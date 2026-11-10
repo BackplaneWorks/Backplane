@@ -119,11 +119,14 @@ pub fn rows(st: &State, here: &str, draft: &str) -> Vec<Value> {
         '&' => {
             let all: Value = MODELS.get().map(|f| f()).and_then(|s| serde_json::from_str(&s).ok()).unwrap_or(Value::Null);
             for (provider, rows) in all.as_object().into_iter().flatten() {
-                for r in rows.as_array().into_iter().flatten() {
+                // equal matches keep the hub's own order of a provider's models (the picker's: the current ones first), and the model named exactly comes first:
+                // `&sonnet` offers claude/sonnet before claude/claude-sonnet-4-6, where the alphabet put the oldest on top, under Enter
+                for (i, r) in rows.as_array().into_iter().flatten().enumerate() {
                     let Some(v) = r["value"].as_str() else { continue };
                     let id = format!("{provider}/{v}"); let label = r["label"].as_str().unwrap_or(v);
                     let sc = score(&id.to_ascii_lowercase().replace('/', "-"), &format!("{id} {label}"), &q.replace('/', "-"));
-                    if sc > 0 { c.push(Cand { word: format!("&{id}"), about: if r["ok"].as_bool().unwrap_or(false) { label.to_string() } else { format!("{label} (not usable now)") }, score: sc + if r["ok"].as_bool().unwrap_or(false) { 5 } else { 0 }, same: false, at: 0 }) }
+                    let exact = !q.is_empty() && (v.eq_ignore_ascii_case(&q) || id.eq_ignore_ascii_case(&q));
+                    if sc > 0 { c.push(Cand { word: format!("&{id}"), about: if r["ok"].as_bool().unwrap_or(false) { label.to_string() } else { format!("{label} (not usable now)") }, score: sc + if r["ok"].as_bool().unwrap_or(false) { 5 } else { 0 } + if exact { 30 } else { 0 }, same: false, at: 10_000u64.saturating_sub(i as u64) }) }
                 }
             }
         }
@@ -240,12 +243,17 @@ mod tests {
         assert_eq!((d(&st, ">fix").as_str(), d(&st, "%roc").as_str()), ("Profiling the render loop", "Rockets and their boards"));
     }
     #[test] fn models_are_offered_from_the_hubs_rows() {
-        fn rows_json() -> String { r#"{"claude":[{"value":"opus","label":"Opus 5.5","ok":true,"why":""},{"value":"sonnet","label":"Sonnet 5","ok":true,"why":""}],"codex":[{"value":"gpt","label":"GPT","ok":false,"why":"x"}]}"#.into() }
+        fn rows_json() -> String { r#"{"claude":[{"value":"opus","label":"Opus 5.5","ok":true,"why":""},{"value":"claude-fable-5-2","label":"Fable 5.2","ok":true,"why":""},{"value":"sonnet","label":"Sonnet 5.5","ok":true,"why":""},{"value":"claude-sonnet-5","label":"Sonnet 5","ok":true,"why":""},{"value":"claude-sonnet-4-6","label":"Sonnet 4.6","ok":true,"why":""}],"codex":[{"value":"gpt","label":"GPT","ok":false,"why":"x"}]}"#.into() }
         set_models(rows_json);
         let st = State::new();
         let w: Vec<String> = rows(&st, "t", "use &claude/op").iter().map(|x| x["word"].as_str().unwrap().to_string()).collect();
         assert_eq!(w, ["&claude/opus"]);
-        assert_eq!(rows(&st, "t", "&").len(), 3, "a bare & lists every model, usable ones first");
+        assert_eq!(rows(&st, "t", "&").len(), 6, "a bare & lists every model, usable ones first");
+        // the model named exactly is first, then the hub's order (newest first), not the alphabet's (oldest first)
+        let words = |d: &str| rows(&st, "t", d).iter().map(|x| x["word"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+        assert_eq!(words("&sonnet"), ["&claude/sonnet", "&claude/claude-sonnet-5", "&claude/claude-sonnet-4-6"]);
+        assert_eq!(words("&son"), ["&claude/sonnet", "&claude/claude-sonnet-5", "&claude/claude-sonnet-4-6"]);
+        assert_eq!(words("&")[..3], ["&claude/opus", "&claude/claude-fable-5-2", "&claude/sonnet"]);
         assert!(rows(&st, "t", "&").last().unwrap()["desc"].as_str().unwrap().contains("not usable"));
     }
     #[test] fn threads_and_projects_are_offered_best_match_first() {
