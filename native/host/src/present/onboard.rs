@@ -636,6 +636,14 @@ fn put(hub: &str, rid: &mut u64, cmds: &mut Vec<Value>, k: &str, v: &str) { send
 fn with(v: &str, id: &str) -> String { let mut l = list(v); if !l.contains(&id) { l.push(id); } l.join(",") }
 
 /// A press in setup. None for what is not setup's.
+/// Whether this press ended setup for good (End setup, or Done on the last step): its patch empties the step.
+pub fn ended(action: &str, patch: &Value) -> bool { matches!(action, "ob-next" | "ob-end") && patch["drafts"]["@ob.step"] == "" && patch["drafts"]["@ob.open"] == "" }
+/// Where the person lands when setup ends with nothing open: the newest thread of a project that is still there (never a bot's chat, an archived or a deleted one).
+pub fn land(st: &State) -> Option<String> {
+    st.threads.iter().filter(|(_, t)| !t.deleted && !t.archived && st.projects.get(&t.project).map_or(false, |p| !p.removed))
+        .max_by_key(|(id, t)| (t.activity.max(t.created), (*id).clone())).map(|(id, _)| id.clone())
+}
+
 pub fn act(st: &State, hub: &str, session: &Value, info: &Value, c: &Client, user_home: &str, action: &str, value: &str) -> Option<Out> {
     if !action.starts_with("ob-") && action != "bfield" { return None }
     if action == "bfield" {
@@ -708,7 +716,7 @@ pub fn act(st: &State, hub: &str, session: &Value, info: &Value, c: &Client, use
             let raw = draft(session, "@f.obproject").trim().to_string();
             let path = if raw.is_empty() { format!("{}/Backplane/first-board", user_home.trim_end_matches('/')) } else { raw };
             if !(path.starts_with('/') || path.starts_with('~') || path.chars().nth(1) == Some(':')) { return Some(Out { patch: json!({"drafts": {"@ob.project.err": "Give the full path, starting at the top of the disk."}}), cmds }) }
-            send(hub, &mut rid, &mut cmds, "project.new", json!({"path": path}));
+            send(hub, &mut rid, &mut cmds, "project.new", json!({"path": path, "orAdd": true}));
             json!({"drafts": {"@ob.project.err": "", "@f.obproject": Value::Null}})
         }
         "ob-thread" => {
@@ -998,6 +1006,14 @@ mod tests {
         let fresh = cst(blank(), &[("onboard.done", ""), ("onboard.skipped", ""), ("onboard.seen", ""), ("onboard.step", "welcome")]);
         assert!(due(&fresh, &sess(json!({}))), "every client opens it, as on a new hub");
     }
+    #[test] fn ending_setup_names_the_thread_to_land_in() {
+        let (s0, i) = (cst(blank(), &[]), info("linux"));
+        let o = act(&s0, "h", &sess(json!({"@ob.step": "done"})), &i, &desk(), "/h", "ob-next", "").unwrap(); assert!(ended("ob-next", &o.patch), "Done on the last step");
+        let e = act(&s0, "h", &sess(json!({})), &i, &desk(), "/h", "ob-end", "").unwrap(); assert!(ended("ob-end", &e.patch));
+        let n = act(&s0, "h", &sess(json!({"@ob.step": "kicad"})), &i, &desk(), "/h", "ob-next", "").unwrap(); assert!(!ended("ob-next", &n.patch), "a step on is not the end");
+        let k = act(&s0, "h", &sess(json!({"@ob.step": "kicad"})), &i, &desk(), "/h", "ob-skip", "").unwrap(); assert!(!ended("ob-skip", &k.patch), "Finish later keeps the step");
+        assert_eq!(land(&cst(blank(), &[])), None, "no thread, nowhere to land");
+    }
     #[test] fn the_last_step_lists_what_is_still_open_with_a_way_there() {
         let p = at(&cst(blank(), &[("onboard.skipped", "kicad")]), "done", &info("linux"), &desk());
         let rows = p["rows"].as_array().unwrap();
@@ -1006,7 +1022,7 @@ mod tests {
     #[test] fn pressing_make_project_makes_the_folder_on_the_hub() {
         let (s0, i) = (cst(blank(), &[]), info("linux"));
         let o = act(&s0, "h", &sess(json!({"@ob.step": "project"})), &i, &desk(), "/home/x", "ob-project", "").unwrap();
-        assert_eq!(sent(&o, "project.new")[0]["path"], "/home/x/Backplane/first-board");
+        assert_eq!(sent(&o, "project.new")[0]["path"], "/home/x/Backplane/first-board"); assert_eq!(sent(&o, "project.new")[0]["orAdd"], true, "a folder that is already there is added, as the step says");
         let bad = act(&s0, "h", &sess(json!({"@f.obproject": "here"})), &i, &desk(), "/home/x", "ob-project", "").unwrap(); assert!(bad.cmds.is_empty()); assert!(s(&bad.patch["drafts"], "@ob.project.err").contains("full path"));
     }
     #[test] fn a_typed_path_is_used_and_checked() {
