@@ -97,6 +97,8 @@ pub struct Composer {
     pub light: bool,
     /// Show every character as `*` (same byte length, so offsets stay exact); copy and cut give nothing.
     pub masked: bool,
+    /// The most rows the box is tall (`MAX_LINES`); a one-row box (a row's rename) scrolls to the caret's row instead of growing over its neighbours.
+    pub max_lines: f32,
     ctx: &'static str,
 }
 
@@ -110,7 +112,7 @@ impl Composer {
     /* i18n-ok: key contexts */ pub fn new(cx: &mut Context<Self>) -> Self { Self::with_context(cx, "Composer") }
     /// A composer with its own key context: "Composer" sends on Enter (main.rs), "AskInput" emits Submit.
     pub fn with_context(cx: &mut Context<Self>, ctx: &'static str) -> Self {
-        /* i18n-ok: the hint, drawn through trs by shown_placeholder */ Self { blink: Default::default(), light: false, masked: false, ctx, focus: cx.focus_handle(), ed: Editor::default(), content: "".into(), popup_open: false, chips: vec![], placeholder: "Ask anything: @bot, >thread, %project, #room, &model, $skill, /btw".into(),
+        /* i18n-ok: the hint, drawn through trs by shown_placeholder */ Self { blink: Default::default(), light: false, masked: false, max_lines: MAX_LINES, ctx, focus: cx.focus_handle(), ed: Editor::default(), content: "".into(), popup_open: false, chips: vec![], placeholder: "Ask anything: @bot, >thread, %project, #room, &model, $skill, /btw".into(),
             rows: vec![], bounds: None, line_height: px(20.), scroll_y: px(0.), selecting: false }
     }
     pub fn set(&mut self, text: String, cx: &mut Context<Self>) { self.ed.set(&text); self.sync(cx); }
@@ -293,13 +295,14 @@ impl gpui::Element for Element_ {
         let input = self.input.read(cx);
         let text: SharedString = if input.content.is_empty() { input.shown_placeholder() } else if input.masked { mask(&input.content).into() } else { input.content.clone() };
         let style = window.text_style();
+        let max_lines = input.max_lines;
         let (font_size, lh) = (style.font_size.to_pixels(window.rem_size()), window.line_height());
         let base = TextRun { len: text.len(), font: style.font(), color: style.color, background_color: None, underline: None, strikethrough: None };
         let layout = window.request_measured_layout(Style { size: gpui::Size { width: relative(1.).into(), height: gpui::Length::Auto }, ..Default::default() }, move |known, avail, window, _| {
             let w = known.width.or(match avail.width { gpui::AvailableSpace::Definite(w) => Some(w), _ => None });
             let rows = shape_rows(window, &text, &base, None, font_size, w, lh, &Chips::default());
             let h = rows.last().map_or(lh, |r| r.top + r.height(lh));
-            size(w.unwrap_or(px(100.)), h.max(lh).min(lh * MAX_LINES))
+            size(w.unwrap_or(px(100.)), h.max(lh).min(lh * max_lines))
         });
         (layout, ())
     }
