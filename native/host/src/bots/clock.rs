@@ -53,14 +53,27 @@ fn rngs(s: &str, lo: u64, hi: u64, names: &[&str], base: u64) -> Option<Vec<(u64
 fn covers(r: &(u64, u64, u64), v: u64) -> bool { v >= r.0 && v <= r.1 && (v - r.0) % r.2 == 0 }
 fn hit(rs: &[(u64, u64, u64)], v: u64) -> bool { rs.iter().any(|r| covers(r, v)) }
 fn vals(rs: &[(u64, u64, u64)], lo: u64, hi: u64) -> Vec<u64> { (lo..=hi).filter(|v| hit(rs, *v)).collect() }
-/// Cron.fields: lower case words; one alias word, or "every 15m", "daily 09:30", "weekdays 08:00"
+/// Cron.fields: lower case words; one alias word, or "every 15m", "daily 09:30", "weekdays 08:00".
+/// The words a person writes, and the ones a routine's row shows (Cron.describe), read the same: "every 20 minutes", "every 2 hours", "every hour", "hourly", "daily at 09:30".
 pub fn fields(s: &str) -> Vec<String> {
     let words = |t: &str| -> Vec<String> { t.trim().split(' ').filter(|w| !w.is_empty()).map(str::to_string).collect() };
-    let ws = words(&s.to_lowercase());
+    let ws = plain(words(&s.to_lowercase()));
     match ws.len() {
         0 => vec![],
-        1 => { let a = match ws[0].as_str() { "@hourly" => "0 * * * *", "@daily" | "@midnight" => "0 0 * * *", "@weekly" => "0 0 * * 0", "@monthly" => "0 0 1 * *", "@yearly" | "@annually" => "0 0 1 1 *", _ => "" }; words(a) }
+        1 => { let a = match ws[0].as_str() { "@hourly" | "hourly" => "0 * * * *", "@daily" | "@midnight" => "0 0 * * *", "@weekly" => "0 0 * * 0", "@monthly" => "0 0 1 * *", "@yearly" | "@annually" => "0 0 1 1 *", _ => "" }; words(a) }
         2 => words(&two(&ws[0], &ws[1])),
+        _ => ws,
+    }
+}
+/// Cron.plain: a schedule in a person's words as the two words `two` reads: "every 20 minutes" is "every 20m", "every 2 hours" "every 2h", "every hour" "every 1h", "daily at 09:30" "daily 09:30".
+/// Anything else stays as it is (a cron line has five words and none of these).
+fn plain(ws: Vec<String>) -> Vec<String> {
+    let unit = |u: &str| match u { "m" | "min" | "mins" | "minute" | "minutes" => Some('m'), "h" | "hr" | "hrs" | "hour" | "hours" => Some('h'), _ => None };
+    let w: Vec<&str> = ws.iter().map(String::as_str).collect();
+    match w.as_slice() {
+        ["every", n, u] if num(n).is_some() => match unit(u) { Some(c) => vec!["every".into(), format!("{n}{c}")], None => ws },
+        ["every", "hour"] => vec!["every".into(), "1h".into()],
+        [d @ ("daily" | "weekdays"), "at", t] => vec![d.to_string(), t.to_string()],
         _ => ws,
     }
 }
@@ -563,6 +576,10 @@ mod tests {
         assert_eq!(Cron::text("@yearly"), "0 0 1 1 *", "text @yearly");
         assert_eq!(Cron::text("@annually"), "0 0 1 1 *", "text @annually");
         assert_eq!(Cron::text("every 15m"), "*/15 * * * *", "text every 15m");
+        // a person's words, and the words a routine's row shows, read as the short forms do
+        for (w, c) in [("every 20 minutes", "*/20 * * * *"), ("Every 5 min", "*/5 * * * *"), ("every 1 minute", "*/1 * * * *"), ("every 2 hours", "0 */2 * * *"), ("every 3 hrs", "0 */3 * * *"), ("every hour", "0 */1 * * *"),
+            ("hourly", "0 * * * *"), ("daily at 09:30", "30 9 * * *"), ("weekdays at 08:00", "0 8 * * 1-5")] { assert_eq!(Cron::text(w), c, "{w}") }
+        for w in ["every 90 minutes", "every 0 minutes", "every 30 hours", "every few minutes", "every 2 days", "daily at noon", "tomorrow at 9am"] { assert!(Cron::parse(w).is_none(), "{w}") }
         assert_eq!(Cron::text("Every 2h"), "0 */2 * * *", "text every 2h");
         assert_eq!(Cron::text("daily 09:30"), "30 9 * * *", "text daily");
         assert_eq!(Cron::text("weekdays 08:00"), "0 8 * * 1-5", "text weekdays");
