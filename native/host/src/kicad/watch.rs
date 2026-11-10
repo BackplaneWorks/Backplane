@@ -157,6 +157,11 @@ impl Plots {
         keys
     }
     pub fn stop(&self, client: u64) { self.drop_subs(client) }
+    /// A watch that starts afresh (`fresh`, the phones'): what this client was sent is not taken as held, so the next watch sends its model
+    /// and parts again (`kept` still names a model it has). A phone drops the last view's model and parts when it switches views; the hub
+    /// keeping them as sent left Split after 3D (and 3D after Split) on a bare board, or on "Loading 3D" until the board changed.
+    /// The sources stay (no gc here): the watch that follows takes them up again.
+    pub fn forget(&self, client: u64) { self.st.lock().unwrap().subs.remove(&client); }
     fn drop_subs(&self, client: u64) {
         let mut st = self.st.lock().unwrap(); st.subs.remove(&client); st.waiting.remove(&client); self.gc(&mut st);
     }
@@ -594,6 +599,7 @@ impl RpcHandler for KicadRpc {
                     let k = s("kept");
                     // (a board picked in the Boards menu must be a file of this folder)
                     let board = s("board"); if !board.is_empty() && !(board.ends_with(".kicad_pcb") && !board.contains("..") && board.starts_with(&format!("{root}/"))) { return vec![json!({"t":"reply","id":id,"ok":false,"error":"that board is not in this project"})] }
+                    if p.get("fresh").and_then(Value::as_bool) == Some(true) { self.0.forget(who.client) }
                     let keys = if kind == "split" { self.0.watch_split(hub, who.client, &root, &path, &s("tree"), &board) }
                     else { self.0.watch(hub, who.client, kind_of(&kind), &root, &path, &s("tree"), kept_of(&k)) };
                     vec![json!({"t":"reply","id":id,"ok":true,"result":{"keys":keys}})]
