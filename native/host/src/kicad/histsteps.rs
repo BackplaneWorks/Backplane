@@ -46,13 +46,25 @@ pub fn version(git: &str, top: &str, commit: &str, file: &str) -> String {
 /// Hist.line: a text's first line, trimmed and kept short.
 fn line(s: &str) -> String { let l = s.trim().lines().next().unwrap_or("").trim(); if l.chars().count() > 160 { format!("{}…", l.chars().take(160).collect::<String>()) } else { l.to_string() } }
 
+/// A shell line without its leading `cd <folder> &&`: agents start nearly every command with it, so three steps in a row read
+/// "After Bash · cd /home/…/worktrees/…" and the bar is too short to reach what was run.
+fn past_cd(l: &str) -> &str {
+    let l = l.trim();
+    let Some(r) = l.strip_prefix("cd ") else { return l };
+    let r = r.trim_start();
+    let end = match r.chars().next() { Some(q @ ('"' | '\'')) => r[1..].find(q).map(|i| i + 2), _ => r.find(|c: char| c.is_whitespace() || c == ';' || c == '&') };
+    let Some(end) = end else { return l };
+    let (gap, rest) = (&r[end..r.len() - r[end..].trim_start().len()], r[end..].trim_start());
+    let next = rest.strip_prefix("&&").or_else(|| rest.strip_prefix(';')).or(if gap.contains('\n') { Some(rest) } else { None });
+    match next { Some(x) if !x.trim().is_empty() => x.trim_start(), _ => l }
+}
 /// Hs.source: what the step followed in the thread.
 fn source(es: &HashMap<&str, &Src>, entry: &str) -> String {
     if entry.is_empty() { return "Turn ended".into() }
     match es.get(entry) {
         Some(e) if e.msg && e.role == "user" => join("Turn started", &line(&e.text)),
         Some(e) if e.msg => join("After reply", &line(&e.text)),
-        Some(e) => { let k = crate::present::thread::shown_name(&e.kind); let t = if e.text == e.kind { String::new() } else { line(&e.text) }; join(&format!("After {k}"), &t) }
+        Some(e) => { let k = crate::present::thread::shown_name(&e.kind); let t = if e.text == e.kind { String::new() } else { line(past_cd(&e.text)) }; join(&format!("After {k}"), &t) }
         None => "Source unavailable".into(),
     }
 }
@@ -202,6 +214,18 @@ mod tests {
         msg("a1", "assistant", "Done: the LDO is in.", 130),
         step("c3", "c2", "", "", &["M\tb.kicad_pcb", "D\tother.kicad_pcb"], 131),
     ] }
+    /// e2e n1110: Compare listed "Step 4 … After Bash · cd /home/kostas/.cache/bp-tmp/n1110-2…" three times: the steps could not be told apart.
+    #[test] fn a_shell_step_is_named_by_what_ran_not_by_the_folder_it_ran_in() {
+        assert_eq!(past_cd("cd /w/lamp/.backplane/worktrees/backplane-a1f790d1 && python3 tie_holes.py"), "python3 tie_holes.py");
+        assert_eq!(past_cd("cd '/w/my lamp' && kicad-cli pcb drc b.kicad_pcb"), "kicad-cli pcb drc b.kicad_pcb");
+        assert_eq!(past_cd("cd \"/w/my lamp\"; ls"), "ls");
+        assert_eq!(past_cd("cd /w/lamp/.backplane/worktrees/backplane-a1f790d1; python3 -I - <<'E'\nimport re"), "python3 -I - <<'E'\nimport re", "the form the agents of n1110 used");
+        assert_eq!(past_cd("cd /w/lamp&&ls"), "ls"); assert_eq!(past_cd("cd /w/lamp\nkicad-cli pcb drc b.kicad_pcb"), "kicad-cli pcb drc b.kicad_pcb");
+        for kept in ["cd /w/lamp", "cd /w/lamp &&", "cd /w/lamp;", "cd /w/lamp ls", "cd /w/lamp & ls", "cdparanoia -B", "ls && cd /w", "cd 'unclosed && ls", ""] { assert_eq!(past_cd(kept), kept, "{kept:?} stays as it is") }
+        let mut l = log(); l[2] = act("tu1", "tool", "Bash", "cd /p && python3 widen.py\nsecond line", 110);
+        let v = bar(&l, 0, "/p/b.kicad_pcb", &|t| format!("T{t}"));
+        assert_eq!(v["steps"][1]["detail"], "Saved T111 · After Bash · python3 widen.py");
+    }
     #[test] fn the_bar_names_each_step_of_the_file_by_what_it_followed() {
         let v = bar(&log(), 0, "/p/b.kicad_pcb", &|t| format!("T{t}"));
         let s = v["steps"].as_array().unwrap();
