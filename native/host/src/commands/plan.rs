@@ -289,7 +289,8 @@ fn create(f: &Fold, at: u64, id: &Value, p: &Value, new_root: Option<(&str, usiz
 fn levels(provider: &str) -> &'static [&'static str] {
     match provider { "claude" => &["low", "medium", "high", "xhigh", "max"], "codex" => &["low", "medium", "high", "xhigh"], "grok" => &["low", "medium", "high"],
         "muse" => &["minimal", "low", "medium", "high", "xhigh", "max"], "pi" => &["off", "minimal", "low", "medium", "high", "xhigh", "max"],
-        "omp" => &["off", "auto", "minimal", "low", "medium", "high", "xhigh", "max"], _ => &[] }
+        "omp" => &["off", "auto", "minimal", "low", "medium", "high", "xhigh", "max"],
+        "antigravity" => &["minimal", "low", "medium", "high", "xhigh", "max"], _ => &[] } // as present/keys.rs: the driver maps a level to agy's nearest variant
 }
 /// AG.Effort.of: the effort a provider takes: e when it offers it, else its default ("").
 fn effort_of(provider: &str, e: &str) -> String { if levels(provider).contains(&e) { e.to_string() } else { String::new() } }
@@ -605,5 +606,14 @@ fn start(f: &Fold, at: u64, id: &Value, p: &Value) -> Option<Plan> {
         let mut f = fold(); let off = go(&f, 100, &Buy::default()); assert!(off.events.is_empty()); assert_eq!(off.reply["error"], "Ordering is off: turn it on in Settings to buy");
         let again = go(&f, 100, &Buy { on: true, buying: true, ..Default::default() }); assert!(again.events.is_empty() && again.act.is_none()); assert_eq!(again.reply["thread"], "t1");
         f.threads.get_mut("t1").unwrap().deleted = true; assert_eq!(go(&f, 100, &on()).reply["error"], "no such thread");
+    }
+}
+
+#[cfg(test)]
+mod effort_tests {
+    /// An Antigravity thread keeps the effort the picker chose (its levels are agy's variants, mapped by the driver); one no provider knows is auto.
+    #[test] fn antigravity_keeps_its_effort() {
+        for e in ["low", "medium", "high", "xhigh", "max", "minimal"] { assert_eq!(super::effort_of("antigravity", e), e) }
+        assert_eq!(super::effort_of("antigravity", "turbo"), ""); assert_eq!(super::effort_of("antigravity", ""), "");
     }
 }
