@@ -224,7 +224,33 @@ fn network(st: &State, info: &Value) -> Vec<Value> {
         if link.is_empty() { row("Pairing link", PAIR_ELSEWHERE, vec![btn("Devices", "settings-page", "devices", false)]) } else { row("Pairing link", link, vec![]) },
         row("Update channel", "Stable takes releases; beta also takes prereleases.", chips(&["stable", "beta"], update_channel(set(st, "update.channel", "stable")), "update.channel")),
         update_row(version, &i("update.status")),
-    ]
+    ].into_iter().chain(boat_hub_rows(i("boathub.cost"), crate::hub::now_ms() / 1000)).collect()
+}
+
+fn hours(h: f64) -> String { let n = h.round() as i64; if n.abs() >= 1000 { format!("{},{:03}", n / 1000, (n % 1000).abs()) } else if h < 10.0 { format!("{h:.1}") } else { n.to_string() } }
+fn ago(s: u64) -> String { match s { 0..=89 => "just now".into(), 90..=5399 => format!("{} min ago", (s + 30) / 60), 5400..=129_599 => format!("{} h ago", (s + 1800) / 3600), _ => format!("{} days ago", (s + 43_200) / 86_400) } }
+/// Settings, Network: what the always-on Boat hub costs (info `boathub.cost`, one JSON line from `scripts/boat-hub.sh cost --save`, docs/BOAT-HUB.md),
+/// and a warning when the plan's hours will not last to the period's end at this rate: `warn` below twice what the box still needs (or a tenth
+/// of the plan), `bad` below what it needs; a measurement over a day old says so. No line, no rows.
+pub fn boat_hub_rows(raw: &str, now_s: u64) -> Vec<Value> {
+    let Ok(c) = serde_json::from_str::<Value>(raw) else { return vec![] };
+    let f = |k: &str| c[k].as_f64().unwrap_or(0.0);
+    let (rate, left, plan, mult) = (f("rate_hour"), f("plan_hours_left"), f("plan_hours"), if f("multiplier") > 0.0 { f("multiplier") } else { 1.0 });
+    let (end, measured) = (c["period_end_s"].as_u64().unwrap_or(0), c["measured"].as_u64().unwrap_or(0));
+    let mut note = format!("${rate:.3} an hour, ${:.2} a month around the clock. {} h so far (${:.2}).", rate * 720.0, hours(f("used_hours")), f("used_dollars"));
+    if plan > 0.0 { note.push_str(&format!(" Plan: {} of {} h left.", hours(left), hours(plan))); }
+    if measured > 0 { note.push_str(&format!(" Measured {}.", ago(now_s.saturating_sub(measured)))); }
+    let name = c["box"].as_str().unwrap_or("Boat");
+    let kind = c["type"].as_str().unwrap_or("");
+    let mut v = vec![row(&format!("Always-on hub: {name}{}", if kind.is_empty() { String::new() } else { format!(" ({kind})") }), &note, vec![])];
+    // what the box still needs this period, in plan hours (a small box counts half)
+    let need = if end > now_s { (end - now_s) as f64 / 3600.0 * mult } else { 0.0 };
+    if plan > 0.0 {
+        if left < need { v.push(row_tone("Boat plan hours run out", &format!("{} h left, the always-on hub needs {} h to the end of the period. Add hours or the hub stops when they run out.", hours(left), hours(need)), "bad")) }
+        else if left < (need * 2.0).max(plan * 0.1) { v.push(row_tone("Boat plan hours running low", &format!("{} h left; the always-on hub needs {} h to the end of the period, and builds use the same hours.", hours(left), hours(need)), "warn")) }
+    }
+    if measured > 0 && now_s.saturating_sub(measured) > 26 * 3600 { v.push(row_tone("Boat cost not measured", &format!("Last measured {}: the desktop measures it (scripts/boat-hub.sh cost --save).", ago(now_s - measured)), "warn")) }
+    v
 }
 
 /// Network's pairing row when the hub has no tailnet link: where links are made now.
@@ -1198,5 +1224,22 @@ mod tests {
         assert_eq!(r[3]["note"], "opus: Opus 5.5"); assert_eq!(r[2]["buttons"][0]["on"], true, "claude is the default provider");
         let r = page_rows(&st(&[("agent.provider", "codex")]), "agents", json!({}));
         assert_eq!(r[2]["note"], "codex is not installed");
+    }
+
+    #[test] fn the_boat_hub_rows_show_its_cost_and_warn_before_the_plan_runs_out() {
+        use super::boat_hub_rows as rows;
+        assert!(rows("", 0).is_empty()); assert!(rows("not json", 0).is_empty());
+        let now = 1_794_350_000u64; let day = 86_400u64;
+        let c = |left: f64, end: u64, measured: u64| serde_json::json!({"box":"bp-hub","type":"small","rate_hour":0.018,"multiplier":0.5,"used_hours":2.0,"used_dollars":0.04,
+            "plan_hours":2777.8,"plan_hours_left":left,"period_end_s":end,"measured":measured}).to_string();
+        let r = rows(&c(2418.0, now + 23 * day, now - 300), now);
+        assert_eq!(r.len(), 1, "{r:?}"); assert_eq!(r[0]["label"], "Always-on hub: bp-hub (small)");
+        let n = r[0]["note"].as_str().unwrap(); assert!(n.contains("$0.018 an hour") && n.contains("$12.96 a month") && n.contains("2,418 of 2,778 h left") && n.contains("5 min ago"), "{n}");
+        // 23 days at half rate needs 276 h: 400 left is under twice that, 200 is under it
+        let w = rows(&c(400.0, now + 23 * day, now), now); assert_eq!(w[1]["tone"], "warn", "{w:?}");
+        let b = rows(&c(200.0, now + 23 * day, now), now); assert_eq!((b[1]["label"].as_str(), b[1]["tone"].as_str()), (Some("Boat plan hours run out"), Some("bad")));
+        // a tenth of the plan warns even near the end of the period
+        assert_eq!(rows(&c(250.0, now + day, now), now)[1]["tone"], "warn");
+        let s = rows(&c(2418.0, now + 23 * day, now - 2 * day), now); assert_eq!(s.last().unwrap()["label"], "Boat cost not measured");
     }
 }

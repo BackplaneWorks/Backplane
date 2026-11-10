@@ -942,6 +942,19 @@ const TESTCLI: &str = "#!/bin/sh\nread hello\necho '{\"q\":1}'\nread ans\necho \
     assert!(!last_ok || th != child, "the chain is bounded"); ag.shutdown();
 }
 
+#[tokio::test(flavor = "multi_thread")] async fn a_launch_held_while_this_machine_was_away_starts_once_however_often_it_is_posted() {
+    // the always-on hub (docs/BOAT-HUB.md) holds a launch for the desktop while it sleeps and posts it again until an answer gets back
+    let (hub, ag, _sd) = codex_start("tlq").await; let from = len(&hub).await;
+    let a = json!({"prompt":"queued work","project":"p1","provider":"codex","_launch":"fl1794000000-7"});
+    let (ok, r) = ag.tool_launch("L1~t9", &a).await; assert!(ok, "{r}"); let th = r["threadId"].as_str().unwrap().to_string();
+    let (ok, r2) = ag.tool_launch("L1~t9", &a).await; assert!(ok, "{r2}"); assert_eq!(r2["threadId"], th.as_str(), "the second post is the same launch");
+    let ev = log_from(&hub, from).await; assert_eq!(ev.iter().filter(|e| is(e, "ThreadCreated")).count(), 1, "{ev:?}");
+    // a local caller's `_launch` means nothing: each is its own launch
+    let b = json!({"prompt":"local","provider":"codex","_launch":"fl1794000000-7"});
+    let (_, x) = ag.tool_launch(T1, &b).await; let (_, y) = ag.tool_launch(T1, &b).await; assert_ne!(x["threadId"], y["threadId"]);
+    ag.shutdown();
+}
+
 #[tokio::test(flavor = "multi_thread")] async fn thread_launch_starts_a_subthread_with_its_first_message_and_reports_can_be_muted() {
     let (hub, ag, _sd) = codex_start("tl1").await; let from = len(&hub).await;
     let (ok, r) = ag.tool_launch(T1, &json!({"prompt":"launched work","title":"Side","provider":"codex"})).await; assert!(ok, "{r}");

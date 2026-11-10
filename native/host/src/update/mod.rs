@@ -2,3 +2,4 @@
 pub mod rel;
 pub mod run;
 pub mod svc;
+pub mod boathub;

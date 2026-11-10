@@ -27,12 +27,12 @@ pub struct Held {
     pub tries: u32,
     /// "" (not tried yet, or on its way), "away" (the machine could not be reached), "refused" (the owner said no: `why`)
     pub state: String, pub why: String,
-    /// what is posted: `turn.start` (a person's message, `p` its params) or `mcp.call` (an agent's thread_send or a launch report, `p` {tool, from, args})
+    /// what is posted: `turn.start` (a person's message, `p` its params) or `mcp.call` (an agent's thread_send or thread_launch, or a launch report, `p` {tool, from, args})
     #[serde(default = "turn_start")] pub m: String,
 }
 fn turn_start() -> String { "turn.start".into() }
 impl Held {
-    pub fn text(&self) -> &str { self.p["text"].as_str().or_else(|| self.p["args"]["text"].as_str()).unwrap_or("") }
+    pub fn text(&self) -> &str { self.p["text"].as_str().or_else(|| self.p["args"]["text"].as_str()).or_else(|| self.p["args"]["prompt"].as_str()).unwrap_or("") }
     /// the request body the owner's /far/rpc takes
     pub fn body(&self) -> Value { json!({"id": 0, "m": self.m, "p": self.p}) }
 }

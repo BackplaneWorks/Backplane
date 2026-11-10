@@ -66,6 +66,8 @@ while :; do
   done
   wait "$PID"; rc=$?; PID=
   if [ "$rc" = 0 ]; then printf '%s\n' "$t" > "$DEV/.main-built"; say "published $(printf %s "$t" | cut -c1-10)"; rm -f "$DEV/.main-bad"
+    # the always-on Boat hub follows main too (docs/BOAT-HUB.md): copied there and run on probation by its own guard; never holds up this loop
+    if [ -s "$HOME/.config/backplane/boat-hub/id" ] && [ "${BP_BOAT_HUB_UPDATE:-1}" != 0 ]; then ( setsid timeout 1200 "$HERE/boat-hub.sh" update --quiet >> "$DEV/boat-hub-update.log" 2>&1 < /dev/null & ); fi
   else printf '%s\n' "$t" > "$DEV/.main-bad"; say "FAILED $(printf %s "$t" | cut -c1-10): $(cat "$DEV/.last-failure" 2>/dev/null)"; fi
   [ "${1:-}" = --once ] && exit "$rc"
 done
