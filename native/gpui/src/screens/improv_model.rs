@@ -47,6 +47,20 @@ You work in your own worktree on the branch {branch}, started from the local mai
 (git merge --ff-only from the main checkout); the main builder then rebuilds and relaunches the app. Do not push unless the person says so. Read AGENTS.md before editing. \
 Use stand-in agents in tests, never real model calls.\n</backplane_handoff>")
 }
+/// What a request to another project's thread is told: its own worktree and branch, and that project's own rules for merging.
+pub fn handoff_in(branch: &str, title: &str) -> String {
+    format!("<backplane_handoff>\nThis request came from the Backplane app's Improvements screen, sent to the project {title}.\n\
+You work in your own worktree on the branch {branch}. Read the project's own instructions (AGENTS.md, CLAUDE.md, README) before editing, and merge only as they say. \
+Do not push unless the person says so.\n</backplane_handoff>")
+}
+/// A linked machine's project (`<link>~<id>`): its thread runs there, and files on this computer (a screenshot, a recording) are not sent to it.
+pub fn is_far(project: &str) -> bool { project.contains('~') }
+/// The thread `thread.create` made for this key in `project`: on a linked machine it is named with that machine's link in front.
+pub fn made_thread(project: &str, key: &str) -> String { match project.split_once('~') { Some((link, _)) => format!("{link}~{}", thread_for(key)), None => thread_for(key) } }
+/// The message for a request that goes to another project than Backplane's own source: the same order, the context's first line naming that project.
+pub fn improvement_message_in(text: &str, context: &Value, title: &str, extra: &str, path: &str, video: &str) -> String {
+    /* i18n-ok: the request sent to the agent */ improvement_message_with(text, context, extra, path, video).replacen("Implement the request above in Backplane application code", &format!("Implement the request above in the project {title}"), 1)
+}
 /// The same message with an extra block (the hand-off) after the context and before the attachments.
 pub fn improvement_message_with(text: &str, context: &Value, extra: &str, path: &str, video: &str) -> String {
     /* i18n-ok: the request sent to the agent */ let attach: Vec<String> = [path, video].iter().filter(|p| !p.is_empty()).map(|p| format!("[attachment: {p}]")).collect();
@@ -118,7 +132,7 @@ impl Draft {
     pub fn check_internal(&self) -> Result<(), &'static str> {
         /* i18n-ok: drawn through tr */ if self.text.trim().is_empty() { return Err("Describe the change to Backplane before sending."); }
         /* i18n-ok: drawn through tr */ if self.image.is_empty() && !(self.inc_rec && !self.recording.is_empty() && self.rec_reviewed) { return Err("Choose an image or preview and select a recording, then retry Send. Your text is kept."); }
-        /* i18n-ok: drawn through tr */ if self.project.is_empty() { return Err("Choose the Backplane source project, then retry Send."); }
+        /* i18n-ok: drawn through tr */ if self.project.is_empty() { return Err("Choose a project, then retry Send."); }
         /* i18n-ok: drawn through tr */ if self.text.len() > MAX_TEXT { return Err("This request is too long. Shorten it before sending."); }
         Ok(())
     }
@@ -211,6 +225,14 @@ mod tests {
         assert!(m.starts_with("req\n\n<backplane_improvements_context>") && m.contains("</backplane_improvements_context>\n\n<backplane_handoff>") && m.ends_with("</backplane_handoff>\n\n[attachment: /a.png]"), "{m}");
         assert_eq!(improvement_message("x", &json!({}), "", ""), improvement_message_with("x", &json!({}), "", "", ""));
     }
+    #[test] fn a_request_to_another_project_names_it_and_a_linked_machines_thread_is_named_there() {
+        let m = improvement_message_in("req", &json!({}), "Keyboard", &handoff_in("imp-abababab", "Keyboard"), "/a.png", "");
+        assert!(m.starts_with("req\n\n<backplane_improvements_context>\nImplement the request above in the project Keyboard using the normal thread permissions"), "{m}");
+        assert!(m.contains("sent to the project Keyboard") && m.contains("own worktree on the branch imp-abababab") && !m.contains("main builder"), "{m}");
+        let k = "ab".repeat(16);
+        assert_eq!(made_thread("p1", &k), format!("improvement-{k}")); assert_eq!(made_thread("boat~p9", &k), format!("boat~improvement-{k}"));
+        assert!(is_far("boat~p9") && !is_far("p1"));
+    }
     #[test] fn context_names_the_origin_as_reference_data_with_backplane_links() {
         let ctx = json!({"appVersion": "1.2.3", "thread": "t1", "project": "p1", "projects": [{"id": "p1", "title": "Board", "root": "/w/board"}]});
         let c = context("t 1", "My thread", "Board", &ctx, Some(&p("a", "/x/backplane-gpui")));
@@ -226,7 +248,7 @@ mod tests {
     #[test] fn sends_say_what_is_missing_before_anything_leaves() {
         let mut d = Draft { internal: true, ..Draft::default() };
         assert!(d.check_internal().unwrap_err().starts_with("Describe")); d.text = "x".into(); assert!(d.check_internal().unwrap_err().starts_with("Choose an image"));
-        d.image = "/i.png".into(); assert!(d.check_internal().unwrap_err().contains("source project")); d.project = "p".into(); assert!(d.check_internal().is_ok());
+        d.image = "/i.png".into(); assert!(d.check_internal().unwrap_err().contains("Choose a project")); d.project = "p".into(); assert!(d.check_internal().is_ok());
         d.text = "x".repeat(MAX_TEXT + 1); assert!(d.check_internal().unwrap_err().contains("too long"));
         let mut q = Draft { text: "t".into(), ..Draft::default() }; assert!(q.check_public().unwrap_err().contains("behavior description")); q.evidence = "e".into(); assert!(q.check_public().is_ok());
         assert!(q.check_writer().unwrap_err().contains("project for the report agent")); q.writer_project = "scratch".into(); assert!(q.check_writer().is_err()); q.writer_project = "p".into(); assert!(q.check_writer().is_ok());

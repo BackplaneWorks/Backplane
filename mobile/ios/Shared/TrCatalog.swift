@@ -345,6 +345,7 @@ ios.buy	Buy it	購入
 ios.buy.from	Buy it · from {price}	購入 · {price}から
 ios.buy.last	Buy it · last estimate: from {price}	購入 · 前回の見積もり: {price}から
 ios.buy.incomplete	Buy it · estimate incomplete	購入 · 見積もりが不完全
+ios.improve.search	Search projects…	プロジェクトを検索…
 common.cancel	Cancel	キャンセル
 common.delete	Delete	削除
 common.save	Save	保存
@@ -1985,6 +1986,16 @@ gpui.bots.no.messages.yet	No messages yet.	メッセージはまだありませ�
 gpui.bots.connecting.to.the.bot.s	Connecting to the bot's browser page.	ボットのブラウザページに接続しています。
 gpui.bots.page.notyet	The {page} page is not drawn here yet.	「{page}」ページはまだここでは表示できません。
 gpui.bots.no.routines	No routines.	ルーチンはありません。
+gpui.imp.send.to.project	Send to project	プロジェクトへ送信
+gpui.imp.search.projects	Search projects…	プロジェクトを検索…
+gpui.imp.choose.a.project.before.sending	Choose a project before sending.	送信する前にプロジェクトを選んでください。
+gpui.imp.choose.a.project.then.retry	Choose a project, then retry Send.	プロジェクトを選んでから、もう一度送信してください。
+gpui.imp.the.thread.runs.on.the	The thread runs on the other machine. Images and recordings stay on this computer. Ctrl+Enter sends this request.	スレッドは別のマシンで動きます。画像と録画はこのコンピューターに残ります。Ctrl+Enterでこのリクエストを送信します。
+gpui.imp.ctrl.enter.sends.this.request	Ctrl+Enter sends this request.	Ctrl+Enterでこのリクエストを送信します。
+gpui.imp.send.starts.a.new.thread	Send starts a new thread in the chosen project.	送信すると、選んだプロジェクトで新しいスレッドが始まります。
+gpui.imp.creating.the.thread	Creating the thread…	スレッドを作成しています…
+gpui.imp.request.sent.opening.the.new2	Request sent. Opening the new thread.	リクエストを送信しました。新しいスレッドを開きます。
+gpui.imp.project.chosen	Sending to {title}	{title}へ送信
 gpui.send.the.message	Send the message	メッセージを送信
 gpui.new.line.in.the.message	New line in the message	メッセージ内で改行
 gpui.send.also	Send (also)	送信（別のキー）
@@ -3661,6 +3672,8 @@ android.mark.also	also on {machines}	{machines} にもあり
 android.mark.newon	New thread on {machine}	{machine} で新しいスレッド
 android.google.signedin	Signed in.	サインインしました。
 android.google.back	Back to Backplane	Backplane に戻る
+android.improve.search	Search projects…	プロジェクトを検索…
+android.improve.nomatch	No project matches.	一致するプロジェクトはありません。
 """#
 
     /// thread.count = {n, plural, one {# thread} other {# threads}}
@@ -4556,6 +4569,9 @@ android.google.back	Back to Backplane	Backplane に戻る
 
     /// gpui.bots.page.notyet = The {page} page is not drawn here yet.
     static func gpui_bots_page_notyet(page: String) -> String { f("gpui.bots.page.notyet", ["page": page]) }
+
+    /// gpui.imp.project.chosen = Sending to {title}
+    static func gpui_imp_project_chosen(title: String) -> String { f("gpui.imp.project.chosen", ["title": title]) }
 
     /// gpui.b.replying.to = ↩ Replying to: {line}
     static func gpui_b_replying_to(line: String) -> String { f("gpui.b.replying.to", ["line": line]) }

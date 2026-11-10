@@ -275,7 +275,7 @@ fn create(f: &Fold, at: u64, id: &Value, p: &Value, new_root: Option<(&str, usiz
     // the server's worktree job follows (it also says so when the folder is not a repository)
     // an Improvements send names its base (a local branch that exists: the handler checked) and its branch; only with a creation key
     let prefer = { let own = f.get(&format!("worktree.base.{project}"), ""); if own.is_empty() { f.get("worktree.base", "") } else { own } }.to_string(); // the project's default base (a local branch), when no base is asked for
-    let opts = if !key.is_empty() { super::worktree::Opts { base: s(p, "base", ""), branch: super::worktree::sanitize(&s(p, "branch", "")), prefer: String::new() } } else { super::worktree::Opts { prefer, ..Default::default() } };
+    let opts = if !key.is_empty() { super::worktree::Opts { base: s(p, "base", ""), branch: super::worktree::sanitize(&s(p, "branch", "")), prefer: if s(p, "base", "").is_empty() { prefer.clone() } else { String::new() } } } else { super::worktree::Opts { prefer, ..Default::default() } };
     let wt = (mode == "worktree" && !scratch).then(|| (th.clone(), root.clone(), env.clone(), String::new(), opts));
     Some(Plan { events: ev, reply: made(id, &th), stop: None, wt, scratch: scratch.then(|| th.clone()), act: None })
 }

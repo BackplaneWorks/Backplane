@@ -1770,6 +1770,16 @@ gpui.bots.no.messages.yet = メッセージはまだありません。
 gpui.bots.connecting.to.the.bot.s = ボットのブラウザページに接続しています。
 gpui.bots.page.notyet = 「{page}」ページはまだここでは表示できません。
 gpui.bots.no.routines = ルーチンはありません。
+gpui.imp.send.to.project = プロジェクトへ送信
+gpui.imp.search.projects = プロジェクトを検索…
+gpui.imp.choose.a.project.before.sending = 送信する前にプロジェクトを選んでください。
+gpui.imp.choose.a.project.then.retry = プロジェクトを選んでから、もう一度送信してください。
+gpui.imp.the.thread.runs.on.the = スレッドは別のマシンで動きます。画像と録画はこのコンピューターに残ります。Ctrl+Enterでこのリクエストを送信します。
+gpui.imp.ctrl.enter.sends.this.request = Ctrl+Enterでこのリクエストを送信します。
+gpui.imp.send.starts.a.new.thread = 送信すると、選んだプロジェクトで新しいスレッドが始まります。
+gpui.imp.creating.the.thread = スレッドを作成しています…
+gpui.imp.request.sent.opening.the.new2 = リクエストを送信しました。新しいスレッドを開きます。
+gpui.imp.project.chosen = {title}へ送信
 
 # ---- gpui-b: keys, ui, files, history ----
 gpui.send.the.message = メッセージを送信
@@ -3461,6 +3471,8 @@ android.mark.also = {machines} にもあり
 android.mark.newon = {machine} で新しいスレッド
 android.google.signedin = サインインしました。
 android.google.back = Backplane に戻る
+android.improve.search = プロジェクトを検索…
+android.improve.nomatch = 一致するプロジェクトはありません。
 # ---- ios: new entries go here ----
 ios.viewerbg = 3Dビューアの背景
 ios.viewerbg.auto = 自動
@@ -3804,6 +3816,7 @@ ios.buy = 購入
 ios.buy.from = 購入 · {price}から
 ios.buy.last = 購入 · 前回の見積もり: {price}から
 ios.buy.incomplete = 購入 · 見積もりが不完全
+ios.improve.search = プロジェクトを検索…
 
 android.notify.head = 通知
 # ---- end ----

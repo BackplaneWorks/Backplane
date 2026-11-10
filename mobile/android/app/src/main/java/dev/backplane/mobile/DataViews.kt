@@ -1026,7 +1026,16 @@ private fun NewThreadScreen(project: String, back: () -> Unit, created: (String)
 private fun ImproveScreen(back: () -> Unit) {
     val scope = rememberCoroutineScope(); val ctx = androidx.compose.ui.platform.LocalContext.current
     var text by remember { mutableStateOf("") }; var sent by remember { mutableStateOf("") }
-    var project by remember { mutableStateOf(DataClient.projects.firstOrNull()?.id ?: "") }
+    // where it goes: the hub searches every machine's projects and says the last one chosen (improvements.projects); a pick is remembered there
+    var project by remember { mutableStateOf("") }; var q by remember { mutableStateOf("") }; var rows by remember { mutableStateOf(listOf<org.json.JSONObject>()) }
+    LaunchedEffect(q, DataClient.conn) {
+        if (DataClient.conn != DataClient.Conn.ONLINE) return@LaunchedEffect
+        kotlinx.coroutines.delay(if (q.isEmpty()) 0 else 250)
+        runCatching { DataClient.call("improvements.projects", org.json.JSONObject().put("q", q)) }.onSuccess { r ->
+            val a = r.optJSONArray("projects"); rows = (0 until (a?.length() ?: 0)).map { a!!.getJSONObject(it) }
+            if (project.isEmpty()) project = r.optString("project").ifEmpty { rows.firstOrNull()?.optString("id") ?: "" }
+        }
+    }
     Column(Modifier.fillMaxSize()) {
         DBar(Msg.android_improve, back)
         Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -1040,9 +1049,13 @@ private fun ImproveScreen(back: () -> Unit) {
                     .appendQueryParameter("body", text + "\n\n---\nBackplane Android ${BuildConfig.VERSION_NAME}, Android ${android.os.Build.VERSION.RELEASE}").build()
                 ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, u))
             }
-            if (DataClient.projects.isNotEmpty()) {
+            if (DataClient.projects.isNotEmpty() || rows.isNotEmpty()) {
                 DLine(); DMono(Msg.android_project_head)
-                DataClient.projects.forEach { p -> DMono((if (p.id == project) "● " else "○ ") + p.title, dcs.onSurface, 13, Modifier.clickable { project = p.id }.padding(vertical = 4.dp)) }
+                DField(q, { q = it }, Msg.android_improve_search, Modifier.testTag("improve.search"), 1)
+                if (rows.isEmpty()) DMono(Msg.android_improve_nomatch, dcs.onSurfaceVariant, 12)
+                rows.take(12).forEach { p -> val id = p.optString("id"); val short = p.optString("short")
+                    DMono((if (id == project) "● " else "○ ") + p.optString("title") + (if (short.isEmpty()) "" else " · $short"), dcs.onSurface, 13,
+                        Modifier.testTag("improve.project.$id").clickable { project = id; scope.launch { runCatching { DataClient.call("improvements.project", org.json.JSONObject().put("project", id)) } } }.padding(vertical = 4.dp)) }
                 DBtn(Msg.android_improve_thread, true, text.isNotBlank() && DataClient.conn == DataClient.Conn.ONLINE && project.isNotEmpty(), Modifier.testTag("improve.thread")) {
                     scope.launch { runCatching { DataClient.createThread(project, "Improvement idea for this app:\n\n$text") }.onSuccess { sent = Msg.android_improve_sent; text = "" }.onFailure { sent = it.message ?: "" } }
                 }

@@ -1165,6 +1165,9 @@ struct DataImprovementsView: View {
     @State private var text = ""
     @State private var project = ""
     @State private var sent = ""
+    // where it goes: the hub searches every machine's projects and says the last one chosen (improvements.projects); a pick is remembered there
+    @State private var q = ""
+    @State private var rows: [DImpProject] = []
 
     var body: some View {
         ScrollView {
@@ -1174,16 +1177,23 @@ struct DataImprovementsView: View {
                 Text(Tr.t("A public GitHub issue draft on BackplaneWorks/Backplane opens in your browser, filled with this text. You review it and press Submit there; nothing is sent from here. Do not include private information.")).dmono(11).foregroundStyle(BackplaneDesign.dim)
                 Button(Tr.t("Open a GitHub issue draft")) { openURL(issueURL) }.buttonStyle(DButton())
                     .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty).accessibilityIdentifier("improvements.github")
-                if !client.projects.isEmpty {
+                if !client.projects.isEmpty || !rows.isEmpty {
                     DLine()
                     DHeading(text: Tr.t("Project"))
-                    DChoices(options: client.projects.map { (label: $0.title, value: $0.id) }, value: Binding(get: { project.isEmpty ? (client.projects.first?.id ?? "") : project }, set: { project = $0 }))
+                    TextField(Tr.t("Search projects…"), text: $q).dmono(13).textInputAutocapitalization(.never).autocorrectionDisabled()
+                        .padding(.horizontal, 10).frame(height: 36).dbox().accessibilityIdentifier("improvements.search")
+                    if rows.isEmpty { Text(Tr.t("No project matches.")).dmono(12).foregroundStyle(BackplaneDesign.dim) }
+                    ForEach(rows.prefix(12)) { r in
+                        Button { project = r.id; Task { _ = try? await client.call("improvements.project", ["project": r.id], as: DEmpty.self) } } label: {
+                            Text((r.id == project ? "● " : "○ ") + r.title + (r.short.isEmpty ? "" : " · \(r.short)")).dmono(13).foregroundStyle(BackplaneDesign.text).frame(maxWidth: .infinity, alignment: .leading)
+                        }.accessibilityIdentifier("improvements.project.\(r.id)")
+                    }
                     Button(Tr.t("Send to an agent thread")) {
-                        let p = project.isEmpty ? (client.projects.first?.id ?? "") : project
+                        let p = project
                         Task { if (try? await client.createThread(project: p, text: "Improvement idea for this app:\n\n" + text)) != nil { sent = "Thread started in Threads."; text = "" } }
                     }
                     .buttonStyle(DButton(primary: true))
-                    .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || client.conn != .online).accessibilityIdentifier("improvements.thread")
+                    .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || client.conn != .online || project.isEmpty).accessibilityIdentifier("improvements.thread")
                     if !sent.isEmpty { Text(Tr.t(sent)).dmono(12).foregroundStyle(BackplaneDesign.dim) }
                     Text(Tr.t("Starts a thread on your hub in the chosen project with this text.")).dmono(11).foregroundStyle(BackplaneDesign.dim)
                 }
@@ -1191,6 +1201,12 @@ struct DataImprovementsView: View {
         }
         .background(BackplaneDesign.background)
         .dataBar(Tr.t("Improvements"))
+        .task(id: q) {
+            if !q.isEmpty { try? await Task.sleep(for: .milliseconds(250)) }
+            guard let r = try? await client.call("improvements.projects", ["q": q], as: DImpProjects.self) else { return }
+            rows = r.projects
+            if project.isEmpty { project = r.project.isEmpty ? (r.projects.first?.id ?? "") : r.project }
+        }
     }
     private var issueURL: URL {
         let info = Bundle.main.infoDictionary

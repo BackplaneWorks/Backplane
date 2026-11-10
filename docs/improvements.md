@@ -23,15 +23,20 @@ tabs, windows and monitors are rejected without reading their pixels. When
 capture is unavailable or cancelled, **Choose image** uses the normal image
 picker. No desktop source enumeration or unrelated-window capture is used.
 
-Every request changes Backplane application code, regardless of the project
-on screen. The popup resolves the unique Backplane source checkout from the
-hub's project roots; an ambiguous or missing match shows the existing project
-selector, labeled **Backplane source project**, for a deliberate choice.
+**Send to project** chooses where the request goes: a search over the projects
+of this machine and of the linked machines (the hub's `improvements.projects`;
+title, folder or machine name). It starts on the last project chosen, which the
+hub remembers, else the unique Backplane source checkout among the project roots.
+A request to Backplane's own source is told to change Backplane application code
+and gets the main-line hand-off; one to another project is told that project's
+name and to follow its own instructions. A linked machine's project makes its
+thread on that machine; the screenshot and recording stay on this computer then.
+The phones' Improvements screens offer the same search and remember the choice.
 The origin thread, bot and project are frozen when the popup opens and kept
 with the draft as reference IDs, names and Backplane links, together with the
 view and file path. Closing/reopening keeps that origin. They are not work targets.
 
-Send creates a normal visible thread in that Backplane project, uploads the
+Send creates a normal visible thread in the chosen project, uploads the
 image through `/attach`, then calls normal `turn.start`. It inherits the normal
 new-thread provider, model, permissions and environment configuration. The
 request's exact text and whitespace lead the message; a labeled app/view

@@ -1,7 +1,8 @@
 //! Improvements in the GPUI app (docs/improvements.md, docs/reporting/README.md): one panel, two destinations. The public GitHub issue is the
 //! default: the description, evidence (words, a screenshot, a recording), optional details and diagnostics become an editable report that the
 //! person reviews, then opens as a GitHub draft in their browser (nothing is submitted by Backplane). The internal destination starts a normal
-//! thread in the Backplane source project with the request and its screenshot. "Write report with agent" starts a visible thread whose answer
+//! thread with the request and its screenshot in the project the person picks (this machine's or a linked one's; the hub searches them and remembers the last:
+//! `improvements.projects`), Backplane's own source project until they pick one. "Write report with agent" starts a visible thread whose answer
 //! is loaded back as the report. The draft, its screenshot and recording stay on this device, in a private folder beside the token.
 //! The report policy (body, link, template, prompt, diagnostics allowlist) is the hub's (`improvements.*`); this file keeps the person's draft,
 //! runs the steps in order (each step is retried from where it stopped: keys and attachments keep their identity), and draws the panel.
@@ -20,13 +21,13 @@ pub fn bindings() -> Vec<KeyBinding> {
 
 /// What a reply is for. A step names the one that follows it.
 #[derive(Clone, Copy, Debug, PartialEq)]
-enum Next { Ctx, Diag(Then), Preview, Template, Prompt, WCreate, WCtx, WTurn, Load, ICreate, ICtx, IModes, ITurn }
+enum Next { Ctx, Diag(Then), Preview, Template, Prompt, WCreate, WCtx, WTurn, Load, ICreate, ICtx, IModes, ITurn, Picks, Remember }
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Then { Review, Write }
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Up { WImage, WVideo, IImage, IVideo }
 
-struct Inputs { text: Entity<Composer>, evidence: Entity<Composer>, details: Entity<Composer>, review: Entity<Composer> }
+struct Inputs { text: Entity<Composer>, evidence: Entity<Composer>, details: Entity<Composer>, review: Entity<Composer>, find: Entity<Composer> }
 
 pub struct Imp {
     pub open: bool,
@@ -61,13 +62,19 @@ pub struct Imp {
     /// A test hook only (script op `runtime`): the permission mode to give the hand-off thread before its turn. Unset, the thread has the normal configuration.
     runtime: Option<String>,
     modes_sent: bool,
+    /// the hub's project rows for the search in `find` (newest question wins: `pick_seq`), and whether its remembered choice was taken for this draft
+    picks: Vec<Value>,
+    pick_seq: u64,
+    picked: bool,
+    /// the words last searched: the box notifies on every blink and focus, and only new words are asked (each question waits in `next`, which is bounded)
+    find_q: Option<String>,
 }
 
 impl Imp {
     pub fn new(drafts_path: &Path, target: Option<super::attach::Target>) -> Self {
         let scope = target.as_ref().map_or("offline".to_string(), |t| t.addr.clone());
         Self { open: false, draft: Draft::default(), loaded: false, inputs: None, ctx: Value::Null, projects: vec![], note: String::new(), busy: false, hidden: false, xid: None, rec: None, rec_text: String::new(),
-            next: HashMap::new(), seq: 0, dir: drafts_path.with_file_name("gpui-improvements"), scope, target, diag: String::new(), url: String::new(), review_open: false, flushing: false, syncing: false, shot: None, auto_shot: false, origin: (String::new(), String::new()), evidence_ok: false, previewed: false, focus_pending: false, runtime: None, modes_sent: false }
+            next: HashMap::new(), seq: 0, dir: drafts_path.with_file_name("gpui-improvements"), scope, target, diag: String::new(), url: String::new(), review_open: false, flushing: false, syncing: false, shot: None, auto_shot: false, origin: (String::new(), String::new()), evidence_ok: false, previewed: false, focus_pending: false, runtime: None, modes_sent: false, picks: vec![], pick_seq: 0, picked: false, find_q: None }
     }
     fn file(&self, name: &str) -> PathBuf { self.dir.join(name) }
     /// The panel's own folder, private to this user.
@@ -102,16 +109,29 @@ impl Imp {
 fn inputs(this: &mut Backplane, cx: &mut Context<Backplane>) -> bool {
     if this.screens.imp.inputs.is_some() { return true }
     let make = |cx: &mut Context<Backplane>, hint: &str| { let e = cx.new(|cx| Composer::with_context(cx, "ImpInput")); e.update(cx, |i, _| i.set_placeholder(&trs(hint))); e };
-    /* i18n-ok: drawn through tr */ let ins = Inputs { text: make(cx, "Describe the change…"), evidence: make(cx, "Describe the behavior in detail: what you did and what you saw."), details: make(cx, "Optional reproduction steps or other details…"), review: make(cx, "The public issue text") };
+    /* i18n-ok: drawn through tr */ let ins = Inputs { text: make(cx, "Describe the change…"), evidence: make(cx, "Describe the behavior in detail: what you did and what you saw."), details: make(cx, "Optional reproduction steps or other details…"), review: make(cx, "The public issue text"), find: make(cx, "Search projects…") };
     for (e, which) in [(&ins.text, 0u8), (&ins.evidence, 1), (&ins.details, 2), (&ins.review, 3)] {
         let which = which;
         cx.observe(e, move |this, e, cx| edited(this, which, e.read(cx).content.to_string(), cx)).detach();
         cx.subscribe(e, move |this, _, ev: &ComposerEvent, cx| if matches!(ev, ComposerEvent::Submit) { act(this, "primary", cx); }).detach();
     }
+    cx.observe(&ins.find, move |this, e, cx| { let q = e.read(cx).content.to_string(); find(this, &q, cx) }).detach();
+    cx.subscribe(&ins.find, move |this, _, ev: &ComposerEvent, cx| if matches!(ev, ComposerEvent::Submit) { if let Some(id) = this.screens.imp.picks.first().and_then(|p| p["id"].as_str()).map(str::to_string) { act(this, &format!("proj:{id}"), cx) } }).detach();
     this.screens.imp.inputs = Some(ins);
     true
 }
 
+/// The project search: the hub's rows for these words (the newest question's answer is the one drawn).
+fn find(this: &mut Backplane, q: &str, cx: &mut Context<Backplane>) {
+    if !this.screens.imp.open || this.screens.imp.find_q.as_deref() == Some(q) { return }
+    this.screens.imp.find_q = Some(q.to_string());
+    ask(this, "improvements.projects", json!({"q": q}), Next::Picks, cx); this.screens.imp.pick_seq = this.screens.imp.seq;
+}
+/// The project the request goes to, as a row: this machine's from the context, a linked machine's from the search.
+fn chosen(imp: &Imp) -> Option<Project> {
+    let id = &imp.draft.project; if id.is_empty() { return None }
+    imp.projects.iter().find(|p| &p.id == id).cloned().or_else(|| imp.picks.iter().find(|p| p["id"].as_str() == Some(id)).map(|p| Project { id: id.clone(), title: s(p, "title"), root: s(p, "root") }))
+}
 /// A box was edited by the person. A box set by the code (loading a draft) changes nothing.
 fn edited(this: &mut Backplane, which: u8, text: String, cx: &mut Context<Backplane>) {
     let imp = &mut this.screens.imp;
@@ -172,11 +192,12 @@ fn open(this: &mut Backplane, cx: &mut Context<Backplane>) {
         if !imp.draft.recording.is_empty() && !(age.map_or(false, |a| a < Duration::from_secs(86_400)) && capture::is_webm(&rec)) { let _ = std::fs::remove_file(&rec); imp.draft.recording.clear(); imp.draft.inc_rec = false; imp.draft.rec_reviewed = false; }
         if !imp.draft.image.is_empty() { match std::fs::read(&imp.draft.image) { Ok(b) if !b.is_empty() => imp.shot = Some(Arc::new(Image::from_bytes(format_of(&imp.draft.image), b))), _ => { imp.draft.image.clear(); imp.draft.inc_shot = false; } } }
     }
-    /* i18n-ok: drawn through tr */ imp.note = if imp.draft.opened { "This draft was already opened on GitHub. Check GitHub before explicitly allowing another copy.".into() } else if imp.draft.internal { "Send starts a new Backplane thread.".into() } else { "Review the issue before opening GitHub.".into() };
+    /* i18n-ok: drawn through tr */ imp.note = if imp.draft.opened { "This draft was already opened on GitHub. Check GitHub before explicitly allowing another copy.".into() } else if imp.draft.internal { "Send starts a new thread in the chosen project.".into() } else { "Review the issue before opening GitHub.".into() };
     imp.review_open = !imp.draft.issue_body.is_empty() && !imp.draft.internal;
     fill_boxes(this, cx);
     this.screens.imp.focus_pending = true;
     ask(this, "improvements.context", json!({"sourceThread": origin_thread}), Next::Ctx, cx);
+    let q = this.screens.imp.inputs.as_ref().map(|i| i.find.read(cx).content.to_string()).unwrap_or_default(); this.screens.imp.find_q = None; find(this, &q, cx);
     // a fresh draft starts with a picture of the app as it was; the panel hides for the grab, then returns
     if this.screens.imp.draft.image.is_empty() && !this.screens.imp.locked() && this.screens.imp.rec.is_none() && capture::unavailable().is_none() {
         this.screens.imp.auto_shot = true;
@@ -206,9 +227,8 @@ pub fn answered(this: &mut Backplane, id: u64, reply: Value, cx: &mut Context<Ba
             let imp = &mut this.screens.imp;
             imp.projects = projects(&r); imp.ctx = r.clone();
             let found = backplane_project(&imp.projects).map(|p| p.id.clone());
-            if !imp.draft.locked() && imp.draft.key.is_empty() {
-                if let Some(id) = found.clone() { imp.draft.project = id; } else if !imp.projects.iter().any(|p| p.id == imp.draft.project) { imp.draft.project.clear(); }
-            }
+            // Backplane's own source until the person picks (the search's answer brings their last choice; a linked machine's project is not in this list)
+            if !imp.draft.locked() && imp.draft.key.is_empty() && imp.draft.project.is_empty() { if let Some(id) = found.clone() { imp.draft.project = id; } }
             if imp.draft.writer_project.is_empty() {
                 let work: Vec<&Project> = imp.projects.iter().filter(|p| p.id != "scratch" && !p.root.is_empty()).collect();
                 let src = s(&r, "project");
@@ -271,25 +291,35 @@ pub fn answered(this: &mut Backplane, id: u64, reply: Value, cx: &mut Context<Ba
             let _ = save_now(this);
         }
         Next::ICreate => {
-            /* i18n-ok: drawn through tr */ if s(&r, "thread") != thread_for(&this.screens.imp.draft.key) { return fail(this, "The hub did not confirm this conversation. Retry Send.".into(), cx) }
-            this.screens.imp.draft.thread = thread_for(&this.screens.imp.draft.key); let _ = save_now(this); advance_internal(this, cx);
+            let want = made_thread(&this.screens.imp.draft.project, &this.screens.imp.draft.key);
+            /* i18n-ok: drawn through tr */ if s(&r, "thread") != want { return fail(this, "The hub did not confirm this conversation. Retry Send.".into(), cx) }
+            this.screens.imp.draft.thread = want; let _ = save_now(this); advance_internal(this, cx);
         }
         Next::ICtx => match r["accountBinding"].as_str() {
             Some(b) => { this.screens.imp.draft.binding = Some(b.to_string()); let _ = save_now(this); advance_internal(this, cx); }
             /* i18n-ok: drawn through tr */ None => return fail(this, "The hub did not confirm this conversation’s account. Retry Send.".into(), cx),
         },
         Next::IModes => { advance_internal(this, cx); }
+        Next::Picks => {
+            let imp = &mut this.screens.imp; if id != imp.pick_seq { return }
+            imp.picks = r["projects"].as_array().cloned().unwrap_or_default();
+            let last = s(&r, "project");
+            if !imp.picked && !imp.draft.locked() && imp.draft.key.is_empty() { imp.picked = true; if !last.is_empty() { imp.draft.project = last; } }
+        }
+        Next::Remember => {}
         Next::ITurn => {
             let thread = this.screens.imp.draft.thread.clone();
-            this.screens.imp.draft.accepted = true; let _ = save_now(this);
+            this.screens.imp.draft.accepted = true; this.screens.imp.picked = false; let _ = save_now(this);
             let _ = this.tx.try_send(Command::Select(thread));
-            /* i18n-ok: drawn through tr */ let imp = &mut this.screens.imp; imp.forget_files(); imp.draft = Draft::default(); imp.busy = false; imp.open = false; imp.note = "Request sent. Opening the new Backplane thread.".into();
+            /* i18n-ok: drawn through tr */ let imp = &mut this.screens.imp; imp.forget_files(); imp.draft = Draft::default(); imp.busy = false; imp.open = false; imp.note = "Request sent. Opening the new thread.".into();
             fill_boxes(this, cx);
         }
     }
     cx.notify();
 }
 fn s(v: &Value, k: &str) -> String { v[k].as_str().unwrap_or("").to_string() }
+/// How many of the search's projects the panel shows.
+const PICK_ROWS: usize = 8;
 
 // ---- the public report ------------------------------------------------------------------------------------------------------------------------
 
@@ -351,7 +381,6 @@ fn load_report(this: &mut Backplane, cx: &mut Context<Backplane>) {
 fn send_internal(this: &mut Backplane, cx: &mut Context<Backplane>) {
     if this.screens.imp.draft.accepted { let t = this.screens.imp.draft.thread.clone(); let _ = this.tx.try_send(Command::Select(t)); return close(this, cx) }
     if let Err(e) = this.screens.imp.draft.check_internal() { return fail(this, e.into(), cx) }
-    /* i18n-ok: drawn through tr */ if let Some(t) = backplane_project(&this.screens.imp.projects) { if this.screens.imp.draft.project != t.id { return fail(this, "This saved request belongs to another project. Open its thread to finish it before starting a Backplane improvement.".into(), cx) } }
     if this.screens.imp.draft.key.is_empty() { this.screens.imp.draft.key = new_key(); }
     /* i18n-ok: drawn through tr */ this.screens.imp.busy = true; this.screens.imp.note = "Sending…".into();
     if let Err(e) = save_now(this) { return fail(this, e, cx) }
@@ -359,26 +388,33 @@ fn send_internal(this: &mut Backplane, cx: &mut Context<Backplane>) {
 }
 fn advance_internal(this: &mut Backplane, cx: &mut Context<Backplane>) {
     let d = this.screens.imp.draft.clone();
-    /* i18n-ok: drawn through tr; the title is sent to the hub */ if d.thread.is_empty() { this.screens.imp.note = "Creating the Backplane thread…".into(); return ask(this, "thread.create", json!({"project": d.project, "title": "New thread", "creationKey": d.key, "base": "gpui", "branch": work_branch(&d.key)}), Next::ICreate, cx) }
-    if d.binding.is_none() { return ask(this, "improvements.context", json!({"sourceThread": d.thread}), Next::ICtx, cx) }
+    // a linked machine's project: its thread runs there, under that machine's own sign-in; files on this computer stay here
+    let far = is_far(&d.project);
+    /* i18n-ok: drawn through tr; the title is sent to the hub */ if d.thread.is_empty() { this.screens.imp.note = "Creating the thread…".into(); return ask(this, "thread.create", json!({"project": d.project, "title": "New thread", "creationKey": d.key, "branch": work_branch(&d.key)}), Next::ICreate, cx) }
+    if far && d.binding.is_none() { this.screens.imp.draft.binding = Some(String::new()); }
+    if !far && d.binding.is_none() { return ask(this, "improvements.context", json!({"sourceThread": d.thread}), Next::ICtx, cx) }
     if let Some(rt) = this.screens.imp.runtime.clone() { if !this.screens.imp.modes_sent { this.screens.imp.modes_sent = true; return ask(this, "thread.modes", json!({"thread": d.thread, "runtime": rt}), Next::IModes, cx) } }
-    /* i18n-ok: drawn through tr */ if !d.image.is_empty() && d.path.is_empty() { this.screens.imp.note = "Uploading the screenshot…".into(); return upload(this, Up::IImage, d.thread.clone(), d.key.clone(), d.image.clone(), cx) }
-    let with_video = d.inc_rec && d.rec_reviewed && !d.recording.is_empty();
+    /* i18n-ok: drawn through tr */ if !far && !d.image.is_empty() && d.path.is_empty() { this.screens.imp.note = "Uploading the screenshot…".into(); return upload(this, Up::IImage, d.thread.clone(), d.key.clone(), d.image.clone(), cx) }
+    let with_video = !far && d.inc_rec && d.rec_reviewed && !d.recording.is_empty();
     if with_video && d.video_path.is_empty() {
         let k = if d.video_key.is_empty() { let k = new_key(); this.screens.imp.draft.video_key = k.clone(); let _ = save_now(this); k } else { d.video_key.clone() };
         /* i18n-ok: drawn through tr */ this.screens.imp.note = "Uploading the selected recording…".into(); return upload(this, Up::IVideo, d.thread.clone(), k, d.recording.clone(), cx)
     }
     let message = if d.message.is_empty() {
-        let imp = &this.screens.imp; let target = imp.projects.iter().find(|p| p.id == d.project);
+        let imp = &this.screens.imp; let target = chosen(imp);
         let (t, n) = imp.origin.clone();
-        /* i18n-ok: a view name in the context data */ let c = context(&t, &n, "Thread", &imp.ctx, target);
-        improvement_message_with(&d.text, &c, &handoff(&work_branch(&d.key)), &d.path, if with_video { &d.video_path } else { "" })
+        /* i18n-ok: a view name in the context data */ let c = context(&t, &n, "Thread", &imp.ctx, target.as_ref());
+        let own = backplane_project(&imp.projects).map_or(false, |b| b.id == d.project);
+        let (path, video) = (if far { "" } else { d.path.as_str() }, if with_video { d.video_path.as_str() } else { "" });
+        if own { improvement_message_with(&d.text, &c, &handoff(&work_branch(&d.key)), path, video) }
+        else { let title = target.map(|p| p.title).unwrap_or_default(); improvement_message_in(&d.text, &c, &title, &handoff_in(&work_branch(&d.key), &title), path, video) }
     } else { d.message.clone() };
     /* i18n-ok: drawn through tr */ if message.len() > MAX_MESSAGE { return fail(this, "This request is too long. Shorten it before sending.".into(), cx) }
     this.screens.imp.draft.message = message.clone();
     if let Err(e) = save_now(this) { return fail(this, e, cx) }
     /* i18n-ok: drawn through tr */ this.screens.imp.note = "Starting the request…".into();
-    ask(this, "turn.start", json!({"thread": d.thread, "text": message, "msg": format!("improvement-request-{}", d.key), "accountBinding": d.binding}), Next::ITurn, cx)
+    let mut p = json!({"thread": d.thread, "text": message, "msg": format!("improvement-request-{}", d.key)}); if !far { p["accountBinding"] = json!(d.binding) }
+    ask(this, "turn.start", p, Next::ITurn, cx)
 }
 
 // ---- attachments (the hub's POST /attach, off the UI thread) ---------------------------------------------------------------------------------
@@ -559,7 +595,7 @@ pub fn act(this: &mut Backplane, id: &str, cx: &mut Context<Backplane>) {
         "close" => return close(this, cx),
         "dest-issue" | "dest-internal" if !locked && this.screens.imp.draft.key.is_empty() => {
             let d = &mut this.screens.imp.draft; d.internal = id == "dest-internal"; d.inc_rec = false; d.forget_report(); this.screens.imp.review_open = false;
-            /* i18n-ok: drawn through tr */ this.screens.imp.note = if id == "dest-internal" { "Send starts a new Backplane thread.".into() } else { "Review the issue before opening GitHub.".into() };
+            /* i18n-ok: drawn through tr */ this.screens.imp.note = if id == "dest-internal" { "Send starts a new thread in the chosen project.".into() } else { "Review the issue before opening GitHub.".into() };
         }
         "chk-shot" if !locked => { flip(this, |d| d.inc_shot = !d.inc_shot); this.screens.imp.draft.forget_report(); this.screens.imp.review_open = false; this.screens.imp.evidence_ok = false; }
         "chk-diag" if !locked => { flip(this, |d| d.inc_diag = !d.inc_diag); this.screens.imp.draft.forget_report(); this.screens.imp.review_open = false; this.screens.imp.evidence_ok = false; this.screens.imp.diag.clear(); }
@@ -589,7 +625,10 @@ pub fn act(this: &mut Backplane, id: &str, cx: &mut Context<Backplane>) {
         /* i18n-ok: drawn through tr */ "save" => { let imp = &mut this.screens.imp; if !imp.draft.issue_body.is_empty() { imp.note = match save_file("backplane-issue.txt", imp.draft.issue_body.as_bytes()) { Ok(p) => format!("Saved {}", p.display()), Err(e) => e }; } }
         /* i18n-ok: drawn through tr */ "allow-again" if this.screens.imp.draft.opened => { this.screens.imp.draft.opened = false; this.screens.imp.note = "Review the report and press Open GitHub draft when ready.".into(); }
         "open-github" => return open_github(this, cx),
-        _ if id.starts_with("proj:") && !locked && this.screens.imp.draft.key.is_empty() => { this.screens.imp.draft.project = id[5..].to_string(); }
+        _ if id.starts_with("proj:") && !locked && this.screens.imp.draft.key.is_empty() => {
+            let p = id[5..].to_string(); this.screens.imp.draft.project = p.clone(); this.screens.imp.picked = true;
+            ask(this, "improvements.project", json!({"project": p}), Next::Remember, cx); // remembered for the next request
+        }
         _ if id.starts_with("wproj:") && !locked => { let d = &mut this.screens.imp.draft; d.writer_project = id[6..].to_string(); d.forget_report(); this.screens.imp.review_open = false; }
         _ => {}
     }
@@ -665,7 +704,7 @@ fn all_controls(imp: &Imp) -> Vec<(String, String)> {
     /* i18n-ok: e2e control labels */ if capture::unavailable().is_none() { v.push(("record", "Record screen")); }
     /* i18n-ok: e2e control labels */ if !d.recording.is_empty() { v.extend([("rec-play", "Play recording"), ("chk-rec", "Attach recording"), ("rec-discard", "Discard recording")]); }
     let mut out: Vec<(String, String)> = v.into_iter().map(|(a, b)| (a.to_string(), b.to_string())).collect();
-    /* i18n-ok: e2e control labels */ out.extend(imp.projects.iter().map(|p| (format!("{}:{}", if d.internal { "proj" } else { "wproj" }, p.id), format!("Project {}", p.title))));
+    /* i18n-ok: e2e control labels */ if d.internal { out.extend(imp.picks.iter().take(PICK_ROWS).map(|p| (format!("proj:{}", s(p, "id")), format!("Project {}", s(p, "title"))))); } else { out.extend(imp.projects.iter().map(|p| (format!("wproj:{}", p.id), format!("Project {}", p.title)))); }
     out
 }
 
@@ -705,8 +744,15 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, imp: &Imp) -> Option<AnyEl
     col = col.child(div().flex().gap_2().child(button(cx, light, "dest-issue", &trs("Public GitHub issue"), !locked && d.key.is_empty(), false, public)).child(button(cx, light, "dest-internal", &trs("Internal implementation thread"), !locked && d.key.is_empty(), false, !public)));
     col = col.child(field(light, &trs("What would you like to improve?"), &ins.text));
     if !public {
-        let unique = backplane_project(&imp.projects).map_or(false, |t| t.id == d.project);
-        if !unique { col = col.child(div().flex().flex_col().gap_1().child(div().text_size(px(12.)).text_color(c("dim")).child(trs("Backplane source project"))).child(div().flex().flex_wrap().gap_2().children(imp.projects.iter().map(|p| button(cx, light, &format!("proj:{}", p.id), &p.title, !locked && d.key.is_empty(), false, p.id == d.project)).collect::<Vec<_>>()))); }
+        // the project it goes to: the hub's search over every machine's projects, the chosen one marked (and named when the search hides it)
+        let free = !locked && d.key.is_empty();
+        /* i18n-ok: a title and a machine name */ let label = |p: &Value| { let short = s(p, "short"); if short.is_empty() { s(p, "title") } else { format!("{} · {short}", s(p, "title")) } };
+        let rows: Vec<AnyElement> = imp.picks.iter().take(PICK_ROWS).map(|p| button(cx, light, &format!("proj:{}", s(p, "id")), &label(p), free, false, s(p, "id") == d.project)).collect();
+        let shown = imp.picks.iter().take(PICK_ROWS).any(|p| s(p, "id") == d.project);
+        let current = chosen(imp).filter(|_| !shown).map(|p| div().text_size(px(12.)).child(tf("gpui.imp.project.chosen", &[("title", p.title.into())])));
+        col = col.child(div().flex().flex_col().gap_1().child(div().text_size(px(12.)).text_color(c("dim")).child(trs("Send to project")))
+            .children(free.then(|| div().w_full().px_2().py_1().border_1().border_color(c("line")).bg(c("view")).child(ins.find.clone()))).child(div().flex().flex_wrap().gap_2().children(rows)).children(current)
+            .children((imp.picks.is_empty() && imp.pick_seq > 0).then(|| para(light, &trs("No project matches.")))));
     } else {
         col = col.child(para(light, &trs("Public on BackplaneWorks/Backplane, attributed to your GitHub account. Sign in on GitHub and press Submit there. Review your text and images for private information.")));
         col = col.child(field(light, &trs("Behavior evidence"), &ins.evidence));
@@ -747,7 +793,7 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, imp: &Imp) -> Option<AnyEl
                     .child(check(cx, light, "chk-rec", &if public { trs("Select this recording for the public report and agent. Play it first.") } else { trs("Attach this recording to the local agent thread. Play it first.") }, d.inc_rec, !locked && d.rec_reviewed)))));
         }
     }
-    col = col.child(div().text_size(px(12.)).text_color(c("dim")).child(if public { trs("OS family and app release are included. Images and recordings stay local until you send them to the agent or attach them yourself on GitHub. Ctrl+Enter reviews the issue.") } else if d.image.is_empty() && !(d.inc_rec && !d.recording.is_empty()) { trs("Choose an image or preview and select a recording before sending.") } else if d.project.is_empty() { trs("Choose the Backplane source project before sending.") } else { trs("Changes will be made in Backplane. Ctrl+Enter sends this request.") }));
+    col = col.child(div().text_size(px(12.)).text_color(c("dim")).child(if public { trs("OS family and app release are included. Images and recordings stay local until you send them to the agent or attach them yourself on GitHub. Ctrl+Enter reviews the issue.") } else if d.image.is_empty() && !(d.inc_rec && !d.recording.is_empty()) { trs("Choose an image or preview and select a recording before sending.") } else if d.project.is_empty() { trs("Choose a project before sending.") } else if is_far(&d.project) { trs("The thread runs on the other machine. Images and recordings stay on this computer. Ctrl+Enter sends this request.") } else { trs("Ctrl+Enter sends this request.") }));
     // the note and the primary button stay pinned below the scrolling body, visible however small the window
     let foot = div().flex_shrink_0().px_4().py_2().border_t_1().border_color(c("line")).flex().items_center().gap_3()
         .child(div().id("imp-note").flex_1().min_w_0().text_size(px(12.)).child(note_text(&imp.note)))

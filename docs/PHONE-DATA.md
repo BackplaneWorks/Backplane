@@ -221,6 +221,11 @@ iOS `DMark`/`DNewOn`/`DChip`, `DataMachineChips`; Android `DMark`/`DNewOn`/`DChi
 - In `thread.entries` and its pushes the card is an Entry `{id, kind:"handoff", text: summary, handoff:{from, title, note, summary, refs}, at}`. Draw the summary, the note when there is one, a row for each reference that opens it (`link.resolve`), and "From <title>" opening `from`.
 - `mentions.list` items carry the thread's, project's or bot's summary as `detail` when the hub has written one (0.14's menu showed it); the desktop's popup says the same. Summaries (`summary.<id>` settings, written when a turn ends) are kept and served this way; 0.14's `summary.set` and `thread.note` were only the hub's own job replies, never a client's request, so they stay unknown methods.
 
+## Improvements: where a request goes (`native/host/src/settings/improvements.rs`)
+
+- `improvements.projects {q}` → `{project, projects:[{id, title, root, machine, short}]}`: the projects of this hub and of the shown linked machines (a linked one's id is `<link>~<id>`, `short` its machine), every word of `q` in the title, folder or machine name, the last choice first, then this machine's, then each linked machine's, by title (at most 40). `project` is the last choice while it still exists, else "".
+- `improvements.project {project}` remembers a choice (setting `improvements.project`); a project on no machine is refused. The apps then send with `thread.create {project, text}` as before: a linked machine's project makes its thread there.
+
 ## Conversation history (feature `history`; `native/host/src/data/ext.rs`, `sidebar.rs` `scratch_chats`)
 The old Scratch chats: 0.14 stopped new ones and kept these. They open read and write as they were; nothing starts there. The desktop's sidebar group is the same list.
 - The Scratch project is no project of `projects.list`, `search` or `mentions.list`, and its chats are not in `threads.list`. `thread.create {project:"scratch"}` is refused ("Conversation history takes no new chats. Start one in a project.").
