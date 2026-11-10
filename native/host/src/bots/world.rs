@@ -56,6 +56,9 @@ pub struct World {
     pub ask_text: HashMap<String, (String, String)>,
     /// a launched thread's launcher (M.Launch.by): the thread that launched it, "" for a launch with no thread behind it
     pub launched: HashMap<String, String>,
+    /// a bot thread's room turn (Room.answer): the room the person's newest message came from ("" for any other message), the room the running turn
+    /// was asked in, and the log line (1-based) of that turn's newest reply. A turn that ends with a room still owed posts its reply there.
+    #[serde(default)] pub room_turns: HashMap<String, (String, String, usize)>,
     /// what the mailroom owes after a step (Run.after, Run.fallback), in log order: taken by `Bots::after_steps`, and only for lines folded after the start
     #[serde(skip)] pub steps: Vec<StepEnd>,
     seen: usize, line: usize,
@@ -68,6 +71,8 @@ pub enum StepEnd {
     Turn { thread: String, state: String, run: Option<super::mail::mailbox::Run> },
     Ask { id: String, thread: String, tool: String, detail: String },
     Fallback { thread: String, run: Option<super::mail::mailbox::Run> },
+    /// a bot's turn ended that the person asked for in a room, and the bot posted nothing there: `line` is its last reply in the log (1-based)
+    RoomReply { thread: String, room: String, line: usize },
 }
 /// the settings the bots lane reads: the new bot's provider and model, the mail switch, the uberbot
 pub const SETTINGS: [&str; 8] = ["agent.provider", "agent.model", "mail.on", "uber.bot", "uber.uid", "person.tz", "person.tz.device", "tz.machine"];
@@ -179,7 +184,7 @@ impl World {
     }
     pub fn apply_line(&mut self, line: &str) {
         let Some(t) = crate::session::event_type(line) else { return };
-        const READ: [&str; 44] = ["DeviceRegistered", "DeviceDropped", "DevicePrefs", "ThreadLaunched", "ActivityLogged", "RunSet", "CharterSet", "DecisionLogged", "ModesSet", "BotSet", "BotDeleted", "RoomSet", "RoomDeleted", "RoomPosted", "HookSet", "HookHit", "RoutineSet", "RoutineDeleted", "RoutineFired",
+        const READ: [&str; 45] = ["MessageFrom", "DeviceRegistered", "DeviceDropped", "DevicePrefs", "ThreadLaunched", "ActivityLogged", "RunSet", "CharterSet", "DecisionLogged", "ModesSet", "BotSet", "BotDeleted", "RoomSet", "RoomDeleted", "RoomPosted", "HookSet", "HookHit", "RoutineSet", "RoutineDeleted", "RoutineFired",
             "MemorySaved", "MemoryForgot", "SpaceSet", "SpacePageSet", "PeerSet", "RoutinePlan", "RoutineSlot", "RoutineDone", "SettingSet", "MessagePosted", "ThreadCreated", "TaskSet", "UberSet", "UberOp", "ConvSet", "MailPosted", "MailMarked", "MailTagged", "TurnChanged", "AskOpened", "AskClosed", "QueueTaken", "BotWoke", "ProjectCreated", "ProjectRemoved"];
         if !READ.contains(&t) { return }
         // cheap tests before a parse: most lines of a big log are messages of other threads and settings nobody here reads
@@ -195,7 +200,7 @@ impl World {
             let th = line.split_once("\"id\":\"").and_then(|(_, r)| r.split('"').next()).unwrap_or("");
             if !self.bot_threads.contains(th) { return }
         }
-        if t == "MessagePosted" {
+        if t == "MessagePosted" || t == "MessageFrom" {
             let th = line.split_once("\"thread\":\"").and_then(|(_, r)| r.split('"').next()).unwrap_or("");
             if !self.bot_threads.contains(th) { return }
         }
@@ -229,6 +234,11 @@ impl World {
                 let run = self.mail.run_of(th).filter(|r| r.live).cloned();
                 if st != "running" { self.steps.push(StepEnd::Turn { thread: th.into(), state: st.into(), run }) }
                 if ["completed", "failed", "interrupted"].contains(&st) { self.mail.run_end(th); }
+                // Room.answer: the turn that starts is owed to the room its message came from; one that completes with the room still owed posts its reply there
+                if let Some(rt) = self.room_turns.get_mut(th) {
+                    if st == "running" { rt.1 = std::mem::take(&mut rt.0); rt.2 = 0 }
+                    else { let (room, line) = (std::mem::take(&mut rt.1), rt.2); if st == "completed" && !room.is_empty() && line > 0 { self.steps.push(StepEnd::RoomReply { thread: th.into(), room, line }) } }
+                }
                 self.turns.insert(th.into(), st.into()); }
             "ThreadLaunched" => { self.launched.insert(id, s(e, "by").into()); }
             "ActivityLogged" => { if s(e, "kind") == "fallback-blocked" { let th = s(e, "thread"); self.steps.push(StepEnd::Fallback { thread: th.into(), run: self.mail.run_of(th).filter(|r| r.live).cloned() }) } }
@@ -241,7 +251,10 @@ impl World {
             "AskClosed" => { if let Some(a) = self.asks.get_mut(&id) { a.2 = false } }
             "BotWoke" => { let bot = s(e, "bot").to_string(); let busy = self.bots.get(&bot).map_or(false, |b| self.turns.get(&b.thread).map_or(false, |t| t == "running")); let h = n(e, "hop");
                 let c = self.hops.entry(bot).or_default(); *c = if busy { Hops { now: c.now, wait: if c.held { c.wait.min(h) } else { h }, held: true } } else { Hops { now: h, wait: 0, held: false } }; }
-            "RoomPosted" => { self.room_lines.entry(s(e, "room").to_string()).or_default().push(self.line); if self.settings.get("mail.on").map_or(true, |v| v != "on") { self.mail.room_post(&id, s(e, "room"), s(e, "from"), s(e, "text"), at); } self.post_ids.insert(id); }
+            "RoomPosted" => {
+                // Room.answer: a bot that posted in the room it was asked in has answered there itself
+                if let (Some(room), Some(th)) = (self.rooms.get(s(e, "room")).map(|r| r.name.to_lowercase()), self.named(s(e, "from")).map(|b| b.thread.clone())) { if let Some(rt) = self.room_turns.get_mut(&th) { if rt.1.to_lowercase() == room { rt.1.clear() } } }
+                self.room_lines.entry(s(e, "room").to_string()).or_default().push(self.line); if self.settings.get("mail.on").map_or(true, |v| v != "on") { self.mail.room_post(&id, s(e, "room"), s(e, "from"), s(e, "text"), at); } self.post_ids.insert(id); }
             "ConvSet" => { self.mail.conv_set(&id, s(e, "subject"), s(e, "kind"), super::mail::mailbox::lines_of(s(e, "parts")), s(e, "project"), super::mail::mailbox::lines_of(s(e, "tags")), at); }
             "MailPosted" => { self.mail.mail(super::mail::Hdr { id, conv: s(e, "conv").into(), from: s(e, "from").into(), to: s(e, "to").into(), kind: s(e, "kind").into(), r#ref: s(e, "ref").into(), want: s(e, "want").into(), head: s(e, "head").into(), size: n(e, "size"), at }); }
             "MailMarked" => { self.mail.marked(s(e, "bot"), s(e, "conv"), s(e, "status"), n(e, "seen"), n(e, "until")); }
@@ -288,8 +301,54 @@ impl World {
             "UberSet" => { self.settings.insert("uber.bot".into(), s(e, "bot").into()); self.settings.insert("uber.uid".into(), s(e, "uid").into()); self.ub.apply(e); }
             "UberOp" => { self.ub.apply(e); }
             "SettingSet" => { let k = s(e, "key"); if k == "machine.id" || k == "uber.offer" || k.starts_with("uber.link.") { self.ub.apply(e); } if kept(k) { self.settings.insert(k.into(), s(e, "value").into()); } }
-            "MessagePosted" => { let th = s(e, "thread"); if self.bot_threads.contains(th) { self.msgs.insert((th.into(), s(e, "msg").into()), self.line); } }
+            "MessagePosted" => { let th = s(e, "thread"); if self.bot_threads.contains(th) { self.msgs.insert((th.into(), s(e, "msg").into()), self.line);
+                // Room.answer: a new message is from no room until its MessageFrom says so; a reply is the running turn's newest
+                match s(e, "role") { "user" => { if let Some(rt) = self.room_turns.get_mut(th) { rt.0.clear() } } "assistant" => { if let Some(rt) = self.room_turns.get_mut(th) { if !rt.1.is_empty() && !s(e, "text").trim().is_empty() { rt.2 = self.line } } } _ => {} } } }
+            "MessageFrom" => { if s(e, "kind") == "room" && s(e, "from") == "person" && !s(e, "ref").is_empty() { self.room_turns.entry(s(e, "thread").into()).or_default().0 = s(e, "ref").into() } }
             _ => {}
         }
+    }
+}
+
+#[cfg(test)]
+mod room_answer {
+    use super::*;
+    /// Room.answer: the person asks in a room; the bot's turn ends without a post there, so its last reply is owed to the room. A bot that posted there itself,
+    /// a message from anywhere else (a routine, another bot), a failed turn and a turn with no reply owe nothing.
+    #[test] fn room_answer_is_owed_when_the_bot_only_replied_in_its_chat() {
+        let base = [r#"{"$":"BotSet","id":"b","name":"foreman","thread":"t1","look":1,"persona":"","at":1}"#, r#"{"$":"RoomSet","id":"r1","name":"Shop Floor","members":"b","at":2}"#];
+        let ask = [r#"{"$":"MessagePosted","thread":"t1","msg":"m1","role":"user","text":"[message from you in #Shop Floor]\nwho wrote it","at":3}"#,
+            r#"{"$":"MessageFrom","thread":"t1","msg":"m1","from":"person","kind":"room","ref":"Shop Floor","at":3}"#, r#"{"$":"TurnChanged","thread":"t1","state":"running","at":3}"#];
+        let reply = r#"{"$":"MessagePosted","thread":"t1","msg":"a1","role":"assistant","text":"the README thread","at":4}"#;
+        let done = r#"{"$":"TurnChanged","thread":"t1","state":"completed","at":5}"#;
+        let run = |lines: &[&str]| { let mut w = World::default(); for (i, l) in base.iter().chain(lines).enumerate() { w.line = i + 1; w.apply_line(l) } w.steps.into_iter().filter(|s| matches!(s, StepEnd::RoomReply { .. })).collect::<Vec<_>>() };
+        fn join<'a>(ask: &[&'a str], mid: &[&'a str], end: &'a str) -> Vec<&'a str> { let mut v = ask.to_vec(); v.extend_from_slice(mid); v.push(end); v }
+        let all = |mid: &[&'static str], end: &'static str| join(&ask, mid, end);
+        // the reply's place in the log: two lines of base, three of the ask, then the reply (1-based)
+        assert_eq!(run(&all(&[reply], done)), vec![StepEnd::RoomReply { thread: "t1".into(), room: "Shop Floor".into(), line: 6 }]);
+        // the newest reply of the turn is the answer
+        assert_eq!(run(&all(&[r#"{"$":"MessagePosted","thread":"t1","msg":"a0","role":"assistant","text":"looking","at":4}"#, reply], done)), vec![StepEnd::RoomReply { thread: "t1".into(), room: "Shop Floor".into(), line: 7 }]);
+        // it posted in that room itself (any case of the name): nothing more is owed; a post in another room does not count
+        assert!(run(&all(&[r#"{"$":"RoomPosted","id":"p1","room":"r1","from":"Foreman","text":"the README thread","hop":1,"at":4}"#, reply], done)).is_empty());
+        assert_eq!(run(&all(&[r#"{"$":"RoomSet","id":"r2","name":"other","members":"b","at":4}"#, r#"{"$":"RoomPosted","id":"p1","room":"r2","from":"foreman","text":"x","hop":1,"at":4}"#, reply], done)).len(), 1);
+        // a failed or stopped turn, and a turn that said nothing, owe nothing
+        assert!(run(&all(&[reply], r#"{"$":"TurnChanged","thread":"t1","state":"failed","at":5}"#)).is_empty());
+        assert!(run(&all(&[reply], r#"{"$":"TurnChanged","thread":"t1","state":"interrupted","at":5}"#)).is_empty());
+        assert!(run(&all(&[], done)).is_empty());
+        // a routine's turn, another bot's room message and the person's own chat message are not answered in a room
+        let other = |from: &str, kind: &str| vec![r#"{"$":"MessagePosted","thread":"t1","msg":"m1","role":"user","text":"x","at":3}"#.to_string(), format!(r#"{{"$":"MessageFrom","thread":"t1","msg":"m1","from":"{from}","kind":"{kind}","ref":"Shop Floor","at":3}}"#),
+            r#"{"$":"TurnChanged","thread":"t1","state":"running","at":3}"#.to_string(), reply.to_string(), done.to_string()];
+        for (from, kind) in [("routine:shop report", "routine"), ("bot:ada", "room")] { let v = other(from, kind); assert!(run(&v.iter().map(String::as_str).collect::<Vec<_>>()).is_empty(), "{from}") }
+        assert!(run(&[r#"{"$":"MessagePosted","thread":"t1","msg":"m1","role":"user","text":"hi","at":3}"#, r#"{"$":"TurnChanged","thread":"t1","state":"running","at":3}"#, reply, done]).is_empty());
+        // the turn after a room turn owes nothing: the next message came from no room
+        let mut two = all(&[reply], done); two.extend_from_slice(&[r#"{"$":"MessagePosted","thread":"t1","msg":"m2","role":"user","text":"[routine: r]\nreport","at":6}"#, r#"{"$":"TurnChanged","thread":"t1","state":"running","at":6}"#,
+            r#"{"$":"MessagePosted","thread":"t1","msg":"a2","role":"assistant","text":"report","at":7}"#, done]);
+        assert_eq!(run(&two).len(), 1);
+        // a message that waits while a turn runs is answered by its own turn: the first turn answers the first room, the second the second
+        let queued = [ask[0], ask[1], ask[2], r#"{"$":"RoomSet","id":"r2","name":"other","members":"b","at":4}"#, r#"{"$":"MessagePosted","thread":"t1","msg":"m2","role":"user","text":"x","at":4}"#,
+            r#"{"$":"MessageFrom","thread":"t1","msg":"m2","from":"person","kind":"room","ref":"other","at":4}"#, reply, done, r#"{"$":"TurnChanged","thread":"t1","state":"running","at":6}"#,
+            r#"{"$":"MessagePosted","thread":"t1","msg":"a2","role":"assistant","text":"second","at":7}"#, done];
+        let got = run(&queued); assert_eq!(got.len(), 2);
+        assert!(matches!(&got[0], StepEnd::RoomReply { room, line: 9, .. } if room == "Shop Floor") && matches!(&got[1], StepEnd::RoomReply { room, line: 12, .. } if room == "other"), "{got:?}");
     }
 }
