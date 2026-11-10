@@ -303,10 +303,14 @@ pub fn rpc_done(this: &mut Backplane, tag: &str, ok: bool, why: &str, cx: &mut C
     let _ = this.tx.try_send(Command::Action(a.into(), v));
 }
 
+/// A QR code's module size, and its drawn width: `n` modules and the four-module quiet zone on both sides (the row is laid out for this width;
+/// counting the quiet zone once pushed the right column 16 px past the dialog's edge, the code and the chips under it cut off).
+const QR_CELL: f32 = 4.0;
+pub fn qr_w(n: usize) -> f32 { (n as f32 + 8.) * QR_CELL }
 /// A QR code as scanners read it in either theme: dark modules on white with the four-module quiet zone the standard asks for (a light
 /// code on the dark theme's background, as it was drawn, is one many phone scanners do not read at all).
 fn qr(_light: bool, lines: &[String]) -> AnyElement {
-    let n = lines.len(); let cell = 4.0_f32;
+    let n = lines.len(); let cell = QR_CELL;
     let (dark, bg) = (gpui::rgb(0x000000), gpui::rgb(0xffffff));
     let rows: Vec<Vec<bool>> = lines.iter().map(|l| l.chars().map(|c| c == '1').collect()).collect();
     div().p(px(4.0 * cell)).bg(bg).child(canvas(|_, _, _| (), move |bounds, _, window, _| {
@@ -337,13 +341,13 @@ pub(crate) fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<
     // a text field takes the room the controls have beside the words (a folder path or an address is longer than 260 px, and wrapped in the field)
     let field_w = (avail - LABEL_MIN - GAP).clamp(260., CONTROLS_MAX).min(avail);
     let widths: Vec<f32> = r.buttons.iter().map(|b| chip_w(&trs(&b.label))).collect();
-    let RowFit { stack, lines } = row_fit(avail, &widths, if has_field { field_w } else { 0. }, if r.qr.is_empty() { 0. } else { r.qr.len() as f32 * 4. + 16. });
+    let RowFit { stack, lines } = row_fit(avail, &widths, if has_field { field_w } else { 0. }, if r.qr.is_empty() { 0. } else { qr_w(r.qr.len()) });
     // the words keep their least width beside the controls (never squeezed to a letter a line), or the whole row's under a stack
     let mut left = div().flex().flex_col().gap_1().min_w_0();
     // beside the controls, the words get the row's width less the controls' (their widest line, field or QR code), as a fixed width: a flex
     // share alone let a long note be measured wider than its column in setup's page, and run on under the button
     let right_w = { let mut at = 0; let mut w = 0f32; for &n in &lines { w = w.max(widths[at..at + n].iter().sum::<f32>() + 4. * (n.max(1) - 1) as f32); at += n; }
-        w.max(if has_field { field_w } else { 0. }).max(if r.qr.is_empty() { 0. } else { r.qr.len() as f32 * 4. + 16. }) };
+        w.max(if has_field { field_w } else { 0. }).max(if r.qr.is_empty() { 0. } else { qr_w(r.qr.len()) }) };
     left = if stack { left.w_full() } else { left.flex_none().w(px((avail - GAP - right_w).max(LABEL_MIN))) };
     if !r.label.is_empty() { left = left.child(div().text_size(px(13.)).child(trs(&r.label))); }
     if !r.note.is_empty() { left = left.child(div().text_size(px(12.)).text_color(c("dim")).child(trs(&r.note))); }
@@ -351,7 +355,8 @@ pub(crate) fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<
     for f in &r.fields {
         if let Some(slot) = fields.get(&f.name) { right = right.child(div().w(px(field_w)).max_w_full().px_2().py_1().bg(c("raise")).child(slot.input.clone())); }
     }
-    if !r.qr.is_empty() { right = right.child(qr(light, &r.qr)); if !r.qrnote.is_empty() { right = right.child(div().text_size(px(11.)).text_color(c("dim")).child(trs(&r.qrnote))); } }
+    // the note under the code (code, address, until when) wraps in the room planned for the controls: one line of it widened the column past the dialog
+    if !r.qr.is_empty() { right = right.child(qr(light, &r.qr)); if !r.qrnote.is_empty() { right = right.child(div().max_w(px(right_w)).text_size(px(11.)).text_color(c("dim")).child(trs(&r.qrnote))); } }
     if !r.buttons.is_empty() {
         // (not a wrapping flex row: it does not grow its parent's height in gpui, and the next row would be drawn over it)
         // chips in lines packed to the room they have (row_fit), at most CHIPS_PER_LINE each
@@ -524,6 +529,12 @@ mod tests {
         assert!(r.note.contains("Ctrl+Shift+H") || r.note.contains("⌃⇧H"), "{}", r.note);
         assert_eq!((r.buttons[0].action.as_str(), r.buttons[0].value.as_str()), ("local:shortcut", "perf"));
         assert!(!rows.iter().any(|r| r.note.starts_with("Not yet") && r.note.contains("Performance")));
+    }
+    #[test] fn a_qr_code_is_laid_out_as_wide_as_it_is_drawn() {
+        // 33 modules and a quiet zone of 4 each side, 4 px each; the 600 px dialog row (the pairing invitation) keeps it beside the words
+        assert_eq!(qr_w(33), 164.);
+        let f = row_fit(600., &[chip_w("Copy link"), chip_w("Copy code")], 0., qr_w(33));
+        assert!(!f.stack);
     }
     #[test] fn rows_parse_with_buttons_fields_and_qr_and_a_vault_field_keeps_no_hub_value() {
         let r = parse(&j(r#"{"rows":[{"label":"Theme","note":"light or dark","buttons":[{"label":"Dark","action":"theme","value":"dark","on":true},{"label":"Light","action":"theme","value":"light","on":false}]},
