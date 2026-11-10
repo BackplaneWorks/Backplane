@@ -26,6 +26,7 @@ const SIGNIN_DEFAULT: &str = "Sign-in could not be verified. Retry or check the 
 const DIRECTORY_ERR: &str = "Claude must report its isolated account directory (Claude Code 2.1.268 or later)";
 
 fn fb_auth(s: &str) -> bool { super::fallback::auth_text(s) }
+fn last_of(inner: &Mutex<Inner>, key: &str) -> u64 { inner.lock().unwrap().refresh_at.get(key).copied().unwrap_or(0) }
 fn now_s() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()) }
 fn now_ms() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64) }
 /// A name shown to the person: no control characters, at most 64, trimmed.
@@ -175,6 +176,8 @@ pub struct Accounts { root: PathBuf, inner: Mutex<Inner>, resolve: Arc<dyn Fn(&s
     /// Claude's usage read with each login's own token (claude_usage.rs): the request, and the CLI's own store. None in a test hub, a stand-in hub and a copy:
     /// the stand-in CLI's `get_usage` is read instead.
     usage: Mutex<Option<(super::claude_usage::Get, Option<PathBuf>)>>,
+    /// The models-list request (the real hub's only: a test hub asks no API).
+    models_get: Mutex<Option<super::claude_usage::Get>>,
     /// One usage read (and the token refresh it may need) at a time per login ("" is the CLI's own).
     usage_locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>> }
 
@@ -267,7 +270,7 @@ impl Accounts {
         // (BACKPLANE_USAGE_READ=1: a rig with stand-in agents reads the logins copied into its temp home for real; a copy never does)
         let real = !cfg!(test) && (std::env::var_os("BACKPLANE_AGENTS").map_or(true, |v| v.is_empty()) || std::env::var("BACKPLANE_USAGE_READ").map_or(false, |v| v == "1")) && std::env::var("BACKPLANE_COPY").map_or(true, |v| v != "1");
         let usage = real.then(|| (super::claude_usage::curl(), super::claude_usage::default_dir()));
-        Accounts { root, inner: Mutex::new(inner), resolve, usage: Mutex::new(usage), usage_locks: Mutex::new(HashMap::new()) }
+        Accounts { root, inner: Mutex::new(inner), resolve, models_get: Mutex::new(real.then(super::claude_usage::curl_models)), usage: Mutex::new(usage), usage_locks: Mutex::new(HashMap::new()) }
     }
     /// The registry's folder (`<home>/providers/accounts-v1`).
     pub fn root(&self) -> &Path { &self.root }
@@ -399,9 +402,12 @@ impl Accounts {
     /// The usage endpoint asked with the login's own token (claude_usage.rs), or None when this login has no token the hub can read (no store file: a keychain
     /// login, an API key) and the CLI is asked instead. An expired token is refreshed by the CLI itself first: one start of it in that store, whose startup
     /// refreshes it under the CLI's own lock; a 401 gets the same once, in case the token was replaced under the read.
-    async fn usage_direct(&self, p: Option<&Profile>) -> Option<Result<Value, String>> {
+    async fn usage_direct(&self, p: Option<&Profile>) -> Option<Result<Value, String>> { self.oauth_read(p, false).await }
+    /// `usage_direct`, or the models list (`models`) asked the same way.
+    async fn oauth_read(&self, p: Option<&Profile>, models: bool) -> Option<Result<Value, String>> {
         use super::claude_usage as cu;
         let (get, default_dir) = self.usage.lock().unwrap().clone()?;
+        let get = if models { self.models_get.lock().unwrap().clone()? } else { get };
         let dir = match p { Some(p) => self.directory(p).ok()?, None => default_dir? };
         let lock = self.usage_locks.lock().unwrap().entry(p.map_or(String::new(), |p| p.id.clone())).or_default().clone();
         let _one = lock.lock().await;
@@ -432,7 +438,9 @@ impl Accounts {
     }
     async fn claude_models(&self, p: &Profile) -> Vec<Value> {
         let Some(r) = self.claude_control(Some(p), "models").await else { return vec![] };
-        r["models"].as_array().cloned().unwrap_or_default().into_iter().take(40).filter(|x| x["value"].is_string()).map(|x| json!({"id":label(x["value"].as_str().unwrap_or("")),"label":label(x["displayName"].as_str().or(x["value"].as_str()).unwrap_or("")),
+        // the CLI's list lags a model the account already has: the API's list (the login's own token, read-only) adds the newest of each family
+        let api = match self.oauth_read(Some(p), true).await { Some(Ok(b)) => b, _ => Value::Null };
+        super::models_probe::claude_extend(r["models"].as_array().cloned().unwrap_or_default(), &api).into_iter().take(40).filter(|x| x["value"].is_string()).map(|x| json!({"id":label(x["value"].as_str().unwrap_or("")),"label":label(x["displayName"].as_str().or(x["value"].as_str()).unwrap_or("")),
             "efforts":x["supportedEffortLevels"].as_array().map(|a| a.iter().take(12).map(|y| json!(label(y.as_str().unwrap_or("")))).collect::<Vec<_>>()).unwrap_or_default()})).collect()
     }
     /// accounts.js claudeWindows: the windows of Claude Code's `get_usage` answer (its `rate_limits` is the usage endpoint's body).
@@ -472,7 +480,12 @@ impl Accounts {
             if data["configDirectory"].as_str().map(|d| crate::plat::fs::canonicalize(d).unwrap_or_else(|_| PathBuf::from(d))) != Some(crate::plat::fs::canonicalize(&dir).unwrap_or(dir)) { return Err(DIRECTORY_ERR.into()) }
             identity = json!({"email":label(data["email"].as_str().unwrap_or("")),"plan":label(data["subscriptionType"].as_str().unwrap_or("")),"auth":"claude.ai"});
             fp_identity = json!([identity["email"], label(data["accountUuid"].as_str().or(data["userId"].as_str()).unwrap_or("")), label(data["orgUuid"].as_str().or(data["organizationId"].as_str()).unwrap_or(""))]);
-            catalog = if p.catalog.is_empty() { self.claude_models(&p).await } else { p.catalog.clone() };
+            // the catalog is read again each hour (a model the provider adds shows without a restart), and the old one stays when the read gives none
+            let ck = format!("catalog:{}", p.id);
+            catalog = if p.catalog.is_empty() || now_s().saturating_sub(last_of(&self.inner, &ck)) >= 3600 {
+                self.inner.lock().unwrap().refresh_at.insert(ck, now_s());
+                let c = self.claude_models(&p).await; if c.is_empty() { p.catalog.clone() } else { c }
+            } else { p.catalog.clone() };
             allowance = p.allowance.clone();
             let at = last(&format!("usage:{}", p.id));
             // a login found dead is read every check: the usage read is the one request that proves it works again (no inference request is made)

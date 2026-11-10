@@ -23,6 +23,34 @@ pub fn claude_listed(out: &str) -> Vec<Value> {
     out.lines().filter(|l| l.contains("\"control_response\"")).find_map(|l| serde_json::from_str::<Value>(l.trim()).ok())
         .and_then(|v| v["response"]["response"]["models"].as_array().cloned()).unwrap_or_default()
 }
+/// A Claude id's family and version: "claude-fable-5-2" -> ("fable", [5, 2]); None for a dated id, an alias or another shape.
+fn claude_version(id: &str) -> Option<(&str, Vec<u32>)> {
+    let mut p = id.strip_prefix("claude-")?.split('-'); let fam = p.next()?;
+    if !["opus", "sonnet", "haiku", "fable"].contains(&fam) { return None }
+    let v = p.map(|x| if x.len() < 4 { x.parse().ok() } else { None }).collect::<Option<Vec<u32>>>()?;
+    if v.is_empty() { None } else { Some((fam, v)) }
+}
+/// The CLI's own model rows plus the newest model of each family that the API lists (`GET /v1/models`, `api`) and the CLI's list lacks: a CLI release lags a model
+/// the account already has (Fable 5.2 was usable on Claude Code 2.1.321, which listed only 5.1). The new row follows its family's newest row and takes its
+/// efforts, description and a `[1m]` suffix; the CLI's rows are untouched. A family the CLI does not list is not added (no efforts are known for it).
+pub fn claude_extend(mut xs: Vec<Value>, api: &Value) -> Vec<Value> {
+    let Some(ids) = api["data"].as_array() else { return xs };
+    let mut add: Vec<(usize, Value)> = vec![];
+    for fam in ["fable", "opus", "sonnet", "haiku"] {
+        let best = xs.iter().enumerate().filter_map(|(i, o)| claude_version(gs(o, "resolvedModel")).filter(|(f, _)| *f == fam).map(|(_, v)| (v, i))).max_by(|a, b| a.0.cmp(&b.0));
+        let Some((have, at)) = best else { continue };
+        let newer = ids.iter().filter_map(|o| { let id = gs(o, "id"); claude_version(id).filter(|(f, v)| *f == fam && *v > have).map(|(_, v)| (v, o.clone())) }).max_by(|a, b| a.0.cmp(&b.0));
+        let Some((_, o)) = newer else { continue };
+        let (id, row) = (gs(&o, "id").to_string(), &xs[at]);
+        let name = { let d = gs(&o, "display_name"); d.strip_prefix("Claude ").unwrap_or(d).to_string() };
+        let suffix = if gs(row, "value").ends_with("[1m]") { "[1m]" } else { "" };
+        let mut n = row.clone();
+        n["value"] = json!(format!("{id}{suffix}")); n["resolvedModel"] = json!(id); n["displayName"] = json!(if name.is_empty() { id.clone() } else { name });
+        add.push((at + 1, n));
+    }
+    for (at, n) in add.into_iter().rev() { xs.insert(at.min(xs.len()), n) }
+    xs
+}
 fn gs<'a>(o: &'a Value, k: &str) -> &'a str { o.get(k).and_then(Value::as_str).unwrap_or("") }
 /// Claude.values: what a thread may pick ("default" is the picker's own first row).
 pub fn claude_models(xs: &[Value]) -> Vec<String> {
@@ -167,7 +195,8 @@ pub async fn detect(home: &Path) -> Found {
     let claude = async { let p = at("claude")?; let v = version(&p).await;
         let out = ask(&p, &["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"], &[r#"{"type":"control_request","request_id":"models","request":{"subtype":"initialize"}}"#],
             |l| l.contains("\"control_response\""), Duration::from_secs(30)).await;
-        Some((v, claude_listed(&out))) };
+        let api = match super::claude_usage::default_dir() { Some(d) => super::claude_usage::api_models(&d, &super::claude_usage::curl_models()).await, None => Value::Null };
+        Some((v, claude_extend(claude_listed(&out), &api))) };
     let codex = async { let p = at("codex")?; let v = version(&p).await; Some((v, std::fs::read_to_string(codex_cache_path()).unwrap_or_default())) };
     let grok = async { let p = at("grok")?; let v = version(&p).await; let o = run(&p, &["models"], &[], Duration::from_secs(15)).await.filter(|r| r.0 == 0).map_or(String::new(), |r| r.1); Some((v, o)) };
     let muse = async { let p = at("muse")?; let v = version(&p).await;
@@ -228,6 +257,17 @@ mod tests {
         assert_eq!(a["efforts"]["default"], json!(["low","medium","high","xhigh","max"])); assert_eq!(a["efforts"]["haiku"], json!([]), "a model without effort takes none");
         assert_eq!(claude_models(&claude_listed("")), ["fable", "opus", "sonnet", "haiku"], "a CLI that cannot say: the known aliases");
         assert_eq!(claude_about("x", &[])["labels"]["opus"], "Opus 5.5 · claude-opus-5-5");
+    }
+    #[test] fn a_model_the_api_lists_and_the_cli_lacks_is_added_after_its_family() {
+        let xs = claude_listed(CLAUDE);
+        let api = json!({"data":[{"id":"claude-fable-5-2","display_name":"Claude Fable 5.2"},{"id":"claude-fable-5-1"},{"id":"claude-fable-5"},{"id":"claude-opus-5-5"},{"id":"claude-opus-4-8"},{"id":"claude-haiku-4-5-20251001"},{"id":"claude-sonnet-5-6","display_name":"Claude Sonnet 5.6"}]});
+        let ys = claude_extend(xs.clone(), &api);
+        assert_eq!(claude_models(&ys), ["opus", "claude-fable-5-1", "claude-fable-5-2", "haiku"], "sonnet is not in the CLI list: not added");
+        let a = claude_about("/x/claude", &ys);
+        assert_eq!(a["labels"]["claude-fable-5-2"], "Fable 5.2 · For your toughest challenges"); assert_eq!(a["efforts"]["claude-fable-5-2"], json!(["low","high"]));
+        assert_eq!(claude_extend(xs.clone(), &Value::Null), xs, "no API answer: the CLI's list as it is");
+        let one = claude_extend(claude_listed(&CLAUDE.replace("\"value\":\"claude-fable-5-1\"", "\"value\":\"claude-fable-5-1[1m]\"")), &api);
+        assert_eq!(claude_models(&one), ["opus", "claude-fable-5-1[1m]", "claude-fable-5-2[1m]", "haiku"], "the [1m] of the family's row carries over");
     }
     #[test] fn codex_reads_its_cache_and_hides_what_it_hides() {
         let t = r#"{"models":[{"slug":"gpt-6.1-sol","visibility":"list","display_name":"GPT-6.1-Sol","description":"Latest workhorse","supported_reasoning_levels":[{"effort":"low"},{"effort":"high"}]},{"slug":"gpt-reserve","visibility":"hide","display_name":"R"}]}"#;

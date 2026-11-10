@@ -9,6 +9,8 @@ use std::{future::Future, path::{Path, PathBuf}, pin::Pin, sync::Arc, time::Dura
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 pub const URL: &str = "https://api.anthropic.com/api/oauth/usage";
+/// The models list (read-only): what the account's token may use, newest included, which Claude Code's own list can lag behind.
+pub const MODELS_URL: &str = "https://api.anthropic.com/v1/models?limit=100";
 /// A token this close to its end is refreshed first (ms).
 const MARGIN_MS: u64 = 60_000;
 
@@ -33,13 +35,16 @@ pub fn default_dir() -> Option<PathBuf> { std::env::var_os("HOME").or_else(|| st
 /// The request: a token in, (HTTP status, body) out; Err only when no answer came (its words never hold the token).
 pub type Get = Arc<dyn Fn(String) -> Pin<Box<dyn Future<Output = Result<(u16, Value), String>> + Send>> + Send + Sync>;
 /// The real request, through curl (Kind::Net, so a copy of a hub never makes it). The headers go in on stdin as curl's config.
-pub fn curl() -> Get {
-    Arc::new(|token: String| Box::pin(async move {
+pub fn curl() -> Get { curl_at(URL) }
+/// The same request for the models list.
+pub fn curl_models() -> Get { curl_at(MODELS_URL) }
+fn curl_at(url: &'static str) -> Get {
+    Arc::new(move |token: String| Box::pin(async move {
         let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Net, "curl");
         c.args(["-sS", "--proto", "=https", "--max-time", "15", "--max-filesize", "1048576", "-K", "-"]);
         c.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).kill_on_drop(true);
         let mut child = c.spawn().map_err(|_| "curl could not be started to read Claude's usage.".to_string())?;
-        let cfg = format!("url = \"{URL}\"\nheader = \"Authorization: Bearer {token}\"\nheader = \"anthropic-beta: oauth-2025-04-20\"\nheader = \"Content-Type: application/json\"\nheader = \"User-Agent: backplane-hub\"\nwrite-out = \"\\n%{{http_code}}\"\n");
+        let cfg = format!("url = \"{url}\"\nheader = \"Authorization: Bearer {token}\"\nheader = \"anthropic-version: 2023-06-01\"\nheader = \"anthropic-beta: oauth-2025-04-20\"\nheader = \"Content-Type: application/json\"\nheader = \"User-Agent: backplane-hub\"\nwrite-out = \"\\n%{{http_code}}\"\n");
         drop(token);
         { let mut stdin = child.stdin.take().ok_or("curl could not be started to read Claude's usage.")?; stdin.write_all(cfg.as_bytes()).await.map_err(|_| "curl closed before the request.".to_string())?; }
         drop(cfg);
@@ -181,4 +186,10 @@ pub(crate) mod tests {
         assert!(super::super::fallback::auth_text(&refusal(401)), "a 401 is a dead login to the failover");
         assert!(!super::super::fallback::auth_text(&refusal(429)) && !super::super::fallback::auth_text(&refusal(500)));
     }
+}
+
+/// The default login's model list from the API, for the picker's detection: its stored token as it is (no refresh here; the CLI was just asked and refreshes its own).
+pub async fn api_models(dir: &Path, get: &Get) -> Value {
+    let Some(l) = read_login(dir).filter(|l| l.fresh(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64))) else { return Value::Null };
+    match get(l.token).await { Ok((200, b)) if b["data"].is_array() => b, _ => Value::Null }
 }
