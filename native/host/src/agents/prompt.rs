@@ -13,13 +13,15 @@ pub struct Kicad { pub status: String, pub cli: String, pub version: String, pub
 pub struct PromptEnv {
     pub fc: String, pub render: String, pub kicad: Kicad, pub kicad_ipc: bool, pub models: String, pub may_delegate: bool, pub orders_on: bool,
     pub root: String, pub pro: String, pub pcb: String, pub sch: String, pub all: String,
+    /// Where this thread's design files and code go, and the document locks (`design_words`).
+    pub design: String,
     pub keys: String, pub machines: String, pub buy: bool, pub lang: String,
     /// Backplane's own skills (bundled.rs): (name, description, SKILL.md path)
     pub skills: Vec<(String, String, String)>,
 }
 impl Default for PromptEnv {
     fn default() -> Self { PromptEnv { fc: String::new(), render: String::new(), kicad: Kicad { status: "missing".into(), ..Default::default() }, kicad_ipc: true, models: String::new(), may_delegate: true, orders_on: true,
-        root: String::new(), pro: String::new(), pcb: String::new(), sch: String::new(), all: String::new(), keys: String::new(), machines: String::new(), buy: false, lang: String::new(), skills: vec![] } }
+        root: String::new(), pro: String::new(), pcb: String::new(), sch: String::new(), all: String::new(), design: String::new(), keys: String::new(), machines: String::new(), buy: false, lang: String::new(), skills: vec![] } }
 }
 
 /// Prompt.runtime
@@ -63,9 +65,12 @@ pub fn kicad(k: &Kicad, ipc: bool) -> String { let h = T::PROMPT_KICAD_HEALTH; f
 
 /// Prompt.path / project.k / projects / project
 fn path(label: &str, p: &str) -> String { if p.is_empty() { String::new() } else { let t = T::PROMPT_PATH; format!("{}{label}{}{p}{}", t[1], t[2], t[3]) } }
-pub fn project(root: &str, pro: &str, pcb: &str, sch: &str, all: &str) -> String {
+pub fn project(root: &str, pro: &str, pcb: &str, sch: &str, all: &str) -> String { project_locked(root, pro, pcb, sch, all, "") }
+/// `design`: where design files and code go and the documents' locks (`design_words`), after the files.
+pub fn project_locked(root: &str, pro: &str, pcb: &str, sch: &str, all: &str, design: &str) -> String {
     let (p, k, ps) = (T::PROMPT_PROJECT, T::PROMPT_PROJECT_K, T::PROMPT_PROJECTS);
-    let body = if pcb.is_empty() && sch.is_empty() { k[0].to_string() } else { format!("{}{}{}{}{}", k[1], path(&k[2], pro), path(&k[3], pcb), path(&k[4], sch), k[5]) };
+    let held = if design.is_empty() { String::new() } else { format!(" {design}") };
+    let body = if pcb.is_empty() && sch.is_empty() { k[0].to_string() } else { format!("{}{}{}{}{}{held}", k[1], path(&k[2], pro), path(&k[3], pcb), path(&k[4], sch), k[5]) };
     let ls: Vec<&str> = all.lines().collect();
     let several = if ls.len() > 1 { let l = T::PROMPT_LIST; format!("{}{}{}", ps[0], ls.iter().map(|x| format!("{}{x}{}", l[1], l[2])).collect::<String>(), ps[1]) } else { String::new() };
     format!("{}{root}{}{body}{several}{}", p[0], p[1], p[2])
@@ -109,9 +114,19 @@ pub fn bundled_skills(ss: &[(String, String, String)]) -> String {
     let (b, l) = (T::PROMPT_BUNDLED, T::PROMPT_SKILL_LINE);
     format!("{}{}{}", b[0], ss.iter().map(|(n, d, p)| format!("{}{n}{}{d}{}{p}{}", l[0], l[1], l[2], l[3])).collect::<Vec<_>>().join("\n"), b[1])
 }
+/// Where a hardware thread's work goes. `code`: its code worktree and branch when it works in the
+/// main checkout ("" for a thread still in an older worktree); `locks`: (document, its lock).
+pub fn design_words(main: &str, code: Option<(&str, &str)>, locks: &[(String, String)]) -> String {
+    let ls = locks.iter().map(|(d, l)| format!("`{}`: `{l}`", d.rsplit('/').next().unwrap_or(d))).collect::<Vec<_>>().join(", ");
+    let one = if ls.is_empty() { String::new() } else { format!(" One writer per document: lock_acquire its lock before you write it ({ls}). If another thread holds it, read only and say so, or queue and end your turn (its grant wakes you). Your document locks are released when your turn ends.") };
+    match code {
+        Some((wt, branch)) => format!("Design files (KiCad boards, schematics, projects, symbol and footprint libraries, 3D models, mech/, mfg/, fab files) live in the main checkout, `{main}`, your working folder: edit them there. Backplane commits them straight to main at the end of each turn and on each SaveDocument, and pushes when main has an upstream. Code (firmware, src/, scripts, docs, build files) goes in your worktree `{wt}` on branch `{branch}`, never in the main checkout: cd there for code, which lands on main the normal way. That worktree has no design files.{one}"),
+        None => format!("These live once, in the project's main checkout `{main}`: never edit a worktree copy of them; code stays in your worktree.{one}"),
+    }
+}
 /// Hub.prompt.base then Prompt.lang.add
 pub fn build(e: &PromptEnv) -> String {
-    let mut s = [config_prompt(&e.fc, &e.render), kicad(&e.kicad, e.kicad_ipc), project(&e.root, &e.pro, &e.pcb, &e.sch, &e.all), orchestration(e.may_delegate, &e.models), background().to_string(), order_project(e.orders_on)].join("\n\n");
+    let mut s = [config_prompt(&e.fc, &e.render), kicad(&e.kicad, e.kicad_ipc), project_locked(&e.root, &e.pro, &e.pcb, &e.sch, &e.all, &e.design), orchestration(e.may_delegate, &e.models), background().to_string(), order_project(e.orders_on)].join("\n\n");
     if !e.skills.is_empty() { s += "\n\n"; s += &bundled_skills(&e.skills) }
     if !e.keys.is_empty() { s += "\n\n"; s += &e.keys }
     if !e.machines.is_empty() { s += "\n\n"; s += &e.machines }
@@ -143,6 +158,10 @@ pub(crate) mod tests {
         let p = project("/r", "a.kicad_pro", "a.kicad_pcb", "", "a.kicad_pro\nb/b.kicad_pro");
         assert!(p.contains("canonical KiCad files:\n- project: `a.kicad_pro`\n- board: `a.kicad_pcb`\nWork on these")); assert!(p.contains("several KiCad projects") && p.contains("\n- `b/b.kicad_pro`"));
         assert!(project("/r", "", "", "", "").contains("No KiCad project was found"));
+        let locks = vec![("/r/a.kicad_pcb".to_string(), "kicad-a-pcb-01234567".to_string())];
+        let p = project_locked("/r", "a.kicad_pro", "a.kicad_pcb", "", "", &design_words("/r", Some(("/r/.backplane/worktrees/x", "backplane/x")), &locks));
+        assert!(p.contains("your working folder") && p.contains("`/r/.backplane/worktrees/x` on branch `backplane/x`") && p.contains("`a.kicad_pcb`: `kicad-a-pcb-01234567`") && p.contains("released when your turn ends"), "{p}");
+        assert!(design_words("/r", None, &locks).contains("never edit a worktree copy"));
     }
     #[test] fn a_delegated_task_at_the_depth_limit_may_not_delegate() { assert!(orchestration(false, "m").contains("depth limit") && !orchestration(false, "m").contains("Models available")); }
     #[test] fn the_bundled_skills_are_named_with_their_files() {

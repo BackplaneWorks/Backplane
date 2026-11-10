@@ -33,8 +33,8 @@ fn who_holds(path: &std::path::Path, now: u64) -> Option<Value> {
 pub type Guards = std::sync::Mutex<std::collections::HashMap<String, (String, std::fs::File)>>;
 
 impl Agents {
-    async fn lock_get(&self, name: &str) -> Lock { let w = self.world().await; Lock::read(w.setting(&format!("lock.{name}"))) }
-    async fn lock_names(&self) -> Vec<String> { let w = self.world().await; bg::lines(w.setting("locks.names")) }
+    pub(super) async fn lock_get(&self, name: &str) -> Lock { let w = self.world().await; Lock::read(w.setting(&format!("lock.{name}"))) }
+    pub(super) async fn lock_names(&self) -> Vec<String> { let w = self.world().await; bg::lines(w.setting("locks.names")) }
     async fn lease_at(&self, now: u64) -> u64 { let w = self.world().await; let m: u64 = w.setting("locks.lease.minutes").parse().unwrap_or(0); now + if m == 0 { 20 } else { m } * 60 }
     fn lock_file(&self, name: &str) -> PathBuf {
         if let Some(d) = std::env::var_os("BACKPLANE_LOCK_DIR").filter(|d| !d.is_empty()) { return PathBuf::from(d).join(format!("bp-{name}.lock")) }
@@ -164,7 +164,7 @@ impl Agents {
         let cwd = self.world().await.cwd(&p.thread); self.work_launch(&p.thread, &p.id, work::target(&r), cwd, dl, Some(name));
     }
     /// The hub's word to a thread about its lock, under the lock's own name; a stopped thread is told without being woken.
-    async fn lock_tell(self: &Arc<Self>, th: &str, name: &str, say: &str) {
+    pub(super) async fn lock_tell(self: &Arc<Self>, th: &str, name: &str, say: &str) {
         let (live, stopped) = { let w = self.world().await; (w.threads.get(th).is_some_and(|t| !t.archived && !t.deleted), w.threads.get(th).is_some_and(|t| t.turn == "interrupted")) };
         if !live { return }
         let msg = format!("t:lock:{}", super::hub_id("l", now_s(), self.seq_n())); let from = format!("lock:{name}");
@@ -178,7 +178,7 @@ impl Agents {
         p.kind != "work" || bg::lines(w.setting(&format!("watch.{}", p.thread))).iter().any(|r| bg::field(r, 0) == bg::clean(&p.id) && !bg::ended(r))
     }
     /// Locks.lease.busy: a running turn, or work of its own at work.
-    async fn party_busy(&self, p: &Party) -> bool { let w = self.world().await; w.running(&p.thread) || bg::lines(w.setting(&format!("watch.{}", p.thread))).iter().any(|r| !bg::ended(r)) || bg::running(&bg::lines(w.setting(&format!("bg.{}", p.thread)))) > 0 }
+    pub(super) async fn party_busy(&self, p: &Party) -> bool { let w = self.world().await; w.running(&p.thread) || bg::lines(w.setting(&format!("watch.{}", p.thread))).iter().any(|r| !bg::ended(r)) || bg::running(&bg::lines(w.setting(&format!("bg.{}", p.thread)))) > 0 }
 
     /// One pass over the locks: parties that are gone leave, leases are walked, a grant held back is tried again.
     pub async fn locks_tick(self: &Arc<Self>) {
@@ -194,6 +194,7 @@ impl Agents {
             if n.holder.is_some() && !n.ready { self.lock_grant(&name).await; continue }
             let Some(h) = n.holder.clone() else { continue };
             if h.kind != "work" && !self.guards.lock().unwrap().contains_key(&name) && !self.guard_take(&name, &h.id) { let o = who_holds(&self.lock_file(&name), now); if n.outside.is_none() && o.is_some() { n.outside = o; self.commit_events(vec![change(&name, &n, now)]).await } } // a restart lost the flock of a thread's lock
+            if super::design::doc_lock_idle(self, &name, &h, now).await { continue } // a document's lock goes with its holder's turn
             if h.kind != "client" { self.lock_lease(&name, &n, &h, now).await }
         }
     }

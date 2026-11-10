@@ -37,6 +37,13 @@ impl ToolSet for Tools {
             let g = |k: &str| a.get(k).and_then(Value::as_str).unwrap_or("").to_string();
             let (name, a2) = (name.to_string(), a.clone());
             if name == "files_show" { self.0.push_all(&json!({"t":"view","thread":thread,"path":g("path"),"kind":"files"})); return (true, json!({"shown":g("path")})) }
+            // KiCad's canonical documents are main's one copy: a read/write that names them in a
+            // worktree acts on main's file; renaming or deleting them is not a thread's to do
+            let root_s = root.to_string_lossy().into_owned();
+            if matches!(name.as_str(), "files_rename" | "files_delete") && super::kicad::canonical::is_canonical_rel(&root_s, &g("path")) {
+                return bad("that is the project's canonical KiCad document on main; threads edit it through KiCad, never rename or delete it".into())
+            }
+            let (droot, drel) = if matches!(name.as_str(), "files_write" | "files_read") { let (r, p) = super::kicad::canonical::direct(&root_s, &g("path")); (std::path::PathBuf::from(r), p) } else { (root.clone(), g("path")) };
             let r = tokio::task::spawn_blocking(move || -> Result<Value, String> {
                 let g = |k: &str| a2.get(k).and_then(Value::as_str).unwrap_or("").to_string();
                 match name.as_str() {
@@ -44,8 +51,8 @@ impl ToolSet for Tools {
                     "files_mkdir" => ops::mkdir(&root, &g("path")).map(|p| json!({"created":p})),
                     "files_rename" => ops::rename(&root, &g("path"), &g("to")).map(|p| json!({"renamed":p})),
                     "files_delete" => ops::delete(&root, &g("path")).map(|p| json!({"deleted":p})),
-                    "files_write" => ops::write(&root, &g("path"), g("text").as_bytes()).map(|p| json!({"written":p})),
-                    _ => ops::read_text(&root, &g("path"), a2.get("max").and_then(Value::as_u64).unwrap_or(65536).min(1 << 20) as usize).map(|t| json!({"text":t})),
+                    "files_write" => ops::write(&droot, &drel, g("text").as_bytes()).map(|p| json!({"written":p})),
+                    _ => ops::read_text(&droot, &drel, a2.get("max").and_then(Value::as_u64).unwrap_or(65536).min(1 << 20) as usize).map(|t| json!({"text":t})),
                 }
             }).await.unwrap_or(Err("failed".into()));
             match r { Ok(v) => (true, v), Err(e) => bad(e) }

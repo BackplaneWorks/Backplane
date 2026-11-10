@@ -142,7 +142,7 @@ impl RpcHandler for GitRpc {
             if method == "history.refs" {
                 let out = git::refs(&cwd, &thread).await;
                 let ls: Vec<&str> = out.split('\n').collect(); let at = |i: usize| ls.get(i).copied().unwrap_or("");
-                let f = kicad::project::read(&cwd);
+                let f = kicad::canonical::for_cwd(&cwd); // history names main's canonical board, never the worktree twin
                 return vec![reply(true, json!({"thread":thread,"git":at(0),"top":at(1),"refs":ls.iter().skip(2).copied().collect::<Vec<_>>().join("\n"),"pcb":f.pcb,"sch":f.sch}))];
             }
             let init = method == "git.act" && s("action") == "init";
