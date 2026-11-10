@@ -115,7 +115,7 @@ pub fn build(e: &PromptEnv) -> String {
     if !e.skills.is_empty() { s += "\n\n"; s += &bundled_skills(&e.skills) }
     if !e.keys.is_empty() { s += "\n\n"; s += &e.keys }
     if !e.machines.is_empty() { s += "\n\n"; s += &e.machines }
-    if e.buy { s += "\n\n"; s += T::ORDER_PROMPT_BUY[0] }
+    if e.buy { s += "\n\n"; s += &T::ORDER_PROMPT_BUY.concat() } // every piece: the opening line alone ([0]) left a buy thread without its steps
     let l = lang_line(&e.lang); if l.is_empty() { s } else { s + "\n" + l }
 }
 
@@ -153,6 +153,18 @@ pub(crate) mod tests {
         assert!(order_project(true).contains("`sendcutsend` block") && !order_project(false).contains("sendcutsend"), "the review knows SendCutSend's check");
     }
     #[test] fn language_and_buy_blocks_are_added_after() { let mut e = gold_env(); e.lang = "en".into(); e.buy = true; let s = build(&e); assert!(s.ends_with("Keep code, commands, paths and identifiers as they are.")); assert!(s.contains("<backplane_buy>")); }
+    /// e2e n1110: Buy it started a thread that exported Gerbers, guessed at a manifest and gave up ("I don't know the format it expects"): its prompt was the
+    /// block's opening line only. The whole block is there: the gate, the questions, the export layout, the quote and the closing rules.
+    #[test] fn a_buy_thread_gets_every_step_of_its_instructions() {
+        let mut e = gold_env(); e.buy = true; let s = build(&e);
+        let block = &s[s.find("<backplane_buy>").unwrap()..];
+        assert!(block.ends_with("</backplane_buy>"), "the block is closed: {}", &block[block.len().saturating_sub(120)..]);
+        for step in ["1. Read `.backplane/intent.md`", "2. Call the backplane tool `order_review`", "3. Ask only what is missing", "`order_ask`", "4. Export from the saved files", "manifest.json", "5. Call the backplane tool `order_quote`", "Only order_quote ever sends anything"] {
+            assert!(block.contains(step), "the buy instructions have {step:?}");
+        }
+        assert_eq!(block, T::ORDER_PROMPT_BUY.concat(), "the pieces in order, nothing between them (each ends its own line)");
+        e.buy = false; assert!(!build(&e).contains("<backplane_buy>"), "only a buy thread has it");
+    }
     #[test] fn api_key_names_are_read_from_the_file_and_the_block_never_holds_a_value() {
         let names = key_names("# c\nOPENAI_API_KEY='sk-secret'\n\nbad name=1\n1X=2\nLONE\nGH_TOKEN='a=b'\n"); assert_eq!(names, ["OPENAI_API_KEY", "GH_TOKEN"]);
         let b = api_keys("/h/secrets/api.env", &names); assert!(b.starts_with("<api_keys>The user keeps API keys for you in `/h/secrets/api.env` (`NAME='value'` lines): `OPENAI_API_KEY`, `GH_TOKEN`. ")); assert!(b.contains("set -a; . '/h/secrets/api.env'; set +a") && b.contains("Bearer $OPENAI_API_KEY") && b.ends_with("</api_keys>")); assert!(!b.contains("sk-secret"));
