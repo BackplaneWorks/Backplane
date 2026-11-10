@@ -74,7 +74,7 @@ mod tests {
         let t0 = std::fs::metadata(d.join("skills/sendcutsend/SKILL.md")).unwrap().modified().unwrap();
         std::thread::sleep(std::time::Duration::from_millis(20)); install(&h).unwrap();
         assert_eq!(std::fs::metadata(d.join("skills/sendcutsend/SKILL.md")).unwrap().modified().unwrap(), t0, "an unchanged file is not rewritten");
-        let l = list(&d); assert_eq!(l.len(), 1); assert_eq!(l[0].0, "sendcutsend"); assert!(l[0].1.contains("SendCutSend")); assert!(l[0].2.ends_with("bundled/skills/sendcutsend/SKILL.md"));
+        let l = list(&d); assert_eq!(l.len(), 1); assert_eq!(l[0].0, "sendcutsend"); assert!(l[0].1.contains("SendCutSend")); assert!(l[0].2.replace('\\', "/").ends_with("bundled/skills/sendcutsend/SKILL.md"));
         let _ = std::fs::remove_dir_all(&h);
     }
 
@@ -85,7 +85,7 @@ mod tests {
         let ss = crate::agents::skills::scan_all(&env, &h.to_string_lossy());
         let f = ss.iter().find(|f| f.name == "sendcutsend").expect("listed");
         assert_eq!((f.group.as_str(), f.kind), ("Backplane", crate::agents::skills::Kind::Hub));
-        assert!(crate::agents::skills::prepare("$sendcutsend check the bracket", &ss, "codex", false).contains("bundled/skills/sendcutsend/SKILL.md"), "Codex is told the file");
+        assert!(crate::agents::skills::prepare("$sendcutsend check the bracket", &ss, "codex", false).replace('\\', "/").contains("bundled/skills/sendcutsend/SKILL.md"), "Codex is told the file");
         assert!(crate::agents::skills::prepare("$sendcutsend check the bracket", &ss, "claude", false).starts_with("/sendcutsend"), "Claude loads it itself");
         let _ = std::fs::remove_dir_all(&h);
     }
