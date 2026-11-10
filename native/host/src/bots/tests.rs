@@ -1420,6 +1420,61 @@ async fn call_hook(hub: &Arc<Hub>, hid: &str, hs: Vec<(String, String)>, body: &
     assert_eq!(call_hook(&hub, &hid, later, "x").await.0, "401 Unauthorized"); assert_eq!(rec.got.lock().unwrap().len(), n);
 }
 
+// docs/ring.md: a Pebble Index ring's recording is kept with its audio, its retries are one note answered 2xx, it reaches Pebble as the person's words, and its link plays it
+async fn call_ring(hub: &Arc<Hub>, hid: &str, hs: Vec<(String, String)>, body: &[u8]) -> (String, Vec<u8>) {
+    let h = hub.http_for(&format!("/hook/{hid}")).unwrap();
+    let mut r = crate::auth::Req::new("POST", &format!("/hook/{hid}"), hs); r.body = body.to_vec();
+    let a = h.call(hub, &r).await; (a.status.to_string(), a.body)
+}
+fn ring_form(words: &str, audio: &[u8], at: u64) -> Vec<u8> {
+    let mut b = format!("--bnd\r\nContent-Disposition: form-data; name=\"audio\"; filename=\"rec-1.m4a\"\r\nContent-Type: audio/mp4\r\n\r\n").into_bytes(); b.extend_from_slice(audio);
+    b.extend(format!("\r\n--bnd\r\nContent-Disposition: form-data; name=\"transcription\"\r\n\r\n{words}\r\n--bnd\r\nContent-Disposition: form-data; name=\"recordedAt\"\r\n\r\n{}\r\n--bnd\r\nContent-Disposition: form-data; name=\"client\"\r\n\r\nring\r\n--bnd--\r\n", at * 1000).as_bytes()); b
+}
+#[tokio::test] async fn a_ring_recording_is_kept_heard_once_and_given_to_pebble() {
+    let (hub, _b, rec) = start("ring", "").await; let uber = rpc(&hub, "bots.create", json!({"name":"Bub","uber":true})).await["bot"].as_str().unwrap().to_string();
+    let s = rpc(&hub, "ring.setup", json!({})).await; assert_eq!(s["ok"], true, "{s}");
+    let (hid, tok, pebble) = (s["hook"].as_str().unwrap().to_string(), s["token"].as_str().unwrap().to_string(), s["bot"].as_str().unwrap().to_string());
+    assert!(s["url"].as_str().unwrap().ends_with(&format!("/hook/{hid}"))); assert_eq!(tok.len(), 32);
+    assert_eq!(rpc(&hub, "ring.setup", json!({})).await["hook"], hid.as_str(), "setting up again keeps what is there");
+    let ev = log(&hub); assert!(ev.iter().any(|e| e["$"] == "BotSet" && e["name"] == "Pebble" && e["persona"].as_str().unwrap().contains("ring-requests")));
+    let room = ev.iter().rev().find(|e| e["$"] == "RoomSet" && e["name"] == "ring-requests").expect("the room"); assert!(room["members"].as_str().unwrap().contains(&pebble));
+    let _ = uber;
+    let ct = ("Content-Type".to_string(), "multipart/form-data; boundary=bnd".to_string());
+    let hs = |dl: &str, trig: &str| vec![ct.clone(), ("Authorization".to_string(), format!("Bearer {tok}")), ("X-Index-Webhook-Version".to_string(), "1".to_string()), ("X-Index-Delivery".to_string(), dl.to_string()), ("X-Index-Trigger".to_string(), trig.to_string())];
+    let now = crate::bots::rpc::now_s(); let audio: &[u8] = b"\x00\x00\x00\x18ftypM4A \r\n--bn\xff";
+    assert_eq!(call_ring(&hub, &hid, vec![ct.clone()], &ring_form("x", audio, now)).await.0, "401 Unauthorized", "no token, nothing kept");
+    // the app's test button: answered, nothing kept, nobody woken
+    let mut t = hs("t-1", "test-event"); t.push(("X-Index-Test".into(), "true".into()));
+    assert_eq!(call_ring(&hub, &hid, t, b"--bnd\r\nContent-Disposition: form-data; name=\"client\"\r\n\r\nring\r\n--bnd--\r\n").await.0, "200 OK");
+    let (st, body) = call_ring(&hub, &hid, hs("d-1", "single-click-hold"), &ring_form("Remind me to call Jeff at five", audio, now - 7200)).await;
+    assert_eq!((st.as_str(), String::from_utf8_lossy(&body).as_ref()), ("200 OK", "received"));
+    for _ in 0..400 { if rec.got.lock().unwrap().iter().any(|g| g.2.starts_with("[voice note from your Pebble ring")) { break } tokio::time::sleep(std::time::Duration::from_millis(50)).await }
+    let got: Vec<_> = rec.got.lock().unwrap().iter().filter(|g| g.2.starts_with("[voice note")).cloned().collect(); assert_eq!(got.len(), 1, "{got:?}");
+    assert!(got[0].2.contains("Hold & talk") && got[0].2.contains("came 2 h after it was said") && got[0].2.ends_with("\nRemind me to call Jeff at five"), "{}", got[0].2);
+    // the app tries again (it missed the answer, or the phone was offline): the same note, a 2xx, nobody hears it twice
+    let (st, body) = call_ring(&hub, &hid, hs("d-1", "single-click-hold"), &ring_form("Remind me to call Jeff at five", audio, now - 7200)).await;
+    assert_eq!((st.as_str(), String::from_utf8_lossy(&body).as_ref()), ("200 OK", "already received"));
+    // the Index signature, with no token, is the other way in
+    let secret = crate::bots::hooks::secret_of(&hub.cfg.home, &hid); let body2 = ring_form("Order STM32N657 samples", audio, now);
+    let mut m = format!("v1\n{now}\nd-2\ndouble-click-hold\n0\n").into_bytes(); m.extend_from_slice(&body2); let sig = hex::encode(crate::net::owner::hmac_sha256(secret.as_bytes(), &m));
+    let signed = vec![ct.clone(), ("X-Index-Webhook-Version".into(), "1".into()), ("X-Index-Delivery".into(), "d-2".into()), ("X-Index-Trigger".into(), "double-click-hold".into()), ("X-Index-Timestamp".into(), now.to_string()), ("X-Index-Signature".into(), sig)];
+    assert_eq!(call_ring(&hub, &hid, signed, &body2).await.0, "200 OK");
+    for _ in 0..400 { if rec.got.lock().unwrap().iter().filter(|g| g.2.starts_with("[voice note")).count() == 2 { break } tokio::time::sleep(std::time::Duration::from_millis(50)).await }
+    assert_eq!(rec.got.lock().unwrap().iter().filter(|g| g.2.starts_with("[voice note")).count(), 2);
+    // kept as it came, listed newest said first, found by its words, played by its link and nothing else
+    let mut l = json!({}); for _ in 0..400 { l = rpc(&hub, "ring.list", json!({})).await; if l["notes"].as_array().map_or(false, |a| a.len() == 2 && a.iter().all(|n| n["state"] == "sent")) { break } tokio::time::sleep(std::time::Duration::from_millis(50)).await }
+    assert_eq!(l["total"], 2, "{l}"); let n = &l["notes"][0];
+    assert_eq!(n["words"], "Order STM32N657 samples"); assert_eq!(n["gesture"], "Double click & hold"); assert_eq!(n["state"], "sent"); assert_eq!(n["model"], "ring");
+    assert_eq!(rpc(&hub, "ring.search", json!({"q":"jeff FIVE"})).await["notes"].as_array().unwrap().len(), 1);
+    let id = l["notes"][1]["id"].as_str().unwrap().to_string(); let full = rpc(&hub, "ring.get", json!({"note": id})).await;
+    assert_eq!(full["note"]["delivery"], "d-1"); assert_eq!(full["note"]["audio"], audio.len()); assert!(!full["note"]["msg"].as_str().unwrap().is_empty());
+    assert_eq!(std::fs::read(crate::voice::ringbox::audio_path(&hub.cfg.home, &id).unwrap()).unwrap(), audio, "the recording's bytes as they came");
+    let play = l["notes"][1]["play"].as_str().unwrap().to_string(); let path = &play[play.find("/ring/audio/").unwrap()..];
+    let get = |p: &str| { let hub = hub.clone(); let p = p.to_string(); async move { let h = hub.http_for(&p).unwrap(); let r = crate::auth::Req::new("GET", &p, vec![]); let a = h.call(&hub, &r).await; (a.status.to_string(), a.body) } };
+    assert_eq!(get(path).await, ("200 OK".to_string(), audio.to_vec())); assert_eq!(get(&format!("/ring/audio/{id}?k=00")).await.0, "404 Not Found");
+    assert_eq!(rpc(&hub, "ring.hear", json!({"note":"../x"})).await["ok"], false);
+}
+
 #[tokio::test] async fn a_task_run_asked_for_wakes_the_bot_with_its_parameters() {
     // main.rs starts the browser driver before the bots: this hub does the same, so Bots wires the driver's wake
     let home = std::env::temp_dir().join(format!("bp-bots-{}-taskrun", std::process::id())); let _ = std::fs::remove_dir_all(&home); std::fs::create_dir_all(&home).unwrap(); std::fs::write(home.join("events.jsonl"), "").unwrap();

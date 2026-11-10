@@ -116,7 +116,7 @@ pub fn choose_url(env: &str, tailnet: bool, dns: &str, serve: &str, host: &str, 
     format!("http://{host}:{port}")
 }
 /// The https address `tailscale serve` has for this port ("" when none, or no tailscale); asked at most every 30 seconds.
-async fn served_url(port: u16) -> String {
+pub(crate) async fn served_url(port: u16) -> String {
     static LAST: std::sync::Mutex<Option<(std::time::Instant, u16, String)>> = std::sync::Mutex::new(None);
     if let Some((t, p, u)) = LAST.lock().unwrap().clone() { if p == port && t.elapsed() < std::time::Duration::from_secs(30) { return u } }
     let out = tokio::time::timeout(std::time::Duration::from_secs(5), crate::proc::tokio_cmd(crate::proc::Kind::Net, "tailscale").args(["serve", "status", "--json"]).stderr(Stdio::null()).output()).await;

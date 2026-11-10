@@ -15,7 +15,7 @@ local-install)
   echo '{"event":"end"}';;
 file)
   echo "$*" > "$here/file-args"; cp "$2" "$here/form"
-  echo '{"event":"ready"}'; echo '{"event":"done","item":"file","text":"Open key cad now."}'; echo '{"event":"end"}';;
+  echo '{"event":"ready"}'; echo '{"event":"done","item":"file","text":"Open key cad now.","segments":[[12,180,87,"Open key cad now."]]}'; echo '{"event":"end"}';;
 live)
   echo "$*" > "$here/args"
   echo '{"event":"ready","recorder":"pw-record","device":"m","label":"Desk mic"}'
@@ -151,14 +151,20 @@ fn replay(fs: &[Value], draft: &str) -> String {
     assert_eq!(r.rpc(json!({"op":"page-act","action":"setting","value":"voice.e.kicad="})).await["ok"], true); assert_eq!(dict_of(&prefs(&r.hub).await, &r.home).terms(), ["nRF52840".to_string()]);
     assert_eq!(r.rpc(json!({"op":"page-act","action":"setting","value":"onboard.done=1"})).await["error"], "not a voice setting");
 }
-#[tokio::test(flavor = "multi_thread")] async fn a_rings_recording_is_heard_with_the_dictionary_and_deleted() {
+#[tokio::test(flavor = "multi_thread")] async fn a_recording_is_heard_with_the_dictionary_with_its_segments() {
     let _g = ONE.lock().await; let r = rig("ring").await;
-    let body = "--x\r\nContent-Disposition: form-data; name=\"transcription\"\r\n\r\nits own words\r\n--x--\r\n";
-    assert_eq!(ring(&r.hub, "n1", "multipart/form-data; boundary=x", body, body.as_bytes()).await, body, "no engine: the form as it came");
+    let p = r.home.join("rec.m4a"); std::fs::write(&p, b"bytes \xff").unwrap();
+    assert_eq!(hear_file(&r.hub, &p, "audio/mp4", "").await.unwrap_err(), "no OpenAI key in Settings, Voice", "no engine: nothing heard, and why");
+    assert!(hear_file(&r.hub, &p, "audio/mp4", "local:parakeet-v3").await.unwrap_err().contains("parakeet-v3 is not downloaded"));
     r.key(); commit(&r.hub, &[("voice.e.kicad".to_string(), "KiCad = key cad".to_string())]).await.unwrap();
-    let f = ring(&r.hub, "n2", "multipart/form-data; boundary=x", body, b"bytes \xff").await;
-    assert_eq!(crate::voice::ring::text(&f), "Open KiCad now.", "the form as heard: {f}"); assert_eq!(crate::voice::ring::part(&f, "heard"), "gpt-live-transcribe");
-    assert_eq!(std::fs::read(bin().join("form")).unwrap(), b"bytes \xff"); assert!(std::fs::read_to_string(bin().join("file-args")).unwrap().contains("multipart/form-data; boundary=x"));
-    assert!(!dir(&r.home).join("ring-n2.form").exists(), "the recording does not stay");
+    let h = hear_file(&r.hub, &p, "audio/mp4", "").await.unwrap();
+    assert_eq!((h.text.as_str(), h.model.as_str(), h.conf), ("Open KiCad now.", "gpt-live-transcribe", Some(87))); assert_eq!(h.segs, vec![(12, 180, 87, "Open key cad now.".to_string())]);
+    assert_eq!(std::fs::read(bin().join("form")).unwrap(), b"bytes \xff"); assert!(std::fs::read_to_string(bin().join("file-args")).unwrap().contains("--content-type audio/mp4"));
+    assert!(p.exists(), "the recording stays where it is kept");
+}
+#[test] fn a_hearing_picks_its_engine() {
+    let p: Prefs = [("voice.model".to_string(), "parakeet-v3".to_string())].into_iter().collect(); let home = std::path::Path::new("/nonexistent");
+    assert_eq!(choose(&p, home, ""), ("openai", "parakeet-v3".to_string())); assert_eq!(choose(&p, home, "local"), ("local", "parakeet-v3".to_string()));
+    assert_eq!(choose(&p, home, "local:parakeet-v2"), ("local", "parakeet-v2".to_string())); assert_eq!(choose(&p, home, "openai").0, "openai");
 }
 #[test] fn the_engine_a_setting_picks() { assert_eq!([engine_of("auto", true), engine_of("auto", false), engine_of("local", false), engine_of("cloud", true), engine_of("cloud", false)], ["local", "openai", "local", "openai", "openai"]); }

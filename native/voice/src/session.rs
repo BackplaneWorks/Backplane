@@ -40,6 +40,8 @@ pub trait Decoder: Send {
 pub trait Sink {
     fn hyp(&mut self, item: &str, words: &[Word], end: i64);
     fn done(&mut self, item: &str, words: &[Word], decode_ms: i64, final_ms: i64);
+    /// A closed segment's start, in centiseconds from the start of the audio, told just before its `done`.
+    fn at(&mut self, _from_cs: i64) {}
 }
 
 pub enum In {
@@ -50,12 +52,12 @@ pub enum In {
 
 enum Job {
     Hyp { item: String, from: i64, to: i64, samples: Vec<f32> },
-    Done { item: String, samples: Vec<f32>, min: f64, speech_end: Option<Instant> },
+    Done { item: String, from: i64, samples: Vec<f32>, min: f64, speech_end: Option<Instant> },
 }
 
 pub enum Reply {
     Hyp { item: String, from: i64, to: i64, words: Vec<Word> },
-    Done { item: String, words: Vec<Word>, decode_ms: i64, final_ms: i64 },
+    Done { item: String, from: i64, words: Vec<Word>, decode_ms: i64, final_ms: i64 },
 }
 
 fn decoder_thread<D: Decoder + 'static>(mut d: D, jobs: Receiver<Job>, inbox: Sender<In>) {
@@ -63,11 +65,11 @@ fn decoder_thread<D: Decoder + 'static>(mut d: D, jobs: Receiver<Job>, inbox: Se
         for job in jobs {
             let reply = match job {
                 Job::Hyp { item, from, to, samples } => Reply::Hyp { item, from, to, words: d.decode(&samples) },
-                Job::Done { item, samples, min, speech_end } => {
+                Job::Done { item, from, samples, min, speech_end } => {
                     let t = Instant::now();
                     let words = if samples.len() as f64 > SR * min { d.decode(&samples) } else { vec![] };
                     let decode_ms = t.elapsed().as_millis() as i64;
-                    Reply::Done { item, words, decode_ms, final_ms: speech_end.map_or(0, |e| e.elapsed().as_millis() as i64) }
+                    Reply::Done { item, from, words, decode_ms, final_ms: speech_end.map_or(0, |e| e.elapsed().as_millis() as i64) }
                 }
             };
             if inbox.send(In::Decoded(reply)).is_err() {
@@ -226,7 +228,7 @@ impl<V: Detector, S: Sink> Session<V, S> {
         self.seg_start = -1;
         self.seq += 1;
         let samples = self.audio(from, to.max(from + 1));
-        self.send(Job::Done { item, samples, min: 0.2, speech_end: Some(Instant::now()) });
+        self.send(Job::Done { item, from, samples, min: 0.2, speech_end: Some(Instant::now()) });
     }
 
     fn on_reply(&mut self, r: Reply) {
@@ -239,7 +241,7 @@ impl<V: Detector, S: Sink> Session<V, S> {
                 }
                 self.decoding = false;
             }
-            Reply::Done { item, words, decode_ms, final_ms } => self.out.done(&item, &words, decode_ms, final_ms),
+            Reply::Done { item, from, words, decode_ms, final_ms } => { self.out.at(cs(from as f64 / SR)); self.out.done(&item, &words, decode_ms, final_ms) }
         }
     }
 
@@ -251,7 +253,7 @@ impl<V: Detector, S: Sink> Session<V, S> {
             self.seg_start = -1;
             self.seq += 1;
             let samples = self.audio(from, to);
-            self.send(Job::Done { item, samples, min: MIN_SPEECH, speech_end: None });
+            self.send(Job::Done { item, from, samples, min: MIN_SPEECH, speech_end: None });
         }
     }
 }
@@ -280,15 +282,26 @@ pub fn run<V: Detector, D: Decoder + 'static, S: Sink>(inbox: Receiver<In>, repl
     }
 }
 
+/// A segment of a whole recording: start and end in centiseconds from the start of the audio, the probability (percent) of its least sure word, and its words.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Seg(pub i64, pub i64, pub i64, pub String);
+
 /// A whole recording (s16le at RATE): segments by the VAD, decoded one by one.
-pub fn transcribe<V: Detector, D: Decoder + 'static>(vad: V, decoder: D, pcm: &[u8]) -> String {
+pub fn transcribe<V: Detector, D: Decoder + 'static>(vad: V, decoder: D, pcm: &[u8]) -> String { segments(vad, decoder, pcm).iter().map(|s| s.3.as_str()).collect::<Vec<_>>().join(" ") }
+/// The same, segment by segment, with when each was said and how sure the engine was.
+pub fn segments<V: Detector, D: Decoder + 'static>(vad: V, decoder: D, pcm: &[u8]) -> Vec<Seg> {
     #[derive(Default)]
-    struct Parts(std::sync::Arc<std::sync::Mutex<Vec<String>>>);
+    struct Parts(std::sync::Arc<std::sync::Mutex<Vec<Seg>>>, i64);
     impl Sink for Parts {
         fn hyp(&mut self, _: &str, _: &[Word], _: i64) {}
+        fn at(&mut self, from_cs: i64) { self.1 = from_cs }
         fn done(&mut self, _: &str, words: &[Word], _: i64, _: i64) {
             let t: Vec<&str> = words.iter().map(|w| w.0.as_str()).collect();
-            self.0.lock().unwrap().push(t.join(" "));
+            let text = t.join(" ");
+            if text.is_empty() { return }
+            let end = words.iter().map(|w| w.2).max().unwrap_or(0);
+            let conf = words.iter().map(|w| w.3).min().unwrap_or(0);
+            self.0.lock().unwrap().push(Seg(self.1 + words.first().map_or(0, |w| w.1), self.1 + end, conf, text));
         }
     }
     let parts = Parts::default();
@@ -300,7 +313,7 @@ pub fn transcribe<V: Detector, D: Decoder + 'static>(vad: V, decoder: D, pcm: &[
     let _ = tx.send(In::Finish);
     run(rx, tx, vad, decoder, parts, false);
     let got = got.lock().unwrap();
-    got.iter().filter(|p| !p.is_empty()).cloned().collect::<Vec<_>>().join(" ")
+    got.clone()
 }
 
 #[cfg(test)]
@@ -438,7 +451,7 @@ mod tests {
         s.n = 100;
         s.seg_start = 0;
         s.close(TAIL);
-        match s.jobs.send(Job::Done { item: String::new(), samples: vec![], min: 0.2, speech_end: None }) {
+        match s.jobs.send(Job::Done { item: String::new(), from: 0, samples: vec![], min: 0.2, speech_end: None }) {
             Ok(()) => assert_eq!(s.pending, 1),
             Err(_) => panic!(),
         }
@@ -487,6 +500,10 @@ mod tests {
         let audio = [pcm(1.0, true), pcm(1.0, false), pcm(1.0, true)].concat();
         let t = transcribe(Loud::default(), Lengths(Duration::ZERO), &audio);
         assert_eq!(t.split(' ').count(), 2);
+        let segs = segments(Loud::default(), Lengths(Duration::ZERO), &audio);
+        assert_eq!(segs.len(), 2);
+        assert!(segs[0].0 < 50 && segs[1].0 >= 150 && segs[1].0 < 250, "each segment says when it was said: {segs:?}");
+        assert_eq!(segs[0].2, 100);
     }
 
     #[test]

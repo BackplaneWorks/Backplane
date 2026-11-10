@@ -1,4 +1,4 @@
-//! A Pebble Index ring's webhook (pure; 0.14's core/ring, docs/bots.md): a multipart form with `transcription` (the ring's own words), `recordedAt`, `client`, `test` and maybe
+//! A Pebble Index ring's webhook (pure; 0.14's core/ring, docs/bots.md, docs/ring.md): its signature, and a form that is not the ring's as JSON for a bot. A multipart form with `transcription` (the ring's own words), `recordedAt`, `client`, `test` and maybe
 //! `audio` (M4A). A part's value is the text between the blank line after its headers and the next boundary; the first part of a name wins, so what Backplane heard goes first.
 use crate::net::{owner, sign};
 use serde_json::{json, Map, Value};
@@ -31,16 +31,6 @@ pub fn form_json(body: &str, size: &str) -> String {
     if let Some(n) = num { o.insert("recordedAt".into(), json!(n)); }
     Value::Object(o).to_string()
 }
-/// The form with what Backplane heard put first; with no words, the form as it came.
-pub fn heard_form(body: &str, heard: &str, note: &str, model: &str) -> String {
-    if heard.is_empty() { return body.to_string() }
-    format!("--backplane\r\nContent-Disposition: form-data; name=\"transcription\"\r\n\r\n{heard}\r\n--backplane\r\nContent-Disposition: form-data; name=\"unsure\"\r\n\r\n{note}\r\n--backplane\r\nContent-Disposition: form-data; name=\"heard\"\r\n\r\n{model}\r\n{body}")
-}
-/// What the bot hears of a signed voice note.
-pub fn note(body: &str) -> String {
-    let t = text(body); let n = if t.is_empty() { "[voice note from your Pebble ring] It came without words: set the ring's webhook to send the transcription, or the recording with a local model or an OpenAI key in Settings, Voice.".to_string() } else { format!("[voice note from your Pebble ring]\n{t}") };
-    let u = unsure(body); if u.is_empty() { n } else { format!("{n}\n\n[{u}]") }
-}
 /// The Index protocol, version 1: X-Index-Signature is the lowercase hex HMAC-SHA256, keyed with the secret's text as entered, of "v1\n<ts>\n<delivery>\n<trigger>\n<0|1>\n" and the
 /// raw body. Stale timestamps fail. The delivery id is the replay key, tagged ":i:" so the hub knows the ring; "!sig" when it does not prove itself.
 pub fn index_key(secret: &str, hid: &str, now: u64, h: &dyn Fn(&str) -> String, raw: &[u8]) -> String {
@@ -65,12 +55,6 @@ mod tests {
         let j: Value = serde_json::from_str(&form_json(&b, "2048")).unwrap();
         assert_eq!(j, json!({"source":"pebble-index-01","transcription":"Buy milk","recordedAt":1700000000000u64,"client":"ring","audio":"omitted, 2048 bytes"}));
         let j: Value = serde_json::from_str(&form_json(&form(&[("recordedAt", "soon"), ("audio", "x")]), "")).unwrap(); assert_eq!(j, json!({"source":"form-data","recordedAt":"soon","audio":"omitted"}));
-    }
-    #[test] fn what_backplane_heard_goes_before_the_rings_own_words() {
-        let b = form(&[("transcription", "the rings words"), ("audio", "M4A")]);
-        let f = heard_form(&b, "Open KiCad", "Possibly misheard: \"KiCad\". Ask if unsure.", "parakeet-v2");
-        assert_eq!(text(&f), "Open KiCad"); assert_eq!(part(&f, "heard"), "parakeet-v2"); assert_eq!(note(&f), "[voice note from your Pebble ring]\nOpen KiCad\n\n[Possibly misheard: \"KiCad\". Ask if unsure.]");
-        assert_eq!(heard_form(&b, "", "", "m"), b, "with no words the ring's own go as they came"); assert!(note(&form(&[("client", "ring")])).contains("It came without words"));
     }
     #[test] fn the_index_signature_is_checked_over_the_bytes_and_fresh() {
         let raw = b"--x\r\n\xff\xfe\x00binary"; let (ts, secret) = (1_700_000_000u64, "the secret as pasted");

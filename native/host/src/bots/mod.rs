@@ -13,6 +13,7 @@ pub mod plane;
 pub mod post;
 pub mod relocate;
 pub mod reply;
+pub mod ring;
 pub mod routines;
 pub mod rpc;
 pub mod tools;

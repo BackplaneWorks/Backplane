@@ -275,37 +275,43 @@ impl HttpHandler for VoiceIn {
     }
 }
 
-/// A recording's words, corrected with the dictionary, what to ask about, and the engine that heard them ("" words with no engine, no helper or no speech). `path` holds the audio,
-/// or a whole multipart form whose content type `ct` names.
-pub async fn hear_file(hub: &Hub, path: &Path, ct: &str) -> (String, String, String) {
-    let (home, none) = (hub.cfg.home.clone(), (String::new(), String::new(), String::new()));
-    let pr = prefs(hub).await; let model = pr.get("voice.model").cloned().unwrap_or_default();
-    let engine = engine_of(pr.get("voice.engine").map_or("auto", String::as_str), ready(&home, &model));
-    if engine == "openai" && text_of(&key_path(&home)).trim().is_empty() { return none }
-    let Some(bin) = exe() else { return none };
+/// The engine and model a hearing uses: `want` "" follows Settings, Voice; "local" the model chosen there, "local:<model>" that model, "openai" GPT-Live-Transcribe.
+pub fn choose(p: &Prefs, home: &Path, want: &str) -> (&'static str, String) {
+    let set = p.get("voice.model").cloned().unwrap_or_default();
+    match want.split_once(':').map_or((want, ""), |(a, b)| (a, b)) {
+        ("local", m) => ("local", vdict::model_id(if m.is_empty() { &set } else { m }).to_string()),
+        ("openai", _) | ("cloud", _) => ("openai", String::new()),
+        _ => (engine_of(p.get("voice.engine").map_or("auto", String::as_str), ready(home, &set)), vdict::model_id(&set).to_string()),
+    }
+}
+/// A recording's words, corrected with the dictionary, what to ask about, the engine that heard them, and (from the local engine) each segment with
+/// when it was said and how sure the engine was. `path` holds the audio, or a whole multipart form whose content type `ct` names. Err says why nothing was heard.
+pub async fn hear_file(hub: &Hub, path: &Path, ct: &str, want: &str) -> Result<super::ringbox::Heard, String> {
+    let home = hub.cfg.home.clone();
+    let pr = prefs(hub).await; let (engine, model) = choose(&pr, &home, want);
+    if engine == "openai" && text_of(&key_path(&home)).trim().is_empty() { return Err("no OpenAI key in Settings, Voice".into()) }
+    if engine == "local" && !ready(&home, &model) { return Err(format!("the local model {model} is not downloaded (Settings, Voice)")) }
+    let Some(bin) = exe() else { return Err(NO_HELPER.into()) };
     let d = dict_of(&pr, &home); write_keywords(&home, &d);
     let p = |x: PathBuf| x.to_string_lossy().into_owned();
     let mut args = vec!["file".to_string(), p(path.to_path_buf()), "--content-type".to_string(), ct.to_string()];
-    if engine == "local" { args.extend(["--engine".to_string(), "local".to_string(), "--local-dir".to_string(), p(local_dir(&home)), "--model".to_string(), vdict::model_id(&model).to_string()]) }
+    if engine == "local" { args.extend(["--engine".to_string(), "local".to_string(), "--local-dir".to_string(), p(local_dir(&home)), "--model".to_string(), model.clone()]) }
     else { args.extend(["--key-file".to_string(), p(key_path(&home)), "--keywords-file".to_string(), p(keywords_path(&home))]) }
     let mut c = proc::tokio_cmd(if engine == "local" { Kind::Local } else { Kind::Net }, &bin); c.args(args).current_dir("/").stdin(Stdio::null()).stderr(Stdio::null()).kill_on_drop(true);
-    let o = match tokio::time::timeout(Duration::from_secs(100), c.output()).await {
+    let o = match tokio::time::timeout(Duration::from_secs(300), c.output()).await {
         Ok(Ok(o)) => o,
-        Ok(Err(e)) => { eprintln!("voice: a recording was not heard: {} did not run: {e}", bin.display()); return none }
-        Err(_) => { eprintln!("voice: a recording was not heard: the helper took over 100 s"); return none }
+        Ok(Err(e)) => return Err(format!("{} did not run: {e}", bin.display())),
+        Err(_) => return Err("the voice helper took over 5 minutes".into()),
     };
     let out = String::from_utf8_lossy(&o.stdout);
-    let heard = out.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).find(|o| o["event"] == "done").map_or(String::new(), |o| s(&o, "text").trim().to_string());
+    let evs: Vec<Value> = out.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).collect();
+    let Some(done) = evs.iter().find(|o| o["event"] == "done") else { return Err(evs.iter().find(|o| o["event"] == "error").map_or("the voice helper stopped without words".to_string(), |e| s(e, "error").to_string())) };
+    let heard = s(done, "text").trim().to_string();
     let fx = d.fix(&vdict::words_text(&heard)); let text = vdict::text(&fx.words); let none: [&str; 0] = [];
     let note = words::note(&d.asks(&none, &vdict::VFix { words: vdict::words_text(&text), fixes: vec![], ask: fx.ask }));
-    (text, note, if engine == "local" { vdict::model_id(&model).to_string() } else { "gpt-live-transcribe".to_string() })
-}
-/// A ring's form with its recording (`raw`, the body's bytes): heard here with the dictionary, then deleted; the form comes back with what was heard first. With no key or no words, as it came.
-pub async fn ring(hub: &Hub, nonce: &str, ct: &str, body: &str, raw: &[u8]) -> String {
-    let path = dir(&hub.cfg.home).join(format!("ring-{nonce}.form")); botnet::mkdir(&dir(&hub.cfg.home));
-    if !botnet::write_secret_bytes(&path, raw) { return body.to_string() }
-    let (heard, note, model) = hear_file(hub, &path, ct).await; let _ = std::fs::remove_file(&path);
-    super::ring::heard_form(body, &heard, &note, &model)
+    let segs: Vec<(i64, i64, i64, String)> = done["segments"].as_array().map(|a| a.iter().filter_map(|x| Some((x[0].as_i64()?, x[1].as_i64()?, x[2].as_i64()?, x[3].as_str()?.to_string()))).collect()).unwrap_or_default();
+    let conf = segs.iter().map(|x| x.2).min();
+    Ok(super::ringbox::Heard { model: if engine == "local" { model } else { "gpt-live-transcribe".to_string() }, text, unsure: note, conf, segs, at: now_ms() / 1000 })
 }
 
 /// Registers `bots.voice` and `/voice/in` (before `settings::start`, which then leaves `bots.voice` alone).
