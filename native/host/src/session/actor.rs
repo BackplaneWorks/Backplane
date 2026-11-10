@@ -367,6 +367,14 @@ pub fn take_reads(client: u64, view_id: &str, target: &Value) -> Vec<Value> {
 pub fn set_bot(client: u64, bot: Option<(String, String)>) {
     ACTORS.lock().unwrap().entry(client).or_default().bot = bot;
 }
+/// The thread whose conversation this connection's view shows: a thread target's own, a bot target's chat thread (as the last request looked it up); "" for the rest.
+pub fn shown_thread(client: u64, target: &Value) -> String {
+    match target["kind"].as_str() {
+        Some("thread") => target["id"].as_str().unwrap_or("").to_string(),
+        Some("bot") => { let id = target["id"].as_str().unwrap_or(""); ACTORS.lock().unwrap().get(&client).and_then(|a| a.bot.as_ref().filter(|(b, _)| b == id).map(|(_, t)| t.clone())).unwrap_or_default() }
+        _ => String::new(),
+    }
+}
 /// A connection ended (`Hub::detach`, from the connection's drop guard).
 pub fn forget(client: u64) { ACTORS.lock().unwrap().remove(&client); }
 
