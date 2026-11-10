@@ -607,6 +607,7 @@ impl Render for Backplane {
         // the thread's header (screens/head.rs): its state and tools beside the name in the top bar when it has the room, else a row of their own
         // a project's page over a thread: the header is the page's (its project's name), not the thread's
         let head_thread = has_thread && !has_home;
+        crate::keys::set_tip_font(&self.local.font);
         let head = if head_thread { self.screens.head.layout(window, f32::from(window.viewport_size().width), &string(thread, "title"), &crate::screens::tools::tools(thread), &self.local.font, 13. * self.local.text_pct as f32 / 100.) } else { Default::default() };
         let (mut top_mid, mut head_row): (Option<AnyElement>, Option<AnyElement>) = (None, None);
         if head_thread {
