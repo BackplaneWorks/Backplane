@@ -39,12 +39,13 @@ pub fn backplane_project(ps: &[Project]) -> Option<&Project> {
 pub fn improvement_message(text: &str, context: &Value, path: &str, video: &str) -> String { improvement_message_with(text, context, "", path, video) }
 /// The branch a GPUI request's thread works on: its own, named by the creation key, never `main` itself.
 pub fn work_branch(key: &str) -> String { format!("imp-{}", &key[..key.len().min(8)]) }
-/// What the thread is told about where and how it works. It works in its own worktree on its own branch and, once its tests pass, rebases on `main` and
-/// fast-forwards `main` itself; the main builder then rebuilds and relaunches the app.
+/// What the thread is told about where and how it works. It works in its own worktree on its own branch and, once its change is done, lands it with
+/// scripts/land.sh (fetch, rebase onto origin/main, test, push as a fast-forward; local main follows); the main builder then rebuilds and relaunches the app.
 pub fn handoff(branch: &str) -> String {
     format!("<backplane_handoff>\nThis request came from inside the Backplane app. Work on the main line.\n\
-You work in your own worktree on the branch {branch}, started from the local main branch. When your change is done and its tests pass, rebase on main and fast-forward main yourself \
-(git merge --ff-only from the main checkout); the main builder then rebuilds and relaunches the app. Do not push unless the person says so. Read AGENTS.md before editing. \
+You work in your own worktree on the branch {branch}. Upstream main (origin/main) is the one main. When your change is done, land it with scripts/land.sh from your worktree: \
+it fetches, rebases onto origin/main, runs the tests and pushes to origin main as a fast-forward (never forced), then local main follows; if it fails, it says why, and \
+nothing is landed until it succeeds. The main builder then rebuilds and relaunches the app. Read AGENTS.md before editing. \
 Use stand-in agents in tests, never real model calls.\n</backplane_handoff>")
 }
 /// What a request to another project's thread is told: its own worktree and branch, and that project's own rules for merging.
@@ -217,10 +218,10 @@ mod tests {
         assert!(improvement_message("x", &json!({}), "/a/b.png", "").ends_with("\n\n[attachment: /a/b.png]")); assert!(improvement_message("x", &json!({}), "", "").ends_with("</backplane_improvements_context>\n\n"));
         assert_eq!(writer_message("P", "/i.png", "/v.webm"), "P\n\n[attachment: /i.png]\n\n[attachment: /v.webm]"); assert_eq!(writer_message("P", "", ""), "P");
     }
-    #[test] fn the_handoff_names_the_branch_and_says_to_fast_forward_main() {
+    #[test] fn the_handoff_names_the_branch_and_says_to_land_on_origin_main() {
         assert_eq!(work_branch(&"ab".repeat(16)), "imp-abababab");
         let h = handoff("imp-abababab");
-        for want in ["own worktree on the branch imp-abababab", "fast-forward main yourself", "main builder then rebuilds"] { assert!(h.contains(want), "{want}"); }
+        for want in ["own worktree on the branch imp-abababab", "land it with scripts/land.sh", "rebases onto origin/main", "main builder then rebuilds"] { assert!(h.contains(want), "{want}"); }
         let m = improvement_message_with("req", &json!({}), &h, "/a.png", "");
         assert!(m.starts_with("req\n\n<backplane_improvements_context>") && m.contains("</backplane_improvements_context>\n\n<backplane_handoff>") && m.ends_with("</backplane_handoff>\n\n[attachment: /a.png]"), "{m}");
         assert_eq!(improvement_message("x", &json!({}), "", ""), improvement_message_with("x", &json!({}), "", "", ""));

@@ -1,6 +1,6 @@
 # main: merge, build, relaunch
 
-A thread merges its own work into `main`. Every move of `main` is built here, on this machine, and the running app relaunches on the result.
+A thread lands its own work on upstream main (`origin/main`). Every move of `origin/main` is built here, on this machine, and the running app relaunches on the result.
 
     scripts/install-hooks.sh           once per clone: a hook that starts the builder whenever main moves
     scripts/main-build.sh              the builder: stays running; --once builds the tip now if it is new
@@ -9,11 +9,11 @@ A thread merges its own work into `main`. Every move of `main` is built here, on
 
 ## Merging
 
-From your own worktree, once your tests pass: `git rebase main`, then fast-forward `main` from the checkout that has it out (`git -C <that checkout> merge --ff-only <your-branch>`). No lock, no review step. If `main` moved while you rebased, rebase again; never force, never merge-commit.
+From your own worktree: `scripts/land.sh`. It fetches, rebases onto `origin/main`, tests, pushes to origin main as a fast-forward, then fast-forwards local `main` (`docs/git.md`, Landing). No lock, no review step. Never force, never merge-commit, never move local `main` by hand.
 
 ## The builder
 
-- Follows the `main` ref. Builds in its own checkout (`.backplane/worktrees/main-build` in the main checkout, detached at the tip) with one target directory per crate (`~/.cache/main-build`), so nobody's untracked files are in a build and every build is incremental.
+- Follows `origin/main`, never local `main`: a commit that is not on GitHub is never built. It fetches origin every `MAIN_FETCH` s (60), and the main hook starts it when `main` or `origin/main` moves. Builds in its own checkout (`.backplane/worktrees/main-build` in the main checkout, detached at the tip) with one target directory per crate (`~/.cache/main-build`), so nobody's untracked files are in a build and every build is incremental.
 - Per new tip: the tests of both crates (minus `scripts/gate-skip.txt`), then builds of `backplane-hub` and `backplane-gpui`, then `dev-cut.sh`. A red test or a failed compile publishes nothing, marks that tip bad and leaves the bar red with the reason until a newer tip lands. So a bad merge never reaches the app, and the next merge fixes it.
 - Coalesces, never drops: a merge while a build runs lets that build finish and publish (if it passed), then the newest tip is built.
 - Waits (bar red) when under 20 GB is free (`MAIN_MIN_FREE_GB`), after trying `scripts/worktree-gc.sh --apply`. Takes one build slot like every `dev-build.sh` and `scripts/cargo-q` (`scripts/lib-buildslot.sh`), `-j` from free memory, at low priority; compiled dependencies come from `sccache`.
