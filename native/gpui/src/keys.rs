@@ -272,11 +272,16 @@ pub fn legend(l: &Local) -> Vec<(Vec<String>, String)> {
 }
 fn has_tool(data: &Value, action: &str) -> bool { data["thread"]["tools"].as_array().into_iter().flatten().any(|t| t["action"] == action) }
 
+/// The window's font, for the tooltips: a tooltip is a view of its own outside the window's root, so it inherits no font and was drawn
+/// in the system's proportional one, unlike everything around it. The window says its font at each draw (`set_tip_font`).
+static TIP_FONT: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+pub fn set_tip_font(font: &str) { let mut f = TIP_FONT.lock().unwrap(); if *f != font { *f = font.to_string() } }
 struct Tip(SharedString, bool);
 impl Render for Tip {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         let c = |n: &str| theme::color(self.1, n);
-        div().px_2().py_1().bg(c("panel")).border_1().border_color(c("line")).text_size(px(11.)).text_color(c("text")).child(self.0.clone())
+        let font = TIP_FONT.lock().unwrap().clone();
+        div().px_2().py_1().bg(c("panel")).border_1().border_color(c("line")).text_size(px(11.)).text_color(c("text")).when(!font.is_empty(), |d| d.font_family(font)).child(self.0.clone())
     }
 }
 /// A tooltip builder for `.tooltip(...)`: `text` through the catalog (English written in the code; a name or title the catalog does not know comes
