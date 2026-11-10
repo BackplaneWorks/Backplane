@@ -228,6 +228,39 @@ pub fn account_sections(st: &State, id: &str, now_s: u64) -> Vec<Value> {
     if !usage.is_empty() { out.push(json!({"title":"Usage","action":"usage","choices":usage})) }
     out
 }
+/// The models info as the thread's own account has it: a Claude or Codex thread bound to a saved account (else the provider's default account) lists that account's catalog
+/// (`accounts.inventory`, read again each hour), each row with the catalog's label and efforts, so a model the account has shows on the desktop and the phones alike even
+/// before the CLI's own list (the picker's detection) names it. No account, or an empty catalog: the info as it is.
+pub fn info_for_thread(st: &State, id: &str, info: &Value) -> Value {
+    let Some(t) = st.threads.get(id) else { return info.clone() };
+    let provider = t.provider.as_str();
+    if !matches!(provider, "claude" | "codex") { return info.clone() }
+    let get = |k: &str| st.settings.get(k).map(String::as_str).unwrap_or("");
+    let bind = |k: String| serde_json::from_str::<Value>(get(&k)).ok().and_then(|b| b["id"].as_str().map(str::to_string)).filter(|b| !b.is_empty());
+    let Some(bound) = bind(format!("account.thread.{id}.{provider}")).or_else(|| bind(format!("account.default.{provider}"))) else { return info.clone() };
+    let cat = serde_json::from_str::<Value>(get("accounts.inventory")).ok().and_then(|v| v["profiles"].as_array().cloned()).unwrap_or_default().into_iter()
+        .find(|p| p["id"].as_str() == Some(bound.as_str()) && p["provider"] == provider).and_then(|p| p["catalog"].as_array().cloned()).unwrap_or_default();
+    with_catalog(info, provider, &cat)
+}
+/// `info` with `provider`'s models, labels and efforts replaced by an account's catalog rows (`{id, label, efforts}`); "default" stays the picker's own first row.
+pub fn with_catalog(info: &Value, provider: &str, cat: &[Value]) -> Value {
+    let mut out = info.clone();
+    let rows: Vec<&Value> = cat.iter().filter(|c| c["id"].as_str().map_or(false, |i| !i.is_empty() && i != "default")).collect();
+    if rows.is_empty() { return out }
+    out[provider] = Value::Array(rows.iter().map(|c| c["id"].clone()).collect());
+    let (mut labels, mut efforts) = (serde_json::Map::new(), serde_json::Map::new());
+    for (k, v) in out["about"][provider]["labels"].as_object().into_iter().flatten() { if k == "default" { labels.insert(k.clone(), v.clone()); } }
+    for (k, v) in out["about"][provider]["efforts"].as_object().into_iter().flatten() { if k == "default" { efforts.insert(k.clone(), v.clone()); } }
+    for c in rows {
+        let id = c["id"].as_str().unwrap_or("");
+        labels.insert(id.into(), json!(c["label"].as_str().filter(|l| !l.is_empty()).unwrap_or(id)));
+        if let Some(e) = c["efforts"].as_array() { efforts.insert(id.into(), json!(e)); }
+    }
+    if !out["about"][provider].is_object() { out["about"][provider] = json!({"cli":"","labels":{}}) }
+    out["about"][provider]["labels"] = Value::Object(labels);
+    if provider == "claude" || !efforts.is_empty() { out["about"][provider]["efforts"] = Value::Object(efforts) }
+    out
+}
 /// The agents the picker offers, in its order, with what each is (dim beside its name: 0.14's ModelPick.product).
 pub const AGENTS: &[(&str, &str)] = &[("claude", "Claude Code"), ("codex", "Codex CLI"), ("grok", "Grok CLI"), ("muse", "Muse Code"), ("antigravity", "Google"), ("opencode", "OpenCode"), ("pi", "Pi"), ("omp", "Oh My Pi")];
 /// Effort.chips.about: the levels `model` of `provider` takes, its default ("") first: those its CLI says that model takes (Claude, Codex, Pi and Oh My Pi
@@ -354,7 +387,8 @@ pub fn keys(st: &State, id: &str, now_s: u64, why: &str, models_text: Option<&st
     m.insert("permissions".into(), permissions(st.runtime.get(id).map(String::as_str).unwrap_or("")));
     let get = |k: String| st.settings.get(&k).map(String::as_str).unwrap_or("");
     let (models, agents) = picker_agents_of(models_text);
-    m.insert("picker".into(), picker_with(&t.provider, &t.model, get(format!("effort.{id}")), get(format!("usage.{id}")), models.as_deref()));
+    let mine = models.as_deref().map(|i| info_for_thread(st, id, i));
+    m.insert("picker".into(), picker_with(&t.provider, &t.model, get(format!("effort.{id}")), get(format!("usage.{id}")), mine.as_ref()));
     m.insert("pickerAgents".into(), agents);
     m.insert("claude".into(), json!(t.provider == "claude"));
     m.insert("allowance".into(), json!(allowance_text(&allowance_of(st, id, &t.provider), &t.provider, &t.model, now_s)));
@@ -467,6 +501,16 @@ mod tests {
             "about": {"claude": {"cli": "2.1", "labels": {"default": "Claude Code's own default", "opus": "Opus 5.5 · claude-opus-5-5", "haiku": "Haiku 4.5 · claude-haiku-4-5"}, "efforts": {"default": ["low", "high"], "opus": ["low", "high"], "haiku": []}},
                 "codex": {"cli": "codex 1.2", "labels": {"default": "Codex's configured default", "gpt-6.1-sol": "GPT-6.1-Sol · Latest workhorse"}, "efforts": {"gpt-6.1-sol": ["low", "medium", "high", "xhigh", "max", "ultra"]}},
                 "grok": {"cli": "", "labels": {}}, "opencode": {"cli": "1.0 · lists no models", "error": "lists no models: sign in with `opencode auth login`", "labels": {}}}})
+    }
+    #[test] fn an_accounts_catalog_lays_over_the_detected_list() {
+        let info = json!({"claude":["fable","opus"],"about":{"claude":{"cli":"2","labels":{"default":"d","fable":"Fable 5.1"},"efforts":{"fable":["low"]}}}});
+        let cat = vec![json!({"id":"default","label":"Default"}), json!({"id":"claude-fable-5-1[1m]","label":"Fable 5.1","efforts":["low","high"]}), json!({"id":"claude-fable-5-2[1m]","label":"Fable 5.2","efforts":["low","high"]})];
+        let m = with_catalog(&info, "claude", &cat);
+        assert_eq!(m["claude"], json!(["claude-fable-5-1[1m]","claude-fable-5-2[1m]"]));
+        let p = picker_with("claude", "claude-fable-5-2[1m]", "high", "", Some(&m));
+        assert!(p["models"].as_array().unwrap().iter().any(|c| c["value"] == "claude-fable-5-2[1m]" && c["note"] == "Fable 5.2"));
+        assert_eq!(model_efforts(Some(&m), "claude", "claude-fable-5-2[1m]"), ["", "low", "high"]);
+        assert_eq!(with_catalog(&info, "claude", &[]), info, "no catalog: the detected list");
     }
     #[test] fn the_picker_lists_each_agents_models_with_labels_and_the_efforts_its_model_takes() {
         let m = info();

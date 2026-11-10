@@ -32,6 +32,10 @@ pub fn chip(provider: &str, model: &str, effort: &str) -> String { format!("{pro
 /// say when one cannot be used; a provider with no list offers its default. Pure: `models` is `settings::models::all`.
 pub fn picker_sections(models: &Value, provider: &str, model: &str, effort: &str, runtime: &str) -> Value {
     let info: Value = serde_json::from_str(&crate::settings::models::info()).unwrap_or(Value::Null);
+    picker_sections_of(&info, models, provider, model, effort, runtime)
+}
+/// `picker_sections` for the models info given (a thread's own account's catalog laid over the hub's, present/keys.rs `info_for_thread`).
+pub fn picker_sections_of(info: &Value, models: &Value, provider: &str, model: &str, effort: &str, runtime: &str) -> Value {
     let k = crate::present::keys::picker_with(provider, model, effort, "", info.is_object().then_some(&info));
     let plain = |list: &Value, strip: bool| -> Vec<Value> { list.as_array().into_iter().flatten().map(|c| { let v = c["value"].as_str().unwrap_or(""); let ok = c["ok"].as_bool().unwrap_or(true);
         json!({"label":c["label"],"value":if strip { v.trim_start_matches('@') } else { v },"on":c["on"],"ok":ok,"why":if ok { "" } else { c["note"].as_str().unwrap_or("") }}) }).collect() };
@@ -54,8 +58,11 @@ async fn picker(hub: &Arc<Hub>, p: &Value) -> Result<Value, Value> {
     let pick = |k: &str, dflt: String| if p.get(k).is_some() { s(p, k).to_string() } else if th.is_empty() { dflt } else { s(&now, k).to_string() };
     let provider = pick("provider", { let d = setting("agent.provider"); if d.is_empty() { "claude".into() } else { d } });
     let model = pick("model", if p.get("provider").is_some() { String::new() } else { setting("agent.model") });
-    let models: Value = serde_json::from_str(&crate::settings::models::all()).unwrap_or(Value::Null);
-    let mut out = picker_sections(&models, &provider, &model, &pick("effort", String::new()), &pick("runtime", "approval-required".into()));
+    // a thread's own account's catalog (the one the desktop's picker lists) over the hub's detected list
+    let info: Value = serde_json::from_str(&crate::settings::models::info()).unwrap_or(Value::Null);
+    let info = if !th.is_empty() && p.get("provider").is_none() { crate::statehost::policies().and_then(|x| x.with_state(|st| crate::present::keys::info_for_thread(st, th, &info))).unwrap_or(info) } else { info };
+    let models: Value = serde_json::from_str(&crate::settings::models::all_of(&info)).unwrap_or(Value::Null);
+    let mut out = picker_sections_of(&info, &models, &provider, &model, &pick("effort", String::new()), &pick("runtime", "approval-required".into()));
     // a thread's: its account and what that has left, the one chip's words as the desktop draws it (a new thread has no account yet)
     if !th.is_empty() && p.get("provider").is_none() {
         let (extra, combo) = crate::statehost::policies().and_then(|x| x.with_state(|st| { let n = crate::hub::now_ms() / 1000; (crate::present::keys::account_sections(st, th, n), crate::present::keys::combo_of(st, th, n)) })).unwrap_or_default();
