@@ -56,6 +56,7 @@ while [ $t -lt 200 ]; do
 done
 # D holds the board's lock in a running turn: the hub dies with it, then comes back
 t=0; until python3 "$ME/test/e2e/kicad_main.py" held "$R/home/events.jsonl" "$LOCK" "D, about to crash" || [ $t -ge 60 ]; do sleep 1; t=$((t+1)); done
-kill -9 "$H"; pkill -9 -f "$R/bin/claude" 2>/dev/null || true; echo "CRASH $(date +%s)" >> "$R/hub.log"; sleep 2
+# the hub and its agents (its children and theirs, by pid: never a name or a pattern) die together
+kids=$(pgrep -P "$H" || true); grand=$(for k in $kids; do pgrep -P "$k" || true; done); kill -9 $grand $kids "$H" 2>/dev/null || true; echo "CRASH $(date +%s)" >> "$R/hub.log"; sleep 2
 hub; sleep 90; shot after-crash
 python3 "$ME/test/e2e/kicad_main.py" judge "$R" "$LOCK"
