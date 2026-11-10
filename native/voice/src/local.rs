@@ -162,9 +162,115 @@ pub fn model_dir(dir: &Path, id: &str) -> Option<PathBuf> {
     Pins::pinned().model(id).map(|m| dir.join(&m.dir))
 }
 
+/// Model M is in DIR, every pinned file at its pinned size (quick: no hashing; the install hashed them).
 fn installed(dir: &Path, m: &Model) -> bool {
     let d = dir.join(&m.dir);
-    d.join("encoder.int8.onnx").exists() && d.join("tokens.txt").exists()
+    m.files.iter().all(|(n, size, _)| fs::metadata(d.join(n)).is_ok_and(|md| md.is_file() && md.len() == *size))
+}
+
+/// The VAD in DIR is the pinned file (643 kB: always hashed).
+fn vad_ok(dir: &Path, pins: &Pins) -> bool {
+    file_ok(&vad_path(dir), pins.vad.size, pins.vad.sha256.as_deref())
+}
+
+fn file_ok(p: &Path, size: Option<u64>, sha: Option<&str>) -> bool {
+    let Ok(md) = fs::metadata(p) else { return false };
+    md.is_file() && md.len() > 0 && size.is_none_or(|s| s == md.len()) && sha.is_none_or(|h| sha256_of(p).is_ok_and(|x| x == h))
+}
+
+/// What the unpacked runtime holds, written by the install beside its files: `<size> <sha256> <name>` a line.
+const MANIFEST: &str = ".files";
+
+/// The runtime in DIR is whole: every file its manifest names at its size (and sha256 when FULL). A runtime from 0.14 has
+/// no manifest: its C library and every file beside it must not be empty (a crash before the data reached the disk
+/// leaves the names and no bytes: 2026-11-09).
+fn runtime_ok(dir: &Path, full: bool) -> bool {
+    let rt = runtime_dir(dir);
+    if !fs::metadata(rt.join(c_library())).is_ok_and(|m| m.is_file() && m.len() > 0) {
+        return false;
+    }
+    let Ok(list) = fs::read_to_string(rt.join(MANIFEST)) else {
+        let Ok(rd) = fs::read_dir(&rt) else { return false };
+        return rd.flatten().all(|e| e.metadata().is_ok_and(|m| !m.is_file() || m.len() > 0));
+    };
+    let mut n = 0;
+    for l in list.lines().filter(|l| !l.is_empty()) {
+        let mut it = l.splitn(3, ' ');
+        let (Some(size), Some(sha), Some(name)) = (it.next().and_then(|v| v.parse::<u64>().ok()), it.next(), it.next()) else { return false };
+        let p = rt.join(name);
+        let whole = if size == 0 { p.is_file() } else { file_ok(&p, Some(size), full.then_some(sha)) };
+        if !whole {
+            return false;
+        }
+        n += 1;
+    }
+    n > 0
+}
+
+/// Writes the manifest of runtime folder RT, every file in it hashed.
+fn write_manifest(rt: &Path) -> Result<(), String> {
+    let mut out = String::new();
+    let mut names: Vec<String> = vec![];
+    walk_files(rt, rt, &mut names);
+    names.sort();
+    for n in names.iter().filter(|n| *n != MANIFEST) {
+        let p = rt.join(n);
+        let len = fs::metadata(&p).map_err(|e| e.to_string())?.len();
+        out.push_str(&format!("{len} {} {n}\n", sha256_of(&p).map_err(|e| e.to_string())?));
+    }
+    write_durably(&rt.join(MANIFEST), out.as_bytes())
+}
+
+/// The files under D, as paths from ROOT with `/`.
+fn walk_files(root: &Path, d: &Path, out: &mut Vec<String>) {
+    let Ok(rd) = fs::read_dir(d) else { return };
+    for e in rd.flatten() {
+        let p = e.path();
+        match e.file_type() {
+            Ok(t) if t.is_dir() => walk_files(root, &p, out),
+            Ok(t) if t.is_file() => {
+                if let Ok(r) = p.strip_prefix(root) {
+                    out.push(r.components().map(|c| c.as_os_str().to_string_lossy()).collect::<Vec<_>>().join("/"));
+                }
+            }
+            _ => {}
+        }
+    }
+}
+
+/// Every file under D on the disk, not only in the page cache: a rename is kept by a crash, data not yet written is not.
+fn sync_tree(d: &Path) -> Result<(), String> {
+    let mut names = vec![];
+    walk_files(d, d, &mut names);
+    for n in names {
+        sync_file(&d.join(n))?;
+    }
+    sync_dir(d);
+    Ok(())
+}
+
+fn sync_file(p: &Path) -> Result<(), String> {
+    fs::OpenOptions::new().write(true).open(p).and_then(|f| f.sync_all()).map_err(|e| format!("{}: {e}", p.display()))
+}
+
+/// A folder's entries on the disk (where a platform can: Windows has no handle on a folder for this).
+fn sync_dir(d: &Path) {
+    #[cfg(unix)]
+    let _ = fs::File::open(d).and_then(|f| f.sync_all());
+    #[cfg(not(unix))]
+    let _ = d;
+}
+
+fn write_durably(p: &Path, b: &[u8]) -> Result<(), String> {
+    let tmp = p.with_extension("tmp");
+    let mut f = fs::File::create(&tmp).map_err(|e| e.to_string())?;
+    f.write_all(b).and_then(|_| f.sync_all()).map_err(|e| e.to_string())?;
+    drop(f);
+    fs::rename(&tmp, p).map_err(|e| e.to_string())?;
+    if let Some(d) = p.parent() {
+        sync_dir(d);
+    }
+    Ok(())
 }
 
 /// What is installed under DIR.
@@ -174,12 +280,19 @@ pub fn status(dir: &Path) -> Value {
 
 /// `status` against PINS (tests).
 pub fn status_with(dir: &Path, pins: &Pins) -> Value {
+    let (rt, vad) = (runtime_ok(dir, false), vad_ok(dir, pins));
+    // a ready mark over files that are not whole is dropped: the hub reads the mark to pick the local engine
+    for m in &pins.models {
+        if !(rt && vad && installed(dir, m)) {
+            rm(&dir.join(format!("ready-{}", m.id)));
+        }
+    }
     let models: Vec<Value> = pins.models.iter().map(|m| json!({"id": m.id, "label": m.label, "size": m.size, "installed": installed(dir, m)})).collect();
     json!({
         "platform": plat(),
         "supported": pins.runtime().is_some(),
-        "runtime": runtime_dir(dir).join(c_library()).exists(),
-        "vad": vad_path(dir).exists(),
+        "runtime": rt,
+        "vad": vad,
         "vadBundled": bundled_ok(pins), // a release's copy beside the helper, which an install takes instead of a download
         "models": models,
     })
@@ -192,8 +305,13 @@ pub fn ready(dir: &Path, id: &str) -> Option<String> {
         return Some(format!("local dictation is not available on {}", plat()));
     }
     let Some(m) = pins.model(id) else { return Some(format!("unknown model {id}")) };
-    if !runtime_dir(dir).join(c_library()).exists() || !vad_path(dir).exists() || !installed(dir, m) {
+    let (rt, vad, model) = (runtime_dir(dir).join(c_library()).exists(), vad_path(dir).exists(), dir.join(&m.dir).join("tokens.txt").exists());
+    if !rt || !vad || !model {
         return Some("the local model is not downloaded (Settings → Voice)".into());
+    }
+    if !runtime_ok(dir, false) || !vad_ok(dir, &pins) || !installed(dir, m) {
+        rm(&dir.join(format!("ready-{id}")));
+        return Some("the local model's files are incomplete or damaged: download it again (Settings → Voice)".into());
     }
     None
 }
@@ -256,7 +374,7 @@ fn fetch_once(pin: &Pin, path: &Path, what: &str, progress: Progress) -> Result<
             progress(what, done, total, "download");
         }
     }
-    out.flush().map_err(|e| fin(e.to_string()))?;
+    out.into_inner().map_err(|e| fin(e.to_string()))?.sync_all().map_err(|e| fin(e.to_string()))?;
     progress(what, done, total, "download");
     if pin.size.is_some_and(|s| s != done) {
         return Err(fin(format!("{what}: {done} bytes, expected {}", pin.size.unwrap())));
@@ -278,7 +396,8 @@ fn untar(archive: &Path, into: &Path, bz2: bool) -> Result<(), String> {
     fs::create_dir_all(into).map_err(tar_err)?;
     let f = std::io::BufReader::new(fs::File::open(archive).map_err(tar_err)?);
     let r: Box<dyn Read> = if bz2 { Box::new(bzip2::read::MultiBzDecoder::new(f)) } else { Box::new(flate2::read::MultiGzDecoder::new(f)) };
-    tar::Archive::new(r).unpack(into).map_err(tar_err)
+    tar::Archive::new(r).unpack(into).map_err(tar_err)?;
+    sync_tree(into)
 }
 
 fn rm(p: &Path) {
@@ -291,23 +410,31 @@ fn rm(p: &Path) {
 
 fn pieces(dir: &Path, stage: &Path, pins: &Pins, m: &Model, progress: Progress) -> Result<(), String> {
     let io = |e: std::io::Error| e.to_string();
-    if !vad_path(dir).exists() {
+    if !vad_ok(dir, pins) {
         let p = stage.join("silero_vad.onnx");
         if !bundled_vad(pins, &p) {
             fetch_to(&pins.vad, &p, "voice activity model", progress)?;
         }
+        sync_file(&p)?;
         fs::rename(&p, vad_path(dir)).map_err(io)?;
+        sync_dir(dir);
     }
-    if !runtime_dir(dir).join(c_library()).exists() {
+    if !runtime_ok(dir, true) {
         let pin = pins.runtime().ok_or("no runtime for this platform")?;
         let tgz = stage.join("runtime.tgz");
         fetch_to(pin, &tgz, "speech runtime", progress)?;
         progress("speech runtime", 0, 0, "unpack");
         untar(&tgz, &stage.join("rt"), false)?;
+        let pkg = stage.join("rt").join("package");
+        if !fs::metadata(pkg.join(c_library())).is_ok_and(|m| m.len() > 0) {
+            return Err(format!("speech runtime: {} is missing or empty in the package", c_library()));
+        }
+        write_manifest(&pkg)?;
         rm(&runtime_dir(dir));
-        fs::rename(stage.join("rt").join("package"), runtime_dir(dir)).map_err(io)?;
+        fs::rename(&pkg, runtime_dir(dir)).map_err(io)?;
+        sync_dir(dir);
     }
-    if !installed(dir, m) {
+    if check_files(&dir.join(&m.dir), m).is_err() {
         let got = match from_archive(stage, m, progress) {
             Ok(d) => d,
             Err(e) => match &m.mirror {
@@ -315,10 +442,19 @@ fn pieces(dir: &Path, stage: &Path, pins: &Pins, m: &Model, progress: Progress) 
                 None => return Err(e),
             },
         };
+        sync_tree(&got)?;
         rm(&dir.join(&m.dir));
         fs::rename(&got, dir.join(&m.dir)).map_err(io)?;
+        sync_dir(dir);
     }
-    Ok(())
+    // all of it again where it now is, before the ready mark says so
+    if !vad_ok(dir, pins) {
+        return Err("voice activity model: the installed file does not match its pin".into());
+    }
+    if !runtime_ok(dir, true) {
+        return Err("speech runtime: the installed files do not match what was unpacked".into());
+    }
+    check_files(&dir.join(&m.dir), m)
 }
 
 /// The VAD shipped beside the helper, copied to P, when it is there and matches the pin (else it is downloaded).
@@ -402,6 +538,9 @@ pub fn install(dir: &Path, id: &str, pins: &Pins, progress: Progress) -> Result<
     }
     let Some(m) = pins.model(id) else { return Err(format!("unknown model {id}")) };
     fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    let ready_mark = dir.join(format!("ready-{id}"));
+    rm(&ready_mark); // written again only once every piece checks
+    clear_stale_stages(dir);
     let stage = dir.join(format!(".stage-{}", std::process::id()));
     rm(&stage);
     fs::create_dir_all(&stage).map_err(|e| e.to_string())?;
@@ -409,7 +548,30 @@ pub fn install(dir: &Path, id: &str, pins: &Pins, progress: Progress) -> Result<
     rm(&stage);
     r?;
     // the hub reads this to know the model is usable
-    fs::write(dir.join(format!("ready-{id}")), "ok").map_err(|e| e.to_string())
+    write_durably(&ready_mark, b"ok")
+}
+
+/// Staging folders of installs that are not running any more (a crash, a kill) go.
+fn clear_stale_stages(dir: &Path) {
+    let Ok(rd) = fs::read_dir(dir) else { return };
+    for e in rd.flatten() {
+        let name = e.file_name().to_string_lossy().into_owned();
+        let Some(pid) = name.strip_prefix(".stage-").and_then(|p| p.parse::<u32>().ok()) else { continue };
+        if pid != std::process::id() && !alive(pid) {
+            rm(&e.path());
+        }
+    }
+}
+
+#[cfg(unix)]
+fn alive(pid: u32) -> bool {
+    // signal 0 checks without sending; EPERM is a process that is there
+    (unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }) || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+#[cfg(not(unix))]
+fn alive(_: u32) -> bool {
+    true // left for the person to clear: no cheap check here
 }
 
 pub fn remove(dir: &Path, id: &str) {
@@ -562,13 +724,41 @@ mod tests {
         for f in ["sherpa-onnx.node", c_library(), onnx_library()] {
             fs::write(rt.join(f), "x").unwrap();
         }
-        fs::write(vad_path(dir), "x").unwrap();
-        let m = dir.join("sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8");
-        fs::create_dir_all(&m).unwrap();
-        for f in ["encoder.int8.onnx", "decoder.int8.onnx", "joiner.int8.onnx", "tokens.txt"] {
-            fs::write(m.join(f), "x").unwrap();
-        }
+        fs::copy(Path::new(env!("CARGO_MANIFEST_DIR")).join("vad/silero_vad.onnx"), vad_path(dir)).unwrap();
+        model_files(dir, "parakeet-v2");
         fs::write(dir.join("ready-parakeet-v2"), "ok").unwrap();
+    }
+
+    /// Model ID's files at their pinned sizes (sparse: nothing written).
+    fn model_files(dir: &Path, id: &str) {
+        let p = Pins::pinned();
+        let m = p.model(id).unwrap();
+        let d = dir.join(&m.dir);
+        fs::create_dir_all(&d).unwrap();
+        for (n, size, _) in &m.files {
+            fs::File::create(d.join(n)).unwrap().set_len(*size).unwrap();
+        }
+    }
+
+    /// What a crash during an install left (2026-11-09): every name in place, no bytes, and a later install's ready mark.
+    #[test]
+    fn files_a_crash_left_empty_are_not_ready_and_lose_the_mark() {
+        let t = tempfile::tempdir().unwrap();
+        install_of_0_14(t.path());
+        for f in fs::read_dir(runtime_dir(t.path())).unwrap().flatten() {
+            fs::File::create(f.path()).unwrap();
+        }
+        fs::File::create(vad_path(t.path())).unwrap();
+        assert_eq!(ready(t.path(), "parakeet-v2").unwrap(), "the local model's files are incomplete or damaged: download it again (Settings → Voice)");
+        assert!(!t.path().join("ready-parakeet-v2").exists(), "the hub picks the local engine by the mark");
+        fs::write(t.path().join("ready-parakeet-v2"), "ok").unwrap();
+        let s = status(t.path());
+        assert_eq!((&s["runtime"], &s["vad"], &s["models"][0]["installed"]), (&json!(false), &json!(false), &json!(true)));
+        assert!(!t.path().join("ready-parakeet-v2").exists());
+        // a model file cut short is not installed
+        let enc = t.path().join("sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8/encoder.int8.onnx");
+        fs::File::create(&enc).unwrap().set_len(1000).unwrap();
+        assert_eq!(status(t.path())["models"][0]["installed"], json!(false));
     }
 
     #[test]
@@ -596,10 +786,7 @@ mod tests {
     fn remove_takes_the_runtime_with_the_last_model() {
         let t = tempfile::tempdir().unwrap();
         install_of_0_14(t.path());
-        let v3 = t.path().join("sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8");
-        fs::create_dir_all(&v3).unwrap();
-        fs::write(v3.join("encoder.int8.onnx"), "x").unwrap();
-        fs::write(v3.join("tokens.txt"), "x").unwrap();
+        model_files(t.path(), "parakeet-v3");
         remove(t.path(), "parakeet-v2");
         assert!(!t.path().join("ready-parakeet-v2").exists());
         assert!(runtime_dir(t.path()).exists());

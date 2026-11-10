@@ -18,7 +18,13 @@ The design and why: `docs/voice-dictation-design.md`.
 `backplane-voice live --engine local --local-dir <home>/voice/local`.
 `local-install` puts three things in `<home>/voice/local`, each checked
 against its pin before it is moved into place, then writes `ready-<model>`
-(what the hub reads):
+(what the hub reads). Every file is fsynced before its rename (a crash on
+2026-11-09 kept the renames and lost the data: names in place, 0 bytes), the
+unpacked runtime gets a manifest (`.files`: size, sha256, name), and all of it
+is checked again where it landed before the mark is written. `local-status` and
+`live` check what is there (sizes; the VAD and runtime by hash at install), not
+only that names exist: a piece that is not whole is fetched again, and a
+`ready-<model>` over broken files is dropped, so the page offers the download.
 
 - the runtime: sherpa-onnx's C library and ONNX Runtime, from npm, sha512
   pinned;
