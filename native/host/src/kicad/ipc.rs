@@ -310,10 +310,17 @@ async fn info_on(i: &Ipc) -> String { let (t, r) = oneshot::channel(); if i.tx.s
 async fn argv_on(i: &Ipc, project: &str, env: &Env) -> String { let (t, r) = oneshot::channel(); if i.tx.send(Msg::Argv { project: project.into(), env: env.clone(), reply: t }).is_err() { return String::new() } r.await.unwrap_or_default() }
 
 /// KIpc.pro: the project of a path: the .kicad_pro itself, or the one beside a board or schematic ("" for none).
+/// A canonical document named by its worktree twin resolves to main's copy first (canonical.rs).
 pub fn pro_of(path: &str) -> String {
     if !crate::plat::fs::is_abs(path) { return String::new() }
-    if path.ends_with(".kicad_pro") { return path.to_string() }
-    Path::new(path).parent().map(|d| project::read(&d.to_string_lossy()).pro).unwrap_or_default()
+    let path = super::canonical::route(path);
+    if path.ends_with(".kicad_pro") { return path }
+    Path::new(&path).parent().map(|d| project::read(&d.to_string_lossy()).pro).unwrap_or_default()
+}
+/// A listed KiCad read (`Get*`, `Ping`): the commands a copy may run and a writer lock never gates.
+pub fn is_read(type_: &str) -> bool {
+    let name = type_.rsplit('.').next().unwrap_or(type_);
+    name.starts_with("Get") || name == "Ping"
 }
 /// KIpc.err: KiCad's own error, with its status.
 fn err_of(o: &Value) -> String {
@@ -343,7 +350,7 @@ pub async fn kicad_ipc_in(hub: &Arc<Hub>, thread: Option<&str>, path: &str, type
 /// Default-deny on a copy (BACKPLANE_COPY=1): KiCad edits the real project's files (CreateItems, SaveDocument ...), so only the commands listed as reads run: `Get*` and `Ping`.
 pub fn copy_ipc_refused(copy: bool, type_: &str) -> Option<String> {
     let name = type_.rsplit('.').next().unwrap_or(type_);
-    if copy && !(name.starts_with("Get") || name == "Ping") { Some(format!("a hub on a copied log (BACKPLANE_COPY=1) writes nothing outside its home: {name} is not a listed read")) } else { None }
+    if copy && !is_read(type_) { Some(format!("a hub on a copied log (BACKPLANE_COPY=1) writes nothing outside its home: {name} is not a listed read")) } else { None }
 }
 /// The MCP tool `kicad_ipc_status`: Ok({"server","servers","argv","version","capabilities","detail"}); starts the server if it is not running.
 pub async fn kicad_ipc_status(hub: &Arc<Hub>, path: &str) -> Result<Value, String> { kicad_ipc_status_in(hub, None, path).await }
@@ -352,6 +359,7 @@ pub async fn kicad_ipc_status_in(hub: &Arc<Hub>, thread: Option<&str>, path: &st
 async fn run(hub: &Arc<Hub>, thread: Option<&str>, path: &str, ty: &str, msg: Value, status: bool) -> Result<Value, String> {
     let msg = if msg.is_object() { msg } else { json!({}) }; // KIpc.msg: a missing message is {}
     let env = runtime(hub).await;
+    let routed = super::canonical::route(path); let path = &routed; // main's copy, whichever thread named it
     let pro = pro_of(path);
     let plain = check(ty, path, &pro, &msg, &env.caps);
     if !plain.is_empty() { return Err(plain) }

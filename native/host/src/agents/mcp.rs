@@ -21,7 +21,7 @@ pub trait ToolSet: Send + Sync {
     fn call<'a>(&'a self, thread: &'a str, name: &'a str, a: &'a Value) -> crate::api::Fut<'a, (bool, Value)>;
 }
 pub const TOOLS_JSON: &str = include_str!("../../../../test/agents/fixtures/mcp-tools.json");
-pub const IMPLEMENTED: &[&str] = &["orchestrator_capabilities", "review_comment", "review_comments", "work_run", "work_watch", "work_list", "work_cancel", "work_unwatch", "lock_acquire", "lock_release", "lock_cancel", "lock_list", "account_list", "thread_launch", "machine_list", "delegate_task", "task_status", "task_cancel", "thread_list", "thread_read", "thread_send", "thread_update", "thread_wait", "thread_interrupt", "thread_settle", "viewer_show", "permission_prompt", "kicad_ipc", "kicad_ipc_status", "terminal_open", "terminal_read", "terminal_send", "terminal_close", "preview_open", "preview_navigate", "preview_snapshot", "preview_click", "preview_type", "preview_press", "preview_scroll", "preview_evaluate", "preview_wait_for", "preview_resize", "preview_status", "secret_request", "secret_list", "secret_run", "settings_inspect", "settings_propose"];
+pub const IMPLEMENTED: &[&str] = &["orchestrator_capabilities", "review_comment", "review_comments", "work_run", "work_watch", "work_list", "work_cancel", "work_unwatch", "lock_acquire", "lock_release", "lock_cancel", "lock_list", "account_list", "thread_launch", "machine_list", "delegate_task", "task_status", "task_cancel", "thread_list", "thread_read", "thread_send", "thread_update", "thread_wait", "thread_interrupt", "thread_settle", "viewer_show", "permission_prompt", "kicad_ipc", "kicad_ipc_status", "kicad_bring_back", "terminal_open", "terminal_read", "terminal_send", "terminal_close", "preview_open", "preview_navigate", "preview_snapshot", "preview_click", "preview_type", "preview_press", "preview_scroll", "preview_evaluate", "preview_wait_for", "preview_resize", "preview_status", "secret_request", "secret_list", "secret_run", "settings_inspect", "settings_propose"];
 const MAX_BODY: usize = 4 << 20;
 const MAX_CONNS: usize = 256;
 const MAX_PARKED_PER_THREAD: usize = 16;
@@ -202,9 +202,18 @@ impl Mcp {
             "thread_wait" => ag.tool_wait(thread, &a).await,
             "thread_interrupt" => ag.tool_interrupt(thread, &a).await,
             "thread_settle" => ag.tool_settle(thread, &a).await,
-            "kicad_ipc" => match crate::files::kicad::ipc::kicad_ipc_in(&ag.hub, Some(thread), sv(&a, "path"), sv(&a, "type"), a.get("message").cloned().unwrap_or(json!({}))).await { Ok(v) => (true, v), Err(e) => fail(&e) },
-            "kicad_ipc_status" => match crate::files::kicad::ipc::kicad_ipc_status_in(&ag.hub, Some(thread), sv(&a, "path")).await { Ok(v) => (true, v), Err(e) => fail(&e) },
-            "kicad_export10" => crate::files::export10::mcp(&ag.hub, sv(&a, "path"), a.get("force").and_then(Value::as_bool).unwrap_or(false)).await,
+            "kicad_ipc" => match ag.kicad_gate(thread, sv(&a, "path"), sv(&a, "type")).await {
+                // main's canonical copy, one holder for writes; the holder is named to any other
+                Ok(path) => match crate::files::kicad::ipc::kicad_ipc_in(&ag.hub, Some(thread), &path, sv(&a, "type"), a.get("message").cloned().unwrap_or(json!({}))).await {
+                    // a saved document is committed straight to main (agents/design.rs)
+                    Ok(v) => { if sv(&a, "type").rsplit('.').next() == Some("SaveDocument") { ag.design_record(thread, "save").await } (true, v) }
+                    Err(e) => fail(&e),
+                },
+                Err(e) => fail(&e),
+            },
+            "kicad_bring_back" => ag.tool_bring_back(thread, &a).await,
+            "kicad_ipc_status" => match crate::files::kicad::ipc::kicad_ipc_status_in(&ag.hub, Some(thread), &crate::files::kicad::canonical::route(sv(&a, "path"))).await { Ok(v) => (true, v), Err(e) => fail(&e) },
+            "kicad_export10" => crate::files::export10::mcp(&ag.hub, &crate::files::kicad::canonical::route(sv(&a, "path")), a.get("force").and_then(Value::as_bool).unwrap_or(false)).await,
             "settings_inspect" => crate::settings::proposal::tool_inspect(&ag.hub, &ag.host.models).await,
             "settings_propose" => { let now = now_s(); let id = hub_id("settings", now, ag.seq_n()); crate::settings::proposal::tool_propose(ag, thread, &ag.host.models, &a, now, &id).await }
             "secret_request" => crate::settings::secret::tool_request(&ag.hub, thread, &a).await,
@@ -214,15 +223,21 @@ impl Mcp {
             n if crate::term::tools::NAMES.contains(&n) => crate::term::tools::call(&ag.hub, thread, n, &a).await.unwrap_or_else(|| fail("unknown tool")),
             "viewer_show" => {
                 // the answer carries what the viewer then shows (kind, source, part, sheet, layer, selection) as the client reports it; a client that does not answer in 2 s leaves the last report, marked
+                // a canonical board named by its worktree twin shows main's live copy
+                let shown = crate::files::kicad::canonical::route(sv(&a, "path"));
                 let before = crate::files::kicad::watch::viewer_state(thread).0;
-                ag.hub.push_all(&json!({"t":"view","thread":thread,"path":sv(&a, "path"),"kind":sv(&a, "kind")}));
+                ag.hub.push_all(&json!({"t":"view","thread":thread,"path":shown,"kind":sv(&a, "kind")}));
                 // (the owner's windows on other machines show it too)
-                { let (hub, ann) = (ag.hub.clone(), json!({"thread":thread,"path":sv(&a, "path"),"kind":sv(&a, "kind")})); tokio::spawn(async move { hub.far_announce("viewer.show", &ann).await }); }
+                { let (hub, ann) = (ag.hub.clone(), json!({"thread":thread,"path":shown.clone(),"kind":sv(&a, "kind")})); tokio::spawn(async move { hub.far_announce("viewer.show", &ann).await }); }
                 let mut now = crate::files::kicad::watch::viewer_state(thread);
                 for _ in 0..40 { if now.0 > before { break } tokio::time::sleep(std::time::Duration::from_millis(50)).await; now = crate::files::kicad::watch::viewer_state(thread); }
-                (true, json!({"shown":sv(&a, "path"),"viewer":now.1,"settled":now.0 > before}))
+                (true, json!({"shown":shown,"viewer":now.1,"settled":now.0 > before}))
             }
-            n if ag.tool_sets().iter().any(|s| s.owns(n)) => { let s = ag.tool_sets().into_iter().find(|s| s.owns(n)).unwrap(); s.call(thread, n, &a).await }
+            n if ag.tool_sets().iter().any(|s| s.owns(n)) => {
+                // a board or schematic written directly holds its document's lock, as a KiCad write does
+                let gate = if n == "files_write" { match ag.files_doc(thread, sv(&a, "path")).await { Some(doc) => ag.doc_gate(thread, &doc).await.err(), None => None } } else { None };
+                match gate { Some(why) => fail(&why), None => { let s = ag.tool_sets().into_iter().find(|s| s.owns(n)).unwrap(); s.call(thread, n, &a).await } }
+            }
             _ => fail("unknown tool"),
         };
         let mut res = result(id, shaped(ok, &body));

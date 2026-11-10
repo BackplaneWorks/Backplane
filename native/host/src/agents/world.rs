@@ -32,7 +32,7 @@ pub struct Ask { pub thread: String, pub kind: String, pub tool: String, pub det
 #[derive(Default, serde::Serialize, serde::Deserialize)]
 pub struct World { /** a thread's queued hand-overs (`handoff:*`), (msg, text): the conversation a switch or a fork owes the agent, which goes with its next turn */ #[serde(default)] pub handoffs: HashMap<String, Vec<(String, String)>>, pub home: String, pub bots: HashMap<String, (String, String, bool)>, pub rooms: HashMap<String, (String, bool)>, pub bot_of: HashMap<String, String>, pub said_to: HashMap<String, std::collections::HashSet<String>>, pub reviews: HashMap<String, Vec<(String, String, u64)>>, pub queued: HashMap<String, Vec<String>>, pub parents: HashMap<String, String>, pub td_msgs: std::collections::HashSet<String>, pub launched: HashMap<String, (String, bool)>, pub projects: HashMap<String, (String, bool)>, pub tasks: HashMap<String, Tk>, pub deadlines: std::collections::HashSet<String>, pub asks: HashMap<String, Ask>, pub sessions: std::collections::HashSet<(String, String)>, pub threads: HashMap<String, T>, pub roots: HashMap<String, String>, pub st: HashMap<String, String>, seen: usize }
 
-const KEYS: &[&str] = &["text.provider", "text.model", "lock.warning.", "locks.lease.minutes", "carry.wait.", "summary.", "rule.", "watch.", "thread.parent.", "bg.", "wait.", "work.timeout.seconds", "allowance.claude", "effort.", "buy.", "kicad.ipc", "order.enabled", "agent.lang", "tz.machine", "agent.thinking", "restart.continue", "tok.epoch", "tok.recount", "tok.basis.", "turn.speed.", "turn.models.", "limit.claude.", "ride.", "agy.", "session.", "launch.n.", "uber.bot"];
+const KEYS: &[&str] = &["text.provider", "text.model", "lock.warning.", "locks.lease.minutes", "carry.wait.", "summary.", "rule.", "watch.", "thread.parent.", "bg.", "wait.", "work.timeout.seconds", "allowance.claude", "effort.", "buy.", "kicad.ipc", "order.enabled", "agent.lang", "tz.machine", "agent.thinking", "restart.continue", "tok.epoch", "tok.recount", "tok.basis.", "turn.speed.", "turn.models.", "limit.claude.", "ride.", "agy.", "session.", "launch.n.", "uber.bot", "kicad.main.", "kicad.offer."];
 fn tracked(k: &str) -> bool { KEYS.iter().any(|p| k == *p || (p.ends_with('.') && k.starts_with(p))) || k.starts_with("usage.") || k.starts_with("tok.key.") }
 
 pub const CARRY_TEXT: &str = "Backplane restarted while you were working. Continue where you left off.";
@@ -163,6 +163,8 @@ impl World {
         let Some(t) = self.threads.get(th) else { return String::new() };
         // a bot's own thread works in `<home>/bots/<bot>`, whatever a WorktreeSet once said (never a folder made elsewhere)
         if let Some(b) = self.bot_of.get(th) { if !self.home.is_empty() && crate::bots::rpc::safe_id(b) && self.bots.get(b).map_or(false, |x| x.1 == th) { let d = crate::bots::relocate::root(std::path::Path::new(&self.home)).join(b); let _ = std::fs::create_dir_all(&d); return d.to_string_lossy().into_owned() } }
+        // a hardware thread works in the main checkout for its design files; its worktree has its code (agents/design.rs)
+        if !t.worktree.is_empty() && self.setting(&format!("kicad.main.{th}")) == "on" { let r = self.roots.get(&t.project).cloned().unwrap_or_default(); if !r.is_empty() { return r } }
         if !t.worktree.is_empty() { t.worktree.clone() } else { self.roots.get(&t.project).cloned().unwrap_or_default() }
     }
     /// Work.busy (without delegated tasks, which this module does not run): the thread's background and watched rows, ended ones included
@@ -210,6 +212,15 @@ mod tests {
         assert_eq!(w.threads["t"].session, "S-codex"); assert_eq!(w.setting("session.t.claude"), "S-claude");
     }
     #[test] fn carry_continues() { assert!(carry_will(&th("running"), "")); assert!(carry_will(&th("running"), "on")); }
+    #[test] fn a_hardware_thread_works_in_the_main_checkout_and_its_offer_is_remembered() {
+        assert!(tracked("kicad.main.t1") && tracked("kicad.offer.t1"));
+        let mut w = World::default();
+        w.roots.insert("p1".into(), "/r".into());
+        w.threads.insert("t1".into(), T { project: "p1".into(), worktree: "/r/.backplane/worktrees/b".into(), ..Default::default() });
+        assert_eq!(w.cwd("t1"), "/r/.backplane/worktrees/b", "an older worktree thread stays where it is");
+        w.st.insert("kicad.main.t1".into(), "on".into());
+        assert_eq!(w.cwd("t1"), "/r", "design files on main: the thread works in the main checkout");
+    }
     #[test] fn carry_leaves_idle() { for s in ["completed", "idle", "failed", "interrupted"] { assert!(!carry_will(&th(s), "on")) } }
     #[test] fn carry_every_provider_that_resumes() {
         for p in CARRIES { let mut t = th("running"); t.provider = p.into(); t.session = "S".into(); assert!(carry_will(&t, "on"), "{p}"); if p != "claude" { assert!(super::super::providers::driver(p).is_some(), "{p} is run here"); t.session.clear(); assert!(!carry_will(&t, "on"), "{p} has nothing to resume") } }

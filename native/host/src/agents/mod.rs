@@ -7,7 +7,7 @@
 //! Out for Claude: images/`$skill` input, the Backplane MCP server and runtime prompt in the agent's arguments,
 //! subagents and background tasks, todo tools, the allowance stream, the legacy queue, mail provenance beyond carry,
 //! and the hub's time-driven policies (liveness, autosettle, alert/told/summary, star nudge), which belong to M4.
-pub mod account_tools; pub mod bundled; pub mod mailroom; pub mod devturns; pub mod bg; pub mod lockrec; pub mod locks; pub mod refs; pub mod person; pub mod work; pub mod textgen; pub mod launch; pub mod far; pub mod review; pub mod tasks; pub mod codex; pub mod providers; pub mod cmds; pub mod hist; pub mod host; pub mod inputs; pub mod skills; pub mod lines; pub mod mcp; pub mod proc; pub mod prompt; pub mod prompt_text; pub mod rules; pub mod settle; pub mod tools; pub mod wake; pub mod world;
+pub mod account_tools; pub mod bundled; pub mod mailroom; pub mod devturns; pub mod bg; pub mod lockrec; pub mod locks; pub mod refs; pub mod person; pub mod work; pub mod textgen; pub mod launch; pub mod far; pub mod review; pub mod tasks; pub mod codex; pub mod providers; pub mod cmds; pub mod design; pub mod hist; pub mod host; pub mod inputs; pub mod skills; pub mod lines; pub mod mcp; pub mod proc; pub mod prompt; pub mod prompt_text; pub mod rules; pub mod settle; pub mod tools; pub mod wake; pub mod world;
 #[cfg(test)] mod tests;
 #[cfg(test)] mod laws;
 
@@ -153,16 +153,21 @@ impl Agents {
         format!("{}{bot}", self.prompt_base(th, cwd).await)
     }
     async fn prompt_base(&self, th: &str, cwd: &str) -> String {
-        let (ipc, orders, lang, buy, names) = { let w = self.world().await;
-            (w.setting("kicad.ipc") != "off", w.setting("order.enabled") != "off", w.setting("agent.lang").to_string(), !w.setting(&format!("buy.{th}")).is_empty(), ()) };
-        let _ = names;
+        let (ipc, orders, lang, buy, code) = { let w = self.world().await;
+            let code = w.threads.get(th).filter(|_| w.setting(&format!("kicad.main.{th}")) == "on").map(|t| (t.worktree.clone(), t.branch.clone()));
+            (w.setting("kicad.ipc") != "off", w.setting("order.enabled") != "off", w.setting("agent.lang").to_string(), !w.setting(&format!("buy.{th}")).is_empty(), code) };
         let (root, home, host) = (cwd.to_string(), self.host.home.clone(), self.host.clone());
         let machines = crate::bots::api::of(&self.hub).map(|b| b.machines_prompt()).unwrap_or_default(); // the paired machines, by name
         tokio::task::spawn_blocking(move || {
-            let f = inputs::read(&root); let keys_path = home.join("secrets/api.env");
+            // KiCad's files are the main checkout's, even when this thread's folder is a worktree:
+            // the agent is handed main's real paths, where its code goes, and each document's lock
+            let main = crate::files::kicad::canonical::main_of(&root);
+            let f = inputs::read(&main); let keys_path = home.join("secrets/api.env");
+            let locks: Vec<(String, String)> = [&f.pcb, &f.sch].into_iter().filter(|d| !d.is_empty()).map(|d| (d.clone(), crate::files::kicad::canonical::doc_lock(d))).collect();
+            let design = if f.pcb.is_empty() && f.sch.is_empty() { String::new() } else { prompt::design_words(&main, code.as_ref().filter(|c| !c.0.is_empty()).map(|c| (c.0.as_str(), c.1.as_str())), &locks) };
             let keys = prompt::api_keys(&keys_path.to_string_lossy(), &prompt::key_names(&std::fs::read_to_string(&keys_path).unwrap_or_default())) + &prompt::secrets(&crate::settings::vault::names());
             prompt::build(&prompt::PromptEnv { fc: crate::files::kicad::stepglb::told_freecad(&host.home, &host.fc), render: host.render.clone(), kicad: host.kicad.clone(), kicad_ipc: ipc, models: host.models_text(), may_delegate: true, orders_on: orders,
-                root, pro: f.pro, pcb: f.pcb, sch: f.sch, all: f.all, keys, machines, buy, lang, skills: host.bundled.as_deref().map(bundled::list).unwrap_or_default() })
+                root, pro: f.pro, pcb: f.pcb, sch: f.sch, all: f.all, design, keys, machines, buy, lang, skills: host.bundled.as_deref().map(bundled::list).unwrap_or_default() })
         }).await.unwrap_or_default()
     }
     /// PendingChanged: the number of open asks on a thread, written after an ask opens or closes (`extra` asks counted on top).
@@ -605,6 +610,7 @@ impl Actor {
             loop { { let w = self.ag.world().await; if let Some(x) = w.threads.get(&self.th) { if !x.worktree.is_empty() || x.wt_skipped { got = Some((x.clone(), w.cwd(&self.th), w.cx(&self.th), w.setting(&format!("ride.{}", self.th)).to_string())); } } } if got.is_some() || Instant::now() > end { break } tokio::time::sleep(Duration::from_millis(200)).await }
             match got { Some(g) => g, None => { let why = "this thread's worktree is not ready (its creation made none): not started in the project folder".to_string(); let (now, th) = (now_s(), self.th.clone()); self.commit(vec![json!({"$":"ActivityLogged","thread":th,"act":hub_id("rf", now, self.ag.seq()),"tone":"error","kind":"refused","summary":format!("not started: {why}"),"at":now})]).await; return Err(why) } }
         } else { (t, cwd, cx, ride) };
+        self.ag.design_ensure(&self.th).await; { let (ag, th) = (self.ag.clone(), self.th.clone()); tokio::spawn(async move { ag.design_offer(&th).await }); } // a hardware thread's code worktree; an older one's offer to bring its design back
         if t.provider != "claude" && providers::driver(&t.provider).is_none() { return Err(format!("{} threads are not run by the Rust hub yet", if t.provider.is_empty() { "this provider's" } else { &t.provider })) }
         let sbs = crate::copy::person_turn_allowed();
         if sbs && !person { return self.codex_ride(&msg, &text, &role, origin).await } // default-deny: only the person's own turn.start starts or writes to a real agent; anything else waits in the ride
@@ -927,7 +933,7 @@ impl Actor {
     fn jobs_start(&mut self, cwd: &str, entry: &str) { self.hist(HistJob::Start(cwd.to_string(), entry.to_string())) }
     /// A tool call ended (Steps.claude): a step after it. A turn ended (Ended.out): a step and a checkpoint.
     fn jobs_step(&mut self, entry: &str) { let cwd = self.cwd.clone(); self.hist(HistJob::Step(cwd, entry.to_string())) }
-    fn jobs_end(&mut self) { let cwd = self.cwd.clone(); self.hist(HistJob::End(cwd)) }
+    fn jobs_end(&mut self) { let cwd = self.cwd.clone(); self.hist(HistJob::End(cwd)); let (ag, th) = (self.ag.clone(), self.th.clone()); tokio::spawn(async move { ag.design_turn_end(&th).await }); }
     /// A thread's design-history captures run one after another, in the order they were asked for: two captures overlapping on one thread's index could see each other's
     /// changes (a step logged against the wrong entry, or an index lock clash), and a turn's end capture must not be overtaken by the next turn's start.
     /// Bounded: a burst of tool-end steps past HIST_STEPS_MAX waiting is dropped (counted), starts and ends always fit. The worker ends after HIST_IDLE with nothing to do
@@ -940,9 +946,9 @@ impl Actor {
                 let (hub, th, home) = (self.ag.hub.clone(), self.th.clone(), self.ag.host.home.to_string_lossy().into_owned()); let ends = self.hist_ends.clone();
                 tokio::spawn(hist_worker(rx, HIST_IDLE, HIST_JOB, move |j| { let (hub, th, home, ends) = (hub.clone(), th.clone(), home.clone(), ends.clone()); async move {
                     match j {
-                        HistJob::Start(cwd, entry) => { hist::checkpoint0(cwd.clone(), th.clone()).await; hist::step(hub, th, cwd, entry, home, "start").await }
+                        HistJob::Start(cwd, entry) => { hist::checkpoint0(hist::code_dir(&hub, &th, &cwd).await, th.clone()).await; hist::step(hub, th, cwd, entry, home, "start").await }
                         HistJob::Step(cwd, entry) => hist::step(hub, th, cwd, entry, home, "").await,
-                        HistJob::End(cwd) => { let _done = EndDone(ends); hist::step(hub.clone(), th.clone(), cwd.clone(), String::new(), home, "").await; hist::checkpoint(cwd, th).await }
+                        HistJob::End(cwd) => { let _done = EndDone(ends); hist::step(hub.clone(), th.clone(), cwd.clone(), String::new(), home, "").await; let code = hist::code_dir(&hub, &th, &cwd).await; hist::checkpoint(code, th).await }
                     } } }));
             }
             let tx = self.hist_tx.as_ref().unwrap();

@@ -1220,6 +1220,52 @@ async fn lock_now(ag: &Arc<Agents>, name: &str) -> Value { ag.tool_lock_list().a
     assert_eq!(rpc(&hub, "lock.release", json!({"thread":T2,"name":"build"})).await["result"]["released"], true, "the panel's Release"); assert!(lock_now(&ag, "build").await["holder"].is_null(), "an empty lock stays listed");
     ag.shutdown();
 }
+#[tokio::test(flavor = "multi_thread")] async fn a_kicad_write_needs_the_documents_lock_and_names_its_holder() {
+    // the board in boards/main/ (the main checkout's one copy); the threads name its worktree twin
+    let seed = |w: &Path| { for b in ["", ".backplane/worktrees/lane/"] { for f in ["main.kicad_pro", "main.kicad_pcb", "main.kicad_sch"] { let p = w.join(format!("{b}boards/main/{f}")); std::fs::create_dir_all(p.parent().unwrap()).unwrap(); std::fs::write(p, "x").unwrap(); } } String::new() };
+    let (_hub, ag, _h, w) = locks_up("lkc", seed).await;
+    let root = w.to_str().unwrap().to_string();
+    let board = format!("{root}/boards/main/main.kicad_pcb");
+    let name = crate::files::kicad::canonical::doc_lock(&board);
+    let sch_lock = crate::files::kicad::canonical::doc_lock(&format!("{root}/boards/main/main.kicad_sch"));
+    let twin = format!("{root}/.backplane/worktrees/lane/boards/main/main.kicad_pcb");
+    let write = "kiapi.board.commands.CreateItems";
+    // no holder yet: told to hold this exact lock first; reads pass and arrive at main's copy
+    let why = ag.kicad_gate(T2, &twin, write).await.unwrap_err(); assert!(why.contains(&name) && why.contains("lock_acquire"), "{why}");
+    assert_eq!(ag.kicad_gate(T2, &twin, "kiapi.board.commands.GetItems").await.unwrap(), board);
+    // T1 takes the board: its writes go to main's copy; T2 is told T1 holds it and reads only, or queues
+    assert!(ag.tool_lock_acquire(T1, &json!({"name":name})).await.1["held"] == true);
+    assert_eq!(ag.kicad_gate(T1, &twin, write).await.unwrap(), board);
+    let why = ag.kicad_gate(T2, &twin, write).await.unwrap_err(); assert!(why.contains(T1) && why.contains(&name) && why.contains("read only"), "{why}");
+    assert!(ag.doc_gate(T2, &board).await.is_err(), "a direct write of the board is gated the same way");
+    // the schematic is its own document: T2 may take it while T1 has the board
+    assert!(ag.tool_lock_acquire(T2, &json!({"name":sch_lock})).await.1["held"] == true);
+    assert!(ag.doc_gate(T2, &format!("{root}/boards/main/main.kicad_sch")).await.is_ok());
+    // T2 queues for the board; T1's turn ends: the board is let go and T2 is granted, with one message
+    assert_eq!(ag.tool_lock_acquire(T2, &json!({"name":name})).await.1["position"], 1);
+    let freed = ag.doc_locks_free(T1).await; assert_eq!(freed, vec![name.clone()]);
+    let l = lock_now(&ag, &name).await; assert_eq!(l["holder"]["id"], T2, "{l}"); assert_eq!(l["ready"], true);
+    assert!(ag.kicad_gate(T2, &twin, write).await.is_ok());
+    ag.shutdown();
+}
+#[tokio::test(flavor = "multi_thread")] async fn a_document_lock_held_by_a_crashed_or_idle_thread_is_cleared() {
+    let seed = |w: &Path| { let p = w.join("b.kicad_pcb"); std::fs::write(p, "x").unwrap(); String::new() };
+    let (hub, ag, _h, w) = locks_up("lkd", seed).await;
+    let name = crate::files::kicad::canonical::doc_lock(&format!("{}/b.kicad_pcb", w.display()));
+    assert!(ag.tool_lock_acquire(T1, &json!({"name":name})).await.1["held"] == true);
+    assert_eq!(ag.tool_lock_acquire(T2, &json!({"name":name})).await.1["position"], 1);
+    // the holder crashes mid-turn: the hub comes back with the lock in its log and no turn running.
+    // The tick sees it idle; within the grace it keeps the document (a grant whose turn is starting)
+    ag.locks_tick().await;
+    assert_eq!(lock_now(&ag, &name).await["holder"]["id"], T1);
+    // past the grace the document goes to the next in line, who is told
+    let from = len(&hub).await;
+    crate::files::kicad::canonical::idle_seen(&name, T1, 1); // first seen idle long ago
+    ag.locks_tick().await;
+    let l = lock_now(&ag, &name).await; assert_eq!(l["holder"]["id"], T2, "{l}");
+    until(&hub, from, 20, |ev| said(ev, T1, "was released") && said(ev, T2, "is yours")).await;
+    ag.shutdown();
+}
 #[tokio::test(flavor = "multi_thread")] async fn jobs_on_one_lock_never_overlap_and_run_first_come_first_served() {
     let (hub, ag, _h, w) = locks_up("lk2", |_| String::new()).await; let from = len(&hub).await; let tr = w.join("trace");
     let job = |i: usize| json!({"command":format!("echo start {i} >> '{0}'; sleep 0.15; echo end {i} >> '{0}'", tr.display()),"lock":"build","note":format!("job {i}")});

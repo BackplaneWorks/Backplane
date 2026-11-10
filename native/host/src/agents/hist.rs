@@ -42,6 +42,12 @@ pub fn adopt(reg: &str, old: &std::path::Path) {
     for l in add { out.push_str(l); out.push('\n') }
     let _ = std::fs::write(reg, out);
 }
+/// Where a thread's turn checkpoints go: its code worktree when it works in the main checkout for
+/// design files (agents/design.rs: the worktree's main checkout is its folder), else its folder.
+pub async fn code_dir(hub: &crate::hub::Hub, th: &str, cwd: &str) -> String {
+    let wt = { let m = hub.model().await; m.threads.get(th).map(|t| t.worktree.clone()).unwrap_or_default() };
+    if !wt.is_empty() && wt != cwd && crate::files::kicad::canonical::main_of(&wt) == cwd && std::path::Path::new(&wt).is_dir() { wt } else { cwd.to_string() }
+}
 /// GitJob checkpoint0: a new thread's first turn is checkpoint 0 (inside a git repository only).
 pub async fn checkpoint0(cwd: String, thread: String) { if cwd.is_empty() || crate::copy::on() || !fgit::is_repo(&cwd).await { return } if fgit::checkpoint_count(&cwd, &thread).await == 0 { let _ = fgit::checkpoint_capture(&cwd, &thread, 0).await; } }
 /// GitJob checkpoint: the work tree at a turn's end, as the next turn number.

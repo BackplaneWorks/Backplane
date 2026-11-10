@@ -1,5 +1,7 @@
 //! A new thread's worktree: a branch of its own from upstream in
-//! `<repo>/.backplane/worktrees`, the folder's uncommitted KiCad work carried over; or the thread works in the project folder.
+//! `<repo>/.backplane/worktrees`, the folder's uncommitted code work carried over (never its
+//! KiCad documents: those live once in the main folder and every thread edits that copy —
+//! kicad/canonical.rs); or the thread works in the project folder.
 //! Runs after the thread is committed and logs what the server's job reports: `WorktreeSet` / `WorktreeSkipped` and a note.
 //! Nothing here runs on a copy of a log (it writes git).
 use crate::{files::git::{self, Ran, SAFE}, hub::Hub};
@@ -29,12 +31,13 @@ const UPSTREAM: &str = "bp_safe; bp_fetchable() { c=$(git config --show-scope --
 const EXCLUDE: &str = "f=\"$1/info/exclude\"; mkdir -p \"$1/info\" && { grep -qxF '/.backplane/' \"$f\" 2>/dev/null || printf '\\n# Backplane thread worktrees\\n/.backplane/\\n' >> \"$f\"; }";
 const CARRY: &str = "set -eu\nexport GIT_OPTIONAL_LOCKS=0\ncd \"$1\"\nbp_safe\ntest -d \"$2\"\nd=$(mktemp -d \"${TMPDIR:-/tmp}/bp-carry.XXXXXX\")\ntrap 'rm -rf \"$d\"' 0\n\
 git diff --no-renames --name-only -z --diff-filter=d HEAD -- > \"$d/changed\"\ngit ls-files -z -o --exclude-standard >> \"$d/changed\"\n\
-perl -0ne 'chomp; print \"$_\\0\" unless m{-backups/|\\.lck$|fp-info-cache$|_autosave-}' \"$d/changed\" > \"$d/copy\"\n\
+perl -0ne 'chomp; print \"$_\\0\" unless m{-backups/|\\.lck$|fp-info-cache$|_autosave-|(?i:(?:^|/)(?:mech|mfg)/|\\.pretty/|\\.3dshapes/|\\.(?:kicad_(?:pcb|sch|pro|prl|sym|mod|dru|wks)|step|stp|wrl|fcstd)$|(?:^|/)(?:fp|sym)-lib-table$|\\.fab\\.json$|[^/]\\.backplane\\.json$)}' \"$d/changed\" > \"$d/copy\"\n\
 if [ -s \"$d/copy\" ]; then tar -c --null -T \"$d/copy\" -f \"$d/files.tar\"; tar -x -f \"$d/files.tar\" -C \"$2\"; fi\n\
 git diff --no-renames --name-only -z --diff-filter=D HEAD -- > \"$d/deleted\"\n\
-xargs -0 sh -c 'd=$1; shift; for p do if [ ! -e \"$p\" ] && [ ! -L \"$p\" ]; then rm -f -- \"$d/$p\" || exit; fi; done' sh \"$2\" < \"$d/deleted\"\n\
+perl -0ne 'chomp; print \"$_\\0\" unless m{(?i:(?:^|/)(?:mech|mfg)/|\\.pretty/|\\.3dshapes/|\\.(?:kicad_(?:pcb|sch|pro|prl|sym|mod|dru|wks)|step|stp|wrl|fcstd)$|(?:^|/)(?:fp|sym)-lib-table$|\\.fab\\.json$|[^/]\\.backplane\\.json$)}' \"$d/deleted\" > \"$d/del\"\n\
+xargs -0 sh -c 'd=$1; shift; for p do if [ ! -e \"$p\" ] && [ ! -L \"$p\" ]; then rm -f -- \"$d/$p\" || exit; fi; done' sh \"$2\" < \"$d/del\"\n\
 git diff --no-renames --name-only -z --diff-filter=A HEAD -- > \"$d/added\"\n\
-perl -0ne 'chomp; print \"$_\\0\" unless m{-backups/|\\.lck$|fp-info-cache$|_autosave-}' \"$d/added\" > \"$d/track\"\n\
+perl -0ne 'chomp; print \"$_\\0\" unless m{-backups/|\\.lck$|fp-info-cache$|_autosave-|(?i:(?:^|/)(?:mech|mfg)/|\\.pretty/|\\.3dshapes/|\\.(?:kicad_(?:pcb|sch|pro|prl|sym|mod|dru|wks)|step|stp|wrl|fcstd)$|(?:^|/)(?:fp|sym)-lib-table$|\\.fab\\.json$|[^/]\\.backplane\\.json$)}' \"$d/added\" > \"$d/track\"\n\
 xargs -0 sh -c 'd=$1; shift; for p do if [ -e \"$d/$p\" ] || [ -L \"$d/$p\" ]; then git -C \"$d\" add -N -f -- \"$p\" || exit; fi; done' sh \"$2\" < \"$d/track\"";
 
 fn err(r: &Ran) -> String { format!("error: {}", r.out.trim()) }
@@ -84,9 +87,7 @@ pub async fn thread_wt(cwd: &str, carry: bool, branch: &str, onto: &str) -> Stri
     cwd_out
 }
 
-fn hardware(root: &str) -> bool {
-    std::fs::read_dir(root).map(|d| d.flatten().any(|e| { let n = e.file_name().to_string_lossy().into_owned(); n.ends_with(".kicad_pro") || n.ends_with(".kicad_pcb") || n.ends_with(".kicad_sch") })).unwrap_or(false)
-}
+fn hardware(root: &str) -> bool { crate::files::kicad::canonical::hardware(root) }
 
 async fn note(hub: &Arc<Hub>, th: &str, tone: &str, summary: String) -> Vec<serde_json::Value> {
     let at = super::now_s();
@@ -149,8 +150,14 @@ pub fn spawn_with(copy: bool, hub: Arc<Hub>, fold: Arc<tokio::sync::Mutex<super:
             let _ = hub.commit_many(&note(&hub, &th, tone, format!("working in the project folder: {why}")).await).await;
             ready(&hub, &fold, &th, &provider, &binding, json!({"$":"WorktreeSkipped","id":th,"at":super::now_s()})).await;
         } else {
+            // a hardware project: the thread works in the main checkout for design files, and this
+            // worktree (with its design files taken out) holds its code (agents/design.rs)
+            let hw = { let rr = root.clone(); tokio::task::spawn_blocking(move || hardware(&rr)).await.unwrap_or(false) };
+            let stripped = if hw { crate::files::kicad::canonical::strip_design(&r).await.ok() } else { None };
+            if stripped.is_some() { let _ = hub.commit_many(&[json!({"$":"SettingSet","key":crate::agents::design::main_key(&th),"value":"on","at":super::now_s()})]).await; }
             ready(&hub, &fold, &th, &provider, &binding, json!({"$":"WorktreeSet","id":th,"branch":sanitize(&branch),"worktree":r,"at":super::now_s()})).await;
-            let _ = hub.commit_many(&note(&hub, &th, "info", format!("worktree {r}{}", if carry { " (with the folder's uncommitted work)" } else { "" })).await).await;
+            let what = match stripped { Some(n) => format!("code worktree {r} ({n} design file{} left in the main checkout, where this thread edits them)", if n == 1 { "" } else { "s" }), None => format!("worktree {r}{}", if carry { " (with the folder's uncommitted work)" } else { "" }) };
+            let _ = hub.commit_many(&note(&hub, &th, "info", what).await).await;
         }
     });
 }
@@ -177,15 +184,20 @@ mod tests {
         let r = thread_wt(d.join("boards/main").to_str().unwrap(), false, "backplane/n2", "").await; assert!(r.ends_with("/.backplane/worktrees/backplane-n2/boards/main"), "{r}");
         let _ = std::fs::remove_dir_all(&d);
     }
-    #[tokio::test] async fn a_repository_gets_a_worktree_on_its_own_branch_and_carries_the_boards_uncommitted_work() {
+    #[tokio::test] async fn a_repository_gets_a_worktree_on_its_own_branch_and_carries_code_but_never_kicad_documents() {
+        // The hybrid split: uncommitted code rides into the thread's worktree; KiCad documents
+        // do not (they live once in the main folder — kicad/canonical.rs).
         let d = std::env::temp_dir().join(format!("bp-wt2-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap();
         let p = d.to_str().unwrap();
         let g = |a: &[&str]| { let o = std::process::Command::new("git").args(a).current_dir(p).env("GIT_AUTHOR_NAME", "t").env("GIT_AUTHOR_EMAIL", "t@t").env("GIT_COMMITTER_NAME", "t").env("GIT_COMMITTER_EMAIL", "t@t").output().unwrap(); assert!(o.status.success(), "{a:?}"); };
         g(&["init", "-q"]); std::fs::write(d.join("a.kicad_pro"), "{}").unwrap(); g(&["add", "."]); g(&["commit", "-qm", "x"]);
         assert!(thread_wt(p, false, "backplane/none", "").await.starts_with("skip:") == false);
         std::fs::write(d.join("new.kicad_sch"), "uncommitted").unwrap();
+        std::fs::write(d.join("code.rs"), "uncommitted code").unwrap();
         let r = thread_wt(p, true, "backplane/carry1", "").await;
         assert!(r.ends_with("/.backplane/worktrees/backplane-carry1"), "{r}");
-        assert_eq!(std::fs::read_to_string(format!("{r}/new.kicad_sch")).unwrap(), "uncommitted");
+        assert_eq!(std::fs::read_to_string(format!("{r}/code.rs")).unwrap(), "uncommitted code");
+        assert!(!std::path::Path::new(&format!("{r}/new.kicad_sch")).exists(), "a KiCad document is never carried into a worktree");
+        assert_eq!(std::fs::read_to_string(d.join("new.kicad_sch")).unwrap(), "uncommitted", "and stays in the main folder");
     }
 }

@@ -3,6 +3,7 @@
 pub mod bj;
 pub mod bom;
 pub mod cad;
+pub mod canonical;
 pub mod checks;
 pub mod ipc;
 pub mod kexport;

@@ -54,10 +54,11 @@ fn shows(kind: &str) -> bool { drawing(kind) || kind == "browser" || files_kind(
 /// The Files tab and what it opened: the folder, or an image, a PDF or a text note
 fn files_kind(kind: &str) -> bool { matches!(kind, "files" | "image" | "pdf" | "text") }
 
-/// Ui.root: the thread's worktree, else its project's folder
+/// Ui.root: the thread's worktree, else its project's folder; a hardware project's design is
+/// always shown from its main checkout (kicad/canonical.rs `design_root`), whichever worktree the thread has
 fn root_of(st: &State, sel: &str) -> String {
     let Some(t) = st.threads.get(sel) else { return String::new() };
-    if !t.worktree.is_empty() { return t.worktree.clone() }
+    if !t.worktree.is_empty() { return crate::files::kicad::canonical::design_root(&t.worktree) }
     st.projects.get(&t.project).map(|p| p.root.clone()).unwrap_or_default()
 }
 /// View.key: the source a plot carries ("" with no root or no drawing kind)
