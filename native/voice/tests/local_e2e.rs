@@ -61,7 +61,8 @@ fn overlap(got: &str, want: &str) -> f64 {
 
 /// Decoding directly: the reference for what the session should get.
 fn reference(dir: &str, wav: &Path) -> String {
-    let (mut rec, _vad) = sherpa::engine(Path::new(dir), "parakeet-v2", 4).unwrap();
+    let api = sherpa::Api::load(Path::new(dir)).unwrap();
+    let mut rec = sherpa::Recognizer::create(&api, Path::new(dir), "parakeet-v2", 4).unwrap();
     let words = rec.decode(&floats(&pcm_of(wav)));
     words.iter().map(|w| w.0.as_str()).collect::<Vec<_>>().join(" ")
 }
@@ -72,7 +73,8 @@ const NONE: &str = "http://127.0.0.1:9/v1";
 fn the_runtime_is_the_pinned_version_and_its_json_has_the_fields_words_are_made_from() {
     let Some((dir, w)) = rig() else { return };
     let t0 = Instant::now();
-    let (rec, _vad) = sherpa::engine(Path::new(&dir), "parakeet-v2", 4).unwrap();
+    let api = sherpa::Api::load(Path::new(&dir)).unwrap();
+    let rec = sherpa::Recognizer::create(&api, Path::new(&dir), "parakeet-v2", 4).unwrap();
     eprintln!("load: {} ms", t0.elapsed().as_millis());
     let wav = &wavs(&w)[0];
     let s = floats(&pcm_of(wav));
@@ -222,4 +224,45 @@ fn file_reads_a_rings_multipart_body() {
     assert_eq!(r.done(), 0);
     let text = r.events()[1]["text"].as_str().unwrap().to_string();
     assert!(overlap(&text, &want) >= 0.9, "{text:?} against {want:?}");
+}
+
+#[test]
+fn a_resident_server_decodes_for_live_and_file_and_a_session_without_it_loads_its_own() {
+    let Some((dir, w)) = rig() else { return };
+    let wav = &wavs(&w)[0];
+    let want = reference(&dir, wav);
+    let t = tempfile::tempdir().unwrap();
+    let sock = t.path().join("engine.sock");
+    let sock = sock.to_str().unwrap();
+    let mut srv = Run::new(&["serve", "--local-dir", &dir, "--socket", sock], NONE, &[]);
+    let l = srv.wait_for("loaded", Duration::from_secs(60)).expect("loaded");
+    eprintln!("serve: loaded in {} ms, {} MB resident", l["ms"], l["rss_kb"].as_u64().unwrap() / 1024);
+    let all = [pcm_of(wav), vec![0u8; 32000]].concat();
+    // a live session and a ring's file at once, both through the one recognizer
+    let p = wav.to_str().unwrap();
+    let mut f = Run::new(&["file", p, "--engine", "local", "--local-dir", &dir, "--server", sock], NONE, &[]);
+    let r = live_run(&dir, wav, &["--server", sock], |r| {
+        r.write(&all);
+        r.close_stdin();
+    });
+    let loaded = r.next("loaded");
+    assert_eq!(loaded["resident"], true, "{loaded}");
+    assert!(loaded["ms"].as_i64().unwrap() < 200, "{loaded}");
+    let text = report("resident", &r);
+    assert!(overlap(&text, &want) >= 0.9, "{text:?} against {want:?}");
+    assert_eq!(f.done(), 0);
+    let ft = f.events()[1]["text"].as_str().unwrap().to_string();
+    assert!(overlap(&ft, &want) >= 0.9, "{ft:?} against {want:?}");
+    // no server there: the session builds its own
+    let r = live_run(&dir, wav, &["--server", &format!("{sock}.none")], |r| {
+        r.write(&all);
+        r.close_stdin();
+    });
+    assert_eq!(r.next("loaded")["resident"], false);
+    let text = report("no server", &r);
+    assert!(overlap(&text, &want) >= 0.9, "{text:?} against {want:?}");
+    // its stdin's end is the server's
+    srv.close_stdin();
+    assert_eq!(srv.done(), 0);
+    assert!(!Path::new(sock).exists(), "the socket is removed");
 }

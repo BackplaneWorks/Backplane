@@ -440,12 +440,13 @@ impl Drop for Vad {
     }
 }
 
-/// What a session needs: both built, ready to run.
-pub fn engine(dir: &Path, id: &str, threads: i32) -> Result<(Recognizer, Vad), String> {
+/// What a session needs: both built, ready to run; the recognizer is the
+/// resident one at SERVER when it answers (the bool says so), else built here.
+pub fn engine(dir: &Path, id: &str, server: &str) -> Result<(crate::resident::Rec, Vad, bool), String> {
     let api = Api::load(dir)?;
-    let rec = Recognizer::create(&api, dir, id, threads)?;
     let vad = Vad::create(&api, dir)?;
-    Ok((rec, vad))
+    let (rec, resident) = crate::resident::recognizer(&api, dir, id, server)?;
+    Ok((rec, vad, resident))
 }
 
 #[cfg(test)]

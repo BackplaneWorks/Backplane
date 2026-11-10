@@ -13,6 +13,11 @@ local-install)
   echo '{"event":"progress","what":"Parakeet v2","done":500000,"total":1000000,"phase":"download"}'
   if [ -e "$here/fail-install" ]; then echo '{"event":"error","error":"checksum mismatch"}'; echo '{"event":"end"}'; exit 1; fi
   echo '{"event":"end"}';;
+serve)
+  echo "$*" > "$here/serve-args"
+  echo '{"event":"loaded","ms":5,"rss_kb":716800,"model":"parakeet-v2"}'
+  cat > /dev/null
+  echo stopped > "$here/serve-stopped";;
 file)
   echo "$*" > "$here/file-args"; cp "$2" "$here/form"
   echo '{"event":"ready"}'; echo '{"event":"done","item":"file","text":"Open key cad now.","segments":[[12,180,87,"Open key cad now."]]}'; echo '{"event":"end"}';;
@@ -168,3 +173,24 @@ fn replay(fs: &[Value], draft: &str) -> String {
     assert_eq!(choose(&p, home, "local:parakeet-v2"), ("local", "parakeet-v2".to_string())); assert_eq!(choose(&p, home, "openai").0, "openai");
 }
 #[test] fn the_engine_a_setting_picks() { assert_eq!([engine_of("auto", true), engine_of("auto", false), engine_of("local", false), engine_of("cloud", true), engine_of("cloud", false)], ["local", "openai", "local", "openai", "openai"]); }
+#[tokio::test(flavor = "multi_thread")] async fn the_local_engine_keeps_one_recognizer_loaded_for_every_session_and_lets_it_go_with_the_cloud() {
+    let _g = ONE.lock().await; let mut r = rig("resident").await; let _ = std::fs::remove_file(bin().join("serve-stopped"));
+    let res = resident::of(&r.home).unwrap();
+    let up = |r: &Rig| r.hub.info_now()["voice.resident"].as_str().map_or(false, |s| s.contains("\"loaded\""));
+    tokio::time::sleep(Duration::from_millis(200)).await; assert!(!up(&r), "no model: nothing loads");
+    std::fs::create_dir_all(local_dir(&r.home)).unwrap(); std::fs::write(local_dir(&r.home).join("ready-parakeet-v2"), "ok").unwrap(); res.kick();
+    for _ in 0..100 { if up(&r) { break } tokio::time::sleep(Duration::from_millis(50)).await }
+    assert!(up(&r), "{}", r.hub.info_now()); assert!(r.hub.info_now()["voice.resident"].as_str().unwrap().contains("\"rss_mb\":700"));
+    assert!(std::fs::read_to_string(bin().join("serve-args")).unwrap().contains(&format!("--socket {}", r.home.join("voice/engine.sock").display())));
+    // a dictation and a ring's recording both decode through it
+    r.rpc(json!({"op":"start","thread":"t1","draft":"","src":"hub"})).await; r.until(|v| v["ev"] == "edit").await; r.rpc(json!({"op":"stop"})).await; r.until(off).await;
+    assert!(std::fs::read_to_string(bin().join("args")).unwrap().contains("--engine local") && std::fs::read_to_string(bin().join("args")).unwrap().contains("--server "), "live goes to the server");
+    let p = r.home.join("note.m4a"); std::fs::write(&p, b"a").unwrap(); let _ = hear_file(&r.hub, &p, "audio/mp4", "").await;
+    assert!(std::fs::read_to_string(bin().join("file-args")).unwrap().contains("--server "), "and the ring's file too");
+    // the cloud chosen: let go
+    assert_eq!(r.rpc(json!({"op":"page-act","action":"setting","value":"voice.engine=cloud"})).await["ok"], true);
+    for _ in 0..100 { if bin().join("serve-stopped").exists() { break } tokio::time::sleep(Duration::from_millis(50)).await }
+    assert!(bin().join("serve-stopped").exists(), "the server's stdin closed"); 
+    for _ in 0..100 { if r.hub.info_now().get("voice.resident").is_none() { break } tokio::time::sleep(Duration::from_millis(50)).await }
+    assert_eq!(r.hub.info_now().get("voice.resident"), None);
+}

@@ -3,7 +3,7 @@
 //! started it: `{"t":"voice","thread","ev":"view","view"}` (what to draw), `"level"`, `"edit"` (place::Edit), `"draft"` (a chip changed the words already there).
 //!
 //! The key is a secret (`<home>/secrets/openai.key`, 0600): the helper reads the file, so it is never in an argv, an environment, the log or a message.
-use super::{dictation::{Dictation, Out, Reader}, page::{self, Prefs}, vdict::{self, VDict}, words};
+use super::{dictation::{Dictation, Out, Reader}, page::{self, Prefs}, resident, vdict::{self, VDict}, words};
 use crate::{api::{Body, Caller, Fut, HttpHandler, HttpReply, RpcHandler}, auth::Req, hub::{now_ms, Hub}, net::{botnet, pairing}, proc::{self, Kind}};
 use serde_json::{json, Value};
 use std::{collections::{BTreeMap, HashMap}, path::{Path, PathBuf}, process::Stdio, sync::{Arc, Mutex}, time::{Duration, Instant}};
@@ -33,7 +33,7 @@ pub fn exe() -> Option<PathBuf> {
     let b = std::env::current_exe().ok()?.parent()?.join(format!("backplane-voice{}", std::env::consts::EXE_SUFFIX)); b.exists().then_some(b)
 }
 /// The model is downloaded whole (the helper writes ready-<model> last).
-fn ready(home: &Path, model: &str) -> bool { text_of(&local_dir(home).join(format!("ready-{}", vdict::model_id(model)))).trim() == "ok" }
+pub fn ready(home: &Path, model: &str) -> bool { text_of(&local_dir(home).join(format!("ready-{}", vdict::model_id(model)))).trim() == "ok" }
 /// The engine a setting (voice.engine: auto, local, cloud) picks: local when asked for, or for auto when the model is downloaded; else the cloud.
 pub fn engine_of(want: &str, ready: bool) -> &'static str { if ready { if want == "cloud" { "openai" } else { "local" } } else if want == "local" { "local" } else { "openai" } }
 
@@ -51,11 +51,12 @@ pub fn dict_of(p: &Prefs, home: &Path) -> VDict {
     let mut d = VDict::of(&lines, &learned); d.add_lines(&words::dict_parse(&text_of(&dict_txt(home)))); d
 }
 fn write_keywords(home: &Path, d: &VDict) { botnet::mkdir(&dir(home)); let _ = std::fs::write(keywords_path(home), words::keywords(d.terms()).join("\n")); }
-fn live_args(home: &Path, engine: &str, model: &str, upload: bool, device: &str) -> Vec<String> {
+fn live_args(home: &Path, engine: &str, model: &str, upload: bool, device: &str, server: &str) -> Vec<String> {
     let p = |x: PathBuf| x.to_string_lossy().into_owned();
     let mut a: Vec<String> = if engine == "local" { vec!["live".into(), "--engine".into(), "local".into(), "--local-dir".into(), p(local_dir(home)), "--model".into(), vdict::model_id(model).into()] }
         else { vec!["live".into(), "--key-file".into(), p(key_path(home)), "--keywords-file".into(), p(keywords_path(home))] };
     if upload { a.extend(["--source", "stdin", "--rate", "16000"].map(String::from)) } else if !device.is_empty() { a.extend(["--device".to_string(), device.to_string()]) }
+    if engine == "local" && !server.is_empty() { a.extend(["--server".to_string(), server.to_string()]) }
     a
 }
 fn frame(thread: &str, ev: &str, mut body: Value) -> Value { body["t"] = json!("voice"); body["thread"] = json!(thread); body["ev"] = json!(ev); body }
@@ -86,8 +87,10 @@ impl Voice {
         let Some(bin) = exe() else { return self.fail(hub, client, &thread, NO_HELPER) };
         let d = dict_of(&pr, &home); write_keywords(&home, &d);
         let device = if upload { String::new() } else { pr.get("voice.device").cloned().unwrap_or_default() };
+        // the resident recognizer, when it is up: the session starts with the model already loaded
+        let (server, hold) = if engine == "local" { resident::of(&home).and_then(|r| r.server(&home, &model)).map_or((String::new(), None), |(p, h)| (p, Some(h))) } else { (String::new(), None) };
         let mut cmd = proc::tokio_cmd(if engine == "local" { Kind::Local } else { Kind::Net }, &bin);
-        cmd.args(live_args(&home, engine, &model, upload, &device)).current_dir("/").stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).kill_on_drop(true);
+        cmd.args(live_args(&home, engine, &model, upload, &device, &server)).current_dir("/").stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).kill_on_drop(true);
         let Ok(mut child) = cmd.spawn() else { return self.fail(hub, client, &thread, NO_HELPER) };
         let (Some(mut stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else { return self.fail(hub, client, &thread, NO_HELPER) };
         let (tx, mut rx) = mpsc::channel::<Vec<u8>>(64);
@@ -98,7 +101,7 @@ impl Voice {
         self.tell(hub, client, &thread);
         if upload { hub.push(client, frame(&thread, "audio", json!({"path": format!("/voice/in?s={key}")}))); }
         let reader = Reader::new(d, engine == "local", draft, caret);
-        { let (v, hub, thread, engine) = (self.clone(), hub.clone(), thread.clone(), engine.to_string()); tokio::spawn(async move { v.read(hub, client, id, thread, engine, reader, child, stdout).await }); }
+        { let (v, hub, thread, engine) = (self.clone(), hub.clone(), thread.clone(), engine.to_string()); tokio::spawn(async move { let _hold = hold; v.read(hub, client, id, thread, engine, reader, child, stdout).await }); }
         json!({"path": if upload { format!("/voice/in?s={key}") } else { String::new() }})
     }
     async fn read(self: Arc<Self>, hub: Arc<Hub>, client: u64, id: u64, thread: String, engine: String, mut r: Reader, mut child: tokio::process::Child, stdout: tokio::process::ChildStdout) {
@@ -168,7 +171,7 @@ impl Voice {
                 if err.is_empty() && code != Some(0) { err = "The voice helper stopped before finishing. Try the download again.".into() }
             }
         }
-        self.refresh(&hub).await;
+        self.refresh(&hub).await; if let Some(r) = resident::of(&home) { r.kick() }
         hub.set_info("voice.job", &if err.is_empty() { String::new() } else { json!({"error": err}).to_string() }).await;
         self.st.lock().unwrap().job = false; self.page(&hub, client).await;
     }
@@ -188,7 +191,7 @@ impl Voice {
     /// A button of the Voice page (`voice-op`), or a line typed to the dictionary (`voice-term`), or a `setting`.
     pub async fn page_act(self: &Arc<Self>, hub: &Arc<Hub>, client: u64, action: &str, value: &str) -> Result<(), String> {
         match action {
-            "setting" => { let (k, v) = value.split_once('=').unwrap_or((value, "")); if !k.starts_with("voice.") { return Err("not a voice setting".into()) } commit(hub, &[(k.to_string(), v.to_string())]).await?; }
+            "setting" => { let (k, v) = value.split_once('=').unwrap_or((value, "")); if !k.starts_with("voice.") { return Err("not a voice setting".into()) } commit(hub, &[(k.to_string(), v.to_string())]).await?; if let Some(r) = resident::of(&hub.cfg.home) { r.kick() } }
             "voice-term" => commit(hub, &page::term_settings(value)).await?,
             "voice-op" => { self.op(hub, client, value).await?; }
             _ => return Err("unknown voice action".into()),
@@ -295,15 +298,17 @@ pub async fn hear_file(hub: &Hub, path: &Path, ct: &str, want: &str) -> Result<s
     let d = dict_of(&pr, &home); write_keywords(&home, &d);
     let p = |x: PathBuf| x.to_string_lossy().into_owned();
     let mut args = vec!["file".to_string(), p(path.to_path_buf()), "--content-type".to_string(), ct.to_string()];
+    let hold = if engine == "local" { resident::of(&home).and_then(|r| r.server(&home, &model)) } else { None };
     if engine == "local" { args.extend(["--engine".to_string(), "local".to_string(), "--local-dir".to_string(), p(local_dir(&home)), "--model".to_string(), model.clone()]) }
     else { args.extend(["--key-file".to_string(), p(key_path(&home)), "--keywords-file".to_string(), p(keywords_path(&home))]) }
+    if let Some((sock, _)) = &hold { args.extend(["--server".to_string(), sock.clone()]) }
     let mut c = proc::tokio_cmd(if engine == "local" { Kind::Local } else { Kind::Net }, &bin); c.args(args).current_dir("/").stdin(Stdio::null()).stderr(Stdio::null()).kill_on_drop(true);
     let o = match tokio::time::timeout(Duration::from_secs(300), c.output()).await {
         Ok(Ok(o)) => o,
         Ok(Err(e)) => return Err(format!("{} did not run: {e}", bin.display())),
         Err(_) => return Err("the voice helper took over 5 minutes".into()),
     };
-    let out = String::from_utf8_lossy(&o.stdout);
+    drop(hold); let out = String::from_utf8_lossy(&o.stdout);
     let evs: Vec<Value> = out.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).collect();
     let Some(done) = evs.iter().find(|o| o["event"] == "done") else { return Err(evs.iter().find(|o| o["event"] == "error").map_or("the voice helper stopped without words".to_string(), |e| s(e, "error").to_string())) };
     let heard = s(done, "text").trim().to_string();
@@ -314,8 +319,8 @@ pub async fn hear_file(hub: &Hub, path: &Path, ct: &str, want: &str) -> Result<s
     Ok(super::ringbox::Heard { model: if engine == "local" { model } else { "gpt-live-transcribe".to_string() }, text, unsure: note, conf, segs, at: now_ms() / 1000 })
 }
 
-/// Registers `bots.voice` and `/voice/in` (before `settings::start`, which then leaves `bots.voice` alone).
-pub fn start(hub: &Arc<Hub>) -> Arc<Voice> { let v = Arc::new(Voice::default()); hub.register_rpc(Arc::new(VoiceRpc(v.clone()))); hub.register_http(Arc::new(VoiceIn(v.clone()))); v }
+/// Registers `bots.voice` and `/voice/in`, and starts the resident recognizer's keeper (before `settings::start`, which then leaves `bots.voice` alone).
+pub fn start(hub: &Arc<Hub>) -> Arc<Voice> { resident::start(hub); let v = Arc::new(Voice::default()); hub.register_rpc(Arc::new(VoiceRpc(v.clone()))); hub.register_http(Arc::new(VoiceIn(v.clone()))); v }
 
 #[cfg(test)]
 mod tests;

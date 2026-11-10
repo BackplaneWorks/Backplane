@@ -13,6 +13,7 @@ pub mod openai;
 pub mod out;
 pub mod record;
 pub mod recorder;
+pub mod resident;
 pub mod session;
 pub mod sherpa;
 pub mod stop;

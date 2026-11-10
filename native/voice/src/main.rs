@@ -24,6 +24,9 @@ fn main() {
         }
         out::fail(line);
     }));
+    if a.cmd == "serve" {
+        backplane_voice::resident::serve(a);
+    }
     if a.cmd.starts_with("local-") {
         cmd::local_cmd(a);
     }

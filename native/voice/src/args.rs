@@ -3,8 +3,9 @@
 use crate::openai::DELAYS;
 
 pub const USAGE: &str = "usage:
-  backplane-voice live --engine local --local-dir D [--model parakeet-v2] [--source ...] [--device NAME]
-  backplane-voice file PATH --engine local --local-dir D [--model ID] [--content-type CT]
+  backplane-voice live --engine local --local-dir D [--model parakeet-v2] [--source ...] [--device NAME] [--server SOCK]
+  backplane-voice file PATH --engine local --local-dir D [--model ID] [--content-type CT] [--server SOCK]
+  backplane-voice serve --local-dir D [--model ID] --socket SOCK
   backplane-voice local-status --local-dir D
   backplane-voice local-install --local-dir D [--model ID]
   backplane-voice local-remove --local-dir D [--model ID]
@@ -17,7 +18,7 @@ pub const USAGE: &str = "usage:
 The key comes from --key-file, else OPENAI_API_KEY. OPENAI_BASE_URL overrides the API base.
 ";
 
-const COMMANDS: [&str; 7] = ["live", "file", "devices", "local-status", "local-install", "local-remove", "record"];
+const COMMANDS: [&str; 8] = ["live", "file", "devices", "local-status", "local-install", "local-remove", "record", "serve"];
 const SOURCES: [&str; 5] = ["auto", "pw-record", "parecord", "arecord", "stdin"];
 
 #[derive(Clone, Debug, Default)]
@@ -36,6 +37,10 @@ pub struct Args {
     pub rate: f64,
     pub local_dir: String,
     pub model: String,
+    /// live, file: the resident recognizer's socket (`serve`), used when it answers
+    pub server: String,
+    /// serve: where to listen
+    pub socket: String,
 }
 
 /// Err is the reason to print before the usage, if there is one.
@@ -77,6 +82,8 @@ pub fn parse(argv: &[String]) -> Result<Args, Option<String>> {
             }
             "--local-dir" => a.local_dir = v,
             "--model" => a.model = v,
+            "--server" => a.server = v,
+            "--socket" => a.socket = v,
             _ => return Err(Some(format!("unknown flag: {f}"))),
         }
     }
@@ -91,7 +98,10 @@ pub fn parse(argv: &[String]) -> Result<Args, Option<String>> {
     if !["openai", "local"].contains(&a.engine.as_str()) {
         return Err(Some(format!("bad --engine: {}", a.engine)));
     }
-    if (a.engine == "local" || a.cmd.starts_with("local-")) && a.local_dir.is_empty() {
+    if a.cmd == "serve" && a.socket.is_empty() {
+        return Err(Some("serve needs --socket".into()));
+    }
+    if (a.engine == "local" || a.cmd.starts_with("local-") || a.cmd == "serve") && a.local_dir.is_empty() {
         return Err(Some("--local-dir is needed".into()));
     }
     if a.cmd == "file" && a.pos.len() != 1 {
@@ -158,5 +168,8 @@ mod tests {
         assert_eq!(why("record --rate 0"), "bad --rate");
         assert_eq!(why("record --rate 1.5"), "bad --rate");
         assert!(p("record --rate 8000 --source arecord --device hw:1").is_ok());
+        assert_eq!(why("serve --local-dir d"), "serve needs --socket");
+        assert_eq!(why("serve --socket s"), "--local-dir is needed");
+        assert_eq!(p("live --engine local --local-dir d --server s").unwrap().server, "s");
     }
 }

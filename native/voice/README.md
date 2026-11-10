@@ -35,6 +35,7 @@ backplane-voice live [--keywords-file F] [--prompt P] [--language xx]... [--dela
                      [--source auto|pw-record|parecord|arecord|stdin] [--device NAME] [--key-file F]
 backplane-voice file PATH [--content-type CT] [--keywords-file F] [--prompt P]
                      [--language xx]... [--delay low] [--key-file F]
+backplane-voice serve --local-dir D [--model ID] --socket SOCK
 backplane-voice devices
 backplane-voice record [--rate 16000] [--source ...] [--device NAME]
 ```
@@ -103,6 +104,21 @@ that fails, it goes to REST `POST /audio/transcriptions` with `gpt-transcribe`
 With `--engine local`: ffmpeg to 16 kHz PCM, then the VAD's segments one by
 one. 90 s limit.
 
+### serve, and --server
+
+`serve` loads the model once (`malloc_trim` after, then a decode of silence so
+the first real one is not the slow one), listens on the Unix socket SOCK
+(0600) and prints `{"event":"loaded","ms":…,"rss_kb":…,"model":…}`; it ends,
+removing the socket, when its stdin ends or a line `stop` comes. `live` and
+`file` with `--engine local --server SOCK` decode through it instead of
+building a recognizer (their `loaded` says `"resident":true`); when nothing
+answers there, or it answers for another model, they build their own, as
+without the flag, and a server lost mid-session is replaced the same way. One
+server serves many clients, one decode at a time. On the socket: `bpv1
+<model>\n`, answered `ok\n` (or `no …\n`); then frames of a u32 LE sample
+count and f32 LE samples, each answered by a u32 LE length and sherpa-onnx's
+JSON. Unix only.
+
 ### record
 
 Raw s16le mono PCM on stdout at `--rate` (default 16000) until SIGTERM,
@@ -124,7 +140,7 @@ NDJSON on stdout, one object a line, written at once; diagnostics on stderr.
                                             or the default ("" unknown); sent again once if the
                                             name comes after 150 ms
 {"event":"ready"}                           file: started
-{"event":"loaded","ms":950}                 live, local: the model is up
+{"event":"loaded","ms":950,"resident":false} live, local: the model is up (resident: the server's, --server)
 {"event":"level","v":0..100}                live, every 250 ms while recording
 {"event":"hint","hint":"no-audio|silent|ok"}  live
 {"event":"delta","item":"<id>","text":"<piece>"}         live, cloud

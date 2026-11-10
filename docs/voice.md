@@ -48,8 +48,43 @@ hub: the helper is its own process and opens the C library at run time, so a
 crash there ends one session. The hub
 publishes the download as info (`voice.job`, `voice.local`), so Settings
 follows it wherever it is open, and a failure stays on the page until the next
-try. The helper loads the model
-when a session starts (about 0.9 s, off the event loop; audio heard
+try.
+
+### Kept loaded
+
+While the audio features run on the local model (voice.engine resolves to
+local and the model is downloaded: dictation from every client, the Pebble
+ring and webhook recordings), the hub keeps **one** recognizer loaded from its
+start: `backplane-voice serve` (`voice/resident.rs`), listening on
+`<home>/voice/engine.sock` (0600). Every `live` and `file` helper gets
+`--server <sock>` and decodes through it, so a session has its model in
+~15 ms instead of ~1 s, and a ring recording costs ~50 MB instead of ~1.2 GB.
+Each session is still its own helper process (recorder, VAD, its stdout), so a
+crash ends one session. With the cloud engine nothing loads. The hub looks
+again every 5 s and at once after a voice setting, an install or a remove; it
+lets the recognizer go when no feature uses the local model, or when
+MemAvailable drops under 1 GB (never mid-session), and loads it again with
+2.5 GB available. A server that dies is started again after 5 s, doubling to
+5 min. Settings shows it (`voice.resident` info) on the Local model row. When
+it is not up, a helper builds its own recognizer, as before.
+
+Measured on the desktop (32 cores, 2026-11-10, Parakeet v2 int8, 4 threads):
+
+| | before | kept loaded |
+|---|---|---|
+| spawn to `loaded` (warm / page cache cold) | 1.09–1.15 s / 1.62 s | 13–17 ms |
+| spawn to first `hyp` (speech from t=0) | 1.13–1.19 s / 1.66 s | 0.33 s (the VAD's, not the model's) |
+| a ring recording (13 s) | 1.34 s, 1.17 GB peak | 0.32 s, 53 MB in the helper |
+| the server | | ~700 MB after load, ~1.0 GB after decodes, ~1.2 GB plateau after 20 s segments (ONNX Runtime's arena); 0 CPU idle |
+
+Building the recognizer is the whole wait (0.94 s warm, 1.39 s cold);
+loading the runtime is 1–8 ms, the VAD 2–4 ms, a first decode of 1 s ~42 ms,
+the microphone's first audio ~140 ms (pw-record). The C API offers no
+session options (optimisation level, mmap'd weights), so it is kept loaded
+instead; `malloc_trim` after the build gives back ~300 MB of parse buffers.
+
+The helper without a server loads the model
+when a session starts (audio heard
 meanwhile is kept) and exits with the session. One model does both the live
 words and the final ones: while the VAD has a segment open, its audio so far
 is decoded again every 300 ms (about 25 ms of CPU per second of speech on 4
