@@ -24,6 +24,16 @@ fn progress(j: &Value) -> String {
     if total == 0 { return format!("Downloading {what} · {} MB received", mb(done)) }
     format!("Downloading {what} · {} / {} MB ({}%)", mb(done), mb(total), (done * 100 / total.max(1)).min(100))
 }
+/// The resident recognizer (`voice.resident`, resident.rs), after "ready.".
+fn resident_note(info: &Value) -> String {
+    let r = parsed(info, "voice.resident");
+    match r["state"].as_str().unwrap_or("") {
+        "loaded" => format!(" Kept loaded so dictation starts at once ({} MB of memory).", r["rss_mb"].as_u64().unwrap_or(0)),
+        "loading" => " Loading it so dictation starts at once…".into(),
+        "held" => " Not kept loaded while memory is short: dictation loads it each time until there is room.".into(),
+        _ => String::new(),
+    }
+}
 fn model_rows(p: &Prefs, info: &Value) -> Value {
     let (l, j) = (parsed(info, "voice.local"), parsed(info, "voice.job"));
     let id = vdict::model_id(set(p, "voice.model", ""));
@@ -35,7 +45,7 @@ fn model_rows(p: &Prefs, info: &Value) -> Value {
         else if let Some(e) = err { format!("Download failed: {e}") }
         else if l["supported"] == false { format!("Local dictation is not available on {}.", l["platform"].as_str().unwrap_or("this machine")) }
         else if m["size"].is_null() { "Checking the voice helper on this machine…".into() }
-        else if ready(&l, &m) { format!("{name} is ready.") }
+        else if ready(&l, &m) { format!("{name} is ready.{}", resident_note(info)) }
         else if m["installed"] == true { "The model needs additional files before it can run. Download to finish setup.".into() }
         else { format!("Not downloaded. About {} MB, plus the speech runtime. Download once for private, offline dictation.", mb(size)) };
     if busy { return row("Local model", &note, vec![]) }
@@ -108,6 +118,10 @@ mod tests {
         let none = rows(&prefs(&[]), &json!({}), "", ""); assert_eq!(find(&none, "Local model")["note"], "Checking the voice helper on this machine…"); assert!(labels(find(&none, "Local model")).contains(&"Check availability".to_string()));
         let r = rows(&prefs(&[]), &local(false), "", ""); let m = find(&r, "Local model"); assert!(m["note"].as_str().unwrap().starts_with("Not downloaded. About 482 MB")); assert_eq!(m["buttons"][2]["value"], "install:parakeet-v2"); assert_eq!(m["buttons"][2]["label"], "Download Parakeet v2 (482 MB)");
         let r = rows(&prefs(&[]), &local(true), "", ""); let m = find(&r, "Local model"); assert_eq!(m["note"], "Parakeet v2 is ready."); assert_eq!(m["buttons"][2]["value"], "remove:parakeet-v2");
+        let mut i = local(true); i["voice.resident"] = json!(json!({"state":"loaded","rss_mb":712}).to_string());
+        assert_eq!(find(&rows(&prefs(&[]), &i, "", ""), "Local model")["note"], "Parakeet v2 is ready. Kept loaded so dictation starts at once (712 MB of memory).");
+        i["voice.resident"] = json!(json!({"state":"held"}).to_string());
+        assert!(find(&rows(&prefs(&[]), &i, "", ""), "Local model")["note"].as_str().unwrap().contains("while memory is short"));
         let mut i = local(false); i["voice.job"] = json!(json!({"busy":"install:parakeet-v2","what":"Parakeet v2","done":241234192u64,"total":482468385u64,"phase":"download"}).to_string());
         let r = rows(&prefs(&[]), &i, "", ""); let m = find(&r, "Local model"); assert_eq!(m["note"], "Downloading Parakeet v2 · 241 / 482 MB (49%)"); assert!(labels(m).is_empty(), "nothing to press while it runs");
         i["voice.job"] = json!(json!({"error":"checksum mismatch"}).to_string()); let r = rows(&prefs(&[]), &i, "", ""); let m = find(&r, "Local model"); assert_eq!(m["note"], "Download failed: checksum mismatch"); assert_eq!(m["buttons"][2]["label"], "Retry download");

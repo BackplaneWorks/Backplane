@@ -49,14 +49,14 @@ impl Sink for Events {
 
 /// The local engine, loading while the microphone already records: audio
 /// sent meanwhile waits in the inbox.
-fn start_local(dir: PathBuf, model: String, stop: Stop) -> (std_mpsc::Sender<In>, std::thread::JoinHandle<()>) {
+fn start_local(dir: PathBuf, model: String, server: String, stop: Stop) -> (std_mpsc::Sender<In>, std::thread::JoinHandle<()>) {
     let (tx, rx) = std_mpsc::channel();
     let reply_to = tx.clone();
     let t = std::thread::spawn(move || {
         let t0 = Instant::now();
-        match sherpa::engine(&dir, &model, 4) {
-            Ok((rec, vad)) => {
-                emit(json!({"event": "loaded", "ms": t0.elapsed().as_millis() as u64}));
+        match sherpa::engine(&dir, &model, &server) {
+            Ok((rec, vad, resident)) => {
+                emit(json!({"event": "loaded", "ms": t0.elapsed().as_millis() as u64, "resident": resident}));
                 session::run(rx, reply_to, vad, rec, Events, true);
             }
             Err(e) => {
@@ -275,7 +275,7 @@ pub async fn live(a: Args) -> ! {
             }
         })
     });
-    let engine = local.then(|| start_local(dir.clone(), a.model.clone(), stop.clone()));
+    let engine = local.then(|| start_local(dir.clone(), a.model.clone(), a.server.clone(), stop.clone()));
 
     let conv = (from_stdin && a.rate > 0.0 && a.rate != rate as f64).then(|| Resampler::new(a.rate, rate as f64));
     let mut feed = Feed {

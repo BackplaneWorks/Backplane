@@ -270,9 +270,9 @@ async fn local_file(a: Args) -> ! {
         let _ = std::fs::remove_file(&on_disk);
     }
     let pcm = pcm.unwrap_or_else(|e| fail(&e));
-    let model = a.model.clone();
+    let (model, server) = (a.model.clone(), a.server.clone());
     let r = tokio::task::spawn_blocking(move || {
-        let (rec, vad) = sherpa::engine(&dir, &model, 4)?;
+        let (rec, vad, _) = sherpa::engine(&dir, &model, &server)?;
         Ok::<Vec<session::Seg>, String>(session::segments(vad, rec, &pcm))
     })
     .await;
