@@ -373,6 +373,13 @@ const JS_ROUTINE_STEPS: &str = include_str!("../../../../test/bots/fixtures/js-r
     assert!(matches!(plan(&z, 1, "Mars/Base", "", "tomorrow 9am", None), Pick::Plan { .. }) == false);
     assert_eq!(plan(&z, 1, "Mars/Base", "", "tomorrow 9am", None), Pick::Bad("I don't have that time zone's rules yet; try again in a minute (or give the time with its offset, or as in 20m)".into()));
     assert_eq!(plan(&z, 1, "Mars/Base", "", "in 5m", None), Pick::Plan { cron: String::new(), once: 301, tz: "Mars/Base".into() });
+    // a person's words for a repeat are a schedule (the app's When box sends them as one)
+    assert_eq!(plan(&z, 1791957600, "", "every 20 minutes", "", None), Pick::Plan { cron: "*/20 * * * *".into(), once: 0, tz: "person".into() });
+    assert_eq!(plan(&z, 1791957600, "", "hourly", "", None), Pick::Plan { cron: "0 * * * *".into(), once: 0, tz: "person".into() });
+    // what is no schedule reaches `at` from that box: a repeat it cannot read is told how repeats are written, a time how times are
+    let bad = |at: &str| match plan(&z, 1791957600, "", "", at, None) { Pick::Bad(m) => m, p => panic!("{at}: {p:?}") };
+    for at in ["every 90 minutes", "every other day", "Daily at noon", "weekly", "each morning"] { let m = bad(at); assert!(m.starts_with("I can't read that schedule.") && m.contains("every 2 hours") && !m.contains("2026-10-14"), "{at}: {m}") }
+    for at in ["soonish", "the 3rd"] { let m = bad(at); assert!(m.starts_with("I can't read that time.") && m.contains("tomorrow 9am"), "{at}: {m}") }
 }
 
 async fn th_a(bots: &Arc<Bots>, b: &str) -> String { bots.world().await.bot(b).unwrap().thread.clone() }
