@@ -16,6 +16,7 @@ const WARM_MECH: usize = 24;
 const POLL_MS: u64 = 150;
 const KEPT: usize = 4; // sources no client watches are kept (plots included): Src.kept
 const VERSIONS_KEPT: usize = 8; // saved versions no view watches: Src.versions.kept
+const WAIT_TICKS: u32 = 7; // a view waiting for its project's first board or schematic looks for it about once a second
 
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct Stamp { rev: String, ok: bool }
@@ -55,11 +56,18 @@ struct Src { kind: u32, file: String, stamp: Option<Stamp>, busy: bool, plot: Op
 /// `kept`: the id (`plot::mesh_id`) of the model the client already holds from an earlier visit; that model is not sent again
 /// `parts_at`: how many of its source's part frames this watcher has been sent
 struct Sub { key: String, held: Vec<plot::Chunk>, mesh: Vec<u8>, fresh: bool, base: String, kept: u64, parts_at: usize }
+/// A view opened on a project that has no board or schematic yet ("No schematic in this project yet"): what it asked for, kept so the
+/// drawing appears by itself when an agent makes the file (`poll` looks for it; any other watch or a stop by that client ends the wait).
+#[derive(Clone, Debug, PartialEq)]
+struct Wait { kind: u32, root: String, tree: String }
+/// The project's own file a view of `kind` shows ("" while the project has none): its schematic, or its board (the 3D views too).
+fn own_file(kind: u32, root: &str) -> String { let f = project::read(root); if kind == 1 { f.sch } else { f.pcb } }
 #[derive(Default)]
 /// `prewarmed`: each board whose part models were queued for conversion, by the revision it was then (pcb3d::stream::prewarm)
 /// `took`: how long the last read of each 3D source's file took (ms), told as the estimate of the next one
 /// `mech_warming`: the projects whose Mech parts are being meshed ahead (warm_mech)
-struct State { srcs: HashMap<String, Src>, subs: HashMap<u64, Vec<Sub>>, polling: bool, idle: Vec<String>, prewarmed: HashMap<String, String>, took: HashMap<String, u64>, mech_warming: std::collections::HashSet<String> }
+/// `waiting`: the clients whose view shows "no board/schematic yet", `wait_busy` while their projects are being looked at
+struct State { srcs: HashMap<String, Src>, subs: HashMap<u64, Vec<Sub>>, waiting: HashMap<u64, Wait>, wait_busy: bool, polling: bool, idle: Vec<String>, prewarmed: HashMap<String, String>, took: HashMap<String, u64>, mech_warming: std::collections::HashSet<String> }
 
 pub struct Plots { gen: std::sync::atomic::AtomicU64, st: Mutex<State>, bin: PathBuf, dir: PathBuf, home: PathBuf, readers: tokio::sync::Semaphore, solid: tokio::sync::Mutex<()> }
 
@@ -77,13 +85,17 @@ impl Plots {
     /// Returns the keys of the plots this view shows, so a client can drop what arrives late for the view it left.
     pub fn watch(self: &Arc<Self>, hub: &Arc<Hub>, client: u64, kind: Option<u32>, root: &str, path: &str, tree: &str, kept: (&str, u64)) -> Vec<String> {
         let Some(kind) = kind else { self.stop(client); return vec![] };
-        let board = |k: u32| if path.is_empty() { let f = project::read(root); if k == 1 { f.sch } else { f.pcb } } else { path.to_string() };
+        let board = |k: u32| if path.is_empty() { own_file(k, root) } else { path.to_string() };
         let file = board(kind);
-        if file.is_empty() { // Pv.watch.k none: nothing to show
+        if file.is_empty() { // Pv.watch.k none: nothing to show yet; the view waits for the project's file
             self.drop_subs(client);
+            { let mut st = self.st.lock().unwrap();
+              st.waiting.insert(client, Wait { kind, root: root.to_string(), tree: tree.to_string() });
+              if !st.polling { st.polling = true; let me = self.clone(); let hub = hub.clone(); tokio::spawn(async move { me.poll(hub).await }); } }
             hub.push(client, json!({"t":"plot","key":key(kind, root, path),"none": if kind == 1 { "No schematic in this project yet" } else { "No board in this project yet" }}));
             return vec![key(kind, root, path)]
         }
+        self.st.lock().unwrap().waiting.remove(&client);
         let is_board = file.ends_with(".kicad_pcb"); // Pv.watch.go: only a board's model has a board beside it
         if !solid_kind(kind) { self.prewarm(hub, &if is_board { file.clone() } else { project::read(root).pcb }) } // a 3D view converts its parts itself, at full speed
         if solid_kind(kind) && solidread::is_step(&file) && !is_version(&file) { self.warm_mech(root, &file) }
@@ -115,6 +127,7 @@ impl Plots {
     /// plot (full chunks, no carry: the panes are separate sources) and the 3D model's board plot shared with the board pane.
     /// `board` (absolute, "" the project's own): a board picked in the Boards menu: its file and the schematic beside it are the sources, keyed by their paths.
     pub fn watch_split(self: &Arc<Self>, hub: &Arc<Hub>, client: u64, root: &str, path: &str, tree: &str, board: &str) -> Vec<String> {
+        self.st.lock().unwrap().waiting.remove(&client);
         let f = project::read(root);
         let picked = !board.is_empty();
         let own_sch = if picked { board.strip_suffix(".kicad_pcb").map(|b| format!("{b}.kicad_sch")).filter(|p| std::path::Path::new(p).is_file()).unwrap_or_default() } else { f.sch.clone() };
@@ -145,7 +158,24 @@ impl Plots {
     }
     pub fn stop(&self, client: u64) { self.drop_subs(client) }
     fn drop_subs(&self, client: u64) {
-        let mut st = self.st.lock().unwrap(); st.subs.remove(&client); self.gc(&mut st);
+        let mut st = self.st.lock().unwrap(); st.subs.remove(&client); st.waiting.remove(&client); self.gc(&mut st);
+    }
+    /// The views waiting for a project's first board or schematic: each whose file is there now is watched as if it had just been opened
+    /// (same key, so the client's "none" gives way to the drawing). The folders are read on a blocking thread, one look at a time.
+    fn look_for_waited(self: &Arc<Self>, hub: &Arc<Hub>) {
+        let waits: Vec<(u64, Wait)> = { let mut st = self.st.lock().unwrap();
+            if st.wait_busy || st.waiting.is_empty() { return }
+            st.wait_busy = true; st.waiting.iter().map(|(c, w)| (*c, w.clone())).collect() };
+        let (me, hub) = (self.clone(), hub.clone());
+        tokio::spawn(async move {
+            let found: Vec<(u64, Wait)> = tokio::task::spawn_blocking(move || waits.into_iter().filter(|(_, w)| !own_file(w.kind, &w.root).is_empty()).collect()).await.unwrap_or_default();
+            me.st.lock().unwrap().wait_busy = false;
+            for (client, w) in found {
+                // still the view this client waits on (it may have opened another, or closed it, while the folders were read)
+                if me.st.lock().unwrap().waiting.get(&client) != Some(&w) { continue }
+                me.watch(&hub, client, Some(w.kind), &w.root, "", &w.tree, ("", 0));
+            }
+        });
     }
     fn gc(&self, st: &mut State) {
         let watched: std::collections::HashSet<String> = st.subs.values().flatten().map(|s| s.key.clone()).collect();
@@ -430,15 +460,18 @@ impl Plots {
     }
 
     async fn poll(self: Arc<Self>, hub: Arc<Hub>) {
+        let mut tick = 0u32;
         loop {
             tokio::time::sleep(Duration::from_millis(POLL_MS)).await;
+            tick = tick.wrapping_add(1);
+            if tick % WAIT_TICKS == 0 { self.look_for_waited(&hub) }
             let mut changed = vec![];
             { let mut st = self.st.lock().unwrap();
               // clients that went away
-              let gone: Vec<u64> = st.subs.keys().copied().filter(|c| !hub.is_attached(*c)).collect();
-              for c in gone { st.subs.remove(&c); }
+              let gone: Vec<u64> = st.subs.keys().chain(st.waiting.keys()).copied().filter(|c| !hub.is_attached(*c)).collect();
+              for c in gone { st.subs.remove(&c); st.waiting.remove(&c); }
               self.gc(&mut st);
-              if st.subs.is_empty() { st.polling = false; return }
+              if st.subs.is_empty() && st.waiting.is_empty() { st.polling = false; return }
               let watched: std::collections::HashSet<String> = st.subs.values().flatten().map(|s| s.key.clone()).collect();
               for (k, s) in st.srcs.iter_mut() {
                   if !watched.contains(k) || s.busy || is_version(&s.file) { continue }
@@ -605,6 +638,42 @@ impl RpcHandler for KicadRpc {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// A person opens the Schematic view of a new, empty project and an agent then makes the schematic: the view said "No schematic in
+    /// this project yet" and stayed so until it was closed and opened again. The view now waits, and the drawing arrives by itself.
+    #[tokio::test] async fn a_view_opened_before_the_projects_first_schematic_gets_it_when_it_appears() {
+        use crate::{hub::{Cfg, Out}, presenter::Canned};
+        let tmp = |n: &str| { let p = std::env::temp_dir().join(format!("bp-wait-{}-{n}", std::process::id())); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p };
+        let (home, proj) = (tmp("home"), tmp("proj"));
+        let cfg = Cfg { home: home.clone(), version: "0.15.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() };
+        let hub = Hub::start(cfg, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+        let plots = Plots::new(&home);
+        let root = proj.to_string_lossy().into_owned();
+        let mut out = hub.attach(7);
+        let keys = plots.watch(&hub, 7, Some(1), &root, "", "", ("", 0));
+        assert_eq!(keys, vec![key(1, &root, "")]);
+        match out.try_recv() { Ok(Out::Value(v)) => assert_eq!(v["none"], "No schematic in this project yet"), _ => panic!("the empty view is told so") }
+        assert_eq!(plots.st.lock().unwrap().waiting.get(&7), Some(&Wait { kind: 1, root: root.clone(), tree: String::new() }));
+        // the agent writes the project: the drawing comes without another request, under the key the view already shows
+        let fx = concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/files/fixtures/plot/ecc83-pp.kicad_sch");
+        std::fs::create_dir_all(proj.join("boards/lamp")).unwrap();
+        std::fs::write(proj.join("boards/lamp/lamp.kicad_pro"), "{}").unwrap();
+        std::fs::copy(fx, proj.join("boards/lamp/lamp.kicad_sch")).unwrap();
+        let mut got = false;
+        for _ in 0..100 {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            while let Ok(o) = out.try_recv() { if let Out::Raw(b) = o { if b.windows(4).any(|w| w == b"plot") { got = true } } }
+            if got { break }
+        }
+        assert!(got, "the schematic's plot reached the waiting view");
+        assert!(plots.st.lock().unwrap().waiting.is_empty(), "the wait is over");
+        // a view that is closed, or replaced by another, waits no more
+        std::fs::remove_file(proj.join("boards/lamp/lamp.kicad_sch")).unwrap();
+        plots.watch(&hub, 7, Some(1), &root, "", "", ("", 0)); assert_eq!(plots.st.lock().unwrap().waiting.len(), 1);
+        plots.stop(7); assert!(plots.st.lock().unwrap().waiting.is_empty());
+        plots.watch(&hub, 7, Some(0), &root, "", "", ("", 0)); assert_eq!(plots.st.lock().unwrap().waiting.get(&7).map(|w| w.kind), Some(0), "a board view waits for the board");
+        plots.watch(&hub, 7, None, "", "", "", ("", 0)); assert!(plots.st.lock().unwrap().waiting.is_empty());
+        let _ = std::fs::remove_dir_all(&home); let _ = std::fs::remove_dir_all(&proj);
+    }
     #[test] fn a_step_not_meshed_yet_has_an_estimate_by_its_size() {
         let d = std::env::temp_dir().join(format!("bp-est-{}", std::process::id())); let _ = std::fs::create_dir_all(&d);
         let f = d.join("big-part.step"); std::fs::write(&f, vec![b'x'; 4 << 20]).unwrap();
