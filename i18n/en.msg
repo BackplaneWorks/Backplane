@@ -2171,6 +2171,7 @@ gpui.order.named = Order · {name}
 gpui.buy.now = Buy now
 gpui.order.buy.now.price = Buy now · {price}
 gpui.badge.away = {name} · away
+gpui.badge.again = Pick again
 gpui.badge.on = on {name}
 gpui.badge.runs.on = runs on {name}
 gpui.badge.also.on = also on {name}

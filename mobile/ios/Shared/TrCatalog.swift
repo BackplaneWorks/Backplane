@@ -2404,6 +2404,7 @@ gpui.order.named	Order · {name}	注文 · {name}
 gpui.buy.now	Buy now	今すぐ購入
 gpui.order.buy.now.price	Buy now · {price}	今すぐ購入 · {price}
 gpui.badge.away	{name} · away	{name} · 不在
+gpui.badge.again	Pick again	選び直す
 gpui.badge.on	on {name}	{name} 上
 gpui.badge.runs.on	runs on {name}	{name} で実行
 gpui.badge.also.on	also on {name}	{name} にもあります

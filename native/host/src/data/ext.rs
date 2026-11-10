@@ -179,7 +179,9 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Re
                     Some((key, value)) => rpc(hub, c, "setting.set", json!({"key":key,"value":value})).await.map(|_| json!({})),
                     None => Err(err("value: a tint or an icon of the list")),
                 },
-                _ => Err(err("action: rename, color, icon or remove")),
+                // Pick again: the hub's model picks the icon (and maybe the tint) anew; the person's choice is cleared
+                "pick" => rpc(hub, c, "project.pick", json!({"project":id})).await.map(|_| json!({})),
+                _ => Err(err("action: rename, color, icon, pick or remove")),
             }
         }
         "badge.list" => Ok(crate::present::badge::list()),

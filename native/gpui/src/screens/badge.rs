@@ -5,7 +5,8 @@ use gpui::{prelude::*, *};
 use serde_json::Value;
 
 /// The icons the hub may name (its list, present/badge.rs); anything else is the folder.
-const ICONS: [&str; 14] = ["folder", "circuit-board", "cpu", "zap", "radio", "box", "layers", "code", "terminal", "globe", "wrench", "flask-conical", "book", "star"];
+const ICONS: [&str; 20] = ["folder", "circuit-board", "cpu", "zap", "radio", "box", "layers", "code", "terminal", "globe", "wrench", "flask-conical", "book", "star",
+    "usb", "plug", "presentation", "gauge", "file-text", "image"];
 pub fn icon_name(n: &str) -> &'static str { ICONS.iter().copied().find(|i| *i == n).unwrap_or("folder") }
 /// "#rrggbb" as a colour; None for anything else.
 pub fn parse_css(css: &str) -> Option<Rgba> {
@@ -21,7 +22,11 @@ pub fn choices(look: &Value, key: &str) -> Vec<(String, String, bool, String)> {
     look[key].as_array().into_iter().flatten().map(|c| (c["label"].as_str().unwrap_or("").to_string(), c["value"].as_str().unwrap_or("").to_string(), c["on"].as_bool().unwrap_or(false), c["css"].as_str().unwrap_or("").to_string())).collect()
 }
 
-/// The editor under a project's header: the colours, then the icons.
+/// The editor's Pick again: its words and the project it is for, when the hub offers it.
+pub fn again(look: &Value) -> Option<(String, String)> {
+    let v = look["again"]["value"].as_str().filter(|v| !v.is_empty())?; Some((look["again"]["label"].as_str().unwrap_or("").to_string(), v.to_string()))
+}
+/// The editor under a project's header: the colours, then the icons, then Pick again.
 pub fn editor(cx: &mut Context<Backplane>, light: bool, pid: &str, look: &Value) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let mut colors = div().flex().flex_wrap().gap_1();
@@ -37,7 +42,11 @@ pub fn editor(cx: &mut Context<Backplane>, light: bool, pid: &str, look: &Value)
             .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("look-set".into(), value.clone())); cx.notify(); }))
             .child(art::icon(icon_name(&label), 14., c(if on { "text" } else { "dim" }))));
     }
-    div().id(SharedString::from(format!("look-{pid}"))).flex().flex_col().gap_2().px_3().py_2().border_b_1().border_color(c("line")).bg(c("panel")).child(colors).child(icons).into_any_element()
+    // Pick again: the hub's model chooses anew (the person's choice is cleared); the hub names the press (`again`)
+    let again = again(look).map(|(label, value)| crate::ui::with_rect(div().id(SharedString::from(format!("look-again-{pid}"))), || "look:again".to_string()).px_2().h(px(22.)).flex().items_center()
+        .text_size(px(12.)).text_color(c("dim")).cursor_pointer().border_1().border_color(c("line")).hover(|s| s.bg(c("raise")).text_color(c("text"))).child(crate::i18n::trs(&label))
+        .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("look-again".into(), value.clone())); cx.notify(); })));
+    div().id(SharedString::from(format!("look-{pid}"))).flex().flex_col().gap_2().px_3().py_2().border_b_1().border_color(c("line")).bg(c("panel")).child(colors).child(icons).children(again.map(|b| div().flex().child(b))).into_any_element()
 }
 
 /// A thread's machine marker as the hub gives it (`mark` {name, short, away}; none on this machine's threads): the text drawn (`short` on
@@ -90,6 +99,8 @@ mod tests {
         let look: Value = serde_json::from_str(r##"{"colors":[{"label":"blue","css":"#5b9cf5","on":true,"value":"project.color.p=blue"}],"icons":[{"label":"cpu","on":false,"value":"project.icon.p=cpu"}]}"##).unwrap();
         assert_eq!(choices(&look, "colors"), [("blue".to_string(), "project.color.p=blue".to_string(), true, "#5b9cf5".to_string())]);
         assert_eq!(choices(&look, "icons")[0].1, "project.icon.p=cpu"); assert!(choices(&Value::Null, "colors").is_empty());
+        assert_eq!(again(&serde_json::json!({"again":{"label":"Pick again","value":"p"}})), Some(("Pick again".to_string(), "p".to_string()))); assert_eq!(again(&look), None);
+        assert_eq!((icon_name("usb"), icon_name("presentation")), ("usb", "presentation"));
     }
     #[test] fn a_machine_marker_is_short_on_rows_full_in_the_header_and_dim_when_away() {
         let m = serde_json::json!({"name":"framework-1.tail.ts.net","short":"framework-1","away":false});

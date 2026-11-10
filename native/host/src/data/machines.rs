@@ -48,9 +48,10 @@ pub fn project_json(id: &str, st: &State, mark: &Value, un: &Unified, machine: &
     let settled = live.iter().filter(|t| super::shelf_flags(t).1).count();
     let updated = ts.iter().map(|t| t.activity.max(t.created)).max().unwrap_or(p.created);
     let waiting = st.asks.values().filter(|(th, open)| *open && st.threads.get(th).map_or(false, |t| t.project == id)).count();
-    let color = crate::present::badge::color_of(setting(st, &format!("project.color.{id}")), id).to_string();
+    let pick = setting(st, &format!("project.pick.{id}"));
+    let color = crate::present::badge::color_eff(setting(st, &format!("project.color.{id}")), pick, id).to_string();
     Some(json!({"id":id,"title":p.title,"root":p.root,"origin":"","threadCount":live.len(),"settledCount":settled,"updatedAt":ms(updated),"waiting":waiting,
-        "icon":crate::present::badge::icon_of(setting(st, &format!("project.icon.{id}"))),"css":crate::present::badge::css_of(&color),"color":color,
+        "icon":crate::present::badge::icon_eff(setting(st, &format!("project.icon.{id}")), pick),"css":crate::present::badge::css_of(&color),"color":color,
         "machine":machine,"mark":mark,"newOn":new_on_far(id, machine, mark, un)}))
 }
 /// A project that is only on a linked machine starts its new threads there.
