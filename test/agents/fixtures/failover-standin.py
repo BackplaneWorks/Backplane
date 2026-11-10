@@ -5,6 +5,8 @@
 #   ok (or no file)   an answer
 #   limit:<reset>     streams a little, then a rejected rate_limit_event, then an error result, then its lifecycle completes (Claude Code 2.1.286+)
 #   limit-noreset     the same, the limit's words alone
+#   cancel:<reset>    Claude Code's weekly limit as the Calendar bot met it (Nov 10): a rejected seven_day rate_limit_event, the limit's words as an assistant message with
+#                     its `rate_limit` error and an error result, then the CLI cancels its own command (lifecycle `cancelled`), which ends the turn Interrupted
 #   limit-old         an old CLI's ending: no lifecycle, the error result ends the turn
 #   warn              a rejected rate_limit_event, and the turn ends well all the same, in one read
 #   auth              the login failed mid-turn
@@ -48,6 +50,12 @@ def claude_turn(line, sid):
         say({"type": "assistant", "message": {"id": "a" + uuid.uuid4().hex, "role": "assistant", "content": [{"type": "text", "text": words}], "usage": {"input_tokens": 0, "output_tokens": 0}}, "error": "authentication_failed", "session_id": sid})
         say({"type": "result", "subtype": "success", "is_error": True, "result": words, "session_id": sid})
         lc("completed"); return
+    if m.startswith("cancel:"):
+        r = int(m.split(":")[1]); words = "You've hit your weekly limit" # the real line goes on " · resets Nov 12, 3am (America/New_York)": reset_words reads that (its own laws); here the event's resetsAt is the time
+        say({"type": "rate_limit_event", "rate_limit_info": {"status": "rejected", "rateLimitType": "seven_day", "resetsAt": r}, "session_id": sid})
+        say({"type": "assistant", "message": {"id": "a" + uuid.uuid4().hex, "role": "assistant", "content": [{"type": "text", "text": words}], "usage": {"input_tokens": 0, "output_tokens": 0}}, "error": "rate_limit", "session_id": sid})
+        say({"type": "result", "subtype": "success", "is_error": True, "result": words, "session_id": sid})
+        lc("cancelled"); return
     if m.startswith("limit") or m == "auth":
         say({"type": "stream_event", "event": {"type": "message_start", "message": {"id": "p1", "role": "assistant", "content": [], "usage": {"input_tokens": 1}}}, "session_id": sid})
         say({"type": "stream_event", "event": {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}, "session_id": sid})

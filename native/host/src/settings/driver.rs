@@ -136,7 +136,8 @@ fn wait_all(w: &World, profiles: &[Value], from: &str, cur_id: &str, cur_epoch: 
     let until = fb::next_reset(profiles, &get, at, &w.provider, &w.model, cur_id, cur_epoch);
     let until = if until > at { until } else { 0 };
     let mut names: Vec<String> = profiles.iter().filter(|p| p["provider"] == w.provider.as_str() && p["state"] == "connected").filter_map(|p| p["label"].as_str().map(str::to_string)).collect();
-    if cur_id.is_empty() { names.insert(0, "Default account".into()) }
+    // the CLI's own login counts when the thread is on it or this request already ran out on it
+    if cur_id.is_empty() || w.tried().contains(&fb::tried_id("", 0)) { names.insert(0, "Default account".into()) }
     let list = if names.is_empty() { String::new() } else { format!(" ({})", names.join(", ")) };
     let say = if signin && until == 0 { format!("{}'s sign-in expired and no other {} account can take over. Continuing once you sign in again.", w.name(cur_id), w.provider) }
         else if until > 0 { format!("Every {} account is out{list}. Continuing at {}, when the first one resets.", w.provider, rules::when(&w.zone(), until, at)) } else { format!("Every {} account is out{list} and no reset time is known. Waiting for you.", w.provider) };
@@ -227,7 +228,11 @@ pub async fn on_line(hub: &Arc<Hub>, acc: Option<&Arc<crate::settings::accounts_
     let (provider, model, running) = { let m = hub.model().await; match m.threads.get(thread) { Some(t) => (t.provider.clone(), t.model.clone(), t.turn == "running"), None => return Verdict::default() } };
     if !running { return Verdict::default() }
     let lim = if shaped { fb::classify(&provider, &model, v).or_else(|| fb::auth_failure(&provider, v)) } else { None };
-    if end.is_some() && end != Some("failed") { // the turn went well or the person stopped it: what was remembered is over
+    // Claude Code cancels its own command after a limit error (Nov 10: "You've hit your weekly limit", then the command's lifecycle `cancelled`), and the turn ends Interrupted on
+    // that line. The person's Stop never ends a turn on a line (cmds.rs: their Stop makes the command a tomb), so a turn the CLI stopped with a limit seen in it ran out.
+    let ran_out = end == Some("interrupted") && (lim.is_some() || seen.is_some() || {
+        let mut any = false; for k in [format!("account.failover.pending.{thread}"), format!("fallback.pending.{thread}")] { any |= !hub.setting(&k).await.unwrap_or_default().is_empty() } any });
+    if end.is_some() && end != Some("failed") && !ran_out { // the turn went well or the person stopped it: what was remembered is over
         // `seen` too: a record written for a line of this same read is not committed yet, so the store does not show it, and left behind it would fail a later turn over
         let had = seen.take().is_some(); let mut ev = vec![];
         for k in [format!("account.failover.pending.{thread}"), format!("fallback.pending.{thread}")] { if had || !hub.setting(&k).await.unwrap_or_default().is_empty() { ev.push(set(&k, "", now_ms() / 1000)) } }

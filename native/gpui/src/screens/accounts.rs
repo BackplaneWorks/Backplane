@@ -54,6 +54,11 @@ pub fn binding(snap: &Value) -> (String, u64) {
 pub fn badge(state: &str) -> (&'static str, &'static str) {
     /* i18n-ok: drawn through tr */ match state { "connected" => ("Connected", "ok"), "connecting" => ("Signing in", "accent"), "unchecked" => ("Not checked", "warn"), "expired" => ("Sign-in expired", "bad"), _ => ("Not connected", "faint") }
 }
+/// The state a card shows: the hub's "limited until 15:40" while the login is held after running out, else its sign-in state.
+pub fn state_word(snap: &Value, id: &str, state: &str) -> (String, &'static str) {
+    if state == "connected" || id.is_empty() { if let Some(t) = snap["holds"][id]["text"].as_str() { return (trs(t), "warn") } }
+    let (w, tok) = badge(state); (trs(w), tok)
+}
 /// Whether the hub is waiting for the person or the provider (so the page asks again every couple of seconds).
 pub fn wants_poll(snap: &Value) -> bool {
     snap["attempts"].as_array().map_or(false, |a| a.iter().any(is_live))
@@ -251,7 +256,7 @@ fn attempt_panel(cx: &mut Context<Backplane>, light: bool, st: &Accounts, a: &Va
 fn card(cx: &mut Context<Backplane>, light: bool, st: &Accounts, p: &Value, i: usize, narrow: bool) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let (id, state) = (string(p, "id"), string(p, "state"));
-    let (word, tok) = badge(&state);
+    let (word, tok) = state_word(&st.snap, &id, &state);
     let epoch = p["epoch"].as_u64().unwrap_or(0);
     let default = is_default(&st.snap, p);
     let mut sub = vec![identity(p)];
@@ -261,7 +266,7 @@ fn card(cx: &mut Context<Backplane>, light: bool, st: &Accounts, p: &Value, i: u
             .child(div().flex().items_center().gap_2().child(super::picker::logo(if p["provider"] == "codex" { "codex" } else { "claude" })).child(div().text_size(px(14.)).font_weight(FontWeight::BOLD).child(string(p, "label")))
                 .when(default, |d| d.child(div().px_2().py(px(1.)).bg(c("raise")).text_size(px(11.)).text_color(c("dim")).child(trs("New threads")))))
             .child(div().text_size(px(12.)).text_color(c("dim")).child(sub.join("  ·  "))))
-        .child(div().flex().items_center().gap_2().flex_shrink_0().child(div().size(px(8.)).bg(c(tok))).child(div().text_size(px(12.)).text_color(c(tok)).child(trs(word))));
+        .child(div().flex().items_center().gap_2().flex_shrink_0().child(div().size(px(8.)).bg(c(tok))).child(div().text_size(px(12.)).text_color(c(tok)).child(word)));
     let mut row = div().flex().items_center().gap_2().mt_3().flex_wrap();
     let armed = st.armed == id;
     let mut btn = |label: &str, key: &str, primary: bool, danger: bool, on: Box<dyn Fn(&mut Backplane, &mut Context<Backplane>)>| { row = std::mem::replace(&mut row, div()).child(button(cx, light, format!("acct-{key}-{i}"), label, primary, danger, on)); };
@@ -308,7 +313,8 @@ pub fn page(cx: &mut Context<Backplane>, light: bool, st: &Accounts, avail: f32)
     let card_row = if avail < ADD_ROW_MIN { div().flex().flex_col().items_start() } else { div().flex().items_center() };
     out.push(card_row.gap_3().p_4().mb_3().border_1().border_color(c("line")).bg(c("view"))
         .child(div().flex().flex_col().gap(px(2.)).flex_1().min_w(px(160.)).max_w_full().child(div().text_size(px(14.)).font_weight(FontWeight::BOLD).child(trs("Default account"))).child(div().text_size(px(12.)).text_color(c("dim")).child(trs("The Claude CLI's own sign-in on this machine, as before."))))
-        .child(div().flex().flex_shrink_0().items_center().gap_2().child(div().size(px(8.)).bg(c("ok"))).child(div().text_size(px(12.)).text_color(c("ok")).child(if def_default { trs("Used for new threads") } else { trs("Available") }))).into_any_element());
+        .child({ let (word, tok) = match st.snap["holds"][""]["text"].as_str() { Some(t) => (trs(t), "warn"), None => (if def_default { trs("Used for new threads") } else { trs("Available") }, "ok") };
+            div().flex().flex_shrink_0().items_center().gap_2().child(div().size(px(8.)).bg(c(tok))).child(div().text_size(px(12.)).text_color(c(tok)).child(word)) }).into_any_element());
     let ps = profiles(&st.snap);
     for (i, p) in ps.iter().enumerate() { out.push(card(cx, light, st, p, i, avail < ADD_ROW_MIN)); }
     if let Some(input) = &st.label {
@@ -446,7 +452,9 @@ mod tests {
         let r = menu_rows(&s, 100);
         assert_eq!(r.iter().map(|x| (x.key, x.label.as_str(), x.on, x.usable)).collect::<Vec<_>>(), vec![(Some(1), "Default account", false, true), (Some(2), "Work", true, true), (Some(3), "Old", false, false)]);
         assert_eq!(r[0].left, "5-hour  75% left · resets in 15m"); assert_eq!(r[1].left, "5-hour  38% left", "the fullest window is the one that decides"); assert_eq!(r[1].detail, "a@b.com"); assert_eq!(r[2].left, "", "nothing known is not said"); assert_eq!(r[2].detail, "Not connected");
-        s["holds"] = json!({"w":{"until":5000,"text":"out, resets 15:40"}}); let r = menu_rows(&s, 100); assert_eq!((r[1].left.as_str(), r[1].out), ("out, resets 15:40", true), "the hub's word for one that ran out");
+        s["holds"] = json!({"w":{"until":5000,"text":"limited until 15:40"}}); let r = menu_rows(&s, 100); assert_eq!((r[1].left.as_str(), r[1].out), ("limited until 15:40", true), "the hub's word for one that ran out");
+        assert_eq!(state_word(&s, "w", "connected"), ("limited until 15:40".to_string(), "warn"), "Settings marks a held account limited until its reset");
+        assert_eq!(state_word(&s, "w", "expired").1, "bad", "a dead sign-in says so, not the hold"); assert_eq!(state_word(&s, "p", "connected").1, "ok");
     }
     #[test] fn only_the_first_nine_logins_have_a_digit_and_other_providers_are_left_out() {
         let ps: Vec<Value> = (0..11).map(|i| json!({"id":format!("p{i}"),"provider":"claude","label":format!("A{i}"),"epoch":1,"state":"connected","identity":{}})).chain([json!({"id":"c","provider":"codex","label":"C","epoch":1,"state":"connected"})]).collect();

@@ -3374,8 +3374,8 @@ android.hub.accounts.act.cancel	Cancel sign-in	サインインをキャンセル
 android.hub.accounts.act.again	Sign in again	再度サインイン
 android.hub.accounts.act.signin	Sign in	サインイン
 android.hub.accounts.remove.ask	Remove {label}? Threads on it stop and must choose another account.	{label}を削除しますか？ このアカウントを使うスレッドは停止し、別のアカウントを選ぶ必要があります。
-android.hub.accounts.hold.resets	out, resets {when}	上限到達、{when}にリセット
-android.hub.accounts.hold	out	上限到達
+android.hub.accounts.hold.resets	limited until {when}	{when}まで上限到達
+android.hub.accounts.hold	limited	上限到達
 android.hub.accounts.alert.expired	{provider} sign-in expired: tap to sign in again	{provider}のサインインが期限切れです。タップして再度サインイン
 android.hub.accounts.alert.needed	{provider} sign-in needed: no account could start {title} ({why})	{provider}のサインインが必要です。{title}を開始できるアカウントがありません（{why}）
 android.hub.accounts.msg.expired	Sign-in expired. Sign in again.	サインインの期限が切れました。再度サインインしてください。
@@ -5613,7 +5613,7 @@ android.google.back	Back to Backplane	Backplane に戻る
     /// android.hub.accounts.remove.ask = Remove {label}? Threads on it stop and must choose another account.
     static func android_hub_accounts_remove_ask(label: String) -> String { f("android.hub.accounts.remove.ask", ["label": label]) }
 
-    /// android.hub.accounts.hold.resets = out, resets {when}
+    /// android.hub.accounts.hold.resets = limited until {when}
     static func android_hub_accounts_hold_resets(when: String) -> String { f("android.hub.accounts.hold.resets", ["when": when]) }
 
     /// android.hub.accounts.alert.expired = {provider} sign-in expired: tap to sign in again
