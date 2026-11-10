@@ -403,7 +403,8 @@ async fn viewers(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Res
                 let path = if path.is_empty() || crate::plat::fs::is_abs(path) { path.to_string() } else { format!("{root}/{path}") };
                 let mut q = machines::on_link(json!({"kind":kind,"root":root,"path":path}), th);
                 if !s(p, "tree").is_empty() { q["tree"] = p["tree"].clone() }
-                if !s(p, "kept").is_empty() { q["kept"] = p["kept"].clone() } // the model the phone has cached (plot::mesh_id, hex): not sent again
+                if !s(p, "kept").is_empty() { q["kept"] = p["kept"].clone() }
+                q["fresh"] = json!(true); // a phone holds only what `kept` names after a switch: models and parts come again (kicad/watch.rs `forget`) // the model the phone has cached (plot::mesh_id, hex): not sent again
                 let r = result(rpc(hub, c, "kicad.watch", q).await?);
                 Ok(json!({"root":root,"keys":r.get("keys").cloned().unwrap_or(json!([]))})) // the plots this view shows: a phone drops what comes late for the one it left
             }
