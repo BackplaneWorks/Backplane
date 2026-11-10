@@ -55,13 +55,26 @@ a held launch carries an id (`_launch`) so it starts once however often it is po
 `boat-hub.sh dry-run`: a copy of the desktop home (without secrets, providers, voice, browser profile, checkpoints, devices) on the box, run with
 `BACKPLANE_COPY=1`, no tailnet, stand-in agent folder only, port 3899; `/healthz` ok at 5 s, folded at 4.4 s, 205 MB; then stopped and deleted.
 
+## State (Nov 10, prep done)
+
+`bp-hub` is on the tailnet as `boat-hub` (100.103.2.108); `bp-hub.service` is enabled and runs an empty hub (no lease, no link, nothing of
+Bub's); `https://boat-hub.tail9e0cf2.ts.net/healthz` answers `ok` from the desktop over the tailnet (`tailscale serve` 443 -> 127.0.0.1:3797).
+
+## The ring's URL
+
+`bots/ring.rs` derives a hook's URL from the hub's own `tailscale serve` address, so each hub shows its own (the Boat's has no port:
+`https://boat-hub.tail9e0cf2.ts.net/hook/<id>`). The ring is owned by one hub. At the cutover the hook record and its token move to the Boat
+(the Authorization header is unchanged), the desktop revokes its hook and gets the setting `ring.home` (`{"url","machine"}`), and its Ring page
+(desktop and phones) then shows the owner's URL instead of Set up. The person edits the URL in the Pebble app once and sends the test event.
+
 ## The cutover (only after the person says yes)
 
 0. Backup: stop nothing; copy the desktop home (`~/.backplane-gpui-fresh/home`) to `~/.backplane-gpui-fresh/backup-<date>/` with
    `~/.config/backplane/apns*`, and `boat snapshot bx_479dqxby bp-hub-before`. Rollback = the steps below in reverse (each is one setting or
    one service).
 1. `boat-hub.sh tailnet`, then `boat-hub.sh start`: the box hub starts on its empty home as `boat-hub.<tailnet>.ts.net`.
-2. Link the machines (Settings, Machines: an invite from the box, joined from the desktop). The desktop offers the uberbot; the box joins it
+2. Link the machines: on the box `BACKPLANE_HOME=~/bp/home ~/bp/backplane pair --machine`, on the desktop
+   `backplane pair --join https://boat-hub.tail9e0cf2.ts.net CODE`, then `pair --requests` / `--approve ID` on the box after the check codes match. The desktop offers the uberbot; the box joins it
    (`bots.uber_join`): its replica gets Bub's memory, space, page, persona and routines by sync.
 3. On the box, "Make this the home" (`bots.uber_home`): the box takes the lease one term on; the desktop steps down at the next exchange and
    stops firing Bub's routines; Bub's last 20 entries go ahead of its next message there. Reminders follow (`Ub.fires`).
