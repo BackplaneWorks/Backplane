@@ -540,32 +540,40 @@ fn keys(st: &State, session: &Value, info: &Value) -> Vec<Value> {
     v
 }
 
-/// The fallback hierarchy (Fallbackv.rows): one opt-in ordered list of provider/model per hub, tried in order at a confirmed usage limit. The list is edited with `setting fallback.chain=...` (Move up, Move down, Remove, Add).
+/// The failover order (Fallbackv.rows): one ordered list of providers (or provider/model) per hub, on unless turned off, Claude, Codex, Antigravity and Grok until the person
+/// sets one. Edited with `setting fallback.chain=...` (Move up, Move down, Remove, Add, Default order).
 fn fallback(st: &State, info: &Value) -> Vec<Value> {
     use crate::settings::fallback as fb;
     let caps: Value = info["models"].as_str().and_then(|s| serde_json::from_str(s).ok()).unwrap_or(Value::Null);
-    let chain = fb::parse(set(st, "fallback.chain", ""));
-    let on = set(st, "fallback.on", "off") == "on";
-    let mut v = vec![row("Fallback hierarchy", "Applies to all threads and bots, including delegates, routines and mail runs. Your chosen model runs first. At a confirmed usage limit, try entries after it; if the whole chain is unavailable, work pauses and asks for attention.",
+    let chain = fb::chain_of(st.settings.get("fallback.chain").map(String::as_str));
+    let on = fb::chain_on(st.settings.get("fallback.on").map(String::as_str));
+    let inv: Value = serde_json::from_str(set(st, "accounts.inventory", "")).unwrap_or(Value::Null);
+    let accounts = |p: &str| inv["profiles"].as_array().map_or(0, |a| a.iter().filter(|x| x["provider"] == p && x["state"] == "connected").count());
+    let mut v = vec![row("Failover order", "Applies to all threads, bots, routines and subthreads. When an account hits its usage limit, work moves to another account of the same provider that has usage left, then down this list. When every account is out, Backplane says when the first one resets and continues then. Work moves back up the list as accounts reset.",
         vec![btn("Enabled", "setting", "fallback.on=on", on), btn("Disabled", "setting", "fallback.on=off", !on)])];
     let down = |key: &str| { let mut r = chain.clone(); r.reverse(); let mut r = fb::up(&r, key); r.reverse(); r };
     for (i, t) in chain.iter().enumerate() {
         let key = t.key();
-        v.push(row(&format!("{}. {}", i + 1, key), if fb::caps_valid(&caps, t) { "" } else { "Unavailable on this machine. Skipped during fallback." },
+        let name = if t.model.is_empty() { fb::provider_name(&t.provider) } else { format!("{} {}", fb::provider_name(&t.provider), t.model) };
+        let n = accounts(&t.provider);
+        let note = if !fb::caps_valid(&caps, t) && !(t.model.is_empty() && n > 0) { "Not installed on this machine. Skipped.".to_string() }
+            else if n == 0 { "Its own sign-in on this machine.".to_string() } else if n == 1 { "1 account.".to_string() } else { format!("{n} accounts, the one with the most usage left first.") };
+        v.push(row(&format!("{}. {name}", i + 1), &note,
             vec![btn("Move up", "setting", &format!("fallback.chain={}", fb::show(&fb::up(&chain, &key))), false), btn("Move down", "setting", &format!("fallback.chain={}", fb::show(&down(&key))), false),
                  btn("Remove", "setting", &format!("fallback.chain={}", fb::show(&fb::remove(&chain, &key))), false)]));
     }
-    let providers: Vec<&str> = PROVIDERS.iter().copied().filter(|p| caps[p].as_array().map_or(false, |a| !a.is_empty())).collect();
+    if fb::show(&chain) != fb::DEFAULT_CHAIN { v.push(row("Default order", "Claude, Codex, Antigravity, Grok.", vec![btn("Use the default order", "setting", &format!("fallback.chain={}", fb::DEFAULT_CHAIN), false)])) }
+    let providers: Vec<&str> = PROVIDERS.iter().copied().filter(|p| caps[p].as_array().map_or(false, |a| !a.is_empty()) || accounts(p) > 0).collect();
     let ap = { let p = set(st, "fallback.add.provider", "codex"); if providers.contains(&p) { p } else { providers.first().copied().unwrap_or("codex") } };
-    let models: Vec<&str> = caps[ap].as_array().into_iter().flatten().filter_map(Value::as_str).take(16).collect();
-    let am = { let m = set(st, "fallback.add.model", ""); if models.contains(&m) { m } else { models.first().copied().unwrap_or("") } };
+    let mut models: Vec<&str> = vec!["default"]; models.extend(caps[ap].as_array().into_iter().flatten().filter_map(Value::as_str).take(16));
+    let am = { let m = set(st, "fallback.add.model", "default"); if models.contains(&m) { m } else { "default" } };
     if !providers.is_empty() {
-        v.push(row("Add a provider", "Choose an installed provider and model, then add it to the end.", chips(&providers, ap, "fallback.add.provider")));
+        v.push(row("Add a provider", "Choose an installed provider, and a model or its default, then add it to the end.", chips(&providers, ap, "fallback.add.provider")));
         v.push(row("Add a model", "Only installed models can be saved. Duplicate entries are not allowed.", chips(&models, am, "fallback.add.model")));
-        let target = fb::Target { provider: ap.to_string(), model: am.to_string() };
+        let target = fb::Target { provider: ap.to_string(), model: if am == "default" { String::new() } else { am.to_string() } };
         let mut next = chain.clone(); next.push(target.clone());
-        let addable = fb::caps_valid(&caps, &target) && !fb::has(&chain, &target.key());
-        v.push(row(&target.key(), "", if addable { vec![btn("Add to hierarchy", "setting", &format!("fallback.chain={}", fb::show(&next)), false)] } else { vec![] }));
+        let addable = (fb::caps_valid(&caps, &target) || (target.model.is_empty() && accounts(ap) > 0)) && !fb::has(&chain, &target.key());
+        v.push(row(&target.label(), "", if addable { vec![btn("Add to the order", "setting", &format!("fallback.chain={}", fb::show(&next)), false)] } else { vec![] }));
     }
     v
 }
@@ -919,13 +927,20 @@ mod tests {
     }
     #[test] fn the_fallback_hierarchy_edits_its_chain_by_setting_and_adds_only_installed_models() {
         let info = json!({"models": r#"{"claude":["opus"],"codex":["gpt-6"]}"#});
-        let r = pg_rows("agents", &[("fallback.chain", "claude/opus,codex/gpt-6"), ("fallback.on", "on")], json!({}), info);
+        let r = pg_rows("agents", &[("fallback.chain", "claude/opus,codex/gpt-6"), ("fallback.on", "on")], json!({}), info.clone());
         let labels: Vec<&str> = r.iter().map(|x| x["label"].as_str().unwrap()).collect();
-        assert!(labels.contains(&"1. claude/opus") && labels.contains(&"2. codex/gpt-6"), "{labels:?}");
-        let second = r.iter().find(|x| x["label"] == "2. codex/gpt-6").unwrap();
+        assert!(labels.contains(&"1. Claude opus") && labels.contains(&"2. Codex gpt-6"), "{labels:?}");
+        let second = r.iter().find(|x| x["label"] == "2. Codex gpt-6").unwrap();
         assert_eq!(second["buttons"][0]["value"], "fallback.chain=codex/gpt-6,claude/opus", "Move up");
         assert_eq!(second["buttons"][2]["value"], "fallback.chain=claude/opus", "Remove");
-        let enabled = r.iter().find(|x| x["label"] == "Fallback hierarchy").unwrap(); assert_eq!(enabled["buttons"][0]["on"], true);
+        let enabled = r.iter().find(|x| x["label"] == "Failover order").unwrap(); assert_eq!(enabled["buttons"][0]["on"], true);
+        assert_eq!(r.iter().find(|x| x["label"] == "Default order").unwrap()["buttons"][0]["value"], "fallback.chain=claude,codex,antigravity,grok");
+        // nothing set: on, in the default order, each provider on its default model
+        let r = pg_rows("agents", &[], json!({}), info);
+        let labels: Vec<&str> = r.iter().map(|x| x["label"].as_str().unwrap()).collect();
+        assert!(labels.contains(&"1. Claude") && labels.contains(&"2. Codex") && labels.contains(&"3. Antigravity") && labels.contains(&"4. Grok") && !labels.contains(&"Default order"), "{labels:?}");
+        assert_eq!(r.iter().find(|x| x["label"] == "Failover order").unwrap()["buttons"][0]["on"], true, "on until turned off");
+        assert_eq!(r.iter().find(|x| x["label"] == "2. Codex").unwrap()["buttons"][0]["value"], "fallback.chain=codex,claude,antigravity,grok");
     }
     #[test] fn cad_keeps_the_typed_path_and_sets_it_on_a_press() {
         let r = pg_rows("cad", &[], json!({}), json!({"kicad.cli": "/usr/bin/kicad-cli", "kicad.version": "10.0.7"}));

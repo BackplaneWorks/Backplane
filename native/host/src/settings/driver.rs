@@ -44,13 +44,36 @@ impl World {
     fn binding(&self) -> (String, u64) { let b: Value = serde_json::from_str(&self.get(&accounts::binding_key(&self.thread, &self.provider))).unwrap_or(Value::Null); (b["id"].as_str().unwrap_or("").to_string(), b["epoch"].as_u64().unwrap_or(0)) }
     /// AF.Provider.managed: the thread is on a named account, or the provider has any connected profile at all.
     pub fn managed(&self) -> bool { !self.binding().0.is_empty() || self.inventory().iter().any(|p| p["provider"] == self.provider.as_str()) }
-    fn chain_on(&self) -> bool { self.get("fallback.on") == "on" }
-    fn chain(&self) -> Vec<fb::Target> { fb::parse(&self.get("fallback.chain")) }
+    fn chain_on(&self) -> bool { fb::chain_on(self.settings.get("fallback.on").map(String::as_str)) }
+    fn chain(&self) -> Vec<fb::Target> { fb::chain_of(self.settings.get("fallback.chain").map(String::as_str)) }
+    /// A target of the order can run here: its CLI lists models (and this one, if named), or it is a provider alone with an account connected.
+    fn offered(&self, t: &fb::Target) -> bool { fb::caps_valid(&self.caps, t) || (t.model.is_empty() && self.inventory().iter().any(|p| p["provider"] == t.provider.as_str() && p["state"] == "connected")) }
+    /// Where `t` would run now: None when it cannot (not offered, held, or every account of it out), Some(None) on the CLI's own login (a provider with no accounts), else the account.
+    fn usable(&self, t: &fb::Target) -> Option<Option<(String, u64)>> {
+        let get = |k: &str| self.get(k); let profiles = self.inventory();
+        if !self.offered(t) || fb::target_held(&get, t, self.now) { return None }
+        if !profiles.iter().any(|p| p["provider"] == t.provider.as_str()) { return Some(None) }
+        fb::pick_account(&profiles, &get, self.now, &t.provider, &t.model).map(|p| Some((p["id"].as_str().unwrap_or("").to_string(), p["epoch"].as_u64().unwrap_or(0))))
+    }
+    /// The first target of the order, from its top, that can run now and is not where the thread is out (its own target, or its provider alone). `above`: only the targets ranked
+    /// above the thread's provider (the way back up once one has reset).
+    fn best(&self, above: bool) -> Option<(fb::Target, Option<(String, u64)>)> {
+        let chain = self.chain();
+        let stop = if above { chain.iter().position(|t| t.provider == self.provider).unwrap_or(0) } else { chain.len() };
+        chain[..stop].iter().filter(|t| !(t.provider == self.provider && (t.model.is_empty() || t.model == self.model))).find_map(|t| self.usable(t).map(|a| (t.clone(), a)))
+    }
+    /// "Codex (Work)", "Grok": a target and the account it runs on.
+    fn target_name(&self, t: &fb::Target, account: &Option<(String, u64)>) -> String {
+        let p = if t.model.is_empty() { fb::provider_name(&t.provider) } else { format!("{} {}", fb::provider_name(&t.provider), t.model) };
+        match account { Some((id, _)) => format!("{p} ({})", self.name(id)), None => p }
+    }
     /// The logins this request has run out on.
     fn tried(&self) -> Vec<String> { serde_json::from_str(&self.get(&tried_key(&self.thread))).unwrap_or_default() }
     fn name(&self, id: &str) -> String { accounts::label(id, &accounts::profile(&self.get("accounts.inventory"), id)) }
     fn zone(&self) -> String { self.get("tz.machine") }
     /// The settings with `events` applied (the next decision sees the hold just written).
+    #[cfg(test)]
+    fn clone_at(&self, now: u64) -> World { World { now, thread: self.thread.clone(), provider: self.provider.clone(), model: self.model.clone(), settings: self.settings.clone(), caps: self.caps.clone() } }
     #[cfg(test)]
     fn with(&self, events: &[Value]) -> World {
         let mut s = self.settings.clone();
@@ -169,23 +192,50 @@ pub fn next(w: &World) -> Next {
     } else if !(w.chain_on() && fb::target_held(&get, &from, at)) {
         return Next::Stay;
     }
-    // the opt-in chain: the targets after this one, the first that is offered, not held, and (a provider with accounts) has one to run on. Never wrapping.
-    let rest = fb::suffix(&w.chain(), &from.key());
-    let usable = |t: &fb::Target| -> Option<Option<(String, u64)>> {
-        if fb::pick(std::slice::from_ref(t), &get, &w.caps, at).is_none() { return None }
-        if !profiles.iter().any(|p| p["provider"] == t.provider.as_str()) { return Some(None) }
-        fb::pick_account(&profiles, &get, at, &t.provider, &t.model).map(|p| Some((p["id"].as_str().unwrap_or("").to_string(), p["epoch"].as_u64().unwrap_or(0))))
-    };
-    for to in &rest {
-        if let Some(account) = usable(to) {
-            let (reset, auth) = hold_of(w, &cur_id, cur_epoch);
-            let say = switched_line(&to.key(), &if w.managed() { w.name(&cur_id) } else { from.key() }, reset, auth, &w.zone(), at);
-            return Next::Chain { to: to.clone(), account, say };
-        }
+    // the order, from its top: the first other provider (or model) that is offered, not held, and (a provider with accounts) has one with allowance left. A provider out earlier
+    // that has reset since is taken again: the order is the person's preference, not a path walked once.
+    if let Some((to, account)) = w.best(false) {
+        let (reset, auth) = if w.managed() { hold_of(w, &cur_id, cur_epoch) } else { (provider_hold(w, &from), false) };
+        let here = fb::provider_name(&w.provider); let from_name = if w.managed() { format!("{here} ({})", w.name(&cur_id)) } else { here };
+        let say = switched_line(&w.target_name(&to, &account), &from_name, reset, auth, &w.zone(), at);
+        return Next::Chain { to, account, say };
     }
-    if w.managed() { return wait_all(w, &profiles, &from.key(), &cur_id, cur_epoch) }
-    let say = format!("Every configured fallback is out too. {} waits for you.", w.provider);
-    Next::Wait { events: vec![set(&format!("provider.resume.{th}"), &json!({"target":from.key(),"reset":0,"reason":"all fallbacks unavailable"}).to_string(), at), json!({"$":"TurnChanged","thread":th,"state":"interrupted","at":at}), act_row(th, "error", "fallback-blocked", &say, at)], reset: 0 }
+    wait_everything(w, &profiles, &from.key(), &cur_id, cur_epoch)
+}
+/// When the hold on a provider with no accounts (or on its model) ends: 0 unknown.
+fn provider_hold(w: &World, t: &fb::Target) -> u64 {
+    let rec = |scope: &str| serde_json::from_str::<Value>(&w.get(&fb::Limit::key(scope))).unwrap_or(Value::Null);
+    [rec(&t.provider), rec(&t.key())].iter().filter(|o| fb::hold_active(o, w.now)).map(fb::hold_end).filter(|e| *e > 0).min().unwrap_or(0)
+}
+/// Every target of the order is out too: one line with every provider's accounts and the earliest reset among all of them, and the thread goes on by itself then (`resume_on`
+/// takes the best that is free at that time, which may be a provider above this one). With no other provider in the order this is the provider's own wait (`wait_all`).
+fn wait_everything(w: &World, profiles: &[Value], from: &str, cur_id: &str, cur_epoch: u64) -> Next {
+    let (th, at) = (w.thread.as_str(), w.now); let get = |k: &str| w.get(k);
+    let others: Vec<fb::Target> = w.chain().into_iter().filter(|t| t.provider != w.provider && w.offered(t)).collect();
+    if others.is_empty() && w.managed() { return wait_all(w, profiles, from, cur_id, cur_epoch) }
+    let earliest = |a: u64, b: u64| if a == 0 { b } else if b == 0 { a } else { a.min(b) };
+    let names_of = |p: &str| -> Vec<String> { profiles.iter().filter(|x| x["provider"] == p && x["state"] == "connected").filter_map(|x| x["label"].as_str().map(str::to_string)).collect() };
+    let mut until = if w.managed() { fb::next_reset(profiles, &get, at, &w.provider, &w.model, cur_id, cur_epoch) } else { provider_hold(w, &fb::Target { provider: w.provider.clone(), model: w.model.clone() }) };
+    let mut parts = vec![]; let mut seen: Vec<String> = vec![];
+    let mut own = names_of(&w.provider); if w.managed() && (cur_id.is_empty() || w.tried().contains(&fb::tried_id("", 0))) { own.insert(0, "Default account".into()) }
+    parts.push(if own.is_empty() { fb::provider_name(&w.provider) } else { format!("{}: {}", fb::provider_name(&w.provider), own.join(", ")) }); seen.push(w.provider.clone());
+    for t in &others {
+        let r = if profiles.iter().any(|p| p["provider"] == t.provider.as_str()) { fb::next_reset(profiles, &get, at, &t.provider, &t.model, "", 0) } else { provider_hold(w, t) };
+        until = earliest(until, if r > at { r } else { 0 });
+        if !seen.contains(&t.provider) { seen.push(t.provider.clone()); let n = names_of(&t.provider); parts.push(if n.is_empty() { fb::provider_name(&t.provider) } else { format!("{}: {}", fb::provider_name(&t.provider), n.join(", ")) }) }
+    }
+    let until = if until > at { until } else { 0 };
+    // a dead sign-in on this account and nothing with a reset to wait for: the sign-in is what it waits for
+    if until == 0 && !cur_id.is_empty() && hold_of(w, cur_id, cur_epoch).1 { return wait_all(w, profiles, from, cur_id, cur_epoch) }
+    let list = parts.join("; ");
+    let mut events = vec![set(&format!("provider.resume.{th}"), &json!({"target":from,"reset":until,"reason":"every account in the failover order is out"}).to_string(), at)];
+    if until > 0 {
+        events.push(act_row(th, "warn", "provider-wait", &format!("Every account is out ({list}). Continuing at {}, when the first one resets.", rules::when(&w.zone(), until, at)), at));
+    } else {
+        events.push(json!({"$":"TurnChanged","thread":th,"state":"interrupted","at":at})); // nothing will start it again: its task and launcher hear it stopped
+        events.push(act_row(th, "error", "fallback-blocked", &format!("Every account is out ({list}) and no reset time is known. Waiting for you."), at));
+    }
+    Next::Wait { events, reset: until }
 }
 
 // ---- the hub side ----
@@ -381,8 +431,24 @@ pub(crate) async fn sweep_holds(hub: &Arc<Hub>, now_s: u64) {
     let ev: Vec<Value> = inv["profiles"].as_array().into_iter().flatten().chain(std::iter::once(&default)).flat_map(|p| fb::clearable(p, &names, &get, now_s)).map(|k| set(&k, "", now_s)).collect();
     if !ev.is_empty() { let _ = hub.commit_many(&ev).await; }
 }
-/// The account a thread left has reset: the thread goes back to it, between turns.
+/// The account a thread left has reset: the thread goes back to it, between turns. A thread the order moved to another provider (`fallback.intent`) goes back up the order
+/// first: to the highest provider above the one it is on that has an account free again, and stays marked until it is back where it started.
 pub(crate) async fn returns(hub: &Arc<Hub>, now_s: u64) {
+    let intents: Vec<String> = { let m = hub.model().await; m.settings_with_prefix("fallback.intent.").map(|(k, _)| k.to_string()).collect() };
+    for k in intents {
+        let intent = hub.setting(&k).await.unwrap_or_default(); if intent.is_empty() { continue }
+        let th = k.trim_start_matches("fallback.intent.").to_string();
+        let (provider, model, idle) = { let m = hub.model().await; match m.threads.get(&th) { Some(t) if !t.deleted && !t.archived => (t.provider.clone(), t.model.clone(), t.turn != "running"), _ => { drop(m); let _ = hub.commit_many(&[set(&k, "", now_s)]).await; continue } } };
+        if !idle || !hub.setting(&format!("provider.resume.{th}")).await.unwrap_or_default().is_empty() { continue }
+        let mut w = world_of(hub, &th, provider, model).await; w.now = now_s;
+        if !w.chain_on() { continue }
+        let Some((to, account)) = w.best(true) else { continue };
+        let say = format!("Back on {}: it has reset", w.target_name(&to, &account));
+        if let Err(e) = ask(hub, "fallback.switch", json!({"thread":th,"provider":to.provider,"model":to.model,"say":say})).await { eprintln!("driver: {th}: could not go back up the order: {e}"); continue }
+        if let Some((id, epoch)) = account { if let Err(e) = ask(hub, "accounts.choose", json!({"thread":th,"profile":id,"epoch":epoch,"by":"return"})).await { eprintln!("driver: {th}: could not choose the account it went back to: {e}") } }
+        // back where it started: nothing to return to any more (the switch cleared the mark); somewhere in between: still marked, it goes on up as more resets come
+        if fb::Target::parse(&intent).provider != to.provider { let _ = hub.commit_many(&[set(&k, &intent, now_s)]).await; }
+    }
     let keys: Vec<String> = { let m = hub.model().await; m.settings_with_prefix("account.failover.preference.").map(|(k, _)| k.to_string()).collect() };
     for k in keys {
         let raw = hub.setting(&k).await.unwrap_or_default(); if raw.is_empty() { continue }
@@ -461,7 +527,11 @@ impl Ticker for ResumeTicker {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// The order off unless the test names it: these are one provider's rules. `ordered` is the hub as it starts, with the default order on.
     fn world(provider: &str, model: &str, settings: &[(&str, String)]) -> World {
+        let mut w = ordered(provider, model, settings); w.settings.entry("fallback.on".into()).or_insert_with(|| "off".into()); w
+    }
+    fn ordered(provider: &str, model: &str, settings: &[(&str, String)]) -> World {
         World { now: 1000, thread: "t1".into(), provider: provider.into(), model: model.into(), settings: settings.iter().map(|(k, v)| (k.to_string(), v.clone())).collect(), caps: json!({"claude":["opus","sonnet"],"codex":["gpt-6"],"grok":["g"]}) }
     }
     fn lim(scope: &str, reset: u64) -> fb::Limit { fb::Limit { scope: scope.into(), reason: "You've hit your usage limit".into(), reset, auth: false } }
@@ -493,8 +563,10 @@ mod tests {
         let w = world("claude", "opus", &[("fallback.on", "on".into()), ("fallback.chain", "claude/opus,codex/gpt-6".into()), hold.clone()]);
         match next(&w) { Next::Chain { to, account, .. } => assert_eq!((to.key(), account), ("codex/gpt-6".to_string(), None)), n => panic!("{n:?}") }
         // codex is held too: nothing is left, the work waits and says so; the chain does not wrap back to claude
-        let both = world("codex", "gpt-6", &[("fallback.on", "on".into()), ("fallback.chain", "claude/opus,codex/gpt-6".into()), hold, ("fallback.outage.codex", json!({"scope":"codex","reset":0}).to_string())]);
-        match next(&both) { Next::Wait { events, reset } => { assert_eq!(reset, 0); assert!(events.iter().any(|e| e["kind"] == "fallback-blocked") && events.iter().any(|e| e["key"] == "provider.resume.t1")) } n => panic!("{n:?}") }
+        let both = world("codex", "gpt-6", &[("fallback.on", "on".into()), ("fallback.chain", "claude/opus,codex/gpt-6".into()), hold, ("fallback.outage.codex", json!({"scope":"codex","reset":0,"at":900}).to_string())]);
+        match next(&both) { Next::Wait { events, reset } => {
+            assert_eq!(reset, 1 + fb::UNKNOWN_HOLD_S, "a limit with no reset is tried again an hour after it was met: Claude's, met first, is the earliest");
+            assert!(events.iter().any(|e| e["kind"] == "provider-wait" && e["summary"].as_str().unwrap().starts_with("Every account is out (Codex; Claude). Continuing at ")) && events.iter().any(|e| e["key"] == "provider.resume.t1"), "{events:?}") } n => panic!("{n:?}") }
     }
     #[test] fn a_chain_target_whose_accounts_are_all_held_is_passed_over() {
         let at = now_ms() / 1000; let (k, i) = inv(json!([{"id":"c","provider":"codex","state":"connected","epoch":1}]));
@@ -503,6 +575,45 @@ mod tests {
         match next(&w) { Next::Chain { to, account, .. } => assert_eq!((to.provider.as_str(), account), ("codex", Some(("c".to_string(), 1))), "it runs on the account it has there"), n => panic!("{n:?}") }
         let held = w.with(&[set(&fb::hold_key("codex", "c", 1), &json!({"scope":"codex","reset":at + 100}).to_string(), 1)]);
         match next(&held) { Next::Chain { to, account, .. } => assert_eq!((to.provider.as_str(), account), ("grok", None), "codex has nothing to run on"), n => panic!("{n:?}") }
+    }
+    fn mixed(at: u64) -> (&'static str, String) { inv(json!([
+        {"id":"w","provider":"claude","state":"connected","epoch":2,"label":"Work","allowance":{"state":"ok","at":at,"provider":"claude","windows":[{"scope":"five_hour","used_percent":50.0}]}},
+        {"id":"p","provider":"claude","state":"connected","epoch":1,"label":"Personal","allowance":{"state":"ok","at":at,"provider":"claude","windows":[{"scope":"five_hour","used_percent":10.0}]}},
+        {"id":"c","provider":"codex","state":"connected","epoch":1,"label":"Codex Work","allowance":{"state":"ok","at":at,"provider":"codex","windows":[{"scope":"five_hour","used_percent":5.0}]}}])) }
+    fn hold(p: &str, id: &str, epoch: u64, reset: u64) -> Value { set(&fb::hold_key(p, id, epoch), &json!({"scope":p,"reset":reset,"at":1}).to_string(), 1) }
+    #[test] fn the_default_order_tries_every_account_of_the_provider_then_the_next_provider_then_waits_for_the_earliest_reset_anywhere() {
+        let at = now_ms() / 1000; let (k, i) = mixed(at);
+        let mut w = ordered("claude", "", &[(k, i), ("account.thread.t1.claude", accounts::binding_show("w", 2))]); w.now = at;
+        assert!(w.chain_on() && fb::show(&w.chain()) == fb::DEFAULT_CHAIN, "on, in the default order, until the person sets one");
+        // 1. the same provider first
+        let w1 = w.with(&on_limit(&w, &lim("claude", at + 3000), true, "go").events);
+        match next(&w1) { Next::Account { id, .. } => assert_eq!(id, "p"), n => panic!("{n:?}") }
+        // 2. both Claude accounts out: Codex, on its account
+        let w2 = w1.with(&[hold("claude", "p", 1, at + 2000), set(&tried_key("t1"), &json!([fb::tried_id("w", 2), fb::tried_id("p", 1)]).to_string(), 1)]);
+        match next(&w2) { Next::Chain { to, account, say } => { assert_eq!((to.label(), account), ("codex".to_string(), Some(("c".to_string(), 1)))); assert!(say.starts_with("Switched to Codex (Codex Work): Claude (Work) ran out (resets "), "{say}") } n => panic!("{n:?}") }
+        // 3. on Codex, its account out too (Antigravity and Grok not installed): one line, the earliest reset of any of them, and it goes on by itself then
+        let mut w3 = ordered("codex", "", &[mixed(at), ("account.thread.t1.codex", accounts::binding_show("c", 1))]); w3.now = at; w3.caps = json!({"claude":["opus"],"codex":["gpt-6"]});
+        let w3 = w3.with(&[hold("claude", "w", 2, at + 3000), hold("claude", "p", 1, at + 2000), hold("codex", "c", 1, at + 4000), set(&tried_key("t1"), &json!([fb::tried_id("c", 1)]).to_string(), 1)]);
+        match next(&w3) { Next::Wait { events, reset } => {
+            assert_eq!(reset, at + 2000, "Personal resets first");
+            let line = events.iter().find(|e| e["kind"] == "provider-wait").unwrap()["summary"].as_str().unwrap().to_string();
+            assert!(line.starts_with("Every account is out (Codex: Codex Work; Claude: Work, Personal). Continuing at "), "{line}");
+            assert!(!events.iter().any(|e| e["$"] == "TurnChanged"), "it will start again: its turn has not ended");
+        } n => panic!("{n:?}") }
+        // the reset comes: the resume (tried cleared) takes the provider above, Claude, on the account that reset
+        let mut w4 = w3.with(&[set(&tried_key("t1"), "", 1)]); w4.now = at + 2001; w4.settings.remove(&tried_key("t1"));
+        match next(&w4) { Next::Chain { to, account, .. } => assert_eq!((to.provider.as_str(), account), ("claude", Some(("p".to_string(), 1)))), n => panic!("{n:?}") }
+        // 4. between turns, a thread the order moved down goes back up once an account above has reset, and not before
+        assert_eq!(w3.best(true), None, "Claude is still out");
+        let mut later = w3.clone_at(at + 2001); later.settings.remove(&tried_key("t1"));
+        assert_eq!(later.best(true).map(|(t, a)| (t.provider, a)), Some(("claude".to_string(), Some(("p".to_string(), 1)))));
+        let mut top = ordered("claude", "", &[mixed(at)]); top.now = at; assert_eq!(top.best(true), None, "nothing is above the top");
+    }
+    #[test] fn the_order_turned_off_keeps_a_thread_on_its_provider() {
+        let at = now_ms() / 1000; let (k, i) = mixed(at);
+        let mut w = ordered("claude", "", &[(k, i), ("fallback.on", "off".into()), ("account.thread.t1.claude", accounts::binding_show("w", 2))]); w.now = at;
+        let w = w.with(&[hold("claude", "w", 2, at + 3000), hold("claude", "p", 1, at + 2000), set(&tried_key("t1"), &json!([fb::tried_id("w", 2), fb::tried_id("p", 1)]).to_string(), 1)]);
+        match next(&w) { Next::Wait { events, .. } => assert!(events.iter().any(|e| e["summary"].as_str().map_or(false, |s| s.starts_with("Every claude account is out"))), "{events:?}"), n => panic!("{n:?}") }
     }
     #[test] fn a_thread_not_held_is_restarted_where_it_was() { let w = world("claude", "opus", &[("fallback.on", "on".into()), ("fallback.chain", "claude/opus,codex/gpt-6".into())]); assert_eq!(next(&w), Next::Stay); }
     fn two() -> (&'static str, String) { inv(json!([{"id":"w","provider":"claude","state":"connected","epoch":2,"label":"Work","catalog":[{"id":"opus"}]},{"id":"p","provider":"claude","state":"connected","epoch":1,"label":"Personal","catalog":[{"id":"opus"}],

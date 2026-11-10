@@ -26,15 +26,15 @@ impl Proposal {
     pub fn from(o: &Value) -> Proposal { let s = |k: &str| o.get(k).and_then(Value::as_str).unwrap_or("").to_string(); Proposal { old_on: s("old_on"), old_chain: s("old_chain"), new_on: s("new_on"), new_chain: s("new_chain"), expires: o.get("expires").and_then(Value::as_u64).unwrap_or(0) } }
     /// Proposal.detail: what the person reads.
     pub fn detail(&self) -> String {
-        format!("Hub-wide provider fallback proposal\nEnabled: {} → {}\nHierarchy: {} → {}\nValues are effective settings; an unset switch defaults to off and an unset hierarchy is empty. Unchanged settings are left untouched.\nExpires at Unix time {}.\nOn a confirmed provider limit, another eligible account of the same provider may be tried first, independently of this setting. If none is available, enabled fallback may switch active threads and bots to a later eligible provider/model; an exhausted hierarchy holds work. This change does not itself start or interrupt a conversation.",
+        format!("Hub-wide provider fallback proposal\nEnabled: {} → {}\nHierarchy: {} → {}\nValues are effective settings; an unset switch defaults to on and an unset hierarchy is the default order (claude, codex, antigravity, grok). Unchanged settings are left untouched.\nExpires at Unix time {}.\nOn a confirmed provider limit, another eligible account of the same provider may be tried first, independently of this setting. If none is available, enabled fallback may switch active threads and bots to a later eligible provider/model; an exhausted hierarchy holds work. This change does not itself start or interrupt a conversation.",
             self.old_on, self.new_on, self.old_chain, self.new_chain, self.expires)
     }
 }
 
-/// The effective values (an unset switch is "off", an unset chain is empty).
+/// The effective values (an unset switch is "on", an unset chain is the default order).
 async fn effective(hub: &Arc<Hub>) -> (String, String) {
-    let on = hub.setting("fallback.on").await.filter(|s| !s.is_empty()).unwrap_or_else(|| "off".into());
-    (on, hub.setting("fallback.chain").await.unwrap_or_default())
+    let on = if crate::settings::fallback::chain_on(hub.setting("fallback.on").await.as_deref()) { "on" } else { "off" }.to_string();
+    (on, hub.setting("fallback.chain").await.unwrap_or_else(|| crate::settings::fallback::DEFAULT_CHAIN.into()))
 }
 
 /// settings_inspect: the supported settings and the installed models. Never credentials.
