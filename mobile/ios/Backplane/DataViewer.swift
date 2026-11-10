@@ -613,7 +613,7 @@ struct DataSplitTab: View {
     @ViewBuilder private func pane(_ label: String, _ id: String, _ frame: PlotFrame?, _ mesh: MeshFrame?, _ open: String, _ none: String) -> some View {
         ZStack(alignment: .topLeading) {
             if let v = plainViewer(open: open, source: "split|" + id, picked: "", off: 0, dim: 0, lift: 255) {
-                PlotCanvasView(frame: (frame?.none.isEmpty ?? true) ? frame : nil, mesh: mesh, scope: thread.id + "|split", viewer: v, pick: { _ in }).accessibilityIdentifier("data.split." + id)
+                PlotCanvasView(frame: (frame?.none.isEmpty ?? true) ? frame : nil, mesh: mesh, parts: mesh.flatMap { client.plots.parts.parts($0.key) }, scope: thread.id + "|split", viewer: v, pick: { _ in }).accessibilityIdentifier("data.split." + id)
             }
             Text(Tr.t(label).uppercased()).font(.system(.caption2, design: .monospaced)).foregroundStyle(.secondary).padding(6)
             let say = !none.isEmpty ? none : (frame?.none ?? "")

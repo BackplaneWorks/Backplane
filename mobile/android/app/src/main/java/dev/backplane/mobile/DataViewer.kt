@@ -484,6 +484,8 @@ private fun SplitTab(thread: DThread, files: DataClient.ProjectFiles?) {
     val plots = DataClient.plots
     val seen = plots.frame to plots.mesh   // the store changes on each frame: read it so the panes follow
     val sch = plots.cachedFrame("1|$root|"); val brd = plots.cachedFrame("0|$root|"); val mdl = plots.cachedMesh("2|$root|")
+    // the parts that stream in after the board model, as the 3D tab draws them (Split showed the bare board only)
+    val prt = mdl?.let { m -> plots.parts.parts?.takeIf { it.key == m.key } }
     val bg = dcs.background.toArgb() and 0xFFFFFF
     // a tap in any pane: what it is, and its part lit on the schematic and the board, its net on the board (the desktop's cross-probe)
     val scope = rememberCoroutineScope()
@@ -499,7 +501,7 @@ private fun SplitTab(thread: DThread, files: DataClient.ProjectFiles?) {
             SplitPane("Schematic", thread.id + "|split|sch", sch, null, false, bg, if (root.isEmpty() || files?.sch.isNullOrEmpty()) Msg.android_viewer_nosch else "", m, lit = lit["1|$root|"].orEmpty(), tap = tap, untap = clear)
             val pick: @Composable (Modifier) -> Unit = { a -> Row(a.padding(4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 ViewChip(Msg.viewer_board, !three, "split.pick.board") { splitThree[thread.id] = false }; ViewChip(Msg.viewer_solid, three, "split.pick.3d") { splitThree[thread.id] = true } } }
-            if (three) SplitPane("3D", thread.id + "|split|3d", brd, mdl, true, bg, if (files?.pcb.isNullOrEmpty()) Msg.android_viewer_noboard else "", m, pick, lit["0|$root|"].orEmpty(), tap, clear)
+            if (three) SplitPane("3D", thread.id + "|split|3d", brd, mdl, true, bg, if (files?.pcb.isNullOrEmpty()) Msg.android_viewer_noboard else "", m, pick, lit["0|$root|"].orEmpty(), tap, clear, prt)
             else SplitPane("Board", thread.id + "|split|brd", brd, null, false, bg, if (files?.pcb.isNullOrEmpty()) Msg.android_viewer_noboard else "", m, pick, lit["0|$root|"].orEmpty(), tap, clear)
         }
         if (maxWidth > maxHeight) Row(Modifier.fillMaxSize()) { panes(Modifier.weight(1f).fillMaxHeight()) }
@@ -509,7 +511,7 @@ private fun SplitTab(thread: DThread, files: DataClient.ProjectFiles?) {
 }
 @Composable
 private fun SplitPane(label: String, source: String, frame: PlotFrame?, mesh: MeshFrame?, three: Boolean, bg: Int, none: String, modifier: Modifier, pick: (@Composable (Modifier) -> Unit)? = null,
-                      lit: List<String> = emptyList(), tap: (String, Int, Int) -> Unit = { _, _, _ -> }, untap: () -> Unit = {}) {
+                      lit: List<String> = emptyList(), tap: (String, Int, Int) -> Unit = { _, _, _ -> }, untap: () -> Unit = {}, parts: PartsFrame? = null) {
     val tapNow by rememberUpdatedState(tap); val untapNow by rememberUpdatedState(untap); val frameNow by rememberUpdatedState(frame)
     val vbg = viewerBackdrop()   // the 3D background: the setting, or the theme's (redraws when either changes)
     Box(modifier.border(BorderStroke(1.dp, dcs.outlineVariant)).background(dcs.background)) {
@@ -517,7 +519,7 @@ private fun SplitPane(label: String, source: String, frame: PlotFrame?, mesh: Me
             s.bindSource(source); s.setThree(three)
             s.backdrop(vbg)
             if (frame != null && frame.none.isEmpty()) s.show(frame, bg, 0x1f6f43, IntArray(0))
-            if (three) s.mesh(mesh)
+            if (three) { s.mesh(mesh); s.parts(parts) }
             s.onPick = { p ->
                 val c = runCatching { org.json.JSONArray(p) }.getOrNull()
                 val best = c?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) }.minByOrNull { it.optLong("a") } }
@@ -681,11 +683,19 @@ object Probe {
 @Composable
 private fun ProbeCard(info: String, lit: Int, modifier: Modifier, close: () -> Unit) {
     val (head, rest) = Probe.lines(info)
+    // the words can be selected (a long press), and Copy takes them all: what was picked and its values (the person: the value at the foot should copy)
+    val ctx = androidx.compose.ui.platform.LocalContext.current
+    var copied by remember(info) { mutableStateOf(false) }
+    LaunchedEffect(copied) { if (copied) { kotlinx.coroutines.delay(1500); copied = false } }
     Row(modifier.fillMaxWidth().background(dcs.surfaceVariant.copy(alpha = .94f)).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(start = 12.dp, top = 6.dp, bottom = 6.dp).testTag("viewer.info"), verticalAlignment = Alignment.CenterVertically) {
-        Column(Modifier.weight(1f)) {
+        Box(Modifier.weight(1f)) { androidx.compose.foundation.text.selection.SelectionContainer { Column {
             Text(head, color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
             if (rest.isNotEmpty() || lit > 1) Text(listOf(rest, if (lit > 1) Msg.android_probe_lit(lit) else "").filter { it.isNotEmpty() }.joinToString(" · "), color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 11.sp, maxLines = 2, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
-        }
+        } } }
+        Box(Modifier.size(44.dp).clickable {
+            (ctx.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager).setPrimaryClip(android.content.ClipData.newPlainText("Backplane", listOf(head, rest).filter { it.isNotEmpty() }.joinToString("\n")))
+            copied = true
+        }.testTag("viewer.info.copy"), contentAlignment = Alignment.Center) { Icon(if (copied) Icons.Default.Check else Icons.Default.ContentCopy, Msg.common_copy, tint = if (copied) dcs.primary else dcs.onSurfaceVariant, modifier = Modifier.size(18.dp)) }
         Box(Modifier.size(44.dp).clickable(onClick = close).testTag("viewer.info.close"), contentAlignment = Alignment.Center) { Icon(Icons.Default.Close, Msg.common_close, tint = dcs.onSurfaceVariant, modifier = Modifier.size(18.dp)) }
     }
 }
