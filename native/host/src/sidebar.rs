@@ -193,8 +193,20 @@ struct Shelves<'a> { pinned: Vec<&'a str>, active: Vec<&'a str>, settled: Vec<&'
 fn shelves_of<'a>(st: &'a State, project: &str, now: u64, kids: &HashSet<&str>) -> Shelves<'a> {
     let mut ids: Vec<&str> = st.threads.iter().filter(|(i, t)| t.project == project && !kids.contains(i.as_str()) && !st.run_hidden(i)).map(|(i, _)| i.as_str()).collect();
     ids.sort();
+    shelves_from(st, &ids, now)
+}
+/// Every project's listed conversations (a hidden child and a bot's run are not), by id: one pass over the threads for all the projects of a plan,
+/// where asking each project in turn (`shelves_of`) reads every thread once per project.
+fn listed_by_project<'a>(st: &'a State, kids: &HashSet<&str>) -> HashMap<&'a str, Vec<&'a str>> {
+    let mut m: HashMap<&str, Vec<&str>> = HashMap::new();
+    for (i, t) in &st.threads { if !kids.contains(i.as_str()) && !st.run_hidden(i) { m.entry(t.project.as_str()).or_default().push(i.as_str()); } }
+    for v in m.values_mut() { v.sort(); }
+    m
+}
+/// The shelves of one project's listed conversations, `ids` in id order.
+fn shelves_from<'a>(st: &'a State, ids: &[&'a str], now: u64) -> Shelves<'a> {
     let mut s = Shelves { pinned: vec![], active: vec![], settled: vec![], hidden: vec![], snoozed: vec![] };
-    for id in ids {
+    for &id in ids {
         let t = &st.threads[id]; let until = st.snooze_until.get(id).copied().unwrap_or(0);
         match shelf_at(t, until, now) { Shelf::Pinned => s.pinned.push(id), Shelf::Active => s.active.push(id), Shelf::Settled => s.settled.push(id), Shelf::Hidden => s.hidden.push(id), Shelf::Snoozed => s.snoozed.push(id) }
     }
@@ -259,6 +271,7 @@ pub fn plan<'a>(st: &'a State, o: &'a Opts<'a>) -> Plan<'a> {
         for (id, _) in all { let p = display_parent(st, id); if !p.is_empty() { kids_by.entry(p).or_default().push(id); } }
     }
     let kids = kids_hidden(st);
+    let listed = listed_by_project(st, &kids);
     let mut ps: Vec<Planned> = vec![];
     // a removed project keeps its row while its thread is the one open (the row goes when another is chosen)
     let open_project = st.threads.get(o.selected).map(|t| t.project.as_str()).unwrap_or("");
@@ -266,10 +279,11 @@ pub fn plan<'a>(st: &'a State, o: &'a Opts<'a>) -> Plan<'a> {
         if p.removed && id != open_project { continue }
         // Side.projs.keep: the Scratch project (conversations that belong to no project) is not listed among projects
         if id.rsplit('~').next() == Some("scratch") && !id.contains('~') || id.split_once('~').map_or(false, |(_, l)| l == "scratch") { continue }
-        let raw = shelves_of(st, id, o.now, &kids);
+        let mine: &[&str] = listed.get(id.as_str()).map_or(&[], Vec::as_slice);
+        let raw = shelves_from(st, mine, o.now);
         // Side.latest: a thread's last move for its project's place; settling by hand counts
         let mut latest = p.created;
-        for tid in st.threads.iter().filter(|(i, t)| t.project == *id && !kids.contains(i.as_str()) && !st.run_hidden(i)).map(|(i, _)| i) { let t = &st.threads[tid]; let touched = if t.override_ == Override::ForcedSettled { t.activity.max(t.settled_at) } else { t.activity }; latest = latest.max(touched); }
+        for tid in mine { let t = &st.threads[*tid]; let touched = if t.override_ == Override::ForcedSettled { t.activity.max(t.settled_at) } else { t.activity }; latest = latest.max(touched); }
         ps.push(Planned { id: id.as_str(), created: p.created, latest, key: order_key(st, &format!("project:{id}"), "active"), sh: tree_shelves(st, &raw) });
     }
     // PSlot.before: keyed projects first, by key; then SRow.before. (`latest` is the group rank: live, quiet or older)
@@ -521,6 +535,30 @@ mod tests {
     const PC: &str = r#"{"$":"ProjectCreated","id":"p1","title":"proj","root":"/r","at":10}"#;
     fn tc(id: &str, at: u64) -> String { format!(r#"{{"$":"ThreadCreated","id":"{id}","project":"p1","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":{at}}}"#) }
     fn opts<'a>(open: &'a HashSet<String>, now: u64) -> Opts<'a> { Opts { hub: "h", now, selected: "", open, older_open: false, query: "" } }
+
+    // one pass over the threads lists every project's conversations as asking each project in turn does: same shelves, same order, hidden children left out
+    #[test] fn the_one_pass_listing_gives_each_project_the_shelves_asked_one_by_one() {
+        let pc = |p: &str| format!(r#"{{"$":"ProjectCreated","id":"{p}","title":"{p}","root":"/r/{p}","at":10}}"#);
+        let th = |id: &str, p: &str, at: u64| tc(id, at).replace(r#""project":"p1""#, &format!(r#""project":"{p}""#));
+        let mut lines: Vec<String> = vec![pc("p1"), pc("p2"), pc("p3")];
+        for i in 0..60u64 { lines.push(th(&format!("t{i:02}"), ["p1", "p2", "p2"][i as usize % 3], 100 + (i * 7) % 13)); }
+        for i in (0..60u64).step_by(5) { lines.push(format!(r#"{{"$":"ThreadPinned","id":"t{i:02}","pinned":true,"at":200}}"#)); }
+        for i in (1..60u64).step_by(4) { lines.push(format!(r#"{{"$":"ThreadSettled","id":"t{i:02}","manual":true,"at":{}}}"#, 300 + i)); }
+        // a delegated child of a person's thread is hidden from the lists
+        lines.push(r#"{"$":"SettingSet","key":"thread.parent.t07","value":"t04","at":20}"#.into());
+        lines.push(r#"{"$":"TaskDelegated","task":"k","parent":"t04","child":"t07","at":13}"#.into());
+        let s = fold(&lines.iter().map(String::as_str).collect::<Vec<_>>());
+        let kids = kids_hidden(&s); let listed = listed_by_project(&s, &kids);
+        assert!(kids.contains("t07") && !listed.values().flatten().any(|i| *i == "t07"));
+        assert_eq!(listed.values().map(Vec::len).sum::<usize>(), s.threads.keys().filter(|i| !kids.contains(i.as_str()) && !s.run_hidden(i)).count());
+        for p in ["p1", "p2", "p3"] {
+            let (a, b) = (shelves_of(&s, p, 1000, &kids), shelves_from(&s, listed.get(p).map_or(&[], Vec::as_slice), 1000));
+            assert_eq!((&a.pinned, &a.active, &a.settled, &a.hidden, &a.snoozed), (&b.pinned, &b.active, &b.settled, &b.hidden, &b.snoozed), "project {p}");
+        }
+        let p2 = shelves_from(&s, &listed["p2"], 1000);
+        assert!(!p2.pinned.is_empty() && !p2.active.is_empty() && !p2.settled.is_empty(), "the fixture fills three shelves: {} {} {}", p2.pinned.len(), p2.active.len(), p2.settled.len());
+        assert!(listed.get("p3").is_none(), "a project with no conversation has no list");
+    }
 
     // Side.want: a red row says what it wants; the rest say nothing
     #[test] fn a_red_row_says_what_it_wants() {
