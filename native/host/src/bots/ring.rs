@@ -29,6 +29,9 @@ After acting, post one short line in #ring-requests saying what you did with the
 static HEAR: tokio::sync::Semaphore = tokio::sync::Semaphore::const_new(1);
 static BUSY: Mutex<Option<HashSet<String>>> = Mutex::new(None);
 static QUERY: Mutex<String> = Mutex::new(String::new());
+static TEST: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+/// The owning hub when it is another (the setting `ring.home`, `{url, machine}`, written at a cutover: docs/ring.md); Null when this hub owns the ring.
+async fn home_of(hub: &Hub) -> Value { hub.setting("ring.home").await.and_then(|t| serde_json::from_str::<Value>(&t).ok()).filter(|v| v["url"].as_str().map_or(false, |u| !u.is_empty())).unwrap_or(Value::Null) }
 fn claim(id: &str) -> bool { BUSY.lock().unwrap().get_or_insert_with(HashSet::new).insert(id.to_string()) }
 fn release(id: &str) { if let Some(s) = BUSY.lock().unwrap().as_mut() { s.remove(id); } }
 fn gs<'a>(p: &'a Value, k: &str) -> &'a str { p.get(k).and_then(Value::as_str).unwrap_or("") }
@@ -52,7 +55,7 @@ impl Bots {
         let test = h("x-index-test") == "true" || ringbox::text_of(&ps, "test") == "true" || h("x-index-trigger") == "test-event";
         if test {
             let _ = self.hub.commit_many(&[json!({"$":"HookHit","id":hid,"at":now})]).await;
-            self.hub.set_info("ring.test", &now.to_string()).await;
+            TEST.store(now, std::sync::atomic::Ordering::Relaxed); self.hub.set_info("ring.test", &now.to_string()).await; self.ring_publish().await;
             return HttpReply::text("200 OK", "test received: Backplane hears this webhook")
         }
         let audio = ringbox::audio_of(&ps);
@@ -110,6 +113,7 @@ impl Bots {
         let me = self.clone();
         tokio::spawn(async move {
             tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            if !home_of(&me.hub).await.is_null() { return } // another hub owns the ring now: nothing is sent from here twice
             let home = me.hub.cfg.home.clone(); let now = now_s();
             let ids = blocking(move || { let mut v = ringbox::pending(&ringbox::list(&home), now); v.reverse(); v }).await.unwrap_or_default();
             if !ids.is_empty() { eprintln!("ring: {} note(s) taken up again", ids.len()) }
@@ -132,6 +136,12 @@ impl Bots {
     }
     /// The ring's bot and webhook as they stand (none until `ring.setup`): its URL and the header the Pebble app sends.
     async fn ring_setup_info(&self) -> Value {
+        let mut v = self.ring_setup_here().await; let home = home_of(&self.hub).await;
+        if !home.is_null() { v["home"] = home; v["hook"] = json!(""); }
+        let t = TEST.load(std::sync::atomic::Ordering::Relaxed); if t > 0 { v["test"] = json!(t) }
+        v
+    }
+    async fn ring_setup_here(&self) -> Value {
         let w = self.world().await;
         let Some(b) = w.named(BOT_NAME).cloned() else { return json!({}) };
         let hook = w.hooks.values().filter(|h| !h.revoked && h.bot == b.id).max_by_key(|h| (h.name == HOOK_NAME, h.created)).cloned();
@@ -142,6 +152,8 @@ impl Bots {
     }
     /// `ring.setup`: Pebble (a sub-bot of the uberbot), its webhook with a bearer token, and the #ring-requests room of the two; what exists is kept.
     async fn ring_setup(self: &Arc<Self>) -> Result<Value, String> {
+        let home = home_of(&self.hub).await;
+        if !home.is_null() { return Err(format!("the ring is on {} now: set it up there", home["machine"].as_str().filter(|m| !m.is_empty()).unwrap_or("another hub"))) }
         let bot = { let w = self.world().await; w.named(BOT_NAME).map(|b| b.id.clone()) };
         let bot = match bot { Some(b) => b, None => {
             let r = self.create(&json!(0), &json!({"name": BOT_NAME, "persona": PERSONA})).await;
@@ -189,17 +201,39 @@ impl Bots {
     }
 }
 
+impl Bots {
+    /// `ring.page`: the phones' rows (voice/ringpage.rs), from what the desktop's come from, times in the person's zone.
+    async fn ring_page(&self, q_typed: &str) -> Vec<Value> {
+        let setup = self.ring_setup_info().await; let q = QUERY.lock().unwrap().clone(); let home = self.hub.cfg.home.clone(); let base = base(&self.hub).await;
+        let notes = blocking(move || { let all = ringbox::list(&home); let key = ringbox::link_key(&home); let f = if q.trim().is_empty() { all.iter().collect::<Vec<_>>() } else { ringbox::search(&all, &q) };
+            json!({"q": q, "total": all.len(), "found": f.len(), "notes": f.iter().take(40).map(|n| ringbox::summary(n, &base, &key)).collect::<Vec<_>>()}) }).await.unwrap_or(Value::Null);
+        let busy = self.hub.info_now()["ring.busy"].as_str().unwrap_or("").to_string();
+        let w = self.world().await; let z = super::clock::Zones { settings: &w.settings }; let rule = z.rule_of("person");
+        let when = |t: u64| rule.as_ref().map_or_else(|| format!("{t}"), |r| r.show(t));
+        crate::voice::ringpage::rows(&setup, &notes, &busy, q_typed, &when, true)
+    }
+}
+
 pub struct RingRpc(pub Arc<Bots>);
 impl RpcHandler for RingRpc {
-    fn methods(&self) -> &'static [&'static str] { &["ring.list", "ring.get", "ring.search", "ring.hear", "ring.send", "ring.setup"] }
+    fn methods(&self) -> &'static [&'static str] { &["ring.list", "ring.get", "ring.search", "ring.hear", "ring.send", "ring.setup", "ring.page", "ring.page.act"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, _who: &'a Caller, id: &'a Value, m: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let b = &self.0; let home = hub.cfg.home.clone();
             let ok = |mut v: Value| { v["t"] = json!("reply"); v["id"] = id.clone(); v["ok"] = json!(true); vec![v] };
             let no = |e: String| vec![json!({"t":"reply","id":id,"ok":false,"error":e})];
             match m {
+                "ring.page" => ok(json!({"rows": b.ring_page("").await})),
+                // a press on a phone's Ring page: the hub's own presses run here, then the page as it is now (the client's own, copy and the rest, never come)
+                "ring.page.act" => {
+                    let q = p["fields"]["ringq"].as_str().unwrap_or("").to_string();
+                    let Some((m2, p2)) = crate::voice::ringpage::request(gs(p, "action"), gs(p, "value"), &q) else { return no("not a Ring page press".into()) };
+                    let r = self.call(hub, _who, id, m2, &p2).await;
+                    if r.first().map_or(false, |r| r["ok"] == false) { return r }
+                    ok(json!({"rows": b.ring_page(if m2 == "ring.search" { &q } else { "" }).await}))
+                }
                 "ring.list" | "ring.search" => {
-                    if m == "ring.search" { *QUERY.lock().unwrap() = gs(p, "q").chars().take(200).collect(); b.ring_publish().await; }
+                    if m == "ring.search" { if let Some(q) = p.get("q").and_then(Value::as_str) { *QUERY.lock().unwrap() = q.chars().take(200).collect(); } b.ring_publish().await; }
                     let (q, base) = (gs(p, "q").to_string(), base(hub).await);
                     let v = blocking(move || { let all = ringbox::list(&home); let key = ringbox::link_key(&home); let f = ringbox::search(&all, &q); json!({"total": all.len(), "notes": f.iter().take(200).map(|n| ringbox::summary(n, &base, &key)).collect::<Vec<_>>()}) }).await.unwrap_or(Value::Null);
                     ok(v)

@@ -41,6 +41,7 @@ final class DataClient {
     let voice = VoiceModel()
     let machines = MachinesModel()
     let notify = NotifyModel()
+    let ring = RingModel()
     let devices = DevicesModel()
     let terms = TermStore()
     private(set) var shot = 0
@@ -126,6 +127,7 @@ final class DataClient {
         voice.client = self
         machines.client = self
         notify.client = self
+        ring.client = self
         devices.client = self
         terms.client = self
         #if DEBUG

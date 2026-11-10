@@ -2371,6 +2371,20 @@ gpui.e.failover.default.order = Default order
 gpui.e.failover.use.the.default.order = Use the default order
 gpui.e.failover.choose.an.installed.provider.and = Choose an installed provider, and a model or its default, then add it to the end.
 gpui.e.failover.add.to.the.order = Add to the order
+ring.ring = Ring
+ring.pebble.index.ring = Pebble Index ring
+ring.test.event = Test event
+ring.recordings = Recordings
+ring.search.what.you.said = Search what you said
+ring.copy.header = Copy header
+ring.copy.both = Copy both
+ring.set.up.again = Set up again
+ring.show.all = Show all
+ring.hear.again.local = Hear again (local)
+ring.hear.again.openai = Hear again (OpenAI)
+ring.what.happened = What happened
+ring.send.again = Send again
+ring.no.recordings.yet = No recordings yet.
 
 # ---- gpui-f: hub setup flow and thread ----
 gpui.f.group.install = Install
@@ -3461,6 +3475,7 @@ android.google.signedin = Signed in.
 android.google.back = Back to Backplane
 android.improve.search = Search projects…
 android.improve.nomatch = No project matches.
+android.ring.head = RING
 # ---- ios: new entries go here ----
 ios.viewerbg = 3D viewer background
 ios.viewerbg.auto = Auto

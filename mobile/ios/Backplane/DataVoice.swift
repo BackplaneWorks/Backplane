@@ -315,6 +315,30 @@ struct DataVoiceSection: View {
 }
 
 /// The hub's rows {label, note, buttons, fields, tone} drawn the same for every page that has them (Voice, Machines); a press goes to `act`, which returns the hub's error for the row, if any.
+/// A row's press the phone does itself, never sent (docs/PHONE-DATA.md, as the Android app's PageRow.local): copy (and the older copy-text), share-text
+/// (the share sheet), open-url (http and https only).
+@MainActor
+enum DPageLocal {
+    static func local(_ action: String) -> Bool { ["copy", "copy-text", "share-text", "open-url"].contains(action) }
+    static func copied(_ action: String) -> Bool { action == "copy" || action == "copy-text" }
+    static func webURL(_ v: String) -> URL? { let t = v.trimmingCharacters(in: .whitespaces); let l = t.lowercased(); guard l.hasPrefix("https://") || l.hasPrefix("http://"), let u = URL(string: t), u.host != nil else { return nil }; return u }
+    /// True when it was the phone's own press, whether or not it could be done.
+    static func run(_ action: String, _ value: String) -> Bool {
+        guard local(action) else { return false }
+        switch action {
+        case "copy", "copy-text": UIPasteboard.general.string = value
+        case "share-text":
+            let vc = UIActivityViewController(activityItems: [value], applicationActivities: nil)
+            let top = UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.keyWindow?.rootViewController }.first
+            var at = top; while let p = at?.presentedViewController { at = p }
+            vc.popoverPresentationController?.sourceView = at?.view
+            at?.present(vc, animated: true)
+        default: if let u = webURL(value) { UIApplication.shared.open(u) }
+        }
+        return true
+    }
+}
+
 struct DPageRows: View {
     let title: String
     let idPrefix: String
@@ -323,6 +347,7 @@ struct DPageRows: View {
     let act: (DVoiceRow, (label: String, action: String, value: String, on: Bool), [String: String]) async -> String
     @State private var typed: [String: String] = [:]
     @State private var errors: [Int: String] = [:]
+    @State private var told: [Int: String] = [:]   // what a press the phone did itself says (Copied), under the row's note
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -332,6 +357,7 @@ struct DPageRows: View {
                     Text(Tr.t(r.label)).dmono(13)
                     let note = errors[r.id] ?? r.note
                     if !note.isEmpty { Text(Tr.t(note)).dmono(11).foregroundStyle(errors[r.id] != nil || r.tone == "bad" ? BackplaneDesign.bad : r.tone == "warn" ? BackplaneDesign.warn : BackplaneDesign.dim) }
+                    if let t = told[r.id] { Text(t).dmono(11).foregroundStyle(BackplaneDesign.dim).accessibilityIdentifier(idPrefix + ".told") }
                     if !r.qr.isEmpty { DQRCode(rows: r.qr).accessibilityIdentifier(idPrefix + ".qr") }
                     if !r.qrnote.isEmpty { Text(Tr.t(r.qrnote)).dmono(12).foregroundStyle(BackplaneDesign.dim).textSelection(.enabled) }
                     ForEach(r.fields, id: \.name) { f in
@@ -356,6 +382,7 @@ struct DPageRows: View {
     }
     private func binding(_ f: DVoiceField) -> Binding<String> { Binding(get: { typed[f.name] ?? f.value }, set: { typed[f.name] = $0 }) }
     private func press(_ r: DVoiceRow, _ b: (label: String, action: String, value: String, on: Bool)) {
+        if DPageLocal.run(b.action, b.value) { told[r.id] = DPageLocal.copied(b.action) ? Tr.t("Copied") : nil; return }
         var fields: [String: String] = [:]
         for f in r.fields { fields[f.name] = typed[f.name] ?? f.value }
         Task {

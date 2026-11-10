@@ -2603,6 +2603,20 @@ gpui.e.failover.default.order	Default order	既定の順序
 gpui.e.failover.use.the.default.order	Use the default order	既定の順序を使う
 gpui.e.failover.choose.an.installed.provider.and	Choose an installed provider, and a model or its default, then add it to the end.	インストール済みのプロバイダーと、モデルまたはその既定を選び、末尾に追加します。
 gpui.e.failover.add.to.the.order	Add to the order	順序に追加
+ring.ring	Ring	リング
+ring.pebble.index.ring	Pebble Index ring	Pebble Index リング
+ring.test.event	Test event	テストイベント
+ring.recordings	Recordings	録音
+ring.search.what.you.said	Search what you said	話した内容を検索
+ring.copy.header	Copy header	ヘッダーをコピー
+ring.copy.both	Copy both	両方をコピー
+ring.set.up.again	Set up again	もう一度設定
+ring.show.all	Show all	すべて表示
+ring.hear.again.local	Hear again (local)	もう一度聞き取る (ローカル)
+ring.hear.again.openai	Hear again (OpenAI)	もう一度聞き取る (OpenAI)
+ring.what.happened	What happened	どうなったか
+ring.send.again	Send again	もう一度送る
+ring.no.recordings.yet	No recordings yet.	録音はまだありません。
 gpui.f.group.install	Install	インストール
 gpui.f.group.agents	Agents	エージェント
 gpui.f.group.cad	CAD tools	CADツール
@@ -3686,6 +3700,7 @@ android.google.signedin	Signed in.	サインインしました。
 android.google.back	Back to Backplane	Backplane に戻る
 android.improve.search	Search projects…	プロジェクトを検索…
 android.improve.nomatch	No project matches.	一致するプロジェクトはありません。
+android.ring.head	RING	リング
 """#
 
     /// thread.count = {n, plural, one {# thread} other {# threads}}

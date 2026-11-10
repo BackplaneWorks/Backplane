@@ -2394,6 +2394,20 @@ gpui.e.failover.default.order = 既定の順序
 gpui.e.failover.use.the.default.order = 既定の順序を使う
 gpui.e.failover.choose.an.installed.provider.and = インストール済みのプロバイダーと、モデルまたはその既定を選び、末尾に追加します。
 gpui.e.failover.add.to.the.order = 順序に追加
+ring.ring = リング
+ring.pebble.index.ring = Pebble Index リング
+ring.test.event = テストイベント
+ring.recordings = 録音
+ring.search.what.you.said = 話した内容を検索
+ring.copy.header = ヘッダーをコピー
+ring.copy.both = 両方をコピー
+ring.set.up.again = もう一度設定
+ring.show.all = すべて表示
+ring.hear.again.local = もう一度聞き取る (ローカル)
+ring.hear.again.openai = もう一度聞き取る (OpenAI)
+ring.what.happened = どうなったか
+ring.send.again = もう一度送る
+ring.no.recordings.yet = 録音はまだありません。
 
 # ---- gpui-f: hub setup flow and thread ----
 gpui.f.group.install = インストール
@@ -3484,6 +3498,7 @@ android.google.signedin = サインインしました。
 android.google.back = Backplane に戻る
 android.improve.search = プロジェクトを検索…
 android.improve.nomatch = 一致するプロジェクトはありません。
+android.ring.head = リング
 # ---- ios: new entries go here ----
 ios.viewerbg = 3Dビューアの背景
 ios.viewerbg.auto = 自動
