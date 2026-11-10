@@ -1,6 +1,0 @@
-#!/bin/bash
-# PID 1 of the system disk (after scripts/nitro/guest-init): the agent the parent talks to over vsock (bp-guest.py), started again if it ends.
-export PATH=/opt/cargo/bin:/usr/local/bin:/usr/bin:/bin
-hostname bp-sandbox 2> /dev/null
-[ -e /run/bp/secret ] && chown bp: /run/bp /run/bp/secret 2> /dev/null
-while :; do python3 -I /usr/local/bin/bp-guest.py; sleep 1; done
