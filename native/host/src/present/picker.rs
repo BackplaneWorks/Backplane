@@ -4,8 +4,12 @@
 use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
+/// The field opens holding "~/", so a whole path pasted or typed into it lands behind that: "~//home/me/board", "~/~/board". A path that
+/// starts again after the "~/" is the path meant (as a shell's file prompt reads "//"), not a folder under the home.
 fn expand(text: &str, home: &str) -> String {
-    if text == "~" { home.to_string() } else if let Some(r) = text.strip_prefix("~/") { format!("{}/{}", home.trim_end_matches('/'), r) } else { text.to_string() }
+    if text == "~" { home.to_string() }
+    else if let Some(r) = text.strip_prefix("~/") { if r.starts_with('/') || r == "~" || r.starts_with("~/") || crate::plat::fs::is_abs(r) { expand(r, home) } else { format!("{}/{}", home.trim_end_matches('/'), r) } }
+    else { text.to_string() }
 }
 /// (the folder being typed in, the part of a name typed so far): "~/pro" is ("<home>/", "pro"); "~/proj/" is ("<home>/proj/", "").
 fn split(expanded: &str) -> (String, String) {
@@ -59,6 +63,14 @@ mod tests {
         assert_eq!(items[0]["action"], "proj-new"); assert_eq!(items[0]["value"], format!("{h}/al")); assert!(items.iter().any(|i| i["label"] == "alpha/") && !items.iter().any(|i| i["label"] == "beta/"));
         let f = folders(&open("~/alpha"), h, &[&format!("{h}/alpha")]); assert_eq!(f["items"][0]["action"], ""); assert!(f["items"][0]["label"].as_str().unwrap().contains("already"));
         let f = folders(&open("~/nope/x"), h, &[]); assert!(f["error"].as_str().unwrap().contains("not a folder")); assert!(f["items"].as_array().unwrap().iter().all(|i| i["action"] != "proj-add" && i["action"] != "proj-new"));
+    }
+    #[test] fn a_whole_path_pasted_behind_the_fields_own_tilde_is_the_path_meant() {
+        let home = d("pasted"); let h = home.to_str().unwrap();
+        let f = folders(&open(&format!("~/{h}/alpha")), h, &[]);
+        assert_eq!(f["error"], ""); assert_eq!((f["items"][0]["action"].as_str(), f["items"][0]["value"].as_str().unwrap()), (Some("proj-add"), format!("{h}/alpha").as_str()), "\"~//abs/path\" is /abs/path");
+        let f = folders(&open("~/~/beta"), h, &[]); assert_eq!(f["items"][0]["value"], format!("{h}/beta"), "and a second ~/ is the home once");
+        let f = folders(&open(&format!("~/{h}/new-board")), h, &[]); assert_eq!((f["items"][0]["action"].as_str(), f["items"][0]["value"].as_str().unwrap()), (Some("proj-new"), format!("{h}/new-board").as_str()));
+        assert_eq!(expand("~/x", "/h"), "/h/x"); assert_eq!(expand("~//x", "/h"), "/x"); assert_eq!(expand("~", "/h"), "/h");
     }
     #[test] fn up_stops_at_the_root_and_names_are_checked() {
         assert_eq!(parent("/a/b/"), "/a/"); assert_eq!(parent("/a/"), "/"); assert_eq!(parent("/"), "/");
