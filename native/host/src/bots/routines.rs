@@ -32,12 +32,17 @@ pub fn plan(z: &Zones, now: u64, tz_arg: &str, sch: &str, at: &str, ex: Option<&
             let read = if tz.is_empty() { z.settings.get("tz.machine").cloned().unwrap_or_default() } else { tz.clone() };
             let rule = z.rule_of(&read).or_else(|| if when_independent(at) { Some(TzRule::utc0()) } else { None });
             match rule {
-                Some(r) => match when_parse(at, now, &r) { Some(t) => Pick::Plan { cron: String::new(), once: t, tz }, None => Pick::Bad(format!("I can't read that time. {WHEN_TEXT}")) },
+                // the app's one "When" box sends what is no schedule as a time: words that ask for a repeat are told how a repeat is written, not how a date is
+                Some(r) => match when_parse(at, now, &r) { Some(t) => Pick::Plan { cron: String::new(), once: t, tz }, None => Pick::Bad(if repeats(at) { REPEAT_TEXT.to_string() } else { format!("I can't read that time. {WHEN_TEXT}") }) },
                 None => Pick::Bad("I don't have that time zone's rules yet; try again in a minute (or give the time with its offset, or as in 20m)".into()),
             }
         }
     }
 }
+/// what a time that cannot be read is told when it asks for a repeat
+const REPEAT_TEXT: &str = "I can't read that schedule. I can read: every 15m, every 2 hours, hourly, daily 09:30, weekdays 08:00, or a cron line.";
+/// Bots.plan.repeats: the text asks for something that repeats (its first word says so)
+fn repeats(at: &str) -> bool { let l = at.trim().to_lowercase(); let w = l.split(' ').next().unwrap_or(""); ["every", "each", "daily", "hourly", "weekly", "monthly", "weekdays", "weekends", "nightly"].contains(&w) || w.starts_with('@') }
 /// Alert.text: one line, cut to max characters
 fn alert_text(t: &str, max: usize) -> String { t.trim().chars().take(max).map(|c| if c == '\t' || c == '\n' { ' ' } else { c }).collect() }
 /// the machine's offset at `now` for legacy routines (Tz{off, east}): from the zone the hub logged, else UTC
