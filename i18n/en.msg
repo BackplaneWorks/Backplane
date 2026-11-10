@@ -3782,4 +3782,5 @@ ios.buy.from = Buy it · from {price}
 ios.buy.last = Buy it · last estimate: from {price}
 ios.buy.incomplete = Buy it · estimate incomplete
 
+android.notify.head = NOTIFICATIONS
 # ---- end ----
