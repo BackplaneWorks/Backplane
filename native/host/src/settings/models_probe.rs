@@ -221,7 +221,9 @@ pub async fn detect(home: &Path) -> Found {
         let mut i = agy::info(&out);
         // no pinned agent: turns run the person's agy CLI (providers/agy_cli.rs), so the picker lists it and the models it offers this sign-in
         if i.have.is_empty() { if let Some(p) = at("agy") { i.cli = version(&p).await; if i.cli.is_empty() { i.cli = "?".into() }
-            i.cli_models = run(&p, &["models"], &[], Duration::from_secs(30)).await.filter(|r| r.0 == 0).map_or(vec![], |r| agy::cli_models(&r.1)); } }
+            i.cli_models = run(&p, &["models"], &[], Duration::from_secs(30)).await.filter(|r| r.0 == 0).map_or(vec![], |r| agy::cli_models(&r.1));
+            // the driver maps a thread's model and effort to agy's variant id from this list (kept only when agy listed something)
+            if !i.cli_models.is_empty() { let _ = std::fs::create_dir_all(&root); let _ = std::fs::write(agy::bases_path(&home.to_string_lossy()), agy::bases_json(&agy::fold(&i.cli_models))); } } }
         i };
     let (claude, codex, grok, muse, opencode, pi, omp, agy) = tokio::join!(claude, codex, grok, muse, oc, pi, omp, ag);
     Found { claude, codex, grok, muse, opencode, pi, omp, agy }

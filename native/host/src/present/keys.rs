@@ -88,7 +88,8 @@ fn effort_label(e: &str) -> String { if e.is_empty() { "auto".into() } else { e.
 fn levels(provider: &str) -> &'static [&'static str] {
     match provider { "claude" => &["low", "medium", "high", "xhigh", "max"], "codex" => &["low", "medium", "high", "xhigh"], "grok" => &["low", "medium", "high"],
         "muse" => &["minimal", "low", "medium", "high", "xhigh", "max"], "pi" => &["off", "minimal", "low", "medium", "high", "xhigh", "max"],
-        "omp" => &["off", "auto", "minimal", "low", "medium", "high", "xhigh", "max"], _ => &[] }
+        "omp" => &["off", "auto", "minimal", "low", "medium", "high", "xhigh", "max"],
+        "antigravity" => &["minimal", "low", "medium", "high", "xhigh", "max"], _ => &[] } // antigravity: each model shows only the variants agy has (about.efforts)
 }
 fn tokens(n: u64) -> String { if n >= 1_000_000 { format!("{}M", n / 1_000_000) } else if n >= 1000 { format!("{}k", n / 1000) } else { n.to_string() } }
 /// Use.tail / Usage.text: the model chip's context tail from the thread's `usage.<id>` reading ("used/window")
