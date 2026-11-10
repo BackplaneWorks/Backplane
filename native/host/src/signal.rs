@@ -48,20 +48,21 @@ pub fn stalled(st: &State, id: &str) -> bool {
     !hidden && st.settings.get(&format!("liveness.{id}")).and_then(|v| serde_json::from_str::<Value>(v).ok()).and_then(|v| v.get("stalled").and_then(|b| b.as_bool())).unwrap_or(false)
 }
 
-fn setting<'a>(st: &'a State, k: String) -> &'a str { st.settings.get(&k).map(|s| s.as_str()).unwrap_or("") }
+/// The setting `<prefix><id>`, its key written into `key` (one buffer for a whole pass over the threads: the index asks five settings of every thread).
+fn setting_in<'a>(st: &'a State, key: &mut String, prefix: &str, id: &str) -> &'a str { key.clear(); key.push_str(prefix); key.push_str(id); st.settings.get(key.as_str()).map(|s| s.as_str()).unwrap_or("") }
 
 /// Signal.own: one thread's value from its own state
-fn own(st: &State, asks: &HashMap<&str, u8>, kids: &HashMap<&str, u32>, id: &str, t: &Thread) -> u8 {
+fn own(st: &State, asks: &HashMap<&str, u8>, kids: &HashMap<&str, u32>, id: &str, t: &Thread, key: &mut String) -> u8 {
     if t.deleted { return 0 }
-    let bg = lines(setting(st, format!("bg.{id}"))); let watch = lines(setting(st, format!("watch.{id}")));
+    let bg = lines(setting_in(st, key, "bg.", id)); let watch = lines(setting_in(st, key, "watch.", id));
     let owned = running(&bg) > 0 || watching(&watch);
     let q: &[(String, String)] = st.queue.get(id).map(|v| v.as_slice()).unwrap_or(&[]);
-    let is_blocked = t.turn == Turn::Failed || t.pending > 0 || blocked(asks.get(id).copied().unwrap_or(0)) || !setting(st, format!("auth.wait.{id}")).is_empty() || held(q);
+    let is_blocked = t.turn == Turn::Failed || t.pending > 0 || blocked(asks.get(id).copied().unwrap_or(0)) || !setting_in(st, key, "auth.wait.", id).is_empty() || held(q);
     let is_active = owned || (t.turn == Turn::Running && !is_blocked);
     let settled = shelf_of(t) == Shelf::Settled;
     let base = done(t.turn == Turn::Completed && q.is_empty(), compose(is_blocked, is_active, settled));
     // Signal.out: what the hub still waits on, confirmed running or not
-    let out = kids.get(id).copied().unwrap_or(0) > 0 || !bg.is_empty() || !watch.is_empty() || !setting(st, format!("order.wait.{id}")).is_empty();
+    let out = kids.get(id).copied().unwrap_or(0) > 0 || !bg.is_empty() || !watch.is_empty() || !setting_in(st, key, "order.wait.", id).is_empty();
     out_k(out, base)
 }
 
@@ -72,27 +73,29 @@ pub fn index(st: &State) -> HashMap<String, u8> {
     let mut kids: HashMap<&str, u32> = HashMap::new();
     for (p, _, term, _) in st.tasks.values() { if !*term { *kids.entry(p.as_str()).or_default() += 1; } }
     let mut ids: Vec<&String> = st.threads.keys().collect(); ids.sort();
-    let mut m: HashMap<String, u8> = HashMap::new();
-    for id in &ids { m.insert((*id).clone(), own(st, &asks, &kids, id, &st.threads[*id])); }
+    let mut m: HashMap<String, u8> = HashMap::with_capacity(ids.len()); let mut key = String::new();
+    for id in &ids { m.insert((*id).clone(), own(st, &asks, &kids, id, &st.threads[*id], &mut key)); }
     // edges child -> parents (newest edge first, as Signal.edge prepends)
     let mut parents: HashMap<String, Vec<String>> = HashMap::new();
     let mut tasks: Vec<_> = st.tasks.values().collect(); tasks.sort_by(|a, b| (&a.0, &a.1).cmp(&(&b.0, &b.1)));
     for (p, c, term, _) in tasks { if !*term && m.contains_key(c) && m.contains_key(p) { parents.entry(c.clone()).or_default().insert(0, p.clone()); } }
-    for id in &ids { let by = setting(st, format!("launch.{id}")); let by = by.get(1..).unwrap_or(""); if !by.is_empty() && m.contains_key(by) { parents.entry((*id).clone()).or_default().insert(0, by.to_string()); } }
+    for id in &ids { let by = setting_in(st, &mut key, "launch.", id); let by = by.get(1..).unwrap_or(""); if !by.is_empty() && m.contains_key(by) { parents.entry((*id).clone()).or_default().insert(0, by.to_string()); } }
     // drain: each node can acquire each of two bits once, so three visits per node suffice (the fuel also stops malformed cycles)
-    let mut queue: VecDeque<String> = ids.iter().map(|s| (*s).clone()).collect();
+    // (only a thread with parents can pass anything on, and the queue holds names, not copies: most homes have a thousand threads and a handful of edges)
+    let mut queue: VecDeque<&str> = ids.iter().map(|s| s.as_str()).collect();
     let mut fuel = 3 * ids.len();
     while fuel > 0 {
         let Some(id) = queue.pop_front() else { break };
         fuel -= 1;
-        let b = bits(m[&id]);
-        if let Some(ps) = parents.get(&id) { for p in ps {
+        let Some(ps) = parents.get(id) else { continue };
+        let b = bits(m[id]);
+        for p in ps {
             let old = m.get(p).copied().unwrap_or(0); let value = merge(old, b);
-            if bits(old) != value { m.insert(p.clone(), value); queue.push_front(p.clone()); }
-        } }
+            if bits(old) != value { if let Some(v) = m.get_mut(p) { *v = value; } else { m.insert(p.clone(), value); } queue.push_front(p.as_str()); }
+        }
     }
     // Signal.waits: active (1) with its own turn not running waits (6) on the work it started or its children's
-    for id in &ids { let n = waits(m[*id], st.threads[*id].turn == Turn::Running); m.insert((*id).clone(), n); }
+    for id in &ids { if let Some(v) = m.get_mut(id.as_str()) { *v = waits(*v, st.threads[*id].turn == Turn::Running); } }
     m
 }
 
