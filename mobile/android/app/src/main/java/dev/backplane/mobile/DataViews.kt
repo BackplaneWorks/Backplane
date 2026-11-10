@@ -289,6 +289,8 @@ internal fun ModelChip(text: String, tag: String, modifier: Modifier = Modifier,
 private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> Unit, addProject: () -> Unit, newThread: (String) -> Unit, openRoom: (DataClient.Room) -> Unit) {
     var q by remember { mutableStateOf("") }
     var projMenu by remember { mutableStateOf<DProject?>(null) }
+    // the project the long press was on stays after its sheet closes: Rename, Badge and Remove open their own box after it (the sheet alone closes)
+    var projSheet by remember { mutableStateOf(false) }
     var pickNew by remember { mutableStateOf<DProject?>(null) }   // a project on more than one machine: where the new thread starts
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val prefs = remember { ctx.getSharedPreferences("data.ui", android.content.Context.MODE_PRIVATE) }
@@ -344,7 +346,7 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
                 item(key = "p:${p.id}") {
                     Row(Modifier.fillMaxWidth().height(40.dp).background(if (flash == p.id) dcs.primary.copy(alpha = .18f) else Color.Transparent).combinedClickable(onClick = {
                         shut = if (closed) shut - p.id else shut + p.id; prefs.edit().putStringSet("projects.shut", shut).apply()
-                    }, onLongClick = { projMenu = p }).padding(start = 10.dp, end = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                    }, onLongClick = { projMenu = p; projSheet = true }).padding(start = 10.dp, end = 2.dp), verticalAlignment = Alignment.CenterVertically) {
                         Icon(if (closed) Icons.Default.ChevronRight else Icons.Default.ExpandMore, null, tint = dcs.onSurfaceVariant, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(6.dp))
                         Icon(Icons.Default.FolderOpen, null, tint = dok, modifier = Modifier.size(15.dp)); Spacer(Modifier.width(8.dp))
                         Box(Modifier.size(8.dp).background(runCatching { androidx.compose.ui.graphics.Color(android.graphics.Color.parseColor(p.css)) }.getOrDefault(dcs.onSurfaceVariant)).testTag("proj.badge.${p.id}"))
@@ -402,7 +404,7 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
             if (DataClient.rooms.isNotEmpty()) { item("rooms") { DMono(Msg.plane_heading_rooms, dfaint, 11, Modifier.fillMaxWidth().padding(start = 12.dp, top = 12.dp, bottom = 4.dp)) }
                 items(DataClient.rooms, key = { "r:${it.id}" }) { r -> SidebarRow("#", r.name, Msg.android_kind_room) { openRoom(r) } } }
         }
-        projMenu?.let { ProjectMenus(it, true) { projMenu = null } }
+        projMenu?.let { ProjectMenus(it, projSheet) { projSheet = false } }
         pickNew?.let { p -> ActionSheet(p.title, p.newOn.map { n -> (n.label + if (n.away) " · " + Msg.android_away else "") to { pickNew = null; newThread(n.value) } }) { pickNew = null } }
     }
 }
