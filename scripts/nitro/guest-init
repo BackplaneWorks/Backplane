@@ -1,0 +1,35 @@
+#!/bin/bash
+# /init of a Backplane Nitro Sandbox (in the initrd; scripts/nitro/guest-build.sh). In confidential mode the Nitro System measures this initrd, the kernel
+# and the command line (PCR0/1). vda is the system disk (read-only, shared by every sandbox), vdb this sandbox's work disk.
+export PATH=/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+mount -t proc proc /proc; mount -t sysfs sysfs /sys; mount -t devtmpfs devtmpfs /dev
+modprobe -a virtio_pci virtio_blk virtio_net vmw_vsock_virtio_transport nsm ext4 overlay 2> /dev/null
+die() { echo "bp-init: $*" > /dev/console 2>/dev/null; poweroff -f; }
+arg() { tr ' ' '\n' < /proc/cmdline | sed -n "s/^$1=//p" | tail -1; }
+for _ in $(seq 100); do [ -b /dev/vdb ] && break; sleep 0.05; done
+mkdir -p /sysroot /work /newroot
+mount -o ro /dev/vda /sysroot || die "no system disk"
+# an attested image runs only the system disk it was built with: the disk is not measured, this initrd is, and it names the disk's hash
+if [ -f /bp/rootfs.sha256 ]; then [ "$(sha256sum < /dev/vda | cut -d' ' -f1)" = "$(cat /bp/rootfs.sha256)" ] || die "the system disk is not the one this image names"; fi
+mount /dev/vdb /work || die "no work disk"
+mkdir -p /work/.root/upper /work/.root/wk
+mount -t overlay overlay -o lowerdir=/sysroot,upperdir=/work/.root/upper,workdir=/work/.root/wk /newroot || die "no overlay"
+mkdir -p /newroot/work /newroot/run/bp; mount --bind /work /newroot/work; mount -t tmpfs -o mode=0700 tmpfs /newroot/run/bp
+ip=$(arg bp.ip); net=$(arg bp.net)
+if [ "$net" = 1 ] && [ -n "$ip" ] && [ -e /sys/class/net/eth0 ]; then
+  ip link set lo up; ip addr add "$ip/30" dev eth0; ip link set eth0 up; ip route add default via "${ip%.*}.$(( ${ip##*.} - 1 ))"
+  echo "nameserver 169.254.169.253" > /newroot/etc/resolv.conf
+fi
+# the secret, if this image wants one: a fresh key pair, the NSM's attestation document carrying the public key to the parent (vsock 5005), and the
+# answer KMS encrypted to that key back (5006). The parent only relays: KMS answers only if PCR0 is the image its key policy names.
+if [ -f /bp/want-secret ] && [ -e /dev/nsm ]; then
+  cd /tmp || die "no /tmp"
+  openssl genrsa -out key.pem 2048 2> /dev/null && openssl rsa -in key.pem -pubout -outform DER -out key.der 2> /dev/null || die "no key"
+  nsm-attest attest --public-key key.der --output att.bin || die "no attestation document"
+  until socat -u OPEN:att.bin VSOCK-CONNECT:2:5005; do sleep 1; done
+  until socat -u VSOCK-CONNECT:2:5006 CREATE:r.cms; do sleep 1; done
+  openssl cms -decrypt -inform DER -in r.cms -inkey key.pem -out /newroot/run/bp/secret || die "the answer did not decrypt"
+  rm -f key.pem r.cms; chmod 0400 /newroot/run/bp/secret
+fi
+for m in proc sys dev; do mkdir -p "/newroot/$m"; mount --move "/$m" "/newroot/$m"; done
+exec switch_root /newroot /usr/local/bin/bp-guest-init
