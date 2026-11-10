@@ -54,6 +54,15 @@ fn href(attrs: &[(&'static str, String)], m: &mut Map<String, Value>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    const GOLD_IN: [&str; 6] = ["a **b** *c* `d` e * f **g", "x [lab] y [l](http://e.x/a) **b `c` d** *e `f`* `unclosed", "**a*b** *x **y** z* ***w*** * lone", "path `src/a.rs` and [t1] *", "a*\n*b **c\n d** e`f\ng`", "tab\t*x*\t**y**"];
+    const GOLD_OUT: [&str; 6] = [
+        r##"[{"tag":"p","kids":[{"text":"a "},{"tag":"strong","kids":[{"text":"b"}]},{"text":" "},{"tag":"em","kids":[{"text":"c"}]},{"text":" "},{"tag":"code","kids":[{"text":"d"}]},{"text":" e * f "},{"text":"**g"}]}]"##,
+        r##"[{"tag":"p","kids":[{"text":"x [lab] y "},{"tag":"a","kids":[{"text":"l"}],"href":"http://e.x/a","file":false},{"text":" "},{"tag":"strong","kids":[{"text":"b "},{"tag":"code","kids":[{"text":"c"}]},{"text":" d"}]},{"text":" "},{"tag":"em","kids":[{"text":"e "},{"tag":"code","kids":[{"text":"f"}]}]},{"text":" "},{"text":"`unclosed"}]}]"##,
+        r##"[{"tag":"p","kids":[{"tag":"strong","kids":[{"text":"a*b"}]},{"text":" "},{"tag":"em","kids":[{"text":"x "}]},{"tag":"em","kids":[{"text":"y"}]},{"text":"* z* "},{"tag":"strong","kids":[{"text":"*w"}]},{"text":"* * lone"}]}]"##,
+        r##"[{"tag":"p","kids":[{"text":"path "},{"tag":"a","kids":[{"tag":"code","kids":[{"text":"src/a.rs"}]}],"href":"src/a.rs","file":true},{"text":" and [t1] *"}]}]"##,
+        r##"[{"tag":"p","kids":[{"text":"a"},{"tag":"em","kids":[{"text":"\n"}]},{"text":"b "},{"tag":"strong","kids":[{"text":"c\n d"}]},{"text":" e"},{"tag":"code","kids":[{"text":"f\ng"}]}]}]"##,
+        r##"[{"tag":"p","kids":[{"text":"tab\t"},{"tag":"em","kids":[{"text":"x"}]},{"text":"\t"},{"tag":"strong","kids":[{"text":"y"}]}]}]"##,
+    ];
     fn j(s: &str) -> String { serde_json::to_string(&nodes_json(&render(s))).unwrap() }
     #[test] fn paragraph_and_emphasis() { assert_eq!(j("a **b** *c*"), r#"[{"tag":"p","kids":[{"text":"a "},{"tag":"strong","kids":[{"text":"b"}]},{"text":" "},{"tag":"em","kids":[{"text":"c"}]}]}]"#); }
     #[test] fn heading_and_list() { assert_eq!(j("# T\n- a\n- b"), r#"[{"tag":"h3","kids":[{"text":"T"}]},{"tag":"ul","kids":[{"tag":"li","kids":[{"text":"a"}]},{"tag":"li","kids":[{"text":"b"}]}]}]"#); }
@@ -67,4 +76,17 @@ mod tests {
         assert_eq!(j("  - a\n- b"), r#"[{"tag":"ul","kids":[{"tag":"li","kids":[{"text":"a"}]}]},{"tag":"ul","kids":[{"tag":"li","kids":[{"text":"b"}]}]}]"#);
     }
     #[test] fn ordered_numbers_kept() { assert!(j("3. x\n4. y").contains(r#""n":"3""#)); }
+    // The inline pass copied its run for every character, so a paragraph cost the square of its length: 135 KB of lines with no blank line between them
+    // took 3 s, and every picture of a thread rendered its page again. Twice the text now costs about twice the time; the bound here is far above a linear
+    // pass on a loaded runner and below the quadratic one (about 7 s for this text).
+    #[test] fn a_long_paragraph_renders_in_time_that_grows_with_its_length() {
+        let lines: String = (0..5000).map(|i| format!("line {i} of plain words with nothing to mark up in it\n")).collect();
+        assert!(lines.len() > 200_000);
+        let t = std::time::Instant::now(); let n = render(&lines); let took = t.elapsed();
+        assert_eq!(n.len(), 1, "one paragraph");
+        assert!(took < std::time::Duration::from_secs(3), "{} KB of one paragraph took {took:?}", lines.len() / 1024);
+        // and what it renders is what it rendered: emphasis, code and text runs, a star before a space kept as text
+        // and what it renders is what it rendered before (taken from the copying pass): open and closed emphasis, code, labels, stars before spaces
+        for (t, want) in GOLD_IN.iter().zip(GOLD_OUT) { assert_eq!(j(t), want, "{t:?}"); }
+    }
 }

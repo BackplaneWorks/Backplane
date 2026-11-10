@@ -54,7 +54,9 @@ fn emphasis(acc: &[char]) -> Vec<Node> {
 enum Inl { Text(S), Star(S), Code(S), Bold(S), BoldStar(S), Em(S), Label(S) }
 
 fn pre(p: &str, acc: &[char]) -> S { let mut a: S = p.chars().collect(); a.extend_from_slice(acc); a }
-fn pushed(acc: &[char], c: char) -> S { let mut a = acc.to_vec(); a.push(c); a }
+/// The run so far with `c` added. It takes the run and gives it back: a copy for every character made a paragraph's cost grow with the square of its length
+/// (a 35 KB paragraph took 88 ms to render, a 135 KB one 3 s).
+fn pushed(mut acc: S, c: char) -> S { acc.push(c); acc }
 
 /// Md.igo: the inline state machine over a line or paragraph
 fn igo(s: &[char]) -> Vec<Node> {
@@ -62,22 +64,22 @@ fn igo(s: &[char]) -> Vec<Node> {
     for &c in s {
         let tick = c == '`'; let star = c == '*'; let space = c == ' ' || c == '\t';
         state = match state {
-            Inl::Label(acc) => if c == ']' { Inl::Text(pushed(&acc, c)) } else { Inl::Label(pushed(&acc, c)) },
+            Inl::Label(acc) => if c == ']' { Inl::Text(pushed(acc, c)) } else { Inl::Label(pushed(acc, c)) },
             Inl::Text(acc) => {
                 if tick { text(&acc, &mut out); Inl::Code(vec![]) }
                 else if star { Inl::Star(acc) }
-                else if space { Inl::Text(pushed(&acc, c)) }
-                else if c == '[' { Inl::Label(pushed(&acc, c)) } else { Inl::Text(pushed(&acc, c)) }
+                else if space { Inl::Text(pushed(acc, c)) }
+                else if c == '[' { Inl::Label(pushed(acc, c)) } else { Inl::Text(pushed(acc, c)) }
             }
             Inl::Star(acc) => {
                 if star { text(&acc, &mut out); Inl::Bold(vec![]) }
-                else if space { let mut a = acc.clone(); a.push('*'); a.push(c); Inl::Text(a) }
+                else if space { let mut a = acc; a.push('*'); a.push(c); Inl::Text(a) }
                 else { text(&acc, &mut out); Inl::Em(vec![c]) }
             }
-            Inl::Em(acc) => if star { out.push(el("em", emphasis(&acc))); Inl::Text(vec![]) } else { Inl::Em(pushed(&acc, c)) },
-            Inl::Code(acc) => if tick { out.push(code(&acc)); Inl::Text(vec![]) } else { Inl::Code(pushed(&acc, c)) },
-            Inl::Bold(acc) => if star { Inl::BoldStar(acc) } else { Inl::Bold(pushed(&acc, c)) },
-            Inl::BoldStar(acc) => if star { out.push(el("strong", emphasis(&acc))); Inl::Text(vec![]) } else { let mut a = acc.clone(); a.push('*'); a.push(c); Inl::Bold(a) },
+            Inl::Em(acc) => if star { out.push(el("em", emphasis(&acc))); Inl::Text(vec![]) } else { Inl::Em(pushed(acc, c)) },
+            Inl::Code(acc) => if tick { out.push(code(&acc)); Inl::Text(vec![]) } else { Inl::Code(pushed(acc, c)) },
+            Inl::Bold(acc) => if star { Inl::BoldStar(acc) } else { Inl::Bold(pushed(acc, c)) },
+            Inl::BoldStar(acc) => if star { out.push(el("strong", emphasis(&acc))); Inl::Text(vec![]) } else { let mut a = acc; a.push('*'); a.push(c); Inl::Bold(a) },
         };
     }
     match state {
