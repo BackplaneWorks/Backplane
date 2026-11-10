@@ -45,7 +45,13 @@ pub fn pressed(now_open: &str) -> Option<String> {
 /// Whether the hub's page `open` is what a press on `kind` asked for (a Files press may land on a file it opened).
 fn opened_as(open: &str, kind: &str) -> bool { open == kind || (kind == "files" && matches!(open, "image" | "pdf" | "text")) }
 /// Open in KiCad: the hub starts KiCad on the thread's design (kicad/open.rs), offered while the viewer has a board or schematic.
-pub fn kicad_open() -> Command { Command::Action("kicad-open".into(), String::new()) }
+/// Open in KiCad names what the viewer draws (its key, `<kind>|<root>|<file>`; a split's first pane), so the hub opens exactly that.
+pub fn kicad_open(viewer: &Value) -> Command { Command::Action("kicad-open".into(), shown_key(viewer)) }
+pub fn shown_key(viewer: &Value) -> String {
+    let k = string(viewer, "key");
+    if !k.is_empty() && !k.starts_with("split|") { return k }
+    arr(viewer, "panes").map(|p| string(p, "key")).find(|k| !k.is_empty()).unwrap_or(k)
+}
 /// The button's words. KiCad opens where the design is, on the hub's own machine: with a hub on another machine the button says whose screen.
 pub fn kicad_open_label(hub_addr: Option<&str>, thread_machine: Option<&str>) -> String {
     // a thread of another machine (its mark names it) opens there, whichever hub the window is on
@@ -174,7 +180,7 @@ fn pane_actions(cx: &mut Context<Backplane>, light: bool, thread: &Value, target
         row = row.child(div().id("viewer-from").min_w_0().max_w(px(200.)).flex().items_center().gap(px(3.)).overflow_hidden().whitespace_nowrap().text_size(px(11.)).text_color(col).opacity(o)
             .tooltip(crate::keys::tip(&hover, "", light)).child(crate::art::icon("link", 11., col)).child(div().overflow_hidden().text_ellipsis().child(t)));
     }
-    if has_design(viewer) { row = row.child(btn(cx, light, "kicad-open".into(), kicad_open_label(target.map(|t| t.addr.as_str()), thread["mark"]["name"].as_str()), false, kicad_open())); }
+    if has_design(viewer) { row = row.child(btn(cx, light, "kicad-open".into(), kicad_open_label(target.map(|t| t.addr.as_str()), thread["mark"]["name"].as_str()), false, kicad_open(viewer))); }
     row.child(div().id("viewer-close").size(px(super::head::BTN_H)).flex().items_center().justify_center().border_1().border_color(c("line")).bg(c("raise")).cursor_pointer().hover(|s| s.bg(c("panel"))).tooltip(crate::keys::tip(&trs("Close the viewer"), "", light))
         .child(crate::art::icon("x", 14., c("dim"))).on_click(cx.listener(|this, _, _, cx| { this.screens.rail_pending = Some(String::new()); this.screens.rail_at = Some(std::time::Instant::now()); let _ = this.tx.try_send(close()); cx.notify(); })))
         .into_any_element()
@@ -877,7 +883,9 @@ mod tests {
         assert_eq!(source(&j(r#"{"open":"files","files":{"trail":[{"label":"Project"}]},"choices":[{"label":"Files","value":"files","on":true}]}"#), false), "Files");
         assert_eq!(source(&j(r#"{"open":"image","file":{"name":"shot.png"}}"#), false), "shot.png");
         assert_eq!(source(&j(r#"{"open":"board"}"#), true), "Diff");
-        assert!(matches!(kicad_open(), Command::Action(a, v) if a == "kicad-open" && v.is_empty()));
+        assert!(matches!(kicad_open(&serde_json::json!({})), Command::Action(a, v) if a == "kicad-open" && v.is_empty()));
+        assert!(matches!(kicad_open(&serde_json::json!({"key":"0|/p|/p/b.kicad_pcb"})), Command::Action(_, v) if v == "0|/p|/p/b.kicad_pcb"));
+        assert_eq!(shown_key(&serde_json::json!({"key":"split|/p|","panes":[{"key":"1|/p|/p/a.kicad_sch"},{"key":"0|/p|"}]})), "1|/p|/p/a.kicad_sch");
     }
     #[test] fn tabs_files_and_diff_parse_from_the_hubs_rows() {
         let v = j(r#"{"open":"files","choices":[{"label":"Board","value":"board","on":false},{"label":"Files","value":"files","on":true}],
