@@ -30,8 +30,9 @@ pub fn submit(this: &mut Backplane, name: &str, cx: &mut Context<Backplane>) -> 
 
 /// Keeps the client's own part of setup in step with the picture.
 pub fn sync(this: &mut Backplane, cx: &mut Context<Backplane>) {
+    // setup went away: the keys go to the message box (it is drawn as the place to type; left where they were, the first words typed ran the rail's letters)
+    if !this.data["tour"].is_object() { if this.screens.setup.up { this.want_focus = true; } this.screens.setup.up = false; this.screens.setup.step.clear(); return }
     let t = &this.data["tour"];
-    if !t.is_object() { this.screens.setup.up = false; this.screens.setup.step.clear(); return }
     let id = string(t, "id"); let panel = string(t, "panel");
     if !this.screens.setup.up { this.screens.setup.up = true; let _ = this.tx.try_send(Command::Action("ob-check".into(), String::new())); }
     if this.screens.setup.step != id {
@@ -48,6 +49,7 @@ pub fn accounts_changed(this: &mut Backplane) {
 
 /// The presses the client answers itself, before or beside the hub. True when nothing more is to be sent.
 pub fn press(this: &mut Backplane, b: &settings::Btn, cx: &mut Context<Backplane>) -> bool {
+    if this.data["tour"].is_object() { this.error.clear(); } // setup's refusal line is about the last press
     match (b.action.as_str(), b.value.as_str()) {
         ("copy", v) => { cx.write_to_clipboard(ClipboardItem::new_string(v.to_string())); true }
         ("ob-home", _) => { crate::launch::forget(); if let Ok(me) = std::env::current_exe() { let _ = std::process::Command::new(me).args(std::env::args().skip(1)).spawn(); } cx.quit(); true }
@@ -60,12 +62,12 @@ fn foot(cx: &mut Context<Backplane>, light: bool, id: &'static str, label: Strin
     let c = |n: &str| theme::color(light, n);
     let d = div().id(id).h(px(30.)).px_4().flex().items_center().text_size(px(13.)).cursor_pointer();
     let d = if primary { d.bg(c("accent")).text_color(c("on-accent")) } else { d.bg(c("raise")).hover(|s| s.bg(c("line"))) };
-    d.child(label).on_click(cx.listener(move |this, _, _, cx| { settings::flush_fields(this); let _ = this.tx.try_send(Command::Action(action.into(), String::new())); cx.notify(); })).into_any_element()
+    d.child(label).on_click(cx.listener(move |this, _, _, cx| { settings::flush_fields(this); this.error.clear(); let _ = this.tx.try_send(Command::Action(action.into(), String::new())); cx.notify(); })).into_any_element()
 }
 
 /// The setup screen in a window `w` px wide: the step list's width, and the width its rows are laid out in (settings::row_fit decides each row).
 pub fn fit(w: f32) -> (f32, f32) { let rail = if w < 900. { 170. } else { 230. }; (rail, (w - rail - 50.).min(760.).max(120.)) /* the rail's border, the step's 24 px margins */ }
-pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, tour: &Value, acct: &super::accounts::Accounts, focus: &FocusHandle, scroll: &ScrollHandle, w: f32) -> Option<AnyElement> {
+pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, tour: &Value, acct: &super::accounts::Accounts, focus: &FocusHandle, scroll: &ScrollHandle, w: f32, refused: &str) -> Option<AnyElement> {
     if !tour.is_object() { return None }
     let c = |n: &str| theme::color(light, n);
     // the list of steps, under their groups
@@ -80,7 +82,7 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
         let mark = match state.as_str() { "done" => div().size(px(8.)).bg(c("ok")), "skipped" => div().w(px(8.)).h(px(2.)).bg(c("faint")), _ => div().size(px(8.)).border_1().border_color(c("faint")) };
         let row = div().id(SharedString::from(format!("setup-step-{i}"))).flex().items_center().gap_2().px_2().py(px(3.)).text_size(px(12.)).cursor_pointer().text_color(c(if here { "text" } else { "dim" }));
         let row = if here { row.bg(c("raise")) } else { row.hover(|x| x.bg(c("raise"))) };
-        rail = rail.child(row.child(div().w(px(10.)).flex().justify_center().child(mark)).child(trs(&string(s, "title"))).on_click(cx.listener(move |this, _, _, cx| { settings::flush_fields(this); let _ = this.tx.try_send(Command::Action("ob-go".into(), id.clone())); cx.notify(); })));
+        rail = rail.child(row.child(div().w(px(10.)).flex().justify_center().child(mark)).child(trs(&string(s, "title"))).on_click(cx.listener(move |this, _, _, cx| { settings::flush_fields(this); this.error.clear(); let _ = this.tx.try_send(Command::Action("ob-go".into(), id.clone())); cx.notify(); })));
     }
     // the step
     let rows = settings::parse(&serde_json::json!({"rows": tour["rows"]}));
@@ -99,10 +101,12 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
     let mut left = div().flex().gap_2();
     if tour["first"] != true { left = left.child(foot(cx, light, "setup-back", trs(&string(tour, "back")), "ob-back", false)); }
     let footer = div().flex().justify_between().items_center().gap_3().px_6().py_3().border_t_1().border_color(c("line")).child(left)
-        .child(div().flex().gap_2().child(foot(cx, light, "setup-end", trs(&string(tour, "end")), "ob-end", false)).child(foot(cx, light, "setup-later", trs(&string(tour, "skip")), "ob-skip", false)).child(foot(cx, light, "setup-next", trs(&string(tour, "next")), "ob-next", true)));
+        // what the hub refused (a folder it cannot make, a path it cannot open): setup covers the window's own error line, so it is said here
+        .child(div().id("setup-refused").flex_1().min_w_0().text_size(px(12.)).text_color(c("bad")).child(trs(refused)))
+        .child(div().flex().flex_shrink_0().gap_2().child(foot(cx, light, "setup-end", trs(&string(tour, "end")), "ob-end", false)).child(foot(cx, light, "setup-later", trs(&string(tour, "skip")), "ob-skip", false)).child(foot(cx, light, "setup-next", trs(&string(tour, "next")), "ob-next", true)));
     let main = div().flex().flex_col().flex_1().min_w_0().child(div().id("setup-main").flex_1().min_h_0().overflow_y_scroll().track_scroll(scroll).px_6().py_5().child(body)).child(footer);
     Some(div().id("setup").absolute().top_0().left_0().size_full().flex().bg(c("bg")).text_color(c("text")).occlude().key_context("Setup").track_focus(focus)
-        .on_key_down(cx.listener(|this, e: &KeyDownEvent, _, cx| { if e.keystroke.key == "enter" && !e.keystroke.modifiers.modified() { settings::flush_fields(this); let _ = this.tx.try_send(Command::Action("ob-next".into(), String::new())); cx.notify(); } }))
+        .on_key_down(cx.listener(|this, e: &KeyDownEvent, _, cx| { if e.keystroke.key == "enter" && !e.keystroke.modifiers.modified() { settings::flush_fields(this); this.error.clear(); let _ = this.tx.try_send(Command::Action("ob-next".into(), String::new())); cx.notify(); } }))
         .child(rail).child(main).into_any_element())
 }
 
