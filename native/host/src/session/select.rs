@@ -45,8 +45,10 @@ pub fn select(f: &dyn Facts, hub: &str, session: &Value, value: &str) -> Option<
     let mut cmds = vec![json!({"type": "focus", "id": "composer"}), json!({"type": "scroll"})];
     // Fab.sync (Fab.want): a look is asked for when where the thread stands changed since the last ask
     let at = fab_at(f, id);
-    let want = at != s(d, "@fab.at") && !at.ends_with('#') && (!at.ends_with("#running") || s(info, &format!("fab.line:{id}")).is_empty());
+    let moved = at != s(d, "@fab.at") && !at.ends_with('#');
+    let want = moved && (!at.ends_with("#running") || s(info, &format!("fab.line:{id}")).is_empty());
     let mut next_rid = rid;
+    if moved && !want { drafts.insert("@fab.at".into(), json!(at)); } // noted, not asked (dispatch::fab_tail): the turn's end is then a new place
     if want {
         drafts.insert("@fab.at".into(), json!(at));
         cmds.push(json!({"type": "send", "hub": hub, "text": format!("{{\"id\":{rid},\"m\":\"fab.look\",\"p\":{{\"thread\":{}}}}}", serde_json::to_string(id).ok()?)}));
@@ -84,6 +86,13 @@ mod tests {
         for k in ["@cmp.menu", "@cmp.resolve::a", "@cmp.resolve::b", "@intent", "@revert", "@del"] { assert_eq!(d[k], json!(""), "{k}") }
         assert_eq!(p["info"]["panel:"], json!(""));
         assert_eq!(p["open"]["settings"], json!(false));
+    }
+    #[test] fn selecting_a_running_thread_whose_card_is_shown_notes_the_place_without_a_look() {
+        let mut s = session(); s["sel"] = json!("t1700000002-3"); s["drafts"]["@fab.at"] = json!("onon#t1700000002-3#idle"); s["info"]["fab.line:t1700000002-3"] = json!("No goal yet.");
+        let o = select(&M { running: true }, HUB, &s, "t1700000002-3").unwrap();
+        assert_eq!(o.cmds.len(), 2, "focus and scroll only");
+        assert!(o.session_patch.get("rid").is_none());
+        assert_eq!(o.session_patch["drafts"]["@fab.at"], json!("onon#t1700000002-3#running"), "so the turn's end is a new place and the card is looked at again");
     }
     #[test] fn the_same_place_asks_for_no_look() {
         let mut s = session(); s["sel"] = json!("t1700000002-3"); s["drafts"]["@fab.at"] = json!("onon#t1700000002-3#idle");
