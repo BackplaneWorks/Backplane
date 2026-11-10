@@ -72,7 +72,9 @@ pub fn routine_act(page: &Value, bot: &str, hub: &str, session: &Value, action: 
             let r = page["routines"].as_array().and_then(|rs| rs.iter().find(|r| s(r, "id") == value));
             if !value.is_empty() && r.is_none() { return None }
             let g = |k: &str| r.map_or("", |r| s(r, k));
-            let when = if g("cron").is_empty() { g("label") } else { g("cron") };
+            // the schedule opens in the words its row shows when those words read back as the same schedule; any other cron line opens as it is
+            let words = crate::bots::sched_text::when_cron(g("cron")); let same = crate::bots::clock::Cron::parse(&words).is_some() && crate::bots::sched_text::when_cron(&words) == words;
+            let when = if g("cron").is_empty() { g("label") } else if same { words.as_str() } else { g("cron") };
             json!({"drafts": {"@onew": "1", "@f.oerr": "", "@f.oid": value, "@f.oname": g("name"), "@f.ocron": when, "@f.oprompt": g("prompt")}})
         }
         "routine-save" if on(session, "@onew") => {
@@ -143,10 +145,17 @@ mod tests {
         let page = json!({"routines": [{"id": "o1", "name": "tidy", "cron": "0 9 * * *", "prompt": "tidy up"}]});
         let mut s = sess(json!({}));
         let o = routine_act(&page, "b1", "h", &s, "routine-edit", "o1").unwrap(); crate::session::patch::merge(&mut s, &o.patch);
-        let f = routine_form(&s); assert_eq!((f["open"].as_bool(), f["name"].as_str(), f["cron"].as_str()), (Some(true), Some("tidy"), Some("0 9 * * *")));
+        // the schedule opens in the words its row shows, and those words are sent back as the schedule
+        let f = routine_form(&s); assert_eq!((f["open"].as_bool(), f["name"].as_str(), f["cron"].as_str(), f["hint"].as_str()), (Some(true), Some("tidy"), Some("daily at 09:00"), Some("daily at 09:00")));
         let o = routine_act(&page, "b1", "h", &s, "routine-save", "").unwrap();
         let req: Value = serde_json::from_str(o.cmds[0]["text"].as_str().unwrap()).unwrap();
-        assert_eq!((req["m"].as_str(), req["p"]["routine"].as_str(), req["p"]["cron"].as_str(), req["p"]["at"].is_null()), (Some("bots.routine"), Some("o1"), Some("0 9 * * *"), true));
+        assert_eq!((req["m"].as_str(), req["p"]["routine"].as_str(), req["p"]["cron"].as_str(), req["p"]["at"].is_null()), (Some("bots.routine"), Some("o1"), Some("daily at 09:00"), true));
+        assert_eq!(crate::bots::clock::Cron::text("daily at 09:00"), "0 9 * * *");
+        // a cron line with no words of its own, or words that would read as another schedule, opens as the line
+        for (cron, shown) in [("*/20 * * * *", "every 20 minutes"), ("0 * * * *", "hourly"), ("0 */1 * * *", "hourly"), ("0 */2 * * *", "every 2 hours"), ("0 8 * * 1-5", "weekdays at 08:00"), ("30 * * * *", "30 * * * *"), ("0 8 1 * *", "0 8 1 * *")] {
+            let page = json!({"routines": [{"id": "o1", "name": "tidy", "cron": cron, "prompt": "p"}]}); let mut s = sess(json!({}));
+            let o = routine_act(&page, "b1", "h", &s, "routine-edit", "o1").unwrap(); crate::session::patch::merge(&mut s, &o.patch); assert_eq!(routine_form(&s)["cron"], shown, "{cron}");
+        }
         crate::session::patch::merge(&mut s, &o.patch); assert_eq!(routine_form(&s)["open"], true, "the form waits for the hub's answer");
         let mut s = sess(json!({"@onew": "1", "@f.ocron": "2030-01-01T09:00"}));
         let o = routine_act(&page, "b1", "h", &s, "routine-save", "").unwrap(); crate::session::patch::merge(&mut s, &o.patch);
