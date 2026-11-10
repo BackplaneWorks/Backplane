@@ -11,3 +11,4 @@ Ctrl	# the Ctrl key cap of the terminal keys, as on the keyboard
 devices	# the Devices page rows' test tag prefix (PageRows tag)
 machines	# the Machines page rows' test tag prefix (PageRows tag)
 voice	# the Voice page rows' test tag prefix (PageRows tag)
+notify	# the Notifications page rows' test tag prefix (PageRows tag)

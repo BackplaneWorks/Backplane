@@ -3805,4 +3805,5 @@ ios.buy.from = 購入 · {price}から
 ios.buy.last = 購入 · 前回の見積もり: {price}から
 ios.buy.incomplete = 購入 · 見積もりが不完全
 
+android.notify.head = 通知
 # ---- end ----

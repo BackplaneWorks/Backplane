@@ -28,5 +28,5 @@ object DataNotify {
 @Composable
 internal fun NotifySettings() {
     LaunchedEffect(DataClient.conn) { if (DataClient.conn == DataClient.Conn.ONLINE) DataNotify.load() }
-    PageRows("NOTIFICATIONS", "notify", DataNotify.rows, DataNotify.error) { action, value, sent -> DataNotify.act(action, value, sent); null }
+    PageRows(Msg.android_notify_head, "notify", DataNotify.rows, DataNotify.error) { action, value, sent -> DataNotify.act(action, value, sent); null }
 }
