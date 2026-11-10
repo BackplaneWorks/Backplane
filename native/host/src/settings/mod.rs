@@ -88,6 +88,7 @@ pub fn start(hub: Arc<Hub>, agents: Option<Arc<crate::agents::Agents>>) {
     hub.register_rpc(Arc::new(telemetry::TelemetryRpc));
     hub.register_rpc(Arc::new(diagnostics::DiagnosticsRpc));
     hub.register_rpc(Arc::new(zone::ZoneRpc));
+    hub.register_rpc(Arc::new(crate::sandbox::rpc::SandboxRpc));
     let _desks = alerts::start(&hub);
     hub.register_rpc(Arc::new(fab::FabRpc));
     hub.register_rpc(Arc::new(skill_install::SkillRpc));

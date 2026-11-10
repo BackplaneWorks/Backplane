@@ -1,0 +1,11 @@
+# The guest's attestation tool (built on the parent by scripts/nitro/host-setup.sh --attest, static, into the attested initrd). Not part of the hub's build.
+[package]
+name = "nsm-attest"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+aws-nitro-enclaves-nsm-api = "0.4"
+serde_bytes = "0.11"
+
+[workspace]
