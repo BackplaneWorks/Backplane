@@ -353,6 +353,34 @@ exit 0\n")
 pub struct Info { pub have: String, pub old: String, pub plat: String, pub accts: Vec<String>, pub signed: Vec<String>, pub cache: String,
     /// the person's agy CLI, when turns run on it (no pinned agent): its version and the models `agy models` lists (id, name)
     pub cli: String, pub cli_models: Vec<(String, String)> }
+/// Backplane's effort scale, lowest first: agy's model variants (`<base>-low`, `-medium`, `-high`, ...) are levels on it.
+pub const SCALE: [&str; 6] = ["minimal", "low", "medium", "high", "xhigh", "max"];
+/// A model id's base and its variant level: "gemini-4-carbon-high" is ("gemini-4-carbon", Some("high")); an id with no level suffix is its own base.
+pub fn split_variant(id: &str) -> (&str, Option<&'static str>) {
+    match id.rsplit_once('-') { Some((b, l)) if !b.is_empty() => match SCALE.iter().find(|x| **x == l) { Some(x) => (b, Some(*x)), None => (id, None) }, _ => (id, None) }
+}
+/// One model as the picker lists it: the base id, its name without the variant ("Gemini 4 Carbon"), and the levels agy offers for it (lowest first; empty: none).
+#[derive(Debug, Clone, PartialEq, Default)]
+pub struct Base { pub id: String, pub name: String, pub levels: Vec<String> }
+/// agy's model list folded: one entry per base model, in the order agy lists them, with the levels its variants cover.
+pub fn fold(models: &[(String, String)]) -> Vec<Base> {
+    let mut out: Vec<Base> = vec![];
+    for (id, name) in models {
+        let (b, l) = split_variant(id);
+        let nm = match l { Some(_) => name.rsplit_once(" (").map_or(name.as_str(), |(n, _)| n).to_string(), None => name.clone() };
+        let i = match out.iter().position(|x| x.id == b) { Some(i) => i, None => { out.push(Base { id: b.into(), name: nm, levels: vec![] }); out.len() - 1 } };
+        if let Some(l) = l { if !out[i].levels.iter().any(|x| x == l) { out[i].levels.push(l.into()) } }
+    }
+    for b in &mut out { b.levels.sort_by_key(|l| SCALE.iter().position(|x| x == l)) }
+    out
+}
+pub fn bases_json(bs: &[Base]) -> String { Value::Array(bs.iter().map(|b| json!({"id":b.id,"name":b.name,"levels":b.levels})).collect()).to_string() }
+pub fn bases_from(text: &str) -> Vec<Base> {
+    serde_json::from_str::<Value>(text).ok().and_then(|v| v.as_array().cloned()).unwrap_or_default().iter()
+        .map(|b| Base { id: gs(b, "id").into(), name: gs(b, "name").into(), levels: b["levels"].as_array().map(|a| a.iter().filter_map(Value::as_str).map(String::from).collect()).unwrap_or_default() }).filter(|b| !b.id.is_empty()).collect()
+}
+/// Where the probe keeps the folded list for the driver: `<home>/antigravity/cli-models.json`.
+pub fn bases_path(home: &str) -> String { format!("{}/cli-models.json", root(home)) }
 /// `agy models`: "id<TAB>name" lines (a "Fetching ..." line first).
 pub fn cli_models(out: &str) -> Vec<(String, String)> {
     out.lines().filter_map(|l| { let (i, n) = l.split_once('\t')?; let i = i.trim(); if i.is_empty() || i.contains(' ') { None } else { Some((i.to_string(), n.trim().to_string())) } }).collect()
@@ -375,15 +403,16 @@ pub fn info(out: &str) -> Info {
 pub fn info_json(a: &Info) -> Value { json!({"pin":VERSION,"have":a.have,"old":a.old,"plat":RELS.iter().any(|r| r.0 == a.plat),"accts":a.accts,"signed":a.signed,"cli":a.cli}) }
 /// Agy.info.models: the models a client lists (none until the agent is installed).
 pub fn info_models(a: &Info) -> Vec<String> {
-    if a.have.is_empty() { return a.cli_models.iter().map(|m| m.0.clone()).collect() }
+    if a.have.is_empty() { return fold(&a.cli_models).into_iter().map(|b| b.id).collect() }
     serde_json::from_str::<Value>(&a.cache).ok().and_then(|c| c["models"].as_array().map(|m| m.iter().map(|x| gs(x, "id").to_string()).collect())).unwrap_or_default()
 }
 /// Agy.info.about: "about" for the picker.
 pub fn info_about(a: &Info) -> Value {
     if a.have.is_empty() && !a.cli.is_empty() {
-        let mut labels = serde_json::Map::new(); labels.insert("default".into(), json!("Antigravity's own default"));
-        for (i, n) in &a.cli_models { labels.insert(i.clone(), json!(if n.is_empty() { i.clone() } else { n.clone() })); }
-        return json!({"cli": format!("Antigravity CLI {}", a.cli), "labels": labels})
+        // one row per base model; its variants are the effort picker's levels for it (none for agy's own default, whose variant is agy's)
+        let (mut labels, mut efforts) = (serde_json::Map::new(), serde_json::Map::new()); labels.insert("default".into(), json!("Antigravity's own default")); efforts.insert("default".into(), json!([]));
+        for b in fold(&a.cli_models) { labels.insert(b.id.clone(), json!(if b.name.is_empty() { b.id.clone() } else { b.name.clone() })); efforts.insert(b.id.clone(), json!(b.levels)); }
+        return json!({"cli": format!("Antigravity CLI {}", a.cli), "labels": labels, "efforts": efforts})
     }
     let c: Value = serde_json::from_str(&a.cache).unwrap_or(Value::Null); let dm = gs(&c, "default").to_string();
     let mut labels = serde_json::Map::new(); labels.insert("default".into(), json!("Antigravity's own default"));
@@ -394,9 +423,9 @@ pub fn info_about(a: &Info) -> Value {
 // ---- The driver ----
 /// Agt.go: the runner script with the sign-in the settings name (agy.auth, agy.account, agy.gcp.project, agy.gcp.location), when Backplane's pinned
 /// agent is installed; otherwise the person's own `agy` CLI (agy_cli.rs), signed in as they are in a terminal. `prepare` decides.
-pub struct AgyDriver { turn: AgyTurn, st: Acp, cli: Option<std::path::PathBuf>, cs: super::agy_cli::St }
+pub struct AgyDriver { turn: AgyTurn, st: Acp, cli: Option<std::path::PathBuf>, cs: super::agy_cli::St, bases: Vec<Base> }
 impl AgyDriver {
-    pub fn new() -> AgyDriver { AgyDriver { turn: AgyTurn::default(), st: Acp::default(), cli: None, cs: Default::default() } }
+    pub fn new() -> AgyDriver { AgyDriver { turn: AgyTurn::default(), st: Acp::default(), cli: None, cs: Default::default(), bases: vec![] } }
     pub fn done(&self) -> bool { if self.cli.is_some() { self.cs.done } else { self.st.done } }
     /// Whether this turn runs the person's agy CLI.
     pub fn on_cli(&self) -> bool { self.cli.is_some() }
@@ -410,6 +439,7 @@ impl Driver for AgyDriver {
         if !pinned(&a.home) { if let Some(p) = super::agy_cli::find() {
             let home = std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default();
             if let super::agy_cli::Mcp::Skipped(why) = super::agy_cli::ensure_mcp(&super::agy_cli::mcp_config(&home)) { self.cs.note = format!("Backplane's tools are not available to Antigravity this turn: {why}.") }
+            self.bases = bases_from(&std::fs::read_to_string(bases_path(&a.home)).unwrap_or_default()); // the probe's folded list: model + effort -> agy's variant
             self.cli = Some(p); return Ok(())
         } }
         // Google's terms forbid other software reaching Antigravity with a Google sign-in ("using OpenClaw with Antigravity OAuth"): the pinned agent's
@@ -418,7 +448,7 @@ impl Driver for AgyDriver {
         write_runner(&root(&a.home)).map_err(|e| e.to_string())
     }
     fn argv(&self, a: &TurnIn) -> Vec<String> {
-        if let Some(p) = &self.cli { let mut v = vec!["-c".to_string(), super::agy_cli::RUN.into(), p.to_string_lossy().into_owned()]; v.extend(super::agy_cli::args(a)); return v }
+        if let Some(p) = &self.cli { let mut v = vec!["-c".to_string(), super::agy_cli::RUN.into(), p.to_string_lossy().into_owned()]; v.extend(super::agy_cli::args(a, &self.bases)); return v }
         let r = root(&a.home);
         args(&r, &format!("{}/secrets/api.env", a.home), a.setting("agy.auth"), a.setting("agy.account"), a.setting("agy.gcp.project"), a.setting("agy.gcp.location"))
     }
@@ -534,10 +564,18 @@ mod tests {
     }
     #[test] fn the_cli_is_what_the_picker_shows_without_the_pinned_agent() {
         let i = Info { cli: "1.4.2".into(), cli_models: cli_models("Fetching available models...\ngemini-4-argon-medium\tGemini 4 Argon (Medium)\nclaude-opus-5-5-high\tClaude Opus 5.5 (High)\n"), ..Default::default() };
-        assert_eq!(info_models(&i), ["gemini-4-argon-medium", "claude-opus-5-5-high"]);
-        let a = info_about(&i); assert_eq!(a["cli"], "Antigravity CLI 1.4.2"); assert_eq!(a["labels"]["gemini-4-argon-medium"], "Gemini 4 Argon (Medium)");
+        assert_eq!(info_models(&i), ["gemini-4-argon", "claude-opus-5-5"]);
+        let a = info_about(&i); assert_eq!(a["cli"], "Antigravity CLI 1.4.2"); assert_eq!(a["labels"]["gemini-4-argon"], "Gemini 4 Argon"); assert_eq!(a["efforts"]["gemini-4-argon"], json!(["medium"])); assert_eq!(a["efforts"]["default"], json!([]));
         assert_eq!(info_about(&Info::default())["cli"], "", "neither: not installed");
         let p = Info { have: VERSION.into(), cli: "1.4.2".into(), ..Default::default() }; assert!(info_about(&p)["cli"].as_str().unwrap().starts_with("Antigravity 1.3"), "the pinned agent runs turns when installed");
+    }
+    // agy 1.4.2's own list (test/fixtures/antigravity/cli-models.txt): one entry a base model, its variants as levels
+    #[test] fn variants_fold_into_one_model_with_its_levels() {
+        let bs = fold(&cli_models(include_str!("../../../../../test/fixtures/antigravity/cli-models.txt")));
+        assert_eq!(bs.iter().map(|b| b.id.as_str()).collect::<Vec<_>>(), ["gemini-4-carbon", "gemini-4-argon", "gemini-3.8-flash", "claude-opus-5-5", "claude-sonnet-5-5", "gpt-oss-120b"]);
+        assert_eq!(bs[0], Base { id: "gemini-4-carbon".into(), name: "Gemini 4 Carbon".into(), levels: vec!["low".into(), "medium".into(), "high".into()] });
+        assert_eq!(bs[5].levels, ["medium"]); assert_eq!(bases_from(&bases_json(&bs)), bs);
+        assert_eq!(split_variant("claude-opus-5-5"), ("claude-opus-5-5", None)); assert_eq!(split_variant("x-max"), ("x", Some("max"))); assert_eq!(split_variant("max"), ("max", None));
     }
     #[test] fn signing_in() {
         let mut s = AgySign::default(); let o = s.line("oauth-personal", "/h", &j(r#"{"id":1,"result":{}}"#)); assert_eq!(m(&o.send[0]), "authenticate");

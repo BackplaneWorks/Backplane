@@ -69,12 +69,35 @@ pub fn mode_args(runtime: &str) -> Vec<String> {
     match runtime { "approval-required" => vec![], "auto-accept-edits" => vec!["--mode".into(), "accept-edits".into()], "auto" => vec!["--mode".into(), "auto".into()], _ => vec!["--dangerously-skip-permissions".into()] }
 }
 pub const EFFORTS: &[&str] = &["low", "medium", "high", "xhigh", "max"];
+/// The nearest level `bs` offers to `want` on Backplane's scale (a tie goes to the lower).
+pub fn nearest(want: &str, levels: &[String]) -> Option<String> {
+    let at = |l: &str| super::agy::SCALE.iter().position(|x| *x == l).map(|i| i as i64);
+    let w = at(want)?; levels.iter().filter_map(|l| at(l).map(|i| ((i - w).abs(), i, l.clone()))).min().map(|t| t.2)
+}
+/// The thread's model and effort as agy takes them: `--model <base>-<level>` when agy has the model as variants (effort "" is the medium one, or the
+/// nearest it has; a level it lacks maps to the nearest), the model as given otherwise, and `--effort` only for agy's own default model or one it did not list.
+pub fn resolve(model: &str, effort: &str, bases: &[super::agy::Base]) -> (Option<String>, Option<String>) {
+    let eff = if EFFORTS.contains(&effort) { Some(effort.to_string()) } else { None };
+    if model.is_empty() || model == "default" { return (None, eff) }
+    let (b, own) = super::agy::split_variant(model);
+    let found = bases.iter().find(|x| x.id == model).or_else(|| bases.iter().find(|x| x.id == b && own.is_some()));
+    match found {
+        Some(base) if !base.levels.is_empty() => {
+            let want = if !effort.is_empty() && super::agy::SCALE.contains(&effort) { effort } else { own.unwrap_or("medium") };
+            let pick = nearest(want, &base.levels).unwrap_or_else(|| base.levels[0].clone());
+            (Some(format!("{}-{pick}", base.id)), None)
+        }
+        Some(base) => (Some(base.id.clone()), None),
+        None => (Some(model.to_string()), if own.is_some() { None } else { eff }),
+    }
+}
 /// The command line after `agy`.
-pub fn args(a: &TurnIn) -> Vec<String> {
+pub fn args(a: &TurnIn, bases: &[super::agy::Base]) -> Vec<String> {
     let mut v: Vec<String> = ["--print=", "--input-format", "stream-json", "--output-format", "stream-json"].iter().map(|s| s.to_string()).collect();
     if !a.session.is_empty() { v.push("--conversation".into()); v.push(a.session.clone()) }
-    if !a.model.is_empty() && a.model != "default" { v.push("--model".into()); v.push(a.model.clone()) }
-    if EFFORTS.contains(&a.effort.as_str()) { v.push("--effort".into()); v.push(a.effort.clone()) }
+    let (m, e) = resolve(&a.model, &a.effort, bases);
+    if let Some(m) = m { v.push("--model".into()); v.push(m) }
+    if let Some(e) = e { v.push("--effort".into()); v.push(e) }
     v.extend(mode_args(&a.runtime)); v
 }
 /// The one input line: the person's text (Backplane's instructions first in a new conversation; image attachments named by path).
@@ -172,11 +195,26 @@ mod tests {
     use super::*;
     fn j(s: &str) -> Value { serde_json::from_str(s).unwrap() }
     fn feed(s: &mut St, text: &str) -> Vec<String> { text.lines().filter(|l| !l.trim().is_empty()).flat_map(|l| line(s, &serde_json::from_str(l).unwrap_or(Value::String(l.into())))).map(|v| v.to_string()).collect() }
-    fn ti(session: &str, runtime: &str) -> TurnIn { TurnIn { session: session.into(), runtime: runtime.into(), text: "hi".into(), prompt: "RULES".into(), model: "gemini-4-argon-medium".into(), effort: "high".into(), ..Default::default() } }
+    fn ti(session: &str, runtime: &str) -> TurnIn { TurnIn { session: session.into(), runtime: runtime.into(), text: "hi".into(), prompt: "RULES".into(), model: "gemini-4-argon".into(), effort: "high".into(), ..Default::default() } }
 
+    fn bases() -> Vec<super::super::agy::Base> { super::super::agy::fold(&super::super::agy::cli_models(include_str!("../../../../../test/fixtures/antigravity/cli-models.txt"))) }
+    #[test] fn effort_picks_the_variant() {
+        let b = bases(); let r = |m: &str, e: &str| resolve(m, e, &b);
+        assert_eq!(r("gemini-4-carbon", "low"), (Some("gemini-4-carbon-low".into()), None));
+        assert_eq!(r("gemini-4-carbon", "high"), (Some("gemini-4-carbon-high".into()), None));
+        assert_eq!(r("gemini-4-carbon", ""), (Some("gemini-4-carbon-medium".into()), None), "auto is the medium variant");
+        assert_eq!(r("gemini-4-carbon", "max"), (Some("gemini-4-carbon-high".into()), None), "a level agy lacks maps to the nearest");
+        assert_eq!(r("gemini-4-carbon", "minimal"), (Some("gemini-4-carbon-low".into()), None));
+        assert_eq!(r("gpt-oss-120b", "high"), (Some("gpt-oss-120b-medium".into()), None), "its one variant");
+        assert_eq!(r("gemini-4-carbon-high", ""), (Some("gemini-4-carbon-high".into()), None), "a thread that kept a variant id keeps it");
+        assert_eq!(r("gemini-4-carbon-high", "low"), (Some("gemini-4-carbon-low".into()), None), "and the effort picker moves it");
+        assert_eq!(r("", "high"), (None, Some("high".into()))); assert_eq!(r("default", "auto"), (None, None));
+        assert_eq!(r("new-model", "low"), (Some("new-model".into()), Some("low".into())), "a model agy did not list is passed as given");
+        assert_eq!(resolve("gemini-4-carbon", "low", &[]), (Some("gemini-4-carbon".into()), Some("low".into())), "no list yet: as given");
+    }
     #[test] fn args_mode_model_effort_resume() {
-        assert_eq!(args(&ti("", "full-access")), ["--print=", "--input-format", "stream-json", "--output-format", "stream-json", "--model", "gemini-4-argon-medium", "--effort", "high", "--dangerously-skip-permissions"]);
-        let v = args(&TurnIn { session: "C1".into(), runtime: "approval-required".into(), model: "default".into(), effort: "auto".into(), ..Default::default() });
+        assert_eq!(args(&ti("", "full-access"), &bases()), ["--print=", "--input-format", "stream-json", "--output-format", "stream-json", "--model", "gemini-4-argon-high", "--dangerously-skip-permissions"]);
+        let v = args(&TurnIn { session: "C1".into(), runtime: "approval-required".into(), model: "default".into(), effort: "auto".into(), ..Default::default() }, &[]);
         assert_eq!(v[5..], ["--conversation", "C1"], "supervised adds no flag, the default model and an effort agy does not take are left out");
         assert_eq!(mode_args("auto-accept-edits"), ["--mode", "accept-edits"]); assert_eq!(mode_args("auto"), ["--mode", "auto"]); assert_eq!(mode_args(""), ["--dangerously-skip-permissions"]);
     }
