@@ -12,7 +12,7 @@
 //! A driver is a small state machine for ONE turn: it names the command line, writes its handshake, and turns the process's own protocol
 //! (ACP / MSP / RPC JSON lines) into shapes and replies. It is built fresh per turn (`driver()`), so it keeps whatever it needs in itself.
 use serde_json::Value;
-pub mod acp; pub mod agy; pub mod codex; pub mod dialog; pub mod grok; pub mod msp; pub mod muse; pub mod omp; pub mod opencode; pub mod pi;
+pub mod acp; pub mod agy; pub mod agy_cli; pub mod codex; pub mod dialog; pub mod grok; pub mod msp; pub mod muse; pub mod omp; pub mod opencode; pub mod pi;
 
 /// Everything about the turn a driver may read. `text` is the message with `$skill` mentions made real; `images` its image attachments' paths;
 /// `prompt` the runtime prompt (Hub.prompt ++ skills); `mcp_url` this process's Backplane MCP endpoint; `home` the hub's home;
@@ -28,7 +28,7 @@ pub struct TurnIn {
     pub settings: Vec<(String, String)>,
 }
 /// The settings the actor copies into `TurnIn.settings` (add a key here when a driver needs one).
-pub const SETTINGS: &[&str] = &["agy.auth", "agy.account", "agy.gcp.project", "agy.gcp.location"];
+pub const SETTINGS: &[&str] = &["agy.auth", "agy.account", "agy.gcp.project", "agy.gcp.location", "agy.oauth.optin"];
 impl TurnIn { pub fn setting(&self, k: &str) -> &str { self.settings.iter().find(|(a, _)| a == k).map(|(_, v)| v.as_str()).unwrap_or("") } }
 
 /// What a driver answers to one line from its process: lines to write back (a reply, the next request) and Codex-shaped lines for the log.

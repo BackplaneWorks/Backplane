@@ -110,6 +110,7 @@ fn render_cli() -> i32 {
 async fn main() {
     plat::hub::raise_nofile();
     if std::env::args().nth(1).as_deref() == Some("--agent-reaper") { std::process::exit(agents::proc::reaper_main()) }
+    if std::env::args().nth(1).as_deref() == Some("--mcp-stdio") { std::process::exit(agents::mcp_stdio::main()) }
     if std::env::args().nth(1).as_deref() == Some("--render") { std::process::exit(render_cli()) }
     let args = match parse() { Ok(a) => a, Err(code) => std::process::exit(code) };
     plat::hub::exit_on_signals();
