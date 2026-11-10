@@ -858,6 +858,7 @@ private fun SettingsScreen(back: () -> Unit, hub: () -> Unit, accounts: () -> Un
             if (DataDevices.available) { DevicesSettings(); DLine() }
             if (DataMachines.available) { MachinesSettings(); DLine() }
             if (DataNotify.available) { NotifySettings(); DLine() }
+            if (DataRing.available) { RingSettings(); DLine() }
             DMono(Msg.android_alerts_head, dfaint)
             var alerts by remember { mutableStateOf(AppSettings.alertsOn()) }
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { listOf(true to "on", false to "off").forEach { (v, l) -> DBtn(if (v) Msg.option_on else Msg.option_off, alerts == v, modifier = Modifier.testTag("settings.alerts.$l")) { alerts = v; AppSettings.putAlerts(v) } } }

@@ -1473,6 +1473,17 @@ fn ring_form(words: &str, audio: &[u8], at: u64) -> Vec<u8> {
     let get = |p: &str| { let hub = hub.clone(); let p = p.to_string(); async move { let h = hub.http_for(&p).unwrap(); let r = crate::auth::Req::new("GET", &p, vec![]); let a = h.call(&hub, &r).await; (a.status.to_string(), a.body) } };
     assert_eq!(get(path).await, ("200 OK".to_string(), audio.to_vec())); assert_eq!(get(&format!("/ring/audio/{id}?k=00")).await.0, "404 Not Found");
     assert_eq!(rpc(&hub, "ring.hear", json!({"note":"../x"})).await["ok"], false);
+    // the phones' page: the same rows, the test event's time, a search typed on the phone, and a press the phone does itself refused here
+    let pg = rpc(&hub, "ring.page", json!({})).await; let rows = pg["rows"].as_array().unwrap().clone();
+    assert!(rows[1]["note"].as_str().unwrap().starts_with("Arrived "), "{:?}", rows[1]); assert!(rows[0]["buttons"].as_array().unwrap().iter().any(|b| b["action"] == "share-text"));
+    let a = rpc(&hub, "ring.page.act", json!({"action":"ring-search","value":"","fields":{"ringq":"stm32n657"}})).await; assert_eq!(a["ok"], true, "{a}");
+    let rows = a["rows"].as_array().unwrap(); assert_eq!(rows[2]["fields"][0]["value"], "stm32n657"); assert_eq!(rows.len(), 4, "one note found"); assert!(rows[3]["note"].as_str().unwrap().starts_with("Order STM32N657"));
+    assert_eq!(rpc(&hub, "ring.page.act", json!({"action":"copy","value":"x"})).await["ok"], false);
+    // after a cutover this hub says where the ring is, offers that URL, sets nothing up
+    hub.commit_many(&[json!({"$":"SettingSet","key":"ring.home","value":r#"{"url":"https://boat-hub.example.ts.net/hook/h1","machine":"boat-hub"}"#,"at":now})]).await.unwrap();
+    let rows = rpc(&hub, "ring.page", json!({})).await["rows"].as_array().unwrap().clone(); assert_eq!(rows.len(), 1);
+    assert!(rows[0]["note"].as_str().unwrap().starts_with("Ring is on boat-hub.")); assert_eq!(rows[0]["buttons"][0]["value"], "https://boat-hub.example.ts.net/hook/h1");
+    assert!(rpc(&hub, "ring.setup", json!({})).await["error"].as_str().unwrap().contains("the ring is on boat-hub now"));
 }
 
 #[tokio::test] async fn a_task_run_asked_for_wakes_the_bot_with_its_parameters() {

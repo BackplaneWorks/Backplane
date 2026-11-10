@@ -547,6 +547,33 @@ final class Journeys: XCTestCase {
     // a tap on a part opens its info over the board; the viewer keeps its size, and closing or tapping empty space deselects.
     // (On the TestFlight build of Nov 6 the tap folded the viewer to its bar: the pick's JSON was pasted into the viewer's JSON.)
     // HUB_VIEWER_THREAD: a thread of a project with a board with parts (the GNSS tracker); else the first thread of the list.
+    /// Settings › Ring (docs/ring.md) against test/ring/rig.py's hub: Set up, Copy both (and what the pasteboard holds), the Pebble app's test event
+    /// (test/ring/ios_ring.sh sends it once the hook exists) shown after Check again, then a recording listed, heard and given to Pebble, with Play and
+    /// What happened, which opens Pebble's thread.
+    func test_ring() {
+        d = Driver("ring"); defer { d.finish() }
+        d.launch()
+        guard d.step("Settings", act: { d.tap(d.el("data.settings")) }, expect: { d.el("data.settings").exists == false || d.label("Ring").exists }) else { return }
+        func on(_ e: XCUIElement) { var n = 0; while n < 16 && !(e.exists && e.isHittable) { d.app.swipeUp(velocity: .slow); n += 1 } }
+        func btn(_ action: String, _ label: String) -> XCUIElement { d.app.buttons.matching(NSPredicate(format: "identifier == %@ AND label == %@", "ring.page." + action, label)).firstMatch }
+        let setUp = btn("ring-op", "Set up")
+        guard d.step("the Ring page offers Set up", timeout: 30, act: { on(setUp) }, expect: { setUp.exists }) else { return }
+        d.shot("page")
+        guard d.step("Set up makes the webhook: its URL shows", timeout: 30, act: { d.tap(setUp) }, expect: { d.label("/hook/h").exists }) else { return }
+        let both = btn("copy", "Copy both")
+        on(both); d.shot("set-up")
+        d.step("Copy both: the row says Copied", timeout: 8, act: { d.tap(both) }, expect: { d.label("Copied").exists })
+        let check = btn("ring-search", "Check again")
+        d.step("the test event's time shows after Check again", timeout: 90, act: {}, expect: { on(check); d.tap(check); sleep(2); return d.label("Backplane hears this webhook").exists })
+        d.shot("test-arrived")
+        d.step("the recording is listed, heard and given to Pebble", timeout: 120, act: {}, expect: { on(check); d.tap(check); sleep(3); return d.label("given to Pebble").exists })
+        let play = btn("open-url", "Play"), what = btn("link-open", "What happened")
+        d.step("it has Play and What happened", timeout: 10, act: { on(what) }, expect: { play.exists && what.exists })
+        d.shot("recording")
+        d.step("What happened opens Pebble's thread", timeout: 20, act: { d.tap(what) }, expect: { d.label("voice note from your Pebble ring").exists })
+        d.shot("what-happened")
+    }
+
     func test_data_part_info() {
         d = Driver("data-part-info"); defer { d.finish() }
         let thread = d.env["HUB_VIEWER_THREAD"] ?? ""

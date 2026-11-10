@@ -1280,6 +1280,7 @@ struct DataSettingsView: View {
                 if client.has("devices") { DataDevicesSection(client: client); DLine() }
                 if client.has("machines") { DataMachinesSection(client: client); DLine() }
                 if client.has("notifysettings") { DataNotifySection(client: client); DLine() }
+                if client.has("ring") { DataRingSection(client: client); DLine() }
                 NavigationLink(value: DPage(name: "improvements")) { Text(Tr.t("Improvements")) }.buttonStyle(DButton()).accessibilityIdentifier("settings.improve")
                 DLine()
                 let i = Bundle.main.infoDictionary

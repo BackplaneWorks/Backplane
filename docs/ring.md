@@ -102,12 +102,36 @@ protocol version 1.
     earlier ones, and the newest one with words is the one used.
   - **Send again**: `ring.send`.
   - **What happened**: opens Pebble's thread.
-- **RPCs**: `ring.list {q}`, `ring.get {note}` (the whole note.json with its
+- **RPCs**: `ring.page`, `ring.page.act`, `ring.list {q}`, `ring.get {note}` (the whole note.json with its
   segments), `ring.search`, `ring.hear`, `ring.send`, `ring.setup`. Info for
   clients: `ring.notes`, `ring.setup`, `ring.busy`, `ring.test`.
 
-The phones do not have a Ring page yet. They receive Pebble's alerts and can
-read #ring-requests and Pebble's thread like any others.
+The phones have the same page (Settings → Ring, feature `ring`). `ring.page`
+gives rows, and `ring.page.act {action, value, fields}` gives the rows again
+after the press. The rows come from one pure function, `voice/ringpage.rs`.
+On the phones:
+
+- Copy URL, Copy header, Copy both and **Share** (the share sheet) never
+  leave the phone, so the person can paste into the Pebble app on the same phone.
+- Play opens the recording's link.
+- What happened opens Pebble's thread.
+
+The **Test event** row says when the Pebble app's Send test event last
+arrived. Check again reads the page again.
+
+## When another hub owns the ring
+
+Only one hub owns the ring: the Pebble bot, its webhook and token, and
+`home/ring/`. After a move (the always-on hub, docs/BOAT-HUB.md), the old hub
+gets the setting `ring.home` = `{"url": "<the owner's hook URL>", "machine": "<its name>"}`.
+Its Ring page then:
+
+- says "Ring is on <machine>", and Copy URL / Copy both give that URL;
+- offers no Set up (`ring.setup` refuses) and shows no list;
+- does not take up notes again after a restart.
+
+The owning hub derives its own URL as above. The Authorization header does not
+change, so in the Pebble app only the URL changes, followed by Send test event.
 
 ## Setting up the phone
 
