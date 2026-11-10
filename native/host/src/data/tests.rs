@@ -640,3 +640,35 @@ impl RpcHandler for FakeStar {
     let r = ask(&mut ws, 3, "improvements.projects", json!({})).await; assert_eq!((r["result"]["project"].as_str(), r["result"]["projects"][0]["id"].as_str()), (Some("p2"), Some("p2")), "the last choice, first");
     let r = ask(&mut ws, 4, "improvements.project", json!({"project":"nope"})).await; assert_eq!(r["ok"], false, "no such project");
 }
+/// Bot.private (Nov 10: Bub's chat on the phone showed a launched thread's whole report): what the hub hands a bot is not the person's chat
+#[test] fn a_bots_conversation_hides_what_the_hub_hands_the_bot() {
+    use crate::agents::{launch, tasks, work};
+    let hide = |id: &str, role: &str, text: &str| crate::present::thread::bot_private(id, role, text);
+    // reports and notes to the bot
+    assert!(hide("t:t9:lr-r1", "user", &launch::note("t9", "Always-on hub", "completed", "Bub: **Prep** done")), "a launched thread's report");
+    assert!(hide("t:t9:lr-r2", "user", &launch::note("t9", "Always-on hub", "failed", "")), "a failed one");
+    assert!(hide("t:t9:td-k1", "system", &tasks::note("k1", "claude", "opus", "completed", "done it")), "a delegated task's result");
+    assert!(hide("w1", "system", &work::text("build", "exit 0", "")), "watched work");
+    assert!(hide("m1", "user", crate::settings::driver::SIGNIN_TEXT), "a provider handover");
+    assert!(hide("m2", "user", crate::settings::driver::RESUME_TEXT), "a limit reset");
+    assert!(hide("m3", "user", crate::agents::ACCOUNT_RETRY_TEXT), "an account retry");
+    assert!(hide("x1", "user", "[mail c1 · email from Ann]\nCurrent actionable input: x1\nhello"), "mailroom input");
+    assert!(hide("x2", "system", "[mailroom escalation from c1] look at this"), "an escalation");
+    assert!(hide("told:m9", "user", "[Backplane] Your private mailroom just told the person this in your conversation (key k)."), "the mailroom's told note");
+    assert!(hide("t:t3:abc", "user", "[message from t3] the board is routed"), "a message from another thread");
+    assert!(hide("r1", "user", "[routine: daily] summarise"), "a routine's prompt");
+    assert!(hide("h1", "user", "[webhook: ring] note"), "a webhook");
+    assert!(hide("c1", "user", "Backplane restarted while you were working. Continue where you left off."), "the restart carry");
+    assert!(hide("s1", "system", "anything the hub says"), "any system note");
+    // what the person needs
+    assert!(!hide("t:t9:lr-r3", "user", &launch::ask_note("t9", "Always-on hub", "question (AskUserQuestion): which box?")), "a launched thread that waits on the person");
+    assert!(!hide("m10", "user", "move the hub to the Boat"), "the person's own words");
+    assert!(!hide("m11", "user", "[message from person@phone] hi"), "the person from another device");
+    assert!(!hide("m12", "user", "[message from ann@far] hi"), "a peer");
+    assert!(!hide("m13", "user", "[message from ann in #ops] hi"), "a room");
+    assert!(!hide("a1", "assistant", "[Backplane] anything"), "the bot's own reply");
+    // only in a bot's conversation
+    let report = launch::note("t9", "x", "completed", "done");
+    assert!(crate::present::thread::hidden(true, "t:t9:lr-r1", "user", &report) && !crate::present::thread::hidden(false, "t:t9:lr-r1", "user", &report));
+    assert!(crate::present::thread::hidden(false, "h", "user", &format!("{}\"First\" (t1).", crate::present::thread::HANDOFF_HEAD)), "agent_only stays everywhere");
+}
