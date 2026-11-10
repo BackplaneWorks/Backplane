@@ -27,6 +27,7 @@ for n in codex grok muse; do printf '#!/bin/sh\nexit 1\n' > "$R/bin/$n"; chmod +
 NOW=$(date +%s)
 { printf '{"$":"ProjectCreated","id":"p1","title":"USB sniffer","root":"%s","at":%s}\n' "$R/usb" "$NOW"
   printf '{"$":"ProjectCreated","id":"p2","title":"Deck","root":"%s","at":%s}\n' "$R/deck" "$NOW"
+  printf '{"$":"ProjectCreated","id":"p3","title":"Backplane","root":"%s","at":%s}\n' "$R/deck" "$NOW"
   for i in 1 2 3 4; do printf '{"$":"ThreadCreated","id":"t%s","project":"p1","title":"thread %s","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":%s}\n' "$i" "$i" "$((NOW - 10 + i))"; done
 } > "$R/home/events.jsonl"
 echo '[{"wait":280000}]' > "$R/script.json"

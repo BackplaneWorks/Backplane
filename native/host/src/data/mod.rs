@@ -111,7 +111,7 @@ fn project_json(m: &crate::model::Model, id: &str, asks: &HashMap<String, u64>) 
     let pick = setting_of(&format!("project.pick.{id}"));
     let color = crate::present::badge::color_eff(&setting_of(&format!("project.color.{id}")), &pick, id).to_string();
     Some(json!({"id":id,"title":p.title,"root":p.root,"origin":crate::mirror::origin_of_root(&p.root),"threadCount":count,"settledCount":settled,"updatedAt":ms(updated),"waiting":waiting,
-        "icon":crate::present::badge::icon_eff(&setting_of(&format!("project.icon.{id}")), &pick),"css":crate::present::badge::css_of(&color),"color":color}))
+        "icon":crate::present::badge::icon_eff(&setting_of(&format!("project.icon.{id}")), &pick, &p.title),"css":crate::present::badge::css_of(&color),"color":color}))
 }
 
 /// The linked machines' projects and threads next to this hub's: `f(shown machines, unified marks and join map, the pick)` (docs/PHONE-DATA.md, Your machines).

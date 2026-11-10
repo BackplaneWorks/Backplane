@@ -51,7 +51,7 @@ pub fn project_json(id: &str, st: &State, mark: &Value, un: &Unified, machine: &
     let pick = setting(st, &format!("project.pick.{id}"));
     let color = crate::present::badge::color_eff(setting(st, &format!("project.color.{id}")), pick, id).to_string();
     Some(json!({"id":id,"title":p.title,"root":p.root,"origin":"","threadCount":live.len(),"settledCount":settled,"updatedAt":ms(updated),"waiting":waiting,
-        "icon":crate::present::badge::icon_eff(setting(st, &format!("project.icon.{id}")), pick),"css":crate::present::badge::css_of(&color),"color":color,
+        "icon":crate::present::badge::icon_eff(setting(st, &format!("project.icon.{id}")), pick, &p.title),"css":crate::present::badge::css_of(&color),"color":color,
         "machine":machine,"mark":mark,"newOn":new_on_far(id, machine, mark, un)}))
 }
 /// A project that is only on a linked machine starts its new threads there.

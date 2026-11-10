@@ -53,9 +53,10 @@ pub fn entries(root: &Path) -> Vec<String> {
     v.sort(); v.truncate(200); v
 }
 
-/// The projects that want a pick: alive, no icon of the person's, no pick kept, and not failed within RETRY.
-pub fn due(projects: &[(String, bool)], setting: impl Fn(&str) -> String, failed: &HashMap<String, u64>, now: u64) -> Vec<String> {
-    let mut v: Vec<String> = projects.iter().filter(|(_, removed)| !removed).map(|(id, _)| id.clone())
+/// The projects that want a pick: alive, not named Backplane (it shows the logo, present/badge.rs `SECRET`), no icon of the person's, no pick kept,
+/// and not failed within RETRY. `projects`: (id, title, removed).
+pub fn due(projects: &[(String, String, bool)], setting: impl Fn(&str) -> String, failed: &HashMap<String, u64>, now: u64) -> Vec<String> {
+    let mut v: Vec<String> = projects.iter().filter(|(_, title, removed)| !removed && !badge::secret(title)).map(|(id, _, _)| id.clone())
         .filter(|id| setting(&format!("project.icon.{id}")).is_empty() && setting(&format!("{KEY}{id}")).is_empty())
         .filter(|id| failed.get(id).map_or(true, |at| now >= at + RETRY)).collect();
     v.sort(); v
@@ -84,9 +85,9 @@ pub fn nudge() { wake().notify_one() }
 impl Agents {
     async fn icon_round(&self) {
         let now = super::now_s();
-        let projects: Vec<(String, bool)> = { let w = self.world().await; w.projects.iter().map(|(id, (_, r))| (id.clone(), *r)).collect() };
+        let projects: Vec<(String, String, bool)> = { let w = self.world().await; w.projects.iter().map(|(id, (t, r))| (id.clone(), t.clone(), *r)).collect() };
         let mut st: HashMap<String, String> = HashMap::new();
-        for (id, _) in &projects { for k in [format!("project.icon.{id}"), format!("{KEY}{id}")] { let v = self.hub.setting(&k).await.unwrap_or_default(); st.insert(k, v); } }
+        for (id, _, _) in &projects { for k in [format!("project.icon.{id}"), format!("{KEY}{id}")] { let v = self.hub.setting(&k).await.unwrap_or_default(); st.insert(k, v); } }
         let list = { let f = failed().lock().unwrap(); due(&projects, |k| st.get(k).cloned().unwrap_or_default(), &f, now) };
         for id in list { self.icon_pick(&id).await; }
     }
@@ -149,11 +150,11 @@ mod tests {
         assert!(entries(Path::new("/nonexistent/bp")).is_empty());
     }
     #[test] fn only_projects_with_no_icon_of_the_persons_and_no_pick_are_due() {
-        let ps = vec![("a".to_string(), false), ("b".into(), false), ("c".into(), false), ("d".into(), true), ("e".into(), false)];
+        let ps: Vec<(String, String, bool)> = [("a", "A", false), ("b", "B", false), ("c", "C", false), ("d", "D", true), ("e", "E", false), ("f", "Backplane", false)].into_iter().map(|(i, t, r)| (i.to_string(), t.to_string(), r)).collect();
         let st: HashMap<String, String> = [("project.icon.b", "cpu"), ("project.pick.c", "usb")].into_iter().map(|(k, v)| (k.to_string(), v.to_string())).collect();
         let get = |k: &str| st.get(k).cloned().unwrap_or_default();
         let mut f = HashMap::new(); f.insert("e".to_string(), 1000u64);
-        assert_eq!(due(&ps, get, &f, 1000 + RETRY - 1), vec!["a".to_string()], "b chosen by the person, c picked, d removed, e failed a moment ago");
+        assert_eq!(due(&ps, get, &f, 1000 + RETRY - 1), vec!["a".to_string()], "b chosen by the person, c picked, d removed, e failed a moment ago, f named Backplane (the logo, no model)");
         assert_eq!(due(&ps, |k| st.get(k).cloned().unwrap_or_default(), &f, 1000 + RETRY), vec!["a".to_string(), "e".into()], "a failure is asked again after RETRY");
     }
     #[test] fn the_prompt_lists_every_icon_and_tint() { let s = system(); for i in badge::ICONS { assert!(s.contains(i), "{i}") } for (t, _) in badge::TINTS { assert!(s.contains(t), "{t}") } }

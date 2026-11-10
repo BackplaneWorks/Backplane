@@ -286,7 +286,8 @@ struct DataThreadsView: View {
             Button { toggle(p) } label: {
                 HStack(spacing: 8) {
                     Image(systemName: shut.contains(p.id) ? "chevron.right" : "chevron.down").font(.system(size: 11)).foregroundStyle(BackplaneDesign.dim).frame(width: 14)
-                    Image(systemName: dataBadgeSymbol(p.icon)).font(.system(size: 13)).foregroundStyle(Color(css: p.css) ?? BackplaneDesign.ok)
+                    // a project named Backplane: the app's own logo (the hub's `backplane`, which no badge sheet offers)
+                    if p.icon == "backplane" { BrandMark(size: 13) } else { Image(systemName: dataBadgeSymbol(p.icon)).font(.system(size: 13)).foregroundStyle(Color(css: p.css) ?? BackplaneDesign.ok) }
                     Text(p.title.uppercased()).dmono(12).foregroundStyle(BackplaneDesign.dim).lineLimit(1)
                     // another machine's project says where it is ("on desktop"); one that is also on a linked machine says so ("also on desktop")
                     let where_ = p.mark.map { dAway(Tr.t($0.label), $0.away) } ?? Tr.t(p.also)

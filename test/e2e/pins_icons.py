@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Pinned threads and picked project icons on the real window (private Xvfb, XTest mouse; scripts/desktop-pins-icons.sh sets it up). Judged by the hub's event log and the
 client's own `controls`/`probes` metrics (the sidebar's order is the order its rows register). Screenshots: $R/shots.
-  icons: both projects get a pick from the hub's one-shot (USB sniffer: usb teal, Deck: presentation), the person's icon wins, Pick again asks anew (plug)
+  icons: a project named Backplane shows the logo and is never asked about; the others get a pick from the hub's one-shot (USB sniffer: usb teal, Deck: presentation), the person's icon wins, Pick again asks anew (plug)
   pins:  a row's hover pin and the header's Pin pin a thread; pins list first, in the order they were pinned; a drag reorders them; they survive a hub restart;
          a pinned row's pin unpins it."""
 import json, os, subprocess, sys, time
@@ -68,6 +68,7 @@ p1 = until(lambda: setting('project.pick.p1'), 40); p2 = until(lambda: setting('
 check(p1 == 'usb teal', f'the USB sniffer is picked usb, teal: {p1}'); check(p2 == 'presentation', f'the deck is picked presentation: {p2}')
 seen = open(f'{R}/picks.log').read() if os.path.exists(f'{R}/picks.log') else ''
 check('USB 2.0 protocol analyzer' in seen and 'boards/' in seen and 'pitch.pptx' in seen, 'the model read the intent and the top-level files')
+check(setting('project.pick.p3') is None and 'Name: Backplane' not in seen, 'a project named Backplane is never asked about: it shows the logo')
 time.sleep(1.5); shot('01-icons')
 # ---- pins: the hover pin on a row (t3), then t1
 press('pin:t3', hover_first='thread:t3'); check(until(lambda: pinned('t3')), 'the row\'s hover pin pins t3')
