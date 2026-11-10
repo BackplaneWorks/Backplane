@@ -49,6 +49,8 @@ pub async fn thread_wt(cwd: &str, carry: bool, branch: &str, onto: &str) -> Stri
     if top.is_empty() { return "skip: not a git repository".into() }
     let r = git::run_ro(cwd, &["rev-parse", "--show-prefix"]).await; if r.code != 0 { return err(&r) }
     let prefix = r.out.trim().to_string();
+    // a folder inside another repository that does not track it (ignored, or never added) is no part of it: a worktree of that repository would not have it
+    if !prefix.is_empty() && !is_tree(&git::run_ro(&top, &["cat-file", "-t", &format!("HEAD:{}", sub(&prefix))]).await) { return format!("skip: not a git repository (inside {top}, which does not track it)") }
     if git::run_ro(cwd, &["rev-parse", "--verify", "-q", "HEAD"]).await.code != 0 { return "skip: no commit yet".into() }
     // Git.exclude: /.backplane/ in the repository's info/exclude, once
     let r = git::run_ro(&top, &["rev-parse", "--path-format=absolute", "--git-common-dir"]).await; if r.code != 0 { return err(&r) }
@@ -139,8 +141,8 @@ pub fn spawn_with(copy: bool, hub: Arc<Hub>, fold: Arc<tokio::sync::Mutex<super:
         }
         if r.starts_with("skip: ") || git::failed(&r) {
             let (tone, why) = if r.starts_with("skip: ") { (if mode == "worktree" { "error" } else { "info" }, r[6..].to_string()) } else { r = r.trim().to_string(); ("error", r.clone()) };
-            if named {
-                // a base was asked for: this thread never falls back to the project folder from here (the folder is the guarded line)
+            if named && !r.starts_with("skip: ") {
+                // a base was asked for in a repository: this thread never falls back to the project folder from here (the folder is the guarded line); a folder that is no repository has nothing to guard
                 let _ = hub.commit_many(&note(&hub, &th, "error", format!("could not make the worktree from {}: {why}", opts.base)).await).await;
                 return;
             }
@@ -165,6 +167,15 @@ mod tests {
     #[tokio::test] async fn a_folder_that_is_not_a_repository_is_skipped() {
         let d = std::env::temp_dir().join(format!("bp-wt-{}", std::process::id())); std::fs::create_dir_all(&d).unwrap();
         assert_eq!(thread_wt(d.to_str().unwrap(), false, "backplane/x", "").await, "skip: not a git repository");
+    }
+    #[tokio::test] async fn a_folder_inside_a_repository_that_does_not_track_it_is_skipped_and_a_tracked_one_is_not() {
+        let d = std::env::temp_dir().join(format!("bp-wt-nest-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(d.join("build/board")).unwrap(); std::fs::create_dir_all(d.join("boards/main")).unwrap();
+        let g = |a: &[&str]| { let o = std::process::Command::new("git").args(a).current_dir(&d).env("GIT_AUTHOR_NAME", "t").env("GIT_AUTHOR_EMAIL", "t@t").env("GIT_COMMITTER_NAME", "t").env("GIT_COMMITTER_EMAIL", "t@t").output().unwrap(); assert!(o.status.success(), "{a:?}"); };
+        std::fs::write(d.join(".gitignore"), "build/\n").unwrap(); std::fs::write(d.join("build/board/b.txt"), "b").unwrap(); std::fs::write(d.join("boards/main/m.txt"), "m").unwrap();
+        g(&["init", "-q"]); g(&["add", "."]); g(&["commit", "-qm", "x"]);
+        let r = thread_wt(d.join("build/board").to_str().unwrap(), false, "backplane/n1", "").await; assert!(r.starts_with("skip: not a git repository"), "{r}");
+        let r = thread_wt(d.join("boards/main").to_str().unwrap(), false, "backplane/n2", "").await; assert!(r.ends_with("/.backplane/worktrees/backplane-n2/boards/main"), "{r}");
+        let _ = std::fs::remove_dir_all(&d);
     }
     #[tokio::test] async fn a_repository_gets_a_worktree_on_its_own_branch_and_carries_the_boards_uncommitted_work() {
         let d = std::env::temp_dir().join(format!("bp-wt2-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap();
