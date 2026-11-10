@@ -153,11 +153,13 @@ pub fn hears(d: &Device, through: bool) -> bool { d.kind == "alert" && d.platfor
 pub enum Sent { Ok, Dead, Later(String) }
 pub trait Carrier: Send + Sync { fn send(self: Arc<Self>, hub: Arc<Hub>, d: Device, frame: apns::Frame) -> futures_util::future::BoxFuture<'static, Sent>; }
 
-enum Msg { Devices, Order(Value), Asked(String), Spoke(String), Seen(String), Prefs, SignIn(String, String) }
+enum Msg { Devices, Order(Value), Asked(String), Spoke(String), Seen(String), Clear, Prefs, SignIn(String, String) }
 pub struct Push { tx: mpsc::UnboundedSender<Msg> }
 impl Push {
     /// `push.seen`: a device opened the thread.
     pub fn seen(&self, thread: &str) { let _ = self.tx.send(Msg::Seen(thread.into())); }
+    /// `push.clear`: everything waiting that is not an open ask leaves the book (the person cleared the badge; once, Nov 10, the backlog the desktop never marked seen).
+    pub fn clear(&self) { let _ = self.tx.send(Msg::Clear); }
 }
 struct Watch(Arc<Push>);
 impl crate::api::Observer for Watch {
@@ -176,12 +178,13 @@ impl crate::api::Observer for Watch {
     }
 }
 
-/// `push.seen {thread}`: a device opened it. `push.state`: what is waiting, for a phone to set its badge and drop what was dealt with while it slept.
+/// `push.seen {thread}`: a device opened it (a phone, or a desk looking at it: settings/alerts.rs `desk.look`). `push.clear`: everything but the open asks is dealt with. `push.state`: what is waiting, for a phone to set its badge and drop what was dealt with while it slept.
 struct PushRpc(Arc<Push>);
 impl crate::api::RpcHandler for PushRpc {
-    fn methods(&self) -> &'static [&'static str] { &["push.seen", "push.state"] }
+    fn methods(&self) -> &'static [&'static str] { &["push.seen", "push.state", "push.clear"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, _who: &'a crate::api::Caller, id: &'a Value, method: &'a str, p: &'a Value) -> crate::api::Fut<'a, Vec<Value>> {
         Box::pin(async move {
+            if method == "push.clear" { self.0.clear(); return vec![json!({"t":"reply","id":id,"ok":true})] }
             if method == "push.seen" { self.0.seen(p["thread"].as_str().unwrap_or("")); return vec![json!({"t":"reply","id":id,"ok":true})] }
             let book: Book = hub.setting(BOOK).await.and_then(|v| serde_json::from_str(&v).ok()).unwrap_or_default();
             let mut keys: Vec<String> = book.open.iter().map(|i| i.key.clone()).collect(); keys.sort(); keys.dedup();
@@ -228,6 +231,7 @@ impl Worker {
             Msg::Asked(id) => self.deal(move |i| !id.is_empty() && i.ask == id).await,
             // an approval stays until it is answered: looking at it is not dealing with it
             Msg::Spoke(t) | Msg::Seen(t) => self.deal(move |i| i.thread == t && i.ask.is_empty()).await,
+            Msg::Clear => self.deal(|i| i.ask.is_empty()).await,
             // the record of an expired sign-in: the alert, once; its clearing (the account is back) takes it off every phone
             Msg::SignIn(key, v) => {
                 let provider = key.strip_prefix(SIGNIN).unwrap_or("").to_string();
@@ -294,7 +298,7 @@ impl Worker {
         for d in devices {
             match self.carrier.clone().send(self.hub.clone(), d.clone(), frame.clone()).await {
                 Sent::Ok => n += 1,
-                Sent::Dead => { let _ = self.hub.commit(&crate::net::devices::dropped(&json!({"token":d.token}), now_s())).await; }
+                Sent::Dead => { eprintln!("push: device {} retired: APNs refused its token for good", page::handle(&d.token)); let _ = self.hub.commit(&crate::net::devices::dropped(&json!({"token":d.token}), now_s())).await; }
                 Sent::Later(why) => eprintln!("push: not delivered: {why}"),
             }
         }

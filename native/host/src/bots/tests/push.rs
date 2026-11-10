@@ -171,6 +171,27 @@ async fn order(s: &S, how: &str, bot: &str) { s.hub.commit(&json!({"$":"PushOrde
     assert_eq!(s.fake.clears().len(), 4, "push.seen clears");
 }
 
+#[tokio::test] async fn a_desk_looking_at_a_thread_and_push_clear_take_items_off_the_badge() {
+    let s = setup("desk").await; crate::settings::alerts::start(&s.hub);
+    let rpc = |m: &'static str, p: Value| { let hub = s.hub.clone(); async move { let h = hub.rpc_for(m).expect("handler"); h.call(&hub, &crate::api::Caller { gen: "1".into(), client: 1 }, &json!(7), m, &p).await.remove(0) } };
+    person(&s, 1).await; let r = notify(&s, "done", "Built it", now_s() + 5).await; assert!(r.0, "{r:?}"); s.fake.wait(1).await;
+    rpc("desk.look", json!({"thread":s.chat,"focused":false})).await; settle().await; assert!(s.fake.clears().is_empty(), "an unfocused desk has not seen it");
+    rpc("desk.look", json!({"thread":s.chat,"focused":true})).await;
+    for _ in 0..300 { if !s.fake.clears().is_empty() { break } tokio::time::sleep(std::time::Duration::from_millis(30)).await }
+    let c = s.fake.clears(); assert_eq!(c.len(), 1, "{c:?}"); assert_eq!(c[0]["aps"]["badge"], 0, "read on the desktop: off the phone's badge");
+    // a backlog, cleared at once; an open ask still counts
+    s.hub.commit(&json!({"$":"ThreadCreated","id":"tw","project":"","title":"Worker","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1})).await.unwrap();
+    s.hub.commit(&json!({"$":"AskOpened","id":"a9","thread":"tw","tool":"Bash","detail":"rm x","at":2})).await.unwrap();
+    person(&s, 10).await; let r = notify(&s, "needs_you", "Approve rm", now_s() + 15).await; assert!(r.0, "{r:?}");
+    person(&s, 20).await; let r = notify(&s, "done", "Another thing", now_s() + 25).await; assert!(r.0, "{r:?}"); s.fake.wait(3).await;
+    let book = |hub: Arc<crate::hub::Hub>| async move { serde_json::from_str::<push::Book>(&hub.setting(push::BOOK).await.unwrap_or_default()).unwrap_or_default() };
+    settle().await; settle().await; // the thread alert records the notes wrote order pushes of their own (settings/alerts.rs): all of them in the book first
+    rpc("push.clear", json!({})).await;
+    for _ in 0..300 { if s.fake.clears().len() >= 2 { break } tokio::time::sleep(std::time::Duration::from_millis(30)).await }
+    assert_eq!(s.fake.clears().len(), 2); settle().await; let b = book(s.hub.clone()).await; assert!(b.open.is_empty() && b.held.is_empty(), "{b:?}");
+    assert_eq!(s.fake.clears()[1]["aps"]["badge"], 1, "the open ask still counts");
+}
+
 #[tokio::test] async fn a_dead_token_is_retired() {
     let s = setup_with("dead", Fake { dead: true, ..Fake::default() }).await;
     let r = notify(&s, "needs_you", "to a dead phone", now_s()).await; assert!(r.0, "{r:?}");
@@ -248,13 +269,16 @@ fn item(id: &str, th: &str, ask: &str, reason: &str) -> Item { Item { id: id.int
 }
 #[test] fn apns_answers_and_frames() {
     assert_eq!(apns::outcome("200", ""), Sent::Ok); assert_eq!(apns::outcome("410", r#"{"reason":"Unregistered"}"#), Sent::Dead);
-    for r in ["BadDeviceToken", "DeviceTokenNotForTopic", "TopicDisallowed", "Unregistered"] { assert_eq!(apns::outcome("400", &format!("{{\"reason\":\"{r}\"}}")), Sent::Dead, "{r}") }
+    for r in ["BadDeviceToken", "DeviceTokenNotForTopic", "Unregistered"] { assert_eq!(apns::outcome("400", &format!("{{\"reason\":\"{r}\"}}")), Sent::Dead, "{r}") }
+    assert!(matches!(apns::outcome("400", r#"{"reason":"TopicDisallowed"}"#), Sent::Later(_)), "the key may not push to the topic: the phone's token is fine (Nov 10)");
+    assert_eq!(apns::said("alert push-a to abc (production dev.b)", "200", "", "ID-1", &Sent::Ok), "push: APNs alert push-a to abc (production dev.b): 200 apns-id ID-1");
+    assert_eq!(apns::said("alert k to abc (production dev.b)", "400", r#"{"reason":"TopicDisallowed"}"#, "ID-2", &Sent::Later(String::new())), "push: APNs alert k to abc (production dev.b): 400 TopicDisallowed apns-id ID-2: kept");
     assert!(matches!(apns::outcome("400", r#"{"reason":"BadTopic"}"#), Sent::Later(_))); assert!(matches!(apns::outcome("403", r#"{"reason":"ExpiredProviderToken"}"#), Sent::Later(_)), "our key, not the phone's token"); assert!(matches!(apns::outcome("429", ""), Sent::Later(_))); assert!(matches!(apns::outcome("503", ""), Sent::Later(_)));
     assert_eq!(apns::host("sandbox"), "https://api.sandbox.push.apple.com"); assert_eq!(apns::host("production"), "https://api.push.apple.com");
     let say = push::collapse(&[item("a", "t1", "x", "needs_you")], "Bub", "h", "s");
     let f = Frame::alert(&say, 3); assert_eq!((f.push_type, f.priority, f.collapse.as_str()), ("alert", 10, "push-a"));
     let c = apns::curl_config("https://u/3/device/T", "JWT", "dev.b", &f, std::path::Path::new("/b"), std::path::Path::new("/o"));
-    for line in ["authorization: bearer JWT", "apns-topic: dev.b", "apns-push-type: alert", "apns-priority: 10", "apns-collapse-id: push-a", "data-binary = \"@/b\""] { assert!(c.contains(line), "{line}: {c}") }
+    for line in ["authorization: bearer JWT", "apns-topic: dev.b", "apns-push-type: alert", "apns-priority: 10", "apns-collapse-id: push-a", "data-binary = \"@/b\"", "%header{apns-id}"] { assert!(c.contains(line), "{line}: {c}") }
     let f = Frame::clear(&["k".to_string()], 0); assert_eq!((f.push_type, f.priority), ("background", 5)); assert!(f.payload["aps"].get("alert").is_none() && f.payload["aps"].get("sound").is_none(), "a clear shows nothing");
     assert!(!apns::curl_config("u", "J", "t", &f, std::path::Path::new("/b"), std::path::Path::new("/o")).contains("apns-collapse-id"));
 }
