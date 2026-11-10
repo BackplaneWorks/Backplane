@@ -330,8 +330,10 @@ pub fn images(cx: &mut Context<Backplane>, light: bool, list: &Value, key: &str,
                 // a box of the picture's own aspect: layout and paint agree, so the picture never spills over the rows below. In a column
                 // narrower than the picture (a viewer open beside the thread) the box narrows with it and its height follows, so the picture
                 // is drawn whole instead of being cut at the column's edge.
+                let (copy, ipath) = (img.clone(), it["path"].as_str().unwrap_or("").to_string());
                 let mut frame = div().w(px(bw)).max_w_full().flex_none(); frame.style().aspect_ratio = Some(bw / bh.max(1.0));
-                frame.overflow_hidden().cursor_pointer().on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| { this.screens.lightbox = Some((shown.clone(), n.clone())); cx.notify(); }))
+                frame.overflow_hidden().cursor_pointer().on_mouse_down(MouseButton::Right, cx.listener(move |this, e: &MouseDownEvent, _, cx| { cx.stop_propagation(); this.screens.ctx_img = Some(copy.clone()); this.ctx_open(e.position, super::ctxmenu::image_items(&ipath), cx); }))
+                    .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| { this.screens.lightbox = Some((shown.clone(), n.clone())); cx.notify(); }))
                     .child(gpui::img(ImageSource::Image(img)).size_full().object_fit(ObjectFit::Contain)).into_any_element() }
             Slot::Loading => div().px_2().py_1().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("dim")).child(crate::i18n::tf("gpui.timeline.loading", &[("name", name.as_str().into())])).into_any_element(),
             Slot::Failed => div().px_2().py_1().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("bad")).child(crate::i18n::tf("gpui.timeline.could.not.load", &[("name", name.as_str().into())])).into_any_element(),
@@ -400,7 +402,7 @@ impl Backplane {
         let Some(pos) = self.timeline_pos(e.position) else { return };
         if e.button == MouseButton::Right {
             let link = self.screens.reg.borrow().link_at(pos).cloned();
-            if let Some(l) = link { cx.write_to_clipboard(ClipboardItem::new_string(l.href)); }
+            if let Some(l) = link { let items = super::ctxmenu::link_items(&l.href, l.file); self.ctx_open(e.position, items, cx); }
             return;
         }
         let mut r = self.screens.reg.borrow_mut();
@@ -429,7 +431,7 @@ impl Backplane {
         if let Some(l) = link {
             self.screens.reg.borrow_mut().hover.clear();
             match super::linkroute::route(&l.href, l.file) {
-                super::linkroute::Route::File(p) => { let _ = self.tx.try_send(Command::Action("file-open".into(), p)); }
+                super::linkroute::Route::File(p) => self.file_open(&p, false),
                 super::linkroute::Route::Web(u) => cx.open_url(&u),
                 super::linkroute::Route::Hub(u) => { self.note.clear(); let _ = self.tx.try_send(Command::Action("link-open".into(), u)); }
                 super::linkroute::Route::Note(n) => self.note = n.to_string(),
