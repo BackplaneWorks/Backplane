@@ -332,7 +332,8 @@ pub(crate) fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<
     if !controls && r.note.is_empty() {
         return div().pt_4().pb_1().text_size(px(14.)).font_weight(FontWeight::BOLD).child(trs(&r.label)).into_any_element();
     }
-    let field_w = 260f32.min(avail);
+    // a text field takes the room the controls have beside the words (a folder path or an address is longer than 260 px, and wrapped in the field)
+    let field_w = (avail - LABEL_MIN - GAP).clamp(260., CONTROLS_MAX).min(avail);
     let widths: Vec<f32> = r.buttons.iter().map(|b| chip_w(&trs(&b.label))).collect();
     let RowFit { stack, lines } = row_fit(avail, &widths, if has_field { field_w } else { 0. }, if r.qr.is_empty() { 0. } else { r.qr.len() as f32 * 4. + 16. });
     // the words keep their least width beside the controls (never squeezed to a letter a line), or the whole row's under a stack

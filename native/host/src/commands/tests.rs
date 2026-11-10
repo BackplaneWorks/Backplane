@@ -263,6 +263,11 @@ fn tmp(name: &str) -> std::path::PathBuf { let d = std::env::temp_dir().join(for
     assert_eq!(e[0]["title"], "Amp board", "it comes back with the name it had, not its folder's");
     let (_, r) = ask(&h, "project.create", json!({"path": "  "})).await; assert_eq!(r["error"], "no folder given");
     let (_, r) = ask(&h, "project.new", json!({"path": d.join("fresh").to_str().unwrap()})).await; assert_eq!(r["ok"], true); assert!(d.join("fresh").is_dir());
+    // a folder that is already there: project.new refuses and says why at the top of the reply; setup's `orAdd` adds it instead
+    let old = tmp("proj-there");
+    let (e, r) = ask(&h, "project.new", json!({"path": old.to_str().unwrap()})).await; assert!(e.is_empty()); assert_eq!(r["ok"], false); assert!(r["error"].as_str().unwrap_or("").starts_with("already exists"), "{r}");
+    let (e, r) = ask(&h, "project.new", json!({"path": old.to_str().unwrap(), "orAdd": true})).await; assert_eq!(r["ok"], true, "{r}"); assert_eq!(e[0]["$"], "ProjectCreated"); assert!(e[0]["root"].as_str().unwrap_or("").ends_with("proj-there"), "{e:?}");
+    let (_, r) = ask(&h, "project.new", json!({"path": d.join("fresh2").to_str().unwrap(), "orAdd": true})).await; assert_eq!(r["ok"], true); assert!(d.join("fresh2").is_dir(), "a new path is still made");
     // a phone's (data/1) add: the project alone, its New thread screen makes the first thread
     let p = tmp("proj-phone");
     let (e, r) = ask(&h, "project.create", json!({"path": p.to_str().unwrap(), "starter": false})).await; assert_eq!(r["ok"], true, "{r}");

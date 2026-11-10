@@ -83,7 +83,8 @@ impl RpcHandler for Commands {
             }
             // one request at a time: the plan reads the fold the commit then moves on
             // the picker's folder requests (FsJob): the answer carries `result`, ok when it holds no `error`
-            let answer = |r: Value| vec![json!({"t":"reply","id":id,"ok":r.get("error").is_none(),"result":r})];
+            // a refusal says why at the top too, where every client reads a reply's reason (the result keeps it for the folder picker)
+            let answer = |r: Value| { let mut x = json!({"t":"reply","id":id,"ok":r.get("error").is_none()}); if let Some(e) = r.get("error") { x["error"] = e.clone(); } x["result"] = r; vec![x] };
             let path = p.get("path").and_then(Value::as_str).unwrap_or("").to_string();
             if method == "project.home" {
                 // Home.request: a project that exists and is not removed; the snapshot is read off the log's folder (the Git job "project-home")
@@ -101,7 +102,9 @@ impl RpcHandler for Commands {
                 "fs.mkdir" => return answer(fs::mkdir(&path).await),
                 "fs.find" => return answer(fs::find().await),
                 "project.add" | "project.new" => {
-                    let r = if method == "project.add" { fs::resolve(&path).await } else { fs::make(&path).await };
+                    // `orAdd` (setup's one field: "a folder that exists to add it, or a new path to make it"): a folder that is there is added as it is
+                    let there = if method == "project.new" && p["orAdd"] == true { fs::resolve(&path).await.ok().filter(|d| fs::is_dir(d)) } else { None };
+                    let r = match there { Some(d) => Ok(d), None if method == "project.add" => fs::resolve(&path).await, None => fs::make(&path).await };
                     match r { Ok(d) if fs::is_dir(&d) => Some(d), Ok(d) => return answer(json!({"error": format!("invalid project folder: {d}")})), Err(e) => return answer(e) }
                 }
                 "project.create" => Some(path.clone()),
