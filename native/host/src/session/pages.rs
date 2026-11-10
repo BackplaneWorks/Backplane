@@ -112,12 +112,23 @@ pub fn summary(files: &[DFile]) -> String {
     format!("{n} {}, +{a} −{d}", if n == 1 { "file" } else { "files" })
 }
 
+/// The line rows one Diff page carries. The diff's own caps are bytes (scripts/diff_cap.sh: 64 KiB a file, 128 KiB in all), and a diff of short lines
+/// (an order's Gerbers in mfg/: 9,000 lines in those 128 KiB) made a picture past the 512 KiB a client takes in one frame: the desktop dropped the
+/// connection at every press of Diff. A file that no longer fits is one "Too big to show here" line, like a file past the byte cap; the summary counts it all.
+pub const DIFF_ROWS: usize = 2500;
 /// Mob.diff.at: what the thread carries as `diff` (null while Diff is not on show)
 pub fn diff_object(text: &str, none: &str) -> Value {
     if !none.is_empty() { return json!({"summary": format!("{none} is not a git repository, so there is nothing to compare this thread's files with."), "files": []}) }
     let files = parse(text);
     let no = |n: usize| if n == 0 { String::new() } else { n.to_string() };
+    let mut left = DIFF_ROWS;
     let rows: Vec<Value> = files.iter().map(|f| {
+        let n: usize = f.hunks.iter().map(|h| h.lines.len() + usize::from(!h.header.is_empty())).sum();
+        if n > left && n > 2 {
+            let count = |k: u32| f.hunks.iter().flat_map(|h| &h.lines).filter(|l| l.k == k).count();
+            return json!({"name": f.new, "status": f.status, "lines": [{"k": 3, "t": format!("\\ Too big to show here: +{} -{} lines", count(1), count(2)), "o": "", "n": ""}]})
+        }
+        left = left.saturating_sub(n);
         let mut lines = Vec::new();
         for h in &f.hunks {
             if !h.header.is_empty() { lines.push(json!({"k": 4, "t": h.header, "o": "", "n": ""})) }
@@ -427,6 +438,22 @@ mod tests {
     #[test] fn an_empty_diff_and_a_folder_without_git_say_so() {
         assert_eq!(diff_object("", "")["summary"], json!("No changes since this thread began."));
         assert!(diff_object("", "/w/p")["summary"].as_str().unwrap().starts_with("/w/p is not a git repository"));
+    }
+    /// e2e n1110: after Buy it exported 23 Gerbers into mfg/, every press of Diff logged "hub frame exceeds 512 KiB" in the desktop and reconnected; Diff never opened.
+    #[test] fn a_diff_of_many_short_lines_stays_a_page_a_client_can_take() {
+        let file = |name: &str, n: usize| format!("diff --git a/{name} b/{name}\nnew file mode 100644\n--- /dev/null\n+++ b/{name}\n@@ -0,0 +1,{n} @@\n{}", "+X1Y2D01*\n".repeat(n));
+        let text = format!("{}{}{}{}", file("mfg/a.gbr", 2000), file("mfg/b.gbr", 2000), file("mfg/c.gbr", 400), file("mfg/d.gbr", 2000));
+        let o = diff_object(&text, ""); let fs = o["files"].as_array().unwrap();
+        let rows = |i: usize| fs[i]["lines"].as_array().unwrap().len();
+        assert_eq!((rows(0), rows(1), rows(2), rows(3)), (2001, 1, 401, 1), "what fits is whole, in order; a file that does not is one line");
+        assert_eq!(fs[1]["lines"][0], json!({"k": 3, "t": "\\ Too big to show here: +2000 -0 lines", "o": "", "n": ""}));
+        assert_eq!((fs[1]["name"].as_str(), fs[1]["status"].as_str()), (Some("mfg/b.gbr"), Some("added")), "still named, with its state");
+        assert!(fs.iter().map(|f| f["lines"].as_array().unwrap().len()).sum::<usize>() <= DIFF_ROWS + fs.len());
+        assert_eq!(o["summary"], json!("4 files, +6400 −0"), "the summary counts every line");
+        assert!(serde_json::to_vec(&o).unwrap().len() < 200 * 1024, "{} bytes", serde_json::to_vec(&o).unwrap().len());
+        // a file the script already capped (two rows) passes as it is, whatever is left
+        let capped = format!("{}diff --git a/big b/big\n--- a/big\n+++ b/big\n@@ -0,0 +0,0 @@\n\\ Too big to show here: +619 -595 lines\n", file("mfg/a.gbr", 2500));
+        let c = diff_object(&capped, ""); assert_eq!(c["files"][1]["lines"].as_array().unwrap().len(), 2); assert_eq!(c["summary"], json!("2 files, +3119 −595"));
     }
     #[test] fn a_binary_file_is_one_meta_line_and_a_capped_diff_counts_what_it_left_out() {
         let o = diff_object("diff --git a/x.png b/x.png\nBinary files a/x.png and b/x.png differ\n", "");
