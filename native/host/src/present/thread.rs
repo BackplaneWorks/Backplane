@@ -27,9 +27,14 @@ pub fn ents(rows: &[Value], thread: &str) -> Option<Vec<Ent>> {
 
 fn tool(e: &Ent) -> bool { !e.msg && (e.role == "tool" || e.role == "step") }
 fn todo(k: &str) -> bool { matches!(k, "TodoWrite" | "TaskCreate" | "TaskUpdate") }
-/// Tool.short: "mcp__backplane__viewer_show" -> "viewer_show"
+/// Tool.short: "mcp__backplane__viewer_show" -> "viewer_show". A parts-search tool (the pcbparts server) is named for what it does, not
+/// for the supplier whose catalogue it reads: its first word gives way to "parts" ("<supplier>_search" -> "parts_search").
 fn short(k: &str) -> String {
-    match k.strip_prefix("mcp__") { Some(r) => match r.find("__") { Some(i) if !r[i + 2..].is_empty() => r[i + 2..].to_string(), _ => k.to_string() }, None => k.to_string() }
+    match k.strip_prefix("mcp__") {
+        Some(r) => match r.find("__") {
+            Some(i) if !r[i + 2..].is_empty() => { let (server, tool) = (&r[..i], &r[i + 2..]); if server == "pcbparts" { format!("parts_{}", tool.split_once('_').map_or(tool, |x| x.1)) } else { tool.to_string() } }
+            _ => k.to_string() },
+        None => k.to_string() }
 }
 pub(crate) fn shown_name(k: &str) -> String { if todo(k) { "To-do".into() } else { short(k) } }
 fn calls(n: usize) -> String { format!("{} tool {}", n, if n == 1 { "call" } else { "calls" }) }
@@ -706,5 +711,8 @@ mod tests {
         assert_eq!(label(&run, false), "5 tool calls · Bash, Read, Edit, …");
         assert_eq!(label(&run, true), "5 tool calls · running: i");
         assert_eq!(label(&[t("mcp__backplane__viewer_show", "")], false), "1 tool call · viewer_show");
+        // a parts search is not named for the supplier it asks
+        assert_eq!(shown_name("mcp__pcbparts__acme_search"), "parts_search"); assert_eq!(shown_name("mcp__pcbparts__acme_get_part"), "parts_get_part"); assert_eq!(shown_name("mcp__pcbparts__search"), "parts_search");
+        assert_eq!(shown_name("mcp__other__acme_search"), "acme_search", "only the parts server's tools");
     }
 }
