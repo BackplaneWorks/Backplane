@@ -13,5 +13,3 @@ native/host/target-guard/
 native/gpui/target/
 native/voice/target/
 .lowmem/
-/scripts/nitro/nsm-attest/target/
-/scripts/nitro/nsm-attest/Cargo.lock
