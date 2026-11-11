@@ -88,8 +88,16 @@ BotSet/RoomSet/UberSet lines appended again with `at` now (each bot's thread tak
 `thread: ""`), the ring lane's new #ring-requests kept with Bub added, and the hub started as `fresh.sh` starts it. Nothing was lost: the Boat
 hub never ran a turn (no Claude sign-in there). Its home, with the carry and a ring hook of its own, is kept and stopped.
 
-Before moving Bub again: (1) clients show and talk to bots on linked machines (sidebar, phones' bot list, rooms), or `uber.sync` is ported so
-the desktop keeps a replica; (2) the Boat signed in to Claude; (3) the phones paired with the Boat.
+Before moving Bub again, one of (recommended first):
+- **B. The clients pair with the Boat hub too** (no code: the desktop app's hub picker and the phones' Settings both have Add a hub). Bub,
+  the bots and rooms are on boat-hub; the desktop's projects and threads show there as another machine's (`mark`); hardware work stays on
+  the desktop hub in the same app. Plus the Boat signed in to Claude. About an hour with the person, then the same cutover.
+- **A. One hub's clients show and drive another machine's bots and rooms** (`<link>~<id>`): the sidebar and the phones' bot list (screen.rs
+  `bots`, bots/api.rs `directory`), a far bot's chat, space, memory and routines, room read and post over the link. Hub, GPUI, iOS, Android
+  and e2e: about 3 to 5 days.
+- **C. Port `uber.sync`** (`net/rpc.rs` answers 501; the ops, fold, derive and lease laws are in `bots/uber.rs`): the exchange, offer and join,
+  heartbeat, takeover, handoff and routine gating, with an e2e of two hubs. About 2 to 3 days, and it covers Bub only: the other bots,
+  rooms, hooks and Google still need one owner, which brings back A or B.
 
 ## The cutover as first planned (not run)
 
