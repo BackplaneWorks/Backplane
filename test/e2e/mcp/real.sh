@@ -16,7 +16,7 @@ if [ "${SKIP_REAL:-}" != 1 ]; then
   cat "$W/real.json"
   # the key is in the vault (sealed) and nowhere else the hub writes
   if grep -rl --exclude=vault.json -- "$SECRET" "$W/home" 2>/dev/null; then echo "FAILED: the key is in plain text in the files above"; fail=1; else echo "the key is in no file of the hub's home but the sealed vault: ok"; fi
-  own_stop
+  own_stop || true
 fi
 # part 2: import
 H="$W/fakehome"; mkdir -p "$H/.codex" "$W/home2" "$W/bin"; for n in claude codex; do printf '#!/bin/sh\nexit 1\n' > "$W/bin/$n"; chmod +x "$W/bin/$n"; done
@@ -26,6 +26,6 @@ own env HOME="$H" BACKPLANE_AGENTS="$W/bin" BACKPLANE_NO_UPDATE=1 BACKPLANE_VAUL
 for k in $(seq 1 120); do grep -q "serving" "$W/hub2.log" 2>/dev/null && break; sleep 0.5; done; sleep 1
 bun "$D/import.ts" 3882 "$W/home2/token" "$H" "$W/home2" || fail=1
 if grep -rl --exclude=vault.json -- "jlc-live-0123456789" "$W/home2" 2>/dev/null; then echo "FAILED: the imported key is in plain text"; fail=1; else echo "the imported key is only in the sealed vault: ok"; fi
-own_stop
+own_stop || true
 [ $fail = 0 ] && rm -rf "$W" || echo "kept $W"
 exit $fail
