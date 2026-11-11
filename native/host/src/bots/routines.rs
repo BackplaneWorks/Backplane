@@ -186,6 +186,7 @@ impl Bots {
                 b.tick_at(now_s()).await;
                 b.mail_due(now_s()).await;
                 b.rooms_due(now_s()).await;
+                b.swarm_tick(now_s()).await;
                 b.uber_heal(now_s()).await;
                 b.uber_init(now_s()).await;
             }

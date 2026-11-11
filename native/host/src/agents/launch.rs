@@ -36,7 +36,9 @@ impl Agents {
         let model = if !s(a, "model").is_empty() { s(a, "model").to_string() } else if s(a, "provider").is_empty() && provider == default_prov { default_model } else { String::new() };
         if provider != "claude" && super::providers::driver(&provider).is_none() { return fail(&format!("{provider} threads are not run by the Rust hub yet")) }
         let (now, report) = (now_s(), a.get("report").and_then(Value::as_bool).unwrap_or(true));
-        let seq = self.seq_n(); let th = hub_id("t", now, seq);
+        let seq = self.seq_n();
+        // `_id`: a swarm names its member threads before they start (the room lists them first, so the agent's first tools/list has the room's tools)
+        let given = s(a, "_id"); let th = if !given.is_empty() && given.len() <= 64 && given.starts_with('t') && given[1..].chars().all(|c| c.is_ascii_digit() || c == '-') && !self.world().await.threads.contains_key(given) { given.to_string() } else { hub_id("t", now, seq) };
         let title = if s(a, "title").is_empty() { rules::title_of(&prompt) } else { s(a, "title").to_string() };
         let by = if caller.is_some() || far_by { thread.to_string() } else { String::new() }; // Mcp.launch.go: the launcher, parent or not
         let mut ev = vec![json!({"$":"ThreadCreated","id":th,"project":proj,"title":title,"env":"local","branch":"","worktree":"","provider":provider,"model":model,"at":now})];

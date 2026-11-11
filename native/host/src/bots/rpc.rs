@@ -21,6 +21,14 @@ pub trait Inbox: Send + Sync {
     fn ride<'a>(&'a self, thread: &'a str, id: &'a str, text: &'a str) -> Fut<'a, Result<(), String>>;
     /// Ride.note alone: the note joins the ride (a running Claude turn hears it at once) and starts no turn
     fn note<'a>(&'a self, thread: &'a str, id: &'a str, text: &'a str) -> Fut<'a, Result<(), String>>;
+    /// a thread as a swarm sees it: None when there is no such thread
+    fn info<'a>(&'a self, _thread: &'a str) -> Fut<'a, Option<super::swarm::ThreadInfo>> { Box::pin(async { None }) }
+    /// thread_launch as `by` ("" for the person): the new thread's id
+    fn launch<'a>(&'a self, _by: &'a str, _args: Value) -> Fut<'a, Result<String, String>> { Box::pin(async { Err("no threads here".to_string()) }) }
+    /// a claim's locks: one per file (a KiCad document's own design lock, else `file-<hash>`), taken as `thread`: (lock, file, held, holder)
+    fn claim<'a>(&'a self, _thread: &'a str, _files: Vec<String>, _note: String) -> Fut<'a, Vec<(String, String, bool, String)>> { Box::pin(async { vec![] }) }
+    /// let a claim's locks go (held or waited for)
+    fn unclaim<'a>(&'a self, _thread: &'a str, _locks: Vec<String>) -> Fut<'a, ()> { Box::pin(async {}) }
 }
 impl Inbox for Arc<Agents> {
     fn deliver<'a>(&'a self, thread: &'a str, msg: &'a str, text: &'a str, origin: Option<(String, String, String)>) -> Fut<'a, Result<(), String>> { Box::pin(async move { Agents::deliver(self, thread, msg, text, origin, vec![]).await }) }
@@ -41,9 +49,31 @@ impl Inbox for Arc<Agents> {
     fn deliver_system<'a>(&'a self, thread: &'a str, msg: &'a str, text: &'a str, origin: Option<(String, String, String)>) -> Fut<'a, Result<(), String>> { Box::pin(async move { Agents::deliver_as(self, "system", thread, msg, text, origin, vec![]).await }) }
     fn ride<'a>(&'a self, thread: &'a str, id: &'a str, text: &'a str) -> Fut<'a, Result<(), String>> { Box::pin(async move { Agents::wake_ride(self, thread, id, text).await }) }
     fn note<'a>(&'a self, thread: &'a str, id: &'a str, text: &'a str) -> Fut<'a, Result<(), String>> { Box::pin(async move { Agents::ride_note(self, thread, id, text).await }) }
+    fn info<'a>(&'a self, thread: &'a str) -> Fut<'a, Option<super::swarm::ThreadInfo>> { Box::pin(async move {
+        let w = self.world().await; let t = w.threads.get(thread)?;
+        let asks = w.asks.values().any(|a| a.thread == thread);
+        Some(super::swarm::ThreadInfo { provider: t.provider.clone(), model: t.model.clone(), title: t.title.clone(), turn: t.turn.clone(), asking: asks, gone: t.archived || t.deleted, project: t.project.clone(), root: w.roots.get(&t.project).cloned().unwrap_or_default() })
+    }) }
+    fn launch<'a>(&'a self, by: &'a str, args: Value) -> Fut<'a, Result<String, String>> { Box::pin(async move {
+        let (ok, r) = self.tool_launch(by, &args).await;
+        if ok { Ok(r["threadId"].as_str().unwrap_or("").to_string()) } else { Err(r["error"].as_str().unwrap_or("could not start the thread").to_string()) }
+    }) }
+    fn claim<'a>(&'a self, thread: &'a str, files: Vec<String>, note: String) -> Fut<'a, Vec<(String, String, bool, String)>> { Box::pin(async move {
+        let root = self.info(thread).await.map(|i| i.root).unwrap_or_default(); let mut out = vec![];
+        for f in files {
+            let name = super::swarm::lock_for(&root, &f);
+            let (ok, r) = self.tool_lock_acquire(thread, &json!({"name":name,"note":note})).await;
+            let held = ok && r["held"] == true; let holder = r["holder"]["thread"].as_str().or_else(|| r["holder"].as_str()).unwrap_or("").to_string();
+            out.push((name, f, held, holder));
+        }
+        out
+    }) }
+    fn unclaim<'a>(&'a self, thread: &'a str, locks: Vec<String>) -> Fut<'a, ()> { Box::pin(async move {
+        for n in locks { let (_, r) = self.tool_lock_release(thread, &json!({"name":n})).await; if r["released"] != true { let _ = self.tool_lock_cancel(thread, &json!({"name":n})).await; } }
+    }) }
 }
 
-pub struct Bots { pub hub: Arc<Hub>, world: Mutex<World>, pub(super) inbox: Arc<dyn Inbox>, pub(crate) router: std::sync::OnceLock<Arc<dyn super::mail::file::Router>>, last_id: std::sync::Mutex<(u64, u64)>, pub(crate) owner_link: std::sync::OnceLock<Arc<dyn super::mail::owner::OwnerLink>>, pub(crate) owner_busy: std::sync::atomic::AtomicBool, star: std::sync::OnceLock<Arc<StarPrompt>>, threads: std::sync::RwLock<std::collections::HashMap<String, String>>, pub(crate) mail_lists: std::sync::RwLock<std::collections::HashMap<String, Vec<&'static str>>>, pub(super) far: super::far::FarState }
+pub struct Bots { pub hub: Arc<Hub>, world: Mutex<World>, pub(super) inbox: Arc<dyn Inbox>, pub(crate) router: std::sync::OnceLock<Arc<dyn super::mail::file::Router>>, last_id: std::sync::Mutex<(u64, u64)>, pub(crate) owner_link: std::sync::OnceLock<Arc<dyn super::mail::owner::OwnerLink>>, pub(crate) owner_busy: std::sync::atomic::AtomicBool, star: std::sync::OnceLock<Arc<StarPrompt>>, threads: std::sync::RwLock<std::collections::HashMap<String, String>>, pub(crate) mail_lists: std::sync::RwLock<std::collections::HashMap<String, Vec<&'static str>>>, pub(super) far: super::far::FarState, pub(super) swarm: super::swarm::Give }
 /// the state lane's star-nudge count for a human prompt (statehost::policies()?.star_prompt): the events to commit with the prompt and, on the fifth, the offer for its connection
 pub type StarPrompt = dyn Fn(&str, u64) -> (Vec<Value>, Option<Value>) + Send + Sync;
 
@@ -94,11 +124,12 @@ impl Bots {
         let store = hub.store.clone();
         let w = tokio::task::spawn_blocking(move || { let mut w = crate::ckpt::take("bots", &store, || World::load(&store)).unwrap_or_default(); if let Err(e) = w.sync(&store) { eprintln!("bots: reading the log: {e:#}") } w }).await.unwrap_or_default();
         let mut w = w; w.steps.clear(); // what the start folded was answered when it happened
-        let b = Arc::new(Bots { hub: hub.clone(), world: Mutex::new(w), inbox, router: Default::default(), last_id: Default::default(), owner_link: Default::default(), owner_busy: Default::default(), star: Default::default(), threads: Default::default(), mail_lists: Default::default(), far: Default::default() });
+        let b = Arc::new(Bots { hub: hub.clone(), world: Mutex::new(w), inbox, router: Default::default(), last_id: Default::default(), owner_link: Default::default(), owner_busy: Default::default(), star: Default::default(), threads: Default::default(), mail_lists: Default::default(), far: Default::default(), swarm: Default::default() });
         { let g = b.world.lock().await; b.refresh_threads(&g); }
         { let me = b.clone(); crate::ckpt::register(move |store| me.world.blocking_lock().save(store)); }
         { let me = b.clone(); tokio::spawn(async move { loop { tokio::time::sleep(std::time::Duration::from_secs(20)).await; me.owner_outbox().await } }); } // OwnerJob: the outbox is walked again
         let _ = b.router.set(Arc::new(super::mail::run::MailRouter(Arc::downgrade(&b))));
+        b.swarm_start();
         b.start_after();
         hub.register_rpc(Arc::new(Rpc(b.clone())));
         // the browser driver's wake (a task run asked for, a teach recording finished): the bot hears it as a message from the person; `bot` is a bot id or its thread's
@@ -124,6 +155,7 @@ impl Bots {
         t.extend(w.mail.runs.values().filter(|r| r.live).filter_map(|r| w.run_bot(&r.thread).map(|b| (r.thread.clone(), b.id.clone())))); // a run and a back office work as their bot (Bots.route: Run.bot)
         *self.mail_lists.write().unwrap() = super::mail::tools::lists(w);
         *self.threads.write().unwrap() = t;
+        *self.swarm.members.write().unwrap() = w.member_rooms.iter().filter(|(_, rs)| rs.iter().any(|r| w.room(r).map_or(false, |x| x.live()))).map(|(t, _)| t.clone()).collect();
     }
     pub fn is_bot_thread(&self, th: &str) -> bool { self.threads.read().unwrap().contains_key(th) }
     /// The bot a thread works for (its own thread, a live run's), as last folded: what a tool list is decided by (google/tools.rs; every call checks again).
@@ -276,19 +308,31 @@ impl Bots {
     /// mail funnel files the post or the member is the uberbot: Bots.wake.room). Members elsewhere ("name@peer") are the net lane's.
     /// A post from the person that no client made (a mention in a thread): no star count, no reply.
     pub(crate) async fn post_as_person(&self, room: &str, text: &str) -> Vec<Value> { self.post(&Value::Null, &json!({"room": room, "text": text}), None).await }
-    async fn post(&self, id: &Value, p: &Value, star: Option<u64>) -> Vec<Value> {
+    async fn post(&self, id: &Value, p: &Value, star: Option<u64>) -> Vec<Value> { match self.post_k(p, star).await { Ok(()) => vec![ok(id)], Err(e) => vec![err(id, &e)] } }
+    /// a person's post with no client behind it for the star (swarm.post)
+    pub(crate) async fn post_person(&self, p: &Value) -> Result<(), String> { self.post_k(p, None).await }
+    /// The person's post: heard by every member (urgent for the threads), with its tags and mentions; it starts a paused room again (the
+    /// guards count afresh from it). In a swarm that is over it is kept and wakes nobody.
+    async fn post_k(&self, p: &Value, star: Option<u64>) -> Result<(), String> {
         let (msg, text) = (gs(p, "msg"), gs(p, "text"));
         let w = self.world().await;
-        let Some(room) = w.room(gs(p, "room")).cloned() else { return vec![err(id, "no such room")] };
-        if !msg.is_empty() && w.has_post(msg) { return vec![ok(id)] }
+        let Some(room) = w.room(gs(p, "room")).cloned() else { return Err("no such room".into()) };
+        if !msg.is_empty() && w.has_post(msg) { return Ok(()) }
         let now = now_s(); let mid = if msg.is_empty() { self.id("p", now) } else { msg.to_string() };
         let rr = super::post::RoomRef { id: room.id.clone(), name: room.name.clone(), members: room.members.clone() };
-        let (extra, offer) = self.star_for(star, &mid, text, now);
-        let pending = match self.post_decide(&w, now, "", "you", "", &rr, text, 0, &mid, extra).await { Ok(p) => p, Err(e) => return vec![err(id, &e)] };
+        let (mut extra, offer) = self.star_for(star, &mid, text, now);
+        let mut heard = if room.ended() { super::post::Heard::held("over") } else { super::post::Heard::live() };
+        let tags: Vec<String> = p.get("tags").and_then(Value::as_array).map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default();
+        let tags = super::gate::tags_of(&tags); if !tags.is_empty() { heard.fields.insert("tags".into(), json!(tags)); }
+        let ms = super::gate::mentions(text, &super::swarm::names(&w, &room)); if !ms.is_empty() { heard.fields.insert("mentions".into(), json!(ms)); }
+        if room.paused() && !room.ended() { extra.insert(0, room.set_ev(now, |x| { x.state = String::new(); x.reason = String::new() })) }
+        let pending = self.post_decide(&w, now, "", "you", "", &rr, text, 0, &mid, extra, heard).await?;
         if let Some((c, f)) = offer { self.hub.push(c, f); }
+        let syn = room.swarm() && !room.ended() && tags.iter().any(|t| t == "synthesis");
+        if syn { self.swarm_end_person(&w, &room, text, now).await }
         drop(w);
         self.post_finish(pending, 0).await;
-        vec![ok(id)]
+        Ok(())
     }
 
     /// Bots.uber: the person makes a bot the uberbot ("" takes it back). A promotion first has the bot backed up; the log learns of it only when that worked.

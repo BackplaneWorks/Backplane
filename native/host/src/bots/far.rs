@@ -165,7 +165,9 @@ impl Bots {
         let rr = RoomRef { id: r.id.clone(), name: r.name.clone(), members: r.members.clone() };
         let hop = p["hop"].as_u64().unwrap_or(0);
         let shown = format!("{from}@{}", self.machine_name(link));
-        match self.post_decide(&w, now, "", &shown, "", &rr, text, hop, &mid, vec![]).await {
+        // a linked machine's post: its guards ran there; here a paused room or a hop past the backstop holds it
+        let heard = if w.room(&rr.id).map_or(false, |r| r.paused()) { super::post::Heard::held("paused") } else if hop > super::gate::LIMITS.backstop { super::post::Heard::held("backstop") } else { super::post::Heard::live() };
+        match self.post_decide(&w, now, "", &shown, "", &rr, text, hop, &mid, vec![], heard).await {
             Ok(pending) => { drop(w); self.post_finish(pending, hop).await; (200, "ok".into()) }
             Err(e) => (503, e),
         }
