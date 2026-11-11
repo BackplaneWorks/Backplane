@@ -51,6 +51,9 @@ impl FarSync {
                 fold_in_chunks(hub, link, &t.events).await;
             }
         } else if !t.events.is_empty() { for c in t.events.chunks(500) { hub.fold_mirror_held(link, c).await } }
+        // a window showing a thread of that machine draws its new entries now (a mirror's lines grow no local log, which is what wakes the views otherwise;
+        // Nov 11: a window that followed Bub to boat-hub kept the four messages it opened with)
+        if !t.events.is_empty() { hub.bump_views(); }
         Ok(t.got.gap)
     }
 
