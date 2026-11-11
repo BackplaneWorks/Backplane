@@ -133,6 +133,9 @@ impl Backplane {
                 self.error.clear();
                 if id.contains('~') { self.note=crate::i18n::trs("Sent. The thread opens here as soon as that machine has it."); }
                 self.screens.projects.made=Some((id.to_string(),at)); self.adopt_new(cx); } cx.notify(); }
+            Event::Data(tag,v) if tag=="names" => { screens::xprobe::got_names(self,&v); cx.notify(); }
+            Event::Data(tag,v) if tag=="xsel" => { screens::xprobe::got_select(self,&v); cx.notify(); }
+            Event::Data(tag,v) if tag=="xsel-tap" => { eprintln!("GPUI_LOG {}",serde_json::json!({"event":"xprobe_tap","ok":v["ok"],"kicad":v["kicad"],"found":v["found"],"error":v["error"]})); }
             Event::Data(tag,v)=>if tag=="google-changed" {screens::google::changed(self)} else if tag=="google" {screens::google::got(self,v,cx)} else if tag=="acct-moveall" {screens::accounts::moved(self,&v)} else {screens::accounts::got(self,v,cx)},
             Event::Voice(f)=>self.voice_frame(f,cx),
             Event::Rpc("voice",ok,why)=>{if !ok{self.error=why;}},
@@ -151,7 +154,7 @@ impl Backplane {
             Event::ViewShow(thread,kind,path)=>self.view_show(&thread,&kind,&path,cx),
             Event::Pick(info)=>{ let slot=self.screens.pick_slot.unwrap_or(0); let card=screens::plot::card(&info); let pv=self.screens.pv(slot); if pv.picked.is_some() { pv.card=card.clone(); } if let Some(c)=card { screens::plotview::cross_probe(self,slot,&c); } screens::plotview::report_state(self); cx.notify(); }
             Event::Probe(slot,m) if slot>=3=>{ screens::plotview::frame_on(self,slot-3,&m); cx.notify(); }
-            Event::Probe(slot,m)=>{ let pv=self.screens.pv(slot); if pv.lit.len()<20000 { pv.lit.extend(m); } cx.notify(); }
+            Event::Probe(slot,m)=>{ eprintln!("GPUI_LOG {}",serde_json::json!({"event":"probe_lit","slot":slot,"n":m.len()})); let pv=self.screens.pv(slot); if pv.lit.len()<20000 { pv.lit.extend(m); } cx.notify(); }
             Event::Status(s)=>{if s!=self.status {eprintln!("GPUI_LOG {}",serde_json::json!({"status":s}));}self.status=s;if self.status=="Connected"{/* (every shown view says Connected: while setup is up its refusal stays until the person presses something there, or it would be gone before it was read) */ if !self.data["tour"].is_object(){self.error.clear();}screens::hubbar::connected(&mut self.screens.hubbar);self.send_unsent();}},
             Event::Accepted=>{self.input.update(cx,|input,cx|input.set(String::new(),cx));let _=self.tx.try_send(Command::Draft(String::new())); /* a /give keeps its text in the hub until it took it: the box is empty now, so is that copy */ self.drafts.remove(&self.selected);self.screens.drafts.set(&self.selected,"");self.voice_sent(cx);self.timeline_to_end();}, // (the file too: the box's own change comes after the map entry is gone, and would not clear it)
             Event::Older(cursor,page)=>self.older_landed(cursor,page,cx),

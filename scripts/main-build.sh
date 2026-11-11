@@ -6,10 +6,7 @@
 #   scripts/main-build.sh status     running or not, the tip it built last, the tip that failed
 # It builds in a checkout of its own (default <repo>/.backplane/worktrees/main-build, detached at the tip: a worktree of the one clone, like every lane), so no worker's untracked files or half edits are in a build, with one shared
 # target directory per crate (default ~/.cache/main-build). Always the newest tip, never a dropped build: a merge while a build runs lets it finish (and publish if it passed), then the newest tip is built. A tip that failed is not
-# tried again; the bar says why until a newer tip lands. It fetches origin every MAIN_FETCH s (default 60), so a push made elsewhere (jlcjak's) is built too. Env: MAIN_BRANCH (main), MAIN_REMOTE (origin), MAIN_WT, MAIN_TARGET, GPUI_DEV_DIR, MAIN_POLL (s, default 3), MAIN_MIN_FREE_GB (20), MAIN_JANITOR_EVERY (s, 3600), MAIN_JANITOR_FREE_GB (100), and dev-build.sh's.
-# The disk janitor (worktree-gc.sh --apply: landed worktrees, idle target dirs, stale bp-tmp entries, sccache over its cap) runs every MAIN_JANITOR_EVERY s, and every 5 minutes
-# while the disk has under MAIN_JANITOR_FREE_GB free, so it acts long before the guard's "Disk nearly full" (under 10 GB); what it frees goes to $DEV/janitor.log.
-# $DEV/janitor points at it: the guard runs it too before it tells the person the disk is full.
+# tried again; the bar says why until a newer tip lands. It fetches origin every MAIN_FETCH s (default 60), so a push made elsewhere (jlcjak's) is built too. Env: MAIN_BRANCH (main), MAIN_REMOTE (origin), MAIN_WT, MAIN_TARGET, GPUI_DEV_DIR, MAIN_POLL (s, default 3), MAIN_MIN_FREE_GB (20), and dev-build.sh's.
 set -u
 unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX GIT_COMMON_DIR GIT_OBJECT_DIRECTORY GIT_QUARANTINE_PATH
 if [ -n "${BACKPLANE_AGENT_OWNER:-}" ]; then exec env -u BACKPLANE_AGENT_OWNER "$0" "$@"; fi   # the hub reaps marked processes (see fresh-watch.sh)
@@ -24,11 +21,6 @@ fetch() { now=$(date +%s); [ $((now - fetched)) -ge "$FETCH" ] || return 0; fetc
 built() { cat "$DEV/.main-built" 2>/dev/null; }
 running() { [ -f "$PIDF" ] && p=$(cat "$PIDF" 2>/dev/null) && [ -n "$p" ] && [ "$p" != $$ ] && kill -0 "$p" 2>/dev/null && tr '\0' ' ' < "/proc/$p/cmdline" 2>/dev/null | grep -q main-build; }
 mkdir -p "$DEV" "$TG"
-JAN_EVERY=${MAIN_JANITOR_EVERY:-3600}; JAN_FREE=${MAIN_JANITOR_FREE_GB:-100}; jan_at=0
-janitor() { local now a gap; now=$(date +%s); a=$(df -BG --output=avail "$TG" 2>/dev/null | tail -1 | tr -dc 0-9); gap=$JAN_EVERY; [ "${a:-0}" -lt "$JAN_FREE" ] && gap=300
-  [ $((now - jan_at)) -ge "$gap" ] || return 0; jan_at=$now
-  [ "$(stat -c %s "$DEV/janitor.log" 2>/dev/null || echo 0)" -gt $((8 << 20)) ] && mv -f "$DEV/janitor.log" "$DEV/janitor.log.1"
-  ( setsid nice -n 19 ionice -c3 "$HERE/worktree-gc.sh" --apply >> "$DEV/janitor.log" 2>&1 < /dev/null & ); }
 case "${1:-}" in
   ensure) running && exit 0
           LOGF=$DEV/main-build.log
@@ -45,17 +37,16 @@ PID=
 stop_build() { [ -n "$PID" ] && kill -TERM -- "-$PID" 2>/dev/null; [ -n "$PID" ] && wait "$PID" 2>/dev/null; PID=; }
 trap 'echo; say "stopped"; stop_build; rm -f "$ST" "$ST.n" "$PIDF"; exit 0' INT TERM
 trap 'rm -f "$PIDF"' EXIT
-ln -sfn "$HERE/worktree-gc.sh" "$DEV/janitor"
 say "following $RM/$BR in $REPO (built: $(built | cut -c1-10)); checkout $WT"
 while :; do
-  janitor; fetch; t=$(tip); b=$(built); bad=$(cat "$DEV/.main-bad" 2>/dev/null)
+  fetch; t=$(tip); b=$(built); bad=$(cat "$DEV/.main-bad" 2>/dev/null)
   if [ "$t" = "$b" ] || [ "$t" = "$bad" ]; then
     # a failed tip stays on the bar until a newer one comes
     if [ "$t" = "$bad" ] && [ -f "$DEV/.last-failure" ]; then status failed "$BR $(printf %s "$t" | cut -c1-10) failed in $(cut -c1-120 "$DEV/.last-failure")"; fi
     [ "${1:-}" = --once ] && exit 0; sleep "$POLL"; continue
   fi
   avail=$(df -BG --output=avail "$TG" | tail -1 | tr -dc 0-9)
-  if [ "${avail:-0}" -lt "$FREE" ]; then "$HERE/worktree-gc.sh" --apply >> "$DEV/janitor.log" 2>&1; avail=$(df -BG --output=avail "$TG" | tail -1 | tr -dc 0-9); fi   # lanes' merged worktrees and idle target dirs first
+  if [ "${avail:-0}" -lt "$FREE" ]; then "$HERE/worktree-gc.sh" --apply --quiet > /dev/null 2>&1; avail=$(df -BG --output=avail "$TG" | tail -1 | tr -dc 0-9); fi   # lanes' merged worktrees and idle target dirs first
   if [ "${avail:-0}" -lt "$FREE" ]; then status failed "Not building $BR $(printf %s "$t" | cut -c1-10): ${avail}G free, need ${FREE}G"; [ "${1:-}" = --once ] && exit 1; sleep 30; continue; fi
   say "building $BR $(printf %s "$t" | cut -c1-10) (tests first)"
   git -C "$WT" checkout -q --detach "$t" && git -C "$WT" clean -qfd -e Cargo.lock || { say "cannot check out $t"; sleep "$POLL"; continue; }
@@ -70,7 +61,6 @@ while :; do
   # a merge while a build runs does not drop it: the build finishes and publishes what passed, then the loop builds the newest tip (one build per burst of merges, never lost work)
   moved=
   while kill -0 "$PID" 2>/dev/null; do
-    janitor
     if [ -z "$moved" ] && [ "$(tip)" != "$t" ]; then moved=1; say "$BR moved to $(tip | cut -c1-10): finishing the build of $(printf %s "$t" | cut -c1-10) first"; fi
     sleep 2
   done

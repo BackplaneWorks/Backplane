@@ -636,18 +636,8 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
         // the real KiCad, its rail page's editor over the pane (viewers/kicad_pane.rs); the pane's controls in its own row above it, never over KiCad's toolbar
         let kicad_open = pressed(open).filter(|k| matches!(k.as_str(), "board" | "schematic" | "3d")).unwrap_or_else(|| open.to_string()); // i18n-ok: rail page kinds
         let e = editor.unwrap().clone(); if e.read(cx).open != kicad_open { e.update(cx, |p, cx| p.set_open(&kicad_open, cx)); }
-        if e.read(cx).light != light { e.update(cx, |p, cx| p.set_light(light, cx)); }
         let a = acts(cx);
-        let (popped, full) = (KICAD_POPPED.load(std::sync::atomic::Ordering::Relaxed), KICAD_FULL.load(std::sync::atomic::Ordering::Relaxed));
-        let strip = crate::viewers::kicad_pane::strip(cx, light, &e, false, full, |this: &mut Backplane, a, _, cx| this.kicad_strip_act(a, cx));
-        let body = if popped {
-            // the editor is in its own window: the pane says so and offers it back
-            div().flex_1().min_h_0().flex().flex_col().items_center().justify_center().gap_2().text_color(theme::color(light, "faint")).child(trs("KiCad is open in its own window."))
-                .child(div().id("kicad-popin").px_3().py_1().border_1().border_color(theme::color(light, "line")).bg(theme::color(light, "raise")).cursor_pointer().child(trs("Pop back in"))
-                    .on_click(cx.listener(|this, _, _, cx| { let h = this.screens.kicad_window; this.kicad_popin(cx); if let Some(h) = h { let _ = h.update(cx, |_, w, _| w.remove_window()); } })))
-                .into_any_element()
-        } else { div().flex_1().min_h_0().child(e).into_any_element() };
-        div().size_full().flex().flex_col().child(bar(light).justify_end().child(a)).when(!popped, |d| d.child(strip)).child(body).into_any_element()
+        div().size_full().flex().flex_col().child(bar(light).justify_end().child(a)).child(div().flex_1().min_h_0().child(e)).into_any_element()
     }
     else if early {
         let k = open;
@@ -688,19 +678,11 @@ pub fn pane(cx: &mut Context<Backplane>, light: bool, thread: &Value, page: AnyE
     let open = open.as_str();
     // a Split holds three pages at once, so it takes the room of a desktop: its pane is at least that wide, whatever this device chose for the others
     let width = if open == "split" { (pane_width() as f32).max(960.) } else { pane_width() as f32 };
-    // the embedded editor's full size: the pane takes the room of the sidebar and the thread (ui.rs folds them for it)
-    if KICAD_FULL.load(std::sync::atomic::Ordering::Relaxed) && matches!(open, "board" | "schematic" | "3d") {
-        return Some(div().flex_1().min_w_0().h_full().relative().border_l_1().border_color(c("rule")).flex().flex_col().child(page).into_any_element())
-    }
     // The pane gives way to the thread: it shrinks (down to its least) before the composer row is squeezed, so Attach and Send stay reachable
     Some(div().w(px(width)).max_w(relative(0.62)).min_w(px(PANE_LEAST.load(std::sync::atomic::Ordering::Relaxed) as f32)).h_full().flex_shrink().relative().border_l_1().border_color(c("rule")).flex().flex_col()
         .child(resize_handle(cx)).child(page).into_any_element())
 }
 
-/// The embedded editor this frame (set by ui.rs before the window is drawn, as the pane's least is): drawn at full size (only while one
-/// is open), and drawn in a window of its own (the pane then says so).
-pub static KICAD_FULL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
-pub static KICAD_POPPED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// The least the pane may shrink to on this frame (`fit`'s third answer, set by ui.rs before the window is drawn).
 static PANE_LEAST: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(crate::local::VIEWER_PX.0);
 pub fn set_least(px: f32) { PANE_LEAST.store(px.max(0.).round() as u32, std::sync::atomic::Ordering::Relaxed); }

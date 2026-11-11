@@ -479,6 +479,7 @@ impl Backplane {
     /// a hover in the sidebar or the caret's blink.
     pub(crate) fn viewer_part(&mut self, _: &mut Window, cx: &mut Context<Self>) -> AnyElement {
         let light = self.light();
+        crate::screens::xprobe::zoom_pending(self);
         let reg = self.screens.reg.clone(); reg.borrow_mut().begin_outside();
         let thread = &self.data["thread"];
         let editor = self.kicad_for(thread, cx);
@@ -492,6 +493,7 @@ impl Backplane {
         let light = self.light();
         let c = |name: &str| theme::color(light, name);
         self.screens.reg.borrow_mut().begin_rows(); self.screens.parts.rows_ctl.clear();
+        crate::screens::xprobe::want_names(self); self.screens.reg.borrow_mut().design = self.screens.xprobe.design.clone();
         let thread = &self.data["thread"];
         let has_thread = thread.is_object();
         let no_rows = thread["entries"].as_array().map_or(true, |e| e.is_empty());
@@ -565,10 +567,6 @@ impl Render for Backplane {
         let (win_w, viewer_open) = (f32::from(window.viewport_size().width), crate::screens::viewer::is_open(thread));
         if crate::screens::viewer::fit(win_w, self.local.sidebar_px as f32, self.sidebar_open, false, viewer_open).0 { self.screens.side_force = false; } // room again: "anyway" is over
         let (side_shown, thread_least, pane_least, share) = crate::screens::viewer::fit(win_w, self.local.sidebar_px as f32, self.sidebar_open, self.screens.side_force, viewer_open);
-        // the embedded editor at full size: the sidebar folds and the thread gives all its room (screens/viewer.rs pane)
-        let kfull = self.screens.kicad_full && viewer_open && self.screens.kicad.is_some() && matches!(thread["viewer"]["open"].as_str(), Some("board" | "schematic" | "3d"));
-        let (side_shown, thread_least) = if kfull { (false, 0.) } else { (side_shown, thread_least) };
-        crate::screens::viewer::KICAD_FULL.store(kfull, std::sync::atomic::Ordering::Relaxed); crate::screens::viewer::KICAD_POPPED.store(self.screens.kicad_window.is_some(), std::sync::atomic::Ordering::Relaxed);
         crate::screens::viewer::set_least(pane_least); crate::screens::viewer::set_share(share); self.screens.side_shown = side_shown;
         let mut ctl: Vec<CtlEntry> = Vec::new(); // the controls drawn this frame (the e2e harness's inventory)
         // project home replaces the thread when the hub selected it
@@ -679,7 +677,7 @@ impl Render for Backplane {
         /* i18n-ok: registered controls the e2e drivers press */ for (i, p) in crate::screens::viewer::mech_parts(&thread["viewer"]).into_iter().enumerate() { ctl.push(CtlEntry { id: format!("mech-part-{i}"), label: p.label, ctl: Ctl::Node("mech-part".into(), p.value) }); }
         // the viewer bar's Open in KiCad, and the Subagents panel's row buttons (Release, Cancel, Stop: `<act>-<value>`, as the rows name them)
         /* i18n-ok: registered controls the e2e drivers press */ if crate::screens::viewer::is_open(thread) && crate::screens::viewer::has_design(&thread["viewer"]) { ctl.push(CtlEntry { id: "ui:Open in KiCad".into(), label: "Open in KiCad".into(), ctl: Ctl::Node("kicad-open".into(), crate::screens::viewer::shown_key(&thread["viewer"])) });
-            /* i18n-ok: registered controls the e2e drivers press */ if crate::viewers::kicad_pane::local(self.screens.attacher.target.as_ref().map(|t| t.addr.as_str()), thread) { ctl.push(CtlEntry { id: "ui:Edit".into(), label: "Edit".into(), ctl: Ctl::KicadEdit(true) }); if self.screens.kicad.is_some() { /* i18n-ok: ctl ids the drivers press */ for (k, l) in crate::viewers::kicad_pane::TABS { ctl.push(CtlEntry { id: format!("kicad-tab:{k}"), label: (*l).into(), ctl: Ctl::KicadAct((*k).into()) }); } for (a, l) in [("full", "Full size"), ("popout", "Pop out"), ("popin", "Pop back in")] { ctl.push(CtlEntry { id: format!("kicad:{a}"), label: l.into(), ctl: Ctl::KicadAct(a.into()) }); } } ctl.push(CtlEntry { id: "ui:View".into(), label: "View".into(), ctl: Ctl::KicadEdit(false) }); } }
+            /* i18n-ok: registered controls the e2e drivers press */ if crate::viewers::kicad_pane::local(self.screens.attacher.target.as_ref().map(|t| t.addr.as_str()), thread) { ctl.push(CtlEntry { id: "ui:Edit".into(), label: "Edit".into(), ctl: Ctl::KicadEdit(true) }); ctl.push(CtlEntry { id: "ui:View".into(), label: "View".into(), ctl: Ctl::KicadEdit(false) }); } }
         // the Diff page's Commit, PR and Revert (and the Revert question's two buttons), by the ids the page draws
         for (id, label, a, v) in crate::screens::viewer::diff_controls(&thread["diff"]) { ctl.push(CtlEntry { id: id.into(), label: label.into(), ctl: Ctl::Node(a.into(), v.into()) }); }
         // a Subagents row opens its own view (sub:<key>); with one open, its Back and its Stop
@@ -766,7 +764,7 @@ impl Render for Backplane {
                     // held Ctrl: the short legend over the sidebar's foot (0.14's keys-legend)
                     .when(self.screens.held == crate::keys::Held::Threads, |d| d.child(crate::screens::hints::legend(cx, light, &self.local))))
                 // main
-                .child(div().flex_1().min_w(px(thread_least)).when(kfull, |d| d.flex_none().w(px(0.)).overflow_hidden()).h_full().relative().child(art::probe("main")).children(crate::perf::mark("main")).flex().flex_col()
+                .child(div().flex_1().min_w(px(thread_least)).h_full().relative().child(art::probe("main")).children(crate::perf::mark("main")).flex().flex_col()
                     .children(crate::screens::bots::bar(cx, light, &self.data["bot"]))
                     .children(head_row)
                     .children(crate::screens::panels::dock(cx, light, &self.screens.fields, &self.screens.panels, thread))

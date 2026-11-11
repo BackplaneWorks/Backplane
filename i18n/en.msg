@@ -2028,16 +2028,6 @@ gpui.c.kicad.no.x11.connection = no X11 connection
 gpui.c.kicad.back.to.backplane.s.viewer = Back to Backplane's viewer (KiCad stays open)
 gpui.c.kicad.edit.in.the.real.kicad = Edit in the real KiCad, here in the pane
 gpui.c.kicad.view = View
-gpui.c.kicad.symbols = Symbols
-gpui.c.kicad.footprints = Footprints
-gpui.c.kicad.full.size = Full size
-gpui.c.kicad.exit.full.size = Exit full size
-gpui.c.kicad.the.editor.takes.the.sidebar = The editor takes the sidebar's and the thread's room
-gpui.c.kicad.pop.back.in = Pop back in
-gpui.c.kicad.back.into.backplane.s.pane = Back into Backplane's pane, as it is
-gpui.c.kicad.the.editor.in.a.window = The editor in a window of its own, as it is
-gpui.c.kicad.kicad.is.open.in.its = KiCad is open in its own window.
-gpui.c.kicad.the.editor.s.window.could = The editor's window could not open:
 
 # ---- gpui-d: setup, pairing, hubs, palette, picker, projects, composer, menus ----
 gpui.assets.missing = Assets missing in {dir}: {files}

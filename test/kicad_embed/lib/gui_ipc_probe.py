@@ -289,6 +289,38 @@ def main() -> None:
             print(json.dumps({"action": action, "status": st, "ok": st == 1}))
             sys.exit(0 if st == 1 else 1)
 
+        if cmd == "selection":
+            # GetSelection on the open PCB or schematic: the selected items' types, and every reference-like string in them (a footprint's
+            # or symbol's reference text), read without the schema by walking the nested messages
+            doc_bytes = cli.first_open_doc_bytes(args[0])
+            _, val = cli.call("kiapi.common.commands.GetSelection", pb_field_msg(1, pb_field_msg(1, doc_bytes)))
+            import re
+            refs, types = set(), []
+            def walk(buf: bytes, depth: int) -> None:
+                if depth > 12:
+                    return
+                try:
+                    fields = pb_decode_fields(buf)
+                except Exception:
+                    return
+                for vals in fields.values():
+                    for v in vals:
+                        if not isinstance(v, (bytes, bytearray)):
+                            continue
+                        try:
+                            t = v.decode("utf-8")
+                            if re.fullmatch(r"[A-Z]{1,6}[0-9]{1,6}[A-Z]?", t):
+                                refs.add(t)
+                        except UnicodeDecodeError:
+                            pass
+                        walk(v, depth + 1)
+            for item in pb_decode_fields(val).get(1, []):
+                anyf = pb_decode_fields(item)
+                types.append(anyf.get(1, [b""])[0].decode("utf-8", errors="replace"))
+                walk(anyf.get(2, [b""])[0], 0)
+            print(json.dumps({"count": len(types), "types": types, "refs": sorted(refs)}))
+            return
+
         if cmd == "items-count":
             kind = args[0]
             kot = int(args[1])

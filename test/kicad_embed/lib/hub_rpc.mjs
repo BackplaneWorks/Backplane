@@ -16,7 +16,7 @@ ws.onmessage = ({ data }) => {
   if (x.t === 'reply') replies.set(x.id, x);
   if (x.info && typeof x.info === 'object') {
     for (const [k, v] of Object.entries(x.info)) {
-      if (k.startsWith('editor.kicad.')) infos.set(k, v);
+      if (k.startsWith('editor.kicad.') || k.startsWith('kicad.sel.')) infos.set(k, v);
     }
   }
 };

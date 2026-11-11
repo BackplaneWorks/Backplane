@@ -412,14 +412,6 @@ pub fn unsaved_update(pro: &str, f: impl FnOnce(Unsaved) -> Unsaved) -> Unsaved 
     let mut m = unsaved().lock().unwrap(); let n = f(m.get(pro).copied().unwrap_or_default()); m.insert(pro.to_string(), n); n
 }
 
-// Backplane's theme per project ("light" | "dark"), as the client last said it (attach's `theme`, `editor.kicad.theme`): the fork's
-// `--theme` at launch and SetTheme while it runs. Stock KiCad keeps its own.
-static THEMES: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
-fn themes() -> &'static Mutex<HashMap<String, String>> { THEMES.get_or_init(Default::default) }
-pub fn theme_of(pro: &str) -> String { themes().lock().unwrap().get(pro).cloned().unwrap_or_default() }
-/// The fork's ThemeMode for Backplane's theme ("" for none).
-pub fn theme_mode(theme: &str) -> &'static str { match theme { "light" => "TM_LIGHT", "dark" => "TM_DARK", _ => "" } }
-
 fn put_route(s: &Session, tx: &mpsc::UnboundedSender<Msg>) {
     unsaved_update(&s.pro, |u| u.seen(s.frames.iter().any(|f| f.modified)));
     let mut r = routes().lock().unwrap();
@@ -442,6 +434,16 @@ pub async fn gui_call(route: &GuiRoute, ty: &str, msg: Value) -> Value {
         return json!({"ok":false,"error":"no reply","why":"no reply","fallback":true})
     }
     r.await.unwrap_or_else(|_| json!({"ok":false,"error":"no reply","why":"no reply","fallback":true}))
+}
+
+/// The pane of `pro` switched to `frame` from the hub (xprobe.rs: `editor.kicad.select {show}`), as its own rail does; in bp.8 fork mode a
+/// non-empty `item` is a reference KiCad cross-probes there (ShowFrame's item).
+pub async fn show_for(pro: &str, frame: &str, item: &str) -> Result<Value, String> {
+    let Some(r) = gui_route(pro) else { return Err("KiCad is not open for this project".into()) };
+    let (tx, rx) = oneshot::channel();
+    r.tx.send(Msg::Show { client: 0, pro: pro.into(), frame: frame.into(), doc: String::new(), item: item.into(), remount: false, reply: tx })
+        .map_err(|_| "the embedded KiCad actor stopped".to_string())?;
+    rx.await.unwrap_or_else(|_| Err("no reply from embedded KiCad actor".into()))
 }
 
 // Runtime / schema discovery ------------------------------------------------------------------------------------------------
@@ -811,11 +813,7 @@ impl Actor {
             format!("{sock_dir_str}/kicad/api.sock")
         };
         let argv_vec = if mode == "fork" {
-            let mut v = fork_argv(&kicad_bin, &pro, &req_sock, container, toplevel, std::process::id());
-            // bp.9 and later: the first paint already in Backplane's theme (an older fork would refuse the flag)
-            let theme = theme_of(&pro);
-            if !theme.is_empty() && !desc.is_empty() && proto::load(&desc).has_own("kiapi.backplane.embed.SetTheme") { let at = v.len() - 1; v.insert(at, theme); v.insert(at, "--theme".into()); }
-            v
+            fork_argv(&kicad_bin, &pro, &req_sock, container, toplevel, std::process::id())
         } else {
             stock_argv(&kicad_bin, &files)
         };
@@ -1612,6 +1610,7 @@ fn spawn_fork_events_loop(me: mpsc::UnboundedSender<Msg>, pro: String, gen: u64,
                 for ev in evs {
                     let ty = ev["type"].as_str().unwrap_or("");
                     let ty_n = ev["type"].as_i64().unwrap_or(0);
+                    if ty == "ET_SELECTION_CHANGED" || ty_n == 14 { super::xprobe::kicad_selected(&pro, ev); continue }
                     if ty == "ET_SHOW_REQUESTED" || ty_n == 9 {
                         show_req = Some(kind_of_fk_val(&ev["frame"]["kind"]).to_string());
                     } else if matches!(ty, "ET_FRAME_OPENED" | "ET_FRAME_CLOSED" | "ET_FRAME_SHOWN" | "ET_FRAME_HIDDEN"
@@ -1668,7 +1667,6 @@ const METHODS: &[&str] = &[
     "editor.kicad.restart",
     "editor.kicad.frames",
     "editor.kicad.touched",
-    "editor.kicad.theme",
 ];
 
 fn ok_reply(id: &Value, payload: Value) -> Vec<Value> {
@@ -1702,17 +1700,6 @@ impl RpcHandler for EmbedRpc {
             };
             if !super::known_root(hub, &resolved.root, "").await {
                 return err_reply(id, &format!("{} is not in a project this hub knows", resolved.pro));
-            }
-            if let Some(t) = p["theme"].as_str().filter(|t| matches!(*t, "light" | "dark")) { themes().lock().unwrap().insert(resolved.pro.clone(), t.to_string()); }
-            if method == "editor.kicad.theme" {
-                let mode = p["mode"].as_str().unwrap_or("");
-                if theme_mode(mode).is_empty() { return err_reply(id, "mode is light or dark") }
-                themes().lock().unwrap().insert(resolved.pro.clone(), mode.to_string());
-                // a running fork that can: now, live; otherwise it is used at the next launch
-                let Some(gui) = gui_route(&resolved.pro) else { return ok_reply(id, json!({"applied": false, "why": "KiCad is not running"})) };
-                if gui.mode != "fork" || gui.desc.is_empty() || !proto::load(&gui.desc).has_own("kiapi.backplane.embed.SetTheme") { return ok_reply(id, json!({"applied": false, "why": "this KiCad cannot switch its theme (needs Backplane KiCad bp.9)"})) }
-                let o = gui_call(&gui, "kiapi.backplane.embed.SetTheme", json!({"mode": theme_mode(mode)})).await;
-                return if o["ok"].as_bool().unwrap_or(false) { ok_reply(id, json!({"applied": true, "theme": o["message"].clone()})) } else { err_reply(id, &format!("SetTheme: {}", o["error"].as_str().unwrap_or(""))) }
             }
             if method == "editor.kicad.touched" { unsaved_update(&resolved.pro, |u| u.touched()); return ok_reply(id, json!({})) }
             let (tx, rx) = oneshot::channel();
@@ -2340,11 +2327,6 @@ mod tests {
         let _ = xvfb.kill();
         let _ = xvfb.wait();
     }
-
-#[cfg(test)]
-mod theme_tests {
-    #[test] fn backplanes_theme_names_the_forks_mode() { assert_eq!(super::theme_mode("light"), "TM_LIGHT"); assert_eq!(super::theme_mode("dark"), "TM_DARK"); assert_eq!(super::theme_mode("auto"), ""); }
-}
 
 #[cfg(test)]
 mod unsaved_tests {

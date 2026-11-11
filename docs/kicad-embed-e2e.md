@@ -110,6 +110,7 @@ test/kicad_embed/
   embed_window_e2e.sh                          # Suite 1 (14 checks in stock|fork; 12 in spike): cold Edit, reflow, move popups, XShape, View/Edit, rail switches, focus
   embed_editors_e2e.sh                         # Suite 2 (15 checks): Schematic, Symbol, PCB + copper zones, Footprint, DRC, 3D orbit, Plot + Gerber/Drill/STEP
   embed_agent_resilience_e2e.sh                # Suite 3 (9 checks in stock|fork; 8 in spike): live agent IPC + GAL diff + Ctrl+Z, SIGSTOP grab_escape, close(ask), GPUI SIGKILL save-set hot-swap, KiCad SIGKILL + restart + close
+  embed_xprobe_e2e.sh                           # Suite 4 (6 checks on bp.8, 7 on bp.9): chat link -> KiCad selection (GetSelection) + zoom, editor.kicad.select, KiCad selection -> viewer (bp.9), chat link -> viewer zoom
   run_all.sh                                   # sequential RAM-light runner (strictly one KiCad process at a time)
 ```
 
@@ -137,6 +138,7 @@ EMBED_MODE=fork BACKPLANE_KICAD_BIN=/path/to/bp8/bin/kicad BACKPLANE_KICAD_CLI=/
    - `editor.kicad.close {project, save: "ask"|"save"|"discard"}`
    - `editor.kicad.restart {project, frame?}`
    - `editor.kicad.frames {project, frames}` (stock client-discovered frame sync for dirty-state gating)
+   - `editor.kicad.select {project | thread, references, nets, pins, zoom, show?, from?}` and `kicad.names {project | thread}` (`kicad/xprobe.rs`); info `kicad.sel.<digest>` on a person's selection in KiCad (bp.9)
 
 ---
 
