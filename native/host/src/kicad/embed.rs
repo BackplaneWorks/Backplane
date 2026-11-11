@@ -176,9 +176,11 @@ pub fn default_frame_for_path(path: &str, requested: &str) -> &'static str {
 }
 
 /// `kiapi.backplane.embed.FrameKind` enum name for a canonical frame string.
-/// The editors pre-warmed after the first one is shown: the schematic and the 3D viewer, less the one shown and those KiCad has open.
+/// The editors pre-warmed after the first one is shown: the board and the schematic, less the one shown and those KiCad has open. Never
+/// the 3D viewer: its first paint builds the board's models on KiCad's UI thread (~0.9 s on a small board), a hitch wherever it falls, so
+/// it is paid only when the person asks for 3D.
 pub fn prewarm_kinds(active: &str, have: &[String]) -> Vec<&'static str> {
-    ["SCH", "PCB", "PCB_3D"].into_iter().filter(|k| *k != canon_frame(active) && !have.iter().any(|h| h == k)).collect()
+    ["SCH", "PCB"].into_iter().filter(|k| *k != canon_frame(active) && !have.iter().any(|h| h == k)).collect()
 }
 
 pub fn fk_of(kind: &str) -> &'static str {
@@ -642,6 +644,8 @@ enum Msg {
     FramesUpdated { pro: String, gen: u64, holder: Option<u64>, frames: Vec<Frame>, reply: Option<(u64, oneshot::Sender<Result<Value, String>>)> },
     ForkShowRequested { pro: String, gen: u64, kind: String },
     ForkSync { pro: String, gen: u64 },
+    /// ForkSync for the project's current session, whichever generation it is (from outside the actor: the prewarm RPC)
+    ForkSyncNow { pro: String },
     HealthResult { pro: String, gen: u64, ok: bool, modified_docs: Option<Vec<String>> },
     ChildExited { pro: String, gen: u64, code: i32, tail: String, reply: Option<oneshot::Sender<Result<Value, String>>> },
     Tick,
@@ -1204,6 +1208,9 @@ impl Actor {
                     }
                 });
             }
+            Msg::ForkSyncNow { pro } => {
+                if let Some(gen) = self.sessions.get(&pro).map(|s| s.gen) { let _ = self.me.send(Msg::ForkSync { pro, gen }); }
+            }
             Msg::ForkSync { pro, gen } => {
                 let Some(s) = self.sessions.get(&pro).filter(|s| s.gen == gen && s.is_live()).cloned() else { return };
                 let me = self.me.clone();
@@ -1696,24 +1703,7 @@ async fn spawn_gui_session(
             if !ev2.is_empty() { events_sock = ev2; }
             frames = f2;
         }
-        let have: Vec<String> = frames.iter().map(|f| f.kind.clone()).collect();
-        let (me2, sock2, desc2, pro2, active2) = (me.clone(), sock.clone(), desc.clone(), pro.clone(), active.clone());
         let _ = me.send(Msg::Ready { pro, gen, sock, version, holder, events_sock, ev_since, frames, spawn_container, spawn_active: active });
-        // pre-warm (bp.9's ShowFrame.prewarm): the other editors opened hidden in KiCad's idle time, so the first switch to them is a show
-        if !desc2.is_empty() && proto::load(&desc2).has_field("kiapi.backplane.embed.ShowFrame", "prewarm") {
-            tokio::spawn(async move {
-                // spaced out: KiCad opens a pre-warmed frame on its UI thread after replying, and a request sent meanwhile (the person's
-                // own switch) would wait behind it; the first after the shown frame has settled
-                for k in prewarm_kinds(&active2, &have) {
-                    tokio::time::sleep(Duration::from_millis(1500)).await;
-                    let _ = raw_on(&me2, &sock2, &desc2, "kiapi.backplane.embed.ShowFrame", json!({"kind": fk_of(k), "prewarm": true}), 30000).await;
-                    // KiCad marks a pre-warmed frame realized ~0.4 s after painting it, with no event: the frames read again then, so the
-                    // client may map it itself from the first switch
-                    tokio::time::sleep(Duration::from_millis(900)).await;
-                    if me2.send(Msg::ForkSync { pro: pro2.clone(), gen }).is_err() { return }
-                }
-            });
-        }
     } else {
         if let Some(act) = stock_action_for(&active) {
             let _ = run_stock_action(&me, &sock, &desc, act).await;
@@ -1807,6 +1797,7 @@ const METHODS: &[&str] = &[
     "editor.kicad.frames",
     "editor.kicad.touched",
     "editor.kicad.theme",
+    "editor.kicad.prewarm",
 ];
 
 fn ok_reply(id: &Value, payload: Value) -> Vec<Value> {
@@ -1842,6 +1833,28 @@ impl RpcHandler for EmbedRpc {
                 return err_reply(id, &format!("{} is not in a project this hub knows", resolved.pro));
             }
             if let Some(t) = p["theme"].as_str().filter(|t| matches!(*t, "light" | "dark")) { themes().lock().unwrap().insert(resolved.pro.clone(), t.to_string()); }
+            if method == "editor.kicad.prewarm" {
+                // the client, once the first editor is on show: the others opened hidden at the pane's size (KiCad paints a pre-warmed frame at
+                // the size given; at its 1280x800 default the first real show relaid the whole frame out)
+                let Some(gui) = gui_route(&resolved.pro) else { return ok_reply(id, json!({"prewarmed": []})) };
+                if gui.mode != "fork" || gui.desc.is_empty() || !proto::load(&gui.desc).has_field("kiapi.backplane.embed.ShowFrame", "prewarm") { return ok_reply(id, json!({"prewarmed": []})) }
+                let (w, h) = (p["width"].as_u64().unwrap_or(0), p["height"].as_u64().unwrap_or(0));
+                let have: Vec<String> = p["have"].as_array().into_iter().flatten().filter_map(|k| k.as_str().map(|k| canon_frame(k).to_string())).collect();
+                let kinds = prewarm_kinds(p["active"].as_str().unwrap_or("PCB"), &have);
+                let (me, gui2, pro) = (actor_tx.clone(), gui.clone(), resolved.pro.clone());
+                tokio::spawn(async move {
+                    for k in kinds {
+                        let mut body = json!({"kind": fk_of(k), "prewarm": true});
+                        if w > 0 && h > 0 { body["width"] = json!(w); body["height"] = json!(h); }
+                        let _ = gui_call(&gui2, "kiapi.backplane.embed.ShowFrame", body).await;
+                        // KiCad marks it realized ~0.4 s after painting it, with no event: the frames are read again then
+                        tokio::time::sleep(Duration::from_millis(900)).await;
+                        if me.send(Msg::ForkSyncNow { pro: pro.clone() }).is_err() { return }
+                        tokio::time::sleep(Duration::from_millis(600)).await;
+                    }
+                });
+                return ok_reply(id, json!({"prewarming": true}))
+            }
             if method == "editor.kicad.theme" {
                 let mode = p["mode"].as_str().unwrap_or("");
                 if theme_mode(mode).is_empty() { return err_reply(id, "mode is light or dark") }
@@ -1932,8 +1945,9 @@ mod tests {
         assert_eq!(default_frame_for_path("/p/a.kicad_pcb", ""), "PCB");
         assert_eq!(default_frame_for_path("/p/a.kicad_pcb", "PCB_3D"), "PCB_3D");
         assert_eq!(fk_of("SCH"), "FK_SCH");
-        assert_eq!(prewarm_kinds("PCB", &["PCB".to_string()]), ["SCH", "PCB_3D"]);
-        assert_eq!(prewarm_kinds("SCH", &["SCH".to_string(), "PCB".to_string()]), ["PCB_3D"]);
+        assert_eq!(prewarm_kinds("PCB", &["PCB".to_string()]), ["SCH"]);
+        assert_eq!(prewarm_kinds("SCH", &["SCH".to_string(), "PCB".to_string()]), Vec::<&str>::new());
+        assert_eq!(prewarm_kinds("PCB_3D", &[]), ["SCH", "PCB"]);
         assert_eq!(fk_of("PCB_3D"), "FK_PCB_3D");
         assert_eq!(kind_of_fk_val(&json!("FK_FOOTPRINT_EDITOR")), "FOOTPRINT_EDITOR");
         assert_eq!(kind_of_fk_val(&json!(5)), "PCB_3D");
