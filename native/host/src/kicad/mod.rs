@@ -5,6 +5,7 @@ pub mod bom;
 pub mod cad;
 pub mod canonical;
 pub mod checks;
+pub mod embed;
 pub mod ipc;
 pub mod kexport;
 pub mod kipc;
@@ -44,6 +45,7 @@ pub fn start(hub: &Arc<Hub>) {
     let plots = watch::Plots::new(&hub.cfg.home);
     hub.register_rpc(Arc::new(watch::KicadRpc(plots)));
     ipc::start(hub);
+    embed::start(hub);
 }
 
 /// `kicad.watch` names a folder and maybe a file: both must lie under a folder the hub knows (a project's root or a

@@ -307,14 +307,15 @@ pub fn tip_raw(text: &str, key: &str, light: bool) -> impl Fn(&mut Window, &mut 
 impl Backplane {
     /// A rail button pressed, or its key: the viewer's kind (or Diff) is asked for; the kind already lit shuts the viewer.
     pub(crate) fn rail_press(&mut self, a: &str, v: &str, cx: &mut Context<Self>) {
-        let cmd = if a == "view-kind" { self.rail_view(v) } else { Command::Action(a.into(), v.into()) };
+        let cmd = if a == "view-kind" { self.rail_view(v, cx) } else { Command::Action(a.into(), v.into()) };
         let _ = self.tx.try_send(cmd); cx.notify();
     }
     /// The command a rail press on viewer kind `v` sends (screens::viewer::rail_command), with the rail lit at once for what it asks: the kind, or none.
-    pub(crate) fn rail_view(&mut self, v: &str) -> Command {
-        let thread = &self.data["thread"];
-        let cmd = crate::screens::viewer::rail_command(&thread["viewer"], thread["diff"].is_object(), self.screens.rail_pending.as_deref(), v);
+    pub(crate) fn rail_view(&mut self, v: &str, cx: &mut Context<Self>) -> Command {
+        let covered = self.data["thread"]["diff"].is_object() || self.screens.kicad.as_ref().is_some_and(|p| p.read(cx).has_override());
+        let cmd = crate::screens::viewer::rail_command(&self.data["thread"]["viewer"], covered, self.screens.rail_pending.as_deref(), v);
         let opens = matches!(&cmd, Command::Action(_, k) if !k.is_empty());
+        if opens { if let Some(p) = self.screens.kicad.clone() { p.update(cx, |p, cx| p.set_open(v, cx)); } }
         self.screens.rail_pending = Some(if opens { v.to_string() } else { String::new() }); self.screens.rail_at = Some(std::time::Instant::now());
         self.screens.plot_click = (opens && matches!(v, "board" | "schematic")).then(std::time::Instant::now);
         cmd

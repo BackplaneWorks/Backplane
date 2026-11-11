@@ -171,7 +171,7 @@ pub fn diff_controls(diff: &Value) -> Vec<(&'static str, &'static str, &'static 
 pub const CORNER_ROOM: f32 = 150.0;
 /// The pane's own controls, at the end of the page's toolbar row: where the page comes from (another machine's thread: "desktop: boards/x.kicad_pcb"),
 /// Open in KiCad (while there is a board or schematic) and Close. They were the tab bar's; the rail picks the page now.
-fn pane_actions(cx: &mut Context<Backplane>, light: bool, thread: &Value, target: Option<&super::attach::Target>, diff_on: bool) -> AnyElement {
+fn pane_actions(cx: &mut Context<Backplane>, light: bool, thread: &Value, target: Option<&super::attach::Target>, diff_on: bool, editing: bool) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let viewer = &thread["viewer"];
     let mut row = div().flex().flex_shrink_0().items_center().gap_1().max_w_full();
@@ -180,7 +180,15 @@ fn pane_actions(cx: &mut Context<Backplane>, light: bool, thread: &Value, target
         row = row.child(div().id("viewer-from").min_w_0().max_w(px(200.)).flex().items_center().gap(px(3.)).overflow_hidden().whitespace_nowrap().text_size(px(11.)).text_color(col).opacity(o)
             .tooltip(crate::keys::tip(&hover, "", light)).child(crate::art::icon("link", 11., col)).child(div().overflow_hidden().text_ellipsis().child(t)));
     }
-    if has_design(viewer) { row = row.child(btn(cx, light, "kicad-open".into(), kicad_open_label(target.map(|t| t.addr.as_str()), thread["mark"]["name"].as_str()), false, kicad_open(viewer))); }
+    // Edit / View: the real KiCad in this pane (on the hub's own machine), or back to Backplane's viewer
+    if has_design(viewer) && !diff_on && crate::viewers::kicad_pane::local(target.map(|t| t.addr.as_str()), thread) {
+        let c2 = c(if editing { "accent" } else { "line" });
+        row = row.child(tall(div().id("kicad-edit").px_2().border_1().border_color(c2).bg(c("raise")).cursor_pointer().hover(|s| s.bg(c("panel"))).text_size(px(12.))
+            .tooltip(crate::keys::tip(&if editing { trs("Back to Backplane's viewer (KiCad stays open)") } else { trs("Edit in the real KiCad, here in the pane") }, "", light))
+            .child(if editing { trs("View") } else { trs("Edit") })
+            .on_click(cx.listener(move |this, _, _, cx| { if editing { this.kicad_view(cx); } else { this.kicad_edit(cx); } }))).into_any_element());
+    }
+    if has_design(viewer) && !editing { row = row.child(btn(cx, light, "kicad-open".into(), kicad_open_label(target.map(|t| t.addr.as_str()), thread["mark"]["name"].as_str()), false, kicad_open(viewer))); }
     row.child(div().id("viewer-close").size(px(super::head::BTN_H)).flex().items_center().justify_center().border_1().border_color(c("line")).bg(c("raise")).cursor_pointer().hover(|s| s.bg(c("panel"))).tooltip(crate::keys::tip(&trs("Close the viewer"), "", light))
         .child(crate::art::icon("x", 14., c("dim"))).on_click(cx.listener(|this, _, _, cx| { this.screens.rail_pending = Some(String::new()); this.screens.rail_at = Some(std::time::Instant::now()); let _ = this.tx.try_send(close()); cx.notify(); })))
         .into_any_element()
@@ -613,7 +621,7 @@ fn pane_page(thread: &Value) -> Option<(String, bool)> {
     press.filter(|k| !k.is_empty()).map(|k| (k, true))
 }
 /// The panel (None while nothing is open). 520 px wide, between the thread and the rail.
-pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &super::filesui::FilesUi, images: &super::images::Images, target: Option<&super::attach::Target>, thread: &Value, plot: &super::plot::Store, pv: &mut super::plotview::PlotView, split_pv: &mut [super::plotview::PlotView; 2], solid: Option<&Entity<crate::viewers::solid::SolidPage>>, browser: Option<&Entity<crate::viewers::browser::BrowserPage>>) -> AnyElement {
+pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &super::filesui::FilesUi, images: &super::images::Images, target: Option<&super::attach::Target>, thread: &Value, plot: &super::plot::Store, pv: &mut super::plotview::PlotView, split_pv: &mut [super::plotview::PlotView; 2], solid: Option<&Entity<crate::viewers::solid::SolidPage>>, browser: Option<&Entity<crate::viewers::browser::BrowserPage>>, editor: Option<&Entity<crate::viewers::kicad_pane::KicadPane>>) -> AnyElement {
     let Some((open, early)) = pane_page(thread) else { return Empty.into_any_element() };
     let open = open.as_str();
     // a drawing page shown without the project's boards (the window reconnected, or the page was restored as it was left): read them once
@@ -622,8 +630,16 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
     let diff_on = thread["diff"].is_object();
     // no tab bar: the rail picks the page. The pane's own controls (where it comes from, Open in KiCad, Close) end the page's toolbar row,
     // or float in the top right corner of a page drawn to its edges (3D, Split, Browser)
-    let acts = |cx: &mut Context<Backplane>| pane_actions(cx, light, thread, target, diff_on);
-    let body: AnyElement = if early {
+    let editing = editor.is_some() && matches!(open, "board" | "schematic" | "3d") && !diff_on;
+    let acts = |cx: &mut Context<Backplane>| pane_actions(cx, light, thread, target, diff_on, editing);
+    let body: AnyElement = if editing {
+        // the real KiCad, its rail page's editor over the pane (viewers/kicad_pane.rs); the pane's controls in its own row above it, never over KiCad's toolbar
+        let kicad_open = pressed(open).filter(|k| matches!(k.as_str(), "board" | "schematic" | "3d")).unwrap_or_else(|| open.to_string()); // i18n-ok: rail page kinds
+        let e = editor.unwrap().clone(); if e.read(cx).open != kicad_open { e.update(cx, |p, cx| p.set_open(&kicad_open, cx)); }
+        let a = acts(cx);
+        div().size_full().flex().flex_col().child(bar(light).justify_end().child(a)).child(div().flex_1().min_h_0().child(e)).into_any_element()
+    }
+    else if early {
         let k = open;
         let a = acts(cx);
         match k { "board" | "schematic" => plot_loading(cx, light, 0, &Value::Null, pv, true, Some(a), &if k == "board" { trs("Loading the board…") } else { trs("Loading the schematic…") }),

@@ -207,6 +207,7 @@ pub async fn socket_inner(hub: Arc<Hub>, s: TcpStream, cbor_wanted: bool, token:
     // attached first, then admitted: a revoke after this point finds the outbox and closes the stream; before it, the credential no longer holds
     if !hub.admit_blocking(conn.client, token.clone()).await { return Ok(()) }
     tx.send(pack(&conn, &greeting)).await?;
+    if let Some(info) = hub.view_info_frame() { tx.send(pack(&conn, &info)).await?; }
     let mut changes = hub.changed.subscribe();
     let mut beat = tokio::time::interval(Duration::from_millis(15000)); beat.tick().await;
     let mut due: Option<tokio::time::Instant> = None;

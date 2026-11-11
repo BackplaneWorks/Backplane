@@ -55,11 +55,17 @@ def main() -> None:
     # Canonical Backplane pointer + companion metadata to verify byte-preservation across saves/exports
     write(os.path.join(proj, ".backplane.json"), json.dumps({"project": "ecc83-pp.kicad_pro"}, indent=2) + "\n")
     companion = {
-        "schema_version": 2,
-        "board_structure": {"regions": [{"id": "rigid_main", "kind": "rigid"}]},
-        "note": "preserve-across-gui-save-and-plot",
+        "format": "backplane-kicad-metadata",
+        "items": {
+            "00000000-0000-0000-0000-000054a581e5": {
+                "custom_properties": {
+                    "backplane_note": "preserve-across-gui-save-and-plot",
+                }
+            }
+        },
+        "version": 1,
     }
-    write(os.path.join(proj, "ecc83-pp.kicad_pcb.backplane.json"), json.dumps(companion, indent=2) + "\n")
+    write(os.path.join(proj, "ecc83-pp.kicad_pcb.backplane.json"), json.dumps(companion, indent=2, sort_keys=True) + "\n")
 
     # Project-local symbol library + footprint library for Symbol Editor & Footprint Editor tests
     write(
@@ -182,6 +188,7 @@ def main() -> None:
 
     # Seed Backplane hub events.jsonl and stand-in agent shims
     now = int(time.time())
+    kicad_cli = os.environ.get("KICAD_CLI", "").strip()
     events = [
         {"$": "ProjectCreated", "id": "p1", "title": "ecc83-pp", "root": proj, "at": now},
         {
@@ -197,6 +204,8 @@ def main() -> None:
             "at": now,
         },
     ]
+    if kicad_cli and os.path.isfile(kicad_cli):
+        events.append({"$": "SettingSet", "key": "kicad.path", "value": kicad_cli, "at": now})
     write(os.path.join(out_dir, "home", "events.jsonl"), "".join(json.dumps(e, separators=(",", ":")) + "\n" for e in events))
 
     bun = shutil.which("bun") or "/usr/bin/env bun"

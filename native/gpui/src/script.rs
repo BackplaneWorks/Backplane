@@ -12,10 +12,10 @@ pub fn metric(started: Instant, event: &str, mut fields: Value) {
 }
 
 #[derive(Clone, Debug)]
-/* i18n-ok: scripted e2e input and its metrics, not drawn */ pub enum Step { PairFill(String, String, String), /** keystrokes typed as the person would ("ctrl-j e c h o enter"), through the window's bindings */ Keys(String), Cef(Value), Browser(Value), Files(String), ScrollState(String), Home(usize), Select(usize), Tap(f32, f32, usize), Sheets(bool), Compare(Option<usize>), Hist(Option<i64>), HistMode(u8), HistPlay, ViewShow(String, String), Popup(String), Type(String), Send, Attach(String), Action(String, String), Field(String, String), Wait(u64), Record(Option<String>), Click(String), Imp(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Mark(String), Fit, Unsupported(String) }
+/* i18n-ok: scripted e2e input and its metrics, not drawn */ pub enum Step { PairFill(String, String, String), /** keystrokes typed as the person would ("ctrl-j e c h o enter"), through the window's bindings */ Keys(String), Cef(Value), Browser(Value), /** {"kicad":{"report":true}}: the embedded editor's report */ Kicad(Value), Files(String), ScrollState(String), Home(usize), Select(usize), Tap(f32, f32, usize), Sheets(bool), Compare(Option<usize>), Hist(Option<i64>), HistMode(u8), HistPlay, ViewShow(String, String), Popup(String), Type(String), Send, Attach(String), Action(String, String), Field(String, String), Wait(u64), Record(Option<String>), Click(String), Imp(String), Read(String), View(String), Layers(bool, Option<f32>, f32), Expect(String), Pan(f32, f32), Zoom(f32, f32, f32), Scroll(f32), NetSleep(f64), Mark(String), Fit, Unsupported(String) }
 /// What a click on a registered control does; the e2e harness's controls inventory and `click` step use these.
 #[derive(Clone, Debug)]
-pub enum Ctl { /** the sidebar hub picker */ Hub(crate::screens::hubpick::Act), PairGo, PairYes, PairCancel, None, Pad, Dictate, OpenPalette, Rail(String), PickFiles, /** the ▾ beside the thread's name: its menu */ ThreadMenu, ToggleSidebar, ToggleContext, Select(String), Home(String), Fold(String), Send, Skill(String), Page(String), /** a hub page of the Settings nav */ SettingsPage(String), Node(String, String), RenameSave(String), Imp(String), FocusSearch, /** a bots-page press (screens::bots::press): its kind and value */ Bot(String, String), /** a chat terminal's card: focus, expand, pop, stop; its key */ Term(String, String), /** a subagent's own view (its key; "" goes back) */ Sub(String) }
+pub enum Ctl { /** the sidebar hub picker */ Hub(crate::screens::hubpick::Act), PairGo, PairYes, PairCancel, None, Pad, Dictate, OpenPalette, Rail(String), PickFiles, /** the ▾ beside the thread's name: its menu */ ThreadMenu, ToggleSidebar, ToggleContext, Select(String), Home(String), Fold(String), Send, Skill(String), Page(String), /** a hub page of the Settings nav */ SettingsPage(String), Node(String, String), RenameSave(String), Imp(String), FocusSearch, /** a bots-page press (screens::bots::press): its kind and value */ Bot(String, String), /** a chat terminal's card: focus, expand, pop, stop; its key */ Term(String, String), /** a subagent's own view (its key; "" goes back) */ Sub(String), /** the viewer's Edit (true: the real KiCad in the pane) and View (false) */ KicadEdit(bool) }
 #[derive(Clone, Debug)]
 pub struct CtlEntry { pub id: String, pub label: String, pub ctl: Ctl }
 #[derive(Clone, Debug)]
@@ -55,6 +55,7 @@ pub fn load(path: &Path) -> VecDeque<Step> {
         else if let Some(what) = v["expect"].as_str() { Some(Step::Expect(what.into())) }
         else if v["cef"].is_object() { Some(Step::Cef(v["cef"].clone())) }
         else if v["browser"].is_object() { Some(Step::Browser(v["browser"].clone())) }
+        else if v["kicad"].is_object() { Some(Step::Kicad(v["kicad"].clone())) }
         else if let Some(kind) = v["view"].as_str() { Some(Step::View(kind.into())) }
         else if let Some(a) = v["pan"].as_array() { Some(Step::Pan(a.first().and_then(Value::as_f64).unwrap_or(0.0) as f32, a.get(1).and_then(Value::as_f64).unwrap_or(0.0) as f32)) }
         else if let Some(a) = v["zoom"].as_array() { Some(Step::Zoom(a.first().and_then(Value::as_f64).unwrap_or(0.0) as f32, a.get(1).and_then(Value::as_f64).unwrap_or(0.5) as f32, a.get(2).and_then(Value::as_f64).unwrap_or(0.5) as f32)) }
@@ -273,6 +274,50 @@ impl Backplane {
                 /* i18n-ok: scripted e2e input and its metrics, not drawn */ { let _ = cmd; self.m("cef", json!({"ok": false, "error": "built without the cef feature"})); }
                 self.pump(cx);
             }
+            Step::Kicad(cmd) => { // {"kicad":{"report":true}} or {"kicad":{"wait_painted":25000,"kind":"PCB","tag":"..."}} (viewers/kicad_pane.rs)
+                let tag = cmd["tag"].as_str().map(String::from);
+                if let Some(ms) = cmd["wait_painted"].as_u64() {
+                    let want_kind = cmd["kind"].as_str().map(String::from);
+                    let min_lit = cmd["min_painted"].as_u64().unwrap_or(15);
+                    let t0 = Instant::now();
+                    cx.spawn(async move |this, cx| {
+                        let mut first = true;
+                        loop {
+                            let elapsed = t0.elapsed().as_millis() as u64;
+                            let step_ms = if elapsed < 500 { 25 } else { 120 };
+                            if !first { cx.background_executor().timer(Duration::from_millis(step_ms)).await; }
+                            first = false;
+                            let done = this.update(cx, |t, cx| {
+                                let mut r = match t.screens.kicad.clone() { Some(p) => p.read(cx).report(), None => json!({"ok": false, "error": "not editing"}) }; // i18n-ok: scripted e2e input and its metrics, not drawn
+                                let shown = r["shown"].as_u64().unwrap_or(0);
+                                let c_lit = r["container"]["painted"].as_u64().unwrap_or(0);
+                                let f_ok = shown != 0 && r["frames"].as_array().is_some_and(|fs| fs.iter().any(|f| {
+                                    f["xid"].as_u64() == Some(shown)
+                                        && f["painted"].as_u64().unwrap_or(0) >= min_lit
+                                        && want_kind.as_deref().map_or(true, |wk| f["kind"].as_str() == Some(wk))
+                                }));
+                                let ready = r["state"].as_str() == Some("ready"); // i18n-ok: wire state enum
+                                let failed = matches!(r["state"].as_str(), Some("failed" | "stopped")); // i18n-ok: wire state enum
+                                if (ready && c_lit >= min_lit && f_ok) || failed || t0.elapsed().as_millis() as u64 >= ms {
+                                    r["wait_ms"] = json!(t0.elapsed().as_millis() as u64);
+                                    if let Some(tg) = &tag { r["tag"] = json!(tg); }
+                                    t.m("kicad", r);
+                                    t.pump(cx);
+                                    true
+                                } else {
+                                    false
+                                }
+                            }).unwrap_or(true);
+                            if done { break }
+                        }
+                    }).detach();
+                } else {
+                    /* i18n-ok: scripted e2e input and its metrics, not drawn */ let mut r = match self.screens.kicad.clone() { Some(p) => p.read(cx).report(), None => json!({"ok": false, "error": "not editing"}) };
+                    if let Some(tg) = tag { r["tag"] = json!(tg); }
+                    self.m("kicad", r);
+                    self.pump(cx);
+                }
+            }
             Step::Browser(cmd) => { // {"browser":{"op":...}}: the Browser tab's page, embedded or the hub's frames (viewers/browser.rs BrowserPage::script)
                 /* i18n-ok: scripted e2e input and its metrics, not drawn */ match self.screens.browser.as_ref().map(|(_, p)| p.clone()) { Some(p) => { let r = p.update(cx, |b, cx| b.script(&cmd, cx)); self.m("browser", r); } None => self.m("browser", json!({"ok": false, "error": "no Browser page", "op": cmd["op"]})) }
                 self.pump(cx);
@@ -413,7 +458,7 @@ impl Backplane {
             /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::PairCancel => { crate::screens::pair::cancel(self, cx); self.ui_epoch += 1; "pair cancelled".into() }
             Ctl::None => "none".into(),
             /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::Pad => "pad (mouse only)".into(),
-            /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::Rail(kind) => { let cmd = self.rail_view(kind); let shut = matches!(&cmd, crate::hub::Command::Action(_, k) if k.is_empty()); let _ = self.tx.try_send(cmd); self.ui_epoch += 1; if shut { "view.action view close".into() } else { "view.action view".into() } }
+            /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::Rail(kind) => { let cmd = self.rail_view(kind, cx); let shut = matches!(&cmd, crate::hub::Command::Action(_, k) if k.is_empty()); let _ = self.tx.try_send(cmd); self.ui_epoch += 1; if shut { "view.action view close".into() } else { "view.action view".into() } }
             Ctl::Dictate => { self.voice_press(cx); "dictate".into() }
             /* i18n-ok: scripted e2e input and its metrics */ Ctl::ThreadMenu => { let items = crate::screens::ctxmenu::title_items(&self.data); let n = items.len(); if n > 0 { self.ctx_open(point(px(320.), px(40.)), items, cx); } self.ui_epoch += 1; format!("thread menu {n}") }
             /* i18n-ok: scripted e2e input and its metrics */ Ctl::PickFiles => { self.pick_files(cx); self.ui_epoch += 1; "attach picker".into() }
@@ -433,6 +478,7 @@ impl Backplane {
             /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::Imp(id) => { crate::screens::improvements::act(self, id, cx); self.ui_epoch += 1; format!("improvements {id}") }
             /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::Term(op, key) => { match op.as_str() { "expand" => self.card_expand(key, cx), "pop" => self.card_pop(key, None, cx), "stop" => self.card_stop(key, cx), _ => self.card_take_keys(key, None, cx) } format!("term {op}") }
             /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::Bot(k, v) => { crate::screens::bots::press(self, k, v, cx); self.ui_epoch += 1; format!("bots {k}") }
+            /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::KicadEdit(on) => { if *on { let ok = self.kicad_edit(cx); self.ui_epoch += 1; format!("kicad edit {ok}") } else { self.kicad_view(cx); self.ui_epoch += 1; "kicad view".into() } }
             /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::Node(a, p) => { if a == "run-on" { if let Some((pj, to)) = p.split_once('|') { self.screens.projects.picked.insert(pj.to_string(), to.to_string()); } } if a == "flag" && p == "settings" { self.open_settings(cx); return format!("view.action {a}"); } if a == "proj-add" || a == "proj-new" || a == "new-thread" || crate::screens::tools::makes_thread(&a) { self.arm_new(); } self.go(&a, p.clone(), cx); format!("view.action {a}") }
         }
     }

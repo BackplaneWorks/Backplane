@@ -11,18 +11,22 @@ REPO_ROOT=$(cd "$KEMBED_LIB/../../.." && pwd)
 # shellcheck source=../../e2e/lib/own-group.sh
 . "$REPO_ROOT/test/e2e/lib/own-group.sh"
 
+REAL_HOME="$HOME"
 EMBED_MODE=${EMBED_MODE:-spike}
 OUT=${OUT:-$(mktemp -d "$BP_TMP/bp-kembed.XXXXXX")}
 mkdir -p "$OUT"
 OUT=$(cd "$OUT" && pwd)
 
 # Discover Backplane client, hub, and assets when not explicitly passed.
+# Prefer the worktree's own built target/fast binaries first so local edits are tested.
 discover_bins() {
   local cur_name cur_dir main_git
+  [ -z "${CLIENT_BIN:-}" ] && [ -x "$REPO_ROOT/native/gpui/target/fast/backplane-gpui" ] && CLIENT_BIN="$REPO_ROOT/native/gpui/target/fast/backplane-gpui"
+  [ -z "${HUB_BIN:-}" ] && [ -x "$REPO_ROOT/native/host/target/fast/backplane-hub" ] && HUB_BIN="$REPO_ROOT/native/host/target/fast/backplane-hub"
   if [ -z "${CLIENT_BIN:-}" ] || [ -z "${HUB_BIN:-}" ]; then
-    if [ -f "$HOME/.backplane-gpui-dev/CURRENT" ]; then
-      cur_name=$(cat "$HOME/.backplane-gpui-dev/CURRENT" 2>/dev/null || true)
-      cur_dir="$HOME/.backplane-gpui-dev/builds/$cur_name"
+    if [ -f "$REAL_HOME/.backplane-gpui-dev/CURRENT" ]; then
+      cur_name=$(cat "$REAL_HOME/.backplane-gpui-dev/CURRENT" 2>/dev/null || true)
+      cur_dir="$REAL_HOME/.backplane-gpui-dev/builds/$cur_name"
       [ -z "${CLIENT_BIN:-}" ] && [ -x "$cur_dir/backplane-gpui" ] && CLIENT_BIN="$cur_dir/backplane-gpui"
       [ -z "${HUB_BIN:-}" ] && [ -x "$cur_dir/backplane-hub" ] && HUB_BIN="$cur_dir/backplane-hub"
       [ -z "${ASSETS_DIR:-}" ] && [ -d "$cur_dir/assets" ] && ASSETS_DIR="$cur_dir/assets"
@@ -35,15 +39,41 @@ discover_bins() {
 }
 
 discover_kicad() {
-  KICAD_CLI=${BACKPLANE_KICAD_CLI:-/home/h/.local/bin/kicad-cli}
-  [ -x "$KICAD_CLI" ] || KICAD_CLI=$(command -v kicad-cli || true)
-  if [ -z "${KICAD_BIN:-}" ]; then
-    if [ -n "${BACKPLANE_KICAD_BIN:-}" ]; then
-      KICAD_BIN="$BACKPLANE_KICAD_BIN"
-    elif [ -x /usr/bin/kicad ]; then
-      KICAD_BIN=/usr/bin/kicad
-    else
-      KICAD_BIN=$(command -v kicad || true)
+  if [ "$EMBED_MODE" = "stock" ]; then
+    KICAD_BIN=${KICAD_BIN:-${BACKPLANE_KICAD_BIN:-/usr/bin/kicad}}
+    [ -x "$KICAD_BIN" ] || KICAD_BIN=$(command -v kicad || true)
+    KICAD_CLI=${BACKPLANE_KICAD_CLI:-/usr/bin/kicad-cli}
+    [ -x "$KICAD_CLI" ] || KICAD_CLI=$(command -v kicad-cli || true)
+  elif [ "$EMBED_MODE" = "fork" ]; then
+    if [ -z "${KICAD_BIN:-}" ]; then
+      if [ -n "${BACKPLANE_KICAD_BIN:-}" ]; then
+        KICAD_BIN="$BACKPLANE_KICAD_BIN"
+      else
+        local cand
+        for cand in $(ls -1dr "$REAL_HOME"/.local/share/backplane/kicad/10.99.0-bp.*/bin/kicad 2>/dev/null || true); do
+          if [ -x "$cand" ] && grep -qa 'kiapi.backplane.embed' "$(dirname "$cand")/../share/backplane/api.desc" 2>/dev/null; then
+            KICAD_BIN="$cand"
+            break
+          fi
+        done
+      fi
+    fi
+    if [ -z "${KICAD_BIN:-}" ] || [ ! -x "$KICAD_BIN" ]; then
+      echo "SKIP/FAIL EMBED_MODE=fork requires Backplane KiCad >= 10.99.0-bp.8 (--embedded); pass BACKPLANE_KICAD_BIN=/path/to/kicad" >&2
+      exit 2
+    fi
+    KICAD_CLI=${BACKPLANE_KICAD_CLI:-$(dirname "$KICAD_BIN")/kicad-cli}
+  else
+    KICAD_CLI=${BACKPLANE_KICAD_CLI:-$REAL_HOME/.local/bin/kicad-cli}
+    [ -x "$KICAD_CLI" ] || KICAD_CLI=$(command -v kicad-cli || true)
+    if [ -z "${KICAD_BIN:-}" ]; then
+      if [ -n "${BACKPLANE_KICAD_BIN:-}" ]; then
+        KICAD_BIN="$BACKPLANE_KICAD_BIN"
+      elif [ -x /usr/bin/kicad ]; then
+        KICAD_BIN=/usr/bin/kicad
+      else
+        KICAD_BIN=$(command -v kicad || true)
+      fi
     fi
   fi
   KICAD_DIR=$(dirname "$(readlink -f "$KICAD_BIN" 2>/dev/null || echo "$KICAD_BIN")")
@@ -148,12 +178,26 @@ EOF
 start_hub() {
   HPORT=$(free_port)
   export HPORT
+  local mode_env=""
+  if [ "$EMBED_MODE" = "stock" ] || [ "$EMBED_MODE" = "fork" ]; then
+    mode_env="$EMBED_MODE"
+  fi
   own env \
     HOME="$OUT/fh" \
     XDG_CONFIG_HOME="$OUT/fh/.config" \
     XDG_CACHE_HOME="$OUT/fh/.cache" \
+    XDG_DATA_HOME="$OUT/fh/.local/share" \
     XDG_RUNTIME_DIR="$OUT/run" \
     TMPDIR="$OUT/tmp" \
+    DISPLAY="$DISP" \
+    GDK_BACKEND=x11 \
+    GDK_SCALE=1 \
+    LIBGL_ALWAYS_SOFTWARE="${LIBGL_ALWAYS_SOFTWARE:-1}" \
+    GALLIUM_DRIVER="${GALLIUM_DRIVER:-llvmpipe}" \
+    LP_NUM_THREADS="${LP_NUM_THREADS:-2}" \
+    VK_ICD_FILENAMES="${VK_ICD_FILENAMES:-}" \
+    BACKPLANE_KICAD_CLI="${KICAD_CLI:-}" \
+    BACKPLANE_KICAD_EMBED_MODE="$mode_env" \
     BACKPLANE_AGENTS="$OUT/bin" \
     BACKPLANE_NO_UPDATE=1 \
     FAKE_LOG="$OUT/standin.log" \
@@ -196,7 +240,46 @@ finish_suite() {
 DRIVER_PY="$KEMBED_LIB/x11_embed_driver.py"
 IPC_PY="$KEMBED_LIB/gui_ipc_probe.py"
 SEED_PY="$KEMBED_LIB/seed_project.py"
+HUB_RPC_MJS="$KEMBED_LIB/hub_rpc.mjs"
 XINPUT_PY="$REPO_ROOT/test/cef/xinput.py"
+
+hub_rpc() {
+  local steps=${1:-[]}
+  bun "$HUB_RPC_MJS" "$HPORT" "$OUT/home/token" "$steps"
+}
+
+last_kicad_report() {
+  local log=$1 tag=${2:-}
+  python3 - "$log" "$tag" <<'PY'
+import json, sys
+log_path, want_tag = sys.argv[1], sys.argv[2]
+found = None
+for line in open(log_path, encoding="utf-8", errors="replace"):
+    if "GPUI_METRIC " not in line:
+        continue
+    try:
+        obj = json.loads(line.split("GPUI_METRIC ", 1)[1])
+    except Exception:
+        continue
+    if obj.get("event") != "kicad":
+        continue
+    if want_tag and obj.get("tag") != want_tag:
+        continue
+    found = obj
+print(json.dumps(found or {}))
+PY
+}
+
+wait_for_log() {
+  local log=$1 needle=$2 tries=${3:-160}
+  for _ in $(seq "$tries"); do
+    if grep -Fq "$needle" "$log" 2>/dev/null; then
+      return 0
+    fi
+    sleep 0.25
+  done
+  return 1
+}
 
 wait_for_ipc() {
   local sock=$1 tries=${2:-80}
@@ -268,6 +351,84 @@ for w in json.load(sys.stdin):
     python3 "$XINPUT_PY" click $xy
   fi
   python3 "$DRIVER_PY" focus "$target_xid" >/dev/null
+}
+
+# Click a Backplane GPUI control (e.g. "rail:Schematic", "rail:Board", "rail:3D", "ui:View", "ui:Edit")
+# using its latest logged GPUI control rect + GPUI top-level window's root coordinates.
+click_gpui_control() {
+  local log=$1 gpui_xid=$2 ctl_id=$3
+  python3 "$XINPUT_PY" chord ctrl grave 2>/dev/null || true
+  sleep 0.1
+  local xy
+  xy=$(python3 - "$log" "$DRIVER_PY" "$gpui_xid" "$ctl_id" <<'PY'
+import json, subprocess, sys
+log_path, drv, gpui_xid_s, ctl_id = sys.argv[1:5]
+gpui_xid = int(gpui_xid_s, 0)
+rect = None
+for line in open(log_path, encoding="utf-8", errors="replace"):
+    if "GPUI_METRIC " not in line or '"controls"' not in line:
+        continue
+    try:
+        obj = json.loads(line.split("GPUI_METRIC ", 1)[1])
+    except Exception:
+        continue
+    if obj.get("event") != "controls":
+        continue
+    for c in obj.get("controls", []):
+        if c.get("id") == ctl_id and c.get("rect"):
+            rect = c["rect"]
+if not rect:
+    sys.exit(0)
+wins = json.loads(subprocess.check_output([sys.executable, drv, "list-windows"], text=True))
+gx, gy = 0, 0
+for w in wins:
+    if w["xid_int"] == gpui_xid:
+        gx, gy = w["root_x"], w["root_y"]
+        break
+cx = int(round(gx + rect["x"] + rect["w"] / 2.0))
+cy = int(round(gy + rect["y"] + rect["h"] / 2.0))
+print(f"{cx} {cy}")
+PY
+)
+  if [ -n "$xy" ]; then
+    # shellcheck disable=SC2086
+    python3 "$XINPUT_PY" click $xy
+    return 0
+  fi
+  echo "DIAG click_gpui_control: control '$ctl_id' not found in $log" >&2
+  return 1
+}
+
+# Read-only poll until Backplane's client has adopted/mapped a frame matching `sub` inside `cont_xid` and it painted.
+wait_for_embedded_frame() {
+  local gpui_xid=$1 cont_xid=$2 pid=$3 sub=$4 tries=${5:-160}
+  local xid="" rpt="" ok=""
+  for _ in $(seq "$tries"); do
+    xid=$(python3 "$DRIVER_PY" list-windows --match "$sub" 2>/dev/null | python3 -c '
+import json, sys
+pid = int(sys.argv[1])
+ws = json.load(sys.stdin)
+good = [
+    w for w in ws
+    if w.get("shown") and not w.get("override_redirect")
+    and w.get("w", 0) >= 180 and w.get("h", 0) >= 100
+    and (pid == 0 or w.get("pid") in (pid, 0) or "kicad" in w.get("wm_class", "").lower())
+]
+print(good[0]["xid"] if good else "")
+' "$pid" 2>/dev/null || true)
+    if [ -n "$xid" ]; then
+      rpt=$(python3 "$DRIVER_PY" report "$gpui_xid" "$cont_xid" "$xid" 2>/dev/null || echo "{}")
+      ok=$(python3 -c 'import json,sys; r=json.loads(sys.argv[1]); print(int(bool(r.get("in_gpui_tree")) and bool(r.get("in_container")) and (r.get("native",{}).get("painted") or 0) > 20))' "$rpt" 2>/dev/null || echo 0)
+      if [ "$ok" = "1" ]; then
+        echo "$xid"
+        return 0
+      fi
+    fi
+    sleep 0.25
+  done
+  echo "DIAG timeout waiting for embedded frame '$sub' (pid=$pid cont=$cont_xid); current X11 windows:" >&2
+  python3 "$DRIVER_PY" list-windows >&2 || true
+  return 1
 }
 
 # Stock KiCad 10.0.7 returns AS_UNHANDLED for GetDocumentModifiedState (added in 10.99-bp),
