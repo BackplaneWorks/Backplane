@@ -377,7 +377,8 @@ fn waiting(ev: &[Value]) -> Vec<String> { let mut m = std::collections::BTreeMap
     // read from the hub's own log, never against the wall clock (a loaded machine stretches the burst but never the gaps' lower bound):
     // the burst is carried before the first of the line is let go (a thread of the line is the only one whose wait mark is cleared, and that comes after a gap's sleep)...
     let pos = |f: &dyn Fn(&Value) -> bool| ev.iter().position(|e| f(e));
-    let cleared = pos(&|e| is(e, "SettingSet") && e["key"].as_str().unwrap_or("").starts_with("carry.wait.") && e["value"] == "").expect("the line is let go");
+    let burst: Vec<String> = c[..BURST].iter().map(|x| format!("carry.wait.{}", x.0)).collect(); // the burst's own marks clear as each starts; the line's only after a gap
+    let cleared = pos(&|e| is(e, "SettingSet") && e["key"].as_str().map_or(false, |k| k.starts_with("carry.wait.") && !burst.iter().any(|b| b == k)) && e["value"] == "").expect("the line is let go");
     let burst_end = ev.iter().enumerate().filter(|(_, e)| is(e, "MessagePosted") && e["role"] == "user" && e["text"].as_str().unwrap_or("").starts_with(world::CARRY_TEXT)).nth(BURST - 1).unwrap().0;
     assert!(burst_end < cleared, "the first BURST go before anyone in line is let go");
     // ...and each of the line follows the one before it by a gap (logged whole seconds: one short)
@@ -387,7 +388,9 @@ fn waiting(ev: &[Value]) -> Vec<String> { let mut m = std::collections::BTreeMap
 #[tokio::test(flavor = "multi_thread")] async fn restart_continue_turned_off_stops_those_still_in_line() {
     let sd = dir("co2-bin"); script(&sd, "claude", DEAF);
     let (hub, ag, _h, _w) = start("co2", |w| cut_log(w, 6), |_| Cli::standin(&sd)).await;
-    assert_eq!(waiting(&log_from(&hub, 0).await).len(), 2, "those past the burst are written down");
+    // every one in line is written down (the burst too, until its start: a restart before it would strand it); how many are still marked now depends on how far the burst has got
+    let marked = |ev: &[Value]| ev.iter().filter(|e| is(e, "SettingSet") && e["key"].as_str().unwrap_or("").starts_with("carry.wait.") && e["value"] == "1").map(|e| e["key"].to_string()).collect::<std::collections::BTreeSet<_>>().len();
+    assert_eq!(marked(&log_from(&hub, 0).await), 6, "all of them are written down");
     hub.commit(&json!({"$":"SettingSet","key":"restart.continue","value":"off","at":1700000200})).await.unwrap();
     let ev = until(&hub, 0, 12, |ev| waiting(ev).is_empty()).await;
     assert_eq!(waiting(&ev), Vec::<String>::new()); assert_eq!(carried(&ev).len(), BURST); ag.shutdown();
