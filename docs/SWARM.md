@@ -96,7 +96,8 @@ each member when it hears the posts:
     takes it in place, at once. Any other provider gets it with its next Backplane tool result, or at
     its turn's end (`ride_note`), so a peer's chatter never restarts a Codex turn. A person's post
     steers every running member (`wake_ride`).
-  - A bot member keeps its inbox delivery, which queues behind a running turn.
+  - A bot member keeps its inbox delivery, at once, which queues behind a running turn (batching is for
+    thread members).
 - **Durable.** What each member has heard is kept in `room.heard.<room>.<member>`, the id of the
   newest post it was given. On a restart, the minute tick gives each member what it hasn't heard
   yet.
@@ -110,12 +111,14 @@ and what to do.
 | guard | rule (defaults) | what happens |
 |---|---|---|
 | rate | a member may post at most 6 times in 5 min | the post is refused, and the answer says to do the work and read the board instead |
-| budget | per room: posts (swarm 300, bot room 40 without a person's post), wake turns (swarm 120), tokens of the members' turns (swarm 4 M) | the room pauses with `reason: budget` |
+| budget | a swarm's posts (300), member turns (120) and member tokens (4 M), all settable | the room pauses with `reason: budget` |
 | circular | in the last 8 posts by members, no `claim`, `done` or person post, and each repeats an earlier one (word-shingle Jaccard ≥ 0.5 on average) | the room pauses with `reason: circular` |
-| chatter | 12 member posts in a row with no `claim`, `done` or person post | the room pauses with `reason: circular` |
+| chatter | 12 member posts in a row with no `claim`, `done` or person post | the room pauses with `reason: chatter` |
 | idle | every member idle, nothing waiting, for 10 min | the room pauses with `reason: idle` |
 | backstop | a hop 30 deep (the old hop count, still carried) | the post is held: a safety net only |
 
+- **The post that trips a guard** is held: it stays on the board, it wakes nobody, and a hub post
+  says why the room paused.
 - **While paused**, posts are still logged and shown, but they wake nobody (`held`).
 - **Resuming.** A person's post, or `resume`, starts the room again with fresh counters, as a person
   starting a new exchange did before.
@@ -151,39 +154,35 @@ and what to do.
 
 ## Client data
 
-**Hub requests** (and the same on data/1, feature `swarm`):
+**A swarm's page is its room's page.** A sidebar row opens it with `@room:<id>`, links resolve it as a
+room, and the person's post box (`room-post`, `bots.post`, data/1 `room.post`) posts there. On top
+of that the hub adds:
 
-- `swarm.create {project, topic, goal, members, seed}` → `{room}`.
-- `swarm.get {room, since?}` → `{room, members, posts, claims}`:
-  - `room`: `{id, name, project, goal, state, reason, by, budget, used}`.
-  - each member: `{member, thread, name, color, provider, model, role, state}`, where `state` is one
-    of `working`, `idle`, `waiting`, `failed` or `removed`.
-  - each post: `{id, from, thread, color, text, tags, reply, mentions, files, guard, held, at}`.
-  - each claim: `{post, thread, files, state}`, where `state` is `held` or `waiting`.
-- `swarm.post {room, text, tags?}` → `{}` (as the person).
-- `swarm.act {room, action, thread?, provider?, model?, role?}` → `{}`.
-
-**Pushes.** On a `lists` subscription, `{k:"swarm", room}` arrives when the board or a member's state
-changes, and the app reads `swarm.get {since}` again.
-
-## UI (desktop, iOS, Android)
-
-- **Sidebar.** A swarm is one row under its project (`shown.projects[].swarms`, nav `@swarm:<room>`),
-  and its member threads are left out of the project's shelves.
-- **Active-only rule** (lead t1794375932-15, lane J). A swarm row is listed while the swarm is
-  `active` or `paused`. A `done` or `stopped` swarm leaves the sidebar, like a settled thread, and is
-  still reached by link, the palette and Bub's report.
-- **The swarm page:**
-  - A row of member chips, each with the member's name and colour and a live state dot. A tap opens
-    the member's own thread.
-  - Then the board: one stream, coloured per member. Tags show as small labels. A claim shows its
-    files, with a done mark once finished. Guard posts are grey, and the synthesis is set apart at
-    the end.
-  - Then the composer: the person's post, which steers everyone.
-  - The controls: Pause or Resume, Stop, and Add or remove member.
-- **New swarm.** A project's "New swarm" form takes the topic, the goal, the members (each a provider
-  and model picker with an optional role, two to eight) and the seed message.
-- **The hub decides** the order, the colours, the states and what shows. The clients only draw it.
+- **Sidebar (desktop).** `shown.projects[].swarms` lists the project's live swarms (active or
+  paused), newest first. Each row is
+  `{id: "<hub>|<room>", name, state: "active"|"paused", members, working, ago, nav: "@room:<room>"}`.
+  The members' threads are left out of the project's shelves, and swarms are left out of the Rooms
+  list.
+- **Room page (desktop).** `roomPage.swarm` is present when the room is a swarm, and gives:
+  - `room`: `{id, name, kind, project, goal, state: active|paused|stopped|done, reason, by, budget:{posts,turns,tokens}, used:{posts,turns,tokens}}`.
+  - `members`: one per member,
+    `{member, thread, name, color, role, provider, model, state: working|idle|waiting|failed|removed|bot, title}`.
+  - `posts`: the newest 200, oldest first, each
+    `{id, from, thread, color, text, tags, reply, mentions, files, guard, held, at, ago, mine}`.
+  - `claims`: the open ones, `{post, thread, files, state: held|waiting}`.
+  - `actions`: `[{label, action: "swarm-act", value: pause|resume|stop}]`.
+  - `ended`.
+- **Hub requests**:
+  - `swarm.create {project, topic, goal?, members:[{provider, model?, role?, account?}], seed?, budget?}` → `{room, members, failed}`.
+  - `swarm.get {room, since?, limit?}` → the same shape as `roomPage.swarm`, without `ago`, `mine` and `actions`.
+  - `swarm.list {project?}` → `{swarms:[{id, name, project, goal, state, reason, members, last}]}`.
+  - `swarm.post {room, text, tags?, msg?}` → `{}`, posted as the person.
+  - `swarm.act {room, action: pause|resume|stop|add|remove|budget, thread?, member?, provider?, model?, role?, budget?}` → `{}`.
+- **data/1** (feature `swarm`): the same five methods (`swarm.post` takes `clientId`).
+  - A thread carries `swarm` (its room's id, or `""`). A phone leaves those threads out of a
+    project's list and shows the project's swarms from `swarm.list` instead.
+  - A `lists` subscription gets the push `{k: "swarm", room}` when a swarm's board, state or member
+    turns change, and the app reads `swarm.get {since}` again.
 
 ## Not in this change
 
