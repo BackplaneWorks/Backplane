@@ -119,20 +119,23 @@ impl Backplane {
             Event::Answer(id,reply) if screens::hubpick::answered(self,id,&reply,cx)=>{},
             Event::Answer(id,reply)=>if !screens::projects::answered(self,id,&reply,cx) {screens::improvements::answered(self,id,reply,cx)},
             // a page's Send whose thread the hub would not make (its machine away...): the text goes back in the box, the error is shown (Refused, next)
-            Event::Data(tag,_) if tag=="create-refused" => { if let Some(text)=screens::projects::take_back(&mut self.screens.projects.first_send) { self.arm_new=None;
+            Event::Data(tag,why) if tag=="create-refused" => { if let Some(text)=screens::projects::take_back(&mut self.screens.projects.first_send) { self.arm_new=None; self.screens.projects.refused=crate::i18n::tf("gpui.hub.refused.it", &[("why", crate::i18n::trs(why.as_str().unwrap_or("")).into())]);
                 let now=self.input.read(cx).content.to_string(); if let Some(t)=screens::projects::give_back(text,&now,&mut self.screens.projects.restore) { self.input.update(cx,|i,cx|i.set(t,cx)); } } cx.notify(); }
             // the hub made the thread a New thread asked for (here or on a linked machine): it is opened by the id the reply carries, not looked for in the lists
             // the hub made the thread a New thread asked for (its id in the reply). A page's Send: its text goes to that thread at once, by id (on a linked
             // machine the thread shows here once that machine sends it, which the message makes it do); the window opens it as soon as its lists hold it
             Event::Data(tag,v) if tag=="created" => { eprintln!("GPUI_LOG {}",serde_json::json!({"created":v,"armed":self.arm_new.is_some(),"first":self.screens.projects.first_send.is_some()})); if let (Some((at,_)),Some(id))=(self.arm_new.clone(),v.as_str().filter(|s|!s.is_empty())) {
-                if let Some(text)=screens::projects::take_back(&mut self.screens.projects.first_send) { self.screens.projects.sending=Some(text.clone()); let _=self.tx.try_send(screens::projects::first_message(id,&text)); }
+                if let Some(text)=screens::projects::take_back(&mut self.screens.projects.first_send) { self.screens.projects.sending=Some(text.clone()); let _=self.tx.try_send(screens::projects::first_message(id,&text));
+                    // made: the text has gone as its first message, so the box empties now (unless the person has typed on since)
+                    if self.input.read(cx).content.to_string()==text { self.input.update(cx,|i,cx|i.set(String::new(),cx)); } }
+                self.error.clear();
                 if id.contains('~') { self.note=crate::i18n::trs("Sent. The thread opens here as soon as that machine has it."); }
                 self.screens.projects.made=Some((id.to_string(),at)); self.adopt_new(cx); } cx.notify(); }
             Event::Data(tag,v)=>if tag=="google-changed" {screens::google::changed(self)} else if tag=="google" {screens::google::got(self,v,cx)} else if tag=="acct-moveall" {screens::accounts::moved(self,&v)} else {screens::accounts::got(self,v,cx)},
             Event::Voice(f)=>self.voice_frame(f,cx),
             Event::Rpc("voice",ok,why)=>{if !ok{self.error=why;}},
             // the first message of a thread a page's Send made: refused, the text comes back (never merged) and the error shows; taken, it is done
-            Event::Rpc("first-message",ok,why)=>{ let text=self.screens.projects.sending.take(); if !ok { self.error=why; if let Some(t)=text { let now=self.input.read(cx).content.to_string(); if let Some(t)=screens::projects::give_back(t,&now,&mut self.screens.projects.restore) { self.input.update(cx,|i,cx|i.set(t,cx)); } } } cx.notify(); },
+            Event::Rpc("first-message",ok,why)=>{ let text=self.screens.projects.sending.take(); if !ok { self.screens.projects.refused=why; if let Some(t)=text { let now=self.input.read(cx).content.to_string(); if let Some(t)=screens::projects::give_back(t,&now,&mut self.screens.projects.restore) { self.input.update(cx,|i,cx|i.set(t,cx)); } } } cx.notify(); },
             Event::Term(key,pid,b,reset,state)=>self.term_frame(&key,pid,&b,reset,state,cx),
             Event::Hello=>{self.term_rejoin();self.screens.unsent.live=true;self.send_unsent();},
             Event::Star(v)=>self.star_offer(&v,cx),
@@ -223,9 +226,9 @@ impl Backplane {
             if text.trim().is_empty()||self.status!="Connected"||self.screens.projects.first_send.is_some() {return;}
             // (it goes where the page's "runs on" line says: the picker's choice; a refusal puts the text back, `create-refused`)
             let Some((cmd,text))=screens::projects::page_send(&self.data,&pid,&text) else {return};
+            // (the text stays in the box until the hub has made the thread: a refusal leaves it where it is, never emptied and put back)
             self.screens.projects.first_send=Some((self.selected.rsplit('|').next().unwrap_or("").to_string(),text,Instant::now()));
-            self.input.update(cx,|i,cx|i.set(String::new(),cx));
-            self.arm_new();let _=self.tx.try_send(cmd);cx.notify();return;
+            self.error.clear(); self.screens.projects.refused.clear(); self.arm_new();let _=self.tx.try_send(cmd);cx.notify();return;
         }
         // a picture or file alone is a message too: the hub sends the attachments with whatever text there is (none: just them)
         let has_att=self.data["thread"]["attaching"].as_array().map_or(false,|a|!a.is_empty());

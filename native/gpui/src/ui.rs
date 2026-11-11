@@ -790,6 +790,8 @@ impl Render for Backplane {
                         .child(div().id("composer-box").border_1().border_color(c("accent")).bg(c("view")).px_3().py_2().min_h(px(60.)).cursor(CursorStyle::IBeam).on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| { this.input.focus_handle(cx).focus(window); })).child(self.input.clone()))
                         // another machine's thread: where an agent sent from here runs
                         .children(if self.project_page.is_some() { None } else { crate::screens::badge::runs_text(&thread["mark"]).map(|r| div().id("runs-on").flex().items_center().gap(px(3.)).text_size(px(11.)).text_color(c("dim")).child(ic(light, "link", 11., "dim")).child(r)) })
+                        // a project's page: what the hub said when it would not do what the page asked (a New thread refused), one line by the box
+                        .children((self.project_page.is_some() && !self.screens.projects.refused.is_empty()).then(|| div().id("page-error").text_size(px(11.)).text_color(c("bad")).child(self.screens.projects.refused.clone())))
                         // text a page's Send could not deliver while the box held new text: offered back, never merged (Restore puts it in the box, what was there is kept to restore)
                         .children(self.screens.projects.restore.clone().map(|t| { let preview: String = t.chars().take(60).collect();
                             /* i18n-ok: a ctl id the drivers press */ with_rect(div().id("restore-unsent"), || "ui:restore unsent".to_string()).flex().items_center().gap(px(6.)).text_size(px(11.)).text_color(c("dim")).cursor_pointer().hover(|s| s.text_color(c("text")))

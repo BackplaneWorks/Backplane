@@ -26,6 +26,9 @@ pub struct Projects {
     pub made: Option<(String, std::time::Instant)>,
     /// A first message on its way to the thread just made (kept until its answer, so a refusal gives it back)
     pub sending: Option<String>,
+    /// What the hub said when it would not make a page's New thread (its machine away, not linked...): drawn by the box until the next Send
+    /// (kept apart from the window's `error`, which a view that says Connected clears)
+    pub refused: String,
 }
 
 /// What Edit puts in the composer: `/intent` and the goal and notes (the hub's `intent_edit`; its Send saves them), the template for none.
@@ -118,6 +121,7 @@ pub fn first_message(id: &str, text: &str) -> Command {
 }
 /// Where text that came back goes: into the box when it is empty, else held to restore (`restore`), so it is never merged with what is there.
 pub fn give_back(text: String, box_now: &str, restore: &mut Option<String>) -> Option<String> {
+    if box_now == text { return None } // (still in the box: the send keeps it there until the hub answers)
     if box_now.trim().is_empty() { Some(text) } else { *restore = Some(text); None }
 }
 pub fn close_cmd() -> Command { Command::Action("proj-close".into(), String::new()) }
@@ -352,6 +356,7 @@ mod home_tests {
         let mut r = None;
         assert_eq!(give_back("old".into(), "", &mut r).as_deref(), Some("old")); assert!(r.is_none());
         assert_eq!(give_back("old".into(), "new words", &mut r), None); assert_eq!(r.as_deref(), Some("old"));
+        let mut r2 = None; assert_eq!(give_back("same".into(), "same", &mut r2), None); assert!(r2.is_none(), "still in the box: nothing to put back");
     }
 
     use super::*; use serde_json::json; use core::prelude::v1::test;

@@ -25,6 +25,9 @@ const LIVE: Duration = Duration::from_secs(30);
 /// How long a call waits for its answer.
 const ANSWER: Duration = Duration::from_secs(30);
 const REACH_EVERY: Duration = Duration::from_secs(300);
+/// How long a queued call waits to be taken by a poll before it goes directly: a polling link holds a poll nearly all the time (it polls again
+/// at once), so a call is taken at once; one not taken in this long means that link stopped polling.
+const TAKEN: Duration = Duration::from_secs(3);
 
 #[derive(Default)]
 struct Link { polled: Option<Instant>, queue: VecDeque<Value>, waiting: HashMap<u64, oneshot::Sender<(u16, String)>>, wake: Arc<Notify>, reach: Option<(Instant, bool)>, probing: bool }
@@ -50,6 +53,20 @@ impl Ends {
             l.waiting.insert(id, tx);
             l.queue.push_back(json!({"id": id, "method": method, "path": path, "headers": hs, "body": B64.encode(body)}));
             l.wake.notify_one();
+        }
+        // taken by a poll within one hold (and a little): else that link stopped polling (it reaches this hub directly again, or it restarted)
+        // and the call goes directly; it never waits ANSWER in a queue nobody reads
+        let taken_by = tokio::time::Instant::now() + TAKEN;
+        let mut rx = rx;
+        loop {
+            let queued = self.links.lock().unwrap().get(peer).map_or(false, |l| l.queue.iter().any(|q| q["id"] == id));
+            if !queued { break }
+            if tokio::time::Instant::now() >= taken_by {
+                if let Some(l) = self.links.lock().unwrap().get_mut(peer) { l.waiting.remove(&id); l.queue.retain(|q| q["id"] != id); l.polled = None; }
+                eprintln!("tunnel: {peer} stopped polling: the call goes directly");
+                return None
+            }
+            if let Ok(r) = tokio::time::timeout(Duration::from_millis(200), &mut rx).await { return Some(r.unwrap_or((0, String::new()))) }
         }
         let r = tokio::time::timeout(ANSWER, rx).await;
         if let Some(l) = self.links.lock().unwrap().get_mut(peer) { l.waiting.remove(&id); l.queue.retain(|q| q["id"] != id); }
@@ -209,4 +226,19 @@ pub fn install(hub: &Arc<Hub>, peering: Arc<crate::net::peering::Peering>) {
     let p3 = peering;
     let here: Arc<dyn Fn() -> Fut<'static, String> + Send + Sync> = Arc::new(move || { let p = p3.clone(); Box::pin(async move { crate::net::botnet::url_here(p.tailnet, &p.host, p.port).await }) });
     start(hub, links, here);
+}
+
+#[cfg(test)]
+mod taken_tests {
+    use super::*;
+    /// A link that polled a moment ago and stopped (it restarted, or reaches this hub directly again): a call is not left in its queue for ANSWER
+    /// (30 s), it goes directly within TAKEN; one a poll takes is answered over the poll.
+    #[tokio::test] async fn a_call_no_poll_takes_goes_directly_within_moments() {
+        let e = Ends::default();
+        e.links.lock().unwrap().entry("p".into()).or_default().polled = Some(Instant::now());
+        let t = Instant::now();
+        assert!(e.call("p", "POST", "/far/rpc", "", "{}").await.is_none(), "not taken: the caller goes directly");
+        assert!(t.elapsed() < TAKEN + Duration::from_secs(1), "{:?}", t.elapsed());
+        assert!(!e.live("p"), "and the link is no longer taken to be polling");
+    }
 }
