@@ -103,6 +103,10 @@ impl Backplane {
             if text != self.ctl_last {
                 self.ctl_last = text; metric(started, "controls", json!({"controls": ctl}));
             }
+            // G4c: the thread on show and its viewer's page and source, on change (an e2e sees where a link went)
+            { static LAST: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+              let v = &self.data["thread"]["viewer"]; let shown = json!({"thread": self.selected, "open": v["open"], "key": crate::screens::viewer::shown_key(v), "page": self.project_page});
+              let t = shown.to_string(); let mut g = LAST.lock().unwrap(); if *g != t { *g = t; metric(started, "shown", shown); } }
             // G4b: every probed rectangle (menus' items, header tools, rows' pins: pressable things that are not controls), on change
             let mut probes: Vec<(&String, &[f32; 4])> = rects.iter().collect(); probes.sort_by(|a, b| a.0.cmp(b.0));
             let ptext = serde_json::to_string(&probes).unwrap_or_default();

@@ -71,7 +71,11 @@ fn project(this: &Backplane, cx: &mut Context<Backplane>, light: bool, p: &Value
     /* i18n-ok: a ctl label */ if can_fold { ctl.push(CtlEntry { id: format!("project-fold:{pid}"), label: format!("{} {}", if folded { "Unfold" } else { "Fold" }, string(p, "title")), ctl: Ctl::Node(fold_action.clone(), key.clone()) }); }
     let twisty = crate::ui::with_rect(div().id(SharedString::from(format!("pfold-{pid}"))), { let p = pid.clone(); move || format!("project-fold:{p}") })
         .w(px(16.)).h(px(30.)).flex_shrink_0().flex().items_center().justify_center()
-        .when(can_fold, |d| { let (a, k) = (fold_action.clone(), key.clone()); d.cursor_pointer().child(crate::ui::ic(light, if folded { "chevron-right" } else { "chevron-down" }, 12., "faint"))
+        .when(can_fold, |d| { let (a, k) = (fold_action.clone(), key.clone()); let (dim, text, line) = (c("dim"), c("text"), c("line")); let g = SharedString::from(format!("pfold-{pid}"));
+            // the chevron: dim, lit with a square behind it under the pointer
+            d.cursor_pointer().group(g.clone())
+            .child(div().size(px(16.)).flex().items_center().justify_center().group_hover(g.clone(), move |s| s.bg(line))
+                .child(svg().path(SharedString::from(format!("icon/{}.svg", if folded { "chevron-right" } else { "chevron-down" }))).size(px(12.)).text_color(dim).group_hover(g, move |s| s.text_color(text))))
             .on_click(cx.listener(move |this, _, w, cx| { cx.stop_propagation(); w.focus(&this.screens.side_focus); this.go(&a, k.clone(), cx); })) });
     /* i18n-ok: a ctl label */ ctl.push(CtlEntry { id: format!("project-pin:{pid}"), label: if pinned { "Unpin project".into() } else { "Pin project".into() }, ctl: Ctl::Node("project-pin".into(), key.clone()) });
     crate::ui::with_rect(div().id(SharedString::from(format!("sproj-{pid}"))), { let p = pid.clone(); move || format!("project:{p}") })
