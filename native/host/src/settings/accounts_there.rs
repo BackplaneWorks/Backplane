@@ -264,18 +264,27 @@ fn put(hub: &Hub, f: impl FnOnce(&mut Panel)) -> Panel {
     let p = &mut g.iter_mut().find(|(h, _)| *h == hub.cfg.home).unwrap().1; f(p); p.clone()
 }
 
-/// What a far answer means: the result, or the words for why there is none.
-pub fn answer(code: u16, text: &str) -> Result<Value, String> {
+/// What a far answer from machine `name` means: the result, or the words for why there is none. Only a hub from before sign-in there means
+/// "update it": it answers 501, or 403 with the generic far path's "not something this machine shares" (it does not know `signin.*`). Any other
+/// refusal is about access and says so: not counted as the owner's (sync off, not approved), a copy, a signature it did not take.
+pub fn answer(name: &str, code: u16, text: &str) -> Result<Value, String> {
+    let body = text.trim();
     match code {
         0 => Err("that machine is away".into()),
         200 => { let v: Value = serde_json::from_str(text).map_err(|_| "that machine answered something unreadable".to_string())?;
             if v["ok"] == true { Ok(v["result"].clone()) } else { let e = s(&v, "error"); Err(if e.is_empty() { "that machine refused".into() } else { e.to_string() }) } }
-        // a hub from before this: the generic far path answers that it does not share it
-        403 | 501 => Err(crate::net::rpc::OLDER.into()),
+        501 => Err(crate::net::rpc::OLDER.into()),
+        403 if body == "not something this machine shares" => Err(crate::net::rpc::OLDER.into()),
+        403 if body.contains("copied log") => Err(format!("{name} refused: it runs on a copy of a log and takes no requests")),
+        403 => Err(format!("{name} refused: it does not count this computer as yours (check Settings, Machines on it)")),
+        401 => Err(format!("{name} refused this computer's signature (pair them again in Settings, Machines)")),
         _ => Err(format!("that machine did not take it ({code})")),
     }
 }
-async fn ask(hub: &Arc<Hub>, link: &str, m: &str, p: &Value) -> Result<Value, String> { let (code, text) = hub.far_raw(link, m, p).await; answer(code, &text) }
+async fn ask(hub: &Arc<Hub>, link: &str, m: &str, p: &Value) -> Result<Value, String> {
+    let name = hub.far_machines().into_iter().find(|(id, _, _)| id == link).map_or_else(|| "that machine".to_string(), |x| x.1);
+    let (code, text) = hub.far_raw(link, m, p).await; answer(&name, code, &text)
+}
 
 /// This machine's Claude sync tokens, and the sign-in of the one being made here (accounts_phone.rs words it).
 async fn local(hub: &Arc<Hub>, making: &str) -> Value {
@@ -447,10 +456,15 @@ mod tests {
         assert!(tail(&"x".repeat(400), 1)[0].ends_with('…'));
     }
     #[test] fn a_far_answer_says_why_it_is_none() {
-        assert_eq!(answer(0, ""), Err("that machine is away".into()));
-        assert_eq!(answer(403, "not something this machine shares"), Err(crate::net::rpc::OLDER.into()), "a hub from before this needs the update");
-        assert_eq!(answer(200, r#"{"t":"reply","ok":true,"result":{"providers":[]}}"#), Ok(json!({"providers":[]})));
-        assert_eq!(answer(200, r#"{"t":"reply","ok":false,"error":"Grok is not installed there"}"#), Err("Grok is not installed there".into()));
+        assert_eq!(answer("boat-hub", 0, ""), Err("that machine is away".into()));
+        assert_eq!(answer("boat-hub", 501, "uber.sync is not ported on this hub yet"), Err(crate::net::rpc::OLDER.into()), "an unknown method: the update");
+        assert_eq!(answer("boat-hub", 403, "not something this machine shares"), Err(crate::net::rpc::OLDER.into()), "a hub from before signin.* answers the generic path's 403");
+        assert_eq!(answer("boat-hub", 403, "threads are shared with the owner's own machines"), Err("boat-hub refused: it does not count this computer as yours (check Settings, Machines on it)".into()), "access, not an old build");
+        assert_eq!(answer("boat-hub", 403, "a hub on a copied log does not take /far/rpc"), Err("boat-hub refused: it runs on a copy of a log and takes no requests".into()));
+        assert_eq!(answer("boat-hub", 401, "bad or stale signature"), Err("boat-hub refused this computer's signature (pair them again in Settings, Machines)".into()));
+        for (c, b) in [(403, "threads are shared with the owner's own machines"), (401, "unknown sender")] { assert_ne!(answer("x", c, b), Err(crate::net::rpc::OLDER.into()), "{c} {b}: never 'update it'") }
+        assert_eq!(answer("boat-hub", 200, r#"{"t":"reply","ok":true,"result":{"providers":[]}}"#), Ok(json!({"providers":[]})));
+        assert_eq!(answer("boat-hub", 200, r#"{"t":"reply","ok":false,"error":"Grok is not installed there"}"#), Err("Grok is not installed there".into()));
     }
     #[test] fn a_run_that_ended_asks_for_fresh_checks_before_it_is_shown() {
         let run = json!({"providers":[{"id":"codex","session":{"running":true}},{"id":"grok","install":{"state":"running"}}]});
