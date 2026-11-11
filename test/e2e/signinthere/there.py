@@ -141,13 +141,28 @@ def main():
     m = row(A, "Oh My Pi")
     check("Oh My Pi has no installer: a terminal there", ("machine-signin-shell", link + US + "omp") in buttons(m), json.dumps(m))
 
-    # Codex: device code, shown here
+    # Codex: device code, shown here; a phone's poll of the page all along (every 0.3 s), as the apps poll while busy
+    import threading
+    polls, polling = [], [True]
+    def phone():
+        while polling[0]:
+            try:
+                pg = rpc(A, "machines.page"); c = next((r for r in pg.get("rows") or [] if r.get("label", "").startswith("Codex")), {})
+                polls.append((time.time(), pg.get("busy"), c.get("label", ""), c.get("note", "")))
+            except Exception: pass
+            time.sleep(0.3)
+    pt = threading.Thread(target=phone, daemon=True); pt.start()
     act(A, "machine-signin", link + US + "codex")
     cx = wait(lambda: (lambda r: r if r and "QWER-TY123" in r.get("note", "") else None)(row(A, "Codex: signing in on hub-b")), 30)
     check("Codex's link and code, from B, show on A", bool(cx) and ("open-url", "https://auth.openai.com/codex/device") in buttons(cx) and ("copy", "QWER-TY123") in buttons(cx), json.dumps(cx)[:500])
     open(os.path.join(B.user, ".standin-approve"), "w").write("1")  # the person approves in the browser
     done = wait(lambda: (lambda r: r if r and r.get("tone") == "ok" else None)(row(A, "Codex")), 40)
     check("then Codex is signed in on B (A asked again by itself)", bool(done) and "Signed in on hub-b" in done.get("note", ""), json.dumps(row(A, "Codex")))
+    time.sleep(1.5); polling[0] = False; pt.join(10)
+    started = next((i for i, p in enumerate(polls) if p[1] is True), None)
+    stale = [p for p in polls[started or 0:] if p[1] is False and "not signed in" in p[3]] if started is not None else ["never busy"]
+    check("no page says not busy with the status from before the run (a phone stops reading there)", started is not None and not stale, str(stale)[:300])
+    check("the last page a phone read says signed in", bool(polls) and polls[-1][1] is False and "Signed in on hub-b" in polls[-1][3], str(polls[-3:])[:300])
     check("the login is B's own, nothing on A", os.path.exists(os.path.join(B.user, ".standin-codex")) and not os.path.exists(os.path.join(A.user, ".standin-codex")))
 
     # Claude: link here, the code typed here goes to B's terminal
