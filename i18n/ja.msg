@@ -3864,4 +3864,6 @@ ios.buy.incomplete = 購入 · 見積もりが不完全
 ios.improve.search = プロジェクトを検索…
 
 android.notify.head = 通知
+gpui.keysheet.note = 設定 → このデバイスで変更できます。Escで閉じます。
+gpui.keys.help = キーボードショートカット：この一覧。テキスト欄の外では ?、どこでも F1
 # ---- end ----

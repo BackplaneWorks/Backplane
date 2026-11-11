@@ -3841,4 +3841,6 @@ ios.buy.incomplete = Buy it · estimate incomplete
 ios.improve.search = Search projects…
 
 android.notify.head = NOTIFICATIONS
+gpui.keysheet.note = Settings, This device changes them. Esc closes this.
+gpui.keys.help = Keyboard shortcuts: this list. ? outside a text box, F1 anywhere
 # ---- end ----
