@@ -2209,8 +2209,8 @@ gpui.e.tz.phone.again = Follow your phone's time zone again
 gpui.e.tz.machine.again = Follow this machine's time zone again
 gpui.e.tz.phone.auto = Automatic: following your phone's time zone
 gpui.e.tz.machine.auto = Automatic: following this machine's time zone
-gpui.e.privacy.note = All telemetry: installs, updates, daily activity, daily counts of threads, messages, model tokens, bot traffic, boards created and completed board orders; random install id, version, package channel, OS, architecture and UTC day. Used for product and aggregate investor metrics. Board/order data is integer counts only: no design paths, hashes, dimensions, layers, part numbers, BOMs, netlists or prices. No content, files, names or credentials. Off disables every category. Local diagnostics stay on this device unless you choose to export them. This build of the hub sends nothing yet. Privacy policy: https://backplane.works/privacy
-gpui.e.privacy.note.id = All telemetry: installs, updates, daily activity, daily counts of threads, messages, model tokens, bot traffic, boards created and completed board orders; random install id, version, package channel, OS, architecture and UTC day. Used for product and aggregate investor metrics. Board/order data is integer counts only: no design paths, hashes, dimensions, layers, part numbers, BOMs, netlists or prices. No content, files, names or credentials. Off disables every category. Local diagnostics stay on this device unless you choose to export them. This build of the hub sends nothing yet. Privacy policy: https://backplane.works/privacy Install id: {id}
+gpui.e.privacy.note = All telemetry: installs, updates, daily activity, daily counts of threads, messages, model tokens, bot traffic, boards created and completed board orders; random install id, version, package channel, OS, architecture and UTC day. Used for product and aggregate investor metrics. Board/order data is integer counts only: no design paths, hashes, dimensions, layers, part numbers, BOMs, netlists or prices. No content, files, names or credentials. On unless you turn it off; Off disables every category. Nothing is sent before setup or the one-time notice has shown this. Local diagnostics stay on this device unless you choose to export them. Privacy policy: https://backplane.works/privacy
+gpui.e.privacy.note.id = All telemetry: installs, updates, daily activity, daily counts of threads, messages, model tokens, bot traffic, boards created and completed board orders; random install id, version, package channel, OS, architecture and UTC day. Used for product and aggregate investor metrics. Board/order data is integer counts only: no design paths, hashes, dimensions, layers, part numbers, BOMs, netlists or prices. No content, files, names or credentials. On unless you turn it off; Off disables every category. Nothing is sent before setup or the one-time notice has shown this. Local diagnostics stay on this device unless you choose to export them. Privacy policy: https://backplane.works/privacy Install id: {id}
 gpui.e.privacy.share = Share anonymous usage
 gpui.e.privacy.reset = Reset id
 gpui.e.privacy.report = Report an issue
@@ -2468,7 +2468,7 @@ gpui.f.ov.here = Your 0.14 work is here
 gpui.f.ov.failed.in = {why}. Your 0.14 data in {from} is untouched. Retry picks up where it stopped: nothing comes twice.
 gpui.f.ov.failed = {why}. Your 0.14 data is untouched. Retry picks up where it stopped: nothing comes twice.
 gpui.f.usage.title = Anonymous usage
-gpui.f.usage.body = This build sends nothing, whichever you choose. A later build may send anonymous counts if you say On. They are installs, updates, daily activity, and daily totals of threads, messages, model tokens, bot traffic, boards made and boards ordered, with a random install id, the version, the system and the day. It would never send your conversations, projects, files, names or keys. Settings, Privacy changes your choice.
+gpui.f.usage.body = On unless you turn it off. Backplane sends anonymous counts: installs, updates, daily activity, and daily totals of threads, messages, model tokens, bot traffic, boards made and boards ordered, with a random install id, the version, the system and the day. Never your conversations, projects, files, names, paths or keys. Settings, Privacy changes it.
 gpui.f.usage.share = Share anonymous usage
 gpui.f.usage.saved = Your choice is saved.
 gpui.f.usage.choose = Choose one.
@@ -3783,4 +3783,5 @@ ios.buy.last = Buy it · last estimate: from {price}
 ios.buy.incomplete = Buy it · estimate incomplete
 
 android.notify.head = NOTIFICATIONS
+gpui.e.telemetry.notice = Backplane now sends anonymous usage counts: installs, updates, daily activity, and daily totals of threads, messages, model tokens, bot traffic, boards made and boards ordered, with a random install id, the version, the system and the day. Never your conversations, projects, files, names, paths or keys. It is on. Turn it off here or in Settings, Privacy.
 # ---- end ----

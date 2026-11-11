@@ -806,6 +806,8 @@ impl Render for Backplane {
                 // right rail
                 .child(div().w(px(72.)).h_full().flex_shrink_0().relative().child(art::probe("rail")).children(crate::perf::mark("rail")).border_l_1().border_color(c("rule")).flex().flex_col().py_2().children(rail)))
             // the GitHub star suggestion, while the hub says it is out: its own row along the bottom (as 0.14's), so the top bar and what is under the pointer do not move when it comes
+            // the one-time telemetry notice, above it (screens/tmnotice.rs)
+            .children({ let (n, shown) = (self.screens.tm_notice.clone(), self.screens.tm_shown.clone()); crate::screens::tmnotice::strip(cx, n.as_ref(), &shown, light) })
             .children(crate::screens::star::strip(cx, self.screens.star.clone().as_ref(), light))
             .children(crate::perf::mark("over"))
             // Settings over the whole window: its dialog is sized from the window (settings::fit), so it must not sit in the thread column

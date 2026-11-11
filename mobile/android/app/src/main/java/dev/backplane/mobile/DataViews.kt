@@ -127,7 +127,7 @@ fun DataRoot() {
             is Page.Viewer -> { BackHandler { page = Page.Thread(p.id) }; DataClient.threads.firstOrNull { it.id == p.id }?.let { ViewerScreen(it, p.file, p.line) { page = Page.Thread(p.id) } }
                 ?: Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() } } // never a blank page while the thread list comes
             is Page.Room -> { BackHandler { page = Page.Home }; RoomScreen(p.room) { page = Page.Home } }
-            is Page.Thread -> { BackHandler { page = Page.Home }; CompositionLocalProvider(LocalOpenSub provides { k -> page = Page.Sub(p.id, k) }) { ThreadScreen(p.id, { page = Page.Viewer(p.id) }, { page = Page.Hub(p) }, { page = Page.Thread(it) }) { page = Page.Home } } }
+            is Page.Thread -> { BackHandler { page = Page.Home }; CompositionLocalProvider(LocalOpenSub provides { k -> page = Page.Sub(p.id, k) }) { ThreadScreen(p.id, { page = Page.Viewer(p.id) }, { page = Page.Hub(p) }, { page = Page.Thread(it) }, { page = Page.Settings }) { page = Page.Home } } }
             is Page.Sub -> { BackHandler { page = Page.Thread(p.id) }; SubScreen(p.id, p.key) { page = Page.Thread(p.id) } }
             Page.Settings -> { BackHandler { page = Page.Home }; SettingsScreen({ page = Page.Home }, { page = Page.Hub(Page.Settings) }, { page = Page.Accounts }) { page = Page.Improve } }
             Page.Accounts -> { BackHandler { page = Page.Settings }; AccountsScreen({ page = Page.Settings }) { page = Page.Account(it, false) } }
@@ -165,9 +165,10 @@ internal fun DBar(title: String, back: (() -> Unit)?, titleMenu: (@Composable Co
 }
 
 @Composable
-private fun ConnBanner(hub: () -> Unit) {
+private fun ConnBanner(hub: () -> Unit, settings: () -> Unit) {
     MigrateBanner()
     HubBanner(hub)
+    TelemetryBanner(settings)
     StarBanner()
     if (DataClient.conn == DataClient.Conn.ONLINE) return
     Row(Modifier.fillMaxWidth().background(dcs.surfaceContainerHigh).padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -315,7 +316,7 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
         }) {
             IconButton(onClick = settings, modifier = Modifier.testTag("home.settings")) { Icon(Icons.Default.Settings, Msg.palette_settings, tint = dcs.onSurfaceVariant) }
         }
-        ConnBanner(hub)
+        ConnBanner(hub, settings)
         Row(Modifier.fillMaxWidth().padding(start = 10.dp, end = 4.dp, top = 8.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             if (DataClient.has("search")) Box(Modifier.weight(1f)) { DField(q, { q = it }, Msg.android_search_hint, Modifier.testTag("home.searchfield")) } else Spacer(Modifier.weight(1f))
             IconButton(onClick = addProject, modifier = Modifier.testTag("home.add")) { Icon(Icons.Default.Add, Msg.sidebar_add_project, tint = dcs.onSurfaceVariant) }
@@ -518,7 +519,7 @@ private fun StateStrip(t: DThread) {
 }
 
 @Composable
-private fun ThreadScreen(id: String, viewer: () -> Unit, hub: () -> Unit, go: (String) -> Unit, back: () -> Unit) {
+private fun ThreadScreen(id: String, viewer: () -> Unit, hub: () -> Unit, go: (String) -> Unit, settings: () -> Unit, back: () -> Unit) {
     val scope = rememberCoroutineScope()
     DisposableEffect(id) { DataClient.openThread(id); onDispose { DataClient.closeThread(id) } }
     val thread = DataClient.threads.firstOrNull { it.id == id }
@@ -606,7 +607,7 @@ private fun ThreadScreen(id: String, viewer: () -> Unit, hub: () -> Unit, go: (S
             if (thread != null && DataClient.has("actions")) IconButton(onClick = { menu = true }, modifier = Modifier.testTag("thread.more")) { Icon(Icons.Default.MoreVert, Msg.native_thread_menu, tint = dcs.onSurfaceVariant) }
             if (thread != null && DataClient.has("viewers")) IconButton(onClick = viewer, modifier = Modifier.testTag("thread.viewer")) { Icon(Icons.Default.Dashboard, Msg.thread_viewer, tint = dcs.onSurfaceVariant) }
         }
-        ConnBanner(hub)
+        ConnBanner(hub, settings)
         thread?.let { StateStrip(it) }
         thread?.mark?.let { m -> DMono(Msg.android_machine_on(m.name) + if (m.away) " · " + Msg.android_away else "", dfaint, 11, Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 3.dp).testTag("thread.machine")) }
         if (finding && DataClient.has("find")) FindBar(id, { finding = false; jumping?.cancel(); found = "" }) { if (it.isEmpty()) { jumping?.cancel(); found = "" } else jump(it, false) }

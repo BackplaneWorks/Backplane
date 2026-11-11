@@ -67,6 +67,8 @@ struct DataRoot: View {
         .onChange(of: client.linkTarget) { _, t in if let t { follow(t); client.linkTarget = nil } }
         .overlay(alignment: .bottom) { DLinkNote(client: client) }
         .onOpenURL { route($0) }
+        // the telemetry notice's Settings link: Settings over what is open
+        .onChange(of: client.openSettings) { _, v in if v { path.append(DPage(name: "settings")); client.openSettings = false } }
         .onChange(of: client.pushThread, initial: true) { _, t in if !t.isEmpty { var p = NavigationPath(); p.append(t); path = p; client.pushThread = "" } }
         // an alert that a sign-in expired: Settings, Accounts, that account, its sign-in started
         .onChange(of: client.pushAccount, initial: true) { _, a in if !a.isEmpty { var p = NavigationPath(); p.append(DPage(name: "settings")); p.append(DPage(name: "accounts")); p.append(DAccountRoute(id: a, start: true)); path = p; client.pushAccount = "" } }
@@ -128,6 +130,7 @@ struct DataThreadsView: View {
         VStack(spacing: 0) {
             DataHubBanner(client: client)
             DataMigrationBanner(client: client)
+            DataTelemetryBanner(client: client)
             DataStarBanner(client: client)
             if client.conn != .online { DataConnectionBanner(client: client) }
             HStack(spacing: 8) {
@@ -634,6 +637,7 @@ struct DataThreadView: View {
         VStack(spacing: 0) {
             DataHubBanner(client: client)
             DataMigrationBanner(client: client)
+            DataTelemetryBanner(client: client)
             DataStarBanner(client: client)
             if client.conn != .online { DataConnectionBanner(client: client) }
             stateStrip

@@ -61,6 +61,13 @@ Viewer, files and browser requests are not here: the lanes adding them in `nativ
 - Frame `{"t":"star","offer":…}`: to the prompting socket when the offer is made, and `offer:null` to every socket once it is decided (hide the banner).
 - `star.nudge {token, action: open|dismiss}` → `{}`: final. `open` also opens `url`. The desktop shows the same strip from the same frames.
 
+## Telemetry notice (feature `telemetryNotice`)
+- A one-time strip saying what anonymous usage the hub sends, with Turn off, Settings and a close ✕. Only when the hello's `features` has `telemetryNotice`.
+- `telemetry.notice` → `{notice}`: `null`, or `{token, text, off, settings}` (all strings): `text` the notice's words, `off` the turn-off button's label, `settings` the settings link's label. Ask it on every (re)connect. A notice with an empty `token` or `text` is none.
+- Frame `{"t":"telemetry.notice","notice":…}`: to every socket whenever it changes; `null` hides the strip.
+- `telemetry.notice.act {token, action: shown|close|off}` → `{}`. `shown`: once per token per app session, when the strip is actually drawn on screen (not on receipt in the background); it is what lets the hub start sending. `close` (✕) and `off` (turns all telemetry off on the hub) hide the strip at once.
+- Settings opens the app's own Settings (its privacy setting where it has one); it sends nothing and leaves the strip. The strip sits where the star strip goes, above it when both show. Hub words go through the English-text lookup, as the star's.
+
 ## Viewers, files, browser (2026-11-06; features `viewers`, `files`, `browser`; `native/host/src/data/ext.rs`)
 Each is the hub's own request (kicad.watch, files.dir, mech.list, bots.browser, kicad.info), run for the folder of the thread. `viewer.watch` makes plots arrive on this socket, so a phone subscribes to a source the way the desktop does.
 - `viewer.files {thread}` → `{root, pro, pcb, sch}`: the project's canonical KiCad files.
