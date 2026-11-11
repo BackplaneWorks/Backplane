@@ -93,6 +93,11 @@ if want('F16'):
     click_ctl(ub); pause(1.5); shot('k-ubp-back'); left = 'page-new-thread' not in ctrls()
     ok = bool(ub) and on_page and left and differs(px('k-ubp-page'), px('k-ubp-back'), box(MAIN()))
     res.append(('uber-after-project', 'click', ok, 'project page shown=%s, then a click on %r: the page gave way=%s (k-ubp-page.png, k-ubp-back.png)' % (on_page, ub, left))); print('    uber-after-project', ok, flush=True)
+    # the same from a Needs you row (docs/ALWAYS-ON.md section 8): the project's page, then the row of the thread that asks: its thread opens
+    click_ctl('project:p1'); pause(1.2); shot('k-nyp-page'); on_page = 'page-new-thread' in ctrls(); listed = 'thread:t4' in ctrls()
+    click_ctl('thread:t4'); pause(1.5); shot('k-nyp-back'); left = 'page-new-thread' not in ctrls()
+    ok = listed and on_page and left and differs(px('k-nyp-page'), px('k-nyp-back'), box(MAIN()))
+    res.append(('needs-after-project', 'click', ok, 'Needs you lists t4=%s, project page shown=%s, then its row: the page gave way=%s (k-nyp-page.png, k-nyp-back.png)' % (listed, on_page, left))); print('    needs-after-project', ok, flush=True)
     sel(1)
     trial('new', 'ctrl n', lambda a, b, e, m: (any(x['$'] == 'ThreadCreated' for x in e), 'ThreadCreated in the hub log'))
     # stop and settle need a running turn: send a long one by keys

@@ -202,7 +202,7 @@ pub fn page_title(data: &Value, page: Option<&str>) -> Option<String> { page.and
 pub fn leaves_page(action: &str) -> bool { matches!(action, "bot" | "room" | "link-open" | "select") }
 /// The sidebar's project with this (raw) id.
 pub fn find<'a>(data: &'a Value, pid: &str) -> Option<&'a Value> {
-    data["projects"].as_array()?.iter().find(|p| string(p, "id").rsplit('|').next() == Some(pid))
+    data["projects"].as_array().and_then(|ps| ps.iter().find(|p| string(p, "id").rsplit('|').next() == Some(pid))).or_else(|| super::sections::find(data, pid))
 }
 /// A project's page, from the sidebar's own rows (no round trip): its name and folder, New thread, and each thread that is in it.
 pub fn page(cx: &mut Context<Backplane>, light: bool, data: &Value, home: &Home, pid: &str, ctl: &mut Vec<crate::script::CtlEntry>) -> Vec<AnyElement> {
@@ -251,6 +251,8 @@ pub fn page(cx: &mut Context<Backplane>, light: bool, data: &Value, home: &Home,
     /* i18n-ok: ctl labels and ui: ids are what drivers press */ ctl.push(CtlEntry { id: "page-new-thread".into(), label: "New thread".into(), ctl: Ctl::Node("new-thread".into(), pid.to_string()) });
     out.push(div().id("page-new-thread").px_3().py_1().w(px(140.)).border_1().border_color(c("line")).bg(c("raise")).text_size(px(12.)).cursor_pointer().hover(|s| s.bg(c("panel"))).child(crate::i18n::trs("New thread"))
         .on_click(cx.listener(move |this, _, _, cx| { this.arm_new(); let _ = this.tx.try_send(Command::Action("new-thread".into(), pid2.clone())); cx.notify(); })).into_any_element());
+    // the hub's lists for this project (running, needs you, recent, Done (n)), every machine's threads; else the sidebar's rows
+    if let Some(lists) = super::sections::page_lists(cx, light, data, pid, ctl) { out.extend(lists); return out }
     out.push(div().pt_3().text_size(px(11.)).text_color(c("faint")).child(crate::i18n::tf("gpui.projects.threads", &[("n", threads.len().into())])).into_any_element());
     if threads.is_empty() { out.push(div().text_color(c("dim")).child(crate::i18n::trs("No threads yet.")).into_any_element()); }
     for t in threads {

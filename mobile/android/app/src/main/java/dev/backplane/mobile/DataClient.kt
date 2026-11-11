@@ -309,14 +309,35 @@ object DataClient {
         try {
             listSub = call("subscribe", JSONObject().put("topic", "lists")).optInt("sub")
             if (g != gen) return
-            coroutineScope { launch { loadProjects(g) }; launch { loadThreads(g) }; launch { runCatching { loadLocks() } }; launch { runCatching { loadStar() } }; launch { loadHistory() }; launch { Swarms.load() } }
+            coroutineScope { launch { loadProjects(g) }; launch { loadThreads(g) }; launch { runCatching { loadLocks() } }; launch { runCatching { loadStar() } }; launch { loadHistory() }; launch { Swarms.load() }; launch { loadSections() } }
             syncPush()
             open?.let { subscribeThread(it, g); refreshThread(it) }
             subOpen?.let { (t, k) -> subSub = 0; runCatching { readSub(t, k, g) } }
             flushOutbox(g)
         } catch (e: Exception) { if (g == gen) failure = e.message ?: "" }
     }
-    suspend fun refresh() { if (conn == Conn.ONLINE) { val g = gen; runCatching { loadProjects(g); loadThreads(g); loadLocks(); loadHistory(); Swarms.load() } } }
+    suspend fun refresh() { if (conn == Conn.ONLINE) { val g = gen; runCatching { loadProjects(g); loadThreads(g); loadLocks(); loadHistory(); Swarms.load(); loadSections() } } }
+    // ---- the sidebar's sections (feature sections, docs/ALWAYS-ON.md section 8): Needs you, Pinned, Active, the groups, Quiet, as the hub presents them
+    var sections by mutableStateOf<List<DSection>>(emptyList()); private set
+    var groupsTo by mutableStateOf<List<Pair<String, String>>>(emptyList()); private set
+    var sectionsOpen by mutableStateOf<Set<String>>(emptySet()); private set
+    private fun openArr() = org.json.JSONArray().also { a -> sectionsOpen.forEach { a.put(it) } }
+    suspend fun loadSections() {
+        if (!has("sections")) return
+        if (sectionsOpen.isEmpty()) sectionsOpen = prefs().getStringSet("sections.open", emptySet())?.toSet() ?: emptySet()
+        val r = runCatching { call("sidebar.sections", JSONObject().put("open", openArr())) }.getOrNull() ?: return
+        sections = DSection.list(r.optJSONArray("sections")); groupsTo = DSection.groups(r.optJSONArray("groupsTo"))
+    }
+    fun toggleSection(t: String) { sectionsOpen = if (t in sectionsOpen) sectionsOpen - t else sectionsOpen + t; prefs().edit().putStringSet("sections.open", sectionsOpen).apply(); scope.launch { loadSections() } }
+    fun sidebarAct(action: String, value: String) { scope.launch { runCatching { call("sidebar.act", JSONObject().put("action", action).put("value", value)) }; loadSections() } }
+    suspend fun projectPage(key: String, done: Boolean): List<DSection>? {
+        if (!has("sections")) return null
+        val r = runCatching { call("sidebar.sections", JSONObject().put("open", openArr()).put("page", key).put("pageDone", done)) }.getOrNull() ?: return null
+        return DSection.list(r.optJSONObject("page")?.optJSONArray("sections"))
+    }
+    private var sectionsDue = false
+    /** A thread or project moved (a push): ask for the sections again, once for a burst. */
+    private fun sectionsMoved() { if (!has("sections") || sectionsDue) return; sectionsDue = true; scope.launch { kotlinx.coroutines.delay(400); sectionsDue = false; loadSections() } }
     // ---- Conversation history (feature history): the old Scratch chats, found and opened, never a place to start one
     var history by mutableStateOf(DHistory()); private set
     var historyOpen by mutableStateOf(false); private set
@@ -480,7 +501,7 @@ object DataClient {
     // ---- pushes
     private fun push(o: JSONObject) {
         when (o.optString("k")) {
-            "thread" -> o.optJSONObject("thread")?.let { val t = parseThread(it); upsert(t); if (t.history) historyMoved() }
+            "thread" -> o.optJSONObject("thread")?.let { val t = parseThread(it); upsert(t); if (t.history) historyMoved(); sectionsMoved() }
             "btw" -> { val tid = o.optString("thread"); if (btw[tid]?.q == o.optString("q")) btw = btw + (tid to Btw(o.optString("q"), o.optString("a"))) }
             "secret" -> scope.launch { refreshSecretAsks(o.optString("thread")) }
             "thread.removed" -> { val id = o.optString("id"); threads = threads.filter { it.id != id }; entries = entries - id; save() }

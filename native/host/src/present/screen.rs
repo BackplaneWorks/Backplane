@@ -2,7 +2,8 @@
 //! Approved differences for this slice: unread shown keys `bubHomes`, `online`, `version`, `error`,
 //! `note`, `sel`, `making`, `lang`, `empty`, `older`, `settled`, `view`, `active`, `legacy`, `rowMenu`,
 //! `removing`, `search`, `folders`, `tour`, `starNudge`, `find`, `island`, `islands`, `uber`, `hub`,
-//! `hubs`, `usageMachines`, `found`, `tabs` are omitted. They belong to other clients/screens.
+//! `hubs`, `usageMachines`, `found`, `tabs` are omitted. They belong to other clients/screens. Added beyond the JS answer (docs/ALWAYS-ON.md section 8):
+//! `sections`, `jump`, `groupsTo`, `projectPage` (present/sections.rs).
 //! Overlay is the same reduced root (without the aggregate's `machine` field on projects),
 //! with its hub key/name. Unsupported targets/actions return None, so Routed supplies a retryable error.
 use super::native_sidebar::{text, NativeSidebar};
@@ -34,7 +35,7 @@ impl super::Screen for Recent {
         // a 0.14 import of this hub: its card goes over any page (present/onboard.rs import_overlay)
         let withmig; let params=match crate::import014::last_published(&_hub.cfg.home) { Some(v) => { let mut c=params.clone(); c["importV014"]=v; withmig=c; &withmig } None => params };
         let m=_hub.mirrors();
-        match policies.with_state(|st|m.shown(|far| { let j=join_full(st,far,m); let marks: HashMap<String,Value>=far.iter().map(|(n,_)|(n.clone(),m.mark(n))).collect(); let here=m.here(); recent_unified(st,far,&Unified{ far:&j.far, marks:&marks, here:&here, rows:&j.rows },params) })) { Some(out)=>out,None=>refused("state.booting") }
+        match policies.with_state(|st|m.shown(|far| { let j=join_full(st,far,m); FAR_ORIGINS.with(|o|*o.borrow_mut()=far.iter().flat_map(|(_,f)|f.projects.keys()).map(|id|(id.clone(),m.origin(id))).collect()); let marks: HashMap<String,Value>=far.iter().map(|(n,_)|(n.clone(),m.mark(n))).collect(); let here=m.here(); recent_unified(st,far,&Unified{ far:&j.far, marks:&marks, here:&here, rows:&j.rows },params) })) { Some(out)=>out,None=>refused("state.booting") }
     }
 }
 fn mine(p: &Value) -> bool {
@@ -245,6 +246,18 @@ pub fn pick_filter(projects: Vec<Value>,pick: &str) -> Vec<Value> {
         Some(p)
     }).collect()
 }
+/// The merged project rows the sections are drawn from (present/merged.rs `merged_projects`, with the registry the home sent last). A linked
+/// machine's project takes its origin from `FAR_ORIGINS` (set by the bound screen from the mirrors for the request), else from the project here
+/// it is unified with (`un.far`).
+pub fn merged_here<'a>(st: &'a State,far: &[(String,&'a State)],un: &Unified) -> Vec<super::merged::MergedProject<'a>> {
+    let origin=|id: &str| FAR_ORIGINS.with(|o|o.borrow().get(id).cloned()).filter(|o|!o.is_empty())
+        .or_else(||un.far.get(id).and_then(|l|st.projects.get(l)).map(|p|crate::mirror::origin_of_root(&p.root))).unwrap_or_default();
+    super::merged::merged_projects(st,far,&|n|un.mark(n)["away"]==json!(true),&origin,un.here,&crate::net::registry::cached())
+}
+thread_local! {
+    /// a linked machine's project id -> its origin (`Mirrors::origin`), for the request being presented on this thread
+    static FAR_ORIGINS: std::cell::RefCell<HashMap<String,String>> = Default::default();
+}
 /// The marker in the header of a thread drawn from `tst`: that machine's (full name), or none when it is this hub's state.
 fn header_mark(far: &[(String,&State)],tst: &State,un: &Unified) -> Option<Value> { far.iter().find(|(_,f)|std::ptr::eq(*f,tst)).map(|(m,_)|un.mark(m)) }
 /// `recent_far` with projects shared across machines shown once (`Unified`).
@@ -286,6 +299,7 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
     let dispatched=crate::session::dispatch::dispatch(&crate::session::dispatch::StateFacts(st),&adopted);
     if let Some(out)=dispatched {
         session=out.session; cmds=[read_cmds.clone(),out.cmds].concat();
+        if action=="select" && session["drafts"].is_object() { session["drafts"]["@ppage"]=json!(""); } // a thread opened: the project page it came from shuts
         if let Some(target)=out.next_target {
             return Some(json!({"remoteReady":false,"nextTarget":target,"session":session,"cmds":cmds,
                 "local":p.get("local").cloned().unwrap_or(json!({"local.native.sidebar.pages":"","local.native.sidebar.context":"","local.native.sidebar.key":"","local.native.sidebar.budget":""}))}));
@@ -330,6 +344,17 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
         "link-note" => cmds.push(json!({"type":"say","tone":"note","text":value})),
         // the machine switcher over the sidebar: "" every machine, "@here" this one, else a linked machine by name (not `machine-*`: those are the Machines page's)
         "side-machine" => { session["drafts"]["@machine"]=json!(value); },
+        // the sidebar's sections (present/sections.rs): a fold, a project's page, a project pin, a group's name, a project moved to a group
+        "side-section" | "project-page" | "project-pin" | "group-rename" | "group-rename-start" | "group-move" => {
+            let rows=merged_here(st,far,un);
+            let Some(a)=super::sections::act(st,&rows,action,value,&session["drafts"],p["now"].as_u64().unwrap_or(0)/1000) else { return refused("action.sidebar-section") };
+            if let Some(k)=a.open_toggle { if !session["open"].is_object() { session["open"]=json!({}); } let was=flag(&session,&k); session["open"][k]=json!(!was); }
+            for k in a.clear { session["drafts"][k]=json!(""); }
+            for (k,v) in a.drafts { session["drafts"][k]=json!(v); }
+            for (k,v) in a.sets { let rid=session["rid"].as_u64().unwrap_or(0); cmds.push(json!({"type":"send","hub":hub,"text":json!({"id":rid,"m":"setting.set","p":{"key":k,"value":v}}).to_string()})); session["rid"]=json!(rid+1); }
+            // a project's page (its threads: running, needs you, recent, done); "" shuts it. A thread opened from it shuts it too (`select`).
+            if let Some(key)=a.page { session["drafts"]["@ppage"]=json!(key); }
+        },
         "flag" | "side-older" | "side-settled" => {
             let raw=value.strip_prefix(&format!("{hub}|" )).unwrap_or(value);
             let key=match action { "side-older"=>"old-projects", "side-settled"=>"active-settled", _=>raw };
@@ -609,8 +634,8 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
     // the machine switcher filters the merged rows: the rows that machine has a copy of, with that machine's threads only
     if !mpick.is_empty() { projects=pick_filter(projects,&mpick); }
     let ren=text(&session["drafts"],"@ren");
-    let ren_kind=if text(&session["drafts"],"@ren.kind")=="project" {"project"} else {"thread"};
-    let renaming=if ren.is_empty() || text(&session["drafts"],"@ren.inline")=="1" { Value::Null }else{json!({"id":format!("{hub}|{ren}"),"kind":ren_kind,"title":if ren_kind=="project" {"Rename project"} else {"Rename thread"},"text":text(&session["drafts"],"@f.title"),"yes":"Rename","no":"Cancel"})};
+    let ren_kind=match text(&session["drafts"],"@ren.kind") { "project"=>"project", "group"=>"group", _=>"thread" };
+    let renaming=if ren.is_empty() || text(&session["drafts"],"@ren.inline")=="1" { Value::Null }else{json!({"id":format!("{hub}|{ren}"),"kind":ren_kind,"title":match ren_kind { "project"=>"Rename project", "group"=>"Rename group", _=>"Rename thread" },"text":text(&session["drafts"],"@f.title"),"yes":"Rename","no":"Cancel"})};
     let del=text(&session["drafts"],"@del");
     let deleting=if del.is_empty() { Value::Null }else{json!({"id":if del.contains('|'){del.to_string()}else{format!("{hub}|{del}")},"title":"Delete thread","body":st.threads.get(del.strip_prefix(&format!("{hub}|" )).unwrap_or(del)).map(|t|t.title.as_str()).unwrap_or(""),"yes":"Delete","no":"Cancel"})};
     let pages=json!([{"version":1,"hub":hub,"projects":projects_page,"active":null,"legacy":null}]);
@@ -618,6 +643,15 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
         "renaming":renaming,"deleting":deleting,"bot":null,"settings":if super::settings::is_open(&session) { super::settings::view(st,&session,p.get("hubInfo").unwrap_or(&Value::Null)) }else{Value::Null},"newRoom":super::botforms::new_room(st,hub,&session).unwrap_or(Value::Null),"newBot":super::botforms::new_bot(&session).unwrap_or(Value::Null),"projectHome":null});
     let mut shown=shown;
     if !far.is_empty() { shown["machines"]=machine_switch(far,un,&mpick); }
+    // the sections (docs/ALWAYS-ON.md section 8): Bub, Needs you, Pinned, Active, groups, Quiet; the project page; Ctrl+K's list
+    { let rows=merged_here(st,far,un); let open=super::sections::opened(&session);
+      let c=super::sections::Ctx{ hub,now:opts.now,query:&query,open:&open,selected:thread };
+      let bub=shown["bots"].as_array().and_then(|b|b.iter().find(|r|r["uber"]==json!(true))).cloned().unwrap_or(Value::Null);
+      shown["sections"]=super::sections::build(st,&rows,&bub,&c);
+      shown["jump"]=super::sections::jump(&rows,&c);
+      shown["groupsTo"]=super::sections::move_targets(st,&rows);
+      let key=text(&session["drafts"],"@ppage");
+      if !key.is_empty() { shown["projectPage"]=super::sections::page(st,&rows,key,&c,open.contains("page-done")); } }
     // the Active view: what needs the person first, then the recently settled folded under "Settled N" (a search shows them)
     if mode=="active" {
         let keep=|title:&str,proj:&str| query.is_empty() || fuzzy_hit(title,&query) || fuzzy_hit(proj,&query);
@@ -702,6 +736,8 @@ mod tests {
         for path in ["/shown/projects","/overlay/j/projects"] { for pr in actual.pointer_mut(path).and_then(|v| v.as_array_mut()).into_iter().flatten() { if let Some(o)=pr.as_object_mut() { o.remove("color"); o.remove("css"); o.remove("closed"); o.remove("swarms"); /* a project's swarms (docs/SWARM.md), which 0.14 had none of */
             // and a red row's want word (sidebar::want), drawn where its age goes
             for k in ["threads","settled","snoozed","archived"] { for r in o.get_mut(k).and_then(|v| v.as_array_mut()).into_iter().flatten() { if let Some(r)=r.as_object_mut() { r.remove("want"); } } } } } }
+        // approved additions: the sidebar's sections, Ctrl+K's list, the groups a project moves to, a project's page (present/sections.rs), which 0.14 has none of
+        for path in ["/shown","/overlay/j"] { if let Some(o)=actual.pointer_mut(path).and_then(|v|v.as_object_mut()) { for k in ["sections","jump","groupsTo","projectPage"] { o.remove(k); } } }
         let mut shown=expected["shown"].clone(); retain_root(&mut shown,OMITTED);
         assert_eq!(actual["shown"],shown,"retained GPUI shown fields differ (no value normalisations)");
         let mut overlay=expected["overlay"].clone(); retain_root(&mut overlay["j"],OVERLAY_OMITTED);

@@ -453,7 +453,27 @@ final class DataClient {
             if let r = subOpen { subSub = 0; await readSub(r, g) }
         } catch { if g == gen { failure = error.localizedDescription } }
     }
-    func refresh() async { guard conn == .online else { return }; let g = gen; _ = try? await loadProjects(g); _ = try? await loadThreads(g); await loadLocks(); await loadHistory(); await loadSwarms() }
+    func refresh() async { guard conn == .online else { return }; let g = gen; _ = try? await loadProjects(g); _ = try? await loadThreads(g); await loadLocks(); await loadHistory(); await loadSwarms(); await loadSections() }
+    // MARK: The sidebar's sections (feature sections, docs/ALWAYS-ON.md section 8): Needs you, Pinned, Active, the groups, Quiet, as the hub presents them
+    private(set) var sections: [DSection] = []
+    private(set) var groupsTo: [DGroupTo] = []
+    private(set) var sectionsOpen = Set(UserDefaults.standard.stringArray(forKey: "data.sections.open") ?? [])
+    func loadSections() async {
+        guard has("sections"), let r: DSections = try? await call("sidebar.sections", ["open": Array(sectionsOpen)]) else { return }
+        sections = r.sections; groupsTo = r.groupsTo
+    }
+    func toggleSection(_ toggle: String) {
+        if sectionsOpen.contains(toggle) { sectionsOpen.remove(toggle) } else { sectionsOpen.insert(toggle) }
+        UserDefaults.standard.set(Array(sectionsOpen), forKey: "data.sections.open"); Task { await loadSections() }
+    }
+    func sidebarAct(_ action: String, _ value: String) async { _ = try? await call("sidebar.act", ["action": action, "value": value]) as DEmpty; await loadSections() }
+    func projectPage(_ key: String, done: Bool) async -> DProjectPage? {
+        guard has("sections"), let r: DSections = try? await call("sidebar.sections", ["open": Array(sectionsOpen), "page": key, "pageDone": done]) else { return nil }
+        return r.page
+    }
+    private var sectionsDue = false
+    /// a thread or project moved (a push): ask for the sections again, once for a burst
+    private func sectionsMoved() { guard has("sections"), !sectionsDue else { return }; sectionsDue = true; Task { try? await Task.sleep(nanoseconds: 400_000_000); sectionsDue = false; await loadSections() } }
     // MARK: Conversation history (feature history): the old Scratch chats, found and opened, never a place to start one
     private(set) var history = DHistory()
     private(set) var historyOpen = UserDefaults.standard.bool(forKey: "data.history.open")
@@ -713,6 +733,7 @@ final class DataClient {
             for t in due { if let i = at[t.id] { ts[i] = t } else { at[t.id] = ts.count; ts.append(t) } }
             threads = ts.sorted { $0.updatedAt > $1.updatedAt }
             if due.contains(where: \.history) { historyMoved() }
+            sectionsMoved()
             scheduleSave()
         }
         if !dueProjects.isEmpty {

@@ -6,7 +6,7 @@
 #![allow(dead_code)]
 
 const STATE: &[&str] = &["state/mod.rs", "state/autosettle.rs", "state/ext.rs", "state/fam.rs", "state/host.rs", "state/json.rs", "state/liveness.rs", "state/policy.rs", "state/star.rs",
-    "state/summary.rs", "state/todo.rs", "state/turnend.rs", "state/uber.rs", "state/watchdog.rs", "shelf.rs", "signal.rs"];
+    "state/summary.rs", "state/todo.rs", "state/turnend.rs", "state/uber.rs", "state/visible.rs", "state/watchdog.rs", "shelf.rs", "signal.rs"];
 
 /// Checkpoint name, then the files (from `src/`) its fold reads. `extra` lists are joined with `STATE` by `inputs`.
 pub const FOLDS: &[(&str, &[&str], bool)] = &[

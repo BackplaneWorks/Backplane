@@ -20,7 +20,7 @@ use tokio_tungstenite::tungstenite::{protocol::WebSocketConfig, Message};
 
 pub const PROTO: &str = "data/1";
 /// What this hub does beyond the base of data/1; a hub from before an addition does not list it (the app can warn instead of sending what would be dropped).
-pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm"];
+pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections"];
 const PREVIEW: usize = 140;
 const ASK_SCAN: usize = 4000;
 
@@ -374,6 +374,32 @@ async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Result<Value,
                 (machines::pick_rows(items, pick), machines::chips(far, un, pick))
             });
             let (projects, next) = page_of(items, limit_of(p, 50, 200), s(p, "before")); Ok(json!({"projects":projects,"next":next,"machines":chips})) }
+        // the sidebar's sections (docs/ALWAYS-ON.md section 8, present/sections.rs), the same the window draws: Needs you, Pinned, Active, the groups, Quiet;
+        // `open` the folds opened ("sec:quiet", "sec:group:<gid>"), `query` the search, `page` a project's key for its page ("pageDone": its Done open).
+        // Thread ids are this hub's (a linked machine's `<link>~<id>`); a row whose machine is off has `off` and no `nav`.
+        "sidebar.sections" => {
+            let Some(pol) = crate::statehost::policies() else { return Err(err("state is starting")) };
+            let open: std::collections::HashSet<String> = p["open"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(String::from)).collect();
+            let (q, key, done) = (s(p, "query").to_string(), s(p, "page").to_string(), p["pageDone"] == true);
+            let now = crate::hub::now_ms() / 1000;
+            pol.with_state(|st| crate::present::merged::merged_of(st, hub.mirrors(), |rows| {
+                let c = crate::present::sections::Ctx { hub: "", now, query: &q, open: &open, selected: "" };
+                let mut v = json!({"sections": crate::present::sections::build(st, &rows, &Value::Null, &c), "groupsTo": crate::present::sections::move_targets(st, &rows)});
+                if p["jump"] == true { v["jump"] = crate::present::sections::jump(&rows, &c); }
+                if !key.is_empty() { v["page"] = crate::present::sections::page(st, &rows, &key, &c, done); }
+                v
+            })).ok_or_else(|| err("state is starting"))
+        }
+        // a sidebar section's press: pin a project (`project-pin` <key>), name a group (`group-rename` "<gid>\u{1f}<name>"), move a project (`group-move` "<key>\u{1f}<gid>")
+        "sidebar.act" => {
+            let Some(pol) = crate::statehost::policies() else { return Err(err("state is starting")) };
+            let (a, v) = (s(p, "action"), s(p, "value"));
+            if !matches!(a, "project-pin" | "group-rename" | "group-move") { return Err(err("no such action")) }
+            let now = crate::hub::now_ms() / 1000;
+            let sets = pol.with_state(|st| crate::present::merged::merged_of(st, hub.mirrors(), |rows| crate::present::sections::act(st, &rows, a, v, &json!({}), now).map(|x| x.sets))).flatten().ok_or_else(|| err("unknown project or group"))?;
+            for (k, val) in sets { rpc(hub, c, "setting.set", json!({"key":k,"value":val})).await?; }
+            Ok(json!({}))
+        }
         "threads.list" => { let g = hub.model().await; let asks = open_ask_counts(hub); let (proj, arch) = (s(p, "project"), p["archived"] == true);
             // `settled`: true is only the Settled shelf (newest settle first), false only the rest (newest activity first); left out, both, as before
             let want = p.get("settled").and_then(Value::as_bool);

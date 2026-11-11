@@ -17,7 +17,7 @@ use std::sync::{Mutex, MutexGuard};
 /// seen counts...). A policy that starts reading another family adds its prefix here.
 const KEEP: &[&str] = &["settle.", "autosettle.", "launch.", "launched.", "thread.parent.", "bg.", "watch.", "order.wait.", "wake.", "wakes.", "lock.", "locks.",
     "secret.ask.", "liveness.", "star.nudge.", "restart.retry", "provider.resume.", "thread.config.hold.", "watchdog.", "alert.", "summary.", "notify.", "push.webhook", "told.", "project.dormant.",
-    "order.enabled", "order.estimates", "account.thread.", "allowance.", "accounts.inventory", "fork.", "usage.", "effort.", "buy."]; // fork.<id>: the source thread id, a thread screen's "back" button; the action dispatcher's facts (Fab.at / Fab.want, Accounts.named): tiny values, one account key per thread
+    "order.enabled", "order.estimates", "account.thread.", "allowance.", "sidebar.pin.", "sidebar.group.", "sidebar.looked.", "sidebar.cut.", "auth.wait.", "carry.wait.", "accounts.inventory", "fork.", "usage.", "effort.", "buy."]; // fork.<id>: the source thread id, a thread screen's "back" button; the action dispatcher's facts (Fab.at / Fab.want, Accounts.named): tiny values, one account key per thread
 // A thread screen must see its refusal gate's configuration even in the lean copy. Exact global keys keep their values;
 // per-thread keys keep only presence, never the possibly large body. stopped./failed. remain outside this allowlist.
 const GATE_EXACT: &[&str] = &["files.max.mb", "person.tz", "person.tz.device", "tz.machine", "think", "agent.thinking", "permissions.default"];
@@ -80,7 +80,8 @@ impl Core {
         let pre_due: Vec<(String, bool)> = ended.iter().map(|t| (t.clone(), turnend::sum_due(&self.st, t, now))).collect();
         let mut meta = vec![];
         for e in &core {
-            let m = autosettle::metadata(&self.st, e); // against the state before each change (Auto.messages.metadata)
+            let mut m = autosettle::metadata(&self.st, e); // against the state before each change (Auto.messages.metadata)
+            m.extend(crate::state::visible::meta(&self.st, e)); // a turn that starts ends a restart's cut mark (the sidebar's "Cut by a restart")
             self.st.apply(e);
             for x in &m { self.st.apply(x); }
             meta.extend(m);
@@ -235,7 +236,7 @@ impl Policy {
     }
     pub fn read(&self, thread: &str, now_s: u64) -> Vec<Value> {
         let g = self.lock();
-        if g.booting.is_some() { vec![] } else { autosettle::read(&g.core.st, thread, now_s) }
+        if g.booting.is_some() { vec![] } else { let mut v = autosettle::read(&g.core.st, thread, now_s); v.extend(crate::state::visible::look(&g.core.st, thread, now_s)); v }
     }
 }
 

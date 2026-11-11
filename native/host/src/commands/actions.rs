@@ -124,6 +124,8 @@ pub fn act(req: &Req) -> Option<ActOut> {
                 let kind = draft(r.session, "@ren.kind").to_string();
                 match kind.as_str() {
                     "project" => { a.ren_clear(); a.rpc("project.rename", json!({"project": id, "title": title})) }
+                    // a sidebar group (present/sections.rs): its name is a setting of this hub
+                    "group" => { a.ren_clear(); a.rpc("setting.set", json!({"key": format!("sidebar.group.name.{id}"), "value": title.chars().take(40).collect::<String>()})) }
                     "artifact" => return None, // a project setting: the helper's
                     _ => { a.ren_clear(); a.rpc("thread.rename", json!({"thread": id, "title": title})) }
                 }

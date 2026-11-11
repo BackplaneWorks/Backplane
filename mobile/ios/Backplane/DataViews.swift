@@ -115,6 +115,8 @@ struct DataThreadsView: View {
     @State private var badgeProject: DProject?
     @State private var projectTitle = ""
     @State private var shut = Set(UserDefaults.standard.stringArray(forKey: "data.projects.shut") ?? [])
+    @State private var renamingGroup: String?
+    @State private var groupTitle = ""
     @State private var treeOpen = Set(UserDefaults.standard.stringArray(forKey: "data.tree.open") ?? []) // parents whose subthreads show
     @State private var flash = ""   // the project a link just opened
 
@@ -187,6 +189,12 @@ struct DataThreadsView: View {
         .navigationDestination(for: DAccountRoute.self) { DataAccountView(client: client, route: $0) }
         .navigationDestination(for: DTermsRoute.self) { DataTermsView(client: client, project: $0.project) }
         .modifier(DataThreadDialogs(client: client, renaming: $renaming, deleting: $deleting))
+        .navigationDestination(for: DProjectRoute.self) { DataProjectPageView(client: client, route: $0, path: $path) }
+        .alert(Tr.t("Rename group"), isPresented: Binding(get: { renamingGroup != nil }, set: { if !$0 { renamingGroup = nil } })) {
+            TextField(Tr.t("Title"), text: $groupTitle)
+            Button(Tr.t("Rename")) { if let g = renamingGroup { Task { await client.sidebarAct("group-rename", g + "\u{1f}" + groupTitle) } } }
+            Button(Tr.t("Cancel"), role: .cancel) {}
+        }
         .alert(Tr.t("Rename project"), isPresented: Binding(get: { renamingProject != nil }, set: { if !$0 { renamingProject = nil } })) {
             TextField(Tr.t("Title"), text: $projectTitle)
             Button(Tr.t("Rename")) { if let p = renamingProject { Task { await client.projectAct(p.id, "rename", title: projectTitle) } } }
@@ -229,6 +237,8 @@ struct DataThreadsView: View {
                 }.padding(14).dataRow()
             }
             ForEach(client.bots.filter { $0.uber && !$0.thread.isEmpty }) { b in botRow(b) }
+            // a hub with sections (docs/ALWAYS-ON.md section 8): Needs you, Pinned, Active, the groups, Quiet, as it presents them; else every project
+            if client.has("sections") && !client.sections.isEmpty { sectionRows } else {
             ForEach(client.projects) { p in
                 projectHeader(p)
                 if !shut.contains(p.id) {
@@ -253,6 +263,7 @@ struct DataThreadsView: View {
                     }
                 }
             }
+            } // (no sections)
             // Conversation history: the old Scratch chats. Its row opens or shuts the list; a chat that wants attention always has its row; nothing starts here
             if client.history.count > 0 {
                 let open = client.historyOpen
@@ -281,6 +292,26 @@ struct DataThreadsView: View {
         .refreshable { await client.refresh() }
     }
 
+    /// The hub's sections, in its order: a section's head, then its threads (Needs you) or its projects, each with its visible threads under it.
+    @ViewBuilder private var sectionRows: some View {
+        ForEach(client.sections.filter { $0.kind != "bub" && !($0.id == "active" && $0.rows.isEmpty) }) { s in
+            DataSectionHead(s: s) { client.toggleSection(s.toggle) }.dataRow()
+                .contextMenu { if s.rename { Button(Tr.t("Rename group"), systemImage: "pencil") { groupTitle = s.title; renamingGroup = s.group } } }
+            if s.kind == "threads" {
+                ForEach(s.rows) { r in DataSectionThread(r: r, showProject: true) { path.append($0) }.dataRow() }
+            } else {
+                ForEach(s.rows) { r in
+                    Button { path.append(DProjectRoute(key: r.key, title: r.title)) } label: { DataSectionProject(r: r, faded: s.id == "quiet") }
+                        .buttonStyle(.plain).dataRow().accessibilityIdentifier("data.section.project." + r.key)
+                        .contextMenu {
+                            Button(Tr.t(r.pinned ? "Unpin project" : "Pin project"), systemImage: "pin") { Task { await client.sidebarAct("project-pin", r.key) } }
+                            ForEach(client.groupsTo, id: \.value) { g in Button(Tr.gpui_sections_move_to(group: g.label)) { Task { await client.sidebarAct("group-move", r.key + "\u{1f}" + g.value) } } }
+                        }
+                    ForEach(r.threads) { t in DataSectionThread(r: t, indent: 34) { path.append($0) }.dataRow() }
+                }
+            }
+        }
+    }
     /// `mark`: a bot or room of a linked machine names its machine, as its threads do
     private func sideRow(_ sigil: String, _ name: String, _ detail: String, _ mark: DMark? = nil) -> some View {
         HStack(spacing: 8) {

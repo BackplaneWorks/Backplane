@@ -3556,6 +3556,7 @@ android.swarm.gone = そのスウォームはこのハブにありません。
 android.swarm.provider = プロバイダー
 android.swarm.model = モデル
 # ---- ios: new entries go here ----
+ios.sections.running = {n, number}件実行中
 ios.viewerbg = 3Dビューアの背景
 ios.viewerbg.auto = 自動
 ios.viewerbg.custom = カスタム
@@ -3996,3 +3997,22 @@ ios.swarm.remove.ask = {name}をスウォームから外しますか？
 ios.swarm.stop.ask = このスウォームを停止しますか？
 ios.swarm.post = ボードに投稿
 # ---- end ----
+# the sidebar's sections (docs/ALWAYS-ON.md section 8): the hub's words, and the window's
+sidebar.sections.needs = 対応が必要
+sidebar.sections.pinned = ピン留め
+sidebar.sections.active = 進行中
+sidebar.sections.quiet = 静か
+sidebar.sections.quiet.hint = 2週間動きなし
+sidebar.sections.running.word = 実行中
+sidebar.sections.recent = 最近
+sidebar.sections.limit = 利用上限のリセット待ち
+sidebar.sections.cut = 再起動で中断
+sidebar.sections.monitoring = バックグラウンドで作業中
+sidebar.sections.stopped = 停止
+sidebar.sections.done = 完了
+sidebar.sections.failed = 失敗
+sidebar.sections.rename = グループ名を変更
+sidebar.sections.pin = プロジェクトをピン留め
+sidebar.sections.unpin = プロジェクトのピン留めを外す
+gpui.sections.move.to = {group}へ移動
+gpui.sections.running = {n, number}件実行中

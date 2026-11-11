@@ -122,6 +122,14 @@ pub fn items(data: &Value) -> Vec<Item> {
     for t in data["conversationHistory"]["jump"].as_array().into_iter().flatten().chain(data["legacy"].as_array().into_iter().flatten()) {
         v.push(Item { label: string(t, "title"), place: trs("Conversation history"), kind: "thread", what: Do::Thread(string(t, "id")), row: Value::Null });
     }
+    // every project and thread on every machine (the hub's `jump`, present/sections.rs): a project opens its page, a thread opens; one on a machine that is off is listed and opens nothing
+    for j in data["jump"].as_array().into_iter().flatten() {
+        let (action, value) = (string(j, "action"), string(j, "value"));
+        if action.is_empty() { continue }
+        let what = if action == "select" { Do::Thread(value) } else { Do::Action(action, value) };
+        let kind = if j["kind"] == "project" { "project" } else { "thread" };
+        v.push(Item { label: string(j, "label"), place: string(j, "place"), kind, what, row: row_of(j) });
+    }
     for t in data["active"].as_array().into_iter().flatten().chain(data["activeSettled"]["rows"].as_array().into_iter().flatten()) {
         v.push(Item { label: string(t, "title"), place: on_machine(&string(t, "project"), t), kind: "thread", what: Do::Thread(string(t, "id")), row: row_of(t) });
     }
@@ -213,7 +221,13 @@ impl Backplane {
             Do::Thread(id) => self.go("select", id, cx),
             // a message found: its thread at the message, marked, with the find bar holding the words for the next and previous ones there
             Do::Message(id, msg) => { let q = self.screens.palette.q.trim().to_string(); self.find_open_at(&id, &msg, &q, cx); }
-            Do::Action(a, v) => { if super::tools::makes_thread(&a) { self.arm_new(); } self.go(&a, v, cx); }
+            Do::Action(a, v) => {
+                if super::tools::makes_thread(&a) { self.arm_new(); }
+                // a project from the jump list: its page opens here too (the hub fills its lists)
+                let page = (a == "project-page").then(|| self.data["jump"].as_array().into_iter().flatten().find(|j| j["kind"] == "project" && j["value"] == v.as_str()).map(|j| string(j, "pid"))).flatten().filter(|p| !p.is_empty());
+                self.go(&a, v, cx);
+                if let Some(pid) = page { self.open_project(pid, cx); }
+            }
             Do::Settings => self.open_settings(cx),
             Do::Sidebar => self.sidebar_toggle(cx),
             Do::Models => self.models_pending = true,

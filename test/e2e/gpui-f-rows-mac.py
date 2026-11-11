@@ -39,6 +39,7 @@ open(P('proj/ecc83.kicad_pro'), 'w').write('{}\n')
 open(P('proj/readme.txt'), 'w').write('rig fixture\n')
 now = int(time.time())
 seed = [{'$': 'ProjectCreated', 'id': 'p1', 'title': 'rows', 'root': P('proj'), 'at': now}] + [{'$': 'ThreadCreated', 'id': 't%d' % i, 'project': 'p1', 'title': 'Thread %d' % i, 'env': 'local', 'branch': '', 'worktree': '', 'provider': 'claude', 'model': '', 'at': now + i} for i in (1, 2, 3)]
+seed += [{'$': 'ThreadPinned', 'id': 't%d' % i, 'pinned': True, 'at': now + 4} for i in (1, 2, 3)]   # the sidebar shows only active threads (D11): the pressed rows are pinned
 seed += [{'$': 'SettingSet', 'key': 'buy.t3', 'value': 't0', 'at': now + 3}, {'$': 'ModesSet', 'id': 't1', 'runtime': 'approval-required', 'interaction': 'default', 'model': '', 'at': now + 3}, {'$': 'ModesSet', 'id': 't2', 'runtime': 'full-access', 'interaction': 'plan', 'model': '', 'at': now + 3}]
 open(P('home/events.jsonl'), 'w').write(''.join(json.dumps(e) + '\n' for e in seed))
 env = dict(os.environ)
