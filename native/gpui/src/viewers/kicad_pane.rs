@@ -173,6 +173,8 @@ pub struct KicadPane {
     pub conflicts: Vec<String>,
     /// the fork's frames KiCad has shown at least once (bp.9: the client may map and unmap them itself, so a tab switch is local)
     ever_shown: Vec<u64>,
+    /// the other editors were asked pre-warmed (once per KiCad process: its pid)
+    prewarmed: Option<u64>,
 }
 
 impl KicadPane {
@@ -183,7 +185,7 @@ impl KicadPane {
             if weak.update(cx, |this, cx| this.tick(cx)).is_err() { break }
         }).detach();
         KicadPane { bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), last_root: (i32::MIN, 0), placed: None,
-            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), poked: None, unmapped_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), ever_shown: Vec::new() }
+            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), poked: None, unmapped_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), ever_shown: Vec::new(), prewarmed: None }
     }
     fn rpc(&self, name: &str, params: Value) { let _ = self.hub.try_send(Command::Rpc(name.to_string(), Secret(params), "kicad")); }
     /// The hub's `editor.kicad.<digest>` for this project changed.
@@ -449,6 +451,14 @@ impl KicadPane {
         if self.placed.as_ref() == Some(&key) {
             if let (Some(at), Some(show)) = (at, show) { nc::sync_root(c, at, show, &mut self.last_root); }
             return;
+        }
+        // the first editor on show (bp.9+): the others pre-warmed at this pane's size, so their first switch is one paint with no relayout
+        if let (true, Some(p), Some(_), Some(pid)) = (local, at, show, self.info["pid"].as_u64()) {
+            if self.prewarmed != Some(pid) {
+                self.prewarmed = Some(pid);
+                let have: Vec<&str> = self.frames.iter().map(|f| f.kind).collect();
+                self.rpc("editor.kicad.prewarm", json!({"project": self.project, "width": p.w, "height": p.h, "active": self.wanted_kind(), "have": have}));
+            }
         }
         if local { nc::place_local(c, at, show, &self.ever_shown, &mut self.last_root); } else { nc::place(c, at, show, managed.as_deref(), &mut self.last_root); }
         if self.keys && show != prev_show {
