@@ -6,7 +6,14 @@ use serde_json::{json, Value};
 use std::collections::HashMap;
 
 #[derive(Default)]
-pub struct Voice { pub views: HashMap<String, Value>, marks: HashMap<String, usize>, pub level: u32, pub fix: Option<Entity<Composer>>, upload: Option<super::voice_mic::Upload> }
+/// `cuts`: this session's sends while dictating, per thread; `seqs`: the number of the last edit written; `held`: edits that came after a send, kept until
+/// the box is empty (the hub's answer to the send), then written at the new mark 0 (voice/dictation.rs `Reader::cut`).
+pub struct Voice { pub views: HashMap<String, Value>, marks: HashMap<String, usize>, pub level: u32, pub fix: Option<Entity<Composer>>, upload: Option<super::voice_mic::Upload>,
+    cuts: HashMap<String, u64>, seqs: HashMap<String, u64>, held: HashMap<String, (std::time::Instant, Vec<Value>)> }
+/// An edit held after a send waits at most this long for the box to empty; past it the send did not go and the edits are written at the end.
+const HOLD: std::time::Duration = std::time::Duration::from_secs(3);
+/// Whether an edit frame was made before this client's last send while dictating (the hub's `cut` count is behind ours): it belongs to nothing now.
+pub fn stale(f: &Value, mine: u64) -> bool { f["cut"].as_u64().map_or(false, |c| c < mine) }
 
 fn chars(s: &str) -> Vec<char> { s.chars().collect() }
 fn byte_at(s: &str, c: usize) -> usize { s.char_indices().nth(c).map_or(s.len(), |(i, _)| i) }
@@ -39,18 +46,15 @@ impl Win {
         let thread = s(&f, "thread").to_string();
         match s(&f, "ev") {
             "view" => {
-                let on = f["view"]["on"] == true; if !on { self.screens.voice.marks.remove(&thread); self.screens.voice.level = 0; self.voice_mic_stop(); }
+                let on = f["view"]["on"] == true; if !on { let v = &mut self.screens.voice; v.marks.remove(&thread); v.cuts.remove(&thread); v.seqs.remove(&thread); v.held.remove(&thread); v.level = 0; self.voice_mic_stop(); }
                 if f["view"]["ask"]["fixing"] == true { self.voice_fix_open(s(&f["view"]["ask"]["field"], "value").to_string(), cx); } else { self.screens.voice.fix = None; }
                 self.screens.voice.views.insert(thread, f["view"].clone());
             }
             "level" => self.screens.voice.level = f["v"].as_u64().unwrap_or(0) as u32,
             "edit" => {
-                let text = if thread == self.selected { self.input.read(cx).content.to_string() } else { self.voice_text(&thread) };
-                let mark = self.screens.voice.marks.get(&thread).copied().unwrap_or(text.chars().count());
-                let n = |k: &str| f[k].as_u64().unwrap_or(0) as usize;
-                let (range, m, caret) = edit_range(&text, mark, n("del"), n("adv"), n("to"));
-                self.screens.voice.marks.insert(thread.clone(), m);
-                self.voice_put(&thread, range, s(&f, "ins"), caret, cx);
+                if stale(&f, self.screens.voice.cuts.get(&thread).copied().unwrap_or(0)) { return cx.notify() }
+                if let Some((at, q)) = self.screens.voice.held.get_mut(&thread) { if at.elapsed() < HOLD { q.push(f); return cx.notify() } }
+                self.voice_release(&thread, true, cx); self.voice_edit(&thread, &f, cx);
             }
             "draft" => {
                 let (old, new) = (if thread == self.selected { self.input.read(cx).content.to_string() } else { self.voice_text(&thread) }, s(&f, "text").to_string());
@@ -62,6 +66,29 @@ impl Win {
         }
         cx.notify();
     }
+    fn voice_edit(&mut self, thread: &str, f: &Value, cx: &mut Context<Self>) {
+        let text = if thread == self.selected { self.input.read(cx).content.to_string() } else { self.voice_text(thread) };
+        let mark = self.screens.voice.marks.get(thread).copied().unwrap_or(text.chars().count());
+        let n = |k: &str| f[k].as_u64().unwrap_or(0) as usize;
+        let (range, m, caret) = edit_range(&text, mark, n("del"), n("adv"), n("to"));
+        self.screens.voice.marks.insert(thread.to_string(), m);
+        if let Some(q) = f["seq"].as_u64() { self.screens.voice.seqs.insert(thread.to_string(), q); }
+        self.voice_put(thread, range, s(f, "ins"), caret, cx);
+    }
+    /// The edits held since a send, written now: into the empty box (`sent`), or at the end of what is there when the send never went.
+    fn voice_release(&mut self, thread: &str, late: bool, cx: &mut Context<Self>) {
+        let Some((_, q)) = self.screens.voice.held.remove(thread) else { return };
+        if late { let n = if thread == self.selected { self.input.read(cx).content.chars().count() } else { self.voice_text(thread).chars().count() }; self.screens.voice.marks.insert(thread.to_string(), n); }
+        for f in q { self.voice_edit(thread, &f, cx) }
+    }
+    /// Send (or Steer) while dictating: what is in the box goes with the message, and so do the words the hub sent up to here; what is said after them
+    /// starts the next draft. `hold`: the box empties only when the hub has the message, so edits meanwhile wait (`voice_sent` writes them).
+    pub fn voice_cut(&mut self, hold: bool) {
+        let t = self.selected.clone(); if !self.screens.voice.views.get(&t).map_or(false, |v| v["on"] == true) { return }
+        let v = &mut self.screens.voice; let n = { let c = v.cuts.entry(t.clone()).or_insert(0); *c += 1; *c }; let seq = v.seqs.get(&t).copied().unwrap_or(0);
+        v.marks.insert(t.clone(), 0); if hold { v.held.insert(t.clone(), (std::time::Instant::now(), vec![])); }
+        rpc(self, json!({"op": "act", "thread": t, "action": "voice-clear", "value": "", "draft": "", "cut": n, "seq": seq}));
+    }
     /// The person typed in the open thread: `draft_changed` calls this with the old and new text.
     pub fn voice_typed(&mut self, old: &str, new: &str) { let t = self.selected.clone(); if let Some(m) = self.screens.voice.marks.get_mut(&t) { *m = shift(old, new, *m); } }
     /// The mic chip: start listening into the open thread, or stop.
@@ -69,7 +96,7 @@ impl Win {
         let thread = self.selected.clone(); if thread.is_empty() { return }
         if self.screens.voice.views.get(&thread).map_or(false, |v| v["on"] == true) { self.voice_mic_end(); rpc(self, json!({"op": "stop", "thread": thread})); return }
         let i = self.input.read(cx); let text = i.content.to_string(); let head = i.editor().head(); let caret = text[..head.min(text.len())].chars().count();
-        self.screens.voice.marks.insert(thread.clone(), caret);
+        self.screens.voice.marks.insert(thread.clone(), caret); self.screens.voice.cuts.remove(&thread); self.screens.voice.seqs.remove(&thread); self.screens.voice.held.remove(&thread);
         let src = if self.voice_mic_begin() { "client" } else { "hub" };
         rpc(self, json!({"op": "start", "thread": thread, "draft": text, "caret": caret, "src": src})); cx.notify();
     }
@@ -78,7 +105,7 @@ impl Win {
         rpc(self, json!({"op": "act", "thread": t, "action": action, "value": value, "draft": draft}));
     }
     /// The message went: what was left to clarify in it goes too.
-    pub fn voice_sent(&mut self, cx: &mut Context<Self>) { let v = self.screens.voice.views.get(&self.selected); if v.map_or(false, |v| !v["ask"].is_null() || v["fixes"].as_array().map_or(false, |a| !a.is_empty())) { self.voice_act("voice-clear", "", cx); } }
+    pub fn voice_sent(&mut self, cx: &mut Context<Self>) { let t = self.selected.clone(); self.voice_release(&t, false, cx); let v = self.screens.voice.views.get(&self.selected); if v.map_or(false, |v| !v["ask"].is_null() || v["fixes"].as_array().map_or(false, |a| !a.is_empty())) { self.voice_act("voice-clear", "", cx); } }
     fn voice_fix_open(&mut self, seed: String, cx: &mut Context<Self>) {
         if self.screens.voice.fix.is_some() { return }
         /* i18n-ok: the hint, drawn through trs by the composer */ let input = cx.new(|cx| { let mut c = Composer::with_context(cx, "AskInput"); c.set_placeholder("The right spelling"); c.set(seed, cx); c });
@@ -130,6 +157,10 @@ mod tests {
     use super::*; use core::prelude::v1::test;
     fn run(text: &str, mark: usize, del: usize, ins: &str, adv: usize, to: usize) -> (String, usize, usize) { let (r, m, c) = edit_range(text, mark, del, adv, to); let mut t = text.to_string(); t.replace_range(r, ins); (t, m, c) }
     // the hub's own vectors (voice/place.rs): an edit is replace `del` at the mark, move the mark `adv`, the caret `to`
+    #[test] fn an_edit_made_before_this_clients_send_is_dropped() {
+        assert!(stale(&json!({"cut": 0}), 1), "made before the hub heard of the send"); assert!(!stale(&json!({"cut": 1}), 1)); assert!(!stale(&json!({"cut": 2}), 1));
+        assert!(!stale(&json!({}), 3), "a hub without cuts: every edit is written");
+    }
     #[test] fn an_edit_replaces_the_tail_at_the_mark() {
         assert_eq!(run("see ", 4, 0, "open the board", 4, 14), ("see open the board".into(), 8, 18));
         assert_eq!(run("see open the board", 8, 10, " the board in Kai", 10, 17), ("see open the board in Kai".into(), 18, 25));

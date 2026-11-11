@@ -74,6 +74,9 @@ final class VoiceModel {
     /// What this phone says itself (the microphone was refused), until Close.
     var local: [String: String] = [:]
     @ObservationIgnored private var marks: [String: Int] = [:]
+    /// This session's sends while dictating, and the number of the last edit written, per thread (the hub's `Reader::cut`).
+    @ObservationIgnored private var cuts: [String: Int] = [:]
+    @ObservationIgnored private var seqs: [String: Int] = [:]
     @ObservationIgnored let recorder = VoiceRecorder()
     @ObservationIgnored weak var client: DataClient?
 
@@ -104,7 +107,7 @@ final class VoiceModel {
             case .ok: break
             }
             active = thread
-            marks[thread] = caret
+            marks[thread] = caret; cuts[thread] = nil; seqs[thread] = nil
             do {
                 let r: DVoiceStart = try await client.call("voice.start", ["thread": thread, "draft": draft, "caret": caret])
                 if r.path.isEmpty { recorder.gone(); if active == thread { active = nil } } else { recorder.address(path: r.path) }
@@ -121,8 +124,15 @@ final class VoiceModel {
         guard let client else { return }
         Task { _ = try? await client.call("voice.act", ["thread": thread, "action": b.action, "value": value ?? b.value, "draft": draft], as: DEmpty.self) }
     }
-    /// The message went: what was left to clarify in it goes too.
+    /// The message went: what was left to clarify in it goes too. While dictating, the words written so far went with it and what is said next
+    /// starts the empty draft: the hub is told up to which edit (`seq`), and edits it made before it heard (`cut` behind ours) are dropped.
     func sent(_ thread: String, draft: String) {
+        if let v = views[thread], v.on, let client {
+            let n = (cuts[thread] ?? 0) + 1; cuts[thread] = n; marks[thread] = 0
+            let p: [String: Any] = ["thread": thread, "action": "voice-clear", "value": "", "draft": draft, "cut": n, "seq": seqs[thread] ?? 0]
+            Task { _ = try? await client.call("voice.act", p, as: DEmpty.self) }
+            return
+        }
         guard let v = views[thread], v.ask != nil || !v.fixes.isEmpty else { return }
         act(thread, DVoiceButton(action: "voice-clear"), draft: draft)
     }
@@ -147,9 +157,11 @@ final class VoiceModel {
             guard let v = o["view"] as? [String: Any] else { return }
             let view = DVoiceView(v)
             views[thread] = view
-            if !view.on { marks[thread] = nil; level = 0; if active == thread { recorder.gone(); active = nil } }
+            if !view.on { marks[thread] = nil; cuts[thread] = nil; seqs[thread] = nil; level = 0; if active == thread { recorder.gone(); active = nil } }
         case "level": level = max(0, min(100, n("v")))
         case "edit":
+            if let c = o["cut"] as? Int, c < (cuts[thread] ?? 0) { return } // made before this phone's send: it belongs to nothing now
+            if let q = o["seq"] as? Int { seqs[thread] = q }
             let text = client.drafts[thread] ?? ""
             let mark = marks[thread] ?? VoiceEdit.count(text)
             let r = VoiceEdit.apply(text, mark: mark, del: n("del"), ins: o["ins"] as? String ?? "", adv: n("adv"), to: n("to"))
