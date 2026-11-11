@@ -5,7 +5,9 @@ use std::collections::HashMap;
 
 #[derive(Default)]
 struct Peers { launched: StdMutex<Vec<Value>>, rides: StdMutex<Vec<(String, String, String)>>, notes: StdMutex<Vec<(String, String, String)>>, got: StdMutex<Vec<(String, String)>>,
-    turn: StdMutex<HashMap<String, String>>, locks: StdMutex<HashMap<String, String>> }
+    turn: StdMutex<HashMap<String, String>>, locks: StdMutex<HashMap<String, String>>,
+    /// the bots, so `unclaim` takes their world lock as the real one does (a freed lock is granted to its waiter, and that delivery takes it)
+    bots: std::sync::OnceLock<std::sync::Weak<Bots>> }
 impl Inbox for Arc<Peers> {
     fn deliver<'a>(&'a self, th: &'a str, _msg: &'a str, text: &'a str, _o: Option<(String, String, String)>) -> Fut<'a, Result<(), String>> { Box::pin(async move { self.got.lock().unwrap().push((th.into(), text.into())); Ok(()) }) }
     fn stop<'a>(&'a self, _th: &'a str) -> Fut<'a, ()> { Box::pin(async {}) }
@@ -22,7 +24,9 @@ impl Inbox for Arc<Peers> {
         let mut l = self.locks.lock().unwrap();
         files.into_iter().map(|f| { let n = crate::bots::swarm::lock_for("/w", &f); let h = l.entry(n.clone()).or_insert_with(|| th.to_string()).clone(); (n, f, h == th, h) }).collect()
     }) }
-    fn unclaim<'a>(&'a self, th: &'a str, locks: Vec<String>) -> Fut<'a, ()> { Box::pin(async move { let mut l = self.locks.lock().unwrap(); for n in locks { if l.get(&n).map_or(false, |h| h == th) { l.remove(&n); } } }) }
+    fn unclaim<'a>(&'a self, th: &'a str, locks: Vec<String>) -> Fut<'a, ()> { Box::pin(async move {
+        if let Some(b) = self.bots.get().and_then(std::sync::Weak::upgrade) { let _w = b.world().await; }
+        let mut l = self.locks.lock().unwrap(); for n in locks { if l.get(&n).map_or(false, |h| h == th) { l.remove(&n); } } }) }
 }
 
 async fn hub_of(name: &str) -> (Arc<Hub>, Arc<Bots>, Arc<Peers>) {
@@ -31,6 +35,7 @@ async fn hub_of(name: &str) -> (Arc<Hub>, Arc<Bots>, Arc<Peers>) {
     let hub = Hub::start(Cfg { home, version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
     let peers = Arc::new(Peers::default());
     let bots = Bots::start_with(hub.clone(), Arc::new(peers.clone())).await;
+    let _ = peers.bots.set(Arc::downgrade(&bots));
     (hub, bots, peers)
 }
 fn rides_to(p: &Peers, th: &str) -> Vec<String> { p.rides.lock().unwrap().iter().filter(|r| r.0 == th).map(|r| r.2.clone()).collect() }
@@ -70,7 +75,9 @@ async fn post(b: &Arc<Bots>, th: &str, a: Value) -> (bool, Value) { b.tool_call(
     let (_, c2) = post(&bots, &codex, json!({"room":room,"text":"I'll take debounce.rs too.","tags":["claim"],"files":["src/debounce.rs"]})).await;
     assert_eq!(c2["claim"]["state"], "waiting"); assert!(c2["note"].as_str().unwrap().contains("don't edit"), "{c2}");
     let (_, d) = post(&bots, &gem, json!({"room":room,"text":"Integrator done, tests pass.","tags":["done"],"reply":c1["post"]})).await;
-    assert_eq!(d["released"], json!([c1["post"]])); assert!(peers.locks.lock().unwrap().values().all(|h| h != &gem), "the lock is free");
+    assert_eq!(d["released"], json!([c1["post"]]));
+    for _ in 0..100 { if peers.locks.lock().unwrap().values().all(|h| h != &gem) { break } tokio::time::sleep(std::time::Duration::from_millis(10)).await; }
+    assert!(peers.locks.lock().unwrap().values().all(|h| h != &gem), "the lock is free, after the world lock is let go");
 
     // the rate guard: a seventh post in five minutes is refused
     for i in 0..3 { let (ok, x) = post(&bots, &opus, json!({"room":room,"text":format!("note {i} on bounce timing {}", i * 7)})).await; assert!(ok, "post {i}: {x}") }
