@@ -456,6 +456,9 @@ struct ResolvedProject {
     frame: String,
 }
 
+/// The canonical .kicad_pro for a project path (a .kicad_pro, .kicad_pcb, .kicad_sch or the project's folder).
+pub fn resolve_pro(raw_path: &str) -> Result<String, String> { resolve_project(raw_path, "").map(|r| r.pro) }
+
 fn resolve_project(raw_path: &str, req_frame: &str) -> Result<ResolvedProject, String> {
     if raw_path.trim().is_empty() { return Err("project is required".into()) }
     if !crate::plat::fs::is_abs(raw_path) {
@@ -1611,6 +1614,7 @@ fn spawn_fork_events_loop(me: mpsc::UnboundedSender<Msg>, pro: String, gen: u64,
                     let ty = ev["type"].as_str().unwrap_or("");
                     let ty_n = ev["type"].as_i64().unwrap_or(0);
                     if ty == "ET_SELECTION_CHANGED" || ty_n == 14 { super::xprobe::kicad_selected(&pro, ev); continue }
+                    if super::reload::on_event(&pro, ev) { need_sync = true; continue }
                     if ty == "ET_SHOW_REQUESTED" || ty_n == 9 {
                         show_req = Some(kind_of_fk_val(&ev["frame"]["kind"]).to_string());
                     } else if matches!(ty, "ET_FRAME_OPENED" | "ET_FRAME_CLOSED" | "ET_FRAME_SHOWN" | "ET_FRAME_HIDDEN"
