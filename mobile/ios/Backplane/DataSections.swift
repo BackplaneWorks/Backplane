@@ -13,7 +13,9 @@ struct DSecRow: Decodable, Identifiable, Equatable {
     var key: String; var projOff: Bool; var running: Int; var needsCount: Int; var threads: [DSecRow]; var icon: String; var css: String; var dots: [DSecDot]; var more: Int
     /// its menu (SectionMenu.swift), the hub's; an older hub sends none
     var menu: [DMenuItem]
-    enum CodingKeys: String, CodingKey { case id, title, word, say, want, ago, machine, mark, project, projectKey, off, nav, pinned, hide, kind, key, running, needsCount, threads, icon, css, dots, more, menu }
+    /// the fold the hub keeps for a project row (`sidebar.fold.<key>`): the action its chevron sends, folded now, the rows it hides or would hide
+    var fold: String; var folded: Bool; var under: Int
+    enum CodingKeys: String, CodingKey { case id, title, word, say, want, ago, machine, mark, project, projectKey, off, nav, pinned, hide, kind, key, running, needsCount, threads, icon, css, dots, more, menu, fold, folded, under }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = c.str(.id); title = c.str(.title); word = c.str(.word); say = c.str(.say); want = c.str(.want); ago = c.str(.ago); machine = c.str(.machine)
@@ -21,8 +23,11 @@ struct DSecRow: Decodable, Identifiable, Equatable {
         kind = c.str(.kind); key = c.str(.key); projOff = (try? c.decode(Bool.self, forKey: .off)) ?? false; running = c.int(.running); needsCount = c.int(.needsCount); threads = (try? c.decode([DSecRow].self, forKey: .threads)) ?? []
         icon = c.str(.icon); css = c.str(.css); dots = (try? c.decode([DSecDot].self, forKey: .dots)) ?? []; more = c.int(.more)
         menu = (try? c.decode([DMenuItem].self, forKey: .menu)) ?? []
+        fold = c.str(.fold); folded = c.bool(.folded); under = c.int(.under)
     }
     var isProject: Bool { !key.isEmpty }
+    /// a chevron on the row: something is under it, or it is folded (an older hub sends no fold)
+    var canFold: Bool { !fold.isEmpty && (folded || under > 0) }
     /// a live swarm's row (`kind` swarm): it opens the swarm's page, its room
     var swarmRoom: String? { kind == "swarm" ? (nav.hasPrefix("@room:") ? String(nav.dropFirst(6)) : nil) : nil }
     /// what a thread row's dot is: red when it asks, the accent while it works, dim when stopped
@@ -91,16 +96,25 @@ extension View {
 }
 /// A project row of a section: its badge and name, the machines' dots, its running count; a press opens its page.
 struct DataSectionProject: View {
-    let r: DSecRow; var faded = false
+    let r: DSecRow; var faded = false; var toggleFold: () -> Void = {}
     var body: some View {
         HStack(spacing: 8) {
+            // the fold: a tap on the chevron folds its threads away or back (the hub keeps it); a tap elsewhere opens the page
+            Group {
+                if r.canFold {
+                    Button(action: toggleFold) { Image(systemName: r.folded ? "chevron.right" : "chevron.down").font(.system(size: 10)).foregroundStyle(BackplaneDesign.faint).frame(width: 22, height: 38).contentShape(Rectangle()) }
+                        .buttonStyle(.plain).accessibilityLabel(Tr.t(r.folded ? "Show" : "Hide")).accessibilityIdentifier("data.section.fold." + r.key)
+                } else { Color.clear.frame(width: 22, height: 38) }
+            }.padding(.trailing, -4)
             if r.icon == "backplane" { BrandMark(size: 13) } else { Image(systemName: dataBadgeSymbol(r.icon)).font(.system(size: 13)).foregroundStyle(Color(css: r.css) ?? BackplaneDesign.ok) }
             Text(r.title).dmono(13).foregroundStyle(BackplaneDesign.text).lineLimit(1)
             if r.dots.count > 1 { HStack(spacing: 3) { ForEach(Array(r.dots.enumerated()), id: \.offset) { _, d in Circle().fill(d.dim ? BackplaneDesign.faint : (d.here ? BackplaneDesign.accent : BackplaneDesign.dim)).frame(width: 5, height: 5) } } }
             Spacer(minLength: 0)
             if r.running > 0 { Text(Tr.ios_sections_running(n: r.running)).dmono(11).foregroundStyle(BackplaneDesign.accent) }
+            // what of it waits on the person (its rows are in Needs you, folded or not)
+            if r.needsCount > 0 { Text("\(r.needsCount)").dmono(10).foregroundStyle(BackplaneDesign.background).padding(.horizontal, 5).background(BackplaneDesign.bad).accessibilityIdentifier("data.section.needs." + r.key) }
             if r.pinned { Image(systemName: "pin.fill").font(.system(size: 10)).foregroundStyle(BackplaneDesign.dim) }
-        }.padding(.horizontal, 12).frame(minHeight: 38).contentShape(Rectangle()).opacity(faded || r.projOff ? 0.55 : 1)
+        }.padding(.trailing, 12).frame(minHeight: 38).contentShape(Rectangle()).opacity(faded || r.projOff ? 0.55 : 1)
     }
 }
 

@@ -252,7 +252,7 @@ struct DataThreadsView: View {
             ForEach(client.projects) { p in
                 projectHeader(p)
                 if !shut.contains(p.id) {
-                    if client.has("swarm") { ForEach(Swarm.listed(client.swarms, project: p.id)) { r in DataSwarmRow(row: r) { path.append(DSwarmRoute(id: r.id, name: r.name)) } } }
+                    if client.has("swarm") && !r.folded { ForEach(Swarm.listed(client.swarms, project: p.id)) { r in DataSwarmRow(row: r) { path.append(DSwarmRoute(id: r.id, name: r.name)) } } }
                     let g = ThreadGroups.splitNested(client.threads, project: p.id, hidden: botThreads)
                     let n = ThreadGroups.count(hub: p.settledCount, loaded: g.settled.count)
                     ForEach(ThreadGroups.tree(g.active, all: g.all, open: treeOpen), id: \.t.id) { treeRow($0) }
@@ -316,7 +316,7 @@ struct DataThreadsView: View {
                 }
             } else {
                 ForEach(s.rows) { r in
-                    Button { path.append(DProjectRoute(key: r.key, title: r.title)) } label: { DataSectionProject(r: r, faded: s.id == "quiet") }
+                    Button { path.append(DProjectRoute(key: r.key, title: r.title)) } label: { DataSectionProject(r: r, faded: s.id == "quiet") { Task { await client.sidebarAct(r.fold, r.key) } } }
                         .buttonStyle(.plain).dataRow().accessibilityIdentifier("data.section.project." + r.key)
                         .contextMenu { if !r.menu.isEmpty { sectionMenu(r) } else {
                             Button(Tr.t(r.pinned ? "Unpin project" : "Pin project"), systemImage: "pin") { Task { await client.sidebarAct("project-pin", r.key) } }
