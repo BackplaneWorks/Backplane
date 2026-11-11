@@ -196,6 +196,12 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
         crate::session::patch::merge(&mut session,&o.patch); cmds=[read_cmds.clone(),o.cmds].concat();
         // setup ended with no thread open: the person lands in their newest thread (the step said they could write in it after setup),
         // not on a page whose message box sends nowhere
+        // Open the uberbot on Done: its chat, once this home has one
+        if ended && action=="ob-uber-open" { if let Some(id)=super::onboard::land_uber(st) {
+            if let Some(o)=session.as_object_mut() { o.remove("route"); }
+            return Some(json!({"remoteReady":false,"nextTarget":{"kind":"bot","id":id},"session":session,"cmds":cmds,
+                "local":p.get("local").cloned().unwrap_or(json!({"local.native.sidebar.pages":"","local.native.sidebar.context":"","local.native.sidebar.key":"","local.native.sidebar.budget":""}))}));
+        } }
         if ended && text(&session,"sel").is_empty() { if let Some(id)=super::onboard::land(st) {
             let mut a=p.clone(); a["session"]=session.clone(); a["action"]=json!("select"); a["value"]=json!(format!("{hub}|{id}"));
             if let Some(out)=crate::session::dispatch::dispatch(&crate::session::dispatch::StateFacts(st),&a) {

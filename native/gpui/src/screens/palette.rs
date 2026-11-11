@@ -219,7 +219,7 @@ impl Backplane {
             Do::Models => self.models_pending = true,
             Do::Prev | Do::Next => { let n = crate::keys::neighbour(&self.data, &self.selected, it.what == Do::Next); if let Some(id) = n { self.select_id(id, cx); } }
             Do::Uber => { let id = self.data["bots"].as_array().into_iter().flatten().find(|b| b["uber"] == true).map(|b| crate::string(b, "id")); if let Some(id) = id { self.go("bot", id, cx); } }
-            Do::Shortcuts => self.open_settings(cx),
+            Do::Shortcuts => self.keysheet_toggle(cx),
             Do::Hub(a) => self.hub_click(&a, cx),
         }
         cx.notify();

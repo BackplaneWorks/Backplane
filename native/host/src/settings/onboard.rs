@@ -1,6 +1,7 @@
 //! Setup's checks (`onboard.check`): what is installed, whether it runs, who is signed in. The answer is the info `onboard.checks`, which the pure step list
 //! in `present/onboard.rs` reads, kept in the setting `onboard.checks`. `onboard.uber` makes the uberbot.
-//! `onboard.view` and `onboard.act` are the phones' way in (data/1 has no presenter).
+//! `onboard.view` and `onboard.act` are the phones' way in (data/1 has no presenter): phones have no setup, so the view is always empty and act
+//! only carries out the 0.14 import card's buttons.
 //! A check only reads: `--version`, `auth status`, `login status`. Nothing here signs in or installs.
 use crate::{api::{Caller, Fut, RpcHandler}, hub::{now_ms, Hub}, proc::{self, Kind}};
 use serde_json::{json, Value};
@@ -108,8 +109,6 @@ fn accounts(info: &Value) -> Value {
     out
 }
 
-/// The session a phone's request stands for: its step, nothing else (data/1 has no view session).
-fn phone_session(p: &Value) -> Value { json!({"rid": 1, "drafts": {"@ob.step": p.get("step").and_then(Value::as_str).unwrap_or("")}, "open": {}}) }
 
 pub struct OnboardRpc;
 impl OnboardRpc {
@@ -143,11 +142,11 @@ impl OnboardRpc {
         let checks: Value = hub.setting("onboard.checks").await.and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null);
         super::tools_install::start(hub, tool, checks["winget"] == true, checks["node"] == true, |h| Box::pin(async move { OnboardRpc::check(&h, &json!({})).await })).await
     }
-    /// On the KiCad step with no KiCad found and a package for this computer, the install starts by itself, once per version (a failure shows Try again
+    /// On the Design tools step with no KiCad found and a package for this computer, the install starts by itself, once per version (a failure shows Try again
     /// and is not retried): the person reached the step, the step says what is downloaded, and the install checks the digest and stages as before.
     async fn auto_kicad(hub: &Arc<Hub>) {
         use crate::files::kicad::install::{decide, package, Action};
-        if hub.setting("onboard.step").await.as_deref() != Some("kicad") { return }
+        if hub.setting("onboard.step").await.as_deref() != Some("tools") { return }
         let info = hub.info_now();
         let state: Value = serde_json::from_str(info["kicad.install"].as_str().unwrap_or("")).unwrap_or_default();
         let Some(p) = package() else { return };
@@ -164,23 +163,16 @@ impl OnboardRpc {
     async fn uber(hub: &Arc<Hub>, who: &Caller) {
         for name in ["Bub", "Bub2", "Bub3"] { if Self::inner(hub, who, "bots.create", json!({"name": name, "uber": true})).await["ok"] == true { break } }
     }
-    /// A phone's turn: the step for `step`, or a press on it, carried out with this caller's rights. Setup's requests go where a view's would.
-    async fn phone(hub: &Arc<Hub>, who: &Caller, p: &Value, act: bool) -> Value {
+    /// `onboard.act` from a phone: a press on the 0.14 import card (`ob-import`), the only setup press a phone has, carried out with this caller's
+    /// rights. Phones have no setup steps (D9), so it never answers a step.
+    async fn card_press(hub: &Arc<Hub>, who: &Caller, p: &Value) {
         use crate::present::onboard as ob;
-        let Some(pol) = crate::statehost::policies() else { return json!({"tour": null}) };
-        let (session, info, c) = (phone_session(p), hub.info_now(), ob::Client { phone: true, os: String::new(), launcher: false });
-        let home = ob::home_dir();
-        let mut out = session.clone();
-        if act {
-            let (a, v) = (p["action"].as_str().unwrap_or(""), p["value"].as_str().unwrap_or(""));
-            let done = pol.with_state(|st| ob::act(st, "", &session, &info, &c, &home, a, v));
-            if let Some(Some(o)) = done {
-                crate::session::patch::merge(&mut out, &o.patch);
-                for cmd in &o.cmds { if let Ok(r) = serde_json::from_str::<Value>(cmd["text"].as_str().unwrap_or("")) { if let Some(h) = r["m"].as_str().and_then(|m| hub.rpc_for(m)) { let m = r["m"].as_str().unwrap_or(""); h.call(hub, who, &r["id"], m, &r["p"]).await; } } }
-            }
-        }
-        let tour = pol.with_state(|st| if p.get("step").is_none() && !act { ob::view(st, &out, &info, &c, &home) } else if out["drafts"]["@ob.closed"] == "1" || (act && out["drafts"]["@ob.step"] == "" && p["action"] != "ob-open") { None } else { Some(ob::page(st, &out, &info, &c, &home)) }).flatten();
-        json!({"tour": tour.unwrap_or(Value::Null)})
+        let (a, v) = (p["action"].as_str().unwrap_or(""), p["value"].as_str().unwrap_or(""));
+        if a != "ob-import" { return } // a phone cannot move, skip or end the computer's setup
+        let Some(pol) = crate::statehost::policies() else { return };
+        let (session, info, c) = (json!({"rid": 1, "drafts": {}, "open": {}}), hub.info_now(), ob::Client { phone: true, os: String::new(), launcher: false });
+        let Some(Some(o)) = pol.with_state(|st| ob::act(st, "", &session, &info, &c, &ob::home_dir(), a, v)) else { return };
+        for cmd in &o.cmds { if let Ok(r) = serde_json::from_str::<Value>(cmd["text"].as_str().unwrap_or("")) { if let Some(h) = r["m"].as_str().and_then(|m| hub.rpc_for(m)) { let m = r["m"].as_str().unwrap_or(""); h.call(hub, who, &r["id"], m, &r["p"]).await; } } }
     }
 }
 impl RpcHandler for OnboardRpc {
@@ -192,7 +184,9 @@ impl RpcHandler for OnboardRpc {
                 "onboard.check" => { let (h, q) = (hub.clone(), p.clone()); tokio::spawn(async move { OnboardRpc::check(&h, &q).await }); vec![ok] }
                 "onboard.install" => match OnboardRpc::install(hub, p["tool"].as_str().unwrap_or("")).await { Ok(m) => vec![json!({"t":"reply","id":id,"ok":true,"result":{"message":m}})], Err(e) => vec![json!({"t":"reply","id":id,"ok":false,"error":e})] },
                 "onboard.uber" => { OnboardRpc::uber(hub, who).await; vec![ok] }
-                _ => vec![json!({"t":"reply","id":id,"ok":true,"result":OnboardRpc::phone(hub, who, p, method == "onboard.act").await})],
+                // phones have no setup (D9): no step to draw; a press is the import card's
+                "onboard.act" => { OnboardRpc::card_press(hub, who, p).await; vec![json!({"t":"reply","id":id,"ok":true,"result":{"tour":null}})] }
+                _ => vec![json!({"t":"reply","id":id,"ok":true,"result":{"tour":null}})],
             }
         })
     }

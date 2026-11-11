@@ -1,4 +1,5 @@
-//! Setup, drawn from the hub's `tour` (present/onboard.rs): the step list on the left, the step on the right. Every word and every decision is the hub's; rows
+//! Setup, drawn from the hub's `tour` (present/onboard.rs): the step list on the left, the step on the right. Five steps and Done; a step's
+//! `group`, when the hub sends one, heads the rail. Every word and every decision is the hub's; rows
 //! are the Settings rows, drawn by the same code. The accounts panel is the Accounts page's own, for the provider the step names.
 use super::settings::{self, Field, FieldSlot};
 use crate::{hub::Command, i18n::trs, string, theme, Backplane};
@@ -12,6 +13,8 @@ pub struct Setup {
     pub up: bool,
     /// The step last drawn, so a new one scrolls to its top and takes the keys.
     pub step: String,
+    /// The accounts panel last opened (the Agents step's Connect), so a new one opens the Accounts page's own for that provider.
+    pub panel: String,
     /// The connected accounts last seen, so a new sign-in runs the checks again.
     pub connected: usize,
     pub want_focus: bool,
@@ -31,14 +34,12 @@ pub fn submit(this: &mut Backplane, name: &str, cx: &mut Context<Backplane>) -> 
 /// Keeps the client's own part of setup in step with the picture.
 pub fn sync(this: &mut Backplane, cx: &mut Context<Backplane>) {
     // setup went away: the keys go to the message box (it is drawn as the place to type; left where they were, the first words typed ran the rail's letters)
-    if !this.data["tour"].is_object() { if this.screens.setup.up { this.want_focus = true; } this.screens.setup.up = false; this.screens.setup.step.clear(); return }
+    if !this.data["tour"].is_object() { if this.screens.setup.up { this.want_focus = true; } this.screens.setup.up = false; this.screens.setup.step.clear(); this.screens.setup.panel.clear(); return }
     let t = &this.data["tour"];
     let id = string(t, "id"); let panel = string(t, "panel");
     if !this.screens.setup.up { this.screens.setup.up = true; let _ = this.tx.try_send(Command::Action("ob-check".into(), String::new())); }
-    if this.screens.setup.step != id {
-        this.screens.setup.step = id; this.screens.setup.want_focus = true; this.screens.setup.scroll.set_offset(point(px(0.), px(0.)));
-        if !panel.is_empty() { this.screens.acct.add_provider = panel; super::accounts::open_page(this, cx); }
-    }
+    if this.screens.setup.step != id { this.screens.setup.step = id; this.screens.setup.want_focus = true; this.screens.setup.scroll.set_offset(point(px(0.), px(0.))); }
+    if this.screens.setup.panel != panel { this.screens.setup.panel = panel.clone(); if !panel.is_empty() { this.screens.acct.add_provider = panel; super::accounts::open_page(this, cx); } }
 }
 
 /// A sign-in finished while setup is up: the checks run again, so the step turns done.
