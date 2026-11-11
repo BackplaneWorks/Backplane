@@ -140,7 +140,7 @@ object DataClient {
     var pairEpoch by mutableStateOf(0); private set
     // forgets the hub and everything a pairing attempt left: a revoked mark, the last message, a pending question
     fun unpair() { setHome(""); leaveHome(); keepOutbox(Outbox()); links = emptyList(); adding = false; prefs().edit().remove("link").remove("links").apply(); reset(); close(); conn = Conn.OFFLINE; needsRepair = false; pairingError = ""; askLink = null; pairEpoch++ }
-    private fun reset() { notice = HubNotice(); star = null; migrating = null; migrateOpen = false; projects = emptyList(); threads = emptyList(); entries = emptyMap(); older = emptyMap(); listsLoaded = false; open = null; cacheFile().delete() }
+    private fun reset() { Swarms.reset(); notice = HubNotice(); star = null; migrating = null; migrateOpen = false; projects = emptyList(); threads = emptyList(); entries = emptyMap(); older = emptyMap(); listsLoaded = false; open = null; cacheFile().delete() }
 
     // ---- connection
     fun connect() {
@@ -309,14 +309,14 @@ object DataClient {
         try {
             listSub = call("subscribe", JSONObject().put("topic", "lists")).optInt("sub")
             if (g != gen) return
-            coroutineScope { launch { loadProjects(g) }; launch { loadThreads(g) }; launch { runCatching { loadLocks() } }; launch { runCatching { loadStar() } }; launch { loadHistory() } }
+            coroutineScope { launch { loadProjects(g) }; launch { loadThreads(g) }; launch { runCatching { loadLocks() } }; launch { runCatching { loadStar() } }; launch { loadHistory() }; launch { Swarms.load() } }
             syncPush()
             open?.let { subscribeThread(it, g); refreshThread(it) }
             subOpen?.let { (t, k) -> subSub = 0; runCatching { readSub(t, k, g) } }
             flushOutbox(g)
         } catch (e: Exception) { if (g == gen) failure = e.message ?: "" }
     }
-    suspend fun refresh() { if (conn == Conn.ONLINE) { val g = gen; runCatching { loadProjects(g); loadThreads(g); loadLocks(); loadHistory() } } }
+    suspend fun refresh() { if (conn == Conn.ONLINE) { val g = gen; runCatching { loadProjects(g); loadThreads(g); loadLocks(); loadHistory(); Swarms.load() } } }
     // ---- Conversation history (feature history): the old Scratch chats, found and opened, never a place to start one
     var history by mutableStateOf(DHistory()); private set
     var historyOpen by mutableStateOf(false); private set
@@ -492,6 +492,7 @@ object DataClient {
             "queue" -> { val tid = o.optString("thread"); scope.launch { runCatching { loadQueue(tid) } } } // a far thread's held messages moved
             "term" -> Terms.push(o)
             "locks" -> locks = parseLocks(o.optJSONArray("locks"))
+            "swarm" -> Swarms.pushed(o.optString("room")) // a swarm's board, state or member turns moved: its list again, and an open board reads what is newer
             "text" -> {
                 val tid = o.optString("thread"); val eid = o.optString("entry"); val add = o.optString("append")
                 val l = entries[tid] ?: return
@@ -939,7 +940,7 @@ object DataClient {
             withContext(Dispatchers.IO) {
                 val j = JSONObject().put("hub", hub)
                     .put("projects", JSONArray(ps.map { JSONObject().put("id", it.id).put("title", it.title).put("root", it.root).put("threadCount", it.threadCount).apply { it.settledCount?.let { n -> put("settledCount", n) } }.put("updatedAt", it.updatedAt).put("waiting", it.waiting).put("also", it.also).put("mark", markJson(it.mark)) }))
-                    .put("threads", JSONArray(ts.map { JSONObject().put("id", it.id).put("project", it.project).put("title", it.title).put("state", it.state).put("updatedAt", it.updatedAt).put("pinned", it.pinned).put("pinOrder", it.pinOrder).put("settled", it.settled).put("settledAt", it.settledAt).put("archived", it.archived).put("provider", it.provider).put("model", it.model).put("effort", it.effort).put("runtime", it.runtime).put("chip", it.chip).put("preview", it.preview).put("waiting", it.waiting).put("mark", markJson(it.mark)) }))
+                    .put("threads", JSONArray(ts.map { JSONObject().put("id", it.id).put("project", it.project).put("title", it.title).put("state", it.state).put("updatedAt", it.updatedAt).put("pinned", it.pinned).put("pinOrder", it.pinOrder).put("settled", it.settled).put("settledAt", it.settledAt).put("archived", it.archived).put("provider", it.provider).put("model", it.model).put("effort", it.effort).put("runtime", it.runtime).put("chip", it.chip).put("preview", it.preview).put("waiting", it.waiting).put("mark", markJson(it.mark)).put("swarm", it.swarm) }))
                     .put("entries", JSONObject().also { o -> es.forEach { (k, v) -> o.put(k, JSONArray(v.map(::J))) } })
                 runCatching { cacheFile().writeText(j.toString()) }
             }

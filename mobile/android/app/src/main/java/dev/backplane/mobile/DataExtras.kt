@@ -114,12 +114,12 @@ fun BadgeSheet(p: DProject, close: () -> Unit) {
 }
 
 @Composable
-fun ProjectMenus(p: DProject, shown: Boolean, close: () -> Unit) {
+fun ProjectMenus(p: DProject, shown: Boolean, newSwarm: (DProject) -> Unit = {}, close: () -> Unit) {
     var renaming by remember(p.id) { mutableStateOf(false) }
     var removing by remember(p.id) { mutableStateOf(false) }
     var badge by remember(p.id) { mutableStateOf(false) }
     val terms = LocalTermsOpen.current
-    if (shown) ActionSheet(p.title, listOfNotNull(("Terminals" to { terms(p.id) }).takeIf { termsOn() }, "Rename" to { renaming = true }, "Badge…" to { badge = true }, "Remove project…" to { removing = true }), close)
+    if (shown) ActionSheet(p.title, listOfNotNull((Msg.android_swarm_new to { newSwarm(p) }).takeIf { Swarms.on() && p.mark == null }, ("Terminals" to { terms(p.id) }).takeIf { termsOn() }, "Rename" to { renaming = true }, "Badge…" to { badge = true }, "Remove project…" to { removing = true }), close)
     if (badge) BadgeSheet(p) { badge = false }
     if (renaming) TextPrompt(Msg.android_project_rename, p.title, Msg.menu_rename, { renaming = false }) { DataClient.projectAct(p.id, "rename", it) }
     if (removing) ActionSheet(Msg.android_project_remove_ask(p.title), listOf("Remove project" to { DataClient.projectAct(p.id, "remove") }, "Keep it" to {}), { removing = false })
