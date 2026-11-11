@@ -523,12 +523,15 @@ fn files_page(st: &State, root: &str, sel: &str, dir: &str) -> Value {
 /// File.json: an opened image, PDF or note: its name, its kind, where the hub serves it (`/img` takes an absolute path).
 fn file_page(kind: &str, abs: &str) -> Value {
     let mut v = json!({"name": crate::files::fm::last(abs), "kind": kind, "url": format!("/img?path={}", pct(abs, true))});
-    // a Markdown note is sent as the chat's nodes (`Md.render`), so the clients draw it rendered; plain text stays the client's to fetch
+    // a Markdown note is sent as a document's nodes (md/doc.rs: GitHub's Markdown, its pictures beside it), so the clients draw it rendered; plain text stays the client's to fetch
     let l = abs.to_ascii_lowercase();
     if kind == "text" && (l.ends_with(".md") || l.ends_with(".markdown")) {
         use std::io::Read;
         let mut b = Vec::new();
-        if std::fs::File::open(abs).map(|f| f.take(256 << 10).read_to_end(&mut b)).is_ok() { v["blocks"] = Value::Array(crate::md::nodes_json(&crate::md::render(&String::from_utf8_lossy(&b)))); }
+        if std::fs::File::open(abs).map(|f| f.take(256 << 10).read_to_end(&mut b)).is_ok() {
+            let base = crate::md::doc::Base::for_file(std::path::Path::new(abs));
+            v["blocks"] = Value::Array(crate::md::nodes_json(&crate::md::doc::render(&String::from_utf8_lossy(&b), &base)));
+        }
     }
     v
 }

@@ -28,7 +28,31 @@ pub fn sniff(b: &[u8]) -> Option<ImageFormat> {
     else if b.starts_with(&[0xFF, 0xD8, 0xFF]) { Some(ImageFormat::Jpeg) }
     /* i18n-ok: file signatures and an HTTP request */ else if b.starts_with(b"GIF8") { Some(ImageFormat::Gif) }
     /* i18n-ok: file signatures and an HTTP request */ else if b.len() > 12 && &b[0..4] == b"RIFF" && &b[8..12] == b"WEBP" { Some(ImageFormat::Webp) }
+    else if is_svg(b) { Some(ImageFormat::Svg) }
     else { None }
+}
+
+/// An SVG document by its start (a README's badges are SVG): an XML prolog, comment or doctype may come before the `<svg`.
+fn is_svg(b: &[u8]) -> bool {
+    let head = String::from_utf8_lossy(&b[..b.len().min(1024)]).to_ascii_lowercase();
+    let t = head.trim_start_matches('\u{feff}').trim_start();
+    /* i18n-ok: file signatures */ (t.starts_with("<svg") || t.starts_with("<?xml") || t.starts_with("<!--") || t.starts_with("<!doctype svg")) && t.contains("<svg")
+}
+/// An SVG's size: its `width` and `height` in pixels, else its viewBox's.
+fn svg_dims(b: &[u8]) -> Option<(u32, u32)> {
+    let head = String::from_utf8_lossy(&b[..b.len().min(4096)]).into_owned();
+    let tag = &head[head.find("<svg")?..]; let tag = &tag[..tag.find('>')?];
+    let attr = |name: &str| -> Option<String> {
+        let mut at = 0;
+        while let Some(i) = tag[at..].find(name) { let i = at + i; let before = tag[..i].chars().last().map_or(false, |c| c.is_whitespace()); let rest = tag[i + name.len()..].trim_start();
+            if before && rest.starts_with('=') { let rest = rest[1..].trim_start(); let q = rest.chars().next()?; if q == '"' || q == '\'' { return rest[1..].split(q).next().map(String::from) } } at = i + name.len(); }
+        None
+    };
+    let num = |v: Option<String>| v.and_then(|v| { let v = v.trim().trim_end_matches("px"); v.parse::<f32>().ok() }).filter(|x| *x > 0.);
+    let (w, h) = (num(attr("width")), num(attr("height")));
+    let vb: Vec<f32> = attr("viewBox").map(|v| v.split([' ', ',']).filter_map(|x| x.parse().ok()).collect()).unwrap_or_default();
+    let (w, h) = match (w, h, vb.as_slice()) { (Some(w), Some(h), _) => (w, h), (Some(w), None, [_, _, vw, vh]) => (w, w * vh / vw), (None, Some(h), [_, _, vw, vh]) => (h * vw / vh, h), (None, None, [_, _, vw, vh]) => (*vw, *vh), _ => return None };
+    (w >= 1. && h >= 1.).then(|| (w.round() as u32, h.round() as u32))
 }
 
 /// A GET request for a path on the hub, with the token appended to the query.
@@ -64,10 +88,30 @@ pub fn shrink(img: Arc<Image>) -> Arc<Image> {
 /// it is on; as an Image, GPUI decodes it on its own executor and draws an empty box until that ends: a reply's pictures showed as blank boxes
 /// for a few frames each time they came on screen (Nov 10). None for a format this build does not decode (GPUI decodes those as before).
 pub fn decode(img: &Image) -> Option<Arc<RenderImage>> {
+    if img.format == ImageFormat::Svg { return svg_raster(&img.bytes) }
     let format = match img.format { ImageFormat::Png => image::ImageFormat::Png, ImageFormat::Jpeg => image::ImageFormat::Jpeg, _ => return None };
     let mut buf = image::load_from_memory_with_format(&img.bytes, format).ok()?.into_rgba8();
     for px in buf.chunks_exact_mut(4) { px.swap(0, 2); }
     Some(Arc::new(RenderImage::new(vec![image::Frame::new(buf)])))
+}
+/// How much finer than its own size an SVG is drawn: sharp on a high-density screen (the box it is drawn in stays its own size).
+pub const SVG_SCALE: f32 = 2.;
+/// An SVG drawn to pixels as GPUI paints them (BGRA, straight alpha), its text in the system's fonts. GPUI's own drawing of an SVG image
+/// gives its red and blue swapped (a blue badge came out orange) and at one pixel a point.
+pub fn svg_raster(bytes: &[u8]) -> Option<Arc<RenderImage>> {
+    use resvg::{tiny_skia, usvg};
+    static FONTS: std::sync::LazyLock<Arc<usvg::fontdb::Database>> = std::sync::LazyLock::new(|| { let mut db = usvg::fontdb::Database::new(); db.load_system_fonts(); Arc::new(db) });
+    let opt = usvg::Options { fontdb: FONTS.clone(), ..Default::default() };
+    let tree = usvg::Tree::from_data(bytes, &opt).ok()?;
+    let size = tree.size();
+    let k = SVG_SCALE.min(4096. / size.width().max(size.height()).max(1.));
+    let (w, h) = ((size.width() * k).ceil() as u32, (size.height() * k).ceil() as u32);
+    let mut pix = tiny_skia::Pixmap::new(w.max(1), h.max(1))?;
+    resvg::render(&tree, tiny_skia::Transform::from_scale(k, k), &mut pix.as_mut());
+    let mut buf = Vec::with_capacity((w * h * 4) as usize);
+    for p in pix.pixels() { let c = p.demultiply(); buf.extend_from_slice(&[c.blue(), c.green(), c.red(), c.alpha()]); }
+    let frame = image::RgbaImage::from_raw(w.max(1), h.max(1), buf)?;
+    Some(Arc::new(RenderImage::new(vec![image::Frame::new(frame)])))
 }
 fn fetch(t: &Target, url: &str) -> Option<Arc<Image>> {
     let mut s = t.stream().ok()?; s.set_timeouts(Duration::from_secs(30)).ok()?;
@@ -101,7 +145,7 @@ pub fn dims(b: &[u8]) -> Option<(u32, u32)> {
             b"VP8L" => { let v = u32::from_le_bytes(b.get(21..25)?.try_into().ok()?); ((v & 0x3FFF) + 1, ((v >> 14) & 0x3FFF) + 1) }
             _ => (le16(26)? & 0x3FFF, le16(28)? & 0x3FFF),
         }
-    } else { return None };
+    } else if is_svg(b) { svg_dims(b)? } else { return None };
     if r.0 == 0 || r.1 == 0 { None } else { Some(r) }
 }
 
@@ -127,6 +171,12 @@ impl Images {
         if st.workers < WORKERS { st.workers += 1; let me = self.clone(); std::thread::spawn(move || me.work()); }
         self.s.1.notify_one();
         Slot::Loading
+    }
+    /// The image for `url` if it was asked for (its state), without asking: a document's pictures are asked for only near the screen.
+    pub fn peek(&self, url: &str) -> Option<Slot> {
+        let Ok(mut st) = self.s.0.lock() else { return None };
+        let tick = st.tick;
+        st.items.get_mut(url).map(|e| { e.used = tick; e.slot.clone() })
     }
     /// A thread was opened again: failed images may be asked for once more.
     /// The picture for `url` decoded for painting, once it has arrived and could be (see `decode`).
@@ -202,6 +252,14 @@ mod tests {
         assert!(matches!(sniff(&[0x89, b'P', b'N', b'G', 0, 0]), Some(ImageFormat::Png))); assert!(matches!(sniff(&[0xFF, 0xD8, 0xFF, 0xE0]), Some(ImageFormat::Jpeg)));
         assert!(sniff(b"<html>not found</html>").is_none()); assert!(sniff(b"").is_none());
         assert!(matches!(sniff(b"RIFF\0\0\0\0WEBPVP8 "), Some(ImageFormat::Webp)));
+        assert!(matches!(sniff(b"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"90\" height=\"20\">"), Some(ImageFormat::Svg)));
+        assert!(matches!(sniff(b"<?xml version=\"1.0\"?>\n<svg viewBox=\"0 0 400 200\">"), Some(ImageFormat::Svg)));
+        assert_eq!(dims(b"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"90\" height=\"20\" role=\"img\">"), Some((90, 20)));
+        assert_eq!(dims(b"<svg stroke-width=\"2\" viewBox=\"0 0 400 200\" width=\"200\">"), Some((200, 100)));
+        assert_eq!(dims(b"<svg><g/></svg>"), None);
+        let blue = svg_raster(b"<svg xmlns=\"http://www.w3.org/2000/svg\" width=\"4\" height=\"2\"><rect width=\"4\" height=\"2\" fill=\"#1f6feb\"/></svg>").unwrap();
+        assert_eq!(blue.size(0), gpui::size(gpui::DevicePixels(8), gpui::DevicePixels(4)), "drawn at twice its size");
+        assert_eq!(&blue.as_bytes(0).unwrap()[..4], &[0xeb, 0x6f, 0x1f, 0xff], "BGRA: blue stays blue");
     }
     #[test] fn only_hub_paths_are_requested() {
         for ok in ["/message-image?entry=e&path=%2Fa.png", "/img?path=x"] { assert!(safe_url(ok), "{ok}"); }

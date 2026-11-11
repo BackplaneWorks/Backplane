@@ -4,6 +4,8 @@
 //! Strings count code points like ; `trim`, `is_space`, `is_alpha`, `is_digit` are Base's (ASCII only).
 pub mod links;
 pub mod refs;
+pub mod doc;
+mod html;
 mod inline;
 mod block;
 
@@ -32,7 +34,21 @@ fn node_json(n: &Node) -> Value {
             let mut m = Map::new();
             m.insert("tag".into(), json!(tag)); m.insert("kids".into(), Value::Array(nodes_json(kids)));
             href(attrs, &mut m);
+            doc_attrs(tag, attrs, &mut m);
             Value::Object(m)
+        }
+    }
+}
+
+/// A document's attributes (doc.rs): a picture's, a block's alignment, an anchor, a task's mark, an alert's kind, a code block's language. The chat's
+/// nodes never carry these, so its JSON is what it was; a document's link says itself whether it is a file (`#anchor` and `mailto:` are not).
+fn doc_attrs(tag: &str, attrs: &[(&'static str, String)], m: &mut Map<String, Value>) {
+    for (k, v) in attrs {
+        match *k {
+            "src" | "alt" | "width" | "height" | "align" | "id" | "checked" | "alert" | "lang" | "open" | "media" | "start" => { m.entry(k.to_string()).or_insert_with(|| json!(v)); }
+            "title" if tag == "img" => { m.insert("title".into(), json!(v)); }
+            "file" => { m.insert("file".into(), json!(v == "1")); }
+            _ => {}
         }
     }
 }
