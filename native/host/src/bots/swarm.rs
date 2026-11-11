@@ -209,8 +209,10 @@ impl Bots {
             let lines = w.room_lines.get(room).cloned().unwrap_or_default(); let mut out: Vec<Value> = vec![];
             for l in lines.iter().rev().take(200) { let Ok(raw) = self.hub.store.get(l - 1) else { continue }; let Ok(e) = serde_json::from_str::<Value>(&raw) else { continue };
                 if !heard.is_empty() && gs(&e, "id") == heard { break } out.push(e) }
-            out.reverse(); let mut posts: Vec<Value> = out.into_iter().filter(|e| gs(e, "thread") != th && gs(e, "held").is_empty()).collect();
-            if heard.is_empty() { let joined = w.setting(&format!("room.joined.{room}.{member}"), ""); if let Some(i) = posts.iter().position(|e| gs(e, "id") == joined) { posts.drain(..=i); } }
+            out.reverse();
+            // a member that joined later hears what came after it joined (the board before is its room_read)
+            if heard.is_empty() { let joined = w.setting(&format!("room.joined.{room}.{member}"), ""); if let Some(i) = out.iter().position(|e| gs(e, "id") == joined) { out.drain(..=i); } }
+            let posts: Vec<Value> = out.into_iter().filter(|e| gs(e, "thread") != th && gs(e, "held").is_empty()).collect();
             (r, posts, hk) };
         if posts.is_empty() { return }
         let newest = posts.last().map(|p| gs(p, "id").to_string()).unwrap_or_default();

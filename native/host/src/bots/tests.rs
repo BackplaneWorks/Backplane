@@ -1385,6 +1385,7 @@ mod triage;
 mod push;
 mod standin;
 mod life;
+mod swarm;
 
 async fn call_hook(hub: &Arc<Hub>, hid: &str, hs: Vec<(String, String)>, body: &str) -> (String, String) {
     let h = hub.http_for(&format!("/hook/{hid}")).expect("the /hook route is registered");
