@@ -203,12 +203,20 @@ fn read_files(root: &str, req: &Value) -> (Value, bool, PathBuf) {
         }
     }
     for name in ["mfg/bom.csv", "mfg/BOM.csv", "bom.csv", "BOM.csv"] { match h.text(name, 4096, 0) { Ok(Some((_, t, _, _))) => { add(&mut art, "bom", name, "BOM", &t); break } Err(m) => return fails(m), _ => {} } }
+    // the README as nodes for the page to draw: README.md (up to 64 KB), else README.html with its tags taken out
+    let mut readme = Value::Null;
+    for name in ["README.md", "readme.md", "README.html", "README.htm"] {
+        match h.text(name, 65536, 0) {
+            Ok(Some((_, t, _, _))) => { let t = if name.ends_with(".md") { t } else { html_text(&t) }; readme = Value::Array(crate::md::nodes_json(&crate::md::render(&t))); break }
+            Err(m) => return fails(m), _ => {}
+        }
+    }
     let git = real.join(".git").exists();
     let revision = hash(serde_json::to_string(&art.iter().map(|a| json!([a["path"], a["mtime"], a["size"]])).collect::<Vec<_>>()).unwrap_or_default().as_bytes());
     let _ = (&mut issues, scanned);
     let snapshot = json!({"project_home": project, "root": real.to_string_lossy(), "artifacts": art, "intentRevision": intent_rev,
         "intentComplete": saved.as_ref().map_or(true, |s| s.3.is_none()), "revision": revision, "next": next, "after": after, "scanNext": scan_next, "issues": issues,
-        "intentSaved": op == "intent", "intentOffset": editor, "intentNext": saved.as_ref().and_then(|s| s.3), "intentBytes": saved.as_ref().map_or(0, |s| s.2),
+        "readme": readme, "intentSaved": op == "intent", "intentOffset": editor, "intentNext": saved.as_ref().and_then(|s| s.3), "intentBytes": saved.as_ref().map_or(0, |s| s.2),
         "intent": saved.map_or("# Goal\n\n# Parts\n\n# Notes\n".to_string(), |s| s.1)});
     (snapshot, git, real)
 }
@@ -275,4 +283,22 @@ mod tests {
         let (v, _, _) = read_files(d.to_str().unwrap(), &json!({"project":"p","op":"document","path":"bad.bin"})); assert_eq!(v["error"], "This file is not valid UTF-8; open the original file to inspect it.");
         let (v, _, _) = read_files("/definitely/not/here", &json!({"project":"p"})); assert_eq!(v["error"], "Project folder is unavailable.");
     }
+}
+
+/// An HTML README as Markdown-ish text: scripts and styles dropped, headings and list items marked, other tags removed, entities of the common kind decoded.
+fn html_text(h: &str) -> String {
+    let mut out = String::new(); let mut rest = h;
+    while let Some(i) = rest.find('<') {
+        out.push_str(&rest[..i]); rest = &rest[i..];
+        let Some(j) = rest.find('>') else { rest = ""; break };
+        let tag = rest[1..j].trim().to_lowercase(); rest = &rest[j + 1..];
+        let name: String = tag.trim_start_matches('/').chars().take_while(|c| c.is_ascii_alphanumeric()).collect();
+        if !tag.starts_with('/') && (name == "script" || name == "style") { let close = format!("</{name}"); rest = match rest.to_lowercase().find(&close) { Some(k) => &rest[k..], None => "" }; continue }
+        match (tag.starts_with('/'), name.as_str()) {
+            (false, "h1") => out.push_str("\n\n# "), (false, "h2") => out.push_str("\n\n## "), (false, "h3" | "h4" | "h5" | "h6") => out.push_str("\n\n### "),
+            (false, "li") => out.push_str("\n- "), (_, "p" | "br" | "div" | "ul" | "ol" | "tr" | "pre" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6") => out.push_str("\n\n"), _ => {}
+        }
+    }
+    out.push_str(rest);
+    out.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&#39;", "'").replace("&nbsp;", " ")
 }
