@@ -10,7 +10,7 @@
 //! Claude sync token, kept in the info `signin.there` that present/signin_there.rs draws; asked again every 2 s while something there runs.
 use crate::hub::{now_ms, Hub};
 use serde_json::{json, Value};
-use std::{collections::HashMap, path::PathBuf, sync::{Arc, Mutex}, time::Duration};
+use std::{path::PathBuf, sync::{Arc, Mutex}, time::Duration};
 
 /// One provider a machine can be signed in to: its CLI, the arguments of its own login, and what the person does in it when that is not obvious.
 pub struct Provider { pub id: &'static str, pub title: &'static str, pub login: &'static [&'static str], pub hint: &'static str }
@@ -27,15 +27,18 @@ pub const PROVIDERS: &[Provider] = &[
 pub fn provider(id: &str) -> Option<&'static Provider> { PROVIDERS.iter().find(|p| p.id == id) }
 /// The keys a press sends, by name.
 pub const KEYS: &[(&str, &str)] = &[("enter", "\r"), ("up", "\x1b[A"), ("down", "\x1b[B"), ("esc", "\x1b"), ("tab", "\t"), ("ctrl-c", "\x03")];
-/// The terminal a provider's sign-in runs in on the machine asked (a shell key: the phones' Terminals list there shows it too).
-pub fn key_of(provider: &str) -> String { format!("s::signin-{provider}") }
+/// The terminal a provider's sign-in runs in on the machine asked: a quiet one (term/mod.rs `quiet`), whose bytes reach no client there, since
+/// what it echoes may be a key; only `session` reads it, redacted.
+pub fn key_of(provider: &str) -> String { format!("q:signin-{provider}") }
+/// The vault name a key typed for a provider's sign-in is kept under on the machine asked (the hub masks every vault value everywhere).
+pub fn vault_name(provider: &str) -> String { format!("hub.signin.{provider}") }
 /// Wide enough that a sign-in link is one line (Claude's is a few hundred characters); `link_in` joins one that wraps all the same.
 const COLS: u16 = 500;
 const ROWS: u16 = 30;
 /// The lines of a sign-in's screen sent back: its end, where the prompt is.
 const LINES: usize = 12;
 /// A typed line at most this long.
-const TYPED: usize = 4096;
+const TYPED_MAX: usize = 4096;
 
 fn s<'a>(v: &'a Value, k: &str) -> &'a str { v.get(k).and_then(Value::as_str).unwrap_or("") }
 
@@ -78,9 +81,58 @@ pub fn tail(text: &str, n: usize) -> Vec<String> {
     let ls: Vec<String> = text.lines().map(|l| l.trim_end()).filter(|l| !l.trim().is_empty()).map(|l| if l.chars().count() > 160 { format!("{}…", l.chars().take(159).collect::<String>()) } else { l.to_string() }).collect();
     ls[ls.len().saturating_sub(n)..].to_vec()
 }
-/// What a sign-in's terminal says, as the client draws it. `state` is the terminal's ("running", "exited 0", "stopped").
-pub fn session(text: &str, state: &str, running: bool, cols: usize) -> Value {
-    json!({"state": state, "running": running, "url": if running { link_in(text, cols) } else { String::new() }, "code": if running { code_in(text) } else { String::new() }, "lines": tail(text, LINES)})
+const HIDDEN: &str = "[hidden]";
+/// Prefixes of the keys providers hand out: a word starting with one, and 8 or more key characters after it, is hidden.
+const KEY_PREFIXES: &[&str] = &["sk-ant-", "sk-", "xai-", "ghp_", "gho_", "ghs_", "ghu_", "github_pat_", "glpat-", "AIza", "xoxb-", "xoxp-"];
+fn key_char(c: char) -> bool { c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '+' | '/' | '.') }
+fn run_char(c: char) -> bool { c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '+' | '/') }
+/// A sign-in's screen with what may be a secret hidden before it leaves the machine: each line typed there (`typed`, 4 characters or more),
+/// a key of a known shape, what follows `Bearer`, and any run of 32 or more key characters (base64, hex, a token of no known shape).
+pub fn redact(text: &str, typed: &[String]) -> String {
+    let mut t = text.to_string();
+    for v in typed.iter().filter(|v| v.chars().count() >= 4) { t = t.replace(v.as_str(), HIDDEN) }
+    let mut out = String::with_capacity(t.len());
+    let cs: Vec<char> = t.chars().collect();
+    let mut i = 0;
+    while i < cs.len() {
+        // a run of key characters, as a word
+        if run_char(cs[i]) && (i == 0 || !key_char(cs[i - 1])) {
+            let mut j = i; while j < cs.len() && key_char(cs[j]) { j += 1 }
+            let w: String = cs[i..j].iter().collect();
+            let known = KEY_PREFIXES.iter().any(|p| w.starts_with(p) && w.len() >= p.len() + 8);
+            let long = w.split('.').any(|part| part.chars().count() >= 32);
+            if known || long { out.push_str(HIDDEN) } else { out.push_str(&w) }
+            i = j; continue
+        }
+        out.push(cs[i]); i += 1;
+    }
+    // Bearer <token>, whatever its shape
+    let mut res = String::with_capacity(out.len()); let mut rest = out.as_str();
+    while let Some(at) = rest.find("Bearer ") {
+        res.push_str(&rest[..at + 7]); let after = &rest[at + 7..];
+        let end = after.find(char::is_whitespace).unwrap_or(after.len());
+        if end > 0 && &after[..end] != HIDDEN { res.push_str(HIDDEN) } else { res.push_str(&after[..end]) }
+        rest = &after[end..];
+    }
+    res.push_str(rest);
+    crate::settings::mask::mask(&res)
+}
+/// What a sign-in's terminal says, as the client draws it, redacted (`redact`). `state` is the terminal's ("running", "exited 0", "stopped").
+/// The link is read from the screen as it is (a long sign-in link would be hidden as a run), with only the typed lines and the vault's values taken out.
+pub fn session(text: &str, state: &str, running: bool, cols: usize, typed: &[String]) -> Value {
+    let url = if running { let mut u = link_in(text, cols); for v in typed.iter().filter(|v| v.chars().count() >= 4) { if u.contains(v.as_str()) { u.clear() } } crate::settings::mask::mask(&u) } else { String::new() };
+    let clean = redact(text, typed);
+    json!({"state": state, "running": running, "url": url, "code": if running { code_in(&clean) } else { String::new() }, "lines": tail(&clean, LINES)})
+}
+
+/// The lines typed into each sign-in here (per home and provider, the newest few), so its screen never shows them back.
+static TYPED: Mutex<Vec<(PathBuf, String, Vec<String>)>> = Mutex::new(Vec::new());
+fn typed_of(hub: &Hub, prov: &str) -> Vec<String> { TYPED.lock().unwrap().iter().find(|(h, p, _)| *h == hub.cfg.home && p == prov).map(|x| x.2.clone()).unwrap_or_default() }
+fn remember_typed(hub: &Hub, prov: &str, line: &str) {
+    let mut g = TYPED.lock().unwrap();
+    if !g.iter().any(|(h, p, _)| *h == hub.cfg.home && p == prov) { g.push((hub.cfg.home.clone(), prov.to_string(), vec![])) }
+    let v = &mut g.iter_mut().find(|(h, p, _)| *h == hub.cfg.home && p == prov).unwrap().2;
+    if !v.iter().any(|x| x == line) { v.push(line.to_string()) } while v.len() > 16 { v.remove(0); }
 }
 
 // ---- the machine asked ----
@@ -126,7 +178,8 @@ pub async fn state(hub: &Arc<Hub>, fresh: bool) -> Value {
     let mut providers = vec![];
     for p in PROVIDERS {
         let c = found.as_array().and_then(|a| a.iter().find(|x| s(x, "id") == p.id)).cloned().unwrap_or(json!({}));
-        let sess = match &terms { Some(t) => t.screen(&key_of(p.id)).await.map(|(text, st, running, cols)| session(&text, &st, running, cols)), None => None };
+        let typed = typed_of(hub, p.id);
+        let sess = match &terms { Some(t) => t.screen(&key_of(p.id)).await.map(|(text, st, running, cols)| session(&text, &st, running, cols, &typed)), None => None };
         providers.push(json!({"id": p.id, "title": p.title, "hint": p.hint, "installed": !s(&c, "path").is_empty(), "version": s(&c, "version"), "signed": if s(&c, "signed").is_empty() { "unknown" } else { s(&c, "signed") },
             "who": s(&c, "who"), "installable": super::tools_install::plan(p.id, &hub.cfg.os, &hub.cfg.arch, false, false).map_or(false, |x| !matches!(x, super::tools_install::Plan::Link(_))),
             "install": installs.get(p.id).cloned().unwrap_or(Value::Null), "session": sess.unwrap_or(Value::Null)}));
@@ -155,10 +208,21 @@ async fn act_here(hub: &Arc<Hub>, prov: &str, action: &str, text: &str) -> Resul
             let cwd = hub.cfg.home.to_string_lossy().into_owned();
             t.run_alone(&key, &format!("Sign in to {}", p.title), &cwd, &prog, &args, COLS, ROWS).await.map(|_| ())
         }
-        "keys" => {
-            if text.len() > TYPED || text.contains(['\r', '\n', '\0']) { return Err("type one line".into()) }
-            let mut b = text.as_bytes().to_vec(); b.push(b'\r');
-            if terms()?.input(&key, b).await { Ok(()) } else { Err("that sign-in is not running".into()) }
+        // a line typed, or a key: the key is kept in this machine's vault first (so every mask here covers it) and typed from there
+        "keys" | "secret" => {
+            if text.len() > TYPED_MAX || text.contains(['\r', '\n', '\0']) { return Err("type one line".into()) }
+            let t = terms()?;
+            let line = if action == "secret" {
+                if text.trim().is_empty() { return Err("paste the key first".into()) }
+                let (name, v) = (vault_name(p.id), text.trim().to_string());
+                let purpose = format!("{} sign-in, typed from another of your machines", p.title);
+                let r = { let (n, v) = (name.clone(), v.clone()); tokio::task::spawn_blocking(move || crate::settings::vault::own_put(&n, &v, &purpose)).await.unwrap_or_else(|_| "fail".into()) };
+                if r.starts_with("fail") { return Err("the key could not be kept in that machine's vault (is it locked?)".into()) }
+                crate::settings::vault::own_get(&name).ok_or("the key could not be read back from that machine's vault")?
+            } else { text.to_string() };
+            remember_typed(hub, p.id, line.trim());
+            let mut b = line.into_bytes(); b.push(b'\r');
+            if t.input(&key, b).await { Ok(()) } else { Err("that sign-in is not running".into()) }
         }
         "key" => {
             let k = KEYS.iter().find(|(n, _)| *n == text).ok_or("not a key")?;
@@ -170,7 +234,7 @@ async fn act_here(hub: &Arc<Hub>, prov: &str, action: &str, text: &str) -> Resul
             let checks: Value = hub.setting("onboard.checks").await.and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null);
             super::tools_install::start(hub, p.id, checks["winget"] == true, checks["node"] == true, |h| Box::pin(async move { forget_checks(&h) })).await.map(|_| ())
         }
-        _ => Err("action: start, shell, keys, key, stop, install or check".into()),
+        _ => Err("action: start, shell, keys, secret, key, stop, install or check".into()),
     }
 }
 
@@ -191,7 +255,7 @@ pub async fn serve(hub: &Arc<Hub>, _link: &str, m: &str, p: &Value) -> Value {
 
 /// The panel open here: the machine (link and name), its last answer, what went wrong, and the Claude sync token being made here.
 #[derive(Default, Clone)]
-struct Panel { link: String, name: String, data: Value, error: String, at: u64, sync: String, polling: bool }
+struct Panel { link: String, name: String, data: Value, error: String, at: u64, sync: String, polling: bool, keymode: Vec<String> }
 static PANELS: Mutex<Vec<(PathBuf, Panel)>> = Mutex::new(Vec::new());
 fn panel(hub: &Hub) -> Panel { PANELS.lock().unwrap().iter().find(|(h, _)| *h == hub.cfg.home).map(|x| x.1.clone()).unwrap_or_default() }
 fn put(hub: &Hub, f: impl FnOnce(&mut Panel)) -> Panel {
@@ -224,7 +288,7 @@ async fn local(hub: &Arc<Hub>, making: &str) -> Value {
 }
 async fn publish(hub: &Arc<Hub>) {
     let p = panel(hub);
-    let v = if p.link.is_empty() { Value::Null } else { json!({"link": p.link, "name": p.name, "data": p.data, "error": p.error, "at": p.at, "local": local(hub, &p.sync).await}) };
+    let v = if p.link.is_empty() { Value::Null } else { json!({"link": p.link, "name": p.name, "data": p.data, "error": p.error, "at": p.at, "local": local(hub, &p.sync).await, "keymode": p.keymode}) };
     hub.set_info("signin.there", &v.to_string()).await;
 }
 /// Whether anything shown runs (a sign-in there, an install there, the sync token's sign-in here): then the panel is asked again soon.
@@ -257,6 +321,15 @@ fn poll(hub: &Arc<Hub>) {
     });
 }
 
+/// A masked box's Send (`secret-save`, its value packed `@signin\u{1f}<link>\u{1f}<provider>`, `@signin-key\u{1f}...` or `@signin-sync`): the typed
+/// text is in `fields` only, for this one request; it is never a draft, never in the panel's state and never in an error.
+pub fn is_save(value: &str) -> bool { value == "@signin-sync" || value.starts_with("@signin\u{1f}") || value.starts_with("@signin-key\u{1f}") }
+pub async fn save(hub: &Arc<Hub>, value: &str, fields: &Value) -> Result<Value, String> {
+    if value == "@signin-sync" { return act(hub, "machine-signin-sync-code", "", fields).await }
+    if let Some(v) = value.strip_prefix("@signin-key\u{1f}") { return act(hub, "machine-signin-secret", v, fields).await }
+    act(hub, "machine-signin-keys", value.strip_prefix("@signin\u{1f}").unwrap_or(""), fields).await
+}
+
 fn parts(value: &str) -> (String, String, String) { let mut i = value.split('\u{1f}'); (i.next().unwrap_or("").into(), i.next().unwrap_or("").into(), i.next().unwrap_or("").into()) }
 
 /// A press on the panel (`machine-signin*`, through `machines.page.act`). `fields` carries `sikeys` (a line to type there) and `sicode` (the sync token's code).
@@ -278,21 +351,24 @@ pub async fn act(hub: &Arc<Hub>, action: &str, value: &str, fields: &Value) -> R
             let made = s(&r, "made").to_string(); if made.is_empty() { return Err(if s(&r, "error").is_empty() { "the sync token could not be started".into() } else { s(&r, "error").into() }) }
             put(hub, |x| x.sync = made); publish(hub).await; poll(hub); Ok(json!({}))
         }
+        // "This is a key": the box's next Send keeps the line in that machine's vault and types it from there
+        "machine-signin-keymode" => { put(hub, |x| if x.keymode.contains(&prov) { x.keymode.retain(|k| *k != prov) } else { x.keymode.push(prov.clone()) }); publish(hub).await; Ok(json!({})) }
         "machine-signin-sync-code" | "machine-signin-sync-cancel" => {
             let m = hub.accounts.get().cloned().ok_or("accounts are not running here")?;
             let id = panel(hub).sync; if id.is_empty() { return Err("no sync token is being made".into()) }
             let snap = m.request(&json!({"op": "list"})).await;
             let att = snap["attempts"].as_array().and_then(|a| a.iter().filter(|x| s(x, "profile") == id).last()).map(|x| s(x, "id").to_string()).unwrap_or_default();
             let q = if action.ends_with("code") { json!({"op": "respond", "profile": id, "attempt": att, "code": s(fields, "sicode").trim()}) } else { json!({"op": "cancel", "profile": id, "attempt": att}) };
-            let r = m.request(&q).await; publish(hub).await; poll(hub);
+            let r = m.request(&q).await;
+            put(hub, |x| x.error = s(&r, "error").to_string()); publish(hub).await; poll(hub);
             if !s(&r, "error").is_empty() { return Err(s(&r, "error").into()) } Ok(json!({}))
         }
-        "machine-signin" | "machine-signin-shell" | "machine-signin-keys" | "machine-signin-key" | "machine-signin-stop" | "machine-signin-install" | "machine-signin-check" => {
+        "machine-signin" | "machine-signin-shell" | "machine-signin-keys" | "machine-signin-secret" | "machine-signin-key" | "machine-signin-stop" | "machine-signin-install" | "machine-signin-check" => {
             if link.is_empty() || provider(&prov).is_none() { return Err("which machine and which agent?".into()) }
             let (a, text) = match action {
                 "machine-signin" => ("start", String::new()), "machine-signin-shell" => ("shell", String::new()), "machine-signin-stop" => ("stop", String::new()),
                 "machine-signin-install" => ("install", String::new()), "machine-signin-check" => ("check", String::new()),
-                "machine-signin-key" => ("key", extra), _ => ("keys", s(fields, "sikeys").to_string()),
+                "machine-signin-key" => ("key", extra), "machine-signin-secret" => ("secret", s(fields, "sikeys").to_string()), _ => ("keys", s(fields, "sikeys").to_string()),
             };
             let r = ask(hub, &link, "signin.act", &json!({"provider": prov, "action": a, "text": text})).await;
             put(hub, |x| if x.link == link { match &r { Ok(d) => { x.data = d.clone(); x.error.clear(); x.at = now_ms() / 1000 } Err(e) => x.error = e.clone() } });
@@ -323,9 +399,30 @@ mod tests {
     }
     #[test] fn a_session_shows_its_link_and_code_only_while_it_runs() {
         let t = "Open https://auth.openai.com/codex/device\nEnter ABCD-EFGH";
-        let on = session(t, "running", true, 500); assert_eq!((on["url"].as_str().unwrap(), on["code"].as_str().unwrap()), ("https://auth.openai.com/codex/device", "ABCD-EFGH"));
-        let off = session(t, "exited 0", false, 500); assert_eq!((off["url"].as_str().unwrap(), off["code"].as_str().unwrap(), off["state"].as_str().unwrap()), ("", "", "exited 0"));
+        let on = session(t, "running", true, 500, &[]); assert_eq!((on["url"].as_str().unwrap(), on["code"].as_str().unwrap()), ("https://auth.openai.com/codex/device", "ABCD-EFGH"));
+        let off = session(t, "exited 0", false, 500, &[]); assert_eq!((off["url"].as_str().unwrap(), off["code"].as_str().unwrap(), off["state"].as_str().unwrap()), ("", "", "exited 0"));
         assert_eq!(off["lines"].as_array().unwrap().len(), 2);
+    }
+    #[test] fn what_may_be_a_secret_never_leaves_the_screen() {
+        let keys = ["sk-ant-api03-abcdefghijklmnopqrstuv", "sk-proj-ABCDEFGH12345678", "xai-0123456789abcdef", "ghp_ABCDEFGHIJKLMNOP1234", "gho_abcdefgh1234", "AIzaSyA-1234567890abcdefgh"];
+        for k in keys { let r = redact(&format!("Your key {k} was saved."), &[]); assert!(!r.contains(k) && r.contains(HIDDEN) && r.starts_with("Your key "), "{k}: {r}") }
+        let b64 = "dGhpcyBpcyBhIHZlcnkgbG9uZyBzZWNyZXQgdG9rZW4gaW4gYmFzZTY0"; assert_eq!(redact(&format!("token={b64}"), &[]), format!("token={HIDDEN}"));
+        let hex = "0123456789abcdef0123456789abcdef"; assert!(!redact(hex, &[]).contains(hex));
+        assert_eq!(redact("Authorization: Bearer abc.def", &[]), format!("Authorization: Bearer {HIDDEN}"));
+        assert_eq!(redact("> my-own-word\nok", &["my-own-word".into()]), format!("> {HIDDEN}\nok"), "the line just typed, echoed");
+        assert_eq!(redact("Enter this code QWER-TY123, then sk- and ask-me", &[]), "Enter this code QWER-TY123, then sk- and ask-me", "ordinary words stay");
+        assert_eq!(redact("1", &["1".into()]), "1", "a short answer (a menu's 1) is not hidden everywhere");
+    }
+    #[test] fn a_session_hides_an_echoed_key_but_keeps_the_sign_in_link() {
+        let screen = "Visit https://claude.com/cai/oauth/authorize?code_challenge=abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ&state=S\nAPI key: sk-ant-api03-SECRETSECRETSECRET\n> typed-secret-value";
+        let v = session(screen, "running", true, 500, &["typed-secret-value".into()]);
+        let all = v.to_string();
+        assert!(!all.contains("SECRETSECRET") && !all.contains("typed-secret-value"), "{all}");
+        assert!(v["url"].as_str().unwrap().ends_with("&state=S"), "the link is whole: {}", v["url"]);
+    }
+    #[test] fn a_masked_send_is_told_by_its_value() {
+        assert!(is_save("@signin\u{1f}p1\u{1f}codex") && is_save("@signin-key\u{1f}p1\u{1f}grok") && is_save("@signin-sync"));
+        assert!(!is_save("@apikey\u{1f}OPENAI") && !is_save("signin"));
     }
     #[test] fn the_tail_is_the_last_lines_that_say_something() {
         let t = (1..=20).map(|i| format!("line {i}")).collect::<Vec<_>>().join("\n\n");
@@ -346,7 +443,7 @@ mod tests {
     }
     #[test] fn every_provider_has_one_terminal_and_no_key_is_free_text() {
         let keys: std::collections::HashSet<String> = PROVIDERS.iter().map(|p| key_of(p.id)).collect(); assert_eq!(keys.len(), PROVIDERS.len());
-        assert!(key_of("claude").starts_with("s:"), "a shell's key: the phones there list it");
+        assert!(crate::term::quiet(&key_of("claude")), "no client there sees its bytes");
         assert!(KEYS.iter().all(|(_, b)| b.len() <= 3));
     }
 }

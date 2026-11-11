@@ -129,6 +129,8 @@ impl Terms {
             _ => (vec![], frame(key, Some(pid), bs, None), None),
         };
         if !replies.is_empty() { if let Some(sh) = g.shells.get(key) { sh.pty.write(replies); } }
+        // a quiet terminal's bytes go to no client (a sign-in another machine drives: what it echoes may be a key)
+        if quiet(key) { return }
         // droppable: a client over half its outbox is skipped and marked, not dropped
         let bytes = bs.len() * 4 + 96;
         for c in self.hub.clients() { if !self.hub.push_budgeted(c, f.clone(), bytes) && g.skipped.len() < MAX_SKIPPED { g.skipped.insert((c, key.to_string())); } }
@@ -162,7 +164,7 @@ impl Terms {
             sf = Some(state_frame(key, sc));
         } }
         Self::finish(&mut g, key);
-        drop(g); if let Some(f) = sf { self.hub.push_all(&f) }
+        drop(g); if let Some(f) = sf.filter(|_| !quiet(key)) { self.hub.push_all(&f) }
     }
     /// A finished terminal's screen stays in memory only among the newest KEEP_FINISHED (chat terminals are on disk; a shell's is not kept).
     fn finish(g: &mut Inner, key: &str) {
@@ -246,6 +248,7 @@ impl Terms {
     }
     /// TSnap: bytes that draw the screen on a blank terminal, to one client (ALL: every client).
     pub async fn snap(&self, client: u64, key: &str) {
+        if quiet(key) { return }
         let mut g = self.inner.lock().await; self.load(&mut g, key);
         let f = match g.screens.get(key) { Some(sc) => { let mut f = sframe(key, sc, None, &emb::snap(&sc.vt), Some((sc.vt.cols(), sc.vt.rows())), sc.off); f["state"] = json!(sc.state); f }
             None => frame(key, None, &[], Some((emb::cols(0) as usize, emb::rows(0) as usize))) };
@@ -273,11 +276,12 @@ impl Terms {
         let mut sf = None;
         let live = g.shells.contains_key(key);
         if let Some(sc) = g.screens.get_mut(key) { if live || sc.state == "running" { if sc.state != "stopped" { sc.state = "stopped".into(); sf = Some(state_frame(key, sc)) } } }
-        drop(g); if let Some(f) = sf { self.hub.push_all(&f) }
+        drop(g); if let Some(f) = sf.filter(|_| !quiet(key)) { self.hub.push_all(&f) }
     }
     /// Stream.read: what a client that holds run `g` up to `from` needs to hold the screen as it is now: the bytes since, or a snapshot.
     /// None: no such terminal.
     pub async fn stream_read(&self, key: &str, g: u64, from: Option<u64>) -> Option<Value> {
+        if quiet(key) { return None }
         let mut gd = self.inner.lock().await; self.load(&mut gd, key);
         let sc = gd.screens.get(key)?; let running = gd.shells.contains_key(key);
         let mut o = json!({"key":key,"g":sc.gen,"o":sc.off,"state":sc.state,"cols":sc.vt.cols(),"rows":sc.vt.rows(),"title":view_title(sc),"running":running});
@@ -290,7 +294,7 @@ impl Terms {
     /// Every terminal the hub holds now (running ones and the finished screens it keeps), newest first; `pre` keeps the keys that start with it.
     pub async fn list(&self, pre: &str) -> Vec<Value> {
         let g = self.inner.lock().await;
-        let mut v: Vec<(u64, Value)> = g.screens.iter().filter(|(k, _)| k.starts_with(pre)).map(|(k, sc)| (sc.at, json!({"key":k,"kind":kind_of(k),"thread":thread_of(k),"title":view_title(sc),
+        let mut v: Vec<(u64, Value)> = g.screens.iter().filter(|(k, _)| k.starts_with(pre) && !quiet(k)).map(|(k, sc)| (sc.at, json!({"key":k,"kind":kind_of(k),"thread":thread_of(k),"title":view_title(sc),
             "state":sc.state,"running":g.shells.contains_key(k),"cols":sc.vt.cols(),"rows":sc.vt.rows(),"g":sc.gen,"o":sc.off,"cwd":sc.cwd,"at":sc.at * 1000}))).collect();
         v.sort_by(|a, b| b.0.cmp(&a.0).then(a.1["key"].as_str().cmp(&b.1["key"].as_str()))); v.into_iter().map(|x| x.1).collect()
     }
@@ -327,6 +331,8 @@ impl Terms {
 
 fn b64(b: &[u8]) -> String { use base64::Engine; base64::engine::general_purpose::STANDARD.encode(b) }
 /// chat (`x:<thread>:<id>`), shell (a client's own, `s:<project>:<n>`) or panel (a thread's floating terminal, keyed by the thread).
+/// A quiet terminal (`q:`): its screen is read by the hub only (`screen`), never pushed to a client, listed, snapped or streamed.
+pub fn quiet(k: &str) -> bool { k.starts_with("q:") }
 pub fn kind_of(k: &str) -> &'static str { if emb::is_key(k) { "chat" } else if k.starts_with("s:") { "shell" } else { "panel" } }
 /// The thread a terminal belongs to ("" for a client's own shell).
 pub fn thread_of(k: &str) -> &str { if emb::is_key(k) { k[2..].rsplitn(2, ':').nth(1).unwrap_or("") } else if k.starts_with("s:") { "" } else { k } }
@@ -356,6 +362,8 @@ impl RpcHandler for TermRpc {
         Box::pin(async move {
             let ok = || vec![json!({"t":"reply","id":id,"ok":true})];
             let t = &self.0; let thread = s(p, "thread");
+            // a quiet terminal is the hub's own (a sign-in driven from another machine): no client opens, types into or stops it
+            if quiet(thread) || quiet(s(p, "key")) { return vec![json!({"t":"reply","id":id,"ok":false,"error":"no such terminal"})] }
             match method {
                 "term.open" => { t.open_shell(thread, u(p, "cols", 80).min(1000) as u16, u(p, "rows", 24).min(1000) as u16).await; ok() }
                 "term.input" => {

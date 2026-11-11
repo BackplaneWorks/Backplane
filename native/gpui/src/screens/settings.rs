@@ -44,10 +44,19 @@ pub fn press(b: &Btn) -> Command { Command::Action(b.action.clone(), b.value.clo
 /// `open-url` is the client's own (it never goes to the hub): only web addresses open, in the system browser.
 pub fn openable(url: &str) -> bool { (url.starts_with("https://") || url.starts_with("http://")) && url.len() <= 8000 && !url.chars().any(|c| c.is_whitespace() || c.is_control()) }
 pub fn is_vault_save(b: &Btn) -> bool { b.action == "secret-save" }
+/// The masked box a sign-in panel's Send reads (`@signin...`), None for the other vault Saves.
+pub fn signin_field(packed: &str) -> Option<&'static str> {
+    if packed == "@signin-sync" { Some("sicode") } else if packed.starts_with("@signin\u{1f}") || packed.starts_with("@signin-key\u{1f}") { Some("sikeys") } else { None }
+}
 
 /// The request a vault Save sends, straight to the hub (never a view action): an API key (`@apikey` + name) is `bots.voice`
 /// `api-add`; a secret ("name\u001fpurpose\u001fthread") is `secret.set`. Nothing is sent without a name and a value.
 pub fn save_request(packed: &str, typed_name: &str, value: &str) -> Result<(String, Value), &'static str> {
+    // a line or a key typed into a sign-in on another machine, or the sync token's code (host present/signin_there.rs): Settings, Machines' own request
+    if let Some(field) = signin_field(packed) {
+        /* i18n-ok: drawn through trs by row_el, nav_title or the title */ if value.trim().is_empty() { return Err("Type it first."); }
+        return Ok(("machines.page.act".into(), serde_json::json!({"action": "secret-save", "value": packed, "fields": {field: value}})));
+    }
     let value = value.trim();
     if packed.starts_with("@apikey\u{1f}") {
         let rest = &packed["@apikey\u{1f}".len()..];
@@ -271,6 +280,12 @@ pub fn submit(this: &mut Backplane, name: &str, cx: &mut Context<Backplane>) {
 /// the field is emptied (history too) only when the hub accepted it. Nothing sent says why, as the phones do (`key-err`, `secret-err`).
 pub fn save_vault(this: &mut Backplane, b: &Btn, cx: &mut Context<Backplane>) {
     let key = b.value.starts_with("@apikey\u{1f}");
+    // a sign-in panel's box: sent as it is, emptied once the hub took it; a refusal is the panel's own row (the hub keeps why)
+    if let Some(field) = signin_field(&b.value) {
+        let Some(input) = this.screens.fields.get(field).map(|s| s.input.clone()) else { return };
+        if let Ok((m, p)) = save_request(&b.value, "", &input.read(cx).content.to_string()) { let _ = this.tx.try_send(Command::Rpc(m, Secret(p), if field == "sicode" { "signin-code" } else { "signin" })); }
+        cx.notify(); return;
+    }
     let (field, err) = if key { ("kval", "key-err") } else { ("sval", "secret-err") };
     let say = |this: &mut Backplane, why: &str| { let _ = this.tx.try_send(Command::Action(err.into(), why.into())); };
     let Some(input) = this.screens.fields.get(field).map(|s| s.input.clone()) else { return };
@@ -297,6 +312,10 @@ pub fn reply_error(x: &Value) -> String {
 pub fn rpc_done(this: &mut Backplane, tag: &str, ok: bool, why: &str, cx: &mut Context<Backplane>) {
     if tag == "browser" { if !ok { if let Some((_, page)) = &this.screens.browser { let page = page.clone(); page.update(cx, |p, cx| p.open_failed(why, cx)); } } return; }
     if tag.starts_with("hook") { return super::bots::hook_done(this, tag, ok, why, cx); }
+    if tag == "signin" || tag == "signin-code" {
+        if ok { if let Some(input) = this.screens.fields.get(if tag == "signin" { "sikeys" } else { "sicode" }).map(|s| s.input.clone()) { input.update(cx, |i, cx| i.set(String::new(), cx)); } }
+        return;
+    }
     let (name, sent, err) = match tag { "key" => ("kval", "key-sent", "key-err"), "secret" => ("sval", "secret-sent", "secret-err"), _ => return };
     /* i18n-ok: drawn through trs by row_el, nav_title or the title */ let (a, v) = if ok { (sent, String::new()) } else { (err, if why.is_empty() { format!("The hub refused the {}", if tag == "key" { "key" } else { "secret" }) } else { why.to_string() }) };
     // the typed value is kept until the hub accepted it, so a refusal can be corrected and sent again
@@ -549,6 +568,12 @@ mod tests {
     #[test] fn a_button_press_is_its_action_and_a_form_field_change_is_bfield_name_unit_text() {
         match press(&Btn { label: "x".into(), action: "theme".into(), value: "dark".into(), on: false }) { Command::Action(a, v) => assert_eq!((a.as_str(), v.as_str()), ("theme", "dark")), c => panic!("{c:?}") }
         match field_command("kname", "OPENAI_API_KEY") { Command::Action(a, v) => { assert_eq!(a, "bfield"); assert_eq!(v, "kname\u{1f}OPENAI_API_KEY"); } c => panic!("{c:?}") }
+    }
+    #[test] fn a_sign_in_box_goes_as_its_own_request_and_names_its_field() {
+        let (m, p) = save_request("@signin-key\u{1f}p1\u{1f}grok", "", "xai-SECRET").unwrap();
+        assert_eq!((m.as_str(), p["action"].as_str(), p["value"].as_str(), p["fields"]["sikeys"].as_str()), ("machines.page.act", Some("secret-save"), Some("@signin-key\u{1f}p1\u{1f}grok"), Some("xai-SECRET")));
+        assert_eq!(save_request("@signin-sync", "", "CODE#S").unwrap().1["fields"]["sicode"], "CODE#S");
+        assert_eq!(signin_field("@apikey\u{1f}X"), None); assert!(save_request("@signin\u{1f}p1\u{1f}codex", "", " ").is_err());
     }
     /// The secret never rides a view action: typing in a vault field sends nothing, and the Save is a direct request.
     #[test] fn only_web_addresses_open() { assert!(openable("https://backplane.works/privacy") && openable("http://127.0.0.1:1/x")); for u in ["file:///etc/passwd", "javascript:alert(1)", "https://a b", "", "ftp://x"] { assert!(!openable(u), "{u}"); } }

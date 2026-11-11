@@ -14,7 +14,7 @@ home = os.environ.get("HOME", "/tmp")
 mark = os.path.join(home, f".standin-{name}")
 def signed(who): open(mark, "w").write(who)
 if a[:1] == ["--version"]:
-    print({"claude": "2.1.322 (Claude Code)", "codex": "codex-cli 0.167.0", "agy": "1.5.5"}[name]); sys.exit(0)
+    print({"claude": "2.1.322 (Claude Code)", "codex": "codex-cli 0.167.0", "agy": "1.5.5", "muse": "muse 0.9.0", "opencode": "1.19.5"}[name]); sys.exit(0)
 if name == "claude":
     if a[:2] == ["auth", "status"]:
         if os.path.exists(mark): print(json.dumps({"loggedIn": True, "email": open(mark).read(), "authMethod": "claude.ai"})); sys.exit(0)
@@ -49,6 +49,22 @@ if name == "codex":
             if os.path.exists(os.path.join(home, ".standin-approve")): signed("chatgpt"); print("Successfully logged in", flush=True); sys.exit(0)
             time.sleep(0.2)
         sys.exit(1)
+    sys.exit(1)
+if name == "muse":  # a key prompt that echoes what is typed, after a banner that shows an old token unasked
+    if a[:1] == ["login"]:
+        print("Muse Code login\nYour previous token: ghp_" + "A" * 30 + "\nPaste your API key: ", end="", flush=True)
+        k = sys.stdin.readline().strip()
+        print(f"Got key {k}. Checking it…", flush=True); signed("keyed"); print("Signed in.", flush=True)
+        for line in sys.stdin: pass
+        sys.exit(0)
+    sys.exit(1)
+if name == "opencode":  # the same, typed as a plain line
+    if a[:2] == ["auth", "login"]:
+        print("Enter API key: ", end="", flush=True)
+        k = sys.stdin.readline().strip()
+        print(f"Saved {k}", flush=True); signed("keyed")
+        for line in sys.stdin: pass
+        sys.exit(0)
     sys.exit(1)
 if name == "agy":
     print("Welcome to Antigravity CLI.\nYou are not signed in. Press Enter to sign in with Google.", flush=True)
