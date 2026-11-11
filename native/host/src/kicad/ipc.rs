@@ -263,10 +263,12 @@ pub fn servers() -> String { IPC.get().map(|i| i.lines.lock().unwrap().clone()).
 
 // The runtime ---------------------------------------------------------------------------------------------------------------
 
-fn newest_in(dir: &Path) -> Vec<PathBuf> {
-    let mut v: Vec<String> = std::fs::read_dir(dir).map(|d| d.flatten().filter_map(|e| e.file_name().into_string().ok()).collect()).unwrap_or_default();
-    v.sort_by(|a, b| if a == b { std::cmp::Ordering::Equal } else if ks::version_ge(a, b) { std::cmp::Ordering::Less } else { std::cmp::Ordering::Greater });
-    v.into_iter().flat_map(|n| [dir.join(&n).join("bin").join("kicad-cli"), dir.join(n).join("bin").join("kicad-cli.exe")]).collect()
+/// The installs under `dirs` (each a folder of `<version>/bin/kicad-cli`), newest first across all of them: a newer runtime in any of the hub's
+/// install folders wins over an older one in another.
+fn newest_in(dirs: &[PathBuf]) -> Vec<PathBuf> {
+    let mut v: Vec<(String, PathBuf)> = dirs.iter().flat_map(|d| std::fs::read_dir(d).map(|r| r.flatten().filter_map(|e| e.file_name().into_string().ok().map(|n| (n, d.clone()))).collect::<Vec<_>>()).unwrap_or_default()).collect();
+    v.sort_by(|a, b| if a.0 == b.0 { std::cmp::Ordering::Equal } else if ks::version_ge(&a.0, &b.0) { std::cmp::Ordering::Less } else { std::cmp::Ordering::Greater });
+    v.into_iter().flat_map(|(n, d)| [d.join(&n).join("bin").join("kicad-cli"), d.join(n).join("bin").join("kicad-cli.exe")]).collect()
 }
 /// Publish what this machine has for Settings > CAD: info `kicad.cli`, `kicad.version`, `kicad.status`, `kicad.source` and `freecad` (empty when absent).
 pub async fn publish_cad(hub: &Arc<Hub>) {
@@ -293,27 +295,42 @@ pub fn cad_status(env: &Env, ran: Option<&str>) -> (String, String) {
         Some(v) => ("stock".into(), v.to_string()),
     }
 }
-/// The runtime to use (Rt.candidates, trimmed): the `kicad.path` setting, BACKPLANE_KICAD_CLI, beside the hub, the install directories (newest first), PATH.
-pub async fn runtime(hub: &Arc<Hub>) -> Env {
-    let mut c: Vec<PathBuf> = vec![];
-    if let Some(s) = hub.setting("kicad.path").await.filter(|s| !s.is_empty()) {
-        // the field takes the command line itself, or a folder that holds it (an install's bin/, or a macOS KiCad.app)
-        let p = PathBuf::from(&s);
-        if p.is_dir() { for r in ["kicad-cli", "kicad-cli.exe", "bin/kicad-cli", "bin/kicad-cli.exe", "Contents/MacOS/kicad-cli", "KiCad.app/Contents/MacOS/kicad-cli"] { c.push(r.split('/').fold(p.to_path_buf(), |a, s| a.join(s))) } } else { c.push(p) }
-    }
-    if let Some(s) = std::env::var_os("BACKPLANE_KICAD_CLI").filter(|s| !s.is_empty()) { c.push(s.into()) }
-    if let Some(d) = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join("kicad/bin/kicad-cli"))) { c.push(d) }
-    let home = crate::plat::dirs::home_or_empty();
-    let data = std::env::var("XDG_DATA_HOME").ok().filter(|s| !s.is_empty()).unwrap_or(format!("{home}/.local/share"));
-    for d in [PathBuf::from(&data).join("backplane/kicad"), PathBuf::from(&home).join(".backplane-bend/kicad"), super::install::parent(&hub.cfg.home), hub.cfg.home.join("kicad")] { c.extend(newest_in(&d)) }
-    // BACKPLANE_KICAD_NO_SYSTEM=1 (rigs that try Install KiCad on a machine that has one): the system's own copies (PATH, /usr/bin, the macOS app) are not looked at
-    if std::env::var("BACKPLANE_KICAD_NO_SYSTEM").map_or(true, |v| v != "1") {
-        for d in std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).filter(|d| !d.as_os_str().is_empty()) { c.push(d.join("kicad-cli")); c.push(d.join("kicad-cli.exe")) }
-        c.push("/usr/bin/kicad-cli".into());
-        c.extend(super::stepglb::kicad_mac_clis().into_iter().map(PathBuf::from)); // macOS: the app bundle, system-wide or in ~/Applications
-    }
-    match c.into_iter().find(|p| p.is_file()) { Some(p) => read_runtime(&p), None => Env { status: "missing".into(), ..Default::default() } }
+/// Where a runtime is looked for, as `places` reads them from this process (tests give their own).
+#[derive(Clone, Debug, Default)]
+pub struct Places { pub setting: Option<String>, pub env_cli: Option<PathBuf>, pub beside: Option<PathBuf>, pub data: String, pub hub_home: PathBuf, pub install: PathBuf, pub system: bool, pub path: Vec<PathBuf>, pub mac: Vec<PathBuf> }
+pub fn places(hub_home: &Path, setting: Option<String>) -> Places {
+    let user_home = crate::plat::dirs::home_or_empty();
+    let data = std::env::var("XDG_DATA_HOME").ok().filter(|s| !s.is_empty()).unwrap_or(format!("{user_home}/.local/share"));
+    Places { setting, env_cli: std::env::var_os("BACKPLANE_KICAD_CLI").filter(|s| !s.is_empty()).map(PathBuf::from), beside: std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join("kicad/bin/kicad-cli"))),
+        data, hub_home: hub_home.to_path_buf(), install: super::install::parent(hub_home),
+        // BACKPLANE_KICAD_NO_SYSTEM=1 (rigs that try Install KiCad on a machine that has one): the system's own copies (PATH, /usr/bin, the macOS app) are not looked at
+        system: std::env::var("BACKPLANE_KICAD_NO_SYSTEM").map_or(true, |v| v != "1"),
+        path: std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).filter(|d| !d.as_os_str().is_empty()).collect(), mac: super::stepglb::kicad_mac_clis().into_iter().map(PathBuf::from).collect() }
 }
+/// The runtime candidates in order (Rt.candidates, trimmed): the `kicad.path` setting, BACKPLANE_KICAD_CLI, beside the hub, the hub's own installs (newest first
+/// across its install folders), then the system's KiCad (PATH, /usr/bin, the macOS app). 0.14's home (`~/.backplane-bend/kicad`) is never looked in: what is left
+/// there is a stale fork that must not win over the hub's own install.
+pub fn candidates(p: &Places) -> Vec<PathBuf> {
+    let mut c: Vec<PathBuf> = vec![];
+    if let Some(s) = p.setting.as_ref().filter(|s| !s.is_empty()) {
+        // the field takes the command line itself, or a folder that holds it (an install's bin/, or a macOS KiCad.app)
+        let f = PathBuf::from(s);
+        if f.is_dir() { for r in ["kicad-cli", "kicad-cli.exe", "bin/kicad-cli", "bin/kicad-cli.exe", "Contents/MacOS/kicad-cli", "KiCad.app/Contents/MacOS/kicad-cli"] { c.push(r.split('/').fold(f.to_path_buf(), |a, s| a.join(s))) } } else { c.push(f) }
+    }
+    c.extend(p.env_cli.clone()); c.extend(p.beside.clone());
+    let mut managed = vec![PathBuf::from(&p.data).join("backplane/kicad"), p.install.clone(), p.hub_home.join("kicad")]; managed.dedup();
+    c.extend(newest_in(&managed));
+    if p.system {
+        for d in &p.path { c.push(d.join("kicad-cli")); c.push(d.join("kicad-cli.exe")) }
+        c.push("/usr/bin/kicad-cli".into());
+        c.extend(p.mac.iter().cloned()); // macOS: the app bundle, system-wide or in ~/Applications
+    }
+    c
+}
+/// The first candidate that is there, read (`Env.status` "missing" when none is).
+pub fn pick(c: Vec<PathBuf>) -> Env { match c.into_iter().find(|p| p.is_file()) { Some(p) => read_runtime(&p), None => Env { status: "missing".into(), ..Default::default() } } }
+/// The runtime to use: the one Backplane has selected, for the hub's own work and every agent's (agents/kicadsel.rs).
+pub async fn runtime(hub: &Arc<Hub>) -> Env { pick(candidates(&places(&hub.cfg.home, hub.setting("kicad.path").await))) }
 /// Rt.manifest + KH.status from the runtime's manifest.json (no version probe: `runs` is taken as true when a manifest is read).
 pub fn read_runtime(cli: &Path) -> Env {
     let root = cli.parent().and_then(|b| b.parent()).map(|r| r.to_string_lossy().to_string()).unwrap_or_default();
@@ -460,7 +477,7 @@ mod tests {
     #[test] fn a_managed_runtime_is_found_by_its_exe_name_in_a_folder_with_spaces() {
         let d = std::env::temp_dir().join(format!("bp kicad {}", std::process::id())).join("kicad"); let _ = std::fs::remove_dir_all(&d);
         for v in ["10.99.0-bp.4", "10.99.0-bp.6"] { std::fs::create_dir_all(d.join(v).join("bin")).unwrap(); std::fs::write(d.join(v).join("bin/kicad-cli.exe"), "MZ").unwrap(); }
-        let found = newest_in(&d).into_iter().find(|p| p.is_file()).unwrap();
+        let found = newest_in(std::slice::from_ref(&d)).into_iter().find(|p| p.is_file()).unwrap();
         assert!(found.ends_with("10.99.0-bp.6/bin/kicad-cli.exe"), "{found:?}");
         let _ = std::fs::remove_dir_all(d.parent().unwrap());
     }

@@ -529,7 +529,7 @@ fn discover_desc(home: &Path, env: &Env) -> (String, bool) {
     if std::env::var("BACKPLANE_KICAD_NO_SYSTEM").map_or(true, |v| v != "1") {
         let user_home = crate::plat::dirs::home_or_empty();
         let data = std::env::var("XDG_DATA_HOME").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| format!("{user_home}/.local/share"));
-        for base in [PathBuf::from(&data).join("backplane/kicad"), PathBuf::from(&user_home).join(".backplane-bend/kicad"), super::install::parent(home), home.join("kicad")] {
+        for base in [PathBuf::from(&data).join("backplane/kicad"), super::install::parent(home), home.join("kicad")] { // never 0.14's ~/.backplane-bend/kicad: a stale fork
             if let Ok(rd) = std::fs::read_dir(&base) {
                 let mut dirs: Vec<PathBuf> = rd.flatten().map(|e| e.path()).collect();
                 dirs.sort(); dirs.reverse();

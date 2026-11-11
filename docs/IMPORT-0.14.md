@@ -24,7 +24,7 @@ What is in a 0.14 home:
 | `attachments/`, `message-images/` | files and images in messages | copied |
 | `bots/<id>/` | bots' working folders | copied, unless over 2 GB |
 | `store.db*`, `live-checkpoints/`, `*.cache`, `browser-profile/`, `cef-profile/`, `electron-profile/` | 0.14's own indexes, caches and browser profiles | not used: 0.15 rebuilds its own |
-| `mail/`, `work/`, `far/`, `deploy/`, `updates/`, `plot/`, `shots/`, `exports/`, `voice/`, `kicad/` | the mailroom's mail, background work logs, linked-machine mirrors, 0.14 updates, plots, models, KiCad builds | not copied; 0.15 still finds a KiCad installed under `~/.backplane-bend/kicad` |
+| `mail/`, `work/`, `far/`, `deploy/`, `updates/`, `plot/`, `shots/`, `exports/`, `voice/`, `kicad/` | the mailroom's mail, background work logs, linked-machine mirrors, 0.14 updates, plots, models, KiCad builds | not copied; a KiCad left under `~/.backplane-bend/kicad` is never used (a stale fork there must not win over the hub's own install): install Backplane KiCad from Settings |
 | `secrets/peers/`, `private-pairing/` | links to other machines | not copied: link again |
 | `secrets/google.json` | the Google connection | not in 0.15 |
 

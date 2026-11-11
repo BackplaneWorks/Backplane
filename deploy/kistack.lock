@@ -4,5 +4,5 @@
 # sha256 of the skills/ tree (each file's sha256 and path, sorted, hashed
 # again) is checked at every build. Change all three only with
 #   python3 scripts/kistack.py bump <commit>
-rev 641ade9041bb0844c4530dfff11010eef30919af
-skills cc68df39e9965f7797ca4f79ba63e77a4f5a3b4b4d04678587ee33d9573e475f
+rev ba82e64d46433add04c145a66c387dfb6bf988c8
+skills 0e6d0ddd86c532d69b7fe7d5dbe1ede6ca529169cfadba3108974351eb62a8a9
