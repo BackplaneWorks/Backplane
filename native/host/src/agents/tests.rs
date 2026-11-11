@@ -1812,3 +1812,15 @@ async fn lines_at_least(sd: &Path, n: usize) -> Vec<Value> { for _ in 0..100 { l
     assert!(argv.contains("a launched thread reported"), "the turn started again with it");
     assert_eq!(ag.stats.procs_spawned.load(Relaxed), 4); ag.shutdown();
 }
+
+/// Codex 0.167 reads a piped stdin to its end as more prompt before it starts ("Reading additional input from stdin..."): the hub closes Codex's stdin once
+/// it runs, or every Codex turn waits forever (the swarm's live run, Nov 11: a member stuck 30 minutes with no output). The stand-in does what Codex does.
+#[tokio::test(flavor = "multi_thread")] async fn a_codex_turn_gets_eof_on_stdin_and_finishes() {
+    let sd = dir("eof-bin");
+    script(&sd, "codex", "#!/bin/sh\ncat > /dev/null\necho '{\"type\":\"item.completed\",\"item\":{\"type\":\"agent_message\",\"text\":\"done after eof\"}}'\necho '{\"type\":\"turn.completed\",\"usage\":{\"input_tokens\":1,\"cached_input_tokens\":0,\"output_tokens\":1}}'\n");
+    let (hub, ag, _h, _w) = start("eof", |w| codex_log(w), |_| Cli::standin(&sd)).await;
+    ag.deliver_as("user", T1, "m-eof", "hello", None, vec![]).await.unwrap();
+    let ev = until(&hub, 0, 15, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await;
+    assert!(ev.iter().any(|e| turn_is(e, "completed")), "the turn ends: Codex read EOF on its stdin");
+    ag.shutdown();
+}
