@@ -6,13 +6,17 @@ End-to-end verification plan for real KiCad (`backplane-kicad-v10.99.0-bp.8+`) e
 
 ## 1. Execution Stages
 
-The harness supports two modes through a single flag (`EMBED_MODE=spike|fork`, default `fork` once `bp.8` lands) so harness construction does not block on the C++ fork build:
+> **Feasibility vs. product verification:** In `EMBED_MODE=spike`, the test harness itself creates the 24-bit X11 container and withdraws/reparents/places KiCad's windows (`lib/x11_embed_driver.py`). `spike` runs therefore prove X11/KiCad/GPUI feasibility, **not** the product's own placement. Product verification requires `EMBED_MODE=stock` or `EMBED_MODE=fork`, where the suites drive `backplane-gpui` and `backplane-hub`'s own placement (`ui:Edit`, `ui:View`, frame strip, and `{"kicad":{"report":true}}`) without harness-side reparenting.
 
-1. **Stage A (`EMBED_MODE=spike`, runs immediately on stock KiCad 10.0.7):**
-   - Uses `/home/h/.local/bin/kicad` (or `pcbnew` / `eeschema`) on a seeded `XDG_CONFIG_HOME` (suppressing the first-run wizard via pre-written `kicad_common.json` with `api.enable_server = true`).
-   - Exercises client-side `XUnmapWindow` + `XReparentWindow` into `native_child::container()` (`scr.root_visual` 24-bit container inside GPUI's 32-bit X11 window), `ConfigureWindow` resize/move sync, synthetic `ConfigureNotify` on top-level window moves, overlay hide/cutout, `XTest` mouse/key routing, GAL + 3D OpenGL rendering, and DRC/Plot floating dialogs.
-2. **Stage B (`EMBED_MODE=fork`, `backplane-kicad-v10.99.0-bp.8`):**
-   - Hub spawns `kicad --embedded --parent-window <container_xid> --api-socket <sock> --parent-pid <hub_pid> <proj>.kicad_pro` through `proc.rs`.
+The harness supports three modes through `EMBED_MODE=spike|stock|fork` (`fork` once `bp.8` lands):
+
+1. **Stage A (`EMBED_MODE=spike`, feasibility proof on stock KiCad 10.0.7):**
+   - Uses stock `/usr/bin/kicad` on a seeded `XDG_CONFIG_HOME` (suppressing the first-run wizard via pre-written `kicad_common.json` with `api.enable_server = true`).
+   - Harness-driven `XWithdrawWindow` + `XReparentWindow` into a harness 24-bit container inside GPUI's 32-bit X11 window; proves `ConfigureWindow` resize/move sync, synthetic `ConfigureNotify` on top-level window moves, `XShape` overlay cutouts, `XTest` mouse/key routing, GAL + 3D OpenGL rendering, DRC/Plot floating dialogs, and live `api.sock` commits + `Ctrl+Z`.
+2. **Stage B (`EMBED_MODE=stock`, product integration on stock KiCad 10.0.7):**
+   - Hub spawns GUI KiCad via `proc.rs` (`kicad/embed.rs`) with seeded config + isolated `TMPDIR` `api.sock`, shuts down headless `kserve`, and routes `kicad_ipc` to the GUI socket; client (`native_child.rs` + `KicadPane`) owns the 24-bit container, reparenting, resize/move sync, `XShape` cutouts, and emits `GPUI_LOG {"event":"kicad",...}`. Zero harness-side placement.
+3. **Stage C (`EMBED_MODE=fork`, product integration on `backplane-kicad-v10.99.0-bp.8`):**
+   - Hub spawns `kicad --embedded --parent-window <container_xid> --toplevel-window <gpui_xid> --api-socket <sock> --parent-pid <hub_pid> <proj>.kicad_pro` through `proc.rs`.
    - Asserts zero top-level WM flash on startup and when KiCad opens secondary frames (`EDA_3D_VIEWER_FRAME`, `SYMBOL_EDIT_FRAME`, `FOOTPRINT_EDIT_FRAME`), `WM_TRANSIENT_FOR` pointing to GPUI's top-level XID on all `DIALOG_SHIM`s, `_BACKPLANE_FOCUS` / `_BACKPLANE_KEY` `ClientMessage`s, `kiapi.backplane.embed` RPCs (`AttachToParent`, `ShowFrame`, `GetFrames`, `NextEvents`, `SetChrome`, `Close`), headless `kserve` handoff, live agent undoable commits, unsaved-changes gate, crash recovery, and client hot-swap re-parenting.
 
 ---
@@ -92,19 +96,26 @@ No check passes on log lines alone. Each step cross-checks three sources of trut
 
 ---
 
-## 5. Planned File Layout in `kicad-embed-e2e`
+## 5. File Layout & Invocation (`test/kicad_embed/`)
 
 ```text
-docs/kicad-embed-e2e.md                        # this specification
+docs/kicad-embed-e2e.md                        # specification + empirical findings
 test/kicad_embed/
   lib/
-    env_xvfb.sh                                # BP_TMP, Xvfb + i3 bootstrap, own-group cleanup, software/hw GL env
-    seed_project.py                            # copies fixtures/demos into isolated git repo + seeds kicad_common.json
-    xtree_assert.py                            # xwininfo/xprop assertions: container parenting, transient-for, zero stray top-levels
-    gui_ipc_probe.py                           # pynng client against --api-socket for live GetFrames/GetItems/modified/selection
-  embed_window_e2e.sh                          # Suite 1: W1-W6 (supports EMBED_MODE=spike today and EMBED_MODE=fork on bp.8)
-  embed_editors_e2e.sh                         # Suite 2: E1-E9 (Schematic, Symbol, Footprint, Cross-probe, PCB, Zones, DRC/ERC, 3D, Plot)
-  embed_agent_resilience_e2e.sh                # Suite 3: R1-R5 (live agent IPC + Ctrl+Z, modal guard, unsaved gate, hot-swap, crash/hang)
+    env_xvfb.sh                                # BP_TMP, private Xvfb + i3 bootstrap, own-group cleanup, llvmpipe env
+    seed_project.py                            # copies ecc83-pp into isolated git repo + seeds KiCad 10.0/10.99 JSON configs
+    x11_embed_driver.py                        # C/libX11/libXext driver: 24-bit container, withdraw/embed/switch, XShape cutout, XGrabKey, pixel diff
+    gui_ipc_probe.py                           # zero-dependency AF_UNIX NNG REQ0 + raw Protobuf client against api.sock
+  embed_window_e2e.sh                          # Suite 1 (12 checks): parenting, 24-bit visual, reflow, pure-move popups, XShape, <50ms frame switch, focus
+  embed_editors_e2e.sh                         # Suite 2 (15 checks): Schematic, Symbol, PCB + copper zones, Footprint, DRC, 3D orbit, Plot + Gerber/Drill/STEP
+  embed_agent_resilience_e2e.sh                # Suite 3 (8 checks): live agent IPC commit + GAL diff + human Ctrl+Z, SIGSTOP XGrabKey rescue, hot-swap, SIGKILL
+  run_all.sh                                   # sequential RAM-light runner (strictly one KiCad process at a time)
+```
+
+Run all three suites against stock KiCad today (`spike`), or against client integration (`stock` / `fork`):
+
+```sh
+EMBED_MODE=spike ./test/kicad_embed/run_all.sh
 ```
 
 ---
@@ -121,3 +132,22 @@ To keep `test/kicad_embed/*` deterministic across Linux (and reusable on Windows
 3. **Fork flags (`bp.8`):**
    - `kicad --embedded --parent-window <container_xid> [--toplevel-window <gpui_xid>] --api-socket <sock> --parent-pid <hub_pid> <project>.kicad_pro`
    - Prints `KiCad API server listening at <sock>` on stdout/stderr once `KICAD_API_SERVER::SetReadyToReply()` has registered handlers.
+
+---
+
+## 7. Empirical Findings on Stock KiCad 10.0.7 (`EMBED_MODE=spike`)
+
+1. **Zero-patch wizard suppression & isolated `api.sock`:**
+   - Pre-seeding `$XDG_CONFIG_HOME/kicad/10.0/kicad_common.json` (`"version": 6`, `"api": {"enable_server": true}`, `"do_not_show_again": {"data_collection_prompt": true, "update_check_prompt": true, "zone_fill_warning": true}`) plus `sym-lib-table`, `fp-lib-table`, `design-block-lib-table`, and per-instance `TMPDIR=<dir>` makes stock KiCad 10.0.7 skip `STARTWIZARD` completely and listen on `$TMPDIR/kicad/api.sock` with zero C++ changes.
+2. **Config schema versions & default AUI docks:**
+   - Stock KiCad 10.0.7 expects exact `"meta.version"` numbers per editor (`kicad_common.json: 6`, `pcbnew.json: 5`, `fpedit.json: 5`, `eeschema.json: 3`, `symbol_editor.json: 1`, `3d_viewer.json: 4`); mismatched versions reset the file to defaults.
+   - Setting `"aui": {"show_properties": false, "show_layer_manager": false, "show_schematic_hierarchy": false}` reclaims ~460 px of horizontal canvas width in narrow half-window panes, and overriding `WM_NORMAL_HINTS` `PMinSize` (`min_width = 500` on `PCB_EDIT_FRAME`) allows clean narrow reflow.
+3. **ICCCM `XWithdrawWindow` required on tiling/reparenting WMs:**
+   - Hiding `KICAD_MANAGER_FRAME` or born-top-level `KIWAY_PLAYER` windows before `XReparentWindow` must use `XWithdrawWindow` (sending synthetic root `UnmapNotify`), not bare `XUnmapWindow`, or `i3` retains an empty tiled container.
+4. **Stock `API_HANDLER_BOARD` `RunAction` requires mapped `PCB_EDIT_FRAME`:**
+   - In stock KiCad 10.0.7, `RunAction` dispatches through `PCB_EDIT_FRAME`'s `TOOL_MANAGER`. Actions (`pcbnew.EditorControl.showEeschema`, `common.Control.show3DViewer`, `pcbnew.DRCTool.runDRC`, `common.Control.plot`, `pcbnew.ZoneFiller.*`) execute reliably when `PCB_EDIT_FRAME` is mapped, whereas unmapping `PCB_EDIT_FRAME` stalls coroutine tool transitions on its GAL canvas; `Symbol Editor` (`Ctrl+L`) and `Footprint Editor` (`Ctrl+F`) open cleanly via `KICAD_MANAGER_FRAME` (`KICAD_MANAGER_CONTROL::ShowPlayer`) inside the same single `kicad` process.
+5. **Dirty-state detection on stock 10.0.7 vs `10.99-bp`:**
+   - Stock KiCad 10.0.7 returns `AS_UNHANDLED` for `GetDocumentModifiedState` (added in `10.99`), but reliably prefixes `_NET_WM_NAME` with `*` when modified and strips `*` on `SaveDocument` / `Ctrl+S`.
+6. **Sibling frame switch latency & live agent `Ctrl+Z`:**
+   - Mapping/unmapping reparented `PCB <-> Schematic <-> 3D Viewer` siblings inside the 24-bit container takes **0.5–0.8 ms**.
+   - Live `BeginCommit -> CreateItems(Track) -> EndCommit` over `api.sock` immediately repaints the embedded OpenGL GAL canvas without file reload, and `Ctrl+Z` inside the embedded editor atomically reverts the agent's commit.
