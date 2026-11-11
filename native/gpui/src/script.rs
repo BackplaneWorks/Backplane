@@ -320,12 +320,19 @@ impl Backplane {
                 self.ui_epoch += 1; self.begin("zoom".into(), Goal::Frame, cx); cx.notify();
             }
             Step::Read(what) => {
-                // G6: the composer's text, or the thread selection (GPUI has no text selection yet: "" with supported:false)
+                // G6: the composer's text, or the thread selection (GPUI has no text selection yet: "" with supported:false); "timeline": the open conversation
                 let (text, supported) = match what.as_str() { "composer" => (self.input.read(cx).content.to_string(), true),
                     // the settings overlay's structure (labels, button actions, field names; never a field's value), to design its layout from the real payload
                     "settings" => (crate::screens::settings::structure(&self.data["settings"]), true),
                     // the performance overlay's text; not supported while it is hidden
                     "perf" => crate::perf::lines().map_or((String::new(), false), |l| (l.join("\n"), true)),
+                    // the open thread's conversation as the window holds it (its id, then one "role: text" line per entry), for e2e checks that a view
+                    // follows its thread without a re-open (lane T, run-c); text only, never drafts or fields
+                    "timeline" => { let t = &self.data["thread"];
+                        let mut out = vec![format!("thread: {}", t["id"].as_str().unwrap_or(""))];
+                        for e in t["entries"].as_array().map_or(&[][..], |r| r.as_slice()) {
+                            out.push(format!("{}: {}", e["role"].as_str().or(e["kind"].as_str()).unwrap_or(""), e["text"].as_str().unwrap_or("").replace('\n', " "))); }
+                        (out.join("\n"), true) }
                     _ => (String::new(), false) };
                 self.m("read", json!({"what": what, "text": text, "supported": supported}));
                 self.pump(cx);
