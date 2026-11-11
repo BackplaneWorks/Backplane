@@ -142,12 +142,13 @@ struct DProject: Codable, Equatable, Identifiable {
     var mark: DMark?         // another machine's project: where it is
     var also: String         // this machine's project that is also on a linked machine: "also on desktop"
     var newOn: [DNewOn]      // where a new thread can start, when more than one machine has this project
-    enum CodingKeys: String, CodingKey { case id, title, root, threadCount, settledCount, updatedAt, waiting, icon, css, mark, also, newOn }
+    var runsOn: String       // "runs on desktop": where a new thread starts (the first of newOn); "" from an older hub
+    enum CodingKeys: String, CodingKey { case id, title, root, threadCount, settledCount, updatedAt, waiting, icon, css, mark, also, newOn, runsOn }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = c.str(.id); title = c.str(.title); root = c.str(.root); threadCount = c.int(.threadCount); settledCount = try? c.decode(Int.self, forKey: .settledCount); updatedAt = c.int(.updatedAt); waiting = c.int(.waiting)
         icon = c.str(.icon); css = c.str(.css)
-        mark = try? c.decode(DMark.self, forKey: .mark); also = c.str(.also); newOn = (try? c.decode([DNewOn].self, forKey: .newOn)) ?? []
+        mark = try? c.decode(DMark.self, forKey: .mark); also = c.str(.also); newOn = (try? c.decode([DNewOn].self, forKey: .newOn)) ?? []; runsOn = c.str(.runsOn)
     }
 }
 

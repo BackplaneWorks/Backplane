@@ -784,7 +784,15 @@ impl Render for Backplane {
                         .children(crate::screens::queue::strip(cx, light, thread, &self.screens.unsent.rows(thread["id"].as_str().unwrap_or(""))))
                         .child(div().id("composer-box").border_1().border_color(c("accent")).bg(c("view")).px_3().py_2().min_h(px(60.)).cursor(CursorStyle::IBeam).on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| { this.input.focus_handle(cx).focus(window); })).child(self.input.clone()))
                         // another machine's thread: where an agent sent from here runs
-                        .children(crate::screens::badge::runs_text(&thread["mark"]).map(|r| div().id("runs-on").flex().items_center().gap(px(3.)).text_size(px(11.)).text_color(c("dim")).child(ic(light, "link", 11., "dim")).child(r)))
+                        .children(if self.project_page.is_some() { None } else { crate::screens::badge::runs_text(&thread["mark"]).map(|r| div().id("runs-on").flex().items_center().gap(px(3.)).text_size(px(11.)).text_color(c("dim")).child(ic(light, "link", 11., "dim")).child(r)) })
+                        // a project's page: where the thread this sends starts ("runs on desktop"), and the machine picker behind it (D6; the hub's `runsOn`, `newOn`)
+                        .children(self.project_page.clone().and_then(|pid| crate::screens::projects::find(&self.data, &pid).map(|p| (pid, p.clone()))).filter(|(_, p)| !string(p, "runsOn").is_empty()).map(|(pid, p)| {
+                            let items = crate::screens::ctxmenu::run_items(&pid, &p["newOn"]); let more = items.len() > 1;
+                            for it in &items { ctl.push(CtlEntry { id: format!("run-on:{}", it.label), label: it.label.clone(), ctl: Ctl::Node(it.action.clone(), it.value.clone()) }); }
+                            /* i18n-ok: a ctl id the drivers press */ with_rect(div().id("runs-on-pick"), || "ui:runs on".to_string()).flex().items_center().gap(px(3.)).text_size(px(11.)).text_color(c("dim")).when(more, |d| d.cursor_pointer().hover(|s| s.text_color(c("text"))))
+                                .child(ic(light, "link", 11., "dim")).child(trs(&string(&p, "runsOn"))).when(more, |d| d.child(ic(light, "chevron-down", 11., "dim")))
+                                .on_mouse_down(MouseButton::Left, cx.listener(move |this, e: &MouseDownEvent, _, cx| { if items.len() > 1 { this.ctx_open(e.position, items.clone(), cx); } }))
+                        }))
                         .child(div().relative().flex().gap_2().items_center().w_full().min_w_0()
                             // the row as drawn: its width sizes the chip's words; the menu floats from where it is (another frame when it moved under an open menu)
                             .child(canvas({ let (me, cell, at, open) = (cx.entity().downgrade(), self.screens.acct.bar_w.clone(), self.screens.pick.row.clone(), self.screens.picker_open); move |b, _, cx| {

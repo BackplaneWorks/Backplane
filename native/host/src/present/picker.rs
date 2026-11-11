@@ -32,7 +32,17 @@ pub fn folders(drafts: &Value, home: &str, roots: &[&str]) -> Value {
     names.sort_by_key(|n| n.to_lowercase()); names.truncate(200);
     let mut items: Vec<Value> = vec![];
     let whole = x.trim_end_matches('/'); let whole = if whole.is_empty() { "/" } else { whole };
-    if Path::new(whole).is_dir() {
+    // Clone it here (the machine picker: `@proj.clone` holds the remote): the folder is confirmed first; a folder that is there is taken only when it
+    // is that repository (it is added as it is), never cloned into
+    let clone = drafts["@proj.clone"].as_str().unwrap_or("");
+    if !clone.is_empty() {
+        if Path::new(whole).exists() {
+            if crate::mirror::origin_of_root(whole) == clone { items.push(json!({"label": format!("Add {whole} (already a clone of {clone})"), "action": "proj-add", "value": whole, "kind": "add"})) }
+            else { items.push(json!({"label": format!("{whole} is there and holds something else: pick another folder"), "action": "", "value": "", "kind": "note"})) }
+        } else if name_ok(&part) && Path::new(&dir).is_dir() {
+            items.push(json!({"label": format!("Clone {clone} into {dir}{part}"), "action": "proj-clone-go", "value": format!("{clone}\u{1f}{dir}{part}"), "kind": "add"}));
+        }
+    } else if Path::new(whole).is_dir() {
         if roots.iter().any(|r| r.trim_end_matches('/') == whole) { items.push(json!({"label": format!("{whole} is a project already"), "action": "", "value": "", "kind": "note"})) }
         else { items.push(json!({"label": format!("Add {whole}"), "action": "proj-add", "value": whole, "kind": "add"})) }
     } else if name_ok(&part) && Path::new(&dir).is_dir() {
@@ -41,7 +51,8 @@ pub fn folders(drafts: &Value, home: &str, roots: &[&str]) -> Value {
     if dir != "/" { items.push(json!({"label": "..", "action": "proj-cd", "value": parent(&dir), "kind": "up"})) }
     for n in names { items.push(json!({"label": format!("{n}/"), "action": "proj-cd", "value": format!("{dir}{n}/"), "kind": "dir"})) }
     let error = if Path::new(&dir).is_dir() { String::new() } else { format!("{dir} is not a folder") };
-    json!({"text": text, "hint": "Path of a folder, e.g. ~/projects/board", "error": error, "items": items})
+    let hint = if clone.is_empty() { "Path of a folder, e.g. ~/projects/board".to_string() } else { format!("Where to clone {clone}") };
+    json!({"text": text, "hint": hint, "error": error, "items": items})
 }
 
 #[cfg(test)]
@@ -49,6 +60,16 @@ mod tests {
     use super::*;
     fn open(t: &str) -> Value { json!({"@proj.open": "1", "@proj.text": t}) }
     fn d(tag: &str) -> PathBuf { let p = std::env::temp_dir().join(format!("bp-picker-{}-{tag}", std::process::id())); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(p.join("alpha/inner")).unwrap(); std::fs::create_dir_all(p.join("beta")).unwrap(); std::fs::create_dir_all(p.join(".hidden")).unwrap(); p }
+    #[test] fn clone_it_here_confirms_the_folder_and_refuses_one_that_holds_something_else() {
+        let home = d("clone"); let h = home.to_str().unwrap();
+        let c = |t: &str| folders(&json!({"@proj.open": "1", "@proj.text": t, "@proj.clone": "github.com/o/r"}), h, &[]);
+        let f = c("~/r"); assert_eq!((f["items"][0]["action"].as_str(), f["items"][0]["value"].as_str().unwrap()), (Some("proj-clone-go"), format!("github.com/o/r\u{1f}{h}/r").as_str()));
+        assert_eq!(f["hint"], "Where to clone github.com/o/r");
+        let f = c("~/alpha"); assert_eq!((f["items"][0]["kind"].as_str(), f["items"][0]["action"].as_str()), (Some("note"), Some("")), "a folder that is there and is not that repository");
+        std::fs::create_dir_all(home.join("beta/.git")).unwrap(); std::fs::write(home.join("beta/.git/config"), "[remote \"origin\"]\n\turl = git@github.com:o/r.git\n").unwrap();
+        let f = c("~/beta"); assert_eq!(f["items"][0]["action"], "proj-add", "already a clone of it: added as it is");
+        let _ = std::fs::remove_dir_all(&home);
+    }
     #[test] fn closed_is_null_and_open_lists_folders_with_add_and_up() {
         assert!(folders(&json!({}), "/h", &[]).is_null());
         let home = d("list"); let h = home.to_str().unwrap();

@@ -156,10 +156,15 @@ pub fn clone_dir(home: &std::path::Path, origin: &str, exists: &dyn Fn(&std::pat
     unreachable!()
 }
 /// `project.clone {origin}`: clone the project's remote here (ssh first, then https) and add it as a project ("Clone it here").
-async fn clone_here(hub: &Arc<Hub>, origin: &str) -> Result<Value, String> {
+/// `path` is the folder the person confirmed (the picker's; empty: `clone_dir`'s). A folder that is there is taken only when it is that repository.
+async fn clone_here(hub: &Arc<Hub>, origin: &str, path: &str) -> Result<Value, String> {
     if origin.is_empty() || origin.contains("..") || origin.starts_with('-') || !origin.contains('/') || origin.chars().any(|c| c.is_whitespace()) { return Err("origin".into()) }
     let home = std::path::PathBuf::from(std::env::var("HOME").unwrap_or_default());
-    let dir = clone_dir(&home, origin, &|d| d.exists().then(|| crate::mirror::origin_of_root(&d.to_string_lossy())));
+    let dir = if path.trim().is_empty() { clone_dir(&home, origin, &|d| d.exists().then(|| crate::mirror::origin_of_root(&d.to_string_lossy()))) } else {
+        let p = path.trim(); let p = if let Some(r) = p.strip_prefix("~/") { home.join(r) } else { std::path::PathBuf::from(p) };
+        if !p.is_absolute() { return Err("the folder must be a full path".into()) }
+        p };
+    if dir.exists() && crate::mirror::origin_of_root(&dir.to_string_lossy()) != origin { return Err(format!("{} is there and holds something else", dir.display())) }
     if !dir.exists() {
         let (host, path) = origin.split_once('/').unwrap_or((origin, ""));
         let mut done = false; let mut why = String::new();
@@ -202,7 +207,7 @@ impl crate::api::RpcHandler for RegistryRpc {
     fn methods(&self) -> &'static [&'static str] { &["registry.list", "project.clone"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, _who: &'a crate::api::Caller, id: &'a Value, m: &'a str, p: &'a Value) -> crate::api::Fut<'a, Vec<Value>> {
         Box::pin(async move { match m {
-            "project.clone" => match clone_here(hub, p["origin"].as_str().unwrap_or("")).await { Ok(v) => vec![json!({"t":"reply","id":id,"ok":true,"result":v})], Err(e) => vec![json!({"t":"reply","id":id,"ok":false,"error":e})] },
+            "project.clone" => match clone_here(hub, p["origin"].as_str().unwrap_or(""), p["path"].as_str().unwrap_or("")).await { Ok(v) => vec![json!({"t":"reply","id":id,"ok":true,"result":v})], Err(e) => vec![json!({"t":"reply","id":id,"ok":false,"error":e})] },
             _ => vec![json!({"t":"reply","id":id,"ok":true,"result":{"projects":cached()}})],
         } })
     }
