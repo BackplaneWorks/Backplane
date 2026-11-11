@@ -190,7 +190,8 @@ impl KicadPane {
     pub fn set_info(&mut self, info: Value, cx: &mut Context<Self>) {
         if info == self.info { return }
         if info["pid"] != self.info["pid"] { self.ever_shown.clear(); }
-        for f in info["frames"].as_array().into_iter().flatten().filter(|f| f["shown"] == true) { if let Some(x) = f["xid"].as_u64() { if !self.ever_shown.contains(&x) { self.ever_shown.push(x); } } }
+        // shown once, or realized (bp.9: KiCad says the client may map it itself, e.g. a pre-warmed editor): the client's to map
+        for f in info["frames"].as_array().into_iter().flatten().filter(|f| f["shown"] == true || f["realized"] == true) { if let Some(x) = f["xid"].as_u64() { if !self.ever_shown.contains(&x) { self.ever_shown.push(x); } } }
         // KiCad became ready (a launch, a restart): it is told Backplane's theme again
         if info["state"] == "ready" && (self.info["state"] != "ready" || info["pid"] != self.info["pid"]) && self.theme_sent {
             self.rpc("editor.kicad.theme", json!({"project": self.project, "mode": if self.light { "light" } else { "dark" }}));
@@ -476,7 +477,7 @@ impl KicadPane {
         });
         let pane = self.placed.as_ref().and_then(|(at, _, _)| *at).map_or(Value::Null, |p| json!({"x": p.x, "y": p.y, "w": p.w, "h": p.h}));
         let shown_meta = shown.and_then(|w| nc::window_meta(w, self.container, self.toplevel));
-        json!({"ok": true, "project": self.project, "root": self.root, "open": self.open, "want": self.wanted_kind(), "conflicts": self.conflicts,
+        json!({"ok": true, "project": self.project, "root": self.root, "open": self.open, "want": self.wanted_kind(), "local_map": self.info["local_map"], "ever_shown": self.ever_shown.len(), "conflicts": self.conflicts,
             "state": self.info["state"], "reason": self.info["reason"], "mode": self.info["mode"], "pid": self.info["pid"],
             "holder": self.info["holder"], "sock": self.info["sock"], "pane": pane,
             "container": self.container.map_or(Value::Null, |c| { let mut v = g(c); v["xid"] = c.into(); v }),
