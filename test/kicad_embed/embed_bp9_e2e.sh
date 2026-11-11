@@ -22,7 +22,7 @@ python3 - "$OUT/script.json" <<'PY'
 import json, sys
 s = [{"select": 0}, {"wait": 2200}, {"click": "rail:Board"}, {"wait": 2500}, {"click": "ui:Edit"}, {"wait": 15000}]
 for m, w in [("ready", 9000), ("reloaded", 9000), ("dirty", 9000), ("conflict", 9000), ("kept", 6000), ("light", 6000), ("dark", 4000)]:
-    s += [{"mark": m}, {"kicad": {"report": True}}, {"wait": w}]
+    s += [{"mark": m}, {"kicad": {"report": True, "tag": m}}, {"wait": w}]
 json.dump(s, open(sys.argv[1], "w"))
 PY
 HOME="$OUT/fh" BACKPLANE_GPUI_ASSETS="$ASSETS_DIR" "$CLIENT_BIN" --url "http://127.0.0.1:$HPORT" --token-file "$OUT/home/token" --script "$OUT/script.json" --exit-after 130 >"$OUT/client.log" 2>&1 &
@@ -30,7 +30,7 @@ CP=$!; track_pid "$CP"
 wait_mark() { for _ in $(seq 600); do grep -q "\"name\":\"$1\",\"event\":\"mark\"" "$OUT/client.log" 2>/dev/null && return 0; kill -0 "$CP" 2>/dev/null || return 1; sleep 0.1; done; return 1; }
 rep() { last_kicad_report "$OUT/client.log" "$1"; }
 field() { python3 -c 'import json,sys; r=json.loads(sys.argv[1]); v=r.get(sys.argv[2]); print(v if v is not None else "")' "$1" "$2"; }
-tracks() { python3 "$IPC_PY" items-count "$SOCK" pcb 11 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin)["count"])' 2>/dev/null || echo -1; }
+tracks() { python3 "$IPC_PY" items-count "$SOCK" pcb 11 2>>"$OUT/ipc.err" | python3 -c 'import json,sys; print(json.load(sys.stdin)["count"])' 2>>"$OUT/ipc.err" || echo -1; }
 # a track written into the board file by someone else: a temp file renamed over it (atomic), as scripts and kicad-cli do
 write_track() { python3 - "$PCB" "$1" <<'PY'
 import os, sys, uuid
@@ -40,17 +40,21 @@ seg = f'\n\t(segment (start 120 {y}) (end 140 {y}) (width 0.25) (layer "F.Cu") (
 open(p + ".tmp", "w").write(s[:-1] + seg + "\n"); os.replace(p + ".tmp", p)
 PY
 }
-canvas_light() { # mean brightness (0..255) of the shown frame's middle, from the screen
+canvas_light() { # mean brightness (0..255) of the shown frame's menu and toolbar row, from the screen
   python3 - "$1" <<'PY'
 import json, subprocess, sys
 r = json.loads(sys.argv[1]); f = next((f for f in r.get("frames", []) if f.get("xid") == r.get("shown")), {})
-x, y, w, h = f.get("root_x", 0) + f.get("w", 0) // 3, f.get("root_y", 0) + f.get("h", 0) // 3, max(1, f.get("w", 0) // 3), max(1, f.get("h", 0) // 3)
-out = subprocess.run(["import", "-window", "root", "-crop", f"{w}x{h}+{x}+{y}", "-colorspace", "Gray", "-format", "%[fx:int(255*mean)]", "info:"], capture_output=True, text=True).stdout.strip()
+# the frame's own toolbars (GTK widgets): white-ish in light, near black in dark (the PCB canvas of KiCad's default colours is dark in both)
+x, y, w, h = f.get("root_x", 0) + 4, f.get("root_y", 0) + 2, max(1, f.get("w", 0) - 8), 24
+png = subprocess.run(["import", "-window", "root", "png:-"], capture_output=True).stdout
+out = subprocess.run(["convert", "png:-", "-crop", f"{w}x{h}+{x}+{y}", "+repage", "-colorspace", "Gray", "-format", "%[fx:int(255*mean)]", "info:"], input=png, capture_output=True).stdout.decode().strip()
 print(out or -1)
 PY
 }
 wait_mark ready || true; sleep 1; R=$(rep ready); SOCK=$(field "$R" sock)
-N0=$(tracks); write_track 60; 
+# the fixture's board is from an older KiCad, so it opens modified (converted on save): saved first, it is clean
+python3 "$IPC_PY" save-doc "$SOCK" pcb >"$OUT/save.log" 2>&1 || true; sleep 1.5
+N0=$(tracks); write_track 60
 wait_mark reloaded || true; sleep 1; N1=$(tracks)
 check "a board written on disk (atomic rename) reloads in the open editor by itself" "$([ "$N0" -ge 0 ] && [ "$N1" -eq $((N0 + 1)) ] && echo 1 || echo 0)" "$N0 -> $N1"
 shot reloaded
