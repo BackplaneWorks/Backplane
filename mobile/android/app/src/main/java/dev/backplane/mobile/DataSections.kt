@@ -82,7 +82,8 @@ fun LazyListScope.sectionItems(open: (String) -> Unit, page: (DSecRow) -> Unit, 
     for (s in DataClient.sections) {
         if (s.kind == "bub" || (s.id == "active" && s.rows.isEmpty())) continue
         item("sec:${s.id}") { SectionHead(s, if (s.rename) ({ rename(s) }) else null) }
-        if (s.kind == "threads") items(s.rows, key = { "sn:${it.id}" }) { r -> SectionThread(r, showProject = true, open = open) }
+        // Needs you: the title has the row (no project name), and a stop says so by its dot; an ask keeps its red word
+        if (s.kind == "threads") items(s.rows, key = { "sn:${it.id}" }) { r -> SectionThread(if (r.want == "failed" || r.want == "stopped") r.copy(want = "", say = "") else r, open = open) }
         else for (p in s.rows) {
             item("sp:${s.id}:${p.key}") { SectionProject(p, s.id == "quiet" || (p.off && p.key.isNotEmpty()), { page(p) }, { menu(p) }) }
             items(p.threads, key = { "st:${s.id}:${it.id}" }) { t -> SectionThread(t, 34, open = open) }

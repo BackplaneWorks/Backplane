@@ -442,6 +442,7 @@ final class DataClient {
             Task { await self.flushOutbox(g) }
             async let p = loadProjects(g), t = loadThreads(g), h: Void = loadHistory()
             _ = try await (p, t, h)
+            await loadSections()   // the sidebar's sections (feature sections): the list draws them once they come
             await loadBots()
             await loadSwarms()
             await voice.resync()
