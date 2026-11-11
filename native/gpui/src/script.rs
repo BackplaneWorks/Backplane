@@ -482,7 +482,7 @@ impl Backplane {
                 "popin" => { let h = self.screens.kicad_window; self.kicad_popin(cx); if let Some(h) = h { let _ = h.update(cx, |_, w, _| w.remove_window()); } }
                 "full" | "popout" => self.kicad_strip_act(a, cx),
                 k => { if let Some(p) = self.screens.kicad.clone() { let k = k.to_string(); p.update(cx, |p, cx| p.show_kind(&k, cx)); } } }
-                self.ui_epoch += 1; format!("kicad {a}") }
+                self.ui_epoch += 1; format!("kicad {a}") } // i18n-ok: an e2e metric
             /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::KicadEdit(on) => { if *on { let ok = self.kicad_edit(cx); self.ui_epoch += 1; format!("kicad edit {ok}") } else { self.kicad_view(cx); self.ui_epoch += 1; "kicad view".into() } }
             /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::Node(a, p) => { if a == "run-on" { if let Some((pj, to)) = p.split_once('|') { self.screens.projects.picked.insert(pj.to_string(), to.to_string()); } } if a == "flag" && p == "settings" { self.open_settings(cx); return format!("view.action {a}"); } if a == "proj-add" || a == "proj-new" || a == "new-thread" || crate::screens::tools::makes_thread(&a) { self.arm_new(); } self.go(&a, p.clone(), cx); format!("view.action {a}") }
         }
