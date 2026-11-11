@@ -146,7 +146,10 @@ impl Hub {
         let shown: Option<String> = match p["target"]["kind"].as_str() { Some("thread") => p["target"]["id"].as_str().map(str::to_string), Some("bot") => bot.as_ref().map(|(_, t)| t.clone()), _ => None };
         let (window, page) = match self.window_for(&p, before, shown.as_deref()).await { Some((w, pg)) => (Some(w), Some(pg)), None => (None, None) };
         if let (Some(w), Some(o)) = (&window, params.as_object_mut()) { o.insert("window".into(), w.clone()); }
-        if let (Some(pg), Some(o)) = (&page, params.as_object_mut()) { o.insert("page".into(), page_json(shown.as_deref().unwrap_or(""), before, pg)); }
+        if let (Some(pg), Some(_)) = (&page, params.as_object_mut()) {
+            let th = shown.as_deref().unwrap_or(""); let far = self.far().filter(|f| f.has(th)); let bb = self.backend_before(far.as_ref(), th, pg).await;
+            let mut pj = page_json(th, before, pg); pj["backendBefore"] = json!(bb); params["page"] = pj;
+        }
         // the reply the agent is streaming now (Hub::live_delta), drawn in place of "Working" until its message lands
         if let (Some(th), true) = (shown.as_deref(), page.is_some()) { let t = self.live_text(th); if !t.is_empty() { if let Some(o) = params.as_object_mut() { o.insert("liveText".into(), Value::String(t)); } } }
         // the thread's subagent log, for the Subagents panel's rows and their drill-down (present/panels.rs `subs_at`)
@@ -235,6 +238,13 @@ impl Hub {
         crate::statehost::policies().and_then(|p| p.with_state(view)).unwrap_or_else(|| view(&Default::default())) // (no policy yet: its log alone)
     }
 
+    /// Whether the newest input older than `page` started a backend turn (`thread::input_backend`): a page that begins inside such a turn hides its replies too.
+    pub(crate) async fn backend_before(&self, far: Option<&std::sync::Arc<dyn crate::api::FarView>>, thread: &str, page: &crate::model::Page) -> bool {
+        let Some(oldest) = page.rows.iter().map(|r| r.ord).min() else { return false };
+        let older = match far { Some(f) => f.page(thread, oldest, 32).map(|p| p.rows), None => { let m = self.model.lock().await; m.page(&self.store, thread, oldest, 32).ok().map(|p| p.rows) } };
+        let mut rows = older.unwrap_or_default(); rows.sort_by(|a, b| b.seq.cmp(&a.seq));
+        crate::present::thread::last_input_backend(&rows)
+    }
     async fn window_for(&self, p: &Value, before: u64, thread: Option<&str>) -> Option<(Value, crate::model::Page)> {
         let t = p.get("target")?;
         let thread = thread?;
@@ -243,12 +253,15 @@ impl Hub {
         if far.is_none() && !self.model.lock().await.threads.contains_key(thread) { return None }
         let page = match &far { Some(f) => f.page(thread, before, 32)?, None => { let m = self.model.lock().await; m.page(&self.store, thread, before, 32).ok()? } };
         let mut req = Map::new(); req.insert("target".into(), t.clone());
+        // Bot.backend: whether the turn the page's oldest row was written in was the person's (`thread::backend_replies` reads the rest from the page)
+        req.insert("backendBefore".into(), json!(self.backend_before(far.as_ref(), thread, &page).await));
         if let Some(a) = p.get("anchor") { req.insert("anchor".into(), a.clone()); }
         let req = Value::Object(req);
         // an older page still names the thread's latest human prompt and assistant text
         let ctx = if before == 0 { vec![] } else if let Some(f) = &far { f.latest_context(thread) } else { let m = self.model.lock().await; m.latest_context(&self.store, thread).unwrap_or_default() };
         // the Rust window first (present::window), computed here because the model lock is async and a presenter Screen cannot take it
-        if let Some(w) = crate::present::window::window_in(&page, &ctx, &self.epoch, before, &req, far.is_none() && crate::data::bot_chat(thread)) { return Some((w, page)) }
+        let bot = if far.is_some() { crate::data::far_bot(self, thread) } else { crate::data::bot_chat(thread) }; // (a bot of a linked machine: its mirror's state says)
+        if let Some(w) = crate::present::window::window_in(&page, &ctx, &self.epoch, before, &req, bot) { return Some((w, page)) }
         // what Rust does not answer (None) is the helper's, and only while the policy helper runs: the window helper is a child process the policy's V needs. A hub without the helper
         // starts nothing for any target, whatever BACKPLANE_WINDOW_BIN says (wants_log is false while the helper is not running): the native refusal stands
         if !self.presenter.wants_log() { return None }

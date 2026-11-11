@@ -1011,7 +1011,9 @@ final class DataClient {
         bots = r.bots; rooms = r.rooms
         if uberAfterPair, let u = bots.first(where: { $0.uber && !$0.thread.isEmpty }) { uberAfterPair = false; pendingThread = u.thread }
         // the uberbot's chat follows a home move: the same row, the same thread, now drawn from the machine that holds it
-        if let o = open { if let b = bots.first(where: { $0.thread == o }) { openBot = b } else if let to = DBot.followed(o, openBot, r.bots) { openBot = nil; pushThread = to } }
+        if let o = open { if let b = bots.first(where: { $0.thread == o }) { openBot = b } else if let to = DBot.followed(o, openBot, r.bots) { openBot = nil
+            // the chat is re-pointed once its row is in: until then it would draw a thread with no name (Nov 11: "Thread" for two seconds)
+            if threads.contains(where: { $0.id == to }) { pushThread = to } else { let g = gen; Task { try? await self.loadThreads(g); self.pushThread = to } } } }
     }
     func roomPosts(_ room: String) async -> [DPost] { ((try? await call("room.posts", ["room": room, "limit": 60]) as DPosts)?.posts) ?? [] }
     func roomPost(_ room: String, _ text: String) async throws { _ = try await call("room.post", ["room": room, "text": text, "clientId": UUID().uuidString], as: DEmpty.self) }

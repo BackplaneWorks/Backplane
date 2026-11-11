@@ -114,6 +114,9 @@ impl Observer for Alerts {
             tokio::spawn(async move {
                 let title = { let m = hub.model.lock().await; m.threads.get(&thread).map(|t| t.title.clone()).unwrap_or_default() };
                 let title = if title.is_empty() { "Backplane".to_string() } else { title };
+                // Bot.backend: a bot's turn that was not the person's (a restart's wake, a report, another bot, a routine, a webhook) alerts no one by its end; the bot
+                // tells the person through notify_person, which orders its own push
+                if kind == "done" && crate::data::bot_chat(&thread) { let m = hub.model().await; if crate::present::thread::last_input_backend(&m.tail(&hub.store, &thread, 48)) { return } }
                 let text_body = body(&kind, &text);
                 let now = now_ms() / 1000;
                 let looks = desks.live(&hub);

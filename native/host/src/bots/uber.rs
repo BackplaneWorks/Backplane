@@ -112,7 +112,7 @@ impl World {
 /// What the uberbot is told when the hub comes back. It is short: the bot reads the plane itself.
 pub fn restarted_text(why: &str) -> String {
     let why = why.trim(); let why = if why.is_empty() { String::new() } else { format!(" ({why})") };
-    format!("You were restarted{why}. Read the plane, restart any threads the restart halted, and carry on managing the backplane threads.")
+    format!("You were restarted{why}. Read the plane, restart any threads the restart halted, and carry on managing the backplane threads. This turn is private: nothing you write here reaches the person. Say nothing unless something needs them (for example a thread the restart halted that you could not resume); then tell them with notify_person (reason needs_you), in one line.")
 }
 
 impl Bots {

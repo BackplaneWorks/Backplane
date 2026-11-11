@@ -176,6 +176,7 @@ def main():
     moved_at = time.time()
     check("B's uberbot is Bub (same id)", m.uber(B) == bub)
     item("the mid-move message reaches Bub on B", "no", bool(m.wait(lambda: said(B, tb, "zz mid-move hello"), 60)))
+    item("Bub on B answers the mid-move message (a turn there)", "no", bool(m.wait(lambda: (lambda ev: any(e.get("$") == "MessagePosted" and e.get("thread") == tb and e.get("role") == "assistant" for e in ev[next((i for i, e in enumerate(ev) if e.get("msg") == "mmid1"), len(ev)):]))(m.events(B)), 60)))
     n_said = lambda h, t: sum(1 for e in m.events(h) if e.get("$") == "MessagePosted" and e.get("thread") == tb and e.get("role") != "assistant" and t in e.get("text", ""))
     item("a bots-API message mid-move (bots.say) reaches Bub on B once", "not held before", bool(m.wait(lambda: n_said(B, "zz said mid-move") == 1, 60)) and n_said(A, "zz said mid-move") == 0, f"B {n_said(B, 'zz said mid-move')} A {n_said(A, 'zz said mid-move')}")
     item("a webhook (the ring) mid-move reaches Bub on B once", "not held before", hook_mid == 200 and bool(m.wait(lambda: n_said(B, "ring mid-move") == 1, 60)) and n_said(A, "ring mid-move") == 0, f"{hook_mid} B {n_said(B, 'ring mid-move')} A {n_said(A, 'ring mid-move')}")
