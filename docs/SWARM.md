@@ -172,6 +172,13 @@ of that the hub adds:
   - `claims`: the open ones, `{post, thread, files, state: held|waiting}`.
   - `actions`: `[{label, action: "swarm-act", value: pause|resume|stop}]`.
   - `ended`.
+  - `add` (desktop, present/swarmform.rs): the add-member picker, `{open, provider, model, providers, models}`, absent once the swarm is over or full. Its
+    lists are the composer picker's (`keys::picker_agents`).
+- **Desktop view actions** (present/swarmform.rs, present/screen.rs): `swarm-act` takes `pause|resume|stop`, `add|<provider>|<model>|<role>` and
+  `remove|<thread>` (a member's), mapped onto `swarm.act`. The add picker is `swarm-add-open`, `swarm-add-provider`, `swarm-add-model` and
+  `form-close @sadd`. New swarm (a project's menu) is `swarm-new <project>`, `swarm-row-add`, `swarm-row-del <i>`, `swarm-row-provider <i>\u001f<provider>`,
+  `swarm-row-model <i>\u001f<model>`, the fields `stopic`, `sgoal`, `sseed`, `srole.<i>` (`bfield`), `swarm-start` (`swarm.create`) and `form-close @snew`.
+  The screen's `newSwarm` is `{project, title, topic, goal, seed, members:[{provider, model, role, providers, models}], canAdd, canRemove, ok}`.
 - **Hub requests**:
   - `swarm.create {project, topic, goal?, members:[{provider, model?, role?, account?}], seed?, budget?}` → `{room, members, failed}`.
   - `swarm.get {room, since?, limit?}` → the same shape as `roomPage.swarm`, without `ago`, `mine` and `actions`.

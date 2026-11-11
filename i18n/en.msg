@@ -3900,4 +3900,17 @@ gpui.f2.done.body = Press ? any time for keys.
 gpui.f2.open.uber = Open the uberbot
 gpui.f2.setup.phone = Setup runs on a computer, in Settings, Setup there. This phone is paired with it.
 gpui.f2.setup.five = Five short steps: your data folder, agents, design tools, where your uberbot lives and a first project.
+gpui.swarm.row = {n, plural, one {# member} other {# members}} · {w, number} working
+gpui.swarm.held = held: {why}
+gpui.swarm.state.why = {state}: {why}
+gpui.swarm.new = New swarm
+gpui.swarm.add.member = Add member
+gpui.swarm.start = Start
+gpui.swarm.topic = Topic
+gpui.swarm.goal = Goal, in a line
+gpui.swarm.seed = First message to every member
+gpui.swarm.role = Role (optional)
+gpui.swarm.remove = Remove from the swarm
+gpui.swarm.over = This swarm is over.
+gpui.swarm.none = No posts yet.
 # ---- end ----

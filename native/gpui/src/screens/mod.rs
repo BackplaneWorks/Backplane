@@ -20,6 +20,7 @@ pub mod bar;
 pub mod hints;
 pub mod blink;
 pub mod bots;
+pub mod swarm;
 pub mod drafts;
 pub mod first;
 pub mod onboard;

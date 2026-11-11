@@ -30,7 +30,7 @@ impl super::Screen for Recent {
         // a revoked device gone); opening the page reads it too (the page in the session is still the one before the press)
         let devpage=super::settings::page(&params["session"])=="devices" || (text(params,"action")=="settings-page" && text(params,"value")=="devices");
         let acted; let params=if devpage && text(params,"action").starts_with("device-") { match super::settings::device_act(text(params,"action"),text(params,"value")) { Some(patch)=>{ let mut c=params.clone(); crate::session::patch::merge(&mut c["session"],&patch); c["action"]=json!(""); c["value"]=json!(""); acted=c; &acted } None=>params } } else { params };
-        let withinfo; let params=if super::settings::is_open(&params["session"]) || shows_thread(params) || setup { let mut c=params.clone(); c["hubInfo"]=_hub.info_now(); c["hubInfo"]["client"]=params["client"].clone(); if devpage { if let Some(r)=crate::net::start::routes() { c["hubInfo"]["devices"]=r.devices(); } } if setup || super::settings::page(&params["session"])=="machines" { if let Some(p)=crate::net::start::peering() { c["hubInfo"]["machines"]=p.page_data(); } } withinfo=c; &withinfo } else { params };
+        let withinfo; let params=if super::settings::is_open(&params["session"]) || shows_thread(params) || shows_swarm_models(params) || setup { let mut c=params.clone(); c["hubInfo"]=_hub.info_now(); c["hubInfo"]["client"]=params["client"].clone(); if devpage { if let Some(r)=crate::net::start::routes() { c["hubInfo"]["devices"]=r.devices(); } } if setup || super::settings::page(&params["session"])=="machines" { if let Some(p)=crate::net::start::peering() { c["hubInfo"]["machines"]=p.page_data(); } } withinfo=c; &withinfo } else { params };
         // a 0.14 import of this hub: its card goes over any page (present/onboard.rs import_overlay)
         let withmig; let params=match crate::import014::last_published(&_hub.cfg.home) { Some(v) => { let mut c=params.clone(); c["importV014"]=v; withmig=c; &withmig } None => params };
         let m=_hub.mirrors();
@@ -48,6 +48,8 @@ fn refused<T>(reason: &'static str) -> Option<T> { super::refusal::report(reason
 
 /// A target that shows a thread (a thread, or a bot, whose chat is one) needs the hub's models info for its picker.
 pub fn shows_thread(p: &Value) -> bool { matches!(text(&p["target"],"kind"),"thread"|"bot") }
+/// A swarm's page (its add picker) and the New swarm form list the composer's models: they get the hub's models info too (present/swarmform.rs)
+pub fn shows_swarm_models(p: &Value) -> bool { (text(&p["target"],"kind")=="room" && p["roomPage"]["swarm"].is_object()) || !text(&p["session"]["drafts"],"@snew").is_empty() || text(p,"action")=="swarm-new" }
 /// The uberbot a state names, when it is one of its bots ("" for none)
 fn uber_in(st: &State) -> String { let u=setting(st,"uber.bot"); if !u.is_empty() && st.bots_nav.contains_key(u) { u.to_string() } else { String::new() } }
 /// The sidebar's bots: this hub's, then each shown linked machine's (`<link>~<id>`, with its machine's `mark`). The uberbot leads: this hub's own, or with
@@ -212,6 +214,8 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
                 }
             }
         } }
+    } else if let Some(o)=super::swarmform::act(st,hub,&session,action,value) {
+        crate::session::patch::merge(&mut session,&o.patch); cmds=[read_cmds.clone(),o.cmds].concat();
     } else if let Some(o)=super::botforms::act(st,hub,&session,action,value) {
         crate::session::patch::merge(&mut session,&o.patch); cmds=[read_cmds.clone(),o.cmds].concat();
     } else if let Some(o)=super::settings::act(hub,&session,action,value) {
@@ -271,11 +275,14 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
             cmds.push(json!({"type":"send","hub":hub,"text":json!({"id":rid,"m":"bots.room_keep","p":{"room":text(&p["target"],"id")}}).to_string()}));
             session["rid"]=json!(rid+1);
         },
-        // a swarm's controls on its room page (`roomPage.swarm.actions`): pause, resume, stop (`swarm.act`); the hub refuses what does not apply
-        "swarm-act" if room_page["swarm"].is_object() && matches!(value, "pause"|"resume"|"stop") => {
+        // a swarm's controls on its room page (`roomPage.swarm.actions`, its add picker, a member's remove): pause, resume, stop,
+        // `add|<provider>|<model>|<role>`, `remove|<thread>` (`swarm.act`, present/swarmform.rs); the hub refuses what does not apply
+        "swarm-act" if room_page["swarm"].is_object() => {
+            let Some(q)=super::swarmform::act_params(&room_page["swarm"],text(&p["target"],"id"),value) else { return refused("action.swarm-act") };
             let rid=session["rid"].as_u64().unwrap_or(0);
-            cmds.push(json!({"type":"send","hub":hub,"text":json!({"id":rid,"m":"swarm.act","p":{"room":text(&p["target"],"id"),"action":value}}).to_string()}));
+            cmds.push(json!({"type":"send","hub":hub,"text":json!({"id":rid,"m":"swarm.act","p":q}).to_string()}));
             session["rid"]=json!(rid+1);
+            if value.starts_with("add|") { session["drafts"]["@sadd"]=json!(""); }
         },
         "room-post" if room_page.is_object() => {
             let body=text(&session["drafts"],"@f.rpost").trim().to_string();
@@ -542,7 +549,12 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
         } }
         shown["bot"]=b;
     }
-    if room_page.is_object() { shown["bot"]=room_page.clone(); }
+    if room_page.is_object() { shown["bot"]=room_page.clone();
+        // a swarm's page: its add-member picker (present/swarmform.rs), from the composer's model lists
+        if room_page["swarm"].is_object() { let agents=super::keys::picker_agents_of(p["hubInfo"]["models"].as_str()).1;
+            if let Some(a)=super::swarmform::add_block(&session,&room_page["swarm"],&agents) { shown["bot"]["swarm"]["add"]=a; } } }
+    // New swarm, opened from a project's menu
+    if let Some(f)=super::swarmform::new_swarm(st,&session,&super::keys::picker_agents_of(p["hubInfo"]["models"].as_str()).1) { shown["newSwarm"]=f; }
     if let Some(t)=super::onboard::view(st,&session,p.get("hubInfo").unwrap_or(&Value::Null),&super::onboard::Client::of(p),&super::onboard::home_dir()) { shown["tour"]=t; }
     { let r=super::onboard::resume(st,&session); if !r.is_null() { shown["setup"]=r; } }
     // a 0.14 home coming across: over everything, setup included (import014)
@@ -757,6 +769,34 @@ mod state_tests {
         event(&mut st,json!({"$":"RoomSet","id":"r3","name":"old check","members":"b","at":5}));
         assert!(st.rooms_nav["r3"].ephemeral && st.rooms_nav["r3"].closed);
     }
+    /// A swarm (docs/SWARM.md): its project's row lists it and leaves its members out; New swarm opens from the project and starts `swarm.create`;
+    /// on its page the controls, the add picker and a member's remove are `swarm.act`.
+    #[test] fn a_swarm_is_a_project_row_a_form_and_a_page_whose_controls_are_swarm_act() {
+        let mut st=State::new(); st.lean=true;
+        for e in [json!({"$":"ProjectCreated","id":"p1","title":"Motor","root":"/m","at":1}),
+            json!({"$":"ThreadCreated","id":"t1","project":"p1","title":"opus","at":2}), json!({"$":"ThreadCreated","id":"t2","project":"p1","title":"codex","at":2}), json!({"$":"ThreadCreated","id":"t3","project":"p1","title":"Mine","at":2}),
+            json!({"$":"RoomSet","id":"s1","name":"debounce","members":"thread:t1\nthread:t2","kind":"swarm","project":"p1","state":"","at":3})] { event(&mut st,e); }
+        let v=recent(&st,&params()).unwrap(); let pr=&v["shown"]["projects"][0];
+        assert_eq!(pr["swarms"][0]["nav"],"@room:s1"); assert_eq!(pr["swarms"][0]["members"],2);
+        let ids: Vec<&str>=pr["threads"].as_array().unwrap().iter().map(|r|r["id"].as_str().unwrap()).collect(); assert_eq!(ids,["h|t3"],"the members are the swarm's");
+        // New swarm from the project's menu
+        let mut p=params(); p["action"]=json!("swarm-new"); p["value"]=json!("p1");
+        let v=recent(&st,&p).unwrap(); assert_eq!(v["shown"]["newSwarm"]["members"].as_array().unwrap().len(),2); assert_eq!(v["shown"]["newSwarm"]["title"],"Motor");
+        let mut p=params(); p["session"]=v["session"].clone(); p["session"]["drafts"]["@f.stopic"]=json!("pair"); p["action"]=json!("swarm-start");
+        let v=recent(&st,&p).unwrap(); let sent: Value=serde_json::from_str(v["cmds"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!((sent["m"].as_str(),sent["p"]["project"].as_str(),sent["p"]["topic"].as_str()),(Some("swarm.create"),Some("p1"),Some("pair"))); assert!(v["shown"]["newSwarm"].is_null());
+        // its page
+        let page=json!({"kind":"room","id":"s1","name":"debounce","posts":[],"swarm":{"room":{"id":"s1","state":"active"},"ended":false,"members":[{"member":"thread:t1","thread":"t1","state":"idle"},{"member":"thread:t2","thread":"t2","state":"working"}],"posts":[],"claims":[],"actions":[]}});
+        let on_page=|action:&str,value:&str,drafts:Value| { let mut p=params(); p["target"]=json!({"kind":"room","id":"s1"}); p["roomPage"]=page.clone(); p["session"]["drafts"]=drafts; p["action"]=json!(action); p["value"]=json!(value); recent(&st,&p) };
+        let v=on_page("","",json!({})).unwrap(); assert_eq!(v["shown"]["bot"]["swarm"]["add"]["open"],false,"the add picker, shut");
+        let v=on_page("swarm-add-open","",json!({})).unwrap(); assert_eq!(v["shown"]["bot"]["swarm"]["add"]["open"],true);
+        let v=on_page("swarm-act","add|codex|gpt-6|critic",json!({"@sadd":"1"})).unwrap(); let sent: Value=serde_json::from_str(v["cmds"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(sent["m"],"swarm.act"); assert_eq!(sent["p"],json!({"room":"s1","action":"add","provider":"codex","model":"gpt-6","role":"critic"})); assert_eq!(v["session"]["drafts"]["@sadd"],"","Add shuts the picker");
+        let v=on_page("swarm-act","remove|t2",json!({})).unwrap(); let sent: Value=serde_json::from_str(v["cmds"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(sent["p"],json!({"room":"s1","action":"remove","thread":"t2"}));
+        let v=on_page("swarm-act","stop",json!({})).unwrap(); let sent: Value=serde_json::from_str(v["cmds"][0]["text"].as_str().unwrap()).unwrap(); assert_eq!(sent["p"]["action"],"stop");
+        assert!(on_page("swarm-act","remove|t3",json!({})).is_none(),"not a member: refused");
+    }
     /// A linked machine's bots and rooms are listed after this hub's, each with its machine's marker; with no uberbot here, the linked machine's
     /// leads in Bub's place, and opening it, a far room or a far bot is a target like a bot here (its chat is its thread there).
     #[test] fn a_linked_machines_bots_rooms_and_uberbot_show_here() {
@@ -930,6 +970,11 @@ mod dispatcher_tests {
 #[cfg(test)]
 mod thread_binding_tests {
     #[test] fn a_bot_chat_gets_the_models_info_like_a_thread() { for k in ["thread","bot"] { assert!(shows_thread(&json!({"target":{"kind":k,"id":"x"}})), "{k}"); } assert!(!shows_thread(&json!({"target":{"kind":"recent"}}))); }
+    #[test] fn a_swarm_page_and_the_new_swarm_form_get_the_models_info() {
+        assert!(shows_swarm_models(&json!({"target":{"kind":"room","id":"s1"},"roomPage":{"swarm":{}}}))); assert!(!shows_swarm_models(&json!({"target":{"kind":"room","id":"r1"},"roomPage":{}})), "a plain room lists no models");
+        assert!(shows_swarm_models(&json!({"target":{"kind":"recent"},"action":"swarm-new"}))); assert!(shows_swarm_models(&json!({"target":{"kind":"recent"},"session":{"drafts":{"@snew":"p1"}}})));
+        assert!(!shows_swarm_models(&json!({"target":{"kind":"recent"},"session":{"drafts":{"@snew":""}}})));
+    }
     use super::*;
     fn fixture(lean: bool) -> (State,Value,Value) {
         let pair:Value=serde_json::from_str(include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/slim/fixtures/thread-pair.json"))).unwrap();

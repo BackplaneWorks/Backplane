@@ -14,6 +14,7 @@ pub mod onboard;
 pub mod onboard_alwayson;
 pub mod signin_there;
 pub mod botforms;
+pub mod swarmform;
 pub mod ready;
 pub mod badge;
 mod refusal;

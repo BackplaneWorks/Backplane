@@ -143,6 +143,7 @@ fn inert(light: bool, label: &str) -> AnyElement {
 /// What a form or page asks the window to focus when it opens: the name of its first typed field, "" for none.
 pub fn focus_target(data: &Value) -> String {
     if data["renaming"].is_object() { return super::tools::focus_target(data).into(); }
+    if let Some(f) = super::swarm::focus_target(data) { return f; }
     if data["newBot"].is_object() { return "name".into(); }
     if data["newRoom"].is_object() { return "rname".into(); }
     match data["bot"]["kind"].as_str() { Some("room") => "rpost".into(), Some("remote") => "rtext".into(), _ => String::new() }
@@ -150,6 +151,7 @@ pub fn focus_target(data: &Value) -> String {
 /// Esc on a form: the action that drops it.
 pub fn close_form(data: &Value) -> Option<Command> {
     if let Some(c) = super::tools::close_question(data) { return Some(c); }
+    if let Some(c) = super::swarm::close_form(data) { return Some(c); }
     if data["newBot"].is_object() { Some(act("form-close", "@bnew")) } else if data["newRoom"].is_object() { Some(act("form-close", "@rnew")) } else { None }
 }
 
@@ -461,6 +463,8 @@ pub fn page(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
     let header = |t: String| div().h(px(36.)).flex_shrink_0().px_3().flex().items_center().border_b_1().border_color(c("line")).font_weight(FontWeight::BOLD).child(t);
     let frame = |inner: AnyElement, top: f32, header: Option<Div>| div().id("bot-page").absolute().top(px(top)).left_0().right_0().bottom_0().occlude().bg(c("bg")).flex().flex_col().children(header).child(div().id("bot-body").flex_1().min_h_0().overflow_y_scroll().child(inner)).into_any_element();
     match kind {
+        // a swarm's room is the swarm page (screens::swarm)
+        "room" if bot["swarm"].is_object() => Some(super::swarm::page(cx, light, fields, bot)),
         "room" => {
             // a bots' exchange opened by its id: Keep this room makes it permanent (`roomPage.keep`); a closed one says so
             let keep = (bot["keep"] == true).then(|| div().ml_auto().font_weight(FontWeight::NORMAL).child(btn(cx, light, "room-keep".into(), trs("Keep this room"), false, keep_room, string(bot, "id"))));
