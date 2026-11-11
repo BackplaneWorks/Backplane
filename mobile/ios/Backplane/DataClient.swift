@@ -11,6 +11,8 @@ import UserNotifications
 final class DataClient {
     /// A thread a link in a message asked to open (backplane://thread/<id>); the root screen takes it.
     var pendingThread: String?
+    /// Just paired: once the hub's bots are in, its uberbot's chat opens (phones have no setup; docs/ALWAYS-ON.md, D9).
+    private var uberAfterPair = false
     /// a tapped link the hub resolved (DataLinks.swift): the root screen opens it; a link that opens nothing leaves a short note
     var linkTarget: DLinkTarget?
     var linkNote = ""
@@ -183,7 +185,7 @@ final class DataClient {
         let changed = Pairing.key(links.first ?? "") != Pairing.key(link)
         links = HubList.adopt(links, link, key: Pairing.key)
         PairingStore.save(links)
-        needsRepair = false; adding = false
+        needsRepair = false; adding = false; uberAfterPair = true
         if changed { reset() }
         connect()
     }
@@ -976,6 +978,7 @@ final class DataClient {
     func loadBots() async {
         guard has("bots"), let r: DDirectory = try? await call("bots.list") else { return }
         bots = r.bots; rooms = r.rooms
+        if uberAfterPair, let u = bots.first(where: { $0.uber && !$0.thread.isEmpty }) { uberAfterPair = false; pendingThread = u.thread }
     }
     func roomPosts(_ room: String) async -> [DPost] { ((try? await call("room.posts", ["room": room, "limit": 60]) as DPosts)?.posts) ?? [] }
     func roomPost(_ room: String, _ text: String) async throws { _ = try await call("room.post", ["room": room, "text": text, "clientId": UUID().uuidString], as: DEmpty.self) }

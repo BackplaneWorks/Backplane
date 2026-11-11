@@ -117,7 +117,7 @@ object DataClient {
     private fun adopt(l: String) {
         if (Pairing.key(l) == null) { pairingError = Msg.android_pair_link_none; return }
         val changed = Pairing.key(link ?: "") != Pairing.key(l)
-        save(HubList.adopt(links, l) { Pairing.key(it) }); needsRepair = false; adding = false
+        save(HubList.adopt(links, l) { Pairing.key(it) }); needsRepair = false; adding = false; uberAfterPair = true
         if (changed) reset()
         connect()
     }
@@ -767,12 +767,15 @@ object DataClient {
     /** `mark`: the short name of the linked machine a bot or room is on ("" for this hub's own) */
     data class Bot(val id: String, val name: String, val thread: String, val uber: Boolean, val mark: String = "")
     data class Room(val id: String, val name: String, val mark: String = "")
+    /** Just paired: once the hub's bots are in, its uberbot's chat opens (phones have no setup; docs/ALWAYS-ON.md, D9). */
+    private var uberAfterPair = false
     var bots by mutableStateOf<List<Bot>>(emptyList()); private set
     var rooms by mutableStateOf<List<Room>>(emptyList()); private set
     suspend fun loadBots() {
         val r = call("bots.list")
         bots = r.optJSONArray("bots")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Bot(it.optString("id"), it.optString("name"), it.optString("thread"), it.optBoolean("uber"), it.optJSONObject("mark")?.optString("short") ?: "") } } ?: emptyList()
         rooms = r.optJSONArray("rooms")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Room(it.optString("id"), it.optString("name"), it.optJSONObject("mark")?.optString("short") ?: "") } } ?: emptyList()
+        if (uberAfterPair) bots.firstOrNull { it.uber && it.thread.isNotEmpty() }?.let { uberAfterPair = false; linkTarget = LinkTarget(LinkTarget.Kind.THREAD, it.thread) }
     }
     data class Post(val from: String, val text: String, val at: Long)
     suspend fun roomPosts(room: String): List<Post> = call("room.posts", JSONObject().put("room", room).put("limit", 60)).optJSONArray("posts")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Post(it.optString("from"), it.optString("text"), it.optLong("at")) } } ?: emptyList()

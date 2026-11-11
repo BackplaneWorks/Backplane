@@ -84,29 +84,34 @@ assert all(not v.get('path') for v in c['agents'].values()), c['agents']
 assert not c['kicad'].get('runs'), c['kicad']
 EOF
 
-# 2. every step, with Enter, skipping what is not done
-ids=(welcome install home usage claude codex others kicad freecad machine phone remote project thread viewers model3d mech browser threadtour bots space rooms routines palette settings uber done)
+# 2. the five steps and Done, with Enter, skipping what is not done (Finish later and a relaunch on Design tools)
+ids=(welcome agents tools alwayson project done)
 i=0
 for id in "${ids[@]}"; do
   i=$((i+1)); n=$(printf %02d $((i+1)))
   sleep 1.5; shot "$n-$id"
   [ "$id" = done ] && break
-  [ "$id" = kicad ] && { X key Escape; sleep 2; kill "$client"; wait "$client" 2>/dev/null; client=; sleep 1
-    [ "$(setting onboard.step)" = kicad ] && ok "Finish later kept the step" || bad "step after Finish later: $(setting onboard.step)"
+  [ "$id" = tools ] && { X key Escape; sleep 2; kill "$client"; wait "$client" 2>/dev/null; client=; sleep 1
+    [ "$(setting onboard.step)" = tools ] && ok "Finish later kept the step" || bad "step after Finish later: $(setting onboard.step)"
     hub_up && ok "the hub kept running when the window closed" || bad "the hub stopped with the window"
     launch "$R/agents" BACKPLANE_FREECAD="$R/agents/freecadcmd" BACKPLANE_KICAD_CLI=/usr/bin/kicad-cli
-    sleep 8; shot "$n-kicad-resumed"
-    [ "$(setting onboard.step)" = kicad ] && ok "a new launch came back to the same step" || bad "resumed at $(setting onboard.step)"
+    sleep 8; shot "$n-tools-resumed"
+    [ "$(setting onboard.step)" = tools ] && ok "a new launch came back to the same step" || bad "resumed at $(setting onboard.step)"
     # the launcher attaches to the running hub, whose PATH has no stand-ins: the rest of the run restarts it below
   }
   X key Return
 done
 echo "steps walked: $i of ${#ids[@]}"
 [ "$(setting onboard.step)" = done ] && ok "reached the last step" || bad "stopped at $(setting onboard.step)"
-s=$(setting onboard.skipped); case ",$s," in *,claude,*) ok "unfinished steps were recorded as skipped: $s";; *) bad "skipped list: $s";; esac
+s=$(setting onboard.skipped); case ",$s," in *,agents,*) ok "unfinished steps were recorded as skipped: $s";; *) bad "skipped list: $s";; esac
+[ "$(setting alwayson.choice)" = here ] && ok "Next on step 4 took Stay on this computer" || bad "alwayson.choice is '$(setting alwayson.choice)'"
 X key Return; sleep 3; shot 90-finished
 [ "$(setting onboard.done)" = 1 ] && ok "Done finished setup" || bad "onboard.done is '$(setting onboard.done)'"
 
 # 3. a later launch stays out of the way, and Settings runs it again
 kill "$client"; wait "$client" 2>/dev/null; client=; launch "$R/agents"; sleep 8; shot 91-second-launch
+# the keys sheet: F1 anywhere (the message box has the keyboard), Esc shuts it
+X key F1; sleep 1.5; shot 92-keys
+python3 "$D/pos.py" "$R/win.log" keysheet >/dev/null 2>&1 && ok "F1 opened the keys sheet" || bad "no keys sheet after F1"
+X key Escape; sleep 1; shot 93-keys-closed
 echo "fails=$fails"; [ "$fails" = 0 ]

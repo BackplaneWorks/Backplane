@@ -11,7 +11,7 @@ actions!(keys, [NewThread, OpenDiff, OpenFiles, StopTurn, ModelPicker, PrevThrea
     PickUp, PickDown, PickLeft, PickRight, PickTab, PickBackTab, PickEnter,
     Project1, Project2, Project3, Project4, Project5, Project6, Project7, Project8, Project9,
     Thread1, Thread2, Thread3, Thread4, Thread5, Thread6, Thread7, Thread8, Thread9,
-    RailBoard, RailSchematic, Rail3d, RailSplit, RailMech, RailFiles, RailDiff, RailReview, RailBrowser, ToggleTerminal, DismissTerminal]);
+    RailBoard, RailSchematic, Rail3d, RailSplit, RailMech, RailFiles, RailDiff, RailReview, RailBrowser, ToggleTerminal, DismissTerminal, ShowKeys]);
 
 /// Where no text field, file list or viewer has the keyboard: a bare key may act.
 /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ pub const FREE: &str = "!AccountMenu && !Composer && !TextInput && !PickInput && !FindInput && !AskInput && !ImpInput && !Viewer && !BrowserBar && !FilesPage";
@@ -84,6 +84,7 @@ pub const TABLE: &[Entry] = &[
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("term-copy", "Copy the terminal's selection", "Terminal", "secondary-shift-c", Fixed),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("term-paste", "Paste into the terminal", "Terminal", "secondary-shift-v", Fixed),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("rail", "Rail views: B board, S schematic, 3 3D, V split, M mech, F files, D diff, R review, W browser", "Viewer", "b s 3 v m f d r w", Fixed),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("help", "Keyboard shortcuts: this list. ? outside a text box, F1 anywhere", "Window", "? or F1", Fixed),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("perf", "Performance overlay: the last few seconds of the window's work", "Window", "ctrl-shift-h", Rebind),
 ];
 /// Keys the old client had that this one cannot do yet (no equivalent): listed, not faked.
@@ -155,6 +156,7 @@ pub fn bindings(l: &Local) -> Vec<KeyBinding> {
         KeyBinding::new(&k("prev"), PrevThread, None), KeyBinding::new(&k("next"), NextThread, None),
         KeyBinding::new(&k("uber"), UberChat, None), KeyBinding::new(&k("settle"), SettleThread, None), KeyBinding::new(&k("layers"), CycleLayers, Some(NOT_FIELD)), KeyBinding::new(&k("perf"), PerfOverlay, None),
         KeyBinding::new("/", FocusComposer, Some(SLASH)), KeyBinding::new(&k("focus-key"), FocusComposer, Some(NOT_SHELL)), KeyBinding::new(&k("find"), crate::FindInThreadKey, Some(NOT_SHELL)),
+        KeyBinding::new("?", ShowKeys, Some(FREE)), KeyBinding::new("shift-/", ShowKeys, Some(FREE)), KeyBinding::new("shift-?", ShowKeys, Some(FREE)), KeyBinding::new("f1", ShowKeys, None),
         KeyBinding::new(&k("term"), ToggleTerminal, None), KeyBinding::new("`", ToggleTerminal, Some(TERM_BARE)), KeyBinding::new("shift-escape", DismissTerminal, None)]);
     // Super+` (off a Mac: Cmd+` there goes from window to window) toggles the terminal too, from the shell as well, as in the old client
     if !mac() { v.push(KeyBinding::new("super-`", ToggleTerminal, None)); }
@@ -407,6 +409,7 @@ pub fn attach(el: Div, picker: bool, cx: &mut Context<Backplane>) -> Div {
     let el = on!(el, DismissTerminal, |this: &mut Backplane, w: &mut Window, cx: &mut Context<Backplane>| this.term_dismiss(w, cx));
     let el = on!(el, CycleLayers, |this: &mut Backplane, w: &mut Window, cx: &mut Context<Backplane>| this.key_layers(w, cx));
     let el = on!(el, PerfOverlay, |this: &mut Backplane, _, cx: &mut Context<Backplane>| this.perf_toggle(cx));
+    let el = on!(el, ShowKeys, |this: &mut Backplane, _, cx: &mut Context<Backplane>| this.keysheet_toggle(cx));
     macro_rules! rail { ($el:expr, $($a:ty => ($k:literal, $v:literal)),*) => {{ let mut e = $el; $( e = on!(e, $a, |this: &mut Backplane, _, cx: &mut Context<Backplane>| this.key_rail($k, $v, cx)); )* e }} }
     let el = rail!(el, RailBoard => ("view-kind", "board"), RailSchematic => ("view-kind", "schematic"), Rail3d => ("view-kind", "3d"), RailSplit => ("view-kind", "split"),
         RailMech => ("view-kind", "mech"), RailFiles => ("view-kind", "files"), RailDiff => ("diff", ""), RailReview => ("view-kind", "review"), RailBrowser => ("view-kind", "browser"));
@@ -591,6 +594,11 @@ mod tests {
         for id in ["menu-up", "menu-down", "menu-left", "menu-right", "menu-tab", "menu-back", "menu-enter"] { let x = find(id).unwrap(); assert_eq!(x.kind, Fixed); assert!(Keystroke::parse(x.key).is_ok(), "{id}"); }
         assert_eq!(hint(&Local::default(), "menu-up"), "Up"); assert_eq!(hint(&Local::default(), "menu-back"), show("shift-tab", mac())); assert_eq!(show("shift-tab", true), "⇧Tab");
         assert!(MISSING.iter().all(|(k, _)| !k.contains("picker")));
+    }
+    #[test] fn question_mark_outside_a_text_box_and_f1_anywhere_open_the_keys_sheet() {
+        let l = Local::default();
+        assert_eq!(does(&l, "?", &[]), "keys::ShowKeys"); assert_eq!(does(&l, "shift-/", &[]), "keys::ShowKeys");
+        for c in ["Composer", "TextInput", "PickInput", "AskInput"] { assert_eq!(does(&l, "?", &[c]), "", "? types in {c}"); assert_eq!(does(&l, "f1", &[c]), "keys::ShowKeys", "F1 in {c}"); }
     }
     #[test] fn a_rebound_shortcut_moves_and_reset_restores_it() {
         let mut l = Local::default();
