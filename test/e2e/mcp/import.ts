@@ -1,0 +1,33 @@
+// Import from a sample ~/.codex/config.toml and ~/.claude.json (test/e2e/mcp/real.sh seeds them): the scan finds them, Import adds the new
+// ones, a key found in one goes to the vault, and nothing is imported twice. usage: bun import.ts PORT TOKEN_FILE HOME_DIR
+const [port, tokenFile, home] = Bun.argv.slice(2);
+const token = (await Bun.file(tokenFile).text()).trim();
+const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?data=1&enc=json&token=${token}`);
+let rid = 0; const wait = new Map<number, (v: any) => void>();
+setTimeout(() => { console.error("[mcp-e2e] timed out"); process.exit(2) }, 25 * 60 * 1000);
+ws.onerror = (e) => { console.error("[mcp-e2e] socket:", String((e as any).message ?? e)); process.exit(2) };
+ws.onmessage = (e) => { const m = JSON.parse(String(e.data)); if (m.t === "reply" && wait.has(m.id)) { wait.get(m.id)!(m); wait.delete(m.id); } };
+await new Promise((r) => (ws.onopen = r));
+const call = (m: string, p: any = {}): Promise<any> => new Promise((res) => { const id = ++rid; wait.set(id, res); ws.send(JSON.stringify({ id, m, p })); });
+const checks: Record<string, boolean | string> = {};
+const ok = (k: string, v: boolean, why = "") => { checks[k] = v ? true : `FAILED ${why}`; console.error("[mcp-import]", k, v ? "ok" : `FAILED ${why}`); };
+let r = await call("mcp.page.act", { action: "mcp-view", value: "import", ui: {}, fields: {} });
+r = await call("mcp.page", { ui: { view: "import" }, fields: {} });
+const rows = r.result.rows;
+const found = rows.filter((x: any) => x.kind === "card" && x.toggle?.style === "check").map((x: any) => x.title);
+const groups = rows.filter((x: any) => x.kind === "group").map((x: any) => `${x.label} ${x.note}`);
+console.error("[mcp-import] groups", groups, "found", found);
+ok("found Claude Code's and Codex's", groups.some((g: string) => g.startsWith("Claude Code ~/.claude.json")) && groups.some((g: string) => g.startsWith("Codex ~/.codex/config.toml")), JSON.stringify(groups));
+ok("found every server", ["kicad", "jlc (esp32-motor)", "context7", "fetch", "deepwiki"].every((n) => found.includes(n)), JSON.stringify(found));
+const btn = rows.find((x: any) => x.kind === "actions")?.buttons?.[0]?.label;
+ok("all picked by default", btn === `Import ${found.length} servers`, btn);
+r = await call("mcp.page.act", { action: "mcp-import", value: "", ui: { view: "import", isync: "on" }, fields: {} });
+ok("import", r.ok === true, JSON.stringify(r.error ?? ""));
+const list = JSON.parse(await Bun.file(`${Bun.argv[5]}/mcp/servers.json`).text()).servers;
+ok("imported, synced", list.length === found.length && list.every((s: any) => s.sync === true), JSON.stringify(list.map((s: any) => s.id)));
+const jlc = list.find((s: any) => s.id === "jlc");
+ok("the key is a vault reference", JSON.stringify(jlc?.env) === JSON.stringify([{ k: "JLC_API_KEY", v: "mcp-jlc-jlc_api_key", secret: true }]), JSON.stringify(jlc?.env));
+r = await call("mcp.page", { ui: { view: "import" }, fields: {} });
+ok("nothing to import twice", !r.result.rows.some((x: any) => x.kind === "card" && x.toggle?.style === "check"));
+console.log(JSON.stringify({ checks }, null, 1));
+ws.close(); process.exit(Object.values(checks).every((v) => v === true) ? 0 : 1);

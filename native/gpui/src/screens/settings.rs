@@ -625,7 +625,7 @@ mod tests {
         assert_eq!(shown(&[]), Shown::Other);
     }
     #[test] fn every_page_has_an_icon_in_the_set_and_the_search_filters_titles_by_substring() {
-        let icons: Vec<String> = ["sun", "message-square", "bell", "cpu", "square-pen", "circuit-board", "shopping-cart", "link", "globe", "mic", "code", "clock", "circle-check", "gauge", "book", "file-text", "settings", "search", "x"].iter().map(|s| s.to_string()).collect();
+        let icons: Vec<String> = ["sun", "message-square", "bell", "cpu", "square-pen", "circuit-board", "shopping-cart", "link", "globe", "mic", "code", "clock", "circle-check", "gauge", "book", "file-text", "settings", "search", "x", "plug"].iter().map(|s| s.to_string()).collect();
         for g in GROUPS { for p in g { assert!(icons.contains(&nav_icon(p).to_string()), "{p}"); } }
         assert!(nav_matches("Appearance", "") && nav_matches("Appearance", " ear") && nav_matches("Appearance", "APP") && !nav_matches("Appearance", "zzz"));
         assert_eq!(group_of("zzz"), GROUPS.len());

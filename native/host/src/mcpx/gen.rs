@@ -77,6 +77,13 @@ pub fn codex(servers: &[&Server], c: &Ctx, vault: Vault) -> (Vec<String>, Vec<(S
     (a, env)
 }
 
+/// Unless the thread asks before acting (approval-required), Codex runs the list's tools without asking (`default_tools_approval_mode = "approve"`): the person added them in Backplane, and a
+/// `codex exec` with approvals off otherwise refuses any tool not marked read-only ("MCP tool call requires approval, but approval policy is never").
+pub fn codex_approve(ids: &[String], runtime: &str) -> Vec<String> {
+    if runtime == "approval-required" { return vec![] } // `codex exec` cannot ask anyone: its approval policy is always never
+    ids.iter().flat_map(|id| ["-c".to_string(), format!("mcp_servers.{id}.default_tools_approval_mode=\"approve\"")]).collect()
+}
+
 /// The ACP agents' `mcpServers` (session/new): Backplane's own, then the list; headers with their secrets put in (they go on the agent's stdin).
 pub fn acp(servers: &[&Server], c: &Ctx, vault: Vault) -> Value {
     let nv = |kv: &[(String, String)]| Value::Array(kv.iter().map(|(k, v)| json!({"name":k,"value":v})).collect());
@@ -126,6 +133,7 @@ mod tests {
         assert!(!args.join(" ").contains("ghp_SECRET"));
         for a in kv { let (_, v) = a.split_once('=').unwrap(); crate::mcpx::toml::parse(&format!("x = {v}\n")).unwrap_or_else(|e| panic!("{v}: {e}")); }
         let (_, env) = codex(&[&rem()], &c(), &|_| None); assert!(env.is_empty(), "a secret the vault lacks is left out");
+        assert_eq!(codex_approve(&["gh".into()], ""), ["-c", "mcp_servers.gh.default_tools_approval_mode=\"approve\""]); assert!(codex_approve(&["gh".into()], "approval-required").is_empty());
     }
     #[test] fn acp_gets_name_value_lists() {
         let (a, b) = (st(), rem()); let v = acp(&[&a, &b], &c(), &vault);

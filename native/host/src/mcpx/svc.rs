@@ -188,7 +188,7 @@ impl Mcpx {
 
 /// What an agent process is started with: each provider's form of the thread's servers.
 #[derive(Clone, Debug, Default)]
-pub struct Launch { pub claude: String, pub disallowed: Vec<String>, pub acp: Value, pub codex_args: Vec<String>, pub codex_env: Vec<(String, String)>, pub fingerprint: String, pub pcbparts: bool }
+pub struct Launch { /** the list's server ids (Codex approves their tools in full access) */ pub ids: Vec<String>, pub claude: String, pub disallowed: Vec<String>, pub acp: Value, pub codex_args: Vec<String>, pub codex_env: Vec<(String, String)>, pub fingerprint: String, pub pcbparts: bool }
 /// The hub's own program, for the wrapper (a replaced binary's " (deleted)" is dropped: the new one is at the same path).
 pub fn hub_exe() -> String { std::env::current_exe().map(|p| p.to_string_lossy().trim_end_matches(" (deleted)").to_string()).unwrap_or_default() }
 /// The servers of `thread` (a `provider` agent) as its launch needs them. No hub MCP list (tests, a hub without it): Backplane's own and pcbparts only.
@@ -198,7 +198,7 @@ pub async fn launch(thread: &str, provider: &str, url: &str) -> Launch {
     let c = gen::Ctx { exe: hub_exe(), url: url.to_string(), pcbparts: pcb };
     let vault_get = |n: &str| vault::person_get(n);
     let (codex_args, codex_env) = gen::codex(&refs, &c, &vault_get);
-    Launch { claude: gen::claude(&refs, &c, &vault_get).to_string(), disallowed: gen::claude_disallowed(&refs), acp: gen::acp(&refs, &c, &vault_get), codex_args, codex_env, fingerprint: gen::fingerprint(&refs, pcb), pcbparts: pcb }
+    Launch { ids: refs.iter().map(|s| s.id.clone()).collect(), claude: gen::claude(&refs, &c, &vault_get).to_string(), disallowed: gen::claude_disallowed(&refs), acp: gen::acp(&refs, &c, &vault_get), codex_args, codex_env, fingerprint: gen::fingerprint(&refs, pcb), pcbparts: pcb }
 }
 /// The launch's fingerprint alone (what decides whether a live Claude is started again).
 pub async fn fingerprint(thread: &str, provider: &str) -> String {
