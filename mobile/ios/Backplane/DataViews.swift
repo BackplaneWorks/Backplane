@@ -136,6 +136,7 @@ struct DataThreadsView: View {
             DataHubBanner(client: client)
             DataMigrationBanner(client: client)
             DataStarBanner(client: client)
+            DataAlertsBanner(client: client)
             if client.conn != .online { DataConnectionBanner(client: client) }
             HStack(spacing: 8) {
                 if client.has("search") {
@@ -706,6 +707,7 @@ struct DataThreadView: View {
             DataHubBanner(client: client)
             DataMigrationBanner(client: client)
             DataStarBanner(client: client)
+            DataAlertsBanner(client: client)
             if client.conn != .online { DataConnectionBanner(client: client) }
             stateStrip
             if let m = thread?.mark { Text(dAway(Tr.ios_machine_on(machine: m.name), m.away)).dmono(11).foregroundStyle(BackplaneDesign.faint).frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).padding(.vertical, 3).accessibilityIdentifier("data.thread.machine") }
@@ -1315,7 +1317,7 @@ struct DataSettingsView: View {
                 DHeading(text: Tr.t("Text size"))
                 DChoices(options: [(label: Tr.t("system"), value: "system")] + AppSettings.textSteps.map { (label: $0.tag, value: $0.tag) }, value: $settings.textSize).accessibilityIdentifier("settings.textsize")
                 onOff(Tr.t("Alerts on this phone"), $settings.alerts, id: "settings.alerts")
-                    .onChange(of: settings.alerts) { _, on in Task { if on { await client.enablePush() }; await client.pushMute(); if client.has("notifysettings") { await client.notify.load() } } }
+                    .onChange(of: settings.alerts) { _, on in Task { if on { await client.enablePush(ask: true) }; await client.pushMute(); if client.has("notifysettings") { await client.notify.load() } } }
                 if settings.alerts { onOff(Tr.t("Alert sound"), $settings.alertSound, id: "settings.sound") }
                 onOff(Tr.t("Haptics"), $settings.haptics, id: "settings.haptics")
                 Text(Tr.t("Off: only what you let through reaches this phone. Alerts come from your uberbot.")).dmono(11).foregroundStyle(BackplaneDesign.dim)

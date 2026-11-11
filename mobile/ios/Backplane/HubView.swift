@@ -103,6 +103,24 @@ struct DataHubBanner: View {
     }
 }
 
+/// Alerts, offered once the person sees why (DataClient.alertsAsk): one line; Allow alerts shows the system's question, Not now hides it until the next launch.
+struct DataAlertsBanner: View {
+    let client: DataClient
+    var body: some View {
+        if client.alertsAsk && client.conn == .online {
+            VStack(spacing: 0) {
+                HStack(spacing: 8) {
+                    Text(Tr.t("Bub can alert you when a thread needs you.")).dmono(12).foregroundStyle(BackplaneDesign.text).lineLimit(2)
+                    Spacer(minLength: 0)
+                    Button(Tr.t("Allow alerts")) { Task { await client.enablePush(ask: true) } }.buttonStyle(DButton(primary: true)).accessibilityIdentifier("alerts.allow")
+                    Button(Tr.t("Not now")) { client.alertsAsk = false }.dmono(12).foregroundStyle(BackplaneDesign.dim).accessibilityIdentifier("alerts.later")
+                }.padding(.horizontal, 12).padding(.vertical, 6).background(BackplaneDesign.raised)
+                DLine()
+            }
+        }
+    }
+}
+
 /// The GitHub star suggestion (DataClient.star), one line: the link opens the page and decides open; Dismiss decides dismiss.
 struct DataStarBanner: View {
     let client: DataClient

@@ -2741,6 +2741,9 @@ gpui.f.inactive = 非アクティブ: 確認できる作業はありません
 gpui.f.tool.runs.nover = {name}が{path}で動作します。
 
 # ---- android: new entries go here ----
+android.alerts.ask = スレッドがあなたを必要とするとき、Bub が通知できます。
+android.alerts.allow = 通知を許可
+android.alerts.later = 今はしない
 android.viewerbg = 3D の背景
 android.viewerbg.auto = 自動
 android.viewerbg.light = ライト
@@ -3559,6 +3562,9 @@ android.swarm.provider = プロバイダー
 android.swarm.model = モデル
 # ---- ios: new entries go here ----
 ios.sections.running = {n, number}件実行中
+ios.alerts.ask = スレッドがあなたを必要とするとき、Bub が通知できます。
+ios.alerts.allow = 通知を許可
+ios.alerts.later = 今はしない
 ios.viewerbg = 3Dビューアの背景
 ios.viewerbg.auto = 自動
 ios.viewerbg.custom = カスタム

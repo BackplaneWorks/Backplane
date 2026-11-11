@@ -1062,12 +1062,16 @@ final class DataClient {
         let stale = await c.deliveredNotifications().filter { !s.keys.contains($0.request.content.userInfo["key"] as? String ?? "") }.map(\.request.identifier)
         if !stale.isEmpty { c.removeDeliveredNotifications(withIdentifiers: stale) }
     }
-    /// Launch, and once a hub can use it: ask once, after the first screen is up, then take a token.
-    func enablePush() async {
+    /// Alerts not decided yet: DataAlertsBanner says why and offers them; the system's question comes only from its Allow alerts. Not now hides it until the next launch.
+    var alertsAsk = false
+    /// Launch, and once a hub can use it: take a token when alerts are allowed; when they are not decided yet, offer them (DataAlertsBanner) instead of asking at once.
+    func enablePush(ask: Bool = false) async {
         guard has("push") else { return }
         let c = UNUserNotificationCenter.current()
         var status = await c.notificationSettings().authorizationStatus
         if status == .notDetermined, AppSettings.shared.alerts {
+            if !ask { alertsAsk = true; return }
+            alertsAsk = false
             _ = try? await c.requestAuthorization(options: [.alert, .sound, .badge])
             status = await c.notificationSettings().authorizationStatus
         }
