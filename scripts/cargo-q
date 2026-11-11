@@ -1,10 +1,10 @@
 #!/bin/bash
 # cargo-q ARGS...: `cargo ARGS...` queued behind the machine-wide build slots (scripts/lib-buildslot.sh), through the shared compiler cache, with -j sized from free memory.
 #   scripts/cargo-q test --offline          from native/host or native/gpui, in your own worktree, instead of bare cargo
-# Every lane runs its tests and builds this way, so a few heavy builds run at once; when every slot is taken a test/build/check/clippy/doc runs on a Boat box instead of waiting (scripts/lib-boat.sh, BP_NO_BOAT=1 forces local), else the wait is said on stderr. An explicit -j/--jobs is kept.
+# Every lane runs its tests and builds this way, so a few heavy builds run at once; when every slot is taken it queues locally, and a test/build/check/clippy/doc goes to a Boat box only after a long wait or with memory low (scripts/lib-boat.sh, BP_NO_BOAT=1 forces local); the queue is said on stderr. An explicit -j/--jobs is kept.
 HERE=$(cd "$(dirname "$0")" && pwd); . "$HERE/lib-buildslot.sh"
-if [ -z "${BQ_HELD:-}" ]; then export BQ_HELD=1; waiting() { echo "cargo-q: waiting for a build slot" >&2; }
-  # every slot taken: a build or test that gives the same result anywhere runs on a Boat box instead of waiting (scripts/lib-boat.sh; BP_NO_BOAT=1 forces local)
+if [ -z "${BQ_HELD:-}" ]; then export BQ_HELD=1; waiting() { echo "cargo-q: queued behind ${1:-other} local builds (building locally when one ends)" >&2; }
+  # every slot taken: a build or test that gives the same result anywhere may run on a Boat box, but only after a long wait or with memory low (lib-buildslot.sh bq_offload_now; BP_NO_BOAT=1 forces local)
   bo_cargo_ok "$@" && bo_ready && export BQ_OFFLOAD=1; bq_run waiting "$0" "$@"; exit $?; fi
 # started by bq_run under a Boat lease: run there, with the same exit code and the same artifacts in the same places
 if [ -n "${BP_BOAT_IDX:-}" ]; then bo_cargo "$@"; rc=$?; [ "$rc" = 98 ] && exit 98; exit "$rc"; fi
