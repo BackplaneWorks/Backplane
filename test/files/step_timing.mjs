@@ -2,7 +2,7 @@
 // A STEP opened in a 3D view, timed through a real hub (stand-in agents, temp HOME and models cache): from the watch request to the parts'
 // start, the first streamed part, and the whole model, each file cold (an empty cache), opened again on the same hub, and opened on a hub
 // started afresh on that cache (the cached reopen after a restart). The frames are told apart by their CBOR map's size: parts {3}, a part
-// {8}, the model {5} (kicad/plot.rs). Results: one row a file and run, and the model's bytes.
+// {8, or 9 with faces}, the model {5, or 6 with faces} (kicad/plot.rs). Results: one row a file and run, and the model's bytes.
 import {mkdirSync,rmSync,writeFileSync,copyFileSync} from 'node:fs';
 import {makeStandins,startHub,stopHub,sleep} from '../perf/lib.mjs';
 import {decode,encode} from '../wire.mjs';
@@ -22,7 +22,7 @@ async function hub(n){
   const frames=[];const replies=new Map();
   const ws=new WebSocket(`ws://127.0.0.1:${port}/ws?view=1&mobile=1&enc=cbor&token=${h.token}`);ws.binaryType='arraybuffer';
   ws.onmessage=({data})=>{const raw=Buffer.from(data);const at=performance.now();
-    if(raw.subarray(1,7).toString('hex')==='0164706c6f74'){const kind={0xa3:'parts',0xa8:'part',0xa5:'model'}[raw[0]]||'plot';if(process.env.DEBUG)console.error(kind,raw.length,raw.subarray(0,120).toString('latin1').replace(/[^ -~]/g,'.'));frames.push({kind:kind==='model'&&!raw.includes(Buffer.from('box3'))?'plot':kind,bytes:raw.length,raw,at});return}
+    if(raw.subarray(1,7).toString('hex')==='0164706c6f74'){const kind={0xa3:'parts',0xa8:'part',0xa9:'part',0xa5:'model',0xa6:'model'}[raw[0]]||'plot';if(process.env.DEBUG)console.error(kind,raw.length,raw.subarray(0,120).toString('latin1').replace(/[^ -~]/g,'.'));frames.push({kind:kind==='model'&&!raw.includes(Buffer.from('box3'))?'plot':kind,bytes:raw.length,raw,at});return}
     let x=null;try{x=decode(data)}catch{return}if(!x)return;if(x.t==='reply')replies.set(x.id,x);if(x.t==='plot'&&x.none)frames.push({kind:'none',why:x.none,at})};
   await new Promise((r,j)=>{ws.onopen=r;ws.onerror=()=>j(new Error('ws'))});
   let id=0;const rpc=async(m,p)=>{const i=++id;ws.send(encode({id:i,m,p}));for(let k=0;k<60000&&!replies.has(i);k++)await sleep(5);return replies.get(i)};

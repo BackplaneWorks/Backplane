@@ -63,10 +63,10 @@ pub struct Detail { pub linear: f64, pub angular: f64, pub relative: bool, pub f
 /// (OpenCascade's relative mode), so a small hole is as round as a big one and a big flat face stays cheap. As many triangles as 0.03 mm
 /// made before; the 16-gon a hole was drawn as came from the hub's grid (`solid::fit`), not from here.
 pub const NORMAL: Detail = Detail { linear: 0.002, angular: 0.2, relative: true, fine: None };
-/// What the solids in a zoomed view are meshed at (`refined`): 0.05 rad (2.9 degrees a segment, 126 a small hole, 252 a big one), a 1000th
-/// of each edge, and no segment under 0.15 mm: the wire carries corners to 10 um, and a facet much shorter than that turns its normal into
-/// noise (a 3 mm fillet meshed at 0.07 mm segments shaded in ridges).
-pub const FINE: (f64, f64, f64) = (0.001, 0.05, 0.15);
+/// What the solids in a zoomed view are meshed at (`refined`): 0.1 rad (2.9 degrees a segment, twice the segments of `NORMAL` on every
+/// curve: 126 a hole) and a 1000th of each edge. Not finer: the wire carries corners to 10 um, and a 3 mm fillet meshed at 0.05 rad
+/// (0.07 mm segments) shaded in ridges. Never coarser than `NORMAL` either: a floor on segment length (MinSize) made small parts coarser.
+pub const FINE: (f64, f64) = (0.001, 0.1);
 /// FreeCAD's scripts take millimetres, not a share of each edge: the deflection they get for a relative detail.
 const FREECAD_MM: f64 = 0.03;
 impl Detail {
@@ -79,7 +79,7 @@ impl Detail {
         let mut a = vec!["--linear".to_string(), self.linear.to_string()];
         if self.relative { a.push("--relative".into()) }
         a.extend(["--angular".to_string(), self.angular.to_string()]);
-        if let Some(b) = self.fine { a.extend(["--fine".to_string(), b.map(|v| format!("{v:.3}")).join(","), "--fine-linear".into(), FINE.0.to_string(), "--fine-angular".into(), FINE.1.to_string(), "--fine-min".into(), FINE.2.to_string()]) }
+        if let Some(b) = self.fine { a.extend(["--fine".to_string(), b.map(|v| format!("{v:.3}")).join(","), "--fine-linear".into(), FINE.0.to_string(), "--fine-angular".into(), FINE.1.to_string()]) }
         a
     }
 }
@@ -349,7 +349,7 @@ mod tests {
     }
     #[test] fn a_detail_is_the_meshers_arguments_and_freecads_millimetres() {
         assert_eq!(NORMAL.args().join(" "), "--linear 0.002 --relative --angular 0.2");
-        assert_eq!(Detail::refined([0.0, 1.0, 2.0, 3.5, 4.0, 5.25]).args().join(" "), "--linear 0.002 --relative --angular 0.2 --fine 0.000,1.000,2.000,3.500,4.000,5.250 --fine-linear 0.001 --fine-angular 0.05 --fine-min 0.15");
+        assert_eq!(Detail::refined([0.0, 1.0, 2.0, 3.5, 4.0, 5.25]).args().join(" "), "--linear 0.002 --relative --angular 0.2 --fine 0.000,1.000,2.000,3.500,4.000,5.250 --fine-linear 0.001 --fine-angular 0.1");
         assert_eq!(NORMAL.env(), [("BP_TOL", "0.03".to_string()), ("BP_ANG", "0.2".to_string())], "FreeCAD takes millimetres");
     }
     #[test] fn the_native_meshers_lines_are_read() {
