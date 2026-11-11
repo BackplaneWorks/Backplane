@@ -79,7 +79,9 @@ pub enum Verdict {
 pub fn since_fresh(posts: &[PostMeta]) -> &[PostMeta] { match posts.iter().rposition(PostMeta::fresh) { Some(i) => &posts[i + 1..], None => posts } }
 
 /// rate: how many posts `member` made in the window ending `now`
-pub fn rate_count(posts: &[PostMeta], member: &str, now: u64, lim: &Limits) -> usize { posts.iter().filter(|p| p.member == member && now.saturating_sub(p.at) < lim.rate_win).count() }
+/// (since the counters last started again: the person's word gives every member a fresh allowance, so a member asked for a synthesis right
+/// after a debate can post it; the live run of Nov 11 had one refused)
+pub fn rate_count(posts: &[PostMeta], member: &str, now: u64, lim: &Limits) -> usize { since_fresh(posts).iter().filter(|p| p.member == member && now.saturating_sub(p.at) < lim.rate_win).count() }
 
 /// chatter: member posts in a row (since fresh) with no progress
 pub fn chatter_run(posts: &[PostMeta]) -> usize { since_fresh(posts).iter().rev().filter(|p| !p.hub()).take_while(|p| !p.progress()).count() }
@@ -186,6 +188,8 @@ mod tests {
         assert!(matches!(verdict(&posts, &p("x", "thread:a", &[], "one more", 110), false, 1, &NONE, &NONE, &L), Verdict::Refuse(_)));
         assert_eq!(verdict(&posts, &p("x", "thread:b", &[], "a different member", 110), false, 1, &NONE, &NONE, &L), Verdict::Live, "the rate is per member");
         assert_eq!(verdict(&posts, &p("x", "thread:a", &[], "later on", 100 + 300 + 1), false, 1, &NONE, &NONE, &L), Verdict::Live, "the window moves on");
+        let mut steered = posts.clone(); steered.push(p("y", "", &[], "the person decides", 108));
+        assert_eq!(verdict(&steered, &p("x", "thread:a", &["synthesis"], "the synthesis", 110), false, 1, &NONE, &NONE, &L), Verdict::Live, "the person's word starts the count again");
     }
     #[test] fn the_person_is_never_refused_or_held() {
         let posts: Vec<PostMeta> = (0..20).map(|i| p(&format!("p{i}"), "", &[], "me again", 100)).collect();
