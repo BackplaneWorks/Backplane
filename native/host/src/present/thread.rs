@@ -758,6 +758,24 @@ mod tests {
         assert_eq!((s[2].1.as_str(), s[2].2.as_str()), ("Finished 21:57 · 1m 10s", ""));
         let s = stamps(&es[..2], true, false); assert_eq!(s[1].1, "21:56", "while the turn runs its newest reply keeps its time showing");
     }
+    // Nov 11: every text a turn writes shows, whole and in order, with its tool calls between them (Bub's 11:56 reply looked cut: its status
+    // had been written only in the model's thinking, never as text; this keeps the rows that do exist from ever being dropped or merged)
+    #[test] fn every_text_of_a_turn_shows_in_order_between_its_tool_calls() {
+        let long = "Status:\n\n1. **Boat**: on today's build\n2. **Codex**: skipped\n\n".repeat(30);
+        let es = [m("u", "user", "what's status", 1699999000), m("msg_A:0:aa", "assistant", &long, 1699999005), tl("t1", "mcp__backplane__thread_read", "thread_read", 1699999006),
+            tl("t2", "mcp__backplane__thread_launch", "thread_launch", 1699999007), m("msg_B:0:bb", "assistant", "I've also started a thread.", 1699999010),
+            tl("t3", "Bash", "ls", 1699999011), m("msg_C:0:cc", "assistant", "Done.", 1699999012)];
+        for open in [true, false] {
+            let out = entries_w(&es, false, false, "", &|_| open, 1700000000_000, Some(&Rule::utc()), &|_| 0, 0).unwrap();
+            let seq: Vec<(String, String)> = out.iter().map(|e| (e["kind"].as_str().unwrap_or("").to_string(), e["id"].as_str().unwrap_or("").to_string())).collect();
+            let texts: Vec<(&str, &str)> = out.iter().filter(|e| e["kind"] == "assistant").map(|e| (e["id"].as_str().unwrap(), e["text"].as_str().unwrap())).collect();
+            assert_eq!(texts, [("msg_A:0:aa", long.as_str()), ("msg_B:0:bb", "I've also started a thread."), ("msg_C:0:cc", "Done.")], "every text whole, in order (folds open: {open})");
+            let at = |id: &str| seq.iter().position(|(_, i)| i == id).unwrap();
+            let tools_between = |a: usize, b: usize| seq[a + 1..b].iter().any(|(k, _)| k != "assistant" && k != "user");
+            assert!(tools_between(at("msg_A:0:aa"), at("msg_B:0:bb")) && tools_between(at("msg_B:0:bb"), at("msg_C:0:cc")), "the tool rows sit between the texts: {seq:?}");
+            assert!(at("u") < at("msg_A:0:aa"));
+        }
+    }
     // the turn ended but its subagents still work: the last reply waits, it is not Finished
     #[test] fn a_turn_whose_work_still_runs_says_waiting_not_finished() {
         let es = [m("u", "user", "go", 1699999000), m("a1", "assistant", "started two subagents", 1699999030)];
