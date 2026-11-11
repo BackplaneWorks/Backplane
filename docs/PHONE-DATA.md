@@ -263,3 +263,15 @@ The hub's own terminals: the chat terminals a thread opens (an agent's `terminal
 ## Links in messages (feature `links`; `native/host/src/data/link.rs`)
 - `link.resolve {url, thread?}` → `{kind:"thread", thread}` | `{kind:"project", project}` | `{kind:"room", room}` | `{kind:"file", thread, path, line}` | `{kind:"none", note}`. `url` is a `backplane://` link (`thread/<id>` or `<machine>~<id>`, `project/<id>`, `conv/room%3A…`, `room/`, `bot/`), a bare id, or a path (`src/x.rs:12`, `src/x.rs#L12`, an absolute path under the thread's project folder). A file resolves only when it is a file inside that project (never through `..`); `path` is then from the project's root and `line` 0 when none was given. `note` is the short line the app shows when nothing opens. The phone picks what looks like a link in the text (web addresses, `backplane://`, emails, phone numbers, paths) and asks only for `backplane://` and paths when tapped.
 - `thread.entries` of a `<machine>~<id>` thread this hub mirrors answers from the mirror (the thread object is bare: no project, no asks, no live text); `link.resolve` says `thread` for it only when the mirror holds it.
+
+## The sidebar's sections (feature `sections`, docs/ALWAYS-ON.md section 8)
+
+- `sidebar.sections {open?:[toggle], query?, page?:key, pageDone?, jump?}` → `{sections, groupsTo, page?, jump?}`: the same sections the window draws (present/sections.rs).
+  A section is `{id, kind: "threads"|"projects", title, count, fold, open, toggle, group?, rename?, rows}`, in order: `needs` (Needs you, absent when empty), `pinned`,
+  `active`, `group:<gid>` (folded until its `toggle` is in `open`), `quiet`. A thread row: `{id, title, word, say, want, ago, machine, mark, project, projectKey, off, nav}`
+  (`word`: needs, running, limit, monitoring, failed, cut, interrupted, done, idle; `off`: its machine is off, known from the registry, and `nav` is ""). A project row:
+  `projects.list`'s merged fields (`key`, `name`, `machines`...) with `running`, `needsCount`, `pinned`, `dots` and its visible `threads`. `page` is the project's page:
+  `{key, project, sections: running, needs, recent, done ("Done (n)", folded unless pageDone)}`. `jump` lists every project and thread on every machine (Ctrl+K).
+- `sidebar.act {action, value}`: `project-pin` key (toggles), `group-rename` "gid\u001fname" ("" gives the automatic name back), `group-move` "key\u001fgid" (or "key\u001f+New name").
+- Visibility (D11): a thread is listed while it runs, owns running work, asks the person, or stopped abnormally and was not opened or settled since; pinned ones always.
+  A thread that asks the person is never hidden. The rest are on the project's page and in `jump`.

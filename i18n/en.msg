@@ -3533,6 +3533,7 @@ android.swarm.gone = That swarm is not on this hub.
 android.swarm.provider = Provider
 android.swarm.model = Model
 # ---- ios: new entries go here ----
+ios.sections.running = {n, number} running
 ios.viewerbg = 3D viewer background
 ios.viewerbg.auto = Auto
 ios.viewerbg.custom = Custom
@@ -3973,3 +3974,22 @@ ios.swarm.remove.ask = Remove {name} from the swarm?
 ios.swarm.stop.ask = Stop this swarm?
 ios.swarm.post = Post to the board
 # ---- end ----
+# the sidebar's sections (docs/ALWAYS-ON.md section 8): the hub's words, and the window's
+sidebar.sections.needs = Needs you
+sidebar.sections.pinned = Pinned
+sidebar.sections.active = Active
+sidebar.sections.quiet = Quiet
+sidebar.sections.quiet.hint = Nothing for two weeks
+sidebar.sections.running.word = Running
+sidebar.sections.recent = Recent
+sidebar.sections.limit = Waiting for a usage reset
+sidebar.sections.cut = Cut by a restart
+sidebar.sections.monitoring = Working in the background
+sidebar.sections.stopped = Stopped
+sidebar.sections.done = Done
+sidebar.sections.failed = Failed
+sidebar.sections.rename = Rename group
+sidebar.sections.pin = Pin project
+sidebar.sections.unpin = Unpin project
+gpui.sections.move.to = Move to {group}
+gpui.sections.running = {n, number} running

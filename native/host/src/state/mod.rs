@@ -13,6 +13,8 @@ use std::collections::HashMap;
 
 // the digest-skipped families (UberOp, wakes, locks, TurnUsage, deploys, todos by tools/person/agent, Reminded): the state lane's
 pub mod fam;
+/// a thread's status word and the sidebar's visibility rule (D11)
+pub mod visible;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, serde::Serialize, serde::Deserialize)]
 pub enum Turn { Idle, Running, Completed, Interrupted, Failed }

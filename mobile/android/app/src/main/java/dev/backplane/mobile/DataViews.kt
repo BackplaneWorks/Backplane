@@ -296,6 +296,10 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
     var projSheet by remember { mutableStateOf(false) }
     var pickNew by remember { mutableStateOf<DProject?>(null) }
     var newSwarm by remember { mutableStateOf<DProject?>(null) }   // New swarm's sheet, from a project's menu   // a project on more than one machine: where the new thread starts
+    var secPage by remember { mutableStateOf<DSecRow?>(null) }    // a project's page (sections), over the list until Back
+    var secMenu by remember { mutableStateOf<DSecRow?>(null) }
+    var secRename by remember { mutableStateOf<DSection?>(null) }
+    secPage?.let { p -> androidx.activity.compose.BackHandler { secPage = null }; ProjectPageScreen(p, open) { secPage = null }; return }
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val prefs = remember { ctx.getSharedPreferences("data.ui", android.content.Context.MODE_PRIVATE) }
     var shut by remember { mutableStateOf(prefs.getStringSet("projects.shut", emptySet())!!.toSet()) }
@@ -344,7 +348,10 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
             val uber = DataClient.bots.filter { it.uber && it.thread.isNotEmpty() }
             items(uber, key = { "u:${it.id}" }) { b -> SidebarRow("@", b.name, onMachine(Msg.android_kind_uberbot, b.mark)) { open(b.thread) } }
             var at = uber.size; rowOf.clear()
-            for (p in projects) {
+            // a hub with sections (docs/ALWAYS-ON.md section 8): Needs you, Pinned, Active, the groups, Quiet, as it presents them; else every project
+            val sectioned = DataClient.has("sections") && DataClient.sections.isNotEmpty()
+            if (sectioned) sectionItems(open, { secPage = it }, { secMenu = it }, { secRename = it })
+            if (!sectioned) for (p in projects) {
                 val closed = p.id in shut
                 rowOf[p.id] = at; at += 1
                 val sw = if (swarmsOn) SwarmUi.live(Swarms.all, p.id) else emptyList()
@@ -395,7 +402,7 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
                 }
             }
             val known = projects.map { it.id }.toSet()
-            items(threads.filter { it.project !in known }, key = { "t:${it.id}" }) { t -> ThreadRow(t, { open(t.id) }) }
+            if (!sectioned) items(threads.filter { it.project !in known }, key = { "t:${it.id}" }) { t -> ThreadRow(t, { open(t.id) }) }
             // Conversation history: the old Scratch chats. Its row opens or shuts the list; a chat that wants attention always has its row; nothing starts here
             if (hist.count > 0) {
                 item("history") {
@@ -418,6 +425,8 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
         }
         projMenu?.let { ProjectMenus(it, projSheet, { newSwarm = it }) { projSheet = false } }
         newSwarm?.let { pr -> NewSwarmSheet(pr.id, { newSwarm = null }) { openSwarm(it) } }
+        secMenu?.let { SectionProjectMenu(it) { secMenu = null } }
+        secRename?.let { SectionRename(it) { secRename = null } }
         pickNew?.let { p -> ActionSheet(p.title, p.newOn.map { n -> (n.label + if (n.away) " · " + Msg.android_away else "") to { pickNew = null; newThread(n.value) } }) { pickNew = null } }
     }
 }

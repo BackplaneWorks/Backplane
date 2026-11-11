@@ -344,6 +344,10 @@ impl Backplane {
                     .child(div().flex().gap_2().items_center().child(div().text_size(px(11.)).text_color(note_color).child(trs(note))).children(marks.get(bid).and_then(|m| crate::screens::badge::machine_mark(light, m, false, bid))))).into_any_element());
         }
         let new_here = crate::keys::new_target(&self.data, &self.selected, self.project_page.as_deref());
+        // the hub's sections (Needs you, Pinned, Active, groups, Quiet: screens/sections.rs); an older hub sends projects and the Active view
+        let sectioned = crate::screens::sections::on(&self.data);
+        if sectioned { self.section_rows(cx, light, &mut rows, &mut ctl); }
+        if !sectioned {
         for project in self.data["projects"].as_array().into_iter().flatten() {
             let pid = string(project, "id"); let pid = pid.rsplit_once('|').map_or(pid.as_str(), |(_, r)| r).to_string();
             ctl.push(CtlEntry { id: format!("project:{pid}"), label: string(project, "title"), ctl: Ctl::Home(pid.clone()) });
@@ -417,6 +421,7 @@ impl Backplane {
                 rows.push(self.side_thread(cx, light, t, &pid, &string(t, "project"), true, &mut ctl));
             }
         }
+        } // (not sectioned)
         for page in self.data["sidebarPages"].as_array().into_iter().flatten() {
             for key in ["projects", "active", "legacy"] { if let Some(row) = pager_row(cx, format!("pg-{key}"), &page[key], light, &mut ctl) { rows.push(row); } }
         }

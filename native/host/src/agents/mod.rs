@@ -7,7 +7,7 @@
 //! Out for Claude: images/`$skill` input, the Backplane MCP server and runtime prompt in the agent's arguments,
 //! subagents and background tasks, todo tools, the allowance stream, the legacy queue, mail provenance beyond carry,
 //! and the hub's time-driven policies (liveness, autosettle, alert/told/summary, star nudge), which belong to M4.
-pub mod account_tools; pub mod mcp_stdio; pub mod bundled; pub mod mailroom; pub mod devturns; pub mod bg; pub mod lockrec; pub mod locks; pub mod refs; pub mod person; pub mod work; pub mod textgen; pub mod iconpick; pub mod launch; pub mod far; pub mod review; pub mod tasks; pub mod codex; pub mod providers; pub mod cmds; pub mod design; pub mod hist; pub mod host; pub mod inputs; pub mod skills; pub mod lines; pub mod mcp; pub mod proc; pub mod prompt; pub mod prompt_text; pub mod rules; pub mod settle; pub mod tools; pub mod wake; pub mod world;
+pub mod account_tools; pub mod mcp_stdio; pub mod bundled; pub mod mailroom; pub mod devturns; pub mod bg; pub mod lockrec; pub mod locks; pub mod refs; pub mod person; pub mod work; pub mod textgen; pub mod iconpick; pub mod groupname; pub mod launch; pub mod far; pub mod review; pub mod tasks; pub mod codex; pub mod providers; pub mod cmds; pub mod design; pub mod hist; pub mod host; pub mod inputs; pub mod skills; pub mod lines; pub mod mcp; pub mod proc; pub mod prompt; pub mod prompt_text; pub mod rules; pub mod settle; pub mod tools; pub mod wake; pub mod world;
 #[cfg(test)] mod tests;
 #[cfg(test)] mod laws;
 
@@ -130,11 +130,13 @@ impl Agents {
         if crate::copy::person_turn_allowed() { let cleared: Vec<Value> = { let w = ag.world().await; w.threads.keys().filter(|t| !w.setting(&format!("ride.{t}")).is_empty()).map(|t| set(format!("ride.{t}"), String::new(), now_s())).collect() }; if !cleared.is_empty() { let _ = hub.commit_many(&cleared).await; } } // mail copied from the real log is not this app's to deliver to a fresh agent
         let repair = { let w = ag.world().await; tasks::repair_plan(&w) }; // Task.repair judges the state the hub started from, before recovery
         crate::startup::mark("agents: before recover");
+        let before_recover = now_s(); // the sidebar's look baseline: a turn this start's recovery cuts is after it, so it still shows (groupname.rs)
         ag.recover().await;
         crate::startup::mark("agents: recovered");
         let _ = HANDLE.set(ag.clone()); hub.set_far_mcp(Arc::new(far::FarServe(Arc::downgrade(&ag)))); tasks::watch(&ag); if !crate::guard::safe() { let a = ag.clone(); tokio::spawn(async move { a.work_rearm().await; a.locks_start() }); } if !repair.is_empty() { let a = ag.clone(); tokio::spawn(async move { a.task_repair_run(repair).await }); }
         hub.register_rpc(Arc::new(Rpc(ag.clone())));
         iconpick::start(&ag, &hub); // project icons picked by Haiku, off to the side
+        groupname::start(&ag, &hub, before_recover); // sidebar group names picked by Haiku the same way (present/sections.rs)
         hub.register_http(Arc::new(devturns::DevTurns(ag.clone())));
         hub.register_http(Arc::new(devturns::AccountRetry(ag.clone())));
         hub.register_http(Arc::new(locks::Http(ag.clone())));
@@ -295,6 +297,7 @@ impl Agents {
                 if !told.contains(th) { ev.push(json!({"$":"ActivityLogged","thread":th,"act":hub_id("r", now, self.seq()),"tone":"error","kind":"restart","summary":rules::restart_cut(&zone, now),"at":now})) }
                 ev.push(json!({"$":"TurnChanged","thread":th,"state":"interrupted","at":now})); cut_threads.push(th.clone());
                 if !t.last_user.is_empty() { ev.push(set(format!("stopped.{}", t.last_user), "1".into(), now)) }
+                ev.push(set(format!("sidebar.cut.{th}"), now.to_string(), now)); // the sidebar says "Cut by a restart" until a turn starts (present/sections.rs)
                 let will = world::carry_will(t, w.setting("restart.continue")) && !th.starts_with("run") && !th.starts_with("mailcoord-"); // Ephemeral.is: nothing carries a mail run on
                 if will && !crate::copy::on() && !crate::guard::safe() { carry.push((t.running_at, th.clone())) } // a hub on a copy of a log resumes no turn, whatever restart.continue says
             }

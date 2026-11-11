@@ -3,6 +3,7 @@
 
 extension Tr {
     static let catalog = #"""
+ios.sections.running	{n, number} running	{n, number}件実行中
 ios.viewerbg	3D viewer background	3Dビューアの背景
 ios.viewerbg.auto	Auto	自動
 ios.viewerbg.custom	Custom	カスタム
@@ -3851,6 +3852,24 @@ android.swarm.none	No posts yet.	まだ投稿はありません。
 android.swarm.gone	That swarm is not on this hub.	そのスウォームはこのハブにありません。
 android.swarm.provider	Provider	プロバイダー
 android.swarm.model	Model	モデル
+sidebar.sections.needs	Needs you	対応が必要
+sidebar.sections.pinned	Pinned	ピン留め
+sidebar.sections.active	Active	進行中
+sidebar.sections.quiet	Quiet	静か
+sidebar.sections.quiet.hint	Nothing for two weeks	2週間動きなし
+sidebar.sections.running.word	Running	実行中
+sidebar.sections.recent	Recent	最近
+sidebar.sections.limit	Waiting for a usage reset	利用上限のリセット待ち
+sidebar.sections.cut	Cut by a restart	再起動で中断
+sidebar.sections.monitoring	Working in the background	バックグラウンドで作業中
+sidebar.sections.stopped	Stopped	停止
+sidebar.sections.done	Done	完了
+sidebar.sections.failed	Failed	失敗
+sidebar.sections.rename	Rename group	グループ名を変更
+sidebar.sections.pin	Pin project	プロジェクトをピン留め
+sidebar.sections.unpin	Unpin project	プロジェクトのピン留めを外す
+gpui.sections.move.to	Move to {group}	{group}へ移動
+gpui.sections.running	{n, number} running	{n, number}件実行中
 """#
 
     /// thread.count = {n, plural, one {# thread} other {# threads}}
@@ -6109,6 +6128,9 @@ android.swarm.model	Model	モデル
     /// android.swarm.held = held · {why}
     static func android_swarm_held(why: String) -> String { f("android.swarm.held", ["why": why]) }
 
+    /// ios.sections.running = {n, number} running
+    static func ios_sections_running(n: Int) -> String { f("ios.sections.running", ["n": String(n)]) }
+
     /// ios.hub.use = Use {hub}
     static func ios_hub_use(hub: String) -> String { f("ios.hub.use", ["hub": hub]) }
 
@@ -6333,4 +6355,10 @@ android.swarm.model	Model	モデル
 
     /// ios.swarm.remove.ask = Remove {name} from the swarm?
     static func ios_swarm_remove_ask(name: String) -> String { f("ios.swarm.remove.ask", ["name": name]) }
+
+    /// gpui.sections.move.to = Move to {group}
+    static func gpui_sections_move_to(group: String) -> String { f("gpui.sections.move.to", ["group": group]) }
+
+    /// gpui.sections.running = {n, number} running
+    static func gpui_sections_running(n: Int) -> String { f("gpui.sections.running", ["n": String(n)]) }
 }
