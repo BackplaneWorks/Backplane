@@ -57,10 +57,10 @@ pub fn status(st: &State, id: &str) -> &'static str {
     let Some(t) = st.threads.get(id) else { return "idle" };
     if t.deleted { return "idle" }
     if wants_person(st, id) { return "needs" }
-    let queued = st.queue.get(id).map_or(false, |q| !q.is_empty());
     if limit_held(st, id) { return "limit" }
     // a turn the restart's line will carry on (`carry.wait.<t>`, agents/mod.rs) is resumed by itself: running work, not a stop
-    if t.turn == Turn::Running || queued || (t.turn == Turn::Interrupted && get(st, &format!("carry.wait.{id}")) == "1") { return "running" }
+    // (a queued message alone is not running work: the hub starts it at once, and the log keeps many a TurnQueued nothing took, on threads long done)
+    if t.turn == Turn::Running || (t.turn == Turn::Interrupted && get(st, &format!("carry.wait.{id}")) == "1") { return "running" }
     match t.turn {
         Turn::Failed => return "failed",
         Turn::Interrupted if !get(st, &format!("sidebar.cut.{id}")).is_empty() => return "cut",
