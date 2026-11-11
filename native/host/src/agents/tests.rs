@@ -1936,3 +1936,40 @@ static HOME_MOVE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
     assert_eq!(log_from(&hub, n0).await.iter().filter(|e| is(e, "MessagePosted") && e["thread"] == "tbub" && e["role"] == "user").count(), 6, "a second start delivers nothing again");
     ag.shutdown();
 }
+
+/// A mailroom whose uberbot chat is `chat`: it files what the funnel is asked and remembers it
+struct ChatRoom { chat: String, filed: StdMutex<Vec<(String, String, String)>> }
+impl mailroom::Mailroom for ChatRoom {
+    fn funnel<'a>(&'a self, _role: &'a str, to: &'a str, msg: &'a str, text: &'a str, o: &'a mailroom::Origin, _r: &'a str, _x: &'a [Value]) -> crate::api::Fut<'a, mailroom::Funnel> {
+        Box::pin(async move { if to == self.chat { self.filed.lock().unwrap().push((msg.into(), o.1.clone(), text.into())); mailroom::Funnel::Filed(Ok(())) } else { mailroom::Funnel::Deliver } })
+    }
+    fn tee<'a>(&'a self, _: &'a str, _: &'a str, _: &'a str, _: &'a str) -> crate::api::Fut<'a, ()> { Box::pin(async {}) }
+    fn dest<'a>(&'a self, by: &'a str) -> crate::api::Fut<'a, String> { Box::pin(async move { by.to_string() }) }
+    fn chat_is<'a>(&'a self, th: &'a str) -> crate::api::Fut<'a, bool> { Box::pin(async move { th == self.chat }) }
+    fn reach<'a>(&'a self, _: &'a str, _: &'a str) -> crate::api::Fut<'a, Option<bool>> { Box::pin(async { None }) }
+    fn hidden<'a>(&'a self, _: &'a str, _: &'a str) -> crate::api::Fut<'a, bool> { Box::pin(async { false }) }
+    fn launcher<'a>(&'a self, th: &'a str) -> crate::api::Fut<'a, String> { Box::pin(async move { th.to_string() }) }
+    fn stopping<'a>(&'a self, _: &'a str) -> crate::api::Fut<'a, ()> { Box::pin(async {}) }
+    fn prompt<'a>(&'a self, _: &'a str) -> crate::api::Fut<'a, String> { Box::pin(async { String::new() }) }
+    fn turn_block<'a>(&'a self, _: &'a str, _: &'a str) -> crate::api::Fut<'a, String> { Box::pin(async { String::new() }) }
+    fn mentions<'a>(&'a self, _: &'a str, _: Vec<String>, _: &'a str) -> crate::api::Fut<'a, ()> { Box::pin(async {}) }
+    fn room_mentions<'a>(&'a self, _: &'a str, _: Vec<String>, _: &'a str) -> crate::api::Fut<'a, ()> { Box::pin(async {}) }
+    fn permit<'a>(&'a self, _: &'a str, _: &'a str, _: &'a Value) -> crate::api::Fut<'a, Option<Value>> { Box::pin(async { None }) }
+    fn gate<'a>(&'a self, _: &'a str, _: &'a str, _: &'a Value) -> crate::api::Fut<'a, Option<(bool, Value)>> { Box::pin(async { None }) }
+}
+#[tokio::test(flavor = "multi_thread")] async fn a_launched_threads_report_to_the_uberbots_settled_chat_reaches_the_mailroom() {
+    // Nov 11 live: Bub's chat auto-settles, and the settled-thread shortcut posted every launch report there as a bare system line: the mailroom (and its
+    // done digest) never saw a finish. A settled plain thread keeps the shortcut.
+    let sd = dir("uchat-bin"); perf_standin(&sd, 1);
+    let (hub, ag, _h, _w) = start("uchat", |w| base_log(w, 2, &format!("{{\"$\":\"ThreadSettled\",\"id\":\"{T1}\",\"manual\":false,\"at\":1700000100}}\n{{\"$\":\"ThreadSettled\",\"id\":\"t1700001001-1\",\"manual\":false,\"at\":1700000100}}\n")), |_| Cli::standin(&sd)).await;
+    let room = Arc::new(ChatRoom { chat: T1.into(), filed: StdMutex::new(vec![]) }); ag.set_mailroom(room.clone());
+    let text = launch::note("t9", "Fix", "completed", "Landed.");
+    let from = len(&hub).await;
+    ag.inbound("user", T1, "t:t9:lr-r1", &text, ("t9".into(), "launch".into(), String::new()), vec![]).await.unwrap();
+    ag.inbound("user", "t1700001001-1", "t:t9:lr-r2", &text, ("t9".into(), "launch".into(), String::new()), vec![]).await.unwrap();
+    let ev = log_from(&hub, from).await;
+    assert_eq!(room.filed.lock().unwrap().iter().map(|f| (f.0.as_str(), f.1.as_str())).collect::<Vec<_>>(), vec![("t:t9:lr-r1", "launch")], "the uberbot's report is filed");
+    assert!(!ev.iter().any(|e| is(e, "MessagePosted") && e["thread"] == T1), "and not posted in its chat: {ev:?}");
+    assert!(ev.iter().any(|e| is(e, "MessagePosted") && e["thread"] == "t1700001001-1" && e["role"] == "system"), "a plain settled thread files it as before");
+    ag.shutdown();
+}
