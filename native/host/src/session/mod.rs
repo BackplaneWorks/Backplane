@@ -334,13 +334,12 @@ mod nohelper_tests {
     use super::*;
     // the person's rule: a hub with no helper starts no process for a thread view, BACKPLANE_WINDOW_BIN or not
     #[tokio::test] async fn without_the_helper_window_for_starts_nothing() {
-        let home = std::env::temp_dir().join(format!("bp-nohelper-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&home); std::fs::create_dir_all(&home).unwrap();
+        let home = crate::plat::tmp::dir("nohelper");
         std::fs::write(home.join("events.jsonl"), "{\"$\":\"ProjectCreated\",\"id\":\"p1\",\"title\":\"x\",\"root\":\"/tmp\",\"at\":1}\n{\"$\":\"ThreadCreated\",\"id\":\"t1\",\"project\":\"p1\",\"title\":\"T\",\"env\":\"local\",\"branch\":\"\",\"worktree\":\"\",\"provider\":\"claude\",\"model\":\"\",\"at\":1}\n").unwrap();
         let spy = home.join("spy-ran"); let script = home.join("window-spy.sh");
         std::fs::write(&script, format!("#!/bin/sh\ntouch {}\n", crate::plat::fs::script_path(&spy))).unwrap();
         { use crate::plat::fs::PermissionsExt; std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap(); }
-        let cfg = crate::hub::Cfg { home: home.clone(), version: "0.1.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() };
+        let cfg = crate::hub::Cfg { home: home.to_path_buf(), version: "0.1.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() };
         let h = Hub::start(cfg, std::sync::Arc::new(crate::presenter::Canned { reply: json!({}) })).await.unwrap();
         let _ = h.window_bin.set(script);
         let out = h.window_for(&json!({"target": {"kind": "thread", "id": "t1"}}), 0, Some("t1")).await;

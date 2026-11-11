@@ -214,7 +214,7 @@ impl RpcHandler for DiagnosticsRpc {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn fresh(tag: &str) -> PathBuf { let h = std::env::temp_dir().join(format!("bp-diag-{tag}-{}", std::process::id())); let _ = std::fs::remove_dir_all(&h); std::fs::create_dir_all(&h).unwrap(); h }
+    fn fresh(tag: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("diag-{tag}")) }
     /// Drops the recorder and starts it on `h` under one hold of its lock. Other tests' hubs call `start` on their own homes (settings::open) in
     /// parallel and outside LOCK; cleared and started apart, one of them could bind between the two and this test would record into its home.
     fn bind(h: &Path) -> Value { let mut g = ST.lock().unwrap_or_else(|e| e.into_inner()); *g = None; start_in(&mut g, h) }

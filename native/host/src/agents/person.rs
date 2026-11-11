@@ -102,7 +102,7 @@ pub const CLAUDE_STRICT: [&str; 3] = ["--strict-mcp-config", "--setting-sources"
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn dir(n: &str) -> PathBuf { let p = std::env::temp_dir().join(format!("bp-person-{}-{n}", std::process::id())); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); crate::plat::fs::canonicalize(&p).unwrap() }
+    fn dir(n: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::canonical(&format!("person-{n}")) }
     #[test] fn the_folder_must_be_a_project_folder_of_the_copy_and_nothing_of_the_live_home_or_root() {
         let (proj, home, live, other) = (dir("proj"), dir("home"), dir("live"), dir("other")); std::fs::create_dir_all(proj.join("sub")).unwrap(); std::fs::create_dir_all(home.join("scratch/t1")).unwrap(); std::fs::create_dir_all(live.join("scratch/t9")).unwrap();
         let roots = vec![proj.to_string_lossy().into_owned()];

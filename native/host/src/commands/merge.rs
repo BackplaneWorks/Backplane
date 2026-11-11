@@ -183,8 +183,8 @@ mod tests {
     use super::*;
     use std::path::Path;
     fn sh(d: &Path, a: &[&str]) -> String { let o = std::process::Command::new("git").args(a).current_dir(d).env("GIT_AUTHOR_NAME", "t").env("GIT_AUTHOR_EMAIL", "t@t").env("GIT_COMMITTER_NAME", "t").env("GIT_COMMITTER_EMAIL", "t@t").output().unwrap(); assert!(o.status.success(), "{a:?}: {}", String::from_utf8_lossy(&o.stderr)); String::from_utf8_lossy(&o.stdout).trim().to_string() }
-    fn repo(name: &str) -> std::path::PathBuf {
-        let d = std::env::temp_dir().join(format!("bp-merge-{name}-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap();
+    fn repo(name: &str) -> crate::plat::tmp::TempDir {
+        let d = crate::plat::tmp::dir(&format!("merge-{name}"));
         sh(&d, &["init", "-q", "-b", "main"]); std::fs::write(d.join("f"), "a\n").unwrap(); sh(&d, &["add", "f"]); sh(&d, &["commit", "-q", "-m", "a"]); d
     }
     fn mk(d: &Path, name: &str) -> String { let wt = format!("{}/.backplane/worktrees/{name}", d.display()); sh(d, &["worktree", "add", "-q", "-b", name, &wt]); wt }

@@ -206,13 +206,12 @@ mod tests {
     }
     /// A real stdio server, written here as a shell script: initialize, then tools/list with two tools.
     #[cfg(unix)] #[tokio::test] async fn a_stdio_server_is_started_and_listed() {
-        let d = std::env::temp_dir().join(format!("bp-mcpx-h-{}", std::process::id())); std::fs::create_dir_all(&d).unwrap(); let f = d.join("srv.sh");
+        let d = crate::plat::tmp::dir("mcpx-h"); let f = d.join("srv.sh");
         std::fs::write(&f, "#!/bin/sh\necho starting >&2\nwhile read -r l; do case \"$l\" in\n*'\"initialize\"'*) echo '{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{\"protocolVersion\":\"2025-06-18\",\"capabilities\":{\"tools\":{},\"prompts\":{}},\"serverInfo\":{\"name\":\"sh-srv\",\"version\":\"0.1\"}}}';;\n*tools/list*) echo '{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{\"tools\":[{\"name\":\"a\"},{\"name\":\"b\"}]}}';;\n*prompts/list*) echo '{\"jsonrpc\":\"2.0\",\"id\":4,\"result\":{\"prompts\":[{\"name\":\"p\"}]}}';;\nesac; done\n").unwrap();
         let r = check(&Resolved { transport: "stdio".into(), command: "sh".into(), args: vec![f.to_string_lossy().into()], env: vec![("X".into(), "1".into())], ..Default::default() }, 5).await;
         assert!(r.ok, "{r:?}"); assert_eq!((r.server.as_str(), r.tools.len(), r.prompts), ("sh-srv", 2, 1)); assert_eq!(r.stderr, "starting"); assert_eq!(r.at, 5);
         let bad = check(&Resolved { transport: "stdio".into(), command: "sh".into(), args: vec!["-c".into(), "echo boom >&2; exit 3".into()], ..Default::default() }, 0).await;
         assert!(!bad.ok); assert!(bad.error.contains("code 3"), "{}", bad.error); assert_eq!(bad.stderr, "boom");
         let none = check(&Resolved { transport: "stdio".into(), command: "/nonexistent/x".into(), ..Default::default() }, 0).await; assert!(none.error.starts_with("could not start"));
-        let _ = std::fs::remove_dir_all(&d);
     }
 }

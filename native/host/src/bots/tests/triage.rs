@@ -4,7 +4,7 @@ use crate::agents::mailroom::{Funnel, Mailroom};
 use crate::bots::mail::{funnel::Room, tools::{lists, MailTools}, escalate::disposition_key};
 use crate::agents::mcp::ToolSet;
 
-pub(super) async fn uber(name: &str) -> (Arc<Hub>, Arc<Bots>, Arc<Rec>, String, String) {
+pub(super) async fn uber(name: &str) -> (crate::hub::TestHub, Arc<Bots>, Arc<Rec>, String, String) {
     let (hub, bots, rec) = start(&format!("parity-{name}"), "").await;
     let r = rpc(&hub, "bots.create", json!({"name":"bub","uber":true})).await; let bub = r["bot"].as_str().unwrap().to_string();
     until(&hub, |l| l.iter().any(|e| e["$"] == "UberSet") && l.iter().any(|e| e["$"] == "WorktreeSet")).await;

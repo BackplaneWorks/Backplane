@@ -200,8 +200,7 @@ mod tests {
     // Hub.autosettle.upgrade runs once at start: on a log that holds launch mails and no autosettle.version, a real Hub start (bootstrap, then the
     // policies' boot fold) writes the delivery settings and the version, once. The bootstrap must not set the version itself (it would hide the mails).
     #[tokio::test] async fn a_legacy_home_is_upgraded_once_at_a_real_start() {
-        let dir = std::env::temp_dir().join(format!("bp-statehost-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::plat::tmp::dir("statehost");
         let log = [json!({"$":"ProjectCreated","id":"p","title":"p","root":"/r","at":1}),
             json!({"$":"ThreadCreated","id":"boss","project":"p","title":"boss","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1}),
             json!({"$":"ThreadCreated","id":"w1","project":"p","title":"w1","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1}),
@@ -211,7 +210,7 @@ mod tests {
             json!({"$":"TurnChanged","thread":"w1","state":"completed","at":5}),
             json!({"$":"MailPosted","id":"t:w1:lr-1","conv":"c","from":"thread:w1","to":"thread:boss","kind":"launch","ref":"","want":"","head":"","size":0,"at":9})];
         std::fs::write(dir.join("events.jsonl"), log.iter().map(|e| e.to_string() + "\n").collect::<String>()).unwrap();
-        let cfg = Cfg { home: dir.clone(), version: "0.14.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() };
+        let cfg = Cfg { home: dir.to_path_buf(), version: "0.14.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() };
         let hub = Hub::start(cfg, Arc::new(Canned { reply: json!({}) })).await.unwrap();
         let _p = start(hub.clone());
         let mut text = String::new();
@@ -222,12 +221,10 @@ mod tests {
         }
         assert!(text.contains(r#""key":"autosettle.delivery.w1\tthread:boss","value":"9""#), "the launch mail became a receipt: {}", text.lines().filter(|l| l.contains("autosettle")).collect::<Vec<_>>().join("\n"));
         assert_eq!(text.matches(r#""key":"autosettle.version""#).count(), 1, "the version is set once, by the upgrade");
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[tokio::test] async fn a_passive_start_commits_nothing_on_a_legacy_home() {
-        let dir = std::env::temp_dir().join(format!("bp-statehost-passive-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::plat::tmp::dir("statehost-passive");
         let log = [json!({"$":"ProjectCreated","id":"p","title":"p","root":"/r","at":1}),
             json!({"$":"ThreadCreated","id":"boss","project":"p","title":"boss","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1}),
             json!({"$":"ThreadCreated","id":"w1","project":"p","title":"w1","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1}),
@@ -237,7 +234,7 @@ mod tests {
             json!({"$":"TurnChanged","thread":"w1","state":"completed","at":5}),
             json!({"$":"MailPosted","id":"t:w1:lr-1","conv":"c","from":"thread:w1","to":"thread:boss","kind":"launch","ref":"","want":"","head":"","size":0,"at":9})];
         std::fs::write(dir.join("events.jsonl"), log.iter().map(|e| e.to_string() + "\n").collect::<String>()).unwrap();
-        let cfg = Cfg { home: dir.clone(), version: "0.14.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() };
+        let cfg = Cfg { home: dir.to_path_buf(), version: "0.14.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() };
         let hub = Hub::start(cfg, Arc::new(Canned { reply: json!({}) })).await.unwrap();
         let p = start_with(hub.clone(), Some(true));
         let mut text = String::new();
@@ -246,15 +243,13 @@ mod tests {
         text.push_str(&hub.store.range(0, hub.store.len()).unwrap().join("\n"));
         assert!(p.booted(), "the policies folded the log");
         assert!(!text.contains("autosettle.delivery.") && !text.contains("autosettle.version"), "passive: the boot commits nothing, the upgrade included: {}", text.lines().filter(|l| l.contains("autosettle")).collect::<Vec<_>>().join("\n"));
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     // The records the JS hub writes next to a message — liveness.<t> and autosettle.quiet.<t> — are written by the Rust hub through a real Hub start:
     // once the policies have folded the log, a user and an assistant message are committed and the log shows both records, in the same batch.
     #[tokio::test] async fn a_real_hub_writes_liveness_and_quiet_next_to_a_message() {
-        let dir = std::env::temp_dir().join(format!("bp-statehost-live-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(&dir).unwrap();
-        let cfg = Cfg { home: dir.clone(), version: "0.14.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() };
+        let dir = crate::plat::tmp::dir("statehost-live");
+        let cfg = Cfg { home: dir.to_path_buf(), version: "0.14.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() };
         let hub = Hub::start(cfg, Arc::new(Canned { reply: json!({}) })).await.unwrap();
         let p = start(hub.clone());
         for _ in 0..200 { if p.booted() { break } tokio::time::sleep(std::time::Duration::from_millis(25)).await; }

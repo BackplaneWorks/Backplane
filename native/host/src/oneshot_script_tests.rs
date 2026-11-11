@@ -5,8 +5,8 @@ use std::{path::{Path, PathBuf}, process::Command};
 fn root() -> PathBuf { Path::new(env!("CARGO_MANIFEST_DIR")).join("../..") }
 /// A temp home with two named Claude accounts (one with a store folder, one a sync account the script must leave alone) and a stand-in claude:
 /// with no CLAUDE_CONFIG_DIR it answers the default login's weekly limit, with one it answers a haiku and says which store it ran under.
-fn rig(name: &str) -> (PathBuf, PathBuf) {
-    let d = std::env::temp_dir().join(format!("bp-oneshot-{}-{name}", std::process::id())); let _ = std::fs::remove_dir_all(&d);
+fn rig(name: &str) -> (crate::plat::tmp::TempDir, PathBuf) {
+    let d = crate::plat::tmp::dir(&format!("oneshot-{name}"));
     let acc = d.join("home/providers/accounts-v1"); std::fs::create_dir_all(acc.join("a1/s1")).unwrap(); std::fs::create_dir_all(acc.join("sy")).unwrap();
     std::fs::write(acc.join("profiles.json"), r#"{"version":1,"profiles":[{"id":"a1","provider":"claude","label":"work","epoch":2,"store":"s1"},{"id":"sy","provider":"claude","label":"sync","epoch":1,"store":"","kind":"sync"},{"id":"cx","provider":"codex","label":"c","epoch":1,"store":""}]}"#).unwrap();
     let fake = d.join("claude");
@@ -28,7 +28,6 @@ fn calls(d: &Path) -> Vec<String> { std::fs::read_to_string(d.join("calls")).unw
     let c = calls(&d); assert_eq!(c.len(), 2, "{c:?}"); assert!(c[0].starts_with("default ") && c[1].contains("/a1/s1 ") && c[1].contains("--setting-sources user"), "default login first, then the account's store: {c:?}");
     assert!(!c.iter().any(|l| l.contains("/sy")), "a sync account is the hub's to run");
     let _ = run(); let c = calls(&d); assert_eq!(c.len(), 3, "the login that ran out is skipped for an hour: {c:?}"); assert!(c[2].contains("/a1/s1 "));
-    let _ = std::fs::remove_dir_all(&d);
 }
 #[test] fn a_build_gets_its_haiku_when_the_default_login_is_out() {
     let (d, fake) = rig("haiku");
@@ -38,5 +37,4 @@ fn calls(d: &Path) -> Vec<String> { std::fs::read_to_string(d.join("calls")).unw
     let o = Command::new("bash").arg(root().join("scripts/build-haiku.sh")).arg(&repo).arg(&from).arg(&to)
         .env("BACKPLANE_HOME", d.join("home")).env("HAIKU_CLAUDE", &fake).env("ONESHOT_STATE", d.join("state.json")).env_remove("CLAUDE_CONFIG_DIR").output().unwrap();
     let out = String::from_utf8_lossy(&o.stdout); assert_eq!(out.lines().collect::<Vec<_>>(), ["Pins hold the threads", "icons wake on every board", "Haiku finds its voice"], "{out:?} {}", String::from_utf8_lossy(&o.stderr));
-    let _ = std::fs::remove_dir_all(&d);
 }

@@ -9,23 +9,24 @@ const T: &str = "t1700000001-2";
 /// How long a wait on state may take before it is called stuck. A deadline costs nothing when the state arrives (every wait returns the moment it does) and only matters when it does
 /// not, so it is long: a gate on a box with three builds running starts a stand-in CLI in seconds, not milliseconds.
 const PATIENCE: u64 = 180;
-struct Rig { hub: Arc<Hub>, ag: Arc<Agents>, mgr: Arc<Accounts>, dir: PathBuf }
+struct Rig { hub: Arc<Hub>, ag: Arc<Agents>, mgr: Arc<Accounts>, dir: crate::plat::tmp::TempDir }
 
-fn fresh(name: &str) -> PathBuf { static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0); let p = std::env::temp_dir().join(format!("bp-fo-{}-{name}-{}", std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::Relaxed))); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
+fn fresh(name: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("fo-{name}")) }
 fn now() -> u64 { crate::hub::now_ms() / 1000 }
 async fn rig(name: &str, provider: &str) -> Rig {
     use crate::plat::fs::PermissionsExt;
-    let (dir, home, work, bin) = (fresh(&format!("{name}-rec")), fresh(&format!("{name}-home")), fresh(&format!("{name}-work")), fresh(&format!("{name}-bin")));
+    let (mut dir, home, work, bin) = (fresh(&format!("{name}-rec")), fresh(&format!("{name}-home")), fresh(&format!("{name}-work")), fresh(&format!("{name}-bin")));
     for cli in ["claude", "codex"] { let p = bin.join(cli); std::fs::write(&p, STANDIN.replace("@DIR@", &crate::plat::fs::script_path(&dir))).unwrap(); std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap(); }
     let log = format!("{{\"$\":\"ProjectCreated\",\"id\":\"p1\",\"title\":\"f\",\"root\":{root},\"at\":1700000000}}\n{{\"$\":\"ThreadCreated\",\"id\":\"{T}\",\"project\":\"p1\",\"title\":\"Fixture\",\"env\":\"local\",\"branch\":\"\",\"worktree\":\"\",\"provider\":\"{provider}\",\"model\":\"\",\"at\":1700000001}}\n", root = serde_json::to_string(&work.to_string_lossy()).unwrap());
     std::fs::write(home.join("events.jsonl"), log).unwrap();
     std::fs::write(home.join("token"), "tok").unwrap(); // a phone's socket (data/1) presents it
-    let hub = Hub::start(Cfg { home: home.clone(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+    let hub = Hub::start(Cfg { home: home.to_path_buf(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
     let ag = Agents::start_with(hub.clone(), Cli::standin(&bin)).await.unwrap();
     crate::commands::start_with(hub.clone(), Some(Arc::new(ag.clone())));
     let mgr = accounts_hub::start_cli(&hub, Some(ag.clone()), Cli::standin(&bin));
     // one provider's rules unless a test sets the order: the machine's own CLIs (a models probe) must not add a provider to these
     hub.commit(&json!({"$":"SettingSet","key":"fallback.chain","value":provider,"at":now()})).await.unwrap();
+    dir.keep(home); dir.keep(work); dir.keep(bin);
     Rig { hub, ag, mgr, dir }
 }
 impl Rig {

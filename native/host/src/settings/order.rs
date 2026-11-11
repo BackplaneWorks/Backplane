@@ -427,7 +427,7 @@ mod tests {
         assert!(!counts_order("paid", "placed", true) && !counts_order("quoted", "pilot", true) && !counts_order("quoted", "expired", true) && !counts_order("quoted", "paid", false));
         assert!(has_board(&serde_json::json!({"parts":[{"kind":"3dp"},{"kind":"flex"}]})) && !has_board(&serde_json::json!({"parts":[{"kind":"cnc"}]})));
     }
-    fn tmp(n: &str) -> std::path::PathBuf { let p = std::env::temp_dir().join(format!("bp-order-{}-{n}", std::process::id())); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
+    fn tmp(n: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("order-{n}")) }
     fn put(p: std::path::PathBuf, t: &str) { std::fs::create_dir_all(p.parent().unwrap()).unwrap(); std::fs::write(p, t).unwrap() }
     const PRINT_SH: &str = "find . \\( -path ./mfg -o -path ./extra -o -path ./.git -o -path ./.backplane -o -name node_modules -o -name '*backup*' \\) -prune -o -type f -not -name '_autosave-*' \\( -name '*.kicad_pcb' -o -name '*.kicad_sch' -o -name '*.step' -o -name '*.stp' -o -name '*.dxf' -o -name '*.fab.json' \\) -print 2>/dev/null | LC_ALL=C sort | while IFS= read -r f; do printf '%s\\n' \"$f\"; cat \"$f\"; done | { sha256sum 2>/dev/null || shasum -a 256; } | cut -c1-32";
     #[test] fn the_fingerprint_is_the_one_a_review_of_0_14_recorded() {

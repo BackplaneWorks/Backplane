@@ -160,9 +160,9 @@ mod tests {
         assert!(!input("x", "/r", "", &[]).contains("intent"), "no intent, no line for it");
     }
     #[test] fn the_folder_lists_its_top_level_without_hidden_ones() {
-        let d = std::env::temp_dir().join(format!("bp-iconpick-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d);
+        let d = crate::plat::tmp::dir("iconpick");
         std::fs::create_dir_all(d.join("boards")).unwrap(); std::fs::create_dir_all(d.join(".backplane")).unwrap(); std::fs::write(d.join("Cargo.toml"), "").unwrap();
-        assert_eq!(entries(&d), vec!["Cargo.toml".to_string(), "boards/".into()]); let _ = std::fs::remove_dir_all(&d);
+        assert_eq!(entries(&d), vec!["Cargo.toml".to_string(), "boards/".into()]);
         assert!(entries(Path::new("/nonexistent/bp")).is_empty());
     }
     #[test] fn only_projects_with_no_icon_of_the_persons_and_no_pick_are_due() {

@@ -25,7 +25,7 @@ mod tests {
     use super::*;
     use core::prelude::v1::test;
     #[test] fn a_finished_download_named_by_the_engine_is_brought_to_downloads_under_its_own_name() {
-        let d = std::env::temp_dir().join(format!("bp-dl-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d);
+        let d = crate::tmp::uncreated("dl-bring");
         let (tmp, dl) = (d.join("artifacts"), d.join("Downloads")); std::fs::create_dir_all(&tmp).unwrap();
         let f = tmp.join("461feba6-guid"); std::fs::write(&f, "bytes").unwrap();
         let to = bring_to(&dl, &f, "report.txt"); assert_eq!(to, dl.join("report.txt")); assert_eq!(std::fs::read_to_string(&to).unwrap(), "bytes"); assert!(!f.exists());

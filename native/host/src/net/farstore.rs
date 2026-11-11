@@ -170,7 +170,7 @@ impl FarView for FarStore {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn home(tag: &str) -> PathBuf { let p = std::env::temp_dir().join(format!("bp-farstore-{tag}-{}", std::process::id())); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
+    fn home(tag: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("farstore-{tag}")) }
     fn it(n: u64, c: Value) -> Item { Item { n, c } }
     fn thread(n: u64, id: &str) -> Item { it(n, json!({"$":"ThreadCreated","id":id,"project":"","title":"T","env":"","branch":"","worktree":"","provider":"claude","model":"","at":n})) }
     fn msg(n: u64, th: &str, role: &str, text: &str) -> Item { it(n, json!({"$":"MessagePosted","thread":th,"msg":format!("m{n}"),"role":role,"text":text,"at":n})) }

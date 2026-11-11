@@ -475,11 +475,10 @@ impl RpcHandler for IpcRpc {
 mod tests {
     /// A managed install on Windows has `bin\kicad-cli.exe`: the newest version's is found, with a space in the folder name.
     #[test] fn a_managed_runtime_is_found_by_its_exe_name_in_a_folder_with_spaces() {
-        let d = std::env::temp_dir().join(format!("bp kicad {}", std::process::id())).join("kicad"); let _ = std::fs::remove_dir_all(&d);
+        let base = crate::plat::tmp::dir("bp kicad"); let d = base.join("kicad");
         for v in ["10.99.0-bp.4", "10.99.0-bp.6"] { std::fs::create_dir_all(d.join(v).join("bin")).unwrap(); std::fs::write(d.join(v).join("bin/kicad-cli.exe"), "MZ").unwrap(); }
         let found = newest_in(std::slice::from_ref(&d)).into_iter().find(|p| p.is_file()).unwrap();
         assert!(found.ends_with("10.99.0-bp.6/bin/kicad-cli.exe"), "{found:?}");
-        let _ = std::fs::remove_dir_all(d.parent().unwrap());
     }
     use super::*;
     /// bp.4's kicad-cli --version prints `10.99.0`: its manifest says what it is, so Settings > CAD shows ok and 10.99.0-bp.4, not stock
@@ -515,7 +514,7 @@ mod tests {
         use crate::plat::fs::PermissionsExt;
         // the real server's answer to GetVersion (bp.4), and one with no message for what is not asked about
         let version: Vec<u8> = { let h = "0a040a02746b120208011a5c0a3c747970652e676f6f676c65617069732e636f6d2f6b696170692e636f6d6d6f6e2e636f6d6d616e64732e47657456657273696f6e526573706f6e7365121c0a1a080a1063221431302e39392e302d756e6b6e6f776e2d62702e34"; (0..h.len() / 2).map(|i| u8::from_str_radix(&h[2 * i..2 * i + 2], 16).unwrap()).collect() };
-        let root = std::path::PathBuf::from("/tmp").join(format!("ipc-actor-{}", std::process::id())); // short: a unix socket path must fit SUN_LEN (104 on macOS) let _ = std::fs::remove_dir_all(&root); std::fs::create_dir_all(&root).unwrap();
+        let root = crate::plat::tmp::short_dir("ia"); // short: a unix socket path must fit SUN_LEN (104 on macOS)
         let (rt, project) = (root.to_string_lossy().to_string(), "/p/a.kicad_pro".to_string());
         let dir = ks::dir(&rt, "", &project); std::fs::create_dir_all(&dir).unwrap();
         let sock = format!("{dir}/api.sock"); let l = crate::plat::ipc::bind(&sock).unwrap();

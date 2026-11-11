@@ -88,13 +88,14 @@ mod tests {
     use super::*;
     #[test] fn the_finder_asks_again_soon_while_an_approved_link_is_not_found() { assert_eq!(next_find(true), Duration::from_secs(15)); assert_eq!(next_find(false), Duration::from_secs(120)); }
     #[test] fn peer_routes_decide_for_themselves_and_cap_their_bodies() {
-        let r = PeerRoutes(Arc::new(unsafe_peering()));
+        let (p, _h) = unsafe_peering();
+        let r = PeerRoutes(Arc::new(p));
         assert!(r.own_auth() && r.body_max() == 262144 && r.routes() == ["/bots/pair", "/bots/link"]);
     }
-    fn unsafe_peering() -> Peering {
-        let h = std::env::temp_dir().join(format!("bp-peerhttp-{}", std::process::id())); std::fs::create_dir_all(&h).unwrap(); std::fs::write(h.join("token"), "t").unwrap();
+    fn unsafe_peering() -> (Peering, crate::plat::tmp::TempDir) {
+        let h = crate::plat::tmp::dir("peerhttp"); std::fs::write(h.join("token"), "t").unwrap();
         let (reg, routes) = super::super::start::open(&h, "127.0.0.1", 1).unwrap();
-        Peering::new(h, reg, PeerTable::new(), routes, false, "127.0.0.1", 1)
+        (Peering::new(h.to_path_buf(), reg, PeerTable::new(), routes, false, "127.0.0.1", 1), h)
     }
     /// info "machines" is the switcher's JSON, as hub publishes it: self.name "" with no tailnet, its own url, peers named in BACKPLANE_PEERS.
     #[tokio::test] async fn machines_info_is_published_in_the_switchers_shape() {

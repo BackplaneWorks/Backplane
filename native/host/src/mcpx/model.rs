@@ -186,13 +186,12 @@ mod tests {
         s.enabled = false; assert!(!s.applies("codex", "p2", ""));
     }
     #[test] fn the_list_round_trips_and_shows_no_secret_value() {
-        let d = std::env::temp_dir().join(format!("bp-mcpx-model-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d);
+        let d = crate::plat::tmp::uncreated("mcpx-model");
         let mut s = stdio("gh"); s.env = vec![Kv::sec("GITHUB_TOKEN", "mcp-gh-github_token", ""), Kv::lit("LOG", "1")];
         let l = List { servers: vec![s.clone()] }; l.save(&d).unwrap(); assert_eq!(List::load(&d), l);
         let raw = std::fs::read_to_string(path(&d)).unwrap(); assert!(raw.contains("\"secret\": true") && raw.contains("mcp-gh-github_token"));
         assert_eq!(s.public()["env"], json!({"GITHUB_TOKEN": {"secret": "mcp-gh-github_token"}, "LOG": "1"}));
         assert_eq!(s.missing(&|n| n == "other"), vec!["mcp-gh-github_token".to_string()]);
         assert_eq!(List::load(&d.join("nope")), List::default());
-        let _ = std::fs::remove_dir_all(&d);
     }
 }

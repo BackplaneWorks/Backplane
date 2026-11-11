@@ -15,12 +15,12 @@ const SEED: &str = concat!(
     "{\"$\":\"WorkSet\",\"thread\":\"t1\",\"kind\":\"bg\",\"rows\":\"b1\\tx\",\"at\":5}\n",
     "{\"$\":\"ThreadSnoozed\",\"id\":\"t1\",\"until\":99999999999,\"at\":5}\n");
 
-async fn hub(name: &str) -> Arc<Hub> {
-    let dir = std::env::temp_dir().join(format!("bp-cmds-{}-{name}", std::process::id())); let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(&dir).unwrap();
+async fn hub(name: &str) -> crate::hub::TestHub {
+    let dir = crate::plat::tmp::dir(&format!("cmds-{name}"));
     std::fs::write(dir.join("events.jsonl"), SEED).unwrap(); std::fs::write(dir.join("token"), "tok").unwrap();
-    let h = Hub::start(Cfg { home: dir, version: "0.14.0".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+    let h = Hub::start(Cfg { home: dir.to_path_buf(), version: "0.14.0".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
     rec(); super::worktree::SUPPRESS.store(true, std::sync::atomic::Ordering::Relaxed); // the worktree job reports on its own, later: tested by itself below
-    super::start(h.clone()); h
+    super::start(h.clone()); crate::hub::TestHub { hub: h, _tmp: dir }
 }
 /// the request, then the log lines it appended (the `at` stamp blanked) and the reply
 async fn ask(h: &Arc<Hub>, m: &str, p: Value) -> (Vec<Value>, Value) {
@@ -257,7 +257,7 @@ async fn say(h: &Arc<Hub>, th: &str, role: &str, text: &str, n: u32) { h.commit(
     assert!(h.cfg.home.join("scratch").join(th).is_dir());
 }
 
-fn tmp(name: &str) -> std::path::PathBuf { let d = std::env::temp_dir().join(format!("bp-fs-{}-{name}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap(); d }
+fn tmp(name: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::named(&format!("fs-{name}"), name) }
 // FsJob.list / FsJob.mkdir: the folder's subfolders, a new folder is refused when it exists
 #[tokio::test] async fn the_pickers_folder_requests_list_and_make_folders() {
     let h = hub("fs").await; let d = tmp("pick"); std::fs::create_dir_all(d.join("b")).unwrap(); std::fs::create_dir_all(d.join("a")).unwrap(); std::fs::write(d.join("f"), "x").unwrap();
@@ -292,7 +292,7 @@ fn tmp(name: &str) -> std::path::PathBuf { let d = std::env::temp_dir().join(for
     assert_eq!((e.len(), e[0]["$"].as_str()), (1, Some("ProjectCreated")), "{e:?}");
 }
 
-fn git_repo(name: &str) -> std::path::PathBuf {
+fn git_repo(name: &str) -> crate::plat::tmp::TempDir {
     let d = tmp(name); let p = d.to_str().unwrap().to_string();
     let g = |a: &[&str]| assert!(std::process::Command::new("git").args(a).current_dir(&p).env("GIT_AUTHOR_NAME", "t").env("GIT_AUTHOR_EMAIL", "t@t").env("GIT_COMMITTER_NAME", "t").env("GIT_COMMITTER_EMAIL", "t@t").output().unwrap().status.success());
     g(&["init", "-q"]); std::fs::write(d.join("f"), "x").unwrap(); g(&["add", "."]); g(&["commit", "-qm", "x"]); d
@@ -481,7 +481,7 @@ async fn plan_of(h: &Arc<Hub>, method: &str, p: Value) -> Vec<Value> {
 // archive_running_stops, through the real agents module (a stand-in agent that never answers): archiving a running thread ends its turn and its process
 #[tokio::test] async fn archive_running_stops_through_the_real_agents_module() {
     use crate::plat::fs::PermissionsExt;
-    let base = std::env::temp_dir().join(format!("bp-cmds-real-{}", std::process::id())); let _ = std::fs::remove_dir_all(&base);
+    let base = crate::plat::tmp::dir("cmds-real");
     let (home, bin, work) = (base.join("home"), base.join("bin"), base.join("work")); for d in [&home, &bin, &work] { std::fs::create_dir_all(d).unwrap() }
     std::fs::write(bin.join("claude"), "#!/bin/sh\nsleep 600\n").unwrap(); std::fs::set_permissions(bin.join("claude"), std::fs::Permissions::from_mode(0o755)).unwrap();
     std::fs::write(home.join("token"), "tok").unwrap();

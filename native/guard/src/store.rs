@@ -110,24 +110,24 @@ pub fn pointer() -> Option<PathBuf> { std::env::var_os("HOME").or_else(|| std::e
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn tmp(n: &str) -> PathBuf { let d = std::env::temp_dir().join(format!("bp-guard-{n}-{}", std::process::id())); let _ = fs::remove_dir_all(&d); fs::create_dir_all(&d).unwrap(); d }
+    fn tmp(n: &str) -> crate::tmp::TempDir { crate::tmp::dir(&format!("guard-{n}")) }
     #[test] fn a_request_is_taken_once() {
-        let d = Dir::of(&tmp("req")); d.ask("restart", "", "cli", "r1").unwrap();
+        let t = tmp("req"); let d = Dir::of(&t); d.ask("restart", "", "cli", "r1").unwrap();
         assert_eq!(d.take_request().unwrap()["action"], "restart"); assert!(d.take_request().is_none());
     }
-    #[test] fn a_torn_request_is_dropped_not_fatal() { let d = Dir::of(&tmp("torn")); d.make(); fs::write(d.path("request"), "{\"act").unwrap(); assert!(d.take_request().is_none()); assert!(d.take_request().is_none()); }
+    #[test] fn a_torn_request_is_dropped_not_fatal() { let t = tmp("torn"); let d = Dir::of(&t); d.make(); fs::write(d.path("request"), "{\"act").unwrap(); assert!(d.take_request().is_none()); assert!(d.take_request().is_none()); }
     #[test] fn good_builds_keep_their_order_and_their_limit() {
-        let d = Dir::of(&tmp("good")); d.make(); for i in 0..20 { d.add_good(&format!("b{i}")); } d.add_good("b5");
+        let t = tmp("good"); let d = Dir::of(&t); d.make(); for i in 0..20 { d.add_good(&format!("b{i}")); } d.add_good("b5");
         let g = d.good(); assert_eq!(g.len(), 16); assert_eq!(g.last().unwrap(), "b5");
     }
     #[test] fn a_bad_mark_reaches_both_readers_and_comes_off() {
-        let b = Builds(tmp("bad")); b.mark_bad("x", "it\npanicked"); b.mark_bad("x", "again"); b.mark_bad("y", "too");
+        let t = tmp("bad"); let b = Builds(t.to_path_buf()); b.mark_bad("x", "it\npanicked"); b.mark_bad("x", "again"); b.mark_bad("y", "too");
         assert_eq!(b.bad(), vec!["x", "y"]); assert_eq!(fs::read_to_string(b.0.join(".fresh-bad")).unwrap().trim(), "y");
         assert_eq!(fs::read_to_string(b.0.join("BAD")).unwrap().lines().count(), 2, "one line each, the why on it");
         b.clear_bad("y"); assert_eq!(b.bad(), vec!["x"]); assert!(!b.0.join(".fresh-bad").exists());
     }
     #[test] fn an_alert_is_open_until_a_clear_of_it() {
-        let d = Dir::of(&tmp("clr")); d.make();
+        let t = tmp("clr"); let d = Dir::of(&t); d.make();
         assert!(!d.open_alert("Disk nearly full"));
         d.incident("Disk nearly full", "7 GB", "free space", "b"); d.incident("Hub crashed", "x", "y", "b");
         assert!(d.open_alert("Disk nearly full"), "another incident after it does not close it");
@@ -135,5 +135,5 @@ mod tests {
         assert!(!d.open_alert("Disk nearly full")); assert!(d.open_alert("Hub crashed"));
         d.incident("Disk nearly full", "6 GB", "free space", "b"); assert!(d.open_alert("Disk nearly full"), "full again");
     }
-    #[test] fn incidents_read_back_newest_last() { let d = Dir::of(&tmp("inc")); d.make(); d.incident("a", "w", "d", "b"); d.incident("c", "w", "d", "b"); assert_eq!(d.incidents(1)[0]["what"], "c"); assert_eq!(d.incidents(9).len(), 2); }
+    #[test] fn incidents_read_back_newest_last() { let t = tmp("inc"); let d = Dir::of(&t); d.make(); d.incident("a", "w", "d", "b"); d.incident("c", "w", "d", "b"); assert_eq!(d.incidents(1)[0]["what"], "c"); assert_eq!(d.incidents(9).len(), 2); }
 }

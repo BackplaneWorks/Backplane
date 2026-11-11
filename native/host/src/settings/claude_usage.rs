@@ -169,7 +169,7 @@ pub(crate) mod tests {
         assert_eq!(super::super::accounts_io::Accounts::claude_windows(&cli), w);
     }
     #[test] fn a_login_is_read_from_its_own_store_and_never_shown() {
-        let d = std::env::temp_dir().join(format!("bp-usage-login-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap();
+        let d = crate::plat::tmp::dir("usage-login");
         assert_eq!(read_login(&d), None);
         std::fs::write(d.join(".credentials.json"), r#"{"claudeAiOauth":{"accessToken":"tok-A","refreshToken":"r","expiresAt":2000000,"scopes":["user:inference"]},"mcpOAuth":{}}"#).unwrap();
         let l = read_login(&d).unwrap(); assert_eq!((l.token.as_str(), l.expires_ms), ("tok-A", 2_000_000));

@@ -118,7 +118,7 @@ mod tests {
         assert_eq!(from_uri("100%"), "100%"); assert_eq!(from_uri("%zz"), "%zz"); assert_eq!(from_uri("a+b"), "a+b"); assert_eq!(from_uri("%E6%97%A5"), "日");
         assert!(!safe(&from_uri("%2e%2e%2fetc"))); assert!(!safe(&from_uri("a%2f..%2fb"))); assert!(!safe(&from_uri("%2fetc")));
     }
-    fn tmp(name: &str) -> PathBuf { let p = std::env::temp_dir().join(format!("bp-fm-{}-{name}", std::process::id())); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
+    fn tmp(name: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("fm-{name}")) }
     // the DirJob.sh rule: a symlink out of the root, a link chain, and a dotdot through a link are all refused
     #[test] fn containment_refuses_symlink_escapes() {
         let base = tmp("contain"); let root = base.join("root"); let out = base.join("outside");

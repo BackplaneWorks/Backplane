@@ -765,8 +765,8 @@ mod tests {
     }
 
 
-    fn files_world(tag: &str) -> (State, String, std::path::PathBuf) {
-        let d = std::env::temp_dir().join(format!("bp-fm-pres-{}-{tag}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(d.join("docs/deep")).unwrap(); std::fs::create_dir_all(d.join("mech")).unwrap(); let d = crate::plat::fs::canonicalize(&d).unwrap();
+    fn files_world(tag: &str) -> (State, String, crate::plat::tmp::TempDir) {
+        let d = crate::plat::tmp::canonical(&format!("fm-pres-{tag}")); std::fs::create_dir_all(d.join("docs/deep")).unwrap(); std::fs::create_dir_all(d.join("mech")).unwrap();
         for (f, c) in [("notes.md", "# n"), ("a.kicad_pcb", "(kicad_pcb)"), ("pic.png", "x"), ("doc.pdf", "x"), ("m.step", "x"), ("plain.bin", "x"), ("docs/a.txt", "a"), (".env", "k"), ("docs/server.key", "k")] { std::fs::write(d.join(f), c).unwrap(); }
         let mut st = State::new(); for l in include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/slim/fixtures/thread-log.jsonl")).lines() { st.apply_line(l); }
         let th = "t1700000003-8".to_string(); let proj = st.threads.get(&th).map(|t| t.project.clone()).unwrap();
@@ -927,7 +927,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
     #[test] fn mech_lists_models_picks_the_assembly_and_watches_the_part_as_3d() {
-        let d = std::env::temp_dir().join(format!("bp-mech-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d);
+        let d = crate::plat::tmp::dir("mech");
         std::fs::create_dir_all(d.join("mech/sub")).unwrap();
         for f in ["mech/bracket.step", "mech/main-assembly.stp", "mech/sub/lid.glb", "mech/notes.txt", "mech/.hidden.step"] { std::fs::write(d.join(f), "x").unwrap(); }
         let root = d.to_string_lossy().into_owned(); let ps = mech_parts(&root);
@@ -1049,7 +1049,7 @@ mod tests {
     }
 
     #[test] fn a_viewer_show_of_a_part_opens_mech_on_it() {
-        let d = std::env::temp_dir().join(format!("bp-mech2-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(d.join("mech")).unwrap();
+        let d = crate::plat::tmp::dir("mech2"); std::fs::create_dir_all(d.join("mech")).unwrap();
         for f in ["mech/a.step", "mech/b.step"] { std::fs::write(d.join(f), "x").unwrap(); }
         let root = d.to_string_lossy().into_owned();
         let mut st = State::new(); for l in include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/slim/fixtures/thread-log.jsonl")).lines() { st.apply_line(l); }
@@ -1067,12 +1067,11 @@ mod tests {
         let o = view_action(&st, "h", &session, "mech").unwrap();
         assert_eq!(o.patch["drafts"][format!("@mech.part:{th}")], "mech/b.step");
         let w = o.before[0]["text"].as_str().unwrap(); assert!(w.contains(&format!("{root}/mech/b.step")), "{w}");
-        let _ = std::fs::remove_dir_all(&d);
     }
 
     /// Issue 1102: a GLB or STEP shown from outside mech/ (build/f1_model/picobiscuit.glb) is the part on show, not mech/'s first.
     #[test] fn a_model_shown_from_outside_mech_is_the_one_drawn() {
-        let d = std::env::temp_dir().join(format!("bp-mech-out-{}", std::process::id())).join("my project"); let _ = std::fs::remove_dir_all(&d);
+        let d = crate::plat::tmp::named("mech-out", "my project");
         std::fs::create_dir_all(d.join("mech")).unwrap(); std::fs::create_dir_all(d.join("build/f1 model")).unwrap();
         for f in ["mech/littelfuse.step", "build/f1 model/pico biscuit.glb"] { std::fs::write(d.join(f), "x").unwrap(); }
         let root = d.to_string_lossy().into_owned();
@@ -1091,10 +1090,9 @@ mod tests {
         assert_eq!(v["mech"]["rel"], "build/f1 model/pico biscuit.glb"); assert_eq!(v["mech"]["parts"][0]["on"], true); assert_eq!(v["mech"]["parts"][1]["on"], false);
         // a chip pressed (mech-part) and a refresh keep it too; one outside the project is kept by its absolute path
         let o = mech_action(&st, "h", &s2, &glb, true).unwrap(); assert!(o.before.is_empty(), "refresh: still that GLB");
-        let far = std::env::temp_dir().join(format!("bp-mech-far-{}.step", std::process::id())); std::fs::write(&far, "x").unwrap(); let fs = far.to_string_lossy().into_owned();
+        let far = crate::plat::tmp::file("mech-far", "far.step"); std::fs::write(&far, "x").unwrap(); let fs = far.to_string_lossy().into_owned();
         assert_eq!(parts_of(&root, th, &fs)[0], fs);
         assert_eq!(parts_of(&root, th, "mech/gone.step"), ["mech/littelfuse.step"], "a file that is not there is not listed");
-        let _ = std::fs::remove_file(&far); let _ = std::fs::remove_dir_all(&d);
     }
     #[test] fn paths_are_kept_from_the_root_whatever_the_separator() {
         assert_eq!(rel_in("/p/x", "/p/x/mech/a.step"), "mech/a.step"); assert_eq!(rel_in("/p/x/", "/p/x/build/b.glb"), "build/b.glb");
@@ -1103,7 +1101,7 @@ mod tests {
         assert_eq!(rel_in(r"C:\p", r"D:\q\a.step"), r"D:\q\a.step");
     }
     #[test] fn viewer_show_refuses_what_it_cannot_show() {
-        let d = std::env::temp_dir().join(format!("bp-vs-ref-{}", std::process::id())); std::fs::create_dir_all(d.join("mech")).unwrap(); std::fs::write(d.join("mech/a.STEP"), "x").unwrap();
+        let d = crate::plat::tmp::dir("vs-ref"); std::fs::create_dir_all(d.join("mech")).unwrap(); std::fs::write(d.join("mech/a.STEP"), "x").unwrap();
         let (root, abs) = (d.to_string_lossy().into_owned(), d.join("mech/a.STEP").to_string_lossy().into_owned()); let roots = [root.clone()];
         for (k, p) in [("mech", abs.as_str()), ("mech", "mech/a.STEP"), ("3d", abs.as_str()), ("", abs.as_str()), ("mech", ""), ("board", ""), ("schematic", "x.kicad_sch"), ("", "b.kicad_pcb"), ("files", ""), ("3d", "")] {
             assert_eq!(show_refusal(k, p, &roots), None, "{k} {p}");

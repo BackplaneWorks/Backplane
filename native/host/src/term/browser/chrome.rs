@@ -23,11 +23,11 @@ async fn wait<F: FnMut() -> bool>(secs: u64, mut f: F) -> bool { let end = std::
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)] #[ignore]
 async fn real_chrome_through_the_driver_preview_teach_and_task() {
     let exe = std::env::var("BP_REAL_BROWSER").expect("BP_REAL_BROWSER"); std::env::set_var("BACKPLANE_BROWSER", exe);
-    let d = std::env::temp_dir().join(format!("bp-chrome-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap();
+    let d = crate::plat::tmp::dir("chrome");
     let mut log = String::from("{\"$\":\"ProjectCreated\",\"id\":\"p1\",\"title\":\"f\",\"root\":\"/tmp\",\"at\":1700000000}\n");
     for t in ["t1", "t2"] { log += &format!("{{\"$\":\"ThreadCreated\",\"id\":\"{t}\",\"project\":\"p1\",\"title\":\"T\",\"env\":\"local\",\"branch\":\"\",\"worktree\":\"\",\"provider\":\"claude\",\"model\":\"\",\"at\":1700000001}}\n"); }
     std::fs::write(d.join("events.jsonl"), log).unwrap();
-    let hub = Hub::start(Cfg { home: d.clone(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+    let hub = Hub::start(Cfg { home: d.to_path_buf(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
     super::super::start(hub.clone()); let tap = Tap::new(&hub, 1); let port = serve().await; let url = format!("http://127.0.0.1:{port}/"); let bot = "t1";
     let drv = super::super::driver::get(&hub).unwrap();
 

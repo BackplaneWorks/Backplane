@@ -96,7 +96,7 @@ mod tests {
     use super::*;
     use crate::files::kicad::ipc::{candidates, pick, Places};
 
-    fn tmp(n: &str) -> PathBuf { let d = std::env::temp_dir().join(format!("bp-kicadsel-{n}-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap(); d }
+    fn tmp(n: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("kicadsel-{n}")) }
     /// A stand-in runtime `<parent>/<version>/`: a manifest naming its version and a `bin/kicad-cli` that prints which one it is.
     fn runtime(parent: &Path, version: &str) -> PathBuf {
         let root = parent.join(version); std::fs::create_dir_all(root.join("bin")).unwrap();

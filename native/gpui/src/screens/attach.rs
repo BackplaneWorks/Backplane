@@ -232,11 +232,10 @@ mod tests {
         assert!(h.contains("Content-Length: 42\r\n") && h.ends_with("\r\n\r\n") && h.contains("Host: 127.0.0.1:3799"));
     }
     #[test] fn target_needs_a_clean_token() {
-        let d = std::env::temp_dir().join(format!("gpui-att-{}", std::process::id())); std::fs::create_dir_all(&d).unwrap();
+        let d = crate::tmp::dir("gpui-att");
         let f = d.join("token"); std::fs::write(&f, "abc-123\n").unwrap();
         assert_eq!(Target::from("ws://h:1/", &f).unwrap().addr, "h:1");
         std::fs::write(&f, "bad token&x").unwrap(); assert!(Target::from("ws://h:1", &f).is_none());
-        let _ = std::fs::remove_dir_all(d);
     }
     #[test] fn answer_is_the_http_body() { assert_eq!(body_of("HTTP/1.1 200 OK\r\nA: b\r\n\r\n{\"attached\":\"/p\"}"), "{\"attached\":\"/p\"}"); }
     /// A hub that replies and then holds the connection open (HTTP keep-alive) must not stall the attach-end.

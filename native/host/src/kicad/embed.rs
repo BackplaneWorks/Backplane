@@ -2003,8 +2003,7 @@ mod tests {
     }
 
     #[test] fn stock_config_seeding_writes_expected_files() {
-        let dir = std::env::temp_dir().join(format!("bp-seed-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let dir = crate::plat::tmp::uncreated("seed");
         seed_stock_config(&dir).unwrap();
         for ver in ["10.0", "10.99"] {
             let c: Value = serde_json::from_str(&std::fs::read_to_string(dir.join("kicad").join(ver).join("kicad_common.json")).unwrap()).unwrap();
@@ -2014,7 +2013,6 @@ mod tests {
             assert_eq!(p["appearance"]["canvas_type"], json!(0));
             assert!(dir.join("kicad").join(ver).join("sym-lib-table").is_file());
         }
-        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[cfg(unix)]
@@ -2023,9 +2021,7 @@ mod tests {
         use super::super::nng::tests as stand_in;
         use crate::plat::fs::PermissionsExt;
 
-        let base = std::env::temp_dir().join(format!("bp-ke-t-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&base);
-        std::fs::create_dir_all(&base).unwrap();
+        let base = crate::plat::tmp::short_dir("ke-t");
 
         let home_dir = base.join("home");
         let proj_dir = base.join("proj");
@@ -2398,9 +2394,7 @@ mod tests {
         };
         let disp = format!(":{disp_num}");
 
-        let base = std::env::var("BP_TMP").ok().filter(|s| !s.is_empty()).map(PathBuf::from).unwrap_or_else(std::env::temp_dir)
-            .join(format!("bp-kr-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&base);
+        let base = crate::plat::tmp::short_dir("kr");
         let home_dir = base.join("h");
         let proj_dir = base.join("p");
         std::fs::create_dir_all(&home_dir).unwrap();
@@ -2427,17 +2421,16 @@ mod tests {
         let mut xvfb = xvfb_cmd.spawn().expect("spawn Xvfb");
         let xvfb_pid = xvfb.id();
 
-        struct Guard { xvfb_pid: u32, kicad_pid: Arc<Mutex<u32>>, base: PathBuf }
+        struct Guard { xvfb_pid: u32, kicad_pid: Arc<Mutex<u32>> }
         impl Drop for Guard {
             fn drop(&mut self) {
                 let kp = *self.kicad_pid.lock().unwrap();
                 if kp > 0 { Actor::kill_pid(kp); }
                 if self.xvfb_pid > 0 { let _ = crate::plat::proc::kill(self.xvfb_pid, crate::plat::proc::TERM); }
-                let _ = std::fs::remove_dir_all(&self.base);
             }
         }
         let kicad_pid = Arc::new(Mutex::new(0u32));
-        let _guard = Guard { xvfb_pid, kicad_pid: kicad_pid.clone(), base: base.clone() };
+        let _guard = Guard { xvfb_pid, kicad_pid: kicad_pid.clone() };
 
         for _ in 0..40 {
             if Path::new(&format!("/tmp/.X11-unix/X{disp_num}")).exists() { break }
@@ -2549,14 +2542,11 @@ mod tests {
     #[test]
     fn stock_kicad_ends_when_hub_exits_on_sigterm() {
         use std::time::Instant;
-        let base = std::env::var("BP_TMP").ok().filter(|s| !s.is_empty()).map(PathBuf::from).unwrap_or_else(std::env::temp_dir)
-            .join(format!("bp-kexit-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&base);
-        std::fs::create_dir_all(&base).unwrap();
+        let base = crate::plat::tmp::short_dir("kexit");
         let ready = base.join("ready");
         let mut hub_child = std::process::Command::new(std::env::current_exe().unwrap())
             .args(["files::kicad::embed::tests::stock_kicad_hub_exit_probe_child", "--exact", "--nocapture", "--test-threads=1"])
-            .env("BP_KICAD_EXIT_PROBE", &base)
+            .env("BP_KICAD_EXIT_PROBE", base.path())
             .env_remove("BACKPLANE_COPY")
             .stdout(Stdio::null())
             .stderr(Stdio::piped())

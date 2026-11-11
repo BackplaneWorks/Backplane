@@ -58,7 +58,7 @@ mod tests {
     use super::*;
     use core::prelude::v1::test;
     #[test] fn unsent_messages_wait_show_and_go_one_at_a_time_in_order() {
-        let dir = std::env::temp_dir().join(format!("bp-unsent-{}", std::process::id())); let _ = std::fs::create_dir_all(&dir); let f = dir.join("u.json"); let _ = std::fs::remove_file(&f);
+        let dir = crate::tmp::dir("unsent"); let f = dir.join("u.json");
         let mut u = Unsent::open(f.clone());
         let a = u.push("h|t1", "first\nmore", 5); let b = u.push("h|t1", "second", 5); let c = u.push("t2", "other", 5);
         let r = u.rows("h|t1"); assert_eq!(r.len(), 2); assert_eq!((r[0]["tag"].as_str(), r[0]["text"].as_str()), (Some("Unsent"), Some("first")));

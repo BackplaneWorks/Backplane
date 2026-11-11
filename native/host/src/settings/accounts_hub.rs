@@ -325,8 +325,8 @@ mod tests {
     }
     async fn ask(rpc: &AccountsRpc, hub: &Arc<Hub>, who: &Caller) -> Value { rpc.call(hub, who, &json!(1), "accounts", &json!({"op":"list","accountProfiles":true})).await.remove(0) }
     #[tokio::test(flavor = "multi_thread")] async fn only_a_granted_client_may_manage_accounts() {
-        let home = std::env::temp_dir().join(format!("bp-acc-hub-{}", std::process::id())); let _ = std::fs::remove_dir_all(&home); std::fs::create_dir_all(&home).unwrap();
-        let hub = Hub::start(crate::hub::Cfg { home: home.clone(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(crate::presenter::Canned { reply: json!({}) })).await.unwrap();
+        let home = crate::plat::tmp::dir("acc-hub");
+        let hub = Hub::start(crate::hub::Cfg { home: home.to_path_buf(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(crate::presenter::Canned { reply: json!({}) })).await.unwrap();
         let rpc = AccountsRpc::new(Arc::new(Accounts::open(&home, Arc::new(|p: &str| Ok(std::path::PathBuf::from(p))))));
         let (a, b) = (Caller { gen: "g".into(), client: 9001 }, Caller { gen: "g".into(), client: 9002 });
         assert_eq!(ask(&rpc, &hub, &a).await["error"], accounts::GATE, "naming the capability on the accounts request itself grants nothing");

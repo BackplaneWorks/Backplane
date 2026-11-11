@@ -82,8 +82,8 @@ mod tests {
     }
     #[tokio::test(flavor = "multi_thread")] async fn a_launched_thread_and_a_fork_get_their_binding_through_a_real_commit() {
         use crate::{hub::Cfg, presenter::Canned};
-        let home = std::env::temp_dir().join(format!("bp-bind-{}", std::process::id())); let _ = std::fs::remove_dir_all(&home); std::fs::create_dir_all(&home).unwrap();
-        let hub = Hub::start(Cfg { home: home.clone(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+        let home = crate::plat::tmp::dir("bind");
+        let hub = Hub::start(Cfg { home: home.to_path_buf(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
         let b = Bindings::new(); hub.register_transform(b.clone()); hub.register_observer(b.clone()); b.seed(&hub).await;
         hub.commit_many(&[json!({"$":"SettingSet","key":"account.default.claude","value":r#"{"id":"w","epoch":2}"#,"at":1})]).await.unwrap();
         // what agents/launch.rs and agents/tasks.rs commit: a bare ThreadCreated, no binding of their own

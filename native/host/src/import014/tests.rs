@@ -4,7 +4,7 @@ use crate::{api::Observer, hub::Cfg, presenter::Canned};
 use std::sync::atomic::{AtomicUsize, Ordering::SeqCst};
 
 fn fixture() -> PathBuf { Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test/fixtures/v014-home") }
-fn tmp(tag: &str) -> PathBuf { let d = std::env::temp_dir().join(format!("bp-import014-{tag}-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap(); d }
+fn tmp(tag: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("import014-{tag}")) }
 /// The fixture copied to `<dir>/old`, with the bot's agent history filed under its folder there (the path depends on where the copy is).
 fn old_home(dir: &Path) -> PathBuf {
     let old = dir.join("old"); files::copy_tree(&fixture(), &old, &[]).unwrap();
@@ -25,10 +25,10 @@ fn snapshot(d: &Path) -> Vec<(String, u64, String, std::time::SystemTime)> {
 struct Probe(AtomicUsize);
 impl Observer for Probe { fn committed(&self, _h: &Arc<Hub>, events: &[Value], _f: u32) { self.0.fetch_add(events.iter().filter(|e| e["$"] != "SettingSet" && e["$"] != "PushOrdered").count(), SeqCst); } }
 
-struct Rig { hub: Arc<Hub>, imp: Arc<Importer>, old: PathBuf, home: PathBuf, probe: Arc<Probe>, _reg: Arc<crate::net::pairing::Registry> }
-async fn rig(tag: &str) -> Rig { let dir = tmp(tag); let old = old_home(&dir); rig_on(&dir, old).await }
-async fn rig_on(dir: &Path, old: PathBuf) -> Rig {
-    let dir = dir.to_path_buf(); let home = dir.join("new"); std::fs::create_dir_all(&home).unwrap();
+struct Rig { hub: Arc<Hub>, imp: Arc<Importer>, old: PathBuf, home: PathBuf, probe: Arc<Probe>, _reg: Arc<crate::net::pairing::Registry>, _dir: crate::plat::tmp::TempDir }
+async fn rig(tag: &str) -> Rig { let dir = tmp(tag); let old = old_home(&dir); rig_on(dir, old).await }
+async fn rig_on(dir: crate::plat::tmp::TempDir, old: PathBuf) -> Rig {
+    let home = dir.join("new"); std::fs::create_dir_all(&home).unwrap();
     std::fs::write(home.join("token"), "0123456789abcdef0123456789abcdef\n").unwrap();
     let cfg = Cfg { home: home.clone(), version: "0.15.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() };
     let hub = Hub::start(cfg, Arc::new(Canned { reply: json!({}) })).await.unwrap();
@@ -37,7 +37,7 @@ async fn rig_on(dir: &Path, old: PathBuf) -> Rig {
     crate::settings::accounts_hub::start_cli(&hub, None, crate::agents::proc::Cli::standin(&dir.join("agents")));
     let probe = Arc::new(Probe(AtomicUsize::new(0))); hub.register_observer(probe.clone());
     let imp = start_from(&hub, Some(old.clone()));
-    Rig { hub, imp, old, home, probe, _reg: reg }
+    Rig { hub, imp, old, home, probe, _reg: reg, _dir: dir }
 }
 fn log(h: &Hub) -> Vec<String> { h.store.range(0, h.store.len()).unwrap() }
 fn has(h: &Hub, pat: &str) -> usize { log(h).iter().filter(|l| l.contains(pat)).count() }
@@ -165,7 +165,7 @@ fn has(h: &Hub, pat: &str) -> usize { log(h).iter().filter(|l| l.contains(pat)).
     let cyg = d.join("cyg/home/a/.backplane-bend"); std::fs::create_dir_all(&cyg).unwrap();
     std::thread::sleep(std::time::Duration::from_millis(20)); std::fs::write(cyg.join("events.jsonl"), "{}\n").unwrap();
     let not_temp = PathBuf::from("/nonexistent-bp-home/hub");
-    if !not_temp.starts_with(std::env::temp_dir()) { assert_eq!(source_in(&not_temp, None, vec![old.clone(), cyg.clone()]), Some(cyg.clone())); }
+    if !crate::plat::dirs::in_temp(&not_temp) { assert_eq!(source_in(&not_temp, None, vec![old.clone(), cyg.clone()]), Some(cyg.clone())); }
 }
 
 #[test] fn the_plan_counts_without_holding_lines() {
@@ -218,7 +218,7 @@ fn has(h: &Hub, pat: &str) -> usize { log(h).iter().filter(|l| l.contains(pat)).
     let old = PathBuf::from(std::env::var("BP_IMPORT_REAL").expect("BP_IMPORT_REAL"));
     assert!(!old.ends_with(".backplane-bend") && !old.starts_with(user_folder().unwrap().join(".backplane-bend")), "a copy only");
     let before = snapshot(&old);
-    let r = rig_on(&tmp("real"), old.clone()).await;
+    let r = rig_on(tmp("real"), old.clone()).await;
     let t = std::time::Instant::now(); let scan = r.imp.scan(&r.hub, false).await;
     println!("REAL scan {:?}: {}", t.elapsed(), scan);
     let t = std::time::Instant::now(); let res = r.imp.run(&r.hub, false).await;
@@ -243,7 +243,7 @@ fn big_home(dir: &Path, p: u32, t: u32, l: u32) -> PathBuf {
 /// write and a read within a second meanwhile, /healthz says migrating with a fold held (the guard keeps the build unproven), and the summary is right.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn a_long_import_reports_progress_every_second_and_the_hub_answers_meanwhile() {
     let dir = tmp("long"); let old = big_home(&dir, 10, 500, 30000);
-    let r = rig_on(&dir, old).await; r.imp.throttle_ms.store(500, std::sync::atomic::Ordering::Relaxed);
+    let r = rig_on(dir, old).await; r.imp.throttle_ms.store(500, std::sync::atomic::Ordering::Relaxed);
     let (h, imp) = (r.hub.clone(), r.imp.clone());
     let run = tokio::spawn(async move { imp.run(&h, false).await });
     let t0 = std::time::Instant::now(); let (mut last, mut last_at, mut gaps, mut seen_running, mut slow) = (String::new(), t0, vec![], 0, vec![]);

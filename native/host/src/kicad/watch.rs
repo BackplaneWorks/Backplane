@@ -745,9 +745,8 @@ mod tests {
     /// this project yet" and stayed so until it was closed and opened again. The view now waits, and the drawing arrives by itself.
     #[tokio::test] async fn a_view_opened_before_the_projects_first_schematic_gets_it_when_it_appears() {
         use crate::{hub::{Cfg, Out}, presenter::Canned};
-        let tmp = |n: &str| { let p = std::env::temp_dir().join(format!("bp-wait-{}-{n}", std::process::id())); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p };
-        let (home, proj) = (tmp("home"), tmp("proj"));
-        let cfg = Cfg { home: home.clone(), version: "0.15.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() };
+        let (home, proj) = (crate::plat::tmp::dir("wait-home"), crate::plat::tmp::dir("wait-proj"));
+        let cfg = Cfg { home: home.to_path_buf(), version: "0.15.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() };
         let hub = Hub::start(cfg, Arc::new(Canned { reply: json!({}) })).await.unwrap();
         let plots = Plots::new(&home);
         let root = proj.to_string_lossy().into_owned();
@@ -781,8 +780,8 @@ mod tests {
     /// view that comes later is sent the model alone. A newer stream of the source stops an older one.
     #[tokio::test] async fn a_steps_streamed_parts_never_come_after_its_model() {
         use crate::{hub::{Cfg, Out}, presenter::Canned};
-        let home = std::env::temp_dir().join(format!("bp-stepstream-{}", std::process::id())); let _ = std::fs::remove_dir_all(&home); std::fs::create_dir_all(&home).unwrap();
-        let cfg = Cfg { home: home.clone(), version: "0.15.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() };
+        let home = crate::plat::tmp::dir("stepstream");
+        let cfg = Cfg { home: home.to_path_buf(), version: "0.15.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() };
         let hub = Hub::start(cfg, Arc::new(Canned { reply: json!({}) })).await.unwrap();
         let plots = Plots::new(&home); let ky = "2|/p/mech/lid.step|".to_string();
         let mut out = hub.attach(7);
@@ -810,13 +809,12 @@ mod tests {
         assert!(!within(focus_box([1990.0, 150.0, 10.0], 5.0), b));
     }
     #[test] fn a_step_not_meshed_yet_has_an_estimate_by_its_size() {
-        let d = std::env::temp_dir().join(format!("bp-est-{}", std::process::id())); let _ = std::fs::create_dir_all(&d);
+        let d = crate::plat::tmp::dir("est");
         let f = d.join("big-part.step"); std::fs::write(&f, vec![b'x'; 4 << 20]).unwrap();
         let (fc, occ) = ([stepglb::Mesher::FreeCad { gui: "/g".into(), cmd: "/c".into() }], [stepglb::Mesher::Step2glb("/s".into())]);
         assert_eq!(first_estimate(2, &f.to_string_lossy(), &fc), 3900, "FreeCAD: 2.5 s and 0.35 s a MB");
         assert_eq!(first_estimate(2, &f.to_string_lossy(), &occ), 530, "native: 50 ms and 0.12 s a MB");
         assert_eq!(first_estimate(2, "/p/b.kicad_pcb", &occ), 0, "a board: no estimate");
-        let _ = std::fs::remove_dir_all(&d);
     }
     #[test] fn a_3d_source_says_what_the_hub_does_for_it() {
         let fc = [stepglb::Mesher::FreeCad { gui: "/g".into(), cmd: "/c".into() }]; let occ = [stepglb::Mesher::Step2glb("/s".into())];

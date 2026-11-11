@@ -286,11 +286,11 @@ mod tests {
         assert_eq!(new_board_families(&[f("boards/a/a", false, true)], false), 0, "a repository's first commit is a baseline");
     }
     use crate::agents::lockrec::{Lock, Party};
-    fn tmp(n: &str) -> std::path::PathBuf { let p = std::env::temp_dir().join(format!("bp-kc-{}-{n}", std::process::id())); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
+    fn tmp(n: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("kc-{n}")) }
     fn touch(p: std::path::PathBuf, t: &str) { std::fs::create_dir_all(p.parent().unwrap()).unwrap(); std::fs::write(p, t).unwrap() }
     /// A fixture project: boards/main/ in the main folder, .backplane.json naming it, and a
     /// worktree twin, exactly the shape a thread sees.
-    fn fixture(n: &str) -> (std::path::PathBuf, String, String) {
+    fn fixture(n: &str) -> (crate::plat::tmp::TempDir, String, String) {
         let r = tmp(n);
         for base in ["", ".backplane/worktrees/lane/"] {
             touch(r.join(format!("{base}boards/main/main.kicad_pro")), "{}");
@@ -377,7 +377,7 @@ mod tests {
         assert!(o.status.success(), "{a:?}: {}", String::from_utf8_lossy(&o.stderr)); String::from_utf8_lossy(&o.stdout).trim().to_string()
     }
     /// A mixed repository: a board in boards/main/, firmware beside it, mech/ for the case.
-    fn mixed(n: &str) -> (std::path::PathBuf, String) {
+    fn mixed(n: &str) -> (crate::plat::tmp::TempDir, String) {
         let r = tmp(n); let main = r.to_str().unwrap().to_string();
         for (f, t) in [("boards/main/main.kicad_pro", "{}"), ("boards/main/main.kicad_pcb", "(pcb)"), ("boards/main/main.kicad_sch", "(sch)"), ("mech/case.py", "# case"), ("firmware/src/main.c", "int main(){}"), ("firmware/CMakeLists.txt", "project(fw)")] { touch(r.join(f), t) }
         std::fs::write(r.join(".backplane.json"), r#"{"project":"boards/main/main.kicad_pro"}"#).unwrap();
@@ -423,8 +423,8 @@ mod tests {
     }
 
     #[tokio::test] async fn a_document_another_thread_holds_is_left_for_it_and_main_pushes_to_its_upstream() {
-        let (r, main) = mixed("push");
-        let bare = r.with_extension("remote.git"); let _ = std::fs::remove_dir_all(&bare);
+        let (_r, main) = mixed("push");
+        let bare = crate::plat::tmp::uncreated("push-remote");
         git(&main, &["init", "-q", "--bare", "-b", "main", bare.to_str().unwrap()]);
         git(&main, &["remote", "add", "origin", bare.to_str().unwrap()]); git(&main, &["push", "-q", "-u", "origin", "main"]);
         std::fs::write(format!("{main}/boards/main/main.kicad_pcb"), "(pcb other thread)").unwrap();
@@ -434,7 +434,6 @@ mod tests {
         assert_eq!(rec.pushed, "origin/main");
         assert_eq!(git(bare.to_str().unwrap(), &["log", "-1", "--format=%s", "main"]), "design: mine (t2)");
         assert_eq!(git(&main, &["status", "--porcelain"]), "M boards/main/main.kicad_pcb", "the held board waits for its writer");
-        let _ = std::fs::remove_dir_all(&bare);
     }
 
     #[tokio::test] async fn an_older_worktree_brings_its_board_back_with_a_backup() {

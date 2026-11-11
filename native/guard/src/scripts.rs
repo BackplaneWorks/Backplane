@@ -5,7 +5,7 @@
 use std::{fs, path::{Path, PathBuf}, process::Command};
 
 fn root() -> PathBuf { Path::new(env!("CARGO_MANIFEST_DIR")).join("../..").canonicalize().unwrap() }
-fn tmp(n: &str) -> PathBuf { let d = std::env::temp_dir().join(format!("bp-guard-scripts-{n}-{}", std::process::id())); let _ = fs::remove_dir_all(&d); fs::create_dir_all(&d).unwrap(); d }
+fn tmp(n: &str) -> crate::tmp::TempDir { crate::tmp::dir(&format!("guard-scripts-{n}")) }
 
 fn walk(d: &Path, out: &mut Vec<PathBuf>) {
     let Ok(rd) = fs::read_dir(d) else { return };
@@ -125,4 +125,43 @@ fn kills_by_name(line: &str) -> bool {
     assert!(left.len() <= 3 && left.iter().any(|n| n == "o5") && !left.iter().any(|n| n == "o0"), "sccache trimmed to its cap, oldest first: {left:?}\n{out}");
     assert!(out.contains("janitor: freed") && out.contains("aot-build") && out.contains("landed"), "it says what it freed:\n{out}");
     let _ = fs::remove_dir_all(&d);
+}
+
+fn walk_rs(d: &Path, out: &mut Vec<PathBuf>) {
+    let Ok(rd) = fs::read_dir(d) else { return };
+    for e in rd.flatten() {
+        let p = e.path(); let n = e.file_name().to_string_lossy().to_string();
+        if matches!(n.as_str(), "vendor" | "target" | "build" | ".git") { continue }
+        if p.is_dir() { walk_rs(&p, out) } else if p.extension().and_then(|x| x.to_str()) == Some("rs") { out.push(p) }
+    }
+}
+
+/// Nov 11: unguarded `temp_dir().join(...)` and `/tmp/bp-*` test folders leaked ~24,700 folders (~6,000 files per checkpoint worktree) into `/tmp`,
+/// exhausting the 1,048,576-inode tmpfs cap and breaking shells. Every test folder goes through `plat::tmp` / `crate::tmp` (honouring `TMPDIR`,
+/// falling back off `/tmp` onto `BP_TMP` / `~/.cache/bp-tmp`, and removing on drop even on panic).
+#[test] fn no_rust_test_bypasses_tmpdir_or_drop_guards() {
+    let r = root(); let mut files = vec![];
+    for d in ["native/host/src", "native/guard/src", "native/gpui/src"] { walk_rs(&r.join(d), &mut files) }
+    assert!(files.len() > 200, "walk found {} .rs files", files.len());
+    let allowed_prod_join = ["native/host/src/agents/locks.rs", "native/host/src/kicad/embed.rs", "native/host/src/mcpx/health.rs"];
+    let mut bad = vec![];
+    for f in files {
+        let rel = f.strip_prefix(&r).unwrap().to_string_lossy().replace('\\', "/");
+        let Ok(t) = fs::read_to_string(&f) else { continue };
+        let mut in_test = false;
+        for (i, raw) in t.lines().enumerate() {
+            if raw.trim_start().starts_with("#[cfg(test)]") { in_test = true }
+            let l = code(raw).split("//").next().unwrap_or("");
+            if l.is_empty() { continue }
+            if l.contains(concat!("temp_dir()", ".join(")) && !(!in_test && allowed_prod_join.contains(&rel.as_str())) {
+                bad.push(format!("{rel}:{}: unguarded temp_dir().join (use plat::tmp / crate::tmp): {}", i + 1, raw.trim()));
+            }
+            for pat in ["create_dir_all(\"/tmp", "write(\"/tmp", "File::create(\"/tmp", "Path::new(\"/tmp/bp-", "PathBuf::from(\"/tmp/bp-", "format!(\"/tmp/bp-"] {
+                if l.contains(pat) {
+                    bad.push(format!("{rel}:{}: hardcoded /tmp path (use plat::tmp / crate::tmp): {}", i + 1, raw.trim()));
+                }
+            }
+        }
+    }
+    assert!(bad.is_empty(), "tests must use plat::tmp / crate::tmp drop guards and never write directly to /tmp:\n{}", bad.join("\n"));
 }

@@ -15,7 +15,7 @@ fn line(v: Value) -> String { v.to_string() }
     let (jp, rp) = (3915u16, 3916u16);
     let me_link = "pjsrustlink00001"; // the link as the JS hub names this machine
     let secret = botnet::fresh_secret();
-    let root = std::env::temp_dir().join(format!("bp-jspeer-{}", std::process::id())); let _ = std::fs::remove_dir_all(&root);
+    let root = crate::plat::tmp::uncreated("jspeer");
     let (jhome, standins) = (root.join("js"), root.join("standins")); std::fs::create_dir_all(&jhome).unwrap(); std::fs::create_dir_all(&standins).unwrap();
 
     // ----- the Rust side: a hub behind a front that also answers GET /hello (the machine finder asks) -----

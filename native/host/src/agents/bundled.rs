@@ -59,7 +59,7 @@ pub fn list(d: &Path) -> Vec<(String, String, String)> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn tmp(n: &str) -> PathBuf { let p = std::env::temp_dir().join(format!("bp-bundled-{}-{n}", std::process::id())); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
+    fn tmp(n: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("bundled-{n}")) }
 
     #[test] fn the_skills_are_written_into_the_home_as_a_plugin_and_old_files_go() {
         let h = tmp("install");

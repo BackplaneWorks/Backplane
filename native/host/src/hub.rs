@@ -34,6 +34,14 @@ pub struct Hub {
     outboxes: std::sync::Mutex<std::collections::HashMap<u64, Slot>>, outbox_max: std::sync::atomic::AtomicUsize, signal_seq: AtomicU64, id_alloc: AtomicU64, view_bump: AtomicU64, need_resync: std::sync::atomic::AtomicBool, extra_info: std::sync::Mutex<std::collections::BTreeMap<String, String>>,
 }
 
+#[cfg(test)]
+#[must_use = "dropping TestHub removes its temp home at once; bind it to a named variable"]
+pub struct TestHub { pub hub: Arc<Hub>, pub _tmp: crate::plat::tmp::TempDir }
+#[cfg(test)]
+impl TestHub { pub fn new(hub: Arc<Hub>, tmp: crate::plat::tmp::TempDir) -> Self { Self { hub, _tmp: tmp } } }
+#[cfg(test)]
+impl std::ops::Deref for TestHub { type Target = Arc<Hub>; fn deref(&self) -> &Self::Target { &self.hub } }
+
 /// One item of a connection's outbox: a value the hub encodes (CBOR with the dictionaries), or bytes that go out as
 /// one binary frame exactly as given (plot frames carry byte strings and plain text the dictionaries would change).
 pub enum Out { Value(Value), Raw(Vec<u8>), /// end the connection (its device was revoked)
@@ -662,7 +670,12 @@ impl Hub {
 mod tests {
     use super::*; use crate::presenter::Canned; use crate::session::*;
     fn cfg(home: &std::path::Path) -> Cfg { Cfg { home: home.to_path_buf(), version: "0.14.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() } }
-    fn home(name: &str) -> PathBuf { let p = std::env::temp_dir().join(format!("bp-hub-{}-{}", std::process::id(), name)); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
+    fn home(name: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("hub-{name}")) }
+    async fn start_hub(name: &str, presenter: Arc<dyn Presenter>) -> TestHub {
+        let _tmp = home(name);
+        let hub = Hub::start(cfg(&_tmp), presenter).await.unwrap();
+        TestHub { hub, _tmp }
+    }
     fn req(c: &Conn, hub: &Hub, m: &str, id: u64, extra: Value) -> Value {
         let mut p = json!({"version":1,"hub":"http://x","generation":c.gen,"epoch":hub.epoch,"requestRevision":1,"target":{"kind":"recent","id":""},"viewId":c.view_id,"session":{}});
         for (k, v) in extra.as_object().into_iter().flatten() { p[k] = v.clone() }
@@ -679,7 +692,7 @@ mod tests {
             fn ping(&self) -> crate::presenter::Fut<'_, ()> { Box::pin(async { Ok(()) }) }
         }
         let spy = Arc::new(Spy(Default::default()));
-        let h = Hub::start(cfg(&home("spy")), spy.clone()).await.unwrap();
+        let h = start_hub("spy", spy.clone()).await;
         let (mut c, _g) = h.connect(true);
         let r0 = req(&c, &h, "view.open", (1 << 47) + 5, json!({"nativeSidebar":1})); let _ = h.request(&mut c, &r0).await;
         let r1 = req(&c, &h, "view.update", (1 << 47) + 6, json!({"nativeSidebar":1, "viewId": format!("{}:{}", c.gen, (1u64 << 47) + 5)})); let _ = h.request(&mut c, &r1).await;
@@ -709,7 +722,7 @@ mod tests {
 
     // Alerts: a desk not watching the thread is told about a need, and once the need is answered it is told to close that notification
     #[tokio::test] async fn an_answered_need_clears_the_desktop_notification_it_raised() {
-        let h = Hub::start(cfg(&home("needclear")), Arc::new(Canned { reply: json!({}) })).await.unwrap();
+        let h = start_hub("needclear", Arc::new(Canned { reply: json!({}) })).await;
         let desks = crate::settings::alerts::start(&h);
         let mut o = h.attach(3); desks.say(3, "t-other", false, now_ms() / 1000);
         async fn frame(o: &mut Outbox) -> Value { loop { match tokio::time::timeout(std::time::Duration::from_secs(5), o.recv()).await { Ok(Some(Out::Value(v))) if v["t"].as_str().map_or(false, |t| t.starts_with("notify")) => return v, Ok(Some(_)) => continue, _ => return Value::Null } } }
@@ -722,7 +735,7 @@ mod tests {
 
     // Hub::set_info: stored for joiners, pushed to every client, empty removes, bounded
     #[tokio::test] async fn set_info_is_stored_pushed_removed_and_bounded() {
-        let h = Hub::start(cfg(&home("setinfo")), Arc::new(Canned { reply: json!({}) })).await.unwrap();
+        let h = start_hub("setinfo", Arc::new(Canned { reply: json!({}) })).await;
         let mut o = h.attach(1);
         assert!(h.set_info("term.demo", "state-1").await);
         assert!(matches!(o.recv().await, Some(Out::Value(v)) if v["t"] == "info" && v["info"]["term.demo"] == "state-1"));
@@ -818,7 +831,7 @@ mod tests {
 
     // fab.look is a read the hub makes for a view: it is recorded for that view's next presenter call (session::record_read)
     #[tokio::test] async fn fab_look_is_recorded_as_a_read_of_its_view() {
-        let h = Hub::start(cfg(&home("fabread")), Arc::new(Canned { reply: json!({"remoteReady":true,"shown":{},"session":{},"cmds":[]}) })).await.unwrap();
+        let h = start_hub("fabread", Arc::new(Canned { reply: json!({"remoteReady":true,"shown":{},"session":{},"cmds":[]}) })).await;
         let (mut c, _g) = h.connect(true);
         let r0 = req(&c, &h, "view.open", (1 << 47) + 5, json!({})); let _ = h.request(&mut c, &r0).await;
         let _ = crate::session::take_reads(c.client, &c.view_id, &c.target); // whatever the open itself recorded
@@ -833,7 +846,7 @@ mod tests {
 
     // soak finding: ids built from store.len() before the commit collided under concurrent project.add: id numbers are handed out past any given
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn concurrent_id_allocations_never_overlap() {
-        let h = Hub::start(cfg(&home("pids")), Arc::new(Canned { reply: json!({}) })).await.unwrap();
+        let h = start_hub("pids", Arc::new(Canned { reply: json!({}) })).await;
         let mut tasks = vec![];
         for _ in 0..8 { let h = h.clone(); tasks.push(tokio::spawn(async move { let mut v = vec![]; for _ in 0..200 { v.push(h.alloc_n(4)); if v.len() % 50 == 0 { h.commit_many(&[json!({"$":"SettingSet","key":"k","value":"v","at":1})]).await.unwrap(); } } v })); }
         let mut all: Vec<u64> = vec![]; for t in tasks { all.extend(t.await.unwrap()); }
@@ -843,7 +856,7 @@ mod tests {
     }
 
     #[tokio::test] async fn open_assembles_identity_in_js_order() {
-        let h = Hub::start(cfg(&home("open")), Arc::new(Canned { reply: json!({"remoteReady":true,"shown":{"a":1},"session":{"sel":""},"cmds":[]}) })).await.unwrap();
+        let h = start_hub("open", Arc::new(Canned { reply: json!({"remoteReady":true,"shown":{"a":1},"session":{"sel":""},"cmds":[]}) })).await;
         let (mut c, g) = h.connect(true); assert_eq!(g["renderer"], "mobile");
         let r0 = req(&c, &h, "view.open", (1 << 47) + 5, json!({})); let out = h.request(&mut c, &r0).await;
         let r = &out[0]["result"]; let keys: Vec<&String> = r.as_object().unwrap().keys().collect();
@@ -851,7 +864,7 @@ mod tests {
         assert_eq!(r["viewId"], format!("{}:{}", c.gen, (1u64 << 47) + 5));
     }
     #[tokio::test] async fn stale_and_invalid_requests_are_refused() {
-        let h = Hub::start(cfg(&home("stale")), Arc::new(Canned { reply: json!({"remoteReady":true,"shown":{},"session":{},"cmds":[]}) })).await.unwrap();
+        let h = start_hub("stale", Arc::new(Canned { reply: json!({"remoteReady":true,"shown":{},"session":{},"cmds":[]}) })).await;
         let (mut c, _) = h.connect(true);
         let mut bad = req(&c, &h, "view.open", (1 << 47) + 1, json!({})); bad["p"]["generation"] = json!("999");
         assert_eq!(h.request(&mut c, &bad).await[0]["error"]["code"], "STALE_CONNECTION");
@@ -861,7 +874,7 @@ mod tests {
     }
     #[tokio::test] async fn big_replies_are_segmented_when_asked() {
         let big = "x".repeat(300_000);
-        let h = Hub::start(cfg(&home("seg")), Arc::new(Canned { reply: json!({"remoteReady":true,"shown":{"s":1},"session":{"big":big},"cmds":[]}) })).await.unwrap();
+        let h = start_hub("seg", Arc::new(Canned { reply: json!({"remoteReady":true,"shown":{"s":1},"session":{"big":big},"cmds":[]}) })).await;
         let (mut c, _) = h.connect(true);
         let r0 = req(&c, &h, "view.open", (1 << 47) + 9, json!({"viewControl":1})); let out = h.request(&mut c, &r0).await;
         assert!(out.len() > 2); assert_eq!(out.last().unwrap()["result"]["controlId"], (1u64 << 47) + 9);
@@ -885,9 +898,9 @@ mod tests {
 mod write_tests {
     use super::*; use crate::presenter::Canned; use crate::session::*;
     #[tokio::test] async fn turn_start_commits_a_message_and_acks_after_it_is_durable() {
-        let dir = std::env::temp_dir().join(format!("bp-hub-ts-{}", std::process::id())); let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::plat::tmp::dir("hub-ts");
         std::fs::write(dir.join("events.jsonl"), "{\"$\":\"ProjectCreated\",\"id\":\"p1\",\"title\":\"p\",\"root\":\"/x\",\"at\":1}\n{\"$\":\"ThreadCreated\",\"id\":\"t1\",\"project\":\"p1\",\"title\":\"T\",\"env\":\"local\",\"branch\":\"\",\"worktree\":\"\",\"provider\":\"claude\",\"model\":\"\",\"at\":1}\n").unwrap();
-        let cfg = Cfg { home: dir.clone(), version: "0.14.0".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() };
+        let cfg = Cfg { home: dir.to_path_buf(), version: "0.14.0".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() };
         let h = Hub::start(cfg, Arc::new(Canned { reply: json!({}) })).await.unwrap();
         let n0 = h.store.len();
         let (mut c, _) = h.connect(true);
@@ -900,8 +913,8 @@ mod write_tests {
 
     // a client that never reads never grows the hub: past the bound it is dropped (plain push), droppable frames are skipped sooner
     #[tokio::test] async fn a_client_that_never_reads_cannot_grow_the_outbox_past_its_bound() {
-        let dir = std::env::temp_dir().join(format!("bp-outbox-{}", std::process::id())); let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(&dir).unwrap();
-        let hub = Hub::start(Cfg { home: dir.clone(), version: "0.14.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+        let dir = crate::plat::tmp::dir("outbox");
+        let hub = Hub::start(Cfg { home: dir.to_path_buf(), version: "0.14.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
         hub.set_outbox_max(100_000);
         let _never = hub.attach(1); let _reads = hub.attach(2);
         let frame = json!({"t":"term","data":"x".repeat(1000)}); let n = frame_bytes(&frame);
@@ -924,8 +937,8 @@ mod write_tests {
 
     // one frame over the cap goes through an empty outbox (a whole model on open), and still bounds memory at cap + one frame
     #[tokio::test] async fn a_frame_larger_than_the_cap_goes_to_an_empty_outbox_and_only_then() {
-        let dir = std::env::temp_dir().join(format!("bp-outbox-big-{}", std::process::id())); let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(&dir).unwrap();
-        let hub = Hub::start(Cfg { home: dir.clone(), version: "0.14.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+        let dir = crate::plat::tmp::dir("outbox-big");
+        let hub = Hub::start(Cfg { home: dir.to_path_buf(), version: "0.14.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
         hub.set_outbox_max(10_000);
         let mut o = hub.attach(1);
         assert!(hub.push_raw(1, vec![0u8; 50_000]), "a frame bigger than the cap reaches an empty outbox");

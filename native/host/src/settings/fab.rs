@@ -291,7 +291,7 @@ impl RpcHandler for FabRpc {
 mod tests {
     use super::*;
     use crate::{hub::Cfg, presenter::Canned};
-    fn tmp(n: &str) -> PathBuf { let p = std::env::temp_dir().join(format!("bp-fab-{}-{n}", std::process::id())); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
+    fn tmp(n: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("fab-{n}")) }
     fn put(p: PathBuf, t: &str) { std::fs::create_dir_all(p.parent().unwrap()).unwrap(); std::fs::write(p, t).unwrap() }
     #[test] fn the_goal_is_the_first_line_under_goal_else_the_first_text_line() {
         assert_eq!(goal("# Intent\n\n# Goal\n\nA lamp that dims.\nmore"), "A lamp that dims."); assert_eq!(goal("just words\nand more"), "just words"); assert_eq!(goal("# H\n#### x\n"), ""); assert_eq!(goal(""), "");
@@ -391,11 +391,11 @@ mod tests {
     }
     #[tokio::test(flavor = "multi_thread")] async fn the_card_of_a_project_and_the_intent_the_person_writes() {
         let _l = ENV.lock().unwrap_or_else(|e| e.into_inner());
-        std::env::set_var("BACKPLANE_AGENTS", "/tmp/x"); std::env::remove_var("BACKPLANE_ORDER_SERVER");
         let home = tmp("home"); let work = tmp("work");
+        std::env::set_var("BACKPLANE_AGENTS", home.join("no-agents")); std::env::remove_var("BACKPLANE_ORDER_SERVER");
         put(work.join("boards/amp/amp.kicad_pro"), "{}"); put(work.join("boards/amp/amp.kicad_pcb"), "(kicad_pcb)"); put(work.join("amp.fab.json"), r#"{"name":"Amp","kind":"pcb","qty":3,"features":{"width_mm":40}}"#);
         std::fs::write(home.join("events.jsonl"), format!("{{\"$\":\"ProjectCreated\",\"id\":\"p1\",\"title\":\"amp\",\"root\":{},\"at\":1}}\n{{\"$\":\"ThreadCreated\",\"id\":\"t1\",\"project\":\"p1\",\"title\":\"T\",\"env\":\"local\",\"branch\":\"\",\"worktree\":\"\",\"provider\":\"claude\",\"model\":\"\",\"at\":2}}\n", serde_json::to_string(&work.to_string_lossy()).unwrap())).unwrap();
-        let hub = Hub::start(Cfg { home: home.clone(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+        let hub = Hub::start(Cfg { home: home.to_path_buf(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
         let call = |m: &'static str, p: Value| { let hub = hub.clone(); async move { FabRpc.call(&hub, &Caller { gen: "1".into(), client: 1 }, &json!(4), m, &p).await.remove(0) } };
         let r = call("fab.look", json!({"thread":"t1"})).await; let c = &r["result"];
         assert_eq!((r["ok"].clone(), c["thread"].clone(), c["goal"].clone(), c["boards"].clone(), c["estimates"].clone(), c["order"].clone()), (json!(true), json!("t1"), json!(""), json!(0), json!(true), json!("")));

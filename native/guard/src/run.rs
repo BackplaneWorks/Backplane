@@ -460,23 +460,23 @@ pub fn run(o: Opts) -> i32 {
 mod tests {
     use super::*;
     fn req(path: &str, method: &str, headers: Vec<(&str, String)>, body: &str) -> Req { Req { method: method.into(), path: path.into(), query: String::new(), headers: headers.into_iter().map(|(k, v)| (k.to_string(), v)).collect(), body: body.into() } }
-    fn home(n: &str) -> (PathBuf, Dir) {
-        let h = std::env::temp_dir().join(format!("bp-rescue-{n}-{}", std::process::id())); let _ = fs::remove_dir_all(&h); fs::create_dir_all(&h).unwrap();
+    fn home(n: &str) -> (crate::tmp::TempDir, Dir) {
+        let h = crate::tmp::dir(&format!("rescue-{n}"));
         fs::write(h.join("token"), "roottoken\n").unwrap();
         fs::write(h.join("devices-v1.json"), json!({"version":1,"devices":[{"id":"a","hash":http::sha("0123456789abcdef0123456789abcdef")},{"id":"b","hash":http::sha("ffffffffffffffffffffffffffffffff"),"revoked":true}]}).to_string()).unwrap();
         let d = Dir::of(&h); d.make(); (h, d)
     }
     fn bearer(t: &str) -> Vec<(&'static str, String)> { vec![("Authorization", format!("Bearer {t}"))] }
     #[test] fn rescue_takes_the_hub_token_and_a_live_device_and_nothing_else() {
-        let (h, d) = home("auth"); let f = rescue_handler(h, d);
+        let (h, d) = home("auth"); let f = rescue_handler(h.to_path_buf(), d);
         assert_eq!(f(&req("/hub/status", "GET", bearer("roottoken"), "")).0, 200);
         assert_eq!(f(&req("/hub/status", "GET", bearer("0123456789abcdef0123456789abcdef"), "")).0, 200, "a paired phone");
         assert_eq!(f(&req("/hub/status", "GET", bearer("ffffffffffffffffffffffffffffffff"), "")).0, 401, "a revoked one");
         assert_eq!(f(&req("/hub/status", "GET", bearer("nope"), "")).0, 401); assert_eq!(f(&req("/hub/status", "GET", vec![], "")).0, 401);
         assert_eq!(f(&req("/hub/control", "POST", vec![], "{\"action\":\"restart\"}")).0, 401, "no credential, no restart");
-        assert!(!Dir::of(&std::env::temp_dir().join(format!("bp-rescue-auth-{}", std::process::id()))).path("request").exists(), "and nothing was asked");
+        assert!(!Dir::of(&h).path("request").exists(), "and nothing was asked");
     }
-    #[test] fn health_answers_with_no_credential_and_says_down() { let (h, d) = home("health"); let (c, b) = rescue_handler(h, d)(&req("/healthz", "GET", vec![], "")); assert_eq!(c, 503); assert!(b.contains("\"down\"") && b.contains("\"control\":1")); }
+    #[test] fn health_answers_with_no_credential_and_says_down() { let (h, d) = home("health"); let (c, b) = rescue_handler(h.to_path_buf(), d)(&req("/healthz", "GET", vec![], "")); assert_eq!(c, 503); assert!(b.contains("\"down\"") && b.contains("\"control\":1")); }
     #[test] fn a_machine_signs_in_with_its_link_and_a_signature_works_once() {
         let (h, d) = home("peer"); d.put("peers.json", r#"{"peers":["p1"]}"#).unwrap();
         fs::create_dir_all(h.join("secrets/peers")).unwrap(); fs::write(h.join("secrets/peers/p1"), r#"{"secret":"abcd"}"#).unwrap();

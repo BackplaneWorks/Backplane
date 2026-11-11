@@ -211,7 +211,7 @@ mod tests {
     }
     fn note(id: &str, ms: u64, words: &str) -> Note { Note { id: id.into(), delivery: "d".into(), hook: "h".into(), recorded_ms: ms, at: ms / 1000, state: "sent".into(), heard: vec![Heard { model: "parakeet-v2".into(), text: words.into(), at: 1, ..Default::default() }], ..Default::default() } }
     #[test] fn notes_are_kept_listed_newest_first_and_found_by_every_word() {
-        let home = std::env::temp_dir().join(format!("ringbox-{}", std::process::id())); let _ = std::fs::remove_dir_all(&home);
+        let home = crate::plat::tmp::uncreated("ringbox");
         let a = note(&id_of("h", "a"), 1_790_000_000_000, "Order the STM32N657 samples"); let b = note(&id_of("h", "b"), 1_790_000_500_000, "Call Jeff about the board");
         assert!(put(&home, &a, Some(b"m4a"))); assert!(put(&home, &b, None)); assert!(exists(&home, &a.id));
         assert_eq!(std::fs::read(audio_path(&home, &a.id).unwrap()).unwrap(), b"m4a");

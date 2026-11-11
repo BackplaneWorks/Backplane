@@ -192,11 +192,11 @@ mod boundary_tests {
     use super::*;
     use crate::{hub::Cfg, presenter::Canned};
     /// a folder per call: tests of this module run side by side, and one sharing a folder wipes the other's files
-    fn tmp(n: &str) -> PathBuf { static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0); let p = std::env::temp_dir().join(format!("bp-boundary-{}-{n}-{}", std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::Relaxed))); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
-    async fn world() -> (Arc<Hub>, PathBuf) {
+    fn tmp(n: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("boundary-{n}")) }
+    async fn world() -> (crate::hub::TestHub, crate::plat::tmp::TempDir) {
         let (home, proj) = (tmp("home"), tmp("proj"));
         std::fs::write(proj.join("a.txt"), "x").unwrap();
-        let cfg = Cfg { home, version: "0.14.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() };
+        let cfg = Cfg { home: home.to_path_buf(), version: "0.14.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() };
         let hub = Hub::start(cfg, Arc::new(Canned { reply: json!({}) })).await.unwrap();
         start(hub.clone());
         let root = proj.to_string_lossy().into_owned();
@@ -204,12 +204,12 @@ mod boundary_tests {
         hub.commit_many(&[json!({"$":"ProjectCreated","id":"p1","title":"P","root":root,"at":1}), json!({"$":"ProjectCreated","id":"p2","title":"Q","root":root,"at":1}), json!({"$":"ProjectCreated","id":"p3","title":"R","root":"relative/root","at":1}),
             tc("ok", "p1", ""), tc("gone", "p1", ""), tc("rm", "p2", ""), tc("badwt", "p1", "relative/wt"), tc("badroot", "p3", ""), tc("priv", "", ""),
             json!({"$":"ThreadDeleted","id":"gone","at":3}), json!({"$":"ProjectRemoved","id":"p2","at":3})]).await.unwrap();
-        (hub, proj)
+        (crate::hub::TestHub { hub, _tmp: home }, proj)
     }
     const ROUTES: &[&str] = &["files.dir", "files.op", "files.read", "files.list", "git.status", "git.diff", "git.act", "git.revert", "history.refs", "history.resolve", "kicad.components", "boards.list", "mech.list", "mech.render",
         "review.bom", "review.checks", "review.tick", "review.comment", "review.release", "kicad.export10", "pdf.page", "file.open"];
     #[tokio::test] async fn every_folder_route_refuses_what_does_not_resolve() {
-        let (hub, _) = world().await;
+        let (hub, _proj) = world().await;
         let who = Caller { gen: "g".into(), client: 1 };
         let refusal = threadpath::refusal(&json!(9));
         // empty, unknown, deleted thread, removed project, relative worktree, relative project root, no project and no folder, unknown and removed project homes
@@ -235,10 +235,10 @@ mod boundary_tests {
             let r = hub.rpc_for("git.status").unwrap().call(&hub, &who, &json!(2), "git.status", &json!({"thread":t})).await;
             assert_ne!(r[0]["error"], threadpath::NO_FOLDER, "{t}");
         }
-        assert_eq!(root_of(&hub, "ok").await.unwrap(), proj);
+        assert_eq!(root_of(&hub, "ok").await.unwrap(), *proj);
         // an archived thread keeps its folder
         hub.commit(&json!({"$":"ThreadArchived","id":"ok","archived":true,"at":4})).await.unwrap();
-        assert_eq!(root_of(&hub, "ok").await.unwrap(), proj);
+        assert_eq!(root_of(&hub, "ok").await.unwrap(), *proj);
     }
     #[tokio::test] async fn files_op_writes_inside_the_project_and_files_get_and_zip_serve_it() {
         let (hub, proj) = world().await;
@@ -259,7 +259,7 @@ mod boundary_tests {
         assert_eq!(call("files.op", json!({"thread":"ok","op":"delete","path":"sub"})).await["ok"], true); assert!(!proj.join("sub").exists());
     }
     #[tokio::test] async fn downloads_and_viewer_sources_keep_the_boundary() {
-        let (hub, _) = world().await;
+        let (hub, _proj) = world().await;
         let who = Caller { gen: "g".into(), client: 1 };
         let dl = |route: &str, thread: &str| { let req = Req::new("GET", &format!("{route}?thread={thread}&path=a.txt"), vec![]); let hub = hub.clone(); let route = route.to_string(); async move { let h = hub.http_for(&route).expect("route"); h.call(&hub, &req).await } };
         for t in ["", "nope", "gone", "rm", "badwt"] {

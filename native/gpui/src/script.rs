@@ -505,9 +505,9 @@ mod tests {
     use super::*;
     use core::prelude::v1::test;
     #[test] fn open_settings_is_a_click_on_the_gear_and_paste_image_is_still_not_implemented() {
-        let p = std::env::temp_dir().join(format!("bp-script-{}.json", std::process::id()));
+        let p = crate::tmp::file("script", "s.json");
         std::fs::write(&p, r#"[{"open_settings":true},{"paste_image":true},{"click":"ui:Settings"}]"#).unwrap();
-        let steps = load(&p); let _ = std::fs::remove_file(&p);
+        let steps = load(&p);
         assert_eq!(steps.len(), 3);
         assert!(matches!(&steps[0], Step::Click(id) if id == "ui:Settings"), "{:?}", steps[0]);
         assert!(matches!(&steps[1], Step::Unsupported(k) if k == "paste_image"), "{:?}", steps[1]);

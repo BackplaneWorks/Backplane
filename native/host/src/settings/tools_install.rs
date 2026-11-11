@@ -218,7 +218,7 @@ mod tests {
     }
 
     #[cfg(unix)] fn exe(p: &Path, body: &str) { std::fs::write(p, body).unwrap(); std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o755)).unwrap() }
-    #[cfg(unix)] fn tmp(n: &str) -> PathBuf { let p = std::env::temp_dir().join(format!("bp-tools-{}-{n}", std::process::id())); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
+    #[cfg(unix)] fn tmp(n: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("tools-{n}")) }
     /// The real Codex script against a stand-in `curl` that serves a release listing in GitHub's layout and an archive.
     #[cfg(unix)] fn codex_run(r: &Path, digest_ok: bool) -> (bool, String, PathBuf) {
         let asset = "codex-x86_64-unknown-linux-musl.tar.gz";

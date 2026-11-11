@@ -81,7 +81,7 @@ mod tests {
         assert_eq!(failure("t1", "upload.incomplete", "")["text"], "the upload did not arrive whole");
         assert_eq!(serde_json::to_string(&failure("t", "upload.incomplete", "")).unwrap(), r#"{"text":"the upload did not arrive whole","thread":"t","upload":true,"uiError":"upload.incomplete","uiDetail":""}"#);
     }
-    fn tmp(n: &str) -> std::path::PathBuf { let p = std::env::temp_dir().join(format!("bp-att-{}-{n}", std::process::id())); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
+    fn tmp(n: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("att-{n}")) }
     #[tokio::test] async fn receives_whole_files_and_refuses_short_big_and_linked_ones() {
         let h = tmp("h");
         let data: Vec<u8> = (0..200_000u32).map(|i| (i % 251) as u8).collect();

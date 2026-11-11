@@ -116,9 +116,9 @@ pub mod tests {
         s.write_all(&hello(REP0)).await.unwrap();
         let mut h = [0u8; 8]; s.read_exact(&mut h).await.unwrap(); (s, h)
     }
-    pub fn sock(name: &str) -> (String, UnixListener) {
-        let d = std::env::temp_dir().join(format!("nng-{}-{name}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap();
-        let p = d.join("api.sock"); let p: String = p.to_string_lossy().into(); let l = crate::plat::ipc::bind(&p).unwrap(); (p, l)
+    pub fn sock(name: &str) -> (String, UnixListener, crate::plat::tmp::TempDir) {
+        let d = crate::plat::tmp::short_dir(&format!("nng-{name}"));
+        let p = d.join("api.sock"); let p: String = p.to_string_lossy().into(); let l = crate::plat::ipc::bind(&p).unwrap(); (p, l, d)
     }
 
     #[test] fn hello_bytes() {
@@ -146,7 +146,7 @@ pub mod tests {
     #[test] fn ids_keep_the_high_bit() { assert_eq!(next_id(0x8000_0001), 0x8000_0002); assert_eq!(next_id(0xffff_ffff), 0x8000_0000); assert!(first_id() & ID_BIT != 0) }
 
     #[tokio::test] async fn dial_says_hello_and_round_trips() {
-        let (path, l) = sock("rt");
+        let (path, l, _d) = sock("rt");
         let srv = tokio::spawn(async move {
             let (mut s, h) = accept(&l).await; assert_eq!(h, hello(REQ0));
             for _ in 0..3 { let (id, b) = read_req(&mut s).await.unwrap(); assert!(id & ID_BIT != 0); let mut r = b.clone(); r.reverse(); write_rep(&mut s, id, &r).await }
@@ -157,13 +157,13 @@ pub mod tests {
         srv.await.unwrap();
     }
     #[tokio::test] async fn a_stale_id_is_dropped() {
-        let (path, l) = sock("stale");
+        let (path, l, _d) = sock("stale");
         tokio::spawn(async move { let (mut s, _) = accept(&l).await; let (id, _) = read_req(&mut s).await.unwrap(); write_rep(&mut s, id ^ 1, b"old").await; s.write_all(&[1, 0, 0, 0, 0, 0, 0, 0, 2, 9, 9]).await.unwrap(); write_rep(&mut s, id, b"new").await; let _ = read_req(&mut s).await; });
         let mut r = Req::dial(&path).await.unwrap();
         assert_eq!(r.request(b"q").await.unwrap(), b"new");
     }
     #[tokio::test] async fn a_closed_connection_is_an_error_at_once() {
-        let (path, l) = sock("eof");
+        let (path, l, _d) = sock("eof");
         tokio::spawn(async move { let (mut s, _) = accept(&l).await; let _ = read_req(&mut s).await; drop(s); let (mut s, _) = accept(&l).await; let (id, _) = read_req(&mut s).await.unwrap(); s.write_all(&head(100)).await.unwrap(); s.write_all(&id.to_be_bytes()).await.unwrap(); });
         let mut r = Req::dial(&path).await.unwrap();
         assert_eq!(r.request(b"q").await.unwrap_err(), CLOSED);
@@ -171,7 +171,7 @@ pub mod tests {
         assert_eq!(r.request(b"q").await.unwrap_err(), CLOSED); // cut inside a message
     }
     #[tokio::test] async fn dial_refuses_what_is_not_a_rep() {
-        let (path, l) = sock("proto");
+        let (path, l, _d) = sock("proto");
         tokio::spawn(async move { loop { let mut s = crate::plat::ipc::accept(&l).await.unwrap(); s.write_all(&hello(0x21)).await.unwrap(); let mut h = [0u8; 8]; let _ = s.read_exact(&mut h).await; } });
         assert_eq!(Req::dial(&path).await.err().unwrap(), format!("dial ipc://{path}: Protocol error"));
         let e = Req::dial("/nonexistent/api.sock").await.err().unwrap();

@@ -57,7 +57,7 @@ pub async fn checkpoint(cwd: String, thread: String) { if cwd.is_empty() || crat
 mod tests {
     use super::*;
     #[test] fn the_0_14_registry_is_adopted_once() {
-        let d = std::env::temp_dir().join(format!("bp-adopt-{}", std::process::id())); std::fs::create_dir_all(&d).unwrap();
+        let d = crate::plat::tmp::dir("adopt");
         let (reg, old) = (d.join("history.trusted"), d.join("old.trusted"));
         std::fs::write(&reg, "57:1 /a/.backplane/history.git").unwrap();
         std::fs::write(&old, "58:2 /b/.backplane/history.git\n57:1 /a/.backplane/history.git\nnonsense\n").unwrap();
@@ -65,7 +65,6 @@ mod tests {
         adopt(&r, &old); adopt(&r, &old);
         assert_eq!(std::fs::read_to_string(&reg).unwrap(), "57:1 /a/.backplane/history.git\n58:2 /b/.backplane/history.git\n");
         adopt(&r, &d.join("none")); assert!(std::fs::read_to_string(&reg).unwrap().ends_with("history.git\n"));
-        let _ = std::fs::remove_dir_all(&d);
     }
     #[test] fn a_step_record_has_the_commit_its_parent_the_places_and_the_files() {
         let out = "c1\np0\n/r/.git\n/r\nM\0a.kicad_pcb\0A\0b.kicad_sch\0";

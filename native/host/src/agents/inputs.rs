@@ -144,7 +144,7 @@ pub fn claude_line_p(text: &str, imgs: &[(String, String)], uuid: &str, now: boo
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn tmp(n: &str) -> PathBuf { let p = std::env::temp_dir().join(format!("bp-in-{}-{n}", std::process::id())); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
+    fn tmp(n: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("in-{n}")) }
     fn touch(p: &Path) { std::fs::create_dir_all(p.parent().unwrap()).unwrap(); std::fs::write(p, "x").unwrap() }
     #[test] fn a_steering_line_carries_priority_now_and_a_plain_one_does_not() {
         let l: Value = serde_json::from_str(&claude_line_p("x", &[], "U", true)).unwrap(); assert_eq!(l["priority"], "now");

@@ -58,7 +58,7 @@ mod tests {
         assert!(copy("Archive_2/x.kicad_pcb") && copy("a/my-backups/x.kicad_pcb") && !copy("old.kicad_pcb") && !copy("a/exporter/x") == false);
     }
     #[test] fn find_prunes_and_sorts() {
-        let d = std::env::temp_dir().join(format!("bp-boards-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d);
+        let d = crate::plat::tmp::dir("boards");
         for f in ["b/y.kicad_pcb", "a/x.kicad_pcb", "a/x.kicad_pro", ".hid/h.kicad_pcb", "node_modules/n.kicad_pcb", "extra/e.kicad_pcb", "mfg/m.kicad_pcb", "a/_autosave-x.kicad_pcb", "a/x-backup.kicad_pcb", "a/b/c/d/e/deep.kicad_pcb", "top.kicad_pro", "a/notes.txt"] { std::fs::create_dir_all(d.join(f).parent().unwrap()).unwrap(); std::fs::write(d.join(f), "").unwrap() }
         assert_eq!(find(&d), s(&["a/x.kicad_pcb", "a/x.kicad_pro", "b/y.kicad_pcb", "top.kicad_pro"]));
     }

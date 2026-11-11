@@ -255,7 +255,7 @@ mod tests {
         let _ = child.kill(); let _ = child.wait();
     }
     use super::*;
-    fn dir(name: &str) -> PathBuf { let p = std::env::temp_dir().join(format!("bp-agents-{}-{}", std::process::id(), name)); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
+    fn dir(name: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("agents-{name}")) }
     fn script(d: &Path, name: &str, body: &str) -> PathBuf { use crate::plat::fs::PermissionsExt; let p = d.join(name); std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap(); std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap(); p }
 
     #[test] fn test_mode_runs_only_the_standin_folder() {

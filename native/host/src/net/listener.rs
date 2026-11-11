@@ -156,13 +156,13 @@ mod tests {
         fn own_auth(&self) -> bool { true }
         fn call<'a>(&'a self, _h: &'a Arc<Hub>, r: &'a Req) -> AFut<'a, HttpReply> { Box::pin(async move { HttpReply::text("200 OK", &format!("trusted={} owner_conn={}", r.trusted, is_owner_conn(r.peer))) }) }
     }
-    async fn node(tag: &str) -> (Arc<Hub>, Arc<Peering>, Arc<AuthRoutes>, std::path::PathBuf) {
-        let h = std::env::temp_dir().join(format!("bp-listener-{tag}-{}", std::process::id())); let _ = std::fs::remove_dir_all(&h); std::fs::create_dir_all(&h).unwrap();
+    async fn node(tag: &str) -> (Arc<Hub>, Arc<Peering>, Arc<AuthRoutes>, crate::plat::tmp::TempDir) {
+        let h = crate::plat::tmp::dir(&format!("listener-{tag}"));
         std::fs::write(h.join("token"), "tok\n").unwrap();
-        let hub = Hub::start(Cfg { home: h.clone(), version: "0.14.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+        let hub = Hub::start(Cfg { home: h.to_path_buf(), version: "0.14.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
         hub.register_http(Arc::new(Echo));
         let (reg, routes) = super::super::start::open(&h, "0.0.0.0", 1).unwrap();
-        let p = Arc::new(Peering::new(h.clone(), reg, super::super::peers::PeerTable::new(), routes.clone(), true, "0.0.0.0", 1));
+        let p = Arc::new(Peering::new(h.to_path_buf(), reg, super::super::peers::PeerTable::new(), routes.clone(), true, "0.0.0.0", 1));
         (hub, p, routes, h)
     }
     async fn get(addr: &str) -> String {
@@ -206,7 +206,7 @@ mod tests {
     /// its own: once the listener is up its address is among the routes, and it is the one the link names.
     #[tokio::test] async fn tailnet_the_pairing_link_and_qr_name_the_listeners_address_not_the_hosts() {
         let (hub, p, _unused, h) = node("link").await;
-        let h2 = std::env::temp_dir().join(format!("bp-listener-link2-{}", std::process::id())); let _ = std::fs::remove_dir_all(&h2); std::fs::create_dir_all(&h2).unwrap(); std::fs::write(h2.join("token"), "tok\n").unwrap();
+        let h2 = crate::plat::tmp::dir("listener-link2"); std::fs::write(h2.join("token"), "tok\n").unwrap();
         let ts = Arc::new(Fake { ip: "127.0.0.1".into(), whois: [("127.0.0.1".to_string(), who("me@x.com"))].into(), status: String::new() });
         let main_port = free();
         let (_, routes) = super::super::start::open(&h2, "127.0.0.1", main_port).unwrap();

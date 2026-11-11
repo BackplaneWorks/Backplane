@@ -101,12 +101,11 @@ mod tests {
     use super::*;
     #[test] fn a_copy_is_kept_under_the_home_and_never_outside_it() {
         use base64::Engine;
-        let home = std::env::temp_dir().join(format!("bp-farfiles-{}", std::process::id())); let _ = std::fs::remove_dir_all(&home);
+        let home = crate::plat::tmp::uncreated("farfiles");
         let r = json!({"b64": base64::engine::general_purpose::STANDARD.encode(b"hello")});
         let p = keep_copy(&home, "L~t1", "docs/a.md", &r).unwrap();
         assert!(p.starts_with(&home.join("far-files").to_string_lossy().into_owned()) && p.ends_with("docs/a.md")); assert_eq!(std::fs::read(&p).unwrap(), b"hello");
         for bad in ["../x", "/etc/passwd", "", "a/../../b"] { assert!(keep_copy(&home, "L~t1", bad, &r).is_err(), "{bad}"); }
-        let _ = std::fs::remove_dir_all(&home);
     }
     #[test] fn a_thread_of_this_machine_is_not_asked_elsewhere() {
         assert!(matches!(listing("t1", ""), Some(Err(_)))); assert!(matches!(copy("~t1", "a"), Some(Err(_))));

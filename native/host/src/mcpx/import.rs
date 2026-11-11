@@ -85,7 +85,7 @@ pub fn sync(list: &mut List, scans: &[Scan]) -> bool {
 mod tests {
     use super::*;
     use crate::mcpx::model::Kv;
-    fn tmp(n: &str) -> PathBuf { let d = std::env::temp_dir().join(format!("bp-mcpx-imp-{n}-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap(); d }
+    fn tmp(n: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("mcpx-imp-{n}")) }
     #[test] fn a_sample_home_is_found_and_read() {
         let h = tmp("home"); let proj = h.join("proj"); std::fs::create_dir_all(proj.join(".vscode")).unwrap(); std::fs::create_dir_all(h.join(".codex")).unwrap(); std::fs::create_dir_all(h.join(".config/Claude")).unwrap();
         std::fs::write(h.join(".claude.json"), r#"{"numStartups":3,"mcpServers":{"fetch":{"type":"stdio","command":"uvx","args":["mcp-server-fetch"],"env":{}}},

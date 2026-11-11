@@ -314,7 +314,7 @@ pub fn convert_streaming(tools: &[Mesher], src: &str, stage: &str, detail: Optio
 mod tests {
     use super::*;
     #[test] fn an_appimage_freecadcmd_runs_its_console_program_headless() {
-        let d = std::env::temp_dir().join(format!("bp-fcai-{}", std::process::id())); std::fs::create_dir_all(&d).unwrap();
+        let d = crate::plat::tmp::dir("fcai");
         let (ai, elf, sh) = (d.join("FreeCAD.AppImage"), d.join("freecadcmd"), d.join("wrapper"));
         std::fs::write(&ai, b"\x7fELF\x02\x01\x01\x00AI\x02rest").unwrap(); std::fs::write(&elf, b"\x7fELF\x02\x01\x01\x00\x00\x00\x00rest").unwrap(); std::fs::write(&sh, "#!/bin/sh\n").unwrap();
         assert_eq!(console_args(&ai.to_string_lossy()), ["freecadcmd"]); assert!(console_args(&elf.to_string_lossy()).is_empty() && console_args(&sh.to_string_lossy()).is_empty());
@@ -324,17 +324,16 @@ mod tests {
         let env: Vec<(String, Option<String>)> = c.get_envs().map(|(k, v)| (k.to_string_lossy().into(), v.map(|v| v.to_string_lossy().into()))).collect();
         assert!(env.contains(&("QT_QPA_PLATFORM".into(), Some("offscreen".into()))), "{env:?}");
         #[cfg(all(unix, not(target_os = "macos")))] assert!(env.contains(&("DISPLAY".into(), None)), "no display: {env:?}");
-        let _ = std::fs::remove_dir_all(&d);
     }
     #[test] fn the_freecad_path_setting_is_tried_first() {
         use crate::plat::fs::PermissionsExt;
-        let d = std::env::temp_dir().join(format!("bp-fcset-{}", std::process::id())); std::fs::create_dir_all(&d).unwrap();
+        let d = crate::plat::tmp::dir("fcset");
         let f = d.join("mycad"); std::fs::write(&f, "#!/bin/sh\n").unwrap(); std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
         set_freecad_setting(&format!(" {} ", f.display())); assert_eq!(freecad_cmd(&d), f.to_string_lossy());
         set_freecad_setting("/no/such/freecad"); assert_ne!(freecad_cmd(&d), "/no/such/freecad", "a path that does not run is skipped");
         set_freecad_setting(&f.display().to_string()); assert_eq!(told_freecad(&d, "/host/found"), f.to_string_lossy(), "an agent is told the configured path");
         set_freecad_setting("/no/such/freecad"); assert_ne!(told_freecad(&d, "/host/found"), "/no/such/freecad", "an agent is not told a path that does not run");
-        set_freecad_setting(""); let _ = std::fs::remove_dir_all(&d);
+        set_freecad_setting("");
     }
     fn fc() -> Mesher { Mesher::FreeCad { gui: "/g".into(), cmd: "/c".into() } }
     #[test] fn the_mesher_is_an_explicit_choice() {
@@ -387,7 +386,7 @@ echo 'TRIS 42'
         assert!(!Path::new(&format!("{out}.parts")).exists(), "the batches' folder goes once the tool is done");
     }
     #[test] fn no_tool_says_what_is_missing() { let r = convert(&[], "/a.step", "/o.glb", Some(NORMAL), false); assert_eq!((r.code, r.out.as_str()), (127, NO_MESHER)); }
-    fn dir(tag: &str) -> PathBuf { let d = std::env::temp_dir().join(format!("bp-stepglb-{tag}-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap(); d }
+    fn dir(tag: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("stepglb-{tag}")) }
     #[test] fn a_tool_gets_the_detail_and_the_next_is_tried_after_a_failure() {
         use crate::plat::fs::PermissionsExt;
         let d = dir("tool"); let tool = d.join("t"); let log = d.join("log");
@@ -404,7 +403,7 @@ echo 'TRIS 42'
     #[test] fn a_converter_runs_itself_and_writes_where_the_hub_looks_spaces_and_all() {
         // no shell between: the output path the tool gets is the one `publish` checks (issue 1102: Git's sh read /tmp as %TEMP%)
         use crate::plat::fs::PermissionsExt;
-        let d = dir("direct").join("a folder"); std::fs::create_dir_all(&d).unwrap(); let tool = d.join("my tool");
+        let base = dir("direct"); let d = base.join("a folder"); std::fs::create_dir_all(&d).unwrap(); let tool = d.join("my tool");
         std::fs::write(&tool, "#!/bin/sh\nprintf glb > \"$2\"\necho out\necho err >&2\n").unwrap();
         std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap();
         let stage = stage(&d.join("m.glb").to_string_lossy(), "export-").unwrap(); let from = stage.join("model.glb"); let out = d.join("cache dir").join("m.glb");

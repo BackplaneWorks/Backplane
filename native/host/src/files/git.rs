@@ -231,7 +231,7 @@ pub fn exists(p: &str) -> bool { Path::new(p).exists() }
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn tmp(n: &str) -> String { let p = std::env::temp_dir().join(format!("bp-git-{}-{n}", std::process::id())); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p.to_string_lossy().into_owned() }
+    fn tmp(n: &str) -> crate::plat::tmp::TempStr { crate::plat::tmp::dir_str(&format!("git-{n}")) }
     async fn g(cwd: &str, a: &[&str]) -> Ran { proc("git", a, cwd, &[("GIT_AUTHOR_NAME", "t"), ("GIT_AUTHOR_EMAIL", "t@t"), ("GIT_COMMITTER_NAME", "t"), ("GIT_COMMITTER_EMAIL", "t@t")]).await }
     /// e2e n1110: Commit on a machine where git was never set up put git's ten-line "*** Please tell me who you are." in red in the thread.
     #[test] fn a_commit_without_a_git_identity_says_the_one_thing_to_do() {
@@ -351,7 +351,7 @@ mod tests {
     #[test] fn copy_child_probe() {
         if std::env::var("BP_COPY_PROBE").ok().as_deref() != Some("1") { return }
         assert!(crate::copy::on());
-        let d = std::env::temp_dir().join(format!("bp-copyprobe-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap(); let cwd = d.to_string_lossy().into_owned();
+        let d = crate::plat::tmp::dir("copyprobe"); let cwd = d.to_string_lossy().into_owned();
         let rt = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
         rt.block_on(async {
             // writes and unknowns: refused with code 126, nothing created

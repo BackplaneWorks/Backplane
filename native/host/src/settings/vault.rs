@@ -478,9 +478,8 @@ pub async fn run(spec: Value) -> Value {
 }
 
 #[cfg(test)]
-pub(crate) fn test_home(tag: &str) -> PathBuf {
-    let h = std::env::temp_dir().join(format!("bp-vault-{tag}-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&h); std::fs::create_dir_all(&h).unwrap(); h
+pub(crate) fn test_home(tag: &str) -> crate::plat::tmp::TempDir {
+    crate::plat::tmp::dir(&format!("vault-{tag}"))
 }
 /// The vault is process-wide, so tests that open one take this lock.
 #[cfg(test)]
@@ -495,24 +494,23 @@ mod tests {
     #[cfg(windows)]
     #[test] fn the_windows_credential_manager_keeps_the_key_and_a_copy_never_touches_it() {
         let _l = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let dir = std::env::temp_dir().join(format!("bp-wincred-{}-{}", std::process::id(), iso_now().replace([':', '.'], "-"))); std::fs::create_dir_all(&dir).unwrap();
-        let v = Vault { home: dir.clone(), items: vec![], key: None, backend: String::new(), locked: false, why: String::new(), flush: String::new() };
+        let dir = crate::plat::tmp::dir("wincred");
+        let v = Vault { home: dir.to_path_buf(), items: vec![], key: None, backend: String::new(), locked: false, why: String::new(), flush: String::new() };
         std::env::remove_var("BACKPLANE_VAULT_KEYRING"); assert_eq!(offer_with(false), "wincred");
         let target = format!("backplane-vault/{}", vault_id(&v));
         assert!(!key_put_with(true, &v, "wincred", &[9u8; 32]) && key_get_with(true, &v, "wincred").is_none(), "a copy: nothing written or read");
         assert!(crate::plat::creds::get(&target).is_none());
         assert!(key_put_with(false, &v, "wincred", &[7u8; 32]), "stored and read back"); assert_eq!(key_get_with(false, &v, "wincred"), Some([7u8; 32]));
         assert!(crate::plat::creds::delete(&target)); assert!(key_get_with(false, &v, "wincred").is_none());
-        let _ = std::fs::remove_dir_all(&dir);
     }
     #[test] fn a_copy_never_touches_the_real_keyring() {
         let _l = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let dir = std::env::temp_dir().join(format!("bp-fakekr-{}", std::process::id())); let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::plat::tmp::dir("fakekr");
         let mark = dir.join("called");
         for n in ["secret-tool", "security"] { let f = dir.join(n); std::fs::write(&f, format!("#!/bin/sh\necho $0 >> {}\nexit 1\n", crate::plat::fs::script_path(&mark))).unwrap(); std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap(); }
-        let old = std::env::var_os("PATH").unwrap_or_default(); let mut p = vec![dir.clone()]; p.extend(std::env::split_paths(&old)); std::env::set_var("PATH", std::env::join_paths(p).unwrap());
+        let old = std::env::var_os("PATH").unwrap_or_default(); let mut p = vec![dir.to_path_buf()]; p.extend(std::env::split_paths(&old)); std::env::set_var("PATH", std::env::join_paths(p).unwrap());
         std::env::remove_var("BACKPLANE_VAULT_KEYRING");
-        let v = Vault { home: dir.clone(), items: vec![], key: None, backend: String::new(), locked: false, why: String::new(), flush: String::new() };
+        let v = Vault { home: dir.to_path_buf(), items: vec![], key: None, backend: String::new(), locked: false, why: String::new(), flush: String::new() };
         assert_eq!(offer_with(true), "file", "a copy keeps its key in its own home");
         for b in ["keyring", "keychain"] { assert_eq!(key_get_with(true, &v, b), None, "{b}: not read"); assert!(!key_put_with(true, &v, b, &[7u8; 32]), "{b}: not written"); }
         assert!(!mark.exists(), "neither secret-tool nor security was run");

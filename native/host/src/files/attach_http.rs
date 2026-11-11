@@ -51,12 +51,12 @@ mod tests {
     // A real client socket against the handler: Content-Length body streamed to <home>/attachments/<thread>/<key>-<name>, the reply a plain
     // Content-Length response (not chunked), 100-continue answered after the size is accepted, unknown/deleted threads and over-cap sizes refused.
     #[tokio::test] async fn an_upload_over_a_real_socket() {
-        let home = std::env::temp_dir().join(format!("bp-att-http-{}", std::process::id())); let _ = std::fs::remove_dir_all(&home); std::fs::create_dir_all(&home).unwrap();
+        let home = crate::plat::tmp::dir("att-http");
         let ev = |v: Value| v.to_string();
         std::fs::write(home.join("events.jsonl"), [ev(json!({"$":"ProjectCreated","id":"p1","title":"p","root":"/x","at":1})), ev(json!({"$":"ThreadCreated","id":"t1","project":"p1","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":2})),
             ev(json!({"$":"ThreadCreated","id":"t2","project":"p1","title":"D","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":3})), ev(json!({"$":"ThreadDeleted","id":"t2","at":4})),
             ev(json!({"$":"SettingSet","key":"files.max.mb","value":"1","at":5}))].join("\n") + "\n").unwrap();
-        let cfg = crate::hub::Cfg { home: home.clone(), version: "0.14.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() };
+        let cfg = crate::hub::Cfg { home: home.to_path_buf(), version: "0.14.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() };
         let hub = Hub::start(cfg, Arc::new(crate::presenter::Canned { reply: json!({}) })).await.unwrap();
         let l = TcpListener::bind("127.0.0.1:0").await.unwrap(); let port = l.local_addr().unwrap().port();
         let h2 = hub.clone();

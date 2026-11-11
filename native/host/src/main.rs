@@ -296,12 +296,12 @@ mod reconnect_tests {
     // first + resume(since = items held, origin). Nothing may be missing or repeated, in order.
     #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
     async fn reconnect_loses_nothing_under_streaming_load() {
-        let dir = std::env::temp_dir().join(format!("bp-reconnect-{}", std::process::id())); let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::plat::tmp::dir("reconnect");
         std::fs::write(dir.join("token"), "tok").unwrap();
         let mut log = String::from("{\"$\":\"ProjectCreated\",\"id\":\"p1\",\"title\":\"p\",\"root\":\"/x\",\"at\":1}\n");
         for t in 0..20 { log.push_str(&format!("{{\"$\":\"ThreadCreated\",\"id\":\"t{t}\",\"project\":\"p1\",\"title\":\"T{t}\",\"env\":\"local\",\"branch\":\"\",\"worktree\":\"\",\"provider\":\"claude\",\"model\":\"\",\"at\":1}}\n")); }
         std::fs::write(dir.join("events.jsonl"), log).unwrap();
-        let cfg = hub::Cfg { home: dir.clone(), version: "0.14.0".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() };
+        let cfg = hub::Cfg { home: dir.to_path_buf(), version: "0.14.0".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() };
         let hub = Hub::start(cfg, Arc::new(presenter::Canned { reply: json!({}) })).await.unwrap();
         let l = TcpListener::bind("127.0.0.1:0").await.unwrap(); let port = l.local_addr().unwrap().port();
         { let hub = hub.clone(); tokio::spawn(async move { loop { let (s, _) = l.accept().await.unwrap(); let h = hub.clone(); tokio::spawn(async move { let _ = serve(h, s).await; }); } }); }
@@ -366,18 +366,18 @@ mod auth_wire_tests {
         fn own_auth(&self) -> bool { self.0 }
         fn call<'a>(&'a self, _h: &'a Arc<Hub>, _r: &'a Req) -> Fut<'a, HttpReply> { { let n = _r.body.len(); let p = _r.peer.is_some(); Box::pin(async move { HttpReply::text("200 OK", &format!("ran {n} peer={p}")) }) } }
     }
-    async fn up(name: &str) -> (Arc<Hub>, u16, Arc<Reg>) {
-        let dir = std::env::temp_dir().join(format!("bp-authwire-{}-{name}", std::process::id())); let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(&dir).unwrap();
+    async fn up(name: &str) -> (hub::TestHub, u16, Arc<Reg>) {
+        let dir = crate::plat::tmp::dir(&format!("authwire-{name}"));
         std::fs::write(dir.join("token"), ROOT).unwrap();
         std::fs::write(dir.join("events.jsonl"), "{\"$\":\"ProjectCreated\",\"id\":\"p1\",\"title\":\"p\",\"root\":\"/x\",\"at\":1}\n").unwrap();
-        let cfg = hub::Cfg { home: dir, version: "0.14.0".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() };
+        let cfg = hub::Cfg { home: dir.to_path_buf(), version: "0.14.0".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() };
         let hub = Hub::start(cfg, Arc::new(presenter::Canned { reply: json!({"remoteReady":false,"cmds":[],"session":{}}) })).await.unwrap();
         let reg = Arc::new(Reg { revoked: AtomicBool::new(false), last: AtomicU64::new(0) });
         hub.set_pairing(reg.clone(), Arc::new(NoRoutes));
         hub.register_http(Arc::new(Probe(false))); hub.register_http(Arc::new(Probe(true)));
         let l = TcpListener::bind("127.0.0.1:0").await.unwrap(); let port = l.local_addr().unwrap().port();
         { let hub = hub.clone(); tokio::spawn(async move { loop { let (s, _) = l.accept().await.unwrap(); let h = hub.clone(); tokio::spawn(async move { let _ = serve(h, s).await; }); } }); }
-        (hub, port, reg)
+        (hub::TestHub { hub, _tmp: dir }, port, reg)
     }
     async fn post(port: u16, path: &str, head: &str, body: &[u8]) -> String {
         let mut s = TcpStream::connect(("127.0.0.1", port)).await.unwrap();
@@ -470,14 +470,14 @@ mod wire_private_tests {
     use tokio_tungstenite::connect_async;
     // join and live: a stored or new token, input and ride value never appears in a frame a client receives
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn a_stored_token_input_and_ride_value_never_reach_a_client_join_or_live() {
-        let dir = std::env::temp_dir().join(format!("bp-wirepriv-{}", std::process::id())); let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::plat::tmp::dir("wirepriv");
         std::fs::write(dir.join("token"), "tok").unwrap();
         let log = [r#"{"$":"ProjectCreated","id":"p1","title":"p","root":"/x","at":1}"#,
             r#"{"$":"DeviceRegistered","id":"d1","token":"STORED-PUSH-TOKEN-1","platform":"ios","bundle":"dev.backplane.mobile","name":"Phone","at":2}"#,
             r#"{"$":"SettingSet","key":"launch.input.t1","value":"STORED-INPUT-SECRET","at":3}"#,
             r#"{"$":"SettingSet","key":"ride.t1","value":"STORED-RIDE-MAIL","at":4}"#].join("\n") + "\n";
         std::fs::write(dir.join("events.jsonl"), log).unwrap();
-        let cfg = hub::Cfg { home: dir.clone(), version: "0.14.0".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() };
+        let cfg = hub::Cfg { home: dir.to_path_buf(), version: "0.14.0".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() };
         let hub = Hub::start(cfg, Arc::new(presenter::Canned { reply: json!({}) })).await.unwrap();
         let l = TcpListener::bind("127.0.0.1:0").await.unwrap(); let port = l.local_addr().unwrap().port();
         { let hub = hub.clone(); tokio::spawn(async move { loop { let (s, _) = l.accept().await.unwrap(); let h = hub.clone(); tokio::spawn(async move { let _ = serve(h, s).await; }); } }); }

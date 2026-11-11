@@ -8,12 +8,12 @@ fn caller() -> Caller { Caller { gen: "1".into(), client: 1 } }
 async fn rpc(hub: &Arc<Hub>, m: &str, p: Value) -> Value { let h = hub.rpc_for(m).expect("handler"); h.call(hub, &caller(), &json!(7), m, &p).await.remove(0) }
 async fn wait<F: FnMut() -> bool>(secs: u64, mut f: F) -> bool { let end = Instant::now() + Duration::from_secs(secs); while Instant::now() < end { if f() { return true } tokio::time::sleep(Duration::from_millis(25)).await } f() }
 fn sent(log: &std::path::Path) -> Vec<Value> { std::fs::read_to_string(log).unwrap_or_default().lines().filter_map(|l| serde_json::from_str(l).ok()).collect() }
-async fn setup(name: &str) -> (Arc<Hub>, Arc<Driver>, PathBuf) {
-    let (hub, d) = hub_with_helper(name).await; let log = d.join("standin.log"); (hub.clone(), get(&hub).unwrap(), log)
+async fn setup(name: &str) -> (Arc<Hub>, Arc<Driver>, PathBuf, crate::plat::tmp::TempDir) {
+    let (hub, d) = hub_with_helper(name).await; let log = d.join("standin.log"); (hub.clone(), get(&hub).unwrap(), log, d)
 }
 
 #[tokio::test] async fn teaching_records_the_persons_steps_and_a_save_makes_a_task_the_bot_is_woken_with() {
-    let (hub, d, log) = setup("teach").await; let tap = Tap::new(&hub, 1);
+    let (hub, d, log, _tmp) = setup("teach").await; let tap = Tap::new(&hub, 1);
     let woke: Arc<std::sync::Mutex<Vec<(String, String)>>> = Default::default(); let w2 = woke.clone(); d.set_wake(Arc::new(move |b, t| w2.lock().unwrap().push((b.into(), t))));
     assert_eq!(rpc(&hub, "bots.teach", json!({"bot":"b1","op":"start"})).await["ok"], true);
     assert!(!d.br.agent_drives_ok("b1").await, "the agent is refused while the person teaches");
@@ -43,7 +43,7 @@ async fn setup(name: &str) -> (Arc<Hub>, Arc<Driver>, PathBuf) {
 }
 
 #[tokio::test] async fn the_persons_input_is_scaled_and_refused_while_the_bot_drives() {
-    let (hub, d, log) = setup("input").await;
+    let (hub, d, log, _tmp) = setup("input").await;
     let r = rpc(&hub, "bots.browser", json!({"bot":"b1","op":"click","x":500,"y":500})).await; assert_eq!(r["ok"], false, "{r}");
     assert_eq!(rpc(&hub, "bots.browser", json!({"bot":"b1","op":"takeover"})).await["ok"], true);
     assert!(!d.br.agent_drives_ok("b1").await);
@@ -60,7 +60,7 @@ async fn setup(name: &str) -> (Arc<Hub>, Arc<Driver>, PathBuf) {
 
 /// A phone's toolbar (data/1 browser op toolbar) becomes a takeover and the command on the page's input queue: back, forward and reload reach the helper in order.
 #[tokio::test] async fn a_phones_back_forward_and_reload_reach_the_helper_in_order() {
-    let (hub, _d, log) = setup("phone-toolbar").await;
+    let (hub, _d, log, _tmp) = setup("phone-toolbar").await;
     assert!(crate::data::ext::browser_requests("b1", &json!({"thread":"b1","op":"toolbar","command":"explode"})).is_err());
     for c in ["back", "forward", "reload"] {
         for q in crate::data::ext::browser_requests("b1", &json!({"thread":"b1","op":"toolbar","command":c})).unwrap() { assert_eq!(rpc(&hub, "bots.browser", q).await["ok"], true) }
@@ -74,13 +74,13 @@ async fn setup(name: &str) -> (Arc<Hub>, Arc<Driver>, PathBuf) {
 }
 
 #[tokio::test] async fn a_recording_ends_after_ten_minutes() {
-    let (hub, d, _log) = setup("expire").await; rpc(&hub, "bots.teach", json!({"bot":"b1","op":"start"})).await;
+    let (hub, d, _log, _tmp) = setup("expire").await; rpc(&hub, "bots.teach", json!({"bot":"b1","op":"start"})).await;
     let start = d.st.lock().await.teach.get("b1").start; d.tick(start + 599).await; assert_eq!(d.st.lock().await.teach.get("b1").mode, "rec"); d.tick(start + 600).await; assert_eq!(d.st.lock().await.teach.get("b1").mode, "review");
     rpc(&hub, "bots.teach", json!({"bot":"b1","op":"discard"})).await; assert!(d.st.lock().await.teach.get("b1").idle());
 }
 
 #[tokio::test] async fn a_task_runs_with_its_parameters_logs_its_steps_pauses_for_the_person_and_ends_pruned() {
-    let (hub, d, _log) = setup("run").await; let thread = "b1";
+    let (hub, d, _log, _tmp) = setup("run").await; let thread = "b1";
     let t = json!({"slug":"look-up","name":"Look up","steps":[{"n":1,"do":"navigate","url":"https://x.test"},{"n":2,"do":"type","value":"{{order}}","target":{"role":"textbox","name":"Order"}},{"n":3,"do":"click","target":{"role":"button","name":"Pay now"}}],"params":[{"name":"order"}]});
     let (ok, _) = d.tool(thread, "task_save", &t).await; assert!(ok);
     let (ok, e) = d.tool(thread, "task_run", &json!({"slug":"look-up"})).await; assert!(!ok); assert_eq!(e["error"], "missing parameter: order");
@@ -103,7 +103,7 @@ async fn setup(name: &str) -> (Arc<Hub>, Arc<Driver>, PathBuf) {
 }
 
 #[tokio::test] async fn runs_beyond_the_newest_twenty_are_pruned() {
-    let dir = std::env::temp_dir().join(format!("bp-prune-{}", std::process::id())); let _ = std::fs::remove_dir_all(&dir);
+    let dir = crate::plat::tmp::dir("prune");
     // the order is set, not left to the clock: each folder's modification time is an explicit second apart (r00 oldest), so a loaded machine cannot tie or reorder them
     let base = std::time::SystemTime::now() - Duration::from_secs(3600);
     for i in 0..25 { let p = dir.join(format!("r{i:02}")); std::fs::create_dir_all(&p).unwrap(); std::fs::File::open(&p).unwrap().set_modified(base + Duration::from_secs(i)).unwrap() }
@@ -112,7 +112,7 @@ async fn setup(name: &str) -> (Arc<Hub>, Arc<Driver>, PathBuf) {
 }
 
 #[tokio::test] async fn tasks_come_back_from_the_log_and_a_delete_removes_them() {
-    let (hub, d, _log) = setup("fold").await;
+    let (hub, d, _log, _tmp) = setup("fold").await;
     hub.commit(&json!({"$":"TaskSet","bot":"b9","slug":"old","json":task::json(&task::parse(&json!({"slug":"old","name":"Old"})).unwrap()).to_string(),"at":1})).await.unwrap();
     let (ok, l) = d.tool("b9", "task_list", &json!({})).await; assert!(ok && l[0]["slug"] == "old");
     let (ok, g) = d.tool("b9", "task_get", &json!({"slug":"old"})).await; assert!(ok && g["name"] == "Old");
@@ -122,13 +122,13 @@ async fn setup(name: &str) -> (Arc<Hub>, Arc<Driver>, PathBuf) {
 }
 
 #[tokio::test] async fn a_press_on_the_shield_takes_the_page_over() {
-    let (_hub, d, _log) = setup("shield").await;
+    let (_hub, d, _log, _tmp) = setup("shield").await;
     d.event(&json!({"event":"shield-click","page":"b1"})).await; assert_eq!(d.st.lock().await.teach.get("b1").drive, "takeover");
     d.event(&json!({"event":"record","page":"b1","step":{"do":"click"}})).await; assert!(d.st.lock().await.teach.get("b1").steps.is_empty(), "not recording");
 }
 
 #[tokio::test] async fn a_runs_pictures_are_served_only_from_the_bots_own_tasks_folder() {
-    let (hub, d, _log) = setup("shot-run").await; let run = "look-up-5";
+    let (hub, d, _log, _tmp) = setup("shot-run").await; let run = "look-up-5";
     let dir = d.run_dir("b1", run); std::fs::create_dir_all(&dir).unwrap(); std::fs::write(dir.join("pause-3.jpg"), b"JPEG3").unwrap(); std::fs::write(dir.join("1.jpg"), b"JPEG1").unwrap(); std::fs::write(d.dir("b1").join("secret.jpg"), b"NO").unwrap();
     let get = |t: &str| Req::new("GET", t, vec![]);
     let call = |t: String| { let hub = hub.clone(); async move { hub.http_for("/bots/b1/tasks/shot").unwrap().call(&hub, &get(&t)).await } };
@@ -140,7 +140,7 @@ async fn setup(name: &str) -> (Arc<Hub>, Arc<Driver>, PathBuf) {
 }
 
 #[tokio::test] async fn an_unknown_owner_is_refused_and_the_words_are() {
-    let (hub, d, _log) = setup("owner").await;
+    let (hub, d, _log, _tmp) = setup("owner").await;
     assert_eq!(rpc(&hub, "bots.browser", json!({"bot":"nobody","op":"takeover"})).await["error"], "unknown browser owner");
     assert_eq!(rpc(&hub, "bots.browser", json!({"bot":"","op":"takeover"})).await["error"], "unknown browser owner");
     assert_eq!(rpc(&hub, "bots.browser", json!({"bot":"../x","op":"takeover"})).await["error"], "unknown browser owner");
@@ -149,7 +149,7 @@ async fn setup(name: &str) -> (Arc<Hub>, Arc<Driver>, PathBuf) {
     assert!(d.st.lock().await.teach.get("nobody").idle());
 }
 #[tokio::test] async fn the_persons_input_runs_in_order_on_one_queue_per_page() {
-    let (hub, _d, log) = setup("order").await; rpc(&hub, "bots.browser", json!({"bot":"b1","op":"takeover"})).await;
+    let (hub, _d, log, _tmp) = setup("order").await; rpc(&hub, "bots.browser", json!({"bot":"b1","op":"takeover"})).await;
     for t in ["down", "move", "up"] { assert_eq!(rpc(&hub, "bots.browser", json!({"bot":"b1","op":"mouse","type":t,"x":10,"y":10})).await["ok"], true) }
     for k in ["a", "b", "c"] { rpc(&hub, "bots.browser", json!({"bot":"b1","op":"press","key":k})).await; }
     assert!(wait(10, || sent(&log).iter().filter(|r| r["op"] == "press").count() == 3).await);
@@ -157,7 +157,7 @@ async fn setup(name: &str) -> (Arc<Hub>, Arc<Driver>, PathBuf) {
     assert_eq!(ops, vec!["down", "move", "up", "a", "b", "c"]);
 }
 #[tokio::test] async fn a_toolbar_command_takes_the_page_over_and_its_reply_comes_later() {
-    let (hub, d, log) = setup("toolbar").await; let tap = Tap::new(&hub, 1);
+    let (hub, d, log, _tmp) = setup("toolbar").await; let tap = Tap::new(&hub, 1);
     assert_eq!(rpc(&hub, "bots.browser", json!({"bot":"b1","op":"toolbar","command":"explode"})).await["error"], "unsupported browser toolbar command");
     let h = hub.rpc_for("bots.browser").unwrap(); let frames = h.call(&hub, &caller(), &json!(42), "bots.browser", &json!({"bot":"b1","op":"toolbar","command":"navigate","url":"example.com/x"})).await; assert!(frames.is_empty(), "the reply is the helper's, later");
     assert_eq!(d.st.lock().await.teach.get("b1").drive, "takeover");
@@ -167,7 +167,7 @@ async fn setup(name: &str) -> (Arc<Hub>, Arc<Driver>, PathBuf) {
     assert_eq!(toolbar_args("tabs", &json!({"new":true}))["new"], "https://www.google.com/"); assert_eq!(toolbar_args("tabs", &json!({"selectId":"e1"})), json!({"selectId":"e1"})); assert_eq!(toolbar_args("tabs", &json!({"closeId":"e2"})), json!({"closeId":"e2"})); assert_eq!(toolbar_args("back", &json!({})), json!({}));
 }
 #[tokio::test] async fn a_pause_marks_the_thread_pending_frees_its_waiter_when_dropped_and_closes_an_unheard_ask() {
-    let (hub, d, _log) = setup("pend").await; let run = "r-1".to_string(); std::fs::create_dir_all(d.run_dir("b1", &run)).unwrap();
+    let (hub, d, _log, _tmp) = setup("pend").await; let run = "r-1".to_string(); std::fs::create_dir_all(d.run_dir("b1", &run)).unwrap();
     let find = |kind: &str| { let mut out = vec![]; for i in 0..hub.store.len() { if let Ok(v) = serde_json::from_str::<Value>(&hub.store.get(i).unwrap()) { if v["$"] == kind { out.push(v) } } } out };
     let (d2, r2) = (d.clone(), run.clone()); let h = tokio::spawn(async move { d2.tool("b1", "task_pause", &json!({"run":r2,"n":1})).await });
     assert!(wait(10, || !find("AskOpened").is_empty()).await); assert_eq!(find("PendingChanged").last().unwrap()["count"], 1);
@@ -183,7 +183,7 @@ async fn setup(name: &str) -> (Arc<Hub>, Arc<Driver>, PathBuf) {
 }
 
 #[tokio::test] async fn the_pages_newest_frame_is_served_as_screen_jpg_and_never_cached() {
-    let (hub, d, _log) = setup("screen").await; let _ = d; let get = |t: &str| Req::new("GET", t, vec![]);
+    let (hub, d, _log, _tmp) = setup("screen").await; let _ = d; let get = |t: &str| Req::new("GET", t, vec![]);
     let call = |t: String| { let hub = hub.clone(); async move { hub.http_for("/bots/b1/screen.jpg").unwrap().call(&hub, &get(&t)).await } };
     assert_eq!(call("/bots/b1/screen.jpg".into()).await.status, "404 Not Found");
     std::fs::create_dir_all(hub.cfg.home.join("shots")).unwrap(); std::fs::write(hub.cfg.home.join("shots/b1.jpg"), b"FRAME").unwrap();

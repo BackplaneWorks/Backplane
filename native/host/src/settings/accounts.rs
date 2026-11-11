@@ -154,14 +154,14 @@ mod tests {
         let f = created(&json!({"$":"ThreadForked","id":"t4","source":"src","at":6}), &get); assert_eq!(f.len(), 2); assert_eq!(f[0]["value"], json!(binding_show("w", 3))); assert_eq!(f[1]["value"], json!(binding_show("", 0)));
     }
     #[tokio::test(flavor = "multi_thread")] async fn a_client_without_the_accounts_capability_is_refused_as_the_js_hub_refuses_it() {
-        let home = std::env::temp_dir().join(format!("bp-acct2-{}", std::process::id())); let _ = std::fs::remove_dir_all(&home); std::fs::create_dir_all(&home).unwrap();
-        let hub = Hub::start(Cfg { home: home.clone(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+        let home = crate::plat::tmp::dir("acct2");
+        let hub = Hub::start(Cfg { home: home.to_path_buf(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
         let r = AccountsDefault.call(&hub, &Caller { gen: "1".into(), client: 1 }, &json!(2), "accounts.default", &json!({"provider":"claude","profile":"","epoch":0})).await.remove(0);
-        assert_eq!(r["error"], GATE); assert_eq!(hub.setting("account.default.claude").await, None); let _ = std::fs::remove_dir_all(&home);
+        assert_eq!(r["error"], GATE); assert_eq!(hub.setting("account.default.claude").await, None);
     }
     #[tokio::test(flavor = "multi_thread")] async fn only_a_connected_profile_or_the_legacy_login_becomes_the_default() {
-        let home = std::env::temp_dir().join(format!("bp-acct-{}", std::process::id())); let _ = std::fs::remove_dir_all(&home); std::fs::create_dir_all(&home).unwrap();
-        let hub = Hub::start(Cfg { home: home.clone(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+        let home = crate::plat::tmp::dir("acct");
+        let hub = Hub::start(Cfg { home: home.to_path_buf(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
         hub.commit(&json!({"$":"SettingSet","key":"accounts.inventory","value":inv(),"at":1})).await.unwrap();
         let call = |p: Value| { let hub = hub.clone(); async move { make_default(&hub, &json!(2), &p).await } };
         let bad = "Check and reconnect this account before making it the default.";

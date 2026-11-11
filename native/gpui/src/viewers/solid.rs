@@ -1327,7 +1327,7 @@ mod tests {
             let c = Camera::fitted_for(&m, 1.5); let t0 = std::time::Instant::now();
             let px = render(&m, &c, w, h, ss, ALIVE).unwrap(); eprintln!("{name}: {:?}", t0.elapsed());
             let mut rgba = px.clone(); for p in rgba.chunks_exact_mut(4) { p.swap(0, 2); }
-            image::RgbaImage::from_raw(w as u32, h as u32, rgba).unwrap().save(format!("/tmp/solid-{name}.png")).unwrap();
+            image::RgbaImage::from_raw(w as u32, h as u32, rgba).unwrap().save(crate::tmp::base().join(format!("solid-{name}.png"))).unwrap();
         }
     }
 }

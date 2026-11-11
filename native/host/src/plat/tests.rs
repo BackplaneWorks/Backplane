@@ -7,10 +7,9 @@
 }
 /// A `#!` script runs as a program (Windows: through the interpreter its first line names).
 #[test] fn a_shebang_script_runs_as_a_program() {
-    let d = std::env::temp_dir().join(format!("bp-plat-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap();
+    let d = crate::plat::tmp::dir("plat");
     let f = d.join("hello"); std::fs::write(&f, "#!/bin/sh\necho \"hi $1\"\n").unwrap();
     { use crate::plat::fs::PermissionsExt; std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap(); }
     let o = crate::proc::std_cmd(crate::proc::Kind::Local, &f).arg("there").output().unwrap();
     assert_eq!(String::from_utf8_lossy(&o.stdout).trim(), "hi there");
-    let _ = std::fs::remove_dir_all(&d);
 }

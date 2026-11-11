@@ -80,7 +80,7 @@ pub async fn open(hub: &Arc<Hub>, thread: &str, key: &str) -> Result<String, Str
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn tmp(n: &str) -> PathBuf { let p = std::env::temp_dir().join(format!("bp-kopen-{}-{n}", std::process::id())); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
+    fn tmp(n: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("kopen-{n}")) }
     fn touch(p: PathBuf) { std::fs::create_dir_all(p.parent().unwrap()).unwrap(); std::fs::write(p, "").unwrap() }
     #[test] fn the_project_first_then_the_board_then_the_schematic() {
         let r = tmp("pick"); let root = r.to_str().unwrap();

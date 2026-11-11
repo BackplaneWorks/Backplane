@@ -246,12 +246,11 @@ mod tests {
     }
     #[test] fn unread_event_kinds_are_skipped_without_parsing() { let mut w = World::default(); w.apply(r#"{"$":"RoomPosted","x":1}"#); w.apply("not json"); assert!(w.threads.is_empty()); }
     #[test] fn a_bots_thread_always_works_in_the_homes_bots_folder() {
-        let home = std::env::temp_dir().join(format!("bp-botcwd-{}", std::process::id())); let _ = std::fs::remove_dir_all(&home);
+        let home = crate::plat::tmp::uncreated("botcwd");
         let mut w = World::default(); w.home = home.to_string_lossy().into_owned();
         w.apply(r#"{"$":"ThreadCreated","id":"t","project":"","title":"Bub","provider":"claude","model":"","worktree":"","at":1}"#);
         w.apply(r#"{"$":"BotSet","id":"bub","name":"Bub","thread":"t","look":1,"persona":"","at":2}"#);
         w.apply(r#"{"$":"WorktreeSet","id":"t","branch":"","worktree":"/elsewhere/lanes/bub","at":3}"#);
         assert_eq!(w.cwd("t"), home.join("bots").join("bub").to_string_lossy()); assert!(home.join("bots/bub").is_dir());
-        let _ = std::fs::remove_dir_all(&home);
     }
 }

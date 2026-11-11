@@ -244,7 +244,7 @@ mod tests {
         assert_eq!(refusal(&rs, "Write", "ship it"), "Refused by a standing rule (r4): \"Never edit\". Write is not allowed here."); assert_eq!(refusal(&rs, "Bash", ""), "", "a rule without enforce is words only"); assert_eq!(refusal(&rs, "", "x"), "");
     }
     #[test] fn a_prompt_too_long_for_a_windows_command_line_goes_in_a_file() {
-        let d = std::env::temp_dir().join(format!("bp-pf-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d);
+        let d = crate::plat::tmp::uncreated("pf");
         let long = "line one\n".repeat(3000);
         let mut a: Vec<String> = ["-p", "--append-system-prompt", long.as_str(), "--model", "m"].iter().map(|x| x.to_string()).collect();
         let f = d.join("prompts/t1.md");
@@ -252,7 +252,6 @@ mod tests {
         assert_eq!(a, vec!["-p".to_string(), "--append-system-prompt-file".into(), f.to_string_lossy().into_owned(), "--model".into(), "m".into()]);
         assert_eq!(std::fs::read_to_string(&f).unwrap(), long, "the whole prompt, newlines and all");
         let mut b: Vec<String> = vec!["-p".into()]; prompt_to_file(&mut b, &f).unwrap(); assert_eq!(b, vec!["-p".to_string()], "no prompt, nothing changes");
-        let _ = std::fs::remove_dir_all(&d);
     }
 }
 

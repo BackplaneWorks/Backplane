@@ -202,7 +202,7 @@ pub fn snapshot(home: &Path, entry: &str, src: &str, thread: &str) -> Result<Sna
 mod tests {
     use super::*;
     // canonical: `source()` refuses a path with a link anywhere on it, so a TMPDIR that is itself a link (h@backplane, macOS /var) must be resolved first
-    fn tmp(n: &str) -> PathBuf { let p = std::env::temp_dir().join(format!("bp-mi-{}-{n}", std::process::id())); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); crate::plat::fs::canonicalize(&p).unwrap() }
+    fn tmp(n: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::canonical(&format!("mi-{n}")) }
     fn png(w: u32, h: u32) -> Vec<u8> { let mut v = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, b'I', b'H', b'D', b'R']; v.extend(w.to_be_bytes()); v.extend(h.to_be_bytes()); v.extend([8, 6, 0, 0, 0]); v.extend([0u8; 16]); v }
     // images laws: Img.paths finds each image path once, in order; words over 1024 chars are no path
     #[test] fn img_paths() {

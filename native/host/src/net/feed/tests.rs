@@ -40,9 +40,9 @@ fn msg(th: &str, n: u64) -> Value { ev(json!({"$":"MessagePosted","thread":th,"m
     f.with(|ix| assert_eq!(ix.shared_after(0), &[1, 2, 3, 4, 5, 6], "line 5 was in the build and in the buffer: once"));
     f.observe(&[msg("t", 7)], 7); f.with(|ix| assert_eq!(ix.shared_after(5), &[6, 7]));
 }
-async fn hub(tag: &str) -> (Arc<Hub>, std::path::PathBuf) {
-    let h = std::env::temp_dir().join(format!("bp-feed-{tag}-{}", std::process::id())); let _ = std::fs::remove_dir_all(&h); std::fs::create_dir_all(&h).unwrap();
-    (Hub::start(Cfg { home: h.clone(), version: "0.14.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap(), h)
+async fn hub(tag: &str) -> (Arc<Hub>, crate::plat::tmp::TempDir) {
+    let h = crate::plat::tmp::dir(&format!("feed-{tag}"));
+    (Hub::start(Cfg { home: h.to_path_buf(), version: "0.14.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap(), h)
 }
 #[tokio::test] async fn far_log_answers_a_pull_with_wire_lines_a_page_at_a_time() {
     let (hub, h) = hub("log").await;

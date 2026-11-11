@@ -267,7 +267,7 @@ mod tests {
     }
     /// A default build (this one, unless the tests run with `e2e-trust`) refuses a release signed by an E2E key, whatever the environment points at.
     #[cfg(not(feature = "e2e-trust"))] #[test] fn a_default_build_ignores_the_e2e_key() {
-        let d = std::env::temp_dir().join(format!("bp-e2e-key-{}", std::process::id())); std::fs::create_dir_all(&d).unwrap();
+        let d = crate::plat::tmp::dir("e2e-key");
         let p = pair(); let mut der = vec![0x30, 0x2a, 0x30, 0x05, 0x06, 0x03, 0x2b, 0x65, 0x70, 0x03, 0x21, 0x00]; der.extend_from_slice(p.pk.as_ref());
         use base64::Engine; let pem = format!("-----BEGIN PUBLIC KEY-----\n{}\n-----END PUBLIC KEY-----\n", base64::engine::general_purpose::STANDARD.encode(&der));
         assert_eq!(spki(&pem), Some(*p.pk), "the PEM the E2E writes is read right");

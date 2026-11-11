@@ -34,7 +34,7 @@ pub fn list(root: &Path, rel: &str) -> Result<String, &'static str> {
 #[cfg(test)]
 mod tests {
     use super::*; use crate::plat::fs::symlink;
-    fn tmp(n: &str) -> std::path::PathBuf { let p = std::env::temp_dir().join(format!("bp-dir-{}-{n}", std::process::id())); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
+    fn tmp(n: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("dir-{n}")) }
     #[test] fn lists_folders_then_files_hides_dotfiles_and_symlinked_folders() {
         let b = tmp("l"); let r = b.join("r"); std::fs::create_dir_all(r.join("zdir")).unwrap(); std::fs::create_dir_all(r.join("adir")).unwrap(); std::fs::create_dir_all(r.join(".git")).unwrap();
         std::fs::write(r.join("b.txt"), "12345").unwrap(); std::fs::write(r.join("a.kicad_pcb"), "").unwrap(); std::fs::write(r.join(".env"), "k").unwrap(); std::fs::write(r.join("bad\tname"), "x").unwrap();

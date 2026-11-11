@@ -135,9 +135,9 @@ mod tests {
             fn handle(&self, _r: &Req, _c: u64) -> Option<AuthOutcome> { None }
             fn unpeer(&self, link: &str) { self.0.lock().unwrap().push(link.to_string()) }
         }
-        let dir = std::env::temp_dir().join(format!("bp-net-settle-{}", std::process::id())); let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::plat::tmp::dir("net-settle");
         std::fs::write(dir.join("token"), "roottoken").unwrap();
-        let hub = Hub::start(Cfg { home: dir.clone(), version: "0.14.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: serde_json::json!({}) })).await.unwrap();
+        let hub = Hub::start(Cfg { home: dir.to_path_buf(), version: "0.14.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: serde_json::json!({}) })).await.unwrap();
         let (reg, _) = open(&dir, "127.0.0.1", 3787).unwrap();
         let links = Links(Default::default());
         let routes = vec!["https://m.ts.net".to_string()];
@@ -158,27 +158,24 @@ mod tests {
         let m = reg.machine(peer); assert_eq!(reg.link(peer, "box")["ok"], true);
         settle_revoke(&hub, &links, "uninvite", &reg.uninvite(m["id"].as_str().unwrap()));
         assert_eq!(*links.0.lock().unwrap(), vec![peer.to_string()], "a used machine invite's link goes with it");
-        let _ = std::fs::remove_dir_all(dir);
     }
     #[test] fn pair_start_needs_the_token() {
-        let dir = std::env::temp_dir().join(format!("bp-net-notoken-{}", std::process::id())); std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::plat::tmp::dir("net-notoken");
         assert!(open(&dir, "127.0.0.1", 3787).is_err(), "no token file: no registry");
         std::fs::write(dir.join("token"), "\n").unwrap();
         assert!(open(&dir, "127.0.0.1", 3787).is_err());
         assert!(!dir.join("devices-v1.json").exists());
-        let _ = std::fs::remove_dir_all(dir);
     }
     #[test] fn pair_holds_means_token_or_live_device() {
-        let dir = std::env::temp_dir().join(format!("bp-net-holds-{}", std::process::id())); std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::plat::tmp::dir("net-holds");
         std::fs::write(dir.join("token"), "roottoken").unwrap();
         let (reg, _) = open(&dir, "127.0.0.1", 3787).unwrap();
         assert!(reg.holds("roottoken") && !reg.holds("") && !reg.holds("nope"));
         let tok = reg.enroll(reg.create(&["https://m.ts.net".to_string()])["code"].as_str().unwrap(), "P")["token"].as_str().unwrap().to_string();
         assert!(reg.holds(&tok));
-        let _ = std::fs::remove_dir_all(dir);
     }
     #[test] fn pair_start_refuses_a_registry_it_cannot_own_and_keeps_it() {
-        let dir = std::env::temp_dir().join(format!("bp-net-start-{}", std::process::id())); std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::plat::tmp::dir("net-start");
         std::fs::write(dir.join("token"), "roottoken\n").unwrap();
         let (reg, _) = open(&dir, "127.0.0.1", 3787).unwrap();
         // the hub asks the trait object: the device the registry knows is held, and a stranger is not
@@ -193,6 +190,5 @@ mod tests {
         let kept = std::fs::read_to_string(dir.join("devices-v1.json")).unwrap();
         assert!(open(&dir, "127.0.0.1", 3787).is_err());
         assert_eq!(std::fs::read_to_string(dir.join("devices-v1.json")).unwrap(), kept);
-        let _ = std::fs::remove_dir_all(dir);
     }
 }

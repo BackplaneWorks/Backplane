@@ -8,7 +8,7 @@ use serde_json::{json, Value};
 use std::{path::{Path, PathBuf}, sync::Arc}; use crate::plat::fs::PermissionsExt;
 
 const PROBE: &str = "BP_SETTINGS_COPY_PROBE";
-fn home(tag: &str) -> PathBuf { let h = std::env::temp_dir().join(format!("bp-scg-{}-{tag}", std::process::id())); let _ = std::fs::remove_dir_all(&h); std::fs::create_dir_all(&h).unwrap(); h }
+fn home(tag: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("scg-{tag}")) }
 async fn hub_in(h: &Path) -> Arc<Hub> { Hub::start(Cfg { home: h.to_path_buf(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap() }
 /// Fake tools on PATH (returns the marker file they append to). Restore PATH with the returned guard value.
 fn fakes(h: &Path) -> (PathBuf, std::ffi::OsString) {

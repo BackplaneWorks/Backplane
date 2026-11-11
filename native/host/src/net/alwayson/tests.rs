@@ -6,10 +6,7 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 /// The tests that move Boat's bases (process-wide environment variables) take turns.
 static ENV: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 
-fn dir(tag: &str) -> std::path::PathBuf {
-    let d = std::env::temp_dir().join(format!("bp-aon-{tag}-{}-{}", std::process::id(), hex::encode(crate::net::pairing::urandom(3))));
-    std::fs::create_dir_all(&d).unwrap(); d
-}
+fn dir(tag: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("aon-{tag}")) }
 
 /// A stand-in Boat: answers by method and path from `routes` (a missing one is 404) and records what it was asked (method, path, auth, body).
 async fn stand_in(routes: Vec<(&'static str, &'static str, u16, String)>) -> (String, Arc<Mutex<Vec<(String, String, String, String)>>>) {
@@ -114,7 +111,7 @@ fn wire_net(hub: &Arc<Hub>) -> Arc<crate::net::routes::AuthRoutes> {
 async fn the_public_door_refuses_every_unauthenticated_request_but_pairing_health_and_self_checked_routes() {
     let home = dir("door");
     std::fs::write(home.join("token"), "doortoken0123456789").unwrap();
-    let cfg = Cfg { home: home.clone(), version: "0.15.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() };
+    let cfg = Cfg { home: home.to_path_buf(), version: "0.15.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() };
     let hub = Hub::start(cfg, Arc::new(Canned { reply: json!({}) })).await.unwrap();
     let _routes = wire_net(&hub);
     crate::voice::session::start(&hub);
@@ -168,7 +165,7 @@ async fn the_public_door_refuses_every_unauthenticated_request_but_pairing_healt
 async fn pairing_through_the_public_door_is_one_time_and_rate_limited() {
     let home = dir("doorpair");
     std::fs::write(home.join("token"), "doortoken0123456789").unwrap();
-    let cfg = Cfg { home: home.clone(), version: "0.15.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() };
+    let cfg = Cfg { home: home.to_path_buf(), version: "0.15.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() };
     let hub = Hub::start(cfg, Arc::new(Canned { reply: json!({}) })).await.unwrap();
     let routes = wire_net(&hub);
     let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap(); let port = l.local_addr().unwrap().port();
@@ -200,10 +197,10 @@ async fn a_hub_nobody_can_reach_gets_its_calls_over_its_own_poll_within_seconds(
     let (peer, secret) = ("ptunnel0123456789", "ab".repeat(32));
     let mk = |tag: &'static str| async move {
         let home = dir(tag); std::fs::write(home.join("token"), "tunneltoken0123456789").unwrap();
-        let cfg = Cfg { home: home.clone(), version: "0.15.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() };
-        Hub::start(cfg, Arc::new(Canned { reply: json!({}) })).await.unwrap()
+        let cfg = Cfg { home: home.to_path_buf(), version: "0.15.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() };
+        (Hub::start(cfg, Arc::new(Canned { reply: json!({}) })).await.unwrap(), home)
     };
-    let (a, b) = (mk("tun-a").await, mk("tun-b").await);
+    let ((a, _ha), (b, _hb)) = (mk("tun-a").await, mk("tun-b").await);
     // B: the always-on end, its door, the tunnel route for the one verified link
     let s2 = secret.clone();
     b.register_http(Arc::new(tunnel::Route { secret_of: Arc::new(move |p: &str| (p == "ptunnel0123456789").then(|| s2.clone())), home: b.cfg.home.clone() }));
@@ -279,9 +276,9 @@ async fn a_hub_nobody_can_reach_gets_its_calls_over_its_own_poll_within_seconds(
 async fn a_loopback_only_hub_links_to_a_public_door_and_is_reached_over_its_own_poll() {
     use crate::api::{HttpHandler, HttpReply};
     use crate::net::{peering::{Peering, TUNNEL_URL}, peers::PeerTable};
-    async fn hub_of(tag: &str) -> Arc<Hub> {
+    async fn hub_of(tag: &str) -> (Arc<Hub>, crate::plat::tmp::TempDir) {
         let home = dir(tag); std::fs::write(home.join("token"), format!("token-{tag}-0123456789")).unwrap();
-        Hub::start(Cfg { home, version: "0.15.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap()
+        (Hub::start(Cfg { home: home.to_path_buf(), version: "0.15.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap(), home)
     }
     struct W(Arc<crate::net::routes::AuthRoutes>);
     impl crate::api::AuthRoute for W {
@@ -306,12 +303,12 @@ async fn a_loopback_only_hub_links_to_a_public_door_and_is_reached_over_its_own_
         p
     }
     // B: the always-on hub, its door on its loopback; it names itself by an address that is not loopback (0.0.0.0 reaches the door here)
-    let b = hub_of("ow-b").await;
+    let (b, _hb) = hub_of("ow-b").await;
     let lb = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap(); let door = lb.local_addr().unwrap().port();
     tokio::spawn(public::accept(b.clone(), lb));
     let pb = wire(&b, "0.0.0.0", door).await;
     // A: this computer's hub, on its loopback only
-    let a = hub_of("ow-a").await;
+    let (a, _ha) = hub_of("ow-a").await;
     let la = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap(); let pa_port = la.local_addr().unwrap().port();
     { let a = a.clone(); tokio::spawn(async move { loop { let Ok((s, _)) = la.accept().await else { return }; let h = a.clone(); tokio::spawn(async move { let _ = crate::wire::serve(h, s).await; }); } }); }
     let pa = wire(&a, "127.0.0.1", pa_port).await;
@@ -368,16 +365,16 @@ async fn a_loopback_only_hub_links_to_a_public_door_and_is_reached_over_its_own_
     }
     let mk = |tag: &'static str| async move {
         let home = dir(tag); std::fs::write(home.join("token"), "movetoken0123456789").unwrap();
-        Hub::start(Cfg { home, version: "0.15.0".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap()
+        (Hub::start(Cfg { home: home.to_path_buf(), version: "0.15.0".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap(), home)
     };
     // no bots: said plainly, and kept for the row
-    let bare = mk("mv-bare").await;
+    let (bare, _hbare) = mk("mv-bare").await;
     let sh = Arc::new(Shared::default());
     let e = act(&bare, &sh, "alwayson-move", "plink", &json!({})).await.unwrap_err();
     assert!(e.contains("no uberbot to move"), "{e}");
     assert_eq!(sh.view(&bare.info_now())["move_err"], e.as_str(), "the row shows why");
     // bots running, no uberbot yet (a fresh setup at step 4): it is made, then the move is asked for
-    let hub = mk("mv-fresh").await;
+    let (hub, _hhub) = mk("mv-fresh").await;
     let _bots = Bots::start_with(hub.clone(), Arc::new(Quiet)).await;
     hub.register_rpc(Arc::new(crate::settings::onboard::OnboardRpc));
     assert!(crate::net::homemove::uber(&hub).await.is_empty(), "a fresh home has no uberbot");

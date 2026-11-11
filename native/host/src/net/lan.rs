@@ -126,9 +126,8 @@ mod tests {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         // the test needs a local network address of this machine's own; a machine with none (a CI box with loopback only) skips
         let Some(ip) = super::super::plan::lan(&interfaces()).into_iter().next() else { eprintln!("no local network address here: skipped"); return };
-        let dir = std::env::temp_dir().join(format!("bp-lan-{}-{}", std::process::id(), hex::encode(super::super::pairing::urandom(4))));
-        std::fs::create_dir_all(&dir).unwrap();
-        let hub = Hub::start(Cfg { home: dir.clone(), version: "0.15.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+        let dir = crate::plat::tmp::dir("lan");
+        let hub = Hub::start(Cfg { home: dir.to_path_buf(), version: "0.15.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
         let port = std::net::TcpListener::bind((ip.as_str(), 0)).unwrap().local_addr().unwrap().port();
         let lan = Lan::new(&dir, "127.0.0.1", port, Arc::downgrade(&hub));
         assert_eq!(lan.on("203.0.113.77")["error"], "lan_unknown", "only this machine's own local network addresses");
@@ -153,6 +152,5 @@ mod tests {
         let again = Lan::new(&dir, "127.0.0.1", port, Arc::downgrade(&hub));
         assert_eq!(again.boot(), 1); assert_eq!(again.bound(), [ip.clone()]);
         again.off(&ip);
-        let _ = std::fs::remove_dir_all(dir);
     }
 }

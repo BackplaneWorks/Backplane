@@ -232,7 +232,7 @@ mod tests {
     }
     #[test] fn the_refusal_names_the_command() { assert_eq!(refusal("curl"), "backplane: a hub on a copied log (BACKPLANE_COPY=1) does not run curl"); }
 
-    fn home(name: &str) -> std::path::PathBuf { let d = std::env::temp_dir().join(format!("bp-copy-{}-{name}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap(); d }
+    fn home(name: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("copy-{name}")) }
     fn log(h: &std::path::Path, text: &str) { std::fs::write(h.join("events.jsonl"), text).unwrap() }
     const SYNTH: &str = "{\"$\":\"ProjectCreated\",\"id\":\"p1\",\"title\":\"p\",\"root\":\"/x\",\"at\":1}\n{\"$\":\"MessagePosted\",\"thread\":\"t1\",\"msg\":\"m1\",\"role\":\"user\",\"text\":\"hi\",\"at\":2}\n";
     #[test] fn a_home_with_no_log_or_a_synthetic_one_runs() {

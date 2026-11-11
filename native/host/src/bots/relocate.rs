@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 pub fn root(home: &Path) -> PathBuf {
     if let Ok(d) = std::env::var("BACKPLANE_BOTS_DIR") { if !d.is_empty() { return PathBuf::from(d) } }
     let own = home.join("bots");
-    if crate::copy::on() || home.starts_with(std::env::temp_dir()) { return own }
+    if crate::copy::on() || crate::plat::dirs::in_temp(home) { return own }
     match std::env::var_os("HOME") { Some(h) if !h.is_empty() => Path::new(&h).join(".backplane").join("bots"), _ => own }
 }
 
@@ -102,7 +102,7 @@ mod tests {
     }
 
     #[test] fn a_bot_moves_with_its_history_a_backup_is_kept_and_a_second_run_does_nothing() {
-        let t = std::env::temp_dir().join(format!("bp-relocate-{}", std::process::id())); let _ = std::fs::remove_dir_all(&t);
+        let t = crate::plat::tmp::dir("relocate");
         let home = t.join("hub"); let root = t.join("dot/bots"); let lane = t.join("lanes/bub");
         w(&home.join("bots/b1/tasks/a.json"), "{}"); w(&lane.join("note.txt"), "x");
         let pj = home.join("providers/accounts-v1/acc/prof/projects");
@@ -114,18 +114,16 @@ mod tests {
         assert!(t.join("dot/backups/bots-move-7/b1").is_dir() && home.join("bots/b1/tasks/a.json").exists() && lane.join("note.txt").exists(), "old data and backup stay");
         assert!(move_bot(&home, &root, "b1", &lane.to_string_lossy(), 8).contains("already"));
         assert!(!t.join("dot/backups/bots-move-8").exists());
-        let _ = std::fs::remove_dir_all(&t);
     }
 
     #[test] fn a_bot_with_nothing_old_just_gets_its_folder() {
-        let t = std::env::temp_dir().join(format!("bp-relocate0-{}", std::process::id())); let _ = std::fs::remove_dir_all(&t);
+        let t = crate::plat::tmp::dir("relocate0");
         let a = move_bot(&t.join("hub"), &t.join("dot/bots"), "b2", "", 1); assert!(a.contains("moved"), "{a}");
         assert!(t.join("dot/bots/b2/.moved.json").exists() && !t.join("dot/backups").exists());
-        let _ = std::fs::remove_dir_all(&t);
     }
 
     #[test] fn a_home_under_the_temp_dir_keeps_its_own_bots_folder() {
-        let h = std::env::temp_dir().join("bp-relocate-root"); if std::env::var("BACKPLANE_BOTS_DIR").is_err() { assert_eq!(root(&h), h.join("bots")); }
+        let h = crate::plat::tmp::uncreated("relocate-root"); if std::env::var("BACKPLANE_BOTS_DIR").is_err() { assert_eq!(root(&h), h.join("bots")); }
     }
 
     /// Dry run on a copy: BP_RELOCATE_HOME=<copied hub home> BP_RELOCATE_ROOT=<new bots folder> BP_RELOCATE_BOT=<id> BP_RELOCATE_CWD=<old folder>.

@@ -194,9 +194,9 @@ mod tests {
         let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap(); let port = l.local_addr().unwrap().port();
         let got = tokio::spawn(async move { let (mut s, _) = l.accept().await.unwrap(); let mut b = vec![0u8; 8192]; let mut n = 0; loop { let k = s.read(&mut b[n..]).await.unwrap(); n += k; let t = String::from_utf8_lossy(&b[..n]).to_string(); if let Some(i) = t.find("\r\n\r\n") { let cl = t.to_lowercase().split("content-length: ").nth(1).and_then(|x| x.split("\r\n").next()).and_then(|x| x.trim().parse::<usize>().ok()).unwrap_or(0); if n >= i + 4 + cl { break } } if k == 0 { break } }
             s.write_all(b"HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n").await.unwrap(); String::from_utf8_lossy(&b[..n]).to_string() });
-        let home = std::env::temp_dir().join(format!("bp-hook-{}", std::process::id())); let _ = std::fs::remove_dir_all(&home); std::fs::create_dir_all(home.join("secrets")).unwrap();
+        let home = crate::plat::tmp::dir("hook"); std::fs::create_dir_all(home.join("secrets")).unwrap();
         std::fs::write(default_file(&home), "73656372657431\n").unwrap();
-        let hub = Hub::start(Cfg { home: home.clone(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+        let hub = Hub::start(Cfg { home: home.to_path_buf(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
         hub.commit(&json!({"$":"SettingSet","key":URL_KEY,"value":format!("http://127.0.0.1:{port}/hook"),"at":1})).await.unwrap();
         let r = deliver(&hub, "t1", "fail", "failed", "boom\nsecond line", "error", "", "Board").await; assert_eq!(r, Ok("204".to_string()));
         let req = got.await.unwrap(); let lower = req.to_lowercase();

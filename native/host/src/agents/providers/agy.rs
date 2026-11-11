@@ -629,11 +629,11 @@ mod tests {
 mod standin_tests {
     use super::*;
     use super::super::muse::e2e::{self, project as _p, js, run, script};
-    fn setup(name: &str) -> (std::path::PathBuf, std::path::PathBuf) {
+    fn setup(name: &str) -> crate::plat::tmp::TempDir {
         let d = e2e::dir(name); let ag = d.join("antigravity/1.3.0"); std::fs::create_dir_all(&ag).unwrap();
         script(&ag.join("agy_acp_server.par"), include_str!("../../../../../test/agents/prov/standin-agy.py"));
         std::fs::write(ag.join("agy-turn.jsonl"), include_str!("../../../../../test/agents/prov/agy-turn.jsonl")).unwrap();
-        (d.clone(), d)
+        d
     }
     fn ti(d: &std::path::Path, runtime: &str, text: &str, session: &str, settings: Vec<(String, String)>) -> TurnIn {
         TurnIn { thread: "t1700000010-2".into(), cwd: d.to_string_lossy().into(), home: d.to_string_lossy().into(), runtime: runtime.into(), text: text.into(), session: session.into(),
@@ -641,7 +641,7 @@ mod standin_tests {
     }
     // Stand-in Antigravity (test/agents/prov/standin-agy.py behind the real runner script) through the driver: equal to the JS hub's events.
     #[tokio::test] async fn agy_turn_matches_the_js_hub() {
-        let (d, _) = setup("agy-turn"); let mut dr = AgyDriver::new(); let a = ti(&d, "full-access", "zq hello", "", vec![]); dr.prepare(&a).unwrap();
+        let d = setup("agy-turn"); let mut dr = AgyDriver::new(); let a = ti(&d, "full-access", "zq hello", "", vec![]); dr.prepare(&a).unwrap();
         let mut argv = dr.argv(&a); let log = d.join("agy.log").to_string_lossy().into_owned();
         let script_path = argv.remove(0); let mut full = vec![script_path]; full.extend(argv);
         struct Sh(Vec<String>, AgyDriver); impl Driver for Sh { fn argv(&self, a: &TurnIn) -> Vec<String> { let _ = a; self.0.clone() } fn start(&mut self, a: &TurnIn) -> Vec<String> { self.1.start(a) } fn on_line(&mut self, l: &Value) -> Reaction { self.1.on_line(l) }
@@ -655,7 +655,7 @@ mod standin_tests {
         let settings = std::fs::read_to_string(d.join("antigravity/profiles/default/antigravity-acp/settings.json")).unwrap(); assert_eq!(settings.trim(), r#"{"auth":{"type":"gemini-api-key"}}"#);
     }
     #[tokio::test] async fn agy_permission_matches_the_js_hub() {
-        let (d, _) = setup("agy-perm"); let mut dr = AgyDriver::new(); let a = ti(&d, "approval-required", "zq perm please", "", vec![]); dr.prepare(&a).unwrap();
+        let d = setup("agy-perm"); let mut dr = AgyDriver::new(); let a = ti(&d, "approval-required", "zq perm please", "", vec![]); dr.prepare(&a).unwrap();
         let argv = dr.argv(&a);
         struct Sh(Vec<String>, AgyDriver); impl Driver for Sh { fn argv(&self, _a: &TurnIn) -> Vec<String> { self.0.clone() } fn start(&mut self, a: &TurnIn) -> Vec<String> { self.1.start(a) } fn on_line(&mut self, l: &Value) -> Reaction { self.1.on_line(l) }
             fn ask_info(&self, r: &Value) -> Option<AskInfo> { self.1.ask_info(r) } fn answer(&mut self, r: &Value, x: &str) -> Vec<String> { self.1.answer(r, x) } }

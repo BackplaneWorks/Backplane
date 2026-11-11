@@ -419,7 +419,8 @@ mod tests {
         let b = Board { footprints: vec![u1], ..Board::default() };
         let p = plan(&b, (1.6, 0.0), &|_: &str| None);
         let said = std::sync::Mutex::new(vec![]);
-        let cache = super::super::models::Cache::new(std::env::temp_dir().join(format!("bp-said-{}", std::process::id())));
+        let cd = crate::plat::tmp::uncreated("said");
+        let cache = super::super::models::Cache::new(cd.to_path_buf());
         parts("2|/r|", "", &p, 0, &cache, &[], &std::sync::atomic::AtomicBool::new(false), &|_f: Vec<u8>| {}, &|t: String| said.lock().unwrap().push(t));
         assert_eq!(said.into_inner().unwrap(), vec!["Placing parts: 1 of 1".to_string()], "a box is placed at once, nothing to convert");
     }
@@ -430,14 +431,13 @@ mod tests {
         b.footprints.truncate(150); assert_eq!(board_budget(&b), super::super::mesh::MOST_TRIS);
     }
     #[test] fn a_board_model_is_kept_by_content_and_read_back_the_same() {
-        let d = std::env::temp_dir().join(format!("bp-kept-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d);
+        let d = crate::plat::tmp::uncreated("kept");
         let bytes = b"(kicad_pcb (general (thickness 1.6)) (gr_rect (start 0 0) (end 20 10) (layer \"Edge.Cuts\") (width 0.1)))".to_vec();
         let a = board_model_kept(&bytes, &d, false).unwrap(); assert!(!a.layers.is_empty(), "made the first time");
         let b = board_model_kept(&bytes, &d, false).unwrap(); assert!(b.layers.is_empty(), "read back");
         assert_eq!((a.plot.solid, a.seat), (b.plot.solid, b.seat));
         assert!(!board_model_kept(&bytes, &d, true).unwrap().layers.is_empty(), "made again when its layers are wanted");
         let mut other = bytes.clone(); other.extend(b" "); assert!(!board_model_kept(&other, &d, false).unwrap().layers.is_empty(), "another content is another model");
-        let _ = std::fs::remove_dir_all(&d);
     }
     #[test] fn a_model_encodes_as_the_boards_mesh_does() {
         let t = [Tri3 { a: [0.01, 0.02, 0.03], b: [1.0, 0.0, 0.0], c: [0.0, 1.0, 0.0], color: 0xff0000 }];
@@ -479,7 +479,7 @@ mod tests {
     #[test] #[ignore] fn bench() {
         let Ok(list) = std::env::var("BACKPLANE_TEST_BOARD") else { eprintln!("skipped: no BACKPLANE_TEST_BOARD"); return };
         let cli = std::env::var("BACKPLANE_KICAD_CLI").ok();
-        let home = std::env::temp_dir().join(format!("bp-pcb3d-bench-{}", std::process::id()));
+        let home = crate::plat::tmp::uncreated("pcb3d-bench");
         let tools = super::super::super::stepglb::machine(&home);
         for path in list.split(':').filter(|p| !p.is_empty()) {
             let t = Instant::now();
@@ -533,7 +533,8 @@ mod tests {
             let dir = board_dir(path);
             let emb = super::super::models::embedded(&std::fs::read(path).unwrap_or_default(), &super::super::models::Cache::standard().embedded_dir());
             let plan = plan(&made.board, made.seat, &|raw: &str| super::super::models::resolve_in(raw, &dir, &env, &emb));
-            let tools = super::super::super::stepglb::machine(&std::env::temp_dir());
+            let td = crate::plat::tmp::dir("pcb3d-dump");
+            let tools = super::super::super::stepglb::machine(&td);
             parts("2|/r|", "", &plan, 0, &cache, &tools, &std::sync::atomic::AtomicBool::new(false), &|_f: Vec<u8>| {}, &|_| {}); // the cache warm, every model converted
             let side: std::collections::HashMap<&str, &str> = made.board.footprints.iter().map(|f| (f.reference.as_str(), if f.side == Side::Bottom { "B" } else { "F" })).collect();
             let ext = |ts: &[[i32; 9]], a: &[f32; 12]| {

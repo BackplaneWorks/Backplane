@@ -71,8 +71,8 @@ mod tests {
     #[test] fn device_drop_event() { assert_eq!(dropped(&json!({"token":"t"}), 3), json!({"$":"DeviceDropped","token":"t","at":3})); assert_eq!(dropped(&json!({}), 3)["token"], ""); }
     #[tokio::test] async fn device_rpc_commits_and_answers() {
         use crate::{hub::{Cfg, Hub}, presenter::Canned};
-        let h = std::env::temp_dir().join(format!("bp-devices-{}", std::process::id())); let _ = std::fs::remove_dir_all(&h); std::fs::create_dir_all(&h).unwrap();
-        let hub = Hub::start(Cfg { home: h.clone(), version: "0.14.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+        let h = crate::plat::tmp::dir("devices");
+        let hub = Hub::start(Cfg { home: h.to_path_buf(), version: "0.14.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
         let who = Caller { gen: String::new(), client: 1 };
         let n0 = hub.store.len();
         let r = Devices.call(&hub, &who, &json!(5), "device.register", &good()).await;

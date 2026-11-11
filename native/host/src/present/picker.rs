@@ -162,7 +162,7 @@ fn folders_in(cache: &Shared, drafts: &Value, home: &str, roots: &[(&str, &str)]
 mod tests {
     use super::*;
     fn open(t: &str) -> Value { json!({"@proj.open": "1", "@proj.text": t}) }
-    fn d(tag: &str) -> PathBuf { let p = std::env::temp_dir().join(format!("bp-picker-{}-{tag}", std::process::id())); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(p.join("alpha/inner")).unwrap(); std::fs::create_dir_all(p.join("beta")).unwrap(); std::fs::create_dir_all(p.join(".hidden")).unwrap(); p }
+    fn d(tag: &str) -> crate::plat::tmp::TempDir { let p = crate::plat::tmp::dir(&format!("picker-{tag}")); std::fs::create_dir_all(p.join("alpha/inner")).unwrap(); std::fs::create_dir_all(p.join("beta")).unwrap(); std::fs::create_dir_all(p.join(".hidden")).unwrap(); p }
     #[test] fn clone_it_here_confirms_the_folder_and_refuses_one_that_holds_something_else() {
         let home = d("clone"); let h = home.to_str().unwrap();
         let c = |t: &str| folders(&json!({"@proj.open": "1", "@proj.text": t, "@proj.clone": "github.com/o/r"}), h, &[]);

@@ -28,18 +28,18 @@ done
 "#;
 const GONE: &str = "gone-session";
 
-pub(super) struct Rig { pub(super) hub: Arc<Hub>, pub(super) ag: Arc<Agents>, rec: PathBuf }
+pub(super) struct Rig { pub(super) hub: Arc<Hub>, pub(super) ag: Arc<Agents>, rec: PathBuf, _tmp: crate::plat::tmp::TempDir }
 impl Rig {
     pub(super) fn starts(&self) -> Vec<String> { std::fs::read_to_string(&self.rec).unwrap_or_default().lines().filter(|l| l.starts_with("START")).map(str::to_string).collect() }
     pub(super) fn users(&self) -> Vec<String> { std::fs::read_to_string(&self.rec).unwrap_or_default().lines().filter(|l| l.starts_with("USER ")).map(str::to_string).collect() }
 }
 /// A thread with a session the CLI does not have and a little conversation before it.
 pub(super) async fn rig(name: &str, mode: &str, extra: &str) -> Rig {
-    let sd = dir(&format!("{name}-bin")); let rec = sd.join("rec");
+    let mut sd = dir(&format!("{name}-bin")); let rec = sd.join("rec");
     script(&sd, "claude", &LOST_CLAUDE.replacen("\n", &format!("\nexport FAKE_MODE={mode} FAKE_LOG={}\n", crate::plat::fs::script_path(&rec)), 1));
     let extra = extra.to_string();
-    let (hub, ag, _h, _w) = start(name, move |w| base_log(w, 1, &format!("{{\"$\":\"SessionSet\",\"id\":\"{T1}\",\"session\":\"{GONE}\",\"at\":1700000050}}\n{{\"$\":\"MessagePosted\",\"thread\":\"{T1}\",\"msg\":\"m0\",\"role\":\"user\",\"text\":\"earlier question\",\"at\":1700000051}}\n{{\"$\":\"MessagePosted\",\"thread\":\"{T1}\",\"msg\":\"m0a\",\"role\":\"assistant\",\"text\":\"earlier answer\",\"at\":1700000052}}\n{extra}")), |_| Cli::standin(&sd)).await;
-    Rig { hub, ag, rec }
+    let (hub, ag, h, w) = start(name, move |w| base_log(w, 1, &format!("{{\"$\":\"SessionSet\",\"id\":\"{T1}\",\"session\":\"{GONE}\",\"at\":1700000050}}\n{{\"$\":\"MessagePosted\",\"thread\":\"{T1}\",\"msg\":\"m0\",\"role\":\"user\",\"text\":\"earlier question\",\"at\":1700000051}}\n{{\"$\":\"MessagePosted\",\"thread\":\"{T1}\",\"msg\":\"m0a\",\"role\":\"assistant\",\"text\":\"earlier answer\",\"at\":1700000052}}\n{extra}")), |_| Cli::standin(&sd)).await;
+    sd.keep(h); sd.keep(w); Rig { hub, ag, rec, _tmp: sd }
 }
 fn lost_say(ev: &[Value]) -> Vec<&Value> { ev.iter().filter(|e| is(e, "ActivityLogged") && e["kind"] == "session").collect() }
 fn failed(ev: &[Value]) -> bool { ev.iter().any(|e| turn_is(e, "failed")) }

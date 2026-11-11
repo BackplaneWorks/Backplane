@@ -246,10 +246,13 @@ mod tests {
     use super::*;
     use std::path::PathBuf;
     fn fixtures() -> PathBuf { PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../test/hub/fixtures") }
-    fn store() -> Store {
-        static N: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
-        let t = std::env::temp_dir().join(format!("bp-model-{}-{}.jsonl", std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
-        std::fs::copy(fixtures().join("pages.jsonl"), &t).unwrap(); Store::open(&t).unwrap()
+    struct TestStore { s: Store, _t: crate::plat::tmp::TempFile }
+    impl std::ops::Deref for TestStore { type Target = Store; fn deref(&self) -> &Store { &self.s } }
+    fn store() -> TestStore {
+        let _t = crate::plat::tmp::file("model", "pages.jsonl");
+        std::fs::copy(fixtures().join("pages.jsonl"), &_t).unwrap();
+        let s = Store::open(&_t).unwrap();
+        TestStore { s, _t }
     }
     #[test] fn link_from_matches() {
         assert_eq!(link_from("t:t3:c0"), "t3"); assert_eq!(link_from("t:t3"), ""); assert_eq!(link_from("m1"), ""); assert_eq!(link_from("tu1:2"), ""); assert_eq!(link_from("t:"), "");
@@ -277,7 +280,7 @@ mod tests {
     }
     // a model saved and loaded is the model, and the lines past the save are folded onto it
     #[test] fn a_model_saved_by_another_fold_is_folded_again() {
-        let d = std::env::temp_dir().join(format!("bp-model-st-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap();
+        let d = crate::plat::tmp::dir("model-st");
         let p = d.join("events.jsonl"); std::fs::copy(fixtures().join("pages.jsonl"), &p).unwrap();
         let s = Store::open(&p).unwrap(); let m = Model::open(&s).unwrap(); assert!(m.save(&s).unwrap()); assert!(Model::load(&s).is_some(), "its own fold: it loads");
         let f = Model::path(&s); let raw = std::fs::read(&f).unwrap(); let nl = raw.iter().position(|b| *b == b'\n').unwrap();
@@ -286,10 +289,9 @@ mod tests {
         h["stamp"] = json!(2); rewrite(&h); assert!(Model::load(&s).is_none(), "another fold's");
         h.as_object_mut().unwrap().shift_remove("stamp"); rewrite(&h); assert!(Model::load(&s).is_none(), "from before stamps");
         assert_eq!(Model::open(&s).unwrap().digest(), m.digest(), "the log gives the same model");
-        let _ = std::fs::remove_dir_all(&d);
     }
     #[test] fn a_saved_model_loads_and_takes_the_tail() {
-        let d = std::env::temp_dir().join(format!("bp-model-ck-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap();
+        let d = crate::plat::tmp::dir("model-ck");
         let p = d.join("events.jsonl"); let all = std::fs::read_to_string(fixtures().join("pages.jsonl")).unwrap();
         let lines: Vec<&str> = all.lines().collect(); let cut = lines.len() / 2;
         std::fs::write(&p, lines[..cut].iter().map(|l| format!("{l}\n")).collect::<String>()).unwrap();
@@ -302,7 +304,7 @@ mod tests {
         let other = Model::open(&Store::open(&p).unwrap()).unwrap(); assert_eq!(other.projects.len(), 1, "a checkpoint of another log is not used");
     }
     #[test] fn settings_hold_the_latest_value_by_key_and_removal() {
-        let t = std::env::temp_dir().join(format!("bp-model-set-{}.jsonl", std::process::id()));
+        let t = crate::plat::tmp::file("model-set", "events.jsonl");
         std::fs::write(&t, "{\"$\":\"SettingSet\",\"key\":\"restart.continue\",\"value\":\"on\",\"at\":1}\n{\"$\":\"SettingSet\",\"key\":\"tok.a\",\"value\":\"1\",\"at\":1}\n{\"$\":\"SettingSet\",\"key\":\"restart.continue\",\"value\":\"off\",\"at\":2}\n{\"$\":\"SettingSet\",\"key\":\"tok.a\",\"value\":\"\",\"at\":3}\n").unwrap();
         let s = Store::open(&t).unwrap(); let m = Model::build(&s).unwrap();
         assert_eq!(m.setting_seq("restart.continue"), Some(3)); assert_eq!(m.setting_seq("tok.a"), None); assert_eq!(m.settings_count(), 1);
@@ -313,7 +315,7 @@ mod tests {
         let t7 = &m.threads["t7"]; assert_eq!(t7.last_user_msg, "u19"); assert_eq!(t7.last_entry, "u19");
     }
     #[test] fn a_torn_tail_does_not_move_the_ordinals() {
-        let t = std::env::temp_dir().join(format!("bp-model-torn-{}.jsonl", std::process::id()));
+        let t = crate::plat::tmp::file("model-torn", "events.jsonl");
         let mut b = std::fs::read(fixtures().join("pages.jsonl")).unwrap(); b.extend(b"{\"$\":\"MessagePosted\",\"thread\":\"t1\",\"ms"); std::fs::write(&t, b).unwrap();
         let s = Store::open(&t).unwrap(); let m = Model::build(&s).unwrap(); assert_eq!(m.entries(), 895);
     }

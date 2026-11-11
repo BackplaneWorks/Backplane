@@ -3,11 +3,10 @@
 use super::*;
 use std::sync::{atomic::{AtomicU64, Ordering}, Arc};
 
-struct Env { dir: PathBuf, t: Arc<AtomicU64>, r: Arc<AtomicU64> }
+struct Env { dir: crate::plat::tmp::TempDir, t: Arc<AtomicU64>, r: Arc<AtomicU64> }
 impl Env {
     fn new(tag: &str) -> Env {
-        let dir = std::env::temp_dir().join(format!("bp-net-{tag}-{}-{}", std::process::id(), hex::encode(urandom(4))));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::plat::tmp::dir(&format!("net-{tag}"));
         Env { dir, t: Arc::new(AtomicU64::new(1_000_000)), r: Arc::new(AtomicU64::new(1)) }
     }
     fn reg(&self) -> Registry {
@@ -17,7 +16,6 @@ impl Env {
     }
     fn advance(&self, ms: u64) { self.t.fetch_add(ms, Ordering::SeqCst); }
 }
-impl Drop for Env { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.dir); } }
 fn routes() -> Vec<String> { vec!["https://m.tail.ts.net".into()] }
 
 #[test] fn pair_enroll_once() {

@@ -147,7 +147,7 @@ pub mod keys_rpc {
     mod tests {
         use super::*;
         #[test] fn the_key_ops_answer_the_names_and_never_a_value() {
-            let h = std::env::temp_dir().join(format!("bp-keysrpc-{}", std::process::id())); let _ = std::fs::remove_dir_all(&h);
+            let h = crate::plat::tmp::uncreated("keysrpc");
             let r = answer(&h, &json!(1), &json!({"op":"api-add","name":"OPENAI_KEY","value":"sk-secret-value-123"}));
             assert_eq!(r["ok"], true); assert_eq!(r["apiKeys"], "OPENAI_KEY"); assert!(!r.to_string().contains("sk-secret"));
             let r = answer(&h, &json!(2), &json!({"op":"api-add","name":"bad name","value":"x"})); assert_eq!(r["ok"], false); assert_eq!(r["error"], "Use the environment variable name: BAD_NAME");

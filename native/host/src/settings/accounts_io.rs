@@ -1355,7 +1355,7 @@ mod tests {
     }
     #[tokio::test] async fn an_expired_login_is_kept_across_a_restart_and_refuses_a_launch_in_words_the_failover_reads() {
         let _g = ENV.lock().unwrap_or_else(|e| e.into_inner());
-        let home = std::env::temp_dir().join(format!("bp-acc-exp-{}", std::process::id())); let _ = std::fs::remove_dir_all(&home); std::fs::create_dir_all(&home).unwrap();
+        let home = crate::plat::tmp::dir("acc-exp");
         let a = Arc::new(Accounts::open(&home, Arc::new(|p: &str| Ok(PathBuf::from(p)))));
         let (id, epoch) = a.plant("claude", "Work", "w@x.com", Value::Null).await;
         assert!(!a.expire(&id, epoch + 1), "another epoch is another login"); assert!(a.expire(&id, epoch)); assert!(!a.expire(&id, epoch), "said once");
@@ -1468,8 +1468,8 @@ for l in sys.stdin:
 "#;
     /// The real CLI's screens for `setup-token` (the stand-in replays them): see the file's `cli`.
     const SETUP_TOKEN_REC: &str = include_str!("testdata/setup_token_2.1.322.json");
-    fn dirs(tag: &str) -> (PathBuf, PathBuf) {
-        let h = std::env::temp_dir().join(format!("bp-acc-{}-{tag}", std::process::id())); let _ = std::fs::remove_dir_all(&h); std::fs::create_dir_all(&h).unwrap();
+    fn dirs(tag: &str) -> (crate::plat::tmp::TempDir, PathBuf) {
+        let h = crate::plat::tmp::dir(&format!("acc-{tag}"));
         let sd = h.join("bin"); std::fs::create_dir_all(&sd).unwrap();
         for (n, t) in [("claude", CLAUDE), ("codex", CODEX)] { let p = sd.join(n); std::fs::write(&p, t).unwrap(); std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap(); }
         std::fs::write(sd.join("setup_token.json"), SETUP_TOKEN_REC).unwrap();

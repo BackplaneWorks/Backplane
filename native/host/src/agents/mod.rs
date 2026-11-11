@@ -82,7 +82,7 @@ impl JobGuard { fn new(a: &Arc<Agents>) -> JobGuard { a.stats.jobs.fetch_add(1, 
 impl Drop for JobGuard { fn drop(&mut self) { self.0.stats.jobs.fetch_sub(1, Relaxed); } }
 pub fn handle() -> Option<Arc<Agents>> { HANDLE.get().cloned() }
 
-pub struct Agents { pub hist_ends: StdMutex<HashMap<String, Arc<HistEnds>>>, pub guards: locks::Guards, carry_gone: std::sync::atomic::AtomicBool, carrying: std::sync::atomic::AtomicUsize, pub copy_point: StdMutex<(Vec<(String, String, bool)>, Vec<String>)>, pub works: StdMutex<HashMap<String, work::Ctl>>, pub work_lock: tokio::sync::Mutex<()>, pub tool_sets: StdMutex<Vec<Arc<dyn mcp::ToolSet>>>, pub stopped_by: StdMutex<HashMap<String, String>>, pub hub: Arc<Hub>, pub cli: Cli, pub host: host::HostInfo, world: Mutex<World>, actors: StdMutex<HashMap<String, mpsc::Sender<Cmd>>>, pub stats: Stats, n: AtomicU64,
+pub struct Agents { pub hist_ends: StdMutex<HashMap<String, Arc<HistEnds>>>, pub guards: locks::Guards, stopped: std::sync::atomic::AtomicBool, carry_gone: std::sync::atomic::AtomicBool, carrying: std::sync::atomic::AtomicUsize, pub copy_point: StdMutex<(Vec<(String, String, bool)>, Vec<String>)>, pub works: StdMutex<HashMap<String, work::Ctl>>, pub work_lock: tokio::sync::Mutex<()>, pub tool_sets: StdMutex<Vec<Arc<dyn mcp::ToolSet>>>, pub stopped_by: StdMutex<HashMap<String, String>>, pub hub: Arc<Hub>, pub cli: Cli, pub host: host::HostInfo, world: Mutex<World>, actors: StdMutex<HashMap<String, mpsc::Sender<Cmd>>>, pub stats: Stats, n: AtomicU64,
     pub driver_asks: StdMutex<HashMap<String, String>>, pub mcp: std::sync::OnceLock<Arc<mcp::Mcp>>, gens: StdMutex<HashMap<String, String>>, pub parked: StdMutex<HashMap<String, mcp::Parked>>, pub order_asks: StdMutex<HashMap<String, crate::settings::order::Asked>>, pub mailroom: std::sync::OnceLock<Arc<dyn mailroom::Mailroom>>, /** the account manager (set by the accounts mod): a thread bound to a named account is launched through it */ pub accounts: std::sync::OnceLock<Arc<crate::settings::accounts_io::Accounts>>, cut: StdMutex<Vec<String>>, /** the selected KiCad's env for the turn being started (kicadsel.rs), set with its prompt */ pub kicad_env: StdMutex<Vec<(String, String)>> }
 
 pub fn now_s() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) }
@@ -107,7 +107,7 @@ impl Agents {
     pub async fn start_with(hub: Arc<Hub>, cli: Cli) -> Result<Arc<Agents>> { Agents::start_host(hub, cli, host::HostInfo::default()).await }
     pub async fn start_host(hub: Arc<Hub>, cli: Cli, host: host::HostInfo) -> Result<Arc<Agents>> {
         let no_dir = cli.dir().is_none();
-        let ag = Arc::new(Agents { kicad_env: Default::default(), hist_ends: Default::default(), guards: Default::default(), carry_gone: Default::default(), carrying: Default::default(), hub: hub.clone(), cli, host, world: Mutex::new(crate::ckpt::take("agents", &hub.store, || World::load(&hub.store)).unwrap_or_default()), actors: StdMutex::new(HashMap::new()), stats: Stats::default(), n: AtomicU64::new(0),
+        let ag = Arc::new(Agents { kicad_env: Default::default(), hist_ends: Default::default(), guards: Default::default(), stopped: Default::default(), carry_gone: Default::default(), carrying: Default::default(), hub: hub.clone(), cli, host, world: Mutex::new(crate::ckpt::take("agents", &hub.store, || World::load(&hub.store)).unwrap_or_default()), actors: StdMutex::new(HashMap::new()), stats: Stats::default(), n: AtomicU64::new(0),
             mailroom: Default::default(), accounts: std::sync::OnceLock::new(), cut: StdMutex::new(vec![]), driver_asks: StdMutex::new(HashMap::new()), order_asks: StdMutex::new(HashMap::new()), stopped_by: StdMutex::new(HashMap::new()), tool_sets: StdMutex::new(vec![]), works: StdMutex::new(HashMap::new()), copy_point: StdMutex::new((vec![], vec![])), work_lock: tokio::sync::Mutex::new(()), mcp: std::sync::OnceLock::new(), gens: StdMutex::new(HashMap::new()), parked: StdMutex::new(HashMap::new()) });
         ag.world.lock().await.home = hub.cfg.home.to_string_lossy().into_owned();
         // reap BEFORE the owner mark is set: marked children of this process (another test's, in a shared test binary) must not be taken for a dead hub's
@@ -188,6 +188,7 @@ impl Agents {
 
     fn actor(self: &Arc<Self>, th: &str) -> mpsc::Sender<Cmd> {
         let mut m = self.actors.lock().unwrap();
+        if self.stopped.load(Relaxed) { return mpsc::channel(1).0 }
         if let Some(t) = m.get(th) { if !t.is_closed() { return t.clone() } }
         let (tx, rx) = mpsc::channel(CMD_QUEUE); m.insert(th.into(), tx.clone());
         let (ag, th) = (self.clone(), th.to_string());
@@ -201,7 +202,7 @@ impl Agents {
     /// How many turns of the restart's line are being carried on right now (their message may not be in the log yet). After `carry_hold` it only falls: a carry that had not begun
     /// when the hold was set ends at once, so zero means every carry there will be is already in the log.
     pub fn carrying(&self) -> usize { self.carrying.load(std::sync::atomic::Ordering::SeqCst) }
-    pub fn shutdown(&self) { self.carry_gone.store(true, Relaxed); self.actors.lock().unwrap().clear(); }
+    pub fn shutdown(&self) { self.stopped.store(true, std::sync::atomic::Ordering::SeqCst); self.carry_gone.store(true, Relaxed); self.actors.lock().unwrap().clear(); }
     pub fn actors(&self) -> usize { self.actors.lock().unwrap().len() }
 
     /// Hub.turn then Hub.post.go: take the person's message, start or feed the thread's agent. Acknowledged after the events are durable.
@@ -809,7 +810,7 @@ impl Actor {
     /// Codex.go: one process for this turn (`codex exec`, resumed on the session); its lines come back as Codex shapes.
     async fn codex_run(&mut self, t: &world::T, cwd: &str, text: &str) {
         let (now, th) = (now_s(), self.th.clone());
-        if crate::copy::turn_gated(self.pressed) { return } // Copy.turns: only a person's turn starts an agent on a copy
+        if crate::copy::turn_gated(self.pressed) || self.ag.stopped.load(Relaxed) || !self.ag.hub.cfg.home.exists() { return } // Copy.turns: only a person's turn starts an agent on a copy
         self.cx.running = true; self.ag.stats.turns.fetch_add(1, Relaxed);
         let root = self.ag.world().await.roots.get(&t.project).cloned().unwrap_or_default();
         if let Err(e) = remake_folder(cwd, &root).await { self.fail(format!("could not start codex: {e}"), "spawn", &format!("spawn-{now}")).await; self.ag.stats.spawn_failures.fetch_add(1, Relaxed); return }
@@ -835,6 +836,7 @@ impl Actor {
         let url = self.ag.mcp.get().map(|m| m.url(&th, &gen)).unwrap_or_default();
         let (host, cwd2, text2, prov2) = (self.ag.host.clone(), cwd.to_string(), text.to_string(), t.provider.clone());
         let (body, imgs) = tokio::task::spawn_blocking(move || { let body = if text2.contains('$') { let ss = skills::scan_all(&skills::env_from(&host.user_home, &host.home, host.kistack.as_deref()), &cwd2); skills::prepare(&text2, &ss, &prov2, false) } else { text2.clone() }; (body, inputs::att_paths(&text2).into_iter().filter(|p| !inputs::mime(p).is_empty()).collect::<Vec<_>>()) }).await.unwrap_or_default();
+        if self.ag.stopped.load(Relaxed) || !self.ag.hub.cfg.home.exists() { return }
         let a = providers::TurnIn { thread: th.clone(), cwd: cwd.into(), home: self.ag.host.home.to_string_lossy().into_owned(), model: t.model.clone(), session, runtime: t.runtime.clone(), interaction: t.interaction.clone(), effort, think, text: body, images: imgs, prompt, mcp_url: url.clone(), pcbparts_url: String::new(), gen: gen.clone(), settings: { let w = self.ag.world().await; providers::SETTINGS.iter().map(|k| (k.to_string(), w.setting(k).to_string())).collect() }, mcp: crate::mcpx::svc::launch(&th, &t.provider, &url).await };
         let a = providers::TurnIn { pcbparts_url: if a.mcp.pcbparts { crate::mcpx::gen::PCBPARTS.into() } else { String::new() }, ..a };
         let mut driver = made.driver;
@@ -997,6 +999,7 @@ impl Actor {
     /// Bounded: a burst of tool-end steps past HIST_STEPS_MAX waiting is dropped (counted), starts and ends always fit. The worker ends after HIST_IDLE with nothing to do
     /// (a deleted or retired thread's actor sends nothing more), and the wait for one capture that hangs ends after HIST_JOB so the later ones still run (the future is dropped; a git child it already started is not killed and may run beside the next one, rarely).
     fn hist(&mut self, j: HistJob) {
+        if self.ag.stopped.load(Relaxed) || !self.ag.hub.cfg.home.exists() { return }
         let is_step = matches!(j, HistJob::Step(..));
         for attempt in 0..2 {
             if self.hist_tx.is_none() {
@@ -1114,6 +1117,7 @@ impl Actor {
     }
 
     async fn spawn(&mut self, t: &world::T, cwd: &str, key: String) -> Result<(), String> {
+        if self.ag.stopped.load(Relaxed) || !self.ag.hub.cfg.home.exists() { return Err("agents shut down".into()) }
         self.handover = false;
         remake_folder(cwd, &self.ag.world().await.roots.get(&t.project).cloned().unwrap_or_default()).await?;
         let mut prog = if self.person { self.person_prog("claude")? } else { self.ag.cli.resolve("claude")? };
@@ -1133,6 +1137,7 @@ impl Actor {
         }
         let gen = format!("{now}-{}", self.ag.seq()); // Hub.gen: the process's generation, which its MCP URL names
         let prompt = self.ag.prompt_for(&th, cwd).await;
+        if self.ag.stopped.load(Relaxed) || !self.ag.hub.cfg.home.exists() { return Err("agents shut down".into()) }
         let own: Vec<String> = self.ag.host.kistack.iter().chain(self.ag.host.bundled.iter()).map(|k| k.to_string_lossy().into_owned()).collect(); // KiStack's and Backplane's own skills
         let mut dirs = own.clone(); dirs.push(self.ag.host.home.join("attachments").to_string_lossy().into_owned());
         let plugins = own;
@@ -1368,13 +1373,12 @@ impl Actor {
 #[cfg(test)]
 mod remake_tests {
     #[tokio::test] async fn a_vanished_folder_is_made_again_never_stopping_the_turn() {
-        let d = std::env::temp_dir().join(format!("remake-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d);
+        let d = crate::plat::tmp::dir("remake");
         let root = d.join("proj"); std::fs::create_dir_all(&root).unwrap();
         for a in [vec!["init", "-q"], vec!["-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "x"]] { std::process::Command::new("git").arg("-C").arg(&root).args(a).status().unwrap(); }
         let gone = d.join("lanes/imp-1");
         super::remake_folder(gone.to_str().unwrap(), root.to_str().unwrap()).await.unwrap();
         assert!(gone.is_dir() && gone.join(".git").exists(), "a fresh worktree");
         let plain = d.join("plain/x"); super::remake_folder(plain.to_str().unwrap(), "").await.unwrap(); assert!(plain.is_dir());
-        let _ = std::fs::remove_dir_all(&d);
     }
 }
