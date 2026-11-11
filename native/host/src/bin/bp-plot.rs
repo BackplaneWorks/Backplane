@@ -45,8 +45,9 @@ fn main() {
         let plot = solidread::plot_of(&bytes, a.get(3).map_or(false, |x| x == "step")).unwrap_or_else(|_| { eprintln!("model too big"); std::process::exit(3) });
         let Some(so) = plot.solid else { eprintln!("no triangles"); std::process::exit(3) };
         let text = |f: &mut Vec<u8>, s: &str| { f.push(0x60 | s.len() as u8); f.extend(s.as_bytes()) };
-        let mut f = vec![0xa3]; text(&mut f, "key"); text(&mut f, "2|bench"); text(&mut f, "n"); f.push(0x1a); f.extend(so.n.to_be_bytes());
+        let mut f = vec![if so.faces.is_empty() { 0xa3 } else { 0xa4 }]; text(&mut f, "key"); text(&mut f, "2|bench"); text(&mut f, "n"); f.push(0x1a); f.extend(so.n.to_be_bytes());
         text(&mut f, "mesh"); f.push(0x5a); f.extend((so.d.len() as u32).to_be_bytes()); f.extend(&so.d);
+        if !so.faces.is_empty() { text(&mut f, "faces"); f.push(0x5a); f.extend((so.faces.len() as u32).to_be_bytes()); f.extend(&so.faces); }
         std::fs::write(out, f).unwrap(); println!("{} triangles", so.n);
         return
     }

@@ -217,6 +217,29 @@ mod tests {
         assert!(frame.len() < crate_outbox_max() && frame.len() < 16 << 20, "fits a phone's socket (16 MB) and the hub's outbox");
     }
     fn crate_outbox_max() -> usize { 8 << 20 } // hub.rs OUTBOX_MAX (this module also builds into bp-plot, without the hub)
+    /// The polygon a round hole is drawn as, at the first detail and zoomed in on (kicad.refine): the top rim of a 3 mm cylinder
+    /// (test/files/fixtures/mesh/cylinder_r3.step) through the hub's own read, counted as the distinct corners on it. Opt in with the
+    /// mesher: BP_STEP2GLB=<backplane-step2glb> cargo test a_cylinder_is_round -- --ignored --nocapture
+    #[test] #[ignore] fn a_cylinder_is_round_enough_at_first_and_rounder_zoomed_in() {
+        let Ok(tool) = std::env::var("BP_STEP2GLB") else { eprintln!("skipped: no BP_STEP2GLB"); return };
+        let d = work("cyl"); let src = d.join("cylinder_r3.step");
+        std::fs::copy(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/files/fixtures/mesh/cylinder_r3.step"), &src).unwrap();
+        std::env::set_var("XDG_CACHE_HOME", d.join("cache")); // its own models cache: nothing made before is read
+        let tools = [Mesher::Step2glb(tool)]; let infos = d.join("i").to_string_lossy().into_owned();
+        let rim = |fine: Option<[f64; 6]>| -> usize {
+            let g = read_streaming(2, &src.to_string_lossy(), "", &tools, &infos, fine, None);
+            assert_eq!(g.code, 0, "{}", g.text);
+            let ts = glb::tris(&std::fs::read(glb_at(2, &src.to_string_lossy(), fine)).unwrap()).unwrap();
+            let mut pts: Vec<(i64, i64)> = ts.iter().flat_map(|t| [t.a, t.b, t.c]).filter(|p| (p[2] - 10.0).abs() < 1e-4 && ((p[0] * p[0] + p[1] * p[1]).sqrt() - 3.0).abs() < 1e-3)
+                .map(|p| ((p[0] * 1e4).round() as i64, (p[1] * 1e4).round() as i64)).collect();
+            pts.sort(); pts.dedup(); pts.len()
+        };
+        let (first, zoomed) = (rim(None), rim(Some([-5.0, -5.0, 0.0, 5.0, 5.0, 12.0])));
+        eprintln!("a 3 mm cylinder's rim: {first} segments at first, {zoomed} zoomed in");
+        assert!(first >= 63, "at first, 5.7 degrees a segment at most: {first}");
+        assert!(zoomed >= 2 * first - 2, "zoomed in, twice as round (2.9 degrees a segment): {zoomed}");
+        let _ = std::fs::remove_dir_all(&d);
+    }
     #[test] fn parts_without_a_model_are_said() {
         assert_eq!(missing_note("ok\n"), "");
         assert_eq!(missing_note("Could not add 3D model for R1.\n"), "1 part has no 3D model on the hub's machine (KiCad's 3D library is not installed there, or the paths are wrong)");

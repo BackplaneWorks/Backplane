@@ -33,10 +33,19 @@ async function hub(n){
     rows.push(row);console.log(JSON.stringify(row));
     const m=fs.find(f=>f.kind==='model');if(m&&run==='cold'){mkdirSync(out+'.frames',{recursive:true});writeFileSync(`${out}.frames/${name.split('/').pop()}.model.cbor`,m.raw)}
     await rpc('kicad.watch',{kind:'',root:proj,path:'',tree:'',sheet:'',stamps:''});await sleep(200)};
-  return {h,ws,open}}
+  // kept watching, a zoom: the next model frame is the refined one
+  const refine=async(name)=>{const [x,y,z,r]=process.env.REFINE.split(',').map(Number);const root=`${proj}/${name.split('/mech/')[0]}`;
+    await rpc('kicad.watch',{kind:'3d',root,path:`${proj}/${name}`,tree:'',sheet:'',stamps:''});await sleep(300);
+    const k=frames.length;const t0=performance.now();const rep=await rpc('kicad.refine',{key:`2|${root}|${proj}/${name}`,at:[x,y,z],r});
+    for(let i=0;i<30000&&!frames.slice(k).some(f=>f.kind==='model');i++)await sleep(5);
+    const m=frames.slice(k).find(f=>f.kind==='model');const row={file:name.split('/').pop(),run:'refine',ok:rep?.ok,error:rep?.error,model:m?Math.round(m.at-t0):null,model_bytes:m?.bytes??0};
+    rows.push(row);console.log(JSON.stringify(row));if(m){mkdirSync(out+'.frames',{recursive:true});writeFileSync(`${out}.frames/${name.split('/').pop()}.refined.cbor`,m.raw)}
+    await rpc('kicad.watch',{kind:'',root:proj,path:'',tree:'',sheet:'',stamps:''});await sleep(200)};
+  return {h,ws,open,refine}}
+// REFINE="x,y,z,r" (env): after each cold open, a zoom there (kicad.refine) and the finer model's time and size: run "refine"
 // cold, then again on the same hub
 let a=await hub(1);for(const n of names){await open1(a,n)}
-async function open1(x,n){await x.open(n,'cold');await x.open(n,'reopen')}
+async function open1(x,n){await x.open(n,'cold');if(process.env.REFINE)await x.refine(n);await x.open(n,'reopen')}
 a.ws.close();stopHub(a.h);await sleep(1500);
 // a new hub on the same models cache
 let b=await hub(2);for(const n of names)await b.open(n,'restart');b.ws.close();stopHub(b.h);await sleep(500);
