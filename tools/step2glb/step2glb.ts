@@ -376,7 +376,14 @@ const BIG = 12 << 20;
 
 const FREECAD_PY = `
 import os, struct, json, array, Part
-src, out, tol = os.environ["BP_IN"], os.environ["BP_OUT"], float(os.environ.get("BP_TOL", "0.1"))
+src, out, tol = os.environ["BP_IN"], os.environ["BP_OUT"], float(os.environ.get("BP_TOL", "0.03"))
+ang = float(os.environ.get("BP_ANG", "0.2"))
+def mesh(shape):  # freecad_gui.py's: the whole shape meshed once at both deflections, then read by tessellate
+    try:
+        import MeshPart
+        MeshPart.meshFromShape(Shape=shape, LinearDeflection=tol, AngularDeflection=ang, Relative=False)
+    except Exception:
+        pass
 s = Part.read(src)
 shapes = list(s.Solids) or [s]
 pal = [(0.8, 0.8, 0.8), (0.6, 0.65, 0.72), (0.74, 0.68, 0.58), (0.52, 0.62, 0.52), (0.7, 0.58, 0.64), (0.58, 0.7, 0.72)]
@@ -388,7 +395,7 @@ buf = bytearray(); views = []; accs = []; prims = []; mats = []; tris = 0
 for gi, g in enumerate(groups):
     pts = []; idx = []
     for so in g:
-        p, f = so.tessellate(tol)
+        mesh(so); p, f = so.tessellate(tol)
         base = len(pts); pts.extend(p)
         for t in f: idx.extend((base + t[0], base + t[1], base + t[2]))
     if not idx: continue
@@ -424,7 +431,14 @@ print("TRIS", tris)
 // triangle count (in out.n: a GUI's stdout is not dependable).
 const FREECAD_GUI_PY = `import os, struct, json, array
 import FreeCAD as App, FreeCADGui as Gui, ImportGui
-src, out, tol = os.environ["BP_IN"], os.environ["BP_OUT"], float(os.environ.get("BP_TOL", "0.25"))
+src, out, tol = os.environ["BP_IN"], os.environ["BP_OUT"], float(os.environ.get("BP_TOL", "0.03"))
+ang = float(os.environ.get("BP_ANG", "0.2"))
+def mesh(shape):  # the whole shape meshed once at both deflections; each face's tessellate then reads that mesh: a face meshed alone has no angle limit (a small circle came out a hexagon), and its edges did not meet its neighbours
+    try:
+        import MeshPart
+        MeshPart.meshFromShape(Shape=shape, LinearDeflection=tol, AngularDeflection=ang, Relative=False)
+    except Exception:
+        pass
 try:
     # a person's FreeCAD preferences can make a STEP import wait forever offscreen: Import's "import mode" 2 (found hanging on 1.1: a box never came in), and the
     # "show this dialog" boxes. Set in memory only: this process ends with os._exit, which saves nothing.
@@ -442,7 +456,8 @@ try:
         base = tuple(round(c, 4) for c in vo.ShapeColor[:3])
         plain = all(abs(a - b) < 0.01 for a, b in zip(base, default)) and all(all(abs(a - b) < 0.01 for a, b in zip(c[:3], default)) for c in cols)
         tint = pal[n % len(pal)]; n += 1
-        faces = o.Shape.Faces
+        shape = o.Shape; mesh(shape)
+        faces = shape.Faces
         for i, f in enumerate(faces):
             c = tint if plain else tuple(round(x, 3) for x in (cols[i][:3] if len(cols) == len(faces) else (cols[0][:3] if cols else base)))
             p, t = f.tessellate(tol)
@@ -508,13 +523,13 @@ function freecadGui(): string {
 
 // the file meshed by FreeCAD's GUI, offscreen, with its colours: its
 // triangle count, or 0 (no GUI, no display server needed, or it failed)
-async function viaFreecadGui(input: string, out: string, linear: number): Promise<number> {
+async function viaFreecadGui(input: string, out: string, linear: number, angular: number): Promise<number> {
   const gui = freecadGui();
   if (!gui) return 0;
   const py = `${out}.gui.py`;
   await Bun.write(py, FREECAD_GUI_PY);
   Bun.spawnSync([gui, py], {
-    env: { ...process.env, QT_QPA_PLATFORM: "offscreen", BP_IN: input, BP_OUT: out, BP_TOL: String(Math.max(linear, 0.25)) },
+    env: { ...process.env, QT_QPA_PLATFORM: "offscreen", BP_IN: input, BP_OUT: out, BP_TOL: String(linear), BP_ANG: String(angular) },
     stdout: "ignore", stderr: "ignore", timeout: 600_000,
   });
   await Bun.file(py).delete().catch(() => {});
@@ -525,15 +540,15 @@ async function viaFreecadGui(input: string, out: string, linear: number): Promis
 
 // the file meshed by FreeCAD into out: its triangle count, or 0. Its GUI
 // first (colours), then its console build (tints only)
-async function viaFreecad(input: string, out: string, linear: number): Promise<number> {
-  const g = await viaFreecadGui(input, out, linear);
+async function viaFreecad(input: string, out: string, linear: number, angular: number): Promise<number> {
+  const g = await viaFreecadGui(input, out, linear, angular);
   if (g > 0) return g;
   const fc = freecad();
   if (!fc) return 0;
   const py = `${out}.py`;
   await Bun.write(py, FREECAD_PY);
   const p = Bun.spawnSync([fc, "-c", `exec(open(${JSON.stringify(py)}).read())`], {
-    env: { ...process.env, BP_IN: input, BP_OUT: out, BP_TOL: String(Math.max(linear, 0.25)) },
+    env: { ...process.env, BP_IN: input, BP_OUT: out, BP_TOL: String(linear), BP_ANG: String(angular) },
     stdout: "pipe", stderr: "pipe",
   });
   await Bun.file(py).delete().catch(() => {});
@@ -552,7 +567,7 @@ const said = (how: string, tris: number) =>
 // a big file goes to FreeCAD first when there is one (OCCT's WASM build is
 // slow on it and often meshes nothing)
 if (!args.tree && Bun.file(args.input).size > BIG && freecad()) {
-  const n = await viaFreecad(args.input, args.output!, args.linear);
+  const n = await viaFreecad(args.input, args.output!, args.linear, args.angular);
   if (n > 0) { said("FreeCAD", n); process.exit(0); }
 }
 const [result, content] = await readStep(args.input, args.linear, args.angular);
@@ -565,7 +580,7 @@ if (args.tree) {
 } else {
   const tris = result.meshes.reduce((s, m) => s + triCount(m), 0);
   if (tris === 0) {
-    const n = await viaFreecad(args.input, args.output!, args.linear);
+    const n = await viaFreecad(args.input, args.output!, args.linear, args.angular);
     if (n > 0) { said("FreeCAD", n); process.exit(0); }
     fail(`${args.input}: no faces could be meshed` + (freecad() ? "" : " (installing FreeCAD lets Backplane mesh large STEP files)"));
   }

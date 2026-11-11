@@ -2,8 +2,8 @@
 //!
 //! 1. `Env` + `resolve`: a `(model "...")` path to a file (KiCad's variables, the board's folder, a STEP beside a `.wrl`).
 //! 2. `key`: sha256 of the file's bytes, memoized per (path, dev, ino, size, mtime), so a board opened again hashes nothing.
-//! 3. `Cache`: `<dir>/part-v1-<key>.glb` (mm, Z up, the converter's own format: freecad_gui.py's), put in place only by rename;
-//!    a failure is `part-v1-<key>.fail` holding the message and is retried after a day.
+//! 3. `Cache`: `<dir>/part-v2-<key>.glb` (mm, Z up, the converter's own format: freecad_gui.py's), put in place only by rename;
+//!    a failure is `part-v2-<key>.fail` holding the message and is retried after a day.
 //! 4. `convert`: a batch of (key, file) jobs. Hits are reported at once; the misses go to K = clamp(cores/4, 1, 8) workers and each
 //!    result is reported the moment it is done (completion order). FreeCAD workers are one process each converting many files
 //!    (files/scripts/freecad_batch.py); `Step2glb` runs one process per file on K threads; a `.wrl` is read natively (`wrl_to_glb`).
@@ -206,8 +206,8 @@ impl Cache {
     /// Where the models a board carries inside it are written out (`embedded`).
     pub fn embedded_dir(&self) -> PathBuf { self.dir.join("embedded") }
     pub fn standard() -> Cache { Cache::new(format!("{}/parts", stepglb::cache_dir())) }
-    pub fn glb(&self, key: &str) -> PathBuf { self.dir.join(format!("part-v1-{key}.glb")) }
-    pub fn fail_file(&self, key: &str) -> PathBuf { self.dir.join(format!("part-v1-{key}.fail")) }
+    pub fn glb(&self, key: &str) -> PathBuf { self.dir.join(format!("part-v2-{key}.glb")) }
+    pub fn fail_file(&self, key: &str) -> PathBuf { self.dir.join(format!("part-v2-{key}.fail")) }
     /// What the cache already knows of a model: its GLB, or a failure not yet a day old. None: convert it.
     pub fn lookup(&self, key: &str) -> Option<Result<PathBuf, String>> {
         let g = self.glb(key);
@@ -392,7 +392,6 @@ fn freecad(opts: Opts, cache: &Cache, gui: bool, program: &str, jobs: Vec<Job>, 
     let py = stage.join("batch.py"); let list = stage.join("jobs.txt");
     let outs: Vec<PathBuf> = jobs.iter().map(|(k, _)| stage.join(format!("{k}.glb"))).collect();
     let text: String = jobs.iter().zip(&outs).map(|((_, p), o)| format!("{}\t{}\n", p.display(), o.display())).collect();
-    let tol = stepglb::NORMAL.linear.max(0.25).to_string();
     let mut failed: Failed = vec![];
     if std::fs::write(&py, BATCH_PY).is_err() || std::fs::write(&list, &text).is_err() {
         let _ = std::fs::remove_dir_all(&stage);
@@ -404,7 +403,7 @@ fn freecad(opts: Opts, cache: &Cache, gui: bool, program: &str, jobs: Vec<Job>, 
             let mut c = nice_cmd(program, opts.nice);
             if gui { stepglb::soft_gl(&mut c); c.arg(&py).env("QT_QPA_PLATFORM", "offscreen").env("BP_GUI", "1"); }
             else { c.args(["-c", "import os; exec(open(os.environ['BP_PY']).read())"]).env("BP_PY", &py); }
-            c.env("BP_JOBS", &list).env("BP_TOL", &tol).spawn().ok()
+            c.env("BP_JOBS", &list).envs(stepglb::NORMAL.env()).spawn().ok()
         }).collect()
     };
     let mut rounds = 0;
@@ -683,7 +682,7 @@ mod tests {
         assert!(c.lookup("k").is_none());
         let t = c.dir.join("tmp"); std::fs::write(&t, "glb").unwrap();
         let g = c.publish("k", &t).unwrap();
-        assert_eq!(g, c.dir.join("part-v1-k.glb")); assert!(!t.exists()); assert_eq!(c.lookup("k"), Some(Ok(g)));
+        assert_eq!(g, c.dir.join("part-v2-k.glb")); assert!(!t.exists()); assert_eq!(c.lookup("k"), Some(Ok(g)));
         std::fs::write(&t, "").unwrap(); assert!(c.publish("j", &t).is_err() && !c.glb("j").exists(), "an empty file is not a model");
         c.record_fail("f", "nope");
         assert_eq!(c.lookup("f"), Some(Err("nope".into())));

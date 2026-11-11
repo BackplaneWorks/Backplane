@@ -44,7 +44,7 @@ pub fn board_budget(b: &Board) -> usize {
 /// (Thunderscope: 1.7 s to mesh, a few ms to read 6 MB), the board parsed again (its parts are planned from it). A model read back has no
 /// `layers` (they make the board's own GLB, kept the first time: `want_layers` says one is needed and nothing is read back then).
 pub fn board_model_kept(bytes: &[u8], dir: &Path, want_layers: bool) -> Result<Made, String> {
-    let file = dir.join(format!("board-solid-v1-{}-{}-{:016x}-{}.bin", mesh::MOST_TRIS, mesh::MOST_TRIS_WITH_PARTS, super::super::plot::mesh_id(bytes), bytes.len()));
+    let file = dir.join(format!("board-solid-v2-{}-{}-{:016x}-{}.bin", mesh::MOST_TRIS, mesh::MOST_TRIS_WITH_PARTS, super::super::plot::mesh_id(bytes), bytes.len()));
     if !want_layers {
         if let Some((so, seat)) = std::fs::read(&file).ok().and_then(|b| read_kept(&b)) {
             let t = Instant::now();
@@ -247,7 +247,7 @@ pub fn board_dir(path: &str) -> PathBuf { Path::new(path).parent().map(Path::to_
 /// Where a board's own GLB is kept: the models cache, by the board's path and exact revision.
 pub fn glb_path(path: &str, rev: &str) -> PathBuf {
     let rev: String = rev.chars().map(|c| if c.is_ascii_alphanumeric() || c == '.' { c } else { '.' }).collect();
-    PathBuf::from(format!("{}/board-native-v1-{:08x}.{rev}.glb", super::super::stepglb::cache_dir(), super::super::stepglb::fnv(path)))
+    PathBuf::from(format!("{}/board-native-v2-{:08x}.{rev}.glb", super::super::stepglb::cache_dir(), super::super::stepglb::fnv(path)))
 }
 /// The board's GLB into the cache (through a staged file and a rename), its older revisions removed: one a board.
 pub fn keep_glb(layers: &[super::Layer], name: &str, path: &str, rev: &str) {
@@ -258,7 +258,7 @@ pub fn keep_glb(layers: &[super::Layer], name: &str, path: &str, rev: &str) {
     if bytes.is_empty() { return }
     let stage = out.with_extension(format!("glb.{}.part", std::process::id()));
     if std::fs::write(&stage, &bytes).is_err() || crate::plat::fs::rename(&stage, &out).is_err() { let _ = std::fs::remove_file(&stage); return }
-    let prefix = format!("board-native-v1-{:08x}.", super::super::stepglb::fnv(path));
+    let prefix = format!("board-native-v2-{:08x}.", super::super::stepglb::fnv(path));
     let own = out.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
     if let Ok(rd) = std::fs::read_dir(dir) { for e in rd.flatten() { let n = e.file_name().to_string_lossy().into_owned(); if n.starts_with(&prefix) && n.ends_with(".glb") && n != own { let _ = std::fs::remove_file(e.path()); } } }
 }

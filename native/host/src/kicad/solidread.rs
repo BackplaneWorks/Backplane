@@ -19,7 +19,7 @@ fn revision(path: &str) -> String {
 }
 /// Pv.step.out, Pv.board.out.recipe: a model's name in the cache, with the source's exact revision unhashed
 pub fn cached(dir: &str, path: &str, rev: &str, step: bool, bare: bool, full: bool) -> String {
-    if step { format!("{dir}/step4-{}.{rev}.normal.glb", stepglb::fnv(path)) }
+    if step { format!("{dir}/step6p-{}.{rev}.normal.glb", stepglb::fnv(path)) }
     else if full { format!("{dir}/board-full-outer-v1-{}{}.{rev}.glb", if bare { "bare-" } else { "parts-" }, stepglb::fnv(path)) }
     else { format!("{dir}/board-{}.{rev}.glb", stepglb::fnv(&format!("{}{path}", if bare { "bare3|" } else { "parts3|" }))) }
 }
@@ -41,13 +41,13 @@ fn step_by_content(dir: &str, path: &str) -> Option<String> {
     static KEYS: std::sync::Mutex<Option<std::collections::HashMap<(String, String), String>>> = std::sync::Mutex::new(None);
     let at = (path.to_string(), revision(path));
     if at.1.is_empty() { return None }
-    if let Some(k) = KEYS.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|m| m.get(&at)) { return Some(format!("{dir}/step5-{k}.normal.glb")) }
+    if let Some(k) = KEYS.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|m| m.get(&at)) { return Some(format!("{dir}/step6-{k}.normal.glb")) }
     let bytes = std::fs::read(path).ok()?;
     let k: String = Sha256::digest(&bytes).iter().map(|b| format!("{b:02x}")).collect();
     let mut g = KEYS.lock().unwrap_or_else(|e| e.into_inner()); let m = g.get_or_insert_with(Default::default);
     if m.len() > 4096 { m.clear() }
     m.insert(at, k.clone());
-    Some(format!("{dir}/step5-{k}.normal.glb"))
+    Some(format!("{dir}/step6-{k}.normal.glb"))
 }
 /// A mesh made under its old name, given its content name too: a hard link, else a copy put in place whole.
 fn take_over(from: &str, to: &str) {
@@ -129,7 +129,7 @@ mod tests {
         assert_eq!(cached("/c", "/p/b.kicad_pcb", r, false, false, false), format!("/c/board-{}.{r}.glb", stepglb::fnv("parts3|/p/b.kicad_pcb")));
         assert_eq!(cached("/c", "/p/b.kicad_pcb", r, false, true, false), format!("/c/board-{}.{r}.glb", stepglb::fnv("bare3|/p/b.kicad_pcb")));
         assert_eq!(cached("/c", "/p/b.kicad_pcb", r, false, false, true), format!("/c/board-full-outer-v1-parts-{}.{r}.glb", stepglb::fnv("/p/b.kicad_pcb")));
-        assert_eq!(cached("/c", "/p/a.step", r, true, false, false), format!("/c/step4-{}.{r}.normal.glb", stepglb::fnv("/p/a.step")));
+        assert_eq!(cached("/c", "/p/a.step", r, true, false, false), format!("/c/step6p-{}.{r}.normal.glb", stepglb::fnv("/p/a.step")));
         assert_eq!(glb_of(2, "/p/own.glb"), "/p/own.glb");
     }
     #[test] fn a_steps_mesh_is_found_by_its_content_from_any_copy_and_an_old_name_is_taken_over() {

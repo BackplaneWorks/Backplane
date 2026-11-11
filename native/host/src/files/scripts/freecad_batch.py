@@ -1,12 +1,19 @@
 import os, sys, struct, json, array
-# One FreeCAD process converting many STEP files. BP_JOBS: a file of lines "in<TAB>out"; BP_TOL: tessellation tolerance (mm); BP_GUI=1: the GUI build
+# One FreeCAD process converting many STEP files. BP_JOBS: a file of lines "in<TAB>out"; BP_TOL, BP_ANG: linear (mm) and angular (radians) deflection; BP_GUI=1: the GUI build
 # (offscreen; the only build that reads a STEP's colours), else the console build (tints only). Several workers share one job file and claim a job with
 # os.open(out + ".claim", O_CREAT|O_EXCL). A job's out is written as out.part then renamed, then out.n holds "<tris>" (or "0 <why>" and no out).
 import FreeCAD as App, Part
 GUI = os.environ.get("BP_GUI") == "1"
 if GUI:
     import FreeCADGui as Gui, ImportGui
-tol = float(os.environ.get("BP_TOL", "0.25"))
+tol = float(os.environ.get("BP_TOL", "0.03"))
+ang = float(os.environ.get("BP_ANG", "0.2"))
+def mesh(shape):  # the whole shape meshed once at both deflections; each face's tessellate then reads that mesh: a face meshed alone has no angle limit (a small circle came out a hexagon), and its edges did not meet its neighbours
+    try:
+        import MeshPart
+        MeshPart.meshFromShape(Shape=shape, LinearDeflection=tol, AngularDeflection=ang, Relative=False)
+    except Exception:
+        pass
 lin = lambda c: [x / 12.92 if x <= 0.04045 else ((x + 0.055) / 1.055) ** 2.4 for x in c]  # a STEP's colour is display sRGB, glTF's is linear light
 
 def glb(src, groups, out):
@@ -50,7 +57,8 @@ def gui_job(src, out):  # freecad_gui.py's meshing and colours
             base = tuple(round(c, 4) for c in vo.ShapeColor[:3])
             plain = all(abs(a - b) < 0.01 for a, b in zip(base, default)) and all(all(abs(a - b) < 0.01 for a, b in zip(c[:3], default)) for c in cols)
             tint = pal[n % len(pal)]; n += 1
-            faces = o.Shape.Faces
+            shape = o.Shape; mesh(shape)
+            faces = shape.Faces
             for i, f in enumerate(faces):
                 c = tint if plain else tuple(round(x, 3) for x in (cols[i][:3] if len(cols) == len(faces) else (cols[0][:3] if cols else base)))
                 p, t = f.tessellate(tol)
@@ -68,7 +76,7 @@ def console_job(src, out):  # freecad_console.py's meshing
     groups = [([], []) for _ in pal]
     for i, so in enumerate(shapes):
         pts, idx = groups[i % len(pal)]
-        p, f = so.tessellate(tol)
+        mesh(so); p, f = so.tessellate(tol)
         base = len(pts); pts.extend(p)
         for t in f: idx.extend((base + t[0], base + t[1], base + t[2]))
     return glb(src, list(zip(pal, groups)), out)

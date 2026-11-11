@@ -19,9 +19,10 @@ pub fn metres(ts: &mut [Tri3]) { for t in ts { for v in [&mut t.a, &mut t.b, &mu
 fn cell_of(v: f32, o: f32, s: f32) -> u32 { fl::to_u32(((v - o) / s).floor()) }
 /// Grid.snap: a coordinate at its cell's centre
 fn snap(v: f32, o: f32, s: f32) -> f32 { o + (((v - o) / s).floor() + 0.5) * s }
-/// Solid.thin: every corner moves across to the centre of its cell in a grid a thousandth of the model's size, a triangle two of whose
-/// corners land in one cell is dropped. y, the model's up, keeps its value, so a board's thin layers stay apart.
-pub fn thin(ts: Vec<Tri3>) -> Vec<Tri3> { thin_by(ts, 1000.0) }
+/// Solid.thin: every corner moves across to the centre of its cell in a grid a 4000th of the model's size, a triangle two of whose
+/// corners land in one cell is dropped. y, the model's up, keeps its value, so a board's thin layers stay apart. A thousandth moved a
+/// 60 mm part's corners by up to 30 um: its small holes and fillets came out dented and shaded in blocks.
+pub fn thin(ts: Vec<Tri3>) -> Vec<Tri3> { thin_by(ts, 4000.0) }
 /// `thin` on a grid of `cells` a side of the model's size (fewer cells: fewer triangles, coarser).
 pub fn thin_by(ts: Vec<Tri3>, cells: f32) -> Vec<Tri3> {
     let big = 1000000000.0f32;
@@ -85,7 +86,7 @@ mod tests {
         let p = plot(None); assert_eq!((p.b.x0, p.b.x1, p.thick, p.edge.y1), (2147483647, 2147483648, 0, 2147483648)); assert!(p.cs.is_empty());
     }
     #[test] fn thinning_drops_a_collapsed_triangle_and_keeps_heights() {
-        // a box 1 m across: cells of about 1.7 mm
+        // a box 1 m across: cells of about 0.4 mm
         let big = tri([0.0, 0.0, 0.0], [1.0, 0.25, 0.0], [0.0, 0.5, 1.0], 7);
         let speck = tri([0.5, 0.0, 0.5], [0.5001, 0.0, 0.5], [0.5, 0.0, 0.5001], 7);
         let out = thin(vec![big, speck]);

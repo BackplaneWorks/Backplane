@@ -29,7 +29,7 @@ fn glb_path(src: &str, cache: &str) -> String {
     use crate::plat::fs::MetadataExt;
     if src.ends_with(".glb") { return src.to_string() }
     let size = std::fs::metadata(src).map_or("0".to_string(), |m| format!("{}.{}", m.len() as u32, m.mtime() as u32));
-    format!("{cache}/{}.glb", stepglb::fnv(&format!("step2|{src}|{size}")))
+    format!("{cache}/{}.glb", stepglb::fnv(&format!("step3|{src}|{size}")))
 }
 /// Parts.glb: the model's GLB, from the cache, else converted into it; None when it cannot be
 fn model_glb(src: &str, cache: &str, tools: &[Mesher]) -> Option<String> {
@@ -38,7 +38,7 @@ fn model_glb(src: &str, cache: &str, tools: &[Mesher]) -> Option<String> {
     if src.ends_with(".glb") { return None }
     let dir = stepglb::stage(&out, "part.").ok()?;
     let from = dir.join("model.glb");
-    let r = stepglb::publish(stepglb::convert(tools, src, &from.to_string_lossy(), None, false), &from, &out);
+    let r = stepglb::publish(stepglb::convert(tools, src, &from.to_string_lossy(), Some(stepglb::NORMAL), false), &from, &out);
     let _ = std::fs::remove_dir_all(&dir);
     (r.code == 0).then_some(out)
 }

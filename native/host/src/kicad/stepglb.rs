@@ -50,10 +50,16 @@ pub fn publish(r: Ran, from: &Path, out: &str) -> Ran {
 /// How a STEP is meshed.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Mesher { Step2glb(String), FreeCad { gui: String, cmd: String } }
-/// Mech.detail.args as numbers (mm, radians); None is step2glb's own default, what `--render` asks
+/// Mech.detail.args as numbers (mm, radians); None is step2glb's own default (FreeCAD meshes at NORMAL then)
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Detail { pub linear: f64, pub angular: f64 }
+/// Fine enough that a 1 mm hole is round and a curve shades smooth (the clients crease at about 55 degrees: 0.2 rad steps blend), and
+/// still cheap: FreeCAD meshes a 64-pin QFP so in 0.1 s, the STEP's import being most of a conversion.
 pub const NORMAL: Detail = Detail { linear: 0.03, angular: 0.2 };
+impl Detail {
+    /// The FreeCAD scripts' environment: BP_TOL the linear deflection (mm), BP_ANG the angular (radians).
+    pub fn env(self) -> [(&'static str, String); 2] { [("BP_TOL", self.linear.to_string()), ("BP_ANG", self.angular.to_string())] }
+}
 
 /// The tools to try, in order, from what this machine has: `env` is BACKPLANE_STEP2GLB, `beside` a step2glb found by the hub.
 pub fn attempts(env: Option<&str>, gui: &str, cmd: &str, beside: &str) -> Vec<Mesher> {
@@ -168,27 +174,27 @@ pub fn is_appimage(cmd: &str) -> bool {
 /// The arguments that come before a console run's own: `freecadcmd` when `cmd` is the AppImage, so its console program runs and not the GUI.
 pub fn console_args(cmd: &str) -> &'static [&'static str] { if is_appimage(cmd) { &["freecadcmd"] } else { &[] } }
 /// viaFreecadGui: the file meshed by FreeCAD's GUI, offscreen, with its colours: its triangle count, 0 when it failed
-fn via_gui(gui: &str, input: &str, out: &str, tol: &str, nice: bool) -> u64 {
+fn via_gui(gui: &str, input: &str, out: &str, d: Detail, nice: bool) -> u64 {
     if gui.is_empty() { return 0 }
     let py = format!("{out}.gui.py");
     if std::fs::write(&py, FREECAD_GUI_PY).is_err() { return 0 }
     let mut c = command(nice, gui);
     headless(&mut c);
-    c.arg(&py).envs([("BP_IN", input), ("BP_OUT", out), ("BP_TOL", tol)]).stdout(Stdio::null()).stderr(Stdio::null());
+    c.arg(&py).envs([("BP_IN", input), ("BP_OUT", out)]).envs(d.env()).stdout(Stdio::null()).stderr(Stdio::null());
     wait(&mut c, FREECAD_SECS);
     let n = std::fs::read_to_string(format!("{out}.n")).unwrap_or_default().split(' ').next().and_then(|x| x.trim().parse::<u64>().ok()).unwrap_or(0);
     let _ = std::fs::remove_file(&py); let _ = std::fs::remove_file(format!("{out}.n"));
     if n > 0 && have(out) { n } else { 0 }
 }
 /// viaFreecad's console half: its triangle count, 0 when it failed
-fn via_console(cmd: &str, input: &str, out: &str, tol: &str, nice: bool) -> u64 {
+fn via_console(cmd: &str, input: &str, out: &str, d: Detail, nice: bool) -> u64 {
     if cmd.is_empty() { return 0 }
     let (py, log) = (format!("{out}.py"), format!("{out}.log"));
     let Ok(file) = std::fs::File::create(&log) else { return 0 };
     if std::fs::write(&py, FREECAD_PY).is_err() { return 0 }
     let mut c = command(nice, cmd);
     headless(&mut c);
-    c.args(console_args(cmd)).args(["-c", "import os; exec(open(os.environ['BP_PY']).read())"]).envs([("BP_PY", py.as_str()), ("BP_IN", input), ("BP_OUT", out), ("BP_TOL", tol)]).stdout(file).stderr(Stdio::null());
+    c.args(console_args(cmd)).args(["-c", "import os; exec(open(os.environ['BP_PY']).read())"]).envs([("BP_PY", py.as_str()), ("BP_IN", input), ("BP_OUT", out)]).envs(d.env()).stdout(file).stderr(Stdio::null());
     let code = wait(&mut c, FREECAD_SECS);
     let text = std::fs::read_to_string(&log).unwrap_or_default();
     let _ = std::fs::remove_file(&py); let _ = std::fs::remove_file(&log);
@@ -207,8 +213,8 @@ pub fn convert(tools: &[Mesher], src: &str, stage: &str, detail: Option<Detail>,
     for t in tools {
         match t {
             Mesher::FreeCad { gui, cmd } => {
-                let tol = detail.map_or(0.1, |d| d.linear).max(0.25).to_string();
-                if via_gui(gui, src, stage, &tol, nice) > 0 || via_console(cmd, src, stage, &tol, nice) > 0 { return Ran::default() }
+                let d = detail.unwrap_or(NORMAL);
+                if via_gui(gui, src, stage, d, nice) > 0 || via_console(cmd, src, stage, d, nice) > 0 { return Ran::default() }
                 last = Ran { code: 1, out: format!("FreeCAD could not mesh {src}") };
             }
             Mesher::Step2glb(tool) => {
