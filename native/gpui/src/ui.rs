@@ -373,6 +373,8 @@ impl Backplane {
                 rows.push(crate::screens::badge::editor(cx, light, &pid_thr, &project["look"]));
             }
             if closed { continue } // folded: the head alone (0.14 project-closed:<id>)
+            // the project's swarms (docs/SWARM.md), above its threads: the hub leaves their members out of the shelves
+            { let open_room = if self.data["bot"]["kind"] == "room" { string(&self.data["bot"], "id") } else { String::new() }; rows.extend(crate::screens::swarm::side_rows(cx, light, project, &open_room, &mut ctl)); }
             for t in project["threads"].as_array().into_iter().flatten() { rows.push(self.side_thread(cx, light, t, &pid_thr, "", quiet, &mut ctl)); }
             // a long list: the hub's page controls for the rest (at most 48 rows a picture)
             if let Some(row) = pager_row(cx, format!("pg-t-{pid_thr}"), &project["threadsPage"], light, &mut ctl) { rows.push(row); }
@@ -677,7 +679,7 @@ impl Render for Backplane {
         // controls with no handler yet are registered too, so the harness finds them dead instead of missing
         /* i18n-ok: registered controls the e2e drivers press */ for (id, label, c) in crate::screens::tools::controls(&self.data) { ctl.push(CtlEntry { id, label, ctl: c }); }
         // the bot form, a bot's tabs and its Webhooks page are controls too (screens::bots::controls)
-        /* i18n-ok: registered controls the e2e drivers press */ for (id, label, c) in crate::screens::bots::controls(&self.data) { ctl.push(CtlEntry { id, label, ctl: c }); }
+        /* i18n-ok: registered controls the e2e drivers press */ for (id, label, c) in crate::screens::bots::controls(&self.data).into_iter().chain(crate::screens::swarm::controls(&self.data)) { ctl.push(CtlEntry { id, label, ctl: c }); }
         /* i18n-ok: registered controls the e2e drivers press */ if has_thread { ctl.push(CtlEntry { id: "ui:Thread menu".into(), label: "Thread actions".into(), ctl: Ctl::ThreadMenu }); }
         /* i18n-ok: registered controls the e2e drivers press */ ctl.push(CtlEntry { id: "ui:Settings".into(), label: "Settings".into(), ctl: Ctl::Node("flag".into(), "settings".into()) });
         /* i18n-ok: registered controls the e2e drivers press */ if self.data["settings"].is_object() { for (page, title) in &self.screens.settings_ui.nav { ctl.push(CtlEntry { id: format!("set-nav:{page}"), label: title.clone(), ctl: Ctl::SettingsPage(page.clone()) }); } }
@@ -807,6 +809,7 @@ impl Render for Backplane {
                     .children(crate::screens::tools::questions(cx, light, &self.screens.fields, &self.data, side_shown))
                     .children(crate::screens::projects::view(cx, light, &self.screens.projects, &self.data))
                     .children(crate::screens::bots::forms(cx, light, &self.screens.fields, &self.data))
+                    .children(crate::screens::swarm::form(cx, light, &self.screens.fields, &self.data))
                     .children(crate::screens::palette::view(cx, light, &self.data, &self.screens.palette, &self.local, &self.selected))
                     .children(crate::screens::images::lightbox(cx, self.screens.lightbox.as_ref()))
                 )

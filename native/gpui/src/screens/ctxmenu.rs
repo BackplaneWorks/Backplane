@@ -106,7 +106,7 @@ pub fn new_items(pid_raw: &str, new_on: &Value) -> Vec<Item> {
     /* i18n-ok: menu labels, drawn through trs in render */ if on.len() > 1 { on } else { vec![item("New thread", "new-thread", pid_raw, false)] }
 }
 pub fn project_items(pid_raw: &str) -> Vec<Item> { project_items_on(pid_raw, &Value::Null) }
-pub fn project_items_on(pid_raw: &str, new_on: &Value) -> Vec<Item> { let mut v = new_items(pid_raw, new_on); v.extend(project_rest(pid_raw)); v }
+pub fn project_items_on(pid_raw: &str, new_on: &Value) -> Vec<Item> { let mut v = new_items(pid_raw, new_on); /* i18n-ok: a menu label, drawn through trs in render */ v.push(item("New swarm", "swarm-new", pid_raw, false)); v.extend(project_rest(pid_raw)); v }
 /* i18n-ok: menu labels, drawn through trs in render */ fn project_rest(pid_raw: &str) -> Vec<Item> { vec![item("Intent…", LOCAL_INTENT, pid_raw, false), item("Rename", "proj-rename", pid_raw, false), item("Badge", "look", pid_raw, false), item("Remove project", "proj-remove", pid_raw, true)] }
 
 impl Backplane {
@@ -244,8 +244,8 @@ mod tests {
         assert_eq!(sent(&disarm(&m2)), Some(("delete-no".into(), String::new()))); m2.armed = None; assert!(disarm(&m2).is_none());
         // a project's Remove asks in the menu, the hub hears only the second click
         let mut p = Menu { at: Point::default(), items: project_items("p1"), armed: None };
-        let s = press(&mut p, 4, &Value::Null); assert!(s.send.is_none() && !s.close); assert_eq!(armed_label(&p.items[4]), "Click again to remove"); assert!(disarm(&p).is_none());
-        let s = press(&mut p, 4, &Value::Null); assert_eq!(sent(&s.send), Some(("proj-remove".into(), "p1".into()))); assert!(s.close);
+        let s = press(&mut p, 5, &Value::Null); assert!(s.send.is_none() && !s.close); assert_eq!(armed_label(&p.items[5]), "Click again to remove"); assert!(disarm(&p).is_none());
+        let s = press(&mut p, 5, &Value::Null); assert_eq!(sent(&s.send), Some(("proj-remove".into(), "p1".into()))); assert!(s.close);
         // any other item does what it says at once
         let mut m3 = Menu { at: Point::default(), items: thread_items(&t, "p1"), armed: None }; let s = press(&mut m3, 0, &Value::Null); assert!(s.close && sent(&s.send).unwrap().0 == "row-pin");
     }
@@ -253,11 +253,11 @@ mod tests {
         let d = j(r#"{"thread":{"id":"http://h:1|t7","menu":[{"label":"Diff","action":"diff","value":""},{"label":"Delete","action":"row-delete","value":"t7","danger":true}]},"projects":[]}"#);
         let it = title_items(&d); assert!(it.iter().find(|i| i.label == "Delete").unwrap().confirm && !it.iter().find(|i| i.label == "Diff").unwrap().confirm);
     }
-    #[test] fn a_project_offers_new_thread_rename_badge_and_a_confirmed_remove() {
+    #[test] fn a_project_offers_new_thread_new_swarm_rename_badge_and_a_confirmed_remove() {
         let on = serde_json::json!([{"value":"p1","label":"New thread on desk"},{"value":"L~p9","label":"New thread on lap (away)"}]);
-        let it = project_items_on("p1", &on); assert_eq!(it.iter().map(|i| (i.label.as_str(), i.value.as_str())).take(3).collect::<Vec<_>>(), [("New thread on desk", "p1"), ("New thread on lap (away)", "L~p9"), ("Intent…", "p1")]);
+        let it = project_items_on("p1", &on); assert_eq!(it.iter().map(|i| (i.label.as_str(), i.value.as_str())).take(3).collect::<Vec<_>>(), [("New thread on desk", "p1"), ("New thread on lap (away)", "L~p9"), ("New swarm", "p1")]);
         assert_eq!(it[1].action, "new-thread");
-        let it = project_items("p1"); assert_eq!(it.iter().map(|i| i.action.as_str()).collect::<Vec<_>>(), ["new-thread", LOCAL_INTENT, "proj-rename", "look", "proj-remove"]); assert!(it[4].confirm && !it[2].confirm && it[2].value == "p1" && it[1].value == "p1");
+        let it = project_items("p1"); assert_eq!(it.iter().map(|i| i.action.as_str()).collect::<Vec<_>>(), ["new-thread", "swarm-new", LOCAL_INTENT, "proj-rename", "look", "proj-remove"]); assert!(it[5].confirm && !it[3].confirm && it[3].value == "p1" && it[1].value == "p1");
     }
     #[test] fn an_archived_row_offers_unarchive_not_archive() {
         let t = j(r#"{"id":"h|t7","lead":[{"label":"Unarchive","action":"row-unarchive","value":"h|t7"}]}"#);

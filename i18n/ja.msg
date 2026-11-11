@@ -3923,4 +3923,17 @@ gpui.f2.done.body = ? でいつでもキー一覧を表示できます。
 gpui.f2.open.uber = メインボットを開く
 gpui.f2.setup.phone = セットアップはコンピュータの 設定 → セットアップ で行います。このスマホはそのコンピュータとペアリングされています。
 gpui.f2.setup.five = 5つの短いステップ：データフォルダ、エージェント、設計ツール、メインボットの置き場所、最初のプロジェクト。
+gpui.swarm.row = メンバー{n, number}人 · 作業中{w, number}
+gpui.swarm.held = 保留：{why}
+gpui.swarm.state.why = {state}：{why}
+gpui.swarm.new = 新しいスウォーム
+gpui.swarm.add.member = メンバーを追加
+gpui.swarm.start = 開始
+gpui.swarm.topic = トピック
+gpui.swarm.goal = 目標（1行で）
+gpui.swarm.seed = 全メンバーへの最初のメッセージ
+gpui.swarm.role = 役割（任意）
+gpui.swarm.remove = スウォームから外す
+gpui.swarm.over = このスウォームは終了しました。
+gpui.swarm.none = まだ投稿はありません。
 # ---- end ----

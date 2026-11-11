@@ -166,7 +166,7 @@ pub fn sync(this: &mut Backplane, cx: &mut Context<Backplane>) {
     let rows = parse(&this.data["settings"]);
     sync_nav(this, &rows, cx);
     let mut want: Vec<Field> = rows.into_iter().flat_map(|r| r.fields).collect();
-    want.extend(super::bots::form_fields(&this.data)); want.extend(super::panels::form_fields(&this.data)); want.extend(super::tools::form_fields(&this.data)); want.extend(super::onboard::form_fields(&this.data)); want.extend(super::sidebox::form_fields(&this.data));
+    want.extend(super::bots::form_fields(&this.data)); want.extend(super::swarm::form_fields(&this.data)); want.extend(super::panels::form_fields(&this.data)); want.extend(super::tools::form_fields(&this.data)); want.extend(super::onboard::form_fields(&this.data)); want.extend(super::sidebox::form_fields(&this.data));
     this.screens.fields.retain(|n, _| want.iter().any(|f| f.name == *n));
     for f in want {
         if let Some(slot) = this.screens.fields.get_mut(&f.name) {
