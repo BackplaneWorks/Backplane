@@ -119,7 +119,9 @@ impl Parts {
         let viewer = super::farview::is_viewer(m);
         let mut local = far::params_local(p, l); if let Some(o) = local.as_object_mut() { o.remove("on"); }
         let body = if viewer { json!({"id": 0, "m": "viewer.call", "p": {"sub": client, "m": m, "p": local}}).to_string() } else { json!({"id": 0, "m": m, "p": local}).to_string() };
-        let (code, text) = post(&sync, hub, l, &body).await;
+        let (mut code, mut text) = post(&sync, hub, l, &body).await;
+        // a new thread there whose request got no answer is asked once more (a link that dropped a request is not a machine that is away)
+        if code == 0 && m == "thread.create" { tokio::time::sleep(std::time::Duration::from_millis(800)).await; (code, text) = post(&sync, hub, l, &body).await; }
         if viewer && code == 200 && (m == "kicad.watch" || m == "term.open") {
             let ok = serde_json::from_str::<Value>(&text).map_or(false, |v| v["ok"] == true);
             // a drawing watched there, or its terminal opened: what that machine pushes for this window is pulled and forwarded (a terminal keeps the

@@ -238,7 +238,7 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                         // every product RPC's answer is logged, so a refused send is never silent (the reply's error may be a plain string, a code or a message)
                         let why=if x["ok"]==true {String::new()} else {rpc_error(&x)};
                         eprintln!("GPUI_LOG {}",json!({"rpc_reply":name,"ok":x["ok"]==true,"error":why.chars().take(160).collect::<String>()}));
-                        if x["ok"]==true {if is_post {let _=events.send(Event::Accepted).await;}}else{let _=events.send(Event::Refused(crate::i18n::tf("gpui.hub.refused.it", &[("why", crate::i18n::trs(&why).into())]))).await;}if v.dirty&&v.pending.is_empty()&&!v.view_id.is_empty(){v.dirty=false;let request=v.request("view.update",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;}continue;}
+                        if x["ok"]==true {if is_post {let _=events.send(Event::Accepted).await;}}else{if name=="thread.create"{let _=events.send(Event::Data("create-refused",json!(why))).await;}let _=events.send(Event::Refused(crate::i18n::tf("gpui.hub.refused.it", &[("why", crate::i18n::trs(&why).into())]))).await;}if v.dirty&&v.pending.is_empty()&&!v.view_id.is_empty(){v.dirty=false;let request=v.request("view.update",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;}continue;}
                     let Some((revision,target,method))=v.pending.remove(&id) else{continue};
                     let paged=v.paging.take_if(|(page,_)|*page==id).map(|(_,cursor)|cursor);
                     // A hub still opening its log says "not yet", and says the same of a thread it cannot show, for as long as it likes. So: the list first, asked for
@@ -339,7 +339,10 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                     if !key.is_empty() {let _=events.send(Event::Term(key,pid,b,reset,state)).await;}},
                 "star"=>{let _=events.send(Event::Star(x["offer"].clone())).await;},
                 "browser.download"=>{let s=|k:&str|x[k].as_str().unwrap_or("").to_string();let _=events.send(Event::BrowserDownload(s("bot"),s("id"),s("name"),s("error"))).await;},
-                "info"=>{if let Some(m)=x["info"].as_object(){for(k,val) in m{if k=="hub.offer"{let _=events.send(Event::HubOffer(val.as_str().unwrap_or("").to_string())).await;}if let Some(owner)=k.strip_prefix("browser.tabs."){let _=events.send(Event::BrowserTabs(owner.to_string(),val.as_str().unwrap_or("").to_string())).await;}}}},
+                "info"=>{
+                    // the merged project rows moved with no log line (a machine's origins learned, it away or back): the view is asked for again
+                    if x["info"].get("mirrors.gen").is_some()&&!v.view_id.is_empty()&&v.pending.is_empty(){let request=v.request("view.update",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;}
+                    if let Some(m)=x["info"].as_object(){for(k,val) in m{if k=="hub.offer"{let _=events.send(Event::HubOffer(val.as_str().unwrap_or("").to_string())).await;}if let Some(owner)=k.strip_prefix("browser.tabs."){let _=events.send(Event::BrowserTabs(owner.to_string(),val.as_str().unwrap_or("").to_string())).await;}}}},
                 "notify"=>{crate::screens::desk::show(&x);},"notify.clear"=>{crate::screens::desk::clear(&x);},
                 "sheets"=>{let _=events.send(Event::Sheets(x["rows"].as_str().unwrap_or("").to_string(),x["refs"].as_str().unwrap_or("").to_string())).await;},
                 "hb"=>{sink.send(Message::Binary(wire::encode(&json!({"id":0,"m":"ping","p":{}})).into())).await?;},

@@ -118,6 +118,8 @@ impl Backplane {
             Event::Using(home)=>{eprintln!("GPUI_LOG {}",serde_json::json!({"hub":"using","text":home.clone().unwrap_or_default()}));self.screens.offers.on_home=home;cx.notify();},
             Event::Answer(id,reply) if screens::hubpick::answered(self,id,&reply,cx)=>{},
             Event::Answer(id,reply)=>if !screens::projects::answered(self,id,&reply,cx) {screens::improvements::answered(self,id,reply,cx)},
+            // a page's Send whose thread the hub would not make (its machine away...): the text goes back in the box, the error is shown (Refused, next)
+            Event::Data(tag,_) if tag=="create-refused" => { if let Some(text)=screens::projects::take_back(&mut self.screens.projects.first_send) { self.arm_new=None; self.input.update(cx,|i,cx|i.set(text,cx)); } cx.notify(); }
             Event::Data(tag,v)=>if tag=="google-changed" {screens::google::changed(self)} else if tag=="google" {screens::google::got(self,v,cx)} else if tag=="acct-moveall" {screens::accounts::moved(self,&v)} else {screens::accounts::got(self,v,cx)},
             Event::Voice(f)=>self.voice_frame(f,cx),
             Event::Rpc("voice",ok,why)=>{if !ok{self.error=why;}},
@@ -209,9 +211,11 @@ impl Backplane {
         // that was open before the page (it is not on screen)
         if let Some(pid)=self.project_page.clone().filter(|p|screens::projects::find(&self.data,p).is_some()) {
             if text.trim().is_empty()||self.status!="Connected"||self.screens.projects.first_send.is_some() {return;}
+            // (it goes where the page's "runs on" line says: the picker's choice; a refusal puts the text back, `create-refused`)
+            let Some((cmd,text))=screens::projects::page_send(&self.data,&pid,&text) else {return};
             self.screens.projects.first_send=Some((self.selected.rsplit('|').next().unwrap_or("").to_string(),text,Instant::now()));
             self.input.update(cx,|i,cx|i.set(String::new(),cx));
-            self.arm_new();let _=self.tx.try_send(Command::Action("new-thread".into(),pid));cx.notify();return;
+            self.arm_new();let _=self.tx.try_send(cmd);cx.notify();return;
         }
         // a picture or file alone is a message too: the hub sends the attachments with whatever text there is (none: just them)
         let has_att=self.data["thread"]["attaching"].as_array().map_or(false,|a|!a.is_empty());
