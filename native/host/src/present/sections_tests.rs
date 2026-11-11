@@ -148,6 +148,35 @@ fn world() -> State {
     assert_eq!(act(&s2, &rows2, "project-pin", &key, &json!({}), NOW).unwrap().sets[0].1, "", "pressed again: unpinned");
     assert!(act(&s, &rows, "project-pin", "no-such-key", &json!({}), NOW).is_none());
 }
+#[test] fn a_project_folds_away_its_threads_and_keeps_its_counts_and_its_asks() {
+    // Alive: one running thread under it and one asking (in Needs you); a second running thread so something lists under it
+    let mut s = world(); s.apply(&tc("tb", "pa", NOW - 80)); s.apply(&turn("tb", "running", NOW - 70));
+    let rows = merged_projects(&s, &[], &|_| false, &|_| String::new(), "desk", &[]);
+    let key = rows.iter().find(|p| p.name == "Alive").unwrap().key.clone();
+    let v = build(&s, &rows, &Value::Null, &ctx(&HashSet::new()));
+    let alive = &sec(&v, "active")["rows"][0];
+    assert_eq!((alive["fold"].as_str(), alive["folded"].as_bool(), alive["under"].as_u64()), (Some("project-fold"), Some(false), Some(1)), "{alive}");
+    assert_eq!(alive["threads"].as_array().unwrap().len(), 1);
+    // the chevron: folded, kept as a setting (so every client and a restart agree)
+    let a = act(&s, &rows, "project-fold", &key, &json!({}), NOW).unwrap(); assert_eq!(a.sets, vec![(format!("sidebar.fold.{key}"), NOW.to_string())]);
+    s.apply(&set(&format!("sidebar.fold.{key}"), &NOW.to_string(), NOW)); let rows = merged_projects(&s, &[], &|_| false, &|_| String::new(), "desk", &[]);
+    let v = build(&s, &rows, &Value::Null, &ctx(&HashSet::new()));
+    let alive = &sec(&v, "active")["rows"][0];
+    assert_eq!(alive["title"], "Alive", "a folded project stays in its section");
+    assert_eq!((alive["folded"].as_bool(), alive["under"].as_u64()), (Some(true), Some(1)));
+    assert!(alive["threads"].as_array().unwrap().is_empty() && alive["swarms"].as_array().unwrap().is_empty(), "nothing under it");
+    assert_eq!((alive["running"].as_u64(), alive["needsCount"].as_u64()), (Some(2), Some(1)), "its counts stay on the row");
+    assert_eq!(titles(sec(&v, "needs"))[0], "T ta", "a thread of it that asks the person is still in Needs you");
+    // a new ask in a folded project surfaces in Needs you
+    let mut s3 = world(); for e in [tc("tb", "pa", NOW - 80), turn("tb", "running", NOW - 70), set(&format!("sidebar.fold.{key}"), "1", NOW), ask("q2", "tb", "question")] { s3.apply(&e); } let rows3 = merged_projects(&s3, &[], &|_| false, &|_| String::new(), "desk", &[]);
+    assert!(titles(sec(&build(&s3, &rows3, &Value::Null, &ctx(&HashSet::new())), "needs")).contains(&"T tb".to_string()));
+    // a search opens it
+    let open = HashSet::new(); let c = Ctx { query: "tb", ..ctx(&open) };
+    let v = build(&s, &rows, &Value::Null, &c); assert_eq!(sec(&v, "active")["rows"][0]["folded"], false);
+    // pressed again: open
+    assert_eq!(act(&s, &rows, "project-fold", &key, &json!({}), NOW).unwrap().sets[0].1, "");
+    assert!(act(&s, &rows, "project-fold", "no-such-key", &json!({}), NOW).is_none());
+}
 #[test] fn groups_follow_the_git_owner_then_the_folder_and_take_the_persons_name_and_moves() {
     assert_eq!(auto_group("github.com/AmericanEmbedded/fazepro", "/x/y"), ("owner:github.com/americanembedded".into(), "AmericanEmbedded".into()));
     assert_eq!(auto_group("", "/home/h/Documents/Nordic/thingy"), ("folder:/home/h/Documents/Nordic".into(), "Nordic".into()));

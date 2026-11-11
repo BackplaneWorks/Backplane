@@ -417,11 +417,11 @@ async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Result<Value,
                 v
             })).ok_or_else(|| err("state is starting"))
         }
-        // a sidebar section's press: pin a project (`project-pin` <key>), archive it (`project-archive` <key>, again to unarchive), hide another machine's thread here (`thread-hide` <id>), name a group (`group-rename` "<gid>\u{1f}<name>"), move a project (`group-move` "<key>\u{1f}<gid>")
+        // a sidebar section's press: pin a project (`project-pin` <key>), fold or unfold its threads (`project-fold` <key>), archive it (`project-archive` <key>, again to unarchive), hide another machine's thread here (`thread-hide` <id>), name a group (`group-rename` "<gid>\u{1f}<name>"), move a project (`group-move` "<key>\u{1f}<gid>")
         "sidebar.act" => {
             let Some(pol) = crate::statehost::policies() else { return Err(err("state is starting")) };
             let (a, v) = (s(p, "action"), s(p, "value"));
-            if !matches!(a, "project-pin" | "thread-hide" | "group-rename" | "group-move" | "project-archive") { return Err(err("no such action")) }
+            if !matches!(a, "project-pin" | "project-fold" | "thread-hide" | "group-rename" | "group-move" | "project-archive") { return Err(err("no such action")) }
             let now = crate::hub::now_ms() / 1000;
             let sets = pol.with_state(|st| crate::present::merged::merged_of(st, hub.mirrors(), |rows| crate::present::sections::act(st, &rows, a, v, &json!({}), now).map(|x| x.sets))).flatten().ok_or_else(|| err("unknown project or group"))?;
             for (k, val) in sets { rpc(hub, c, "setting.set", json!({"key":k,"value":val})).await?; }

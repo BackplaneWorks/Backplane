@@ -11,7 +11,7 @@ actions!(keys, [NewThread, OpenDiff, OpenFiles, StopTurn, ModelPicker, PrevThrea
     PickUp, PickDown, PickLeft, PickRight, PickTab, PickBackTab, PickEnter,
     Project1, Project2, Project3, Project4, Project5, Project6, Project7, Project8, Project9,
     Thread1, Thread2, Thread3, Thread4, Thread5, Thread6, Thread7, Thread8, Thread9,
-    RailBoard, RailSchematic, Rail3d, RailSplit, RailMech, RailFiles, RailDiff, RailReview, RailBrowser, ToggleTerminal, DismissTerminal, ShowKeys]);
+    RailBoard, RailSchematic, Rail3d, RailSplit, RailMech, RailFiles, RailDiff, RailReview, RailBrowser, ToggleTerminal, DismissTerminal, ShowKeys, FoldProject, UnfoldProject]);
 
 /// Where no text field, file list or viewer has the keyboard: a bare key may act.
 /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ pub const FREE: &str = "!AccountMenu && !Composer && !TextInput && !PickInput && !FindInput && !AskInput && !ImpInput && !Viewer && !BrowserBar && !FilesPage";
@@ -19,6 +19,8 @@ actions!(keys, [NewThread, OpenDiff, OpenFiles, StopTurn, ModelPicker, PrevThrea
 /// goes when a person looks at a board; with the letters dead there they never acted (the message box has the keyboard everywhere else).
 /// The 3D and Mech views keep their own letters (F fits, 1-6 turn), and a web page, the terminal and the Files page their typing.
 /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ pub const RAIL: &str = "!AccountMenu && !Composer && !TextInput && !PickInput && !FindInput && !AskInput && !ImpInput && (!Viewer || Plot) && !BrowserBar && !FilesPage";
+/// Where Left and Right fold a project row: the sidebar has the keyboard (a press on a project row gives it), and no field or viewer is in it.
+/* i18n-ok: key contexts */ const SIDE: &str = "Sidebar && !TextInput && !PickInput && !FindInput && !AskInput && !ImpInput && !Picker";
 /// Where "/" puts the keyboard in the message box: as `FREE`, and from a viewer too (a web page's own "/" is kept: `focus_composer`).
 /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ const SLASH: &str = "!AccountMenu && !Composer && !TextInput && !PickInput && !FindInput && !AskInput && !ImpInput && !BrowserBar && !FilesPage";
 /// No text field has the keyboard (so a chord that edits text there is the field's: Option+digit types a character on a Mac, Ctrl+C copies).
@@ -67,6 +69,8 @@ pub const TABLE: &[Entry] = &[
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("threads", "Go to thread 1…9 of the project", "Sidebar", "secondary-1…9", Fixed),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("prev", "Previous thread", "Sidebar", "secondary-shift-[", Rebind),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("next", "Next thread", "Sidebar", "secondary-shift-]", Rebind),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("fold", "Fold the project's threads (the row under the pointer, else the open one), after a press on a project row", "Sidebar", "left", Fixed),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("unfold", "Unfold the project's threads", "Sidebar", "right", Fixed),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("uber", "Uberbot chat", "Sidebar", "secondary-shift-u", Rebind),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("new", "New thread", "Timeline", "secondary-n", Rebind),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("settle", "Settle or unsettle the thread", "Timeline", "secondary-shift-s", Rebind),
@@ -169,6 +173,7 @@ pub fn bindings(l: &Local) -> Vec<KeyBinding> {
     let alt = if mac() { Some(NOT_MAC_COMPOSER) } else { None };
     macro_rules! digits { ($($n:literal $p:ident $t:ident),*) => { v.extend([$(KeyBinding::new(concat!("alt-", $n), $p, alt), KeyBinding::new(concat!("secondary-", $n), $t, None)),*]); } }
     digits!("1" Project1 Thread1, "2" Project2 Thread2, "3" Project3 Thread3, "4" Project4 Thread4, "5" Project5 Thread5, "6" Project6 Thread6, "7" Project7 Thread7, "8" Project8 Thread8, "9" Project9 Thread9);
+    /* i18n-ok: key contexts */ v.extend([KeyBinding::new("left", FoldProject, Some(SIDE)), KeyBinding::new("right", UnfoldProject, Some(SIDE))]);
     v.extend([KeyBinding::new("b", RailBoard, Some(RAIL)), KeyBinding::new("s", RailSchematic, Some(RAIL)), KeyBinding::new("3", Rail3d, Some(RAIL)), KeyBinding::new("v", RailSplit, Some(RAIL)),
         KeyBinding::new("m", RailMech, Some(RAIL)), KeyBinding::new("f", RailFiles, Some(RAIL)), KeyBinding::new("d", RailDiff, Some(RAIL)), KeyBinding::new("r", RailReview, Some(RAIL)),
         KeyBinding::new("w", RailBrowser, Some(RAIL))]);
@@ -410,6 +415,8 @@ pub fn attach(el: Div, picker: bool, cx: &mut Context<Backplane>) -> Div {
     let el = on!(el, DismissTerminal, |this: &mut Backplane, w: &mut Window, cx: &mut Context<Backplane>| this.term_dismiss(w, cx));
     let el = on!(el, CycleLayers, |this: &mut Backplane, w: &mut Window, cx: &mut Context<Backplane>| this.key_layers(w, cx));
     let el = on!(el, PerfOverlay, |this: &mut Backplane, _, cx: &mut Context<Backplane>| this.perf_toggle(cx));
+    let el = on!(el, FoldProject, |this: &mut Backplane, _, cx: &mut Context<Backplane>| this.key_fold(true, cx));
+    let el = on!(el, UnfoldProject, |this: &mut Backplane, _, cx: &mut Context<Backplane>| this.key_fold(false, cx));
     let el = on!(el, ShowKeys, |this: &mut Backplane, _, cx: &mut Context<Backplane>| this.keysheet_toggle(cx));
     macro_rules! rail { ($el:expr, $($a:ty => ($k:literal, $v:literal)),*) => {{ let mut e = $el; $( e = on!(e, $a, |this: &mut Backplane, _, cx: &mut Context<Backplane>| this.key_rail($k, $v, cx)); )* e }} }
     let el = rail!(el, RailBoard => ("view-kind", "board"), RailSchematic => ("view-kind", "schematic"), Rail3d => ("view-kind", "3d"), RailSplit => ("view-kind", "split"),
@@ -560,6 +567,12 @@ mod tests {
         let x = find("layers").unwrap(); assert_eq!((x.key, x.kind), ("ctrl-h", Rebind)); assert_eq!(hint(&Local::default(), "layers"), show("ctrl-h", mac()));
         let mut l = Local::default();
         assert!(l.set("shortcut", "layers\u{1f}ctrl-alt-h")); assert_eq!(does(&l, "ctrl-alt-h", &["Viewer"]), "keys::CycleLayers"); assert_eq!(does(&l, "ctrl-h", &["Viewer"]), ""); assert_eq!(does(&l, "ctrl-alt-h", &["Composer"]), "keys::CycleLayers"); assert_eq!(does(&l, "ctrl-alt-h", &["AskInput"]), "");
+    }
+    #[test] fn left_and_right_fold_only_where_the_sidebar_has_the_keyboard() {
+        assert_eq!(d("left", &["Sidebar"]), "keys::FoldProject"); assert_eq!(d("right", &["Sidebar"]), "keys::UnfoldProject");
+        assert_eq!(d("left", &[]), ""); assert_eq!(d("right", &["Composer"]), "composer::Right", "the message box keeps its caret");
+        assert_eq!(d("left", &["Sidebar", "TextInput"]), "text_input::Left", "a rename field in the sidebar keeps its caret");
+        assert_eq!(d("left", &["Viewer", "Plot"]), "", "a plot pans");
     }
     #[test] fn sidebar_scope_numbers_and_neighbours() {
         assert_eq!(d("alt-1", &[]), "keys::Project1"); assert_eq!(d("alt-9", &[]), "keys::Project9"); assert_eq!(d("ctrl-1", &["Composer"]), "keys::Thread1"); assert_eq!(d("ctrl-9", &[]), "keys::Thread9");

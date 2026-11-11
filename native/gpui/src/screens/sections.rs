@@ -1,7 +1,8 @@
 //! The sidebar's sections (docs/ALWAYS-ON.md section 8), as the hub presents them (`sections`: present/sections.rs): Needs you, Pinned,
 //! Active, the groups and Quiet. Drawn generically: a section is a head (its title, a count, a chevron when it folds) and its rows, a thread
 //! row (`kind` "threads") or a project row with its visible threads under it ("projects"). Bub is drawn above by the window as before.
-//! The hub decides everything shown; this only draws and sends `side-section`, `project-page`, `project-pin`, `group-rename-start`, `group-move`.
+//! The hub decides everything shown; this only draws and sends `side-section`, `project-page`, `project-pin`, `project-fold`, `group-rename-start`, `group-move`.
+//! A project row's chevron (and Left/Right while the sidebar has the keyboard) folds its threads away; the hub keeps the fold per project.
 use crate::i18n::{tf, trs};
 use crate::script::{Ctl, CtlEntry};
 use crate::{string, theme, Backplane};
@@ -63,11 +64,21 @@ fn project(this: &Backplane, cx: &mut Context<Backplane>, light: bool, p: &Value
     let groups = this.data["groupsTo"].clone();
     let menu = p["menu"].clone();
     let (pid2, key2, key3, pid3) = (pid.clone(), key.clone(), key.clone(), pid.clone());
+    // the fold (the hub keeps it per project): a chevron while something is under the row or it is folded, an empty slot otherwise
+    let (folded, under, needs_n) = (p["folded"] == true, p["under"].as_u64().unwrap_or(0), p["needsCount"].as_u64().unwrap_or(0));
+    let fold_action = string(p, "fold");
+    let can_fold = !fold_action.is_empty() && (folded || under > 0);
+    /* i18n-ok: a ctl label */ if can_fold { ctl.push(CtlEntry { id: format!("project-fold:{pid}"), label: format!("{} {}", if folded { "Unfold" } else { "Fold" }, string(p, "title")), ctl: Ctl::Node(fold_action.clone(), key.clone()) }); }
+    let twisty = crate::ui::with_rect(div().id(SharedString::from(format!("pfold-{pid}"))), { let p = pid.clone(); move || format!("project-fold:{p}") })
+        .w(px(16.)).h(px(30.)).flex_shrink_0().flex().items_center().justify_center()
+        .when(can_fold, |d| { let (a, k) = (fold_action.clone(), key.clone()); d.cursor_pointer().child(crate::ui::ic(light, if folded { "chevron-right" } else { "chevron-down" }, 12., "faint"))
+            .on_click(cx.listener(move |this, _, w, cx| { cx.stop_propagation(); w.focus(&this.screens.side_focus); this.go(&a, k.clone(), cx); })) });
     /* i18n-ok: a ctl label */ ctl.push(CtlEntry { id: format!("project-pin:{pid}"), label: if pinned { "Unpin project".into() } else { "Pin project".into() }, ctl: Ctl::Node("project-pin".into(), key.clone()) });
     crate::ui::with_rect(div().id(SharedString::from(format!("sproj-{pid}"))), { let p = pid.clone(); move || format!("project:{p}") })
         .when(faded || p["off"] == true, |d| d.opacity(0.55)).flex().items_center().gap_2().pl(px(6.)).pr_3().h(px(30.)).text_size(px(13.))
         .border_l_2().border_color(if on_page { c("accent") } else { c("panel") }).when(on_page, |d| d.bg(c("raise"))).cursor_pointer().hover(|s| s.bg(c("raise")))
-        .on_click(cx.listener(move |this, _, _, cx| { this.go("project-page", key2.clone(), cx); this.open_project(pid2.clone(), cx); }))
+        .on_hover({ let p = pid.clone(); cx.listener(move |this, on: &bool, _, _| { if *on { this.screens.side_hover = Some(p.clone()) } else if this.screens.side_hover.as_deref() == Some(p.as_str()) { this.screens.side_hover = None } }) })
+        .on_click(cx.listener(move |this, _, w, cx| { w.focus(&this.screens.side_focus); this.go("project-page", key2.clone(), cx); this.open_project(pid2.clone(), cx); }))
         .on_mouse_down(MouseButton::Right, cx.listener(move |this, e: &MouseDownEvent, _, cx| {
             // the hub's menu (Pin, New swarm, Rename, Badge, Open folder, Move to group ›, Archive, Remove project); an older hub sends none
             let hub_menu = crate::screens::ctxmenu::section_items(&menu);
@@ -79,11 +90,13 @@ fn project(this: &Backplane, cx: &mut Context<Backplane>, light: bool, p: &Value
             }
             this.ctx_open(e.position, items, cx);
         }))
-        .child(div().w(px(16.)).flex_shrink_0())
+        .child(twisty)
         .child(crate::screens::badge::mark(light, p))
         .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(string(p, "title")))
         .children((!dots.is_empty()).then(|| div().flex().gap_1().items_center().children(dots)))
         .children((running > 0).then(|| div().text_size(px(11.)).text_color(c("accent")).child(tf("gpui.sections.running", &[("n", running.into())]))))
+        // what of it waits on the person (its rows are in Needs you, folded or not)
+        .children((needs_n > 0).then(|| div().px(px(5.)).h(px(16.)).flex().items_center().bg(c("bad")).text_size(px(10.)).text_color(c("bg")).child(needs_n.to_string())))
         .when(pinned, |d| d.child(crate::ui::ic(light, "pin", 12., "dim")))
         // New thread in this project (a project also on linked machines: the + asks which machine)
         /* i18n-ok: a ctl id the drivers press */ .child(crate::ui::with_rect(div().id(SharedString::from(format!("new-{pid}"))), || "ui:New thread".to_string()).cursor_pointer().tooltip(crate::keys::tip("New thread", "", light)).on_click({ let (new_on, pidn) = (p["newOn"].clone(), pid.clone()); cx.listener(move |this, e: &ClickEvent, _, cx| { cx.stop_propagation();
@@ -92,7 +105,21 @@ fn project(this: &Backplane, cx: &mut Context<Backplane>, light: bool, p: &Value
         .into_any_element()
 }
 
+/// The project row Left and Right fold and unfold in the sidebar: the one under the pointer, else the project page on show, else the open
+/// thread's project. (the action, the project's key, whether it is folded now), None when that row has nothing to fold.
+pub fn fold_target(data: &Value, hover: Option<&str>, page: Option<&str>, sel: &str) -> Option<(String, String, bool)> {
+    let pid = hover.map(String::from).or_else(|| page.map(String::from)).unwrap_or_else(|| crate::keys::project_of(data, sel));
+    let p = find(data, &pid)?;
+    let (action, folded) = (string(p, "fold"), p["folded"] == true);
+    (!action.is_empty() && (folded || p["under"].as_u64().unwrap_or(0) > 0)).then(|| (action, string(p, "nav"), folded))
+}
+
 impl Backplane {
+    /// Left (fold: true) or Right on the sidebar: fold or unfold the project `fold_target` names; a row already so is left alone.
+    pub(crate) fn key_fold(&mut self, fold: bool, cx: &mut Context<Self>) {
+        let Some((action, key, folded)) = fold_target(&self.data, self.screens.side_hover.as_deref(), self.project_page.as_deref(), &self.selected) else { return };
+        if folded != fold { self.go(&action, key, cx); }
+    }
     /// The sections' rows, in the hub's order (Bub is drawn above them by the window).
     pub(crate) fn section_rows(&self, cx: &mut Context<Self>, light: bool, rows: &mut Vec<AnyElement>, ctl: &mut Vec<CtlEntry>) {
         let sections: Vec<Value> = self.data["sections"].as_array().cloned().unwrap_or_default();
@@ -168,6 +195,20 @@ pub fn page_lists(cx: &mut Context<Backplane>, light: bool, data: &Value, pid: &
 #[cfg(test)]
 mod tests {
     use super::*; use serde_json::json; use core::prelude::v1::test;
+    #[test] fn left_and_right_fold_the_hovered_row_else_the_page_else_the_open_threads_project() {
+        let d = json!({"sections":[{"id":"active","kind":"projects","rows":[
+                {"id":"h|p1","nav":"k1","fold":"project-fold","folded":false,"under":2},
+                {"id":"h|p2","nav":"k2","fold":"project-fold","folded":true,"under":0},
+                {"id":"h|p3","nav":"k3","fold":"project-fold","folded":false,"under":0},
+                {"id":"h|p4","nav":"k4"}]}],
+            "projects":[{"id":"h|p1","threads":[{"id":"h|t1"}]}]});
+        assert_eq!(fold_target(&d, Some("p2"), Some("p1"), "t1"), Some(("project-fold".into(), "k2".into(), true)), "the row under the pointer first");
+        assert_eq!(fold_target(&d, None, Some("p1"), ""), Some(("project-fold".into(), "k1".into(), false)), "then the page on show");
+        assert_eq!(fold_target(&d, None, None, "t1"), Some(("project-fold".into(), "k1".into(), false)), "then the open thread's project");
+        assert_eq!(fold_target(&d, Some("p3"), None, ""), None, "nothing under it, open: nothing to fold");
+        assert_eq!(fold_target(&d, Some("p4"), None, ""), None, "an older hub sends no fold");
+        assert_eq!(fold_target(&d, None, None, ""), None);
+    }
     #[test] fn a_project_is_found_in_any_section_by_its_raw_id() {
         let d = json!({"sections":[{"id":"needs","kind":"threads","rows":[{"id":"h|t1"}]},{"id":"active","kind":"projects","rows":[{"id":"h|p1","nav":"k1"}]},{"id":"quiet","kind":"projects","rows":[{"id":"h|L~p2","nav":"k2"}]}]});
         assert!(on(&d) && !on(&json!({})));

@@ -12,7 +12,8 @@
 //! Settings this hub keeps (all short, all in the lean copy): `sidebar.pin.<key>` (a pinned project: when), `sidebar.group.of.<key>` (a project
 //! the person moved: its group id), `sidebar.group.name.<gid>` (the person's name for a group), `sidebar.group.pick.<gid>` (Haiku's,
 //! agents/groupname.rs), `sidebar.looked.<thread>` (when the person last opened a thread that stopped abnormally), `sidebar.cut.<thread>` (a
-//! restart cut its turn; cleared when a turn starts).
+//! restart cut its turn; cleared when a turn starts), `sidebar.fold.<key>` (the person folded a project row: when; its threads are not listed under
+//! it, its counts still are, and a thread of it that needs the person is still in Needs you).
 use super::merged::{MergedProject, MergedThread};
 use crate::shelf::{shelf_of, Shelf};
 use crate::state::{State, Turn};
@@ -256,6 +257,8 @@ pub struct Ctx<'a> {
 fn pid_of(p: &MergedProject) -> String { p.here.clone().unwrap_or_else(|| p.ids.first().map(|x| x.1.clone()).unwrap_or_default()) }
 fn hit(text: &str, q: &str) -> bool { q.is_empty() || crate::sidebar::fuzzy_hit(text, q) }
 fn pinned_at(st: &State, key: &str) -> u64 { num(st, &format!("sidebar.pin.{key}")) }
+/// When the person folded a project row (`sidebar.fold.<key>`), 0 for open.
+pub fn folded_at(st: &State, key: &str) -> u64 { num(st, &format!("sidebar.fold.{key}")) }
 
 /// A project's live swarms (docs/SWARM.md) as rows, every copy's: `sidebar::swarm_rows`' shape (the clients' swarm rows draw it) with the sections'
 /// fields: `kind` "swarm", `word` (`sidebar::live_swarms`; `needs` too when a member waits on the person), `want`, `title`, `project`, its machine.
@@ -294,7 +297,10 @@ fn project_row(st: &State, c: &Ctx, p: &MergedProject, ths: &[Th], gid: &str, gr
     let needs = ths.iter().filter(|f| f.needs).count();
     let q = c.query;
     let shown: Vec<&Th> = ths.iter().filter(|f| if q.is_empty() { f.show && !f.needs && !f.kid } else { crate::sidebar::word_hit(&f.t.title, q) }).collect();
-    let rows: Vec<Value> = shown.iter().take(UNDER).map(|f| thread_row(c.hub, c.now, p, f)).collect();
+    // folded by the person: no rows under it (a search opens it, as it opens the section folds); its counts stay on the row
+    let folded = folded_at(st, &p.key) > 0 && q.is_empty();
+    let under: Vec<Value> = shown.iter().take(UNDER).map(|f| thread_row(c.hub, c.now, p, f)).collect();
+    let rows: Vec<Value> = if folded { vec![] } else { under.clone() };
     r["id"] = json!(qid(c.hub, &pid_of(p)));
     r["title"] = json!(p.name);
     r["pinned"] = json!(pinned_at(st, &p.key) > 0);
@@ -303,7 +309,10 @@ fn project_row(st: &State, c: &Ctx, p: &MergedProject, ths: &[Th], gid: &str, gr
     let sw = swarms_of(p, c);
     r["running"] = json!(running + sw.iter().filter(|x| x.1 == "running").count());
     r["needsCount"] = json!(needs + sw.iter().filter(|x| x.1 != "running").count());
-    r["swarms"] = json!(sw.into_iter().filter(|x| x.1 == "running").map(|x| x.0).collect::<Vec<_>>());
+    let live: Vec<Value> = sw.into_iter().filter(|x| x.1 == "running").map(|x| x.0).collect();
+    // the fold: `fold` the action a chevron sends (with `nav`), `folded` its state, `under` how many rows it hides or would hide (no chevron at 0, open)
+    r["fold"] = json!("project-fold"); r["folded"] = json!(folded); r["under"] = json!(under.len() + live.len());
+    r["swarms"] = json!(if folded { vec![] } else { live });
     r["group"] = json!(gid);
     r["archived"] = json!(archived_at(st, &p.key) > 0);
     r["menu"] = project_menu(st, p, gid, groups);
@@ -452,6 +461,8 @@ pub fn act(st: &State, rows: &[MergedProject], action: &str, value: &str, drafts
             if !crate::net::far::is(id) || !rows.iter().any(|p| p.threads.iter().any(|t| t.id == id && !t.machine.is_empty())) { return None }
             Some(Act { sets: vec![(format!("sidebar.hide.{id}"), now.to_string())], ..none() })
         }
+        // a project row's chevron: fold its threads away, or unfold them (kept per project in the hub, so every client and restart agrees)
+        "project-fold" => { if !known(value) { return None } let on = folded_at(st, value) > 0; Some(Act { sets: vec![(format!("sidebar.fold.{value}"), if on { String::new() } else { now.max(1).to_string() })], ..none() }) }
         "project-pin" => { if !known(value) { return None } let on = pinned_at(st, value) > 0; Some(Act { sets: vec![(format!("sidebar.pin.{value}"), if on { String::new() } else { now.to_string() })], ..none() }) }
         // a group's name, from its rename field (`@f.group.<gid>`); an empty name gives the group back its automatic one
         "group-rename" => {

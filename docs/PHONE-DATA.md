@@ -281,6 +281,6 @@ The hub's own terminals: the chat terminals a thread opens (an agent's `terminal
   (`word`: needs, running, limit, monitoring, failed, cut, interrupted, done, idle; `off`: its machine is off, known from the registry, and `nav` is ""). A project row:
   `projects.list`'s merged fields (`key`, `name`, `machines`...) with `running`, `needsCount`, `pinned`, `dots` and its visible `threads`. `page` is the project's page:
   `{key, project, sections: running, needs, recent, done ("Done (n)", folded unless pageDone)}`. `jump` lists every project and thread on every machine (Ctrl+K).
-- `sidebar.act {action, value}`: `project-pin` key (toggles), `group-rename` "gid\u001fname" ("" gives the automatic name back), `group-move` "key\u001fgid" (or "key\u001f+New name").
+- `sidebar.act {action, value}`: `project-pin` key (toggles), `project-fold` key (toggles a project row's fold: its `folded` row has no `threads`/`swarms`, `under` counts what it hides), `group-rename` "gid\u001fname" ("" gives the automatic name back), `group-move` "key\u001fgid" (or "key\u001f+New name").
 - Visibility (D11): a thread is listed while it runs, owns running work, asks the person, or stopped abnormally and was not opened or settled since; pinned ones always.
   A thread that asks the person is never hidden. The rest are on the project's page and in `jump`.
