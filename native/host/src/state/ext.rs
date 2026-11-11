@@ -42,6 +42,19 @@ pub struct Ext {
     /// MailPosted launch mails, newest time per "<sender thread>\t<to address>": the receipts `Auto.old.reports` reads before the one-time migration
     /// (autosettle.version "1"). Bounded by thread pairs.
     pub reports: HashMap<String, u64>,
+    /// MemorySaved/MemoryForgot: each bot memory's kind, the characters of its <memory> line (bots/mail/route.rs `mem_line`) and when it changed, by
+    /// "<bot>\u{1f}<key>": the Context panel says what a bot's turn starts with. Bounded by the memories.
+    #[serde(default)] pub mems: HashMap<String, (String, u32, u64)>,
+    /// SessionSet/TurnQueued: when a thread's agent session last began afresh (a new id, or cleared) and when it was last handed the conversation
+    /// (`handoff:*`) and why. Bounded by threads.
+    #[serde(default)] pub sess: HashMap<String, Sess>,
+}
+#[derive(Default, Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct Sess { pub began: u64, pub handed: u64, pub why: String }
+/// Handoff.why: what a `handoff:*` queue id says it was
+pub fn handoff_why(msg: &str) -> &'static str {
+    let m = msg.strip_prefix("handoff:").unwrap_or("");
+    if m.starts_with("switch:account") { "account switch" } else if m.starts_with("switch:") { "agent switch" } else if m.starts_with("give:") { "work handed in" } else if m.starts_with("back:") { "fork came back" } else { "fork" }
 }
 
 fn until(s: &str, end: char) -> String { s.chars().take_while(|c| *c != end).collect() }
