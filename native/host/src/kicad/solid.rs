@@ -7,6 +7,13 @@ use super::{fl, glb::Tri3, plot::{Plot, Rect, Solid}, plotgen::um};
 /// not, but the limit is the product's rule and its words, so the same models show.
 pub const MOST: u64 = 12582912;
 pub fn fits(size: u64) -> bool { size <= MOST }
+/// The biggest STEP mesh the hub reads (one it made: its triangles are then held to `STEP_TRIS` by `fit`, not by the file's size).
+pub const MOST_STEP: u64 = 64 << 20;
+/// Whether a model's GLB of `size` bytes is read: a STEP's mesh up to MOST_STEP, any other up to MOST.
+pub fn fits_for(size: u64, step: bool) -> bool { size <= if step { MOST_STEP } else { MOST } }
+/// The most triangles a STEP's model goes out with: a phone takes (64 << 20) / 84 for a model, and a frame of about 10 bytes a triangle
+/// stays under the hub's 8 MB outbox. A model within it is sent exactly as meshed.
+pub const STEP_TRIS: usize = 600_000;
 /// Solid.big: what a refused model says (its size in whole megabytes, rounded up)
 pub fn big(size: u64) -> String { format!("This 3D model is too big to show here ({} MB; the hub reads models up to {} MB)", (size + 1048575) >> 20, MOST >> 20) }
 
@@ -23,6 +30,14 @@ fn snap(v: f32, o: f32, s: f32) -> f32 { o + (((v - o) / s).floor() + 0.5) * s }
 /// corners land in one cell is dropped. y, the model's up, keeps its value, so a board's thin layers stay apart. A thousandth moved a
 /// 60 mm part's corners by up to 30 um: its small holes and fillets came out dented and shaded in blocks.
 pub fn thin(ts: Vec<Tri3>) -> Vec<Tri3> { thin_by(ts, 4000.0) }
+/// A STEP's triangles within `most`: as they are when they fit (thinning snaps corners to a grid, which made a small hole in a 2 m
+/// assembly a jagged 16-gon), else thinned on the finest grid that fits.
+pub fn fit(ts: Vec<Tri3>, most: usize) -> Vec<Tri3> {
+    if ts.len() <= most { return ts }
+    let mut last = vec![];
+    for cells in [64000.0, 16000.0, 4000.0, 1000.0, 250.0] { last = thin_by(ts.clone(), cells); if last.len() <= most { break } }
+    last
+}
 /// `thin` on a grid of `cells` a side of the model's size (fewer cells: fewer triangles, coarser).
 pub fn thin_by(ts: Vec<Tri3>, cells: f32) -> Vec<Tri3> {
     let big = 1000000000.0f32;
@@ -82,6 +97,14 @@ mod tests {
     fn tri(a: [f32; 3], b: [f32; 3], c: [f32; 3], color: u32) -> Tri3 { Tri3 { a, b, c, color } }
     fn read(d: &[u8]) -> Vec<u32> { let (mut o, mut z, mut s) = (vec![], 0u32, 0); for b in d { z |= ((*b & 127) as u32) << s; s += 7; if b & 128 == 0 { o.push(z); z = 0; s = 0 } } o }
     fn unzig(z: u32) -> i32 { ((z >> 1) ^ 0u32.wrapping_sub(z & 1)) as i32 }
+    #[test] fn a_step_within_its_budget_is_kept_exact_and_one_over_it_thinned_as_little_as_fits() {
+        let fine: Vec<Tri3> = (0..200).map(|i| { let a = i as f32 * 0.0314; tri([a.cos() * 0.003, a.sin() * 0.003, 0.0], [(a + 0.0314).cos() * 0.003, (a + 0.0314).sin() * 0.003, 0.0], [0.0, 0.0, 0.0], 1) }).collect();
+        let mut model = fine.clone(); model.push(tri([2.0, 0.0, 0.0], [2.0, 0.001, 0.0], [2.0, 0.0, 0.001], 2)); // a 6 mm hole's rim in a 2 m model
+        assert_eq!(fit(model.clone(), 1000), model, "within the budget: not one corner moved");
+        assert!(thin(model.clone()).len() < 120, "the old grid (a 4000th of 2 m: 0.5 mm) kept {} of the 6 mm rim's 200", thin(model.clone()).len());
+        let f = fit(model.clone(), 199); assert!(f.len() <= 199 && f.len() > 150, "over it: the finest grid that fits ({})", f.len());
+        assert!(fits_for(MOST_STEP, true) && !fits_for(MOST + 1, false) && fits_for(MOST, false));
+    }
     #[test] fn a_part_of_ints_is_the_same_bytes_as_the_solid() {
         let t = [tri([0.001, 0.002, 0.003], [0.002, 0.002, -0.003], [0.001, -0.002, 0.003], 0xff0000), tri([0.5, 0.0, 1.0], [0.0; 3], [-0.25, 0.1, 0.0], 0x00ff01)];
         assert_eq!(part_mesh(&t), (2, of(&t).unwrap().d));

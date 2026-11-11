@@ -2,8 +2,8 @@
 //!
 //! 1. `Env` + `resolve`: a `(model "...")` path to a file (KiCad's variables, the board's folder, a STEP beside a `.wrl`).
 //! 2. `key`: sha256 of the file's bytes, memoized per (path, dev, ino, size, mtime), so a board opened again hashes nothing.
-//! 3. `Cache`: `<dir>/part-v2-<key>.glb` (mm, Z up, the converter's own format: freecad_gui.py's), put in place only by rename;
-//!    a failure is `part-v2-<key>.fail` holding the message and is retried after a day.
+//! 3. `Cache`: `<dir>/part-v3-<key>.glb` (mm, Z up, the converter's own format: freecad_gui.py's), put in place only by rename;
+//!    a failure is `part-v3-<key>.fail` holding the message and is retried after a day.
 //! 4. `convert`: a batch of (key, file) jobs. Hits are reported at once; the misses go to K = clamp(cores/4, 1, 8) workers and each
 //!    result is reported the moment it is done (completion order). FreeCAD workers are one process each converting many files
 //!    (files/scripts/freecad_batch.py); `Step2glb` runs one process per file on K threads; a `.wrl` is read natively (`wrl_to_glb`).
@@ -206,8 +206,8 @@ impl Cache {
     /// Where the models a board carries inside it are written out (`embedded`).
     pub fn embedded_dir(&self) -> PathBuf { self.dir.join("embedded") }
     pub fn standard() -> Cache { Cache::new(stepglb::cache_file("parts")) }
-    pub fn glb(&self, key: &str) -> PathBuf { self.dir.join(format!("part-v2-{key}.glb")) }
-    pub fn fail_file(&self, key: &str) -> PathBuf { self.dir.join(format!("part-v2-{key}.fail")) }
+    pub fn glb(&self, key: &str) -> PathBuf { self.dir.join(format!("part-v3-{key}.glb")) }
+    pub fn fail_file(&self, key: &str) -> PathBuf { self.dir.join(format!("part-v3-{key}.fail")) }
     /// What the cache already knows of a model: its GLB, or a failure not yet a day old. None: convert it.
     pub fn lookup(&self, key: &str) -> Option<Result<PathBuf, String>> {
         let g = self.glb(key);
@@ -710,7 +710,7 @@ mod tests {
         assert!(c.lookup("k").is_none());
         let t = c.dir.join("tmp"); std::fs::write(&t, "glb").unwrap();
         let g = c.publish("k", &t).unwrap();
-        assert_eq!(g, c.dir.join("part-v2-k.glb")); assert!(!t.exists()); assert_eq!(c.lookup("k"), Some(Ok(g)));
+        assert_eq!(g, c.dir.join("part-v3-k.glb")); assert!(!t.exists()); assert_eq!(c.lookup("k"), Some(Ok(g)));
         std::fs::write(&t, "").unwrap(); assert!(c.publish("j", &t).is_err() && !c.glb("j").exists(), "an empty file is not a model");
         c.record_fail("f", "nope");
         assert_eq!(c.lookup("f"), Some(Err("nope".into())));

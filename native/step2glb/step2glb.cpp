@@ -1,6 +1,8 @@
 // backplane-step2glb: a STEP file to a GLB with OpenCascade, natively (no FreeCAD, no Bun, no Python).
 //
-//   backplane-step2glb IN.step OUT.glb [--linear MM] [--angular RAD] [--parts DIR]
+//   backplane-step2glb IN.step OUT.glb [--linear MM] [--relative] [--angular RAD] [--parts DIR]
+//   (--relative: --linear is a share of each edge's size, not millimetres)
+//   [--fine x0,y0,z0,x1,y1,z1 --fine-linear L --fine-angular A]: the solids that meet that box (millimetres) are meshed at L and A instead
 //
 // Reads IN through XCAF (STEPCAFControl_Reader, colours on), meshes every distinct solid once with BRepMesh (several solids at a time on
 // the machine's cores, each solid's faces in parallel when there are few), and writes OUT: millimetres, Z up, one mesh whose primitives
@@ -12,7 +14,9 @@
 // said on stdout as `PART <triangles> <leaves> <file>` (the file last: its path may hold spaces); OUT is written after them all. Before the first: `OF <solids> <faces>`.
 // Always on stdout: `TIME <stage> <ms>` per stage (read, transfer, mesh, write) and, last, `TRIS <triangles>`. Exit 0 only when OUT was
 // written with at least one triangle; else a line saying why and exit 1 (2: bad arguments, 3: unreadable STEP).
+#include <BRepBndLib.hxx>
 #include <BRepMesh_IncrementalMesh.hxx>
+#include <Bnd_Box.hxx>
 #include <BRep_Builder.hxx>
 #include <IMeshTools_Parameters.hxx>
 #include <Interface_Static.hxx>
@@ -135,7 +139,7 @@ static bool write_glb(const Model& m, const std::string& path, const std::string
 // A distinct solid: as read (no healing yet), the colours its faces carry in the STEP (by face), then healed, with those colours moved
 // onto the healed faces, then meshed.
 struct Solid {
-  TopoDS_Shape raw, healed; TDF_Label label; size_t faces = 0;
+  TopoDS_Shape raw, healed; TDF_Label label; size_t faces = 0; bool fine = false;
   std::unordered_map<const void*, Rgb> raw_colour, colour;  // by face TShape
 };
 // A leaf of the assembly: where it is, which solid it shows, and its colour where its faces have none (its own, else a tint).
@@ -188,11 +192,16 @@ static void add_leaf(Model& m, const Leaf& l, const Solid& s) {
 }
 
 int main(int argc, char** argv) {
-  if (argc < 3) { say("usage: backplane-step2glb IN.step OUT.glb [--linear MM] [--angular RAD] [--parts DIR]"); return 2; }
-  std::string in = argv[1], out = argv[2], parts; double linear = 0.03, angular = 0.2;
+  if (argc < 3) { say("usage: backplane-step2glb IN.step OUT.glb [--linear MM|SHARE] [--relative] [--angular RAD] [--parts DIR]"); return 2; }
+  std::string in = argv[1], out = argv[2], parts; double linear = 0.03, angular = 0.2; bool relative = false;
+  double fine_box[6] = {0, 0, 0, 0, 0, 0}, fine_linear = 0.001, fine_angular = 0.05; bool fine = false;
   for (int i = 3; i < argc; i++) {
     std::string a = argv[i];
+    if (a == "--relative") { relative = true; continue; }
     if (i + 1 >= argc) { say("%s needs a value", a.c_str()); return 2; }
+    if (a == "--fine") { fine = sscanf(argv[++i], "%lf,%lf,%lf,%lf,%lf,%lf", &fine_box[0], &fine_box[1], &fine_box[2], &fine_box[3], &fine_box[4], &fine_box[5]) == 6; if (!fine) { say("--fine needs x0,y0,z0,x1,y1,z1"); return 2; } continue; }
+    if (a == "--fine-linear") { fine_linear = atof(argv[++i]); continue; }
+    if (a == "--fine-angular") { fine_angular = atof(argv[++i]); continue; }
     if (a == "--linear") linear = atof(argv[++i]); else if (a == "--angular") angular = atof(argv[++i]); else if (a == "--parts") parts = argv[++i];
     else { say("unknown argument %s", a.c_str()); return 2; }
   }
@@ -234,9 +243,16 @@ int main(int argc, char** argv) {
     Rgb tint = from_srgb(PAL[plain % 6]);
     if (n.Style.IsSetColorSurf() && !is_default(n.Style.GetColorSurf())) tint = rgb(n.Style.GetColorSurf()); else plain++;
     leaves.push_back(Leaf{n.Location, ix, tint});
+    // --fine: a solid with a leaf in the box is meshed finer (the part the person zoomed in on)
+    if (fine && !solids[ix].fine) {
+      Bnd_Box bb; BRepBndLib::Add(s.Located(n.Location), bb, false);
+      if (!bb.IsVoid()) { double x0, y0, z0, x1, y1, z1; bb.Get(x0, y0, z0, x1, y1, z1);
+        solids[ix].fine = x1 >= fine_box[0] && x0 <= fine_box[3] && y1 >= fine_box[1] && y0 <= fine_box[4] && z1 >= fine_box[2] && z0 <= fine_box[5]; }
+    }
   }
   if (leaves.empty()) { say("no surfaces in %s", in.c_str()); return 1; }
   if (!parts.empty()) say("OF %zu %zu", leaves.size(), faces);
+  if (fine) { size_t nf = 0; for (auto& so : solids) nf += so.fine; say("FINE %zu", nf); }
 
   // Two solids that share a face cannot be healed or meshed at once (the face is one); then one worker does them in turn.
   bool shared = false;
@@ -246,7 +262,8 @@ int main(int argc, char** argv) {
   }
   ShapeProcess_OperLibrary::Init();  // the healing operators' registry, filled once before any worker reads it
   const unsigned cores = std::max(1u, std::thread::hardware_concurrency());
-  IMeshTools_Parameters p; p.Deflection = linear; p.Angle = angular; p.Relative = false;
+  // --relative: the linear deflection is a share of each edge's size (OpenCascade's relative mode), so a small hole is as round as a big one
+  IMeshTools_Parameters p; p.Deflection = linear; p.Angle = angular; p.Relative = relative;
   // each solid's faces in parallel too when there are fewer solids than cores (one big part: all cores on it)
   p.InParallel = shared || solids.size() < cores;
   std::vector<char> meshed(solids.size(), 0);
@@ -259,7 +276,8 @@ int main(int argc, char** argv) {
     for (size_t k; (k = next.fetch_add(1)) < order.size();) {
       Solid& s = solids[order[k]];
       heal(s, params, ops);
-      BRepMesh_IncrementalMesh(s.healed, p);
+      IMeshTools_Parameters sp = p; if (s.fine) { sp.Deflection = fine_linear; sp.Angle = fine_angular; }
+      BRepMesh_IncrementalMesh(s.healed, sp);
       std::lock_guard<std::mutex> g(mu); meshed[order[k]] = 1; cv.notify_all();
     }
   };
