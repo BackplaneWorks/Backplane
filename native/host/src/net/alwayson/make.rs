@@ -31,7 +31,7 @@ pub async fn run(hub: Arc<Hub>, sh: Arc<Shared>, b: Boat, from: String) {
         let r = match *id {
             "create" => create(&hub, &sh, &b, &o).await,
             "ready" => ready(&b, &sh.box_id()).await,
-            "build" => build(&hub, &b, &sh.box_id()).await,
+            "build" => build(&hub, &b, &sh.box_id(), &o.network).await,
             "service" => service(&hub, &b, &sh.box_id(), &o).await,
             "network" => network(&hub, &sh, &b, &o).await,
             "start" => start_hub(&b, &sh.box_id(), &o.network).await,
@@ -116,12 +116,25 @@ pub fn source_of(os: &str, arch: &str, build: Option<&str>) -> Source {
     let main_build = build.map_or(false, |b| !crate::update::rel::tag_ok(b));
     if same && main_build { Source::Upload } else { Source::Release }
 }
-pub fn source_here() -> (Source, Option<PathBuf>) {
-    let dir = build_dir().filter(|d| d.join("backplane-hub").is_file() && d.join("backplane").is_file());
+pub fn source_here() -> (Source, Option<PathBuf>) { let (s, d, _) = source_why(); (s, d) }
+/// `source_here`, and why, as the hub's log says it once per make ("release: no guard beside the hub in /x").
+pub fn source_why() -> (Source, Option<PathBuf>, String) {
+    let exe = build_dir();
+    let dir = exe.clone().filter(|d| d.join("backplane-hub").is_file() && d.join("backplane").is_file());
     let id = dir.as_deref().and_then(build_id);
     // BACKPLANE_ALWAYSON_SOURCE=release: a test's way to take the release path from a main build (test/alwayson/e2e.sh SOURCE=release)
-    if std::env::var("BACKPLANE_ALWAYSON_SOURCE").map_or(false, |v| v == "release") { return (Source::Release, dir) }
-    (source_of(std::env::consts::OS, std::env::consts::ARCH, id.as_deref()), dir)
+    if std::env::var("BACKPLANE_ALWAYSON_SOURCE").map_or(false, |v| v == "release") { return (Source::Release, dir, "release: BACKPLANE_ALWAYSON_SOURCE=release".into()) }
+    let (os, arch) = (std::env::consts::OS, std::env::consts::ARCH);
+    let src = source_of(os, arch, id.as_deref());
+    let where_ = exe.as_deref().map_or("an unknown folder".to_string(), |d| d.display().to_string());
+    let why = match (&src, &dir, &id) {
+        (Source::Upload, _, Some(i)) => format!("upload: this hub's main build {i}"),
+        _ if crate::update::rel::target_of(os, arch) != Some(BOAT_TARGET) => format!("release: this hub is {os}-{arch}, the Boat is {BOAT_TARGET}"),
+        (_, None, _) => format!("release: no guard beside the hub in {where_}"),
+        (_, _, Some(i)) => format!("release: {i} is a release build"),
+        _ => format!("release: {where_} is not a build folder"),
+    };
+    (src, dir, why)
 }
 /// The release a Boat gets: this hub's version, or `BACKPLANE_ALWAYSON_RELEASE` (a test's published version).
 pub fn release_version(own: &str) -> String { std::env::var("BACKPLANE_ALWAYSON_RELEASE").ok().filter(|v| !v.trim().is_empty()).unwrap_or_else(|| own.to_string()) }
@@ -162,8 +175,9 @@ printf '%s\\n' '{expect}' > builds/.in-{t}/EXPECT; mv builds/.in-{t} builds/{t}"
         size = f.size, url = f.url.replace('\'', ""), sha = f.sha256, expect = json!({"version": f.version, "commit": f.commit}), layout = layout())
 }
 
-async fn build(hub: &Arc<Hub>, b: &Boat, id: &str) -> Result<String, String> {
-    let (src, dir) = source_here();
+async fn build(hub: &Arc<Hub>, b: &Boat, id: &str, net: &str) -> Result<String, String> {
+    let (src, dir, why) = source_why();
+    eprintln!("backplane-hub: always-on Boat {id}: the build comes by {why}");
     b.sh(id, &layout(), 30).await?;
     let bid = if src == Source::Release {
         let (home, version) = (hub.cfg.home.clone(), release_version(&hub.cfg.version));
@@ -200,6 +214,10 @@ async fn build(hub: &Arc<Hub>, b: &Boat, id: &str) -> Result<String, String> {
     }
     bid
     };
+    // a public Boat needs the door (public.rs): a build without it is told now, seconds after the install, not after the hub has started
+    if net == "public" && b.sh(id, &format!("grep -qa BACKPLANE_PUBLIC_PORT {R}/builds/{bid}/backplane-hub && echo door || echo none"), 60).await?.trim() != "door" {
+        return Err(no_door(&bid))
+    }
     // the first build: CURRENT, and the guard beside it (an update never replaces the program running it)
     b.sh(id, &format!("set -e; cd {R}; [ -s CURRENT ] || echo {bid} > CURRENT; cp builds/$(head -1 CURRENT)/backplane backplane.new && mv backplane.new backplane"), 60).await?;
     Ok(bid)
@@ -209,14 +227,15 @@ async fn build(hub: &Arc<Hub>, b: &Boat, id: &str) -> Result<String, String> {
 /// homes, which take every build main-build.sh publishes), that build goes up and the Boat's guard runs it on probation, going back by itself
 /// if it fails its health check, as `scripts/boat-hub.sh update` does for bp-hub. A Boat on a release updates itself on its own channel instead.
 /// Keeps the Boat's current build and the two before it. Ok(Some(build)) when it moved, Ok(None) when there was nothing to do.
-pub async fn follow(hub: &Arc<Hub>, b: &Boat, id: &str, had: &str) -> Result<Option<String>, String> {
+pub async fn follow(hub: &Arc<Hub>, b: &Boat, id: &str, had: &str, net: &str) -> Result<Option<String>, String> {
+    let net = net.to_string();
     let (src, dir) = source_here();
     if src != Source::Upload { return Ok(None) }
     let Some(bid) = dir.as_deref().and_then(build_id) else { return Ok(None) };
     if bid == had { return Ok(None) }
     let cur = b.sh(id, &format!("head -1 {R}/CURRENT 2>/dev/null || true"), 30).await?.trim().to_string();
     if cur == bid { return Ok(Some(bid)) }
-    build(hub, b, id).await?;
+    build(hub, b, id, &net).await?;
     b.sh(id, &format!("if systemctl is-active -q bp-hub; then BACKPLANE_HOME={R}/home {R}/backplane hub update {bid}; else echo {bid} > {R}/CURRENT; fi"), 120).await?;
     let _ = b.sh(id, &format!("cd {R}/builds && ls -1t | grep -v '^\\.' | tail -n +4 | while read -r d; do [ \"$d\" = \"$(head -1 {R}/CURRENT)\" ] || [ -e .pins/$d ] || rm -rf -- \"$d\"; done"), 120).await;
     Ok(Some(bid))
@@ -313,14 +332,19 @@ async fn start_hub(b: &Boat, id: &str, net: &str) -> Result<String, String> {
                     if matches!(c.trim(), "200" | "503") { return Ok(String::new()) }
                     tokio::time::sleep(Duration::from_secs(2)).await;
                 }
-                let v = b.sh(id, &format!("{R}/builds/$(head -1 {R}/CURRENT)/backplane-hub --version 2>/dev/null | awk '{{print $NF}}'"), 30).await.unwrap_or_default();
-                return Err(format!("Backplane {} on the Boat has no public address yet: it came with a later release. Use your tailnet, or wait for the next release.", v.trim()))
+                let cur = b.sh(id, &format!("head -1 {R}/CURRENT"), 30).await.unwrap_or_default();
+                return Err(no_door(cur.trim()))
             }
         }
         tokio::time::sleep(Duration::from_secs(3)).await;
     }
     let log = b.sh(id, &format!("tail -5 {R}/hub.log 2>/dev/null; systemctl is-active bp-hub"), 30).await.unwrap_or_default();
     Err(format!("the hub did not answer on the Boat within three minutes: {}", log.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(200).collect::<String>()))
+}
+
+/// What a public Boat says when its build has no door (a release from before it: v0.15.2 and older).
+pub fn no_door(build: &str) -> String {
+    format!("Backplane {build} on the Boat has no public address yet: it came with a later release. Use your tailnet, or wait for the next release.")
 }
 
 /// The machine code `backplane pair --machine` prints on the Boat: "On the other machine: backplane pair --join <address> <code>".
@@ -455,6 +479,11 @@ mod tests {
         assert!(sh.starts_with(&format!("set -e; mkdir -p {R}/builds {R}/home {R}/units; cd {R};")), "a fresh Boat has no layout: the install makes its own first");
         assert!(sh.contains(&format!("echo '{sha}  .in-v0.15.2.tgz' | sha256sum -c")) && sh.contains("--max-filesize 1234") && sh.contains("--no-same-owner") && sh.contains("mv builds/.in-v0.15.2 builds/v0.15.2"));
         assert!(sh.contains(r#"{"version":"0.15.2","commit":"c0ffee"}"#), "EXPECT from the signed manifest");
+    }
+    #[test] fn the_source_says_why() {
+        let (src, _, why) = source_why();
+        assert!(why.starts_with(if src == Source::Upload { "upload: " } else { "release: " }), "{why}");
+        assert!(no_door("v0.15.0").starts_with("Backplane v0.15.0 on the Boat has no public address yet"));
     }
     #[test] fn a_build_folder_name_is_the_guards_id() {
         assert_eq!(build_id(Path::new("/x/builds/20261111-001717-483154793")).as_deref(), Some("20261111-001717-483154793"));
