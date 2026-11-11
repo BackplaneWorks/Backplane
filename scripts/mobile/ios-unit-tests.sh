@@ -32,4 +32,5 @@ run browser-input BrowserInputTests.swift "$ROOT/test/mobile/browser_input_cases
 run google-loop GoogleLoopTests.swift "" GoogleLoopLogic.swift
 run swarm-model SwarmModelTests.swift "" SwarmModel.swift
 run section-menu SectionMenuTests.swift "" SectionMenu.swift
+run mcp-page McpPageTests.swift "" McpPage.swift
 sh "$ROOT/scripts/mobile/ios-outbox-test.sh" && echo "ok outbox"
