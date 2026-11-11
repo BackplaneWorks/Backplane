@@ -1699,6 +1699,7 @@ fn spawn_fork_events_loop(me: mpsc::UnboundedSender<Msg>, pro: String, gen: u64,
                 json!({"since": since, "wait_ms": 25000, "max": 0}), 35000).await;
             if !o["ok"].as_bool().unwrap_or(false) {
                 errs += 1;
+                eprintln!("kicad embed: NextEvents failed ({errs}/6): {}", o["error"].as_str().unwrap_or(""));
                 if errs > 5 { return }
                 tokio::time::sleep(Duration::from_millis(250)).await;
                 continue;
@@ -1713,6 +1714,7 @@ fn spawn_fork_events_loop(me: mpsc::UnboundedSender<Msg>, pro: String, gen: u64,
                 for ev in evs {
                     let ty = ev["type"].as_str().unwrap_or("");
                     let ty_n = ev["type"].as_i64().unwrap_or(0);
+                    if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("kicad embed event: {ev}"); }
                     if ty == "ET_SELECTION_CHANGED" || ty_n == 14 { super::xprobe::kicad_selected(&pro, ev); continue }
                     if super::reload::on_event(&pro, ev) { need_sync = true; continue }
                     if ty == "ET_SHOW_REQUESTED" || ty_n == 9 {

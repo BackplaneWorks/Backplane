@@ -538,7 +538,7 @@ impl Hub {
     pub fn view_info_frame(&self) -> Option<Value> {
         let mut i = serde_json::Map::new();
         for (k, v) in self.extra_info.lock().unwrap().iter() {
-            if !v.is_empty() && (k == "hub.offer" || k.starts_with("editor.kicad.") || k.starts_with("kicad.reload.") || k.starts_with("browser.tabs.")) {
+            if !v.is_empty() && (k == "hub.offer" || k.starts_with("editor.kicad.") || k.starts_with("kicad.reload.") || k.starts_with("kicad.sel.") || k.starts_with("browser.tabs.")) {
                 i.insert(k.clone(), json!(v));
             }
         }
