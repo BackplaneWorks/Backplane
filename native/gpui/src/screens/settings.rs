@@ -288,7 +288,9 @@ pub fn save_vault(this: &mut Backplane, b: &Btn, cx: &mut Context<Backplane>) {
         if let Ok((m, p)) = save_request(&b.value, "", &input.read(cx).content.to_string()) { let _ = this.tx.try_send(Command::Rpc(m, Secret(p), if field == "sicode" { "signin-code" } else { "signin" })); }
         cx.notify(); return;
     }
-    let (field, err) = if key { ("kval", "key-err") } else { ("sval", "secret-err") };
+    // an MCP server's key has a box of its own (`msec.<vault name>`, mcpx/page.rs); every other secret is the masked box's `sval`
+    let mcp_box = b.value.split('\u{1f}').next().filter(|n| n.starts_with("mcp-")).map(|n| format!("msec.{n}"));
+    let (field, err) = if key { ("kval", "key-err") } else { (mcp_box.as_deref().unwrap_or("sval"), "secret-err") };
     let say = |this: &mut Backplane, why: &str| { let _ = this.tx.try_send(Command::Action(err.into(), why.into())); };
     let Some(input) = this.screens.fields.get(field).map(|s| s.input.clone()) else { return };
     let typed_name = this.screens.fields.get(if key { "kname" } else { "sname" }).map(|s| s.input.read(cx).content.to_string()).unwrap_or_default();
