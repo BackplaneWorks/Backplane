@@ -387,7 +387,7 @@ pub fn rpc_error(x:&Value)->String {
 /// The product RPCs whose ok answer is a message the hub took (the window then empties its box). A bot's chat sends `bots.say`, not `turn.start`.
 pub fn is_post(m:&str)->bool { ["message.send","thread.send","send","turn.start","bots.say","bots.give"].contains(&m) }
 /// A view command that is for this client, not the hub: `compose` sets a thread's composer, `say` is one line for the person (a refusal, unless its `tone` is "note").
-pub fn client_cmd(c:&Value)->Option<Event>{let text=c["text"].as_str().unwrap_or("").to_string();match c["type"].as_str()?{"compose"=>Some(Event::Compose(c["thread"].as_str()?.to_string(),text)),"say" if c["tone"]=="note"=>Some(Event::Note(text)),"say"=>Some(Event::Refused(text)),_=>None}}
+pub fn client_cmd(c:&Value)->Option<Event>{let text=c["text"].as_str().unwrap_or("").to_string();match c["type"].as_str()?{"compose"=>Some(Event::Compose(c["thread"].as_str()?.to_string(),text)),"say" if c["tone"]=="note"=>Some(Event::Note(text)),"say" if c["of"]=="new-thread"=>Some(Event::Data("create-refused",serde_json::Value::String(text))),"say"=>Some(Event::Refused(text)),_=>None}}
 
 #[cfg(test)]
 mod refused_text_tests { #[test] fn a_stale_view_says_it_is_not_on_this_hub(){ assert!(super::refused_view_text(&serde_json::json!("STALE_VIEW")).contains("not on this hub")); assert_eq!(super::refused_view_text(&serde_json::json!("X")),"View request refused: \"X\""); } }

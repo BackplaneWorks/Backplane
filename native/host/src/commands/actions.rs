@@ -29,6 +29,8 @@ pub struct ActOut {
     pub next_target: Option<Value>,
 }
 
+/// Whether two project ids are on one machine: a linked machine's are `<link>~<id>`, this machine's have no `~`.
+pub fn same_machine(a: &str, b: &str) -> bool { a.split_once('~').map(|x| x.0) == b.split_once('~').map(|x| x.0) }
 fn draft<'a>(s: &'a Value, k: &str) -> &'a str { s["drafts"][k].as_str().unwrap_or("") }
 
 struct Acc<'a> { r: &'a Req<'a>, d: Map<String, Value>, rid: u64, cmds: Vec<Value>, unselect: bool }
@@ -162,7 +164,13 @@ pub fn act(req: &Req) -> Option<ActOut> {
         "run-on" => { let (p, to) = v.split_once('|')?; if p.is_empty() { return None } a.set(&format!("@runon.{p}"), to); a.set("@menu", ""); }
         "new-thread" => {
             if v.is_empty() { return None } // no project named: the new-bot form, the helper's
+            // `<target>\u{1f}<picked>`: the window says which machine the person picked; a target on any other machine is refused, never made there
+            let (v, picked) = v.split_once('\u{1f}').unwrap_or((v, ""));
             let chosen = draft(r.session, &format!("@runon.{v}")).to_string(); let v = if chosen.is_empty() { v } else { chosen.as_str() };
+            if !picked.is_empty() && !same_machine(v, picked) {
+                a.cmds.push(json!({"type": "say", "of": "new-thread", "text": "Not started: the machine you picked is not where this would run. Pick it again, or another."}));
+                return Some(a.out())
+            }
             let rid = a.rid.to_string();
             let at = format!("{}|{}", r.session["info"]["local.machine"].as_str().unwrap_or(""), r.session["info"]["local.generation"].as_str().unwrap_or(""));
             a.set("@del", ""); a.set("@menu", ""); a.set("@want.viewer", ""); a.set("@want.new", &rid); a.set("@want.new.at", &at);
@@ -288,6 +296,15 @@ mod tests {
         assert!(act(&Req { hub: "h", session: &s, sel: "", action: "row-snooze", value: "t1", title_of: &t }).is_none(), "a snooze without its span is not mine");
         let o = act(&Req { hub: "h", session: &json!({"sel":"","rid":4,"drafts":{},"info":{"local.machine":"m","local.generation":"7"}}), sel: "", action: "new-thread", value: "p1", title_of: &t }).unwrap();
         assert_eq!(o.session_patch["drafts"]["@want.new.at"], "m|7"); assert_eq!(o.session_patch["drafts"]["@want.new"], "4");
+    }
+    /// No pick of machine X becomes a create on machine Y: a target on another machine than the one picked is refused (the window keeps the text).
+    #[test] fn a_new_thread_on_another_machine_than_the_one_picked_is_refused() {
+        let t = |_: &str| String::new();
+        let o = act(&Req { hub: "h", session: &json!({"sel":"","rid":4,"drafts":{},"info":{}}), sel: "", action: "new-thread", value: "p1\u{1f}L~p9", title_of: &t }).unwrap();
+        assert!(o.cmds.iter().all(|c| c["type"] != "send"), "nothing is made"); assert!(o.cmds.iter().any(|c| c["type"] == "say" && c["of"] == "new-thread"));
+        let o = act(&Req { hub: "h", session: &json!({"sel":"","rid":4,"drafts":{},"info":{}}), sel: "", action: "new-thread", value: "L~p9\u{1f}L~p9", title_of: &t }).unwrap();
+        let sent: Value = serde_json::from_str(o.cmds[0]["text"].as_str().unwrap()).unwrap(); assert_eq!(sent["p"]["project"], "L~p9");
+        assert!(same_machine("p1", "p2") && same_machine("L~a", "L~b") && !same_machine("p1", "L~p1") && !same_machine("L~a", "M~a"));
     }
     /// The composer's machine picker: run-on keeps the choice for that project; the next new thread there starts on the machine chosen.
     #[test] fn run_on_sends_the_next_new_thread_to_the_machine_chosen() {

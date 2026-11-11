@@ -433,7 +433,7 @@ impl Backplane {
             /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::Imp(id) => { crate::screens::improvements::act(self, id, cx); self.ui_epoch += 1; format!("improvements {id}") }
             /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::Term(op, key) => { match op.as_str() { "expand" => self.card_expand(key, cx), "pop" => self.card_pop(key, None, cx), "stop" => self.card_stop(key, cx), _ => self.card_take_keys(key, None, cx) } format!("term {op}") }
             /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::Bot(k, v) => { crate::screens::bots::press(self, k, v, cx); self.ui_epoch += 1; format!("bots {k}") }
-            /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::Node(a, p) => { if a == "flag" && p == "settings" { self.open_settings(cx); return format!("view.action {a}"); } if a == "proj-add" || a == "proj-new" || a == "new-thread" || crate::screens::tools::makes_thread(&a) { self.arm_new(); } self.go(&a, p.clone(), cx); format!("view.action {a}") }
+            /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::Node(a, p) => { if a == "run-on" { if let Some((pj, to)) = p.split_once('|') { self.screens.projects.picked.insert(pj.to_string(), to.to_string()); } } if a == "flag" && p == "settings" { self.open_settings(cx); return format!("view.action {a}"); } if a == "proj-add" || a == "proj-new" || a == "new-thread" || crate::screens::tools::makes_thread(&a) { self.arm_new(); } self.go(&a, p.clone(), cx); format!("view.action {a}") }
         }
     }
     /// The popup is always the hub's rows now (no client-side rows), so a popup step is never local.

@@ -29,6 +29,9 @@ pub struct Projects {
     /// What the hub said when it would not make a page's New thread (its machine away, not linked...): drawn by the box until the next Send
     /// (kept apart from the window's `error`, which a view that says Connected clears)
     pub refused: String,
+    /// What the person picked on each project's runs-on line here (`run-on`): project id -> the target project id (`<link>~<id>` for a linked
+    /// machine's). A page's Send never goes to another machine than this (`page_send`)
+    pub picked: std::collections::HashMap<String, String>,
 }
 
 /// What Edit puts in the composer: `/intent` and the goal and notes (the hub's `intent_edit`; its Send saves them), the template for none.
@@ -105,11 +108,18 @@ pub fn submit_cmd(data: &Value, typed: &str) -> Option<Command> {
 }
 /// Send on a project's page: the new thread goes where its "runs on" line says (the picker's choice, the hub's first `newOn` entry: this
 /// machine's project id or a linked machine's `<link>~<id>`), and the typed text waits to be its first message once it is on show.
-pub fn page_send(data: &Value, pid: &str, text: &str) -> Option<(Command, String)> {
+/// `picked`: what the person picked here for this project. The target must be on that machine, or nothing is sent (Err: the words to show,
+/// the text stays in the box); the command carries the pick too, and the hub refuses a target on another machine as well.
+pub fn page_send(data: &Value, pid: &str, text: &str, picked: Option<&str>) -> Option<Result<(Command, String), String>> {
     if text.trim().is_empty() { return None }
     let p = find(data, pid)?;
     let to = p["newOn"].as_array().and_then(|a| a.iter().find(|o| o["on"] == true && matches!(o["kind"].as_str(), Some("machine") | Some("wait") | None))).and_then(|o| o["value"].as_str()).filter(|v| !v.is_empty()).unwrap_or(pid);
-    Some((Command::Action("new-thread".into(), to.to_string()), text.to_string()))
+    let machine = |id: &str| id.split_once('~').map(|x| x.0.to_string());
+    if let Some(pk) = picked.filter(|p| !p.is_empty()) {
+        if machine(to) != machine(pk) { return Some(Err(crate::i18n::trs("Not sent: the machine you picked is not where this would run. Pick it again, or another."))) }
+        return Some(Ok((Command::Action("new-thread".into(), format!("{to}\u{1f}{pk}")), text.to_string())))
+    }
+    Some(Ok((Command::Action("new-thread".into(), to.to_string()), text.to_string())))
 }
 /// The hub refused the new thread a page's Send asked for: the text goes back in the box (never lost), the window says why.
 pub fn take_back(first_send: &mut Option<(String, String, std::time::Instant)>) -> Option<String> { first_send.take().map(|(_, text, _)| text) }
@@ -345,10 +355,13 @@ mod home_tests {
     /// A page's Send with a linked machine picked: the command names that machine's project, the text waits; refused, the text comes back.
     #[test] fn a_page_send_goes_to_the_machine_picked_and_a_refusal_gives_the_text_back() {
         let d: serde_json::Value = serde_json::from_str(r#"{"projects":[{"id":"h|pA1","runsOn":"runs on boat-hub","newOn":[{"value":"L~pB1","label":"New thread on boat-hub","kind":"machine","on":true},{"value":"pA1","label":"New thread on desktop","kind":"machine"},{"value":"github.com/o/demo","label":"A Boat (fresh clone)","kind":"boat","disabled":true}]}]}"#).unwrap();
-        match page_send(&d, "pA1", "a thread sent to boat-hub") { Some((Command::Action(a, v), t)) => { assert_eq!((a.as_str(), v.as_str(), t.as_str()), ("new-thread", "L~pB1", "a thread sent to boat-hub")) } other => panic!("{other:?}") }
+        match page_send(&d, "pA1", "a thread sent to boat-hub", None) { Some(Ok((Command::Action(a, v), t))) => { assert_eq!((a.as_str(), v.as_str(), t.as_str()), ("new-thread", "L~pB1", "a thread sent to boat-hub")) } other => panic!("{other:?}") }
+        match page_send(&d, "pA1", "x", Some("L~pB1")) { Some(Ok((Command::Action(_, v), _))) => assert_eq!(v, "L~pB1\u{1f}L~pB1", "the pick goes with it"), other => panic!("{other:?}") }
         let mut d2 = d.clone(); d2["projects"][0]["newOn"][0]["on"] = serde_json::json!(false);
-        match page_send(&d2, "pA1", "x") { Some((Command::Action(_, v), _)) => assert_eq!(v, "pA1", "no choice: this project"), other => panic!("{other:?}") }
-        assert!(page_send(&d, "pA1", "  ").is_none(), "nothing typed: nothing sent");
+        match page_send(&d2, "pA1", "x", None) { Some(Ok((Command::Action(_, v), _))) => assert_eq!(v, "pA1", "no choice: this project"), other => panic!("{other:?}") }
+        // boat-hub picked, but the line's choice is desktop (the pick was lost, the rows moved): never sent to desktop, the text stays
+        assert!(matches!(page_send(&d2, "pA1", "x", Some("L~pB1")), Some(Err(_))), "a pick of B never becomes a create on A");
+        assert!(page_send(&d, "pA1", "  ", None).is_none(), "nothing typed: nothing sent");
         let mut fs = Some(("t0".to_string(), "a thread sent to boat-hub".to_string(), std::time::Instant::now()));
         assert_eq!(take_back(&mut fs).as_deref(), Some("a thread sent to boat-hub")); assert!(fs.is_none());
         // given back: into an empty box exactly; a box with new text keeps it, and the old text waits to be restored (never merged)
