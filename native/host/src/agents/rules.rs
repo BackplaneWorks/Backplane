@@ -254,3 +254,19 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 }
+
+/// The row a steer leaves in the thread: the message that cut in, so the row never stands without it.
+pub fn steer_summary(text: &str) -> String {
+    let one: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if one.is_empty() { return "Steered: the turn starts again".into() }
+    let cut: String = one.chars().take(300).collect();
+    format!("Steered: {cut}{}", if one.chars().count() > 300 { "..." } else { "" })
+}
+#[cfg(test)]
+mod steer_summary_tests {
+    #[test] fn names_the_message() {
+        assert_eq!(super::steer_summary("  fix\nthe  legs "), "Steered: fix the legs");
+        assert_eq!(super::steer_summary(" "), "Steered: the turn starts again");
+        assert!(super::steer_summary(&"x".repeat(400)).ends_with("..."));
+    }
+}
