@@ -34,7 +34,7 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, open: bool, l: &Local) -> 
         }
     }
     /* i18n-ok: drawn through trs */ let title = trs("Keyboard shortcuts");
-    /* i18n-ok: drawn through trs */ let note = trs("Settings, This device changes them. Esc closes this.");
+    let note = crate::i18n::t("gpui.keysheet.note");
     let sheet = div().id("keysheet").relative().w(px(640.)).max_h(relative(0.85)).flex().flex_col().bg(c("panel")).border_1().border_color(c("line")).text_color(c("text"))
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
         // where it is, for the window's checks (BACKPLANE_GPUI_RECTS=1: test/onboarding/run.sh finds it)
