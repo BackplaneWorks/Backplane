@@ -99,6 +99,27 @@ h=$(c "$PUB/healthz"); w=$(c -H 'Upgrade: websocket' -H 'Connection: Upgrade' -H
 s=$(c "$PUB/hub/status"); l=$(c -X POST -d '{}' "$PUB/bots/pair/local"); d=$(c "$PUB/client/capabilities")
 say "door: healthz $h, /ws?data=1 $w, /hub/status $s, /bots/pair/local $l, /client/capabilities $d"
 [ "$h" = 200 ] && [ "$w" = 401 ] && [ "$s" = 401 ] && [ "$l" = 401 ] && [ "$d" = 401 ] || fail "the public door let something through"
+# Move your uberbot there: a fresh throwaway home has no uberbot (as at setup's step 4); it is made here, then moved to the Boat
+LINK=$(view | python3 -I -c 'import sys,json; print(json.load(sys.stdin)["boat"].get("link",""))')
+[ -n "$LINK" ] || fail "no link recorded for the Boat"
+# A fresh Boat has no agent signed in, and the move's own check refuses until the uberbot's provider is signed in there (Sign it in there: a
+# browser approval this script cannot give). MOVE=full expects the move to finish (sign the Boat in first); by default the press must make the
+# uberbot here, get past "the home is not on this machine" to that check, and the row must say its reason.
+if [ "${MOVE:-}" != full ]; then
+  out=$(act alwayson-move "$LINK") && fail "the move started with nothing signed in on the Boat: $out"
+  echo "$out" | grep -q "not signed in on" || fail "Move was refused for another reason: $out"
+  view | python3 -I -c 'import sys,json; v=json.load(sys.stdin); e=v.get("move_err",""); assert "not signed in on" in e, v; print("move row says:", e)' || fail "the row does not say why"
+  grep -q '"name":"Bub"' "$H/events.jsonl" || fail "no uberbot was made here"
+  say "move: the uberbot was made here, and the move's check said why it waits"
+else
+out=$(act alwayson-move "$LINK") || fail "Move was refused: $out"
+for i in $(seq 1 120); do
+  mv=$(view | python3 -I -c 'import sys,json; v=json.load(sys.stdin); m=v.get("move") or {}; print(m.get("state",""), "|", m.get("step",""), "|", m.get("note",""), "|", v.get("move_err",""))')
+  case "$mv" in done*) say "move: $mv"; break;; failed*) fail "the move failed: $mv";; esac
+  [ $((i % 6)) = 0 ] && say "move: $mv"; sleep 5
+done
+case "$mv" in done*) ;; *) fail "the move did not end in 10 minutes: $mv";; esac
+fi
 # keep-alive and cost
 act alwayson-check > /dev/null; view | python3 -I -c 'import sys,json; v=json.load(sys.stdin); print("status:", v["status"], "cost:", v["cost"])'
 # Delete it: two presses
@@ -108,5 +129,5 @@ sleep 5
 st=$(boat --no-update info "$BOX" --json 2> /dev/null | python3 -I -c 'import sys,json; print(json.load(sys.stdin)["sandbox"]["state"])' 2> /dev/null || echo gone)
 say "after Delete: $BOX is $st"
 case "$st" in gone|deleted|deleting) ;; *) fail "the Boat is still $st";; esac
-say "PASS ($BOX made, linked, door checked, deleted)"; echo "$BOX" >> "$W/../bp-aon-e2e-boats.txt"
+say "PASS ($BOX made, linked, door checked, Move ${MOVE:-checked}, deleted)"; echo "$BOX" >> "$W/../bp-aon-e2e-boats.txt"
 BOX=""

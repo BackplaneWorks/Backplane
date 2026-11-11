@@ -69,8 +69,8 @@ pub fn act(_f: &Facts, session: &Value, _c: &Client, action: &str, value: &str, 
             ask.send("alwayson.act", json!({"action": a, "value": value, "fields": fields}));
             Some(if a == "alwayson-other-pair" { json!({"drafts": {"@f.obaonaddr": "", "@f.obaoncode": ""}}) } else { json!({}) })
         }
-        // Sign it in to your agents (lane G's panel: `machine-signin*`) and Move your uberbot there (`machine-home`, lane H)
-        a if a.starts_with("machine-signin") || a == "machine-home" => {
+        // Sign it in to your agents (lane G's panel: `machine-signin*`) and Move your uberbot there (`alwayson-move`: net/alwayson makes the uberbot first when there is none, then the home move)
+        a if a.starts_with("machine-signin") => {
             let fields: serde_json::Map<String, Value> = super::signin_there::FIELDS.iter().map(|k| (k.to_string(), json!(draft(session, &format!("@f.{k}"))))).collect();
             ask.send("machines.page.act", json!({"action": a, "value": value, "fields": fields}));
             Some(json!({}))
@@ -90,7 +90,8 @@ mod tests {
         assert!(act(&f, &session, &c, "alwayson-other-pair", "", &mut ask).is_some());
         let cmd = ask.cmds.last().unwrap().to_string();
         assert!(cmd.contains("alwayson.act") && cmd.contains("http://nas:3797") && cmd.contains("ABCD"), "{cmd}");
-        assert!(act(&f, &session, &c, "machine-home", "p1", &mut ask).is_some()); assert!(ask.cmds.last().unwrap().to_string().contains("machines.page.act"));
+        assert!(act(&f, &session, &c, "machine-signin-open", "p1", &mut ask).is_some()); assert!(ask.cmds.last().unwrap().to_string().contains("machines.page.act"));
+        assert!(act(&f, &session, &c, "alwayson-move", "p1", &mut ask).is_some()); assert!(ask.cmds.last().unwrap().to_string().contains("alwayson.act"), "the move makes the uberbot first when there is none");
         assert!(act(&f, &session, &c, "kicad-path", "", &mut ask).is_none());
         let r = rows(&f, &json!({"drafts": {"@ob.aon": "boat"}}), &c);
         assert!(r.iter().any(|x| x["label"] == "Connect your Boat account"), "{r:?}");

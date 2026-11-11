@@ -1,7 +1,7 @@
 //! The always-on rows, a pure function of the info `alwayson` (mod.rs `Shared::view`): setup's step 4 (present/onboard_alwayson.rs) and Settings,
 //! Machines draw the same ones. Row shape: `{label, note, buttons:[{label, action, value, on}], fields?, tone?}`. Presses are `alwayson-*` (to the
 //! hub as `alwayson.act`), `secret-save` (the client puts the key straight into the vault, as on the API keys page), `machine-*` (Settings,
-//! Machines' own: sign in there is lane G's `machine-signin-open`, the move is `machine-home`), and the clients' own `open-url` and `copy`.
+//! Machines' own: sign in there is lane G's `machine-signin-open`, the move is `alwayson-move` (the uberbot made first when there is none, then `home.move`)), and the clients' own `open-url` and `copy`.
 use serde_json::{json, Value};
 
 fn btn(label: &str, action: &str, value: &str, on: bool) -> Value { json!({"label": label, "action": action, "value": value, "on": on}) }
@@ -114,12 +114,21 @@ fn delete_note(v: &Value) -> String {
 
 /// Sub-steps 3 and 4 once a machine is linked: sign it in to the agents (present/signin_there.rs: its button opens that machine's panel),
 /// move the uberbot there (`home.move`, net/homemove.rs).
-pub fn after_rows(link: &str, name: &str) -> Vec<Value> {
+pub fn after_rows(link: &str, name: &str) -> Vec<Value> { after_rows_with(link, name, &Value::Null) }
+/// `after_rows`, with the move's state from the view (`move`: the home move's info, `move_err`: why a press was refused) on its row.
+pub fn after_rows_with(link: &str, name: &str, v: &Value) -> Vec<Value> {
     if link.is_empty() { return vec![] }
-    vec![
-        row("Sign it in to your agents", &format!("{name} signs in to Claude, Codex and the others on its own. Account files never travel."), vec![crate::present::signin_there::open_button(link)]),
-        row("Move your uberbot there", "One press: Bub, the bots, rooms, reminders and phone alerts move, and Bub's chat shows the move.", vec![btn(&format!("Move it to {name}"), "machine-home", link, false)]),
-    ]
+    let mv = &v["move"];
+    let mut m = row("Move your uberbot there", "One press: Bub, the bots, rooms, reminders and phone alerts move, and Bub's chat shows the move. With no uberbot yet, it is made first.",
+        vec![btn(&format!("Move it to {name}"), "alwayson-move", link, false)]);
+    match (s(mv, "state"), s(v, "move_err")) {
+        (_, e) if !e.is_empty() => { m["note"] = json!(format!("The move did not start: {e}")); m["tone"] = json!("bad"); }
+        ("failed", _) => { m["note"] = json!(format!("The move failed{}: {}", if s(mv, "step").is_empty() { String::new() } else { format!(" at {}", s(mv, "step")) }, if s(mv, "note").is_empty() { "no reason was given" } else { s(mv, "note") })); m["tone"] = json!("bad"); }
+        ("moving", _) => { m["note"] = json!(format!("Moving to {name}: {}", if s(mv, "step").is_empty() { "starting" } else { s(mv, "step") })); m["buttons"] = json!([]); }
+        ("done", _) => { m["note"] = json!(format!("Your uberbot lives on {name} now.")); m["buttons"] = json!([]); }
+        _ => {}
+    }
+    vec![row("Sign it in to your agents", &format!("{name} signs in to Claude, Codex and the others on its own. Account files never travel."), vec![crate::present::signin_there::open_button(link)]), m]
 }
 
 /// Step 4's "An always-on Boat": the account, then making it (or its progress), then the two sub-steps after it.
@@ -130,7 +139,7 @@ pub fn boat_rows(v: &Value) -> Vec<Value> {
     let prog = progress_rows(v);
     if !prog.is_empty() { r.extend(prog) } else if !made && v["account"]["email"].as_str().map_or(false, |e| !e.is_empty()) { r.extend(make_rows(v)) }
     if made { r.extend(status_rows(v, crate::hub::now_ms() / 1000)) }
-    r.extend(after_rows(s(b, "link"), s(b, "name")));
+    r.extend(after_rows_with(s(b, "link"), s(b, "name"), v));
     r
 }
 
@@ -199,7 +208,7 @@ pub fn machines_rows(info: &Value, stays_on: bool) -> Vec<Value> {
         } else {
             r.extend(progress_rows(&v));
             if v["boat"]["made"] == true { r.extend(status_rows(&v, crate::hub::now_ms() / 1000)) }
-            r.extend(after_rows(s(&v["boat"], "link"), s(&v["boat"], "name")));
+            r.extend(after_rows_with(s(&v["boat"], "link"), s(&v["boat"], "name"), &v));
         }
     }
     r.push(stays_on_row(stays_on, super::other::under_systemd()));
@@ -238,6 +247,14 @@ mod tests {
         let none = boat_rows(&view(json!({})));
         assert!(none.iter().any(|x| s(x, "note").contains("boat api-key create backplane-always-on --ttl 365d --actions sandbox.create")), "the key row says how to make the key");
     }
+    #[test] fn the_move_row_says_why_it_did_not_start_or_failed_and_how_it_goes() {
+        let r = after_rows_with("p1", "bp", &json!({"move_err": "the home is not on this machine"}));
+        assert_eq!((r[1]["tone"].as_str(), r[1]["note"].as_str()), (Some("bad"), Some("The move did not start: the home is not on this machine")));
+        let r = after_rows_with("p1", "bp", &json!({"move": {"state": "failed", "step": "checking", "note": "codex is not signed in there"}}));
+        assert_eq!(r[1]["note"], "The move failed at checking: codex is not signed in there"); assert_eq!(r[1]["tone"], "bad");
+        let r = after_rows_with("p1", "bp", &json!({"move": {"state": "moving", "step": "copying"}})); assert_eq!(r[1]["note"], "Moving to bp: copying"); assert_eq!(r[1]["buttons"], json!([]));
+        assert_eq!(acts(&after_rows_with("p1", "bp", &Value::Null)), ["machine-signin-open:p1", "alwayson-move:p1"]);
+    }
     #[test] fn a_failed_sign_in_says_so_and_the_key_box_stays() {
         let r = boat_rows(&view(json!({"login_err": "Boat's sign-in did not start: Boat answered 404. Paste an API key instead."})));
         assert!(r.iter().any(|x| x["tone"] == "warn" && s(x, "note").contains("Paste an API key instead")));
@@ -272,7 +289,7 @@ mod tests {
         let r = status_rows(&armed, 1000); assert_eq!(s(&r[0]["buttons"][1], "label"), "Delete it: press again"); assert!(s(&r[1], "note").contains("Deletes the Boat bx_1 and everything on it"));
         let mut down = v.clone(); down["status"]["hub"] = json!("down"); down["down_since"] = json!(100);
         assert_eq!(status_rows(&down, 1100)[0]["tone"], "bad");
-        let b = boat_rows(&v); assert!(acts(&b).contains(&"machine-signin-open:p1".to_string()) && acts(&b).contains(&"machine-home:p1".to_string()), "sign in there and move it there");
+        let b = boat_rows(&v); assert!(acts(&b).contains(&"machine-signin-open:p1".to_string()) && acts(&b).contains(&"alwayson-move:p1".to_string()), "sign in there and move it there");
     }
     #[test] fn another_machine_is_always_on_only_when_it_says_it_is_a_server() {
         let linked = json!([{"id": "p1", "name": "nas", "url": "http://nas:3797", "state": "paired"}, {"id": "p2", "name": "x", "url": "u", "state": "unpaired"}]);
@@ -283,6 +300,6 @@ mod tests {
         let r = other_rows(&json!({"link": "p1", "name": "nas", "server": false, "asked": true}), &linked, &n, &d);
         assert!(r.iter().any(|x| s(x, "note") == "It runs while that machine is on."));
         let r = other_rows(&json!({"link": "p1", "name": "nas", "server": true, "asked": true}), &linked, &n, &d);
-        assert!(r.iter().any(|x| s(x, "note") == "Always-on: it runs as a server.") && acts(&r).contains(&"machine-home:p1".to_string()));
+        assert!(r.iter().any(|x| s(x, "note") == "Always-on: it runs as a server.") && acts(&r).contains(&"alwayson-move:p1".to_string()));
     }
 }

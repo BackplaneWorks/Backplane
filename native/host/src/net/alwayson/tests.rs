@@ -354,3 +354,35 @@ async fn a_loopback_only_hub_links_to_a_public_door_and_is_reached_over_its_own_
     let e = crate::net::peering::announce(&a.cfg.home, &format!("http://127.0.0.1:{pa_port}"), "http://0.0.0.0:9").await.unwrap_err();
     assert!(e.contains("loopback"), "{e}");
 }
+
+/// Move your uberbot there, on a fresh setup (step 4 comes before Done, where setup makes Bub): the uberbot is made here first, then the home move
+/// starts. On a hub with no bots running it says why instead of "the home is not on this machine" and an unchanged row.
+#[tokio::test] async fn a_fresh_home_with_no_uberbot_makes_it_then_moves() {
+    use crate::bots::{Bots, Inbox};
+    struct Quiet;
+    impl Inbox for Quiet {
+        fn deliver<'a>(&'a self, _t: &'a str, _m: &'a str, _x: &'a str, _o: Option<(String, String, String)>) -> Fut<'a, Result<(), String>> { Box::pin(async { Ok(()) }) }
+        fn stop<'a>(&'a self, _t: &'a str) -> Fut<'a, ()> { Box::pin(async {}) }
+        fn ride<'a>(&'a self, _t: &'a str, _i: &'a str, _x: &'a str) -> Fut<'a, Result<(), String>> { Box::pin(async { Ok(()) }) }
+        fn note<'a>(&'a self, _t: &'a str, _i: &'a str, _x: &'a str) -> Fut<'a, Result<(), String>> { Box::pin(async { Ok(()) }) }
+    }
+    let mk = |tag: &'static str| async move {
+        let home = dir(tag); std::fs::write(home.join("token"), "movetoken0123456789").unwrap();
+        Hub::start(Cfg { home, version: "0.15.0".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap()
+    };
+    // no bots: said plainly, and kept for the row
+    let bare = mk("mv-bare").await;
+    let sh = Arc::new(Shared::default());
+    let e = act(&bare, &sh, "alwayson-move", "plink", &json!({})).await.unwrap_err();
+    assert!(e.contains("no uberbot to move"), "{e}");
+    assert_eq!(sh.view(&bare.info_now())["move_err"], e.as_str(), "the row shows why");
+    // bots running, no uberbot yet (a fresh setup at step 4): it is made, then the move is asked for
+    let hub = mk("mv-fresh").await;
+    let _bots = Bots::start_with(hub.clone(), Arc::new(Quiet)).await;
+    hub.register_rpc(Arc::new(crate::settings::onboard::OnboardRpc));
+    assert!(crate::net::homemove::uber(&hub).await.is_empty(), "a fresh home has no uberbot");
+    let e = move_there(&hub, "plink").await.unwrap_err();
+    assert!(!crate::net::homemove::uber(&hub).await.is_empty(), "the uberbot was made first");
+    assert!(!e.contains("the home is not on this machine"), "it got past the uberbot to the move itself: {e}");
+    assert!(e.contains("linked"), "and the move speaks for itself (no such linked machine in this test): {e}");
+}
