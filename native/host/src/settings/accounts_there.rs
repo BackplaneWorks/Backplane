@@ -294,11 +294,26 @@ async fn publish(hub: &Arc<Hub>) {
 /// Whether anything shown runs (a sign-in there, an install there, the sync token's sign-in here): then the panel is asked again soon.
 pub fn busy(info: &Value) -> bool {
     let running = info["data"]["providers"].as_array().into_iter().flatten().any(|p| p["session"]["running"] == true || s(&p["install"], "state") == "running");
-    running || info["local"]["attempt"]["busy"] == true
+    // the sync token's sign-in is done but its check here has not said connected yet: still busy, or a page in between says "Make a sync token"
+    let making = s(&info["local"], "making");
+    let checking = info["local"]["attempt"]["done"] == true && info["local"]["sync"].as_array().into_iter().flatten().any(|x| s(x, "id") == making && s(x, "state") != "connected");
+    running || info["local"]["attempt"]["busy"] == true || checking
+}
+/// Whether something that ran in `before` (a sign-in, an install) has ended in `after`: its end changes who is signed in, which the answer
+/// read with the minute's cached checks does not say yet.
+pub fn ended(before: &Value, after: &Value) -> bool {
+    let ran = |d: &Value, id: &str| d["providers"].as_array().into_iter().flatten().find(|p| s(p, "id") == id).map_or(false, |p| p["session"]["running"] == true || s(&p["install"], "state") == "running");
+    before["providers"].as_array().into_iter().flatten().any(|p| ran(before, s(p, "id")) && !ran(after, s(p, "id")))
+}
+/// The machine's answer, made whole: when something that ran has just ended, it is asked again with fresh checks before anyone is shown it,
+/// so no page says "not busy" with the status from before the run.
+async fn settled(hub: &Arc<Hub>, link: &str, before: &Value, r: Result<Value, String>) -> Result<Value, String> {
+    match r { Ok(d) if ended(before, &d) => ask(hub, link, "signin.state", &json!({"fresh": true})).await.or(Ok(d)), r => r }
 }
 async fn refresh(hub: &Arc<Hub>, fresh: bool) {
     let p = panel(hub); if p.link.is_empty() { return }
     let r = ask(hub, &p.link, "signin.state", &json!({"fresh": fresh})).await;
+    let r = settled(hub, &p.link, &p.data, r).await;
     put(hub, |x| if x.link == p.link { match r { Ok(d) => { x.data = d; x.error.clear(); x.at = now_ms() / 1000 } Err(e) => x.error = e } });
     publish(hub).await;
 }
@@ -370,7 +385,9 @@ pub async fn act(hub: &Arc<Hub>, action: &str, value: &str, fields: &Value) -> R
                 "machine-signin-install" => ("install", String::new()), "machine-signin-check" => ("check", String::new()),
                 "machine-signin-key" => ("key", extra), "machine-signin-secret" => ("secret", s(fields, "sikeys").to_string()), _ => ("keys", s(fields, "sikeys").to_string()),
             };
+            let before = panel(hub).data;
             let r = ask(hub, &link, "signin.act", &json!({"provider": prov, "action": a, "text": text})).await;
+            let r = settled(hub, &link, &before, r).await;
             put(hub, |x| if x.link == link { match &r { Ok(d) => { x.data = d.clone(); x.error.clear(); x.at = now_ms() / 1000 } Err(e) => x.error = e.clone() } });
             publish(hub).await; poll(hub);
             r.map(|_| json!({}))
@@ -435,11 +452,21 @@ mod tests {
         assert_eq!(answer(200, r#"{"t":"reply","ok":true,"result":{"providers":[]}}"#), Ok(json!({"providers":[]})));
         assert_eq!(answer(200, r#"{"t":"reply","ok":false,"error":"Grok is not installed there"}"#), Err("Grok is not installed there".into()));
     }
+    #[test] fn a_run_that_ended_asks_for_fresh_checks_before_it_is_shown() {
+        let run = json!({"providers":[{"id":"codex","session":{"running":true}},{"id":"grok","install":{"state":"running"}}]});
+        let over = json!({"providers":[{"id":"codex","session":{"running":false,"state":"exited 0"}},{"id":"grok","install":{"state":"running"}}]});
+        assert!(ended(&run, &over), "the sign-in ended: busy goes false only with the status read after it");
+        assert!(!ended(&run, &run) && !ended(&over, &over) && !ended(&json!(null), &over));
+        let installed = json!({"providers":[{"id":"codex","session":{"running":true}},{"id":"grok","install":{"state":"done"}}]});
+        assert!(ended(&run, &installed), "an install that finished too");
+    }
     #[test] fn busy_while_a_sign_in_or_an_install_runs_there_or_the_token_here() {
         assert!(!busy(&json!({"data":{"providers":[{"session":{"running":false}}]}})));
         assert!(busy(&json!({"data":{"providers":[{"session":{"running":true}}]}})));
         assert!(busy(&json!({"data":{"providers":[{"install":{"state":"running"}}]}})));
         assert!(busy(&json!({"local":{"attempt":{"busy":true}}})));
+        assert!(busy(&json!({"local":{"making":"s1","attempt":{"done":true},"sync":[{"id":"s1","state":"unchecked"}]}})), "made, not checked yet");
+        assert!(!busy(&json!({"local":{"making":"s1","attempt":{"done":true},"sync":[{"id":"s1","state":"connected"}]}})));
     }
     #[test] fn every_provider_has_one_terminal_and_no_key_is_free_text() {
         let keys: std::collections::HashSet<String> = PROVIDERS.iter().map(|p| key_of(p.id)).collect(); assert_eq!(keys.len(), PROVIDERS.len());
