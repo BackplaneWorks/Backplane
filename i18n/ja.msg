@@ -2061,6 +2061,9 @@ gpui.c.kicad.back.into.backplane.s.pane = このままの状態で Backplane の
 gpui.c.kicad.the.editor.in.a.window = このままの状態でエディタを別ウィンドウで開きます
 gpui.c.kicad.kicad.is.open.in.its = KiCad は別ウィンドウで開いています。
 gpui.c.kicad.the.editor.s.window.could = エディタのウィンドウを開けませんでした:
+gpui.c.kicad.changed = ディスク上で変更されました: {files}。未保存の編集があります。
+gpui.c.kicad.keep.yours = 自分の編集を残す
+gpui.c.kicad.reload.lose.your.edits = 再読み込み（編集は失われます）
 
 # ---- gpui-d: setup, pairing, hubs, palette, picker, projects, composer, menus ----
 gpui.assets.missing = {dir} にアセットがありません: {files}

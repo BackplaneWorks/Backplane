@@ -2038,6 +2038,9 @@ gpui.c.kicad.back.into.backplane.s.pane = Back into Backplane's pane, as it is
 gpui.c.kicad.the.editor.in.a.window = The editor in a window of its own, as it is
 gpui.c.kicad.kicad.is.open.in.its = KiCad is open in its own window.
 gpui.c.kicad.the.editor.s.window.could = The editor's window could not open:
+gpui.c.kicad.changed = Changed on disk: {files}. You have unsaved edits.
+gpui.c.kicad.keep.yours = Keep yours
+gpui.c.kicad.reload.lose.your.edits = Reload (lose your edits)
 
 # ---- gpui-d: setup, pairing, hubs, palette, picker, projects, composer, menus ----
 gpui.assets.missing = Assets missing in {dir}: {files}
