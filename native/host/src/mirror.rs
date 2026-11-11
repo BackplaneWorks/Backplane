@@ -120,7 +120,7 @@ impl Mirrors {
     /// A mirrored project's origin ("" when its machine has not said).
     pub fn origin(&self, far_id: &str) -> String { self.origins.read().unwrap().get(far_id).cloned().unwrap_or_default() }
     /// Whether a linked machine answered when last asked (the origin watch asks each one every minute).
-    pub fn set_away(&self, link: &str, away: bool) { let mut g = self.away.write().unwrap(); if away { g.insert(link.to_string()); } else { g.remove(link); } }
+    pub fn set_away(&self, link: &str, away: bool) { let mut g = self.away.write().unwrap(); let was = g.contains(link); if away { g.insert(link.to_string()); } else { g.remove(link); } if was != away { eprintln!("machines: {link} {}", if away { "is away" } else { "answers" }); } }
     /// The marker of a shown machine, by its name (`mark_of`).
     pub fn mark(&self, machine: &str) -> Value {
         let names = self.names.get().map(|n| n()).unwrap_or_default();
@@ -166,7 +166,8 @@ pub fn watch_origins(hub: Arc<crate::hub::Hub>) {
         hub.mirrors().set_here(&crate::net::botnet::name().await);
         loop {
             for (link, _, _) in hub.far_machines() {
-                let r = hub.far_call(&link, "machine_list", "machine_list", &serde_json::json!({})).await;
+                // (bounded: one machine slow to answer never holds up the others' away state)
+                let r = match tokio::time::timeout(std::time::Duration::from_secs(15), hub.far_call(&link, "machine_list", "machine_list", &serde_json::json!({}))).await { Ok(r) => r, Err(_) => Err("that machine is away".to_string()) };
                 hub.mirrors().set_away(&link, r.is_err());
                 if let Ok((true, b)) = r {
                     let ps: Vec<(String, String)> = b["projects"].as_array().into_iter().flatten().map(|p| (p["id"].as_str().unwrap_or("").to_string(), p["origin"].as_str().unwrap_or("").to_string())).filter(|(i, _)| !i.is_empty()).collect();
@@ -174,7 +175,7 @@ pub fn watch_origins(hub: Arc<crate::hub::Hub>) {
                 }
             }
             // the registry on the home: this hub's rows go there, the merged list comes back (net/registry.rs)
-            crate::net::registry::tick(&hub, &hub.mirrors().here()).await;
+            let _ = tokio::time::timeout(std::time::Duration::from_secs(30), crate::net::registry::tick(&hub, &hub.mirrors().here())).await;
             tokio::time::sleep(std::time::Duration::from_secs(60)).await;
         }
     });

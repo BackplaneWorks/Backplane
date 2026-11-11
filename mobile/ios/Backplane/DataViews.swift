@@ -496,6 +496,17 @@ struct DataNewThreadSheet: View {
     @State private var chip = ""
     @State private var picking = false
     private var owner: DProject? { client.projects.first { $0.id == project || $0.newOn.contains { $0.value == project } } }
+    // where it runs (D6): the hub's choice first ("runs on desktop"); the line opens the machine picker when the project is on more than one
+    @State private var target = ""
+    @State private var pickRun = false
+    private var runTo: String { target.isEmpty ? project : target }
+    private var whereLine: String {
+        guard let o = owner else { return "" }
+        let chosen = o.newOn.first(where: { $0.value == runTo })
+        if !o.runsOn.isEmpty && (chosen == nil || chosen == o.newOn.first) { return o.runsOn }
+        if let w = chosen, o.newOn.count > 1 || o.mark != nil { return w.label }
+        return ""
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -503,7 +514,11 @@ struct DataNewThreadSheet: View {
                 Text(owner?.title ?? Tr.t("New thread")).dmono(14, bold: true).lineLimit(1); Spacer()
                 Button(Tr.t("Cancel")) { dismiss() }.dmono(13).foregroundStyle(BackplaneDesign.dim)
             }
-            if let w = owner?.newOn.first(where: { $0.value == project }), (owner?.newOn.count ?? 0) > 1 || owner?.mark != nil { Text(Tr.t(w.label)).dmono(11).foregroundStyle(BackplaneDesign.faint).accessibilityIdentifier("data.thread.new.where") }
+            if !whereLine.isEmpty {
+                Button { if (owner?.newOn.count ?? 0) > 1 { pickRun = true } } label: { Text(Tr.t(whereLine) + ((owner?.newOn.count ?? 0) > 1 ? " ▾" : "")).dmono(11).foregroundStyle(BackplaneDesign.faint) }
+                    .buttonStyle(.plain).accessibilityIdentifier("data.thread.new.where")
+                    .confirmationDialog(owner?.title ?? "", isPresented: $pickRun) { ForEach(owner?.newOn ?? [], id: \.value) { n in Button(dAway(Tr.t(n.label), n.away)) { target = n.value } } }
+            }
             ZStack(alignment: .topLeading) {
                 TextEditor(text: $text).dmono(13).scrollContentBackground(.hidden).padding(6).accessibilityIdentifier("data.thread.new.text")
                 if text.isEmpty { Text(Tr.t("What should it do?")).dmono(13).foregroundStyle(BackplaneDesign.faint).padding(.horizontal, 11).padding(.vertical, 14).allowsHitTesting(false) }
@@ -526,7 +541,7 @@ struct DataNewThreadSheet: View {
     private func start() async {
         busy = true; defer { busy = false }
         do {
-            let t = try await client.createThread(project: project, text: text, choice: choice)
+            let t = try await client.createThread(project: runTo, text: text, choice: choice)
             dismiss(); started(t.id)
         } catch { self.error = error.localizedDescription }
     }

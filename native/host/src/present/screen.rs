@@ -177,8 +177,10 @@ fn off_thread(t: &Value,row: Option<&Value>,hub: &str,now: u64) -> Value {
 /// this machine's copy first, else the most recently active machine's; an away machine's entry says "Wait for <machine>" (a held launch: the far
 /// outbox delivers it when that machine answers); "Clone it here" when this machine has no copy and the project has a remote; "A Boat (fresh
 /// clone)" when it has a remote, disabled until a Boat account is connected (`net::registry::boat_ready`). `runsOn` says where: "runs on desktop".
-pub fn picker(project: &mut Value,row: &Value,here: &str) {
-    let default=text(&row["default"],"id").to_string();
+pub fn picker(project: &mut Value,row: &Value,here: &str) { picker_on(project,row,here,"") }
+/// `picker` with the person's choice in this window (`@runon.<project>`, the `run-on` action): that entry first and `on`, and `runsOn` names it.
+pub fn picker_on(project: &mut Value,row: &Value,here: &str,chosen: &str) {
+    let default=if chosen.is_empty() { text(&row["default"],"id").to_string() } else { chosen.to_string() };
     let mut on: Vec<Value>=project["newOn"].as_array().cloned().unwrap_or_default();
     if on.is_empty() && !default.is_empty() { on.push(json!({"value":default,"label":"New thread","away":false})); }
     on.sort_by_key(|o| text(o,"value")!=default);
@@ -188,8 +190,14 @@ pub fn picker(project: &mut Value,row: &Value,here: &str) {
     if !origin.is_empty() && !here_has { on.push(json!({"value":origin,"label":"Clone it here","away":false,"kind":"clone","action":"proj-clone"})); }
     if !origin.is_empty() { on.push(json!({"value":origin,"label":"A Boat (fresh clone)","away":false,"kind":"boat","action":"proj-boat","disabled":!crate::net::registry::boat_ready()})); }
     let first=on.first().cloned().unwrap_or(Value::Null);
-    let m=if here_has || first.is_null() { if here.is_empty() { "this machine".to_string() } else { crate::mirror::short_name(here) } } else {
-        row["machineChips"].as_array().and_then(|c|c.iter().find(|c|text(&row["default"],"machine")==text(c,"name"))).map(|c|text(c,"short").to_string()).unwrap_or_default() };
+    if let Some(f)=on.first_mut() { if matches!(f["kind"].as_str(),Some("machine")|Some("wait")) { f["on"]=json!(true); } }
+    // the machine the first entry is on: a linked copy's id is `<link>~<id>`; its chip says which machine that is
+    let first_id=text(&first,"value");
+    let m=if !first_id.contains('~') { if here.is_empty() { "this machine".to_string() } else { crate::mirror::short_name(here) } } else {
+        let ids=row["ids"].as_array().cloned().unwrap_or_default();
+        let mach=ids.iter().find(|i|text(i,"id")==first_id).map(|i|text(i,"machine").to_string()).unwrap_or_else(||text(&row["default"],"machine").to_string());
+        row["machineChips"].as_array().and_then(|c|c.iter().find(|c|text(c,"name")==mach)).map(|c|text(c,"short").to_string()).unwrap_or_else(||crate::mirror::short_name(&mach)) };
+    let _=here_has;
     project["runsOn"]=json!(if m.is_empty() { String::new() } else { format!("runs on {m}") });
     project["newOn"]=json!(on);
 }
@@ -208,9 +216,10 @@ pub fn link_with(owner: &str,rows: &HashMap<String,Value>) -> Value {
 }
 /// The merged row's own fields on a sidebar project: `key`, `machineChips` (every machine with a copy: here/on/away/off, dimmed when away or
 /// off, a `note` "desktop is off"), and the threads of its machines that are off, from the registry, after the live ones.
-fn merged_fields(project: &mut Value,row: Option<&Value>,hub: &str,now: u64) {
+fn merged_fields(project: &mut Value,row: Option<&Value>,hub: &str,now: u64,here: &str,drafts: &Value) {
     let Some(r)=row else { return };
-    project["key"]=r["key"].clone(); project["machineChips"]=r["machineChips"].clone(); picker(project,r,"");
+    let own=text(project,"id").rsplit('|').next().unwrap_or("").to_string();
+    project["key"]=r["key"].clone(); project["machineChips"]=r["machineChips"].clone(); picker_on(project,r,here,text(drafts,&format!("@runon.{own}")));
     let off: Vec<Value>=r["off"]["threads"].as_array().into_iter().flatten().map(|t|off_thread(t,row,hub,now)).collect();
     if !off.is_empty() { if let Some(a)=project["threads"].as_array_mut() { a.extend(off); } }
 }
@@ -591,7 +600,7 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
             // the machines it is also on, after its name ("also on desktop"); each of their rows keeps its own marker
             project["also"]=json!(if machine.is_empty() { sidebar::also_label(&marks) } else { sidebar::also_label(&marks).replacen("also on","on",1) }); project["marks"]=json!(marks);
         }
-        merged_fields(&mut project,un.rows.get(owner),hub,opts.now);
+        merged_fields(&mut project,un.rows.get(owner),hub,opts.now,un.here,&session["drafts"]);
         if machine.is_empty() { let l=link_with(owner,un.rows); if l.as_array().map_or(false,|a|!a.is_empty()) { project["linkWith"]=l; } }
         Some(project)
     }).collect();

@@ -106,6 +106,14 @@ pub fn new_items(pid_raw: &str, new_on: &Value) -> Vec<Item> {
     let on: Vec<Item> = new_on.as_array().into_iter().flatten().filter(|n| n["disabled"] != true).map(|n| item(&s(n, "label"), n["action"].as_str().filter(|a| !a.is_empty()).unwrap_or("new-thread"), &s(n, "value"), false)).filter(|i| !i.label.is_empty() && !i.value.is_empty()).collect();
     /* i18n-ok: menu labels, drawn through trs in render */ if on.len() > 1 { on } else { vec![item("New thread", "new-thread", pid_raw, false)] }
 }
+/// The composer's machine picker (the hub's `newOn`, default first): a machine or Wait for one is chosen for the next new thread (`run-on`
+/// `<project>|<where>`); Clone it here and a Boat send their own action. One the hub says is not ready is left out.
+pub fn run_items(pid_raw: &str, new_on: &Value) -> Vec<Item> {
+    new_on.as_array().into_iter().flatten().filter(|n| n["disabled"] != true).filter_map(|n| {
+        let (label, value) = (s(n, "label"), s(n, "value")); if label.is_empty() || value.is_empty() { return None }
+        Some(match n["action"].as_str().filter(|a| !a.is_empty()) { Some(a) => item(&label, a, &value, false), None => item(&label, "run-on", &format!("{pid_raw}|{value}"), false) })
+    }).collect()
+}
 pub fn project_items(pid_raw: &str) -> Vec<Item> { project_items_on(pid_raw, &Value::Null) }
 pub fn project_items_on(pid_raw: &str, new_on: &Value) -> Vec<Item> { let mut v = new_items(pid_raw, new_on); /* i18n-ok: a menu label, drawn through trs in render */ v.push(item("New swarm", "swarm-new", pid_raw, false)); v.extend(project_rest(pid_raw)); v }
 /// A project's menu with the hub's Link with… entries (a project with no remote: `linkWith`, each `proj-link`) before Remove.

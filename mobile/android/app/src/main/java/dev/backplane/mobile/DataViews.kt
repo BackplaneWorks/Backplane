@@ -1001,19 +1001,25 @@ private fun NewThreadScreen(project: String, back: () -> Unit, created: (String)
     var picking by remember { mutableStateOf(false) }
     val owner = DataClient.projects.firstOrNull { it.id == project || it.newOn.any { n -> n.value == project } }
     val title = owner?.title ?: ""
-    val where = owner?.newOn?.firstOrNull { it.value == project }?.takeIf { owner.newOn.size > 1 || owner.mark != null }?.label ?: ""   // "New thread on desktop"
+    // where it runs (D6): the hub's choice first ("runs on desktop"); the line opens the machine picker when the project is on more than one
+    var target by remember { mutableStateOf(project) }
+    var pickRun by remember { mutableStateOf(false) }
+    val chosen = owner?.newOn?.firstOrNull { it.value == target }
+    val where = if (owner != null && owner.runsOn.isNotEmpty() && (chosen == null || chosen == owner.newOn.firstOrNull())) owner.runsOn
+        else chosen?.takeIf { owner!!.newOn.size > 1 || owner.mark != null }?.label ?: ""   // "New thread on desktop", "Wait for desktop"
+    if (pickRun && owner != null) ActionSheet(title, owner.newOn.map { n -> (n.label + if (n.away) " · " + Msg.android_away else "") to { pickRun = false; target = n.value } }) { pickRun = false }
     LaunchedEffect(choice) { if (DataClient.has("picker")) runCatching { DataClient.picker(null, choice) }.onSuccess { chip = it.chip } }
     if (picking) PickerSheet(null, choice, { choice = it }) { picking = false }
     Column(Modifier.fillMaxSize()) {
         DBar(Msg.android_thread_new_title(title), back)
         Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (where.isNotEmpty()) DMono(Tr.t(where), dfaint, 11, Modifier.testTag("new.where"))
+            if (where.isNotEmpty()) DMono(Tr.t(where) + if ((owner?.newOn?.size ?: 0) > 1) " ▾" else "", dfaint, 11, Modifier.testTag("new.where").clickable(enabled = (owner?.newOn?.size ?: 0) > 1) { pickRun = true })
             DField(text, { text = it }, Msg.android_thread_new_hint, Modifier.heightIn(min = 120.dp).testTag("new.text"), 8, dcs.primary)
             if (err.isNotEmpty()) Text(Tr.t(err), color = dcs.error, fontFamily = BpMono, fontSize = 12.sp)
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 if (DataClient.has("picker")) ModelChip(chip.ifEmpty { " " }, "new.model", Modifier.weight(1f)) { picking = true } else Spacer(Modifier.weight(1f))
                 DBtn(if (busy) Msg.state_starting else Msg.android_start, true, !busy, Modifier.testTag("new.start")) {
-                    busy = true; scope.launch { try { created(DataClient.createThread(project, text, choice).id) } catch (e: Exception) { err = e.message ?: ""; busy = false } }
+                    busy = true; scope.launch { try { created(DataClient.createThread(target, text, choice).id) } catch (e: Exception) { err = e.message ?: ""; busy = false } }
                 }
             }
         }

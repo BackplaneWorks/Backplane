@@ -104,7 +104,7 @@ def main():
             notes = [p for p in ps if (p.get("title") or "").startswith("notes-")]
             check("a project with no remote is keyed by its machine", [p.get("key") for p in notes] == ["boat-hub/p5"], str([(p.get("title"), p.get("key")) for p in notes]))
             # the registry: boat-hub (the home) holds every machine's rows
-            reg = bots.until(lambda: (lambda r: r if any(x.get("key") == "github.com/o/r" and len(x.get("machines") or []) == 2 for x in r.get("projects", [])) else None)(rpc(H["bh"], "registry.list")), 90)
+            reg = bots.until(lambda: (lambda r: r if any(x.get("key") == "github.com/o/r" and len(x.get("machines") or []) == 2 for x in (r.get("result") or r).get("projects", [])) else None)(rpc(H["bh"], "registry.list")), 180)
             check("the home's registry holds the repository on both machines", bool(reg), json.dumps(rpc(H["bh"], "registry.list"))[:500])
             # Bub's tools: machine_list gives each project's key; thread_launch takes the key with no machine and starts it where the project is
             ada = rpc(H["bh"], "bots.create", {"name": "ada"})["bot"]
@@ -126,13 +126,14 @@ def main():
                 print("holding (both on): touch", os.path.join(o.hold, "next"), flush=True)
                 while not os.path.exists(os.path.join(o.hold, "next")) and not os.path.exists(os.path.join(o.hold, "stop")): time.sleep(1)
             # desktop goes off: its project and thread stay on boat-hub, dimmed
-            procs["desk"].terminate(); procs["desk"].wait(15)
+            procs["desk"].terminate(); procs["desk"].wait(15); t_off = time.time()
             def off():
                 ps = side(H["bh"]); repo = [p for p in ps if (p.get("title") or "").startswith("repo-")]
                 if len(repo) != 1: return None
                 ch = {m.get("short"): m for m in repo[0].get("machineChips") or []}
                 return (ps, repo[0]) if ch.get("desktop", {}).get("dim") else None
-            got = bots.until(off, 150)
+            got = bots.until(off, 90)  # (D7: "desktop is off" within 90 s: the far link's own failure, and the once-a-minute ask)
+            report("desktop seen off after", "seen", f"{time.time() - t_off:.0f} s")
             check("with desktop off, the repository is still one row with desktop's chip dimmed", bool(got), json.dumps(summary(side(H["bh"]))))
             if got:
                 r = got[1]; ch = {m.get("short"): m for m in r.get("machineChips") or []}

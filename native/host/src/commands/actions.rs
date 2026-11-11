@@ -139,7 +139,9 @@ pub fn act(req: &Req) -> Option<ActOut> {
         }
         // the project menu's Remove (the client asks twice) and a thread's New subthread (`<parent>|<project>`: the new thread is selected as New thread's is)
         // the machine picker's Clone it here (present/screen.rs `picker`): this hub clones the remote and adds it (net/registry.rs `project.clone`)
-        "proj-clone" => { if v.is_empty() { return None } a.rpc("project.clone", json!({"origin": v})); a.set("@menu", ""); }
+        // it opens the folder picker on ~/Documents/<repo> to confirm (or change) the folder; the picker's Clone row sends `proj-clone-go` `<origin>\u{1f}<folder>`
+        "proj-clone" => { if v.is_empty() { return None } let name = v.rsplit('/').next().unwrap_or("project"); a.set("@proj.open", "1"); a.set("@proj.text", &format!("~/Documents/{name}")); a.set("@proj.clone", v); a.set("@proj.err", ""); a.set("@menu", ""); }
+        "proj-clone-go" => { let (origin, path) = v.split_once('\u{1f}')?; a.rpc("project.clone", json!({"origin": origin, "path": path})); a.set("@proj.open", ""); a.set("@proj.text", ""); a.set("@proj.clone", ""); a.set("@proj.err", ""); }
         // Link with… (a project with no remote): this project shows as one with the other (`project.link.<id>` = the other's key, present/merged.rs); "" unlinks
         "proj-link" => { let (id, key) = v.split_once('|')?; if id.is_empty() { return None } a.rpc("setting.set", json!({"key": format!("project.link.{id}"), "value": key})); a.set("@menu", ""); }
         "proj-remove" => { if v.is_empty() { return None } a.rpc("project.remove", json!({"project": v})); a.set("@menu", ""); a.set("@del", ""); }
@@ -153,8 +155,12 @@ pub fn act(req: &Req) -> Option<ActOut> {
         "delete-no" => { a.set("@del", ""); a.set("@menu", "") }
         "rename-no" => { a.set("@del", ""); a.ren_clear() }
         // Made.want + Ui.new_thread.project: the next request makes a thread; its reply selects it (the session module's)
+        // the composer's machine picker (present/screen.rs `picker`): `<project>|<where>` (a copy's project id, here or on a linked machine); the
+        // next new thread of that project from this window starts there. `<project>|` goes back to the default.
+        "run-on" => { let (p, to) = v.split_once('|')?; if p.is_empty() { return None } a.set(&format!("@runon.{p}"), to); a.set("@menu", ""); }
         "new-thread" => {
             if v.is_empty() { return None } // no project named: the new-bot form, the helper's
+            let chosen = draft(r.session, &format!("@runon.{v}")).to_string(); let v = if chosen.is_empty() { v } else { chosen.as_str() };
             let rid = a.rid.to_string();
             let at = format!("{}|{}", r.session["info"]["local.machine"].as_str().unwrap_or(""), r.session["info"]["local.generation"].as_str().unwrap_or(""));
             a.set("@del", ""); a.set("@menu", ""); a.set("@want.viewer", ""); a.set("@want.new", &rid); a.set("@want.new.at", &at);
@@ -162,10 +168,10 @@ pub fn act(req: &Req) -> Option<ActOut> {
         }
         // Add project: the folder picker (present/picker.rs draws it from `@proj.open`, `@proj.text`). Typing and going into a folder set the text;
         // Add and Create send the request that makes the project (and its first thread, which the reply selects: Made.want).
-        "picker-open" => { a.set("@proj.open", "1"); a.set("@proj.text", "~/"); a.set("@proj.err", ""); a.set("@menu", "") }
+        "picker-open" => { a.set("@proj.open", "1"); a.set("@proj.text", "~/"); a.set("@proj.err", ""); a.set("@proj.clone", ""); a.set("@menu", "") }
         "picker-type" => { a.set("@proj.text", v); a.set("@proj.err", "") }
         "proj-cd" => { let t = if v.ends_with('/') { v.to_string() } else { format!("{v}/") }; a.set("@proj.text", &t); a.set("@proj.err", "") }
-        "proj-close" => { a.set("@proj.open", ""); a.set("@proj.text", ""); a.set("@proj.err", "") }
+        "proj-close" => { a.set("@proj.open", ""); a.set("@proj.text", ""); a.set("@proj.err", ""); a.set("@proj.clone", "") }
         "proj-add" | "proj-new" if !v.trim().is_empty() => {
             let rid = a.rid.to_string();
             let at = format!("{}|{}", r.session["info"]["local.machine"].as_str().unwrap_or(""), r.session["info"]["local.generation"].as_str().unwrap_or(""));
@@ -280,5 +286,17 @@ mod tests {
         assert!(act(&Req { hub: "h", session: &s, sel: "", action: "row-snooze", value: "t1", title_of: &t }).is_none(), "a snooze without its span is not mine");
         let o = act(&Req { hub: "h", session: &json!({"sel":"","rid":4,"drafts":{},"info":{"local.machine":"m","local.generation":"7"}}), sel: "", action: "new-thread", value: "p1", title_of: &t }).unwrap();
         assert_eq!(o.session_patch["drafts"]["@want.new.at"], "m|7"); assert_eq!(o.session_patch["drafts"]["@want.new"], "4");
+    }
+    /// The composer's machine picker: run-on keeps the choice for that project; the next new thread there starts on the machine chosen.
+    #[test] fn run_on_sends_the_next_new_thread_to_the_machine_chosen() {
+        let t = |_: &str| String::new();
+        let o = act(&Req { hub: "h", session: &json!({"sel":"","rid":4,"drafts":{},"info":{}}), sel: "", action: "run-on", value: "p1|L~p9", title_of: &t }).unwrap();
+        assert_eq!(o.session_patch["drafts"]["@runon.p1"], "L~p9");
+        let o = act(&Req { hub: "h", session: &json!({"sel":"","rid":4,"drafts":{"@runon.p1":"L~p9"},"info":{}}), sel: "", action: "new-thread", value: "p1", title_of: &t }).unwrap();
+        let sent: Value = serde_json::from_str(o.cmds[0]["text"].as_str().unwrap()).unwrap(); assert_eq!((sent["m"].as_str(), sent["p"]["project"].as_str()), (Some("thread.create"), Some("L~p9")));
+        // Clone it here opens the folder picker on ~/Documents/<repo> to confirm it
+        let o = act(&Req { hub: "h", session: &json!({"sel":"","rid":4,"drafts":{},"info":{}}), sel: "", action: "proj-clone", value: "github.com/o/Board", title_of: &t }).unwrap();
+        assert_eq!((o.session_patch["drafts"]["@proj.open"].as_str(), o.session_patch["drafts"]["@proj.text"].as_str(), o.session_patch["drafts"]["@proj.clone"].as_str()), (Some("1"), Some("~/Documents/Board"), Some("github.com/o/Board")));
+        assert!(o.cmds.is_empty(), "nothing is cloned before the folder is confirmed");
     }
 }

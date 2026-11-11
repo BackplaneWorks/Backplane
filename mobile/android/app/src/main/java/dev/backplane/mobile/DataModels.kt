@@ -41,7 +41,7 @@ fun parseMark(o: JSONObject?) = o?.takeIf { it.optString("name").isNotEmpty() }?
 fun parseChips(a: JSONArray?) = a.list { DChip(it.str("value"), it.str("label"), it.optBoolean("on"), it.optBoolean("away"), it.str("hint")) }
 fun markJson(m: DMark?): Any = if (m == null) JSONObject.NULL else JSONObject().put("name", m.name).put("short", m.short).put("away", m.away).put("label", m.label).put("runs", m.runs)
 data class DProject(val id: String, val title: String, val root: String, val threadCount: Int, val updatedAt: Long, val waiting: Int, val icon: String = "folder", val css: String = "", val settledCount: Int? = null,
-    val mark: DMark? = null, val also: String = "", val newOn: List<DNewOn> = emptyList()) // settledCount: the hub's count (feature `settled`), null from a hub before it
+    val mark: DMark? = null, val also: String = "", val newOn: List<DNewOn> = emptyList(), val runsOn: String = "") // runsOn: "runs on desktop", where a new thread starts (the first of newOn) // settledCount: the hub's count (feature `settled`), null from a hub before it
 data class DThread(
     val id: String, val project: String, val title: String, val state: String, val updatedAt: Long, val pinned: Boolean, val settled: Boolean,
     val archived: Boolean, val provider: String, val model: String, val preview: String, val waiting: Int,
@@ -76,7 +76,7 @@ fun parseEntry(o: JSONObject) = DEntry(
     handoff = o.optJSONObject("handoff")?.let(::parseHandoff),
 )
 fun parseProject(o: JSONObject) = DProject(o.str("id"), o.str("title"), o.str("root"), o.optInt("threadCount", 0), o.lng("updatedAt"), o.optInt("waiting", 0), o.optString("icon", "folder"), o.optString("css"), if (o.has("settledCount") && !o.isNull("settledCount")) o.optInt("settledCount") else null,
-    parseMark(o.optJSONObject("mark")), o.str("also"), o.optJSONArray("newOn").list { DNewOn(it.str("value"), it.str("label"), it.optBoolean("away")) })
+    parseMark(o.optJSONObject("mark")), o.str("also"), o.optJSONArray("newOn").list { DNewOn(it.str("value"), it.str("label"), it.optBoolean("away")) }, o.str("runsOn"))
 fun parseThread(o: JSONObject) = DThread(
     o.str("id"), o.str("project"), o.str("title"), o.str("state"), o.lng("updatedAt"), o.optBoolean("pinned"), o.optBoolean("settled"), o.optBoolean("archived"),
     o.str("provider"), o.str("model"), o.str("preview"), o.optInt("waiting", 0), o.str("parent"), o.str("effort"), o.str("runtime"), o.str("chip"), o.lng("settledAt"), o.optBoolean("history"), parseMark(o.optJSONObject("mark")), o.optInt("pinOrder", 0), o.str("status"), o.str("swarm"),

@@ -24,6 +24,8 @@ pub(super) async fn post(sync: &FarSync, hub: &Arc<Hub>, link: &str, body: &str)
     let url = sync.peering.table.with(|p| p.url(link));
     if url.is_empty() { return (0, String::new()) }
     let r = super::botnet::to_peer(&hub.cfg.home, &url, link, now(), "/far/rpc", true, &nonced(body)).await;
+    // the link's own answer says whether that machine is up, at once (the sidebar's "desktop is off"; mirror.rs also asks each minute)
+    hub.mirrors().set_away(link, r.code == 0);
     (r.code, r.body)
 }
 fn err(id: &Value, e: &str) -> Vec<Value> { vec![json!({"t":"reply","id":id,"ok":false,"error":e})] }
