@@ -14,7 +14,7 @@ pub const FOLDS: &[(&str, &[&str], bool)] = &[
     ("STATE", &[], true),
     ("COMMANDS", &["commands/fold.rs", "session/event_type.rs"], false),
     ("AGENTS", &["agents/world.rs", "agents/lines.rs", "agents/bg.rs", "session/event_type.rs"], false),
-    ("BOTS", &["bots/world.rs", "bots/mail/mod.rs", "bots/mail/mailbox.rs", "session/event_type.rs"], true),
+    ("BOTS", &["bots/world.rs", "bots/gate.rs", "bots/mail/mod.rs", "bots/mail/mailbox.rs", "session/event_type.rs"], true),
     ("WAKES", &["agents/wake.rs", "session/event_type.rs"], false),
     ("FEED", &["net/feed.rs", "net/far.rs"], false),
     ("PEERS", &["net/peers.rs", "net/machines.rs"], false),
