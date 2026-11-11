@@ -283,9 +283,67 @@ thread_local! {
 }
 /// The marker in the header of a thread drawn from `tst`: that machine's (full name), or none when it is this hub's state.
 fn header_mark(far: &[(String,&State)],tst: &State,un: &Unified) -> Option<Value> { far.iter().find(|(_,f)|std::ptr::eq(*f,tst)).map(|(m,_)|un.mark(m)) }
+/// `link-file`: the plan (present/filelink.rs) carried out. Another thread: the target moves to it with its viewer open on the file (as `link-far`);
+/// the thread on show: presented as it is with the viewer's patch and its watch; a file of no design in no project: the system opens it.
+/// What `link-file` does to the session, before it is presented: the thread it opens (and the thread on show), the session with that
+/// thread's viewer on the file, and the commands (its watch); or a note, or a path for the system (a file of no design in no project).
+enum LinkFile { Open { thread: String, shown: String, session: Value, cmds: Vec<Value> }, Note(&'static str), Os(String) }
+fn link_file_of(st: &State,p: &Value,href: &str) -> LinkFile {
+    use super::filelink::{plan, Plan};
+    let hub=text(p,"hub").to_string();
+    let mut session=p.get("session").filter(|s|s.is_object()).cloned().unwrap_or(json!({}));
+    for k in ["open","drafts"] { if !session[k].is_object() { session[k]=json!({}); } }
+    let shown=if p["target"]["kind"]=="thread" { text(&p["target"],"id").to_string() } else { text(&session,"sel").to_string() };
+    let shown=shown.rsplit_once('|').map_or(shown.as_str(),|(_,r)|r).to_string();
+    let home=crate::plat::dirs::home_or_empty();
+    let (thread,out)=match plan(st,&shown,href,&home,&|x| std::path::Path::new(x).is_file()) {
+        Plan::Note(n) => return LinkFile::Note(n),
+        Plan::Os(path) => return LinkFile::Os(path),
+        Plan::Open { thread, open, action, value } => {
+            for (k,v) in open { session["open"][k]=json!(v); }
+            session["sel"]=json!(thread);
+            let o=if action=="view" { super::viewer::view_action(st,&hub,&session,&value) } else { super::viewer::files_action(st,&hub,&session,action,&value) };
+            (thread,o)
+        }
+        Plan::Scoped { thread, kind, path } => { session["sel"]=json!(thread); let o=super::filelink::scoped_view(st,&hub,&session,kind,&path); (thread,o) }
+    };
+    let Some(o)=out else { return LinkFile::Note("That file does not open here.") };
+    crate::session::patch::merge(&mut session,&o.patch);
+    session["drafts"]["@ppage"]=json!(""); // (a project page on show shuts: the thread and its viewer are what the link opens)
+    LinkFile::Open { thread, shown, session, cmds: o.before }
+}
+/// `link-file` carried out. Another thread: the target moves to it with its viewer open on the file (as `link-far`); the thread on show:
+/// presented as it is with the viewer's patch and its watch first; a file of no design in no project: the system opens it, as before.
+fn link_file(st: &State,far: &[(String,&State)],un: &Unified,p: &Value,href: &str) -> Option<Value> {
+    if !mine(p) { return refused("target.or-native-sidebar") }
+    let hub=text(p,"hub").to_string();
+    let mut c=p.clone(); c["action"]=json!(""); c["value"]=json!("");
+    match link_file_of(st,p,href) {
+        LinkFile::Note(n) => { c["action"]=json!("link-note"); c["value"]=json!(n); recent_unified(st,far,un,&c) }
+        LinkFile::Os(path) => {
+            let mut v=recent_unified(st,far,un,&c)?; let rid=v["session"]["rid"].as_u64().unwrap_or(0);
+            if let Some(a)=v["cmds"].as_array_mut() { a.push(json!({"type":"send","hub":hub,"text":json!({"id":rid,"m":"file.open","p":{"path":path,"how":"open"}}).to_string()})); }
+            v["session"]["rid"]=json!(rid+1); Some(v)
+        }
+        LinkFile::Open { thread, shown, session, cmds } if thread!=shown =>
+            Some(json!({"remoteReady":false,"nextTarget":{"kind":"thread","id":thread},"session":session,"cmds":cmds,"local":p.get("local").cloned().unwrap_or(json!({"local.native.sidebar.pages":"","local.native.sidebar.context":"","local.native.sidebar.key":"","local.native.sidebar.budget":""}))})),
+        LinkFile::Open { session, cmds: first, .. } => {
+            c["session"]=session;
+            let mut v=recent_unified(st,far,un,&c)?;
+            let mut cmds=first; cmds.extend(v["cmds"].as_array().cloned().unwrap_or_default()); v["cmds"]=json!(cmds);
+            Some(v)
+        }
+    }
+}
 /// `recent_far` with projects shared across machines shown once (`Unified`).
 pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value) -> Option<Value> {
     if text(p,"action")=="proj-go" { match find_go(st,p) { Some(c)=>return recent_unified(st,far,un,&c), None=>{ let mut c=p.clone(); c["action"]=json!("proj-find-q"); c["value"]=json!(""); return recent_unified(st,far,un,&c) } } }
+    // a file clicked in a message or a note (present/filelink.rs): its project's thread and the viewer tab that draws it, never the system's app;
+    // a `backplane://file/<scope>/<path>` link is the same
+    if text(p,"action")=="link-file" { let href=text(p,"value").to_string(); return link_file(st,far,un,p,&href) }
+    if text(p,"action")=="link-open" { if let Some(r)=crate::md::refs::parse(text(p,"value").trim()).filter(|r|r.kind=="file") {
+        let Some(path)=super::filelink::file_ref(st,&r.rest) else { let mut c=p.clone(); c["action"]=json!("link-note"); c["value"]=json!("That file is not on this hub."); return recent_unified(st,far,un,&c) };
+        return link_file(st,far,un,p,&path) } }
     // a link clicked in a message: what it opens is decided here (present/linkopen.rs); a thread on a linked machine moves the target itself
     if text(p,"action")=="link-open" {
         let c=super::linkopen::request(st,far,un.here,p);
@@ -892,6 +950,40 @@ mod state_tests {
     }
     /// One repository on two machines is one sidebar project: the linked machine's threads sit in this hub's project, each row names its
     /// machine; a linked project of another repository keeps its own row; the Active view names this hub's project for both.
+    /// A KiCad file clicked in a message opens inside Backplane: the target moves to its project's thread with the Schematic tab on that file,
+    /// and its watch is sent; in the thread on show it stays there; nothing goes to the system's app (`file.open`).
+    #[test] fn a_kicad_file_link_opens_its_projects_thread_on_the_viewer_tab() {
+        let d=std::env::temp_dir().join(format!("bp-filelink-{}",std::process::id())); let _=std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(d.join("amp/boards/main")).unwrap(); std::fs::create_dir_all(d.join("other")).unwrap();
+        std::fs::write(d.join("amp/boards/main/main.kicad_sch"),"(kicad_sch)").unwrap(); std::fs::write(d.join("amp/boards/main/main.kicad_pcb"),"(kicad_pcb)").unwrap();
+        let (amp,other)=(d.join("amp").to_string_lossy().to_string(),d.join("other").to_string_lossy().to_string());
+        let mut st=State::new(); st.lean=true;
+        for e in [json!({"$":"ProjectCreated","id":"pa","title":"Amp","root":amp,"at":1}),json!({"$":"ProjectCreated","id":"po","title":"Other","root":other,"at":1}),
+                  json!({"$":"ThreadCreated","id":"ta","project":"pa","title":"A","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":5}),
+                  json!({"$":"ThreadCreated","id":"to","project":"po","title":"O","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":6})] { event(&mut st,e); }
+        let map=HashMap::new(); let marks=HashMap::new(); let un=Unified{ far:&map, marks:&marks, here:"desk", rows:&HashMap::new() };
+        let click=|on: &str,href: &str| { let mut q=params(); q["target"]=json!({"kind":"thread","id":on}); q["window"]=json!({"contextMessages":[],"messageIds":[],"historyUnits":[],"partial":[],"ids":[],"anchor":{"id":"","offset":0},"older":"","olderNext":"","hasMore":false,"remaining":0,"newer":0,"total":0}); q["action"]=json!("link-file"); q["value"]=json!(href); recent_unified(&st,&[],&un,&q).unwrap() };
+        let sends=|v: &Value| v["cmds"].as_array().into_iter().flatten().filter_map(|c| serde_json::from_str::<Value>(c["text"].as_str()?).ok()).collect::<Vec<_>>();
+        // from another project's thread: the target moves to Amp's thread, the Schematic tab on that file
+        let sch=format!("file://{amp}/boards/main/main.kicad_sch");
+        let v=click("to",&sch);
+        assert_eq!(v["nextTarget"],json!({"kind":"thread","id":"ta"}),"{v}");
+        let dr=&v["session"]["drafts"];
+        assert_eq!((dr["@view:ta"].as_str(),dr["@view.file:ta"].as_str()),(Some("schematic"),Some(format!("{amp}/boards/main/main.kicad_sch").as_str())));
+        assert_eq!(v["session"]["open"]["project-closed:pa"],false,"its project unfolded");
+        let w=sends(&v); assert!(w.iter().any(|c|c["m"]=="kicad.watch" && c["p"]["kind"]=="schematic"),"{w:?}"); assert!(!w.iter().any(|c|c["m"]=="file.open"),"never the system's app");
+        // in the thread on show (a path from its folder): no move, the Board tab on the board
+        let mut q=params(); q["target"]=json!({"kind":"thread","id":"ta"});
+        let LinkFile::Open { thread, shown, session, cmds }=link_file_of(&st,&q,"boards/main/main.kicad_pcb") else { panic!("opens") };
+        assert_eq!((thread.as_str(),shown.as_str(),session["drafts"]["@view:ta"].as_str()),("ta","ta",Some("board")));
+        assert!(sends(&json!({"cmds":cmds})).iter().any(|c|c["m"]=="kicad.watch" && c["p"]["kind"]=="board"));
+        // a file the viewer does not draw, in no project: the system's, as a click on a path always did
+        assert!(matches!(link_file_of(&st,&q,"/etc/hostname"),LinkFile::Os(p) if p=="/etc/hostname"));
+        // a backplane://file link is the same as its path
+        let mut q=params(); q["target"]=json!({"kind":"thread","id":"to"}); q["action"]=json!("link-open"); q["value"]=json!("backplane://file/pa/boards/main/main.kicad_pcb");
+        let v=recent_unified(&st,&[],&un,&q).unwrap(); assert_eq!(v["nextTarget"]["id"],"ta"); assert_eq!(v["session"]["drafts"]["@view:ta"],"board");
+        let _=std::fs::remove_dir_all(&d);
+    }
     #[test] fn one_repository_on_two_machines_is_one_project() {
         let d=std::env::temp_dir().join(format!("bp-unify-{}",std::process::id())); let _=std::fs::remove_dir_all(&d);
         std::fs::create_dir_all(d.join(".git")).unwrap(); std::fs::write(d.join(".git/config"),"[remote \"origin\"]\n\turl = git@github.com:o/r.git\n").unwrap();

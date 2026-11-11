@@ -67,7 +67,7 @@ pub fn linkify(text: &str) -> Vec<Span> {
     while i < text.len() {
         let rest = &text[i..];
         let at_word = i == 0 || b[i - 1].is_ascii_whitespace() || matches!(b[i - 1], b'(' | b'[' | b'"' | b'\'' | b'`' | b'<');
-        let kind = if !at_word { 0 } else if rest.starts_with("http://") || rest.starts_with("https://") || rest.starts_with("backplane://") { 1 } else if (rest.starts_with('/') && rest.len() > 1 && !rest[1..].starts_with(|c: char| c.is_whitespace() || c == '/')) || rest.starts_with("~/") { 2 } else { 0 };
+        let kind = if !at_word { 0 } else if rest.starts_with("http://") || rest.starts_with("https://") || rest.starts_with("backplane://") { 1 } else if (rest.starts_with('/') && rest.len() > 1 && !rest[1..].starts_with(|c: char| c.is_whitespace() || c == '/')) || rest.starts_with("~/") || rest.starts_with("file:///") || design_word(rest) { 2 } else { 0 };
         if kind == 0 { let ch = rest.chars().next().unwrap(); plain.push(ch); i += ch.len_utf8(); continue; }
         let end = rest.find(|c: char| c.is_whitespace() || matches!(c, '<' | '>' | '"' | '`' | '\'')).unwrap_or(rest.len());
         let mut word = &rest[..end];
@@ -82,6 +82,12 @@ pub fn linkify(text: &str) -> Vec<Span> {
     out
 }
 
+/// A design file named by a word (`main.kicad_sch`, `boards/a.kicad_pcb:3`), the word at the start of `rest`: a link (it opens in the viewer).
+fn design_word(rest: &str) -> bool {
+    let end = rest.find(|c: char| c.is_whitespace() || matches!(c, '<' | '>' | '"' | '`' | '\'' | '(' | ')' | ',' | ';')).unwrap_or(rest.len());
+    let w = rest[..end].trim_end_matches(|c: char| matches!(c, '.' | ',' | ';' | '!' | '?' | ']')); let w = w.trim_end_matches(|c: char| c.is_ascii_digit() || c == ':');
+    !w.contains("://") && w.chars().all(|c| c.is_alphanumeric() || matches!(c, '.' | '_' | '-' | '/' | '~' | '+')) && super::linkroute::design_file(w)
+}
 /// Where the whole words of `words` sit in `s`, as byte ranges in order: a word starts after a space or an opening bracket or quote, and ends at the end, a space or punctuation.
 pub fn word_ranges(s: &str, words: &[String]) -> Vec<(usize, usize)> {
     let opens = |c: char| c.is_whitespace() || matches!(c, '(' | '[' | '"' | '\'');
@@ -438,6 +444,10 @@ mod link_tests {
     }
     #[test] fn plain_words_slashes_and_mid_word_urls_are_not_links() {
         assert!(links("and/or a / b // c http://").is_empty()); assert!(links("xhttps://example.com").is_empty());
+    }
+    #[test] fn design_files_named_alone_and_file_addresses_are_file_links() {
+        assert_eq!(links("open main.kicad_sch, then boards/a.kicad_pcb:3 and file:///w/x%20y.step."), vec![("main.kicad_sch".to_string(), true), ("boards/a.kicad_pcb:3".to_string(), true), ("file:///w/x%20y.step".to_string(), true)]);
+        assert!(links("x.rs main.c version 1.2 .kicad_pcb").is_empty(), "{:?}", links("x.rs main.c version 1.2 .kicad_pcb"));
     }
     #[test] fn the_spans_keep_every_character() { let t = "a https://x.io/p, b /tmp/q é"; assert_eq!(linkify(t).iter().map(|s| s.text.as_str()).collect::<String>(), t); }
 }

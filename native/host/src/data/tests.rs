@@ -514,6 +514,8 @@ impl RpcHandler for FakeStar {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_link_resolve_says_what_a_link_opens_or_why_not() {
     let root = std::env::temp_dir().join(format!("bp-links-{}", std::process::id())); let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(root.join("src")).unwrap(); std::fs::write(root.join("src/x.rs"), "one\ntwo\n").unwrap();
+    std::fs::create_dir_all(root.join("boards")).unwrap(); std::fs::write(root.join("boards/a.kicad_sch"), "(kicad_sch)").unwrap();
+    let sch = format!("file://{}/boards/a.kicad_sch", root.to_string_lossy());
     let more = format!("{{\"$\":\"ProjectCreated\",\"id\":\"p9\",\"title\":\"links\",\"root\":{},\"at\":1700000100}}\n{{\"$\":\"ThreadCreated\",\"id\":\"t9\",\"project\":\"p9\",\"title\":\"Nine\",\"env\":\"local\",\"branch\":\"\",\"worktree\":\"\",\"provider\":\"claude\",\"model\":\"\",\"at\":1700000101}}\n", serde_json::Value::from(root.to_string_lossy()));   // JSON-quoted: a Windows path has backslashes
     let (_h, port) = up_with("links", &more).await; let mut ws = open(port, "&enc=json").await; next(&mut ws).await;
     let mut n = 0u64;
@@ -530,6 +532,9 @@ impl RpcHandler for FakeStar {
         (r("src/y.rs:2", "t9"), json!({"kind":"none"})),
         (r("../etc/passwd", "t9"), json!({"kind":"none"})),
         (r("src/x.rs", ""), json!({"kind":"none"})),
+        // a design file of another project (a file:// address, the thread given is another's): that project's thread, the path from its root
+        (r(&sch, "t1"), json!({"kind":"file","thread":"t9","path":"boards/a.kicad_sch","line":0})),
+        (r(&sch, ""), json!({"kind":"file","thread":"t9","path":"boards/a.kicad_sch"})),
     ];
     for (m, want) in cases {
         let id = m["id"].as_u64().unwrap(); ws.send(Message::Text(m.to_string().into())).await.unwrap();

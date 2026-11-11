@@ -1934,6 +1934,12 @@ gpui.the.hub.gave.no.answer = ハブから応答がありません
 gpui.the.hub.answered = ハブの応答：{status}
 gpui.fold.the.project.s.threads = プロジェクトのスレッドを畳む（ポインタの下の行、なければ開いている行。プロジェクト行を押した後）
 gpui.unfold.the.project.s.threads = プロジェクトのスレッドを開く
+gpui.open.in.kicad.embedded = KiCadで開く（埋め込み）
+gpui.that.file.does.not.open = そのファイルはここでは開けません。
+gpui.open.a.thread.first.that = 先にスレッドを開いてください。そのファイルはどのプロジェクトにもありません。
+gpui.gerbers.open.on.their.project = ガーバーはプロジェクトのボードで開きます。このファイルはどのプロジェクトにもありません。
+gpui.that.kicad.project.has.no = そのKiCadプロジェクトの隣にボードも回路図もありません。
+gpui.that.file.is.not.on = そのファイルはこのハブにありません。
 
 # ---- gpui-c: viewers, plots, terminal, drawing pad ----
 gpui.c.commit = コミット

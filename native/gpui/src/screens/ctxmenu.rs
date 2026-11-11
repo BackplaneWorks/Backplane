@@ -25,6 +25,10 @@ pub const LOCAL_FILE_REVEAL: &str = "local:file-reveal";
 pub const LOCAL_COPY: &str = "local:copy";
 pub const LOCAL_COPY_IMAGE: &str = "local:copy-image";
 pub const LOCAL_URL_OPEN: &str = "local:url-open";
+/// A file link's Open: inside Backplane (the hub's `link-file`: its project's thread, the viewer tab that draws it), never the system's app.
+pub const LOCAL_LINK_FILE: &str = "local:link-file";
+/// A KiCad file link's Open in KiCad (embedded): opened as above, then the KiCad pane in the viewer edits it (kicad_pane.rs).
+pub const LOCAL_KICAD_EMBED: &str = "local:kicad-embed";
 /// An item that opens a second menu where the first was (a project's Move to group): its `value` is the second menu's items, as JSON.
 pub const LOCAL_SUB: &str = "local:sub";
 fn s(v: &Value, k: &str) -> String { v[k].as_str().unwrap_or("").to_string() }
@@ -35,7 +39,9 @@ fn item(label: &str, action: &str, value: &str, confirm: bool) -> Item { Item { 
 pub fn link_items(href: &str, file: bool) -> Vec<Item> {
     use super::linkroute::{route, Route};
     /* i18n-ok: menu labels, drawn through trs in render */ match route(href, file) {
-        /* i18n-ok: menu labels, drawn through trs in render */ Route::File(p) => vec![item("Open", LOCAL_FILE_OPEN, &p, false), item("Show in folder", LOCAL_FILE_REVEAL, &p, false), item("Copy path", LOCAL_COPY, &p, false)],
+        /* i18n-ok: menu labels, drawn through trs in render */ Route::File(p) => { let mut v = vec![item("Open", LOCAL_LINK_FILE, &p, false)];
+            /* i18n-ok: a menu label, drawn through trs in render */ if super::linkroute::kicad_file(&p) { v.push(item("Open in KiCad (embedded)", LOCAL_KICAD_EMBED, &p, false)); }
+            /* i18n-ok: menu labels, drawn through trs in render */ v.extend([item("Show in folder", LOCAL_FILE_REVEAL, &p, false), item("Copy path", LOCAL_COPY, &p, false)]); v }
         /* i18n-ok: menu labels, drawn through trs in render */ Route::Web(u) => vec![item("Open link", LOCAL_URL_OPEN, &u, false), item("Copy link", LOCAL_COPY, &u, false)],
         /* i18n-ok: menu labels, drawn through trs in render */ _ => vec![item("Copy link", LOCAL_COPY, href.trim(), false)],
     }
@@ -153,6 +159,19 @@ impl Backplane {
         self.screens.ctx = Some(Menu { at, items, armed: None, probe: "ctx" }); cx.notify();
     }
     /// A file named in a message: the hub opens it (or shows it in its folder) on its machine; a relative path is from the thread's folder.
+    /// A file link pressed (or its menu's Open): the hub opens it inside Backplane (`link-file`: its project's thread, the viewer tab that draws
+    /// it). `edit`: Open in KiCad (embedded): once the viewer shows that file, the KiCad pane edits it (`edit_due`).
+    pub(crate) fn link_file(&mut self, path: &str, edit: bool, cx: &mut Context<Self>) {
+        self.screens.edit_after = edit.then(|| (super::linkroute::stem_of(path), std::time::Instant::now()));
+        self.go("link-file", path.to_string(), cx);
+    }
+    /// After a picture: the KiCad pane for an Open in KiCad (embedded) once the viewer shows its file (10 s at most).
+    pub(crate) fn edit_due(&mut self, cx: &mut Context<Self>) {
+        let Some((stem, at)) = self.screens.edit_after.clone() else { return };
+        if at.elapsed() > std::time::Duration::from_secs(10) { self.screens.edit_after = None; return }
+        let viewer = &self.data["thread"]["viewer"];
+        if super::linkroute::shows_file(viewer["open"].as_str().unwrap_or(""), &super::viewer::shown_key(viewer), &stem) { self.screens.edit_after = None; self.kicad_edit(cx); }
+    }
     pub(crate) fn file_open(&mut self, path: &str, reveal: bool) {
         let thread = raw(self.data["thread"]["id"].as_str().unwrap_or("")).to_string();
         let _ = self.tx.try_send(Command::Rpc("file.open".into(), crate::screens::settings::Secret(serde_json::json!({"path": path, "thread": thread, "how": if reveal { "reveal" } else { "open" }})), "fileopen"));
@@ -181,6 +200,7 @@ impl Backplane {
             Some((a, v)) if a == LOCAL_FILE_OPEN || a == LOCAL_FILE_REVEAL => { self.ctx_close(cx); self.file_open(&v, a == LOCAL_FILE_REVEAL); return }
             Some((a, v)) if a == LOCAL_COPY => { self.ctx_close(cx); cx.write_to_clipboard(ClipboardItem::new_string(v)); return }
             Some((a, v)) if a == LOCAL_URL_OPEN => { self.ctx_close(cx); cx.open_url(&v); return }
+            Some((a, v)) if a == LOCAL_LINK_FILE || a == LOCAL_KICAD_EMBED => { self.ctx_close(cx); self.link_file(&v, a == LOCAL_KICAD_EMBED, cx); return }
             Some((a, _)) if a == LOCAL_COPY_IMAGE => { self.ctx_close(cx); if let Some(img) = self.screens.ctx_img.take() { cx.write_to_clipboard(ClipboardItem::new_image(&img)); } return }
             // a second menu, where the first was (Move to group: the other groups, then New group…)
             Some((a, v)) if a == LOCAL_SUB => {
@@ -278,6 +298,11 @@ mod tests {
     #[test] fn a_link_and_a_picture_have_menus() {
         let l = |h: &str, f: bool| link_items(h, f).into_iter().map(|i| (i.label, i.action, i.value)).collect::<Vec<_>>();
         assert_eq!(l("mfg/a.zip", true).iter().map(|x| x.0.as_str()).collect::<Vec<_>>(), ["Open", "Show in folder", "Copy path"]); assert_eq!(l("mfg/a.zip", true)[1], ("Show in folder".into(), LOCAL_FILE_REVEAL.into(), "mfg/a.zip".into()));
+        assert_eq!(l("mfg/a.zip", true)[0].1, LOCAL_LINK_FILE, "a file opens inside Backplane, never the system's app");
+        // a KiCad file: Open, Open in KiCad (embedded), Show in folder, Copy path
+        assert_eq!(l("boards/main/main.kicad_sch", true).iter().map(|x| (x.0.as_str(), x.1.as_str())).collect::<Vec<_>>(),
+            [("Open", LOCAL_LINK_FILE), ("Open in KiCad (embedded)", LOCAL_KICAD_EMBED), ("Show in folder", LOCAL_FILE_REVEAL), ("Copy path", LOCAL_COPY)]);
+        assert_eq!(l("file:///w/a.kicad_pcb", true).len(), 4); assert_eq!(l("/w/case.step", true).len(), 3, "a model has no KiCad to edit it");
         assert_eq!(l("https://x.io", false).iter().map(|x| x.1.as_str()).collect::<Vec<_>>(), [LOCAL_URL_OPEN, LOCAL_COPY]); assert_eq!(l("javascript:x", false).len(), 1);
         assert_eq!(image_items("/h/a.png").iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), ["Copy image", "Open", "Show in folder", "Copy path"]); assert_eq!(image_items("").len(), 1);
     }

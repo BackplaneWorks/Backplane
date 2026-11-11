@@ -416,7 +416,7 @@ pub fn page_title(data: &Value, page: Option<&str>) -> Option<String> { page.and
 /// Whether an action sent to the hub goes somewhere (a bot's chat, a room, a link, a thread): the project's page on show gives way to it.
 /// The page is this window's own; the hub's selection may not move at all (the uberbot's chat was already selected under the page), so
 /// a click on the uberbot after a project page left the page up.
-pub fn leaves_page(action: &str) -> bool { matches!(action, "bot" | "room" | "link-open" | "select") }
+pub fn leaves_page(action: &str) -> bool { matches!(action, "bot" | "room" | "link-open" | "link-file" | "select") }
 /// The sidebar's project with this (raw) id.
 pub fn find<'a>(data: &'a Value, pid: &str) -> Option<&'a Value> {
     data["projects"].as_array().and_then(|ps| ps.iter().find(|p| string(p, "id").rsplit('|').next() == Some(pid))).or_else(|| super::sections::find(data, pid))
@@ -571,7 +571,7 @@ pub fn controls(data: &Value) -> Vec<(String, String, Ctl)> {
 #[cfg(test)]
 mod tests {
     #[test] fn going_to_a_bot_a_room_a_link_or_a_thread_leaves_the_project_page() {
-        for a in ["bot", "room", "link-open", "select"] { assert!(super::leaves_page(a), "{a}"); }
+        for a in ["bot", "room", "link-open", "link-file", "select"] { assert!(super::leaves_page(a), "{a}"); }
         for a in ["flag", "new-thread", "proj-find-q", ""] { assert!(!super::leaves_page(a), "{a}"); }
     }
     use super::*; use core::prelude::v1::test;

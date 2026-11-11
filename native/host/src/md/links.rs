@@ -45,6 +45,15 @@ pub fn is_ref(s: &str, loose: bool) -> bool {
 /// Link.is_path
 pub fn is_path(s: &str) -> bool { is_ref(s, false) }
 
+/// A design file named alone (`main.kicad_sch`, `case.step:3`, no folder): a link too, the viewer draws it (present/filelink.rs).
+pub fn is_design(s: &str) -> bool {
+    if s.is_empty() || !s.chars().all(pchar) || s.contains("://") || s.starts_with("//") { return false }
+    let p = part(s); let rest: String = s.chars().skip(p.chars().count()).collect();
+    sfx(&rest) && !p.ends_with('/') && !crate::present::filelink::design_kind(last(&p)).is_empty() && last(&p).split('.').next().map_or(false, |n| !n.is_empty())
+}
+/// A `file:///abs/path` address (a design file's or any): a link to that file.
+pub fn file_url(s: &str) -> bool { s.strip_prefix("file://").map_or(false, |r| { let r = r.strip_prefix("localhost").unwrap_or(r); r.len() > 1 && r.starts_with('/') && !r.contains(char::is_whitespace) }) }
+
 /// Link.target: a markdown target, file:// dropped
 fn target(u: &str) -> String { u.strip_prefix("file://").unwrap_or(u).to_string() }
 
@@ -214,12 +223,14 @@ fn ids_go(w: &[char], b: &mut Bw, muted: bool) {
 fn bare_flush(b: &mut Bw) {
     if b.word.is_empty() { return }
     let w = std::mem::take(&mut b.word);
-    if w.contains(&'/') {
+    if w.contains(&'/') || w.contains(&'.') {
         let (l, t) = (lead(&w), trail(&w));
         let n = w.len();
         let mid_len = n.saturating_sub(l).saturating_sub(t);
         let core: S = w[l.min(n)..(l.min(n) + mid_len).min(n)].to_vec();
-        if is_path(&st(&core)) {
+        let cs = st(&core);
+        // a path, a design file named alone, or a file:// address
+        if is_path(&cs) || is_design(&cs) || file_url(&cs) {
             let mut txt = std::mem::take(&mut b.txt); txt.extend_from_slice(&w[..l]);
             text(&txt, &mut b.out);
             let cs = st(&core); b.out.push(Piece::Link(cs.clone(), cs));
@@ -232,7 +243,7 @@ fn bare_flush(b: &mut Bw) {
 }
 
 fn bare_text(s: &str) -> Vec<Piece> {
-    if !(s.contains('/') || s.contains('-')) { return vec![Piece::Text(s.to_string())] }
+    if !(s.contains('/') || s.contains('-') || s.split_whitespace().any(|w| is_design(w.trim_matches(|c: char| wrap(c) || after(c))))) { return vec![Piece::Text(s.to_string())] }
     let mut b = Bw { txt: vec![], word: vec![], out: vec![], image: 0, bang: false };
     for c in s.chars() {
         if c.is_ascii_whitespace() || c == '\u{b}' {
@@ -261,5 +272,12 @@ mod tests {
     }
     #[test] fn markdown_links() { assert_eq!(t("[x](https://a.b)"), vec![Piece::Link("x".into(), "https://a.b".into())]); assert_eq!(t("![x](a.png)"), vec![Piece::Text("![x](a.png)".into())]); }
     #[test] fn paths() { assert_eq!(t("open src/main.rs now"), vec![Piece::Text("open ".into()), Piece::Link("src/main.rs".into(), "src/main.rs".into()), Piece::Text(" now".into())]); }
+    #[test] fn design_files_named_alone_and_file_addresses_are_links() {
+        assert_eq!(t("see main.kicad_sch now"), vec![Piece::Text("see ".into()), Piece::Link("main.kicad_sch".into(), "main.kicad_sch".into()), Piece::Text(" now".into())]);
+        assert_eq!(t("(case.STEP)."), vec![Piece::Text("(".into()), Piece::Link("case.STEP".into(), "case.STEP".into()), Piece::Text(").".into())]);
+        assert_eq!(t("open file:///home/h/a%20b.kicad_pcb"), vec![Piece::Text("open ".into()), Piece::Link("file:///home/h/a%20b.kicad_pcb".into(), "file:///home/h/a%20b.kicad_pcb".into())]);
+        assert_eq!(t("[board](file:///w/a.kicad_pcb)"), vec![Piece::Link("board".into(), "/w/a.kicad_pcb".into())]);
+        for plain in ["version 1.2 done", "e.g. this", "a .kicad_pcb file", "x.rs alone"] { assert!(t(plain).iter().all(|p| matches!(p, Piece::Text(_))), "{plain}: {:?}", t(plain)); }
+    }
     #[test] fn bare_ids() { assert!(matches!(t("see t1700000000-1.")[1], Piece::Ref(..))); }
 }

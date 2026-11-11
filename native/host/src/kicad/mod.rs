@@ -59,7 +59,8 @@ pub fn start(hub: &Arc<Hub>) {
 /// hub read any file as a board). Versions (`git\t<gitdir>...`, `diff\n...`) must name only known folders too.
 pub async fn known_root(hub: &Arc<Hub>, root: &str, path: &str) -> bool {
     let roots: Vec<String> = { let m = hub.model().await; m.projects.values().filter(|p| !p.removed).map(|p| p.root.clone()).chain(m.threads.values().filter(|t| !t.worktree.is_empty()).map(|t| t.worktree.clone())).collect() };
-    allowed(&roots, root, path)
+    // (a design file in no project the person opened by a link is drawn from the thread on show: present/filelink.rs `allow`)
+    allowed(&roots, root, path) || (allowed(&roots, root, "") && crate::present::filelink::allowed(path))
 }
 pub fn allowed(roots: &[String], root: &str, path: &str) -> bool {
     let under = |p: &str, r: &str| !r.is_empty() && (p == r || (p.starts_with(r) && p.as_bytes().get(r.len()) == Some(&b'/'))) && !p.split('/').any(|x| x == "..") && !p.contains('\0');

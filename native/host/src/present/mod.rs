@@ -28,6 +28,7 @@ pub mod screen;
 pub mod merged;
 pub mod sections;
 pub mod linkopen;
+pub mod filelink;
 mod native_sidebar;
 
 /// One ported part of the presentation. `None`: not mine, ask the next one (finally the helper).
