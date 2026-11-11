@@ -306,7 +306,10 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
     }
     let room_page=&p["roomPage"];
     let bot_page=&p["botPage"]; // a bot's target shows its chat thread, under its tabs (session seam: bots::bot_page)
-    let thread=if p["target"]["kind"]=="thread" { text(&p["target"],"id") }else if bot_page.is_object() { text(bot_page,"chat") }else{""};
+    // a swarm's page: the thread its viewer is drawn for (its first member), when the seam gave its window; the room page covers its conversation
+    let room_view=if room_page.is_object() { super::swarmform::viewer_thread(room_page) }else{String::new()};
+    let room_view=if !room_view.is_empty() && p["window"].is_object() && (st.threads.contains_key(&room_view) || far.iter().any(|(_,f)|f.threads.contains_key(&room_view))) { room_view }else{String::new()};
+    let thread=if p["target"]["kind"]=="thread" { text(&p["target"],"id") }else if bot_page.is_object() { text(bot_page,"chat") }else{room_view.as_str()};
     // the uberbot's (or a bot's) chat after its home moved: this hub keeps the old copy of the thread, the live one is the new home's, the same id there; it is drawn instead
     let moved=crate::net::homemove::moved_thread(setting(st,"home.at"),thread,st.threads.get(thread).map(|t|t.project.as_str()),&|id|far.iter().any(|(_,f)|f.threads.contains_key(id)));
     let thread=moved.as_deref().unwrap_or(thread);
@@ -560,7 +563,10 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
         if !p["window"].is_object() { return refused("window.missing") }
         let mut params=p.clone(); params["session"]=session.clone();
         match super::thread::thread_object_checked(tst,hub,thread,&params,text(&session["drafts"],thread)) {
-            Ok(value)=>value, Err(reason)=>return refused(reason),
+            Ok(value)=>value,
+            // a swarm's page stands without its viewer's thread: the page is what the person opened
+            Err(reason) if !room_view.is_empty() => { super::refusal::report(reason); Value::Null },
+            Err(reason)=>return refused(reason),
         }
     };
     // a thread of another machine: its marker with the full name, for the header (this machine's threads have none)
@@ -579,7 +585,9 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
     if action=="native-sidebar-page" { session["drafts"]["@menu"]=json!(""); session["drafts"]["@del"]=json!(""); }
     let open: HashSet<String>=session["open"].as_object().into_iter().flatten().filter(|(_,v)|v.as_bool()==Some(true)).map(|(k,_)|k.clone()).collect();
     // a search unfolds the older projects too (Side.unfolded)
-    let opts=sidebar::Opts { hub,now:p["now"].as_u64().unwrap_or(0)/1000,selected:thread,open:&open,older_open:flag(&session,"old-projects") || !query.is_empty(),query:&query };
+    // the sidebar marks the thread on show: none on a room's page (its viewer's thread is not what the person opened)
+    let side_sel=if room_page.is_object() { "" }else{thread};
+    let opts=sidebar::Opts { hub,now:p["now"].as_u64().unwrap_or(0)/1000,selected:side_sel,open:&open,older_open:flag(&session,"old-projects") || !query.is_empty(),query:&query };
     let plan=sidebar::plan(st,&opts);
     // a linked project shown as one with a project here opens and shuts with it
     let mut fopen=open.clone();
@@ -590,7 +598,7 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
     let owner_live=|l: &str| st.projects.contains_key(l) || far.iter().any(|(_,f)|f.projects.contains_key(l));
     let mut partners: HashMap<&str,Vec<(&str,&State,&sidebar::Plan,&str)>>=HashMap::new();
     for (m,f,fp) in &fplans { for id in fp.ids() { if let Some(l)=un_far.get(id) { if l!=id && owner_live(l) { partners.entry(l.as_str()).or_default().push((*m,*f,fp,id)); } } } }
-    let selected_project=st.threads.get(thread).map(|t|t.project.as_str()).unwrap_or("");
+    let selected_project=st.threads.get(side_sel).map(|t|t.project.as_str()).unwrap_or("");
     // Find.rows: the projects whose name fuzzy-matches, and those holding a thread the search finds; the one holding the open thread stays (Side.cur.held)
     let far_hit=|id: &str| partners.get(id).map_or(false,|v|v.iter().any(|(_,_,fp,f)|fp.has_hit(f)));
     let mut ids: Vec<&str>=plan.ids().into_iter().filter(|id| query.is_empty() || *id==selected_project || st.projects.get(*id).map_or(false,|p|fuzzy_hit(&p.title,&query)) || plan.has_hit(id) || far_hit(id)).collect();
@@ -621,7 +629,7 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
         // the plan (and state) that holds this project: this hub's, else the linked machine's it came from
         let (pst,pplan,machine)=match fplans.iter().find(|(_,f,_)|f.projects.contains_key(owner)) { Some((m,f,fp)) if !st.projects.contains_key(owner) => (*f,fp,*m), _ => (st,&plan,"") };
         let mut project=pplan.project(owner,&mut |kind,ids| {
-            let (mut indices,pager)=ns.slice_ids(ids,kind,owner,row_limit,thread);
+            let (mut indices,pager)=ns.slice_ids(ids,kind,owner,row_limit,side_sel);
             indices.sort_unstable(); // Mob.native.tree_rows filters in tree order.
             (indices,pager)
         })?;
@@ -642,7 +650,7 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
             // a row drawn from a linked machine's copy (no copy here) names that machine among its machines, and no single "on <machine>"
             if !machine.is_empty() { machines.push(json!(machine)); marks.push(un.mark(machine)); project.as_object_mut().unwrap().remove("mark"); }
             for (m,_,fp,fid) in ps {
-                let Some(mut fproj)=fp.project(fid,&mut |kind,ids| { let (mut indices,pager)=ns.slice_ids(ids,kind,fid,row_limit,thread); indices.sort_unstable(); (indices,pager) }) else { continue };
+                let Some(mut fproj)=fp.project(fid,&mut |kind,ids| { let (mut indices,pager)=ns.slice_ids(ids,kind,fid,row_limit,side_sel); indices.sort_unstable(); (indices,pager) }) else { continue };
                 sidebar::label_rows(&mut fproj,&un.mark(m));
                 sidebar::join_project(&mut project,fproj,&row_key);
                 if !machines.contains(&json!(m)) { machines.push(json!(m)); marks.push(un.mark(m)); }
@@ -674,7 +682,7 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
     if !far.is_empty() { shown["machines"]=machine_switch(far,un,&mpick); }
     // the sections (docs/ALWAYS-ON.md section 8): Bub, Needs you, Pinned, Active, groups, Quiet; the project page; Ctrl+K's list
     { let rows=merged_here(st,far,un); let open=super::sections::opened(&session);
-      let c=super::sections::Ctx{ hub,now:opts.now,query:&query,open:&open,selected:thread };
+      let c=super::sections::Ctx{ hub,now:opts.now,query:&query,open:&open,selected:side_sel };
       let bub=shown["bots"].as_array().and_then(|b|b.iter().find(|r|r["uber"]==json!(true))).cloned().unwrap_or(Value::Null);
       shown["sections"]=super::sections::build(st,&rows,&bub,&c);
       shown["jump"]=super::sections::jump(&rows,&c);
@@ -1049,6 +1057,16 @@ mod state_tests {
         assert_eq!(sent["p"],json!({"room":"s1","action":"remove","thread":"t2"}));
         let v=on_page("swarm-act","stop",json!({})).unwrap(); let sent: Value=serde_json::from_str(v["cmds"][0]["text"].as_str().unwrap()).unwrap(); assert_eq!(sent["p"]["action"],"stop");
         assert!(on_page("swarm-act","remove|t3",json!({})).is_none(),"not a member: refused");
+        // its viewer: drawn for its first member (the seam gives that thread's window), so the rail opens Board on the project's design
+        let win=json!({"contextMessages":[],"messageIds":[],"historyUnits":[],"partial":[],"ids":[],"anchor":{"id":"","offset":0},"older":"","olderNext":"","hasMore":false,"remaining":0,"newer":0,"total":0});
+        let with_window=|action:&str,value:&str| { let mut p=params(); p["target"]=json!({"kind":"room","id":"s1"}); p["roomPage"]=page.clone(); p["window"]=win.clone(); p["action"]=json!(action); p["value"]=json!(value); recent(&st,&p).unwrap() };
+        let v=with_window("view","board");
+        assert_eq!(v["session"]["sel"],"t1"); assert_eq!(v["session"]["drafts"]["@view:t1"],"board");
+        let watch=v["cmds"].as_array().unwrap().iter().filter_map(|c| serde_json::from_str::<Value>(c["text"].as_str()?).ok()).find(|c| c["m"]=="kicad.watch").expect("the board is watched");
+        assert_eq!((watch["p"]["kind"].as_str(),watch["p"]["root"].as_str()),(Some("board"),Some("/m")));
+        assert_eq!(v["shown"]["bot"]["kind"],"room","the page stays the swarm's");
+        // with no window for it (a member the seam could not page) the page is still drawn, with no viewer
+        let v=on_page("","",json!({})).unwrap(); assert_eq!(v["session"]["sel"],""); assert!(v["shown"]["thread"].is_null()); assert_eq!(v["shown"]["bot"]["kind"],"room");
     }
     /// A linked machine's bots and rooms are listed after this hub's, each with its machine's marker; with no uberbot here, the linked machine's
     /// leads in Bub's place, and opening it, a far room or a far bot is a target like a bot here (its chat is its thread there).

@@ -143,7 +143,9 @@ impl Hub {
         }
         let before = actor::page(c.client, &view_id, m, p["action"].as_str().unwrap_or(""), &p["target"], if m == "view.page" { page_before(&p) } else { 0 });
         // the conversation the target shows: a thread's own, a bot's chat thread (a bot view without its window stays on "Updating conversation...")
-        let shown: Option<String> = match p["target"]["kind"].as_str() { Some("thread") => p["target"]["id"].as_str().map(str::to_string), Some("bot") => bot.as_ref().map(|(_, t)| t.clone()), _ => None };
+        // and a swarm's page the thread its viewer is drawn for (present::swarmform::viewer_thread): drawn under the page, the viewer beside it
+        let shown: Option<String> = match p["target"]["kind"].as_str() { Some("thread") => p["target"]["id"].as_str().map(str::to_string), Some("bot") => bot.as_ref().map(|(_, t)| t.clone()),
+            Some("room") => Some(crate::present::swarmform::viewer_thread(&params["roomPage"])).filter(|t| !t.is_empty()), _ => None };
         let (window, page) = match self.window_for(&p, before, shown.as_deref()).await { Some((w, pg)) => (Some(w), Some(pg)), None => (None, None) };
         if let (Some(w), Some(o)) = (&window, params.as_object_mut()) { o.insert("window".into(), w.clone()); }
         if let (Some(pg), Some(_)) = (&page, params.as_object_mut()) {

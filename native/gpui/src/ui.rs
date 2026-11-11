@@ -159,7 +159,7 @@ impl Backplane {
         let c = |name: &str| theme::color(light, name);
                 let id = string(t, "id");
                 let raw = id.rsplit_once('|').map_or(id.as_str(), |(_, i)| i);
-                let selected = raw == self.selected && self.project_page.is_none(); // a project's page on show: its head is the one highlighted, no row
+                let selected = raw == self.selected && self.project_page.is_none() && !crate::screens::swarm::over_thread(&self.data); // a project's page on show: its head is the one highlighted, no row (nor on a room's page)
                 ctl.push(CtlEntry { id: format!("thread:{raw}"), label: string(t, "title"), ctl: Ctl::Select(id.clone()) });
                 let (depth, kids, open) = (t["depth"].as_u64().unwrap_or(0).min(6) as f32, t["children"].as_u64().unwrap_or(0), t["expanded"].as_bool().unwrap_or(false));
                 // only a project's tree unfolds: an Active-view or Conversation-history row with subthreads has no rows to show under it, so no chevron
@@ -629,7 +629,8 @@ impl Render for Backplane {
         let (combo_avail, tok_words) = crate::screens::combo::split(bar_w, &thread["combo"], &string(&self.data, "tokChip"), &ctx);
         // the thread's header (screens/head.rs): its state and tools beside the name in the top bar when it has the room, else a row of their own
         // a project's page over a thread: the header is the page's (its project's name), not the thread's
-        let head_thread = has_thread && !has_home;
+        // a swarm's page over the thread its viewer is drawn for: the page is what is open, so that thread has no header
+        let head_thread = has_thread && !has_home && !crate::screens::swarm::over_thread(&self.data);
         crate::keys::set_tip_font(&self.local.font);
         let head = if head_thread { self.screens.head.layout(window, f32::from(window.viewport_size().width), &string(thread, "title"), &crate::screens::tools::tools(thread), &self.local.font, 13. * self.local.text_pct as f32 / 100.) } else { Default::default() };
         let (mut top_mid, mut head_row): (Option<AnyElement>, Option<AnyElement>) = (None, None);
