@@ -83,6 +83,65 @@ def home_has_a_copy(hub_bin, base, agents, port):
         if os.environ.get("KEEP") != "1": shutil.rmtree(root, ignore_errors=True)
 
 
+def one_direction(hub_bin, base, agents, port):
+    """A pairs to B (machines.code on B, machines.pair from A, B approves: the always-on rig's way, one direction), each with a copy of the repository
+    and one project of its own. From the first answer after linking, and again after B restarts, both hubs' projects.list show the repository once
+    with both machines and each machine's own project: never a machine/id row, never a machine missing."""
+    root = tempfile.mkdtemp(prefix="bpt-split3-", dir=base)
+    unified.seed(root, "a", "https://github.com/o/demo.git", True); unified.seed(root, "b", "git@github.com:o/demo.git", False)
+    ports = {"a": port, "b": port + 1}
+    os.environ["BP_NAME_A"], os.environ["BP_NAME_B"] = "desktop", "boat-hub"
+    procs, homes = {}, {}
+    for k in ("a", "b"): procs[k], homes[k] = bots.start(hub_bin, root, k, ports[k], ports["b" if k == "a" else "a"], agents)
+    H = {k: Hub(f"http://127.0.0.1:{p}", "") for k, p in ports.items()}
+    def rows(k):
+        d = Data(H[k], H[k].root)
+        try: pl = d.ok("projects.list", {})
+        finally:
+            try: d.s.close()
+            except Exception: pass
+        return [(p.get("title"), p.get("key"), sorted(m.get("short", "") for m in (p.get("machines") or []))) for p in (pl.get("projects") or [])]
+    def good(k):
+        r = rows(k); demo = [x for x in r if x[0].startswith("repo-")]
+        return r if len(demo) == 1 and demo[0][2] == ["boat-hub", "desktop"] and any(x[0] == "other-a" for x in r) and not any("/" in (x[1] or "") and not (x[1] or "").startswith("github.com") for x in r if x[0] != "notes") else None
+    try:
+        if not all(h.wait_up(60) for h in H.values()): check("two hubs up", False); return
+        for k, h in H.items(): h.root = open(os.path.join(homes[k], "token")).read().strip()
+        code = rpc(H["b"], "machines.code"); rpc(H["a"], "machines.pair", {"address": H["b"].base, "code": code.get("code", "")})
+        req = bots.until(lambda: (rpc(H["b"], "machines.requests") or {}).get("requests"), 30)
+        check("A asked B to pair (one direction)", bool(req))
+        if not req: return
+        rpc(H["b"], "machines.approve", {"request": req[0]["id"]})
+        t0 = time.time()
+        got = bots.until(lambda: good("b") and good("a"), 20)
+        check("one-direction pairing: both hubs list the repository once with both machines, and A's own project, within 20 s", bool(got), f"{time.time() - t0:.0f} s; A {rows('a')} B {rows('b')}")
+        # a hub linked to A for sharing (another person's: not marked the owner's own) is sent none of A's rows: no registry, no projects of A's
+        unified.seed(root, "c", "https://github.com/x/theirs", False); os.environ["BP_NAME_C"] = "theirs"
+        procs["c"], homes["c"] = bots.start(hub_bin, root, "c", port + 2, ports["a"], agents); C = Hub(f"http://127.0.0.1:{port + 2}", "")
+        if C.wait_up(60):
+            C.root = open(os.path.join(homes["c"], "token")).read().strip()
+            inv = rpc(H["a"], "bots.invite"); j = rpc(C, "bots.join", {"invite": inv["invite"]})
+            check("a hub of someone else's linked to A (not the owner's own)", bool(j.get("peer")), json.dumps(j)[:200])
+            rpc(H["a"], "setting.set", {"key": "restart.continue", "value": "off"})  # (a change on A: its rows are due again)
+            time.sleep(75)  # (A sends its rows each minute when due)
+            reg = rpc(C, "registry.list"); rp = (reg.get("result") or reg).get("projects", [])
+            leaked = [p for p in rp if any(m.get("machine") != "theirs" for m in p.get("machines", []))]
+            check("a machine linked for sharing receives none of A's registry rows", not leaked, json.dumps(leaked)[:300])
+            ev = open(os.path.join(homes["c"], "events.jsonl")).read()
+            check("nor anything of A's projects in its log", "repo-a" not in ev and "other-a" not in ev and "/a/proj" not in ev)
+        procs["b"].terminate(); procs["b"].wait(15)
+        procs["b"], homes["b"] = bots.start(hub_bin, root, "b", ports["b"], ports["a"], agents)
+        H["b"].wait_up(60); t0 = time.time()
+        got = bots.until(lambda: good("b"), 20)
+        check("after B restarts, B lists them merged again within 20 s", bool(got), f"{time.time() - t0:.0f} s; B {rows('b')}")
+    finally:
+        for p in procs.values(): p.terminate()
+        for p in procs.values():
+            try: p.wait(10)
+            except subprocess.TimeoutExpired: p.kill()
+        if os.environ.get("KEEP") != "1": shutil.rmtree(root, ignore_errors=True)
+
+
 def main():
     a = argparse.ArgumentParser()
     a.add_argument("--hub", required=True); a.add_argument("--port", type=int, default=3911); a.add_argument("--hold", default=""); a.add_argument("--expect", default="merged")
@@ -98,7 +157,8 @@ def main():
         with open(os.path.join(agents, n), "w") as f: f.write("#!/bin/sh\nexit 1\n")
     for n in os.listdir(agents): os.chmod(os.path.join(agents, n), 0o755)
     for k, n in NAMES.items(): os.environ["BP_NAME_" + k.upper()] = n
-    if o.expect != "split": home_has_a_copy(o.hub, base, agents, o.port + 5)
+    if o.expect != "split": one_direction(o.hub, base, agents, o.port + 7); home_has_a_copy(o.hub, base, agents, o.port + 5)
+    for k, n in NAMES.items(): os.environ["BP_NAME_" + k.upper()] = n
     seed_home(root, "bh")
     unified.seed(root, "desk", "git@github.com:o/r.git", False); unified.seed(root, "fw", "https://github.com/o/r", False)
     ports = {"bh": o.port, "desk": o.port + 1, "fw": o.port + 2}

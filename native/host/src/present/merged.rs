@@ -107,10 +107,11 @@ pub fn merged_projects<'a>(st: &'a State, far: &[(String, &'a State)], away: &dy
             let mut key = None;
             // its machine has not said its origin yet (a link just made): the registry's key for that copy, else it waits (never machine/id while the
             // origin is only unknown: the same repository would be two rows); a machine that does not answer is keyed by machine/id as it has no say
-            if o == crate::mirror::UNKNOWN {
+            if o == crate::mirror::UNKNOWN || o.is_empty() {
+                // (the registry has the copy's key as that machine computed it: it wins over "none" too, which a machine that will not say gets)
                 match reg.iter().find(|r| r.machines.iter().any(|c| c.machine == *m && c.id == local)) {
                     Some(r) => { o = r.origin.clone(); key = Some(r.key.clone()); }
-                    None if away(m) => { o = String::new(); }
+                    None if o.is_empty() || away(m) => { o = String::new(); }
                     None => continue,
                 }
             }
@@ -169,7 +170,7 @@ pub fn merged_projects<'a>(st: &'a State, far: &[(String, &'a State)], away: &dy
 pub fn merged_of<R>(st: &State, m: &crate::mirror::Mirrors, f: impl FnOnce(Vec<MergedProject>) -> R) -> R {
     let reg = crate::net::registry::cached();
     let here = m.here();
-    m.shown(|far| f(merged_projects(st, far, &|n| m.mark(n)["away"] == true, &|id| m.origin(id), &here, &reg)))
+    m.shown(|far| { let mut list = merged_projects(st, far, &|n| m.mark(n)["away"] == true, &|id| m.origin(id), &here, &reg); for p in list.iter_mut() { crate::mirror::live_chips(m, &mut p.machines) } f(list) })
 }
 
 /// The sidebar's join (present/screen.rs, data/1): which project id draws each merged row (its owner: this machine's copy, else the copy of the

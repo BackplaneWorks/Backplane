@@ -131,7 +131,8 @@ pub fn unified_of(st: &State,far: &[(String,&State)],origin: &dyn Fn(&str)->Stri
 /// The join over this hub's mirrors and the registry: what the sidebar and data/1 draw from.
 pub fn join_full(st: &State,far: &[(String,&State)],m: &crate::mirror::Mirrors) -> super::merged::Join {
     let reg=crate::net::registry::cached(); let here=m.here();
-    let list=super::merged::merged_projects(st,far,&|n|m.mark(n)["away"]==true,&|id|m.origin(id),&here,&reg);
+    let mut list=super::merged::merged_projects(st,far,&|n|m.mark(n)["away"]==true,&|id|m.origin(id),&here,&reg);
+    for p in list.iter_mut() { crate::mirror::live_chips(m,&mut p.machines) } // (a linked machine whose history has not come yet is on, not off)
     let mut j=super::merged::join_of(&list,&far.iter().map(|(n,_)|n.clone()).collect::<Vec<_>>());
     // a project every machine of which is off: a row of its own, drawn from the registry (`@off:<key>`)
     for p in super::merged::all_off(&list) { let mut r=super::merged::row_json(p); r["off"]=json!({"copies":p.ids.iter().map(|(m,i)|json!({"machine":m,"id":i})).collect::<Vec<_>>(),"threads":p.threads.iter().map(|t|json!({"machine":t.machine,"id":t.id,"title":t.title,"status":t.status,"activity":t.activity,"pinned":t.pinned})).collect::<Vec<_>>()}); r["machineChips"]=r["machines"].take(); j.rows.insert(format!("@off:{}",p.key),r); }

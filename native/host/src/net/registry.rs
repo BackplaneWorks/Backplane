@@ -98,17 +98,40 @@ pub async fn all(hub: &Hub) -> Vec<Value> {
     for m in index(hub).await { if let Some(r) = hub.setting(&key_of(&m)).await.and_then(|s| serde_json::from_str::<Value>(&s).ok()) { v.push(r) } }
     v
 }
-/// The far requests (net/rpc.rs; the owner's own machines only): `registry.put {rows}` and `registry.get`.
-pub async fn serve(hub: &Arc<Hub>, m: &str, p: &Value) -> Value {
+/// Rows a linked machine sent this hub (every hub sends its rows to each linked machine too, not only to the home): its origins and keys
+/// reach this hub even when this hub cannot call it (one-direction pairing, a machine behind a tunnel). Kept in memory, by machine.
+fn received() -> &'static Mutex<HashMap<String, Value>> { static R: OnceLock<Mutex<HashMap<String, Value>>> = OnceLock::new(); R.get_or_init(Default::default) }
+/// Every machine's rows this hub knows: `base` (the home's list, or its own store), then what linked machines sent (newer `seen` wins).
+fn with_received(mut base: Vec<Value>) -> Vec<Value> {
+    for (m, r) in received().lock().unwrap().iter() {
+        match base.iter_mut().find(|b| b["machine"].as_str() == Some(m.as_str())) {
+            Some(b) => { if r["seen"].as_u64().unwrap_or(0) > b["seen"].as_u64().unwrap_or(0) { *b = r.clone() } }
+            None => base.push(r.clone()),
+        }
+    }
+    base
+}
+/// The far requests (net/rpc.rs; the owner's own machines only): `registry.put {rows}` and `registry.get`. `link` is the sender.
+pub async fn serve(hub: &Arc<Hub>, link: &str, m: &str, p: &Value) -> Value {
     match m {
-        // (the home's own list is refreshed at once: its sidebar keys a just-linked machine's copies by it)
-        "registry.put" => match put(hub, &p["rows"]).await { Ok(()) => { set_cached(merge(&all(hub).await)); json!({"ok":true}) } Err(e) => json!({"ok":false,"error":e}) },
+        // its rows say its projects' origins (the sidebar keys its copies at once); the home keeps them in its log, any other hub in memory
+        "registry.put" => {
+            let rows = &p["rows"]; let machine = rows["machine"].as_str().unwrap_or("").to_string();
+            if machine.is_empty() { return json!({"ok":false,"error":"machine"}) }
+            hub.mirrors().origins_from_rows(link, rows);
+            received().lock().unwrap().insert(machine, rows.clone());
+            // (kept in the log only where the uberbot lives: it moves with home.move; elsewhere it is a copy, refreshed as it comes)
+            let r = if !crate::net::homemove::uber(hub).await.is_empty() { put(hub, rows).await } else { Ok(()) };
+            set_cached(merge(&with_received(all(hub).await))); hub.mirrors().bump(); hub.mirrors().publish(hub).await;
+            match r { Ok(()) => json!({"ok":true}), Err(e) => json!({"ok":false,"error":e}) }
+        }
         "registry.get" => json!({"ok":true,"machines":all(hub).await}),
         _ => json!({"ok":false,"error":"unknown"}),
     }
 }
 
 // ---- each hub ---------------------------------------------------------------------------------------------------------------------------
+
 /// Where the registry is: the home's link when another machine holds it, else None (this hub holds it, or none is known: it keeps its own).
 async fn home_link(hub: &Arc<Hub>) -> Option<String> {
     // `home.at` names the machine that holds the home (net/homemove.rs); "" or unset: this one, or none known (it keeps its own)
@@ -116,7 +139,9 @@ async fn home_link(hub: &Arc<Hub>) -> Option<String> {
     at["link"].as_str().filter(|l| !l.is_empty()).map(str::to_string)
 }
 /// What was last sent, where: (the home's link, "" this hub; the rows' digest; when).
-fn last() -> &'static Mutex<(String, String, u64)> { static L: OnceLock<Mutex<(String, String, u64)>> = OnceLock::new(); L.get_or_init(Default::default) }
+fn last() -> &'static Mutex<HashMap<String, (String, u64)>> { static L: OnceLock<Mutex<HashMap<String, (String, u64)>>> = OnceLock::new(); L.get_or_init(Default::default) }
+fn due(dest: &str, digest: &str, now: u64) -> bool { last().lock().unwrap().get(dest).map_or(true, |(d, at)| d != digest || now >= at + AGAIN) }
+fn sent(dest: &str, digest: &str, now: u64) { last().lock().unwrap().insert(dest.to_string(), (digest.to_string(), now)); }
 /// Send this hub's rows to the home (when they changed, or ten minutes went by) and read the merged list back. Best effort: a home that does
 /// not answer leaves the last list in place.
 pub async fn tick(hub: &Arc<Hub>, machine: &str) {
@@ -125,22 +150,28 @@ pub async fn tick(hub: &Arc<Hub>, machine: &str) {
     let Some(rows) = crate::statehost::policies().and_then(|p| p.with_state(|st| rows_of(st, machine, now, &|r| crate::mirror::origin_of_root(r)))) else { return };
     let digest = { let mut r = rows.clone(); r["seen"] = json!(0); r.to_string() };
     let home = home_link(hub).await;
-    let dest = home.clone().unwrap_or_default();
-    let due = { let l = last().lock().unwrap(); l.0 != dest || l.1 != digest || now >= l.2 + AGAIN };
-    match home {
-        None => {
-            if due && put(hub, &rows).await.is_ok() { *last().lock().unwrap() = (dest, digest, now); }
-            set_cached(merge(&all(hub).await));
-        }
+    let base = match &home {
+        None => { if due("", &digest, now) && put(hub, &rows).await.is_ok() { sent("", &digest, now) } all(hub).await }
         Some(link) => {
-            if due {
-                let (code, text) = hub.far_raw(&link, "registry.put", &json!({"rows":rows})).await;
-                if code == 200 && serde_json::from_str::<Value>(&text).map_or(false, |v| v["ok"] == true) { *last().lock().unwrap() = (dest, digest, now); }
+            if due(link, &digest, now) {
+                let (code, text) = hub.far_raw(link, "registry.put", &json!({"rows":rows})).await;
+                if code == 200 && serde_json::from_str::<Value>(&text).map_or(false, |v| v["ok"] == true) { sent(link, &digest, now) }
             }
-            let (code, text) = hub.far_raw(&link, "registry.get", &json!({})).await;
-            if code == 200 { if let Ok(v) = serde_json::from_str::<Value>(&text) { if v["ok"] == true { set_cached(merge(v["machines"].as_array().map(|a| a.as_slice()).unwrap_or(&[]))); } } }
+            let (code, text) = hub.far_raw(link, "registry.get", &json!({})).await;
+            let mut v: Vec<Value> = if code == 200 { serde_json::from_str::<Value>(&text).ok().filter(|v| v["ok"] == true).and_then(|v| v["machines"].as_array().cloned()).unwrap_or_default() } else { vec![] };
+            if !v.iter().any(|r| r["machine"].as_str() == Some(machine)) { v.push(rows.clone()) }
+            v
         }
+    };
+    // every other machine of the owner's hears this hub's rows too: its sidebar keys this hub's copies by them even when it cannot call this one.
+    // Only the owner's own verified machines (`far_machines`, and `far_raw` refuses any other link): project folders, thread titles and states never
+    // go to a machine linked for sharing or to another person's hub; and a hub takes `registry.put` only from its owner's own machines (net/rpc.rs)
+    for (link, _, _) in hub.far_machines() {
+        if Some(&link) == home.as_ref() || !due(&link, &digest, now) { continue }
+        let (code, text) = hub.far_raw(&link, "registry.put", &json!({"rows":rows})).await;
+        if code == 200 && serde_json::from_str::<Value>(&text).map_or(false, |v| v["ok"] == true) { sent(&link, &digest, now) }
     }
+    set_cached(merge(&with_received(base)));
 }
 
 /// Whether a Boat account is connected, so the picker's "A Boat (fresh clone)" can run (lane F's always-on Boat fills this in; until then off).

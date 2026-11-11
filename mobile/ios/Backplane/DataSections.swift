@@ -96,6 +96,8 @@ struct DataSectionProject: View {
 struct DataProjectPageView: View {
     let client: DataClient; let route: DProjectRoute
     @Binding var path: NavigationPath
+    var onNew: (String) -> Void = { _ in }   // New thread in this project (the New thread sheet: where it runs, and the machine picker)
+    private var project: DProject? { client.projects.first { !$0.key.isEmpty && $0.key == route.key } }
     @State private var page: DProjectPage?
     @State private var done = false
     var body: some View {
@@ -110,6 +112,7 @@ struct DataProjectPageView: View {
         }
         .listStyle(.plain).scrollContentBackground(.hidden).environment(\.defaultMinListRowHeight, 1)
         .navigationTitle(route.title).task { await load() }.refreshable { await load() }
+        .toolbar { if let p = project { ToolbarItem(placement: .primaryAction) { Button { onNew(p.id) } label: { Image(systemName: "plus") }.accessibilityIdentifier("data.project.page.new") } } }
     }
     private func load() async { page = await client.projectPage(route.key, done: done) }
 }
