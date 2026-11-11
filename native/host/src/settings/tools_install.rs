@@ -94,7 +94,7 @@ pub fn tools_dir_in(windows: bool, local_app_data: Option<&str>, xdg: Option<&st
     }
 }
 pub fn tools_dir() -> PathBuf {
-    let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).unwrap_or_default();
+    let home = crate::plat::dirs::home_or_empty();
     tools_dir_in(cfg!(windows), std::env::var("LOCALAPPDATA").ok().as_deref(), std::env::var("XDG_DATA_HOME").ok().as_deref(), &home)
 }
 

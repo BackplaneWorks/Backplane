@@ -109,7 +109,7 @@ pub async fn call(hub: &Arc<Hub>, client: u64, watch: &mut HashSet<String>, m: &
                 let root = hub.model().await.projects.get(project).filter(|x| !x.removed).map(|x| x.root.clone());
                 let Some(root) = root else { return Some(Err(err("unknown project"))) };
                 (project.to_string(), root)
-            } else { (String::new(), std::env::var("HOME").unwrap_or_default()) };
+            } else { (String::new(), crate::plat::dirs::home_or_empty()) };
             match t.new_shell(&pk, &cwd, size(p, "cols", 80), size(p, "rows", 24)).await {
                 Ok(k) => Ok(t.stream_read(&k, 0, None).await.unwrap_or_else(|| json!({"key":k}))),
                 Err(e) => Err(json!(e)),

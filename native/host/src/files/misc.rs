@@ -46,7 +46,7 @@ fn pdf_why(out: &str) -> String { if out.contains("nopoppler") { "PDFs show here
 pub fn link_path(path: &str, root: &str) -> String {
     let abs = |p: &str| if p.starts_with("~/") || p.starts_with('/') { p.to_string() } else { format!("{}/{}", root.trim_end_matches('/'), p.trim_start_matches("./")) };
     let full = abs(path);
-    let exists = |p: &str| { let q = match p.strip_prefix("~/") { Some(r) => std::env::var("HOME").map(|h| format!("{h}/{r}")).unwrap_or_default(), None => p.to_string() }; std::fs::symlink_metadata(q).is_ok() };
+    let exists = |p: &str| { let q = match p.strip_prefix("~/") { Some(r) => crate::plat::dirs::home().map(|h| format!("{h}/{r}")).unwrap_or_default(), None => p.to_string() }; std::fs::symlink_metadata(q).is_ok() };
     let mut cut = full.as_str();
     while !exists(cut) {
         let Some((head, tail)) = cut.rsplit_once(':') else { return full };

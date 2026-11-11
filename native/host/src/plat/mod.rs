@@ -5,6 +5,7 @@
 #[cfg(unix)] pub use unix::*;
 #[cfg(windows)] mod windows;
 #[cfg(windows)] pub use windows::*;
+pub mod dirs;
 
 /// A child's exit as the shell says it: its code, else 128 + the signal that ended it (Unix only has those).
 pub fn exit_code(s: &std::process::ExitStatus) -> i32 { s.code().unwrap_or_else(|| 128 + proc::signal(s).unwrap_or(0)) }

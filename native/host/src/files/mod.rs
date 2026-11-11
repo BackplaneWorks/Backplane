@@ -53,7 +53,7 @@ impl HttpHandler for Img {
             let path = fm::from_uri(&req.param("path"));
             if !fm::viewable(&path) { return HttpReply::text("404 Not Found", "not an image") }
             let real = match path.strip_prefix("~/") {
-                Some(rest) => format!("{}/{rest}", std::env::var("HOME").unwrap_or_default()),
+                Some(rest) => format!("{}/{rest}", crate::plat::dirs::home_or_empty()),
                 None => path.clone(),
             };
             let (ct, range) = (fm::ctype(&path), req.header("range").to_string());

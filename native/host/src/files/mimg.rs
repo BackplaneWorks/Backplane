@@ -44,7 +44,7 @@ fn without_code(text: &str) -> String {
     out
 }
 fn exists(p: &str) -> bool { match source(p) { Ok(f) => std::fs::symlink_metadata(&f).map_or(false, |m| m.is_file()), Err(_) => false } }
-fn is_dir(p: &str) -> bool { let f = match p.strip_prefix("~/") { Some(r) => PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(r), None => PathBuf::from(p) }; f.is_absolute() && std::fs::metadata(&f).map_or(false, |m| m.is_dir()) }
+fn is_dir(p: &str) -> bool { let f = match p.strip_prefix("~/") { Some(r) => PathBuf::from(crate::plat::dirs::home_or_empty()).join(r), None => PathBuf::from(p) }; f.is_absolute() && std::fs::metadata(&f).map_or(false, |m| m.is_dir()) }
 /// Img.paths: the images a message shows, in order, each once. A word longer than 1024 characters is no path.
 /// Forms: bare, in `backticks`, in lists, **bold**, (parentheses), with trailing punctuation, `![alt](path)`, `~/path`, file://path, and a folder
 /// followed by file names (a line naming a folder that exists, then lines that begin with an image's bare name): each joined name that exists is shown.
@@ -143,7 +143,7 @@ fn snapshot_dir(home: &Path) -> Result<PathBuf, &'static str> {
 pub fn source(src: &str) -> Result<PathBuf, &'static str> {
     // (Windows: a backslash is a separator there, not refused)
     if src.len() > 1024 || src.contains(['\0', '\r', '\n']) || (cfg!(unix) && src.contains('\\')) || src.split(crate::plat::fs::SEPS).any(|x| x == "." || x == "..") { return Err("Invalid image path") }
-    let file = match src.strip_prefix("~/") { Some(rest) => PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(rest), None => PathBuf::from(src) };
+    let file = match src.strip_prefix("~/") { Some(rest) => PathBuf::from(crate::plat::dirs::home_or_empty()).join(rest), None => PathBuf::from(src) };
     let l = file.to_string_lossy().to_lowercase();
     if !file.is_absolute() || !(l.ends_with(".png") || l.ends_with(".jpg") || l.ends_with(".jpeg") || l.ends_with(".gif") || l.ends_with(".webp") || l.ends_with(".bmp")) { return Err("Invalid image path") }
     if !crate::plat::fs::no_link_on(&file).map_err(|_| "Invalid image path")? { return Err("Image symlink") }
@@ -215,7 +215,7 @@ mod tests {
     /// plus file names; and a code sample that is not a picture.
     #[cfg(unix)] #[test] fn every_form_of_a_path_draws() {
         let d = tmp("forms"); for n in ["a.png", "b.jpg", "c.jpeg", "d.gif", "e.webp", "f.png", "g.png", "h.png", "i.png"] { std::fs::write(d.join(n), png(4, 4)).unwrap() }
-        let (dir, home) = (d.to_string_lossy().into_owned(), std::env::var("HOME").unwrap_or_default());
+        let (dir, home) = (d.to_string_lossy().into_owned(), crate::plat::dirs::home_or_empty());
         let text = format!("Bare: {dir}/a.png\nBackticks: `{dir}/b.jpg`\n- list {dir}/c.jpeg\n- **{dir}/d.gif**\n(see {dir}/e.webp).\nEnd: {dir}/f.png.\n![shot]({dir}/g.png)\n\
 Wide chip — {dir}/h.png;\n\nFolder: `{dir}`\n- i.png — the last\n- missing.png\n- no.txt\n\n```rust\nlet p = \"{dir}/code.png\";\n```\nHome ~/x.png and {home}/x.png");
         let got = paths(&text);

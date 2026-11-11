@@ -185,7 +185,7 @@ async fn ask(cmd: &Path, args: &[&str], lines: &[&str], done: fn(&str) -> bool, 
 
 fn codex_cache_path() -> PathBuf {
     std::env::var_os("CODEX_HOME").filter(|v| !v.is_empty()).map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(std::env::var("HOME").unwrap_or_default()).join(".codex")).join("models_cache.json")
+        .unwrap_or_else(|| PathBuf::from(crate::plat::dirs::home_or_empty()).join(".codex")).join("models_cache.json")
 }
 
 /// Models.detect: every agent at once; one that is not installed (or blocked: a stand-in folder without it) is None.

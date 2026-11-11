@@ -118,7 +118,7 @@ pub fn auto_group(origin: &str, folder: &str) -> (String, String) {
     let parts: Vec<&str> = origin.split('/').filter(|s| !s.is_empty()).collect();
     if parts.len() >= 3 { return (format!("owner:{}/{}", parts[0], parts[1].to_lowercase()), parts[1].to_string()) }
     let parent = std::path::Path::new(folder.trim_end_matches('/')).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
-    let home = std::env::var("HOME").unwrap_or_default();
+    let home = crate::plat::dirs::home_or_empty();
     if parent.is_empty() || parent == "/" || (!home.is_empty() && parent == home) { return ("folder:~".into(), "Personal".into()) }
     let base = std::path::Path::new(&parent).file_name().map(|b| b.to_string_lossy().to_string()).unwrap_or_default();
     (format!("folder:{parent}"), base)

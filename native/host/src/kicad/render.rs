@@ -13,9 +13,10 @@ const MOST_FILE: u64 = 1 << 30;
 pub const VIEWS: [(&str, f32, f32); 4] = [("iso", 0.785398, 0.61548), ("front", 0.0, 0.0), ("top", 0.0, 1.570796), ("right", 1.570796, 0.0)];
 
 /// Mech.last
-fn last(p: &str) -> &str { p.rsplit('/').next().unwrap_or(p) }
+/// (a separator is `/`, and on Windows `\\` too: `C:\\p\\a.step`'s renders go in `C:\\p\\renders`)
+fn last(p: &str) -> &str { p.rsplit(crate::plat::fs::SEPS).next().unwrap_or(p) }
 /// Mech.parent: the folder a path is in ("" for none)
-pub fn parent(p: &str) -> &str { p[..p.len() - last(p).len()].strip_suffix('/').unwrap_or("") }
+pub fn parent(p: &str) -> &str { p[..p.len() - last(p).len()].strip_suffix(crate::plat::fs::SEPS).unwrap_or("") }
 /// Mech.stem: a file's name without its extension
 pub fn stem(p: &str) -> &str { let f = last(p); f.rsplit_once('.').map_or(f, |x| x.0) }
 fn inside(dir: &str, f: &str) -> String { if dir.is_empty() { f.to_string() } else { format!("{dir}/{f}") } }
@@ -29,18 +30,18 @@ fn glb_path(src: &str, cache: &str) -> String {
     use crate::plat::fs::MetadataExt;
     if src.ends_with(".glb") { return src.to_string() }
     let size = std::fs::metadata(src).map_or("0".to_string(), |m| format!("{}.{}", m.len() as u32, m.mtime() as u32));
-    format!("{cache}/{}.glb", stepglb::fnv(&format!("step3|{src}|{size}")))
+    std::path::Path::new(cache).join(format!("{}.glb", stepglb::fnv(&format!("step3|{src}|{size}")))).to_string_lossy().into_owned()
 }
-/// Parts.glb: the model's GLB, from the cache, else converted into it; None when it cannot be
-fn model_glb(src: &str, cache: &str, tools: &[Mesher]) -> Option<String> {
+/// Parts.glb: the model's GLB, from the cache, else converted into it; Err: why it cannot be ("" for a GLB that is not there)
+fn model_glb(src: &str, cache: &str, tools: &[Mesher]) -> Result<String, String> {
     let out = glb_path(src, cache);
-    if stepglb::have(&out) { return Some(out) }
-    if src.ends_with(".glb") { return None }
-    let dir = stepglb::stage(&out, "part.").ok()?;
+    if stepglb::have(&out) { return Ok(out) }
+    if src.ends_with(".glb") { return Err(String::new()) }
+    let dir = stepglb::stage(&out, "part.").map_err(|e| format!("could not make a folder beside {out}: {e}"))?;
     let from = dir.join("model.glb");
     let r = stepglb::publish(stepglb::convert(tools, src, &from.to_string_lossy(), Some(stepglb::NORMAL), false), &from, &out);
     let _ = std::fs::remove_dir_all(&dir);
-    (r.code == 0).then_some(out)
+    if r.code == 0 { Ok(out) } else { Err(r.out.trim().to_string()) }
 }
 /// Render.write and Render.publish: the file appears whole or not at all
 fn write(path: &str, bs: &[u8]) -> bool {
@@ -66,7 +67,9 @@ fn one(model: &str, cwd: &str, cache: &str, tools: &[Mesher], say: &mut Vec<Stri
     let path = if crate::plat::fs::is_abs(model) { model.to_string() } else { format!("{cwd}/{model}") };
     let mut failed = |why: String| { say.push(format!("backplane --render: {why}")); false };
     let _ = std::fs::create_dir_all(cache);
-    let Some(file) = model_glb(&path, cache, tools) else { return failed(format!("could not mesh {path} (a STEP or GLB file; a large STEP needs FreeCAD installed). Nothing was drawn.")) };
+    let file = match model_glb(&path, cache, tools) { Ok(f) => f, Err(why) => {
+        let why = if why.is_empty() { String::new() } else { format!(": {}", why.chars().take(600).collect::<String>()) };
+        return failed(format!("could not mesh {path} (a STEP or GLB file; a large STEP needs FreeCAD installed){why}. Nothing was drawn.")) } };
     if std::fs::metadata(&file).map_or(0, |m| m.len()) > MOST_FILE { return failed(format!("{path} is too big to draw here. Nothing was drawn.")) }
     let Ok(mut ts) = glb::tris(&std::fs::read(&file).unwrap_or_default()) else { return failed(format!("{path} has too many triangles to draw here. Nothing was drawn.")) };
     if is_step(&path) { solid::upright(&mut ts) }
@@ -92,6 +95,7 @@ mod tests {
         assert_eq!(path_of("/p/a.b.glb", "top"), "/p/renders/a.b.top.png"); assert_eq!(path_of("x", "top"), "renders/x.top.png"); assert_eq!(path_of("/x.glb", "top"), "renders/x.top.png");
         assert_eq!(parent("a/b/c.step"), "a/b"); assert_eq!(parent("c"), ""); assert_eq!(stem("a/.hid"), ""); assert_eq!(stem("a/noext"), "noext");
         assert!(is_step("/p/A.STEP") && is_step("a.Stp") && !is_step("a.glb"));
+        #[cfg(windows)] { assert_eq!(path_of(r"C:\p dir\a.step", "iso"), r"C:\p dir/renders/a.iso.png"); assert_eq!(parent(r"C:\p\a.step"), r"C:\p"); }
     }
     fn work(tag: &str) -> String { let d = std::env::temp_dir().join(format!("bp-render-{tag}-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap(); d.to_string_lossy().into_owned() }
     fn cube() -> Vec<u8> {

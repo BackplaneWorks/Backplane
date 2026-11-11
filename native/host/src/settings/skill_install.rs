@@ -31,7 +31,7 @@ impl RpcHandler for SkillRpc {
     fn call<'a>(&'a self, _hub: &'a Arc<Hub>, _who: &'a Caller, id: &'a Value, _method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let (url, prov) = (p["url"].as_str().unwrap_or("").to_string(), p["provider"].as_str().unwrap_or("claude").to_string());
-            let replace = p["replace"].as_bool().unwrap_or(false); let home = std::env::var("HOME").unwrap_or_default();
+            let replace = p["replace"].as_bool().unwrap_or(false); let home = crate::plat::dirs::home_or_empty();
             let r = tokio::task::spawn_blocking(move || install(&home, &url, &prov, replace)).await.unwrap_or_else(|_| Err("failed".into()));
             vec![match r { Ok((name, path)) => json!({"t":"reply","id":id,"ok":true,"result":{"name":name,"path":path}}), Err(e) => json!({"t":"reply","id":id,"ok":false,"error":e}) }]
         })

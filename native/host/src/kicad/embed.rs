@@ -516,7 +516,7 @@ fn discover_desc(home: &Path, env: &Env) -> (String, bool) {
         if !p.is_empty() && Path::new(&p).is_file() { return (p, false) }
     }
     if std::env::var("BACKPLANE_KICAD_NO_SYSTEM").map_or(true, |v| v != "1") {
-        let user_home = std::env::var("HOME").unwrap_or_default();
+        let user_home = crate::plat::dirs::home_or_empty();
         let data = std::env::var("XDG_DATA_HOME").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| format!("{user_home}/.local/share"));
         for base in [PathBuf::from(&data).join("backplane/kicad"), PathBuf::from(&user_home).join(".backplane-bend/kicad"), super::install::parent(home), home.join("kicad")] {
             if let Ok(rd) = std::fs::read_dir(&base) {
@@ -2216,7 +2216,7 @@ mod tests {
             eprintln!("skipping real_stock_kicad_argv test: /usr/bin/kicad(-cli) not installed");
             return;
         }
-        let user_home = std::env::var("HOME").unwrap_or_default();
+        let user_home = crate::plat::dirs::home_or_empty();
         let mut xvfb_bin = PathBuf::new();
         let mut xvfb_ld = String::new();
         for root in [format!("{user_home}/.local/xvfb-root"), format!("{user_home}/.cache/xvfb-root")] {
