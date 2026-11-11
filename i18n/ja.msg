@@ -2211,6 +2211,7 @@ gpui.badge.on = {name} 上
 gpui.badge.runs.on = {name} で実行
 gpui.unsent.restore = 未送信: {text} · 元に戻す
 gpui.made.far.note = 送信しました。そのマシンに届きしだい、ここでスレッドが開きます。
+gpui.picked.elsewhere = 送信していません: 選んだマシンでは実行されません。もう一度選ぶか、別のマシンを選んでください。
 gpui.badge.also.on = {name} にもあります
 gpui.combo.key.model = {key} モデル
 gpui.combo.key.account = {key} アカウント

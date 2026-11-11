@@ -2189,6 +2189,7 @@ gpui.badge.runs.on = runs on {name}
 gpui.badge.also.on = also on {name}
 gpui.unsent.restore = Not sent: {text} · Restore
 gpui.made.far.note = Sent. The thread opens here as soon as that machine has it.
+gpui.picked.elsewhere = Not sent: the machine you picked is not where this would run. Pick it again, or another.
 gpui.combo.key.model = {key} model
 gpui.combo.key.account = {key} account
 gpui.combo.left = {pct}% left

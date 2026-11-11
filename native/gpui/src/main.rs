@@ -225,7 +225,8 @@ impl Backplane {
         if let Some(pid)=self.project_page.clone().filter(|p|screens::projects::find(&self.data,p).is_some()) {
             if text.trim().is_empty()||self.status!="Connected"||self.screens.projects.first_send.is_some() {return;}
             // (it goes where the page's "runs on" line says: the picker's choice; a refusal puts the text back, `create-refused`)
-            let Some((cmd,text))=screens::projects::page_send(&self.data,&pid,&text) else {return};
+            let picked=self.screens.projects.picked.get(&pid).cloned();
+            let (cmd,text)=match screens::projects::page_send(&self.data,&pid,&text,picked.as_deref()) { None=>return, Some(Ok(x))=>x, Some(Err(why))=>{ self.screens.projects.refused=why; cx.notify(); return } };
             // (the text stays in the box until the hub has made the thread: a refusal leaves it where it is, never emptied and put back)
             self.screens.projects.first_send=Some((self.selected.rsplit('|').next().unwrap_or("").to_string(),text,Instant::now()));
             self.error.clear(); self.screens.projects.refused.clear(); self.arm_new();let _=self.tx.try_send(cmd);cx.notify();return;
