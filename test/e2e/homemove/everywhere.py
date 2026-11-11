@@ -35,12 +35,14 @@ def item(name, before, ok, detail=""):
 def agents():
     d = os.path.join(WORK, "agents")
     os.makedirs(d, exist_ok=True)
-    bun = shutil.which("bun")
+    bun = shutil.which("bun") or next((b for b in [os.path.expanduser("~/.bun/bin/bun")] if os.path.exists(b)), None)
+    assert bun, "needs bun (the stand-in agent runs on it)"
     with open(os.path.join(d, "claude"), "w") as f:
         f.write("#!/bin/sh\n"
                 "if [ \"$1\" = auth ] && [ \"$2\" = status ]; then\n"
                 "  if [ -f \"$HOME/signed\" ]; then echo '{\"loggedIn\":true,\"email\":\"standin@example.com\"}'; exit 0; fi\n"
                 "  echo '{\"loggedIn\":false}'; exit 1\nfi\n"
+                "export FAKE_LOG=\"$HOME/standin.log\" BP_STANDIN_MODE=stream BP_STREAM_N=1 BP_STREAM_MS=20; printf '%s\\n' \"$*\" | cut -c1-2000 >> \"$HOME/argv.log\"\n"
                 f"exec {bun} {ROOT}/test/tools/claude_standin.ts \"$@\"\n")
     os.chmod(os.path.join(d, "claude"), 0o755)
 
@@ -69,16 +71,12 @@ def said(hub, thread, text):
 
 
 def reply_of(hub, thread, tool, since):
-    """The stand-in's answer to an mcpcall (its reply message, `MCPCALL <tool> <json-rpc answer>`), parsed: (ok, body)."""
+    """The stand-in's answer to an mcpcall (its reply, `MCPCALL <tool> <json-rpc answer>`, cut at 600 characters): (ok, the answer's text)."""
     for e in m.events(hub)[since:]:
         t = e.get("text", "")
         if e.get("$") == "MessagePosted" and e.get("thread") == thread and e.get("role") == "assistant" and t.startswith(f"MCPCALL {tool} "):
-            try:
-                r = json.loads(t[len(f"MCPCALL {tool} "):])
-                res = r.get("result", {})
-                return (not res.get("isError"), json.loads(res.get("content", [{}])[0].get("text", "null")))
-            except ValueError:
-                return (False, t)
+            body = t[len(f"MCPCALL {tool} "):]
+            return ('"isError":true' not in body, body.replace('\\"', '"'))
     return None
 
 
@@ -142,32 +140,35 @@ def main():
     link_a = next(e["id"] for e in m.events(B) if e.get("$") == "PeerSet" and not e.get("revoked"))
     tA = f"{link_a}~t1700000001-1"
     ok, v = bub_call(B, bub, tb, "machine_list", {})
-    item("machine_list from B shows A's project", "yes", ok and any(p.get("id") == "p1" for mm in v.get("machines", []) for p in mm.get("projects", [])), json.dumps(v)[:200])
+    item("machine_list from B shows A's project", "yes", ok and '"id":"p1"' in v, str(v)[:200])
     ok, v = bub_call(B, bub, tb, "thread_list", {"machine": "hub-a"})
-    item("thread_list {machine} lists A's threads", "yes", ok and any(t.get("id") == tA for t in v.get("threads", [])), json.dumps(v)[:200])
+    item("thread_list {machine} lists A's threads", "yes", ok and tA in v, str(v)[:200])
     ok, v = bub_call(B, bub, tb, "thread_launch", {"machine": "hub-a", "project": "p1", "prompt": "zz launched from B", "title": "From B"})
-    item("thread_launch {machine, project} into A's project", "yes", ok and v.get("state") == "started" and bool(m.wait(lambda: said(A, (v.get("threadId") or "~").split("~")[-1], "zz launched from B"), 30)), json.dumps(v)[:200])
+    item("thread_launch {machine, project} into A's project", "yes", ok and '"state":"started"' in v and bool(m.wait(lambda: any(e.get("$") == "MessagePosted" and "zz launched from B" in e.get("text", "") for e in m.events(A)), 30)), str(v)[:200])
     ok, v = bub_call(B, bub, tb, "thread_send", {"threadId": tA, "text": "zz send from B"})
-    item("thread_send on <link>~<id>", "yes", ok and bool(m.wait(lambda: said(A, "t1700000001-1", "zz send from B"), 30)), json.dumps(v)[:200])
+    item("thread_send on <link>~<id>", "yes", ok and bool(m.wait(lambda: said(A, "t1700000001-1", "zz send from B"), 30)), str(v)[:200])
     ok, v = bub_call(B, bub, tb, "thread_read", {"threadId": tA, "limit": 3})
-    item("thread_read on <link>~<id>", "yes", ok and (v.get("status") or {}).get("id") == tA, json.dumps(v)[:200])
+    item("thread_read on <link>~<id>", "yes", ok and f'"id":"{tA}"' in v, str(v)[:200])
     ok, v = bub_call(B, bub, tb, "thread_wait", {"threadId": tA, "timeoutMs": 20000}, 60)
-    item("thread_wait on <link>~<id>", "yes", ok and "done" in v, json.dumps(v)[:200])
+    item("thread_wait on <link>~<id>", "yes", ok and '"done"' in v, str(v)[:200])
     ok, v = bub_call(B, bub, tb, "thread_update", {"threadId": tA, "title": "Renamed from B"})
-    item("thread_update title on <link>~<id>", "yes", ok and v.get("title") == "Renamed from B", json.dumps(v)[:200])
+    item("thread_update title on <link>~<id>", "yes", ok and "Renamed from B" in v and any(e.get("$") == "ThreadRenamed" and e.get("title") == "Renamed from B" for e in m.events(A)), str(v)[:200])
     ok, v = bub_call(B, bub, tb, "thread_update", {"threadId": tA, "model": "claude-haiku-5-5"})
-    item("thread_update model on <link>~<id>", "no (not in the Rust hub)", ok and v.get("model") == "claude-haiku-5-5", json.dumps(v)[:200])
+    item("thread_update model on <link>~<id>", "no (not in the Rust hub)", ok and '"model":"claude-haiku-5-5"' in v, str(v)[:200])
     ok, v = bub_call(B, bub, tb, "thread_interrupt", {"threadId": tA})
-    item("thread_interrupt on <link>~<id>", "yes", ok, json.dumps(v)[:200])
-    ok, v = bub_call(B, bub, tb, "kicad_ipc", {"command": "GetVersion"})
-    item("a tool that needs a local thing (kicad_ipc) answers plainly on B", "n/a", isinstance(v, (dict, str)) and "error" in json.dumps(v).lower() or "not" in json.dumps(v).lower(), json.dumps(v)[:200])
+    item("thread_interrupt on <link>~<id>", "yes", ok, str(v)[:200])
+    board = os.path.join(WORK, "proj", "main.kicad_pcb")
+    ok, v = bub_call(B, bub, tb, "kicad_ipc", {"path": board, "type": "kiapi.board.commands.GetItems"})
+    item("kicad_ipc on A's board from B says where to do it", "no (a KiCad error)", not ok and "is not on this machine" in v and "thread_launch" in v, str(v)[:200])
+    ok, v = bub_call(B, bub, tb, "viewer_show", {"path": board})
+    item("viewer_show of A's board from B says where to do it", "no (showed nothing)", not ok and "is not on this machine" in v, str(v)[:200])
 
     # 1. the desktop away: held launch and send
     m.stop("A")
     ok, v = bub_call(B, bub, tb, "thread_launch", {"machine": "hub-a", "project": "p1", "prompt": "zz held launch", "title": "Held"})
-    item("thread_launch with A away is held (queued)", "yes", ok and v.get("state") == "queued", json.dumps(v)[:200])
+    item("thread_launch with A away is held (queued)", "yes", ok and '"state":"queued"' in v, str(v)[:200])
     ok, v = bub_call(B, bub, tb, "thread_send", {"threadId": tA, "text": "zz held send"})
-    item("thread_send with A away is held", "yes", ok and v.get("state") == "held", json.dumps(v)[:200])
+    item("thread_send with A away is held", "yes", ok and '"state":"held"' in v, str(v)[:200])
     item("ring: B's /hook/<id> lands on B with A stopped", "yes", m.post_hook(B.base, hid, tok) == 200)
     A = m.start("A")
     item("the held launch starts on A when it is back", "yes", bool(m.wait(lambda: any(e.get("$") == "MessagePosted" and "zz held launch" in e.get("text", "") for e in m.events(A)), 60)))

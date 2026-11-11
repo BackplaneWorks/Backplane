@@ -176,6 +176,8 @@ impl Mcp {
         if let Some(m) = ag.mailroom() { if let Some((ok, body)) = m.gate(thread, name, &a).await { return Some(result(id, shaped(ok, &body))) } } // Hub.mcp.charter
         // a thread or a machine elsewhere (agents/far.rs): asked there, as a signed request, only over a link that is one of the owner's own
         if let Some((ok, body)) = ag.far_route(thread, name, &a).await { return Some(result(id, shaped(ok, &body))) }
+        // a tool that needs a local thing (a board, a file of a project) asked by a thread of no project here: what it names is on another machine (agents/far.rs)
+        if let Some(why) = ag.not_here(thread, name, &a).await { return Some(result(id, shaped(false, &json!({"error": why})))) }
         let (ok, body) = match name {
             "machine_list" => ag.tool_machines(thread).await,
             "orchestrator_capabilities" => ag.tool_caps(thread).await,

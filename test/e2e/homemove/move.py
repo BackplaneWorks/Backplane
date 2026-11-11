@@ -163,7 +163,7 @@ def main():
     rpc(A, "device.register", {"token": "ab" * 32, "platform": "ios", "kind": "alert", "env": "sandbox", "bundle": "dev.backplane.works"})
 
     # B is the ring's front door, while A owns the hook
-    fr = rpc(A, "ring.front.use", {"to": "hub-b"})
+    fr = wait(lambda: (lambda r: r if r.get("base") else None)(rpc(A, "ring.front.use", {"to": "hub-b"})), 30) or {}  # (B is named once A's link table has it)
     check("B fronts A's webhook", fr.get("base", "").startswith("http"), json.dumps(fr)[:200])
     check("a delivery to B reaches A while A owns it", post_hook(B.base, hid, tok) == 200)
 
