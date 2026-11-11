@@ -33,7 +33,9 @@ pub fn thread_json(id: &str, st: &State, project: &str, mark: &Value, preview: &
     let waiting = st.asks.values().filter(|(th, open)| *open && th == id).count() as u64;
     let state = if waiting > 0 { "asking" } else { match t.turn { Turn::Running => "working", Turn::Failed => "failed", _ => "idle" } };
     let (pinned, settled, settled_at) = super::shelf_flags(t);
-    let status = if waiting > 0 { "waiting" } else if t.turn == Turn::Running { "active" } else if settled { "settled" } else { "" };
+    // the sidebar dot's word as that machine's own state gives it (signal.rs, as data/mod.rs `thread_json` does for this hub's): a turn done reads finished there too
+    let signal = crate::signal::index(st).get(id).map_or(String::new(), |n| crate::signal::display_name(st, *n, id).to_string());
+    let status = if !signal.is_empty() { signal.as_str() } else if waiting > 0 { "waiting" } else if t.turn == Turn::Running { "active" } else if settled { "settled" } else { "" };
     let runtime = st.runtime.get(id).cloned().unwrap_or_default();
     Some(json!({"id":id,"project":project,"title":t.title,"state":state,"updatedAt":ms(t.activity.max(t.created)),"pinned":pinned,"settled":settled,"settledAt":settled_at,"archived":t.archived,
         "provider":t.provider,"model":t.model,"effort":"","runtime":runtime,"chip":super::ext::chip(&t.provider, &t.model, ""),"preview":preview,"waiting":waiting,"status":status,
