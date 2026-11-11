@@ -299,7 +299,7 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
     var secPage by remember { mutableStateOf<DSecRow?>(null) }    // a project's page (sections), over the list until Back
     var secMenu by remember { mutableStateOf<DSecRow?>(null) }
     var secRename by remember { mutableStateOf<DSection?>(null) }
-    secPage?.let { p -> androidx.activity.compose.BackHandler { secPage = null }; ProjectPageScreen(p, open) { secPage = null }; return }
+    secPage?.let { p -> androidx.activity.compose.BackHandler { secPage = null }; ProjectPageScreen(p, open, { id -> secPage = null; newThread(id) }) { secPage = null }; return }
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val prefs = remember { ctx.getSharedPreferences("data.ui", android.content.Context.MODE_PRIVATE) }
     var shut by remember { mutableStateOf(prefs.getStringSet("projects.shut", emptySet())!!.toSet()) }

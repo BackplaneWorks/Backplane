@@ -105,12 +105,16 @@ fun SectionRename(s: DSection, close: () -> Unit) { TextPrompt(Msg.sidebar_secti
 
 /** A project's page: running, then needs you, then recent, then Done (n) folded; every machine's threads. */
 @Composable
-fun ProjectPageScreen(p: DSecRow, open: (String) -> Unit, back: () -> Unit) {
+fun ProjectPageScreen(p: DSecRow, open: (String) -> Unit, newThread: (String) -> Unit, back: () -> Unit) {
     var done by remember { mutableStateOf(false) }
     var lists by remember { mutableStateOf<List<DSection>?>(null) }
     LaunchedEffect(p.key, done, DataClient.sections) { lists = DataClient.projectPage(p.key, done) }
     Column(Modifier.fillMaxSize().background(dcs.surfaceVariant)) {
         DBar(p.title, back)
+        // New thread in this project: its New thread screen says where it runs and has the machine picker (projects.list's row of the same key)
+        DataClient.projects.firstOrNull { it.key.isNotEmpty() && it.key == p.key }?.let { pr ->
+            DMono("+ " + Msg.android_thread_new_in(pr.title), dcs.primary, 12, Modifier.fillMaxWidth().clickable { newThread(pr.id) }.padding(horizontal = 12.dp, vertical = 10.dp).testTag("project.page.new"))
+        }
         val ls = lists
         if (ls == null) { DMono(Msg.viewer_loading, dfaint, 12, Modifier.padding(16.dp)); return@Column }
         LazyColumn(Modifier.fillMaxSize().testTag("project.page")) {

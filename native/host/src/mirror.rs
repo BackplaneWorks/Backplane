@@ -12,7 +12,9 @@ pub type Names = Arc<dyn Fn() -> Vec<(String, String)> + Send + Sync>;
 #[derive(Default)]
 pub struct Mirrors { st: RwLock<HashMap<String, State>>, names: OnceLock<Names>, origins: RwLock<HashMap<String, String>>, away: RwLock<std::collections::HashSet<String>>, here: RwLock<String>,
     /// the links that said their projects' origins (an origin of one of theirs is known, "" when it has none); `asked` wakes the watch for a new one
-    known: RwLock<std::collections::HashSet<String>>, asked: tokio::sync::Notify }
+    known: RwLock<std::collections::HashSet<String>>, asked: tokio::sync::Notify,
+    /// moves when what the merged rows are made of moves (an origin learned, a machine away or back): `publish` redraws the clients then
+    gen: std::sync::atomic::AtomicU64, published: std::sync::atomic::AtomicU64 }
 
 impl Mirrors {
     pub fn set_names(&self, n: Names) { let _ = self.names.set(n); }
@@ -119,9 +121,12 @@ impl Mirrors {
     /// The origins a linked machine says its projects have (machine_list's `origin`), by the mirror's id `<link>~<id>`; replaces that link's.
     pub fn set_origins(&self, link: &str, projects: &[(String, String)]) {
         let mut g = self.origins.write().unwrap();
-        let pre = format!("{link}~"); g.retain(|k, _| !k.starts_with(&pre));
+        let pre = format!("{link}~");
+        let before: Vec<(String, String)> = { let mut v: Vec<_> = g.iter().filter(|(k, _)| k.starts_with(&pre)).map(|(k, v)| (k.clone(), v.clone())).collect(); v.sort(); v };
+        g.retain(|k, _| !k.starts_with(&pre));
         for (id, o) in projects { if !o.is_empty() { g.insert(format!("{pre}{id}"), o.clone()); } }
-        self.known.write().unwrap().insert(link.to_string());
+        let after: Vec<(String, String)> = { let mut v: Vec<_> = g.iter().filter(|(k, _)| k.starts_with(&pre)).map(|(k, v)| (k.clone(), v.clone())).collect(); v.sort(); v };
+        if self.known.write().unwrap().insert(link.to_string()) || before != after { self.bump() }
     }
     /// A mirrored project's origin: "" when its machine said it has none, `UNKNOWN` ("?") while that machine has not said yet (asked at once:
     /// `present::merged` never keys such a project by machine/id, which would show one repository twice; it takes the registry's key or waits).
@@ -133,7 +138,15 @@ impl Mirrors {
         UNKNOWN.to_string()
     }
     /// Whether a linked machine answered when last asked (the origin watch asks each one every minute).
-    pub fn set_away(&self, link: &str, away: bool) { let mut g = self.away.write().unwrap(); let was = g.contains(link); if away { g.insert(link.to_string()); } else { g.remove(link); } if was != away { eprintln!("machines: {link} {}", if away { "is away" } else { "answers" }); } }
+    pub fn set_away(&self, link: &str, away: bool) { let mut g = self.away.write().unwrap(); let was = g.contains(link); if away { g.insert(link.to_string()); } else { g.remove(link); } if was != away { eprintln!("machines: {link} {}", if away { "is away" } else { "answers" }); drop(g); self.bump() } }
+    pub fn bump(&self) { self.gen.fetch_add(1, std::sync::atomic::Ordering::Relaxed); }
+    /// The merged rows changed with no log line of this hub saying so (an origin learned, a machine away or back): every client draws again
+    /// (`mirrors.gen` info; the phones' lists are pushed by data/1 `far_pushes`).
+    pub async fn publish(&self, hub: &crate::hub::Hub) {
+        use std::sync::atomic::Ordering::Relaxed;
+        let g = self.gen.load(Relaxed);
+        if self.published.swap(g, Relaxed) != g { hub.set_info("mirrors.gen", &g.to_string()).await; }
+    }
     /// The marker of a shown machine, by its name (`mark_of`).
     pub fn mark(&self, machine: &str) -> Value {
         let names = self.names.get().map(|n| n()).unwrap_or_default();
@@ -172,27 +185,58 @@ pub fn thread_ref(id: &str, here: &str, local: &dyn Fn(&str) -> bool, far: &[(St
     (named(here) && local(t)).then(|| t.to_string())
 }
 
+/// Ask one linked machine for its projects' origins (machine_list), bounded. Away only when it does not answer at all (no reply on the link): a
+/// machine that answers and refuses (an older build, not shared) is up, and its origins come from the rows it sends (net/registry.rs).
+pub async fn ask_origins(hub: &crate::hub::Hub, link: &str) {
+    let r = match tokio::time::timeout(std::time::Duration::from_secs(15), hub.far_call(link, "machine_list", "machine_list", &serde_json::json!({}))).await { Ok(r) => r, Err(_) => Err("that machine is away".to_string()) };
+    match &r {
+        Err(e) if e == "that machine is away" => hub.mirrors().set_away(link, true),
+        // (it answers but will not say: its origins are taken as none, unless its registry rows say them; never waited for)
+        Err(e) => { hub.mirrors().set_away(link, false); if hub.mirrors().known.write().unwrap().insert(link.to_string()) { hub.mirrors().bump(); eprintln!("machines: {link} answers but not machine_list: {e}"); } }
+        Ok(_) => hub.mirrors().set_away(link, false),
+    }
+    if let Ok((true, b)) = r {
+        let ps: Vec<(String, String)> = b["projects"].as_array().into_iter().flatten().map(|p| (p["id"].as_str().unwrap_or("").to_string(), p["origin"].as_str().unwrap_or("").to_string())).filter(|(i, _)| !i.is_empty()).collect();
+        hub.mirrors().set_origins(link, &ps);
+    }
+}
+/// The shown links whose origins are not known yet (a link just made), and not away: what a list about to be drawn asks for first.
+pub fn unknown_links(hub: &crate::hub::Hub) -> Vec<String> {
+    let m = hub.mirrors(); let k = m.known.read().unwrap(); let a = m.away.read().unwrap();
+    m.names().into_iter().map(|(l, _)| l).filter(|l| !k.contains(l) && !a.contains(l)).collect()
+}
+/// A machine known only from the registry (no mirror here yet) that is linked and answers is on, not off: its chips say so (`present::merged`).
+pub fn live_chips(m: &Mirrors, chips: &mut [Value]) {
+    let names = m.names(); let away = m.away.read().unwrap();
+    for c in chips.iter_mut() {
+        if c["state"] != "off" { continue }
+        let n = c["name"].as_str().unwrap_or("");
+        if names.iter().any(|(l, nm)| nm == n && !away.contains(l)) { c["state"] = serde_json::json!("on"); c["dim"] = serde_json::json!(false); c["away"] = serde_json::json!(false); c["note"] = serde_json::json!(""); }
+    }
+}
+/// A machine's origins as its own registry rows say them (`registry.put` from it: the path that works when this hub cannot call it).
+impl Mirrors { pub fn origins_from_rows(&self, link: &str, rows: &Value) {
+    let ps: Vec<(String, String)> = rows["projects"].as_array().into_iter().flatten().map(|p| (p["id"].as_str().unwrap_or("").to_string(), p["origin"].as_str().unwrap_or("").to_string())).filter(|(i, _)| !i.is_empty()).collect();
+    if !ps.is_empty() { self.set_origins(link, &ps) }
+} }
+
 /// Ask each linked machine for its projects' origins (machine_list) now and every minute, so the sidebar can show a repository
 /// that is on both machines as one project, and sync this hub's rows with the registry on the home. Display only: nothing here is a decision.
 pub fn watch_origins(hub: Arc<crate::hub::Hub>) {
     tokio::spawn(async move {
         hub.mirrors().set_here(&crate::net::botnet::name().await);
         loop {
-            for (link, _, _) in hub.far_machines() {
-                // (bounded: one machine slow to answer never holds up the others' away state)
-                let r = match tokio::time::timeout(std::time::Duration::from_secs(15), hub.far_call(&link, "machine_list", "machine_list", &serde_json::json!({}))).await { Ok(r) => r, Err(_) => Err("that machine is away".to_string()) };
-                hub.mirrors().set_away(&link, r.is_err());
-                if let Ok((true, b)) = r {
-                    let ps: Vec<(String, String)> = b["projects"].as_array().into_iter().flatten().map(|p| (p["id"].as_str().unwrap_or("").to_string(), p["origin"].as_str().unwrap_or("").to_string())).filter(|(i, _)| !i.is_empty()).collect();
-                    hub.mirrors().set_origins(&link, &ps);
-                }
-            }
+            for (link, _, _) in hub.far_machines() { ask_origins(&hub, &link).await; }
             // the registry on the home: this hub's rows go there, the merged list comes back (net/registry.rs)
             let _ = tokio::time::timeout(std::time::Duration::from_secs(30), crate::net::registry::tick(&hub, &hub.mirrors().here())).await;
+            hub.mirrors().publish(&hub).await;
             // every minute, or at once when the sidebar met a project whose machine has not said its origin yet (a link just made)
             // (an early ask at most every 5 s: a machine that does not answer keeps its origins unknown, and every drawing asks again)
             let began = std::time::Instant::now();
-            tokio::select! { _ = tokio::time::sleep(std::time::Duration::from_secs(60)) => {}, _ = hub.mirrors().asked.notified() => {} }
+            // (a machine linked just now is asked, and sent this hub's rows, within 2 s: its copies are keyed and listed before its history arrives)
+            let links: std::collections::HashSet<String> = hub.far_machines().into_iter().map(|x| x.0).collect();
+            let new_link = async { loop { tokio::time::sleep(std::time::Duration::from_secs(2)).await; if hub.far_machines().into_iter().any(|x| !links.contains(&x.0)) { break } } };
+            tokio::select! { _ = tokio::time::sleep(std::time::Duration::from_secs(60)) => {}, _ = hub.mirrors().asked.notified() => {}, _ = new_link => {} }
             let wait = std::time::Duration::from_secs(5).saturating_sub(began.elapsed()).max(std::time::Duration::from_millis(300)); tokio::time::sleep(wait).await;
         }
     });

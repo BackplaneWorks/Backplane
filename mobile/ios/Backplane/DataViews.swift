@@ -189,7 +189,7 @@ struct DataThreadsView: View {
         .navigationDestination(for: DAccountRoute.self) { DataAccountView(client: client, route: $0) }
         .navigationDestination(for: DTermsRoute.self) { DataTermsView(client: client, project: $0.project) }
         .modifier(DataThreadDialogs(client: client, renaming: $renaming, deleting: $deleting))
-        .navigationDestination(for: DProjectRoute.self) { DataProjectPageView(client: client, route: $0, path: $path) }
+        .navigationDestination(for: DProjectRoute.self) { DataProjectPageView(client: client, route: $0, path: $path, onNew: { id in newThread = id }) }
         .alert(Tr.t("Rename group"), isPresented: Binding(get: { renamingGroup != nil }, set: { if !$0 { renamingGroup = nil } })) {
             TextField(Tr.t("Title"), text: $groupTitle)
             Button(Tr.t("Rename")) { if let g = renamingGroup { Task { await client.sidebarAct("group-rename", g + "\u{1f}" + groupTitle) } } }

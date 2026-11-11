@@ -125,6 +125,20 @@ fn with_far<R>(hub: &Hub, want: &str, f: impl FnOnce(&machines::Far, &crate::pre
         f(far, &crate::present::screen::Unified { far: &join.far, marks: &marks, here: &here, rows: &join.rows }, &pick)
     })
 }
+/// The merged project rows (projects.list, and what is pushed when one moves): one row per project key over every machine (present/merged.rs):
+/// this hub's copy, else a linked machine's, holds the others' counts; `key`, `machines` (chips), `default` (where new work runs) on each.
+fn merged_rows(g: &crate::model::Model, asks: &HashMap<String, u64>, far: &machines::Far, un: &crate::present::screen::Unified) -> Vec<(u64, String, Value)> {
+    let ps = machines::partners(far, "", un.far);
+    let mut items: Vec<(u64, String, Value)> = g.projects.keys().filter_map(|i| project_json(g, i, asks).map(|mut v| { if let Some(x) = ps.get(i) { machines::join_project(&mut v, x, un) } (v["updatedAt"].as_u64().unwrap_or(0), i.clone(), v) })).collect();
+    items.extend(machines::project_rows(far, "", un.far, un).into_iter().map(|(a, i, mut v)| { if let Some(x) = ps.get(&i) { machines::join_project(&mut v, x, un) } (a, i, v) }));
+    items.extend(machines::off_rows(un));
+    for it in items.iter_mut() { machines::merged_fields(&mut it.2, un); }
+    items
+}
+/// One merged project row by its id ("" pick), for a push.
+fn merged_row(hub: &Hub, g: &crate::model::Model, asks: &HashMap<String, u64>, id: &str) -> Option<Value> {
+    with_far(hub, "", |far, un, _| merged_rows(g, asks, far, un).into_iter().find(|x| x.1 == id).map(|x| x.2))
+}
 /// A thread row of this hub or of a linked machine (`<link>~<id>`, built from its mirror: no log to read, so its preview is the mirror's last words).
 fn thread_row(hub: &Hub, m: &crate::model::Model, id: &str, asks: &HashMap<String, u64>, join: &HashMap<String, String>) -> Option<Value> {
     if !id.contains('~') || m.threads.contains_key(id) { return thread_json(hub, m, id, asks) }
@@ -362,17 +376,11 @@ fn attachment_get(hub: &Hub, p: &Value) -> Result<Value, Value> {
 
 async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Result<Value, Value> {
     match m {
-        "projects.list" => { let g = hub.model().await; let asks = open_ask_counts(hub);
-            // one row per project key over every machine (present/merged.rs): this hub's copy, else a linked machine's, holds the others' counts;
-            // `key`, `machines` (chips), `default` (where new work runs) on each; a machine picked keeps the rows it has a copy of
-            let (items, chips) = with_far(hub, s(p, "machine"), |far, un, pick| {
-                let ps = machines::partners(far, "", un.far);
-                let mut items: Vec<(u64, String, Value)> = g.projects.keys().filter_map(|i| project_json(&g, i, &asks).map(|mut v| { if let Some(x) = ps.get(i) { machines::join_project(&mut v, x, un) } (v["updatedAt"].as_u64().unwrap_or(0), i.clone(), v) })).collect();
-                items.extend(machines::project_rows(far, "", un.far, un).into_iter().map(|(a, i, mut v)| { if let Some(x) = ps.get(&i) { machines::join_project(&mut v, x, un) } (a, i, v) }));
-                items.extend(machines::off_rows(un));
-                for it in items.iter_mut() { machines::merged_fields(&mut it.2, un); }
-                (machines::pick_rows(items, pick), machines::chips(far, un, pick))
-            });
+        "projects.list" => {
+            // a machine just linked whose origins are not known yet is asked first (bounded), so its copies are in the merged rows of this answer
+            for l in crate::mirror::unknown_links(hub) { let _ = tokio::time::timeout(Duration::from_secs(3), crate::mirror::ask_origins(hub, &l)).await; }
+            let g = hub.model().await; let asks = open_ask_counts(hub);
+            let (items, chips) = with_far(hub, s(p, "machine"), |far, un, pick| (machines::pick_rows(merged_rows(&g, &asks, far, un), pick), machines::chips(far, un, pick)));
             let (projects, next) = page_of(items, limit_of(p, 50, 200), s(p, "before")); Ok(json!({"projects":projects,"next":next,"machines":chips})) }
         // the sidebar's sections (docs/ALWAYS-ON.md section 8, present/sections.rs), the same the window draws: Needs you, Pinned, Active, the groups, Quiet;
         // `open` the folds opened ("sec:quiet", "sec:group:<gid>"), `query` the search, `page` a project's key for its page ("pageDone": its Done open).
@@ -477,7 +485,7 @@ async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Result<Value,
 #[derive(Clone, PartialEq)]
 enum Topic { Lists, Thread(String), Sub(String, String) }
 #[derive(Default)]
-struct Subs { far_rows: HashMap<String, (HashSet<String>, String)>, far_seen: Option<HashMap<String, String>>, next: u64, subs: Vec<(u64, Topic)>, live: HashMap<String, Streams>, counts: HashMap<String, (u64, u64)>, terms: HashSet<String> }
+struct Subs { far_rows: HashMap<String, (HashSet<String>, String)>, far_seen: Option<HashMap<String, String>>, proj_seen: Option<HashMap<String, String>>, next: u64, subs: Vec<(u64, Topic)>, live: HashMap<String, Streams>, counts: HashMap<String, (u64, u64)>, terms: HashSet<String> }
 /// A thread's streamed replies on one connection. Frames (deltas, their end) and log lines (the reply's final message) reach the connection on two channels, so
 /// the final message of a reply a person's message cut can arrive after the next reply has begun streaming. Each stream has its own entry (`live:<thread>`, then
 /// `live:<thread>.<n>`), a stream ends at its `delta_end` frame (which comes in order with the deltas), and a final message replaces the oldest stream that ended
@@ -570,10 +578,10 @@ async fn deltas(hub: &Hub, lines: &[String], subs: &mut Subs) -> Vec<Value> {
     // a project's counts (threads, settled) move with its threads
     let moved: Vec<String> = { let mut v: Vec<String> = vec![]; for th in upsert.iter() { if let Some(t) = g.threads.get(th) { if !projects.iter().any(|(i, _)| *i == t.project) && !v.contains(&t.project) { v.push(t.project.clone()) } } } v };
     // pushed only when a count moved (a message in a thread leaves them as they were)
-    for pid in &moved { if let Some(pj) = project_json(&g, pid, &asks) { let key = (pj["threadCount"].as_u64().unwrap_or(0), pj["settledCount"].as_u64().unwrap_or(0));
+    for pid in &moved { if let Some(pj) = merged_row(hub, &g, &asks, pid) { let key = (pj["threadCount"].as_u64().unwrap_or(0), pj["settledCount"].as_u64().unwrap_or(0));
         if subs.counts.insert(pid.clone(), key) != Some(key) { for sub in subs.lists() { out.push(d(sub, "project", json!({"project":pj}))) } } } }
     for th in &gone { for sub in subs.lists().into_iter().chain(subs.threads(th)) { out.push(d(sub, "thread.removed", json!({"id":th}))) } }
-    for (id, alive) in &projects { for sub in subs.lists() { match alive.then(|| project_json(&g, id, &asks)).flatten() { Some(p) => out.push(d(sub, "project", json!({"project":p}))), None => out.push(d(sub, "project.removed", json!({"id":id}))) } } }
+    for (id, alive) in &projects { for sub in subs.lists() { match alive.then(|| merged_row(hub, &g, &asks, id)).flatten() { Some(p) => out.push(d(sub, "project", json!({"project":p}))), None => out.push(d(sub, "project.removed", json!({"id":id}))) } } }
     out
 }
 /// The pushes for the linked machines' threads, which no log line of this hub announces: their mirrors are read again every few seconds, and what moved is pushed
@@ -591,6 +599,14 @@ async fn far_pushes(hub: &Hub, subs: &mut Subs) -> Vec<Value> {
             now.insert(id.clone(), digest); } }
         if !first { for id in seen.keys().filter(|i| !now.contains_key(*i)) { for sub in subs.lists() { out.push(d(sub, "thread.removed", json!({"id":id}))) } } }
         subs.far_seen = Some(now); let _ = seen;
+        // the merged project rows move with no log line here (a linked machine's origins learned, it away or back, its rows from the registry): each
+        // row that changed is pushed, one that went is removed
+        let asks = open_ask_counts(hub);
+        let rows: HashMap<String, Value> = with_far(hub, "", |far, un, _| merged_rows(&g, &asks, far, un).into_iter().map(|x| (x.1, x.2)).collect());
+        let firstp = subs.proj_seen.is_none(); let before = subs.proj_seen.take().unwrap_or_default(); let mut now: HashMap<String, String> = HashMap::new();
+        for (id, r) in &rows { let digest = r.to_string(); if !firstp && before.get(id) != Some(&digest) { for sub in subs.lists() { out.push(d(sub, "project", json!({"project":r}))) } } now.insert(id.clone(), digest); }
+        if !firstp { for id in before.keys().filter(|i| !now.contains_key(*i)) { for sub in subs.lists() { out.push(d(sub, "project.removed", json!({"id":id}))) } } }
+        subs.proj_seen = Some(now);
     }
     let open: Vec<String> = subs.subs.iter().filter_map(|(_, t)| match t { Topic::Thread(x) if machines::is_far(x) => Some(x.clone()), _ => None }).collect();
     if let Some(f) = hub.far() { for th in open {

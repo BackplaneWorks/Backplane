@@ -25,7 +25,7 @@ pub(super) async fn post(sync: &FarSync, hub: &Arc<Hub>, link: &str, body: &str)
     if url.is_empty() { return (0, String::new()) }
     let r = super::botnet::to_peer(&hub.cfg.home, &url, link, now(), "/far/rpc", true, &nonced(body)).await;
     // the link's own answer says whether that machine is up, at once (the sidebar's "desktop is off"; mirror.rs also asks each minute)
-    hub.mirrors().set_away(link, r.code == 0);
+    hub.mirrors().set_away(link, r.code == 0); hub.mirrors().publish(hub).await;
     (r.code, r.body)
 }
 fn err(id: &Value, e: &str) -> Vec<Value> { vec![json!({"t":"reply","id":id,"ok":false,"error":e})] }
@@ -315,7 +315,7 @@ pub async fn serve_with(copy: bool, sync: &Arc<FarSync>, hub: &Arc<Hub>, r: &PRe
     // sign in there (settings/accounts_there.rs): this machine signed in to its agents from the client the owner is using
     if m == "signin.state" || m == "signin.act" { return json_reply(&crate::settings::accounts_there::serve(hub, &link, m, &p).await) }
     // the project registry (net/registry.rs): kept on the home, from the owner's own machines only (checked above)
-    if m == "registry.put" || m == "registry.get" { return json_reply(&super::registry::serve(hub, m, &p).await) }
+    if m == "registry.put" || m == "registry.get" { return json_reply(&super::registry::serve(hub, &link, m, &p).await) }
     if m == "uber.sync" { return HttpReply::text("501 Not Implemented", "uber.sync is not ported on this hub yet") }
     if m == "mcp.call" {
         let tool = p["tool"].as_str().unwrap_or("");
