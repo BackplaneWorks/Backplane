@@ -133,6 +133,22 @@ def main():
     c = m.rpc(A, "home.check", {"to": "hub-b"})
     item("check: passes once signed in (build, link, disk, memory)", "n/a", c.get("ready") is True, json.dumps(c)[:300])
 
+    # a restart mid-move: what was held (the person's message, a bots-API message, a webhook) is on disk, and the next start delivers each here once
+    r = m.rpc(A, "home.move", {"to": "hub-b"})
+    check("a move to be cut starts", r.get("started") is True, json.dumps(r)[:200])
+    m.rpc(A, "turn.start", {"thread": tb, "text": "zz cut person", "msg": "mcut1"})
+    m.rpc(A, "bots.say", {"bot": bub, "text": "zz cut said", "msg": "mcut2"})
+    m.post_hook(B.base, hid, tok, b'{"zz":"cut ring"}')
+    held = json.load(open(os.path.join(A.home, "home-held.json"))).get("held", []) if os.path.exists(os.path.join(A.home, "home-held.json")) else []
+    item("a move's holds are on disk", "no (in memory)", len(held) == 3, str(len(held)))
+    m.stop("A"); A = m.start("A")
+    cnt = lambda h, t: sum(1 for e in m.events(h) if e.get("$") == "MessagePosted" and e.get("thread") == tb and e.get("role") != "assistant" and t in e.get("text", ""))
+    got = m.wait(lambda: all(cnt(A, t) >= 1 for t in ("zz cut person", "zz cut said", "cut ring")), 60)
+    time.sleep(2)
+    item("a restart mid-move delivers each held message here once", "no (lost)", bool(got) and all(cnt(A, t) == 1 for t in ("zz cut person", "zz cut said", "cut ring")) and not os.path.exists(os.path.join(A.home, "home-held.json")),
+         str([cnt(A, t) for t in ("zz cut person", "zz cut said", "cut ring")]))
+    item("Bub's row says the cut move did not happen", "no (Moving to forever)", '"failed"' in row_note(A) and "restarted" in row_note(A), row_note(A))
+
     # 2. the move, with a message mid-move
     r = m.rpc(A, "home.move", {"to": "hub-b"})
     check("home.move starts", r.get("started") is True, json.dumps(r)[:200])

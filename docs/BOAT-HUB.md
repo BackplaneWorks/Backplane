@@ -24,8 +24,9 @@ The always-on push (docs/ALWAYS-ON.md, D1-D10) made the move a single press with
   - Bub's row says "Moving to boat-hub" (the setting `home.moving`; data/1 `bots.list` gives it as `note`).
   - What reaches a moving thread is held and delivered once at the new home, or here if the move failed. That covers the person's message
     (`turn.start`) and everything else through agents `deliver_k`: another bot, a routine, a room, a webhook (the ring), mail, a launched
-    thread's report. Held items go through the far outbox as `home.deliver`, keyed by message id. The hold is in memory, so a hub restarted
-    mid-move loses what it held.
+    thread's report. Held items go through the far outbox as `home.deliver`, keyed by message id. The hold is kept in `<home>/home-held.json`
+    from the move's start (as far-sends.json is). A hub restarted mid-move delivers it on its next start, exactly once: to the new home if the
+    move had finished, else here. The row then says the move did not happen.
   - After the move, what reaches the old copy of a moved thread goes on to the new home.
   - A window that had Bub open is told `nextTarget` `<link>~<bub>` and opens it there; after a move back it gets the plain id again. The phones
     hear `k:bots` and follow the open chat (iOS `DBot.followed`, Android `followed`).
