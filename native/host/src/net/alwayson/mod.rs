@@ -229,6 +229,8 @@ pub async fn act(hub: &Arc<Hub>, sh: &Arc<Shared>, action: &str, value: &str, fi
             {
                 let mut g = sh.st.lock().unwrap();
                 if g.running { return Err("it is being made already".into()) }
+                let lacks: Vec<String> = g.account["missing"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(str::to_string)).collect();
+                if !lacks.is_empty() && action == "alwayson-make" { return Err(format!("this key lacks {}: make one with {}", lacks.join(", "), boat::key_command())) }
                 if g.saved["made"] == true && action == "alwayson-make" { return Err("this computer has an always-on Boat already".into()) }
                 let info = hub.info_now();
                 if g.opts.size.is_empty() { let types: Vec<String> = g.account["types"].as_array().into_iter().flatten().filter_map(|t| t.as_str().map(str::to_string)).collect(); g.opts.size = sizes::pick(g.opts.dictation, 2, &types).into(); }
@@ -249,7 +251,7 @@ pub async fn act(hub: &Arc<Hub>, sh: &Arc<Shared>, action: &str, value: &str, fi
             if sh.st.lock().unwrap().running { return Err("wait for the step that runs to end".into()) }
             // off the person's tailnet first (best-effort: a Boat that does not answer is deleted all the same)
             if sh.saved()["network"] == "tailnet" { let _ = b.sh(&id, "sudo -n tailscale logout", 60).await; }
-            b.delete(&id).await.or_else(|e| if e.contains("404") { Ok(()) } else { Err(e) })?;
+            b.delete(&id).await.or_else(|e| if e.contains("404") { Ok(()) } else if e.contains("api_key_action_forbidden") || e.contains("403") { Err("This key may delete only the Boats it made, and another key made this one. Delete it on boat.dev, or paste a key with sandbox.delete.".to_string()) } else { Err(e) })?;
             let link = sh.saved()["link"].as_str().unwrap_or("").to_string();
             if let (false, Some(p)) = (link.is_empty(), crate::net::start::peering()) {
                 if hub.commit(&json!({"$":"PeerSet","id":link,"name":"","url":"","revoked":true,"at":crate::hub::now_ms() / 1000})).await.is_ok() { p.unpeered(&link) }
@@ -299,8 +301,15 @@ async fn login_wait(hub: Arc<Hub>, sh: Arc<Shared>) {
         match boat::login_poll(&hub.cfg.home, &poll).await {
             Ok(None) => continue,
             Ok(Some(tok)) => {
-                let r = crate::settings::vault::put(boat::KEY, &tok, "Boat account for the always-on machine", "hub");
-                { let mut g = sh.st.lock().unwrap(); g.login = Value::Null; if !r.starts_with("ok") { g.login_err = format!("signed in, but the key could not be kept: {r}") } }
+                // the sign-in may do everything: it makes a key of only what the Boat needs, keeps that, and ends the sign-in's session
+                let session = Boat::with_key(&hub.cfg.home, &tok);
+                let name = format!("backplane-always-on-{}", crate::net::botnet::name().await.replace(' ', "-"));
+                let (keep, note) = match session.make_key(&name).await {
+                    Ok(k) => { let _ = session.logout().await; (k, String::new()) }
+                    Err(e) => (tok.clone(), format!("Signed in, but Boat would not make a narrower key: {e}. This sign-in is kept as it is, and it can do everything on your account.")),
+                };
+                let r = crate::settings::vault::put(boat::KEY, &keep, "Boat account for the always-on machine", "hub");
+                { let mut g = sh.st.lock().unwrap(); g.login = Value::Null; g.login_err = if !r.starts_with("ok") { format!("signed in, but the key could not be kept: {r}") } else { note }; }
                 refresh_account(&hub, &sh).await; sh.publish(&hub).await; return
             }
             Err(e) => { { let mut g = sh.st.lock().unwrap(); g.login = Value::Null; g.login_err = e; } sh.publish(&hub).await; return }

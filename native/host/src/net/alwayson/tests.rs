@@ -3,6 +3,9 @@ use super::*;
 use crate::{hub::Cfg, presenter::Canned};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+/// The tests that move Boat's bases (process-wide environment variables) take turns.
+static ENV: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
 fn dir(tag: &str) -> std::path::PathBuf {
     let d = std::env::temp_dir().join(format!("bp-aon-{tag}-{}-{}", std::process::id(), hex::encode(crate::net::pairing::urandom(3))));
     std::fs::create_dir_all(&d).unwrap(); d
@@ -55,6 +58,7 @@ fn wire_net(hub: &Arc<Hub>) -> Arc<crate::net::routes::AuthRoutes> {
 }
 
 #[tokio::test] async fn boats_browser_sign_in_gives_a_token_and_a_missing_endpoint_says_to_paste_a_key() {
+    let _env = ENV.lock().await;
     let home = dir("login");
     let (base, seen) = stand_in(vec![
         ("POST", "/api/boat/cli/login/start", 200, r#"{"login_url":"https://boat.dev/api/boat/auth/github?state=s","poll_token":"P0llToken123","user_code":"M2SD-BJHQ","expires_at":"2026-11-11T06:11:41.433Z","auth_method":"github","email":null}"#.into()),
@@ -80,6 +84,7 @@ fn wire_net(hub: &Arc<Hub>) -> Arc<crate::net::routes::AuthRoutes> {
 }
 
 #[tokio::test] async fn the_api_is_called_with_the_key_as_a_bearer_and_the_create_has_no_auto_stop() {
+    let _env = ENV.lock().await;
     let home = dir("api");
     let (base, seen) = stand_in(vec![
         ("GET", "/me", 200, r#"{"ok":true,"user":{"email":"a@b.c","login":"a"}}"#.into()),
@@ -245,4 +250,24 @@ async fn a_hub_nobody_can_reach_gets_its_calls_over_its_own_poll_within_seconds(
     assert_eq!(post(door, &format!("X-Backplane-Peer: {peer}\r\nX-Backplane-Timestamp: {ts}\r\nX-Backplane-Signature: {}\r\n", crate::net::sign::header(&secret, ts, body)), body).await, 200, "the link itself");
     // a link that is not polling: None, the caller goes directly
     assert!(tunnel::ends().call("pnobody0123456789", "GET", "/x", "", "").await.is_none());
+}
+
+/// A browser sign-in may do everything: the hub makes a key of only the always-on Boat's actions with it, and ends the session.
+#[tokio::test] async fn a_sign_in_is_traded_for_a_key_of_only_what_the_boat_needs() {
+    let _env = ENV.lock().await;
+    let home = dir("mint");
+    let (base, seen) = stand_in(vec![
+        ("POST", "/api-keys/scoped", 201, r#"{"ok":true,"type":"api_key.created","secret":"boat_narrow_secret_1234"}"#.into()),
+        ("POST", "/api/boat/auth/logout", 200, r#"{"ok":true}"#.into()),
+    ]).await;
+    std::env::set_var("BACKPLANE_BOAT_API", &base); std::env::set_var("BACKPLANE_BOAT_WEB", &base);
+    let s = boat::Boat::with_key(&home, "session_token_full");
+    assert_eq!(s.make_key("backplane-always-on-desk").await.unwrap(), "boat_narrow_secret_1234");
+    s.logout().await.unwrap();
+    std::env::remove_var("BACKPLANE_BOAT_API"); std::env::remove_var("BACKPLANE_BOAT_WEB");
+    let seen = seen.lock().unwrap();
+    let body: Value = serde_json::from_str(&seen[0].3).unwrap();
+    assert_eq!(body["actions"], json!(boat::ACTIONS)); assert_eq!(body["ttl"], "365d"); assert!(body.get("preset").is_none());
+    assert!(!seen[0].3.contains('*') && !seen[0].3.contains("admin"), "nothing more than the Boat needs");
+    assert_eq!((seen[1].0.as_str(), seen[1].1.as_str(), seen[1].2.as_str()), ("POST", "/api/boat/auth/logout", "Bearer session_token_full"), "the session is ended with its own token");
 }
