@@ -341,6 +341,7 @@ mod tests {
         // a stand-in: says its batches, each written before it is said, then the model
         std::fs::write(&tool, "#!/bin/sh
 while [ $# -gt 0 ]; do [ \"$1\" = --parts ] && P=$2; shift; done
+[ -n \"$P\" ] || exit 0
 echo 'TIME read 1'
 echo 'OF 2 9'
 printf a > \"$P/0000.glb\"
@@ -350,6 +351,9 @@ echo \"PART 30 1 $P/0001.glb\"
 echo 'TRIS 42'
 ").unwrap();
         std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap();
+        // "Text file busy": the script written a moment ago is still open for writing in a child another test thread just forked, until that child's exec (a few ms, longer on a loaded box).
+        // Run it without --parts (it exits at once) until it starts.
+        for _ in 0..400 { match std::process::Command::new(&tool).status() { Err(e) if e.raw_os_error() == Some(crate::plat::errno::ETXTBSY) => std::thread::sleep(std::time::Duration::from_millis(25)), _ => break } }
         let out = d.join("o.glb").to_string_lossy().into_owned();
         let mut seen = vec![];
         let mut on = |e: Event| { if let Event::Part { glb, .. } = &e { seen.push(std::fs::read_to_string(glb).unwrap_or_default()) } seen.push(format!("{e:?}").chars().take(4).collect()) };
