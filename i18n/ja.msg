@@ -2051,6 +2051,16 @@ gpui.c.kicad.no.x11.connection = X11 に接続できません
 gpui.c.kicad.back.to.backplane.s.viewer = Backplane のビューアに戻る（KiCad は開いたまま）
 gpui.c.kicad.edit.in.the.real.kicad = このペインで本物の KiCad で編集
 gpui.c.kicad.view = 表示
+gpui.c.kicad.symbols = シンボル
+gpui.c.kicad.footprints = フットプリント
+gpui.c.kicad.full.size = 最大化
+gpui.c.kicad.exit.full.size = 最大化を解除
+gpui.c.kicad.the.editor.takes.the.sidebar = エディタがサイドバーとスレッドの領域も使います
+gpui.c.kicad.pop.back.in = ペインに戻す
+gpui.c.kicad.back.into.backplane.s.pane = このままの状態で Backplane のペインに戻します
+gpui.c.kicad.the.editor.in.a.window = このままの状態でエディタを別ウィンドウで開きます
+gpui.c.kicad.kicad.is.open.in.its = KiCad は別ウィンドウで開いています。
+gpui.c.kicad.the.editor.s.window.could = エディタのウィンドウを開けませんでした:
 
 # ---- gpui-d: setup, pairing, hubs, palette, picker, projects, composer, menus ----
 gpui.assets.missing = {dir} にアセットがありません: {files}
