@@ -297,6 +297,15 @@ mod imp {
     /// In stock mode (`managed` None), `place` maps `show` and unmaps siblings; in fork mode (`managed` Some), GTK3 owns frame map state via
     /// `ShowFrame`/`HideFrame` (calling external `XMapWindow` before `GTKShowFromOnIdle` trips `gtk_window_map_event` -> `gdk_window_hide`),
     /// so `place` only configures `show` and sends a synthetic `ConfigureNotify` to update root coords and wake `bp.8`'s GDK event loop.
+    /// bp.9's local map: `place` where the client maps `show` and unmaps the other frames in `mine` (shown by KiCad once); a frame KiCad has
+    /// never shown is left to it (its first show goes through KiCad, for GTK).
+    pub fn place_local(container: u64, r: Option<R>, show: Option<u64>, mine: &[u64], last_root: &mut (i32, i32)) {
+        place(container, r, show, Some(mine), last_root);
+        if r.is_none() { return }
+        let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
+        for k in mine { if Some(*k) == show { let _ = c.map_window(*k as u32); } else { let _ = c.unmap_window(*k as u32); } }
+        let _ = c.flush();
+    }
     pub fn place(container: u64, r: Option<R>, show: Option<u64>, managed: Option<&[u64]>, last_root: &mut (i32, i32)) {
         let container = container as u32;
         let show = show.map(|x| x as u32);
@@ -824,6 +833,8 @@ mod imp {
     }
 
     /// Position/size/show `container` and its child frames strictly via `SWP_ASYNCWINDOWPOS` and `ShowWindowAsync`.
+    /// Windows: the fork's frames are KiCad's to show (ShowFrame); the round trip stays.
+    pub fn place_local(container: u64, r: Option<R>, show: Option<u64>, mine: &[u64], last_root: &mut (i32, i32)) { place(container, r, show, Some(mine), last_root) }
     pub fn place(container: u64, r: Option<R>, show: Option<u64>, managed: Option<&[u64]>, last_root: &mut (i32, i32)) {
         let c = hwnd(container);
         if c.is_null() || unsafe { IsWindow(c) } == 0 { return }
@@ -1194,6 +1205,7 @@ mod imp {
     pub fn dialogs(_pid: u32, _container: u64, _toplevel: u64) {}
     pub fn frames(_container: u64) -> Vec<Frame> { vec![] }
     pub fn place(_container: u64, _r: Option<R>, _show: Option<u64>, _managed: Option<&[u64]>, _last_root: &mut (i32, i32)) {}
+    pub fn place_local(_container: u64, _r: Option<R>, _show: Option<u64>, _mine: &[u64], _last_root: &mut (i32, i32)) {}
     pub fn sync_root(_container: u64, _r: R, _show: u64, _last_root: &mut (i32, i32)) {}
     pub fn holes(_container: u64, _keep: Option<&[R]>) {}
     pub fn focus(_w: u64) {}
