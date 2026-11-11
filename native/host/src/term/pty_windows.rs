@@ -44,8 +44,13 @@ impl Pty {
     /// Run `cmd args` in `cwd` ("" keeps ours) on a new pseudo console. Errors are CreateProcessW's (NotFound for an unknown command).
     pub fn spawn(cmd: &str, args: &[String], cwd: &str, cols: u16, rows: u16) -> std::io::Result<Spawned> {
         if crate::copy::on() { return Err(std::io::Error::other(crate::copy::refusal("a terminal"))) }
-        let mut c = crate::proc::std_cmd(crate::proc::Kind::Terminal, cmd);
+        Self::spawn_as(crate::proc::Kind::Terminal, cmd, args, cwd, cols, rows, &mut |_| {})
+    }
+    /// `spawn` as another kind of process, its environment then set by `env` (pty.rs `spawn_as`).
+    pub fn spawn_as(kind: crate::proc::Kind, cmd: &str, args: &[String], cwd: &str, cols: u16, rows: u16, env: &mut dyn FnMut(&mut std::process::Command)) -> std::io::Result<Spawned> {
+        let mut c = crate::proc::std_cmd(kind, cmd);
         c.args(args).env("TERM", "xterm-256color").env("COLORTERM", "truecolor").env_remove("LINES").env_remove("COLUMNS");
+        env(&mut c);
         if !cwd.is_empty() { c.current_dir(cwd); }
         // the command line, environment and folder the gate made, handed to CreateProcessW
         let mut line = vec![]; quote(c.get_program(), &mut line); for a in c.get_args() { line.push(b' ' as u16); quote(a, &mut line); } line.push(0);

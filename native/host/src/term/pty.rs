@@ -28,6 +28,11 @@ impl Pty {
     pub fn spawn(cmd: &str, args: &[String], cwd: &str, cols: u16, rows: u16) -> std::io::Result<Spawned> {
         // a hub on a copied log runs no shell (proc.rs would make the program a path that does not exist): say why, and open no pty for it
         if crate::copy::on() { return Err(std::io::Error::other(crate::copy::refusal("a terminal"))) }
+        Self::spawn_as(crate::proc::Kind::Terminal, cmd, args, cwd, cols, rows, &mut |_| {})
+    }
+    /// `spawn` as another kind of process (the copy gate is `kind`'s), its environment then set by `env`: a provider CLI's sign-in that wants a terminal
+    /// (`claude setup-token`, settings/accounts_io.rs).
+    pub fn spawn_as(kind: crate::proc::Kind, cmd: &str, args: &[String], cwd: &str, cols: u16, rows: u16, env: &mut dyn FnMut(&mut Command)) -> std::io::Result<Spawned> {
         let (master, slave) = unsafe {
             let m = libc::posix_openpt(libc::O_RDWR | libc::O_NOCTTY); // (Darwin takes only these two flags)
             if m >= 0 { libc::fcntl(m, libc::F_SETFD, libc::FD_CLOEXEC); }
@@ -50,8 +55,9 @@ impl Pty {
             libc::ioctl(m.as_raw_fd(), libc::TIOCSWINSZ, &ws);
             (File::from(m), File::from_raw_fd(s))
         };
-        let mut c = crate::proc::std_cmd(crate::proc::Kind::Terminal, cmd);
+        let mut c = crate::proc::std_cmd(kind, cmd);
         c.args(args).env("TERM", "xterm-256color").env("COLORTERM", "truecolor").env_remove("LINES").env_remove("COLUMNS");
+        env(&mut c);
         if !cwd.is_empty() { c.current_dir(Path::new(cwd)); }
         c.stdin(Stdio::from(slave.try_clone()?)).stdout(Stdio::from(slave.try_clone()?)).stderr(Stdio::from(slave));
         unsafe { c.pre_exec(|| {

@@ -110,16 +110,82 @@ impl Usage {
         a
     }
 }
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct Profile { pub id: String, pub provider: String, pub label: String, pub epoch: u64, pub fingerprint: String, pub store: String, pub state: String, pub identity: Value, pub catalog: Vec<Value>, pub allowance: Option<Value>, pub checked_at: u64, pub message: String,
     /// When its sign-in was found dead (0: it was not): kept in the registry, so a restart still knows it must be signed in again.
     pub expired_at: u64,
     /// When the provider last answered a request made with this login (its usage read): the proof a dead sign-in works again. Not kept.
-    pub proven_at: u64 }
+    pub proven_at: u64,
+    /// "" a CLI login in its own store; [`SYNC`] Claude Code's long-lived token (`claude setup-token`), kept in the vault ([`token_name`]) and shared with the owner's linked machines.
+    pub kind: String,
+    /// A sync account another machine made: that machine's link id here ("" made here). Only the machine that made one announces it (accounts_sync.rs).
+    pub origin: String,
+    /// A sync token's issue and end (seconds; 0 unknown): its end raises the renewal alert a month ahead (accounts_hub.rs `renew_alert`).
+    pub made_at: u64, pub expires_at: u64 }
+/// The account kind of a Claude Code long-lived token.
+pub const SYNC: &str = "sync";
+/// The vault name of a sync account's token (`hub.`: the hub's own, never listed, run or set through the secret box).
+pub fn token_name(id: &str) -> String { format!("hub.account.{id}.token") }
+/// How long `claude setup-token` says its token lasts: one year.
+pub const TOKEN_LIFE: u64 = 365 * 86400;
+/// A token's life in the CLI's words ("Your OAuth token (valid for 1 year):", "valid for 364 days"), in seconds; None when it said none.
+pub fn valid_for(text: &str) -> Option<u64> {
+    let i = text.find("valid for")?; let rest = text[i + 9..].trim_start();
+    let n: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+    let n: u64 = if n.is_empty() { if rest.starts_with("a ") || rest.starts_with("an ") { 1 } else { return None } } else { n.parse().ok()? };
+    let unit = rest.trim_start_matches(|c: char| c.is_ascii_digit()).trim_start().trim_start_matches("an ").trim_start_matches("a ");
+    let per = [("year", 365 * 86400), ("month", 30 * 86400), ("week", 7 * 86400), ("day", 86400), ("hour", 3600)].iter().find(|(u, _)| unit.starts_with(u)).map(|(_, s)| *s)?;
+    Some(n * per)
+}
+/// The terminal's escape sequences (colour, cursor moves) out of what a CLI on a pty printed.
+pub fn strip_ansi(s: &str) -> String {
+    let mut out = String::with_capacity(s.len()); let mut it = s.chars().peekable();
+    while let Some(c) = it.next() {
+        if c != '\u{1b}' { out.push(c); continue }
+        match it.peek() {
+            Some('[') => { it.next(); while let Some(&d) = it.peek() { it.next(); if ('@'..='~').contains(&d) { break } } }
+            Some(']') => { it.next(); while let Some(d) = it.next() { if d == '\u{7}' { break } if d == '\u{1b}' { it.next(); break } } }
+            Some(_) => { it.next(); }
+            None => {}
+        }
+    }
+    out
+}
+/// The long-lived token in what `claude setup-token` printed (`sk-ant-oat01-...`), or None.
+pub fn catch_token(text: &str) -> Option<String> {
+    let i = text.find("sk-ant-oat")?;
+    let t: String = text[i..].chars().take_while(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').collect();
+    (t.len() >= 40 && t.len() <= 512).then_some(t)
+}
+/// Where a sync account's token is kept. The hub's is its vault; a test's is memory.
+pub trait Tokens: Send + Sync {
+    fn get(&self, id: &str) -> Option<String>;
+    /// false when it could not be kept
+    fn put(&self, id: &str, label: &str, token: &str) -> bool;
+    fn del(&self, id: &str);
+    /// whether the store can be read now (a locked vault cannot: nothing is announced from it then)
+    fn open(&self) -> bool;
+}
+pub struct VaultTokens;
+impl Tokens for VaultTokens {
+    fn get(&self, id: &str) -> Option<String> { super::vault::own_get(&token_name(id)) }
+    fn put(&self, id: &str, label: &str, token: &str) -> bool { !super::vault::own_put(&token_name(id), token, &format!("Claude sync token: {label}")).starts_with("fail") }
+    fn del(&self, id: &str) { if super::vault::own_get(&token_name(id)).is_some() { let _ = super::vault::own_del(&token_name(id)); } }
+    fn open(&self) -> bool { super::vault::status()["locked"] != true }
+}
+#[derive(Default)]
+pub struct MemTokens(pub Mutex<HashMap<String, String>>);
+impl Tokens for MemTokens {
+    fn get(&self, id: &str) -> Option<String> { self.0.lock().unwrap().get(id).cloned() }
+    fn put(&self, id: &str, _label: &str, token: &str) -> bool { self.0.lock().unwrap().insert(id.into(), token.into()); true }
+    fn del(&self, id: &str) { self.0.lock().unwrap().remove(id); }
+    fn open(&self) -> bool { true }
+}
 impl Profile {
     fn public(&self) -> Value {
         let allowance = self.allowance.as_ref().map(|a| { let mut a = a.clone(); if now_s().saturating_sub(a["at"].as_u64().unwrap_or(0)) > 300 { a["state"] = json!("stale") } a });
-        json!({"id":self.id,"provider":self.provider,"label":self.label,"epoch":self.epoch,"state":self.state,"identity":self.identity,"checkedAt":self.checked_at,"catalog":self.catalog,"allowance":allowance,"message":self.message,"expiredAt":self.expired_at})
+        json!({"id":self.id,"provider":self.provider,"label":self.label,"epoch":self.epoch,"state":self.state,"identity":self.identity,"checkedAt":self.checked_at,"catalog":self.catalog,"allowance":allowance,"message":self.message,"expiredAt":self.expired_at,
+            "kind":self.kind,"origin":self.origin,"madeAt":self.made_at,"tokenExpiresAt":self.expires_at})
     }
 }
 // ---- the sign-in state: what a profile's state becomes on each fact ----
@@ -167,7 +233,9 @@ struct Attempt { id: String, profile: String, state: String, url: String, user_c
 
 enum Cmd { Respond(String), Cancel }
 #[derive(Default)]
-struct Inner { profiles: Vec<Profile>, attempts: Vec<Attempt>, jobs: HashMap<String, String>, cmds: HashMap<String, mpsc::UnboundedSender<Cmd>>, revision: u64, load_error: String, default_allowance: Option<Value>, default_identity: String, refresh_at: HashMap<String, u64>, busy: HashMap<String, usize>, launching: HashMap<String, usize>, launch_locks: HashMap<String, Arc<tokio::sync::Mutex<()>>>, runs_on: HashMap<String, (String, u64)>, runs_seq: u64 }
+struct Inner { profiles: Vec<Profile>,
+    /// a sync token a sign-in caught, by profile, while it is checked (never kept here longer, never in the registry)
+    caught: HashMap<String, String>, attempts: Vec<Attempt>, jobs: HashMap<String, String>, cmds: HashMap<String, mpsc::UnboundedSender<Cmd>>, revision: u64, load_error: String, default_allowance: Option<Value>, default_identity: String, refresh_at: HashMap<String, u64>, busy: HashMap<String, usize>, launching: HashMap<String, usize>, launch_locks: HashMap<String, Arc<tokio::sync::Mutex<()>>>, runs_on: HashMap<String, (String, u64)>, runs_seq: u64 }
 
 /// A launch waiting or running on a profile; dropped (finished, refused or its future dropped) it leaves the queue, so the profile is never stranded.
 struct Queued { me: Arc<Accounts>, id: String }
@@ -179,7 +247,9 @@ pub struct Accounts { root: PathBuf, inner: Mutex<Inner>, resolve: Arc<dyn Fn(&s
     /// The models-list request (the real hub's only: a test hub asks no API).
     models_get: Mutex<Option<super::claude_usage::Get>>,
     /// One usage read (and the token refresh it may need) at a time per login ("" is the CLI's own).
-    usage_locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>> }
+    usage_locks: Mutex<HashMap<String, Arc<tokio::sync::Mutex<()>>>>,
+    /// Where sync accounts' tokens are kept (the vault; memory in a test).
+    tokens: Mutex<Arc<dyn Tokens>> }
 
 fn private_dir(dir: &Path) -> std::io::Result<()> {
     if let Some(parent) = dir.parent() { if !parent.exists() { std::fs::DirBuilder::new().recursive(true).mode(0o700).create(parent)?; } }
@@ -188,6 +258,20 @@ fn private_dir(dir: &Path) -> std::io::Result<()> {
     use crate::plat::fs::MetadataExt;
     if !m.is_dir() || m.file_type().is_symlink() || m.uid() != crate::plat::fs::uid() { return Err(std::io::Error::new(std::io::ErrorKind::Other, "Unsafe provider directory")) }
     std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o700))
+}
+
+/// What goes before a Claude child's own arguments: the person's settings only, and a CLI login must be a claude.ai one. A sync account's token is a claude.ai
+/// subscription's too, but comes from the environment, which that setting is not about.
+fn claude_pre(p: Option<&Profile>) -> &'static [&'static str] {
+    if p.map_or(false, |p| p.kind == SYNC) { &["--setting-sources", "user"] } else { &["--setting-sources", "user", "--settings", "{\"forceLoginMethod\":\"claudeai\"}"] }
+}
+/// A registry entry's kind is one this hub knows: a CLI login, or a Claude sync token.
+fn kind_ok(p: &Value) -> bool { match p["kind"].as_str().unwrap_or("") { "" => true, SYNC => p["provider"] == "claude" && p["origin"].as_str().map_or(true, |o| o.len() <= 128), _ => false } }
+/// What a registry entry keeps of its kind (the rest of a profile is the caller's).
+fn saved_kind(p: &Value) -> Profile {
+    if p["kind"] != SYNC { return Profile { identity: json!({}), ..Profile::default() } }
+    Profile { kind: SYNC.into(), origin: p["origin"].as_str().unwrap_or("").into(), made_at: p["madeAt"].as_u64().unwrap_or(0), expires_at: p["expiresAt"].as_u64().unwrap_or(0),
+        identity: json!({"email":label(p["email"].as_str().unwrap_or("")),"plan":label(p["plan"].as_str().unwrap_or("")),"auth":"oauth_token"}), ..Profile::default() }
 }
 
 // ---- child processes ----
@@ -236,8 +320,19 @@ pub const STORE_ENV: &[&str] = &["CLAUDE_CONFIG_DIR", "CODEX_HOME"];
 /// The host's environment, minus every provider credential variable when the child is a NAMED profile's (its own store is then put in). The CLI's own login
 /// (`named` false) keeps the host's environment, as the JS hub's `environment(null)` does, except a profile's store ([`STORE_ENV`]).
 fn apply_env(c: &mut tokio::process::Command, env: &[(String, String)], named: bool) {
-    if named { for (k, _) in std::env::vars_os() { if let Some(k) = k.to_str() { if unset_env(k) { c.env_remove(k); } } } } else { for k in STORE_ENV { c.env_remove(k); } }
-    for (k, v) in env { c.env(k, v); }
+    let (remove, set) = env_plan(std::env::vars_os().filter_map(|(k, _)| k.into_string().ok()), env, named);
+    for k in remove { c.env_remove(k); } for (k, v) in set { c.env(k, v); }
+}
+/// `apply_env` as what to remove of the host's variables (`host`) and what to set.
+pub fn env_plan(host: impl Iterator<Item = String>, env: &[(String, String)], named: bool) -> (Vec<String>, Vec<(String, String)>) {
+    let remove = if named { host.filter(|k| unset_env(k)).collect() } else { STORE_ENV.iter().map(|k| k.to_string()).collect() };
+    (remove, env.to_vec())
+}
+/// A provider child's own variables name a profile's store (a named account's child): every provider credential it would inherit from the hub goes, so only
+/// its own login reaches it (agents/proc.rs `spawn_with`: a turn, a title). A sync account's token is set again after, from its own environment.
+pub fn scrub_for(env: &[(String, String)]) -> Vec<String> {
+    if !env.iter().any(|(k, _)| STORE_ENV.contains(&k.as_str())) { return vec![] }
+    std::env::vars_os().filter_map(|(k, _)| k.into_string().ok()).filter(|k| unset_env(k)).collect()
 }
 
 impl Accounts {
@@ -256,10 +351,10 @@ impl Accounts {
                     let parsed = if ok { std::fs::read_to_string(&index).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()) } else { None };
                     let list = parsed.as_ref().filter(|s| s["version"] == 1).and_then(|s| s["profiles"].as_array()).filter(|a| a.len() <= 40);
                     match list {
-                        Some(a) if a.iter().all(|p| valid_id(p["id"].as_str().unwrap_or("")) && matches!(p["provider"].as_str(), Some("claude" | "codex")) && p["epoch"].as_u64().map_or(false, |e| e >= 1)) => {
+                        Some(a) if a.iter().all(|p| valid_id(p["id"].as_str().unwrap_or("")) && matches!(p["provider"].as_str(), Some("claude" | "codex")) && p["epoch"].as_u64().map_or(false, |e| e >= 1) && kind_ok(p)) => {
                             for p in a { inner.profiles.push(Profile { id: p["id"].as_str().unwrap().into(), provider: p["provider"].as_str().unwrap().into(), label: label(p["label"].as_str().unwrap_or("")), epoch: p["epoch"].as_u64().unwrap(),
-                                fingerprint: p["fingerprint"].as_str().unwrap_or("").into(), store: p["store"].as_str().filter(|s| valid_id(s)).unwrap_or("").into(), state: if p["expiredAt"].as_u64().unwrap_or(0) > 0 { "expired".into() } else { "unchecked".into() }, identity: json!({}), catalog: vec![], allowance: None, checked_at: 0,
-                                message: if p["expiredAt"].as_u64().unwrap_or(0) > 0 { EXPIRED_SHORT.into() } else { String::new() }, expired_at: p["expiredAt"].as_u64().unwrap_or(0), proven_at: 0 }) }
+                                fingerprint: p["fingerprint"].as_str().unwrap_or("").into(), store: p["store"].as_str().filter(|s| valid_id(s)).unwrap_or("").into(), state: if p["expiredAt"].as_u64().unwrap_or(0) > 0 { "expired".into() } else { "unchecked".into() }, identity: saved_kind(p).identity, catalog: vec![], allowance: None, checked_at: 0,
+                                message: if p["expiredAt"].as_u64().unwrap_or(0) > 0 { EXPIRED_SHORT.into() } else { String::new() }, expired_at: p["expiredAt"].as_u64().unwrap_or(0), proven_at: 0, ..saved_kind(p) }) }
                         }
                         _ => inner.load_error = "The private account registry could not be verified.".into(),
                     }
@@ -270,7 +365,7 @@ impl Accounts {
         // (BACKPLANE_USAGE_READ=1: a rig with stand-in agents reads the logins copied into its temp home for real; a copy never does)
         let real = !cfg!(test) && (std::env::var_os("BACKPLANE_AGENTS").map_or(true, |v| v.is_empty()) || std::env::var("BACKPLANE_USAGE_READ").map_or(false, |v| v == "1")) && std::env::var("BACKPLANE_COPY").map_or(true, |v| v != "1");
         let usage = real.then(|| (super::claude_usage::curl(), super::claude_usage::default_dir()));
-        Accounts { root, inner: Mutex::new(inner), resolve, models_get: Mutex::new(real.then(super::claude_usage::curl_models)), usage: Mutex::new(usage), usage_locks: Mutex::new(HashMap::new()) }
+        Accounts { root, inner: Mutex::new(inner), resolve, models_get: Mutex::new(real.then(super::claude_usage::curl_models)), usage: Mutex::new(usage), usage_locks: Mutex::new(HashMap::new()), tokens: Mutex::new(Arc::new(VaultTokens)) }
     }
     /// The registry's folder (`<home>/providers/accounts-v1`).
     pub fn root(&self) -> &Path { &self.root }
@@ -290,7 +385,8 @@ impl Accounts {
                 if !valid_id(id) || !matches!(provider, "claude" | "codex") || epoch < 1 || g.profiles.len() >= 40 { continue }
                 let store = p["store"].as_str().filter(|s| valid_id(s)).unwrap_or("").to_string();
                 let (state, expired_at, message) = if signed_in { ("unchecked".to_string(), 0, String::new()) } else { ("expired".to_string(), now, EXPIRED_SHORT.to_string()) };
-                g.profiles.push(Profile { id: id.into(), provider: provider.into(), label: label(p["label"].as_str().unwrap_or("")), epoch, fingerprint: p["fingerprint"].as_str().unwrap_or("").into(), store, state, identity: json!({}), catalog: vec![], allowance: None, checked_at: 0, message, expired_at, proven_at: 0 });
+                if !kind_ok(p) { continue }
+                g.profiles.push(Profile { id: id.into(), provider: provider.into(), label: label(p["label"].as_str().unwrap_or("")), epoch, fingerprint: p["fingerprint"].as_str().unwrap_or("").into(), store, state, identity: saved_kind(p).identity, catalog: vec![], allowance: None, checked_at: 0, message, expired_at, proven_at: 0, ..saved_kind(p) });
                 n += 1;
             }
         })?;
@@ -298,7 +394,10 @@ impl Accounts {
     }
     /// Writes the registry (temp file, then rename). The revision moves only when the file is good; a failure is the op's failure.
     fn save(&self, g: &mut Inner) -> Result<(), ()> {
-        let body = json!({"version":1,"profiles":g.profiles.iter().map(|p| { let mut o = json!({"id":p.id,"provider":p.provider,"label":p.label,"epoch":p.epoch,"fingerprint":p.fingerprint,"store":p.store}); if p.expired_at > 0 && p.state == "expired" { o["expiredAt"] = json!(p.expired_at) } o }).collect::<Vec<_>>()}).to_string();
+        let body = json!({"version":1,"profiles":g.profiles.iter().map(|p| { let mut o = json!({"id":p.id,"provider":p.provider,"label":p.label,"epoch":p.epoch,"fingerprint":p.fingerprint,"store":p.store}); if p.expired_at > 0 && p.state == "expired" { o["expiredAt"] = json!(p.expired_at) }
+            // a sync account's identity is what it was made with (its token cannot ask who it is): kept, as are where it came from and its token's dates. Never the token.
+            if p.kind == SYNC { o["kind"] = json!(SYNC); o["origin"] = json!(p.origin); o["madeAt"] = json!(p.made_at); o["expiresAt"] = json!(p.expires_at); o["email"] = p.identity["email"].clone(); o["plan"] = p.identity["plan"].clone(); }
+            o }).collect::<Vec<_>>()}).to_string();
         let tmp = self.root.join(format!("profiles.json.{}.tmp", new_id()));
         let w = std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp).and_then(|mut f| { std::io::Write::write_all(&mut f, body.as_bytes())?; f.sync_all() }).and_then(|_| crate::plat::fs::rename(&tmp, self.root.join("profiles.json")));
         if w.is_err() { let _ = std::fs::remove_file(&tmp); return Err(()) }
@@ -325,9 +424,23 @@ impl Accounts {
         let d = self.root.join(id).join(store);
         if let Ok(m) = std::fs::symlink_metadata(&d) { if m.is_dir() && !m.file_type().is_symlink() { let _ = std::fs::remove_dir_all(&d); } }
     }
-    /// The environment a profile's CLI runs with: the host's, minus every provider credential variable, plus the profile's own store.
+    /// A test's token store (the hub's is the vault).
+    pub fn set_tokens(&self, t: Arc<dyn Tokens>) { *self.tokens.lock().unwrap() = t }
+    /// A sync account's token: the one a sign-in just caught while it is checked, else the kept one.
+    pub fn token(&self, id: &str) -> Option<String> {
+        if let Some(t) = self.inner.lock().unwrap().caught.get(id).cloned() { return Some(t) }
+        let t = self.tokens.lock().unwrap().clone(); t.get(id)
+    }
+    /// The environment a profile's CLI runs with: the host's, minus every provider credential variable, plus the profile's own store; a sync account's
+    /// child also gets its token (`CLAUDE_CODE_OAUTH_TOKEN`), and no other child ever does (`unset_env`).
     pub fn environment(&self, p: Option<&Profile>) -> Result<Vec<(String, String)>, ()> {
         let Some(p) = p else { return Ok(vec![]) };
+        let mut env = self.store_environment(p)?;
+        if p.kind == SYNC { env.push(("CLAUDE_CODE_OAUTH_TOKEN".into(), self.token(&p.id).filter(|t| !t.is_empty()).ok_or(())?)); }
+        Ok(env)
+    }
+    /// `environment` without the token (the sign-in that makes one).
+    fn store_environment(&self, p: &Profile) -> Result<Vec<(String, String)>, ()> {
         let mut env: Vec<(String, String)> = vec![("CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC".into(), "1".into()), ("DISABLE_AUTOUPDATER".into(), "1".into()), ("MCP_TOOL_TIMEOUT".into(), "86400000".into()), ("CLAUDE_CODE_ENABLE_TODO_TOOLS".into(), "1".into())];
         // a store that cannot be made or verified is a failure of the op: an empty value would let the CLI fall back to the person's own login
         let dir = self.directory(p).map_err(|_| ())?.to_string_lossy().to_string();
@@ -370,7 +483,7 @@ impl Accounts {
     async fn claude_read(&self, p: Option<&Profile>, want: &str) -> Result<Value, String> {
         let prog = (self.resolve)("claude").map_err(|_| "The Claude CLI was not found on this machine.".to_string())?;
         let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Agent, &prog);
-        c.args(["--setting-sources", "user", "--settings", "{\"forceLoginMethod\":\"claudeai\"}", "-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"]);
+        c.args(claude_pre(p)); c.args(["-p", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose"]);
         c.current_dir(&self.root); apply_env(&mut c, &self.environment(p).map_err(|_| "This account's private folder could not be verified.".to_string())?, p.is_some());
         c.stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).kill_on_drop(true);
         let mut child = spawn(&mut c).await.map_err(|_| "The Claude CLI could not be started.".to_string())?;
@@ -408,6 +521,11 @@ impl Accounts {
         use super::claude_usage as cu;
         let (get, default_dir) = self.usage.lock().unwrap().clone()?;
         let get = if models { self.models_get.lock().unwrap().clone()? } else { get };
+        // a sync token is the provider's to refresh (it is never): asked as it is
+        if let Some(p) = p.filter(|p| p.kind == SYNC) {
+            let tok = self.token(&p.id)?;
+            return Some(match get(tok).await { Ok((200, body)) if body.is_object() => Ok(body), Ok((200, _)) => Err("Claude's usage service answered with something else than usage.".into()), Ok((code, _)) => Err(cu::refusal(code)), Err(e) => Err(e) })
+        }
         let dir = match p { Some(p) => self.directory(p).ok()?, None => default_dir? };
         let lock = self.usage_locks.lock().unwrap().entry(p.map_or(String::new(), |p| p.id.clone())).or_default().clone();
         let _one = lock.lock().await;
@@ -473,7 +591,36 @@ impl Accounts {
         let (identity, fp_identity, mut catalog, mut allowance);
         let mut fact = Fact::Unproven;
         let last = |k: &str| self.inner.lock().unwrap().refresh_at.get(k).copied().unwrap_or(0).max(p.allowance.as_ref().and_then(|a| a["at"].as_u64()).unwrap_or(0));
-        if p.provider == "claude" {
+        if p.kind == SYNC {
+            // the CLI says it runs on the token it was given (`authMethod: oauth_token`; it cannot say whose: the identity is the one the account was made with),
+            // and the usage read with it is the provider's answer. No model prompt.
+            let (code, data) = self.cli(Some(&p), "claude", &["auth", "status"]).await.map_err(|_| "Claude sync token could not be checked".to_string())?;
+            if code != 0 || data["loggedIn"] != true || data["authMethod"] != "oauth_token" { return Err("Claude Code did not take this account's sync token.".into()) }
+            let dir = self.directory(&p).map_err(|e| e.to_string())?;
+            if data["configDirectory"].as_str().map(|d| crate::plat::fs::canonicalize(d).unwrap_or_else(|_| PathBuf::from(d))) != Some(crate::plat::fs::canonicalize(&dir).unwrap_or(dir)) { return Err(DIRECTORY_ERR.into()) }
+            identity = json!({"email":p.identity["email"].as_str().unwrap_or(""),"plan":p.identity["plan"].as_str().unwrap_or(""),"auth":"oauth_token"});
+            fp_identity = json!([identity["email"], format!("sync:{}", p.id)]);
+            let ck = format!("catalog:{}", p.id);
+            catalog = if p.catalog.is_empty() || now_s().saturating_sub(last_of(&self.inner, &ck)) >= 3600 {
+                self.inner.lock().unwrap().refresh_at.insert(ck, now_s());
+                let c = self.claude_models(&p).await; if c.is_empty() { p.catalog.clone() } else { c }
+            } else { p.catalog.clone() };
+            allowance = p.allowance.clone();
+            let at = last(&format!("usage:{}", p.id));
+            if new_login || asked || p.state == "expired" || at == 0 || now_s().saturating_sub(at) >= 300 {
+                self.inner.lock().unwrap().refresh_at.insert(format!("usage:{}", p.id), now_s());
+                match self.claude_usage(Some(&p)).await {
+                    Ok(u) => { fact = Fact::Proven; allowance = Some(u.allowance(now_s(), "")) }
+                    Err(reason) => {
+                        if fb_auth(&reason) { fact = Fact::Refused } else if reason == NO_WINDOWS || reason == NO_LIMITS { fact = Fact::Proven }
+                        self.inner.lock().unwrap().refresh_at.insert(format!("usage:{}", p.id), now_s().saturating_sub(240));
+                        if allowance.as_ref().map_or(true, |a| a["state"] != "ok") { allowance = Some(json!({"provider":"claude","state":"unavailable","at":0,"attempted_at":now_s(),"source":"claude-cli-usage","reason":reason,"windows":[]})) }
+                    }
+                }
+            }
+            // past its end the token is dead whatever the CLI says
+            if p.expires_at > 0 && now_s() >= p.expires_at { fact = Fact::Refused }
+        } else if p.provider == "claude" {
             let (code, data) = self.cli(Some(&p), "claude", &["auth", "status"]).await.map_err(|_| "Claude subscription sign-in could not be verified".to_string())?;
             if code != 0 || data["loggedIn"] != true || data["authMethod"] != "claude.ai" { return Err("Claude subscription sign-in could not be verified; Console profiles and API credentials use a different store.".into()) }
             let dir = self.directory(&p).map_err(|e| e.to_string())?;
@@ -529,7 +676,8 @@ impl Accounts {
         }
         if !fp_identity.as_array().map_or(false, |a| a.iter().any(|x| x.as_str().map_or(false, |s| !s.is_empty()))) { return Err("Provider did not report a verifiable account identity".into()) }
         let digest = fingerprint(&p.id, &fp_identity);
-        if new_login || (!p.fingerprint.is_empty() && p.fingerprint != digest) { p.epoch += 1; if !new_login { catalog = vec![]; allowance = None; } }
+        // a sync account's identity is fixed when it is made: a new token (a renewal) is the same account, and threads on it stay on it
+        if p.kind != SYNC && (new_login || (!p.fingerprint.is_empty() && p.fingerprint != digest)) { p.epoch += 1; if !new_login { catalog = vec![]; allowance = None; } }
         p.fingerprint = digest; p.identity = identity; p.catalog = catalog; p.allowance = allowance; p.checked_at = now_s();
         if fact == Fact::Proven { p.proven_at = now_s() }
         p.state = after(if new_login { "unchecked" } else { &p.state }, fact).into();
@@ -622,13 +770,23 @@ impl Accounts {
             for id in todo { let _ = Box::pin(self.request_inner(&json!({"op":"status","profile":id}))).await; }
             return Ok(self.snapshot());
         }
-        if op == "add" {
-            let (provider, lab) = (r["provider"].as_str().unwrap_or(""), label(r["label"].as_str().unwrap_or("")));
-            let mut g = self.inner.lock().unwrap();
-            if !matches!(provider, "claude" | "codex") || lab.is_empty() || g.profiles.len() >= 12 { return Err(None) }
-            let p = Profile { id: new_id(), provider: provider.into(), label: lab, epoch: 1, fingerprint: String::new(), store: String::new(), state: "disconnected".into(), identity: json!({}), catalog: vec![], allowance: None, checked_at: 0, message: String::new(), expired_at: 0, proven_at: 0 };
-            self.directory(&p).map_err(|_| None)?;
-            g.profiles.push(p); if self.save(&mut g).is_err() { g.profiles.pop(); return Err(None) } drop(g); return Ok(self.snapshot());
+        if op == "add" || op == "synctoken" {
+            // synctoken: a sync account made from a connected Claude account (its name and who it is), and its `claude setup-token` started at once
+            let from = if op == "synctoken" { let f = self.profile(r["profile"].as_str().unwrap_or("")).map_err(|_| None)?; if f.provider != "claude" || f.kind == SYNC || f.state != "connected" { return Err(None) } Some(f) } else { None };
+            let sync = from.is_some() || r["kind"] == SYNC;
+            let provider = if from.is_some() { "claude" } else { r["provider"].as_str().unwrap_or("") };
+            let lab = match &from { Some(f) => label(&format!("{} sync", f.label)), None => label(r["label"].as_str().unwrap_or("")) };
+            let identity = match &from { Some(f) => json!({"email":f.identity["email"],"plan":f.identity["plan"],"auth":"oauth_token"}), None if sync => json!({"email":label(r["email"].as_str().unwrap_or("")),"plan":"","auth":"oauth_token"}), None => json!({}) };
+            let p = {
+                let mut g = self.inner.lock().unwrap();
+                if !matches!(provider, "claude" | "codex") || (sync && provider != "claude") || lab.is_empty() || g.profiles.len() >= 12 { return Err(None) }
+                let p = Profile { id: new_id(), provider: provider.into(), label: lab, epoch: 1, state: "disconnected".into(), identity, kind: if sync { SYNC.into() } else { String::new() }, ..Profile::default() };
+                self.directory(&p).map_err(|_| None)?;
+                g.profiles.push(p.clone()); if self.save(&mut g).is_err() { g.profiles.pop(); return Err(None) } p
+            };
+            // synctoken, or an add that asks (`start`, Settings' Add Claude (sync)): its sign-in starts at once
+            if from.is_some() || (sync && r["start"] == true) { self.start(&p, "sync").await.map_err(|_| None)?; }
+            let mut s = self.snapshot(); s["made"] = json!(p.id); return Ok(s);
         }
         let pid = r["profile"].as_str().unwrap_or("").to_string();
         let p = self.profile(&pid).map_err(|_| None)?;
@@ -653,7 +811,7 @@ impl Accounts {
                 if let Some(t) = tx { let _ = t.send(Cmd::Respond(code.trim().to_string())); }
                 return Ok(self.snapshot());
             }
-            "login" => { self.start(&p, r["mode"].as_str().unwrap_or("device")).await.map_err(|_| None)?; return Ok(self.snapshot()) }
+            "login" => { self.start(&p, if p.kind == SYNC { "sync" } else { r["mode"].as_str().unwrap_or("device") }).await.map_err(|_| None)?; return Ok(self.snapshot()) }
             _ => {}
         }
         // Delete is the way out of a stuck sign-in: its attempt is ended first (its child is told to stop), and a job left behind by an attempt that is gone is dropped
@@ -673,6 +831,12 @@ impl Accounts {
                     }
                     Ok(())
                 }
+                "disconnect" if p.kind == SYNC => {
+                    // a sync token is not a login the CLI can sign out of: it is forgotten here (on a machine that made it, its linked machines forget it too)
+                    if self.busy(&pid) { return Err(()) }
+                    self.update(&pid, |slot| { slot.state = "disconnected".into(); slot.catalog = vec![]; slot.allowance = None; slot.made_at = 0; slot.expires_at = 0; })?;
+                    let t = self.tokens.lock().unwrap().clone(); t.del(&pid); Ok(())
+                }
                 "disconnect" => {
                     if self.busy(&pid) { return Err(()) }
                     if p.provider == "claude" { let (code, _) = self.cli(Some(&p), "claude", &["auth", "logout"]).await?; if code != 0 { return Err(()) } }
@@ -686,6 +850,7 @@ impl Accounts {
                     if self.busy(&pid) { return Err(()) }
                     let base = self.root.join(&pid); private_dir(&base).map_err(|_| ())?;
                     self.mutate_save(|g| { g.profiles.retain(|x| x.id != pid); g.attempts.retain(|a| a.profile != pid); })?;
+                    if p.kind == SYNC { let t = self.tokens.lock().unwrap().clone(); t.del(&pid); }
                     let _ = std::fs::remove_dir_all(&base); Ok(())
                 }
                 _ => Err(()),
@@ -704,8 +869,10 @@ impl Accounts {
             // a dead login is signed in again even while a process of it lives: that process can do nothing with it, and the new sign-in has a store of its own
             let dead = g.profiles.iter().any(|x| x.id == p.id && x.state == "expired");
             if g.attempts.len() >= 8 || g.jobs.contains_key(&p.id) || (!dead && g.busy.get(&p.id).copied().unwrap_or(0) > 0) || g.launching.get(&p.id).copied().unwrap_or(0) > 0 { return Err(()) }
-            let cand = Profile { store: aid.clone(), ..p.clone() };
-            g.attempts.push(Attempt { id: aid.clone(), profile: p.id.clone(), state: "starting".into(), url: String::new(), user_code: String::new(), expires_at: now_ms() + 600_000, message: String::new(), previous_state: p.state.clone(), store: aid.clone() });
+            // a sync account's store holds no credentials (its sessions only): a new token keeps it
+            let store = if p.kind == SYNC { p.store.clone() } else { aid.clone() };
+            let cand = Profile { store: store.clone(), ..p.clone() };
+            g.attempts.push(Attempt { id: aid.clone(), profile: p.id.clone(), state: "starting".into(), url: String::new(), user_code: String::new(), expires_at: now_ms() + 600_000, message: String::new(), previous_state: p.state.clone(), store });
             g.jobs.insert(p.id.clone(), format!("attempt:{aid}"));
             if let Some(slot) = g.profiles.iter_mut().find(|x| x.id == p.id) { slot.state = "connecting".into() }
             g.revision += 1;
@@ -743,6 +910,12 @@ impl Accounts {
         match self.verify(cand, true).await {
             Ok(np) => {
                 if self.current(aid).is_none() { return }
+                // a sync token is kept once it is checked: in the vault, under the account's id (a renewal replaces the old one)
+                if cand.kind == SYNC {
+                    let Some(tok) = self.inner.lock().unwrap().caught.get(&cand.id).cloned() else { return self.cancel(aid, "failed", "verification") };
+                    let t = self.tokens.lock().unwrap().clone();
+                    if !t.put(&cand.id, &cand.label, &tok) { return self.cancel(aid, "failed", "storage") }
+                }
                 let old_store = self.profile(&a.profile).map(|p| p.store).unwrap_or_default();
                 // one lock: the profile takes the new store and the attempt is done in the same step, so a cancel cannot land between and put the old state back over it
                 let saved = self.mutate_save(|g| {
@@ -751,7 +924,7 @@ impl Accounts {
                     if let Some(att) = g.attempts.iter_mut().find(|x| x.id == aid) { att.state = "done".into(); att.url.clear(); att.user_code.clear(); }
                 });
                 if saved.is_err() { return self.cancel(aid, "failed", "storage") }
-                if !old_store.is_empty() { self.remove_store(&a.profile, &old_store); }
+                if !old_store.is_empty() && old_store != a.store { self.remove_store(&a.profile, &old_store); }
             }
             Err(e) => self.cancel(aid, "failed", if e == DIRECTORY_ERR { "directory" } else { "verification" }),
         }
@@ -785,6 +958,8 @@ impl Accounts {
             };
             rpc.close().await;
             match outcome { Some(ok) => self.finish(&aid, &cand, ok, "").await, None => self.cancel(&aid, "expired", "") }
+        } else if mode == "sync" {
+            self.run_setup_token(&aid, cand, cmds, deadline).await
         } else {
             let Ok(prog) = (self.resolve)("claude") else { return self.cancel(&aid, "failed", "cli_start") };
             let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Agent, &prog);
@@ -800,18 +975,7 @@ impl Accounts {
             drop(otx);
             let (mut output, mut reason, mut open) = (String::new(), String::new(), true);
             // what the CLI says is read for its link and for why a code was refused; no transcript is kept or sent
-            let mut scan = |output: &str, reason: &mut String| -> Option<String> {
-                let low = output.to_lowercase();
-                if low.contains("that code wasn't accepted") || low.contains("invalid code.") || low.contains("invalid_grant") || (low.contains("code") && (low.contains("expired") || low.contains("already used"))) { *reason = "code_rejected".into() }
-                else if low.contains("could not save") || low.contains("failed to save") || low.contains("credential store could not be") { *reason = "storage".into() }
-                else if ["enotfound", "econnrefused", "etimedout", "unable to connect", "fetch failed"].iter().any(|w| low.contains(w)) { *reason = "network".into() }
-                let mut rest = output;
-                while let Some(i) = rest.find("https://") {
-                    let tail = &rest[i..]; let end = tail.find(|c: char| c.is_whitespace() || c == '\u{1b}' || c == '<' || c == '>').unwrap_or(tail.len());
-                    let u = sign_in_url(&tail[..end], "claude"); if !u.is_empty() { return Some(u) } rest = &tail[8..];
-                }
-                None
-            };
+            let scan = scan_claude;
             let outcome: Result<bool, &str> = loop {
                 tokio::select! {
                     chunk = orx.recv(), if open => match chunk {
@@ -830,6 +994,65 @@ impl Accounts {
             let _ = child.start_kill(); let _ = child.wait().await;
             match outcome { Ok(ok) => self.finish(&aid, &cand, ok, &reason).await, Err("expired") => self.cancel(&aid, "expired", ""), Err(_) => self.cancel(&aid, "failed", "") }
         }
+    }
+}
+/// What a Claude sign-in printed so far: why it failed if it said (into `reason`), and its authorization link once it shows one.
+fn scan_claude(output: &str, reason: &mut String) -> Option<String> {
+    let low = output.to_lowercase();
+    if low.contains("that code wasn't accepted") || low.contains("invalid code.") || low.contains("invalid_grant") || (low.contains("code") && (low.contains("expired") || low.contains("already used"))) { *reason = "code_rejected".into() }
+    else if low.contains("could not save") || low.contains("failed to save") || low.contains("credential store could not be") { *reason = "storage".into() }
+    else if ["enotfound", "econnrefused", "etimedout", "unable to connect", "fetch failed"].iter().any(|w| low.contains(w)) { *reason = "network".into() }
+    let mut rest = output;
+    while let Some(i) = rest.find("https://") {
+        let tail = &rest[i..]; let end = tail.find(|c: char| c.is_whitespace() || c == '\u{1b}' || c == '<' || c == '>').unwrap_or(tail.len());
+        let u = sign_in_url(&tail[..end], "claude"); if !u.is_empty() { return Some(u) } rest = &tail[8..];
+    }
+    None
+}
+impl Accounts {
+    /// A sync account's sign-in: `claude setup-token` on a terminal of its own (it draws its screen and reads the pasted code as a terminal program), its link
+    /// shown, the code the person pastes typed into it, and the token it prints caught straight into the attempt: never logged, never in the snapshot, the
+    /// timeline or a client. It is checked (`finish`) and only then kept, in the vault.
+    async fn run_setup_token(self: &Arc<Self>, aid: &str, mut cand: Profile, mut cmds: mpsc::UnboundedReceiver<Cmd>, deadline: tokio::time::Instant) {
+        let Ok(prog) = (self.resolve)("claude") else { return self.cancel(aid, "failed", "cli_start") };
+        let Ok(mut env) = self.store_environment(&cand) else { return self.cancel(aid, "failed", "cli_start") };
+        env.push(("BROWSER".into(), "/bin/true".into()));
+        let (remove, set) = env_plan(std::env::vars_os().filter_map(|(k, _)| k.into_string().ok()), &env, true);
+        // wide, so neither its link nor its token is wrapped across lines
+        let sp = crate::term::pty::Pty::spawn_as(crate::proc::Kind::Agent, &prog.to_string_lossy(), &["setup-token".to_string()], &self.root.to_string_lossy(), 2000, 50,
+            &mut |c| { for k in &remove { c.env_remove(k); } for (k, v) in &set { c.env(k, v); } });
+        let Ok(mut sp) = sp else { return self.cancel(aid, "failed", "cli_start") };
+        let (mut output, mut reason, mut open) = (String::new(), String::new(), true);
+        let mut shown = false;
+        let caught: Option<(String, u64)> = loop {
+            tokio::select! {
+                chunk = sp.output.recv(), if open => match chunk {
+                    Some(b) => {
+                        output.push_str(&String::from_utf8_lossy(&b)); if output.len() > 262144 { break None }
+                        let clean = strip_ansi(&output);
+                        if let Some(t) = catch_token(&clean) {
+                            // the whole token: what follows it on its line has been drawn too
+                            if clean[clean.find(&t).unwrap_or(0) + t.len()..].contains(['\n', '\r']) { break Some((t, valid_for(&clean).unwrap_or(TOKEN_LIFE))) }
+                        }
+                        if !shown { if let Some(u) = scan_claude(&clean, &mut reason) { if self.current(aid).is_some() { self.set_waiting(aid, u, String::new()); shown = true } } } else { let _ = scan_claude(&clean, &mut reason); }
+                    }
+                    None => open = false,
+                },
+                cmd = cmds.recv() => match cmd { Some(Cmd::Respond(code)) => { let _ = sp.pty.write(format!("{code}\r").into_bytes()); } Some(Cmd::Cancel) | None => { sp.pty.force(); return } },
+                _ = &mut sp.exit => {
+                    while let Ok(Some(b)) = tokio::time::timeout(Duration::from_millis(200), sp.output.recv()).await { output.push_str(&String::from_utf8_lossy(&b)); }
+                    let clean = strip_ansi(&output); let _ = scan_claude(&clean, &mut reason);
+                    break catch_token(&clean).map(|t| (t, valid_for(&clean).unwrap_or(TOKEN_LIFE)))
+                },
+                _ = tokio::time::sleep_until(deadline) => { sp.pty.force(); return self.cancel(aid, "expired", "") },
+            }
+        };
+        sp.pty.force(); drop(output);
+        let Some((token, life)) = caught else { return self.cancel(aid, "failed", &reason) };
+        let now = now_s(); cand.made_at = now; cand.expires_at = now + life;
+        self.inner.lock().unwrap().caught.insert(cand.id.clone(), token);
+        self.finish(aid, &cand, true, "").await;
+        self.inner.lock().unwrap().caught.remove(&cand.id);
     }
 }
 fn g_job_is(inner: &Mutex<Inner>, profile: &str, aid: &str) -> bool { inner.lock().unwrap().jobs.get(profile).map(String::as_str) == Some(format!("attempt:{aid}").as_str()) }
@@ -875,7 +1098,7 @@ impl Accounts {
             if np.epoch.to_string() != epoch || np.state != "connected" { return Err("Account identity changed; select this account again".to_string()) }
             let program = (self.resolve)(cmd)?;
             let args: Vec<String> = if np.provider == "codex" { vec!["-c".into(), "cli_auth_credentials_store=\"file\"".into(), "-c".into(), "model_provider=\"openai\"".into()] }
-                else { vec!["--setting-sources".into(), "user".into(), "--settings".into(), "{\"forceLoginMethod\":\"claudeai\"}".into()] };
+                else { claude_pre(Some(&np)).iter().map(|a| a.to_string()).collect() };
             Ok(LaunchPlan { program, env: self.environment(Some(&np)).map_err(|_| NO.to_string())?, args })
         }.await;
         r
@@ -951,6 +1174,89 @@ impl Accounts {
     }
 }
 
+// ---- sync accounts between the owner's machines (accounts_sync.rs carries them) ----
+
+/// A token as one machine tells another: Claude Code's long-lived one, or "" (the account was signed out there).
+fn token_ok(t: &str) -> bool { t.is_empty() || (t.starts_with("sk-ant-") && (20..=512).contains(&t.len()) && t.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')) }
+/// What a linked machine's announcement does to this machine's profiles.
+#[derive(Debug, Default)]
+pub struct Merge { pub profiles: Vec<Profile>, pub put: Vec<(String, String, String)>, pub del: Vec<String>, pub removed: Vec<String>, pub changed: usize }
+/// The sync accounts machine `origin` made, as it says they are now (`items`: `{id, label, email, plan, token, madeAt, expiresAt}`, every one it has): each is
+/// added here with its id, or brought up to date (a renewed token, a new name), and the ones of `origin` it no longer names are removed. A profile of this machine's
+/// own, or of another machine, is never touched. `have`: the token kept here now.
+pub fn sync_merge(cur: &[Profile], origin: &str, items: &[Value], have: &dyn Fn(&str) -> Option<String>) -> Merge {
+    let mut m = Merge { profiles: cur.to_vec(), ..Merge::default() };
+    let mut named = vec![];
+    for it in items.iter().take(40) {
+        let (id, tok) = (it["id"].as_str().unwrap_or(""), it["token"].as_str().unwrap_or(""));
+        let lab = label(it["label"].as_str().unwrap_or(""));
+        if !valid_id(id) || lab.is_empty() || !token_ok(tok) || origin.is_empty() { continue }
+        named.push(id.to_string());
+        let ident = json!({"email":label(it["email"].as_str().unwrap_or("")),"plan":label(it["plan"].as_str().unwrap_or("")),"auth":"oauth_token"});
+        let (made, ends) = (it["madeAt"].as_u64().unwrap_or(0), it["expiresAt"].as_u64().unwrap_or(0));
+        let new_token = !tok.is_empty() && have(id).as_deref() != Some(tok);
+        match m.profiles.iter_mut().find(|p| p.id == id) {
+            Some(p) if p.kind != SYNC || p.origin != origin => continue,
+            Some(p) => {
+                let before = (p.label.clone(), p.identity.clone(), p.made_at, p.expires_at, p.state.clone());
+                p.label = lab.clone(); p.identity = ident; p.made_at = made; p.expires_at = ends;
+                if tok.is_empty() { if p.state != "disconnected" { p.state = "disconnected".into(); p.catalog = vec![]; p.allowance = None; } if have(id).is_some() { m.del.push(id.into()) } }
+                else if new_token { m.put.push((id.into(), lab.clone(), tok.into())); if matches!(p.state.as_str(), "disconnected" | "expired") { p.state = "unchecked".into(); p.expired_at = 0; p.message.clear(); } }
+                if new_token || before != (p.label.clone(), p.identity.clone(), p.made_at, p.expires_at, p.state.clone()) { m.changed += 1 }
+            }
+            None => {
+                if m.profiles.len() >= 40 { continue }
+                m.profiles.push(Profile { id: id.into(), provider: "claude".into(), label: lab.clone(), epoch: 1, state: if tok.is_empty() { "disconnected".into() } else { "unchecked".into() }, identity: ident,
+                    kind: SYNC.into(), origin: origin.into(), made_at: made, expires_at: ends, ..Profile::default() });
+                if !tok.is_empty() { m.put.push((id.into(), lab.clone(), tok.into())) }
+                m.changed += 1;
+            }
+        }
+    }
+    let gone: Vec<String> = m.profiles.iter().filter(|p| p.kind == SYNC && p.origin == origin && !named.contains(&p.id)).map(|p| p.id.clone()).collect();
+    m.profiles.retain(|p| !gone.contains(&p.id));
+    m.changed += gone.len(); m.del.extend(gone.iter().cloned()); m.removed = gone;
+    m
+}
+impl Accounts {
+    /// The sync accounts this machine made, as its linked machines are told them (with their tokens: the far link is signed and goes only to the owner's own
+    /// machines). None while a token cannot be read (a locked vault): nothing is said then, so no machine removes what it holds.
+    pub fn sync_out(&self) -> Option<Vec<Value>> {
+        let t = self.tokens.lock().unwrap().clone(); if !t.open() { return None }
+        let g = self.inner.lock().unwrap(); if !g.load_error.is_empty() { return None }
+        let mut out = vec![];
+        for p in g.profiles.iter().filter(|p| p.kind == SYNC && p.origin.is_empty()) {
+            let tok = t.get(&p.id).unwrap_or_default();
+            // a connected account whose token is not there is not one to remove elsewhere: say nothing until it is read
+            if tok.is_empty() && !matches!(p.state.as_str(), "disconnected" | "connecting") { return None }
+            if p.state == "connecting" && tok.is_empty() { continue } // being made: told once it has its token
+            out.push(json!({"id":p.id,"label":p.label,"email":p.identity["email"],"plan":p.identity["plan"],"token":tok,"madeAt":p.made_at,"expiresAt":p.expires_at}));
+        }
+        Some(out)
+    }
+    /// What machine `origin` (its link id here) says its sync accounts are (`sync_merge`): tokens into this machine's vault, the registry written. Ok(how many changed).
+    pub fn sync_in(&self, origin: &str, items: &[Value]) -> Result<usize, ()> {
+        let t = self.tokens.lock().unwrap().clone(); if !t.open() { return Err(()) }
+        let cur = { let g = self.inner.lock().unwrap(); if !g.load_error.is_empty() { return Err(()) } g.profiles.clone() };
+        let m = sync_merge(&cur, origin, items, &|id| t.get(id));
+        if m.changed == 0 { return Ok(0) }
+        for (id, lab, tok) in &m.put { if !t.put(id, lab, tok) { return Err(()) } }
+        for p in &m.profiles { if !m.removed.contains(&p.id) && p.kind == SYNC { let _ = self.directory(p); } }
+        let mut np = m.profiles.clone();
+        self.mutate_save(|g| {
+            // what changed here meanwhile (a check's reading) stays on the profiles the announcement did not change
+            for p in np.iter_mut() { if let Some(x) = g.profiles.iter().find(|x| x.id == p.id) { if p.kind != SYNC || p.origin != origin { *p = x.clone() } else { p.catalog = x.catalog.clone(); p.allowance = if p.state == "disconnected" { None } else { x.allowance.clone() }; p.checked_at = x.checked_at; p.fingerprint = x.fingerprint.clone(); p.store = x.store.clone(); p.epoch = x.epoch; } } }
+            for x in g.profiles.iter() { if !np.iter().any(|p| p.id == x.id) && !m.removed.contains(&x.id) { np.push(x.clone()) } }
+            g.profiles = np; g.attempts.retain(|a| !m.removed.contains(&a.profile));
+        })?;
+        for id in &m.del { t.del(id) }
+        for id in &m.removed { let base = self.root.join(id); if private_dir(&base).is_ok() { let _ = std::fs::remove_dir_all(&base); } }
+        Ok(m.changed)
+    }
+    /// The profile's kind and the machine it came from ("", "" when there is none).
+    pub fn kind_of(&self, id: &str) -> (String, String) { self.inner.lock().unwrap().profiles.iter().find(|p| p.id == id).map(|p| (p.kind.clone(), p.origin.clone())).unwrap_or_default() }
+}
+
 
 #[cfg(test)]
 mod tests {
@@ -970,7 +1276,7 @@ mod tests {
         assert_eq!(after("connecting", Proven), "connecting", "a check never ends a sign-in");
     }
     #[test] fn a_check_that_started_before_the_login_died_does_not_bring_it_back() {
-        let base = Profile { id: "p".into(), provider: "claude".into(), label: "W".into(), epoch: 2, fingerprint: String::new(), store: String::new(), state: "connected".into(), identity: json!({}), catalog: vec![], allowance: None, checked_at: 0, message: String::new(), expired_at: 0, proven_at: 0 };
+        let base = Profile { id: "p".into(), provider: "claude".into(), label: "W".into(), epoch: 2, fingerprint: String::new(), store: String::new(), state: "connected".into(), identity: json!({}), catalog: vec![], allowance: None, checked_at: 0, message: String::new(), expired_at: 0, proven_at: 0, ..Profile::default() };
         let dead = Profile { state: "expired".into(), expired_at: 100, message: EXPIRED_SHORT.into(), ..base.clone() };
         let stale = Profile { checked_at: 120, proven_at: 50, ..base.clone() };
         assert_eq!(merge_checked(&dead, stale.clone()).state, "expired", "its proof is older than the failure");
@@ -999,12 +1305,24 @@ d = os.environ.get("CLAUDE_CONFIG_DIR", "")
 a = sys.argv[1:]
 def login(): return os.path.join(d, "login.json")
 if a[:2] == ["auth", "status"]:
-    json.dump({"leak": bool(os.environ.get("ANTHROPIC_API_KEY")), "dir": d}, open(os.path.join(d, "env.json"), "w")) if d else None
-    if d and os.path.exists(login()):
+    json.dump({"leak": bool(os.environ.get("ANTHROPIC_API_KEY")), "dir": d, "token": os.environ.get("CLAUDE_CODE_OAUTH_TOKEN", "")}, open(os.path.join(d, "env.json"), "w")) if d else None
+    if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
+        print(json.dumps({"loggedIn": True, "authMethod": "oauth_token", "configDirectory": d, "loginExpiresAt": None}))
+    elif d and os.path.exists(login()):
         j = json.load(open(login())); j.update({"loggedIn": True, "authMethod": "claude.ai", "configDirectory": d}); print(json.dumps(j))
     else: print(json.dumps({"loggedIn": False}))
 elif a[:2] == ["auth", "logout"]:
     if os.path.exists(login()): os.remove(login())
+elif a[:1] == ["setup-token"]:
+    # drawn on a terminal, as Claude Code's is: colour, the link, the pasted code read from the terminal, then the token
+    print("\x1b[1mBrowser didn't open? Use the url below to sign in\x1b[0m", flush=True)
+    print("\x1b[2mhttps://claude.com/cai/oauth/authorize?code=true&client_id=x&state=STATE123\x1b[0m", flush=True)
+    print("Paste code here if prompted > ", end="", flush=True)
+    line = sys.stdin.readline().strip()
+    if line == "CODE#STATE123":
+        print("\x1b[32m\u2713 Long-lived authentication token created successfully!\x1b[0m\n\nYour OAuth token (valid for 1 year):\n\n\x1b[33m" + os.environ.get("STANDIN_TOKEN", "sk-ant-oat01-" + "A" * 90) + "\x1b[0m\n\nStore this token securely.", flush=True)
+    else:
+        print("OAuth error: Invalid code.", flush=True); sys.exit(1)
 elif a[:2] == ["auth", "login"]:
     if d: open(d.rstrip("/") + ".pid", "w").write(str(os.getpid()))
     print("Open https://claude.com/cai/oauth/authorize?code=true&client_id=x&state=STATE123 to sign in", flush=True)
@@ -1171,6 +1489,108 @@ for l in sys.stdin:
         let s = a.request(&json!({"op":"disconnect","profile":id})).await; assert_eq!((prof(&s, &id)["state"].clone(), prof(&s, &id)["epoch"].clone()), (json!("disconnected"), json!(4)));
         assert!(std::fs::read_dir(&store).unwrap().flatten().all(|e| !e.path().is_dir()), "the store is forgotten");
         std::env::remove_var("ANTHROPIC_API_KEY"); let _ = std::fs::remove_dir_all(&h);
+    }
+
+    // ---- sync accounts ----
+    #[test] fn a_token_its_life_and_the_terminals_colours_are_read_from_what_setup_token_printed() {
+        assert_eq!(valid_for("Your OAuth token (valid for 1 year):"), Some(365 * 86400)); assert_eq!(valid_for("valid for 364 days"), Some(364 * 86400)); assert_eq!(valid_for("valid for a year"), Some(365 * 86400));
+        assert_eq!(valid_for("nothing said"), None); assert_eq!(valid_for("valid for ever"), None);
+        assert_eq!(strip_ansi("\u{1b}[33mtok\u{1b}[0m \u{1b}]8;;https://x\u{7}link\u{1b}]8;;\u{7}"), "tok link");
+        let t = format!("sk-ant-oat01-{}", "x_Y-9".repeat(20));
+        assert_eq!(catch_token(&format!("Your OAuth token:\n{t}\nStore it")), Some(t.clone())); assert_eq!(catch_token("sk-ant-oat01-short"), None); assert_eq!(catch_token("no token"), None);
+    }
+    #[test] fn only_a_sync_accounts_child_gets_the_token_and_every_named_child_loses_the_inherited_one() {
+        let (h, sd) = dirs("syncenv"); let a = mgr(&h, &sd); let mem = Arc::new(MemTokens::default()); a.set_tokens(mem.clone());
+        let cli = Profile { id: new_id(), provider: "claude".into(), label: "W".into(), epoch: 1, state: "connected".into(), ..Profile::default() };
+        let sync = Profile { id: new_id(), kind: SYNC.into(), ..cli.clone() };
+        assert!(a.environment(Some(&sync)).is_err(), "no token: no child, never the person's own login");
+        mem.put(&sync.id, "W", "sk-ant-oat01-T");
+        let e = a.environment(Some(&sync)).unwrap(); assert!(e.contains(&("CLAUDE_CODE_OAUTH_TOKEN".into(), "sk-ant-oat01-T".into()))); assert!(e.iter().any(|(k, v)| k == "CLAUDE_CONFIG_DIR" && v.contains(&sync.id)));
+        assert!(!a.environment(Some(&cli)).unwrap().iter().any(|(k, _)| k == "CLAUDE_CODE_OAUTH_TOKEN"), "a CLI login's child has none");
+        let host = || ["CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY", "PATH"].iter().map(|s| s.to_string());
+        let (rm, set) = env_plan(host(), &e, true); assert!(rm.contains(&"CLAUDE_CODE_OAUTH_TOKEN".to_string()) && !rm.contains(&"PATH".to_string())); assert_eq!(set, e, "removed from the host's, then its own set");
+        assert!(!env_plan(host(), &[], false).0.contains(&"CLAUDE_CODE_OAUTH_TOKEN".to_string()), "the CLI's own login keeps the host's environment");
+        assert!(unset_env("CLAUDE_CODE_OAUTH_TOKEN") && unset_env("CLAUDE_CODE_OAUTH_TOKEN_FILE_DESCRIPTOR"));
+        let _l = ENV.lock().unwrap_or_else(|e| e.into_inner()); std::env::set_var("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-HOST");
+        assert!(scrub_for(&a.environment(Some(&cli)).unwrap()).contains(&"CLAUDE_CODE_OAUTH_TOKEN".to_string()), "a turn on a named account loses the hub's");
+        assert!(scrub_for(&[]).is_empty(), "a turn on the CLI's own login keeps it");
+        std::env::remove_var("CLAUDE_CODE_OAUTH_TOKEN"); let _ = std::fs::remove_dir_all(&h);
+    }
+    fn sp(id: &str, origin: &str, state: &str) -> Profile { Profile { id: id.into(), provider: "claude".into(), label: "S".into(), epoch: 3, state: state.into(), kind: SYNC.into(), origin: origin.into(), identity: json!({"email":"s@x"}), ..Profile::default() } }
+    #[test] fn an_announcement_adds_renews_signs_out_and_removes_only_what_its_machine_made() {
+        let (a, b, c, mine, cli) = (new_id(), new_id(), new_id(), new_id(), new_id());
+        let cur = vec![sp(&a, "L1", "connected"), sp(&b, "L1", "connected"), sp(&mine, "", "connected"), sp(&c, "L2", "connected"), Profile { id: cli.clone(), provider: "claude".into(), label: "W".into(), epoch: 2, state: "connected".into(), ..Profile::default() }];
+        let tok = |x: &str| format!("sk-ant-oat01-{x}{}", "z".repeat(30));
+        let have = |id: &str| if id == a { Some(tok("old")) } else if id == b { Some(tok("b")) } else { None };
+        let d = new_id();
+        let items = vec![json!({"id":a,"label":"Work sync","email":"w@x","plan":"max","token":tok("new"),"madeAt":10,"expiresAt":20}), json!({"id":b,"label":"S","email":"s@x","token":""}), json!({"id":d,"label":"New","email":"n@x","token":tok("d"),"expiresAt":99}),
+            json!({"id":mine,"label":"Hijack","token":tok("h")}), json!({"id":cli,"label":"Hijack","token":tok("h")}), json!({"id":"bad","label":"X","token":tok("x")}), json!({"id":new_id(),"label":"X","token":"not a token"})];
+        let m = sync_merge(&cur, "L1", &items, &have);
+        let get = |id: &str| m.profiles.iter().find(|p| p.id == id).cloned();
+        let pa = get(&a).unwrap(); assert_eq!((pa.label.as_str(), pa.identity["plan"].as_str().unwrap(), pa.expires_at, pa.epoch), ("Work sync", "max", 20, 3), "renewed in place, same epoch");
+        assert!(m.put.iter().any(|(id, _, t)| *id == a && *t == tok("new")), "the new token is kept");
+        assert_eq!(get(&b).unwrap().state, "disconnected"); assert!(m.del.contains(&b), "signed out there: its token goes here");
+        let pd = get(&d).unwrap(); assert_eq!((pd.kind.as_str(), pd.origin.as_str(), pd.state.as_str(), pd.provider.as_str(), pd.expires_at), (SYNC, "L1", "unchecked", "claude", 99), "a new one, with its id");
+        assert_eq!(get(&mine).unwrap().label, "S", "this machine's own is never another's to change"); assert_eq!(get(&cli).unwrap().label, "W", "nor a CLI login");
+        assert!(get(&c).is_some(), "another machine's stays"); assert!(get("bad").is_none());
+        assert_eq!(m.changed, 3);
+        let m2 = sync_merge(&m.profiles, "L1", &items[..1], &|_| Some(tok("new")));
+        assert_eq!((m2.removed.len(), m2.changed), (2, 2), "the ones it no longer names are removed: {:?}", m2.removed); assert!(m2.del.contains(&d) && m2.del.contains(&b));
+        assert_eq!(sync_merge(&m2.profiles, "L1", &items[..1], &|_| Some(tok("new"))).changed, 0, "told again unchanged: nothing moves");
+    }
+    #[tokio::test(flavor = "multi_thread")] async fn a_sync_token_is_made_by_setup_token_kept_in_the_vault_used_by_its_turns_and_carried_to_another_machine() {
+        let _l = ENV.lock().unwrap_or_else(|e| e.into_inner()); std::env::set_var("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-should-not-leak-from-the-host");
+        let (h, sd) = dirs("sync"); let a = mgr(&h, &sd); let mem = Arc::new(MemTokens::default()); a.set_tokens(mem.clone());
+        let work = { let (id, _) = a.plant("claude", "Work", "w@example.com", Value::Null).await; id };
+        // made next to a connected account: its name and who it is, and setup-token started at once
+        let s = a.request(&json!({"op":"synctoken","profile":work})).await; assert_eq!(s["error"], "", "{s}"); let id = s["made"].as_str().unwrap().to_string();
+        assert_eq!((prof(&s, &id)["kind"].as_str().unwrap(), prof(&s, &id)["label"].as_str().unwrap(), prof(&s, &id)["identity"]["email"].as_str().unwrap()), (SYNC, "Work sync", "w@example.com"));
+        let s = until(&a, |s| s["attempts"].as_array().map_or(false, |x| x.iter().any(|t| t["profile"] == id.as_str() && t["state"] == "waiting"))).await;
+        let att = s["attempts"].as_array().unwrap().iter().find(|t| t["profile"] == id.as_str()).unwrap().clone();
+        assert_eq!(att["url"], "https://claude.com/cai/oauth/authorize?code=true&client_id=x&state=STATE123", "the link, out of the terminal's colours");
+        assert_eq!(a.request(&json!({"op":"respond","profile":id,"attempt":att["id"],"code":"CODE#STATE123"})).await["error"], "");
+        let s = until(&a, |s| prof(s, &id)["state"] == "connected").await; let p = prof(&s, &id);
+        let tok = format!("sk-ant-oat01-{}", "A".repeat(90));
+        assert_eq!(mem.get(&id).as_deref(), Some(tok.as_str()), "the token is in the vault");
+        assert!(!s.to_string().contains(&tok) && !a.snapshot().to_string().contains("sk-ant-oat01-A"), "and nowhere a client is told");
+        let ends = p["tokenExpiresAt"].as_u64().unwrap(); assert!(ends >= now_s() + TOKEN_LIFE - 60 && ends <= now_s() + TOKEN_LIFE, "a year");
+        let env: Value = serde_json::from_str(&std::fs::read_to_string(h.join("providers/accounts-v1").join(&id).join("env.json")).unwrap()).unwrap();
+        assert_eq!(env["token"].as_str().unwrap(), tok, "its status check ran on its own token, not the host's");
+        let epoch = p["epoch"].as_u64().unwrap();
+        let plan = a.launch_plan(&id, &epoch.to_string(), "claude").await.unwrap();
+        assert!(plan.env.contains(&("CLAUDE_CODE_OAUTH_TOKEN".into(), tok.clone()))); assert_eq!(plan.args, ["--setting-sources", "user"], "no claude.ai-only setting over a token");
+        let wplan = a.launch_plan(&work, "2", "claude").await.unwrap(); assert!(!wplan.env.iter().any(|(k, _)| k == "CLAUDE_CODE_OAUTH_TOKEN"), "a CLI login's turn never gets one");
+        // a restart keeps the account whole, its token in the vault only
+        let reg = std::fs::read_to_string(h.join("providers/accounts-v1/profiles.json")).unwrap(); assert!(!reg.contains("sk-ant-oat01"), "no token in the registry");
+        let again = mgr(&h, &sd); again.set_tokens(mem.clone()); let sn = again.snapshot(); let q = prof(&sn, &id);
+        assert_eq!((q["kind"].as_str().unwrap(), q["identity"]["email"].as_str().unwrap(), q["tokenExpiresAt"].as_u64().unwrap()), (SYNC, "w@example.com", ends));
+        // the other machine: told it, it has it with the same id, its token in its own vault; a turn there gets the token
+        let (h2, _) = dirs("sync-b"); let b = mgr(&h2, &sd); let mem2 = Arc::new(MemTokens::default()); b.set_tokens(mem2.clone());
+        let out = a.sync_out().unwrap(); assert_eq!(out.len(), 1, "only the sync account goes: {out:?}"); assert_eq!(out[0]["id"], id.as_str());
+        assert_eq!(b.sync_in("LA", &out), Ok(1)); assert_eq!(mem2.get(&id).as_deref(), Some(tok.as_str()));
+        let bp = prof(&b.snapshot(), &id).clone(); assert_eq!((bp["origin"].as_str().unwrap(), bp["state"].as_str().unwrap()), ("LA", "unchecked"));
+        let bplan = b.launch_plan(&id, &bp["epoch"].as_u64().unwrap().to_string(), "claude").await.unwrap(); assert!(bplan.env.contains(&("CLAUDE_CODE_OAUTH_TOKEN".into(), tok.clone())));
+        assert!(b.sync_out().unwrap().is_empty(), "what it was given it does not announce");
+        // renewal: a new token, the same account and epoch everywhere
+        std::env::set_var("STANDIN_TOKEN", format!("sk-ant-oat01-{}", "B".repeat(90)));
+        let att = { a.request(&json!({"op":"login","profile":id})).await; let s = until(&a, |s| s["attempts"].as_array().unwrap().iter().any(|t| t["profile"] == id.as_str() && t["state"] == "waiting")).await; s["attempts"].as_array().unwrap().iter().rev().find(|t| t["profile"] == id.as_str()).unwrap()["id"].clone() };
+        a.request(&json!({"op":"respond","profile":id,"attempt":att,"code":"CODE#STATE123"})).await;
+        let s = until(&a, |s| s["attempts"].as_array().unwrap().iter().any(|t| t["id"] == att && t["state"] == "done")).await; std::env::remove_var("STANDIN_TOKEN");
+        assert_eq!(prof(&s, &id)["epoch"].as_u64().unwrap(), epoch, "a renewal is the same account"); assert!(mem.get(&id).unwrap().contains("BBBB"));
+        assert_eq!(b.sync_in("LA", &a.sync_out().unwrap()), Ok(1)); assert!(mem2.get(&id).unwrap().contains("BBBB"), "the renewal reaches the other machine");
+        // removed where it was made: gone there and, told, here
+        assert_eq!(a.request(&json!({"op":"remove","profile":id})).await["error"], ""); assert!(mem.get(&id).is_none(), "its token leaves the vault");
+        assert_eq!(b.sync_in("LA", &a.sync_out().unwrap()), Ok(1)); assert!(b.snapshot()["profiles"].as_array().unwrap().iter().all(|p| p["id"] != id.as_str())); assert!(mem2.get(&id).is_none());
+        std::env::remove_var("CLAUDE_CODE_OAUTH_TOKEN"); let _ = std::fs::remove_dir_all(&h); let _ = std::fs::remove_dir_all(&h2);
+    }
+    #[tokio::test(flavor = "multi_thread")] async fn a_locked_vault_announces_nothing_so_no_machine_removes_what_it_holds() {
+        struct Locked; impl Tokens for Locked { fn get(&self, _: &str) -> Option<String> { None } fn put(&self, _: &str, _: &str, _: &str) -> bool { false } fn del(&self, _: &str) {} fn open(&self) -> bool { false } }
+        let (h, sd) = dirs("synclock"); let a = mgr(&h, &sd); a.set_tokens(Arc::new(Locked));
+        assert!(a.sync_out().is_none(), "a locked vault says nothing, not even that there is nothing");
+        let s = a.request(&json!({"op":"add","provider":"claude","kind":"sync","label":"S"})).await; let id = s["made"].as_str().unwrap().to_string();
+        a.update(&id, |p| p.state = "connected".into()).unwrap();
+        assert!(a.sync_out().is_none()); assert!(a.sync_in("L", &[]).is_err());
+        let _ = std::fs::remove_dir_all(&h);
     }
     async fn connect(a: &Arc<Accounts>, id: &str) {
         a.request(&json!({"op":"login","profile":id})).await; let s = until(a, |s| s["attempts"][0]["state"] == "waiting").await; let aid = s["attempts"][0]["id"].as_str().unwrap().to_string();
