@@ -85,8 +85,10 @@ pub fn own(st: &State, id: &str) -> bool {
     let backend = |th: &str| bot(th) || st.run_hidden(th) || th.starts_with("run") || th.starts_with("mailcoord-");
     if backend(id) || st.tasks.values().any(|(_, c, _, _)| c == id) { return false }
     // launched by another thread (`launch.<t>` = kind + launcher): the person's when its launcher is
+    // the uberbot's chat works for the person: what it launches is theirs (a lane of a lead, a thread asked for); any other bot's is backend work
     let by = get(st, &format!("launch.{id}")); let by = by.get(1..).unwrap_or("");
-    by.is_empty() || by == id || !backend(by)
+    let uber = st.bots_nav.get(get(st, "uber.bot")).map(|b| b.thread.as_str()).filter(|t| !t.is_empty());
+    by.is_empty() || by == id || Some(by) == uber || !backend(by)
 }
 
 /// The person opened the thread after it last moved (the mark is written by `look`, at a viewer's view.open).

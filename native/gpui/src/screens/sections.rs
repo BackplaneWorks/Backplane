@@ -95,7 +95,9 @@ impl Backplane {
                     for t in s["rows"].as_array().into_iter().flatten() {
                         let pid = string(t, "projectKey");
                         // no project name after the title: the sidebar is narrow and the title is what the person reads (sub " ": an Active-view row, so no tree chevron and no drag)
-                        rows.push(self.side_thread(cx, light, t, "", " ", t["off"] == true, ctl));
+                        // a stop says so by its dot alone (the right column is the title's); an ask keeps its red word (approval, question)
+                        let mut t = t.clone(); if matches!(t["want"].as_str(), Some("failed" | "stopped")) { t["want"] = serde_json::json!(""); }
+                        rows.push(self.side_thread(cx, light, &t, "", " ", t["off"] == true, ctl));
                     }
                 }
                 _ => {
