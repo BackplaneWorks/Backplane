@@ -5,7 +5,7 @@
 # Whatever the flags, a build whose hub cannot start on a real-shaped home is not published (scripts/smoke-start.sh; SKIP_SMOKE=1 only when that script itself is what is broken).
 # The strip's bar is time against the last build's time ($DEV/.build-secs, one per mode; a first build guesses 150 s): an incremental build compiles one crate, a full one
 # hundreds, so counting crates says nothing. The bar stops at 95% until the build is done.
-# When every local build slot is taken this does not wait: it runs the tests and builds on a Boat box (scripts/lib-boat.sh; BP_NO_BOAT=1 forces local) and copies the programs
+# When every local build slot is taken this queues locally, and runs the tests and builds on a Boat box only after a long wait (BQ_OFFLOAD_AFTER, default 420 s) or with free memory under BQ_LOW_GB (8) (scripts/lib-boat.sh; BP_NO_BOAT=1 forces local) and copies the programs
 # back to the paths a local run writes, after a sha256 check; the stage, the smoke start (always, SKIP_SMOKE is ignored for a box's build) and the publish happen here as ever.
 # Env: GPUI_DEV_DIR (default ~/.backplane-gpui-dev), BACKPLANE_DEV_STATUS (the status file; default $DEV/BUILD), BUILD_ROOT (the checkout to build; default this one),
 #      PROFILE (cargo profile, default fast; release for fat LTO), HOST_TARGET / GPUI_TARGET / VOICE_TARGET (a CARGO_TARGET_DIR for each crate), ASSETS (an assets/ folder to ship; default the one in the build now current), JOBS (default: about 2 GB of free memory a job, a share of the cores, at most 28), BUILD_SLOTS / BUILD_LOCK_DIR / NO_SCCACHE (scripts/lib-buildslot.sh).
@@ -14,11 +14,11 @@ declare -A KEY   # the gate fills it; a cut built on a Boat box reads it without
 ROOT=${BUILD_ROOT:-$(cd "$(dirname "$0")/.." && pwd)}; HERE=$(cd "$(dirname "$0")" && pwd)
 DEV=${GPUI_DEV_DIR:-$HOME/.backplane-gpui-dev}; ST=${BACKPLANE_DEV_STATUS:-$DEV/BUILD}; J=${JOBS:-}  # cargo -j: JOBS, else sized from free memory once the build lock is held (below)
 case " $* " in *" --no-cut "*) [ -n "${BACKPLANE_DEV_STATUS:-}" ] || ST=$DEV/BUILD.nocut.$$;; esac   # a build that publishes nothing must not write the person's progress strip
-# A few heavy builds at a time on this machine (scripts/lib-buildslot.sh: slots from cores and free memory, two here): lanes cutting at once queue on a slot instead of all
+# A few heavy builds at a time on this machine (scripts/lib-buildslot.sh: slots from cores and free memory, three here): lanes cutting at once queue on a slot instead of all
 # compiling together and filling RAM. This script runs again inside the slot (BQ_HELD); nothing it leaves behind can keep the slot.
 if [ -z "${BQ_HELD:-}" ]; then . "$HERE/lib-buildslot.sh"; export BQ_HELD=1
-  queued() { mkdir -p "$DEV"; printf '{"phase":"building","text":"Queued behind other builds","done":0,"total":0}\n' > "$ST"; }
-  bo_ready && export BQ_OFFLOAD=1   # every slot taken: the tests and builds run on a Boat box instead of waiting
+  queued() { mkdir -p "$DEV"; printf '{"phase":"building","text":"Queued behind %s local builds","done":0,"total":0}\n' "${1:-other}" > "$ST"; }
+  bo_ready && export BQ_OFFLOAD=1   # every slot taken: queue locally; a Boat box only after a long wait or with memory low (lib-buildslot.sh bq_offload_now)
   bq_run queued "$0" "$@"; rc=$?; rm -f "$ST"; exit $rc; fi
 . "$HERE/lib-buildslot.sh"; bp_notmp_target "${HOST_TARGET:-}" && bp_notmp_target "${GPUI_TARGET:-}" || exit 1   # lane temp and target dirs are on disk (lib-bptmp.sh)
 declare -A KEY SKIP   # the gate's suite keys; read by the smoke start on every path (a Boat build has none: `${KEY[hub]:-}` on an undeclared name is an unbound variable under set -u)

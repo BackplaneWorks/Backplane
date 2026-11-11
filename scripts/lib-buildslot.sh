@@ -5,22 +5,24 @@
 # Env: BUILD_SLOTS (fixed count), BUILD_LOCK_DIR, SCCACHE_DIR (default ~/.cache/sccache), SCCACHE_CACHE_SIZE (default 20G), NO_SCCACHE=1 (no compiler cache).
 . "$(dirname "${BASH_SOURCE[0]}")/lib-boat.sh"   # builds on a Boat sandbox when every slot is taken (BQ_OFFLOAD=1 asks for it; BP_NO_BOAT=1 never)
 bq_mem_gb() { awk '/^MemAvailable:/ {print int($2 / 1048576)}' /proc/meminfo 2>/dev/null || echo 16; }
-# slots: one per 12 cores and per 6 GB free, between 1 and 3 (this machine: 2)
+# slots: one per 10 cores and per 6 GB free, between 1 and 4 (this desktop, 32 cores and ~42 GB free: 3). The person's rule (Nov 11): this machine is used fully before a Boat.
 bq_slots() { [ -n "${BUILD_SLOTS:-}" ] && { echo "$BUILD_SLOTS"; return; }
-  local c m n; c=$(( $(nproc) / 12 )); m=$(( $(bq_mem_gb) / 6 )); n=$(( c < m ? c : m )); [ "$n" -lt 1 ] && n=1; [ "$n" -gt 3 ] && n=3; echo "$n"; }
+  local c m n; c=$(( $(nproc) / 10 )); m=$(( $(bq_mem_gb) / 6 )); n=$(( c < m ? c : m )); [ "$n" -lt 1 ] && n=1; [ "$n" -gt 4 ] && n=4; echo "$n"; }
+# a build goes to a Boat only when every local slot is taken AND (it has already waited BQ_OFFLOAD_AFTER seconds, default 420, or free memory is under BQ_LOW_GB, default 8)
+bq_offload_now() { [ "$1" -ge "${BQ_OFFLOAD_AFTER:-420}" ] || [ "$(bq_mem_gb)" -lt "${BQ_LOW_GB:-8}" ]; }
 # cargo -j for one build holding a slot: about 2 GB a job from what is free, a share of the cores, at most the 28 the builds are pinned to, at least 1
 bq_jobs() { local n g c j; n=$(bq_slots); g=$(( $(bq_mem_gb) / 2 )); c=$(( $(nproc) / n )); j=$g; [ "$c" -lt "$j" ] && j=$c; [ "$j" -gt 28 ] && j=28; [ "$j" -lt 1 ] && j=1; echo "$j"; }
-# bq_run CALLBACK CMD...: run CMD holding a slot, waiting for a free one (CALLBACK, if any, is run once when it has to wait). `flock -o` closes the lock's descriptor in CMD,
+# bq_run CALLBACK CMD...: run CMD holding a slot, waiting for a free one (CALLBACK, if any, is run once when it has to wait, with the number of local builds ahead of it). `flock -o` closes the lock's descriptor in CMD,
 # so nothing CMD leaves running in the background (a sleep, a server) can keep the slot after CMD ends; the flock process itself holds it until CMD exits.
 bq_run() { local cb=$1 d=${BUILD_LOCK_DIR:-$HOME/.cache/backplane-build.locks} i n rc waited=0 tick=0; shift; mkdir -p "$d"
   while :; do n=$(bq_slots)
     # the main builder has a slot of its own besides the shared ones: lanes starting builds all day cannot starve it (BQ_MAIN=1, set by main-build.sh; one builder, so one slot)
     if [ -n "${BQ_MAIN:-}" ]; then flock -n -E 200 -o "$d/slot.main" "$@"; rc=$?; [ "$rc" -ne 200 ] && return "$rc"; fi
     for ((i = 0; i < n; i++)); do flock -n -E 200 -o "$d/slot.$i" "$@"; rc=$?; [ "$rc" -ne 200 ] && return "$rc"; done
-    # every slot is taken: with BQ_OFFLOAD=1 the same command runs on a Boat box instead of waiting (scripts/lib-boat.sh; the command sees BP_BOAT_IDX and does the run there).
-    # 98 = no box could be used (it said why): wait for a local slot as before. 200 = the boxes are busy too: look again every few seconds.
-    if [ -n "${BQ_OFFLOAD:-}" ] && [ -z "${BQ_MAIN:-}" ] && [ $((tick % 5)) = 0 ] && bo_ready; then bo_try "$@"; rc=$?; case "$rc" in 98|200) ;; *) return "$rc";; esac; fi
-    if [ "$waited" = 0 ]; then waited=1; [ -n "$cb" ] && "$cb"; fi; tick=$((tick + 1)); sleep 1; done; }
+    # every slot is taken: with BQ_OFFLOAD=1, and only once the wait is long or memory is low (bq_offload_now), the same command runs on a Boat box (scripts/lib-boat.sh;
+    # the command sees BP_BOAT_IDX and does the run there). 98 = no box could be used (it said why): keep waiting locally. 200 = the boxes are busy too: look again every few seconds.
+    if [ -n "${BQ_OFFLOAD:-}" ] && [ -z "${BQ_MAIN:-}" ] && [ $((tick % 5)) = 0 ] && bq_offload_now "$tick" && bo_ready; then bo_try "$@"; rc=$?; case "$rc" in 98|200) ;; *) return "$rc";; esac; fi
+    if [ "$waited" = 0 ]; then waited=1; [ -n "$cb" ] && "$cb" "$n"; fi; tick=$((tick + 1)); sleep 1; done; }
 # sccache shares compiled dependencies between worktrees (a new lane no longer compiles tokio, naga, zbus... from cold); through sccache-tmp, so the shared server never lives in a test run's TMPDIR
 bq_cc() { [ -z "${NO_SCCACHE:-}" ] && [ -z "${RUSTC_WRAPPER:-}" ] && command -v sccache > /dev/null 2>&1 || return 0
   export RUSTC_WRAPPER=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/sccache-tmp SCCACHE_DIR=${SCCACHE_DIR:-$HOME/.cache/sccache} SCCACHE_CACHE_SIZE=${SCCACHE_CACHE_SIZE:-20G}; }

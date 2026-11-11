@@ -1,7 +1,7 @@
 #!/bin/bash
 # Builds and tests on a Boat sandbox when the machine's build slots are all taken (sourced by lib-buildslot.sh; used by scripts/cargo-q and scripts/dev-build.sh).
 #
-# What happens: bq_run (lib-buildslot.sh) finds no free local slot and, instead of waiting, runs the same script under a BOAT LEASE (a flock file like a slot,
+# What happens: bq_run (lib-buildslot.sh) finds no free local slot, has queued long enough or is low on memory (bq_offload_now), and runs the same script under a BOAT LEASE (a flock file like a slot,
 # BUILD_LOCK_DIR/boat.N, N below BP_BOAT_POOL). The script then
 #   1. bo_box   finds or starts pool box bp-build-N (resumes it if stopped; creates it from the snapshot bp-build-base otherwise);
 #   2. bo_sync  copies the exact worktree state (tracked and untracked files, committed or not, nothing git ignores) with rsync over `boat ssh`; only changed
