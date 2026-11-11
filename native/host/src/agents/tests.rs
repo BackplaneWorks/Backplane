@@ -1881,4 +1881,20 @@ async fn lines_at_least(sd: &Path, n: usize) -> Vec<Value> { for _ in 0..100 { l
     let ev = until(&hub, 0, 15, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await;
     assert!(ev.iter().any(|e| turn_is(e, "completed")), "the turn ends: Codex read EOF on its stdin");
     ag.shutdown();
+/// A home move holds what reaches a thread it carries by every way but the person's (another bot, a routine, a room, a webhook, mail): nothing is written or run
+/// while it moves; a move that failed delivers each here once, as it would have been (net/homemove.rs). The way to the new home is test/e2e/homemove/everywhere.py.
+#[tokio::test(flavor = "multi_thread")] async fn a_home_move_holds_every_kind_of_delivery_and_a_failed_move_delivers_each_once() {
+    let sd = dir("hm-bin"); perf_standin(&sd, 1);
+    let (hub, ag, _h, _w) = start("hm", |w| base_log(w, 2, "{\"$\":\"ThreadCreated\",\"id\":\"tbub\",\"project\":\"\",\"title\":\"Bub\",\"env\":\"local\",\"branch\":\"\",\"worktree\":\"\",\"provider\":\"claude\",\"model\":\"\",\"at\":1700000009}\n"), |_| Cli::standin(&sd)).await;
+    crate::net::homemove::hold_for("L1", &["tbub"]); let n0 = len(&hub).await;
+    let kinds = [("bot:b2", "bot", "zqshort from the calendar bot"), ("routine:r1", "system", "zqshort the morning routine"), ("room:staff", "bot", "zqshort a post in staff"),
+                 ("hook:h1", "system", "zqshort [webhook: Pebble Index] a ring recording"), ("mail:m1", "system", "zqshort mail from someone")];
+    for (i, (from, kind, text)) in kinds.iter().enumerate() { assert_eq!(ag.inbound("user", "tbub", &format!("hm{i}"), text, (from.to_string(), kind.to_string(), String::new()), vec![]).await, Ok(()), "held, not refused: {from}") }
+    assert_eq!(crate::net::homemove::held_now(), 5);
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert!(!log_from(&hub, n0).await.iter().any(|e| is(e, "MessagePosted") && e["thread"] == "tbub"), "nothing reaches the moving thread");
+    crate::net::homemove::release(&hub, false).await;
+    let ev = until(&hub, n0, 10, |ev| ev.iter().filter(|e| is(e, "MessagePosted") && e["thread"] == "tbub" && e["role"] != "assistant").count() >= 5).await;
+    for (i, (_, _, text)) in kinds.iter().enumerate() { assert_eq!(ev.iter().filter(|e| is(e, "MessagePosted") && e["thread"] == "tbub" && e["msg"] == format!("hm{i}").as_str()).count(), 1, "{text} delivered once") }
+    assert_eq!(crate::net::homemove::held_now(), 0); ag.shutdown();
 }

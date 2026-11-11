@@ -220,6 +220,14 @@ pub async fn serve(hub: &Arc<Hub>, link: &str, m: &str, p: &Value) -> Value {
         }
         // the ring's record on the machine that holds the home now, for the Ring page of the one that asks
         "home.ready" => ok(ready_here(hub, p["providers"].as_array().map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default()).await),
+        // a delivery the sender held during a move (or that reached its old copy after one): made here, once (a message id already in the thread is not taken again)
+        "home.deliver" => {
+            let (th, msg) = (gs(p, "thread"), gs(p, "msg"));
+            if hub.model().await.threads.get(th).map_or(true, |t| t.deleted) { return no("that thread is not here") }
+            let seen = { let m = hub.model().await; m.page(&hub.store, th, 0, 64).map(|pg| pg.rows.iter().any(|r| r.id == msg)).unwrap_or(false) };
+            if seen { return ok(json!({"seen": true})) }
+            match hub.rpc_for("thread.deliver") { Some(h) => { let r = h.call(hub, &Caller { gen: "home".into(), client: 0 }, &json!(0), "thread.deliver", p).await.into_iter().next().unwrap_or(Value::Null); if r["ok"] == true { ok(json!({})) } else { no(gs(&r, "error")) } } None => no("agents are not running") }
+        }
         "home.ring" => match crate::bots::api::of(hub) { Some(b) => ok(json!({"setup": b.ring_setup_info().await})), None => no("bots are not running") },
         "home.mint" => match crate::net::start::routes() {
             Some(rt) => { let j = rt.invite(); if j["error"].is_string() { no(gs(&j, "error")) } else { ok(json!({"link": gs(&j, "link")})) } }
@@ -279,6 +287,25 @@ pub async fn intercept(hub: &Arc<Hub>, thread: &str, p: &Value) -> Option<Result
     let to = moved_thread(&hub.setting("home.at").await.unwrap_or_default(), thread, project.as_deref(), &there)?;
     Some(forward(&to, link, p))
 }
+/// A delivery to a local thread (agents `deliver_k`, every way but the person's own message: another bot, a routine, a room, a webhook, mail, a
+/// launched thread's report; `d` its params as `thread.deliver` takes them): Some(Ok) when a home move takes it. Held during a move of that thread,
+/// sent on to the new home after one (once: the far outbox keys it by its message id, the owner takes an id once).
+pub async fn hold_delivery(hub: &Arc<Hub>, thread: &str, d: &Value) -> Option<Result<(), String>> {
+    if crate::net::far::is(thread) { return None }
+    { let mut g = MOVING.lock().unwrap(); if let Some(m) = g.as_mut() { if m.threads.contains(thread) { let mut q = d.clone(); q["via"] = json!("deliver"); m.held.push(q); return Some(Ok(())) } } }
+    let at_s = hub.setting("home.at").await.unwrap_or_default(); if at_s.is_empty() { return None }
+    let at: Value = serde_json::from_str(&at_s).ok()?; let link = gs(&at, "link").to_string(); if link.is_empty() { return None }
+    let project = hub.model().await.threads.get(thread).map(|t| t.project.clone());
+    let far = hub.far(); let there = |id: &str| far.as_ref().map_or(false, |f| f.has(id));
+    let to = moved_thread(&at_s, thread, project.as_deref(), &there)?;
+    Some(deliver_there(&to, &link, d))
+}
+fn deliver_there(to: &str, link: &str, d: &Value) -> Result<(), String> {
+    let Some(out) = crate::net::farsend::global() else { return Err("this hub cannot reach another machine".into()) };
+    let mut q = d.clone(); q["thread"] = json!(crate::net::far::local(to)); if let Some(o) = q.as_object_mut() { o.remove("via"); }
+    let msg = if gs(&q, "msg").is_empty() { format!("hd{}", now_ms()) } else { gs(&q, "msg").to_string() }; q["msg"] = json!(msg);
+    out.hold_m(to, link, "home.deliver", &format!("hd:{msg}"), q, crate::net::farsend::now_ms()); Ok(())
+}
 /// A held message to its thread on the new home, through the far outbox (it goes when that machine answers, and shows in that thread's strip until it does).
 fn forward(to: &str, link: &str, p: &Value) -> Result<(), String> {
     let Some(out) = crate::net::farsend::global() else { return Err("this hub cannot reach another machine".into()) };
@@ -286,11 +313,19 @@ fn forward(to: &str, link: &str, p: &Value) -> Result<(), String> {
     if gs(&q, "msg").is_empty() { q["msg"] = json!(format!("hm{}-{}", now_ms(), q.to_string().len())) }
     out.hold(to, link, q, crate::net::farsend::now_ms()); Ok(())
 }
+/// A move's hold on `threads` toward `link`, as `begin` sets it (the tests set it alone).
+#[cfg(test)] pub(crate) fn hold_for(link: &str, threads: &[&str]) { *MOVING.lock().unwrap() = Some(Moving { link: link.into(), threads: threads.iter().map(|t| t.to_string()).collect(), held: vec![] }); }
+#[cfg(test)] pub(crate) fn held_now() -> usize { MOVING.lock().unwrap().as_ref().map_or(0, |m| m.held.len()) }
 /// The end of a move: the held messages go to the new home (`moved`) or, when it failed, to this hub's own threads as they would have.
-async fn release(hub: &Arc<Hub>, moved: bool) {
+pub(crate) async fn release(hub: &Arc<Hub>, moved: bool) {
     let Some(m) = MOVING.lock().unwrap().take() else { return };
     for p in m.held {
         let th = gs(&p, "thread").to_string();
+        if p["via"] == "deliver" {
+            if moved { if let Err(e) = deliver_there(&crate::net::far::id(&m.link, &th), &m.link, &p) { eprintln!("backplane: home move: a held delivery to {th} was not sent: {e}") } }
+            else if let Some(h) = hub.rpc_for("thread.deliver") { let _ = h.call(hub, &Caller { gen: "home".into(), client: 0 }, &json!(0), "thread.deliver", &p).await; }
+            continue
+        }
         if moved { if let Err(e) = forward(&crate::net::far::id(&m.link, &th), &m.link, &p) { eprintln!("backplane: home move: a held message to {th} was not sent: {e}") } }
         else if let Some(h) = hub.rpc_for("turn.start") { let _ = h.call(hub, &Caller { gen: "home".into(), client: 1 }, &json!(0), "turn.start", &p).await; }
     }
