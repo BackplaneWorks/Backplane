@@ -57,6 +57,9 @@ final class DataClient {
     private var subSub = 0
     private(set) var locks: [DLock] = []
     private(set) var rooms: [DRoom] = []
+    // swarms (feature swarm, docs/SWARM.md): every project's from swarm.list, and how often each room's `swarm` push came (the open swarm screen reads again when its own moves)
+    private(set) var swarms: [DSwarmRow] = []
+    private(set) var swarmMoved: [String: Int] = [:]
     // what the hub says it can do beyond the base of data/1 (hello.features); a hub that names none takes no pictures
     private(set) var features: Set<String> = []
     // hello `notice`, newer from /hub/status: the banner
@@ -440,6 +443,7 @@ final class DataClient {
             async let p = loadProjects(g), t = loadThreads(g), h: Void = loadHistory()
             _ = try await (p, t, h)
             await loadBots()
+            await loadSwarms()
             await voice.resync()
             await enablePush(); await registerPush(); await syncPush()
             await loadLocks()
@@ -449,7 +453,7 @@ final class DataClient {
             if let r = subOpen { subSub = 0; await readSub(r, g) }
         } catch { if g == gen { failure = error.localizedDescription } }
     }
-    func refresh() async { guard conn == .online else { return }; let g = gen; _ = try? await loadProjects(g); _ = try? await loadThreads(g); await loadLocks(); await loadHistory() }
+    func refresh() async { guard conn == .online else { return }; let g = gen; _ = try? await loadProjects(g); _ = try? await loadThreads(g); await loadLocks(); await loadHistory(); await loadSwarms() }
     // MARK: Conversation history (feature history): the old Scratch chats, found and opened, never a place to start one
     private(set) var history = DHistory()
     private(set) var historyOpen = UserDefaults.standard.bool(forKey: "data.history.open")
@@ -679,6 +683,8 @@ final class DataClient {
                var l = entries[tid], let i = l.firstIndex(where: { $0.id == eid }) {
                 l[i].text += add; l[i].live = true; entries[tid] = l
             }
+        case "swarm":
+            if let r = o["room"] as? String { swarmMoved[r, default: 0] += 1; swarmsMoved() }
         case "notify":
             notified(o)
         case "clear":
@@ -982,6 +988,26 @@ final class DataClient {
     }
     func roomPosts(_ room: String) async -> [DPost] { ((try? await call("room.posts", ["room": room, "limit": 60]) as DPosts)?.posts) ?? [] }
     func roomPost(_ room: String, _ text: String) async throws { _ = try await call("room.post", ["room": room, "text": text, "clientId": UUID().uuidString], as: DEmpty.self) }
+
+    // MARK: swarms (feature swarm, docs/SWARM.md Client data)
+    func loadSwarms() async { guard has("swarm"), let r: DSwarmList = try? await call("swarm.list", ["project": ""]) else { return }; swarms = r.swarms }
+    @ObservationIgnored private var swarmsDue = false
+    /// a board, state or member turn changed: the list's rows again, once for a burst
+    private func swarmsMoved() { guard !swarmsDue else { return }; swarmsDue = true; Task { try? await Task.sleep(nanoseconds: 400_000_000); swarmsDue = false; await loadSwarms() } }
+    func swarmGet(_ room: String, since: String = "") async throws -> DSwarmBoard {
+        var p: [String: Any] = ["room": room]; if !since.isEmpty { p["since"] = since }
+        return try await call("swarm.get", p)
+    }
+    func swarmPost(_ room: String, _ text: String) async throws { _ = try await call("swarm.post", ["room": room, "text": text, "clientId": UUID().uuidString], as: DEmpty.self) }
+    func swarmAct(_ room: String, _ action: String, _ extra: [String: Any] = [:]) async throws {
+        _ = try await call("swarm.act", extra.merging(["room": room, "action": action]) { _, b in b }, as: DEmpty.self)
+        await loadSwarms()
+    }
+    func swarmCreate(_ p: [String: Any]) async throws -> String {
+        let r: DSwarmCreated = try await call("swarm.create", p)
+        await loadSwarms(); return r.room
+    }
+    func modelsList() async -> [String: [DModelRow]] { guard has("models"), let r: DModelsList = try? await call("models.list") else { return [:] }; return r.models }
 
     // MARK: alerts: only what the hub's gate lets through reaches here (native/host/src/push): an APNs push, or the same on the socket for a phone with no token
     private func notified(_ o: [String: Any]) {

@@ -118,7 +118,12 @@ struct DataThreadsView: View {
     @State private var treeOpen = Set(UserDefaults.standard.stringArray(forKey: "data.tree.open") ?? []) // parents whose subthreads show
     @State private var flash = ""   // the project a link just opened
 
-    private var botThreads: Set<String> { Set(client.bots.map(\.thread)) }
+    @State private var newSwarm: String?        // a project id: the New swarm sheet
+    /// the threads a project's list leaves out: bots' and, on a hub with swarms, the swarms' members (the swarm's row stands for them)
+    private var botThreads: Set<String> {
+        let b = Set(client.bots.map(\.thread))
+        return client.has("swarm") ? b.union(Swarm.members(client.threads, swarm: \.swarm, id: \.id)) : b
+    }
     private func toggle(_ p: DProject) {
         if shut.contains(p.id) { shut.remove(p.id) } else { shut.insert(p.id) }
         UserDefaults.standard.set(Array(shut), forKey: "data.projects.shut")
@@ -173,6 +178,7 @@ struct DataThreadsView: View {
         .navigationDestination(for: DSubRoute.self) { DataSubView(client: client, route: $0) }
         .navigationDestination(for: DThreadAt.self) { DataThreadView(client: client, id: $0.id, at: $0.msg).environment(\.dataSubThread, client.has("subview") ? $0.id : "") }
         .navigationDestination(for: DRoom.self) { DataRoomView(client: client, room: $0) }
+        .navigationDestination(for: DSwarmRoute.self) { DataSwarmView(client: client, route: $0) }
         .navigationDestination(for: DViewerRoute.self) { r in
             if let t = client.threads.first(where: { $0.id == r.id }) { DataViewerView(client: client, thread: t, openFile: r.file, line: r.line) }
             else { DLoading(text: Tr.t(client.conn == .online ? "Loading the thread…" : "Connecting to the hub…")) } // never a blank page while the thread list comes
@@ -194,6 +200,9 @@ struct DataThreadsView: View {
             ForEach(pickNew?.newOn ?? [], id: \.value) { n in Button(dAway(Tr.t(n.label), n.away)) { newThread = n.value; pickNew = nil }.accessibilityIdentifier("data.thread.new.on." + n.value) }
         }
         .sheet(isPresented: $addingProject) { DataNewProjectSheet(client: client) }
+        .sheet(item: Binding(get: { newSwarm.map { Wrapped(id: $0) } }, set: { newSwarm = $0?.id })) { w in
+            DataNewSwarmSheet(client: client, project: w.id) { path.append($0) }
+        }
         .sheet(item: $badgeProject) { DataBadgeSheet(client: client, project: $0) }
         .sheet(item: Binding(get: { newThread.map { Wrapped(id: $0) } }, set: { newThread = $0?.id })) { w in
             DataNewThreadSheet(client: client, project: w.id) { path.append($0) }
@@ -223,10 +232,11 @@ struct DataThreadsView: View {
             ForEach(client.projects) { p in
                 projectHeader(p)
                 if !shut.contains(p.id) {
+                    if client.has("swarm") { ForEach(Swarm.listed(client.swarms, project: p.id)) { r in DataSwarmRow(row: r) { path.append(DSwarmRoute(id: r.id, name: r.name)) } } }
                     let g = ThreadGroups.splitNested(client.threads, project: p.id, hidden: botThreads)
                     let n = ThreadGroups.count(hub: p.settledCount, loaded: g.settled.count)
                     ForEach(ThreadGroups.tree(g.active, all: g.all, open: treeOpen), id: \.t.id) { treeRow($0) }
-                    if g.active.isEmpty && n == 0 { Text(Tr.t("No threads")).dmono(12).foregroundStyle(BackplaneDesign.faint).padding(.leading, 34).frame(height: 32).dataRow() }
+                    if g.active.isEmpty && n == 0 && !(client.has("swarm") && !Swarm.listed(client.swarms, project: p.id).isEmpty) { Text(Tr.t("No threads")).dmono(12).foregroundStyle(BackplaneDesign.faint).padding(.leading, 34).frame(height: 32).dataRow() }
                     if n > 0 {
                         let open = client.settledOpen.contains(p.id)
                         Button { client.setSettled(open: !open, p.id) } label: {
@@ -301,6 +311,10 @@ struct DataThreadsView: View {
             if client.has("terms") {
                 Button { path.append(DTermsRoute(project: p.id)) } label: { Image(systemName: "terminal").font(.system(size: 13)).foregroundStyle(BackplaneDesign.dim).frame(width: 36, height: 40).contentShape(Rectangle()) }
                     .buttonStyle(.plain).accessibilityLabel(Tr.ios_project_terms(project: p.title)).accessibilityIdentifier("data.terms." + p.id)
+            }
+            if client.has("swarm") && p.mark == nil {
+                Button { newSwarm = p.id } label: { Image(systemName: "circle.hexagongrid").font(.system(size: 13)).foregroundStyle(BackplaneDesign.dim).frame(width: 36, height: 40).contentShape(Rectangle()) }
+                    .buttonStyle(.plain).accessibilityLabel(Tr.ios_swarm_new_in(project: p.title)).accessibilityIdentifier("data.swarm.new." + p.id)
             }
             Button { if p.newOn.count > 1 { pickNew = p } else { newThread = p.id } } label: { Image(systemName: "plus").font(.system(size: 14)).foregroundStyle(BackplaneDesign.dim).frame(width: 40, height: 40).contentShape(Rectangle()) }
                 .buttonStyle(.plain).accessibilityLabel(Tr.ios_project_newthread(project: p.title)).accessibilityIdentifier("data.thread.new." + p.id)

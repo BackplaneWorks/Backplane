@@ -173,12 +173,13 @@ struct DThread: Codable, Equatable, Identifiable, NestedThread {
     var history: Bool    // an old Scratch chat (feature history): listed under Conversation history, never under a project
     var status: String   // the sidebar dot's word (feature status): finished is the desktop's green dot (a turn done, not yet settled); "" from an older hub
     var mark: DMark?     // the machine it runs on when it is another one; nil for this hub's own
-    enum CodingKeys: String, CodingKey { case id, project, title, state, updatedAt, pinned, pinOrder, settled, settledAt, archived, provider, model, effort, runtime, chip, preview, waiting, parent, history, status, mark }
+    var swarm: String    // the swarm (its room) this thread is a member of, "" for none (feature swarm): left out of its project's list
+    enum CodingKeys: String, CodingKey { case id, project, title, state, updatedAt, pinned, pinOrder, settled, settledAt, archived, provider, model, effort, runtime, chip, preview, waiting, parent, history, status, mark, swarm }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = c.str(.id); project = c.str(.project); title = c.str(.title); state = c.str(.state); updatedAt = c.int(.updatedAt)
         pinned = c.bool(.pinned); pinOrder = c.int(.pinOrder); settled = c.bool(.settled); settledAt = c.int(.settledAt); archived = c.bool(.archived)
-        provider = c.str(.provider); model = c.str(.model); effort = c.str(.effort); runtime = c.str(.runtime); chip = c.str(.chip); preview = c.str(.preview); waiting = c.int(.waiting); parent = c.str(.parent); history = c.bool(.history); status = c.str(.status); mark = try? c.decode(DMark.self, forKey: .mark)
+        provider = c.str(.provider); model = c.str(.model); effort = c.str(.effort); runtime = c.str(.runtime); chip = c.str(.chip); preview = c.str(.preview); waiting = c.int(.waiting); parent = c.str(.parent); history = c.bool(.history); status = c.str(.status); mark = try? c.decode(DMark.self, forKey: .mark); swarm = c.str(.swarm)
     }
 }
 

@@ -29,4 +29,5 @@ S=$ROOT/mobile/ios/Shared; run tr TrTests.swift "" Tr.swift TrCatalog.swift; S=$
 run viewer-backdrop ViewerBackdropTests.swift "" ViewerBackdrop.swift
 run browser-input BrowserInputTests.swift "$ROOT/test/mobile/browser_input_cases.json" BrowserInput.swift
 run google-loop GoogleLoopTests.swift "" GoogleLoopLogic.swift
+run swarm-model SwarmModelTests.swift "" SwarmModel.swift
 sh "$ROOT/scripts/mobile/ios-outbox-test.sh" && echo "ok outbox"
