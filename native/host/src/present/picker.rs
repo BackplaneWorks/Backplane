@@ -20,6 +20,12 @@ fn parent(dir: &str) -> String {
     let t = dir.trim_end_matches('/');
     match t.rfind('/') { Some(0) | None => "/".to_string(), Some(i) => format!("{}/", &t[..i]) }
 }
+/// A path as the person reads it: under the home it is written "~/..." (the field and the labels; the values stay absolute).
+fn tilde(p: &str, home: &str) -> String {
+    let h = home.trim_end_matches('/');
+    if h.is_empty() { return p.to_string() }
+    if p == h { "~".to_string() } else if let Some(r) = p.strip_prefix(h).filter(|r| r.starts_with('/')) { format!("~{r}") } else { p.to_string() }
+}
 fn name_ok(n: &str) -> bool { !n.is_empty() && n != "." && n != ".." && !n.contains('/') && !n.contains('\0') }
 
 /// One folder's sub-folders as last read: every name (hidden ones too, sorted without case), the folder's mtime then, and the tags found so far.
@@ -45,6 +51,11 @@ impl Cache {
     }
     /// The sub-folders of `dir` (ending in "/").
     fn names(&mut self, dir: &str) -> std::sync::Arc<Vec<String>> { self.fresh(dir).names.clone() }
+    /// Forget `dir`'s listing when `name` is a folder in it that the listing lacks (made just now, as Create does: a folder whose mtime has a
+    /// coarse clock may not have moved), so it is read again.
+    fn check(&mut self, dir: &str, name: &str) {
+        if name_ok(name) && self.dirs.get(dir).map_or(false, |l| !l.names.iter().any(|n| n == name)) && Path::new(&format!("{dir}{name}")).is_dir() { self.dirs.remove(dir); }
+    }
     /// What the child `name` of `dir` looks like: "KiCad", "git" or "".
     fn tag(&mut self, dir: &str, name: &str) -> &'static str {
         let l = self.fresh(dir);
@@ -68,10 +79,14 @@ fn look(path: &str) -> &'static str {
     }
     if git { "git" } else { "" }
 }
-/// The names shown for what is typed: those that start with it (case aside), hidden ones only once a dot is typed; at most 200.
-fn shown<'a>(names: &'a [String], part: &str) -> Vec<&'a str> {
+/// How many rows of folders are sent; the rest are counted (`more`).
+const ROWS: usize = 200;
+/// The names shown for what is typed: those that start with it (case aside), hidden ones only once a dot is typed; at most `ROWS`, and how many match in all.
+fn shown<'a>(names: &'a [String], part: &str) -> (Vec<&'a str>, usize) {
     let p = part.to_lowercase();
-    names.iter().filter(|n| (part.starts_with('.') || !n.starts_with('.')) && n.to_lowercase().starts_with(&p)).take(200).map(String::as_str).collect()
+    let mut all = names.iter().filter(|n| (part.starts_with('.') || !n.starts_with('.')) && n.to_lowercase().starts_with(&p));
+    let out: Vec<&str> = all.by_ref().take(ROWS).map(String::as_str).collect();
+    let n = out.len() + all.count(); (out, n)
 }
 
 pub fn folders(drafts: &Value, home: &str, roots: &[&str]) -> Value {
@@ -84,8 +99,11 @@ fn folders_in(cache: &mut Cache, drafts: &Value, home: &str, roots: &[&str]) -> 
     let text = drafts["@proj.text"].as_str().filter(|t| !t.is_empty()).unwrap_or("~/").to_string();
     let x = expand(&text, home);
     let (dir, part) = split(&x);
+    cache.check(&dir, &part);
     let all = cache.names(&dir);
-    let names = shown(&all, &part);
+    let (names, total) = shown(&all, &part);
+    let t = |p: &str| tilde(p, home);
+    let more = total - names.len();
     let mut items: Vec<Value> = vec![];
     let whole = x.trim_end_matches('/'); let whole = if whole.is_empty() { "/" } else { whole };
     let is_root = |p: &str| roots.iter().any(|r| r.trim_end_matches('/') == p);
@@ -94,28 +112,31 @@ fn folders_in(cache: &mut Cache, drafts: &Value, home: &str, roots: &[&str]) -> 
     let clone = drafts["@proj.clone"].as_str().unwrap_or("");
     if !clone.is_empty() {
         if Path::new(whole).exists() {
-            if crate::mirror::origin_of_root(whole) == clone { items.push(json!({"label": format!("Add {whole} (already a clone of {clone})"), "action": "proj-add", "value": whole, "kind": "add"})) }
-            else { items.push(json!({"label": format!("{whole} is there and holds something else: pick another folder"), "action": "", "value": "", "kind": "note"})) }
+            if crate::mirror::origin_of_root(whole) == clone { items.push(json!({"label": format!("Add {} (already a clone of {clone})", t(whole)), "action": "proj-add", "value": whole, "kind": "add"})) }
+            else { items.push(json!({"label": format!("{} is there and holds something else: pick another folder", t(whole)), "action": "", "value": "", "kind": "note"})) }
         } else if name_ok(&part) && Path::new(&dir).is_dir() {
-            items.push(json!({"label": format!("Clone {clone} into {dir}{part}"), "action": "proj-clone-go", "value": format!("{clone}\u{1f}{dir}{part}"), "kind": "add"}));
+            items.push(json!({"label": format!("Clone {clone} into {}", t(&format!("{dir}{part}"))), "action": "proj-clone-go", "value": format!("{clone}\u{1f}{dir}{part}"), "kind": "add"}));
         }
     } else if Path::new(whole).is_dir() {
-        if is_root(whole) { items.push(json!({"label": format!("{whole} is a project already"), "action": "", "value": "", "kind": "note"})) }
-        else { items.push(json!({"label": format!("Add {whole}"), "action": "proj-add", "value": whole, "kind": "add"})) }
+        if is_root(whole) { items.push(json!({"label": format!("{} is a project already", t(whole)), "action": "", "value": "", "kind": "note"})) }
+        else { items.push(json!({"label": format!("Add {}", t(whole)), "action": "proj-add", "value": whole, "kind": "add"})) }
     } else if name_ok(&part) && Path::new(&dir).is_dir() {
-        items.push(json!({"label": format!("Create {}{}", dir, part), "action": "proj-new", "value": format!("{dir}{part}"), "kind": "add"}));
+        items.push(json!({"label": format!("Create {}", t(&format!("{dir}{part}"))), "action": "proj-new", "value": format!("{dir}{part}"), "kind": "add"}));
     }
-    if dir != "/" { items.push(json!({"label": "..", "action": "proj-cd", "value": parent(&dir), "kind": "up"})) }
-    // `tag`: a folder that is a project here already, or looks like one (older clients draw the rows without it)
+    // `field`: what the path field shows on going into the row (the "~/" form); `tag`: a folder that is a project here already, or looks like
+    // one (older clients draw the rows without either)
+    if dir != "/" { let up = parent(&dir); items.push(json!({"label": "..", "action": "proj-cd", "field": t(&up), "value": up, "kind": "up"})) }
     for n in names {
         let tag = if is_root(&format!("{dir}{n}")) { "project" } else { cache.tag(&dir, n) };
-        let mut it = json!({"label": format!("{n}/"), "action": "proj-cd", "value": format!("{dir}{n}/"), "kind": "dir"});
+        let v = format!("{dir}{n}/");
+        let mut it = json!({"label": format!("{n}/"), "action": "proj-cd", "field": t(&v), "value": v, "kind": "dir"});
         if !tag.is_empty() { it["tag"] = json!(tag); }
         items.push(it);
     }
-    let error = if Path::new(&dir).is_dir() { String::new() } else { format!("{dir} is not a folder") };
+    let error = if Path::new(&dir).is_dir() { String::new() } else { format!("{} is not a folder", t(&dir)) };
     let hint = if clone.is_empty() { "Path of a folder, e.g. ~/projects/board".to_string() } else { format!("Where to clone {clone}") };
-    json!({"text": text, "hint": hint, "error": error, "items": items})
+    // `more`: the folders that match past the rows sent (typing narrows them)
+    json!({"text": text, "hint": hint, "error": error, "items": items, "more": more})
 }
 
 #[cfg(test)]
@@ -164,13 +185,16 @@ mod tests {
         let home = d("list"); let h = home.to_str().unwrap();
         let f = folders(&open("~/"), h, &[]);
         let labels: Vec<&str> = f["items"].as_array().unwrap().iter().map(|i| i["label"].as_str().unwrap()).collect();
-        assert_eq!(labels[0], format!("Add {h}")); assert_eq!(&labels[1..], ["..", "alpha/", "beta/"], "hidden folders are not listed");
-        let alpha = &f["items"][2]; assert_eq!((alpha["action"].as_str(), alpha["value"].as_str().unwrap()), (Some("proj-cd"), format!("{h}/alpha/").as_str()));
+        assert_eq!(labels[0], "Add ~", "paths under the home read \"~/\""); assert_eq!(&labels[1..], ["..", "alpha/", "beta/"], "hidden folders are not listed");
+        let alpha = &f["items"][2]; assert_eq!((alpha["action"].as_str(), alpha["value"].as_str().unwrap(), alpha["field"].as_str()), (Some("proj-cd"), format!("{h}/alpha/").as_str(), Some("~/alpha/")));
+        let f = folders(&open("~/alpha/"), h, &[]); assert_eq!((f["items"][0]["label"].as_str(), f["items"][1]["field"].as_str()), (Some("Add ~/alpha"), Some("~/")), "the Add row and \"..\" in the \"~/\" form");
+        assert_eq!(f["more"], 0);
+        assert_eq!(tilde("/h/x", "/h"), "~/x"); assert_eq!(tilde("/h", "/h/"), "~"); assert_eq!(tilde("/hx/y", "/h"), "/hx/y", "only the home itself"); assert_eq!(tilde("/a", ""), "/a");
     }
     #[test] fn a_typed_name_filters_and_a_new_one_can_be_created_or_a_project_is_noted() {
         let home = d("typed"); let h = home.to_str().unwrap();
         let f = folders(&open("~/al"), h, &[]); let items = f["items"].as_array().unwrap();
-        assert_eq!(items[0]["action"], "proj-new"); assert_eq!(items[0]["value"], format!("{h}/al")); assert!(items.iter().any(|i| i["label"] == "alpha/") && !items.iter().any(|i| i["label"] == "beta/"));
+        assert_eq!(items[0]["action"], "proj-new"); assert_eq!(items[0]["value"], format!("{h}/al")); assert_eq!(items[0]["label"], "Create ~/al"); assert!(items.iter().any(|i| i["label"] == "alpha/") && !items.iter().any(|i| i["label"] == "beta/"));
         let f = folders(&open("~/alpha"), h, &[&format!("{h}/alpha")]); assert_eq!(f["items"][0]["action"], ""); assert!(f["items"][0]["label"].as_str().unwrap().contains("already"));
         let f = folders(&open("~/nope/x"), h, &[]); assert!(f["error"].as_str().unwrap().contains("not a folder")); assert!(f["items"].as_array().unwrap().iter().all(|i| i["action"] != "proj-add" && i["action"] != "proj-new"));
     }
@@ -181,6 +205,18 @@ mod tests {
         let f = folders(&open("~/~/beta"), h, &[]); assert_eq!(f["items"][0]["value"], format!("{h}/beta"), "and a second ~/ is the home once");
         let f = folders(&open(&format!("~/{h}/new-board")), h, &[]); assert_eq!((f["items"][0]["action"].as_str(), f["items"][0]["value"].as_str().unwrap()), (Some("proj-new"), format!("{h}/new-board").as_str()));
         assert_eq!(expand("~/x", "/h"), "/h/x"); assert_eq!(expand("~//x", "/h"), "/x"); assert_eq!(expand("~", "/h"), "/h");
+    }
+    #[test] fn a_folder_made_since_the_listing_is_seen_at_once_and_past_200_rows_are_counted() {
+        let home = d("made"); let h = home.to_str().unwrap(); let mut c = Cache::default();
+        folders_in(&mut c, &open("~/"), h, &[]); assert_eq!(c.reads, 1);
+        // the listing is still within its time and the clock may not move the mtime: a folder named in the field that the listing lacks is read again
+        std::fs::create_dir_all(home.join("fresh")).unwrap(); c.dirs.get_mut(&format!("{h}/")).unwrap().mtime = std::fs::metadata(&home).unwrap().modified().ok();
+        let f = folders_in(&mut c, &open("~/fresh"), h, &[]); assert!(f["items"].as_array().unwrap().iter().any(|i| i["label"] == "fresh/"), "{f}");
+        folders_in(&mut c, &open("~/zz"), h, &[]); let n = c.reads; folders_in(&mut c, &open("~/zzz"), h, &[]); assert_eq!(c.reads, n, "a name that is not a folder reads nothing");
+        for i in 0..230 { std::fs::create_dir_all(home.join(format!("many/d{i:03}"))).unwrap(); }
+        let f = folders_in(&mut c, &open("~/many/"), h, &[]); assert_eq!((f["items"].as_array().unwrap().iter().filter(|i| i["kind"] == "dir").count(), f["more"].as_u64()), (200, Some(30)));
+        let f = folders_in(&mut c, &open("~/many/d22"), h, &[]); assert_eq!(f["more"], 0);
+        let _ = std::fs::remove_dir_all(&home);
     }
     #[test] fn up_stops_at_the_root_and_names_are_checked() {
         assert_eq!(parent("/a/b/"), "/a/"); assert_eq!(parent("/a/"), "/"); assert_eq!(parent("/"), "/");
