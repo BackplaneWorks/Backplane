@@ -14,7 +14,8 @@ pub struct Btn { pub label: String, pub action: String, pub value: String, pub o
 #[derive(Clone, PartialEq)]
 pub struct Field { pub name: String, pub hint: String, pub secret: bool, pub value: String, pub vault: bool }
 #[derive(Clone, Debug, PartialEq)]
-pub struct Row { pub label: String, pub note: String, pub buttons: Vec<Btn>, pub fields: Vec<Field>, pub qr: Vec<String>, pub qrnote: String, pub local: bool }
+/// `tone`: "warn" or "bad" draws the note in that colour (a failed install, a code that names only this computer); empty is the usual.
+pub struct Row { pub label: String, pub note: String, pub buttons: Vec<Btn>, pub fields: Vec<Field>, pub qr: Vec<String>, pub qrnote: String, pub local: bool, pub tone: String }
 /* i18n-ok: drawn through trs by row_el, nav_title or the title */ impl std::fmt::Debug for Field { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "Field({}{})", self.name, if self.vault { ", vault" } else { "" }) } }
 
 /// A request to the hub that carries a secret: its Debug shows nothing.
@@ -31,7 +32,7 @@ pub fn parse(settings: &Value) -> Vec<Row> {
         buttons: r["buttons"].as_array().into_iter().flatten().map(|b| Btn { label: string(b, "label"), action: string(b, "action"), value: string(b, "value"), on: b["on"].as_bool().unwrap_or(false) }).collect(),
         fields: r["fields"].as_array().into_iter().flatten().map(|f| { let vault = f["vault"].as_bool().unwrap_or(false); Field { name: string(f, "name"), hint: string(f, "hint"), secret: f["secret"].as_bool().unwrap_or(false), value: if vault { String::new() } else { string(f, "value") }, vault } }).collect(),
         qr: r["qr"].as_array().into_iter().flatten().filter_map(|l| l.as_str().map(str::to_string)).collect(),
-        qrnote: string(r, "qrnote"), local: r["local"].as_bool().unwrap_or(false),
+        qrnote: string(r, "qrnote"), local: r["local"].as_bool().unwrap_or(false), tone: string(r, "tone"),
     }).collect()
 }
 
@@ -251,7 +252,7 @@ pub fn send_todo(this: &mut Backplane, cx: &mut Context<Backplane>) {
 pub fn secret_enter(data: &Value) -> Option<String> { Some(string(&data["thread"]["secretBox"], "save")).filter(|s| !s.is_empty()) }
 
 pub fn submit(this: &mut Backplane, name: &str, cx: &mut Context<Backplane>) {
-    if name.starts_with("ob") && super::onboard::submit(this, name, cx) { return }
+    if (name.starts_with("ob") || (name == "sval" && this.data["tour"].is_object())) && super::onboard::submit(this, name, cx) { return }
     match name { "rpost" => super::bots::send_post(this, "rpost", "room-post", cx), "rtext" => super::bots::send_post(this, "rtext", "remote-send", cx), "title" => { // Enter in the rename box saves, as its Rename button does (nothing for a blank title)
             let id = string(&this.data["renaming"], "id");
             let text = this.screens.fields.get("title").map(|s| s.input.read(cx).content.to_string()).unwrap_or_default();
@@ -350,7 +351,7 @@ pub(crate) fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<
         w.max(if has_field { field_w } else { 0. }).max(if r.qr.is_empty() { 0. } else { qr_w(r.qr.len()) }) };
     left = if stack { left.w_full() } else { left.flex_none().w(px((avail - GAP - right_w).max(LABEL_MIN))) };
     if !r.label.is_empty() { left = left.child(div().text_size(px(13.)).child(trs(&r.label))); }
-    if !r.note.is_empty() { left = left.child(div().text_size(px(12.)).text_color(c("dim")).child(trs(&r.note))); }
+    if !r.note.is_empty() { left = left.child(div().text_size(px(12.)).text_color(c(match r.tone.as_str() { "warn" => "warn", "bad" => "bad", _ => "dim" })).child(trs(&r.note))); }
     let mut right = if stack { div().flex().flex_col().items_start().gap_2().max_w_full() } else { div().flex().flex_col().items_end().gap_2().flex_shrink_0().max_w(px(CONTROLS_MAX)) };
     for f in &r.fields {
         if let Some(slot) = fields.get(&f.name) { right = right.child(div().w(px(field_w)).max_w_full().px_2().py_1().bg(c("raise")).child(slot.input.clone())); }
@@ -454,7 +455,7 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
 pub fn device_rows(l: &crate::local::Local) -> Vec<Row> {
     use crate::local as lo;
     let b = |label: &str, name: &str, value: &str, on: bool| Btn { label: label.into(), action: format!("local:{name}"), value: value.into(), on };
-    let r = |label: &str, note: &str, buttons: Vec<Btn>| Row { label: label.into(), note: note.into(), buttons, fields: vec![], qr: vec![], qrnote: String::new(), local: true };
+    let r = |label: &str, note: &str, buttons: Vec<Btn>| Row { label: label.into(), note: note.into(), buttons, fields: vec![], qr: vec![], qrnote: String::new(), local: true, tone: String::new() };
     let mut rows = vec![
         /* i18n-ok: drawn through trs by row_el, nav_title or the title */ r("Appearance", "", vec![]),
         /* i18n-ok: drawn through trs by row_el, nav_title or the title */ r("Language", "This device. Automatic follows the system language.", crate::i18n::CHOICES.iter().map(|(k, key)| b(&crate::i18n::t(key), "lang", k, l.lang == *k)).collect()),
@@ -579,7 +580,7 @@ mod tests {
         let mut f = Echo::new(""); f.remember("x");
         assert!(f.on_hub("changed on another device", "x"), "a real change from elsewhere");
     }
-    fn row(label: &str, page: &str) -> Row { Row { label: label.into(), note: String::new(), buttons: if page.is_empty() { vec![] } else { vec![Btn { label: format!("{label} ›"), action: "settings-page".into(), value: page.into(), on: false }] }, fields: vec![], qr: vec![], qrnote: String::new(), local: false } }
+    fn row(label: &str, page: &str) -> Row { Row { label: label.into(), note: String::new(), buttons: if page.is_empty() { vec![] } else { vec![Btn { label: format!("{label} ›"), action: "settings-page".into(), value: page.into(), on: false }] }, fields: vec![], qr: vec![], qrnote: String::new(), local: false, tone: String::new() } }
     #[test] fn the_pages_menu_is_told_from_a_page_and_the_nav_keeps_group_order() {
         let menu = vec![row("Usage", "usage"), row("Appearance", "appearance"), row("Voice", "voice"), row("Agents", "agents")];
         match shown(&menu) { Shown::Menu(items) => { let nav = nav_order(&items); assert_eq!(nav.iter().map(|(p, _)| p.as_str()).collect::<Vec<_>>(), ["appearance", "agents", "voice", "usage"], "grouped, stable inside a group"); } s => panic!("{s:?}") }

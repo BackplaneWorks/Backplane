@@ -540,9 +540,12 @@ pub fn land(st: &State) -> Option<String> {
 /// The bot Open the uberbot opens once setup has ended: this home's uberbot, when it has one yet.
 pub fn land_uber(st: &State) -> Option<String> { uber_of(st) }
 
+/// Step 4's own presses that are not `ob-*` (present/onboard_alwayson.rs answers them): setup's while it is up, the Machines page's otherwise.
+fn step4_press(action: &str) -> bool { action.starts_with("alwayson-") || action.starts_with("machine-signin") || action == "machine-home" }
+
 /// A press in setup. None for what is not setup's.
 pub fn act(st: &State, hub: &str, session: &Value, info: &Value, c: &Client, user_home: &str, action: &str, value: &str) -> Option<Out> {
-    if !action.starts_with("ob-") && action != "bfield" { return None }
+    if !action.starts_with("ob-") && action != "bfield" && !(step4_press(action) && due(st, session)) { return None }
     if action == "bfield" {
         let (name, text) = value.split_once('\u{1f}')?;
         if !(matches!(name, "obkicad" | "obfreecad" | "obproject" | "obfirst") || name.starts_with("obaon")) { return None }

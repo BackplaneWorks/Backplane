@@ -28,7 +28,10 @@ pub fn form_fields(data: &Value) -> Vec<Field> { settings::parse(&serde_json::js
 pub fn submit(this: &mut Backplane, name: &str, cx: &mut Context<Backplane>) -> bool {
     let rows = settings::parse(&serde_json::json!({"rows": this.data["tour"]["rows"]}));
     let Some(b) = rows.iter().find(|r| r.fields.iter().any(|f| f.name == name)).and_then(|r| r.buttons.first().cloned()) else { return false };
-    settings::flush_fields(this); let _ = this.tx.try_send(settings::press(&b)); cx.notify(); true
+    settings::flush_fields(this);
+    // step 4's masked box (a Boat API key, a Tailscale key): its Save goes straight to the vault, as Settings' does, never as a view action
+    if settings::is_vault_save(&b) { settings::save_vault(this, &b, cx); } else { let _ = this.tx.try_send(settings::press(&b)); }
+    cx.notify(); true
 }
 
 /// Keeps the client's own part of setup in step with the picture.
