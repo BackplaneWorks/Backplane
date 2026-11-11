@@ -67,7 +67,19 @@ Bub's); `https://boat-hub.tail9e0cf2.ts.net/healthz` answers `ok` from the deskt
 (the Authorization header is unchanged), the desktop revokes its hook and gets the setting `ring.home` (`{"url","machine"}`), and its Ring page
 (desktop and phones) then shows the owner's URL instead of Set up. The person edits the URL in the Pebble app once and sends the test event.
 
-## The cutover (only after the person says yes)
+## The cutover as run (Nov 10)
+
+The Rust hub does not sync an uberbot between machines (`uber.sync` answers 501: `net/rpc.rs`), so the lease plan below could not run.
+Bub moved whole instead, as the one owner (`scripts/boat-hub-carry.py`): everything of the desktop's log outside its projects (94k lines:
+Bub's conversation, its run, coordination and routine threads, the five other bots, 13 rooms, memories, routines and slots, mail, triage, the
+push book), ids kept; machine, peer, uber, account, session, worktree, lock and device lines left out. Order: the desktop log copied, at once
+the uberbot demoted and every bot and room deleted on the desktop (RPCs; their history stays in its log), then the Boat hub stopped, the carry
+appended, the bots' folders, mail, message images, ring key, vault and APNs config copied, the hub started (`push.apns.key` set to the box path).
+The ring was set up on the Boat (`ring.setup`: Pebble, hook `h1794356130-94959`); the desktop never had one. Parakeet v2 is installed there.
+Rollback: `scripts/boat-hub-cutover.sh rollback` (the Boat hub stopped; with the desktop hub stopped, its own last BotSet/RoomSet/UberSet lines
+appended again; then the app started).
+
+## The cutover as first planned (not run)
 
 Run as `scripts/boat-hub-cutover.sh <step>` in this order: `backup`, `link`, `link-join CODE`, `approve`, `join`, `home`, `carry`, `retire`, `check`
 (`rollback` undoes it). The carry is `scripts/boat-hub-carry.py`: from a copy of the desktop log, every live bot but the uberbot (with its thread,

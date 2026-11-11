@@ -12,6 +12,7 @@
 #   scripts/boat-hub.sh dry-run             a COPY of the desktop's home on the box (BACKPLANE_COPY=1, no tailnet, no agents, no secrets/providers/voice),
 #                                           started from the installed build on port 3899: fold time, memory, /healthz; then stopped and deleted
 #   scripts/boat-hub.sh tailnet             join the tailnet with the vault secret tailscale-boat-hub (through secret_run: TS_KEY_FILE names the file)
+#   scripts/boat-hub.sh pair-phone          a phone pairing QR (PNG, never the link in text) and short code for boat-hub, ten minutes, once
 #   scripts/boat-hub.sh start|stop          the box's hub service (the cutover starts it; see docs/BOAT-HUB.md)
 #
 # Env: BP_HUB_NAME (bp-hub), BP_HUB_TYPE (small), BP_HUB_PORT (3797), DEV (~/.backplane-gpui-dev).
@@ -174,6 +175,14 @@ cmd_tailnet() {
   on "tailscale status --self --peers=false | head -1"
 }
 
+# a pairing link for a phone (ten minutes, once): the QR as a PNG here (0600), the short code on stdout; the link itself is never printed
+cmd_pair_phone() {
+  need_box; command -v qrencode > /dev/null || die "qrencode is needed"
+  local d=${BP_TMP:-$HOME/.cache/bp-tmp} out; mkdir -p "$d"; out=$(on "BACKPLANE_HOME=$R/home $R/backplane pair" | tr -d '\r')
+  local link code; link=$(printf '%s\n' "$out" | sed -n 's/^Link: //p' | head -1); code=$(printf '%s\n' "$out" | sed -n 's/^Code: \([A-Z0-9]*\).*/\1/p' | head -1)
+  [ -n "$link" ] || die "no link from the box"
+  ( umask 077; printf %s "$link" | qrencode -s 8 -o "$d/boat-hub-pair.png" ); echo "QR: $d/boat-hub-pair.png  code: $code  address: https://boat-hub.tail9e0cf2.ts.net (ten minutes, once)"
+}
 cmd_start() { need_box; on "sudo -n systemctl enable --now bp-hub" && say "bp-hub started"; }
 cmd_stop() { need_box; on "sudo -n systemctl disable --now bp-hub" && say "bp-hub stopped and disabled"; }
 
@@ -200,6 +209,6 @@ cmd_dry_run() {
 
 case "${1:-}" in
   create) cmd_create;; install) shift; cmd_install "$@";; update) shift; cmd_update "$@";; status) cmd_status;; cost) shift; cmd_cost "$@";;
-  dry-run) cmd_dry_run;; tailnet) cmd_tailnet;; start) cmd_start;; stop) cmd_stop;;
-  *) sed -n '2,17p' "$0" | sed 's/^# \{0,1\}//'; exit 2;;
+  dry-run) cmd_dry_run;; pair-phone) cmd_pair_phone;; tailnet) cmd_tailnet;; start) cmd_start;; stop) cmd_stop;;
+  *) sed -n '2,18p' "$0" | sed 's/^# \{0,1\}//'; exit 2;;
 esac
