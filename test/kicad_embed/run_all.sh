@@ -17,6 +17,7 @@ SUITES=(
   "embed_window_e2e.sh:window"
   "embed_editors_e2e.sh:editors"
   "embed_agent_resilience_e2e.sh:resilience"
+  "embed_ux_e2e.sh:ux"
 )
 
 FAILED=0
@@ -32,5 +33,5 @@ for entry in "${SUITES[@]}"; do
   fi
 done
 
-echo "=== Summary: $((3 - FAILED))/3 suites passed (artifacts: $OUT_ROOT) ==="
+echo "=== Summary: $((${#SUITES[@]} - FAILED))/${#SUITES[@]} suites passed (artifacts: $OUT_ROOT) ==="
 [ "$FAILED" -eq 0 ]
