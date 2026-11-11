@@ -445,6 +445,7 @@ async function run(c: Cmd, firstOne: boolean) {
     }
     // "mcpcall:{json}": one Backplane MCP tool call, {"name":"preview_evaluate","arguments":{...}}, its answer in the tool result
     const mc = /mcpcall:(\{.*\})/.exec(c.text);
+    let mcGot: string | null = null; // the call made here: the reply below says it, and does not make it a second time
     if (mc && mcpUrl) {
       const call = JSON.parse(mc[1]) as { name: string; arguments: unknown };
       const id = `toolu_${rnd()}`;
@@ -458,6 +459,7 @@ async function run(c: Cmd, firstOne: boolean) {
       } catch (e) { got = String(e); }
       log(`MCPCALL ${call.name} ${got.slice(0, 600)}`);
       emit({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: `MCPRESULT ${got.slice(0, 1500)}` }] }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
+      mcGot = got;
     }
     // "edit:": an Edit call that moves the board's first footprint 2.54 mm right
     if (c.text.includes("edit:")) {
@@ -505,7 +507,8 @@ async function run(c: Cmd, firstOne: boolean) {
       emit({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: got.slice(0, 400) }] }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
     }
     // "mcpcall:{json}": one Backplane MCP call, {"name":"thread_launch","arguments":{..}} (a thread elsewhere, a room...), its answer posted as the reply
-    if (c.text.includes("mcpcall:") && mcpUrl) {
+    if (c.text.includes("mcpcall:") && mcpUrl && mcGot !== null) { const got = mcGot; say(`MCPCALL ${JSON.parse(mc![1]).name} ${got.slice(0, 600)}`); }
+    else if (c.text.includes("mcpcall:") && mcpUrl) {
       const id = `toolu_${rnd()}`;
       let call: { name: string; arguments: unknown } = { name: "", arguments: {} };
       try { call = JSON.parse(c.text.slice(c.text.indexOf("mcpcall:") + 8)); } catch (e) { log(`MCPCALL bad json ${e}`); }
