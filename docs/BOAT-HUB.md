@@ -79,6 +79,18 @@ The ring was set up on the Boat (`ring.setup`: Pebble, hook `h1794356130-94959`)
 Rollback: `scripts/boat-hub-cutover.sh rollback` (the Boat hub stopped; with the desktop hub stopped, its own last BotSet/RoomSet/UberSet lines
 appended again; then the app started).
 
+## Rolled back (Nov 10, 19:34)
+
+Within the hour the person found Bub gone from the app: the desktop app and the phone talk to the desktop hub, and neither shows another
+machine's bots (`present/screen.rs` `bots` drops `<link>~<id>` rows; data/1 `bots.list` reads only this hub's bots). So the move was rolled back:
+the Boat hub stopped and disabled, then, with the desktop hub stopped by a detached job (a turn is a child of the hub), the desktop's own last
+BotSet/RoomSet/UberSet lines appended again with `at` now (each bot's thread taken from its last BotSet that named one: Bub's last edit had
+`thread: ""`), the ring lane's new #ring-requests kept with Bub added, and the hub started as `fresh.sh` starts it. Nothing was lost: the Boat
+hub never ran a turn (no Claude sign-in there). Its home, with the carry and a ring hook of its own, is kept and stopped.
+
+Before moving Bub again: (1) clients show and talk to bots on linked machines (sidebar, phones' bot list, rooms), or `uber.sync` is ported so
+the desktop keeps a replica; (2) the Boat signed in to Claude; (3) the phones paired with the Boat.
+
 ## The cutover as first planned (not run)
 
 Run as `scripts/boat-hub-cutover.sh <step>` in this order: `backup`, `link`, `link-join CODE`, `approve`, `join`, `home`, `carry`, `retire`, `check`
