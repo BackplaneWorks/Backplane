@@ -105,6 +105,19 @@ async fn push(a: &Node, b: &Node, link: &str, body: Value) -> botnet::Resp {
     assert!(calls.load(Ordering::SeqCst) > before, "it pulled");
     assert!(!fs.store.page(&format!("{link}~t"), 0, 32).map_or(false, |p| p.rows.iter().any(|r| r.text == "late old push")), "the push itself was not trusted");
 }
+#[test] fn a_link_no_finder_can_list_is_the_owners_once_approved() {
+    let mut p = Peers::default();
+    p.fold(&json!({"$":"PeerSet","id":"pb","name":"bp-always-on","url":"https://box-node-1-3798.on.boat.dev","revoked":false,"at":1}));
+    p.fold(&json!({"$":"PeerSet","id":"pd","name":"desk","url":crate::net::peering::TUNNEL_URL,"revoked":false,"at":1}));
+    let j = json!({"self":{"name":"me","url":"http://127.0.0.1:3797","domain":""},"peers":[]});
+    assert!(!own_link(&p, &j, "pb") && !own_link(&p, &j, "pd"), "not before the person approved the pairing");
+    for l in ["pb", "pd"] { p.fold(&json!({"$":"SettingSet","key":format!("peer.own.{l}"),"value":"approved","at":2})); }
+    assert!(own_link(&p, &j, "pb"), "the Boat at its public address, from the desktop");
+    assert!(own_link(&p, &j, "pd"), "the desktop over its reverse link, from the Boat");
+    p.fold(&json!({"$":"SettingSet","key":"sync.desk","value":"off","at":3})); assert!(!own_link(&p, &j, "pd"), "sync off still holds");
+    for (u, f) in [("http://100.2.0.1:3787", true), ("https://boat-hub.tail9e0cf2.ts.net", true), ("http://192.168.1.4:3787", true), ("http://desk:3787", true), ("http://127.0.0.1:1", true),
+                   ("https://x-3798.on.boat.dev", false), (crate::net::peering::TUNNEL_URL, false), ("http://203.0.113.5:3787", false)] { assert_eq!(findable(u), f, "{u}") }
+}
 #[test] fn far_own_link_needs_live_verified_not_off_and_found() {
     let mut p = Peers::default();
     let ps = |id: &str, name: &str, rev: bool| json!({"$":"PeerSet","id":id,"name":name,"url":"http://100.2.0.1:3787","revoked":rev,"at":1});

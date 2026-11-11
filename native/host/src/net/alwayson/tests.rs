@@ -296,6 +296,13 @@ async fn a_loopback_only_hub_links_to_a_public_door_and_is_reached_over_its_own_
         hub.register_http(Arc::new(crate::net::peerhttp::PeerRoutes(p.clone())));
         hub.set_pairing(reg, Arc::new(W(routes)));
         tunnel::install(hub, p.clone());
+        // the far requests both ways (/far/rpc and the router that asks), as farhttp_start wires them, without its process-wide parts
+        let store = crate::net::farstore::FarStore::open(&hub.cfg.home).unwrap();
+        let sync = crate::net::farsync::FarSync::new(store, p.clone());
+        hub.register_http(Arc::new(crate::net::rpc::RpcRoutes(sync.clone())));
+        hub.set_far_router(Arc::new(crate::net::rpc::Router::with_copy(sync, false)));
+        // what the machine finder publishes once it has run (this machine, nobody found): a link it could never list must still be the owner's
+        p.routes.machines(json!({"self": {"name": "me", "url": format!("http://{host}:{port}"), "domain": ""}, "peers": []}), vec![]);
         p
     }
     // B: the always-on hub, its door on its loopback; it names itself by an address that is not loopback (0.0.0.0 reaches the door here)
@@ -334,6 +341,15 @@ async fn a_loopback_only_hub_links_to_a_public_door_and_is_reached_over_its_own_
     let r = crate::net::botnet::signed(&b.cfg.home, TUNNEL_URL, &link.0, &secret, crate::hub::now_ms() / 1000, "/oneway-echo", true, "hello").await;
     assert_eq!((r.code, r.body.as_str()), (200, "A got hello"));
     assert!(t0.elapsed() < std::time::Duration::from_secs(3), "{:?}", t0.elapsed());
+    // the requests each end asks of the other (sign in there, the move check) find it the owner's own, both ways: never the 403 an older
+    // Backplane answers (lane T's run-a: "that machine runs an older Backplane", "runs a Backplane without the move check")
+    let link_on_a = pa.table.with(|t| t.live().into_iter().next().map(|x| x.id)).unwrap();
+    for m in ["signin.state", "home.ready"] {
+        let (code, text) = a.far_raw(&link_on_a, m, &json!({"providers": []})).await;
+        assert_eq!(code, 200, "A to B {m}: {code} {text}");
+        let (code, text) = b.far_raw(&link.0, m, &json!({"providers": []})).await;
+        assert_eq!(code, 200, "B to A {m}, over A's poll: {code} {text}");
+    }
     // a hub that does not take the reverse link (an older build: no /far/tunnel) is still refused, as before
     let e = crate::net::peering::announce(&a.cfg.home, &format!("http://127.0.0.1:{pa_port}"), "http://0.0.0.0:9").await.unwrap_err();
     assert!(e.contains("loopback"), "{e}");

@@ -98,7 +98,7 @@ impl Ends {
         let mut g = self.links.lock().unwrap();
         let l = g.entry(peer.to_string()).or_default();
         if let Some((at, ok)) = l.reach { if at.elapsed() < REACH_EVERY { return Some(ok) } }
-        if l.probing || !crate::net::botnet::url_ok(url) { return l.reach.map(|r| r.1) }
+        if l.probing || !crate::net::botnet::url_ok(url) || crate::net::machines::loopback(url) || crate::net::peering::over_link(url) { return l.reach.map(|r| r.1) }
         l.probing = true;
         let (home, peer, url) = (home.to_path_buf(), peer.to_string(), url.to_string());
         tokio::spawn(async move {
@@ -185,7 +185,10 @@ pub fn start(hub: &Arc<Hub>, links: Links, here: Arc<dyn Fn() -> Fut<'static, St
                         // still linked (a removed link ends its loop)
                         let Some((_, url, secret)) = links().into_iter().find(|l| l.0 == id) else { break };
                         let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
-                        let body = json!({"wait": true, "url": here().await, "replies": []}).to_string();
+                        // this hub's own address, for the far end's reach probe; a loopback one would be the far end's own loopback (its own hub
+                        // answering there), so it is never sent: a hub nobody can reach keeps polling
+                        let mine = here().await;
+                        let body = json!({"wait": true, "url": if crate::net::machines::loopback(&mine) { String::new() } else { mine }, "replies": []}).to_string();
                         let r = crate::net::botnet::signed(&hub.cfg.home, &url, &id, &secret, now, "/far/tunnel", true, &body).await;
                         match r.code {
                             200 => back = 5,
