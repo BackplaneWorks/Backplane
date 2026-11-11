@@ -136,6 +136,8 @@ impl KicadPane {
     }
     pub fn has_override(&self) -> bool { self.override_kind.is_some() }
     fn wanted_kind(&self) -> &str { self.override_kind.as_deref().unwrap_or_else(|| frame_for(&self.open)) }
+    /// The person took the editor: the hub then refuses an agent's save while anything is unsaved (kicad/embed.rs `Unsaved`).
+    fn touched(&self) { self.rpc("editor.kicad.touched", json!({"project": self.project})); }
     fn want(&self) -> Option<u32> { if self.info.is_null() { return None } pick(self.wanted_kind(), &self.info, &self.frames) }
     fn tick(&mut self, cx: &mut Context<Self>) {
         let Some(c) = self.container else { return };
@@ -200,15 +202,15 @@ impl KicadPane {
         // a click over the editor gives it the keyboard; a click anywhere else in the client's window gives it back
         if let Some(w) = self.want() { match (nc::button_over(w), nc::has_focus(c)) { (Some(true), false) => nc::focus(w), (Some(false), true) => nc::focus(self.toplevel), _ => {} } }
         let has = nc::has_focus(c);
-        if has != self.keys { self.keys = has; nc::grab_escape(self.toplevel, has); nc::grab_click(c, !has); cx.notify(); }
+        if has != self.keys { self.keys = has; nc::grab_escape(self.toplevel, has); nc::grab_click(c, !has); if has { self.touched(); } cx.notify(); }
         if let Some(h) = self.info["holder"].as_u64().filter(|h| *h > 0 && *h as u32 != self.kept) { nc::keep(h as u32); self.kept = h as u32; }
         for e in nc::events() {
             match e {
                 // the keyboard back to the client's window; a reserved chord is then pressed in gpui (after_frame, which has the window)
                 nc::Ev::Escape => { nc::focus(self.toplevel); self.keys = false; nc::grab_escape(self.toplevel, false); nc::grab_click(c, true); cx.notify(); }
-                nc::Ev::Click => { if let Some(w) = self.want() { nc::grab_click(c, false); nc::focus(w); self.keys = true; nc::grab_escape(self.toplevel, true); cx.notify(); } }
+                nc::Ev::Click => { if let Some(w) = self.want() { nc::grab_click(c, false); nc::focus(w); self.keys = true; self.touched(); nc::grab_escape(self.toplevel, true); cx.notify(); } }
                 nc::Ev::Key(k) => { nc::focus(self.toplevel); self.keys = false; nc::grab_escape(self.toplevel, false); nc::grab_click(c, true); self.press.push(k); cx.notify(); }
-                nc::Ev::Focus(_) => { if !self.keys { self.keys = true; nc::grab_escape(self.toplevel, true); nc::grab_click(c, false); cx.notify(); } }
+                nc::Ev::Focus(_) => { if !self.keys { self.keys = true; self.touched(); nc::grab_escape(self.toplevel, true); nc::grab_click(c, false); cx.notify(); } }
             }
         }
     }

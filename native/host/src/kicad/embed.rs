@@ -385,7 +385,35 @@ pub fn gui_route(pro: &str) -> Option<GuiRoute> {
     routes().lock().unwrap().get(pro).cloned()
 }
 
+// The person's unsaved edits (the person's rule, Nov 11): an agent's save never writes what the person has open and unsaved. Per project:
+// whether a document is modified (from each publish: GetFrames in fork mode, the client's titles in stock mode), whether the agent's own
+// commits changed it since the last save, and whether the person had the editor (the keyboard on a click, from the client) or had it
+// modified before the agent's commit began. All three clear when nothing is modified any more (a save, a revert).
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Unsaved { pub modified: bool, pub agent: bool, pub person: bool }
+impl Unsaved {
+    /// What a publish says: nothing modified clears everything.
+    pub fn seen(self, modified: bool) -> Self { if modified { Unsaved { modified, ..self } } else { Unsaved::default() } }
+    /// The person took the editor (a click gave KiCad the keyboard).
+    pub fn touched(self) -> Self { Unsaved { person: true, ..self } }
+    /// An agent's BeginCommit: edits already pending that are not the agent's are the person's.
+    pub fn agent_begins(self) -> Self { Unsaved { person: self.person || (self.modified && !self.agent), ..self } }
+    /// An agent's commit landed.
+    pub fn agent_committed(self) -> Self { Unsaved { agent: true, modified: true, ..self } }
+    /// Why an agent's save is refused ("" when it may save): the document is modified and the person may have edits in it.
+    pub fn refuse_save(self, file: &str) -> String {
+        if self.modified && self.person { format!("You have unsaved edits in KiCad ({file}). The agent's save was refused so that it does not write them: save or revert your edits in KiCad first, then ask again.") } else { String::new() }
+    }
+}
+static UNSAVED: OnceLock<Mutex<HashMap<String, Unsaved>>> = OnceLock::new();
+fn unsaved() -> &'static Mutex<HashMap<String, Unsaved>> { UNSAVED.get_or_init(Default::default) }
+/// The project's state, changed by `f`; answers the new state.
+pub fn unsaved_update(pro: &str, f: impl FnOnce(Unsaved) -> Unsaved) -> Unsaved {
+    let mut m = unsaved().lock().unwrap(); let n = f(m.get(pro).copied().unwrap_or_default()); m.insert(pro.to_string(), n); n
+}
+
 fn put_route(s: &Session, tx: &mpsc::UnboundedSender<Msg>) {
+    unsaved_update(&s.pro, |u| u.seen(s.frames.iter().any(|f| f.modified)));
     let mut r = routes().lock().unwrap();
     if s.state == "ready" && !s.sock.is_empty() {
         r.insert(s.pro.clone(), GuiRoute {
@@ -1627,6 +1655,7 @@ const METHODS: &[&str] = &[
     "editor.kicad.close",
     "editor.kicad.restart",
     "editor.kicad.frames",
+    "editor.kicad.touched",
 ];
 
 fn ok_reply(id: &Value, payload: Value) -> Vec<Value> {
@@ -1661,6 +1690,7 @@ impl RpcHandler for EmbedRpc {
             if !super::known_root(hub, &resolved.root, "").await {
                 return err_reply(id, &format!("{} is not in a project this hub knows", resolved.pro));
             }
+            if method == "editor.kicad.touched" { unsaved_update(&resolved.pro, |u| u.touched()); return ok_reply(id, json!({})) }
             let (tx, rx) = oneshot::channel();
             let sent = match method {
                 "editor.kicad.attach" => {
@@ -2286,4 +2316,21 @@ mod tests {
         let _ = xvfb.kill();
         let _ = xvfb.wait();
     }
+
+#[cfg(test)]
+mod unsaved_tests {
+    use super::Unsaved;
+    #[test] fn an_agent_save_never_writes_the_persons_unsaved_edits() {
+        let clean = Unsaved::default();
+        // only the agent's commits: it may save
+        let a = clean.agent_begins().agent_committed(); assert_eq!(a.refuse_save("a.kicad_pcb"), "");
+        // the person clicked into KiCad and the board is modified: refused, whoever made the change
+        let p = a.touched(); assert!(p.refuse_save("a.kicad_pcb").starts_with("You have unsaved edits in KiCad (a.kicad_pcb)"));
+        // edits pending before the agent's first commit are the person's
+        let pending = clean.seen(true).agent_begins().agent_committed(); assert!(!pending.refuse_save("b").is_empty());
+        // a touch without changes refuses nothing; a save (nothing modified) clears it all
+        assert_eq!(clean.touched().refuse_save("c"), ""); assert_eq!(p.seen(false), Unsaved::default());
+    }
+}
+
 }
