@@ -467,6 +467,7 @@ impl Rig {
     std::fs::remove_file(r.dir.join("mode.p@x.com")).unwrap(); r.tick(rp + 1).await;
     assert_eq!(th(&*r.hub.model().await), ("claude".to_string(), "claude-opus-5-5".to_string()), "{:?}", r.lines(t2));
     assert_eq!(r.binding(t2, "claude").await, p.0);
+}
 /// thread_update {provider, model, account} from another thread (a lead moving a lane), between turns: the conversation goes with it as a switch by hand does; a choice
 /// made this way stays (the chain does not move it back up by itself), and a thread the chain moved down is brought back by it with the chain's bookkeeping cleared.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn a_lead_moves_a_thread_to_another_provider_and_back_and_the_conversation_goes_with_it() {
