@@ -172,11 +172,14 @@ pub fn input_backend(id: &str, role: &str, text: &str) -> bool {
     if ["[Backplane]", "[mail ", "[mailroom "].iter().any(|h| text.starts_with(h)) { return true }
     crate::state::fam::ext::classify_kind(crate::model::link_from(id), id, text) != "person"
 }
+/// Bot.told: a message the bot speaks to the person from a backend turn: notify_person's (`tell:<id>`) and the private mailroom's tell_person (`tell:<id>`, and
+/// before Nov 11 `tell<digits>`, which the backend filter hid: those tells reached no one's screen). It always shows.
+pub fn told_row(id: &str) -> bool { id.strip_prefix("tell").map_or(false, |r| r.starts_with(':') || r.starts_with(|c: char| c.is_ascii_digit())) }
 /// The backend replies among `rows` (oldest first: (id, is a message, role, text)); `before`: the turn running when the first row was written was a backend one.
 /// A turn is the person's when any of the inputs that started or steered it since the last reply is (several can run as one turn); a reply of `tell:` always shows.
 pub fn backend_replies<'a>(rows: impl IntoIterator<Item = (&'a str, bool, &'a str, &'a str)>, before: bool) -> std::collections::HashSet<String> {
     let mut out = std::collections::HashSet::new(); let mut t = Turnk { backend: before, fresh: false };
-    for (id, msg, role, text) in rows { if msg && t.step(id, role, text) && role == "assistant" && !id.starts_with("tell:") { out.insert(id.to_string()); } }
+    for (id, msg, role, text) in rows { if msg && t.step(id, role, text) && role == "assistant" && !told_row(id) { out.insert(id.to_string()); } }
     out
 }
 /// The state of that walk: whether the turn being written is a backend one, and whether a reply came since its last input.

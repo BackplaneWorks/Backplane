@@ -32,8 +32,8 @@ pub fn continuity_replied(ms: &[Hdr], bot: &str, thread: &str) -> bool {
 /// Continuity.needs
 fn continuity_needs(token: &str, escalated: &str, forwarded: &str, status: &str, replied: bool) -> bool { !replied && !(status == "done" || status == "snoozed") && token != escalated && token != forwarded }
 
-const SEND_HEAD: &str = "[Private mailroom escalation; assess in this separate private lane. Resolve routine coordination, duplicate reports and evidence limitations silently within existing authority. Only for a verified material new outcome, real decision, approval or coordination blocker, explicitly call tell_person with your OWN contextual update and source links. Empty final output is successful; no visible response or acknowledgement is owed. Never forward raw worker output, internal tool denials or charter chatter; a triage limitation alone does not require user approval. Genuine source approvals remain pending.]\n";
-pub const PRIVATE_BRIEF: &str = "\n<private_mailroom_turn allow_empty_output=\"true\">\nYou are the owning coordinator in its private back office, not the person's conversation. Resolve mail and coordinate within existing authorization using your normal tools, owner memory and mail_context. All commentary, tool activity and final text stay in this private lane. Empty final output is successful: do not retry or re-prompt merely to produce visible output. Routine acknowledgments and already-told items need no user message. Only when you explicitly choose to tell the person, call tell_person(text, key) with your OWN contextual message and actionable source links. This is the only chat-publication path; a final response, escalation or decision is not publication. Use a stable exact event/version key to avoid duplicate tells. Actual source approvals remain pending; no message or decision grants consent. Never answer an approval, resume a hold, or infer authorization from a report.\n</private_mailroom_turn>\n";
+const SEND_HEAD: &str = "[Private mailroom escalation; assess in this separate private lane. Resolve routine coordination, duplicate reports and evidence limitations silently within existing authority. Done is material: a launched thread finishing work the person asked for, or a landing on main, is a material outcome. For it, and for a real decision, approval or coordination blocker, explicitly call tell_person with your OWN contextual update and source links. Empty final output is successful; no visible response or acknowledgement is owed. Never forward raw worker output, internal tool denials or charter chatter; a triage limitation alone does not require user approval. Genuine source approvals remain pending.]\n";
+pub const PRIVATE_BRIEF: &str = "\n<private_mailroom_turn allow_empty_output=\"true\">\nYou are the owning coordinator in its private back office, not the person's conversation. Resolve mail and coordinate within existing authorization using your normal tools, owner memory and mail_context. All commentary, tool activity and final text stay in this private lane. Empty final output is successful: do not retry or re-prompt merely to produce visible output. Routine acknowledgments, pure intermediate progress and already-told items need no user message. Done is material: when work the person asked for finishes or lands (on main or in their build), tell them right away in one short plain line: what landed, whether it is live in their running build, and what to try. An ask or decision waiting on the person is told once. The person's own rules in <owner_preferences> and <memory> override this brief. To tell the person, call tell_person(text, key) with your OWN contextual message and actionable source links. This is the only chat-publication path; a final response, escalation or decision is not publication. Use a stable exact event/version key to avoid duplicate tells. Actual source approvals remain pending; no message or decision grants consent. Never answer an approval, resume a hold, or infer authorization from a report.\n</private_mailroom_turn>\n";
 
 impl<'a> Ctx<'a> {
     pub fn triage_key(bot: &str, input: &str) -> String { pair_key("triage.escalated.", bot, input) }
@@ -110,7 +110,7 @@ impl<'a> Ctx<'a> {
     }
 
     /// Private.spawn: a thread and provider session of its own for the coordinator's back office, with the note on its ride
-    fn private_spawn(&mut self, bot: &str, input: &str, note: &str) -> Step {
+    pub(super) fn private_spawn(&mut self, bot: &str, input: &str, note: &str) -> Step {
         let owner = self.w.bot(bot).map(|b| b.thread.clone()).unwrap_or_default(); let parent = self.th(&owner); let cwd = self.cwd(&parent);
         let thread = format!("mailcoord-{bot}-{}", self.id("turn")); let now = self.now;
         let (runtime, interaction) = self.w.modes.get(&owner).map_or(("full-access".to_string(), "default".to_string()), |m| (m.0.clone(), m.1.clone()));
@@ -237,6 +237,7 @@ impl<'a> Ctx<'a> {
 
     /// Private.lost: a lane cut off before it told anyone hands its note to the owner's own agent, once
     pub fn private_lost(&mut self, lane: &str, state: &str) -> Step {
+        if let Some(st) = self.done_lane_end(lane, state) { return st } // Done.lane.end: a done lane's digest is posted, not handed over
         if !self.w.private_is(lane) || !(state == "interrupted" || state == "failed") { return Step::none() }
         let note = self.setting(&note_key(lane), ""); let target = self.w.triage_thread();
         if note.is_empty() || !self.setting(&said_key(lane), "").is_empty() || !self.setting(&handed_key(lane), "").is_empty() || target.is_empty() { return Step::none() }
@@ -248,7 +249,7 @@ impl<'a> Ctx<'a> {
     pub fn private_tell(&mut self, thread: &str, text: &str, key: &str) -> Step {
         let bot = self.w.private_owner(thread); let target = self.w.triage_thread();
         if !self.setting(&private_told_key(&bot, key), "").is_empty() { return Step::none() }
-        let msg = self.id("tell"); let now = self.now;
+        let msg = self.id("tell:"); let now = self.now; // Bot.told: `tell:` always shows in the chat
         let mut cs = vec![json!({"$":"MessagePosted","thread":target,"msg":msg,"role":"assistant","text":text,"at":now}), json!({"$":"MessageFrom","thread":target,"msg":msg,"from":format!("thread:{thread}"),"kind":"tell-person","ref":key,"at":now}),
             set(private_told_key(&bot, key), &msg, now), set(said_key(thread), &msg, now)];
         if self.policy_on("needs") || self.policy_on("settled") { cs.push(self.alert_set(&target, "note", &format!("tell-{msg}"), &Self::alert_text(text, 500))) }

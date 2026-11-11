@@ -62,7 +62,11 @@ impl Bots {
         (t, st.outs)
     }
     /// Mail.route for a header just filed
-    pub async fn route_body(self: &Arc<Self>, body: Body) { let outs = self.decide(&[], |c| c.route(&body)).await; self.perform(outs).await }
+    pub async fn route_body(self: &Arc<Self>, body: Body) {
+        let outs = self.decide(&[], |c| c.route(&body)).await; self.perform(outs).await;
+        // Done.timer: a finish that opened the owner's batch flushes it when its window is over
+        if body.mail.kind == "launch" { let due = { let w = self.world().await; w.setting(&super::done::due_key(&w.uber_bot()), "").parse().unwrap_or(0) }; self.done_timer(due) }
+    }
     /// Run.queue.start for RunNext
     pub async fn run_next(self: &Arc<Self>, bot: String, conv: String) { let outs = self.decide(&[], |c| c.queue_start(&bot, &conv)).await; self.perform(outs).await }
     pub(crate) fn perform(self: &Arc<Self>, outs: Vec<RouteOut>) -> crate::api::Fut<'_, ()> { Box::pin(async move {

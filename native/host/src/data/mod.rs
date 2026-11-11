@@ -563,7 +563,7 @@ async fn deltas(hub: &Hub, lines: &[String], subs: &mut Subs) -> Vec<Value> {
                 let bot = bot_chat(&th);
                 let backend = bot && {
                     if !last_in.contains_key(&th) { let m = hub.model().await; let rows: Vec<crate::model::Row> = m.tail(&hub.store, &th, 48).into_iter().filter(|r| r.seq <= base).collect(); last_in.insert(th.clone(), crate::present::thread::turn_of(&rows)); }
-                    let t = last_in.get_mut(&th).unwrap(); t.step(id, role, s(&e, "text")) && role == "assistant" && !id.starts_with("tell:")
+                    let t = last_in.get_mut(&th).unwrap(); t.step(id, role, s(&e, "text")) && role == "assistant" && !crate::present::thread::told_row(id)
                 };
                 if crate::present::thread::hidden(bot, id, role, s(&e, "text")) || backend { en["agentOnly"] = json!(true) }
                 if let Some(a) = e.get("attachments") { en["attachments"] = a.clone() }

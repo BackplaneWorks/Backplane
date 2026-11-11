@@ -16,7 +16,7 @@ impl<'a> Ctx<'a> {
     pub fn bot_prompt(&self, thread: &str, home: &str) -> String {
         let bot = self.w.run_bot(thread).cloned();
         let who = |b: &Option<Bot>| b.as_ref().map_or(String::new(), |b| identity(self.w, b, home));
-        if self.w.private_is(thread) { return format!("{}{}{PRIVATE_BRIEF}", who(&bot), self.triage_context(&self.w.private_owner(thread))) }
+        if self.w.private_is(thread) { let owner = self.w.private_owner(thread); return format!("{}{}{PRIVATE_BRIEF}{}", who(&bot), self.triage_context(&owner), self.prefs(&owner)) }
         if self.w.triage_is(thread) { return format!("{}{}{}{}\n", T::RUN[0], ref_uri("thread", &self.w.triage_thread()), T::RUN[1], super::route::EVIDENCE_TOOLS) }
         let assess = if thread == self.w.triage_thread() && !thread.is_empty() { format!("{}{}{}", T::ASSESS[0], self.triage_audit(&self.w.uber_bot()), T::ASSESS[1]) } else { String::new() };
         format!("{}{assess}", who(&bot))
