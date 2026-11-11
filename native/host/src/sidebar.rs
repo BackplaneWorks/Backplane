@@ -200,6 +200,19 @@ fn kids_hidden<'a>(st: &'a State) -> HashSet<&'a str> {
     // a swarm's members (docs/SWARM.md): the swarm is one row of its project, its threads open from its page
     k.extend(st.swarm_of.keys().map(String::as_str)); k
 }
+/// A live swarm as the sidebar's sections place it (lane J, present/sections.rs): one row under its project, opened by `nav`.
+#[derive(Clone, Debug, PartialEq)]
+pub struct SwarmRow { pub id: String, pub project: String, pub title: String, pub word: &'static str, pub activity: u64, pub nav: String }
+/// The live swarms (active or paused), newest first. `word` in the sections' words: `needs` when a guard paused it (circular, chatter, budget, idle: the
+/// person decides what next) or a member waits on an ask, `failed` when a member's last turn failed, else `running` (a swarm the person paused included).
+/// A swarm's member threads are in `State::swarm_of`: they are no row of their own.
+pub fn live_swarms(st: &State) -> Vec<SwarmRow> {
+    let mut v: Vec<SwarmRow> = st.rooms_nav.iter().filter(|(_, r)| r.swarm_live()).map(|(id, r)| {
+        let ts = || r.threads.iter().filter_map(|t| st.threads.get(t.as_str()));
+        let word = if (r.state == "paused" && r.reason != "person") || ts().any(|t| t.pending > 0) { "needs" } else if ts().any(|t| t.turn == Turn::Failed) { "failed" } else { "running" };
+        SwarmRow { id: id.clone(), project: r.project.clone(), title: r.name.clone(), word, activity: r.last, nav: format!("@room:{id}") } }).collect();
+    v.sort_by(|a, b| b.activity.cmp(&a.activity).then(a.id.cmp(&b.id))); v
+}
 /// A project's swarms as sidebar rows, newest first: the live ones only (active or paused; one that is over leaves, as a settled thread does).
 /// `working`: members whose turn runs now. A row opens the swarm's room page (`@room:<id>`).
 pub fn swarm_rows(st: &State, o: &Opts, pid: &str) -> Vec<Value> {
@@ -555,6 +568,15 @@ mod tests {
     fn fold(lines: &[&str]) -> State { let mut s = State::new(); for l in lines { s.apply_line(l); } s }
     const PC: &str = r#"{"$":"ProjectCreated","id":"p1","title":"proj","root":"/r","at":10}"#;
     fn tc(id: &str, at: u64) -> String { format!(r#"{{"$":"ThreadCreated","id":"{id}","project":"p1","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":{at}}}"#) }
+    #[test] fn live_swarms_are_one_row_each_and_a_guard_pause_needs_the_person() {
+        let room = |id: &str, state: &str, reason: &str| format!(r#"{{"$":"RoomSet","id":"{id}","name":"S {id}","members":"thread:a\nthread:b","kind":"swarm","project":"p1","state":"{state}","reason":"{reason}","at":20}}"#);
+        let s = fold(&[PC, &tc("a", 11), &tc("b", 12), &room("r1", "", ""), &room("r2", "paused", "circular"), &room("r3", "paused", "person"), &room("r4", "done", "")]);
+        let rows = live_swarms(&s); let w: Vec<(&str, &str)> = rows.iter().map(|r| (r.id.as_str(), r.word)).collect();
+        assert_eq!(w.len(), 3, "a swarm that is over is no row: {w:?}");
+        assert!(w.contains(&("r1", "running")) && w.contains(&("r2", "needs")) && w.contains(&("r3", "running")), "{w:?}");
+        assert_eq!(rows[0].nav, format!("@room:{}", rows[0].id));
+        assert!(s.swarm_of.contains_key("a") && s.swarm_of.contains_key("b"), "the members are marked: no rows of their own");
+    }
     fn opts<'a>(open: &'a HashSet<String>, now: u64) -> Opts<'a> { Opts { hub: "h", now, selected: "", open, older_open: false, query: "" } }
 
     // one pass over the threads lists every project's conversations as asking each project in turn does: same shelves, same order, hidden children left out
@@ -725,4 +747,5 @@ mod bounded_tests {
             }
         }
     }
+
 }

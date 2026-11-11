@@ -45,7 +45,7 @@ pub struct RoomNav { pub name: String, pub members: usize,
     /// a bots' exchange (bots/life.rs): in no sidebar, list, mention or count; opened by its id only
     #[serde(default)] pub ephemeral: bool, #[serde(default)] pub closed: bool,
     /// a swarm (docs/SWARM.md): its kind, project, state ("" active, paused, stopped, done), member threads, made and newest post
-    #[serde(default)] pub kind: String, #[serde(default)] pub project: String, #[serde(default)] pub state: String,
+    #[serde(default)] pub kind: String, #[serde(default)] pub project: String, #[serde(default)] pub state: String, #[serde(default)] pub reason: String,
     #[serde(default)] pub threads: Vec<String>, #[serde(default)] pub created: u64, #[serde(default)] pub last: u64 }
 impl RoomNav {
     pub fn swarm(&self) -> bool { self.kind == "swarm" }
@@ -252,7 +252,7 @@ impl State {
                 let kind = keep("kind", o.map(|r| &r.kind)); let threads: Vec<String> = ms.iter().filter_map(|m| m.strip_prefix("thread:")).map(str::to_string).collect();
                 if kind == "swarm" { for t in &threads { self.swarm_of.insert(t.clone(), id.to_string()); } }
                 let at = e["at"].as_u64().unwrap_or(0);
-                self.rooms_nav.insert(id.into(), RoomNav { name:s(e,"name")?.into(), members:ms.len(), ephemeral, closed, kind, project: keep("project", o.map(|r| &r.project)), state: keep("state", o.map(|r| &r.state)),
+                self.rooms_nav.insert(id.into(), RoomNav { name:s(e,"name")?.into(), members:ms.len(), ephemeral, closed, kind, project: keep("project", o.map(|r| &r.project)), state: keep("state", o.map(|r| &r.state)), reason: keep("reason", o.map(|r| &r.reason)),
                     threads, created: o.map_or(at, |r| r.created), last: o.map_or(at, |r| r.last.max(at)) }); }
             "RoomDeleted" => { if let Some(r) = self.rooms_nav.remove(s(e,"id")?) { for t in r.threads { self.swarm_of.remove(&t); } } }
             "RoomPosted" => { if let Some(r) = self.rooms_nav.get_mut(s(e,"room")?) { r.last = r.last.max(e["at"].as_u64().unwrap_or(0)) } if let Some(bot)=self.bots_nav.get_mut(s(e,"from")?) { bot.talked=n(e,"at")?; } }
