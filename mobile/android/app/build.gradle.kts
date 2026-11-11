@@ -32,8 +32,8 @@ gradle.taskGraph.whenReady {
 // -Pbp.appId=… -Pbp.scheme=…: a test build that installs beside the one a phone already uses (it keeps its pairing)
 val bpAppId = (findProperty("bp.appId") as String?) ?: "dev.backplane.mobile.gpui"
 val bpScheme = (findProperty("bp.scheme") as String?) ?: "bpgpui"
-// -Pbp.appName=…: the launcher name (the release is "Backplane", as 0.14.1 was)
-val bpAppName = (findProperty("bp.appName") as String?) ?: "Backplane GPUI"
+// -Pbp.appName=…: the launcher name ("Backplane", as 0.14.1 was; the id and scheme stay the GPUI ones, which updates depend on)
+val bpAppName = (findProperty("bp.appName") as String?) ?: "Backplane"
 
 android {
     namespace = "dev.backplane.mobile"

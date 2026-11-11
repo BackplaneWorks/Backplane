@@ -208,7 +208,7 @@
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				BASE_BUNDLE_ID = dev.backplane.gpui;
-				APP_DISPLAY_NAME = "Backplane GPUI";
+				APP_DISPLAY_NAME = Backplane;
 				URL_SCHEME = backplane-gpui;
 				CURRENT_PROJECT_VERSION = 1;
 				MARKETING_VERSION = 0.15.0;
@@ -234,7 +234,7 @@
 			buildSettings = {
 				ALWAYS_SEARCH_USER_PATHS = NO;
 				BASE_BUNDLE_ID = dev.backplane.gpui;
-				APP_DISPLAY_NAME = "Backplane GPUI";
+				APP_DISPLAY_NAME = Backplane;
 				URL_SCHEME = backplane-gpui;
 				CURRENT_PROJECT_VERSION = 1;
 				MARKETING_VERSION = 0.15.0;
