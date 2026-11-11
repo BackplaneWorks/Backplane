@@ -759,7 +759,7 @@ struct DataThreadView: View {
                         }
                         ForEach(DataFold.rows(list, running: working)) { r in
                             switch r {
-                            case .entry(let e): DataEntryRow(client: client, thread: id, entry: e)
+                            case .entry(let e): DataEntryRow(client: client, thread: id, entry: e, goTo: { mark = $0; findGo = $0 })
                                 // the message a find or a search hit went to
                                 .background { if mark == e.id { Rectangle().fill(BackplaneDesign.accent.opacity(0.12)).overlay(alignment: .leading) { Rectangle().fill(BackplaneDesign.accent).frame(width: 2) }.padding(-4).accessibilityElement().accessibilityLabel(Tr.k("ios.thread.marked")).accessibilityIdentifier("data.thread.marked") } }
                                 .id(e.id)
@@ -1160,12 +1160,17 @@ struct DataEntryRow: View {
     let client: DataClient
     let thread: String
     let entry: DEntry
+    var goTo: (String) -> Void = { _ in }   // a reply's chip: to the message it answers
 
     var body: some View {
         switch entry.kind {
         case "user":
             HStack { Spacer(minLength: 32)
                 VStack(alignment: .trailing, spacing: 3) {
+                    if let r = entry.replyTo {
+                        Button { goTo(r.id) } label: { Text(Tr.gpui_b_in_reply_to(quote: r.quote)).dmono(11).foregroundStyle(BackplaneDesign.dim).lineLimit(1).truncationMode(.tail) }
+                            .buttonStyle(.plain).accessibilityIdentifier("data.entry.replyto")
+                    }
                     VStack(alignment: .leading, spacing: 6) {
                         ForEach(Array(entry.localImages.enumerated()), id: \.offset) { _, d in
                             if let u = UIImage(data: d) { Image(uiImage: u).resizable().scaledToFit().frame(maxWidth: 220, maxHeight: 220).accessibilityIdentifier("data.entry.image") }

@@ -650,7 +650,7 @@ private fun ThreadScreen(id: String, viewer: () -> Unit, hub: () -> Unit, go: (S
             items(rows, key = { it.id }) { r ->
                 Box(Modifier.background(if (found == r.id) dcs.primary.copy(alpha = .16f) else Color.Transparent)) {
                 when (r) {
-                    is DRow.Entry -> EntryRow(id, r.entry)
+                    is DRow.Entry -> EntryRow(id, r.entry) { jump(it, true) }
                     is DRow.Fold -> FoldRow(r.fold, r.fold.id in openRuns) { openRuns = if (r.fold.id in openRuns) openRuns - r.fold.id else openRuns + r.fold.id }
                 }
                 }
@@ -786,9 +786,11 @@ private fun SecretBox(tid: String, name0: String, asked: DataClient.SecretAsk?, 
 }
 
 @Composable
-private fun EntryRow(tid: String, e: DEntry) {
+private fun EntryRow(tid: String, e: DEntry, goTo: (String) -> Unit = {}) {
     when (e.kind) {
         "user" -> Column(Modifier.fillMaxWidth().padding(start = 32.dp, end = 12.dp, top = 6.dp, bottom = 6.dp), horizontalAlignment = Alignment.End) {
+            // a reply: what it answers, a tap goes there
+            e.replyTo?.let { r -> DMono(Msg.gpui_b_in_reply_to(r.quote), dfaint, modifier = Modifier.clickable { goTo(r.id) }.padding(bottom = 3.dp).testTag("thread.entry.replyto")) }
             e.localImages.forEach { Pic(it, 160); Spacer(Modifier.height(4.dp)) }
             e.attachments.filter { e.localImages.isEmpty() }.forEach { PicById(it.id, 160); Spacer(Modifier.height(4.dp)) }
             if (e.text.isNotEmpty()) Box(Modifier.background(dcs.surfaceContainerHigh).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(horizontal = 10.dp, vertical = 8.dp)) { LinkText(e.text, tid, color = dcs.onSurface, size = 13, lineHeight = 19) }

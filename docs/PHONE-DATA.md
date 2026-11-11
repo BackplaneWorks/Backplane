@@ -22,8 +22,10 @@ Thread  = {id, project, title, state, updatedAt, pinned, pinOrder, settled, sett
           pinOrder = where a pinned thread stands on its project's Pinned shelf (0 first: the order the pins were made, or a drag's), so a phone lists pins as the desktop does; 0 when not pinned
           mark? = {name, short, away, label, runs}: the machine the thread runs on when it is another one (see One project across machines); absent for this hub's
           state ∈ "idle" | "working" | "asking" | "failed"; preview ≤ 140 chars; waiting = open asks
-Entry   = {id, kind, text, at, clientId?, live?, agentOnly?, tool?, ask?}
+Entry   = {id, kind, text, at, clientId?, live?, agentOnly?, tool?, ask?, replyTo?}
           kind ∈ "user" | "assistant" | "tool" | "ask" | "note" | "step"
+          replyTo: {id, quote} on the person's reply to a message (the desktop's Reply): `text` is what they wrote, `quote` the first line of the
+          message answered. Draw "↩ In reply to: <quote>" (`gpui.b.in.reply.to`) over the bubble; a tap goes to `id` (read older pages until held).
           agentOnly: true on a message only the agent reads (the hub's note about a quote it posted): a client does not show it; in a bot's conversation (the uberbot's chat) also
           everything the hub hands the bot: launched-thread and task reports, watched work, mailroom/triage input, wake/routine/webhook
           prompts, other threads' messages, `[Backplane]` notes and system notes (`present::thread::bot_private`). A launched thread that
