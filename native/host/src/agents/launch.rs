@@ -17,7 +17,7 @@ impl Agents {
         let (caller, proj, default_prov, default_model, scratch_ok) = { let w = self.world().await;
             let c = w.threads.get(thread).cloned();
             let asked = s(a, "project");
-            let proj = if !asked.is_empty() { w.project_find(asked) } else { c.as_ref().map(|c| c.project.clone()) };
+            let proj = if !asked.is_empty() { w.project_find(asked).or_else(|| crate::net::registry::local_id(asked)) } else { c.as_ref().map(|c| c.project.clone()) };
             (c, proj, w.setting("agent.provider").to_string(), w.setting("agent.model").to_string(), asked.trim().eq_ignore_ascii_case("scratch")) };
         if scratch_ok { return fail("Scratch is retired: name a project (machine_list), or ask the uberbot") }
         let Some(proj) = proj.filter(|p| !p.is_empty()) else { return fail("name an existing project (project_list shows them)") };

@@ -175,10 +175,10 @@ impl Backplane {
                 let pin_group = SharedString::from(format!("row-{id}"));
                 let pin = crate::screens::siderow::pin_button(cx, light, t, pin_group.clone());
                 { let (action, value) = crate::screens::siderow::pin_press(t); ctl.push(CtlEntry { id: format!("pin:{raw}"), label: action.into(), ctl: Ctl::Node(action.into(), value) }); }
-                with_rect(div().id(SharedString::from(format!("thread-{id}"))), || format!("thread:{raw}")).group(pin_group).flex().items_center().gap_2().pr_3().h(px(32.)).when(faded, |d| d.opacity(0.55))
+                with_rect(div().id(SharedString::from(format!("thread-{id}"))), || format!("thread:{raw}")).group(pin_group).flex().items_center().gap_2().pr_3().h(px(32.)).when(faded || t["off"] == true, |d| d.opacity(0.55))
                     .border_l_2().border_color(if selected { c("accent") } else { c("panel") })
                     .bg(if selected { c("raise") } else { c("panel") }).hover(|s| s.bg(c("raise"))).cursor_pointer()
-                    .on_click(cx.listener({ let sid = id.clone(); move |this, _, window, cx| this.select(sid.clone(), window, cx) }))
+                    .on_click(cx.listener({ let (sid, off) = (id.clone(), t["off"] == true); move |this, _, window, cx| if !off { this.select(sid.clone(), window, cx) } })) // (a thread of a machine that is off: listed from the registry, nothing to open)
                     .when(sub.is_empty(), |d| d.on_drag(DragRow { id: raw.to_string(), label: string(t, "title") }, |d, _, _, cx| { let l = d.label.clone(); cx.new(|_| Ghost(l)) })
                         .drag_over::<DragRow>({ let a = c("accent"); move |s, _, _, _| s.border_t_2().border_color(a) }))
                     .on_drop(cx.listener({ let target = raw.to_string(); move |this, d: &DragRow, _, cx| { let _ = this.tx.try_send(Command::Action("reorder".into(), format!("{}\u{1f}{}", d.id, target))); cx.notify(); } }))
@@ -359,7 +359,7 @@ impl Backplane {
                 .on_drag(DragProj { id: pid_new.clone(), label: string(project, "title") }, |d, _, _, cx| { let l = d.label.clone(); cx.new(|_| Ghost(l)) })
                 .drag_over::<DragProj>({ let a = c("accent"); move |s, _, _, _| s.border_t_2().border_color(a) })
                 .on_drop(cx.listener({ let target = pid_new.clone(); move |this, d: &DragProj, _, cx| { let _ = this.tx.try_send(Command::Action("reorder-project".into(), format!("{}\u{1f}{}", d.id, target))); cx.notify(); } }))
-                .on_mouse_down(MouseButton::Right, { let pidm = pid_new.clone(); let new_on = project["newOn"].clone(); cx.listener(move |this, e: &MouseDownEvent, _, cx| { let items = crate::screens::ctxmenu::project_items_on(&pidm, &new_on); this.ctx_open(e.position, items, cx); }) })
+                .on_mouse_down(MouseButton::Right, { let pidm = pid_new.clone(); let proj = project.clone(); cx.listener(move |this, e: &MouseDownEvent, _, cx| { let items = crate::screens::ctxmenu::project_items_of(&pidm, &proj); this.ctx_open(e.position, items, cx); }) })
                 .child(with_rect(div().id(SharedString::from(format!("fold-{pid_new}"))), || format!("fold:{pid_new}")).w(px(16.)).flex_shrink_0().flex().items_center().cursor_pointer().hover(|s| s.bg(c("raise"))).child(ic(light, if closed { "chevron-right" } else { "chevron-down" }, 14., "dim"))
                     .on_click(cx.listener(move |this, _, _, cx| { cx.stop_propagation(); let _ = this.tx.try_send(Command::Action("flag".into(), fold_value.clone())); cx.notify(); })))
                 .child(crate::screens::badge::mark(light, project)).child(div().flex_1().min_w_0().flex().items_center().gap_2().relative().child(if crate::screens::siderow::renaming(&self.data, &qpid, "project") { crate::screens::siderow::field(light, &self.screens.fields, &qpid) } else { div().child(string(project, "title").to_uppercase()).into_any_element() }).children(crate::screens::badge::place(light, &project["mark"], project["also"].as_str().unwrap_or(""), &format!("proj-{pid_new}")))

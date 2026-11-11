@@ -68,7 +68,7 @@ fn chip(machine: &str, here_name: &str, state: &str) -> Value {
     let dim = state == "away" || state == "off";
     m["here"] = json!(machine.is_empty()); m["state"] = json!(state); m["dim"] = json!(dim);
     let short = m["short"].as_str().unwrap_or("").to_string();
-    m["note"] = json!(match state { "off" => format!("{short} is off"), "away" => format!("{short} is away"), _ => String::new() });
+    m["note"] = json!(match state { "off" => format!("{short} is off"), "away" => format!("{short} is off"), /* a linked machine that does not answer: to the person it is off */ _ => String::new() });
     m
 }
 
@@ -160,6 +160,29 @@ pub fn merged_of<R>(st: &State, m: &crate::mirror::Mirrors, f: impl FnOnce(Vec<M
     m.shown(|far| f(merged_projects(st, far, &|n| m.mark(n)["away"] == true, &|id| m.origin(id), &here, &reg)))
 }
 
+/// The sidebar's join (present/screen.rs, data/1): which project id draws each merged row (its owner: this machine's copy, else the copy of the
+/// first shown machine that has it, `far` order, then the lowest id: stable while activity moves) and every other live copy -> that owner.
+/// `rows` is per owner: `key`, `name`, `origin`, `machineChips` (every machine with a copy, `machines`' chips) and `off` (the copies only the
+/// registry knows: `{machine, id, folder}`, and their threads as `{machine, id, title, status, activity, pinned}`).
+pub struct Join { pub far: HashMap<String, String>, pub rows: HashMap<String, Value> }
+pub fn join_of(list: &[MergedProject], far_order: &[String]) -> Join {
+    let (mut far, mut rows) = (HashMap::new(), HashMap::new());
+    let rank = |m: &str| far_order.iter().position(|n| n == m).unwrap_or(usize::MAX);
+    for p in list {
+        let live: Vec<&(String, String)> = p.ids.iter().filter(|(m, _)| m.is_empty() || far_order.iter().any(|n| n == m)).collect();
+        let Some(owner) = live.iter().min_by(|a, b| (!a.0.is_empty(), rank(&a.0), &a.1).cmp(&(!b.0.is_empty(), rank(&b.0), &b.1))).map(|x| x.1.clone()) else { continue };
+        for (_, id) in &live { if *id != owner { far.insert(id.clone(), owner.clone()); } }
+        let off_ids: Vec<Value> = p.ids.iter().filter(|c| !live.contains(c)).map(|(m, i)| json!({"machine":m,"id":i})).collect();
+        let off_threads: Vec<Value> = p.threads.iter().filter(|t| t.src.is_none()).map(|t| json!({"machine":t.machine,"id":t.id,"title":t.title,"status":t.status,"activity":t.activity,"pinned":t.pinned})).collect();
+        // where new work on it runs by default (D6): this machine's copy, else the most recently active live machine's (`ids` is in that order)
+        let default = live.first().map(|(m, i)| json!({"machine":m,"id":i})).unwrap_or(Value::Null);
+        rows.insert(owner, json!({"key":p.key,"name":p.name,"origin":p.origin,"machineChips":p.machines,"default":default,"ids":live.iter().map(|(m, i)| json!({"machine":m,"id":i})).collect::<Vec<_>>(),"off":{"copies":off_ids,"threads":off_threads}}));
+    }
+    Join { far, rows }
+}
+/// Only the registry's projects none of whose machines is live (every copy off): drawn as rows of their own.
+pub fn all_off<'a, 'b>(list: &'b [MergedProject<'a>]) -> Vec<&'b MergedProject<'a>> { list.iter().filter(|p| p.settings_of.is_none() && !p.ids.is_empty()).collect() }
+
 /// A merged row as JSON (data/1 `projects.list`'s merged fields, and what the sections draw): `key, name, origin, folder, here, ids, machines,
 /// lastActivity, icon, color, css, threadCount`. Threads are not in it (they page separately).
 pub fn row_json(p: &MergedProject) -> Value {
@@ -196,6 +219,14 @@ mod tests {
         assert_eq!(ts, [("desktop~t9", "desktop", false), ("L~t7", "framework", true), ("M~t3", "boat-hub", true)], "a live machine's registry rows are not doubled");
         assert_eq!(bp.threads[0].status, "needs");
         assert_eq!(v[1].here.as_deref(), Some("p1")); assert_eq!(v[1].machines[0]["here"], true);
+        // the join: framework's copy draws the row (first shown machine), boat-hub's joins it, desktop's is off
+        let j = join_of(&v, &["framework".to_string(), "boat-hub".to_string()]);
+        assert_eq!(j.far.get("M~p3").map(String::as_str), Some("L~p7")); assert!(!j.far.contains_key("L~p7"));
+        let r = &j.rows["L~p7"]; assert_eq!(r["key"], "github.com/o/bp"); assert_eq!(r["off"]["copies"], json!([{"machine":"desktop","id":"p9"}]));
+        assert_eq!(r["off"]["threads"][0]["id"], "desktop~t9"); assert_eq!(r["machineChips"].as_array().unwrap().len(), 3);
+        assert!(all_off(&v).is_empty());
+        let only_off = merged_projects(&here, &[], &|_| false, &|_| String::new(), "laptop", &reg);
+        assert_eq!(all_off(&only_off).len(), 1, "with every machine off, the registry's project is still a row");
     }
     #[test] fn this_machine_names_the_row_and_a_hand_link_joins_projects_with_no_remote() {
         let here = st(&[pc("p1", "My name", "", 1), json!({"$":"SettingSet","key":"project.link.p1","value":"framework/p8","at":1}), json!({"$":"SettingSet","key":"project.icon.p1","value":"cpu","at":1})]);

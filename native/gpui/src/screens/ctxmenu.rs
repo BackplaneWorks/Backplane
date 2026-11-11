@@ -102,11 +102,19 @@ pub fn title_items(data: &Value) -> Vec<Item> {
 /// The items for a project's header.
 /// A project that is also on linked machines (the hub's `newOn`): one New thread per machine, this one first, each naming its machine.
 pub fn new_items(pid_raw: &str, new_on: &Value) -> Vec<Item> {
-    let on: Vec<Item> = new_on.as_array().into_iter().flatten().map(|n| item(&s(n, "label"), "new-thread", &s(n, "value"), false)).filter(|i| !i.label.is_empty() && !i.value.is_empty()).collect();
+    // (the hub's machine picker: a machine, Wait for <machine>, Clone it here, a Boat; one it says is not ready yet is left out)
+    let on: Vec<Item> = new_on.as_array().into_iter().flatten().filter(|n| n["disabled"] != true).map(|n| item(&s(n, "label"), n["action"].as_str().filter(|a| !a.is_empty()).unwrap_or("new-thread"), &s(n, "value"), false)).filter(|i| !i.label.is_empty() && !i.value.is_empty()).collect();
     /* i18n-ok: menu labels, drawn through trs in render */ if on.len() > 1 { on } else { vec![item("New thread", "new-thread", pid_raw, false)] }
 }
 pub fn project_items(pid_raw: &str) -> Vec<Item> { project_items_on(pid_raw, &Value::Null) }
 pub fn project_items_on(pid_raw: &str, new_on: &Value) -> Vec<Item> { let mut v = new_items(pid_raw, new_on); /* i18n-ok: a menu label, drawn through trs in render */ v.push(item("New swarm", "swarm-new", pid_raw, false)); v.extend(project_rest(pid_raw)); v }
+/// A project's menu with the hub's Link with… entries (a project with no remote: `linkWith`, each `proj-link`) before Remove.
+pub fn project_items_of(pid_raw: &str, project: &Value) -> Vec<Item> {
+    let mut v = project_items_on(pid_raw, &project["newOn"]);
+    let at = v.len().saturating_sub(1);
+    for (i, l) in project["linkWith"].as_array().into_iter().flatten().enumerate() { v.insert(at + i, item(&s(l, "label"), "proj-link", &s(l, "value"), false)); }
+    v
+}
 /* i18n-ok: menu labels, drawn through trs in render */ fn project_rest(pid_raw: &str) -> Vec<Item> { vec![item("Intent…", LOCAL_INTENT, pid_raw, false), item("Rename", "proj-rename", pid_raw, false), item("Badge", "look", pid_raw, false), item("Remove project", "proj-remove", pid_raw, true)] }
 
 impl Backplane {

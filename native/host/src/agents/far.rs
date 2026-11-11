@@ -51,6 +51,11 @@ impl Agents {
 
     /// A call that is about another machine: Some(answer) when it was sent there (or could not be), None when it is about this one.
     pub async fn far_route(self: &Arc<Self>, thread: &str, name: &str, a: &Value) -> Option<(bool, Value)> {
+        // a launch named by project key, remote or name with no machine (Bub's "launch in Backplane"): the machine that has it (net/registry.rs
+        // `resolve`: this one's copy, else the most recently active machine's); sent there as a launch with that machine, held if it is away
+        let resolved; let a = if name == "thread_launch" && sv(a, "machine").trim().is_empty() && !sv(a, "project").trim().is_empty() && self.world().await.project_find(sv(a, "project")).is_none() {
+            match crate::net::registry::resolve(&self.hub, sv(a, "project")) { Some((l, id)) if !l.is_empty() => { let mut b = a.clone(); b["machine"] = json!(l); b["project"] = json!(id); resolved = b; &resolved } _ => a }
+        } else { a };
         let (link, tool) = if ON_THREAD.contains(&name) && far::is(sv(a, "threadId")) { (far::link(sv(a, "threadId")), name) }
             else if ON_MACHINE.contains(&name) && !sv(a, "machine").trim().is_empty() {
                 match self.machine_link(sv(a, "machine")) { Some(l) => (l, name), None => return Some(fail(&format!("no machine of yours called {} is linked here (machine_list shows them)", sv(a, "machine")))) }
@@ -102,8 +107,9 @@ impl Agents {
         (true, json!({"machines":out}))
     }
     pub async fn local_projects(&self) -> Value {
+        let here = self.hub.mirrors().here(); // (`key`: the project's one name across machines, present/merged.rs; thread_launch takes it)
         let w = self.world().await;
-        let mut v: Vec<_> = w.projects.iter().filter(|(_, p)| !p.1).map(|(id, p)| { let folder = w.roots.get(id).cloned().unwrap_or_default(); let origin = crate::mirror::origin_of_root(&folder); json!({"id":id,"name":p.0,"folder":folder,"origin":origin}) }).collect();
+        let mut v: Vec<_> = w.projects.iter().filter(|(_, p)| !p.1).map(|(id, p)| { let folder = w.roots.get(id).cloned().unwrap_or_default(); let origin = crate::mirror::origin_of_root(&folder); let key = crate::present::merged::key_of(&origin, w.st.get(&format!("project.link.{id}")).map(String::as_str).unwrap_or(""), "", &here, id); json!({"id":id,"name":p.0,"folder":folder,"origin":origin,"key":key}) }).collect();
         v.sort_by(|a, b| a["id"].as_str().cmp(&b["id"].as_str()));
         Value::Array(v)
     }

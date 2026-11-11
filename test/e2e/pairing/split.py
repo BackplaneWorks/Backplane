@@ -70,6 +70,8 @@ def main():
             check(f"boat-hub linked with {NAMES[k]}", bool(j.get("peer")), json.dumps(j)[:200]); time.sleep(1)
             for h in (H["bh"], H[k]):
                 r = rpc(h, "bots.peer_own", {"peer": inv["peer"], "own": True}); check("marked the owner's own", r.get("ok") is True, json.dumps(r)[:200])
+            # the home is boat-hub (as after home.move): the other machines send their rows to its registry
+            r = rpc(H[k], "setting.set", {"key": "home.at", "value": json.dumps({"link": j.get("peer"), "name": "boat-hub", "url": f"http://127.0.0.1:{ports['bh']}", "at": int(time.time())})})
             rpc(H[k], "bots.create", {"name": "bot" + k})  # a change after the link pushes to boat-hub, whose gap pulls the history
         # both machines' threads reach boat-hub's mirrors and their origins are asked (once a minute)
         def both():
@@ -100,10 +102,24 @@ def main():
                 p = prows[0]
                 check("projects.list's row has key, machines and default", p.get("key") == "github.com/o/r" and sorted(m.get("short") for m in p.get("machines") or []) == ["desktop", "framework"] and bool(p.get("default")), json.dumps(p)[:500])
             notes = [p for p in ps if (p.get("title") or "").startswith("notes-")]
-            check("projects with no remote stay per machine", len(notes) == 3, str([p.get("title") for p in notes]))
+            check("a project with no remote is keyed by its machine", [p.get("key") for p in notes] == ["boat-hub/p5"], str([(p.get("title"), p.get("key")) for p in notes]))
             # the registry: boat-hub (the home) holds every machine's rows
             reg = bots.until(lambda: (lambda r: r if any(x.get("key") == "github.com/o/r" and len(x.get("machines") or []) == 2 for x in r.get("projects", [])) else None)(rpc(H["bh"], "registry.list")), 90)
             check("the home's registry holds the repository on both machines", bool(reg), json.dumps(rpc(H["bh"], "registry.list"))[:500])
+            # Bub's tools: machine_list gives each project's key; thread_launch takes the key with no machine and starts it where the project is
+            ada = rpc(H["bh"], "bots.create", {"name": "ada"})["bot"]
+            tha = next(e["thread"] for e in bots.log_of(homes["bh"]) if e.get("$") == "BotSet" and e.get("id") == ada)
+            bots.until(lambda: any(e.get("$") == "WorktreeSet" and e.get("id") == tha for e in bots.log_of(homes["bh"])))
+            rpc(H["bh"], "bots.say", {"bot": ada, "text": "mcpcall:" + json.dumps({"name": "machine_list", "arguments": {}})})
+            ml = bots.until(lambda: next((e for e in bots.log_of(homes["bh"]) if e.get("$") == "MessagePosted" and e.get("thread") == tha and "MCPCALL machine_list" in e.get("text", "")), None))
+            check("machine_list gives each project's key", '"key":"github.com/o/r"' in (ml or {}).get("text", "").replace("\\", "").replace(" ", ""), (ml or {}).get("text", "")[:300])
+            rpc(H["bh"], "bots.say", {"bot": ada, "text": "mcpcall:" + json.dumps({"name": "thread_launch", "arguments": {"project": "github.com/o/r", "title": "launched by key", "prompt": "hello"}})})
+            def launched():
+                for k in ("desk", "fw"):
+                    if any(e.get("$") == "ThreadCreated" and e.get("title") == "launched by key" for e in bots.log_of(homes[k])): return k
+                return None
+            where = bots.until(launched, 60)
+            check("thread_launch by key (no machine) starts it on a machine that has the project", where in ("desk", "fw"), str(where))
             if o.hold:
                 os.makedirs(o.hold, exist_ok=True)
                 with open(os.path.join(o.hold, "rig.json"), "w") as f: json.dump({"url": f"http://127.0.0.1:{ports['bh']}", "token_file": os.path.join(homes["bh"], "token"), "phase": "both on"}, f)

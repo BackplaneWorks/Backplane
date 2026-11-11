@@ -79,6 +79,7 @@ pub fn farhttp_start(hub: std::sync::Arc<crate::hub::Hub>, peering: std::sync::A
             let r = std::sync::Arc::new(rpc::Router::with_outbox(sync.clone(), crate::copy::on(), out)); r.work(&hub);
             hub.set_far_router(r); }
         farfiles::bind(&hub, sync.clone()); // (Files of a thread whose project is on another machine, both ways)
+        crate::net::registry::install(&hub);
         crate::mirror::watch_origins(hub.clone()); // (each linked machine's projects' origins, for one sidebar project per repository)
         { // (the bots start on their own; the transport is handed over once they exist, looked for for ten minutes)
             let (hub, sync, peering_w) = (hub.clone(), sync.clone(), peering.clone());
