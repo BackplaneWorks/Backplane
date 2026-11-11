@@ -1,5 +1,5 @@
 #!/bin/bash
-# Sign in there end to end on two temp hubs (there.py): builds nothing; runs this checkout's hub with stand-in CLIs. Ports 3911-3912.
+# Sign in there end to end on two temp hubs (there.py): builds nothing; runs this checkout's hub with stand-in CLIs. Ports 3951-3952.
 set -u
 WT=$(cd "$(dirname "$0")/../../.." && pwd); . "$WT/scripts/lib-bptmp.sh"
 W=$BP_TMP/bp-signinthere-e2e; rm -rf "$W"; mkdir -p "$W"

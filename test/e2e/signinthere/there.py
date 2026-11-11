@@ -13,15 +13,19 @@ from proto import Hub, check, finish  # noqa: E402
 from settings_revoke import View  # noqa: E402
 
 BIN, WORK = sys.argv[1], sys.argv[2]
-PORTS = {"A": 3911, "B": 3912}
+PORTS = {"A": 3951, "B": 3952}
 HERE = os.path.dirname(os.path.abspath(__file__))
 US = "\x1f"
 procs = {}
 
 
+KEY_MUSE = "xai-" + "Q" * 40          # typed with "This is a key": kept in B's vault, typed from it
+KEY_OPEN = "sk-ant-api03-" + "Z" * 40  # typed as a plain line: the screen echoes it, the panel must not
+
+
 def agents(name):
     d = os.path.join(WORK, "agents-" + name); os.makedirs(d, exist_ok=True)
-    for n in ("claude", "codex", "agy"):
+    for n in ("claude", "codex", "agy") + (("muse", "opencode") if name == "B" else ()):
         with open(os.path.join(d, n), "w") as f: f.write(f'#!/bin/sh\nexec python3 -I {HERE}/standin.py {n} "$@"\n')
         os.chmod(os.path.join(d, n), 0o755)
     return d
@@ -84,6 +88,28 @@ def wait(f, seconds=60):
     return None
 
 
+class Listen:
+    """A client of a hub, held open in the background: every frame it is sent (info, terminal bytes, views), kept as text to search."""
+    def __init__(self, hub):
+        import threading
+        self.v, self.seen, self.on = View(hub), [], True
+        self.t = threading.Thread(target=self.run, daemon=True); self.t.start()
+    def run(self):
+        from settings_revoke import cbor  # noqa
+        while self.on:
+            try:
+                op, body = self.v.frame()
+                if op == 2: self.seen.append(json.dumps(cbor(body)[0], default=str))
+                elif op == 1: self.seen.append(body.decode(errors="replace"))
+            except Exception:
+                if not self.on: return
+    def text(self): return "\n".join(self.seen)
+    def close(self):
+        self.on = False
+        try: self.v.close()
+        except Exception: pass
+
+
 def rows(A): return (rpc(A, "machines.page") or {}).get("rows") or []
 def row(A, label):
     return next((r for r in rows(A) if r.get("label") == label), None)
@@ -112,8 +138,8 @@ def main():
     check("Claude on B: not signed in", "not signed in" in (row(A, "Claude") or {}).get("note", ""), json.dumps(row(A, "Claude")))
     g = row(A, "Grok")
     check("Grok is not on B, with Install there", "Not installed on hub-b" in (g or {}).get("note", "") and ("machine-signin-install", link + US + "grok") in buttons(g), json.dumps(g))
-    m = row(A, "Muse")
-    check("Muse has no installer: a terminal there", ("machine-signin-shell", link + US + "muse") in buttons(m), json.dumps(m))
+    m = row(A, "Oh My Pi")
+    check("Oh My Pi has no installer: a terminal there", ("machine-signin-shell", link + US + "omp") in buttons(m), json.dumps(m))
 
     # Codex: device code, shown here
     act(A, "machine-signin", link + US + "codex")
@@ -130,7 +156,9 @@ def main():
     url = next((v for a, v in buttons(cl) if a == "open-url"), "")
     check("Claude's whole link shows on A", url.startswith("https://claude.com/cai/oauth/authorize?") and url.endswith("state=LOGINSTATE"), url[:300])
     check("with a box to type in", any(f.get("name") == "sikeys" for f in (cl or {}).get("fields") or []), json.dumps(cl)[:300])
-    act(A, "machine-signin-keys", link + US + "claude", sikeys="CODE#LOGINSTATE")
+    f = next((x for x in (cl or {}).get("fields") or [] if x.get("name") == "sikeys"), {})
+    check("the box is masked and the hub holds nothing of it", f.get("secret") is True and f.get("vault") is True and f.get("value") == "", json.dumps(f))
+    act(A, "secret-save", "@signin" + US + link + US + "claude", sikeys="CODE#LOGINSTATE")
     ok = wait(lambda: (lambda r: r if r and r.get("tone") == "ok" else None)(row(A, "Claude")), 40)
     check("Claude is signed in on B, as who it says", bool(ok) and "as boat@example.com" in ok.get("note", ""), json.dumps(row(A, "Claude")))
 
@@ -145,11 +173,47 @@ def main():
     st = wait(lambda: row(A, "Antigravity"), 20)
     check("Stop ends it there", bool(st) and "cannot ask it" in st.get("note", ""), json.dumps(st))
 
+    la, lb = Listen(A), Listen(B)  # every frame A's and B's clients get from here on
+    # a key typed with "This is a key": through B's vault; the CLI echoes it and shows an old token unasked
+    act(A, "machine-signin", link + US + "muse")
+    mu = wait(lambda: (lambda r: r if r and "Paste your API key" in r.get("note", "") else None)(row(A, "Muse: signing in on hub-b")), 30)
+    check("Muse's key prompt shows on A, its old token hidden", bool(mu) and ("ghp_" + "A" * 30) not in json.dumps(mu) and "[hidden]" in mu.get("note", ""), json.dumps(mu)[:400])
+    act(A, "machine-signin-keymode", link + US + "muse")
+    km = row(A, "Muse: signing in on hub-b")
+    check("This is a key is on, and its Send goes through the vault there", any(b.get("action") == "machine-signin-keymode" and b.get("on") for b in (km or {}).get("buttons") or []) and ("secret-save", "@signin-key" + US + link + US + "muse") in buttons(km), json.dumps(km)[:400])
+    act(A, "secret-save", "@signin-key" + US + link + US + "muse", sikeys=KEY_MUSE)
+    echoed = wait(lambda: (lambda r: r if r and "Signed in." in r.get("note", "") else None)(row(A, "Muse: signing in on hub-b")), 30)
+    check("the key reached Muse on B, and its echo is hidden", bool(echoed) and KEY_MUSE not in json.dumps(echoed) and "Got key" in echoed.get("note", ""), json.dumps(echoed)[:400])
+    act(A, "machine-signin-stop", link + US + "muse")
+    # a key typed as a plain line: echoed, hidden all the same
+    act(A, "machine-signin", link + US + "opencode")
+    wait(lambda: (lambda r: r if r and "Enter API key" in r.get("note", "") else None)(row(A, "OpenCode: signing in on hub-b")), 30)
+    act(A, "secret-save", "@signin" + US + link + US + "opencode", sikeys=KEY_OPEN)
+    oc = wait(lambda: (lambda r: r if r and "Saved" in r.get("note", "") else None)(row(A, "OpenCode: signing in on hub-b")), 30)
+    check("a plain line that is a key is hidden in its echo", bool(oc) and KEY_OPEN not in json.dumps(oc), json.dumps(oc)[:400])
+    st = rpc(A, "machines.page")
+    check("machines.page says busy while a sign-in runs there", st.get("busy") is True, json.dumps(st)[:200])
+    act(A, "machine-signin-stop", link + US + "opencode")
+    time.sleep(1); la.close(); lb.close()
+    check("A's clients were sent the panel's info as it changed", "signin.there" in la.text() and "Got key" in la.text(), la.text()[-300:])
+    for k in (KEY_MUSE, KEY_OPEN):
+        check(f"{k[:6]}…: not in what B sent A (signin.state, the panel's info, the page)", k not in la.text() and k not in json.dumps(rpc(A, "machines.page")))
+        check(f"{k[:6]}…: not in anything B's own clients were sent (its sign-in terminal is quiet)", k not in lb.text())
+    leaks = []
+    for root, _, files in os.walk(WORK):
+        for fn in files:
+            path = os.path.join(root, fn)
+            try: data = open(path, "rb").read()
+            except OSError: continue
+            for k in (KEY_MUSE, KEY_OPEN):
+                if k.encode() in data: leaks.append(os.path.relpath(path, WORK))
+    check("neither key is in any file of either hub (logs, events, drafts, vault)", not leaks, str(leaks))
+
     # the Claude sync token, made here
     act(A, "machine-signin-sync")
-    sy = wait(lambda: (lambda r: r if r and any(a == "machine-signin-sync-code" for a, _ in buttons(r)) else None)(row(A, "Claude sync token")), 30)
+    sy = wait(lambda: (lambda r: r if r and ("secret-save", "@signin-sync") in buttons(r) else None)(row(A, "Claude sync token")), 30)
     check("the sync token's sign-in shows its link and a code box on A", bool(sy) and any(a == "open-url" for a, _ in buttons(sy)), json.dumps(row(A, "Claude sync token"))[:400])
-    act(A, "machine-signin-sync-code", "", sicode="CODE#SYNCSTATE")
+    act(A, "secret-save", "@signin-sync", sicode="CODE#SYNCSTATE")
     reach = wait(lambda: (lambda r: r if r and "on hub-b" in r.get("note", "") else None)(row(A, "Claude sync token")), 60)
     check("the sync token is said to reach B", bool(reach), json.dumps(row(A, "Claude sync token")))
     check("and B holds it (the same token, never a login file)", not os.path.exists(os.path.join(B.user, ".claude")))

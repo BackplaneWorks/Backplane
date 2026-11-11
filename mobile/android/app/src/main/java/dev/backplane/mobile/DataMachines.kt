@@ -8,10 +8,12 @@ import org.json.JSONObject
 object DataMachines {
     var rows by mutableStateOf<List<JSONObject>>(emptyList()); private set
     var error by mutableStateOf(""); private set
+    /** The hub says the page changes by itself now (a sign-in on another machine runs): read again every 2 s while it does. */
+    var busy by mutableStateOf(false); private set
     val available get() = DataClient.has("machines")
 
     suspend fun load() {
-        try { rows = DataClient.call("machines.page").optJSONArray("rows").let { a -> if (a == null) emptyList() else (0 until a.length()).mapNotNull { a.optJSONObject(it) } }; error = "" }
+        try { val r = DataClient.call("machines.page"); rows = r.optJSONArray("rows").let { a -> if (a == null) emptyList() else (0 until a.length()).mapNotNull { a.optJSONObject(it) } }; busy = r.optBoolean("busy"); error = "" }
         catch (e: Exception) { error = e.message ?: "" }
     }
     suspend fun act(action: String, value: String, fields: Map<String, String>) {
@@ -26,5 +28,10 @@ object DataMachines {
 @Composable
 internal fun MachinesSettings() {
     LaunchedEffect(DataClient.conn) { if (DataClient.conn == DataClient.Conn.ONLINE) DataMachines.load() }
-    PageRows(Msg.android_machines_head, "machines", DataMachines.rows, DataMachines.error) { action, value, sent -> DataMachines.act(action, value, sent); null }
+    // while a sign-in there runs, its link, code and screen change without a press: the page is read again every 2 s, as the desktop redraws
+    LaunchedEffect(DataClient.conn, DataMachines.busy) {
+        while (DataClient.conn == DataClient.Conn.ONLINE && DataMachines.busy) { kotlinx.coroutines.delay(2000); DataMachines.load() }
+    }
+    // a masked box's Send (the sign-in panel's): its text is emptied once sent, never kept
+    PageRows(Msg.android_machines_head, "machines", DataMachines.rows, DataMachines.error) { action, value, sent -> DataMachines.act(action, value, sent); if (action == "secret-save") (if (value == "@signin-sync") "sicode" else "sikeys") else null }
 }

@@ -76,6 +76,8 @@ pub async fn act(p: &Arc<Peering>, hub: &Arc<Hub>, action: &str, value: &str, fi
     match action {
         "machine-code" => p.make_code().await,
         a if a.starts_with("machine-signin") => crate::settings::accounts_there::act(hub, a, value, fields).await,
+        // a masked box's Send on the sign-in panel: the typed text is in `fields` of this request only
+        "secret-save" if crate::settings::accounts_there::is_save(value) => crate::settings::accounts_there::save(hub, value, fields).await,
         "machine-home" => super::homemove::start(hub, value).await,
         "machine-approve" => p.approve(hub, value).await.map(|_| json!({})),
         "machine-deny" => p.deny(hub, value).await.map(|_| json!({})),
