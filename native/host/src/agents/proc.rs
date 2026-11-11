@@ -188,11 +188,15 @@ fn spawn_with(kind: crate::proc::Kind, person: Option<&PersonChild>, program: &P
     let mut c = crate::proc::tokio_cmd(kind, program);
     let args: Vec<String> = args.iter().map(|a| crate::settings::mask::mask(a)).collect(); // settings lane: Spawn.agent masks every launch argument
     c.args(&args).current_dir(cwd).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
-    if person.is_none() && extra_path.is_none() { if let Ok(j) = std::env::join_paths(search_dirs()) { c.env("PATH", j); } } // production: the agent runs with the merged PATH (its own children find node, git...)
-    if let Some(d) = extra_path { let old = std::env::var_os("PATH").unwrap_or_default(); let mut v = vec![d.to_path_buf()]; v.extend(std::env::split_paths(&old)); if let Ok(j) = std::env::join_paths(v) { c.env("PATH", j); } }
+    // production: the agent runs with the merged PATH (its own children find node, git...); a test's stand-in folder comes first on the hub's own
+    let mut path: Option<Vec<PathBuf>> = if person.is_none() && extra_path.is_none() { Some(search_dirs().to_vec()) } else { None };
+    if let Some(d) = extra_path { let mut v = vec![d.to_path_buf()]; v.extend(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default())); path = Some(v) }
+    // the selected KiCad's shims (kicadsel.rs) come before everything, so a `kicad-cli` on the agent's PATH is always the one Backplane selected
+    if let (Some(v), Some((_, d))) = (path.as_mut(), env.iter().find(|(k, _)| k == super::kicadsel::SHIMS_KEY)) { v.insert(0, PathBuf::from(d)) }
+    if let Some(j) = path.and_then(|v| std::env::join_paths(v).ok()) { c.env("PATH", j); }
     if person.is_none() { for k in crate::settings::accounts_io::STORE_ENV { c.env_remove(k); } } // the default login is ~/.claude, never a profile store the hub itself inherited; a named account puts its own back below
     for k in crate::settings::accounts_io::scrub_for(env) { c.env_remove(k); } // a named account's child inherits no provider credential (a sync account's token is its own, below)
-    for (k, v) in env { c.env(k, v); }
+    for (k, v) in env.iter().filter(|(k, _)| k != super::kicadsel::SHIMS_KEY) { c.env(k, v); }
     match person {
         None => { if let Some(o) = OWNER.get() { c.env("BACKPLANE_AGENT_OWNER", o).env("BACKPLANE_LOCK_HOME", o); } } // scripts/bp-lock.sh finds its hub by it (never BACKPLANE_HOME: proc::HUB_ONLY)
         Some(p) => { let (remove, set) = super::person::child_env(&p.home, &p.path, std::env::vars_os()); for k in remove { c.env_remove(k); } for (k, v) in set { c.env(k, v); } } // no BACKPLANE_* (so no owner mark either: PDEATHSIG ends it with the hub)

@@ -7,7 +7,7 @@
 //! Out for Claude: images/`$skill` input, the Backplane MCP server and runtime prompt in the agent's arguments,
 //! subagents and background tasks, todo tools, the allowance stream, the legacy queue, mail provenance beyond carry,
 //! and the hub's time-driven policies (liveness, autosettle, alert/told/summary, star nudge), which belong to M4.
-pub mod account_tools; pub mod mcp_stdio; pub mod bundled; pub mod mailroom; pub mod devturns; pub mod bg; pub mod lockrec; pub mod locks; pub mod refs; pub mod person; pub mod work; pub mod textgen; pub mod iconpick; pub mod groupname; pub mod launch; pub mod far; pub mod review; pub mod tasks; pub mod codex; pub mod providers; pub mod cmds; pub mod design; pub mod hist; pub mod host; pub mod inputs; pub mod skills; pub mod lines; pub mod mcp; pub mod proc; pub mod prompt; pub mod prompt_text; pub mod rules; pub mod settle; pub mod tools; pub mod wake; pub mod world;
+pub mod account_tools; pub mod kicadsel; pub mod mcp_stdio; pub mod bundled; pub mod mailroom; pub mod devturns; pub mod bg; pub mod lockrec; pub mod locks; pub mod refs; pub mod person; pub mod work; pub mod textgen; pub mod iconpick; pub mod groupname; pub mod launch; pub mod far; pub mod review; pub mod tasks; pub mod codex; pub mod providers; pub mod cmds; pub mod design; pub mod hist; pub mod host; pub mod inputs; pub mod skills; pub mod lines; pub mod mcp; pub mod proc; pub mod prompt; pub mod prompt_text; pub mod rules; pub mod settle; pub mod tools; pub mod wake; pub mod world;
 #[cfg(test)] mod tests;
 #[cfg(test)] mod laws;
 
@@ -83,7 +83,7 @@ impl Drop for JobGuard { fn drop(&mut self) { self.0.stats.jobs.fetch_sub(1, Rel
 pub fn handle() -> Option<Arc<Agents>> { HANDLE.get().cloned() }
 
 pub struct Agents { pub hist_ends: StdMutex<HashMap<String, Arc<HistEnds>>>, pub guards: locks::Guards, carry_gone: std::sync::atomic::AtomicBool, carrying: std::sync::atomic::AtomicUsize, pub copy_point: StdMutex<(Vec<(String, String, bool)>, Vec<String>)>, pub works: StdMutex<HashMap<String, work::Ctl>>, pub work_lock: tokio::sync::Mutex<()>, pub tool_sets: StdMutex<Vec<Arc<dyn mcp::ToolSet>>>, pub stopped_by: StdMutex<HashMap<String, String>>, pub hub: Arc<Hub>, pub cli: Cli, pub host: host::HostInfo, world: Mutex<World>, actors: StdMutex<HashMap<String, mpsc::Sender<Cmd>>>, pub stats: Stats, n: AtomicU64,
-    pub driver_asks: StdMutex<HashMap<String, String>>, pub mcp: std::sync::OnceLock<Arc<mcp::Mcp>>, gens: StdMutex<HashMap<String, String>>, pub parked: StdMutex<HashMap<String, mcp::Parked>>, pub order_asks: StdMutex<HashMap<String, crate::settings::order::Asked>>, pub mailroom: std::sync::OnceLock<Arc<dyn mailroom::Mailroom>>, /** the account manager (set by the accounts mod): a thread bound to a named account is launched through it */ pub accounts: std::sync::OnceLock<Arc<crate::settings::accounts_io::Accounts>>, cut: StdMutex<Vec<String>> }
+    pub driver_asks: StdMutex<HashMap<String, String>>, pub mcp: std::sync::OnceLock<Arc<mcp::Mcp>>, gens: StdMutex<HashMap<String, String>>, pub parked: StdMutex<HashMap<String, mcp::Parked>>, pub order_asks: StdMutex<HashMap<String, crate::settings::order::Asked>>, pub mailroom: std::sync::OnceLock<Arc<dyn mailroom::Mailroom>>, /** the account manager (set by the accounts mod): a thread bound to a named account is launched through it */ pub accounts: std::sync::OnceLock<Arc<crate::settings::accounts_io::Accounts>>, cut: StdMutex<Vec<String>>, /** the selected KiCad's env for the turn being started (kicadsel.rs), set with its prompt */ pub kicad_env: StdMutex<Vec<(String, String)>> }
 
 pub fn now_s() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) }
 pub fn now_ms() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis() as u64).unwrap_or(0) }
@@ -107,7 +107,7 @@ impl Agents {
     pub async fn start_with(hub: Arc<Hub>, cli: Cli) -> Result<Arc<Agents>> { Agents::start_host(hub, cli, host::HostInfo::default()).await }
     pub async fn start_host(hub: Arc<Hub>, cli: Cli, host: host::HostInfo) -> Result<Arc<Agents>> {
         let no_dir = cli.dir().is_none();
-        let ag = Arc::new(Agents { hist_ends: Default::default(), guards: Default::default(), carry_gone: Default::default(), carrying: Default::default(), hub: hub.clone(), cli, host, world: Mutex::new(crate::ckpt::take("agents", &hub.store, || World::load(&hub.store)).unwrap_or_default()), actors: StdMutex::new(HashMap::new()), stats: Stats::default(), n: AtomicU64::new(0),
+        let ag = Arc::new(Agents { kicad_env: Default::default(), hist_ends: Default::default(), guards: Default::default(), carry_gone: Default::default(), carrying: Default::default(), hub: hub.clone(), cli, host, world: Mutex::new(crate::ckpt::take("agents", &hub.store, || World::load(&hub.store)).unwrap_or_default()), actors: StdMutex::new(HashMap::new()), stats: Stats::default(), n: AtomicU64::new(0),
             mailroom: Default::default(), accounts: std::sync::OnceLock::new(), cut: StdMutex::new(vec![]), driver_asks: StdMutex::new(HashMap::new()), order_asks: StdMutex::new(HashMap::new()), stopped_by: StdMutex::new(HashMap::new()), tool_sets: StdMutex::new(vec![]), works: StdMutex::new(HashMap::new()), copy_point: StdMutex::new((vec![], vec![])), work_lock: tokio::sync::Mutex::new(()), mcp: std::sync::OnceLock::new(), gens: StdMutex::new(HashMap::new()), parked: StdMutex::new(HashMap::new()) });
         ag.world.lock().await.home = hub.cfg.home.to_string_lossy().into_owned();
         // reap BEFORE the owner mark is set: marked children of this process (another test's, in a shared test binary) must not be taken for a dead hub's
@@ -159,7 +159,13 @@ impl Agents {
         let (ipc, orders, lang, buy, code) = { let w = self.world().await;
             let code = w.threads.get(th).filter(|_| w.setting(&format!("kicad.main.{th}")) == "on").map(|t| (t.worktree.clone(), t.branch.clone()));
             (w.setting("kicad.ipc") != "off", w.setting("order.enabled") != "off", w.setting("agent.lang").to_string(), !w.setting(&format!("buy.{th}")).is_empty(), code) };
-        let (root, home, host) = (cwd.to_string(), self.host.home.clone(), self.host.clone());
+        let (root, home, mut host) = (cwd.to_string(), self.host.home.clone(), self.host.clone());
+        // the KiCad the hub has selected, resolved for this turn: the prompt names it, and the turn runs with its env and shims (kicadsel.rs)
+        if host.live_kicad {
+            let env = crate::files::kicad::ipc::runtime(&self.hub).await; let shims = kicadsel::shims_dir(&home);
+            let sel = tokio::task::spawn_blocking(move || kicadsel::select(&env, &shims, kicadsel::version_of)).await.unwrap_or_default();
+            host.kicad = sel.kicad; *self.kicad_env.lock().unwrap() = sel.env;
+        }
         let machines = crate::bots::api::of(&self.hub).map(|b| b.machines_prompt()).unwrap_or_default(); // the paired machines, by name
         tokio::task::spawn_blocking(move || {
             // KiCad's files are the main checkout's, even when this thread's folder is a worktree:
@@ -824,7 +830,7 @@ impl Actor {
         let mut driver = made.driver;
         if let Err(e) = driver.prepare(&a) { let hint = driver.install_hint().map(|h| format!(". {h}")).unwrap_or_default(); self.fail(format!("could not start {}: {e}{hint}", made.cli), "spawn", &format!("spawn-{now}")).await; self.ag.stats.spawn_failures.fetch_add(1, Relaxed); return }
         let (mut args, mut env, start) = (driver.argv(&a), driver.env(&a), driver.start(&a));
-        if !acct_args.is_empty() { acct_args.extend(args); args = acct_args } env.extend(acct_env);
+        if !acct_args.is_empty() { acct_args.extend(args); args = acct_args } env.extend(acct_env); env.extend(self.ag.kicad_env.lock().unwrap().clone());
         let spawned = if self.person { match self.person_child() { Ok(pc) => proc::spawn_person(&pc, &prog, &args, std::path::Path::new(cwd), &env), Err(e) => Err(std::io::Error::new(std::io::ErrorKind::Other, e)) } } else { proc::spawn(&prog, &args, std::path::Path::new(cwd), self.ag.cli.dir(), &env) };
         match spawned {
             Ok(mut p) => { self.ag.stats.procs_spawned.fetch_add(1, Relaxed); self.heard = Instant::now(); for l in start { let _ = p.input.try_send(l); }
@@ -1126,7 +1132,7 @@ impl Actor {
         if !acct_args.is_empty() { acct_args.extend(args); args = acct_args }
         if self.person { args.extend(person::CLAUDE_STRICT.iter().map(|x| x.to_string())) } // only this hub's MCP config; the person's user-level hooks, MCP servers and rules do not load
         self.ag.set_gen(&th, &gen);
-        let p = if self.person { proc::spawn_person(&self.person_child()?, &prog, &args, std::path::Path::new(cwd), &[]) } else { proc::spawn(&prog, &args, std::path::Path::new(cwd), self.ag.cli.dir(), &acct_env) }.map_err(|e| e.to_string())?;
+        let p = if self.person { proc::spawn_person(&self.person_child()?, &prog, &args, std::path::Path::new(cwd), &[]) } else { proc::spawn(&prog, &args, std::path::Path::new(cwd), self.ag.cli.dir(), &[acct_env.clone(), self.ag.kicad_env.lock().unwrap().clone()].concat()) }.map_err(|e| e.to_string())?;
         self.cmds = cmds::Cmds::new(); self.wait.clear(); self.resumed = if self.person { String::new() } else { session.clone() }; self.spawn_n += 1;
         self.ag.stats.procs_spawned.fetch_add(1, Relaxed);
         self.live_proc = Some(Live { input: p.input, pid: p.pid, key, person: self.person, _busy: busy }); self.lines = Some(p.lines); self.exit = Some(p.exit);

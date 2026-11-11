@@ -37,7 +37,7 @@ def main():
     ]
     (home / 'events.jsonl').write_text(''.join(json.dumps(x) + '\n' for x in events))
     display = next(n for n in range(90, 120) if not Path(f'/tmp/.X11-unix/X{n}').exists() and not Path(f'/tmp/.X{n}-lock').exists())
-    env = {**os.environ, 'DISPLAY': f':{display}', 'BACKPLANE_HOME': str(home), 'BACKPLANE_SNAP': str(home / 'frame.ppm'), 'BACKPLANE_NO_UPDATE': '1', 'BACKPLANE_PEERS': '', 'BACKPLANE_KICAD_CLI': '/home/h/.backplane-bend/kicad/10.99.0-bp.4/bin/kicad-cli'}
+    env = {**os.environ, 'DISPLAY': f':{display}', 'BACKPLANE_HOME': str(home), 'BACKPLANE_SNAP': str(home / 'frame.ppm'), 'BACKPLANE_NO_UPDATE': '1', 'BACKPLANE_PEERS': '', 'BACKPLANE_KICAD_CLI': os.environ.get('BACKPLANE_KICAD_CLI', '')}
     processes = []
     try:
         xvlog = (home / 'xvfb.log').open('w')

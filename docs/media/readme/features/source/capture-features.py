@@ -60,7 +60,7 @@ def main():
     env = {**os.environ, 'DISPLAY': f':{display}', 'HOME': str(home), 'ZDOTDIR': str(home),
            'BACKPLANE_HOME': str(home), 'BACKPLANE_SNAP': str(home / 'frame.ppm'),
            'BACKPLANE_NO_UPDATE': '1', 'BACKPLANE_PEERS': '', 'PATH': '/usr/bin:/bin',
-           'BACKPLANE_KICAD_CLI': '/home/h/.backplane-bend/kicad/10.99.0-bp.4/bin/kicad-cli',
+           'BACKPLANE_KICAD_CLI': os.environ.get('BACKPLANE_KICAD_CLI', ''),
            'XDG_CONFIG_HOME': str(home / 'config'), 'XDG_CACHE_HOME': str(home / 'cache'),
            'XDG_DATA_HOME': str(home / 'data')}
     processes = []

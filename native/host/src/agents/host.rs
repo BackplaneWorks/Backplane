@@ -6,10 +6,12 @@ use serde_json::{json, Value};
 use std::path::{Path, PathBuf};
 
 #[derive(Clone, Debug)]
-pub struct HostInfo { pub home: PathBuf, pub user_home: String, pub fc: String, pub render: String, pub kicad: Kicad, pub models: Value, pub kistack: Option<PathBuf>, pub bundled: Option<PathBuf> }
+pub struct HostInfo { pub home: PathBuf, pub user_home: String, pub fc: String, pub render: String, pub kicad: Kicad, pub models: Value, pub kistack: Option<PathBuf>, pub bundled: Option<PathBuf>,
+    /// The hub resolves its selected KiCad at each turn (kicadsel.rs) instead of using `kicad`; tests' hosts keep the `kicad` they give.
+    pub live_kicad: bool }
 
 impl Default for HostInfo {
-    fn default() -> HostInfo { HostInfo { home: PathBuf::new(), user_home: "/nonexistent".into(), fc: String::new(), render: String::new(), kicad: Kicad { status: "missing".into(), ..Default::default() }, models: json!({"claude":["fable","opus","sonnet","haiku"]}), kistack: None, bundled: None } }
+    fn default() -> HostInfo { HostInfo { home: PathBuf::new(), user_home: "/nonexistent".into(), fc: String::new(), render: String::new(), kicad: Kicad { status: "missing".into(), ..Default::default() }, models: json!({"claude":["fable","opus","sonnet","haiku"]}), kistack: None, bundled: None, live_kicad: false } }
 }
 fn on_path(name: &str) -> Option<PathBuf> { std::env::var_os("PATH").and_then(|p| std::env::split_paths(&p).map(|d| d.join(name)).find(|c| c.is_file())) }
 
@@ -23,11 +25,8 @@ impl HostInfo {
     pub fn probe(home: &Path) -> HostInfo {
         let mut h = HostInfo { home: home.to_path_buf(), user_home: crate::plat::dirs::home().unwrap_or_else(|| "/nonexistent".into()), render: std::env::current_exe().map(|p| p.to_string_lossy().into_owned()).unwrap_or_default(), ..Default::default() };
         h.fc = std::env::var("BACKPLANE_FREECAD").ok().filter(|s| !s.is_empty()).or_else(|| on_path("freecadcmd").map(|p| p.to_string_lossy().into_owned())).unwrap_or_else(|| mac_app("FreeCAD.app/Contents/Resources/bin/freecadcmd"));
-        if let Some(cli) = std::env::var("BACKPLANE_KICAD_CLI").ok().filter(|s| !s.is_empty()).map(PathBuf::from).or_else(|| on_path("kicad-cli")).or_else(|| ["KiCad/KiCad.app/Contents/MacOS/kicad-cli", "KiCad.app/Contents/MacOS/kicad-cli"].iter().map(|r| mac_app(r)).find(|p| !p.is_empty()).map(PathBuf::from)) {
-            let out = crate::proc::std_cmd(crate::proc::Kind::Local, &cli).arg("--version").stdin(std::process::Stdio::null()).stderr(std::process::Stdio::null()).output().ok();
-            h.kicad = match out { Some(o) if o.status.success() => { let v = String::from_utf8_lossy(&o.stdout).trim().to_string(); Kicad { status: if v.contains("-bp.") { "ok" } else { "stock" }.into(), cli: cli.to_string_lossy().into_owned(), version: v, commit: std::env::var("BACKPLANE_KICAD_COMMIT").unwrap_or_default(), why: String::new() } }
-                _ => Kicad { status: "broken".into(), cli: cli.to_string_lossy().into_owned(), why: "it does not run".into(), ..Default::default() } };
-        }
+        // KiCad is not looked for here (never PATH's): each turn takes the one the hub has selected, kicad::ipc::runtime via kicadsel.rs
+        h.kicad = Kicad { status: "checking".into(), ..Default::default() }; h.live_kicad = true;
         if let Some(m) = std::env::var("BACKPLANE_MODELS").ok().and_then(|s| serde_json::from_str::<Value>(&s).ok()) { h.models = m }
         h.kistack = std::env::var("BACKPLANE_KISTACK").ok().map(PathBuf::from).or_else(|| std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join("kistack")))).filter(|p| p.is_dir());
         h.bundled = super::bundled::install(home); // Backplane's own skills, in this home (bundled.rs)

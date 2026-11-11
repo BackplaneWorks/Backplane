@@ -82,6 +82,7 @@ impl Agents {
         let outp = dir.join("out"); let _ = std::fs::write(dir.join("cmd"), &cmd);
         let (so, se) = match std::fs::File::create(&outp).and_then(|f| f.try_clone().map(|g| (f, g))) { Ok(x) => x, Err(e) => { self.work_end(&th, &id, "gone", &format!("could not open the output file: {e}")).await; return } };
         let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Shell, "sh"); c.args(["-c", cmd.as_str()]).current_dir(if cwd.is_empty() { self.hub.cfg.home.clone() } else { PathBuf::from(&cwd) }).env("BACKPLANE_LOCK_HOME", &self.hub.cfg.home).stdin(Stdio::null()).stdout(so).stderr(se).kill_on_drop(false);
+        for (k, v) in super::kicadsel::job_env(&self.kicad_env.lock().unwrap(), std::env::var_os("PATH")) { c.env(k, v); } // the KiCad the agent was given (kicadsel.rs)
         crate::plat::proc::own_group_tokio(&mut c);
         if let Some(f) = &guard { crate::plat::proc::inherit(&mut c, f) } // the job inherits its lock's flock
         let mut child = match c.spawn() { Ok(c) => c, Err(e) => { self.work_end(&th, &id, "gone", &format!("could not start: {e}")).await; return } };
