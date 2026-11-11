@@ -79,6 +79,16 @@ The ring was set up on the Boat (`ring.setup`: Pebble, hook `h1794356130-94959`)
 Rollback: `scripts/boat-hub-cutover.sh rollback` (the Boat hub stopped; with the desktop hub stopped, its own last BotSet/RoomSet/UberSet lines
 appended again; then the app started).
 
+## Live (Nov 10, 21:04): the home is on boat-hub
+
+Moved with one press (Settings, Machines: Move home to boat-hub; `home.move`, net/homemove.rs): 96,162 events, Bub (same id and uid), the six
+other bots, 13 rooms, memories, routines, mail, the vault, APNs and 91 push registrations, the paired devices (a phone's own token opens
+boat-hub). The desktop's projects stayed. The desktop hub and every client on it show Bub as the uberbot, marked boat-hub, with the bots and
+rooms (far bots, aae1beeca); clients add boat-hub to their hubs by themselves (`hub.offer`, e81cc3b79) and fail over to it. Pushes go from
+boat-hub (an APNs alert answered 200). The ring's one webhook address is `https://boat-hub.tail9e0cf2.ts.net/hook/h1794356011-590786`
+(bots/front.rs: boat-hub is its front door and owns it now; the hook id and token are the ones the desktop made). Every Ring page shows it.
+Back: Machines, Move home back here (`home.move {to:"back"}`). Open: boat-hub has no Claude sign-in yet (lane D: sync accounts).
+
 ## Rolled back (Nov 10, 19:34)
 
 Within the hour the person found Bub gone from the app: the desktop app and the phone talk to the desktop hub, and neither shows another
