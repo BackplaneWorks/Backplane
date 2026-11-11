@@ -139,6 +139,10 @@ async fn post(b: &Arc<Bots>, th: &str, a: Value) -> (bool, Value) { b.tool_call(
     peers.turn.lock().unwrap().insert(tst.clone(), "running".into());
     post(&bots, &des, json!({"room":room,"text":"first sketch"})).await;
     assert!(rides_to(&peers, &tst).is_empty() && peers.notes.lock().unwrap().iter().any(|n| n.0 == tst), "a running Codex turn takes it with its next tool result, not a restart");
+    post(&bots, &des, json!({"room":room,"text":"@tester look at this"})).await;
+    assert!(rides_to(&peers, &tst).is_empty(), "a mention gets there at once, but still never restarts a running Codex turn (the live run: five restarts and no post)");
+    assert_eq!(rpc(&hub, "swarm.post", json!({"room":room,"text":"tester: stop and write the tests"})).await["ok"], true);
+    assert_eq!(rides_to(&peers, &tst).len(), 1, "the person's word steers it");
     // added by the person: it starts with the joining brief and hears only what comes after it joined
     let a = rpc(&hub, "swarm.act", json!({"room":room,"action":"add","provider":"claude","role":"critic"})).await; assert_eq!(a["ok"], true, "{a}");
     let crit = a["result"]["thread"].as_str().unwrap().to_string();
