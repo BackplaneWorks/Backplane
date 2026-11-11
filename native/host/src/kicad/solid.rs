@@ -41,6 +41,17 @@ fn zig(d: u32) -> u32 { (d << 1) ^ 0u32.wrapping_sub(d >> 31) }
 fn num(o: &mut Vec<u8>, mut z: u32) { while z >= 128 { o.push((z & 127) as u8 | 128); z >>= 7 } o.push(z as u8) }
 /// SE.u: a glTF coordinate (metres, y up) in 10 micrometre units
 fn unit(m: f32) -> u32 { um(m * 100.0) }
+/// Each triangle's corners in the wire's integers (board axes, 10 micrometre units), as `of` writes them, and its colour: a part frame
+/// of these with the identity placement draws exactly where `of`'s model does (a STEP's streamed parts, then its whole model).
+pub fn ints(ts: &[Tri3]) -> impl Iterator<Item = ([i32; 9], u32)> + '_ {
+    ts.iter().map(|t| { let mut o = [0i32; 9]; for (k, v) in [t.a, t.b, t.c].into_iter().enumerate() { o[3 * k] = unit(v[0]) as i32; o[3 * k + 1] = unit(v[2]) as i32; o[3 * k + 2] = unit(v[1]) as i32 } (o, t.color) })
+}
+/// A part frame's `n` and `mesh` (plot::part_frame) of these triangles, placed by the identity: the same bytes as `of`'s mesh.
+pub fn part_mesh(ts: &[Tri3]) -> (u32, Vec<u8>) {
+    let (mut d, mut c, mut p) = (Vec::with_capacity(ts.len() * 16), 0u32, [0u32; 3]);
+    for (t, color) in ints(ts) { num(&mut d, color ^ c); c = color; for k in 0..3 { for a in 0..3 { let v = t[3 * k + a] as u32; num(&mut d, zig(v.wrapping_sub(p[a]))); p[a] = v } } }
+    (ts.len() as u32, d)
+}
 /// Solid.of: a model's triangles as a solid; None for no triangles (Line.solid prints nothing for one)
 pub fn of(ts: &[Tri3]) -> Option<Solid> {
     if ts.is_empty() { return None }
@@ -71,6 +82,10 @@ mod tests {
     fn tri(a: [f32; 3], b: [f32; 3], c: [f32; 3], color: u32) -> Tri3 { Tri3 { a, b, c, color } }
     fn read(d: &[u8]) -> Vec<u32> { let (mut o, mut z, mut s) = (vec![], 0u32, 0); for b in d { z |= ((*b & 127) as u32) << s; s += 7; if b & 128 == 0 { o.push(z); z = 0; s = 0 } } o }
     fn unzig(z: u32) -> i32 { ((z >> 1) ^ 0u32.wrapping_sub(z & 1)) as i32 }
+    #[test] fn a_part_of_ints_is_the_same_bytes_as_the_solid() {
+        let t = [tri([0.001, 0.002, 0.003], [0.002, 0.002, -0.003], [0.001, -0.002, 0.003], 0xff0000), tri([0.5, 0.0, 1.0], [0.0; 3], [-0.25, 0.1, 0.0], 0x00ff01)];
+        assert_eq!(part_mesh(&t), (2, of(&t).unwrap().d));
+    }
     #[test] fn a_solid_codes_colours_by_xor_and_points_by_zigzag_deltas() {
         let t = [tri([0.001, 0.002, 0.003], [0.002, 0.002, 0.003], [0.001, -0.002, 0.003], 0xff0000), tri([0.0; 3], [0.0; 3], [0.0; 3], 0xff0001)];
         let s = of(&t).unwrap(); let n = read(&s.d);

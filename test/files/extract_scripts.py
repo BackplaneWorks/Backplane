@@ -17,13 +17,8 @@ defs = {}
 for m in re.finditer(r"^def ([A-Z][A-Za-z]*\.[A-Za-z_.]+)\(\) -> String:\n((?:  .*\n|\n)+?)(?=\S|\Z)", SRC, re.M):
     defs[m.group(1)] = m.group(2).strip("\n")
 
-# FreeCAD's scripts live in step2glb.ts's template literals: the Rust hub runs FreeCAD itself (kicad/stepglb.rs), the same text
-def template(name):
-    ts = open(os.path.join(ROOT, "tools/step2glb/step2glb.ts")).read()
-    m = re.search(r"^const " + name + r" = `(.*?)`;$", ts, re.M | re.S)
-    if not m: raise SystemExit("no " + name + " in step2glb.ts")
-    return m.group(1).replace("\\\\", "\\")
-PY = {"freecad_gui.py": "FREECAD_GUI_PY", "freecad_console.py": "FREECAD_PY"}
+# FreeCAD's scripts (freecad_gui.py, freecad_console.py, freecad_batch.py) are their own source now, in native/host/src/files/scripts: the
+# Bun step2glb they were taken from is gone (native/step2glb meshes natively; FreeCAD is the last resort).
 
 def lit(s, i):
     assert s[i] == '"'
@@ -70,7 +65,7 @@ def call(name):
 if __name__ == "__main__":
     check = "--check" in sys.argv; bad = 0
     os.makedirs(OUT, exist_ok=True)
-    for f, text in [(f, call(name)) for name, f in WANT.items()] + [(f, template(name)) for f, name in PY.items()]:
+    for f, text in [(f, call(name)) for name, f in WANT.items()]:
         p = os.path.join(OUT, f)
         if check:
             if not os.path.exists(p) or open(p).read() != text: print("DIFFERS:", f); bad = 1

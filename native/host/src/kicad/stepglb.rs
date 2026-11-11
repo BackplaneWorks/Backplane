@@ -1,10 +1,12 @@
 //! A STEP file to a GLB, straight from the hub, no child. Meshing a B-rep is out of scope for this crate, so a host tool does it,
-//! run as a subprocess and never linked. Which one is an explicit choice (`attempts`):
-//!   * `BACKPLANE_STEP2GLB=<path>`: that `backplane-step2glb` only. OpenCascade in WASM on Bun's runtime: the JS hub's meshes exactly.
-//!   * `BACKPLANE_STEP2GLB=off`: FreeCAD only: no Bun anywhere, and a machine without FreeCAD shows no STEP.
-//!   * unset: FreeCAD (Python, with native OpenCascade), then `backplane-step2glb` beside the hub only if FreeCAD is absent or failed.
-//! FreeCAD is run as step2glb itself runs it (tools/step2glb: the GUI offscreen, the only build that reads a STEP's colours, then the
-//! console build, tints only); the two scripts are step2glb.ts's text, extracted by test/files/extract_scripts.py.
+//! run as a subprocess (its own program, never a shell) and never linked. Which one is an explicit choice (`attempts`):
+//!   * `BACKPLANE_STEP2GLB=<path>`: that `backplane-step2glb` only.
+//!   * `BACKPLANE_STEP2GLB=off`: FreeCAD only.
+//!   * unset: `backplane-step2glb` beside the hub, then FreeCAD only if it is absent or failed.
+//! `backplane-step2glb` (native/step2glb) is OpenCascade compiled natively: it reads a STEP's colours through XCAF, heals and meshes its
+//! solids on every core, and streams them (`convert_streaming`): a part in about 20 ms, a 9 MB board in about a second. FreeCAD is the
+//! last resort, run as before (the GUI offscreen, the only FreeCAD build that reads a STEP's colours, then the console build, tints only):
+//! its start alone takes four seconds.
 //! Also the models cache: a converter writes in a folder of its own, and only a non-empty file that
 //! converted is moved into the cache in one rename.
 use std::path::{Path, PathBuf};
@@ -15,7 +17,9 @@ use std::time::{Duration, Instant};
 const FREECAD_GUI_PY: &str = include_str!("../files/scripts/freecad_gui.py");
 const FREECAD_PY: &str = include_str!("../files/scripts/freecad_console.py");
 const FREECAD_SECS: u64 = 600;
-pub const NO_MESHER: &str = "a STEP needs FreeCAD on the hub's machine (or backplane-step2glb beside the hub)";
+pub const NO_MESHER: &str = "a STEP needs backplane-step2glb beside the hub (or FreeCAD on the hub's machine)";
+/// The longest a native conversion may take before it is stopped (a 9 MB board takes about a second).
+const STEP2GLB_SECS: u64 = 600;
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Ran { pub code: i32, pub out: String }
@@ -68,7 +72,7 @@ pub fn attempts(env: Option<&str>, gui: &str, cmd: &str, beside: &str) -> Vec<Me
     match env {
         Some("off") | Some("0") => fc(),
         Some(p) if !p.is_empty() => vec![Mesher::Step2glb(p.into())],
-        _ => { let mut v = fc(); if !beside.is_empty() { v.push(Mesher::Step2glb(beside.into())) } v }
+        _ => { let mut v = if beside.is_empty() { vec![] } else { vec![Mesher::Step2glb(beside.into())] }; v.extend(fc()); v }
     }
 }
 
@@ -221,8 +225,55 @@ pub fn run_merged(argv: &[&str], nice: bool) -> Ran {
     })();
     match started { Ok((s, o)) => Ran { code: s.code().unwrap_or(1), out: String::from_utf8_lossy(&o).into_owned() }, Err(e) => Ran { code: 127, out: format!("{prog}: {e}") } }
 }
+/// What a streaming conversion says as it goes: how many leaves (placed solids) the model has, then each batch of them as a GLB of
+/// its own (the same format as the whole), in the order they were meshed.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Event { Of { leaves: u32, faces: u32 }, Part { tris: u64, leaves: u32, glb: PathBuf } }
+/// One line of backplane-step2glb's stdout, read (`TIME`, `TRIS` and anything else: None).
+pub fn event(line: &str) -> Option<Event> {
+    let mut w = line.splitn(4, ' ');
+    match w.next()? {
+        "OF" => Some(Event::Of { leaves: w.next()?.parse().ok()?, faces: w.next()?.parse().ok()? }),
+        "PART" => { let tris = w.next()?.parse().ok()?; let leaves = w.next()?.parse().ok()?; let glb = w.next()?.trim_end(); (!glb.is_empty()).then(|| Event::Part { tris, leaves, glb: glb.into() }) }
+        _ => None,
+    }
+}
+/// backplane-step2glb on `src` into `stage`, its stdout read line by line as it is written: each `Event` to `on` the moment it is said
+/// (the batch's GLB is there until this returns), and all its output in the answer. Stopped after STEP2GLB_SECS.
+fn step2glb_run(tool: &str, src: &str, stage: &str, detail: Option<Detail>, nice: bool, mut on: Option<&mut (dyn FnMut(Event) + '_)>) -> Ran {
+    use std::io::BufRead;
+    let parts = format!("{stage}.parts");
+    let mut c = command(nice, tool); c.args([src, stage]);
+    if let Some(d) = detail { c.args(["--linear", &d.linear.to_string(), "--angular", &d.angular.to_string()]); }
+    if on.is_some() { if std::fs::create_dir_all(&parts).is_err() { on = None } else { c.args(["--parts", &parts]); } }
+    let started = (|| {
+        let (r, w) = std::io::pipe()?;
+        c.stdout(w.try_clone()?).stderr(w);
+        let p = std::sync::Arc::new(std::sync::Mutex::new(c.spawn()?));
+        drop(c); // the pipe's writing ends are the child's alone: its exit ends the read
+        // the guard: stops the tool at its time, or ends the moment the tool's output does (no polling: a part's 20 ms are not waited on)
+        let (done, ended) = std::sync::mpsc::channel::<()>();
+        let guard = { let p = p.clone(); std::thread::spawn(move || {
+            if let Err(std::sync::mpsc::RecvTimeoutError::Timeout) = ended.recv_timeout(Duration::from_secs(STEP2GLB_SECS)) { let _ = p.lock().unwrap_or_else(|e| e.into_inner()).kill(); }
+        }) };
+        let mut out = String::new();
+        for line in std::io::BufReader::new(r).lines() {
+            let Ok(line) = line else { break };
+            if let (Some(f), Some(e)) = (on.as_mut(), event(&line)) { f(e) }
+            out.push_str(&line); out.push('\n');
+        }
+        let _ = done.send(()); let _ = guard.join();
+        let s = p.lock().unwrap_or_else(|e| e.into_inner()).wait();
+        Ok::<_, std::io::Error>((s?, out))
+    })();
+    let _ = std::fs::remove_dir_all(&parts);
+    match started { Ok((s, o)) => Ran { code: s.code().unwrap_or(1), out: o }, Err(e) => Ran { code: 127, out: format!("{tool}: {e}") } }
+}
 /// `src` meshed into `stage` by the first tool that can, at `detail` (None: the tool's default).
-pub fn convert(tools: &[Mesher], src: &str, stage: &str, detail: Option<Detail>, nice: bool) -> Ran {
+pub fn convert(tools: &[Mesher], src: &str, stage: &str, detail: Option<Detail>, nice: bool) -> Ran { convert_streaming(tools, src, stage, detail, nice, None) }
+/// `convert`, with the model's parts to `on` as they are meshed (backplane-step2glb streams; FreeCAD says nothing until the end). A tool
+/// that fails after it streamed is followed by the next, whose model replaces what was streamed.
+pub fn convert_streaming(tools: &[Mesher], src: &str, stage: &str, detail: Option<Detail>, nice: bool, mut on: Option<&mut dyn FnMut(Event)>) -> Ran {
     let mut last = Ran { code: 127, out: NO_MESHER.into() };
     for t in tools {
         match t {
@@ -232,10 +283,7 @@ pub fn convert(tools: &[Mesher], src: &str, stage: &str, detail: Option<Detail>,
                 last = Ran { code: 1, out: format!("FreeCAD could not mesh {src}") };
             }
             Mesher::Step2glb(tool) => {
-                let (l, a) = detail.map_or((String::new(), String::new()), |d| (d.linear.to_string(), d.angular.to_string()));
-                let mut argv = vec![tool.as_str(), src, stage];
-                if detail.is_some() { argv.extend(["--linear", l.as_str(), "--angular", a.as_str()]) }
-                let r = run_merged(&argv, nice);
+                let r = step2glb_run(tool, src, stage, detail, nice, on.as_deref_mut());
                 if r.code == 0 { return r }
                 last = r;
             }
@@ -273,13 +321,43 @@ mod tests {
     fn fc() -> Mesher { Mesher::FreeCad { gui: "/g".into(), cmd: "/c".into() } }
     #[test] fn the_mesher_is_an_explicit_choice() {
         let s = |p: &str| Mesher::Step2glb(p.into());
-        assert_eq!(attempts(None, "/g", "/c", "/s"), vec![fc(), s("/s")]); // FreeCAD first; step2glb only when FreeCAD is absent or failed
+        assert_eq!(attempts(None, "/g", "/c", "/s"), vec![s("/s"), fc()]); // the native mesher first; FreeCAD only when it is absent or failed
         assert_eq!(attempts(None, "", "", "/s"), vec![s("/s")]);
         assert_eq!(attempts(None, "", "", ""), vec![]);
         assert_eq!(attempts(Some("/x/tool"), "/g", "/c", "/s"), vec![s("/x/tool")]); // named: that tool only
-        assert_eq!(attempts(Some("off"), "/g", "/c", "/s"), vec![fc()]); // no Bun at all
+        assert_eq!(attempts(Some("off"), "/g", "/c", "/s"), vec![fc()]); // FreeCAD alone
         assert_eq!(attempts(Some("off"), "", "", "/s"), vec![]);
-        assert_eq!(attempts(Some(""), "/g", "/c", "/s"), vec![fc(), s("/s")]);
+        assert_eq!(attempts(Some(""), "/g", "/c", "/s"), vec![s("/s"), fc()]);
+    }
+    #[test] fn the_native_meshers_lines_are_read() {
+        assert_eq!(event("OF 76 1348"), Some(Event::Of { leaves: 76, faces: 1348 }));
+        assert_eq!(event("PART 20378 68 /c/my parts/0000.glb"), Some(Event::Part { tris: 20378, leaves: 68, glb: "/c/my parts/0000.glb".into() }), "a path with spaces is whole");
+        for l in ["TIME read 12", "TRIS 9", "PART 1 2", "PART x 2 /a", "OF 1", ""] { assert_eq!(event(l), None, "{l}") }
+    }
+    #[cfg(unix)]
+    #[test] fn a_stream_says_each_part_while_the_tool_runs_and_its_folder_goes_after() {
+        use crate::plat::fs::PermissionsExt;
+        let d = dir("stream"); let tool = d.join("t");
+        // a stand-in: says its batches, each written before it is said, then the model
+        std::fs::write(&tool, "#!/bin/sh
+while [ $# -gt 0 ]; do [ \"$1\" = --parts ] && P=$2; shift; done
+echo 'TIME read 1'
+echo 'OF 2 9'
+printf a > \"$P/0000.glb\"
+echo \"PART 12 1 $P/0000.glb\"
+printf b > \"$P/0001.glb\"
+echo \"PART 30 1 $P/0001.glb\"
+echo 'TRIS 42'
+").unwrap();
+        std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let out = d.join("o.glb").to_string_lossy().into_owned();
+        let mut seen = vec![];
+        let mut on = |e: Event| { if let Event::Part { glb, .. } = &e { seen.push(std::fs::read_to_string(glb).unwrap_or_default()) } seen.push(format!("{e:?}").chars().take(4).collect()) };
+        let r = convert_streaming(&[Mesher::Step2glb(tool.to_string_lossy().into())], "/a.step", &out, Some(NORMAL), false, Some(&mut on));
+        assert_eq!(r.code, 0, "{}", r.out);
+        assert_eq!(seen, ["Of {", "a", "Part", "b", "Part"], "each batch readable when it is said");
+        assert!(r.out.contains("TRIS 42"));
+        assert!(!Path::new(&format!("{out}.parts")).exists(), "the batches' folder goes once the tool is done");
     }
     #[test] fn no_tool_says_what_is_missing() { let r = convert(&[], "/a.step", "/o.glb", Some(NORMAL), false); assert_eq!((r.code, r.out.as_str()), (127, NO_MESHER)); }
     fn dir(tag: &str) -> PathBuf { let d = std::env::temp_dir().join(format!("bp-stepglb-{tag}-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap(); d }

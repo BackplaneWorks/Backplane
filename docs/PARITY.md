@@ -70,7 +70,7 @@ Each lane updates its own rows in the commit that lands the work.
 | `mobile/tests/improvements/bridge.mjs` and other tests of the old bridge | done | cleanup |
 | **Helpers** (goal: only `tools/browser` stays Bun) | | |
 | `tools/kipc`: removed, with `BACKPLANE_KIPC_BIN` and `scripts/build-kipc.sh`; the hub does the IPC in process | done | cleanup |
-| `tools/step2glb`: FreeCAD comes first, Bun and OpenCascade WASM are the fallback for machines without FreeCAD | partial | helpers |
+| `native/step2glb`: native OpenCascade meshes STEP (streamed, colours kept); FreeCAD is the last resort; no Bun | done | helpers |
 | `tools/voice` (removed; `native/voice` replaces it) | done | voice |
 | `tools/platform/windows-path.ts` | unchecked | helpers |
 | **Requests and tools with no handler on `main`** | | |

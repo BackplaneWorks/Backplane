@@ -103,7 +103,7 @@ jobs:
           if grep -aq backplane-e2e-trust-enabled native/host/target/release/backplane-hub${{ runner.os == 'Windows' && '.exe' || '' }}; then echo "::error::backplane-hub was built with feature e2e-trust"; exit 1; fi
       # The Bun version here is deploy/bun-version's: change them together, and update deploy/licenses/bun (NOTICE.md and Bun's LICENSE.md at that tag)
       # whenever it changes. scripts/licenses.sh refuses a package built with a Bun the notices do not name.
-      # bun for the browser helper and step2glb. Its download server has answered 504 more than once: a pinned version, kept in the Actions cache, and
+      # bun for the browser helper. Its download server has answered 504 more than once: a pinned version, kept in the Actions cache, and
       # up to three tries with a pause between, so a tag push never fails halfway on it
       - uses: actions/cache@v4
         with:
@@ -127,6 +127,15 @@ jobs:
         run: |
           for i in 1 2 3; do npm install -g bun@1.4.4 && break; sleep 30; done
           bun --version
+      # The STEP mesher (native/step2glb): OpenCascade, natively, linked statically from its pinned source (scripts/build-occt.sh, only the
+      # toolkits it uses). That build takes minutes and is kept in the Actions cache by its version, script and platform.
+      - uses: actions/cache@v4
+        with:
+          path: ~/.cache/backplane/occt-7.9.2-static-*
+          key: occt-7.9.2-${{ hashFiles('scripts/build-occt.sh') }}-${{ matrix.target }}
+      - name: STEP mesher
+        env: { MACOSX_DEPLOYMENT_TARGET: "12.0" }
+        run: STATIC=1 scripts/build-step2glb.sh dist/backplane-step2glb${{ runner.os == 'Windows' && '.exe' || '' }}
       # licenses/rust: the notices of the Rust crates in each program, for this target (scripts/rust-licenses.sh). A crate under a licence outside
       # deploy/licenses/rust/about.toml's allow-list fails the release here. cargo-about is kept in ~/.cargo/bin by the rust cache.
       - name: rust notices
@@ -145,9 +154,9 @@ jobs:
           # the guard goes in every archive: an install without it can neither update nor recover (deploy/install.sh.in refuses one)
           [ -x native/guard/target/release/backplane ] || { echo "::error::no guard (native/guard) for ${{ matrix.target }}"; exit 1; }
           cp native/guard/target/release/backplane $d/
-          # the Browser tab's helper and STEP's mesher (no FreeCAD needed), both bun programs: either missing fails the job
+          # the Browser tab's helper (a bun program) and STEP's mesher (native, built above; no FreeCAD needed): either missing fails the job
           (cd tools/browser && bun install --frozen-lockfile && bun build.ts "$PWD/../../$d/backplane-browser")
-          (cd tools/step2glb && bun install --frozen-lockfile && bun build --compile step2glb.ts --outfile "$PWD/../../$d/backplane-step2glb")
+          cp dist/backplane-step2glb $d/
           # Linux: CEF's runtime beside the client, where viewers/cef.rs runtime_dir looks in an install (libcef stripped: ~1.4 GB with symbols, ~270 MB without)
           case "${{ matrix.target }}" in linux-*)
             # the cef crate's distribution in its OUT_DIR (kept by the build cache, unlike the copy beside the binary, which a cached build leaves out)
@@ -172,7 +181,7 @@ jobs:
           scripts/licenses.sh $d ${{ matrix.target }} build/licenses/rust   # licenses/: every third-party notice (deploy/licenses/README.md)
           # everything a dev cut has (scripts/dev-build.sh), or the job fails: a release must not lose a feature a dev cut showed working
           need="backplane-hub backplane-gpui backplane backplane-voice silero_vad.onnx backplane-browser backplane-step2glb COMMIT assets/icons.json assets/cat-rigs kistack/REVISION"
-          need="$need licenses/README.md licenses/LICENSE licenses/bun/NOTICE.md licenses/bun/LICENSE.md licenses/playwright-core/NOTICE licenses/step2glb/license.occt.txt licenses/silero-vad/LICENSE licenses/gpui/LICENSE-APACHE licenses/rust/hub.txt licenses/rust/client.txt licenses/rust/guard.txt licenses/rust/voice.txt"
+          need="$need licenses/README.md licenses/LICENSE licenses/bun/NOTICE.md licenses/bun/LICENSE.md licenses/playwright-core/NOTICE licenses/step2glb/NOTICE.md licenses/silero-vad/LICENSE licenses/gpui/LICENSE-APACHE licenses/rust/hub.txt licenses/rust/client.txt licenses/rust/guard.txt licenses/rust/voice.txt"
           case "${{ matrix.target }}" in linux-*) need="$need libcef.so icudtl.dat resources.pak chrome_100_percent.pak v8_context_snapshot.bin locales/en-US.pak licenses/cef/LICENSE.txt licenses/cef/CREDITS.html";;
             darwin-*) need="$need licenses/cef/LICENSE.txt licenses/cef/CREDITS.html";; esac
           for f in $need; do [ -e "$d/$f" ] || { echo "::error::$f missing from the ${{ matrix.target }} archive"; exit 1; }; done
@@ -202,14 +211,14 @@ jobs:
           scripts/cef-runtime-files.sh native/gpui/target/release $d windows
           echo "9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6  $d/silero_vad.onnx" | sha256sum -c - || { echo "::error::silero_vad.onnx is not the pinned file (native/voice/src/local.rs)"; exit 1; }
           (cd tools/browser && bun install --frozen-lockfile && bun build.ts "$PWD/../../$d/backplane-browser.exe")
-          (cd tools/step2glb && bun install --frozen-lockfile && bun build --compile step2glb.ts --outfile "$PWD/../../$d/backplane-step2glb.exe")
+          cp dist/backplane-step2glb.exe $d/   # the STEP mesher, native (built above)
           cp -r assets $d/assets
           scripts/build-kistack.sh $d/kistack
           [ -s $d/assets/icons.json ] && [ "$(ls $d/assets/cat-rigs | wc -l)" -ge 576 ] || { echo "::error::assets/icons.json or assets/cat-rigs missing from the archive"; exit 1; }
           git rev-parse HEAD > $d/COMMIT
           scripts/licenses.sh $d ${{ matrix.target }} build/licenses/rust   # licenses/: every third-party notice (deploy/licenses/README.md)
           for f in backplane-hub.exe backplane-gpui.exe backplane.exe bp-sh.exe backplane-voice.exe silero_vad.onnx backplane-browser.exe backplane-step2glb.exe COMMIT assets/icons.json assets/cat-rigs kistack/REVISION \
-                   licenses/README.md licenses/LICENSE licenses/bun/NOTICE.md licenses/bun/LICENSE.md licenses/playwright-core/NOTICE licenses/step2glb/license.occt.txt licenses/silero-vad/LICENSE licenses/gpui/LICENSE-APACHE licenses/rust/hub.txt licenses/rust/client.txt licenses/rust/guard.txt licenses/rust/voice.txt \
+                   licenses/README.md licenses/LICENSE licenses/bun/NOTICE.md licenses/bun/LICENSE.md licenses/playwright-core/NOTICE licenses/step2glb/NOTICE.md licenses/silero-vad/LICENSE licenses/gpui/LICENSE-APACHE licenses/rust/hub.txt licenses/rust/client.txt licenses/rust/guard.txt licenses/rust/voice.txt \
                    libcef.dll chrome_elf.dll icudtl.dat resources.pak chrome_100_percent.pak v8_context_snapshot.bin locales/en-US.pak licenses/cef/LICENSE.txt licenses/cef/CREDITS.html; do
             [ -e "$d/$f" ] || { echo "::error::$f missing from the windows-x64 archive"; exit 1; }; done
           ls -la $d

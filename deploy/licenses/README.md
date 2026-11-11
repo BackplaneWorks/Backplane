@@ -9,9 +9,9 @@ notices for everything else in this archive, one folder per component.
 |---|---|---|---|
 | `rust/` | The Rust crates compiled into each program: `hub.txt` (backplane-hub, bp-sh), `client.txt` (backplane-gpui), `guard.txt` (backplane), `voice.txt` (backplane-voice). Made at release time by cargo-about for this platform | the programs | MIT, Apache-2.0, BSD and others, each text in full |
 | `gpui/` | gpui 0.2.2 by Zed Industries, vendored with the changes in `PATCH.md` | backplane-gpui | Apache-2.0 |
-| `bun/` | The Bun runtime, with JavaScriptCore/WebKit and tinycc, in the two programs built with `bun build --compile` | backplane-browser, backplane-step2glb | MIT; LGPL-2 and LGPL-2.1 (see `NOTICE.md`) |
+| `bun/` | The Bun runtime, with JavaScriptCore/WebKit and tinycc, in the program built with `bun build --compile` | backplane-browser | MIT; LGPL-2 and LGPL-2.1 (see `NOTICE.md`) |
 | `playwright-core/` | Playwright's core library, bundled into the Browser tab's helper | backplane-browser | Apache-2.0 |
-| `step2glb/` | OpenCascade and occt-import-js, compiled to WebAssembly and embedded in the STEP mesher | backplane-step2glb | LGPL-2.1 |
+| `step2glb/` | Open CASCADE Technology 7.9.2, linked statically into the STEP mesher (`NOTICE.md`: its source and how to relink) | backplane-step2glb | LGPL-2.1 with Open CASCADE's exception |
 | `cef/` | Chromium Embedded Framework (`LICENSE.txt`) and Chromium's own credits for every library it carries (`CREDITS.html`). Linux only | libcef.so and its files | BSD-3-Clause; Chromium's are listed in `CREDITS.html` |
 | `silero-vad/` | Silero VAD, the model dictation finds speech with | silero_vad.onnx | MIT |
 | `voice-engine/` | Dictation's local engine (sherpa-onnx, ONNX Runtime, the Parakeet models): downloaded when you turn it on, not shipped | not in the archive | Apache-2.0, MIT, CC-BY-4.0 |
