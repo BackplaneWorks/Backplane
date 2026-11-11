@@ -390,7 +390,7 @@ pub fn close(this: &mut Backplane, cx: &mut Context<Backplane>) {
 /// Whether any settings page is up (the hub's, or this device's and the accounts page, which the hub need not serve).
 pub fn is_open(this: &Backplane) -> bool { this.data["settings"].is_object() || this.screens.settings_ui.open_local }
 
-pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, settings: &Value, focus: &FocusHandle, ui: &SettingsUi, local: &crate::local::Local, acct: &super::accounts::Accounts, fit: Fit, hub_list: &[crate::hubs::Hub]) -> Option<AnyElement> {
+pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, settings: &Value, focus: &FocusHandle, ui: &SettingsUi, local: &crate::local::Local, acct: &super::accounts::Accounts, fit: Fit, hub_list: &[crate::hubs::Hub], on_home: Option<&str>) -> Option<AnyElement> {
     let hub_on = settings.is_object();
     if !hub_on && !ui.open_local { return None; }
     let on_acct = ui.accounts;
@@ -401,7 +401,7 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
     let on_page = hub_on && !on_device && !on_acct && !on_hubs && matches!(shown(&rows), Shown::Page);
     let skip = if on_page { 1 } else { 0 };
     let dev_rows = device_rows(local);
-    let hub_rows = super::hubpick::rows(hub_list);
+    let hub_rows = super::hubpick::rows_on(hub_list, on_home);
     let mut els: Vec<AnyElement> = if on_hubs { hub_rows.iter().enumerate().map(|(i, r)| row_el(cx, light, fields, r, i, fit.rows)).collect() } else if on_acct { super::accounts::page(cx, light, acct, fit.rows) } else if on_device { dev_rows.iter().enumerate().map(|(i, r)| row_el(cx, light, fields, r, i, fit.rows)).collect() } else { rows.iter().skip(skip).take(MAX_ROWS).enumerate().map(|(i, r)| row_el(cx, light, fields, r, i, fit.rows)).collect() };
     if !on_device && !on_acct && !on_hubs && rows.len() > MAX_ROWS + skip { els.push(div().py_2().text_color(c("dim")).child(tf("gpui.settings.more", &[("n", (rows.len() - MAX_ROWS - skip).into())])).into_any_element()); }
     // the left nav

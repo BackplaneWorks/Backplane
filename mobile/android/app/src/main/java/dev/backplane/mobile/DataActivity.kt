@@ -36,7 +36,7 @@ class DataActivity : ComponentActivity() {
         intent.data?.let { route(it) }
     }
     // an alert's link: "account:<id>" opens that account's sign-in (an expired sign-in's alert) instead of the thread
-    private fun linked(i: android.content.Intent?) { i?.getStringExtra("link")?.takeIf { it.startsWith("account:") }?.let { DataClient.openAccount = it.removePrefix("account:"); DataClient.openFromIntent = null } }
+    private fun linked(i: android.content.Intent?) { i?.getStringExtra("hub")?.takeIf(String::isNotEmpty)?.let { DataClient.openHub(it) }; i?.getStringExtra("link")?.takeIf { it.startsWith("account:") }?.let { DataClient.openAccount = it.removePrefix("account:"); DataClient.openFromIntent = null } }
     // backplane://thread/<id> opens that thread, backplane://account/<id> that account's sign-in; any other link of this app's scheme asks before it pairs
     private fun route(u: android.net.Uri) {
         if (u.scheme != BuildConfig.URL_SCHEME || u.host == "google") return

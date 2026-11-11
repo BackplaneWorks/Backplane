@@ -18,10 +18,13 @@ pub struct Hub {
     /// This computer's own hub only: the token file of the hub the client was started on (`origin` is its address). Empty until the client is started with one.
     /* i18n-ok: a serde attribute */ #[serde(default, skip_serializing_if = "String::is_empty")]
     pub token_file: String,
+    /// The home hub (an always-on hub the person's home moved to, added by its offer): used while the one in use cannot be reached.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub home: bool,
 }
 impl Hub {
-    pub fn local() -> Hub { Hub { key: LOCAL.into(), origin: String::new(), token_file: String::new() } }
-    pub fn remote(origin: &str) -> Hub { Hub { key: crate::pairing::host_port(origin).0, origin: origin.trim_end_matches('/').to_string(), token_file: String::new() } }
+    pub fn local() -> Hub { Hub { key: LOCAL.into(), origin: String::new(), token_file: String::new(), home: false } }
+    pub fn remote(origin: &str) -> Hub { Hub { key: crate::pairing::host_port(origin).0, origin: origin.trim_end_matches('/').to_string(), token_file: String::new(), home: false } }
     pub fn is_local(&self) -> bool { self.key == LOCAL }
     /// What the picker and the Hubs page call it.
     /* i18n-ok: the label is what drivers press; drawn through trs */ pub fn label(&self) -> String { if self.is_local() { "This computer".into() } else { self.key.clone() } }
@@ -38,6 +41,13 @@ pub fn adopt<T: Clone>(list: &[T], item: T, key: impl Fn(&T) -> Option<String>) 
     out.extend(list.iter().filter(|x| key(x) != k).cloned());
     out
 }
+/// A hub an offer added goes second: the one in use stays in use; an older pairing with it is replaced.
+pub fn second<T: Clone>(list: &[T], item: T, key: impl Fn(&T) -> Option<String>) -> Vec<T> {
+    let k = key(&item);
+    let mut out: Vec<T> = list.iter().filter(|x| key(x) != k).cloned().collect();
+    out.insert(out.len().min(1), item);
+    out
+}
 /// Switching to a paired hub moves it first; an unknown key changes nothing.
 pub fn use_hub<T: Clone>(list: &[T], k: &str, key: impl Fn(&T) -> Option<String>) -> Vec<T> {
     match list.iter().find(|x| key(x).as_deref() == Some(k)) {
@@ -50,6 +60,39 @@ pub fn forget<T: Clone>(list: &[T], k: &str, key: impl Fn(&T) -> Option<String>)
 /// host:port of a link, the key the phones use for a hub.
 pub fn link_key(link: &str) -> Option<String> { crate::pairing::origin_of(link.trim()).map(|o| crate::pairing::host_port(&o).0) }
 
+// ---- the home hub (docs/pairing.md, Home hub): the phones' rules, held to test/mobile/hubs_cases.json ----
+
+#[derive(Debug, PartialEq, Clone)]
+pub struct Offer { pub id: String, pub name: String, pub url: String, pub why: String, pub credential: String }
+/// The hub's `hub.offer` (a JSON string, "" for none), or None when it names no hub.
+pub fn offer(text: &str) -> Option<Offer> {
+    let o: Value = serde_json::from_str(text).ok()?;
+    let s = |k: &str| o[k].as_str().unwrap_or("").to_string();
+    let id = s("id"); if id.is_empty() { return None }
+    let url = crate::pairing::origin_of(&s("url"))?.trim_end_matches('/').to_string();
+    Some(Offer { id, name: s("name"), url, why: s("why"), credential: s("credential") })
+}
+#[derive(Debug, PartialEq, Clone)]
+pub enum Plan { None, Known(String), Same { key: String, link: String }, Take(String) }
+/// What an offer asks of this client: nothing, a hub already paired (it becomes the home), the same token at the offered address, or a link to take and redeem.
+/// `token` is the device token held for the hub in use (None on this computer's own hub's token: the desktop takes a link); `done` the offers already answered.
+pub fn plan<T>(text: &str, list: &[T], token: Option<&str>, done: &[String], key: impl Fn(&T) -> Option<String>) -> Plan {
+    let Some(o) = offer(text) else { return Plan::None };
+    if done.contains(&o.id) { return Plan::None }
+    let k = crate::pairing::host_port(&o.url).0;
+    if list.first().and_then(&key).as_deref() == Some(k.as_str()) { return Plan::None }
+    if list.iter().any(|x| key(x).as_deref() == Some(k.as_str())) { return Plan::Known(k) }
+    match token { Some(t) if o.credential == "same" && !t.is_empty() => Plan::Same { key: k, link: format!("{}/#token={t}", o.url) }, _ => Plan::Take(k) }
+}
+/// How long the hub in use may not answer before the home is used instead.
+pub const FAILOVER_AFTER: std::time::Duration = std::time::Duration::from_secs(20);
+/// Whether to be on the home hub: `main` is the hub in use, `home` the remembered one ("" for none), `down` how long main has not answered.
+pub fn on_home(main: &str, home: &str, now: bool, down: std::time::Duration, home_up: bool, main_up: bool) -> bool {
+    if home.is_empty() || home == main { return false }
+    if now { return !main_up }
+    down >= FAILOVER_AFTER && home_up
+}
+
 // ---- the client's list ----
 
 fn key_of(h: &Hub) -> Option<String> { Some(h.key.clone()) }
@@ -61,6 +104,19 @@ fn with_local(mut list: Vec<Hub>) -> Vec<Hub> {
     list
 }
 pub fn adopted(list: &[Hub], origin: &str) -> Vec<Hub> { with_local(adopt(list, Hub::remote(origin), key_of)) }
+/// A hub added by an offer: second, so the one in use stays first (no switch), and the home when the offer says so (only one home).
+pub fn added(list: &[Hub], origin: &str, home: bool) -> Vec<Hub> {
+    let mut h = Hub::remote(origin); h.home = home;
+    let rest: Vec<Hub> = list.iter().cloned().map(|mut x| { if home { x.home = false } x }).collect();
+    with_local(second(&rest, h, key_of))
+}
+/// An offered hub already on the list becomes the home: the new list, None when nothing changes.
+pub fn homed(list: &[Hub], key: &str) -> Option<Vec<Hub>> {
+    if !list.iter().any(|h| h.key == key) || list.iter().any(|h| h.key == key && h.home) { return None }
+    Some(list.iter().cloned().map(|mut h| { h.home = h.key == key; h }).collect())
+}
+/// The home hub, when it is not the one in use.
+pub fn home(list: &[Hub]) -> Option<&Hub> { list.iter().skip(1).find(|h| h.home && !h.is_local()) }
 pub fn used(list: &[Hub], key: &str) -> Vec<Hub> { with_local(use_hub(list, key, key_of)) }
 /// Forgetting a hub; this computer's own cannot be forgotten.
 pub fn forgotten(list: &[Hub], key: &str) -> Vec<Hub> { if key == LOCAL { list.to_vec() } else { with_local(forget(list, key, key_of)) } }
@@ -134,9 +190,11 @@ pub fn drop_hub(list: &[Hub], key: &str) -> Option<(Vec<Hub>, bool)> {
 
 /// A row of the Hubs page and of the picker's menu, decided here.
 #[derive(Debug, PartialEq, Clone)]
-pub struct Entry { pub key: String, pub label: String, pub in_use: bool, pub can_forget: bool }
-pub fn entries(list: &[Hub]) -> Vec<Entry> {
-    list.iter().enumerate().map(|(i, h)| Entry { key: h.key.clone(), label: h.label(), in_use: i == 0, can_forget: !h.is_local() }).collect()
+pub struct Entry { pub key: String, pub label: String, pub in_use: bool, pub can_forget: bool, /** the home hub */ pub home: bool, /** connected to now: the one in use, or the home while that cannot be reached */ pub on: bool }
+pub fn entries(list: &[Hub]) -> Vec<Entry> { entries_on(list, None) }
+/// The rows with the hub connected to now (`on_home`: the home's key while the client failed over to it).
+pub fn entries_on(list: &[Hub], on_home: Option<&str>) -> Vec<Entry> {
+    list.iter().enumerate().map(|(i, h)| Entry { key: h.key.clone(), label: h.label(), in_use: i == 0, can_forget: !h.is_local(), home: h.home, on: on_home.map_or(i == 0, |k| k == h.key) }).collect()
 }
 
 // ---- the saved list ----
@@ -194,6 +252,18 @@ pub fn adopt_in(dir: &Path, origin: &str, token: &str) -> io::Result<Vec<Hub>> {
     save_list(dir, &list)?;
     Ok(list)
 }
+/// Keep a hub an offer added (its credential, then the list), without changing the hub in use.
+pub fn add_in(dir: &Path, origin: &str, token: &str, home: bool) -> io::Result<Vec<Hub>> {
+    let list = added(&load_from(dir), origin, home);
+    let k = Hub::remote(origin).key;
+    write_private(&credential_path(dir, &k), token)?;
+    save_list(dir, &list)?;
+    Ok(list)
+}
+pub fn home_in(dir: &Path, key: &str) -> io::Result<Option<Vec<Hub>>> {
+    let Some(list) = homed(&load_from(dir), key) else { return Ok(None) };
+    save_list(dir, &list)?; Ok(Some(list))
+}
 pub fn use_in(dir: &Path, key: &str) -> io::Result<Option<Vec<Hub>>> {
     let Some(list) = switch(&load_from(dir), key) else { return Ok(None) };
     save_list(dir, &list)?; Ok(Some(list))
@@ -210,6 +280,13 @@ pub fn target_in(dir: &Path) -> Target { target(&load_from(dir), |k| has_credent
 fn dir() -> Option<PathBuf> { crate::pairing::dir() }
 pub fn load() -> Vec<Hub> { dir().map(|d| load_from(&d)).unwrap_or_else(|| vec![Hub::local()]) }
 pub fn adopt_saved(origin: &str, token: &str) -> io::Result<Vec<Hub>> { adopt_in(&dir().ok_or(io::ErrorKind::NotFound)?, origin, token) }
+pub fn add_saved(origin: &str, token: &str, home: bool) -> io::Result<Vec<Hub>> { add_in(&dir().ok_or(io::ErrorKind::NotFound)?, origin, token, home) }
+pub fn home_saved(key: &str) -> io::Result<Option<Vec<Hub>>> { home_in(&dir().ok_or(io::ErrorKind::NotFound)?, key) }
+/// The home hub to fail over to, with its credential file, when it is not the hub in use.
+pub fn home_target() -> Option<(String, String, PathBuf)> {
+    let d = dir()?; let l = load_from(&d); let h = home(&l)?;
+    let c = credential_path(&d, &h.key); c.is_file().then(|| (h.key.clone(), h.ws(), c))
+}
 pub fn use_saved(key: &str) -> io::Result<Option<Vec<Hub>>> { use_in(&dir().ok_or(io::ErrorKind::NotFound)?, key) }
 pub fn forget_saved(key: &str) -> io::Result<Option<(Vec<Hub>, bool)>> { forget_in(&dir().ok_or(io::ErrorKind::NotFound)?, key) }
 pub fn target_saved() -> Target { dir().map(|d| target_in(&d)).unwrap_or(Target::Local) }
@@ -237,6 +314,9 @@ mod tests {
             assert_eq!(adopt(&strs(&c["links"]), c["link"].as_str().unwrap().to_string(), |l| link_key(l)), strs(&c["want"]), "{}", c["name"]);
         }
     }
+    #[test] fn the_phones_added_table() {
+        for c in cases()["added"].as_array().unwrap() { assert_eq!(second(&strs(&c["links"]), c["link"].as_str().unwrap().to_string(), |l| link_key(l)), strs(&c["want"]), "{}", c["name"]); }
+    }
     #[test] fn the_phones_use_table() {
         for c in cases()["use"].as_array().unwrap() { assert_eq!(use_hub(&strs(&c["links"]), c["key"].as_str().unwrap(), |l| link_key(l)), strs(&c["want"]), "{}", c["name"]); }
     }
@@ -250,6 +330,49 @@ mod tests {
             assert_eq!(crate::pairing::only_local(&got), c["local"].as_bool().unwrap(), "{}", c["name"]);
         }
     }
+    #[test] fn the_phones_offer_table() {
+        for c in cases()["offer"].as_array().unwrap() {
+            // the table's key is the phones' (host[:port]); this client's is always host:port
+            let w = &c["want"]; let k = offer(c["offer"].as_str().unwrap()).map(|o| crate::pairing::host_port(&o.url).0).unwrap_or_default();
+            let want = match w["plan"].as_str().unwrap() { "known" => Plan::Known(k), "same" => Plan::Same { key: k, link: w["link"].as_str().unwrap().into() }, "take" => Plan::Take(k), _ => Plan::None };
+            let tok = c["token"].as_str().unwrap();
+            assert_eq!(plan(c["offer"].as_str().unwrap(), &strs(&c["links"]), (!tok.is_empty()).then_some(tok), &strs(&c["done"]), |l| link_key(l)), want, "{}", c["name"]);
+        }
+    }
+    #[test] fn the_phones_failover_table() {
+        for c in cases()["failover"].as_array().unwrap() {
+            let s = |k: &str| c[k].as_str().unwrap(); let b = |k: &str| c[k].as_bool().unwrap();
+            assert_eq!(on_home(s("main"), s("home"), b("onHome"), std::time::Duration::from_secs_f64(c["down"].as_f64().unwrap()), b("homeUp"), b("mainUp")), b("want"), "{}", c["name"]);
+        }
+    }
+    #[test] fn the_desktop_on_its_own_hub_takes_a_link_and_one_paired_by_token_uses_it() {
+        let o = r#"{"id":"o1","name":"boat-hub","url":"https://boat-hub.tail9e0cf2.ts.net","why":"home","credential":"same"}"#;
+        let k = |h: &Hub| Some(h.key.clone());
+        assert_eq!(plan(o, &[Hub::local()], None, &[], k), Plan::Take("boat-hub.tail9e0cf2.ts.net:443".into()));
+        assert_eq!(plan(o, &[Hub::remote("http://a:1"), Hub::local()], Some(SECRET), &[], k), Plan::Same { key: "boat-hub.tail9e0cf2.ts.net:443".into(), link: format!("https://boat-hub.tail9e0cf2.ts.net/#token={SECRET}") });
+        assert_eq!(plan(o, &[Hub::local(), Hub::remote("https://boat-hub.tail9e0cf2.ts.net")], None, &[], k), Plan::Known("boat-hub.tail9e0cf2.ts.net:443".into()), "already paired means no take");
+    }
+    #[test] fn an_offered_hub_is_added_second_without_switching_and_is_the_only_home() {
+        let d = tmp("offer");
+        adopt_in(&d, "http://a:1", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa").unwrap();
+        let l = add_in(&d, "https://boat-hub.ts.net", "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", true).unwrap();
+        assert_eq!(l.iter().map(|h| (h.key.as_str(), h.home)).collect::<Vec<_>>(), [("a:1", false), ("boat-hub.ts.net:443", true), (LOCAL, false)]);
+        assert!(matches!(target_in(&d), Target::Remote { ref key, .. } if key == "a:1"), "the hub in use stays in use");
+        assert_eq!(std::fs::read_to_string(credential_path(&d, "boat-hub.ts.net:443")).unwrap(), "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb");
+        assert_eq!(home(&load_from(&d)).map(|h| h.key.as_str()), Some("boat-hub.ts.net:443"), "kept across restarts");
+        let l = home_in(&d, "a:1").unwrap().unwrap();
+        assert_eq!(l.iter().filter(|h| h.home).count(), 1);
+        assert_eq!(home(&l), None, "the hub in use is never its own home");
+        assert_eq!(home_in(&d, "a:1").unwrap(), None);
+        let on = entries_on(&load_from(&d), Some("boat-hub.ts.net:443"));
+        assert_eq!(on.iter().map(|e| (e.in_use, e.on)).collect::<Vec<_>>(), [(true, false), (false, true), (false, false)], "the list shows which one is used");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+    #[test] fn on_this_computers_hub_the_offered_hub_goes_after_it() {
+        let l = added(&[Hub::local()], "https://boat-hub.ts.net", true);
+        assert_eq!(l.iter().map(|h| h.key.as_str()).collect::<Vec<_>>(), [LOCAL, "boat-hub.ts.net:443"]);
+        assert_eq!(home(&l).map(|h| h.key.as_str()), Some("boat-hub.ts.net:443"));
+    }
     fn tmp(name: &str) -> PathBuf {
         let base = std::env::var_os("BP_TMP").map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
         let d = base.join(format!("bp-hubs-{name}-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap(); d
@@ -259,7 +382,7 @@ mod tests {
         std::fs::write(d.join("pairing.json"), r#"{"hub":"wss://box.ts.net:8451"}"#).unwrap();
         std::fs::write(d.join("device-token"), SECRET).unwrap();
         let l = load_from(&d);
-        assert_eq!(l, vec![Hub { key: "box.ts.net:8451".into(), origin: "https://box.ts.net:8451".into(), token_file: String::new() }, Hub::local()], "the paired hub stays in use");
+        assert_eq!(l, vec![Hub { key: "box.ts.net:8451".into(), origin: "https://box.ts.net:8451".into(), token_file: String::new(), home: false }, Hub::local()], "the paired hub stays in use");
         assert_eq!(std::fs::read_to_string(credential_path(&d, "box.ts.net:8451")).unwrap(), SECRET, "its credential moved to its own file");
         assert!(!d.join("pairing.json").exists() && !d.join("device-token").exists());
         assert_eq!(load_from(&d), l, "the list is what is read next time");
@@ -337,7 +460,7 @@ mod tests {
     }
     #[test] fn the_picker_lists_the_hub_in_use_first_and_only_a_paired_hub_can_be_forgotten() {
         let l = vec![Hub::remote("https://b.ts.net:8451"), Hub::local()];
-        assert_eq!(entries(&l), vec![Entry { key: "b.ts.net:8451".into(), label: "b.ts.net:8451".into(), in_use: true, can_forget: true }, Entry { key: LOCAL.into(), label: "This computer".into(), in_use: false, can_forget: false }]);
+        assert_eq!(entries(&l), vec![Entry { key: "b.ts.net:8451".into(), label: "b.ts.net:8451".into(), in_use: true, can_forget: true, home: false, on: true }, Entry { key: LOCAL.into(), label: "This computer".into(), in_use: false, can_forget: false, home: false, on: false }]);
         assert_eq!(switch(&l, "b.ts.net:8451"), None); assert_eq!(switch(&l, "q:1"), None);
         assert_eq!(switch(&l, LOCAL).unwrap()[0], Hub::local());
         assert_eq!(drop_hub(&l, LOCAL), None);

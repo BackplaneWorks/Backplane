@@ -97,8 +97,14 @@ final class DataClient {
     private(set) var quiet = ""
     private(set) var quietUrgent = false
 
-    // the hub being used: the first of the paired ones (HubList)
-    var link: String? { links.first }
+    // the hub being used: the first of the paired ones (HubList), or the home hub while that one cannot be reached (failover)
+    var link: String? { onHome ? homeLink ?? links.first : links.first }
+    /// the home hub (docs/pairing.md, Home hub): added by its offer, used while the hub in use cannot be reached
+    private(set) var homeKey = UserDefaults.standard.string(forKey: "data.home") ?? ""
+    private(set) var onHome = false
+    private var homeLink: String? { homeKey.isEmpty ? nil : links.first { Pairing.key($0) == homeKey } }
+    /// the key of the hub connected to now
+    var usingKey: String { link.flatMap { Pairing.key($0) } ?? "" }
     /// the pairing screen is open over a paired hub, to add another (Settings → Add a hub)
     var adding = false
     var hubName: String { link.flatMap { Pairing.key($0) } ?? "" }
@@ -117,6 +123,11 @@ final class DataClient {
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     @ObservationIgnored private var listNext: String?
     @ObservationIgnored private var pushToken: String?
+    @ObservationIgnored private var downSince: Date?
+    @ObservationIgnored private var probing = false
+    @ObservationIgnored private var homeWatch: Task<Void, Never>?
+    @ObservationIgnored private var offersDone: Set<String> = []
+    @ObservationIgnored private var offerBusy = false
 
     init() {
         #if DEBUG || BP_MEASURE
@@ -181,7 +192,7 @@ final class DataClient {
         guard Pairing.key(link ?? "") != key else { return }
         let next = HubList.use(links, key, key: Pairing.key)
         guard next != links else { return }
-        close(); links = next; PairingStore.save(links); reset(); loadOutbox()
+        close(); leaveHome(); links = next; PairingStore.save(links); reset(); loadOutbox()
         needsRepair = false; pairingError = ""; failure = ""
         connect()
     }
@@ -190,6 +201,7 @@ final class DataClient {
         let current = Pairing.key(link ?? "") == key
         try? FileManager.default.removeItem(at: Self.outboxURL(key))
         links = HubList.forget(links, key, key: Pairing.key); PairingStore.save(links)
+        if key == homeKey { setHome(""); if onHome { leaveHome(); close(); reset(); loadOutbox(); connect() } }
         guard current else { return }
         close(); reset(); loadOutbox(); needsRepair = false; pairingError = ""
         if link != nil { connect() } else { conn = .offline }
@@ -197,7 +209,7 @@ final class DataClient {
     /// Forget every hub.
     func unpair() {
         for l in links { if let k = Pairing.key(l) { try? FileManager.default.removeItem(at: Self.outboxURL(k)) } }
-        links = []; adding = false; PairingStore.save(links); reset(); close(); conn = .offline; outbox = Outbox()
+        links = []; adding = false; PairingStore.save(links); setHome(""); leaveHome(); reset(); close(); conn = .offline; outbox = Outbox()
     }
     private func reset() {
         notice = HubNotice(); star = nil; migration = DMigration(); migrationOpen = false; migrationError = ""
@@ -276,13 +288,96 @@ final class DataClient {
         failure = why
         close()
         conn = .offline
+        if downSince == nil { downSince = Date() }
+        if onHome, needsRepair { needsRepair = false; leaveHome(); reset(); loadOutbox(); connect(); return }   // the home refused this phone: back to the hub chosen
         guard link != nil, !needsRepair else { return }
+        failover()
         let wait = backoff
         backoff = min(backoff * 2, 4)
         reconnectTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(wait))
             guard !Task.isCancelled else { return }
             self?.connect()
+        }
+    }
+
+    // MARK: the home hub (docs/pairing.md, Home hub): its offer, carried out with no dialog, and failing over to it
+    private func setHome(_ k: String) { homeKey = k; UserDefaults.standard.set(k, forKey: "data.home") }
+    private func leaveHome() { onHome = false; homeWatch?.cancel(); homeWatch = nil; downSince = nil }
+    private func heardOffer(_ text: String) {
+        guard !onHome, !offerBusy, let o = HubList.offer(text) else { return }
+        let plan = HubList.plan(text, links: links, token: link.flatMap(Pairing.token), done: offersDone, key: Pairing.key)
+        logPair("offer", "\(o.url) \(String(describing: plan).prefix { $0 != "(" })")   // never the plan itself: same holds the token
+        switch plan {
+        case .none: return
+        case .known(let k): if o.why == "home" { setHome(k) }; offerDone(o.id, true)
+        case .same(let k, let l): offerBusy = true; Task { await self.tryOffer(o, k) { try await Self.takes(l); return l } }
+        case .take(let k): offerBusy = true; Task {
+            await self.tryOffer(o, k) {
+                let r: DOfferLink = try await self.call("hub.offer.take", ["id": o.id])
+                guard let invite = Pairing.invitation(r.link) else { throw DError(code: "BAD_LINK", message: "not a pairing link") }
+                return try await Pairing.exchange(invite, name: UIDevice.current.name)
+            }
+        }
+        }
+    }
+    private struct DOfferLink: Decodable { let link: String }
+    /// a few tries with a longer wait each time; the hub added second (the one in use stays), the home when the offer says so, then hub.offer.done
+    private func tryOffer(_ o: HubList.Offer, _ k: String, _ get: () async throws -> String) async {
+        defer { offerBusy = false }
+        for n in 0..<3 {
+            if n > 0 { try? await Task.sleep(for: .seconds(Double(2 << n))) }
+            do {
+                let l = try await get()
+                links = HubList.added(links, l, key: Pairing.key); PairingStore.save(links)
+                if o.why == "home" { setHome(Pairing.key(l) ?? k) }
+                logPair("added", o.url)
+                offerDone(o.id, true); return
+            } catch { logPair("offer-retry", error.localizedDescription) }
+        }
+        offerDone(o.id, false)
+    }
+    private func offerDone(_ id: String, _ ok: Bool) {
+        offersDone.insert(id)
+        Task { let _: DEmpty? = try? await call("hub.offer.done", ["id": id, "ok": ok]) }
+    }
+    /// the same device token at the offered hub: kept only once that hub takes it
+    private static func takes(_ link: String) async throws {
+        guard let url = Pairing.http(link, path: "/client/capabilities", token: false), let t = Pairing.token(link) else { throw URLError(.badURL) }
+        var r = URLRequest(url: url); r.timeoutInterval = 8
+        r.setValue("Bearer " + t, forHTTPHeaderField: "Authorization"); r.setValue("native", forHTTPHeaderField: "X-Backplane-Client")
+        let (_, resp) = try await URLSession(configuration: .ephemeral).data(for: r)
+        guard (resp as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.userAuthenticationRequired) }
+    }
+    /// whether a hub answers at all (/hello needs no credential)
+    private static func answers(_ link: String) async -> Bool {
+        guard let url = Pairing.http(link, path: "/hello", token: false) else { return false }
+        var r = URLRequest(url: url); r.timeoutInterval = 4
+        return ((try? await URLSession(configuration: .ephemeral).data(for: r))?.1 as? HTTPURLResponse)?.statusCode == 200
+    }
+    /// the hub in use has not answered for a while: the home, when it answers (HubList.onHome decides)
+    private func failover() {
+        guard !onHome, !probing, let home = homeLink, let main = links.first, let since = downSince else { return }
+        let down = Date().timeIntervalSince(since)
+        guard HubList.onHome(main: Pairing.key(main) ?? "", home: homeKey, now: false, down: down, homeUp: true, mainUp: false) else { return }
+        probing = true
+        Task {
+            defer { probing = false }
+            let up = await Self.answers(home)
+            guard !onHome, HubList.onHome(main: Pairing.key(main) ?? "", home: homeKey, now: false, down: down, homeUp: up, mainUp: false) else { return }
+            logPair("home", homeKey)
+            close(); onHome = true; reset(); loadOutbox(); connect()
+            homeWatch = Task { [weak self] in
+                while !Task.isCancelled {
+                    try? await Task.sleep(for: .seconds(10))
+                    guard let self, self.onHome, let m = self.links.first else { return }
+                    let back = await Self.answers(m)
+                    if !HubList.onHome(main: Pairing.key(m) ?? "", home: self.homeKey, now: true, down: 0, homeUp: true, mainUp: back) {
+                        self.logPair("back", Pairing.key(m) ?? "")
+                        self.close(); self.leaveHome(); self.reset(); self.loadOutbox(); self.connect(); return
+                    }
+                }
+            }
         }
     }
 
@@ -297,7 +392,9 @@ final class DataClient {
             heardMigration(o["migrating"])
             commands = ((o["commands"] as? [[String: Any]]) ?? []).map { Word(word: $0["word"] as? String ?? "", label: $0["label"] as? String ?? "", desc: $0["desc"] as? String ?? "") }
             conn = .online; failure = ""; backoff = 0.25; plots.reset()
+            if !onHome { downSince = nil }
             Task { await self.synchronise(g) }
+            heardOffer(o["hubOffer"] as? String ?? "")
         case "reply":
             guard let id = o["id"] as? Int ?? (o["id"] as? Double).map(Int.init), let k = calls.removeValue(forKey: id) else { return }
             if o["ok"] as? Bool == true {
@@ -310,6 +407,7 @@ final class DataClient {
         case "plot": plots.receiveJSON(o) // why a view has nothing to show (the plots themselves come as binary frames)
         case "star": star = DStarOffer.of(o["offer"])
         case "migrating": heardMigration(o)
+        case "info": if let v = (o["info"] as? [String: Any])?["hub.offer"] as? String { heardOffer(v) }
         case "shot": shotBot = o["bot"] as? String ?? ""; shot = (o["n"] as? Int) ?? ((o["n"] as? Double).map(Int.init) ?? 0)
         default: break
         }
@@ -945,7 +1043,12 @@ final class DataClient {
     func setQuiet(_ spec: String) async { quiet = spec; _ = try? await call("push.prefs", ["notify.quiet": spec], as: DEmpty.self) }
     func setQuietUrgent(_ on: Bool) async { quietUrgent = on; _ = try? await call("push.prefs", ["notify.quiet.urgent": on ? "on" : "off"], as: DEmpty.self) }
     /// A tapped notification opens its thread, at its approval when it has one.
-    func openPush(thread: String, ask: String, link: String = "") {
+    func openPush(thread: String, ask: String, link: String = "", hub: String = "") {
+        // a push from another hub on the list (its url in `hub`): that hub first, then what it links to
+        if let k = Pairing.key(hub), !k.isEmpty, k != usingKey, links.contains(where: { Pairing.key($0) == k }) {
+            if k == homeKey, links.first.flatMap(Pairing.key) != k { if !onHome { close(); onHome = true; reset(); loadOutbox(); connect() } }
+            else { useHub(k) }
+        }
         // a link the hub put on it opens that instead: "account:<id>" is that account's sign-in (an expired sign-in's alert)
         if link.hasPrefix("account:") { pushAccount = String(link.dropFirst(8)); return }
         guard !thread.isEmpty else { return }

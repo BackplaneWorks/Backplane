@@ -23,6 +23,11 @@ enum HubList {
 
     /// A newly paired hub goes first; an older pairing with the same hub is replaced, every other hub is kept.
     static func adopt(_ links: [String], _ link: String, key: (String) -> String?) -> [String] { let k = key(link); return [link] + links.filter { key($0) != k } }
+    /// A hub an offer added goes second: the one in use stays in use; an older pairing with it is replaced.
+    static func added(_ links: [String], _ link: String, key: (String) -> String?) -> [String] {
+        let k = key(link); let rest = links.filter { key($0) != k }
+        return rest.isEmpty ? [link] : [rest[0], link] + rest.dropFirst()
+    }
     /// Switching to a paired hub moves it first; an unknown key changes nothing.
     static func use(_ links: [String], _ k: String, key: (String) -> String?) -> [String] {
         guard let hit = links.first(where: { key($0) == k }) else { return links }
@@ -50,6 +55,34 @@ enum HubList {
     }
     /// Every address is the hub's own computer: a phone that opens it reaches itself, never the hub.
     static func local(_ routes: [String]) -> Bool { !routes.isEmpty && routes.allSatisfy(loopback) }
+
+
+    // MARK: the home hub (docs/pairing.md, Home hub): an offer to add it, and failing over to it
+    struct Offer: Equatable { let id, name, url, why, credential: String }
+    /// The hub's `hub.offer` (a JSON string, "" for none), or nil when it names no hub.
+    static func offer(_ text: String) -> Offer? {
+        guard let d = text.data(using: .utf8), let o = (try? JSONSerialization.jsonObject(with: d)) as? [String: Any],
+              let id = o["id"] as? String, !id.isEmpty, let url = (o["url"] as? String).flatMap(origin) else { return nil }
+        return Offer(id: id, name: o["name"] as? String ?? "", url: url, why: o["why"] as? String ?? "", credential: o["credential"] as? String ?? "")
+    }
+    enum Plan: Equatable { case none, known(String), same(key: String, link: String), take(String) }
+    /// What an offer asks of this phone: nothing, a hub already paired (it becomes the home), the same token at the offered address, or a link to take and redeem.
+    /// token is the one this phone holds for the hub in use; done the offers already answered.
+    static func plan(_ text: String, links: [String], token: String?, done: Set<String>, key: (String) -> String?) -> Plan {
+        guard let o = offer(text), !done.contains(o.id), let k = key(o.url) else { return .none }
+        if let first = links.first, key(first) == k { return .none }
+        if links.contains(where: { key($0) == k }) { return .known(k) }
+        if o.credential == "same", let t = token, !t.isEmpty { return .same(key: k, link: o.url + "/#token=" + t) }
+        return .take(k)
+    }
+    /// How long the hub in use may not answer before the home is used instead.
+    static let failoverAfter: Double = 20
+    /// Whether to be on the home hub: main is the hub in use, home the remembered one ("" for none), down how long main has not answered.
+    static func onHome(main: String, home: String, now onHome: Bool, down: Double, homeUp: Bool, mainUp: Bool) -> Bool {
+        guard !home.isEmpty, home != main else { return false }
+        if onHome { return !mainUp }
+        return down >= failoverAfter && homeUp
+    }
 
     /// What the phone says of an invitation that names only its hub's computer.
     static let localText = "This invitation names only its hub's own computer (127.0.0.1), so this phone cannot reach it. Start the hub with Tailscale on, or on an address this phone can reach, then make a new invitation."

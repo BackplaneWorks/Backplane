@@ -831,9 +831,13 @@ private fun SettingsScreen(back: () -> Unit, hub: () -> Unit, accounts: () -> Un
             var forget by remember { mutableStateOf<String?>(null) }
             DataClient.links.mapNotNull { Pairing.key(it) }.forEachIndexed { i, k ->
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    if (i == 0) DDot(if (DataClient.conn == DataClient.Conn.ONLINE) dcs.primary else if (DataClient.conn == DataClient.Conn.CONNECTING) dwarn else dcs.error, 8)
+                    // the hub connected to now: the one in use, or the home hub while that one cannot be reached
+                    val on = k == DataClient.usingKey
+                    if (on) DDot(if (DataClient.conn == DataClient.Conn.ONLINE) dcs.primary else if (DataClient.conn == DataClient.Conn.CONNECTING) dwarn else dcs.error, 8)
                     Text(k, Modifier.weight(1f), color = dcs.onSurface, fontFamily = BpMono, fontSize = 14.sp, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    if (i > 0) DBtn(Msg.android_hub_use, false, modifier = Modifier.testTag("settings.hub.use.$k")) { DataClient.useHub(k); back() }
+                    if (k == DataClient.homeKey) DMono(Msg.native_hub_home, dcs.onSurfaceVariant, 12, Modifier.testTag("settings.hub.home.$k"))
+                    if (i == 0 && DataClient.onHome) DMono(Msg.native_hub_unreachable, dcs.onSurfaceVariant, 12)
+                    if (i > 0 && !on) DBtn(Msg.android_hub_use, false, modifier = Modifier.testTag("settings.hub.use.$k")) { DataClient.useHub(k); back() }
                     DBtn(Msg.bots_memory_forget, false, modifier = Modifier.testTag("settings.hub.forget.$k"), danger = true) { forget = k }
                 }
             }
