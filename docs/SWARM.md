@@ -185,7 +185,8 @@ of that the hub adds:
   - `swarm.list {project?}` → `{swarms:[{id, name, project, goal, state, reason, members, last}]}`.
   - `swarm.post {room, text, tags?, msg?}` → `{}`, posted as the person.
   - `swarm.act {room, action: pause|resume|stop|add|remove|budget, thread?, member?, provider?, model?, role?, budget?}` → `{}`.
-- **data/1** (feature `swarm`): the same five methods (`swarm.post` takes `clientId`).
+- **data/1** (feature `swarm`): the same five methods (`swarm.post` takes `clientId`), with times in unix
+  ms (`posts[].at`, `swarms[].last`), as everywhere in data/1. The hub's own requests answer seconds.
   - A thread carries `swarm` (its room's id, or `""`). A phone leaves those threads out of a
     project's list and shows the project's swarms from `swarm.list` instead.
   - A `lists` subscription gets the push `{k: "swarm", room}` when a swarm's board, state or member
