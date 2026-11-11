@@ -73,14 +73,15 @@ pub fn signin_steps(prev: &mut Seen, snapshot: &Value) -> (Vec<String>, Vec<Stri
 /// The setting that says the person was alerted that a provider's sign-in expired (one alert a provider, until one of its accounts is back); the push module sends it.
 pub fn alert_key(provider: &str) -> String { format!("account.signin.alert.{provider}") }
 pub fn provider_title(provider: &str) -> &'static str { match provider { "codex" => "Codex", _ => "Claude" } }
-/// SignIn.alert: the alert to record for a dead account, when no account of its provider can run a turn (`eligible`: connected, not held, allowance left) and none is
-/// recorded yet. Its text is what the phone shows; `link` opens that account's sign-in.
+/// SignIn.alert: the alert to record for a dead account, once (none recorded yet), whether or not another account of its provider takes its work over (Nov 11: a broken
+/// sign-in is the person's to fix, so they hear of it once, in the uberbot's name; a usage limit only waits for its reset). Its text is what the phone shows; `link` opens
+/// that account's sign-in.
 pub fn signin_alert(profiles: &[Value], get: &dyn Fn(&str) -> String, now: u64, id: &str) -> Option<Value> {
     let p = profiles.iter().find(|p| p["id"] == id)?;
     let provider = p["provider"].as_str().unwrap_or("");
     // a renewal reminder gives way to a sign-in that is dead now
     let cur = get(&alert_key(provider)); let renew = serde_json::from_str::<Value>(&cur).map_or(false, |r| r["renew"] == true);
-    if (!cur.is_empty() && !renew) || profiles.iter().any(|x| fb::eligible(get, now, provider, "", x)) { return None }
+    if !cur.is_empty() && !renew { return None }
     Some(json!({"profile":id,"epoch":p["epoch"],"provider":provider,"label":p["label"],"text":format!("{} sign-in expired: tap to sign in again", provider_title(provider)),"link":format!("account:{id}"),"at":now}))
 }
 
@@ -348,10 +349,10 @@ mod tests {
         assert_eq!(signin_steps(&mut seen, &snap("connected")), (vec![], vec![]));
         let mut fresh = Seen::new(); assert_eq!(signin_steps(&mut fresh, &snap("expired")).0, ["w"], "a restart that finds it dead");
     }
-    #[test] fn the_alert_goes_only_when_no_account_can_take_over_and_only_once() {
+    #[test] fn a_broken_sign_in_is_told_once_even_when_another_account_takes_over() {
         let ok = json!({"state":"ok","at":9_999_999_999u64,"windows":[{"scope":"five_hour","used_percent":10.0}]});
         let ps = vec![json!({"id":"w","provider":"claude","label":"Work","epoch":2,"state":"expired"}), json!({"id":"p","provider":"claude","label":"Personal","epoch":1,"state":"connected","allowance":ok}), json!({"id":"c","provider":"codex","label":"C","epoch":1,"state":"connected"})];
-        assert!(signin_alert(&ps, &|_| String::new(), 100, "w").is_none(), "Personal takes over");
+        assert!(signin_alert(&ps, &|_| String::new(), 100, "w").is_some(), "Personal takes the work over, and the person still hears the sign-in broke");
         let held = fb::hold_key("claude", "p", 1); let rec = json!({"scope":"claude","reset":0,"at":90}).to_string();
         let get = |k: &str| if k == held { rec.clone() } else { String::new() };
         let a = signin_alert(&ps, &get, 100, "w").expect("Personal is out too");

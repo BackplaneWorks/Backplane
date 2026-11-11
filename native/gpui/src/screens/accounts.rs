@@ -293,7 +293,7 @@ fn card(cx: &mut Context<Backplane>, light: bool, st: &Accounts, p: &Value, i: u
     let pid = id.clone();
     if !live {
         if state == "connected" {
-            btn(&trs("Refresh"), "status", false, false, Box::new({ let pid = pid.clone(); move |this, _| ask(this, json!({"op": "status", "profile": pid, "asked": true})) }));
+            btn(&trs("Check now"), "status", false, false, Box::new({ let pid = pid.clone(); move |this, _| ask(this, json!({"op": "status", "profile": pid, "asked": true})) }));
             /* i18n-ok: drawn through tr */ if !default { let (prov, pid2) = (string(p, "provider"), pid.clone()); btn(&trs("Use for new threads"), "default", false, false, Box::new(move |this, _| { if this.tx.try_send(Command::Rpc("accounts.default".into(), Secret(json!({"provider": prov, "profile": pid2, "epoch": epoch})), "acct-default")).is_err() { this.screens.acct.notice = "The hub is not reachable. Try again.".into(); } })); }
             /* i18n-ok: drawn through tr */ { let (prov, pid2) = (string(p, "provider"), pid.clone()); btn(&trs("Move all threads here"), "moveall", false, false, Box::new(move |this, _| { this.screens.acct.notice.clear(); this.screens.acct.info.clear(); if this.tx.try_send(Command::Rpc("accounts.move_all".into(), Secret(json!({"provider": prov, "profile": pid2, "epoch": epoch, "default": true})), "acct-moveall")).is_err() { this.screens.acct.notice = "The hub is not reachable. Try again.".into(); } })); }
             if is_sync(p) { btn(&trs("Renew the sync token"), "renew", false, false, Box::new({ let pid = pid.clone(); move |this, _| ask(this, json!({"op": "login", "profile": pid})) })); }

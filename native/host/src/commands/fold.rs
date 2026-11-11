@@ -27,7 +27,7 @@ pub struct Fold {
     pub home_msgs: std::collections::HashSet<String>,
 }
 
-const KEYS: &[&str] = &["thread.parent.", "bg.", "watch.", "carry.wait.", "thread.env", "agent.provider", "agent.model", "projects.missing", "merged.", "provider.resume.", "restart.retry.", "resume.", "wt.again.", "thread.config.hold.", "seen.", "tz.machine", "account.thread.", "account.default.", "accounts.inventory", "account.session.", "account.seen.", "account.chosen.", "account.limit."];
+const KEYS: &[&str] = &["thread.parent.", "bg.", "watch.", "carry.wait.", "thread.env", "agent.provider", "agent.model", "projects.missing", "merged.", "provider.resume.", "restart.retry.", "resume.", "wt.again.", "thread.config.hold.", "seen.", "tz.machine", "account.thread.", "account.default.", "accounts.inventory", "account.session.", "account.seen.", "account.chosen.", "account.limit.", "fallback.intent."];
 fn tracked(k: &str) -> bool { KEYS.iter().any(|p| k == *p || (p.ends_with('.') && k.starts_with(p))) }
 
 impl Fold {

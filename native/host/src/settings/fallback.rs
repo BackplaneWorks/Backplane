@@ -210,8 +210,18 @@ pub fn hold_mark(provider: &str, id: &str, epoch: u64, lim: &Limit, now: u64, at
     let key = if lim.scope == provider { hold_key(provider, id, epoch) } else { hold_model_key(provider, id, epoch, &model) };
     json!({"$":"SettingSet","key":key,"value":lim.json(now),"at":at})
 }
-/// Profile.model: the profile's catalog offers the model (an empty catalog or model does not exclude).
-pub fn profile_model(profile: &Value, model: &str) -> bool { let xs = profile["catalog"].as_array().cloned().unwrap_or_default(); model.is_empty() || xs.is_empty() || xs.iter().any(|x| x["id"].as_str() == Some(model)) }
+/// Profile.model: the profile's catalog offers the model (an empty catalog or model does not exclude). A catalog lists aliases ("opus", "fable") where a thread names
+/// the model in full ("claude-opus-5-5"): an alias offers every model of its family (`same_model`). Nov 11: an exact match only made every Claude account with usage left
+/// ineligible for a thread on claude-opus-5-5, and its failover went straight to Codex.
+pub fn profile_model(profile: &Value, model: &str) -> bool { let xs = profile["catalog"].as_array().cloned().unwrap_or_default(); model.is_empty() || xs.is_empty() || xs.iter().any(|x| x["id"].as_str().map_or(false, |id| same_model(id, model))) }
+/// A model's family: "claude-opus-5-5" and "opus" are "opus", "claude-fable-5-2[1m]" is "fable".
+pub fn model_family(m: &str) -> String { let m = m.trim().to_lowercase(); let m = m.strip_prefix("claude-").unwrap_or(&m); m.split(|c: char| c == '-' || c == '[' || c == '.' || c == ' ').next().unwrap_or("").to_string() }
+/// The same model, or an alias and a model of its family (an alias is a bare word: two full ids that differ are two models).
+pub fn same_model(a: &str, b: &str) -> bool {
+    if a == b { return true }
+    let bare = |s: &str| !s.contains('-') && !s.contains('[') && !s.is_empty();
+    (bare(a) || bare(b)) && !model_family(a).is_empty() && model_family(a) == model_family(b)
+}
 /// Usage.applies: a model-specific window counts only for that model.
 fn applies(w: &Value, model: &str) -> bool {
     let scope = w["scope"].as_str().unwrap_or("");
@@ -220,11 +230,23 @@ fn applies(w: &Value, model: &str) -> bool {
     (!matches!(scope, "seven_day_opus" | "opus") || model.contains("opus")) && (!matches!(scope, "seven_day_sonnet" | "sonnet") || model.contains("sonnet"))
 }
 /// Usage.score: the remaining allowance in thousandths of a percent across the applicable live windows (the largest use counts); None when unknown.
-/// Missing, stale and expired readings stay unknown, never zero.
+/// Missing, stale and expired readings stay unknown, never zero, except a window that is full and resets later (`exhausted`): that is zero, whatever its age.
 pub fn usage_score(profile: &Value, now: u64, model: &str) -> Option<u32> {
+    if exhausted(profile, now, model).is_some() { return Some(0) }
+    usage_score_live(profile, now, model)
+}
+/// A window of the login's reading that is full and resets later: the login is out until then, however old the reading (a window only fills further until its reset).
+/// (scope, reset); the window that resets last when there are several.
+pub fn exhausted(profile: &Value, now: u64, model: &str) -> Option<(String, u64)> {
+    let a = &profile["allowance"];
+    // "stale" is how the inventory publishes a reading over five minutes old: still a full window until its reset
+    if !(a["state"] == "ok" || a["state"] == "stale") || a["at"].as_u64().unwrap_or(0) > now { return None }
+    a["windows"].as_array().into_iter().flatten().filter(|w| applies(w, model) && w["resets_at"].as_u64().unwrap_or(0) > now && w["used_percent"].as_f64().map_or(false, |u| u >= 100.0))
+        .map(|w| (w["scope"].as_str().unwrap_or("").to_string(), w["resets_at"].as_u64().unwrap_or(0))).max_by_key(|x| x.1)
+}
+fn usage_score_live(profile: &Value, now: u64, model: &str) -> Option<u32> {
     let a = &profile["allowance"];
     if a["state"] != "ok" || a["phase"].as_str().unwrap_or("complete") != "complete" || a["provider"].as_str().unwrap_or(profile["provider"].as_str().unwrap_or("")) != profile["provider"].as_str().unwrap_or("") { return None }
-    // a reading older than five minutes, from the future, or undated says nothing about the account now
     let at = a["at"].as_u64().unwrap_or(0);
     if at == 0 || at > now || now - at > 300 { return None }
     let mut used: Option<u32> = None;
@@ -490,6 +512,18 @@ mod outage_tests {
 
 #[cfg(test)]
 mod tests {
+    #[test] fn an_alias_in_a_catalog_offers_the_full_model_and_two_full_ids_stay_two_models() {
+        let p = serde_json::json!({"catalog":[{"id":"default"},{"id":"opus"},{"id":"fable"}]});
+        assert!(profile_model(&p, "claude-opus-5-5") && profile_model(&p, "opus") && profile_model(&p, "claude-fable-5-2[1m]") && !profile_model(&p, "claude-sonnet-5-5"));
+        assert!(same_model("claude-opus-5-5", "opus") && !same_model("claude-opus-5-5", "claude-opus-4-1") && !same_model("gpt-6", "gpt-5"));
+        assert_eq!(model_family("claude-fable-5-2[1m]"), "fable");
+    }
+    #[test] fn a_full_window_is_out_until_its_reset_however_old_the_reading() {
+        let p = |at: u64| serde_json::json!({"provider":"claude","allowance":{"state":"ok","at":at,"provider":"claude","windows":[{"scope":"seven_day","used_percent":100.0,"resets_at":5000}]}});
+        assert_eq!(usage_score(&p(100), 1000, "opus"), Some(0), "a reading 900 s old"); assert_eq!(exhausted(&p(100), 1000, ""), Some(("seven_day".into(), 5000)));
+        assert_eq!(usage_score(&p(100), 6000, "opus"), None, "its reset has come: unknown, not out");
+    }
+
     use super::*; use serde_json::json;
     fn caps() -> Value { json!({"claude":["opus","sonnet"],"codex":["gpt-6"],"grok":[]}) }
     #[test] fn a_target_is_a_provider_and_everything_after_the_first_slash() { assert_eq!(Target::parse("openai/gpt/5"), Target { provider: "openai".into(), model: "gpt/5".into() }); assert_eq!(Target::parse("claude").key(), "claude/"); }

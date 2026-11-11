@@ -196,6 +196,7 @@ impl Agents {
     /// Hub.turn then Hub.post.go: take the person's message, start or feed the thread's agent. Acknowledged after the events are durable.
     pub async fn deliver(self: &Arc<Self>, thread: &str, msg: &str, text: &str, origin: Option<(String, String, String)>, extra: Vec<Value>) -> Result<(), String> { self.deliver_as("user", thread, msg, text, origin, extra).await }
     pub async fn deliver_k(self: &Arc<Self>, person: bool, role: &str, thread: &str, msg: &str, text: &str, origin: Option<(String, String, String)>, extra: Vec<Value>) -> Result<(), String> {
+        self.healthy(thread).await;
         for _ in 0..3 {
             let tx = self.actor(thread); let (reply, rx) = oneshot::channel();
             match tx.try_send(Cmd::User { person, msg: msg.into(), text: text.into(), role: role.into(), origin: origin.clone(), extra: extra.clone(), reply }) {
@@ -219,6 +220,10 @@ impl Agents {
     pub async fn deliver_as(self: &Arc<Self>, role: &str, thread: &str, msg: &str, text: &str, origin: Option<(String, String, String)>, extra: Vec<Value>) -> Result<(), String> { self.deliver_k(false, role, thread, msg, text, origin, extra).await }
     /// A message a PERSON typed (the client's turn.start): the only delivery that may start or write to a real agent in side-by-side mode.
     pub async fn deliver_person(self: &Arc<Self>, thread: &str, msg: &str, text: &str, extra: Vec<Value>) -> Result<(), String> { self.deliver_k(true, "user", thread, msg, text, None, extra).await }
+    /// Before a turn is handed to the thread's actor (a person's message, a launch, a routine, a bot's mail, a queued start): an idle thread bound to an account known to
+    /// be out moves to the provider's best healthy account (settings/driver.rs `preflight`). Here, outside the actor: the account switch stops the thread's agent, which
+    /// the actor could not do while it waited on the switch.
+    async fn healthy(&self, thread: &str) { if !crate::copy::person_turn_allowed() { crate::settings::driver::preflight(&self.hub, thread).await } }
     pub async fn stop(self: &Arc<Self>, thread: &str) -> Result<(), String> {
         let tx = self.actor(thread); let (reply, rx) = oneshot::channel();
         tx.try_send(Cmd::Stop { reply }).map_err(|_| "too many requests are waiting for this thread".to_string())?; rx.await.map_err(|_| "the thread's agent stopped".to_string())
@@ -226,11 +231,13 @@ impl Agents {
     /// Wt.start / Hub.resume: an idle thread's queued `text` runs as one turn (QueueTaken, TurnChanged running). The CALLER decides that it may (Config.held, Queue.waiting)
     /// and logs the queue events it owns; this does not check them. Not a client method: it logs no message.
     pub async fn start_queued(self: &Arc<Self>, thread: &str, text: &str) -> Result<(), String> {
+        self.healthy(thread).await;
         let tx = self.actor(thread); let (reply, rx) = oneshot::channel();
         tx.try_send(Cmd::StartQueued { text: text.into(), taken: true, reply }).map_err(|_| "too many requests are waiting for this thread".to_string())?; rx.await.unwrap_or_else(|_| Err("the thread's agent stopped".into()))
     }
     /// Task.repair: the idle parent that holds a task's result as its newest message starts its turn with it (TurnChanged running only; the caller logs TaskDelivered).
     pub async fn resume_with(self: &Arc<Self>, thread: &str, text: &str) -> Result<(), String> {
+        self.healthy(thread).await;
         let tx = self.actor(thread); let (reply, rx) = oneshot::channel();
         tx.try_send(Cmd::StartQueued { text: text.into(), taken: false, reply }).map_err(|_| "too many requests are waiting for this thread".to_string())?; rx.await.unwrap_or_else(|_| Err("the thread's agent stopped".into()))
     }
