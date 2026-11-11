@@ -283,7 +283,11 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Re
         "star.nudge" => rpc(hub, c, "star.nudge", json!({"token":s(p, "token"),"action":s(p, "action")})).await.map(|_| json!({})),
         "bots.list" => Ok(crate::bots::api::directory(hub).await),
         // feature "swarm" (docs/SWARM.md): the hub's own swarm.* requests; a swarm is a room, its member threads carry `swarm` (the room) and a project's list shows the swarm once
-        "swarm.list" | "swarm.get" | "swarm.act" | "swarm.create" => rpc(hub, c, m, p.clone()).await.map(|r| r["result"].clone()),
+        // times are unix ms here, as everywhere in data/1 (the hub's own requests answer seconds)
+        "swarm.list" | "swarm.get" | "swarm.act" | "swarm.create" => rpc(hub, c, m, p.clone()).await.map(|r| { let mut v = r["result"].clone();
+            for x in v["posts"].as_array_mut().into_iter().flatten() { if let Some(t) = x["at"].as_u64() { x["at"] = json!(t * 1000) } }
+            for x in v["swarms"].as_array_mut().into_iter().flatten() { if let Some(t) = x["last"].as_u64() { x["last"] = json!(t * 1000) } }
+            v }),
         "swarm.post" => { if s(p, "text").trim().is_empty() { return Some(Err(err("empty message"))) }
             let mut q = p.clone(); if safe_id(s(p, "clientId")) && !s(p, "clientId").is_empty() { q["msg"] = p["clientId"].clone() } rpc(hub, c, "swarm.post", q).await.map(|_| json!({})) }
         "bot.say" => {
