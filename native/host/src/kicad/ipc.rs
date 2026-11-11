@@ -303,7 +303,7 @@ pub async fn runtime(hub: &Arc<Hub>) -> Env {
     }
     if let Some(s) = std::env::var_os("BACKPLANE_KICAD_CLI").filter(|s| !s.is_empty()) { c.push(s.into()) }
     if let Some(d) = std::env::current_exe().ok().and_then(|e| e.parent().map(|d| d.join("kicad/bin/kicad-cli"))) { c.push(d) }
-    let home = std::env::var("HOME").unwrap_or_default();
+    let home = crate::plat::dirs::home_or_empty();
     let data = std::env::var("XDG_DATA_HOME").ok().filter(|s| !s.is_empty()).unwrap_or(format!("{home}/.local/share"));
     for d in [PathBuf::from(&data).join("backplane/kicad"), PathBuf::from(&home).join(".backplane-bend/kicad"), super::install::parent(&hub.cfg.home), hub.cfg.home.join("kicad")] { c.extend(newest_in(&d)) }
     // BACKPLANE_KICAD_NO_SYSTEM=1 (rigs that try Install KiCad on a machine that has one): the system's own copies (PATH, /usr/bin, the macOS app) are not looked at

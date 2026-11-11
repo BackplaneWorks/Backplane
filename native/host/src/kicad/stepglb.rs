@@ -23,11 +23,11 @@ pub struct Ran { pub code: i32, pub out: String }
 /// Key.hash / Str.hash: FNV-1a of a text's code points
 pub fn fnv(s: &str) -> u32 { s.chars().fold(2166136261u32, |h, c| (h ^ c as u32).wrapping_mul(16777619)) }
 
-/// Pv.cache / Parts.cache: where converted models are kept
-pub fn cache_dir() -> String {
-    let home = std::env::var("HOME").unwrap_or_else(|_| "/tmp".into());
-    format!("{}/backplane-bend/models", std::env::var("XDG_CACHE_HOME").unwrap_or_else(|_| format!("{home}/.cache")))
-}
+/// Pv.cache / Parts.cache: where converted models are kept, a native absolute path on every system (plat::dirs::models_cache: never `/tmp`
+/// on Windows, where the hub and Git's shell read it as two different folders). Name a file in it with `cache_file`.
+pub fn cache_dir() -> String { crate::plat::dirs::models_cache() }
+/// `name` (a file or `sub/file`) in the models cache, with the system's separators.
+pub fn cache_file(name: &str) -> String { Path::new(&cache_dir()).join(name).to_string_lossy().into_owned() }
 /// ModelCache.have: a non-empty regular file (a zero-byte output must not become a hit)
 pub fn have(path: &str) -> bool { std::fs::metadata(path).map(|m| m.is_file() && m.len() > 0).unwrap_or(false) }
 
@@ -40,11 +40,12 @@ pub fn stage(out: &str, tag: &str) -> std::io::Result<PathBuf> {
     std::fs::DirBuilder::new().mode(0o700).create(&dir)?;
     Ok(dir)
 }
-/// ModelCache.publish: a finished converter's file into the cache, or why not
+/// ModelCache.publish: a finished converter's file into the cache, or why not: the path looked at and what the converter said
 pub fn publish(r: Ran, from: &Path, out: &str) -> Ran {
     if r.code != 0 { return r }
-    if !have(&from.to_string_lossy()) { return Ran { code: 1, out: "Could not cache 3D model: converter produced no model".into() } }
-    match crate::plat::fs::rename(from, out) { Ok(()) => r, Err(e) => Ran { code: 1, out: format!("Could not cache 3D model: {e}") } }
+    let said = |r: &Ran| { let t = r.out.trim(); if t.is_empty() { String::new() } else { format!("; the converter said: {}", t.chars().take(400).collect::<String>()) } };
+    if !have(&from.to_string_lossy()) { return Ran { code: 1, out: format!("Could not cache 3D model: converter produced no model at {}{}", from.display(), said(&r)) } }
+    match crate::plat::fs::rename(from, out) { Ok(()) => r, Err(e) => Ran { code: 1, out: format!("Could not cache 3D model: {} to {out}: {e}{}", from.display(), said(&r)) } }
 }
 
 /// How a STEP is meshed.
@@ -135,8 +136,14 @@ pub fn machine(home: &Path) -> Vec<Mesher> {
     attempts(std::env::var("BACKPLANE_STEP2GLB").ok().as_deref(), &gui, &cmd, &step2glb_beside())
 }
 
-fn low(c: &mut Command, nice: bool, program: &str) { if nice { c.args(["-n", "10", program]); } }
-fn command(nice: bool, program: &str) -> Command { let mut c = crate::proc::std_cmd(crate::proc::Kind::Local, if nice { "nice" } else { program }); low(&mut c, nice, program); c.stdin(Stdio::null()).current_dir("/"); c }
+/// A tool run straight, no shell between (a shell reads a path its own way: Git's on Windows takes `/tmp` for %TEMP%, issue 1102), at a lower
+/// priority when `nice`: `nice -n 10` on Unix, below-normal priority on Windows (it has no `nice`). Its folder is the root: every path given is absolute.
+fn command(nice: bool, program: &str) -> Command {
+    #[cfg(unix)] let mut c = { let mut c = crate::proc::std_cmd(crate::proc::Kind::Local, if nice { "nice" } else { program }); if nice { c.args(["-n", "10", program]); } c };
+    #[cfg(windows)] let mut c = { use std::os::windows::process::CommandExt; const BELOW_NORMAL: u32 = 0x0000_4000;
+        let mut c = crate::proc::std_cmd(crate::proc::Kind::Local, program); if nice { c.creation_flags(crate::plat::proc::NO_WINDOW | BELOW_NORMAL); } c };
+    c.stdin(Stdio::null()).current_dir(std::path::MAIN_SEPARATOR_STR); c
+}
 /// a tool's exit code once it ends, or None when it had `secs` and did not (it is stopped then: its own PID, from this spawn)
 fn wait(c: &mut Command, secs: u64) -> Option<i32> {
     let mut p = c.spawn().ok()?; let end = Instant::now() + Duration::from_secs(secs);
@@ -201,11 +208,18 @@ fn via_console(cmd: &str, input: &str, out: &str, d: Detail, nice: bool) -> u64 
     let n = text.split("TRIS ").nth(1).and_then(|t| t.split_whitespace().next()).and_then(|x| x.parse::<u64>().ok()).unwrap_or(0);
     if code == Some(0) && n > 0 && have(out) { n } else { 0 }
 }
-/// a tool's stdout and stderr together, as Proc.run gives them; exit 127 when it cannot start
+/// a tool's stdout and stderr together (one pipe, in the order written), as Proc.run gives them; exit 127 when it cannot start. The tool is
+/// started itself, with `argv` as given: the paths it writes are the ones the hub then reads.
 pub fn run_merged(argv: &[&str], nice: bool) -> Ran {
-    let mut c = crate::proc::std_cmd(crate::proc::Kind::Local, "sh");
-    c.args(["-c", if nice { "exec nice -n 10 \"$@\" 2>&1" } else { "exec \"$@\" 2>&1" }, "sh"]).args(argv).stdin(Stdio::null()).current_dir("/");
-    match c.output() { Ok(o) => Ran { code: o.status.code().unwrap_or(1), out: String::from_utf8_lossy(&o.stdout).into_owned() }, Err(e) => Ran { code: 127, out: e.to_string() } }
+    let Some((prog, args)) = argv.split_first() else { return Ran { code: 127, out: "no program".into() } };
+    let started = (|| {
+        let (mut r, w) = std::io::pipe()?;
+        let mut c = command(nice, prog); c.args(args).stdout(w.try_clone()?).stderr(w);
+        let mut p = c.spawn()?; drop(c); // the pipe's writing ends are the child's alone: its exit ends the read
+        let mut out = Vec::new(); let _ = std::io::Read::read_to_end(&mut r, &mut out);
+        Ok::<_, std::io::Error>((p.wait()?, out))
+    })();
+    match started { Ok((s, o)) => Ran { code: s.code().unwrap_or(1), out: String::from_utf8_lossy(&o).into_owned() }, Err(e) => Ran { code: 127, out: format!("{prog}: {e}") } }
 }
 /// `src` meshed into `stage` by the first tool that can, at `detail` (None: the tool's default).
 pub fn convert(tools: &[Mesher], src: &str, stage: &str, detail: Option<Detail>, nice: bool) -> Ran {
@@ -282,11 +296,26 @@ mod tests {
         let r = convert(&[Mesher::Step2glb(t.to_string())], "/a.step", &out, None, true); assert_eq!(r.code, 0); // nice
         assert_eq!(std::fs::read_to_string(&log).unwrap().trim(), format!("/a.step {out}"));
     }
+    #[test] fn a_converter_runs_itself_and_writes_where_the_hub_looks_spaces_and_all() {
+        // no shell between: the output path the tool gets is the one `publish` checks (issue 1102: Git's sh read /tmp as %TEMP%)
+        use crate::plat::fs::PermissionsExt;
+        let d = dir("direct").join("a folder"); std::fs::create_dir_all(&d).unwrap(); let tool = d.join("my tool");
+        std::fs::write(&tool, "#!/bin/sh\nprintf glb > \"$2\"\necho out\necho err >&2\n").unwrap();
+        std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let stage = stage(&d.join("m.glb").to_string_lossy(), "export-").unwrap(); let from = stage.join("model.glb"); let out = d.join("cache dir").join("m.glb");
+        std::fs::create_dir_all(out.parent().unwrap()).unwrap();
+        let r = convert(&[Mesher::Step2glb(tool.to_string_lossy().into())], &d.join("in put.step").to_string_lossy(), &from.to_string_lossy(), None, true);
+        assert_eq!(r.code, 0, "{}", r.out); assert!(r.out.contains("out") && r.out.contains("err"), "stdout and stderr together: {:?}", r.out);
+        assert_eq!(publish(r, &from, &out.to_string_lossy()).code, 0); assert_eq!(std::fs::read_to_string(&out).unwrap(), "glb");
+        let r = run_merged(&[&d.join("no such tool").to_string_lossy()], false); assert_eq!(r.code, 127); assert!(r.out.contains("no such tool"), "{}", r.out);
+    }
     #[test] fn a_converter_that_wrote_nothing_is_not_published() {
         let d = dir("pub"); let (from, out) = (d.join("m"), d.join("o.glb")); let o = out.to_string_lossy();
         assert_eq!(publish(Ran { code: 3, out: "no".into() }, &from, &o), Ran { code: 3, out: "no".into() });
         assert_eq!(publish(Ran::default(), &from, &o).code, 1); assert!(!out.exists());
-        std::fs::write(&from, "").unwrap(); assert_eq!(publish(Ran::default(), &from, &o).out, "Could not cache 3D model: converter produced no model"); assert!(!have(&o));
+        std::fs::write(&from, "").unwrap(); assert_eq!(publish(Ran::default(), &from, &o).out, format!("Could not cache 3D model: converter produced no model at {}", from.display())); assert!(!have(&o));
+        let said = publish(Ran { code: 0, out: "wrote C:\\elsewhere\\m.glb\n".into() }, &from, &o).out;
+        assert_eq!(said, format!("Could not cache 3D model: converter produced no model at {}; the converter said: wrote C:\\elsewhere\\m.glb", from.display()), "the path looked at and what the converter said");
         std::fs::write(&from, "x").unwrap(); assert_eq!(publish(Ran::default(), &from, &o), Ran::default()); assert!(have(&o) && !from.exists());
     }
     #[test] fn two_stages_of_one_model_are_two_folders() { let d = dir("st"); let o = d.join("o").to_string_lossy().into_owned(); assert_ne!(stage(&o, "export-").unwrap(), stage(&o, "export-").unwrap()); }

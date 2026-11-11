@@ -24,7 +24,7 @@ impl Client {
 }
 
 /// The person's own folder on the hub's machine: where a first project goes.
-pub fn home_dir() -> String { std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).unwrap_or_default() }
+pub fn home_dir() -> String { crate::plat::dirs::home_or_empty() }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum Mark { Done, Skipped, Todo }

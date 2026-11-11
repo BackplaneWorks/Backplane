@@ -437,7 +437,7 @@ impl Driver for AgyDriver {
     /// the person's agy CLI if there is one, with Backplane's MCP server kept in its mcp_config.json.
     fn prepare(&mut self, a: &TurnIn) -> Result<(), String> {
         if !pinned(&a.home) { if let Some(p) = super::agy_cli::find() {
-            let home = std::env::var_os("HOME").map(std::path::PathBuf::from).unwrap_or_default();
+            let home = std::path::PathBuf::from(crate::plat::dirs::home_or_empty());
             if let super::agy_cli::Mcp::Skipped(why) = super::agy_cli::ensure_mcp(&super::agy_cli::mcp_config(&home)) { self.cs.note = format!("Backplane's tools are not available to Antigravity this turn: {why}.") }
             self.bases = bases_from(&std::fs::read_to_string(bases_path(&a.home)).unwrap_or_default()); // the probe's folded list: model + effort -> agy's variant
             self.cli = Some(p); return Ok(())

@@ -25,6 +25,7 @@ All of it is in `native/host/src/plat/` (`unix.rs` is the calls the hub always m
 - The vault's master key is kept in the Credential Manager (`backplane-vault/<id>`).
 - Paths: `\\?\` is dropped from resolved paths, a path is absolute as `C:\`, `C:/`, `\\host` or `/`, a relative one may not climb through `\` or name a drive, agent paths are recognised as `C:\x`, `C:/x` or `/c/x`.
 - Ctrl+C, Ctrl+Break, closing the console, logoff and shutdown end the hub (exit 130).
+- The person's folders (`plat/dirs.rs`): HOME is usually unset, so the home is `%USERPROFILE%`; a POSIX value (Git's shell's `HOME=/c/...` or `/tmp`) is ignored, because the hub reads `/tmp` as `C:\tmp` and Git's shell as `%TEMP%` (issue 1102). Converted 3D models are cached in `%LOCALAPPDATA%\Backplane\cache\models` (`XDG_CACHE_HOME` still wins when it is a Windows path), and KiCad's model variables are read from its own profile, `%APPDATA%\kicad\<version>\kicad_common.json` (the running KiCad's version first). Converters run directly, never through `sh`, so they write where the hub looks.
 - The client keeps its settings in `%APPDATA%\backplane-gpui`, its default hub home is `%APPDATA%\Backplane\hub`, its home is `%USERPROFILE%` when `HOME` is not set.
 
 ## Building on Linux for a Windows machine
