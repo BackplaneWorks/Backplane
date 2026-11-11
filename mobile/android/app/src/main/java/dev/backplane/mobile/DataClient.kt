@@ -789,7 +789,14 @@ object DataClient {
         return (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Mention(it.optString("sigil"), it.optString("id"), it.optString("label"), it.optString("detail"), it.optString("word")) }
     }
     /** `mark`: the short name of the linked machine a bot or room is on ("" for this hub's own) */
-    data class Bot(val id: String, val name: String, val thread: String, val uber: Boolean, val mark: String = "")
+    data class Bot(val id: String, val name: String, val thread: String, val uber: Boolean, val mark: String = "", val note: String = "")
+    /** The open chat `open` after a home move: the same bot's thread on its new home (`<link>~<id>` there, or the plain id back here); null when it did not move. */
+    fun followed(open: String, was: List<Bot>, now: List<Bot>): String? {
+        val local = { s: String -> s.substringAfterLast('~') }
+        val b = was.firstOrNull { it.thread == open } ?: return null
+        if (now.any { it.thread == open }) return null
+        return now.firstOrNull { local(it.id) == local(b.id) && local(it.thread) == local(open) }?.thread
+    }
     data class Room(val id: String, val name: String, val mark: String = "")
     /** Just paired: once the hub's bots are in, its uberbot's chat opens (phones have no setup; docs/ALWAYS-ON.md, D9). */
     private var uberAfterPair = false
@@ -797,7 +804,10 @@ object DataClient {
     var rooms by mutableStateOf<List<Room>>(emptyList()); private set
     suspend fun loadBots() {
         val r = call("bots.list")
-        bots = r.optJSONArray("bots")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Bot(it.optString("id"), it.optString("name"), it.optString("thread"), it.optBoolean("uber"), it.optJSONObject("mark")?.optString("short") ?: "") } } ?: emptyList()
+        val was = bots
+        bots = r.optJSONArray("bots")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Bot(it.optString("id"), it.optString("name"), it.optString("thread"), it.optBoolean("uber"), it.optJSONObject("mark")?.optString("short") ?: "", it.optString("note")) } } ?: emptyList()
+        // the uberbot's chat follows a home move: the same row, the same thread, now drawn from the machine that holds it
+        open?.let { o -> followed(o, was, bots)?.let { linkTarget = LinkTarget(LinkTarget.Kind.THREAD, it) } }
         rooms = r.optJSONArray("rooms")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Room(it.optString("id"), it.optString("name"), it.optJSONObject("mark")?.optString("short") ?: "") } } ?: emptyList()
         if (uberAfterPair) bots.firstOrNull { it.uber && it.thread.isNotEmpty() }?.let { uberAfterPair = false; linkTarget = LinkTarget(LinkTarget.Kind.THREAD, it.thread) }
     }

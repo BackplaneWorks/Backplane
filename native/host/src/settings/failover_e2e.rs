@@ -467,4 +467,38 @@ impl Rig {
     std::fs::remove_file(r.dir.join("mode.p@x.com")).unwrap(); r.tick(rp + 1).await;
     assert_eq!(th(&*r.hub.model().await), ("claude".to_string(), "claude-opus-5-5".to_string()), "{:?}", r.lines(t2));
     assert_eq!(r.binding(t2, "claude").await, p.0);
+/// thread_update {provider, model, account} from another thread (a lead moving a lane), between turns: the conversation goes with it as a switch by hand does; a choice
+/// made this way stays (the chain does not move it back up by itself), and a thread the chain moved down is brought back by it with the chain's bookkeeping cleared.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn a_lead_moves_a_thread_to_another_provider_and_back_and_the_conversation_goes_with_it() {
+    let r = rig("lead", "claude").await; let (w, p, c) = r.across().await; const LEAD: &str = "t1700000099-9";
+    r.hub.commit(&json!({"$":"ThreadCreated","id":LEAD,"project":"p1","title":"Lead","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":now()})).await.unwrap();
+    r.say(T, "m1", "FIRST-REQUEST remember the pad size").await; r.rest(T, "completed", 1).await;
+    // refused: what is not a provider, a mix with a rename, a thread's own turn
+    let (ok, v) = r.tool(LEAD, "thread_update", json!({"threadId":T,"provider":"nope"})).await; assert!(!ok && v["error"].as_str().unwrap().contains("not a provider"), "{v}");
+    let (ok, v) = r.tool(LEAD, "thread_update", json!({"threadId":T,"provider":"codex","title":"x"})).await; assert!(!ok && v["error"].as_str().unwrap().contains("cannot be combined"), "{v}");
+    // to Codex: the saved status comes back, nothing runs until the next message, which carries the conversation so far
+    let (ok, v) = r.tool(LEAD, "thread_update", json!({"threadId":T,"provider":"codex","account":"Spare"})).await; assert!(ok, "{v}");
+    assert_eq!((v["threadId"].as_str(), v["provider"].as_str(), v["model"].as_str(), v["account"].as_str()), (Some(T), Some("codex"), Some(""), Some("Spare")), "{v}"); assert_eq!(r.binding(T, "codex").await, c.0);
+    assert_eq!(r.turns().len(), 1, "a switch starts no turn"); assert_eq!(r.provider(T).await, "codex");
+    r.say(T, "m2", "SECOND-REQUEST route the board").await; r.rest(T, "completed", 2).await;
+    let t = &r.turns()[1]; assert_eq!(t["who"], "c@x.com"); assert!(t["text"].as_str().unwrap().contains("FIRST-REQUEST remember the pad size"), "Codex gets the conversation:\n{}", t["text"]);
+    // a choice, not a fallback: a reset later does not move it back up
+    assert_eq!(r.hub.setting(&format!("fallback.intent.{T}")).await.unwrap_or_default(), ""); r.tick(now() + 7200).await; assert_eq!(r.provider(T).await, "codex", "{:?}", r.lines(T));
+    // a model alone keeps the provider
+    let (ok, v) = r.tool(LEAD, "thread_update", json!({"threadId":T,"model":"gpt-test"})).await; assert!(ok, "{v}"); assert_eq!((v["provider"].as_str(), v["model"].as_str()), (Some("codex"), Some("gpt-test")), "{v}");
+    // back to Claude on a named account, in one call; what Codex did goes along
+    let (ok, v) = r.tool(LEAD, "thread_update", json!({"threadId":T,"provider":"claude","account":"Personal"})).await; assert!(ok, "{v}");
+    assert_eq!((v["provider"].as_str(), v["model"].as_str(), v["account"].as_str()), (Some("claude"), Some(""), Some("Personal")), "{v}"); assert_eq!(r.binding(T, "claude").await, p.0);
+    r.say(T, "m3", "THIRD").await; r.rest(T, "completed", 3).await; let t = &r.turns()[2];
+    assert_eq!(t["who"], "p@x.com"); assert!(t["text"].as_str().unwrap().contains("SECOND-REQUEST"), "what Codex did goes with it:\n{}", t["text"]);
+    // the chain moves it down at a limit, as before; the lead brings it back up, and the chain's bookkeeping goes with that choice
+    let rs = now() + 3600; r.mode("w@x.com", &format!("limit:{rs}")); r.mode("p@x.com", &format!("limit:{rs}"));
+    r.say(T, "m4", "FOURTH").await; r.rest(T, "completed", 6).await; assert_eq!(r.provider(T).await, "codex", "{:?}", r.lines(T));
+    assert_ne!(r.hub.setting(&format!("fallback.intent.{T}")).await.unwrap_or_default(), "", "the chain remembers where it came from");
+    std::fs::remove_file(r.dir.join("mode.w@x.com")).unwrap();
+    let (ok, v) = r.tool(LEAD, "thread_update", json!({"threadId":T,"provider":"claude","account":"Work"})).await; assert!(ok, "{v}");
+    assert_eq!((r.provider(T).await, r.binding(T, "claude").await), ("claude".to_string(), w.0.clone()));
+    assert_eq!(r.hub.setting(&format!("fallback.intent.{T}")).await.unwrap_or_default(), "", "the lead's choice clears the chain's");
+    r.say(T, "m5", "FIFTH").await; r.rest(T, "completed", 7).await; let t = &r.turns()[6];
+    assert_eq!(t["who"], "w@x.com"); assert!(t["text"].as_str().unwrap().contains("answered by c@x.com"), "what Codex did after the fallback goes back with it:\n{}", t["text"]);
 }

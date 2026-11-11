@@ -1005,8 +1005,10 @@ final class DataClient {
     }
     func loadBots() async {
         guard has("bots"), let r: DDirectory = try? await call("bots.list") else { return }
-        bots = r.bots; rooms = r.rooms
+        let was = bots; bots = r.bots; rooms = r.rooms
         if uberAfterPair, let u = bots.first(where: { $0.uber && !$0.thread.isEmpty }) { uberAfterPair = false; pendingThread = u.thread }
+        // the uberbot's chat follows a home move: the same row, the same thread, now drawn from the machine that holds it
+        if let o = open, let to = DBot.followed(o, was, r.bots) { pushThread = to }
     }
     func roomPosts(_ room: String) async -> [DPost] { ((try? await call("room.posts", ["room": room, "limit": 60]) as DPosts)?.posts) ?? [] }
     func roomPost(_ room: String, _ text: String) async throws { _ = try await call("room.post", ["room": room, "text": text, "clientId": UUID().uuidString], as: DEmpty.self) }

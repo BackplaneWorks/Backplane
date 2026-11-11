@@ -60,6 +60,8 @@ fn bots(st: &State, far: &[(String,&State)], un: &Unified, hub: &str, now: u64) 
     let mut rows=bot_rows(st,hub,now,&uber,&Value::Null);
     for (m,f) in far { rows.extend(bot_rows(f,hub,now,&uber,&un.mark(m))); }
     rows.sort_by_key(|r| !r["uber"].as_bool().unwrap_or(false)); // (stable: each machine's own order kept)
+    // a home move (net/homemove.rs, the setting `home.moving`): the uberbot's own row says where it is going while it goes, and once that it did not
+    if let Some((mood,note))=crate::net::homemove::moving_note(setting(st,"home.moving"),now) { if let Some(r)=rows.iter_mut().find(|r|r["uber"]==true && r["mark"].is_null()) { r["mood"]=json!(mood); r["note"]=json!(note); r["cat"]=json!(format!("{}:{mood}",r["look"])); } }
     rows
 }
 /// One state's bots as sidebar rows (its own only: a mirror's bots are `<link>~<id>`, never re-listed by this hub's state)
@@ -305,6 +307,9 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
     let room_page=&p["roomPage"];
     let bot_page=&p["botPage"]; // a bot's target shows its chat thread, under its tabs (session seam: bots::bot_page)
     let thread=if p["target"]["kind"]=="thread" { text(&p["target"],"id") }else if bot_page.is_object() { text(bot_page,"chat") }else{""};
+    // the uberbot's (or a bot's) chat after its home moved: this hub keeps the old copy of the thread, the live one is the new home's, the same id there; it is drawn instead
+    let moved=crate::net::homemove::moved_thread(setting(st,"home.at"),thread,st.threads.get(thread).map(|t|t.project.as_str()),&|id|far.iter().any(|(_,f)|f.threads.contains_key(id)));
+    let thread=moved.as_deref().unwrap_or(thread);
     session["sel"]=json!(thread);
     if !session["drafts"].is_object() { session["drafts"]=json!({}); }
     for k in ["@boot","@bot","@bot.want","@btab","@del","@desk","@draft.bound","@mech.at","@presentation","@remote","@room","@solid.at","@telemetry.dismiss","@thread.want"] {

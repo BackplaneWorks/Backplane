@@ -428,28 +428,36 @@ impl RpcHandler for Rpc {
                 return vec![if ok_ { json!({"t":"reply","id":id,"ok":true,"result":b}) } else { err(id, b["error"].as_str().unwrap_or("refused")) }]
             }
             let r = match method {
-                "turn.start" => {
-                    let shown = p.get("text").and_then(Value::as_str).unwrap_or("");
-                    // `agentText` (the phone data API: the text with the paths of the images attached) is what the agent is told and the message carries; `attachments` (their metadata) ride as a MessageAttached event in the same commit
-                    let text = p.get("agentText").and_then(Value::as_str).filter(|t| !t.is_empty()).unwrap_or(shown);
-                    let msg = p.get("msg").and_then(Value::as_str).filter(|m| !m.is_empty()).map(str::to_string).unwrap_or_else(|| hub_id("m", now_s(), self.0.seq()));
-                    let retry = p.get("retry").and_then(Value::as_bool).unwrap_or(false);
-                    let attached: Vec<Value> = p.get("attachments").filter(|a| a.as_array().map_or(false, |x| !x.is_empty())).map(|a| vec![json!({"$":"MessageAttached","thread":th,"msg":msg,"attachments":a,"at":now_s()})]).unwrap_or_default();
-                    if who.client > 0 && !retry && !text.trim().is_empty() {
-                        // the star nudge counts this prompt in the same commit; the offer (the fifth) goes to this connection after it
-                        let (mut extra, offer) = crate::statehost::policies().map(|p| p.star_prompt(&msg, now_s())).unwrap_or((vec![], None));
-                        extra.extend(attached);
-                        let r = self.0.deliver_person(th, &msg, text, extra).await; if r.is_ok() { if let Some(f) = offer { self.0.hub.push(who.client, f); } }
-                        if r.is_ok() { if let Some(m) = self.0.mailroom() { let bots: Vec<String> = { let w = self.0.world().await; refs::found(&w, th, text).into_iter().filter(|(h, _)| h.kind == "bot" && !h.id.contains('@')).map(|(h, _)| h.id).collect() }; if !bots.is_empty() { m.mentions(th, bots, text).await } let rooms: Vec<String> = { let w = self.0.world().await; refs::found(&w, th, text).into_iter().filter(|(h, _)| h.kind == "room").map(|(h, _)| h.id).collect() }; if !rooms.is_empty() { m.room_mentions(th, rooms, text).await } } } // Bots.mentions
-                        r
-                    } else { self.0.deliver(th, &msg, text, None, attached).await }
-                }
+                // a home move (net/homemove.rs) holds a message to a thread it carries, and sends one to the old copy of a moved thread on to the new home
+                "turn.start" => match crate::net::homemove::intercept(&self.0.hub, th, p).await { Some(r) => r, None => self.0.turn_start(who, th, p).await },
                 _ => { let r = self.0.interrupt(th).await; if let Some(m) = self.0.mailroom() { m.stopping(th).await } r }
             };
             match r { Ok(()) => vec![ok(id)], Err(e) => vec![err(id, &e)] }
         })
     }
 }
+impl Agents {
+    /// `turn.start` for a thread of this hub: the person's message (counted by the star nudge, mentions told), or the hub's own.
+    async fn turn_start(self: &Arc<Self>, who: &Caller, th: &str, p: &Value) -> Result<(), String> {
+        {
+                    let shown = p.get("text").and_then(Value::as_str).unwrap_or("");
+                    // `agentText` (the phone data API: the text with the paths of the images attached) is what the agent is told and the message carries; `attachments` (their metadata) ride as a MessageAttached event in the same commit
+                    let text = p.get("agentText").and_then(Value::as_str).filter(|t| !t.is_empty()).unwrap_or(shown);
+                    let msg = p.get("msg").and_then(Value::as_str).filter(|m| !m.is_empty()).map(str::to_string).unwrap_or_else(|| hub_id("m", now_s(), self.seq()));
+                    let retry = p.get("retry").and_then(Value::as_bool).unwrap_or(false);
+                    let attached: Vec<Value> = p.get("attachments").filter(|a| a.as_array().map_or(false, |x| !x.is_empty())).map(|a| vec![json!({"$":"MessageAttached","thread":th,"msg":msg,"attachments":a,"at":now_s()})]).unwrap_or_default();
+                    if who.client > 0 && !retry && !text.trim().is_empty() {
+                        // the star nudge counts this prompt in the same commit; the offer (the fifth) goes to this connection after it
+                        let (mut extra, offer) = crate::statehost::policies().map(|p| p.star_prompt(&msg, now_s())).unwrap_or((vec![], None));
+                        extra.extend(attached);
+                        let r = self.deliver_person(th, &msg, text, extra).await; if r.is_ok() { if let Some(f) = offer { self.hub.push(who.client, f); } }
+                        if r.is_ok() { if let Some(m) = self.mailroom() { let bots: Vec<String> = { let w = self.world().await; refs::found(&w, th, text).into_iter().filter(|(h, _)| h.kind == "bot" && !h.id.contains('@')).map(|(h, _)| h.id).collect() }; if !bots.is_empty() { m.mentions(th, bots, text).await } let rooms: Vec<String> = { let w = self.world().await; refs::found(&w, th, text).into_iter().filter(|(h, _)| h.kind == "room").map(|(h, _)| h.id).collect() }; if !rooms.is_empty() { m.room_mentions(th, rooms, text).await } } } // Bots.mentions
+                        r
+                    } else { self.deliver(th, &msg, text, None, attached).await }
+        }
+    }
+}
+
 
 /// A thread whose creation asked for a worktree (a branch) or that is an improvement thread must not fall back to its project folder.
 /// A thread's folder that vanished (a removed worktree) never stops a turn: it is made again as a fresh git worktree of the project (detached at HEAD),
