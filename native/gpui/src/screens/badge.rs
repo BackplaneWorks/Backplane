@@ -7,6 +7,8 @@ use serde_json::Value;
 /// The icons the hub may name (its list, present/badge.rs); anything else is the folder.
 const ICONS: [&str; 20] = ["folder", "circuit-board", "cpu", "zap", "radio", "box", "layers", "code", "terminal", "globe", "wrench", "flask-conical", "book", "star",
     "usb", "plug", "presentation", "gauge", "file-text", "image"];
+/// The icon drawn for a name: itself when the client's icons.json has it, else the folder (a safety net: the build ships every listed icon).
+pub fn drawable(n: &'static str, has: impl Fn(&str) -> bool) -> &'static str { if has(n) { n } else { "folder" } }
 pub fn icon_name(n: &str) -> &'static str { ICONS.iter().copied().find(|i| *i == n).unwrap_or("folder") }
 /// "#rrggbb" as a colour; None for anything else.
 pub fn parse_css(css: &str) -> Option<Rgba> {
@@ -17,7 +19,8 @@ pub fn parse_css(css: &str) -> Option<Rgba> {
 pub fn mark(light: bool, project: &Value) -> AnyElement {
     // a project named Backplane: the app's own logo (the hub's `backplane`, which no editor offers)
     if logo(project) { return div().size(px(14.)).flex_shrink_0().child(art::logo(light, 14., "badge-logo")).into_any_element() }
-    art::icon(icon_name(project["icon"].as_str().unwrap_or("")), 14., parse_css(project["css"].as_str().unwrap_or("")).unwrap_or_else(|| theme::color(light, "ok")))
+    // a name this client cannot draw (not in its list, or missing from its icons.json) is the folder: a project's mark is never blank
+    art::icon(drawable(icon_name(project["icon"].as_str().unwrap_or("")), art::has_icon), 14., parse_css(project["css"].as_str().unwrap_or("")).unwrap_or_else(|| theme::color(light, "ok")))
 }
 /// The editor's choices as (label, value, on, css).
 pub fn choices(look: &Value, key: &str) -> Vec<(String, String, bool, String)> {
@@ -44,7 +47,7 @@ pub fn editor(cx: &mut Context<Backplane>, light: bool, pid: &str, look: &Value)
         icons = icons.child(crate::ui::with_rect(div().id(SharedString::from(format!("look-icon-{pid}-{label}"))), { let v = value.clone(); move || format!("look:{v}") }).size(px(24.)).flex().items_center().justify_center().cursor_pointer().border_1()
             .border_color(if on { c("text") } else { c("line") }).hover(|s| s.bg(c("raise")))
             .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("look-set".into(), value.clone())); cx.notify(); }))
-            .child(art::icon(icon_name(&label), 14., c(if on { "text" } else { "dim" }))));
+            .child(art::icon(drawable(icon_name(&label), art::has_icon), 14., c(if on { "text" } else { "dim" }))));
     }
     // Pick again: the hub's model chooses anew (the person's choice is cleared); the hub names the press (`again`)
     let again = again(look).map(|(label, value)| crate::ui::with_rect(div().id(SharedString::from(format!("look-again-{pid}"))), || "look:again".to_string()).px_2().h(px(22.)).flex().items_center()
@@ -105,6 +108,7 @@ mod tests {
         assert_eq!(choices(&look, "icons")[0].1, "project.icon.p=cpu"); assert!(choices(&Value::Null, "colors").is_empty());
         assert_eq!(again(&serde_json::json!({"again":{"label":"Pick again","value":"p"}})), Some(("Pick again".to_string(), "p".to_string()))); assert_eq!(again(&look), None);
         assert_eq!((icon_name("usb"), icon_name("presentation")), ("usb", "presentation"));
+        assert_eq!((drawable("usb", |n| n == "usb"), drawable("usb", |_| false)), ("usb", "folder"), "an icon the assets lack draws as the folder, never blank");
         assert!(logo(&serde_json::json!({"icon":"backplane"})) && !logo(&serde_json::json!({"icon":"cpu"})) && icon_name("backplane") == "folder", "the logo is drawn by itself, never as an icon of the list");
     }
     #[test] fn a_machine_marker_is_short_on_rows_full_in_the_header_and_dim_when_away() {
@@ -126,4 +130,14 @@ mod tests {
         assert_eq!((from_machine(&m, "boards/x.kicad_pcb"), from_machine(&Value::Null, "boards/x.kicad_pcb")), ("desktop: boards/x.kicad_pcb".to_string(), "boards/x.kicad_pcb".to_string()));
         assert_eq!(from_machine(&m, ""), "desktop");
     }
+    #[test] fn the_icon_list_is_the_hubs_and_every_icon_in_it_draws() {
+        // one list: the hub's (present/badge.rs ICONS, what the model and the editors may name) is this one, and assets/icons.json has every icon of it
+        let hub = include_str!("../../../host/src/present/badge.rs");
+        let start = hub.find("pub const ICONS: &[&str] = &[").expect("the hub's list") + "pub const ICONS: &[&str] = &[".len(); let end = start + hub[start..].find("];").unwrap();
+        let theirs: Vec<String> = hub[start..end].lines().map(|l| l.split("//").next().unwrap_or("")).collect::<Vec<_>>().join(" ").split(',').map(|x| x.trim().trim_matches('"').to_string()).filter(|x| !x.is_empty()).collect();
+        assert_eq!(theirs, ICONS.iter().map(|s| s.to_string()).collect::<Vec<_>>());
+        let icons: serde_json::Value = serde_json::from_str(include_str!("../../../../assets/icons.json")).unwrap();
+        for n in ICONS { assert!(icons.get(n).is_some(), "{n} is offered but assets/icons.json cannot draw it") }
+    }
+
 }

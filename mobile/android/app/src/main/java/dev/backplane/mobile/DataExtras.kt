@@ -11,10 +11,11 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
-import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
@@ -81,6 +82,13 @@ fun ThreadMenus(t: DThread, shown: Boolean, close: () -> Unit, deleted: () -> Un
     if (deleting) ActionSheet(Msg.android_thread_delete_ask(t.title), listOf("Delete thread" to { DataClient.threadAct(t.id, "delete"); deleted() }, "Keep it" to {}), { deleting = false })
 }
 
+/** A project's icon as the hub names it (present/badge.rs ICONS, the desktop's icons.json), as a Material glyph; any other name is the folder, so a mark is never blank. */
+fun badgeGlyph(name: String): androidx.compose.ui.graphics.vector.ImageVector = BADGE_GLYPHS[name] ?: androidx.compose.material.icons.Icons.Default.Folder
+val BADGE_GLYPHS: Map<String, androidx.compose.ui.graphics.vector.ImageVector> = androidx.compose.material.icons.Icons.Default.let { i -> mapOf(
+    "folder" to i.Folder, "circuit-board" to i.DeveloperBoard, "cpu" to i.Memory, "zap" to i.Bolt, "radio" to i.SettingsInputAntenna, "box" to i.Inventory2,
+    "layers" to i.Layers, "code" to i.Code, "terminal" to i.Terminal, "globe" to i.Public, "wrench" to i.Build, "flask-conical" to i.Science, "book" to i.Book,
+    "star" to i.Star, "usb" to i.Usb, "plug" to i.Power, "presentation" to i.Slideshow, "gauge" to i.Speed, "file-text" to i.Description, "image" to i.Image) }
+
 /** A project's badge: the hub's tints and icons (`badge.list`); a press is `project.act color|icon|pick`. */
 @Composable
 fun BadgeSheet(p: DProject, close: () -> Unit) {
@@ -102,7 +110,9 @@ fun BadgeSheet(p: DProject, close: () -> Unit) {
                 val ia = l.optJSONArray("icons"); val icons = (0 until (ia?.length() ?: 0)).map { ia!!.optString(it) }
                 icons.chunked(3).forEach { row ->
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        row.forEach { n -> DMono((if (n == p.icon) "● " else "○ ") + n, dcs.onSurface, 12, Modifier.weight(1f).clickable { DataClient.projectAct(p.id, "icon", value = n) }.padding(vertical = 4.dp).testTag("badge.icon.$n")) }
+                        row.forEach { n -> Row(Modifier.weight(1f).clickable { DataClient.projectAct(p.id, "icon", value = n) }.padding(vertical = 4.dp).testTag("badge.icon.$n"), verticalAlignment = androidx.compose.ui.Alignment.CenterVertically) {
+                            Icon(badgeGlyph(n), null, tint = if (n == p.icon) dcs.onSurface else dcs.onSurfaceVariant, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(6.dp))
+                            DMono((if (n == p.icon) "● " else "") + n, dcs.onSurface, 12) } }
                     }
                 }
             }
