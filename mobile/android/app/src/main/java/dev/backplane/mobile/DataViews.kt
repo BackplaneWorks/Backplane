@@ -340,9 +340,16 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
         val threads = DataClient.threads.filter { !it.archived && it.id !in botThreads && !it.history && !(swarmsOn && it.swarm.isNotEmpty()) }
         val hist = DataClient.history
         if (projects.isEmpty() && threads.isEmpty() && hist.count == 0) {
-            Column(Modifier.fillMaxSize().padding(32.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-                Text(if (DataClient.listsLoaded) Msg.android_projects_none else Msg.viewer_loading, color = dcs.onSurface, fontFamily = BpMono, fontSize = 14.sp)
-                if (DataClient.listsLoaded) { Spacer(Modifier.height(12.dp)); DBtn(Msg.android_project_add, true, true, onClick = addProject) }
+            // no project yet: Bub (and what the hub's sections hold, Needs you) still lead the list; the empty state and Add a project come under them
+            LazyColumn(Modifier.fillMaxSize().testTag("home.list")) {
+                items(DataClient.bots.filter { it.uber && it.thread.isNotEmpty() }, key = { "u:${it.id}" }) { b -> SidebarRow("@", b.name, onMachine(Msg.android_kind_uberbot, b.mark)) { open(b.thread) } }
+                if (DataClient.has("sections") && DataClient.sections.isNotEmpty()) sectionItems(open, { secPage = it }, { secMenu = it }, { secRename = it })
+                item("empty") {
+                    Column(Modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                        Text(if (DataClient.listsLoaded) Msg.android_projects_none else Msg.viewer_loading, color = dcs.onSurface, fontFamily = BpMono, fontSize = 14.sp)
+                        if (DataClient.listsLoaded) { Spacer(Modifier.height(12.dp)); DBtn(Msg.android_project_add, true, true, onClick = addProject) }
+                    }
+                }
             }
         } else LazyColumn(Modifier.fillMaxSize().testTag("home.list"), state = listState) {
             val uber = DataClient.bots.filter { it.uber && it.thread.isNotEmpty() }
