@@ -28,6 +28,8 @@ impl Ticker for Cost {
             let last = self.last.load(SeqCst);
             if last != 0 && now_s < last + 300 { return vec![] }
             self.last.store(now_s.max(1), SeqCst);
+            // a hub that measures its always-on Boat itself (net/alwayson: its own Boat key and calls) shows it on Settings, Machines instead
+            if !crate::net::alwayson::shared().box_id().is_empty() && crate::net::alwayson::boat::Boat::from_vault(&hub.cfg.home).is_some() { hub.set_info("boathub.cost", "").await; return vec![] }
             if let Some(p) = path() { hub.set_info("boathub.cost", &read(&p)).await; }
             vec![]
         })

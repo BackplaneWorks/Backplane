@@ -77,6 +77,10 @@ pub async fn signed(home: &Path, url: &str, peer: &str, secret: &str, now: u64, 
     if !url_ok(url) || secret.is_empty() { return Resp { code: 0, body: "no secret, or not an http address".into() } }
     let target = format!("{}{path}", url_base(url));
     let sig = sign::header(secret, now, body);
+    // a linked machine this hub cannot reach, polling it (net/alwayson/tunnel.rs): the call goes back over its poll instead
+    if path != "/far/tunnel" {
+        if let Some((code, body)) = super::alwayson::tunnel::ends().call(peer, if post { "POST" } else { "GET" }, path, &headers(peer, now, &sig), if post { body } else { "" }).await { return Resp { code, body } }
+    }
     if !post { return curl(args(None, &target), headers(peer, now, &sig)).await }
     mkdir(&home.join("secrets")); mkdir(&home.join("secrets/tmp"));
     let file = home.join("secrets/tmp").join(hex::encode(super::pairing::urandom(8)));

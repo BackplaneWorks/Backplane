@@ -11,6 +11,7 @@
 //! * `Auth` asking `pairing::Registry::resolve` instead of reading devices-v1.json once.
 #[cfg(test)]
 mod copy_outs;
+pub mod alwayson;
 pub mod botnet;
 pub mod homemove;
 pub mod farfiles;

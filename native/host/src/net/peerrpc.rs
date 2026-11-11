@@ -21,6 +21,7 @@ impl RpcHandler for PeerRpc {
                 "machines.page" => { let d = self.0.page_data(); let mut r = super::machinespage::rows(&d, &|_| String::new());
                     let (uber, at) = (!super::homemove::uber(hub).await.is_empty(), hub.setting("home.at").await.unwrap_or_default());
                     r.extend(super::homemove::rows(uber, &at, hub.info_now()["home.move"].as_str().unwrap_or(""), &d["linked"]));
+                    r.extend(super::alwayson::rows::machines_rows(&hub.info_now(), hub.setting(super::alwayson::other::STAYS_ON).await.as_deref() == Some("on")));
                     // `busy`: a sign-in panel there changes by itself now; the phones read the page again every 2 s while it says so
                     let info = hub.info_now(); r.extend(crate::present::signin_there::open_rows(&info)); ok(id, json!({"rows": r, "busy": crate::present::signin_there::busy(&info)})) }
                 "machines.page.act" => match super::machinespage::act(&self.0, hub, &s("action"), &s("value"), &p["fields"]).await { Ok(x) => ok(id, x), Err(e) => err(id, &e) },

@@ -26,27 +26,77 @@ fn picked<'a>(f: &'a Facts, session: &'a Value) -> &'a str {
     let d = draft(session, "@ob.aon");
     if !d.is_empty() { d } else if !chosen(f).is_empty() { chosen(f) } else { "here" }
 }
+fn other_of(f: &Facts) -> Value { f.st.settings.get(crate::net::alwayson::other::PICKED).and_then(|t| serde_json::from_str(t).ok()).unwrap_or(Value::Null) }
+fn linked_of(f: &Facts) -> Value {
+    let m = if f.machines.is_string() { serde_json::from_str::<Value>(f.machines.as_str().unwrap_or("")).unwrap_or(Value::Null) } else { f.machines.clone() };
+    m["linked"].clone()
+}
 
 pub fn rows(f: &Facts, session: &Value, _c: &Client) -> Vec<Value> {
+    use crate::net::alwayson::rows as ar;
     let on = picked(f, session);
     let mut v = vec![];
     for (id, label, note) in OPTIONS {
         v.push(row(label, note, vec![btn(if *id == on { "Chosen" } else { "Choose" }, "ob-aon-pick", id, *id == on)]));
-        if *id == on && *id != "here" { v.push(row("Coming soon", "This build cannot set it up yet. Stay on this computer for now.", vec![])); }
+        if *id != on { continue }
+        match *id {
+            "boat" => v.extend(ar::boat_rows(&ar::view_of(f.info))),
+            "machine" => v.extend(ar::other_rows(&other_of(f), &linked_of(f), &|k| format!("obaon{k}"), &|k| draft(session, &format!("@f.obaon{k}")).to_string())),
+            _ => {}
+        }
+        // the sign-in panel of the machine whose Sign in there was pressed, under its row
+        if *id != "here" { v.extend(super::signin_there::open_rows(f.info)) }
     }
     v
 }
 
-pub fn done(f: &Facts) -> bool { !chosen(f).is_empty() }
+/// Stay on this computer is the default (D2): with nothing saved the step is done, as with a choice made. A Boat or another machine
+/// being set up does not undo that: the uberbot stays here until it is moved.
+pub fn done(_f: &Facts) -> bool { true }
 
+/// Next: Stay on this computer is recorded at once; a Boat once it is made (make.rs records `boat`), another machine once one is picked
+/// (other.rs records `machine`). Until then Next leaves the step not done, so setup comes back to it.
 pub fn next(f: &Facts, session: &Value, ask: &mut Ask) {
-    // the stub saves only Stay on this computer: the others cannot be set up yet
     if chosen(f).is_empty() && picked(f, session) == "here" { ask.put(CHOICE, "here"); }
 }
 
-pub fn act(_f: &Facts, _session: &Value, _c: &Client, action: &str, value: &str, ask: &mut Ask) -> Option<Value> {
+pub fn act(_f: &Facts, session: &Value, _c: &Client, action: &str, value: &str, ask: &mut Ask) -> Option<Value> {
     match action {
         "ob-aon-pick" if OPTIONS.iter().any(|o| o.0 == value) => { if value == "here" { ask.put(CHOICE, "here"); } Some(json!({"drafts": {"@ob.aon": value}})) }
+        // the Boat's and the other machine's presses: to the hub as Settings, Machines sends them
+        a if a.starts_with("alwayson-") => {
+            let fields = json!({"addr": draft(session, "@f.obaonaddr"), "code": draft(session, "@f.obaoncode")});
+            ask.send("alwayson.act", json!({"action": a, "value": value, "fields": fields}));
+            Some(if a == "alwayson-other-pair" { json!({"drafts": {"@f.obaonaddr": "", "@f.obaoncode": ""}}) } else { json!({}) })
+        }
+        // Sign it in to your agents (lane G's panel: `machine-signin*`) and Move your uberbot there (`machine-home`, lane H)
+        a if a.starts_with("machine-signin") || a == "machine-home" => {
+            let fields: serde_json::Map<String, Value> = super::signin_there::FIELDS.iter().map(|k| (k.to_string(), json!(draft(session, &format!("@f.{k}"))))).collect();
+            ask.send("machines.page.act", json!({"action": a, "value": value, "fields": fields}));
+            Some(json!({}))
+        }
         _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test] fn the_boat_and_machine_presses_go_to_the_hub() {
+        let st = crate::state::State::default(); let info = json!({}); let f = Facts::of(&st, &info);
+        let c = Client { phone: false, os: "linux".into(), launcher: false };
+        let session = json!({"drafts": {"@f.obaonaddr": "http://nas:3797", "@f.obaoncode": "ABCD"}});
+        let mut ask = Ask { hub: "h", rid: 0, cmds: vec![] };
+        assert!(act(&f, &session, &c, "alwayson-other-pair", "", &mut ask).is_some());
+        let cmd = ask.cmds.last().unwrap().to_string();
+        assert!(cmd.contains("alwayson.act") && cmd.contains("http://nas:3797") && cmd.contains("ABCD"), "{cmd}");
+        assert!(act(&f, &session, &c, "machine-home", "p1", &mut ask).is_some()); assert!(ask.cmds.last().unwrap().to_string().contains("machines.page.act"));
+        assert!(act(&f, &session, &c, "kicad-path", "", &mut ask).is_none());
+        let r = rows(&f, &json!({"drafts": {"@ob.aon": "boat"}}), &c);
+        assert!(r.iter().any(|x| x["label"] == "Connect your Boat account"), "{r:?}");
+        let r = rows(&f, &json!({"drafts": {"@ob.aon": "machine"}}), &c);
+        assert!(r.iter().any(|x| x["label"] == "Install Backplane there"));
+        assert!(done(&f), "staying here is the default: nothing saved is done");
+        let r = rows(&f, &json!({}), &c); assert_eq!((r[0]["buttons"][0]["label"].as_str(), r[0]["buttons"][0]["on"].as_bool()), (Some("Chosen"), Some(true)), "the option in effect says Chosen");
     }
 }

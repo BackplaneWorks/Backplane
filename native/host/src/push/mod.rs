@@ -49,6 +49,9 @@ impl Source {
     pub fn reminder(w: &World, r: &Routine) -> Option<Source> { (r.kind == "remind" && (r.by.is_empty() || w.triage_owner(&r.by))).then(|| Source { how: "reminder", bot: r.by.clone() }) }
     /// The hub's own word that bringing a 0.14 home across is over (import014): one notice, to the phones that were away. Nothing else may use it.
     pub(crate) fn import_done() -> Source { Source { how: "import", bot: String::new() } }
+    /// The hub's own word that its always-on machine has stayed down (net/alwayson, once until it is back): it cannot be the uberbot's,
+    /// which may be on that machine. Nothing else may use it.
+    pub(crate) fn alwayson_down() -> Source { Source { how: "alwayson", bot: String::new() } }
     /// A thread's alert record that no desk in use is showing (`alert`). Nothing else may use it.
     fn alert() -> Source { Source { how: "alert", bot: String::new() } }
     /// The one event a push starts from.
@@ -60,6 +63,7 @@ impl Source {
 pub fn admit(e: &Value, w: &World) -> bool {
     let (how, bot) = (e["how"].as_str().unwrap_or(""), e["bot"].as_str().unwrap_or(""));
     match how { "notify" => w.triage_owner(bot), "reminder" => bot.is_empty() || w.triage_owner(bot), "import" => bot.is_empty() && e["reason"] == "import",
+        "alwayson" => bot.is_empty() && e["reason"] == "needs_you" && e["thread"].as_str().map_or(true, str::is_empty),
         // a thread's alert record: the hub's own, about a thread
         "alert" => bot.is_empty() && matches!(e["reason"].as_str(), Some("done" | "needs_you" | "reminder"))
             && alert_may(w, e["thread"].as_str().unwrap_or(""), e["kind"].as_str().unwrap_or(match e["reason"].as_str() { Some("needs_you") => "ask", Some("reminder") => "reminder", _ => "done" })),

@@ -16,7 +16,7 @@ pub fn builds() -> Option<PathBuf> { std::env::var_os(if cfg!(test) { "BACKPLANE
 /// reason as `builds`: agent shells inherit BACKPLANE_NO_UPDATE=1 from the dev hub.
 fn off() -> bool { crate::copy::on() || std::env::var(if cfg!(test) { "BACKPLANE_TEST_NO_UPDATE" } else { "BACKPLANE_NO_UPDATE" }).map_or(false, |v| v == "1") }
 /// The feed. A flag or the environment may change it, never a setting: any paired client can write a setting, and this names what a hub runs next. The signature still has to match.
-fn feed() -> String { std::env::var("BACKPLANE_UPDATE_FEED").ok().filter(|v| !v.is_empty()).unwrap_or_else(|| run::FEED.to_string()) }
+pub(crate) fn feed() -> String { std::env::var("BACKPLANE_UPDATE_FEED").ok().filter(|v| !v.is_empty()).unwrap_or_else(|| run::FEED.to_string()) }
 
 /// What every client shows. `state`: package, off, idle, checking, available, downloading, waiting, installing, failed.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
@@ -27,7 +27,7 @@ pub fn busy<'a>(mut turns: impl Iterator<Item = &'a str>) -> bool { turns.any(|t
 /// The hourly check is due: never checked, or an hour on. A clock that went back does not stop it for good.
 pub fn due(now: u64, last: u64) -> bool { last == 0 || now < last || now - last >= EVERY }
 
-fn curl(url: &str, out: &Path, max: u64) -> Result<(), String> {
+pub(crate) fn curl(url: &str, out: &Path, max: u64) -> Result<(), String> {
     let mut c = proc::std_cmd(Kind::Net, "curl");
     c.args(["-fsSL", "--max-time", "1800", "--max-filesize", &max.to_string(), "-A", "backplane-hub", "-o"]).arg(out);
     if url.starts_with("https://") { c.args(["--proto", "=https", "--proto-redir", "=https"]); } // the real feed never falls to plain http on a redirect
@@ -74,7 +74,12 @@ impl Updates {
         let line = { let mut s = self.st.lock().unwrap(); f(&mut s); serde_json::to_string(&*s).unwrap_or_default() };
         hub.set_info("update.status", &line).await;
     }
-    async fn channel(hub: &Hub) -> String { rel::channel(&hub.setting("update.channel").await.unwrap_or_default()).to_string() }
+    /// The channel set in Settings, else `BACKPLANE_UPDATE_CHANNEL` (a Boat made by a beta hub starts on beta: net/alwayson/make.rs), else stable.
+    async fn channel(hub: &Hub) -> String {
+        let set = hub.setting("update.channel").await.unwrap_or_default();
+        let raw = if set.trim().is_empty() { std::env::var("BACKPLANE_UPDATE_CHANNEL").unwrap_or_default() } else { set };
+        rel::channel(&raw).to_string()
+    }
     async fn turns_run(hub: &Arc<Hub>) -> bool { let g = hub.model().await; busy(g.threads.values().map(|t| t.turn.as_str())) }
 
     /// At start: what this install is, and how an update asked for before the restart ended.
