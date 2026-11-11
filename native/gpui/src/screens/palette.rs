@@ -210,15 +210,15 @@ impl Backplane {
         let Some(it) = list.get(i.unwrap_or(self.screens.palette.ix)).cloned() else { return };
         self.screens.palette.open = false; self.want_focus = true;
         match it.what {
-            Do::Thread(id) => { let _ = self.tx.try_send(Command::Action("select".into(), id)); }
+            Do::Thread(id) => self.go("select", id, cx),
             // a message found: its thread at the message, marked, with the find bar holding the words for the next and previous ones there
             Do::Message(id, msg) => { let q = self.screens.palette.q.trim().to_string(); self.find_open_at(&id, &msg, &q, cx); }
-            Do::Action(a, v) => { if super::tools::makes_thread(&a) { self.arm_new(); } let _ = self.tx.try_send(Command::Action(a, v)); }
+            Do::Action(a, v) => { if super::tools::makes_thread(&a) { self.arm_new(); } self.go(&a, v, cx); }
             Do::Settings => self.open_settings(cx),
             Do::Sidebar => self.sidebar_toggle(cx),
             Do::Models => self.models_pending = true,
             Do::Prev | Do::Next => { let n = crate::keys::neighbour(&self.data, &self.selected, it.what == Do::Next); if let Some(id) = n { self.select_id(id, cx); } }
-            Do::Uber => { let id = self.data["bots"].as_array().into_iter().flatten().find(|b| b["uber"] == true).map(|b| crate::string(b, "id")); if let Some(id) = id { let _ = self.tx.try_send(Command::Action("bot".into(), id)); } }
+            Do::Uber => { let id = self.data["bots"].as_array().into_iter().flatten().find(|b| b["uber"] == true).map(|b| crate::string(b, "id")); if let Some(id) = id { self.go("bot", id, cx); } }
             Do::Shortcuts => self.open_settings(cx),
             Do::Hub(a) => self.hub_click(&a, cx),
         }

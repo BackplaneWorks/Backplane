@@ -119,8 +119,8 @@ fn ref_cards(cx: &mut Context<Backplane>, light: bool, mid: &str, refs: &Value) 
         if go {
             card = card.cursor_pointer().hover(|s| s.bg(c("raise"))).on_click(cx.listener(move |this, _, window, cx| {
                 match kind.as_str() {
-                    "bot" => { let _ = this.tx.try_send(Command::Action("bot".into(), id.clone())); }
-                    "room" => { let _ = this.tx.try_send(Command::Action("room".into(), id.clone())); }
+                    "bot" => this.go("bot", id.clone(), cx),
+                    "room" => this.go("room", id.clone(), cx),
                     "project" => { this.open_project(id.rsplit('|').next().unwrap_or(&id).to_string(), cx); }
                     _ => { this.select(id.clone(), window, cx); }
                 }
@@ -338,7 +338,7 @@ impl Backplane {
             ctl.push(CtlEntry { id: format!("bot:{bname}"), label: bname.clone(), ctl: Ctl::Node("bot".into(), bid.clone()) });
             let bid2 = bid.clone();
             rows.push(with_rect(div().id(SharedString::from(format!("bot-{bid}"))), || format!("bot:{bname}")).flex().items_center().gap_3().px_3().py(px(10.)).border_b_1().border_color(c("line")).cursor_pointer().when(*bsel, |d| d.bg(c("raise"))).hover(|s| s.bg(c("raise")))
-                .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("bot".into(), bid2.clone())); cx.notify(); }))
+                .on_click(cx.listener(move |this, _, _, cx| this.go("bot", bid2.clone(), cx)))
                 .child(art::cat(rig.clone(), mood, 56., started, if art::rects_on() { format!("cat:{bname}") } else { String::new() }))
                 .child(div().flex().flex_col().min_w_0().line_height(px(22.)).child(div().text_size(px(16.)).overflow_hidden().whitespace_nowrap().child(bname.clone()))
                     .child(div().flex().gap_2().items_center().child(div().text_size(px(11.)).text_color(note_color).child(trs(note))).children(marks.get(bid).and_then(|m| crate::screens::badge::machine_mark(light, m, false, bid))))).into_any_element());
@@ -447,7 +447,7 @@ impl Backplane {
                     ctl.push(CtlEntry { id: format!("bot:{bname}"), label: bname.clone(), ctl: Ctl::Node("bot".into(), bid.clone()) });
                     let bid2 = bid.clone();
                     rows.push(with_rect(div().id(SharedString::from(format!("bot-{bid}"))), || format!("bot:{bname}")).flex().items_center().gap_2().px_3().py(px(3.)).cursor_pointer().when(*bsel, |d| d.bg(c("raise"))).hover(|s| s.bg(c("raise")))
-                        .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("bot".into(), bid2.clone())); cx.notify(); }))
+                        .on_click(cx.listener(move |this, _, _, cx| this.go("bot", bid2.clone(), cx)))
                         .child(art::cat(rig.clone(), mood, 28., started, if art::rects_on() { format!("cat:{bname}") } else { String::new() }))
                         .child(div().flex().flex_col().min_w_0().line_height(px(18.)).child(div().overflow_hidden().whitespace_nowrap().child(bname.clone()))
                             .child(div().flex().gap_2().items_center().child(div().text_size(px(11.)).text_color(note_color).child(trs(note))).children(marks.get(bid).and_then(|m| crate::screens::badge::machine_mark(light, m, false, bid))))).into_any_element());
@@ -458,7 +458,7 @@ impl Backplane {
                     ctl.push(CtlEntry { id: format!("room:{rname}"), label: rname.clone(), ctl: Ctl::Node("room".into(), rid.clone()) });
                     let rid2 = rid.clone();
                     rows.push(with_rect(div().id(SharedString::from(format!("room-{rid}"))), || format!("room:{rname}")).flex().items_center().gap_2().px_3().py_1().cursor_pointer().when(sel, |d| d.bg(c("raise"))).hover(|s| s.bg(c("raise")))
-                        .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("room".into(), rid2.clone())); cx.notify(); }))
+                        .on_click(cx.listener(move |this, _, _, cx| this.go("room", rid2.clone(), cx)))
                         .child(div().text_color(c("faint")).child("#")).child(div().flex_1().overflow_hidden().whitespace_nowrap().child(rname.clone()))
                         .children(crate::screens::badge::machine_mark(light, &r["mark"], false, &rid))
                         .child(div().text_size(px(11.)).text_color(c("faint")).child(format!("{}", r["members"]))).into_any_element());

@@ -396,7 +396,7 @@ pub fn attach(el: Div, picker: bool, cx: &mut Context<Backplane>) -> Div {
     let el = on!(el, NextThread, |this: &mut Backplane, _, cx: &mut Context<Backplane>| { let n = neighbour(&this.data, &this.selected, true); this.key_go(n, cx) });
     let el = on!(el, UberChat, |this: &mut Backplane, _, cx: &mut Context<Backplane>| {
         let id = this.data["bots"].as_array().into_iter().flatten().find(|b| b["uber"].as_bool().unwrap_or(false)).map(|b| crate::string(b, "id"));
-        if let Some(id) = id { let _ = this.tx.try_send(Command::Action("bot".into(), id)); cx.notify(); }
+        if let Some(id) = id { this.go("bot", id, cx); }
     });
     let el = on!(el, FocusComposer, |this: &mut Backplane, w: &mut Window, cx: &mut Context<Backplane>| {
         // the Browser page (and its address bar, whose context the viewer's overrides) types its own "/"
