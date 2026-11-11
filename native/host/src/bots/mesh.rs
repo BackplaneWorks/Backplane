@@ -92,7 +92,12 @@ impl Bots {
         if !flat { self.mesh_learn().await }
         let mut others = vec![];
         for (link, name, url) in self.machines() { others.push(json!({"mid": self.mid_known(&link).unwrap_or_default(), "name": name, "url": url})) }
-        json!({"mid": self.my_mid(), "name": crate::net::botnet::name().await, "machines": others})
+        json!({"mid": self.my_mid(), "name": crate::net::botnet::name().await, "machines": others, "server": crate::net::alwayson::other::server_now()})
+    }
+    /// What one linked machine says it is (`bots.hello`, flat): its id, name, machines, and `server` (it stays on: a guard under systemd, or its
+    /// "stays on" switch). None when it is away or does not answer.
+    pub async fn hello_of(&self, link: &str) -> Option<Value> {
+        match self.far_send(link, "bots.hello", json!({"flat": true})).await { Some((200, t)) => serde_json::from_str(&t).ok(), _ => None }
     }
     /// The machines the linked ones are linked to that this one is not: `{via, via_name, name, url, mid}` (asked of each linked machine)
     pub async fn mesh_candidates(&self) -> Vec<Value> {

@@ -92,6 +92,8 @@ pub fn start_full(hub: &Arc<Hub>, host: &str, port: u16, tailnet: bool, https: b
             if tokio::runtime::Handle::try_current().is_ok() {
                 super::peerhttp::spawn_loops(hub.clone(), table.clone(), peering.clone());
                 super::farhttp_start(hub.clone(), peering.clone());
+                // the reverse link: polls to the linked machines that cannot reach this one, and the route for those that poll it
+                super::alwayson::tunnel::install(hub, peering.clone());
                 if tailnet {
                     // the tailnet listener: owner trust by whois, the pairing link, and what clients are told ("tailscale")
                     let (h, r, host) = (hub.clone(), routes.clone(), host.to_string()); let r2 = routes.clone();

@@ -103,6 +103,7 @@ pub fn start(hub: Arc<Hub>, agents: Option<Arc<crate::agents::Agents>>) {
     hub.register_rpc(Arc::new(misc::SettingsMisc));
     crate::update::svc::install(&hub);
     crate::update::boathub::install(&hub);
+    crate::net::alwayson::install(&hub);
     crate::net::homemove::install(&hub);
     hub.register_rpc(Arc::new(onboard::OnboardRpc));
     hub.register_rpc(Arc::new(improvements::ImprovementsRpc));

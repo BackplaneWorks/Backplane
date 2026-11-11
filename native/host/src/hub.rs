@@ -411,6 +411,8 @@ impl Hub {
     /// (the caller holds `mirror_gate`)
     pub async fn fold_mirror_held(&self, link: &str, events: &[Value]) { self.mirrors.fold(link, events); let _ = self.presenter.fold(&json!({"t":"changes","items":events,"now":now_ms()})).await; }
     pub fn register_http(&self, h: Arc<dyn HttpHandler>) { let mut v = self.http.write().unwrap(); for r in h.routes() { v.retain(|(n, _)| n != r); v.push((r, h.clone())) } }
+    /// Every registered HTTP route prefix (the public door's test walks them all).
+    pub fn http_routes(&self) -> Vec<&'static str> { self.http.read().unwrap().iter().map(|(p, _)| *p).collect() }
     pub fn rpc_for(&self, method: &str) -> Option<Arc<dyn RpcHandler>> { self.rpc.read().unwrap().iter().find(|(n, _)| *n == method).map(|(_, h)| h.clone()) }
     pub fn http_for(&self, route: &str) -> Option<Arc<dyn HttpHandler>> { self.http.read().unwrap().iter().filter(|(p, _)| route == *p || route.starts_with(&format!("{p}/"))).max_by_key(|(p, _)| p.len()).map(|(_, h)| h.clone()) }
     pub fn arc(&self) -> Arc<Hub> { self.me.get().and_then(|w| w.upgrade()).expect("hub is alive") }
