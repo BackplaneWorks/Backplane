@@ -100,7 +100,7 @@ try:
     json.dump([{'select': 0}, {'wait': 900000}], open(OUT + '/script.json', 'w'))
     spawn([CLIENT, '--url', f'http://127.0.0.1:{port}', '--token-file', OUT + '/home/token', '--script', OUT + '/script.json', '--exit-after', '400'], 'client.log',
           env={**env, 'BACKPLANE_GPUI_RECTS': '1', 'BACKPLANE_GPUI_ASSETS': ASSETS, 'VK_ICD_FILENAMES': '/usr/share/vulkan/icd.d/lvp_icd.json', 'LP_NUM_THREADS': '2', 'LIBGL_ALWAYS_SOFTWARE': '1', 'GALLIUM_DRIVER': 'llvmpipe', 'LD_LIBRARY_PATH': ''})
-    wait('the thread', lambda: 'ui:Draw' in controls() and metrics('usable'), 40); time.sleep(2)
+    wait('the thread', lambda: 'ui:Draw' in controls() and metrics('usable'), 40); time.sleep(2)  # the Draw button is off for now: this waits for it to come back
     g = metrics('gpu'); print('gpu:', g[-1] if g else None, flush=True)
     check(controls()['ui:Draw']['enabled'], 'the composer has a Draw button')
 

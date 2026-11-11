@@ -99,7 +99,7 @@ try:
     spawn([CLIENT, '--url', f'http://127.0.0.1:{port}', '--token-file', OUT + '/home/token', '--script', OUT + '/script.json', '--exit-after', '1500'], 'client.log',
           env={**env, 'PATH': OUT + '/bin:' + env['PATH'], 'DBUS_SESSION_BUS_ADDRESS': 'unix:path=' + OUT + '/no-bus', 'BACKPLANE_GPUI_NOTIFY_CMD': OUT + '/bin/notify', 'BACKPLANE_GPUI_RECTS': '1', 'BACKPLANE_GPUI_ASSETS': ASSETS, 'VK_ICD_FILENAMES': '/usr/share/vulkan/icd.d/lvp_icd.json',
                'LP_NUM_THREADS': '2', 'LIBGL_ALWAYS_SOFTWARE': '1', 'GALLIUM_DRIVER': 'llvmpipe', 'LD_LIBRARY_PATH': ''})
-    wait('the thread', lambda: metrics('usable') and 'ui:Draw' in controls(), 60); time.sleep(2)
+    wait('the thread', lambda: metrics('usable') and 'ui:Attach' in controls(), 60); time.sleep(2)
 
     # 1. Buy it, in the thread's header
     r = wait('Buy it in the header', lambda: rect_of('tool:fab-buy'), 40); time.sleep(1); shot('1-buy-it')

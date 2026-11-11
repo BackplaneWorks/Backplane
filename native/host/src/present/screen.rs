@@ -709,7 +709,7 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
     // the query in force, said back once the box has been used (the client takes it when it is not what it sent: Enter clears it)
     if session["drafts"].as_object().map_or(false,|d|d.contains_key("@f.pq")) { shown["search"]=json!({"query":query,"hint":"Search projects and threads"}); }
     { let f=picker::folders(&session["drafts"],&crate::plat::dirs::home_or_empty(),&st.projects.iter().filter(|(_,p)|!p.removed).map(|(id,p)|(p.root.as_str(),id.as_str())).collect::<Vec<_>>()); if !f.is_null() { shown["folders"]=f; } } // (present only while the picker is open)
-    if !thread.is_empty() { shown["stats"]=super::keys::stats(tst,thread); shown["tokChip"]=json!(super::keys::tok_chip(tst,thread)); } // the Context panel's rows (beside the thread: its object is the helper's, key for key)
+    if !thread.is_empty() { shown["usage"]=super::keys::usage(tst,thread,opts.now); shown["tokChip"]=json!(super::keys::tok_chip(tst,thread)); } // the Context panel (present/tokstats.rs `usage`) and its chip
     if bot_page.is_object() {
         let id=text(&p["target"],"id"); let key=format!("{hub}|{id}");
         let mut b=bot_page.clone();

@@ -3908,6 +3908,13 @@ sidebar.sections.remove.ask	Remove {project} from Backplane? Its folder and file
 gpui.sections.running	{n, number} running	{n, number}件実行中
 gpui.projects.mech	MECHANICAL ({n})	機構部品（{n}）
 gpui.open.folder	Open folder	フォルダを開く
+gpui.picker.none	No folders	フォルダなし
+gpui.picker.key.select	select	選択
+gpui.picker.key.into	go into	中へ
+gpui.picker.key.complete	complete	補完
+gpui.picker.key.open	open project	プロジェクトを開く
+gpui.picker.added	added	追加済み
+gpui.picker.more.typed	{n} more: type to filter	ほか{n}件: 入力して絞り込む
 gpui.assembly	Assembly	アセンブリ
 gpui.mech	Mech	機構
 gpui.readme	README	README
@@ -3915,6 +3922,35 @@ gpui.board	Board	基板
 gpui.schematic	Schematic	回路図
 gpui.view.three.d	3D	3D
 gpui.files	Files	ファイル
+gpui.usage.bot	Bot chat	ボットチャット
+gpui.usage.tokens	tokens	トークン
+gpui.usage.accounts.tip	Accounts in Settings	設定のアカウント
+gpui.usage.feeds	Each turn starts with	各ターンの冒頭に入るもの
+gpui.usage.lanes	Side lanes today	今日の別レーン
+gpui.usage.turn.live	This turn so far	このターン（途中）
+gpui.usage.chat	This chat	このチャット
+gpui.usage.today	Today	今日
+gpui.usage.prefs	Preferences	設定ルール
+gpui.usage.handover	Handover	引き継ぎ
+gpui.usage.none.waiting	none waiting	待機なし
+gpui.usage.session	Session	セッション
+gpui.usage.last.handover	Last handover	前回の引き継ぎ
+gpui.usage.triage	Mailroom triage	メールルームの仕分け
+gpui.usage.office	Back office	バックオフィス
+gpui.usage.office.lower	back office	バックオフィス
+gpui.usage.compact	Compact	圧縮
+gpui.usage.switch	Switch model	モデルを切り替え
+gpui.usage.note	Costs are estimates at the model's API rates.	費用はモデルのAPI料金での見積もりです。
+gpui.usage.lanes.note	Mail, routines and reports run in sessions of their own: they never fill this chat's context.	メール、ルーティン、報告はそれぞれ別のセッションで動くため、このチャットのコンテキストを使いません。
+gpui.usage.lanes.routines	Routines run as turns of this chat.	ルーティンはこのチャットのターンとして動きます。
+gpui.usage.turns.many	50+ more turns at this rate	このペースならあと50ターン以上
+gpui.usage.turns.full	nearly full at this rate	このペースではまもなく満杯
+gpui.usage.turns.one	about 1 more turn at this rate	このペースならあと約1ターン
+gpui.usage.turns.n	about {n} more turns at this rate	このペースならあと約{n}ターン
+gpui.usage.left	{n} left	残り{n}
+gpui.usage.of	{a} of {b}	{b}中{a}
+gpui.usage.context	{n} context	コンテキスト{n}
+gpui.usage.noread	No reading yet: the first turn's result reports it.	まだ値がありません。最初のターンの結果で分かります。
 """#
 
     /// thread.count = {n, plural, one {# thread} other {# threads}}
@@ -6418,4 +6454,19 @@ gpui.files	Files	ファイル
 
     /// gpui.projects.mech = MECHANICAL ({n})
     static func gpui_projects_mech(n: String) -> String { f("gpui.projects.mech", ["n": n]) }
+
+    /// gpui.picker.more.typed = {n} more: type to filter
+    static func gpui_picker_more_typed(n: String) -> String { f("gpui.picker.more.typed", ["n": n]) }
+
+    /// gpui.usage.turns.n = about {n} more turns at this rate
+    static func gpui_usage_turns_n(n: String) -> String { f("gpui.usage.turns.n", ["n": n]) }
+
+    /// gpui.usage.left = {n} left
+    static func gpui_usage_left(n: String) -> String { f("gpui.usage.left", ["n": n]) }
+
+    /// gpui.usage.of = {a} of {b}
+    static func gpui_usage_of(a: String, b: String) -> String { f("gpui.usage.of", ["a": a, "b": b]) }
+
+    /// gpui.usage.context = {n} context
+    static func gpui_usage_context(n: String) -> String { f("gpui.usage.context", ["n": n]) }
 }

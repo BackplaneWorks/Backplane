@@ -221,7 +221,9 @@ impl State {
             "WorktreeSet" => { let id = s(e, "id")?; let (b, w) = (s(e, "branch")?.to_string(), s(e, "worktree")?.to_string()); let t = self.thread_mut(id); t.worktree_mode = true; t.branch = b; t.worktree = w; }
             "WorktreeSkipped" => { let id = s(e, "id")?; let t = self.thread_mut(id); t.worktree_mode = false; t.branch.clear(); t.worktree.clear(); }
             "WorktreeRemoved" => { let id = s(e, "id")?; self.thread_mut(id).worktree.clear(); }
-            "SessionSet" => { let id = s(e, "id")?; let se = s(e, "session")?.to_string(); self.thread_mut(id).session = se; }
+            "SessionSet" => { let id = s(e, "id")?; let se = s(e, "session")?.to_string();
+                if self.threads.get(id).map_or(true, |t| t.session != se) { self.ext.sess.entry(id.into()).or_default().began = e.get("at").and_then(Value::as_u64).unwrap_or(0) }
+                self.thread_mut(id).session = se; }
             "ModesSet" => { let id = s(e, "id")?; let m = s(e, "model")?.to_string(); let rt = s(e, "runtime")?.to_string(); s(e, "interaction")?; self.thread_mut(id).model = m;
                 // the permission mode (Thread.runtime): only a mode other than the default is kept, so the map is bounded by the threads that changed it
                 if matches!(rt.as_str(), "approval-required" | "auto-accept-edits" | "auto") { self.runtime.insert(id.to_string(), rt); } else { self.runtime.remove(id); } }
@@ -277,7 +279,9 @@ impl State {
             "AskOpened" => { let (id, th) = (s(e, "id")?, s(e, "thread")?); self.asks.insert(id.into(), (th.into(), true));
                 self.ask_data.retain(|a| a.0 != id); self.ask_data.push((id.into(), th.into(), s(e, "kind")?.into(), s(e, "tool")?.into(), s(e, "detail")?.into(), s(e, "options")?.into())); }
             "AskClosed" => { let id = s(e, "id")?; self.ask_data.retain(|a| a.0 != id); if self.lean { self.asks.remove(id); } else if let Some(a) = self.asks.get_mut(id) { a.1 = false; } else { self.asks.insert(id.into(), (String::new(), false)); } }
-            "TurnQueued" => { let (th, msg, text) = (s(e, "thread")?, s(e, "msg")?, s(e, "text")?); self.queue.entry(th.into()).or_default().push((msg.into(), text.into())); }
+            "TurnQueued" => { let (th, msg, text) = (s(e, "thread")?, s(e, "msg")?, s(e, "text")?);
+                if msg.starts_with("handoff:") { let x = self.ext.sess.entry(th.into()).or_default(); x.handed = e.get("at").and_then(Value::as_u64).unwrap_or(0); x.why = fam::ext::handoff_why(msg).into(); }
+                self.queue.entry(th.into()).or_default().push((msg.into(), text.into())); }
             "QueueTaken" => { let th = s(e, "thread")?; self.queue.insert(th.into(), vec![]); }
             "QueueEdited" => { let (th, msg, text) = (s(e, "thread")?, s(e, "msg")?, s(e, "text")?); for q in self.queue.entry(th.into()).or_default() { if q.0 == msg { q.1 = text.into(); } } }
             "QueueRemoved" | "QueueTakenOne" => { let (th, msg) = (s(e, "thread")?, s(e, "msg")?); self.queue.entry(th.into()).or_default().retain(|q| q.0 != msg); }

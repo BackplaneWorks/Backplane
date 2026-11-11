@@ -11,8 +11,8 @@ use std::{cell::Cell, rc::Rc};
 /// The width of one character of the chip's words (12 px mono) and what the chip spends besides its words (padding, border, the mark and its gap).
 const CH: f32 = 7.3;
 const FRAME: f32 = 52.;
-/// What the composer's row spends on its other controls (Draw, the context chip, Attach, Dictate, Send and the gaps between).
-pub const OTHERS: f32 = 350.;
+/// What the composer's row spends on its other controls (the context chip, Attach, Dictate, Send and the gaps between).
+pub const OTHERS: f32 = 300.;
 /// The context chip's frame (padding, border, the gauge and its gap) and the part of OTHERS that is not the context chip ("ctx NN%" was counted in it).
 const TOK_FRAME: f32 = 46.;
 const FIXED: f32 = OTHERS - (TOK_FRAME + 7. * CH);

@@ -150,6 +150,8 @@ fn account_of(st: &State, id: &str, provider: &str, snapshot: &Value) -> (String
 /// date); another provider's id is as it is; none is "default".
 pub fn model_short(model: &str) -> String {
     if model.is_empty() { return "default".into() }
+    // a window tag ("[1m]") says the window after the name: "claude-fable-5-2[1m]" is "Fable 5.2 (1M)"
+    if let Some(i) = model.find('[').filter(|i| *i > 0) { let n = model_short(&model[..i]); return if n == model[..i] { model.to_string() } else { format!("{n} ({})", model[i..].trim_matches(['[', ']']).to_uppercase()) } }
     let m = model.strip_prefix("claude-").unwrap_or(model);
     let fam = ["opus", "sonnet", "haiku", "fable"];
     let mut parts = m.split('-');
@@ -337,14 +339,36 @@ pub fn picker_agents_of(text: Option<&str>) -> (Option<Arc<Value>>, Value) {
     (Some(m), a)
 }
 
-/// The Context panel's sections for a thread (present/tokstats.rs), read from its settings.
-pub fn stats(st: &State, id: &str) -> Value {
+/// The Context panel for a thread (present/tokstats.rs `usage`), read from its settings; a bot's chat with what feeds its turns and its lanes.
+pub fn usage(st: &State, id: &str, now: u64) -> Value {
+    use super::tokstats as ts;
     let Some(t) = st.threads.get(id) else { return Value::Null };
     let get = |k: String| st.settings.get(&k).map(String::as_str).unwrap_or("");
     let tok = { let ep = format!("{}{}", get("tok.epoch".into()), get("tok.recount".into())); if ep.is_empty() { "tok.".to_string() } else { format!("tok.{ep}.") } };
-    let mut v = super::tokstats::sections(&t.provider, get(format!("usage.{id}")), get(format!("turn.last.{id}")), get(format!("{tok}t.{id}")), get(format!("turn.speed.{id}")), get(format!("turn.models.{id}")));
-    if let Some(s) = super::tokstats::live_section(&live(st, id)) { v.insert(1, s) }
-    Value::Array(v)
+    let bot = st.bot_of_thread(id).map(|b| {
+        let uber = get("uber.bot".into()) == b;
+        let pre = format!("{b}\u{1f}");
+        let mems = st.ext.mems.iter().filter(|(k, _)| k.starts_with(&pre)).map(|(_, m)| (m.0.clone(), m.1 as u64)).collect();
+        let waiting = st.queue.get(id).into_iter().flatten().filter(|(m, _)| m.starts_with("handoff:")).map(|(m, x)| (crate::state::fam::ext::handoff_why(m).to_string(), x.clone())).collect();
+        let lanes = ["runs", "office"].iter().map(|l| { let v = get(format!("{tok}bl.{b}|{l}")).to_string();
+            let mut it = v.split('|').skip(2); let (pv, acct) = (it.next().unwrap_or(""), it.next().unwrap_or(""));
+            (l.to_string(), v.clone(), account_name(st, pv, acct)) }).collect();
+        ts::Bot { name: st.bots_nav.get(&b).map(|n| n.name.clone()).unwrap_or_default(), uber, routines_filed: uber || get("mail.on".into()) == "on", mems, waiting, lanes }
+    });
+    let lv = live(st, id); let sess = st.ext.sess.get(id).cloned().unwrap_or_default();
+    let x = ts::In { provider: &t.provider, model: &t.model, usage: get(format!("usage.{id}")), last: get(format!("turn.last.{id}")), tv: get(format!("{tok}t.{id}")), speed: get(format!("turn.speed.{id}")),
+        models: get(format!("turn.models.{id}")), live: &lv, ring: get(format!("{tok}tr.{id}")), today: get(format!("{tok}td.{id}")), day: &crate::state::fam::day_of(now),
+        began: sess.began, handed: (sess.handed, &sess.why), now, running: t.turn == crate::state::Turn::Running, bot };
+    ts::usage(&x)
+}
+/// An account's name for the panel: a saved account's label, else the CLI's own login
+fn account_name(st: &State, provider: &str, id: &str) -> String {
+    if provider.is_empty() { return String::new() }
+    if id.is_empty() { let a = serde_json::from_str::<Value>(st.settings.get(&format!("allowance.{provider}")).map(String::as_str).unwrap_or("")).unwrap_or(Value::Null); return a["email"].as_str().and_then(|e| e.split('@').next()).filter(|e| !e.is_empty()).unwrap_or("default login").to_string() }
+    let inv = st.settings.get("accounts.inventory").map(String::as_str).unwrap_or("");
+    let p = serde_json::from_str::<Value>(inv).ok().and_then(|v| v["profiles"].as_array().cloned()).unwrap_or_default().into_iter().find(|p| p["id"].as_str() == Some(id)).unwrap_or(Value::Null);
+    let l = p["label"].as_str().filter(|l| !l.is_empty()).or_else(|| p["identity"]["email"].as_str()).unwrap_or("saved account");
+    l.split('@').next().unwrap_or(l).to_string()
 }
 
 /// The running turn's numbers so far (`turn.live.<t>`, agents/lines.rs), "" unless the thread's turn is running.
@@ -410,7 +434,7 @@ mod tests {
         assert_eq!(allowance_text(&snap, "grok", "", 100), "");
     }
     #[test] fn a_models_short_name_is_its_family_and_version() {
-        for (id, want) in [("", "default"), ("claude-opus-5-5", "Opus 5.5"), ("opus", "Opus"), ("sonnet", "Sonnet"), ("claude-sonnet-4-5-20250929", "Sonnet 4.5"), ("claude-fable-5-1", "Fable 5.1"), ("opus[1m]", "Opus[1m]"), ("gpt-5.1-codex", "gpt-5.1-codex"), ("claude-mystery-1", "claude-mystery-1")] {
+        for (id, want) in [("", "default"), ("claude-opus-5-5", "Opus 5.5"), ("opus", "Opus"), ("sonnet", "Sonnet"), ("claude-sonnet-4-5-20250929", "Sonnet 4.5"), ("claude-fable-5-1", "Fable 5.1"), ("opus[1m]", "Opus (1M)"), ("claude-fable-5-2[1m]", "Fable 5.2 (1M)"), ("gpt-5.1-codex", "gpt-5.1-codex"), ("claude-mystery-1", "claude-mystery-1")] {
             assert_eq!(model_short(id), want, "{id}")
         }
     }
