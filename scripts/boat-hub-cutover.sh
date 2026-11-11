@@ -102,15 +102,14 @@ check)
   say "box:"; on "systemctl is-active bp-hub; curl -s -m5 http://127.0.0.1:3797/healthz; echo; grep -c . $BH/events.jsonl; grep -h -o '\"key\":\"uber.r.[^\"]*lease\"' $BH/events.jsonl | tail -1";;
 
 rollback)
-  B=$(cat "$ST/backup" 2>/dev/null || true)
-  say "the lease back: on the desktop, Bub's Status, Make this the home (bots.uber_home)"; drpc bots.uber_home "{}" || true
-  if [ -f "$ST/retire" ]; then
-    say "restoring the retired bots, rooms and hooks on the desktop from their last lines"
-    python3 -I -c 'import json,sys; [print(json.dumps(x)) for x in json.load(open(sys.argv[1]))]' "$ST/carry/restore.json" > "$ST/carry/restore.jsonl"
-    say "the restore lines are $ST/carry/restore.jsonl: commit them on the desktop with the hub stopped (append), hook secrets from $B/home/secrets/hooks"
-    drpc setting.set '{"key":"ring.home","value":""}' > /dev/null || true
-    for d in "$DH"/ring.moved-*; do [ -d "$d" ] && [ ! -e "$DH/ring" ] && mv "$d" "$DH/ring"; done
-  fi
-  on "sudo -n systemctl stop bp-hub" && say "box hub stopped (its home kept)"; rm -f "$ST"/{link,join,home,carry,retire};;
+  # Bub, the bots and rooms back on the desktop: the box hub stopped first (so nothing runs twice), then the desktop's own last
+  # BotSet/RoomSet/UberSet lines appended to its log while ITS hub is stopped (no RPC commits raw lines), then the person starts the app again.
+  on "sudo -n systemctl disable --now bp-hub" && say "box hub stopped and disabled (its home kept: $BH)"
+  python3 -I -c 'import json,sys; [print(json.dumps(x, separators=(",",":"))) for x in json.load(open(sys.argv[1]))]' "$ST/carry/restore.json" > "$ST/carry/restore.jsonl"
+  if [ -e "$DH/hub.lock" ] && kill -0 "$(awk '{print $1}' "$DH/hub.lock")" 2>/dev/null; then
+    say "the desktop hub is running: stop it (backplane hub stop, at the desktop), then run rollback again; the box is already stopped"; exit 1; fi
+  cp "$DH/events.jsonl" "$DH/events.jsonl.before-rollback"; cat "$ST/carry/restore.jsonl" >> "$DH/events.jsonl"
+  say "restored $(wc -l < "$ST/carry/restore.jsonl") lines (Bub as uberbot, the bots and rooms); start the app again. Backup of everything: $(cat "$ST/backup")"
+  rm -f "$ST"/{carry-done,retire-done};;
 *) "$0" plan; exit 2;;
 esac
