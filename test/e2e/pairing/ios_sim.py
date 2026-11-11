@@ -68,10 +68,10 @@ def main():
     # a link from outside
     time.sleep(61)
     n0 = live(hub); st, inv = hub.invite(); url = "backplane-gpui://pair?url=" + urllib.parse.quote(inv["link"], safe="")
-    # iOS asks first ("Open in “Backplane GPUI”?", SpringBoard's own alert) and a simulator has no taps to answer it: the link is offered to this app,
+    # iOS asks first ("Open in “Backplane”?", SpringBoard's own alert) and a simulator has no taps to answer it: the link is offered to this app,
     # then the app's route is driven by its debug hook (BACKPLANE_OPEN_URL, the same route() as onOpenURL)
     s.fresh(); s.launch(); time.sleep(3); s.open(url); time.sleep(3)
-    check("the system offers the link to this app (its own Open in … question)", "Open in “Backplane GPUI”?" in s.springboard(), "no alert in SpringBoard's log")
+    check("the system offers the link to this app (its own Open in … question)", "Open in “Backplane”?" in s.springboard(), "no alert in SpringBoard's log")
     report("iOS's Open in … answered", "not run", "a simulator has no taps; the person's TestFlight check")
     s.fresh(); s.launch(BACKPLANE_ASK="cancel", BACKPLANE_OPEN_URL=url); time.sleep(7)
     check("an outside link names its hub and asks", f"ask {hub.base}" in s.log(), last(s.log()))

@@ -110,10 +110,12 @@ internal fun AlertsBanner() {
         Row(Modifier.fillMaxWidth().background(dcs.surfaceContainerHigh).padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
             Text(Msg.android_alerts_ask, Modifier.weight(1f), color = dcs.onSurface, fontFamily = BpMono, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.width(8.dp))
-            DMono(Msg.android_alerts_allow, dcs.primary, 12, Modifier.testTag("alerts.allow").clickable {
+            // a filled primary button, as iOS's DButton(primary: true)
+            DBtn(Msg.android_alerts_allow, true, true, Modifier.testTag("alerts.allow")) {
                 DataClient.alertsAsk = false
                 if (android.os.Build.VERSION.SDK_INT >= 33) act.requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1)
-            }.padding(horizontal = 4.dp, vertical = 4.dp), bold = true)
+            }
+            Spacer(Modifier.width(4.dp))
             DMono(Msg.android_alerts_later, dcs.onSurfaceVariant, 12, Modifier.testTag("alerts.later").clickable { DataClient.alertsAsk = false }.padding(horizontal = 4.dp, vertical = 4.dp))
         }
         DLine()
