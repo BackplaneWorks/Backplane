@@ -113,39 +113,137 @@ fn hide_of(hub: &str, t: &MergedThread) -> String { if t.machine.is_empty() { St
 
 // ---- groups -----------------------------------------------------------------------------------------------------------------
 /// A project's automatic group: its git owner (`owner:github.com/acme`), else its folder's parent (`folder:/home/h/Documents/Acme`), with the
-/// raw label (owner, folder name) a name is made from.
+/// raw label (owner, folder name) a name is made from. A folder right in a home (this machine's, or any `/home/<who>`, `/Users/<who>`,
+/// `C:\Users\<who>` a linked machine names) is the one personal group, `folder:~`.
 pub fn auto_group(origin: &str, folder: &str) -> (String, String) {
     let parts: Vec<&str> = origin.split('/').filter(|s| !s.is_empty()).collect();
     if parts.len() >= 3 { return (format!("owner:{}/{}", parts[0], parts[1].to_lowercase()), parts[1].to_string()) }
-    let parent = std::path::Path::new(folder.trim_end_matches('/')).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
+    let parent = std::path::Path::new(folder.trim_end_matches(['/', '\\'])).parent().map(|p| p.to_string_lossy().to_string()).unwrap_or_default();
     let home = crate::plat::dirs::home_or_empty();
-    if parent.is_empty() || parent == "/" || (!home.is_empty() && parent == home) { return ("folder:~".into(), "Personal".into()) }
+    if parent.is_empty() || parent == "/" || (!home.is_empty() && parent == home) || a_home(&parent) { return ("folder:~".into(), "Personal".into()) }
     let base = std::path::Path::new(&parent).file_name().map(|b| b.to_string_lossy().to_string()).unwrap_or_default();
     (format!("folder:{parent}"), base)
 }
-/// A group's id for a project: the person's move, else its automatic one.
-pub fn group_of(st: &State, p: &MergedProject) -> String {
+/// A home folder on any machine: `/home/<who>`, `/Users/<who>`, `C:\Users\<who>`.
+fn a_home(dir: &str) -> bool {
+    let d = dir.replace('\\', "/"); let d = d.trim_end_matches('/');
+    let parts: Vec<&str> = d.split('/').collect();
+    match parts.as_slice() { ["", "home" | "Users", who] => !who.is_empty(), [drive, u, who] => drive.len() == 2 && drive.ends_with(':') && u.eq_ignore_ascii_case("users") && !who.is_empty(), _ => false }
+}
+/// A project's group as kept: the person's move, else its automatic one. Groups of one name are one group (`Groups::id`).
+fn group_raw(st: &State, p: &MergedProject) -> String {
     let moved = get(st, &format!("sidebar.group.of.{}", p.key));
     if !moved.is_empty() { moved.to_string() } else { auto_group(&p.origin, &p.folder).0 }
 }
 /// A group's name: the person's, else Haiku's, else the raw label.
 pub fn group_name(st: &State, gid: &str, raw: &str) -> String {
     let n = get(st, &format!("sidebar.group.name.{gid}")); if !n.is_empty() { return n.to_string() }
+    auto_name(st, gid, raw)
+}
+/// A group's name before the person names it: Haiku's, else the raw label, else its id's last word.
+fn auto_name(st: &State, gid: &str, raw: &str) -> String {
     let n = get(st, &format!("sidebar.group.pick.{gid}")); if !n.is_empty() { return n.to_string() }
     if !raw.is_empty() { return raw.to_string() }
     gid.split_once(':').map_or(gid, |(_, r)| r).rsplit('/').next().unwrap_or(gid).to_string()
+}
+fn fold_name(n: &str) -> String { n.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase() }
+
+/// The groups as the person sees them: each name once. Group ids come from where a project lives (its git owner, its folder's parent, a
+/// linked machine's paths) and Haiku names each on its own, so `owner:github.com/acme`, `owner:github.com/acme-inc` and `folder:/home/h/Acme`
+/// can all be "Acme", and every folder of a person's own work "Personal". Ids of one name (Haiku's or the person's) are one group, whose id is
+/// the smallest of them; a move kept on any of them lands in it, so nothing is rewritten and no assignment is lost.
+pub struct Groups { canon: HashMap<String, String>, names: HashMap<String, String>, members: HashMap<String, Vec<String>> }
+impl Groups {
+    pub fn of(st: &State, rows: &[MergedProject]) -> Groups {
+        // every id in use, with the first raw label a member gives it
+        let mut ids: Vec<(String, String)> = vec![];
+        for p in rows {
+            let gid = group_raw(st, p);
+            let (auto, raw) = auto_group(&p.origin, &p.folder);
+            let raw = if auto == gid { raw } else { String::new() };
+            match ids.iter_mut().find(|x| x.0 == gid) { Some(x) => { if x.1.is_empty() { x.1 = raw } } None => ids.push((gid, raw)) }
+        }
+        ids.sort();
+        let n = ids.len();
+        let mut up: Vec<usize> = (0..n).collect();
+        fn root(up: &mut [usize], i: usize) -> usize { let mut i = i; while up[i] != i { up[i] = up[up[i]]; i = up[i]; } i }
+        fn join(up: &mut [usize], a: usize, b: usize) { let (a, b) = (root(up, a), root(up, b)); if a != b { up[a.max(b)] = a.min(b); } }
+        // one automatic name, one group
+        let autos: Vec<String> = ids.iter().map(|(g, r)| fold_name(&auto_name(st, g, r))).collect();
+        for i in 0..n { for j in 0..i { if autos[i] == autos[j] { join(&mut up, i, j); } } }
+        // a group's name: the person's name on its first id that has one, else the automatic name of its first id
+        let named = |up: &mut Vec<usize>| -> Vec<String> {
+            let mut by: HashMap<usize, String> = HashMap::new();
+            for i in 0..n { let r = root(up, i); let own = get(st, &format!("sidebar.group.name.{}", ids[i].0)); if !own.is_empty() && !by.contains_key(&r) { by.insert(r, own.to_string()); } }
+            (0..n).map(|i| { let r = root(up, i); by.get(&r).cloned().unwrap_or_else(|| auto_name(st, &ids[r].0, &ids[r].1)) }).collect()
+        };
+        // the person named two groups alike (or one like another's automatic name): one group
+        let first = named(&mut up);
+        for i in 0..n { for j in 0..i { if fold_name(&first[i]) == fold_name(&first[j]) { join(&mut up, i, j); } } }
+        let shown = named(&mut up);
+        let (mut canon, mut names, mut members): (HashMap<String, String>, HashMap<String, String>, HashMap<String, Vec<String>>) = Default::default();
+        for i in 0..n {
+            let c = ids[root(&mut up, i)].0.clone();
+            canon.insert(ids[i].0.clone(), c.clone()); names.insert(c.clone(), shown[i].clone()); members.entry(c).or_default().push(ids[i].0.clone());
+        }
+        Groups { canon, names, members }
+    }
+    /// The group a kept id is in (an id no project uses is its own).
+    pub fn id(&self, raw: &str) -> String { self.canon.get(raw).cloned().unwrap_or_else(|| raw.to_string()) }
+    /// A project's group.
+    pub fn of_project(&self, st: &State, p: &MergedProject) -> String { self.id(&group_raw(st, p)) }
+    pub fn name(&self, st: &State, gid: &str) -> String { self.names.get(&self.id(gid)).cloned().unwrap_or_else(|| group_name(st, gid, "")) }
+    /// The ids merged into a group (its own first).
+    pub fn members(&self, gid: &str) -> Vec<String> { self.members.get(&self.id(gid)).cloned().unwrap_or_else(|| vec![gid.to_string()]) }
+    /// Every group once, by name: (id, name).
+    pub fn list(&self) -> Vec<(String, String)> {
+        let mut v: Vec<(String, String)> = self.names.iter().map(|(g, n)| (g.clone(), n.clone())).collect();
+        v.sort_by(|a, b| a.1.to_lowercase().cmp(&b.1.to_lowercase()).then(a.0.cmp(&b.0))); v
+    }
 }
 /// The groups that want a name from Haiku: (gid, raw label, member names and origins), none named by the person or picked already.
 pub fn groups_due(st: &State, rows: &[MergedProject]) -> Vec<(String, String, Vec<String>)> {
     let mut by: Vec<(String, String, Vec<String>)> = vec![];
     for p in rows {
-        let gid = group_of(st, p);
+        let gid = group_raw(st, p);
         if gid.starts_with("custom:") || !get(st, &format!("sidebar.group.name.{gid}")).is_empty() || !get(st, &format!("sidebar.group.pick.{gid}")).is_empty() { continue }
         let raw = auto_group(&p.origin, &p.folder).1;
         let line = if p.origin.is_empty() { format!("{} ({})", p.name, p.folder) } else { format!("{} ({})", p.name, p.origin) };
         match by.iter_mut().find(|g| g.0 == gid) { Some(g) => { if g.2.len() < 12 { g.2.push(line) } } None => by.push((gid, raw, vec![line])) }
     }
     by
+}
+/// A new group by its name, with a project in it: the settings it writes (`custom:<slug>`; a name another group has joins that group).
+pub fn new_group_sets(key: &str, name: &str) -> Option<Vec<(String, String)>> {
+    let name: String = name.trim().chars().take(40).collect(); if key.is_empty() || name.is_empty() { return None }
+    let slug: String = name.to_lowercase().chars().map(|c| if c.is_alphanumeric() { c } else { '-' }).collect();
+    let gid = format!("custom:{slug}");
+    Some(vec![(format!("sidebar.group.of.{key}"), gid.clone()), (format!("sidebar.group.name.{gid}"), name)])
+}
+/// An archived project (`sidebar.archived.<key>`): in Quiet whatever its activity, until it is unarchived; a thread of it that needs the
+/// person is still in Needs you.
+fn archived_at(st: &State, key: &str) -> u64 { num(st, &format!("sidebar.archived.{key}")) }
+
+/// A project row's menu (right click on the desktop, long press on the phones), the same on every client: each item an `id` the clients know,
+/// its words, the hub action and value GPUI sends; Move to group is a submenu of the other groups and New group…; Remove asks first
+/// (`confirm`) and only takes the project off Backplane's list (`project.remove`: its folder and files stay). A project only on linked
+/// machines has no Rename, Badge, Open folder or Remove here.
+pub fn project_menu(st: &State, p: &MergedProject, gid: &str, groups: &Groups) -> Value {
+    let key = &p.key; let pid = pid_of(p);
+    let pinned = pinned_at(st, key) > 0; let archived = archived_at(st, key) > 0;
+    let it = |id: &str, label: &str, action: &str, value: &str| json!({"id":id,"label":label,"action":action,"value":value});
+    let mut v = vec![it("pin", if pinned { "Unpin project" } else { "Pin project" }, "project-pin", key), it("swarm", "New swarm", "swarm-new", &pid)];
+    if let Some(here) = &p.here {
+        v.push(it("rename", "Rename", "proj-rename", here));
+        v.push(it("badge", "Badge", "look", here));
+        if !p.folder.is_empty() { v.push(it("open", "Open folder", "open-folder", &p.folder)); }
+    }
+    let mut sub: Vec<Value> = groups.list().into_iter().filter(|(g, _)| g != gid).map(|(g, n)| it("group", &n, "group-move", &format!("{key}\u{1f}{g}"))).collect();
+    sub.push(it("new-group", "New group\u{2026}", "group-new-start", key));
+    v.push(json!({"id":"move","label":"Move to group","action":"","value":"","sub":sub}));
+    v.push(it("archive", if archived { "Unarchive" } else { "Archive" }, "project-archive", key));
+    if let Some(here) = &p.here { let mut r = it("remove", "Remove project", "proj-remove", here); r["confirm"] = json!(true); v.push(r); }
+    json!(v)
 }
 
 // ---- the sections ---------------------------------------------------------------------------------------------------------
@@ -189,7 +287,7 @@ fn swarms_of(p: &MergedProject, c: &Ctx) -> Vec<(Value, &'static str)> {
 fn text_of<'a>(v: &'a Value, k: &str) -> &'a str { v[k].as_str().unwrap_or("") }
 
 /// One project row: the merged row (`merged::row_json`) with its counts and its visible threads (Needs you's are not repeated under it).
-fn project_row(st: &State, c: &Ctx, p: &MergedProject, ths: &[Th], gid: &str) -> Value {
+fn project_row(st: &State, c: &Ctx, p: &MergedProject, ths: &[Th], gid: &str, groups: &Groups) -> Value {
     let mut r = super::merged::row_json(p);
     // what runs: a turn running (one that also asks the person counts here and in Needs you), work it owns, a turn held for a reset
     let running = ths.iter().filter(|f| matches!(f.word, "running" | "monitoring" | "limit") || (f.word == "needs" && f.t.src.map_or(false, |s| s.threads.get(&f.t.id).map_or(false, |x| x.turn == Turn::Running)))).count();
@@ -207,6 +305,8 @@ fn project_row(st: &State, c: &Ctx, p: &MergedProject, ths: &[Th], gid: &str) ->
     r["needsCount"] = json!(needs + sw.iter().filter(|x| x.1 != "running").count());
     r["swarms"] = json!(sw.into_iter().filter(|x| x.1 == "running").map(|x| x.0).collect::<Vec<_>>());
     r["group"] = json!(gid);
+    r["archived"] = json!(archived_at(st, &p.key) > 0);
+    r["menu"] = project_menu(st, p, gid, groups);
     r["nav"] = json!(p.key);
     // the machines' dots: one per machine that has it, dim when away or off
     // every machine that has it is off or away: the row is drawn dimmed (lane I's `off`), and still opens its page (the registry lists its threads)
@@ -257,18 +357,20 @@ pub fn build(st: &State, rows: &[MergedProject], bub: &Value, c: &Ctx) -> Value 
     // the projects: pinned, active, by group, quiet
     let (mut pinned, mut active, mut quiet): (Vec<(u64, Value)>, Vec<(u64, Value)>, Vec<Value>) = (vec![], vec![], vec![]);
     let mut groups: Vec<(String, String, Vec<Value>)> = vec![];
+    let all = Groups::of(st, rows);
     let held = rows.iter().zip(&facts_of).find(|(_, ths)| ths.iter().any(|f| f.t.id == c.selected)).map(|(p, _)| p.key.clone()).unwrap_or_default();
     for (p, ths) in rows.iter().zip(&facts_of) {
         if !c.query.is_empty() && !hit(&p.name, c.query) && !ths.iter().any(|f| crate::sidebar::word_hit(&f.t.title, c.query)) { continue }
-        let gid = group_of(st, p);
-        let row = project_row(st, c, p, ths, &gid);
+        let gid = all.of_project(st, p);
+        let row = project_row(st, c, p, ths, &gid, &all);
         let pin = pinned_at(st, &p.key);
         let shows = ths.iter().any(|f| f.show && !f.kid) || row["swarms"].as_array().map_or(false, |a| !a.is_empty()) || row["needsCount"].as_u64().unwrap_or(0) > 0;
         if pin > 0 { pinned.push((pin, row)); continue }
+        // archived: in Quiet, unless the person is held by it (its asks are in Needs you all the same)
+        if archived_at(st, &p.key) > 0 && p.key != held { quiet.push(row); continue }
         if shows || p.last_activity + ACTIVE > c.now || p.key == held { active.push((p.last_activity, row)); continue }
         if p.last_activity + QUIET <= c.now { quiet.push(row); continue }
-        let raw = auto_group(&p.origin, &p.folder).1;
-        match groups.iter_mut().find(|g| g.0 == gid) { Some(g) => g.2.push(row), None => groups.push((gid.clone(), group_name(st, &gid, &raw), vec![row])) }
+        match groups.iter_mut().find(|g| g.0 == gid) { Some(g) => g.2.push(row), None => groups.push((gid.clone(), all.name(st, &gid), vec![row])) }
     }
     pinned.sort_by(|a, b| a.0.cmp(&b.0));
     active.sort_by(|a, b| b.0.cmp(&a.0));
@@ -280,12 +382,9 @@ pub fn build(st: &State, rows: &[MergedProject], bub: &Value, c: &Ctx) -> Value 
     json!(out)
 }
 
-/// The groups a project can be moved to (its row's menu): every group shown, then "New group".
+/// Every group once, by name (`Groups`): what an older client's menu lists to move a project to. A row's own `menu` leaves out its group.
 pub fn move_targets(st: &State, rows: &[MergedProject]) -> Value {
-    let mut seen = HashSet::new(); let mut v = vec![];
-    for p in rows { let gid = group_of(st, p); if seen.insert(gid.clone()) { let raw = auto_group(&p.origin, &p.folder).1; v.push(json!({"value":gid,"label":group_name(st,&gid,&raw)})); } }
-    v.sort_by(|a, b| a["label"].as_str().unwrap_or("").to_lowercase().cmp(&b["label"].as_str().unwrap_or("").to_lowercase()));
-    json!(v)
+    json!(Groups::of(st, rows).list().into_iter().map(|(g, n)| json!({"value":g,"label":n})).collect::<Vec<_>>())
 }
 
 // ---- a project's page -----------------------------------------------------------------------------------------------------
@@ -300,10 +399,10 @@ pub fn page(st: &State, rows: &[MergedProject], key: &str, c: &Ctx, done_open: b
         if f.needs { needs.push(r) } else if matches!(f.word, "running" | "monitoring" | "limit") { running.push(r) }
         else if f.settled || (f.word == "done" && !f.show) { done.push(r) } else { recent.push(r) }
     }
-    let gid = group_of(st, p); let raw = auto_group(&p.origin, &p.folder).1;
+    let all = Groups::of(st, rows); let gid = all.of_project(st, p);
     let n = done.len(); recent.truncate(PAGE); done.truncate(PAGE);
     let mut head = super::merged::row_json(p);
-    head["pinned"] = json!(pinned_at(st, &p.key) > 0); head["group"] = json!(gid); head["groupName"] = json!(group_name(st, &gid, &raw));
+    head["pinned"] = json!(pinned_at(st, &p.key) > 0); head["group"] = json!(gid); head["groupName"] = json!(all.name(st, &gid)); head["menu"] = project_menu(st, p, &gid, &all);
     head["newThread"] = json!(p.here.clone().unwrap_or_default());
     // what a client's page head draws (the shape of a sidebar project row): its id here, else on the newest machine
     head["id"] = json!(qid(c.hub, &pid_of(p))); head["title"] = json!(p.name); head["root"] = json!(p.folder); head["nav"] = json!(p.key);
@@ -360,25 +459,33 @@ pub fn act(st: &State, rows: &[MergedProject], action: &str, value: &str, drafts
             let (gid, name) = match value.split_once('\u{1f}') { Some((g, n)) => (g, n.to_string()), None => (value, drafts[format!("@f.group.{value}")].as_str().unwrap_or("").to_string()) };
             let name = name.trim().chars().take(40).collect::<String>();
             if gid.is_empty() { return None }
-            Some(Act { sets: vec![(format!("sidebar.group.name.{gid}"), name)], clear: vec![format!("@f.group.{gid}")], ..none() })
+            // a merged group's name goes on each of its ids, so it stays one group under the new name
+            let sets = Groups::of(st, rows).members(gid).into_iter().map(|g| (format!("sidebar.group.name.{g}"), name.clone())).collect();
+            Some(Act { sets, clear: vec![format!("@f.group.{gid}")], ..none() })
         }
         // GPUI's Rename group: the hub's rename bar (kind "group"; commands/actions.rs `rename-save` writes the name)
         "group-rename-start" => {
             if value.is_empty() { return None }
-            let raw = rows.iter().find(|p| group_of(st, p) == value).map(|p| auto_group(&p.origin, &p.folder).1).unwrap_or_default();
-            let name = group_name(st, value, &raw);
-            Some(Act { drafts: vec![("@ren".into(), value.into()), ("@ren.kind".into(), "group".into()), ("@ren.inline".into(), String::new()), ("@ren.owner".into(), String::new()), ("@f.title".into(), name)], ..none() })
+            let all = Groups::of(st, rows); let gid = all.id(value); let name = all.name(st, &gid);
+            Some(Act { drafts: vec![("@ren".into(), gid), ("@ren.kind".into(), "group".into()), ("@ren.inline".into(), String::new()), ("@ren.owner".into(), String::new()), ("@f.title".into(), name)], ..none() })
         }
         // a project moved: "<key>\u{1f}<gid>", or "<key>\u{1f}+<new group's name>"; "<key>\u{1f}" puts it back in its automatic group
         "group-move" => {
             let (key, to) = value.split_once('\u{1f}')?; if !known(key) { return None }
-            if let Some(name) = to.strip_prefix('+') {
-                let name = name.trim(); if name.is_empty() { return None }
-                let slug: String = name.to_lowercase().chars().map(|c| if c.is_alphanumeric() { c } else { '-' }).collect();
-                let gid = format!("custom:{slug}");
-                return Some(Act { sets: vec![(format!("sidebar.group.of.{key}"), gid.clone()), (format!("sidebar.group.name.{gid}"), name.to_string())], ..none() })
-            }
-            Some(Act { sets: vec![(format!("sidebar.group.of.{key}"), to.to_string())], ..none() })
+            if let Some(name) = to.strip_prefix('+') { return Some(Act { sets: new_group_sets(key, name)?, ..none() }) }
+            let to = if to.is_empty() { String::new() } else { Groups::of(st, rows).id(to) };
+            Some(Act { sets: vec![(format!("sidebar.group.of.{key}"), to)], ..none() })
+        }
+        // New group… (GPUI): the rename bar asks its name (kind "group-new"; commands/actions.rs `rename-save` moves the project into it)
+        "group-new-start" => {
+            if !known(value) { return None }
+            Some(Act { drafts: vec![("@ren".into(), value.into()), ("@ren.kind".into(), "group-new".into()), ("@ren.inline".into(), String::new()), ("@ren.owner".into(), String::new()), ("@f.title".into(), String::new())], ..none() })
+        }
+        // Archive: the project goes to Quiet (and is unpinned) until Unarchive; nothing of it is deleted
+        "project-archive" => {
+            if !known(value) { return None }
+            if archived_at(st, value) > 0 { return Some(Act { sets: vec![(format!("sidebar.archived.{value}"), String::new())], ..none() }) }
+            Some(Act { sets: vec![(format!("sidebar.archived.{value}"), now.to_string()), (format!("sidebar.pin.{value}"), String::new())], ..none() })
         }
         _ => None,
     }

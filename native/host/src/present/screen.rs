@@ -371,7 +371,7 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
         // the machine switcher over the sidebar: "" every machine, "@here" this one, else a linked machine by name (not `machine-*`: those are the Machines page's)
         "side-machine" => { session["drafts"]["@machine"]=json!(value); },
         // the sidebar's sections (present/sections.rs): a fold, a project's page, a project pin, a group's name, a project moved to a group
-        "side-section" | "project-page" | "project-pin" | "thread-hide" | "group-rename" | "group-rename-start" | "group-move" => {
+        "side-section" | "project-page" | "project-pin" | "thread-hide" | "group-rename" | "group-rename-start" | "group-move" | "group-new-start" | "project-archive" => {
             let rows=merged_here(st,far,un);
             let Some(a)=super::sections::act(st,&rows,action,value,&session["drafts"],p["now"].as_u64().unwrap_or(0)/1000) else { return refused("action.sidebar-section") };
             if let Some(k)=a.open_toggle { if !session["open"].is_object() { session["open"]=json!({}); } let was=flag(&session,&k); session["open"][k]=json!(!was); }
@@ -662,8 +662,9 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
     // the machine switcher filters the merged rows: the rows that machine has a copy of, with that machine's threads only
     if !mpick.is_empty() { projects=pick_filter(projects,&mpick); }
     let ren=text(&session["drafts"],"@ren");
-    let ren_kind=match text(&session["drafts"],"@ren.kind") { "project"=>"project", "group"=>"group", _=>"thread" };
-    let renaming=if ren.is_empty() || text(&session["drafts"],"@ren.inline")=="1" { Value::Null }else{json!({"id":format!("{hub}|{ren}"),"kind":ren_kind,"title":match ren_kind { "project"=>"Rename project", "group"=>"Rename group", _=>"Rename thread" },"text":text(&session["drafts"],"@f.title"),"yes":"Rename","no":"Cancel"})};
+    let ren_kind=match text(&session["drafts"],"@ren.kind") { "project"=>"project", "group"=>"group", "group-new"=>"group-new", _=>"thread" };
+    // New group… (a project's menu) asks the new group's name in the same bar
+    let renaming=if ren.is_empty() || text(&session["drafts"],"@ren.inline")=="1" { Value::Null }else{json!({"id":format!("{hub}|{ren}"),"kind":ren_kind,"title":match ren_kind { "project"=>"Rename project", "group"=>"Rename group", "group-new"=>"New group", _=>"Rename thread" },"text":text(&session["drafts"],"@f.title"),"yes":if ren_kind=="group-new" { "Create" } else { "Rename" },"no":"Cancel"})};
     let del=text(&session["drafts"],"@del");
     let deleting=if del.is_empty() { Value::Null }else{json!({"id":if del.contains('|'){del.to_string()}else{format!("{hub}|{del}")},"title":"Delete thread","body":st.threads.get(del.strip_prefix(&format!("{hub}|" )).unwrap_or(del)).map(|t|t.title.as_str()).unwrap_or(""),"yes":"Delete","no":"Cancel"})};
     let pages=json!([{"version":1,"hub":hub,"projects":projects_page,"active":null,"legacy":null}]);

@@ -50,6 +50,8 @@ pub fn rename_in_sidebar(data: &Value, sidebar_open: bool) -> bool {
     let r = &data["renaming"];
     if !r.is_object() || !sidebar_open { return false }
     let id = string(r, "id"); let raw = id.rsplit('|').next().unwrap_or("").to_string();
+    // the hub's sections draw a thread's title box in its row, never a project's or a group's (those take the bar)
+    if crate::screens::sections::on(data) { return string(r, "kind") == "thread" && walk(&data["sections"], &raw) }
     fn walk(v: &Value, raw: &str) -> bool {
         match v {
             Value::Object(m) => m.get("id").and_then(Value::as_str).map_or(false, |id| id.rsplit('|').next() == Some(raw) && m.contains_key("title")) || m.values().any(|x| walk(x, raw)),

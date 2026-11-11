@@ -31,15 +31,24 @@ import org.json.JSONObject
 
 /** A row of a section: a thread, or a project (its `key` set) with its visible threads under it. */
 data class DSecRow(val id: String, val title: String, val word: String, val say: String, val want: String, val ago: String, val mark: DMark?, val project: String,
-    val off: Boolean, val nav: String, val pinned: Boolean, val key: String, val running: Int, val threads: List<DSecRow>, val css: String, val dots: List<Pair<Boolean, Boolean>>, val kind: String = "", val hide: String = "", val icon: String = "") {
+    val off: Boolean, val nav: String, val pinned: Boolean, val key: String, val running: Int, val threads: List<DSecRow>, val css: String, val dots: List<Pair<Boolean, Boolean>>, val kind: String = "", val hide: String = "", val icon: String = "", val menu: List<DMenuItem> = emptyList()) {
     companion object {
         fun of(o: JSONObject): DSecRow = DSecRow(o.optString("id"), o.optString("title"), o.optString("word"), o.optString("say"), o.optString("want"), o.optString("ago"),
             parseMark(o.optJSONObject("mark")), o.optString("project"), o.optBoolean("off"), o.optString("nav"), o.optBoolean("pinned"), o.optString("key"), o.optInt("running"),
-            list(o.optJSONArray("threads")), o.optString("css"), (0 until (o.optJSONArray("dots")?.length() ?: 0)).map { i -> o.getJSONArray("dots").getJSONObject(i).let { it.optBoolean("here") to it.optBoolean("dim") } }, o.optString("kind"), o.optString("hide"), o.optString("icon"))
+            list(o.optJSONArray("threads")), o.optString("css"), (0 until (o.optJSONArray("dots")?.length() ?: 0)).map { i -> o.getJSONArray("dots").getJSONObject(i).let { it.optBoolean("here") to it.optBoolean("dim") } }, o.optString("kind"), o.optString("hide"), o.optString("icon"), DMenuItem.list(o.optJSONArray("menu")))
         fun list(a: JSONArray?): List<DSecRow> = (0 until (a?.length() ?: 0)).map { of(a!!.getJSONObject(it)) }
     }
     /** a live swarm's row (`kind` swarm): it opens the swarm's page, its room */
     val swarmRoom: String? get() = if (kind == "swarm") nav.removePrefix("@room:").takeIf { it.isNotEmpty() && nav.startsWith("@room:") } else null
+}
+/** An item of a project row's menu, the hub's (present/sections.rs `project_menu`): `id` says what it does here, `sub` is Move to group's list. */
+data class DMenuItem(val id: String, val label: String, val action: String, val value: String, val confirm: Boolean, val sub: List<DMenuItem>) {
+    companion object {
+        fun list(a: JSONArray?): List<DMenuItem> = (0 until (a?.length() ?: 0)).map { i -> a!!.getJSONObject(i).let { o ->
+            DMenuItem(o.optString("id"), o.optString("label"), o.optString("action"), o.optString("value"), o.optBoolean("confirm"), list(o.optJSONArray("sub"))) } }
+        /** What a phone's long press lists: the hub's menu without Open folder (the folder is on the hub's machine) and New swarm when swarms are off. */
+        fun phone(menu: List<DMenuItem>, swarms: Boolean): List<DMenuItem> = menu.filter { it.id != "open" && (swarms || it.id != "swarm") && it.label.isNotEmpty() }
+    }
 }
 data class DSection(val id: String, val kind: String, val title: String, val count: Int, val fold: Boolean, val open: Boolean, val toggle: String, val group: String, val rename: Boolean, val rows: List<DSecRow>) {
     companion object {
@@ -113,17 +122,46 @@ fun LazyListScope.sectionItems(open: (String) -> Unit, page: (DSecRow) -> Unit, 
 
 private const val PIN = "project-pin"
 private const val MOVE = "group-move"
-/** A project row's long press: pin or unpin it, its badge (icon, colour, Pick again), move it to a group. */
+private const val ARCHIVE = "project-archive"
+private const val NEW_GROUP = "new-group"
+/** A project row's long press: the hub's menu (Pin, New swarm, Rename, Badge, Move to group, Archive, Remove project); Move to group lists the
+ *  other groups and New group…; Remove asks first and only takes the project off Backplane's list. An older hub sends no menu: pin, badge, moves. */
 @Composable
 fun SectionProjectMenu(p: DSecRow, newSwarm: (String) -> Unit = {}, close: () -> Unit) {
-    var badge by remember(p.id) { mutableStateOf(false) }
+    var shown by remember(p.key) { mutableStateOf(true) }
+    var step by remember(p.key) { mutableStateOf("") }   // "" | move | rename | new-group | remove | badge
+    var moveShown by remember(p.key) { mutableStateOf(true) }
     val proj = DataClient.projects.firstOrNull { it.id == p.id }
-    if (badge && proj != null) { BadgeSheet(proj) { badge = false; close() }; return }
-    val look: () -> Unit = { badge = true }
-    val pin: () -> Unit = { DataClient.sidebarAct(PIN, p.key) }
-    val swarm: () -> Unit = { newSwarm(p.id) }
-    val moves = DataClient.groupsTo.map { (gid, label) -> val go: () -> Unit = { DataClient.sidebarAct(MOVE, p.key + "\u001f" + gid) }; Msg.gpui_sections_move_to(label) to go }
-    ActionSheet(p.title, listOf((if (p.pinned) Msg.sidebar_sections_unpin else Msg.sidebar_sections_pin) to pin) + (if (proj != null) listOf(Msg.gpui_badge to look) else emptyList()) + (if (Swarms.on()) listOf(Msg.android_swarm_new to swarm) else emptyList()) + moves, close)
+    val items = DMenuItem.phone(p.menu, Swarms.on())
+    // the sheet shut and nothing after it (a press that opens a second box sets `step` in the same click)
+    if (!shown && step.isEmpty()) LaunchedEffect(Unit) { close() }
+    val done: () -> Unit = { step = ""; shown = false }
+    if (items.isEmpty()) {
+        if (step == "badge" && proj != null) { BadgeSheet(proj) { done(); close() }; return }
+        val moves = DataClient.groupsTo.map { (gid, label) -> val go: () -> Unit = { DataClient.sidebarAct(MOVE, p.key + "\u001f" + gid) }; Msg.gpui_sections_move_to(label) to go }
+        if (shown) ActionSheet(p.title, listOf((if (p.pinned) Msg.sidebar_sections_unpin else Msg.sidebar_sections_pin) to { DataClient.sidebarAct(PIN, p.key) }) + (if (proj != null) listOf(Msg.gpui_badge to { step = "badge" }) else emptyList()) + (if (Swarms.on()) listOf(Msg.android_swarm_new to { newSwarm(p.id) }) else emptyList()) + moves) { shown = false }
+        return
+    }
+    fun value(id: String) = items.firstOrNull { it.id == id }?.value ?: ""
+    if (shown) ActionSheet(p.title, items.map { it -> it.label to {
+        when (it.id) {
+            "pin" -> DataClient.sidebarAct(PIN, it.value)
+            "swarm" -> newSwarm(p.id)
+            "archive" -> DataClient.sidebarAct(ARCHIVE, it.value)
+            "rename", "badge", "move", "remove" -> step = it.id
+            else -> {}
+        }
+    } }) { shown = false }
+    when (step) {
+        "badge" -> if (proj != null) BadgeSheet(proj) { done() } else done()
+        "rename" -> TextPrompt(Msg.android_project_rename, p.title, Msg.menu_rename, done) { DataClient.projectAct(value("rename"), "rename", it) }
+        NEW_GROUP -> TextPrompt(Msg.sidebar_sections_new_group_title, "", Msg.common_create, done) { DataClient.sidebarAct(MOVE, p.key + "\u001f+" + it) }
+        "remove" -> ActionSheet(Msg.sidebar_sections_remove_ask(p.title), listOf("Remove project" to { DataClient.projectAct(value("remove"), "remove") }, "Keep it" to {}), done)
+        // the other groups, then New group…; a pick shuts the sheet (`moveShown`), New group… asks its name next
+        "move" -> { val sub = items.firstOrNull { it.id == "move" }?.sub.orEmpty()
+            if (moveShown) ActionSheet(Msg.sidebar_sections_move, sub.map { g -> g.label to { if (g.id == NEW_GROUP) step = NEW_GROUP else DataClient.sidebarAct(MOVE, g.value) } }) { moveShown = false }
+            else LaunchedEffect(Unit) { done() } }
+    }
 }
 @Composable
 fun SectionRename(s: DSection, close: () -> Unit) { TextPrompt(Msg.sidebar_sections_rename, s.title, Msg.menu_rename, close) { DataClient.sidebarAct("group-rename", s.group + "\u001f" + it) } }
