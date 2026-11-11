@@ -72,6 +72,8 @@ pub fn waiting(info: &Value, have_frame: bool) -> Option<String> {
 }
 
 pub struct KicadPane {
+    /// the .kicad_pro the hub resolved this pane's project to (its attach reply), "" until then
+    pub bound: String,
     pub project: String, pub root: String, pub project_id: String, pub open: String, hub: tokio::sync::mpsc::Sender<Command>,
     container: Option<u32>, toplevel: u32, attached: bool, pub info: Value, frames: Vec<nc::Frame>,
     marker: Arc<Mutex<Option<HitboxId>>>, last_root: (i32, i32), placed: Option<(Option<nc::R>, Option<u32>, Vec<nc::R>)>,
@@ -89,7 +91,7 @@ impl KicadPane {
             cx.background_executor().timer(std::time::Duration::from_millis(40)).await;
             if weak.update(cx, |this, cx| this.tick(cx)).is_err() { break }
         }).detach();
-        KicadPane { project, root, project_id, open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), last_root: (i32::MIN, 0), placed: None,
+        KicadPane { bound: String::new(), project, root, project_id, open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), last_root: (i32::MIN, 0), placed: None,
             focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), poked: None, override_kind: None, pending_show: None }
     }
     fn rpc(&self, name: &str, params: Value) { let _ = self.hub.try_send(Command::Rpc(name.to_string(), Secret(params), "kicad")); }
@@ -118,6 +120,9 @@ impl KicadPane {
     }
     pub fn matches(&self, info: &Value) -> bool {
         let p = info["project"].as_str().unwrap_or("");
+        // the hub's own name for this pane's project, from its attach reply: the .kicad_pro may sit below the folder the viewer named
+        // (a repository whose board is in boards/<name>/), so the viewer's path alone did not match (Nov 11, SOT23_Card)
+        if !self.bound.is_empty() && p == self.bound { return true }
         let root = info["root"].as_str().unwrap_or("").trim_end_matches('/');
         (!p.is_empty() && path_stem(p) == path_stem(&self.project))
             || (!root.is_empty() && (root == self.project.trim_end_matches('/') || (!self.root.is_empty() && root == self.root)))
@@ -128,7 +133,9 @@ impl KicadPane {
         self.open = open.to_string();
         self.override_kind = None;
         let kind = frame_for(open);
-        if self.attached {
+        // KiCad was closed (or failed): the rail's page starts it again, instead of a "stopped" refusal from show
+        if self.attached && matches!(self.info["state"].as_str(), Some("stopped" | "failed")) { self.reattach(); }
+        else if self.attached {
             self.pending_show = Some(kind.to_string());
             self.rpc("editor.kicad.show", json!({"project": self.project, "frame": kind}));
         }
@@ -402,11 +409,16 @@ impl crate::Backplane {
             let mut v = reply;
             if let Some(obj) = v.as_object_mut() { obj.remove("t"); obj.remove("id"); obj.remove("ok"); }
             if let Some(p) = self.screens.kicad.clone() {
+                // the reply to this pane's own attach: it binds the pane to the project the hub resolved
+                if let Some(pro) = v["project"].as_str().filter(|s| !s.is_empty()) { let pro = pro.to_string(); p.update(cx, |p, _| p.bound = pro); }
                 let apply = {
                     let pr = p.read(cx);
                     pr.matches(&v) && (pr.info.is_null() || v["state"] == "ready")
                 };
                 if apply { p.update(cx, |p, cx| p.set_info(v, cx)); }
+                // info that came before the reply (kept by digest) applies now
+                let late: Vec<Value> = self.screens.kicad_infos.values().cloned().collect();
+                for i in late { if p.read(cx).matches(&i) { p.update(cx, |p, cx| p.set_info(i, cx)); } }
             }
         }
     }

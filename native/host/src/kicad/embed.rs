@@ -118,9 +118,9 @@ impl Session {
         self.frames.clear(); self
     }
     pub fn exited(self, code: i32, tail: &str) -> Self {
-        if self.closing || code == 0 {
-            return self.stopped("")
-        }
+        if self.closing { return self.stopped("") }
+        // KiCad quit by itself (its window closed, its own File > Exit): said, so the pane and a later request never read "stopped ()"
+        if code == 0 { return self.stopped("KiCad was closed") }
         let detail = tail.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").trim();
         let why = if detail.is_empty() { format!("KiCad exited (code {code})") } else { format!("KiCad exited (code {code}): {detail}") };
         self.failed(&why)
