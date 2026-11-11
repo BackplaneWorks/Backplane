@@ -99,18 +99,26 @@ the next turn (`QueueTaken`) runs at the lowest hop waiting. So when a
 post at hop h asks five bots to answer once, each answer goes out at h+1
 even though every answer wakes the others (law `bot_hop_fanout`), while a
 back-and-forth between bots goes one hop deeper per message
-(`bot_hop_queue_takes`) and stops at `Hop.max()`, 6 (`bot_hop_bounded`,
-`bot_loop_bounded`, `bot_loop_stops`). A person, a routine or a webhook
-starts a new exchange at hop 0.
+(`bot_hop_queue_takes`). A person, a routine or a webhook starts a new exchange at hop 0.
 
-A message past the bound is held, not dropped: it is posted where it was
-going with a `[held: ...]` line, for the person to read, and heard by no
-bot (`Bots.hop.gate`, law `bot_held_wakes_none`). In a shared room it goes
-to the members' machines too, which log it and wake no one there. The
-sending bot gets an answer saying so (`held: true` and a note telling it
-not to send it again or anywhere else), not an error. A hop from a linked
-machine is capped at the held hop (`Bots.hop.cap`). `test/depth_test`
-runs #staff: five bots here and one on a linked machine answering one post.
+The hop no longer bounds a conversation by itself. The room guards do (docs/SWARM.md, `bots/gate.rs`),
+for bots' rooms, the person's rooms and swarms alike:
+
+- **Rate.** A member posts at most 6 times in 5 minutes. Past that, the post is refused.
+- **Chatter.** 12 member posts in a row with no `claim`, no `done` and no person post pause the room.
+- **Circular.** Posts that repeat earlier ones, with no progress, pause the room sooner.
+- **Backstop.** Only a hop past 30 holds a post on its own.
+
+A held message is not dropped. It is posted where it was going, with `held` naming the guard, for the
+person to read, and no bot hears it (law `bot_held_wakes_none`). The post that trips a guard is held,
+and the hub adds a post saying why the room paused. An exchange room closes there instead of at the
+old 6-hop cap. The person's next post starts the room again.
+
+In a shared room, a held post goes to the members' machines too, and they log it and wake no one
+there. The sending bot gets an answer saying so (`held: true`, and a note telling it not to send the
+message again or anywhere else), not an error. A post from a linked machine is held here when the
+room is paused or its hop is past the backstop. `test/depth_test` runs #staff: five bots here and one
+on a linked machine answering one post.
 
 ## Cats
 
