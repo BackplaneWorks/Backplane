@@ -188,9 +188,10 @@ pub fn thread_ref(id: &str, here: &str, local: &dyn Fn(&str) -> bool, far: &[(St
 /// Ask one linked machine for its projects' origins (machine_list), bounded. Away only when it does not answer at all (no reply on the link): a
 /// machine that answers and refuses (an older build, not shared) is up, and its origins come from the rows it sends (net/registry.rs).
 pub async fn ask_origins(hub: &crate::hub::Hub, link: &str) {
+    let t0 = std::time::Instant::now();
     let r = match tokio::time::timeout(std::time::Duration::from_secs(15), hub.far_call(link, "machine_list", "machine_list", &serde_json::json!({}))).await { Ok(r) => r, Err(_) => Err("that machine is away".to_string()) };
     match &r {
-        Err(e) if e == "that machine is away" => hub.mirrors().set_away(link, true),
+        Err(e) if e == "that machine is away" => { if !hub.mirrors().away.read().unwrap().contains(link) { eprintln!("machines: {link}: machine_list got no answer after {} ms", t0.elapsed().as_millis()); } hub.mirrors().set_away(link, true) }
         // (it answers but will not say: its origins are taken as none, unless its registry rows say them; never waited for)
         Err(e) => { hub.mirrors().set_away(link, false); if hub.mirrors().known.write().unwrap().insert(link.to_string()) { hub.mirrors().bump(); eprintln!("machines: {link} answers but not machine_list: {e}"); } }
         Ok(_) => hub.mirrors().set_away(link, false),

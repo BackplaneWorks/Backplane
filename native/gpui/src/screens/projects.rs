@@ -94,6 +94,16 @@ pub fn submit_cmd(data: &Value, typed: &str) -> Option<Command> {
     if f.text != typed { return None }
     f.items.into_iter().find(|i| i.kind == "add" && !i.action.is_empty()).map(|i| Command::Action(i.action, i.value))
 }
+/// Send on a project's page: the new thread goes where its "runs on" line says (the picker's choice, the hub's first `newOn` entry: this
+/// machine's project id or a linked machine's `<link>~<id>`), and the typed text waits to be its first message once it is on show.
+pub fn page_send(data: &Value, pid: &str, text: &str) -> Option<(Command, String)> {
+    if text.trim().is_empty() { return None }
+    let p = find(data, pid)?;
+    let to = p["newOn"].as_array().and_then(|a| a.iter().find(|o| o["on"] == true && matches!(o["kind"].as_str(), Some("machine") | Some("wait") | None))).and_then(|o| o["value"].as_str()).filter(|v| !v.is_empty()).unwrap_or(pid);
+    Some((Command::Action("new-thread".into(), to.to_string()), text.to_string()))
+}
+/// The hub refused the new thread a page's Send asked for: the text goes back in the box (never lost), the window says why.
+pub fn take_back(first_send: &mut Option<(String, String, std::time::Instant)>) -> Option<String> { first_send.take().map(|(_, text, _)| text) }
 pub fn close_cmd() -> Command { Command::Action("proj-close".into(), String::new()) }
 /// Esc leaves the folder picker while it is open.
 pub fn close_on_escape(data: &Value) -> Option<Command> { data["folders"].is_object().then(close_cmd) }
@@ -311,6 +321,17 @@ mod tests {
 
 #[cfg(test)]
 mod home_tests {
+    /// A page's Send with a linked machine picked: the command names that machine's project, the text waits; refused, the text comes back.
+    #[test] fn a_page_send_goes_to_the_machine_picked_and_a_refusal_gives_the_text_back() {
+        let d: serde_json::Value = serde_json::from_str(r#"{"projects":[{"id":"h|pA1","runsOn":"runs on boat-hub","newOn":[{"value":"L~pB1","label":"New thread on boat-hub","kind":"machine","on":true},{"value":"pA1","label":"New thread on desktop","kind":"machine"},{"value":"github.com/o/demo","label":"A Boat (fresh clone)","kind":"boat","disabled":true}]}]}"#).unwrap();
+        match page_send(&d, "pA1", "a thread sent to boat-hub") { Some((Command::Action(a, v), t)) => { assert_eq!((a.as_str(), v.as_str(), t.as_str()), ("new-thread", "L~pB1", "a thread sent to boat-hub")) } other => panic!("{other:?}") }
+        let mut d2 = d.clone(); d2["projects"][0]["newOn"][0]["on"] = serde_json::json!(false);
+        match page_send(&d2, "pA1", "x") { Some((Command::Action(_, v), _)) => assert_eq!(v, "pA1", "no choice: this project"), other => panic!("{other:?}") }
+        assert!(page_send(&d, "pA1", "  ").is_none(), "nothing typed: nothing sent");
+        let mut fs = Some(("t0".to_string(), "a thread sent to boat-hub".to_string(), std::time::Instant::now()));
+        assert_eq!(take_back(&mut fs).as_deref(), Some("a thread sent to boat-hub")); assert!(fs.is_none());
+    }
+
     use super::*; use serde_json::json; use core::prelude::v1::test;
     #[test] fn edit_puts_the_goal_and_notes_in_the_composer_as_intent() {
         assert_eq!(intent_draft("# Goal\nlamp"), "/intent\n# Goal\nlamp"); assert!(intent_draft("  ").starts_with("/intent\n# Goal\n"));
