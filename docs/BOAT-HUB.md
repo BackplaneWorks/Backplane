@@ -4,6 +4,45 @@ A small hub that keeps running when the desktop sleeps or is off: the uberbot (B
 Google, webhooks (the ring) and phone access. The desktop stays the machine for hardware and code: KiCad, local files, builds.
 Script: `scripts/boat-hub.sh` (run on the desktop; its header lists the commands).
 
+## How it works now (Nov 11)
+
+The always-on push (docs/ALWAYS-ON.md, D1-D10) made the move a single press with the person kept in the loop. In order:
+
+- **Make it** (lane F, `net/alwayson/`): setup's step 4 or Settings, Machines makes the person's own Boat on their Boat account. It creates the
+  box with no auto-stop, installs the build, the guard under systemd and the health timer, and brings the network up (the tailnet, else Boat's
+  public HTTPS address). It links the Boat to this hub with no code typed. The Machines rows show its status, build, cost this month and plan hours
+  left, with Resize, Restart and Delete. `bp-hub` (this file) is the person's, adopted as `alwayson.boat`.
+- **Sign it in** (lane G, `settings/accounts_there.rs`, docs/multiple-provider-accounts.md "Sign in there"): Settings, Machines, Sign in there.
+  The provider's own login runs on the Boat, and the link and code are shown on the client in use. Claude goes first, with the sync token made
+  here. Account files never travel.
+- **Check it** (`home.check {to}`, the far request `home.ready`; `scripts/home-move-check.sh boat-hub`): the target's build and commit, the link,
+  free disk (three times the log plus 512 MB) and memory (600 MB), and a working sign-in for each provider the moving threads use. A provider's
+  sign-in is checked with `claude auth status` or `codex login status`, or by a connected or sync account; no turn is spent. `home.move` and the
+  move back run the same check first and refuse with its reasons, and Bub's row says once that the move did not happen
+  ("Did not move to boat-hub: Claude Code is not signed in on boat-hub: sign in there first").
+- **Move it** (`home.move`, net/homemove.rs): as below ("The cutover as run", "Live"), now with Bub in sight the whole time:
+  - Bub's row says "Moving to boat-hub" (the setting `home.moving`; data/1 `bots.list` gives it as `note`).
+  - What reaches a moving thread is held and delivered once at the new home, or here if the move failed. That covers the person's message
+    (`turn.start`) and everything else through agents `deliver_k`: another bot, a routine, a room, a webhook (the ring), mail, a launched
+    thread's report. Held items go through the far outbox as `home.deliver`, keyed by message id. The hold is in memory, so a hub restarted
+    mid-move loses what it held.
+  - After the move, what reaches the old copy of a moved thread goes on to the new home.
+  - A window that had Bub open is told `nextTarget` `<link>~<bub>` and opens it there; after a move back it gets the plain id again. The phones
+    hear `k:bots` and follow the open chat (iOS `DBot.followed`, Android `followed`).
+  - A failed move is undone and said once, in that row.
+- **From the home, Bub works everywhere**:
+  - It can use machine_list, thread_list and thread_launch with `{machine}` (or a project key, remote or name, with the machine picked by the
+    hub), and thread_send, read, wait, update, interrupt and settle on `<link>~<id>`.
+  - A launch, a send or a report for a machine that is away is held in the far outbox and goes when that machine is back.
+  - `thread_update {provider, model, account}` moves a thread to another provider or account between turns, here or over the link, with its
+    conversation handed over. The fallback chain then leaves that choice alone.
+  - kicad_ipc and viewer_show from Bub for a file the home does not have say to launch a thread on the machine that has it.
+- **Rehearsal**: `test/e2e/homemove/everywhere.sh` (two temp hubs on ports 3901/3902 with a stand-in agent; every item above, with the outcome
+  of each before and after this push) and `test/e2e/homemove/run.sh` (move.py). `BACKPLANE_MOVE_PAUSE_MS` holds a test copy open so a message
+  can be sent mid-move.
+
+Everything from "Dry run" down is the history of Nov 10: what was run and learned, kept for the record.
+
 ## The box
 
 - Sandbox `bp-hub` (Nov 10: `bx_479dqxby`), type **small** (2 vCPU, 4 GB, half rate), made with `--no-auto-stop` and `--no-env`: no TTL,
@@ -50,13 +89,13 @@ Dispatch to the desktop: Bub uses `thread_launch {machine}` / `thread_send` over
 launch are held in the Boat hub's far outbox (`net/farsend.rs`, `<home>/far-sends.json`, kept across restarts) and go the moment it is back;
 a held launch carries an id (`_launch`) so it starts once however often it is posted (`agents/launch.rs`, setting `far.launched.<id>`).
 
-## Dry run (done, Nov 10)
+## History: dry run (Nov 10)
 
 `boat-hub.sh dry-run`: a copy of the desktop home (without secrets, providers, voice, browser profile, checkpoints, devices) on the box, run with
 `BACKPLANE_COPY=1`, no tailnet, stand-in agent folder only, port 3899; `/healthz` ok at 5 s, folded at 4.4 s, 205 MB; then stopped and deleted.
 On a copy no turn starts unless the person sends one (`COPY-GUARD.md` gate 5): its interrupted turns, due routines and held far-sends wait, whatever `restart.continue` says.
 
-## State (Nov 10, prep done)
+## History: state (Nov 10, prep done)
 
 `bp-hub` is on the tailnet as `boat-hub` (100.103.2.108); `bp-hub.service` is enabled and runs an empty hub (no lease, no link, nothing of
 Bub's); `https://boat-hub.tail9e0cf2.ts.net/healthz` answers `ok` from the desktop over the tailnet (`tailscale serve` 443 -> 127.0.0.1:3797).
@@ -67,8 +106,9 @@ Bub's); `https://boat-hub.tail9e0cf2.ts.net/healthz` answers `ok` from the deskt
 `https://boat-hub.tail9e0cf2.ts.net/hook/<id>`). The ring is owned by one hub. At the cutover the hook record and its token move to the Boat
 (the Authorization header is unchanged), the desktop revokes its hook and gets the setting `ring.home` (`{"url","machine"}`), and its Ring page
 (desktop and phones) then shows the owner's URL instead of Set up. The person edits the URL in the Pebble app once and sends the test event.
+Across a move to or from boat-hub the one address stays and lands where the ring is owned: the front door passes a delivery to the owner while the owner is another machine, and the owner takes it itself once the home is there (checked by test on temp hubs: everywhere.py and move.py, before, after, with the desktop stopped and after the move back).
 
-## The cutover as run (Nov 10)
+## History: the cutover as run (Nov 10)
 
 The Rust hub does not sync an uberbot between machines (`uber.sync` answers 501: `net/rpc.rs`), so the lease plan below could not run.
 Bub moved whole instead, as the one owner (`scripts/boat-hub-carry.py`): everything of the desktop's log outside its projects (94k lines:
@@ -80,7 +120,7 @@ The ring was set up on the Boat (`ring.setup`: Pebble, hook `h1794356130-94959`)
 Rollback: `scripts/boat-hub-cutover.sh rollback` (the Boat hub stopped; with the desktop hub stopped, its own last BotSet/RoomSet/UberSet lines
 appended again; then the app started).
 
-## Live (Nov 10, 21:04): the home is on boat-hub
+## History: the first one-press move (Nov 10, 21:04)
 
 Moved with one press (Settings, Machines: Move home to boat-hub; `home.move`, net/homemove.rs): 96,162 events, Bub (same id and uid), the six
 other bots, 13 rooms, memories, routines, mail, the vault, APNs and 91 push registrations, the paired devices (a phone's own token opens
@@ -88,9 +128,9 @@ boat-hub). The desktop's projects stayed. The desktop hub and every client on it
 rooms (far bots, aae1beeca); clients add boat-hub to their hubs by themselves (`hub.offer`, e81cc3b79) and fail over to it. Pushes go from
 boat-hub (an APNs alert answered 200). The ring's one webhook address is `https://boat-hub.tail9e0cf2.ts.net/hook/h1794356011-590786`
 (bots/front.rs: boat-hub is its front door and owns it now; the hook id and token are the ones the desktop made). Every Ring page shows it.
-Back: Machines, Move home back here (`home.move {to:"back"}`). Open: boat-hub has no Claude sign-in yet (lane D: sync accounts).
+Back: Machines, Move home back here (`home.move {to:"back"}`). It was rolled back again because boat-hub had no Claude sign-in (since then: sync accounts, Sign in there, and the readiness check that refuses such a move).
 
-## Rolled back (Nov 10, 19:34)
+## History: rolled back (Nov 10, 19:34)
 
 Within the hour the person found Bub gone from the app: the desktop app and the phone talk to the desktop hub, and neither shows another
 machine's bots (`present/screen.rs` `bots` drops `<link>~<id>` rows; data/1 `bots.list` reads only this hub's bots). So the move was rolled back:
@@ -99,7 +139,7 @@ BotSet/RoomSet/UberSet lines appended again with `at` now (each bot's thread tak
 `thread: ""`), the ring lane's new #ring-requests kept with Bub added, and the hub started as `fresh.sh` starts it. Nothing was lost: the Boat
 hub never ran a turn (no Claude sign-in there). Its home, with the carry and a ring hook of its own, is kept and stopped.
 
-Before moving Bub again, one of (recommended first):
+The options weighed then (history: A was done as far bots, aae1beeca, and B as hub.offer, e81cc3b79; C, `uber.sync`, is still not ported):
 - **B. The clients pair with the Boat hub too** (no code: the desktop app's hub picker and the phones' Settings both have Add a hub). Bub,
   the bots and rooms are on boat-hub; the desktop's projects and threads show there as another machine's (`mark`); hardware work stays on
   the desktop hub in the same app. Plus the Boat signed in to Claude. About an hour with the person, then the same cutover.
@@ -110,7 +150,7 @@ Before moving Bub again, one of (recommended first):
   heartbeat, takeover, handoff and routine gating, with an e2e of two hubs. About 2 to 3 days, and it covers Bub only: the other bots,
   rooms, hooks and Google still need one owner, which brings back A or B.
 
-## The cutover as first planned (not run)
+## History: the cutover as first planned (not run)
 
 Run as `scripts/boat-hub-cutover.sh <step>` in this order: `backup`, `link`, `link-join CODE`, `approve`, `join`, `home`, `carry`, `retire`, `check`
 (`rollback` undoes it). The carry is `scripts/boat-hub-carry.py`: from a copy of the desktop log, every live bot but the uberbot (with its thread,

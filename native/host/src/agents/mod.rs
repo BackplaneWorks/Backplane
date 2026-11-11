@@ -198,6 +198,9 @@ impl Agents {
     /// Hub.turn then Hub.post.go: take the person's message, start or feed the thread's agent. Acknowledged after the events are durable.
     pub async fn deliver(self: &Arc<Self>, thread: &str, msg: &str, text: &str, origin: Option<(String, String, String)>, extra: Vec<Value>) -> Result<(), String> { self.deliver_as("user", thread, msg, text, origin, extra).await }
     pub async fn deliver_k(self: &Arc<Self>, person: bool, role: &str, thread: &str, msg: &str, text: &str, origin: Option<(String, String, String)>, extra: Vec<Value>) -> Result<(), String> {
+        // a home move (net/homemove.rs): what reaches a thread it carries (another bot, a routine, a room, a webhook, mail, a launched thread's report) is held
+        // while it moves and delivered once at the new home; after it, what reaches the old copy goes on there
+        if let Some(r) = crate::net::homemove::hold_delivery(&self.hub, thread, &json!({"thread":thread,"msg":msg,"text":text,"role":role,"person":person,"origin":origin,"extra":extra})).await { return r }
         self.healthy(thread).await;
         for _ in 0..3 {
             let tx = self.actor(thread); let (reply, rx) = oneshot::channel();
@@ -385,11 +388,19 @@ impl Agents {
 
 struct Rpc(Arc<Agents>);
 impl RpcHandler for Rpc {
-    fn methods(&self) -> &'static [&'static str] { &["turn.start", "turn.interrupt", "ask.answer", "thread.retitle", "thread.btw", "lock.release", "lock.cancel", "work.cancel", "task.stop", "text.write", "thread.hand"] }
+    fn methods(&self) -> &'static [&'static str] { &["turn.start", "turn.interrupt", "ask.answer", "thread.retitle", "thread.btw", "lock.release", "lock.cancel", "work.cancel", "task.stop", "text.write", "thread.hand", "thread.deliver"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             // the hub's own requests (`/give`, from commands/give.rs): a connection (client 1 and up) could say anything there, so it is never heard
-            if matches!(method, "text.write" | "thread.hand") && who.client != 0 { return vec![err(id, "unknown method")] }
+            if matches!(method, "text.write" | "thread.hand" | "thread.deliver") && who.client != 0 { return vec![err(id, "unknown method")] }
+            // thread.deliver {thread, msg, text, role, person, origin, extra}: a delivery a home move held (net/homemove.rs), made as it would have been
+            if method == "thread.deliver" {
+                let s_ = |k: &str| p.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+                if !self.0.world().await.threads.contains_key(&s_("thread")) { return vec![err(id, "unknown thread")] }
+                let origin: Option<(String, String, String)> = serde_json::from_value(p["origin"].clone()).ok().flatten();
+                let extra: Vec<Value> = p.get("extra").and_then(Value::as_array).cloned().unwrap_or_default();
+                return vec![match self.0.deliver_k(p["person"] == true, &s_("role"), &s_("thread"), &s_("msg"), &s_("text"), origin, extra).await { Ok(()) => ok(id), Err(e) => err(id, &e) }]
+            }
             // text.write {system, input}: the writing model's answer ("" when it cannot be run), under the Writing setting, off to the side
             if method == "text.write" {
                 let a = self.0.one_shot(p.get("system").and_then(Value::as_str).unwrap_or(""), p.get("input").and_then(Value::as_str).unwrap_or("")).await.unwrap_or_default();
