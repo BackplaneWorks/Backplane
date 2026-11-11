@@ -175,6 +175,8 @@ impl Backplane {
     /// A project's name was clicked: its page (its threads, a New thread button) opens in the main area, at once, from what the sidebar holds; the folder's goal and notes,
     /// parts and boards follow when the hub answers (screens::projects::ask_home).
     pub fn open_project(&mut self,pid:String,cx:&mut Context<Self>){screens::projects::ask_home(self,&pid);self.project_page=Some(pid);self.ui_epoch+=1;cx.notify();}
+    /// An action for the hub from a click or key; one that goes somewhere (projects::leaves_page) closes the project's page first.
+    pub fn go(&mut self,action:&str,value:String,cx:&mut Context<Self>){if screens::projects::leaves_page(action)&&self.project_page.take().is_some(){self.ui_epoch+=1;}let _=self.tx.try_send(Command::Action(action.into(),value));cx.notify();}
     fn select_id(&mut self,id:String,cx:&mut Context<Self>) {self.project_page=None;self.ui_epoch+=1;self.screens.panels.sub_view=None;
         let raw=id.rsplit_once('|').map_or(id.as_str(),|(_,id)|id).to_string();
         

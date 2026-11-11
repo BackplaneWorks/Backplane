@@ -2,7 +2,7 @@
 //! messages), links, code blocks with Copy and light highlighting, tables, and images. What to draw comes from the hub's
 //! nodes (screens::md); this file only lays them out and answers the pointer. The pure rules are in md.rs and select.rs.
 use super::{images::Slot, md::{self, Block, Link, Span, Tok}, select::{self, Pos, Selection, Text}};
-use crate::{art, hub::Command, theme, Backplane};
+use crate::{art, theme, Backplane};
 use gpui::{prelude::*, *};
 use serde_json::Value;
 use std::{cell::RefCell, ops::Range, rc::Rc};
@@ -433,7 +433,7 @@ impl Backplane {
             match super::linkroute::route(&l.href, l.file) {
                 super::linkroute::Route::File(p) => self.file_open(&p, false),
                 super::linkroute::Route::Web(u) => cx.open_url(&u),
-                super::linkroute::Route::Hub(u) => { self.note.clear(); let _ = self.tx.try_send(Command::Action("link-open".into(), u)); }
+                super::linkroute::Route::Hub(u) => { self.note.clear(); self.go("link-open", u, cx); }
                 super::linkroute::Route::Note(n) => self.note = n.to_string(),
             }
         }
