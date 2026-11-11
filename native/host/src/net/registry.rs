@@ -101,7 +101,8 @@ pub async fn all(hub: &Hub) -> Vec<Value> {
 /// The far requests (net/rpc.rs; the owner's own machines only): `registry.put {rows}` and `registry.get`.
 pub async fn serve(hub: &Arc<Hub>, m: &str, p: &Value) -> Value {
     match m {
-        "registry.put" => match put(hub, &p["rows"]).await { Ok(()) => json!({"ok":true}), Err(e) => json!({"ok":false,"error":e}) },
+        // (the home's own list is refreshed at once: its sidebar keys a just-linked machine's copies by it)
+        "registry.put" => match put(hub, &p["rows"]).await { Ok(()) => { set_cached(merge(&all(hub).await)); json!({"ok":true}) } Err(e) => json!({"ok":false,"error":e}) },
         "registry.get" => json!({"ok":true,"machines":all(hub).await}),
         _ => json!({"ok":false,"error":"unknown"}),
     }

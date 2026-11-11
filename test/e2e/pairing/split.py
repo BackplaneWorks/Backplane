@@ -38,6 +38,51 @@ def summary(ps):
     return [(p.get("title"), p.get("machine"), p.get("key"), [m.get("short") for m in (p.get("machineChips") or p.get("marks") or [])], [r.get("id", "").split("|")[-1] for r in p.get("threads", [])]) for p in ps]
 
 
+def home_has_a_copy(hub_bin, base, agents, port):
+    """The home (boat-hub) has its own copy of the repository, and so does desktop: within a few seconds of linking, each hub shows it once.
+    (A hub must never key the other machine's copy by machine/id while that machine's origin is not known yet.)"""
+    root = tempfile.mkdtemp(prefix="bpt-split2-", dir=base)
+    unified.seed(root, "bh", "ssh://git@github.com:22/o/demo.git", False); unified.seed(root, "desk", "https://github.com/o/demo", False)
+    ports = {"bh": port, "desk": port + 1}
+    procs, homes = {}, {}
+    for k in ("bh", "desk"): procs[k], homes[k] = bots.start(hub_bin, root, k, ports[k], ports["desk" if k == "bh" else "bh"], agents)
+    H = {k: Hub(f"http://127.0.0.1:{p}", "") for k, p in ports.items()}
+    try:
+        if not all(h.wait_up(60) for h in H.values()): check("two hubs up", False); return
+        for k, h in H.items(): h.root = open(os.path.join(homes[k], "token")).read().strip()
+        inv = rpc(H["bh"], "bots.invite"); j = rpc(H["desk"], "bots.join", {"invite": inv["invite"]})
+        check("the home with a copy linked with desktop", bool(j.get("peer")), json.dumps(j)[:200]); time.sleep(1)
+        for h in (H["bh"], H["desk"]): rpc(h, "bots.peer_own", {"peer": inv["peer"], "own": True})
+        rpc(H["desk"], "setting.set", {"key": "home.at", "value": json.dumps({"link": j.get("peer"), "name": "boat-hub", "url": f"http://127.0.0.1:{ports['bh']}", "at": int(time.time())})})
+        rpc(H["desk"], "bots.create", {"name": "botdesk"}); rpc(H["bh"], "bots.create", {"name": "botbh"})
+        t0 = time.time()
+        def mirrored(k):  # the other machine's thread is in this hub's mirror (what the link brings; the rows must be right from then on)
+            return any("~t-" in r.get("id", "") for p in side(H[k]) for r in p.get("threads", []))
+        bots.until(lambda: mirrored("bh") and mirrored("desk"), 60)
+        t_m = time.time() - t0
+        bad = {}
+        def once(k):
+            ps = side(H[k]); demo = [p for p in ps if (p.get("title") or "").startswith("repo-")]
+            if len(demo) > 1: bad[k] = [(p.get("title"), p.get("key")) for p in demo]
+            return len(demo) == 1 and len(demo[0].get("threads", [])) == 2
+        # from the moment the mirror holds the other machine's copy, never two rows; one row with both threads within a few seconds
+        end = time.time() + 10; ok = False
+        while time.time() < end:
+            if once("bh") and once("desk"): ok = True; break
+            time.sleep(0.25)
+        check("both hubs show the repository once, with both machines' threads, within 10 s of the mirror", ok, f"mirrored after {t_m:.0f} s; " + json.dumps([summary(side(H[k])) for k in ("bh", "desk")])[:600])
+        check("no hub ever showed it twice (no machine/id key while an origin was unknown)", not bad, json.dumps(bad)[:400])
+        d = Data(H["bh"], H["bh"].root); pl = d.ok("projects.list", {})
+        rows = [p for p in (pl.get("projects") or []) if (p.get("title") or "").startswith("repo-")]
+        check("projects.list on the home: once, keyed by the remote", len(rows) == 1 and rows[0].get("key") == "github.com/o/demo", json.dumps([(p.get("title"), p.get("key")) for p in rows]))
+    finally:
+        for p in procs.values(): p.terminate()
+        for p in procs.values():
+            try: p.wait(10)
+            except subprocess.TimeoutExpired: p.kill()
+        if os.environ.get("KEEP") != "1": shutil.rmtree(root, ignore_errors=True)
+
+
 def main():
     a = argparse.ArgumentParser()
     a.add_argument("--hub", required=True); a.add_argument("--port", type=int, default=3911); a.add_argument("--hold", default=""); a.add_argument("--expect", default="merged")
@@ -52,6 +97,8 @@ def main():
     for n in ("codex", "grok", "muse", "opencode"):
         with open(os.path.join(agents, n), "w") as f: f.write("#!/bin/sh\nexit 1\n")
     for n in os.listdir(agents): os.chmod(os.path.join(agents, n), 0o755)
+    for k, n in NAMES.items(): os.environ["BP_NAME_" + k.upper()] = n
+    if o.expect != "split": home_has_a_copy(o.hub, base, agents, o.port + 5)
     seed_home(root, "bh")
     unified.seed(root, "desk", "git@github.com:o/r.git", False); unified.seed(root, "fw", "https://github.com/o/r", False)
     ports = {"bh": o.port, "desk": o.port + 1, "fw": o.port + 2}

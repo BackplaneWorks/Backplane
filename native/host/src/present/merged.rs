@@ -102,8 +102,20 @@ pub fn merged_projects<'a>(st: &'a State, far: &[(String, &'a State)], away: &dy
         let mut fp: Vec<_> = f.projects.iter().filter(|(id, p)| !p.removed && !id.ends_with(&format!("~{}", crate::sidebar::SCRATCH)) && id.as_str() != crate::sidebar::SCRATCH).collect();
         fp.sort_by(|a, b| a.1.created.cmp(&b.1.created).then(a.0.cmp(b.0)));
         for (id, p) in fp {
-            let o = origin(id);
-            put(key_of(&o, set(f, format!("project.link.{}", id.rsplit('~').next().unwrap_or(id))), m, here, id), Copy { machine: m.clone(), id: id.clone(), st: Some(*f), name: p.title.clone(), folder: p.root.clone(), origin: o, activity: live_act(f, id, p.created) });
+            let local = id.rsplit('~').next().unwrap_or(id);
+            let mut o = origin(id);
+            let mut key = None;
+            // its machine has not said its origin yet (a link just made): the registry's key for that copy, else it waits (never machine/id while the
+            // origin is only unknown: the same repository would be two rows); a machine that does not answer is keyed by machine/id as it has no say
+            if o == crate::mirror::UNKNOWN {
+                match reg.iter().find(|r| r.machines.iter().any(|c| c.machine == *m && c.id == local)) {
+                    Some(r) => { o = r.origin.clone(); key = Some(r.key.clone()); }
+                    None if away(m) => { o = String::new(); }
+                    None => continue,
+                }
+            }
+            let key = key.unwrap_or_else(|| key_of(&o, set(f, format!("project.link.{local}")), m, here, id));
+            put(key, Copy { machine: m.clone(), id: id.clone(), st: Some(*f), name: p.title.clone(), folder: p.root.clone(), origin: o, activity: live_act(f, id, p.created) });
         }
     }
     // the registry: only machines that are neither this one nor live (theirs come from their mirrors)
@@ -227,6 +239,23 @@ mod tests {
         assert!(all_off(&v).is_empty());
         let only_off = merged_projects(&here, &[], &|_| false, &|_| String::new(), "laptop", &reg);
         assert_eq!(all_off(&only_off).len(), 1, "with every machine off, the registry's project is still a row");
+    }
+    /// A linked machine whose origins are not known yet (the link was just made): its copy takes the registry's key, else it waits; it is never
+    /// keyed machine/id (the same repository twice on a hub that has its own copy). One that does not answer is keyed by machine/id.
+    #[test] fn a_copy_whose_origin_is_not_known_yet_takes_the_registrys_key_or_waits() {
+        let here = st(&[pc("p1", "demo", "", 1)]);
+        let a = st(&[pc("L~pA1", "demo", "/a/demo", 2), tc("L~t1", "L~pA1", 9)]);
+        let far = vec![("desktop".to_string(), &a)];
+        let unknown = |_: &str| crate::mirror::UNKNOWN.to_string();
+        let mine = |id: &str| if id == "p1" { "github.com/o/demo".to_string() } else { String::new() };
+        let _ = mine;
+        let v = merged_projects(&here, &far, &|_| false, &unknown, "boat-hub", &[]);
+        assert!(v.iter().all(|p| p.ids.iter().all(|(m, _)| m.is_empty())), "waits: no desktop/pA1 row: {v:?}");
+        let reg = vec![RegProject { key: "laptop/p1".into(), name: "demo".into(), origin: "".into(), machines: vec![RegMachine { machine: "desktop".into(), id: "pA1".into(), folder: "/a/demo".into(), seen: 1 }], threads: vec![] }];
+        let v = merged_projects(&here, &far, &|_| false, &unknown, "boat-hub", &reg);
+        assert!(v.iter().any(|p| p.key == "laptop/p1" && p.ids.iter().any(|(_, i)| i == "L~pA1")), "the registry's key: {v:?}");
+        let v = merged_projects(&here, &far, &|_| true, &unknown, "boat-hub", &[]);
+        assert!(v.iter().any(|p| p.key == "desktop/pA1"), "away and not in the registry: machine/id");
     }
     #[test] fn this_machine_names_the_row_and_a_hand_link_joins_projects_with_no_remote() {
         let here = st(&[pc("p1", "My name", "", 1), json!({"$":"SettingSet","key":"project.link.p1","value":"framework/p8","at":1}), json!({"$":"SettingSet","key":"project.icon.p1","value":"cpu","at":1})]);

@@ -573,7 +573,9 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
     // a project shown as one with a linked machine's stands where the livelier of them would
     let lowest=|pl: &sidebar::Plan,id: &str| pl.place(id).unwrap_or((2,std::cmp::Reverse(0)));
     let mut lists=vec![ids.drain(..).map(|id|(partners.get(id).into_iter().flatten().map(|(_,_,fp,f)|lowest(fp,f)).fold(lowest(&plan,id),std::cmp::min),id)).collect::<Vec<_>>()];
-    for (_,f,fp) in &fplans { lists.push(fp.ids().into_iter().filter(|id| !joined.contains(id)).filter(|id| query.is_empty() || f.projects.get(*id).map_or(false,|p|fuzzy_hit(&p.title,&query)) || fp.has_hit(id) || far_hit(id)).map(|id|(partners.get(id).into_iter().flatten().map(|(_,_,pp,x)|lowest(pp,x)).fold(lowest(fp,id),std::cmp::min),id)).collect()); }
+    // (a linked copy in no merged row is waiting for its machine's origin (present/merged.rs): not drawn until it is known; no rows: no join made)
+    let keyed=|id: &str| un.rows.is_empty() || un.rows.contains_key(id) || un.far.contains_key(id);
+    for (_,f,fp) in &fplans { lists.push(fp.ids().into_iter().filter(|id| !joined.contains(id) && keyed(id)).filter(|id| query.is_empty() || f.projects.get(*id).map_or(false,|p|fuzzy_hit(&p.title,&query)) || fp.has_hit(id) || far_hit(id)).map(|id|(partners.get(id).into_iter().flatten().map(|(_,_,pp,x)|lowest(pp,x)).fold(lowest(fp,id),std::cmp::min),id)).collect()); }
     let ids: Vec<&str>=sidebar::merge_ordered(lists,&|x|x.0).into_iter().map(|x|x.1).collect();
     let project_limit=ns.project_limit();
     // For now an explicitly opened thread in a folded Older project is unported. The recent list

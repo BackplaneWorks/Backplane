@@ -10,7 +10,9 @@ use std::{collections::HashMap, sync::{Arc, OnceLock, RwLock}};
 pub type Names = Arc<dyn Fn() -> Vec<(String, String)> + Send + Sync>;
 
 #[derive(Default)]
-pub struct Mirrors { st: RwLock<HashMap<String, State>>, names: OnceLock<Names>, origins: RwLock<HashMap<String, String>>, away: RwLock<std::collections::HashSet<String>>, here: RwLock<String> }
+pub struct Mirrors { st: RwLock<HashMap<String, State>>, names: OnceLock<Names>, origins: RwLock<HashMap<String, String>>, away: RwLock<std::collections::HashSet<String>>, here: RwLock<String>,
+    /// the links that said their projects' origins (an origin of one of theirs is known, "" when it has none); `asked` wakes the watch for a new one
+    known: RwLock<std::collections::HashSet<String>>, asked: tokio::sync::Notify }
 
 impl Mirrors {
     pub fn set_names(&self, n: Names) { let _ = self.names.set(n); }
@@ -43,6 +45,9 @@ impl Mirrors {
         f(&v)
     }
 }
+
+/// A far project's origin while its machine has not said it yet (`Mirrors::origin`).
+pub const UNKNOWN: &str = "?";
 
 // ---- one project across machines: the same git repository (its normalized origin remote) -------------------------------------
 /// A remote URL as one string for both forms and any user or port: `git@github.com:o/r.git`, `ssh://git@github.com:22/o/r`,
@@ -116,9 +121,17 @@ impl Mirrors {
         let mut g = self.origins.write().unwrap();
         let pre = format!("{link}~"); g.retain(|k, _| !k.starts_with(&pre));
         for (id, o) in projects { if !o.is_empty() { g.insert(format!("{pre}{id}"), o.clone()); } }
+        self.known.write().unwrap().insert(link.to_string());
     }
-    /// A mirrored project's origin ("" when its machine has not said).
-    pub fn origin(&self, far_id: &str) -> String { self.origins.read().unwrap().get(far_id).cloned().unwrap_or_default() }
+    /// A mirrored project's origin: "" when its machine said it has none, `UNKNOWN` ("?") while that machine has not said yet (asked at once:
+    /// `present::merged` never keys such a project by machine/id, which would show one repository twice; it takes the registry's key or waits).
+    pub fn origin(&self, far_id: &str) -> String {
+        if let Some(o) = self.origins.read().unwrap().get(far_id) { return o.clone() }
+        let link = far_id.split_once('~').map_or("", |x| x.0);
+        if self.known.read().unwrap().contains(link) { return String::new() }
+        self.asked.notify_one();
+        UNKNOWN.to_string()
+    }
     /// Whether a linked machine answered when last asked (the origin watch asks each one every minute).
     pub fn set_away(&self, link: &str, away: bool) { let mut g = self.away.write().unwrap(); let was = g.contains(link); if away { g.insert(link.to_string()); } else { g.remove(link); } if was != away { eprintln!("machines: {link} {}", if away { "is away" } else { "answers" }); } }
     /// The marker of a shown machine, by its name (`mark_of`).
@@ -176,7 +189,11 @@ pub fn watch_origins(hub: Arc<crate::hub::Hub>) {
             }
             // the registry on the home: this hub's rows go there, the merged list comes back (net/registry.rs)
             let _ = tokio::time::timeout(std::time::Duration::from_secs(30), crate::net::registry::tick(&hub, &hub.mirrors().here())).await;
-            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            // every minute, or at once when the sidebar met a project whose machine has not said its origin yet (a link just made)
+            // (an early ask at most every 5 s: a machine that does not answer keeps its origins unknown, and every drawing asks again)
+            let began = std::time::Instant::now();
+            tokio::select! { _ = tokio::time::sleep(std::time::Duration::from_secs(60)) => {}, _ = hub.mirrors().asked.notified() => {} }
+            let wait = std::time::Duration::from_secs(5).saturating_sub(began.elapsed()).max(std::time::Duration::from_millis(300)); tokio::time::sleep(wait).await;
         }
     });
 }
