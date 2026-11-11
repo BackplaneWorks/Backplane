@@ -83,7 +83,7 @@ pub fn needs_you(word: &str, own: bool, looked: bool, settled: bool) -> bool { w
 pub fn own(st: &State, id: &str) -> bool {
     let bot = |th: &str| st.bot_threads_has(th) || st.bots_nav.values().any(|b| b.thread == th) || st.runs.contains_key(th);
     let backend = |th: &str| bot(th) || st.run_hidden(th) || th.starts_with("run") || th.starts_with("mailcoord-");
-    if backend(id) || st.tasks.values().any(|(_, c, _, _)| c == id) { return false }
+    if backend(id) || st.swarm_of.contains_key(id) || st.tasks.values().any(|(_, c, _, _)| c == id) { return false }
     // launched by another thread (`launch.<t>` = kind + launcher): the person's when its launcher is
     // the uberbot's chat works for the person: what it launches is theirs (a lane of a lead, a thread asked for); any other bot's is backend work
     let by = get(st, &format!("launch.{id}")); let by = by.get(1..).unwrap_or("");
@@ -107,6 +107,8 @@ pub fn settled(st: &State, id: &str) -> bool { st.threads.get(id).map_or(false, 
 pub fn visible(st: &State, id: &str) -> bool {
     let Some(t) = st.threads.get(id) else { return false };
     if t.deleted || st.run_hidden(id) { return false }
+    // a swarm's member is no row of its own: its swarm's row stands for it, and says when a member asks the person (present/sections.rs)
+    if st.swarm_of.contains_key(id) { return false }
     let w = status(st, id);
     // never hidden: what asks the person, whatever else is true of it (settled, archived, snoozed)
     if w == "needs" { return true }

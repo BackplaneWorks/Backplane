@@ -45,7 +45,8 @@ fn facts<'a>(t: &'a MergedThread<'a>) -> Th<'a> {
             let w = status(st, &t.id); let lk = looked(st, &t.id); let se = settled(st, &t.id);
             // a delegated child hangs under its parent: it is listed alone only when it asks the person
             let kid = st.tasks.values().any(|(p, c, _, _)| c == &t.id && st.threads.contains_key(p) && !st.bot_threads_has(p));
-            Th { t, word: w, show: visible(st, &t.id), needs: needs_you(w, own(st, &t.id), lk, se), kid, settled: se }
+            let member = st.swarm_of.contains_key(&t.id); // (its swarm's row carries it)
+            Th { t, word: w, show: visible(st, &t.id), needs: !member && needs_you(w, own(st, &t.id), lk, se), kid: kid || member, settled: se }
         }
         None => { let w = word_of(&t.status); Th { t, word: w, show: visible_word(w, t.pinned), needs: w == "needs", kid: false, settled: w == "done" || w == "idle" } }
     }
@@ -133,6 +134,35 @@ fn pid_of(p: &MergedProject) -> String { p.here.clone().unwrap_or_else(|| p.ids.
 fn hit(text: &str, q: &str) -> bool { q.is_empty() || crate::sidebar::fuzzy_hit(text, q) }
 fn pinned_at(st: &State, key: &str) -> u64 { num(st, &format!("sidebar.pin.{key}")) }
 
+/// A project's live swarms (docs/SWARM.md) as rows, every copy's: `sidebar::swarm_rows`' shape (the clients' swarm rows draw it) with the sections'
+/// fields: `kind` "swarm", `word` (`sidebar::live_swarms`; `needs` too when a member waits on the person), `want`, `title`, `project`, its machine.
+fn swarms_of(p: &MergedProject, c: &Ctx) -> Vec<(Value, &'static str)> {
+    let mut states: Vec<&State> = p.threads.iter().filter_map(|t| t.src).collect();
+    if let Some((s, _)) = &p.settings_of { states.push(s); }
+    states.dedup_by(|a, b| std::ptr::eq(*a, *b));
+    let mut seen: Vec<*const State> = vec![]; let mut out = vec![];
+    let open = HashSet::new(); let o = crate::sidebar::Opts { hub: c.hub, now: c.now, selected: "", open: &open, older_open: false, query: "" };
+    for s in states {
+        if seen.contains(&(s as *const State)) { continue } seen.push(s as *const State);
+        let live = crate::sidebar::live_swarms(s);
+        for (machine, pid) in p.ids.iter().filter(|(_, pid)| s.projects.contains_key(pid.as_str())) {
+            for mut r in crate::sidebar::swarm_rows(s, &o, pid) {
+                let room = text_of(&r, "nav").trim_start_matches("@room:").to_string();
+                let Some(l) = live.iter().find(|l| l.id == room) else { continue };
+                let asks = s.swarm_of.iter().any(|(t, sw)| sw == &room && wants_person(s, t));
+                let word = if asks { "needs" } else { l.word };
+                r["kind"] = json!("swarm"); r["word"] = json!(word); r["title"] = json!(l.title); r["say"] = json!(say(word));
+                r["want"] = json!(match word { "needs" => "question", "failed" => "failed", _ => "" });
+                r["status"] = json!(dot_word(word)); r["machine"] = json!(machine); r["mark"] = mark_of(p, machine);
+                r["project"] = json!(p.name); r["projectKey"] = json!(p.key); r["off"] = json!(false); r["activity"] = json!(l.activity);
+                out.push((r, word));
+            }
+        }
+    }
+    out
+}
+fn text_of<'a>(v: &'a Value, k: &str) -> &'a str { v[k].as_str().unwrap_or("") }
+
 /// One project row: the merged row (`merged::row_json`) with its counts and its visible threads (Needs you's are not repeated under it).
 fn project_row(st: &State, c: &Ctx, p: &MergedProject, ths: &[Th], gid: &str) -> Value {
     let mut r = super::merged::row_json(p);
@@ -145,8 +175,12 @@ fn project_row(st: &State, c: &Ctx, p: &MergedProject, ths: &[Th], gid: &str) ->
     r["id"] = json!(qid(c.hub, &pid_of(p)));
     r["title"] = json!(p.name);
     r["pinned"] = json!(pinned_at(st, &p.key) > 0);
-    r["running"] = json!(running); r["needsCount"] = json!(needs);
     r["threads"] = json!(rows); r["more"] = json!(ths.len().saturating_sub(rows.len()));
+    // its live swarms, above its threads (a swarm that needs the person is in Needs you, not repeated here)
+    let sw = swarms_of(p, c);
+    r["running"] = json!(running + sw.iter().filter(|x| x.1 == "running").count());
+    r["needsCount"] = json!(needs + sw.iter().filter(|x| x.1 != "running").count());
+    r["swarms"] = json!(sw.into_iter().filter(|x| x.1 == "running").map(|x| x.0).collect::<Vec<_>>());
     r["group"] = json!(gid);
     r["nav"] = json!(p.key);
     // the machines' dots: one per machine that has it, dim when away or off
@@ -175,6 +209,10 @@ pub fn build(st: &State, rows: &[MergedProject], bub: &Value, c: &Ctx) -> Value 
         let rank = match r["want"].as_str().unwrap_or("") { "approval" => 0, "question" | "sign-in" => 1, "failed" => 2, _ => 3 };
         needs.push((rank, f.t.activity, r));
     } }
+    // a live swarm that waits on the person (a guard paused it, a member asks) or whose member failed: in Needs you, opening its page
+    for p in rows { for (r, w) in swarms_of(p, c) { if w == "running" { continue }
+        if !c.query.is_empty() && !hit(text_of(&r, "title"), c.query) && !hit(&p.name, c.query) { continue }
+        let at = r["activity"].as_u64().unwrap_or(0); needs.push((if w == "needs" { 1 } else { 2 }, at, r)); } }
     // an ask outside every project (a bot's chat, a room's run, a scratch chat; a linked machine's too) is in Needs you like any other
     { let listed: HashSet<&str> = rows.iter().flat_map(|p| p.threads.iter().map(|t| t.id.as_str())).collect();
       let mut states: Vec<(&State, String)> = vec![(st, String::new())];
@@ -199,7 +237,7 @@ pub fn build(st: &State, rows: &[MergedProject], bub: &Value, c: &Ctx) -> Value 
         let gid = group_of(st, p);
         let row = project_row(st, c, p, ths, &gid);
         let pin = pinned_at(st, &p.key);
-        let shows = ths.iter().any(|f| f.show && !f.kid);
+        let shows = ths.iter().any(|f| f.show && !f.kid) || row["swarms"].as_array().map_or(false, |a| !a.is_empty()) || row["needsCount"].as_u64().unwrap_or(0) > 0;
         if pin > 0 { pinned.push((pin, row)); continue }
         if shows || p.last_activity + ACTIVE > c.now || p.key == held { active.push((p.last_activity, row)); continue }
         if p.last_activity + QUIET <= c.now { quiet.push(row); continue }
@@ -230,6 +268,7 @@ pub fn page(st: &State, rows: &[MergedProject], key: &str, c: &Ctx, done_open: b
     let Some(p) = rows.iter().find(|p| p.key == key) else { return Value::Null };
     let ths: Vec<Th> = p.threads.iter().map(facts).filter(listed).collect();
     let (mut running, mut needs, mut recent, mut done) = (vec![], vec![], vec![], vec![]);
+    for (r, w) in swarms_of(p, c) { if w == "running" { running.push(r) } else { needs.push(r) } } // its live swarms, as on the sidebar
     for f in &ths {
         let r = thread_row(c.hub, c.now, p, f);
         if f.needs { needs.push(r) } else if matches!(f.word, "running" | "monitoring" | "limit") { running.push(r) }
@@ -258,6 +297,8 @@ pub fn jump(rows: &[MergedProject], c: &Ctx) -> Value {
     for p in rows {
         let machines: Vec<String> = p.machines.iter().filter_map(|m| m["short"].as_str().map(String::from)).collect();
         v.push((2, p.last_activity, json!({"kind":"project","label":p.name,"place":machines.join(" · "),"action":"project-page","value":p.key,"pid":pid_of(p)})));
+        // its live swarms: a jump opens the swarm's page (its room)
+        for (r, w) in swarms_of(p, c) { v.push((if w == "running" { 1 } else { 0 }, r["activity"].as_u64().unwrap_or(0), json!({"kind":"swarm","label":r["title"],"place":p.name,"action":"room","value":qid(c.hub, text_of(&r, "nav").trim_start_matches("@room:")),"word":w,"status":r["status"],"want":r["want"]}))); }
         for t in &p.threads {
             let f = facts(t); if !listed(&f) { continue }
             let place = match &t.src { Some(_) if t.machine.is_empty() => p.name.clone(), _ => format!("{} · {}", p.name, crate::mirror::short_name(&t.machine)) };

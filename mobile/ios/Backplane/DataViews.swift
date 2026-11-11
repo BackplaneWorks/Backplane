@@ -299,15 +299,22 @@ struct DataThreadsView: View {
                 .contextMenu { if s.rename { Button(Tr.t("Rename group"), systemImage: "pencil") { groupTitle = s.title; renamingGroup = s.group } } }
             if s.kind == "threads" {
                 // Needs you: the title has the row (no project name), and a stop says so by its dot; an ask keeps its red word
-                ForEach(s.rows) { r in DataSectionThread(r: r, quiet: r.want == "failed" || r.want == "stopped") { path.append($0) }.dataRow() }
+                ForEach(s.rows) { r in
+                    // a swarm that waits on the person opens the swarm's page
+                    if let room = r.swarmRoom { DataSectionThread(r: r) { _ in path.append(DSwarmRoute(id: room, name: r.title)) }.dataRow() }
+                    else { DataSectionThread(r: r, quiet: r.want == "failed" || r.want == "stopped") { path.append($0) }.dataRow() }
+                }
             } else {
                 ForEach(s.rows) { r in
                     Button { path.append(DProjectRoute(key: r.key, title: r.title)) } label: { DataSectionProject(r: r, faded: s.id == "quiet") }
                         .buttonStyle(.plain).dataRow().accessibilityIdentifier("data.section.project." + r.key)
                         .contextMenu {
                             Button(Tr.t(r.pinned ? "Unpin project" : "Pin project"), systemImage: "pin") { Task { await client.sidebarAct("project-pin", r.key) } }
+                            if client.has("swarm") { Button(Tr.ios_swarm_new_in(project: r.title), systemImage: "circle.hexagongrid") { newSwarm = r.id } }
                             ForEach(client.groupsTo, id: \.value) { g in Button(Tr.gpui_sections_move_to(group: g.label)) { Task { await client.sidebarAct("group-move", r.key + "\u{1f}" + g.value) } } }
                         }
+                    // its live swarms (the client's own rows, feature swarm), above its threads; their members have no rows
+                    if client.has("swarm") { ForEach(Swarm.listed(client.swarms, project: r.id).filter { x in !(client.sections.first { $0.id == "needs" }?.rows.contains { $0.swarmRoom == x.id } ?? false) }) { x in DataSwarmRow(row: x) { path.append(DSwarmRoute(id: x.id, name: x.name)) }.dataRow() } }
                     ForEach(r.threads) { t in DataSectionThread(r: t, indent: 34) { path.append($0) }.dataRow() }
                 }
             }

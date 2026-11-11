@@ -61,14 +61,15 @@ fn project(this: &Backplane, cx: &mut Context<Backplane>, light: bool, p: &Value
     }).collect();
     let pinned = p["pinned"] == true;
     let groups = this.data["groupsTo"].clone();
-    let (pid2, key2, key3) = (pid.clone(), key.clone(), key.clone());
+    let (pid2, key2, key3, pid3) = (pid.clone(), key.clone(), key.clone(), pid.clone());
     /* i18n-ok: a ctl label */ ctl.push(CtlEntry { id: format!("project-pin:{pid}"), label: if pinned { "Unpin project".into() } else { "Pin project".into() }, ctl: Ctl::Node("project-pin".into(), key.clone()) });
     crate::ui::with_rect(div().id(SharedString::from(format!("sproj-{pid}"))), { let p = pid.clone(); move || format!("project:{p}") })
         .when(faded || p["off"] == true, |d| d.opacity(0.55)).flex().items_center().gap_2().pl(px(6.)).pr_3().h(px(30.)).text_size(px(13.))
         .border_l_2().border_color(if on_page { c("accent") } else { c("panel") }).when(on_page, |d| d.bg(c("raise"))).cursor_pointer().hover(|s| s.bg(c("raise")))
         .on_click(cx.listener(move |this, _, _, cx| { this.go("project-page", key2.clone(), cx); this.open_project(pid2.clone(), cx); }))
         .on_mouse_down(MouseButton::Right, cx.listener(move |this, e: &MouseDownEvent, _, cx| {
-            /* i18n-ok: menu labels, drawn through trs */ let mut items = vec![crate::screens::ctxmenu::Item { label: if pinned { "Unpin project".into() } else { "Pin project".into() }, action: "project-pin".into(), value: key3.clone(), confirm: false }];
+            /* i18n-ok: menu labels, drawn through trs */ let mut items = vec![crate::screens::ctxmenu::Item { label: if pinned { "Unpin project".into() } else { "Pin project".into() }, action: "project-pin".into(), value: key3.clone(), confirm: false },
+                /* i18n-ok: a menu label, drawn through trs */ crate::screens::ctxmenu::Item { label: "New swarm".into(), action: "swarm-new".into(), value: pid3.clone(), confirm: false }];
             for g in groups.as_array().into_iter().flatten() {
                 items.push(crate::screens::ctxmenu::Item { label: tf("gpui.sections.move.to", &[("group", string(g, "label").into())]), action: "group-move".into(), value: format!("{}\u{1f}{}", key3, string(g, "value")), confirm: false });
             }
@@ -87,12 +88,16 @@ impl Backplane {
     /// The sections' rows, in the hub's order (Bub is drawn above them by the window).
     pub(crate) fn section_rows(&self, cx: &mut Context<Self>, light: bool, rows: &mut Vec<AnyElement>, ctl: &mut Vec<CtlEntry>) {
         let sections: Vec<Value> = self.data["sections"].as_array().cloned().unwrap_or_default();
+        // the swarm page on show (its room), for the row's highlight (screens/swarm.rs draws the swarm rows)
+        let open_room = if self.data["bot"]["kind"] == "room" { string(&self.data["bot"], "id") } else { String::new() };
         for s in &sections {
             match s["kind"].as_str().unwrap_or("") {
                 "bub" => continue,
                 "threads" => {
                     rows.push(head(cx, light, s, ctl));
                     for t in s["rows"].as_array().into_iter().flatten() {
+                        // a swarm that waits on the person: its own row (screens/swarm.rs), which opens the swarm's page
+                        if t["kind"] == "swarm" { rows.extend(crate::screens::swarm::side_rows(cx, light, &serde_json::json!({"swarms": [t]}), &open_room, ctl)); continue }
                         let pid = string(t, "projectKey");
                         // no project name after the title: the sidebar is narrow and the title is what the person reads (sub " ": an Active-view row, so no tree chevron and no drag)
                         // a stop says so by its dot alone (the right column is the title's); an ask keeps its red word (approval, question)
@@ -107,6 +112,8 @@ impl Backplane {
                     let faded = s["id"] == "quiet";
                     for p in s["rows"].as_array().into_iter().flatten() {
                         rows.push(project(self, cx, light, p, faded, ctl));
+                        // its live swarms, above its threads (their members have no rows: the swarm stands for them)
+                        rows.extend(crate::screens::swarm::side_rows(cx, light, p, &open_room, ctl));
                         let qid = string(p, "id"); let pid = qid.rsplit_once('|').map_or(qid.as_str(), |(_, r)| r).to_string();
                         for t in p["threads"].as_array().into_iter().flatten() { rows.push(self.side_thread(cx, light, t, &pid, "", faded, ctl)); }
                     }
@@ -138,6 +145,7 @@ pub fn page_lists(cx: &mut Context<Backplane>, light: bool, data: &Value, pid: &
             let id = string(t, "id"); let raw = id.rsplit('|').next().unwrap_or(&id).to_string();
             if t["off"] != true { ctl.push(CtlEntry { id: format!("page-thread:{raw}"), label: string(t, "title"), ctl: Ctl::Select(id.clone()) }); }
             let off = t["off"] == true;
+            if t["kind"] == "swarm" { out.extend(crate::screens::swarm::side_rows(cx, light, &serde_json::json!({"swarms": [t]}), "", ctl)); continue }
             out.push(div().id(SharedString::from(format!("page-thread-{raw}"))).flex().items_center().gap_2().px_2().h(px(30.)).border_b_1().border_color(c("line")).when(off, |d| d.opacity(0.55))
                 .when(!off, |d| d.cursor_pointer().hover(|s| s.bg(c("raise"))))
                 .child(super::siderow::dot(light, t)).child(div().flex_1().overflow_hidden().whitespace_nowrap().child(string(t, "title")))
