@@ -107,7 +107,13 @@ pub fn belongs_to(pane_proj: &str, pane_root: &str, pane_pid: &str, viewer_key: 
 
 /// The window to show for `want` among the container's frames, preferring the hub's own list (fork mode: kinds it knows) over titles.
 /// In fork mode, wait until `info["frames"]` lists the window as shown so a half-opened frame parked in `holder` during `ShowFrame` is never mapped early.
-pub fn pick(want: &str, info: &Value, frames: &[nc::Frame]) -> Option<u64> {
+pub fn pick(want: &str, info: &Value, frames: &[nc::Frame]) -> Option<u64> { pick_local(want, info, frames, &[]) }
+/// `pick`, where `ever` are the fork's frames shown at least once (bp.9's local map: the client maps such a frame itself, no round trip).
+pub fn pick_local(want: &str, info: &Value, frames: &[nc::Frame], ever: &[u64]) -> Option<u64> {
+    if info["mode"] == "fork" && info["local_map"] == true {
+        let x = info["frames"].as_array().into_iter().flatten().find(|f| f["kind"] == want).and_then(|f| f["xid"].as_u64());
+        if let Some(x) = x.filter(|x| ever.contains(x) && frames.iter().any(|f| f.window == *x)) { return Some(x) }
+    }
     if info["mode"] == "fork" {
         let hub = info["frames"].as_array().into_iter().flatten().find(|f| f["kind"] == want && f["shown"] != false).and_then(|f| f["xid"].as_u64());
         return hub.filter(|x| frames.iter().any(|f| f.window == *x));
@@ -165,6 +171,8 @@ pub struct KicadPane {
     theme_sent: bool, home: u64,
     /// files changed on disk that KiCad holds back over the person's unsaved edits (info `kicad.reload.<digest>`)
     pub conflicts: Vec<String>,
+    /// the fork's frames KiCad has shown at least once (bp.9: the client may map and unmap them itself, so a tab switch is local)
+    ever_shown: Vec<u64>,
 }
 
 impl KicadPane {
@@ -175,12 +183,14 @@ impl KicadPane {
             if weak.update(cx, |this, cx| this.tick(cx)).is_err() { break }
         }).detach();
         KicadPane { bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), last_root: (i32::MIN, 0), placed: None,
-            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), poked: None, unmapped_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new() }
+            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), poked: None, unmapped_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), ever_shown: Vec::new() }
     }
     fn rpc(&self, name: &str, params: Value) { let _ = self.hub.try_send(Command::Rpc(name.to_string(), Secret(params), "kicad")); }
     /// The hub's `editor.kicad.<digest>` for this project changed.
     pub fn set_info(&mut self, info: Value, cx: &mut Context<Self>) {
         if info == self.info { return }
+        if info["pid"] != self.info["pid"] { self.ever_shown.clear(); }
+        for f in info["frames"].as_array().into_iter().flatten().filter(|f| f["shown"] == true) { if let Some(x) = f["xid"].as_u64() { if !self.ever_shown.contains(&x) { self.ever_shown.push(x); } } }
         // KiCad became ready (a launch, a restart): it is told Backplane's theme again
         if info["state"] == "ready" && (self.info["state"] != "ready" || info["pid"] != self.info["pid"]) && self.theme_sent {
             self.rpc("editor.kicad.theme", json!({"project": self.project, "mode": if self.light { "light" } else { "dark" }}));
@@ -281,7 +291,7 @@ impl KicadPane {
     fn wanted_kind(&self) -> &str { self.override_kind.as_deref().unwrap_or_else(|| frame_for(&self.open)) }
     /// The person took the editor: the hub then refuses an agent's save while anything is unsaved (kicad/embed.rs `Unsaved`).
     fn touched(&self) { self.rpc("editor.kicad.touched", json!({"project": self.project})); }
-    fn want(&self) -> Option<u64> { if self.info.is_null() || (cfg!(windows) && self.info["mode"] == "stock") { return None } pick(self.wanted_kind(), &self.info, &self.frames) }
+    fn want(&self) -> Option<u64> { if self.info.is_null() || (cfg!(windows) && self.info["mode"] == "stock") { return None } pick_local(self.wanted_kind(), &self.info, &self.frames, &self.ever_shown) }
     fn tick(&mut self, cx: &mut Context<Self>) {
         let Some(c) = self.container else { return };
         if let Some(pid) = self.info["pid"].as_u64().filter(|p| *p > 0) {
@@ -425,19 +435,21 @@ impl KicadPane {
             if over.iter().any(|o| *o != p) { over.retain(|o| *o != p); }
         }
         let show = self.want();
-        let managed: Option<Vec<u64>> = (self.info["mode"] == "fork").then(|| {
+        // bp.9 local map: the frames shown once are the client's to map and unmap, the switch with no round trip (KiCad follows the map state)
+        let local = self.info["mode"] == "fork" && self.info["local_map"] == true;
+        let managed: Option<Vec<u64>> = if local { None } else { (self.info["mode"] == "fork").then(|| {
             self.info["frames"].as_array().into_iter().flatten()
                 .filter(|f| f["shown"] != false)
                 .filter_map(|f| f["xid"].as_u64())
                 .collect()
-        });
+        }) };
         let prev_show = self.placed.as_ref().and_then(|(_, s, _)| *s);
         let key = (at, show, over.clone());
         if self.placed.as_ref() == Some(&key) {
             if let (Some(at), Some(show)) = (at, show) { nc::sync_root(c, at, show, &mut self.last_root); }
             return;
         }
-        nc::place(c, at, show, managed.as_deref(), &mut self.last_root);
+        if local { nc::place_local(c, at, show, &self.ever_shown, &mut self.last_root); } else { nc::place(c, at, show, managed.as_deref(), &mut self.last_root); }
         if self.keys && show != prev_show {
             if let Some(w) = show { nc::focus(w); }
         }

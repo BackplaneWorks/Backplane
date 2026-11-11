@@ -146,6 +146,8 @@ impl Session {
             "sock": self.sock,
             "display": self.display,
             "frames": self.frames.iter().map(Frame::to_json).collect::<Vec<_>>(),
+            // bp.9: the client may map and unmap a frame KiCad has shown once (its tab switches need no round trip)
+            "local_map": self.mode == "fork" && !self.desc.is_empty() && proto::load(&self.desc).has_field("kiapi.backplane.embed.ShowFrame", "prewarm"),
         })
     }
 }
