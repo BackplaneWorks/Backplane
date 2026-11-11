@@ -69,6 +69,9 @@ pub trait Ticker: Send + Sync {
 /// not block, and never commit from it (spawn a task that does). Register with `Hub::register_observer`.
 pub trait Observer: Send + Sync {
     fn committed(&self, hub: &Arc<Hub>, events: &[Value], first_seq: u32);
+    /// History brought in whole (`Hub::import_lines`): past events, not news, so only an observer that keeps a copy of the log's content takes them
+    /// (the feed to the owner's other machines: their mirrors are this hub's history). None by default.
+    fn imported(&self, _hub: &Arc<Hub>, _events: &[Value], _first_seq: u32) {}
 }
 
 /// Paired devices and the connections they hold (net lane: `net::pairing::Registry`). `Auth` asks it instead of reading

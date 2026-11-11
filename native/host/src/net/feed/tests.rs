@@ -140,3 +140,19 @@ async fn hub(tag: &str) -> (Arc<Hub>, std::path::PathBuf) {
     assert!(texts < 700_000 && a["more"] == true, "the 700k line did not join a page that already holds thousands of lines ({} chars, more={})", texts, a["more"]);
     let _ = std::fs::remove_dir_all(h);
 }
+/// History written with `Hub::import_lines` while the hub runs (the 0.14 import, a home moved onto this hub) is this hub's history to its mirrors too:
+/// a pull after it gives its bots' threads, memories, rooms and posts.
+#[tokio::test] async fn far_imported_history_is_in_the_feed() {
+    let (hub, h) = hub("import").await;
+    let f = Feed::new(); f.start(&hub).await; hub.register_observer(f.clone());
+    let n0 = hub.store.len() as u64;
+    let lines = [json!({"$":"BotSet","id":"b1","name":"Bub","thread":"t1","look":1,"persona":"","at":1}), created("t1", "", 1), msg("t1", 2),
+        json!({"$":"MemorySaved","bot":"b1","key":"tea","kind":"fact","text":"green","tags":"","at":3}), json!({"$":"RoomSet","id":"r1","name":"Ring","members":"b1","at":4}),
+        json!({"$":"RoomPosted","id":"p1","room":"r1","from":"you","text":"ding","hop":0,"at":5})];
+    hub.import_lines(lines.iter().map(|l| l.to_string()).collect()).await.unwrap();
+    hub.commit_many(&[json!({"$":"UberSet","bot":"b1","uid":"u","at":6})]).await.unwrap();
+    let a = f.answer(&hub, 0, "", json!([])).await.unwrap();
+    let kinds: Vec<&str> = a["items"].as_array().unwrap().iter().filter(|i| i["n"].as_u64().unwrap() > n0).map(|i| i["c"]["$"].as_str().unwrap()).collect();
+    assert_eq!(kinds, ["BotSet", "ThreadCreated", "MessagePosted", "MemorySaved", "RoomSet", "RoomPosted", "UberSet"], "{a}");
+    let _ = std::fs::remove_dir_all(h);
+}

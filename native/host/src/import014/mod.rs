@@ -4,7 +4,7 @@
 //! The old home is only ever read: no file in it is changed, moved or deleted.
 //!
 //! What comes across is decided in `plan` (the log) and `files` (attachments, bot folders, account profiles, the vault, paired devices). Keys and
-//! sign-ins come only when the person chose "with keys". The lines go in through `Hub::import_lines`, which no policy, push or feed sees, with the
+//! sign-ins come only when the person chose "with keys". The lines go in through `Hub::import_lines`, which no policy or push sees (the feed does: linked machines mirror them), with the
 //! policies folded again around it. Ways in: the RPC `import.v014` {op: "scan"|"run", secrets} (setup and Settings), and for a script with the
 //! home's token, GET `/import/0.14` (what is there) and GET `/import/0.14/run[?secrets=1]` (import, answers when done).
 //! Progress and the result are the hub info key `import.v014` (JSON text), which setup and Settings draw; the last result is also the setting

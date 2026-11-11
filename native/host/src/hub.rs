@@ -63,7 +63,7 @@ pub fn frame_bytes(v: &Value) -> usize {
         Value::Array(a) => 2 + a.iter().map(|x| frame_bytes(x) + 1).sum::<usize>(), Value::Object(o) => 2 + o.iter().map(|(k, x)| k.len() + 3 + frame_bytes(x)).sum::<usize>() }
 }
 
-/// `raw`: lines brought in whole from another log (the 0.14 import, `import_lines`): written byte for byte, folded and announced, never seen by a transform or an observer.
+/// `raw`: lines brought in whole from another log (the 0.14 import, `import_lines`): written byte for byte, folded and announced, never seen by a transform; observers get them as `imported` (the feed only).
 struct Commit { events: Vec<Value>, raw: Vec<String>, done: tokio::sync::oneshot::Sender<Result<u64>> }
 /// The last imported batch's time in the writer: its append and fsync (high 32 bits, ms) and its fold into the model (low). For the import's own record of what a request waited behind.
 pub static RAW_TIMES: AtomicU64 = AtomicU64::new(0);
@@ -283,8 +283,8 @@ impl Hub {
         rx.await?
     }
     /// History brought in from another log (the 0.14 import): each line as it was, durable, then folded into the model and the presenter and
-    /// announced to the log's followers, in the writer's order. No transform and no observer sees them: they are past events, not news (no push,
-    /// no alert, no feed to a linked machine, no policy reaction). The caller refolds the policies around the import (`state::host::refold_*`).
+    /// announced to the log's followers, in the writer's order. No transform sees them and observers only as `Observer::imported`: they are past
+    /// events, not news (no push, no alert, no policy reaction), but the feed indexes them, so the owner's other machines mirror them like any line. The caller refolds the policies around the import (`state::host::refold_*`).
     /// Every line must be one whole JSON event without a newline.
     pub async fn import_lines(&self, lines: Vec<String>) -> Result<u64> {
         if lines.iter().any(|l| l.contains('\n')) { anyhow::bail!("an imported line holds a newline") }
@@ -305,6 +305,8 @@ impl Hub {
                 // (parsed only for a presenter that keeps the log: the hub's own takes none, and a client's write waits while this runs)
                 if hub.need_resync.swap(false, Relaxed) { if let Err(e) = hub.fold_log().await { eprintln!("presenter resync failed: {e:#}"); hub.need_resync.store(true, Relaxed); } }
                 else if hub.presenter.wants_log() { let all: Vec<Value> = lines.iter().filter_map(|l| serde_json::from_str::<Value>(&crate::store::clean(l)).ok()).collect(); for ch in all.chunks(200) { let _ = hub.presenter.fold(&json!({"t":"changes","items":ch,"now":now_ms()})).await; } }
+                { let all: Vec<Value> = lines.iter().map(|l| serde_json::from_str::<Value>(&crate::store::clean(l)).unwrap_or(Value::Null)).collect();
+                  let obs: Vec<Arc<dyn Observer>> = hub.observers.read().unwrap().clone(); for o in obs { let first = (first_idx + 1) as u32; let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| o.imported(&hub, &all, first))); } }
                 let n = hub.store.len() as u64; hub.signal_seq.store(n, Relaxed); let _ = hub.changed.send(n);
                 let _ = done.send(Ok((first_idx + lines.len()) as u64));
             }
