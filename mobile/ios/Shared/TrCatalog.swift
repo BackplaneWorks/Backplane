@@ -406,6 +406,41 @@ gpui.f2.done.body	Press ? any time for keys.	? でいつでもキー一覧を表
 gpui.f2.open.uber	Open the uberbot	メインボットを開く
 gpui.f2.setup.phone	Setup runs on a computer, in Settings, Setup there. This phone is paired with it.	セットアップはコンピュータの 設定 → セットアップ で行います。このスマホはそのコンピュータとペアリングされています。
 gpui.f2.setup.five	Five short steps: your data folder, agents, design tools, where your uberbot lives and a first project.	5つの短いステップ：データフォルダ、エージェント、設計ツール、メインボットの置き場所、最初のプロジェクト。
+gpui.swarm.row	{n, plural, one {# member} other {# members}} · {w, number} working	メンバー{n, number}人 · 作業中{w, number}
+gpui.swarm.held	held: {why}	保留：{why}
+gpui.swarm.state.why	{state}: {why}	{state}：{why}
+gpui.swarm.new	New swarm	新しいスウォーム
+gpui.swarm.add.member	Add member	メンバーを追加
+gpui.swarm.start	Start	開始
+gpui.swarm.topic	Topic	トピック
+gpui.swarm.goal	Goal, in a line	目標（1行で）
+gpui.swarm.seed	First message to every member	全メンバーへの最初のメッセージ
+gpui.swarm.role	Role (optional)	役割（任意）
+gpui.swarm.remove	Remove from the swarm	スウォームから外す
+gpui.swarm.over	This swarm is over.	このスウォームは終了しました。
+gpui.swarm.none	No posts yet.	まだ投稿はありません。
+ios.swarm.new	New swarm	新しいスウォーム
+ios.swarm.new.in	New swarm in {project}	{project}に新しいスウォーム
+ios.swarm.members	{n, plural, one {# member} other {# members}}	メンバー{n, number}人
+ios.swarm.state.paused	paused	一時停止中
+ios.swarm.state.removed	removed	外れた
+ios.swarm.tag.idea	idea	アイデア
+ios.swarm.tag.critique	critique	批評
+ios.swarm.tag.claim	claim	担当
+ios.swarm.tag.synthesis	synthesis	まとめ
+ios.swarm.reason.circular	circular	堂々巡り
+ios.swarm.reason.budget	budget	予算切れ
+ios.swarm.reason.person	person	手動
+ios.swarm.reason.chatter	chatter	進展なし
+ios.swarm.held	held · {why}	保留・{why}
+ios.swarm.topic	Topic	トピック
+ios.swarm.goal	Goal	ゴール
+ios.swarm.seed	Seed: the problem, its context, paths	最初のメッセージ：問題、背景、パス
+ios.swarm.role	Role (optional)	役割（任意）
+ios.swarm.add	Add member	メンバーを追加
+ios.swarm.remove.ask	Remove {name} from the swarm?	{name}をスウォームから外しますか？
+ios.swarm.stop.ask	Stop this swarm?	このスウォームを停止しますか？
+ios.swarm.post	Post to the board	ボードに投稿
 common.cancel	Cancel	キャンセル
 common.delete	Delete	削除
 common.save	Save	保存
@@ -2043,6 +2078,8 @@ gpui.bots.no.hooks	No hooks.	Webhookはありません。
 gpui.bots.hook.calls	{n, plural, one {# call} other {# calls}}	{n, plural, other {#回の呼び出し}}
 gpui.bots.no.token	No token	トークンなし
 gpui.bots.no.messages.yet	No messages yet.	メッセージはまだありません。
+gpui.bots.keep.room	Keep this room	このルームを残す
+gpui.bots.room.closed	This exchange between bots is over. It is kept for reference.	ボット同士のこのやり取りは終わりました。参照用に残してあります。
 gpui.bots.connecting.to.the.bot.s	Connecting to the bot's browser page.	ボットのブラウザページに接続しています。
 gpui.bots.page.notyet	The {page} page is not drawn here yet.	「{page}」ページはまだここでは表示できません。
 gpui.bots.no.routines	No routines.	ルーチンはありません。
@@ -6223,4 +6260,25 @@ android.ring.head	RING	リング
 
     /// gpui.f2.path.to = Path to {tool}
     static func gpui_f2_path_to(tool: String) -> String { f("gpui.f2.path.to", ["tool": tool]) }
+
+    /// gpui.swarm.row = {n, plural, one {# member} other {# members}} · {w, number} working
+    static func gpui_swarm_row(n: Int, w: Int) -> String { f("gpui.swarm.row", ["n": String(n), "w": String(w)]) }
+
+    /// gpui.swarm.held = held: {why}
+    static func gpui_swarm_held(why: String) -> String { f("gpui.swarm.held", ["why": why]) }
+
+    /// gpui.swarm.state.why = {state}: {why}
+    static func gpui_swarm_state_why(state: String, why: String) -> String { f("gpui.swarm.state.why", ["state": state, "why": why]) }
+
+    /// ios.swarm.new.in = New swarm in {project}
+    static func ios_swarm_new_in(project: String) -> String { f("ios.swarm.new.in", ["project": project]) }
+
+    /// ios.swarm.members = {n, plural, one {# member} other {# members}}
+    static func ios_swarm_members(n: Int) -> String { f("ios.swarm.members", ["n": String(n)]) }
+
+    /// ios.swarm.held = held · {why}
+    static func ios_swarm_held(why: String) -> String { f("ios.swarm.held", ["why": why]) }
+
+    /// ios.swarm.remove.ask = Remove {name} from the swarm?
+    static func ios_swarm_remove_ask(name: String) -> String { f("ios.swarm.remove.ask", ["name": name]) }
 }

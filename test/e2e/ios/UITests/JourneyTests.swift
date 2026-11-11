@@ -574,6 +574,52 @@ final class Journeys: XCTestCase {
         d.shot("what-happened")
     }
 
+    // swarms (docs/SWARM.md), against test/swarm/rig.py's hub: project "toy" with the swarms "debounce" (active, a full board) and "enclosure fit" (paused)
+    func test_swarm() {
+        d = Driver("swarm"); defer { d.finish() }
+        d.app.launchArguments = ["-app.alerts", "<false/>"] // no notification question over the list
+        d.launch()
+        let row = d.el("data.swarm.row.rsw1"), paused = d.el("data.swarm.row.rsw2")
+        guard d.step("the project lists its live swarms, one row each", timeout: 30, act: {}, expect: { row.exists && paused.exists }) else { return }
+        d.step("a finished swarm and the members' threads are left out; other threads stay", act: {}, expect: {
+            !d.el("data.swarm.row.rsw0").exists && !d.el("data.thread.row.t-opus").exists && !d.el("data.thread.row.t-a").exists && d.el("data.thread.row.t-enc").exists })
+        d.shot("project-row")
+        guard d.step("the swarm screen: chips, goal, state, the board", timeout: 20, act: { d.tap(row) }, expect: {
+            d.el("data.swarm.member.opus").exists && d.el("data.swarm.goal").exists && d.el("data.swarm.act.pause").exists && d.el("data.swarm.post.sp10").exists }) else { return }
+        d.step("a waiting claim's files and the hub's own post", act: {}, expect: { d.label("tests/encoder.rs").exists && d.label("waiting").exists && d.label("gemini holds it").exists })
+        d.shot("swarm")
+        let comp = d.el("data.swarm.composer")
+        d.step("type a post", act: { d.tap(comp); d.type(comp, "Go with the state machine, zqswarm.") }, expect: { d.el("data.swarm.send").isEnabled })
+        d.step("swarm.post: the post is on the board", timeout: 20, act: { d.tap(d.el("data.swarm.send")) }, expect: { d.label("zqswarm").exists })
+        d.step("the person's post wakes the members", timeout: 30, act: {}, expect: { d.label("opus, working").exists || d.label("gemini, working").exists })
+        d.shot("posted")
+        d.step("Pause: the state line says paused and offers Resume", timeout: 20, act: { d.tap(d.el("data.swarm.act.pause")) }, expect: { d.el("data.swarm.act.resume").exists && d.label("Paused by the person").exists })
+        d.shot("paused")
+        d.step("Resume", timeout: 20, act: { d.tap(d.el("data.swarm.act.resume")) }, expect: { d.el("data.swarm.act.pause").exists })
+        d.step("a chip opens its member's thread", timeout: 20, act: { d.tap(d.el("data.swarm.member.opus")) }, expect: { d.el("thread.composer").exists })
+        d.tap(d.el("data.back"))
+        guard d.step("Add member: the sheet", timeout: 15, act: { d.tap(d.el("data.swarm.add")) }, expect: { d.el("data.swarm.add.go").exists }) else { return }
+        d.shot("add-member")
+        d.step("Add: a fourth member joins", timeout: 30, act: { d.tap(d.el("data.swarm.add.go")) }, expect: { d.label("joined the swarm").exists })
+        let critic = d.el("data.swarm.member.critic")
+        d.step("Remove (long press on a chip)", timeout: 15, act: { if critic.waitForExistence(timeout: 4) { critic.press(forDuration: 1.2) }; d.tap(d.app.buttons["Remove"].firstMatch) }, expect: { d.el("data.swarm.remove.yes").exists })
+        d.step("critic leaves the swarm", timeout: 30, act: { d.tap(d.el("data.swarm.remove.yes")) }, expect: { d.label("critic left the swarm").exists })
+        d.shot("members")
+        d.tap(d.el("data.back"))
+        guard d.step("New swarm: the sheet from the project", timeout: 15, act: { d.tap(d.el("data.swarm.new.p1")) }, expect: { d.el("data.swarm.new.topic").exists && d.el("data.swarm.member.provider.1").exists }) else { return }
+        let topic = d.el("data.swarm.new.topic")
+        d.step("topic, goal, seed, roles", act: {
+            d.tap(topic); d.type(topic, "led timing")
+            let goal = d.el("data.swarm.new.goal"); d.tap(goal); d.type(goal, "Pick the PWM frequency")
+            let seed = d.el("data.swarm.new.seed"); d.tap(seed); d.type(seed, "The LEDs flicker on camera at 1 kHz.")
+            let role = d.el("data.swarm.member.role.1"); d.tap(role); d.type(role, "critic")
+        }, expect: { d.el("data.swarm.new.start").isEnabled })
+        d.shot("new-swarm")
+        d.step("a third member row", act: { d.tap(d.el("data.swarm.new.add")) }, expect: { d.el("data.swarm.member.provider.2").exists })
+        d.step("Start: swarm.create opens the new swarm", timeout: 40, act: { d.tap(d.el("data.swarm.new.start")) }, expect: { d.el("data.swarm.composer").exists && d.label("Pick the PWM frequency").exists })
+        d.shot("created")
+    }
+
     func test_data_part_info() {
         d = Driver("data-part-info"); defer { d.finish() }
         let thread = d.env["HUB_VIEWER_THREAD"] ?? ""
