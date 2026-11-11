@@ -409,7 +409,16 @@ async fn run(hub: &Arc<Hub>, thread: Option<&str>, path: &str, ty: &str, msg: Va
         if !super::known_root(hub, Path::new(&pro).parent().map(|p| p.to_str().unwrap_or("")).unwrap_or(""), "").await { return Err(format!("{path} is not in a project this hub knows")) }
         let setting = hub.setting("kicad.ipc").await.unwrap_or_else(|| "on".into());
         if setting == "off" { let why = "KiCad IPC is turned off in Settings"; log_fallback(hub, thread, why).await; return Err(ks::unavailable(why, &gui.cli)) }
+        // the person's unsaved edits are never written by an agent's save (SaveDocument, SaveDocumentAs); its commits are tracked for that
+        let short = ty.rsplit('.').next().unwrap_or(ty);
+        if matches!(short, "SaveDocument" | "SaveDocumentAs") {
+            let why = super::embed::unsaved_update(&pro, |u| u).refuse_save(Path::new(path).file_name().and_then(|f| f.to_str()).unwrap_or(path));
+            if !why.is_empty() { return Err(why) }
+        }
+        if short == "BeginCommit" { super::embed::unsaved_update(&pro, |u| u.agent_begins()); }
+        let commits = short == "EndCommit" && msg_commits(&msg);
         let o = super::embed::gui_call(&gui, ty, msg).await;
+        if commits && o["ok"].as_bool().unwrap_or(false) { super::embed::unsaved_update(&pro, |u| u.agent_committed()); }
         if o["fallback"].as_bool().unwrap_or(false) { log_fallback(hub, thread, o["why"].as_str().unwrap_or("")).await; return Err(o["error"].as_str().unwrap_or("").into()) }
         let ok = o["ok"].as_bool().unwrap_or(false);
         let servers = format!("{pro}|ready|gui ({})", gui.mode);
@@ -432,6 +441,9 @@ async fn run(hub: &Arc<Hub>, thread: Option<&str>, path: &str, ty: &str, msg: Va
     if status { return Ok(json!({"server":ks::note(&lines),"servers":lines,"argv":argv,"version":env.version,"capabilities":o["message"].clone(),"detail":if ok { String::new() } else { err_of(&o) }})) }
     if ok { Ok(json!({"type":o["type"].as_str().unwrap_or(""),"message":o["message"].clone()})) } else { Err(err_of(&o)) }
 }
+
+/// Whether an EndCommit request commits (CMA_COMMIT, the default) rather than drops.
+fn msg_commits(msg: &Value) -> bool { !msg.to_string().contains("CMA_DROP") }
 
 /// Client RPC `kicad.retry` (Hub.kretry): failed servers are forgotten; the next request starts them.
 pub struct IpcRpc;
