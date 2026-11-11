@@ -98,6 +98,15 @@ def view_next(hub, bot):
         v.close()
 
 
+def view_text(hub, target):
+    """What a window opened on `target` draws (the whole reply as text)."""
+    v = View(hub)
+    try:
+        return json.dumps(v.request("view.open", {"target": target}))
+    finally:
+        v.close()
+
+
 def row_note(hub, uber_only=True):
     """Bub's sidebar row as this hub draws it (the note), from the setting the row reads: home.moving."""
     return m.setting(hub, "home.moving")
@@ -149,6 +158,10 @@ def main():
          str([cnt(A, t) for t in ("zz cut person", "zz cut said", "cut ring")]))
     item("Bub's row says the cut move did not happen", "no (Moving to forever)", '"failed"' in row_note(A) and "restarted" in row_note(A), row_note(A))
 
+    # a window that has Bub's chat open through the move, on one connection, as GPUI holds it
+    held_view = View(A)
+    held_view.request("view.open", {"target": {"kind": "bot", "id": bub}})
+
     # 2. the move, with a message mid-move
     r = m.rpc(A, "home.move", {"to": "hub-b"})
     check("home.move starts", r.get("started") is True, json.dumps(r)[:200])
@@ -160,6 +173,7 @@ def main():
     hook_mid = m.post_hook(B.base, hid, tok, b'{"zz":"ring mid-move"}')
     done = m.wait(lambda: (lambda s: s if s.get("state") in ("done", "failed") else None)(m.rpc(A, "home.status")), 180)
     check("the move is done", (done or {}).get("state") == "done", json.dumps(done))
+    moved_at = time.time()
     check("B's uberbot is Bub (same id)", m.uber(B) == bub)
     item("the mid-move message reaches Bub on B", "no", bool(m.wait(lambda: said(B, tb, "zz mid-move hello"), 60)))
     n_said = lambda h, t: sum(1 for e in m.events(h) if e.get("$") == "MessagePosted" and e.get("thread") == tb and e.get("role") != "assistant" and t in e.get("text", ""))
@@ -172,6 +186,18 @@ def main():
     link_b = json.loads(m.setting(A, "home.at") or "{}").get("link", "")
     nxt, tgt, okv = view_next(A, bub)
     item("a window on A with Bub open is sent to Bub on B (same id), no error", "no (not on this hub)", okv and nxt == {"kind": "bot", "id": f"{link_b}~{bub}"} and tgt == {"kind": "bot", "id": bub}, f"{nxt} {tgt}")
+    r1 = held_view.request("view.update", {"target": {"kind": "bot", "id": bub}})
+    nt = (r1.get("result") or {}).get("nextTarget") or {}
+    held_view.view_id = ""
+    r2 = held_view.request("view.open", {"target": nt}) if nt else {}
+    held_txt = json.dumps(r2)
+    if "zz mid-move hello" not in held_txt:
+        time.sleep(3); held_txt = json.dumps(held_view.request("view.update", {"target": nt}))
+    held_view.close()
+    item("the window held open through the move follows and draws B's entries", "no (old entries only)", nt.get("id", "").endswith(bub) and "zz mid-move hello" in held_txt, held_txt[:300])
+    t0 = time.time(); shown = m.wait(lambda: (lambda t: t if "zz mid-move hello" in t and "zz to the old copy" in t else None)(view_text(A, nxt)), 60) or view_text(A, nxt)
+    print(f"(A's mirror drew the mid-move messages {time.time() - t0:.1f} s after the checks above; the move ended {time.time() - moved_at:.1f} s ago)", flush=True)
+    item("that window draws Bub's chat from B, the mid-move message in it", "no (old entries only)", "zz mid-move hello" in shown and "zz to the old copy" in shown, shown[:200])
 
     # 1. from B (no project), Bub works on A
     link_a = next(e["id"] for e in m.events(B) if e.get("$") == "PeerSet" and not e.get("revoked"))

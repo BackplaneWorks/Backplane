@@ -240,9 +240,10 @@ struct DBot: Codable, Equatable, Identifiable {
     enum CodingKeys: String, CodingKey { case id, name, thread, uber, mark, note }
     init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); id = c.str(.id); name = c.str(.name); thread = c.str(.thread); uber = c.bool(.uber); mark = try? c.decode(DMark.self, forKey: .mark); note = c.str(.note) }
     /// The open chat `open` after a home move: the same bot's thread on its new home (`<link>~<id>` there, or the plain id back here); nil when it did not move.
-    static func followed(_ open: String, _ was: [DBot], _ now: [DBot]) -> String? {
+    /// `known`: the bot that chat was last seen to be (a move lists it gone for a moment between the old home letting go and the new one showing it).
+    static func followed(_ open: String, _ known: DBot?, _ now: [DBot]) -> String? {
         let local = { (s: String) in String(s.split(separator: "~").last ?? Substring(s)) }
-        guard let b = was.first(where: { $0.thread == open }), !now.contains(where: { $0.thread == open }) else { return nil }
+        guard let b = known, b.thread == open, !now.contains(where: { $0.thread == open }) else { return nil }
         return now.first(where: { local($0.id) == local(b.id) && local($0.thread) == local(open) })?.thread
     }
 }

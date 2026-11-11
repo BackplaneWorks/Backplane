@@ -125,6 +125,7 @@ final class DataClient {
     @ObservationIgnored private var listSub = 0
     @ObservationIgnored private var threadSub = 0
     @ObservationIgnored private var open: String?
+    @ObservationIgnored private var openBot: DBot?   // the bot whose chat is open, as last listed (a home move follows it)
     @ObservationIgnored private var saveTask: Task<Void, Never>?
     @ObservationIgnored private var listNext: String?
     @ObservationIgnored private var pushToken: String?
@@ -1006,10 +1007,11 @@ final class DataClient {
     }
     func loadBots() async {
         guard has("bots"), let r: DDirectory = try? await call("bots.list") else { return }
-        let was = bots; bots = r.bots; rooms = r.rooms
+        if let o = open, let b = bots.first(where: { $0.thread == o }) { openBot = b }
+        bots = r.bots; rooms = r.rooms
         if uberAfterPair, let u = bots.first(where: { $0.uber && !$0.thread.isEmpty }) { uberAfterPair = false; pendingThread = u.thread }
         // the uberbot's chat follows a home move: the same row, the same thread, now drawn from the machine that holds it
-        if let o = open, let to = DBot.followed(o, was, r.bots) { pushThread = to }
+        if let o = open { if let b = bots.first(where: { $0.thread == o }) { openBot = b } else if let to = DBot.followed(o, openBot, r.bots) { openBot = nil; pushThread = to } }
     }
     func roomPosts(_ room: String) async -> [DPost] { ((try? await call("room.posts", ["room": room, "limit": 60]) as DPosts)?.posts) ?? [] }
     func roomPost(_ room: String, _ text: String) async throws { _ = try await call("room.post", ["room": room, "text": text, "clientId": UUID().uuidString], as: DEmpty.self) }

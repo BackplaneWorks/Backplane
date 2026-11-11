@@ -408,13 +408,16 @@ async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Result<Value,
             for (k, val) in sets { rpc(hub, c, "setting.set", json!({"key":k,"value":val})).await?; }
             Ok(json!({}))
         }
-        "threads.list" => { let g = hub.model().await; let asks = open_ask_counts(hub); let (proj, arch) = (s(p, "project"), p["archived"] == true);
+        "threads.list" => { let at = hub.setting("home.at").await.unwrap_or_default(); let farv = hub.far();
+            // the old copy of a thread the home took to another machine (the uberbot's, a bot's) is not listed: that machine's is (net/homemove.rs)
+            let moved = |id: &str, project: &str| crate::net::homemove::moved_thread(&at, id, Some(project), &|x| farv.as_ref().map_or(false, |f| f.has(x))).is_some();
+            let g = hub.model().await; let asks = open_ask_counts(hub); let (proj, arch) = (s(p, "project"), p["archived"] == true);
             // `settled`: true is only the Settled shelf (newest settle first), false only the rest (newest activity first); left out, both, as before
             let want = p.get("settled").and_then(Value::as_bool);
             let lim = limit_of(p, 50, 200);
             // the linked machines' threads are listed with this hub's, newest first across machines (`machine`: "" every machine, "@here", or one machine's name)
             let (mut keyed, join, chips) = with_far(hub, s(p, "machine"), |far, un, pick| {
-                let mut keyed: Vec<(u64, String)> = if machines::here_on(pick) { g.threads.iter().filter(|(_, t)| !t.deleted && t.archived == arch && (proj.is_empty() || t.project == proj) && t.project != crate::sidebar::SCRATCH).filter_map(|(i, t)| {
+                let mut keyed: Vec<(u64, String)> = if machines::here_on(pick) { g.threads.iter().filter(|(i, t)| !t.deleted && t.archived == arch && (proj.is_empty() || t.project == proj) && t.project != crate::sidebar::SCRATCH && !moved(i, &t.project)).filter_map(|(i, t)| {
                     let (_, settled, at) = flags_of(i);
                     if want.map_or(false, |w| w != settled) { return None }
                     Some((if want == Some(true) { at } else { ms(t.activity.max(t.created)) }, i.clone())) }).collect() } else { vec![] };
