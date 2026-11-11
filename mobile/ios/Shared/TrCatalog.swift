@@ -347,6 +347,65 @@ ios.buy.last	Buy it · last estimate: from {price}	購入 · 前回の見積も�
 ios.buy.incomplete	Buy it · estimate incomplete	購入 · 見積もりが不完全
 ios.improve.search	Search projects…	プロジェクトを検索…
 android.notify.head	NOTIFICATIONS	通知
+gpui.keysheet.note	Settings, This device changes them. Esc closes this.	設定 → このデバイスで変更できます。Escで閉じます。
+gpui.keys.help	Keyboard shortcuts: this list. ? outside a text box, F1 anywhere	キーボードショートカット：この一覧。テキスト欄の外では ?、どこでも F1
+gpui.f2.welcome.body	Backplane runs coding agents on your boards, schematics and mechanical parts. Five short steps set it up, and each one can be skipped. Finish later closes setup until the next launch.	Backplaneは基板・回路図・機構部品の上でコーディングエージェントを動かします。5つの短いステップで準備し、どれも飛ばせます。「後で続ける」で次回起動までセットアップを閉じます。
+gpui.f2.data.folder.note	{home}. Your threads, settings, bots and keys are kept here, and the hub runs your agents from it.	{home}。スレッド・設定・ボット・キーはここに保存され、ハブはここからエージェントを動かします。
+gpui.f2.choose.another	Choose another	別のフォルダを選ぶ
+gpui.f2.usage.note	This build sends nothing. With On, a later build may send daily counts with a random id. Never your conversations, files, names or keys. Settings, Privacy changes it.	このビルドは何も送信しません。オンにすると、今後のビルドがランダムなIDと日ごとの件数を送ることがあります。会話・ファイル・名前・キーは送りません。設定 → プライバシーで変更できます。
+gpui.f2.v014	Backplane 0.14	Backplane 0.14
+gpui.f2.v014.copied	Your 0.14 data was copied into this hub.	0.14のデータはこのハブにコピーされました。
+gpui.f2.v014.found	Your 0.14 data is in {from}. This hub can copy its projects, threads, bots and settings. The 0.14 folder is only read.	0.14のデータは {from} にあります。このハブはそのプロジェクト・スレッド・ボット・設定をコピーできます。0.14のフォルダは読むだけです。
+gpui.f2.agents.body	Backplane runs these agents on this computer. You need one. Install it here and connect your account. Claude and Codex sign in from here. The others sign in with their own command.	Backplaneはこのコンピュータでこれらのエージェントを動かします。1つあれば十分です。ここでインストールし、アカウントを接続してください。ClaudeとCodexはここからサインインします。その他は各自のコマンドでサインインします。
+gpui.f2.installing	Installing. {note}	インストール中。{note}
+gpui.f2.install.failed	It did not install: {note}.	インストールできませんでした：{note}。
+gpui.f2.installed	Installed.	インストール済み。
+gpui.f2.version	Version {v}.	バージョン {v}。
+gpui.f2.v.connected	Version {v}. Connected.	バージョン {v}。接続済み。
+gpui.f2.v.connected.as	Version {v}. Connected as {who}.	バージョン {v}。{who} として接続済み。
+gpui.f2.i.connected	Installed. Connected.	インストール済み。接続済み。
+gpui.f2.i.connected.as	Installed. Connected as {who}.	インストール済み。{who} として接続済み。
+gpui.f2.v.notconnected	Version {v}. Not connected.	バージョン {v}。未接続。
+gpui.f2.i.notconnected	Installed. Not connected.	インストール済み。未接続。
+gpui.f2.v.runcmd	Version {v}. If it is not signed in yet, run {cmd} in a terminal.	バージョン {v}。まだサインインしていなければ、ターミナルで {cmd} を実行してください。
+gpui.f2.i.runcmd	Installed. If it is not signed in yet, run {cmd} in a terminal.	インストール済み。まだサインインしていなければ、ターミナルで {cmd} を実行してください。
+gpui.f2.more.agents	More agents	その他のエージェント
+gpui.f2.check.after	After you install or sign in somewhere else.	別の場所でインストールやサインインをした後に。
+gpui.f2.tools	Design tools	設計ツール
+gpui.f2.tools.body	Agents use KiCad for boards and schematics, and FreeCAD for mechanical parts. Skip FreeCAD if you only design boards.	エージェントは基板と回路図にKiCadを、機構部品にFreeCADを使います。基板だけを設計するならFreeCADは飛ばしてかまいません。
+gpui.f2.kicad.ok	Backplane KiCad {v} at {path}. Agents can edit a board in a running KiCad.	Backplane KiCad {v}（{path}）。エージェントは起動中のKiCadで基板を編集できます。
+gpui.f2.kicad.installing	Installing Backplane KiCad {v}. {note}	Backplane KiCad {v} をインストール中。{note}
+gpui.f2.kicad.auto	Not found. Downloading Backplane KiCad {v} into Backplane's own folder. This takes a few minutes.	見つかりません。Backplane KiCad {v} をBackplane専用のフォルダにダウンロードしています。数分かかります。
+gpui.f2.kicad.nopkg	Not found. No Backplane KiCad is published for this computer. Stock KiCad 9 or later works for viewing and export.	見つかりません。このコンピュータ向けのBackplane KiCadは公開されていません。通常のKiCad 9以降で表示と書き出しができます。
+gpui.f2.freecad.notfound	Not found. Agents use it to model enclosures and brackets.	見つかりません。エージェントはケースやブラケットのモデリングに使います。
+gpui.f2.locate.kicad	Locate KiCad	KiCadの場所を指定
+gpui.f2.locate.freecad	Locate FreeCAD	FreeCADの場所を指定
+gpui.f2.locate.note	If it is installed somewhere else, give the full path to {tool}.	別の場所にインストールされている場合は、{tool} のフルパスを入力してください。
+gpui.f2.path.to	Path to {tool}	{tool} のパス
+gpui.f2.alwayson	Where your uberbot lives	メインボットの置き場所
+gpui.f2.alwayson.body	Always-on keeps your uberbot, reminders, bots and phone alerts running while this computer sleeps. Hardware and code still run here.	常時稼働にすると、このコンピュータがスリープ中もメインボット・リマインダー・ボット・スマホへの通知が動き続けます。ハードウェアとコードは引き続きここで動きます。
+gpui.f2.aon.here	Stay on this computer	このコンピュータのまま
+gpui.f2.aon.here.note	Your uberbot runs here, while this computer is on. You can move it later in Settings, Machines.	メインボットはこのコンピュータが動いている間ここで動きます。後で 設定 → マシン から移せます。
+gpui.f2.aon.boat	An always-on Boat	常時稼働のBoat
+gpui.f2.aon.boat.note	A small server on your own Boat account runs your uberbot day and night. You pay Boat for it.	ご自身のBoatアカウントの小さなサーバーが、メインボットを昼も夜も動かします。費用はBoatに支払います。
+gpui.f2.aon.machine	Another machine of yours	お持ちの別のマシン
+gpui.f2.aon.machine.note	A home server or a desktop that stays on runs your uberbot.	自宅サーバーや電源を入れたままのデスクトップがメインボットを動かします。
+gpui.f2.chosen	Chosen	選択中
+gpui.f2.choose	Choose	選ぶ
+gpui.f2.coming	Coming soon	近日対応
+gpui.f2.coming.note	This build cannot set it up yet. Stay on this computer for now.	このビルドではまだ設定できません。今はこのコンピュータのままにしてください。
+gpui.f2.project.body	A project is a folder, usually with a KiCad project in it. Give a folder that exists to add it, or a new path to make it. Then tell an agent what you want.	プロジェクトはフォルダで、ふつうKiCadプロジェクトが入っています。既存のフォルダを指定すると追加し、新しいパスなら作成します。そのあとエージェントにしてほしいことを伝えてください。
+gpui.f2.first.message.note	Starts a thread in this project with it. You can also leave it empty and write after setup.	このメッセージでこのプロジェクトにスレッドを始めます。空のままにして、セットアップ後に書くこともできます。
+gpui.f2.what.agent	What should the agent do?	エージェントに何をしてほしいですか？
+gpui.f2.folder.note	The full path of a folder on this computer.	このコンピュータ上のフォルダのフルパス。
+gpui.f2.pair.phone	Pair a phone	スマホをペアリング
+gpui.f2.pair.phone.note	Optional. Get the app, then show the code here and scan it. The phone opens your uberbot.	任意です。アプリを入れてから、ここでコードを表示して読み取ってください。スマホはメインボットを開きます。
+gpui.f2.pair.phone.shown	Scan this with the Backplane app, or type the short code and this address. It works once, for ten minutes. Treat it as a password.	Backplaneアプリでこれを読み取るか、短いコードとこのアドレスを入力してください。1回だけ、10分間有効です。パスワードと同じように扱ってください。
+gpui.f2.show.code	Show the code	コードを表示
+gpui.f2.done.body	Press ? any time for keys.	? でいつでもキー一覧を表示できます。
+gpui.f2.open.uber	Open the uberbot	メインボットを開く
+gpui.f2.setup.phone	Setup runs on a computer, in Settings, Setup there. This phone is paired with it.	セットアップはコンピュータの 設定 → セットアップ で行います。このスマホはそのコンピュータとペアリングされています。
+gpui.f2.setup.five	Five short steps: your data folder, agents, design tools, where your uberbot lives and a first project.	5つの短いステップ：データフォルダ、エージェント、設計ツール、メインボットの置き場所、最初のプロジェクト。
 common.cancel	Cancel	キャンセル
 common.delete	Delete	削除
 common.save	Save	保存
@@ -1997,6 +2056,13 @@ gpui.imp.send.starts.a.new.thread	Send starts a new thread in the chosen project
 gpui.imp.creating.the.thread	Creating the thread…	スレッドを作成しています…
 gpui.imp.request.sent.opening.the.new2	Request sent. Opening the new thread.	リクエストを送信しました。新しいスレッドを開きます。
 gpui.imp.project.chosen	Sending to {title}	{title}へ送信
+gpui.acct.sync.token	sync token	同期トークン
+gpui.acct.sync.token.from.a.linked	sync token from a linked machine	リンク先のマシンからの同期トークン
+gpui.acct.sync.days	{n, plural, one {# day left} other {# days left}}	{n, plural, other {残り#日}}
+gpui.acct.renew.the.sync.token	Renew the sync token	同期トークンを更新
+gpui.acct.make.a.sync.token	Make a sync token	同期トークンを作成
+gpui.acct.make.the.sync.token	Make the sync token	同期トークンを作成する
+gpui.acct.add.claude.sync	Add Claude (sync)	Claude（同期）を追加
 gpui.send.the.message	Send the message	メッセージを送信
 gpui.new.line.in.the.message	New line in the message	メッセージ内で改行
 gpui.send.also	Send (also)	送信（別のキー）
@@ -2581,7 +2647,7 @@ gpui.e.acct.sonnet.resets	Sonnet weekly  {left}% left · resets {when}	週間（
 notify.which.alerts.reach.you.quiet	Which alerts reach you, quiet hours and phones are under Notifications.	どの通知を受け取るか、静かな時間帯、スマートフォンは「通知」にあります。
 notify.notifications	Notifications ›	通知 ›
 notify.phones	Phones	スマートフォン
-notify.only.your.uberbot.pushes.to	Only your uberbot pushes to a phone, and a phone window open on the thread is not pushed to.	スマートフォンにプッシュするのはあなたのウーバーボットだけです。スレッドを開いているスマートフォンの画面にはプッシュしません。
+notify.only.your.uberbot.pushes.to	Only your uberbot pushes to a phone, and a phone window open on the thread is not pushed to.	スマートフォンにプッシュするのはあなたのメインボットだけです。スレッドを開いているスマートフォンの画面にはプッシュしません。
 notify.quiet.hours	Quiet hours	静かな時間帯
 notify.a.push.waits.until.the	A push waits until the end of quiet hours, in your time zone, and goes then as one.	プッシュは静かな時間帯が終わる(あなたのタイムゾーン)まで待ち、終わるとまとめて送られます。
 notify.quiet.from.and.until	Quiet from and until	静かな時間帯の開始と終了
@@ -2620,6 +2686,11 @@ ring.hear.again.openai	Hear again (OpenAI)	もう一度聞き取る (OpenAI)
 ring.what.happened	What happened	どうなったか
 ring.send.again	Send again	もう一度送る
 ring.no.recordings.yet	No recordings yet.	録音はまだありません。
+hub.acct.claude.sync	Claude (sync)	Claude（同期）
+hub.acct.add.a.claude.sync.token	Add a Claude sync token	Claude の同期トークンを追加
+hub.acct.connected.sync.token	connected, sync token	接続済み（同期トークン）
+hub.acct.sync.token.ended	Sync token ended	同期トークンの期限切れ
+hub.acct.sync.token.ends	Sync token ends {when}	同期トークンの期限: {when}
 gpui.f.group.install	Install	インストール
 gpui.f.group.agents	Agents	エージェント
 gpui.f.group.cad	CAD tools	CADツール
@@ -2874,19 +2945,19 @@ gpui.f.tour.palette.body	{m}+K opens the palette. Type part of a thread's name o
 gpui.f.key.agent	Agent, model and effort	エージェント・モデル・思考量
 gpui.f.key.prevnext	Previous and next thread	前と次のスレッド
 gpui.f.key.prevnext.keys	{m}+Shift+[ and {m}+Shift+]	{m}+Shift+[ と {m}+Shift+]
-gpui.f.key.uber	Uberbot chat	ウーバーボットとのチャット
+gpui.f.key.uber	Uberbot chat	メインボットとのチャット
 gpui.f.try.it	Try it	試す
 gpui.f.try.palette	Closes setup and opens the palette. Finish setup in the sidebar brings you back.	セットアップを閉じてパレットを開きます。サイドバーの「セットアップを続ける」で戻れます。
 gpui.f.open.palette	Open the palette	パレットを開く
 gpui.f.try.settings	Closes setup and opens Settings. Finish setup in the sidebar brings you back.	セットアップを閉じて設定を開きます。サイドバーの「セットアップを続ける」で戻れます。
 gpui.f.open.settings	Open Settings	設定を開く
 gpui.f.tour.settings.body	Settings holds the choices for the whole hub. This device holds the choices for this window only. The pages are {pages}. Accounts is where you add more Claude and Codex accounts, and Hubs switches this window to another hub.	設定にはハブ全体の選択があります。「このデバイス」にはこのウィンドウだけの選択があります。ページは {pages} です。ClaudeやCodexのアカウントを追加するのは「アカウント」、このウィンドウを別のハブに切り替えるのは「ハブ」です。
-gpui.f.uber.title	Your uberbot	あなたのウーバーボット
-gpui.f.uber.is	{name} is your uberbot. Open it at the top of the sidebar for the status of everything: what runs, what waits for you and what failed.	{name}があなたのウーバーボットです。サイドバーの一番上から開くと、実行中のもの、あなたを待っているもの、失敗したものなど、すべての状況がわかります。
-gpui.f.uber.pick	Your uberbot is the bot you talk to first. It sees each project, thread, bot and machine, and its Status tab shows what runs and what waits for you. Make one of your bots the uberbot. You can change it later.	ウーバーボットは最初に話しかけるボットです。すべてのプロジェクト、スレッド、ボット、マシンを把握し、状況タブに実行中のものとあなたを待っているものを表示します。ボットの1体をウーバーボットにしてください。後で変更できます。
-gpui.f.uber.create	Your uberbot is the bot you talk to first. It sees each project, thread, bot and machine, and its Status tab shows what runs and what waits for you. Create it now and rename it later.	ウーバーボットは最初に話しかけるボットです。すべてのプロジェクト、スレッド、ボット、マシンを把握し、状況タブに実行中のものとあなたを待っているものを表示します。今作成して、名前は後で変えられます。
-gpui.f.uber.make	Make {name} my uberbot	{name}をウーバーボットにする
-gpui.f.uber.create.btn	Create my uberbot	ウーバーボットを作成
+gpui.f.uber.title	Your uberbot	あなたのメインボット
+gpui.f.uber.is	{name} is your uberbot. Open it at the top of the sidebar for the status of everything: what runs, what waits for you and what failed.	{name}があなたのメインボットです。サイドバーの一番上から開くと、実行中のもの、あなたを待っているもの、失敗したものなど、すべての状況がわかります。
+gpui.f.uber.pick	Your uberbot is the bot you talk to first. It sees each project, thread, bot and machine, and its Status tab shows what runs and what waits for you. Make one of your bots the uberbot. You can change it later.	メインボットは最初に話しかけるボットです。すべてのプロジェクト、スレッド、ボット、マシンを把握し、状況タブに実行中のものとあなたを待っているものを表示します。ボットの1体をメインボットにしてください。後で変更できます。
+gpui.f.uber.create	Your uberbot is the bot you talk to first. It sees each project, thread, bot and machine, and its Status tab shows what runs and what waits for you. Create it now and rename it later.	メインボットは最初に話しかけるボットです。すべてのプロジェクト、スレッド、ボット、マシンを把握し、状況タブに実行中のものとあなたを待っているものを表示します。今作成して、名前は後で変えられます。
+gpui.f.uber.make	Make {name} my uberbot	{name}をメインボットにする
+gpui.f.uber.create.btn	Create my uberbot	メインボットを作成
 gpui.f.all.set	Everything is set up. Settings, Setup runs this again at any time.	すべて設定できました。設定 → セットアップでいつでもやり直せます。
 gpui.f.still.open	These steps are still open. Go to one now, or press Done and return to them in Settings, Setup.	まだ残っているステップがあります。今すぐ移動するか、「完了」を押して後で設定 → セットアップから戻ってください。
 gpui.f.skipped.dot	Skipped.	飛ばしました。
@@ -4605,6 +4676,9 @@ android.ring.head	RING	リング
     /// gpui.imp.project.chosen = Sending to {title}
     static func gpui_imp_project_chosen(title: String) -> String { f("gpui.imp.project.chosen", ["title": title]) }
 
+    /// gpui.acct.sync.days = {n, plural, one {# day left} other {# days left}}
+    static func gpui_acct_sync_days(n: Int) -> String { f("gpui.acct.sync.days", ["n": String(n)]) }
+
     /// gpui.b.replying.to = ↩ Replying to: {line}
     static func gpui_b_replying_to(line: String) -> String { f("gpui.b.replying.to", ["line": line]) }
 
@@ -5150,6 +5224,9 @@ android.ring.head	RING	リング
 
     /// gpui.e.failover.accounts.the.one.with.the = {n} accounts, the one with the most usage left first.
     static func gpui_e_failover_accounts_the_one_with_the(n: String) -> String { f("gpui.e.failover.accounts.the.one.with.the", ["n": n]) }
+
+    /// hub.acct.sync.token.ends = Sync token ends {when}
+    static func hub_acct_sync_token_ends(when: String) -> String { f("hub.acct.sync.token.ends", ["when": when]) }
 
     /// gpui.f.counter = {i, number} of {n, number}
     static func gpui_f_counter(i: Int, n: Int) -> String { f("gpui.f.counter", ["i": String(i), "n": String(n)]) }
@@ -6098,4 +6175,52 @@ android.ring.head	RING	リング
 
     /// ios.buy.last = Buy it · last estimate: from {price}
     static func ios_buy_last(price: String) -> String { f("ios.buy.last", ["price": price]) }
+
+    /// gpui.f2.data.folder.note = {home}. Your threads, settings, bots and keys are kept here, and the hub runs your agents from it.
+    static func gpui_f2_data_folder_note(home: String) -> String { f("gpui.f2.data.folder.note", ["home": home]) }
+
+    /// gpui.f2.v014.found = Your 0.14 data is in {from}. This hub can copy its projects, threads, bots and settings. The 0.14 folder is only read.
+    static func gpui_f2_v014_found(from: String) -> String { f("gpui.f2.v014.found", ["from": from]) }
+
+    /// gpui.f2.installing = Installing. {note}
+    static func gpui_f2_installing(note: String) -> String { f("gpui.f2.installing", ["note": note]) }
+
+    /// gpui.f2.install.failed = It did not install: {note}.
+    static func gpui_f2_install_failed(note: String) -> String { f("gpui.f2.install.failed", ["note": note]) }
+
+    /// gpui.f2.version = Version {v}.
+    static func gpui_f2_version(v: String) -> String { f("gpui.f2.version", ["v": v]) }
+
+    /// gpui.f2.v.connected = Version {v}. Connected.
+    static func gpui_f2_v_connected(v: String) -> String { f("gpui.f2.v.connected", ["v": v]) }
+
+    /// gpui.f2.v.connected.as = Version {v}. Connected as {who}.
+    static func gpui_f2_v_connected_as(v: String, who: String) -> String { f("gpui.f2.v.connected.as", ["v": v, "who": who]) }
+
+    /// gpui.f2.i.connected.as = Installed. Connected as {who}.
+    static func gpui_f2_i_connected_as(who: String) -> String { f("gpui.f2.i.connected.as", ["who": who]) }
+
+    /// gpui.f2.v.notconnected = Version {v}. Not connected.
+    static func gpui_f2_v_notconnected(v: String) -> String { f("gpui.f2.v.notconnected", ["v": v]) }
+
+    /// gpui.f2.v.runcmd = Version {v}. If it is not signed in yet, run {cmd} in a terminal.
+    static func gpui_f2_v_runcmd(v: String, cmd: String) -> String { f("gpui.f2.v.runcmd", ["v": v, "cmd": cmd]) }
+
+    /// gpui.f2.i.runcmd = Installed. If it is not signed in yet, run {cmd} in a terminal.
+    static func gpui_f2_i_runcmd(cmd: String) -> String { f("gpui.f2.i.runcmd", ["cmd": cmd]) }
+
+    /// gpui.f2.kicad.ok = Backplane KiCad {v} at {path}. Agents can edit a board in a running KiCad.
+    static func gpui_f2_kicad_ok(v: String, path: String) -> String { f("gpui.f2.kicad.ok", ["v": v, "path": path]) }
+
+    /// gpui.f2.kicad.installing = Installing Backplane KiCad {v}. {note}
+    static func gpui_f2_kicad_installing(v: String, note: String) -> String { f("gpui.f2.kicad.installing", ["v": v, "note": note]) }
+
+    /// gpui.f2.kicad.auto = Not found. Downloading Backplane KiCad {v} into Backplane's own folder. This takes a few minutes.
+    static func gpui_f2_kicad_auto(v: String) -> String { f("gpui.f2.kicad.auto", ["v": v]) }
+
+    /// gpui.f2.locate.note = If it is installed somewhere else, give the full path to {tool}.
+    static func gpui_f2_locate_note(tool: String) -> String { f("gpui.f2.locate.note", ["tool": tool]) }
+
+    /// gpui.f2.path.to = Path to {tool}
+    static func gpui_f2_path_to(tool: String) -> String { f("gpui.f2.path.to", ["tool": tool]) }
 }
