@@ -2,7 +2,8 @@
 //
 //   backplane-step2glb IN.step OUT.glb [--linear MM] [--relative] [--angular RAD] [--parts DIR]
 //   (--relative: --linear is a share of each edge's size, not millimetres)
-//   [--fine x0,y0,z0,x1,y1,z1 --fine-linear L --fine-angular A]: the solids that meet that box (millimetres) are meshed at L and A instead
+//   [--fine x0,y0,z0,x1,y1,z1 --fine-linear L --fine-angular A [--fine-min MM]]: the solids that meet that box (millimetres) are meshed at L
+//   and A instead, no segment under MM (finer than the wire's 10 um corners carry, a facet's normal is noise)
 //
 // Reads IN through XCAF (STEPCAFControl_Reader, colours on), meshes every distinct solid once with BRepMesh (several solids at a time on
 // the machine's cores, each solid's faces in parallel when there are few), and writes OUT: millimetres, Z up, one mesh whose primitives
@@ -197,7 +198,7 @@ static void add_leaf(Model& m, const Leaf& l, const Solid& s) {
 int main(int argc, char** argv) {
   if (argc < 3) { say("usage: backplane-step2glb IN.step OUT.glb [--linear MM|SHARE] [--relative] [--angular RAD] [--parts DIR]"); return 2; }
   std::string in = argv[1], out = argv[2], parts; double linear = 0.03, angular = 0.2; bool relative = false;
-  double fine_box[6] = {0, 0, 0, 0, 0, 0}, fine_linear = 0.001, fine_angular = 0.05; bool fine = false;
+  double fine_box[6] = {0, 0, 0, 0, 0, 0}, fine_linear = 0.001, fine_angular = 0.05, fine_min = 0; bool fine = false;
   for (int i = 3; i < argc; i++) {
     std::string a = argv[i];
     if (a == "--relative") { relative = true; continue; }
@@ -205,6 +206,7 @@ int main(int argc, char** argv) {
     if (a == "--fine") { fine = sscanf(argv[++i], "%lf,%lf,%lf,%lf,%lf,%lf", &fine_box[0], &fine_box[1], &fine_box[2], &fine_box[3], &fine_box[4], &fine_box[5]) == 6; if (!fine) { say("--fine needs x0,y0,z0,x1,y1,z1"); return 2; } continue; }
     if (a == "--fine-linear") { fine_linear = atof(argv[++i]); continue; }
     if (a == "--fine-angular") { fine_angular = atof(argv[++i]); continue; }
+    if (a == "--fine-min") { fine_min = atof(argv[++i]); continue; }
     if (a == "--linear") linear = atof(argv[++i]); else if (a == "--angular") angular = atof(argv[++i]); else if (a == "--parts") parts = argv[++i];
     else { say("unknown argument %s", a.c_str()); return 2; }
   }
@@ -279,7 +281,7 @@ int main(int argc, char** argv) {
     for (size_t k; (k = next.fetch_add(1)) < order.size();) {
       Solid& s = solids[order[k]];
       heal(s, params, ops);
-      IMeshTools_Parameters sp = p; if (s.fine) { sp.Deflection = fine_linear; sp.Angle = fine_angular; }
+      IMeshTools_Parameters sp = p; if (s.fine) { sp.Deflection = fine_linear; sp.Angle = fine_angular; if (fine_min > 0) sp.MinSize = fine_min; }
       BRepMesh_IncrementalMesh(s.healed, sp);
       std::lock_guard<std::mutex> g(mu); meshed[order[k]] = 1; cv.notify_all();
     }

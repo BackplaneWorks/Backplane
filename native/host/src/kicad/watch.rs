@@ -319,6 +319,8 @@ impl Plots {
           if !st.subs.get(&client).map_or(false, |v| v.iter().any(|s| s.key == ky)) { return Err("that model is not on show here") }
           let Some(s) = st.srcs.get_mut(ky) else { return Err("that model is not on show here") };
           if !solid_kind(s.kind) || !solidread::is_step(&s.file) || is_version(&s.file) { return Err("only a STEP part is refined") }
+          // FreeCAD meshes a whole file one way: only the native mesher refines a region
+          if !matches!(stepglb::machine(&self.home).first(), Some(stepglb::Mesher::Step2glb(_))) { return Err("refining needs backplane-step2glb beside the hub") }
           if s.focus.map_or(false, |f| within(b, f)) { return Ok(false) }
           s.focus = Some(b); }
         self.read(hub, ky);
