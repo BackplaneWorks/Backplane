@@ -280,14 +280,14 @@ fn import(f: &Facts, c: &Client) -> Option<Step> {
     Some(Step { id: "import", group: "Install", title: "Bring your 0.14 projects across?".into(), body, rows: import_rows(f.info), choices: vec![], panel: "", done: v["state"] == "done", task: true })
 }
 
+/// The anonymous-usage step: On is preselected, and finishing setup with it on is the choice (docs/telemetry.md).
 fn usage(f: &Facts) -> Step {
-    let (share, asked, ua) = (set(f.st, "telemetry.share"), set(f.st, "telemetry.asked"), set(f.st, "telemetry.usage.asked"));
-    let answered = crate::settings::telemetry::answered(share, asked, ua) || !set(f.st, "onboard.usage").is_empty();
-    let on = crate::settings::telemetry::on(share, ua) && set(f.st, "onboard.usage") != "off";
-    let body = "This build sends nothing, whichever you choose. A later build may send anonymous counts if you say On. They are installs, updates, daily activity, and daily totals of threads, messages, model tokens, bot traffic, boards made and boards ordered, with a random install id, the version, the system and the day. It would never send your conversations, projects, files, names or keys. Settings, Privacy changes your choice.".to_string();
-    let rows = vec![row("Share anonymous usage", if answered { "Your choice is saved." } else { "Choose one." }, vec![btn("On", "ob-usage", "on", answered && on), btn("Off", "ob-usage", "off", answered && !on)])];
-    Step { id: "usage", group: "Install", title: "Anonymous usage".into(), body, rows, choices: vec![], panel: "", done: answered, task: true }
+    let off = crate::settings::telemetry::off(set(f.st, "telemetry.share"), set(f.st, "telemetry.usage.asked"), set(f.st, "onboard.usage"));
+    let rows = vec![row("Share anonymous usage", "", vec![btn("On", "ob-usage", "on", !off), btn("Off", "ob-usage", "off", off)])];
+    Step { id: "usage", group: "Install", title: "Anonymous usage".into(), body: USAGE_NOTE.to_string(), rows, choices: vec![], panel: "", done: true, task: true }
 }
+/// What the telemetry step says is sent, all of it.
+pub const USAGE_NOTE: &str = "On unless you turn it off. Backplane sends anonymous counts: installs, updates, daily activity, and daily totals of threads, messages, model tokens, bot traffic, boards made and boards ordered, with a random install id, the version, the system and the day. Never your conversations, projects, files, names, paths or keys. Settings, Privacy changes it.";
 
 fn agent_note(f: &Facts, a: &Agent) -> String {
     let c = f.agent(a.id);
@@ -667,7 +667,8 @@ pub fn act(st: &State, hub: &str, session: &Value, info: &Value, c: &Client, use
         "ob-next" => {
             let x = &steps[i];
             if i + 1 == steps.len() {
-                put(hub, &mut rid, &mut cmds, "onboard.done", "1"); put(hub, &mut rid, &mut cmds, "onboard.step", "");
+                // finishing setup with the telemetry step behind it is the disclosure: recorded before setup is marked done (settings/telemetry.rs)
+                send(hub, &mut rid, &mut cmds, "telemetry.notice.act", json!({"action": "setup"})); put(hub, &mut rid, &mut cmds, "onboard.done", "1"); put(hub, &mut rid, &mut cmds, "onboard.step", "");
                 json!({"drafts": {"@ob.step": "", "@ob.open": "", "@ob.closed": ""}})
             } else {
                 if x.task && !x.done { put(hub, &mut rid, &mut cmds, "onboard.skipped", &with(set(st, "onboard.skipped"), x.id)); }
@@ -679,7 +680,7 @@ pub fn act(st: &State, hub: &str, session: &Value, info: &Value, c: &Client, use
         "ob-go" => { if !steps.iter().any(|x| x.id == value) { return None } let mut p = go(value, hub, &mut rid, &mut cmds); p["drafts"]["@ob.open"] = json!("1"); p["drafts"]["@ob.closed"] = json!(""); p["open"] = json!({"settings": false}); p }
         // Finish later (the phones' dismissal too): closed here until the next launch, the step kept
         "ob-skip" => { put(hub, &mut rid, &mut cmds, "onboard.step", steps[i].id); json!({"drafts": {"@ob.closed": "1", "@ob.open": ""}}) }
-        "ob-end" => { put(hub, &mut rid, &mut cmds, "onboard.done", "1"); put(hub, &mut rid, &mut cmds, "onboard.step", ""); json!({"drafts": {"@ob.closed": "", "@ob.open": "", "@ob.step": ""}}) }
+        "ob-end" => { send(hub, &mut rid, &mut cmds, "telemetry.notice.act", json!({"action": "setup"})); put(hub, &mut rid, &mut cmds, "onboard.done", "1"); put(hub, &mut rid, &mut cmds, "onboard.step", ""); json!({"drafts": {"@ob.closed": "", "@ob.open": "", "@ob.step": ""}}) }
         // from Settings or the sidebar: "start" at the first step, anything else where it was left
         "ob-open" => {
             let first = if value == "start" { steps[0].id.to_string() } else { cur.clone() };
@@ -708,6 +709,11 @@ pub fn act(st: &State, hub: &str, session: &Value, info: &Value, c: &Client, use
             if value != "on" && value != "off" { return None }
             put(hub, &mut rid, &mut cmds, "onboard.usage", value);
             if value == "off" { put(hub, &mut rid, &mut cmds, "telemetry.share", "off"); }
+            // On after an Off is the person's own recorded choice, bound to the preferences on screen (setting.set cannot re-enable)
+            else if crate::settings::telemetry::off(set(st, "telemetry.share"), set(st, "telemetry.usage.asked"), "") {
+                let t = crate::settings::telemetry::of(st); let d = format!("ob-{}-{}", t.revision_n(), rid);
+                send(hub, &mut rid, &mut cmds, "telemetry.choice", json!({"value": "on", "expected": t.token(), "decision": d, "popup": false}));
+            }
             json!({})
         }
         "ob-kicad" => { let raw = draft(session, "@f.obkicad").trim().to_string(); put(hub, &mut rid, &mut cmds, "kicad.path", &raw); send(hub, &mut rid, &mut cmds, "onboard.check", json!({"kicad": raw})); json!({}) }

@@ -103,6 +103,31 @@ struct DataHubBanner: View {
     }
 }
 
+/// The one-time telemetry notice (DataClient.telemetryNotice), one line: Turn off turns telemetry off, Settings opens this app's Settings, ✕ closes it.
+/// "shown" goes once it is really on screen: drawn while the app is active.
+struct DataTelemetryBanner: View {
+    let client: DataClient
+    @Environment(\.scenePhase) private var phase
+    var body: some View {
+        if let n = client.telemetryNotice {
+            VStack(spacing: 0) {
+                HStack(spacing: 8) {
+                    Text(Tr.t(n.text)).dmono(12).foregroundStyle(BackplaneDesign.text).lineLimit(3)
+                    Spacer(minLength: 0)
+                    Button(n.off.isEmpty ? Tr.t("Turn off") : Tr.t(n.off)) { client.telemetryAct("off") }
+                        .buttonStyle(DButton(primary: true)).accessibilityIdentifier("telemetry.off")
+                    Button(n.settings.isEmpty ? Tr.t("Settings") : Tr.t(n.settings)) { client.openSettings = true }
+                        .dmono(12).foregroundStyle(BackplaneDesign.dim).accessibilityIdentifier("telemetry.settings")
+                    Button { client.telemetryAct("close") } label: { Image(systemName: "xmark").font(.system(size: 12)).foregroundStyle(BackplaneDesign.dim).frame(width: 28, height: 28) }
+                        .accessibilityLabel(Tr.t("Close")).accessibilityIdentifier("telemetry.close")
+                }.padding(.horizontal, 12).padding(.vertical, 6).background(BackplaneDesign.raised)
+                DLine()
+            }
+            .task(id: "\(n.token)|\(phase == .active)") { if phase == .active { client.telemetryShown(n.token) } }
+        }
+    }
+}
+
 /// The GitHub star suggestion (DataClient.star), one line: the link opens the page and decides open; Dismiss decides dismiss.
 struct DataStarBanner: View {
     let client: DataClient

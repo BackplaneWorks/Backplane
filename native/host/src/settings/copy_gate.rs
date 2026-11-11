@@ -86,7 +86,7 @@ mod tests {
             if code.contains("Kind::Net") { net_users.push(name) }
         }
         assert!(bad.is_empty(), "{bad:?}"); net_users.sort();
-        assert_eq!(net_users, ["claude_usage.rs", "fab.rs", "order.rs", "skill_install.rs", "tools_install.rs", "webhook.rs"], "the only settings code that makes a Kind::Net process (claude_usage.rs: the usage read of a Claude login, never made on a copy: accounts_io `open`; tools_install.rs: setup's installs, refused on a copy by `start`; order.rs: the order server, refused on a copy: agents::tests::order copy_probe; skill_install.rs: a skill the person confirmed, refused on a copy); there is no telemetry sender and no update check in the Rust hub");
+        assert_eq!(net_users, ["claude_usage.rs", "fab.rs", "order.rs", "skill_install.rs", "telemetry_send.rs", "tools_install.rs", "webhook.rs"], "the only settings code that makes a Kind::Net process (telemetry_send.rs: the telemetry sender, never started on a copy: `start`; claude_usage.rs: the usage read of a Claude login, never made on a copy: accounts_io `open`; tools_install.rs: setup's installs, refused on a copy by `start`; order.rs: the order server, refused on a copy: agents::tests::order copy_probe; skill_install.rs: a skill the person confirmed, refused on a copy); there is no update check in the Rust hub");
         assert!(!std::fs::read_to_string(Path::new(env!("CARGO_MANIFEST_DIR")).join("src/settings/telemetry.rs")).unwrap().contains("proc::"), "telemetry.rs starts no process");
     }
 

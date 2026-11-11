@@ -52,6 +52,7 @@ pub mod select;
 pub mod siderow;
 pub mod sidebox;
 pub mod star;
+pub mod tmnotice;
 pub mod strip;
 pub mod term;
 pub mod settings;
@@ -81,6 +82,8 @@ pub struct Screens {
     pub elsewhere: Option<(String, String)>,
     /// the GitHub star suggestion while the hub says it is out and undecided (star.rs)
     pub star: Option<star::Offer>,
+    /// the one-time telemetry notice while the hub offers it (tmnotice.rs), and the token already told `shown`
+    pub tm_notice: Option<tmnotice::Notice>, pub tm_shown: String,
     pub devbar: Option<devbar::Bar>, /// when Restart now was first clicked (the second click confirms)
     pub devbar_confirm: Option<std::time::Instant>,
     /// The suggestion popup's highlighted row, and the rows it was for (a new set starts at the first).
@@ -175,6 +178,6 @@ impl Screens {
     pub fn new<T: 'static>(_cx: &mut Context<T>, target: Option<attach::Target>, drafts_path: std::path::PathBuf, saved: HashMap<String, String>) -> Self {
         let imp = improvements::Imp::new(&drafts_path, target.clone());
         let unsent = unsent::Unsent::open(drafts_path.with_file_name("gpui-unsent.json"));
-        Self { parts: Default::default(), side_force: false, side_shown: true, hubbar: Default::default(), elsewhere: None, star: None, term: term::Term::new(_cx.focus_handle()), pad: None, voice: Default::default(), setup: Default::default(), setup_focus: _cx.focus_handle(), acct: Default::default(), ctx_open: false, split_pv: Default::default(), pick_slot: None, last_state: String::new(), ask_inputs: HashMap::new(), attacher: attach::Attacher::new(target), drafts: drafts::Writer::start(drafts_path, saved), unsent, offsets: HashMap::new(), seeking: None, streamed: String::new(), paging: None, reg: Default::default(), projects: Default::default(), files: Default::default(), solid: None, browser: None, rail_pending: None, rail_at: None, focus_field: None, bots_open: String::new(), plot_click: None, plot: Default::default(), plotview: Default::default(), picker_open: false, pick: Default::default(), panels: Default::default(), head: Default::default(), palette: Default::default(), find: Default::default(), lightbox: None, known_refs: vec![], popup_off: None, popup_shut: false, fields: HashMap::new(), settings_focus: _cx.focus_handle(), focus_settings: false, settings_was_open: false, settings_ui: Default::default(), parsed: Default::default(), born: HashMap::new(), shown_at: std::time::Instant::now(), images: Default::default(), img_poll: false, await_draft: None, pending_draft: None, draft_timer: false, imp, devbar: None, devbar_confirm: None, ctx: None, scroll_logged: None, popup_ix: 0, popup_key: String::new(), popup_scroll: Default::default(), held: Default::default(), hold_threads: vec![], hold_projects: vec![], root_focus: _cx.focus_handle() }
+        Self { parts: Default::default(), side_force: false, side_shown: true, hubbar: Default::default(), elsewhere: None, star: None, tm_notice: None, tm_shown: String::new(), term: term::Term::new(_cx.focus_handle()), pad: None, voice: Default::default(), setup: Default::default(), setup_focus: _cx.focus_handle(), acct: Default::default(), ctx_open: false, split_pv: Default::default(), pick_slot: None, last_state: String::new(), ask_inputs: HashMap::new(), attacher: attach::Attacher::new(target), drafts: drafts::Writer::start(drafts_path, saved), unsent, offsets: HashMap::new(), seeking: None, streamed: String::new(), paging: None, reg: Default::default(), projects: Default::default(), files: Default::default(), solid: None, browser: None, rail_pending: None, rail_at: None, focus_field: None, bots_open: String::new(), plot_click: None, plot: Default::default(), plotview: Default::default(), picker_open: false, pick: Default::default(), panels: Default::default(), head: Default::default(), palette: Default::default(), find: Default::default(), lightbox: None, known_refs: vec![], popup_off: None, popup_shut: false, fields: HashMap::new(), settings_focus: _cx.focus_handle(), focus_settings: false, settings_was_open: false, settings_ui: Default::default(), parsed: Default::default(), born: HashMap::new(), shown_at: std::time::Instant::now(), images: Default::default(), img_poll: false, await_draft: None, pending_draft: None, draft_timer: false, imp, devbar: None, devbar_confirm: None, ctx: None, scroll_logged: None, popup_ix: 0, popup_key: String::new(), popup_scroll: Default::default(), held: Default::default(), hold_threads: vec![], hold_projects: vec![], root_focus: _cx.focus_handle() }
     }
 }

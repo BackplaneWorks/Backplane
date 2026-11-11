@@ -379,3 +379,25 @@ struct DStarOffer: Codable, Equatable {
     }
 }
 struct DStarReply: Decodable { var offer: DStarOffer? }
+
+/// The one-time telemetry notice while the hub says so (feature "telemetryNotice", docs/PHONE-DATA.md): from telemetry.notice at every
+/// (re)connect, and from a `{"t":"telemetry.notice","notice"}` frame (null hides it). `off` and `settings` are the buttons' labels.
+struct DTelemetryNotice: Codable, Equatable {
+    var token: String; var text: String; var off: String; var settings: String
+    var valid: DTelemetryNotice? { !token.isEmpty && !text.isEmpty ? self : nil }
+    static func of(_ o: Any?) -> DTelemetryNotice? {
+        guard let d = o as? [String: Any] else { return nil }
+        let g = { (k: String) in d[k] as? String ?? "" }
+        return DTelemetryNotice(token: g("token"), text: g("text"), off: g("off"), settings: g("settings")).valid
+    }
+    /// telemetry.notice.act's params: shown, close or off
+    static func act(_ token: String, _ action: String) -> [String: Any] { ["token": token, "action": action] }
+    init(token: String, text: String, off: String, settings: String) { self.token = token; self.text = text; self.off = off; self.settings = settings }
+    // a field the hub leaves out is empty, as `of` reads it
+    init(from d: Decoder) throws {
+        let c = try d.container(keyedBy: CodingKeys.self)
+        let g = { (k: CodingKeys) in (try? c.decodeIfPresent(String.self, forKey: k)) ?? "" }
+        self.init(token: g(.token), text: g(.text), off: g(.off), settings: g(.settings))
+    }
+}
+struct DTelemetryNoticeReply: Decodable { var notice: DTelemetryNotice? }
