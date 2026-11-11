@@ -7,6 +7,7 @@ private Xvfb with its own i3, the screen captured by ffmpeg x11grab at 30 fps. C
   open    after the long thread is opened from the short one, the timeline changes once (the frame it is drawn in) and then holds still
   pages   no history page is read twice (the client's `history` metrics name each page)
   still   once the reader stops scrolling, pages that land above hold the screen still: no frame changes after the last scroll settles
+  top     scrolled to the very top, the window holds the thread's first message and every reply (no gap), and the screen is not empty
   blank   no frame shows a picture's box empty (a picture area of the timeline's background colour where the picture was drawn before)
 usage: gpui-open-flash.py CLIENT_BIN HUB_BIN ASSETS_DIR OUT [PORT] [DISPLAY_N]   -> OUT/rows.json, OUT/frames/*.png, one line per check
 env: XVFB (default ~/.cache/xvfb-root/usr/bin/Xvfb) XVFB_LIB (its libraries). Needs ffmpeg (x11grab), i3, Python PIL."""
@@ -39,7 +40,9 @@ ev = [{'$': 'ProjectCreated', 'id': 'p1', 'title': 'flash', 'root': P('proj'), '
 for i in range(400):
     at = now + i * 60
     ev.append({'$': 'MessagePosted', 'thread': 't_long', 'msg': 'u%d' % i, 'role': 'user', 'text': 'Question %d: look at the board again and tell me what changed.' % i, 'at': at})
-    for j in range(6):
+    # two long runs of tool calls (the middle of the thread, and its last turn): pages of them hold no row the list shows, as Bub's do; the reading
+    # must go on past them (Nov 11: it stopped at the first such page and Bub's history could not be scrolled into)
+    for j in range(300 if i in (200, 399) else 6):
         ev.append({'$': 'ActivityLogged', 'thread': 't_long', 'act': 'a%d-%d' % (i, j), 'tone': 'tool', 'kind': 'shell', 'summary': 'rg -n "net_%d_%d" boards/main --max-count 3' % (i, j), 'at': at + 1})
     text = 'Answer %d. The board has %d nets left to route.\n\n- Placement: unchanged\n- Routing: %d tracks\n\nWhat I checked:\n\n1. DRC\n2. ERC\n3. The BOM' % (i, 400 - i, i * 7)
     if i % 5 == 0: text += '\n\nThe render: %s' % P('proj', 'pic%d.png' % (i // 5 % 8))
@@ -75,15 +78,16 @@ try:
     open(P('i3.conf'), 'w').write('font pango:monospace 8\nnew_window none\nfor_window [class=".*"] border none\ndefault_border none\nhide_edge_borders both\nipc-socket %s/i3.sock\n' % RUN)
     denv = dict(env, DISPLAY=':%d' % N); spawn(['i3', '-c', P('i3.conf')], 'i3.log', denv); time.sleep(1)
     cenv = dict(denv, VK_ICD_FILENAMES=(sorted(glob.glob('/usr/share/vulkan/icd.d/lvp_icd*.json')) or ['/usr/share/vulkan/icd.d/lvp_icd.json'])[0], LP_NUM_THREADS='4', BACKPLANE_GPUI_ASSETS=ASSETS, BACKPLANE_GPUI_RECTS='1')
+    # typing while history is read: each key's picture of the newest page lands between pages (a live turn does the same with Bub)
     # the short thread first, then the long one opened from it; then the reader scrolls up into its history and stops
     steps = [{'wait': 5000}, {'select': 0}, {'wait': 2500}, {'select': 1}, {'wait': 2500}, {'select': 0}, {'wait': 2500}, {'mark': 'open'}, {'select': 1}, {'wait': 3000},
-             {'mark': 'up'}] + [{'scroll': -900}, {'wait': 120}] * 25 + [{'mark': 'stop'}, {'wait': 4000}, {'mark': 'end'}]
+             {'mark': 'up'}] + [{'scroll': -900}, {'type': 'x'}, {'wait': 120}] * 25 + [{'mark': 'stop'}, {'wait': 4000}, {'mark': 'end'}] + [{'scroll': -20000}, {'wait': 250}] * 120 + [{'wait': 2000}, {'read': 'timeline'}, {'mark': 'top'}]
     json.dump(steps, open(P('script.json'), 'w'))
     t_rec = time.time()
-    rec = spawn(['ffmpeg', '-v', 'error', '-y', '-f', 'x11grab', '-framerate', str(FPS), '-video_size', '%dx%d' % (W, H), '-i', ':%d' % N, '-t', '40', '-vf', 'scale=%d:-1' % (W // 2), P('frames/f_%04d.png')], 'ffmpeg.log', denv)
+    rec = spawn(['ffmpeg', '-v', 'error', '-y', '-f', 'x11grab', '-framerate', str(FPS), '-video_size', '%dx%d' % (W, H), '-i', ':%d' % N, '-t', '80', '-vf', 'scale=%d:-1' % (W // 2), P('frames/f_%04d.png')], 'ffmpeg.log', denv)
     client = spawn([CLIENT, '--url', 'http://127.0.0.1:%d' % PORT, '--token-file', P('home/token'), '--script', P('script.json'), '--exit-after', '1000'], 'client.log', cenv)
     t_client = time.time()
-    client.wait(timeout=120)
+    client.wait(timeout=240)
     try: os.killpg(rec.pid, signal.SIGINT); rec.wait(timeout=20)
     except Exception: pass
 finally:
@@ -108,10 +112,11 @@ else:
     changes = [a + i + 1 for i in range(len(seq) - 1) if diff(seq[i], seq[i + 1]) > 0.4]
     # the first change is the long thread drawn; nothing after it within the 3 s the reader looks at it
     log('open', len(changes) >= 1 and all(c - changes[0] <= 1 for c in changes), 'timeline changes after open at frames %s (want one, or two adjacent: the frame boundary)' % changes[:12])
-    pages = [m.get('page') for m in ms if m.get('event') == 'history']
+    # a page whose reply came back stale (the view moved on while it was out: a key typed) is asked again; only the pages that landed count
+    pages = [m.get('page') for m in ms if m.get('event') == 'history' and m.get('landed', True)]
     twice = sorted({p for p in pages if p is not None and pages.count(p) > 1})
     log('pages', len(pages) > 0 and not twice, '%d pages read, read twice: %s' % (len(pages), twice[:8]))
-    s, e = frame_at(marks['stop']) + int(FPS * 0.7), min(len(frames) - 1, frame_at(marks['end']))
+    s, e = frame_at(marks['stop']) + int(FPS * 0.7), min(len(frames) - 1, frame_at(marks['end']) - 4)
     seq = [tl(i) for i in range(s, e)]
     moved = [s + i + 1 for i in range(len(seq) - 1) if diff(seq[i], seq[i + 1]) > 0.4]
     log('still', len(seq) > 10 and not moved, 'frames changed after scrolling stopped: %s (pages landing above must not move the screen)' % moved[:12])
@@ -123,5 +128,11 @@ else:
         flat = ImageStat.Stat(y).stddev[0] < 4 and ImageStat.Stat(x).stddev[0] > 20
         if flat: blank.append(i)
     log('blank', not blank, 'frames where the timeline went flat: %s' % blank[:12])
+    read = next((m['text'] for m in ms if m.get('event') == 'read' and m.get('what') == 'timeline'), '')
+    answers = {int(l.split('Answer ', 1)[1].split('.', 1)[0]) for l in read.splitlines() if 'Answer ' in l}
+    missing = sorted(set(range(400)) - answers)
+    tf = min(len(frames) - 1, frame_at(marks.get('top', marks['end'])) - 2)
+    shown = ImageStat.Stat(tl(tf)).stddev[0] if frames else 0
+    log('top', 'Question 0:' in read and not missing and shown > 8, 'first message held: %s, replies missing: %d %s, timeline contrast at the top %.1f' % ('Question 0:' in read, len(missing), missing[:6], shown))
 cleanup()
 sys.exit(0 if rows and all(r['ok'] for r in rows) else 1)

@@ -92,6 +92,7 @@ impl Backplane {
     }
     /// The rows on screen are another thread's: the list starts over, at the end or at the place this thread was left.
     pub(crate) fn timeline_show(&mut self, raw: &str) {
+        
         self.timeline.reset(self.data["thread"]["entries"].as_array().map_or(0, |r| r.len()));
         self.screens.born.clear(); self.screens.shown_at = std::time::Instant::now();
         self.screens.pages_read.clear(); // the rows start over: no page of them is held yet
@@ -176,7 +177,7 @@ impl Backplane {
                 // a row that came in with this picture arrives (ui.rs fades it in); one only drawn for the first time does not
                 let now = std::time::Instant::now();
                 for id in rows.iter().filter_map(|r| r["id"].as_str()).filter(|id| !had.contains(*id)) { self.screens.born.insert(id.to_string(), now); }
-                let top = if i > 0 { crate::string(&prev, "historyOlder") } else { older };
+                let top = history::older_after_picture(i, &crate::string(&prev, "historyOlder"), window["older"].as_str().unwrap_or(""), window["hasMore"] == true, &self.screens.pages_read);
                 (rows, top)
             }
             _ => { self.data["thread"]["entries"] = Value::Array(fresh); self.data["thread"]["historyOlder"] = Value::String(older); self.timeline_show(&raw); return; }
@@ -188,7 +189,7 @@ impl Backplane {
     /// A history page landed: laid into the rows held, the reader staying where they are.
     pub(crate) fn older_landed(&mut self, cursor: String, page: Option<Value>, cx: &mut Context<Self>) {
         // how long the page took, asked to landed (the wheel's notes say whether the reader waited for it at the top)
-        if let Some(t) = self.screens.paging.take() { self.m("history", serde_json::json!({"ms": t.elapsed().as_millis() as u64, "page": history::page_mark(&cursor), "rows": page.as_ref().and_then(|r| r["shown"]["thread"]["entries"].as_array()).map_or(0, |a| a.len())})); }
+        if let Some(t) = self.screens.paging.take() { self.m("history", serde_json::json!({"ms": t.elapsed().as_millis() as u64, "page": history::page_mark(&cursor), "landed": page.is_some(), "rows": page.as_ref().and_then(|r| r["shown"]["thread"]["entries"].as_array()).map_or(0, |a| a.len())})); }
         let Some(mut r) = page else { cx.notify(); return };
         let (a, b) = (crate::string(&r["shown"]["thread"], "id"), crate::string(&self.data["thread"], "id"));
         if attach::raw_id(&a) != attach::raw_id(&b) { return; }

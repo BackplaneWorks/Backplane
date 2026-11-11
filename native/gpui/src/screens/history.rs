@@ -101,6 +101,15 @@ pub fn changed(old: &[Value], new: &[Value], from: usize) -> (Range<usize>, Rang
 pub fn next_older(read: &str, older: &str, has_more: bool, rows: usize, seen: &HashSet<String>) -> String {
     if !has_more || older == read || rows >= MAX_ROWS || seen.contains(&page_mark(older)) { String::new() } else { older.to_string() }
 }
+/// The page to ask for next after a picture of the newest page was laid over the rows held. `at`: where it went in them (rows held above it
+/// keep the cursor they were read to, `held`). With none above, the newest window's own cursor, unless that page was read already: then the
+/// cursor the reading got to stands. (Setting it to none there stopped history for good: a page of only hidden rows adds nothing above, the
+/// next picture went at 0, and Bub's thread could not be scrolled up at all, Nov 11.)
+pub fn older_after_picture(at: usize, held: &str, older: &str, has_more: bool, seen: &HashSet<String>) -> String {
+    if at > 0 { return held.to_string(); }
+    if !has_more || older.is_empty() { return String::new(); }
+    if seen.contains(&page_mark(older)) { held.to_string() } else { older.to_string() }
+}
 /// What names a page whatever else its cursor carries: its `before` (the hub's epoch and target change nothing about which rows it holds).
 pub fn page_mark(cursor: &str) -> String {
     match serde_json::from_str::<Value>(cursor) { Ok(c) if !c["before"].is_null() => c["before"].as_str().map_or_else(|| c["before"].to_string(), str::to_string), _ => cursor.to_string() }
@@ -182,6 +191,15 @@ mod tests {
         seen.insert(page_mark(&b)); assert_eq!(next_older(&b, &a, true, 32, &seen), "", "A again");
         assert_eq!(next_older(&b, &cur(900, "2"), true, 32, &seen), "", "the same page under a new epoch is the same page");
         assert_eq!(page_mark(&a), "900"); assert_eq!(page_mark("plain"), "plain");
+    }
+    #[test] fn a_picture_over_rows_with_nothing_above_keeps_the_reading_going() {
+        let (a, b) = (cur(900, "1"), cur(880, "1"));
+        let mut seen = HashSet::new();
+        assert_eq!(older_after_picture(0, "", &a, true, &seen), a, "nothing read yet: the newest window's page");
+        seen.insert(page_mark(&a));
+        assert_eq!(older_after_picture(0, &b, &a, true, &seen), b, "A read and it added no row: B, where the reading got to, stands");
+        assert_eq!(older_after_picture(3, &b, &a, true, &seen), b);
+        assert_eq!(older_after_picture(0, &b, "", false, &seen), "", "the thread starts here");
     }
     #[test] fn a_picture_finds_its_place_in_the_tail_and_never_cuts_the_history_above() {
         // an older page brought a row back above everything ("m", a run's fold seen again); the newest picture also has it: before, merge cut at

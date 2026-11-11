@@ -89,6 +89,10 @@ struct View {
     restored:Restore, saved:Option<Value>, drawn:bool, outgoing:HashMap<u64,bool>, rpc_names:HashMap<u64,String>, dirty:bool, controls:HashMap<u64,Control>, sent:HashMap<u64,std::time::Instant>, req_draft:HashMap<u64,String>, offered:HashMap<u64,String>, bases:delta::Bases,
     /// The history page on its way (request id, cursor), and one waiting for the view's requests to settle: its picture must carry their session.
     paging:Option<(u64,String)>, want_page:Option<String>,
+    /// The hub holds an older page for this view (a view.page with a cursor went out, the one back to the newest not yet): every request sent
+    /// meanwhile is answered with that older page (session/actor.rs `page_at`). Those replies are never drawn as the thread's picture: a key typed
+    /// while history was read drew the older page as the newest, cut the rows read above it and started the list over (Nov 11).
+    older_on:bool, older_reqs:std::collections::HashSet<u64>,
 }
 #[derive(Default)] struct Control { next:u64, bytes:usize, parts:Vec<String>, done:bool }
 const MAX_CONTROLS:usize=4;const MAX_CONTROL_BYTES:usize=16*1024*1024;const MAX_CONTROL_PARTS:u64=4096;
@@ -96,7 +100,7 @@ impl View {
     fn new(config:&Config)->Self {let mut v=Self::fresh(config);let reopen=crate::local::Local::load().default_view!="list"; let saved_view=crate::screens::place::take_view(); if let (true,Some((target,session)))=(reopen,saved_view){v.target=target;v.session=crate::screens::place::opened_session(&session,millis());v.restored=Restore::First;}v}
     fn fresh(config:&Config)->Self {Self {launcher:config.launched,restored:Restore::None,saved:None,drawn:false,rpcs:HashMap::new(),asks:HashMap::new(),hub:crate::pairing::http_of(&config.hub),cid:format!("gpui-{}-{}",std::process::id(),millis()),
         greeting:Value::Null,target:json!({"kind":"recent","id":""}),session:json!({"sel":"","rid":millis(),"drafts":{},"open":{},"adding":false,"panel":false,"info":{}}),
-        view_id:String::new(),revision:0,next:(1_u64<<47)+millis(),pending:HashMap::new(),outgoing:HashMap::new(),rpc_names:HashMap::new(),dirty:false,controls:HashMap::new(),sent:HashMap::new(),paging:None,want_page:None,req_draft:HashMap::new(),offered:HashMap::new(),bases:delta::Bases::default()}}
+        view_id:String::new(),revision:0,next:(1_u64<<47)+millis(),pending:HashMap::new(),outgoing:HashMap::new(),rpc_names:HashMap::new(),dirty:false,controls:HashMap::new(),sent:HashMap::new(),paging:None,want_page:None,older_on:false,older_reqs:Default::default(),req_draft:HashMap::new(),offered:HashMap::new(),bases:delta::Bases::default()}}
     /// the session key the composer's text goes under: the thread on show (a bot's target shows its chat thread), else the target
     fn draft_key(&self)->String {self.session["sel"].as_str().filter(|s|!s.is_empty()).or(self.target["id"].as_str()).unwrap_or("").to_string()}
     fn request(&mut self, method:&str, extra:Value)->Value {
@@ -116,6 +120,7 @@ impl View {
             if self.offered.len()>64 {self.offered.clear();}
         }
         self.pending.insert(self.next,(self.revision,self.target.clone(),method.into()));
+        if self.older_on {self.older_reqs.insert(self.next);if self.older_reqs.len()>256 {self.older_reqs.clear();}}
         if self.sent.len()>64 {self.sent.clear();}
         self.sent.insert(self.next,std::time::Instant::now());
         // the draft this request carried: a delta's "t" op puts back exactly that text (a later reply may have replaced the session since)
@@ -125,8 +130,9 @@ impl View {
     }
     /// view.page: a view stays on the page it asked for, so a history page is always followed by this with cursor "", the newest again.
     fn page(&mut self, cursor:&str)->Value {
+        if cursor.is_empty() {self.older_on=false;}
         let request=self.request("view.page",json!({"cursor":cursor,"anchor":{"id":"","offset":0}}));
-        if !cursor.is_empty() {self.paging=Some((self.next,cursor.to_string()));}
+        if !cursor.is_empty() {self.paging=Some((self.next,cursor.to_string()));self.older_on=true;}
         request
     }
 }
@@ -166,12 +172,12 @@ pub fn connect(config:Config)->(Sender<Command>,async_channel::Receiver<Event>) 
                         if let Some(secs)=format!("{error:#}").strip_prefix("net_sleep:").and_then(|s|s.parse::<f64>().ok()) {
                             // the e2e harness's net_sleep: the socket is gone for `secs`, then the normal reconnect runs
                             /* i18n-ok: connection status, compared with Connected; drawn through trs */ let _=events.send(Event::Status("Disconnected (net_sleep)".into())).await;
-                            view.pending.clear();view.outgoing.clear();view.rpc_names.clear();view.controls.clear();view.offered.clear();view.bases.clear();view.view_id.clear();view.greeting=Value::Null;view.paging=None;view.want_page=None;
+                            view.pending.clear();view.outgoing.clear();view.rpc_names.clear();view.controls.clear();view.offered.clear();view.bases.clear();view.view_id.clear();view.greeting=Value::Null;view.paging=None;view.want_page=None;view.older_on=false;view.older_reqs.clear();
                             tokio::time::sleep(Duration::from_secs_f64(secs)).await;let _=events.send(Event::NetWake).await;delay=1;continue;
                         }
                         let token=std::fs::read_to_string(&cfg.token_file).unwrap_or_default();let mut text=format!("{error:#}");if !token.trim().is_empty(){text=text.replace(token.trim(),"<token>");}eprintln!("GPUI_LOG {{\"disconnect\":{}}}",serde_json::Value::String(text));
                         let _=events.send(Event::Error(crate::i18n::trs("Hub disconnected. Draft kept; reconnecting. Check the experimental hub log."))).await;
-                        view.pending.clear();view.outgoing.clear();view.rpc_names.clear();view.controls.clear();view.offered.clear();view.bases.clear();view.view_id.clear();view.greeting=Value::Null;view.paging=None;view.want_page=None;
+                        view.pending.clear();view.outgoing.clear();view.rpc_names.clear();view.controls.clear();view.offered.clear();view.bases.clear();view.view_id.clear();view.greeting=Value::Null;view.paging=None;view.want_page=None;view.older_on=false;view.older_reqs.clear();
                         tokio::time::sleep(Duration::from_secs(delay)).await;delay=(delay*2).min(10);
                     }
                 }
@@ -241,6 +247,7 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                         if x["ok"]==true {if is_post {let _=events.send(Event::Accepted).await;} if name=="thread.create" {let th=x["thread"].as_str().or(x["result"]["thread"].as_str()).unwrap_or("").to_string(); eprintln!("GPUI_LOG {}",json!({"made":th})); if !th.is_empty() {let _=events.send(Event::Data("created",json!(th))).await;}}}else{if name=="thread.create"{let _=events.send(Event::Data("create-refused",json!(why))).await;}let _=events.send(Event::Refused(crate::i18n::tf("gpui.hub.refused.it", &[("why", crate::i18n::trs(&why).into())]))).await;}if v.dirty&&v.pending.is_empty()&&!v.view_id.is_empty(){v.dirty=false;let request=v.request("view.update",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;}continue;}
                     let Some((revision,target,method))=v.pending.remove(&id) else{continue};
                     let paged=v.paging.take_if(|(page,_)|*page==id).map(|(_,cursor)|cursor);
+                    let on_older=v.older_reqs.remove(&id);
                     // A hub still opening its log says "not yet", and says the same of a thread it cannot show, for as long as it likes. So: the list first, asked for
                     // until the first view of this connection, which proves the hub is up; then the saved place once. Refused then, it is gone.
                     match view_refusal(&x,&method,v.drawn,v.restored) {
@@ -323,6 +330,7 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                         let _=events.send(Event::Older(cursor,Some(rv))).await;
                         let request=v.page("");sink.send(Message::Binary(wire::encode(&request).into())).await?;
                     }
+                    /* i18n-ok: connection status, compared with Connected; drawn through trs */ else if on_older {v.dirty=true;}
                     /* i18n-ok: connection status, compared with Connected; drawn through trs */ else if r["shown"].is_object(){let _=events.send(Event::Picture(rv,timing)).await;let _=events.send(Event::Status("Connected".into())).await;}
                 },
                 "view.control"=>{
