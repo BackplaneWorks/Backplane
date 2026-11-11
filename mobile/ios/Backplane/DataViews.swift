@@ -263,7 +263,7 @@ struct DataThreadsView: View {
             if !client.rooms.isEmpty {
                 DHeading(text: Tr.t("Rooms")).padding(.leading, 12).padding(.top, 12).padding(.bottom, 4).dataRow()
                 ForEach(client.rooms) { r in
-                    Button { path.append(r) } label: { sideRow("#", r.name, "room") }.buttonStyle(.plain).dataRow().accessibilityIdentifier("data.room." + r.id)
+                    Button { path.append(r) } label: { sideRow("#", r.name, "room", r.mark) }.buttonStyle(.plain).dataRow().accessibilityIdentifier("data.room." + r.id)
                 }
             }
         }
@@ -271,15 +271,17 @@ struct DataThreadsView: View {
         .refreshable { await client.refresh() }
     }
 
-    private func sideRow(_ sigil: String, _ name: String, _ detail: String) -> some View {
+    /// `mark`: a bot or room of a linked machine names its machine, as its threads do
+    private func sideRow(_ sigil: String, _ name: String, _ detail: String, _ mark: DMark? = nil) -> some View {
         HStack(spacing: 8) {
             Text(sigil).dmono(13, bold: true).foregroundStyle(BackplaneDesign.accent).frame(width: 16)
             Text(name).dmono(13).foregroundStyle(BackplaneDesign.text).lineLimit(1); Spacer()
+            if let m = mark { Text(dAway(m.short, m.away)).dmono(11).foregroundStyle(BackplaneDesign.faint) }
             Text(Tr.t(detail)).dmono(11).foregroundStyle(BackplaneDesign.faint)
         }.padding(.horizontal, 12).frame(minHeight: 40).contentShape(Rectangle())
     }
     private func botRow(_ b: DBot) -> some View {
-        Button { path.append(b.thread) } label: { sideRow("@", b.name, b.uber ? "uberbot" : "bot") }.buttonStyle(.plain).dataRow().accessibilityIdentifier("data.bot." + b.id)
+        Button { path.append(b.thread) } label: { sideRow("@", b.name, b.uber ? "uberbot" : "bot", b.mark) }.buttonStyle(.plain).dataRow().accessibilityIdentifier("data.bot." + b.id)
     }
     private func projectHeader(_ p: DProject) -> some View {
         HStack(spacing: 8) {

@@ -41,9 +41,12 @@ pub fn address(l: &str, from: &str) -> String {
     else if let Some(r) = from.strip_prefix("bot:") { format!("bot:{}", sender(l, r)) } else { from.to_string() }
 }
 
+/// A room's members (one a line) as the mirror names them: a bot of the owner's is `<link>~<bot>`, a `name@machine` member is kept as written.
+pub fn members(l: &str, m: &str) -> String { m.split('\n').filter(|x| !x.is_empty()).map(|x| if x.contains('@') { x.to_string() } else { sender(l, x) }).collect::<Vec<_>>().join("\n") }
+
 // ----- changes, as a client here reads them -----
 #[derive(Clone, Copy)]
-enum K { Id, Opt, Sender, Sent, Addr, Text }
+enum K { Id, Opt, Sender, Sent, Addr, Text, Members }
 use K::*;
 /// Fr.change's table: for each change that shows a thread, a bot and its space, the fields renamed into this hub's
 /// ids. Settings, devices, links, webhooks, rooms (shared rooms travel on their own), ordering and usage are absent:
@@ -57,10 +60,12 @@ pub const METHODS: &[&str] = &["turn.start", "turn.interrupt", "ask.answer", "qu
     // the viewers of a thread whose project is there: its Diff and its Files (listing, and a file's bytes to show here)
     "git.diff", "files.dir", "files.get",
     // its Diff's Commit, PR and Revert act on that machine's repository
-    "git.act", "git.revert"];
+    "git.act", "git.revert",
+    // a person's post in a room there
+    "bots.post"];
 pub fn may(m: &str) -> bool { METHODS.contains(&m) }
 /// The params that name a thing (the ones renamed on the way)
-const KEYS: &[&str] = &["thread", "id", "bot", "routine", "task", "parent", "child", "project", "ask"];
+const KEYS: &[&str] = &["thread", "id", "bot", "routine", "task", "parent", "child", "project", "ask", "room"];
 /// `Fr.params.link`: the link a request's params name, "" for nothing elsewhere. The first field that decides wins: a renamed key holding a
 /// `<link>~<id>`, or `on` holding a machine's link that is not itself an id elsewhere.
 pub fn params_link(p: &Value) -> String {
@@ -91,7 +96,9 @@ pub const VARIANTS: &[&str] = &["ProjectCreated", "ProjectRemoved", "ThreadRenam
     "ThreadDeleted", "ModesSet", "ProviderSet", "AskClosed", "BotDeleted", "RoutineDeleted", "RoutineFired", "RoutinePlan", "RoutineSlot", "RoutineDone", "ThreadCreated",
     "MessagePosted", "MessageFrom", "TurnChanged", "PendingChanged", "TurnQueued", "QueueTaken", "QueueEdited", "QueueRemoved", "QueueMoved", "QueueTakenOne", "TodosChanged",
     "TodosSet", "WorkSet", "ActivityLogged", "ThreadForked", "TaskDelegated", "TaskStateSet", "TaskDelivered", "AskOpened", "BotSet", "RoutineSet", "Reminded", "MemorySaved",
-    "MemoryForgot", "TaskSet", "TaskDeleted", "SpaceSet", "SpacePageSet", "ThreadParentSet", "ThreadLaunched"];
+    "MemoryForgot", "TaskSet", "TaskDeleted", "SpaceSet", "SpacePageSet", "ThreadParentSet", "ThreadLaunched",
+    // which bot is the uberbot, and the rooms with their posts (a direct room `dm:` stays home): a client here shows them as the owner's
+    "UberSet", "RoomSet", "RoomDeleted", "RoomPosted"];
 fn table(variant: &str) -> Option<&'static [(&'static str, K)]> {
     Some(match variant {
         "ProjectCreated" | "ProjectRemoved" | "ThreadRenamed" | "ThreadSettled" | "ThreadUnsettled" | "ThreadWoke" | "ThreadArchived" | "ThreadPinned"
@@ -106,12 +113,17 @@ fn table(variant: &str) -> Option<&'static [(&'static str, K)]> {
         "TaskDelegated" => &[("task", Id), ("parent", Opt), ("child", Opt)],
         "TaskStateSet" | "TaskDelivered" => &[("task", Id)],
         "AskOpened" => &[("id", Id), ("thread", Id)],
-        "BotSet" => &[("id", Id), ("thread", Id)],
+        // (an edit with no thread keeps the bot's: "" stays "")
+        "BotSet" => &[("id", Id), ("thread", Opt)],
         "RoutineSet" => &[("id", Id), ("bot", Id)],
         "Reminded" => &[("id", Id), ("bot", Id), ("thread", Id)],
         "MemorySaved" | "MemoryForgot" | "TaskSet" | "TaskDeleted" | "SpaceSet" | "SpacePageSet" => &[("bot", Id)],
         "ThreadParentSet" => &[("id", Id), ("parent", Opt)],
         "ThreadLaunched" => &[("id", Id), ("by", Sender)],
+        "UberSet" => &[("bot", Opt)],
+        "RoomSet" => &[("id", Id), ("members", Members)],
+        "RoomDeleted" => &[("id", Id)],
+        "RoomPosted" => &[("id", Id), ("room", Id)],
         _ => return None,
     })
 }
@@ -122,7 +134,7 @@ pub fn change(l: &str, c: &Value, origin: &dyn Fn(&str, &str) -> String) -> Opti
     let mut o: Map<String, Value> = c.as_object()?.clone();
     for (f, k) in t {
         let Some(v) = o.get(*f).and_then(Value::as_str).map(str::to_string) else { continue };
-        let r = match k { Id => id(l, &v), Opt => opt(l, &v), Sender => sender(l, &v), Sent => sent(l, &v), Addr => address(l, &v), Text => origin(&v, l) };
+        let r = match k { Id => id(l, &v), Opt => opt(l, &v), Sender => sender(l, &v), Sent => sent(l, &v), Addr => address(l, &v), Text => origin(&v, l), Members => members(l, &v) };
         o.insert((*f).to_string(), Value::String(r));
     }
     Some(Value::Object(o))
@@ -158,7 +170,9 @@ pub fn shared(o: &dyn Owned, c: &Value) -> bool {
         "TaskStateSet" | "TaskDelivered" => o.task_parent(f("task")).map_or(false, |p| thread_shared(o, &p)) || (o.task_parent(f("task")).is_none() && thread_shared(o, "")),
         "AskClosed" => o.ask_thread(f("id")).map_or(false, |t| thread_shared(o, &t)) || (o.ask_thread(f("id")).is_none() && thread_shared(o, "")),
         "BotSet" | "BotDeleted" | "RoutineSet" | "RoutineDeleted" | "RoutineFired" | "RoutinePlan" | "RoutineSlot" | "RoutineDone" | "Reminded"
-        | "MemorySaved" | "MemoryForgot" | "TaskSet" | "TaskDeleted" | "SpaceSet" | "SpacePageSet" => true,
+        | "MemorySaved" | "MemoryForgot" | "TaskSet" | "TaskDeleted" | "SpaceSet" | "SpacePageSet" | "UberSet" => true,
+        "RoomSet" | "RoomDeleted" => !f("id").starts_with("dm:") && !is(f("id")),
+        "RoomPosted" => !f("room").starts_with("dm:") && !is(f("room")),
         _ => false,
     }
 }
@@ -216,7 +230,7 @@ mod tests {
         assert_eq!((c["id"].as_str().unwrap(), c["thread"].as_str().unwrap(), c["name"].as_str().unwrap()), ("L~b1", "L~t1", "Bub"));
     }
     #[test] fn far_settings_stay_home() {
-        for v in ["SettingSet", "PeerSet", "HookSet", "DeviceRegistered", "RoomSet", "OrderPlaced", "TurnUsage", "Nope"] {
+        for v in ["SettingSet", "PeerSet", "HookSet", "DeviceRegistered", "OrderPlaced", "TurnUsage", "Nope"] {
             let c = json!({"$":v,"key":"k","value":"v","id":"t1","at":1});
             assert!(!shared(&st(), &c) && change("p1", &c, &same).is_none(), "{v}");
         }
@@ -242,6 +256,33 @@ mod tests {
     #[test] fn far_change_fork_names_its_source() {
         let c = change("L", &json!({"$":"ThreadForked","id":"t2","source":"t1","at":1}), &same).unwrap();
         assert_eq!((c["id"].as_str().unwrap(), c["source"].as_str().unwrap()), ("L~t2", "L~t1"), "a mirror's fork points at the mirrored source");
+    }
+    #[test] fn far_uberbot_and_rooms_are_shared_and_named() {
+        let s = st();
+        let u = json!({"$":"UberSet","bot":"b1","uid":"u9","at":1});
+        assert!(shared(&s, &u)); assert_eq!(change("L", &u, &same).unwrap()["bot"], "L~b1");
+        assert_eq!(change("L", &json!({"$":"UberSet","bot":"","uid":"","at":2}), &same).unwrap()["bot"], "", "no uberbot stays none");
+        let r = json!({"$":"RoomSet","id":"r1","name":"Shop","members":"b1\nb2\nscout@desk","at":1});
+        assert!(shared(&s, &r));
+        let c = change("L", &r, &same).unwrap();
+        assert_eq!((c["id"].as_str().unwrap(), c["members"].as_str().unwrap(), c["name"].as_str().unwrap()), ("L~r1", "L~b1\nL~b2\nscout@desk", "Shop"));
+        let p = json!({"$":"RoomPosted","id":"p1","room":"r1","from":"Foreman","text":"hi","hop":0,"at":2});
+        assert!(shared(&s, &p)); let c = change("L", &p, &same).unwrap();
+        assert_eq!((c["id"].as_str().unwrap(), c["room"].as_str().unwrap(), c["from"].as_str().unwrap(), c["text"].as_str().unwrap()), ("L~p1", "L~r1", "Foreman", "hi"), "a post keeps its words and who said it");
+        assert!(shared(&s, &json!({"$":"RoomDeleted","id":"r1","at":3})));
+        for dm in [json!({"$":"RoomSet","id":"dm:a:b","name":"x","members":"a\nb","at":1}), json!({"$":"RoomPosted","id":"p","room":"dm:a:b","from":"a","text":"x","hop":0,"at":1}), json!({"$":"RoomSet","id":"L2~r","name":"x","members":"","at":1})] {
+            assert!(!shared(&s, &dm), "a direct room stays home, and a mirror is never re-exported: {dm}");
+        }
+    }
+    #[test] fn far_a_bot_edit_with_no_thread_keeps_none() {
+        let c = change("L", &json!({"$":"BotSet","id":"b1","name":"Bub","thread":"","look":3,"persona":"p","at":9}), &same).unwrap();
+        assert_eq!(c["thread"], "", "not L~: the edit keeps the bot's thread");
+    }
+    #[test] fn far_a_post_in_a_room_there_goes_there() {
+        assert!(may("bots.post"));
+        assert_eq!(params_link(&json!({"room":"L~r1","text":"hi"})), "L");
+        assert_eq!(params_local(&json!({"room":"L~r1","text":"hi","msg":"m1"}), "L"), json!({"room":"r1","text":"hi","msg":"m1"}));
+        assert_eq!(params_link(&json!({"room":"r1","text":"hi"})), "", "a room here stays here");
     }
     #[test] fn far_settingset_has_no_table() { assert!(table("SettingSet").is_none()); }
     #[test] fn far_item_roundtrip() { let i = it(7); assert_eq!(Item::of(&i.json()), i); let _ = id_("a", "b"); }

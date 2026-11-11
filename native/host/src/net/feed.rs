@@ -89,6 +89,8 @@ impl Feed {
         match m {
             "ask.answer" => idx.ask_thread(g("id")).map_or(false, |t| idx.thread(&t) && !far::is(&t)),
             "bots.space" | "bots.routine_run" => !(if g("bot").is_empty() { g("id") } else { g("bot") }).is_empty(),
+            // a post in a room of this hub's (the bots lane says whether the room exists)
+            "bots.post" => { let r = g("room"); !r.is_empty() && !r.starts_with("dm:") && !far::is(r) }
             "thread.create" | "project.remove" => idx.project_shared(g("project")),
             "project.add" | "project.new" | "fs.list" | "fs.mkdir" | "fs.find" => true,
             _ => idx.thread(g("thread")) && !far::is(g("thread")),
@@ -204,9 +206,10 @@ impl Feed {
 impl Observer for Feed { fn committed(&self, _h: &Arc<Hub>, events: &[Value], first_seq: u32) { self.observe(events, first_seq) } }
 
 /// Far.history: the first durable change (its text), with a mark when the log holds lines this build cannot decode,
-/// identifies the history; its signature is the epoch a peer pins. "" for an empty log.
+/// identifies the history; its signature is the epoch a peer pins. "" for an empty log. `view:N` is what is shared: a build that shares more
+/// (view:4, the uberbot and the rooms) is another history to its mirrors, which start over and so get the older lines they never had.
 pub fn epoch_of(first: &str, len: usize, seq: usize) -> String {
-    let body = format!("{}{}|view:3", first, if len == seq { String::new() } else { format!("|unknown:{}", len.saturating_sub(seq)) });
+    let body = format!("{}{}|view:4", first, if len == seq { String::new() } else { format!("|unknown:{}", len.saturating_sub(seq)) });
     sign::header("00", 0, &body)
 }
 pub fn epoch(hub: &Hub) -> String {

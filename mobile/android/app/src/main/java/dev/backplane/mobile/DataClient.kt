@@ -764,14 +764,15 @@ object DataClient {
         val a = call("mentions.list", JSONObject().put("q", q).put("kind", kind).put("limit", 8)).optJSONArray("items") ?: return emptyList()
         return (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Mention(it.optString("sigil"), it.optString("id"), it.optString("label"), it.optString("detail"), it.optString("word")) }
     }
-    data class Bot(val id: String, val name: String, val thread: String, val uber: Boolean)
-    data class Room(val id: String, val name: String)
+    /** `mark`: the short name of the linked machine a bot or room is on ("" for this hub's own) */
+    data class Bot(val id: String, val name: String, val thread: String, val uber: Boolean, val mark: String = "")
+    data class Room(val id: String, val name: String, val mark: String = "")
     var bots by mutableStateOf<List<Bot>>(emptyList()); private set
     var rooms by mutableStateOf<List<Room>>(emptyList()); private set
     suspend fun loadBots() {
         val r = call("bots.list")
-        bots = r.optJSONArray("bots")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Bot(it.optString("id"), it.optString("name"), it.optString("thread"), it.optBoolean("uber")) } } ?: emptyList()
-        rooms = r.optJSONArray("rooms")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Room(it.optString("id"), it.optString("name")) } } ?: emptyList()
+        bots = r.optJSONArray("bots")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Bot(it.optString("id"), it.optString("name"), it.optString("thread"), it.optBoolean("uber"), it.optJSONObject("mark")?.optString("short") ?: "") } } ?: emptyList()
+        rooms = r.optJSONArray("rooms")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Room(it.optString("id"), it.optString("name"), it.optJSONObject("mark")?.optString("short") ?: "") } } ?: emptyList()
     }
     data class Post(val from: String, val text: String, val at: Long)
     suspend fun roomPosts(room: String): List<Post> = call("room.posts", JSONObject().put("room", room).put("limit", 60)).optJSONArray("posts")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Post(it.optString("from"), it.optString("text"), it.optLong("at")) } } ?: emptyList()

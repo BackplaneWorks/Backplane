@@ -324,6 +324,8 @@ impl Backplane {
         let uber_data: Vec<(String, String, String, u64, String, bool)> = self.data["bots"].as_array().into_iter().flatten().filter(|b| b["uber"].as_bool().unwrap_or(false))
             .map(|b| (string(b, "name"), string(b, "mood"), string(b, "note"), b["look"].as_u64().unwrap_or(0), string(b, "id"), b["sel"].as_bool().unwrap_or(false))).collect();
         let uber_rigs: Vec<_> = uber_data.iter().map(|(_, mood, _, look, _, _)| self.cats.rig(*look, mood)).collect();
+        // a bot or room of a linked machine carries that machine's marker (the hub's `mark`, as threads elsewhere do); none for this machine's
+        let marks: std::collections::HashMap<String, Value> = ["bots", "rooms"].iter().flat_map(|k| self.data[*k].as_array().into_iter().flatten()).filter(|b| b["mark"].is_object()).map(|b| (string(b, "id"), b["mark"].clone())).collect();
         let bot_data: Vec<(String, String, String, u64, String, bool)> = self.data["bots"].as_array().into_iter().flatten().filter(|b| !b["uber"].as_bool().unwrap_or(false))
             .map(|b| (string(b, "name"), string(b, "mood"), string(b, "note"), b["look"].as_u64().unwrap_or(0), string(b, "id"), b["sel"].as_bool().unwrap_or(false))).collect();
         let bot_rigs: Vec<_> = bot_data.iter().map(|(_, mood, _, look, _, _)| self.cats.rig(*look, mood)).collect();
@@ -339,7 +341,7 @@ impl Backplane {
                 .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("bot".into(), bid2.clone())); cx.notify(); }))
                 .child(art::cat(rig.clone(), mood, 56., started, if art::rects_on() { format!("cat:{bname}") } else { String::new() }))
                 .child(div().flex().flex_col().min_w_0().line_height(px(22.)).child(div().text_size(px(16.)).overflow_hidden().whitespace_nowrap().child(bname.clone()))
-                    .child(div().text_size(px(11.)).text_color(note_color).child(trs(note)))).into_any_element());
+                    .child(div().flex().gap_2().items_center().child(div().text_size(px(11.)).text_color(note_color).child(trs(note))).children(marks.get(bid).and_then(|m| crate::screens::badge::machine_mark(light, m, false, bid))))).into_any_element());
         }
         let new_here = crate::keys::new_target(&self.data, &self.selected, self.project_page.as_deref());
         for project in self.data["projects"].as_array().into_iter().flatten() {
@@ -448,7 +450,7 @@ impl Backplane {
                         .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("bot".into(), bid2.clone())); cx.notify(); }))
                         .child(art::cat(rig.clone(), mood, 28., started, if art::rects_on() { format!("cat:{bname}") } else { String::new() }))
                         .child(div().flex().flex_col().min_w_0().line_height(px(18.)).child(div().overflow_hidden().whitespace_nowrap().child(bname.clone()))
-                            .child(div().text_size(px(11.)).text_color(note_color).child(trs(note)))).into_any_element());
+                            .child(div().flex().gap_2().items_center().child(div().text_size(px(11.)).text_color(note_color).child(trs(note))).children(marks.get(bid).and_then(|m| crate::screens::badge::machine_mark(light, m, false, bid))))).into_any_element());
                 }
             } else {
                 for r in self.data["rooms"].as_array().into_iter().flatten() {
@@ -458,6 +460,7 @@ impl Backplane {
                     rows.push(with_rect(div().id(SharedString::from(format!("room-{rid}"))), || format!("room:{rname}")).flex().items_center().gap_2().px_3().py_1().cursor_pointer().when(sel, |d| d.bg(c("raise"))).hover(|s| s.bg(c("raise")))
                         .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("room".into(), rid2.clone())); cx.notify(); }))
                         .child(div().text_color(c("faint")).child("#")).child(div().flex_1().overflow_hidden().whitespace_nowrap().child(rname.clone()))
+                        .children(crate::screens::badge::machine_mark(light, &r["mark"], false, &rid))
                         .child(div().text_size(px(11.)).text_color(c("faint")).child(format!("{}", r["members"]))).into_any_element());
                 }
             }

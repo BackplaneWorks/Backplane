@@ -22,13 +22,13 @@ fn msg(th: &str, n: u64) -> Value { ev(json!({"$":"MessagePosted","thread":th,"m
     assert!(ix.shared_after(0).is_empty(), "ids with a ~ are mirrors");
 }
 #[test] fn far_epoch_is_the_signature_of_the_first_line_and_the_view() {
-    // Far.history: SG.Sign.header("00", 0, first ++ "|view:3")
+    // Far.history: SG.Sign.header("00", 0, first ++ "|view:4")
     let first = r#"{"$":"ProjectCreated","id":"p","title":"t","root":"/","at":1}"#;
     let e = epoch_of(first, 5, 5);
     assert!(e.starts_with("sha256=") && e.len() == 7 + 64);
-    assert_eq!(e, sign::header("00", 0, &format!("{first}|view:3")));
+    assert_eq!(e, sign::header("00", 0, &format!("{first}|view:4")));
     assert_ne!(epoch_of(first, 6, 5), e, "lines this build cannot decode give the history a new identity");
-    assert_eq!(epoch_of(first, 6, 5), sign::header("00", 0, &format!("{first}|unknown:1|view:3")));
+    assert_eq!(epoch_of(first, 6, 5), sign::header("00", 0, &format!("{first}|unknown:1|view:4")));
     assert_ne!(epoch_of("{\"$\":\"other\"}", 5, 5), e);
 }
 #[test] fn far_a_commit_during_the_build_is_applied_once() {
@@ -72,7 +72,7 @@ async fn hub(tag: &str) -> (Arc<Hub>, std::path::PathBuf) {
 
 #[test] fn far_epoch_on_unknown_lines() {
     let body = |first: &str, len: usize, seq: usize| epoch_of(first, len, seq);
-    assert_eq!(body("x", 3, 3), sign::header("00", 0, "x|view:3")); assert_eq!(body("x", 5, 3), sign::header("00", 0, "x|unknown:2|view:3"));
+    assert_eq!(body("x", 3, 3), sign::header("00", 0, "x|view:4")); assert_eq!(body("x", 5, 3), sign::header("00", 0, "x|unknown:2|view:4"));
 }
 #[test] fn far_epoch_view_bumped() { assert_ne!(epoch_of("x", 3, 3), sign::header("00", 0, "x|view:2")); }
 #[tokio::test] async fn far_a_commit_that_shares_goes_to_the_push_machine_in_wire_form() {

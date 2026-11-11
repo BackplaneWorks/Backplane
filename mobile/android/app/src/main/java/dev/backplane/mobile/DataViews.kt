@@ -336,7 +336,7 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
             }
         } else LazyColumn(Modifier.fillMaxSize().testTag("home.list"), state = listState) {
             val uber = DataClient.bots.filter { it.uber && it.thread.isNotEmpty() }
-            items(uber, key = { "u:${it.id}" }) { b -> SidebarRow("@", b.name, Msg.android_kind_uberbot) { open(b.thread) } }
+            items(uber, key = { "u:${it.id}" }) { b -> SidebarRow("@", b.name, onMachine(Msg.android_kind_uberbot, b.mark)) { open(b.thread) } }
             var at = uber.size; rowOf.clear()
             for (p in projects) {
                 val closed = p.id in shut
@@ -403,9 +403,9 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
             }
             val bots = DataClient.bots.filter { !it.uber }
             if (bots.isNotEmpty()) { item("bots") { DMono(Msg.plane_heading_bots, dfaint, 11, Modifier.fillMaxWidth().padding(start = 12.dp, top = 12.dp, bottom = 4.dp)) }
-                items(bots, key = { "b:${it.id}" }) { b -> SidebarRow("@", b.name, Msg.android_kind_bot) { if (b.thread.isNotEmpty()) open(b.thread) } } }
+                items(bots, key = { "b:${it.id}" }) { b -> SidebarRow("@", b.name, onMachine(Msg.android_kind_bot, b.mark)) { if (b.thread.isNotEmpty()) open(b.thread) } } }
             if (DataClient.rooms.isNotEmpty()) { item("rooms") { DMono(Msg.plane_heading_rooms, dfaint, 11, Modifier.fillMaxWidth().padding(start = 12.dp, top = 12.dp, bottom = 4.dp)) }
-                items(DataClient.rooms, key = { "r:${it.id}" }) { r -> SidebarRow("#", r.name, Msg.android_kind_room) { openRoom(r) } } }
+                items(DataClient.rooms, key = { "r:${it.id}" }) { r -> SidebarRow("#", r.name, onMachine(Msg.android_kind_room, r.mark)) { openRoom(r) } } }
         }
         projMenu?.let { ProjectMenus(it, projSheet) { projSheet = false } }
         pickNew?.let { p -> ActionSheet(p.title, p.newOn.map { n -> (n.label + if (n.away) " · " + Msg.android_away else "") to { pickNew = null; newThread(n.value) } }) { pickNew = null } }
@@ -1092,3 +1092,6 @@ private fun OrderCard(o: DataClient.Order) {
         }
     }
 }
+
+/** A row's kind, with the linked machine it is on when it is another machine's (the hub's `mark.short`) */
+fun onMachine(kind: String, mark: String): String = if (mark.isEmpty()) kind else "$kind · $mark"

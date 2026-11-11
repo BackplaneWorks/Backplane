@@ -33,6 +33,8 @@ impl Mirrors {
     pub fn counts(&self) -> Vec<(String, usize, usize)> {
         let mut v: Vec<_> = self.st.read().unwrap().iter().map(|(l, s)| (l.clone(), s.threads.len(), s.projects.len())).collect(); v.sort(); v
     }
+    /// The shown links with their machine's name, in display order (none before the net lane says).
+    pub fn names(&self) -> Vec<(String, String)> { self.names.get().map(|n| n()).unwrap_or_default() }
     /// The shown machines' states, in `names` order: `f(&[(machine, state)])`. A link with no name callback yet (or not in it) is not shown.
     pub fn shown<R>(&self, f: impl FnOnce(&[(String, &State)]) -> R) -> R {
         let names = self.names.get().map(|n| n()).unwrap_or_default();

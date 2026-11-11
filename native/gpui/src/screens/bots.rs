@@ -208,7 +208,8 @@ pub fn bar(cx: &mut Context<Backplane>, light: bool, bot: &Value) -> Option<AnyE
     let subs = tabs(bot, "subtabs");
     let mut col = div().h(px(bar_h(bot))).flex_shrink_0().px_3().py_1().flex().flex_col().gap_1().border_b_1().border_color(c("line")).bg(c("bg"))
         .child(div().flex().gap_2().items_center().child(div().font_weight(FontWeight::BOLD).child(bot["title"].as_str().map(str::to_string).unwrap_or_else(|| string(bot, "name"))))
-            .child(div().text_size(px(11.)).text_color(c("dim")).child(trs(&string(bot, "note"))))).child(strip);
+            .child(div().text_size(px(11.)).text_color(c("dim")).child(trs(&string(bot, "note"))))
+            .children(super::badge::place(light, &bot["mark"], "", "bot-bar"))).child(strip);
     if !subs.is_empty() { let cur = string(bot, "tab"); col = col.child(div().flex().gap_1().children(subs.into_iter().enumerate().map(|(i, t)| { let is = t.id == cur; btn(cx, light, format!("bsub-{i}"), trs(&t.label), is, tab_cmd, t.id) }).collect::<Vec<_>>())); }
     Some(col.into_any_element())
 }
@@ -459,7 +460,7 @@ pub fn page(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
     let header = |t: String| div().h(px(36.)).flex_shrink_0().px_3().flex().items_center().border_b_1().border_color(c("line")).font_weight(FontWeight::BOLD).child(t);
     let frame = |inner: AnyElement, top: f32, header: Option<Div>| div().id("bot-page").absolute().top(px(top)).left_0().right_0().bottom_0().occlude().bg(c("bg")).flex().flex_col().children(header).child(div().id("bot-body").flex_1().min_h_0().overflow_y_scroll().child(inner)).into_any_element();
     match kind {
-        "room" => Some(div().id("room-page").absolute().inset_0().occlude().bg(c("bg")).flex().flex_col().child(header(bot["title"].as_str().map(str::to_string).unwrap_or_else(|| string(bot, "name")))).child(div().flex_1().min_h_0().child(talk_page(cx, light, fields, bot, "rpost", "room-post"))).into_any_element()),
+        "room" => Some(div().id("room-page").absolute().inset_0().occlude().bg(c("bg")).flex().flex_col().child(header(bot["title"].as_str().map(str::to_string).unwrap_or_else(|| string(bot, "name"))).gap_2().children(super::badge::place(light, &bot["mark"], "", "room-head"))).child(div().flex_1().min_h_0().child(talk_page(cx, light, fields, bot, "rpost", "room-post"))).into_any_element()),
         "remote" => Some(div().id("remote-page").absolute().inset_0().occlude().bg(c("bg")).flex().flex_col().child(header(bot["title"].as_str().map(str::to_string).unwrap_or_else(|| string(bot, "name")))).child(div().flex_1().min_h_0().child(talk_page(cx, light, fields, bot, "rtext", "remote-send"))).into_any_element()),
         "bot" => {
             let tab = bot["tab"].as_str().unwrap_or("chat");
