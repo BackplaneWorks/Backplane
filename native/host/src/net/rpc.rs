@@ -308,6 +308,8 @@ pub async fn serve_with(copy: bool, sync: &Arc<FarSync>, hub: &Arc<Hub>, r: &PRe
     if m == "bots.mesh_code" { return super::mesh::serve_code(sync, hub, &o.get("p").cloned().unwrap_or(Value::Null)).await }
     if m == "ring.front" { return json_reply(&crate::bots::front::serve(hub, &link, &p).await) }
     if m.starts_with("home.") { return json_reply(&super::homemove::serve(hub, &link, m, &p).await) }
+    // the owner's sync accounts (settings/accounts_sync.rs): only ever between the owner's own machines (checked above)
+    if m == "accounts.sync" || m == "accounts.drop" { return json_reply(&crate::settings::accounts_sync::serve(hub, &link, m, &p).await) }
     if m == "uber.sync" { return HttpReply::text("501 Not Implemented", "uber.sync is not ported on this hub yet") }
     if m == "mcp.call" {
         let tool = p["tool"].as_str().unwrap_or("");

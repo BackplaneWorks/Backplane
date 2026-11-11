@@ -135,10 +135,12 @@ async fn accounts(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Result<Va
             let attempt = |snap: &Value| snap["attempts"].as_array().and_then(|a| a.iter().filter(|x| x["profile"] == id.as_str()).last()).and_then(|x| x["id"].as_str()).unwrap_or("").to_string();
             let snap = match action {
                 "add" => {
-                    let provider = s(p, "provider"); if !ph::PROVIDERS.contains(&provider) { return Err(err("provider: claude or codex")) }
+                    let group = s(p, "provider"); if !ph::GROUPS.contains(&group) { return Err(err("provider: claude, claude-sync or codex")) }
+                    // claude-sync: a Claude sync token (its sign-in is `claude setup-token`, settings/accounts_sync.rs)
+                    let (provider, sync) = if group == "claude-sync" { ("claude", true) } else { (group, false) };
                     let before = list(rpc(hub, c, "accounts", json!({"op":"list"})).await?);
-                    let label = ph::new_label(&before, provider, s(p, "label"));
-                    let r = list(rpc(hub, c, "accounts", json!({"op":"add","provider":provider,"label":label})).await?);
+                    let label = if sync { ph::new_sync_label(&before, s(p, "label")) } else { ph::new_label(&before, provider, s(p, "label")) };
+                    let r = list(rpc(hub, c, "accounts", json!({"op":"add","provider":provider,"label":label,"kind":if sync { "sync" } else { "" }})).await?);
                     let made = r["profiles"].as_array().and_then(|a| a.iter().filter(|x| x["provider"] == provider && x["label"] == label.as_str()).last()).and_then(|x| x["id"].as_str()).unwrap_or("").to_string();
                     if made.is_empty() { return Err(err("the account could not be added")) }
                     let r = list(rpc(hub, c, "accounts", json!({"op":"login","profile":made,"mode":"device"})).await?);

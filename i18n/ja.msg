@@ -1780,6 +1780,13 @@ gpui.imp.send.starts.a.new.thread = 送信すると、選んだプロジェク�
 gpui.imp.creating.the.thread = スレッドを作成しています…
 gpui.imp.request.sent.opening.the.new2 = リクエストを送信しました。新しいスレッドを開きます。
 gpui.imp.project.chosen = {title}へ送信
+gpui.acct.sync.token = 同期トークン
+gpui.acct.sync.token.from.a.linked = リンク先のマシンからの同期トークン
+gpui.acct.sync.days = {n, plural, other {残り#日}}
+gpui.acct.renew.the.sync.token = 同期トークンを更新
+gpui.acct.make.a.sync.token = 同期トークンを作成
+gpui.acct.make.the.sync.token = 同期トークンを作成する
+gpui.acct.add.claude.sync = Claude（同期）を追加
 
 # ---- gpui-b: keys, ui, files, history ----
 gpui.send.the.message = メッセージを送信
@@ -2411,6 +2418,11 @@ ring.hear.again.openai = もう一度聞き取る (OpenAI)
 ring.what.happened = どうなったか
 ring.send.again = もう一度送る
 ring.no.recordings.yet = 録音はまだありません。
+hub.acct.claude.sync = Claude（同期）
+hub.acct.add.a.claude.sync.token = Claude の同期トークンを追加
+hub.acct.connected.sync.token = 接続済み（同期トークン）
+hub.acct.sync.token.ended = 同期トークンの期限切れ
+hub.acct.sync.token.ends = 同期トークンの期限: {when}
 
 # ---- gpui-f: hub setup flow and thread ----
 gpui.f.group.install = インストール

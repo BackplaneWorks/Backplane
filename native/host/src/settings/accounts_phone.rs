@@ -4,6 +4,10 @@
 use serde_json::{json, Value};
 
 pub const PROVIDERS: &[&str] = &["claude", "codex"];
+/// The groups of the page: Claude's CLI logins, Claude's sync tokens (accounts_sync.rs), Codex's. `claude-sync` is what a phone adds a sync account with.
+pub const GROUPS: &[&str] = &["claude", "claude-sync", "codex"];
+fn group_of(p: &Value) -> &'static str { if s(p, "kind") == super::accounts_io::SYNC { "claude-sync" } else if s(p, "provider") == "codex" { "codex" } else { "claude" } }
+fn group_title(g: &str) -> &'static str { match g { "claude-sync" => "Claude (sync)", "codex" => "Codex", _ => "Claude" } }
 fn s<'a>(v: &'a Value, k: &str) -> &'a str { v.get(k).and_then(Value::as_str).unwrap_or("") }
 pub fn title(provider: &str) -> &'static str { super::accounts_hub::provider_title(provider) }
 
@@ -41,14 +45,15 @@ pub fn limit_lines(p: &Value, zone: &str, now: u64) -> Vec<String> {
 /// One account in the list.
 pub fn row(p: &Value, holds: &Value, zone: &str, now: u64) -> Value {
     let id = s(p, "id"); let (line, tone) = state_line(s(p, "state"));
+    let line = if s(p, "kind") == super::accounts_io::SYNC && s(p, "state") == "connected" { "connected, sync token" } else { line };
     json!({"id":id,"provider":s(p, "provider"),"label":s(p, "label"),"email":s(&p["identity"], "email"),"state":s(p, "state"),"line":line,"tone":tone,
         "limits":limit_lines(p, zone, now).join(" · "),"hold":s(&holds[id], "text")})
 }
 /// Page: every provider with accounts here, in order, with its accounts as they were saved.
 pub fn page(snap: &Value, zone: &str, now: u64) -> Value {
     let profiles = snap["profiles"].as_array().cloned().unwrap_or_default();
-    let providers: Vec<Value> = PROVIDERS.iter().map(|pv| json!({"provider":pv,"title":title(pv),"add":format!("Add a {} account", title(pv)),
-        "accounts":profiles.iter().filter(|p| s(p, "provider") == *pv).map(|p| row(p, &snap["holds"], zone, now)).collect::<Vec<_>>()})).collect();
+    let providers: Vec<Value> = GROUPS.iter().map(|g| json!({"provider":g,"title":group_title(g),"add":if *g == "claude-sync" { "Add a Claude sync token".to_string() } else { format!("Add a {} account", group_title(g)) },
+        "accounts":profiles.iter().filter(|p| group_of(p) == *g).map(|p| row(p, &snap["holds"], zone, now)).collect::<Vec<_>>()})).collect();
     json!({"providers":providers,"error":s(snap, "error"),"note":"Accounts sign in on the hub. Other agents use the hub machine's own sign-in."})
 }
 /// The newest sign-in attempt of a profile.
@@ -79,14 +84,24 @@ pub fn view(snap: &Value, id: &str, zone: &str, now: u64) -> Option<Value> {
     let busy = sg.as_ref().map_or(false, |x| x["busy"] == true);
     let act = |label: &str, action: &str, danger: bool| json!({"label":label,"action":action,"danger":danger});
     let actions: Vec<Value> = if busy { vec![act("Cancel sign-in", "cancel", false)] } else {
-        let mut v = vec![match state { "connected" => act("Sign in again", "signin", false), "expired" => act("Sign in again", "signin", false), _ => act("Sign in", "signin", false) }];
+        let sync = s(p, "kind") == super::accounts_io::SYNC;
+        let mut v = vec![if sync { act(if state == "disconnected" { "Make the sync token" } else { "Renew the sync token" }, "signin", false) } else { match state { "connected" => act("Sign in again", "signin", false), "expired" => act("Sign in again", "signin", false), _ => act("Sign in", "signin", false) } }];
         if matches!(state, "connected" | "expired" | "unchecked") { v.push(act("Check now", "check", false)) }
         v.push(act("Remove", "remove", true)); v
     };
     let msg = s(p, "message");
-    Some(json!({"id":id,"provider":provider,"title":title(provider),"label":s(p, "label"),"email":s(&p["identity"], "email"),"plan":s(&p["identity"], "plan"),"state":state,"line":line,"tone":tone,
-        "message":if msg == super::accounts_io::EXPIRED_SHORT { "" } else { msg },"limits":limit_lines(p, zone, now),"hold":s(&snap["holds"][id], "text"),"signin":sg,"actions":actions,
+    let ends = p["tokenExpiresAt"].as_u64().unwrap_or(0);
+    let mut limits = limit_lines(p, zone, now);
+    if s(p, "kind") == super::accounts_io::SYNC && ends > 0 { limits.insert(0, if ends > now { format!("Sync token ends {}", crate::agents::rules::when(zone, ends, now)) } else { "Sync token ended".to_string() }) }
+    Some(json!({"id":id,"provider":provider,"title":if s(p, "kind") == super::accounts_io::SYNC { "Claude (sync)" } else { title(provider) },"label":s(p, "label"),"email":s(&p["identity"], "email"),"plan":s(&p["identity"], "plan"),"state":state,"line":line,"tone":tone,
+        "message":if msg == super::accounts_io::EXPIRED_SHORT { "" } else { msg },"limits":limits,"hold":s(&snap["holds"][id], "text"),"signin":sg,"actions":actions,
         "remove":format!("Remove {}? Threads on it stop and must choose another account.", s(p, "label"))}))
+}
+/// The label a new sync account gets when the person gives none: "Claude sync 1" for the first.
+pub fn new_sync_label(snap: &Value, given: &str) -> String {
+    let g = super::accounts_io::label(given); if !g.is_empty() { return g }
+    let n = snap["profiles"].as_array().map_or(0, |a| a.iter().filter(|p| s(p, "kind") == super::accounts_io::SYNC).count());
+    format!("Claude sync {}", n + 1)
 }
 /// The label a new account gets when the person gives none: "Claude 2" for the second.
 pub fn new_label(snap: &Value, provider: &str, given: &str) -> String {
@@ -111,11 +126,11 @@ mod tests {
     }
     #[test] fn the_page_lists_each_provider_with_its_accounts_state_and_limits() {
         let p = page(&snap(), "UTC", 1000);
-        let pv: Vec<&str> = p["providers"].as_array().unwrap().iter().map(|x| x["provider"].as_str().unwrap()).collect(); assert_eq!(pv, ["claude", "codex"]);
+        let pv: Vec<&str> = p["providers"].as_array().unwrap().iter().map(|x| x["provider"].as_str().unwrap()).collect(); assert_eq!(pv, ["claude", "claude-sync", "codex"]);
         let claude = &p["providers"][0]["accounts"]; assert_eq!(claude.as_array().unwrap().len(), 2);
         assert_eq!((claude[0]["line"].as_str().unwrap(), claude[0]["tone"].as_str().unwrap(), claude[0]["hold"].as_str().unwrap()), ("sign-in expired", "bad", "limited"));
         assert!(claude[0]["limits"].as_str().unwrap().starts_with("5h  42% used, resets ") && claude[0]["limits"].as_str().unwrap().ends_with(" · 7d  10% used"), "{}", claude[0]["limits"]);
-        assert_eq!(p["providers"][1]["accounts"][0]["limits"], "5h  5% used", "a Codex window by its length");
+        assert_eq!(p["providers"][2]["accounts"][0]["limits"], "5h  5% used", "a Codex window by its length");
         assert_eq!(p["providers"][0]["add"], "Add a Claude account");
     }
     #[test] fn an_expired_account_offers_to_sign_in_again_and_says_nothing_twice() {

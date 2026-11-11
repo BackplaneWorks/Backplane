@@ -68,7 +68,18 @@ pub fn wants_poll(snap: &Value) -> bool {
 pub fn identity(p: &Value) -> String {
     /* i18n-ok: product names */ let mut parts = vec![if p["provider"] == "codex" { "Codex".to_string() } else { "Claude".to_string() }];
     for k in ["email", "plan"] { if let Some(s) = p["identity"][k].as_str().filter(|s| !s.is_empty()) { parts.push(s.to_string()) } }
+    if is_sync(p) { parts.push(sync_line(p, now_s())) }
     parts.join(" · ")
+}
+/// A sync account: Claude Code's long-lived token, shared with the person's linked machines (the hub's accounts_sync.rs).
+pub fn is_sync(p: &Value) -> bool { p["kind"] == "sync" }
+/// What a sync account's card says of its token: where it came from and how long it has left.
+pub fn sync_line(p: &Value, now: u64) -> String {
+    let ends = p["tokenExpiresAt"].as_u64().unwrap_or(0);
+    let from = if p["origin"].as_str().map_or(true, str::is_empty) { trs("sync token") } else { trs("sync token from a linked machine") };
+    if ends == 0 { return from }
+    /* i18n-ok: joins two catalog words */ if ends <= now { return format!("{from}, {}", trs("ended")) }
+    /* i18n-ok: joins two catalog words */ format!("{from}, {}", tf("gpui.acct.sync.days", &[("n", ((ends - now) / 86400).into())]))
 }
 /// The most used window of a profile's allowance as "62% of 5-hour used", when the provider reported one.
 pub fn allowance(p: &Value) -> String {
@@ -206,6 +217,14 @@ fn add(this: &mut Backplane, cx: &mut Context<Backplane>) {
     ask(this, json!({"op": "add", "provider": provider, "label": label.trim()}));
     input.update(cx, |i, cx| i.set(String::new(), cx));
 }
+/// Add account → Claude (sync): a sync account named in the box, its `claude setup-token` started at once on the hub.
+fn add_sync(this: &mut Backplane, cx: &mut Context<Backplane>) {
+    let Some(input) = this.screens.acct.label.clone() else { return };
+    let label = input.read(cx).content.to_string();
+    /* i18n-ok: drawn through tr */ if label.trim().is_empty() { this.screens.acct.notice = "Name the account first, e.g. Work or Personal.".into(); return }
+    ask(this, json!({"op": "add", "provider": "claude", "kind": "sync", "label": label.trim(), "start": true}));
+    input.update(cx, |i, cx| i.set(String::new(), cx));
+}
 fn respond(this: &mut Backplane, attempt: &str, cx: &mut Context<Backplane>) {
     let Some(input) = this.screens.acct.codes.get(attempt).cloned() else { return };
     let profile = this.screens.acct.snap["attempts"].as_array().into_iter().flatten().find(|a| a["id"] == attempt).map(|a| string(a, "profile")).unwrap_or_default();
@@ -277,7 +296,11 @@ fn card(cx: &mut Context<Backplane>, light: bool, st: &Accounts, p: &Value, i: u
             btn(&trs("Refresh"), "status", false, false, Box::new({ let pid = pid.clone(); move |this, _| ask(this, json!({"op": "status", "profile": pid, "asked": true})) }));
             /* i18n-ok: drawn through tr */ if !default { let (prov, pid2) = (string(p, "provider"), pid.clone()); btn(&trs("Use for new threads"), "default", false, false, Box::new(move |this, _| { if this.tx.try_send(Command::Rpc("accounts.default".into(), Secret(json!({"provider": prov, "profile": pid2, "epoch": epoch})), "acct-default")).is_err() { this.screens.acct.notice = "The hub is not reachable. Try again.".into(); } })); }
             /* i18n-ok: drawn through tr */ { let (prov, pid2) = (string(p, "provider"), pid.clone()); btn(&trs("Move all threads here"), "moveall", false, false, Box::new(move |this, _| { this.screens.acct.notice.clear(); this.screens.acct.info.clear(); if this.tx.try_send(Command::Rpc("accounts.move_all".into(), Secret(json!({"provider": prov, "profile": pid2, "epoch": epoch, "default": true})), "acct-moveall")).is_err() { this.screens.acct.notice = "The hub is not reachable. Try again.".into(); } })); }
+            if is_sync(p) { btn(&trs("Renew the sync token"), "renew", false, false, Box::new({ let pid = pid.clone(); move |this, _| ask(this, json!({"op": "login", "profile": pid})) })); }
+            else if p["provider"] == "claude" { btn(&trs("Make a sync token"), "synctoken", false, false, Box::new({ let pid = pid.clone(); move |this, _| ask(this, json!({"op": "synctoken", "profile": pid})) })); }
             btn(&trs("Sign out"), "logout", false, false, Box::new({ let pid = pid.clone(); move |this, _| ask(this, json!({"op": "disconnect", "profile": pid})) }));
+        } else if is_sync(p) && state != "unchecked" {
+            btn(&if state == "expired" { trs("Renew the sync token") } else { trs("Make the sync token") }, "login", true, false, Box::new({ let pid = pid.clone(); move |this, _| ask(this, json!({"op": "login", "profile": pid})) }));
         } else {
             if state == "expired" { btn(&trs("Check now"), "status", false, false, Box::new({ let pid = pid.clone(); move |this, _| ask(this, json!({"op": "status", "profile": pid, "asked": true})) })); }
             btn(&if state == "unchecked" { trs("Check sign-in") } else if state == "expired" { trs("Sign in again") } else { trs("Connect") }, "login", state != "unchecked", false, Box::new({ let pid = pid.clone(); move |this, _| ask(this, json!({"op": if state_of(&this.screens.acct.snap, &pid) == "unchecked" { "status" } else { "login" }, "profile": pid})) }));
@@ -321,7 +344,8 @@ pub fn page(cx: &mut Context<Backplane>, light: bool, st: &Accounts, avail: f32)
         let row = if avail < ADD_ROW_MIN { div().flex().flex_col().items_start().gap_2().mt_2().child(div().w_full().h(px(32.)).px_3().flex().items_center().bg(c("raise")).child(input.clone())) }
             else { div().flex().items_center().gap_2().mt_2().child(div().flex_1().min_w_0().h(px(32.)).px_3().flex().items_center().bg(c("raise")).child(input.clone())) };
         out.push(row
-            .child(button(cx, light, "acct-add".into(), &trs("Add Claude account"), true, false, |this, cx| add(this, cx))).into_any_element());
+            .child(button(cx, light, "acct-add".into(), &trs("Add Claude account"), true, false, |this, cx| add(this, cx)))
+            .child(button(cx, light, "acct-add-sync".into(), &trs("Add Claude (sync)"), false, false, |this, cx| add_sync(this, cx))).into_any_element());
     }
     out.extend(super::google::section(cx, light, &st.google));
     out
@@ -434,6 +458,12 @@ mod tests {
             {"id":"d","provider":"claude","label":"Old","epoch":1,"state":"disconnected","identity":{}}],
             "attempts":[{"id":"a1","profile":"d","state":"waiting","url":"https://claude.ai/x","userCode":"","message":""}],
             "thread":{"id":"t1","provider":"claude","binding":"{\"id\":\"w\",\"epoch\":3}"},"defaults":{"claude":"{\"id\":\"w\",\"epoch\":3}"}})
+    }
+    #[test] fn a_sync_card_says_where_its_token_came_from_and_how_long_it_has_left() {
+        let p = json!({"kind":"sync","origin":"","tokenExpiresAt":1000 + 40 * 86400}); assert!(is_sync(&p) && !is_sync(&json!({"kind":""})));
+        assert_eq!(sync_line(&p, 1000), "sync token, 40 days left");
+        assert_eq!(sync_line(&json!({"kind":"sync","origin":"L1","tokenExpiresAt":10}), 1000), "sync token from a linked machine, ended");
+        assert_eq!(sync_line(&json!({"kind":"sync"}), 1000), "sync token");
     }
     #[test] fn a_card_says_who_signed_in_and_how_much_is_used() {
         let ps = profiles(&snap()); assert_eq!(identity(&ps[0]), "Claude · a@b.com · max"); assert_eq!(identity(&ps[1]), "Claude");

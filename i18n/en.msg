@@ -1757,6 +1757,13 @@ gpui.imp.send.starts.a.new.thread = Send starts a new thread in the chosen proje
 gpui.imp.creating.the.thread = Creating the thread…
 gpui.imp.request.sent.opening.the.new2 = Request sent. Opening the new thread.
 gpui.imp.project.chosen = Sending to {title}
+gpui.acct.sync.token = sync token
+gpui.acct.sync.token.from.a.linked = sync token from a linked machine
+gpui.acct.sync.days = {n, plural, one {# day left} other {# days left}}
+gpui.acct.renew.the.sync.token = Renew the sync token
+gpui.acct.make.a.sync.token = Make a sync token
+gpui.acct.make.the.sync.token = Make the sync token
+gpui.acct.add.claude.sync = Add Claude (sync)
 
 # ---- gpui-b: keys, ui, files, history ----
 gpui.send.the.message = Send the message
@@ -2388,6 +2395,11 @@ ring.hear.again.openai = Hear again (OpenAI)
 ring.what.happened = What happened
 ring.send.again = Send again
 ring.no.recordings.yet = No recordings yet.
+hub.acct.claude.sync = Claude (sync)
+hub.acct.add.a.claude.sync.token = Add a Claude sync token
+hub.acct.connected.sync.token = connected, sync token
+hub.acct.sync.token.ended = Sync token ended
+hub.acct.sync.token.ends = Sync token ends {when}
 
 # ---- gpui-f: hub setup flow and thread ----
 gpui.f.group.install = Install

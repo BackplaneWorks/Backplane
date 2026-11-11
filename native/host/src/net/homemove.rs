@@ -307,6 +307,9 @@ pub async fn move_to(hub: &Arc<Hub>, link: &str) -> Result<Value, String> {
         far(hub, link, "home.adopt", &json!({"devices": ds})).await?;
         tell(hub, "moving", step("vault"), "").await;
         if let Ok(items) = crate::settings::vault::read_other(&home) { for (nm, purpose, value) in items { far(hub, link, "home.secret", &json!({"name": nm, "purpose": purpose, "value": value})).await?; } }
+        // the sync accounts arrive whole: their registry entries with their tokens (the vault entries above are only the tokens; a renewal made since is in this one)
+        tell(hub, "moving", step("accounts"), "").await;
+        crate::settings::accounts_sync::push_to(hub, link).await?;
         tell(hub, "moving", step("files"), "").await;
         let bots_dir = crate::bots::relocate::root(&home);
         for b in &c.bots { let mut fs = vec![]; walk(&bots_dir, b, &mut fs); for f in fs { send_file(hub, link, "bots", &f, &bots_dir.join(&f)).await?; } }

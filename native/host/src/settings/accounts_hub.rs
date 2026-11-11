@@ -78,8 +78,29 @@ pub fn provider_title(provider: &str) -> &'static str { match provider { "codex"
 pub fn signin_alert(profiles: &[Value], get: &dyn Fn(&str) -> String, now: u64, id: &str) -> Option<Value> {
     let p = profiles.iter().find(|p| p["id"] == id)?;
     let provider = p["provider"].as_str().unwrap_or("");
-    if !get(&alert_key(provider)).is_empty() || profiles.iter().any(|x| fb::eligible(get, now, provider, "", x)) { return None }
+    // a renewal reminder gives way to a sign-in that is dead now
+    let cur = get(&alert_key(provider)); let renew = serde_json::from_str::<Value>(&cur).map_or(false, |r| r["renew"] == true);
+    if (!cur.is_empty() && !renew) || profiles.iter().any(|x| fb::eligible(get, now, provider, "", x)) { return None }
     Some(json!({"profile":id,"epoch":p["epoch"],"provider":provider,"label":p["label"],"text":format!("{} sign-in expired: tap to sign in again", provider_title(provider)),"link":format!("account:{id}"),"at":now}))
+}
+
+/// How long before a sync token's end the person is asked to renew it.
+pub const RENEW_AHEAD: u64 = 30 * 86400;
+/// The renewal alert for the sync token nearest its end, a month ahead (`RENEW_AHEAD`), when no Claude sign-in alert is recorded: the sign-in alert's own record
+/// (`account.signin.alert.claude`, `renew: true`), so the push module sends it as it sends an expired sign-in, and its link opens the account.
+pub fn renew_alert(profiles: &[Value], get: &dyn Fn(&str) -> String, zone: &str, now: u64) -> Option<Value> {
+    if !get(&alert_key("claude")).is_empty() { return None }
+    let p = profiles.iter().filter(|p| p["kind"] == super::accounts_io::SYNC && p["state"] != "disconnected").filter(|p| { let e = p["tokenExpiresAt"].as_u64().unwrap_or(0); e > 0 && now + RENEW_AHEAD >= e })
+        .min_by_key(|p| p["tokenExpiresAt"].as_u64().unwrap_or(0))?;
+    let (id, ends, lab) = (p["id"].as_str().unwrap_or(""), p["tokenExpiresAt"].as_u64().unwrap_or(0), p["label"].as_str().unwrap_or(""));
+    let when = if ends > now { format!("ends {}", crate::agents::rules::when(zone, ends, now)) } else { "has ended".to_string() };
+    Some(json!({"profile":id,"epoch":p["epoch"],"provider":"claude","label":lab,"text":format!("Claude sync token {lab} {when}: renew the sync token"),"link":format!("account:{id}"),"at":now,"renew":true}))
+}
+/// A renewal alert that is over: its account was renewed (its end is more than a month away) or is gone. Any other record is not this one's to clear.
+pub fn renew_over(rec: &str, profiles: &[Value], now: u64) -> bool {
+    let Ok(r) = serde_json::from_str::<Value>(rec) else { return false };
+    if r["renew"] != true { return false }
+    match profiles.iter().find(|p| p["id"] == r["profile"]) { None => true, Some(p) => p["state"] == "disconnected" || p["tokenExpiresAt"].as_u64().unwrap_or(0) > now + RENEW_AHEAD }
 }
 
 /// Where a start may go when its own account cannot start a turn: the provider's other saved accounts that may (connected, or not yet checked since the restart: the
@@ -149,6 +170,14 @@ pub async fn found_seen(hub: &Arc<Hub>, agents: &Option<Arc<Agents>>, snapshot: 
         if !hub.setting(&alert_key(&provider)).await.unwrap_or_default().is_empty() { let _ = hub.commit_many(&[json!({"$":"SettingSet","key":alert_key(&provider),"value":"","at":at})]).await; }
         if let Some(a) = agents { let n = super::driver::signed_in(a, id, at).await; if n > 0 { eprintln!("accounts: {n} thread(s) go on after a sign-in") } }
     }
+    // a sync token near its end: the same one alert, a month ahead, until it is renewed (or removed)
+    {
+        let (cur, zone) = (hub.setting(&alert_key("claude")).await.unwrap_or_default(), hub.setting("tz.machine").await.unwrap_or_default());
+        if renew_over(&cur, &profiles, at) { let _ = hub.commit_many(&[json!({"$":"SettingSet","key":alert_key("claude"),"value":"","at":at})]).await; }
+        else if let Some(rec) = renew_alert(&profiles, &|k: &str| if k == alert_key("claude") { cur.clone() } else { String::new() }, &zone, at) {
+            let _ = hub.commit_many(&[json!({"$":"SettingSet","key":alert_key("claude"),"value":rec.to_string(),"at":at})]).await;
+        }
+    }
     // still dead with nothing to take over: the one alert (the push module sends it in the uberbot's name)
     let dead: Vec<&str> = seen.iter().filter(|(_, (_, d))| *d).map(|(id, _)| id.as_str()).collect();
     if dead.is_empty() { return }
@@ -203,7 +232,10 @@ impl RpcHandler for AccountsRpc {
             if matches!(op, "remove" | "login" | "disconnect") && !dead && active(hub, pid).await {
                 return vec![json!({"t":"reply","id":id,"ok":false,"error":"Stop this account's active turns before changing its login."})]
             }
+            let (kind, origin) = self.mgr.kind_of(pid);
             let mut snap = self.mgr.request(p).await;
+            // a sync account another machine made, removed here: that machine is asked to remove it too, so it leaves every machine
+            if op == "remove" && kind == super::accounts_io::SYNC && !origin.is_empty() && snap["error"].as_str().unwrap_or("").is_empty() { super::accounts_sync::dropped(hub, &origin, pid).await; }
             // a client that names a thread is also told what the thread is bound to (the account chip and its menu need the binding to send `accounts.select` with `expected`)
             snap["defaults"] = json!({"claude": hub.setting("account.default.claude").await.unwrap_or_default(), "codex": hub.setting("account.default.codex").await.unwrap_or_default()});
             let mut model = String::new();
@@ -255,6 +287,7 @@ pub fn start_cli(hub: &Arc<Hub>, agents: Option<Arc<Agents>>, cli: crate::agents
     LIVE.lock().unwrap().retain(|(h, w)| w.strong_count() > 0 && h != &hub.cfg.home); LIVE.lock().unwrap().push((hub.cfg.home.clone(), Arc::downgrade(&mgr)));
     if let Some(a) = &agents { let _ = a.accounts.set(mgr.clone()); } // the agents' start overran its budget: they take the same manager from the hub when they get to it
     hub.register_rpc(Arc::new(AccountsRpc::new(mgr.clone())));
+    super::accounts_sync::start(hub, mgr.clone());
     let (h, m) = (hub.clone(), mgr.clone());
     tokio::spawn(async move {
         let (mut last, mut seen) = (String::new(), Seen::new());
@@ -325,6 +358,23 @@ mod tests {
         assert_eq!((a["text"].as_str().unwrap(), a["link"].as_str().unwrap(), a["provider"].as_str().unwrap()), ("Claude sign-in expired: tap to sign in again", "account:w", "claude"));
         let told = a.to_string(); let get2 = |k: &str| if k == held { rec.clone() } else if k == alert_key("claude") { told.clone() } else { String::new() };
         assert!(signin_alert(&ps, &get2, 100, "w").is_none(), "one alert a provider until one of its accounts is back");
+    }
+    #[test] fn a_sync_token_near_its_end_asks_for_a_renewal_a_month_ahead_once_and_gives_way_to_a_dead_sign_in() {
+        let now = 1_800_000_000; let day = 86400;
+        let ps = vec![json!({"id":"s","provider":"claude","kind":"sync","label":"Work sync","state":"connected","epoch":1,"tokenExpiresAt":now + 20 * day}),
+            json!({"id":"far","provider":"claude","kind":"sync","label":"Later","state":"connected","epoch":1,"tokenExpiresAt":now + 200 * day}), json!({"id":"w","provider":"claude","kind":"","label":"Work","state":"connected","epoch":2})];
+        let none = |_: &str| String::new();
+        let r = renew_alert(&ps, &none, "UTC", now).unwrap();
+        assert_eq!((r["profile"].as_str().unwrap(), r["link"].as_str().unwrap(), r["renew"].as_bool().unwrap()), ("s", "account:s", true)); assert!(r["text"].as_str().unwrap().starts_with("Claude sync token Work sync ends ") && r["text"].as_str().unwrap().ends_with(": renew the sync token"), "{r}");
+        assert!(renew_alert(&ps[1..], &none, "UTC", now).is_none(), "more than a month left: nothing yet");
+        assert!(renew_alert(&ps[1..], &none, "UTC", now + 171 * day).is_some(), "a month ahead of its end");
+        assert!(renew_alert(&ps, &|_: &str| r.to_string(), "UTC", now).is_none(), "once");
+        assert!(renew_alert(&ps, &none, "UTC", now + 21 * day).unwrap()["text"].as_str().unwrap().contains("has ended"));
+        assert!(!renew_over(&r.to_string(), &ps, now), "still due");
+        let renewed = vec![json!({"id":"s","kind":"sync","state":"connected","tokenExpiresAt":now + 365 * day})]; assert!(renew_over(&r.to_string(), &renewed, now), "renewed: over");
+        assert!(renew_over(&r.to_string(), &[], now), "removed: over"); assert!(!renew_over(&json!({"profile":"w","text":"x"}).to_string(), &[], now), "a sign-in alert is not this one's to clear");
+        let dead = vec![json!({"id":"w","provider":"claude","state":"expired","epoch":2,"label":"Work"})];
+        assert!(signin_alert(&dead, &|k: &str| if k == alert_key("claude") { r.to_string() } else { String::new() }, now, "w").is_some(), "a dead sign-in takes the alert over a reminder");
     }
     #[test] fn the_default_claude_allowance_is_kept_as_a_setting_once() {
         let s = json!({"default_allowance":{"provider":"claude","source":"claude-cli-usage","attempted_at":5,"windows":[]}});
