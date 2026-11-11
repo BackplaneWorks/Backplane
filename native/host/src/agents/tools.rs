@@ -183,6 +183,7 @@ impl Agents {
             return Ok(())
         }
         let (now, th) = (now_s(), a.thread.clone());
+        if a.tool == crate::mcpx::tools::TOOL { return crate::mcpx::tools::answer(self, ask, &th, &a.options, answer).await } // Settings > MCP: an agent's server change, confirmed or not
         if a.tool == crate::settings::proposal::TOOL { return { let open: Vec<String> = self.world().await.asks.iter().filter(|(_, k)| k.tool == crate::settings::proposal::TOOL).map(|(i, _)| i.clone()).collect(); crate::settings::proposal::answer_ask(self, ask, &th, &a.options, answer, now, &open).await } } // settings lane: Settings.answer
         if a.tool.starts_with("order_ask") { // Hub.answer.order: it parks nothing: the answer is the person's message, which starts (or queues) the agent's turn however long they took
             let pend = self.pending_ev(&th, 0, ask, now).await; self.commit_events(vec![json!({"$":"AskClosed","id":ask,"answer":answer,"at":now}), pend]).await;

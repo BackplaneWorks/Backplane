@@ -120,7 +120,7 @@ fn merge(old: &str, used: u64, window: u64) -> String { let mut w = World::defau
 #[test] fn speed_told_rise() { assert_eq!(speed_value("2/1/0/0/0/0/0/0", 5, 4, 1, 1), "5/4/3/3/1/3/3/1") }
 
 // ---- small rules of hub / prompt ----
-#[test] fn claude_kistack_plugin() { let a = super::rules::claude_args(&super::rules::ArgsIn { model: "", session: "", runtime: "full-access", interaction: "default", prompt: "P", dirs: &[], effort: "", think: false, plugins: &["/k/rev".to_string()], mcp_url: "u" }); let i = a.iter().position(|x| x == "--plugin-dir").unwrap(); assert_eq!(&a[i..i + 2], ["--plugin-dir", "/k/rev"]) }
+#[test] fn claude_kistack_plugin() { let a = super::rules::claude_args(&super::rules::ArgsIn { model: "", session: "", runtime: "full-access", interaction: "default", prompt: "P", dirs: &[], effort: "", think: false, plugins: &["/k/rev".to_string()], mcp_url: "u", mcp_json: "", disallowed: &[] }); let i = a.iter().position(|x| x == "--plugin-dir").unwrap(); assert_eq!(&a[i..i + 2], ["--plugin-dir", "/k/rev"]) }
 #[test] fn tool_summary_question() { assert_eq!(super::lines::tool_summary("mcp__backplane__order_ask", &json!({"question":"Ship where?"})), "Ship where?") }
 #[test] fn tool_summary_says_what_a_search_a_fetch_and_a_task_update_did() {
     assert_eq!(super::lines::tool_summary("WebSearch", &json!({"query":"TPS54331 datasheet"})), "TPS54331 datasheet");

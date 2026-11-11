@@ -39,12 +39,13 @@ pub fn permission(runtime: &str, interaction: &str) -> &'static str {
 }
 
 /// Claude.args then Hub.agent_args: effort, thinking, plugins and the MCP config follow.
-pub struct ArgsIn<'a> { pub model: &'a str, pub session: &'a str, pub runtime: &'a str, pub interaction: &'a str, pub prompt: &'a str, pub dirs: &'a [String], pub effort: &'a str, pub think: bool, pub plugins: &'a [String], pub mcp_url: &'a str }
+pub struct ArgsIn<'a> { pub model: &'a str, pub session: &'a str, pub runtime: &'a str, pub interaction: &'a str, pub prompt: &'a str, pub dirs: &'a [String], pub effort: &'a str, pub think: bool, pub plugins: &'a [String], pub mcp_url: &'a str, /** the --mcp-config JSON (mcpx gen::claude); empty: Backplane's own and pcbparts */ pub mcp_json: &'a str, /** tools Claude is told not to use */ pub disallowed: &'a [String] }
 pub fn claude_args(a: &ArgsIn) -> Vec<String> {
     let s = |x: &str| x.to_string();
     let mut v: Vec<String> = ["-p", "--verbose", "--input-format", "stream-json", "--output-format", "stream-json", "--include-partial-messages", "--permission-mode"].iter().map(|x| s(x)).collect();
     v.push(s(permission(a.runtime, a.interaction)));
-    v.extend(["--disallowedTools", "Agent,Task", "--append-system-prompt"].iter().map(|x| s(x))); v.push(s(a.prompt));
+    v.push(s("--disallowedTools")); v.push(std::iter::once("Agent,Task".to_string()).chain(a.disallowed.iter().cloned()).collect::<Vec<_>>().join(","));
+    v.push(s("--append-system-prompt")); v.push(s(a.prompt));
     if !(a.runtime == "full-access" && a.interaction == "default") && !a.runtime.is_empty() { v.extend(["--permission-prompt-tool", "mcp__backplane__permission_prompt"].iter().map(|x| s(x))); }
     if !a.model.is_empty() { v.push(s("--model")); v.push(s(a.model)); }
     if !a.session.is_empty() { v.push(s("--resume")); v.push(s(a.session)); }
@@ -52,7 +53,7 @@ pub fn claude_args(a: &ArgsIn) -> Vec<String> {
     if effort_ok(a.effort) { v.push(s("--effort")); v.push(s(a.effort)); }
     if a.think { v.push(s("--thinking-display")); v.push(s("summarized")); }
     for d in a.plugins { v.push(s("--plugin-dir")); v.push(s(d)); }
-    v.push(s("--mcp-config")); v.push(mcp_config(a.mcp_url));
+    v.push(s("--mcp-config")); v.push(if a.mcp_json.is_empty() { mcp_config(a.mcp_url) } else { a.mcp_json.to_string() });
     v
 }
 /// Windows: the system prompt goes to Claude in a file (`--append-system-prompt-file`). A command line there holds 32767 characters,
@@ -204,7 +205,7 @@ mod tests {
     #[test] fn titles_cut_at_sixty_characters() { assert_eq!(title_of("  hello\nworld"), "hello"); let t = title_of(&"é".repeat(80)); assert_eq!(t.chars().count(), 60); assert!(t.ends_with("...")); assert_eq!(title_of(&"a".repeat(60)).len(), 60); }
     #[test] fn modes_map_to_claudes_permission_flags() {
         assert_eq!(permission("full-access", "default"), "bypassPermissions"); assert_eq!(permission("approval-required", "default"), "default"); assert_eq!(permission("full-access", "plan"), "plan");
-        let mk = |m: &'static str, s: &'static str, r: &'static str| ArgsIn { model: m, session: s, runtime: r, interaction: "default", prompt: "P", dirs: &[], effort: "", think: false, plugins: &[], mcp_url: "http://u" };
+        let mk = |m: &'static str, s: &'static str, r: &'static str| ArgsIn { model: m, session: s, runtime: r, interaction: "default", prompt: "P", dirs: &[], effort: "", think: false, plugins: &[], mcp_url: "http://u", mcp_json: "", disallowed: &[] };
         let a = claude_args(&mk("opus", "S", "full-access")); assert!(!a.contains(&"--permission-prompt-tool".to_string())); assert_eq!(&a[a.len() - 6..a.len() - 2], ["--model", "opus", "--resume", "S"]);
         assert!(claude_args(&mk("", "", "auto")).contains(&"--permission-prompt-tool".to_string()));
         let mut x = mk("", "", "full-access"); let dirs = vec!["/k".to_string(), "/h/attachments".to_string()]; x.dirs = &dirs; x.effort = "high"; x.think = true; x.plugins = &dirs[..1];

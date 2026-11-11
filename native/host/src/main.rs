@@ -111,6 +111,8 @@ async fn main() {
     plat::hub::raise_nofile();
     if std::env::args().nth(1).as_deref() == Some("--agent-reaper") { std::process::exit(agents::proc::reaper_main()) }
     if std::env::args().nth(1).as_deref() == Some("--mcp-stdio") { std::process::exit(agents::mcp_stdio::main()) }
+    if std::env::args().nth(1).as_deref() == Some("--mcp-run") { let a: Vec<String> = std::env::args().skip(2).collect(); std::process::exit(mcpx::run::main(&a)) }
+    if std::env::args().nth(1).as_deref() == Some("--mcp-headers") { let a: Vec<String> = std::env::args().skip(2).collect(); std::process::exit(mcpx::run::headers_main(&a)) }
     if std::env::args().nth(1).as_deref() == Some("--render") { std::process::exit(render_cli()) }
     let args = match parse() { Ok(a) => a, Err(code) => std::process::exit(code) };
     plat::hub::exit_on_signals(files::kicad::embed::shutdown_all);
@@ -180,6 +182,7 @@ async fn run(a: Args) -> Result<()> {
     if let Some(ag) = &agents {
         settings::order::resume(ag.clone()); // Od.resume: follow every order not yet delivered (a copy follows none)
         files::tools::register(&hub, ag);
+        let _mcp = mcpx::svc::start(&hub, ag, std::path::PathBuf::from(&ag.host.user_home)); // Settings > MCP: the servers every agent gets, the mcp_ tools, mcp.page
         let a2 = ag.clone(); guard::watch("agents", move || { let a = a2.clone(); Box::pin(async move { drop(a.world().await); }) });
     }
     startup::mark("agents started");

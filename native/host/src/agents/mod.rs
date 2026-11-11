@@ -835,7 +835,8 @@ impl Actor {
         let url = self.ag.mcp.get().map(|m| m.url(&th, &gen)).unwrap_or_default();
         let (host, cwd2, text2, prov2) = (self.ag.host.clone(), cwd.to_string(), text.to_string(), t.provider.clone());
         let (body, imgs) = tokio::task::spawn_blocking(move || { let body = if text2.contains('$') { let ss = skills::scan_all(&skills::env_from(&host.user_home, &host.home, host.kistack.as_deref()), &cwd2); skills::prepare(&text2, &ss, &prov2, false) } else { text2.clone() }; (body, inputs::att_paths(&text2).into_iter().filter(|p| !inputs::mime(p).is_empty()).collect::<Vec<_>>()) }).await.unwrap_or_default();
-        let a = providers::TurnIn { thread: th.clone(), cwd: cwd.into(), home: self.ag.host.home.to_string_lossy().into_owned(), model: t.model.clone(), session, runtime: t.runtime.clone(), interaction: t.interaction.clone(), effort, think, text: body, images: imgs, prompt, mcp_url: url, pcbparts_url: "https://pcbparts.dev/mcp".into(), gen: gen.clone(), settings: { let w = self.ag.world().await; providers::SETTINGS.iter().map(|k| (k.to_string(), w.setting(k).to_string())).collect() } };
+        let a = providers::TurnIn { thread: th.clone(), cwd: cwd.into(), home: self.ag.host.home.to_string_lossy().into_owned(), model: t.model.clone(), session, runtime: t.runtime.clone(), interaction: t.interaction.clone(), effort, think, text: body, images: imgs, prompt, mcp_url: url.clone(), pcbparts_url: String::new(), gen: gen.clone(), settings: { let w = self.ag.world().await; providers::SETTINGS.iter().map(|k| (k.to_string(), w.setting(k).to_string())).collect() }, mcp: crate::mcpx::svc::launch(&th, &t.provider, &url).await };
+        let a = providers::TurnIn { pcbparts_url: if a.mcp.pcbparts { crate::mcpx::gen::PCBPARTS.into() } else { String::new() }, ..a };
         let mut driver = made.driver;
         if let Err(e) = driver.prepare(&a) { let hint = driver.install_hint().map(|h| format!(". {h}")).unwrap_or_default(); self.fail(format!("could not start {}: {e}{hint}", made.cli), "spawn", &format!("spawn-{now}")).await; self.ag.stats.spawn_failures.fetch_add(1, Relaxed); return }
         let (mut args, mut env, start) = (driver.argv(&a), driver.env(&a), driver.start(&a));
@@ -956,7 +957,8 @@ impl Actor {
     async fn claude_send(&mut self, t: &world::T, cwd: &str, msg: &str, text: &str, agent_text: &str, now: u64) {
         if crate::copy::turn_gated(self.pressed) { return } // Copy.turns: nothing but a person's turn writes to an agent on a copy
         let th = self.th.clone(); let (cwd, msg, text, mut agent_text) = (cwd.to_string(), msg.to_string(), text.to_string(), agent_text.to_string());
-        let key = rules::agent_key(&t.model, &t.runtime, &t.interaction, self.cx.think);
+        // the thread's MCP servers are part of the key: a list changed in Settings > MCP (or by an agent) starts Claude again at its next turn, on the same session
+        let key = format!("{}|mcp:{}", rules::agent_key(&t.model, &t.runtime, &t.interaction, self.cx.think), crate::mcpx::svc::fingerprint(&th, "claude").await);
         // a live process with a command still open (a turn in flight) is never replaced for a changed model/mode key: the message goes on its input (the CLI queues it) and the new key applies from the next process
         if self.live_proc.as_ref().map_or(true, |p| p.person != self.person || (p.key != key && !self.cmds.open(""))) {
             self.stop().await; self.lines = None; self.exit = None;
@@ -1136,7 +1138,8 @@ impl Actor {
         let plugins = own;
         let (effort, think) = { let w = self.ag.world().await; (w.setting(&format!("effort.{th}")).to_string(), self.cx.think) };
         let url = self.ag.mcp.get().map(|m| m.url(&th, &gen)).unwrap_or_default();
-        let mut args = rules::claude_args(&rules::ArgsIn { model: &t.model, session: &session, runtime: &t.runtime, interaction: &t.interaction, prompt: &prompt, dirs: &dirs, effort: &effort, think, plugins: &plugins, mcp_url: &url });
+        let mcp = crate::mcpx::svc::launch(&th, "claude", &url).await;
+        let mut args = rules::claude_args(&rules::ArgsIn { model: &t.model, session: &session, runtime: &t.runtime, interaction: &t.interaction, prompt: &prompt, dirs: &dirs, effort: &effort, think, plugins: &plugins, mcp_url: &url, mcp_json: &mcp.claude, disallowed: &mcp.disallowed });
         #[cfg(windows)] { let name: String = th.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' }).collect(); rules::prompt_to_file(&mut args, &self.ag.host.home.join("prompts").join(format!("{name}.md"))).map_err(|e| e.to_string())?; }
         if !acct_args.is_empty() { acct_args.extend(args); args = acct_args }
         if self.person { args.extend(person::CLAUDE_STRICT.iter().map(|x| x.to_string())) } // only this hub's MCP config; the person's user-level hooks, MCP servers and rules do not load

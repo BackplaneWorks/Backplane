@@ -6,7 +6,8 @@ use serde_json::{json, Map, Value};
 
 /// AcpTurn: what a turn needs.
 #[derive(Clone, Debug, Default)]
-pub struct AcpTurn { pub cwd: String, pub mcp: String, pub prompt: String, pub text: String, pub session: String, pub ask: bool }
+pub struct AcpTurn { pub cwd: String, pub mcp: String, pub prompt: String, pub text: String, pub session: String, pub ask: bool, /** the full mcpServers (mcpx gen::acp); null: Backplane's own only */ pub servers: Value }
+impl AcpTurn { pub fn servers(&self) -> Value { if self.servers.is_array() { self.servers.clone() } else { mcp(&self.mcp) } } }
 
 /// Acp: the session id once known, the reply text so far, whether the turn ended, and the tool calls already logged ("\n<id>\n" each).
 #[derive(Clone, Debug, Default, PartialEq)]
@@ -32,8 +33,8 @@ pub fn init() -> String { rpc(1, "initialize", json!({"protocolVersion":1,"clien
 pub fn mcp(url: &str) -> Value { json!([{"type":"http","name":"backplane","url":url,"headers":[]}]) }
 /// Acp.open: session/new, or session/load for the thread's own session.
 pub fn open(t: &AcpTurn) -> String {
-    if t.session.is_empty() { rpc(2, "session/new", json!({"cwd":t.cwd,"mcpServers":mcp(&t.mcp)})) }
-    else { rpc(2, "session/load", json!({"sessionId":t.session,"cwd":t.cwd,"mcpServers":mcp(&t.mcp)})) }
+    if t.session.is_empty() { rpc(2, "session/new", json!({"cwd":t.cwd,"mcpServers":t.servers()})) }
+    else { rpc(2, "session/load", json!({"sessionId":t.session,"cwd":t.cwd,"mcpServers":t.servers()})) }
 }
 fn say_rpc(sid: &str, text: &str) -> String { rpc(3, "session/prompt", json!({"sessionId":sid,"prompt":[{"type":"text","text":text}]})) }
 /// Acp.say.k: a new session gets Backplane's instructions first.
@@ -158,7 +159,7 @@ pub fn line(a: &mut Acp, t: &AcpTurn, o: &Value) -> Out {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn t(sid: &str) -> AcpTurn { AcpTurn { cwd: "/tmp/p".into(), mcp: "http://127.0.0.1:1/mcp/t?token=x".into(), prompt: "RULES".into(), text: "hello".into(), session: sid.into(), ask: false } }
+    fn t(sid: &str) -> AcpTurn { AcpTurn { cwd: "/tmp/p".into(), mcp: "http://127.0.0.1:1/mcp/t?token=x".into(), prompt: "RULES".into(), text: "hello".into(), session: sid.into(), ask: false, servers: Value::Null } }
     fn ta(sid: &str) -> AcpTurn { AcpTurn { ask: true, ..t(sid) } }
     fn ln(a: &mut Acp, t: &AcpTurn, l: &str) -> Out { line(a, t, &serde_json::from_str(l).unwrap()) }
     fn outs(o: &Out) -> String { o.send.iter().cloned().chain(o.shapes.iter().map(|v| v.to_string())).collect::<Vec<_>>().join(" | ") }

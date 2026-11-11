@@ -13,10 +13,10 @@ pub struct OcpTurn { pub acp: AcpTurn, pub model: String }
 /// Ocp.picked: "" and "default" are opencode's own.
 pub fn picked(m: &str) -> bool { !m.is_empty() && m != "default" }
 fn set_model(id: u64, sid: &str, model: &str) -> String { acp::rpc(id, "session/set_config_option", json!({"sessionId":sid,"configId":"model","value":model})) }
-fn new_rpc(id: u64, cwd: &str, mcp: &str) -> String { acp::rpc(id, "session/new", json!({"cwd":cwd,"mcpServers":acp::mcp(mcp)})) }
+fn new_rpc(id: u64, cwd: &str, mcp: Value) -> String { acp::rpc(id, "session/new", json!({"cwd":cwd,"mcpServers":mcp})) }
 /// Ocp.open: a new session, or the thread's own resumed.
 pub fn open(t: &AcpTurn) -> String {
-    if t.session.is_empty() { new_rpc(2, &t.cwd, &t.mcp) } else { acp::rpc(2, "session/resume", json!({"sessionId":t.session,"cwd":t.cwd,"mcpServers":acp::mcp(&t.mcp)})) }
+    if t.session.is_empty() { new_rpc(2, &t.cwd, t.servers()) } else { acp::rpc(2, "session/resume", json!({"sessionId":t.session,"cwd":t.cwd,"mcpServers":t.servers()})) }
 }
 /// Ocp.rel: a path in the thread's folder, from it.
 pub fn rel(cwd: &str, p: &str) -> String {
@@ -55,7 +55,7 @@ fn reply(a: &mut Acp, t: &OcpTurn, o: &Value) -> Out {
     match (id, ok) {
         (1, true) => Out { send: vec![open(&t.acp)], shapes: vec![] },
         (2, true) => { let sid = sid_of(&t.acp.session); opened(t.acp.session.is_empty(), a, t, &sid) }
-        (2, false) => if !t.acp.session.is_empty() && lost(&err(o)) { Out { send: vec![new_rpc(7, &t.acp.cwd, &t.acp.mcp)], shapes: vec![] } } else { fail(a, &err(o)) },
+        (2, false) => if !t.acp.session.is_empty() && lost(&err(o)) { Out { send: vec![new_rpc(7, &t.acp.cwd, t.acp.servers())], shapes: vec![] } } else { fail(a, &err(o)) },
         (5, true) | (15, true) => Out { send: vec![acp::say(id == 5, &t.acp, &a.sid)], shapes: vec![] },
         (5, false) | (15, false) => fail(a, &format!("opencode refused the model {}: {}", t.model, err(o))),
         (7, true) => { let sid = sid_of(""); let mut r = opened(true, a, t, &sid); r.shapes.push(acp::event("notice", json!({"message":renewed_msg(&t.acp.session)}))); r }
@@ -114,7 +114,7 @@ impl Driver for OcDriver {
     fn argv(&self, _: &TurnIn) -> Vec<String> { vec!["acp".into()] }
     fn env(&self, a: &TurnIn) -> Vec<(String, String)> { vec![("OPENCODE_CONFIG_CONTENT".into(), config(&a.model, &a.runtime))] }
     fn start(&mut self, a: &TurnIn) -> Vec<String> {
-        self.turn = OcpTurn { acp: AcpTurn { cwd: a.cwd.clone(), mcp: a.mcp_url.clone(), prompt: a.prompt.clone(), text: a.text.clone(), session: a.session.clone(), ask: super::grok::asks(&a.runtime) }, model: a.model.clone() };
+        self.turn = OcpTurn { acp: AcpTurn { cwd: a.cwd.clone(), mcp: a.mcp_url.clone(), prompt: a.prompt.clone(), text: a.text.clone(), session: a.session.clone(), ask: super::grok::asks(&a.runtime), servers: a.mcp.acp.clone() }, model: a.model.clone() };
         vec![acp::init()]
     }
     fn on_line(&mut self, l: &Value) -> Reaction { let o = line(&mut self.a, &self.turn, l); Reaction { send: o.send, shapes: o.shapes } }
@@ -182,7 +182,7 @@ pub fn models_sh() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn turn(sid: &str, model: &str, ask: bool) -> OcpTurn { OcpTurn { acp: AcpTurn { cwd: "/tmp/p".into(), mcp: "http://127.0.0.1:1/mcp/t?token=x".into(), prompt: "RULES".into(), text: "hello".into(), session: sid.into(), ask }, model: model.into() } }
+    fn turn(sid: &str, model: &str, ask: bool) -> OcpTurn { OcpTurn { acp: AcpTurn { cwd: "/tmp/p".into(), mcp: "http://127.0.0.1:1/mcp/t?token=x".into(), prompt: "RULES".into(), text: "hello".into(), session: sid.into(), ask, servers: Value::Null }, model: model.into() } }
     fn ln(a: &mut Acp, t: &OcpTurn, l: &str) -> Out { line(a, t, &serde_json::from_str(l).unwrap()) }
     fn emits(o: &Out) -> String { o.shapes.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(" | ") }
     fn sends(o: &Out) -> String { o.send.join(" | ") }

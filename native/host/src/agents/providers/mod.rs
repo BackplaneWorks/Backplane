@@ -26,6 +26,8 @@ pub struct TurnIn {
     pub gen: String,
     /// world settings a driver reads (`agy.auth`, `agy.account`, `agy.gcp.project`, `agy.gcp.location`); see `SETTINGS`
     pub settings: Vec<(String, String)>,
+    /// the thread's MCP servers in each provider's form (mcpx/svc.rs `launch`)
+    pub mcp: crate::mcpx::svc::Launch,
 }
 /// The settings the actor copies into `TurnIn.settings` (add a key here when a driver needs one).
 pub const SETTINGS: &[&str] = &["agy.auth", "agy.account", "agy.gcp.project", "agy.gcp.location", "agy.oauth.optin"];

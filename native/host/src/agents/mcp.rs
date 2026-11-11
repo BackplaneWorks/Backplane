@@ -156,6 +156,17 @@ impl Mcp {
             "tools/list" => { let mut tools = self.tools.clone(); tools.extend(crate::settings::order::listed(&ag, thread).await); for s in ag.tool_sets() { tools.extend(s.list(thread)) } Some(result(&id, json!({"tools":tools}))) }
             "tools/call" => self.call(&ag, thread, gen, &id, &p, sock).await,
             "ping" => Some(result(&id, json!({}))),
+            // the stdio wrapper and Claude's headersHelper for the thread's own MCP servers (mcpx/run.rs): never listed as tools, answered only to this agent process
+            m if m.starts_with("backplane/mcp_") => {
+                let Some(x) = crate::mcpx::svc::get() else { return Some(error(&id, -32000, "MCP is not running on this hub")) };
+                if !gen.is_empty() && ag.gen_of(thread).map_or(true, |g| g != gen) && m != "backplane/mcp_used" && m != "backplane/mcp_failed" { return Some(error(&id, -32000, "stale process: this agent process is no longer the thread's")) }
+                let sid = sv(&p, "id");
+                let r = match m { "backplane/mcp_spec" => x.spec(thread, sid).await, "backplane/mcp_headers" => x.headers(thread, sid).await,
+                    "backplane/mcp_used" => { x.used(sid, sv(&p, "tool"), p["ok"] != false, sv(&p, "error")); Ok(json!({})) }
+                    "backplane/mcp_failed" => { x.failed(sid, sv(&p, "error"), sv(&p, "stderr")); Ok(json!({})) }
+                    _ => Err("unknown method".to_string()) };
+                Some(match r { Ok(v) => result(&id, v), Err(e) => error(&id, -32000, &e) })
+            }
             _ => None, // notifications and anything unknown: no reply (Mcp.method.pos)
         }
     }
