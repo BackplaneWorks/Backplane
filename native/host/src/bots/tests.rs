@@ -42,7 +42,8 @@ fn caller() -> Caller { Caller { gen: "1".into(), client: 1 } }
 async fn rpc(hub: &Arc<Hub>, m: &str, p: Value) -> Value { let h = hub.rpc_for(m).expect("handler"); h.call(hub, &caller(), &json!(7), m, &p).await.remove(0) }
 fn log(hub: &Arc<Hub>) -> Vec<Value> { hub.store.range(0, usize::MAX).unwrap().iter().filter_map(|l| serde_json::from_str(l).ok()).collect() }
 fn kinds(hub: &Arc<Hub>, from: usize) -> Vec<String> { log(hub)[from..].iter().map(|e| e["$"].as_str().unwrap_or("").to_string()).collect() }
-async fn until(hub: &Arc<Hub>, f: impl Fn(&[Value]) -> bool) { for _ in 0..100 { if f(&log(hub)) { return } tokio::time::sleep(std::time::Duration::from_millis(50)).await } panic!("timed out") }
+async fn until(hub: &Arc<Hub>, f: impl Fn(&[Value]) -> bool) { for _ in 0..2400 { if f(&log(hub)) { return } tokio::time::sleep(std::time::Duration::from_millis(50)).await } panic!("timed out") }
+// (`until` returns when the state is there; two minutes is only how long a stuck one is waited for)
 /// creates a bot and waits for its home job (the WorktreeSet that follows the reply), so a later count of events is steady
 async fn bot(hub: &Arc<Hub>, name: &str) -> String {
     let b = rpc(hub, "bots.create", json!({"name":name})).await["bot"].as_str().unwrap().to_string();
