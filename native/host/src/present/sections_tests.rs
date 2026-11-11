@@ -190,6 +190,50 @@ fn world() -> State {
     let v = build(&s, &rows, &Value::Null, &ctx(&HashSet::new()));
     let r = &sec(&v, "needs")["rows"][0]; assert_eq!(r["id"], "h|L~t1"); assert_eq!(r["machine"], "desktop"); assert_eq!(r["mark"]["short"], "desktop");
 }
+#[test] fn a_far_thread_quiet_past_active_or_running_on_a_machine_away_leaves_the_sidebar_and_needs_you() {
+    assert_eq!(far_word("needs", false, ACTIVE + 1), "idle", "an ask over there, quiet for longer than ACTIVE, drops out like a settled one");
+    assert_eq!(far_word("running", false, ACTIVE + 1), "idle"); assert_eq!(far_word("failed", true, ACTIVE + 1), "idle");
+    assert_eq!(far_word("running", true, 60), "idle", "a machine that is away runs nothing the person can see");
+    assert_eq!(far_word("needs", true, 60), "needs", "its recent ask is still the person's"); assert_eq!(far_word("running", false, 60), "running");
+    let s = st(&[pc("p1", "Here", "/h/r", NOW - 100)]);
+    let f = st(&[pc("L~p1", "There", "/d/r", NOW - 4 * 86400), tc("L~old", "L~p1", NOW - 4 * 86400), ask("q", "L~old", "question"),
+        tc("L~run", "L~p1", NOW - 2 * 86400), turn("L~run", "running", NOW - 2 * 86400), tc("L~chat", "", NOW - 4 * 86400), ask("q2", "L~chat", "question")]);
+    let far = vec![("framework".to_string(), &f)];
+    let rows = merged_projects(&s, &far, &|n| n == "framework", &|_| String::new(), "desk", &[]);
+    let v = build(&s, &rows, &Value::Null, &ctx(&HashSet::new()));
+    assert!(sec(&v, "needs").is_null(), "no stale ask from the far machine, in a project or outside one: {v}");
+    let there = sec(&v, "active")["rows"].as_array().unwrap().iter().find(|r| r["name"] == "There").cloned().unwrap_or(Value::Null);
+    assert_eq!(there["running"], 0, "its old running turn is not counted while the machine is away: {there}");
+    // the same machine answering, and the threads recent: as they were
+    let f2 = st(&[pc("L~p1", "There", "/d/r", NOW - 100), tc("L~run", "L~p1", NOW - 60), turn("L~run", "running", NOW - 60)]);
+    let far2 = vec![("framework".to_string(), &f2)];
+    let rows2 = merged_projects(&s, &far2, &|_| false, &|_| String::new(), "desk", &[]);
+    let v2 = build(&s, &rows2, &Value::Null, &ctx(&HashSet::new()));
+    assert_eq!(sec(&v2, "active")["rows"].as_array().unwrap().iter().find(|r| r["name"] == "There").unwrap()["running"], 1);
+}
+#[test] fn another_machines_thread_can_be_hidden_here_until_something_new_happens_there() {
+    let f = st(&[pc("L~p1", "There", "/d/r", NOW - 100), tc("L~t1", "L~p1", NOW - 50), ask("q", "L~t1", "question")]);
+    let far = vec![("framework".to_string(), &f)];
+    let mine = st(&[pc("p1", "Here", "/h/r", NOW - 100), tc("t1", "p1", NOW - 50), ask("q1", "t1", "question")]);
+    let rows = merged_projects(&mine, &far, &|_| false, &|_| String::new(), "desk", &[]);
+    let v = build(&mine, &rows, &Value::Null, &ctx(&HashSet::new()));
+    let far_row = sec(&v, "needs")["rows"].as_array().unwrap().iter().find(|r| r["id"] == "h|L~t1").cloned().unwrap();
+    assert_eq!((far_row["hide"].as_str(), far_row["lead"][0]["action"].as_str()), (Some("h|L~t1"), Some("thread-hide")), "{far_row}");
+    let local_row = sec(&v, "needs")["rows"].as_array().unwrap().iter().find(|r| r["id"] == "h|t1").cloned().unwrap();
+    assert_eq!(local_row["hide"], "", "a local thread has Settle and Archive");
+    assert!(act(&mine, &rows, "thread-hide", "h|t1", &json!({}), NOW).is_none(), "not a local one");
+    assert!(act(&mine, &rows, "thread-hide", "h|L~nope", &json!({}), NOW).is_none(), "not one it does not list");
+    let a = act(&mine, &rows, "thread-hide", "h|L~t1", &json!({}), NOW).unwrap();
+    assert_eq!(a.sets, vec![("sidebar.hide.L~t1".to_string(), NOW.to_string())]);
+    let mine2 = st(&[pc("p1", "Here", "/h/r", NOW - 100), tc("t1", "p1", NOW - 50), ask("q1", "t1", "question"), set("sidebar.hide.L~t1", &NOW.to_string(), NOW)]);
+    let rows2 = merged_projects(&mine2, &far, &|_| false, &|_| String::new(), "desk", &[]);
+    assert_eq!(titles(sec(&build(&mine2, &rows2, &Value::Null, &ctx(&HashSet::new())), "needs")), ["T t1"], "hidden here");
+    let f2 = st(&[pc("L~p1", "There", "/d/r", NOW - 100), tc("L~t1", "L~p1", NOW - 50), ask("q", "L~t1", "question"), turn("L~t1", "running", NOW + 5)]);
+    let far2 = vec![("framework".to_string(), &f2)];
+    let rows3 = merged_projects(&mine2, &far2, &|_| false, &|_| String::new(), "desk", &[]);
+    let c = Ctx { hub: "h", now: NOW + 10, query: "", open: &HashSet::new(), selected: "" };
+    assert_eq!(titles(sec(&build(&mine2, &rows3, &Value::Null, &c), "needs")).len(), 2, "back once it moves there");
+}
 
 // ---- the project page and Ctrl+K --------------------------------------------------------------------------------------------
 #[test] fn the_project_page_lists_running_needs_recent_and_done_behind_its_count() {

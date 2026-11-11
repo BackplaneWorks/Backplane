@@ -181,4 +181,6 @@ pub trait FarView: Send + Sync {
     fn bots(&self, _link: &str, _f: &mut dyn FnMut(&crate::bots::world::World)) -> bool { false }
     /// A mirror's renamed event by its 1-based number (a room's posts: `World::room_lines` of that mirror's world)
     fn event(&self, _link: &str, _n: usize) -> Option<String> { None }
+    /// The machine is no longer linked: its mirror goes, files and all (blocking: call it off the async workers). Whether there was one.
+    fn drop_link(&self, _link: &str) -> bool { false }
 }

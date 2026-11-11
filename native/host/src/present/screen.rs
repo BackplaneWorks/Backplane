@@ -371,7 +371,7 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
         // the machine switcher over the sidebar: "" every machine, "@here" this one, else a linked machine by name (not `machine-*`: those are the Machines page's)
         "side-machine" => { session["drafts"]["@machine"]=json!(value); },
         // the sidebar's sections (present/sections.rs): a fold, a project's page, a project pin, a group's name, a project moved to a group
-        "side-section" | "project-page" | "project-pin" | "group-rename" | "group-rename-start" | "group-move" => {
+        "side-section" | "project-page" | "project-pin" | "thread-hide" | "group-rename" | "group-rename-start" | "group-move" => {
             let rows=merged_here(st,far,un);
             let Some(a)=super::sections::act(st,&rows,action,value,&session["drafts"],p["now"].as_u64().unwrap_or(0)/1000) else { return refused("action.sidebar-section") };
             if let Some(k)=a.open_toggle { if !session["open"].is_object() { session["open"]=json!({}); } let was=flag(&session,&k); session["open"][k]=json!(!was); }

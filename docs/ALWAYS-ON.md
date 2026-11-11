@@ -148,6 +148,12 @@ Setup's sub-step shows each row as Signed in / Sign in there / Not on that machi
 - **D11 Thread visibility (T3 Code style):** a thread shows in the sidebar only while it is active: running (or monitoring work it owns),
   needs the person (an ask, approval or question), or stopped abnormally (failed, interrupted, cut by a restart or a limit). Finished, settled
   and idle threads are hidden there and stay reachable from the project page and Ctrl+K. Pinned threads always show.
+  Another machine's thread follows the same rule with two limits (`present/sections.rs` `far_word`): what it last said is believed for
+  ACTIVE only (an ask or a stop there quiet for longer leaves the sidebar and Needs you), and a machine that is away runs nothing the person
+  can see (its running words do not count). Its row offers **Hide** (the desktop's menu, a long press on the phones): hidden on this machine
+  (`sidebar.hide.<id>`) until something new happens there; nothing is asked of that machine. **Remove** in Settings → Machines unlinks a
+  machine and drops its mirror (`<home>/far/<link>.*`), so its threads, bots and asks leave every view at once; a mirror of a link the log
+  revoked any other way is dropped at start and on the next pull pass.
 - **D12 Structure, top to bottom:**
   1. Bub (the uberbot).
   2. **Needs you:** every open ask, approval and failure across all projects and machines; gone when empty.

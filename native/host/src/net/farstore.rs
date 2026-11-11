@@ -157,6 +157,14 @@ impl FarView for FarStore {
         f(&m.bots.read().unwrap()); true
     }
     fn event(&self, link: &str, n: usize) -> Option<String> { if n == 0 { return None } self.get(link)?.events.get(n - 1).ok() }
+    fn drop_link(&self, link: &str) -> bool {
+        if !safe(link) { return false }
+        let had = self.m.write().unwrap().remove(link);
+        // (a writer mid-`take` holds its own Arc; its file is unlinked under it and goes when it lets go)
+        if let Some(m) = &had { let _w = m.w.lock().unwrap(); }
+        for e in ["jsonl", "events"] { let _ = std::fs::remove_file(path(&self.dir, link, e)); }
+        had.is_some()
+    }
 }
 
 #[cfg(test)]
@@ -179,6 +187,14 @@ mod tests {
         let ctx = fs.latest_context("L1~t9"); assert_eq!(ctx.len(), 2);
         assert!(!h.join("events.jsonl").exists(), "nothing touches the hub's log");
         let _ = std::fs::remove_dir_all(h);
+    }
+    #[test] fn far_a_dropped_link_loses_its_mirror_on_disk_and_after_a_restart() {
+        let h = home("drop");
+        { let fs = FarStore::open(&h).unwrap(); fs.take("L", "e", 0, 1, &[thread(1, "t")]).unwrap(); fs.take("M", "e", 0, 1, &[thread(1, "u")]).unwrap();
+          assert!(fs.drop_link("L")); assert!(!fs.drop_link("L"), "once"); assert!(!fs.drop_link("../x"));
+          assert_eq!(fs.links(), ["M"]); assert!(!fs.has("L~t") && fs.has("M~u")); }
+        assert!(!h.join("far/L.jsonl").exists() && !h.join("far/L.events").exists());
+        assert_eq!(FarStore::open(&h).unwrap().links(), ["M"], "it does not come back");
     }
     #[test] fn far_a_batch_twice_late_or_past_a_gap_is_harmless() {
         let h = home("order"); let fs = FarStore::open(&h).unwrap();

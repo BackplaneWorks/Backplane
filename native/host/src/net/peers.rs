@@ -39,6 +39,11 @@ impl Peers {
             _ => {}
         }
     }
+    /// Whether the table holds the whole log yet (before that, a link it lacks may only be unread).
+    pub fn replayed(&self) -> bool { self.replayed }
+    /// Far.gone: a link the table knows nothing live of (revoked, or never linked). Its mirror is not the owner's machine any more. False until
+    /// the table is replayed: nothing is dropped for not having been read yet.
+    pub fn gone(&self, link: &str) -> bool { self.replayed && self.rows.get(link).map_or(true, |r| r.revoked) }
     /// World.peers: the live ones.
     pub fn live(&self) -> Vec<PeerRow> { let mut v: Vec<_> = self.rows.values().filter(|p| !p.revoked).cloned().collect(); v.sort_by(|a, b| a.id.cmp(&b.id)); v }
     pub fn peer(&self, id: &str) -> Option<&PeerRow> { self.rows.get(id) }
@@ -141,6 +146,13 @@ mod tests {
     use serde_json::json;
     fn ps(id: &str, name: &str, url: &str, revoked: bool, at: u64) -> Value { json!({"$":"PeerSet","id":id,"name":name,"url":url,"revoked":revoked,"at":at}) }
 
+    #[test] fn a_link_is_gone_once_revoked_or_unknown_and_never_before_the_table_is_read() {
+        let mut p = Peers::default();
+        p.fold(&ps("pA", "framework", "http://f:3797", false, 1)); p.fold(&ps("pB", "boat", "http://b:3797", false, 1)); p.fold(&ps("pB", "", "", true, 2));
+        assert!(!p.gone("pA") && !p.gone("pB") && !p.gone("pZ"), "nothing is gone while the log is not read yet");
+        p.replayed = true;
+        assert!(!p.gone("pA")); assert!(p.gone("pB"), "revoked"); assert!(p.gone("pZ"), "never linked");
+    }
     #[test] fn peer_set_folds_like_the_world() {
         let mut p = Peers::default();
         p.fold(&ps("p1", "desk", "http://d:1", false, 5));

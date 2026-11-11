@@ -56,6 +56,9 @@ pub fn farhttp_start(hub: std::sync::Arc<crate::hub::Hub>, peering: std::sync::A
         let Ok(Ok(store)) = tokio::task::spawn_blocking(move || farstore::FarStore::open(&home)).await else { eprintln!("backplane: could not read the far mirrors"); return };
         hub.set_far(store.clone());
         hub.set_mirror_feed(std::sync::Arc::new(farsync::Refeed(store.clone())));
+        // the mirrors of machines no longer linked go before anything is shown of them (the peer table is read first: at most a minute)
+        for _ in 0..600 { if peering.table.with(|p| p.replayed()) { break } tokio::time::sleep(std::time::Duration::from_millis(100)).await; }
+        for l in farsync::gone_links(&store, &peering) { let s = store.clone(); let link = l.clone(); if tokio::task::spawn_blocking(move || crate::api::FarView::drop_link(s.as_ref(), &link)).await.unwrap_or(false) { eprintln!("far: the mirror of {l} was dropped (no longer linked)") } }
         for l in store.links() {
             // (read off the async workers, and sent a chunk at a time)
             let s = store.clone(); let link = l.clone();
@@ -92,6 +95,8 @@ pub fn farhttp_start(hub: std::sync::Arc<crate::hub::Hub>, peering: std::sync::A
             });
         }
         loop {
+            // a link revoked since (an invite revoked in Settings → Devices, another machine's unlink): its mirror goes too
+            for l in farsync::gone_links(&sync.store, &peering) { farsync::forget_link(&hub, &l, "").await; }
             let links: Vec<String> = peering.table.with(|p| p.live().into_iter().map(|x| x.id).collect());
             for l in links { sync.pull(&hub, &l).await; }
             tokio::time::sleep(std::time::Duration::from_secs(300)).await;

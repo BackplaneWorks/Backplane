@@ -88,8 +88,10 @@ pub async fn act(p: &Arc<Peering>, hub: &Arc<Hub>, action: &str, value: &str, fi
             if !p.table.with(|t| t.peer(value).map_or(false, |r| !r.revoked)) { return Err("no such link".into()) }
             let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs());
             let ev = if action == "machine-remove" { json!({"$":"PeerSet","id":value,"name":"","url":"","revoked":true,"at":now}) } else { json!({"$":"SettingSet","key":format!("peer.own.{value}"),"value":"owner","at":now}) };
+            let name = p.table.with(|t| t.peer(value).map(|r| r.name.clone()).unwrap_or_default());
             hub.commit(&ev).await.map_err(|e| format!("{e:#}"))?;
-            if action == "machine-remove" { p.unpeered(value) }
+            // removed: its threads, bots and asks leave this machine's views now, and its mirror goes from the disk
+            if action == "machine-remove" { p.unpeered(value); super::farsync::forget_link(hub, value, &name).await; }
             Ok(json!({}))
         }
         "machine-introduce" => {

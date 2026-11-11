@@ -7,15 +7,15 @@ import SwiftUI
 struct DSecRow: Decodable, Identifiable, Equatable {
     var id: String; var title: String
     // a thread's
-    var word: String; var say: String; var want: String; var ago: String; var machine: String; var mark: DMark?; var project: String; var projectKey: String; var off: Bool; var nav: String; var pinned: Bool
+    var word: String; var say: String; var want: String; var ago: String; var machine: String; var mark: DMark?; var project: String; var projectKey: String; var off: Bool; var nav: String; var pinned: Bool; var hide: String
     // a project's
     var kind: String
     var key: String; var projOff: Bool; var running: Int; var needsCount: Int; var threads: [DSecRow]; var icon: String; var css: String; var dots: [DSecDot]; var more: Int
-    enum CodingKeys: String, CodingKey { case id, title, word, say, want, ago, machine, mark, project, projectKey, off, nav, pinned, kind, key, running, needsCount, threads, icon, css, dots, more }
+    enum CodingKeys: String, CodingKey { case id, title, word, say, want, ago, machine, mark, project, projectKey, off, nav, pinned, hide, kind, key, running, needsCount, threads, icon, css, dots, more }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = c.str(.id); title = c.str(.title); word = c.str(.word); say = c.str(.say); want = c.str(.want); ago = c.str(.ago); machine = c.str(.machine)
-        mark = try? c.decode(DMark.self, forKey: .mark); project = c.str(.project); projectKey = c.str(.projectKey); off = c.bool(.off); nav = c.str(.nav); pinned = c.bool(.pinned)
+        mark = try? c.decode(DMark.self, forKey: .mark); project = c.str(.project); projectKey = c.str(.projectKey); off = c.bool(.off); nav = c.str(.nav); pinned = c.bool(.pinned); hide = c.str(.hide)
         kind = c.str(.kind); key = c.str(.key); projOff = (try? c.decode(Bool.self, forKey: .off)) ?? false; running = c.int(.running); needsCount = c.int(.needsCount); threads = (try? c.decode([DSecRow].self, forKey: .threads)) ?? []
         icon = c.str(.icon); css = c.str(.css); dots = (try? c.decode([DSecDot].self, forKey: .dots)) ?? []; more = c.int(.more)
     }
@@ -80,6 +80,12 @@ struct DataSectionThread: View {
         }.buttonStyle(.plain).accessibilityIdentifier("data.section.thread." + r.id)
     }
 }
+extension View {
+    /// Another machine's thread (the hub's `hide`): a long press hides it here until something new happens there (`thread-hide`).
+    func farHide(_ r: DSecRow, _ client: DataClient) -> some View {
+        contextMenu { if !r.hide.isEmpty { Button(Tr.t("Hide"), systemImage: "eye.slash") { Task { await client.sidebarAct("thread-hide", r.hide) } } } }
+    }
+}
 /// A project row of a section: its badge and name, the machines' dots, its running count; a press opens its page.
 struct DataSectionProject: View {
     let r: DSecRow; var faded = false
@@ -108,7 +114,7 @@ struct DataProjectPageView: View {
             if let page {
                 ForEach(page.sections.filter { !$0.rows.isEmpty || ($0.fold && $0.count > 0) }) { s in
                     DataSectionHead(s: s) { done.toggle(); Task { await load() } }.dataRow()
-                    ForEach(s.rows) { r in DataSectionThread(r: r) { nav in if let room = r.swarmRoom { path.append(DSwarmRoute(id: room, name: r.title)) } else { path.append(nav) } }.dataRow() }
+                    ForEach(s.rows) { r in DataSectionThread(r: r) { nav in if let room = r.swarmRoom { path.append(DSwarmRoute(id: room, name: r.title)) } else { path.append(nav) } }.farHide(r, client).dataRow() }
                 }
                 if page.sections.allSatisfy({ $0.rows.isEmpty && $0.count == 0 }) { Text(Tr.t("No threads")).dmono(12).foregroundStyle(BackplaneDesign.faint).padding(14).dataRow() }
             } else { DLoading(text: Tr.t("Loading…")).dataRow() }

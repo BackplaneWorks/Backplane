@@ -11,7 +11,10 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material3.DropdownMenu
+import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
+import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -27,11 +30,11 @@ import org.json.JSONObject
 
 /** A row of a section: a thread, or a project (its `key` set) with its visible threads under it. */
 data class DSecRow(val id: String, val title: String, val word: String, val say: String, val want: String, val ago: String, val mark: DMark?, val project: String,
-    val off: Boolean, val nav: String, val pinned: Boolean, val key: String, val running: Int, val threads: List<DSecRow>, val css: String, val dots: List<Pair<Boolean, Boolean>>, val kind: String = "") {
+    val off: Boolean, val nav: String, val pinned: Boolean, val key: String, val running: Int, val threads: List<DSecRow>, val css: String, val dots: List<Pair<Boolean, Boolean>>, val kind: String = "", val hide: String = "") {
     companion object {
         fun of(o: JSONObject): DSecRow = DSecRow(o.optString("id"), o.optString("title"), o.optString("word"), o.optString("say"), o.optString("want"), o.optString("ago"),
             parseMark(o.optJSONObject("mark")), o.optString("project"), o.optBoolean("off"), o.optString("nav"), o.optBoolean("pinned"), o.optString("key"), o.optInt("running"),
-            list(o.optJSONArray("threads")), o.optString("css"), (0 until (o.optJSONArray("dots")?.length() ?: 0)).map { i -> o.getJSONArray("dots").getJSONObject(i).let { it.optBoolean("here") to it.optBoolean("dim") } }, o.optString("kind"))
+            list(o.optJSONArray("threads")), o.optString("css"), (0 until (o.optJSONArray("dots")?.length() ?: 0)).map { i -> o.getJSONArray("dots").getJSONObject(i).let { it.optBoolean("here") to it.optBoolean("dim") } }, o.optString("kind"), o.optString("hide"))
         fun list(a: JSONArray?): List<DSecRow> = (0 until (a?.length() ?: 0)).map { of(a!!.getJSONObject(it)) }
     }
     /** a live swarm's row (`kind` swarm): it opens the swarm's page, its room */
@@ -56,15 +59,21 @@ fun SectionHead(s: DSection, onLong: (() -> Unit)?) {
         if (s.fold || s.kind == "threads") { Spacer(Modifier.width(6.dp)); DMono("${s.count}", dfaint, 11) }
     }
 }
+/** Another machine's thread (the hub's `hide`): a long press offers Hide, here only, until something new happens there (`thread-hide`). */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun SectionThread(r: DSecRow, indent: Int = 12, showProject: Boolean = false, open: (String) -> Unit) {
-    Row(Modifier.fillMaxWidth().height(36.dp).alpha(if (r.off) .55f else 1f).clickable(enabled = !r.off) { open(r.nav) }.padding(start = indent.dp, end = 12.dp).testTag("home.section.thread.${r.id}"), verticalAlignment = Alignment.CenterVertically) {
-        DDot(toneOf(r.word), 7); Spacer(Modifier.width(8.dp))
-        DMono(r.title, dcs.onSurface, 13, Modifier.weight(1f, fill = false))
-        if (showProject) { Spacer(Modifier.width(8.dp)); DMono(r.project, dfaint, 11) }
-        Spacer(Modifier.weight(1f))
-        r.mark?.let { DMono(it.short + if (it.away) " · " + Msg.android_away else "", dfaint, 11); Spacer(Modifier.width(6.dp)) }
-        if (r.want.isNotEmpty()) DMono(Tr.t(r.want), dcs.error, 11) else DMono(Tr.t(r.say.ifEmpty { r.ago }), dfaint, 11)
+    var menu by remember { mutableStateOf(false) }
+    Box {
+        Row(Modifier.fillMaxWidth().height(36.dp).alpha(if (r.off) .55f else 1f).combinedClickable(onClick = { if (!r.off) open(r.nav) }, onLongClick = if (r.hide.isNotEmpty()) ({ menu = true }) else null).padding(start = indent.dp, end = 12.dp).testTag("home.section.thread.${r.id}"), verticalAlignment = Alignment.CenterVertically) {
+            DDot(toneOf(r.word), 7); Spacer(Modifier.width(8.dp))
+            DMono(r.title, dcs.onSurface, 13, Modifier.weight(1f, fill = false))
+            if (showProject) { Spacer(Modifier.width(8.dp)); DMono(r.project, dfaint, 11) }
+            Spacer(Modifier.weight(1f))
+            r.mark?.let { DMono(it.short + if (it.away) " · " + Msg.android_away else "", dfaint, 11); Spacer(Modifier.width(6.dp)) }
+            if (r.want.isNotEmpty()) DMono(Tr.t(r.want), dcs.error, 11) else DMono(Tr.t(r.say.ifEmpty { r.ago }), dfaint, 11)
+        }
+        DropdownMenu(menu, { menu = false }) { DropdownMenuItem(text = { Text(Msg.common_hide) }, onClick = { menu = false; DataClient.sidebarAct("thread-hide", r.hide) }, modifier = Modifier.testTag("home.section.hide.${r.id}")) }
     }
 }
 @OptIn(ExperimentalFoundationApi::class)
