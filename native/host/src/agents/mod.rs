@@ -1098,6 +1098,16 @@ impl Actor {
     /// `ended`: the failure is an agent-gone end; a spawn failure is not marked.
     async fn fail_k(&mut self, text: String, kind: &str, act: &str, ended: bool) {
         let (now, th) = (now_s(), self.th.clone());
+        // a start that failed because the provider is not installed here moves on through the fallback order, as a usage limit does (driver.rs `on_missing`)
+        if kind == "spawn" && !self.person {
+            let v = crate::settings::driver::on_missing(&self.ag.hub, &th, &text).await;
+            if v.act.is_some() || v.drop_turn_end {
+                let mut ev = vec![json!({"$":"ActivityLogged","thread":th,"act":act,"tone":"warn","kind":kind,"summary":text,"at":now})]; ev.extend(v.events);
+                self.live_close().await; self.commit(ev).await; self.cx.running = false; self.jobs_end();
+                if let Some(a) = v.act { crate::settings::driver::spawn_act(self.ag.clone(), th, a) }
+                return
+            }
+        }
         let mut ev = vec![json!({"$":"ActivityLogged","thread":th,"act":act,"tone":"error","kind":kind,"summary":text,"at":now}), json!({"$":"TurnChanged","thread":th,"state":"failed","at":now})]; if ended && MARK_ENDS { ev[1]["_end"] = json!(true) };
         if ended && !self.last_user.is_empty() { ev.push(set(format!("failed.{}", self.last_user), "1".into(), now)) } // writes failed.<msg> for an agent-gone end, not for a spawn failure
         self.live_close().await; self.commit(ev).await; self.cx.running = false; self.jobs_end();

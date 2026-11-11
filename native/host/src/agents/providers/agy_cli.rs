@@ -235,6 +235,13 @@ mod tests {
         assert_eq!(got.last().unwrap(), r#"{"type":"turn.completed","usage":{"input_tokens":10434,"cached_input_tokens":6166,"output_tokens":168,"reasoning_output_tokens":52}}"#);
         assert!(s.done);
     }
+    // test/fixtures/antigravity/cli-turn-1.5.5.jsonl: agy 1.5.5 (Nov 10), same flags and events as 1.4: a command, then the reply
+    #[test] fn a_real_turn_on_1_5_5() {
+        let mut s = St::default(); let got = feed(&mut s, include_str!("../../../../../test/fixtures/antigravity/cli-turn-1.5.5.jsonl"));
+        assert!(got[0].starts_with(r#"{"type":"thread.started","thread_id":"#));
+        assert!(got.iter().any(|l| l.contains("command_execution") && l.contains("ls")) && got.iter().any(|l| l.contains("tool.done")), "{got:#?}");
+        assert!(got.iter().any(|l| l.contains("agent_message") && l.contains("DONE"))); assert!(got.last().unwrap().contains("turn.completed")); assert!(s.done);
+    }
     #[test] fn a_resumed_turn_keeps_its_conversation_and_denials_are_said() {
         let mut s = St { session: "C1".into(), ..Default::default() };
         let got = feed(&mut s, r#"{"event":"init","conversation_id":"C1","init":{}}
