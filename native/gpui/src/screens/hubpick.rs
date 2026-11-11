@@ -145,7 +145,7 @@ pub fn rows(list: &[hubs::Hub]) -> Vec<Row> { rows_on(list, None) }
 pub fn rows_on(list: &[hubs::Hub], on_home: Option<&str>) -> Vec<Row> {
     let b = |label: &str, action: String, on: bool| Btn { label: label.into(), action, value: String::new(), on };
     let mut out: Vec<Row> = entries_rows(&hubs::entries_on(list, on_home));
-    /* i18n-ok: settings rows, drawn through trs by row_el */ out.push(Row { label: "Add a hub".into(), note: "Pair this device with a hub on another machine.".into(), buttons: vec![b("Add a hub", "hub:add".into(), false)], fields: vec![], qr: vec![], qrnote: String::new(), local: true });
+    /* i18n-ok: settings rows, drawn through trs by row_el */ out.push(Row { label: "Add a hub".into(), note: "Pair this device with a hub on another machine.".into(), buttons: vec![b("Add a hub", "hub:add".into(), false)], fields: vec![], qr: vec![], qrnote: String::new(), local: true, tone: String::new() });
     out
 }
 fn entries_rows(es: &[Entry]) -> Vec<Row> {
@@ -153,7 +153,7 @@ fn entries_rows(es: &[Entry]) -> Vec<Row> {
         let mut buttons = vec![];
         /* i18n-ok: settings rows, drawn through trs by row_el */ if e.on { buttons.push(Btn { label: "In use".into(), action: String::new(), value: String::new(), on: true }) } else { buttons.push(Btn { label: "Use".into(), action: format!("hub:use:{}", e.key), value: String::new(), on: false }) }
         /* i18n-ok: settings rows, drawn through trs by row_el */ if e.can_forget { buttons.push(Btn { label: "Forget".into(), action: format!("hub:forget:{}", e.key), value: String::new(), on: false }) }
-        /* i18n-ok: settings rows, drawn through trs by row_el */ Row { label: e.label.clone(), note: note_of(e).into(), buttons, fields: vec![], qr: vec![], qrnote: String::new(), local: true }
+        /* i18n-ok: settings rows, drawn through trs by row_el */ Row { label: e.label.clone(), note: note_of(e).into(), buttons, fields: vec![], qr: vec![], qrnote: String::new(), local: true, tone: String::new() }
     }).collect()
 }
 
