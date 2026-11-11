@@ -149,7 +149,7 @@ impl Bots {
                 let mine: Vec<(String, Value)> = claims(w, &rr.id).into_iter().filter(|(_, c)| c["thread"] == who.thread.as_str()).collect();
                 let which: Vec<(String, Value)> = { let r = gs(a, "reply"); let m: Vec<_> = mine.iter().filter(|(p, _)| p == r).cloned().collect(); if m.is_empty() { mine } else { m } };
                 if !which.is_empty() { ans["released"] = json!(which.iter().map(|(p, _)| p.clone()).collect::<Vec<_>>()) }
-                self.release(&which, now).await;
+                self.release_later(which, now);
             }
             if tags.iter().any(|t| t == "synthesis") { if let Some(r) = &rec { if r.swarm() { self.end(w, r, "done", &text, &who.name, now).await; ans["note"] = json!("synthesis posted: the swarm is done, and its starter hears the synthesis") } } }
         }
@@ -169,11 +169,18 @@ impl Bots {
         let evs: Vec<Value> = which.iter().filter_map(|(_, c)| c.get("_key").and_then(Value::as_str)).map(|k| json!({"$":"SettingSet","key":k,"value":"","at":now})).collect();
         if !evs.is_empty() { let _ = self.hub.commit_many(&evs).await; }
     }
+    /// `release` once the caller's world lock is let go: a released lock is granted to the thread waiting for it, and that delivery takes the
+    /// world lock (a release under it hung the hub: a synthesis while a peer's claim of the same file waited)
+    fn release_later(&self, which: Vec<(String, Value)>, now: u64) {
+        if which.is_empty() { return }
+        let Some(me) = self.arc() else { return };
+        tokio::spawn(async move { me.release(&which, now).await });
+    }
     /// End a swarm (done with a synthesis, or stopped): its state, every claim let go, the members told (no turn started), the starter told.
     async fn end(&self, w: &World, r: &Room, state: &str, synthesis: &str, by_name: &str, now: u64) {
         let all = claims(w, &r.id);
         let _ = self.hub.commit_many(&w.also(now, vec![r.set_ev(now, |x| { x.state = state.into(); x.reason = String::new() }), self.guard_post(&r.id, if state == "done" { "The swarm is done." } else { "The swarm was stopped." }, &[], true, now)])).await;
-        self.release(&all, now).await;
+        self.release_later(all, now);
         let note = if state == "done" { format!("[#{}] The swarm is done: {by_name} posted the synthesis. Nothing more is needed from you here.\n\n{synthesis}", r.name) } else { format!("[#{}] The swarm was stopped. Nothing more is needed from you here; let go of anything you claimed.", r.name) };
         let me = self.arc(); let (members, by, name, id) = (r.threads(), r.by.clone(), r.name.clone(), r.id.clone()); let syn = synthesis.to_string(); let state = state.to_string(); let by_name = by_name.to_string();
         // after the world lock is let go: a delivery may go through the mailroom, which takes it
