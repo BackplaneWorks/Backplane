@@ -317,7 +317,9 @@ impl Agents {
             // the uberbot and its mailroom lanes first, so the person can always reach it; then the longest running
             let mut carry: Vec<(bool, u64, String)> = carry.into_iter().map(|(at, th)| (!Agents::priority(&w, &th), at, th)).collect(); carry.sort();
             let carry: Vec<String> = carry.into_iter().map(|c| c.2).collect();
-            for th in carry.iter().skip(BURST) { if w.setting(&wait_key(th)) != "1" { ev.push(set(wait_key(th), "1".into(), now)) } }
+            // every one in line holds its place until its turn starts, the first burst too: a second restart (or a shutdown) before a burst thread's start is reached would otherwise strand it
+            // interrupted with no mark, owed a turn nothing would ever give (the restart storm: a thread cut once and never carried on). carry_on clears the mark as it starts
+            for th in carry.iter() { if w.setting(&wait_key(th)) != "1" { ev.push(set(wait_key(th), "1".into(), now)) } }
             (ev, carry, cut_threads)
         };
         if !cut.is_empty() { if let Err(e) = self.hub.commit_many(&cut).await { eprintln!("agents: recovery: {e:#}") } }
