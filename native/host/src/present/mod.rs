@@ -25,6 +25,7 @@ use anyhow::Result;
 use serde_json::{json, Value};
 use std::{io::Write, path::PathBuf, sync::{Arc, Mutex}};
 pub mod screen;
+pub mod merged;
 pub mod linkopen;
 mod native_sidebar;
 
