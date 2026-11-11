@@ -157,15 +157,18 @@ pub async fn serve(hub: &Arc<Hub>, link: &str, m: &str, p: &Value) -> Value {
             let Some(dir) = root_dir(hub, root) else { return no("no such root") };
             use base64::Engine as _;
             let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(gs(p, "b64")) else { return no("not base64") };
-            let (path, first, secret) = (dir.join(rel), p["off"].as_u64().unwrap_or(0) == 0, root == "apns" || rel.starts_with("secrets/"));
+            let off = p["off"].as_u64().unwrap_or(0);
+            let (path, first, secret) = (dir.join(rel), off == 0, root == "apns" || rel.starts_with("secrets/"));
             let rel = rel.to_string(); let root = root.to_string();
             let r = tokio::task::spawn_blocking(move || -> std::io::Result<()> {
                 use std::io::Write; use crate::plat::fs::OpenOptionsExt;
                 if let Some(d) = path.parent() { std::fs::create_dir_all(d)?; }
                 // a file this hub has already (a move back): replaced, whatever its mode (git keeps its objects read-only)
                 if first && std::fs::symlink_metadata(&path).map_or(false, |m| m.is_file()) { std::fs::remove_file(&path)?; }
-                let mut o = std::fs::OpenOptions::new(); o.create(true).write(true); if first { o.truncate(true); } else { o.append(true); } if secret { o.mode(0o600); }
-                let mut f = o.open(&path)?; f.write_all(&bytes)?; f.sync_all()
+                // each chunk at its own offset, so one sent again (its answer was lost) writes the same bytes once
+                use std::io::Seek;
+                let mut o = std::fs::OpenOptions::new(); o.create(true).write(true); if first { o.truncate(true); } if secret { o.mode(0o600); }
+                let mut f = o.open(&path)?; f.seek(std::io::SeekFrom::Start(off))?; f.write_all(&bytes)?; f.set_len(off + bytes.len() as u64)?; f.sync_all()
             }).await;
             match r { Ok(Ok(())) => ok(json!({})), Ok(Err(e)) => no(&format!("could not write {root}/{rel}: {e}")), Err(_) => no("could not write it") }
         }
@@ -499,6 +502,28 @@ async fn ask(hub: &Arc<Hub>, link: &str, name: &str, what: &str, m: &str, p: &Va
     if code == 200 { if let Ok(v) = serde_json::from_str::<Value>(&text) { if v["ok"] == true { return Ok(v) } let e = gs(&v, "error").to_string(); return Err(if e.contains("not something this machine does") { why_not(name, what, 200, &e) } else { format!("{m}: {e}") }) } }
     Err(why_not(name, what, code, &text))
 }
+/// The waits between the tries of one of the move's calls (code 0: no answer, or 5xx): five tries in all.
+pub const MOVE_BACKOFF_S: [u64; 4] = [1, 2, 4, 8];
+/// Tries `call` until it is answered (anything but code 0 or 5xx), waiting `waits` between tries; the last answer when none was.
+pub async fn tries<F, Fu>(waits: &[u64], unit: std::time::Duration, mut call: F) -> (u16, String, usize) where F: FnMut() -> Fu, Fu: std::future::Future<Output = (u16, String)> {
+    let mut n = 0;
+    loop {
+        let (code, text) = call().await; n += 1;
+        if !(code == 0 || code >= 500) || n > waits.len() { return (code, text, n) }
+        tokio::time::sleep(unit * waits[n - 1] as u32).await;
+    }
+}
+/// One of the move's own calls (each idempotent on the receiver: a chunk taken again is taken once): sent to the paired machine whatever another
+/// caller's last answer marked it (away), tried again on no answer or a 5xx, and logged with its size and time so a failure says which.
+async fn far_move(hub: &Arc<Hub>, link: &str, m: &str, p: &Value) -> Result<Value, String> {
+    let size = p.to_string().len(); let t0 = std::time::Instant::now();
+    let (code, text, n) = tries(&MOVE_BACKOFF_S, std::time::Duration::from_secs(1), || hub.far_raw_paired(link, m, p)).await;
+    eprintln!("backplane: home move: {m} {size} B: {code} in {} ms{}", t0.elapsed().as_millis(), if n > 1 { format!(" after {n} tries") } else { String::new() });
+    if code == 0 { return Err(format!("that machine is away: {m} of {size} bytes had no answer after {n} tries")) }
+    if code != 200 { return Err(format!("{m}: {code} {}", text.chars().take(160).collect::<String>())) }
+    let v: Value = serde_json::from_str(&text).map_err(|_| format!("{m}: not JSON"))?;
+    if v["ok"] == true { Ok(v) } else { Err(format!("{m}: {}", gs(&v, "error"))) }
+}
 async fn far(hub: &Arc<Hub>, link: &str, m: &str, p: &Value) -> Result<Value, String> {
     let (code, text) = hub.far_raw(link, m, p).await;
     if code == 0 { return Err("that machine is away".into()) }
@@ -522,7 +547,7 @@ async fn send_file(hub: &Arc<Hub>, link: &str, root: &str, rel: &str, path: &Pat
     let mut off = 0usize;
     loop {
         let end = (off + CHUNK).min(bytes.len());
-        far(hub, link, "home.file", &json!({"root": root, "rel": rel, "off": off, "b64": base64::engine::general_purpose::STANDARD.encode(&bytes[off..end])})).await?;
+        far_move(hub, link, "home.file", &json!({"root": root, "rel": rel, "off": off, "b64": base64::engine::general_purpose::STANDARD.encode(&bytes[off..end])})).await?;
         off = end; if off >= bytes.len() { return Ok(()) }
     }
 }
@@ -531,7 +556,7 @@ async fn send_lines(hub: &Arc<Hub>, link: &str, lines: &[String]) -> Result<usiz
     while i < lines.len() {
         let (mut j, mut size) = (i, 0usize);
         while j < lines.len() && (j == i || size + lines[j].len() < CHUNK) { size += lines[j].len() + 8; j += 1 }
-        let v = far(hub, link, "home.import", &json!({"lines": &lines[i..j]})).await?;
+        let v = far_move(hub, link, "home.import", &json!({"lines": &lines[i..j]})).await?;
         took += v["took"].as_u64().unwrap_or(0) as usize; i = j;
     }
     Ok(took)
@@ -557,9 +582,9 @@ pub async fn move_to(hub: &Arc<Hub>, link: &str) -> Result<Value, String> {
     let r: Result<(), String> = async {
         tell(hub, "moving", step("devices"), "").await;
         let ds: Vec<Value> = std::fs::read_to_string(home.join("devices-v1.json")).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).and_then(|v| v["devices"].as_array().cloned()).unwrap_or_default();
-        far(hub, link, "home.adopt", &json!({"devices": ds})).await?;
+        far_move(hub, link, "home.adopt", &json!({"devices": ds})).await?;
         tell(hub, "moving", step("vault"), "").await;
-        if let Ok(items) = crate::settings::vault::read_other(&home) { for (nm, purpose, value) in items { far(hub, link, "home.secret", &json!({"name": nm, "purpose": purpose, "value": value})).await?; } }
+        if let Ok(items) = crate::settings::vault::read_other(&home) { for (nm, purpose, value) in items { far_move(hub, link, "home.secret", &json!({"name": nm, "purpose": purpose, "value": value})).await?; } }
         // the sync accounts arrive whole: their registry entries with their tokens (the vault entries above are only the tokens; a renewal made since is in this one)
         tell(hub, "moving", step("accounts"), "").await;
         crate::settings::accounts_sync::push_to(hub, link).await?;
@@ -589,7 +614,7 @@ pub async fn move_to(hub: &Arc<Hub>, link: &str) -> Result<Value, String> {
     let fin: Result<(), String> = async {
         if let Some((file, path)) = apns.as_ref().map(|a| (gs(a, "file").to_string(), PathBuf::from(gs(a, "path")))) { if path.is_file() { send_file(hub, link, "apns", &file, &path).await?; } }
         send_lines(hub, link, &extra).await?;
-        far(hub, link, "home.finish", &json!({"revive": c.revive, "hooks": c.hooks, "apns": apns.clone().unwrap_or(Value::Null)})).await?;
+        far_move(hub, link, "home.finish", &json!({"revive": c.revive, "hooks": c.hooks, "apns": apns.clone().unwrap_or(Value::Null)})).await?;
         Ok(())
     }.await;
     let at = json!({"link": link, "name": name, "url": url, "at": now_s()}).to_string();
@@ -598,7 +623,7 @@ pub async fn move_to(hub: &Arc<Hub>, link: &str) -> Result<Value, String> {
         // undo: this hub takes the home back as it was, the receiver lets go
         tell(hub, "moving", "undoing", &e).await;
         let _ = hub.commit_many(&c.revive).await;
-        let _ = far(hub, link, "home.retire", &json!({"retire": c.retire})).await;
+        let _ = far_move(hub, link, "home.retire", &json!({"retire": c.retire})).await;
         tell(hub, "failed", "undone", &format!("{e}; the home stayed here")).await;
         return Err(e)
     }
@@ -894,5 +919,26 @@ mod tests {
         assert_eq!(w(401, "bad or stale signature"), "boat-hub refused the move check: it did not take this computer's signature (pair them again in Settings, Machines)");
         assert_eq!(w(0, ""), "boat-hub is away: the link is down");
         for (c, b) in [(403, "threads are shared with the owner's own machines"), (401, "unknown sender"), (403, "sync is off")] { assert!(!w(c, b).contains("update it"), "{c} {b}: access, never 'update it'") }
+    }
+    /// Nov 11 (the person's move to boat-hub: one home.import chunk got no answer and the move failed): a call with no answer, or a 5xx, is sent again,
+    /// five tries in all; any other answer ends it at once.
+    #[tokio::test] async fn a_move_call_with_no_answer_is_sent_again_and_any_answer_ends_the_tries() {
+        let ms = std::time::Duration::from_millis(1);
+        let n = std::sync::atomic::AtomicUsize::new(0);
+        let r = tries(&MOVE_BACKOFF_S, ms, || { let k = n.fetch_add(1, std::sync::atomic::Ordering::SeqCst); async move { if k == 0 { (0, String::new()) } else { (200, "{\"ok\":true}".to_string()) } } }).await;
+        assert_eq!((r.0, r.2), (200, 2), "the dropped answer, then the one that came");
+        let r = tries(&MOVE_BACKOFF_S, ms, || async { (503, "busy".to_string()) }).await; assert_eq!((r.0, r.2), (503, 5), "five tries, then the move fails");
+        let r = tries(&MOVE_BACKOFF_S, ms, || async { (403, "no".to_string()) }).await; assert_eq!(r.2, 1, "a refusal is not tried again");
+    }
+    /// The receiver takes a chunk sent again once: the lines of a home.import (by their hash) and a file's chunk (at its offset).
+    #[tokio::test(flavor = "multi_thread")] async fn a_chunk_sent_again_is_taken_once() {
+        let home = std::env::temp_dir().join(format!("bp-hm-again-{}", std::process::id())); let _ = std::fs::remove_dir_all(&home); std::fs::create_dir_all(&home).unwrap();
+        let hub = crate::hub::Hub::start(crate::hub::Cfg { home: home.clone(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, std::sync::Arc::new(crate::presenter::Canned { reply: json!({}) })).await.unwrap();
+        let lines = vec![l(json!({"$":"MemorySaved","bot":"b1","key":"k","text":"the desktop","at":5}))];
+        let a = serve(&hub, "L", "home.import", &json!({"lines": lines})).await; let b = serve(&hub, "L", "home.import", &json!({"lines": lines})).await;
+        assert_eq!((a["took"].as_u64(), b["took"].as_u64()), (Some(1), Some(0)), "{a} {b}");
+        use base64::Engine as _; let b64 = |x: &[u8]| base64::engine::general_purpose::STANDARD.encode(x);
+        for (off, part) in [(0u64, &b"abc"[..]), (3, b"def"), (3, b"def")] { let r = serve(&hub, "L", "home.file", &json!({"root":"home","rel":"mail/x.txt","off":off,"b64":b64(part)})).await; assert_eq!(r["ok"], true, "{r}") }
+        assert_eq!(std::fs::read(home.join("mail/x.txt")).unwrap(), b"abcdef", "the chunk sent again is written once");
     }
 }

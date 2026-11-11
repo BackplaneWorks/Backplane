@@ -193,6 +193,12 @@ impl FarRouter for Router {
         })
     }
     fn machines(&self) -> Vec<(String, String, String)> { machines_of(&self.sync) }
+    fn raw_paired<'a>(&'a self, hub: &'a Arc<Hub>, link: &'a str, m: &'a str, p: &'a Value) -> Fut<'a, (u16, String)> {
+        Box::pin(async move {
+            if self.copy || !(self.sync.own(link) || self.sync.mine(link)) { return (0, String::new()) }
+            post(&self.sync, hub, link, &json!({"id": 0, "m": m, "p": p}).to_string()).await
+        })
+    }
     fn raw<'a>(&'a self, hub: &'a Arc<Hub>, link: &'a str, m: &'a str, p: &'a Value) -> Fut<'a, (u16, String)> {
         Box::pin(async move {
             if self.copy || !self.sync.own(link) { return (0, String::new()) }

@@ -165,6 +165,9 @@ pub trait FarRouter: Send + Sync {
     fn machines(&self) -> Vec<(String, String, String)> { vec![] }
     /// One signed request `{m, p}` to an owner's machine's /far/rpc: (status, body); 0 when it could not be made (away, not linked, a copy).
     fn raw<'a>(&'a self, _hub: &'a Arc<Hub>, _link: &'a str, _m: &'a str, _p: &'a Value) -> Fut<'a, (u16, String)> { Box::pin(async { (0, String::new()) }) }
+    /// `raw` to a machine the owner paired and approved, whatever the machine finder or another caller's last answer says of it now (a home move's
+    /// own calls: a big chunk in flight must not be refused because a probe just found the machine slow).
+    fn raw_paired<'a>(&'a self, hub: &'a Arc<Hub>, link: &'a str, m: &'a str, p: &'a Value) -> Fut<'a, (u16, String)> { self.raw(hub, link, m, p) }
 }
 /// The owning side of a tool call made from another machine (`mcp.call`): the agents lane runs the tool for `from` (an id like "<link>~<thread>").
 pub trait FarMcp: Send + Sync {
