@@ -1754,6 +1754,7 @@ async fn a_dollar_skill_of_the_persons_own_reaches_the_agent_as_a_slash_command_
     let sd = dir("vs-bin"); perf_standin(&sd, 1);
     let (hub, ag, _h, _w) = start("vs", |w| base_log(w, 2, ""), |_| Cli::standin(&sd)).await;
     // a client that reports in time: the answer carries its state, settled. It reports when the hub's `view` frame reaches it, not after a time
+    let cwd = ag.world().await.cwd(T1); std::fs::create_dir_all(std::path::Path::new(&cwd).join("mech")).unwrap(); std::fs::write(std::path::Path::new(&cwd).join("mech/a.step"), "ISO-10303-21;").unwrap();
     let mut client = hub.attach(hub.fresh_client());
     let late = tokio::spawn(async move { while let Some(o) = client.recv().await { if let crate::hub::Out::Value(f) = o { if f["t"] == "view" && f["thread"] == T1 { break } } } crate::files::kicad::watch::viewer_report(T1, json!({"open": "mech", "part": "mech/a.step", "selection": null})); });
     let (_, r) = rpc_mcp(&ag, T1, "", "tools/call", json!({"name":"viewer_show","arguments":{"kind":"mech","path":"mech/a.step"}})).await; late.await.unwrap();
@@ -1761,6 +1762,11 @@ async fn a_dollar_skill_of_the_persons_own_reaches_the_agent_as_a_slash_command_
     // a client that says nothing: the last report, marked unsettled
     let (_, r) = rpc_mcp(&ag, T1, "", "tools/call", json!({"name":"viewer_show","arguments":{"kind":"board","path":""}})).await;
     let t = tool_text(&r); assert_eq!(t["settled"], false); assert_eq!(t["viewer"]["open"], "mech");
+    // a model that is not there, or a file Mech has no page for, is refused, not acknowledged while another part shows (issue 1102)
+    for (k, p) in [("mech", "mech/gone.step"), ("mech", "notes.md"), ("teapot", "")] {
+        let (_, r) = rpc_mcp(&ag, T1, "", "tools/call", json!({"name":"viewer_show","arguments":{"kind":k,"path":p}})).await;
+        assert_eq!(r["result"]["isError"], true, "{k} {p}: {r}");
+    }
 }
 
 // ---- Settle: the thread's turn and everything it owns stop, and nothing starts it again ----
