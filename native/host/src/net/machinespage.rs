@@ -18,11 +18,12 @@ pub fn rows(d: &Value, draft: &dyn Fn(&str) -> String) -> Vec<Value> {
     let linked = d["linked"].as_array().cloned().unwrap_or_default();
     if linked.is_empty() { r.push(row("Linked machines", "None yet. Make a code here and enter it on the other machine, or enter its code below.", vec![])) }
     for l in &linked {
+        let shown = if super::peering::over_link(s(l, "url")) { "reached over its own link" } else { s(l, "url") };
         let (note, mut b) = match s(l, "state") {
             // one of the owner's machines: its agents can be signed in from here (present/signin_there.rs)
-            "paired" => (format!("{} · Paired", s(l, "url")), vec![crate::present::signin_there::open_button(s(l, "id"))]),
-            "no" => (format!("{} · Not yours", s(l, "url")), vec![btn("Mine", "machine-mine", s(l, "id"), false)]),
-            _ => (format!("{} · Unpaired: nobody approved this link. Confirm it is yours, or pair again with a code.", s(l, "url")), vec![btn("Mine", "machine-mine", s(l, "id"), false)]),
+            "paired" => (format!("{} · Paired", shown), vec![crate::present::signin_there::open_button(s(l, "id"))]),
+            "no" => (format!("{} · Not yours", shown), vec![btn("Mine", "machine-mine", s(l, "id"), false)]),
+            _ => (format!("{} · Unpaired: nobody approved this link. Confirm it is yours, or pair again with a code.", shown), vec![btn("Mine", "machine-mine", s(l, "id"), false)]),
         };
         b.push(btn("Remove", "machine-remove", s(l, "id"), false));
         let mut x = row(s(l, "name"), &note, b);

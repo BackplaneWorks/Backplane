@@ -271,3 +271,70 @@ async fn a_hub_nobody_can_reach_gets_its_calls_over_its_own_poll_within_seconds(
     assert!(!seen[0].3.contains('*') && !seen[0].3.contains("admin"), "nothing more than the Boat needs");
     assert_eq!((seen[1].0.as_str(), seen[1].1.as_str(), seen[1].2.as_str()), ("POST", "/api/boat/auth/logout", "Bearer session_token_full"), "the session is ended with its own token");
 }
+
+/// One-way linking: hub A is reachable only on its own loopback (no tailnet, no BACKPLANE_URL), hub B only on its public door. A pairs with
+/// B's code through the door: it announces "reach me over my reverse link" (peering::TUNNEL_URL) instead of a loopback address B could never
+/// use, the pairing is approved on B, A joins, and A's poll carries B's calls to A from then on.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_loopback_only_hub_links_to_a_public_door_and_is_reached_over_its_own_poll() {
+    use crate::api::{HttpHandler, HttpReply};
+    use crate::net::{peering::{Peering, TUNNEL_URL}, peers::PeerTable};
+    async fn hub_of(tag: &str) -> Arc<Hub> {
+        let home = dir(tag); std::fs::write(home.join("token"), format!("token-{tag}-0123456789")).unwrap();
+        Hub::start(Cfg { home, version: "0.15.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap()
+    }
+    struct W(Arc<crate::net::routes::AuthRoutes>);
+    impl crate::api::AuthRoute for W {
+        fn handle(&self, req: &crate::auth::Req, client: u64) -> Option<crate::api::AuthOutcome> { self.0.handle(req, client).map(|o| crate::api::AuthOutcome { reply: o.reply, close: o.close, unpeer: o.unpeer }) }
+        fn unpeer(&self, _link: &str) {}
+    }
+    /// The pairing machinery and the reverse link on `hub`, announcing `host:port` as its own address.
+    async fn wire(hub: &Arc<Hub>, host: &str, port: u16) -> Arc<Peering> {
+        let (reg, routes) = crate::net::start::open(&hub.cfg.home, host, port).unwrap();
+        let table = PeerTable::new(); table.start(hub).await;
+        let p = Arc::new(Peering::new(hub.cfg.home.clone(), reg.clone(), table, routes.clone(), false, host, port));
+        hub.register_http(Arc::new(crate::net::peerhttp::PeerRoutes(p.clone())));
+        hub.set_pairing(reg, Arc::new(W(routes)));
+        tunnel::install(hub, p.clone());
+        p
+    }
+    // B: the always-on hub, its door on its loopback; it names itself by an address that is not loopback (0.0.0.0 reaches the door here)
+    let b = hub_of("ow-b").await;
+    let lb = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap(); let door = lb.local_addr().unwrap().port();
+    tokio::spawn(public::accept(b.clone(), lb));
+    let pb = wire(&b, "0.0.0.0", door).await;
+    // A: this computer's hub, on its loopback only
+    let a = hub_of("ow-a").await;
+    let la = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap(); let pa_port = la.local_addr().unwrap().port();
+    { let a = a.clone(); tokio::spawn(async move { loop { let Ok((s, _)) = la.accept().await else { return }; let h = a.clone(); tokio::spawn(async move { let _ = crate::wire::serve(h, s).await; }); } }); }
+    let pa = wire(&a, "127.0.0.1", pa_port).await;
+    struct Echo;
+    impl HttpHandler for Echo {
+        fn routes(&self) -> &'static [&'static str] { &["/oneway-echo"] }
+        fn own_auth(&self) -> bool { true }
+        fn call<'a>(&'a self, _h: &'a Arc<Hub>, r: &'a crate::auth::Req) -> Fut<'a, HttpReply> { Box::pin(async move { HttpReply::text("200 OK", &format!("A got {}", String::from_utf8_lossy(&r.body))) }) }
+    }
+    a.register_http(Arc::new(Echo));
+    // B makes a code; A pairs through B's door; B approves A's request (its check code matches)
+    let code = pb.make_code().await.unwrap()["code"].as_str().unwrap().to_string();
+    let (attempt, check) = pa.pair_with(&a, &format!("http://0.0.0.0:{door}"), &code).await.expect("a loopback-only hub pairs with a hub that takes the reverse link");
+    let req = { let mut id = None; for _ in 0..50 { if let Some(r) = pb.page_data()["requests"].as_array().and_then(|rs| rs.iter().find(|r| r["check"] == check.as_str()).cloned()) { id = r["id"].as_str().map(str::to_string); break } tokio::time::sleep(std::time::Duration::from_millis(100)).await } id.expect("B sees A's request") };
+    pb.approve(&b, &req).await.unwrap();
+    for _ in 0..100 { if pa.attempt(&attempt)["state"] != "waiting" { break } tokio::time::sleep(std::time::Duration::from_millis(100)).await }
+    assert_eq!(pa.attempt(&attempt)["state"], "linked", "{}", pa.attempt(&attempt));
+    // B keeps A as "over its reverse link", never a loopback address
+    let link = pb.table.with(|t| t.live().into_iter().next().map(|x| (x.id, x.url))).expect("B holds the link");
+    assert_eq!(link.1, TUNNEL_URL);
+    assert!(pa.table.with(|t| t.live().iter().any(|x| x.url == format!("http://0.0.0.0:{door}"))), "A holds B by its door");
+    // A polls B; B's signed call to A goes over it
+    for _ in 0..200 { if tunnel::ends().live(&link.0) { break } tokio::time::sleep(std::time::Duration::from_millis(100)).await }
+    assert!(tunnel::ends().live(&link.0), "A polls B over the link it just made");
+    let secret = crate::net::botnet::peer_secret(&b.cfg.home, &link.0);
+    let t0 = std::time::Instant::now();
+    let r = crate::net::botnet::signed(&b.cfg.home, TUNNEL_URL, &link.0, &secret, crate::hub::now_ms() / 1000, "/oneway-echo", true, "hello").await;
+    assert_eq!((r.code, r.body.as_str()), (200, "A got hello"));
+    assert!(t0.elapsed() < std::time::Duration::from_secs(3), "{:?}", t0.elapsed());
+    // a hub that does not take the reverse link (an older build: no /far/tunnel) is still refused, as before
+    let e = crate::net::peering::announce(&a.cfg.home, &format!("http://127.0.0.1:{pa_port}"), "http://0.0.0.0:9").await.unwrap_err();
+    assert!(e.contains("loopback"), "{e}");
+}

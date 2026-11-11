@@ -40,11 +40,12 @@ rm -rf "$W"; mkdir -p "$H" "$W/builds"
 B=$W/builds/aon-$(git -C "$ROOT" rev-parse --short HEAD); mkdir -p "$B"
 cp "$HUB_BIN" "$B/backplane-hub"; for f in backplane backplane-voice silero_vad.onnx; do cp "$CUR/$f" "$B/"; done; cp -r "$CUR/assets" "$B/"
 git -C "$ROOT" rev-parse HEAD > "$B/COMMIT"
-IP=$(tailscale ip -4 2> /dev/null | head -1)
 say "throwaway hub on 127.0.0.1:$PORT (home $H, build $(basename "$B"))"
 # SOURCE=release RELEASE=0.15.2: the Boat installs that published release (the path a user's hub takes) instead of this build
 [ "${SOURCE:-}" = release ] && export BACKPLANE_ALWAYSON_SOURCE=release BACKPLANE_ALWAYSON_RELEASE="${RELEASE:-}"
-BACKPLANE_URL="http://${IP:-192.0.2.1}:$PORT" BACKPLANE_VAULT_KEYRING=file BACKPLANE_ALWAYSON_ADOPT=0 BACKPLANE_ALWAYSON_BUILD="$B" BACKPLANE_NO_UPDATE=1 BACKPLANE_NAME=aon-e2e \
+# no BACKPLANE_URL and no tailnet: this hub is reachable on its own loopback only, as a user's with no tailnet is; it links one way and the Boat
+# reaches it over its reverse link (HUB_URL=... sets an address instead)
+env ${HUB_URL:+BACKPLANE_URL="$HUB_URL"} BACKPLANE_VAULT_KEYRING=file BACKPLANE_ALWAYSON_ADOPT=0 BACKPLANE_ALWAYSON_BUILD="$B" BACKPLANE_NO_UPDATE=1 BACKPLANE_NAME=aon-e2e \
   "$HUB_BIN" --home "$H" --port "$PORT" --host 127.0.0.1 --no-tailscale --foreground --headless > "$W/hub.log" 2>&1 &
 HPID=$!
 for _ in $(seq 1 60); do curl -fsS -m 2 "http://127.0.0.1:$PORT/healthz" > /dev/null 2>&1 && break; sleep 1; done
