@@ -137,7 +137,7 @@ mod imp {
     pub fn destroy(container: u64) {
         let container = container as u32;
         let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
-        let _ = c.allow_events(Allow::ASYNC_POINTER, x11rb::CURRENT_TIME);
+        let _ = c.allow_events(Allow::REPLAY_POINTER, x11rb::CURRENT_TIME);
         let _ = c.ungrab_button(ButtonIndex::ANY, container, ModMask::ANY);
         if let Some(r) = root(c) {
             let kids = c.query_tree(container).ok().and_then(|q| q.reply().ok()).map(|t| t.children).unwrap_or_default();
@@ -411,7 +411,8 @@ mod imp {
         if on {
             let _ = c.grab_button(false, container, EventMask::BUTTON_PRESS, GrabMode::SYNC, GrabMode::ASYNC, x11rb::NONE, x11rb::NONE, ButtonIndex::ANY, ModMask::ANY);
         } else {
-            let _ = c.allow_events(Allow::ASYNC_POINTER, x11rb::CURRENT_TIME);
+            // a press the grab froze goes on to KiCad (replayed), never dropped: the click that gave KiCad the keyboard is also KiCad's click
+            let _ = c.allow_events(Allow::REPLAY_POINTER, x11rb::CURRENT_TIME);
             let _ = c.ungrab_button(ButtonIndex::ANY, container, ModMask::ANY);
         }
         let _ = c.flush();
