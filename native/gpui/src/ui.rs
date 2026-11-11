@@ -579,7 +579,7 @@ impl Render for Backplane {
         let has_home = home.is_object() || page.is_some();
         // the project home replaces the rows' part: what it drew last is not on screen (its controls, its text for selection)
         if has_home { self.screens.parts.rows_ctl.clear(); self.screens.reg.borrow_mut().begin_rows(); }
-        let home_els: Vec<AnyElement> = if let (false, Some(p)) = (home.is_object(), page.as_ref()) { crate::screens::projects::page(cx, light, &self.data, &self.screens.projects.home, p, &mut ctl) } else if has_home {
+        let home_els: Vec<AnyElement> = if let (false, Some(p)) = (home.is_object(), page.as_ref()) { crate::screens::projects::page(cx, &self.screens.reg.clone(), light, &self.data, &self.screens.projects.home, p, &mut ctl) } else if has_home {
             home["cards"].as_array().into_iter().flatten().take(60).enumerate().map(|(i, k)| node_el(cx, k, light, 0, &format!("h{i}"), &mut ctl)).collect()
         } else { Vec::new() };
         // popup

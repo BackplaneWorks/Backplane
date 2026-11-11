@@ -17,6 +17,8 @@ pub struct Projects {
     pub home: Home,
     /// The page's Edit: (the thread it opened, the text for its composer), put there once that thread is on show.
     pub intent_edit: Option<(String, String)>,
+    /// The page's viewer buttons: (the thread it opened, the view kind), sent as `view-kind` once that thread is on show.
+    pub view_edit: Option<(String, &'static str)>,
     /// Send on a project's page (0.14's home composer): (the thread on show before, the message, when), sent once the new thread the page
     /// asked for is the one on show; back in the box if none came.
     pub first_send: Option<(String, String, std::time::Instant)>,
@@ -39,13 +41,14 @@ pub struct Projects {
 
 /// What the hub said of the project on show (asked when its page opens; an answer for another project is dropped).
 #[derive(Default)]
-pub struct Home { pub pid: String, pub snap: Value, pub card: Value, seq: u64, asks: Vec<(u64, &'static str, String)> }
+pub struct Home { pub pid: String, pub snap: Value, pub card: Value, /// the README's blocks, parsed once when the answer came
+    pub readme: Vec<super::md::Block>, seq: u64, asks: Vec<(u64, &'static str, String)> }
 /// Ask tags of the project page (far above the Improvements page's own).
 const TAG: u64 = 1 << 48;
 /// The page opened (or opened again): its two reads go out; what the last answers said stays until the new ones come.
 pub fn ask_home(this: &mut Backplane, pid: &str) {
     let h = &mut this.screens.projects.home;
-    if h.pid != pid { h.snap = Value::Null; h.card = Value::Null; h.pid = pid.to_string(); }
+    if h.pid != pid { h.snap = Value::Null; h.card = Value::Null; h.readme.clear(); h.pid = pid.to_string(); }
     for (m, p) in [("project.home", serde_json::json!({"project": pid})), ("fab.look", serde_json::json!({"project": pid}))] {
         let h = &mut this.screens.projects.home; h.seq += 1; let tag = TAG + h.seq;
         h.asks.push((tag, m, pid.to_string())); if h.asks.len() > 16 { h.asks.remove(0); }
@@ -61,7 +64,7 @@ pub fn answered(this: &mut Backplane, tag: u64, reply: &Value, cx: &mut Context<
     let (_, m, pid) = h.asks.remove(i);
     if pid != h.pid || reply["ok"] != true { return true }
     let r = reply["result"].clone();
-    if m == "project.home" { if r.get("artifacts").is_some() { h.snap = r; } } else { h.card = r; }
+    if m == "project.home" { if r.get("artifacts").is_some() { h.readme = r["readme"].as_array().map(|n| super::md::parse(n)).unwrap_or_default(); h.snap = r; } } else { h.card = r; }
     cx.notify(); true
 }
 /// The goal and notes as the person wrote them (`.backplane/intent.md`), a line each: (kind, text): "h" a heading, "li" a list item, "p" text.
@@ -163,6 +166,12 @@ pub fn sync(this: &mut Backplane, cx: &mut Context<Backplane>) {
             let _ = this.tx.try_send(Command::Draft(text));
         }
     }
+    if let Some((th, kind)) = this.screens.projects.view_edit.clone() {
+        let shown = string(&this.data["thread"], "id"); let shown = shown.rsplit('|').next().unwrap_or("").to_string();
+        if shown == th && this.selected.rsplit('|').next() == Some(th.as_str()) && this.data["thread"]["loading"] != true {
+            this.screens.projects.view_edit = None; let _ = this.tx.try_send(Command::Action("view-kind".into(), kind.into()));
+        }
+    }
     if this.screens.projects.search.is_none() {
         let input = cx.new(|cx| Composer::with_context(cx, "AskInput"));
         cx.observe(&input, |this, input, cx| {
@@ -245,66 +254,139 @@ pub fn leaves_page(action: &str) -> bool { matches!(action, "bot" | "room" | "li
 pub fn find<'a>(data: &'a Value, pid: &str) -> Option<&'a Value> {
     data["projects"].as_array().and_then(|ps| ps.iter().find(|p| string(p, "id").rsplit('|').next() == Some(pid))).or_else(|| super::sections::find(data, pid))
 }
-/// A project's page, from the sidebar's own rows (no round trip): its name and folder, New thread, and each thread that is in it.
-pub fn page(cx: &mut Context<Backplane>, light: bool, data: &Value, home: &Home, pid: &str, ctl: &mut Vec<crate::script::CtlEntry>) -> Vec<AnyElement> {
+/// The folder's mechanical parts, assembly first: (path, name, bytes) of the `mech` artifacts, the largest file (the assembly, the one with the most parts in it) at the top.
+pub fn mech_parts(snap: &Value) -> Vec<(String, String, u64)> {
+    let mut v: Vec<(String, String, u64)> = snap["artifacts"].as_array().into_iter().flatten().filter(|a| a["kind"] == "mech").map(|a| {
+        let p = a["path"].as_str().unwrap_or("").to_string(); let n = p.rsplit('/').next().unwrap_or("").to_string(); (p, n, a["size"].as_u64().unwrap_or(0))
+    }).collect();
+    v.sort_by(|a, b| b.2.cmp(&a.2).then(a.1.cmp(&b.1))); v
+}
+/// The viewers a project's page offers, from what the folder holds: (label, view kind, icon).
+pub fn viewer_buttons(snap: &Value) -> Vec<(&'static str, &'static str, &'static str)> {
+    let has = |k: &str| snap["artifacts"].as_array().map_or(false, |a| a.iter().any(|x| x["kind"] == k));
+    let mut v = vec![];
+    /* i18n-ok: viewer kinds, drawn through trs */ { if has("board") { v.push(("Board", "board", "circuit-board")); } if has("schematic") { v.push(("Schematic", "schematic", "cpu")); } if has("board") { v.push(("3D", "3d", "box")); } if has("mech") { v.push(("Mech", "mech", "layers")); } v.push(("Files", "files", "folder")); }
+    v
+}
+/// A size in words: 1.2 MB, 340 KB.
+pub fn size_text(b: u64) -> String { if b >= 1 << 20 { format!("{:.1} MB", b as f64 / (1u64 << 20) as f64) } else { format!("{} KB", (b + 1023) >> 10) } }
+fn section(light: bool, label: String, right: Option<AnyElement>) -> AnyElement {
+    let c = |n: &str| theme::color(light, n);
+    div().flex().items_center().justify_between().pt_5().pb_1().border_b_1().border_color(c("line")).child(div().text_size(px(11.)).text_color(c("faint")).child(label)).children(right).into_any_element()
+}
+fn action_button(cx: &mut Context<Backplane>, light: bool, id: &'static str, icon: &'static str, label: String, primary: bool) -> Stateful<Div> {
+    let c = |n: &str| theme::color(light, n);
+    let _ = cx;
+    div().id(id).flex().items_center().gap_2().px_3().h(px(30.)).border_1().border_color(c(if primary { "accent" } else { "line" })).bg(c(if primary { "accent" } else { "raise" })).text_size(px(12.)).cursor_pointer()
+        .hover(|s| s.bg(c(if primary { "accent" } else { "panel" })).opacity(0.9))
+        .child(crate::ui::ic(light, icon, 14., if primary { "bg" } else { "text" })).child(div().text_color(c(if primary { "bg" } else { "text" })).child(label))
+}
+/// A project's page, from the sidebar's own rows (no round trip): its name and folder with the actions (New thread, Open folder, the viewers), its threads, the README,
+/// the goal and notes, the mechanical parts (assembly first), the parts to order and the boards.
+pub fn page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, light: bool, data: &Value, home: &Home, pid: &str, ctl: &mut Vec<crate::script::CtlEntry>) -> Vec<AnyElement> {
     use crate::script::CtlEntry;
     let Some(p) = find(data, pid) else { return vec![] };
     let c = |n: &str| theme::color(light, n);
     let threads: Vec<&Value> = p["threads"].as_array().into_iter().flatten().chain(p["settled"].as_array().into_iter().flatten()).collect();
+    let (hp, snap, card) = (home.pid.clone(), home.snap.clone(), home.card.clone());
+    let loaded = hp == pid;
+    let root = if loaded { let r = string(&snap, "root"); if r.is_empty() { string(p, "root") } else { r } } else { string(p, "root") };
+    let top = threads.first().map(|t| string(t, "id"));
     let mut out: Vec<AnyElement> = vec![
         div().text_size(px(22.)).font_weight(FontWeight::BOLD).child(string(p, "title")).into_any_element(),
-        div().text_size(px(12.)).text_color(c("dim")).child(string(p, "root")).into_any_element(),
+        div().text_size(px(12.)).text_color(c("dim")).child(root.clone()).into_any_element(),
     ];
-    // the hub's lists for this project first (running, needs you, recent, Done (n)), every machine's threads; the goal and notes after them
+    // the actions: New thread first (the way in), Open folder, then the viewers the folder has something for (they open on the project's top thread)
+    let mut bar = div().flex().flex_wrap().items_center().gap_2().pt_3().pb_1();
+    { let pid2 = pid.to_string();
+      /* i18n-ok: ctl labels and ui: ids are what drivers press */ ctl.push(CtlEntry { id: "page-new-thread".into(), label: "New thread".into(), ctl: Ctl::Node("new-thread".into(), pid.to_string()) });
+      bar = bar.child(action_button(cx, light, "page-new-thread", "plus", crate::i18n::trs("New thread"), true)
+        .on_click(cx.listener(move |this, _, _, cx| { this.arm_new(); let _ = this.tx.try_send(Command::Action("new-thread".into(), pid2.clone())); cx.notify(); }))); }
+    { let r = root.clone();
+      bar = bar.child(action_button(cx, light, "page-open-folder", "folder-open", crate::i18n::trs("Open folder"), false).on_click(cx.listener(move |this, _, _, _| this.file_open(&r, false)))); }
+    if loaded { if let Some(top) = top.clone() {
+        bar = bar.child(div().w(px(1.)).h(px(18.)).mx_1().bg(c("line")));
+        for (label, kind, icon) in viewer_buttons(&snap) {
+            let (t, id) = (top.clone(), format!("page-open-{kind}"));
+            /* i18n-ok: ctl labels and ids */ ctl.push(CtlEntry { id: id.clone(), label: format!("Open {label}"), ctl: Ctl::Select(top.clone()) });
+            let sid: &'static str = Box::leak(id.into_boxed_str());
+            bar = bar.child(action_button(cx, light, sid, icon, crate::i18n::trs(label), false).on_click(cx.listener(move |this, _, window, cx| {
+                let raw = t.rsplit('|').next().unwrap_or("").to_string(); this.screens.projects.view_edit = Some((raw, kind)); this.select(t.clone(), window, cx);
+            })));
+        }
+    } }
+    out.push(bar.into_any_element());
+    // threads: the hub's lists for this project (running, needs you, recent, Done (n)), every machine's threads
     let lists = super::sections::page_lists(cx, light, data, pid, ctl);
     let listed = lists.is_some();
     if let Some(l) = lists { out.extend(l); }
-    // what the folder holds (the hub's reads): the goal and notes, the parts to order and the boards (no Ready to order bar and no Buy it here: Buy it is a thread's tool)
-    let (hp, snap, card) = (home.pid.clone(), home.snap.clone(), home.card.clone());
-    if hp == pid {
-        let root = string(&snap, "root"); let root = if root.is_empty() { string(p, "root") } else { root };
-        let intent = { let i = string(&card, "intent"); if i.is_empty() && snap["artifacts"].as_array().map_or(false, |a| a.iter().any(|x| x["kind"] == "intent")) { string(&snap, "intent") } else { i } };
-        out.push(div().pt_3().text_size(px(11.)).text_color(c("faint")).child(crate::i18n::trs("GOAL & NOTES")).into_any_element());
-        if intent.trim().is_empty() { out.push(div().text_color(c("dim")).child(crate::i18n::trs("No goal yet. Ask an agent to write what this project is for, or edit .backplane/intent.md.")).into_any_element()); }
-        let mut col = div().id("home-intent").flex().flex_col().gap_1().text_size(px(13.));
-        for (k, t) in intent_lines(&intent) {
-            col = col.child(match k { "h" => div().pt_1().font_weight(FontWeight::BOLD).child(t), "li" => div().flex().gap_2().child(div().text_color(c("dim")).child("•")).child(div().flex_1().min_w_0().child(t)), _ => div().child(t) });
-        }
-        out.push(col.into_any_element());
-        // Edit: the project's top thread opens with the goal and notes in its composer as `/intent ...`; Send saves them (0.14 Intent's Edit)
-        if let Some(top) = threads.first().map(|t| string(t, "id")) {
-            let text = intent_draft(&intent);
-            /* i18n-ok: ctl labels and ui: ids are what drivers press */ ctl.push(crate::script::CtlEntry { id: "home-intent-edit".into(), label: "Edit goal & notes".into(), ctl: Ctl::Select(top.clone()) });
-            /* i18n-ok: ctl labels and ui: ids are what drivers press */ out.push(crate::ui::with_rect(div().id("home-intent-edit"), || "ui:Edit goal & notes".to_string()).px_3().py_1().w(px(160.)).border_1().border_color(c("line")).bg(c("raise")).text_size(px(12.)).cursor_pointer().hover(|s| s.bg(c("panel"))).child(crate::i18n::trs("Edit goal & notes"))
-                .on_click(cx.listener(move |this, _, window, cx| { let raw = top.rsplit('|').next().unwrap_or("").to_string(); this.screens.projects.intent_edit = Some((raw, text.clone())); this.select(top.clone(), window, cx); })).into_any_element());
-        }
-        let parts: Vec<&Value> = card["parts"].as_array().into_iter().flatten().collect();
-        if !parts.is_empty() {
-            out.push(div().pt_3().text_size(px(11.)).text_color(c("faint")).child(crate::i18n::tf("gpui.projects.to.order", &[("n", parts.len().into())])).into_any_element());
-            for (i, x) in parts.iter().enumerate() {
-                out.push(div().id(SharedString::from(format!("home-part-{i}"))).flex().gap_2().px_2().h(px(26.)).items_center().border_b_1().border_color(c("line")).text_size(px(12.))
-                    .child(div().flex_1().child(string(x, "name"))).child(div().text_color(c("dim")).child(string(x, "kind"))).child(div().text_color(c("faint")).child(string(x, "path"))).into_any_element());
-            }
-        }
-        let bs = boards(&snap, &card, &root);
-        if !bs.is_empty() {
-            out.push(div().pt_3().text_size(px(11.)).text_color(c("faint")).child(crate::i18n::tf("gpui.projects.boards", &[("n", bs.len().into())])).into_any_element());
-            for (i, b) in bs.iter().enumerate() { out.push(div().id(SharedString::from(format!("home-board-{i}"))).px_2().h(px(26.)).flex().items_center().border_b_1().border_color(c("line")).text_size(px(12.)).child(b.clone()).into_any_element()); }
+    if !listed {
+        out.push(section(light, crate::i18n::tf("gpui.projects.threads", &[("n", threads.len().into())]), None));
+        if threads.is_empty() { out.push(div().py_2().text_color(c("dim")).child(crate::i18n::trs("No threads yet.")).into_any_element()); }
+        for t in &threads {
+            let id = string(t, "id"); let raw = id.rsplit('|').next().unwrap_or(&id).to_string();
+            ctl.push(CtlEntry { id: format!("page-thread:{raw}"), label: string(t, "title"), ctl: Ctl::Select(id.clone()) });
+            out.push(div().id(SharedString::from(format!("page-thread-{raw}"))).flex().items_center().gap_2().px_2().h(px(30.)).border_b_1().border_color(c("line")).cursor_pointer().hover(|s| s.bg(c("raise")))
+                .child(super::siderow::dot(light, t)).child(div().flex_1().overflow_hidden().whitespace_nowrap().child(string(t, "title")))
+                .on_click(cx.listener(move |this, _, window, cx| this.select(id.clone(), window, cx))).into_any_element());
         }
     }
-    let pid2 = pid.to_string();
-    /* i18n-ok: ctl labels and ui: ids are what drivers press */ ctl.push(CtlEntry { id: "page-new-thread".into(), label: "New thread".into(), ctl: Ctl::Node("new-thread".into(), pid.to_string()) });
-    out.push(div().id("page-new-thread").px_3().py_1().w(px(140.)).border_1().border_color(c("line")).bg(c("raise")).text_size(px(12.)).cursor_pointer().hover(|s| s.bg(c("panel"))).child(crate::i18n::trs("New thread"))
-        .on_click(cx.listener(move |this, _, _, cx| { this.arm_new(); let _ = this.tx.try_send(Command::Action("new-thread".into(), pid2.clone())); cx.notify(); })).into_any_element());
-    if listed { return out } // (the hub's lists are above)
-    out.push(div().pt_3().text_size(px(11.)).text_color(c("faint")).child(crate::i18n::tf("gpui.projects.threads", &[("n", threads.len().into())])).into_any_element());
-    if threads.is_empty() { out.push(div().text_color(c("dim")).child(crate::i18n::trs("No threads yet.")).into_any_element()); }
-    for t in threads {
-        let id = string(t, "id"); let raw = id.rsplit('|').next().unwrap_or(&id).to_string();
-        ctl.push(CtlEntry { id: format!("page-thread:{raw}"), label: string(t, "title"), ctl: Ctl::Select(id.clone()) });
-        out.push(div().id(SharedString::from(format!("page-thread-{raw}"))).flex().items_center().gap_2().px_2().h(px(30.)).border_b_1().border_color(c("line")).cursor_pointer().hover(|s| s.bg(c("raise")))
-            .child(super::siderow::dot(light, t)).child(div().flex_1().overflow_hidden().whitespace_nowrap().child(string(t, "title")))
-            .on_click(cx.listener(move |this, _, window, cx| this.select(id.clone(), window, cx))).into_any_element());
+    if !loaded { return out }
+    // the README, drawn from its Markdown
+    if !home.readme.is_empty() {
+        out.push(section(light, "README".into(), None));
+        reg.borrow_mut().enter(0, "home-readme");
+        out.push(div().id("home-readme").flex().flex_col().gap_2().py_2().text_size(px(13.)).children(super::timeline::blocks(cx, reg, light, &home.readme, "home-readme")).into_any_element());
+    }
+    // the goal and notes
+    let intent = { let i = string(&card, "intent"); if i.is_empty() && snap["artifacts"].as_array().map_or(false, |a| a.iter().any(|x| x["kind"] == "intent")) { string(&snap, "intent") } else { i } };
+    let edit = top.clone().map(|top| {
+        let text = intent_draft(&intent);
+        /* i18n-ok: ctl labels and ui: ids are what drivers press */ ctl.push(CtlEntry { id: "home-intent-edit".into(), label: "Edit goal & notes".into(), ctl: Ctl::Select(top.clone()) });
+        /* i18n-ok: ctl labels and ui: ids are what drivers press */ crate::ui::with_rect(div().id("home-intent-edit"), || "ui:Edit goal & notes".to_string()).px_2().py_px().border_1().border_color(c("line")).bg(c("raise")).text_size(px(11.)).cursor_pointer().hover(|s| s.bg(c("panel"))).child(crate::i18n::trs("Edit goal & notes"))
+            .on_click(cx.listener(move |this, _, window, cx| { let raw = top.rsplit('|').next().unwrap_or("").to_string(); this.screens.projects.intent_edit = Some((raw, text.clone())); this.select(top.clone(), window, cx); })).into_any_element()
+    });
+    out.push(section(light, crate::i18n::trs("GOAL & NOTES"), edit));
+    if intent.trim().is_empty() { out.push(div().py_2().text_color(c("dim")).child(crate::i18n::trs("No goal yet. Ask an agent to write what this project is for, or edit .backplane/intent.md.")).into_any_element()); }
+    let mut col = div().id("home-intent").flex().flex_col().gap_1().py_2().text_size(px(13.));
+    for (k, t) in intent_lines(&intent) {
+        col = col.child(match k { "h" => div().pt_1().font_weight(FontWeight::BOLD).child(t), "li" => div().flex().gap_2().child(div().text_color(c("dim")).child("•")).child(div().flex_1().min_w_0().child(t)), _ => div().child(t) });
+    }
+    out.push(col.into_any_element());
+    // the mechanical parts: the assembly (the file with the most in it) first
+    let mech = mech_parts(&snap);
+    if !mech.is_empty() {
+        let open = top.clone().map(|top| {
+            let t = top.clone();
+            /* i18n-ok: a ctl id */ crate::ui::with_rect(div().id("home-mech-open"), || "ui:Open Mech".to_string()).px_2().py_px().border_1().border_color(c("line")).bg(c("raise")).text_size(px(11.)).cursor_pointer().hover(|s| s.bg(c("panel"))).child(crate::i18n::trs("Mech"))
+                .on_click(cx.listener(move |this, _, window, cx| { let raw = t.rsplit('|').next().unwrap_or("").to_string(); this.screens.projects.view_edit = Some((raw, "mech")); this.select(t.clone(), window, cx); })).into_any_element()
+        });
+        out.push(section(light, crate::i18n::tf("gpui.projects.mech", &[("n", mech.len().into())]), open));
+        for (i, (path, name, size)) in mech.iter().enumerate() {
+            let rel = path.strip_prefix(&root).map(|r| r.trim_start_matches('/').to_string()).unwrap_or_else(|| path.clone());
+            let (pth, first) = (path.clone(), i == 0 && mech.len() > 1);
+            out.push(div().id(SharedString::from(format!("home-mech-{i}"))).flex().gap_2().px_2().h(px(28.)).items_center().border_b_1().border_color(c("line")).text_size(px(12.)).cursor_pointer().hover(|s| s.bg(c("raise")))
+                .child(crate::ui::ic(light, if first { "layers" } else { "box" }, 14., if first { "accent" } else { "dim" }))
+                .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().child(name.clone()))
+                .children(first.then(|| div().text_color(c("accent")).child(crate::i18n::trs("Assembly"))))
+                .child(div().text_color(c("faint")).child(size_text(*size)))
+                .on_click(cx.listener(move |this, _, _, _| this.file_open(&pth, true)))
+                .tooltip(crate::keys::tip_raw(&rel, "", light))
+                .into_any_element());
+        }
+    }
+    let parts: Vec<&Value> = card["parts"].as_array().into_iter().flatten().collect();
+    if !parts.is_empty() {
+        out.push(section(light, crate::i18n::tf("gpui.projects.to.order", &[("n", parts.len().into())]), None));
+        for (i, x) in parts.iter().enumerate() {
+            out.push(div().id(SharedString::from(format!("home-part-{i}"))).flex().gap_2().px_2().h(px(26.)).items_center().border_b_1().border_color(c("line")).text_size(px(12.))
+                .child(div().flex_1().child(string(x, "name"))).child(div().text_color(c("dim")).child(string(x, "kind"))).child(div().text_color(c("faint")).child(string(x, "path"))).into_any_element());
+        }
+    }
+    let bs = boards(&snap, &card, &root);
+    if !bs.is_empty() {
+        out.push(section(light, crate::i18n::tf("gpui.projects.boards", &[("n", bs.len().into())]), None));
+        for (i, b) in bs.iter().enumerate() { out.push(div().id(SharedString::from(format!("home-board-{i}"))).px_2().h(px(26.)).flex().items_center().border_b_1().border_color(c("line")).text_size(px(12.)).child(b.clone()).into_any_element()); }
     }
     out
 }
@@ -389,5 +471,12 @@ mod home_tests {
         let snap = json!({"artifacts": [{"kind": "board", "path": "/p/board.kicad_pcb"}, {"kind": "intent", "path": "/p/.backplane/intent.md"}]});
         assert_eq!(boards(&snap, &json!({"board_files": ["board.kicad_pcb", "boards/b/b.kicad_pcb"]}), "/p"), vec!["board.kicad_pcb".to_string(), "boards/b/b.kicad_pcb".into()]);
         assert!(boards(&Value::Null, &Value::Null, "/p").is_empty());
+    }
+    #[test] fn the_mech_list_puts_the_assembly_first_and_the_viewers_follow_what_the_folder_has() {
+        let snap = json!({"artifacts": [{"kind": "board", "path": "/p/a.kicad_pcb"}, {"kind": "mech", "path": "/p/mech/lid.step", "size": 100}, {"kind": "mech", "path": "/p/mech/asm.step", "size": 5000}]});
+        assert_eq!(mech_parts(&snap).iter().map(|m| m.1.as_str()).collect::<Vec<_>>(), ["asm.step", "lid.step"]);
+        assert_eq!(viewer_buttons(&snap).iter().map(|v| v.1).collect::<Vec<_>>(), ["board", "3d", "mech", "files"]);
+        assert_eq!(viewer_buttons(&Value::Null).iter().map(|v| v.1).collect::<Vec<_>>(), ["files"]);
+        assert_eq!((size_text(2048), size_text(3 << 20)), ("2 KB".to_string(), "3.0 MB".to_string()));
     }
 }
