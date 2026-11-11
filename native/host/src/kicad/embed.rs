@@ -32,6 +32,8 @@ pub struct Frame {
     pub title: String,
     pub modified: bool,
     pub shown: bool,
+    /// bp.9: the client may map and unmap this frame itself (shown once, or pre-warmed)
+    pub realized: bool,
     pub xid: u64,
     pub min_w: i32,
     pub min_h: i32,
@@ -41,7 +43,7 @@ impl Frame {
     pub fn to_json(&self) -> Value {
         json!({
             "kind": self.kind, "doc": self.doc, "title": self.title,
-            "modified": self.modified, "shown": self.shown,
+            "modified": self.modified, "shown": self.shown, "realized": self.realized,
             "xid": self.xid, "min_w": self.min_w, "min_h": self.min_h,
         })
     }
@@ -286,6 +288,7 @@ pub fn parse_frame_info(v: &Value) -> Frame {
         title: v["title"].as_str().unwrap_or("").into(),
         modified: v["modified"].as_bool().unwrap_or(false),
         shown: v["shown"].as_bool().unwrap_or(false),
+        realized: v["realized"].as_bool().unwrap_or(false),
         xid: u64_of(&v["window"]),
         min_w: v["min_width"].as_i64().unwrap_or(0) as i32,
         min_h: v["min_height"].as_i64().unwrap_or(0) as i32,
@@ -1222,7 +1225,7 @@ impl Actor {
                         let mut frames: Vec<Frame> = mods.iter().map(|d| Frame {
                             kind: if d.ends_with(".kicad_sch") { "SCH".into() } else { "PCB".into() },
                             doc: d.clone(), title: d.rsplit('/').next().unwrap_or(d).into(),
-                            modified: true, shown: true, xid: 0, min_w: 0, min_h: 0,
+                            modified: true, shown: true, realized: false, xid: 0, min_w: 0, min_h: 0,
                         }).collect();
                         frames.sort_by(|a, b| a.doc.cmp(&b.doc));
                         s.frames = frames;
@@ -1891,6 +1894,7 @@ impl RpcHandler for EmbedRpc {
                             title,
                             modified,
                             shown: f["shown"].as_bool().unwrap_or(false),
+                            realized: false,
                             xid: f.get("xid").map(u64_of).unwrap_or(0),
                             min_w: 0,
                             min_h: 0,
@@ -1986,7 +1990,7 @@ mod tests {
             let mut s = Session::new(pro, "/p", "fork", "PCB", 1, t).ready("/s", "10.99.0-bp.8", t);
             s.container = container;
             if dirty {
-                s.frames.push(Frame { kind: "PCB".into(), doc: "/p/x.kicad_pcb".into(), title: "*x".into(), modified: true, shown: true, xid: 1, min_w: 0, min_h: 0 });
+                s.frames.push(Frame { kind: "PCB".into(), doc: "/p/x.kicad_pcb".into(), title: "*x".into(), modified: true, shown: true, realized: false, xid: 1, min_w: 0, min_h: 0 });
             }
             s
         };
