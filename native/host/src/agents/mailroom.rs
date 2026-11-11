@@ -55,7 +55,11 @@ impl Agents {
     pub async fn inbound_ref(self: &Arc<Self>, role: &str, thread: &str, msg: &str, text: &str, origin: Origin, r: &str, extra: Vec<Value>) -> Result<(), String> {
         // a settled thread is not started again by what the hub sends it on its own (a work or lock end, a task result, a wake, a launched thread's report):
         // the message is filed and the thread stays as it is; a person's message, or one from another thread, still reaches it
-        if matches!(origin.1.as_str(), "system" | "task" | "wake" | "launch") && self.world().await.threads.get(thread).map_or(false, |t| t.settled) {
+        // The uberbot's chat is the exception: what it is sent always goes to the funnel, which files it for the mailroom (a launched thread's finish for the done
+        // digest) and starts no turn there either. Its chat auto-settles, so before Nov 11 every report to it was posted here as a bare system line the mailroom
+        // never saw, and the person heard of no finished work.
+        let uber_chat = match self.mailroom() { Some(m) => m.chat_is(thread).await, None => false };
+        if !uber_chat && matches!(origin.1.as_str(), "system" | "task" | "wake" | "launch") && self.world().await.threads.get(thread).map_or(false, |t| t.settled) {
             let mut ev = extra; ev.push(json!({"$":"MessagePosted","thread":thread,"msg":msg,"role":"system","text":text,"at":now_s()}));
             self.commit_events(ev).await; return Ok(())
         }
