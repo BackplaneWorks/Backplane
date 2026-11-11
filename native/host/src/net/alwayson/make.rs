@@ -34,7 +34,7 @@ pub async fn run(hub: Arc<Hub>, sh: Arc<Shared>, b: Boat, from: String) {
             "build" => build(&hub, &b, &sh.box_id()).await,
             "service" => service(&hub, &b, &sh.box_id(), &o).await,
             "network" => network(&hub, &sh, &b, &o).await,
-            "start" => start_hub(&b, &sh.box_id()).await,
+            "start" => start_hub(&b, &sh.box_id(), &o.network).await,
             "link" => link(&hub, &sh, &b).await,
             _ => voice(&b, &sh.box_id()).await,
         };
@@ -119,8 +119,14 @@ pub fn source_of(os: &str, arch: &str, build: Option<&str>) -> Source {
 pub fn source_here() -> (Source, Option<PathBuf>) {
     let dir = build_dir().filter(|d| d.join("backplane-hub").is_file() && d.join("backplane").is_file());
     let id = dir.as_deref().and_then(build_id);
+    // BACKPLANE_ALWAYSON_SOURCE=release: a test's way to take the release path from a main build (test/alwayson/e2e.sh SOURCE=release)
+    if std::env::var("BACKPLANE_ALWAYSON_SOURCE").map_or(false, |v| v == "release") { return (Source::Release, dir) }
     (source_of(std::env::consts::OS, std::env::consts::ARCH, id.as_deref()), dir)
 }
+/// The release a Boat gets: this hub's version, or `BACKPLANE_ALWAYSON_RELEASE` (a test's published version).
+pub fn release_version(own: &str) -> String { std::env::var("BACKPLANE_ALWAYSON_RELEASE").ok().filter(|v| !v.trim().is_empty()).unwrap_or_else(|| own.to_string()) }
+/// The guard's layout on the Boat, made by every step that writes there: no step relies on one before it having run (a fresh Boat has none of it).
+pub fn layout() -> String { format!("mkdir -p {R}/builds {R}/home {R}/units") }
 
 /// The release a Boat installs, as the updater checks one: this hub's version exactly, its signed files verified with this build's release key,
 /// the manifest's tag, version and channel matching, and the linux-x64 archive's name, size and SHA-256 from it.
@@ -145,7 +151,7 @@ pub fn release_for(version: &str, list: &[crate::update::run::Listed], dir: &Pat
 /// if any is a link or leaves the folder, unpacked owning nothing, the hub and the guard present, EXPECT written from the manifest, one rename.
 pub fn release_script(f: &Fetched) -> String {
     let t = &f.tag;
-    format!("set -e; cd {R}; mkdir -p builds; [ -x builds/{t}/backplane-hub ] && exit 0; rm -rf builds/.in-{t} .in-{t}.tgz; \
+    format!("set -e; {layout}; cd {R}; [ -x builds/{t}/backplane-hub ] && exit 0; rm -rf builds/.in-{t} .in-{t}.tgz; \
 curl -fsSL --proto =https --max-filesize {size} -o .in-{t}.tgz '{url}'; \
 [ \"$(stat -c %s .in-{t}.tgz)\" = {size} ] || {{ echo 'the download is the wrong size' >&2; exit 3; }}; \
 echo '{sha}  .in-{t}.tgz' | sha256sum -c --status || {{ echo 'the checksum does not match the signed manifest' >&2; exit 3; }}; \
@@ -153,13 +159,14 @@ if tar -tvzf .in-{t}.tgz | grep -qE '^[lhbcp]' || tar -tzf .in-{t}.tgz | grep -q
 mkdir builds/.in-{t}; tar --no-same-owner -xzf .in-{t}.tgz -C builds/.in-{t}; rm -f .in-{t}.tgz; \
 test -x builds/.in-{t}/backplane-hub && test -x builds/.in-{t}/backplane || {{ echo 'the release has no hub or guard' >&2; exit 3; }}; \
 printf '%s\\n' '{expect}' > builds/.in-{t}/EXPECT; mv builds/.in-{t} builds/{t}",
-        size = f.size, url = f.url.replace('\'', ""), sha = f.sha256, expect = json!({"version": f.version, "commit": f.commit}))
+        size = f.size, url = f.url.replace('\'', ""), sha = f.sha256, expect = json!({"version": f.version, "commit": f.commit}), layout = layout())
 }
 
 async fn build(hub: &Arc<Hub>, b: &Boat, id: &str) -> Result<String, String> {
     let (src, dir) = source_here();
+    b.sh(id, &layout(), 30).await?;
     let bid = if src == Source::Release {
-        let (home, version) = (hub.cfg.home.clone(), hub.cfg.version.clone());
+        let (home, version) = (hub.cfg.home.clone(), release_version(&hub.cfg.version));
         let f = tokio::task::spawn_blocking(move || -> Result<Fetched, String> {
             let d = home.join("secrets").join("boat").join(format!("rel-{}", hex::encode(crate::net::pairing::urandom(4))));
             std::fs::create_dir_all(&d).map_err(|e| e.to_string())?;
@@ -246,8 +253,9 @@ pub fn self_updates(info: &Value) -> bool { std::env::var("BACKPLANE_NO_UPDATE")
 
 async fn service(hub: &Arc<Hub>, b: &Boat, id: &str, o: &Opts) -> Result<String, String> {
     b.sh(id, "sudo -n true", 30).await.map_err(|_| "no sudo on the Boat".to_string())?;
+    b.sh(id, &layout(), 30).await?;
     b.write(id, &format!("{R}/health.sh"), &health_sh()).await?;
-    b.sh(id, &format!("chmod +x {R}/health.sh && mkdir -p {R}/units"), 30).await?;
+    b.sh(id, &format!("chmod +x {R}/health.sh"), 30).await?;
     // the network's address is not known yet on a public Boat: the unit is written again once it is (network step)
     write_units(hub, b, id, &o.network, &o.host, "").await?;
     b.sh(id, "sudo -n systemctl enable --now bp-hub-health.timer > /dev/null 2>&1", 60).await?;
@@ -293,11 +301,21 @@ async fn network(hub: &Arc<Hub>, sh: &Arc<Shared>, b: &Boat, o: &Opts) -> Result
     Ok(url)
 }
 
-async fn start_hub(b: &Boat, id: &str) -> Result<String, String> {
+async fn start_hub(b: &Boat, id: &str, net: &str) -> Result<String, String> {
     b.sh(id, "sudo -n systemctl enable bp-hub > /dev/null 2>&1; sudo -n systemctl restart bp-hub", 90).await?;
     for _ in 0..60 {
         if let Ok(h) = b.sh(id, &format!("curl -fsS -m 5 http://127.0.0.1:{PORT}/healthz"), 30).await {
-            if h.contains("\"ok\"") || h.contains("booted") || h.starts_with('{') { return Ok(String::new()) }
+            if h.contains("\"ok\"") || h.contains("booted") || h.starts_with('{') {
+                if net != "public" { return Ok(String::new()) }
+                // the public address needs the door (public.rs); a release from before it has none, and nothing would answer there
+                for _ in 0..10 {
+                    let c = b.sh(id, &format!("curl -s -o /dev/null -m 5 -w '%{{http_code}}' http://127.0.0.1:{PUBLIC_PORT}/healthz; true"), 30).await.unwrap_or_default();
+                    if matches!(c.trim(), "200" | "503") { return Ok(String::new()) }
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                }
+                let v = b.sh(id, &format!("{R}/builds/$(head -1 {R}/CURRENT)/backplane-hub --version 2>/dev/null | awk '{{print $NF}}'"), 30).await.unwrap_or_default();
+                return Err(format!("Backplane {} on the Boat has no public address yet: it came with a later release. Use your tailnet, or wait for the next release.", v.trim()))
+            }
         }
         tokio::time::sleep(Duration::from_secs(3)).await;
     }
@@ -434,6 +452,7 @@ mod tests {
         assert!(release_for("0.15.2", &list, &d, &get, &[("k".into(), [1; 32])]).is_err(), "only this build's key");
         assert!(release_for("0.17.0", &list, &d, &get, &keys).unwrap_err().contains("no release v0.17.0"));
         let sh = release_script(&f);
+        assert!(sh.starts_with(&format!("set -e; mkdir -p {R}/builds {R}/home {R}/units; cd {R};")), "a fresh Boat has no layout: the install makes its own first");
         assert!(sh.contains(&format!("echo '{sha}  .in-v0.15.2.tgz' | sha256sum -c")) && sh.contains("--max-filesize 1234") && sh.contains("--no-same-owner") && sh.contains("mv builds/.in-v0.15.2 builds/v0.15.2"));
         assert!(sh.contains(r#"{"version":"0.15.2","commit":"c0ffee"}"#), "EXPECT from the signed manifest");
     }

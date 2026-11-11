@@ -1,18 +1,20 @@
 #!/bin/bash
 # The always-on Boat end to end, against a REAL Boat on the person's account (the desktop's `boat` CLI is signed in):
-#   a throwaway hub home on this desktop (port 3911, file vault, no tailnet, no adoption of bp-hub), the Boat key put in its vault with
+#   a throwaway hub home on this desktop (a free port in 3940-3999, file vault, no tailnet, no adoption of bp-hub), the Boat key put in its vault with
 #   secret.set (from the CLI's own config, through a 0600 file, never an argument), then alwayson.act: public network, small, Make it.
 #   Checks: every step done, the Boat linked and listed on Machines, the public door (healthz 200, /ws and /hub/status 401 to a stranger),
 #   Delete it (two presses) and the Boat gone from `boat list`. A trap deletes the Boat whatever happens. bx_479dqxby is never touched.
 #
 #   test/alwayson/e2e.sh [HUB_BIN]    HUB_BIN: the backplane-hub to test (default native/host/target/debug/backplane-hub)
-#   DICTATION=on also installs local dictation on the Boat (about 0.5 GB and a few minutes more).
+#   DICTATION=on also installs local dictation on the Boat (about 0.5 GB and a few minutes more). KEY_FILE: see below.
 set -uo pipefail
 export PATH="$HOME/.bun/bin:$HOME/.ascii/bin:$PATH"
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)
 HUB_BIN=${1:-$ROOT/native/host/target/debug/backplane-hub}
 DEV=${DEV:-$HOME/.backplane-gpui-dev}; CUR=$DEV/builds/$(head -1 "$DEV/CURRENT")
-PORT=${PORT:-3911}; W=${W:-/tmp/bp-aon-e2e}; H=$W/home; URL=ws://127.0.0.1:$PORT
+# the first free port in 3940-3999 (other lanes' throwaway hubs sit lower)
+if [ -z "${PORT:-}" ]; then for p in $(seq 3940 3999); do ss -ltn 2> /dev/null | grep -q "127.0.0.1:$p " || { PORT=$p; break; }; done; fi
+W=${W:-/tmp/bp-aon-e2e-$PORT}; H=$W/home; URL=ws://127.0.0.1:$PORT
 say() { echo "aon-e2e: $*" >&2; }
 fail() { say "FAIL: $*"; exit 1; }
 rpc() { bun "$ROOT/scripts/hub-rpc.mjs" "$H/token" "$URL" "$@"; }
@@ -20,6 +22,7 @@ act() { rpc alwayson.act "{\"action\":\"$1\",\"value\":\"${2:-}\"}"; }
 view() { rpc alwayson.view | python3 -I -c 'import sys,json; print(json.dumps(json.load(sys.stdin)["view"]))'; }
 BOX=""
 cleanup() {
+  [ -n "$BOX" ] && echo "$BOX" >> /tmp/bp-aon-e2e-boats.txt
   [ -n "${HPID:-}" ] && kill "$HPID" 2> /dev/null
   # a Boat made before its id was seen here: the one named as this hub names it, made during this run
   [ -z "$BOX" ] && [ -n "${T0ISO:-}" ] && BOX=$(boat --no-update list --all --json 2> /dev/null | python3 -I -c 'import sys,json
@@ -39,6 +42,8 @@ cp "$HUB_BIN" "$B/backplane-hub"; for f in backplane backplane-voice silero_vad.
 git -C "$ROOT" rev-parse HEAD > "$B/COMMIT"
 IP=$(tailscale ip -4 2> /dev/null | head -1)
 say "throwaway hub on 127.0.0.1:$PORT (home $H, build $(basename "$B"))"
+# SOURCE=release RELEASE=0.15.2: the Boat installs that published release (the path a user's hub takes) instead of this build
+[ "${SOURCE:-}" = release ] && export BACKPLANE_ALWAYSON_SOURCE=release BACKPLANE_ALWAYSON_RELEASE="${RELEASE:-}"
 BACKPLANE_URL="http://${IP:-192.0.2.1}:$PORT" BACKPLANE_VAULT_KEYRING=file BACKPLANE_ALWAYSON_ADOPT=0 BACKPLANE_ALWAYSON_BUILD="$B" BACKPLANE_NO_UPDATE=1 BACKPLANE_NAME=aon-e2e \
   "$HUB_BIN" --home "$H" --port "$PORT" --host 127.0.0.1 --no-tailscale --foreground --headless > "$W/hub.log" 2>&1 &
 HPID=$!
@@ -46,12 +51,26 @@ for _ in $(seq 1 60); do curl -fsS -m 2 "http://127.0.0.1:$PORT/healthz" > /dev/
 curl -fsS -m 2 "http://127.0.0.1:$PORT/healthz" > /dev/null || fail "the hub did not start (tail $W/hub.log)"
 sleep 3
 # the person's Boat key into the throwaway vault, through a private file
-( umask 077; python3 -I -c 'import json,os; print(json.load(open(os.path.expanduser("~/.config/ascii/boat/config.json")))["token"])' > "$W/k" )
+# KEY_FILE: a key Boat's `api-key create --json` printed (its "secret"), e.g. one with only boat.rs ACTIONS; else the CLI's own sign-in
+( umask 077; python3 -I -c 'import json,os,sys
+f=sys.argv[1]
+print(json.load(open(f))["secret"] if f else json.load(open(os.path.expanduser("~/.config/ascii/boat/config.json")))["token"])' "${KEY_FILE:-}" > "$W/k" )
 bun "$ROOT/test/alwayson/put-secret.mjs" "$H/token" "$URL" boat.api_key "$W/k" || fail "secret.set"
 rm -f "$W/k"
 act alwayson-account > /dev/null || fail "the account was not read"
-view | python3 -I -c 'import sys,json; v=json.load(sys.stdin); a=v["account"]; print("account:", a["email"], a["plan"], "%.0f h left"%a["hours_left"]); print("sizes:", [s["line"] for s in v["sizes"]]); print("need:", v["need"])'
-act alwayson-network public > /dev/null; act alwayson-size small > /dev/null; act alwayson-dictation "${DICTATION:-off}" > /dev/null
+view | python3 -I -c 'import sys,json; v=json.load(sys.stdin); a=v["account"]; print("account:", a["email"], a["plan"], "%.0f h left"%a["hours_left"], "missing:", a.get("missing")); print("sizes:", [s["line"] for s in v["sizes"]]); print("need:", v["need"])'
+# EXPECT_MISSING=sandbox.create: the key is one that cannot make a Boat; the row must say so and Make it must not run
+if [ -n "${EXPECT_MISSING:-}" ]; then
+  view | python3 -I -c 'import sys,json; v=json.load(sys.stdin); m=v["account"].get("missing") or []; assert sys.argv[1] in m, m; print("missing as expected:", m)' "$EXPECT_MISSING" || fail "the missing action was not seen"
+  act alwayson-network public > /dev/null; out=$(act alwayson-make 2>&1) && fail "Make it ran with a key that cannot create: $out"
+  say "PASS (Make it refused: $out)"; exit 0
+fi
+# NETWORK=tailnet TS_KEY_FILE=<a Tailscale auth key file>: the Boat joins the tailnet (the key goes into the throwaway vault as tailscale.boat)
+if [ "${NETWORK:-public}" = tailnet ]; then
+  [ -s "${TS_KEY_FILE:-}" ] || fail "NETWORK=tailnet needs TS_KEY_FILE"
+  bun "$ROOT/test/alwayson/put-secret.mjs" "$H/token" "$URL" tailscale.boat "$TS_KEY_FILE" > /dev/null || fail "secret.set tailscale.boat"
+fi
+act alwayson-network "${NETWORK:-public}" > /dev/null; act alwayson-size small > /dev/null; act alwayson-dictation "${DICTATION:-off}" > /dev/null
 T0ISO=$(date -u +%Y-%m-%dT%H:%M:%S)
 act alwayson-make > /dev/null || fail "Make it was refused"
 t0=$(date +%s); last=""

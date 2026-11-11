@@ -28,6 +28,15 @@ pub fn account_rows(v: &Value) -> Vec<Value> {
         let left = if a["hours"].as_f64().unwrap_or(0.0) > 0.0 { format!("{} of {} plan hours left until {}.", hours(a["hours_left"].as_f64().unwrap_or(0.0)), hours(a["hours"].as_f64().unwrap_or(0.0)), day(s(a, "period_end"))) } else { String::new() };
         r.push(row(&format!("Boat account: {}", s(a, "email")), &format!("{plan}{left} Boat bills this account; Backplane does not."), vec![btn("Forget", "alwayson-forget", "", false)]));
         if a["can_start"] == false { r.push(tone(row("Boat will not start a sandbox now", s(a, "blocked"), vec![btn("Open Boat", "open-url", "https://boat.dev/dashboard?tab=billing", false)]), "warn")) }
+        let lacks: Vec<&str> = a["missing"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+        if !lacks.is_empty() {
+            let what = if lacks.contains(&"sandbox.create") { "This key cannot make a Boat" } else { "This key cannot run an always-on Boat" };
+            r.push(tone(row(what, &format!("It lacks {}. Make a key with the command below, or on boat.dev, Dashboard, API Keys, with these actions: {}. Then Forget this one and paste the new key.", lacks.join(", "), super::boat::ACTIONS.join(", ")),
+                vec![btn("Copy the command", "copy", &super::boat::key_command(), true), btn("Forget this key", "alwayson-forget", "", false)]), "bad"));
+        } else if a["actions"].as_array().map_or(false, |x| x.iter().any(|v| v == "*")) && v["login_err"].as_str().map_or(true, str::is_empty) && a["session"] != true {
+            r.push(tone(row("This key can do everything on your account", "The always-on Boat needs less. A key with only what it needs is safer: make one with the command below, then Forget this one and paste the new key.",
+                vec![btn("Copy the command", "copy", &super::boat::key_command(), false)]), "warn"));
+        }
         return r
     }
     if v["key"] == true && v["account_err"].as_str().map_or(true, str::is_empty) { return vec![row("Boat account", "Reading your account.", vec![])] }
@@ -42,7 +51,8 @@ pub fn account_rows(v: &Value) -> Vec<Value> {
     }
     if let Some(e) = v["login_err"].as_str().filter(|e| !e.is_empty()) { r.push(tone(row("Boat sign-in", e, vec![]), "warn")) }
     let (f, b) = vault_box(super::boat::KEY, "Boat account for the always-on machine", "Boat API key, boat_...");
-    let mut k = row("Or paste an API key", "Make one on boat.dev, Dashboard, API keys. It is kept in this computer's vault.", vec![b, btn("Open Boat", "open-url", "https://boat.dev/dashboard?tab=api-keys", false)]);
+    let mut k = row("Or paste an API key", &format!("Make a key with only what the always-on Boat needs, with Boat's command: {}. Or on boat.dev, Dashboard, API Keys: New key, expiry a year, with these actions: {}. It is kept in this computer's vault.", super::boat::key_command(), super::boat::ACTIONS.join(", ")),
+        vec![b, btn("Copy the command", "copy", &super::boat::key_command(), false), btn("Open Boat", "open-url", "https://boat.dev/dashboard?tab=api-keys", false)]);
     k["fields"] = json!([f]);
     r.push(k);
     r
@@ -73,8 +83,10 @@ pub fn make_rows(v: &Value) -> Vec<Value> {
         r.push(row("Reached at Boat's public address", "A fixed https address on boat.dev. Anyone can reach it, so everything but pairing and hooks needs this computer's or a paired device's credential.",
             vec![if v["tailnet"] == true { btn("Use my tailnet", "alwayson-network", "tailnet", false) } else { Value::Null }].into_iter().filter(|b| !b.is_null()).collect()));
     }
-    let ready = v["account"]["email"].as_str().map_or(false, |e| !e.is_empty()) && (v["network"] != "tailnet" || v["ts_key"] == true);
-    r.push(row("Make it", if ready { "Takes about five minutes. You can leave this page; it carries on." } else { "Connect your Boat account first." }, if ready { vec![btn("Make it", "alwayson-make", "", true)] } else { vec![] }));
+    let lacks = v["account"]["missing"].as_array().map_or(false, |m| !m.is_empty());
+    let ready = v["account"]["email"].as_str().map_or(false, |e| !e.is_empty()) && (v["network"] != "tailnet" || v["ts_key"] == true) && !lacks;
+    let why = if lacks { "This key cannot make and run the Boat: see above." } else if v["network"] == "tailnet" && v["ts_key"] != true { "Paste the Tailscale auth key first." } else { "Connect your Boat account first." };
+    r.push(row("Make it", if ready { "Takes about five minutes. You can leave this page; it carries on." } else { why }, if ready { vec![btn("Make it", "alwayson-make", "", true)] } else { vec![] }));
     r
 }
 
@@ -211,6 +223,20 @@ mod tests {
         let f = r.iter().find_map(|x| x["fields"].as_array().cloned()).unwrap();
         assert_eq!((f[0]["secret"].as_bool(), f[0]["vault"].as_bool(), f[0]["value"].as_str()), (Some(true), Some(true), Some("")), "the key is never in a draft");
         assert!(!a.iter().any(|x| x.starts_with("alwayson-make")), "nothing to make before the account");
+    }
+    #[test] fn a_pasted_key_that_cannot_create_says_so_before_make_it() {
+        let acc = json!({"email": "a@b.c", "hours": 10.0, "hours_left": 5.0, "can_start": true, "missing": ["sandbox.create", "sandbox.stop", "sandbox.resume", "sandbox.delete-own"], "actions": ["sandbox.read", "exec"]});
+        let r = boat_rows(&view(json!({"account": acc, "ts_key": true})));
+        let bad = r.iter().find(|x| x["tone"] == "bad").expect("a red row");
+        assert_eq!(s(bad, "label"), "This key cannot make a Boat"); assert!(s(bad, "note").starts_with("It lacks sandbox.create, sandbox.stop"));
+        assert!(acts(&r).contains(&format!("copy:{}", super::super::boat::key_command())));
+        assert!(!acts(&r).contains(&"alwayson-make:".to_string()), "no Make it with that key");
+        let ok = json!({"email": "a@b.c", "hours": 10.0, "hours_left": 5.0, "can_start": true, "missing": [], "actions": super::super::boat::ACTIONS});
+        let r = boat_rows(&view(json!({"account": ok, "ts_key": true}))); assert!(acts(&r).contains(&"alwayson-make:".to_string()) && !r.iter().any(|x| x["tone"] == "bad" || x["tone"] == "warn"));
+        let admin = json!({"email": "a@b.c", "can_start": true, "missing": [], "actions": ["*"]});
+        let r = boat_rows(&view(json!({"account": admin, "ts_key": true}))); assert!(r.iter().any(|x| x["tone"] == "warn" && s(x, "label").contains("everything")), "an admin key is usable but said to be more than needed");
+        let none = boat_rows(&view(json!({})));
+        assert!(none.iter().any(|x| s(x, "note").contains("boat api-key create backplane-always-on --ttl 365d --actions sandbox.create")), "the key row says how to make the key");
     }
     #[test] fn a_failed_sign_in_says_so_and_the_key_box_stays() {
         let r = boat_rows(&view(json!({"login_err": "Boat's sign-in did not start: Boat answered 404. Paste an API key instead."})));

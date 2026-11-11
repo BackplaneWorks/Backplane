@@ -96,11 +96,26 @@ impl Boat {
     }
     pub async fn get(&self, path: &str) -> Result<Value, String> { self.call("GET", path, None, 40).await }
 
-    /// `GET /me` and `GET /limits`, as the account row shows them: `{email, login, plan, plan_dollars, hours_left, hours, period_end, rate_hour, types, trial}`.
+    /// `GET /me` and `GET /limits`, as the account row shows them: `{email, login, plan, plan_dollars, hours_left, hours, period_end, rate_hour, types, trial}`,
+    /// and what this key may do: `actions` (["*"] for a sign-in or an admin key) and `missing`, the actions the always-on Boat needs that it lacks.
     pub async fn account(&self) -> Result<Value, String> {
-        let me = self.get("/me").await?;
+        let me = self.get("/me").await.map_err(|e| if e.contains("api_key_action_forbidden") || e.contains("403") { format!("This key cannot read your Boat account: it lacks account.read. {}", MAKE_KEY) } else { e })?;
         let l = self.get("/limits").await?;
-        Ok(account_of(&me, &l))
+        let mut a = account_of(&me, &l);
+        let acts = self.get("/api-keys").await.ok().and_then(|k| key_actions(&k, &self.key));
+        a["actions"] = json!(acts.clone().unwrap_or_else(|| vec!["*".to_string()]));
+        a["missing"] = json!(missing(acts.as_deref().unwrap_or(&["*".to_string()])));
+        Ok(a)
+    }
+    /// A key of the always-on Boat's own (`ACTIONS`, a year), made with this sign-in's token: the secret, shown once by Boat.
+    pub async fn make_key(&self, name: &str) -> Result<String, String> {
+        let r = self.call("POST", "/api-keys/scoped", Some(json!({"name": name, "ttl": "365d", "actions": ACTIONS})), 40).await?;
+        r["secret"].as_str().or_else(|| r["apiKey"]["secret"].as_str()).filter(|s| !s.is_empty()).map(str::to_string).ok_or_else(|| "Boat made the key but did not hand it over".into())
+    }
+    /// End this sign-in's session (the CLI's own logout), once its narrower key is kept.
+    pub async fn logout(&self) -> Result<(), String> {
+        let r = send(&self.home, Call::new("POST", format!("{}/api/boat/auth/logout", web_base()), &self.key).secs(20)).await;
+        if r.ok() { Ok(()) } else { Err(r.why()) }
     }
     /// `POST /sandboxes`: no auto-stop (`ttlSeconds: null`), none of the account's stored logins (`noEnv`), labelled so it can be found again.
     /// The Idempotency-Key makes a retry after a lost answer return the same Boat rather than a second one that bills.
@@ -171,6 +186,27 @@ impl Boat {
     }
 }
 
+/// What the always-on Boat asks of the person's Boat key, and nothing more: make, read and keep on (update: no auto-stop), stop and resume (Restart,
+/// Resize), delete only the Boats this key made, run commands, write files (the build goes up through a signed upload URL), host the hub's port,
+/// and read the account and its usage. Checked against Boat on Nov 11 2026: each call the Boat makes answered with a key of exactly these actions.
+pub const ACTIONS: &[&str] = &["sandbox.create", "sandbox.read", "sandbox.update", "sandbox.stop", "sandbox.resume", "sandbox.delete-own", "exec", "file.write", "host", "account.read"];
+/// How to make that key, said where the key is pasted.
+pub fn key_command() -> String { format!("boat api-key create backplane-always-on --ttl 365d --actions {}", ACTIONS.join(",")) }
+pub const MAKE_KEY: &str = "Make one with the Boat command below, or on boat.dev, Dashboard, API Keys: New key, with the actions listed.";
+/// This key's actions, from `GET /api-keys` (Boat shows each key's prefix and last four). None when it is not listed: a sign-in's session, which may do everything.
+pub fn key_actions(list: &Value, key: &str) -> Option<Vec<String>> {
+    let k = list["apiKeys"].as_array()?.iter().find(|k| {
+        let (p, l) = (k["keyPrefix"].as_str().unwrap_or(""), k["keyLastFour"].as_str().unwrap_or(""));
+        !p.is_empty() && !l.is_empty() && key.starts_with(p) && key.ends_with(l)
+    })?;
+    Some(k["scope"]["actions"].as_array()?.iter().filter_map(|a| a.as_str().map(str::to_string)).collect())
+}
+/// The actions the always-on Boat needs that `have` lacks (`*` has them all; `sandbox.delete` covers `sandbox.delete-own`).
+pub fn missing(have: &[String]) -> Vec<&'static str> {
+    if have.iter().any(|a| a == "*") { return vec![] }
+    ACTIONS.iter().copied().filter(|n| !have.iter().any(|h| h == n || (*n == "sandbox.delete-own" && h == "sandbox.delete"))).collect()
+}
+
 pub fn create_body(size: &str, name: &str) -> Value {
     json!({"type": size, "ttlSeconds": null, "noEnv": true, "name": name, "labels": {"backplane": "alwayson"}})
 }
@@ -228,6 +264,19 @@ mod tests {
         let a = account_of(&me, &l);
         assert_eq!((a["email"].as_str(), a["plan"].as_str(), a["hours_left"].as_f64()), (Some("a@b.c"), Some("Standard"), Some(2413.0)));
         assert_eq!(a["types"], json!(["small"])); assert_eq!(a["trial"], false);
+    }
+    #[test] fn the_keys_actions_are_read_from_boats_list_and_what_it_lacks_is_named() {
+        let list = json!({"apiKeys": [
+            {"keyPrefix": "boat_4ftM", "keyLastFour": "EsZ1", "scope": {"actions": ["*"]}},
+            {"keyPrefix": "boat_abcd", "keyLastFour": "WXYZ", "scope": {"actions": ["sandbox.read", "sandbox.update", "exec", "file.read", "file.write", "host", "account.read"]}}]});
+        let fs = key_actions(&list, "boat_abcd1234567890WXYZ").unwrap();
+        assert_eq!(missing(&fs), ["sandbox.create", "sandbox.stop", "sandbox.resume", "sandbox.delete-own"], "Boat's full-sandbox preset cannot create");
+        assert!(missing(&key_actions(&list, "boat_4ftMzzzEsZ1").unwrap()).is_empty(), "an admin key");
+        assert_eq!(key_actions(&list, "session-token-not-listed"), None, "a sign-in's session is not a listed key");
+        assert!(missing(&ACTIONS.iter().map(|a| a.to_string()).collect::<Vec<_>>()).is_empty());
+        let mut d: Vec<String> = ACTIONS.iter().map(|a| a.to_string()).collect(); d.retain(|a| a != "sandbox.delete-own"); d.push("sandbox.delete".into());
+        assert!(missing(&d).is_empty(), "delete covers delete-own");
+        assert!(key_command().starts_with("boat api-key create backplane-always-on --ttl 365d --actions sandbox.create,sandbox.read,") && !key_command().contains("admin") && !key_command().contains('*'));
     }
     #[test] fn a_refused_key_says_to_connect_again_and_boats_message_is_kept() {
         assert!(Resp { code: "401".into(), body: b"{}".to_vec(), err: String::new() }.why().contains("Connect the account again"));
