@@ -217,6 +217,10 @@ def main() -> None:
     ]
     if kicad_cli and os.path.isfile(kicad_cli):
         events.append({"$": "SettingSet", "key": "kicad.path", "value": kicad_cli, "at": now})
+    # KEMBED_SEED_MESSAGE: an agent's message already in the thread (the cross-probe suite clicks the parts it names)
+    seed_msg = os.environ.get("KEMBED_SEED_MESSAGE", "")
+    if seed_msg:
+        events.append({"$": "MessagePosted", "thread": "t1", "msg": "m2", "role": "assistant", "text": seed_msg, "at": now})
     write(os.path.join(out_dir, "home", "events.jsonl"), "".join(json.dumps(e, separators=(",", ":")) + "\n" for e in events))
 
     bun = shutil.which("bun") or "/usr/bin/env bun"

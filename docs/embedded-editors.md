@@ -140,7 +140,12 @@ Backplane's bare keys (the rail's B S 3 V M F D R W, `/`) only bind where no vie
 - **Rail items to frames:** Board maps to `PCB`, Schematic to `SCH` and 3D to `PCB_3D`. Mech maps to FreeCAD. The Symbol and Footprint editor frames appear in the strip when KiCad opens them (Edit Symbol, Edit Footprint, or the agent's `OpenLibraryItem`). Each frame has a close button, and Ctrl+Tab cycles them.
 - **Switching** is the client mapping one frame's window and unmapping the others. It knows their ids from the hub's state. Nothing is closed, so a frame keeps its zoom, tool and selection. The hub sends `ShowFrame` only for a frame that isn't open yet.
 - **Split** with an editor: the left and right rectangles each show a frame, or one editor and one GPUI viewer.
-- **Cross-probing** happens inside KiCad (KIWAY). Backplane gets selection changes through `NextEvents`, so the agent can be told "the person has U3 selected".
+- **Cross-probing** between KiCad's own frames happens inside KiCad (KIWAY). Between KiCad and Backplane it goes through the hub (`kicad/xprobe.rs`, client `screens/xprobe.rs`):
+  - **Chat → KiCad.** A reference (U3), pin (U3.4) or net (GND, /SDA) of the thread's design in a message is a link; the hub lists the names (`kicad.names {thread}`: the board's footprints and nets, every sheet's symbols and labels). A click sends `editor.kicad.select {thread, references, nets, pins, zoom}`: it is selected and zoomed in the open KiCad. With no editor in the pane, the Board page opens and zooms on it instead.
+  - **Agents** do the same with the MCP tool `kicad_select {path, references, nets, pins, zoom, show}`; `show` (PCB or SCH) switches the pane first. The answer says what KiCad found.
+  - **Backplane's viewers.** The select also sets the hub's board probe (`probe:<root>|<board>`), which every Board, Schematic and Split page lights. A piece tapped in a viewer is selected in KiCad (`from: "viewer"`).
+  - **KiCad → Backplane** (bp.9): the person's selection arrives as `ET_SELECTION_CHANGED` (`NextEvents`). The hub publishes it as info `kicad.sel.<digest>` `{project, frame, selection, probe}` and sets the board probe, so the viewers light it.
+  - **Runtimes.** bp.9 uses `kiapi.backplane.embed.SelectItems {kind, references, nets, pins, zoom}` on each open PCB/SCH frame (gated on the runtime's `api.desc`). bp.8 has `ShowFrame {kind, item}`: one part is cross-probed (selected and centred) on the shown frame; nets are only lit in Backplane's viewers.
 - **The project manager** is hidden in embedded mode. Opening a different project goes through Backplane (another thread or project), not KiCad's File → Open Project. The fork disables that menu item in embedded mode.
 
 ## Size and layout

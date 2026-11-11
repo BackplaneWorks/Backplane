@@ -19,6 +19,8 @@ pub struct Registry {
     pub copy_seen: usize,
     /// The target of the link under the pointer, shown at the corner of the timeline.
     pub hover: String,
+    /// The thread's design names: its parts, pins and nets in a message are links (screens/xprobe.rs).
+    pub design: Rc<super::xprobe::Design>,
 }
 #[derive(Clone, Debug, PartialEq)]
 pub struct KPos { pub entry: String, pub idx: usize, pub off: usize }
@@ -28,7 +30,7 @@ pub type Reg = Rc<RefCell<Registry>>;
 pub const VIEWER_COPIES: usize = 1000;
 
 impl Default for Registry {
-    fn default() -> Self { Self { blocks: Vec::new(), dragging: false, entry: 0, entry_id: String::new(), idx: 0, keyed: None, sel: Selection::default(), copies: Vec::new(), copy_seen: 0, hover: String::new() } }
+    fn default() -> Self { Self { blocks: Vec::new(), dragging: false, entry: 0, entry_id: String::new(), idx: 0, keyed: None, sel: Selection::default(), copies: Vec::new(), copy_seen: 0, hover: String::new(), design: Default::default() } }
 }
 
 impl Registry {
@@ -132,6 +134,7 @@ pub struct SelText { spans: Vec<Span>, kind: Kind, light: bool, reg: Reg, id: St
 impl SelText {
     pub fn new(reg: &Reg, spans: Vec<Span>, kind: Kind, light: bool) -> Self {
         let mut r = reg.borrow_mut();
+        let spans = if kind == Kind::Code || r.design.is_empty() { spans } else { super::xprobe::links(spans, &r.design) };
         let mut at = 0usize; let mut links = Vec::new();
         for s in &spans { if let Some(l) = &s.style.link { links.push((at..at + s.text.len(), l.clone())); } at += s.text.len(); }
         let entry = r.entry; let (id, idx) = (r.entry_id.clone(), r.next_idx());
@@ -435,6 +438,7 @@ impl Backplane {
                 super::linkroute::Route::Web(u) => cx.open_url(&u),
                 super::linkroute::Route::Hub(u) => { self.note.clear(); self.go("link-open", u, cx); }
                 super::linkroute::Route::Note(n) => self.note = n.to_string(),
+                super::linkroute::Route::Design(w) => super::xprobe::clicked(self, &w),
             }
         }
         // a finished selection is the X11 PRIMARY selection too (middle-click paste in other apps)

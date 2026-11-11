@@ -112,14 +112,6 @@ mod imp {
                 .event_mask(EventMask::SUBSTRUCTURE_NOTIFY)).ok()?.check().ok()?;
         let _ = c.flush(); Some(id)
     }
-    /// Every child of `old` (stock KiCad's frames, or the fork's holder) moved into `new`, unmapped where it was not shown: a pane moved to
-    /// another window (popped out, or back in) takes KiCad with it, its state untouched.
-    pub fn move_frames(old: u32, new: u32) {
-        let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
-        let kids = c.query_tree(old).ok().and_then(|r| r.reply().ok()).map(|t| t.children).unwrap_or_default();
-        for k in kids { let _ = c.reparent_window(k, new, 0, 0); }
-        let _ = c.flush();
-    }
     pub fn destroy(container: u32) {
         let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
         let _ = c.allow_events(Allow::ASYNC_POINTER, x11rb::CURRENT_TIME);
@@ -497,7 +489,6 @@ mod imp {
     use super::{Frame, R};
     pub fn container(_parent: u32) -> Option<u32> { None }
     pub fn destroy(_container: u32) {}
-    pub fn move_frames(_old: u32, _new: u32) {}
     pub fn adopt(_pid: u32, _container: u32, _toplevel: u32) -> Vec<u32> { vec![] }
     pub fn dialogs(_pid: u32, _container: u32, _toplevel: u32) {}
     pub fn frames(_container: u32) -> Vec<Frame> { vec![] }

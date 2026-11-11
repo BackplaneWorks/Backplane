@@ -11,7 +11,7 @@ pub struct Opts { pub home: PathBuf, pub port: u16, pub host: String, pub builds
 struct Times { probe: u64, misses: u32, stable: u64, stall: u64, boot: u64, floor: u64 }
 fn env(n: &str, d: u64) -> u64 { std::env::var(n).ok().and_then(|v| v.parse().ok()).unwrap_or(d) }
 
-struct Guard { o: Opts, d: Dir, b: Option<Builds>, t: Tuning, tm: Times, build: String, mode: Mode, skip: Vec<String>, hist: Vec<Fail>, remote: Vec<u64>, why: String, hub_pid: u32, state: &'static str, stable: bool, last_req: Value, since: u64, probation: Option<String>, low: Vec<String>, space_at: Option<Instant>, swept: Vec<String>, sweep: Option<(Child, Instant)>, down: Vec<String>, down_before: Vec<String> }
+struct Guard { o: Opts, d: Dir, b: Option<Builds>, t: Tuning, tm: Times, build: String, mode: Mode, skip: Vec<String>, hist: Vec<Fail>, remote: Vec<u64>, why: String, hub_pid: u32, state: &'static str, stable: bool, last_req: Value, since: u64, probation: Option<String>, low: Vec<String>, space_at: Option<Instant>, down: Vec<String>, down_before: Vec<String> }
 
 /// What a request changed.
 enum Move { Nothing, Restart, Exit }
@@ -72,50 +72,16 @@ impl Guard {
     fn temp_dir() -> PathBuf { std::env::temp_dir() }
     fn watch_space(&mut self) {
         if self.space_at.map_or(false, |t| t.elapsed().as_secs() < 30) { return }
-        let first = self.space_at.is_none(); self.space_at = Some(Instant::now());
-        // the janitor's run: given ten minutes, then its result is what the person hears about
-        let sweeping = match &mut self.sweep {
-            Some((c, at)) => match c.try_wait() { Ok(None) if at.elapsed().as_secs() < 600 => true, Ok(None) => { let _ = c.kill(); let _ = c.wait(); self.sweep = None; false } _ => { self.sweep = None; false } },
-            None => false,
-        };
-        let janitor = self.janitor();
+        self.space_at = Some(Instant::now());
         for (what, p) in [("home", self.o.home.clone()), ("temp", Self::temp_dir())] {
             let Some((free, total)) = sys::space(&p) else { continue };
-            let (title, room, did) = if what == "temp" { ("Temp folder nearly full", "Temp folder has room again", "agents' temporary files will fail to write; the next hub start gets a temp folder on the home's disk. Free it, or `backplane hub restart`") }
-                else { ("Disk nearly full", "Disk has room again", "the hub keeps its log whole and refuses writes it cannot finish; free space on this disk") };
-            let low = plan::low_space(free, total, self.tm.floor);
-            let told = self.low.iter().any(|x| x == what);
-            // an alert this guard did not raise (an earlier run's) is looked up once, at its first look
-            let open = told || (first && !low && self.d.open_alert(title));
+            let (low, was) = (plan::low_space(free, total, self.tm.floor), self.low.iter().any(|x| x == what));
             let left = format!("{}: {} free of {}", p.display(), plan::gb(free), plan::gb(total));
-            match plan::space_step(low, told, open, sweeping, self.swept.iter().any(|x| x == what), janitor.is_some()) {
-                plan::Space::Sweep => {
-                    self.swept.push(what.into());
-                    if self.sweep.is_none() { if let Some(j) = &janitor { self.start_janitor(j, &left) } }
-                    if self.sweep.is_some() { self.space_at = Some(Instant::now() - Duration::from_secs(20)) } else { self.low.push(what.into()); self.alert(title, &left, did) }
-                }
-                plan::Space::Wait | plan::Space::Nothing => {}
-                plan::Space::Alert => { self.low.push(what.into()); self.alert(title, &left, did) }
-                plan::Space::Clear => {
-                    self.low.retain(|x| x != what);
-                    say(&format!("room again on {left}")); self.d.clear(room, &left, title, &self.build);
-                    if told { sys::notify("Backplane hub", &format!("{room}: {left}")) }
-                }
-            }
-            if !low { self.swept.retain(|x| x != what) }
-        }
-    }
-    /// The disk janitor of a dev machine: `BACKPLANE_JANITOR` (empty or 0: none), else `janitor` beside the builds (main-build.sh points it at scripts/worktree-gc.sh).
-    fn janitor(&self) -> Option<PathBuf> {
-        match std::env::var("BACKPLANE_JANITOR") { Ok(v) if v.is_empty() || v == "0" => return None, Ok(v) => return Some(PathBuf::from(v)), _ => {} }
-        let j = self.b.as_ref()?.0.join("janitor"); fs::metadata(&j).ok().filter(|m| m.is_file()).map(|_| j)
-    }
-    fn start_janitor(&mut self, j: &Path, left: &str) {
-        let log = self.b.as_ref().map(|b| b.0.join("janitor.log")).unwrap_or_else(|| self.d.path("janitor.log"));
-        let out = || OpenOptions::new().create(true).append(true).open(&log).map_or(Stdio::null(), Stdio::from);
-        match Command::new(j).arg("--apply").env_remove("BACKPLANE_AGENT_OWNER").stdin(Stdio::null()).stdout(out()).stderr(out()).spawn() {
-            Ok(c) => { say(&format!("low on {left}: the janitor runs first ({}; {})", j.display(), log.display())); self.sweep = Some((c, Instant::now())) }
-            Err(e) => say(&format!("low on {left}: the janitor {} would not start: {e}", j.display())),
+            if low && !was {
+                self.low.push(what.into());
+                if what == "temp" { self.alert("Temp folder nearly full", &left, "agents' temporary files will fail to write; the next hub start gets a temp folder on the home's disk. Free it, or `backplane hub restart`") }
+                else { self.alert("Disk nearly full", &left, "the hub keeps its log whole and refuses writes it cannot finish; free space on this disk") }
+            } else if !low && was { self.low.retain(|x| x != what); say(&format!("room again on {left}")); }
         }
     }
     /// A temp folder for the hub and every agent under it: the usual one, unless it is nearly full and the home's disk is not.
@@ -450,7 +416,7 @@ pub fn run(o: Opts) -> i32 {
     let t = Tuning { tries: env("BACKPLANE_GUARD_TRIES", 3) as usize, window: env("BACKPLANE_GUARD_WINDOW", 600), pause: env("BACKPLANE_GUARD_PAUSE", 1), machine_pause: env("BACKPLANE_GUARD_MACHINE_PAUSE", 5), rescue_retry: env("BACKPLANE_GUARD_RESCUE_RETRY", 120) };
     let tm = Times { probe: env("BACKPLANE_GUARD_PROBE", 5), misses: env("BACKPLANE_GUARD_MISSES", 6) as u32, stable: env("BACKPLANE_GUARD_STABLE", 60), stall: env("BACKPLANE_GUARD_STALL", 300), boot: env("BACKPLANE_GUARD_BOOT", 900), floor: env("BACKPLANE_GUARD_MIN_FREE", 1 << 30) };
     let mode = if o.safe { Mode::Safe } else { Mode::Normal };
-    let mut g = Guard { d, b, t, tm, build, mode, skip: vec![], hist: vec![], remote: vec![], why: String::new(), hub_pid: 0, state: "starting", stable: false, last_req: Value::Null, since: now(), probation: None, low: vec![], space_at: None, swept: vec![], sweep: None, down: vec![], down_before: vec![], o };
+    let mut g = Guard { d, b, t, tm, build, mode, skip: vec![], hist: vec![], remote: vec![], why: String::new(), hub_pid: 0, state: "starting", stable: false, last_req: Value::Null, since: now(), probation: None, low: vec![], space_at: None, down: vec![], down_before: vec![], o };
     // a build already marked bad is not started: the newest one that is not
     if bad.contains(&g.build) { if let Some(to) = g.rollback_to() { say(&format!("{} is marked bad: starting {to}", g.build)); g.build = to; } }
     g.pin(); g.go()

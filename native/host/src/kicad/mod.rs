@@ -34,6 +34,7 @@ pub mod project;
 pub mod release;
 pub mod review;
 pub mod watch;
+pub mod xprobe;
 pub mod histsteps;
 pub mod open;
 pub mod install;
@@ -46,6 +47,7 @@ pub fn start(hub: &Arc<Hub>) {
     hub.register_rpc(Arc::new(watch::KicadRpc(plots)));
     ipc::start(hub);
     embed::start(hub);
+    xprobe::start(hub);
 }
 
 /// `kicad.watch` names a folder and maybe a file: both must lie under a folder the hub knows (a project's root or a

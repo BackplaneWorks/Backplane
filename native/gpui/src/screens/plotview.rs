@@ -294,6 +294,7 @@ pub fn cross_probe(app: &mut Backplane, slot: usize, card: &super::plot::Card) {
     // (lit here at once: the hub's copy of this probe, when it comes back, finds it already lit)
     for (s, key) in targets { app.screens.pv(s).probe_at = format!("{key}\u{1}{text}"); probe_one(app, s, &key, card); }
     keep_probe(app, Some(card));
+    super::xprobe::tapped(app, card);
 }
 /// The hub's probe on a canvas showing source `key`: lit again (and its card set) when the source or the probe changed since it was last lit; cleared when the
 /// hub has none. Called while the page is drawn; the requests go out right after.
@@ -311,6 +312,7 @@ pub fn probe_sync(cx: &mut Context<Backplane>, slot: usize, pv: &mut PlotView, k
     pv.probe_at = tag;
     if probe.is_empty() { if !first { pv.card = None; pv.picked = None; pv.lit.clear(); } return }
     let Some(card) = super::plot::card(probe) else { return };
+    eprintln!("GPUI_LOG {}", serde_json::json!({"event": "probe_sync", "slot": slot, "key": key, "probe": probe}));
     // the same probe on the same source is already lit (the tap that made it); otherwise light it here
     pv.card = Some(card.clone()); pv.lit.clear();
     let key = key.to_string();

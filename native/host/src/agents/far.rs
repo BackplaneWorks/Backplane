@@ -14,7 +14,7 @@ fn fail(m: &str) -> (bool, Value) { (false, json!({"error":m})) }
 /// The tools that take a thread, and so may name one elsewhere
 const ON_THREAD: &[&str] = &["thread_send", "thread_read", "thread_wait", "thread_interrupt", "thread_update", "thread_settle"];
 /// The tools that need the file they name on this machine
-const LOCAL_THINGS: &[&str] = &["kicad_ipc", "kicad_ipc_status", "kicad_bring_back", "kicad_export10", "viewer_show"];
+const LOCAL_THINGS: &[&str] = &["kicad_ipc", "kicad_ipc_status", "kicad_select", "kicad_bring_back", "kicad_export10", "viewer_show"];
 /// The tools that take a `machine`
 const ON_MACHINE: &[&str] = &["thread_list", "thread_launch"];
 

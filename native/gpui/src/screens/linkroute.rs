@@ -2,10 +2,11 @@
 //! which project, which shelf, which room), a web address opens in the system browser, a path opens in the Files viewer, anything else says so.
 
 #[derive(Clone, Debug, PartialEq)]
-pub enum Route { Web(String), Hub(String), File(String), Note(&'static str) }
+pub enum Route { Web(String), Hub(String), File(String), /** a part, pin or net of the thread's design (screens/xprobe.rs) */ Design(String), Note(&'static str) }
 
 pub fn route(href: &str, file: bool) -> Route {
     let h = href.trim();
+    if let Some(w) = h.strip_prefix(super::xprobe::HREF).filter(|w| !w.is_empty()) { return Route::Design(w.to_string()) }
     if h.starts_with("backplane://") || crate::pairing::is_open_link(h) { return Route::Hub(h.to_string()) }
     if h.starts_with("https://") || h.starts_with("http://") || h.starts_with("mailto:") { return Route::Web(h.to_string()) }
     if file && !h.is_empty() { return Route::File(h.to_string()) }
@@ -29,6 +30,7 @@ mod tests {
         assert_eq!(route("http://x.io", false), Route::Web("http://x.io".into()));
         assert_eq!(route("~/Documents/a.rs", true), Route::File("~/Documents/a.rs".into()));
         assert_eq!(route("src/x.rs:12", true), Route::File("src/x.rs:12".into()));
+        assert_eq!(route("kicad:U3", false), Route::Design("U3".into()));
     }
     #[test] fn what_opens_nowhere_is_a_note() {
         assert!(matches!(route("ftp://x", false), Route::Note(_))); assert!(matches!(route("", true), Route::Note(_))); assert!(matches!(route("javascript:alert(1)", false), Route::Note(_)));

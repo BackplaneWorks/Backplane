@@ -17,7 +17,7 @@ SUITES=(
   "embed_window_e2e.sh:window"
   "embed_editors_e2e.sh:editors"
   "embed_agent_resilience_e2e.sh:resilience"
-  "embed_ux_e2e.sh:ux"
+  "embed_xprobe_e2e.sh:xprobe"
 )
 
 FAILED=0

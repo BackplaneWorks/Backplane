@@ -97,19 +97,6 @@ pub fn identity_mismatch(expect: &serde_json::Value, said: &serde_json::Value) -
 /// A filesystem the hub writes to is nearly full: under `floor` (1 GiB), or under 5 % and under 10 GiB (a big disk with 90 GB left is not full). The temp folder counts as much as the home's disk: on a desktop where /tmp is a RAM
 /// tmpfs shared by every agent, it fills first, and every agent's writes then fail (ENOSPC, EDQUOT) as they would on a full disk.
 pub fn low_space(free: u64, total: u64, floor: u64) -> bool { free < floor || (free.saturating_mul(20) < total && free < 10 << 30) }
-/// What the half-minute look at one filesystem does. Low space first gets the janitor (lanes' worktrees, build dirs, stale temp files; scripts/worktree-gc.sh), and
-/// the person is told only if it is still low once the janitor is done; room again clears what was told, also an alert a guard before this one left open.
-#[derive(Debug, PartialEq, Clone, Copy)]
-pub enum Space { Nothing, Sweep, Wait, Alert, Clear }
-pub fn space_step(low: bool, told: bool, open: bool, sweeping: bool, swept: bool, can_sweep: bool) -> Space {
-    match (low, told) {
-        (true, false) if sweeping => Space::Wait,
-        (true, false) if !swept && can_sweep => Space::Sweep,
-        (true, false) => Space::Alert,
-        (false, _) if told || open => Space::Clear,
-        _ => Space::Nothing,
-    }
-}
 pub fn gb(n: u64) -> String { format!("{:.1} GB", n as f64 / 1e9) }
 
 /// The parts an update came up without that the build before it had running (both from /healthz `degraded`). A part that was already down is the home's, not the update's.
@@ -234,17 +221,6 @@ mod tests {
         assert!(low_space(g / 2, 2000 * g, g), "under 1 GiB, whatever the size");
         assert!(low_space(g * 14 / 10, 30 * g, g), "a 30 GB tmpfs with 1.4 GB left: under 5 %");
         assert!(!low_space(10 * g, 30 * g, g)); assert!(!low_space(90 * g, 1800 * g, g), "90 GB free of 1.8 TB is under 5 % and not low");
-    }
-    #[test] fn low_space_gets_the_janitor_first_and_room_again_clears_the_alert() {
-        use Space::*;
-        assert_eq!(space_step(true, false, false, false, false, true), Sweep, "the janitor runs before anyone is told");
-        assert_eq!(space_step(true, false, false, true, true, true), Wait, "nothing is told while it runs");
-        assert_eq!(space_step(true, false, false, false, true, true), Alert, "still low once it is done: told");
-        assert_eq!(space_step(true, false, false, false, false, false), Alert, "no janitor on this machine: told at once");
-        assert_eq!(space_step(true, true, true, false, true, true), Nothing, "told once");
-        assert_eq!(space_step(false, true, true, false, true, true), Clear, "room again clears it");
-        assert_eq!(space_step(false, false, true, false, false, true), Clear, "an alert an earlier guard left open is cleared once there is room");
-        assert_eq!(space_step(false, false, false, false, true, true), Nothing, "the janitor made room before anyone was told: nothing to clear");
     }
     #[test] fn an_update_that_loses_a_part_fails_and_one_the_home_had_down_does_not() {
         assert_eq!(lost_parts(&[], &s(&["bots"])), s(&["bots"]), "bots panicked at start: the update goes back");
