@@ -449,12 +449,28 @@ pub async fn gui_call(route: &GuiRoute, ty: &str, msg: Value) -> Value {
 pub async fn show_for(pro: &str, frame: &str, item: &str) -> Result<Value, String> {
     let Some(r) = gui_route(pro) else { return Err("KiCad is not open for this project".into()) };
     let (tx, rx) = oneshot::channel();
-    r.tx.send(Msg::Show { client: 0, pro: pro.into(), frame: frame.into(), doc: String::new(), item: item.into(), remount: false, reply: tx })
+    r.tx.send(Msg::Show { client: 0, pro: pro.into(), frame: frame.into(), doc: String::new(), item: item.into(), focus: false, remount: false, reply: tx })
         .map_err(|_| "the embedded KiCad actor stopped".to_string())?;
     rx.await.unwrap_or_else(|_| Err("no reply from embedded KiCad actor".into()))
 }
 
 // Runtime / schema discovery ------------------------------------------------------------------------------------------------
+
+fn live_pids() -> &'static Mutex<std::collections::HashSet<u32>> {
+    static P: OnceLock<Mutex<std::collections::HashSet<u32>>> = OnceLock::new();
+    P.get_or_init(Default::default)
+}
+
+/// End every KiCad session this hub spawned when the hub itself exits on a signal.
+pub fn shutdown_all() {
+    let pids: Vec<u32> = live_pids().lock().map_or_else(|e| e.into_inner().drain().collect(), |mut g| g.drain().collect());
+    for pid in pids {
+        crate::agents::proc::unwatch_group(pid);
+        crate::plat::proc::kill_group(pid, crate::plat::proc::TERM);
+        crate::plat::proc::kill_group(pid, crate::plat::proc::KILL);
+        crate::plat::proc::kill(pid, crate::plat::proc::KILL);
+    }
+}
 
 #[derive(Clone, Debug)]
 struct ResolvedProject {
@@ -589,7 +605,7 @@ enum Msg {
         reply: oneshot::Sender<Result<Value, String>>,
     },
     Show {
-        client: u64, pro: String, frame: String, doc: String, item: String, remount: bool,
+        client: u64, pro: String, frame: String, doc: String, item: String, remount: bool, focus: bool,
         reply: oneshot::Sender<Result<Value, String>>,
     },
     Detach {
@@ -746,6 +762,7 @@ impl Actor {
                 return;
             }
             if matches!(existing.state.as_str(), "ready" | "unresponsive") {
+                let prev_cont = existing.container;
                 existing.container = container;
                 if toplevel > 0 { existing.toplevel = toplevel; }
                 if !display.is_empty() { existing.display = display; }
@@ -759,10 +776,20 @@ impl Actor {
                             let _ = raw_on(&me, &snap.sock, &snap.desc, "kiapi.backplane.embed.AttachToParent",
                                 json!({"window": container, "toplevel": snap.toplevel, "scale": 1.0}), 15000).await;
                         }
-                        if let Ok(Some((holder, _, frames))) = switch_fork_frame(&me, &snap.sock, &snap.desc, &snap.active, "", "", false).await {
-                            let _ = me.send(Msg::FramesUpdated { pro: snap.pro.clone(), gen: snap.gen, holder: Some(holder), frames, reply: Some((cid, reply)) });
-                        } else {
-                            let _ = me.send(Msg::FramesUpdated { pro: snap.pro.clone(), gen: snap.gen, holder: None, frames: snap.frames.clone(), reply: Some((cid, reply)) });
+                        match switch_fork_frame(&me, &snap.sock, &snap.desc, &snap.active, "", "", false, false).await {
+                            Ok(Some((holder, _, frames)))
+                                if !cfg!(windows) || container == 0 || container == prev_cont || frames.iter().any(|f| f.shown && f.xid > 0) =>
+                            {
+                                let _ = me.send(Msg::FramesUpdated { pro: snap.pro.clone(), gen: snap.gen, holder: Some(holder), frames, reply: Some((cid, reply)) });
+                            }
+                            _ if cfg!(windows) && container > 0 && prev_cont > 0 && container != prev_cont => {
+                                // On Windows, if the previous client crashed and the OS destroyed `prev_cont` (tearing down `bp.8` `WS_CHILD` frames),
+                                // automatically restart the session into the new client's container.
+                                let _ = me.send(Msg::Restart { client: cid, pro: snap.pro.clone(), env, reply });
+                            }
+                            _ => {
+                                let _ = me.send(Msg::FramesUpdated { pro: snap.pro.clone(), gen: snap.gen, holder: None, frames: snap.frames.clone(), reply: Some((cid, reply)) });
+                            }
                         }
                     });
                 } else {
@@ -819,9 +846,9 @@ impl Actor {
         let sock_dir = short_sock_dir(&self.hub.cfg.home, &digest, gen);
         let sock_dir_str = sock_dir.to_string_lossy().to_string();
         let req_sock = if mode == "fork" {
-            format!("{sock_dir_str}/api.sock")
+            sock_dir.join("api.sock").to_string_lossy().to_string()
         } else {
-            format!("{sock_dir_str}/kicad/api.sock")
+            sock_dir.join("kicad").join("api.sock").to_string_lossy().to_string()
         };
         let argv_vec = if mode == "fork" {
             let mut v = fork_argv(&kicad_bin, &pro, &req_sock, container, toplevel, std::process::id());
@@ -848,6 +875,15 @@ impl Actor {
         sess.desc = desc.clone();
         sess.caps = env.caps.clone();
 
+        // On Windows, cross-process top-level stock windows are never adopted; publish stock mode ready without spawning a floating window.
+        if cfg!(windows) && mode == "stock" {
+            sess.state = "ready".into();
+            let out = sess.info_json();
+            self.sessions.insert(pro.clone(), sess.clone());
+            self.publish_and_reply(&sess, Some(client), reply, Ok(out));
+            return;
+        }
+
         if wait {
             self.publish(&sess, Some(client));
             self.sessions.insert(pro.clone(), sess.clone());
@@ -871,7 +907,7 @@ impl Actor {
         });
     }
 
-    fn show(&mut self, client: u64, pro: String, frame: String, doc: String, item: String, remount: bool, reply: oneshot::Sender<Result<Value, String>>) {
+    fn show(&mut self, client: u64, pro: String, frame: String, doc: String, item: String, remount: bool, focus: bool, reply: oneshot::Sender<Result<Value, String>>) {
         let Some(s) = self.sessions.get_mut(&pro) else {
             let _ = reply.send(Err("no embedded KiCad session for this project; attach first".into())); return;
         };
@@ -893,7 +929,7 @@ impl Actor {
         let cid = client;
         if snap.mode == "fork" {
             tokio::spawn(async move {
-                let synced = match switch_fork_frame(&me, &snap.sock, &snap.desc, &snap.active, &doc, &item, remount).await {
+                let synced = match switch_fork_frame(&me, &snap.sock, &snap.desc, &snap.active, &doc, &item, remount, focus).await {
                     Ok(v) => v,
                     Err(e) => { let _ = reply.send(Err(e)); return; }
                 };
@@ -906,9 +942,11 @@ impl Actor {
         } else {
             let ack = self.publish_ack(&snap);
             tokio::spawn(async move {
-                if let Some(act) = stock_action_for(&snap.active) {
-                    if let Err(e) = run_stock_action(&me, &snap.sock, &snap.desc, act).await {
-                        let _ = reply.send(Err(e)); return;
+                if !snap.sock.is_empty() {
+                    if let Some(act) = stock_action_for(&snap.active) {
+                        if let Err(e) = run_stock_action(&me, &snap.sock, &snap.desc, act).await {
+                            let _ = reply.send(Err(e)); return;
+                        }
                     }
                 }
                 if let Some(rx) = ack { let _ = rx.await; }
@@ -953,9 +991,18 @@ impl Actor {
         let save_norm = save.trim().to_ascii_lowercase();
         if s.mode == "fork" && !s.sock.is_empty() {
             let cm = close_mode_of(&save_norm);
+            let pid = s.pid;
             tokio::spawn(async move {
                 let o = raw_on(&me, &s.sock, &s.desc, "kiapi.backplane.embed.Close", json!({"mode": cm}), 15000).await;
                 if o["ok"].as_bool().unwrap_or(false) {
+                    if pid > 0 {
+                        tokio::spawn(async move {
+                            tokio::time::sleep(Duration::from_millis(800)).await;
+                            if crate::plat::proc::alive(pid) {
+                                Actor::kill_pid(pid);
+                            }
+                        });
+                    }
                     let _ = me.send(Msg::ChildExited { pro: s.pro.clone(), gen: s.gen, code: 0, tail: String::new(), reply: Some(reply) });
                 } else {
                     let err = o["error"].as_str().unwrap_or("KiCad refused to close").to_string();
@@ -1025,7 +1072,7 @@ impl Actor {
             Msg::Attach { client, pro, root, files, frame, container, toplevel, display, wait, env, reply } => {
                 self.attach(client, pro, root, files, frame, container, toplevel, display, wait, env, reply);
             }
-            Msg::Show { client, pro, frame, doc, item, remount, reply } => self.show(client, pro, frame, doc, item, remount, reply),
+            Msg::Show { client, pro, frame, doc, item, remount, focus, reply } => self.show(client, pro, frame, doc, item, remount, focus, reply),
             Msg::Detach { client, pro, reply } => self.detach(client, pro, reply),
             Msg::Close { client, pro, save, reply } => self.close(client, pro, save, reply),
             Msg::Restart { client, pro, env, reply } => self.restart(client, pro, env, reply),
@@ -1086,7 +1133,7 @@ impl Actor {
                                 json!({"window": s2.container, "toplevel": if s2.container > 0 { s2.toplevel } else { 0 }, "scale": 1.0}), 15000).await;
                         }
                         if s2.container > 0 {
-                            if let Ok(Some((h, _, f))) = switch_fork_frame(&me, &s2.sock, &s2.desc, &s2.active, "", "", false).await {
+                            if let Ok(Some((h, _, f))) = switch_fork_frame(&me, &s2.sock, &s2.desc, &s2.active, "", "", false, false).await {
                                 let _ = me.send(Msg::FramesUpdated { pro: s2.pro, gen: s2.gen, holder: Some(h), frames: f, reply: None });
                             }
                         } else {
@@ -1137,7 +1184,7 @@ impl Actor {
                 let snap = s.clone();
                 let me = self.me.clone();
                 tokio::spawn(async move {
-                    if let Ok(Some((holder, _, frames))) = switch_fork_frame(&me, &snap.sock, &snap.desc, &snap.active, "", "", false).await {
+                    if let Ok(Some((holder, _, frames))) = switch_fork_frame(&me, &snap.sock, &snap.desc, &snap.active, "", "", false, false).await {
                         let _ = me.send(Msg::FramesUpdated { pro: snap.pro, gen: snap.gen, holder: Some(holder), frames, reply: None });
                     }
                 });
@@ -1155,6 +1202,7 @@ impl Actor {
             }
             Msg::HealthResult { pro, gen, ok, modified_docs } => {
                 let Some(s) = self.sessions.get_mut(&pro).filter(|s| s.gen == gen && matches!(s.state.as_str(), "ready" | "unresponsive")) else { return };
+                let was_unresponsive = s.state == "unresponsive";
                 let prev = s.clone();
                 *s = s.clone().ping_result(ok);
                 if s.mode == "stock" {
@@ -1168,9 +1216,13 @@ impl Actor {
                         s.frames = frames;
                     }
                 }
+                let recovered_fork = was_unresponsive && s.state == "ready" && s.mode == "fork";
                 if *s != prev {
                     let snap = s.clone();
                     self.publish(&snap, None);
+                }
+                if recovered_fork {
+                    let _ = self.me.send(Msg::ForkSync { pro, gen });
                 }
             }
             Msg::ChildExited { pro, gen, code, tail, reply } => {
@@ -1239,8 +1291,8 @@ async fn drain_lines<R: AsyncRead + Unpin>(r: R, mut each: impl FnMut(String)) {
     }
 }
 
-async fn show_fork_frame(me: &mpsc::UnboundedSender<Msg>, sock: &str, desc: &str, kind: &str, doc: &str, item: &str) -> Result<Value, String> {
-    let mut body = json!({ "kind": fk_of(kind), "focus": false });
+async fn show_fork_frame(me: &mpsc::UnboundedSender<Msg>, sock: &str, desc: &str, kind: &str, doc: &str, item: &str, focus: bool) -> Result<Value, String> {
+    let mut body = json!({ "kind": fk_of(kind), "focus": focus });
     if !doc.is_empty() { body["document"] = json!(doc); }
     if !item.is_empty() { body["item"] = json!(item); }
     for attempt in 0..8 {
@@ -1257,9 +1309,9 @@ async fn show_fork_frame(me: &mpsc::UnboundedSender<Msg>, sock: &str, desc: &str
     Err("ShowFrame did not succeed".into())
 }
 
-/// Show `kind` in fork mode and hide every other currently-shown frame via `HideFrame` so GTK3 owns frame map state cleanly.
+/// Show `kind` in fork mode and hide every other currently-shown frame via `HideFrame` so GTK3/wxMSW owns frame map state cleanly.
 async fn switch_fork_frame(
-    me: &mpsc::UnboundedSender<Msg>, sock: &str, desc: &str, kind: &str, doc: &str, item: &str, remount: bool,
+    me: &mpsc::UnboundedSender<Msg>, sock: &str, desc: &str, kind: &str, doc: &str, item: &str, remount: bool, focus: bool,
 ) -> Result<Option<(u64, String, Vec<Frame>)>, String> {
     let target_kind = canon_frame(kind);
     if remount {
@@ -1271,7 +1323,7 @@ async fn switch_fork_frame(
             }
         }
     }
-    let shown_res = show_fork_frame(me, sock, desc, kind, doc, item).await?;
+    let shown_res = show_fork_frame(me, sock, desc, kind, doc, item, focus).await?;
     let resp_win = u64_of(&shown_res["message"]["frame"]["window"]);
     let resp_kind = kind_of_fk_val(&shown_res["message"]["frame"]["kind"]);
     let target_win = (resp_win > 0 && resp_kind == target_kind).then_some(resp_win);
@@ -1364,6 +1416,23 @@ fn sweep_crashed_locks(root: &str, pro: &str) {
     }
 }
 
+fn embed_sock_exists(sock: &str) -> bool {
+    #[cfg(windows)]
+    {
+        let p = Path::new(sock);
+        let (Some(dir), Some(base)) = (p.parent(), p.file_name()) else { return false };
+        std::fs::read_dir(r"\\.\pipe\").ok().into_iter().flatten().flatten().any(|e| {
+            let full = e.file_name().to_string_lossy().into_owned();
+            let fp = Path::new(&full);
+            fp.parent() == Some(dir) && fp.file_name() == Some(base)
+        })
+    }
+    #[cfg(not(windows))]
+    {
+        Path::new(sock).exists()
+    }
+}
+
 async fn spawn_gui_session(
     me: mpsc::UnboundedSender<Msg>, home: PathBuf, pro: String, root: String, gen: u64, mode: String,
     argv: Vec<String>, sock_dir: PathBuf, req_sock: String, display: String, desc: String, active: String, spawn_container: u64, sweep_locks: bool,
@@ -1390,30 +1459,37 @@ async fn spawn_gui_session(
     }
 
     let before = kipc::sockets_at(&req_sock);
+    let cwd = Path::new(&pro).parent().filter(|p| !p.as_os_str().is_empty()).map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
     let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Local, &argv[0]);
     c.args(&argv[1..])
-        .env("GDK_BACKEND", "x11")
-        .env("GDK_SCALE", "1")
-        .env_remove("WAYLAND_DISPLAY")
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
-        .current_dir(Path::new(&pro).parent().unwrap_or(Path::new("/")))
+        .current_dir(cwd)
         .kill_on_drop(false);
-    if !display.is_empty() { c.env("DISPLAY", &display); }
-    if mode == "stock" {
-        c.env("XDG_CONFIG_HOME", &cfg_dir)
-            .env("XDG_CACHE_HOME", &cache_dir)
-            .env("TMPDIR", &sock_dir);
-    } else if std::env::var_os("TMPDIR").is_none() {
-        c.env("TMPDIR", &sock_dir);
+    #[cfg(not(windows))]
+    {
+        c.env("GDK_BACKEND", "x11")
+            .env("GDK_SCALE", "1")
+            .env_remove("WAYLAND_DISPLAY");
+        if !display.is_empty() { c.env("DISPLAY", &display); }
+        if mode == "stock" {
+            c.env("XDG_CONFIG_HOME", &cfg_dir)
+                .env("XDG_CACHE_HOME", &cache_dir)
+                .env("TMPDIR", &sock_dir);
+        } else if std::env::var_os("TMPDIR").is_none() {
+            c.env("TMPDIR", &sock_dir);
+        }
     }
+    #[cfg(windows)]
+    let _ = &display;
     for k in ["BACKPLANE_KICAD_LIBRARY", "KICAD_CONFIG_HOME"] {
         if let Ok(v) = std::env::var(k) {
             if !v.is_empty() { c.env(k, v); }
         }
     }
-    crate::plat::proc::own_group_tokio(&mut c);
+    // Own session + PDEATHSIG (Linux) / Job Object (Windows) / reaper (macOS) so stock KiCad never outlives a stopped or killed hub.
+    crate::plat::proc::agent_group(&mut c);
 
     let mut tries = 0;
     let mut child = loop {
@@ -1430,6 +1506,10 @@ async fn spawn_gui_session(
     };
     let pid = child.id().unwrap_or(0);
     crate::plat::proc::adopt(pid, true);
+    if pid > 0 {
+        live_pids().lock().unwrap_or_else(|e| e.into_inner()).insert(pid);
+        crate::agents::proc::watch_group(pid);
+    }
     let _ = me.send(Msg::Spawned { pro: pro.clone(), gen, pid });
 
     let (stdout, stderr) = (child.stdout.take(), child.stderr.take());
@@ -1493,6 +1573,11 @@ async fn spawn_gui_session(
         let pro = pro.clone();
         tokio::spawn(async move {
             let code = child.wait().await.map(|s| s.code().unwrap_or(128)).unwrap_or(1);
+            if pid > 0 {
+                live_pids().lock().unwrap_or_else(|e| e.into_inner()).remove(&pid);
+                crate::agents::proc::unwatch_group(pid);
+                crate::plat::proc::kill_group(pid, crate::plat::proc::KILL);
+            }
             done.store(true, Ordering::SeqCst);
             let _ = so.await; let _ = se.await;
             let joined: Vec<String> = tail.lock().unwrap().iter().cloned().collect();
@@ -1529,7 +1614,7 @@ async fn spawn_gui_session(
             }
         } else if mode == "fork" {
             let ev_path = format!("{sock}.events");
-            if Path::new(&ev_path).exists() {
+            if embed_sock_exists(&ev_path) {
                 let o = raw_on(&me, &ev_path, &desc, "kiapi.backplane.embed.NextEvents",
                     json!({"since": ev_since, "wait_ms": 0, "max": 64}), 1500).await;
                 if o["ok"].as_bool().unwrap_or(false) {
@@ -1577,18 +1662,21 @@ async fn spawn_gui_session(
             (0, format!("{sock}.events"), vec![])
         };
         if events_sock.is_empty() { events_sock = format!("{sock}.events"); }
-        // On the very first frame opened at process startup, wxGTK's process-wide `gs_decorExtentSupport` starts at 0 and only
-        // flips to 2 when wxGTK's 1000 ms `wxRequestFrameExtentsTimeout` fires after the first `wxTopLevelWindowGTK::Show(true)`.
-        // Because `PrepareFrame` strips decorations, `GTKUpdateDecorSize` returns early without calling `gtk_widget_show` on that
-        // first frame. Waiting past the 1000 ms timer and toggling `HideFrame` + `ShowFrame` calls `gtk_widget_show` cleanly.
-        if let Ok(first) = show_fork_frame(&me, &sock, &desc, &active, "", "").await {
-            let win = u64_of(&first["message"]["frame"]["window"]);
-            if win > 0 {
-                tokio::time::sleep(Duration::from_millis(1150)).await;
-                let _ = raw_on(&me, &sock, &desc, "kiapi.backplane.embed.HideFrame", json!({ "window": win }), 5000).await;
+        #[cfg(target_os = "linux")]
+        {
+            // On the very first frame opened at process startup, wxGTK's process-wide `gs_decorExtentSupport` starts at 0 and only
+            // flips to 2 when wxGTK's 1000 ms `wxRequestFrameExtentsTimeout` fires after the first `wxTopLevelWindowGTK::Show(true)`.
+            // Because `PrepareFrame` strips decorations, `GTKUpdateDecorSize` returns early without calling `gtk_widget_show` on that
+            // first frame. Waiting past the 1000 ms timer and toggling `HideFrame` + `ShowFrame` calls `gtk_widget_show` cleanly.
+            if let Ok(first) = show_fork_frame(&me, &sock, &desc, &active, "", "", false).await {
+                let win = u64_of(&first["message"]["frame"]["window"]);
+                if win > 0 {
+                    tokio::time::sleep(Duration::from_millis(1150)).await;
+                    let _ = raw_on(&me, &sock, &desc, "kiapi.backplane.embed.HideFrame", json!({ "window": win }), 5000).await;
+                }
             }
         }
-        if let Ok(Some((h2, ev2, f2))) = switch_fork_frame(&me, &sock, &desc, &active, "", "", false).await {
+        if let Ok(Some((h2, ev2, f2))) = switch_fork_frame(&me, &sock, &desc, &active, "", "", false, false).await {
             holder = h2;
             if !ev2.is_empty() { events_sock = ev2; }
             frames = f2;
@@ -1748,8 +1836,9 @@ impl RpcHandler for EmbedRpc {
                     let doc = p["document"].as_str().unwrap_or("").to_string();
                     let item = p["item"].as_str().unwrap_or("").to_string();
                     let remount = p["remount"].as_bool().unwrap_or(false);
+                    let focus = p["focus"].as_bool().unwrap_or(false);
                     actor_tx.send(Msg::Show {
-                        client, pro: resolved.pro, frame: resolved.frame, doc, item, remount, reply: tx,
+                        client, pro: resolved.pro, frame: resolved.frame, doc, item, remount, focus, reply: tx,
                     })
                 }
                 "editor.kicad.detach" => {
@@ -2354,6 +2443,122 @@ mod tests {
         *kicad_pid.lock().unwrap() = 0;
         let _ = xvfb.kill();
         let _ = xvfb.wait();
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn stock_kicad_hub_exit_probe_child() {
+        use std::os::unix::fs::PermissionsExt;
+        let Ok(raw) = std::env::var("BP_KICAD_EXIT_PROBE") else { return };
+        let base = PathBuf::from(raw);
+        crate::plat::hub::exit_on_signals(super::shutdown_all);
+        let home_dir = base.join("h");
+        let proj_dir = base.join("p");
+        let bin_dir = base.join("bin");
+        std::fs::create_dir_all(&home_dir).unwrap();
+        std::fs::create_dir_all(&proj_dir).unwrap();
+        std::fs::create_dir_all(&bin_dir).unwrap();
+        let pro = proj_dir.join("amp.kicad_pro");
+        let pcb = proj_dir.join("amp.kicad_pcb");
+        std::fs::write(&pro, "{\"meta\":{\"filename\":\"amp.kicad_pro\",\"version\":3}}").unwrap();
+        std::fs::write(&pcb, "(kicad_pcb (version 20240108) (generator \"pcbnew\"))").unwrap();
+
+        let cli = bin_dir.join("kicad-cli");
+        let gui = bin_dir.join("kicad");
+        let sub_pid_file = base.join("sub_pid");
+        std::fs::write(&cli, "#!/bin/sh\nif [ \"$1\" = \"api-server\" ]; then exit 2; fi\necho '10.0.7'\n").unwrap();
+        std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::write(&gui, format!(
+            "#!/bin/sh\nsleep 120 &\nprintf '%s' \"$!\" > '{}'\nexec sleep 120\n",
+            sub_pid_file.display()
+        )).unwrap();
+        std::fs::set_permissions(&gui, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let cfg = crate::hub::Cfg {
+            home: home_dir, version: "0.15.0".into(), commit: "test".into(),
+            listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into(),
+        };
+        let hub = Hub::start(cfg, Arc::new(crate::presenter::Canned { reply: json!({}) })).await.unwrap();
+        ipc::start(&hub);
+        start(&hub);
+        let _ = hub.commit(&json!({"$":"ProjectCreated","id":"p1","title":"amp","root":proj_dir.to_string_lossy(),"at":1})).await;
+        let _ = hub.commit(&json!({"$":"SettingSet","key":"kicad.path","value":cli.to_string_lossy(),"at":2})).await;
+
+        let (mut conn, _) = hub.connect(true);
+        let rep = hub.request(&mut conn, &json!({
+            "id": 1, "m": "editor.kicad.attach",
+            "p": { "project": pcb.to_string_lossy(), "container": 0, "toplevel": 0, "display": ":99", "frame": "PCB", "wait": false }
+        })).await;
+        assert_eq!(rep[0]["ok"], json!(true), "{rep:?}");
+        let key = info_key(&pro.to_string_lossy());
+        let mut kpid = 0u32;
+        for _ in 0..80 {
+            if let Some(txt) = hub.info_now()[&key].as_str() {
+                if let Ok(v) = serde_json::from_str::<Value>(txt) {
+                    if let Some(p) = v["pid"].as_u64().filter(|p| *p > 0) {
+                        kpid = p as u32;
+                        if sub_pid_file.is_file() { break }
+                    }
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        assert!(kpid > 0, "stock KiCad stand-in did not publish pid");
+        let sub_pid: u32 = std::fs::read_to_string(&sub_pid_file).unwrap_or_default().trim().parse().unwrap_or(0);
+        assert!(sub_pid > 0, "stock KiCad stand-in sub-child pid missing");
+        std::fs::write(base.join("ready"), format!("{kpid} {sub_pid}\n")).unwrap();
+        std::future::pending::<()>().await;
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn stock_kicad_ends_when_hub_exits_on_sigterm() {
+        use std::time::Instant;
+        let base = std::env::var("BP_TMP").ok().filter(|s| !s.is_empty()).map(PathBuf::from).unwrap_or_else(std::env::temp_dir)
+            .join(format!("bp-kexit-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+        let ready = base.join("ready");
+        let mut hub_child = std::process::Command::new(std::env::current_exe().unwrap())
+            .args(["files::kicad::embed::tests::stock_kicad_hub_exit_probe_child", "--exact", "--nocapture", "--test-threads=1"])
+            .env("BP_KICAD_EXIT_PROBE", &base)
+            .env_remove("BACKPLANE_COPY")
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("spawn probe hub");
+        let hub_pid = hub_child.id();
+        let t0 = Instant::now();
+        while !ready.is_file() && t0.elapsed() < Duration::from_secs(15) {
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        let text = match std::fs::read_to_string(&ready) {
+            Ok(t) => t,
+            Err(_) => {
+                let _ = hub_child.kill();
+                let out = hub_child.wait_with_output().unwrap();
+                panic!("probe hub did not reach ready: {}", String::from_utf8_lossy(&out.stderr));
+            }
+        };
+        let nums: Vec<u32> = text.split_whitespace().filter_map(|s| s.parse().ok()).collect();
+        let (kpid, sub_pid) = (nums[0], nums[1]);
+        assert!(crate::plat::proc::alive(kpid) && crate::plat::proc::alive(sub_pid), "stock KiCad and sub-child should be alive before SIGTERM");
+
+        assert!(crate::plat::proc::kill(hub_pid, crate::plat::proc::TERM), "send SIGTERM to probe hub");
+        let status = hub_child.wait().expect("wait probe hub");
+        assert_eq!(status.code(), Some(143), "probe hub should exit with 128 + SIGTERM (143): {status:?}");
+
+        let t1 = Instant::now();
+        while (crate::plat::proc::alive(kpid) || crate::plat::proc::alive(sub_pid)) && t1.elapsed() < Duration::from_secs(5) {
+            std::thread::sleep(Duration::from_millis(25));
+        }
+        let k_alive = crate::plat::proc::alive(kpid);
+        let s_alive = crate::plat::proc::alive(sub_pid);
+        if k_alive { let _ = crate::plat::proc::kill_group(kpid, crate::plat::proc::KILL); }
+        if s_alive { let _ = crate::plat::proc::kill(sub_pid, crate::plat::proc::KILL); }
+        let _ = std::fs::remove_dir_all(&base);
+        assert!(!k_alive, "stock KiCad pid={kpid} survived hub SIGTERM");
+        assert!(!s_alive, "stock KiCad process-group child pid={sub_pid} survived hub SIGTERM");
     }
 
 #[cfg(test)]

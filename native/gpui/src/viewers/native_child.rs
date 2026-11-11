@@ -1,13 +1,12 @@
 //! Another program's windows inside the client's (the embedded KiCad editors, docs/embedded-editors.md): a container window of ours in the client's
 //! window, the program's frames made its children, one of them mapped over the pane and the rest unmapped. Unlike the Browser's Chromium
-//! (viewers/cef_native.rs, the same process), these windows belong to another process, so everything here goes through the X server.
-//! - The container has the screen's default (24-bit) visual: gpui's window has a 32-bit one, and GL canvases made under it are refused.
-//! - Stock KiCad makes its frames as top-levels: `adopt` withdraws them from the window manager and reparents them into the container. The
-//!   fork's `--embedded` makes them in the container from the start, so `adopt` finds nothing to do.
-//! - The frames are never told they moved when only the client's window moves (they are not top-levels any more), so `place` sends them a
-//!   synthetic ConfigureNotify with their root position (ICCCM 4.2.3); otherwise their menus and popups open where the window used to be.
-//! - Overlays (the palette, menus) are drawn by gpui under the container; `holes` cuts them out of the container's shape instead of hiding it.
-//! Linux (X11, and Wayland through XWayland) only for now; elsewhere every call is a no-op and `container` is None (the pane then says so).
+//! (viewers/cef_native.rs, the same process), these windows belong to another process, so everything here goes through X11 or async Win32 calls.
+//! - On X11, the container has the screen's default (24-bit) visual: gpui's window has a 32-bit one, and GL canvases made under it are refused.
+//!   On Windows, the container is a `WS_CHILD` HWND under gpui's top-level HWND (with `WS_CLIPCHILDREN` on the parent), and all geometry/visibility
+//!   changes use `SWP_ASYNCWINDOWPOS` / `ShowWindowAsync` so a hung KiCad never blocks gpui's thread.
+//! - Stock KiCad on Linux makes its frames as top-levels: `adopt` withdraws them from the window manager and reparents them into the container.
+//!   The fork's `--embedded` makes them in the container from the start, so `adopt` finds nothing to do. On Windows, only the fork is embedded.
+//! - Overlays (the palette, menus) are drawn by gpui under the container; `holes` cuts them out of the container's shape (`shape_rectangles` / `SetWindowRgn`).
 #![allow(dead_code)]
 
 /// A rectangle in the client window's physical pixels.
@@ -61,7 +60,7 @@ pub fn cut(pane: R, over: &[R]) -> Vec<R> {
 
 /// What the editor's side sent the client (`events`).
 #[derive(Clone, Debug, PartialEq)]
-pub enum Ev { /** Ctrl+`: the keyboard back to the client */ Escape, /** a button press over the unfocused container (replayed to KiCad) */ Click, /** a reserved chord, as gpui names a keystroke */ Key(String), /** KiCad took the keyboard on a click into this frame */ Focus(u32) }
+pub enum Ev { /** Ctrl+`: the keyboard back to the client */ Escape, /** a button press over the unfocused container (replayed to KiCad) */ Click, /** a reserved chord, as gpui names a keystroke */ Key(String), /** KiCad took the keyboard on a click into this frame */ Focus(u64) }
 
 /// A reserved chord from `_BACKPLANE_KEY` (an X keysym and modifier mask) as gpui's keystroke text: `ctrl-k`, `ctrl-shift-tab`, `ctrl-``.
 pub fn chord(keysym: u32, mods: u32) -> Option<String> {
@@ -71,9 +70,21 @@ pub fn chord(keysym: u32, mods: u32) -> Option<String> {
     Some(s + &key)
 }
 
+/// Default reserved chord index from Windows `WM_APP + 0x102` (`wParam = aData[3]`, index in `BACKPLANE_EMBED::m_reserved`).
+pub fn reserved_chord_index(idx: usize) -> Option<&'static str> {
+    match idx {
+        0 => Some("ctrl-k"), // i18n-ok: gpui keystroke
+        1 => Some("ctrl-j"), // i18n-ok: gpui keystroke
+        2 => Some("ctrl-tab"), // i18n-ok: gpui keystroke
+        3 => Some("ctrl-shift-tab"), // i18n-ok: gpui keystroke
+        4 => Some("ctrl-`"), // i18n-ok: gpui keystroke
+        _ => None,
+    }
+}
+
 /// A frame the container holds: its window, its title as the program last set it, and its kind.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Frame { pub window: u32, pub title: String, pub kind: &'static str }
+pub struct Frame { pub window: u64, pub title: String, pub kind: &'static str }
 
 #[cfg(target_os = "linux")]
 mod imp {
@@ -103,24 +114,28 @@ mod imp {
     }
 
     /// A window of ours in the client's window `parent`, with the screen's default visual, unmapped until `place` maps it.
-    pub fn container(parent: u32) -> Option<u32> {
+    pub fn container(parent: u64) -> Option<u64> {
+        let parent = parent as u32;
         let g = conn()?; let c = g.as_ref().unwrap();
         let scr = c.setup().roots.get(SCREEN.load(std::sync::atomic::Ordering::Relaxed))?;
         let id = c.generate_id().ok()?;
         c.create_window(scr.root_depth, id, parent, 0, 0, 1, 1, 0, WindowClass::INPUT_OUTPUT, scr.root_visual,
             &CreateWindowAux::new().background_pixel(scr.black_pixel).border_pixel(scr.black_pixel).colormap(scr.default_colormap)
                 .event_mask(EventMask::SUBSTRUCTURE_NOTIFY)).ok()?.check().ok()?;
-        let _ = c.flush(); Some(id)
+        let _ = c.flush(); Some(id as u64)
     }
+    pub fn container_for(parent: u64, _key: &str) -> Option<u64> { container(parent) }
     /// Every child of `old` (stock KiCad's frames, or the fork's holder) moved into `new`, unmapped where it was not shown: a pane moved to
     /// another window (popped out, or back in) takes KiCad with it, its state untouched.
-    pub fn move_frames(old: u32, new: u32) {
+    pub fn move_frames(old: u64, new: u64) {
+        let (old, new) = (old as u32, new as u32);
         let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
         let kids = c.query_tree(old).ok().and_then(|r| r.reply().ok()).map(|t| t.children).unwrap_or_default();
         for k in kids { let _ = c.reparent_window(k, new, 0, 0); }
         let _ = c.flush();
     }
-    pub fn destroy(container: u32) {
+    pub fn destroy(container: u64) {
+        let container = container as u32;
         let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
         let _ = c.allow_events(Allow::ASYNC_POINTER, x11rb::CURRENT_TIME);
         let _ = c.ungrab_button(ButtonIndex::ANY, container, ModMask::ANY);
@@ -177,8 +192,9 @@ mod imp {
     /// synthetic UnmapNotify to the root as ICCCM 4.1.4 asks, so a tiling one gives its space back); once the window manager has let go of it
     /// (at least 150 ms later: it puts an unmanaged window back on the root, so reparenting at once lost the race to i3), it is reparented,
     /// unmapped, into `container` with its minimum size cleared. Answers the windows reparented now.
-    pub fn adopt(pid: u32, container: u32, toplevel: u32) -> Vec<u32> {
+    pub fn adopt(pid: u32, container: u64, toplevel: u64) -> Vec<u64> {
         use x11rb::protocol::xfixes::{self, ConnectionExt as _};
+        let (container, toplevel) = (container as u32, toplevel as u32);
         static WITHDRAWN: Mutex<Vec<(u32, std::time::Instant)>> = Mutex::new(Vec::new());
         let Some(g) = conn() else { return vec![] }; let c = g.as_ref().unwrap();
         let Some(root) = root(c) else { return vec![] };
@@ -201,7 +217,7 @@ mod imp {
             let _ = c.reparent_window(w, container, 0, 0);
             let _ = c.xfixes_change_save_set(xfixes::SaveSetMode::INSERT, xfixes::SaveSetTarget::ROOT, xfixes::SaveSetMapping::UNMAP, w);
             let _ = c.change_window_attributes(w, &ChangeWindowAttributesAux::new().event_mask(EventMask::PROPERTY_CHANGE | EventMask::STRUCTURE_NOTIFY));
-            took.push(w);
+            took.push(w as u64);
         }
         wd.retain_mut(|(w, at)| {
             if at.elapsed() < std::time::Duration::from_millis(150) { return true }
@@ -218,7 +234,7 @@ mod imp {
             let _ = c.reparent_window(*w, container, 0, 0);
             let _ = c.xfixes_change_save_set(xfixes::SaveSetMode::INSERT, xfixes::SaveSetTarget::ROOT, xfixes::SaveSetMapping::UNMAP, *w);
             let _ = c.change_window_attributes(*w, &ChangeWindowAttributesAux::new().event_mask(EventMask::PROPERTY_CHANGE | EventMask::STRUCTURE_NOTIFY));
-            took.push(*w); false
+            took.push(*w as u64); false
         });
         let _ = c.flush();
         took
@@ -244,9 +260,9 @@ mod imp {
             }
         }
     }
-    pub fn dialogs(pid: u32, container: u32, toplevel: u32) {
+    pub fn dialogs(pid: u32, container: u64, toplevel: u64) {
         let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
-        dialogs_over(c, pid, container, toplevel);
+        dialogs_over(c, pid, container as u32, toplevel as u32);
         let _ = c.flush();
     }
 
@@ -263,25 +279,27 @@ mod imp {
     /// The fork's holder in our save-set: if the client dies, the X server moves it to the root instead of destroying KiCad's windows with ours.
     /// XFixes' form (to the root, unmapped): with a reparenting window manager the core save-set would put the holder in the manager's frame,
     /// which it then destroys, and KiCad with it (bp.8, BACKPLANE_EMBED.md).
-    pub fn keep(holder: u32) {
+    pub fn keep(holder: u64) {
         use x11rb::protocol::xfixes::{self, ConnectionExt as _};
         let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
         let _ = c.xfixes_query_version(5, 0).ok().and_then(|r| r.reply().ok());
-        let _ = c.xfixes_change_save_set(xfixes::SaveSetMode::INSERT, xfixes::SaveSetTarget::ROOT, xfixes::SaveSetMapping::UNMAP, holder);
+        let _ = c.xfixes_change_save_set(xfixes::SaveSetMode::INSERT, xfixes::SaveSetTarget::ROOT, xfixes::SaveSetMapping::UNMAP, holder as u32);
         let _ = c.flush();
     }
 
     /// The container's children now (adopted, or made there by the fork), with their titles and kinds.
-    pub fn frames(container: u32) -> Vec<Frame> {
+    pub fn frames(container: u64) -> Vec<Frame> {
         let Some(g) = conn() else { return vec![] }; let c = g.as_ref().unwrap();
-        frame_windows(c, container).into_iter().map(|w| { let t = title(c, w); Frame { window: w, kind: super::kind_of_title(&t), title: t } }).collect()
+        frame_windows(c, container as u32).into_iter().map(|w| { let t = title(c, w); Frame { window: w as u64, kind: super::kind_of_title(&t), title: t } }).collect()
     }
 
     /// The container over the pane at `r` with `show` (one of its children) filling it, or the container unmapped (`r` None).
     /// In stock mode (`managed` None), `place` maps `show` and unmaps siblings; in fork mode (`managed` Some), GTK3 owns frame map state via
     /// `ShowFrame`/`HideFrame` (calling external `XMapWindow` before `GTKShowFromOnIdle` trips `gtk_window_map_event` -> `gdk_window_hide`),
     /// so `place` only configures `show` and sends a synthetic `ConfigureNotify` to update root coords and wake `bp.8`'s GDK event loop.
-    pub fn place(container: u32, r: Option<R>, show: Option<u32>, managed: Option<&[u32]>, last_root: &mut (i32, i32)) {
+    pub fn place(container: u64, r: Option<R>, show: Option<u64>, managed: Option<&[u64]>, last_root: &mut (i32, i32)) {
+        let container = container as u32;
+        let show = show.map(|x| x as u32);
         let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
         let Some(r) = r else { let _ = c.unmap_window(container); let _ = c.flush(); return };
         let (w, h) = (r.w.max(1) as u32, r.h.max(1) as u32);
@@ -295,7 +313,7 @@ mod imp {
             }
         }
         for k in frame_windows(c, container) {
-            if managed.map_or(false, |m| !m.contains(&k)) { continue }
+            if managed.map_or(false, |m| !m.contains(&(k as u64))) { continue }
             if Some(k) == show {
                 let _ = c.configure_window(k, &ConfigureWindowAux::new().x(0).y(0).width(w).height(h).border_width(0));
                 if managed.is_none() { let _ = c.map_window(k); }
@@ -320,7 +338,8 @@ mod imp {
 
     /// Re-check the container's root coordinates and `show`'s geometry (e.g. on a pure WM top-level move, or right after GTK's deferred
     /// `gtk_widget_show` maps `show` at its own default size) and sync `show` to `(0, 0, w, h)` + current root position.
-    pub fn sync_root(container: u32, r: R, show: u32, last_root: &mut (i32, i32)) {
+    pub fn sync_root(container: u64, r: R, show: u64, last_root: &mut (i32, i32)) {
+        let (container, show) = (container as u32, show as u32);
         let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
         let (uw, uh) = (r.w.max(1) as u32, r.h.max(1) as u32);
         let mut resized = false;
@@ -346,7 +365,8 @@ mod imp {
     }
 
     /// The container's shape: the pane minus `keep`'s complement (the rectangles `cut` left), or whole again (`keep` None).
-    pub fn holes(container: u32, keep: Option<&[R]>) {
+    pub fn holes(container: u64, keep: Option<&[R]>) {
+        let container = container as u32;
         let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
         match keep {
             Some(k) => { let rs: Vec<Rectangle> = k.iter().map(|r| Rectangle { x: r.x as i16, y: r.y as i16, width: r.w.max(0) as u16, height: r.h.max(0) as u16 }).collect();
@@ -357,13 +377,15 @@ mod imp {
     }
 
     /// The keyboard to `w` (a frame), when it is viewable.
-    pub fn focus(w: u32) {
+    pub fn focus(w: u64) {
+        let w = w as u32;
         let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
         let viewable = c.get_window_attributes(w).ok().and_then(|r| r.reply().ok()).map_or(false, |a| a.map_state == MapState::VIEWABLE);
         if viewable { let _ = c.set_input_focus(InputFocus::PARENT, w, x11rb::CURRENT_TIME); let _ = c.flush(); }
     }
     /// Whether the X keyboard focus is in `container` (on one of its frames or their windows): the editor has the keys.
-    pub fn has_focus(container: u32) -> bool {
+    pub fn has_focus(container: u64) -> bool {
+        let container = container as u32;
         let Some(g) = conn() else { return false }; let c = g.as_ref().unwrap();
         let Some(mut w) = c.get_input_focus().ok().and_then(|r| r.reply().ok()).map(|f| f.focus) else { return false };
         let root = root(c).unwrap_or(0);
@@ -373,7 +395,8 @@ mod imp {
     }
     /// With a mouse button down now: whether the pointer is over `w` (a click there gives the editor the keyboard, a click elsewhere gives it back).
     /// None while no button is down.
-    pub fn button_over(w: u32) -> Option<bool> {
+    pub fn button_over(w: u64) -> Option<bool> {
+        let w = w as u32;
         let g = conn()?; let c = g.as_ref().unwrap();
         let p = c.query_pointer(w).ok()?.reply().ok()?;
         let down = u16::from(p.mask) & (u16::from(KeyButMask::BUTTON1) | u16::from(KeyButMask::BUTTON2) | u16::from(KeyButMask::BUTTON3)) != 0;
@@ -382,7 +405,8 @@ mod imp {
         Some(p.same_screen && p.win_x >= 0 && p.win_y >= 0 && (p.win_x as i32) < geo.width as i32 && (p.win_y as i32) < geo.height as i32)
     }
     /// Passive button grab on `container` while unfocused so even a short click transfers X input focus and replays cleanly to KiCad.
-    pub fn grab_click(container: u32, on: bool) {
+    pub fn grab_click(container: u64, on: bool) {
+        let container = container as u32;
         let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
         if on {
             let _ = c.grab_button(false, container, EventMask::BUTTON_PRESS, GrabMode::SYNC, GrabMode::ASYNC, x11rb::NONE, x11rb::NONE, ButtonIndex::ANY, ModMask::ANY);
@@ -394,7 +418,8 @@ mod imp {
     }
     /// Ctrl+` (the escape chord) grabbed on the client's top-level while the editor has the keyboard, so pressing it there comes to us
     /// (`escape_pressed`) and not to KiCad; ungrabbed otherwise, so the client's own keys are untouched. With and without Caps and Num Lock.
-    pub fn grab_escape(top: u32, on: bool) {
+    pub fn grab_escape(top: u64, on: bool) {
+        let top = top as u32;
         let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
         let Some(kc) = keycode(c, 0x60) else { return };
         for extra in [0u16, u16::from(ModMask::LOCK), u16::from(ModMask::M2), u16::from(ModMask::LOCK) | u16::from(ModMask::M2)] {
@@ -425,7 +450,7 @@ mod imp {
                 x11rb::protocol::Event::ClientMessage(m) if m.format == 32 => {
                     let d = m.data.as_data32();
                     if m.type_ == key { if let Some(k) = super::chord(d[1], d[2]) { out.push(if k == "ctrl-`" { super::Ev::Escape } else { super::Ev::Key(k) }); } }
-                    else if m.type_ == focus { out.push(super::Ev::Focus(d[0])); }
+                    else if m.type_ == focus { out.push(super::Ev::Focus(d[0] as u64)); }
                 }
                 _ => {}
             }
@@ -435,7 +460,8 @@ mod imp {
     }
     /// A key pressed and released in `w` by a synthetic event (no real input): how stock KiCad, which has no IPC to open an editor, is asked
     /// to (Ctrl+P in its project manager opens the PCB editor, even unmapped). `keysym` an X keysym, `mods` an X modifier mask.
-    pub fn poke(w: u32, keysym: u32, mods: u16) {
+    pub fn poke(w: u64, keysym: u32, mods: u16) {
+        let w = w as u32;
         let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
         let (Some(kc), Some(root)) = (keycode(c, keysym), root(c)) else { return };
         for (t, mask) in [(KEY_PRESS_EVENT, EventMask::KEY_PRESS), (KEY_RELEASE_EVENT, EventMask::KEY_RELEASE)] {
@@ -445,7 +471,8 @@ mod imp {
         let _ = c.flush();
     }
     /// Where `w` is in its parent and whether it is mapped, and how many sampled pixels are painted (excluding black and the placeholder background): what the e2e report says.
-    pub fn report(w: u32) -> Option<(R, bool, usize)> {
+    pub fn report(w: u64) -> Option<(R, bool, usize)> {
+        let w = w as u32;
         let g = conn()?; let c = g.as_ref().unwrap();
         let geo = c.get_geometry(w).ok()?.reply().ok()?;
         let mapped = c.get_window_attributes(w).ok()?.reply().ok()?.map_state == MapState::VIEWABLE;
@@ -469,7 +496,8 @@ mod imp {
     }
 
     /// Extra X11 geometry/shape/ancestry details for `w`: `(depth, (root_x, root_y), shape_rects, in_tree)`.
-    pub fn window_meta(w: u32, container: Option<u32>, toplevel: u32) -> Option<(u8, (i32, i32), usize, bool)> {
+    pub fn window_meta(w: u64, container: Option<u64>, toplevel: u64) -> Option<(u8, (i32, i32), usize, bool)> {
+        let (w, container, toplevel) = (w as u32, container.map(|x| x as u32), toplevel as u32);
         let g = conn()?; let c = g.as_ref().unwrap();
         let geo = c.get_geometry(w).ok()?.reply().ok()?;
         let root_id = root(c).unwrap_or(0);
@@ -492,28 +520,691 @@ mod imp {
     }
 }
 
-#[cfg(not(target_os = "linux"))]
+#[cfg(windows)]
+mod imp {
+    use super::{Ev, Frame, R};
+    use std::{collections::{HashMap, HashSet}, ptr::null_mut, sync::{atomic::{AtomicBool, AtomicU64, Ordering}, Mutex, OnceLock}};
+    use windows_sys::Win32::{
+        Foundation::{HWND, LPARAM, LRESULT, POINT, RECT, WPARAM},
+        Graphics::Gdi::{
+            BitBlt, CombineRgn, CreateCompatibleBitmap, CreateCompatibleDC, CreateRectRgn, CreateSolidBrush,
+            DeleteDC, DeleteObject, GetDC, GetDIBits, GetRegionData, GetWindowRgn, ReleaseDC, ScreenToClient,
+            SelectObject, SetWindowRgn, BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, RGNDATA, RGN_OR,
+            SRCCOPY,
+        },
+        System::Threading::{AttachThreadInput, GetCurrentThreadId},
+        UI::{
+            Input::KeyboardAndMouse::{
+                GetAsyncKeyState, RegisterHotKey, SetFocus, UnregisterHotKey, VkKeyScanW, MOD_CONTROL,
+                MOD_NOREPEAT, VK_OEM_3,
+            },
+            WindowsAndMessaging::{
+                CreateWindowExW, DefWindowProcW, EnumChildWindows, EnumWindows, GetAncestor, GetCursorPos,
+                GetGUIThreadInfo, GetSystemMetrics, GetWindowLongPtrW, GetWindowRect,
+                GetWindowThreadProcessId, InternalGetWindowText, IsChild, IsWindow,
+                IsWindowVisible, LoadCursorW, PostMessageW, RegisterClassExW, SetWindowLongPtrW,
+                SetWindowPos, ShowWindowAsync, WindowFromPoint, GA_PARENT, GUITHREADINFO, GWLP_HWNDPARENT,
+                GWL_STYLE, IDC_ARROW, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN,
+                SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOSIZE,
+                SWP_NOZORDER, SW_HIDE, SW_SHOWNA, WM_ACTIVATE, WM_APP, WM_HOTKEY, WM_LBUTTONDOWN, WM_MBUTTONDOWN,
+                WM_MOUSEACTIVATE, WM_PARENTNOTIFY, WM_RBUTTONDOWN, WNDCLASSEXW, WS_CAPTION,
+                WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS,
+            },
+        },
+    };
+
+    const WM_BP_FOCUS: u32 = WM_APP + 0x101;
+    const WM_BP_KEY: u32 = WM_APP + 0x102;
+    const ESC_HOTKEY_ID: i32 = 1;
+
+    fn hwnd(w: u64) -> HWND { w as usize as HWND }
+    fn id_of(h: HWND) -> u64 { h as usize as u64 }
+    fn mono_ms() -> u64 {
+        static T0: OnceLock<std::time::Instant> = OnceLock::new();
+        T0.get_or_init(std::time::Instant::now).elapsed().as_millis() as u64
+    }
+
+    fn events_q() -> &'static Mutex<Vec<Ev>> { static Q: OnceLock<Mutex<Vec<Ev>>> = OnceLock::new(); Q.get_or_init(Default::default) }
+    fn containers_map() -> &'static Mutex<HashMap<(u64, String), u64>> { static M: OnceLock<Mutex<HashMap<(u64, String), u64>>> = OnceLock::new(); M.get_or_init(Default::default) }
+    fn centered_dialogs() -> &'static Mutex<HashSet<u64>> { static D: OnceLock<Mutex<HashSet<u64>>> = OnceLock::new(); D.get_or_init(Default::default) }
+
+    static ACTIVE_CONTAINER: AtomicU64 = AtomicU64::new(0);
+    static HOTKEY_HWND: AtomicU64 = AtomicU64::new(0);
+    static ATTACHED_TID: AtomicU64 = AtomicU64::new(0);
+    static CLICK_GRACE_UNTIL: AtomicU64 = AtomicU64::new(0);
+    static FOCUS_ESCAPED: AtomicBool = AtomicBool::new(false);
+    static CHILD_FOCUSED: AtomicBool = AtomicBool::new(false);
+
+    unsafe fn in_child_focus(c: HWND) -> bool {
+        if c.is_null() || unsafe { IsWindow(c) } == 0 { return false }
+        let mut gti = GUITHREADINFO { cbSize: std::mem::size_of::<GUITHREADINFO>() as u32, ..unsafe { std::mem::zeroed() } };
+        if unsafe { GetGUIThreadInfo(0, &mut gti) } == 0 || gti.hwndFocus.is_null() { return false }
+        gti.hwndFocus == c || unsafe { IsChild(c, gti.hwndFocus) } != 0
+    }
+
+    unsafe fn attach_visible_child_queue(container: HWND) {
+        let cur = unsafe { GetCurrentThreadId() };
+        for f in frames(id_of(container)) {
+            let kh = hwnd(f.window);
+            if unsafe { IsWindowVisible(kh) } != 0 {
+                let ctid = unsafe { GetWindowThreadProcessId(kh, null_mut()) };
+                if ctid != 0 && ctid != cur {
+                    ATTACHED_TID.store(ctid as u64, Ordering::SeqCst);
+                    unsafe { AttachThreadInput(cur, ctid, 1); }
+                    return;
+                }
+            }
+        }
+    }
+
+    unsafe fn handle_child_mouse_down(container: HWND, button_msg: u32) {
+        let already = unsafe { in_child_focus(container) };
+        FOCUS_ESCAPED.store(false, Ordering::SeqCst);
+        CHILD_FOCUSED.store(true, Ordering::SeqCst);
+        unsafe { attach_visible_child_queue(container); }
+        if button_msg == WM_RBUTTONDOWN || already {
+            if let Ok(mut q) = events_q().lock() { q.push(Ev::Focus(0)); }
+            return;
+        }
+        let now = mono_ms();
+        if now >= CLICK_GRACE_UNTIL.load(Ordering::SeqCst) {
+            CLICK_GRACE_UNTIL.store(now + 500, Ordering::SeqCst);
+            if let Ok(mut q) = events_q().lock() { q.push(Ev::Click); }
+        }
+    }
+
+    unsafe extern "system" fn wndproc(h: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+        match msg {
+            WM_BP_FOCUS => {
+                // `bp.8` casts the 32-bit kernel HWND handle through `long` (`i32`) on Win64; zero-extend via `u32`.
+                let fw = (lparam as u32) as u64;
+                FOCUS_ESCAPED.store(false, Ordering::SeqCst);
+                CHILD_FOCUSED.store(true, Ordering::SeqCst);
+                if fw != 0 {
+                    let ctid = unsafe { GetWindowThreadProcessId(hwnd(fw), null_mut()) };
+                    let cur = unsafe { GetCurrentThreadId() };
+                    if ctid != 0 && ctid != cur {
+                        ATTACHED_TID.store(ctid as u64, Ordering::SeqCst);
+                        unsafe { AttachThreadInput(cur, ctid, 1); }
+                    }
+                }
+                if let Ok(mut q) = events_q().lock() { q.push(Ev::Focus(fw)); }
+                0
+            }
+            WM_MOUSEACTIVATE => {
+                let mouse_msg = ((lparam as usize) >> 16) as u32 & 0xffff;
+                if matches!(mouse_msg, WM_LBUTTONDOWN | WM_MBUTTONDOWN | WM_RBUTTONDOWN) {
+                    unsafe { handle_child_mouse_down(h, mouse_msg); }
+                }
+                unsafe { DefWindowProcW(h, msg, wparam, lparam) }
+            }
+            WM_PARENTNOTIFY => {
+                let ev = (wparam & 0xffff) as u32;
+                if matches!(ev, WM_LBUTTONDOWN | WM_MBUTTONDOWN | WM_RBUTTONDOWN) {
+                    unsafe { handle_child_mouse_down(h, ev); }
+                }
+                unsafe { DefWindowProcW(h, msg, wparam, lparam) }
+            }
+            WM_BP_KEY => {
+                if let Some(k) = super::reserved_chord_index(wparam) {
+                    CHILD_FOCUSED.store(false, Ordering::SeqCst);
+                    CLICK_GRACE_UNTIL.store(0, Ordering::SeqCst);
+                    if let Ok(mut q) = events_q().lock() {
+                        q.push(if k == "ctrl-`" { Ev::Escape } else { Ev::Key(k.to_string()) }); // i18n-ok: gpui keystroke
+                    }
+                }
+                0
+            }
+            WM_HOTKEY if wparam as i32 == ESC_HOTKEY_ID => {
+                CHILD_FOCUSED.store(false, Ordering::SeqCst);
+                CLICK_GRACE_UNTIL.store(0, Ordering::SeqCst);
+                if let Ok(mut q) = events_q().lock() { q.push(Ev::Escape); }
+                0
+            }
+            _ => unsafe { DefWindowProcW(h, msg, wparam, lparam) },
+        }
+    }
+
+    fn class_name() -> &'static [u16] {
+        static CLS: OnceLock<Vec<u16>> = OnceLock::new();
+        CLS.get_or_init(|| {
+            let mut n: Vec<u16> = "BackplaneKicadContainer".encode_utf16().chain(std::iter::once(0)).collect(); // i18n-ok: Win32 window class name
+            unsafe {
+                let wc = WNDCLASSEXW {
+                    cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32,
+                    style: 0,
+                    lpfnWndProc: Some(wndproc),
+                    cbClsExtra: 0,
+                    cbWndExtra: 0,
+                    hInstance: null_mut(),
+                    hIcon: null_mut(),
+                    hCursor: LoadCursorW(null_mut(), IDC_ARROW),
+                    // #001023 in Win32 COLORREF (`0x00BBGGRR`)
+                    hbrBackground: CreateSolidBrush(0x0023_1000),
+                    lpszMenuName: null_mut(),
+                    lpszClassName: n.as_mut_ptr(),
+                    hIconSm: null_mut(),
+                };
+                RegisterClassExW(&wc);
+            }
+            n
+        })
+    }
+
+    /// Ensure `WS_CLIPCHILDREN` on gpui's `parent` HWND and create (or reuse) the hidden child container HWND for `(parent, key)`.
+    /// Reusing the parked container across `Edit -> View -> Edit` avoids `DestroyWindow` (which would destroy KiCad's `WS_CHILD`
+    /// frames or deadlock on a hung KiCad) and keeps `bp.8`'s `m_holder` valid.
+    pub fn container_for(parent: u64, key: &str) -> Option<u64> {
+        unsafe {
+            let p = hwnd(parent);
+            if p.is_null() || IsWindow(p) == 0 { return None }
+            let st = GetWindowLongPtrW(p, GWL_STYLE);
+            if (st & WS_CLIPCHILDREN as isize) == 0 {
+                SetWindowLongPtrW(p, GWL_STYLE, st | WS_CLIPCHILDREN as isize);
+            }
+            if !key.is_empty() {
+                if let Ok(mut map) = containers_map().lock() {
+                    if let Some(&existing) = map.get(&(parent, key.to_string())) {
+                        let eh = hwnd(existing);
+                        if IsWindow(eh) != 0 && GetAncestor(eh, GA_PARENT) == p {
+                            CHILD_FOCUSED.store(false, Ordering::SeqCst);
+                            ACTIVE_CONTAINER.store(existing, Ordering::SeqCst);
+                            return Some(existing);
+                        }
+                        map.remove(&(parent, key.to_string()));
+                    }
+                }
+            }
+            let cls = class_name();
+            let c = CreateWindowExW(
+                0,
+                cls.as_ptr(),
+                null_mut(),
+                WS_CHILD | WS_CLIPCHILDREN | WS_CLIPSIBLINGS,
+                0, 0, 1, 1,
+                p,
+                null_mut(),
+                null_mut(),
+                null_mut(),
+            );
+            if c.is_null() { return None }
+            let cid = id_of(c);
+            CHILD_FOCUSED.store(false, Ordering::SeqCst);
+            ACTIVE_CONTAINER.store(cid, Ordering::SeqCst);
+            if !key.is_empty() {
+                if let Ok(mut map) = containers_map().lock() {
+                    map.insert((parent, key.to_string()), cid);
+                }
+            }
+            Some(cid)
+        }
+    }
+
+    pub fn container(parent: u64) -> Option<u64> { container_for(parent, "") }
+
+    /// Switch the active container handle; `reattach()` (`AttachToParent`) moves KiCad's `WS_CHILD` frames on KiCad's own UI thread.
+    pub fn move_frames(_old: u64, new: u64) {
+        ACTIVE_CONTAINER.store(new, Ordering::SeqCst);
+    }
+
+    /// Hide and park `container` without ever calling `DestroyWindow` or `SetParent(NULL)` on KiCad's cross-process child frames.
+    pub fn destroy(container: u64) {
+        unregister_escape();
+        CHILD_FOCUSED.store(false, Ordering::SeqCst);
+        if ACTIVE_CONTAINER.load(Ordering::SeqCst) == container {
+            ACTIVE_CONTAINER.store(0, Ordering::SeqCst);
+        }
+        unsafe {
+            let c = hwnd(container);
+            if !c.is_null() && IsWindow(c) != 0 {
+                SetWindowRgn(c, null_mut(), 0);
+                ShowWindowAsync(c, SW_HIDE);
+            }
+        }
+    }
+
+    /// Stock cross-process top-level adoption is never used on Windows (fork only).
+    pub fn adopt(_pid: u32, _container: u64, _toplevel: u64) -> Vec<u64> { vec![] }
+
+    /// Own and centre floating KiCad dialogs (`WS_CAPTION`, non-child top-levels of `pid`) over Backplane's `toplevel` HWND asynchronously.
+    pub fn dialogs(pid: u32, container: u64, toplevel: u64) {
+        if pid == 0 || toplevel == 0 { return }
+        struct Ctx { pid: u32, container: HWND, toplevel: HWND }
+        unsafe extern "system" fn cb(w: HWND, l: LPARAM) -> i32 {
+            let ctx = unsafe { &*(l as *const Ctx) };
+            if w == ctx.toplevel || w == ctx.container { return 1 }
+            let mut wpid = 0u32;
+            unsafe { GetWindowThreadProcessId(w, &mut wpid); }
+            if wpid != ctx.pid { return 1 }
+            if unsafe { IsWindowVisible(w) } == 0 { return 1 }
+            let st = unsafe { GetWindowLongPtrW(w, GWL_STYLE) } as u32;
+            if (st & WS_CHILD) != 0 || (st & WS_CAPTION) == 0 { return 1 }
+            let wid = id_of(w);
+            let cur_owner = unsafe { GetWindowLongPtrW(w, GWLP_HWNDPARENT) } as usize;
+            if cur_owner != ctx.toplevel as usize {
+                unsafe { SetWindowLongPtrW(w, GWLP_HWNDPARENT, ctx.toplevel as isize); }
+            }
+            let first_seen = centered_dialogs().lock().map_or(false, |mut s| s.insert(wid));
+            if first_seen {
+                let (mut tr, mut dr) = (RECT::default(), RECT::default());
+                if unsafe { GetWindowRect(ctx.toplevel, &mut tr) != 0 && GetWindowRect(w, &mut dr) != 0 } {
+                    let (dw, dh) = (dr.right - dr.left, dr.bottom - dr.top);
+                    let x = tr.left + ((tr.right - tr.left) - dw) / 2;
+                    let y = tr.top + ((tr.bottom - tr.top) - dh) / 2;
+                    unsafe { SetWindowPos(w, null_mut(), x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS); }
+                }
+            }
+            1
+        }
+        let ctx = Ctx { pid, container: hwnd(container), toplevel: hwnd(toplevel) };
+        unsafe { EnumWindows(Some(cb), &ctx as *const Ctx as LPARAM); }
+        if let Ok(mut set) = centered_dialogs().lock() {
+            set.retain(|&wid| unsafe { IsWindow(hwnd(wid)) != 0 && IsWindowVisible(hwnd(wid)) != 0 });
+        }
+    }
+
+    /// Direct `WS_CHILD` frames inside `container`, reading titles via `InternalGetWindowText` (kernel read, never sends `WM_GETTEXT`).
+    pub fn frames(container: u64) -> Vec<Frame> {
+        let c = hwnd(container);
+        if c.is_null() || unsafe { IsWindow(c) } == 0 { return vec![] }
+        struct Ctx { parent: HWND, out: Vec<Frame> }
+        unsafe extern "system" fn cb(w: HWND, l: LPARAM) -> i32 {
+            let ctx = unsafe { &mut *(l as *mut Ctx) };
+            if unsafe { GetAncestor(w, GA_PARENT) } != ctx.parent { return 1 }
+            let mut buf = [0u16; 512];
+            let n = unsafe { InternalGetWindowText(w, buf.as_mut_ptr(), buf.len() as i32) };
+            let t = if n > 0 { String::from_utf16_lossy(&buf[..n as usize]) } else { String::new() };
+            ctx.out.push(Frame { window: id_of(w), kind: super::kind_of_title(&t), title: t });
+            1
+        }
+        let mut ctx = Ctx { parent: c, out: Vec::new() };
+        unsafe { EnumChildWindows(c, Some(cb), &mut ctx as *mut Ctx as LPARAM); }
+        ctx.out
+    }
+
+    /// Position/size/show `container` and its child frames strictly via `SWP_ASYNCWINDOWPOS` and `ShowWindowAsync`.
+    pub fn place(container: u64, r: Option<R>, show: Option<u64>, managed: Option<&[u64]>, last_root: &mut (i32, i32)) {
+        let c = hwnd(container);
+        if c.is_null() || unsafe { IsWindow(c) } == 0 { return }
+        ACTIVE_CONTAINER.store(container, Ordering::SeqCst);
+        let Some(r) = r else {
+            unsafe { ShowWindowAsync(c, SW_HIDE); }
+            return;
+        };
+        let (w, h) = (r.w.max(1), r.h.max(1));
+        unsafe {
+            SetWindowPos(c, null_mut(), r.x, r.y, w, h, SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
+            for f in frames(container) {
+                if managed.map_or(false, |m| !m.contains(&f.window)) { continue }
+                let kh = hwnd(f.window);
+                if Some(f.window) == show {
+                    SetWindowPos(kh, null_mut(), 0, 0, w, h, SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
+                    if managed.is_none() { ShowWindowAsync(kh, SW_SHOWNA); }
+                } else if managed.is_none() {
+                    ShowWindowAsync(kh, SW_HIDE);
+                }
+            }
+            ShowWindowAsync(c, if show.is_some() { SW_SHOWNA } else { SW_HIDE });
+            let mut rc = RECT::default();
+            if GetWindowRect(c, &mut rc) != 0 { *last_root = (rc.left, rc.top); }
+        }
+    }
+
+    /// Keep `show` sized to `(0, 0, w, h)` asynchronously (e.g. right after KiCad's `ShowFrame` reveals a frame at its default size).
+    pub fn sync_root(container: u64, r: R, show: u64, last_root: &mut (i32, i32)) {
+        let (c, s) = (hwnd(container), hwnd(show));
+        if c.is_null() || s.is_null() { return }
+        let (w, h) = (r.w.max(1), r.h.max(1));
+        unsafe {
+            if IsWindowVisible(s) != 0 {
+                if let Some((sr, _)) = geometry(show) {
+                    if (sr.x, sr.y, sr.w, sr.h) != (0, 0, w, h) {
+                        SetWindowPos(s, null_mut(), 0, 0, w, h, SWP_NOZORDER | SWP_NOACTIVATE | SWP_ASYNCWINDOWPOS);
+                    }
+                }
+            }
+            let mut rc = RECT::default();
+            if GetWindowRect(c, &mut rc) != 0 { *last_root = (rc.left, rc.top); }
+        }
+    }
+
+    /// Punch overlay holes in `container` using `SetWindowRgn` (system owns the region handle once `SetWindowRgn` succeeds).
+    pub fn holes(container: u64, keep: Option<&[R]>) {
+        let c = hwnd(container);
+        if c.is_null() || unsafe { IsWindow(c) } == 0 { return }
+        unsafe {
+            match keep {
+                None => { SetWindowRgn(c, null_mut(), 1); }
+                Some(rs) => {
+                    let acc = CreateRectRgn(0, 0, 0, 0);
+                    if acc.is_null() { return }
+                    for r in rs {
+                        let tmp = CreateRectRgn(r.x, r.y, r.x + r.w.max(0), r.y + r.h.max(0));
+                        if !tmp.is_null() {
+                            CombineRgn(acc, acc, tmp, RGN_OR);
+                            DeleteObject(tmp);
+                        }
+                    }
+                    if SetWindowRgn(c, acc, 1) == 0 {
+                        DeleteObject(acc);
+                    }
+                }
+            }
+        }
+    }
+
+    unsafe fn focus_target_in_frame(frame: HWND) -> HWND {
+        let mut pt = POINT::default();
+        if unsafe { GetCursorPos(&mut pt) } != 0 {
+            let hit = unsafe { WindowFromPoint(pt) };
+            if !hit.is_null() && (hit == frame || unsafe { IsChild(frame, hit) } != 0) {
+                return hit;
+            }
+        }
+        struct Best { best: HWND, area: i64 }
+        unsafe extern "system" fn cb(w: HWND, l: LPARAM) -> i32 {
+            let b = unsafe { &mut *(l as *mut Best) };
+            if unsafe { IsWindowVisible(w) } == 0 { return 1 }
+            let mut rc = RECT::default();
+            if unsafe { GetWindowRect(w, &mut rc) } != 0 {
+                let area = ((rc.right - rc.left).max(0) as i64) * ((rc.bottom - rc.top).max(0) as i64);
+                if area > b.area { b.best = w; b.area = area; }
+            }
+            1
+        }
+        let mut best = Best { best: frame, area: 0 };
+        unsafe { EnumChildWindows(frame, Some(cb), &mut best as *mut Best as LPARAM); }
+        best.best
+    }
+
+    /// Focus `w` without ever making a synchronous Win32 call into KiCad's thread:
+    /// - When `w` is KiCad's child frame (`target_tid != cur`), attach the foreground input queue and `PostMessageW(target, WM_ACTIVATE, 1, 0)`
+    ///   so `DefWindowProcW` on KiCad's own UI thread calls `::SetFocus` directly on the clicked canvas/control asynchronously.
+    /// - When `w` is gpui's top-level window (`target_tid == cur`), detach thread input queues first so `SetFocus(h)` never sends synchronous
+    ///   `WM_KILLFOCUS` into KiCad (staying instant even when KiCad is `NtSuspendProcess`-frozen and preserving KiCad's `m_lostFocus` state).
+    pub fn focus(w: u64) {
+        let h = hwnd(w);
+        if h.is_null() { return }
+        unsafe {
+            let cur = GetCurrentThreadId();
+            let target_tid = GetWindowThreadProcessId(h, null_mut());
+            if target_tid != 0 && target_tid != cur {
+                FOCUS_ESCAPED.store(false, Ordering::SeqCst);
+                CHILD_FOCUSED.store(true, Ordering::SeqCst);
+                CLICK_GRACE_UNTIL.store(mono_ms() + 500, Ordering::SeqCst);
+                ATTACHED_TID.store(target_tid as u64, Ordering::SeqCst);
+                AttachThreadInput(cur, target_tid, 1);
+                let target = focus_target_in_frame(h);
+                PostMessageW(target, WM_ACTIVATE, 1, 0);
+                return;
+            }
+            CHILD_FOCUSED.store(false, Ordering::SeqCst);
+            CLICK_GRACE_UNTIL.store(0, Ordering::SeqCst);
+            let prev_tid = ATTACHED_TID.swap(0, Ordering::SeqCst) as u32;
+            if prev_tid != 0 && prev_tid != cur {
+                AttachThreadInput(prev_tid, cur, 0);
+                AttachThreadInput(cur, prev_tid, 0);
+            }
+            let mut gti = GUITHREADINFO { cbSize: std::mem::size_of::<GUITHREADINFO>() as u32, ..std::mem::zeroed() };
+            if GetGUIThreadInfo(0, &mut gti) != 0 && !gti.hwndFocus.is_null() {
+                let focus_tid = GetWindowThreadProcessId(gti.hwndFocus, null_mut());
+                if focus_tid != 0 && focus_tid != cur {
+                    AttachThreadInput(focus_tid, cur, 0);
+                    AttachThreadInput(cur, focus_tid, 0);
+                }
+            }
+            SetFocus(h);
+            let mut gti2 = GUITHREADINFO { cbSize: std::mem::size_of::<GUITHREADINFO>() as u32, ..std::mem::zeroed() };
+            let escaped = GetGUIThreadInfo(0, &mut gti2) != 0
+                && !gti2.hwndFocus.is_null()
+                && GetWindowThreadProcessId(gti2.hwndFocus, null_mut()) != cur;
+            FOCUS_ESCAPED.store(escaped, Ordering::SeqCst);
+        }
+    }
+
+    /// Whether keyboard focus in the active foreground queue is inside `container`.
+    pub fn has_focus(container: u64) -> bool {
+        if FOCUS_ESCAPED.load(Ordering::SeqCst) { return false }
+        let c = hwnd(container);
+        if c.is_null() || unsafe { IsWindow(c) } == 0 { return false }
+        unsafe {
+            if in_child_focus(c) {
+                if !CHILD_FOCUSED.load(Ordering::SeqCst) {
+                    // wxMSW calls ::SetFocus(canvasHwnd) during cold frame construction even when ShowFrame(focus=false);
+                    // reclaim focus back to GPUI's top-level HWND so opening an editor never steals the keyboard before a click.
+                    let top = GetAncestor(c, GA_PARENT);
+                    if !top.is_null() { focus(id_of(top)); }
+                    return false;
+                }
+                return true;
+            }
+            if CHILD_FOCUSED.load(Ordering::SeqCst) && mono_ms() < CLICK_GRACE_UNTIL.load(Ordering::SeqCst) {
+                return true;
+            }
+            let mut gti = GUITHREADINFO { cbSize: std::mem::size_of::<GUITHREADINFO>() as u32, ..std::mem::zeroed() };
+            if GetGUIThreadInfo(0, &mut gti) != 0 {
+                let top = GetAncestor(c, GA_PARENT);
+                if !top.is_null() && gti.hwndFocus == top {
+                    CHILD_FOCUSED.store(false, Ordering::SeqCst);
+                }
+            }
+            false
+        }
+    }
+
+    /// When a mouse button is down inside Backplane's top-level window outside `container` (including inside a `SetWindowRgn` hole),
+    /// return `Some(false)` so gpui reclaims keyboard focus. Left/middle clicks inside `container` return `Some(true)`; dialogs stay untouched.
+    pub fn button_over(w: u64) -> Option<bool> {
+        unsafe {
+            let l_or_m = [0x01, 0x04].iter().any(|k| (GetAsyncKeyState(*k) as u16 & 0x8000) != 0);
+            let r_down = (GetAsyncKeyState(0x02) as u16 & 0x8000) != 0;
+            if !l_or_m && !r_down { return None }
+            let mut pt = POINT::default();
+            if GetCursorPos(&mut pt) == 0 { return None }
+            let hit = WindowFromPoint(pt);
+            if hit.is_null() { return None }
+            let c = GetAncestor(hwnd(w), GA_PARENT);
+            if c.is_null() { return None }
+            let top = GetAncestor(c, GA_PARENT);
+            if top.is_null() { return None }
+            let in_cont = hit == c || IsChild(c, hit) != 0;
+            let in_top = hit == top || IsChild(top, hit) != 0;
+            if in_cont {
+                if l_or_m { Some(true) } else { None }
+            } else if in_top {
+                CHILD_FOCUSED.store(false, Ordering::SeqCst);
+                CLICK_GRACE_UNTIL.store(0, Ordering::SeqCst);
+                Some(false)
+            } else {
+                None
+            }
+        }
+    }
+
+    pub fn grab_click(_container: u64, _on: bool) {}
+
+    fn unregister_escape() {
+        let prev = HOTKEY_HWND.swap(0, Ordering::SeqCst);
+        if prev != 0 {
+            unsafe { UnregisterHotKey(hwnd(prev), ESC_HOTKEY_ID); }
+        }
+    }
+
+    /// Register `Ctrl+`` on the active container while KiCad holds keyboard focus so `WM_HOTKEY` rescues focus even if KiCad's UI thread is hung.
+    pub fn grab_escape(_top: u64, on: bool) {
+        if !on {
+            unregister_escape();
+            return;
+        }
+        let c = ACTIVE_CONTAINER.load(Ordering::SeqCst);
+        if c == 0 { return }
+        let cur = HOTKEY_HWND.load(Ordering::SeqCst);
+        if cur == c { return }
+        unregister_escape();
+        unsafe {
+            let scan = VkKeyScanW('`' as u16);
+            let vk = if scan != -1 && ((scan as u16) & 0xff00) == 0 { ((scan as u16) & 0xff) as u32 } else { VK_OEM_3 as u32 };
+            if RegisterHotKey(hwnd(c), ESC_HOTKEY_ID, MOD_CONTROL | MOD_NOREPEAT, vk) != 0 {
+                HOTKEY_HWND.store(c, Ordering::SeqCst);
+            }
+        }
+    }
+
+    pub fn events() -> Vec<Ev> {
+        events_q().lock().map_or_else(|_| Vec::new(), |mut q| std::mem::take(&mut *q))
+    }
+
+    pub fn poke(_w: u64, _keysym: u32, _mods: u16) {}
+    pub fn keep(_holder: u64) {}
+
+    fn geometry(w: u64) -> Option<(R, bool)> {
+        let h = hwnd(w);
+        if h.is_null() || unsafe { IsWindow(h) } == 0 { return None }
+        unsafe {
+            let mut rc = RECT::default();
+            if GetWindowRect(h, &mut rc) == 0 { return None }
+            let parent = GetAncestor(h, GA_PARENT);
+            let mut pt = POINT { x: rc.left, y: rc.top };
+            if !parent.is_null() { ScreenToClient(parent, &mut pt); }
+            Some((R { x: pt.x, y: pt.y, w: rc.right - rc.left, h: rc.bottom - rc.top }, IsWindowVisible(h) != 0))
+        }
+    }
+
+    fn sample_painted(h: HWND) -> usize {
+        unsafe {
+            let mut rc = RECT::default();
+            if GetWindowRect(h, &mut rc) == 0 { return 0 }
+            let vx = GetSystemMetrics(SM_XVIRTUALSCREEN);
+            let vy = GetSystemMetrics(SM_YVIRTUALSCREEN);
+            let vw = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+            let vh = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+            let x0 = rc.left.max(vx);
+            let y0 = rc.top.max(vy);
+            let x1 = rc.right.min(vx + vw);
+            let y1 = rc.bottom.min(vy + vh);
+            let (w, ht) = (x1 - x0, y1 - y0);
+            if w <= 4 || ht <= 4 { return 0 }
+            let sdc = GetDC(null_mut());
+            if sdc.is_null() { return 0 }
+            let mdc = CreateCompatibleDC(sdc);
+            let bmp = CreateCompatibleBitmap(sdc, w, ht);
+            if mdc.is_null() || bmp.is_null() {
+                if !bmp.is_null() { DeleteObject(bmp); }
+                if !mdc.is_null() { DeleteDC(mdc); }
+                ReleaseDC(null_mut(), sdc);
+                return 0;
+            }
+            let old = SelectObject(mdc, bmp);
+            let ok = BitBlt(mdc, 0, 0, w, ht, sdc, x0, y0, SRCCOPY) != 0;
+            let mut lit = 0usize;
+            if ok {
+                let mut bi = BITMAPINFO {
+                    bmiHeader: BITMAPINFOHEADER {
+                        biSize: std::mem::size_of::<BITMAPINFOHEADER>() as u32,
+                        biWidth: w,
+                        biHeight: -ht,
+                        biPlanes: 1,
+                        biBitCount: 32,
+                        biCompression: BI_RGB,
+                        ..std::mem::zeroed()
+                    },
+                    ..std::mem::zeroed()
+                };
+                let mut px = vec![0u8; (w as usize) * (ht as usize) * 4];
+                let lines = GetDIBits(mdc, bmp, 0, ht as u32, px.as_mut_ptr() as *mut _, &mut bi, DIB_RGB_COLORS);
+                if lines > 0 {
+                    let mut buckets = HashSet::new();
+                    for p in px.chunks(4).step_by(97) {
+                        if p.len() < 3 { continue }
+                        let (b, g, r) = (p[0], p[1], p[2]);
+                        let is_placeholder = r <= 12 && (8..=28).contains(&g) && (20..=52).contains(&b);
+                        if (b > 24 || g > 24 || r > 24) && !is_placeholder {
+                            lit += 1;
+                            buckets.insert((b >> 4, g >> 4, r >> 4));
+                        }
+                    }
+                    if buckets.len() < 4 { lit = 0; }
+                }
+            }
+            SelectObject(mdc, old);
+            DeleteObject(bmp);
+            DeleteDC(mdc);
+            ReleaseDC(null_mut(), sdc);
+            lit
+        }
+    }
+
+    pub fn report(w: u64) -> Option<(R, bool, usize)> {
+        let (r, vis) = geometry(w)?;
+        let painted = if vis { sample_painted(hwnd(w)) } else { 0 };
+        Some((r, vis, painted))
+    }
+
+    pub fn window_meta(w: u64, container: Option<u64>, toplevel: u64) -> Option<(u8, (i32, i32), usize, bool)> {
+        let h = hwnd(w);
+        if h.is_null() || unsafe { IsWindow(h) } == 0 { return None }
+        unsafe {
+            let mut rc = RECT::default();
+            if GetWindowRect(h, &mut rc) == 0 { return None }
+            let rgn = CreateRectRgn(0, 0, 0, 0);
+            let shape_rects = if !rgn.is_null() {
+                let kind = GetWindowRgn(h, rgn);
+                let n = if kind == 0 {
+                    1
+                } else {
+                    let sz = GetRegionData(rgn, 0, null_mut());
+                    if sz >= std::mem::size_of::<RGNDATA>() as u32 {
+                        let mut buf = vec![0u8; sz as usize];
+                        if GetRegionData(rgn, sz, buf.as_mut_ptr() as *mut RGNDATA) != 0 {
+                            (*(buf.as_ptr() as *const RGNDATA)).rdh.nCount as usize
+                        } else { 1 }
+                    } else { 0 }
+                };
+                DeleteObject(rgn);
+                n
+            } else { 1 };
+
+            let mut saw_cont = container.map_or(true, |ct| ct == w);
+            let mut saw_top = toplevel == 0 || w == toplevel;
+            let mut cur = h;
+            for _ in 0..16 {
+                if saw_cont && saw_top { break }
+                if cur.is_null() { break }
+                if (GetWindowLongPtrW(cur, GWL_STYLE) as u32 & WS_CHILD) == 0 { break }
+                cur = GetAncestor(cur, GA_PARENT);
+                let cid = id_of(cur);
+                if Some(cid) == container { saw_cont = true; }
+                if cid == toplevel { saw_top = true; }
+            }
+            // Depth bit encodes `WS_CLIPCHILDREN` check readiness (`32` on DWM; `toplevel` carries `WS_CLIPCHILDREN`).
+            Some((32, (rc.left, rc.top), shape_rects, saw_cont && saw_top))
+        }
+    }
+}
+
+#[cfg(not(any(target_os = "linux", windows)))]
 mod imp {
     use super::{Frame, R};
-    pub fn container(_parent: u32) -> Option<u32> { None }
-    pub fn destroy(_container: u32) {}
-    pub fn move_frames(_old: u32, _new: u32) {}
-    pub fn adopt(_pid: u32, _container: u32, _toplevel: u32) -> Vec<u32> { vec![] }
-    pub fn dialogs(_pid: u32, _container: u32, _toplevel: u32) {}
-    pub fn frames(_container: u32) -> Vec<Frame> { vec![] }
-    pub fn place(_container: u32, _r: Option<R>, _show: Option<u32>, _managed: Option<&[u32]>, _last_root: &mut (i32, i32)) {}
-    pub fn sync_root(_container: u32, _r: R, _show: u32, _last_root: &mut (i32, i32)) {}
-    pub fn holes(_container: u32, _keep: Option<&[R]>) {}
-    pub fn focus(_w: u32) {}
-    pub fn has_focus(_container: u32) -> bool { false }
-    pub fn button_over(_w: u32) -> Option<bool> { None }
-    pub fn grab_click(_container: u32, _on: bool) {}
-    pub fn grab_escape(_top: u32, _on: bool) {}
+    pub fn container(_parent: u64) -> Option<u64> { None }
+    pub fn container_for(_parent: u64, _key: &str) -> Option<u64> { None }
+    pub fn move_frames(_old: u64, _new: u64) {}
+    pub fn destroy(_container: u64) {}
+    pub fn adopt(_pid: u32, _container: u64, _toplevel: u64) -> Vec<u64> { vec![] }
+    pub fn dialogs(_pid: u32, _container: u64, _toplevel: u64) {}
+    pub fn frames(_container: u64) -> Vec<Frame> { vec![] }
+    pub fn place(_container: u64, _r: Option<R>, _show: Option<u64>, _managed: Option<&[u64]>, _last_root: &mut (i32, i32)) {}
+    pub fn sync_root(_container: u64, _r: R, _show: u64, _last_root: &mut (i32, i32)) {}
+    pub fn holes(_container: u64, _keep: Option<&[R]>) {}
+    pub fn focus(_w: u64) {}
+    pub fn has_focus(_container: u64) -> bool { false }
+    pub fn button_over(_w: u64) -> Option<bool> { None }
+    pub fn grab_click(_container: u64, _on: bool) {}
+    pub fn grab_escape(_top: u64, _on: bool) {}
     pub fn events() -> Vec<super::Ev> { vec![] }
-    pub fn poke(_w: u32, _keysym: u32, _mods: u16) {}
-    pub fn keep(_holder: u32) {}
-    pub fn report(_w: u32) -> Option<(R, bool, usize)> { None }
-    pub fn window_meta(_w: u32, _container: Option<u32>, _toplevel: u32) -> Option<(u8, (i32, i32), usize, bool)> { None }
+    pub fn poke(_w: u64, _keysym: u32, _mods: u16) {}
+    pub fn keep(_holder: u64) {}
+    pub fn report(_w: u64) -> Option<(R, bool, usize)> { None }
+    pub fn window_meta(_w: u64, _container: Option<u64>, _toplevel: u64) -> Option<(u8, (i32, i32), usize, bool)> { None }
 }
 
 pub use imp::*;
@@ -535,6 +1226,10 @@ mod tests {
         assert_eq!(chord(0xff09, 5).as_deref(), Some("ctrl-shift-tab"));
         assert_eq!(chord(0x60, 4).as_deref(), Some("ctrl-`"));
         assert_eq!(chord(0xffbe, 4), None, "F1: not a reserved key");
+        assert_eq!(reserved_chord_index(0), Some("ctrl-k"));
+        assert_eq!(reserved_chord_index(3), Some("ctrl-shift-tab"));
+        assert_eq!(reserved_chord_index(4), Some("ctrl-`"));
+        assert_eq!(reserved_chord_index(9), None);
     }
     #[test] fn overlays_cut_holes_and_nothing_else() {
         let pane = R { x: 100, y: 50, w: 400, h: 300 };
