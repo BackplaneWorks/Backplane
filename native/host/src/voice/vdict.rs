@@ -193,6 +193,9 @@ pub fn model_id(m: &str) -> &'static str { if m == "parakeet-v3" { "parakeet-v3"
 /// The segment's item, where its committed words end (cs; timed engines), how many are committed (untimed), the last committed word, the last hypothesis.
 #[derive(Clone, Debug, Default)]
 pub struct Settle { pub item: String, cut: u32, n: usize, last: String, prev: Vec<VW> }
+/// Where a segment's written words end (`Settle::mark`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Mark { pub end: u32, pub n: usize, pub last: String }
 /// What a hypothesis gives: words to commit now, the tail.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Step { pub commit: Vec<VW>, pub tail: Vec<VW> }
@@ -219,6 +222,13 @@ impl Settle {
         self.prev = ws;
         Step { commit: c, tail: rest }
     }
+/// How far this segment's words have been written once `tail` is shown after the committed ones: (the end of the last, cs; how many; the last, normalised).
+    pub fn mark(&self, timed: bool, tail: &[VW]) -> Mark { Mark { end: if timed { tail.last().map_or(self.cut, |l| l.e.max(self.cut)) } else { 0 }, n: self.n + tail.len(), last: tail.last().map_or(self.last.clone(), |l| norm(&l.w)) } }
+    /// The message was sent with this segment's words up to `m`: they count as committed and are never written again; what was heard after them, written
+    /// or not, is written again into the next draft.
+    pub fn rewind(&mut self, m: &Mark) { self.cut = m.end; self.n = m.n; self.last = m.last.clone(); }
+    /// The words of a finished segment past `m` (what a send left for the next draft).
+    pub fn rest(timed: bool, ws: &[VW], m: &Mark) -> Vec<VW> { let s = Settle { cut: m.end, n: m.n, last: m.last.clone(), ..Settle::default() }; s.tail(timed, ws) }
     /// The segment's last hypothesis: whatever is not committed is, now.
     pub fn done(&mut self, timed: bool, item: &str, ws: &[VW]) -> Step { self.begin(item); let commit = self.tail(timed, ws); *self = Settle::default(); Step { commit, tail: vec![] } }
 }

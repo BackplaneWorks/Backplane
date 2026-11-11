@@ -91,14 +91,43 @@ pub struct Acted { pub draft: Option<String>, pub settings: Vec<(String, String)
 pub enum Out { Edit(Edit), View, Level(u32) }
 
 /// A live session's reader: the settling segment, the cloud's text so far, the segment's corrected words and guesses so far, the tail last sent.
-pub struct Reader { d: VDict, timed: bool, place: Place, set: Settle, acc: String, seg: Vec<VW>, ask: Vec<Unsure>, tail: String, fixes: Vec<VFx> }
+/// `cuts`: how many sends cut this session, and `seq` the edits written: every edit carries both, so a client drops an edit made before its cut and says
+/// which edit it had last when it sent. `hist`: how far each recent edit had written its segment (None: the segment was done), to cut exactly there.
+pub struct Reader { d: VDict, timed: bool, place: Place, set: Settle, acc: String, seg: Vec<VW>, ask: Vec<Unsure>, tail: String, fixes: Vec<VFx>,
+    pub cuts: u64, pub seq: u64, hist: std::collections::VecDeque<(u64, String, Option<vdict::Mark>)>, done: (String, Vec<VW>) }
+const HIST: usize = 64;
 impl Reader {
-    pub fn new(d: VDict, timed: bool, draft: &str, caret: usize) -> Reader { Reader { d, timed, place: Place::new(draft, caret), set: Settle::default(), acc: String::new(), seg: vec![], ask: vec![], tail: String::new(), fixes: vec![] } }
-    fn words(&mut self, x: vdict::Step, fin: bool, st: &mut Dictation) -> Vec<Out> {
+    pub fn new(d: VDict, timed: bool, draft: &str, caret: usize) -> Reader {
+        Reader { d, timed, place: Place::new(draft, caret), set: Settle::default(), acc: String::new(), seg: vec![], ask: vec![], tail: String::new(), fixes: vec![], cuts: 0, seq: 0, hist: Default::default(), done: Default::default() }
+    }
+    /// The message was sent while dictating: cut `n` (the client's count), with edit `seq` the last the client had written (0: none). Every word up to that
+    /// edit went with the message; the next draft is empty, its mark at 0, and starts with what was heard after it, including words of edits the client
+    /// dropped because they came after its send (that one comes back as an edit). No word of the sent message is written again.
+    pub fn cut(&mut self, n: u64, seq: u64, st: &mut Dictation) -> Vec<Out> {
+        if n <= self.cuts { return vec![] }
+        self.cuts = n; self.place = Place::new("", 0); self.seg.clear(); self.ask.clear(); self.fixes.clear(); self.tail.clear();
+        let at = self.hist.iter().find(|h| h.0 == seq).cloned(); let open = self.set.item.clone();
+        let all = vdict::Mark::default();
+        match at {
+            Some((_, item, Some(m))) if item == open => self.set.rewind(&m),
+            Some((_, item, Some(m))) if item == self.done.0 => {
+                // that segment finished after the send: the rest of it opens the next draft, and the one open now follows it whole
+                if !open.is_empty() { self.set.rewind(&all) }
+                let rest = Settle::rest(self.timed, &self.done.1, &m);
+                if !rest.is_empty() { let item = self.done.0.clone(); return self.words(&item, vdict::Step { commit: rest, tail: vec![] }, true, st) }
+            }
+            // gone from the history (very old): what is open now was not written
+            None if seq != 0 => { let m = self.set.mark(self.timed, &[]); self.set.rewind(&m) }
+            _ => if !open.is_empty() { self.set.rewind(&all) },
+        }
+        vec![]
+    }
+    fn words(&mut self, item: &str, x: vdict::Step, fin: bool, st: &mut Dictation) -> Vec<Out> {
         let fx = self.d.fix(&x.commit); let tail = vdict::text(&self.d.fix(&x.tail).words);
         if !fin && fx.words.is_empty() && tail == self.tail { return vec![] }
         let commit = vdict::text(&fx.words); let first = self.seg.is_empty();
         let e = self.place.words(first, v::firm(self.d.terms(), &commit), &commit, &tail);
+        self.seq += 1; let m = (!fin).then(|| self.set.mark(self.timed, &x.tail)); self.hist.push_back((self.seq, item.to_string(), m)); if self.hist.len() > HIST { self.hist.pop_front(); }
         self.seg.extend(fx.words); self.ask.extend(fx.ask); self.fixes.extend(fx.fixes);
         let was = st.writing; st.writing = !tail.trim().is_empty();
         let mut out = vec![Out::Edit(e)];
@@ -117,10 +146,10 @@ impl Reader {
             "ready" => { st.state = "live".into(); st.device = if s("label").is_empty() { s("device") } else { s("label") }; st.hint.clear(); st.engine = engine.to_string(); vec![Out::View] }
             "delta" => {
                 let item = s("item"); self.acc = if self.set.item == item { format!("{}{}", self.acc, s("text")) } else { s("text") };
-                let x = self.set.hyp(false, &item, vdict::words_text(&self.acc), 0, &self.d.waits().to_vec()); self.words(x, false, st)
+                let x = self.set.hyp(false, &item, vdict::words_text(&self.acc), 0, &self.d.waits().to_vec()); self.words(&item, x, false, st)
             }
-            "hyp" => { let x = self.set.hyp(true, &s("item"), vdict::words_json(&o["words"]), o["end"].as_u64().unwrap_or(0) as u32, &self.d.waits().to_vec()); self.words(x, false, st) }
-            "done" => { let ws = if self.timed { vdict::words_json(&o["words"]) } else { vdict::words_text(&s("text")) }; let x = self.set.done(self.timed, &s("item"), &ws); self.words(x, true, st) }
+            "hyp" => { let item = s("item"); let x = self.set.hyp(true, &item, vdict::words_json(&o["words"]), o["end"].as_u64().unwrap_or(0) as u32, &self.d.waits().to_vec()); self.words(&item, x, false, st) }
+            "done" => { let item = s("item"); let ws = if self.timed { vdict::words_json(&o["words"]) } else { vdict::words_text(&s("text")) }; let x = self.set.done(self.timed, &item, &ws); self.done = (item.clone(), ws); self.words(&item, x, true, st) }
             "stopping" => { st.state = "stopping".into(); vec![Out::View] }
             "error" => { st.err = if s("error").is_empty() { "dictation failed".into() } else { s("error") }; vec![Out::View] }
             "level" => { st.level = o["v"].as_u64().unwrap_or(0) as u32; vec![Out::Level(st.level)] }
@@ -153,6 +182,56 @@ mod tests {
         let a = json!([["Open",0,30,95],["the",30,50,99],["board",60,90,99]]);
         let outs = play(&mut r, &mut st, &mut t, &[w(a.clone()), w(a), json!({"event":"done","item":"l0","text":"","words":[["Open",0,30,95],["the",30,50,99],["board.",60,90,99]]})]);
         assert_eq!(t, "see open the board."); assert!(outs.iter().filter(|o| matches!(o, Out::Edit(_))).count() >= 2);
+    }
+    /// A client: applies an edit only when it is of its own cut or later (the frame's `cut`), and keeps the number of the last it applied (`seq`).
+    struct Cl { text: String, mark: usize, mine: u64, seq: u64 }
+    impl Cl {
+        fn new() -> Cl { Cl { text: String::new(), mark: 0, mine: 0, seq: 0 } }
+        fn take(&mut self, r: &Reader, outs: Vec<Out>) { for o in outs { if let Out::Edit(e) = &o { if r.cuts >= self.mine { (self.text, self.mark, _) = apply(&self.text, self.mark, e); self.seq = r.seq; } } } }
+        fn hear(&mut self, r: &mut Reader, st: &mut Dictation, lines: &[Value]) { for l in lines { let o = r.step(&l.to_string(), st, "local"); self.take(r, o); } }
+        /// Send: the draft goes with the message, the box is empty, the mark at 0; the hub hears of it (`voice-clear` with cut and seq) a little later.
+        fn send(&mut self) -> (String, u64, u64) { self.mine += 1; self.mark = 0; (std::mem::take(&mut self.text), self.mine, self.seq) }
+    }
+    fn hyp(ws: Value, end: u32) -> Value { json!({"event":"hyp","item":"l0","words":ws,"end":end}) }
+    fn said(n: usize) -> Value {
+        let all = [("I",0,10),("bought",10,40),("some",40,60),("stuff.",60,100),("I've",130,150),("put",150,170),("a",170,180),("new",180,200),("SIM",200,230),("card.",230,260)];
+        Value::Array(all[..n].iter().map(|(w, s, e)| json!([w, s, e, 99])).collect())
+    }
+    #[test] fn a_message_sent_mid_sentence_takes_its_words_and_the_next_draft_starts_with_what_follows() {
+        // the person's Nov 11: "...stuff." sent while still talking, and the next draft began "stuff. I've put a new SIM card"
+        let (mut r, mut st, mut c) = (Reader::new(dict(), true, "", 0), Dictation::default(), Cl::new());
+        c.hear(&mut r, &mut st, &[hyp(said(4), 105), hyp(said(4), 110)]); assert!(c.text.ends_with("stuff."), "the tail is shown: {:?}", c.text);
+        let (sent, n, seq) = c.send();
+        // edits the hub made before it heard of the send reach the client after it: dropped, not written into the new draft
+        c.hear(&mut r, &mut st, &[hyp(said(5), 160), hyp(said(5), 170)]);
+        let o = r.cut(n, seq, &mut st); c.take(&r, o);
+        c.hear(&mut r, &mut st, &[hyp(said(10), 270), hyp(said(10), 280), json!({"event":"done","item":"l0","text":"","words":said(10)})]);
+        assert_eq!(sent, "I bought some stuff.");
+        assert_eq!(c.text, "I've put a new SIM card.", "no word of the sent message carried over, none heard after it lost");
+        c.hear(&mut r, &mut st, &[json!({"event":"done","item":"l1","text":"","words":[["Thanks.",300,330,99]]})]);
+        assert_eq!(c.text, "I've put a new SIM card. Thanks.", "the next segment follows as ever");
+    }
+    #[test] fn a_segment_that_ends_before_the_hub_hears_of_the_send_gives_its_rest_to_the_next_draft() {
+        let (mut r, mut st, mut c) = (Reader::new(dict(), true, "", 0), Dictation::default(), Cl::new());
+        c.hear(&mut r, &mut st, &[hyp(said(4), 105), hyp(said(4), 110)]);
+        let (sent, n, seq) = c.send();
+        c.hear(&mut r, &mut st, &[json!({"event":"done","item":"l0","text":"","words":said(6)}), json!({"event":"hyp","item":"l1","words":[["new",300,320,99]],"end":330})]);
+        let o = r.cut(n, seq, &mut st); c.take(&r, o);
+        c.hear(&mut r, &mut st, &[json!({"event":"done","item":"l1","text":"","words":[["New",300,320,99],["day.",320,340,99]]})]);
+        assert_eq!((sent.as_str(), c.text.as_str()), ("I bought some stuff.", "I've put new day."), "the rest of the finished segment, then the next");
+    }
+    #[test] fn sent_with_nothing_written_yet_the_whole_segment_is_the_next_drafts() {
+        let (mut r, mut st, mut c) = (Reader::new(dict(), true, "", 0), Dictation::default(), Cl::new());
+        let (_, n, seq) = c.send(); c.hear(&mut r, &mut st, &[hyp(said(2), 50)]); let o = r.cut(n, seq, &mut st); c.take(&r, o); assert_eq!(r.cut(n, seq, &mut st), vec![], "a cut is once");
+        c.hear(&mut r, &mut st, &[json!({"event":"done","item":"l0","text":"","words":said(4)})]); assert_eq!(c.text, "I bought some stuff.");
+    }
+    #[test] fn the_cloud_engine_cut_mid_segment_counts_the_words_already_sent() {
+        let (mut r, mut st, mut c) = (Reader::new(dict(), false, "", 0), Dictation::default(), Cl::new());
+        let d = |x: &str| json!({"event":"delta","item":"a","text":x});
+        c.hear(&mut r, &mut st, &[d("Buy some"), d(" stuff.")]); assert_eq!(c.text, "Buy some stuff.");
+        let (_, n, seq) = c.send(); c.hear(&mut r, &mut st, &[d(" Then")]); let o = r.cut(n, seq, &mut st); c.take(&r, o);
+        c.hear(&mut r, &mut st, &[d(" call"), d(" Bob"), json!({"event":"done","item":"a","text":"Buy some stuff. Then call Bob."})]);
+        assert_eq!(c.text, "Then call Bob.");
     }
     #[test] fn an_unchanged_hypothesis_says_nothing() {
         let (mut r, mut st) = (Reader::new(dict(), true, "", 0), Dictation::default());

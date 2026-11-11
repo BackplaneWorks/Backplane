@@ -105,6 +105,25 @@ way (untimed: never the last two words). The strip shows one word for the
 state (Starting, Loading the model, Listening, Writing, Finishing) and the
 level, never the words; after a segment its fixes are chips that undo.
 
+### Sending while dictating
+
+Send (or Steer) while the microphone is on cuts the transcript there: every
+word written so far, the tail included, goes with that message, and the next
+draft starts empty with only what is said after them; no word is written
+twice, none heard after them is lost. Each edit frame carries `cut` (the
+session's sends so far) and `seq` (its number). On Send the client empties its
+box, puts its mark at 0, counts the send and tells the hub with
+`voice.act`/`act` `voice-clear` plus `cut` and `seq` (the last edit it wrote);
+until the hub has it, edits keep coming with the old `cut` and the client
+drops them. The hub (`Reader::cut`) counts as sent exactly the words up to
+edit `seq` (`Settle::rewind`) and writes everything after into the new draft,
+including words of edits the client dropped, and the rest of a segment that
+finished in between. The desktop empties its box only when the hub took the
+message, so it holds newer edits until then (3 s at most; past that the send
+did not go and they are written at the end). Nov 11: a send mid-sentence put
+the last word, "stuff.", at the start of the next draft, the uncommitted tail
+being committed into the empty box.
+
 ## The dictionary
 
 Settings (all clients see them; they live in the hub's log):

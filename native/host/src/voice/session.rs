@@ -61,7 +61,8 @@ fn live_args(home: &Path, engine: &str, model: &str, upload: bool, device: &str,
 }
 fn frame(thread: &str, ev: &str, mut body: Value) -> Value { body["t"] = json!("voice"); body["thread"] = json!(thread); body["ev"] = json!(ev); body }
 
-struct Live { id: u64, client: u64, thread: String, key: String, upload: bool, audio: Option<mpsc::Sender<Vec<u8>>>, stopped: Option<Instant> }
+/// `cut`: a send while dictating, to the session's reader (Reader::cut).
+struct Live { id: u64, client: u64, thread: String, key: String, upload: bool, audio: Option<mpsc::Sender<Vec<u8>>>, stopped: Option<Instant>, cut: mpsc::UnboundedSender<(u64, u64)> }
 #[derive(Default)]
 struct St { live: Option<Live>, dicts: HashMap<String, Dictation>, job: bool, next: u64 }
 #[derive(Default)]
@@ -96,26 +97,23 @@ impl Voice {
         let (tx, mut rx) = mpsc::channel::<Vec<u8>>(64);
         tokio::spawn(async move { while let Some(b) = rx.recv().await { if stdin.write_all(&b).await.is_err() { break } } });
         let key = if upload { hex::encode(pairing::urandom(16)) } else { String::new() };
-        let id = { let mut g = self.st.lock().unwrap(); g.next += 1; let id = g.next; g.live = Some(Live { id, client, thread: thread.clone(), key: key.clone(), upload, audio: Some(tx), stopped: None }); id };
+        let (cut_tx, cut_rx) = mpsc::unbounded_channel();
+        let id = { let mut g = self.st.lock().unwrap(); g.next += 1; let id = g.next; g.live = Some(Live { id, client, thread: thread.clone(), key: key.clone(), upload, audio: Some(tx), stopped: None, cut: cut_tx }); id };
         self.with(&thread, |x| { x.begin(); x.engine = engine.to_string(); });
         self.tell(hub, client, &thread);
         if upload { hub.push(client, frame(&thread, "audio", json!({"path": format!("/voice/in?s={key}")}))); }
         let reader = Reader::new(d, engine == "local", draft, caret);
-        { let (v, hub, thread, engine) = (self.clone(), hub.clone(), thread.clone(), engine.to_string()); tokio::spawn(async move { let _hold = hold; v.read(hub, client, id, thread, engine, reader, child, stdout).await }); }
+        { let (v, hub, thread, engine) = (self.clone(), hub.clone(), thread.clone(), engine.to_string()); tokio::spawn(async move { let _hold = hold; v.read(hub, client, id, thread, engine, reader, child, stdout, cut_rx).await }); }
         json!({"path": if upload { format!("/voice/in?s={key}") } else { String::new() }})
     }
-    async fn read(self: Arc<Self>, hub: Arc<Hub>, client: u64, id: u64, thread: String, engine: String, mut r: Reader, mut child: tokio::process::Child, stdout: tokio::process::ChildStdout) {
+    async fn read(self: Arc<Self>, hub: Arc<Hub>, client: u64, id: u64, thread: String, engine: String, mut r: Reader, mut child: tokio::process::Child, stdout: tokio::process::ChildStdout, mut cuts: mpsc::UnboundedReceiver<(u64, u64)>) {
         let mut lines = BufReader::new(stdout).lines(); let mut tick = tokio::time::interval(Duration::from_secs(1));
         loop {
             tokio::select! {
                 l = lines.next_line() => { let Ok(Some(l)) = l else { break };
-                    let outs = self.with(&thread, |d| r.step(&l, d, &engine));
-                    for o in outs { match o {
-                        Out::Edit(e) => { hub.push(client, frame(&thread, "edit", json!({"del": e.del, "ins": e.ins, "adv": e.adv, "to": e.to}))); }
-                        Out::View => self.tell(&hub, client, &thread),
-                        Out::Level(v) => { hub.push(client, frame(&thread, "level", json!({"v": v}))); }
-                    } }
+                    let outs = self.with(&thread, |d| r.step(&l, d, &engine)); self.out(&hub, client, &thread, &r, outs);
                 }
+                Some((n, seq)) = cuts.recv() => { let outs = self.with(&thread, |d| r.cut(n, seq, d)); self.out(&hub, client, &thread, &r, outs); }
                 _ = tick.tick() => {
                     if !hub.is_attached(client) { self.close_audio(id) } // the client went away: nobody is listening to this microphone
                     let late = self.st.lock().unwrap().live.as_ref().filter(|l| l.id == id).and_then(|l| l.stopped).map_or(false, |t| t.elapsed() > STOP_LIMIT);
@@ -127,6 +125,14 @@ impl Voice {
         { let mut g = self.st.lock().unwrap(); if g.live.as_ref().map_or(false, |l| l.id == id) { g.live = None } }
         self.with(&thread, |d| { d.idle(); if code != Some(0) && d.err.is_empty() { d.err = "the voice helper stopped".into() } });
         self.tell(&hub, client, &thread);
+    }
+    /// What a reader's step gives, to the client: each edit with the session's cut count and its number (`Reader::cut`).
+    fn out(&self, hub: &Hub, client: u64, thread: &str, r: &Reader, outs: Vec<Out>) {
+        for o in outs { match o {
+            Out::Edit(e) => { hub.push(client, frame(thread, "edit", json!({"del": e.del, "ins": e.ins, "adv": e.adv, "to": e.to, "cut": r.cuts, "seq": r.seq}))); }
+            Out::View => self.tell(hub, client, thread),
+            Out::Level(v) => { hub.push(client, frame(thread, "level", json!({"v": v}))); }
+        } }
     }
     fn stop(self: &Arc<Self>) {
         let (id, upload) = { let g = self.st.lock().unwrap(); let Some(l) = g.live.as_ref() else { return }; (l.id, l.upload) };
@@ -183,6 +189,8 @@ impl Voice {
     }
     async fn act(&self, hub: &Arc<Hub>, client: u64, p: &Value) -> Result<(), String> {
         let thread = s(p, "thread"); let pr = prefs(hub).await;
+        // a send while dictating: the words up to the client's last edit (`seq`) went with it; `cut` counts the client's sends this session
+        if let (Some(n), true) = (p["cut"].as_u64(), s(p, "action") == "voice-clear") { let g = self.st.lock().unwrap(); if let Some(l) = g.live.as_ref().filter(|l| l.thread == thread) { let _ = l.cut.send((n, p["seq"].as_u64().unwrap_or(0))); } }
         let a = self.with(thread, |d| d.act(s(p, "action"), s(p, "value"), s(p, "draft"), &|k| pr.get(k).cloned().unwrap_or_default()));
         commit(hub, &a.settings).await?;
         if let Some(t) = a.draft { hub.push(client, frame(thread, "draft", json!({"text": t}))); }

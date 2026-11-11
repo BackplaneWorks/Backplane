@@ -41,6 +41,8 @@ object DataVoice {
     var rows by mutableStateOf<List<JSONObject>>(emptyList()); private set
     var pageError by mutableStateOf(""); private set
     private val marks = HashMap<String, Int>()
+    /** This session's sends while dictating, and the number of the last edit written, per thread (the hub's `Reader::cut`). */
+    private val cuts = HashMap<String, Int>(); private val seqs = HashMap<String, Int>()
     private val recorder: VoiceRecorder = VoiceRecorder { th -> scope.launch { ended(th) } }
 
     val available get() = DataClient.has("voice")
@@ -49,7 +51,7 @@ object DataVoice {
 
     private fun show(tid: String, v: JSONObject) { views = views + (tid to v) }
     private fun local(tid: String, note: String) = show(tid, JSONObject().put("on", false).put("note", note).put("bad", true))
-    private fun ended(tid: String) { marks.remove(tid); level = 0 }
+    private fun ended(tid: String) { marks.remove(tid); cuts.remove(tid); seqs.remove(tid); level = 0 }
 
     /** The mic chip: start listening into the thread (the caller holds the RECORD_AUDIO permission), or stop. */
     fun press(tid: String) {
@@ -57,7 +59,7 @@ object DataVoice {
         val link = DataClient.link ?: return
         val tf = DataClient.field(tid)
         val caret = VoiceText.length(tf.text.substring(0, tf.selection.start.coerceIn(0, tf.text.length)))
-        marks[tid] = caret
+        marks[tid] = caret; cuts.remove(tid); seqs.remove(tid)
         if (!recorder.start(tid, link)) { local(tid, Msg.android_mic_failed); return }
         scope.launch {
             try {
@@ -79,8 +81,17 @@ object DataVoice {
                 .onFailure { local(tid, it.message ?: "") }
         }
     }
-    /** The message went: what was left to clarify in it goes too. */
-    fun sent(tid: String) { if (hasFixes(tid)) act(tid, "voice-clear", "") }
+    /** The message went: what was left to clarify in it goes too. While dictating, the words written so far went with it and what is said next starts the
+     *  empty draft: the hub is told up to which edit (`seq`), and edits it made before it heard (`cut` behind ours) are dropped. */
+    fun sent(tid: String) {
+        if (views[tid]?.optBoolean("on") == true) {
+            val n = (cuts[tid] ?: 0) + 1; cuts[tid] = n; marks[tid] = 0
+            val p = JSONObject().put("thread", tid).put("action", "voice-clear").put("value", "").put("draft", "").put("cut", n).put("seq", seqs[tid] ?: 0)
+            scope.launch { runCatching { DataClient.call("voice.act", p) } }
+            return
+        }
+        if (hasFixes(tid)) act(tid, "voice-clear", "")
+    }
     /** The person typed: the mark moves with what changed before it. */
     fun typed(tid: String, old: String, new: String) { marks[tid]?.let { marks[tid] = VoiceText.shift(old, new, it) } }
 
@@ -102,6 +113,8 @@ object DataVoice {
             "view" -> o.optJSONObject("view")?.let { view(tid, it) }
             "level" -> level = o.optInt("v").coerceIn(0, 100)
             "edit" -> {
+                if (o.has("cut") && o.optInt("cut") < (cuts[tid] ?: 0)) return // made before this phone's send: it belongs to nothing now
+                if (o.has("seq")) seqs[tid] = o.optInt("seq")
                 val tf = DataClient.field(tid)
                 val r = VoiceText.edit(tf.text, marks[tid] ?: VoiceText.length(tf.text), o.optInt("del"), o.optString("ins"), o.optInt("adv"), o.optInt("to"))
                 marks[tid] = r.mark
