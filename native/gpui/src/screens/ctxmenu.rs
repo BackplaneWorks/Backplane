@@ -10,7 +10,8 @@ use serde_json::Value;
 pub struct Item { pub label: String, pub action: String, pub value: String, pub confirm: bool }
 #[derive(Clone, Debug)]
 pub struct Menu { pub at: Point<Pixels>, pub items: Vec<Item>, /// the item whose confirming click is awaited
-    pub armed: Option<usize> }
+    pub armed: Option<usize>, /// the probe ids of its entries are `<probe>:<label>` ("ctx" unless the opener names its own, e.g. "run-on")
+    pub probe: &'static str }
 
 /// The ▾ menu's "Find in thread": the window's own (the find bar over that thread, find.rs).
 pub const LOCAL_SEARCH: &str = "local:search-thread";
@@ -128,7 +129,7 @@ pub fn project_items_of(pid_raw: &str, project: &Value) -> Vec<Item> {
 impl Backplane {
     pub(crate) fn ctx_open(&mut self, at: Point<Pixels>, items: Vec<Item>, cx: &mut Context<Self>) {
         if let Some(c) = self.screens.ctx.as_ref().and_then(disarm) { let _ = self.tx.try_send(c); }
-        self.screens.ctx = Some(Menu { at, items, armed: None }); cx.notify();
+        self.screens.ctx = Some(Menu { at, items, armed: None, probe: "ctx" }); cx.notify();
     }
     /// A file named in a message: the hub opens it (or shows it in its folder) on its machine; a relative path is from the thread's folder.
     pub(crate) fn file_open(&mut self, path: &str, reveal: bool) {
@@ -136,6 +137,13 @@ impl Backplane {
         let _ = self.tx.try_send(Command::Rpc("file.open".into(), crate::screens::settings::Secret(serde_json::json!({"path": path, "thread": thread, "how": if reveal { "reveal" } else { "open" }})), "fileopen"));
     }
     /// Esc or a click outside: true when there was a menu to close.
+    /// A menu that opens from a control (the composer's machine picker): under it, or over it when the window has no room below for all of
+    /// its entries; its entries' probe ids are `<probe>:<label>`.
+    pub(crate) fn ctx_open_from(&mut self, from: Bounds<Pixels>, window_h: Pixels, items: Vec<Item>, probe: &'static str, cx: &mut Context<Self>) {
+        let at = anchored(from, window_h, items.len());
+        if let Some(c) = self.screens.ctx.as_ref().and_then(disarm) { let _ = self.tx.try_send(c); }
+        self.screens.ctx = Some(Menu { at, items, armed: None, probe }); cx.notify();
+    }
     pub(crate) fn ctx_close(&mut self, cx: &mut Context<Self>) -> bool {
         let Some(m) = self.screens.ctx.take() else { return false };
         if let Some(c) = disarm(&m) { let _ = self.tx.try_send(c); }
@@ -155,7 +163,7 @@ impl Backplane {
             Some((a, v)) if a == LOCAL_MOVE => {
                 let (tid, project) = v.split_once('|').unwrap_or((v.as_str(), ""));
                 let items = parent_choices(&self.data, project, tid);
-                let at = m.at; self.screens.ctx = (!items.is_empty()).then(|| Menu { at, items, armed: None }); cx.notify(); return
+                let (at, probe) = (m.at, m.probe); self.screens.ctx = (!items.is_empty()).then(|| Menu { at, items, armed: None, probe }); cx.notify(); return
             }
             _ => {}
         }
@@ -197,6 +205,15 @@ pub fn shown_armed_label(it: &Item) -> String {
     match it.action.as_str() { "row-delete" | "proj-remove" => crate::i18n::trs(&armed_label(it)), _ => crate::i18n::tf("gpui.ctx.click.again.to", &[("what", crate::i18n::trs(&it.label).to_lowercase().into())]) }
 }
 
+/// Where a menu of `n` entries opens from a control: its left edge under the control, or above it when below there is not room for all of it
+/// (an entry is about 22 px, the border and padding 10 px; 4 px of air).
+pub fn anchored(from: Bounds<Pixels>, window_h: Pixels, n: usize) -> Point<Pixels> {
+    let h = px(n as f32 * 22. + 10.);
+    let below = from.origin.y + from.size.height + px(4.);
+    let y = if below + h <= window_h - px(4.) { below } else { (from.origin.y - h - px(4.)).max(px(4.)) };
+    point(from.origin.x, y)
+}
+
 /// The menu over everything, with a backdrop that closes it.
 pub fn render(cx: &mut Context<Backplane>, light: bool, m: &Menu) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
@@ -205,7 +222,7 @@ pub fn render(cx: &mut Context<Backplane>, light: bool, m: &Menu) -> AnyElement 
         let armed = m.armed == Some(i);
         let label = if armed { shown_armed_label(it) } else { crate::i18n::trs(&it.label) };
         let danger = it.confirm;
-        list = list.child(crate::ui::with_rect(div().id(SharedString::from(format!("ctx-{i}"))), { let l = it.label.clone(); move || format!("ctx:{l}") }).px_3().py_1().cursor_pointer().text_color(if armed || danger { c("bad") } else { c("text") })
+        list = list.child(crate::ui::with_rect(div().id(SharedString::from(format!("ctx-{i}"))), { let (l, pr) = (it.label.clone(), m.probe); move || format!("{pr}:{l}") }).px_3().py_1().cursor_pointer().text_color(if armed || danger { c("bad") } else { c("text") })
             .when(armed, |d| d.bg(c("raise")).font_weight(FontWeight::BOLD)).hover(|s| s.bg(c("raise"))).child(label)
             .on_click(cx.listener(move |this, _, _, cx| this.ctx_click(i, cx))));
     }
@@ -219,6 +236,14 @@ pub fn render(cx: &mut Context<Backplane>, light: bool, m: &Menu) -> AnyElement 
 mod tests {
     use super::*; use core::prelude::v1::test;
     fn j(s: &str) -> Value { serde_json::from_str(s).unwrap() }
+    /// The composer's machine picker opens at its line: under it when there is room, over it near the window's bottom edge (never clipped).
+    #[test] fn a_menu_from_a_control_opens_at_it_and_above_it_near_the_bottom() {
+        let b = |x: f32, y: f32| Bounds { origin: point(px(x), px(y)), size: size(px(120.), px(16.)) };
+        assert_eq!(anchored(b(500., 300.), px(1000.), 3), point(px(500.), px(320.)), "under it");
+        let up = anchored(b(500., 938.), px(1000.), 3);
+        assert_eq!(up.x, px(500.)); assert!(up.y + px(3. * 22. + 10.) <= px(938.), "over it: {up:?}");
+        assert!(anchored(b(10., 20.), px(60.), 9).y >= px(4.), "never off the top");
+    }
     #[test] fn a_link_and_a_picture_have_menus() {
         let l = |h: &str, f: bool| link_items(h, f).into_iter().map(|i| (i.label, i.action, i.value)).collect::<Vec<_>>();
         assert_eq!(l("mfg/a.zip", true).iter().map(|x| x.0.as_str()).collect::<Vec<_>>(), ["Open", "Show in folder", "Copy path"]); assert_eq!(l("mfg/a.zip", true)[1], ("Show in folder".into(), LOCAL_FILE_REVEAL.into(), "mfg/a.zip".into()));
@@ -246,7 +271,7 @@ mod tests {
     fn sent(c: &Option<Command>) -> Option<(String, String)> { match c { Some(Command::Action(a, v)) => Some((a.clone(), v.clone())), _ => None } }
     #[test] fn delete_asks_in_the_menu_and_the_second_click_deletes() {
         let t = j(r#"{"id":"http://h:1|t7","pinned":false}"#);
-        let mut m = Menu { at: Point::default(), items: thread_items(&t, "p1"), armed: None };
+        let mut m = Menu { at: Point::default(), items: thread_items(&t, "p1"), armed: None, probe: "ctx" };
         let del = m.items.iter().position(|i| i.action == "row-delete").unwrap();
         let s1 = press(&mut m, del, &Value::Null);
         assert_eq!(sent(&s1.send), Some(("row-delete".into(), "http://h:1|t7".into())), "the first click arms the hub's confirm"); assert!(!s1.close && m.armed == Some(del));
@@ -254,16 +279,16 @@ mod tests {
         let armed = j(r#"{"deleting":{"id":"http://h:1|t7"}}"#);
         let s2 = press(&mut m, del, &armed); assert_eq!(sent(&s2.send), Some(("row-delete".into(), "http://h:1|t7".into()))); assert!(s2.close, "the second click deletes and shuts the menu");
         // the hub forgot the armed delete in between (a sidebar page): the click arms it again, the menu stays
-        let mut m2 = Menu { at: Point::default(), items: thread_items(&t, "p1"), armed: Some(del) };
+        let mut m2 = Menu { at: Point::default(), items: thread_items(&t, "p1"), armed: Some(del), probe: "ctx" };
         let s3 = press(&mut m2, del, &Value::Null); assert!(!s3.close && sent(&s3.send).is_some());
         // shut with Delete armed: the hub's confirm goes too; shut with nothing armed sends nothing
         assert_eq!(sent(&disarm(&m2)), Some(("delete-no".into(), String::new()))); m2.armed = None; assert!(disarm(&m2).is_none());
         // a project's Remove asks in the menu, the hub hears only the second click
-        let mut p = Menu { at: Point::default(), items: project_items("p1"), armed: None };
+        let mut p = Menu { at: Point::default(), items: project_items("p1"), armed: None, probe: "ctx" };
         let s = press(&mut p, 5, &Value::Null); assert!(s.send.is_none() && !s.close); assert_eq!(armed_label(&p.items[5]), "Click again to remove"); assert!(disarm(&p).is_none());
         let s = press(&mut p, 5, &Value::Null); assert_eq!(sent(&s.send), Some(("proj-remove".into(), "p1".into()))); assert!(s.close);
         // any other item does what it says at once
-        let mut m3 = Menu { at: Point::default(), items: thread_items(&t, "p1"), armed: None }; let s = press(&mut m3, 0, &Value::Null); assert!(s.close && sent(&s.send).unwrap().0 == "row-pin");
+        let mut m3 = Menu { at: Point::default(), items: thread_items(&t, "p1"), armed: None, probe: "ctx" }; let s = press(&mut m3, 0, &Value::Null); assert!(s.close && sent(&s.send).unwrap().0 == "row-pin");
     }
     #[test] fn the_thread_names_menu_asks_before_its_delete_too() {
         let d = j(r#"{"thread":{"id":"http://h:1|t7","menu":[{"label":"Diff","action":"diff","value":""},{"label":"Delete","action":"row-delete","value":"t7","danger":true}]},"projects":[]}"#);
