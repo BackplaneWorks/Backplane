@@ -4,7 +4,7 @@
 //! `turn.start`, `ask.answer`, `turn.interrupt`) run as this connection; subscriptions turn each new log line, and the streamed text of a running turn, into
 //! pushes (`thread`, `project`, `entry`, `text`, `turn`) for the lists and threads a connection asked for.
 pub(crate) mod ext;
-mod link;
+pub(crate) mod link;
 pub mod term;
 pub mod machines;
 /// What a phone hears of a push on its socket (ext.rs `notify_of`).

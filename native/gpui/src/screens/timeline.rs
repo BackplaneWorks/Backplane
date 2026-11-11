@@ -576,7 +576,7 @@ impl Backplane {
     pub(crate) fn open_link(&mut self, l: &Link, cx: &mut Context<Self>) {
         if let Some(id) = l.href.strip_prefix('#') { self.jump_to_anchor(id); cx.notify(); return; }
         match super::linkroute::route(&l.href, l.file) {
-            super::linkroute::Route::File(p) => self.file_open(&p, false),
+            super::linkroute::Route::File(p) => { self.note.clear(); self.link_file(&p, false, cx) }
             super::linkroute::Route::Web(u) => cx.open_url(&u),
             super::linkroute::Route::Hub(u) => { self.note.clear(); self.go("link-open", u, cx); }
             super::linkroute::Route::Note(n) => self.note = n.to_string(),

@@ -1911,6 +1911,12 @@ gpui.the.hub.gave.no.answer = the hub gave no answer
 gpui.the.hub.answered = the hub answered {status}
 gpui.fold.the.project.s.threads = Fold the project's threads (the row under the pointer, else the open one), after a press on a project row
 gpui.unfold.the.project.s.threads = Unfold the project's threads
+gpui.open.in.kicad.embedded = Open in KiCad (embedded)
+gpui.that.file.does.not.open = That file does not open here.
+gpui.open.a.thread.first.that = Open a thread first: that file is in no project here.
+gpui.gerbers.open.on.their.project = Gerbers open on their project's Board; this one is in no project.
+gpui.that.kicad.project.has.no = That KiCad project has no board or schematic beside it.
+gpui.that.file.is.not.on = That file is not on this hub.
 
 # ---- gpui-c: viewers, plots, terminal, drawing pad ----
 gpui.c.commit = Commit

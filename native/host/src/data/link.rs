@@ -62,11 +62,25 @@ pub(super) async fn resolve(hub: &Arc<Hub>, p: &Value) -> Result<Value, Value> {
         };
     }
     if url.starts_with("backplane://") { return none("That link is not one this hub knows.") }
-    // a path in a project: against the thread's folder
-    let (path, line) = split_line(url);
-    if th.is_empty() { return none("There is no project to look for that file in.") }
-    let root = { let g = hub.model().await; g.threads.get(th).filter(|t| !t.deleted).and_then(|t| g.projects.get(&t.project)).map(|p| p.root.clone()) };
-    let Some(root) = root else { return none("That file is on another machine.") };
+    // a path in a project: against the thread's folder; a file of another project (an absolute path, a file:// address) opens in that
+    // project's thread (present/filelink.rs: the one given when it is that project's, else its newest), its tab chosen by the app from its name
+    let url = url.strip_prefix("file://").map(|r| crate::md::refs::unpct(r.strip_prefix("localhost").unwrap_or(r))).unwrap_or_else(|| url.to_string());
+    let (path, line) = split_line(&url);
+    let other = { let g = hub.model().await; use crate::present::filelink as fl;
+        let base = g.threads.get(th).and_then(|t| if !t.worktree.is_empty() { Some(crate::files::kicad::canonical::design_root(&t.worktree)) } else { g.projects.get(&t.project).map(|p| p.root.clone()) }).unwrap_or_default();
+        fl::absolute(path, &base, &crate::plat::dirs::home_or_empty()).and_then(|a| {
+            let under = |r: &str| { let r = r.trim_end_matches('/'); !r.is_empty() && a.len() > r.len() && a.starts_with(r) && a.as_bytes()[r.len()] == b'/' };
+            let (pid, p) = g.projects.iter().filter(|(id, p)| !p.removed && !id.contains('~') && under(&p.root)).max_by_key(|(_, p)| p.root.trim_end_matches('/').len())?;
+            let t = if g.threads.get(th).map_or(false, |t| &t.project == pid && !t.deleted) { th.to_string() }
+                else { g.threads.iter().filter(|(_, t)| &t.project == pid && !t.archived && !t.deleted).max_by_key(|(i, t)| (t.activity, i.to_string())).map(|(i, _)| i.clone())? };
+            Some((t, p.root.clone())) }) };
+    let (th, root) = { let g = hub.model().await;
+        match other { Some(x) => x, None => {
+            if th.is_empty() { return none("There is no project to look for that file in.") }
+            let root = g.threads.get(th).filter(|t| !t.deleted).and_then(|t| g.projects.get(&t.project)).map(|p| p.root.clone());
+            let Some(root) = root else { return none("That file is on another machine.") };
+            (th.to_string(), root) } } };
+    let th = th.as_str();
     let r2 = root.clone(); let pp = path.to_string();
     match tokio::task::spawn_blocking(move || inside(&r2, &pp)).await.ok().flatten() {
         Some(rel) => Ok(json!({"kind":"file","thread":th,"path":rel,"line":line})),

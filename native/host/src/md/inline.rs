@@ -35,7 +35,7 @@ fn text(acc: &[char], out: &mut Vec<Node>) {
 fn code(acc: &[char]) -> Node {
     let s = st(acc);
     let c = el("code", vec![Node::Txt(s.clone())]);
-    if links::is_path(&s) { file(&s, vec![c]) } else { c }
+    if links::is_path(&s) || links::is_design(&s) || links::file_url(&s) { file(&s, vec![c]) } else { c }
 }
 
 /// Md.emphasis: text runs and code spans inside ** or *

@@ -2247,6 +2247,12 @@ gpui.the.hub.gave.no.answer	the hub gave no answer	ハブから応答があり�
 gpui.the.hub.answered	the hub answered {status}	ハブの応答：{status}
 gpui.fold.the.project.s.threads	Fold the project's threads (the row under the pointer, else the open one), after a press on a project row	プロジェクトのスレッドを畳む（ポインタの下の行、なければ開いている行。プロジェクト行を押した後）
 gpui.unfold.the.project.s.threads	Unfold the project's threads	プロジェクトのスレッドを開く
+gpui.open.in.kicad.embedded	Open in KiCad (embedded)	KiCadで開く（埋め込み）
+gpui.that.file.does.not.open	That file does not open here.	そのファイルはここでは開けません。
+gpui.open.a.thread.first.that	Open a thread first: that file is in no project here.	先にスレッドを開いてください。そのファイルはどのプロジェクトにもありません。
+gpui.gerbers.open.on.their.project	Gerbers open on their project's Board; this one is in no project.	ガーバーはプロジェクトのボードで開きます。このファイルはどのプロジェクトにもありません。
+gpui.that.kicad.project.has.no	That KiCad project has no board or schematic beside it.	そのKiCadプロジェクトの隣にボードも回路図もありません。
+gpui.that.file.is.not.on	That file is not on this hub.	そのファイルはこのハブにありません。
 gpui.c.commit	Commit	コミット
 gpui.c.diff.cut	… the rest of the diff is not shown	… 差分の残りは表示されていません
 gpui.c.loading.board	Loading the board…	基板を読み込み中…
