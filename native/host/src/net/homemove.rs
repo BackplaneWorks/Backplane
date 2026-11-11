@@ -268,8 +268,21 @@ pub fn moved_thread(at: &str, thread: &str, project: Option<&str>, there: &dyn F
 }
 
 /// The move in progress: where to, and the threads it carries (the person's messages to them are held until it is over).
-struct Moving { link: String, threads: HashSet<String>, held: Vec<Value> }
+/// Kept in `<home>/home-held.json` from the move's start to the last held message's delivery (as net/farsend.rs keeps far-sends.json), so a hub that
+/// restarts mid-move loses none of them: `recover` delivers them on the next start, to the new home when the move finished, else here.
+#[derive(serde::Serialize, serde::Deserialize, Default)]
+struct Moving { link: String, threads: HashSet<String>, held: Vec<Value>, #[serde(skip)] path: Option<PathBuf> }
 static MOVING: Mutex<Option<Moving>> = Mutex::new(None);
+fn held_path(home: &Path) -> PathBuf { home.join("home-held.json") }
+impl Moving {
+    fn save(&self) {
+        let Some(p) = &self.path else { return };
+        let tmp = p.with_extension("json.tmp");
+        if std::fs::write(&tmp, serde_json::to_vec(self).unwrap_or_default()).is_ok() { let _ = std::fs::rename(&tmp, p); }
+    }
+    /// Hold `q` (once: a message id held already is not held again).
+    fn hold(&mut self, q: Value) { let id = gs(&q, "msg").to_string(); if id.is_empty() || !self.held.iter().any(|h| gs(h, "msg") == id && gs(h, "thread") == gs(&q, "thread")) { self.held.push(q); self.save(); } }
+}
 /// The threads a move carries: every live thread of no project (the uberbot's, the bots', their routines').
 async fn carried_threads(hub: &Arc<Hub>) -> HashSet<String> { hub.model().await.threads.iter().filter(|(_, t)| !t.deleted && t.project.is_empty()).map(|(k, _)| k.clone()).collect() }
 async fn set_moving(hub: &Arc<Hub>, v: Value) { let _ = hub.commit(&json!({"$":"SettingSet","key":"home.moving","value":if v.is_null() { String::new() } else { v.to_string() },"at":now_s()})).await; }
@@ -279,7 +292,7 @@ async fn set_moving(hub: &Arc<Hub>, v: Value) { let _ = hub.commit(&json!({"$":"
 /// failed. After a move, a message to the old copy of a moved thread goes to the new home (a client that still had it open).
 pub async fn intercept(hub: &Arc<Hub>, thread: &str, p: &Value) -> Option<Result<(), String>> {
     if crate::net::far::is(thread) { return None }
-    { let mut g = MOVING.lock().unwrap(); if let Some(m) = g.as_mut() { if m.threads.contains(thread) { let mut q = p.clone(); q["thread"] = json!(thread); m.held.push(q); return Some(Ok(())) } } }
+    { let mut g = MOVING.lock().unwrap(); if let Some(m) = g.as_mut() { if m.threads.contains(thread) { let mut q = p.clone(); q["thread"] = json!(thread); if gs(&q, "msg").is_empty() { q["msg"] = json!(format!("hm{}", now_ms())) } m.hold(q); return Some(Ok(())) } } }
     let at: Value = serde_json::from_str(&hub.setting("home.at").await.unwrap_or_default()).ok()?;
     let link = gs(&at, "link"); if link.is_empty() { return None }
     let project = hub.model().await.threads.get(thread).map(|t| t.project.clone());
@@ -292,7 +305,7 @@ pub async fn intercept(hub: &Arc<Hub>, thread: &str, p: &Value) -> Option<Result
 /// sent on to the new home after one (once: the far outbox keys it by its message id, the owner takes an id once).
 pub async fn hold_delivery(hub: &Arc<Hub>, thread: &str, d: &Value) -> Option<Result<(), String>> {
     if crate::net::far::is(thread) { return None }
-    { let mut g = MOVING.lock().unwrap(); if let Some(m) = g.as_mut() { if m.threads.contains(thread) { let mut q = d.clone(); q["via"] = json!("deliver"); m.held.push(q); return Some(Ok(())) } } }
+    { let mut g = MOVING.lock().unwrap(); if let Some(m) = g.as_mut() { if m.threads.contains(thread) { let mut q = d.clone(); q["via"] = json!("deliver"); m.hold(q); return Some(Ok(())) } } }
     let at_s = hub.setting("home.at").await.unwrap_or_default(); if at_s.is_empty() { return None }
     let at: Value = serde_json::from_str(&at_s).ok()?; let link = gs(&at, "link").to_string(); if link.is_empty() { return None }
     let project = hub.model().await.threads.get(thread).map(|t| t.project.clone());
@@ -314,21 +327,45 @@ fn forward(to: &str, link: &str, p: &Value) -> Result<(), String> {
     out.hold(to, link, q, crate::net::farsend::now_ms()); Ok(())
 }
 /// A move's hold on `threads` toward `link`, as `begin` sets it (the tests set it alone).
-#[cfg(test)] pub(crate) fn hold_for(link: &str, threads: &[&str]) { *MOVING.lock().unwrap() = Some(Moving { link: link.into(), threads: threads.iter().map(|t| t.to_string()).collect(), held: vec![] }); }
+#[cfg(test)] pub(crate) fn hold_for(home: &Path, link: &str, threads: &[&str]) { let m = Moving { link: link.into(), threads: threads.iter().map(|t| t.to_string()).collect(), held: vec![], path: Some(held_path(home)) }; m.save(); *MOVING.lock().unwrap() = Some(m); }
+/// The process ends mid-move (the tests' restart): what was held is only on disk.
+#[cfg(test)] pub(crate) fn forget_in_memory() { *MOVING.lock().unwrap() = None; }
 #[cfg(test)] pub(crate) fn held_now() -> usize { MOVING.lock().unwrap().as_ref().map_or(0, |m| m.held.len()) }
 /// The end of a move: the held messages go to the new home (`moved`) or, when it failed, to this hub's own threads as they would have.
 pub(crate) async fn release(hub: &Arc<Hub>, moved: bool) {
     let Some(m) = MOVING.lock().unwrap().take() else { return };
-    for p in m.held {
+    deliver_held(hub, m, moved).await
+}
+/// A hub that starts with held messages on disk and no move running (it restarted mid-move): they go now, to the new home when the move had
+/// finished (`home.at` names that machine), else here.
+pub async fn recover(hub: &Arc<Hub>) {
+    if MOVING.lock().unwrap().is_some() { return }
+    let path = held_path(&hub.cfg.home);
+    let Some(mut m) = std::fs::read(&path).ok().and_then(|b| serde_json::from_slice::<Moving>(&b).ok()) else { return };
+    m.path = Some(path);
+    let at: Value = serde_json::from_str(&hub.setting("home.at").await.unwrap_or_default()).unwrap_or(Value::Null);
+    let moved = !m.link.is_empty() && gs(&at, "link") == m.link;
+    eprintln!("backplane: home move: {} held from a move cut by a restart go {}", m.held.len(), if moved { "to the new home" } else { "here" });
+    deliver_held(hub, m, moved).await
+}
+/// Whether `thread` here has the message `msg` already (a delivery made once, whatever restarts came between).
+async fn has_msg(hub: &Arc<Hub>, thread: &str, msg: &str) -> bool {
+    if msg.is_empty() { return false }
+    let m = hub.model().await; m.page(&hub.store, thread, 0, 64).map(|pg| pg.rows.iter().any(|r| r.id == msg)).unwrap_or(false)
+}
+async fn deliver_held(hub: &Arc<Hub>, mut m: Moving, moved: bool) {
+    while !m.held.is_empty() {
+        let p = m.held[0].clone();
         let th = gs(&p, "thread").to_string();
+        let to = crate::net::far::id(&m.link, &th);
         if p["via"] == "deliver" {
-            if moved { if let Err(e) = deliver_there(&crate::net::far::id(&m.link, &th), &m.link, &p) { eprintln!("backplane: home move: a held delivery to {th} was not sent: {e}") } }
-            else if let Some(h) = hub.rpc_for("thread.deliver") { let _ = h.call(hub, &Caller { gen: "home".into(), client: 0 }, &json!(0), "thread.deliver", &p).await; }
-            continue
-        }
-        if moved { if let Err(e) = forward(&crate::net::far::id(&m.link, &th), &m.link, &p) { eprintln!("backplane: home move: a held message to {th} was not sent: {e}") } }
-        else if let Some(h) = hub.rpc_for("turn.start") { let _ = h.call(hub, &Caller { gen: "home".into(), client: 1 }, &json!(0), "turn.start", &p).await; }
+            if moved { if let Err(e) = deliver_there(&to, &m.link, &p) { eprintln!("backplane: home move: a held delivery to {th} was not sent: {e}") } }
+            else if !has_msg(hub, &th, gs(&p, "msg")).await { if let Some(h) = hub.rpc_for("thread.deliver") { let _ = h.call(hub, &Caller { gen: "home".into(), client: 0 }, &json!(0), "thread.deliver", &p).await; } }
+        } else if moved { if let Err(e) = forward(&to, &m.link, &p) { eprintln!("backplane: home move: a held message to {th} was not sent: {e}") } }
+        else if !has_msg(hub, &th, gs(&p, "msg")).await { if let Some(h) = hub.rpc_for("turn.start") { let _ = h.call(hub, &Caller { gen: "home".into(), client: 1 }, &json!(0), "turn.start", &p).await; } }
+        m.held.remove(0); m.save(); // (the far outbox keeps what goes there from here on)
     }
+    if let Some(p) = &m.path { let _ = std::fs::remove_file(p); }
 }
 
 // ---- the readiness check (before a move; nothing here signs in, installs or costs a request to a provider) ----
@@ -585,7 +622,7 @@ pub async fn begin(hub: &Arc<Hub>, l: &str) -> Result<(), String> {
     let name = gs(&c, "machine").to_string();
     if c["ready"] != true { let why = c["reasons"].as_array().into_iter().flatten().filter_map(Value::as_str).collect::<Vec<_>>().join("; "); tell(hub, "failed", "checking", &why).await; set_moving(hub, json!({"to": name, "state": "failed", "why": why, "at": now_s()})).await; return Err(why) }
     let threads = carried_threads(hub).await;
-    *MOVING.lock().unwrap() = Some(Moving { link: l.clone(), threads, held: vec![] });
+    { let m = Moving { link: l.clone(), threads, held: vec![], path: Some(held_path(&hub.cfg.home)) }; m.save(); *MOVING.lock().unwrap() = Some(m); }
     set_moving(hub, json!({"to": name, "state": "moving", "at": now_s()})).await;
     let h = hub.clone(); tokio::spawn(async move {
         let r = move_to(&h, &l).await;
@@ -675,6 +712,16 @@ pub fn install(hub: &Arc<Hub>) {
     hub.register_rpc(Arc::new(HomeRpc));
     let h = hub.clone(); tokio::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_secs(2)).await; publish_offer(&h).await;
+        // a move cut by a restart: what it held goes now (once the agents answer `thread.deliver`)
+        for _ in 0..30 { if h.rpc_for("thread.deliver").is_some() && h.rpc_for("turn.start").is_some() { break } tokio::time::sleep(std::time::Duration::from_secs(1)).await; }
+        recover(&h).await;
+        // a row still saying "Moving to" after a restart cut the move: it says the move did not happen, or nothing once the home is there
+        if let Ok(v) = serde_json::from_str::<Value>(&h.setting("home.moving").await.unwrap_or_default()) {
+            if gs(&v, "state") == "moving" && MOVING.lock().unwrap().is_none() {
+                let there = !h.setting("home.at").await.unwrap_or_default().is_empty();
+                set_moving(&h, if there { Value::Null } else { json!({"to": gs(&v, "to"), "state": "failed", "why": "this machine restarted during the move; the home stayed here", "at": now_s()}) }).await;
+            }
+        }
         let me = crate::bots::ring::base(&h).await; if me.starts_with("https://") { crate::push::set_hub_url(&me) }
         // while the home is elsewhere, this hub's Ring page follows that machine's ring (its record is asked for each minute)
         loop {

@@ -1883,10 +1883,13 @@ async fn lines_at_least(sd: &Path, n: usize) -> Vec<Value> { for _ in 0..100 { l
     ag.shutdown();
 /// A home move holds what reaches a thread it carries by every way but the person's (another bot, a routine, a room, a webhook, mail): nothing is written or run
 /// while it moves; a move that failed delivers each here once, as it would have been (net/homemove.rs). The way to the new home is test/e2e/homemove/everywhere.py.
+/// The home move's hold is one per process: its tests take turns.
+static HOME_MOVE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 #[tokio::test(flavor = "multi_thread")] async fn a_home_move_holds_every_kind_of_delivery_and_a_failed_move_delivers_each_once() {
+    let _one = HOME_MOVE.lock().await;
     let sd = dir("hm-bin"); perf_standin(&sd, 1);
     let (hub, ag, _h, _w) = start("hm", |w| base_log(w, 2, "{\"$\":\"ThreadCreated\",\"id\":\"tbub\",\"project\":\"\",\"title\":\"Bub\",\"env\":\"local\",\"branch\":\"\",\"worktree\":\"\",\"provider\":\"claude\",\"model\":\"\",\"at\":1700000009}\n"), |_| Cli::standin(&sd)).await;
-    crate::net::homemove::hold_for("L1", &["tbub"]); let n0 = len(&hub).await;
+    crate::net::homemove::hold_for(&hub.cfg.home, "L1", &["tbub"]); let n0 = len(&hub).await;
     let kinds = [("bot:b2", "bot", "zqshort from the calendar bot"), ("routine:r1", "system", "zqshort the morning routine"), ("room:staff", "bot", "zqshort a post in staff"),
                  ("hook:h1", "system", "zqshort [webhook: Pebble Index] a ring recording"), ("mail:m1", "system", "zqshort mail from someone")];
     for (i, (from, kind, text)) in kinds.iter().enumerate() { assert_eq!(ag.inbound("user", "tbub", &format!("hm{i}"), text, (from.to_string(), kind.to_string(), String::new()), vec![]).await, Ok(()), "held, not refused: {from}") }
@@ -1897,4 +1900,29 @@ async fn lines_at_least(sd: &Path, n: usize) -> Vec<Value> { for _ in 0..100 { l
     let ev = until(&hub, n0, 10, |ev| ev.iter().filter(|e| is(e, "MessagePosted") && e["thread"] == "tbub" && e["role"] != "assistant").count() >= 5).await;
     for (i, (_, _, text)) in kinds.iter().enumerate() { assert_eq!(ev.iter().filter(|e| is(e, "MessagePosted") && e["thread"] == "tbub" && e["msg"] == format!("hm{i}").as_str()).count(), 1, "{text} delivered once") }
     assert_eq!(crate::net::homemove::held_now(), 0); ag.shutdown();
+}
+
+/// A hub restarted mid-move (Nov 10: the first move back failed so) loses nothing it held: on the next start (`recover`) each held delivery, one of each kind, is made
+/// here once (the move had not finished: `home.at` names no machine), and a second recovery makes none again.
+#[tokio::test(flavor = "multi_thread")] async fn a_hub_restarted_mid_move_delivers_what_it_held_once_on_its_next_start() {
+    let _one = HOME_MOVE.lock().await;
+    let sd = dir("hmr-bin"); perf_standin(&sd, 1);
+    let (hub, ag, home, _w) = start("hmr", |w| base_log(w, 2, "{\"$\":\"ThreadCreated\",\"id\":\"tbub\",\"project\":\"\",\"title\":\"Bub\",\"env\":\"local\",\"branch\":\"\",\"worktree\":\"\",\"provider\":\"claude\",\"model\":\"\",\"at\":1700000009}\n"), |_| Cli::standin(&sd)).await;
+    crate::net::homemove::hold_for(&home, "L1", &["tbub"]); let n0 = len(&hub).await;
+    let kinds = [("bot:b2", "bot", "zqshort from the calendar bot"), ("routine:r1", "system", "zqshort the morning routine"), ("room:staff", "bot", "zqshort a post in staff"),
+                 ("hook:h1", "system", "zqshort [webhook: Pebble Index] a ring recording"), ("mail:m1", "system", "zqshort mail from someone")];
+    for (i, (from, kind, text)) in kinds.iter().enumerate() { assert_eq!(ag.inbound("user", "tbub", &format!("hr{i}"), text, (from.to_string(), kind.to_string(), String::new()), vec![]).await, Ok(()), "held: {from}") }
+    // and the person's own message, as a client sends it
+    assert_eq!(rpc(&hub, "turn.start", json!({"thread":"tbub","text":"zqshort the person mid-move","msg":"hr-person"})).await["ok"], true);
+    let kept: Value = serde_json::from_slice(&std::fs::read(home.join("home-held.json")).unwrap()).unwrap(); assert_eq!(kept["held"].as_array().unwrap().len(), 6, "on disk before the answer");
+    crate::net::homemove::forget_in_memory(); // the process ends
+    assert!(!log_from(&hub, n0).await.iter().any(|e| is(e, "MessagePosted") && e["thread"] == "tbub"));
+    crate::net::homemove::recover(&hub).await;
+    let want: Vec<String> = (0..5).map(|i| format!("hr{i}")).chain(["hr-person".to_string()]).collect();
+    let ev = until(&hub, n0, 10, |ev| want.iter().all(|m| ev.iter().any(|e| is(e, "MessagePosted") && e["msg"] == m.as_str()))).await;
+    for m in &want { assert_eq!(ev.iter().filter(|e| is(e, "MessagePosted") && e["thread"] == "tbub" && e["msg"] == m.as_str()).count(), 1, "{m} delivered once") }
+    assert!(!home.join("home-held.json").exists(), "nothing is left held");
+    crate::net::homemove::recover(&hub).await; tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(log_from(&hub, n0).await.iter().filter(|e| is(e, "MessagePosted") && e["thread"] == "tbub" && e["role"] == "user").count(), 6, "a second start delivers nothing again");
+    ag.shutdown();
 }
