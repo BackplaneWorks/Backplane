@@ -14,6 +14,11 @@ const READERS: usize = 2;
 /// The most Mech parts meshed ahead when one is shown.
 const WARM_MECH: usize = 24;
 const POLL_MS: u64 = 150;
+/// The most triangles a STEP's streamed batch carries in one part frame (about 16 bytes each: well under the hub's outbox and a phone's
+/// socket); a bigger batch is not streamed, the whole model brings it.
+const STREAM_PART_TRIS: usize = 300_000;
+/// A part frame's placement of a STEP's streamed batch: none (solid::part_mesh is already the model's own integers).
+const IDENTITY: [f32; 12] = [1., 0., 0., 0., 0., 1., 0., 0., 0., 0., 1., 0.];
 const KEPT: usize = 4; // sources no client watches are kept (plots included): Src.kept
 const VERSIONS_KEPT: usize = 8; // saved versions no view watches: Src.versions.kept
 const WAIT_TICKS: u32 = 7; // a view waiting for its project's first board or schematic looks for it about once a second
@@ -28,12 +33,13 @@ pub fn stamp(path: &str) -> Stamp {
 /// A saved version or a comparison: immutable, read once.
 pub fn is_version(path: &str) -> bool { path.starts_with("git\t") || path.starts_with("diff\n") }
 pub fn solid_kind(k: u32) -> bool { matches!(k, 2..=4) }
-/// How long a 3D source's first read should take (ms; 0: not worth saying): a STEP not meshed yet is FreeCAD's start (about 2.5 s) and
-/// about 0.35 s a megabyte (measured 2026-11-09: a 7.4 MB connector 3.3 s, a 10 MB assembly 5.5 s). After that, the last read's time.
-pub fn first_estimate(kind: u32, file: &str) -> u64 {
+/// How long a 3D source's first read should take (ms; 0: not worth saying), by the tool that will mesh a STEP not meshed yet:
+/// backplane-step2glb about 50 ms and 0.12 s a megabyte (measured 2026-11-11: a 9 MB board 1.2 s, a 5.6 MB assembly 0.7 s), FreeCAD its
+/// start (about 2.5 s) and 0.35 s a megabyte (2026-11-09: a 7.4 MB connector 3.3 s, a 10 MB assembly 5.5 s). After that, the last read's time.
+pub fn first_estimate(kind: u32, file: &str, tools: &[stepglb::Mesher]) -> u64 {
     if !solidread::is_step(file) || solidread::known(kind, file) > 0 { return 0 }
     let mb = std::fs::metadata(file).map_or(0, |m| m.len()) as f64 / 1048576.0;
-    (2500.0 + 350.0 * mb) as u64
+    match tools.first() { Some(stepglb::Mesher::Step2glb(_)) => (50.0 + 120.0 * mb) as u64, _ => (2500.0 + 350.0 * mb) as u64 }
 }
 /// What the hub is doing to make a 3D source's model, in the person's words: `native` a board made here (pcb3d), `cached` a converted model already kept.
 pub fn stage_text(kind: u32, file: &str, native: bool, cached: bool, tools: &[stepglb::Mesher]) -> String {
@@ -265,6 +271,35 @@ impl Plots {
           } }
         for c in gone { self.stop(c) }
     }
+    /// A STEP's parts stream (`run_native`): a new flag on the source (an older stream of it stops), its held part frames gone.
+    fn step_stream(&self, ky: &str) -> Arc<std::sync::atomic::AtomicBool> {
+        let stop = Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let mut st = self.st.lock().unwrap();
+        if let Some(s) = st.srcs.get_mut(ky) {
+            if let Some(old) = s.stop.replace(stop.clone()) { old.store(true, std::sync::atomic::Ordering::Relaxed) }
+            s.parts.clear();
+        }
+        for subs in st.subs.values_mut() { for sub in subs.iter_mut().filter(|s| s.key == ky) { sub.parts_at = 0 } }
+        stop
+    }
+    /// One frame of a STEP's stream onto its source and out to its watchers at once, in order; nothing once the stream is stopped.
+    fn stream_frame(&self, hub: &Arc<Hub>, ky: &str, stop: &std::sync::atomic::AtomicBool, frame: Vec<u8>) {
+        { let mut st = self.st.lock().unwrap();
+          if stop.load(std::sync::atomic::Ordering::Relaxed) { return } // checked under the lock that ends it: no frame lands after the model
+          let Some(s) = st.srcs.get_mut(ky) else { return };
+          s.parts.push(Arc::new(frame)); }
+        self.sync_parts(hub, ky, None)
+    }
+    /// The end of a STEP's stream, before its model goes out: the stream stops and its frames go, so a watcher that comes later gets
+    /// the model alone. A board's stream (it starts after its model) is not this.
+    fn step_stream_end(&self, ky: &str) {
+        let mut st = self.st.lock().unwrap();
+        let Some(s) = st.srcs.get_mut(ky) else { return };
+        if !solidread::is_step(&s.file) { return }
+        if let Some(stop) = s.stop.take() { stop.store(true, std::sync::atomic::Ordering::Relaxed) }
+        s.parts.clear();
+        for subs in st.subs.values_mut() { for sub in subs.iter_mut().filter(|s| s.key == ky) { sub.parts_at = 0 } }
+    }
     /// A board model's parts, streamed: the plan's frames go onto the source as they are made and out to its watchers. A newer model's
     /// stream stops this one (its flag), and so does the source leaving.
     fn start_parts(self: &Arc<Self>, hub: &Arc<Hub>, ky: &str, file: &str, rev: String, made: Arc<(pcb3d::stream::Plan, u64)>) {
@@ -386,7 +421,7 @@ impl Plots {
         tokio::spawn(async move {
             let t0 = std::time::Instant::now();
             let solid3 = solid_kind(kind);
-            let about = if solid3 { me.st.lock().unwrap().took.get(&file).copied().unwrap_or_else(|| first_estimate(kind, &file)) } else { 0 };
+            let about = if solid3 { me.st.lock().unwrap().took.get(&file).copied().unwrap_or_else(|| first_estimate(kind, &file, &stepglb::machine(&me.home))) } else { 0 };
             let say = |text: &str| if solid3 { me.stage(&hub, &ky, text, t0.elapsed().as_millis() as u64, about) };
             if solid3 && me.readers.available_permits() == 0 { say("Waiting for another drawing to finish…") }
             let _slot = me.readers.acquire().await.ok();
@@ -416,6 +451,7 @@ impl Plots {
             }
             match (&plot, code) {
                 (Some(p), _) => {
+                    me.step_stream_end(&ky); // a STEP's streamed parts: the model replaces them, and no part of them comes after it
                     me.send_to(&hub, &ky, p, None); me.revision(&hub, &ky, None);
                     if let Some(plan) = parts.take() { me.start_parts(&hub, &ky, &file, before.rev.clone(), plan) }
                 }
@@ -433,13 +469,33 @@ impl Plots {
     }
     /// `Pv.child` in this process (kicad/plotread.rs, kicad/solidread.rs): the plot, its info file written, and the child's exit code and
     /// message. A panic in a reader is an unread file, never the hub's end; a big file's memory goes back when it is done.
-    async fn run_native(&self, hub: &Arc<Hub>, kind: u32, file: &str, ky: &str) -> Option<(i32, String, Option<Plot>)> {
+    async fn run_native(self: &Arc<Self>, hub: &Arc<Hub>, kind: u32, file: &str, ky: &str) -> Option<(i32, String, Option<Plot>)> {
         let (f, infos) = (file.to_string(), self.infos(ky));
         if solid_kind(kind) {
             let (cli, home) = (super::ipc::runtime(hub).await.cli, self.home.clone());
+            // a STEP not meshed yet streams: its parts go out as they are meshed, its whole model after them replaces them
+            let stream = (solidread::is_step(file) && !is_version(file) && solidread::known(kind, file) == 0).then(|| self.step_stream(ky));
+            let (me, hub, ky) = (self.clone(), hub.clone(), ky.to_string());
             return tokio::task::spawn_blocking(move || {
                 let i = infos.to_string_lossy().into_owned();
-                let r = std::panic::catch_unwind(|| solidread::read(kind, &f, &cli, &stepglb::machine(&home), &i));
+                let tools = stepglb::machine(&home);
+                let r = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| match &stream {
+                    Some(stop) => {
+                        let rev = stamp(&f).rev; let (mut done, mut n) = (0u32, 0u32);
+                        let emit = |frame: Vec<u8>| me.stream_frame(&hub, &ky, stop, frame);
+                        let mut on = |e: solidread::Streamed| match e {
+                            solidread::Streamed::Of(of) => emit(plot::parts_frame(&ky, of, &rev)),
+                            solidread::Streamed::Part { tris, leaves } => {
+                                done += leaves;
+                                if tris.len() > STREAM_PART_TRIS { return } // a batch too big for one frame: the whole model brings it
+                                let (count, mesh) = solid::part_mesh(&tris); n += 1;
+                                emit(plot::part_frame(&ky, &format!("step{n}"), count, &mesh, &[IDENTITY], &[], done))
+                            }
+                        };
+                        solidread::read_streaming(kind, &f, &cli, &tools, &i, Some(&mut on))
+                    }
+                    None => solidread::read(kind, &f, &cli, &tools, &i),
+                }));
                 let o = match r { Ok(g) => (g.code, g.text, g.plot), Err(_) => (3, plotgen::UNREAD.to_string(), None) };
                 #[cfg(all(target_os = "linux", target_env = "gnu"))] unsafe { libc::malloc_trim(0); }
                 o
@@ -683,11 +739,38 @@ mod tests {
         plots.watch(&hub, 7, None, "", "", "", ("", 0)); assert!(plots.st.lock().unwrap().waiting.is_empty());
         let _ = std::fs::remove_dir_all(&home); let _ = std::fs::remove_dir_all(&proj);
     }
+    /// A STEP streaming its parts: each frame goes out as it is made; once its model is sent no frame of the stream follows it, and a
+    /// view that comes later is sent the model alone. A newer stream of the source stops an older one.
+    #[tokio::test] async fn a_steps_streamed_parts_never_come_after_its_model() {
+        use crate::{hub::{Cfg, Out}, presenter::Canned};
+        let home = std::env::temp_dir().join(format!("bp-stepstream-{}", std::process::id())); let _ = std::fs::remove_dir_all(&home); std::fs::create_dir_all(&home).unwrap();
+        let cfg = Cfg { home: home.clone(), version: "0.15.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() };
+        let hub = Hub::start(cfg, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+        let plots = Plots::new(&home); let ky = "2|/p/mech/lid.step|".to_string();
+        let mut out = hub.attach(7);
+        { let mut st = plots.st.lock().unwrap();
+          st.srcs.insert(ky.clone(), Src { kind: 2, file: "/p/mech/lid.step".into(), stamp: None, busy: true, plot: None, again: false, parts: vec![], stop: None });
+          st.subs.insert(7, vec![Sub { key: ky.clone(), held: vec![], mesh: vec![], fresh: true, base: String::new(), kept: 0, parts_at: 0 }]); }
+        let raw = |out: &mut crate::hub::Outbox| { let mut v = vec![]; while let Ok(o) = out.try_recv() { if let Out::Raw(b) = o { v.push(String::from_utf8_lossy(&b).into_owned()) } } v };
+        let old = plots.step_stream(&ky);
+        let stop = plots.step_stream(&ky);
+        assert!(old.load(std::sync::atomic::Ordering::Relaxed), "a newer stream stops the older");
+        plots.stream_frame(&hub, &ky, &old, b"stale".to_vec());
+        plots.stream_frame(&hub, &ky, &stop, b"part 1".to_vec()); plots.stream_frame(&hub, &ky, &stop, b"part 2".to_vec());
+        assert_eq!(raw(&mut out), ["part 1", "part 2"], "each frame out at once, in order; the stopped stream's never");
+        plots.step_stream_end(&ky);
+        plots.stream_frame(&hub, &ky, &stop, b"late part".to_vec());
+        assert!(raw(&mut out).is_empty(), "nothing of the stream after its end (the model goes next)");
+        assert!(plots.st.lock().unwrap().srcs[&ky].parts.is_empty(), "a later view is sent the model alone");
+        let _ = std::fs::remove_dir_all(&home);
+    }
     #[test] fn a_step_not_meshed_yet_has_an_estimate_by_its_size() {
         let d = std::env::temp_dir().join(format!("bp-est-{}", std::process::id())); let _ = std::fs::create_dir_all(&d);
         let f = d.join("big-part.step"); std::fs::write(&f, vec![b'x'; 4 << 20]).unwrap();
-        assert_eq!(first_estimate(2, &f.to_string_lossy()), 3900, "2.5 s and 0.35 s a MB");
-        assert_eq!(first_estimate(2, "/p/b.kicad_pcb"), 0, "a board: no estimate");
+        let (fc, occ) = ([stepglb::Mesher::FreeCad { gui: "/g".into(), cmd: "/c".into() }], [stepglb::Mesher::Step2glb("/s".into())]);
+        assert_eq!(first_estimate(2, &f.to_string_lossy(), &fc), 3900, "FreeCAD: 2.5 s and 0.35 s a MB");
+        assert_eq!(first_estimate(2, &f.to_string_lossy(), &occ), 530, "native: 50 ms and 0.12 s a MB");
+        assert_eq!(first_estimate(2, "/p/b.kicad_pcb", &occ), 0, "a board: no estimate");
         let _ = std::fs::remove_dir_all(&d);
     }
     #[test] fn a_3d_source_says_what_the_hub_does_for_it() {

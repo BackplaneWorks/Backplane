@@ -1,4 +1,4 @@
-# Sourced by the scripts that compile Bun programs into Backplane (backplane-browser, backplane-step2glb).
+# Sourced by the scripts that compile Bun programs into Backplane (backplane-browser).
 # deploy/bun-version is the Bun a release builds them with: release.yml's setup-bun pins it, deploy/licenses/bun names it, and scripts/licenses.sh
 # refuses a release built with another.
 # bun_pin_check BUN: say so on stderr when BUN is another version, so a dev build that differs from a release is never silent.

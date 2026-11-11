@@ -115,6 +115,8 @@ pub fn decode_part(n: usize, bytes: &[u8], at: &[u8]) -> Result<Mesh, String> {
 
 /// The board and the parts that have come, as one model: the board's triangles (group 0) then each part frame's (group 1, 2...). Its
 /// centre and size are the board's, so arriving parts never move the camera.
+/// One layer's triangles onto a combined mesh, as fade group `g` (what `combine` does a layer).
+pub fn append(m: &mut Mesh, l: &Mesh, g: u32) { m.tris.extend_from_slice(&l.tris); m.normals.extend_from_slice(&l.normals); m.colors.extend_from_slice(&l.colors); m.groups.resize(m.tris.len(), g); }
 pub fn combine(board: Option<&Mesh>, parts: &[Arc<Mesh>]) -> Option<Mesh> {
     let first = board.or(parts.first().map(|p| &**p))?;
     let n = board.map_or(0, |b| b.tris.len()) + parts.iter().map(|p| p.tris.len()).sum::<usize>();
@@ -130,7 +132,7 @@ pub struct Layers { pub board: Option<Arc<Mesh>>, pub parts: Vec<Arc<Mesh>>, pub
 impl Layers {
     pub fn of(board: Option<Arc<Mesh>>, parts: Vec<Arc<Mesh>>) -> Option<Layers> {
         let first = board.as_ref().or(parts.first())?;
-        let (center, radius) = (first.center, first.radius);
+        let (center, radius) = if board.is_some() { (first.center, first.radius) } else { bound(&parts) };
         Some(Layers { board, parts, center, radius })
     }
     pub fn tris(&self) -> usize { self.board.as_ref().map_or(0, |b| b.tris.len()) + self.parts.iter().map(|p| p.tris.len()).sum::<usize>() }
@@ -138,6 +140,22 @@ impl Layers {
     pub fn list(&self) -> Vec<(&Arc<Mesh>, Option<u32>)> { self.board.iter().map(|b| (b, Some(0))).chain(self.parts.iter().enumerate().map(|(g, p)| (p, Some(g as u32 + 1)))).collect() }
     /// One mesh of them all (`combine`).
     pub fn combined(&self) -> Option<Mesh> { combine(self.board.as_deref(), &self.parts) }
+}
+/// The sphere around every part (a model streamed in parts with no board under them: a STEP's): the box of the parts' spheres, then the
+/// smallest sphere about its centre that holds each of them.
+pub fn bound(parts: &[Arc<Mesh>]) -> ([f32; 3], f32) {
+    let (mut lo, mut hi) = ([f32::MAX; 3], [f32::MIN; 3]);
+    for p in parts { for a in 0..3 { lo[a] = lo[a].min(p.center[a] - p.radius); hi[a] = hi[a].max(p.center[a] + p.radius); } }
+    if parts.is_empty() { return ([0.0; 3], 1e-3) }
+    let c = [(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0, (lo[2] + hi[2]) / 2.0];
+    let r = parts.iter().map(|p| dot(sub(p.center, c), sub(p.center, c)).sqrt() + p.radius).fold(1e-3f32, f32::max);
+    (c, r)
+}
+/// Whether the camera, fitted to `was` and not moved since, fits again to `now`: the model it shows moved or changed size by more than a
+/// fiftieth of itself (a streamed model growing as its parts come, then its whole model).
+pub fn refit(was: ([f32; 3], f32), now: ([f32; 3], f32)) -> bool {
+    let d = dot(sub(was.0, now.0), sub(was.0, now.0)).sqrt();
+    d > now.1 * 0.02 || (now.1 - was.1).abs() > now.1 * 0.02
 }
 /// How long a part takes to fade in.
 pub const FADE_MS: f32 = 300.0;
@@ -392,11 +410,24 @@ impl Drawer {
             let mut gpu = super::solid_gpu::shared().lock().unwrap_or_else(|e| e.into_inner());
             if let Some(g) = gpu.as_mut() { match g.render_layers(&model.list(), fades, cam, w, h, back) { Some(px) => return Some((px, "gpu")), None => { log::warn!("3D page: the GPU failed a picture, drawing on the CPU from now on"); std::mem::forget(gpu.take()); } } }
         }
-        let list = model.list();
-        let made = self.cpu.as_ref().is_some_and(|(of, _)| of.len() == list.len() && of.iter().zip(&list).all(|(w, l)| std::sync::Weak::as_ptr(w) == Arc::as_ptr(l.0)));
-        if !made { self.cpu = model.combined().map(|m| (list.iter().map(|l| Arc::downgrade(l.0)).collect(), Arc::new(m))); }
-        let mesh = self.cpu.as_ref()?.1.clone();
+        let mesh = self.cpu_mesh(model)?;
         raster::render_faded(&mesh, fades, cam, w, h, ss, back, alive).map(|px| (px, "cpu"))
+    }
+    /// The layers as one mesh for the CPU's drawing: the one made last when they are its layers, that one with the new layers appended when
+    /// they are its layers and more (parts arriving: not every layer copied again a part), else made again.
+    fn cpu_mesh(&mut self, model: &Layers) -> Option<Arc<Mesh>> {
+        let list = model.list();
+        let same = |of: &[std::sync::Weak<Mesh>], n: usize| of.len() <= list.len() && n == of.len() && of.iter().zip(&list).all(|(w, l)| std::sync::Weak::as_ptr(w) == Arc::as_ptr(l.0));
+        let made = self.cpu.as_ref().is_some_and(|(of, _)| same(of, list.len()));
+        // parts arriving add layers after the ones drawn: those are appended to the mesh made (not every layer copied again a part)
+        let grows = !made && self.cpu.as_ref().is_some_and(|(of, _)| same(of, of.len()));
+        if grows {
+            let (of, m) = self.cpu.take().unwrap();
+            let mut m = Arc::try_unwrap(m).unwrap_or_else(|a| (*a).clone());
+            for (l, g) in &list[of.len()..] { append(&mut m, l, g.unwrap_or(0)); }
+            self.cpu = Some((list.iter().map(|l| Arc::downgrade(l.0)).collect(), Arc::new(m)));
+        } else if !made { self.cpu = model.combined().map(|m| (list.iter().map(|l| Arc::downgrade(l.0)).collect(), Arc::new(m))); }
+        Some(self.cpu.as_ref()?.1.clone())
     }
     /// The model's buffer off the GPU (the page is put away).
     fn forget(&mut self) {
@@ -485,7 +516,7 @@ pub fn retry_watch(key: &str) -> Option<serde_json::Value> {
 /// `image`: its last picture, as CPU bytes (out of the atlas; painted again when it comes back, while a new one is drawn).
 struct Kept { key: String, mesh: Arc<Layers>, cam: Camera, touched: bool, fit_aspect: f32, parts: (u32, u32), groups: usize, image: Option<Arc<RenderImage>> }
 pub struct SolidPage {
-    mesh: Option<Arc<Layers>>, key: String, cam: Option<Camera>, touched: bool, fit_aspect: f32, image: Option<Arc<RenderImage>>, /** pictures off the screen and the window frame they left it in (`collect`) */ retired: Vec<(Arc<RenderImage>, u64)>, frames: u64, drag: Option<(Drag, Point<Pixels>)>,
+    mesh: Option<Arc<Layers>>, key: String, cam: Option<Camera>, touched: bool, fit_aspect: f32, /** what the camera was last fitted to (centre, radius) */ fitted: ([f32; 3], f32), image: Option<Arc<RenderImage>>, /** pictures off the screen and the window frame they left it in (`collect`) */ retired: Vec<(Arc<RenderImage>, u64)>, frames: u64, drag: Option<(Drag, Point<Pixels>)>,
     /** when each part group showed (its fade runs from then), the parts' progress (done, of), whether the last picture asked for was mid-fade */
     born: Vec<std::time::Instant>, parts: (u32, u32), fading: bool,
     /** the page's keys (0.14's: f/Home fit, 0-6 views, arrows turn, shift+arrows move, +/- zoom), taken when the model is pressed; the wheel's burst, to settle after it */ focus: FocusHandle, wheel: u64,
@@ -503,7 +534,7 @@ impl SolidPage {
                 if weak.update(cx, |this, cx| this.apply(msg, cx)).is_err() { break }
             }
         }).detach();
-        SolidPage { mesh: None, key: String::new(), cam: None, touched: false, fit_aspect: 0.0, image: None, retired: Vec::new(), frames: 0, drag: None, born: Vec::new(), parts: (0, 0), fading: false, focus: cx.focus_handle(), wheel: 0, stage: None, ticking: false, draft_scale: 1.0, prev: None, restored: None, failed: false, back: raster::Backdrop::DARK, note: "No 3D model yet".into(), /* i18n-ok: the note is drawn through note_words */ reserve: 0.0, worker: Worker::spawn(tx),
+        SolidPage { mesh: None, key: String::new(), cam: None, touched: false, fit_aspect: 0.0, fitted: ([0.0; 3], 0.0), image: None, retired: Vec::new(), frames: 0, drag: None, born: Vec::new(), parts: (0, 0), fading: false, focus: cx.focus_handle(), wheel: 0, stage: None, ticking: false, draft_scale: 1.0, prev: None, restored: None, failed: false, back: raster::Backdrop::DARK, note: "No 3D model yet".into(), /* i18n-ok: the note is drawn through note_words */ reserve: 0.0, worker: Worker::spawn(tx),
             size: Arc::new(Mutex::new([0.0, 0.0, 1.0, 0.0, 0.0])), asked: (0, 0), latest: 0, on_screen: 0, floor: 0, counted: 0, stats: Stats::default() }
     }
     /// The background to draw on (the setting resolved by the window): a change draws the picture again at once, the camera untouched.
@@ -553,7 +584,9 @@ impl SolidPage {
                 self.failed = false;
                 let Some(mesh) = mesh else { cx.notify(); return };
                 if board || fresh { self.floor = self.latest + 1; } // pictures of the old board are stale; ones without the newest part are not
-                if fresh { let [pw, ph, _, _, _] = *self.size.lock().unwrap(); self.fit_aspect = pw / ph.max(1.0); self.touched = false; self.cam = Some(Camera::fit_to(mesh.center, mesh.radius, self.fit_aspect)); }
+                if fresh { let [pw, ph, _, _, _] = *self.size.lock().unwrap(); self.fit_aspect = pw / ph.max(1.0); self.touched = false; self.cam = Some(Camera::fit_to(mesh.center, mesh.radius, self.fit_aspect)); self.fitted = (mesh.center, mesh.radius); }
+                // a model coming in parts with nothing under them (a STEP streaming) grows: the camera follows it until the person moves it
+                else if !self.touched && refit(self.fitted, (mesh.center, mesh.radius)) { self.cam = Some(Camera::fit_to(mesh.center, mesh.radius, self.fit_aspect.max(0.05))); self.fitted = (mesh.center, mesh.radius); }
                 self.mesh = Some(mesh); self.note.clear(); self.ask_render(self.drag.is_some()); cx.notify();
             }
             Msg::Mesh(SolidFrame::Model(..) | SolidFrame::Parts(..) | SolidFrame::Part(..)) => {} // the worker makes these a Scene
@@ -601,7 +634,7 @@ impl SolidPage {
         if let Some(i) = self.image.take() { self.retired.push((i, self.frames)); }
         // its last picture at once (the same camera), a new one drawn behind it
         if let Some(i) = k.image { self.retired.retain(|(r, _)| !Arc::ptr_eq(r, &i)); self.image = Some(i); self.on_screen = self.latest; }
-        self.key = k.key; self.mesh = Some(k.mesh); self.cam = Some(k.cam); self.touched = k.touched; self.fit_aspect = k.fit_aspect; self.parts = k.parts;
+        self.fitted = (k.mesh.center, k.mesh.radius); self.key = k.key; self.mesh = Some(k.mesh); self.cam = Some(k.cam); self.touched = k.touched; self.fit_aspect = k.fit_aspect; self.parts = k.parts;
         let shown = std::time::Instant::now() - std::time::Duration::from_secs(1); self.born = vec![shown; k.groups]; self.restored = Some(k.groups);
         if self.stage.as_ref().is_some_and(|s| s.key == self.key) { self.stage = None; }
         self.note.clear(); self.failed = false; self.floor = self.latest + 1; self.asked = (0, 0); self.ask_render(false); cx.notify();
@@ -632,7 +665,7 @@ impl SolidPage {
     pub fn set_view(&mut self, name: &str) {
         let Some(m) = self.mesh.clone() else { return };
         let fitted = Camera::fit_to(m.center, m.radius, self.fit_aspect.max(0.05));
-        if name == "fit" { self.cam = Some(fitted); self.touched = false; }
+        if name == "fit" { self.cam = Some(fitted); self.touched = false; self.fitted = (m.center, m.radius); }
         else { self.cam = Some(fitted.named(name)); self.touched = true; }
         self.ask_render(false);
     }
@@ -722,7 +755,7 @@ impl Render for SolidPage {
         // a panel whose size differs from the last request re-renders at the right size
         let [pw, ph, sf, _, _] = *self.size.lock().unwrap();
         // the model was fitted before the panel's size was known: an untouched camera is fitted again to the real shape
-        if let Some(m) = self.mesh.clone() { if pw > 0.0 && ph > 0.0 && !self.touched && aspect_changed(self.fit_aspect, pw / ph) { self.fit_aspect = pw / ph; self.cam = Some(Camera::fit_to(m.center, m.radius, self.fit_aspect)); self.ask_render(false); } }
+        if let Some(m) = self.mesh.clone() { if pw > 0.0 && ph > 0.0 && !self.touched && aspect_changed(self.fit_aspect, pw / ph) { self.fit_aspect = pw / ph; self.cam = Some(Camera::fit_to(m.center, m.radius, self.fit_aspect)); self.fitted = (m.center, m.radius); self.ask_render(false); } }
         if self.mesh.is_some() && pw > 0.0 { let want = (((pw * sf) as usize).max(64), ((ph * sf) as usize).max(48)); if self.drag.is_none() && want.0 * want.1 <= MAX_PIXELS && want != self.asked && self.asked.0 * 2 != want.0 { self.ask_render(false); } }
         // the model is here and its first picture is being drawn (a big board on a machine without a usable GPU: a second or two): said, not blank
         let stage = { let t = self.stage_text(); if t.is_empty() && self.image.is_none() && self.mesh.is_some() { trs(DRAWING) } else { t } };
@@ -804,7 +837,8 @@ mod tests {
         assert!(!super::note_keeps_model("", "2|/b|"));
     }
     // not `use super::*`: that glob brings gpui's own `test` attribute macro into scope and #[test] then expands into itself
-    use super::{decode_mesh, parse_frame, render, wheel_zoom, Camera, Layers, Mesh, SolidFrame, add, mul, sub};
+    use super::{decode_mesh, parse_frame, render, wheel_zoom, Camera, Drawer, Layers, Mesh, SolidFrame, add, dot, mul, refit, sub};
+    use std::sync::Arc;
     use super::super::raster::smooth_normals;
     fn put(out: &mut Vec<u8>, mut v: u32) { loop { let b = (v & 0x7f) as u8; v >>= 7; if v == 0 { out.push(b); return } out.push(b | 0x80); } }
     fn zig(v: i32) -> u32 { ((v << 1) ^ (v >> 31)) as u32 }
@@ -1048,6 +1082,48 @@ mod tests {
     }
     fn parts_frame(key: &str, of: u8) -> Vec<u8> { let mut f = vec![0xa2]; cbor_text(&mut f, "key"); cbor_text(&mut f, key); cbor_text(&mut f, "parts"); f.push(0xa2); cbor_text(&mut f, "of"); f.push(of); cbor_text(&mut f, "rev"); cbor_text(&mut f, "1.2.3"); f }
     const ID: [f32; 12] = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0];
+    fn at(m: &Mesh, d: [f32; 3]) -> Arc<Mesh> { let mut m = m.clone(); for t in &mut m.tris { for k in 0..9 { t[k] += d[k % 3] } } m.center = add(m.center, d); Arc::new(m) }
+    #[test] fn parts_with_no_board_are_bounded_together_and_the_camera_follows_them_as_they_grow() {
+        let m = mesh(); let (a, b) = (at(&m, [0.0; 3]), at(&m, [10.0, 0.0, 0.0]));
+        let (c1, r1) = Layers::of(None, vec![a.clone()]).map(|l| (l.center, l.radius)).unwrap();
+        assert_eq!((c1, r1), (m.center, m.radius), "one part: its own");
+        let l = Layers::of(None, vec![a.clone(), b.clone()]).unwrap();
+        for p in [&a, &b] { assert!(dot(sub(p.center, l.center), sub(p.center, l.center)).sqrt() + p.radius <= l.radius + 1e-4, "every part inside") }
+        assert!((l.center[0] - (m.center[0] + 5.0)).abs() < 1e-4, "centred between them");
+        assert!(refit((c1, r1), (l.center, l.radius)), "a part far off: the camera fits again");
+        assert!(!refit((l.center, l.radius), (l.center, l.radius * 1.01)), "a hundredth: it stays");
+        let board = Layers::of(Some(a.clone()), vec![b.clone()]).unwrap();
+        assert_eq!((board.center, board.radius), (a.center, a.radius), "a board's parts never move its camera");
+    }
+    /// The client's share of opening a model, on real frames: decode (with the normals), the GPU's vertices, and one CPU picture. Opt in with
+    /// a folder of model frames as test/files/step_timing.mjs saves them: BP_FRAMES=<dir> cargo test real_frames -- --ignored --nocapture
+    #[test] #[ignore] fn real_frames_decode_and_draw_in_time() {
+        let Ok(dir) = std::env::var("BP_FRAMES") else { eprintln!("skipped: no BP_FRAMES"); return };
+        let mut fs: Vec<_> = std::fs::read_dir(&dir).unwrap().flatten().map(|e| e.path()).collect(); fs.sort();
+        for f in fs {
+            let b = std::fs::read(&f).unwrap();
+            let t = std::time::Instant::now();
+            let Some(SolidFrame::Model(_, m)) = parse_frame(&b) else { eprintln!("{}: not a model", f.display()); continue };
+            let decode = t.elapsed().as_secs_f64() * 1000.0;
+            let t = std::time::Instant::now(); let v = super::super::solid_gpu::bench_vertices(&m); let verts = t.elapsed().as_secs_f64() * 1000.0;
+            let cam = Camera::fitted(&m); let m = Arc::new(m); let l = Layers::of(Some(m.clone()), vec![]).unwrap();
+            let mut d = Drawer::default(); let t = std::time::Instant::now();
+            let px = d.cpu_mesh(&l).and_then(|mm| render(&mm, &cam, 1280, 800, 1, &|| true)); let cpu = t.elapsed().as_secs_f64() * 1000.0;
+            eprintln!("BENCH {} tris {} bytes {} decode {decode:.1} ms gpu-vertices {verts:.1} ms ({v}) cpu-picture-1280x800 {cpu:.1} ms {}", f.file_name().unwrap().to_string_lossy(), m.tris.len(), b.len(), if px.is_some() { "" } else { "(none)" });
+        }
+    }
+    #[test] fn the_cpu_mesh_grows_by_the_parts_that_came_and_is_the_same_as_made_whole() {
+        let m = mesh(); let (a, b, c) = (at(&m, [0.0; 3]), at(&m, [3.0, 0.0, 0.0]), at(&m, [0.0, 7.0, 0.0]));
+        let mut d = Drawer::default();
+        let made = d.cpu_mesh(&Layers::of(None, vec![a.clone(), b.clone()]).unwrap()).unwrap();
+        let grown = Layers::of(None, vec![a.clone(), b.clone(), c.clone()]).unwrap();
+        let now = d.cpu_mesh(&grown).unwrap();
+        assert_eq!(*now, grown.combined().unwrap(), "appended: what combining every layer again makes");
+        assert_eq!(now.tris.len(), made.tris.len() + c.tris.len());
+        assert!(Arc::ptr_eq(&now, &d.cpu_mesh(&grown).unwrap()), "the same layers: the same mesh");
+        let other = Layers::of(None, vec![b.clone(), a.clone()]).unwrap();
+        assert_eq!(*d.cpu_mesh(&other).unwrap(), other.combined().unwrap(), "other layers: made again");
+    }
     #[test] fn a_part_frame_places_its_model_at_every_instance_and_the_parts_frame_says_how_many() {
         assert_eq!(parse_frame(&parts_frame("2|b|", 7)), Some(SolidFrame::Parts("2|b|".into(), 7)));
         // the second instance: turned a quarter about z (x' = -y, y' = x) and moved 50 mm in x (5000 wire units)

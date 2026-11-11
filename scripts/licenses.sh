@@ -16,7 +16,7 @@ put() { # put DEST_SUBDIR FILE... : each file must exist
 }
 cp "$src/README.md" "$L/README.md"; cp "$root/LICENSE" "$L/LICENSE"
 
-# Bun: the notice names the pinned version, and the Bun that compiled the two programs must be that one
+# Bun: the notice names the pinned version, and the Bun that compiled backplane-browser must be that one
 pin=$(tr -d ' \r\n' < "$root/deploy/bun-version")
 grep -q "Bun $pin " "$src/bun/NOTICE.md" || die "deploy/licenses/bun/NOTICE.md does not name Bun $pin (deploy/bun-version): update the notices with the pin"
 grep -q "bun-v$pin" "$src/bun/NOTICE.md" || die "deploy/licenses/bun/NOTICE.md does not name bun-v$pin"
@@ -25,8 +25,7 @@ have=$(${BUN:-bun} --version 2>/dev/null | tr -d ' \r\n' || true)
 put bun "$src/bun/NOTICE.md" "$src/bun/LICENSE.md"
 pw=$root/tools/browser/node_modules/playwright-core
 put playwright-core "$pw/LICENSE" "$pw/NOTICE" "$pw/ThirdPartyNotices.txt"
-oc=$root/tools/step2glb/node_modules/occt-import-js
-put step2glb "$oc/dist/license.occt.txt" "$oc/dist/license.occt-import-js.txt"
+put step2glb "$src/step2glb/NOTICE.md" "$src/step2glb/LICENSE_LGPL_21.txt" "$src/step2glb/OCCT_LGPL_EXCEPTION.txt"   # OpenCascade, linked statically
 
 # CEF (every platform's client embeds it): CEF's licence, and Chromium's credits from the distribution the build used (the cef crate's OUT_DIR,
 # else the copy cef-dll-sys put beside the binary)

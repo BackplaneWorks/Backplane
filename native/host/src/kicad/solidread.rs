@@ -83,12 +83,20 @@ pub fn stage_name(path: &str) -> String {
     format!("{}.glb", if stem.is_empty() { "model" } else { &stem })
 }
 /// Pv.glb.staged: the export, in a folder of its own, promoted to `out` only when it worked; the folder goes either way
-fn export(step: bool, bare: bool, full: bool, path: &str, out: &str, cli: &str, tools: &[Mesher]) -> Ran {
+fn export(step: bool, bare: bool, full: bool, path: &str, out: &str, cli: &str, tools: &[Mesher], on: Option<&mut dyn FnMut(Streamed)>) -> Ran {
     if !step && cli.is_empty() { return Ran { code: 127, out: "KiCad is not installed on this machine (no kicad-cli): get it from kicad.org/download or its package manager".into() } }
     if let Some(d) = std::path::Path::new(out).parent() { let _ = std::fs::create_dir_all(d); }
     let Ok(dir) = stepglb::stage(out, "export-") else { return Ran { code: 3, out: "Unable to create model staging directory".into() } };
     let stage = dir.join(stage_name(path)); let at = stage.to_string_lossy().into_owned();
-    let r = if step { stepglb::convert(tools, path, &at, Some(stepglb::NORMAL), true) } else {
+    let r = if step {
+        // each batch read as it is said (its file goes when the tool is done) and given on as the model's triangles
+        let mut on = on;
+        let mut each = |e: stepglb::Event| if let Some(f) = on.as_mut() { match e {
+            stepglb::Event::Of { leaves, .. } => f(Streamed::Of(leaves)),
+            stepglb::Event::Part { leaves, glb, .. } => if let Some(ts) = std::fs::read(&glb).ok().and_then(|b| part_tris(&b)) { f(Streamed::Part { tris: ts, leaves }) },
+        } };
+        stepglb::convert_streaming(tools, path, &at, Some(stepglb::NORMAL), true, Some(&mut each))
+    } else {
         let a = flags(bare, full, &at, path);
         let mut argv = vec![cli]; argv.extend(a.iter().map(String::as_str));
         stepglb::run_merged(&argv, true)
@@ -96,6 +104,17 @@ fn export(step: bool, bare: bool, full: bool, path: &str, out: &str, cli: &str, 
     let r = stepglb::publish(r, &stage, out);
     let _ = std::fs::remove_dir_all(&dir);
     r
+}
+/// What a STEP's conversion gives as it goes: how many placed solids it has, then a batch of them meshed (triangles as `plot_of`'s, in
+/// metres and upright, not thinned), in the order they were done. The whole model comes after, as always.
+#[derive(Debug)]
+pub enum Streamed { Of(u32), Part { tris: Vec<glb::Tri3>, leaves: u32 } }
+/// A streamed batch's GLB as triangles in the axes and units of the STEP's whole model (`plot_of`); None when it has none.
+pub fn part_tris(bytes: &[u8]) -> Option<Vec<glb::Tri3>> {
+    let mut ts = glb::tris(bytes).ok()?;
+    if ts.is_empty() { return None }
+    solid::metres(&mut ts); solid::upright(&mut ts);
+    Some(ts)
 }
 /// Pv.solid.parse, without the cached text: a model's plot from its GLB
 pub fn plot_of(bytes: &[u8], step: bool) -> Result<Plot, glb::TooBig> {
@@ -110,13 +129,15 @@ pub fn warm(path: &str, tools: &[Mesher]) -> bool {
     if !is_step(path) || std::fs::metadata(path).map_or(true, |m| m.len() > 48 << 20) { return false }
     let out = glb_of(2, path);
     if stepglb::have(&out) { return false }
-    export(true, false, false, path, &out, "", tools).code == 0
+    export(true, false, false, path, &out, "", tools, None).code == 0
 }
 /// Pv.child.solid: what `--plot KIND FILE INFOS` does for a 3D model. The note (parts without a model) goes to `infos`, as the child left it.
-pub fn read(kind: u32, path: &str, cli: &str, tools: &[Mesher], infos: &str) -> Got {
+pub fn read(kind: u32, path: &str, cli: &str, tools: &[Mesher], infos: &str) -> Got { read_streaming(kind, path, cli, tools, infos, None) }
+/// `read`, a STEP not meshed yet streaming its parts to `on` while it is (a cached one, a board or a GLB says nothing there).
+pub fn read_streaming(kind: u32, path: &str, cli: &str, tools: &[Mesher], infos: &str, on: Option<&mut dyn FnMut(Streamed)>) -> Got {
     let (isglb, step) = (path.ends_with(".glb"), is_step(path));
     let out = glb_of(kind, path);
-    let r = if isglb || stepglb::have(&out) { Ran::default() } else { export(step, kind == 3, kind == 4, path, &out, cli, tools) };
+    let r = if isglb || stepglb::have(&out) { Ran::default() } else { export(step, kind == 3, kind == 4, path, &out, cli, tools, on) };
     if r.code != 0 { return fail(format!("3D export failed: {}", r.out.trim().chars().take(600).collect::<String>())) }
     plotgen::write_infos(infos, &missing_note(&r.out));
     let size = std::fs::metadata(&out).map(|m| m.len()).unwrap_or(0);
@@ -168,7 +189,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("bp-realboard-{}", std::process::id())); std::fs::create_dir_all(&dir).unwrap();
         let out = dir.join("board.glb").to_string_lossy().into_owned();
         let t = std::time::Instant::now();
-        let r = export(false, false, false, &board, &out, &cli, &[]);
+        let r = export(false, false, false, &board, &out, &cli, &[], None);
         assert_eq!(r.code, 0, "export: {}", r.out);
         let bytes = std::fs::read(&out).unwrap(); let _ = std::fs::remove_dir_all(&dir);
         let stem = std::path::Path::new(&board).file_stem().unwrap().to_string_lossy().into_owned();

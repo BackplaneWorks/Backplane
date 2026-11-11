@@ -143,7 +143,7 @@ IssueとPull Requestを歓迎します。ビルドには、Bun、Python 3.12以�
 
 ## ライセンス
 
-MIT。[LICENSE](LICENSE)をご覧ください。[KiCadフォーク](https://github.com/BackplaneWorks/Backplane_KiCad)には、KiCadのライセンスが引き続き適用されます。STEPコンバーターには、OpenCascadeと`occt-import-js`（LGPL-2.1）が含まれています。[サードパーティーのライセンス](tools/step2glb/README.md#license)をご覧ください。
+MIT。[LICENSE](LICENSE)をご覧ください。[KiCadフォーク](https://github.com/BackplaneWorks/Backplane_KiCad)には、KiCadのライセンスが引き続き適用されます。STEPコンバーター（`native/step2glb`）はOpen CASCADE Technology（LGPL-2.1、Open CASCADEの例外付き）をリンクしています。[サードパーティーのライセンス](deploy/licenses/step2glb/NOTICE.md)をご覧ください。
 
 <p align="center">
   <img src="docs/media/readme/cad/cats-footer-200.png" alt="Backplaneの猫たち" width="216" height="72">

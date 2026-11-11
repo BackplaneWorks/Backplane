@@ -72,6 +72,9 @@ impl Agents {
         match kc::commit_design(&root, &msg, &skip).await {
             Ok(r) if r.commit.is_empty() => {}
             Ok(r) => {
+                // a STEP written this turn is meshed now, in the background, so its first showing reads it from the cache
+                let steps: Vec<String> = r.files.iter().filter(|p| crate::files::kicad::solidread::is_step(p)).map(|p| format!("{root}/{p}")).collect();
+                if !steps.is_empty() { let home = self.hub.cfg.home.clone(); tokio::task::spawn_blocking(move || { let tools = crate::files::kicad::stepglb::machine(&home); for p in steps { crate::files::kicad::solidread::warm(&p, &tools); } }); }
                 let n = r.files.len();
                 let pushed = if r.pushed.is_empty() { String::new() } else if r.pushed.starts_with("not pushed") { format!("; {}", r.pushed) } else { format!(", pushed to {}", r.pushed) };
                 let left = if skip.is_empty() { String::new() } else { format!(" (left for its writer: {})", skip.iter().map(|d| d.rsplit('/').next().unwrap_or(d)).collect::<Vec<_>>().join(", ")) };

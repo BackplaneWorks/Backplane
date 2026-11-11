@@ -175,6 +175,11 @@ command -v bun >/dev/null 2>&1 || { [ -x "${BUN_INSTALL:-$HOME/.bun}/bin/bun" ] 
 command -v bun >/dev/null 2>&1 && { . "$ROOT/scripts/bun-pin.sh"; bun_pin_check bun; }   # a release builds it with deploy/bun-version's Bun
 if command -v bun >/dev/null 2>&1 && ( cd "$ROOT/tools/browser" && bun install --frozen-lockfile >/dev/null 2>&1 && bun build.ts "$D/backplane-browser" >/dev/null 2>&1 ); then :
 else prev=$DEV/builds/$(head -1 "$DEV/CURRENT" 2>/dev/null)/backplane-browser; [ -x "$prev" ] && cp "$prev" "$D/" || echo "warning: no browser helper built (bun missing or the build failed) and none to reuse" >&2; fi
+mark "step mesher"
+# the STEP mesher (native/step2glb, OpenCascade natively): the hub looks for `backplane-step2glb` beside itself; without one every STEP goes to
+# FreeCAD, seconds each. Built against the system's OpenCascade here (libocct-*-dev), kept between builds of the same sources.
+if sh "$ROOT/scripts/build-step2glb.sh" "$D/backplane-step2glb" > /dev/null 2> "$DEV/.step2glb-build.log"; then :
+else prev=$DEV/builds/$(head -1 "$DEV/CURRENT" 2>/dev/null)/backplane-step2glb; [ -x "$prev" ] && cp "$prev" "$D/" || echo "warning: no STEP mesher built (see $DEV/.step2glb-build.log) and none to reuse: STEP files go to FreeCAD" >&2; fi
 mark "assets"
 A=${ASSETS:-$DEV/builds/$(head -1 "$DEV/CURRENT" 2>/dev/null)/assets}; [ -d "$A" ] && cp -r "$A" "$D/assets"
 # the generated assets the client draws come from this checkout (assets/GENERATED.md: kept in the repo), never only from the build before: a build that carried the

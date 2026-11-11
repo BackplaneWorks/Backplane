@@ -151,7 +151,7 @@ Issues and pull requests are welcome. Building needs , Bun and Python 3.12+. Sta
 
 ## License
 
-MIT. See [LICENSE](LICENSE). The [KiCad fork](https://github.com/BackplaneWorks/Backplane_KiCad) retains KiCad's licensing. The STEP converter includes OpenCascade and `occt-import-js` (LGPL-2.1); see [third-party licensing](tools/step2glb/README.md#license).
+MIT. See [LICENSE](LICENSE). The [KiCad fork](https://github.com/BackplaneWorks/Backplane_KiCad) retains KiCad's licensing. The STEP converter (`native/step2glb`) links Open CASCADE Technology (LGPL-2.1 with Open CASCADE's exception); see [third-party licensing](deploy/licenses/step2glb/NOTICE.md).
 
 <p align="center">
   <img src="docs/media/readme/cad/cats-footer-200.png" alt="Three Backplane cats" width="216" height="72">

@@ -1,12 +1,11 @@
-# Bun in backplane-browser and backplane-step2glb
+# Bun in backplane-browser
 
-`backplane-browser` (the Browser tab's helper, tools/browser) and
-`backplane-step2glb` (the STEP to GLB mesher, tools/step2glb) are each one
+`backplane-browser` (the Browser tab's helper, tools/browser) is one
 executable made by `bun build --compile` with Bun 1.4.4 (https://bun.sh, source
 https://github.com/oven-sh/bun/tree/bun-v1.4.4; the version is pinned in
-`deploy/bun-version`, and a release built with any other Bun is refused). Each holds two things:
+`deploy/bun-version`, and a release built with any other Bun is refused). It holds two things:
 the Bun runtime, and Backplane's program (JavaScript built from this
-repository's `tools/browser` or `tools/step2glb`).
+repository's `tools/browser`).
 
 Bun is MIT-licensed. It statically links JavaScriptCore and parts of WebKit,
 which are under LGPL-2 (some files under BSD licenses), and tinycc, which is
@@ -23,15 +22,14 @@ under LGPL-2.1. The other libraries it links, and their licenses, are listed in
 - **tinycc:** https://github.com/tinycc/tinycc, commit
   `05f0fafaa3be31e31d7b4b5c17dc60f62c991171` (`TINYCC_COMMIT` in Bun's
   `scripts/build/deps/tinycc.ts`).
-- **Backplane's programs:** they are not linked into Bun's object code. Each is
+- **Backplane's program:** it is not linked into Bun's object code. It is
   a separate JavaScript program that Bun runs, and its source is this
-  repository at the commit in the archive's `COMMIT` file. To run one on a
+  repository at the commit in the archive's `COMMIT` file. To run it on a
   modified Bun, build it with that Bun:
 
   ```sh
-  BUN=/path/to/your/bun scripts/build-step2glb.sh   # dist/backplane-step2glb
   cd tools/browser && /path/to/your/bun build.ts backplane-browser
   ```
 
-`backplane-step2glb` also embeds OpenCascade through occt-import-js
-(LGPL-2.1): their notices are in `licenses/step2glb/`.
+(`backplane-step2glb`, the STEP mesher, is native code with no Bun in it: its
+notices are in `licenses/step2glb/`.)
