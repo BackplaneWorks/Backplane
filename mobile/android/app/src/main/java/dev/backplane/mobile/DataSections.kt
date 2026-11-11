@@ -16,6 +16,7 @@ import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -30,11 +31,11 @@ import org.json.JSONObject
 
 /** A row of a section: a thread, or a project (its `key` set) with its visible threads under it. */
 data class DSecRow(val id: String, val title: String, val word: String, val say: String, val want: String, val ago: String, val mark: DMark?, val project: String,
-    val off: Boolean, val nav: String, val pinned: Boolean, val key: String, val running: Int, val threads: List<DSecRow>, val css: String, val dots: List<Pair<Boolean, Boolean>>, val kind: String = "", val hide: String = "") {
+    val off: Boolean, val nav: String, val pinned: Boolean, val key: String, val running: Int, val threads: List<DSecRow>, val css: String, val dots: List<Pair<Boolean, Boolean>>, val kind: String = "", val hide: String = "", val icon: String = "") {
     companion object {
         fun of(o: JSONObject): DSecRow = DSecRow(o.optString("id"), o.optString("title"), o.optString("word"), o.optString("say"), o.optString("want"), o.optString("ago"),
             parseMark(o.optJSONObject("mark")), o.optString("project"), o.optBoolean("off"), o.optString("nav"), o.optBoolean("pinned"), o.optString("key"), o.optInt("running"),
-            list(o.optJSONArray("threads")), o.optString("css"), (0 until (o.optJSONArray("dots")?.length() ?: 0)).map { i -> o.getJSONArray("dots").getJSONObject(i).let { it.optBoolean("here") to it.optBoolean("dim") } }, o.optString("kind"), o.optString("hide"))
+            list(o.optJSONArray("threads")), o.optString("css"), (0 until (o.optJSONArray("dots")?.length() ?: 0)).map { i -> o.getJSONArray("dots").getJSONObject(i).let { it.optBoolean("here") to it.optBoolean("dim") } }, o.optString("kind"), o.optString("hide"), o.optString("icon"))
         fun list(a: JSONArray?): List<DSecRow> = (0 until (a?.length() ?: 0)).map { of(a!!.getJSONObject(it)) }
     }
     /** a live swarm's row (`kind` swarm): it opens the swarm's page, its room */
@@ -80,7 +81,10 @@ fun SectionThread(r: DSecRow, indent: Int = 12, showProject: Boolean = false, op
 @Composable
 fun SectionProject(r: DSecRow, faded: Boolean, onClick: () -> Unit, onLong: () -> Unit) {
     Row(Modifier.fillMaxWidth().height(38.dp).alpha(if (faded) .55f else 1f).combinedClickable(onClick = onClick, onLongClick = onLong).padding(horizontal = 12.dp).testTag("home.section.project.${r.key}"), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.size(8.dp).background(runCatching { Color(android.graphics.Color.parseColor(r.css)) }.getOrDefault(dcs.onSurfaceVariant))); Spacer(Modifier.width(8.dp))
+        // the project's icon in its colour (the hub's; an unknown name is the folder), or the logo for a project named Backplane
+        if (r.icon == "backplane") androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(if (dcs.background.luminance() > 0.5f) R.drawable.brand_light else R.drawable.brand_dark), null, Modifier.size(15.dp).testTag("home.section.logo.${r.key}"))
+        else androidx.compose.material3.Icon(badgeGlyph(r.icon), null, tint = runCatching { Color(android.graphics.Color.parseColor(r.css)) }.getOrDefault(dcs.onSurfaceVariant), modifier = Modifier.size(15.dp).testTag("home.section.icon.${r.key}"))
+        Spacer(Modifier.width(8.dp))
         DMono(r.title, dcs.onSurface, 13, Modifier.weight(1f, fill = false))
         if (r.dots.size > 1) { Spacer(Modifier.width(6.dp)); r.dots.forEach { (here, dim) -> DDot(if (dim) dfaint else if (here) dok else dcs.onSurfaceVariant, 5); Spacer(Modifier.width(3.dp)) } }
         Spacer(Modifier.weight(1f))
@@ -109,13 +113,17 @@ fun LazyListScope.sectionItems(open: (String) -> Unit, page: (DSecRow) -> Unit, 
 
 private const val PIN = "project-pin"
 private const val MOVE = "group-move"
-/** A project row's long press: pin or unpin it, move it to a group. */
+/** A project row's long press: pin or unpin it, its badge (icon, colour, Pick again), move it to a group. */
 @Composable
 fun SectionProjectMenu(p: DSecRow, newSwarm: (String) -> Unit = {}, close: () -> Unit) {
+    var badge by remember(p.id) { mutableStateOf(false) }
+    val proj = DataClient.projects.firstOrNull { it.id == p.id }
+    if (badge && proj != null) { BadgeSheet(proj) { badge = false; close() }; return }
+    val look: () -> Unit = { badge = true }
     val pin: () -> Unit = { DataClient.sidebarAct(PIN, p.key) }
     val swarm: () -> Unit = { newSwarm(p.id) }
     val moves = DataClient.groupsTo.map { (gid, label) -> val go: () -> Unit = { DataClient.sidebarAct(MOVE, p.key + "\u001f" + gid) }; Msg.gpui_sections_move_to(label) to go }
-    ActionSheet(p.title, listOf((if (p.pinned) Msg.sidebar_sections_unpin else Msg.sidebar_sections_pin) to pin) + (if (Swarms.on()) listOf(Msg.android_swarm_new to swarm) else emptyList()) + moves, close)
+    ActionSheet(p.title, listOf((if (p.pinned) Msg.sidebar_sections_unpin else Msg.sidebar_sections_pin) to pin) + (if (proj != null) listOf(Msg.gpui_badge to look) else emptyList()) + (if (Swarms.on()) listOf(Msg.android_swarm_new to swarm) else emptyList()) + moves, close)
 }
 @Composable
 fun SectionRename(s: DSection, close: () -> Unit) { TextPrompt(Msg.sidebar_sections_rename, s.title, Msg.menu_rename, close) { DataClient.sidebarAct("group-rename", s.group + "\u001f" + it) } }
