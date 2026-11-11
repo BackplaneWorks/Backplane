@@ -27,6 +27,12 @@ pub async fn run(hub: Arc<Hub>, sh: Arc<Shared>, b: Boat, from: String) {
     for (i, (id, _)) in STEPS.iter().enumerate().skip(start) {
         let o = sh.opts();
         if *id == "voice" && !o.dictation { sh.step(id, "skip", "Off: dictation stays on this computer."); continue }
+        if *id == "voice" {
+            // a build without the voice helper (an upload of a folder that has none) cannot hear there: said, not failed
+            let bid = b.sh(&sh.box_id(), &format!("head -1 {R}/CURRENT 2>/dev/null || true"), 30).await.unwrap_or_default();
+            let has = b.sh(&sh.box_id(), &format!("test -x {R}/builds/{}/backplane-voice && echo yes || echo no", bid.trim()), 30).await.unwrap_or_default();
+            if has.trim() == "no" { sh.step(id, "skip", "This build has no voice helper, so dictation stays on this computer."); continue }
+        }
         sh.step(id, "run", ""); sh.publish(&hub).await;
         let r = match *id {
             "create" => create(&hub, &sh, &b, &o).await,

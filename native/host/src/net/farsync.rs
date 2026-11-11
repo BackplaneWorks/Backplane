@@ -16,7 +16,22 @@ pub fn own_link(p: &Peers, machines_json: &Value, link: &str) -> bool {
     // (right after a start nothing is published yet, until the first pass of the machine finder has asked every machine /hello: a link the
     // person approved does not stop being theirs for those seconds, so the machine list only decides once it exists)
     let finding = machines_json.as_object().map_or(true, |o| o.is_empty());
-    p.verified(link) && !p.sync_off(&row.name) && (finding || machines::machine(machines_json, &row.name, &row.url).is_some())
+    // a link the finder could never list (the always-on Boat at its public address; a hub reached over its reverse link): the person's approval
+    // of the pairing is all there is to go on, and it holds. Without this, each end of a one-way link took the other for a stranger, and
+    // asked for anything (sign in there, the move check) it answered 403, which the asking side reads as an older Backplane.
+    p.verified(link) && !p.sync_off(&row.name) && (finding || !findable(&row.url) || machines::machine(machines_json, &row.name, &row.url).is_some())
+}
+/// An address the machine finder can list: on the tailnet (*.ts.net, 100.x), the local network or this computer. A public address and the
+/// reverse link's placeholder are not.
+pub fn findable(url: &str) -> bool {
+    if super::peering::over_link(url) { return false }
+    let h = machines::host(url).trim_start_matches('[').trim_end_matches(']').to_lowercase();
+    if h.ends_with(".ts.net") || h == "localhost" || !h.contains('.') { return true }
+    match h.parse::<std::net::IpAddr>() {
+        Ok(std::net::IpAddr::V4(a)) => { let o = a.octets(); a.is_loopback() || a.is_private() || a.is_link_local() || o[0] == 100 }
+        Ok(std::net::IpAddr::V6(a)) => a.is_loopback() || (a.segments()[0] & 0xfe00) == 0xfc00 || (a.segments()[0] & 0xffc0) == 0xfe80,
+        Err(_) => false,
+    }
 }
 /// The links whose mirrors the sidebar shows, with the machine's name: verified (the owner's own), not revoked, sync not set off.
 pub fn shown_names(peering: &Peering) -> Vec<(String, String)> {
