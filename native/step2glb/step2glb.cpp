@@ -87,8 +87,9 @@ static bool is_default(const Quantity_Color& c) {
   return true;
 }
 
-// One colour's triangles: positions (mm, xyz) and indices.
-struct Group { Rgb c; std::vector<float> p; std::vector<uint32_t> i; };
+// One colour's triangles: positions (mm, xyz) and indices, and the first vertex of each B-rep face in it (`extras.faces`: a face's
+// triangles use only its own vertices, so a reader knows each triangle's face, and smooths normals within a face, crisp across faces)
+struct Group { Rgb c; std::vector<float> p; std::vector<uint32_t> i; std::vector<uint32_t> faces; };
 struct Model {
   std::vector<Group> groups; std::unordered_map<uint32_t, size_t> at;
   Group& of(Rgb c) { uint32_t k = key_of(c); auto f = at.find(k); if (f != at.end()) return groups[f->second]; at[k] = groups.size(); groups.push_back(Group{c, {}, {}}); return groups.back(); }
@@ -114,8 +115,9 @@ static bool write_glb(const Model& m, const std::string& path, const std::string
     accs += ",{\"bufferView\":" + std::to_string(nv - 1) + ",\"componentType\":5125,\"count\":" + std::to_string(g.i.size()) + ",\"type\":\"SCALAR\"}"; na++;
     if (nm) { mats += ","; }
     mats += "{\"pbrMetallicRoughness\":{\"baseColorFactor\":[" + num(g.c.r) + "," + num(g.c.g) + "," + num(g.c.b) + ",1],\"metallicFactor\":0,\"roughnessFactor\":0.8}}"; nm++;
+    std::string fs; for (size_t k = 0; k < g.faces.size(); k++) { if (k) fs += ","; fs += std::to_string(g.faces[k]); }
     if (!prims.empty()) { prims += ","; }
-    prims += "{\"attributes\":{\"POSITION\":" + std::to_string(na - 2) + "},\"indices\":" + std::to_string(na - 1) + ",\"material\":" + std::to_string(nm - 1) + "}";
+    prims += "{\"attributes\":{\"POSITION\":" + std::to_string(na - 2) + "},\"indices\":" + std::to_string(na - 1) + ",\"material\":" + std::to_string(nm - 1) + ",\"extras\":{\"faces\":[" + fs + "]}}";
   }
   if (prims.empty()) return false;
   std::string nm_esc; for (char c : name) { if (c == '"' || c == '\\') nm_esc += '\\'; if ((unsigned char)c >= 0x20) nm_esc += c; }
@@ -182,6 +184,7 @@ static void add_leaf(Model& m, const Leaf& l, const Solid& s) {
     Group& g = m.of(c == s.colour.end() ? l.tint : c->second);
     const gp_Trsf T = fl.Transformation(); const bool flip = f.Orientation() == TopAbs_REVERSED;
     const uint32_t base = (uint32_t)(g.p.size() / 3); const int n = tr->NbNodes();
+    g.faces.push_back(base);
     for (int i = 1; i <= n; i++) { gp_Pnt p = tr->Node(i).Transformed(T); g.p.push_back((float)p.X()); g.p.push_back((float)p.Y()); g.p.push_back((float)p.Z()); }
     for (int t = 1; t <= tr->NbTriangles(); t++) {
       int a, b, c3; tr->Triangle(t).Get(a, b, c3); if (flip) std::swap(b, c3);

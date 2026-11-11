@@ -511,11 +511,11 @@ impl Plots {
                         let emit = |frame: Vec<u8>| me.stream_frame(&hub, &ky, stop, frame);
                         let mut on = |e: solidread::Streamed| match e {
                             solidread::Streamed::Of(of) => emit(plot::parts_frame(&ky, of, &rev)),
-                            solidread::Streamed::Part { tris, leaves } => {
+                            solidread::Streamed::Part { tris, faces, leaves } => {
                                 done += leaves;
                                 if tris.len() > STREAM_PART_TRIS { return } // a batch too big for one frame: the whole model brings it
                                 let (count, mesh) = solid::part_mesh(&tris); n += 1;
-                                emit(plot::part_frame(&ky, &format!("step{n}"), count, &mesh, &[IDENTITY], &[], done))
+                                emit(plot::part_frame_faces(&ky, &format!("step{n}"), count, &mesh, &[IDENTITY], &[], done, &faces))
                             }
                         };
                         solidread::read_streaming(kind, &f, &cli, &tools, &i, None, Some(&mut on))

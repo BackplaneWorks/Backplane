@@ -100,7 +100,7 @@ fn export(step: bool, bare: bool, full: bool, path: &str, out: &str, cli: &str, 
         let mut on = on;
         let mut each = |e: stepglb::Event| if let Some(f) = on.as_mut() { match e {
             stepglb::Event::Of { leaves, .. } => f(Streamed::Of(leaves)),
-            stepglb::Event::Part { leaves, glb, .. } => if let Some(ts) = std::fs::read(&glb).ok().and_then(|b| part_tris(&b)) { f(Streamed::Part { tris: ts, leaves }) },
+            stepglb::Event::Part { leaves, glb, .. } => if let Some((ts, faces)) = std::fs::read(&glb).ok().and_then(|b| part_tris(&b)) { f(Streamed::Part { tris: ts, faces, leaves }) },
         } };
         stepglb::convert_streaming(tools, path, &at, Some(detail), true, Some(&mut each))
     } else {
@@ -115,21 +115,25 @@ fn export(step: bool, bare: bool, full: bool, path: &str, out: &str, cli: &str, 
 /// What a STEP's conversion gives as it goes: how many placed solids it has, then a batch of them meshed (triangles as `plot_of`'s, in
 /// metres and upright, not thinned), in the order they were done. The whole model comes after, as always.
 #[derive(Debug)]
-pub enum Streamed { Of(u32), Part { tris: Vec<glb::Tri3>, leaves: u32 } }
-/// A streamed batch's GLB as triangles in the axes and units of the STEP's whole model (`plot_of`); None when it has none.
-pub fn part_tris(bytes: &[u8]) -> Option<Vec<glb::Tri3>> {
-    let mut ts = glb::tris(bytes).ok()?;
+pub enum Streamed { Of(u32), Part { tris: Vec<glb::Tri3>, faces: Vec<u8>, leaves: u32 } }
+/// A streamed batch's GLB as triangles in the axes and units of the STEP's whole model (`plot_of`), and its faces' runs; None when it has none.
+pub fn part_tris(bytes: &[u8]) -> Option<(Vec<glb::Tri3>, Vec<u8>)> {
+    let (mut ts, faces) = glb::tris_faces(bytes).ok()?;
     if ts.is_empty() { return None }
     solid::metres(&mut ts); solid::upright(&mut ts);
-    Some(ts)
+    let runs = solid::face_runs(&faces, ts.len());
+    Some((ts, runs))
 }
 /// Pv.solid.parse, without the cached text: a model's plot from its GLB
 pub fn plot_of(bytes: &[u8], step: bool) -> Result<Plot, glb::TooBig> {
-    let mut ts = glb::tris(bytes)?;
+    let (mut ts, faces) = glb::tris_faces(bytes)?;
     if step { solid::metres(&mut ts); solid::upright(&mut ts) } // a part from STEP stands Z up, in metres
-    // a STEP is sent as meshed while it fits (the grid of `thin` made small holes in big assemblies jagged); a board as always
+    // a STEP is sent as meshed while it fits (the grid of `thin` made small holes in big assemblies jagged), with its B-rep faces when
+    // its mesher said them and nothing was thinned; a board as always
     let ts = if step { solid::fit(ts, solid::STEP_TRIS) } else { solid::thin(ts) };
-    Ok(solid::plot(solid::of(&ts)))
+    let runs = if step { solid::face_runs(&faces, ts.len()) } else { vec![] };
+    let mut so = solid::of(&ts); if let Some(s) = so.as_mut() { s.faces = runs }
+    Ok(solid::plot(so))
 }
 /// A STEP part meshed into the models cache ahead of its showing (Mech's read-ahead): whether it was meshed now (false: already there,
 /// not a STEP, too big a file to mesh unasked, or it failed; a failure is meshed, and said, when the part is shown).

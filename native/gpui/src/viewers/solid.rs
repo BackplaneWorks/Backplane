@@ -45,7 +45,17 @@ impl<'a> Varints<'a> {
 }
 
 /// Mesh from the frame's `n` and `mesh` bytes. Errors when the bytes are not exactly `n` triangles. Coordinates wrap like the encoder's U32 deltas.
-pub fn decode_mesh(n: usize, bytes: &[u8]) -> Result<Mesh, String> {
+pub fn decode_mesh(n: usize, bytes: &[u8]) -> Result<Mesh, String> { decode_mesh_faces(n, bytes, &[]) }
+/// A frame's `faces` (runs: how many triangles in a row are of one B-rep face, varints) as each triangle's face; None when they are not
+/// exactly `n` triangles (then normals are creased by angle).
+pub fn face_ids(runs: &[u8], n: usize) -> Option<Vec<u32>> {
+    if runs.is_empty() { return None }
+    let mut v = Varints::new(runs); let mut out = Vec::with_capacity(n); let mut f = 0u32;
+    while v.more() { let k = v.next() as usize; if !v.valid || k == 0 || out.len() + k > n { return None } out.extend(std::iter::repeat(f).take(k)); f += 1; }
+    (out.len() == n).then_some(out)
+}
+/// `decode_mesh` with the frame's `faces` (empty: none).
+pub fn decode_mesh_faces(n: usize, bytes: &[u8], runs: &[u8]) -> Result<Mesh, String> {
     /* i18n-ok: the note is drawn through note_words */ if n == 0 || n > MAX_TRIANGLES || bytes.len() < n * 10 { return Err("Invalid or oversized model".into()) }
     let mut v = Varints::new(bytes);
     let (mut color, mut p) = (0u32, [0i32; 3]);
@@ -66,14 +76,16 @@ pub fn decode_mesh(n: usize, bytes: &[u8]) -> Result<Mesh, String> {
     /* i18n-ok: the note is drawn through note_words */ if v.more() || !v.valid { return Err("Unexpected model bytes".into()) }
     let center = [(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0, (lo[2] + hi[2]) / 2.0];
     let radius = (0..3).map(|a| (hi[a] - lo[a]) * (hi[a] - lo[a])).sum::<f32>().sqrt() / 2.0;
-    let normals = raster::smooth_normals(&tris, &keys);
+    let normals = raster::smooth_normals_in(&tris, &keys, face_ids(runs, n).as_deref());
     Ok(Mesh { tris, normals, colors, center, radius: radius.max(1e-3), groups: Vec::new() })
 }
 
 /// A part frame's model placed at each of its instances, in the page's axes (mm, the wire's y turned up, as `decode_mesh`). `at` is 12
 /// little-endian f32 an instance: the row-major 3 x 4 affine from the model's integer coordinates to the board model's. Errors when the
 /// bytes are not exactly `n` triangles or `at` is not whole instances.
-pub fn decode_part(n: usize, bytes: &[u8], at: &[u8]) -> Result<Mesh, String> {
+pub fn decode_part(n: usize, bytes: &[u8], at: &[u8]) -> Result<Mesh, String> { decode_part_faces(n, bytes, at, &[]) }
+/// `decode_part` with the frame's `faces` (each instance's triangles in the same faces as the model's).
+pub fn decode_part_faces(n: usize, bytes: &[u8], at: &[u8], runs: &[u8]) -> Result<Mesh, String> {
     /* i18n-ok: the note is drawn through note_words */ if n == 0 || n > MAX_TRIANGLES || bytes.len() < n * 10 { return Err("Invalid or oversized part".into()) }
     /* i18n-ok: the note is drawn through note_words */ if at.is_empty() || at.len() % 48 != 0 { return Err("Invalid part placement".into()) }
     let k = at.len() / 48;
@@ -109,7 +121,9 @@ pub fn decode_part(n: usize, bytes: &[u8], at: &[u8]) -> Result<Mesh, String> {
     }
     let center = [(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0, (lo[2] + hi[2]) / 2.0];
     let radius = (0..3).map(|a| (hi[a] - lo[a]) * (hi[a] - lo[a])).sum::<f32>().sqrt() / 2.0;
-    let normals = raster::smooth_normals(&tris, &keys);
+    // each instance's faces are the model's, numbered apart (a face of one instance never blends with another's)
+    let faces = face_ids(runs, n).map(|f| { let top = f.last().map_or(0, |x| x + 1); (0..k as u32).flat_map(|i| f.iter().map(move |x| x + i * top)).collect::<Vec<u32>>() });
+    let normals = raster::smooth_normals_in(&tris, &keys, faces.as_deref());
     Ok(Mesh { tris, normals, colors, center, radius: radius.max(1e-3), groups: Vec::new() })
 }
 
@@ -274,11 +288,13 @@ pub fn parse_frame(b: &[u8]) -> Option<SolidFrame> {
         /* i18n-ok: the note is drawn through note_words */ let (Some(Item::Bytes(mesh)), Some(Item::Bytes(at))) = (get("mesh"), get("at")) else { return Some(SolidFrame::Bad("part without its model".into())) };
         /* i18n-ok: the note is drawn through note_words */ let n = match get("n") { Some(Item::Int(n)) if *n > 0 => *n as usize, _ => return Some(SolidFrame::Bad("missing triangle count".into())) };
         let done = match get("done") { Some(Item::Int(d)) if *d >= 0 => *d as u32, _ => 0 };
-        return Some(match decode_part(n, mesh, at) { Ok(m) => SolidFrame::Part(key, m, done), Err(e) => SolidFrame::Bad(e) })
+        let runs = match get("faces") { Some(Item::Bytes(b)) => b.as_slice(), _ => &[] };
+        return Some(match decode_part_faces(n, mesh, at, runs) { Ok(m) => SolidFrame::Part(key, m, done), Err(e) => SolidFrame::Bad(e) })
     }
     let Some(Item::Bytes(mesh)) = get("mesh") else { return None }; // a note about the parts is not a model
     /* i18n-ok: the note is drawn through note_words */ let n = match get("n") { Some(Item::Int(n)) if *n > 0 => *n as usize, _ => return Some(SolidFrame::Bad("missing triangle count".into())) };
-    Some(match decode_mesh(n, mesh) { Ok(m) => SolidFrame::Model(key, m), Err(e) => SolidFrame::Bad(e) })
+    let runs = match get("faces") { Some(Item::Bytes(b)) => b.as_slice(), _ => &[] };
+    Some(match decode_mesh_faces(n, mesh, runs) { Ok(m) => SolidFrame::Model(key, m), Err(e) => SolidFrame::Bad(e) })
 }
 
 // ---- the camera: free orbit ------------------------------------------------------------------------------------
@@ -503,8 +519,24 @@ pub fn stage_line(text: &str, secs: u64, about_ms: u64) -> String {
     s
 }
 /// What the page asks of the window: the model of this source made again (its Retry, after the hub could not make it).
-pub enum SolidEvent { Retry(String) }
+/// `Refine`: the person zoomed in on a STEP: its solids near `at` (the model's millimetres) within `r`, meshed finer (kicad.refine).
+pub enum SolidEvent { Retry(String), Refine(String, [f32; 3], f32) }
 impl EventEmitter<SolidEvent> for SolidPage {}
+/// Whether a source's model can be refined: a STEP's (the Mech tab's parts; a board's model is made at its finest already).
+pub fn refinable(key: &str) -> bool {
+    let path = key.splitn(3, '|').nth(2).unwrap_or("").to_ascii_lowercase();
+    is_solid_key(key) && (path.ends_with(".step") || path.ends_with(".stp"))
+}
+/// How zoomed in a view must be for its part to be meshed finer: the half of the view it sees under this share of the model's size.
+pub const REFINE_AT: f32 = 0.35;
+/// What a view at rest asks to be refined: the point it looks at and the half-size of what it sees (with room around it), when it sees
+/// less than REFINE_AT of the model (`radius`: the model's); None when the model as meshed is fine enough at that size.
+pub fn refine_focus(cam: &Camera, radius: f32, aspect: f32) -> Option<([f32; 3], f32)> {
+    let half = (FOV / 2.0).tan() * cam.dist * aspect.max(1.0);
+    (half < radius * REFINE_AT).then(|| (cam.target, half * 1.5))
+}
+/// Whether the sphere `b` lies within the sphere `a` (a view inside one refined already asks nothing).
+pub fn covers(a: ([f32; 3], f32), b: ([f32; 3], f32)) -> bool { dot(sub(a.0, b.0), sub(a.0, b.0)).sqrt() + b.1 <= a.1 }
 /// The watch that asks the hub for a 3D source again: kind "3d" with the key's root and path ("2|<root>|<path>").
 pub fn retry_watch(key: &str) -> Option<serde_json::Value> {
     let mut p = key.splitn(3, '|');
@@ -516,7 +548,7 @@ pub fn retry_watch(key: &str) -> Option<serde_json::Value> {
 /// `image`: its last picture, as CPU bytes (out of the atlas; painted again when it comes back, while a new one is drawn).
 struct Kept { key: String, mesh: Arc<Layers>, cam: Camera, touched: bool, fit_aspect: f32, parts: (u32, u32), groups: usize, image: Option<Arc<RenderImage>> }
 pub struct SolidPage {
-    mesh: Option<Arc<Layers>>, key: String, cam: Option<Camera>, touched: bool, fit_aspect: f32, /** what the camera was last fitted to (centre, radius) */ fitted: ([f32; 3], f32), image: Option<Arc<RenderImage>>, /** pictures off the screen and the window frame they left it in (`collect`) */ retired: Vec<(Arc<RenderImage>, u64)>, frames: u64, drag: Option<(Drag, Point<Pixels>)>,
+    mesh: Option<Arc<Layers>>, key: String, cam: Option<Camera>, touched: bool, fit_aspect: f32, /** what the camera was last fitted to (centre, radius) */ fitted: ([f32; 3], f32), /** the regions of this model asked to be refined (`settled`) */ refined: Vec<([f32; 3], f32)>, image: Option<Arc<RenderImage>>, /** pictures off the screen and the window frame they left it in (`collect`) */ retired: Vec<(Arc<RenderImage>, u64)>, frames: u64, drag: Option<(Drag, Point<Pixels>)>,
     /** when each part group showed (its fade runs from then), the parts' progress (done, of), whether the last picture asked for was mid-fade */
     born: Vec<std::time::Instant>, parts: (u32, u32), fading: bool,
     /** the page's keys (0.14's: f/Home fit, 0-6 views, arrows turn, shift+arrows move, +/- zoom), taken when the model is pressed; the wheel's burst, to settle after it */ focus: FocusHandle, wheel: u64,
@@ -534,7 +566,7 @@ impl SolidPage {
                 if weak.update(cx, |this, cx| this.apply(msg, cx)).is_err() { break }
             }
         }).detach();
-        SolidPage { mesh: None, key: String::new(), cam: None, touched: false, fit_aspect: 0.0, fitted: ([0.0; 3], 0.0), image: None, retired: Vec::new(), frames: 0, drag: None, born: Vec::new(), parts: (0, 0), fading: false, focus: cx.focus_handle(), wheel: 0, stage: None, ticking: false, draft_scale: 1.0, prev: None, restored: None, failed: false, back: raster::Backdrop::DARK, note: "No 3D model yet".into(), /* i18n-ok: the note is drawn through note_words */ reserve: 0.0, worker: Worker::spawn(tx),
+        SolidPage { mesh: None, key: String::new(), cam: None, touched: false, fit_aspect: 0.0, fitted: ([0.0; 3], 0.0), refined: Vec::new(), image: None, retired: Vec::new(), frames: 0, drag: None, born: Vec::new(), parts: (0, 0), fading: false, focus: cx.focus_handle(), wheel: 0, stage: None, ticking: false, draft_scale: 1.0, prev: None, restored: None, failed: false, back: raster::Backdrop::DARK, note: "No 3D model yet".into(), /* i18n-ok: the note is drawn through note_words */ reserve: 0.0, worker: Worker::spawn(tx),
             size: Arc::new(Mutex::new([0.0, 0.0, 1.0, 0.0, 0.0])), asked: (0, 0), latest: 0, on_screen: 0, floor: 0, counted: 0, stats: Stats::default() }
     }
     /// The background to draw on (the setting resolved by the window): a change draws the picture again at once, the camera untouched.
@@ -576,6 +608,7 @@ impl SolidPage {
                     if let Some(m) = mesh { self.mesh = Some(m); self.ask_render(self.drag.is_some()); } cx.notify(); return
                 }
                 let fresh = key != self.key || self.cam.is_none();
+                if key != self.key { self.refined.clear(); }
                 self.key = key;
                 if reset { self.born.clear(); }
                 let now = std::time::Instant::now(); self.born.truncate(groups); while self.born.len() < groups { self.born.push(now); } // a part fades in from when it shows
@@ -674,8 +707,18 @@ impl SolidPage {
         self.touched = true; self.ask_render(true); self.wheel += 1; let n = self.wheel;
         cx.spawn(async move |weak, cx| {
             cx.background_executor().timer(std::time::Duration::from_millis(150)).await;
-            let _ = weak.update(cx, |this, _| if this.wheel == n && this.drag.is_none() { this.ask_render(false) });
+            let _ = weak.update(cx, |this, cx| if this.wheel == n && this.drag.is_none() { this.settled(cx) });
         }).detach();
+    }
+    /// The view came to rest: the full picture, and, zoomed in on a STEP part, its solids there asked to be meshed finer (once a region:
+    /// the finer model replaces this one when the hub has it, the camera where the person left it).
+    fn settled(&mut self, cx: &mut Context<Self>) {
+        self.ask_render(false);
+        let (Some(m), Some(c)) = (&self.mesh, self.cam) else { return };
+        if !refinable(&self.key) { return }
+        let Some(f) = refine_focus(&c, m.radius, self.fit_aspect.max(0.05)) else { return };
+        if self.refined.iter().any(|r| covers(*r, f)) { return }
+        self.refined.push(f); cx.emit(SolidEvent::Refine(self.key.clone(), f.0, f.1));
     }
     /// The page's keys, as 0.14's 3D view had them; whether the key was one of them.
     fn on_key(&mut self, e: &KeyDownEvent, cx: &mut Context<Self>) -> bool {
@@ -802,10 +845,10 @@ impl Render for SolidPage {
                 this.touched = true; if let Some(c) = &mut this.cam { match kind { Drag::Orbit => c.orbit(dx, dy), Drag::Pan => c.pan(dx, dy, h), Drag::Roll => c.roll(dx) } }
                 this.drag = Some((kind, e.position)); this.ask_render(true); // a draft while dragging, the full image on release. No repaint here: the picture's arrival is what repaints
             }))
-            .on_mouse_up(MouseButton::Left, cx.listener(|this, _: &MouseUpEvent, _, cx| { if this.drag.take().is_some() { this.ask_render(false); cx.notify(); } }))
-            .on_mouse_up_out(MouseButton::Left, cx.listener(|this, _: &MouseUpEvent, _, cx| { if this.drag.take().is_some() { this.ask_render(false); cx.notify(); } }))
-            .on_mouse_up(MouseButton::Right, cx.listener(|this, _: &MouseUpEvent, _, cx| { if this.drag.take().is_some() { this.ask_render(false); cx.notify(); } }))
-            .on_mouse_up(MouseButton::Middle, cx.listener(|this, _: &MouseUpEvent, _, cx| { if this.drag.take().is_some() { this.ask_render(false); cx.notify(); } }))
+            .on_mouse_up(MouseButton::Left, cx.listener(|this, _: &MouseUpEvent, _, cx| { if this.drag.take().is_some() { this.settled(cx); cx.notify(); } }))
+            .on_mouse_up_out(MouseButton::Left, cx.listener(|this, _: &MouseUpEvent, _, cx| { if this.drag.take().is_some() { this.settled(cx); cx.notify(); } }))
+            .on_mouse_up(MouseButton::Right, cx.listener(|this, _: &MouseUpEvent, _, cx| { if this.drag.take().is_some() { this.settled(cx); cx.notify(); } }))
+            .on_mouse_up(MouseButton::Middle, cx.listener(|this, _: &MouseUpEvent, _, cx| { if this.drag.take().is_some() { this.settled(cx); cx.notify(); } }))
             .on_scroll_wheel(cx.listener(|this, e: &ScrollWheelEvent, window, cx| {
                 let k = match e.delta { ScrollDelta::Pixels(p) => wheel_zoom(None, f32::from(p.y), e.modifiers.control), ScrollDelta::Lines(l) => wheel_zoom(Some(l.y), 0.0, e.modifiers.control) };
                 let [pw, ph, _, ox, oy] = *this.size.lock().unwrap();
@@ -1131,6 +1174,33 @@ mod tests {
             #[cfg(target_os = "linux")] if let Some(g) = super::super::solid_gpu::shared().lock().unwrap().as_mut() { if let Some(px) = g.render_layers(&[(&m, None)], &[], &c, w, h, &super::super::raster::Backdrop::DARK) { save(px, "gpu") } }
             eprintln!("CLOSE {} tris {}", f[1], m.tris.len());
         }
+    }
+    #[test] fn a_frames_faces_are_runs_of_triangles_and_wrong_ones_are_none() {
+        assert_eq!(super::face_ids(&[2, 1, 3], 6), Some(vec![0, 0, 1, 2, 2, 2]));
+        assert_eq!(super::face_ids(&[2, 1], 6), None, "fewer than the triangles: creased by angle instead");
+        assert_eq!(super::face_ids(&[0, 6], 6), None, "an empty run");
+        assert_eq!(super::face_ids(&[], 6), None);
+    }
+    #[test] fn within_a_face_normals_blend_and_across_faces_they_do_not_whatever_the_angle() {
+        // two triangles folded 20 degrees along a shared edge: one face (a curve's facets) or two (a shallow chamfer)
+        let a = 20f32.to_radians();
+        let t = vec![[0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0], [0.0, 0.0, 0.0, 0.0, -a.cos(), a.sin(), 1.0, 0.0, 0.0]];
+        let k: Vec<[i32; 3]> = t.iter().flat_map(|x| (0..3).map(|c| [(x[3 * c] * 1000.0) as i32, (x[3 * c + 1] * 1000.0) as i32, (x[3 * c + 2] * 1000.0) as i32]).collect::<Vec<_>>()).collect();
+        let one = super::super::raster::smooth_normals_in(&t, &k, Some(&[0, 0]));
+        let two = super::super::raster::smooth_normals_in(&t, &k, Some(&[0, 1]));
+        // the corner at the origin is corner 0 of both
+        let close = |p: &[f32], q: &[f32]| (0..3).all(|i| (p[i] - q[i]).abs() < 1e-5);
+        assert!(close(&one[0][0..3], &one[1][0..3]) && one[0][2] < 0.999, "one face: the shared corner has one normal, between the two");
+        assert!(close(&two[0][0..3], &[0.0, 0.0, 1.0]) && !close(&two[1][0..3], &[0.0, 0.0, 1.0]), "two faces: each keeps its own, the edge crisp");
+    }
+    #[test] fn a_step_zoomed_in_on_asks_once_for_its_region() {
+        assert!(super::refinable("2|/p|/p/mech/lid.step") && super::refinable("2|/p|/p/mech/LID.STP") && !super::refinable("2|/p|") && !super::refinable("2|/p|/p/m.glb"));
+        let m = mesh(); let mut c = Camera::fitted(&m);
+        assert_eq!(super::refine_focus(&c, m.radius, 1.5), None, "the whole model in view: the first mesh is fine");
+        c.dist = m.radius * 0.1;
+        let f = super::refine_focus(&c, m.radius, 1.5).expect("zoomed in");
+        assert_eq!(f.0, c.target);
+        assert!(super::covers(f, (f.0, f.1 * 0.5)) && !super::covers(f, (add(f.0, [f.1 * 2.0, 0.0, 0.0]), f.1)), "a closer look inside it asks nothing; one beside it asks");
     }
     #[test] fn the_cpu_mesh_grows_by_the_parts_that_came_and_is_the_same_as_made_whole() {
         let m = mesh(); let (a, b, c) = (at(&m, [0.0; 3]), at(&m, [3.0, 0.0, 0.0]), at(&m, [0.0, 7.0, 0.0]));

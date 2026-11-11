@@ -73,7 +73,7 @@ fn read_kept(b: &[u8]) -> Option<(super::super::plot::Solid, (f64, f64))> {
     let f = |i: usize| f64::from_le_bytes(b[i..i + 8].try_into().unwrap());
     let (n, bx) = (u(4), std::array::from_fn(|k| u(8 + 4 * k)));
     if n == 0 { return None }
-    Some((super::super::plot::Solid { n, b: bx, d: b[48..].to_vec() }, (f(32), f(40))))
+    Some((super::super::plot::Solid { n, b: bx, d: b[48..].to_vec(), faces: vec![] }, (f(32), f(40))))
 }
 /// The newest `keep` kept boards stay.
 fn prune_kept(dir: &Path, keep: usize) {

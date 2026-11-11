@@ -279,19 +279,28 @@ fn board_name<'a>(meshes: &Tbl<'a>, pcb: &'a str) -> &'a str {
 
 struct Gltf<'a> { accs: Tbl<'a>, views: Tbl<'a>, mats: Tbl<'a>, bin: Bin, pcb: &'a str }
 /// Prim.tris: a primitive's triangles onto `out` (only mode 4 draws); `name` is its mesh's
-fn prim(p: &J, name: &str, g: &Gltf, m: &M4, out: &mut Vec<Tri3>) -> Result<(), TooBig> {
+/// `faces`: each triangle's B-rep face onto it, numbered across the file from `next` (backplane-step2glb's `extras.faces`, the first vertex
+/// of each face); it is left as it is, and `next` unmoved, for a primitive that does not say them.
+fn prim(p: &J, name: &str, g: &Gltf, m: &M4, out: &mut Vec<Tri3>, faces: &mut Vec<u32>, next: &mut u32) -> Result<(), TooBig> {
     if p.get_u32("mode", 4) != 4 { return Ok(()) }
     let vs = positions(&Acc::of(g.accs.at(p.get_obj("attributes").get_u32("POSITION", 0)), &g.views), &g.bin, m)?;
     let col = if p.get("material").is_some() {
         let mat = g.mats.at(p.get_u32("material", 0));
         match layer_of(name, g.pcb) { (true, mask) => board_color(mat, mask), _ => color(mat) }
     } else { 13421772 };
+    let starts = p.get_obj("extras").u32s("faces");
+    let (first, said) = (out.len(), !starts.is_empty() && starts.windows(2).all(|w| w[0] < w[1]));
     let mut push = |a: [f32; 3], b: [f32; 3], c: [f32; 3]| { if out.len() >= MOST_TRIS { return Err(TooBig) } out.push(Tri3 { a, b, c, color: col }); Ok(()) };
     if let Some(J::Num(r)) = p.get("indices") {
         let ix = indices(&Acc::of(g.accs.at(u32_read(r).unwrap_or(0)), &g.views), &g.bin)?;
         let m = mask(vs.len());
         let at = |i: u32| vs.get((i as u64 & m) as usize).copied().unwrap_or([0.0; 3]);
         for t in ix.chunks_exact(3) { push(at(t[0]), at(t[1]), at(t[2]))? }
+        if said {
+            faces.resize(first, u32::MAX); // a primitive before that said none
+            for t in ix.chunks_exact(3) { faces.push(*next + (starts.partition_point(|s| *s <= t[0]).max(1) - 1) as u32) }
+            *next += starts.len() as u32;
+        }
     } else { for t in vs.chunks_exact(3) { push(t[0], t[1], t[2])? } }
     Ok(())
 }
@@ -307,12 +316,14 @@ pub fn kicad_board(bs: &[u8]) -> String {
     if !extras.get_str("generator", "").starts_with("KiCad") { return String::new() }
     board_name(&Tbl { xs: j.get_obj("meshes").elems() }, extras.get_str("pcb_name", "")).to_string()
 }
-pub fn tris(bs: &[u8]) -> Result<Vec<Tri3>, TooBig> {
+pub fn tris(bs: &[u8]) -> Result<Vec<Tri3>, TooBig> { tris_faces(bs).map(|t| t.0) }
+/// `tris`, and each triangle's B-rep face where the file says them (backplane-step2glb's GLB: `extras.faces`); else none (empty).
+pub fn tris_faces(bs: &[u8]) -> Result<(Vec<Tri3>, Vec<u32>), TooBig> {
     let u32_at = |at: u64| word_at(bs, at);
-    if u32_at(0) != 1179937895 { return Ok(vec![]) }
+    if u32_at(0) != 1179937895 { return Ok((vec![], vec![])) }
     let jl = u32_at(12) as usize;
     let json = bs.get(20..).map(|r| &r[..jl.min(r.len())]).unwrap_or(&[]);
-    let Some(j) = parse(&String::from_utf8_lossy(json))? else { return Ok(vec![]) };
+    let Some(j) = parse(&String::from_utf8_lossy(json))? else { return Ok((vec![], vec![])) };
     let rest = 20u64 + jl as u64;
     let n = (u32_at(rest) / 4) as usize; // BIN's words, as many as the file holds
     let body = usize::try_from(rest + 8).ok().and_then(|at| bs.get(at..)).unwrap_or(&[]);
@@ -326,15 +337,18 @@ pub fn tris(bs: &[u8]) -> Result<Vec<Tri3>, TooBig> {
     // Walk.go: depth first over the node forest, the first child next; fuel bounds the visits
     let mut work: Vec<(u32, M4)> = roots.iter().rev().map(|r| (*r, ID)).collect();
     let (mut fuel, mut out) = (nodes.xs.len().saturating_mul(2).saturating_add(16), vec![]);
+    let (mut faces, mut next) = (vec![], 0u32);
     while let Some((idx, m)) = work.pop() {
         if fuel == 0 { break }
         fuel -= 1;
         let n = nodes.at(idx); let w = m.mul(&M4::of_node(n));
         work.extend(n.u32s("children").iter().rev().map(|k| (*k, w)));
         if work.len() > MOST_WALK { return Err(TooBig) }
-        if n.get("mesh").is_some() { let mesh = meshes.at(n.get_u32("mesh", 0)); for p in mesh.get_obj("primitives").elems() { prim(p, mesh.get_str("name", ""), &g, &w, &mut out)? } }
+        if n.get("mesh").is_some() { let mesh = meshes.at(n.get_u32("mesh", 0)); for p in mesh.get_obj("primitives").elems() { prim(p, mesh.get_str("name", ""), &g, &w, &mut out, &mut faces, &mut next)? } }
     }
-    Ok(out)
+    // faces only when every triangle has one (a file that says them for some primitives only is read as one that says none)
+    if faces.len() != out.len() || faces.contains(&u32::MAX) { faces.clear() }
+    Ok((out, faces))
 }
 
 #[cfg(test)]
@@ -358,6 +372,18 @@ pub mod tests {
     #[test] fn not_a_glb_is_no_triangles() {
         assert!(tris(b"").unwrap().is_empty()); assert!(tris(b"glTX0000000000000000000000000000").unwrap().is_empty());
         let mut bad = one(); bad[20] = b'['; bad[21] = b'['; assert!(tris(&bad).unwrap().is_empty());
+    }
+    #[test] fn a_steps_faces_are_read_by_their_first_vertex_and_numbered_across_primitives() {
+        // two primitives over one buffer: six corners, two faces in the first (from vertex 0 and 3), one in the second
+        let pos: Vec<f32> = (0..6).flat_map(|i| [i as f32, 0.0, (i % 2) as f32]).collect();
+        let ix: Vec<u8> = [0u32, 1, 2, 3, 4, 5, 2, 1, 0].iter().flat_map(|x| x.to_le_bytes()).collect();
+        let ix2: Vec<u8> = [0u32, 1, 2].iter().flat_map(|x| x.to_le_bytes()).collect();
+        let mut bin = floats(&pos); let (i1, i2) = (bin.len(), bin.len() + ix.len()); bin.extend(&ix); bin.extend(&ix2);
+        let json = |second: &str| format!(r#"{{"scenes":[{{"nodes":[0]}}],"nodes":[{{"mesh":0}}],"meshes":[{{"primitives":[{{"attributes":{{"POSITION":0}},"indices":1,"extras":{{"faces":[0,3]}}}},{{"attributes":{{"POSITION":0}},"indices":2{second}}}]}}],"accessors":[{{"bufferView":0,"componentType":5126,"count":6,"type":"VEC3"}},{{"bufferView":1,"componentType":5125,"count":9,"type":"SCALAR"}},{{"bufferView":2,"componentType":5125,"count":3,"type":"SCALAR"}}],"bufferViews":[{{"byteOffset":0,"byteLength":{i1}}},{{"byteOffset":{i1},"byteLength":36}},{{"byteOffset":{i2},"byteLength":12}}]}}"#);
+        let (ts, faces) = tris_faces(&glb(&json(r#","extras":{"faces":[0]}"#), &bin)).unwrap();
+        assert_eq!((ts.len(), faces), (4, vec![0, 1, 0, 2]), "a triangle's face is the last that starts at or before its first corner");
+        let (ts, faces) = tris_faces(&glb(&json(""), &bin)).unwrap();
+        assert_eq!((ts.len(), faces.len()), (4, 0), "a primitive that says none: the file says none");
     }
     #[test] fn nodes_compose_translation_and_children_first_child_first() {
         let j = TRI.replace(r#""nodes":[{"mesh":0}]"#, r#""nodes":[{"translation":[1,2,3],"children":[1,2]},{"mesh":0,"scale":[2,2,2]},{"mesh":0,"matrix":[1,0,0,0,0,1,0,0,0,0,1,0,5,0,0,1]}]"#);
