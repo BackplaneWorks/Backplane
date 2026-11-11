@@ -30,12 +30,44 @@ fn default_part(ps: &[String]) -> Option<&String> {
 }
 /// The part on show: the one chosen (`@mech.part:<thread>`) while the listing still has it, else the default.
 pub fn mech_current(ps: &[String], chosen: &str) -> Option<String> { ps.iter().find(|p| p.as_str() == chosen).or_else(|| default_part(ps)).cloned() }
+/// A model's path as Mech keeps it: from the root with `/` when it is under the root (either separator, as Windows writes it), else as given (absolute).
+pub fn rel_in(root: &str, p: &str) -> String {
+    if root.is_empty() { return p.to_string() }
+    let (r, q) = (root.replace('\\', "/"), p.replace('\\', "/"));
+    let r = r.trim_end_matches('/');
+    let eq = |a: &str, b: &str| if cfg!(windows) { a.eq_ignore_ascii_case(b) } else { a == b };
+    match q.get(..r.len()) { Some(head) if eq(head, r) && q[r.len()..].starts_with('/') => q[r.len() + 1..].to_string(), _ => p.to_string() }
+}
+/// A file Mech draws: a STEP, STP or GLB, any case.
+pub fn is_model(p: &str) -> bool { let l = p.to_ascii_lowercase(); [".step", ".stp", ".glb"].iter().any(|x| l.ends_with(x)) }
 fn abs_of(root: &str, rel: &str) -> String { if crate::plat::fs::is_abs(rel) { rel.to_string() } else { format!("{root}/{rel}") } }
+/// viewer_show's check before it answers (the client's `shown` decides the page from the same kind and path): why this cannot be shown, None
+/// when it can. A model for Mech must be a STEP, STP or GLB file that is there; a kind the viewer has no page for is refused, never acknowledged
+/// while another part is drawn. A relative path is from one of `roots` (the thread's design folder and its own).
+pub fn show_refusal(kind: &str, path: &str, roots: &[String]) -> Option<String> {
+    let l = path.to_ascii_lowercase();
+    let there = || if crate::plat::fs::is_abs(path) { std::path::Path::new(path).is_file() } else { roots.iter().any(|r| !r.is_empty() && std::path::Path::new(r).join(path).is_file()) };
+    match kind {
+        "mech" if path.is_empty() => None,
+        "mech" | "3d" if is_model(path) => (!there()).then(|| format!("no such file: {path} (Mech shows a STEP, STP or GLB file that exists)")),
+        "mech" => Some(format!("Mech shows STEP, STP and GLB files, not {path}")),
+        "board" | "pcb" | "schematic" | "sch" | "3d" | "split" | "browser" | "files" | "review" => None,
+        "" if is_model(path) => (!there()).then(|| format!("no such file: {path}")),
+        "" if l.ends_with(".kicad_pcb") || l.ends_with(".kicad_sch") => None,
+        "" => Some(format!("the viewer has no page for {path}: give a kind (board, schematic, 3d, mech, files) or a .kicad_pcb, .kicad_sch, .step or .glb")),
+        k => Some(format!("unknown viewer kind {k:?} (board, schematic, 3d, mech, split, files, review)")),
+    }
+}
 /// The source a Mech page asks the hub for: the part as a 3D model ("" with no part).
 /// A project's parts: listed from its folder here; a project on another machine from that machine's listing of its `mech/` (net/farfiles.rs:
-/// the first draw has none yet, the next has them), with the part an agent showed kept even before then.
+/// the first draw has none yet, the next has them), with the part an agent showed kept even before then. Here too a model asked for
+/// outside `mech/` (a board's GLB in build/, a vendor STEP anywhere) is kept first while it is there: viewer_show shows what it names (issue 1102).
 fn parts_of(root: &str, sel: &str, chosen: &str) -> Vec<String> {
-    if !sel.contains('~') { return mech_parts(root) }
+    if !sel.contains('~') {
+        let mut ps = mech_parts(root);
+        if !chosen.is_empty() && is_model(chosen) && !ps.iter().any(|p| p == chosen) && std::path::Path::new(&abs_of(root, chosen)).is_file() { ps.insert(0, chosen.to_string()) }
+        return ps
+    }
     let mut ps = match crate::net::farfiles::listing(sel, "mech") { Some(Ok(t)) => parts_in_listing(&t), _ => vec![] };
     if !chosen.is_empty() && !ps.iter().any(|p| p == chosen) { ps.insert(0, chosen.to_string()) }
     ps
@@ -123,7 +155,7 @@ pub fn view_action(st: &State, hub: &str, session: &Value, kind: &str) -> Option
     let part = if kind == "mech" && part.is_empty() { kept_part.as_str() } else { part };
     // (a board picked in the Boards menu stays the one shown on Board, Schematic, 3D and Split: its file is the source)
     let picked = if matches!(kind, "board" | "schematic" | "3d" | "split") { board_file(kind, &root, &chosen_board(d, sel)) } else { String::new() };
-    let (want, wkind, wpath, board) = if kind == "mech" { let part = part.strip_prefix(&format!("{root}/")).unwrap_or(part); let ps = parts_of(&root, sel, part); let (w, a) = mech_want(&root, &ps, part); let k = if w.is_empty() { "" } else { "3d" }; (w, k.to_string(), a, String::new()) }
+    let (want, wkind, wpath, board) = if kind == "mech" { let part = rel_in(&root, part); let ps = parts_of(&root, sel, &part); let (w, a) = mech_want(&root, &ps, &part); let k = if w.is_empty() { "" } else { "3d" }; (w, k.to_string(), a, String::new()) }
         else { let base = key(kind, &root); let want = if base.is_empty() { base } else { format!("{base}{picked}") };
             // (Split watches its three sources from the board: the path stays its schematic's sheet, "" the root)
             if kind == "split" { (want, kind.to_string(), String::new(), picked.clone()) } else { (want, kind.to_string(), picked.clone(), String::new()) } };
@@ -133,7 +165,7 @@ pub fn view_action(st: &State, hub: &str, session: &Value, kind: &str) -> Option
     let mut drafts = serde_json::Map::new();
     drafts.insert(format!("@view.file:{sel}"), json!(if kind == "split" { "" } else { picked.as_str() })); drafts.insert(format!("@view:{sel}"), json!(kind));
     drafts.insert(format!("@view.sheet:{sel}"), json!(""));
-    if kind == "mech" { drafts.insert(format!("@mech.part:{sel}"), json!(part.strip_prefix(&format!("{root}/")).unwrap_or(part))); } // another page leaves Mech's choice as it is
+    if kind == "mech" { drafts.insert(format!("@mech.part:{sel}"), json!(rel_in(&root, part))); } // another page leaves Mech's choice as it is
     for k in ["@pick", "@card", "@pick.rid"] { drafts.insert(k.into(), json!("")); }
     if want != at {
         // View.ask: the kind, the root, the path ("" for the project's own file) and the board tree ("")
@@ -240,9 +272,10 @@ pub fn boards_look(st: &State, hub: &str, session: &Value) -> Option<Vec<Value>>
 pub fn mech_action(st: &State, hub: &str, session: &Value, rel: &str, refresh: bool) -> Option<ViewOut> {
     let sel = s(session, "sel");
     if !simple(st, session, sel) || s(&session["drafts"], &format!("@view:{sel}")) != "mech" { return None }
-    let root = root_of(st, sel); let ps = mech_parts(&root);
-    let rel = rel.strip_prefix(&format!("{root}/")).unwrap_or(rel); // viewer_show names a part by its absolute path
+    let root = root_of(st, sel);
+    let rel = rel_in(&root, rel); let rel = rel.as_str(); // viewer_show names a part by its absolute path
     let chosen = if refresh { s(&session["drafts"], &format!("@mech.part:{sel}")) } else { rel };
+    let ps = parts_of(&root, sel, chosen);
     let (want, abs) = mech_want(&root, &ps, chosen);
     let mut rid = session["rid"].as_u64().unwrap_or(0); let mut before = vec![]; let mut drafts = serde_json::Map::new();
     if !refresh { drafts.insert(format!("@mech.part:{sel}"), json!(rel)); }
@@ -1034,6 +1067,49 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
 
+    /// Issue 1102: a GLB or STEP shown from outside mech/ (build/f1_model/picobiscuit.glb) is the part on show, not mech/'s first.
+    #[test] fn a_model_shown_from_outside_mech_is_the_one_drawn() {
+        let d = std::env::temp_dir().join(format!("bp-mech-out-{}", std::process::id())).join("my project"); let _ = std::fs::remove_dir_all(&d);
+        std::fs::create_dir_all(d.join("mech")).unwrap(); std::fs::create_dir_all(d.join("build/f1 model")).unwrap();
+        for f in ["mech/littelfuse.step", "build/f1 model/pico biscuit.glb"] { std::fs::write(d.join(f), "x").unwrap(); }
+        let root = d.to_string_lossy().into_owned();
+        let mut st = State::new(); for l in include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/slim/fixtures/thread-log.jsonl")).lines() { st.apply_line(l); }
+        let th = "t1700000003-8"; let proj = st.threads.get(th).map(|t| t.project.clone()).unwrap();
+        if let Some(p) = st.projects.get_mut(&proj) { p.root = root.clone(); }
+        let glb = d.join("build/f1 model/pico biscuit.glb").to_string_lossy().into_owned();
+        let session = json!({"sel": th, "rid": 1, "drafts": {}, "open": {}, "adding": false, "panel": false, "info": {}});
+        let o = view_action(&st, "h", &session, &format!("mech\t{glb}")).unwrap();
+        assert_eq!(o.patch["drafts"][format!("@mech.part:{th}")], "build/f1 model/pico biscuit.glb");
+        let w: Value = serde_json::from_str(o.before[0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(w["p"]["path"].as_str().map(|p| p.replace('\\', "/")), Some(glb.replace('\\', "/")), "the GLB asked for is watched, not mech/littelfuse.step");
+        let mut s2 = session.clone(); crate::session::patch::merge(&mut s2, &o.patch);
+        let template: Value = serde_json::from_str::<Value>(include_str!("thread_static.json")).unwrap()["viewer"].clone();
+        let v = viewer_json(&st, &template, &s2).unwrap();
+        assert_eq!(v["mech"]["rel"], "build/f1 model/pico biscuit.glb"); assert_eq!(v["mech"]["parts"][0]["on"], true); assert_eq!(v["mech"]["parts"][1]["on"], false);
+        // a chip pressed (mech-part) and a refresh keep it too; one outside the project is kept by its absolute path
+        let o = mech_action(&st, "h", &s2, &glb, true).unwrap(); assert!(o.before.is_empty(), "refresh: still that GLB");
+        let far = std::env::temp_dir().join(format!("bp-mech-far-{}.step", std::process::id())); std::fs::write(&far, "x").unwrap(); let fs = far.to_string_lossy().into_owned();
+        assert_eq!(parts_of(&root, th, &fs)[0], fs);
+        assert_eq!(parts_of(&root, th, "mech/gone.step"), ["mech/littelfuse.step"], "a file that is not there is not listed");
+        let _ = std::fs::remove_file(&far); let _ = std::fs::remove_dir_all(&d);
+    }
+    #[test] fn paths_are_kept_from_the_root_whatever_the_separator() {
+        assert_eq!(rel_in("/p/x", "/p/x/mech/a.step"), "mech/a.step"); assert_eq!(rel_in("/p/x/", "/p/x/build/b.glb"), "build/b.glb");
+        assert_eq!(rel_in("/p/x", "/p/xy/a.step"), "/p/xy/a.step", "a sibling folder is not the root"); assert_eq!(rel_in("/p/x", "mech/a.step"), "mech/a.step");
+        assert_eq!(rel_in(r"C:\Users\a b\proj", r"C:\Users\a b\proj\build\m.glb"), "build/m.glb"); assert_eq!(rel_in("C:/p", r"C:\p\mech\a.step"), "mech/a.step");
+        assert_eq!(rel_in(r"C:\p", r"D:\q\a.step"), r"D:\q\a.step");
+    }
+    #[test] fn viewer_show_refuses_what_it_cannot_show() {
+        let d = std::env::temp_dir().join(format!("bp-vs-ref-{}", std::process::id())); std::fs::create_dir_all(d.join("mech")).unwrap(); std::fs::write(d.join("mech/a.STEP"), "x").unwrap();
+        let (root, abs) = (d.to_string_lossy().into_owned(), d.join("mech/a.STEP").to_string_lossy().into_owned()); let roots = [root.clone()];
+        for (k, p) in [("mech", abs.as_str()), ("mech", "mech/a.STEP"), ("3d", abs.as_str()), ("", abs.as_str()), ("mech", ""), ("board", ""), ("schematic", "x.kicad_sch"), ("", "b.kicad_pcb"), ("files", ""), ("3d", "")] {
+            assert_eq!(show_refusal(k, p, &roots), None, "{k} {p}");
+        }
+        for (k, p) in [("mech", "mech/gone.step"), ("mech", "board.kicad_pcb"), ("", "notes.md"), ("teapot", ""), ("3d", "mech/gone.glb")] {
+            assert!(show_refusal(k, p, &roots).is_some(), "{k} {p}");
+        }
+        let _ = std::fs::remove_dir_all(&d);
+    }
     #[test] fn a_sheet_is_part_of_the_schematics_source_and_is_watched_by_its_file() {
         let template: Value = serde_json::from_str::<Value>(include_str!("thread_static.json")).unwrap()["viewer"].clone();
         let drafts = json!({"@view.sheet:t1": "/p/amp.kicad_sch"});

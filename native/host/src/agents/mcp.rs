@@ -229,6 +229,8 @@ impl Mcp {
                 // the answer carries what the viewer then shows (kind, source, part, sheet, layer, selection) as the client reports it; a client that does not answer in 2 s leaves the last report, marked
                 // a canonical board named by its worktree twin shows main's live copy
                 let shown = crate::files::kicad::canonical::route(sv(&a, "path"));
+                let cwd = ag.world().await.cwd(thread); let roots = [crate::files::kicad::canonical::design_root(&cwd), cwd];
+                if let Some(why) = crate::present::viewer::show_refusal(sv(&a, "kind"), &shown, &roots) { fail(&why) } else {
                 let before = crate::files::kicad::watch::viewer_state(thread).0;
                 ag.hub.push_all(&json!({"t":"view","thread":thread,"path":shown,"kind":sv(&a, "kind")}));
                 // (the owner's windows on other machines show it too)
@@ -236,6 +238,7 @@ impl Mcp {
                 let mut now = crate::files::kicad::watch::viewer_state(thread);
                 for _ in 0..40 { if now.0 > before { break } tokio::time::sleep(std::time::Duration::from_millis(50)).await; now = crate::files::kicad::watch::viewer_state(thread); }
                 (true, json!({"shown":shown,"viewer":now.1,"settled":now.0 > before}))
+                }
             }
             n if ag.tool_sets().iter().any(|s| s.owns(n)) => {
                 // a board or schematic written directly holds its document's lock, as a KiCad write does
