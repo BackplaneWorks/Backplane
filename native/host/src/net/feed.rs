@@ -203,7 +203,11 @@ impl Feed {
         Value::Array(out)
     }
 }
-impl Observer for Feed { fn committed(&self, _h: &Arc<Hub>, events: &[Value], first_seq: u32) { self.observe(events, first_seq) } }
+impl Observer for Feed {
+    fn committed(&self, _h: &Arc<Hub>, events: &[Value], first_seq: u32) { self.observe(events, first_seq) }
+    /// imported history is this hub's history: indexed and pushed like a commit (a mirror that misses it would never pull it: the index answers pulls)
+    fn imported(&self, _h: &Arc<Hub>, events: &[Value], first_seq: u32) { self.observe(events, first_seq) }
+}
 
 /// Far.history: the first durable change (its text), with a mark when the log holds lines this build cannot decode,
 /// identifies the history; its signature is the epoch a peer pins. "" for an empty log. `view:N` is what is shared: a build that shares more
