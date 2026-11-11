@@ -158,14 +158,13 @@ fn welcome(f: &Facts, c: &Client) -> Step {
     Step { id: "welcome", group: "", title: "Welcome to Backplane".into(), body, rows, choices: vec![], panel: String::new(), done: !f.home.is_empty(), task: false, accept: false }
 }
 
-/// The anonymous-usage switch, one row.
+/// The anonymous-usage switch, one row: On is preselected, and finishing setup with it on is the choice (docs/telemetry.md).
 fn usage_row(f: &Facts) -> Value {
-    let (share, asked, ua) = (set(f.st, "telemetry.share"), set(f.st, "telemetry.asked"), set(f.st, "telemetry.usage.asked"));
-    let answered = crate::settings::telemetry::answered(share, asked, ua) || !set(f.st, "onboard.usage").is_empty();
-    let on = crate::settings::telemetry::on(share, ua) && set(f.st, "onboard.usage") != "off";
-    row("Share anonymous usage", "This build sends nothing. With On, a later build may send daily counts with a random id. Never your conversations, files, names or keys. Settings, Privacy changes it.",
-        vec![btn("On", "ob-usage", "on", answered && on), btn("Off", "ob-usage", "off", answered && !on)])
+    let off = crate::settings::telemetry::off(set(f.st, "telemetry.share"), set(f.st, "telemetry.usage.asked"), set(f.st, "onboard.usage"));
+    row("Share anonymous usage", USAGE_NOTE, vec![btn("On", "ob-usage", "on", !off), btn("Off", "ob-usage", "off", off)])
 }
+/// What the telemetry step says is sent, all of it.
+pub const USAGE_NOTE: &str = "On unless you turn it off. Backplane sends anonymous counts: installs, updates, daily activity, and daily totals of threads, messages, model tokens, bot traffic, boards made and boards ordered, with a random install id, the version, the system and the day. Never your conversations, projects, files, names, paths or keys. Settings, Privacy changes it.";
 
 // ---- the 0.14 import (import014/mod.rs does it; these are its words) ----
 
@@ -561,7 +560,8 @@ pub fn act(st: &State, hub: &str, session: &Value, info: &Value, c: &Client, use
         if id == "done" && uber_of(st).is_none() { ask.send("onboard.uber", json!({})); }
         json!({"drafts": {"@ob.step": id, "@ob.project.err": "", "@invite": Value::Null, "@ob.panel": ""}})
     };
-    let end = |ask: &mut Ask| -> Value { ask.put("onboard.done", "1"); ask.put("onboard.step", ""); json!({"drafts": {"@ob.step": "", "@ob.open": "", "@ob.closed": ""}}) };
+    // finishing setup with the telemetry step on screen is the disclosure: recorded before setup is marked done (settings/telemetry.rs)
+    let end = |ask: &mut Ask| -> Value { ask.send("telemetry.notice.act", json!({"action": "setup"})); ask.put("onboard.done", "1"); ask.put("onboard.step", ""); json!({"drafts": {"@ob.step": "", "@ob.open": "", "@ob.closed": ""}}) };
     let mut patch = if let Some(p) = super::onboard_alwayson::act(&f, session, c, action, value, &mut ask) { p } else { match action {
         "ob-next" => {
             let x = &steps[i];
@@ -608,6 +608,11 @@ pub fn act(st: &State, hub: &str, session: &Value, info: &Value, c: &Client, use
             if value != "on" && value != "off" { return None }
             ask.put("onboard.usage", value);
             if value == "off" { ask.put("telemetry.share", "off"); }
+            // On after an Off is the person's own recorded choice, bound to the preferences on screen (setting.set cannot re-enable)
+            else if crate::settings::telemetry::off(set(st, "telemetry.share"), set(st, "telemetry.usage.asked"), "") {
+                let t = crate::settings::telemetry::of(st); let d = format!("ob-{}-{}", t.revision_n(), ask.rid);
+                ask.send("telemetry.choice", json!({"value": "on", "expected": t.token(), "decision": d, "popup": false}));
+            }
             json!({})
         }
         "ob-kicad" => { let raw = draft(session, "@f.obkicad").trim().to_string(); ask.put("kicad.path", &raw); ask.send("onboard.check", json!({"kicad": raw})); json!({}) }

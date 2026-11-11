@@ -6,7 +6,10 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -17,6 +20,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.repeatOnLifecycle
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
@@ -117,6 +121,26 @@ internal fun AlertsBanner() {
             }
             Spacer(Modifier.width(4.dp))
             DMono(Msg.android_alerts_later, dcs.onSurfaceVariant, 12, Modifier.testTag("alerts.later").clickable { DataClient.alertsAsk = false }.padding(horizontal = 4.dp, vertical = 4.dp))
+        }
+        DLine()
+    }
+}
+
+/** The one-time telemetry notice (DataClient.telemetryNotice), one line: Turn off turns telemetry off, Settings opens the app's Settings, ✕ closes it.
+ *  Shown sends "shown" once it is drawn (DataClient.telemetryShown). */
+@Composable
+internal fun TelemetryBanner(settings: () -> Unit) {
+    val n = DataClient.telemetryNotice ?: return
+    // "shown" only once it is really on screen: the app started (not in the background), the strip composed
+    val owner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    LaunchedEffect(n.token, owner) { owner.lifecycle.repeatOnLifecycle(androidx.lifecycle.Lifecycle.State.STARTED) { DataClient.telemetryShown(n.token) } }
+    Column(Modifier.testTag("telemetry.banner")) {
+        Row(Modifier.fillMaxWidth().background(dcs.surfaceContainerHigh).padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(Tr.t(n.text), Modifier.weight(1f), color = dcs.onSurface, fontFamily = BpMono, fontSize = 12.sp, maxLines = 3, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.width(8.dp))
+            DMono(Tr.t(n.off.ifEmpty { "Turn off" }), dcs.primary, 12, Modifier.testTag("telemetry.off").clickable { DataClient.telemetryAct("off") }.padding(horizontal = 4.dp, vertical = 4.dp), bold = true)
+            DMono(Tr.t(n.settings.ifEmpty { "Settings" }), dcs.onSurfaceVariant, 12, Modifier.testTag("telemetry.settings").clickable(onClick = settings).padding(horizontal = 4.dp, vertical = 4.dp))
+            Box(Modifier.size(28.dp).clickable { DataClient.telemetryAct("close") }.testTag("telemetry.close"), contentAlignment = Alignment.Center) { Icon(Icons.Default.Close, Msg.common_close, tint = dcs.onSurfaceVariant, modifier = Modifier.size(16.dp)) }
         }
         DLine()
     }

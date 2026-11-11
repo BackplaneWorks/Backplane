@@ -194,16 +194,22 @@ pub fn id_ok(id: &str) -> bool { id.starts_with("q_") && id.len() <= 80 && id.by
 /// Od.pay
 fn pay_of(server: &str, qid: &str, token: &str) -> String { format!("{server}/q/{qid}?t={token}") }
 #[derive(Clone)]
-struct Rec { id: String, token: String, thread: String, server: String }
+struct Rec { id: String, token: String, thread: String, server: String, boards: bool }
+/// The board kinds of a fab file / manifest part (usage counts paid orders with at least one).
+pub const BOARD_KINDS: &[&str] = &["pcb", "flex", "hdi", "aluminum", "copper_core", "rogers", "ptfe"];
+/// Whether a manifest's parts hold a board.
+pub fn has_board(m: &Value) -> bool { m["parts"].as_array().into_iter().flatten().any(|p| BOARD_KINDS.contains(&p["kind"].as_str().unwrap_or(""))) }
+/// Usage: an order counts once, the first time it is seen paid or past it (a pilot's test payment is "pilot", never counted), and only with a board.
+pub fn counts_order(last: &str, st: &str, boards: bool) -> bool { let o = |x: &str| matches!(x, "paid" | "placed" | "shipped" | "delivered"); boards && o(st) && !o(last) }
 /// Od.keep: the record a quote leaves, the token's one home: 0600 in a 0700 folder.
 fn keep(home: &Path, r: &Rec, status: &str) -> std::io::Result<()> {
     let d = home.join("orders"); std::fs::DirBuilder::new().mode(0o700).recursive(true).create(&d)?; std::fs::set_permissions(&d, std::fs::Permissions::from_mode(0o700))?;
     let (f, tmp) = (d.join(format!("{}.json", r.id)), d.join(format!(".{}.tmp", r.id)));
     let _ = std::fs::remove_file(&tmp);
-    std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp)?.write_all(json!({"id":r.id,"token":r.token,"thread":r.thread,"server":r.server,"status":status}).to_string().as_bytes())?;
+    std::fs::OpenOptions::new().write(true).create_new(true).mode(0o600).open(&tmp)?.write_all(json!({"id":r.id,"token":r.token,"thread":r.thread,"server":r.server,"status":status,"boards":r.boards}).to_string().as_bytes())?;
     crate::plat::fs::rename(&tmp, &f)?; PAY.write().unwrap().insert(r.id.clone(), pay_of(&r.server, &r.id, &r.token)); Ok(())
 }
-fn rec_of(j: &Value) -> Option<(Rec, String)> { let (id, token) = (sv(j, "id"), sv(j, "token")); if !id_ok(id) || token.is_empty() { return None } Some((Rec { id: id.into(), token: token.into(), thread: sv(j, "thread").into(), server: sv(j, "server").into() }, sv(j, "status").to_string())) }
+fn rec_of(j: &Value) -> Option<(Rec, String)> { let (id, token) = (sv(j, "id"), sv(j, "token")); if !id_ok(id) || token.is_empty() { return None } Some((Rec { id: id.into(), token: token.into(), thread: sv(j, "thread").into(), server: sv(j, "server").into(), boards: j["boards"].as_bool().unwrap_or(false) }, sv(j, "status").to_string())) }
 /// Every record, newest first (200 at most, as `Od.resume` read).
 fn records(home: &Path) -> Vec<(Rec, String)> {
     let mut fs: Vec<(std::time::SystemTime, PathBuf)> = std::fs::read_dir(home.join("orders")).map(|r| r.flatten().filter(|e| { let n = e.file_name().to_string_lossy().to_string(); n.starts_with("q_") && n.ends_with(".json") })
@@ -340,6 +346,7 @@ async fn watch(ag: Arc<Agents>, r: Rec, mut last: String) {
         let q = get(&home, &r).await; let st = state(&q);
         if st.is_empty() { continue } // no answer: the server may be away; ask again
         // the card first, then the step's message: whoever reads the message finds the card already at that step
+        if st != last && counts_order(&last, &st, r.boards) { crate::settings::telemetry_usage::bump(crate::settings::telemetry_usage::BOARDS_ORDERED, 1) }
         if st != last { card_set(&ag, &r.thread, &sum(&q), &r.id, false).await; progress(&ag, &r, &st, sv(&q["order"], "tracking")).await; let _ = keep(&home, &r, &st); last = st.clone(); }
         if done(&st) { return }
     }
@@ -378,7 +385,8 @@ async fn go(ag: &Arc<Agents>, q: Asked) {
     }).await.unwrap_or(Value::Null);
     let (id, token) = (sv(&up, "id"), sv(&up, "token"));
     if token.is_empty() || !id_ok(id) { return wake(ag, &th, &format!("The files were not taken: {}.", up["error"].as_str().unwrap_or("no answer"))).await }
-    let r = Rec { id: id.into(), token: token.into(), thread: th, server: q.server.clone() };
+    let boards = std::fs::read(q.cwd.join(&q.dir).join("manifest.json")).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).map_or(false, |m| has_board(&m));
+    let r = Rec { id: id.into(), token: token.into(), thread: th, server: q.server.clone(), boards };
     let _ = keep(&home, &r, "quoting"); poll(ag.clone(), r).await;
 }
 /// Od.status.now: from the thread first: a quote being made is never called unpayable.
@@ -414,6 +422,11 @@ pub fn resume(ag: Arc<Agents>) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn a_paid_board_order_counts_once_and_nothing_else_does() {
+        assert!(counts_order("quoted", "paid", true) && counts_order("quoted", "shipped", true), "first seen paid, or later when polling missed paid");
+        assert!(!counts_order("paid", "placed", true) && !counts_order("quoted", "pilot", true) && !counts_order("quoted", "expired", true) && !counts_order("quoted", "paid", false));
+        assert!(has_board(&serde_json::json!({"parts":[{"kind":"3dp"},{"kind":"flex"}]})) && !has_board(&serde_json::json!({"parts":[{"kind":"cnc"}]})));
+    }
     fn tmp(n: &str) -> std::path::PathBuf { let p = std::env::temp_dir().join(format!("bp-order-{}-{n}", std::process::id())); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
     fn put(p: std::path::PathBuf, t: &str) { std::fs::create_dir_all(p.parent().unwrap()).unwrap(); std::fs::write(p, t).unwrap() }
     const PRINT_SH: &str = "find . \\( -path ./mfg -o -path ./extra -o -path ./.git -o -path ./.backplane -o -name node_modules -o -name '*backup*' \\) -prune -o -type f -not -name '_autosave-*' \\( -name '*.kicad_pcb' -o -name '*.kicad_sch' -o -name '*.step' -o -name '*.stp' -o -name '*.dxf' -o -name '*.fab.json' \\) -print 2>/dev/null | LC_ALL=C sort | while IFS= read -r f; do printf '%s\\n' \"$f\"; cat \"$f\"; done | { sha256sum 2>/dev/null || shasum -a 256; } | cut -c1-32";
@@ -473,7 +486,7 @@ mod tests {
         assert_eq!(card("L", false, false, false, false, "")["line"], "Reply below to go on."); assert_eq!(card("L", true, false, false, false, "")["line"], "Backplane needs your answer below.");
         let c = card("L", false, true, false, false, ""); assert_eq!(marks(&c), "done,on,,,,"); assert_eq!(c["line"], "Check the files below and send them for a quote.");
         let c = card("L", false, false, true, false, ""); assert_eq!(c["line"], "Getting your quote… usually 1-2 min"); assert_eq!(c["waiting"], true);
-        let r = Rec { id: "q_card".into(), token: "tok".into(), thread: "t".into(), server: "http://s".into() }; PAY.write().unwrap().insert(r.id.clone(), pay_of(&r.server, &r.id, &r.token));
+        let r = Rec { id: "q_card".into(), token: "tok".into(), thread: "t".into(), server: "http://s".into(), boards: false }; PAY.write().unwrap().insert(r.id.clone(), pay_of(&r.server, &r.id, &r.token));
         let mut q = ready(false); q["id"] = json!("q_card"); let s = sum(&q); assert!(!s.contains("tok"), "the setting holds no token");
         let c = card("L", false, false, false, false, &s); assert_eq!(marks(&c), "done,done,done,on,,"); assert_eq!((c["total"].as_str(), c["pay"].as_str(), c["label"].as_str()), (Some("$112.40"), Some("http://s/q/q_card?t=tok"), Some("Buy now · $112.40")));
         assert_eq!(c["customs"], "Includes import VAT and duties: nothing to pay on delivery.");
@@ -503,9 +516,9 @@ mod tests {
     }
     #[test] fn a_record_is_private_and_a_server_id_cannot_leave_the_folder() {
         for id in ["../x", "q_../x", "q_a/b", "x", "", "q_a.b"] { assert!(!id_ok(id), "{id}") } assert!(id_ok("q_Ab-1_c"));
-        let h = tmp("rec"); let r = Rec { id: "q_rec".into(), token: "tok".into(), thread: "t1".into(), server: "http://s".into() }; keep(&h, &r, "quoting").unwrap();
+        let h = tmp("rec"); let r = Rec { id: "q_rec".into(), token: "tok".into(), thread: "t1".into(), server: "http://s".into(), boards: false }; keep(&h, &r, "quoting").unwrap();
         let f = h.join("orders/q_rec.json"); assert_eq!(crate::plat::fs::mode_bits(std::fs::metadata(&f).unwrap().permissions().mode() & 0o777, 0o600), 0o600); assert_eq!(crate::plat::fs::mode_bits(std::fs::metadata(h.join("orders")).unwrap().permissions().mode() & 0o777, 0o700), 0o700);
-        assert_eq!(std::fs::read_to_string(&f).unwrap(), r#"{"id":"q_rec","token":"tok","thread":"t1","server":"http://s","status":"quoting"}"#, "the shape fab.look's search and 0.14's records have");
+        assert_eq!(std::fs::read_to_string(&f).unwrap(), r#"{"id":"q_rec","token":"tok","thread":"t1","server":"http://s","status":"quoting","boards":false}"#, "the shape fab.look's search and 0.14's records have (and whether it holds a board, for the usage count)");
         keep(&h, &r, "quoted").unwrap(); let v = records(&h); assert_eq!((v.len(), v[0].1.as_str()), (1, "quoted")); assert_eq!(pay_link("q_rec").unwrap(), "http://s/q/q_rec?t=tok");
         std::fs::write(h.join("orders/q_bad.json"), r#"{"id":"../../x","token":"t"}"#).unwrap(); assert_eq!(records(&h).len(), 1, "a record with a bad id is not followed");
     }

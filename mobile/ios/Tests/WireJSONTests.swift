@@ -32,5 +32,18 @@ check(WireJSON.decode(7, as: [DLock].self) == nil, "number where an array belong
 check(text(WireJSON.data(["id": 1, "m": "thread.work", "p": ["thread": "t1"]] as [String: Any])).contains(#""m":"thread.work""#), "request", "")
 check(WireJSON.data(frame(#"{"a":[1,null,"x"]}"#)) != nil, "nested null in an object", "")
 
+// the one-time telemetry notice (feature telemetryNotice): its words as the hub sends them, null or empty is none, the act carries {token, action}
+let tn = DTelemetryNotice.of(frame(#"{"token":"t1","text":"Backplane sends anonymous usage counts.","off":"Turn off","settings":"Settings"}"#))
+check(tn == DTelemetryNotice(token: "t1", text: "Backplane sends anonymous usage counts.", off: "Turn off", settings: "Settings"), "telemetry notice", String(describing: tn))
+check(DTelemetryNotice.of(frame(#"{"t":"telemetry.notice","notice":null}"#)["notice"]) == nil, "telemetry notice frame null", "")
+check(DTelemetryNotice.of(frame(#"{"token":"","text":"x","off":"Turn off","settings":"Settings"}"#)) == nil, "telemetry notice no token", "")
+check(DTelemetryNotice.of(frame(#"{"token":"t","text":"","off":"Turn off","settings":"Settings"}"#)) == nil, "telemetry notice no text", "")
+check(WireJSON.decode(frame(#"{"notice":null}"#)["notice"], as: DTelemetryNotice.self) == nil, "telemetry.notice reply null", "")
+check(WireJSON.decode(frame(#"{"notice":{"token":"t1","text":"x","off":"Turn off","settings":"Settings"}}"#)["notice"], as: DTelemetryNotice.self)?.valid?.settings == "Settings", "telemetry.notice reply decodes", "")
+for a in ["shown", "close", "off"] {
+    let p = DTelemetryNotice.act("t1", a)
+    check(p.count == 2 && p["token"] as? String == "t1" && p["action"] as? String == a, "telemetry act \(a)", p)
+}
+
 print("wire-json: \(passed) passed, \(failed) failed")
 exit(failed == 0 ? 0 : 1)

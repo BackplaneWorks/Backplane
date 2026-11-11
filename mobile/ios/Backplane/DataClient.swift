@@ -72,6 +72,10 @@ final class DataClient {
     private(set) var migrationError = ""
     // the GitHub star suggestion (feature "star"): shown while the hub says so, gone once decided on any device
     private(set) var star: DStarOffer?
+    // the one-time telemetry notice (feature "telemetryNotice"): shown while the hub says so
+    private(set) var telemetryNotice: DTelemetryNotice?
+    /// the notice's Settings link: the root view opens Settings and sets it back
+    var openSettings = false
     var canSendImages: Bool { features.contains("images") }
     // the composer's own commands (hello.commands): the hub's table; none of them is ever a message
     struct Word: Equatable { let word, label, desc: String }
@@ -218,7 +222,7 @@ final class DataClient {
         links = []; adding = false; PairingStore.save(links); setHome(""); leaveHome(); reset(); close(); conn = .offline; outbox = Outbox()
     }
     private func reset() {
-        notice = HubNotice(); star = nil; migration = DMigration(); migrationOpen = false; migrationError = ""
+        notice = HubNotice(); star = nil; telemetryNotice = nil; migration = DMigration(); migrationOpen = false; migrationError = ""
         dueThreads = []; dueProjects = []
         projects = []; threads = []; entries = [:]; older = [:]; loadedThreads = []; listsLoaded = false; open = nil; queues = [:]; queueError = [:]
         try? FileManager.default.removeItem(at: cacheURL)
@@ -412,6 +416,7 @@ final class DataClient {
         case "voice": voice.frame(o)
         case "plot": plots.receiveJSON(o) // why a view has nothing to show (the plots themselves come as binary frames)
         case "star": star = DStarOffer.of(o["offer"])
+        case "telemetry.notice": telemetryNotice = DTelemetryNotice.of(o["notice"])
         case "migrating": heardMigration(o)
         case "info": if let v = (o["info"] as? [String: Any])?["hub.offer"] as? String { heardOffer(v) }
         case "shot": shotBot = o["bot"] as? String ?? ""; shot = (o["n"] as? Int) ?? ((o["n"] as? Double).map(Int.init) ?? 0)
@@ -450,6 +455,7 @@ final class DataClient {
             await enablePush(); await registerPush(); await syncPush()
             await loadLocks()
             await loadStar()
+            await loadTelemetryNotice()
             terms.resync()
             if let open { try await subscribeThread(open, g); await refreshThread(open) }
             if let r = subOpen { subSub = 0; await readSub(r, g) }
@@ -496,6 +502,18 @@ final class DataClient {
     func starDecide(_ action: String) {
         guard let s = star else { return }; star = nil
         Task { let _: DEmpty? = try? await call("star.nudge", ["token": s.token, "action": action]) }
+    }
+    func loadTelemetryNotice() async { guard has("telemetryNotice"), let r: DTelemetryNoticeReply = try? await call("telemetry.notice") else { return }; telemetryNotice = r.notice?.valid }
+    @ObservationIgnored private var noticeShown = Set<String>()   // tokens whose "shown" went this app session
+    /// The strip is on screen: "shown" once per token per app session (it lets the hub start sending).
+    func telemetryShown(_ token: String) {
+        guard !token.isEmpty, noticeShown.insert(token).inserted else { return }
+        Task { do { let _: DEmpty = try await call("telemetry.notice.act", DTelemetryNotice.act(token, "shown")) } catch { noticeShown.remove(token) } }
+    }
+    /// close (✕) or off (turns telemetry off on the hub): the strip goes at once
+    func telemetryAct(_ action: String) {
+        guard let n = telemetryNotice else { return }; telemetryNotice = nil
+        Task { let _: DEmpty? = try? await call("telemetry.notice.act", DTelemetryNotice.act(n.token, action)) }
     }
     private func heardMigration(_ v: Any?) {
         migration.heard(v)
