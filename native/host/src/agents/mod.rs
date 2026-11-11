@@ -127,7 +127,7 @@ impl Agents {
         let _ = ag.mcp.set(mcp::Mcp::start(&ag).await?);
         crate::startup::mark("agents: mcp started");
         if crate::copy::person_turn_allowed() { let w = ag.world().await; let n = hub.store.len(); let last = if n > 0 { hub.store.range(n.saturating_sub(50), n).unwrap_or_default() } else { vec![] }; *ag.copy_point.lock().unwrap() = (w.threads.iter().map(|(id, x)| (id.clone(), w.cwd(id), x.turn == "running")).collect(), last); } // threads running at the copy point: the live hub may still be running them
-        if crate::copy::person_turn_allowed() { let cleared: Vec<Value> = { let w = ag.world().await; w.threads.keys().filter(|t| !w.setting(&format!("ride.{t}")).is_empty()).map(|t| set(format!("ride.{t}"), String::new(), now_s())).collect() }; if !cleared.is_empty() { let _ = hub.commit_many(&cleared).await; } } // mail copied from the real log is not this app's to deliver to a fresh agent
+        if crate::copy::person_only() { let cleared: Vec<Value> = { let w = ag.world().await; w.threads.keys().filter(|t| !w.setting(&format!("ride.{t}")).is_empty()).map(|t| set(format!("ride.{t}"), String::new(), now_s())).collect() }; if !cleared.is_empty() { let _ = hub.commit_many(&cleared).await; } } // mail copied from the real log is not this app's to deliver to a fresh agent (any copy: copy::person_only)
         let repair = { let w = ag.world().await; tasks::repair_plan(&w) }; // Task.repair judges the state the hub started from, before recovery
         crate::startup::mark("agents: before recover");
         let before_recover = now_s(); // the sidebar's look baseline: a turn this start's recovery cuts is after it, so it still shows (groupname.rs)
@@ -211,7 +211,7 @@ impl Agents {
     }
     /// Ride.mcp: a running turn's Backplane tool result carries the waiting mail (once); the ride is emptied in the same commit.
     pub async fn ride_take(&self, thread: &str) -> Option<String> {
-        if crate::copy::person_turn_allowed() { return None } // side-by-side: mail waits for the person's next message, never into a running real agent
+        if crate::copy::person_only() { return None } // a copy (side-by-side or not): mail waits for the person's next message, never into a running agent
         let (ride, running) = { let w = self.world().await; (w.setting(&format!("ride.{thread}")).to_string(), w.running(thread)) };
         if ride.is_empty() || !running { return None }
         let ev = codex::ride_done(thread, &ride, "into the running turn", now_s());
@@ -515,7 +515,7 @@ struct Actor {
     hist_ends: Arc<HistEnds>,
     /// The reply of the command being handled, until it is sent: sent early (the events are durable) when the turn has to wait for the earlier turn's end capture, so the caller is not held for it
     early: Option<oneshot::Sender<Result<(), String>>>,
-    hist_tx: Option<mpsc::Sender<(Option<JobGuard>, HistJob)>>, person: bool,
+    hist_tx: Option<mpsc::Sender<(Option<JobGuard>, HistJob)>>, person: bool, /** the newest turn here is the person's own press (Copy.turns) */ pressed: bool,
     ag: Arc<Agents>, th: String, cx: Cx, live_proc: Option<Live>,
     lines: Option<mpsc::Receiver<String>>, exit: Option<oneshot::Receiver<Exit>>,
     live: String, live_gen: u64, ahead: String, last_user: String, recent: VecDeque<String>, pacing: Option<Instant>, rid: u64,
@@ -548,7 +548,7 @@ async fn recv_opt(r: &mut Option<mpsc::Receiver<String>>) -> Option<Vec<String>>
 async fn exit_opt(r: &mut Option<oneshot::Receiver<Exit>>) -> Result<Exit, oneshot::error::RecvError> { match r { Some(rx) => rx.await, None => std::future::pending().await } }
 
 impl Actor {
-    fn new(ag: Arc<Agents>, th: String) -> Actor { Actor { early: None, hist_ends: ag.ends_of(&th), hist_tx: None, person: false, cx: Cx::new(&th), ag, th, live_proc: None, lines: None, exit: None, live: String::new(), live_gen: 0, ahead: String::new(), last_user: String::new(), recent: VecDeque::new(), pacing: None, rid: 0, cwd: String::new(), cmds: cmds::Cmds::new(), sent: VecDeque::new(), wait: String::new(), prog: bg::Prog::default(), heard: Instant::now(), codex: false, prov: String::new(), model: String::new(), next_ride: false, driver: None, asked: HashMap::new(), steer_now: false, resumed: String::new(), spawn_in: None, spawn_n: 0, acct_tries: 0, handover: false, limit_seen: None } }
+    fn new(ag: Arc<Agents>, th: String) -> Actor { Actor { early: None, hist_ends: ag.ends_of(&th), hist_tx: None, person: false, pressed: false, cx: Cx::new(&th), ag, th, live_proc: None, lines: None, exit: None, live: String::new(), live_gen: 0, ahead: String::new(), last_user: String::new(), recent: VecDeque::new(), pacing: None, rid: 0, cwd: String::new(), cmds: cmds::Cmds::new(), sent: VecDeque::new(), wait: String::new(), prog: bg::Prog::default(), heard: Instant::now(), codex: false, prov: String::new(), model: String::new(), next_ride: false, driver: None, asked: HashMap::new(), steer_now: false, resumed: String::new(), spawn_in: None, spawn_n: 0, acct_tries: 0, handover: false, limit_seen: None } }
 
     async fn run(mut self, mut rx: mpsc::Receiver<Cmd>) {
         let mut tick = tokio::time::interval(Duration::from_secs(1)); tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -624,14 +624,14 @@ impl Actor {
         self.ag.design_ensure(&self.th).await; { let (ag, th) = (self.ag.clone(), self.th.clone()); tokio::spawn(async move { ag.design_offer(&th).await }); } // a hardware thread's code worktree; an older one's offer to bring its design back
         if t.provider != "claude" && providers::driver(&t.provider).is_none() { return Err(format!("{} threads are not run by the Rust hub yet", if t.provider.is_empty() { "this provider's" } else { &t.provider })) }
         let sbs = crate::copy::person_turn_allowed();
-        if sbs && !person { return self.codex_ride(&msg, &text, &role, origin).await } // default-deny: only the person's own turn.start starts or writes to a real agent; anything else waits in the ride
+        if crate::copy::turn_gated(person) { return self.codex_ride(&msg, &text, &role, origin).await } // Copy.turns, default-deny: on a copy only the person's own turn.start starts or writes to an agent; anything else (a carry, a retry, a resume, failover, a routine, a bot, mail, a far-send) waits in the ride
         let mut t = t;
         if sbs { // the person's turn here (SIDE-BY-SIDE.md checks 2-5; 1 is the caller, 6 the child's environment): refused with its reason, or forced permissions and a fresh session
             if let Err(why) = Self::person_checks(self.ag.clone(), cwd.clone()).await {
                 let (now, th) = (now_s(), self.th.clone()); self.commit(vec![json!({"$":"ActivityLogged","thread":th,"act":hub_id("rf", now, self.ag.seq()),"tone":"error","kind":"refused","summary":format!("not started: {why}"),"at":now})]).await; return Err(why) }
             t.runtime = person::runtime_for(&t.runtime).to_string(); t.session.clear();
         }
-        self.person = sbs;
+        self.person = sbs; self.pressed = person;
         // every message cuts into a running turn at once: the person's, a bot's, the uberbot's, another thread's (thread_send), a report, mail. Claude: the line
         // carries priority now (on an idle process it is just the next turn, and it is set always so a message sent as a turn is starting does not wait for it)
         self.steer_now = true;
@@ -710,7 +710,7 @@ impl Actor {
 
     /// Wt.start / Hub.resume: an idle thread's queued text runs as one turn (QueueTaken, TurnChanged running).
     async fn start_queued(&mut self, text: String, taken: bool) -> Result<(), String> {
-        if crate::copy::person_turn_allowed() { return Err("on a copy in side-by-side mode a turn starts only when the person sends a message".into()) }
+        if crate::copy::turn_gated(false) { return Err(crate::copy::TURN_LINE.into()) } // Copy.turns: nobody pressed this start
         let (t, cwd, cx) = { let w = self.ag.world().await; let Some(t) = w.threads.get(&self.th).cloned() else { return Err("unknown thread".into()) }; (t, w.cwd(&self.th), w.cx(&self.th)) };
         if self.cx.running || t.turn == "running" { return Err("the thread's turn is running".into()) }
         if t.provider != "claude" && providers::driver(&t.provider).is_none() { return Err(format!("{} threads are not run by the Rust hub yet", t.provider)) }
@@ -736,7 +736,7 @@ impl Actor {
         vec![json!({"$":"MessagePosted","thread":self.th,"msg":format!("{msg}:before"),"role":"assistant","text":kept,"at":now})]
     }
     async fn steer(&mut self, text: String) -> Result<(), String> {
-        if crate::copy::person_turn_allowed() { return Err("on a copy in side-by-side mode a turn starts only when the person sends a message".into()) }
+        if crate::copy::turn_gated(false) { return Err(crate::copy::TURN_LINE.into()) } // Copy.turns: nobody pressed this start
         let (t, cwd, ride) = { let w = self.ag.world().await; let Some(t) = w.threads.get(&self.th).cloned() else { return Err("unknown thread".into()) }; (t, w.cwd(&self.th), w.setting(&format!("ride.{}", self.th)).to_string()) };
         let (now, th) = (now_s(), self.th.clone());
         if t.provider == "claude" { // Steer.go: TurnChanged running always (Steer.note is empty for Claude), and the run starts even with no live process
@@ -765,7 +765,7 @@ impl Actor {
     /// Codex.go: one process for this turn (`codex exec`, resumed on the session); its lines come back as Codex shapes.
     async fn codex_run(&mut self, t: &world::T, cwd: &str, text: &str) {
         let (now, th) = (now_s(), self.th.clone());
-        if crate::copy::person_turn_allowed() && !self.person { return } // side-by-side: only a person's turn starts a real agent
+        if crate::copy::turn_gated(self.pressed) { return } // Copy.turns: only a person's turn starts an agent on a copy
         self.cx.running = true; self.ag.stats.turns.fetch_add(1, Relaxed);
         let root = self.ag.world().await.roots.get(&t.project).cloned().unwrap_or_default();
         if let Err(e) = remake_folder(cwd, &root).await { self.fail(format!("could not start codex: {e}"), "spawn", &format!("spawn-{now}")).await; self.ag.stats.spawn_failures.fetch_add(1, Relaxed); return }
@@ -824,7 +824,7 @@ impl Actor {
         if t.provider != "claude" && providers::driver(&t.provider).is_none() { return Err(format!("{} threads are not run by the Rust hub yet", t.provider)) }
         let (now, th) = (now_s(), self.th.clone()); let v = codex::ride_add(&ride, &id, &text);
         let running = self.cx.running || t.turn == "running";
-        if crate::copy::person_turn_allowed() { self.commit(vec![set(format!("ride.{th}"), v.clone(), now)]).await; return Ok(()) } // side-by-side: the note waits in the ride for the person's next message
+        if crate::copy::person_only() { self.commit(vec![set(format!("ride.{th}"), v.clone(), now)]).await; return Ok(()) } // Copy.turns: on a copy the note waits in the ride for the person's next message
         if running && t.provider == "claude" && self.live_proc.is_some() { // Ride.note.k True: into the running turn at once, with whatever waited (a "running" turn with no process, after a restart, keeps the ride)
             let mut ev = codex::ride_done(&th, &v, "into the running turn", now); ev.push(set(format!("ridden.{th}"), now.to_string(), now)); self.commit(ev).await;
             self.cwd = cwd.clone(); let msg = hub_id("w", now, self.ag.seq()); let block = codex::ride_input(&v);
@@ -850,7 +850,7 @@ impl Actor {
 
     /// Ride.after: a turn that ended with mail waiting starts the next at once with it (Ride.run).
     async fn codex_next(&mut self) {
-        if crate::copy::person_turn_allowed() { return } // the ride waits for the person's next message
+        if crate::copy::person_only() { return } // Copy.turns: the ride waits for the person's next message
         let th = self.th.clone();
         let (t, cwd, ride) = { let w = self.ag.world().await; (w.threads.get(&th).cloned(), w.cwd(&th), w.setting(&format!("ride.{th}")).to_string()) };
         let Some(t) = t else { return }; if ride.is_empty() || t.archived || t.deleted || providers::driver(&t.provider).is_none() { return }
@@ -910,7 +910,7 @@ impl Actor {
 
     /// Claude: the process (started if it is not the right one) takes the message on its input.
     async fn claude_send(&mut self, t: &world::T, cwd: &str, msg: &str, text: &str, agent_text: &str, now: u64) {
-        if crate::copy::person_turn_allowed() && !self.person { return } // side-by-side: nothing but a person's turn writes to a real agent
+        if crate::copy::turn_gated(self.pressed) { return } // Copy.turns: nothing but a person's turn writes to an agent on a copy
         let th = self.th.clone(); let (cwd, msg, text, mut agent_text) = (cwd.to_string(), msg.to_string(), text.to_string(), agent_text.to_string());
         let key = rules::agent_key(&t.model, &t.runtime, &t.interaction, self.cx.think);
         // a live process with a command still open (a turn in flight) is never replaced for a changed model/mode key: the message goes on its input (the CLI queues it) and the new key applies from the next process

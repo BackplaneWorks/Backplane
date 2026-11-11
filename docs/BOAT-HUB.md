@@ -54,6 +54,7 @@ a held launch carries an id (`_launch`) so it starts once however often it is po
 
 `boat-hub.sh dry-run`: a copy of the desktop home (without secrets, providers, voice, browser profile, checkpoints, devices) on the box, run with
 `BACKPLANE_COPY=1`, no tailnet, stand-in agent folder only, port 3899; `/healthz` ok at 5 s, folded at 4.4 s, 205 MB; then stopped and deleted.
+On a copy no turn starts unless the person sends one (`COPY-GUARD.md` gate 5): its interrupted turns, due routines and held far-sends wait, whatever `restart.continue` says.
 
 ## State (Nov 10, prep done)
 

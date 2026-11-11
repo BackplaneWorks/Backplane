@@ -345,3 +345,26 @@ impl RpcHandler for Viewer {
     let got = mcp.0.lock().unwrap().clone(); assert_eq!(got.len(), 1); assert!(got[0].0.ends_with("~t9"), "the sender, named as the owner names it: {}", got[0].0);
     assert_eq!((got[0].1.as_str(), got[0].2["text"].as_str(), got[0].2["_msg"].as_str()), ("thread_send", Some("look again"), Some("fs1")));
 }
+
+/// Copy.turns: a message held for a thread elsewhere (a far-send a copied home's `far-sends.json` still names) never leaves a copy: its worker does not start, so the
+/// owner's machine (the person's real one) starts no turn with it. The same router without the copy switch delivers it, so the switch is the only difference.
+#[tokio::test] async fn a_held_far_send_never_leaves_a_copy() {
+    for copy in [true, false] {
+        let slot: Arc<Mutex<Option<Arc<FarSync>>>> = Arc::new(Mutex::new(None)); let s2 = slot.clone();
+        let extra: Extra = Arc::new(move |hub, req| { let s = s2.lock().unwrap().clone(); Box::pin(async move {
+            let s = s?; if req.route() != "/far/rpc" || req.method != "POST" { return None }
+            Some(serve_with(false, &s, &hub, &req).await) }) });
+        let a = node_extra(&format!("rfc-a-{copy}"), false, false, Some(extra)).await;
+        a.hub.commit(&json!({"$":"ThreadCreated","id":"t","project":"","title":"T","env":"","branch":"","worktree":"","provider":"claude","model":"","at":1})).await.unwrap();
+        let fa = FarSync::new(FarStore::open(&a.home).unwrap(), a.p.clone()); let feed = Feed::new(); feed.start(&a.hub).await; let _ = fa.feed.set(feed);
+        a.hub.set_far_router(Arc::new(Router::with_copy(fa.clone(), false))); *slot.lock().unwrap() = Some(fa);
+        let rec = Rec::new(ALL); a.hub.register_rpc(rec.clone());
+        let (b, fb) = side(&format!("rfc-b-{copy}"), false, false).await;
+        let l = link(&a, &b, true).await;
+        let out = Outbox::open(None); out.hold(&format!("{l}~t"), &l, json!({"thread":"t","text":"go on","msg":"fc1"}), farsend::now_ms());
+        let rb = Arc::new(Router::with_outbox(fb.clone(), copy, out.clone())); rb.work(&b.hub);
+        for _ in 0..80 { if !copy && out.items().is_empty() { break } tokio::time::sleep(std::time::Duration::from_millis(50)).await }
+        if copy { assert!(rec.seen().is_empty(), "a copy posts no held message: {:?}", rec.seen()); assert_eq!(out.items().len(), 1, "it stays held") }
+        else { assert!(out.items().is_empty(), "delivered without the switch: {:?}", out.items()); assert_eq!(rec.seen().len(), 1, "the owner took it once") }
+    }
+}
