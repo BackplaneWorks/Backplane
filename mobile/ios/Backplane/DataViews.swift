@@ -147,7 +147,7 @@ struct DataThreadsView: View {
             }.padding(.horizontal, 10).padding(.vertical, 8)
             DataMachineChips(client: client)
             DLine()
-            if !client.locks.isEmpty { DataLocksStrip(client: client, path: $path) }
+            if !client.locks.isEmpty && !(client.has("sections") && !client.sections.isEmpty) { DataLocksStrip(client: client, path: $path) } // (the sections leave the hub's locks out: backend work)
             if client.has("search"), !query.trimmingCharacters(in: .whitespaces).isEmpty {
                 DataSearchResults(client: client, query: query, open: { path.append($0) }, openAt: { path.append($0) })
             } else { list }
@@ -298,7 +298,8 @@ struct DataThreadsView: View {
             DataSectionHead(s: s) { client.toggleSection(s.toggle) }.dataRow()
                 .contextMenu { if s.rename { Button(Tr.t("Rename group"), systemImage: "pencil") { groupTitle = s.title; renamingGroup = s.group } } }
             if s.kind == "threads" {
-                ForEach(s.rows) { r in DataSectionThread(r: r, showProject: true) { path.append($0) }.dataRow() }
+                // Needs you: the title has the row (no project name), and a stop says so by its dot; an ask keeps its red word
+                ForEach(s.rows) { r in DataSectionThread(r: r, quiet: r.want == "failed" || r.want == "stopped") { path.append($0) }.dataRow() }
             } else {
                 ForEach(s.rows) { r in
                     Button { path.append(DProjectRoute(key: r.key, title: r.title)) } label: { DataSectionProject(r: r, faded: s.id == "quiet") }

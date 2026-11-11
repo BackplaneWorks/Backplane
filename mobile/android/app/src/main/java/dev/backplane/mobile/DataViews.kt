@@ -332,7 +332,7 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
         }
         MachineChips()
         DLine()
-        if (DataClient.locks.isNotEmpty()) LocksStrip(open)
+        if (DataClient.locks.isNotEmpty() && !(DataClient.has("sections") && DataClient.sections.isNotEmpty())) LocksStrip(open) // (the sections leave the hub's locks out: backend work)
         if (q.isNotBlank() && DataClient.has("search")) { SearchResults(q, open); return@Column }
         val botThreads = DataClient.bots.map { it.thread }.toSet()
         val projects = DataClient.projects; val swarmsOn = Swarms.on()

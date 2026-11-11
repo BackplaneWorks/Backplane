@@ -62,7 +62,7 @@ struct DataSectionHead: View {
 }
 /// A thread row of a section; one whose machine is off is listed, dimmed, and opens nothing.
 struct DataSectionThread: View {
-    let r: DSecRow; var indent: CGFloat = 12; var showProject = false; let open: (String) -> Void
+    let r: DSecRow; var indent: CGFloat = 12; var showProject = false; var quiet = false; let open: (String) -> Void
     var body: some View {
         Button { if !r.off { open(r.nav) } } label: {
             HStack(spacing: 8) {
@@ -71,7 +71,8 @@ struct DataSectionThread: View {
                 if showProject { Text(r.project).dmono(11).foregroundStyle(BackplaneDesign.faint).lineLimit(1) }
                 Spacer(minLength: 0)
                 if let m = r.mark { Text(dAway(m.short, m.away)).dmono(11).foregroundStyle(BackplaneDesign.faint) }
-                Text(r.want.isEmpty ? Tr.t(r.say.isEmpty ? r.ago : r.say) : Tr.t(r.want)).dmono(11).foregroundStyle(r.want.isEmpty ? BackplaneDesign.faint : BackplaneDesign.bad)
+                if quiet { Text(r.ago).dmono(11).foregroundStyle(BackplaneDesign.faint) }
+                else { Text(r.want.isEmpty ? Tr.t(r.say.isEmpty ? r.ago : r.say) : Tr.t(r.want)).dmono(11).foregroundStyle(r.want.isEmpty ? BackplaneDesign.faint : BackplaneDesign.bad) }
             }.padding(.leading, indent).padding(.trailing, 12).frame(minHeight: 36).contentShape(Rectangle()).opacity(r.off ? 0.55 : 1)
         }.buttonStyle(.plain).accessibilityIdentifier("data.section.thread." + r.id)
     }
