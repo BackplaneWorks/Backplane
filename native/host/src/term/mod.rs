@@ -304,6 +304,22 @@ impl Terms {
         Ok(key)
     }
     pub async fn known(&self, key: &str) -> bool { self.read_known(key).await }
+    /// A program of its own on a pty under `key` (a sign-in another machine asked for, settings/accounts_there.rs): `prog args` with no shell after it,
+    /// or the login shell when `prog` is empty. One already running under `key` is hung up first.
+    pub async fn run_alone(self: &Arc<Self>, key: &str, title: &str, cwd: &str, prog: &str, args: &[String], cols: u16, rows: u16) -> Result<i32, String> {
+        let (cols, rows) = (cols.clamp(20, vt::MAX_COLS as u16), rows.clamp(3, vt::MAX_ROWS as u16));
+        { let mut g = self.inner.lock().await;
+          if let Some(sh) = g.shells.remove(key) { sh.pty.hangup() }
+          if g.shells.len() >= MAX_SHELLS { return Err("too many terminals are open".into()) } }
+        let (prog, args) = if prog.is_empty() { (self.shell.clone(), vec!["-l".to_string()]) } else { (prog.to_string(), args.to_vec()) };
+        self.launch(key, &prog, &args, cwd, cols, rows, title, true).await
+    }
+    /// The screen of `key` as text, its state ("running", "exited 0", "stopped"), whether its program still runs, and its width. None: no such terminal.
+    pub async fn screen(&self, key: &str) -> Option<(String, String, bool, usize)> {
+        let g = self.inner.lock().await;
+        let sc = g.screens.get(key)?;
+        Some((emb::text(&sc.vt), sc.state.clone(), g.shells.contains_key(key), sc.vt.cols()))
+    }
     /// The chat terminals of a thread that are running now.
     pub async fn running_of(&self, thread: &str) -> Vec<String> { let pre = format!("x:{thread}:"); self.inner.lock().await.shells.keys().filter(|k| k.starts_with(&pre)).cloned().collect() }
     pub async fn shell_count(&self) -> usize { self.inner.lock().await.shells.len() }

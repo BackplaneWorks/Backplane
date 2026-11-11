@@ -654,7 +654,8 @@ pub fn view(st: &State, session: &Value, info: &Value) -> Value {
         let title = PAGES.iter().find(|(id, _)| *id == p).map_or("", |(_, t)| *t);
         let mut r = vec![row(title, "", vec![btn("‹ Settings", "settings-page", "", false)])];
         r.extend(match p { "appearance" => appearance(st), "threads" => threads(st, session), "notifications" => notifications(st, session, info), "about" => about(st, info), "setup" => super::onboard::settings_rows(st, session, info, &super::onboard::Client::of(info), &super::onboard::home_dir()), "import" => super::onboard::import_rows(info), "agents" => { let mut a = agents(st, info); a.extend(fallback(st, info)); a }, "writing" => writing(st, info), "cad" => cad(st, session, info), "keys" => keys(st, session, info), "ordering" => ordering(st), "network" => network(st, info), "devices" => devices(st, session, info), "machines" => { let mut r = crate::net::machinespage::rows(&info["machines"], &|k| draft(session, &format!("@f.{k}")).to_string());
-            r.extend(crate::net::homemove::rows(!set(st, "uber.bot", "").is_empty(), set(st, "home.at", ""), info["home.move"].as_str().unwrap_or(""), &info["machines"]["linked"])); r }, "timezone" => timezone(st, session), "rules" => rules(st, session), "privacy" => privacy(st, info), "voice" => voice(st, session, info), "ring" => ring(st, session, info), "usage" => usage(st), "developer" => developer(st), _ => vec![] });
+            r.extend(crate::net::homemove::rows(!set(st, "uber.bot", "").is_empty(), set(st, "home.at", ""), info["home.move"].as_str().unwrap_or(""), &info["machines"]["linked"]));
+            r.extend(super::signin_there::open_rows(info, &|k| draft(session, &format!("@f.{k}")).to_string())); r }, "timezone" => timezone(st, session), "rules" => rules(st, session), "privacy" => privacy(st, info), "voice" => voice(st, session, info), "ring" => ring(st, session, info), "usage" => usage(st), "developer" => developer(st), _ => vec![] });
         r
     };
     json!({"rows": rows})
@@ -733,9 +734,9 @@ pub fn act(hub: &str, session: &Value, action: &str, value: &str) -> Option<Out>
         "voice-term" => { for (k, v) in crate::voice::page::term_settings(draft(session, "@f.vterm")) { send(session, hub, "setting.set", json!({"key": k, "value": v}), &mut cmds, &mut rid); } json!({"drafts": {"@f.vterm": ""}}) }
         // Machines: every press goes to the hub as machines.page.act, with the fields as typed
         a if a.starts_with("machine-") => {
-            let fields = json!({"maddr": draft(session, "@f.maddr"), "mcode": draft(session, "@f.mcode"), "fcode": draft(session, "@f.fcode"), "rfrom": draft(session, "@f.rfrom"), "rname": draft(session, "@f.rname")});
+            let fields = json!({"maddr": draft(session, "@f.maddr"), "mcode": draft(session, "@f.mcode"), "fcode": draft(session, "@f.fcode"), "rfrom": draft(session, "@f.rfrom"), "rname": draft(session, "@f.rname"), "sikeys": draft(session, "@f.sikeys"), "sicode": draft(session, "@f.sicode")});
             send(session, hub, "machines.page.act", json!({"action": a, "value": value, "fields": fields}), &mut cmds, &mut rid);
-            if a == "machine-pair" { json!({"drafts": {"@f.maddr": "", "@f.mcode": "", "@f.fcode": ""}}) } else if a == "machine-rename" { json!({"drafts": {"@f.rfrom": "", "@f.rname": ""}}) } else { json!({}) }
+            if a == "machine-pair" { json!({"drafts": {"@f.maddr": "", "@f.mcode": "", "@f.fcode": ""}}) } else if a == "machine-signin-keys" { json!({"drafts": {"@f.sikeys": ""}}) } else if a == "machine-signin-sync-code" { json!({"drafts": {"@f.sicode": ""}}) } else if a == "machine-rename" { json!({"drafts": {"@f.rfrom": "", "@f.rname": ""}}) } else { json!({}) }
         }
         // Notifications: every press goes to the hub as notify.page.act, with the times as typed (the phones send the same)
         a if a.starts_with("notify-") => {
@@ -748,7 +749,7 @@ pub fn act(hub: &str, session: &Value, action: &str, value: &str) -> Option<Out>
         "key-err" => json!({"drafts": {"@key.err": value}}),
         "bfield" => {
             let (name, text) = value.split_once('\u{1f}')?;
-            if !matches!(name, "whurl" | "whsec" | "tzname" | "kpath" | "fpath" | "kname" | "vterm" | "rtext" | "btitle" | "maddr" | "mcode" | "fcode" | "rfrom" | "rname" | "qfrom" | "qto") { return None }
+            if !matches!(name, "whurl" | "whsec" | "tzname" | "kpath" | "fpath" | "kname" | "vterm" | "rtext" | "btitle" | "maddr" | "mcode" | "fcode" | "rfrom" | "rname" | "qfrom" | "qto" | "sikeys" | "sicode") { return None }
             json!({"drafts": {format!("@f.{name}"): text}})
         }
         "telemetry-on" => { send(session, hub, "telemetry.choice", json!({"value": "on", "expected": value, "decision": "", "popup": false}), &mut cmds, &mut rid); json!({}) }
