@@ -19,6 +19,7 @@ SUITES=(
   "embed_agent_resilience_e2e.sh:resilience"
   "embed_ux_e2e.sh:ux"
   "embed_xprobe_e2e.sh:xprobe"
+  "embed_bp9_e2e.sh:bp9"
 )
 
 FAILED=0
