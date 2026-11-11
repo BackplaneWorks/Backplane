@@ -119,10 +119,20 @@ impl Backplane {
             Event::Answer(id,reply) if screens::hubpick::answered(self,id,&reply,cx)=>{},
             Event::Answer(id,reply)=>if !screens::projects::answered(self,id,&reply,cx) {screens::improvements::answered(self,id,reply,cx)},
             // a page's Send whose thread the hub would not make (its machine away...): the text goes back in the box, the error is shown (Refused, next)
-            Event::Data(tag,_) if tag=="create-refused" => { if let Some(text)=screens::projects::take_back(&mut self.screens.projects.first_send) { self.arm_new=None; self.input.update(cx,|i,cx|i.set(text,cx)); } cx.notify(); }
+            Event::Data(tag,_) if tag=="create-refused" => { if let Some(text)=screens::projects::take_back(&mut self.screens.projects.first_send) { self.arm_new=None;
+                let now=self.input.read(cx).content.to_string(); if let Some(t)=screens::projects::give_back(text,&now,&mut self.screens.projects.restore) { self.input.update(cx,|i,cx|i.set(t,cx)); } } cx.notify(); }
+            // the hub made the thread a New thread asked for (here or on a linked machine): it is opened by the id the reply carries, not looked for in the lists
+            // the hub made the thread a New thread asked for (its id in the reply). A page's Send: its text goes to that thread at once, by id (on a linked
+            // machine the thread shows here once that machine sends it, which the message makes it do); the window opens it as soon as its lists hold it
+            Event::Data(tag,v) if tag=="created" => { eprintln!("GPUI_LOG {}",serde_json::json!({"created":v,"armed":self.arm_new.is_some(),"first":self.screens.projects.first_send.is_some()})); if let (Some((at,_)),Some(id))=(self.arm_new.clone(),v.as_str().filter(|s|!s.is_empty())) {
+                if let Some(text)=screens::projects::take_back(&mut self.screens.projects.first_send) { self.screens.projects.sending=Some(text.clone()); let _=self.tx.try_send(screens::projects::first_message(id,&text)); }
+                if id.contains('~') { self.note=crate::i18n::trs("Sent. The thread opens here as soon as that machine has it."); }
+                self.screens.projects.made=Some((id.to_string(),at)); self.adopt_new(cx); } cx.notify(); }
             Event::Data(tag,v)=>if tag=="google-changed" {screens::google::changed(self)} else if tag=="google" {screens::google::got(self,v,cx)} else if tag=="acct-moveall" {screens::accounts::moved(self,&v)} else {screens::accounts::got(self,v,cx)},
             Event::Voice(f)=>self.voice_frame(f,cx),
             Event::Rpc("voice",ok,why)=>{if !ok{self.error=why;}},
+            // the first message of a thread a page's Send made: refused, the text comes back (never merged) and the error shows; taken, it is done
+            Event::Rpc("first-message",ok,why)=>{ let text=self.screens.projects.sending.take(); if !ok { self.error=why; if let Some(t)=text { let now=self.input.read(cx).content.to_string(); if let Some(t)=screens::projects::give_back(t,&now,&mut self.screens.projects.restore) { self.input.update(cx,|i,cx|i.set(t,cx)); } } } cx.notify(); },
             Event::Term(key,pid,b,reset,state)=>self.term_frame(&key,pid,&b,reset,state,cx),
             Event::Hello=>{self.term_rejoin();self.screens.unsent.live=true;self.send_unsent();},
             Event::Star(v)=>self.star_offer(&v,cx),
@@ -243,6 +253,8 @@ impl Backplane {
     /// A thread (or a project with its first thread) is being made on the person's say: the first new thread row to appear is opened.
     pub fn arm_new(&mut self){self.arm_new=Some((Instant::now(),self.thread_ids().into_iter().collect()));}
     fn adopt_new(&mut self,cx:&mut Context<Self>){
+        // the thread the hub said it made (its id from the reply): opened as soon as the window's lists hold it, whatever else is new
+        if let Some((id,_))=self.screens.projects.made.clone() { if let Some(q)=self.thread_ids().into_iter().find(|t|t.rsplit_once('|').map_or(t.as_str(),|(_,x)|x)==id) { self.screens.projects.made=None;self.arm_new=None;self.note.clear();self.select_id(q,cx);self.want_focus=true;return } }
         let Some((at,known))=self.arm_new.as_ref() else {return};
         // (a thread made on a linked machine shows once that machine has pushed it: a few seconds, more while it sets up a worktree)
         if at.elapsed()>Duration::from_secs(30){self.arm_new=None;return;}

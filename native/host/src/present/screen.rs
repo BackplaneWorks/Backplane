@@ -200,7 +200,9 @@ pub fn picker_on(project: &mut Value,row: &Value,here: &str,chosen: &str) {
         let mach=ids.iter().find(|i|text(i,"id")==first_id).map(|i|text(i,"machine").to_string()).unwrap_or_else(||text(&row["default"],"machine").to_string());
         row["machineChips"].as_array().and_then(|c|c.iter().find(|c|text(c,"name")==mach)).map(|c|text(c,"short").to_string()).unwrap_or_else(||crate::mirror::short_name(&mach)) };
     let _=here_has;
-    project["runsOn"]=json!(if m.is_empty() { String::new() } else { format!("runs on {m}") });
+    // the machine picked is away: the line says so (Wait for it, or pick another); it never falls back to another machine by itself
+    let away=first["away"]==true;
+    project["runsOn"]=json!(if m.is_empty() { String::new() } else if away { format!("{m} is away") } else { format!("runs on {m}") });
     project["newOn"]=json!(on);
 }
 /// Link with… on the menu of this machine's project that has no remote (`key` is `<machine>/<id>`, or a hand link's): the other machines'

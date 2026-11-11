@@ -790,6 +790,11 @@ impl Render for Backplane {
                         .child(div().id("composer-box").border_1().border_color(c("accent")).bg(c("view")).px_3().py_2().min_h(px(60.)).cursor(CursorStyle::IBeam).on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| { this.input.focus_handle(cx).focus(window); })).child(self.input.clone()))
                         // another machine's thread: where an agent sent from here runs
                         .children(if self.project_page.is_some() { None } else { crate::screens::badge::runs_text(&thread["mark"]).map(|r| div().id("runs-on").flex().items_center().gap(px(3.)).text_size(px(11.)).text_color(c("dim")).child(ic(light, "link", 11., "dim")).child(r)) })
+                        // text a page's Send could not deliver while the box held new text: offered back, never merged (Restore puts it in the box, what was there is kept to restore)
+                        .children(self.screens.projects.restore.clone().map(|t| { let preview: String = t.chars().take(60).collect();
+                            /* i18n-ok: a ctl id the drivers press */ with_rect(div().id("restore-unsent"), || "ui:restore unsent".to_string()).flex().items_center().gap(px(6.)).text_size(px(11.)).text_color(c("dim")).cursor_pointer().hover(|s| s.text_color(c("text")))
+                                .child(crate::i18n::tf("gpui.unsent.restore", &[("text", preview.into())]))
+                                .on_click(cx.listener(move |this, _, _, cx| { let now = this.input.read(cx).content.to_string(); this.screens.projects.restore = if now.trim().is_empty() { None } else { Some(now) }; let t2 = t.clone(); this.input.update(cx, |i, cx| i.set(t2, cx)); cx.notify(); })) }))
                         // a project's page: where the thread this sends starts ("runs on desktop"), and the machine picker behind it (D6; the hub's `runsOn`, `newOn`)
                         .children(self.project_page.clone().and_then(|pid| crate::screens::projects::find(&self.data, &pid).map(|p| (pid, p.clone()))).filter(|(_, p)| !string(p, "runsOn").is_empty()).map(|(pid, p)| {
                             let items = crate::screens::ctxmenu::run_items(&pid, &p["newOn"]); let more = items.len() > 1;
