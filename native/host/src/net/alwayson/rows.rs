@@ -128,6 +128,8 @@ pub fn after_rows_with(link: &str, name: &str, v: &Value) -> Vec<Value> {
         ("done", _) => { m["note"] = json!(format!("Your uberbot lives on {name} now.")); m["buttons"] = json!([]); }
         _ => {}
     }
+    // the check's warnings (net/homemove.rs): providers of other bots not signed in there yet; the move does not wait for them
+    if let Some(w) = crate::net::homemove::warn_note(mv) { let n = s(&m, "note").to_string(); m["note"] = json!(if n.is_empty() { w } else { format!("{n} {w}") }); if s(&m, "tone").is_empty() { m["tone"] = json!("warn"); } }
     vec![row("Sign it in to your agents", &format!("{name} signs in to Claude, Codex and the others on its own. Account files never travel."), vec![crate::present::signin_there::open_button(link)]), m]
 }
 

@@ -16,7 +16,7 @@ The always-on push (docs/ALWAYS-ON.md, D1-D10) made the move a single press with
   The provider's own login runs on the Boat, and the link and code are shown on the client in use. Claude goes first, with the sync token made
   here. Account files never travel.
 - **Check it** (`home.check {to}`, the far request `home.ready`; `scripts/home-move-check.sh boat-hub`): the target's build and commit, the link,
-  free disk (three times the log plus 512 MB) and memory (600 MB), and a working sign-in for each provider the moving threads use. A provider's
+  free disk (three times the log plus 512 MB) and memory (600 MB), and a working sign-in for the provider the uberbot itself runs on. Each other provider the moving bots use that is missing there is a warning shown with the move, not a refusal: until it is signed in there, the fallback order runs those bots on the next provider. A provider's
   sign-in is checked with `claude auth status` or `codex login status`, or by a connected or sync account; no turn is spent. `home.move` and the
   move back run the same check first and refuse with its reasons, and Bub's row says once that the move did not happen
   ("Did not move to boat-hub: Claude Code is not signed in on boat-hub: sign in there first").

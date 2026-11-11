@@ -421,19 +421,34 @@ pub fn providers_of(lines: &[String]) -> Vec<String> {
     }
     let mut v: Vec<String> = by.into_iter().filter(|(t, _)| !gone.contains(t)).map(|(_, p)| if p.is_empty() { "claude".into() } else { p }).collect(); v.sort(); v.dedup(); v
 }
-/// What stops a move to `name`, one reason each, from the receiver's answer `st` (an empty list: ready). `need_mb`: the room the carry takes there.
-pub fn reasons(name: &str, me: (&str, &str), st: &Value, need: &[String], need_mb: u64) -> Vec<String> {
+/// What one provider lacks on `name` (st: the receiver's answer), in words; None when it is signed in there (or its CLI has no status to read).
+fn provider_issue(name: &str, st: &Value, p: &str) -> Option<String> {
+    let s = &st["providers"][p];
+    let nm = crate::present::onboard::AGENTS.iter().find(|a| a.id == p).map_or(p, |a| a.name);
+    if s["installed"] == false && s["signed"] != "yes" { Some(format!("{nm} is not installed on {name}")) }
+    else if s["signed"] == "no" { Some(format!("{nm} is not signed in on {name}")) } else { None }
+}
+/// What stops a move to `name`, one reason each, from the receiver's answer `st` (an empty list: ready): another build, too little disk or memory,
+/// and the uberbot's own provider (`uber`) without a sign-in there. The other bots' providers are `warnings`: the fallback order covers a bot whose
+/// provider is missing there until it is signed in (the person's rule, Nov 11). `need_mb`: the room the carry takes there.
+pub fn reasons(name: &str, me: (&str, &str), st: &Value, uber: &str, need_mb: u64) -> Vec<String> {
     let mut r = vec![];
     if gs(st, "version") != me.0 || gs(st, "commit") != me.1 { r.push(format!("{name} runs another build ({} {}; this one is {} {}): update it first", gs(st, "version"), gs(st, "commit"), me.0, me.1)) }
-    for p in need {
-        let s = &st["providers"][p];
-        let nm = crate::present::onboard::AGENTS.iter().find(|a| a.id == p).map_or(p.as_str(), |a| a.name);
-        if s["installed"] == false && s["signed"] != "yes" { r.push(format!("{nm} is not installed on {name}")) }
-        else if s["signed"] == "no" { r.push(format!("{nm} is not signed in on {name}: sign in there first")) }
-    }
+    if let Some(why) = provider_issue(name, st, uber) { r.push(format!("{why}: the uberbot runs on it, so sign in there first")) }
     if let Some(d) = st["disk_mb"].as_u64() { if d < need_mb { r.push(format!("{name} has {d} MB of disk free; the move needs about {need_mb} MB")) } }
     if let Some(m) = st["mem_mb"].as_u64() { if m < MIN_MEM_MB { r.push(format!("{name} has {m} MB of memory free; the home needs about {MIN_MEM_MB} MB")) } }
     r
+}
+/// What the move does not wait for: each other provider the moving bots use that `name` lacks (they run on the next provider of the fallback order there
+/// until it is signed in).
+pub fn warnings(name: &str, st: &Value, uber: &str, need: &[String]) -> Vec<String> {
+    need.iter().filter(|p| p.as_str() != uber).filter_map(|p| provider_issue(name, st, p)).map(|w| format!("{w}: the bots on it use the next provider in the fallback order until you sign in there")).collect()
+}
+/// The provider the uberbot's own thread runs on now ("claude" when it names none, or there is no uberbot).
+async fn uber_provider(hub: &Arc<Hub>) -> String {
+    let th = match crate::bots::api::of(hub) { Some(b) => { let w = b.world().await; let u = w.uber_bot(); if u.is_empty() { String::new() } else { w.bot(&u).map(|x| x.thread.clone()).unwrap_or_default() } } None => String::new() };
+    let p = hub.model().await.threads.get(&th).map(|t| t.provider.clone()).unwrap_or_default();
+    if p.is_empty() { "claude".into() } else { p }
 }
 /// The memory a home's hub needs free to take it (it folds the log at about 200 MB and runs the bots' agents).
 const MIN_MEM_MB: u64 = 600;
@@ -442,18 +457,22 @@ pub async fn check(hub: &Arc<Hub>, link: &str) -> Result<Value, String> {
     let Some((_, name, _)) = hub.far_machines().into_iter().find(|(id, _, _)| id == link) else { return Err("no such machine is linked".into()) };
     let lines = hub.store.all();
     let bytes: u64 = lines.iter().map(|l| l.len() as u64 + 1).sum();
-    let need = providers_of(&lines); drop(lines);
+    let mut need = providers_of(&lines); drop(lines);
+    let uber = uber_provider(hub).await; if !need.contains(&uber) { need.push(uber.clone()); need.sort(); }
     let st = ask(hub, link, &name, "the move check", "home.ready", &json!({"providers": need})).await?;
     let need_mb = (bytes >> 20) * 3 + 512; // the log and its fold, twice over, and room to run
-    let rs = reasons(&name, (&hub.cfg.version, &hub.cfg.commit), &st, &need, need_mb);
-    Ok(json!({"ready": rs.is_empty(), "reasons": rs, "machine": name, "needs": need, "checks": st}))
+    let rs = reasons(&name, (&hub.cfg.version, &hub.cfg.commit), &st, &uber, need_mb);
+    let ws = warnings(&name, &st, &uber, &need);
+    Ok(json!({"ready": rs.is_empty(), "reasons": rs, "warnings": ws, "machine": name, "needs": need, "uber": uber, "checks": st}))
 }
 
 // ---- the sending side ----
 
 static STATE: Mutex<Option<Value>> = Mutex::new(None);
+/// The check's warnings for the move running now (or the last one), shown with its state: what the bots there wait for (`warnings`).
+static WARN: Mutex<Vec<String>> = Mutex::new(Vec::new());
 async fn tell(hub: &Arc<Hub>, state: &str, step: &str, note: &str) {
-    let v = json!({"state": state, "step": step, "note": note, "at": now_s()});
+    let v = json!({"state": state, "step": step, "note": note, "warnings": WARN.lock().unwrap().clone(), "at": now_s()});
     *STATE.lock().unwrap() = Some(v.clone());
     hub.set_info("home.move", &v.to_string()).await;
     eprintln!("backplane: home move: {state} {step} {note}");
@@ -643,6 +662,7 @@ pub async fn begin(hub: &Arc<Hub>, l: &str) -> Result<(), String> {
     let l = l.to_string();
     let c = match check(hub, &l).await { Ok(c) => c, Err(e) => { tell(hub, "failed", "checking", &e).await; return Err(e) } };
     let name = gs(&c, "machine").to_string();
+    *WARN.lock().unwrap() = c["warnings"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
     if c["ready"] != true { let why = c["reasons"].as_array().into_iter().flatten().filter_map(Value::as_str).collect::<Vec<_>>().join("; "); tell(hub, "failed", "checking", &why).await; set_moving(hub, json!({"to": name, "state": "failed", "why": why, "at": now_s()})).await; return Err(why) }
     let threads = carried_threads(hub).await;
     { let m = Moving { link: l.clone(), threads, held: vec![], path: Some(held_path(&hub.cfg.home)) }; m.save(); *MOVING.lock().unwrap() = Some(m); }
@@ -677,6 +697,11 @@ pub async fn start(hub: &Arc<Hub>, to: &str) -> Result<Value, String> {
     begin(hub, &l).await?;
     Ok(json!({"started": true}))
 }
+/// The check's warnings on a move's state (info `home.move`) as one note, None when there are none.
+pub fn warn_note(mv: &Value) -> Option<String> {
+    let w: Vec<&str> = mv["warnings"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+    (!w.is_empty()).then(|| w.join(". ") + ".")
+}
 /// Settings, Machines: where the home is and the one press that moves it (the phones' Machines page draws the same rows).
 /// `uber`: this hub has the uberbot; `at`: the setting `home.at`; `mv`: the info `home.move`; `linked`: the page's linked machines.
 pub fn rows(uber: bool, at: &str, mv: &str, linked: &Value) -> Vec<Value> {
@@ -695,6 +720,7 @@ pub fn rows(uber: bool, at: &str, mv: &str, linked: &Value) -> Vec<Value> {
     if !gs(&mv, "state").is_empty() && gs(&mv, "state") != "idle" {
         let note = match gs(&mv, "state") { "moving" => format!("Moving: {} {}", gs(&mv, "step"), gs(&mv, "note")), "done" => format!("Moved to {}.", gs(&mv, "note")), _ => format!("The move did not finish: {}", gs(&mv, "note")) };
         let mut x = row("Home move", note.trim(), vec![]); if gs(&mv, "state") == "failed" { x["tone"] = json!("bad") } r.push(x);
+        if let Some(w) = warn_note(&mv) { let mut x = row("Not signed in there yet", &w, vec![]); x["tone"] = json!("warn"); r.push(x); }
     }
     r
 }
@@ -819,15 +845,32 @@ mod tests {
         assert_eq!(providers_of(&lines), vec!["claude", "codex"], "the moving threads' providers: not a project's, not a deleted one's; a switch counts");
         let need = vec!["claude".to_string(), "codex".to_string()];
         let good = json!({"version":"0.15.0","commit":"abc","disk_mb":9000,"mem_mb":2700,"providers":{"claude":{"installed":true,"signed":"yes"},"codex":{"installed":true,"signed":"yes"}}});
-        assert!(reasons("boat-hub", ("0.15.0", "abc"), &good, &need, 900).is_empty());
+        assert!(reasons("boat-hub", ("0.15.0", "abc"), &good, "claude", 900).is_empty() && warnings("boat-hub", &good, "claude", &need).is_empty());
         let mut bad = good.clone(); bad["commit"] = json!("def"); bad["disk_mb"] = json!(100); bad["mem_mb"] = json!(200);
         bad["providers"]["claude"]["signed"] = json!("no"); bad["providers"]["codex"] = json!({"installed":false,"signed":"no"});
-        let r = reasons("boat-hub", ("0.15.0", "abc"), &bad, &need, 900);
-        assert_eq!(r, vec!["boat-hub runs another build (0.15.0 def; this one is 0.15.0 abc): update it first", "Claude Code is not signed in on boat-hub: sign in there first", "Codex is not installed on boat-hub",
+        let r = reasons("boat-hub", ("0.15.0", "abc"), &bad, "claude", 900);
+        assert_eq!(r, vec!["boat-hub runs another build (0.15.0 def; this one is 0.15.0 abc): update it first", "Claude Code is not signed in on boat-hub: the uberbot runs on it, so sign in there first",
             "boat-hub has 100 MB of disk free; the move needs about 900 MB", "boat-hub has 200 MB of memory free; the home needs about 600 MB"]);
+        assert_eq!(warnings("boat-hub", &bad, "claude", &need), vec!["Codex is not installed on boat-hub: the bots on it use the next provider in the fallback order until you sign in there"], "another bot's provider never stops the move");
         // a sync account is a sign-in; a provider whose CLI has no status to read does not stop the move
         let mut ok = good.clone(); ok["providers"]["claude"] = json!({"installed":true,"signed":"yes","accounts":["Synced"]}); ok["providers"]["codex"] = json!({"installed":true,"signed":"unknown"});
-        assert!(reasons("boat-hub", ("0.15.0", "abc"), &ok, &need, 900).is_empty());
+        assert!(reasons("boat-hub", ("0.15.0", "abc"), &ok, "claude", 900).is_empty());
+    }
+    /// Nov 11 (the person's move to boat-hub, blocked): only what the uberbot runs on is required; the other bots' providers are warnings.
+    #[test] fn a_home_whose_bots_use_other_providers_moves_where_only_the_uberbots_is_signed_in_with_warnings() {
+        let need: Vec<String> = ["antigravity", "claude", "codex", "grok", "muse"].iter().map(|s| s.to_string()).collect();
+        let st = json!({"version":"0.15.0","commit":"abc","disk_mb":9000,"mem_mb":2700,"providers":{"claude":{"installed":true,"signed":"yes"},
+            "codex":{"installed":true,"signed":"no"},"grok":{"installed":false,"signed":"no"},"muse":{"installed":false,"signed":"no"},"antigravity":{"installed":true,"signed":"unknown"}}});
+        assert!(reasons("boat-hub", ("0.15.0", "abc"), &st, "claude", 900).is_empty(), "ready: the uberbot's Claude is signed in there");
+        let w = warnings("boat-hub", &st, "claude", &need);
+        assert_eq!(w.len(), 3, "Codex, Grok and Muse are said, Antigravity (no status to read) is not: {w:?}");
+        assert!(w[0].starts_with("Codex is not signed in on boat-hub") && w[1].starts_with("Grok Build is not installed") && w[2].starts_with("Muse Code is not installed"), "{w:?}");
+        // the uberbot on another provider: that one is required, Claude is a warning
+        let r = reasons("boat-hub", ("0.15.0", "abc"), &st, "codex", 900); assert_eq!(r, vec!["Codex is not signed in on boat-hub: the uberbot runs on it, so sign in there first"]);
+        // the move's state carries them; Settings, Machines shows them as one warn row
+        let mv = json!({"state":"moving","step":"log","note":"","warnings":w}).to_string();
+        let rows = rows(true, "", &mv, &json!([]));
+        let x = rows.iter().find(|r| r["label"] == "Not signed in there yet").expect("a row of its own"); assert_eq!(x["tone"], "warn"); assert!(x["note"].as_str().unwrap().contains("Grok Build"));
     }
     #[test] fn bubs_row_says_where_it_is_moving_and_its_chat_follows_it_there() {
         assert_eq!(moving_note(&json!({"to":"boat-hub","state":"moving","at":10}).to_string(), 20), Some(("work", "Moving to boat-hub".to_string())));
