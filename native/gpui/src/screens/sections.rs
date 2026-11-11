@@ -94,7 +94,8 @@ impl Backplane {
                     rows.push(head(cx, light, s, ctl));
                     for t in s["rows"].as_array().into_iter().flatten() {
                         let pid = string(t, "projectKey");
-                        rows.push(self.side_thread(cx, light, t, &pid, &string(t, "project"), t["off"] == true, ctl));
+                        // no project name after the title: the sidebar is narrow and the title is what the person reads (sub " ": an Active-view row, so no tree chevron and no drag)
+                        rows.push(self.side_thread(cx, light, t, "", " ", t["off"] == true, ctl));
                     }
                 }
                 _ => {

@@ -436,7 +436,7 @@ impl Backplane {
         }
         for t in self.data["legacy"].as_array().into_iter().flatten() { rows.push(self.side_thread(cx, light, t, "", "", false, &mut ctl)); }
         // the Older group of projects (no live thread, quiet for a while): a row that opens and shuts it
-        if let Some(n) = self.data["olderProjects"]["count"].as_u64() {
+        if let Some(n) = self.data["olderProjects"]["count"].as_u64().filter(|_| !sectioned) { // (the sections have Quiet instead)
             let open = self.data["olderProjects"]["open"].as_bool().unwrap_or(false);
             /* i18n-ok: a ctl label */ ctl.push(CtlEntry { id: "side-older".into(), label: "Older projects".into(), ctl: Ctl::Node("side-older".into(), String::new()) });
             rows.push(with_rect(div().id("side-older"), || "side-older".to_string()).flex().items_center().gap_2().px_3().py_1().text_size(px(11.)).text_color(c("accent")).cursor_pointer().hover(|s| s.bg(c("raise")))
