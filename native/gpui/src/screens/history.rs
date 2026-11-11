@@ -14,11 +14,18 @@ pub const PAGE_KEY: &str = "historyPage";
 
 fn id(row: &Value) -> &str { row["id"].as_str().unwrap_or("") }
 
-/// The first row of `page` that `rows` also holds: (its index in `rows`, its index in `page`).
+/// A row that names a place in the thread. The hub's live rows (`@working:<thread>`, `@stream:<thread>`) keep one id whatever the thread
+/// has become, so they say nothing about where a page sits: a picture of the newest page found its place at the "Working" row of an old
+/// stretch, every newer row above that row in the picture went as a "cut head", and Bub's thread stayed at 01:47 for hours (Nov 11).
+fn anchor(row: &Value) -> bool { let i = id(row); !i.is_empty() && !i.starts_with('@') }
+/// The first row of `page` that `rows` also holds: (its index in `rows`, its index in `page`). Live rows are no anchor.
 fn first_shared(rows: &[Value], page: &[Value]) -> Option<(usize, usize)> {
-    let at: HashMap<&str, usize> = rows.iter().enumerate().map(|(i, r)| (id(r), i)).collect();
-    page.iter().enumerate().find_map(|(j, r)| at.get(id(r)).map(|i| (*i, j)))
+    let at: HashMap<&str, usize> = rows.iter().enumerate().filter(|(_, r)| anchor(r)).map(|(i, r)| (id(r), i)).collect();
+    page.iter().enumerate().filter(|(_, r)| anchor(r)).find_map(|(j, r)| at.get(id(r)).map(|i| (*i, j)))
 }
+/// The most rows at the top of a newest page that may be missing from the rows held and still be only the cut head of a run held whole
+/// (a fold's id changes with where the page cuts it). More, and the rows held are not the stretch just above the page: they are not merged.
+pub const CUT_HEAD: usize = 2;
 
 /// How far up the rows held a picture of the newest page may find its place: the newest page sits at the end of what is held, so a row it
 /// shares further up (a run's fold id seen again, a row an older page brought back above) is not where it starts. Matching it there cut every
@@ -26,9 +33,10 @@ fn first_shared(rows: &[Value], page: &[Value]) -> Option<(usize, usize)> {
 /// page and its history many times a second (Nov 10, both recordings of opening Bub).
 pub fn tail_from(rows: &[Value], fresh: &[Value]) -> usize { rows.len().saturating_sub(fresh.len() * 2 + 16) }
 /// The first row of `fresh` that the tail of `rows` (from `tail_from`) also holds: (its index in `rows`, its index in `fresh`).
+/// None too when the page's first shared row comes after more than CUT_HEAD rows the tail does not hold: merging there would drop them.
 fn first_shared_tail(rows: &[Value], fresh: &[Value]) -> Option<(usize, usize)> {
     let from = tail_from(rows, fresh);
-    first_shared(&rows[from..], fresh).map(|(i, j)| (i + from, j))
+    first_shared(&rows[from..], fresh).map(|(i, j)| (i + from, j)).filter(|(_, j)| *j <= CUT_HEAD)
 }
 /// Where a picture of the newest page starts in the rows held (None: it shares nothing with them).
 pub fn merge_point(rows: &[Value], fresh: &[Value]) -> Option<usize> { first_shared_tail(rows, fresh).map(|(i, _)| i) }
@@ -191,6 +199,19 @@ mod tests {
         seen.insert(page_mark(&b)); assert_eq!(next_older(&b, &a, true, 32, &seen), "", "A again");
         assert_eq!(next_older(&b, &cur(900, "2"), true, 32, &seen), "", "the same page under a new epoch is the same page");
         assert_eq!(page_mark(&a), "900"); assert_eq!(page_mark("plain"), "plain");
+    }
+    #[test] fn the_working_row_is_no_place_and_a_picture_far_ahead_stands_alone() {
+        // Nov 11: rows held stopped at 01:47 with the hub's "Working" row; every newer picture shared only that row
+        let held = rows(&["a", "b", "m147", "@working:t"]);
+        let fresh = rows(&["n1", "n2", "n3", "n4", "@working:t"]);
+        assert_eq!(merge_point(&held, &fresh), None, "nothing real shared: the picture stands alone");
+        assert_eq!(ids(&merge(held.clone(), fresh.clone())), ["n1", "n2", "n3", "n4", "@working:t"]);
+        // shared, but after three rows the rows held do not have: not the stretch above the page
+        let held = rows(&["a", "b", "c"]);
+        assert_eq!(merge_point(&held, &rows(&["x", "y", "z", "c", "d"])), None);
+        assert_eq!(ids(&merge(held, rows(&["x", "y", "z", "c", "d"]))), ["x", "y", "z", "c", "d"]);
+        // a new message at the bottom while a turn works: appended, the working row follows
+        assert_eq!(ids(&merge(rows(&["a", "b", "@working:t"]), rows(&["a", "b", "c", "@working:t"]))), ["a", "b", "c", "@working:t"]);
     }
     #[test] fn a_picture_over_rows_with_nothing_above_keeps_the_reading_going() {
         let (a, b) = (cur(900, "1"), cur(880, "1"));

@@ -8,6 +8,7 @@ private Xvfb with its own i3, the screen captured by ffmpeg x11grab at 30 fps. C
   pages   no history page is read twice (the client's `history` metrics name each page)
   still   once the reader stops scrolling, pages that land above hold the screen still: no frame changes after the last scroll settles
   top     scrolled to the very top, the window holds the thread's first message and every reply (no gap), and the screen is not empty
+  bottom  then back down: the list reaches its end, which holds the newest reply (Answer 399) and the answer that came in while scrolled up
   blank   no frame shows a picture's box empty (a picture area of the timeline's background colour where the picture was drawn before)
 usage: gpui-open-flash.py CLIENT_BIN HUB_BIN ASSETS_DIR OUT [PORT] [DISPLAY_N]   -> OUT/rows.json, OUT/frames/*.png, one line per check
 env: XVFB (default ~/.cache/xvfb-root/usr/bin/Xvfb) XVFB_LIB (its libraries). Needs ffmpeg (x11grab), i3, Python PIL."""
@@ -26,7 +27,8 @@ def log(i, ok, ev):
 
 shutil.rmtree(OUT, ignore_errors=True)
 for d in ('home', 'proj', 'bin', 'fakehome/.cache', 'frames'): os.makedirs(P(d), exist_ok=True)
-for n in ('claude', 'codex', 'grok', 'muse', 'opencode', 'agy', 'pi', 'omp'):
+shutil.copy(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'lib', 'standin_rows.py'), P('bin', 'claude')); os.chmod(P('bin', 'claude'), 0o755)
+for n in ('codex', 'grok', 'muse', 'opencode', 'agy', 'pi', 'omp'):
     open(P('bin', n), 'w').write('#!/bin/sh\nexit 1\n'); os.chmod(P('bin', n), 0o755)
 # pictures the replies name (absolute paths: the hub serves them through /message-image)
 for k in range(8):
@@ -81,13 +83,16 @@ try:
     # typing while history is read: each key's picture of the newest page lands between pages (a live turn does the same with Bub)
     # the short thread first, then the long one opened from it; then the reader scrolls up into its history and stops
     steps = [{'wait': 5000}, {'select': 0}, {'wait': 2500}, {'select': 1}, {'wait': 2500}, {'select': 0}, {'wait': 2500}, {'mark': 'open'}, {'select': 1}, {'wait': 3000},
-             {'mark': 'up'}] + [{'scroll': -900}, {'type': 'x'}, {'wait': 120}] * 25 + [{'mark': 'stop'}, {'wait': 4000}, {'mark': 'end'}] + [{'scroll': -20000}, {'wait': 250}] * 120 + [{'wait': 2000}, {'read': 'timeline'}, {'mark': 'top'}]
+             {'mark': 'up'}] + [{'scroll': -900}, {'type': 'x'}, {'wait': 120}] * 25 + [{'mark': 'stop'}, {'wait': 4000}, {'mark': 'end'}] + [{'scroll': -20000}, {'wait': 250}] * 120 + [{'wait': 2000}, {'read': 'timeline'}, {'scroll_state': 'top'}, {'mark': 'top'}]
+    # a message sent from the top: the stand-in answers while the reader is scrolled up again; then back to the bottom, which must hold it
+    steps += [{'type': 'zqecho LATE-ARRIVAL-77'}, {'send': True}, {'wait': 300}] + [{'scroll': -20000}, {'wait': 150}] * 20 + [{'wait': 6000}, {'scroll_state': 'away'}, {'mark': 'back'}]
+    steps += [{'scroll': 20000}, {'wait': 120}] * 120 + [{'wait': 2000}, {'read': 'timeline'}, {'scroll_state': 'bottom'}, {'mark': 'bottom'}]
     json.dump(steps, open(P('script.json'), 'w'))
     t_rec = time.time()
-    rec = spawn(['ffmpeg', '-v', 'error', '-y', '-f', 'x11grab', '-framerate', str(FPS), '-video_size', '%dx%d' % (W, H), '-i', ':%d' % N, '-t', '80', '-vf', 'scale=%d:-1' % (W // 2), P('frames/f_%04d.png')], 'ffmpeg.log', denv)
+    rec = spawn(['ffmpeg', '-v', 'error', '-y', '-f', 'x11grab', '-framerate', str(FPS), '-video_size', '%dx%d' % (W, H), '-i', ':%d' % N, '-t', '120', '-vf', 'scale=%d:-1' % (W // 2), P('frames/f_%04d.png')], 'ffmpeg.log', denv)
     client = spawn([CLIENT, '--url', 'http://127.0.0.1:%d' % PORT, '--token-file', P('home/token'), '--script', P('script.json'), '--exit-after', '1000'], 'client.log', cenv)
     t_client = time.time()
-    client.wait(timeout=240)
+    client.wait(timeout=360)
     try: os.killpg(rec.pid, signal.SIGINT); rec.wait(timeout=20)
     except Exception: pass
 finally:
@@ -128,11 +133,19 @@ else:
         flat = ImageStat.Stat(y).stddev[0] < 4 and ImageStat.Stat(x).stddev[0] > 20
         if flat: blank.append(i)
     log('blank', not blank, 'frames where the timeline went flat: %s' % blank[:12])
-    read = next((m['text'] for m in ms if m.get('event') == 'read' and m.get('what') == 'timeline'), '')
+    reads = [m['text'] for m in ms if m.get('event') == 'read' and m.get('what') == 'timeline']
+    read = reads[0] if reads else ''
     answers = {int(l.split('Answer ', 1)[1].split('.', 1)[0]) for l in read.splitlines() if 'Answer ' in l}
     missing = sorted(set(range(400)) - answers)
     tf = min(len(frames) - 1, frame_at(marks.get('top', marks['end'])) - 2)
     shown = ImageStat.Stat(tl(tf)).stddev[0] if frames else 0
+    sc = {m['name']: m for m in ms if m.get('event') == 'scroll'}
+    last = reads[1] if len(reads) > 1 else ''
+    away, bot = sc.get('away', {}), sc.get('bottom', {})
+    tail = [l for l in last.splitlines() if l.startswith('assistant:')][-2:]
+    at_end = bot.get('top') == '(end)' or (bot.get('max', 0) - bot.get('y', -1)) <= 2
+    log('bottom', away.get('top') not in (None, '(end)') and at_end and any('LATE-ARRIVAL-77' in l for l in tail) and 'Answer 399' in last,
+        'scrolled away at %s; at the bottom: end=%s, the last replies %s' % (away.get('top'), at_end, [l[:60] for l in tail]))
     log('top', 'Question 0:' in read and not missing and shown > 8, 'first message held: %s, replies missing: %d %s, timeline contrast at the top %.1f' % ('Question 0:' in read, len(missing), missing[:6], shown))
 cleanup()
 sys.exit(0 if rows and all(r['ok'] for r in rows) else 1)
