@@ -675,6 +675,7 @@ final class DataClient {
         guard let k = o["k"] as? String else { return }
         if k == "btw", let th = o["thread"] as? String, let q = o["q"] as? String, btw[th]?.q == q { btw[th] = Btw(q: q, a: o["a"] as? String ?? ""); return }
         if k == "term" { terms.push(o); return }
+        if k == "bots" { Task { await loadBots() }; return } // the bots or the home moved: read them again (an open uberbot chat follows it)
         if k == "secret" { let th = o["thread"] as? String ?? ""; Task { await refreshSecretAsks(th) }; return }
         // a null (`"subs":null` when a thread's work ends) or any non-JSON value decodes to nil instead of raising
         func decode<T: Decodable>(_ key: String, _ type: T.Type) -> T? { WireJSON.decode(o[key], as: type) }

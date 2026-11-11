@@ -506,6 +506,7 @@ object DataClient {
             "thread" -> o.optJSONObject("thread")?.let { val t = parseThread(it); upsert(t); if (t.history) historyMoved(); sectionsMoved() }
             "btw" -> { val tid = o.optString("thread"); if (btw[tid]?.q == o.optString("q")) btw = btw + (tid to Btw(o.optString("q"), o.optString("a"))) }
             "secret" -> scope.launch { refreshSecretAsks(o.optString("thread")) }
+            "bots" -> scope.launch { runCatching { loadBots() } } // the bots or the home moved: read them again (an open uberbot chat follows it)
             "thread.removed" -> { val id = o.optString("id"); threads = threads.filter { it.id != id }; entries = entries - id; save() }
             "project.removed" -> { val id = o.optString("id"); projects = projects.filter { it.id != id }; save() }
             "project" -> o.optJSONObject("project")?.let { val p = parseProject(it); projects = (projects.filter { x -> x.id != p.id } + p).sortedByDescending { x -> x.updatedAt }; save() }

@@ -515,7 +515,7 @@ fn turn_word(state: &str) -> &'static str { match state { "running" => "working"
 async fn deltas(hub: &Hub, lines: &[String], subs: &mut Subs) -> Vec<Value> {
     if subs.subs.is_empty() { return vec![] }
     let mut out = vec![]; let (mut upsert, mut gone, mut projects): (Vec<String>, Vec<String>, Vec<(String, bool)>) = (vec![], vec![], vec![]);
-    let (mut worked, mut locks_moved): (Vec<String>, bool) = (vec![], false); let mut swarms: Vec<String> = vec![];
+    let (mut worked, mut locks_moved, mut bots_moved): (Vec<String>, bool, bool) = (vec![], false, false); let mut swarms: Vec<String> = vec![];
     let mut viewed: Vec<(u64, String, String)> = vec![];
     for l in lines {
         let Ok(e) = serde_json::from_str::<Value>(l) else { continue };
@@ -529,6 +529,9 @@ async fn deltas(hub: &Hub, lines: &[String], subs: &mut Subs) -> Vec<Value> {
             "ThreadDeleted" => gone.push(th.clone()),
             "WorkSet" => { let w = s(&e, "thread").to_string(); if !worked.contains(&w) { worked.push(w) } }
             "LockChanged" => locks_moved = true,
+            // the bots, the uberbot or where the home is changed (a home move): the phones read bots.list again, and an open chat of the uberbot follows it
+            "BotSet" | "BotDeleted" | "UberSet" => bots_moved = true,
+            "SettingSet" if matches!(s(&e, "key"), "home.moving" | "home.at") => bots_moved = true,
             "ProjectCreated" | "ProjectRenamed" => projects.push((s(&e, "id").to_string(), true)),
             "ProjectRemoved" => projects.push((s(&e, "id").to_string(), false)),
             "MessagePosted" => {
@@ -570,6 +573,7 @@ async fn deltas(hub: &Hub, lines: &[String], subs: &mut Subs) -> Vec<Value> {
     if locks_moved { for (_, t) in &subs.subs { if let Topic::Thread(th) = t { if !worked.contains(th) { worked.push(th.clone()) } } } }
     for (sub, th, k) in &viewed { let v = hub.sub_view_for(th, k).await; out.push(d(*sub, "sub", json!({"thread":th,"key":k,"view":v}))) }
     for th in &worked { let subs_now = ext::work_now(hub, th).await; for sub in subs.threads(th) { out.push(d(sub, "work", json!({"thread":th,"subs":subs_now}))) } }
+    if bots_moved { for sub in subs.lists() { out.push(d(sub, "bots", json!({}))) } }
     if locks_moved { let l = ext::locks_now(hub).await; for sub in subs.lists() { out.push(d(sub, "locks", json!({"locks":l}))) } }
     for r in &swarms { for sub in subs.lists() { out.push(d(sub, "swarm", json!({"room":r}))) } }
     if upsert.is_empty() && gone.is_empty() && projects.is_empty() { return out }
