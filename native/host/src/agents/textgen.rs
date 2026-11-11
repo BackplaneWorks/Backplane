@@ -192,6 +192,8 @@ impl Agents {
             }
         } }
         if provider == "claude" { return self.shot_healthy(&model, BTW_SYSTEM, &input, &format!("btw: {thread}")).await.unwrap_or_default() }
+        // no account of the thread's: Claude goes to a login that can take it (the default login may be out for the week), another provider to its own
+        if provider == "claude" { return self.shot_healthy(&model, BTW_SYSTEM, &input, &format!("btw: {thread}")).await.unwrap_or_default() }
         self.shot(provider, &model, BTW_SYSTEM, &input, &Launch::default()).await.unwrap_or_default()
     }
     /// A thread's title from `text`: the Writing setting's provider and model when the person chose one, else Haiku under the thread's own account (else the default login), then Haiku on the default login, then Codex's light model.
