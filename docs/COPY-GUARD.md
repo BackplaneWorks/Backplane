@@ -1,6 +1,6 @@
 # The copy guard (BACKPLANE_COPY=1)
 
-A hub on a copy of a real log acts on nothing outside its home. One switch (`copy::on()`), four gates:
+A hub on a copy of a real log acts on nothing outside its home. One switch (`copy::on()`), five gates:
 
 1. **The home** (`copy::gate`, `main.rs`, before anything is touched): a home that looks like a real hub's data (symlinked log, a real
    `machine.id`/`tz.checked`, a JS hub's `store.db`, a log over 256 MiB) is refused unless `BACKPLANE_COPY=1`; a home this hub made carries `hub.owner`.
@@ -14,6 +14,22 @@ A hub on a copy of a real log acts on nothing outside its home. One switch (`cop
    This list is a second line, not the gate: see "Writes are default-deny" below.
 4. **Listeners**: a copy never starts the tailnet listener (`main.rs`: `tailscale: !no_tailscale && !copy::on()`); the only listener is the one
    named by `--host/--port`.
+
+5. **Turns** (`copy::turn_gated`, checked by the thread actor in `agents/mod.rs` at every turn start: `user`, `start_queued`, `steer`, `wake_ride`,
+   `codex_next`, `claude_send`, `codex_run`): on a copy nothing starts an agent turn by itself. Only the person's own `turn.start` from a
+   window (`deliver_person`) starts or writes to an agent. A restart's carry-on or retry, a provider resume, the usage-limit failover's input,
+   auto-continue, held launches, routines and reminders (`Bots::tick_at` also fires none), webhooks and mail reaching a bot, improvement runs,
+   task results, wakes and `thread_send` all post their message, and it waits in the thread's ride for the person's next message; queued
+   starts are refused with `copy::TURN_LINE`. Rides copied from the real log are emptied at start. Held far-sends never leave
+   (`net/rpc.rs` `Router::work` starts no worker on a copy). The rule does not depend on `restart.continue`, and it holds even when
+   `BACKPLANE_AGENTS` names a folder of working agents. Side-by-side mode (`SIDE-BY-SIDE.md`) is this same rule with real agents for the person's turn.
+   **Why (2026-11-11):** before this, a copy with `restart.continue=off` still started its interrupted turns at start (`restart.retry`,
+   `provider.resume`, `fallback.input`, threads `running`). Those copies were safe only because no agent was found, and the turns failed with
+   "could not start claude". With agents present, a copy would have run live turns in the person's real project folders.
+   Tests: `agents::tests::a_copy_with_interrupted_turns_a_due_routine_and_waiting_starts_runs_no_agent` (a child with `BACKPLANE_COPY=1`; a
+   recording agent on PATH and in `BACKPLANE_AGENTS` is never started; then the person's own send runs it once),
+   `the_same_home_without_the_copy_switch_resumes` (the same home without the switch: the carry runs and the routine fires),
+   `net::rpc::tests::a_held_far_send_never_leaves_a_copy`, `copy::tests::on_a_copy_only_the_persons_press_starts_a_turn`.
 
 Raw sockets are not child processes, so gate 2 does not see them. There is no HTTP client crate; the non-test `connect` calls are
 `presenter.rs` (loopback to our own policy child), `kicad/nng.rs` (the KiCad unix socket) and `net/tailnet.rs` `hello_with` (a raw

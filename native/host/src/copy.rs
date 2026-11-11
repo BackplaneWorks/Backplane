@@ -26,11 +26,22 @@ pub fn side_by_side_requested() -> bool { static ON: OnceLock<bool> = OnceLock::
 pub fn side_by_side_gate(copy: bool, requested: bool) -> Result<(), String> {
     if requested && !copy { Err("backplane-hub: BACKPLANE_SIDE_BY_SIDE=1 without BACKPLANE_COPY=1: refused (side-by-side runs only on a copy)".to_string()) } else { Ok(()) }
 }
+/// Copy.turns: on a copy, only the person's own press (a client's `turn.start`) starts or writes to an agent turn. Nothing starts one by itself: no restart
+/// continue or retry, no provider resume or usage-limit failover input, no auto-continue, no held launch or far-send, no routine, reminder, webhook, mail or
+/// improvement run, no task result or wake. Those messages are posted and wait in the thread's ride for the person's next message (as in side-by-side mode,
+/// which this always held for). One rule, checked by the thread actor (agents/mod.rs) at every turn start: `turn_gated(pressed)`.
+pub fn person_only() -> bool { on() }
+/// Whether a turn start that is (`pressed`) or is not the person's own press is refused here.
+pub fn turn_gated_with(copy: bool, pressed: bool) -> bool { copy && !pressed }
+pub fn turn_gated(pressed: bool) -> bool { turn_gated_with(person_only(), pressed) }
+/// What a caller whose turn start was refused on a copy is told.
+pub const TURN_LINE: &str = "a hub on a copied log (BACKPLANE_COPY=1) starts a turn only when the person sends a message";
+
 /// The state policies run passive in side-by-side mode (they do nothing on their own); otherwise `BACKPLANE_PASSIVE` decides, as before.
 pub fn passive_from(person_turn_allowed: bool) -> Option<bool> { person_turn_allowed.then_some(true) }
 
 /// Copy.note: said in the first log lines.
-pub const NOTE: &str = "BACKPLANE_COPY=1: a copy of a log; no watched work, deploys, pushes, far pushes, network commands or git that writes; agents are stand-in blocks";
+pub const NOTE: &str = "BACKPLANE_COPY=1: a copy of a log; no watched work, deploys, pushes, far pushes, network commands or git that writes; agents are stand-in blocks, and a turn starts only when the person sends a message";
 /// What a client that asked for git that writes is told (it would wait for an answer that never comes).
 pub const GIT_TOLD: &str = "a hub on a copied log (BACKPLANE_COPY=1) runs no git that writes";
 
@@ -214,6 +225,11 @@ mod tests {
         assert!(!refused_with(true, "sh", &["-c", "git log --oneline"]));
     }
     #[test] fn the_switch_is_exactly_one() { assert!(is_on("1")); assert!(!is_on("")); assert!(!is_on("0")); assert!(!is_on("true")); }
+    #[test] fn on_a_copy_only_the_persons_press_starts_a_turn() {
+        assert!(turn_gated_with(true, false), "a copy: a start nobody pressed is refused");
+        assert!(!turn_gated_with(true, true), "a copy: the person's own send runs");
+        assert!(!turn_gated_with(false, false) && !turn_gated_with(false, true), "not a copy: no gate");
+    }
     #[test] fn the_refusal_names_the_command() { assert_eq!(refusal("curl"), "backplane: a hub on a copied log (BACKPLANE_COPY=1) does not run curl"); }
 
     fn home(name: &str) -> std::path::PathBuf { let d = std::env::temp_dir().join(format!("bp-copy-{}-{name}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap(); d }

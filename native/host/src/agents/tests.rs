@@ -1127,6 +1127,64 @@ fn tree(d: &Path) -> Vec<(String, u64)> {
     assert!(String::from_utf8_lossy(&o.stdout).contains("copy_child_probe ... ok"), "the probe ran: {}", String::from_utf8_lossy(&o.stdout));
 }
 
+// ---- Copy.turns: on a copy nothing starts an agent turn by itself, only the person's own send (BACKPLANE_COPY=1 is read once per process: the probe runs in a child, once
+// with the switch and once without, on the same home, so the switch is the only difference) ----
+#[tokio::test(flavor = "multi_thread")] async fn copy_turns_probe() {
+    let Ok(mode) = std::env::var("BP_COPY_TURNS_PROBE") else { return };
+    let copy = mode == "copy"; assert_eq!(crate::copy::on(), copy, "the switch is as the parent set it");
+    std::env::set_var("TZ", "Etc/UTC");
+    // the agent on PATH (and as the stand-in): it writes a line to `calls` each time it is started, then runs the stand-in
+    let sd = PathBuf::from(std::env::var("BP_COPY_TURNS_BIN").unwrap()); let calls = sd.join("calls"); let inner = sd.join("standin.sh");
+    std::fs::write(&inner, STANDIN.replacen("\n", "\nexport FAKE_PER=2 FAKE_CYCLE=5 FAKE_SECS=1 FAKE_LOG=/dev/null\n", 1)).unwrap();
+    script(&sd, "claude", &format!("#!/bin/sh\necho started >> {}\nexec sh {}\n", crate::plat::fs::script_path(&calls), crate::plat::fs::script_path(&inner)));
+    // the home: T1's turn was running when the hub stopped (restart.continue is on: a live hub carries it on), T2 at rest with a usage-limit resume record
+    let (hub, ag, _h, _w) = start("ct", |w| { let s = running_log(w, ""); let t2 = base_log(w, 2, ""); let t2 = t2.lines().last().unwrap().to_string();
+        format!("{s}{t2}\n{}\n{}\n", json!({"$":"SettingSet","key":"restart.continue","value":"on","at":1700000101}), json!({"$":"SettingSet","key":format!("provider.resume.{T2}"),"value":"{\"target\":\"claude/\",\"reset\":1,\"reason\":\"limit\"}","at":1700000102})) }, |_| Cli::standin(&sd)).await;
+    let bots = crate::bots::start(hub.clone(), ag.clone()).await;
+    let r = rpc(&hub, "bots.create", json!({"name":"ada"})).await; let bot = r["bot"].as_str().expect("a bot").to_string();
+    // a routine that is due (a one-time one, at a past instant)
+    let past = 1_000_000u64;
+    for e in [json!({"$":"RoutineSet","id":"o1","bot":bot,"name":"once","cron":"","prompt":"do the routine thing","on":true,"at":past}), json!({"$":"RoutinePlan","id":"o1","once":past + 10,"tz":"person","kind":"","at":past})] { hub.commit(&e).await.unwrap(); }
+    let fired = bots.tick_at(now_s()).await;
+    // the starts no person pressed, each as the hub makes it: failover's carry-on (resume_with), a queued start (Wt.start), a wake, a usage-limit resume / mail / bot / far message (deliver)
+    let _ = ag.resume_with(T2, "[Backplane] carry on after the switch").await;
+    let _ = ag.start_queued(T2, "queued text").await;
+    let _ = ag.wake_ride(T2, "w1", "a wake note").await;
+    let _ = ag.deliver(T2, "m-resume", crate::settings::driver::RESUME_TEXT, None, vec![]).await;
+    tokio::time::sleep(Duration::from_millis(3000)).await;
+    let ev = log_from(&hub, 0).await; let spawned = ag.stats.procs_spawned.load(Relaxed); let called = std::fs::read_to_string(&calls).unwrap_or_default().lines().count();
+    let carried = ev.iter().any(|e| is(e, "MessageFrom") && e["kind"] == "carry");
+    if copy {
+        assert_eq!(fired, 0, "no routine fires on a copy");
+        assert_eq!(spawned, 0, "no agent process"); assert_eq!(called, 0, "the agent on PATH was never started");
+        assert!(!carried, "the cut turn is not carried on");
+        assert!(!ev.iter().any(|e| turn_is(e, "running") && e["at"].as_u64().unwrap_or(0) > 1700000200), "no turn is running again");
+        assert!(!ev.iter().any(|e| is(e, "SettingSet") && e["key"].as_str().map_or(false, |k| k.starts_with("fallback.input.") || k.starts_with("restart.retry.")) && e["at"].as_u64().unwrap_or(0) > 1700000200), "no turn start was logged (restart.retry, fallback.input)");
+        assert!(ag.world().await.setting(&format!("ride.{T2}")).contains("a wake note"), "what nobody pressed waits in the ride");
+        // the person's own send in the copy's window runs
+        let from = len(&hub).await; let r = rpc(&hub, "turn.start", json!({"thread":T2,"text":"zqshort hi"})).await; assert_eq!(r["ok"], true, "{r}");
+        until(&hub, from, 30, |ev| ev.iter().any(|e| turn_is(e, "completed") || turn_is(e, "failed"))).await;
+        assert_eq!(ag.stats.procs_spawned.load(Relaxed), 1, "the person's turn started its agent: {:?}", log_from(&hub, from).await);
+        assert_eq!(std::fs::read_to_string(&calls).unwrap_or_default().lines().count(), 1, "once");
+    } else {
+        assert_eq!(fired, 1, "the routine fires");
+        assert!(carried, "the cut turn is carried on");
+        assert!(spawned >= 1 && called >= 1, "agents were started: {spawned} processes, {called} calls");
+    }
+    println!("copy_turns_ok {mode} spawned={spawned} called={called}");
+    ag.shutdown();
+}
+fn copy_turns_child(copy: bool) -> String {
+    let me = std::env::current_exe().unwrap(); let bin = dir(if copy { "ctc-bin" } else { "ctl-bin" });
+    let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default());
+    let mut c = std::process::Command::new(me); c.args(["agents::tests::copy_turns_probe", "--exact", "--nocapture", "--test-threads=1"]).env("BP_COPY_TURNS_PROBE", if copy { "copy" } else { "live" }).env("BP_COPY_TURNS_BIN", &bin).env("PATH", path).env("BACKPLANE_AGENTS", &bin).env_remove("BACKPLANE_SIDE_BY_SIDE"); // agents present: on PATH and as the copy's stand-in folder, the case the gate is for
+    if copy { c.env("BACKPLANE_COPY", "1"); } else { c.env_remove("BACKPLANE_COPY"); }
+    let o = c.output().unwrap(); let out = String::from_utf8_lossy(&o.stdout).into_owned();
+    assert!(o.status.success(), "{out}{}", String::from_utf8_lossy(&o.stderr)); assert!(out.contains("copy_turns_ok ") && out.contains("test result: ok. 1 passed"), "the probe ran: {out}"); out
+}
+#[test] fn a_copy_with_interrupted_turns_a_due_routine_and_waiting_starts_runs_no_agent() { assert!(copy_turns_child(true).contains("copy_turns_ok copy spawned=0 called=0")) }
+#[test] fn the_same_home_without_the_copy_switch_resumes() { assert!(copy_turns_child(false).contains("copy_turns_ok live")) }
+
 #[path = "core_e2e.rs"] mod core_e2e;
 #[tokio::test(flavor = "multi_thread")] async fn a_turn_starts_in_a_thread_from_a_hand_written_log_with_spaced_json() { // build/gpui/results/desktop/sendchk.events.jsonl: Python's json.dumps puts a space after every colon
     let sd = dir("sp-bin"); perf_standin(&sd, 1); let work = dir("sp-work");
