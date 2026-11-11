@@ -369,3 +369,86 @@ fn triage_view(ev: &[Value]) -> Vec<String> {
     assert_eq!(posts.len(), 1, "one post, the missing room skipped: {posts:?}"); assert_eq!(posts[0]["from"], "you");
     assert!(posts[0]["text"].as_str().unwrap().starts_with("[from the thread \"") && posts[0]["text"].as_str().unwrap().ends_with("see #ops-lab please"), "{:?}", posts[0]["text"]);
 }
+
+// ---- Done is material (mail/done.rs): a launched thread's finish reaches the person once, near-simultaneous finishes go out together, progress stays quiet ----
+/// what the agents lane does with a launched thread's report to the uberbot (`launch_tell` → the funnel)
+async fn report(bots: &Arc<Bots>, chat: &str, from: &str, kind: &str, text: &str) {
+    let msg = format!("t:{from}:lr-{}", rand_n()); let o = origin(from, kind, "");
+    assert!(matches!(Room(Arc::downgrade(bots)).funnel("user", chat, &msg, text, &o, "", &[]).await, Funnel::Filed(Ok(()))), "filed for the uberbot");
+}
+fn rand_n() -> u64 { static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1); N.fetch_add(1, std::sync::atomic::Ordering::Relaxed) }
+/// the assistant lines the person's Bub chat shows: in the uberbot's conversation, not left out as a backend turn's reply
+fn shown_lines(hub: &Arc<Hub>, chat: &str) -> Vec<String> {
+    let rows: Vec<Value> = log(hub).into_iter().filter(|e| e["$"] == "MessagePosted" && e["thread"] == chat).collect();
+    let hid = crate::present::thread::backend_replies(rows.iter().map(|e| (e["msg"].as_str().unwrap(), true, e["role"].as_str().unwrap(), e["text"].as_str().unwrap())), true);
+    rows.iter().filter(|e| e["role"] == "assistant" && !hid.contains(e["msg"].as_str().unwrap()) && !crate::present::thread::hidden(true, e["msg"].as_str().unwrap(), "assistant", e["text"].as_str().unwrap())).map(|e| e["text"].as_str().unwrap().to_string()).collect()
+}
+async fn due_now(hub: &Arc<Hub>, bots: &Arc<Bots>, bub: &str) { hub.commit(&json!({"$":"SettingSet","key":crate::bots::mail::done::due_key(bub),"value":"1","at":now_s()})).await.unwrap(); bots.done_tick().await; settle().await }
+fn lanes(hub: &Arc<Hub>, bub: &str) -> Vec<String> { runs(hub).iter().filter_map(|r| r["thread"].as_str().filter(|t| t.starts_with(&format!("mailcoord-{bub}-"))).map(str::to_string)).collect() }
+
+#[tokio::test] async fn a_launched_thread_finishing_reaches_the_persons_chat_as_exactly_one_line() {
+    let (hub, bots, rec, bub, chat) = uber("done-one").await;
+    let text = crate::agents::launch::note("t1794400000-1", "KiCad embed", "completed", "Landed 1a2b3c4 on main: KiCad opens inside the Board tab.\nDetails follow.");
+    report(&bots, &chat, "t1794400000-1", "launch", &text).await; settle().await;
+    assert!(runs(&hub).is_empty(), "a finish is no triage run to keep quiet: it joins the done batch");
+    assert!(setting_of(&hub, &crate::bots::mail::done::batch_key(&bub)).contains("KiCad embed"));
+    bots.done_tick().await; settle().await; assert!(lanes(&hub, &bub).is_empty(), "the batch waits for its window");
+    due_now(&hub, &bots, &bub).await;
+    let ls = lanes(&hub, &bub); assert_eq!(ls.len(), 1, "one lane for the batch");
+    let ride = rec.rides.lock().unwrap().iter().find(|r| r.0 == ls[0]).cloned().unwrap();
+    assert!(ride.2.contains("Done is material") && ride.2.contains("KiCad embed") && ride.2.contains("Running hub build:") && ride.2.contains("tell_person key: done:"), "{}", ride.2);
+    let key = ride.2.split("tell_person key: ").nth(1).unwrap().lines().next().unwrap().to_string();
+    running(&hub, &ls[0]).await; settle().await;
+    let line = "KiCad embed landed (1a2b3c4): not in your running build yet, it needs a hub restart; then open a board and press Open in KiCad.";
+    assert!(bots.mail_tool(&ls[0], "tell_person", &json!({"text":line,"key":key})).await.0); settle().await;
+    assert!(bots.mail_tool(&ls[0], "tell_person", &json!({"text":line,"key":key})).await.0); settle().await;
+    end(&hub, &ls[0], "completed").await; settle().await;
+    assert_eq!(shown_lines(&hub, &chat), vec![line.to_string()], "one visible line, shown although the chat's last input was the hub's");
+    let posted: Vec<Value> = log(&hub).into_iter().filter(|e| e["$"] == "MessagePosted" && e["thread"] == chat.as_str() && e["role"] == "assistant").collect();
+    assert!(posted[0]["msg"].as_str().unwrap().starts_with("tell:"), "{posted:?}");
+    // the same report routed again (the owner's outbox walk routes pending tickets again and again) is not a second finish
+    let body = { let w = bots.world().await; let m = log(&hub).into_iter().find(|e| e["$"] == "MailPosted" && e["kind"] == "launch").unwrap(); let conv = m["conv"].as_str().unwrap();
+        crate::bots::mail::Body { conv: w.mail.conv(conv), mail: w.mail.headers(conv).iter().find(|h| h.id == m["id"].as_str().unwrap()).cloned().unwrap(), text: text.clone() } };
+    bots.route_body(body).await; due_now(&hub, &bots, &bub).await;
+    assert_eq!(lanes(&hub, &bub).len(), 1, "no second lane"); assert!(runs(&hub).len() == 1, "and no triage run");
+    assert_eq!(shown_lines(&hub, &chat).len(), 1);
+}
+
+#[tokio::test] async fn two_finishes_within_a_minute_are_one_batched_line_and_a_silent_lane_gets_the_hubs_digest() {
+    let (hub, bots, rec, bub, chat) = uber("done-two").await;
+    report(&bots, &chat, "t1794400000-2", "launch", &crate::agents::launch::note("t1794400000-2", "Sync-token fix", "completed", "Landed 5d6e7f8 on main.")).await;
+    report(&bots, &chat, "t1794400000-3", "launch", &crate::agents::launch::note("t1794400000-3", "Scroll fixes", "completed", "Chat scrolls up without jumps.")).await; settle().await;
+    assert!(runs(&hub).is_empty());
+    due_now(&hub, &bots, &bub).await;
+    let ls = lanes(&hub, &bub); assert_eq!(ls.len(), 1, "both finishes in one lane");
+    let ride = rec.rides.lock().unwrap().iter().find(|r| r.0 == ls[0]).cloned().unwrap(); assert!(ride.2.contains("Sync-token fix") && ride.2.contains("Scroll fixes") && ride.2.contains("Finished (2)"));
+    // the lane says nothing and ends: the hub posts the plain digest, once
+    running(&hub, &ls[0]).await; settle().await; end(&hub, &ls[0], "completed").await; settle().await;
+    end(&hub, &ls[0], "failed").await; settle().await;
+    let shown = shown_lines(&hub, &chat); assert_eq!(shown.len(), 1, "{shown:?}");
+    assert_eq!(shown[0], "Done:\n- Sync-token fix: Landed 5d6e7f8 on main. (backplane://thread/t1794400000-2)\n- Scroll fixes: Chat scrolls up without jumps. (backplane://thread/t1794400000-3)");
+    assert!(!rec.rides.lock().unwrap().iter().any(|r| r.1.starts_with("lost:")), "a done lane is not handed over as lost");
+    bots.done_tick().await; settle().await; assert_eq!(lanes(&hub, &bub).len(), 1, "nothing left to flush");
+}
+
+#[tokio::test] async fn progress_pings_and_unfinished_reports_put_no_line_in_the_persons_chat() {
+    let (hub, bots, _rec, bub, chat) = uber("done-none").await;
+    report(&bots, &chat, "t1794400000-4", "thread", "Still building: 3 of 7 crates done.").await;
+    report(&bots, &chat, "t1794400000-4", "launch", &crate::agents::launch::note("t1794400000-4", "Windows #1102", "finished its turn and waits for an answer", "Which installer, MSI or MSIX?")).await;
+    report(&bots, &chat, "t1794400000-4", "launch", &crate::agents::launch::note("t1794400000-4", "Windows #1102", "failed", "rate limited")).await; settle().await;
+    assert_eq!(setting_of(&hub, &crate::bots::mail::done::batch_key(&bub)), "", "no finish among them");
+    due_now(&hub, &bots, &bub).await;
+    assert!(lanes(&hub, &bub).is_empty(), "no done lane");
+    assert!(shown_lines(&hub, &chat).is_empty(), "nothing in the person's chat: progress goes to quiet triage");
+}
+
+#[test] fn the_owners_preferences_reach_the_mailroom_lanes_reporting_ones_first() {
+    let m = |k: &str, t: &str, at: u64| crate::bots::world::Mem { bot: "b".into(), key: k.into(), kind: "pref".into(), text: t.into(), tags: String::new(), created: at, updated: at };
+    let mut ms: Vec<crate::bots::world::Mem> = (0..40).map(|i| m(&format!("pref.other-{i}"), &"x".repeat(400), 100 + i)).collect();
+    ms.push(m("pref.report-completions", "When work the person asked for lands or finishes, tell them right away in one short line.", 1));
+    let refs: Vec<&crate::bots::world::Mem> = ms.iter().collect();
+    let b = crate::bots::mail::route::pref_block(&refs);
+    assert!(b.contains("<owner_preferences>") && b.contains("pref.report-completions") && b.contains("Obey them over this brief"), "an old reporting rule is kept ahead of newer others");
+    assert!(b.chars().count() < 6400);
+    assert!(!crate::bots::mail::route::mem_block(&refs, "anything", 200).contains("pref.report-completions"), "the <memory> block alone loses it");
+}
