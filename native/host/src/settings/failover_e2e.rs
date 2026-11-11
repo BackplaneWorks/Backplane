@@ -6,6 +6,9 @@ use std::{path::PathBuf, sync::Arc, time::{Duration, Instant}};
 
 const STANDIN: &str = include_str!("../../../../test/agents/fixtures/failover-standin.py");
 const T: &str = "t1700000001-2";
+/// How long a wait on state may take before it is called stuck. A deadline costs nothing when the state arrives (every wait returns the moment it does) and only matters when it does
+/// not, so it is long: a gate on a box with three builds running starts a stand-in CLI in seconds, not milliseconds.
+const PATIENCE: u64 = 180;
 struct Rig { hub: Arc<Hub>, ag: Arc<Agents>, mgr: Arc<Accounts>, dir: PathBuf }
 
 fn fresh(name: &str) -> PathBuf { static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0); let p = std::env::temp_dir().join(format!("bp-fo-{}-{name}-{}", std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::Relaxed))); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
@@ -43,7 +46,7 @@ impl Rig {
         (w, p, c)
     }
     async fn provider(&self, th: &str) -> String { self.hub.model().await.threads.get(th).map(|t| t.provider.clone()).unwrap_or_default() }
-    async fn settled(&self, ids: &[&String]) { let end = Instant::now() + Duration::from_secs(5); loop { let inv = self.hub.setting("accounts.inventory").await.unwrap_or_default(); if ids.iter().all(|i| ac::ready(&ac::profile(&inv, i), ac::profile(&inv, i)["provider"].as_str().unwrap_or(""), 2)) { return } assert!(Instant::now() < end, "the inventory never told of them: {inv}"); tokio::time::sleep(Duration::from_millis(50)).await } }
+    async fn settled(&self, ids: &[&String]) { let end = Instant::now() + Duration::from_secs(PATIENCE); loop { let inv = self.hub.setting("accounts.inventory").await.unwrap_or_default(); if ids.iter().all(|i| ac::ready(&ac::profile(&inv, i), ac::profile(&inv, i)["provider"].as_str().unwrap_or(""), 2)) { return } assert!(Instant::now() < end, "the inventory never told of them: {inv}"); tokio::time::sleep(Duration::from_millis(50)).await } }
     async fn bind(&self, th: &str, provider: &str, a: &(String, u64)) { self.hub.commit(&json!({"$":"SettingSet","key":ac::binding_key(th, provider),"value":ac::binding_show(&a.0, a.1),"at":now()})).await.unwrap(); }
     fn mode(&self, who: &str, m: &str) { std::fs::write(self.dir.join(format!("mode.{who}")), m).unwrap() }
     fn turns(&self) -> Vec<Value> { std::fs::read_to_string(self.dir.join("turns.jsonl")).unwrap_or_default().lines().filter_map(|l| serde_json::from_str(l).ok()).collect() }
@@ -52,7 +55,7 @@ impl Rig {
     fn lines(&self, th: &str) -> Vec<String> { self.log().iter().filter(|e| e["$"] == "ActivityLogged" && e["thread"] == th).filter_map(|e| e["summary"].as_str().map(str::to_string)).collect() }
     async fn turn_of(&self, th: &str) -> String { self.hub.model().await.threads.get(th).map(|t| t.turn.clone()).unwrap_or_default() }
     /// Until the thread's turn is at rest in `state` and `n` turns ran.
-    async fn rest(&self, th: &str, state: &str, n: usize) { let end = Instant::now() + Duration::from_secs(20); loop { if self.turns().len() >= n && self.turn_of(th).await == state { tokio::time::sleep(Duration::from_millis(150)).await; if self.turn_of(th).await == state { return } } assert!(Instant::now() < end, "turn {}, {} of {n} turns; {:?}\n{:#?}", self.turn_of(th).await, self.turns().len(), self.lines(th), self.turns()); tokio::time::sleep(Duration::from_millis(40)).await } }
+    async fn rest(&self, th: &str, state: &str, n: usize) { let end = Instant::now() + Duration::from_secs(PATIENCE); loop { if self.turns().len() >= n && self.turn_of(th).await == state { tokio::time::sleep(Duration::from_millis(150)).await; if self.turn_of(th).await == state { return } } assert!(Instant::now() < end, "turn {}, {} of {n} turns; {:?}\n{:#?}", self.turn_of(th).await, self.turns().len(), self.lines(th), self.turns()); tokio::time::sleep(Duration::from_millis(40)).await } }
     async fn binding(&self, th: &str, provider: &str) -> String { let b: Value = serde_json::from_str(&self.hub.setting(&ac::binding_key(th, provider)).await.unwrap_or_default()).unwrap_or(Value::Null); b["id"].as_str().unwrap_or("").to_string() }
     /// An MCP tool, through the real server, as an agent of `th`.
     async fn tool(&self, th: &str, name: &str, args: Value) -> (bool, Value) {
@@ -190,7 +193,7 @@ impl Rig {
     let k = fb::hold_key("claude", &w.0, w.1); let at: u64 = serde_json::from_str::<Value>(&r.hub.setting(&k).await.unwrap()).unwrap()["at"].as_u64().unwrap();
     r.tick(now()).await; assert!(!r.hub.setting(&k).await.unwrap_or_default().is_empty(), "nothing newer has been learned");
     tokio::time::sleep(Duration::from_millis(1100)).await; let _ = r.mgr.request(&json!({"op":"status","profile":w.0})).await;
-    let end = Instant::now() + Duration::from_secs(5); loop { let inv = r.hub.setting("accounts.inventory").await.unwrap_or_default(); if ac::profile(&inv, &w.0)["checkedAt"].as_u64().unwrap_or(0) > at { break } assert!(Instant::now() < end); tokio::time::sleep(Duration::from_millis(50)).await }
+    let end = Instant::now() + Duration::from_secs(PATIENCE); loop { let inv = r.hub.setting("accounts.inventory").await.unwrap_or_default(); if ac::profile(&inv, &w.0)["checkedAt"].as_u64().unwrap_or(0) > at { break } assert!(Instant::now() < end); tokio::time::sleep(Duration::from_millis(50)).await }
     r.tick(now()).await; assert_eq!(r.hub.setting(&k).await.unwrap_or_default(), "", "its sign-in was checked after it failed");
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn an_old_cli_a_process_that_dies_and_a_turn_that_ended_well_are_each_read_right() {
@@ -287,15 +290,15 @@ impl Rig {
     // honest: the status check asks the provider, which refuses; the hold stays, and the inventory says expired
     let _ = r.mgr.request(&json!({"op":"status","profile":w.0})).await; assert_eq!(r.mgr.state_of(&w.0), "expired", "auth status names the account, the provider refuses it");
     r.tick(now()).await; assert!(!r.hub.setting(&fb::hold_key("claude", &w.0, w.1)).await.unwrap_or_default().is_empty(), "nothing newer has been learned");
-    let end = Instant::now() + Duration::from_secs(5); loop { if ac::profile(&r.hub.setting("accounts.inventory").await.unwrap_or_default(), &w.0)["state"] == "expired" { break } assert!(Instant::now() < end, "the inventory never said it"); tokio::time::sleep(Duration::from_millis(50)).await }
+    let end = Instant::now() + Duration::from_secs(PATIENCE); loop { if ac::profile(&r.hub.setting("accounts.inventory").await.unwrap_or_default(), &w.0)["state"] == "expired" { break } assert!(Instant::now() < end, "the inventory never said it"); tokio::time::sleep(Duration::from_millis(50)).await }
     // a new message on it refuses at the start, in the same words, and waits as well (no turn runs on a dead login)
     let waits = |r: &Rig| r.lines(T).iter().filter(|l| l.starts_with("Work's sign-in expired")).count();
     r.say(T, "m3", "THIRD-REQUEST").await;
-    let end = Instant::now() + Duration::from_secs(20); while waits(&r) < 2 { assert!(Instant::now() < end, "{:?}", r.lines(T)); tokio::time::sleep(Duration::from_millis(50)).await }
+    let end = Instant::now() + Duration::from_secs(PATIENCE); while waits(&r) < 2 { assert!(Instant::now() < end, "{:?}", r.lines(T)); tokio::time::sleep(Duration::from_millis(50)).await }
     r.rest(T, "interrupted", 2).await; assert_eq!(r.turns().len(), 2, "no process was started on it");
     // one alert, linked to the account's sign-in
     let alerts = |l: &[Value]| l.iter().filter(|e| e["$"] == "SettingSet" && e["key"] == accounts_hub::alert_key("claude") && e["value"] != "").cloned().collect::<Vec<_>>();
-    let end = Instant::now() + Duration::from_secs(5); while alerts(&r.log()).is_empty() { assert!(Instant::now() < end, "no alert"); tokio::time::sleep(Duration::from_millis(50)).await }
+    let end = Instant::now() + Duration::from_secs(PATIENCE); while alerts(&r.log()).is_empty() { assert!(Instant::now() < end, "no alert"); tokio::time::sleep(Duration::from_millis(50)).await }
     let a: Value = serde_json::from_str(alerts(&r.log())[0]["value"].as_str().unwrap()).unwrap();
     assert_eq!((a["text"].as_str().unwrap(), a["link"].as_str().unwrap()), ("Claude sign-in expired: tap to sign in again", format!("account:{}", w.0).as_str()));
 
@@ -307,7 +310,7 @@ impl Rig {
     let mut call = |m: &'static str, p: Value| { n += 1; let id = n; let msg = json!({"id":id,"m":m,"p":p}).to_string(); (id, msg) };
     async fn reply(ws: &mut tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>, id: u64, msg: String) -> Value {
         ws.send(Message::Text(msg.into())).await.unwrap();
-        loop { let m = tokio::time::timeout(Duration::from_secs(60), ws.next()).await.expect("an answer").unwrap().unwrap(); if let Message::Text(t) = m { let v: Value = serde_json::from_str(t.as_str()).unwrap(); if v["t"] == "reply" && v["id"] == id { return v } } }
+        loop { let m = tokio::time::timeout(Duration::from_secs(PATIENCE), ws.next()).await.expect("an answer").unwrap().unwrap(); if let Message::Text(t) = m { let v: Value = serde_json::from_str(t.as_str()).unwrap(); if v["t"] == "reply" && v["id"] == id { return v } } }
     }
     let hello = loop { let m = ws.next().await.unwrap().unwrap(); if let Message::Text(t) = m { break serde_json::from_str::<Value>(t.as_str()).unwrap() } };
     assert!(hello["features"].as_array().unwrap().contains(&json!("accounts")));
@@ -315,7 +318,7 @@ impl Rig {
     let row = &page["result"]["providers"][0]["accounts"][0]; assert_eq!((row["label"].as_str().unwrap(), row["line"].as_str().unwrap(), row["tone"].as_str().unwrap()), ("Work", "sign-in expired", "bad"));
     let (id, m) = call("account.act", json!({"profile":w.0,"action":"signin"})); let v = reply(&mut ws, id, m).await; assert_eq!(v["ok"], true, "{v}");
     let mut view = v["result"]["account"].clone();
-    let end = Instant::now() + Duration::from_secs(60);
+    let end = Instant::now() + Duration::from_secs(PATIENCE);
     while view["signin"]["paste"] != true { assert!(Instant::now() < end, "{view}"); tokio::time::sleep(Duration::from_millis(100)).await; let (id, m) = call("account.view", json!({"profile":w.0})); view = reply(&mut ws, id, m).await["result"]["account"].clone(); }
     assert!(view["signin"]["url"].as_str().unwrap().starts_with("https://claude.com/cai/oauth/authorize?code=true"), "{view}");
     assert_eq!(view["actions"], json!([{"label":"Cancel sign-in","action":"cancel","danger":false}]));
@@ -359,7 +362,7 @@ impl Rig {
     r.hub.commit(&json!({"$":"SettingSet","key":kw,"value":fresh,"at":now()})).await.unwrap();
     r.tick(now()).await; assert!(!r.hub.setting(&kw).await.unwrap_or_default().is_empty(), "nothing newer has been learned");
     r.say(T, "m1", "WORKS-AGAIN").await; r.rest(T, "completed", 1).await;
-    let end = Instant::now() + Duration::from_secs(5); while !r.hub.setting(&kw).await.unwrap_or_default().is_empty() { assert!(Instant::now() < end, "the completed turn did not end the hold"); tokio::time::sleep(Duration::from_millis(50)).await }
+    let end = Instant::now() + Duration::from_secs(PATIENCE); while !r.hub.setting(&kw).await.unwrap_or_default().is_empty() { assert!(Instant::now() < end, "the completed turn did not end the hold"); tokio::time::sleep(Duration::from_millis(50)).await }
 }
 
 /// Nov 10, the order the person set: every account of the provider first, then the next provider, with the conversation handed over and one line per switch; the way back
