@@ -45,11 +45,25 @@ pub fn is_ref(s: &str, loose: bool) -> bool {
 /// Link.is_path
 pub fn is_path(s: &str) -> bool { is_ref(s, false) }
 
+/// The file kinds the viewer draws, by name (present/filelink.rs opens them inside Backplane): board, schematic, project, model, gerber, or "" for none.
+pub fn design_kind(name: &str) -> &'static str {
+    let l = name.to_ascii_lowercase();
+    let e = l.rsplit_once('.').map_or("", |(_, e)| e);
+    // KiCad's inner copper layers: `.g1`…`.g30`
+    let inner = e.strip_prefix('g').map_or(false, |n| !n.is_empty() && n.len() <= 2 && n.bytes().all(|b| b.is_ascii_digit()));
+    match e {
+        "kicad_pcb" => "board", "kicad_sch" => "schematic", "kicad_pro" => "project",
+        "step" | "stp" | "glb" => "model",
+        "gbr" | "gbrjob" | "gtl" | "gbl" | "gts" | "gbs" | "gto" | "gbo" | "gtp" | "gbp" | "gko" | "gm1" | "gml" | "drl" | "xln" => "gerber",
+        _ if inner => "gerber",
+        _ => "",
+    }
+}
 /// A design file named alone (`main.kicad_sch`, `case.step:3`, no folder): a link too, the viewer draws it (present/filelink.rs).
 pub fn is_design(s: &str) -> bool {
     if s.is_empty() || !s.chars().all(pchar) || s.contains("://") || s.starts_with("//") { return false }
     let p = part(s); let rest: String = s.chars().skip(p.chars().count()).collect();
-    sfx(&rest) && !p.ends_with('/') && !crate::present::filelink::design_kind(last(&p)).is_empty() && last(&p).split('.').next().map_or(false, |n| !n.is_empty())
+    sfx(&rest) && !p.ends_with('/') && !design_kind(last(&p)).is_empty() && last(&p).split('.').next().map_or(false, |n| !n.is_empty())
 }
 /// A `file:///abs/path` address (a design file's or any): a link to that file.
 pub fn file_url(s: &str) -> bool { s.strip_prefix("file://").map_or(false, |r| { let r = r.strip_prefix("localhost").unwrap_or(r); r.len() > 1 && r.starts_with('/') && !r.contains(char::is_whitespace) }) }

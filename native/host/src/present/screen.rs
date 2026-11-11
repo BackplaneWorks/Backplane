@@ -296,6 +296,11 @@ fn link_file_of(st: &State,p: &Value,href: &str) -> LinkFile {
     let shown=if p["target"]["kind"]=="thread" { text(&p["target"],"id").to_string() } else { text(&session,"sel").to_string() };
     let shown=shown.rsplit_once('|').map_or(shown.as_str(),|(_,r)|r).to_string();
     let home=crate::plat::dirs::home_or_empty();
+    // a design file named alone (`main.kicad_sch`) that is not at the thread's root: the one of that name below it
+    let base=super::filelink::root_of(st,&shown);
+    let bare=crate::data::link::split_line(href.trim()).0.to_string();
+    let found=if !bare.contains('/') && !std::path::Path::new(&format!("{base}/{bare}")).is_file() { super::filelink::find_named(&base,&bare) } else { None };
+    let href=found.as_deref().unwrap_or(href);
     let (thread,out)=match plan(st,&shown,href,&home,&|x| std::path::Path::new(x).is_file()) {
         Plan::Note(n) => return LinkFile::Note(n),
         Plan::Os(path) => return LinkFile::Os(path),

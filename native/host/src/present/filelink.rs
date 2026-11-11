@@ -20,20 +20,7 @@ pub enum Plan {
     Note(&'static str),
 }
 
-/// The file kinds the viewer draws, by name: board, schematic, project, model, gerber, or "" for none.
-pub fn design_kind(name: &str) -> &'static str {
-    let l = name.to_ascii_lowercase();
-    let e = l.rsplit_once('.').map_or("", |(_, e)| e);
-    match e {
-        "kicad_pcb" => "board", "kicad_sch" => "schematic", "kicad_pro" => "project",
-        "step" | "stp" | "glb" => "model",
-        "gbr" | "gbrjob" | "gtl" | "gbl" | "gts" | "gbs" | "gto" | "gbo" | "gtp" | "gbp" | "gko" | "gm1" | "gml" | "drl" | "xln" => "gerber",
-        _ if is_inner(e) => "gerber",
-        _ => "",
-    }
-}
-/// KiCad's inner copper layers: `.g1`…`.g30`
-fn is_inner(e: &str) -> bool { e.strip_prefix('g').map_or(false, |n| !n.is_empty() && n.len() <= 2 && n.bytes().all(|b| b.is_ascii_digit())) }
+pub use crate::md::links::design_kind;
 
 /// The path a link names, absolute: `file://` and `%XX` taken off, a `:12`/`#L12` dropped, `~/` this home, a relative path from `base` (the
 /// thread's folder). None when it is no path or a relative one has no base.
@@ -112,6 +99,29 @@ pub fn plan(st: &State, sel: &str, href: &str, home: &str, exists: &dyn Fn(&str)
 fn scoped_plan(st: &State, sel: &str, kind: &'static str, path: String) -> Plan {
     if root_of(st, sel).is_empty() { return Plan::Note("Open a thread first: that file is in no project here.") }
     Plan::Scoped { thread: sel.to_string(), kind, path }
+}
+
+/// A design file named alone (`main.kicad_sch`, no folder) that is not at the root: the first of that name below it (breadth first, four levels,
+/// hidden folders and build trees skipped), as an absolute path. Agents name a board by its file name; it lives in `boards/<name>/`.
+pub fn find_named(root: &str, name: &str) -> Option<String> {
+    if root.is_empty() || name.is_empty() || name.contains('/') || design_kind(name).is_empty() { return None }
+    let mut level = vec![std::path::PathBuf::from(root)];
+    for _ in 0..5 {
+        let mut next = vec![];
+        for d in level {
+            let Ok(rd) = std::fs::read_dir(&d) else { continue };
+            let mut es: Vec<_> = rd.flatten().collect(); es.sort_by_key(|e| e.file_name());
+            for e in es {
+                let n = e.file_name().to_string_lossy().to_string();
+                let Ok(ft) = e.file_type() else { continue };
+                if ft.is_file() && n == name { return Some(e.path().to_string_lossy().into_owned()) }
+                if ft.is_dir() && !n.starts_with('.') && !matches!(n.as_str(), "target" | "node_modules" | "build" | "backup" | "backups") { next.push(e.path()); }
+            }
+            if next.len() > 400 { next.truncate(400); }
+        }
+        level = next;
+    }
+    None
 }
 
 /// A `backplane://file/<project or thread id>/<path…>` link as a path: from that project's (or thread's) folder.

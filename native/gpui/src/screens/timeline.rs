@@ -195,10 +195,12 @@ impl Element for SelText {
         let mut out = vec![(window.insert_hitbox(bounds, HitboxBehavior::Normal), CursorStyle::IBeam)];
         let Some(styled) = self.styled.as_ref() else { return out };
         let layout = styled.layout().clone(); let lh = layout.line_height();
-        let links: Vec<Range<usize>> = { let r = self.reg.borrow(); r.at(&self.id, self.idx).map(|o| r.blocks[o].links.iter().map(|(r, _)| r.clone()).collect()).unwrap_or_default() };
-        for r in links {
+        let links: Vec<(Range<usize>, String)> = { let r = self.reg.borrow(); r.at(&self.id, self.idx).map(|o| r.blocks[o].links.iter().map(|(r, l)| (r.clone(), l.href.clone())).collect()).unwrap_or_default() };
+        for (r, href) in links {
             if let (Some(pa), Some(pb)) = (layout.position_for_index(r.start), layout.position_for_index(r.end)) {
                 let rect = if pa.y == pb.y { Bounds::from_corners(pa, point(pb.x, pb.y + lh)) } else { Bounds::from_corners(point(bounds.left(), pa.y), point(bounds.right(), pb.y + lh)) };
+                // (check mode: where each link is, for the e2e drivers that click one)
+                /* i18n-ok: an e2e rect name */ crate::art::report(&format!("link:{}", href.replace(['"', '\\'], "")), if pa.y == pb.y { rect } else { Bounds::from_corners(pa, point(bounds.right(), pa.y + lh)) }, window.scale_factor());
                 out.push((window.insert_hitbox(rect, HitboxBehavior::Normal), CursorStyle::PointingHand));
             }
         }
