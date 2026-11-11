@@ -1,7 +1,7 @@
 //! What a bot's agent is told: who it is, how it works, the uberbot's part, a triage run's and a back office's role, and the memory a turn starts
 //! with. The words are generated from source (prompt_text.rs).
 use super::{escalate::PRIVATE_BRIEF, prompt_text as T, route::{mem_block, ref_uri, Ctx}};
-use crate::bots::{clock::Zones, rpc::{now_s, Bots, HOP_MAX}, sched_text::zone_source, world::{Bot, World}};
+use crate::bots::{clock::Zones, rpc::{now_s, Bots}, sched_text::zone_source, world::{Bot, World}};
 use std::sync::Arc;
 
 /// Bots.prompt.k
@@ -9,7 +9,7 @@ fn identity(w: &World, b: &Bot, home: &str) -> String {
     let z = Zones { settings: &w.settings }; let h = T::HEAD; let k = T::WORK;
     let persona = if b.persona.is_empty() { String::new() } else { format!("{}{}{}", T::PERSONA[0], b.persona, T::PERSONA[1]) };
     let uber = if w.uber_is(&b.id) { T::UBER } else { "" };
-    format!("{}{}{}{}{home}/{}{}{persona}{}{HOP_MAX}{}{}{}{}{}{uber}", h[0], b.name, h[1], h[2], b.id, h[3], k[0], k[1], z.person(), k[2], zone_source(&z), k[3])
+    format!("{}{}{}{}{home}/{}{}{persona}{}{}{}{}{}{}{}{uber}", h[0], b.name, h[1], h[2], b.id, h[3], k[0], crate::bots::gate::LIMITS.chatter, k[1], z.person(), k[2], zone_source(&z), k[3])
 }
 impl<'a> Ctx<'a> {
     /// Bots.prompt.for

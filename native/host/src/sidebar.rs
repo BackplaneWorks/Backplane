@@ -196,7 +196,17 @@ fn agents_note(st: &State, id: &str) -> String {
 /// thread of its own); a child with no visible parent stays reachable
 fn kids_hidden<'a>(st: &'a State) -> HashSet<&'a str> {
     let bot_thread = |p: &str| st.bot_threads_has(p);
-    st.tasks.values().filter(|(parent, child, _, _)| !bot_thread(parent) && st.threads.contains_key(child.as_str()) && !display_parent(st, child).is_empty()).map(|(_, c, _, _)| c.as_str()).collect()
+    let mut k: HashSet<&str> = st.tasks.values().filter(|(parent, child, _, _)| !bot_thread(parent) && st.threads.contains_key(child.as_str()) && !display_parent(st, child).is_empty()).map(|(_, c, _, _)| c.as_str()).collect();
+    // a swarm's members (docs/SWARM.md): the swarm is one row of its project, its threads open from its page
+    k.extend(st.swarm_of.keys().map(String::as_str)); k
+}
+/// A project's swarms as sidebar rows, newest first: the live ones only (active or paused; one that is over leaves, as a settled thread does).
+/// `working`: members whose turn runs now. A row opens the swarm's room page (`@room:<id>`).
+pub fn swarm_rows(st: &State, o: &Opts, pid: &str) -> Vec<Value> {
+    let mut v: Vec<(&String, &crate::state::RoomNav)> = st.rooms_nav.iter().filter(|(_, r)| r.swarm_live() && r.project == pid).collect();
+    v.sort_by(|a, b| b.1.created.cmp(&a.1.created).then(b.0.cmp(a.0)));
+    v.into_iter().map(|(id, r)| { let working = r.threads.iter().filter(|t| st.threads.get(t.as_str()).map_or(false, |x| x.turn == Turn::Running)).count();
+        json!({"id":q(o, id),"name":r.name,"state":if r.state.is_empty() { "active" } else { r.state.as_str() },"members":r.threads.len(),"working":working,"ago":ago(o.now, r.last),"nav":format!("@room:{id}")}) }).collect()
 }
 
 struct Shelves<'a> { pinned: Vec<&'a str>, active: Vec<&'a str>, settled: Vec<&'a str>, hidden: Vec<&'a str>, snoozed: Vec<&'a str> }
@@ -261,7 +271,7 @@ fn project_json(st: &State, o: &Opts, ix: &HashMap<String, u8>, pid: &str, sh: &
     arch.sort_by(|a, b| rank(&st.threads[*b]).cmp(&rank(&st.threads[*a])));
     json!({"machine": "", "quiet": quiet, "id": q(o, pid), "title": p.title, "root": p.root, "icon": "folder", "open": o.open.contains(pid),
            "threads": rows(&live_ids, &shelf_num), "snoozedShelf": "Snoozed", "snoozed": rows(&sh.snoozed, &shelf_num), "shelf": format!("Settled {}", sh.settled.len()),
-           "settled": rows(&sh.settled, &shelf_num), "value": format!("{}|arch:{}", o.hub, pid), "archOpen": o.open.contains(&format!("arch:{pid}")), "archived": rows(&arch, &shelf_num)})
+           "settled": rows(&sh.settled, &shelf_num), "value": format!("{}|arch:{}", o.hub, pid), "archOpen": o.open.contains(&format!("arch:{pid}")), "archived": rows(&arch, &shelf_num), "swarms": swarm_rows(st, o, pid)})
 }
 
 struct Planned<'a> { id: &'a str, created: u64, latest: u64, key: Vec<bool>, sh: Shelves<'a> }
@@ -389,7 +399,7 @@ impl Plan<'_> {
         arch.sort_by(|a,b|rank(&st.threads[*b]).cmp(&rank(&st.threads[*a])));
         let mut project=json!({"machine":"","quiet":quiet,"id":q(o,id),"title":meta.title,"root":meta.root,"icon":"folder","open":o.open.contains(id),
             "snoozedShelf":"Snoozed","shelf":format!("Settled {}",sh.settled.len()),"settledCount":sh.settled.len(),"value":format!("{}|arch:{id}",o.hub),
-            "archOpen":o.open.contains(&format!("arch:{id}")),"archivedCount":arch.len()});
+            "archOpen":o.open.contains(&format!("arch:{id}")),"archivedCount":arch.len(),"swarms":swarm_rows(st,o,id)});
         for (kind,page,roots,enabled) in [("threads","threadsPage",&live,true),("snoozed","snoozedPage",&sh.snoozed,true),
             ("settled","settledPage",&sh.settled,o.open.contains(id)),("archived","archivedPage",&arch,o.open.contains(&format!("arch:{id}")))] {
             let mut rows=if enabled || narrow { tree_rows(st,roots,o.selected,&self.kids_by) }else{vec![]};

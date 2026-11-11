@@ -43,7 +43,15 @@ pub fn room_life(e: &Value, was: (bool, bool)) -> (bool, bool) { (e["ephemeral"]
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct RoomNav { pub name: String, pub members: usize,
     /// a bots' exchange (bots/life.rs): in no sidebar, list, mention or count; opened by its id only
-    #[serde(default)] pub ephemeral: bool, #[serde(default)] pub closed: bool }
+    #[serde(default)] pub ephemeral: bool, #[serde(default)] pub closed: bool,
+    /// a swarm (docs/SWARM.md): its kind, project, state ("" active, paused, stopped, done), member threads, made and newest post
+    #[serde(default)] pub kind: String, #[serde(default)] pub project: String, #[serde(default)] pub state: String,
+    #[serde(default)] pub threads: Vec<String>, #[serde(default)] pub created: u64, #[serde(default)] pub last: u64 }
+impl RoomNav {
+    pub fn swarm(&self) -> bool { self.kind == "swarm" }
+    /// a swarm the sidebar lists (active or paused; one over leaves it, as a settled thread does)
+    pub fn swarm_live(&self) -> bool { self.swarm() && self.state != "stopped" && self.state != "done" }
+}
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Thread {
     pub project: String, pub title: String, pub created: u64, pub activity: u64, pub turn: Turn, pub pending: u64,
@@ -79,6 +87,8 @@ pub struct State {
     bot_threads: HashMap<String, String>,
     pub bots_nav: HashMap<String, BotNav>,
     pub rooms_nav: HashMap<String, RoomNav>,
+    /// a swarm's member thread -> its room (the sidebar shows the swarm once, not its threads)
+    #[serde(default)] pub swarm_of: HashMap<String, String>,
     /// ThreadSnoozed: the time a thread's snooze ends (Nav.until); 0 / absent: never snoozed
     pub snooze_until: HashMap<String, u64>,
     /// ModesSet: a thread's permission mode when it is not the default ("approval-required", "auto-accept-edits", "auto"); absent: full access
@@ -235,10 +245,17 @@ impl State {
                 self.bots_nav.insert(id.into(), BotNav { name: s(e,"name")?.into(), thread: self.bot_threads[id].clone(), look:n(e,"look")?,
                     created:old.map_or(n(e,"at")?,|b|b.created), talked:old.map_or(0,|b|b.talked) }); }
             "BotDeleted" => { let id = s(e, "id")?; self.bot_threads.remove(id); self.bots_nav.remove(id); }
-            "RoomSet" => { let id = s(e,"id")?; let was = self.rooms_nav.get(id).map_or((false,false),|r|(r.ephemeral,r.closed)); let (ephemeral,closed) = room_life(e,was);
-                self.rooms_nav.insert(id.into(), RoomNav { name:s(e,"name")?.into(), members:s(e,"members")?.split('\n').filter(|s|!s.is_empty()).count(), ephemeral, closed }); }
-            "RoomDeleted" => { self.rooms_nav.remove(s(e,"id")?); }
-            "RoomPosted" => { if let Some(bot)=self.bots_nav.get_mut(s(e,"from")?) { bot.talked=n(e,"at")?; } }
+            "RoomSet" => { let id = s(e,"id")?; let old = self.rooms_nav.get(id).cloned(); let was = old.as_ref().map_or((false,false),|r|(r.ephemeral,r.closed)); let (ephemeral,closed) = room_life(e,was);
+                let keep = |k: &str, o: Option<&String>| e.get(k).and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| o.cloned().unwrap_or_default());
+                let o = old.as_ref(); let ms: Vec<&str> = s(e,"members")?.split('\n').filter(|s|!s.is_empty()).collect();
+                for t in o.map(|r| r.threads.clone()).unwrap_or_default() { self.swarm_of.remove(&t); }
+                let kind = keep("kind", o.map(|r| &r.kind)); let threads: Vec<String> = ms.iter().filter_map(|m| m.strip_prefix("thread:")).map(str::to_string).collect();
+                if kind == "swarm" { for t in &threads { self.swarm_of.insert(t.clone(), id.to_string()); } }
+                let at = e["at"].as_u64().unwrap_or(0);
+                self.rooms_nav.insert(id.into(), RoomNav { name:s(e,"name")?.into(), members:ms.len(), ephemeral, closed, kind, project: keep("project", o.map(|r| &r.project)), state: keep("state", o.map(|r| &r.state)),
+                    threads, created: o.map_or(at, |r| r.created), last: o.map_or(at, |r| r.last.max(at)) }); }
+            "RoomDeleted" => { if let Some(r) = self.rooms_nav.remove(s(e,"id")?) { for t in r.threads { self.swarm_of.remove(&t); } } }
+            "RoomPosted" => { if let Some(r) = self.rooms_nav.get_mut(s(e,"room")?) { r.last = r.last.max(e["at"].as_u64().unwrap_or(0)) } if let Some(bot)=self.bots_nav.get_mut(s(e,"from")?) { bot.talked=n(e,"at")?; } }
             "TaskDelegated" => {
                 let (task, parent, child) = (s(e, "task")?, s(e, "parent")?, s(e, "child")?); n(e, "depth")?;
                 let before = fam::ext::task_before(self, task);
