@@ -450,7 +450,7 @@ fn action_button(cx: &mut Context<Backplane>, light: bool, id: &'static str, ico
 }
 /// A project's page, from the sidebar's own rows (no round trip): its name and folder with the actions (New thread, Open folder, the viewers), its threads, the README,
 /// the goal and notes, the mechanical parts (assembly first), the parts to order and the boards.
-pub fn page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, light: bool, data: &Value, home: &Home, pid: &str, ctl: &mut Vec<crate::script::CtlEntry>) -> Vec<AnyElement> {
+pub fn page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, light: bool, data: &Value, home: &Home, pid: &str, ctl: &mut Vec<crate::script::CtlEntry>, doc: &super::timeline::Doc) -> Vec<AnyElement> {
     use crate::script::CtlEntry;
     let Some(p) = find(data, pid) else { return vec![] };
     let c = |n: &str| theme::color(light, n);
@@ -499,11 +499,11 @@ pub fn page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, light: bool
         }
     }
     if !loaded { return out }
-    // the README, drawn from its Markdown
+    // the README, drawn from its Markdown as GitHub draws it (pictures, alignment, alerts, details: the hub's md/doc.rs)
     if !home.readme.is_empty() {
         out.push(section(light, crate::i18n::trs("README"), None));
         reg.borrow_mut().enter(0, "home-readme");
-        out.push(div().id("home-readme").flex().flex_col().gap_2().py_2().text_size(px(13.)).children(super::timeline::blocks(cx, reg, light, &home.readme, "home-readme")).into_any_element());
+        out.push(div().id("home-readme").flex().flex_col().gap_3().py_2().text_size(px(14.)).children(super::timeline::doc_blocks(cx, reg, light, &home.readme, "home-readme", doc)).into_any_element());
     }
     // the goal and notes
     let intent = { let i = string(&card, "intent"); if i.is_empty() && snap["artifacts"].as_array().map_or(false, |a| a.iter().any(|x| x["kind"] == "intent")) { string(&snap, "intent") } else { i } };

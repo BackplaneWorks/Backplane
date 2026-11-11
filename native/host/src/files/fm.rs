@@ -41,7 +41,7 @@ pub fn parent(dir: &str) -> String {
 
 /// Img.is_image / Img.viewable's path half: absolute or `~/`, with an image extension.
 fn abs_or_home(p: &str) -> bool { crate::plat::fs::is_abs(p) || p.starts_with("~/") }
-pub fn is_image(p: &str) -> bool { abs_or_home(p) && ends(&[".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"], &p.to_lowercase()) }
+pub fn is_image(p: &str) -> bool { abs_or_home(p) && ends(&[".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp", ".svg"], &p.to_lowercase()) }
 /// Img.viewable: what /img serves.
 pub fn viewable(p: &str) -> bool {
     // since PR #960 a cwd-relative path is no viewer path at all: every kind needs an absolute or ~/ path
@@ -51,7 +51,7 @@ pub fn viewable(p: &str) -> bool {
 pub fn ctype(p: &str) -> &'static str {
     let l = p.to_lowercase();
     if preview(&l) == "text" { "text/plain; charset=utf-8" } else if l.ends_with(".pdf") { "application/pdf" } else if l.ends_with(".png") { "image/png" }
-    else if l.ends_with(".jpg") || l.ends_with(".jpeg") { "image/jpeg" } else if l.ends_with(".gif") { "image/gif" } else if l.ends_with(".webp") { "image/webp" } else { "image/bmp" }
+    else if l.ends_with(".jpg") || l.ends_with(".jpeg") { "image/jpeg" } else if l.ends_with(".gif") { "image/gif" } else if l.ends_with(".webp") { "image/webp" } else if l.ends_with(".svg") { "image/svg+xml" } else { "image/bmp" }
 }
 
 /// Att.from_uri("file://" ++ s): trim, then percent-decode as UTF-8 (a bad escape stays as written, `+` stays).
@@ -135,6 +135,6 @@ mod tests {
     #[test] fn viewable_and_ctype() {
         assert!(viewable("/x/a.PNG")); assert!(viewable("~/a.jpg")); assert!(!viewable("rel/note.md")); assert!(viewable("/x/note.md")); assert!(viewable("/a/b.pdf")); assert!(viewable("~/a.PDF"));
         assert!(!viewable("/etc/passwd")); assert!(!viewable("rel/a.pdf")); assert!(!viewable("/a/b.png.exe")); assert!(!viewable("/a/key.pem")); assert!(!viewable(""));
-        assert_eq!(ctype("/a.PNG"), "image/png"); assert_eq!(ctype("/a.md"), "text/plain; charset=utf-8"); assert_eq!(ctype("/a.pdf"), "application/pdf"); assert_eq!(ctype("/a.bmp"), "image/bmp");
+        assert_eq!(ctype("/a.PNG"), "image/png"); assert_eq!(ctype("/a.md"), "text/plain; charset=utf-8"); assert_eq!(ctype("/a.pdf"), "application/pdf"); assert_eq!(ctype("/a.bmp"), "image/bmp"); assert!(viewable("/x/logo.svg")); assert_eq!(ctype("/x/logo.SVG"), "image/svg+xml");
     }
 }

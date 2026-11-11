@@ -253,6 +253,8 @@ impl Backplane {
             }
             Step::Scroll(n) => {
                 self.begin(format!("scroll:{n}"), Goal::Frame, cx);
+                // a project's page scrolls its own column
+                if self.project_page.is_some() || self.data["projectHome"].is_object() { let h = &self.screens.home_scroll; self.m("home_scroll", json!({"y": f32::from(h.offset().y), "max": f32::from(h.max_offset().height)})); let o = h.offset(); h.set_offset(point(o.x, (o.y - px(n)).min(px(0.)).max(-h.max_offset().height))); self.ui_epoch += 1; cx.notify(); return; }
                 // at the end the list's own top is past its last row, a screen below where the wheel starts from
                 let at_end = self.timeline.logical_scroll_top().item_ix >= self.timeline.item_count();
                 self.timeline.scroll_by(px(n) - if at_end { self.timeline.viewport_bounds().size.height } else { px(0.) }); self.ui_epoch += 1; cx.notify();

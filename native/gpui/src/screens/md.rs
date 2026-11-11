@@ -5,7 +5,9 @@ use serde_json::Value;
 use std::ops::Range;
 
 #[derive(Clone, Debug, PartialEq, Default)]
-pub struct Style { pub bold: bool, pub italic: bool, pub code: bool, pub link: Option<Link> }
+pub struct Style { pub bold: bool, pub italic: bool, pub code: bool, pub link: Option<Link>,
+    /// a document's: struck through, a key (`<kbd>`), a small raised or lowered run (`<sup>`, `<sub>`: drawn dimmer, the line keeps one size)
+    pub strike: bool, pub kbd: bool, pub small: bool }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Link { pub href: String, /// a path on the hub's machine, not a web address
     pub file: bool }
@@ -22,11 +24,37 @@ pub enum Block {
     Code(String, Vec<(Range<usize>, Tok)>),
     Table { head: Vec<Vec<Span>>, rows: Vec<Vec<Vec<Span>>> },
     Rule,
+    /// A document's (a README, a note): a paragraph or heading (level, 0 for a paragraph) with pictures among its text.
+    Flow(Vec<Inline>, u8),
+    /// Blocks aligned as `<p align>` / `<div align>` asks.
+    Aligned(Align, Vec<Block>),
+    /// A quote of several blocks, or one of GitHub's alerts (`> [!NOTE]`: note, tip, important, warning, caution).
+    Callout(Option<String>, Vec<Block>),
+    /// `<details>`: its summary, open at first or not, and what it hides.
+    Details { summary: Vec<Span>, open: bool, blocks: Vec<Block> },
+    /// Where a heading's anchor (`#usage`) leads; draws nothing.
+    Anchor(String),
 }
 
-/// A list item: its own text and the lists nested in it.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Align { Left, Center, Right }
+/// A size an image asks for: pixels, or a share of the width it is in.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Dim { Px(f32), Pct(f32) }
+/// A picture in a document: where it is (a web address, or a path on the hub's machine), its words, the size it asks for, the link around it,
+/// and the other pictures a `<picture>` offers for a dark or a light window.
+#[derive(Clone, Debug, PartialEq, Default)]
+pub struct Img { pub src: String, pub alt: String, pub title: String, pub width: Option<Dim>, pub height: Option<Dim>, pub link: Option<Link>, pub dark: Option<String>, pub light: Option<String> }
+impl Img {
+    /// The picture to draw in a light or dark window.
+    pub fn source(&self, light: bool) -> &str { (if light { self.light.as_deref() } else { self.dark.as_deref() }).unwrap_or(&self.src) }
+}
 #[derive(Clone, Debug, PartialEq)]
-pub struct Item { pub spans: Vec<Span>, pub sub: Vec<Block> }
+pub enum Inline { Text(Vec<Span>), Img(Img), Break }
+
+/// A list item: its own text, what follows it (its nested lists, more paragraphs, code), and a task item's box.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Item { pub spans: Vec<Span>, pub sub: Vec<Block>, pub checked: Option<bool> }
 
 const MAX_DEPTH: usize = 16;
 
@@ -94,6 +122,13 @@ fn inline(node: &Value, style: &Style, out: &mut Vec<Span>, depth: usize) {
         "strong" | "b" => s.bold = true,
         "em" | "i" => s.italic = true,
         "code" => s.code = true,
+        "del" | "s" => s.strike = true,
+        "kbd" => { s.kbd = true; s.code = true }
+        "sup" | "sub" => s.small = true,
+        // where only text can go (a table's cell, a list item's line), a picture is its words
+        "img" => { push(out, node["alt"].as_str().unwrap_or(""), style); return; }
+        "picture" => { if let Some(i) = kids(node).iter().find(|k| k["tag"] == "img") { inline(i, style, out, depth + 1) } return; }
+        "source" => return,
         "a" => if let Some(h) = node["href"].as_str().or_else(|| node["ref"].as_str()) { s.link = Some(Link { href: h.to_string(), file: node["file"].as_bool().unwrap_or(false) }); },
         "br" => { push(out, "\n", style); return; }
         _ => {}
@@ -112,27 +147,99 @@ fn text_of(n: &Value, out: &mut String, depth: usize) {
     for k in kids(n) { text_of(k, out, depth + 1); }
 }
 
+const BLOCK_TAGS: &[&str] = &["p", "h1", "h2", "h3", "h4", "h5", "h6", "ul", "ol", "blockquote", "pre", "hr", "table", "div", "details", "summary", "dt", "dd", "button"];
+fn is_block(n: &Value) -> bool { n["tag"].as_str().map_or(false, |t| BLOCK_TAGS.contains(&t)) }
+fn has_img(n: &Value, depth: usize) -> bool { depth <= MAX_DEPTH && (matches!(n["tag"].as_str(), Some("img" | "picture")) || kids(n).iter().any(|k| has_img(k, depth + 1))) }
+fn align(n: &Value) -> Option<Align> { match n["align"].as_str()? { "center" | "middle" => Some(Align::Center), "right" => Some(Align::Right), "left" => Some(Align::Left), _ => None } }
+fn dim(v: &Value) -> Option<Dim> {
+    let s = v.as_str()?.trim();
+    if let Some(p) = s.strip_suffix('%') { return p.trim().parse::<f32>().ok().filter(|x| *x > 0.).map(|x| Dim::Pct(x.min(100.))) }
+    s.trim_end_matches("px").trim().parse::<f32>().ok().filter(|x| *x > 0.).map(|x| Dim::Px(x.min(4000.)))
+}
+fn img_of(n: &Value, link: Option<Link>) -> Option<Img> {
+    let (img, sources): (&Value, Vec<&Value>) = if n["tag"] == "picture" { (kids(n).iter().find(|k| k["tag"] == "img")?, kids(n).iter().filter(|k| k["tag"] == "source").collect()) } else { (n, vec![]) };
+    let s = |k: &str| img[k].as_str().unwrap_or("").to_string();
+    let media = |want: &str| sources.iter().find(|x| x["media"].as_str().map_or(false, |m| m.contains(want))).and_then(|x| x["src"].as_str()).map(String::from);
+    let src = s("src"); let (dark, light) = (media("dark"), media("light"));
+    if src.is_empty() && dark.is_none() && light.is_none() { return None }
+    let src = if src.is_empty() { light.clone().or(dark.clone()).unwrap_or_default() } else { src };
+    Some(Img { src, alt: s("alt"), title: s("title"), width: dim(&img["width"]), height: dim(&img["height"]), link, dark, light })
+}
+/// Inline nodes with pictures among them, as text runs, pictures and line breaks.
+fn flow_parts(n: &Value, style: &Style, out: &mut Vec<Inline>, depth: usize) {
+    if depth > MAX_DEPTH { return; }
+    let tag = n["tag"].as_str().unwrap_or("");
+    if matches!(tag, "img" | "picture") { if let Some(i) = img_of(n, style.link.clone()) { out.push(Inline::Img(i)) } return; }
+    if tag == "br" { out.push(Inline::Break); return; }
+    if n["text"].is_string() || !has_img(n, 0) {
+        let mut spans = match out.last_mut() { Some(Inline::Text(s)) => std::mem::take(s), _ => vec![] };
+        inline(n, style, &mut spans, depth);
+        match out.last_mut() { Some(Inline::Text(s)) => *s = spans, _ => if !spans.is_empty() { out.push(Inline::Text(spans)) } }
+        return;
+    }
+    let mut s = style.clone();
+    match tag {
+        "strong" | "b" => s.bold = true, "em" | "i" => s.italic = true, "del" | "s" => s.strike = true,
+        "a" => if let Some(h) = n["href"].as_str().or_else(|| n["ref"].as_str()) { s.link = Some(Link { href: h.to_string(), file: n["file"].as_bool().unwrap_or(false) }); },
+        _ => {}
+    }
+    for k in kids(n) { flow_parts(k, &s, out, depth + 1); }
+}
+/// A paragraph (or heading, `level` > 0) from its inline nodes: plain styled text, or a flow when it holds pictures.
+fn para(nodes: &[Value], level: u8) -> Option<Block> {
+    if nodes.iter().any(|n| has_img(n, 0)) {
+        let mut parts = Vec::new(); for n in nodes { flow_parts(n, &Style::default(), &mut parts, 0); }
+        // a lone space between pictures is a gap, not a line of text
+        parts.retain(|p| !matches!(p, Inline::Text(s) if plain(s).trim().is_empty()));
+        return (!parts.is_empty()).then_some(Block::Flow(parts, level));
+    }
+    let s = spans(nodes);
+    if level > 0 { return Some(Block::Heading(level, s)) }
+    (!s.is_empty()).then_some(Block::Para(s))
+}
+/// Nodes in order: runs of inline nodes become paragraphs, block nodes their blocks.
+fn flow(nodes: &[Value], out: &mut Vec<Block>, depth: usize) {
+    let mut run: Vec<Value> = Vec::new();
+    let flush = |run: &mut Vec<Value>, out: &mut Vec<Block>| { if !run.is_empty() { if let Some(b) = para(run, 0) { out.push(b) } run.clear(); } };
+    for n in nodes {
+        if is_block(n) { flush(&mut run, out); blocks_into(n, out, depth + 1); }
+        else if n["tag"] == "a" && n["kids"].as_array().map_or(false, |k| k.is_empty()) && n["id"].is_string() { flush(&mut run, out); out.push(Block::Anchor(n["id"].as_str().unwrap_or("").to_string())); }
+        else { run.push(n.clone()); }
+    }
+    flush(&mut run, out);
+}
+fn aligned(n: &Value, b: Vec<Block>, out: &mut Vec<Block>) { match align(n) { Some(a) if a != Align::Left => out.push(Block::Aligned(a, b)), _ => out.extend(b) } }
+
 fn blocks_into(n: &Value, out: &mut Vec<Block>, depth: usize) {
     if depth > MAX_DEPTH { return; }
     let tag = n["tag"].as_str().unwrap_or("");
+    if let Some(id) = n["id"].as_str().filter(|_| tag != "li" && tag != "a") { out.push(Block::Anchor(id.to_string())); }
     match tag {
         "" => { let s = spans(std::slice::from_ref(n)); if !s.is_empty() { out.push(Block::Para(s)); } }
-        "p" => out.push(Block::Para(spans(kids(n)))),
-        t if t.len() == 2 && t.starts_with('h') && t.as_bytes()[1].is_ascii_digit() => out.push(Block::Heading(t.as_bytes()[1] - b'0', spans(kids(n)))),
+        "p" | "dt" | "dd" | "summary" => { if let Some(b) = para(kids(n), 0) { aligned(n, vec![b], out) } else if tag == "p" && align(n).is_none() && !has_img(n, 0) { out.push(Block::Para(Vec::new())) } }
+        t if t.len() == 2 && t.starts_with('h') && t.as_bytes()[1].is_ascii_digit() => { if let Some(b) = para(kids(n), t.as_bytes()[1] - b'0') { aligned(n, vec![b], out) } }
         "ul" | "ol" => {
             // the hub writes an ordered item's number as `n` (a string); `value` is read too
             let start = kids(n).first().and_then(|li| li["n"].as_str().and_then(|x| x.parse().ok()).or_else(|| li["value"].as_u64())).unwrap_or(1);
             let items = kids(n).iter().map(|li| {
-                let is_list = |k: &&Value| matches!(k["tag"].as_str(), Some("ul" | "ol"));
-                let text: Vec<Value> = kids(li).iter().filter(|k| !is_list(k)).cloned().collect();
-                let mut sub = Vec::new();
-                for k in kids(li).iter().filter(is_list) { blocks_into(k, &mut sub, depth + 1); }
-                Item { spans: spans(&text), sub }
+                if let Some(id) = li["id"].as_str() { out.push(Block::Anchor(id.to_string())); }
+                let mut bs = Vec::new(); flow(kids(li), &mut bs, depth + 1);
+                let spans = match bs.first() { Some(Block::Para(s)) => { let s = s.clone(); bs.remove(0); s } _ => Vec::new() };
+                let checked = match li["checked"].as_str() { Some("true") => Some(true), Some("false") => Some(false), _ => None };
+                Item { spans, sub: bs, checked }
             }).collect();
             out.push(Block::List { ordered: tag == "ol", start, items });
         }
-        "blockquote" => out.push(Block::Quote(spans(kids(n)))),
-        "pre" => { let mut t = String::new(); text_of(n, &mut t, 0); let t = t.trim_end_matches('\n').to_string(); let tokens = highlight(&t); out.push(Block::Code(t, tokens)); }
+        "blockquote" => {
+            let mut bs = Vec::new(); flow(kids(n), &mut bs, depth + 1);
+            let alert = n["alert"].as_str().map(String::from);
+            match (alert, bs.as_slice()) {
+                (None, [Block::Para(s)]) => out.push(Block::Quote(s.clone())),
+                (None, []) => out.push(Block::Quote(Vec::new())),
+                (a, _) => out.push(Block::Callout(a, bs)),
+            }
+        }
+        "pre" => { let mut t = String::new(); text_of(n, &mut t, 0); let t = t.trim_end_matches('\n').to_string(); let tokens = if matches!(n["lang"].as_str(), Some("text" | "txt" | "plain" | "console" | "output")) { vec![(0..t.len(), Tok::Plain)] } else { highlight(&t) }; out.push(Block::Code(t, tokens)); }
         "hr" => out.push(Block::Rule),
         "table" => {
             let rows: Vec<Vec<Vec<Span>>> = kids(n).iter().map(|tr| kids(tr).iter().map(|c| spans(kids(c))).collect()).collect();
@@ -141,16 +248,23 @@ fn blocks_into(n: &Value, out: &mut Vec<Block>, depth: usize) {
             let head = if headed { it.next().unwrap_or_default() } else { Vec::new() };
             out.push(Block::Table { head, rows: it.collect() });
         }
+        "details" => {
+            let summary = kids(n).iter().find(|k| k["tag"] == "summary").map(|s| spans(kids(s))).unwrap_or_default();
+            let rest: Vec<Value> = kids(n).iter().filter(|k| k["tag"] != "summary").cloned().collect();
+            let mut bs = Vec::new(); flow(&rest, &mut bs, depth + 1);
+            out.push(Block::Details { summary, open: n.get("open").is_some(), blocks: bs });
+        }
+        "div" => { let mut bs = Vec::new(); flow(kids(n), &mut bs, depth + 1); aligned(n, bs, out) }
         // the copy button of a fenced block carries no text of its own; its sibling `pre` is the code
         "button" => {}
-        _ => { if kids(n).iter().any(|k| k["tag"].is_string() && k["tag"] != "a" && k["tag"] != "span" && k["tag"] != "code" && k["tag"] != "strong" && k["tag"] != "em") { for k in kids(n) { blocks_into(k, out, depth + 1); } } else { let s = spans(std::slice::from_ref(n)); if !s.is_empty() { out.push(Block::Para(s)); } } }
+        _ => { if kids(n).iter().any(is_block) { flow(kids(n), out, depth + 1) } else if let Some(b) = para(std::slice::from_ref(n), 0) { out.push(b) } }
     }
 }
 pub const MAX_BLOCKS: usize = 400;
 /// At most MAX_BLOCKS blocks; the rest are said, not hidden.
 pub fn parse(nodes: &[Value]) -> Vec<Block> {
     let mut o = Vec::new();
-    for n in nodes.iter().take(MAX_BLOCKS) { blocks_into(n, &mut o, 0); }
+    flow(&nodes[..nodes.len().min(MAX_BLOCKS)], &mut o, 0);
     if nodes.len() > MAX_BLOCKS { o.push(Block::Para(vec![Span { text: crate::i18n::tf("gpui.c.md.more", &[("n", (nodes.len() - MAX_BLOCKS).into())]), style: Style { italic: true, ..Default::default() } }])); }
     o
 }
@@ -161,7 +275,8 @@ pub fn block_text(b: &Block) -> String {
     match b {
         Block::Para(s) | Block::Heading(_, s) | Block::Quote(s) => plain(s),
         Block::List { ordered, start, items } => items.iter().enumerate().map(|(i, it)| {
-            let mut t = if *ordered { format!("{}. {}", start + i as u64, plain(&it.spans)) } else { format!("- {}", plain(&it.spans)) };
+            let mark = match it.checked { Some(true) => "[x] ", Some(false) => "[ ] ", None => "" };
+            /* i18n-ok: copied text, a list's marks */ let mut t = if *ordered { format!("{}. {mark}{}", start + i as u64, plain(&it.spans)) } else { format!("- {mark}{}", plain(&it.spans)) };
             for b in &it.sub { for l in block_text(b).lines() { t.push_str("\n  "); t.push_str(l); } }
             t
         }).collect::<Vec<_>>().join("\n"),
@@ -173,7 +288,10 @@ pub fn block_text(b: &Block) -> String {
             lines.extend(rows.iter().map(line));
             lines.join("\n")
         }
-        Block::Rule => String::new(),
+        Block::Rule | Block::Anchor(_) => String::new(),
+        Block::Flow(parts, _) => parts.iter().map(|p| match p { Inline::Text(s) => plain(s), Inline::Img(i) => i.alt.clone(), Inline::Break => "\n".into() }).collect(),
+        Block::Aligned(_, bs) | Block::Callout(_, bs) => bs.iter().map(block_text).filter(|t| !t.is_empty()).collect::<Vec<_>>().join("\n\n"),
+        Block::Details { summary, blocks, .. } => std::iter::once(plain(summary)).chain(blocks.iter().map(block_text)).filter(|t| !t.is_empty()).collect::<Vec<_>>().join("\n\n"),
     }
 }
 
@@ -265,6 +383,45 @@ mod tests {
     }
     #[test] fn highlight_survives_unicode_and_unclosed_strings() {
         for code in ["let s = \"unterminated 世界", "# 見出し\nx = 'é'", "/* open", "日本語 ok 12abc"] { let h = highlight(code); assert_eq!(h.last().unwrap().0.end, code.len(), "{code}"); }
+    }
+}
+
+#[cfg(test)]
+mod doc_tests {
+    use super::*; use core::prelude::v1::test;
+    fn j(s: &str) -> Vec<Value> { serde_json::from_str(s).unwrap() }
+    #[test] fn a_centred_html_picture_is_an_aligned_flow_with_its_picture() {
+        let b = parse(&j(r#"[{"tag":"h2","kids":[{"text":"Day 1"}],"id":"day-1"},{"tag":"p","kids":[{"tag":"img","kids":[],"src":"/p/img/a.png","alt":"A","width":"50%"}],"align":"center"}]"#));
+        assert_eq!(b[0], Block::Anchor("day-1".into())); assert!(matches!(&b[1], Block::Heading(2, _)));
+        let Block::Aligned(Align::Center, inner) = &b[2] else { panic!("{b:?}") };
+        let Block::Flow(parts, 0) = &inner[0] else { panic!() };
+        let [Inline::Img(i)] = parts.as_slice() else { panic!("{parts:?}") };
+        assert_eq!((i.src.as_str(), i.alt.as_str(), i.width), ("/p/img/a.png", "A", Some(Dim::Pct(50.))));
+    }
+    #[test] fn badges_in_links_keep_their_link_and_text_runs_between() {
+        let b = parse(&j(r#"[{"tag":"p","kids":[{"text":"Built "},{"tag":"a","href":"https://ci.io","file":false,"kids":[{"tag":"img","kids":[],"src":"https://x/b.svg","alt":"CI"}]},{"text":" "},{"tag":"img","kids":[],"src":"https://x/c.svg"}]}]"#));
+        let Block::Flow(p, 0) = &b[0] else { panic!("{b:?}") };
+        assert_eq!(p.len(), 3, "the lone space between pictures is no text: {p:?}");
+        let Inline::Img(i) = &p[1] else { panic!() }; assert_eq!(i.link.as_ref().map(|l| l.href.as_str()), Some("https://ci.io"));
+    }
+    #[test] fn alerts_details_tasks_and_pictures_for_dark_windows() {
+        let b = parse(&j(r#"[{"tag":"blockquote","alert":"warning","kids":[{"tag":"p","kids":[{"text":"Hot"}]}]},
+            {"tag":"details","kids":[{"tag":"summary","kids":[{"text":"More"}]},{"tag":"p","kids":[{"text":"x"}]}]},
+            {"tag":"ul","kids":[{"tag":"li","checked":"true","kids":[{"text":"done"}]},{"tag":"li","checked":"false","kids":[{"text":"todo"}]}]},
+            {"tag":"picture","kids":[{"tag":"source","media":"(prefers-color-scheme: dark)","src":"/d.png","kids":[]},{"tag":"img","src":"/l.png","kids":[]}]}]"#));
+        assert!(matches!(&b[0], Block::Callout(Some(k), bs) if k == "warning" && bs.len() == 1));
+        assert!(matches!(&b[1], Block::Details { open: false, blocks, .. } if blocks.len() == 1));
+        assert_eq!(block_text(&b[2]), "- [x] done\n- [ ] todo");
+        let Block::Flow(p, _) = &b[3] else { panic!() }; let Inline::Img(i) = &p[0] else { panic!() };
+        assert_eq!((i.source(false), i.source(true)), ("/d.png", "/l.png"));
+    }
+    #[test] fn strike_kbd_and_sup_are_styles() {
+        let Block::Para(s) = &parse(&j(r#"[{"tag":"p","kids":[{"tag":"del","kids":[{"text":"a"}]},{"tag":"kbd","kids":[{"text":"b"}]},{"tag":"sup","kids":[{"text":"c"}]}]}]"#))[0] else { panic!() };
+        assert!(s[0].style.strike && s[1].style.kbd && s[2].style.small);
+    }
+    #[test] fn a_chat_quote_is_still_one_quote() {
+        assert_eq!(parse(&j(r#"[{"tag":"blockquote","kids":[{"text":"q "},{"tag":"strong","kids":[{"text":"b"}]}]}]"#)).len(), 1);
+        assert!(matches!(&parse(&j(r#"[{"tag":"blockquote","kids":[{"text":"q"}]}]"#))[0], Block::Quote(_)));
     }
 }
 

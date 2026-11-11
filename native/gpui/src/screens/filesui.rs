@@ -34,6 +34,8 @@ pub struct FilesUi {
     pub dir: String,
     pub texts: HashMap<String, Text>,
     pub pdf: Pdf,
+    /// The preview's scroll (a note's `#` links move it).
+    pub preview_scroll: ScrollHandle,
 }
 
 // ------------------------------------------------------------------ pure rules
@@ -420,7 +422,8 @@ pub fn preview_page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, lig
             // a Markdown note: the hub sent its nodes, drawn as the chat draws a reply
             let blocks: Vec<Value> = viewer["file"]["blocks"].as_array().cloned().unwrap_or_default();
             let parsed = super::md::parse(&blocks);
-            div().flex().flex_col().gap_2().p_3().children(super::timeline::blocks(cx, reg, light, &parsed, "file")).into_any_element()
+            let doc = super::timeline::Doc { imgs: images, target, width: (f32::from(ui.preview_scroll.bounds().size.width) - 24.).max(240.) };
+            div().flex().flex_col().gap_3().p_3().text_size(px(14.)).children(super::timeline::doc_blocks(cx, reg, light, &parsed, "file", &doc)).into_any_element()
         }
         _ => match ui.texts.get(&url) {
             Some(Text::Ready(t)) => text_block(light, &name, t),
@@ -428,7 +431,7 @@ pub fn preview_page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, lig
             _ => div().p_3().text_color(c("dim")).child(trs("Loading…")).into_any_element(),
         },
     };
-    div().size_full().flex().flex_col().child(bar).child(div().id("fm-preview").flex_1().min_h_0().overflow_y_scroll().child(body)).into_any_element()
+    div().size_full().flex().flex_col().child(bar).child(div().id("fm-preview").track_scroll(&ui.preview_scroll).flex_1().min_h_0().overflow_y_scroll().child(body)).into_any_element()
 }
 
 /// Text lines in the mono font; a Markdown note bolds its headings and dims its rules.

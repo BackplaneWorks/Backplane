@@ -1,7 +1,7 @@
 //! The timeline's text: Markdown blocks drawn as styled, wrapped, selectable text (selection runs across blocks and
 //! messages), links, code blocks with Copy and light highlighting, tables, and images. What to draw comes from the hub's
 //! nodes (screens::md); this file only lays them out and answers the pointer. The pure rules are in md.rs and select.rs.
-use super::{images::Slot, md::{self, Block, Link, Span, Tok}, select::{self, Pos, Selection, Text}};
+use super::{images::Slot, md::{self, Align, Block, Dim, Img, Inline, Link, Span, Tok}, select::{self, Pos, Selection, Text}};
 use crate::{art, theme, Backplane};
 use gpui::{prelude::*, *};
 use serde_json::Value;
@@ -161,12 +161,12 @@ impl SelText {
             if s.style.bold || self.kind == Kind::Head { font.weight = FontWeight::BOLD; }
             if s.style.italic { font.style = FontStyle::Italic; }
             if s.style.code { font = mono.clone(); }
-            let color = if s.style.link.is_some() { c("accent") } else if self.kind == Kind::Quote { c("dim") } else { c("text") };
+            let color = if s.style.link.is_some() { c("accent") } else if self.kind == Kind::Quote || s.style.small { c("dim") } else { c("text") };
             runs.push(TextRun {
                 len: s.text.len(), font, color: color.into(),
-                background_color: s.style.code.then(|| c("raise").into()),
+                background_color: (s.style.code || s.style.kbd).then(|| c("raise").into()),
                 underline: s.style.link.is_some().then(|| UnderlineStyle { color: Some(color.into()), thickness: px(1.), wavy: false }),
-                strikethrough: None,
+                strikethrough: s.style.strike.then(|| StrikethroughStyle { color: Some(color.into()), thickness: px(1.) }),
             });
         }
         runs
@@ -247,28 +247,61 @@ fn copy_probe(reg: &Reg, ix: usize) -> impl IntoElement {
 }
 
 /// A list: a marker column and the item, its nested lists below it one step in. Bullets change with the level (• ◦ ▪), numbers keep their own count.
-fn list_el(cx: &mut Context<Backplane>, reg: &Reg, light: bool, b: &Block, key: &str, level: usize) -> AnyElement {
-    let Block::List { ordered, start, items } = b else { return block_el(cx, reg, light, b, key) };
+fn list_el(cx: &mut Context<Backplane>, reg: &Reg, light: bool, b: &Block, key: &str, level: usize, doc: Option<&Doc>) -> AnyElement {
+    let Block::List { ordered, start, items } = b else { return block_el(cx, reg, light, b, key, doc) };
     let c = |n: &str| theme::color(light, n);
     let mut col = div().flex().flex_col().gap_1();
     if level == 0 { col = col.pl(px(8.)); }
     for (i, it) in items.iter().enumerate() {
-        let mark = if *ordered { format!("{}.", start + i as u64) } else { ["•", "◦", "▪"][level % 3].to_string() };
-        let mut body = div().flex_1().min_w_0().flex().flex_col().gap_1().child(text(reg, light, it.spans.clone(), Kind::Body));
-        for (k, s) in it.sub.iter().enumerate() { body = body.child(list_el(cx, reg, light, s, &format!("{key}-{i}-{k}"), level + 1)); }
-        col = col.child(div().flex().gap_2().child(div().min_w(px(18.)).flex_shrink_0().text_color(c("dim")).child(mark)).child(body));
+        let mark = match it.checked { Some(true) => "☑".to_string(), Some(false) => "☐".to_string(), None if *ordered => format!("{}.", start + i as u64), None => ["•", "◦", "▪"][level % 3].to_string() };
+        let mut body = div().flex_1().min_w_0().flex().flex_col().gap_1();
+        if !it.spans.is_empty() || it.sub.is_empty() { body = body.child(text(reg, light, it.spans.clone(), Kind::Body)); }
+        for (k, s) in it.sub.iter().enumerate() { body = body.child(list_el(cx, reg, light, s, &format!("{key}-{i}-{k}"), if matches!(s, Block::List { .. }) { level + 1 } else { level }, doc)); }
+        col = col.child(div().flex().gap_2().child(div().min_w(px(18.)).flex_shrink_0().text_color(c(if it.checked == Some(true) { "ok" } else { "dim" })).child(mark)).child(body));
     }
     col.into_any_element()
 }
 
-fn block_el(cx: &mut Context<Backplane>, reg: &Reg, light: bool, b: &Block, key: &str) -> AnyElement {
+fn block_el(cx: &mut Context<Backplane>, reg: &Reg, light: bool, b: &Block, key: &str, doc: Option<&Doc>) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     match b {
         Block::Para(s) => text(reg, light, s.clone(), Kind::Body),
-        Block::Heading(l, s) => div().text_size(px(match l { 1 => 20., 2 => 17., 3 => 15., _ => 14. })).mt_1().child(text(reg, light, s.clone(), Kind::Head)).into_any_element(),
+        Block::Heading(l, s) => {
+            // a document's h1 and h2 are underlined, as GitHub draws them
+            let h = div().text_size(px(if doc.is_some() { doc_heading_size(*l) } else { heading_size(*l) })).mt_1().child(text(reg, light, s.clone(), Kind::Head));
+            if doc.is_some() && *l <= 2 { h.pb_1().border_b_1().border_color(c("line")).into_any_element() } else { h.into_any_element() }
+        }
+        Block::Flow(parts, level) => flow_el(cx, reg, light, parts, *level, key, doc, Align::Left),
+        Block::Aligned(a, bs) => {
+            let mut col = div().w_full().flex().flex_col().gap_2();
+            col = match a { Align::Center => col.text_center(), Align::Right => col.text_right(), Align::Left => col };
+            for (i, b) in bs.iter().enumerate() {
+                let k = format!("{key}-{i}");
+                col = col.child(match b { Block::Flow(p, l) => flow_el(cx, reg, light, p, *l, &k, doc, *a), _ => block_el(cx, reg, light, b, &k, doc) });
+            }
+            col.into_any_element()
+        }
+        Block::Callout(kind, bs) => {
+            let (word, tone) = kind.as_deref().map(alert_of).map_or((None, "line"), |(w, t)| (Some(w), t));
+            let mut col = div().border_l_2().border_color(c(tone)).pl_3().flex().flex_col().gap_2();
+            if let Some(w) = word { col = col.child(div().font_weight(FontWeight::BOLD).text_color(c(tone)).child(crate::i18n::t(w))); }
+            for (i, b) in bs.iter().enumerate() { col = col.child(block_el(cx, reg, light, b, &format!("{key}-{i}"), doc)); }
+            col.into_any_element()
+        }
+        Block::Details { summary, open, blocks } => {
+            let k = key.to_string();
+            let shown = *open != DETAILS.with(|d| d.borrow().contains(&k));
+            let head = div().id(SharedString::from(format!("details-{key}"))).flex().gap_2().items_center().cursor_pointer()
+                .child(div().text_color(c("dim")).child(if shown { "▾" } else { "▸" })).child(div().flex_1().min_w_0().child(text(reg, light, summary.clone(), Kind::Body)))
+                .on_click(cx.listener(move |_, _, _, cx| { DETAILS.with(|d| { let mut d = d.borrow_mut(); if !d.remove(&k) { d.insert(k.clone()); } }); cx.notify(); }));
+            let mut col = div().flex().flex_col().gap_2().child(head);
+            if shown { let mut inner = div().pl_4().flex().flex_col().gap_2(); for (i, b) in blocks.iter().enumerate() { inner = inner.child(block_el(cx, reg, light, b, &format!("{key}-{i}"), doc)); } col = col.child(inner); }
+            col.into_any_element()
+        }
+        Block::Anchor(id) => { let id = id.clone(); canvas(|_, _, _| (), move |b, _, _, _| { ANCHORS.with(|a| { a.borrow_mut().insert(id.clone(), b); }); }).w_full().h(px(0.)).into_any_element() }
         Block::Quote(s) => div().border_l_2().border_color(c("line")).pl_3().child(text(reg, light, s.clone(), Kind::Quote)).into_any_element(),
         Block::Rule => div().h(px(1.)).w_full().bg(c("line")).my_1().into_any_element(),
-        Block::List { .. } => list_el(cx, reg, light, b, key, 0),
+        Block::List { .. } => list_el(cx, reg, light, b, key, 0, doc),
         Block::Code(t, tokens) => {
             let copy = t.clone();
             let copy_ix = { let mut r = reg.borrow_mut(); let n = r.copy_seen; r.copy_seen += 1; n };
@@ -315,7 +348,106 @@ impl ParseCache {
 
 /// An assistant message's blocks.
 pub fn blocks(cx: &mut Context<Backplane>, reg: &Reg, light: bool, parsed: &[Block], key: &str) -> Vec<AnyElement> {
-    parsed.iter().enumerate().map(|(i, b)| block_el(cx, reg, light, b, &format!("{key}-{i}"))).collect()
+    parsed.iter().enumerate().map(|(i, b)| block_el(cx, reg, light, b, &format!("{key}-{i}"), None)).collect()
+}
+/// What a document's pictures need (a README, a note in the file viewer): the image cache, the hub they come from, and the width the page
+/// gives the document (a `width="50%"` is a share of it).
+pub struct Doc<'a> { pub imgs: &'a super::images::Images, pub target: Option<&'a super::attach::Target>, pub width: f32 }
+/// A document's blocks: as `blocks`, with its pictures drawn.
+pub fn doc_blocks(cx: &mut Context<Backplane>, reg: &Reg, light: bool, parsed: &[Block], key: &str, doc: &Doc) -> Vec<AnyElement> {
+    parsed.iter().enumerate().map(|(i, b)| block_el(cx, reg, light, b, &format!("{key}-{i}"), Some(doc))).collect()
+}
+
+/// Where a document's picture is fetched from on the hub: a web address through the hub's cache (`/webimg`), a file through `/img`.
+pub fn doc_img_url(src: &str) -> String {
+    let l = src.to_ascii_lowercase();
+    if l.starts_with("https://") || l.starts_with("http://") { format!("/webimg?url={}", super::attach::enc(src)) } else { format!("/img?path={}", super::attach::enc(src)) }
+}
+/// The box a document's picture is drawn in: the size it asks for (a share of `avail` for a percentage, its own aspect for the side it leaves
+/// out), else its own pixels; never wider than `avail`. None while neither the picture nor its attributes say.
+pub fn doc_img_size(img: &Img, natural: Option<(f32, f32)>, avail: f32) -> Option<(f32, f32)> {
+    let px_of = |d: Option<Dim>| d.map(|d| match d { Dim::Px(p) => p, Dim::Pct(p) => avail * p / 100. });
+    let (w, h) = (px_of(img.width), px_of(img.height));
+    let (w, h) = match (w, h, natural) {
+        (Some(w), Some(h), _) => (w, h),
+        (Some(w), None, Some((nw, nh))) => (w, w * nh / nw.max(1.)),
+        (None, Some(h), Some((nw, nh))) => (h * nw / nh.max(1.), h),
+        (None, None, Some(n)) => n,
+        _ => return None,
+    };
+    let k = if w > avail && avail > 0. { avail / w } else { 1. };
+    Some(((w * k).max(1.), (h * k).max(1.)))
+}
+
+thread_local! {
+    /// A document's `<details>` the person opened or closed, by block key (each toggles its own default).
+    static DETAILS: RefCell<std::collections::HashSet<String>> = RefCell::new(Default::default());
+    /// Where each anchor (`#usage`) was painted last: the heading a page's `#` link scrolls to.
+    pub static ANCHORS: RefCell<std::collections::HashMap<String, Bounds<Pixels>>> = RefCell::new(Default::default());
+}
+
+/// A document's picture: drawn when it has arrived (a link around it opens the link, else a click shows it large); while it loads a box of
+/// its size, and only once it comes near the screen is it asked for (a long README's pictures load as it is read).
+fn doc_img(cx: &mut Context<Backplane>, light: bool, img: &Img, key: &str, doc: &Doc) -> AnyElement {
+    let c = |n: &str| theme::color(light, n);
+    let src = img.source(light).to_string();
+    let url = doc_img_url(&src);
+    let name = if img.alt.is_empty() { src.rsplit('/').next().unwrap_or("").to_string() } else { img.alt.clone() };
+    let slot = doc.imgs.peek(&url);
+    let ready = match &slot { Some(Slot::Ready(i)) => Some(i.clone()), _ => None };
+    let natural = ready.as_ref().and_then(|i| super::images::dims(&i.bytes)).map(|(w, h)| (w as f32, h as f32));
+    let size = doc_img_size(img, natural, doc.width);
+    let id = SharedString::from(format!("dimg-{key}"));
+    match (ready, slot) {
+        (Some(pic), _) => {
+            let (bw, bh) = size.unwrap_or((240., 120.));
+            let mut frame = div().id(id).w(px(bw)).max_w_full().flex_none(); frame.style().aspect_ratio = Some(bw / bh.max(1.0));
+            let (shown, n, link) = (pic.clone(), name.clone(), img.link.clone());
+            let src_img = doc.imgs.decoded(&url).map_or(ImageSource::Image(pic), ImageSource::Render);
+            frame.overflow_hidden().cursor_pointer()
+                .on_click(cx.listener(move |this, _, _, cx| { match &link { Some(l) => this.open_link(l, cx), None => this.screens.lightbox = Some((shown.clone(), n.clone())) } cx.notify(); }))
+                .child(gpui::img(src_img).size_full().object_fit(ObjectFit::Contain)).into_any_element()
+        }
+        (None, Some(Slot::Failed)) => {
+            // GitHub shows the words of a picture that cannot be drawn
+            div().px_1().text_size(px(12.)).text_color(c("dim")).border_1().border_color(c("line")).child(name).into_any_element()
+        }
+        (None, slot) => {
+            let (bw, bh) = size.unwrap_or((if img.alt.is_empty() { 120. } else { (img.alt.chars().count() as f32 * 7. + 16.).min(doc.width) }, 22.));
+            let asked = slot.is_some();
+            let (imgs, target, u) = (doc.imgs.clone(), doc.target.cloned(), url.clone());
+            let mut b = div().id(id).relative().w(px(bw)).max_w_full().flex_none().border_1().border_color(c("line")).overflow_hidden().text_size(px(11.)).text_color(c("faint")).px_1().child(name);
+            b.style().aspect_ratio = Some(bw / bh.max(1.0));
+            b.when(!asked, |b| b.child(canvas(move |bounds, window, _| {
+                // near the screen (a screen's height above or below): ask for it, and draw again so the window keeps polling until it arrives
+                let view = window.viewport_size(); let margin = view.height;
+                if bounds.bottom() > -margin && bounds.top() < view.height + margin { let _ = imgs.get(target.as_ref(), &u); window.refresh(); }
+            }, |_, _, _, _| {}).absolute().size_full())).into_any_element()
+        }
+    }
+}
+
+/// A paragraph or heading with pictures: its text and pictures in a row that wraps, aligned as asked.
+fn flow_el(cx: &mut Context<Backplane>, reg: &Reg, light: bool, parts: &[Inline], level: u8, key: &str, doc: Option<&Doc>, align: Align) -> AnyElement {
+    let mut row = div().w_full().flex().flex_wrap().items_end().gap_1();
+    row = match align { Align::Center => row.justify_center(), Align::Right => row.justify_end(), Align::Left => row };
+    if level > 0 { row = row.text_size(px(if doc.is_some() { doc_heading_size(level) } else { heading_size(level) })).mt_1(); }
+    for (i, p) in parts.iter().enumerate() {
+        row = match p {
+            Inline::Text(s) => row.child(div().max_w_full().child(text(reg, light, s.clone(), if level > 0 { Kind::Head } else { Kind::Body }))),
+            Inline::Img(img) => match doc { Some(d) => row.child(doc_img(cx, light, img, &format!("{key}-{i}"), d)), None => row.child(div().text_color(theme::color(light, "dim")).child(img.alt.clone())) },
+            Inline::Break => row.child(div().w_full().h(px(0.))),
+        };
+    }
+    row.into_any_element()
+}
+fn heading_size(level: u8) -> f32 { match level { 1 => 20., 2 => 17., 3 => 15., _ => 14. } }
+/// A document's headings, larger, as GitHub draws them (2em, 1.5em, 1.25em of its text).
+fn doc_heading_size(level: u8) -> f32 { match level { 1 => 27., 2 => 21., 3 => 17.5, _ => 15. } }
+
+/// An alert's word (its catalog key) and colour (GitHub's five).
+fn alert_of(kind: &str) -> (&'static str, &'static str) {
+    match kind { "tip" => ("gpui.md.alert.tip", "ok"), "important" => ("gpui.md.alert.important", "accent"), "warning" => ("gpui.md.alert.warning", "warn"), "caution" => ("gpui.md.alert.caution", "bad"), _ => ("gpui.md.alert.note", "accent") }
 }
 
 const MAX_IMAGES: usize = 12;
@@ -433,18 +565,35 @@ impl Backplane {
         let link = pos.filter(|_| collapsed).and_then(|p| self.screens.reg.borrow().link_at(p).cloned());
         if let Some(l) = link {
             self.screens.reg.borrow_mut().hover.clear();
-            match super::linkroute::route(&l.href, l.file) {
-                super::linkroute::Route::File(p) => self.file_open(&p, false),
-                super::linkroute::Route::Web(u) => cx.open_url(&u),
-                super::linkroute::Route::Hub(u) => { self.note.clear(); self.go("link-open", u, cx); }
-                super::linkroute::Route::Note(n) => self.note = n.to_string(),
-                super::linkroute::Route::Design(w) => super::xprobe::clicked(self, &w),
-            }
+            self.open_link(&l, cx);
         }
         // a finished selection is the X11 PRIMARY selection too (middle-click paste in other apps)
         #[cfg(target_os = "linux")]
         { let s = self.timeline_selected(); if !s.is_empty() { cx.write_to_primary(ClipboardItem::new_string(s)); } }
         cx.notify();
+    }
+    /// Open a link of the timeline or a document: a file in the viewer, a web address in the browser, a document's `#anchor` scrolled to.
+    pub(crate) fn open_link(&mut self, l: &Link, cx: &mut Context<Self>) {
+        if let Some(id) = l.href.strip_prefix('#') { self.jump_to_anchor(id); cx.notify(); return; }
+        match super::linkroute::route(&l.href, l.file) {
+            super::linkroute::Route::File(p) => self.file_open(&p, false),
+            super::linkroute::Route::Web(u) => cx.open_url(&u),
+            super::linkroute::Route::Hub(u) => { self.note.clear(); self.go("link-open", u, cx); }
+            super::linkroute::Route::Note(n) => self.note = n.to_string(),
+            super::linkroute::Route::Design(w) => super::xprobe::clicked(self, &w),
+        }
+    }
+    /// Scroll the document on screen (the project's README, or a note in the file viewer) so the anchor `id` is at its top.
+    fn jump_to_anchor(&mut self, id: &str) {
+        let Some(at) = ANCHORS.with(|a| a.borrow().get(id).copied()) else { return };
+        for h in [&self.screens.home_scroll, &self.screens.files.preview_scroll] {
+            let view = h.bounds();
+            if view.size.height <= px(0.) || at.left() < view.left() || at.left() > view.right() { continue }
+            let off = h.offset();
+            let y = (off.y - (at.top() - view.top()) + px(8.)).min(px(0.)).max(-h.max_offset().height);
+            h.set_offset(point(off.x, y));
+            return;
+        }
     }
     /// Ctrl-C with the composer's selection empty: copy what is selected in the timeline.
     pub(crate) fn timeline_copy(&mut self, cx: &mut Context<Self>) {
@@ -464,6 +613,16 @@ pub fn near_top(y: f32, max: f32) -> bool { y.min(max) < RUNWAY }
 mod tests {
     use super::*;
     use core::prelude::v1::test;
+    #[test] fn a_document_picture_takes_the_size_it_asks_for_and_never_more_than_the_page() {
+        let img = |w: Option<Dim>, h: Option<Dim>| Img { width: w, height: h, ..Default::default() };
+        assert_eq!(doc_img_size(&img(None, None), Some((1200., 600.)), 800.), Some((800., 400.)));
+        assert_eq!(doc_img_size(&img(Some(Dim::Px(300.)), None), Some((1200., 600.)), 800.), Some((300., 150.)));
+        assert_eq!(doc_img_size(&img(Some(Dim::Pct(50.)), None), Some((100., 100.)), 800.), Some((400., 400.)));
+        assert_eq!(doc_img_size(&img(Some(Dim::Px(90.)), Some(Dim::Px(20.))), None, 800.), Some((90., 20.)));
+        assert_eq!(doc_img_size(&img(None, None), None, 800.), None);
+        assert_eq!(doc_img_url("https://x.io/a b.svg"), format!("/webimg?url={}", super::super::attach::enc("https://x.io/a b.svg")));
+        assert!(doc_img_url("/p/img/a.png").starts_with("/img?path="));
+    }
     #[test] fn history_is_asked_for_within_the_runway_of_the_top() {
         assert!(near_top(0., 5000.)); assert!(near_top(RUNWAY - 1., 5000.)); assert!(!near_top(RUNWAY, 5000.));
         assert!(near_top(9000., 300.), "at the end of a short list, past its range");

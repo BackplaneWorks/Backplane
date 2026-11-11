@@ -15,6 +15,7 @@ pub mod misc;
 pub mod rv;
 pub mod serve;
 pub mod threadpath;
+pub mod webimg;
 #[path = "../kicad/mod.rs"]
 pub mod kicad;
 
@@ -25,6 +26,7 @@ use std::{path::PathBuf, sync::Arc};
 pub fn start(hub: Arc<Hub>) {
     watch_dir::start(hub.clone());
     hub.register_http(Arc::new(Img));
+    hub.register_http(Arc::new(webimg::WebImg));
     hub.register_http(Arc::new(Downloads));
     hub.register_rpc(Arc::new(Files));
     hub.register_rpc(Arc::new(GitRpc));

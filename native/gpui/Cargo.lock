@@ -536,6 +536,7 @@ dependencies = [
  "log",
  "lyon",
  "raw-window-handle",
+ "resvg",
  "rustls",
  "rustls-native-certs",
  "serde",

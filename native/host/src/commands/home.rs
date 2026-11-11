@@ -203,11 +203,16 @@ fn read_files(root: &str, req: &Value) -> (Value, bool, PathBuf) {
         }
     }
     for name in ["mfg/bom.csv", "mfg/BOM.csv", "bom.csv", "BOM.csv"] { match h.text(name, 4096, 0) { Ok(Some((_, t, _, _))) => { add(&mut art, "bom", name, "BOM", &t); break } Err(m) => return fails(m), _ => {} } }
-    // the README as nodes for the page to draw: README.md (up to 64 KB), else README.html with its tags taken out
+    // the README as nodes for the page to draw, as GitHub draws it (md/doc.rs): README.md (up to 256 KB), else README.html; its pictures and
+    // links are files beside it, inside the project
     let mut readme = Value::Null;
-    for name in ["README.md", "readme.md", "README.html", "README.htm"] {
-        match h.text(name, 65536, 0) {
-            Ok(Some((_, t, _, _))) => { let t = if name.ends_with(".md") { t } else { html_text(&t) }; readme = Value::Array(crate::md::nodes_json(&crate::md::render(&t))); break }
+    for name in ["README.md", "readme.md", "Readme.md", "README.markdown", "README.html", "README.htm"] {
+        match h.text(name, 256 << 10, 0) {
+            Ok(Some((f, t, _, _))) => {
+                let base = crate::md::doc::Base { dir: f.path.parent().map_or_else(|| real.clone(), Path::to_path_buf), root: real.clone() };
+                let nodes = if name.contains(".htm") { crate::md::doc::render_html(&t, &base) } else { crate::md::doc::render(&t, &base) };
+                readme = Value::Array(crate::md::nodes_json(&nodes)); break
+            }
             Err(m) => return fails(m), _ => {}
         }
     }
@@ -285,20 +290,3 @@ mod tests {
     }
 }
 
-/// An HTML README as Markdown-ish text: scripts and styles dropped, headings and list items marked, other tags removed, entities of the common kind decoded.
-fn html_text(h: &str) -> String {
-    let mut out = String::new(); let mut rest = h;
-    while let Some(i) = rest.find('<') {
-        out.push_str(&rest[..i]); rest = &rest[i..];
-        let Some(j) = rest.find('>') else { rest = ""; break };
-        let tag = rest[1..j].trim().to_lowercase(); rest = &rest[j + 1..];
-        let name: String = tag.trim_start_matches('/').chars().take_while(|c| c.is_ascii_alphanumeric()).collect();
-        if !tag.starts_with('/') && (name == "script" || name == "style") { let close = format!("</{name}"); rest = match rest.to_lowercase().find(&close) { Some(k) => &rest[k..], None => "" }; continue }
-        match (tag.starts_with('/'), name.as_str()) {
-            (false, "h1") => out.push_str("\n\n# "), (false, "h2") => out.push_str("\n\n## "), (false, "h3" | "h4" | "h5" | "h6") => out.push_str("\n\n### "),
-            (false, "li") => out.push_str("\n- "), (_, "p" | "br" | "div" | "ul" | "ol" | "tr" | "pre" | "h1" | "h2" | "h3" | "h4" | "h5" | "h6") => out.push_str("\n\n"), _ => {}
-        }
-    }
-    out.push_str(rest);
-    out.replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"").replace("&#39;", "'").replace("&nbsp;", " ")
-}
