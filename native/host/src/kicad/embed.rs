@@ -1707,8 +1707,11 @@ async fn spawn_gui_session(
                 for k in prewarm_kinds(&active2, &have) {
                     tokio::time::sleep(Duration::from_millis(1500)).await;
                     let _ = raw_on(&me2, &sock2, &desc2, "kiapi.backplane.embed.ShowFrame", json!({"kind": fk_of(k), "prewarm": true}), 30000).await;
+                    // KiCad marks a pre-warmed frame realized ~0.4 s after painting it, with no event: the frames read again then, so the
+                    // client may map it itself from the first switch
+                    tokio::time::sleep(Duration::from_millis(900)).await;
+                    if me2.send(Msg::ForkSync { pro: pro2.clone(), gen }).is_err() { return }
                 }
-                let _ = me2.send(Msg::ForkSync { pro: pro2, gen });
             });
         }
     } else {
