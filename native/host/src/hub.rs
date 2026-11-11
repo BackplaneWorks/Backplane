@@ -403,6 +403,8 @@ impl Hub {
     pub async fn far_ask(self: &Arc<Self>, client: u64, m: &str, p: &Value) -> Option<Value> { let r = self.far_router.get().cloned()?; r.ask(self, client, &Value::Null, m, p).await }
     /// One signed request to an owner's machine (`FarRouter::raw`): (status, body), 0 when it could not be made.
     pub async fn far_raw(self: &Arc<Self>, link: &str, m: &str, p: &Value) -> (u16, String) { match self.far_router.get().cloned() { Some(r) => r.raw(self, link, m, p).await, None => (0, String::new()) } }
+    /// `far_raw` to a paired machine whatever it was last marked (FarRouter `raw_paired`: a home move's own calls)
+    pub async fn far_raw_paired(self: &Arc<Self>, link: &str, m: &str, p: &Value) -> (u16, String) { match self.far_router.get().cloned() { Some(r) => r.raw_paired(self, link, m, p).await, None => (0, String::new()) } }
     pub fn far_machines(&self) -> Vec<(String, String, String)> { self.far_router.get().map(|r| r.machines()).unwrap_or_default() }
     /// The display-only states of the linked machines' mirrors (the sidebar); never the policy state.
     pub fn mirrors(&self) -> &crate::mirror::Mirrors { &self.mirrors }
