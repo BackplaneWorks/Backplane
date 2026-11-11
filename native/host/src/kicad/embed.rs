@@ -1720,8 +1720,8 @@ fn spawn_fork_events_loop(me: mpsc::UnboundedSender<Msg>, pro: String, gen: u64,
                     if ty == "ET_SHOW_REQUESTED" || ty_n == 9 {
                         show_req = Some(kind_of_fk_val(&ev["frame"]["kind"]).to_string());
                     } else if matches!(ty, "ET_FRAME_OPENED" | "ET_FRAME_CLOSED" | "ET_FRAME_SHOWN" | "ET_FRAME_HIDDEN"
-                        | "ET_TITLE_CHANGED" | "ET_MODIFIED_CHANGED" | "ET_DETACHED" | "ET_DOCUMENT_CHANGED")
-                        || matches!(ty_n, 1 | 2 | 3 | 4 | 5 | 6 | 12 | 13)
+                        | "ET_TITLE_CHANGED" | "ET_MODIFIED_CHANGED" | "ET_DETACHED" | "ET_DOCUMENT_CHANGED" | "ET_ATTACHED")
+                        || matches!(ty_n, 1 | 2 | 3 | 4 | 5 | 6 | 12 | 13 | 18)
                     {
                         need_sync = true;
                     }
