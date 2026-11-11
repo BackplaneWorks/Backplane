@@ -291,7 +291,10 @@ impl Plots {
             let say = |text: String| { if !stop.load(std::sync::atomic::Ordering::Relaxed) { me.stage(&hub, &ky, &text, t0.elapsed().as_millis() as u64, 0) } };
             let t = pcb3d::stream::parts(&ky, &rev, &made.0, made.1, &cache, &tools, &stop, &emit, &say);
             if !stop.load(std::sync::atomic::Ordering::Relaxed) { me.stage(&hub, &ky, "", t0.elapsed().as_millis() as u64, 0) }
-            eprintln!("pcb3d: {} parts: first {} ms, all {:.0} ms ({} part frames, {} instances boxed, {} models failed)", file, t.first.map_or("-".into(), |f| format!("{f:.0}")), t.all, t.models, t.boxes, t.failed);
+            // a box is either a model not found (unresolved: a variable or file missing) or one that failed to convert: said apart
+            let un = &made.0.unresolved;
+            let seen = if un.is_empty() { String::new() } else { format!("; not found: {}{}", un.iter().take(3).cloned().collect::<Vec<_>>().join(", "), if un.len() > 3 { format!(" and {} more", un.len() - 3) } else { String::new() }) };
+            eprintln!("pcb3d: {} parts: first {} ms, all {:.0} ms ({} part frames, {} instances boxed, {} models not found, {} models failed to convert{seen})", file, t.first.map_or("-".into(), |f| format!("{f:.0}")), t.all, t.models, t.boxes, un.len(), t.failed);
         });
     }
     /// A project's board opened (any of its views) or changed: its part models converted in the background, once a revision, so its 3D

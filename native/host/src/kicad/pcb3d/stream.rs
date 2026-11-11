@@ -153,7 +153,9 @@ pub fn encode(ts: impl Iterator<Item = ([i32; 9], u32)>) -> (u32, Vec<u8>) {
 /// `boxes`: each instance's box, drawn instead when the model will not convert
 pub struct Use { pub path: PathBuf, pub refs: Vec<String>, pub at: Vec<[f32; 12]>, pub boxes: Vec<Option<[f32; 12]>> }
 #[derive(Clone, Debug, Default, PartialEq)]
-pub struct Plan { pub uses: Vec<Use>, pub boxes: Vec<(String, [f32; 12])>, pub of: u32 }
+/// `unresolved`: each model reference no file was found for (a variable not set, a file not there), once, as the board names it: a box
+/// for that reason, not because its model failed to convert.
+pub struct Plan { pub uses: Vec<Use>, pub boxes: Vec<(String, [f32; 12])>, pub of: u32, pub unresolved: Vec<String> }
 
 /// The box a part with no model is drawn as: its courtyard's (else its fab outline's) extent on the board, this tall.
 pub const BOX_HIGH: f64 = 1.0;
@@ -204,7 +206,7 @@ pub fn plan(b: &Board, seat: (f64, f64), resolve: &dyn Fn(&str) -> Option<PathBu
         if shown.is_empty() { continue }
         let mut any = false;
         for m in shown {
-            let Some(path) = memo.entry(m.path.clone()).or_insert_with(|| resolve(&m.path)).clone() else { continue };
+            let Some(path) = memo.entry(m.path.clone()).or_insert_with(|| { let r = resolve(&m.path); if r.is_none() { p.unresolved.push(m.path.trim().to_string()) } r }).clone() else { continue };
             any = true;
             let i = *at.entry(path.clone()).or_insert_with(|| { p.uses.push(Use { path, refs: vec![], at: vec![], boxes: vec![] }); p.uses.len() - 1 });
             p.uses[i].refs.push(fp.reference.clone()); p.uses[i].at.push(instance(fp, m, seat)); p.uses[i].boxes.push(box_at(fp, seat)); p.of += 1;
@@ -247,7 +249,7 @@ pub fn board_dir(path: &str) -> PathBuf { Path::new(path).parent().map(Path::to_
 /// Where a board's own GLB is kept: the models cache, by the board's path and exact revision.
 pub fn glb_path(path: &str, rev: &str) -> PathBuf {
     let rev: String = rev.chars().map(|c| if c.is_ascii_alphanumeric() || c == '.' { c } else { '.' }).collect();
-    PathBuf::from(format!("{}/board-native-v2-{:08x}.{rev}.glb", super::super::stepglb::cache_dir(), super::super::stepglb::fnv(path)))
+    PathBuf::from(super::super::stepglb::cache_file(&format!("board-native-v2-{:08x}.{rev}.glb", super::super::stepglb::fnv(path))))
 }
 /// The board's GLB into the cache (through a staged file and a rename), its older revisions removed: one a board.
 pub fn keep_glb(layers: &[super::Layer], name: &str, path: &str, rev: &str) {
@@ -263,11 +265,13 @@ pub fn keep_glb(layers: &[super::Layer], name: &str, path: &str, rev: &str) {
     if let Ok(rd) = std::fs::read_dir(dir) { for e in rd.flatten() { let n = e.file_name().to_string_lossy().into_owned(); if n.starts_with(&prefix) && n.ends_with(".glb") && n != own { let _ = std::fs::remove_file(e.path()); } } }
 }
 
-/// The note a model with missing parts carries (as kicad-cli's log made it): "" when every part has its model.
+/// The note a model with missing parts carries (as kicad-cli's log made it): "" when every part has its model. It names a model file that
+/// was not found (the first one; a variable not set says which), so a missing library is not taken for a failed conversion.
 pub fn missing_note(p: &Plan) -> String {
     let n = p.boxes.len();
     if n == 0 { return String::new() }
-    format!("{n} {} no 3D model on the hub's machine (KiCad's 3D library is not installed there, or the paths are wrong): {} shown as a box", if n == 1 { "part has" } else { "parts have" }, if n == 1 { "it is" } else { "they are" })
+    let first = p.unresolved.first().map_or(String::new(), |u| format!("; not found: {}{}", u.chars().take(160).collect::<String>(), match p.unresolved.len() { 1 => String::new(), k => format!(" and {} more", k - 1) }));
+    format!("{n} {} no 3D model on the hub's machine (KiCad's 3D library is not installed there, or the paths are wrong): {} shown as a box{first}", if n == 1 { "part has" } else { "parts have" }, if n == 1 { "it is" } else { "they are" })
 }
 
 /// The most triangles a model's parts may add (the phones refuse a model of over (64 << 20) / 84 triangles, board and parts together):
@@ -401,6 +405,10 @@ mod tests {
         let p = plan(&b, (1.6, 0.0), &|s: &str| s.ends_with("R.step").then(|| PathBuf::from("/lib/R.step")));
         assert_eq!(p.of, 3); assert_eq!(p.uses.len(), 1); assert_eq!(p.uses[0].refs, vec!["R1", "R2"]);
         assert_eq!(p.boxes.len(), 1); assert_eq!(p.boxes[0].0, "U1");
+        assert_eq!(p.unresolved, ["gone.step"], "a model not found is said apart from one that failed to convert");
+        assert!(missing_note(&p).ends_with("shown as a box; not found: gone.step"), "{}", missing_note(&p));
+        // the board's every reference resolved: nothing unresolved, whatever later fails to convert
+        assert!(plan(&b, (1.6, 0.0), &|_: &str| Some(PathBuf::from("/lib/any.step"))).unresolved.is_empty());
         // the box spans the courtyard (29..31, 9.5..10.5) and hangs 1 mm under the back
         let a = p.boxes[0].1; let corner = |x: f64, y: f64, z: f64| std::array::from_fn::<f64, 3, _>(|r| a[4 * r] as f64 * x + a[4 * r + 1] as f64 * y + a[4 * r + 2] as f64 * z + a[4 * r + 3] as f64);
         assert!(near(corner(0.0, 0.0, 0.0), [2900.0, 950.0, -100.0]) && near(corner(1000.0, 1000.0, 1000.0), [3100.0, 1050.0, 0.0]), "{:?} {:?}", corner(0.0, 0.0, 0.0), corner(1000.0, 1000.0, 1000.0));
