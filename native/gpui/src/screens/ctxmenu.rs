@@ -25,6 +25,8 @@ pub const LOCAL_FILE_REVEAL: &str = "local:file-reveal";
 pub const LOCAL_COPY: &str = "local:copy";
 pub const LOCAL_COPY_IMAGE: &str = "local:copy-image";
 pub const LOCAL_URL_OPEN: &str = "local:url-open";
+/// An item that opens a second menu where the first was (a project's Move to group): its `value` is the second menu's items, as JSON.
+pub const LOCAL_SUB: &str = "local:sub";
 fn s(v: &Value, k: &str) -> String { v[k].as_str().unwrap_or("").to_string() }
 fn raw(id: &str) -> &str { id.rsplit('|').next().unwrap_or(id) }
 fn item(label: &str, action: &str, value: &str, confirm: bool) -> Item { Item { label: label.into(), action: action.into(), value: value.into(), confirm } }
@@ -124,6 +126,24 @@ pub fn project_items_of(pid_raw: &str, project: &Value) -> Vec<Item> {
     for (i, l) in project["linkWith"].as_array().into_iter().flatten().enumerate() { v.insert(at + i, item(&s(l, "label"), "proj-link", &s(l, "value"), false)); }
     v
 }
+/// A project row's menu in the hub's sections: the hub's `menu` (present/sections.rs `project_menu`) as it is, Open folder the window's own
+/// (the folder opens on the hub's machine) and Move to group a second menu. The hub decides the items, their order and which group is left out.
+pub fn section_items(menu: &Value) -> Vec<Item> {
+    fn one(i: &Value) -> Item {
+        let (id, label, action, value) = (s(i, "id"), s(i, "label"), s(i, "action"), s(i, "value"));
+        if i["sub"].is_array() {
+            let sub: Vec<Value> = i["sub"].as_array().into_iter().flatten().map(|x| { let it = one(x); serde_json::json!([it.label, it.action, it.value, it.confirm]) }).collect();
+            return item(&label, LOCAL_SUB, &Value::Array(sub).to_string(), false)
+        }
+        if id == "open" { return item(&label, LOCAL_FILE_OPEN, &value, false) }
+        item(&label, &action, &value, i["confirm"] == true)
+    }
+    menu.as_array().into_iter().flatten().map(one).filter(|i| !i.label.is_empty() && (!i.action.is_empty())).collect()
+}
+/// The second menu an item of `LOCAL_SUB` holds.
+pub fn sub_items(value: &str) -> Vec<Item> {
+    serde_json::from_str::<Vec<(String, String, String, bool)>>(value).unwrap_or_default().into_iter().map(|(l, a, v, c)| item(&l, &a, &v, c)).collect()
+}
 /* i18n-ok: menu labels, drawn through trs in render */ fn project_rest(pid_raw: &str) -> Vec<Item> { vec![item("Intent…", LOCAL_INTENT, pid_raw, false), item("Rename", "proj-rename", pid_raw, false), item("Badge", "look", pid_raw, false), item("Remove project", "proj-remove", pid_raw, true)] }
 
 impl Backplane {
@@ -162,6 +182,11 @@ impl Backplane {
             Some((a, v)) if a == LOCAL_COPY => { self.ctx_close(cx); cx.write_to_clipboard(ClipboardItem::new_string(v)); return }
             Some((a, v)) if a == LOCAL_URL_OPEN => { self.ctx_close(cx); cx.open_url(&v); return }
             Some((a, _)) if a == LOCAL_COPY_IMAGE => { self.ctx_close(cx); if let Some(img) = self.screens.ctx_img.take() { cx.write_to_clipboard(ClipboardItem::new_image(&img)); } return }
+            // a second menu, where the first was (Move to group: the other groups, then New group…)
+            Some((a, v)) if a == LOCAL_SUB => {
+                let items = sub_items(&v);
+                let (at, probe) = (m.at, m.probe); self.screens.ctx = (!items.is_empty()).then(|| Menu { at, items, armed: None, probe }); cx.notify(); return
+            }
             // the second menu, where the first was: the threads this one may go under
             Some((a, v)) if a == LOCAL_MOVE => {
                 let (tid, project) = v.split_once('|').unwrap_or((v.as_str(), ""));
@@ -226,7 +251,7 @@ pub fn render(cx: &mut Context<Backplane>, light: bool, m: &Menu) -> AnyElement 
     let mut list = div().absolute().left(m.at.x).top(m.at.y).min_w(px(190.)).flex().flex_col().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).occlude();
     for (i, it) in m.items.iter().enumerate() {
         let armed = m.armed == Some(i);
-        let label = if armed { shown_armed_label(it) } else { crate::i18n::trs(&it.label) };
+        let label = if armed { shown_armed_label(it) } else if it.action == LOCAL_SUB { format!("{} \u{203a}", crate::i18n::trs(&it.label)) } else { crate::i18n::trs(&it.label) };
         let danger = it.confirm;
         list = list.child(crate::ui::with_rect(div().id(SharedString::from(format!("ctx-{i}"))), { let (l, pr) = (it.label.clone(), m.probe); move || format!("{pr}:{l}") }).px_3().py_1().cursor_pointer().text_color(if armed || danger { c("bad") } else { c("text") })
             .when(armed, |d| d.bg(c("raise")).font_weight(FontWeight::BOLD)).hover(|s| s.bg(c("raise"))).child(label)
@@ -332,5 +357,23 @@ mod tests {
         let sub = j(r#"{"id":"http://h:1|t8","depth":1,"canChild":true}"#); let it = thread_items(&sub, "p1");
         let m = it.iter().find(|i| i.label == "Move to top level").unwrap(); assert_eq!((m.action.as_str(), m.value.as_str()), ("row-detach", "t8"));
         assert!(thread_items(&j(r#"{"id":"t1","depth":0}"#), "p1").iter().all(|i| i.action != "row-detach") && thread_items(&j(r#"{"id":"t1"}"#), "p1").iter().all(|i| i.action != "row-detach"));
+    }
+    /// 11 Nov: the sections sidebar's project menu had only Pin, New swarm and a Move to per group (some twice); it is the hub's whole menu again.
+    #[test] fn a_section_project_menu_is_the_hubs_with_move_to_group_a_second_menu() {
+        let menu = serde_json::json!([
+            {"id":"pin","label":"Pin project","action":"project-pin","value":"k1"}, {"id":"swarm","label":"New swarm","action":"swarm-new","value":"p1"},
+            {"id":"rename","label":"Rename","action":"proj-rename","value":"p1"}, {"id":"badge","label":"Badge","action":"look","value":"p1"},
+            {"id":"open","label":"Open folder","action":"open-folder","value":"/w/p1"},
+            {"id":"move","label":"Move to group","action":"","value":"","sub":[{"id":"group","label":"Nordic","action":"group-move","value":"k1\u{1f}folder:/w/n"},{"id":"new-group","label":"New group\u{2026}","action":"group-new-start","value":"k1"}]},
+            {"id":"archive","label":"Archive","action":"project-archive","value":"k1"}, {"id":"remove","label":"Remove project","action":"proj-remove","value":"p1","confirm":true}]);
+        let it = section_items(&menu);
+        assert_eq!(it.iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), ["Pin project", "New swarm", "Rename", "Badge", "Open folder", "Move to group", "Archive", "Remove project"]);
+        assert_eq!((it[4].action.as_str(), it[4].value.as_str()), (LOCAL_FILE_OPEN, "/w/p1"), "the folder opens on the hub's machine");
+        assert!(it[7].confirm && it[7].action == "proj-remove" && !it[0].confirm, "Remove asks first");
+        assert_eq!(armed_label(&it[7]), "Click again to remove");
+        assert_eq!(it[5].action, LOCAL_SUB);
+        let sub = sub_items(&it[5].value);
+        assert_eq!(sub, vec![item("Nordic", "group-move", "k1\u{1f}folder:/w/n", false), item("New group\u{2026}", "group-new-start", "k1", false)]);
+        assert!(section_items(&Value::Null).is_empty(), "an older hub: the window's own menu");
     }
 }

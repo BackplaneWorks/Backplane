@@ -3901,7 +3901,20 @@ sidebar.sections.rename	Rename group	グループ名を変更
 sidebar.sections.pin	Pin project	プロジェクトをピン留め
 sidebar.sections.unpin	Unpin project	プロジェクトのピン留めを外す
 gpui.sections.move.to	Move to {group}	{group}へ移動
+sidebar.sections.move	Move to group	グループへ移動
+sidebar.sections.new.group	New group…	新しいグループ…
+sidebar.sections.new.group.title	New group	新しいグループ
+sidebar.sections.remove.ask	Remove {project} from Backplane? Its folder and files stay.	{project}をBackplaneから外しますか？フォルダとファイルはそのまま残ります。
 gpui.sections.running	{n, number} running	{n, number}件実行中
+gpui.projects.mech	MECHANICAL ({n})	機構部品（{n}）
+gpui.open.folder	Open folder	フォルダを開く
+gpui.assembly	Assembly	アセンブリ
+gpui.mech	Mech	機構
+gpui.readme	README	README
+gpui.board	Board	基板
+gpui.schematic	Schematic	回路図
+gpui.view.three.d	3D	3D
+gpui.files	Files	ファイル
 """#
 
     /// thread.count = {n, plural, one {# thread} other {# threads}}
@@ -6397,6 +6410,12 @@ gpui.sections.running	{n, number} running	{n, number}件実行中
     /// gpui.sections.move.to = Move to {group}
     static func gpui_sections_move_to(group: String) -> String { f("gpui.sections.move.to", ["group": group]) }
 
+    /// sidebar.sections.remove.ask = Remove {project} from Backplane? Its folder and files stay.
+    static func sidebar_sections_remove_ask(project: String) -> String { f("sidebar.sections.remove.ask", ["project": project]) }
+
     /// gpui.sections.running = {n, number} running
     static func gpui_sections_running(n: Int) -> String { f("gpui.sections.running", ["n": String(n)]) }
+
+    /// gpui.projects.mech = MECHANICAL ({n})
+    static func gpui_projects_mech(n: String) -> String { f("gpui.projects.mech", ["n": n]) }
 }

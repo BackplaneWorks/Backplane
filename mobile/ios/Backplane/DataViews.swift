@@ -118,6 +118,7 @@ struct DataThreadsView: View {
     @State private var projectTitle = ""
     @State private var shut = Set(UserDefaults.standard.stringArray(forKey: "data.projects.shut") ?? [])
     @State private var renamingGroup: String?
+    @State private var newGroupFor: String?     // a project key: New group… asks the group's name
     @State private var groupTitle = ""
     @State private var treeOpen = Set(UserDefaults.standard.stringArray(forKey: "data.tree.open") ?? []) // parents whose subthreads show
     @State private var flash = ""   // the project a link just opened
@@ -199,12 +200,17 @@ struct DataThreadsView: View {
             Button(Tr.t("Rename")) { if let g = renamingGroup { Task { await client.sidebarAct("group-rename", g + "\u{1f}" + groupTitle) } } }
             Button(Tr.t("Cancel"), role: .cancel) {}
         }
+        .alert(Tr.t("New group"), isPresented: Binding(get: { newGroupFor != nil }, set: { if !$0 { newGroupFor = nil } })) {
+            TextField(Tr.t("Title"), text: $groupTitle)
+            Button(Tr.t("Create")) { if let k = newGroupFor, !groupTitle.trimmingCharacters(in: .whitespaces).isEmpty { Task { await client.sidebarAct("group-move", k + "\u{1f}+" + groupTitle) } } }
+            Button(Tr.t("Cancel"), role: .cancel) {}
+        }
         .alert(Tr.t("Rename project"), isPresented: Binding(get: { renamingProject != nil }, set: { if !$0 { renamingProject = nil } })) {
             TextField(Tr.t("Title"), text: $projectTitle)
             Button(Tr.t("Rename")) { if let p = renamingProject { Task { await client.projectAct(p.id, "rename", title: projectTitle) } } }
             Button(Tr.t("Cancel"), role: .cancel) {}
         }
-        .confirmationDialog(Tr.ios_project_remove_ask(title: projectMenu?.title ?? ""), isPresented: Binding(get: { projectMenu != nil }, set: { if !$0 { projectMenu = nil } }), titleVisibility: .visible) {
+        .confirmationDialog(Tr.sidebar_sections_remove_ask(project: projectMenu?.title ?? ""), isPresented: Binding(get: { projectMenu != nil }, set: { if !$0 { projectMenu = nil } }), titleVisibility: .visible) {
             Button(Tr.t("Remove project"), role: .destructive) { if let p = projectMenu { Task { await client.projectAct(p.id, "remove") } } }
             Button(Tr.t("Keep it"), role: .cancel) {}
         }
@@ -312,16 +318,38 @@ struct DataThreadsView: View {
                 ForEach(s.rows) { r in
                     Button { path.append(DProjectRoute(key: r.key, title: r.title)) } label: { DataSectionProject(r: r, faded: s.id == "quiet") }
                         .buttonStyle(.plain).dataRow().accessibilityIdentifier("data.section.project." + r.key)
-                        .contextMenu {
+                        .contextMenu { if !r.menu.isEmpty { sectionMenu(r) } else {
                             Button(Tr.t(r.pinned ? "Unpin project" : "Pin project"), systemImage: "pin") { Task { await client.sidebarAct("project-pin", r.key) } }
                             if let p = client.projects.first(where: { $0.id == r.id }) { Button(Tr.t("Badge"), systemImage: "paintpalette") { badgeProject = p } }
                             if client.has("swarm") { Button(Tr.ios_swarm_new_in(project: r.title), systemImage: "circle.hexagongrid") { newSwarm = r.id } }
                             ForEach(client.groupsTo, id: \.value) { g in Button(Tr.gpui_sections_move_to(group: g.label)) { Task { await client.sidebarAct("group-move", r.key + "\u{1f}" + g.value) } } }
-                        }
+                        } }
                     // its live swarms (the client's own rows, feature swarm), above its threads; their members have no rows
                     if client.has("swarm") { ForEach(Swarm.listed(client.swarms, project: r.id).filter { x in !(client.sections.first { $0.id == "needs" }?.rows.contains { $0.swarmRoom == x.id } ?? false) }) { x in DataSwarmRow(row: x) { path.append(DSwarmRoute(id: x.id, name: x.name)) }.dataRow() } }
                     ForEach(r.threads) { t in DataSectionThread(r: t, indent: 34) { path.append($0) }.farHide(t, client).dataRow() }
                 }
+            }
+        }
+    }
+    /// A project row's long press: the hub's menu (SectionMenu.swift), Move to group a submenu of the other groups and New group…; Remove asks
+    /// first (the project leaves Backplane's list, its folder and files stay).
+    @ViewBuilder private func sectionMenu(_ r: DSecRow) -> some View {
+        let proj = client.projects.first(where: { $0.id == r.id })
+        ForEach(DMenuItem.phone(r.menu, swarms: client.has("swarm"))) { it in
+            switch it.id {
+            case "pin": Button(Tr.t(it.label), systemImage: "pin") { Task { await client.sidebarAct("project-pin", it.value) } }
+            case "swarm": Button(Tr.t(it.label), systemImage: "circle.hexagongrid") { newSwarm = r.id }
+            case "rename": if let p = proj { Button(Tr.t(it.label), systemImage: "pencil") { projectTitle = p.title; renamingProject = p } }
+            case "badge": if let p = proj { Button(Tr.t(it.label), systemImage: "paintpalette") { badgeProject = p } }
+            case "move": Menu {
+                    ForEach(it.sub) { g in
+                        if g.id == "new-group" { Button(Tr.t(g.label), systemImage: "plus") { groupTitle = ""; newGroupFor = r.key } }
+                        else { Button(Tr.t(g.label)) { Task { await client.sidebarAct("group-move", g.value) } } }
+                    }
+                } label: { Label(Tr.t(it.label), systemImage: "folder") }
+            case "archive": Button(Tr.t(it.label), systemImage: "archivebox") { Task { await client.sidebarAct("project-archive", it.value) } }
+            case "remove": if let p = proj { Button(Tr.t(it.label), systemImage: "trash", role: .destructive) { projectMenu = p } }
+            default: EmptyView()
             }
         }
     }

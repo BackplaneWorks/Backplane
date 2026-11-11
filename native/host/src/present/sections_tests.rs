@@ -166,6 +166,89 @@ fn world() -> State {
     let mut s3 = world(); for (k, v) in &a.sets { s3.apply(&set(k, v, 3)); } let rows3 = merged_projects(&s3, &[], &|_| false, &|_| String::new(), "desk", &[]);
     let v = build(&s3, &rows3, &Value::Null, &ctx(&HashSet::new())); assert_eq!(sec(&v, "group:custom:client-work")["title"], "Client work");
 }
+/// Groups of one name are one group: Haiku called three folders "Personal" (one a linked machine's home) and two "American Embedded"
+/// (11 Nov: the menu listed Personal four times); a move kept on any of the merged ids lands in the one group.
+fn named_world() -> State {
+    let old = NOW - 8 * DAY;
+    let mut v = vec![];
+    for (i, (id, root)) in [("p1", "/w/acme/one"), ("p2", "/w/stuff/two"), ("p3", "/home/someone/three"), ("p4", "/w/ae/four"), ("p5", "/w/ae-inc/five"), ("p6", "/w/nordic/six")].iter().enumerate() {
+        v.push(pc(id, &id.to_uppercase(), root, old - 10)); v.push(tc(&format!("t{i}"), id, old)); v.push(turn(&format!("t{i}"), "completed", old));
+    }
+    for (g, n) in [("folder:/w/acme", "Personal"), ("folder:/w/stuff", "personal"), ("folder:/w/ae", "American Embedded"), ("folder:/w/ae-inc", "American  Embedded"), ("folder:/w/nordic", "Nordic")] { v.push(set(&format!("sidebar.group.pick.{g}"), n, 1)); }
+    st(&v)
+}
+#[test] fn groups_of_one_name_are_one_group_and_keep_their_projects() {
+    assert_eq!(auto_group("", "/Users/kelly/x").0, "folder:~", "a Mac's home folder is the personal group too");
+    assert_eq!(auto_group("", "C:\\Users\\kelly\\x").0, "folder:~");
+    assert_eq!(auto_group("", "/home/someone/x").0, "folder:~");
+    assert_eq!(auto_group("", "/home/someone/src/x").0, "folder:/home/someone/src");
+    let mut s = named_world();
+    let key6 = merged_projects(&s, &[], &|_| false, &|_| String::new(), "desk", &[]).iter().find(|p| p.name == "P6").unwrap().key.clone();
+    s.apply(&set(&format!("sidebar.group.of.{key6}"), "folder:/w/ae-inc", 2)); // the person moved it there before the merge
+    let rows = merged_projects(&s, &[], &|_| false, &|_| String::new(), "desk", &[]);
+    let to = move_targets(&s, &rows);
+    let labels: Vec<&str> = to.as_array().unwrap().iter().map(|g| g["label"].as_str().unwrap()).collect();
+    assert_eq!(labels, ["American Embedded", "Personal"], "each group once ({to})");
+    let open: HashSet<String> = ["sec:group:folder:/w/acme".to_string(), "sec:group:folder:/w/ae".to_string()].into();
+    let v = build(&s, &rows, &Value::Null, &ctx(&open));
+    let groups: Vec<String> = ids(&v).into_iter().filter(|i| i.starts_with("group:")).collect();
+    assert_eq!(groups, ["group:folder:/w/ae", "group:folder:/w/acme"], "{v}");
+    let mut t = titles(sec(&v, "group:folder:/w/acme")); t.sort(); assert_eq!(t, ["P1", "P2", "P3"]);
+    let mut t = titles(sec(&v, "group:folder:/w/ae")); t.sort(); assert_eq!(t, ["P4", "P5", "P6"], "the move kept on a merged id stays");
+    // renaming the merged group names each of its ids, so it stays one group
+    let a = act(&s, &rows, "group-rename", "folder:/w/ae\u{1f}AE", &json!({}), NOW).unwrap();
+    let mut keys: Vec<&str> = a.sets.iter().map(|x| x.0.as_str()).collect(); keys.sort();
+    assert_eq!(keys, ["sidebar.group.name.folder:/w/ae", "sidebar.group.name.folder:/w/ae-inc"]);
+    // two groups the person names alike are one
+    let mut s2 = named_world(); s2.apply(&set("sidebar.group.name.folder:/w/nordic", "personal", 3));
+    let rows2 = merged_projects(&s2, &[], &|_| false, &|_| String::new(), "desk", &[]);
+    assert_eq!(move_targets(&s2, &rows2).as_array().unwrap().len(), 2, "Nordic renamed Personal joined Personal");
+    // a move to a merged id writes the group's own id; a new group of an existing name joins it
+    let a = act(&s, &rows, "group-move", &format!("{key6}\u{1f}folder:/w/stuff"), &json!({}), NOW).unwrap();
+    assert_eq!(a.sets, vec![(format!("sidebar.group.of.{key6}"), "folder:/w/acme".to_string())]);
+    let a = act(&s, &rows, "group-move", &format!("{key6}\u{1f}+Personal"), &json!({}), NOW).unwrap();
+    let mut s3 = named_world(); for (k, v) in &a.sets { s3.apply(&set(k, v, 4)); }
+    let rows3 = merged_projects(&s3, &[], &|_| false, &|_| String::new(), "desk", &[]);
+    assert_eq!(move_targets(&s3, &rows3).as_array().unwrap().iter().filter(|g| g["label"] == "Personal").count(), 1);
+}
+fn menu_ids(m: &Value) -> Vec<String> { m.as_array().unwrap().iter().map(|i| i["id"].as_str().unwrap().to_string()).collect() }
+#[test] fn a_project_row_has_the_whole_menu() {
+    let s = named_world(); let rows = merged_projects(&s, &[], &|_| false, &|_| String::new(), "desk", &[]);
+    let open: HashSet<String> = ["sec:group:folder:/w/acme".to_string()].into();
+    let v = build(&s, &rows, &Value::Null, &ctx(&open));
+    let p1 = sec(&v, "group:folder:/w/acme")["rows"].as_array().unwrap().iter().find(|r| r["title"] == "P1").unwrap().clone();
+    let m = &p1["menu"];
+    assert_eq!(menu_ids(m), ["pin", "swarm", "rename", "badge", "open", "move", "archive", "remove"]);
+    let labels: Vec<&str> = m.as_array().unwrap().iter().map(|i| i["label"].as_str().unwrap()).collect();
+    assert_eq!(labels, ["Pin project", "New swarm", "Rename", "Badge", "Open folder", "Move to group", "Archive", "Remove project"]);
+    let rm = &m[7]; assert_eq!((rm["action"].as_str(), rm["value"].as_str(), rm["confirm"].as_bool()), (Some("proj-remove"), Some("p1"), Some(true)), "Remove asks first and names the project here");
+    assert_eq!(m[4]["value"], "/w/acme/one");
+    // Move to group: every other group once, never the one it is in, then New group…
+    let sub: Vec<&str> = m[5]["sub"].as_array().unwrap().iter().map(|i| i["label"].as_str().unwrap()).collect();
+    assert_eq!(sub, ["American Embedded", "Nordic", "New group\u{2026}"]);
+    assert_eq!(m[5]["sub"][0]["value"], format!("{}\u{1f}folder:/w/ae", p1["nav"].as_str().unwrap()));
+    assert_eq!(m[5]["sub"][2]["action"], "group-new-start");
+    // New group… asks a name in the rename bar; its save makes the group with the project in it
+    let key = p1["nav"].as_str().unwrap();
+    let a = act(&s, &rows, "group-new-start", key, &json!({}), NOW).unwrap();
+    assert!(a.drafts.contains(&("@ren.kind".to_string(), "group-new".to_string())) && a.drafts.contains(&("@ren".to_string(), key.to_string())));
+    assert_eq!(new_group_sets(key, "  Clients "), Some(vec![(format!("sidebar.group.of.{key}"), "custom:clients".into()), ("sidebar.group.name.custom:clients".into(), "Clients".into())]));
+    assert_eq!(new_group_sets(key, "  "), None);
+}
+#[test] fn an_archived_project_is_quiet_until_unarchived() {
+    let s = world(); let rows = merged_projects(&s, &[], &|_| false, &|_| String::new(), "desk", &[]);
+    let key = rows.iter().find(|p| p.name == "Recent").unwrap().key.clone();
+    let a = act(&s, &rows, "project-archive", &key, &json!({}), NOW).unwrap();
+    assert_eq!(a.sets, vec![(format!("sidebar.archived.{key}"), NOW.to_string()), (format!("sidebar.pin.{key}"), String::new())]);
+    let mut s2 = world(); for (k, v) in &a.sets { s2.apply(&set(k, v, NOW)); }
+    let rows2 = merged_projects(&s2, &[], &|_| false, &|_| String::new(), "desk", &[]);
+    let open: HashSet<String> = ["sec:quiet".to_string()].into(); let v = build(&s2, &rows2, &Value::Null, &ctx(&open));
+    assert!(!titles(sec(&v, "active")).contains(&"Recent".to_string())); assert!(titles(sec(&v, "quiet")).contains(&"Recent".to_string()));
+    let r = sec(&v, "quiet")["rows"].as_array().unwrap().iter().find(|r| r["title"] == "Recent").unwrap().clone();
+    assert_eq!(r["archived"], true); assert_eq!(r["menu"].as_array().unwrap().iter().find(|i| i["id"] == "archive").unwrap()["label"], "Unarchive");
+    assert_eq!(act(&s2, &rows2, "project-archive", &key, &json!({}), NOW).unwrap().sets, vec![(format!("sidebar.archived.{key}"), String::new())], "again: unarchived");
+    assert!(act(&s, &rows, "project-archive", "nope", &json!({}), NOW).is_none());
+}
 #[test] fn the_sidebar_search_opens_folds_and_finds_hidden_threads() {
     let s = world(); let rows = merged_projects(&s, &[], &|_| false, &|_| String::new(), "desk", &[]);
     let open = HashSet::new(); let c = Ctx { query: "tq", ..ctx(&open) }; let v = build(&s, &rows, &Value::Null, &c);

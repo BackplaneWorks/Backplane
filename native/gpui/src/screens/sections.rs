@@ -61,6 +61,7 @@ fn project(this: &Backplane, cx: &mut Context<Backplane>, light: bool, p: &Value
     }).collect();
     let pinned = p["pinned"] == true;
     let groups = this.data["groupsTo"].clone();
+    let menu = p["menu"].clone();
     let (pid2, key2, key3, pid3) = (pid.clone(), key.clone(), key.clone(), pid.clone());
     /* i18n-ok: a ctl label */ ctl.push(CtlEntry { id: format!("project-pin:{pid}"), label: if pinned { "Unpin project".into() } else { "Pin project".into() }, ctl: Ctl::Node("project-pin".into(), key.clone()) });
     crate::ui::with_rect(div().id(SharedString::from(format!("sproj-{pid}"))), { let p = pid.clone(); move || format!("project:{p}") })
@@ -68,6 +69,9 @@ fn project(this: &Backplane, cx: &mut Context<Backplane>, light: bool, p: &Value
         .border_l_2().border_color(if on_page { c("accent") } else { c("panel") }).when(on_page, |d| d.bg(c("raise"))).cursor_pointer().hover(|s| s.bg(c("raise")))
         .on_click(cx.listener(move |this, _, _, cx| { this.go("project-page", key2.clone(), cx); this.open_project(pid2.clone(), cx); }))
         .on_mouse_down(MouseButton::Right, cx.listener(move |this, e: &MouseDownEvent, _, cx| {
+            // the hub's menu (Pin, New swarm, Rename, Badge, Open folder, Move to group ›, Archive, Remove project); an older hub sends none
+            let hub_menu = crate::screens::ctxmenu::section_items(&menu);
+            if !hub_menu.is_empty() { this.ctx_open(e.position, hub_menu, cx); return }
             /* i18n-ok: menu labels, drawn through trs */ let mut items = vec![crate::screens::ctxmenu::Item { label: if pinned { "Unpin project".into() } else { "Pin project".into() }, action: "project-pin".into(), value: key3.clone(), confirm: false },
                 /* i18n-ok: a menu label, drawn through trs */ crate::screens::ctxmenu::Item { label: "New swarm".into(), action: "swarm-new".into(), value: pid3.clone(), confirm: false }];
             for g in groups.as_array().into_iter().flatten() {

@@ -128,6 +128,8 @@ pub fn act(req: &Req) -> Option<ActOut> {
                     "project" => { a.ren_clear(); a.rpc("project.rename", json!({"project": id, "title": title})) }
                     // a sidebar group (present/sections.rs): its name is a setting of this hub
                     "group" => { a.ren_clear(); a.rpc("setting.set", json!({"key": format!("sidebar.group.name.{id}"), "value": title.chars().take(40).collect::<String>()})) }
+                    // New group…: a group of that name with this project (`id` its key) in it
+                    "group-new" => { a.ren_clear(); for (k, val) in crate::present::sections::new_group_sets(&id, &title).unwrap_or_default() { a.rpc("setting.set", json!({"key": k, "value": val})) } }
                     "artifact" => return None, // a project setting: the helper's
                     _ => { a.ren_clear(); a.rpc("thread.rename", json!({"thread": id, "title": title})) }
                 }
@@ -214,6 +216,10 @@ mod tests {
         assert_eq!((d["@ren"].as_str(), d["@ren.kind"].as_str(), d["@f.title"].as_str()), (Some("p1"), Some("project"), Some("Board")));
         let mut s2 = sess.clone(); s2["drafts"] = json!({"@ren": "p1", "@ren.kind": "project", "@f.title": "Board 2"});
         let o = run("rename-save", "", &s2).unwrap(); assert!(o.cmds[0]["text"].as_str().unwrap().contains("\"project.rename\""));
+        // New group… (a sections project's menu): the bar's name makes the group with the project in it
+        let mut s3 = sess.clone(); s3["drafts"] = json!({"@ren": "github.com/a/b", "@ren.kind": "group-new", "@f.title": " Clients "});
+        let o = run("rename-save", "", &s3).unwrap(); let sent: Vec<String> = o.cmds.iter().map(|c| c["text"].as_str().unwrap().to_string()).collect();
+        assert!(sent.len() == 2 && sent[0].contains("sidebar.group.of.github.com/a/b") && sent[0].contains("custom:clients") && sent[1].contains("sidebar.group.name.custom:clients") && sent[1].contains("\"Clients\""), "{sent:?}");
         assert!(run("proj-rename", "", &sess).is_none());
         let o = run("look", "p1", &sess).unwrap(); assert_eq!(o.session_patch["drafts"]["@look"], "p1");
         let mut s3 = sess.clone(); s3["drafts"] = json!({"@look": "p1"}); assert_eq!(run("look", "p1", &s3).unwrap().session_patch["drafts"]["@look"], "", "the same press shuts it");
