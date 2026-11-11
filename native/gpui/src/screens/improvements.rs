@@ -230,7 +230,7 @@ pub fn answered(this: &mut Backplane, id: u64, reply: Value, cx: &mut Context<Ba
             // Backplane's own source until the person picks (the search's answer brings their last choice; a linked machine's project is not in this list)
             let gone = !imp.draft.project.is_empty() && !is_far(&imp.draft.project) && !imp.projects.iter().any(|p| p.id == imp.draft.project);
             if !imp.draft.locked() && imp.draft.thread.is_empty() && gone { imp.draft.project.clear(); imp.draft.key.clear(); }
-            if !imp.draft.locked() && imp.draft.thread.is_empty() && imp.draft.project.is_empty() { if let Some(id) = found.clone() { imp.draft.project = id; } }
+            if !imp.draft.locked() && imp.draft.thread.is_empty() { if let Some(id) = found.clone() { if imp.draft.project != id { imp.draft.key.clear(); } imp.draft.project = id; } }
             if !imp.draft.writer_project.is_empty() && imp.draft.writer.is_none() && !imp.projects.iter().any(|p| p.id == imp.draft.writer_project) { imp.draft.writer_project.clear(); }
             if imp.draft.writer_project.is_empty() {
                 let work: Vec<&Project> = imp.projects.iter().filter(|p| p.id != "scratch" && !p.root.is_empty()).collect();
@@ -307,7 +307,7 @@ pub fn answered(this: &mut Backplane, id: u64, reply: Value, cx: &mut Context<Ba
             let imp = &mut this.screens.imp; if id != imp.pick_seq { return }
             imp.picks = r["projects"].as_array().cloned().unwrap_or_default();
             let last = s(&r, "project");
-            if !imp.picked && !imp.draft.locked() && imp.draft.thread.is_empty() { imp.picked = true; if !last.is_empty() && last != imp.draft.project { imp.draft.project = last; imp.draft.key.clear(); } }
+            let _ = last; // the project is Backplane's own: the remembered choice no longer moves it
         }
         Next::Remember => {}
         Next::ITurn => {
@@ -727,9 +727,9 @@ fn check(cx: &mut Context<Backplane>, light: bool, id: &str, label: &str, on: bo
 }
 fn field(light: bool, label: &str, input: &Entity<Composer>) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
-    div().flex().flex_col().gap_1().child(div().text_size(px(12.)).text_color(c("dim")).child(label.to_string())).child(div().w_full().px_2().py_1().border_1().border_color(c("line")).bg(c("view")).child(input.clone())).into_any_element()
+    div().flex().flex_col().flex_shrink_0().gap_1().child(div().text_size(px(12.)).text_color(c("dim")).child(label.to_string())).child(div().w_full().px_2().py_1().border_1().border_color(c("line")).bg(c("view")).child(input.clone())).into_any_element()
 }
-fn para(light: bool, text: &str) -> AnyElement { div().text_size(px(11.)).text_color(theme::color(light, "dim")).child(text.to_string()).into_any_element() }
+fn para(light: bool, text: &str) -> AnyElement { div().flex_shrink_0().text_size(px(11.)).text_color(theme::color(light, "dim")).child(text.to_string()).into_any_element() }
 
 /// The recording indicator: visible whenever a recording runs, whatever else is on screen.
 pub fn indicator(cx: &mut Context<Backplane>, light: bool, imp: &Imp) -> Option<AnyElement> {
@@ -748,15 +748,7 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, imp: &Imp) -> Option<AnyEl
     col = col.child(div().flex().gap_2().child(button(cx, light, "dest-issue", &trs("Public GitHub issue"), !locked && d.thread.is_empty(), false, public)).child(button(cx, light, "dest-internal", &trs("Internal implementation thread"), !locked && d.thread.is_empty(), false, !public)));
     col = col.child(field(light, &trs("What would you like to improve?"), &ins.text));
     if !public {
-        // the project it goes to: the hub's search over every machine's projects, the chosen one marked (and named when the search hides it)
-        let free = !locked && d.thread.is_empty();
-        /* i18n-ok: a title and a machine name */ let label = |p: &Value| { let short = s(p, "short"); if short.is_empty() { s(p, "title") } else { format!("{} · {short}", s(p, "title")) } };
-        let rows: Vec<AnyElement> = imp.picks.iter().take(PICK_ROWS).map(|p| button(cx, light, &format!("proj:{}", s(p, "id")), &label(p), free, false, s(p, "id") == d.project)).collect();
-        let shown = imp.picks.iter().take(PICK_ROWS).any(|p| s(p, "id") == d.project);
-        let current = chosen(imp).filter(|_| !shown).map(|p| div().text_size(px(12.)).child(tf("gpui.imp.project.chosen", &[("title", p.title.into())])));
-        col = col.child(div().flex().flex_col().gap_1().child(div().text_size(px(12.)).text_color(c("dim")).child(trs("Send to project")))
-            .children(free.then(|| div().w_full().px_2().py_1().border_1().border_color(c("line")).bg(c("view")).child(ins.find.clone()))).child(div().flex().flex_wrap().gap_2().children(rows)).children(current)
-            .children((imp.picks.is_empty() && imp.pick_seq > 0).then(|| para(light, &trs("No project matches.")))));
+        // the request goes to Backplane's own project: no picker
     } else {
         col = col.child(para(light, &trs("Public on BackplaneWorks/Backplane, attributed to your GitHub account. Sign in on GitHub and press Submit there. Review your text and images for private information.")));
         col = col.child(field(light, &trs("Behavior evidence"), &ins.evidence));
@@ -783,14 +775,14 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, imp: &Imp) -> Option<AnyEl
     }
     // the screenshot
     if public && !d.inc_shot { /* no image area until one is selected */ } else {
-        col = col.child(div().flex().flex_col().gap_2().child(div().flex().gap_2().child(button(cx, light, "capture", &trs("Capture again"), !locked, false, false)).child(button(cx, light, "choose", &trs("Choose image"), !locked, false, false)))
-            .children(imp.shot.clone().map(|i| div().max_w(px(480.)).max_h(px(300.)).border_1().border_color(c("line")).child(img(ImageSource::Image(i)).max_w(px(480.)).max_h(px(300.)).object_fit(ObjectFit::Contain)))));
+        col = col.child(div().flex().flex_col().flex_shrink_0().gap_2().child(div().flex().gap_2().child(button(cx, light, "capture", &trs("Capture again"), !locked, false, false)).child(button(cx, light, "choose", &trs("Choose image"), !locked, false, false)))
+            .children(imp.shot.clone().map(|i| div().flex_shrink_0().w(px(480.)).h(px(300.)).border_1().border_color(c("line")).child(img(ImageSource::Image(i)).w(px(478.)).h(px(298.)).object_fit(ObjectFit::Contain)))));
     }
     // the recording
     match capture::unavailable() {
         Some(why) => col = col.child(div().flex().flex_col().gap_1().child(button(cx, light, "record", &trs("Record screen"), false, false, false)).child(para(light, &trs(why)))),
         None => {
-            col = col.child(div().flex().flex_col().gap_2().child(button(cx, light, "record", &trs("Record screen"), !locked && d.thread.is_empty(), false, false))
+            col = col.child(div().flex().flex_col().flex_shrink_0().gap_2().child(button(cx, light, "record", &trs("Record screen"), !locked && d.thread.is_empty(), false, false))
                 .child(para(light, &trs("Video of this window only, no audio. Up to 2 minutes and 9 MiB. Private copies expire after 24 hours. A recording may show private messages, credentials or other private information; it cannot be redacted.")))
                 .children((!d.recording.is_empty()).then(|| div().flex().flex_col().gap_2().child(div().text_size(px(12.)).child(tf("gpui.imp.rec.saved", &[("secs", (d.recording_ms / 1000).into())])))
                     .child(div().flex().gap_2().child(button(cx, light, "rec-play", &trs("Play recording"), true, false, false)).child(button(cx, light, "rec-discard", &trs("Discard recording"), !locked && d.thread.is_empty(), false, false)))
