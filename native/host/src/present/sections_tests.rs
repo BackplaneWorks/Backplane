@@ -41,7 +41,8 @@ fn one(evs: &[Value]) -> State { let mut v = vec![pc("p1", "Proj", "/nowhere/pro
     assert_eq!(status(&one(&[turn("t1", "interrupted", NOW - 50), json!({"$":"TurnQueued","thread":"t1","msg":"fallback:held:1","text":"go on"})]), "t1"), "limit", "held in line for the reset");
     assert_eq!(status(&one(&[turn("t1", "failed", NOW - 50), set("provider.resume.t1", &json!({"reset":NOW+60}).to_string(), NOW - 40)]), "t1"), "limit", "a resume record");
     assert_eq!(status(&one(&[turn("t1", "running", NOW - 60), turn("t1", "interrupted", NOW - 50), set("sidebar.cut.t1", &(NOW - 50).to_string(), NOW - 50)]), "t1"), "cut");
-    assert_eq!(status(&one(&[json!({"$":"TurnQueued","thread":"t1","msg":"m9","text":"next"})]), "t1"), "running", "a queued message is running work");
+    assert_eq!(status(&one(&[turn("t1", "completed", NOW - 60), json!({"$":"TurnQueued","thread":"t1","msg":"m9","text":"next"})]), "t1"), "done", "a queued message nothing took is not running work");
+    assert_eq!(status(&one(&[turn("t1", "interrupted", NOW - 60), json!({"$":"TurnQueued","thread":"t1","msg":"m9","text":"next"})]), "t1"), "interrupted", "nor does it hide a stop");
 }
 #[test] fn a_turn_that_starts_clears_the_cut_mark() {
     let s = one(&[turn("t1", "interrupted", NOW - 50), set("sidebar.cut.t1", "1", NOW - 50)]);
