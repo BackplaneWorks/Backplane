@@ -2,7 +2,7 @@
 //! store of its own under `<home>/providers/accounts-v1/<profile>[/<store>]`. Ops (`request`): list, add, status, login (a sign-in attempt that shows a link, and for
 //! Claude takes the pasted code), respond, cancel, rename, disconnect, remove. No inference request is ever made: status asks the CLI who is signed in
 //! (`claude auth status`, Codex's `account/read`), the allowance reads are the providers' own read-only usage requests, and nothing but allowlisted metadata
-//! leaves this module (raw CLI output is never kept, logged or sent; a profile's credentials never leave the CLI's store, except its access token read for the
+//! leaves this module (raw CLI output is never kept, logged or sent, except the one line a failed sync sign-in's CLI showed, never a token: `said_line`; a profile's credentials never leave the CLI's store, except its access token read for the
 //! usage request: claude_usage.rs).
 //! Every child is a provider CLI resolved like the agents' (the stand-in folder in a test hub, else PATH) and made through the process gate (Kind::Agent).
 //! Any failure of an op answers the same generic message the JS hub gives; what a sign-in failed on is one of a few fixed sentences.
@@ -143,7 +143,8 @@ pub fn strip_ansi(s: &str) -> String {
     while let Some(c) = it.next() {
         if c != '\u{1b}' { out.push(c); continue }
         match it.peek() {
-            Some('[') => { it.next(); while let Some(&d) = it.peek() { it.next(); if ('@'..='~').contains(&d) { break } } }
+            // Claude Code's Ink places words by column (`Paste\e[8Gcode`): a column move is a gap between words
+            Some('[') => { it.next(); while let Some(&d) = it.peek() { it.next(); if ('@'..='~').contains(&d) { if matches!(d, 'G' | 'C') && !out.ends_with([' ', '\n', '\r']) && !out.is_empty() { out.push(' ') } break } } }
             Some(']') => { it.next(); while let Some(d) = it.next() { if d == '\u{7}' { break } if d == '\u{1b}' { it.next(); break } } }
             Some(_) => { it.next(); }
             None => {}
@@ -886,14 +887,25 @@ impl Accounts {
     }
     fn current(&self, aid: &str) -> Option<Attempt> { let g = self.inner.lock().unwrap(); let a = g.attempts.iter().find(|a| a.id == aid)?.clone(); if g.jobs.get(&a.profile).map(String::as_str) == Some(format!("attempt:{aid}").as_str()) { Some(a) } else { None } }
     fn set_waiting(&self, aid: &str, url: String, code: String) { let mut g = self.inner.lock().unwrap(); if let Some(a) = g.attempts.iter_mut().find(|a| a.id == aid) { a.url = url; a.user_code = code; a.state = "waiting".into(); } g.revision += 1; }
-    fn cancel(&self, aid: &str, state: &str, reason: &str) {
+    fn cancel(&self, aid: &str, state: &str, reason: &str) { self.end_as(aid, state, if state == "failed" { failure_text(reason) } else { String::new() }) }
+    /// A sync sign-in that failed: why, in this page's words, then the line the CLI itself showed (no token is ever in it: [`said_line`]).
+    fn cancel_said(&self, aid: &str, reason: &str, said: &str) {
+        let why = match reason {
+            "code_rejected" => "Claude did not accept that code. It may be incomplete, expired, already used, or from an earlier sign-in. Press Make the sync token and paste the code from that new sign-in.",
+            "no_answer" => "Claude Code did not finish the sign-in after the code was sent. Press Make the sync token to try again.",
+            "" => "The sync token could not be made. Press Make the sync token to try again.",
+            r => return self.end_as(aid, "failed", with_said(&failure_text(r), said)),
+        };
+        self.end_as(aid, "failed", with_said(why, said))
+    }
+    fn end_as(&self, aid: &str, state: &str, message: String) {
         let mut g = self.inner.lock().unwrap();
         let Some(i) = g.attempts.iter().position(|a| a.id == aid) else { return };
         let prof = g.attempts[i].profile.clone();
         if g.jobs.get(&prof).map(String::as_str) != Some(format!("attempt:{aid}").as_str()) { return }
         g.jobs.remove(&prof);
         let (store, prev) = (g.attempts[i].store.clone(), g.attempts[i].previous_state.clone());
-        { let a = &mut g.attempts[i]; a.state = state.into(); a.url.clear(); a.user_code.clear(); a.message = if state == "failed" { failure_text(reason) } else { String::new() }; }
+        { let a = &mut g.attempts[i]; a.state = state.into(); a.url.clear(); a.user_code.clear(); a.message = message; }
         let active = g.profiles.iter().find(|p| p.id == prof).map(|p| p.store.clone()).unwrap_or_default();
         if let Some(slot) = g.profiles.iter_mut().find(|p| p.id == prof) { slot.state = prev }
         g.revision += 1; g.cmds.remove(aid); let _ = (store, active);
@@ -1011,6 +1023,26 @@ fn scan_claude(output: &str, reason: &mut String) -> Option<String> {
     }
     None
 }
+/// How long after the pasted code its Enter is typed: a key of its own, never read in one go with the code.
+const ENTER_AFTER: Duration = Duration::from_millis(150);
+/// How long a sent code's answer (the token, or the CLI's error) is waited for: the exchange is a request or two.
+const ANSWER_WAIT: Duration = if cfg!(test) { Duration::from_secs(4) } else { Duration::from_secs(90) };
+/// One line a terminal program showed, as words, at most 240 characters; None for a line that holds a token or the masked code, or no words.
+pub fn said_line(line: &str) -> Option<String> {
+    let l: String = line.chars().map(|c| if c.is_control() { ' ' } else { c }).collect::<String>().split_whitespace().collect::<Vec<_>>().join(" ");
+    // nor the pasted code, which the CLI echoes masked (`*****…` and its last characters)
+    if l.contains("sk-ant") || l.contains("****") || l.chars().filter(|c| c.is_alphabetic()).count() < 3 { return None }
+    Some(if l.chars().count() > 240 { format!("{}…", l.chars().take(240).collect::<String>()) } else { l })
+}
+fn lines(text: &str) -> impl DoubleEndedIterator<Item = &str> { text.split(['\r', '\n']).map(str::trim).filter(|l| !l.is_empty()) }
+/// The CLI's last line on its screen, for a failure the page names.
+pub fn last_said(text: &str) -> String { lines(text).rev().find_map(said_line).unwrap_or_default() }
+/// `claude setup-token`'s error screen after a code ("OAuth error: … Press Enter to retry."): its error line. It waits there for Enter; it never exits.
+pub fn refusal(text: &str) -> Option<String> {
+    if !text.to_lowercase().contains("press enter to retry") { return None }
+    Some(lines(text).rev().filter(|l| l.to_lowercase().contains("error")).find_map(said_line).unwrap_or_else(|| last_said(text)))
+}
+fn with_said(why: &str, said: &str) -> String { if said.is_empty() { why.to_string() } else { format!("{why} Claude Code said: \u{201c}{said}\u{201d}") } }
 impl Accounts {
     /// A sync account's sign-in: `claude setup-token` on a terminal of its own (it draws its screen and reads the pasted code as a terminal program), its link
     /// shown, the code the person pastes typed into it, and the token it prints caught straight into the attempt: never logged, never in the snapshot, the
@@ -1026,31 +1058,54 @@ impl Accounts {
         let Ok(mut sp) = sp else { return self.cancel(aid, "failed", "cli_start") };
         let (mut output, mut reason, mut open) = (String::new(), String::new(), true);
         let mut shown = false;
-        let caught: Option<(String, u64)> = loop {
+        // where the output stood when the code was typed, and until when an answer to it is waited for
+        let mut sent: Option<(usize, tokio::time::Instant)> = None;
+        let far = deadline;
+        let caught: Result<(String, u64), String> = loop {
+            let answer_by = sent.map_or(far, |(_, t)| t.min(far));
             tokio::select! {
                 chunk = sp.output.recv(), if open => match chunk {
                     Some(b) => {
-                        output.push_str(&String::from_utf8_lossy(&b)); if output.len() > 262144 { break None }
+                        output.push_str(&String::from_utf8_lossy(&b)); if output.len() > 262144 { break Err(String::new()) }
                         let clean = strip_ansi(&output);
                         if let Some(t) = catch_token(&clean) {
                             // the whole token: what follows it on its line has been drawn too
-                            if clean[clean.find(&t).unwrap_or(0) + t.len()..].contains(['\n', '\r']) { break Some((t, valid_for(&clean).unwrap_or(TOKEN_LIFE))) }
+                            if clean[clean.find(&t).unwrap_or(0) + t.len()..].contains(['\n', '\r']) { break Ok((t, valid_for(&clean).unwrap_or(TOKEN_LIFE))) }
                         }
                         if !shown { if let Some(u) = scan_claude(&clean, &mut reason) { if self.current(aid).is_some() { self.set_waiting(aid, u, String::new()); shown = true } } } else { let _ = scan_claude(&clean, &mut reason); }
+                        // a refused code: the CLI draws its error and "Press Enter to retry", then waits there for good (it does not exit)
+                        if let Some((at, _)) = sent { if let Some(said) = refusal(&strip_ansi(&output[at..])) { break Err(said) } }
                     }
                     None => open = false,
                 },
-                cmd = cmds.recv() => match cmd { Some(Cmd::Respond(code)) => { let _ = sp.pty.write(format!("{code}\r").into_bytes()); } Some(Cmd::Cancel) | None => { sp.pty.force(); return } },
+                cmd = cmds.recv() => match cmd {
+                    Some(Cmd::Respond(code)) => {
+                        // as a bracketed paste when the CLI asked for those, then Enter on its own: text and Enter in one write is pasted text to Claude Code's
+                        // input, and a code that long never submits (Nov 11: hung at "Checking the code…")
+                        let paste = output.contains("\u{1b}[?2004h");
+                        let at = output.len();
+                        let _ = sp.pty.write(if paste { format!("\u{1b}[200~{code}\u{1b}[201~") } else { code }.into_bytes());
+                        tokio::time::sleep(ENTER_AFTER).await;
+                        let _ = sp.pty.write(b"\r".to_vec());
+                        sent = Some((at, tokio::time::Instant::now() + ANSWER_WAIT));
+                    }
+                    Some(Cmd::Cancel) | None => { sp.pty.force(); return }
+                },
                 _ = &mut sp.exit => {
                     while let Ok(Some(b)) = tokio::time::timeout(Duration::from_millis(200), sp.output.recv()).await { output.push_str(&String::from_utf8_lossy(&b)); }
                     let clean = strip_ansi(&output); let _ = scan_claude(&clean, &mut reason);
-                    break catch_token(&clean).map(|t| (t, valid_for(&clean).unwrap_or(TOKEN_LIFE)))
+                    break catch_token(&clean).map(|t| (t, valid_for(&clean).unwrap_or(TOKEN_LIFE))).ok_or_else(|| last_said(&strip_ansi(&output[sent.map_or(0, |(at, _)| at)..])))
                 },
-                _ = tokio::time::sleep_until(deadline) => { sp.pty.force(); return self.cancel(aid, "expired", "") },
+                _ = tokio::time::sleep_until(answer_by) => {
+                    sp.pty.force();
+                    if sent.is_none() || answer_by >= far { return self.cancel(aid, "expired", "") }
+                    if reason.is_empty() { reason = "no_answer".into() }
+                    break Err(last_said(&strip_ansi(&output[sent.map_or(0, |(at, _)| at)..])))
+                },
             }
         };
         sp.pty.force(); drop(output);
-        let Some((token, life)) = caught else { return self.cancel(aid, "failed", &reason) };
+        let (token, life) = match caught { Ok(t) => t, Err(said) => return self.cancel_said(aid, &reason, &said) };
         let now = now_s(); cand.made_at = now; cand.expires_at = now + life;
         self.inner.lock().unwrap().caught.insert(cand.id.clone(), token);
         self.finish(aid, &cand, true, "").await;
@@ -1316,15 +1371,42 @@ if a[:2] == ["auth", "status"]:
 elif a[:2] == ["auth", "logout"]:
     if os.path.exists(login()): os.remove(login())
 elif a[:1] == ["setup-token"]:
-    # drawn on a terminal, as Claude Code's is: colour, the link, the pasted code read from the terminal, then the token
-    print("\x1b[1mBrowser didn't open? Use the url below to sign in\x1b[0m", flush=True)
-    print("\x1b[2mhttps://claude.com/cai/oauth/authorize?code=true&client_id=x&state=STATE123\x1b[0m", flush=True)
-    print("Paste code here if prompted > ", end="", flush=True)
-    line = sys.stdin.readline().strip()
-    if line == "CODE#STATE123":
-        print("\x1b[32m\u2713 Long-lived authentication token created successfully!\x1b[0m\n\nYour OAuth token (valid for 1 year):\n\n\x1b[33m" + os.environ.get("STANDIN_TOKEN", "sk-ant-oat01-" + "A" * 90) + "\x1b[0m\n\nStore this token securely.", flush=True)
-    else:
-        print("OAuth error: Invalid code.", flush=True); sys.exit(1)
+    # Claude Code 2.1.322's own screens, replayed from a recording of the real CLI on a pty (testdata/setup_token_2.1.322.json), and its input as measured
+    # there: raw keys, bracketed paste on; text and Enter in one read is taken as pasted text and never submits (Nov 11: a 132-character code written with
+    # its CR hung at "Checking the code…"); Enter on its own, or after a bracketed paste, submits. A refused code draws "OAuth error: … Press Enter to retry."
+    # and waits there for good: the CLI does not exit. The success screen is drawn the way its Ink renders (words placed by cursor column).
+    import termios, tty, select
+    rec = json.load(open(os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "setup_token.json")))
+    tty.setraw(0)
+    if d: open(os.path.join(d, "setup-token.pid"), "w").write(str(os.getpid()))
+    out = lambda t: (os.write(1, t.encode()), None)[1]
+    out(rec["prompt"])
+    code, pasting = "", False
+    def submit(c):
+        if c == "CODE#STATE123":
+            tok = os.environ.get("STANDIN_TOKEN", "sk-ant-oat01-" + "A" * 90)
+            out("\x1b[2K\x1b[1A\x1b[2K\x1b[1A\x1b[2K\x1b[G\r\r\n\x1b[2G\x1b[38;5;114m\u2713\x1b[4GLong-lived\x1b[15Gauthentication\x1b[30Gtoken\x1b[36Gcreated\x1b[44Gsuccessfully!\x1b[39m\r\r\n\r\r\n"
+                "\x1b[2GYour\x1b[7GOAuth\x1b[13Gtoken\x1b[19G(valid\x1b[26Gfor\x1b[30G1\x1b[32Gyear):\r\r\n\r\r\n\x1b[2G\x1b[38;5;220m" + tok + "\x1b[39m\r\r\n\r\r\n"
+                "\x1b[2G\x1b[38;5;246mStore\x1b[8Gthis\x1b[13Gtoken\x1b[19Gsecurely.\x1b[39m\r\r\n")
+            time.sleep(0.5); sys.exit(0)
+        if c == "SLOW#STATE123":
+            while os.read(0, 4096): pass  # never answers
+        out(rec["rejected"])
+        while os.read(0, 4096): pass  # waits for Enter to retry, for good
+    while True:
+        b = os.read(0, 4096)
+        if not b: sys.exit(1)
+        while b:
+            if pasting:
+                i = b.find(b"\x1b[201~")
+                if i < 0: code += b.decode(); b = b""; break
+                code += b[:i].decode(); b = b[i + 6:]; pasting = False; out(rec["echo"]); continue
+            if b.startswith(b"\x1b[200~"): pasting = True; b = b[6:]; continue
+            if b in (b"\r", b"\n"): submit(code.strip()); b = b""; break
+            if b[:1] in (b"\r", b"\n") and not code: b = b[1:]; continue
+            if b[:1] in (b"\r", b"\n"): submit(code.strip()); b = b""; break
+            # typed or pasted without the markers: one read is one input event, its CR part of the text
+            code += b.replace(b"\r", b"").replace(b"\n", b"").decode(); b = b""; out(rec["echo"])
 elif a[:2] == ["auth", "login"]:
     if d: open(d.rstrip("/") + ".pid", "w").write(str(os.getpid()))
     print("Open https://claude.com/cai/oauth/authorize?code=true&client_id=x&state=STATE123 to sign in", flush=True)
@@ -1371,10 +1453,13 @@ for l in sys.stdin:
         send({"id": i, "result": {}})
     else: send({"id": i, "result": {}})
 "#;
+    /// The real CLI's screens for `setup-token` (the stand-in replays them): see the file's `cli`.
+    const SETUP_TOKEN_REC: &str = include_str!("testdata/setup_token_2.1.322.json");
     fn dirs(tag: &str) -> (PathBuf, PathBuf) {
         let h = std::env::temp_dir().join(format!("bp-acc-{}-{tag}", std::process::id())); let _ = std::fs::remove_dir_all(&h); std::fs::create_dir_all(&h).unwrap();
         let sd = h.join("bin"); std::fs::create_dir_all(&sd).unwrap();
         for (n, t) in [("claude", CLAUDE), ("codex", CODEX)] { let p = sd.join(n); std::fs::write(&p, t).unwrap(); std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap(); }
+        std::fs::write(sd.join("setup_token.json"), SETUP_TOKEN_REC).unwrap();
         (h, sd)
     }
     fn mgr(home: &Path, sd: &Path) -> Arc<Accounts> { let cli = crate::agents::proc::Cli::standin(sd); Arc::new(Accounts::open(home, Arc::new(move |p: &str| cli.resolve(p)))) }
@@ -1549,7 +1634,8 @@ for l in sys.stdin:
         assert_eq!((prof(&s, &id)["kind"].as_str().unwrap(), prof(&s, &id)["label"].as_str().unwrap(), prof(&s, &id)["identity"]["email"].as_str().unwrap()), (SYNC, "Work sync", "w@example.com"));
         let s = until(&a, |s| s["attempts"].as_array().map_or(false, |x| x.iter().any(|t| t["profile"] == id.as_str() && t["state"] == "waiting"))).await;
         let att = s["attempts"].as_array().unwrap().iter().find(|t| t["profile"] == id.as_str()).unwrap().clone();
-        assert_eq!(att["url"], "https://claude.com/cai/oauth/authorize?code=true&client_id=x&state=STATE123", "the link, out of the terminal's colours");
+        let url = att["url"].as_str().unwrap();
+        assert!(url.starts_with("https://claude.com/cai/oauth/authorize?code=true&client_id=") && url.ends_with("&state=STATE123") && !url.contains(['\u{1b}', '\u{7}']), "the link, out of the terminal's colours and its hyperlink: {url}");
         assert_eq!(a.request(&json!({"op":"respond","profile":id,"attempt":att["id"],"code":"CODE#STATE123"})).await["error"], "");
         let s = until(&a, |s| prof(s, &id)["state"] == "connected").await; let p = prof(&s, &id);
         let tok = format!("sk-ant-oat01-{}", "A".repeat(90));
@@ -1584,6 +1670,60 @@ for l in sys.stdin:
         assert_eq!(a.request(&json!({"op":"remove","profile":id})).await["error"], ""); assert!(mem.get(&id).is_none(), "its token leaves the vault");
         assert_eq!(b.sync_in("LA", &a.sync_out().unwrap()), Ok(1)); assert!(b.snapshot()["profiles"].as_array().unwrap().iter().all(|p| p["id"] != id.as_str())); assert!(mem2.get(&id).is_none());
         std::env::remove_var("CLAUDE_CODE_OAUTH_TOKEN"); let _ = std::fs::remove_dir_all(&h); let _ = std::fs::remove_dir_all(&h2);
+    }
+    #[test] fn the_real_setup_token_screens_read_as_words_its_error_line_and_never_a_token() {
+        let rec: Value = serde_json::from_str(SETUP_TOKEN_REC).unwrap();
+        let prompt = strip_ansi(rec["prompt"].as_str().unwrap());
+        assert!(prompt.contains("Paste code here if prompted >") && prompt.contains("long-lived (1-year) auth token setup"), "Ink's column moves are gaps between words: {prompt}");
+        assert!(refusal(&prompt).is_none(), "the prompt is no refusal");
+        let mut why = String::new();
+        let u = scan_claude(&prompt, &mut why).unwrap(); assert!(u.starts_with("https://claude.com/cai/oauth/authorize?") && u.ends_with("state=STATE123"), "{u}"); assert_eq!(why, "");
+        let after = strip_ansi(&format!("{}{}", rec["echo"].as_str().unwrap(), rec["rejected"].as_str().unwrap()));
+        assert_eq!(refusal(&after).as_deref(), Some("OAuth error: That code wasn't accepted. It may be incomplete, expired, already used, or from an earlier sign-in attempt. Sign in again to get a new code."));
+        let _ = scan_claude(&after, &mut why); assert_eq!(why, "code_rejected");
+        // what is said is never a token, nor the masked code
+        let t = format!("sk-ant-oat01-{}", "Z".repeat(90));
+        assert_eq!(last_said(&format!("Error: bad\r\n {t} \r\n******uAQI84\r\n")), "Error: bad");
+        assert_eq!(said_line(&"word ".repeat(100)).unwrap().chars().count(), 241);
+        assert_eq!(strip_ansi("Your\u{1b}[7GOAuth\u{1b}[13Gtoken\u{1b}[19G(valid\u{1b}[26Gfor\u{1b}[30G1\u{1b}[32Gyear):"), "Your OAuth token (valid for 1 year):");
+    }
+    async fn sync_waiting(a: &Arc<Accounts>, id: &str) -> String {
+        let s = until(a, |s| s["attempts"].as_array().unwrap().iter().any(|t| t["profile"] == id && t["state"] == "waiting")).await;
+        s["attempts"].as_array().unwrap().iter().rev().find(|t| t["profile"] == id && t["state"] == "waiting").unwrap()["id"].as_str().unwrap().to_string()
+    }
+    /// Nov 11: a sync token's code was pasted, Submit pressed, and the page said "Checking the code and your sign-in…" for good: the code went in with its Enter
+    /// in one write (pasted text to Claude Code, never submitted), and a refused code's error screen waits for Enter, so nothing ever ended the attempt.
+    #[tokio::test(flavor = "multi_thread")] async fn a_sync_codes_answer_always_ends_the_attempt_refused_unanswered_or_cancelled_and_it_can_be_made_again() {
+        let (h, sd) = dirs("syncfail"); let a = mgr(&h, &sd); let mem = Arc::new(MemTokens::default()); a.set_tokens(mem.clone());
+        let s = a.request(&json!({"op":"add","provider":"claude","kind":"sync","label":"S","start":true})).await; let id = s["made"].as_str().unwrap().to_string();
+        // the stand-in's pid, written in its store before it draws its link
+        fn pid_in(d: &Path) -> Option<u32> { for e in std::fs::read_dir(d).ok()?.flatten() { let p = e.path(); if p.is_dir() { if let Some(x) = pid_in(&p) { return Some(x) } } else if p.ends_with("setup-token.pid") { if let Ok(t) = std::fs::read_to_string(&p) { if let Ok(n) = t.trim().parse() { return Some(n) } } } } None }
+        let root = h.join("providers/accounts-v1").join(&id);
+        let pid_now = || pid_in(&root);
+        // a refused code (as long as a real one): its error line said, the CLI ended
+        let aid = sync_waiting(&a, &id).await; let p = pid_now(); assert!(p.is_some(), "its CLI runs");
+        let long = format!("{}#STATE123", "Xy9_".repeat(30));
+        assert_eq!(a.request(&json!({"op":"respond","profile":id,"attempt":aid,"code":long})).await["error"], "");
+        let s = until(&a, |s| s["attempts"].as_array().unwrap().iter().any(|t| t["id"] == aid.as_str() && t["state"] == "failed")).await;
+        let m = s["attempts"].as_array().unwrap().iter().find(|t| t["id"] == aid.as_str()).unwrap()["message"].as_str().unwrap().to_string();
+        assert!(m.starts_with("Claude did not accept that code.") && m.contains("Make the sync token") && m.contains("Claude Code said: \u{201c}OAuth error: That code wasn't accepted."), "{m}");
+        let p = p.unwrap(); soon(|| !crate::agents::proc::alive(p)).await; assert!(!crate::agents::proc::alive(p), "the CLI on its error screen is ended");
+        // one that is never answered: ended when its wait is over, with the CLI's last line
+        a.request(&json!({"op":"login","profile":id})).await; let aid = sync_waiting(&a, &id).await;
+        a.request(&json!({"op":"respond","profile":id,"attempt":aid,"code":"SLOW#STATE123"})).await;
+        let s = until(&a, |s| s["attempts"].as_array().unwrap().iter().any(|t| t["id"] == aid.as_str() && t["state"] == "failed")).await;
+        let m = s["attempts"].as_array().unwrap().iter().find(|t| t["id"] == aid.as_str()).unwrap()["message"].as_str().unwrap().to_string();
+        assert!(m.starts_with("Claude Code did not finish the sign-in after the code was sent."), "{m}");
+        // cancelled: its CLI goes
+        a.request(&json!({"op":"login","profile":id})).await; let aid = sync_waiting(&a, &id).await;
+        let p = pid_now().unwrap(); assert!(crate::agents::proc::alive(p));
+        a.request(&json!({"op":"cancel","profile":id,"attempt":aid})).await;
+        soon(|| !crate::agents::proc::alive(p)).await; assert!(!crate::agents::proc::alive(p), "Cancel sign-in ends the CLI");
+        // and made again, with the right code: done, its token kept
+        a.request(&json!({"op":"login","profile":id})).await; let aid = sync_waiting(&a, &id).await;
+        a.request(&json!({"op":"respond","profile":id,"attempt":aid,"code":"CODE#STATE123"})).await;
+        until(&a, |s| prof(s, &id)["state"] == "connected").await; assert!(mem.get(&id).unwrap().starts_with("sk-ant-oat01-"));
+        let _ = std::fs::remove_dir_all(&h);
     }
     #[tokio::test(flavor = "multi_thread")] async fn a_locked_vault_announces_nothing_so_no_machine_removes_what_it_holds() {
         struct Locked; impl Tokens for Locked { fn get(&self, _: &str) -> Option<String> { None } fn put(&self, _: &str, _: &str, _: &str) -> bool { false } fn del(&self, _: &str) {} fn open(&self) -> bool { false } }
