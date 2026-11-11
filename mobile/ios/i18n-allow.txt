@@ -8,5 +8,3 @@ Mono.swift | Copyright 2020 The JetBrains Mono Project Authors | the font's lice
 PairView.swift | BACKPLANE | the product name as its wordmark
 Outbox.swift | Edit | the outbox rows take the hub's queue row shape (English, like the hub's own); the strip shows them through Tr.t
 Outbox.swift | Remove | the same: a queue row button in the hub's words, translated where the strip draws it
-DataMcp.swift | MCP servers | the page's title until the hub's rows come (the hub's head row names it, translated through Tr.t); MCP is the protocol's name
-DataViews.swift | MCP servers | the Settings entry for the same page: the title the hub gives it
