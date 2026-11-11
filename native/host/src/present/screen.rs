@@ -35,7 +35,7 @@ impl super::Screen for Recent {
         // a 0.14 import of this hub: its card goes over any page (present/onboard.rs import_overlay)
         let withmig; let params=match crate::import014::last_published(&_hub.cfg.home) { Some(v) => { let mut c=params.clone(); c["importV014"]=v; withmig=c; &withmig } None => params };
         let m=_hub.mirrors();
-        match policies.with_state(|st|m.shown(|far| { let j=join_full(st,far,m); FAR_ORIGINS.with(|o|*o.borrow_mut()=far.iter().flat_map(|(_,f)|f.projects.keys()).map(|id|(id.clone(),m.origin(id))).collect()); let marks: HashMap<String,Value>=far.iter().map(|(n,_)|(n.clone(),m.mark(n))).collect(); let here=m.here(); recent_unified(st,far,&Unified{ far:&j.far, marks:&marks, here:&here, rows:&j.rows },params) })) { Some(out)=>out,None=>refused("state.booting") }
+        match policies.with_state(|st|m.shown(|far| { let j=join_full(st,far,m); FAR_ORIGINS.with(|o|*o.borrow_mut()=far.iter().flat_map(|(_,f)|f.projects.keys()).map(|id|(id.clone(),m.origin(id))).collect()); SECTION_HUB.with(|h|*h.borrow_mut()=Arc::downgrade(&_hub)); let marks: HashMap<String,Value>=far.iter().map(|(n,_)|(n.clone(),m.mark(n))).collect(); let here=m.here(); recent_unified(st,far,&Unified{ far:&j.far, marks:&marks, here:&here, rows:&j.rows },params) })) { Some(out)=>out,None=>refused("state.booting") }
     }
 }
 fn mine(p: &Value) -> bool {
@@ -250,12 +250,22 @@ pub fn pick_filter(projects: Vec<Value>,pick: &str) -> Vec<Value> {
 /// The merged project rows the sections are drawn from (present/merged.rs `merged_projects`, with the registry the home sent last). A linked
 /// machine's project takes its origin from `FAR_ORIGINS` (set by the bound screen from the mirrors for the request), else from the project here
 /// it is unified with (`un.far`).
+/// The chips follow `mirror::live_chips` (a machine known only from the registry that is linked and answering is on), with the hub's mirrors
+/// the bound screen set for the request (`SECTION_HUB`); none in a test or the oracle.
 pub fn merged_here<'a>(st: &'a State,far: &[(String,&'a State)],un: &Unified) -> Vec<super::merged::MergedProject<'a>> {
+    match SECTION_HUB.with(|h|h.borrow().upgrade()) { Some(hub) => merged_with(st,far,un,Some(hub.mirrors()),&crate::net::registry::cached()), None => merged_with(st,far,un,None,&crate::net::registry::cached()) }
+}
+/// `merged_here` with the mirrors the chips are judged by (None: as `merged_projects` made them).
+pub fn merged_with<'a>(st: &'a State,far: &[(String,&'a State)],un: &Unified,m: Option<&crate::mirror::Mirrors>,reg: &[super::merged::RegProject]) -> Vec<super::merged::MergedProject<'a>> {
     let origin=|id: &str| FAR_ORIGINS.with(|o|o.borrow().get(id).cloned()).filter(|o|!o.is_empty())
         .or_else(||un.far.get(id).and_then(|l|st.projects.get(l)).map(|p|crate::mirror::origin_of_root(&p.root))).unwrap_or_default();
-    super::merged::merged_projects(st,far,&|n|un.mark(n)["away"]==json!(true),&origin,un.here,&crate::net::registry::cached())
+    let mut list=super::merged::merged_projects(st,far,&|n|un.mark(n)["away"]==json!(true),&origin,un.here,reg);
+    if let Some(m)=m { for p in list.iter_mut() { crate::mirror::live_chips(m,&mut p.machines) } }
+    list
 }
 thread_local! {
+    /// the hub the bound screen presents for, on this thread (its mirrors judge the chips: `merged_here`)
+    static SECTION_HUB: std::cell::RefCell<Weak<Hub>> = std::cell::RefCell::new(Weak::new());
     /// a linked machine's project id -> its origin (`Mirrors::origin`), for the request being presented on this thread
     static FAR_ORIGINS: std::cell::RefCell<HashMap<String,String>> = Default::default();
 }
@@ -746,6 +756,22 @@ mod tests {
         let mut overlay=expected["overlay"].clone(); retain_root(&mut overlay["j"],OVERLAY_OMITTED);
         assert_eq!(actual["overlay"],overlay,"retained overlay fields differ");
         for k in ["remoteReady","session","cmds","window"] { assert_eq!(actual[k],expected[k],"{k}"); }
+    }
+    #[test] fn a_machine_known_from_the_registry_that_answers_is_not_dimmed_in_the_sections() {
+        use crate::present::merged::{RegProject,RegMachine,RegThread};
+        let st={ let mut s=State::new(); s.lean=true; s }; let marks=HashMap::new(); let un=Unified{ far:&HashMap::new(), marks:&marks, here:"laptop", rows:&HashMap::new() };
+        let reg=vec![RegProject{ key:"github.com/o/r".into(), name:"Far".into(), origin:"github.com/o/r".into(), machines:vec![RegMachine{ machine:"desktop".into(), id:"p9".into(), folder:"/d/r".into(), seen:1 }],
+            threads:vec![RegThread{ machine:"desktop".into(), id:"t9".into(), title:"runs".into(), status:"running".into(), activity:1, pinned:false }] }];
+        let open=HashSet::new(); let c=super::super::sections::Ctx{ hub:"h",now:2,query:"",open:&open,selected:"" };
+        let row=|rows: &[super::super::merged::MergedProject]| super::super::sections::build(&st,rows,&Value::Null,&c).as_array().unwrap().iter().find(|s|s["id"]=="active").unwrap()["rows"][0].clone();
+        // no mirrors to ask (a test, the oracle): known from the registry alone, the machine is off and the row dimmed
+        let p=row(&merged_with(&st,&[],&un,None,&reg)); assert_eq!((p["dots"][0]["dim"].clone(),p["off"].clone()),(json!(true),json!(true)));
+        // linked and answering: its chip is on and the row is not dimmed (mirror::live_chips, the one rule)
+        let m=crate::mirror::Mirrors::default(); m.set_names(Arc::new(||vec![("L1".to_string(),"desktop".to_string())]));
+        let rows=merged_with(&st,&[],&un,Some(&m),&reg); assert_eq!(rows[0].machines[0]["state"],"on");
+        let p=row(&rows); assert_eq!((p["dots"][0]["dim"].clone(),p["off"].clone()),(json!(false),json!(false)));
+        // linked but away: still dimmed
+        m.set_away("L1",true); let p=row(&merged_with(&st,&[],&un,Some(&m),&reg)); assert_eq!(p["dots"][0]["dim"],json!(true));
     }
     #[test] fn recorded_js_recent_gpui() { oracle(include_str!("fixtures/session-recent.json")); }
     #[test] fn recorded_js_recent_gpuid() { oracle(include_str!("fixtures/session-recent-d.json")); }
