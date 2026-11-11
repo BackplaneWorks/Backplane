@@ -216,7 +216,8 @@ impl Bots {
             (r, posts, hk) };
         if posts.is_empty() { return }
         let newest = posts.last().map(|p| gs(p, "id").to_string()).unwrap_or_default();
-        let urgent = posts.iter().any(|p| (gs(p, "from") == "you" && p["guard"] != true) || p["mentions"].as_array().map_or(false, |a| a.iter().any(|m| m == member.as_str())));
+        // only the person's word steers a running turn; a mention got here early, but a peer never restarts a running non-Claude turn (it would never finish)
+        let person = posts.iter().any(|p| gs(p, "from") == "you" && p["guard"] != true);
         let note = batch_note(&r, &posts, &HashMap::new());
         let now = now_s();
         if self.hub.commit(&json!({"$":"SettingSet","key":hk,"value":newest,"at":now})).await.is_err() { return }
@@ -224,7 +225,7 @@ impl Bots {
         let Some(info) = self.inbox.info(th).await else { return }; if info.gone { return }
         let id = format!("room:{room}:{newest}");
         // a running non-Claude turn takes it with its next Backplane tool result or at its end (never restarted by a peer's post); the person's post steers
-        let _ = if !urgent && info.turn == "running" && info.provider != "claude" { self.inbox_note(th, &id, &note).await } else { self.inbox_ride(th, &id, &note).await };
+        let _ = if !person && info.turn == "running" && info.provider != "claude" { self.inbox_note(th, &id, &note).await } else { self.inbox_ride(th, &id, &note).await };
     }
     /// The minute tick: a member that has posts it never heard (a restart cut its timer) is given them; an active swarm whose members are all idle
     /// for `LIMITS.idle`, or whose turns or tokens are used up, pauses.
