@@ -1909,6 +1909,8 @@ gpui.no.hub.address = no hub address
 gpui.not.a.hub.path = not a hub path
 gpui.the.hub.gave.no.answer = the hub gave no answer
 gpui.the.hub.answered = the hub answered {status}
+gpui.fold.the.project.s.threads = Fold the project's threads (the row under the pointer, else the open one), after a press on a project row
+gpui.unfold.the.project.s.threads = Unfold the project's threads
 
 # ---- gpui-c: viewers, plots, terminal, drawing pad ----
 gpui.c.commit = Commit

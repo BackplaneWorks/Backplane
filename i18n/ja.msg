@@ -1932,6 +1932,8 @@ gpui.no.hub.address = ハブのアドレスがありません
 gpui.not.a.hub.path = ハブのパスではありません
 gpui.the.hub.gave.no.answer = ハブから応答がありません
 gpui.the.hub.answered = ハブの応答：{status}
+gpui.fold.the.project.s.threads = プロジェクトのスレッドを畳む（ポインタの下の行、なければ開いている行。プロジェクト行を押した後）
+gpui.unfold.the.project.s.threads = プロジェクトのスレッドを開く
 
 # ---- gpui-c: viewers, plots, terminal, drawing pad ----
 gpui.c.commit = コミット

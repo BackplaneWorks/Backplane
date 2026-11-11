@@ -473,7 +473,7 @@ impl Backplane {
             }
         }
         self.screens.parts.side_ctl = ctl;
-        div().id("sidebar").size_full().overflow_y_scroll().children(rows).into_any_element()
+        /* i18n-ok: a key context */ div().id("sidebar").size_full().overflow_y_scroll().track_focus(&self.screens.side_focus).key_context("Sidebar").children(rows).into_any_element()
     }
     /// The viewer's page, a part of the window (part.rs): a board or schematic is drawn again only when the page itself changed, not for
     /// a hover in the sidebar or the caret's blink.
