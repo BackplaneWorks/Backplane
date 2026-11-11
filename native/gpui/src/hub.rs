@@ -7,10 +7,10 @@ use tokio::sync::mpsc::{self, Sender};
 use tokio_tungstenite::tungstenite::{Message, protocol::WebSocketConfig};
 
 #[derive(Debug)] pub enum Command { Rpc(String,crate::screens::settings::Secret,&'static str), Sleep(f64), Select(String), Send(String), Draft(String), Action(String,String), Page(String), Ask(String,Value,u64), /** read this history page of the thread, then stand on the newest again */ History(String), /** open this subagent's own view over the thread (its call's id; "" goes back to the thread) */ Sub(String) }
-#[derive(Debug)] pub enum Event { /** the hub put this text in a thread's composer */ Compose(String,String), /** a line that is no error (Intent saved) */ Note(String), /** the hub refused this device's credential: it was revoked */ Unpaired, /** a terminal's output: key, pid (None in a snapshot), bytes, and a snapshot's cols x rows */ Term(String,Option<i32>,Vec<u8>,Option<(usize,usize)>,Option<String>), /** a new connection's greeting: what a terminal printed meanwhile is lost */ Hello, /** the browser helper's tabs of an owner's page (info `browser.tabs.<owner>`, JSON text) */ BrowserTabs(String,String), /** a person's download in the Browser tab: owner, id, name, error */ BrowserDownload(String,String,String,String), PlotTooBig(usize), /** a direct request's result (the accounts snapshot) */ Data(&'static str,Value), /** a `{"t":"voice"}` frame (screens/voice.rs) */ Voice(Value), /** history.steps' answer */ Steps(Value), /** history.refs' answer: git dir, top, refs lines, board, schematic */ Refs(Value), /** a cross-probe's pieces on canvas slot: (chunk, piece) */ Probe(usize,Vec<(usize,usize)>), /** a schematic's sheets: rows `depth<TAB>leaf<TAB>name<TAB>file` per line, and each sheet file's references (`file<TAB>ref<TAB>ref...` per line) */ Sheets(String,String), /** an agent's viewer_show: thread, kind, path */ ViewShow(String,String,String), /** what a tapped piece is (kicad.info's answer) */ Pick(String), Rpc(&'static str,bool,String), Answer(u64,Value), Plot(Vec<u8>), NetWake, Picture(Value,Timing), Status(String), Accepted, /** a history page read for this cursor (None: its answer went stale) */ Older(String,Option<Value>), /** the star suggestion the hub shows now (null: none) */ Star(Value), Error(String), /** the hub answered, and said no: shown, but the connection is fine */ Refused(String) }
+#[derive(Debug)] pub enum Event { /** the hub put this text in a thread's composer */ Compose(String,String), /** a line that is no error (Intent saved) */ Note(String), /** the hub refused this device's credential: it was revoked */ Unpaired, /** a terminal's output: key, pid (None in a snapshot), bytes, and a snapshot's cols x rows */ Term(String,Option<i32>,Vec<u8>,Option<(usize,usize)>,Option<String>), /** a new connection's greeting: what a terminal printed meanwhile is lost */ Hello, /** the browser helper's tabs of an owner's page (info `browser.tabs.<owner>`, JSON text) */ BrowserTabs(String,String), /** the hub's `hub.offer` (info, a JSON string; "" for none) */ HubOffer(String), /** the connection failed over to the home hub (its key), or came back (None) */ Using(Option<String>), /** a person's download in the Browser tab: owner, id, name, error */ BrowserDownload(String,String,String,String), PlotTooBig(usize), /** a direct request's result (the accounts snapshot) */ Data(&'static str,Value), /** a `{"t":"voice"}` frame (screens/voice.rs) */ Voice(Value), /** history.steps' answer */ Steps(Value), /** history.refs' answer: git dir, top, refs lines, board, schematic */ Refs(Value), /** a cross-probe's pieces on canvas slot: (chunk, piece) */ Probe(usize,Vec<(usize,usize)>), /** a schematic's sheets: rows `depth<TAB>leaf<TAB>name<TAB>file` per line, and each sheet file's references (`file<TAB>ref<TAB>ref...` per line) */ Sheets(String,String), /** an agent's viewer_show: thread, kind, path */ ViewShow(String,String,String), /** what a tapped piece is (kicad.info's answer) */ Pick(String), Rpc(&'static str,bool,String), Answer(u64,Value), Plot(Vec<u8>), NetWake, Picture(Value,Timing), Status(String), Accepted, /** a history page read for this cursor (None: its answer went stale) */ Older(String,Option<Value>), /** the star suggestion the hub shows now (null: none) */ Star(Value), Error(String), /** the hub answered, and said no: shown, but the connection is fine */ Refused(String) }
 impl Event {
     /// What the performance overlay calls it.
-    /* i18n-ok: event names for the perf overlay */ pub fn name(&self)->&'static str {match self {Event::Term(..)=>"term",Event::Hello=>"hello",Event::Star(_)=>"star",Event::BrowserTabs(..)=>"browser tabs",Event::BrowserDownload(..)=>"browser download",Event::PlotTooBig(_)=>"plot too big",Event::Data(..)=>"data",Event::Voice(_)=>"voice",Event::Steps(_)=>"steps",Event::Refs(_)=>"refs",Event::Probe(..)=>"probe",Event::Sheets(..)=>"sheets",Event::ViewShow(..)=>"view show",Event::Pick(_)=>"pick",Event::Rpc(..)=>"rpc",Event::Answer(..)=>"answer",Event::Plot(_)=>"plot",Event::NetWake=>"net wake",Event::Picture(..)=>"picture",Event::Status(_)=>"status",Event::Accepted=>"accepted",Event::Older(..)=>"older",Event::Error(_)=>"error",Event::Refused(_)=>"refused",Event::Unpaired=>"unpaired",Event::Compose(..)=>"compose",Event::Note(_)=>"note"}}
+    /* i18n-ok: event names for the perf overlay */ pub fn name(&self)->&'static str {match self {Event::Term(..)=>"term",Event::Hello=>"hello",Event::Star(_)=>"star",Event::BrowserTabs(..)=>"browser tabs",Event::HubOffer(_)=>"hub offer",Event::Using(_)=>"using",Event::BrowserDownload(..)=>"browser download",Event::PlotTooBig(_)=>"plot too big",Event::Data(..)=>"data",Event::Voice(_)=>"voice",Event::Steps(_)=>"steps",Event::Refs(_)=>"refs",Event::Probe(..)=>"probe",Event::Sheets(..)=>"sheets",Event::ViewShow(..)=>"view show",Event::Pick(_)=>"pick",Event::Rpc(..)=>"rpc",Event::Answer(..)=>"answer",Event::Plot(_)=>"plot",Event::NetWake=>"net wake",Event::Picture(..)=>"picture",Event::Status(_)=>"status",Event::Accepted=>"accepted",Event::Older(..)=>"older",Event::Error(_)=>"error",Event::Refused(_)=>"refused",Event::Unpaired=>"unpaired",Event::Compose(..)=>"compose",Event::Note(_)=>"note"}}
 }
 /// The connection label an event sets (None: it leaves the label alone). A refusal is a live connection, so it is not "Disconnected".
 pub fn status_for(ev:&Event)->Option<&'static str>{match ev{Event::Error(_)=>Some("Disconnected"),_=>None}}
@@ -146,11 +146,22 @@ pub fn connect(config:Config)->(Sender<Command>,async_channel::Receiver<Event>) 
         runtime.block_on(async move {
             if config.unpaired {while commands.recv().await.is_some() {} return;} // nothing to connect to: pairing starts this client again
             let mut view=View::new(&config);let mut delay=1;
+            // the home failover (docs/pairing.md, Home hub): `cfg` is the hub connected to, `on_home` the home's key while it is not the one chosen
+            let mut cfg=config.clone();let mut on_home:Option<String>=None;let mut down:Option<tokio::time::Instant>=None;
             loop {
                 /* i18n-ok: connection status, compared with Connected; drawn through trs */ let _=events.send(Event::Status("Connecting…".into())).await;
-                match session(&config,&mut commands,&events,&mut view).await {
+                let began=tokio::time::Instant::now();
+                let back=on_home.as_ref().map(|_|crate::pairing::http_of(&config.hub));
+                let r=session(&cfg,&mut commands,&events,&mut view,back).await;
+                // a session that stood a while was up: the hub is down from now; quick failures keep the first time it went
+                if r.is_err() && (down.is_none()||began.elapsed()>Duration::from_secs(5)) {down=Some(tokio::time::Instant::now());}
+                if let Err(error)=&r { if let Some(next)=failover(&config,&cfg,on_home.as_deref(),down.map_or(Duration::ZERO,|d|d.elapsed()),format!("{error:#}")=="home:back"||(on_home.is_some()&&refused(true,error))).await {
+                    match next {Some((key,ws,cred))=>{cfg.hub=ws;cfg.token_file=cred;cfg.paired=true;on_home=Some(key);}None=>{cfg=config.clone();on_home=None;}}
+                    view=View::new(&cfg);delay=1;down=None;let _=events.send(Event::Using(on_home.clone())).await;continue;
+                }}
+                match r {
                     Ok(())=>break,
-                    Err(error) if refused(config.paired,&error)=>{let _=events.send(Event::Unpaired).await;break;}
+                    Err(error) if refused(cfg.paired,&error)=>{let _=events.send(Event::Unpaired).await;break;}
                     Err(error)=>{ // Never log the handshake URL or its credential.
                         if let Some(secs)=format!("{error:#}").strip_prefix("net_sleep:").and_then(|s|s.parse::<f64>().ok()) {
                             // the e2e harness's net_sleep: the socket is gone for `secs`, then the normal reconnect runs
@@ -158,7 +169,7 @@ pub fn connect(config:Config)->(Sender<Command>,async_channel::Receiver<Event>) 
                             view.pending.clear();view.outgoing.clear();view.rpc_names.clear();view.controls.clear();view.offered.clear();view.bases.clear();view.view_id.clear();view.greeting=Value::Null;view.paging=None;view.want_page=None;
                             tokio::time::sleep(Duration::from_secs_f64(secs)).await;let _=events.send(Event::NetWake).await;delay=1;continue;
                         }
-                        let token=std::fs::read_to_string(&config.token_file).unwrap_or_default();let mut text=format!("{error:#}");if !token.trim().is_empty(){text=text.replace(token.trim(),"<token>");}eprintln!("GPUI_LOG {{\"disconnect\":{}}}",serde_json::Value::String(text));
+                        let token=std::fs::read_to_string(&cfg.token_file).unwrap_or_default();let mut text=format!("{error:#}");if !token.trim().is_empty(){text=text.replace(token.trim(),"<token>");}eprintln!("GPUI_LOG {{\"disconnect\":{}}}",serde_json::Value::String(text));
                         let _=events.send(Event::Error(crate::i18n::trs("Hub disconnected. Draft kept; reconnecting. Check the experimental hub log."))).await;
                         view.pending.clear();view.outgoing.clear();view.rpc_names.clear();view.controls.clear();view.offered.clear();view.bases.clear();view.view_id.clear();view.greeting=Value::Null;view.paging=None;view.want_page=None;
                         tokio::time::sleep(Duration::from_secs(delay)).await;delay=(delay*2).min(10);
@@ -168,7 +179,21 @@ pub fn connect(config:Config)->(Sender<Command>,async_channel::Receiver<Event>) 
         });
     }).expect("hub worker");(tx,rx)
 }
-async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&async_channel::Sender<Event>,v:&mut View)->Result<()> {
+/// Where the connection goes next when a session ended: Some(Some(home)) to the home hub, Some(None) back to the chosen hub, None to try the same again.
+/// `main_back`: on the home, the chosen hub answered (the heartbeat's probe) or the home refused this device. The rule is `hubs::on_home`'s.
+async fn failover(config:&Config,cfg:&Config,on_home:Option<&str>,down:Duration,main_back:bool)->Option<Option<(String,String,PathBuf)>> {
+    if config.unpaired||config.pending {return None;}
+    let main=crate::pairing::host_port(&crate::pairing::http_of(&config.hub)).0;
+    if on_home.is_some() {
+        let up=main_back||{let o=crate::pairing::http_of(&config.hub);tokio::task::spawn_blocking(move||crate::pairing::answers(&o)).await.unwrap_or(false)};
+        return (!crate::hubs::on_home(&main,on_home.unwrap_or(""),true,down,true,up)).then_some(None);
+    }
+    let (key,ws,cred)=tokio::task::spawn_blocking(crate::hubs::home_target).await.ok().flatten()?;
+    if down<crate::hubs::FAILOVER_AFTER||crate::pairing::host_port(&crate::pairing::http_of(&cfg.hub)).0==key {return None;}
+    let o=crate::pairing::http_of(&ws);let up=tokio::task::spawn_blocking(move||crate::pairing::answers(&o)).await.unwrap_or(false);
+    crate::hubs::on_home(&main,&key,false,down,up,false).then(||Some((key,ws,cred)))
+}
+async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&async_channel::Sender<Event>,v:&mut View,back:Option<String>)->Result<()> {
     let token=std::fs::read_to_string(&config.token_file)?;
     /* i18n-ok: connection errors, logged as GPUI_LOG disconnect */ ensure!(token.trim().chars().all(|c|c.is_ascii_alphanumeric()||c=='-'||c=='_'),"invalid token file");
     let url=format!("{}/ws?view=1&mobile=1&token={}",config.hub.trim_end_matches('/'),token.trim());
@@ -314,7 +339,7 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                     if !key.is_empty() {let _=events.send(Event::Term(key,pid,b,reset,state)).await;}},
                 "star"=>{let _=events.send(Event::Star(x["offer"].clone())).await;},
                 "browser.download"=>{let s=|k:&str|x[k].as_str().unwrap_or("").to_string();let _=events.send(Event::BrowserDownload(s("bot"),s("id"),s("name"),s("error"))).await;},
-                "info"=>{if let Some(m)=x["info"].as_object(){for(k,val) in m{if let Some(owner)=k.strip_prefix("browser.tabs."){let _=events.send(Event::BrowserTabs(owner.to_string(),val.as_str().unwrap_or("").to_string())).await;}}}},
+                "info"=>{if let Some(m)=x["info"].as_object(){for(k,val) in m{if k=="hub.offer"{let _=events.send(Event::HubOffer(val.as_str().unwrap_or("").to_string())).await;}if let Some(owner)=k.strip_prefix("browser.tabs."){let _=events.send(Event::BrowserTabs(owner.to_string(),val.as_str().unwrap_or("").to_string())).await;}}}},
                 "notify"=>{crate::screens::desk::show(&x);},"notify.clear"=>{crate::screens::desk::clear(&x);},
                 "sheets"=>{let _=events.send(Event::Sheets(x["rows"].as_str().unwrap_or("").to_string(),x["refs"].as_str().unwrap_or("").to_string())).await;},
                 "hb"=>{sink.send(Message::Binary(wire::encode(&json!({"id":0,"m":"ping","p":{}})).into())).await?;},
@@ -323,7 +348,9 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
             if v.dirty&&v.pending.is_empty()&&!v.view_id.is_empty(){v.dirty=false;let request=v.request("view.update",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;}
             else if v.want_page.is_some()&&v.pending.is_empty()&&v.paging.is_none()&&!v.view_id.is_empty(){let cursor=v.want_page.take().unwrap_or_default();let request=v.page(&cursor);sink.send(Message::Binary(wire::encode(&request).into())).await?;}
         },
-        /* i18n-ok: connection errors, logged as GPUI_LOG disconnect */ _=heartbeat.tick()=>{ensure!(last.elapsed()<Duration::from_secs(35),"hub heartbeat timeout");sink.send(Message::Ping(Vec::new().into())).await?;}
+        /* i18n-ok: connection errors, logged as GPUI_LOG disconnect */ _=heartbeat.tick()=>{ensure!(last.elapsed()<Duration::from_secs(35),"hub heartbeat timeout");
+            // on the home hub: the chosen hub answering again ends this session, and the loop goes back to it
+            if let Some(o)=back.clone(){if tokio::task::spawn_blocking(move||crate::pairing::answers(&o)).await.unwrap_or(false){anyhow::bail!("home:back");}}sink.send(Message::Ping(Vec::new().into())).await?;}
     }}
 }
 

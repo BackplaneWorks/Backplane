@@ -1256,12 +1256,16 @@ struct DataSettingsView: View {
                 let keys = client.links.compactMap { Pairing.key($0) }
                 ForEach(keys.indices, id: \.self) { i in
                     let k = keys[i]
+                    // the hub connected to now: the one in use, or the home hub while that one cannot be reached
+                    let on = k == client.usingKey
                     HStack(spacing: 8) {
-                        if i == 0 { DDot(color: client.conn == .online ? BackplaneDesign.ok : client.conn == .connecting ? BackplaneDesign.warn : BackplaneDesign.bad, size: 8) }
+                        if on { DDot(color: client.conn == .online ? BackplaneDesign.ok : client.conn == .connecting ? BackplaneDesign.warn : BackplaneDesign.bad, size: 8) }
                         Text(k).dmono(13).lineLimit(1)
+                        if k == client.homeKey { Text(Tr.t("Home")).dmono(11).foregroundStyle(BackplaneDesign.dim).accessibilityIdentifier("settings.hub.home.\(k)") }
                         Spacer()
-                        if i == 0 { Text(Tr.t(client.conn.rawValue)).dmono(11).foregroundStyle(BackplaneDesign.dim) }
-                        else { Button(Tr.t("Use")) { client.useHub(k) }.buttonStyle(DButton()).accessibilityIdentifier("settings.hub.use.\(k)") }
+                        if on { Text(Tr.t(client.conn.rawValue)).dmono(11).foregroundStyle(BackplaneDesign.dim) }
+                        else if i == 0, client.onHome { Text(Tr.t("Cannot be reached")).dmono(11).foregroundStyle(BackplaneDesign.dim) }
+                        else if i > 0 { Button(Tr.t("Use")) { client.useHub(k) }.buttonStyle(DButton()).accessibilityIdentifier("settings.hub.use.\(k)") }
                         Button(Tr.t("Forget")) { forgetKey = k }.buttonStyle(DButton(danger: true)).accessibilityIdentifier("settings.hub.forget.\(k)")
                     }
                 }

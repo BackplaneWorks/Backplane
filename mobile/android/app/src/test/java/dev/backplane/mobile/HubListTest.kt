@@ -20,12 +20,22 @@ class HubListTest {
     private val key: (String) -> String? = { HubList.authority(it) }
 
     @Test fun adopt() = each("adopt") { c -> assertEquals(c.getString("name"), list(c.getJSONArray("want")), HubList.adopt(list(c.getJSONArray("links")), c.getString("link"), key)) }
+    @Test fun added() = each("added") { c -> assertEquals(c.getString("name"), list(c.getJSONArray("want")), HubList.added(list(c.getJSONArray("links")), c.getString("link"), key)) }
     @Test fun use() = each("use") { c -> assertEquals(c.getString("name"), list(c.getJSONArray("want")), HubList.use(list(c.getJSONArray("links")), c.getString("key"), key)) }
     @Test fun forget() = each("forget") { c -> assertEquals(c.getString("name"), list(c.getJSONArray("want")), HubList.forget(list(c.getJSONArray("links")), c.getString("key"), key)) }
     @Test fun routes() = each("routes") { c ->
         val r = HubList.routes(c.getString("text"))
         assertEquals(c.getString("name"), list(c.getJSONArray("want")), r)
         assertEquals(c.getString("name"), c.getBoolean("local"), HubList.local(r))
+    }
+    @Test fun offer() = each("offer") { c ->
+        val w = c.getJSONObject("want"); val k = w.getString("key")
+        val want = when (w.getString("plan")) { "known" -> HubList.Plan.Known(k); "same" -> HubList.Plan.Same(k, w.getString("link")); "take" -> HubList.Plan.Take(k); else -> HubList.Plan.None }
+        val tok = c.getString("token").ifEmpty { null }
+        assertEquals(c.getString("name"), want, HubList.plan(c.getString("offer"), list(c.getJSONArray("links")), tok, list(c.getJSONArray("done")).toSet(), key))
+    }
+    @Test fun failover() = each("failover") { c ->
+        assertEquals(c.getString("name"), c.getBoolean("want"), HubList.onHome(c.getString("main"), c.getString("home"), c.getBoolean("onHome"), (c.getDouble("down") * 1000).toLong(), c.getBoolean("homeUp"), c.getBoolean("mainUp")))
     }
     @Test fun storedListsSurviveAnUpgrade() {
         assertEquals(listOf("http://a:1/#token=x"), HubList.decode(null, "http://a:1/#token=x"))

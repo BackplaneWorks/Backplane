@@ -24,6 +24,11 @@ object HubList {
 
     /** A newly paired hub goes first; an older pairing with the same hub is replaced, every other hub is kept. */
     fun adopt(links: List<String>, link: String, key: (String) -> String?): List<String> { val k = key(link); return listOf(link) + links.filter { key(it) != k } }
+    /** A hub an offer added goes second: the one in use stays in use; an older pairing with it is replaced. */
+    fun added(links: List<String>, link: String, key: (String) -> String?): List<String> {
+        val k = key(link); val rest = links.filter { key(it) != k }
+        return if (rest.isEmpty()) listOf(link) else listOf(rest[0], link) + rest.drop(1)
+    }
     /** Switching to a paired hub moves it first; an unknown key changes nothing. */
     fun use(links: List<String>, k: String, key: (String) -> String?): List<String> {
         val hit = links.firstOrNull { key(it) == k } ?: return links
@@ -46,6 +51,37 @@ object HubList {
     fun loopback(origin: String): Boolean { val r = origin.substringAfter("://", ""); return r.startsWith("localhost") || r.startsWith("127.") || r.startsWith("[::1]") }
     /** Every address is the hub's own computer: a phone that opens it reaches itself, never the hub. */
     fun local(routes: List<String>): Boolean = routes.isNotEmpty() && routes.all { loopback(it) }
+
+
+    // ---- the home hub (docs/pairing.md, Home hub): an offer to add it, and failing over to it
+    data class Offer(val id: String, val name: String, val url: String, val why: String, val credential: String)
+    /** The hub's `hub.offer` (a JSON string, "" for none), or null when it names no hub. */
+    fun offer(text: String): Offer? {
+        val o = runCatching { org.json.JSONObject(text) }.getOrNull() ?: return null
+        val id = o.optString("id"); val url = origin(o.optString("url")) ?: return null
+        if (id.isEmpty()) return null
+        return Offer(id, o.optString("name"), url, o.optString("why"), o.optString("credential"))
+    }
+    sealed class Plan { object None : Plan(); data class Known(val key: String) : Plan(); data class Same(val key: String, val link: String) : Plan(); data class Take(val key: String) : Plan() }
+    /** What an offer asks of this phone: nothing, a hub already paired (it becomes the home), the same token at the offered address, or a link to take and redeem.
+     *  token is the one this phone holds for the hub in use; done the offers already answered. */
+    fun plan(text: String, links: List<String>, token: String?, done: Set<String>, key: (String) -> String?): Plan {
+        val o = offer(text) ?: return Plan.None
+        if (o.id in done) return Plan.None
+        val k = key(o.url) ?: return Plan.None
+        if (links.firstOrNull()?.let(key) == k) return Plan.None
+        if (links.any { key(it) == k }) return Plan.Known(k)
+        if (o.credential == "same" && !token.isNullOrEmpty()) return Plan.Same(k, o.url + "/#token=" + token)
+        return Plan.Take(k)
+    }
+    /** How long the hub in use may not answer before the home is used instead, in ms. */
+    const val FAILOVER_MS = 20_000L
+    /** Whether to be on the home hub: main is the hub in use, home the remembered one ("" for none), down how long main has not answered. */
+    fun onHome(main: String, home: String, now: Boolean, downMs: Long, homeUp: Boolean, mainUp: Boolean): Boolean {
+        if (home.isEmpty() || home == main) return false
+        if (now) return !mainUp
+        return downMs >= FAILOVER_MS && homeUp
+    }
 
     /** What the phone says of an invitation that names only its hub's computer. */
     const val LOCAL = "This invitation names only its hub's own computer (127.0.0.1), so this phone cannot reach it. Start the hub with Tailscale on, or on an address this phone can reach, then make a new invitation."

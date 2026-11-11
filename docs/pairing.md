@@ -209,3 +209,29 @@ follow the same rules, `docs/PHONE-DATA.md`):
   the phones ask `link.resolve`.
 
 `test/e2e/pairing/unified.py --hold DIR` keeps two linked temp hubs up (`BP_NAME_A`/`BP_NAME_B` name them) for a window to drive.
+
+## Home hub: an offered hub, added with no taps, used when the hub in use is away
+
+When the person's home (Bub, the bots, push, webhooks) moves to an always-on hub, the hub in use offers it to every client paired with it.
+The offer is info `hub.offer`, a JSON string (`""` for none) with no secret: `{"id", "name", "url", "why": "home", "credential"?: "same"}`.
+GPUI gets it in the info snapshot and `{"t":"info"}` frames. data/1 gets it as hello `hubOffer` (feature `hubOffer`) and `{"t":"info","info":{"hub.offer":…}}` frames.
+What a client does is `HubList.plan` / `hubs::plan`, held to `test/mobile/hubs_cases.json` (`offer`):
+
+- none: no offer, one already answered, or one for the hub in use.
+- known: the hub is already on the list. No take; it becomes the home when `why` is `home`.
+- same (`credential: "same"`, and the client holds a device token for the hub in use): the hub adopted this hub's paired devices, so the
+  client keeps the offered url with that same token, once `GET /client/capabilities` there takes it. The phones are this case.
+- take (no device token of its own: the desktop window on its own hub's token): `hub.offer.take {id}` → `{link}`, a single-use pairing link,
+  redeemed as a scanned code is (`/auth/enroll`).
+
+The hub goes second on the list (`HubList.added` / `hubs::second`): the hub in use stays in use. A failed try is tried again twice, with a longer
+wait each time. Then the client calls `hub.offer.done {id, ok}` on the hub in use. Nothing is shown to the person.
+
+Failover (`HubList.onHome` / `hubs::on_home`, the table's `failover`): the client remembers the added hub as the home (phones: the stored key
+`home`; GPUI: `home` in `hubs.json`). When the hub in use has not answered for 20 s and the home answers `/hello`, the client connects to the home.
+The list does not change. While on the home, the client asks the chosen hub's `/hello` every 10 s and goes back as soon as it answers.
+This holds at a start with the chosen hub asleep too. The hub lists show which hub is connected now, and mark the home.
+
+A push may carry `hub` (the sending hub's url) and `link`. A tap on one from another hub on the list connects to that hub first, then opens the
+link: `account:<id>` is that account's sign-in. `scripts/mobile/ios-offer-journey.sh` and `scripts/mobile/android-offer-journey.sh` run the
+whole thing against two stand-in hubs (`test/mobile/offer_stub.py`).

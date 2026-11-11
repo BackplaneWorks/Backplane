@@ -2328,6 +2328,9 @@ gpui.pair.this.device.with.a	Pair this device with a hub on another machine.	こ
 gpui.in.use	In use	使用中
 gpui.use	Use	使う
 gpui.the.hub.on.this.computer	The hub on this computer.	このコンピューターのハブです。
+gpui.hub.home.on	Home hub. In use while the hub you chose cannot be reached.	ホームハブ。選んだハブにつながらない間、使用中です。
+gpui.hub.home	Home hub. Used when the hub in use cannot be reached.	ホームハブ。使用中のハブにつながらないときに使います。
+gpui.hub.home.away	Cannot be reached: the home hub is in use until it answers.	つながりません。応答するまでホームハブを使います。
 gpui.hub	Hub	ハブ
 gpui.the.hub.is.not.answering	The hub is not answering	ハブが応答しません
 gpui.restart.hub	Restart hub	ハブを再起動
@@ -3000,6 +3003,8 @@ android.ask.done	ASKED	回答済みの質問
 android.ask.answer	Your answer	回答
 android.ask.answered	answered: {answer}	回答: {answer}
 android.hub.use	Use	使う
+native.hub.home	Home	ホーム
+native.hub.unreachable	Cannot be reached	つながりません
 android.online	online	オンライン
 android.offline	offline {why}	オフライン {why}
 android.accounts	Accounts	アカウント

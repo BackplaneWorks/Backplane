@@ -44,7 +44,19 @@ object DataClient {
     var secretAsks by mutableStateOf<Map<String, List<SecretAsk>>>(emptyMap()); private set
     /** every hub this phone is paired with (HubList); the first is the one in use */
     var links by mutableStateOf<List<String>>(emptyList()); private set
-    val link: String? get() = links.firstOrNull()
+    /** the hub being used: the first of the paired ones, or the home hub while that one cannot be reached (failover) */
+    val link: String? get() = if (onHome) homeLink ?: links.firstOrNull() else links.firstOrNull()
+    /** the home hub (docs/pairing.md, Home hub): added by its offer, used while the hub in use cannot be reached */
+    var homeKey by mutableStateOf(""); private set
+    var onHome by mutableStateOf(false); private set
+    private val homeLink: String? get() = if (homeKey.isEmpty()) null else links.firstOrNull { Pairing.key(it) == homeKey }
+    /** the key of the hub connected to now */
+    val usingKey get() = link?.let { Pairing.key(it) } ?: ""
+    private var downSince = 0L
+    private var probing = false
+    private var homeWatch: Job? = null
+    private val offersDone = HashSet<String>()
+    private var offerBusy = false
     /** the pairing screen is open over a paired hub, to add another (Settings → Add a hub) */
     var adding by mutableStateOf(false)
     var pairingError by mutableStateOf(""); var pairingBusy by mutableStateOf(false)
@@ -69,6 +81,7 @@ object DataClient {
         app = ctx.applicationContext
         MeshDisk.dir = java.io.File(app.cacheDir, "models")
         links = HubList.decode(prefs().getString("links", null), prefs().getString("link", null))
+        homeKey = prefs().getString("home", "") ?: ""
         settledOpen = prefs().getStringSet("settled.open", emptySet())!!.toSet(); historyOpen = prefs().getBoolean("history.open", false)
         System.getenv("BACKPLANE_LINK")?.let { links = it.split(' ').filter(String::isNotBlank) }
         loadCache()
@@ -112,12 +125,13 @@ object DataClient {
     fun useHub(key: String) {
         if (Pairing.key(link ?: "") == key) return
         val next = HubList.use(links, key) { Pairing.key(it) }; if (next == links) return
-        close(); save(next); reset(); needsRepair = false; pairingError = ""; failure = ""; connect()
+        close(); leaveHome(); save(next); reset(); needsRepair = false; pairingError = ""; failure = ""; connect()
     }
     /** Forget one hub; when it was the one in use, the next paired hub is used (none left: the pairing screen). */
     fun forgetHub(key: String) {
         val current = Pairing.key(link ?: "") == key
         save(HubList.forget(links, key) { Pairing.key(it) })
+        if (key == homeKey) { setHome(""); if (onHome) { leaveHome(); close(); reset(); connect() } }
         if (!current) return
         close(); reset(); needsRepair = false; pairingError = ""
         if (link != null) connect() else { conn = Conn.OFFLINE; askLink = null; pairEpoch++ }
@@ -125,7 +139,7 @@ object DataClient {
     /** bumped by unpair(): the pairing screen starts again with empty fields */
     var pairEpoch by mutableStateOf(0); private set
     // forgets the hub and everything a pairing attempt left: a revoked mark, the last message, a pending question
-    fun unpair() { keepOutbox(Outbox()); links = emptyList(); adding = false; prefs().edit().remove("link").remove("links").apply(); reset(); close(); conn = Conn.OFFLINE; needsRepair = false; pairingError = ""; askLink = null; pairEpoch++ }
+    fun unpair() { setHome(""); leaveHome(); keepOutbox(Outbox()); links = emptyList(); adding = false; prefs().edit().remove("link").remove("links").apply(); reset(); close(); conn = Conn.OFFLINE; needsRepair = false; pairingError = ""; askLink = null; pairEpoch++ }
     private fun reset() { notice = HubNotice(); star = null; migrating = null; migrateOpen = false; projects = emptyList(); threads = emptyList(); entries = emptyMap(); older = emptyMap(); listsLoaded = false; open = null; cacheFile().delete() }
 
     // ---- connection
@@ -167,7 +181,10 @@ object DataClient {
     private fun lost(g: Int, why: String) {
         if (g != gen) return
         failure = why; close(); conn = Conn.OFFLINE
+        if (downSince == 0L) downSince = System.currentTimeMillis()
+        if (onHome && needsRepair) { needsRepair = false; leaveHome(); reset(); connect(); return }   // the home refused this phone: back to the hub chosen
         if (link == null || needsRepair) return
+        failover()
         val w = backoff; backoff = minOf(backoff * 2, 4000)
         reconnect = scope.launch { delay(w); connect() }
     }
@@ -182,7 +199,9 @@ object DataClient {
                 heardMigrating(o.optJSONObject("migrating"))
                 commands = o.optJSONArray("commands")?.let { a -> (0 until a.length()).map { val w = a.getJSONObject(it); Word(w.optString("word"), w.optString("label"), w.optString("desc")) } } ?: emptyList()
                 conn = Conn.ONLINE; failure = ""; backoff = 250; plots.reset()
+                if (!onHome) downSince = 0L
                 scope.launch { synchronise(g) }
+                heardOffer(o.optString("hubOffer"))
             }
             "reply" -> {
                 val d = calls.remove(o.optInt("id", -1)) ?: return
@@ -194,8 +213,84 @@ object DataClient {
             "plot" -> scope.launch(Dispatchers.Main) { plots.receiveJSON(o) } // why a view has nothing to show (plots themselves are binary)
             "star" -> { star = DStarOffer.of(o.optJSONObject("offer")) }
             "migrating" -> heardMigrating(o)
+            "info" -> o.optJSONObject("info")?.let { if (it.has("hub.offer")) heardOffer(it.optString("hub.offer")) }
             "shot" -> { shotBot = o.optString("bot"); shot = o.optLong("n") }
         }
+    }
+
+    // ---- the home hub (docs/pairing.md, Home hub): its offer, carried out with no dialog, and failing over to it
+    private fun setHome(k: String) { homeKey = k; prefs().edit().putString("home", k).apply() }
+    private fun leaveHome() { onHome = false; homeWatch?.cancel(); homeWatch = null; downSince = 0L }
+    private fun log(what: String, text: String) { if (BuildConfig.DEBUG) android.util.Log.i("BPPAIR", "$what $text") }
+    private fun heardOffer(text: String) {
+        if (onHome || offerBusy) return
+        val o = HubList.offer(text) ?: return
+        val plan = HubList.plan(text, links, link?.let { Pairing.token(it) }, offersDone) { Pairing.key(it) }
+        log("offer", "${o.url} ${plan::class.simpleName}")   // never the plan itself: Same holds the token
+        when (plan) {
+            is HubList.Plan.None -> {}
+            is HubList.Plan.Known -> { if (o.why == "home") setHome(plan.key); offerDone(o.id, true) }
+            is HubList.Plan.Same -> { offerBusy = true; scope.launch { tryOffer(o, plan.key) { takes(plan.link); plan.link } } }
+            is HubList.Plan.Take -> { offerBusy = true; scope.launch { tryOffer(o, plan.key) {
+                val l = call("hub.offer.take", JSONObject().put("id", o.id)).optString("link")
+                val inv = Pairing.invitation(l) ?: throw Exception("not a pairing link")
+                Pairing.exchange(inv, inv.routes.ifEmpty { listOf(inv.origin) })
+            } } }
+        }
+    }
+    /** a few tries with a longer wait each time; the hub added second (the one in use stays), the home when the offer says so, then hub.offer.done */
+    private suspend fun tryOffer(o: HubList.Offer, k: String, get: suspend () -> String) {
+        try {
+            for (n in 0 until 3) {
+                if (n > 0) delay(2000L shl n)
+                try {
+                    val l = get()
+                    save(HubList.added(links, l) { Pairing.key(it) })
+                    if (o.why == "home") setHome(Pairing.key(l) ?: k)
+                    log("added", o.url); offerDone(o.id, true); return
+                } catch (e: CancellationException) { throw e } catch (e: Exception) { log("offer-retry", e.message ?: "") }
+            }
+            offerDone(o.id, false)
+        } finally { offerBusy = false }
+    }
+    private fun offerDone(id: String, ok: Boolean) { offersDone += id; scope.launch { runCatching { call("hub.offer.done", JSONObject().put("id", id).put("ok", ok)) } } }
+    private val probe = OkHttpClient.Builder().callTimeout(6, TimeUnit.SECONDS).build()
+    /** the same device token at the offered hub: kept only once that hub takes it */
+    private suspend fun takes(l: String) = withContext(Dispatchers.IO) {
+        val r = probe.newCall(Request.Builder().url(Pairing.http(l, "/client/capabilities", token = false) ?: throw Exception("no address")).header("Authorization", "Bearer " + (Pairing.token(l) ?: "")).header("X-Backplane-Client", "native").build()).execute()
+        r.use { if (it.code != 200) throw Exception("HTTP ${it.code}") }
+    }
+    /** whether a hub answers at all (/hello needs no credential) */
+    private suspend fun answers(l: String) = withContext(Dispatchers.IO) { runCatching { probe.newCall(Request.Builder().url(Pairing.http(l, "/hello", token = false)!!).build()).execute().use { it.code == 200 } }.getOrDefault(false) }
+    /** the hub in use has not answered for a while: the home, when it answers (HubList.onHome decides) */
+    private fun failover() {
+        if (onHome || probing || downSince == 0L) return
+        val home = homeLink ?: return; val main = links.firstOrNull()?.let { Pairing.key(it) } ?: return
+        val down = System.currentTimeMillis() - downSince
+        if (!HubList.onHome(main, homeKey, false, down, true, false)) return
+        probing = true
+        scope.launch {
+            try {
+                val up = answers(home)
+                if (onHome || !HubList.onHome(main, homeKey, false, down, up, false)) return@launch
+                log("home", homeKey)
+                close(); onHome = true; reset(); connect()
+                homeWatch = scope.launch {
+                    while (isActive) {
+                        delay(10_000)
+                        if (!onHome) return@launch
+                        val m = links.firstOrNull() ?: return@launch
+                        if (!HubList.onHome(Pairing.key(m) ?: "", homeKey, true, 0, true, answers(m))) { log("back", Pairing.key(m) ?: ""); close(); leaveHome(); reset(); connect(); return@launch }
+                    }
+                }
+            } finally { probing = false }
+        }
+    }
+    /** a tapped alert from another hub on the list (its url in `hub`): that hub first, then what it links to */
+    fun openHub(hub: String) {
+        val k = Pairing.key(hub)?.takeIf { it.isNotEmpty() && it != usingKey } ?: return
+        if (links.none { Pairing.key(it) == k }) return
+        if (k == homeKey && links.firstOrNull()?.let { Pairing.key(it) } != k) { if (!onHome) { close(); onHome = true; reset(); connect() } } else useHub(k)
     }
 
     /** the hub answered ok:false: it said no (any other failure of a call is the socket's) */
@@ -705,7 +800,7 @@ object DataClient {
         val nm = app.getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
         channels()
         // a notice of the hub's own (kind import) has no thread: its tap opens the lists
-        val intent = android.content.Intent(app, DataActivity::class.java).apply { if (tid.isNotEmpty()) putExtra("thread", tid) }.putExtra("ask", ask).putExtra("link", o.optString("link")).addFlags(android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP)
+        val intent = android.content.Intent(app, DataActivity::class.java).apply { if (tid.isNotEmpty()) putExtra("thread", tid) }.putExtra("ask", ask).putExtra("link", o.optString("link")).putExtra("hub", o.optString("hub")).addFlags(android.content.Intent.FLAG_ACTIVITY_SINGLE_TOP or android.content.Intent.FLAG_ACTIVITY_CLEAR_TOP)
         val open = android.app.PendingIntent.getActivity(app, key.hashCode(), intent, android.app.PendingIntent.FLAG_IMMUTABLE or android.app.PendingIntent.FLAG_UPDATE_CURRENT)
         val n = android.app.Notification.Builder(app, "data-alerts").setSmallIcon(android.R.drawable.stat_notify_chat).setContentTitle(o.optString("title").ifEmpty { "Backplane" })
             .setContentText(Tr.t(o.optString("body"))).apply { if (tid.isNotEmpty()) setGroup(tid) }.setNumber(o.optInt("badge")).setContentIntent(open).setAutoCancel(true).build()

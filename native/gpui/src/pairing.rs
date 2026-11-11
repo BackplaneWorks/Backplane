@@ -158,6 +158,23 @@ fn exchange_at(origin: &str, i: &Invitation, name: &str) -> Result<String, Strin
     let (status, body) = crate::screens::images::split(&b).ok_or_else(|| message("hub_unreachable").to_string())?;
     enroll_answer(status, body)
 }
+/// One plain GET at a hub, with a device token or none: its status (0 when it could not be reached). Blocking, a few seconds at most.
+fn get(origin: &str, path: &str, token: Option<&str>) -> u16 {
+    let (addr, tls) = host_port(origin);
+    /* i18n-ok: an HTTP header */ let auth = token.map_or(String::new(), |t| format!("Authorization: Bearer {t}\r\n"));
+    let run = || -> io::Result<Vec<u8>> {
+        let mut s = open(&addr, tls)?; s.set_timeouts(Duration::from_secs(4))?;
+        /* i18n-ok: an HTTP request */ s.write_all(format!("GET {path} HTTP/1.1\r\nHost: {addr}\r\n{auth}X-Backplane-Client: native\r\nConnection: close\r\n\r\n").as_bytes())?;
+        let mut b = Vec::new(); s.take(65536).read_to_end(&mut b)?; Ok(b)
+    };
+    run().ok().and_then(|b| crate::screens::images::split(&b).map(|(st, _)| st)).unwrap_or(0)
+}
+/// Whether a hub answers at all (`/hello` needs no credential): the home failover's probe.
+pub fn answers(origin: &str) -> bool { get(&http_of(origin), "/hello", None) == 200 }
+/// Whether a hub takes this device token (`/client/capabilities` asks for a paired credential): an offer's "same" credential is checked before it is kept.
+pub fn takes(origin: &str, token: &str) -> Result<(), String> {
+    match get(origin, "/client/capabilities", Some(token)) { 200 => Ok(()), 0 => Err(message("hub_unreachable").to_string()), /* i18n-ok: logged, never shown */ st => Err(format!("HTTP {st}")) }
+}
 /// Trade the invitation for a device credential: each address it names is tried in order; the first that answers decides. Answers the address that worked and the credential. Blocking.
 pub fn exchange(i: &Invitation, name: &str) -> Result<(String, String), String> {
     let mut last = message("hub_unreachable").to_string();
