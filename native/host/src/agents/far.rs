@@ -13,6 +13,8 @@ fn fail(m: &str) -> (bool, Value) { (false, json!({"error":m})) }
 
 /// The tools that take a thread, and so may name one elsewhere
 const ON_THREAD: &[&str] = &["thread_send", "thread_read", "thread_wait", "thread_interrupt", "thread_update", "thread_settle"];
+/// The tools that need the file they name on this machine
+const LOCAL_THINGS: &[&str] = &["kicad_ipc", "kicad_ipc_status", "kicad_bring_back", "kicad_export10", "viewer_show"];
 /// The tools that take a `machine`
 const ON_MACHINE: &[&str] = &["thread_list", "thread_launch"];
 
@@ -83,6 +85,18 @@ impl Agents {
             }
             Err(e) => fail(&e),
         })
+    }
+    /// A tool that works on a local file (KiCad, the viewer) asked by a thread of no project (the uberbot, a bot) for a path this machine does not have:
+    /// the error that says where it is done instead, a thread on the machine that has it. None: the tool runs here as before.
+    pub async fn not_here(&self, thread: &str, name: &str, a: &Value) -> Option<String> {
+        if !LOCAL_THINGS.contains(&name) { return None }
+        let path = sv(a, "path").trim(); if path.is_empty() { return None }
+        let no_project = self.world().await.threads.get(thread).map_or(false, |t| t.project.is_empty());
+        if !no_project || std::path::Path::new(path).exists() { return None }
+        let here = crate::net::botnet::name().await;
+        let elsewhere: Vec<String> = self.hub.far_machines().into_iter().map(|(_, n, _)| n).collect();
+        Some(format!("{path} is not on this machine ({here}): {name} runs where the file is. Start a thread there with thread_launch {{machine, project}} (machine_list shows {}) and ask it to do this.",
+            if elsewhere.is_empty() { "the machines".to_string() } else { elsewhere.join(", ") }))
     }
     /// thread_wait on a thread elsewhere: asked again every second until it is done or the time is up
     async fn far_wait(&self, link: &str, thread: &str, a: &Value) -> (bool, Value) {
