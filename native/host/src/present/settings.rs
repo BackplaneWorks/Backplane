@@ -12,7 +12,7 @@ pub fn set_version(v: &str) { let _ = VERSION.set(v.to_string()); }
 pub fn version() -> &'static str { VERSION.get().map(String::as_str).unwrap_or("") }
 
 /// The ported pages in the order the desktop menu lists them (Settings.menu.pages): page id and title.
-pub const PAGES: &[(&str, &str)] = &[("appearance", "Appearance"), ("threads", "Threads"), ("notifications", "Notifications"), ("agents", "Agents"), ("writing", "Writing"), ("cad", "CAD"), ("ordering", "Ordering"), ("network", "Network and updates"), ("devices", "Devices"), ("machines", "Machines"), ("voice", "Voice"), ("ring", "Ring"), ("keys", "API keys"), ("timezone", "Time zone"), ("rules", "Rules and task board"), ("usage", "Usage"), ("setup", "Setup"), ("import", "Import from 0.14"), ("about", "About"), ("privacy", "Privacy"), ("developer", "Developer")];
+pub const PAGES: &[(&str, &str)] = &[("appearance", "Appearance"), ("threads", "Threads"), ("notifications", "Notifications"), ("agents", "Agents"), ("mcp", "MCP servers"), ("writing", "Writing"), ("cad", "CAD"), ("ordering", "Ordering"), ("network", "Network and updates"), ("devices", "Devices"), ("machines", "Machines"), ("voice", "Voice"), ("ring", "Ring"), ("keys", "API keys"), ("timezone", "Time zone"), ("rules", "Rules and task board"), ("usage", "Usage"), ("setup", "Setup"), ("import", "Import from 0.14"), ("about", "About"), ("privacy", "Privacy"), ("developer", "Developer")];
 
 pub struct Out { pub patch: Value, pub cmds: Vec<Value> }
 
@@ -654,6 +654,22 @@ fn ring(st: &State, session: &Value, info: &Value) -> Vec<Value> {
     crate::voice::ringpage::rows(&parsed("ring.setup"), &parsed("ring.notes"), s(info, "ring.busy"), draft(session, "@f.ringq"), &|t| super::thread::clock(t, 0, &zone), false)
 }
 
+/// Settings > MCP (mcpx/page.rs): the hub's rows from `info["mcp"]`, the page's state in `@mcp.*` drafts and what is typed in `@f.m*`.
+fn mcp_get(session: &Value) -> impl Fn(&str) -> Option<String> + Sync + '_ {
+    move |k: &str| { let key = if crate::mcpx::page::UI_KEYS.contains(&k) { format!("@mcp.{k}") } else { format!("@f.{k}") }; session["drafts"][key.as_str()].as_str().map(str::to_string) }
+}
+fn mcp(session: &Value, info: &Value) -> Vec<Value> {
+    let m: Value = info["mcp"].as_str().and_then(|t| serde_json::from_str(t).ok()).unwrap_or(Value::Null);
+    if m.is_null() { return vec![row("MCP servers", "Not running on this hub.", vec![])] }
+    let get = mcp_get(session);
+    crate::mcpx::page::rows(&m, &crate::mcpx::page::Ui { get: &get }, crate::hub::now_ms() / 1000)
+}
+fn mcp_patch(p: serde_json::Map<String, Value>) -> Value {
+    let mut d = serde_json::Map::new();
+    for (k, v) in p { let key = if crate::mcpx::page::UI_KEYS.contains(&k.as_str()) { format!("@mcp.{k}") } else { format!("@f.{k}") }; d.insert(key, v); }
+    json!({"drafts": d})
+}
+
 /// The rows shown while the dialog is open: the page menu (no page chosen) or one page, its first row the way back.
 pub fn view(st: &State, session: &Value, info: &Value) -> Value {
     let p = page(session);
@@ -665,7 +681,7 @@ pub fn view(st: &State, session: &Value, info: &Value) -> Value {
         r.extend(match p { "appearance" => appearance(st), "threads" => threads(st, session), "notifications" => notifications(st, session, info), "about" => about(st, info), "setup" => super::onboard::settings_rows(st, session, info, &super::onboard::Client::of(info), &super::onboard::home_dir()), "import" => super::onboard::import_rows(info), "agents" => { let mut a = agents(st, info); a.extend(fallback(st, info)); a }, "writing" => writing(st, info), "cad" => cad(st, session, info), "keys" => keys(st, session, info), "ordering" => ordering(st), "network" => network(st, info), "devices" => devices(st, session, info), "machines" => { let mut r = crate::net::machinespage::rows(&info["machines"], &|k| draft(session, &format!("@f.{k}")).to_string());
             r.extend(crate::net::homemove::rows(!set(st, "uber.bot", "").is_empty(), set(st, "home.at", ""), info["home.move"].as_str().unwrap_or(""), &info["machines"]["linked"]));
             r.extend(crate::net::alwayson::rows::machines_rows(info, set(st, crate::net::alwayson::other::STAYS_ON, "") == "on"));
-            r.extend(super::signin_there::open_rows(info)); r }, "timezone" => timezone(st, session), "rules" => rules(st, session), "privacy" => privacy(st, info), "voice" => voice(st, session, info), "ring" => ring(st, session, info), "usage" => usage(st), "developer" => developer(st), _ => vec![] });
+            r.extend(super::signin_there::open_rows(info)); r }, "timezone" => timezone(st, session), "rules" => rules(st, session), "privacy" => privacy(st, info), "voice" => voice(st, session, info), "ring" => ring(st, session, info), "usage" => usage(st), "developer" => developer(st), "mcp" => mcp(session, info), _ => vec![] });
         r
     };
     json!({"rows": rows})
@@ -754,6 +770,23 @@ pub fn act(hub: &str, session: &Value, action: &str, value: &str) -> Option<Out>
             send(session, hub, "alwayson.act", json!({"action": a, "value": value, "fields": fields}), &mut cmds, &mut rid);
             if a == "alwayson-other-pair" { json!({"drafts": {"@f.aonaddr": "", "@f.aoncode": ""}}) } else { json!({}) }
         }
+        // MCP: a press that only moves the page stays here; the rest go to the hub as mcp.page.act with the page state and what is typed (the phones send the same)
+        a if a.starts_with("mcp-") => {
+            let get = mcp_get(session); let ui = crate::mcpx::page::Ui { get: &get };
+            if let Some(p) = crate::mcpx::page::step(&ui, a, value) {
+                if a == "mcp-view" && value == "import" { send(session, hub, "mcp.page.act", json!({"action": "mcp-scan", "value": "", "desktop": true}), &mut cmds, &mut rid); }
+                mcp_patch(p)
+            } else {
+                let (mut uiv, mut fields) = (serde_json::Map::new(), serde_json::Map::new());
+                for k in crate::mcpx::page::UI_KEYS { if let Some(v) = get(k) { uiv.insert(k.into(), json!(v)); } }
+                for k in crate::mcpx::page::FIELDS { if let Some(v) = get(k) { fields.insert(k.into(), json!(v)); } }
+                send(session, hub, "mcp.page.act", json!({"action": a, "value": value, "ui": uiv, "fields": fields, "desktop": true}), &mut cmds, &mut rid);
+                // where the page goes when the hub takes it (a refusal is said at the top of the page): back to the list, or the server's card
+                let to = match a { "mcp-add" | "mcp-import" | "mcp-gallery" | "mcp-dup" => Some(String::new()), "mcp-remove" => Some(String::new()), "mcp-save" => Some(format!("open:{value}")), _ => None };
+                match to { Some(v) => { let mut p = serde_json::Map::new(); p.insert("view".into(), json!(v)); p.insert("rm".into(), json!("")); p.insert("skip".into(), json!("")); p.insert("imp".into(), json!(""));
+                    if a != "mcp-dup" { for f in crate::mcpx::page::FIELDS { p.insert(f.into(), Value::Null); } } mcp_patch(p) } None => json!({}) }
+            }
+        }
         // Notifications: every press goes to the hub as notify.page.act, with the times as typed (the phones send the same)
         a if a.starts_with("notify-") => {
             let fields = json!({"qfrom": draft(session, "@f.qfrom"), "qto": draft(session, "@f.qto")});
@@ -765,7 +798,7 @@ pub fn act(hub: &str, session: &Value, action: &str, value: &str) -> Option<Out>
         "key-err" => json!({"drafts": {"@key.err": value}}),
         "bfield" => {
             let (name, text) = value.split_once('\u{1f}')?;
-            if !matches!(name, "whurl" | "whsec" | "tzname" | "kpath" | "fpath" | "kname" | "vterm" | "rtext" | "btitle" | "maddr" | "mcode" | "fcode" | "rfrom" | "rname" | "qfrom" | "qto" | "aonaddr" | "aoncode") { return None }
+            if !matches!(name, "whurl" | "whsec" | "tzname" | "kpath" | "fpath" | "kname" | "vterm" | "rtext" | "btitle" | "maddr" | "mcode" | "fcode" | "rfrom" | "rname" | "qfrom" | "qto" | "aonaddr" | "aoncode" | "mpaste" | "mname" | "mcmd" | "menv" | "mcwd" | "murl" | "mhdr" | "mgarg") { return None }
             json!({"drafts": {format!("@f.{name}"): text}})
         }
         "telemetry-on" => { send(session, hub, "telemetry.choice", json!({"value": "on", "expected": value, "decision": "", "popup": false}), &mut cmds, &mut rid); json!({}) }

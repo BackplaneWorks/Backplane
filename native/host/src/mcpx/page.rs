@@ -75,24 +75,25 @@ pub fn rows(info: &Value, ui: &Ui, now: u64) -> Vec<Value> {
     let n = servers.len();
     let lead = if n == 0 { "Every agent Backplane runs gets the servers here: Claude, Codex, Antigravity, Grok, OpenCode. Changes apply from each thread's next turn.".to_string() }
         else { format!("{} for every agent Backplane runs. Changes apply from each thread's next turn.", plural(n, "server")) };
-    v.push(json!({"kind": "head", "label": "MCP servers", "note": lead, "buttons": [btn("Add", "mcp-view", if view == "add" { "" } else { "add" }, view == "add"), btn("Import", "mcp-view", if view == "import" { "" } else { "import" }, view == "import"), btn("Gallery", "mcp-view", if view == "gallery" { "" } else { "gallery" }, view == "gallery")]}));
+    v.push(json!({"kind": "head", "label": "MCP servers", "note": lead, "buttons": [btn("Add", "mcp-view", if view == "add" { "" } else { "add" }, view == "add"), btn("Import", "mcp-view", if view == "import" { "" } else { "import" }, view == "import"), btn("Gallery", "mcp-view", if view == "gallery" { "" } else { "gallery" }, view == "gallery")], "primary": 0}));
     let err = { let e = ui.s("err"); if e.is_empty() { s(info, "notice").to_string() } else { e } }; if !err.is_empty() { v.push(json!({"kind": "notice", "label": err, "note": "", "tone": "bad", "buttons": [btn("Dismiss", "mcp-err", "", false)]})) }
     match view.as_str() { "add" => add_rows(&mut v, info, ui), "import" => import_rows(&mut v, info, ui), "gallery" => gallery_rows(&mut v, info, ui), _ => {} }
     if let Some(id) = view.strip_prefix("edit:") { if let Some(x) = servers.iter().find(|x| x["server"]["id"] == id) { edit_rows(&mut v, &x["server"], ui) } }
 
     // the servers
     v.push(json!({"kind": "group", "label": "Servers", "note": "", "buttons": []}));
-    v.push(json!({"kind": "card", "label": "Backplane", "note": "Built in. Threads, viewers, KiCad, secrets, work and locks.", "title": "Backplane", "sub": "Built in", "icon": {"text": "B", "bg": "#2f6f5e"},
-        "pill": {"text": "Always on", "tone": "ok"}, "meta": "", "buttons": []}));
-    let pcb = info["pcbparts"] != false;
-    v.push(json!({"kind": "card", "label": "pcbparts", "note": "Parts search: the fab's stock, Mouser, DigiKey.", "title": "pcbparts", "sub": "https://pcbparts.dev/mcp", "icon": {"text": "P", "bg": "#5a6b2f"},
-        "pill": if pcb { json!({"text": "On", "tone": "ok"}) } else { json!({"text": "Off", "tone": "dim"}) }, "meta": "HTTP · built in",
-        "toggle": {"on": pcb, "action": "mcp-pcbparts", "value": if pcb { "off" } else { "on" }}, "buttons": [btn(if pcb { "on" } else { "off" }, "mcp-pcbparts", if pcb { "off" } else { "on" }, pcb)]}));
     if servers.is_empty() && view.is_empty() {
         v.push(json!({"kind": "empty", "label": "No servers of yours yet", "note": "Paste the snippet a vendor's docs give, add one from the gallery, or bring in what Claude Code, Codex, Cursor or VS Code already have.",
             "buttons": [btn("Paste a config", "mcp-view", "add", false), btn("Gallery", "mcp-view", "gallery", false), btn("Import", "mcp-view", "import", false)]}));
     }
     for x in &servers { card_rows(&mut v, x, info, ui, now, machine) }
+    v.push(json!({"kind": "group", "label": "Built in", "note": "", "buttons": []}));
+    v.push(json!({"kind": "card", "label": "Backplane", "note": "Built in. Threads, viewers, KiCad, secrets, work and locks.", "title": "Backplane", "sub": "Built in", "icon": {"text": "B", "bg": "#2f6f5e"}, "compact": true,
+        "pill": {"text": "Always on", "tone": "ok"}, "meta": "", "buttons": []}));
+    let pcb = info["pcbparts"] != false;
+    v.push(json!({"kind": "card", "label": "pcbparts", "note": "Parts search: the fab's stock, Mouser, DigiKey.", "title": "pcbparts", "sub": "https://pcbparts.dev/mcp", "icon": {"text": "P", "bg": "#5a6b2f"}, "compact": true,
+        "pill": if pcb { json!({"text": "On", "tone": "ok"}) } else { json!({"text": "Off", "tone": "dim"}) }, "meta": "HTTP · built in",
+        "toggle": {"on": pcb, "action": "mcp-pcbparts", "value": if pcb { "off" } else { "on" }}, "buttons": [btn(if pcb { "on" } else { "off" }, "mcp-pcbparts", if pcb { "off" } else { "on" }, pcb)]}));
 
     // what agents may do
     let projects = info["projects"].as_array().cloned().unwrap_or_default();
@@ -128,7 +129,8 @@ fn card_rows(v: &mut Vec<Value>, x: &Value, info: &Value, ui: &Ui, now: u64, mac
         "toggle": {"on": server.enabled, "action": "mcp-toggle", "value": id},
         "buttons": [btn(if server.enabled { "on" } else { "off" }, "mcp-toggle", id, server.enabled), btn(if open { "Close" } else { "Open" }, "mcp-view", &if open { String::new() } else { format!("open:{id}") }, open)]}));
     if !open { return }
-    // opened: secrets, the check, scope, tools, the actions
+    // opened: secrets, the check, scope, tools, the actions, drawn inside the card ("in")
+    let from = v.len();
     for k in x["secrets"].as_array().into_iter().flatten() {
         let (key, name, set) = (s(k, "key"), s(k, "name"), k["set"] == true);
         if set { v.push(json!({"label": format!("{key}"), "note": format!("In the vault as {name}. Its value is put in when an agent starts the server."), "tone": "", "buttons": [btn("Replace", "mcp-view", &format!("secret:{id}:{name}"), false)]})) }
@@ -176,8 +178,11 @@ fn card_rows(v: &mut Vec<Value>, x: &Value, info: &Value, ui: &Ui, now: u64, mac
     let rm = ui.s("rm") == id;
     v.push(json!({"kind": "actions", "label": "", "note": if rm { "Remove it from every agent? Press Remove again." } else { "" }, "buttons": [
         btn(if x["checking"] == true { "Testing" } else { "Test" }, "mcp-test", id, false), btn("Edit", "mcp-view", &format!("edit:{id}"), false), btn("Duplicate", "mcp-dup", id, false), btn(if rm { "Remove for good" } else { "Remove" }, "mcp-remove", id, rm)]}));
+    for r in v[from..].iter_mut() { r["in"] = json!(true) }
 }
 
+/// A path with the home folder said as ~.
+fn tilde(p: &str, home: &str) -> String { if !home.is_empty() && p.starts_with(home) { format!("~{}", &p[home.len()..]) } else { p.to_string() } }
 fn scope_line(s: &Server, info: &Value) -> String {
     let mut p = vec![];
     if !s.providers.is_empty() { p.push(s.providers.join(", ")) }
@@ -218,7 +223,7 @@ fn preview(v: &mut Vec<Value>, f: &parse::Found, skip: &[usize], pick: bool) {
         let sec_note = if secrets.is_empty() { String::new() } else { let with: Vec<&str> = s.env.iter().chain(s.headers.iter()).filter(|k| k.secret && given.contains(&&k.v)).map(|k| k.k.as_str()).collect();
             if with.is_empty() { format!("{} from the vault: you set {} after adding", secrets.join(", "), if secrets.len() == 1 { "it" } else { "them" }) } else { format!("{} goes to the vault, never into a config file", secrets.join(", ")) } };
         let mut card = json!({"kind": "card", "label": s.title(), "note": sec_note, "title": s.title(), "sub": s.line(), "icon": icon(s), "pill": {"text": transport_label(&s.transport), "tone": "dim"}, "meta": sec_note, "buttons": []});
-        if pick && f.servers.len() > 1 { card["toggle"] = json!({"on": on, "action": "mcp-skip", "value": i.to_string()}); card["buttons"] = json!([btn(if on { "add" } else { "skip" }, "mcp-skip", &i.to_string(), on)]) }
+        if pick && f.servers.len() > 1 { card["toggle"] = json!({"on": on, "action": "mcp-skip", "value": i.to_string(), "style": "check"}); card["buttons"] = json!([btn(if on { "add" } else { "skip" }, "mcp-skip", &i.to_string(), on)]) }
         v.push(card);
     }
 }
@@ -305,21 +310,21 @@ fn import_rows(v: &mut Vec<Value>, info: &Value, ui: &Ui) {
     let scan = info["scan"].as_array().cloned();
     v.push(json!({"kind": "panel", "label": "Import from your tools", "note": "Claude Code, Codex, Cursor, VS Code, Claude Desktop, Windsurf, Gemini CLI and OpenCode, read where they keep their servers. Nothing of theirs is changed.", "buttons": [btn("Look again", "mcp-scan", "", false)]}));
     let Some(scan) = scan else { v.push(json!({"kind": "notice", "label": "Looking…", "note": "", "tone": "busy", "buttons": []})); return };
-    let picked: Vec<String> = ui.s("imp").split(',').filter(|x| !x.is_empty()).map(str::to_string).collect();
+    let skipped: Vec<String> = ui.s("imp").split(',').filter(|x| !x.is_empty()).map(str::to_string).collect(); // every new one is picked until it is unticked
     let mut any = false; let mut n = 0;
     for src in &scan {
         let servers = src["servers"].as_array().cloned().unwrap_or_default();
         if servers.is_empty() && s(src, "error").is_empty() { continue }
-        v.push(json!({"kind": "group", "label": format!("{} · {}", s(src, "tool"), s(src, "path")), "note": "", "buttons": []}));
+        v.push(json!({"kind": "group", "label": s(src, "tool"), "note": tilde(s(src, "path"), s(info, "home")), "buttons": []}));
         if !s(src, "error").is_empty() { v.push(json!({"kind": "notice", "label": format!("Could not read it: {}", s(src, "error")), "note": "", "tone": "warn", "buttons": []})) }
         for (i, x) in servers.iter().enumerate() {
             any = true;
             let srv: Server = serde_json::from_value(x["server"].clone()).unwrap_or_default();
             let key = format!("{}|{i}", s(src, "path")); let here = x["here"].as_str();
-            let on = here.is_none() && picked.contains(&key); if on { n += 1 }
+            let on = here.is_none() && !skipped.contains(&key); if on { n += 1 }
             let mut card = json!({"kind": "card", "label": srv.title(), "note": "", "title": srv.title(), "sub": srv.line(), "icon": icon(&srv), "pill": {"text": transport_label(&srv.transport), "tone": "dim"},
                 "meta": match here { Some(h) => format!("Already here as {h}"), None => if x["secret"].as_u64().unwrap_or(0) > 0 { "Its keys go to the vault".to_string() } else { String::new() } }, "buttons": []});
-            if here.is_none() { card["toggle"] = json!({"on": on, "action": "mcp-imp", "value": key}); card["buttons"] = json!([btn(if on { "import" } else { "skip" }, "mcp-imp", &key, on)]) }
+            if here.is_none() { card["toggle"] = json!({"on": on, "action": "mcp-imp", "value": key, "style": "check"}); card["buttons"] = json!([btn(if on { "import" } else { "skip" }, "mcp-imp", &key, on)]) }
             v.push(card);
         }
     }
@@ -328,6 +333,11 @@ fn import_rows(v: &mut Vec<Value>, info: &Value, ui: &Ui) {
     v.push(json!({"kind": "actions", "label": "", "note": "Keep in sync: an imported server follows changes to its file; your on/off, scope and tools stay yours.", "buttons": [btn(&if n == 1 { "Import 1 server".to_string() } else { format!("Import {n} servers") }, "mcp-import", "", n > 0), btn("Keep in sync", "mcp-isync", if sync { "off" } else { "on" }, sync), btn("Cancel", "mcp-view", "", false)]}));
 }
 
+/// The scan's servers to import: every one not already here, less those unticked (`imp`).
+pub fn import_picks(scan: &Value, skipped: &str) -> Vec<String> {
+    let skip: Vec<&str> = skipped.split(',').filter(|x| !x.is_empty()).collect();
+    scan.as_array().into_iter().flatten().flat_map(|src| src["servers"].as_array().into_iter().flatten().enumerate().filter(|(_, x)| x["here"].is_null()).map(move |(i, _)| format!("{}|{i}", s(src, "path")))).filter(|k| !skip.contains(&k.as_str())).collect()
+}
 fn gallery_rows(v: &mut Vec<Value>, info: &Value, ui: &Ui) {
     let added: Vec<&str> = info["gallery_added"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
     v.push(json!({"kind": "panel", "label": "Gallery", "note": "Checked to exist, one press to add. Community means it is not made by the vendor.", "buttons": []}));
@@ -337,7 +347,7 @@ fn gallery_rows(v: &mut Vec<Value>, info: &Value, ui: &Ui) {
         let here = added.contains(&e.id);
         let (pill, tone) = if e.signin { ("Needs sign-in", "dim") } else if here { ("Added", "ok") } else { (transport_label(if e.remote() { "http" } else { "stdio" }), "dim") };
         let mut b = vec![];
-        if !e.signin && e.needs.is_empty() { b.push(btn(if here { "Add again" } else { "Add" }, "mcp-gallery", e.id, !here)) }
+        if !e.signin && e.needs.is_empty() && !here { b.push(btn("Add", "mcp-gallery", e.id, true)) }
         b.push(btn("Docs", "open-url", e.home, false));
         let mut card = json!({"kind": "card", "label": e.name, "note": format!("{} · {}", e.by, e.about), "title": e.name, "sub": format!("{} · {}", e.by, e.about), "icon": gallery_icon(e),
             "pill": {"text": pill, "tone": tone}, "meta": if e.signin { "OAuth sign-in is not supported yet".to_string() } else if let Some((k, _, req)) = e.secret { format!("{k} {}", if req { "from the vault" } else { "optional, from the vault" }) } else { String::new() },
@@ -379,9 +389,9 @@ mod tests {
     fn kinds(rows: &[Value]) -> Vec<String> { rows.iter().map(|r| format!("{}:{}", s(r, "kind"), s(r, "label"))).collect() }
     #[test] fn the_list_shows_built_ins_then_cards_with_their_status() {
         let m = HashMap::new(); let get = ui(&m); let r = rows(&info(), &Ui { get: &get }, 160);
-        let k = kinds(&r); assert_eq!(&k[..5], ["head:MCP servers", "group:Servers", "card:Backplane", "card:pcbparts", "card:fetch"]); assert_eq!(k[5], "card:GitHub");
-        assert_eq!(r[4]["pill"], json!({"text":"Ready","tone":"ok"})); assert_eq!(r[4]["meta"], "stdio · 1 tool · used just now"); assert_eq!(r[4]["sub"], "uvx mcp-server-fetch");
-        assert_eq!(r[5]["pill"], json!({"text":"Needs a key","tone":"warn"})); assert_eq!(r[5]["icon"], json!({"text":"GH","bg":"#24292f"}));
+        let k = kinds(&r); assert_eq!(&k[..7], ["head:MCP servers", "group:Servers", "card:fetch", "card:GitHub", "group:Built in", "card:Backplane", "card:pcbparts"]);
+        assert_eq!(r[2]["pill"], json!({"text":"Ready","tone":"ok"})); assert_eq!(r[2]["meta"], "stdio · 1 tool · used just now"); assert_eq!(r[2]["sub"], "uvx mcp-server-fetch");
+        assert_eq!(r[3]["pill"], json!({"text":"Needs a key","tone":"warn"})); assert_eq!(r[3]["icon"], json!({"text":"GH","bg":"#24292f"}));
         assert!(r.iter().all(|x| x["label"].is_string() && x["buttons"].is_array()), "every row also reads as a plain row for an older client");
         assert!(k.contains(&"group:Agents adding servers".to_string()));
     }
@@ -391,7 +401,7 @@ mod tests {
         assert!(r.iter().any(|x| x["label"] == "Agents" && x["buttons"][0]["on"] == true)); assert!(r.iter().any(|x| x["label"] == "Bots"));
         let m: HashMap<&str, &str> = [("view", "open:fetch")].into(); let get = ui(&m); let r = rows(&info(), &Ui { get: &get }, 160);
         let t = r.iter().find(|x| x["kind"] == "tool").unwrap(); assert_eq!((t["label"].as_str(), t["toggle"]["value"].as_str()), (Some("fetch"), Some("fetch|fetch")));
-        assert!(r.iter().any(|x| x["kind"] == "actions" && x["buttons"][0]["action"] == "mcp-test"));
+        assert!(r.iter().any(|x| x["kind"] == "actions" && x["buttons"][0]["action"] == "mcp-test" && x["in"] == true), "the details are drawn inside the card");
     }
     #[test] fn add_parses_as_you_paste() {
         let m: HashMap<&str, &str> = [("view", "add"), ("mpaste", r#"{"mcpServers":{"a":{"command":"x"},"b":{"url":"https://b.example/mcp"}}}"#), ("skip", "1")].into(); let get = ui(&m);
@@ -414,7 +424,7 @@ mod tests {
         assert!(r.iter().any(|x| x["title"] == "Nordic Semiconductor" && x["pill"]["text"] == "Needs sign-in"));
         assert!(r.iter().any(|x| x["title"] == "STM32 Docs" && x["badge"] == "Community"));
         let mut i = info(); i["scan"] = json!([{"tool": "Codex", "path": "/h/.codex/config.toml", "error": "", "servers": [{"server": Server { id: "x".into(), transport: "stdio".into(), command: "x".into(), ..Default::default() }, "here": null, "secret": 0}, {"server": Server { id: "f2".into(), transport: "stdio".into(), command: "uvx".into(), ..Default::default() }, "here": "fetch", "secret": 0}]}]);
-        let m: HashMap<&str, &str> = [("view", "import"), ("imp", "/h/.codex/config.toml|0")].into(); let get = ui(&m); let r = rows(&i, &Ui { get: &get }, 0);
+        let m: HashMap<&str, &str> = [("view", "import")].into(); let get = ui(&m); let r = rows(&i, &Ui { get: &get }, 0);
         assert!(r.iter().any(|x| x["meta"] == "Already here as fetch")); assert_eq!(r.iter().find(|x| x["kind"] == "actions").unwrap()["buttons"][0]["label"], "Import 1 server");
     }
     #[test] fn steps_move_the_page_only() {
