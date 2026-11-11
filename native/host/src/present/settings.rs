@@ -876,7 +876,7 @@ mod tests {
 
     #[test] fn the_menu_lists_the_ported_pages_each_a_settings_page_button() {
         let v = view(&st(&[]), &json!({"open": {"settings": true}, "drafts": {}}), &json!({}));
-        assert_eq!(labels(&v), ["Appearance", "Threads", "Notifications", "Agents", "Writing", "CAD", "Ordering", "Network and updates", "Devices", "Machines", "Voice", "Ring", "API keys", "Time zone", "Rules and task board", "Usage", "Setup", "Import from 0.14", "About", "Privacy", "Developer"]);
+        assert_eq!(labels(&v), ["Appearance", "Threads", "Notifications", "Agents", "MCP servers", "Writing", "CAD", "Ordering", "Network and updates", "Devices", "Machines", "Voice", "Ring", "API keys", "Time zone", "Rules and task board", "Usage", "Setup", "Import from 0.14", "About", "Privacy", "Developer"]);
         assert_eq!(v["rows"][1]["buttons"][0]["action"], "settings-page"); assert_eq!(v["rows"][1]["buttons"][0]["value"], "threads");
     }
     #[test] fn about_says_what_this_windows_browser_tab_is() {
