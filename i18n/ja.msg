@@ -2066,6 +2066,7 @@ gpui.c.kicad.the.editor.s.window.could = エディタのウィンドウを開け
 gpui.c.kicad.changed = ディスク上で変更されました: {files}。未保存の編集があります。
 gpui.c.kicad.keep.yours = 自分の編集を残す
 gpui.c.kicad.reload.lose.your.edits = 再読み込み（編集は失われます）
+gpui.c.kicad.a.comment.from.kicad.needs = KiCad からのコメントにはスレッドを開いておく必要があります。
 
 # ---- gpui-d: setup, pairing, hubs, palette, picker, projects, composer, menus ----
 gpui.assets.missing = {dir} にアセットがありません: {files}

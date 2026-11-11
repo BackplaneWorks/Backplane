@@ -36,6 +36,7 @@ pub mod review;
 pub mod watch;
 pub mod xprobe;
 pub mod reload;
+pub mod comment;
 pub mod histsteps;
 pub mod open;
 pub mod install;
@@ -50,6 +51,7 @@ pub fn start(hub: &Arc<Hub>) {
     embed::start(hub);
     xprobe::start(hub);
     reload::start(hub);
+    comment::start(hub);
 }
 
 /// `kicad.watch` names a folder and maybe a file: both must lie under a folder the hub knows (a project's root or a

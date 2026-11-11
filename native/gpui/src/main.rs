@@ -117,6 +117,7 @@ impl Backplane {
             Event::HubOffer(text)=>screens::hubpick::offered(self,&text,cx),
             Event::KicadEditor(digest,text)=>self.kicad_info(digest,&text,cx),
             Event::KicadReply(m,reply)=>self.kicad_reply(m,reply,cx),
+            Event::KicadComment(text)=>self.kicad_comment(&text,cx),
             Event::KicadReload(text)=>{if let Some(p)=self.screens.kicad.clone(){let v:serde_json::Value=serde_json::from_str(&text).unwrap_or_default();p.update(cx,|p,cx|p.set_reload(v,cx));}},
             Event::Using(home)=>{eprintln!("GPUI_LOG {}",serde_json::json!({"hub":"using","text":home.clone().unwrap_or_default()}));self.screens.offers.on_home=home;cx.notify();},
             Event::Answer(id,reply) if screens::hubpick::answered(self,id,&reply,cx)=>{},

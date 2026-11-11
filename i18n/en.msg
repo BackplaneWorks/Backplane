@@ -2043,6 +2043,7 @@ gpui.c.kicad.the.editor.s.window.could = The editor's window could not open:
 gpui.c.kicad.changed = Changed on disk: {files}. You have unsaved edits.
 gpui.c.kicad.keep.yours = Keep yours
 gpui.c.kicad.reload.lose.your.edits = Reload (lose your edits)
+gpui.c.kicad.a.comment.from.kicad.needs = A comment from KiCad needs an open thread.
 
 # ---- gpui-d: setup, pairing, hubs, palette, picker, projects, composer, menus ----
 gpui.assets.missing = Assets missing in {dir}: {files}

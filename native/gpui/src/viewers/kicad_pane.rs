@@ -504,6 +504,14 @@ impl Render for KicadPane {
 mod tests {
     use super::{belongs_to, edit_target, frame_for, hub_open_step, nc, path_stem, pick, project_of, root_of, waiting, waiting_on};
     use serde_json::{json, Value};
+    #[test] fn a_kicad_comment_reads_as_the_persons_message_with_its_references_and_picture() {
+        let c = json!({"frame": "FK_PCB", "note": "Move U3 closer to J1", "names": {"references": ["U3"], "nets": ["GND"], "pins": []},
+            "items": [{"kind": "FOOTPRINT", "reference": "U3", "layer": "F.Cu", "x_mm": 10.0, "y_mm": 20.5}], "image": "/h/kicad-comments/a-4.png"});
+        let t = super::comment_text(&c);
+        assert!(t.starts_with("Move U3 closer to J1\n\nSelected in the KiCad board: U3; nets GND"), "{t}");
+        assert!(t.contains("- footprint U3 on F.Cu at (10.00, 20.50) mm") && t.ends_with("\n\n/h/kicad-comments/a-4.png"), "{t}");
+        assert!(super::comment_text(&json!({"frame": "FK_SCH", "note": "here", "empty": true})).contains("nothing selected"));
+    }
     #[test] fn ctrl_tab_goes_round_the_editor_tabs() {
         assert_eq!(super::next_tab("PCB", 1), "SCH"); assert_eq!(super::next_tab("PCB", -1), "FOOTPRINT_EDITOR"); assert_eq!(super::next_tab("FOOTPRINT_EDITOR", 1), "PCB"); assert_eq!(super::next_tab("?", 1), "SCH");
     }
@@ -739,5 +747,49 @@ impl crate::Backplane {
     /// The strip's buttons in the main window.
     pub(crate) fn kicad_strip_act(&mut self, a: &str, cx: &mut Context<Self>) {
         match a { "full" => { self.screens.kicad_full = !self.screens.kicad_full; cx.notify(); } "popout" => self.kicad_popout(cx), _ => {} }
+    }
+}
+
+/// A "Comment to Backplane" as the person's message: their note, then what they had selected in KiCad (references, pins and nets, which the
+/// thread draws as links that cross-probe; each item's layer or sheet and position in mm), then the screenshot (its path alone on a line: the
+/// thread draws it). English: it is the person's message to an agent, as they wrote it.
+pub fn comment_text(c: &Value) -> String {
+    let list = |k: &str| c["names"][k].as_array().into_iter().flatten().filter_map(Value::as_str).map(String::from).collect::<Vec<_>>();
+    let (refs, nets, pins) = (list("references"), list("nets"), list("pins"));
+    let ed = if c["frame"] == "FK_SCH" || c["frame"] == 2 { "schematic" } else { "board" }; // i18n-ok: the person's message to an agent
+    let mut t = c["note"].as_str().unwrap_or("").trim().to_string();
+    if c["empty"] == true { t.push_str(&format!("\n\n(KiCad {ed}, nothing selected: the area in view)")); } // i18n-ok: the person's message to an agent
+    else {
+        let mut sel = Vec::new();
+        if !refs.is_empty() { sel.push(refs.join(", ")); }
+        if !pins.is_empty() { sel.push(format!("pins {}", pins.join(", "))); } // i18n-ok: the person's message to an agent
+        if !nets.is_empty() { sel.push(format!("nets {}", nets.join(", "))); } // i18n-ok: the person's message to an agent
+        t.push_str(&format!("\n\nSelected in the KiCad {ed}: {}", sel.join("; "))); // i18n-ok: the person's message to an agent
+        if let Some(sp) = c["sheet_path"].as_str().filter(|s| !s.is_empty() && *s != "/") { t.push_str(&format!(" (sheet {sp})")); } // i18n-ok
+    }
+    let items = c["items"].as_array().cloned().unwrap_or_default();
+    for it in items.iter().take(12) {
+        let name = [it["reference"].as_str(), it["pin"].as_str(), it["net"].as_str()].into_iter().flatten().find(|s| !s.is_empty()).unwrap_or("");
+        let at = match (it["x_mm"].as_f64(), it["y_mm"].as_f64()) { (Some(x), Some(y)) => format!(" at ({x:.2}, {y:.2}) mm"), _ => String::new() }; // i18n-ok
+        let place = it["layer"].as_str().or(it["sheet_path"].as_str()).filter(|s| !s.is_empty()).map(|l| format!(" on {l}")).unwrap_or_default(); // i18n-ok
+        t.push_str(&format!("\n- {} {name}{place}{at}", it["kind"].as_str().unwrap_or("item").to_lowercase()));
+    }
+    if items.len() > 12 || c["truncated"] == true { t.push_str(&format!("\n- … and more ({} items listed of the selection)", items.len().min(12))); } // i18n-ok
+    if let Some(img) = c["image"].as_str().filter(|s| !s.is_empty()) { t.push_str(&format!("\n\n{img}")); }
+    t
+}
+
+impl crate::Backplane {
+    /// A comment from KiCad: posted once (by its seq) into the open thread, when the window shows this project's editor.
+    pub(crate) fn kicad_comment(&mut self, text: &str, cx: &mut Context<Self>) {
+        let Ok(v) = serde_json::from_str::<Value>(text) else { return };
+        let Some(p) = self.screens.kicad.clone() else { return };
+        if !p.read(cx).matches(&v) { return }
+        let key = format!("{}#{}", v["project"].as_str().unwrap_or(""), v["seq"]);
+        if !self.screens.kicad_comments_seen.insert(key) { return }
+        let th = self.data["thread"]["id"].as_str().unwrap_or("").rsplit('|').next().unwrap_or("").to_string();
+        if th.is_empty() { self.note = crate::i18n::trs("A comment from KiCad needs an open thread."); cx.notify(); return }
+        let _ = self.tx.try_send(Command::Ask("turn.start".into(), json!({"thread": th, "text": comment_text(&v), "mode": "steer"}), 0));
+        cx.notify();
     }
 }
