@@ -2,7 +2,9 @@
 //! in parallel (geom::triangulate).
 //!
 //! Heights (mm, z up from the laminate's bottom face): laminate 0..T with T = thickness - 2 copper; copper's outer faces at T + cu and
-//! -cu; the finish 2 um above the copper, the mask 10 um, the silk 20 um (the bottom side mirrored).
+//! -cu; the finish one wire unit (10 um) above the copper, the mask two, the silk three (the bottom side mirrored). Every height is a whole
+//! number of wire units (`heights`): the clients get positions in 10 um, so layers closer than that, or on a half unit, would round onto
+//! one plane and fight (a 0.8 mm board's copper at 76.5 units and its mask at 77.5 drew as stripes of both).
 use super::geom::{self, Ring, Shapes};
 use super::{Board, Drill, Finish, Layer, Rgba, Side};
 use rayon::prelude::*;
@@ -171,10 +173,19 @@ pub fn layers_within(b: &Board, most: usize) -> Vec<Layer> {
     best
 }
 
+/// The wire's unit (mm): positions reach the clients in 10 um (solid.rs `unit`).
+pub const WIRE: f64 = 0.01;
+/// The laminate's top T and the copper's thickness cu, each a whole number of wire units, cu at least one and the whole board as thick
+/// as the file says to the unit: (T, cu).
+pub fn heights(thickness: f64, copper: f64) -> (f64, f64) {
+    let cu = (copper.max(0.0) / WIRE).round().max(1.0);
+    let t = ((thickness / WIRE).round() - 2.0 * cu).max((0.05 / WIRE as f64).round());
+    (t * WIRE, cu * WIRE)
+}
+
 fn layers_now(b: &Board) -> Vec<Layer> {
     let st = &b.stack;
-    let cu = st.copper.max(0.0);
-    let t = (st.thickness - 2.0 * cu).max(0.05);
+    let (t, cu) = heights(st.thickness, st.copper);
     let (outline, _) = outline(b);
     let ds = drills(b);
     let drill_rings: Vec<Ring> = ds.iter().map(|d| geom::norm(geom::drill_ring(d, 0.0))).collect();
@@ -210,7 +221,7 @@ fn layers_now(b: &Board) -> Vec<Layer> {
                 // clipped to the board, as KiCad's 3D view and kicad-cli are: a pad off the board's edge is not drawn
                 let cu_s = geom::intersect(&geom::flat(&copper_shapes(b, side, &drill_rings)), &board_rings);
                 let op = openings(b, side);
-                let (zc, zf) = if top { (t + cu, t + cu + 0.002) } else { (-cu, -cu - 0.002) };
+                let (zc, zf) = if top { (t + cu, t + cu + WIRE) } else { (-cu, -cu - WIRE) };
                 let (a, f) = rayon::join(
                     || { let mut m = M::default(); m.face(&cu_s, zc, top); m.into_layer(if top { "copper_top" } else { "copper_bottom" }, wire(copper_rgba, false)) },
                     || fin.map(|fc| { let fs = geom::intersect(&geom::flat(&cu_s), &op); let mut m = M::default(); m.face(&fs, zf, top); m.into_layer(if top { "finish_top" } else { "finish_bottom" }, wire(fc, false)) }),
@@ -220,7 +231,7 @@ fn layers_now(b: &Board) -> Vec<Layer> {
             K::Mask(side) => {
                 let top = side == Side::Top;
                 let ms = mask_shapes(b, side, &board_rings);
-                let z = if top { t + cu + 0.01 } else { -cu - 0.01 };
+                let z = if top { t + cu + 2.0 * WIRE } else { -cu - 2.0 * WIRE };
                 let mut m = M::default(); m.face(&ms, z, top);
                 let c = if top { st.mask_top } else { st.mask_bottom }.unwrap_or(KICAD_MASK);
                 vec![m.into_layer(if top { "mask_top" } else { "mask_bottom" }, wire(c, true))]
@@ -229,7 +240,7 @@ fn layers_now(b: &Board) -> Vec<Layer> {
                 let top = side == Side::Top;
                 // the board's shape, not the mask's openings: kicad-cli draws silk over a pad as the file has it (it has no option to subtract the mask)
                 let s = geom::intersect(&silk_rings(b, side), &board_rings);
-                let z = if top { t + cu + 0.02 } else { -cu - 0.02 };
+                let z = if top { t + cu + 3.0 * WIRE } else { -cu - 3.0 * WIRE };
                 let mut m = M::default(); m.face(&s, z, top);
                 let c = if top { st.silk_top } else { st.silk_bottom }.unwrap_or(KICAD_SILK);
                 vec![m.into_layer(if top { "silk_top" } else { "silk_bottom" }, wire(c, false))]
@@ -270,12 +281,33 @@ mod tests {
     fn poly_area(n: usize, r: f64) -> f64 { n as f64 * r * r * (2.0 * std::f64::consts::PI / n as f64).sin() / 2.0 }
 
     #[test]
+    fn every_layer_lies_on_its_own_wire_plane() {
+        // the clients get positions in 10 um: a 0.8 mm board's copper (76.5 units) and mask (77.5) rounded onto one plane and fought
+        for (th, cu) in [(0.8, 0.035), (1.6, 0.035), (1.6, 0.07), (1.0, 0.0175), (0.4, 0.012), (1.57, 0.0)] {
+            let mut b = board(10.0, 10.0);
+            b.stack.thickness = th; b.stack.copper = cu; b.stack.finish = Finish::Enig;
+            b.copper.push((Side::Top, seg((2.0, 5.0), (8.0, 5.0)))); b.copper.push((Side::Bottom, seg((2.0, 5.0), (8.0, 5.0))));
+            b.pads.push(round_pad(5.0, 2.0, 1.0, None));
+            b.silk.push((Side::Top, seg((2.0, 8.0), (8.0, 8.0)))); b.silk.push((Side::Bottom, seg((2.0, 8.0), (8.0, 8.0))));
+            let ls = layers(&b);
+            let plane = |n: &str, top: bool| {
+                let zs: Vec<f64> = layer(&ls, n).pos.iter().map(|p| p[2] as f64 / WIRE).collect();
+                for z in &zs { assert!((z - z.round()).abs() < 0.01, "{th}/{cu}: {n} at {z} units, not on the grid"); }
+                zs.into_iter().map(|z| z.round() as i64).fold(None, |a: Option<i64>, z| Some(a.map_or(z, |a| if top { a.max(z) } else { a.min(z) })))
+            };
+            let up = ["laminate", "copper_top", "finish_top", "mask_top", "silk_top"].map(|n| plane(n, true).unwrap_or_else(|| panic!("{th}/{cu}: no {n}")));
+            let down = ["laminate", "copper_bottom", "finish_bottom", "mask_bottom", "silk_bottom"].map(|n| plane(n, false).unwrap());
+            assert!(up.windows(2).all(|w| w[0] < w[1]) && down.windows(2).all(|w| w[0] > w[1]), "{th}/{cu}: planes up {up:?} down {down:?}");
+            assert_eq!(up[1] - down[1], (th / WIRE).round() as i64, "{th}/{cu}: copper to copper is the board's thickness");
+        }
+    }
+    #[test]
     fn square_with_hole_and_slot() {
         let mut b = board(20.0, 10.0);
         b.pads.push(round_pad(5.0, 5.0, 3.0, Some(2.0)));
         b.holes.push(Drill { c: P2::new(14.0, 5.0), w: 4.0, h: 1.0, rot: 0.0, plated: false });
         let ls = layers(&b);
-        let t = 1.6 - 0.07;
+        let t = heights(1.6, 0.035).0;
         let lam = layer(&ls, "laminate");
         let hole = poly_area(geom::full_steps(1.0), 1.0);
         let slot = 3.0 * 1.0 + std::f64::consts::PI * 0.25; // chords of the caps: a little under
@@ -331,7 +363,8 @@ mod tests {
         assert!((full - cut - poly_area(geom::full_steps(0.05), 0.05)).abs() < 1e-4, "{full} {cut}");
         let ls = layers(&b);
         let cu = layer(&ls, "copper_top");
-        assert!((flat_area(cu, (1.53 + 0.0) as f32 - 0.0, true) - cut).abs() < 0.01 || flat_area(cu, 1.6 - 0.035, true) > 3.5);
+        let (t, c) = heights(1.6, 0.035);
+        assert!((flat_area(cu, (t + c) as f32, true) - cut).abs() < 0.01, "{}", flat_area(cu, (t + c) as f32, true));
     }
 
     #[test]

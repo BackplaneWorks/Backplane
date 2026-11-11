@@ -1,6 +1,13 @@
 
 import os, struct, json, array, Part
-src, out, tol = os.environ["BP_IN"], os.environ["BP_OUT"], float(os.environ.get("BP_TOL", "0.1"))
+src, out, tol = os.environ["BP_IN"], os.environ["BP_OUT"], float(os.environ.get("BP_TOL", "0.03"))
+ang = float(os.environ.get("BP_ANG", "0.2"))
+def mesh(shape):  # freecad_gui.py's: the whole shape meshed once at both deflections, then read by tessellate
+    try:
+        import MeshPart
+        MeshPart.meshFromShape(Shape=shape, LinearDeflection=tol, AngularDeflection=ang, Relative=False)
+    except Exception:
+        pass
 s = Part.read(src)
 shapes = list(s.Solids) or [s]
 pal = [(0.8, 0.8, 0.8), (0.6, 0.65, 0.72), (0.74, 0.68, 0.58), (0.52, 0.62, 0.52), (0.7, 0.58, 0.64), (0.58, 0.7, 0.72)]
@@ -12,7 +19,7 @@ buf = bytearray(); views = []; accs = []; prims = []; mats = []; tris = 0
 for gi, g in enumerate(groups):
     pts = []; idx = []
     for so in g:
-        p, f = so.tessellate(tol)
+        mesh(so); p, f = so.tessellate(tol)
         base = len(pts); pts.extend(p)
         for t in f: idx.extend((base + t[0], base + t[1], base + t[2]))
     if not idx: continue

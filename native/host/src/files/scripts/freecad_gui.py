@@ -1,6 +1,13 @@
 import os, struct, json, array
 import FreeCAD as App, FreeCADGui as Gui, ImportGui
-src, out, tol = os.environ["BP_IN"], os.environ["BP_OUT"], float(os.environ.get("BP_TOL", "0.25"))
+src, out, tol = os.environ["BP_IN"], os.environ["BP_OUT"], float(os.environ.get("BP_TOL", "0.03"))
+ang = float(os.environ.get("BP_ANG", "0.2"))
+def mesh(shape):  # the whole shape meshed once at both deflections; each face's tessellate then reads that mesh: a face meshed alone has no angle limit (a small circle came out a hexagon), and its edges did not meet its neighbours
+    try:
+        import MeshPart
+        MeshPart.meshFromShape(Shape=shape, LinearDeflection=tol, AngularDeflection=ang, Relative=False)
+    except Exception:
+        pass
 try:
     # a person's FreeCAD preferences can make a STEP import wait forever offscreen: Import's "import mode" 2 (found hanging on 1.1: a box never came in), and the
     # "show this dialog" boxes. Set in memory only: this process ends with os._exit, which saves nothing.
@@ -18,7 +25,8 @@ try:
         base = tuple(round(c, 4) for c in vo.ShapeColor[:3])
         plain = all(abs(a - b) < 0.01 for a, b in zip(base, default)) and all(all(abs(a - b) < 0.01 for a, b in zip(c[:3], default)) for c in cols)
         tint = pal[n % len(pal)]; n += 1
-        faces = o.Shape.Faces
+        shape = o.Shape; mesh(shape)
+        faces = shape.Faces
         for i, f in enumerate(faces):
             c = tint if plain else tuple(round(x, 3) for x in (cols[i][:3] if len(cols) == len(faces) else (cols[0][:3] if cols else base)))
             p, t = f.tessellate(tol)

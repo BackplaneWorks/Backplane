@@ -6,6 +6,6 @@ mask_top 2b020804 tris 2 area 35241.86
 mask_bottom 2b020804 tris 2 area 35241.86
 silk_top 00e9e9e9 tris 192 area 0.73
 silk_bottom 00e9e9e9 tris 0 area -0.00
-solid 5810 box [5969, 8128, -5, 35179, 20193, 159]
-seat 1.565 0.000
+solid 5810 box [5969, 8128, -6, 35179, 20193, 159]
+seat 1.560 0.000
 parts 0 files 0 boxes 0 footprints 4

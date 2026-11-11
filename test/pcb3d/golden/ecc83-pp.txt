@@ -6,6 +6,6 @@ mask_top 000c4e14 tris 1078 area 2195.24
 mask_bottom 000c4e14 tris 1078 area 2195.24
 silk_top 00939393 tris 2613 area 89.87
 silk_bottom 00939393 tris 0 area -0.00
-solid 15850 box [12129, 9017, -5, 17336, 13652, 159]
-seat 1.565 -0.035
+solid 15850 box [12129, 9017, -6, 17336, 13652, 159]
+seat 1.560 -0.040
 parts 11 files 5 boxes 0 footprints 15
