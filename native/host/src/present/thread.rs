@@ -163,6 +163,27 @@ pub fn bot_private(id: &str, role: &str, text: &str) -> bool {
     if ["[Backplane]", "[mail ", "[mailroom "].iter().any(|h| text.starts_with(h)) { return true }
     !matches!(crate::state::fam::ext::classify_kind(crate::model::link_from(id), id, text), "person" | "peer" | "room")
 }
+/// Bot.backend: what starts a bot's turn that is not the person's (or a person's on a linked machine): the hub's notes, a restart's wake, a launched thread's
+/// report, another bot, a room, a routine, a webhook, mail. The replies of such a turn are backend: no row of the person's chat, no alert. The bot speaks to
+/// the person from it only through notify_person, whose text lands as a message of its own (id `tell:`).
+pub fn input_backend(id: &str, role: &str, text: &str) -> bool {
+    if role == "system" { return true }
+    if role != "user" { return false }
+    if ["[Backplane]", "[mail ", "[mailroom "].iter().any(|h| text.starts_with(h)) { return true }
+    crate::state::fam::ext::classify_kind(crate::model::link_from(id), id, text) != "person"
+}
+/// The backend replies among `rows` (oldest first: (id, is a message, role, text)); `before`: the turn running when the first row was written was a backend one.
+pub fn backend_replies<'a>(rows: impl IntoIterator<Item = (&'a str, bool, &'a str, &'a str)>, mut before: bool) -> std::collections::HashSet<String> {
+    let mut out = std::collections::HashSet::new();
+    for (id, msg, role, text) in rows {
+        if !msg { continue }
+        if role == "user" || role == "system" { before = input_backend(id, role, text) }
+        else if role == "assistant" && before && !id.starts_with("tell:") { out.insert(id.to_string()); }
+    }
+    out
+}
+/// Whether the newest input among `rows` (newest first) started a backend turn (false when there is none).
+pub fn last_input_backend(rows: &[crate::model::Row]) -> bool { rows.iter().find(|r| r.kind == "msg" && (r.role == "user" || r.role == "system")).map_or(false, |r| input_backend(&r.id, &r.role, &r.text)) }
 /// `agent_only`, and in a bot's conversation `bot_private` too
 pub fn hidden(bot: bool, id: &str, role: &str, text: &str) -> bool { agent_only(role, text) || (bot && bot_private(id, role, text)) }
 /// Hub.order.note: Backplane's own note of an order's progress in its buy thread (settings/order.rs `progress`, ids "o:<order>:<status>")
@@ -485,7 +506,8 @@ pub fn thread_object_checked(st: &State, hub: &str, thread: &str, params: &Value
     let es: Vec<Ent> = es.into_iter().filter(|e| think_on || !(!e.msg && e.role == "thinking")).collect();
     // Bot.private: in a bot's conversation the hub's reports and notes to the bot are not rows
     let bot = st.bot_threads_has(thread);
-    let es: Vec<Ent> = es.into_iter().filter(|e| !(bot && e.msg && bot_private(&e.id, &e.role, &e.text))).collect();
+    let backend = if bot { backend_replies(es.iter().map(|e| (e.id.as_str(), e.msg, e.role.as_str(), e.text.as_str())), page["backendBefore"] == true) } else { Default::default() };
+    let es: Vec<Ent> = es.into_iter().filter(|e| !(bot && e.msg && (bot_private(&e.id, &e.role, &e.text) || backend.contains(&e.id)))).collect();
     let zone = person_zone(st);
     let running = st.threads.get(thread).map_or(false, |t| t.turn == Turn::Running);
     let now_ms = params["now"].as_u64().unwrap_or(0);

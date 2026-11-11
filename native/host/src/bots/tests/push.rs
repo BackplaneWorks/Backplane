@@ -526,3 +526,35 @@ async fn a_run(s: &S, n: usize) -> (String, String) {
     let long = "word ".repeat(60); let b = p(&long); assert!(b.chars().count() <= 180 && b.ends_with('…'), "{b}");
     assert_eq!(p("Plain text."), "Plain text.");
 }
+
+/// Bot.backend (Nov 11: after every restart Bub's "I read the plane; nothing was halted" showed in the person's chat): a turn the person did not start is private.
+/// A restart's wake answered in plain text shows nothing and pushes nothing; the same turn's notify_person shows exactly its one line; the person's turns are as before.
+#[tokio::test] async fn a_turn_the_person_did_not_start_is_private_and_only_notify_person_speaks_from_it() {
+    let s = setup("backend").await;
+    let posted = |id: &str, role: &str, text: &str| json!({"$":"MessagePosted","thread":s.chat,"msg":id,"role":role,"text":text,"at":now_s()});
+    // the person's own turn: their message and the reply show
+    s.hub.commit(&posted("p1", "user", "how is the board?")).await.unwrap(); s.hub.commit(&posted("a1", "assistant", "Routed, two errors left.")).await.unwrap();
+    // a restart's wake (bots/uber.rs restarted_text, delivered as a system message) answered in plain text
+    s.hub.commit(&posted("w1", "system", &crate::bots::uber::restarted_text("update"))).await.unwrap();
+    s.hub.commit(&posted("a2", "assistant", "I read the plane; nothing was halted.")).await.unwrap();
+    let hid = crate::data::backend_now(&s.hub, &s.chat).await;
+    assert!(hid.contains("a2") && !hid.contains("a1"), "the wake's reply is private, the person's is not: {hid:?}");
+    assert!(crate::present::thread::last_input_backend(&s.hub.model().await.tail(&s.hub.store, &s.chat, 48)), "its turn's end alerts no one (settings/alerts.rs)");
+    tokio::time::sleep(std::time::Duration::from_millis(300)).await; assert!(s.fake.alerts().is_empty(), "nothing pushed");
+    // from the same kind of turn, notify_person is the one way to the person: one line in the chat, one push
+    let r = notify(&s, "needs_you", "The restart halted Lane F and I could not resume it.", now_s()).await; assert!(r.0, "{r:?}");
+    let tells: Vec<Value> = log(&s.hub).into_iter().filter(|e| e["$"] == "MessagePosted" && e["thread"] == s.chat.as_str() && e["msg"].as_str().unwrap_or("").starts_with("tell:")).collect();
+    assert_eq!(tells.len(), 1, "{tells:?}"); assert_eq!(tells[0]["text"], "The restart halted Lane F and I could not resume it."); assert_eq!(tells[0]["role"], "assistant");
+    let hid = crate::data::backend_now(&s.hub, &s.chat).await; assert!(!hid.contains(tells[0]["msg"].as_str().unwrap()), "the told line shows");
+    assert_eq!(s.fake.wait(1).await.len(), 1, "and it is the one push");
+    // a report, another bot, a room or a webhook start private turns the same way; the person's next message starts theirs again
+    for (i, (id, text)) in [("t:t9:lr-r1", "[Backplane] Launched thread \"x\" (t9) completed:\n\ndone"), ("b1", "[message from ada] the calendar is full"), ("h1", "[webhook: ring] note")].iter().enumerate() {
+        s.hub.commit(&posted(id, "user", text)).await.unwrap(); s.hub.commit(&posted(&format!("r{i}"), "assistant", "noted")).await.unwrap();
+        assert!(crate::data::backend_now(&s.hub, &s.chat).await.contains(&format!("r{i}")), "{id}'s reply is private");
+    }
+    s.hub.commit(&posted("p2", "user", "thanks")).await.unwrap(); s.hub.commit(&posted("a3", "assistant", "Any time.")).await.unwrap();
+    let hid = crate::data::backend_now(&s.hub, &s.chat).await; assert!(!hid.contains("a3") && !hid.contains("a1"), "{hid:?}");
+    // in the person's own turn notify_person adds no chat line (the reply says it)
+    let n = log(&s.hub).iter().filter(|e| e["msg"].as_str().map_or(false, |m| m.starts_with("tell:"))).count(); let _ = notify(&s, "done", "Done.", now_s()).await;
+    assert_eq!(log(&s.hub).iter().filter(|e| e["msg"].as_str().map_or(false, |m| m.starts_with("tell:"))).count(), n);
+}

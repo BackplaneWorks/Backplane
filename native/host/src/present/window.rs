@@ -21,9 +21,11 @@ fn blocks(s: &str) -> (String, usize) {
     (first, n)
 }
 /// `bot`: the thread is a bot's conversation, where the hub's reports and notes to the bot draw nothing (`thread::bot_private`)
-fn entry_in(r: &Row, bot: bool) -> E {
+fn entry_in(r: &Row, bot: bool) -> E { entry_hid(r, bot, &Default::default()) }
+/// the same, `backend` the replies of turns that were not the person's (`thread::backend_replies`): left out of a bot's conversation as well
+fn entry_hid(r: &Row, bot: bool, backend: &std::collections::HashSet<String>) -> E {
     let msg = r.kind == "msg";
-    let private = msg && bot && super::thread::bot_private(&r.id, &r.role, &r.text);
+    let private = msg && bot && (super::thread::bot_private(&r.id, &r.role, &r.text) || backend.contains(&r.id));
     E { id: r.id.clone(), msg, role: r.role.clone(), kind: r.akind.clone(), text: if msg { crate::settings::order::pay_shown(&r.text) } else { blocks(&r.text).0 }, private }
 }
 
@@ -133,7 +135,8 @@ pub fn window_in(page: &Page, ctx: &[Row], epoch: &str, before: u64, p: &Value, 
     if p["bodyPages"].as_u64() == Some(1) { return None }
     let by: HashMap<u64, &Row> = page.rows.iter().map(|r| (r.ord, r)).collect();
     let ids = &page.ids;
-    let ents: Vec<(u64, E)> = ids.iter().rev().filter_map(|id| by.get(&num(id)).map(|r| (r.ord, entry_in(r, bot)))).collect(); // oldest first
+    let backend = if bot { let mut rs: Vec<&Row> = page.rows.iter().collect(); rs.sort_by_key(|r| r.seq); super::thread::backend_replies(rs.into_iter().map(|r| (r.id.as_str(), r.kind == "msg", r.role.as_str(), r.text.as_str())), p["backendBefore"] == true) } else { Default::default() };
+    let ents: Vec<(u64, E)> = ids.iter().rev().filter_map(|id| by.get(&num(id)).map(|r| (r.ord, entry_hid(r, bot, &backend)))).collect(); // oldest first
     let open = |id: &str| fold_choice(p, id);
     let es: Vec<E> = ents.iter().map(|(_, e)| e.clone()).filter(|e| !step_base(e)).collect();
     let rs = context_roles(&es, spread(&es, roles(&shown(&es), &open)), &open);
@@ -198,8 +201,8 @@ mod tests {
         let page = Page { ids: (1..=5).rev().map(|n| n.to_string()).collect(), below: 0, above: 0, rows };
         let ids = |w: &Value| w["messageIds"].as_array().unwrap().iter().map(|v| v.as_str().unwrap().to_string()).collect::<Vec<_>>();
         let bot = window_in(&page, &[], "e", 0, &json!({"target":{}}), true).unwrap();
-        assert_eq!(ids(&bot), ["u1", "a1", "a2"], "{bot}");
-        assert_eq!(bot["contextMessages"], json!(["a2", "u1"]), "the person's prompt is theirs, not the report");
+        assert_eq!(ids(&bot), ["u1", "a1"], "the reply to the report is private too (Bot.backend): {bot}");
+        assert_eq!(bot["contextMessages"], json!(["a1", "u1"]), "the person's prompt is theirs, not the report");
         let plain = window_in(&page, &[], "e", 0, &json!({"target":{}}), false).unwrap();
         assert_eq!(ids(&plain), ["u1", "a1", "t:t9:lr-r1", "a2"], "a thread that is no bot's keeps its reports");
     }

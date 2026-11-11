@@ -31,6 +31,8 @@ pub fn lean_keeps(k: &str) -> bool {
     // the to-do panel reads the thread's list and whether it shows (small); the merge base (`todos.base.`) stays out
     if k.starts_with("todos.") && !k.starts_with("todos.base.") { return true }
     // The GPUI recent root and existing sidebar read only bounded navigation settings.
+    // a home move (net/homemove.rs): the uberbot's row says where it is going, and a moved chat is drawn from its new home
+    if ["home.moving", "home.at"].contains(&k) { return true }
     if ["ui.theme", "sidebar.view", "mail.on", "uber.bot", "order.enabled", "order.estimates", "import.v014.ack"].contains(&k)
         || ["thread.tree.", "project.icon.", "project.color.", "project.pick.", "project.link.", "buy.", "order.quote.", "mail.private.owner.", "account.thread."].iter().any(|p| k.starts_with(p)) { return true }
     // the Context panel's readings (present/tokstats.rs): one short string a thread, and the epoch that names the thread totals' key

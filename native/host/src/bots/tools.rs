@@ -424,6 +424,10 @@ impl Bots {
         let mut evs = vec![json!({"$":"SettingSet","key":format!("alert.{th}"),"value":value,"at":now})];
         let target = if !ask.is_empty() && link.is_empty() { crate::data::ask_thread(&self.hub, ask).unwrap_or_default() } else if link.is_empty() { th.to_string() } else { link.to_string() };
         if let (true, Some(s)) = (on, &source) { evs.push(s.order(&self.hub_id("push", now), reason, &target, ask, text, now)) }
+        // Bot.backend: from a turn that was not the person's (a restart's wake, a report, another bot, a routine, a webhook) the reply stays private; this is how the
+        // bot speaks to the person from it: the text lands in its chat as a message of its own (`tell:`), shown like a reply
+        let backend = { let m = self.hub.model().await; crate::present::thread::last_input_backend(&m.tail(&self.hub.store, th, 48)) };
+        if backend { evs.push(json!({"$":"MessagePosted","thread":th,"msg":format!("tell:{}", self.hub_id("n", now)),"role":"assistant","text":text,"at":now})) }
         let answer = if !on { "recorded; the person turned these alerts off" } else if source.is_some() { "sent to the person" } else { "shown on the person's desktop; only the uberbot reaches their phone" };
         self.t_commit(w, now, evs).await.map_or_else(|e| fail(&e), |_| said(answer))
     }

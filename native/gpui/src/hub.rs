@@ -316,7 +316,9 @@ async fn session(config:&Config,commands:&mut mpsc::Receiver<Command>,events:&as
                             sink.send(Message::Binary(wire::encode(&request).into())).await?;
                         }
                     }
-                    if r["nextTarget"].is_object(){v.target=r["nextTarget"].clone();v.view_id.clear();let request=v.request("view.open",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;}
+                    // a home move (or a link) sends the window elsewhere; what each open then drew, for the logs: its target, thread and how many messages
+                    if method=="view.open" {eprintln!("GPUI_LOG {{\"view_open\":{},\"thread\":{},\"messages\":{}}}",r["target"],r["shown"]["thread"]["id"],r["window"]["messageIds"].as_array().map_or(-1,|a|a.len() as i64));}
+                    if r["nextTarget"].is_object(){eprintln!("GPUI_LOG {{\"next_target\":{}}}",r["nextTarget"]);v.target=r["nextTarget"].clone();v.view_id.clear();let request=v.request("view.open",json!({}));sink.send(Message::Binary(wire::encode(&request).into())).await?;}
                     else if let Some(cursor)=paged {
                         let _=events.send(Event::Older(cursor,Some(rv))).await;
                         let request=v.page("");sink.send(Message::Binary(wire::encode(&request).into())).await?;
