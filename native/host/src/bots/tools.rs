@@ -15,7 +15,7 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 
 pub const TOOLS_JSON: &str = include_str!("tools.json");
-pub const NAMES: &[&str] = &["bot_whoami", "bot_list", "bot_send", "room_list", "room_create", "room_post", "room_read", "memory_save", "memory_recall", "memory_forget", "memory_list",
+pub const NAMES: &[&str] = &["bot_whoami", "bot_list", "bot_send", "room_list", "room_create", "room_keep", "room_post", "room_read", "memory_save", "memory_recall", "memory_forget", "memory_list",
     "space_set", "space_get", "space_page", "routine_list", "routine_set", "routine_delete", "project_list", "bot_create", "voice_dictionary_add", "plane_read", "room_join", "room_leave", "notify_person", "remind_person", "person_timezone", "project_create"];
 const HOP_MAX: u64 = 6;
 const MAX_PAGE: usize = 262_144;
@@ -56,10 +56,22 @@ fn state(w: &World, thread: &str) -> &'static str {
     if open("approval") { "approval" } else if open("question") { "input" } else { match w.turns.get(thread).map(String::as_str) { Some("running") => "working", Some("failed") => "failed", _ => "ready" } }
 }
 fn room_json(r: &super::world::Room) -> Value { json!({"id":r.id,"name":r.name,"members":r.members}) }
-/// World.rooms: live and not a direct room, by id
-fn rooms(w: &World) -> Vec<&super::world::Room> { let mut v: Vec<_> = w.rooms.values().filter(|r| !r.deleted && !r.id.starts_with("dm:")).collect(); v.sort_by(|a, b| a.id.cmp(&b.id)); v }
-/// World.find_room: a room by id or by name in any case
-fn find_room<'a>(w: &'a World, name: &str) -> Option<&'a super::world::Room> { let l = name.to_lowercase(); rooms(w).into_iter().find(|r| r.id == name || r.name.to_lowercase() == l) }
+/// World.rooms: the listed rooms (live, permanent, not a direct room), by id: what room_list, bot_whoami and plane_read show. An ephemeral room is no bot's context.
+fn rooms(w: &World) -> Vec<&super::world::Room> { let mut v: Vec<_> = w.rooms.values().filter(|r| r.listed() && !r.id.starts_with("dm:")).collect(); v.sort_by(|a, b| a.id.cmp(&b.id)); v }
+/// the open ephemeral rooms bot `me` is in, by id: its own exchanges, found by id or topic, never listed
+fn exchanges<'a>(w: &'a World, me: &str) -> Vec<&'a super::world::Room> {
+    let mut v: Vec<_> = w.rooms.values().filter(|r| r.live() && r.ephemeral && !r.id.starts_with("dm:") && r.members.iter().any(|m| m == me)).collect(); v.sort_by(|a, b| a.id.cmp(&b.id)); v
+}
+/// World.find_room: a listed room by id or by name in any case, else one of `me`'s open exchanges
+fn find_room<'a>(w: &'a World, name: &str, me: &str) -> Option<&'a super::world::Room> {
+    let l = name.to_lowercase(); let hit = |r: &&super::world::Room| r.id == name || r.name.to_lowercase() == l;
+    rooms(w).into_iter().find(hit).or_else(|| exchanges(w, me).into_iter().find(hit))
+}
+/// a bot pair's room about a topic: one of the pair's open exchanges first, else a listed room of just the two
+fn pair_room<'a>(w: &'a World, me: &str, name: &str, other: impl Fn(&str) -> bool) -> Option<&'a super::world::Room> {
+    let fit = |r: &&super::world::Room| r.name.to_lowercase() == name.to_lowercase() && r.members.len() == 2 && r.members.iter().any(|m| m == me) && r.members.iter().any(|m| other(m));
+    exchanges(w, me).into_iter().find(fit).or_else(|| rooms(w).into_iter().find(fit))
+}
 fn routines_of<'a>(w: &'a World, bot: &str) -> Vec<&'a Routine> { let mut v: Vec<_> = w.routines.values().filter(|r| !r.deleted && r.bot == bot).collect(); v.sort_by(|a, b| a.id.cmp(&b.id)); v }
 /// the log position in a hub id (`b<secs>-<seq>`): bots made in one second keep the order they were made in
 fn id_seq(id: &str) -> u64 { id.rsplit('-').next().and_then(|n| n.parse().ok()).unwrap_or(0) }
@@ -67,6 +79,10 @@ fn id_seq(id: &str) -> u64 { id.rsplit('-').next().and_then(|n| n.parse().ok()).
 fn dm(a: &str, b: &str) -> String { if a <= b { format!("dm:{a}:{b}") } else { format!("dm:{b}:{a}") } }
 fn held_text(t: &str) -> String { format!("[held: {HOP_MAX} messages between bots without a person, so no bot heard this]\n{t}") }
 const HELD_NOTE: &str = "held: this exchange between bots is 6 messages deep, so no bot was woken. Your message is in the room for the person to read; don't send it again or anywhere else. A message from a person, a routine or a webhook starts a new exchange.";
+const HELD_CLOSED: &str = "held: this exchange between bots is 6 messages deep, so no bot was woken, and its room is closed now. Don't send it again or anywhere else. If the person needs it, tell them yourself (notify_person); a message from a person, a routine or a webhook starts a new exchange.";
+fn held_closed(r: Res) -> Res { if r.0 { (true, json!({"ok":true,"held":true,"closed":true,"note":HELD_CLOSED})) } else { r } }
+/// the RoomSet that closes an ephemeral room (Life.close)
+pub(super) fn close_ev(id: &str, name: &str, members: &[String], now: u64) -> Value { json!({"$":"RoomSet","id":id,"name":name,"members":members.join("\n"),"ephemeral":true,"closed":true,"at":now}) }
 /// Held.res: a held message's answer replaces the plain one
 fn held_res(r: Res) -> Res { if r.0 { (true, json!({"ok":true,"held":true,"note":HELD_NOTE})) } else { r } }
 /// Bots.members: the maker first, then the names given as ids (a name that is no bot is dropped; name@machine stays), one per line
@@ -118,22 +134,31 @@ impl Bots {
             }
             "bot_send" => self.t_send(w, &b, now, a, later).await,
             "room_list" => (true, Value::Array(rooms(&w).into_iter().map(room_json).collect())),
+            "room_keep" => {
+                let Some(r) = find_room(&w, gs(a, "room"), &b.id).or_else(|| w.rooms.get(gs(a, "room")).filter(|r| !r.deleted)).cloned() else { return fail("no such room (its id, or the topic of one of your exchanges)") };
+                if !r.ephemeral { return said("that room is permanent already") }
+                self.t_commit(w, now, vec![json!({"$":"RoomSet","id":r.id,"name":r.name,"members":r.members.join("\n"),"ephemeral":false,"closed":false,"at":now})]).await.map_or_else(|e| fail(&e), |_| said("kept: the room is permanent now, listed and shown to the person"))
+            }
             "room_create" => {
                 let ms = members(&w, &b.id, gs(a, "members"));
                 if let Err(e) = self.far_members_ok(&ms.lines().map(str::to_string).collect::<Vec<_>>()) { return fail(&e) }
                 let rid = self.hub_id("r", now);
-                let ev = json!({"$":"RoomSet","id":rid,"name":a.get("name").and_then(Value::as_str).unwrap_or("room"),"members":ms,"at":now});
-                self.t_commit(w, now, vec![ev]).await.map_or_else(|e| fail(&e), |_| said("room made"))
+                // a bot's room is for one exchange unless the person asked for one that lasts (`keep`)
+                let keep = gb(a, "keep", false);
+                let ev = json!({"$":"RoomSet","id":rid,"name":a.get("name").and_then(Value::as_str).unwrap_or("room"),"members":ms,"ephemeral":!keep,"at":now});
+                self.t_commit(w, now, vec![ev]).await.map_or_else(|e| fail(&e), |_| if keep { said("room made") } else { (true, json!({"ok":true,"room":rid,"note":"room made for this exchange: post and read it by its id; it is listed to nobody and closes when the exchange ends"})) })
             }
             "room_join" | "room_leave" => self.t_room_membership(w, &b, now, name == "room_join", a).await,
             "room_post" => {
-                let Some(room) = find_room(&w, gs(a, "room")).cloned() else { return fail("no such room here (room_list). A room on another machine: room_join it with `machine` first (it is copied here), then post; or bot_send name@machine") };
+                if let Some(r) = w.rooms.get(gs(a, "room")).filter(|r| r.closed && !r.deleted) { return fail(&format!("#{} is closed: that exchange is over. bot_send starts a new one", r.name)) }
+                let Some(room) = find_room(&w, gs(a, "room"), &b.id).cloned() else { return fail("no such room here (room_list). A room on another machine: room_join it with `machine` first (it is copied here), then post; or bot_send name@machine") };
                 let rr = RoomRef { id: room.id, name: room.name, members: room.members };
                 self.t_post(w, &b, now, &rr, gs(a, "text"), vec![], later, |_| said("posted")).await
             }
             "room_read" => {
                 let room = gs(a, "room"); let n = gn(a, "limit", 30);
-                let id = find_room(&w, room).map(|r| r.id.clone()).unwrap_or_else(|| dm(&b.name, &w.named(room).map_or(room.to_string(), |o| o.name.clone())));
+                // a closed exchange is still read by its id (kept for history)
+                let id = find_room(&w, room, &b.id).or_else(|| w.rooms.get(room).filter(|r| !r.deleted && !r.id.starts_with("dm:"))).map(|r| r.id.clone()).unwrap_or_else(|| dm(&b.name, &w.named(room).map_or(room.to_string(), |o| o.name.clone())));
                 let lines = w.room_lines.get(&id).cloned().unwrap_or_default();
                 let take: Vec<usize> = lines.iter().rev().take(n).rev().copied().collect();
                 let mut out = vec![];
@@ -213,7 +238,7 @@ impl Bots {
         let (room, machine) = (gs(a, "room").trim(), gs(a, "machine").trim());
         if room.is_empty() { return fail("name the room (room_list)") }
         if !machine.is_empty() { return match self.far_membership(w, &b.name, join, room, machine).await { Ok(()) => said(if join { "joined; the room is copied here in a moment" } else { "left" }), Err(e) => fail(&e) } }
-        let Some(r) = find_room(w, room).cloned() else { return fail("no such room (room_list; with `machine`, one on another machine)") };
+        let Some(r) = find_room(w, room, &b.id).cloned() else { return fail("no such room (room_list; with `machine`, one on another machine)") };
         let has = r.members.contains(&b.id);
         if join == has { return said(if join { "you are in it already" } else { "you are not in it" }) }
         let ms: Vec<String> = if join { let mut v = r.members.clone(); v.push(b.id.clone()); v } else { r.members.iter().filter(|m| **m != b.id).cloned().collect() };
@@ -225,23 +250,28 @@ impl Bots {
         let hop = w.hops.get(&b.id).map_or(0, |h| h.now) + 1;
         let (hop, text, held) = if hop <= HOP_MAX { (hop, text.to_string(), false) } else { (HOP_MAX + 1, held_text(text), true) };
         let mid = self.hub_id("p", now);
+        let eph = w.rooms.get(&room.id).map_or_else(|| before.iter().any(|e| e["$"] == "RoomSet" && e["id"] == room.id.as_str() && e["ephemeral"] == true), |r| r.ephemeral);
         let pending = match self.post_decide(w, now, &b.thread, &b.name, &b.id, room, &text, hop, &mid, before).await { Ok(p) => p, Err(e) => return fail(&e) };
         *later = Some((pending, hop));
-        let r = said(room); if held { held_res(r) } else { r }
+        // Life.cap: an exchange that reaches the conversation cap is over; its room closes (the post stays in the log)
+        if held && eph { if let Err(e) = self.t_commit(w, now, vec![close_ev(&room.id, &room.name, &room.members, now)]).await { eprintln!("bots: room {} not closed: {e}", room.id) } }
+        let r = said(room); if held { if eph { held_closed(r) } else { held_res(r) } } else { r }
     }
 
     async fn t_send(&self, w: &World, b: &Bot, now: u64, a: &Value, later: &mut Option<(Pending, u64)>) -> Res {
         let (to, direct, topic) = (gs(a, "to"), gb(a, "direct", false), gs(a, "topic").trim());
+        // Life.make: the room bot_send makes is for this exchange (listed to nobody, closed when it ends) unless the person asked for one that lasts
+        let keep = gb(a, "keep", false);
         if let Some((name, mach)) = to.rsplit_once('@') { // a bot on a linked machine: the room is shared with it (bots/far.rs)
             let Some(link) = self.machine_link(mach) else { return fail(&format!("no linked machine called {mach} (see bot_list)")) };
             if direct { return fail("a private message to a bot on another machine is not available: give a `topic`") }
             let theirs = format!("{name}@{link}");
             let rname = if topic.is_empty() { let (x, y) = (b.name.to_lowercase(), format!("{}@{}", name.to_lowercase(), mach.to_lowercase())); if x <= y { format!("{x} + {y}") } else { format!("{y} + {x}") } } else { topic.chars().take(60).collect() };
-            let found = rooms(w).into_iter().find(|r| r.name.to_lowercase() == rname.to_lowercase() && r.members.len() == 2 && r.members.contains(&b.id) && r.members.iter().any(|m| m.to_lowercase() == theirs.to_lowercase() || m.rsplit_once('@').map_or(false, |(n, mm)| n.eq_ignore_ascii_case(name) && self.machine_link(mm).as_deref() == Some(link.as_str())))).cloned();
+            let found = pair_room(w, &b.id, &rname, |m| m.to_lowercase() == theirs.to_lowercase() || m.rsplit_once('@').map_or(false, |(n, mm)| n.eq_ignore_ascii_case(name) && self.machine_link(mm).as_deref() == Some(link.as_str()))).cloned();
             let (rr, before) = match found {
                 Some(r) => (RoomRef { id: r.id, name: r.name, members: r.members }, vec![]),
                 None => { let id = self.hub_id("r", now); let ms = vec![b.id.clone(), theirs];
-                    let ev = json!({"$":"RoomSet","id":id,"name":rname,"members":ms.join("\n"),"at":now}); (RoomRef { id, name: rname, members: ms }, vec![ev]) }
+                    let ev = json!({"$":"RoomSet","id":id,"name":rname,"members":ms.join("\n"),"ephemeral":!keep,"at":now}); (RoomRef { id, name: rname, members: ms }, vec![ev]) }
             };
             return self.t_post(w, b, now, &rr, gs(a, "text"), before, later, |r| (true, json!({"ok":true,"room":r.id,"roomName":r.name,"note":format!("posted in #{}, shared with {to}; keep everything about this request there", r.name)}))).await
         }
@@ -255,14 +285,16 @@ impl Bots {
         }
         // Req.send: the request goes to the room the two bots already have about this topic, else a new one
         let name = if topic.is_empty() { let (x, y) = (b.name.to_lowercase(), t.name.to_lowercase()); if x <= y { format!("{x} + {y}") } else { format!("{y} + {x}") } } else { topic.chars().take(60).collect() };
-        let found = rooms(w).into_iter().find(|r| r.name.to_lowercase() == name.to_lowercase() && r.members.len() == 2 && r.members.contains(&b.id) && r.members.contains(&t.id)).cloned();
+        let found = pair_room(w, &b.id, &name, |m| m == t.id).cloned();
         let (rr, before) = match found {
             Some(r) => (RoomRef { id: r.id, name: r.name, members: r.members }, vec![]),
             None => { let id = self.hub_id("r", now); let ms = vec![b.id.clone(), t.id.clone()];
-                let ev = json!({"$":"RoomSet","id":id,"name":name,"members":ms.join("\n"),"at":now}); (RoomRef { id, name, members: ms }, vec![ev]) }
+                let ev = json!({"$":"RoomSet","id":id,"name":name,"members":ms.join("\n"),"ephemeral":!keep,"at":now}); (RoomRef { id, name, members: ms }, vec![ev]) }
         };
-        self.t_post(w, b, now, &rr, text, before, later, |r| (true, json!({"ok":true,"room":r.id,"roomName":r.name,
-            "note":format!("posted in #{}, where the person can follow it; keep everything about this request there (bot_send with the same topic, or room_post)", r.name)}))).await
+        let eph = w.rooms.get(&rr.id).map_or(!keep, |r| r.ephemeral);
+        self.t_post(w, b, now, &rr, text, before, later, move |r| (true, json!({"ok":true,"room":r.id,"roomName":r.name,
+            "note":if eph { format!("posted in #{}, this request's own room (listed to nobody; it closes when the exchange ends); keep everything about this request there (bot_send with the same topic, or room_post with its id)", r.name) }
+                else { format!("posted in #{}, where the person can follow it; keep everything about this request there (bot_send with the same topic, or room_post)", r.name) }}))).await
     }
 
     async fn t_routine_set(&self, w: &World, b: &Bot, now: u64, a: &Value) -> Res {

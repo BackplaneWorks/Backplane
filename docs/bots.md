@@ -171,6 +171,26 @@ server sends itself on `TurnEnded`): logged here in the room the message
 came in, and posted in the person's direct room there, waking no one (laws
 `reply_*`).
 
+### Ephemeral rooms
+
+A room is permanent or ephemeral (`bots/life.rs`). The person's rooms (Bots' New room,
+`bots.room`) and the role rooms a feature sets up (#staff, `ring-requests`) are permanent: listed
+and shown as before. A room a bot makes for one exchange is ephemeral: `bot_send`'s topic room and
+`room_create`, unless the person asked for a lasting one (`keep: true`). An ephemeral room is in no
+list: not the sidebar, the palette, `#` mentions, the phone's `bots.list`, `room_list`,
+`bot_whoami` or plane_read's rooms with unread posts. Its members post and read it by its id or
+topic (`room_post`, `room_read`, `bot_send` with the same topic), and nobody else finds it by name.
+
+It closes when the exchange ends: the post that reaches the conversation cap (6 hops, below) closes
+it, and so does a day with no post (`life::IDLE`, the minute tick). A closed room refuses posts,
+stays in the log and is read by its id; the same topic later opens a new room. Opened by its id
+(a link), its page offers **Keep this room** (`roomPage.keep`; GPUI's room header, data/1
+`room.keep`), and `room_keep` does the same for a bot when the person asks: permanent from then
+on. Both are optional `RoomSet` fields, `ephemeral` and `closed`; a RoomSet without them (a line
+from before, a join, a linked machine's copy) keeps the room's life, and `bots.room_sync` carries
+them across machines. The rooms from before were classified once at the first tick (setting
+`rooms.life`): a room of exactly two bots that is not a role room became ephemeral and closed.
+
 ### Shared rooms
 
 A room's members can be on other machines (`name@machine`). A post goes to

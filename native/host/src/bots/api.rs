@@ -168,25 +168,32 @@ pub fn far_rooms(rows: Vec<Value>, here: &std::collections::HashSet<String>) -> 
 pub fn rows_of(w: &super::world::World, uber: &str, mark: &Value) -> (Vec<Value>, Vec<Value>) {
     let mut bots: Vec<_> = w.bots.values().filter(|x| !x.deleted).map(|x| (x.created, x.id.clone(), json!({"id":x.id,"name":x.name,"thread":x.thread,"uber":!uber.is_empty() && x.id == uber,"mark":mark}))).collect();
     bots.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
-    let mut rooms: Vec<_> = w.rooms.values().filter(|x| !x.deleted && !crate::net::far::local(&x.id).starts_with("dm:")).map(|x| (x.created, x.id.clone(), json!({"id":x.id,"name":x.name,"members":x.members,"mark":mark}))).collect();
+    let mut rooms: Vec<_> = w.rooms.values().filter(|x| x.listed() && !crate::net::far::local(&x.id).starts_with("dm:")).map(|x| (x.created, x.id.clone(), json!({"id":x.id,"name":x.name,"members":x.members,"mark":mark}))).collect();
     rooms.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
     (bots.into_iter().map(|x| x.2).collect(), rooms.into_iter().map(|x| x.2).collect())
 }
-/// MBots.room.view for a room here (MBots.room.view.loc): `{kind:"room", id, name, title, members, posts:[{id, from, text, ago, mine}]}`, the newest 200 posts oldest first. None for an unknown room.
+/// MBots.room.view for a room here (MBots.room.view.loc): `{kind:"room", id, name, title, members, posts:[{id, from, text, ago, mine}], ephemeral, closed, keep}`
+/// (`keep`: the page offers Keep this room, `bots.room_keep`), the newest 200 posts oldest first. None for an unknown room.
 pub async fn room_page(hub: &Arc<Hub>, room: &str, now: u64) -> Option<Value> {
     if room.starts_with("dm:") { return None }
     if room.contains('~') { // a linked machine's room, from its mirror; a post goes there (net/rpc.rs holds it while that machine is away)
-        let mut head = None; on_far(hub, &crate::net::far::link(room), |mark, w| head = w.room(room).map(|r| (r.name.clone(), r.members.iter().map(|m| w.bot(m).map_or(m.clone(), |b| b.name.clone())).collect::<Vec<_>>(), mark.clone())));
-        let (name, members, mark) = head?;
+        let mut head = None; on_far(hub, &crate::net::far::link(room), |mark, w| head = w.room(room).map(|r| (r.name.clone(), r.members.iter().map(|m| w.bot(m).map_or(m.clone(), |b| b.name.clone())).collect::<Vec<_>>(), mark.clone(), (r.ephemeral, r.closed))));
+        let (name, members, mark, life) = head?;
         let posts: Vec<Value> = room_posts(hub, room, 200).await?.into_iter().map(|p| { let from = p["from"].as_str().unwrap_or("").to_string();
             json!({"id":p["id"],"from":from,"text":p["text"],"ago":ago(now, p["at"].as_u64().unwrap_or(0)),"mine":from == "you"}) }).collect();
-        return Some(json!({"kind":"room","id":room,"name":name,"title":name,"members":members.join(", "),"posts":posts,"mark":mark}))
+        return Some(json!({"kind":"room","id":room,"name":name,"title":name,"members":members.join(", "),"posts":posts,"mark":mark,"ephemeral":life.0,"closed":life.1,"keep":false}))
     }
     let b = of(hub)?;
-    let (name, members) = { let w = b.world().await; let r = w.room(room).filter(|r| !r.deleted)?; (r.name.clone(), r.members.iter().map(|m| w.bot(m).map_or(m.clone(), |b| b.name.clone())).collect::<Vec<_>>()) };
+    let (name, members, life) = { let w = b.world().await; let r = w.room(room).filter(|r| !r.deleted)?; (r.name.clone(), r.members.iter().map(|m| w.bot(m).map_or(m.clone(), |b| b.name.clone())).collect::<Vec<_>>(), (r.ephemeral, r.closed)) };
     let posts: Vec<Value> = room_posts(hub, room, 200).await?.into_iter().map(|p| { let from = p["from"].as_str().unwrap_or("").to_string();
         json!({"id":p["id"],"from":from,"text":p["text"],"ago":ago(now, p["at"].as_u64().unwrap_or(0)),"mine":from == "you"}) }).collect();
-    Some(json!({"kind":"room","id":room,"name":name,"title":name,"members":members.join(", "),"posts":posts}))
+    // Life.keep: a bots' exchange opened by its id offers Keep (a linked machine's is kept there)
+    Some(json!({"kind":"room","id":room,"name":name,"title":name,"members":members.join(", "),"posts":posts,"ephemeral":life.0,"closed":life.1,"keep":life.0}))
+}
+/// a room's life (ephemeral, closed), here or in a linked machine's mirror; None for an unknown room
+pub async fn room_life(hub: &Arc<Hub>, room: &str) -> Option<(bool, bool)> {
+    if room.contains('~') { let mut life = None; on_far(hub, &crate::net::far::link(room), |_, w| life = w.room(room).map(|r| (r.ephemeral, r.closed))); return life }
+    let b = of(hub)?; let w = b.world().await; w.room(room).map(|r| (r.ephemeral, r.closed))
 }
 /// `room.posts`: the newest `limit` posts of a room, oldest first (`{id, from, text, at}`).
 pub async fn room_posts(hub: &Arc<Hub>, room: &str, limit: usize) -> Option<Vec<serde_json::Value>> {

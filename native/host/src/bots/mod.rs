@@ -6,6 +6,7 @@ pub mod api;
 pub mod mail;
 pub mod clock;
 pub mod hooks;
+pub mod life;
 pub mod front;
 pub mod far;
 pub mod mesh;

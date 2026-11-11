@@ -287,7 +287,11 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Re
             let mut q = json!({"bot":bot,"text":text}); if safe_id(s(p, "clientId")) && !s(p, "clientId").is_empty() { q["msg"] = p["clientId"].clone() }
             rpc(hub, c, "bots.say", q).await.map(|_| json!({}))
         }
-        "room.posts" => match crate::bots::api::room_posts(hub, s(p, "room"), limit_of(p, 40, 200)).await { Some(x) => Ok(json!({"posts":x})), None => Err(err("unknown room")) },
+        // a bots' exchange (`ephemeral`) is never in bots.list; opened by a link it reads like any room, and `keep` says the page offers Keep this room (`room.keep`)
+        "room.posts" => match crate::bots::api::room_posts(hub, s(p, "room"), limit_of(p, 40, 200)).await {
+            Some(x) => { let (eph, closed) = crate::bots::api::room_life(hub, s(p, "room")).await.unwrap_or_default(); Ok(json!({"posts":x,"ephemeral":eph,"closed":closed,"keep":eph && !s(p, "room").contains('~')})) }
+            None => Err(err("unknown room")) },
+        "room.keep" => rpc(hub, c, "bots.room_keep", json!({"room":s(p, "room")})).await.map(|_| json!({})),
         "room.post" => {
             let (room, text) = (s(p, "room"), s(p, "text")); if text.trim().is_empty() { return Some(Err(err("empty message"))) }
             let mut q = json!({"room":room,"text":text}); if safe_id(s(p, "clientId")) && !s(p, "clientId").is_empty() { q["msg"] = p["clientId"].clone() }

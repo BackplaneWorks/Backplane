@@ -36,8 +36,14 @@ pub struct Project { pub title: String, pub root: String, pub created: u64, pub 
 /// Navigation metadata only: no bot persona, posts, room history or second world fold.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct BotNav { pub name: String, pub thread: String, pub look: u64, pub created: u64, pub talked: u64 }
+/// A RoomSet's life: (ephemeral, closed). A field left out keeps what the room had (`was`), so a line from before the fields, and a change
+/// that only renames or moves members (room_join, a ring, a linked machine's copy), never makes a room permanent or opens a closed one.
+/// A room made again after RoomDeleted starts from (false, false).
+pub fn room_life(e: &Value, was: (bool, bool)) -> (bool, bool) { (e["ephemeral"].as_bool().unwrap_or(was.0), e["closed"].as_bool().unwrap_or(was.1)) }
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
-pub struct RoomNav { pub name: String, pub members: usize }
+pub struct RoomNav { pub name: String, pub members: usize,
+    /// a bots' exchange (bots/life.rs): in no sidebar, list, mention or count; opened by its id only
+    #[serde(default)] pub ephemeral: bool, #[serde(default)] pub closed: bool }
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 pub struct Thread {
     pub project: String, pub title: String, pub created: u64, pub activity: u64, pub turn: Turn, pub pending: u64,
@@ -229,7 +235,8 @@ impl State {
                 self.bots_nav.insert(id.into(), BotNav { name: s(e,"name")?.into(), thread: self.bot_threads[id].clone(), look:n(e,"look")?,
                     created:old.map_or(n(e,"at")?,|b|b.created), talked:old.map_or(0,|b|b.talked) }); }
             "BotDeleted" => { let id = s(e, "id")?; self.bot_threads.remove(id); self.bots_nav.remove(id); }
-            "RoomSet" => { self.rooms_nav.insert(s(e,"id")?.into(), RoomNav { name:s(e,"name")?.into(), members:s(e,"members")?.split('\n').filter(|s|!s.is_empty()).count() }); }
+            "RoomSet" => { let id = s(e,"id")?; let was = self.rooms_nav.get(id).map_or((false,false),|r|(r.ephemeral,r.closed)); let (ephemeral,closed) = room_life(e,was);
+                self.rooms_nav.insert(id.into(), RoomNav { name:s(e,"name")?.into(), members:s(e,"members")?.split('\n').filter(|s|!s.is_empty()).count(), ephemeral, closed }); }
             "RoomDeleted" => { self.rooms_nav.remove(s(e,"id")?); }
             "RoomPosted" => { if let Some(bot)=self.bots_nav.get_mut(s(e,"from")?) { bot.talked=n(e,"at")?; } }
             "TaskDelegated" => {

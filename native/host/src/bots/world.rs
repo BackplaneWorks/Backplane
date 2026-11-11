@@ -7,7 +7,21 @@ use std::collections::{HashMap, HashSet};
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Bot { pub id: String, pub name: String, pub thread: String, pub look: u64, pub persona: String, pub created: u64, pub deleted: bool }
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct Room { pub id: String, pub name: String, pub members: Vec<String>, pub created: u64, pub deleted: bool }
+pub struct Room { pub id: String, pub name: String, pub members: Vec<String>, pub created: u64, pub deleted: bool,
+    /// made by a bot for one exchange (bot_send, room_create): listed to nobody, kept out of the person's screens and the bots' context (`life`)
+    #[serde(default)] pub ephemeral: bool,
+    /// an ephemeral room whose exchange is over (the conversation cap, or a day idle): kept in the log, read only by id
+    #[serde(default)] pub closed: bool,
+    /// the room's newest change or post (the idle clock of an ephemeral room)
+    #[serde(default)] pub last: u64 }
+impl Room {
+    /// a room shown and listed: the person's own and the role rooms, not a bots' exchange
+    pub fn listed(&self) -> bool { !self.deleted && !self.ephemeral }
+    /// a room that can still be posted in
+    pub fn live(&self) -> bool { !self.deleted && !self.closed }
+}
+/// A RoomSet's life (ephemeral, closed): `state::room_life`
+pub use crate::state::room_life as life;
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Mem { pub bot: String, pub key: String, pub kind: String, pub text: String, pub tags: String, pub created: u64, pub updated: u64 }
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -226,11 +240,12 @@ impl World {
             }
             "BotDeleted" => { self.mail.bot_deleted(&id); if let Some(x) = self.bots.get_mut(&id) { x.deleted = true } else { self.bots.insert(id.clone(), Bot { id, name: String::new(), thread: String::new(), look: 0, persona: String::new(), created: 0, deleted: true }); } }
             "RoomSet" => {
-                let (created, deleted) = self.rooms.get(&id).map_or((0, true), |r| (r.created, r.deleted));
+                let (created, deleted, was) = self.rooms.get(&id).map_or((0, true, (false, false)), |r| (r.created, r.deleted, (r.ephemeral, r.closed)));
+                let (ephemeral, closed) = life(e, if deleted { (false, false) } else { was });
                 self.mail.room_set(&id, s(e, "name"), s(e, "members"), at);
-                self.rooms.insert(id.clone(), Room { id, name: s(e, "name").into(), members: members_of(s(e, "members")), created: if deleted { at } else { created }, deleted: false });
+                self.rooms.insert(id.clone(), Room { id, name: s(e, "name").into(), members: members_of(s(e, "members")), created: if deleted { at } else { created }, deleted: false, ephemeral, closed, last: at });
             }
-            "RoomDeleted" => { if let Some(r) = self.rooms.get_mut(&id) { r.deleted = true } else { self.rooms.insert(id.clone(), Room { id, name: String::new(), members: vec![], created: 0, deleted: true }); } }
+            "RoomDeleted" => { if let Some(r) = self.rooms.get_mut(&id) { r.deleted = true } else { self.rooms.insert(id.clone(), Room { id, name: String::new(), members: vec![], created: 0, deleted: true, ephemeral: false, closed: false, last: 0 }); } }
             "ProjectCreated" => { self.projects.insert(id, (s(e, "title").into(), s(e, "root").into(), false)); }
             "ProjectRemoved" => { if let Some(p) = self.projects.get_mut(&id) { p.2 = true } }
             // a turn stopped only to change accounts (settings/driver.rs, `failover`) goes on at once on the next one: it has not ended, and its run stays live, so the
@@ -261,6 +276,7 @@ impl World {
             "RoomPosted" => {
                 // Room.answer: a bot that posted in the room it was asked in has answered there itself
                 if let (Some(room), Some(th)) = (self.rooms.get(s(e, "room")).map(|r| r.name.to_lowercase()), self.named(s(e, "from")).map(|b| b.thread.clone())) { if let Some(rt) = self.room_turns.get_mut(&th) { if rt.1.to_lowercase() == room { rt.1.clear() } } }
+                if let Some(r) = self.rooms.get_mut(s(e, "room")) { r.last = r.last.max(at) }
                 self.room_lines.entry(s(e, "room").to_string()).or_default().push(self.line); if self.settings.get("mail.on").map_or(true, |v| v != "on") { self.mail.room_post(&id, s(e, "room"), s(e, "from"), s(e, "text"), at); } self.post_ids.insert(id); }
             "ConvSet" => { self.mail.conv_set(&id, s(e, "subject"), s(e, "kind"), super::mail::mailbox::lines_of(s(e, "parts")), s(e, "project"), super::mail::mailbox::lines_of(s(e, "tags")), at); }
             "MailPosted" => { self.mail.mail(super::mail::Hdr { id, conv: s(e, "conv").into(), from: s(e, "from").into(), to: s(e, "to").into(), kind: s(e, "kind").into(), r#ref: s(e, "ref").into(), want: s(e, "want").into(), head: s(e, "head").into(), size: n(e, "size"), at }); }

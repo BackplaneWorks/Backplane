@@ -19,7 +19,7 @@
  },
  {
   "name": "bot_send",
-  "description": "Ask another bot for something, here (its name) or on a linked machine (name@machine). It goes in a room of the two of you named for `topic`, which the person can read: the same room each time for the same bots and topic, so every later message about a request stays together. It reaches the bot's inbox and waits while that bot works. Messages between bots carry a depth: each answer is one deeper than the message it answers, and after a few replies back and forth the next one is held (the person sees it, no bot hears it) until a person, a routine or a webhook starts a new exchange.",
+  "description": "Ask another bot for something, here (its name) or on a linked machine (name@machine). It goes in a room of the two of you named for `topic`, made for this one exchange: the same room each time for the same bots and topic while the exchange is open, so every later message about a request stays together. That room is listed to nobody (not room_list, not the person's screens); you and the other bot post and read it by its id or the topic, and it closes when the exchange ends (the depth limit below, or a day with no message), after which room_read by its id still reads it. It reaches the bot's inbox and waits while that bot works. Messages between bots carry a depth: each answer is one deeper than the message it answers, and after a few replies back and forth the next one is held (no bot hears it) until a person, a routine or a webhook starts a new exchange. To tell the person something, use notify_person: they do not read these rooms.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -38,6 +38,10 @@
     "direct": {
      "type": "boolean",
      "description": "Send a private message instead of posting in a room. Only when the person asked for one."
+    },
+    "keep": {
+     "type": "boolean",
+     "description": "Make a permanent room the person sees and that stays, instead of one for this exchange. Only when the person asked for a lasting room."
     }
    },
    "required": [
@@ -48,7 +52,7 @@
  },
  {
   "name": "room_list",
-  "description": "List rooms (group conversations) and their members.",
+  "description": "List the permanent rooms (group conversations the person made or a feature set up, like staff) and their members. The rooms bots make for one exchange (bot_send, room_create) are not listed.",
   "inputSchema": {
    "type": "object",
    "properties": {},
@@ -57,7 +61,7 @@
  },
  {
   "name": "room_create",
-  "description": "Make a room for a group of bots (you are added). Members are bot names here, or name@machine.",
+  "description": "Make a room for a group of bots (you are added) for one exchange: it is listed to nobody, you and its members post and read it by the id this returns, and it closes after the exchange (the depth limit, or a day with no message). Members are bot names here, or name@machine. With keep, a permanent room the person sees, only when they asked for one.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -68,11 +72,31 @@
     "members": {
      "type": "string",
      "description": "Members, separated by commas or spaces."
+    },
+    "keep": {
+     "type": "boolean",
+     "description": "A permanent room, listed and shown to the person. Only when the person asked for a room that lasts."
     }
    },
    "required": [
     "name",
     "members"
+   ]
+  }
+ },
+ {
+  "name": "room_keep",
+  "description": "Make one of the rooms bots made for an exchange permanent: listed, shown to the person and never closed. Only when the person asks to keep it.",
+  "inputSchema": {
+   "type": "object",
+   "properties": {
+    "room": {
+     "type": "string",
+     "description": "The room's id (or the topic of one of your open exchanges)."
+    }
+   },
+   "required": [
+    "room"
    ]
   }
  },
@@ -84,7 +108,7 @@
    "properties": {
     "room": {
      "type": "string",
-     "description": "The room's name or id."
+     "description": "The room's name or id (one of your exchanges: its id or topic)."
     },
     "text": {
      "type": "string",
@@ -99,7 +123,7 @@
  },
  {
   "name": "room_read",
-  "description": "Read a room's (or a direct conversation's) recent messages, oldest first.",
+  "description": "Read a room's (or a direct conversation's) recent messages, oldest first. A closed exchange is still read by its id.",
   "inputSchema": {
    "type": "object",
    "properties": {

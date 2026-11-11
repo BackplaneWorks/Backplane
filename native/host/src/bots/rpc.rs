@@ -259,9 +259,17 @@ impl Bots {
         match r { Ok(()) => vec![ok(id)], Err(e) => vec![err(id, &e)] }
     }
 
+    /// a room the person makes is permanent; an edit (`room` given) keeps the room's life
     async fn room(&self, id: &Value, p: &Value) -> Vec<Value> {
         let _w = self.world().await; let now = now_s(); let rid = if gs(p, "room").is_empty() { self.id("r", now) } else { gs(p, "room").to_string() };
         self.commit_reply(id, vec![json!({"$":"RoomSet","id":rid,"name":gsd(p, "name", "room"),"members":gs(p, "members"),"at":now})]).await
+    }
+    /// Life.keep: the person keeps a bots' exchange room (open or closed): permanent from now on, listed and shown
+    pub(crate) async fn room_keep(&self, id: &Value, room: &str) -> Vec<Value> {
+        let w = self.world().await; let now = now_s();
+        let Some(r) = w.room(room).filter(|r| !r.id.starts_with("dm:") && !r.id.contains('~')).cloned() else { return vec![err(id, "no such room here")] };
+        if !r.ephemeral { return vec![ok(id)] }
+        self.commit_reply(id, vec![json!({"$":"RoomSet","id":r.id,"name":r.name,"members":r.members.join("\n"),"ephemeral":false,"closed":false,"at":now})]).await
     }
 
     /// Bots.post.id: a person's post in a room (hop 0): logged, then every other member here hears it (never a held one, never when the
@@ -319,7 +327,7 @@ fn human(who: &Caller, p: &Value) -> Option<u64> { if who.client > 0 && matches!
 
 struct Rpc(Arc<Bots>);
 impl RpcHandler for Rpc {
-    fn methods(&self) -> &'static [&'static str] { &["bots.create", "bots.edit", "bots.delete", "bots.say", "bots.room", "bots.room_delete", "bots.post", "bots.remember", "bots.forget", "bots.space", "bots.uber", "bots.routine", "bots.routine_delete", "bots.routine_run", "bots.hook", "bots.hook_token", "bots.hook_revoke", "bots.pin", "bots.uber_home", "bots.uber_join", "rules.set", "rules.drop", "board.set", "board.drop"] }
+    fn methods(&self) -> &'static [&'static str] { &["bots.create", "bots.edit", "bots.delete", "bots.say", "bots.room", "bots.room_keep", "bots.room_delete", "bots.post", "bots.remember", "bots.forget", "bots.space", "bots.uber", "bots.routine", "bots.routine_delete", "bots.routine_run", "bots.hook", "bots.hook_token", "bots.hook_revoke", "bots.pin", "bots.uber_home", "bots.uber_join", "rules.set", "rules.drop", "board.set", "board.drop"] }
     fn call<'a>(&'a self, _hub: &'a Arc<Hub>, who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let b = &self.0;
@@ -329,6 +337,7 @@ impl RpcHandler for Rpc {
                 "bots.delete" => b.delete(id, p).await,
                 "bots.say" => b.say(id, gs(p, "bot"), gs(p, "text"), gs(p, "msg"), gs(p, "reply"), human(who, p)).await,
                 "bots.room" => b.room(id, p).await,
+                "bots.room_keep" => b.room_keep(id, gs(p, "room")).await,
                 "bots.room_delete" => { let _w = b.world().await; b.commit_reply(id, vec![json!({"$":"RoomDeleted","id":gs(p, "room"),"at":now_s()})]).await }
                 "bots.post" => b.post(id, p, human(who, p)).await,
                 "bots.forget" => { let w = b.world().await; let now = now_s(); b.commit_reply(id, w.also(now, vec![json!({"$":"MemoryForgot","bot":gs(p, "bot"),"key":gs(p, "key"),"at":now})])).await }

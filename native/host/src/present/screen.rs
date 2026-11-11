@@ -77,7 +77,7 @@ fn bot_rows(st: &State, hub: &str, now: u64, uber: &str, mark: &Value) -> Vec<Va
             "nav":if b.thread.is_empty(){format!("@remote:{id}")}else{format!("{hub}|{}",b.thread)},"mark":mark})
     }).collect()
 }
-/// The sidebar's rooms: this hub's, then each shown linked machine's (with its `mark`); a room kept on both machines (a room shared across them) is listed once, as this hub's.
+/// The sidebar's rooms (permanent ones only: a bots' exchange, `RoomNav.ephemeral`, is never listed): this hub's, then each shown linked machine's (with its `mark`); a room kept on both machines (a room shared across them) is listed once, as this hub's.
 fn rooms(st: &State, far: &[(String,&State)], un: &Unified, hub: &str) -> Vec<Value> {
     let mut rows=room_rows(st,hub,&Value::Null,&|_|false);
     for (m,f) in far { rows.extend(room_rows(f,hub,&un.mark(m),&|id| st.rooms_nav.contains_key(&crate::net::far::local(id)))); }
@@ -85,7 +85,7 @@ fn rooms(st: &State, far: &[(String,&State)], un: &Unified, hub: &str) -> Vec<Va
 }
 fn room_rows(st: &State, hub: &str, mark: &Value, here: &dyn Fn(&str)->bool) -> Vec<Value> {
     let far=!mark.is_null();
-    let mut rooms: Vec<_>=st.rooms_nav.iter().filter(|(id,_)|!crate::net::far::local(id).starts_with("dm:") && id.contains('~')==far && !here(id)).collect(); rooms.sort_by_key(|(id,_)|*id);
+    let mut rooms: Vec<_>=st.rooms_nav.iter().filter(|(id,r)|!r.ephemeral && !crate::net::far::local(id).starts_with("dm:") && id.contains('~')==far && !here(id)).collect(); rooms.sort_by_key(|(id,_)|*id);
     rooms.iter().map(|(id,r)| {
         let name=if rooms.iter().filter(|(_,other)|other.name.eq_ignore_ascii_case(&r.name)).count()>1 { format!("{} · {}",r.name,crate::net::far::local(id)) }else{r.name.clone()};
         json!({"id":format!("{hub}|{id}"),"name":name,"members":r.members,"sel":false,"nav":format!("@room:{id}"),"mark":mark})
@@ -258,6 +258,12 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
             if !(st.rooms_nav.contains_key(id) || (id.contains('~') && far.iter().any(|(_,f)|f.rooms_nav.contains_key(id)))) || id.starts_with("dm:") { return refused("action.room-unknown") }
             if let Some(o)=session.as_object_mut() { o.remove("route"); }
             return Some(json!({"remoteReady":false,"nextTarget":{"kind":"room","id":id},"session":session,"cmds":cmds,"local":p.get("local").cloned().unwrap_or(json!({"local.native.sidebar.pages":"","local.native.sidebar.context":"","local.native.sidebar.key":"","local.native.sidebar.budget":""}))}));
+        },
+        // Life.keep: Keep this room on a bots' exchange's page (`roomPage.keep`) makes it permanent (`bots.room_keep`)
+        "room-keep" if room_page["keep"]==json!(true) => {
+            let rid=session["rid"].as_u64().unwrap_or(0);
+            cmds.push(json!({"type":"send","hub":hub,"text":json!({"id":rid,"m":"bots.room_keep","p":{"room":text(&p["target"],"id")}}).to_string()}));
+            session["rid"]=json!(rid+1);
         },
         "room-post" if room_page.is_object() => {
             let body=text(&session["drafts"],"@f.rpost").trim().to_string();
@@ -719,6 +725,25 @@ mod state_tests {
         assert_eq!(st.bots_nav["b"].thread,"t"); assert_eq!(st.bots_nav["b"].created,2);
         event(&mut st,json!({"$":"BotDeleted","id":"b","at":6})); event(&mut st,json!({"$":"RoomDeleted","id":"r","at":6}));
         let v=recent(&st,&params()).unwrap(); assert_eq!(v["shown"]["bots"],json!([])); assert_eq!(v["shown"]["rooms"],json!([]));
+    }
+    /// A bots' exchange (bots/life.rs) is in no sidebar list, here or a linked machine's; it still opens by its id, and Keep is sent only from a page that offers it
+    #[test] fn an_ephemeral_room_is_not_listed_but_opens_by_id() {
+        let mut st=State::new(); st.lean=true;
+        for e in [json!({"$":"BotSet","id":"b","name":"Cat","thread":"t","look":1,"at":2}),
+            json!({"$":"RoomSet","id":"r1","name":"staff","members":"b\nother","at":3}),
+            json!({"$":"RoomSet","id":"r2","name":"Google sign-in check","members":"b\nother","ephemeral":true,"at":3}),
+            json!({"$":"RoomSet","id":"r3","name":"old check","members":"b\nother","ephemeral":true,"closed":true,"at":3})] { event(&mut st,e); }
+        let v=recent(&st,&params()).unwrap();
+        let ids: Vec<&str>=v["shown"]["rooms"].as_array().unwrap().iter().map(|r|r["id"].as_str().unwrap()).collect();
+        assert_eq!(ids,["h|r1"]);
+        let mut p=params(); p["action"]=json!("room"); p["value"]=json!("h|r2");
+        assert_eq!(recent(&st,&p).unwrap()["nextTarget"],json!({"kind":"room","id":"r2"}),"reachable by its id");
+        // the person keeps it: the room is listed from then on
+        event(&mut st,json!({"$":"RoomSet","id":"r2","name":"Google sign-in check","members":"b\nother","ephemeral":false,"closed":false,"at":4}));
+        let v=recent(&st,&params()).unwrap(); assert_eq!(v["shown"]["rooms"].as_array().unwrap().len(),2);
+        // a later change with no life fields (a join) keeps the closed room hidden
+        event(&mut st,json!({"$":"RoomSet","id":"r3","name":"old check","members":"b","at":5}));
+        assert!(st.rooms_nav["r3"].ephemeral && st.rooms_nav["r3"].closed);
     }
     /// A linked machine's bots and rooms are listed after this hub's, each with its machine's marker; with no uberbot here, the linked machine's
     /// leads in Bub's place, and opening it, a far room or a far bot is a target like a bot here (its chat is its thread there).

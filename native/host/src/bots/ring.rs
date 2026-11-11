@@ -175,7 +175,7 @@ impl Bots {
         } };
         let r = self.hook_token(&json!(0), &json!({"hook": hook, "op": "show"})).await;
         if r.first().map_or(true, |r| r["ok"] != true) { return Err("the webhook's token could not be made".into()) }
-        let (room, uber) = { let w = self.world().await; (w.rooms.values().find(|r| !r.deleted && r.name == ROOM_NAME).map(|r| (r.id.clone(), r.members.clone())), w.uber_bot()) };
+        let (room, uber) = { let w = self.world().await; (w.rooms.values().find(|r| r.listed() && r.name == ROOM_NAME).map(|r| (r.id.clone(), r.members.clone())), w.uber_bot()) };
         let want: Vec<String> = [bot.clone(), uber].into_iter().filter(|m| !m.is_empty()).collect();
         let (rid, mut members) = room.unwrap_or_else(|| (self.hub_id("r", now_s()), vec![]));
         let missing = want.iter().any(|m| !members.contains(m));
