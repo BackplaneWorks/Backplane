@@ -3814,6 +3814,43 @@ android.google.back	Back to Backplane	Backplane に戻る
 android.improve.search	Search projects…	プロジェクトを検索…
 android.improve.nomatch	No project matches.	一致するプロジェクトはありません。
 android.ring.head	RING	リング
+android.swarm.new	New swarm	新しいスウォーム
+android.swarm.topic	Topic	トピック
+android.swarm.goal	Goal	目標
+android.swarm.seed	First message to every member	全メンバーへの最初のメッセージ
+android.swarm.member.add	Add member	メンバーを追加
+android.swarm.member.n	Member {n}	メンバー {n}
+android.swarm.role	Role (optional)	役割（任意）
+android.swarm.members	{n, plural, one {# member} other {# members}}	{n, plural, other {メンバー #人}}
+android.swarm.pause	Pause	一時停止
+android.swarm.resume	Resume	再開
+android.swarm.stop	Stop	停止
+android.swarm.stop.ask	Stop {name}?	{name} を停止しますか？
+android.swarm.stop.yes	Stop swarm	スウォームを停止
+android.swarm.keep	Keep it running	続ける
+android.swarm.remove.member	Remove {name}	{name} を外す
+android.swarm.state.active	active	稼働中
+android.swarm.state.paused	paused	一時停止中
+android.swarm.state.stopped	stopped	停止
+android.swarm.state.done	done	完了
+android.swarm.reason.circular	going in circles	堂々巡り
+android.swarm.reason.idle	idle	待機中
+android.swarm.reason.budget	budget used up	予算を使い切りました
+android.swarm.reason.person	by you	あなたが停止
+android.swarm.reason.chatter	talk without progress	進展のない会話
+android.swarm.tag.idea	idea	アイデア
+android.swarm.tag.critique	critique	批評
+android.swarm.tag.claim	claim	担当
+android.swarm.tag.done	done	完了
+android.swarm.tag.question	question	質問
+android.swarm.tag.synthesis	synthesis	まとめ
+android.swarm.waiting	waiting	待機中
+android.swarm.held	held · {why}	保留 · {why}
+android.swarm.post.hint	Post to the board	ボードに投稿
+android.swarm.none	No posts yet.	まだ投稿はありません。
+android.swarm.gone	That swarm is not on this hub.	そのスウォームはこのハブにありません。
+android.swarm.provider	Provider	プロバイダー
+android.swarm.model	Model	モデル
 """#
 
     /// thread.count = {n, plural, one {# thread} other {# threads}}
@@ -6056,6 +6093,21 @@ android.ring.head	RING	リング
 
     /// android.mark.newon = New thread on {machine}
     static func android_mark_newon(machine: String) -> String { f("android.mark.newon", ["machine": machine]) }
+
+    /// android.swarm.member.n = Member {n}
+    static func android_swarm_member_n(n: String) -> String { f("android.swarm.member.n", ["n": n]) }
+
+    /// android.swarm.members = {n, plural, one {# member} other {# members}}
+    static func android_swarm_members(n: Int) -> String { f("android.swarm.members", ["n": String(n)]) }
+
+    /// android.swarm.stop.ask = Stop {name}?
+    static func android_swarm_stop_ask(name: String) -> String { f("android.swarm.stop.ask", ["name": name]) }
+
+    /// android.swarm.remove.member = Remove {name}
+    static func android_swarm_remove_member(name: String) -> String { f("android.swarm.remove.member", ["name": name]) }
+
+    /// android.swarm.held = held · {why}
+    static func android_swarm_held(why: String) -> String { f("android.swarm.held", ["why": why]) }
 
     /// ios.hub.use = Use {hub}
     static func ios_hub_use(hub: String) -> String { f("ios.hub.use", ["hub": hub]) }

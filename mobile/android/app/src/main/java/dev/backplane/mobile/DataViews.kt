@@ -96,7 +96,7 @@ internal fun dAgo(ms: Long): String {
 @Composable internal fun DDot(c: Color, size: Int = 6) = Box(Modifier.size(size.dp).background(c))
 @Composable internal fun DLine() = Box(Modifier.fillMaxWidth().height(1.dp).background(dcs.outlineVariant))
 
-private sealed interface Page { object Improve : Page; data class Room(val room: DataClient.Room) : Page; data class Viewer(val id: String, val file: String = "", val line: Int = 0) : Page; object Home : Page; data class Hub(val from: Page) : Page; data class Thread(val id: String) : Page; data class Sub(val id: String, val key: String) : Page; object Settings : Page; object Folders : Page; data class New(val project: String) : Page; object Accounts : Page; data class Term(val key: String, val from: Page) : Page; data class Terms(val project: String?, val from: Page) : Page; data class Account(val id: String, val start: Boolean, val n: Long = System.nanoTime()) : Page }
+private sealed interface Page { object Improve : Page; data class Room(val room: DataClient.Room) : Page; data class Viewer(val id: String, val file: String = "", val line: Int = 0) : Page; object Home : Page; data class Hub(val from: Page) : Page; data class Thread(val id: String, val from: Page? = null) : Page; data class Swarm(val room: String) : Page; data class Sub(val id: String, val key: String) : Page; object Settings : Page; object Folders : Page; data class New(val project: String) : Page; object Accounts : Page; data class Term(val key: String, val from: Page) : Page; data class Terms(val project: String?, val from: Page) : Page; data class Account(val id: String, val start: Boolean, val n: Long = System.nanoTime()) : Page }
 
 @Composable
 fun DataRoot() {
@@ -113,6 +113,8 @@ fun DataRoot() {
             LinkTarget.Kind.FILE -> page = Page.Viewer(t.id, t.path, t.line)
             LinkTarget.Kind.PROJECT -> { DataClient.focusProject = t.id; page = Page.Home }
             LinkTarget.Kind.ROOM -> {
+                if (Swarms.on() && !Swarms.isSwarm(t.id)) Swarms.load()
+                if (Swarms.isSwarm(t.id)) { page = Page.Swarm(t.id); return@LaunchedEffect }   // a swarm's page is its room's
                 if (DataClient.rooms.none { it.id == t.id }) runCatching { DataClient.loadBots() }
                 DataClient.rooms.firstOrNull { it.id == t.id }?.let { page = Page.Room(it) } ?: DataClient.say(Msg.android_room_gone)
             }
@@ -121,13 +123,14 @@ fun DataRoot() {
     Box(Modifier.fillMaxSize().background(dcs.background).windowInsetsPadding(WindowInsets.systemBars.union(WindowInsets.ime))) {
         if (DataClient.link == null || DataClient.needsRepair || DataClient.adding) { if (DataClient.adding && DataClient.link != null) BackHandler { DataClient.adding = false }; PairScreen() }
         else CompositionLocalProvider(LocalTermOpen provides { k: String -> page = Page.Term(k, page.let { if (it is Page.Term) it.from else it }) }, LocalTermsOpen provides { pr: String? -> page = Page.Terms(pr, page) }) { when (val p = page) {
-            Page.Home -> HomeScreen({ page = Page.Thread(it) }, { page = Page.Settings }, { page = Page.Hub(Page.Home) }, { page = Page.Folders }, { page = Page.New(it) }) { page = Page.Room(it) }
+            Page.Home -> HomeScreen({ page = Page.Thread(it) }, { page = Page.Settings }, { page = Page.Hub(Page.Home) }, { page = Page.Folders }, { page = Page.New(it) }, { page = Page.Swarm(it) }) { page = Page.Room(it) }
             is Page.Term -> { BackHandler { page = p.from }; TermFull(p.key, Msg.palette_terminal) { page = p.from } }
             is Page.Terms -> { BackHandler { page = p.from }; TermsScreen(p.project, { page = p.from }) { page = Page.Term(it, p) } }
             is Page.Viewer -> { BackHandler { page = Page.Thread(p.id) }; DataClient.threads.firstOrNull { it.id == p.id }?.let { ViewerScreen(it, p.file, p.line) { page = Page.Thread(p.id) } }
                 ?: Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() } } // never a blank page while the thread list comes
             is Page.Room -> { BackHandler { page = Page.Home }; RoomScreen(p.room) { page = Page.Home } }
-            is Page.Thread -> { BackHandler { page = Page.Home }; CompositionLocalProvider(LocalOpenSub provides { k -> page = Page.Sub(p.id, k) }) { ThreadScreen(p.id, { page = Page.Viewer(p.id) }, { page = Page.Hub(p) }, { page = Page.Thread(it) }) { page = Page.Home } } }
+            is Page.Thread -> { BackHandler { page = p.from ?: Page.Home }; CompositionLocalProvider(LocalOpenSub provides { k -> page = Page.Sub(p.id, k) }) { ThreadScreen(p.id, { page = Page.Viewer(p.id) }, { page = Page.Hub(p) }, { page = Page.Thread(it) }) { page = p.from ?: Page.Home } } }
+            is Page.Swarm -> { BackHandler { page = Page.Home }; SwarmScreen(p.room, { page = Page.Home }) { page = Page.Thread(it, p) } }
             is Page.Sub -> { BackHandler { page = Page.Thread(p.id) }; SubScreen(p.id, p.key) { page = Page.Thread(p.id) } }
             Page.Settings -> { BackHandler { page = Page.Home }; SettingsScreen({ page = Page.Home }, { page = Page.Hub(Page.Settings) }, { page = Page.Accounts }) { page = Page.Improve } }
             Page.Accounts -> { BackHandler { page = Page.Settings }; AccountsScreen({ page = Page.Settings }) { page = Page.Account(it, false) } }
@@ -286,12 +289,13 @@ internal fun ModelChip(text: String, tag: String, modifier: Modifier = Modifier,
 // ---- home: the sidebar, projects with their threads
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> Unit, addProject: () -> Unit, newThread: (String) -> Unit, openRoom: (DataClient.Room) -> Unit) {
+private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> Unit, addProject: () -> Unit, newThread: (String) -> Unit, openSwarm: (String) -> Unit, openRoom: (DataClient.Room) -> Unit) {
     var q by remember { mutableStateOf("") }
     var projMenu by remember { mutableStateOf<DProject?>(null) }
     // the project the long press was on stays after its sheet closes: Rename, Badge and Remove open their own box after it (the sheet alone closes)
     var projSheet by remember { mutableStateOf(false) }
-    var pickNew by remember { mutableStateOf<DProject?>(null) }   // a project on more than one machine: where the new thread starts
+    var pickNew by remember { mutableStateOf<DProject?>(null) }
+    var newSwarm by remember { mutableStateOf<DProject?>(null) }   // New swarm's sheet, from a project's menu   // a project on more than one machine: where the new thread starts
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val prefs = remember { ctx.getSharedPreferences("data.ui", android.content.Context.MODE_PRIVATE) }
     var shut by remember { mutableStateOf(prefs.getStringSet("projects.shut", emptySet())!!.toSet()) }
@@ -327,7 +331,9 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
         if (DataClient.locks.isNotEmpty()) LocksStrip(open)
         if (q.isNotBlank() && DataClient.has("search")) { SearchResults(q, open); return@Column }
         val botThreads = DataClient.bots.map { it.thread }.toSet()
-        val projects = DataClient.projects; val threads = DataClient.threads.filter { !it.archived && it.id !in botThreads && !it.history }
+        val projects = DataClient.projects; val swarmsOn = Swarms.on()
+        // a swarm's members are left out of their project's list: the project shows the swarm once (feature swarm)
+        val threads = DataClient.threads.filter { !it.archived && it.id !in botThreads && !it.history && !(swarmsOn && it.swarm.isNotEmpty()) }
         val hist = DataClient.history
         if (projects.isEmpty() && threads.isEmpty() && hist.count == 0) {
             Column(Modifier.fillMaxSize().padding(32.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
@@ -341,7 +347,9 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
             for (p in projects) {
                 val closed = p.id in shut
                 rowOf[p.id] = at; at += 1
-                if (!closed) { val g0 = ThreadGroups.split(threads, p.id); val n0 = ThreadGroups.count(p.settledCount, g0.settled.size); at += ThreadGroups.tree(g0.active, g0.all, treeOpen).size + (if (g0.active.isEmpty() && n0 == 0) 1 else 0) + (if (n0 > 0) 1 else 0)
+                val sw = if (swarmsOn) SwarmUi.live(Swarms.all, p.id) else emptyList()
+                if (!closed) { at += sw.size }
+                if (!closed) { val g0 = ThreadGroups.split(threads, p.id); val n0 = ThreadGroups.count(p.settledCount, g0.settled.size); at += ThreadGroups.tree(g0.active, g0.all, treeOpen).size + (if (g0.active.isEmpty() && n0 == 0 && sw.isEmpty()) 1 else 0) + (if (n0 > 0) 1 else 0)
                     if (n0 > 0 && p.id in DataClient.settledOpen) at += ThreadGroups.tree(g0.settled, g0.all, treeOpen).size + (if (p.id in DataClient.settledMore) 1 else 0) }
                 item(key = "p:${p.id}") {
                     Row(Modifier.fillMaxWidth().height(40.dp).background(if (flash == p.id) dcs.primary.copy(alpha = .18f) else Color.Transparent).combinedClickable(onClick = {
@@ -364,10 +372,11 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
                     }
                 }
                 if (!closed) {
+                    items(sw, key = { "s:${it.id}" }) { x -> SwarmRow(x) { openSwarm(x.id) } }
                     val g = ThreadGroups.split(threads, p.id)
                     val n = ThreadGroups.count(p.settledCount, g.settled.size)
                     items(ThreadGroups.tree(g.active, g.all, treeOpen), key = { "t:${it.t.id}" }) { r -> TreeRow(r, treeOpen, { treeOpen = it; prefs.edit().putStringSet("tree.open", it).apply() }, open) }
-                    if (g.active.isEmpty() && n == 0) item("none:${p.id}") { DMono(Msg.android_threads_none, dfaint, 12, Modifier.padding(start = 34.dp, top = 6.dp, bottom = 8.dp)) }
+                    if (g.active.isEmpty() && n == 0 && sw.isEmpty()) item("none:${p.id}") { DMono(Msg.android_threads_none, dfaint, 12, Modifier.padding(start = 34.dp, top = 6.dp, bottom = 8.dp)) }
                     if (n > 0) {
                         val on = p.id in DataClient.settledOpen
                         item("settled:${p.id}") {
@@ -407,7 +416,8 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
             if (DataClient.rooms.isNotEmpty()) { item("rooms") { DMono(Msg.plane_heading_rooms, dfaint, 11, Modifier.fillMaxWidth().padding(start = 12.dp, top = 12.dp, bottom = 4.dp)) }
                 items(DataClient.rooms, key = { "r:${it.id}" }) { r -> SidebarRow("#", r.name, onMachine(Msg.android_kind_room, r.mark)) { openRoom(r) } } }
         }
-        projMenu?.let { ProjectMenus(it, projSheet) { projSheet = false } }
+        projMenu?.let { ProjectMenus(it, projSheet, { newSwarm = it }) { projSheet = false } }
+        newSwarm?.let { pr -> NewSwarmSheet(pr.id, { newSwarm = null }) { openSwarm(it) } }
         pickNew?.let { p -> ActionSheet(p.title, p.newOn.map { n -> (n.label + if (n.away) " · " + Msg.android_away else "") to { pickNew = null; newThread(n.value) } }) { pickNew = null } }
     }
 }
