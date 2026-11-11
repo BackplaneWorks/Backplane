@@ -37,7 +37,7 @@ struct St {
     login: Value, login_err: String,
     opts: Opts, steps: Vec<Value>, running: bool,
     saved: Value,
-    status: Value, down_since: u64, alerted: bool, cost: Value, cost_at: u64, busy: String, note: String,
+    status: Value, down_since: u64, alerted: bool, cost: Value, cost_at: u64, busy: String, note: String, move_err: String,
 }
 /// What the run, the RPC and the ticker share.
 #[derive(Default)]
@@ -66,7 +66,8 @@ impl Shared {
             "dictation": g.opts.dictation, "network": network, "tailnet": tailnet,
             "ts_key": crate::settings::vault::person_get(TS_KEY).map_or(false, |k| !k.trim().is_empty()),
             "steps": g.steps, "running": g.running, "boat": g.saved, "status": g.status, "down_since": g.down_since, "cost": g.cost,
-            "busy": g.busy, "note": g.note,
+            "busy": g.busy, "note": g.note, "move": serde_json::from_str::<Value>(hub_info["home.move"].as_str().unwrap_or("")).unwrap_or(Value::Null),
+            "move_err": g.move_err,
         })
     }
     pub async fn publish(&self, hub: &Arc<Hub>) { let v = self.view(&hub.info_now()); hub.set_info("alwayson", &v.to_string()).await; }
@@ -285,11 +286,33 @@ pub async fn act(hub: &Arc<Hub>, sh: &Arc<Shared>, action: &str, value: &str, fi
             });
             Ok(json!({}))
         }
+        // Move your uberbot there: a fresh setup has no uberbot yet at this step; it is made here first (as setup makes Bub on the way to Done),
+        // then moved by the home move like any other. Any refusal is kept for the row.
+        "alwayson-move" => {
+            sh.st.lock().unwrap().move_err.clear();
+            let r = move_there(hub, value).await;
+            if let Err(e) = &r { sh.st.lock().unwrap().move_err = e.clone(); }
+            r
+        }
         "alwayson-check" => { let id = sh.box_id(); if !id.is_empty() { check(hub, sh, &id, crate::hub::now_ms() / 1000).await } Ok(json!({})) }
         // another machine of the person's as the always-on one
         a if a.starts_with("alwayson-other") => other::act(hub, a, value, fields).await,
         _ => Err("unknown action".into()),
     }
+}
+
+/// Make the uberbot here when there is none (the `onboard.uber` request setup sends on the way to Done), wait for it, then start the home move to `link`.
+pub async fn move_there(hub: &Arc<Hub>, link: &str) -> Result<Value, String> {
+    if link.is_empty() { return Err("which machine?".into()) }
+    if crate::net::homemove::uber(hub).await.is_empty() {
+        if crate::bots::api::of(hub).is_none() { return Err("bots are not running on this computer, so there is no uberbot to move".into()) }
+        let h = hub.rpc_for("onboard.uber").ok_or("this hub cannot make an uberbot")?;
+        let _ = h.call(hub, &Caller { gen: String::new(), client: hub.fresh_client() }, &json!(0), "onboard.uber", &json!({})).await;
+        let mut made = false;
+        for _ in 0..100 { if !crate::net::homemove::uber(hub).await.is_empty() { made = true; break } tokio::time::sleep(std::time::Duration::from_millis(100)).await }
+        if !made { return Err("the uberbot could not be made here, so there was nothing to move".into()) }
+    }
+    crate::net::homemove::start(hub, link).await
 }
 
 /// The browser sign-in, polled every 2 s for ten minutes; the token goes to the vault and the account is read.
