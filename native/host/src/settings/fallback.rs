@@ -133,6 +133,21 @@ pub fn classify(p: &str, m: &str, o: &Value) -> Option<Limit> {
     let signal = rejected(o) || assistant(o) || envelope(o);
     if signal && !not_quota(&low) && (rejected(o) || assistant(o) || quota_code(code) || quota_words(&low)) { Some(Limit { scope: scope_of(p, m, o), reason: reason(o), reset: reset_of(o), auth: false }) } else { None }
 }
+/// How long a provider whose CLI is not installed here is held before a turn tries it again (it may be installed, or the home may come back to a machine that has it).
+pub const MISSING_HOLD_S: u64 = 900;
+/// Words that say a provider's CLI is not on this machine: the hub's own (`<cli> is not installed (looked in ...)`, a runner's "Antigravity is not installed: ..."),
+/// or a start whose program vanished. Never a usage limit, never the agent's own reply.
+pub fn missing_text(s: &str) -> bool {
+    let low = s.to_lowercase();
+    low.contains(" is not installed") || low.contains("not installed for the person") || (low.starts_with("could not start") && low.contains("no such file or directory"))
+}
+/// A turn that failed because its provider is not installed here: held like a limit on the whole provider, for [`MISSING_HOLD_S`], so the order moves the request on.
+pub fn missing(p: &str, o: &Value, now: u64) -> Option<Limit> {
+    if s_of(o, "type") != "turn.failed" { return None }
+    let msg = o["message"].as_str().or(o["error"]["message"].as_str()).unwrap_or("");
+    if missing_text(msg) { Some(missing_limit(p, msg, now)) } else { None }
+}
+pub fn missing_limit(p: &str, why: &str, now: u64) -> Limit { Limit { scope: p.to_string(), reason: why.chars().take(400).collect(), reset: now + MISSING_HOLD_S, auth: false } }
 /// Error.auth_code / Error.auth_words: what a provider's error envelope says when the login itself failed.
 fn auth_code(c: &str) -> bool { matches!(c, "authentication_error" | "invalid_api_key" | "permission_error" | "unauthorized" | "token_expired") }
 /// Claude Code 2.1.319 says "Failed to authenticate: OAuth session expired and could not be refreshed" when its refresh token is dead (OAuthRefreshDeadError: "OAuth refresh token is

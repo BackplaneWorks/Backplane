@@ -277,7 +277,8 @@ pub async fn on_line(hub: &Arc<Hub>, acc: Option<&Arc<crate::settings::accounts_
     if !shaped && end.is_none() { return Verdict::default() }
     let (provider, model, running) = { let m = hub.model().await; match m.threads.get(thread) { Some(t) => (t.provider.clone(), t.model.clone(), t.turn == "running"), None => return Verdict::default() } };
     if !running { return Verdict::default() }
-    let lim = if shaped { fb::classify(&provider, &model, v).or_else(|| fb::auth_failure(&provider, v)) } else { None };
+    // a provider whose CLI is not installed here (Nov 10: the Pebble bot's turn ran on a machine without agy) moves on like a limit, so a bot never just fails
+    let lim = if shaped { fb::classify(&provider, &model, v).or_else(|| fb::auth_failure(&provider, v)).or_else(|| fb::missing(&provider, v, now_ms() / 1000)) } else { None };
     // Claude Code cancels its own command after a limit error (Nov 10: "You've hit your weekly limit", then the command's lifecycle `cancelled`), and the turn ends Interrupted on
     // that line. The person's Stop never ends a turn on a line (cmds.rs: their Stop makes the command a tomb), so a turn the CLI stopped with a limit seen in it ran out.
     let ran_out = end == Some("interrupted") && (lim.is_some() || seen.is_some() || {
@@ -301,6 +302,16 @@ pub async fn on_line(hub: &Arc<Hub>, acc: Option<&Arc<crate::settings::accounts_
     let w = world_of(hub, thread, provider, model).await;
     let Some(lim) = lim.or_else(|| pending_of(&w).filter(|p| due(p, w.now))) else { return Verdict::default() };
     expire_login(acc, &w, &lim);
+    let orig = original(hub, thread).await;
+    on_limit(&w, &lim, true, &orig)
+}
+/// A turn that could not start because its provider's CLI is not installed here (`could not start <cli>: <cli> is not installed ...`): held and moved on as a limit is.
+/// Default when it is not that, or the thread is not one this hub runs.
+pub async fn on_missing(hub: &Arc<Hub>, thread: &str, why: &str) -> Verdict {
+    if !fb::missing_text(why) { return Verdict::default() }
+    let (provider, model) = { let m = hub.model().await; match m.threads.get(thread) { Some(t) => (t.provider.clone(), t.model.clone()), None => return Verdict::default() } };
+    let w = world_of(hub, thread, provider.clone(), model).await;
+    let lim = fb::missing_limit(&provider, why, w.now);
     let orig = original(hub, thread).await;
     on_limit(&w, &lim, true, &orig)
 }
@@ -567,6 +578,21 @@ mod tests {
         match next(&both) { Next::Wait { events, reset } => {
             assert_eq!(reset, 1 + fb::UNKNOWN_HOLD_S, "a limit with no reset is tried again an hour after it was met: Claude's, met first, is the earliest");
             assert!(events.iter().any(|e| e["kind"] == "provider-wait" && e["summary"].as_str().unwrap().starts_with("Every account is out (Codex; Claude). Continuing at ")) && events.iter().any(|e| e["key"] == "provider.resume.t1"), "{events:?}") } n => panic!("{n:?}") }
+    }
+    /// Nov 10: the Pebble bot's antigravity turn ran where agy was not installed and failed. Not installed is held like a limit on the provider and the request goes on down the order.
+    #[test] fn a_provider_not_installed_moves_the_request_down_the_order() {
+        let failed = json!({"type":"turn.failed","message":"Antigravity is not installed: install Google's Antigravity CLI (agy), or install it under Settings › Agents › Antigravity."});
+        let l = fb::missing("antigravity", &failed, 1000).unwrap(); assert_eq!((l.scope.as_str(), l.reset, l.auth), ("antigravity", 1000 + fb::MISSING_HOLD_S, false));
+        assert!(fb::missing_text("could not start sh: agy is not installed (looked in the hub's PATH, the login shell's and the usual install directories)"));
+        assert!(fb::missing_text("could not start grok: No such file or directory (os error 2)"));
+        assert!(fb::missing("antigravity", &json!({"type":"item.completed","item":{"type":"agent_message","text":"grok is not installed"}}), 1000).is_none(), "an agent's own words are not it");
+        assert!(!fb::missing_text("You've hit your usage limit")); assert!(!fb::missing_text("could not start claude: permission denied"));
+        // the hub as it starts (the default order on): held, the same request restarted, and the restart goes on to Claude
+        let w = ordered("antigravity", "gemini-4-carbon", &[]);
+        let v = on_limit(&w, &l, true, "triage this webhook"); assert!(v.drop_turn_end && v.act.is_some(), "{:?}", keys(&v.events));
+        assert_eq!(keys(&v.events), ["fallback.outage.antigravity", "fallback.pending.t1", "TurnChanged"]);
+        let held = w.with(&v.events); match next(&held) { Next::Chain { to, .. } => assert_eq!(to.provider, "claude"), n => panic!("{n:?}") }
+        assert_eq!(next(&held.clone_at(1000 + fb::MISSING_HOLD_S + 1)), Next::Stay, "tried again once the hold is over");
     }
     #[test] fn a_chain_target_whose_accounts_are_all_held_is_passed_over() {
         let at = now_ms() / 1000; let (k, i) = inv(json!([{"id":"c","provider":"codex","state":"connected","epoch":1}]));
