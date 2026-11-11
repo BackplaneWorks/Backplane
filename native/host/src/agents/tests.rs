@@ -1881,6 +1881,7 @@ async fn lines_at_least(sd: &Path, n: usize) -> Vec<Value> { for _ in 0..100 { l
     let ev = until(&hub, 0, 15, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await;
     assert!(ev.iter().any(|e| turn_is(e, "completed")), "the turn ends: Codex read EOF on its stdin");
     ag.shutdown();
+}
 /// A home move holds what reaches a thread it carries by every way but the person's (another bot, a routine, a room, a webhook, mail): nothing is written or run
 /// while it moves; a move that failed delivers each here once, as it would have been (net/homemove.rs). The way to the new home is test/e2e/homemove/everywhere.py.
 /// The home move's hold is one per process: its tests take turns.
