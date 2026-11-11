@@ -33,6 +33,8 @@ object DataClient {
     var features by mutableStateOf<Set<String>>(emptySet()); private set
     var notice by mutableStateOf(HubNotice()); private set   // hello `notice`, newer from /hub/status: the banner
     var star by mutableStateOf<DStarOffer?>(null); private set
+    /** Alerts not allowed yet (Android 13+): AlertsBanner offers them, with the reason, instead of the system asking at start. Not now hides it until the next launch. */
+    var alertsAsk by mutableStateOf(false)
     var migrating by mutableStateOf<DMigrateCard?>(null); private set   // a 0.14 home coming across: hello `migrating`, then each `migrating` frame (DataMigrate.kt)
     var migrateOpen by mutableStateOf(false)   // the GitHub star suggestion (feature "star"): shown while the hub says so
     // the composer's own commands (hello.commands): the hub's table; none of them is ever a message

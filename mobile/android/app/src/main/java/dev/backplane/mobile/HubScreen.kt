@@ -100,6 +100,26 @@ internal fun HubBanner(open: () -> Unit) {
     }
 }
 
+/** Alerts, asked for once the person sees why (Android 13+): one line, Allow alerts shows the system's question, Not now hides it until the next launch.
+ *  Shown once paired and online, so it sits over Bub's chat or the list, never over the pairing screen. */
+@Composable
+internal fun AlertsBanner() {
+    val act = LocalContext.current as? android.app.Activity ?: return
+    if (!DataClient.alertsAsk || DataClient.conn != DataClient.Conn.ONLINE) return
+    Column(Modifier.testTag("alerts.banner")) {
+        Row(Modifier.fillMaxWidth().background(dcs.surfaceContainerHigh).padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+            Text(Msg.android_alerts_ask, Modifier.weight(1f), color = dcs.onSurface, fontFamily = BpMono, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.width(8.dp))
+            DMono(Msg.android_alerts_allow, dcs.primary, 12, Modifier.testTag("alerts.allow").clickable {
+                DataClient.alertsAsk = false
+                if (android.os.Build.VERSION.SDK_INT >= 33) act.requestPermissions(arrayOf(android.Manifest.permission.POST_NOTIFICATIONS), 1)
+            }.padding(horizontal = 4.dp, vertical = 4.dp), bold = true)
+            DMono(Msg.android_alerts_later, dcs.onSurfaceVariant, 12, Modifier.testTag("alerts.later").clickable { DataClient.alertsAsk = false }.padding(horizontal = 4.dp, vertical = 4.dp))
+        }
+        DLine()
+    }
+}
+
 /** The GitHub star suggestion (DataClient.star), one line: the link opens the page and decides open; Dismiss decides dismiss. */
 @Composable
 internal fun StarBanner() {

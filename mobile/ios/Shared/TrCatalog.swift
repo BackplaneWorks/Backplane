@@ -4,6 +4,9 @@
 extension Tr {
     static let catalog = #"""
 ios.sections.running	{n, number} running	{n, number}件実行中
+ios.alerts.ask	Bub can alert you when a thread needs you.	スレッドがあなたを必要とするとき、Bub が通知できます。
+ios.alerts.allow	Allow alerts	通知を許可
+ios.alerts.later	Not now	今はしない
 ios.viewerbg	3D viewer background	3Dビューアの背景
 ios.viewerbg.auto	Auto	自動
 ios.viewerbg.custom	Custom	カスタム
@@ -2516,6 +2519,8 @@ gpui.badge.again	Pick again	選び直す
 gpui.badge.on	on {name}	{name} 上
 gpui.badge.runs.on	runs on {name}	{name} で実行
 gpui.badge.also.on	also on {name}	{name} にもあります
+gpui.unsent.restore	Not sent: {text} · Restore	未送信: {text} · 元に戻す
+gpui.made.far.note	Sent. The thread opens here as soon as that machine has it.	送信しました。そのマシンに届きしだい、ここでスレッドが開きます。
 gpui.combo.key.model	{key} model	{key} モデル
 gpui.combo.key.account	{key} account	{key} アカウント
 gpui.combo.left	{pct}% left	残り{pct}%
@@ -3039,6 +3044,9 @@ gpui.f.quote.files	Send these files for a quote?	これらのファイルを送�
 gpui.f.dictate	Dictate with this device's microphone	このデバイスのマイクで音声入力
 gpui.f.inactive	Inactive: no confirmed active work	非アクティブ: 確認できる作業はありません
 gpui.f.tool.runs.nover	{name}  runs from {path}.	{name}が{path}で動作します。
+android.alerts.ask	Bub can alert you when a thread needs you.	スレッドがあなたを必要とするとき、Bub が通知できます。
+android.alerts.allow	Allow alerts	通知を許可
+android.alerts.later	Not now	今はしない
 android.viewerbg	3D background	3D の背景
 android.viewerbg.auto	Auto	自動
 android.viewerbg.light	Light	ライト
@@ -5119,6 +5127,9 @@ gpui.sections.running	{n, number} running	{n, number}件実行中
 
     /// gpui.badge.also.on = also on {name}
     static func gpui_badge_also_on(name: String) -> String { f("gpui.badge.also.on", ["name": name]) }
+
+    /// gpui.unsent.restore = Not sent: {text} · Restore
+    static func gpui_unsent_restore(text: String) -> String { f("gpui.unsent.restore", ["text": text]) }
 
     /// gpui.combo.key.model = {key} model
     static func gpui_combo_key_model(key: String) -> String { f("gpui.combo.key.model", ["key": key]) }

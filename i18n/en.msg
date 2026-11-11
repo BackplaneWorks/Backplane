@@ -2718,6 +2718,9 @@ gpui.f.inactive = Inactive: no confirmed active work
 gpui.f.tool.runs.nover = {name}  runs from {path}.
 
 # ---- android: new entries go here ----
+android.alerts.ask = Bub can alert you when a thread needs you.
+android.alerts.allow = Allow alerts
+android.alerts.later = Not now
 android.viewerbg = 3D background
 android.viewerbg.auto = Auto
 android.viewerbg.light = Light
@@ -3536,6 +3539,9 @@ android.swarm.provider = Provider
 android.swarm.model = Model
 # ---- ios: new entries go here ----
 ios.sections.running = {n, number} running
+ios.alerts.ask = Bub can alert you when a thread needs you.
+ios.alerts.allow = Allow alerts
+ios.alerts.later = Not now
 ios.viewerbg = 3D viewer background
 ios.viewerbg.auto = Auto
 ios.viewerbg.custom = Custom
