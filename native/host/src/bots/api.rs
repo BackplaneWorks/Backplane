@@ -160,6 +160,8 @@ pub async fn directory(hub: &Arc<Hub>) -> serde_json::Value {
     let mut far = vec![]; each_far(hub, |_, _, w| far.push(mirrored_uber(w)));
     let uber = uber_shown(&uber, &far);
     each_far(hub, |_, mark, w| { let (bs, rs) = rows_of(w, &uber, mark); bots.extend(bs); rooms.extend(far_rooms(rs, &here_rooms)); });
+    // a home move: the uberbot's row says where it is going (net/homemove.rs `moving_note`), as the desktop's sidebar does
+    if let Some((_, note)) = crate::net::homemove::moving_note(&hub.setting("home.moving").await.unwrap_or_default(), crate::hub::now_ms() / 1000) { if let Some(b) = bots.iter_mut().find(|b| b["uber"] == true && b["mark"].is_null()) { b["note"] = serde_json::json!(note) } }
     serde_json::json!({"bots":bots,"rooms":rooms})
 }
 /// A linked machine's rooms as listed here: a room shared across machines is kept on each under the same id, and this machine's copy is the one listed

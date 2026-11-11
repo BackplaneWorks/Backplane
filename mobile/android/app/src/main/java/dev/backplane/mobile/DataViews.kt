@@ -355,7 +355,7 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
             }
         } else LazyColumn(Modifier.fillMaxSize().testTag("home.list"), state = listState) {
             val uber = DataClient.bots.filter { it.uber && it.thread.isNotEmpty() }
-            items(uber, key = { "u:${it.id}" }) { b -> SidebarRow("@", b.name, onMachine(Msg.android_kind_uberbot, b.mark)) { open(b.thread) } }
+            items(uber, key = { "u:${it.id}" }) { b -> SidebarRow("@", b.name, onMachine(b.note.ifEmpty { Msg.android_kind_uberbot }, b.mark)) { open(b.thread) } }
             var at = uber.size; rowOf.clear()
             // a hub with sections (docs/ALWAYS-ON.md section 8): Needs you, Pinned, Active, the groups, Quiet, as it presents them; else every project
             val sectioned = DataClient.has("sections") && DataClient.sections.isNotEmpty()

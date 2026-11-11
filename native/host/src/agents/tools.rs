@@ -29,8 +29,8 @@ impl Agents {
         let phase = self.phase(id, &t.turn, t.pending).await;
         let parent = { let w = self.world().await; let p = w.setting(&format!("thread.parent.{id}")).to_string(); // Tree.raw: a link to a live thread of the same project, never to itself
             if !p.is_empty() && p != id && w.threads.get(&p).map_or(false, |x| !x.deleted && x.project == t.project) && w.threads.get(id).map_or(false, |x| !x.deleted) { p } else { String::new() } };
-        let (busy, titles) = self.world().await.work(id);
-        Some(json!({"id":id,"project":t.project,"title":t.title,"provider":t.provider,"model":t.model,"turn":t.turn,"activity":t.activity,"parent":parent,"phase":phase,"waiting":busy,"work":titles}))
+        let (busy, titles, model) = { let w = self.world().await; let (b, ti) = w.work(id); (b, ti, w.threads.get(id).map_or(t.model.clone(), |x| x.model.clone())) }; // the model as the agents run it: a model picked alone is a ModesSet, which the hub's model does not fold
+        Some(json!({"id":id,"project":t.project,"title":t.title,"provider":t.provider,"model":model,"turn":t.turn,"activity":t.activity,"parent":parent,"phase":phase,"waiting":busy,"work":titles}))
     }
 
     pub async fn tool_caps(&self, thread: &str) -> (bool, Value) {
@@ -75,7 +75,7 @@ impl Agents {
         let target = if sv(a, "threadId").is_empty() { thread } else { sv(a, "threadId") };
         if crate::net::far::is(target) { return fail("name the thread (threadId)") }
         if !self.same_project(thread, target).await { return fail(NOT_HERE) }
-        if a.get("provider").is_some() || a.get("model").is_some() { return fail("changing a thread's provider or model is not available in the Rust hub yet") }
+        if a.get("provider").is_some() || a.get("model").is_some() { return self.tool_update_provider(thread, target, a).await }
         if a.get("account").is_some() { if a.get("title").is_some() || a.get("report").is_some() || a.get("parent").is_some() { return fail("account cannot be combined with title, report or parent") } return self.tool_update_account(thread, target, a).await }
         // pinned: the sidebar's Pin and Unpin (thread.pin / thread.unpin); alone, like account
         if let Some(pv) = a.get("pinned") {
@@ -99,6 +99,29 @@ impl Agents {
             return match self.retitle(target, None, force).await { Ok(t) => (true, json!({"threadId":target,"title":t})), Err(e) => fail(&e) } }
         self.commit_events(vec![json!({"$":"ThreadRenamed","id":target,"title":title,"at":now_s()})]).await;
         (true, json!({"threadId":target,"title":title}))
+    }
+    /// thread_update {provider?, model?, account?}: the person's own switch (`thread.provider`), between turns. The conversation is kept as a switch
+    /// by hand or by the fallback chain keeps it: the new provider gets what it has not seen with the next message. A choice made this way is the
+    /// thread's own from then on (the chain's bookkeeping is cleared, so it is not moved back up by itself). Answers the saved status.
+    async fn tool_update_provider(&self, thread: &str, target: &str, a: &Value) -> (bool, Value) {
+        if a.get("title").is_some() || a.get("report").is_some() || a.get("parent").is_some() || a.get("pinned").is_some() { return fail("provider and model cannot be combined with title, report, parent or pinned") }
+        let (from, was_model, running) = { let w = self.world().await; match w.threads.get(target) { Some(t) => (t.provider.clone(), t.model.clone(), w.running(target)), None => return fail("No such thread.") } };
+        let to = { let p = sv(a, "provider").trim().to_lowercase(); if p.is_empty() { from.clone() } else { p } };
+        if to != "claude" && super::providers::driver(&to).is_none() { return fail(&format!("{to} is not a provider this hub runs (orchestrator_capabilities lists them)")) }
+        let model = match a.get("model") { Some(Value::String(m)) => m.trim().to_string(), Some(Value::Null) | None => if to == from { was_model.clone() } else { String::new() }, Some(_) => return fail("model is a string (empty for the provider's default)") };
+        if running { return fail(if target == thread { "a thread's provider and model change between turns, and this is its turn: ask from another thread, or the person, once it ends" } else { "a provider changes between turns: that thread is running; thread_interrupt it first, or wait for its turn to end" }) }
+        if to != from || model != was_model {
+            let Some(h) = self.hub.rpc_for("thread.provider") else { return fail("switching providers is not available") };
+            let r = h.call(&self.hub, &crate::api::Caller { gen: "agents".into(), client: 0 }, &json!(0), "thread.provider", &json!({"thread":target,"provider":to,"model":model})).await.into_iter().next().unwrap_or(Value::Null);
+            if r["ok"] != true { return fail(r["error"].as_str().unwrap_or("the provider could not be changed")) }
+        }
+        let mut out = self.thread_json(target).await.unwrap_or(Value::Null); out["threadId"] = json!(target);
+        if a.get("account").is_some() { // the account is the new provider's, chosen as thread_update {account} alone chooses one
+            let (ok, v) = self.tool_update_account(thread, target, a).await;
+            if !ok { let e = v["error"].as_str().unwrap_or("the account could not be selected"); return fail(&format!("now on {to}{}, but the account was not changed: {e}", if model.is_empty() { String::new() } else { format!(" ({model})") })) }
+            out["account"] = v["account"].clone();
+        }
+        (true, out)
     }
     pub async fn tool_interrupt(self: &Arc<Self>, thread: &str, a: &Value) -> (bool, Value) {
         let target = sv(a, "threadId"); if !self.same_project(thread, target).await { return fail(NOT_HERE) }

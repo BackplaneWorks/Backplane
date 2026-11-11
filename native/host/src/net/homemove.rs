@@ -138,7 +138,7 @@ pub async fn serve(hub: &Arc<Hub>, link: &str, m: &str, p: &Value) -> Value {
     match m {
         "home.state" => {
             let uber = uber(hub).await;
-            ok(json!({"uber": uber, "version": hub.cfg.version, "lines": hub.store.len(), "here": hub.setting("home.here").await.unwrap_or_default(), "at": hub.setting("home.at").await.unwrap_or_default()}))
+            ok(json!({"uber": uber, "version": hub.cfg.version, "lines": hub.store.len(), "here": hub.setting("home.here").await.unwrap_or_default(), "at": hub.setting("home.at").await.unwrap_or_default(), "move": STATE.lock().unwrap().clone().unwrap_or(Value::Null)}))
         }
         "home.adopt" => {
             let ds = p["devices"].as_array().cloned().unwrap_or_default();
@@ -219,6 +219,7 @@ pub async fn serve(hub: &Arc<Hub>, link: &str, m: &str, p: &Value) -> Value {
             match hub.commit_many(&ev).await { Ok(_) => ok(json!({})), Err(e) => no(&format!("{e:#}")) }
         }
         // the ring's record on the machine that holds the home now, for the Ring page of the one that asks
+        "home.ready" => ok(ready_here(hub, p["providers"].as_array().map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default()).await),
         "home.ring" => match crate::bots::api::of(hub) { Some(b) => ok(json!({"setup": b.ring_setup_info().await})), None => no("bots are not running") },
         "home.mint" => match crate::net::start::routes() {
             Some(rt) => { let j = rt.invite(); if j["error"].is_string() { no(gs(&j, "error")) } else { ok(json!({"link": gs(&j, "link")})) } }
@@ -227,9 +228,7 @@ pub async fn serve(hub: &Arc<Hub>, link: &str, m: &str, p: &Value) -> Value {
         "home.pull" => {
             // the machine that asks wants the home back: this hub moves it there
             if !hub.setting("home.here").await.unwrap_or_default().contains(link) && uber(hub).await.is_empty() { return no("the home is not here") }
-            let (h, l) = (hub.clone(), link.to_string());
-            tokio::spawn(async move { let _ = move_to(&h, &l).await; });
-            ok(json!({"started": true}))
+            match begin(hub, link).await { Ok(()) => ok(json!({"started": true})), Err(e) => no(&e) }
         }
         _ => no("not something this machine does"),
     }
@@ -237,6 +236,144 @@ pub async fn serve(hub: &Arc<Hub>, link: &str, m: &str, p: &Value) -> Value {
 fn same_host(a: &str, b: &str) -> bool {
     let h = |u: &str| u.split("://").nth(1).unwrap_or(u).split(['/', ':']).next().unwrap_or("").to_ascii_lowercase();
     !h(a).is_empty() && h(a) == h(b)
+}
+
+// ---- never losing sight of Bub during a move ----
+
+/// The uberbot row's mood and note for the setting `home.moving` (`{to, state, why, at}`): "Moving to boat-hub" while it goes; a failed move says
+/// so in the row for a while (one line, no alert), then the row is as it was. None: nothing to say.
+pub fn moving_note(v: &str, now: u64) -> Option<(&'static str, String)> {
+    let v: Value = serde_json::from_str(v).ok()?; let to = gs(&v, "to");
+    match gs(&v, "state") {
+        "moving" if !to.is_empty() => Some(("work", format!("Moving to {to}"))),
+        "failed" if now <= v["at"].as_u64().unwrap_or(0) + FAILED_SHOWN_S => Some(("error", format!("Did not move to {to}: {}", gs(&v, "why")))),
+        _ => None,
+    }
+}
+const FAILED_SHOWN_S: u64 = 3600;
+/// The thread a client asked for, when the home moved away and took it: `<link>~<id>` on the new home (the same id there), drawn in its place.
+/// `at` the setting `home.at`; `project` the local thread's project (a project's thread never moves); `there` whether the mirror has an id.
+pub fn moved_thread(at: &str, thread: &str, project: Option<&str>, there: &dyn Fn(&str) -> bool) -> Option<String> {
+    if thread.is_empty() || crate::net::far::is(thread) || project.map_or(true, |p| !p.is_empty()) { return None }
+    let at: Value = serde_json::from_str(at).ok()?; let link = gs(&at, "link"); if link.is_empty() { return None }
+    let id = crate::net::far::id(link, thread); there(&id).then_some(id)
+}
+
+/// The move in progress: where to, and the threads it carries (the person's messages to them are held until it is over).
+struct Moving { link: String, threads: HashSet<String>, held: Vec<Value> }
+static MOVING: Mutex<Option<Moving>> = Mutex::new(None);
+/// The threads a move carries: every live thread of no project (the uberbot's, the bots', their routines').
+async fn carried_threads(hub: &Arc<Hub>) -> HashSet<String> { hub.model().await.threads.iter().filter(|(_, t)| !t.deleted && t.project.is_empty()).map(|(k, _)| k.clone()).collect() }
+async fn set_moving(hub: &Arc<Hub>, v: Value) { let _ = hub.commit(&json!({"$":"SettingSet","key":"home.moving","value":if v.is_null() { String::new() } else { v.to_string() },"at":now_s()})).await; }
+
+/// A person's message (`turn.start` params `p`) to a local thread: Some(reply) when the home move takes it instead of this hub. During a move a
+/// message to a thread that moves is held (answered ok: not dropped, not an error) and goes to the new home when the move is done, or here if it
+/// failed. After a move, a message to the old copy of a moved thread goes to the new home (a client that still had it open).
+pub async fn intercept(hub: &Arc<Hub>, thread: &str, p: &Value) -> Option<Result<(), String>> {
+    if crate::net::far::is(thread) { return None }
+    { let mut g = MOVING.lock().unwrap(); if let Some(m) = g.as_mut() { if m.threads.contains(thread) { let mut q = p.clone(); q["thread"] = json!(thread); m.held.push(q); return Some(Ok(())) } } }
+    let at: Value = serde_json::from_str(&hub.setting("home.at").await.unwrap_or_default()).ok()?;
+    let link = gs(&at, "link"); if link.is_empty() { return None }
+    let project = hub.model().await.threads.get(thread).map(|t| t.project.clone());
+    let far = hub.far(); let there = |id: &str| far.as_ref().map_or(false, |f| f.has(id));
+    let to = moved_thread(&hub.setting("home.at").await.unwrap_or_default(), thread, project.as_deref(), &there)?;
+    Some(forward(&to, link, p))
+}
+/// A held message to its thread on the new home, through the far outbox (it goes when that machine answers, and shows in that thread's strip until it does).
+fn forward(to: &str, link: &str, p: &Value) -> Result<(), String> {
+    let Some(out) = crate::net::farsend::global() else { return Err("this hub cannot reach another machine".into()) };
+    let mut q = p.clone(); q["thread"] = json!(crate::net::far::local(to));
+    if gs(&q, "msg").is_empty() { q["msg"] = json!(format!("hm{}-{}", now_ms(), q.to_string().len())) }
+    out.hold(to, link, q, crate::net::farsend::now_ms()); Ok(())
+}
+/// The end of a move: the held messages go to the new home (`moved`) or, when it failed, to this hub's own threads as they would have.
+async fn release(hub: &Arc<Hub>, moved: bool) {
+    let Some(m) = MOVING.lock().unwrap().take() else { return };
+    for p in m.held {
+        let th = gs(&p, "thread").to_string();
+        if moved { if let Err(e) = forward(&crate::net::far::id(&m.link, &th), &m.link, &p) { eprintln!("backplane: home move: a held message to {th} was not sent: {e}") } }
+        else if let Some(h) = hub.rpc_for("turn.start") { let _ = h.call(hub, &Caller { gen: "home".into(), client: 1 }, &json!(0), "turn.start", &p).await; }
+    }
+}
+
+// ---- the readiness check (before a move; nothing here signs in, installs or costs a request to a provider) ----
+
+/// The free disk under `dir` and the memory available, in MB (None where it cannot be read).
+fn disk_mb(dir: &Path) -> Option<u64> {
+    #[cfg(unix)] {
+        use std::os::unix::ffi::OsStrExt;
+        let c = std::ffi::CString::new(dir.as_os_str().as_bytes()).ok()?; let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
+        if unsafe { libc::statvfs(c.as_ptr(), &mut st) } != 0 { return None }
+        Some((st.f_bavail as u64).saturating_mul(st.f_frsize as u64) >> 20)
+    }
+    #[cfg(not(unix))] { let _ = dir; None }
+}
+fn mem_mb() -> Option<u64> { std::fs::read_to_string("/proc/meminfo").ok()?.lines().find(|l| l.starts_with("MemAvailable:"))?.split_whitespace().nth(1)?.parse::<u64>().ok().map(|kb| kb / 1024) }
+/// One provider's sign-in here: `yes`, `no` or `unknown` (installed, but its CLI has no status to read), and who. Claude and Codex are asked their own
+/// status (`auth status`, `login status`: no turn, no usage); a connected named account (a sync account included) counts as signed in.
+async fn signed_here(hub: &Arc<Hub>, cli: &crate::agents::proc::Cli, provider: &str) -> Value {
+    let live: Value = hub.info_now()["accounts.live"].as_str().and_then(|t| serde_json::from_str(t).ok()).unwrap_or(Value::Null);
+    let named: Vec<String> = live["profiles"].as_array().into_iter().flatten().filter(|p| p["state"] == "connected" && p["provider"] == provider).filter_map(|p| p["label"].as_str().map(str::to_string)).collect();
+    let name = if provider == "claude" { "claude" } else { crate::agents::providers::driver(provider).map_or(provider, |m| m.cli) };
+    let Ok(prog) = cli.resolve(name) else { return json!({"installed": false, "signed": if named.is_empty() { "no" } else { "yes" }, "accounts": named}) };
+    async fn run(p: &Path, args: &[&str]) -> Option<(i32, String, String)> {
+        let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Agent, p); c.args(args).stdin(std::process::Stdio::null()).kill_on_drop(true);
+        let o = tokio::time::timeout(std::time::Duration::from_secs(15), c.output()).await.ok()?.ok()?;
+        Some((o.status.code().unwrap_or(-1), String::from_utf8_lossy(&o.stdout).into_owned(), String::from_utf8_lossy(&o.stderr).into_owned()))
+    }
+    let (mut signed, who) = match provider {
+        "claude" => run(&prog, &["auth", "status"]).await.map_or(("unknown", String::new()), |r| crate::settings::onboard::claude_signed(r.0, &r.1)),
+        "codex" => (run(&prog, &["login", "status"]).await.map_or("unknown", |r| crate::settings::onboard::codex_signed(r.0, &r.1, &r.2)), String::new()),
+        _ => ("unknown", String::new()),
+    };
+    if !named.is_empty() { signed = "yes" }
+    json!({"installed": true, "signed": signed, "who": who, "accounts": named})
+}
+/// The receiver's side of the check: its build, room and the sign-ins of `providers`.
+pub async fn ready_here(hub: &Arc<Hub>, providers: Vec<String>) -> Value {
+    let cli = crate::agents::proc::Cli::from_env(); let mut ps = serde_json::Map::new();
+    for p in providers.iter().take(12) { ps.insert(p.clone(), signed_here(hub, &cli, p).await); }
+    json!({"version": hub.cfg.version, "commit": hub.cfg.commit, "disk_mb": disk_mb(&hub.cfg.home), "mem_mb": mem_mb(), "providers": ps})
+}
+/// The providers the threads that move run on (the uberbot's, the bots', their routines'): the threads of no project.
+pub fn providers_of(lines: &[String]) -> Vec<String> {
+    let mut by: HashMap<String, String> = HashMap::new(); let mut gone: HashSet<String> = HashSet::new();
+    for e in lines.iter().filter_map(|l| serde_json::from_str::<Value>(l).ok()) {
+        match gs(&e, "$") {
+            "ThreadCreated" | "ThreadForked" if gs(&e, "project").is_empty() => { by.insert(gs(&e, "id").into(), gs(&e, "provider").into()); }
+            "ProviderSet" => { if let Some(p) = by.get_mut(gs(&e, "id")) { *p = gs(&e, "provider").into() } }
+            "ThreadDeleted" => { gone.insert(gs(&e, "id").into()); }
+            _ => {}
+        }
+    }
+    let mut v: Vec<String> = by.into_iter().filter(|(t, _)| !gone.contains(t)).map(|(_, p)| if p.is_empty() { "claude".into() } else { p }).collect(); v.sort(); v.dedup(); v
+}
+/// What stops a move to `name`, one reason each, from the receiver's answer `st` (an empty list: ready). `need_mb`: the room the carry takes there.
+pub fn reasons(name: &str, me: (&str, &str), st: &Value, need: &[String], need_mb: u64) -> Vec<String> {
+    let mut r = vec![];
+    if gs(st, "version") != me.0 || gs(st, "commit") != me.1 { r.push(format!("{name} runs another build ({} {}; this one is {} {}): update it first", gs(st, "version"), gs(st, "commit"), me.0, me.1)) }
+    for p in need {
+        let s = &st["providers"][p];
+        let nm = crate::present::onboard::AGENTS.iter().find(|a| a.id == p).map_or(p.as_str(), |a| a.name);
+        if s["installed"] == false && s["signed"] != "yes" { r.push(format!("{nm} is not installed on {name}")) }
+        else if s["signed"] == "no" { r.push(format!("{nm} is not signed in on {name}: sign in there first")) }
+    }
+    if let Some(d) = st["disk_mb"].as_u64() { if d < need_mb { r.push(format!("{name} has {d} MB of disk free; the move needs about {need_mb} MB")) } }
+    if let Some(m) = st["mem_mb"].as_u64() { if m < MIN_MEM_MB { r.push(format!("{name} has {m} MB of memory free; the home needs about {MIN_MEM_MB} MB")) } }
+    r
+}
+/// The memory a home's hub needs free to take it (it folds the log at about 200 MB and runs the bots' agents).
+const MIN_MEM_MB: u64 = 600;
+/// The readiness check: `{ready, reasons, checks}`; Err only when the machine is not linked or does not answer (the link is down).
+pub async fn check(hub: &Arc<Hub>, link: &str) -> Result<Value, String> {
+    let Some((_, name, _)) = hub.far_machines().into_iter().find(|(id, _, _)| id == link) else { return Err("no such machine is linked".into()) };
+    let lines = hub.store.all();
+    let bytes: u64 = lines.iter().map(|l| l.len() as u64 + 1).sum();
+    let need = providers_of(&lines); drop(lines);
+    let st = far(hub, link, "home.ready", &json!({"providers": need})).await.map_err(|e| if e == "that machine is away" { format!("{name} is away: the link is down") } else if e.contains("not something") || e.contains("403") || e.contains("unknown") { format!("{name} runs a Backplane without the move check: update it first") } else { e })?;
+    let need_mb = (bytes >> 20) * 3 + 512; // the log and its fold, twice over, and room to run
+    let rs = reasons(&name, (&hub.cfg.version, &hub.cfg.commit), &st, &need, need_mb);
+    Ok(json!({"ready": rs.is_empty(), "reasons": rs, "machine": name, "needs": need, "checks": st}))
 }
 
 // ---- the sending side ----
@@ -294,6 +431,8 @@ pub async fn move_to(hub: &Arc<Hub>, link: &str) -> Result<Value, String> {
     let uber_here = uber(hub).await;
     if uber_here.is_empty() { tell(hub, "failed", "checking", "the home is not on this machine").await; return Err("the home is not on this machine".into()) }
     if !gs(&st, "uber").is_empty() { tell(hub, "failed", "checking", &format!("{name} has an uberbot of its own")).await; return Err(format!("{name} has an uberbot of its own")) }
+    // a rehearsal (test/e2e/homemove/everywhere.py) holds the copy open a moment, so a message can be sent mid-move
+    if let Some(ms) = std::env::var("BACKPLANE_MOVE_PAUSE_MS").ok().and_then(|v| v.parse::<u64>().ok()) { tokio::time::sleep(std::time::Duration::from_millis(ms.min(30_000))).await; }
     let home = hub.cfg.home.clone();
     // the log as it is now
     let n0 = hub.store.len();
@@ -403,6 +542,23 @@ pub fn public_url(u: &str) -> String {
 }
 pub async fn publish_offer(hub: &Arc<Hub>) { let at = hub.setting("home.at").await.unwrap_or_default(); hub.set_info("hub.offer", &offer_of(&at)).await; }
 
+/// A move from this hub to `l`, checked first (a move that would leave Bub where it cannot answer is refused before anything is copied, and says why),
+/// then run in the background with the person's messages to the moving threads held.
+pub async fn begin(hub: &Arc<Hub>, l: &str) -> Result<(), String> {
+    let l = l.to_string();
+    let c = match check(hub, &l).await { Ok(c) => c, Err(e) => { tell(hub, "failed", "checking", &e).await; return Err(e) } };
+    let name = gs(&c, "machine").to_string();
+    if c["ready"] != true { let why = c["reasons"].as_array().into_iter().flatten().filter_map(Value::as_str).collect::<Vec<_>>().join("; "); tell(hub, "failed", "checking", &why).await; set_moving(hub, json!({"to": name, "state": "failed", "why": why, "at": now_s()})).await; return Err(why) }
+    let threads = carried_threads(hub).await;
+    *MOVING.lock().unwrap() = Some(Moving { link: l.clone(), threads, held: vec![] });
+    set_moving(hub, json!({"to": name, "state": "moving", "at": now_s()})).await;
+    let h = hub.clone(); tokio::spawn(async move {
+        let r = move_to(&h, &l).await;
+        match &r { Ok(_) => set_moving(&h, Value::Null).await, Err(e) => set_moving(&h, json!({"to": name, "state": "failed", "why": e, "at": now_s()})).await }
+        release(&h, r.is_ok()).await;
+    });
+    Ok(())
+}
 /// One press: `to` a linked machine (its link id or name) moves the home there; "back" asks the machine that holds it to move it here.
 pub async fn start(hub: &Arc<Hub>, to: &str) -> Result<Value, String> {
     if STATE.lock().unwrap().as_ref().map_or(false, |s| s["state"] == "moving") { return Err("a move is running".into()) }
@@ -411,10 +567,19 @@ pub async fn start(hub: &Arc<Hub>, to: &str) -> Result<Value, String> {
         let l = gs(&at, "link").to_string(); if l.is_empty() { return Err("the home is here".into()) }
         far(hub, &l, "home.pull", &json!({})).await?;
         tell(hub, "moving", "back", gs(&at, "name")).await;
+        // this hub's own row of the uberbot (a far row until the move is done) says it is coming here, until it is here or the other machine says the move failed
+        let me = crate::net::botnet::name().await; set_moving(hub, json!({"to": me, "state": "moving", "at": now_s()})).await;
+        let (h, l2) = (hub.clone(), l.clone()); tokio::spawn(async move {
+            for _ in 0..900 {
+                tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+                if !uber(&h).await.is_empty() { set_moving(&h, Value::Null).await; tell(&h, "done", "moved", "this machine").await; return }
+                if let Ok(st) = far(&h, &l2, "home.state", &json!({})).await { if st["move"]["state"] == "failed" { set_moving(&h, json!({"to": me, "state": "failed", "why": gs(&st["move"], "note"), "at": now_s()})).await; tell(&h, "failed", "back", gs(&st["move"], "note")).await; return } }
+            }
+        });
         return Ok(json!({"started": true}))
     }
     let Some(l) = hub.far_machines().into_iter().find(|(lid, n, _)| lid == to || n.eq_ignore_ascii_case(to)).map(|(lid, _, _)| lid) else { return Err("no machine of yours by that name is linked".into()) };
-    let h = hub.clone(); tokio::spawn(async move { let _ = move_to(&h, &l).await; });
+    begin(hub, &l).await?;
     Ok(json!({"started": true}))
 }
 /// Settings, Machines: where the home is and the one press that moves it (the phones' Machines page draws the same rows).
@@ -440,7 +605,7 @@ pub fn rows(uber: bool, at: &str, mv: &str, linked: &Value) -> Vec<Value> {
 }
 pub struct HomeRpc;
 impl RpcHandler for HomeRpc {
-    fn methods(&self) -> &'static [&'static str] { &["home.move", "home.status", "hub.offer.take", "hub.offer.done", "ring.front.use"] }
+    fn methods(&self) -> &'static [&'static str] { &["home.move", "home.check", "home.status", "hub.offer.take", "hub.offer.done", "ring.front.use"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, _who: &'a Caller, id: &'a Value, m: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let reply = |v: Value| vec![json!({"t":"reply","id":id,"ok":true,"result":v})];
@@ -448,6 +613,8 @@ impl RpcHandler for HomeRpc {
             match m {
                 "home.status" => reply(STATE.lock().unwrap().clone().unwrap_or(json!({"state":"idle"}))),
                 "home.move" => match start(hub, gs(p, "to")).await { Ok(v) => reply(v), Err(e) => fail(&e) },
+                // the dry check alone (Settings, Machines and scripts/home-move-check.sh): what a move there would find, nothing moved
+                "home.check" => { let to = gs(p, "to"); match hub.far_machines().into_iter().find(|(lid, n, _)| lid == to || n.eq_ignore_ascii_case(to)).map(|(lid, _, _)| lid) { Some(l) => match check(hub, &l).await { Ok(v) => reply(v), Err(e) => fail(&e) }, None => fail("no machine of yours by that name is linked") } }
                 "hub.offer.take" => {
                     let at: Value = serde_json::from_str(&hub.setting("home.at").await.unwrap_or_default()).unwrap_or(Value::Null);
                     let l = gs(&at, "link"); if l.is_empty() { return fail("no hub is offered") }
@@ -538,5 +705,34 @@ mod tests {
         assert_eq!(o, json!({"id":"home-7","name":"boat-hub","url":"https://boat-hub.tail9e0cf2.ts.net","why":"home","credential":"same"}));
         assert_eq!(offer_of(""), ""); assert_eq!(public_url("https://boat-hub.x.ts.net/"), "https://boat-hub.x.ts.net");
         assert!(same_host("https://boat-hub.x.ts.net", "http://boat-hub.x.ts.net:3797/") && !same_host("https://a.ts.net", "https://b.ts.net"));
+    }
+    #[test] fn the_check_names_each_reason_a_move_would_fail_and_passes_a_ready_machine() {
+        let lines = vec![l(json!({"$":"ProjectCreated","id":"p1","title":"x","root":"/r","at":1})), l(json!({"$":"ThreadCreated","id":"tb","project":"","provider":"claude","model":"","at":1})),
+            l(json!({"$":"ThreadCreated","id":"tr","project":"","provider":"","model":"","at":1})), l(json!({"$":"ThreadCreated","id":"tp","project":"p1","provider":"grok","model":"","at":1})),
+            l(json!({"$":"ThreadCreated","id":"tc","project":"","provider":"claude","model":"","at":1})), l(json!({"$":"ProviderSet","id":"tc","provider":"codex","model":"","at":2})),
+            l(json!({"$":"ThreadCreated","id":"td","project":"","provider":"muse","model":"","at":1})), l(json!({"$":"ThreadDeleted","id":"td","at":3}))];
+        assert_eq!(providers_of(&lines), vec!["claude", "codex"], "the moving threads' providers: not a project's, not a deleted one's; a switch counts");
+        let need = vec!["claude".to_string(), "codex".to_string()];
+        let good = json!({"version":"0.15.0","commit":"abc","disk_mb":9000,"mem_mb":2700,"providers":{"claude":{"installed":true,"signed":"yes"},"codex":{"installed":true,"signed":"yes"}}});
+        assert!(reasons("boat-hub", ("0.15.0", "abc"), &good, &need, 900).is_empty());
+        let mut bad = good.clone(); bad["commit"] = json!("def"); bad["disk_mb"] = json!(100); bad["mem_mb"] = json!(200);
+        bad["providers"]["claude"]["signed"] = json!("no"); bad["providers"]["codex"] = json!({"installed":false,"signed":"no"});
+        let r = reasons("boat-hub", ("0.15.0", "abc"), &bad, &need, 900);
+        assert_eq!(r, vec!["boat-hub runs another build (0.15.0 def; this one is 0.15.0 abc): update it first", "Claude Code is not signed in on boat-hub: sign in there first", "Codex is not installed on boat-hub",
+            "boat-hub has 100 MB of disk free; the move needs about 900 MB", "boat-hub has 200 MB of memory free; the home needs about 600 MB"]);
+        // a sync account is a sign-in; a provider whose CLI has no status to read does not stop the move
+        let mut ok = good.clone(); ok["providers"]["claude"] = json!({"installed":true,"signed":"yes","accounts":["Synced"]}); ok["providers"]["codex"] = json!({"installed":true,"signed":"unknown"});
+        assert!(reasons("boat-hub", ("0.15.0", "abc"), &ok, &need, 900).is_empty());
+    }
+    #[test] fn bubs_row_says_where_it_is_moving_and_its_chat_follows_it_there() {
+        assert_eq!(moving_note(&json!({"to":"boat-hub","state":"moving","at":10}).to_string(), 20), Some(("work", "Moving to boat-hub".to_string())));
+        let failed = json!({"to":"boat-hub","state":"failed","why":"Claude Code is not signed in on boat-hub: sign in there first","at":10}).to_string();
+        assert_eq!(moving_note(&failed, 20), Some(("error", "Did not move to boat-hub: Claude Code is not signed in on boat-hub: sign in there first".to_string())));
+        assert_eq!(moving_note(&failed, 10 + FAILED_SHOWN_S + 1), None, "said once, for a while, then the row is as it was"); assert_eq!(moving_note("", 5), None);
+        let at = json!({"link":"L1","name":"boat-hub","url":"u","at":1}).to_string(); let there = |id: &str| id == "L1~tbub";
+        assert_eq!(moved_thread(&at, "tbub", Some(""), &there).as_deref(), Some("L1~tbub"), "Bub's chat is drawn from the new home, the same id there");
+        assert_eq!(moved_thread(&at, "tdesk", Some("p1"), &|_| true), None, "a project's thread never moves");
+        assert_eq!(moved_thread(&at, "tother", Some(""), &there), None, "only what the new home has");
+        assert_eq!(moved_thread("", "tbub", Some(""), &there), None, "the home is here"); assert_eq!(moved_thread(&at, "L1~tbub", Some(""), &|_| true), None);
     }
 }

@@ -23,8 +23,14 @@ def start(name):
     home = os.path.join(WORK, name)
     os.makedirs(home, exist_ok=True)
     os.makedirs(os.path.join(WORK, "agents"), exist_ok=True)
+    # the move's readiness check asks the target's `claude auth status`: a stand-in that is signed in (everywhere.py writes its own)
+    cl = os.path.join(WORK, "agents", "claude")
+    if not os.path.exists(cl):
+        with open(cl, "w") as f:
+            f.write("#!/bin/sh\n[ \"$1\" = auth ] && { echo '{\"loggedIn\":true,\"email\":\"standin@example.com\"}'; exit 0; }\nexit 1\n")
+        os.chmod(cl, 0o755)
     env = dict(os.environ, BACKPLANE_AGENTS=os.path.join(WORK, "agents"), BACKPLANE_NO_UPDATE="1", BACKPLANE_NAME=f"hub-{name.lower()}",
-               BACKPLANE_BOTS_DIR=os.path.join(home, "botsdir"), BACKPLANE_UBER_GRACE="600", HOME=os.path.join(WORK, f"home-{name}"))
+               BACKPLANE_BOTS_DIR=os.path.join(home, "botsdir"), BACKPLANE_UBER_GRACE="600", BACKPLANE_MOVE_PAUSE_MS=os.environ.get("BACKPLANE_MOVE_PAUSE_MS", ""), HOME=os.path.join(WORK, f"home-{name}"))
     for k in ("DISPLAY", "WAYLAND_DISPLAY", "BACKPLANE_URL", "BACKPLANE_HOOK_URL", "BACKPLANE_HTTPS_PORT"):
         env.pop(k, None)
     os.makedirs(env["HOME"], exist_ok=True)

@@ -331,7 +331,7 @@ struct DataThreadsView: View {
         }.padding(.horizontal, 12).frame(minHeight: 40).contentShape(Rectangle())
     }
     private func botRow(_ b: DBot) -> some View {
-        Button { path.append(b.thread) } label: { sideRow("@", b.name, b.uber ? "uberbot" : "bot", b.mark) }.buttonStyle(.plain).dataRow().accessibilityIdentifier("data.bot." + b.id)
+        Button { path.append(b.thread) } label: { sideRow("@", b.name, !b.note.isEmpty ? b.note : b.uber ? "uberbot" : "bot", b.mark) }.buttonStyle(.plain).dataRow().accessibilityIdentifier("data.bot." + b.id)
     }
     private func projectHeader(_ p: DProject) -> some View {
         HStack(spacing: 8) {
