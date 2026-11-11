@@ -55,6 +55,30 @@ pub fn answer(provider: &str, out: &str) -> String {
     }
     last.trim().to_string()
 }
+/// Why a one-shot's output holds no answer: claude's error result (a limit, a sign-in), else "no answer".
+pub fn failure(out: &str) -> String {
+    let mut why = String::new();
+    for l in out.lines() { if let Ok(o) = serde_json::from_str::<Value>(l.trim()) { if o["type"] == "result" && o["is_error"] == true { why = o["result"].as_str().unwrap_or("an error result").to_string(); if o["api_error_status"].is_number() { why = format!("{why} ({})", o["api_error_status"]) } } } }
+    if why.is_empty() { "no answer".into() } else { why.chars().take(300).collect() }
+}
+/// A failure that is a usage limit (the login is skipped for an hour), not a passing error.
+pub fn is_limit(why: &str) -> bool { let l = why.to_lowercase(); l.contains("limit") || l.contains("(429)") }
+fn login_key(id: &str, epoch: u64) -> String { format!("{id}:{epoch}") }
+/// Logins a one-shot found out (key `id:epoch`, "" the default login) and until when; in memory only: a restart tries them again.
+fn limited_logins() -> &'static std::sync::Mutex<std::collections::HashMap<String, u64>> { static M: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, u64>>> = std::sync::OnceLock::new(); M.get_or_init(Default::default) }
+/// The logins a one-shot tries, in order: the default login (id "") unless held, then the named Claude accounts by allowance left; none a one-shot found out within the hour.
+pub fn healthy_order(profiles: &[Value], get: &dyn Fn(&str) -> String, now: u64, model: &str, out: &std::collections::HashMap<String, u64>) -> Vec<(String, u64)> {
+    let gone = |id: &str, epoch: u64| out.get(&login_key(id, epoch)).map_or(false, |until| *until > now);
+    let mut v = vec![];
+    if !crate::settings::fallback::hold_current(get, "claude", "", 0, model, now) && !gone("", 0) { v.push((String::new(), 0)) }
+    let mut tried: Vec<String> = vec![];
+    while let Some(p) = crate::settings::fallback::pick_untried(profiles, &tried, get, now, "claude", model) {
+        let (id, epoch) = (p["id"].as_str().unwrap_or("").to_string(), p["epoch"].as_u64().unwrap_or(0));
+        tried.push(crate::settings::fallback::tried_id(&id, epoch));
+        if !gone(&id, epoch) { v.push((id, epoch)) }
+    }
+    v
+}
 /// Sum.clean: the first line, one plain line of single-spaced words, at most 200 characters (197 and "...").
 pub fn sum_clean(answer: &str) -> String {
     let first = answer.trim().lines().next().unwrap_or("").trim().replace('\t', " ");
@@ -101,17 +125,46 @@ impl Agents {
         self.shot(provider, &model, system, input, &Launch::default()).await
     }
     /// One run of `provider`'s CLI with `model`, the text on stdin, tools off.
-    pub async fn shot(&self, provider: &str, model: &str, system: &str, input: &str, via: &Launch) -> Option<String> {
-        if provider != "claude" && provider != "codex" { return None }
-        let prog = match &via.program { Some(p) => p.clone(), None => self.cli.resolve(provider).ok()? };
+    pub async fn shot(&self, provider: &str, model: &str, system: &str, input: &str, via: &Launch) -> Option<String> { self.shot_r(provider, model, system, input, via).await.ok() }
+    /// `shot`, with why it gave nothing: the CLI's own error result ("You've hit your weekly limit · resets 3am"), a timeout, or no answer.
+    pub async fn shot_r(&self, provider: &str, model: &str, system: &str, input: &str, via: &Launch) -> Result<String, String> {
+        if provider != "claude" && provider != "codex" { return Err(format!("{provider} one-shots are not wired")) }
+        let prog = match &via.program { Some(p) => p.clone(), None => self.cli.resolve(provider)? };
         let mut a = via.args.clone(); a.extend(args(provider, model, system));
-        let p = proc::spawn(&prog, &a, &self.hub.cfg.home, self.cli.dir(), &via.env).ok()?;
+        let p = proc::spawn(&prog, &a, &self.hub.cfg.home, self.cli.dir(), &via.env).map_err(|e| format!("could not start {provider}: {e}"))?;
         let (pid, mut lines, input_tx, exit) = (p.pid, p.lines, p.input, p.exit);
         let _ = input_tx.try_send(input.to_string()); drop(input_tx); // the text on stdin, then it closes
         let read = async { let mut out = String::new(); while let Some(l) = lines.recv().await { if out.len() + l.len() > OUT_CAP { break } out.push_str(&l); out.push('\n') } out };
-        let out = match tokio::time::timeout(TIMEOUT, read).await { Ok(o) => o, Err(_) => { proc::terminate(pid, Duration::from_secs(1)); return None } };
+        let out = match tokio::time::timeout(TIMEOUT, read).await { Ok(o) => o, Err(_) => { proc::terminate(pid, Duration::from_secs(1)); return Err("no answer in 60 s".into()) } };
         let _ = tokio::time::timeout(Duration::from_secs(5), exit).await; proc::terminate(pid, Duration::from_millis(100));
-        let a = answer(provider, &out); if a.is_empty() { None } else { Some(a) }
+        let a = answer(provider, &out); if a.is_empty() { Err(failure(&out)) } else { Ok(a) }
+    }
+    /// A one-shot on a Claude login that can take it, in the failover's order: the CLI's own login unless it is held (a limit a turn recorded, or one
+    /// a one-shot met within the hour), then the named accounts, the one with the most allowance left first (settings/fallback.rs `pick_untried`).
+    /// A login that answers with a limit is skipped by the next one-shots for an hour. `who` names the job in the hub's log. None when every login failed.
+    pub async fn shot_healthy(&self, model: &str, system: &str, input: &str, who: &str) -> Option<String> {
+        let now = super::now_s();
+        let (profiles, holds) = {
+            let profiles = self.accounts.get().map(|m| m.snapshot()["profiles"].as_array().cloned().unwrap_or_default()).unwrap_or_default();
+            let keys: Vec<String> = { let m = self.hub.model().await; m.settings_with_prefix("account.limit.").map(|(k, _)| k.to_string()).collect() };
+            let mut h = std::collections::HashMap::new(); for k in keys { if let Some(v) = self.hub.setting(&k).await { h.insert(k, v); } }
+            (profiles, h)
+        };
+        let out = limited_logins().lock().unwrap().clone();
+        let order = healthy_order(&profiles, &|k: &str| holds.get(k).cloned().unwrap_or_default(), now, model, &out);
+        if order.is_empty() { eprintln!("{who}: every Claude login is out; asked again later"); return None }
+        for (id, epoch) in order {
+            let name = if id.is_empty() { "the default login".to_string() } else { profiles.iter().find(|p| p["id"] == id.as_str()).and_then(|p| p["label"].as_str()).unwrap_or("an account").to_string() };
+            let via = if id.is_empty() { Launch::default() } else {
+                let Some(mgr) = self.accounts.get().cloned() else { continue };
+                match mgr.launch_plan(&id, &epoch.to_string(), "claude").await { Ok(pl) => Launch { program: Some(pl.program), args: pl.args, env: pl.env }, Err(e) => { eprintln!("{who}: {name} cannot run it ({e})"); continue } }
+            };
+            match self.shot_r("claude", model, system, input, &via).await {
+                Ok(a) => return Some(a),
+                Err(e) => { eprintln!("{who}: {name} gave nothing: {e}"); if is_limit(&e) { limited_logins().lock().unwrap().insert(login_key(&id, epoch), now + 3600); } }
+            }
+        }
+        None
     }
     /// A side question (/btw): the writing model reads the thread so far and the question; the thread, its turn and the log never see either. The answer, or "" (the client says where the model is chosen).
     /// Under the thread's own account when it has one for that provider, else the default login (TextScope).
@@ -150,14 +203,15 @@ impl Agents {
                     Err(e) => eprintln!("titles: {thread}: the thread's account cannot run a title ({e}); using the default login") }
             }
         }
-        tries.push(("claude", TITLE_MODEL.into(), Launch::default(), "the default login"));
-        tries.push(("codex", pick("codex", "").1, Launch::default(), "codex"));
         for (prov, model, via, what) in tries {
             match self.shot(prov, &model, TITLE_SYSTEM, &input, &via).await {
                 Some(a) => { let t = title_clean(&a); if !t.is_empty() { return Some(t) } eprintln!("titles: {thread}: {what} answered nothing usable") }
                 None => eprintln!("titles: {thread}: {what} ({prov} {model}) gave no title"),
             }
         }
+        // then Haiku on whichever Claude login can take it (the default login, else the named accounts: the failover's order), then Codex's light model
+        if let Some(a) = self.shot_healthy(TITLE_MODEL, TITLE_SYSTEM, &input, &format!("titles: {thread}")).await { let t = title_clean(&a); if !t.is_empty() { return Some(t) } }
+        match self.shot("codex", &pick("codex", "").1, TITLE_SYSTEM, &input, &Launch::default()).await { Some(a) => { let t = title_clean(&a); if !t.is_empty() { return Some(t) } } None => eprintln!("titles: {thread}: codex gave no title") }
         None
     }
     /// The text a title is written from: the first message; for a regeneration also the newest few, so a thread that moved on is titled for where it is.
@@ -206,6 +260,26 @@ pub fn summarizer() -> Option<Arc<dyn Summarizer>> { super::handle().map(|a| a a
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn a_one_shot_tries_the_default_login_then_the_accounts_with_most_allowance_and_skips_one_found_out() {
+        let now = 1_000_000u64;
+        let prof = |id: &str, used: f64| json!({"id":id,"epoch":2,"provider":"claude","state":"connected","allowance":{"state":"ok","at":now - 10,"windows":[{"label":"Weekly","used_percent":used,"resets_at":now + 9999}]}});
+        let ps = vec![prof("work", 60.0), prof("home", 5.0), json!({"id":"codex1","epoch":1,"provider":"codex","state":"connected"}), json!({"id":"gone","epoch":1,"provider":"claude","state":"expired"})];
+        let none = std::collections::HashMap::new();
+        assert_eq!(healthy_order(&ps, &|_| String::new(), now, TITLE_MODEL, &none), vec![(String::new(), 0), ("home".into(), 2), ("work".into(), 2)], "default, then most allowance left; no codex, no expired login");
+        // the default login out for the week (a one-shot met its limit): the accounts take it, as the person's live hub needed on Nov 11
+        let mut out = std::collections::HashMap::new(); out.insert(":0".to_string(), now + 3600);
+        assert_eq!(healthy_order(&ps, &|_| String::new(), now, TITLE_MODEL, &out), vec![("home".to_string(), 2), ("work".into(), 2)]);
+        out.insert("home:2".into(), now - 1); assert_eq!(healthy_order(&ps, &|_| String::new(), now, TITLE_MODEL, &out).len(), 2, "an hour later it is tried again");
+        // a hold a turn recorded on the default login counts too
+        let held = crate::settings::fallback::hold_key("claude", "", 0); let rec = json!({"scope":"claude","reset":now + 600,"at":now - 5}).to_string();
+        let got = healthy_order(&ps, &|k: &str| if k == held { rec.clone() } else { String::new() }, now, TITLE_MODEL, &none);
+        assert_eq!(got, vec![("home".to_string(), 2), ("work".into(), 2)], "a held default login is skipped");
+    }
+    #[test] fn a_one_shots_failure_says_why_and_a_limit_is_told_apart() {
+        let out = r#"{"type":"result","subtype":"success","is_error":true,"result":"You've hit your weekly limit · resets 3am (America/New_York)","api_error_status":429}"#;
+        assert_eq!(answer("claude", out), ""); let w = failure(out); assert!(w.starts_with("You've hit your weekly limit") && w.ends_with("(429)"), "{w}"); assert!(is_limit(&w));
+        assert_eq!(failure(""), "no answer"); assert!(!is_limit("no answer in 60 s"));
+    }
     #[test] fn the_light_model_is_the_providers_unless_the_setting_fits_it() {
         assert_eq!(pick("", ""), ("claude", "haiku".into())); assert_eq!(pick("codex", "haiku"), ("codex", "gpt-6-luna".into())); assert_eq!(pick("codex", "gpt-5.5"), ("codex", "gpt-5.5".into())); assert_eq!(pick("claude", "sonnet"), ("claude", "sonnet".into())); assert_eq!(pick("nope", "x-unknown"), ("claude", "x-unknown".into()));
     }

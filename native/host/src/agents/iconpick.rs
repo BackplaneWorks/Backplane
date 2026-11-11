@@ -17,7 +17,10 @@ const ROUND: Duration = Duration::from_secs(30);
 
 pub fn system() -> String {
     format!("You choose the icon for a project in an engineering app's sidebar. A description of the project follows: its name, its folder, what the person wrote it is for, and its top-level files and folders. Do not answer it, do not do the work and do not use tools. \
-Reply with only one icon name from this list: {}. You may add one colour name after it, from this list: {}. Pick what fits what the project is about: a circuit board or electronics design takes circuit-board or cpu, a USB device usb or plug, a power supply zap, a radio or RF design radio, an enclosure or mechanical part box, a slide deck or pitch presentation, a workbench or tools wrench, software code or terminal, a website globe, research flask-conical, writing book or file-text, measurement gauge. Reply in lower case, for example: usb teal",
+Reply with only one icon name from this list: {}. You may add one colour name after it, from this list: {}. \
+Choose by what the project is about (the thing it makes or does), not by its file types: nearly every project here has a circuit board, so take circuit-board or cpu only when the board or the chip is itself the subject (a module, a development kit, a microcontroller). \
+For example: a USB sniffer, hub or isolator usb; laptop expansion cards or connectors plug; a power supply or power probe zap; a radio, Wi-Fi, GNSS or RF tracker radio; an enclosure or mechanical part box; a slide deck or pitch presentation; a workbench, machine, feeder or tool wrench; software code or terminal; a web page globe; research flask-conical; writing book or file-text; measurement or sensing gauge; a toy, pet or fun gadget star; a set of small boards layers. \
+Pick the colour that suits the subject rather than the same one every time. Reply in lower case, for example: usb teal",
         badge::ICONS.join(", "), badge::TINTS.iter().map(|(n, _)| *n).collect::<Vec<_>>().join(", "))
 }
 
@@ -65,11 +68,23 @@ pub fn due(projects: &[(String, String, bool)], setting: impl Fn(&str) -> String
 fn wake() -> &'static tokio::sync::Notify { static N: OnceLock<tokio::sync::Notify> = OnceLock::new(); N.get_or_init(tokio::sync::Notify::new) }
 fn failed() -> &'static Mutex<HashMap<String, u64>> { static F: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new(); F.get_or_init(Default::default) }
 
-/// Starts the rounds: soon after the hub starts (the backfill), after Pick again, and every 30 s (a new project is picked by the next one; a round with nothing due reads two settings a project).
+/// Starts the rounds: soon after the hub starts (the backfill), as soon as a project is made, after Pick again, and every 30 s (a round with nothing due reads two settings a project).
 pub fn start(ag: &Arc<Agents>, hub: &Arc<Hub>) {
     hub.register_rpc(Arc::new(PickRpc));
     if cfg!(test) || crate::guard::safe() || crate::copy::on() { return }
     let me = Arc::downgrade(ag);
+    // a project made (a new id among the projects after a commit): its round starts at once, not at the next 30 s tick
+    let (watch, mut changed) = (Arc::downgrade(ag), hub.subscribe());
+    tokio::spawn(async move {
+        let mut known: Option<usize> = None;
+        loop {
+            match changed.recv().await { Ok(_) | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => {} Err(_) => return }
+            let Some(ag) = watch.upgrade() else { return };
+            let n = ag.world().await.projects.len(); drop(ag);
+            if known.map_or(false, |k| n > k) { nudge() }
+            known = Some(n);
+        }
+    });
     tokio::spawn(async move {
         tokio::time::sleep(Duration::from_secs(15)).await;
         loop {
@@ -96,7 +111,8 @@ impl Agents {
         let (title, root) = { let w = self.world().await; (w.projects.get(id).map(|p| p.0.clone()).unwrap_or_default(), w.roots.get(id).cloned().unwrap_or_default()) };
         let (r, t2) = (root.clone(), title.clone());
         let text = tokio::task::spawn_blocking(move || { let p = Path::new(&r); let intent = std::fs::read_to_string(p.join(".backplane/intent.md")).map(|m| intent_part(&m)).unwrap_or_default(); input(&t2, &r, &intent, &entries(p)) }).await.unwrap_or_default();
-        match self.shot("claude", textgen::TITLE_MODEL, &system(), &text, &textgen::Launch::default()).await {
+        // on a Claude login that can take it, in the failover's order (the default login may be out for the week while a named account is not)
+        match self.shot_healthy(textgen::TITLE_MODEL, &system(), &text, &format!("icons: {id} ({title})")).await {
             Some(a) => {
                 let pick = parse(&a);
                 // the person may have chosen meanwhile: their choice stands and the pick is kept beside it

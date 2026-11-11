@@ -55,7 +55,7 @@ impl Agents {
         let due = pol.with_state(|st| crate::present::merged::merged_of(st, m, |rows| crate::present::sections::groups_due(st, &rows))).unwrap_or_default();
         let due: Vec<_> = { let f = failed().lock().unwrap(); due.into_iter().filter(|g| f.get(&g.0).map_or(true, |at| now >= at + RETRY)).collect() };
         for (gid, raw, members) in due {
-            match self.shot("claude", textgen::TITLE_MODEL, &system(), &input(&raw, &members), &textgen::Launch::default()).await.map(|a| parse(&a)).filter(|n| !n.is_empty()) {
+            match self.shot_healthy(textgen::TITLE_MODEL, &system(), &input(&raw, &members), "swarm names").await.map(|a| parse(&a)).filter(|n| !n.is_empty()) {
                 Some(name) => { self.commit_events(vec![json!({"$":"SettingSet","key":format!("sidebar.group.pick.{gid}"),"value":name,"at":super::now_s()})]).await; eprintln!("groups: {gid}: {name}"); }
                 None => { eprintln!("groups: {gid}: no answer; asked again later"); failed().lock().unwrap().insert(gid, super::now_s()); }
             }

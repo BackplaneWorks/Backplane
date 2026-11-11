@@ -262,6 +262,8 @@ fn icon_svg(name: &str) -> Option<String> {
 /// The icon set's own name for `name` (a hub-sent name, say), if the set has it.
 pub fn icon_name(name: &str) -> Option<&'static str> { icons().get_key_value(name).map(|(k, _)| k.as_str()) }
 /// A Lucide icon, `size` px square, in `color` (a sprite GPUI keeps per size: `Assets`).
+/// Whether icons.json has this icon (a name it lacks draws nothing: callers that must show something fall back, screens/badge.rs `drawable`).
+pub fn has_icon(name: &str) -> bool { icons().contains_key(name) }
 pub fn icon(name: &'static str, size: f32, color: Rgba) -> AnyElement {
     if !icons().contains_key(name) {
         /* i18n-ok: svg markup, env names and log lines */ log_once(format!("icon {name} not in icons.json"));

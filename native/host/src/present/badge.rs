@@ -68,6 +68,10 @@ mod tests {
         assert_eq!(setting_of("project.icon.p1="), Some(("project.icon.p1".into(), String::new())));
         for bad in ["project.color.p1=mauve", "project.icon.p1=skull", "agent.provider=codex", "project.color.=red", "project.color.a b=red", "nothing"] { assert_eq!(setting_of(bad), None, "{bad}"); }
     }
+    #[test] fn every_icon_offered_is_one_the_clients_ship() {
+        let icons: Value = serde_json::from_str(include_str!("../../../../assets/icons.json")).unwrap();
+        for n in ICONS { assert!(icons.get(n).is_some(), "{n} is offered to the model and the editors but assets/icons.json has no glyph for it") }
+    }
     #[test] fn the_list_names_every_tint_and_icon() { let l = list(); assert_eq!((l["colors"].as_array().unwrap().len(), l["icons"].as_array().unwrap().len()), (TINTS.len(), ICONS.len())); assert_eq!(l["colors"][0], json!({"name": "blue", "css": "#5b9cf5"})); }
     #[test] fn the_editor_marks_the_current_choice_and_carries_each_press() {
         let e = editor("p1", "", "cpu");

@@ -225,30 +225,6 @@ struct DataRoomView: View {
 }
 
 /// The SF Symbol drawn for a project's icon name (the hub's list, present/badge.rs); anything else is the folder.
-func dataBadgeSymbol(_ icon: String) -> String {
-    switch icon {
-    case "circuit-board": "cpu.fill"
-    case "cpu": "cpu"
-    case "zap": "bolt"
-    case "radio": "antenna.radiowaves.left.and.right"
-    case "box": "shippingbox"
-    case "layers": "square.3.layers.3d"
-    case "code": "chevron.left.forwardslash.chevron.right"
-    case "terminal": "terminal"
-    case "globe": "globe"
-    case "wrench": "wrench"
-    case "flask-conical": "flask"
-    case "book": "book"
-    case "star": "star"
-    case "usb": "cable.connector"
-    case "plug": "powerplug"
-    case "presentation": "play.rectangle"
-    case "gauge": "gauge"
-    case "file-text": "doc.text"
-    case "image": "photo"
-    default: "folder"
-    }
-}
 
 /// A project's badge: the hub's tints and icons (`badge.list`); a press is `project.act color|icon|pick`.
 struct DataBadgeSheet: View {

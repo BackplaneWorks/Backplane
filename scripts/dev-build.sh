@@ -177,6 +177,10 @@ if command -v bun >/dev/null 2>&1 && ( cd "$ROOT/tools/browser" && bun install -
 else prev=$DEV/builds/$(head -1 "$DEV/CURRENT" 2>/dev/null)/backplane-browser; [ -x "$prev" ] && cp "$prev" "$D/" || echo "warning: no browser helper built (bun missing or the build failed) and none to reuse" >&2; fi
 mark "assets"
 A=${ASSETS:-$DEV/builds/$(head -1 "$DEV/CURRENT" 2>/dev/null)/assets}; [ -d "$A" ] && cp -r "$A" "$D/assets"
+# the generated assets the client draws come from this checkout (assets/GENERATED.md: kept in the repo), never only from the build before: a build that carried the
+# old icons.json forward drew nothing for the icons added since (usb, plug, presentation: four blank project marks on Nov 11)
+mkdir -p "$D/assets"; cp "$ROOT/assets/icons.json" "$D/assets/icons.json" || { echo "dev-build: assets/icons.json missing from the checkout" >&2; exit 1; }
+[ -d "$ROOT/assets/cat-rigs" ] && { rm -rf "$D/assets/cat-rigs"; cp -r "$ROOT/assets/cat-rigs" "$D/assets/cat-rigs"; }
 mark "kistack"
 sh "$ROOT/scripts/build-kistack.sh" "$D/kistack" >/dev/null || { echo "dev-build: KiStack missing or not the pinned commit (deploy/kistack.lock)" >&2; exit 1; }
 git -C "$ROOT" rev-parse --short HEAD > "$D/COMMIT"
