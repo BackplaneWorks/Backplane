@@ -311,6 +311,7 @@ struct DataThreadsView: View {
                         .buttonStyle(.plain).dataRow().accessibilityIdentifier("data.section.project." + r.key)
                         .contextMenu {
                             Button(Tr.t(r.pinned ? "Unpin project" : "Pin project"), systemImage: "pin") { Task { await client.sidebarAct("project-pin", r.key) } }
+                            if let p = client.projects.first(where: { $0.id == r.id }) { Button(Tr.t("Badge"), systemImage: "paintpalette") { badgeProject = p } }
                             if client.has("swarm") { Button(Tr.ios_swarm_new_in(project: r.title), systemImage: "circle.hexagongrid") { newSwarm = r.id } }
                             ForEach(client.groupsTo, id: \.value) { g in Button(Tr.gpui_sections_move_to(group: g.label)) { Task { await client.sidebarAct("group-move", r.key + "\u{1f}" + g.value) } } }
                         }
