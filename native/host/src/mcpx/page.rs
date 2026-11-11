@@ -22,7 +22,9 @@ impl<'a> Ui<'a> {
 }
 /// The page's own state keys (not sent to the hub as a change) and the typed fields.
 pub const UI_KEYS: [&str; 8] = ["view", "mode", "rtrans", "rm", "skip", "imp", "isync", "err"];
-pub const FIELDS: [&str; 9] = ["mpaste", "mname", "mcmd", "menv", "mcwd", "murl", "mhdr", "mgarg", "msec"];
+pub const FIELDS: [&str; 8] = ["mpaste", "mname", "mcmd", "menv", "mcwd", "murl", "mhdr", "mgarg"];
+/// The masked box for one secret of a server: its own per vault name, so two keys never share a box. Never a page field: it goes only to the vault.
+pub fn secret_field(name: &str) -> String { format!("msec.{name}") }
 
 fn btn(label: &str, action: &str, value: &str, on: bool) -> Value { json!({"label": label, "action": action, "value": value, "on": on}) }
 fn row(label: &str, note: &str, buttons: Vec<Value>) -> Value { json!({"label": label, "note": note, "buttons": buttons}) }
@@ -136,7 +138,7 @@ fn card_rows(v: &mut Vec<Value>, x: &Value, info: &Value, ui: &Ui, now: u64, mac
         if set { v.push(json!({"label": format!("{key}"), "note": format!("In the vault as {name}. Its value is put in when an agent starts the server."), "tone": "", "buttons": [btn("Replace", "mcp-view", &format!("secret:{id}:{name}"), false)]})) }
         if !set || ui.s("view") == format!("secret:{id}:{name}") {
             v.push(json!({"label": key, "note": format!("{} Typed here, it goes straight to the vault as {name}; it is never written to a config file.", if set { "A new value." } else { "This server needs it." }),
-                "fields": [{"name": "msec", "hint": format!("{key}"), "secret": true, "vault": true, "value": ""}], "buttons": [btn("Save to vault", "secret-save", &format!("{name}\u{1f}MCP server {id}: {key}\u{1f}"), true)]}));
+                "fields": [{"name": secret_field(name), "hint": format!("{key}"), "secret": true, "vault": true, "value": ""}], "buttons": [btn("Save to vault", "secret-save", &format!("{name}\u{1f}MCP server {id}: {key}\u{1f}"), true)]}));
         }
     }
     if x["found"] == false && server.transport == "stdio" { v.push(json!({"kind": "notice", "label": format!("{} is not found on {machine}.", server.command), "note": "Agents run it where they run. Install it, or give its full path in Edit.", "tone": "bad", "buttons": []})) }

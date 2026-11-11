@@ -103,18 +103,19 @@ impl RpcHandler for PageRpc {
             let Some(m) = svc::get() else { return vec![json!({"t":"reply","id":id,"ok":false,"error":"MCP is not running on this hub"})] };
             let get = ui_of(p);
             let mut ui_state: Map<String, Value> = p["ui"].as_object().cloned().unwrap_or_default();
+            let mut cleared: Vec<String> = vec![]; // what a press emptied is drawn empty in the rows it answers with
             if method == "mcp.page.act" {
                 let s = |k: &str| p.get(k).and_then(Value::as_str).unwrap_or("").to_string();
                 let from_desktop = p["desktop"] == true;
                 match act(&m, &s("action"), &s("value"), &Ui { get: &get }).await {
-                    Ok(patch) => { for (k, v) in patch { if v.is_null() { ui_state.remove(&k); } else { ui_state.insert(k, v); } } if !from_desktop { m.set_notice("") } }
+                    Ok(patch) => { for (k, v) in patch { if v.is_null() { cleared.push(k.clone()); ui_state.remove(&k); } else { ui_state.insert(k, v); } } if !from_desktop { m.set_notice("") } }
                     Err(e) => { if from_desktop { m.set_notice(&e); m.publish().await; } return vec![json!({"t":"reply","id":id,"ok":false,"error":e})] }
                 }
                 if s("action") == "mcp-view" && s("value") == "import" { m.scan_imports().await; }
             } else if p["ui"]["view"] == "import" && m.last_scan().is_null() { m.scan_imports().await; }
             let info = m.info().await;
             let ui_v = Value::Object(ui_state.clone());
-            let fields = p["fields"].clone();
+            let mut fields = p["fields"].clone(); if let Some(o) = fields.as_object_mut() { for k in &cleared { o.remove(k); } }
             let get2 = move |k: &str| { let src = if page::UI_KEYS.contains(&k) { &ui_v } else { &fields }; src.get(k).and_then(|v| v.as_str().map(str::to_string)) };
             let rows = page::rows(&info, &Ui { get: &get2 }, svc::now_s());
             vec![json!({"t":"reply","id":id,"ok":true,"rows":rows,"ui":ui_state})]
