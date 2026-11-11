@@ -137,7 +137,8 @@ fn mcp(url: &str) -> Value { json!([{"type":"http","name":"backplane","url":url,
 
 /// AcpTurn
 #[derive(Clone, Debug, Default)]
-pub struct AcpTurn { pub cwd: String, pub mcp: String, pub prompt: String, pub text: String, pub session: String, pub ask: bool }
+pub struct AcpTurn { pub cwd: String, pub mcp: String, pub prompt: String, pub text: String, pub session: String, pub ask: bool, /** the full mcpServers (mcpx gen::acp); null: Backplane's own only */ pub servers: Value }
+impl AcpTurn { fn servers(&self) -> Value { if self.servers.is_array() { self.servers.clone() } else { mcp(&self.mcp) } } }
 /// AgyTurn
 #[derive(Clone, Debug, Default)]
 pub struct AgyTurn { pub acp: AcpTurn, pub method: String, pub mode: String, pub model: String }
@@ -153,7 +154,7 @@ pub fn init() -> String { rpc(1, "initialize", json!({"protocolVersion":1,"clien
 pub fn auth(m: &str) -> String { rpc(4, "authenticate", json!({"methodId": method(m)})) }
 fn new_rpc(id: u64, cwd: &str, mcp: Value) -> String { rpc(id, "session/new", json!({"cwd":cwd,"mcpServers":mcp})) }
 fn open(t: &AcpTurn) -> String {
-    if t.session.is_empty() { new_rpc(2, &t.cwd, mcp(&t.mcp)) } else { rpc(2, "session/resume", json!({"sessionId":t.session,"cwd":t.cwd,"mcpServers":mcp(&t.mcp)})) }
+    if t.session.is_empty() { new_rpc(2, &t.cwd, t.servers()) } else { rpc(2, "session/resume", json!({"sessionId":t.session,"cwd":t.cwd,"mcpServers":t.servers()})) }
 }
 fn set_mode(id: u64, sid: &str, mode: &str) -> String { rpc(id, "session/set_mode", json!({"sessionId":sid,"modeId":mode})) }
 fn set_model(id: u64, sid: &str, model: &str) -> String { rpc(id, "session/set_config_option", json!({"sessionId":sid,"configId":"model","value":model})) }
@@ -242,7 +243,7 @@ fn reply(a: &mut Acp, t: &AgyTurn, o: &Value) -> Out {
         (1, true) => out_send(vec![auth(&t.method)]),
         (4, true) => out_send(vec![open(&t.acp)]),
         (2, true) => { let sid = res_sid(&t.acp.session); opened(fresh_at_open, a, t, &sid) }
-        (2, false) => if fresh_at_open { fail(a, &hint(&err_msg(o))) } else { out_send(vec![new_rpc(7, &t.acp.cwd, mcp(&t.acp.mcp))]) },
+        (2, false) => if fresh_at_open { fail(a, &hint(&err_msg(o))) } else { out_send(vec![new_rpc(7, &t.acp.cwd, t.acp.servers())]) },
         (7, true) => { let sid = o.get("result").map(|r| gs(r, "sessionId")).unwrap_or("").to_string(); opened(true, a, t, &sid) }
         (5, _) => moded(true, a, t),
         (15, _) => moded(false, a, t),
@@ -459,7 +460,7 @@ impl Driver for AgyDriver {
     }
     fn start(&mut self, a: &TurnIn) -> Vec<String> {
         if self.cli.is_some() { let note = std::mem::take(&mut self.cs.note); self.cs = super::agy_cli::St { session: a.session.clone(), step: -1, note, ..Default::default() }; return vec![super::agy_cli::input(a)] }
-        self.turn = AgyTurn { acp: AcpTurn { cwd: a.cwd.clone(), mcp: a.mcp_url.clone(), prompt: a.prompt.clone(), text: a.text.clone(), session: a.session.clone(), ask: mode_runtime(&a.runtime) != 3 },
+        self.turn = AgyTurn { acp: AcpTurn { cwd: a.cwd.clone(), mcp: a.mcp_url.clone(), prompt: a.prompt.clone(), text: a.text.clone(), session: a.session.clone(), ask: mode_runtime(&a.runtime) != 3, servers: a.mcp.acp.clone() },
             method: method(a.setting("agy.auth")).into(), mode: mode(&a.runtime).into(), model: a.model.clone() };
         self.st = Acp::default(); vec![init()]
     }
@@ -490,7 +491,7 @@ pub fn driver(provider: &str) -> Option<Made> { if provider == "antigravity" { S
 mod tests {
     use super::*;
     fn j(s: &str) -> Value { serde_json::from_str(s).unwrap() }
-    fn turn(session: &str, model: &str, ask: bool) -> AgyTurn { AgyTurn { acp: AcpTurn { cwd: "/tmp/p".into(), mcp: "http://127.0.0.1:1/mcp/t?token=x".into(), prompt: "RULES".into(), text: "hello".into(), session: session.into(), ask }, method: "gemini-api-key".into(), mode: "default".into(), model: model.into() } }
+    fn turn(session: &str, model: &str, ask: bool) -> AgyTurn { AgyTurn { acp: AcpTurn { cwd: "/tmp/p".into(), mcp: "http://127.0.0.1:1/mcp/t?token=x".into(), prompt: "RULES".into(), text: "hello".into(), session: session.into(), ask, servers: Value::Null }, method: "gemini-api-key".into(), mode: "default".into(), model: model.into() } }
     fn m(l: &str) -> String { j(l)["method"].as_str().unwrap_or("").to_string() }
     fn id(l: &str) -> u64 { j(l)["id"].as_u64().unwrap() }
     fn feed(a: &mut Acp, t: &AgyTurn, l: &str) -> Out { line(a, t, &j(l)) }

@@ -8,7 +8,7 @@ fn setting(k: String, v: String, at: u64) -> Value { json!({"$":"SettingSet","ke
 pub fn sandbox(runtime: &str) -> Vec<String> {
     match runtime { "full-access" | "" => vec!["--dangerously-bypass-approvals-and-sandbox".into()], "approval-required" => vec!["-s".into(), "read-only".into()], _ => vec!["-s".into(), "workspace-write".into()] }
 }
-pub struct ArgsIn<'a> { pub model: &'a str, pub session: &'a str, pub runtime: &'a str, pub effort: &'a str, pub think: bool, pub images: &'a [String], pub mcp_url: &'a str, pub pcbparts: &'a str, pub prompt: &'a str, pub text: &'a str }
+pub struct ArgsIn<'a> { pub model: &'a str, pub session: &'a str, pub runtime: &'a str, pub effort: &'a str, pub think: bool, pub images: &'a [String], pub mcp_url: &'a str, pub pcbparts: &'a str, pub prompt: &'a str, pub text: &'a str, /** the list's servers (mcpx gen::codex) */ pub extra: &'a [String] }
 /// Codex.args: head (fresh or resume), sandbox, model, effort, summaries, images, the MCP servers, the instructions, the text.
 pub fn args(a: &ArgsIn) -> Vec<String> {
     let mut v: Vec<String> = if a.session.is_empty() { vec!["exec".into(), "--json".into(), "--skip-git-repo-check".into()] } else { vec!["exec".into(), "resume".into(), a.session.into(), "--json".into(), "--skip-git-repo-check".into()] };
@@ -18,7 +18,8 @@ pub fn args(a: &ArgsIn) -> Vec<String> {
     if a.think { v.push("-c".into()); v.push("model_reasoning_summary=\"detailed\"".into()) }
     for i in a.images { v.push("--image".into()); v.push(i.clone()) }
     v.push("-c".into()); v.push(format!("mcp_servers.backplane.url=\"{}\"", a.mcp_url));
-    v.push("-c".into()); v.push(format!("mcp_servers.pcbparts.url=\"{}\"", a.pcbparts));
+    if !a.pcbparts.is_empty() { v.push("-c".into()); v.push(format!("mcp_servers.pcbparts.url=\"{}\"", a.pcbparts)); }
+    v.extend(a.extra.iter().cloned());
     v.push("-c".into()); v.push(format!("developer_instructions={}", Value::String(a.prompt.into())));
     v.push(a.text.into()); v
 }
@@ -136,7 +137,7 @@ mod tests {
     use super::*;
     fn ev(l: &str) -> Value { serde_json::from_str(l).unwrap() }
     #[test] fn args_fresh_and_resumed() {
-        let a = ArgsIn { model: "m", session: "", runtime: "auto", effort: "high", think: true, images: &["/i.png".into()], mcp_url: "http://u", pcbparts: "https://p", prompt: "P\"q", text: "hi" };
+        let a = ArgsIn { model: "m", session: "", runtime: "auto", effort: "high", think: true, images: &["/i.png".into()], mcp_url: "http://u", pcbparts: "https://p", prompt: "P\"q", text: "hi", extra: &[] };
         let v = args(&a); assert_eq!(&v[..3], ["exec", "--json", "--skip-git-repo-check"]); assert_eq!(v.last().unwrap(), "hi");
         assert!(v.windows(2).any(|w| w == ["-s", "workspace-write"])); assert!(v.windows(2).any(|w| w == ["-m", "m"])); assert!(v.windows(2).any(|w| w == ["--image", "/i.png"]));
         assert!(v.contains(&"developer_instructions=\"P\\\"q\"".to_string())); assert!(v.contains(&"mcp_servers.backplane.url=\"http://u\"".to_string()));

@@ -6,8 +6,10 @@ use crate::agents::codex as c;
 pub struct CodexDriver;
 impl Driver for CodexDriver {
     fn argv(&self, a: &TurnIn) -> Vec<String> {
-        c::args(&c::ArgsIn { model: &a.model, session: &a.session, runtime: &a.runtime, effort: &a.effort, think: a.think, images: &a.images, mcp_url: &a.mcp_url, pcbparts: &a.pcbparts_url, prompt: &a.prompt, text: &a.text })
+        c::args(&c::ArgsIn { model: &a.model, session: &a.session, runtime: &a.runtime, effort: &a.effort, think: a.think, images: &a.images, mcp_url: &a.mcp_url, pcbparts: &a.pcbparts_url, prompt: &a.prompt, text: &a.text, extra: &a.mcp.codex_args })
     }
+    /// a remote server's secret headers (mcpx gen::codex: env_http_headers)
+    fn env(&self, a: &TurnIn) -> Vec<(String, String)> { a.mcp.codex_env.clone() }
     fn on_line(&mut self, line: &Value) -> Reaction { if line.is_object() { Reaction { send: vec![], shapes: vec![line.clone()] } } else { Reaction::default() } }
     fn closes_stdin(&self) -> bool { true }
 }

@@ -27,7 +27,7 @@ impl GrokDriver { pub fn new() -> GrokDriver { GrokDriver { turn: AcpTurn::defau
 impl Driver for GrokDriver {
     fn argv(&self, a: &TurnIn) -> Vec<String> { args(&a.runtime, &a.model, &a.effort) }
     fn start(&mut self, a: &TurnIn) -> Vec<String> {
-        self.turn = AcpTurn { cwd: a.cwd.clone(), mcp: a.mcp_url.clone(), prompt: a.prompt.clone(), text: a.text.clone(), session: a.session.clone(), ask: asks(&a.runtime) };
+        self.turn = AcpTurn { cwd: a.cwd.clone(), mcp: a.mcp_url.clone(), prompt: a.prompt.clone(), text: a.text.clone(), session: a.session.clone(), ask: asks(&a.runtime), servers: a.mcp.acp.clone() };
         vec![acp::init()]
     }
     fn on_line(&mut self, line: &Value) -> Reaction { let o = acp::line(&mut self.a, &self.turn, line); Reaction { send: o.send, shapes: o.shapes } }
