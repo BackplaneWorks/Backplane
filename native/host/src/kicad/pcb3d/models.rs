@@ -46,24 +46,23 @@ impl Env {
         }
         None
     }
-    /// Process environment, then KiCad's `kicad_common.json` (newest version first), then the default 3D model dirs.
-    /// `kicad_cli` adds `<its dir>/../share/kicad/3dmodels` to the places looked in.
+    /// Process environment, then KiCad's `kicad_common.json` (the running KiCad's version first, then newest first), then the default 3D model dirs.
+    /// KiCad's settings are where KiCad keeps them on this system (plat::dirs::kicad_config_roots: `%APPDATA%\kicad` on Windows, with no HOME).
+    /// `kicad_cli` adds `<its dir>/../share/kicad/3dmodels` to the places looked in, and its folder names the version (`.../10.99.0-bp.6/bin`).
     pub fn system(kicad_cli: Option<&Path>) -> Env {
-        let home = std::env::var("HOME").unwrap_or_default();
-        let mut roots = vec![];
-        if let Ok(x) = std::env::var("XDG_CONFIG_HOME") { if !x.is_empty() { roots.push(PathBuf::from(x).join("kicad")) } }
-        roots.push(PathBuf::from(&home).join(".config/kicad"));
-        roots.push(PathBuf::from(&home).join("Library/Preferences/kicad"));
-        roots.push(PathBuf::from(&home).join(".var/app/org.kicad.KiCad/config/kicad"));
+        let home = crate::plat::dirs::home_or_empty();
+        let roots: Vec<PathBuf> = crate::plat::dirs::kicad_config_roots().into_iter().map(PathBuf::from).collect();
+        let prefer = kicad_cli.and_then(|c| crate::plat::dirs::kicad_version_of(&c.to_string_lossy()));
         let mut dirs: Vec<PathBuf> = ["/usr/share/kicad/3dmodels", "/usr/local/share/kicad/3dmodels", "/var/lib/flatpak/exports/share/kicad/3dmodels",
             "/var/lib/flatpak/app/org.kicad.KiCad/current/active/files/share/kicad/3dmodels", "/Applications/KiCad/KiCad.app/Contents/SharedSupport/3dmodels",
             "/Applications/KiCad.app/Contents/SharedSupport/3dmodels"].iter().map(PathBuf::from).collect();
-        dirs.push(PathBuf::from(&home).join(".local/share/flatpak/app/org.kicad.KiCad/current/active/files/share/kicad/3dmodels"));
-        if let Some(c) = kicad_cli.and_then(|c| c.parent()) { dirs.insert(0, c.join("../share/kicad/3dmodels")) }
-        Env::build(std::env::vars().collect(), &roots, &dirs)
+        if !home.is_empty() { dirs.push(PathBuf::from(&home).join(".local/share/flatpak/app/org.kicad.KiCad/current/active/files/share/kicad/3dmodels")) }
+        if let Some(c) = kicad_cli.and_then(|c| c.parent()) { dirs.insert(0, c.join("..").join("share").join("kicad").join("3dmodels")) }
+        Env::build(std::env::vars().collect(), &roots, &dirs, prefer.as_deref())
     }
-    /// `process` wins over every `kicad_common.json` under the `config_roots` (`<root>/<version>/kicad_common.json`, newest first), which win over `dirs`.
-    pub fn build(process: Vec<(String, String)>, config_roots: &[PathBuf], dirs: &[PathBuf]) -> Env {
+    /// `process` wins over every `kicad_common.json` under the `config_roots` (`<root>/<version>/kicad_common.json`: the `prefer` version's first,
+    /// then newest first), which win over `dirs`.
+    pub fn build(process: Vec<(String, String)>, config_roots: &[PathBuf], dirs: &[PathBuf], prefer: Option<&str>) -> Env {
         let mut vars = BTreeMap::new();
         for (k, v) in process { vars.insert(k, v); }
         let mut files: Vec<(Vec<u64>, PathBuf)> = vec![];
@@ -73,7 +72,8 @@ impl Env {
                 if p.is_file() { files.push((version_key(&e.file_name().to_string_lossy()), p)) }
             }
         }
-        files.sort_by(|a, b| b.0.cmp(&a.0));
+        let first = prefer.map(version_key);
+        files.sort_by(|a, b| (Some(&b.0) == first.as_ref()).cmp(&(Some(&a.0) == first.as_ref())).then(b.0.cmp(&a.0)));
         for (_, p) in files {
             let Some(j) = std::fs::read_to_string(&p).ok().and_then(|t| serde_json::from_str::<serde_json::Value>(&t).ok()) else { continue };
             for (k, v) in j.pointer("/environment/vars").and_then(|v| v.as_object()).into_iter().flatten() {
@@ -205,7 +205,7 @@ impl Cache {
     pub fn new(dir: impl Into<PathBuf>) -> Cache { Cache { dir: dir.into(), fail_ttl: FAIL_TTL } }
     /// Where the models a board carries inside it are written out (`embedded`).
     pub fn embedded_dir(&self) -> PathBuf { self.dir.join("embedded") }
-    pub fn standard() -> Cache { Cache::new(format!("{}/parts", stepglb::cache_dir())) }
+    pub fn standard() -> Cache { Cache::new(stepglb::cache_file("parts")) }
     pub fn glb(&self, key: &str) -> PathBuf { self.dir.join(format!("part-v2-{key}.glb")) }
     pub fn fail_file(&self, key: &str) -> PathBuf { self.dir.join(format!("part-v2-{key}.fail")) }
     /// What the cache already knows of a model: its GLB, or a failure not yet a day old. None: convert it.
@@ -654,13 +654,41 @@ mod tests {
             std::fs::create_dir_all(cfg.join(v)).unwrap();
             std::fs::write(cfg.join(v).join("kicad_common.json"), format!(r#"{{"environment":{{"vars":{{"MYLIB":"{val}","KICAD10_3DMODEL_DIR":"/from-config"}}}}}}"#)).unwrap();
         }
-        let e = Env::build(vec![("KICAD10_3DMODEL_DIR".into(), "/from-process".into())], &[cfg.clone()], &[d.join("none"), m.clone()]);
+        let e = Env::build(vec![("KICAD10_3DMODEL_DIR".into(), "/from-process".into())], &[cfg.clone()], &[d.join("none"), m.clone()], None);
         assert_eq!(e.get("KICAD10_3DMODEL_DIR"), Some("/from-process"));
         assert_eq!(e.get("MYLIB"), Some("/new"), "newest version first");
         assert_eq!(e.get("KICAD8_3DMODEL_DIR"), Some(m.to_str().unwrap()), "default: the first install dir that exists");
         assert_eq!(e.get("KISYS3DMOD"), Some(m.to_str().unwrap()));
-        let e = Env::build(vec![], &[cfg], &[m]);
+        let e = Env::build(vec![], &[cfg.clone()], &[m.clone()], None);
         assert_eq!(e.get("KICAD10_3DMODEL_DIR"), Some("/from-config"));
+        assert_eq!(Env::build(vec![], &[cfg.clone()], &[m.clone()], Some("9.0")).get("MYLIB"), Some("/old"), "the running KiCad's version first");
+        assert_eq!(Env::build(vec![], &[cfg], &[m], Some("8.0")).get("MYLIB"), Some("/new"), "a version with no settings: newest first");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+    /// Issue 1102: on Windows the variables a board's models use are often only in KiCad's own profile, `%APPDATA%\kicad\<ver>\kicad_common.json`,
+    /// with HOME and XDG_CONFIG_HOME unset. That profile is read (plat::dirs's roots), its variables resolve the models, and a process variable still wins.
+    #[test] fn a_windows_kicad_profile_resolves_the_models_its_variables_name() {
+        use crate::plat::dirs::{kicad_config_roots_in, Os};
+        let d = dir("winprof"); let appdata = d.join("App Data").join("Roaming"); let third = d.join("My Documents").join("KiCad 3rd");
+        let lib = d.join("KiCad 10").join("3dmodels");
+        for f in [third.join("Pkg.3dshapes/U1.step"), lib.join("Resistor_SMD.3dshapes/R_0603.step")] { std::fs::create_dir_all(f.parent().unwrap()).unwrap(); std::fs::write(&f, "ISO-10303-21;").unwrap(); }
+        let prof = appdata.join("kicad").join("10.99"); std::fs::create_dir_all(&prof).unwrap();
+        let j = serde_json::json!({"environment": {"vars": {"KICAD_3RD_PARTY": third.to_string_lossy(), "KICAD10_3DMODEL_DIR": lib.to_string_lossy()}}});
+        std::fs::write(prof.join("kicad_common.json"), j.to_string()).unwrap();
+        std::fs::create_dir_all(appdata.join("kicad").join("11.0")).unwrap(); // a newer KiCad's folder with no settings changes nothing
+        // the roots as Windows gives them (APPDATA, no HOME), as paths of this machine
+        let a = appdata.to_string_lossy().into_owned();
+        let env = move |k: &str| (k == "APPDATA").then(|| a.clone());
+        let roots: Vec<PathBuf> = kicad_config_roots_in(if cfg!(windows) { Os::Windows } else { Os::Linux }, &env).into_iter().map(PathBuf::from).collect();
+        let roots = if cfg!(windows) { roots } else { vec![appdata.join("kicad")] }; // (APPDATA is Windows' only: on Linux the folder is given)
+        if cfg!(windows) { assert_eq!(roots, [appdata.join("kicad")]) }
+        let e = Env::build(vec![], &roots, &[], Some("10.99"));
+        let board = d.join("board dir");
+        assert_eq!(resolve("${KICAD_3RD_PARTY}/Pkg.3dshapes/U1.step", &board, &e), Some(third.join("Pkg.3dshapes/U1.step")));
+        assert_eq!(resolve("${KICAD10_3DMODEL_DIR}/Resistor_SMD.3dshapes/R_0603.wrl", &board, &e), Some(lib.join("Resistor_SMD.3dshapes/R_0603.step")));
+        assert_eq!(resolve("${KICAD9_3DMODEL_DIR}/Resistor_SMD.3dshapes/R_0603.step", &board, &e), Some(lib.join("Resistor_SMD.3dshapes/R_0603.step")), "another version's variable stands in");
+        let e = Env::build(vec![("KICAD_3RD_PARTY".into(), lib.to_string_lossy().into())], &roots, &[], None);
+        assert_eq!(e.get("KICAD_3RD_PARTY"), Some(lib.to_str().unwrap()), "the process's variable wins over the profile");
         let _ = std::fs::remove_dir_all(&d);
     }
     #[test] fn the_key_is_content_and_memoized() {
