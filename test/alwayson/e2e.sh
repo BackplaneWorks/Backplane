@@ -14,9 +14,9 @@ HUB_BIN=${1:-$ROOT/native/host/target/debug/backplane-hub}
 DEV=${DEV:-$HOME/.backplane-gpui-dev}; CUR=$DEV/builds/$(head -1 "$DEV/CURRENT")
 # the first free port in 3940-3999 (other lanes' throwaway hubs sit lower)
 if [ -z "${PORT:-}" ]; then for p in $(seq 3940 3999); do ss -ltn 2> /dev/null | grep -q "127.0.0.1:$p " || { PORT=$p; break; }; done; fi
-W=${W:-/tmp/bp-aon-e2e-$PORT}; H=$W/home; URL=ws://127.0.0.1:$PORT
+W=${W:-/tmp/bp-aon-e2e-$PORT}; H=$W/home; URL=ws://${HUB_HOST:-127.0.0.1}:$PORT
 say() { echo "aon-e2e: $*" >&2; }
-fail() { say "FAIL: $*"; exit 1; }
+fail() { say "FAIL: $*"; FAILED=1; exit 1; }
 rpc() { bun "$ROOT/scripts/hub-rpc.mjs" "$H/token" "$URL" "$@"; }
 act() { rpc alwayson.act "{\"action\":\"$1\",\"value\":\"${2:-}\"}"; }
 view() { rpc alwayson.view | python3 -I -c 'import sys,json; print(json.dumps(json.load(sys.stdin)["view"]))'; }
@@ -29,7 +29,11 @@ cleanup() {
 t=sys.argv[1]; s=[x for x in json.load(sys.stdin)["sandboxes"] if x.get("name")=="Backplane always-on" and x.get("state") not in ("deleted","deleting") and (x.get("createdAt") or "")>=t and x["id"]!="bx_479dqxby"]
 print(s[0]["id"] if s else "")' "$T0ISO")
   if [ -n "$BOX" ] && [ "$BOX" != bx_479dqxby ]; then
-    if boat --no-update info "$BOX" --json > /dev/null 2>&1; then say "trap: deleting $BOX"; boat --no-update delete "$BOX" --yes > /dev/null 2>&1 || boat --no-update delete "$BOX" > /dev/null 2>&1 < /dev/null; fi
+    if boat --no-update info "$BOX" --json > /dev/null 2>&1; then
+      [ -n "${FAILED:-}" ] && { say "trap: the Boat's view before it goes:"; boat --no-update exec "$BOX" -- bash -c 'tail -15 /home/user/bp/hub.log; systemctl is-active bp-hub; tailscale serve status 2>&1 | head -5; ss -ltn | grep -E ":(443|3797|3798) "' 2>&1 | tail -25 >&2; }
+      # off the tailnet first (the hub's own Delete does this; the trap deletes the Boat directly)
+      boat --no-update exec "$BOX" -- sudo -n tailscale logout > /dev/null 2>&1 || true
+      say "trap: deleting $BOX"; boat --no-update delete "$BOX" --yes > /dev/null 2>&1 || boat --no-update delete "$BOX" > /dev/null 2>&1 < /dev/null; fi
   fi
   rm -f "$W/k"
 }
@@ -46,10 +50,10 @@ say "throwaway hub on 127.0.0.1:$PORT (home $H, build $(basename "$B"))"
 # no BACKPLANE_URL and no tailnet: this hub is reachable on its own loopback only, as a user's with no tailnet is; it links one way and the Boat
 # reaches it over its reverse link (HUB_URL=... sets an address instead)
 env ${HUB_URL:+BACKPLANE_URL="$HUB_URL"} BACKPLANE_VAULT_KEYRING=file BACKPLANE_ALWAYSON_ADOPT=0 BACKPLANE_ALWAYSON_BUILD="$B" BACKPLANE_NO_UPDATE=1 BACKPLANE_NAME=aon-e2e \
-  "$HUB_BIN" --home "$H" --port "$PORT" --host 127.0.0.1 --no-tailscale --foreground --headless > "$W/hub.log" 2>&1 &
+  "$HUB_BIN" --home "$H" --port "$PORT" --host "${HUB_HOST:-127.0.0.1}" --no-tailscale --foreground --headless > "$W/hub.log" 2>&1 &
 HPID=$!
-for _ in $(seq 1 60); do curl -fsS -m 2 "http://127.0.0.1:$PORT/healthz" > /dev/null 2>&1 && break; sleep 1; done
-curl -fsS -m 2 "http://127.0.0.1:$PORT/healthz" > /dev/null || fail "the hub did not start (tail $W/hub.log)"
+for _ in $(seq 1 60); do curl -fsS -m 2 "http://${HUB_HOST:-127.0.0.1}:$PORT/healthz" > /dev/null 2>&1 && break; sleep 1; done
+curl -fsS -m 2 "http://${HUB_HOST:-127.0.0.1}:$PORT/healthz" > /dev/null || fail "the hub did not start (tail $W/hub.log)"
 sleep 3
 # the person's Boat key into the throwaway vault, through a private file
 # KEY_FILE: a key Boat's `api-key create --json` printed (its "secret"), e.g. one with only boat.rs ACTIONS; else the CLI's own sign-in
@@ -98,14 +102,18 @@ c() { curl -s -o /dev/null -w '%{http_code}' -m 20 "$@"; }
 h=$(c "$PUB/healthz"); w=$(c -H 'Upgrade: websocket' -H 'Connection: Upgrade' -H 'Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==' -H 'Sec-WebSocket-Version: 13' "$PUB/ws?data=1")
 s=$(c "$PUB/hub/status"); l=$(c -X POST -d '{}' "$PUB/bots/pair/local"); d=$(c "$PUB/client/capabilities")
 say "door: healthz $h, /ws?data=1 $w, /hub/status $s, /bots/pair/local $l, /client/capabilities $d"
-[ "$h" = 200 ] && [ "$w" = 401 ] && [ "$s" = 401 ] && [ "$l" = 401 ] && [ "$d" = 401 ] || fail "the public door let something through"
+# nothing but /healthz answers a stranger: every other code is a refusal (401 from this build's door; an older release on the tailnet may say 404)
+refused() { case "$1" in 2??|101|000) return 1;; *) return 0;; esac; }
+[ "$h" = 200 ] && refused "$w" && refused "$s" && refused "$l" && refused "$d" || fail "the public door let something through"
+[ "${NETWORK:-public}" = public ] && { [ "$w" = 401 ] && [ "$s" = 401 ] && [ "$l" = 401 ] && [ "$d" = 401 ] || fail "the public door answered other than 401"; }
 # Move your uberbot there: a fresh throwaway home has no uberbot (as at setup's step 4); it is made here, then moved to the Boat
 LINK=$(view | python3 -I -c 'import sys,json; print(json.load(sys.stdin)["boat"].get("link",""))')
 [ -n "$LINK" ] || fail "no link recorded for the Boat"
 # A fresh Boat has no agent signed in, and the move's own check refuses until the uberbot's provider is signed in there (Sign it in there: a
 # browser approval this script cannot give). MOVE=full expects the move to finish (sign the Boat in first); by default the press must make the
 # uberbot here, get past "the home is not on this machine" to that check, and the row must say its reason.
-if [ "${MOVE:-}" != full ]; then
+if [ "${MOVE:-}" = skip ]; then say "move: skipped (MOVE=skip)"
+elif [ "${MOVE:-}" != full ]; then
   out=$(act alwayson-move "$LINK") && fail "the move started with nothing signed in on the Boat: $out"
   echo "$out" | grep -q "not signed in on" || fail "Move was refused for another reason: $out"
   view | python3 -I -c 'import sys,json; v=json.load(sys.stdin); e=v.get("move_err",""); assert "not signed in on" in e, v; print("move row says:", e)' || fail "the row does not say why"

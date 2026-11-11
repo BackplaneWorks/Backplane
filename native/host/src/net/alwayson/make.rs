@@ -377,7 +377,22 @@ async fn link(hub: &Arc<Hub>, sh: &Arc<Shared>, b: &Boat) -> Result<String, Stri
     }
     let pair = format!("BACKPLANE_HOME={R}/home {R}/backplane pair");
     let out = b.sh(&id, &format!("{pair} --machine"), 60).await?;
-    let (_, code) = code_of(&out).ok_or("the Boat made no machine code")?;
+    let (said, code) = code_of(&out).ok_or("the Boat made no machine code")?;
+    // the address this hub pairs with: the one recorded at Reach it, else the one the Boat's hub gives for itself, whichever answers first
+    // (a tailnet name's HTTPS can take a minute to come up after the Boat joins)
+    let mut tries: Vec<String> = vec![url.clone()];
+    if crate::net::botnet::url_ok(&said) && !crate::net::machines::loopback(&said) && said != url { tries.push(said.clone()) }
+    let mut url = String::new();
+    'find: for _ in 0..30 {
+        for t in &tries {
+            let r = super::boat::send(&hub.cfg.home, super::boat::Call::new("GET", format!("{}/healthz", t.trim_end_matches('/')), "").secs(8)).await;
+            if matches!(r.code.as_str(), "200" | "503") { url = t.clone(); break 'find }
+        }
+        tokio::time::sleep(Duration::from_secs(4)).await;
+    }
+    if url.is_empty() { return Err(format!("this computer cannot reach the Boat at {}", tries.join(" or "))) }
+    let u2 = url.clone(); super::save(hub, sh, |k| { k["url"] = json!(u2); }).await;
+    let hp = crate::net::machines::hostport(&url).to_string();
     let (attempt, check) = p.pair_with(hub, &url, &code).await?;
     // this hub made the request: it approves it there, after matching the check code
     let mut approved = false;
