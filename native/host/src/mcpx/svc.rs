@@ -167,7 +167,7 @@ impl Mcpx {
         let mut projects = projects; projects.sort_by(|a, b| a[1].as_str().cmp(&b[1].as_str()));
         let mut bots = bots; bots.sort_by(|a, b| a[1].as_str().cmp(&b[1].as_str()));
         json!({"servers": servers, "projects": projects, "bots": bots, "allow": allow, "pcbparts": self.pcbparts().await, "scan": self.last_scan(), "notice": self.notice.lock().unwrap().clone(),
-            "gallery_added": list.servers.iter().filter_map(|s| s.source.strip_prefix("gallery:").map(str::to_string)).collect::<Vec<_>>(), "machine": machine()})
+            "gallery_added": list.servers.iter().filter_map(|s| s.source.strip_prefix("gallery:").map(str::to_string)).collect::<Vec<_>>(), "machine": machine(), "home": self.user_home.to_string_lossy()})
     }
     pub async fn publish(&self) { let v = self.info().await; self.hub.set_info("mcp", &v.to_string()).await; }
 

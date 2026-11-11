@@ -13,9 +13,10 @@ pub struct Btn { pub label: String, pub action: String, pub value: String, pub o
 /// once, at Save, in one request; it is never a `bfield`, never taken back from the hub, never in a format string (no Debug).
 #[derive(Clone, PartialEq)]
 pub struct Field { pub name: String, pub hint: String, pub secret: bool, pub value: String, pub vault: bool }
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Default)]
 /// `tone`: "warn" or "bad" draws the note in that colour (a failed install, a code that names only this computer); empty is the usual.
-pub struct Row { pub label: String, pub note: String, pub buttons: Vec<Btn>, pub fields: Vec<Field>, pub qr: Vec<String>, pub qrnote: String, pub local: bool, pub tone: String }
+/// `kind`: a row the hub draws as more than words and controls (a card, a group label, a notice...: cards.rs); `raw` is the row as the hub sent it.
+pub struct Row { pub label: String, pub note: String, pub buttons: Vec<Btn>, pub fields: Vec<Field>, pub qr: Vec<String>, pub qrnote: String, pub local: bool, pub tone: String, pub kind: String, pub raw: Value }
 /* i18n-ok: drawn through trs by row_el, nav_title or the title */ impl std::fmt::Debug for Field { fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result { write!(f, "Field({}{})", self.name, if self.vault { ", vault" } else { "" }) } }
 
 /// A request to the hub that carries a secret: its Debug shows nothing.
@@ -33,6 +34,7 @@ pub fn parse(settings: &Value) -> Vec<Row> {
         fields: r["fields"].as_array().into_iter().flatten().map(|f| { let vault = f["vault"].as_bool().unwrap_or(false); Field { name: string(f, "name"), hint: string(f, "hint"), secret: f["secret"].as_bool().unwrap_or(false), value: if vault { String::new() } else { string(f, "value") }, vault } }).collect(),
         qr: r["qr"].as_array().into_iter().flatten().filter_map(|l| l.as_str().map(str::to_string)).collect(),
         qrnote: string(r, "qrnote"), local: r["local"].as_bool().unwrap_or(false), tone: string(r, "tone"),
+        kind: string(r, "kind"), raw: if r["kind"].is_string() || r["in"] == true { r.clone() } else { Value::Null },
     }).collect()
 }
 
@@ -93,7 +95,7 @@ impl Echo {
 #[derive(Default)]
 pub struct SettingsUi { pub accounts: bool, pub nav: Vec<(String, String)>, pub page: String, pub q: String, pub search: Option<Entity<Composer>>, pub auto: bool, pub open_local: bool, pub device: bool, /** the Hubs page of this device */ pub hubs: bool }
 /// The pages in the order and groups the nav shows them (the hub's menu order, grouped with a divider between groups). An unknown page goes last.
-const GROUPS: [&[&str]; 5] = [&["appearance", "threads", "notifications", "agents", "writing"], &["cad", "ordering", "devices"], &["network", "voice", "keys", "timezone"], &["rules"], &["usage", "setup", "about", "privacy"]];
+const GROUPS: [&[&str]; 5] = [&["appearance", "threads", "notifications", "agents", "mcp", "writing"], &["cad", "ordering", "devices"], &["network", "voice", "keys", "timezone"], &["rules"], &["usage", "setup", "about", "privacy"]];
 pub fn group_of(page: &str) -> usize { GROUPS.iter().position(|g| g.contains(&page)).unwrap_or(GROUPS.len()) }
 /// How the dialog fits a window of `w` x `h` px: the margin around it, the page list's width, and whether a row's controls go under its words
 /// (a narrow page has no room beside them). The page list and the rows each scroll on their own, so nothing is out of reach on a short window.
@@ -139,7 +141,7 @@ fn nav_icon_el(icon: AnyElement) -> Div { div().flex_shrink_0().child(icon) }
 fn nav_title(t: &str) -> Div { div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(trs(t)) }
 /// An icon (from the set the client carries) for each page.
 pub fn nav_icon(page: &str) -> &'static str {
-    match page { "appearance" => "sun", "threads" => "message-square", "notifications" => "bell", "agents" => "cpu", "writing" => "square-pen", "cad" => "circuit-board", "ordering" => "shopping-cart",
+    match page { "appearance" => "sun", "threads" => "message-square", "notifications" => "bell", "agents" => "cpu", "mcp" => "plug", "writing" => "square-pen", "cad" => "circuit-board", "ordering" => "shopping-cart",
         "devices" => "link", "network" => "globe", "voice" => "mic", "keys" => "code", "timezone" => "clock", "rules" => "circle-check", "usage" => "gauge", "about" => "book", "privacy" => "file-text", _ => "settings" }
 }
 /// The hub shows its page menu (rows that are each one `settings-page` button naming a page) or one page (its first row is the way back).
@@ -352,6 +354,9 @@ const CHIPS_PER_LINE: usize = 6;
 /// section heading; a label and a note with nothing to press or type is a paragraph.
 /// `avail`: the width the row is laid out in (`Fit::rows`); `row_fit` decides from it whether the controls go beside the words or under them.
 pub(crate) fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, r: &Row, i: usize, avail: f32) -> AnyElement {
+    // a row drawn inside the card above it (a server's details): the row as usual, framed as the card's continuation
+    if r.raw["in"] == true { let mut inner = r.clone(); inner.raw["in"] = Value::Bool(false); let e = row_el(cx, light, fields, &inner, i, avail - 26.); return super::cards::inside(light, e, r.kind == "actions") }
+    if !r.kind.is_empty() { if let Some(e) = super::cards::el(cx, light, fields, r, i, avail) { return e } }
     let c = |n: &str| theme::color(light, n);
     let has_field = r.fields.iter().any(|f| fields.contains_key(&f.name));
     let controls = !r.buttons.is_empty() || has_field || !r.qr.is_empty();
@@ -389,12 +394,17 @@ pub(crate) fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<
                 let d = if b.on { d.bg(c("accent")).text_color(c("on-accent")) } else { d.bg(c("raise")).hover(|s| s.bg(c("line"))) };
                 // its rectangle for the e2e drivers (BACKPLANE_GPUI_RECTS=1 only), named by what it does: `btn:<action>:<value>`
                 let d = if crate::art::rects_on() { let n = format!("btn:{}:{}", b.action, b.value); d.relative().child(canvas(|_, _, _| (), move |r: Bounds<Pixels>, _, w: &mut Window, _| crate::art::report(&n, r, w.scale_factor())).absolute().top_0().left_0().size_full()) } else { d };
-                d.child(trs(&b.label)).on_click(cx.listener(move |this, _, _, cx| { if super::onboard::press(this, &b2, cx) { return; } if let Some(a) = super::hubpick::parse(&b2.action) { super::hubpick::act(this, a, cx); return; } if let Some(name) = b2.action.strip_prefix("local:") { this.local_press(name, &b2.value, cx); return; } if b2.action == "open-url" { if openable(&b2.value) { cx.open_url(&b2.value); } return; } if b2.action == "open-licenses" { if let Some(d) = crate::hub::licenses_dir() { cx.open_with_system(&d); } return; } flush_fields(this); if is_vault_save(&b2) { save_vault(this, &b2, cx); } else { let _ = this.tx.try_send(press(&b2)); } cx.notify(); })).into_any_element()
+                d.child(trs(&b.label)).on_click(cx.listener(move |this, _, _, cx| on_press(this, &b2, cx))).into_any_element()
             }).collect::<Vec<_>>()));
         }
     }
     let line = if stack { div().flex().flex_col().gap_2() } else { div().flex().items_center().justify_between().gap(px(GAP)) };
     line.py_3().border_b_1().border_color(c("line")).child(left).child(right).into_any_element()
+}
+
+/// A row's button pressed: the client's own actions here, a vault Save straight to the hub, anything else the view action it names.
+pub fn on_press(this: &mut Backplane, b2: &Btn, cx: &mut Context<Backplane>) {
+    if super::onboard::press(this, b2, cx) { return; } if let Some(a) = super::hubpick::parse(&b2.action) { super::hubpick::act(this, a, cx); return; } if let Some(name) = b2.action.strip_prefix("local:") { this.local_press(name, &b2.value, cx); return; } if b2.action == "open-url" { if openable(&b2.value) { cx.open_url(&b2.value); } return; } if b2.action == "open-licenses" { if let Some(d) = crate::hub::licenses_dir() { cx.open_with_system(&d); } return; } flush_fields(this); if is_vault_save(b2) { save_vault(this, b2, cx); } else { let _ = this.tx.try_send(press(b2)); } cx.notify();
 }
 
 /// The dialog while the hub has settings open; None when it has not: a title bar with a close ×, the pages on the left (search above, an icon and a
@@ -474,7 +484,7 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
 pub fn device_rows(l: &crate::local::Local) -> Vec<Row> {
     use crate::local as lo;
     let b = |label: &str, name: &str, value: &str, on: bool| Btn { label: label.into(), action: format!("local:{name}"), value: value.into(), on };
-    let r = |label: &str, note: &str, buttons: Vec<Btn>| Row { label: label.into(), note: note.into(), buttons, fields: vec![], qr: vec![], qrnote: String::new(), local: true, tone: String::new() };
+    let r = |label: &str, note: &str, buttons: Vec<Btn>| Row { label: label.into(), note: note.into(), buttons, fields: vec![], qr: vec![], qrnote: String::new(), local: true, tone: String::new(), ..Default::default() };
     let mut rows = vec![
         /* i18n-ok: drawn through trs by row_el, nav_title or the title */ r("Appearance", "", vec![]),
         /* i18n-ok: drawn through trs by row_el, nav_title or the title */ r("Language", "This device. Automatic follows the system language.", crate::i18n::CHOICES.iter().map(|(k, key)| b(&crate::i18n::t(key), "lang", k, l.lang == *k)).collect()),
@@ -605,7 +615,7 @@ mod tests {
         let mut f = Echo::new(""); f.remember("x");
         assert!(f.on_hub("changed on another device", "x"), "a real change from elsewhere");
     }
-    fn row(label: &str, page: &str) -> Row { Row { label: label.into(), note: String::new(), buttons: if page.is_empty() { vec![] } else { vec![Btn { label: format!("{label} ›"), action: "settings-page".into(), value: page.into(), on: false }] }, fields: vec![], qr: vec![], qrnote: String::new(), local: false, tone: String::new() } }
+    fn row(label: &str, page: &str) -> Row { Row { label: label.into(), note: String::new(), buttons: if page.is_empty() { vec![] } else { vec![Btn { label: format!("{label} ›"), action: "settings-page".into(), value: page.into(), on: false }] }, fields: vec![], qr: vec![], qrnote: String::new(), local: false, tone: String::new(), ..Default::default() } }
     #[test] fn the_pages_menu_is_told_from_a_page_and_the_nav_keeps_group_order() {
         let menu = vec![row("Usage", "usage"), row("Appearance", "appearance"), row("Voice", "voice"), row("Agents", "agents")];
         match shown(&menu) { Shown::Menu(items) => { let nav = nav_order(&items); assert_eq!(nav.iter().map(|(p, _)| p.as_str()).collect::<Vec<_>>(), ["appearance", "agents", "voice", "usage"], "grouped, stable inside a group"); } s => panic!("{s:?}") }

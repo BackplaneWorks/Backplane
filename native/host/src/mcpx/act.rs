@@ -62,7 +62,8 @@ pub async fn act(m: &Arc<Mcpx>, action: &str, value: &str, ui: &Ui<'_>) -> Resul
             set(&m.hub, &svc::allow_key(p), if v == "allow" { "allow" } else { "" }).await?; m.publish().await; Ok(Map::new()) }
         "mcp-scan" => { m.scan_imports().await; m.publish().await; Ok(Map::new()) }
         "mcp-import" => {
-            let picked: Vec<String> = ui_s(ui, "imp").split(',').filter(|x| !x.is_empty()).map(str::to_string).collect();
+            if m.last_scan().is_null() { m.scan_imports().await; }
+            let picked = page::import_picks(&m.last_scan(), &ui_s(ui, "imp"));
             let n = import_picked(m, &picked, ui_s(ui, "isync") != "off").await?;
             if n == 0 { return Err("Nothing picked to import".into()) }
             Ok(cleared(""))
