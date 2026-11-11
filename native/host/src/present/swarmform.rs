@@ -100,6 +100,12 @@ pub fn add_block(session: &Value, swarm: &Value, agents: &Value) -> Option<Value
     let p = if known(p) { p } else { "claude" };
     Some(json!({"open": draft(session, "@sadd") == "1", "provider": p, "model": m, "providers": providers(agents, p), "models": models(agents, p, m)}))
 }
+/// The thread a swarm's page draws its viewer for (Board, Schematic, 3D, Split, Mech, Files: they are a thread's, and the swarm's own
+/// is its project's design): its first member still in it, "" for a plain room or a swarm with none. Its members are top-level threads of
+/// the swarm's project, so the canonical design they share is the one shown.
+pub fn viewer_thread(room_page: &Value) -> String {
+    room_page["swarm"]["members"].as_array().into_iter().flatten().find(|m| !s(m, "thread").is_empty() && s(m, "state") != "removed").map(|m| s(m, "thread").to_string()).unwrap_or_default()
+}
 /// The `swarm.act` params of a swarm page's `swarm-act` value: pause, resume, stop; `add|<provider>|<model>|<role>`; `remove|<thread>` (a member's).
 /// None for a value the page does not offer.
 pub fn act_params(swarm: &Value, room: &str, value: &str) -> Option<Value> {
@@ -124,6 +130,12 @@ pub fn act_params(swarm: &Value, room: &str, value: &str) -> Option<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn a_swarm_page_draws_its_viewer_for_its_first_member_still_in_it() {
+        let page = json!({"kind": "room", "swarm": {"members": [{"member": "cat", "thread": "", "state": "bot"}, {"member": "thread:t1", "thread": "t1", "state": "removed"}, {"member": "thread:t2", "thread": "t2", "state": "idle"}, {"member": "thread:t3", "thread": "t3", "state": "working"}]}});
+        assert_eq!(viewer_thread(&page), "t2");
+        assert_eq!(viewer_thread(&json!({"kind": "room", "posts": []})), "", "a plain room has no viewer");
+        assert_eq!(viewer_thread(&json!({"kind": "room", "swarm": {"members": [{"thread": "t1", "state": "removed"}]}})), "", "nobody left");
+    }
     use crate::session::patch::merge;
     fn sess(d: Value) -> Value { json!({"rid": 5, "drafts": d}) }
     fn st() -> State { let mut st = State::default(); st.projects.insert("p1".into(), crate::state::Project { title: "Motor".into(), root: "/r".into(), created: 1, removed: false }); st }

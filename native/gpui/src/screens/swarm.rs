@@ -12,6 +12,9 @@ fn arr<'a>(v: &'a Value, k: &str) -> impl Iterator<Item = &'a Value> { v[k].as_a
 fn act(a: &str, v: &str) -> Command { Command::Action(a.into(), v.into()) }
 
 /// A sidebar row's `nav` as the view action that opens it: `@room:<id>` is the room's page.
+/// A room's page is open over the window's thread (a swarm's page over the thread its viewer is drawn for): that thread has no header
+/// and no sidebar row is marked; only its viewer shows, beside the page.
+pub fn over_thread(data: &Value) -> bool { data["bot"]["kind"] == "room" }
 pub fn nav_action(nav: &str) -> Option<(String, String)> { nav.strip_prefix("@room:").filter(|r| !r.is_empty()).map(|r| ("room".to_string(), r.to_string())) }
 /// A member's or post's colour, "#rrggbb" from the hub.
 pub fn hex(c: &str) -> Option<Rgba> { let h = c.strip_prefix('#')?; (h.len() == 6).then(|| u32::from_str_radix(h, 16).ok().map(rgb)).flatten() }
@@ -275,6 +278,7 @@ mod tests {
     use serde_json::json;
     #[test] fn a_rows_nav_opens_its_room_and_nothing_else() {
         assert_eq!(nav_action("@room:r7"), Some(("room".into(), "r7".into())));
+        assert!(over_thread(&json!({"bot": {"kind": "room", "swarm": {}}, "thread": {"id": "h|t1"}}))); assert!(!over_thread(&json!({"bot": {"kind": "bot"}, "thread": {"id": "h|t1"}}))); assert!(!over_thread(&json!({"bot": null})));
         for n in ["", "@room:", "h|t1", "@remote:b"] { assert_eq!(nav_action(n), None, "{n}"); }
     }
     #[test] fn colours_and_dots_follow_the_hubs_words() {
