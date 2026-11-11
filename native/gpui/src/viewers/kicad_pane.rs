@@ -98,6 +98,8 @@ pub struct KicadPane {
     poked: Option<(String, std::time::Instant)>, override_kind: Option<String>, pending_show: Option<String>,
     /// the theme told to the hub at least once; the main window (its first home), where Pop back in returns it
     theme_sent: bool, home: u32,
+    /// files changed on disk that KiCad holds back over the person's unsaved edits (info `kicad.reload.<digest>`)
+    pub conflicts: Vec<String>,
 }
 
 impl KicadPane {
@@ -108,7 +110,7 @@ impl KicadPane {
             if weak.update(cx, |this, cx| this.tick(cx)).is_err() { break }
         }).detach();
         KicadPane { bound: String::new(), project, root, project_id, open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), last_root: (i32::MIN, 0), placed: None,
-            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), poked: None, override_kind: None, pending_show: None, theme_sent: false, home: 0 }
+            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), poked: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new() }
     }
     fn rpc(&self, name: &str, params: Value) { let _ = self.hub.try_send(Command::Rpc(name.to_string(), Secret(params), "kicad")); }
     /// The hub's `editor.kicad.<digest>` for this project changed.
@@ -172,6 +174,17 @@ impl KicadPane {
         self.toplevel = t; self.container = Some(new); self.placed = None; self.last_root = (i32::MIN, 0);
         nc::grab_click(new, !self.keys);
         self.reattach();
+    }
+    /// The hub's `kicad.reload.<digest>`: this project's waiting files, if it is this pane's.
+    pub fn set_reload(&mut self, v: Value, cx: &mut Context<Self>) {
+        if !self.matches(&v) { return }
+        let c: Vec<String> = v["conflicts"].as_array().into_iter().flatten().filter_map(|f| f.as_str().map(String::from)).collect();
+        if c != self.conflicts { self.conflicts = c; cx.notify(); }
+    }
+    /// The person's answer to a file changed on disk (Keep yours / Reload), for every waiting file.
+    pub fn resolve(&mut self, choice: &str, cx: &mut Context<Self>) {
+        for f in std::mem::take(&mut self.conflicts) { self.rpc("editor.kicad.resolve", json!({"project": self.project, "file": f, "choice": choice})); }
+        cx.notify();
     }
     /// The main window's X11 id (the pane's first home).
     pub fn home(&self) -> u32 { self.home }
@@ -358,7 +371,7 @@ impl KicadPane {
         });
         let pane = self.placed.as_ref().and_then(|(at, _, _)| *at).map_or(Value::Null, |p| json!({"x": p.x, "y": p.y, "w": p.w, "h": p.h}));
         let shown_meta = shown.and_then(|w| nc::window_meta(w, self.container, self.toplevel));
-        json!({"ok": true, "project": self.project, "root": self.root, "open": self.open, "want": self.wanted_kind(),
+        json!({"ok": true, "project": self.project, "root": self.root, "open": self.open, "want": self.wanted_kind(), "conflicts": self.conflicts,
             "state": self.info["state"], "reason": self.info["reason"], "mode": self.info["mode"], "pid": self.info["pid"],
             "holder": self.info["holder"], "sock": self.info["sock"], "pane": pane,
             "container": self.container.map_or(Value::Null, |c| { let mut v = g(c); v["xid"] = c.into(); v }),
@@ -536,6 +549,17 @@ pub fn strip<V: 'static>(cx: &mut Context<V>, light: bool, pane: &Entity<KicadPa
             .tooltip(crate::keys::tip(&crate::i18n::trs(label), "Ctrl+Tab", light))
             .child(crate::i18n::trs(label))
             .on_click(move |_, _, cx| { let k = k.clone(); p.update(cx, |p, cx| p.show_kind(&k, cx)); }));
+    }
+    // a file changed on disk over the person's unsaved edits: said here too (KiCad asks in its own infobar), with the same two answers
+    if !pane.read(cx).conflicts.is_empty() {
+        let names: Vec<String> = pane.read(cx).conflicts.iter().map(|f| std::path::Path::new(f).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()).collect();
+        let (pk, pr) = (pane.clone(), pane.clone());
+        row = row.child(div().id("kicad-reload").ml_2().flex().items_center().gap_1().text_size(px(12.)).text_color(c("bad"))
+            .child(crate::i18n::tf("gpui.c.kicad.changed", &[("files", names.join(", ").into())]))
+            .child(div().id("kicad-keep").px_2().border_1().border_color(c("line")).bg(c("raise")).cursor_pointer().text_color(c("text")).child(crate::i18n::trs("Keep yours"))
+                .on_click(move |_, _, cx| pk.update(cx, |p, cx| p.resolve("keep", cx))))
+            .child(div().id("kicad-reload-btn").px_2().border_1().border_color(c("line")).bg(c("raise")).cursor_pointer().text_color(c("text")).child(crate::i18n::trs("Reload (lose your edits)"))
+                .on_click(move |_, _, cx| pr.update(cx, |p, cx| p.resolve("reload", cx)))));
     }
     row = row.child(div().flex_1());
     let mk = |id: &'static str, label: String, tip: String, a: &'static str, cx: &mut Context<V>| {
