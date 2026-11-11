@@ -9,6 +9,7 @@ impl Driver for CodexDriver {
         c::args(&c::ArgsIn { model: &a.model, session: &a.session, runtime: &a.runtime, effort: &a.effort, think: a.think, images: &a.images, mcp_url: &a.mcp_url, pcbparts: &a.pcbparts_url, prompt: &a.prompt, text: &a.text })
     }
     fn on_line(&mut self, line: &Value) -> Reaction { if line.is_object() { Reaction { send: vec![], shapes: vec![line.clone()] } } else { Reaction::default() } }
+    fn closes_stdin(&self) -> bool { true }
 }
 pub fn driver(provider: &str) -> Option<Made> { if provider == "codex" { Some(Made { cli: "codex", driver: Box::new(CodexDriver) }) } else { None } }
 

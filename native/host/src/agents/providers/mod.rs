@@ -71,6 +71,9 @@ pub trait Driver: Send {
     fn ask_info(&self, _request: &Value) -> Option<AskInfo> { None }
     /// Lines to write to stdin for the person's answer to `request`.
     fn answer(&mut self, _request: &Value, _answer: &str) -> Vec<String> { vec![] }
+    /// The process reads nothing after its start lines: its stdin is closed once they are written. Codex: `codex exec` (0.167) reads a piped
+    /// stdin to its end as more prompt ("Reading additional input from stdin..."), so an open pipe kept every Codex turn waiting forever.
+    fn closes_stdin(&self) -> bool { false }
 }
 
 /// A driver and the CLI it runs (resolved through `Cli`: in test mode only the stand-in folder).
