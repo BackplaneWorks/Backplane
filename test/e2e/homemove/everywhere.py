@@ -19,6 +19,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import move as m  # noqa: E402
 from proto import check, finish  # noqa: E402
+from settings_revoke import View  # noqa: E402
 
 m.PORTS.update({"A": 3901, "B": 3902})
 os.environ["BACKPLANE_MOVE_PAUSE_MS"] = "4000"  # the copy is held open so a message is sent mid-move (net/homemove.rs)
@@ -86,6 +87,17 @@ def bub_call(hub, bub, thread, tool, args, wait=60):
     return m.wait(lambda: reply_of(hub, thread, tool, n), wait) or (False, "no answer")
 
 
+def view_next(hub, bot):
+    """A window's view.open of the bot `bot` on `hub`: the reply's nextTarget (where the window goes), or {} when it stays; the reply's target."""
+    v = View(hub)
+    try:
+        r = v.request("view.open", {"target": {"kind": "bot", "id": bot}})
+        res = r.get("result") or {}
+        return res.get("nextTarget") or {}, res.get("target"), r.get("ok", True)
+    finally:
+        v.close()
+
+
 def row_note(hub, uber_only=True):
     """Bub's sidebar row as this hub draws it (the note), from the setting the row reads: home.moving."""
     return m.setting(hub, "home.moving")
@@ -135,6 +147,9 @@ def main():
     m.rpc(A, "turn.start", {"thread": tb, "text": "zz to the old copy", "msg": "mold1"})
     item("a message to the old copy of Bub's thread goes on to B", "no (ran on A's copy)", bool(m.wait(lambda: said(B, tb, "zz to the old copy"), 60)))
     item("ring: B's /hook/<id> lands on B after the move", "yes", m.post_hook(B.base, hid, tok) == 200)
+    link_b = json.loads(m.setting(A, "home.at") or "{}").get("link", "")
+    nxt, tgt, okv = view_next(A, bub)
+    item("a window on A with Bub open is sent to Bub on B (same id), no error", "no (not on this hub)", okv and nxt == {"kind": "bot", "id": f"{link_b}~{bub}"} and tgt == {"kind": "bot", "id": bub}, f"{nxt} {tgt}")
 
     # 1. from B (no project), Bub works on A
     link_a = next(e["id"] for e in m.events(B) if e.get("$") == "PeerSet" and not e.get("revoked"))
@@ -181,6 +196,8 @@ def main():
     back = m.wait(lambda: m.uber(A) == bub and m.uber(B) == "", 180)
     item("Bub is back on A, same id", "yes", bool(back))
     item("A's row: no move note after the move back", "n/a", bool(m.wait(lambda: row_note(A) == "", 30)), row_note(A))
+    nxt, tgt, okv = view_next(A, f"{link_b}~{bub}")
+    item("a window on A with B's Bub open comes back to Bub here", "n/a", okv and nxt == {"kind": "bot", "id": bub}, f"{nxt} {tgt}")
     item("ring: B's /hook/<id> lands on A again", "yes", bool(m.wait(lambda: m.post_hook(B.base, hid, tok) == 200, 30)))
     m.stop("A"); m.stop("B")
     print("\n| item | worked before | works now |\n|---|---|---|")

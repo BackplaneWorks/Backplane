@@ -69,21 +69,20 @@ fn acknowledges(method: &str, mirror: bool) -> bool { method == "view.open" && !
 pub(crate) fn shown_thread(client: u64, target: &Value) -> String { actor::shown_thread(client, target) }
 
 impl Hub {
-    /// A view of the uberbot (or another bot, or its chat thread) whose home moved away: the target becomes the same one on the machine that holds
-    /// it now (`<link>~<id>`, net/homemove.rs), so a window that had Bub's chat open keeps it, drawn from there, with no "not on this hub".
-    async fn follow_home(&self, mut p: Value) -> Value {
+    /// A view of the uberbot (or another bot, or its chat thread) whose home moved away: the same one on the machine that holds it now
+    /// (`<link>~<id>`, net/homemove.rs), or back here; the reply names it as `nextTarget`, so a window that had Bub's chat open opens it there.
+    async fn follow_home(&self, p: &Value) -> Option<Value> {
         let (kind, id) = (p["target"]["kind"].as_str().unwrap_or("").to_string(), p["target"]["id"].as_str().unwrap_or("").to_string());
-        if id.is_empty() || !matches!(kind.as_str(), "bot" | "thread") { return p }
+        if id.is_empty() || !matches!(kind.as_str(), "bot" | "thread") { return None }
         // and back: a view of the far copy once the home came back here, when that machine no longer has it
         if crate::net::far::is(&id) {
             let local = crate::net::far::local(&id); let me = self.arc();
             let here = if kind == "bot" { (match crate::bots::api::of(&me) { Some(b) => b.world().await.bot(&local).map_or(false, |x| !x.deleted), None => false }) && !self.mirrors().has_bot(&crate::net::far::link(&id), &local) }
                 else { self.model().await.threads.get(&local).map_or(false, |t| !t.deleted && t.project.is_empty()) && !self.far().map_or(false, |f| f.has(&id)) };
-            if here && self.setting("home.at").await.unwrap_or_default().is_empty() { p["target"]["id"] = json!(local) }
-            return p
+            return (here && self.setting("home.at").await.unwrap_or_default().is_empty()).then(|| json!({"kind": kind, "id": local}))
         }
-        let at = self.setting("home.at").await.unwrap_or_default(); if at.is_empty() { return p }
-        let Some(link) = serde_json::from_str::<Value>(&at).ok().and_then(|v| v["link"].as_str().map(str::to_string)).filter(|l| !l.is_empty()) else { return p };
+        let at = self.setting("home.at").await.unwrap_or_default(); if at.is_empty() { return None }
+        let link = serde_json::from_str::<Value>(&at).ok().and_then(|v| v["link"].as_str().map(str::to_string)).filter(|l| !l.is_empty())?;
         let moved = if kind == "bot" {
             let me = self.arc();
             let gone = match crate::bots::api::of(&me) { Some(b) => b.world().await.bot(&id).map_or(true, |x| x.deleted), None => true };
@@ -92,13 +91,11 @@ impl Hub {
             let project = self.model().await.threads.get(&id).map(|t| t.project.clone()); let far = self.far();
             crate::net::homemove::moved_thread(&at, &id, project.as_deref(), &|x| far.as_ref().map_or(false, |f| f.has(x)))
         };
-        if let Some(to) = moved { p["target"]["id"] = json!(to) }
-        p
+        moved.map(|to| json!({"kind": kind, "id": to}))
     }
     /// The view branch of `Hub::request`: `m` starts with "view.".
     pub(crate) async fn view_request(&self, c: &mut Conn, id: Value, m: &str, msg: &Value) -> Vec<Value> {
         let p = msg.get("p").cloned().unwrap_or(Value::Null);
-        let p = self.follow_home(p).await;
         let rid = id.as_u64().unwrap_or(0);
         let hubname = p.get("hub").and_then(Value::as_str).unwrap_or("");
         let valid = rid > CONTROL_ID_FLOOR && p.get("version") == Some(&json!(1))
@@ -114,6 +111,11 @@ impl Hub {
         if m != "view.open" && p.get("viewId").and_then(Value::as_str) != Some(c.view_id.as_str()) { return vec![error(&id, "STALE_VIEW")] }
         let view_id = if m == "view.open" { format!("{}:{}", c.gen, rid) } else { c.view_id.clone() };
         let rev = self.revision().await;
+        // the home moved: the window is told where the same bot or chat is now (its identity fields stay the request's), and opens it there
+        if let Some(next) = self.follow_home(&p).await {
+            let pol = json!({"remoteReady": false, "nextTarget": next, "session": p.get("session").cloned().unwrap_or(Value::Null), "cmds": []});
+            return vec![json!({"t":"reply","id":id,"ok":true,"result":self.assemble(&p, &view_id, rev, &pol)})]
+        }
         let mut params = p.clone();
         strip_hub_owned(&mut params);   // window, page, reads and local are the hub's: whatever the client sent is gone before the hub's own are put in
         if let Some(o) = params.as_object_mut() {
