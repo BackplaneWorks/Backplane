@@ -182,6 +182,9 @@ impl World {
         }
         Ok(())
     }
+    /// Fold line `line` (1-based) of another store: a linked machine's mirror (net/farstore.rs), renamed to `<link>~<id>`, whose room posts
+    /// are read back from that store by the number. Nothing there is acted on: what a step would owe is dropped.
+    pub fn apply_numbered(&mut self, line: usize, text: &str) { self.line = line; self.apply_line(text); self.seen = self.seen.max(line); self.steps.clear(); }
     pub fn apply_line(&mut self, line: &str) {
         let Some(t) = crate::session::event_type(line) else { return };
         const READ: [&str; 45] = ["MessageFrom", "DeviceRegistered", "DeviceDropped", "DevicePrefs", "ThreadLaunched", "ActivityLogged", "RunSet", "CharterSet", "DecisionLogged", "ModesSet", "BotSet", "BotDeleted", "RoomSet", "RoomDeleted", "RoomPosted", "HookSet", "HookHit", "RoutineSet", "RoutineDeleted", "RoutineFired",

@@ -89,13 +89,16 @@ impl Router {
     /// The machine a request goes to, or the error frames to answer at once; counts it as waiting (`Parts::run` gives it back).
     /// A person's message to a thread on one of the owner's machines, answering now or away: held here and answered at once (net/farsend.rs); the worker takes it
     /// there, where it cuts into the running turn, and the thread's queue strip shows it while it has not arrived. None for anything else.
+    /// A person's post in a room there (`bots.post`) is held the same way, under the room: the owner logs it once by its id (`msg`), however often it is posted.
     fn hold(&self, hub: &Arc<Hub>, id: &Value, m: &str, p: &Value) -> Option<Value> {
-        if m != "turn.start" || self.copy { return None }
+        if !held_method(m) || self.copy { return None }
         let l = far::params_link(p); if l.is_empty() || !self.sync.mine(&l) { return None }
         let mut local = far::params_local(p, &l); if let Some(o) = local.as_object_mut() { o.remove("on"); }
-        if local["msg"].as_str().map_or(true, str::is_empty) { local["msg"] = json!(format!("m{}-{}", farsend::now_ms(), hub.fresh_client())); }
-        let th = p["thread"].as_str().unwrap_or("").to_string();
-        self.out.hold(&th, &l, local, farsend::now_ms()); self.work(hub);
+        if local["msg"].as_str().map_or(true, str::is_empty) { local["msg"] = json!(format!("{}{}-{}", if m == "bots.post" { "p" } else { "m" }, farsend::now_ms(), hub.fresh_client())); }
+        let key = if m == "bots.post" { "room" } else { "thread" };
+        let th = p[key].as_str().unwrap_or("").to_string();
+        let msg = local["msg"].as_str().unwrap_or("").to_string();
+        self.out.hold_m(&th, &l, m, &msg, local, farsend::now_ms()); self.work(hub);
         Some(json!({"t":"reply","id":id,"ok":true,"result":{"held":true}}))
     }
     fn plan(&self, client: u64, id: &Value, m: &str, p: &Value) -> Result<String, Vec<Value>> {
@@ -221,6 +224,9 @@ async fn send_held(sync: Arc<FarSync>, hub: std::sync::Weak<Hub>, out: Arc<Outbo
         tokio::select! { _ = out.kick.notified() => {}, _ = tokio::time::sleep(std::time::Duration::from_millis(250)) => {} }
     }
 }
+/// What `Router::hold` keeps until its machine takes it: a person's message to a thread there, and a person's post in a room there
+pub fn held_method(m: &str) -> bool { m == "turn.start" || m == "bots.post" }
+#[cfg(test)] #[test] fn a_message_and_a_room_post_are_held_and_nothing_else() { assert!(held_method("turn.start") && held_method("bots.post") && !held_method("bots.say") && !held_method("thread.rename")); }
 /// The owner's side: the ids of the messages a linked machine posted lately, so one it posts again (its answer was lost on the way) runs once.
 static TAKEN: std::sync::Mutex<std::collections::VecDeque<String>> = std::sync::Mutex::new(std::collections::VecDeque::new());
 fn taken_before(link: &str, msg: &str) -> bool { !msg.is_empty() && TAKEN.lock().unwrap().iter().any(|k| *k == format!("{link}/{msg}")) }

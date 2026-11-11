@@ -48,12 +48,24 @@ fn refused<T>(reason: &'static str) -> Option<T> { super::refusal::report(reason
 
 /// A target that shows a thread (a thread, or a bot, whose chat is one) needs the hub's models info for its picker.
 pub fn shows_thread(p: &Value) -> bool { matches!(text(&p["target"],"kind"),"thread"|"bot") }
-fn bots(st: &State, hub: &str, now: u64) -> Vec<Value> {
-    let mut bots: Vec<_>=st.bots_nav.iter().filter(|(id,_)|!id.contains('~')).collect();
-    let uber=setting(st,"uber.bot").to_string();
+/// The uberbot a state names, when it is one of its bots ("" for none)
+fn uber_in(st: &State) -> String { let u=setting(st,"uber.bot"); if !u.is_empty() && st.bots_nav.contains_key(u) { u.to_string() } else { String::new() } }
+/// The sidebar's bots: this hub's, then each shown linked machine's (`<link>~<id>`, with its machine's `mark`). The uberbot leads: this hub's own, or with
+/// none a linked machine's (`bots::api::uber_shown`, the rule `bots.list` follows), drawn in Bub's place.
+fn bots(st: &State, far: &[(String,&State)], un: &Unified, hub: &str, now: u64) -> Vec<Value> {
+    let uber=crate::bots::api::uber_shown(&uber_in(st),&far.iter().map(|(_,f)|uber_in(f)).collect::<Vec<_>>());
+    let mut rows=bot_rows(st,hub,now,&uber,&Value::Null);
+    for (m,f) in far { rows.extend(bot_rows(f,hub,now,&uber,&un.mark(m))); }
+    rows.sort_by_key(|r| !r["uber"].as_bool().unwrap_or(false)); // (stable: each machine's own order kept)
+    rows
+}
+/// One state's bots as sidebar rows (its own only: a mirror's bots are `<link>~<id>`, never re-listed by this hub's state)
+fn bot_rows(st: &State, hub: &str, now: u64, uber: &str, mark: &Value) -> Vec<Value> {
+    let far=!mark.is_null();
+    let mut bots: Vec<_>=st.bots_nav.iter().filter(|(id,_)|id.contains('~')==far).collect();
     bots.sort_by(|(ia,a),(ib,b)| (**ib==uber).cmp(&(**ia==uber)).then(a.created.cmp(&b.created)).then(ia.cmp(ib))); // the uberbot leads
     bots.iter().map(|(id,b)| {
-        let name=if bots.iter().filter(|(_,other)|other.name.eq_ignore_ascii_case(&b.name)).count()>1 { format!("{} ({id})",b.name) }else{b.name.clone()};
+        let name=if bots.iter().filter(|(_,other)|other.name.eq_ignore_ascii_case(&b.name)).count()>1 { format!("{} ({})",b.name,crate::net::far::local(id)) }else{b.name.clone()};
         let t=st.threads.get(&b.thread);
         let (mood,note)=if st.asks.values().any(|(th,open)| th==&b.thread && *open) || t.map_or(false,|t|t.pending>0) { ("wait","needs you") }
             else if t.map_or(false,|t|t.turn==crate::state::Turn::Running) || st.queue.get(&b.thread).map_or(false,|q|!q.is_empty()) {
@@ -62,14 +74,21 @@ fn bots(st: &State, hub: &str, now: u64) -> Vec<Value> {
             else if now>t.map_or(0,|t|t.activity).saturating_add(900) { ("sleep","asleep") }else{("idle","ready")};
         json!({"id":format!("{hub}|{id}"),"name":name,"title":name,"act":if b.thread.is_empty(){"remote"}else{"bot"},
             "look":b.look,"mood":mood,"note":note,"uber":!uber.is_empty()&&**id==uber,"sel":false,"remote":false,"peer":"","cat":format!("{}:{mood}",b.look),"key":id,"link":"",
-            "nav":if b.thread.is_empty(){format!("@remote:{id}")}else{format!("{hub}|{}",b.thread)}})
+            "nav":if b.thread.is_empty(){format!("@remote:{id}")}else{format!("{hub}|{}",b.thread)},"mark":mark})
     }).collect()
 }
-fn rooms(st: &State, hub: &str) -> Vec<Value> {
-    let mut rooms: Vec<_>=st.rooms_nav.iter().filter(|(id,_)|!id.starts_with("dm:")).collect(); rooms.sort_by_key(|(id,_)|*id);
+/// The sidebar's rooms: this hub's, then each shown linked machine's (with its `mark`); a room kept on both machines (a room shared across them) is listed once, as this hub's.
+fn rooms(st: &State, far: &[(String,&State)], un: &Unified, hub: &str) -> Vec<Value> {
+    let mut rows=room_rows(st,hub,&Value::Null,&|_|false);
+    for (m,f) in far { rows.extend(room_rows(f,hub,&un.mark(m),&|id| st.rooms_nav.contains_key(&crate::net::far::local(id)))); }
+    rows
+}
+fn room_rows(st: &State, hub: &str, mark: &Value, here: &dyn Fn(&str)->bool) -> Vec<Value> {
+    let far=!mark.is_null();
+    let mut rooms: Vec<_>=st.rooms_nav.iter().filter(|(id,_)|!crate::net::far::local(id).starts_with("dm:") && id.contains('~')==far && !here(id)).collect(); rooms.sort_by_key(|(id,_)|*id);
     rooms.iter().map(|(id,r)| {
-        let name=if rooms.iter().filter(|(_,other)|other.name.eq_ignore_ascii_case(&r.name)).count()>1 { format!("{} · {id}",r.name) }else{r.name.clone()};
-        json!({"id":format!("{hub}|{id}"),"name":name,"members":r.members,"sel":false,"nav":format!("@room:{id}")})
+        let name=if rooms.iter().filter(|(_,other)|other.name.eq_ignore_ascii_case(&r.name)).count()>1 { format!("{} · {}",r.name,crate::net::far::local(id)) }else{r.name.clone()};
+        json!({"id":format!("{hub}|{id}"),"name":name,"members":r.members,"sel":false,"nav":format!("@room:{id}"),"mark":mark})
     }).collect()
 }
 
@@ -229,14 +248,14 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
         },
         "bot" => {
             let id=value.strip_prefix(&format!("{hub}|" )).unwrap_or(value);
-            if !st.bots_nav.contains_key(id) { return refused("action.bot-unknown") }
+            if !st.bots_nav.contains_key(id) && !(id.contains('~') && far.iter().any(|(_,f)|f.bots_nav.contains_key(id))) { return refused("action.bot-unknown") }
             if let Some(o)=session.as_object_mut() { o.remove("route"); }
             return Some(json!({"remoteReady":false,"nextTarget":{"kind":"bot","id":id},"session":session,"cmds":cmds,"local":p.get("local").cloned().unwrap_or(json!({"local.native.sidebar.pages":"","local.native.sidebar.context":"","local.native.sidebar.key":"","local.native.sidebar.budget":""}))}));
         },
         // a room's page: its row opens it, the post box (`bfield` rpost) is sent as a post by the person (`bots.post`)
         "room" => {
             let id=value.strip_prefix(&format!("{hub}|" )).unwrap_or(value);
-            if !st.rooms_nav.contains_key(id) || id.starts_with("dm:") { return refused("action.room-unknown") }
+            if !(st.rooms_nav.contains_key(id) || (id.contains('~') && far.iter().any(|(_,f)|f.rooms_nav.contains_key(id)))) || id.starts_with("dm:") { return refused("action.room-unknown") }
             if let Some(o)=session.as_object_mut() { o.remove("route"); }
             return Some(json!({"remoteReady":false,"nextTarget":{"kind":"room","id":id},"session":session,"cmds":cmds,"local":p.get("local").cloned().unwrap_or(json!({"local.native.sidebar.pages":"","local.native.sidebar.context":"","local.native.sidebar.key":"","local.native.sidebar.budget":""}))}));
         },
@@ -463,7 +482,7 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
     let del=text(&session["drafts"],"@del");
     let deleting=if del.is_empty() { Value::Null }else{json!({"id":if del.contains('|'){del.to_string()}else{format!("{hub}|{del}")},"title":"Delete thread","body":st.threads.get(del.strip_prefix(&format!("{hub}|" )).unwrap_or(del)).map(|t|t.title.as_str()).unwrap_or(""),"yes":"Delete","no":"Cancel"})};
     let pages=json!([{"version":1,"hub":hub,"projects":projects_page,"active":null,"legacy":null}]);
-    let shown=json!({"projects":projects,"sidebarPages":pages,"nativeSidebar":1,"active":[],"legacy":[],"thread":shown_thread,"rooms":rooms(st,hub),"bots":bots(st,hub,opts.now),"theme":setting(st,"ui.theme"),
+    let shown=json!({"projects":projects,"sidebarPages":pages,"nativeSidebar":1,"active":[],"legacy":[],"thread":shown_thread,"rooms":rooms(st,far,un,hub),"bots":bots(st,far,un,hub,opts.now),"theme":setting(st,"ui.theme"),
         "renaming":renaming,"deleting":deleting,"bot":null,"settings":if super::settings::is_open(&session) { super::settings::view(st,&session,p.get("hubInfo").unwrap_or(&Value::Null)) }else{Value::Null},"newRoom":super::botforms::new_room(st,hub,&session).unwrap_or(Value::Null),"newBot":super::botforms::new_bot(&session).unwrap_or(Value::Null),"projectHome":null});
     let mut shown=shown;
     if !far.is_empty() { shown["machines"]=machine_switch(far,un,&mpick); }
@@ -700,6 +719,39 @@ mod state_tests {
         assert_eq!(st.bots_nav["b"].thread,"t"); assert_eq!(st.bots_nav["b"].created,2);
         event(&mut st,json!({"$":"BotDeleted","id":"b","at":6})); event(&mut st,json!({"$":"RoomDeleted","id":"r","at":6}));
         let v=recent(&st,&params()).unwrap(); assert_eq!(v["shown"]["bots"],json!([])); assert_eq!(v["shown"]["rooms"],json!([]));
+    }
+    /// A linked machine's bots and rooms are listed after this hub's, each with its machine's marker; with no uberbot here, the linked machine's
+    /// leads in Bub's place, and opening it, a far room or a far bot is a target like a bot here (its chat is its thread there).
+    #[test] fn a_linked_machines_bots_rooms_and_uberbot_show_here() {
+        let mut here=State::new(); here.lean=true;
+        for e in [json!({"$":"ThreadCreated","id":"t1","project":"","title":"T","at":1}), json!({"$":"BotSet","id":"b1","name":"Scout","thread":"t1","look":1,"at":2}),
+            json!({"$":"RoomSet","id":"r1","name":"Here","members":"b1","at":2}), json!({"$":"RoomSet","id":"r2","name":"Shared","members":"b1\nbub@boat","at":2})] { event(&mut here,e); }
+        let mut boat=State::new(); boat.lean=true;
+        for e in [json!({"$":"ThreadCreated","id":"L~tb","project":"","title":"Bub","at":1}), json!({"$":"BotSet","id":"L~bub","name":"Bub","thread":"L~tb","look":7,"at":1}),
+            json!({"$":"BotSet","id":"L~cal","name":"Calendar","thread":"","look":3,"at":2}), json!({"$":"UberSet","bot":"L~bub","uid":"u","at":3}),
+            json!({"$":"RoomSet","id":"L~r9","name":"Ring","members":"L~bub","at":3}), json!({"$":"RoomSet","id":"L~r2","name":"Shared","members":"L~bub\nscout@desk","at":3})] { event(&mut boat,e); }
+        let far=vec![("boat-hub".to_string(),&boat)];
+        let marks: HashMap<String,Value>=[("boat-hub".to_string(),crate::mirror::mark_of("boat-hub",false))].into();
+        let un=Unified{ far:&HashMap::new(), marks:&marks, here:"" };
+        let v=recent_unified(&here,&far,&un,&params()).unwrap(); let s=&v["shown"];
+        let ids: Vec<&str>=s["bots"].as_array().unwrap().iter().map(|b|b["id"].as_str().unwrap()).collect();
+        assert_eq!(ids,["h|L~bub","h|b1","h|L~cal"],"the far uberbot leads, then this hub's bots, then the far ones");
+        assert_eq!((s["bots"][0]["uber"].as_bool(),s["bots"][0]["nav"].as_str(),s["bots"][0]["mark"]["short"].as_str()),(Some(true),Some("h|L~tb"),Some("boat-hub")));
+        assert!(s["bots"][1]["mark"].is_null() && s["bots"][1]["uber"]==false);
+        let rooms: Vec<&str>=s["rooms"].as_array().unwrap().iter().map(|r|r["id"].as_str().unwrap()).collect();
+        assert_eq!(rooms,["h|r1","h|r2","h|L~r9"],"a room kept on both machines is listed once, as this hub's");
+        assert_eq!(s["rooms"][2]["mark"]["name"],"boat-hub");
+        // an uberbot of this hub's own stays the one
+        event(&mut here,json!({"$":"UberSet","bot":"b1","uid":"u1","at":4}));
+        let v=recent_unified(&here,&far,&un,&params()).unwrap();
+        assert_eq!(v["shown"]["bots"].as_array().unwrap().iter().filter(|b|b["uber"]==true).map(|b|b["id"].as_str().unwrap()).collect::<Vec<_>>(),["h|b1"]);
+        // the far bot and the far room open as targets here
+        let mut p=params(); p["action"]=json!("bot"); p["value"]=json!("h|L~bub");
+        assert_eq!(recent_unified(&here,&far,&un,&p).unwrap()["nextTarget"],json!({"kind":"bot","id":"L~bub"}));
+        let mut p=params(); p["action"]=json!("room"); p["value"]=json!("h|L~r9");
+        assert_eq!(recent_unified(&here,&far,&un,&p).unwrap()["nextTarget"],json!({"kind":"room","id":"L~r9"}));
+        let mut p=params(); p["action"]=json!("bot"); p["value"]=json!("h|L~nobody");
+        assert!(recent_unified(&here,&far,&un,&p).is_none(),"an unknown far bot is refused");
     }
     /// A lean state from log lines (JSON text).
     fn state(lines: &[&str]) -> State { let mut st=State::new(); st.lean=true; for l in lines { event(&mut st,serde_json::from_str(l).unwrap()); } st }

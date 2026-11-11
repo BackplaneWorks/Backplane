@@ -18,7 +18,7 @@ use std::{collections::HashMap, path::{Path, PathBuf}, sync::{Arc, Mutex, RwLock
 /// nothing else; the derived events store is read without any lock (`Store` readers never wait for a writer); the
 /// `Model` has a read-write lock held only to apply or to read an index. So a view of a mirrored thread never waits for a
 /// disk write, and one link never waits for another.
-struct Mirror { w: Mutex<Writer>, events: Store, model: RwLock<Model> }
+struct Mirror { w: Mutex<Writer>, events: Store, model: RwLock<Model>, bots: RwLock<crate::bots::world::World> }
 struct Writer { epoch: String, head: u64, items: Store }
 pub struct FarStore { dir: PathBuf, m: RwLock<HashMap<String, Arc<Mirror>>> }
 
@@ -37,7 +37,7 @@ impl Mirror {
         for e in ["jsonl", "events"] { let _ = std::fs::remove_file(path(dir, link, e)); }
         let items = Store::open(&path(dir, link, "jsonl"))?;
         items.append(&json!({"epoch": epoch, "tail": 0}).to_string())?;
-        Ok(Mirror { w: Mutex::new(Writer { epoch: epoch.into(), head: 0, items }), events: Store::open(&path(dir, link, "events"))?, model: RwLock::new(Model::default()) })
+        Ok(Mirror { w: Mutex::new(Writer { epoch: epoch.into(), head: 0, items }), events: Store::open(&path(dir, link, "events"))?, model: RwLock::new(Model::default()), bots: Default::default() })
     }
     /// Read a mirror back: the items file, then the derived events rebuilt from it.
     fn load(dir: &Path, link: &str) -> anyhow::Result<Mirror> {
@@ -55,7 +55,9 @@ impl Mirror {
             if !out.is_empty() { events.append_many(&out.iter().map(String::as_str).collect::<Vec<_>>())?; }
         }
         let model = Model::build(&events)?;
-        Ok(Mirror { w: Mutex::new(Writer { epoch, head, items }), events, model: RwLock::new(model) })
+        let mut bots = crate::bots::world::World::default();
+        for a in (0..events.len()).step_by(4096) { for (i, l) in events.range(a, a + 4096)?.iter().enumerate() { bots.apply_numbered(a + i + 1, l) } }
+        Ok(Mirror { w: Mutex::new(Writer { epoch, head, items }), events, model: RwLock::new(model), bots: RwLock::new(bots) })
     }
 }
 
@@ -105,6 +107,8 @@ impl FarStore {
             let first = mirror.events.append_many(&texts.iter().map(String::as_str).collect::<Vec<_>>())?;
             let mut model = mirror.model.write().unwrap();
             for (i, t) in texts.iter().enumerate() { model.apply_line((first + i + 1) as u32, t) }
+            let mut bots = mirror.bots.write().unwrap();
+            for (i, t) in texts.iter().enumerate() { bots.apply_numbered(first + i + 1, t) }
         }
         w.head = got.head;
         Ok(Taken { got, events, reset })
@@ -148,6 +152,11 @@ impl FarView for FarStore {
     fn latest_context(&self, thread: &str) -> Vec<Row> {
         self.get(&far::link(thread)).and_then(|m| m.model.read().unwrap().latest_context(&m.events, thread).ok()).unwrap_or_default()
     }
+    fn bots(&self, link: &str, f: &mut dyn FnMut(&crate::bots::world::World)) -> bool {
+        let Some(m) = self.get(link) else { return false };
+        f(&m.bots.read().unwrap()); true
+    }
+    fn event(&self, link: &str, n: usize) -> Option<String> { if n == 0 { return None } self.get(link)?.events.get(n - 1).ok() }
 }
 
 #[cfg(test)]
@@ -224,6 +233,24 @@ mod tests {
         assert!(fs.has("A~t") && fs.page("A~t", 0, 32).is_some() && !fs.latest_context("A~t").is_empty(), "views of A do not wait for A's writer");
         fs.take("B", "e", 1, 2, &[msg(2, "u", "user", "two")]).unwrap();
         assert_eq!(fs.page("B~u", 0, 32).unwrap().rows.len(), 1, "another link takes meanwhile");
+        let _ = std::fs::remove_dir_all(h);
+    }
+    #[test] fn far_a_mirror_folds_its_bots_and_finds_a_rooms_posts_across_a_restart() {
+        let h = home("bots");
+        let items = [it(1, json!({"$":"BotSet","id":"b1","name":"Bub","thread":"t1","look":1,"persona":"","at":1})), it(2, json!({"$":"UberSet","bot":"b1","uid":"u","at":2})),
+            it(3, json!({"$":"RoomSet","id":"r1","name":"Ring","members":"b1","at":3})), it(4, json!({"$":"RoomPosted","id":"p1","room":"r1","from":"Bub","text":"ding","hop":0,"at":4}))];
+        let check = |fs: &FarStore| {
+            let mut got = None;
+            assert!(fs.bots("L", &mut |w| got = Some((w.bot("L~b1").map(|b| b.thread.clone()), w.setting("uber.bot", ""), w.room_lines.get("L~r1").cloned()))));
+            let (th, uber, lines) = got.unwrap();
+            assert_eq!((th.as_deref(), uber.as_str()), (Some("L~t1"), "L~b1"));
+            let n = lines.unwrap()[0];
+            let e: Value = serde_json::from_str(&fs.event("L", n).unwrap()).unwrap();
+            assert_eq!((e["text"].as_str(), e["room"].as_str()), (Some("ding"), Some("L~r1")));
+            assert!(!fs.bots("M", &mut |_| {}) && fs.event("L", 0).is_none());
+        };
+        { let fs = FarStore::open(&h).unwrap(); fs.take("L", "e", 0, 4, &items).unwrap(); check(&fs); }
+        check(&FarStore::open(&h).unwrap());
         let _ = std::fs::remove_dir_all(h);
     }
     #[test] fn far_what_stays_home_never_reaches_a_mirror() {

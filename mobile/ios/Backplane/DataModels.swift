@@ -232,13 +232,15 @@ struct DError: Error, LocalizedError {
 // MARK: data/1 additions (hello.features: actions, search, models, mentions, bots, notify; native/host/src/data/ext.rs)
 struct DBot: Codable, Equatable, Identifiable {
     var id: String; var name: String; var thread: String; var uber: Bool
-    enum CodingKeys: String, CodingKey { case id, name, thread, uber }
-    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); id = c.str(.id); name = c.str(.name); thread = c.str(.thread); uber = c.bool(.uber) }
+    var mark: DMark?     // a bot of a linked machine: where it is; nil for this hub's own
+    enum CodingKeys: String, CodingKey { case id, name, thread, uber, mark }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); id = c.str(.id); name = c.str(.name); thread = c.str(.thread); uber = c.bool(.uber); mark = try? c.decode(DMark.self, forKey: .mark) }
 }
 struct DRoom: Codable, Equatable, Hashable, Identifiable {
     var id: String; var name: String
-    enum CodingKeys: String, CodingKey { case id, name }
-    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); id = c.str(.id); name = c.str(.name) }
+    var mark: DMark?     // a room of a linked machine: where it is
+    enum CodingKeys: String, CodingKey { case id, name, mark }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); id = c.str(.id); name = c.str(.name); mark = try? c.decode(DMark.self, forKey: .mark) }
 }
 struct DDirectory: Decodable { var bots: [DBot]; var rooms: [DRoom]
     enum CodingKeys: String, CodingKey { case bots, rooms }

@@ -174,4 +174,8 @@ pub trait FarView: Send + Sync {
     fn page(&self, thread: &str, before: u64, limit: usize) -> Option<crate::model::Page>;
     /// the newest rows up to the latest human prompt and assistant text (`Model::latest_context`)
     fn latest_context(&self, thread: &str) -> Vec<crate::model::Row>;
+    /// The bots of a linked machine as its mirror folds them (`<link>~<id>`: bots, rooms, memories, routines, spaces); false when there is no such mirror.
+    fn bots(&self, _link: &str, _f: &mut dyn FnMut(&crate::bots::world::World)) -> bool { false }
+    /// A mirror's renamed event by its 1-based number (a room's posts: `World::room_lines` of that mirror's world)
+    fn event(&self, _link: &str, _n: usize) -> Option<String> { None }
 }
