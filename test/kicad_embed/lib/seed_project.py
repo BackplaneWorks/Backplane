@@ -37,10 +37,15 @@ def main() -> None:
     fixtures = os.path.join(repo_root, "test", "files", "fixtures", "plot")
 
     os.makedirs(proj, exist_ok=True)
+    # KEMBED_LAYOUT=repo: the KiCad project in boards/ecc83-pp/ of the repository (as in the person's SOT23_Card), the viewer naming the
+    # repository's root; the default keeps it at the root
+    sub = os.path.join("boards", "ecc83-pp") if os.environ.get("KEMBED_LAYOUT") == "repo" else ""
+    kdir = os.path.join(proj, sub) if sub else proj
+    os.makedirs(kdir, exist_ok=True)
     for ext in ("kicad_pcb", "kicad_sch", "kicad_prl"):
         src = os.path.join(fixtures, f"ecc83-pp.{ext}")
         if os.path.isfile(src):
-            shutil.copy2(src, os.path.join(proj, f"ecc83-pp.{ext}"))
+            shutil.copy2(src, os.path.join(kdir, f"ecc83-pp.{ext}"))
 
     # Synthesize a clean .kicad_pro beside ecc83-pp.{kicad_pcb,kicad_sch}
     pro = {
@@ -50,10 +55,10 @@ def main() -> None:
         "schematic": {"legacy_lib_dir": "", "legacy_lib_list": []},
         "sheets": [["28f865a0-4433-4a53-bbd7-b62f276848e4", "Root"]],
     }
-    write(os.path.join(proj, "ecc83-pp.kicad_pro"), json.dumps(pro, indent=2) + "\n")
+    write(os.path.join(kdir, "ecc83-pp.kicad_pro"), json.dumps(pro, indent=2) + "\n")
 
     # Canonical Backplane pointer + companion metadata to verify byte-preservation across saves/exports
-    write(os.path.join(proj, ".backplane.json"), json.dumps({"project": "ecc83-pp.kicad_pro"}, indent=2) + "\n")
+    write(os.path.join(proj, ".backplane.json"), json.dumps({"project": os.path.join(sub, "ecc83-pp.kicad_pro") if sub else "ecc83-pp.kicad_pro"}, indent=2) + "\n")
     companion = {
         "format": "backplane-kicad-metadata",
         "items": {
@@ -65,11 +70,11 @@ def main() -> None:
         },
         "version": 1,
     }
-    write(os.path.join(proj, "ecc83-pp.kicad_pcb.backplane.json"), json.dumps(companion, indent=2, sort_keys=True) + "\n")
+    write(os.path.join(kdir, "ecc83-pp.kicad_pcb.backplane.json"), json.dumps(companion, indent=2, sort_keys=True) + "\n")
 
     # Project-local symbol library + footprint library for Symbol Editor & Footprint Editor tests
     write(
-        os.path.join(proj, "proj_syms.kicad_sym"),
+        os.path.join(kdir, "proj_syms.kicad_sym"),
         """(kicad_symbol_lib
   (version 20231120)
   (generator "kicad_symbol_editor")
@@ -97,11 +102,11 @@ def main() -> None:
 """,
     )
     write(
-        os.path.join(proj, "sym-lib-table"),
+        os.path.join(kdir, "sym-lib-table"),
         '(sym_lib_table\n  (version 7)\n  (lib (name "proj_syms")(type "KiCad")(uri "${KIPRJMOD}/proj_syms.kicad_sym")(options "")(descr ""))\n)\n',
     )
     write(
-        os.path.join(proj, "proj_fps.pretty", "TestPad.kicad_mod"),
+        os.path.join(kdir, "proj_fps.pretty", "TestPad.kicad_mod"),
         """(footprint "TestPad"
   (version 20240108)
   (generator "pcbnew")
@@ -117,7 +122,7 @@ def main() -> None:
 """,
     )
     write(
-        os.path.join(proj, "fp-lib-table"),
+        os.path.join(kdir, "fp-lib-table"),
         '(fp_lib_table\n  (version 7)\n  (lib (name "proj_fps")(type "KiCad")(uri "${KIPRJMOD}/proj_fps.pretty")(options "")(descr ""))\n)\n',
     )
 
@@ -126,6 +131,12 @@ def main() -> None:
     if os.path.isfile(hier_src):
         shutil.copy2(hier_src, os.path.join(proj, "extra", "complex_hierarchy.kicad_sch") if False else os.path.join(proj, "complex_hierarchy_ref.txt"))
         os.remove(os.path.join(proj, "complex_hierarchy_ref.txt"))
+
+    # KEMBED_PROJ_SRC=<a real project folder>: a copy of it instead of the fixture (its own .backplane.json names the board; never the original)
+    src = os.environ.get("KEMBED_PROJ_SRC", "")
+    if src:
+        shutil.rmtree(proj)
+        shutil.copytree(src, proj, ignore=shutil.ignore_patterns(".git", ".backplane", "mfg", "*.lck", "*-backups"))
 
     # Initialize bare origin.git + proj git repo on main so canonical.rs design_root works as in production
     subprocess.run(["git", "init", "--bare", "-b", "main", origin], check=True, stdout=subprocess.DEVNULL)

@@ -331,7 +331,7 @@ if [ "$EMBED_MODE" != "spike" ]; then
     if kill -0 "$KPID" 2>/dev/null; then
       WARM_ALIVE_AFTER_VIEW=1
     fi
-    CLOSE_OUT=$(hub_rpc "[{\"m\":\"editor.kicad.close\",\"p\":{\"project\":\"$OUT/proj/ecc83-pp.kicad_pro\",\"save\":\"discard\"}}]" || true)
+    CLOSE_OUT=$(hub_rpc "[{\"m\":\"editor.kicad.close\",\"p\":{\"project\":\"$OUT/proj/${KEMBED_LAYOUT:+boards/ecc83-pp/}ecc83-pp.kicad_pro\",\"save\":\"discard\"}}]" || true)
     echo "$CLOSE_OUT" >"$OUT/close_rpc.log"
     for _ in $(seq 30); do
       if ! kill -0 "$KPID" 2>/dev/null; then
