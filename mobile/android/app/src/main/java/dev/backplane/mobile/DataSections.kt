@@ -31,13 +31,18 @@ import org.json.JSONObject
 
 /** A row of a section: a thread, or a project (its `key` set) with its visible threads under it. */
 data class DSecRow(val id: String, val title: String, val word: String, val say: String, val want: String, val ago: String, val mark: DMark?, val project: String,
-    val off: Boolean, val nav: String, val pinned: Boolean, val key: String, val running: Int, val threads: List<DSecRow>, val css: String, val dots: List<Pair<Boolean, Boolean>>, val kind: String = "", val hide: String = "", val icon: String = "", val menu: List<DMenuItem> = emptyList()) {
+    val off: Boolean, val nav: String, val pinned: Boolean, val key: String, val running: Int, val threads: List<DSecRow>, val css: String, val dots: List<Pair<Boolean, Boolean>>, val kind: String = "", val hide: String = "", val icon: String = "", val menu: List<DMenuItem> = emptyList(),
+    /** the fold the hub keeps for a project row (`sidebar.fold.<key>`): the action its chevron sends, folded now, the rows it hides or would hide */
+    val fold: String = "", val folded: Boolean = false, val under: Int = 0, val needsCount: Int = 0) {
     companion object {
         fun of(o: JSONObject): DSecRow = DSecRow(o.optString("id"), o.optString("title"), o.optString("word"), o.optString("say"), o.optString("want"), o.optString("ago"),
             parseMark(o.optJSONObject("mark")), o.optString("project"), o.optBoolean("off"), o.optString("nav"), o.optBoolean("pinned"), o.optString("key"), o.optInt("running"),
-            list(o.optJSONArray("threads")), o.optString("css"), (0 until (o.optJSONArray("dots")?.length() ?: 0)).map { i -> o.getJSONArray("dots").getJSONObject(i).let { it.optBoolean("here") to it.optBoolean("dim") } }, o.optString("kind"), o.optString("hide"), o.optString("icon"), DMenuItem.list(o.optJSONArray("menu")))
+            list(o.optJSONArray("threads")), o.optString("css"), (0 until (o.optJSONArray("dots")?.length() ?: 0)).map { i -> o.getJSONArray("dots").getJSONObject(i).let { it.optBoolean("here") to it.optBoolean("dim") } }, o.optString("kind"), o.optString("hide"), o.optString("icon"), DMenuItem.list(o.optJSONArray("menu")),
+            o.optString("fold"), o.optBoolean("folded"), o.optInt("under"), o.optInt("needsCount"))
         fun list(a: JSONArray?): List<DSecRow> = (0 until (a?.length() ?: 0)).map { of(a!!.getJSONObject(it)) }
     }
+    /** a chevron on the row: something is under it, or it is folded (an older hub sends no fold) */
+    val canFold: Boolean get() = fold.isNotEmpty() && (folded || under > 0)
     /** a live swarm's row (`kind` swarm): it opens the swarm's page, its room */
     val swarmRoom: String? get() = if (kind == "swarm") nav.removePrefix("@room:").takeIf { it.isNotEmpty() && nav.startsWith("@room:") } else null
 }
@@ -89,7 +94,11 @@ fun SectionThread(r: DSecRow, indent: Int = 12, showProject: Boolean = false, op
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun SectionProject(r: DSecRow, faded: Boolean, onClick: () -> Unit, onLong: () -> Unit) {
-    Row(Modifier.fillMaxWidth().height(38.dp).alpha(if (faded) .55f else 1f).combinedClickable(onClick = onClick, onLongClick = onLong).padding(horizontal = 12.dp).testTag("home.section.project.${r.key}"), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().height(38.dp).alpha(if (faded) .55f else 1f).combinedClickable(onClick = onClick, onLongClick = onLong).padding(end = 12.dp).testTag("home.section.project.${r.key}"), verticalAlignment = Alignment.CenterVertically) {
+        // the fold: a tap on the chevron folds its threads away or back (the hub keeps it), a tap elsewhere opens the page
+        Box(Modifier.size(width = 30.dp, height = 38.dp).then(if (r.canFold) Modifier.clickable { DataClient.sidebarAct(r.fold, r.key) } else Modifier).testTag("home.section.fold.${r.key}"), contentAlignment = Alignment.Center) {
+            if (r.canFold) Icon(if (r.folded) Icons.Default.ChevronRight else Icons.Default.ExpandMore, if (r.folded) Msg.common_show else Msg.common_hide, tint = dfaint, modifier = Modifier.size(14.dp))
+        }
         // the project's icon in its colour (the hub's; an unknown name is the folder), or the logo for a project named Backplane
         if (r.icon == "backplane") androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(if (dcs.background.luminance() > 0.5f) R.drawable.brand_light else R.drawable.brand_dark), null, Modifier.size(15.dp).testTag("home.section.logo.${r.key}"))
         else androidx.compose.material3.Icon(badgeGlyph(r.icon), null, tint = runCatching { Color(android.graphics.Color.parseColor(r.css)) }.getOrDefault(dcs.onSurfaceVariant), modifier = Modifier.size(15.dp).testTag("home.section.icon.${r.key}"))
@@ -98,6 +107,8 @@ fun SectionProject(r: DSecRow, faded: Boolean, onClick: () -> Unit, onLong: () -
         if (r.dots.size > 1) { Spacer(Modifier.width(6.dp)); r.dots.forEach { (here, dim) -> DDot(if (dim) dfaint else if (here) dok else dcs.onSurfaceVariant, 5); Spacer(Modifier.width(3.dp)) } }
         Spacer(Modifier.weight(1f))
         if (r.running > 0) DMono(Msg.ios_sections_running(r.running), dok, 11)
+        // what of it waits on the person (its rows are in Needs you, folded or not)
+        if (r.needsCount > 0) { Spacer(Modifier.width(6.dp)); Box(Modifier.background(dcs.error).padding(horizontal = 5.dp).testTag("home.section.needs.${r.key}")) { DMono("${r.needsCount}", dcs.onError, 10) } }
     }
 }
 
@@ -114,7 +125,7 @@ fun LazyListScope.sectionItems(open: (String) -> Unit, page: (DSecRow) -> Unit, 
         else for (p in s.rows) {
             item("sp:${s.id}:${p.key}") { SectionProject(p, s.id == "quiet" || (p.off && p.key.isNotEmpty()), { page(p) }, { menu(p) }) }
             // its live swarms (the client's own rows, feature swarm), above its threads; their members have no rows
-            if (Swarms.on()) items(SwarmUi.live(Swarms.all, p.id).filter { it.id !in asking }, key = { "ss:${s.id}:${it.id}" }) { x -> SwarmRow(x) { openSwarm(x.id) } }
+            if (Swarms.on() && !p.folded) items(SwarmUi.live(Swarms.all, p.id).filter { it.id !in asking }, key = { "ss:${s.id}:${it.id}" }) { x -> SwarmRow(x) { openSwarm(x.id) } }
             items(p.threads, key = { "st:${s.id}:${it.id}" }) { t -> SectionThread(t, 34, open = open) }
         }
     }
