@@ -1,114 +1,190 @@
 # Anonymous usage
 
 Backplane counts installs and how many people use it. Only the hub sends:
-window, web, iOS and Android never contact the telemetry service.
+the desktop window, iOS and Android never contact the telemetry service.
 
 Alpha also sends aggregate daily counts of threads created, messages, model
-token usage, bot traffic and numeric board creation/completed-order counts for product and investor reporting. This is usage
-measurement, not token billing. API keys, authentication tokens, conversation
-content and credentials are never part of these counters.
+token usage, bot traffic and numeric board creation/completed-order counts
+for product and investor reporting. This is usage measurement, not token
+billing. API keys, authentication tokens, conversation content and
+credentials are never part of these counters.
 
-An identified install sends a random UUIDv4, app version, channel, OS,
-architecture and UTC date. Updates optionally include the preceding version.
-A daily active event counts the UTC day of a successful authenticated allowlisted UI action, at most once per id/day. Idle rollover, reconnect, keepalive, automatic view refresh and provider or background work do not count. This is a UI interaction signal, not hardware attestation. Committed sharing, consent or reset changes discard pending action evidence even before an install id exists.
+## What is sent
+
+Nothing else is ever put in a request.
+
+- **install**: a random UUIDv4 install id, app version, channel (`release` or
+  `nightly`), OS (`linux`, `darwin`, `windows`), architecture (`x64`,
+  `arm64`), UTC date, and the id's proof of work.
+- **update**: the same, plus the previous version.
+- **active**: the same identity and platform fields. It counts the UTC day of
+  a successful authenticated allowlisted UI action, at most once per id per
+  day. The allowlist is `turn.start`, `thread.create`, `bots.say`,
+  `bots.post`, `project.new`, `project.add` and `thread.fork`. Idle
+  rollover, reconnects, keepalives, automatic view refreshes, provider work
+  and background work do not count. This is a UI interaction signal, not
+  hardware attestation.
+- **usage**: the same identity and platform fields, plus twelve fixed
+  integer counters for one UTC day (see the alpha aggregate contract below).
+
 There are no app-kind counts, usage times, crash uploads, projects, files,
-prompts, names, addresses, hardware identifiers or time zones in these events.
-The request includes a send timestamp and random nonce for authentication and
-replay protection; the server does not retain that timestamp as usage data.
+prompts, names, paths, addresses, hardware identifiers or time zones in these
+events. A request carries a send timestamp and a random nonce for
+authentication and replay protection. The server does not keep the timestamp
+as usage data.
 
-The installation/first-run popup explains **all** telemetry before any can
-leave the hub. Builds without sending capability do not interrupt onboarding with this popup; if capability becomes available, an unanswered choice is still required. Telemetry is selected On by default, but is blocked until the
-person presses **Continue with telemetry on** (a recorded choice). **Turn off
-all telemetry** records Off. **Decide later**, Escape, closing the app and
-unanswered/offline first runs authorize nothing. A dismissed popup remains
-pending and is offered again after reconnect or a new app session. Privacy/report links
-leave it unanswered. The regular onboarding tour does not repeat an already
-answered telemetry step; an interrupted automatic or manual tour resumes at its existing cursor. Only the hub sends; its saved choice is shared by
-web, desktop and both phone clients, so answering on one ends the question on
-all synchronized clients, including after reconnect. No per-client preference
-silently overrides it.
+The wire format is v1:
+`{"v":1,"ts":<unix s>,"nonce":<16 hex>,"events":[…]}`.
+It is signed with HMAC-SHA256 over `ts + "." + body` and sent with these
+headers:
 
-An existing explicit Off stays Off even if an older version never wrote an
-answer marker. A recorded expanded-metrics decline also stays Off. Existing
-complete On choices remain On; upgrades and reinstalls using the same hub
-home preserve these settings. An older On choice without the aggregate
-disclosure stays stored, but all sends wait for the complete popup answer.
-A genuinely new hub home has no recorded choice and starts pending. Reset id
-rotates identity only, never enables telemetry or resets the choice.
+- `X-Backplane-Key: <key id>`
+- `X-Backplane-Timestamp: <ts>`
+- `X-Backplane-Signature: sha256=<hex>`
 
-One hub transaction records the share and disclosure fields. The UI decision
-names the preferences and monotonic choice revision it displayed: a stale On answer or outbox replay cannot
-overwrite a newer Off on another client. An explicit Off always stops sharing. Repeated decisions invalidate stale On requests; bounded replay receipts prevent lost acknowledgements from applying a decision twice. A receipt names one click: the client makes a decision id per click and keeps it in its outbox text, so only a resend of that very request is recognised; two people choosing the same value from the same displayed state are two decisions, and a request without an id is never treated as a replay. A client with several choices outstanding falls back, on a refusal, to the last preferences the hub confirmed, once none is outstanding, never to another unconfirmed proposal. Nothing may contact the network while any write waits in the disk-full queue: a choice folded into the hub's state but not yet on disk authorizes no registration or usage send until it is flushed, while a waiting Off still revokes at once and its cleanup still runs. A worker's snapshot is compared with the hub's state through the same projection it was built from, so an unchanged choice never reschedules it. Older clients may still turn telemetry Off or reset the id; individual legacy On/answer-marker writes are rejected. Each click has its own decision id, kept stable only for transport retries; independent users choosing Off from the same old screen remain distinct. Every decision reply carries authoritative preferences after the append is saved, so rejected choices and failed saves do not leave an optimistic On displayed.
-An offline choice reaches the sender only after it is recorded by the hub;
-there is no pre-choice history backfill. These are product preference records,
-not a statement about legal consent.
+Each event's keys are exactly `e`, `day`, `id`, `share` (always `true`),
+`ver`, `prev` (updates only), `ch`, `os`, `arch`, `pow` (installs only) and
+`counts` (usage only). This is the format the 0.14 hub sent, unchanged.
 
-Settings on every client has Share anonymous usage, On/Off, Reset id and
-Privacy. Opting out clears the id, private queue and acknowledgements, and disables
-**every** category, including anonymous install/update pings. Unanswered
-installs never expire into anonymous transmission. Old unanswered/anonymous
-queue entries from previous versions are discarded rather than released. Re-enabling or Reset id makes a fresh random id and
-registers it with a proof of work. The id is stored in
-`<home>/telemetry/state.json`, mode 0600, in a 0700 directory, and sent only
-to authenticated clients as info `telemetry.id` for the copyable Install id
-text in Settings. It never enters the event log. The info is empty when
-there is no id or the person opted out. State writes use an atomic rename.
-The queue expires after seven days, caps at 200 events (old activity first),
-and sends at most 50 events / 16 KiB. A failed request retries no sooner than
-one hour, including a longer numeric Retry-After. Schema/auth/replay rejection
-drops its batch. Only HTTP 202 or permanent 400/401/403/409/413 responses consume a submitted batch; other statuses retain it with backoff. One background job runs at a time and HTTP times out at 10s.
+## Consent
 
-Setting `BACKPLANE_TELEMETRY=0` (or `off`) or `DO_NOT_TRACK=1` disables all
-telemetry, including anonymous counts and state writes. `CI` set,
-`BACKPLANE_SANDBOX` nonempty except `0`, and `--sandbox` also disable it.
-Missing endpoint, key id or key closes the gate. Developer builds bake no
-configuration, regardless of developer environment variables or `.env`.
+Telemetry is **opt-out**, but nothing leaves the hub before the person could
+have seen what is sent.
 
-Release compilation explicitly sets `BACKPLANE_TELEMETRY_BAKE=1`,
-`BACKPLANE_VERSION` (the full package version), and the endpoint/key id/key.
-`scripts/telemetry-header.py` writes a private compile-only prelude (`.js`),
-after the JS emission, which `scripts/build-js.sh` compiles into the binary
-on every target. It never enters the emitted JS, emit caches or package
-files. The prelude is removed when compilation ends. Missing configuration bakes empty
-values; malformed configuration fails the build without printing values.
+- **New installs.** Setup's first step has a telemetry row that says exactly
+  what is sent, with **On** preselected. Pressing **Off** there turns all
+  telemetry off. Finishing setup with it on (Done, End setup or Open the
+  uberbot) counts as the choice: the hub records `telemetry.notice = setup`
+  and only then starts sending. Finish later, closing the app, or a setup
+  that never finishes sends nothing.
+- **Existing installs** (setup finished, or the home has projects from
+  before setup): after updating to a release with the sender, every client
+  shows a one-time notice. It says what is sent, that telemetry is on, and
+  offers a one-tap **Turn off**, a **Settings** link (Privacy) and a close.
+  Telemetry starts once the notice has been drawn on any client: that
+  client sends `telemetry.notice.act {action: shown}` and the hub records
+  `telemetry.notice = shown`. It stays up until it is closed or answered,
+  and a closed notice never returns. A build that cannot send shows no
+  notice.
+- **Off stays Off.** An explicit Off is final against upgrades, the notice
+  and setup. That covers `telemetry.share = off`, the expanded answer
+  `telemetry.usage.asked = 0`, and an earlier setup decline
+  `onboard.usage = off`. Only the person's own later **On** changes it, in
+  Settings, Privacy or setup's row, through the token-bound
+  `telemetry.choice`. An existing install with an Off never sees the notice
+  and sends nothing.
+- Pressing **On** in Settings beside the full list also counts as having seen
+  it (`telemetry.notice = chosen`).
+- **Reset id** rotates the identity only. The next pass makes a fresh id; the
+  old id's queue, acknowledgements and counters are dropped and the new id
+  registers again. It never enables telemetry or changes the choice.
 
-`BACKPLANE_TELEMETRY_CHANNEL` is immutable build metadata: `release` for a
-stable version, `nightly` for `-nightly.`. The helper derives it from the
-stamped/package version and rejects an explicit disagreement. If both
-`BACKPLANE_VERSION` and `BACKPLANE_VERSION_STAMP` are supplied, their full
-versions must agree after removing the leading `v`. Changing the user's
-update preference never relabels telemetry from an installed package.
+Settings, Privacy on every client has **Share anonymous usage** with these
+controls:
 
-Release and nightly builds use the canonical receiver
-`https://backplaneworks.com/api/v1/events` directly, with the same HMAC API
-and key configuration. Builds do not rely on the legacy domain redirect.
+- On and Off.
+- Reset id.
+- Privacy and Report an issue.
+- The install id, as copyable text, from the info `telemetry.id`. It is sent
+  only to authenticated clients, never enters the event log, and is empty when
+  there is no id or telemetry is off.
 
-Normal runtime environment variables cannot replace baked credentials or
-redirect traffic. Explicit integration tests set `BACKPLANE_TELEMETRY_TEST=1`
-and supply `BACKPLANE_TELEMETRY_URL`, `_KID`, `_KEY` and `_CHANNEL`; only a
-literal `http://127.0.0.1:PORT/api/v1/events` endpoint is accepted in that
-mode. CI, sandbox and opt-out kill switches still win. No credentials are
-printed or passed to curl on its command line: curl reads headers/body from
-a private temporary config, removed after the attempt.
+`setting.set` cannot write `telemetry.notice` or re-enable telemetry. Older
+clients can still turn it off or reset the id. A choice's decision ids,
+receipts and revision tokens work as before, so a stale On from another
+client cannot overwrite a newer Off.
 
-Before starting HTTP, the worker asks the hub whether its recorded all-category
-choice permits transmission and its sharing/answer/reset snapshot is current. Any pending durable-write queue blocks network authorization, including a folded but unsaved On; a queued Off still revokes immediately. A choice made during proof-of-work
-invalidates that worker's pending request. A request already in flight can
-finish; opt-out clears the visible id immediately and the next plan removes
-queued identified data.
+Opting out, and any state where sending is not allowed, deletes the id, the
+outbox, the acknowledgements and the counters (`<home>/telemetry/*`). Nothing
+is backfilled when telemetry is turned on again. Committing an Off or a reset
+deletes them at once, so an Off and an On between two passes still start a
+new identity. These are product preference records, not a statement about
+legal consent.
 
-Open-source clients cannot keep a secret. HMAC-SHA256 over timestamp and raw
-body raises the cost of garbage submissions; server schema validation,
-version/channel allowlists, replay protection, rate limits and deduplication
-are the real controls. An identified install uses 18-bit SHA-256 proof of work
-in a disposable native child (`--telemetry-pow UUID`); the pure verifier
-independently checks the result. This is not identity authentication.
-See [Privacy](https://backplane.works/privacy) for server retention/deletion.
+## Sender
 
-Report an issue opens a GitHub issue form. Its URL contains only validated
-version, OS and architecture and an empty What happened prompt. Reporting is
-an explicit link, never an automatic upload. The tour reminds people that
-Backplane is in beta.
+`native/host/src/settings/telemetry_send.rs` sends. It runs one pass a minute
+and at once after a choice, a notice change or the day's first UI action.
+One pass runs at a time. Each pass does this:
+
+1. Reads the choice. If sending is not allowed, it deletes the telemetry
+   files and stops.
+2. Plans: a new id if there is none or the reset marker moved, an update if
+   the version changed, and an active event for a day with a UI action.
+3. Solves the install's 18-bit SHA-256 proof of work (`bp-pow1:<id>:<hex>`)
+   off the async runtime.
+4. Saves the outbox.
+5. Asks the hub again right before each HTTP request whether sending is still
+   allowed and the id is still current. An Off or a reset made meanwhile wins.
+6. Sends up to 50 ready events in at most 16 KiB.
+7. Sends the usage snapshots, separately and only once the install is
+   registered. An older receiver's rejection of usage then never costs the
+   install, update and activity events.
+
+**Outbox.** `<home>/telemetry/state.json` is in a 0700 directory with mode
+0600, and is written by atomic rename. It holds the id, the queue and the
+retry time, and survives restarts, so offline events are sent when the network
+comes back. The field names are the 0.14 state file's, so an old file still
+reads; anonymous or unanswered entries from earlier versions are dropped,
+never released.
+
+The queue is de-duplicated: one install per id, one update per version, one
+active per day. It expires after seven days and caps at 200 events, dropping
+the oldest activity first. Only HTTP 202 or a permanent 400/401/403/409/413
+consumes a batch. Anything else, including no answer, keeps it and waits at
+least an hour, or longer if a numeric `Retry-After` says so. The receiver also
+de-duplicates installs, updates and actives by id, so a resend after a crash
+counts once.
+
+**HTTP.** The hub runs `curl --disable` with a private config and body file
+in the telemetry directory, removed after each attempt. Nothing is on its
+command line. It is limited to HTTPS for the release endpoint, with a 10 s
+timeout and a 16 KiB response limit. A hub on a copy of a log
+(`BACKPLANE_COPY`) starts no sender.
+
+## Endpoint, key and builds
+
+Release builds talk only to `https://backplaneworks.com/api/v1/events`. The
+release workflow (`.github/workflows/release.yml`, build step) compiles the
+endpoint and the key in, on tag pushes only, using `option_env!`:
+
+| Compile-time variable | Source |
+| --- | --- |
+| `BACKPLANE_TELEMETRY_URL` | the literal endpoint above |
+| `BACKPLANE_TELEMETRY_KID` | Actions secret `BACKPLANE_TELEMETRY_KID` (`rel-…`) |
+| `BACKPLANE_TELEMETRY_KEY` | Actions secret `BACKPLANE_TELEMETRY_KEY` (64 lowercase hex) |
+
+A missing secret builds a hub that sends nothing, with a warning. A malformed
+one fails the build without printing the value. Dry runs (workflow_dispatch)
+and every developer build bake nothing, so they can never send, whatever their
+environment says. The hub also checks the configuration at start (the
+canonical endpoint, a `rel-` key id, 64 hex digits); anything else closes the
+gate. The channel comes from the package version: `-nightly.` means
+`nightly`, otherwise `release`.
+
+Normal runtime environment variables cannot replace the baked values or
+redirect traffic. Only `BACKPLANE_TELEMETRY_TEST=1` accepts
+`BACKPLANE_TELEMETRY_URL`, `_KID`, `_KEY` and `_CHANNEL` from the
+environment, and only for a literal `http://127.0.0.1:PORT/api/v1/events`.
+`BACKPLANE_TELEMETRY_TICK_MS` shortens the pass interval only in that mode.
+
+**Kill switches** disable all telemetry, including state writes, and win over
+everything:
+
+- `BACKPLANE_TELEMETRY=0` (or `off`)
+- `DO_NOT_TRACK=1`
+- `CI` set
+- `BACKPLANE_SANDBOX` nonempty except `0`
+- `--sandbox`
+
+Open-source clients cannot keep a secret: the key is in the binary. The HMAC
+raises the cost of garbage submissions. The receiver's real controls are
+schema validation, per-key version and channel allowlists, replay protection
+(nonces), rate limits, de-duplication and the proof of work. See
+[Privacy](https://backplane.works/privacy) for server retention and deletion.
+
+Report an issue opens a GitHub issue form. Its URL contains only the
+validated version, OS and architecture, and an empty What happened prompt.
 
 ## Alpha aggregate contract
 
@@ -119,113 +195,76 @@ The additive wire-v1 event is `usage`. It has the same required `day`, `id`,
 
 | Field | Counts |
 | --- | --- |
-| `threads_created` | Local `ThreadCreated` events, including child threads and forks; a fork marker alone adds nothing. |
+| `threads_created` | Committed `ThreadCreated` events, including child threads and forks. |
 | `user_messages` | Committed user-role `MessagePosted` events, including programmatic messages in bot threads. |
-| `assistant_messages` | Committed assistant-role `MessagePosted` events; streaming chunks, system messages and tool calls add nothing. |
-| `bot_messages` | Newly accepted mailbox messages (`MailPosted`), plus legacy room messages while the mailbox is off. Duplicate mail ids add nothing. |
+| `assistant_messages` | Committed assistant-role `MessagePosted` events; streaming text, system messages and tool calls add nothing. |
+| `bot_messages` | Committed mailbox messages (`MailPosted`); a repeated mail id adds nothing. |
 | `bot_wakes` | Committed `BotWoke` events, including routine and automatic wakeups. |
-| `input_tokens` | Known, uncached input tokens in accepted provider turn reports. |
+| `input_tokens` | Known, uncached input tokens in `TurnUsage` reports. |
 | `cache_read_tokens` | Known cache-read input tokens in those reports. |
 | `cache_write_tokens` | Known cache-write input tokens in those reports. |
 | `output_tokens` | Known output tokens, including reasoning already included by the provider. |
 | `usage_turns` | Turns with known output-token usage; unknown provider usage is not estimated. |
-| `boards_created` | Newly added local KiCad project/PCB families observed after a Backplane tool call. A matching `.kicad_pro`/`.kicad_pcb` pair counts once; a later counterpart adds nothing. Existing baseline files, edits, deletions and detected renames add nothing. |
-| `boards_ordered` | Newly completed non-pilot Buy-it checkouts containing at least one board-kind part. One per order, regardless of quantity or number of designs. Quotes, unpaid/cancelled/refunded orders, mechanical-only orders and already-paid upgrade history add nothing. |
+| `boards_created` | KiCad project/PCB families (a `.kicad_pro`/`.kicad_pcb` pair counts once) that first appear in a design commit Backplane records at a turn's end, with no file of that family in the previous commit. A later counterpart, edits and deletions add nothing; a commit that removes families as well counts the difference (a rename adds nothing); a repository's first commit is a baseline and adds nothing. |
+| `boards_ordered` | Buy-it orders whose manifest holds a board kind (pcb, flex, hdi, aluminum, copper_core, rogers, ptfe), counted once, the first time the order is seen `paid` or later. Pilot test payments, quotes, unpaid, expired and mechanical-only orders add nothing. |
 
-The original ten fields remain required by the receiver. The two board fields
-are optional for older clients and default to zero. New clients send all twelve
-fixed integer counters. Neither arbitrary field names nor design-derived enum
-keys are accepted. No quantities or kind breakdowns are part of this extension.
-No names, paths, design hashes, dimensions, per-design layer counts, part
-numbers, BOMs, netlists or prices are transmitted. Only the existing install,
-package/platform/day metadata surrounds the numerical counts.
-
-Creation is detected from the same local design-history snapshot Backplane
-already takes, with rename detection. Opening/importing a project as an initial
-baseline adds nothing. A completed checkout is first observed as `paid` (or a
-later successful state when polling missed `paid`). Local once-only source
-markers are durable and never enter the usage wire; opting out/reset clears
-counters and leaves earlier observations ineligible for backfill. A design job
-also carries the privacy generation captured before it starts, so stale work
-cannot count into a new sharing session.
+The receiver requires the original ten fields; the two board fields are
+optional there and default to zero. This client sends all twelve. Field names
+are fixed: no names, paths, design hashes, dimensions, layer counts, part
+numbers, BOMs, netlists, prices, costs, provider or model names, thread or bot
+identifiers, message sizes or contents.
 
 Total model tokens are input + cache read + cache write + output. Reasoning
-is a subset of output and is not added again. Costs, provider/model names,
-thread/bot identifiers, message sizes and contents never enter this event.
-Message categories can overlap: bot mail may also become a user-role thread
-message. They must not be summed into a count of human-authored messages.
-Mirrored threads from other hubs (`~` ids) are excluded. Bot traffic does not
-create daily-active-human events.
+is a subset of output and is not added again. Message categories can overlap:
+bot mail may also become a user-role thread message. They must not be summed
+into a count of human-authored messages. Mirrored threads from other hubs
+(`~` ids) are excluded. Bot traffic does not create daily-active events.
 
-Each counter is cumulative **per install id and UTC day**. The backend must
-UPSERT component-wise MAX for that key, then sum those maxima for reports.
-Summing incoming snapshots would inflate totals on retries. Identified usage
-requires a verified install; the worker sends registration first. Legacy
-telemetry travels in a separate request so an older receiver's usage schema
-rejection does not discard install/update/activity events. Deploy the receiver
-before enabling these alpha packages.
+`native/host/src/settings/telemetry_usage.rs` counts events as they commit,
+and only while sending is allowed. It never reads conversations back. A
+privacy change stops counting until the next pass has checked the choice
+again. An Off or a Reset id erases the counters, and turning it on again
+starts from zero.
 
-The hub projects seven days of counters from durable committed events, in private state outside the shared settings and sidebar memo inputs, with
-incremental `obj.usage` records written in the same transaction. It never scans
-conversation history to count. Reset id, changing sharing, or revoking the
-expanded answer erases the current counters; re-enabling starts fresh. A
-privacy-generation check immediately before HTTP rejects stale usage workers,
-including off/on changes in a single append. An already in-flight request can
-finish, as with the original telemetry pipeline.
-That generation also participates in the local identity-reset marker, so an
-off/on sequence between worker ticks rotates the id instead of attributing
-fresh counters to a previous consenting session's daily maximum.
+The counters are kept for seven UTC days, today included, in
+`<home>/telemetry/counts.json`. That file is private, written atomically on
+each pass, and scoped to the id's reset marker. A crash between passes loses
+at most that minute's counts, an undercount.
 
-`<home>/telemetry/usage.json` holds at most seven acknowledged, id-scoped
-snapshots, in the private telemetry directory with atomic mode-0600 writes.
-Unchanged snapshots send nothing. Failed/ambiguous delivery keeps the snapshot
-eligible with the existing one-hour/Retry-After backoff; an accepted or
-permanently rejected snapshot is suppressed until its counters change. A crash
-before acknowledgement persistence only causes an idempotent resend. Snapshots
-older than seven days expire, so extended offline periods are undercounts.
-Opt-out/unanswered usage removes this acknowledgement file on the next worker.
-Environment kill switches stop all telemetry workers and state writes.
+Each counter is cumulative **per install id and UTC day**. The receiver
+UPSERTs component-wise MAX for that key. `<home>/telemetry/usage.json` holds
+the acknowledged snapshots, so an unchanged day sends nothing. A failed or
+ambiguous delivery keeps the snapshot eligible with the same backoff. A crash
+before the acknowledgement is saved only causes an idempotent resend.
 
 ## Development checks
 
-`test/telemetry_usage_test` covers durable daily counts, known/unknown
-token usage, duplicate reports/mail, mirrored threads, privacy clearing,
-worker invalidation, seven-day expiry, wire fields and incremental-store
-recovery. `test/telemetry_test` covers the planner, queue, allowlist, wire bytes,
-HMAC and PoW vectors and shared client actions. The telemetry laws are appended
-to LAWS and proven in PROOF; existing laws are unchanged.
-`bun test/tools/telemetry_e2e.ts [BINARY] [WIREDIR]` uses a generated dev key,
-a random local HTTP port and temporary hub homes. It exercises signatures,
-PoW, opt-in/out, activity, backoff, rejection and closed gates. It never reads
-production credentials. Outputs are saved to `build/telemetry-report/`.
+`cargo test` in `native/host` covers the wire and the consent paths:
 
-The alpha receiver implementation is pinned for paired testing at backend
-commit `be77491e1dd8a5e6e51b198c03bc24d7492bb034`. Build the small worker with
-then `bun build --compile build/usage-delivery.js --outfile build/usage-delivery`.
-Run `test/tools/telemetry_usage_e2e.py` with the backend's `uv` environment,
-`--backend` pointing to a clean checkout, `--revision` its exact full commit,
-`--worker build/usage-delivery`, and `--receipt build/usage-integration.json`.
-It starts a real receiver on loopback with generated development credentials
-and a temporary database; the compiled worker sends and signs its actual
-projection. It tests registration, retries and ambiguous responses, reordered
-snapshots, reset, opt-out, old consent, kill switches and investor totals. The
-receipt records source/backend/worker hashes and counts without identifiers
-or credentials. The product hub's release build script has additional hub
-entrypoint checks and is not used for this standalone worker.
+- `settings::telemetry` covers the choice, the gate and the notice.
+- `settings::telemetry_send` covers the wire fields and order, the envelope,
+  the HMAC, the proof of work, the validators and the planner. The planner
+  tests check at most one active per day, the reset rotating only the id, the
+  backoff and consumed statuses, expiry and the cap, batch limits and reading
+  a 0.14 state file.
+- Its end-to-end tests start a hub on a temporary home and a loopback
+  receiver that checks the signature as the real one does. They cover each
+  consent path:
+  - a new install that keeps it on;
+  - a new install that turns it off in setup;
+  - an existing install upgraded with no answer (the notice shows, then it
+    sends);
+  - an existing install with an explicit Off, or an earlier decline (it stays
+    off and sends nothing).
+- They also cover the notice's Turn off, outbox replay across a restart, and
+  that no content, names, paths or keys ever appear in a request.
 
-Only in explicit loopback integration-test mode,
-`BACKPLANE_TELEMETRY_DAY_SECS=N` shortens the day. It alternates between
-today's UTC date and yesterday every N seconds, within the real server's
-allowed date window. This hook is never baked. `BACKPLANE_WAKE_TICK_MS=500`
-makes temporary hubs tick quickly. The protocol has no client-kind field.
+The same tests in `canonical` and `order` cover the board counts. The desktop's
+`screens::tmnotice` and the phones' notice tests cover the client side.
 
-For actual signed local-server integration, set `TM_SERVER_ROOT` to a clean,
-pinned Backplane.Works checkout and `TM_SERVER_HEAD` to its full commit.
-The test launches the existing Flask app with `uv` (or
-`TM_SERVER_PYTHON`), generated development credentials and temporary database
-paths. The native hub itself signs and sends; assertions inspect actual
-server SQLite rows for verified installs, updates, activity and identifier-free
-opted-out updates. The test records backend/source and binary hashes with
-counts, without retaining credentials. Platform package ingestion is a
-separate release gate; passing metadata tests or setting Actions secrets is
-not evidence that a distributed package sends successfully.
+The receiver is the Backplane.Works app (`telemetry.py`, `POST
+/api/v1/events`). Its accepted format is the 0.14 wire v1 plus the optional
+board counters. Production keys live in its `TELEMETRY_KEYS`: each key id has
+a secret, the allowed channels and the allowed versions. A release whose
+version the key does not allow is answered `403` and its batch dropped, so
+the key's `versions` must cover the release (for example `0.15.*` or `*`).

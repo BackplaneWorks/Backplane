@@ -168,7 +168,18 @@ async fn dirty_design(top: &str) -> Result<Vec<String>, String> {
 }
 /// What a commit to main did: the commit (short) and its files, and whether it was pushed.
 #[derive(Debug, Default, Clone, PartialEq)]
-pub struct Recorded { pub commit: String, pub files: Vec<String>, pub pushed: String }
+pub struct Recorded { pub commit: String, pub files: Vec<String>, pub pushed: String, pub new_boards: u64 }
+/// The board families (`<dir>/<name>` of a `.kicad_pro`/`.kicad_pcb`) among changed files, each with whether the last commit had any file of
+/// it and whether any is on disk now.
+pub type Family = (String, bool, bool);
+/// Usage: how many board families a design commit created: families the previous commit had none of and that are on disk, less the families
+/// it removed (a rename is a removal and an addition: it creates nothing). A repository's first commit is a baseline: none.
+pub fn new_board_families(fams: &[Family], had_head: bool) -> u64 {
+    if !had_head { return 0 }
+    let added = fams.iter().filter(|(_, before, now)| !before && *now).count() as u64;
+    let removed = fams.iter().filter(|(_, before, now)| *before && !now).count() as u64;
+    added.saturating_sub(removed)
+}
 /// Commit the design files changed in the main checkout of `root` straight onto its branch, as
 /// one commit, then push when the branch has an upstream. `skip`: documents another thread
 /// holds the lock of (their files stay for that thread's own commit). Only the main checkout
@@ -187,6 +198,16 @@ pub async fn commit_design(root: &str, msg: &str, skip: &[String]) -> Result<Rec
     let skipped = |p: &str| { let abs = format!("{top}/{p}"); skip.iter().any(|d| abs == *d || abs.starts_with(&format!("{d}.")) ) };
     let files: Vec<String> = dirty_design(&top).await?.into_iter().filter(|p| !skipped(p)).collect();
     if files.is_empty() { return Ok(Recorded::default()) }
+    // the board families this commit adds or removes, seen before it is made (usage counting: settings/telemetry_usage.rs)
+    let had_head = git::run_ro(&top, &["rev-parse", "-q", "--verify", "HEAD"]).await.code == 0;
+    let mut stems: Vec<String> = files.iter().filter_map(|p| p.strip_suffix(".kicad_pro").or_else(|| p.strip_suffix(".kicad_pcb")).map(str::to_string)).collect(); stems.sort(); stems.dedup();
+    let mut fams: Vec<Family> = vec![];
+    for st in stems {
+        let mut before = false; for ext in [".kicad_pro", ".kicad_pcb"] { if had_head && git::run_ro(&top, &["cat-file", "-e", &format!("HEAD:{st}{ext}")]).await.code == 0 { before = true } }
+        let now = [".kicad_pro", ".kicad_pcb"].iter().any(|ext| std::path::Path::new(&format!("{top}/{st}{ext}")).is_file());
+        fams.push((st, before, now));
+    }
+    let new_boards = new_board_families(&fams, had_head);
     let mut add = vec!["add", "-A", "--"]; add.extend(files.iter().map(String::as_str));
     let r = git::run(&top, &add).await;
     if r.code != 0 { return Err(format!("git add: {}", r.out.trim())) }
@@ -200,7 +221,7 @@ pub async fn commit_design(root: &str, msg: &str, skip: &[String]) -> Result<Rec
         let p = git::run(&top, &["push", "-q", &remote, &format!("{branch}:{rb}")]).await;
         if p.code == 0 { up.out.trim().to_string() } else { format!("not pushed: {}", p.out.trim().lines().last().unwrap_or("")) }
     } else { String::new() };
-    Ok(Recorded { commit, files, pushed })
+    Ok(Recorded { commit, files, pushed, new_boards })
 }
 
 /// A hardware thread's code worktree carries no design files: each tracked one is marked
@@ -257,6 +278,13 @@ pub fn bring_back(main: &str, wt: &str, thread: &str, stamp: &str) -> Result<(St
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn a_new_board_family_counts_once_a_rename_or_baseline_counts_nothing() {
+        let f = |n: &str, b: bool, now: bool| (n.to_string(), b, now);
+        assert_eq!(new_board_families(&[f("boards/a/a", false, true)], true), 1, "a .kicad_pro/.kicad_pcb pair is one family");
+        assert_eq!(new_board_families(&[f("boards/a/a", true, true)], true), 0, "an edit, or a later counterpart");
+        assert_eq!(new_board_families(&[f("old/x", true, false), f("new/x", false, true)], true), 0, "a rename");
+        assert_eq!(new_board_families(&[f("boards/a/a", false, true)], false), 0, "a repository's first commit is a baseline");
+    }
     use crate::agents::lockrec::{Lock, Party};
     fn tmp(n: &str) -> std::path::PathBuf { let p = std::env::temp_dir().join(format!("bp-kc-{}-{n}", std::process::id())); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
     fn touch(p: std::path::PathBuf, t: &str) { std::fs::create_dir_all(p.parent().unwrap()).unwrap(); std::fs::write(p, t).unwrap() }

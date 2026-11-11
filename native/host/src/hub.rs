@@ -606,11 +606,14 @@ impl Hub {
             if !c.view_id.is_empty() { crate::session::record_read_bound(c.client, &c.view_id, &c.target, "fab.look", id.as_u64().unwrap_or(0), reply["ok"].as_bool().unwrap_or(true), reply["result"].clone()); }
             return vec![reply];
         }
+        // a person's own successful UI action on an authenticated connection: the day it happened may count as active (settings/telemetry_send.rs)
+        let human = |out: &[Value]| if crate::settings::telemetry_send::human_method(m) && out.iter().any(|r| r["t"] == "reply" && r["ok"] == true) { crate::settings::telemetry_send::human() };
         if let Some(handler) = self.rpc_for(m) {
             let me = self.arc();
-            return handler.call(&me, &Caller { gen: c.gen.clone(), client: c.client }, &id, m, msg.get("p").unwrap_or(&Value::Null)).await;
+            let out = handler.call(&me, &Caller { gen: c.gen.clone(), client: c.client }, &id, m, msg.get("p").unwrap_or(&Value::Null)).await;
+            human(&out); return out;
         }
-        if m == "turn.start" { return self.turn_start(&id, msg.get("p").unwrap_or(&Value::Null)).await }
+        if m == "turn.start" { let out = self.turn_start(&id, msg.get("p").unwrap_or(&Value::Null)).await; human(&out); return out }
         if !m.starts_with("view.") {
             return vec![json!({"t":"reply","id":id,"ok":false,"error":"unknown method"})];
         }

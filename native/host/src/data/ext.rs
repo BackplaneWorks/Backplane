@@ -281,6 +281,9 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Re
         // (to this socket, at the fifth prompt) or hides it (every socket, once decided); `star.nudge {token, action: open|dismiss}` → `{}`
         "star.offer" => rpc(hub, c, "star.offer", json!({})).await.map(|r| r["result"].clone()),
         "star.nudge" => rpc(hub, c, "star.nudge", json!({"token":s(p, "token"),"action":s(p, "action")})).await.map(|_| json!({})),
+        // the one-time telemetry notice (settings/telemetry.rs): asked on (re)connect; "shown" once it is drawn, "close", "off"
+        "telemetry.notice" => rpc(hub, c, "telemetry.notice", json!({})).await.map(|r| r["result"].clone()),
+        "telemetry.notice.act" => rpc(hub, c, "telemetry.notice.act", json!({"token":s(p, "token"),"action":s(p, "action")})).await.map(|_| json!({})),
         "bots.list" => Ok(crate::bots::api::directory(hub).await),
         // feature "swarm" (docs/SWARM.md): the hub's own swarm.* requests; a swarm is a room, its member threads carry `swarm` (the room) and a project's list shows the swarm once
         // times are unix ms here, as everywhere in data/1 (the hub's own requests answer seconds)

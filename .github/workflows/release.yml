@@ -89,8 +89,20 @@ jobs:
           command -v ninja >/dev/null && exit 0
           case "${{ runner.os }}" in macOS) brew install ninja;; Windows) choco install ninja -y --no-progress;; Linux) sudo apt-get install -y -qq ninja-build;; esac
       - name: build
+        env:
+          # telemetry (docs/telemetry.md): the endpoint and the release key are compiled into the hub (option_env!, settings/telemetry_send.rs).
+          # Only a tag push bakes them; a dry run (workflow_dispatch) builds a hub that sends nothing. Values are never printed.
+          TM_KID: ${{ secrets.BACKPLANE_TELEMETRY_KID }}
+          TM_KEY: ${{ secrets.BACKPLANE_TELEMETRY_KEY }}
+        shell: bash
         run: |
           export BACKPLANE_COMMIT=$(git rev-parse --short HEAD)   # compiled into the hub: the guard checks an update against it
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            if [ -z "$TM_KID" ] || [ -z "$TM_KEY" ]; then echo "::warning::no telemetry key: this release's hub sends no telemetry"
+            elif [[ ! "$TM_KID" =~ ^rel-[a-z0-9-]{1,28}$ ]] || [[ ! "$TM_KEY" =~ ^[0-9a-f]{64}$ ]]; then echo "::error::BACKPLANE_TELEMETRY_KID/KEY are malformed (want rel-..., 64 lowercase hex)"; exit 1
+            else export BACKPLANE_TELEMETRY_URL=https://backplaneworks.com/api/v1/events BACKPLANE_TELEMETRY_KID="$TM_KID" BACKPLANE_TELEMETRY_KEY="$TM_KEY"; echo "telemetry baked (key id only: $TM_KID)"; fi
+          fi
+          unset TM_KID TM_KEY
           (cd native/host && cargo build --release --bin backplane-hub --bin bp-sh) & a=$!
           # the client with the embedded Chromium (feature cef) on every platform; its runtime is packaged beside it below (docs/browser-gpui-cef.md)
           (cd native/gpui && cargo build --release --features cef) & b=$!

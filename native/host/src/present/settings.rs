@@ -467,15 +467,13 @@ fn timezone(st: &State, session: &Value) -> Vec<Value> {
 
 /// The preferences the page shows, bound into the On button: `setting.set` cannot re-enable telemetry (settings/telemetry.rs `reserved`), only a `telemetry.choice` carrying this token can.
 fn tm_token(st: &State) -> String {
-    crate::settings::telemetry::State { share: set(st, "telemetry.share", "").into(), asked: set(st, "telemetry.asked", "").into(), usage_asked: set(st, "telemetry.usage.asked", "").into(),
-        generation: set(st, "telemetry.usage.generation", "").into(), revision: set(st, "telemetry.choice.revision", "").into(), ..Default::default() }.token()
+    crate::settings::telemetry::of(st).token()
 }
 
 fn privacy(st: &State, info: &Value) -> Vec<Value> {
-    let share = set(st, "telemetry.share", ""); let usage = set(st, "telemetry.usage.asked", "");
-    let on = (share.is_empty() || share == "on") && usage != "0";
+    let on = !crate::settings::telemetry::off(set(st, "telemetry.share", ""), set(st, "telemetry.usage.asked", ""), set(st, "onboard.usage", ""));
     let id = if on { info["telemetry.id"].as_str().unwrap_or("") } else { "" };
-    let mut note = "All telemetry: installs, updates, daily activity, daily counts of threads, messages, model tokens, bot traffic, boards created and completed board orders; random install id, version, package channel, OS, architecture and UTC day. Used for product and aggregate investor metrics. Board/order data is integer counts only: no design paths, hashes, dimensions, layers, part numbers, BOMs, netlists or prices. No content, files, names or credentials. Off disables every category. Local diagnostics stay on this device unless you choose to export them. This build of the hub sends nothing yet. Privacy policy: https://backplane.works/privacy".to_string();
+    let mut note = "All telemetry: installs, updates, daily activity, daily counts of threads, messages, model tokens, bot traffic, boards created and completed board orders; random install id, version, package channel, OS, architecture and UTC day. Used for product and aggregate investor metrics. Board/order data is integer counts only: no design paths, hashes, dimensions, layers, part numbers, BOMs, netlists or prices. No content, files, names or credentials. On unless you turn it off; Off disables every category. Nothing is sent before setup or the one-time notice has shown this. Local diagnostics stay on this device unless you choose to export them. Privacy policy: https://backplane.works/privacy".to_string();
     if !id.is_empty() { note.push_str(&format!(" Install id: {id}")); }
     let n = set(st, "telemetry.reset", "").parse::<u64>().unwrap_or(0) + 1;
     vec![row("Share anonymous usage", &note, vec![btn("On", "telemetry-on", &tm_token(st), on), btn("Off", "setting", "telemetry.share=off", !on), btn("Reset id", "setting", &format!("telemetry.reset={n}"), false),

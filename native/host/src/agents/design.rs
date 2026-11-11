@@ -72,6 +72,7 @@ impl Agents {
         match kc::commit_design(&root, &msg, &skip).await {
             Ok(r) if r.commit.is_empty() => {}
             Ok(r) => {
+                crate::settings::telemetry_usage::bump(crate::settings::telemetry_usage::BOARDS_CREATED, r.new_boards);
                 // a STEP written this turn is meshed now, in the background, so its first showing reads it from the cache
                 let steps: Vec<String> = r.files.iter().filter(|p| crate::files::kicad::solidread::is_step(p)).map(|p| format!("{root}/{p}")).collect();
                 if !steps.is_empty() { let home = self.hub.cfg.home.clone(); tokio::task::spawn_blocking(move || { let tools = crate::files::kicad::stepglb::machine(&home); for p in steps { crate::files::kicad::solidread::warm(&p, &tools); } }); }

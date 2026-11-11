@@ -356,7 +356,7 @@ gpui.keys.help	Keyboard shortcuts: this list. ? outside a text box, F1 anywhere	
 gpui.f2.welcome.body	Backplane runs coding agents on your boards, schematics and mechanical parts. Five short steps set it up, and each one can be skipped. Finish later closes setup until the next launch.	Backplaneは基板・回路図・機構部品の上でコーディングエージェントを動かします。5つの短いステップで準備し、どれも飛ばせます。「後で続ける」で次回起動までセットアップを閉じます。
 gpui.f2.data.folder.note	{home}. Your threads, settings, bots and keys are kept here, and the hub runs your agents from it.	{home}。スレッド・設定・ボット・キーはここに保存され、ハブはここからエージェントを動かします。
 gpui.f2.choose.another	Choose another	別のフォルダを選ぶ
-gpui.f2.usage.note	This build sends nothing. With On, a later build may send daily counts with a random id. Never your conversations, files, names or keys. Settings, Privacy changes it.	このビルドは何も送信しません。オンにすると、今後のビルドがランダムなIDと日ごとの件数を送ることがあります。会話・ファイル・名前・キーは送りません。設定 → プライバシーで変更できます。
+gpui.f2.usage.note	On unless you turn it off. Backplane sends anonymous counts: installs, updates, daily activity, and daily totals of threads, messages, model tokens, bot traffic, boards made and boards ordered, with a random install id, the version, the system and the day. Never your conversations, projects, files, names, paths or keys. Settings, Privacy changes it.	オフにしない限りオンです。Backplaneは匿名の集計を送ります：インストール、更新、日々の利用、そしてスレッド、メッセージ、モデルのトークン、ボットの通信量、作成した基板、注文した基板の1日ごとの合計で、ランダムなインストールID、バージョン、OS、日付が付きます。会話、プロジェクト、ファイル、名前、パス、キーを送ることはありません。設定 → プライバシーで変更できます。
 gpui.f2.v014	Backplane 0.14	Backplane 0.14
 gpui.f2.v014.copied	Your 0.14 data was copied into this hub.	0.14のデータはこのハブにコピーされました。
 gpui.f2.v014.found	Your 0.14 data is in {from}. This hub can copy its projects, threads, bots and settings. The 0.14 folder is only read.	0.14のデータは {from} にあります。このハブはそのプロジェクト・スレッド・ボット・設定をコピーできます。0.14のフォルダは読むだけです。
@@ -2353,6 +2353,28 @@ gpui.c.pad.hint.eraser	Drag over what to erase · {undo} undoes	消す部分を�
 gpui.c.pad.pen	Pen	ペン
 gpui.c.pad.box	Box	枠
 gpui.c.pad.eraser	Eraser	消しゴム
+gpui.c.kicad.kicad.could.not.start	KiCad could not start:	KiCad を起動できませんでした:
+gpui.c.kicad.kicad.is.not.responding	KiCad is not responding.	KiCad が応答していません。
+gpui.c.kicad.kicad.was.closed	KiCad was closed.	KiCad は閉じられました。
+gpui.c.kicad.starting.kicad	Starting KiCad…	KiCad を起動しています…
+gpui.c.kicad.this.window.cannot.hold.another	this window cannot hold another program's (only X11 and XWayland for now)	このウィンドウには他のプログラムのウィンドウを入れられません（今は X11 と XWayland のみ）
+gpui.c.kicad.no.x11.connection	no X11 connection	X11 に接続できません
+gpui.c.kicad.back.to.backplane.s.viewer	Back to Backplane's viewer (KiCad stays open)	Backplane のビューアに戻る（KiCad は開いたまま）
+gpui.c.kicad.edit.in.the.real.kicad	Edit in the real KiCad, here in the pane	このペインで本物の KiCad で編集
+gpui.c.kicad.view	View	表示
+gpui.c.kicad.symbols	Symbols	シンボル
+gpui.c.kicad.footprints	Footprints	フットプリント
+gpui.c.kicad.full.size	Full size	最大化
+gpui.c.kicad.exit.full.size	Exit full size	最大化を解除
+gpui.c.kicad.the.editor.takes.the.sidebar	The editor takes the sidebar's and the thread's room	エディタがサイドバーとスレッドの領域も使います
+gpui.c.kicad.pop.back.in	Pop back in	ペインに戻す
+gpui.c.kicad.back.into.backplane.s.pane	Back into Backplane's pane, as it is	このままの状態で Backplane のペインに戻します
+gpui.c.kicad.the.editor.in.a.window	The editor in a window of its own, as it is	このままの状態でエディタを別ウィンドウで開きます
+gpui.c.kicad.kicad.is.open.in.its	KiCad is open in its own window.	KiCad は別ウィンドウで開いています。
+gpui.c.kicad.the.editor.s.window.could	The editor's window could not open:	エディタのウィンドウを開けませんでした:
+gpui.c.kicad.changed	Changed on disk: {files}. You have unsaved edits.	ディスク上で変更されました: {files}。未保存の編集があります。
+gpui.c.kicad.keep.yours	Keep yours	自分の編集を残す
+gpui.c.kicad.reload.lose.your.edits	Reload (lose your edits)	再読み込み（編集は失われます）
 gpui.assets.missing	Assets missing in {dir}: {files}	{dir} にアセットがありません: {files}
 gpui.connecting	Connecting…	接続中…
 gpui.connected	Connected	接続済み
@@ -2521,6 +2543,7 @@ gpui.badge.runs.on	runs on {name}	{name} で実行
 gpui.badge.also.on	also on {name}	{name} にもあります
 gpui.unsent.restore	Not sent: {text} · Restore	未送信: {text} · 元に戻す
 gpui.made.far.note	Sent. The thread opens here as soon as that machine has it.	送信しました。そのマシンに届きしだい、ここでスレッドが開きます。
+gpui.picked.elsewhere	Not sent: the machine you picked is not where this would run. Pick it again, or another.	送信していません: 選んだマシンでは実行されません。もう一度選ぶか、別のマシンを選んでください。
 gpui.combo.key.model	{key} model	{key} モデル
 gpui.combo.key.account	{key} account	{key} アカウント
 gpui.combo.left	{pct}% left	残り{pct}%
@@ -2564,8 +2587,8 @@ gpui.e.tz.phone.again	Follow your phone's time zone again	スマートフォン�
 gpui.e.tz.machine.again	Follow this machine's time zone again	このマシンのタイムゾーンに戻す
 gpui.e.tz.phone.auto	Automatic: following your phone's time zone	自動：スマートフォンのタイムゾーンに従っています
 gpui.e.tz.machine.auto	Automatic: following this machine's time zone	自動：このマシンのタイムゾーンに従っています
-gpui.e.privacy.note	All telemetry: installs, updates, daily activity, daily counts of threads, messages, model tokens, bot traffic, boards created and completed board orders; random install id, version, package channel, OS, architecture and UTC day. Used for product and aggregate investor metrics. Board/order data is integer counts only: no design paths, hashes, dimensions, layers, part numbers, BOMs, netlists or prices. No content, files, names or credentials. Off disables every category. Local diagnostics stay on this device unless you choose to export them. This build of the hub sends nothing yet. Privacy policy: https://backplane.works/privacy	すべてのテレメトリ：インストール、更新、日々の利用、スレッド・メッセージ・モデルトークン・ボット通信・作成した基板・完了した基板注文の日ごとの件数、ランダムなインストールID、バージョン、パッケージのチャンネル、OS、アーキテクチャ、UTCの日付。製品改善と投資家向けの集計指標に使います。基板・注文のデータは整数の件数だけで、設計のパス、ハッシュ、寸法、レイヤー、部品番号、BOM、ネットリスト、価格は含みません。内容、ファイル、名前、認証情報も含みません。オフにするとすべての種類が止まります。ローカルの診断情報は、書き出さない限りこの端末に残ります。このビルドのハブはまだ何も送りません。プライバシーポリシー：https://backplane.works/privacy
-gpui.e.privacy.note.id	All telemetry: installs, updates, daily activity, daily counts of threads, messages, model tokens, bot traffic, boards created and completed board orders; random install id, version, package channel, OS, architecture and UTC day. Used for product and aggregate investor metrics. Board/order data is integer counts only: no design paths, hashes, dimensions, layers, part numbers, BOMs, netlists or prices. No content, files, names or credentials. Off disables every category. Local diagnostics stay on this device unless you choose to export them. This build of the hub sends nothing yet. Privacy policy: https://backplane.works/privacy Install id: {id}	すべてのテレメトリ：インストール、更新、日々の利用、スレッド・メッセージ・モデルトークン・ボット通信・作成した基板・完了した基板注文の日ごとの件数、ランダムなインストールID、バージョン、パッケージのチャンネル、OS、アーキテクチャ、UTCの日付。製品改善と投資家向けの集計指標に使います。基板・注文のデータは整数の件数だけで、設計のパス、ハッシュ、寸法、レイヤー、部品番号、BOM、ネットリスト、価格は含みません。内容、ファイル、名前、認証情報も含みません。オフにするとすべての種類が止まります。ローカルの診断情報は、書き出さない限りこの端末に残ります。このビルドのハブはまだ何も送りません。プライバシーポリシー：https://backplane.works/privacy インストールID：{id}
+gpui.e.privacy.note	All telemetry: installs, updates, daily activity, daily counts of threads, messages, model tokens, bot traffic, boards created and completed board orders; random install id, version, package channel, OS, architecture and UTC day. Used for product and aggregate investor metrics. Board/order data is integer counts only: no design paths, hashes, dimensions, layers, part numbers, BOMs, netlists or prices. No content, files, names or credentials. On unless you turn it off; Off disables every category. Nothing is sent before setup or the one-time notice has shown this. Local diagnostics stay on this device unless you choose to export them. Privacy policy: https://backplane.works/privacy	すべてのテレメトリ：インストール、更新、日々の利用、スレッド・メッセージ・モデルトークン・ボット通信・作成した基板・完了した基板注文の日ごとの件数、ランダムなインストールID、バージョン、パッケージのチャンネル、OS、アーキテクチャ、UTCの日付。製品改善と投資家向けの集計指標に使います。基板・注文のデータは整数の件数だけで、設計のパス、ハッシュ、寸法、レイヤー、部品番号、BOM、ネットリスト、価格は含みません。内容、ファイル、名前、認証情報も含みません。オフにしない限りオンで、オフにするとすべての種類が止まります。セットアップか一度だけの案内でこの内容が表示されるまでは何も送りません。ローカルの診断情報は、書き出さない限りこの端末に残ります。プライバシーポリシー：https://backplane.works/privacy
+gpui.e.privacy.note.id	All telemetry: installs, updates, daily activity, daily counts of threads, messages, model tokens, bot traffic, boards created and completed board orders; random install id, version, package channel, OS, architecture and UTC day. Used for product and aggregate investor metrics. Board/order data is integer counts only: no design paths, hashes, dimensions, layers, part numbers, BOMs, netlists or prices. No content, files, names or credentials. On unless you turn it off; Off disables every category. Nothing is sent before setup or the one-time notice has shown this. Local diagnostics stay on this device unless you choose to export them. Privacy policy: https://backplane.works/privacy Install id: {id}	すべてのテレメトリ：インストール、更新、日々の利用、スレッド・メッセージ・モデルトークン・ボット通信・作成した基板・完了した基板注文の日ごとの件数、ランダムなインストールID、バージョン、パッケージのチャンネル、OS、アーキテクチャ、UTCの日付。製品改善と投資家向けの集計指標に使います。基板・注文のデータは整数の件数だけで、設計のパス、ハッシュ、寸法、レイヤー、部品番号、BOM、ネットリスト、価格は含みません。内容、ファイル、名前、認証情報も含みません。オフにしない限りオンで、オフにするとすべての種類が止まります。セットアップか一度だけの案内でこの内容が表示されるまでは何も送りません。ローカルの診断情報は、書き出さない限りこの端末に残ります。プライバシーポリシー：https://backplane.works/privacy インストールID：{id}
 gpui.e.privacy.share	Share anonymous usage	匿名の利用状況を共有
 gpui.e.privacy.reset	Reset id	IDをリセット
 gpui.e.privacy.report	Report an issue	問題を報告
@@ -2734,6 +2757,7 @@ hub.acct.add.a.claude.sync.token	Add a Claude sync token	Claude の同期トー�
 hub.acct.connected.sync.token	connected, sync token	接続済み（同期トークン）
 hub.acct.sync.token.ended	Sync token ended	同期トークンの期限切れ
 hub.acct.sync.token.ends	Sync token ends {when}	同期トークンの期限: {when}
+gpui.e.telemetry.notice	Backplane now sends anonymous usage counts: installs, updates, daily activity, and daily totals of threads, messages, model tokens, bot traffic, boards made and boards ordered, with a random install id, the version, the system and the day. Never your conversations, projects, files, names, paths or keys. It is on. Turn it off here or in Settings, Privacy.	Backplaneは匿名の利用集計を送るようになりました：インストール、更新、日々の利用、そしてスレッド、メッセージ、モデルのトークン、ボットの通信量、作成した基板、注文した基板の1日ごとの合計で、ランダムなインストールID、バージョン、OS、日付が付きます。会話、プロジェクト、ファイル、名前、パス、キーは送りません。現在オンです。ここか、設定 → プライバシーでオフにできます。
 gpui.f.group.install	Install	インストール
 gpui.f.group.agents	Agents	エージェント
 gpui.f.group.cad	CAD tools	CADツール
@@ -2850,7 +2874,7 @@ gpui.f.ov.here	Your 0.14 work is here	0.14の作業を移行しました
 gpui.f.ov.failed.in	{why}. Your 0.14 data in {from} is untouched. Retry picks up where it stopped: nothing comes twice.	{why}。{from}にある0.14のデータには触れていません。再試行すると止まったところから続け、重複はしません。
 gpui.f.ov.failed	{why}. Your 0.14 data is untouched. Retry picks up where it stopped: nothing comes twice.	{why}。0.14のデータには触れていません。再試行すると止まったところから続け、重複はしません。
 gpui.f.usage.title	Anonymous usage	匿名の利用状況
-gpui.f.usage.body	This build sends nothing, whichever you choose. A later build may send anonymous counts if you say On. They are installs, updates, daily activity, and daily totals of threads, messages, model tokens, bot traffic, boards made and boards ordered, with a random install id, the version, the system and the day. It would never send your conversations, projects, files, names or keys. Settings, Privacy changes your choice.	どちらを選んでも、このビルドは何も送信しません。オンにすると、今後のビルドで匿名の集計を送ることがあります。内容はインストール、更新、日々の利用、そしてスレッド、メッセージ、モデルのトークン、ボットの通信量、作成した基板、注文した基板の1日ごとの合計で、ランダムなインストールID、バージョン、OS、日付が付きます。会話、プロジェクト、ファイル、名前、キーを送ることはありません。設定 → プライバシーで変更できます。
+gpui.f.usage.body	On unless you turn it off. Backplane sends anonymous counts: installs, updates, daily activity, and daily totals of threads, messages, model tokens, bot traffic, boards made and boards ordered, with a random install id, the version, the system and the day. Never your conversations, projects, files, names, paths or keys. Settings, Privacy changes it.	オフにしない限りオンです。Backplaneは匿名の集計を送ります：インストール、更新、日々の利用、そしてスレッド、メッセージ、モデルのトークン、ボットの通信量、作成した基板、注文した基板の1日ごとの合計で、ランダムなインストールID、バージョン、OS、日付が付きます。会話、プロジェクト、ファイル、名前、パス、キーを送ることはありません。設定 → プライバシーで変更できます。
 gpui.f.usage.share	Share anonymous usage	匿名の利用状況を共有
 gpui.f.usage.saved	Your choice is saved.	選択を保存しました。
 gpui.f.usage.choose	Choose one.	どちらかを選んでください。
@@ -4990,6 +5014,9 @@ gpui.sections.running	{n, number} running	{n, number}件実行中
     /// gpui.c.pad.hint.eraser = Drag over what to erase · {undo} undoes
     static func gpui_c_pad_hint_eraser(undo: String) -> String { f("gpui.c.pad.hint.eraser", ["undo": undo]) }
 
+    /// gpui.c.kicad.changed = Changed on disk: {files}. You have unsaved edits.
+    static func gpui_c_kicad_changed(files: String) -> String { f("gpui.c.kicad.changed", ["files": files]) }
+
     /// gpui.assets.missing = Assets missing in {dir}: {files}
     static func gpui_assets_missing(dir: String, files: String) -> String { f("gpui.assets.missing", ["dir": dir, "files": files]) }
 
@@ -5152,7 +5179,7 @@ gpui.sections.running	{n, number} running	{n, number}件実行中
     /// gpui.e.about.notices.hub = The licences of the third-party software in Backplane are in {path} on the hub's machine.
     static func gpui_e_about_notices_hub(path: String) -> String { f("gpui.e.about.notices.hub", ["path": path]) }
 
-    /// gpui.e.privacy.note.id = All telemetry: installs, updates, daily activity, daily counts of threads, messages, model tokens, bot traffic, boards created and completed board orders; random install id, version, package channel, OS, architecture and UTC day. Used for product and aggregate investor metrics. Board/order data is integer counts only: no design paths, hashes, dimensions, layers, part numbers, BOMs, netlists or prices. No content, files, names or credentials. Off disables every category. Local diagnostics stay on this device unless you choose to export them. This build of the hub sends nothing yet. Privacy policy: https://backplane.works/privacy Install id: {id}
+    /// gpui.e.privacy.note.id = All telemetry: installs, updates, daily activity, daily counts of threads, messages, model tokens, bot traffic, boards created and completed board orders; random install id, version, package channel, OS, architecture and UTC day. Used for product and aggregate investor metrics. Board/order data is integer counts only: no design paths, hashes, dimensions, layers, part numbers, BOMs, netlists or prices. No content, files, names or credentials. On unless you turn it off; Off disables every category. Nothing is sent before setup or the one-time notice has shown this. Local diagnostics stay on this device unless you choose to export them. Privacy policy: https://backplane.works/privacy Install id: {id}
     static func gpui_e_privacy_note_id(id: String) -> String { f("gpui.e.privacy.note.id", ["id": id]) }
 
     /// gpui.e.writing.model.note = {model}: the provider's light model unless one is chosen.

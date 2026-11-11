@@ -33,6 +33,7 @@ object DataClient {
     var features by mutableStateOf<Set<String>>(emptySet()); private set
     var notice by mutableStateOf(HubNotice()); private set   // hello `notice`, newer from /hub/status: the banner
     var star by mutableStateOf<DStarOffer?>(null); private set
+    var telemetryNotice by mutableStateOf<DTelemetryNotice?>(null); private set   // the one-time telemetry notice (feature "telemetryNotice"): shown while the hub says so
     /** Alerts not allowed yet (Android 13+): AlertsBanner offers them, with the reason, instead of the system asking at start. Not now hides it until the next launch. */
     var alertsAsk by mutableStateOf(false)
     var migrating by mutableStateOf<DMigrateCard?>(null); private set   // a 0.14 home coming across: hello `migrating`, then each `migrating` frame (DataMigrate.kt)
@@ -143,7 +144,7 @@ object DataClient {
     var pairEpoch by mutableStateOf(0); private set
     // forgets the hub and everything a pairing attempt left: a revoked mark, the last message, a pending question
     fun unpair() { setHome(""); leaveHome(); keepOutbox(Outbox()); links = emptyList(); adding = false; prefs().edit().remove("link").remove("links").apply(); reset(); close(); conn = Conn.OFFLINE; needsRepair = false; pairingError = ""; askLink = null; pairEpoch++ }
-    private fun reset() { Swarms.reset(); notice = HubNotice(); star = null; migrating = null; migrateOpen = false; projects = emptyList(); threads = emptyList(); entries = emptyMap(); older = emptyMap(); listsLoaded = false; open = null; cacheFile().delete() }
+    private fun reset() { Swarms.reset(); notice = HubNotice(); star = null; telemetryNotice = null; migrating = null; migrateOpen = false; projects = emptyList(); threads = emptyList(); entries = emptyMap(); older = emptyMap(); listsLoaded = false; open = null; cacheFile().delete() }
 
     // ---- connection
     fun connect() {
@@ -215,6 +216,7 @@ object DataClient {
             "voice" -> DataVoice.frame(o)
             "plot" -> scope.launch(Dispatchers.Main) { plots.receiveJSON(o) } // why a view has nothing to show (plots themselves are binary)
             "star" -> { star = DStarOffer.of(o.optJSONObject("offer")) }
+            "telemetry.notice" -> { telemetryNotice = DTelemetryNotice.of(o.optJSONObject("notice")) }
             "migrating" -> heardMigrating(o)
             "info" -> o.optJSONObject("info")?.let { if (it.has("hub.offer")) heardOffer(it.optString("hub.offer")) }
             "shot" -> { shotBot = o.optString("bot"); shot = o.optLong("n") }
@@ -312,7 +314,7 @@ object DataClient {
         try {
             listSub = call("subscribe", JSONObject().put("topic", "lists")).optInt("sub")
             if (g != gen) return
-            coroutineScope { launch { loadProjects(g) }; launch { loadThreads(g) }; launch { runCatching { loadLocks() } }; launch { runCatching { loadStar() } }; launch { loadHistory() }; launch { Swarms.load() }; launch { loadSections() } }
+            coroutineScope { launch { loadProjects(g) }; launch { loadThreads(g) }; launch { runCatching { loadLocks() } }; launch { runCatching { loadStar() } }; launch { runCatching { loadTelemetryNotice() } }; launch { loadHistory() }; launch { Swarms.load() }; launch { loadSections() } }
             syncPush()
             open?.let { subscribeThread(it, g); refreshThread(it) }
             subOpen?.let { (t, k) -> subSub = 0; runCatching { readSub(t, k, g) } }
@@ -381,6 +383,18 @@ object DataClient {
     fun starDecide(action: String) {
         val s = star ?: return; star = null
         scope.launch { runCatching { call("star.nudge", JSONObject().put("token", s.token).put("action", action)) } }
+    }
+    private suspend fun loadTelemetryNotice() { if (has("telemetryNotice")) telemetryNotice = DTelemetryNotice.of(call("telemetry.notice").optJSONObject("notice")) }
+    private val noticeShown = mutableSetOf<String>()   // tokens whose "shown" went this app session
+    /** The strip is on screen: "shown" once per token per app session (it lets the hub start sending). */
+    fun telemetryShown(token: String) {
+        if (token.isEmpty() || !noticeShown.add(token)) return
+        scope.launch { if (runCatching { call("telemetry.notice.act", DTelemetryNotice.act(token, "shown")) }.isFailure) noticeShown.remove(token) }
+    }
+    /** close (✕) or off (turns telemetry off on the hub): the strip goes at once */
+    fun telemetryAct(action: String) {
+        val n = telemetryNotice ?: return; telemetryNotice = null
+        scope.launch { runCatching { call("telemetry.notice.act", DTelemetryNotice.act(n.token, action)) } }
     }
     private suspend fun loadLocks() { if (has("work")) locks = parseLocks(call("locks.list").optJSONArray("locks")) }
     private suspend fun loadWork(id: String) { if (has("work")) setWork(id, call("thread.work", JSONObject().put("thread", id)).optJSONObject("subs")) }
@@ -998,5 +1012,19 @@ data class DStarOffer(val token: String, val text: String, val url: String, val 
             val s = DStarOffer(o.optString("token"), o.optString("text"), o.optString("url"), o.optString("label"))
             return if (s.token.isNotEmpty() && s.text.isNotEmpty() && s.url.startsWith("https://")) s else null
         }
+    }
+}
+
+/** The one-time telemetry notice while the hub says so (feature "telemetryNotice", docs/PHONE-DATA.md): from telemetry.notice at every
+ *  (re)connect and from a `{"t":"telemetry.notice","notice"}` frame (null hides it). `off` and `settings` are the buttons' labels. */
+data class DTelemetryNotice(val token: String, val text: String, val off: String, val settings: String) {
+    companion object {
+        fun of(o: JSONObject?): DTelemetryNotice? {
+            if (o == null) return null
+            val n = DTelemetryNotice(o.optString("token"), o.optString("text"), o.optString("off"), o.optString("settings"))
+            return if (n.token.isNotEmpty() && n.text.isNotEmpty()) n else null
+        }
+        /** telemetry.notice.act's params: shown, close or off */
+        fun act(token: String, action: String): JSONObject = JSONObject().put("token", token).put("action", action)
     }
 }

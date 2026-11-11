@@ -42,6 +42,8 @@ pub mod proposal;
 pub mod secret;
 pub mod set;
 pub mod telemetry;
+pub mod telemetry_send;
+pub mod telemetry_usage;
 pub mod vault;
 pub mod webhook;
 pub mod zone;
@@ -88,6 +90,7 @@ mod read_tests {
 pub fn start(hub: Arc<Hub>, agents: Option<Arc<crate::agents::Agents>>) {
     hub.register_rpc(Arc::new(set::SettingSet { agents: agents.clone() }));
     hub.register_rpc(Arc::new(telemetry::TelemetryRpc));
+    telemetry_send::start(&hub); // the sender: nothing runs in a build with no baked endpoint and key (docs/telemetry.md)
     hub.register_rpc(Arc::new(diagnostics::DiagnosticsRpc));
     hub.register_rpc(Arc::new(zone::ZoneRpc));
     let _desks = alerts::start(&hub);
