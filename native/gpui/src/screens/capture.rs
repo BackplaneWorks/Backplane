@@ -59,7 +59,7 @@ pub fn shot_args(xid: u32, display: &str, out: &Path) -> Vec<String> {
 /// The recording: even sides (VP8 wants them), 15 fps, no audio, 120 s, under 9 MiB.
 pub fn record_args(xid: u32, display: &str, out: &Path) -> Vec<String> {
     ["-y", "-hide_banner", "-loglevel", "error", "-f", "x11grab", "-draw_mouse", "0", "-framerate", &FPS.to_string(), "-window_id", &xid.to_string(), "-i", display, "-an",
-     "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2", "-c:v", "libvpx", "-b:v", "512k", "-deadline", "realtime", "-cpu-used", "8", "-t", &MAX_SECS.to_string(), "-fs", &FILE_CAP.to_string()]
+     "-vf", "pad=ceil(iw/2)*2:ceil(ih/2)*2", "-pix_fmt", "yuv420p", "-c:v", "libvpx", "-b:v", "512k", "-deadline", "realtime", "-cpu-used", "8", "-t", &MAX_SECS.to_string(), "-fs", &FILE_CAP.to_string()]
         .iter().map(|s| s.to_string()).chain([out.to_string_lossy().into_owned()]).collect()
 }
 
@@ -89,7 +89,8 @@ impl Recording {
     pub fn start(xid: u32, out: &Path) -> Result<Self, String> {
         let (bin, disp) = (ffmpeg()?, display()?);
         let _ = std::fs::remove_file(out);
-        /* i18n-ok: English here, in the catalog for where improvements.rs draws it */ let child = Command::new(bin).args(record_args(xid, &disp, out)).stdin(Stdio::piped()).stdout(Stdio::null()).stderr(Stdio::null()).spawn().map_err(|_| "ffmpeg did not start.".to_string())?;
+        /* i18n-ok: English here, in the catalog for where improvements.rs draws it */ let log = std::fs::File::create(out.with_extension("log")).map_or_else(|_| Stdio::null(), Stdio::from);
+        let child = Command::new(bin).args(record_args(xid, &disp, out)).stdin(Stdio::piped()).stdout(Stdio::null()).stderr(log).spawn().map_err(|_| "ffmpeg did not start.".to_string())?;
         Ok(Self { child, path: out.to_path_buf(), started: Instant::now() })
     }
     pub fn elapsed(&self) -> Duration { self.started.elapsed() }
@@ -104,7 +105,12 @@ impl Recording {
         while Instant::now() < end { if !matches!(self.child.try_wait(), Ok(None)) { break; } std::thread::sleep(Duration::from_millis(50)); }
         if matches!(self.child.try_wait(), Ok(None)) { let _ = self.child.kill(); let _ = self.child.wait(); }
         let ms = self.started.elapsed().as_millis() as u64;
-        /* i18n-ok: English here, in the catalog for where improvements.rs draws it */ if is_webm(&self.path) { Ok(ms.min(MAX_SECS as u64 * 1000)) } else { let _ = std::fs::remove_file(&self.path); Err("Recording failed or went over the size limit. Record a shorter clip.".into()) }
+        /* i18n-ok: English here, in the catalog for where improvements.rs draws it */ if is_webm(&self.path) { Ok(ms.min(MAX_SECS as u64 * 1000)) } else { let _ = std::fs::remove_file(&self.path); Err(self.why()) }
+    }
+    /// Why it failed: ffmpeg's last line when it said one, else the usual reasons.
+    fn why(&self) -> String {
+        let last = std::fs::read_to_string(self.path.with_extension("log")).ok().and_then(|t| t.lines().rev().find(|l| !l.trim().is_empty()).map(|l| l.trim().chars().take(160).collect::<String>()));
+        /* i18n-ok: English here, in the catalog for where improvements.rs draws it */ match last { Some(l) => format!("Recording failed: {l}"), None => "Recording failed or went over the size limit. Record a shorter clip.".into() }
     }
     /// Cancel: end ffmpeg and delete whatever it wrote.
     pub fn cancel(mut self) { let _ = self.child.kill(); let _ = self.child.wait(); let _ = std::fs::remove_file(&self.path); }
