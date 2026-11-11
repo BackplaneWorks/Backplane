@@ -82,7 +82,7 @@ impl JobGuard { fn new(a: &Arc<Agents>) -> JobGuard { a.stats.jobs.fetch_add(1, 
 impl Drop for JobGuard { fn drop(&mut self) { self.0.stats.jobs.fetch_sub(1, Relaxed); } }
 pub fn handle() -> Option<Arc<Agents>> { HANDLE.get().cloned() }
 
-pub struct Agents { pub hist_ends: StdMutex<HashMap<String, Arc<HistEnds>>>, pub guards: locks::Guards, carry_gone: std::sync::atomic::AtomicBool, pub copy_point: StdMutex<(Vec<(String, String, bool)>, Vec<String>)>, pub works: StdMutex<HashMap<String, work::Ctl>>, pub work_lock: tokio::sync::Mutex<()>, pub tool_sets: StdMutex<Vec<Arc<dyn mcp::ToolSet>>>, pub stopped_by: StdMutex<HashMap<String, String>>, pub hub: Arc<Hub>, pub cli: Cli, pub host: host::HostInfo, world: Mutex<World>, actors: StdMutex<HashMap<String, mpsc::Sender<Cmd>>>, pub stats: Stats, n: AtomicU64,
+pub struct Agents { pub hist_ends: StdMutex<HashMap<String, Arc<HistEnds>>>, pub guards: locks::Guards, carry_gone: std::sync::atomic::AtomicBool, carrying: std::sync::atomic::AtomicUsize, pub copy_point: StdMutex<(Vec<(String, String, bool)>, Vec<String>)>, pub works: StdMutex<HashMap<String, work::Ctl>>, pub work_lock: tokio::sync::Mutex<()>, pub tool_sets: StdMutex<Vec<Arc<dyn mcp::ToolSet>>>, pub stopped_by: StdMutex<HashMap<String, String>>, pub hub: Arc<Hub>, pub cli: Cli, pub host: host::HostInfo, world: Mutex<World>, actors: StdMutex<HashMap<String, mpsc::Sender<Cmd>>>, pub stats: Stats, n: AtomicU64,
     pub driver_asks: StdMutex<HashMap<String, String>>, pub mcp: std::sync::OnceLock<Arc<mcp::Mcp>>, gens: StdMutex<HashMap<String, String>>, pub parked: StdMutex<HashMap<String, mcp::Parked>>, pub order_asks: StdMutex<HashMap<String, crate::settings::order::Asked>>, pub mailroom: std::sync::OnceLock<Arc<dyn mailroom::Mailroom>>, /** the account manager (set by the accounts mod): a thread bound to a named account is launched through it */ pub accounts: std::sync::OnceLock<Arc<crate::settings::accounts_io::Accounts>>, cut: StdMutex<Vec<String>> }
 
 pub fn now_s() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) }
@@ -107,7 +107,7 @@ impl Agents {
     pub async fn start_with(hub: Arc<Hub>, cli: Cli) -> Result<Arc<Agents>> { Agents::start_host(hub, cli, host::HostInfo::default()).await }
     pub async fn start_host(hub: Arc<Hub>, cli: Cli, host: host::HostInfo) -> Result<Arc<Agents>> {
         let no_dir = cli.dir().is_none();
-        let ag = Arc::new(Agents { hist_ends: Default::default(), guards: Default::default(), carry_gone: Default::default(), hub: hub.clone(), cli, host, world: Mutex::new(crate::ckpt::take("agents", &hub.store, || World::load(&hub.store)).unwrap_or_default()), actors: StdMutex::new(HashMap::new()), stats: Stats::default(), n: AtomicU64::new(0),
+        let ag = Arc::new(Agents { hist_ends: Default::default(), guards: Default::default(), carry_gone: Default::default(), carrying: Default::default(), hub: hub.clone(), cli, host, world: Mutex::new(crate::ckpt::take("agents", &hub.store, || World::load(&hub.store)).unwrap_or_default()), actors: StdMutex::new(HashMap::new()), stats: Stats::default(), n: AtomicU64::new(0),
             mailroom: Default::default(), accounts: std::sync::OnceLock::new(), cut: StdMutex::new(vec![]), driver_asks: StdMutex::new(HashMap::new()), order_asks: StdMutex::new(HashMap::new()), stopped_by: StdMutex::new(HashMap::new()), tool_sets: StdMutex::new(vec![]), works: StdMutex::new(HashMap::new()), copy_point: StdMutex::new((vec![], vec![])), work_lock: tokio::sync::Mutex::new(()), mcp: std::sync::OnceLock::new(), gens: StdMutex::new(HashMap::new()), parked: StdMutex::new(HashMap::new()) });
         ag.world.lock().await.home = hub.cfg.home.to_string_lossy().into_owned();
         // reap BEFORE the owner mark is set: marked children of this process (another test's, in a shared test binary) must not be taken for a dead hub's
@@ -191,7 +191,10 @@ impl Agents {
     /// Every actor ends and takes its process (and the process's group) with it.
     /// No further turn of the restart's line is carried on (the ones already started run on). The restart-storm test calls it before it restarts the hub, so no carry lands in the
     /// instant before the cut (one carried and cut before it did anything is left stopped by design, world.rs carry_twice_once).
-    pub fn carry_hold(&self) { self.carry_gone.store(true, Relaxed) }
+    pub fn carry_hold(&self) { self.carry_gone.store(true, std::sync::atomic::Ordering::SeqCst) }
+    /// How many turns of the restart's line are being carried on right now (their message may not be in the log yet). After `carry_hold` it only falls: a carry that had not begun
+    /// when the hold was set ends at once, so zero means every carry there will be is already in the log.
+    pub fn carrying(&self) -> usize { self.carrying.load(std::sync::atomic::Ordering::SeqCst) }
     pub fn shutdown(&self) { self.carry_gone.store(true, Relaxed); self.actors.lock().unwrap().clear(); }
     pub fn actors(&self) -> usize { self.actors.lock().unwrap().len() }
 
@@ -354,6 +357,11 @@ impl Agents {
         if waits { self.task_end(th, "interrupted").await; self.launch_tell(th, &[json!({"$":"TurnChanged","thread":th,"state":"interrupted","at":now_s()})], "").await }
     }
     async fn carry_on(self: &Arc<Self>, th: &str) {
+        // counted before the hold is looked at (both SeqCst): a hold set after this count sees it, one set before is seen here
+        use std::sync::atomic::Ordering::SeqCst;
+        struct Done<'a>(&'a std::sync::atomic::AtomicUsize); impl Drop for Done<'_> { fn drop(&mut self) { self.0.fetch_sub(1, SeqCst); } }
+        self.carrying.fetch_add(1, SeqCst); let _done = Done(&self.carrying);
+        if self.carry_gone.load(SeqCst) { return }
         let now = now_s(); let id = hub_id("c", now, self.seq());
         let note = json!({"$":"ActivityLogged","thread":th,"act":hub_id("r", now, self.seq()),"tone":"info","kind":"restart","summary":"Continuing after the restart","at":now});
         let waited = self.world().await.setting(&wait_key(th)) == "1";

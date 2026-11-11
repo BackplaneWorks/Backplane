@@ -211,13 +211,16 @@ async fn a_storm_of_twenty_restarts_mid_turn_never_fails_a_start_on_the_accounts
         loop {
             // past the first look, no further carry starts: the restart comes only once the carried set has stopped growing and every one of them has said something
             if !held && t0.elapsed() > Duration::from_millis(700) { up.ag.carry_hold(); held = true; steady = Instant::now(); }
+            // taken before the log: once held, a carry still on its way is counted, and zero before the look means every carry there will be is in the look. (A carry that was posted
+            // after the steady window, on a loaded box with the account's slow check, was cut before it said anything and left stopped by design: the stuck threads of the final wait.)
+            let drained = held && up.ag.carrying() == 0;
             let ev = log(&up.hub); let since = &ev[up.from..];
             // the carried threads from the same snapshot as `since` (a second look at the log may see a carry the first did not, and the search below would find none)
             let c: Vec<String> = since.iter().filter(|e| e["$"] == "MessagePosted" && e["role"] == "user" && e["text"].as_str().unwrap_or("").starts_with(crate::agents::world::CARRY_TEXT)).filter_map(|e| e["thread"].as_str().map(str::to_string)).collect();
             let busy = c.iter().all(|th| { let at = since.iter().rposition(|e| e["$"] == "MessagePosted" && e["thread"] == th.as_str() && e["text"].as_str().unwrap_or("").starts_with(crate::agents::world::CARRY_TEXT)).unwrap(); since[at..].iter().any(|e| e["$"] == "MessagePosted" && e["thread"] == th.as_str() && e["role"] == "assistant") });
             let mailed = since.iter().any(|e| e["$"] == "MessagePosted" && e["msg"] == format!("mail-{r}").as_str());
             if c.len() != last_n { last_n = c.len(); steady = Instant::now(); }
-            if held && busy && mailed && !c.is_empty() && steady.elapsed() > Duration::from_millis(400) { break }
+            if drained && busy && mailed && !c.is_empty() && steady.elapsed() > Duration::from_millis(400) { break }
             assert!(t0.elapsed() < Duration::from_secs(300), "restart {r}: the carried turns never got going: {c:?} {:?}", lines(&up.hub, BUB_T));
             tokio::time::sleep(Duration::from_millis(50)).await;
         }

@@ -104,7 +104,9 @@ async fn setup(name: &str) -> (Arc<Hub>, Arc<Driver>, PathBuf) {
 
 #[tokio::test] async fn runs_beyond_the_newest_twenty_are_pruned() {
     let dir = std::env::temp_dir().join(format!("bp-prune-{}", std::process::id())); let _ = std::fs::remove_dir_all(&dir);
-    for i in 0..25 { std::fs::create_dir_all(dir.join(format!("r{i:02}"))).unwrap(); std::thread::sleep(Duration::from_millis(15)) }
+    // the order is set, not left to the clock: each folder's modification time is an explicit second apart (r00 oldest), so a loaded machine cannot tie or reorder them
+    let base = std::time::SystemTime::now() - Duration::from_secs(3600);
+    for i in 0..25 { let p = dir.join(format!("r{i:02}")); std::fs::create_dir_all(&p).unwrap(); std::fs::File::open(&p).unwrap().set_modified(base + Duration::from_secs(i)).unwrap() }
     prune(&dir, KEEP_RUNS); let mut left: Vec<String> = std::fs::read_dir(&dir).unwrap().map(|e| e.unwrap().file_name().to_string_lossy().into_owned()).collect(); left.sort();
     assert_eq!(left.len(), 20); assert_eq!(left[0], "r05"); assert_eq!(left[19], "r24");
 }
