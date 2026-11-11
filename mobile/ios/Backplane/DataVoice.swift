@@ -365,29 +365,8 @@ struct DPageRows: View {
         VStack(alignment: .leading, spacing: 10) {
             DHeading(text: title)
             ForEach(rows) { r in
-                VStack(alignment: .leading, spacing: 6) {
-                    Text(Tr.t(r.label)).dmono(13)
-                    let note = errors[r.id] ?? r.note
-                    if !note.isEmpty { Text(Tr.t(note)).dmono(11).foregroundStyle(errors[r.id] != nil || r.tone == "bad" ? BackplaneDesign.bad : r.tone == "warn" ? BackplaneDesign.warn : BackplaneDesign.dim) }
-                    if let t = told[r.id] { Text(t).dmono(11).foregroundStyle(BackplaneDesign.dim).accessibilityIdentifier(idPrefix + ".told") }
-                    if !r.qr.isEmpty { DQRCode(rows: r.qr).accessibilityIdentifier(idPrefix + ".qr") }
-                    if !r.qrnote.isEmpty { Text(Tr.t(r.qrnote)).dmono(12).foregroundStyle(BackplaneDesign.dim).textSelection(.enabled) }
-                    ForEach(r.fields, id: \.name) { f in
-                        Group {
-                            if f.secret { SecureField(Tr.t(f.hint), text: binding(f)) } else { TextField(Tr.t(f.hint), text: binding(f)) }
-                        }
-                        .dmono(13).textInputAutocapitalization(.never).autocorrectionDisabled()
-                        .padding(.horizontal, 10).frame(minHeight: 40).dbox()
-                        .accessibilityIdentifier(idPrefix + ".field." + f.name)
-                    }
-                    if !r.buttons.isEmpty {
-                        FlowRow(spacing: 6) {
-                            ForEach(Array(r.buttons.enumerated()), id: \.offset) { _, b in
-                                Button(Tr.t(b.label)) { press(r, b) }.buttonStyle(DButton(primary: b.on)).accessibilityAddTraits(b.on ? .isSelected : []).accessibilityIdentifier(idPrefix + ".page." + b.action)
-                            }
-                        }
-                    }
-                }
+                DPageRowView(row: r, idPrefix: idPrefix, note: errors[r.id] ?? r.note, noteTone: errors[r.id] != nil ? "bad" : r.tone, told: told[r.id],
+                             text: { binding($0) }, press: { press(r, $0) })
             }
             if rows.isEmpty, !empty.isEmpty { Text(empty).dmono(11).foregroundStyle(BackplaneDesign.dim) }
         }
@@ -401,6 +380,44 @@ struct DPageRows: View {
             let err = await act(r, b, fields)
             errors[r.id] = err.isEmpty ? nil : err
             if err.isEmpty { for f in r.fields { typed[f.name] = nil } }
+        }
+    }
+}
+
+/// One of those rows: its label, note (in its tone), what a press said, a code, its fields and its buttons. `compact`: smaller buttons, for a row
+/// drawn inside a card (Settings > MCP servers).
+struct DPageRowView: View {
+    let row: DVoiceRow
+    let idPrefix: String
+    let note: String
+    let noteTone: String
+    let told: String?
+    var compact = false
+    let text: (DVoiceField) -> Binding<String>
+    let press: ((label: String, action: String, value: String, on: Bool)) -> Void
+    var body: some View {
+        let r = row
+        VStack(alignment: .leading, spacing: 6) {
+            Text(Tr.t(r.label)).dmono(13)
+            if !note.isEmpty { Text(Tr.t(note)).dmono(11).foregroundStyle(noteTone == "bad" ? BackplaneDesign.bad : noteTone == "warn" ? BackplaneDesign.warn : BackplaneDesign.dim).fixedSize(horizontal: false, vertical: true) }
+            if let t = told { Text(t).dmono(11).foregroundStyle(BackplaneDesign.dim).accessibilityIdentifier(idPrefix + ".told") }
+            if !r.qr.isEmpty { DQRCode(rows: r.qr).accessibilityIdentifier(idPrefix + ".qr") }
+            if !r.qrnote.isEmpty { Text(Tr.t(r.qrnote)).dmono(12).foregroundStyle(BackplaneDesign.dim).textSelection(.enabled) }
+            ForEach(r.fields, id: \.name) { f in
+                Group {
+                    if f.secret { SecureField(Tr.t(f.hint), text: text(f)) } else { TextField(Tr.t(f.hint), text: text(f)) }
+                }
+                .dmono(13).textInputAutocapitalization(.never).autocorrectionDisabled()
+                .padding(.horizontal, 10).frame(minHeight: 40).dbox()
+                .accessibilityIdentifier(idPrefix + ".field." + f.name)
+            }
+            if !r.buttons.isEmpty {
+                FlowRow(spacing: 6) {
+                    ForEach(Array(r.buttons.enumerated()), id: \.offset) { _, b in
+                        Button(Tr.t(b.label)) { press(b) }.buttonStyle(DButton(primary: b.on, compact: compact)).accessibilityAddTraits(b.on ? .isSelected : []).accessibilityIdentifier(idPrefix + ".page." + b.action)
+                    }
+                }
+            }
         }
     }
 }

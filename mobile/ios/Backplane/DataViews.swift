@@ -190,7 +190,7 @@ struct DataThreadsView: View {
             if let t = client.threads.first(where: { $0.id == r.id }) { DataViewerView(client: client, thread: t, openFile: r.file, line: r.line) }
             else { DLoading(text: Tr.t(client.conn == .online ? "Loading the thread…" : "Connecting to the hub…")) } // never a blank page while the thread list comes
         }
-        .navigationDestination(for: DPage.self) { p in if p.name == "settings" { DataSettingsView(client: client) } else if p.name == "hub" { DataHubView(client: client) } else if p.name == "accounts" { DataAccountsView(client: client) } else { DataImprovementsView(client: client) } }
+        .navigationDestination(for: DPage.self) { p in if p.name == "settings" { DataSettingsView(client: client) } else if p.name == "hub" { DataHubView(client: client) } else if p.name == "accounts" { DataAccountsView(client: client) } else if p.name == "mcp" { DataMcpView(client: client) } else { DataImprovementsView(client: client) } }
         .navigationDestination(for: DAccountRoute.self) { DataAccountView(client: client, route: $0) }
         .navigationDestination(for: DTermsRoute.self) { DataTermsView(client: client, project: $0.project) }
         .modifier(DataThreadDialogs(client: client, renaming: $renaming, deleting: $deleting))
@@ -1387,6 +1387,7 @@ struct DataSettingsView: View {
                 }
                 NavigationLink(value: DPage(name: "hub")) { Text(Tr.t("Hub")) }.buttonStyle(DButton()).accessibilityIdentifier("settings.hub")
                 if client.has("accounts") { NavigationLink(value: DPage(name: "accounts")) { Text(Tr.t("Accounts")) }.buttonStyle(DButton()).accessibilityIdentifier("settings.accounts") }
+                if client.has("mcpsettings") { NavigationLink(value: DPage(name: "mcp")) { Text(Tr.t("MCP servers")) }.buttonStyle(DButton()).accessibilityIdentifier("settings.mcp") }
                 DLine()
                 DataUpdateSection(client: client)
                 DLine()
