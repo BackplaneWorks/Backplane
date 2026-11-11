@@ -502,9 +502,20 @@ fn writing(st: &State, info: &Value) -> Vec<Value> {
 pub fn install_row(session: &Value, info: &Value, pkg: Option<&crate::files::kicad::install::Package>) -> Option<Value> {
     use crate::files::kicad::install::FROM;
     let i = |k: &str| info[k].as_str().unwrap_or("");
-    if !i("kicad.cli").is_empty() || i("kicad.status") == "checking" { return None }
+    if i("kicad.status") == "checking" { return None }
     let st: Value = serde_json::from_str(i("kicad.install")).unwrap_or_default();
     let (state, note) = (st["state"].as_str().unwrap_or(""), st["note"].as_str().unwrap_or(""));
+    // a Backplane KiCad found: the row only while it is an older build of the published one (the update), or while that update runs
+    if !i("kicad.cli").is_empty() {
+        let Some(p) = pkg.filter(|p| i("kicad.status") == "ok" && crate::files::kicad::install::older(i("kicad.version"), p)) else { return None };
+        return Some(match state {
+            "running" => row(&format!("Updating to Backplane KiCad {}", p.version), if note.is_empty() { "Starting." } else { note }, vec![]),
+            _ if draft(session, "@kinstall") == "ask" => row("Update Backplane KiCad?", &format!("Downloads Backplane KiCad {} (about 1 GB) from {FROM} and puts it beside {}, which stays. It brings the KiCad editor inside Backplane's viewer (Edit).", p.version, i("kicad.version")),
+                vec![btn("Update", "kicad-install", "", true), btn("Cancel", "kicad-install-cancel", "", false)]),
+            "failed" => row("Update Backplane KiCad", &format!("{note}."), vec![btn("Try again", "kicad-install-ask", "", true)]),
+            _ => row("Update Backplane KiCad", &format!("Backplane KiCad {} is out; this computer has {}. It brings the KiCad editor inside Backplane's viewer (Edit).", p.version, i("kicad.version")), vec![btn("Update KiCad", "kicad-install-ask", "", true)]),
+        });
+    }
     let Some(p) = pkg else { return Some(row("Install KiCad", &format!("No Backplane KiCad is published for this computer ({}). Install KiCad from kicad.org, then set its path above.", crate::files::kicad::install::this_computer()), vec![])) };
     let home = i("home"); let into = if home.is_empty() { "Backplane's own folder".to_string() } else { format!("{home}/kicad") };
     Some(match state {

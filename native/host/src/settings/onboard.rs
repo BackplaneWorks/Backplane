@@ -150,7 +150,7 @@ impl OnboardRpc {
         let info = hub.info_now();
         let state: Value = serde_json::from_str(info["kicad.install"].as_str().unwrap_or("")).unwrap_or_default();
         let Some(p) = package() else { return };
-        if decide(Some(p), info["kicad.status"].as_str().unwrap_or(""), state["state"].as_str().unwrap_or("")) != Action::Auto { return }
+        if decide(Some(p), info["kicad.status"].as_str().unwrap_or(""), info["kicad.version"].as_str().unwrap_or(""), state["state"].as_str().unwrap_or("")) != Action::Auto { return }
         if hub.setting("onboard.kicad.auto").await.as_deref() == Some(p.version) { return }
         let _ = hub.commit(&json!({"$":"SettingSet","key":"onboard.kicad.auto","value":p.version,"at":now_ms() / 1000})).await;
         if let Err(why) = crate::files::kicad::install::install(hub, true).await { eprintln!("setup: KiCad install not started: {why}"); }
