@@ -303,7 +303,7 @@ struct DataThreadsView: View {
                 ForEach(s.rows) { r in
                     // a swarm that waits on the person opens the swarm's page
                     if let room = r.swarmRoom { DataSectionThread(r: r) { _ in path.append(DSwarmRoute(id: room, name: r.title)) }.dataRow() }
-                    else { DataSectionThread(r: r, quiet: r.want == "failed" || r.want == "stopped") { path.append($0) }.dataRow() }
+                    else { DataSectionThread(r: r, quiet: r.want == "failed" || r.want == "stopped") { path.append($0) }.farHide(r, client).dataRow() }
                 }
             } else {
                 ForEach(s.rows) { r in
@@ -316,7 +316,7 @@ struct DataThreadsView: View {
                         }
                     // its live swarms (the client's own rows, feature swarm), above its threads; their members have no rows
                     if client.has("swarm") { ForEach(Swarm.listed(client.swarms, project: r.id).filter { x in !(client.sections.first { $0.id == "needs" }?.rows.contains { $0.swarmRoom == x.id } ?? false) }) { x in DataSwarmRow(row: x) { path.append(DSwarmRoute(id: x.id, name: x.name)) }.dataRow() } }
-                    ForEach(r.threads) { t in DataSectionThread(r: t, indent: 34) { path.append($0) }.dataRow() }
+                    ForEach(r.threads) { t in DataSectionThread(r: t, indent: 34) { path.append($0) }.farHide(t, client).dataRow() }
                 }
             }
         }

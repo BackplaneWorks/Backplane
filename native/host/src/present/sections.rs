@@ -39,7 +39,29 @@ fn listed(f: &Th) -> bool { !f.t.archived || f.word == "needs" }
 fn word_of(s: &str) -> &'static str {
     match s { "needs" => "needs", "running" => "running", "limit" => "limit", "failed" => "failed", "cut" => "cut", "interrupted" => "interrupted", "monitoring" => "monitoring", "done" => "done", _ => "idle" }
 }
-fn facts<'a>(t: &'a MergedThread<'a>) -> Th<'a> {
+/// Another machine's thread as the sections believe it (D11 for a mirror): a machine that is away or off runs nothing the person can see, so its
+/// live words (running, monitoring, a usage hold) are not believed; and what it last said is believed for ACTIVE only: a thread there quiet for
+/// longer leaves the sidebar and Needs you, as a local one settles out of them (it stays on the project page and in Ctrl+K). This machine's own
+/// threads are never touched. Pure.
+pub fn far_word(word: &'static str, away: bool, quiet_for: u64) -> &'static str {
+    if quiet_for > ACTIVE && word != "done" { return "idle" }
+    if away && matches!(word, "running" | "monitoring" | "limit") { return "idle" }
+    word
+}
+/// When the person hid another machine's thread here (`sidebar.hide.<id>`, s; 0 for never). Hide is this machine's: it asks nothing of that
+/// machine (which may be away), and the thread comes back by itself when anything new happens there (its activity passes the mark).
+pub fn hidden_at(st: &State, id: &str) -> u64 { num(st, &format!("sidebar.hide.{id}")) }
+fn facts<'a>(st: &State, p: &MergedProject, t: &'a MergedThread<'a>, now: u64) -> Th<'a> {
+    let mut f = facts_here(t);
+    if !t.machine.is_empty() {
+        let away = p.machines.iter().any(|m| m["name"].as_str() == Some(t.machine.as_str()) && m["dim"] == true);
+        let hid = hidden_at(st, &t.id) >= t.activity.max(1);
+        let w = if hid { "idle" } else { far_word(f.word, away, now.saturating_sub(t.activity)) };
+        if w != f.word { f.word = w; f.show = visible_word(w, t.pinned); f.needs = false; }
+    }
+    f
+}
+fn facts_here<'a>(t: &'a MergedThread<'a>) -> Th<'a> {
     match t.src {
         Some(st) => {
             let w = status(st, &t.id); let lk = looked(st, &t.id); let se = settled(st, &t.id);
@@ -83,8 +105,11 @@ fn thread_row(hub: &str, now: u64, p: &MergedProject, f: &Th) -> Value {
     json!({"id":qid(hub,&t.id),"title":if t.title.is_empty() { "New thread" } else { t.title.as_str() },"word":f.word,"say":say(f.word),"want":want(t,f.word),
         "status":dot_word(f.word),"state":turn_word(f.word),"depth":0,"children":0,"expanded":false,"agents":"",
         "ago":crate::sidebar::ago(now,t.activity),"activity":t.activity,"pinned":t.pinned,"machine":t.machine,"mark":mark_of(p,&t.machine),
-        "project":p.name,"projectKey":p.key,"off":off,"nav":if off { String::new() } else { qid(hub,&t.id) }})
+        "project":p.name,"projectKey":p.key,"off":off,"nav":if off { String::new() } else { qid(hub,&t.id) },
+        // another machine's thread can be hidden here (its menu's first item on the desktop, a long press on the phones)
+        "hide":hide_of(hub,t),"lead":if hide_of(hub,t).is_empty() { json!([]) } else { json!([{"label":"Hide","action":"thread-hide","value":hide_of(hub,t),"tone":"settle","options":[]}]) }})
 }
+fn hide_of(hub: &str, t: &MergedThread) -> String { if t.machine.is_empty() { String::new() } else { qid(hub, &t.id) } }
 
 // ---- groups -----------------------------------------------------------------------------------------------------------------
 /// A project's automatic group: its git owner (`owner:github.com/acme`), else its folder's parent (`folder:/home/h/Documents/Acme`), with the
@@ -167,7 +192,7 @@ fn text_of<'a>(v: &'a Value, k: &str) -> &'a str { v[k].as_str().unwrap_or("") }
 fn project_row(st: &State, c: &Ctx, p: &MergedProject, ths: &[Th], gid: &str) -> Value {
     let mut r = super::merged::row_json(p);
     // what runs: a turn running (one that also asks the person counts here and in Needs you), work it owns, a turn held for a reset
-    let running = ths.iter().filter(|f| matches!(f.word, "running" | "monitoring" | "limit") || f.t.src.map_or(false, |s| s.threads.get(&f.t.id).map_or(false, |x| x.turn == Turn::Running))).count();
+    let running = ths.iter().filter(|f| matches!(f.word, "running" | "monitoring" | "limit") || (f.word == "needs" && f.t.src.map_or(false, |s| s.threads.get(&f.t.id).map_or(false, |x| x.turn == Turn::Running)))).count();
     let needs = ths.iter().filter(|f| f.needs).count();
     let q = c.query;
     let shown: Vec<&Th> = ths.iter().filter(|f| if q.is_empty() { f.show && !f.needs && !f.kid } else { crate::sidebar::word_hit(&f.t.title, q) }).collect();
@@ -198,7 +223,7 @@ fn fold_section(id: &str, title: &str, rows: Vec<Value>, c: &Ctx, extra: Value) 
 
 /// The sections, top to bottom. `bub` is the uberbot's sidebar row (screen.rs `bots`), or null.
 pub fn build(st: &State, rows: &[MergedProject], bub: &Value, c: &Ctx) -> Value {
-    let facts_of: Vec<Vec<Th>> = rows.iter().map(|p| p.threads.iter().map(facts).filter(listed).collect()).collect();
+    let facts_of: Vec<Vec<Th>> = rows.iter().map(|p| p.threads.iter().map(|t| facts(st, p, t, c.now)).filter(listed).collect()).collect();
     let mut out = vec![];
     if bub.is_object() { out.push(json!({"id":"bub","kind":"bub","title":"","rows":[bub]})); }
     // Needs you: every machine's, approvals first, then questions, then stops, newest first within each
@@ -217,7 +242,8 @@ pub fn build(st: &State, rows: &[MergedProject], bub: &Value, c: &Ctx) -> Value 
     { let listed: HashSet<&str> = rows.iter().flat_map(|p| p.threads.iter().map(|t| t.id.as_str())).collect();
       let mut states: Vec<(&State, String)> = vec![(st, String::new())];
       for p in rows { for t in &p.threads { if let Some(s) = t.src { if !t.machine.is_empty() && !states.iter().any(|(x, _)| std::ptr::eq(*x, s)) { states.push((s, t.machine.clone())); } } } }
-      for (s, machine) in states { for (id, t) in s.threads.iter().filter(|(id, t)| !t.deleted && !listed.contains(id.as_str()) && wants_person(s, id)) {
+      for (s, machine) in states { // (another machine's ask is believed for ACTIVE, as `far_word` has it)
+      for (id, t) in s.threads.iter().filter(|(id, t)| !t.deleted && !listed.contains(id.as_str()) && wants_person(s, id) && (machine.is_empty() || (far_word("needs", false, c.now.saturating_sub(t.activity)) == "needs" && hidden_at(st, id) < t.activity.max(1)))) {
           let place = s.bots_nav.values().find(|b| &b.thread == id).map(|b| b.name.clone()).unwrap_or_else(|| "Conversation history".into());
           if !c.query.is_empty() && !hit(&t.title, c.query) && !hit(&place, c.query) { continue }
           let mt = MergedThread { machine: machine.clone(), id: id.clone(), title: t.title.clone(), activity: t.activity, pinned: t.pinned, archived: t.archived, src: Some(s), status: String::new() };
@@ -266,7 +292,7 @@ pub fn move_targets(st: &State, rows: &[MergedProject]) -> Value {
 /// A project's page: running, then needs you, then recent, then done behind "Done (n)". `done_open`: the person opened Done.
 pub fn page(st: &State, rows: &[MergedProject], key: &str, c: &Ctx, done_open: bool) -> Value {
     let Some(p) = rows.iter().find(|p| p.key == key) else { return Value::Null };
-    let ths: Vec<Th> = p.threads.iter().map(facts).filter(listed).collect();
+    let ths: Vec<Th> = p.threads.iter().map(|t| facts(st, p, t, c.now)).filter(listed).collect();
     let (mut running, mut needs, mut recent, mut done) = (vec![], vec![], vec![], vec![]);
     for (r, w) in swarms_of(p, c) { if w == "running" { running.push(r) } else { needs.push(r) } } // its live swarms, as on the sidebar
     for f in &ths {
@@ -300,7 +326,7 @@ pub fn jump(rows: &[MergedProject], c: &Ctx) -> Value {
         // its live swarms: a jump opens the swarm's page (its room)
         for (r, w) in swarms_of(p, c) { v.push((if w == "running" { 1 } else { 0 }, r["activity"].as_u64().unwrap_or(0), json!({"kind":"swarm","label":r["title"],"place":p.name,"action":"room","value":qid(c.hub, text_of(&r, "nav").trim_start_matches("@room:")),"word":w,"status":r["status"],"want":r["want"]}))); }
         for t in &p.threads {
-            let f = facts(t); if !listed(&f) { continue }
+            let f = facts(&State::new(), p, t, c.now); if !listed(&f) { continue } // (a thread hidden here is still found)
             let place = match &t.src { Some(_) if t.machine.is_empty() => p.name.clone(), _ => format!("{} · {}", p.name, crate::mirror::short_name(&t.machine)) };
             let rank = if f.needs { 0 } else if f.show { 1 } else { 3 };
             v.push((rank, t.activity, json!({"kind":"thread","label":if t.title.is_empty() { "New thread" } else { t.title.as_str() },"place":place,"word":f.word,"status":dot_word(f.word),"state":turn_word(f.word),"want":want(t,f.word),
@@ -321,6 +347,12 @@ pub fn act(st: &State, rows: &[MergedProject], action: &str, value: &str, drafts
         // a section's fold (Groups, Quiet) and the project page's Done (n)
         "side-section" => { if !(value.starts_with("sec:group:") || value == "sec:quiet" || value == "page-done") { return None } Some(Act { open_toggle: Some(value.into()), ..none() }) }
         "project-page" => { if !value.is_empty() && !known(value) { return None } Some(Act { page: Some(value.into()), ..none() }) }
+        // another machine's thread, hidden here until something new happens there (`hidden_at`); a local thread has Settle and Archive
+        "thread-hide" => {
+            let id = value.rsplit_once('|').map_or(value, |(_, r)| r);
+            if !crate::net::far::is(id) || !rows.iter().any(|p| p.threads.iter().any(|t| t.id == id && !t.machine.is_empty())) { return None }
+            Some(Act { sets: vec![(format!("sidebar.hide.{id}"), now.to_string())], ..none() })
+        }
         "project-pin" => { if !known(value) { return None } let on = pinned_at(st, value) > 0; Some(Act { sets: vec![(format!("sidebar.pin.{value}"), if on { String::new() } else { now.to_string() })], ..none() }) }
         // a group's name, from its rename field (`@f.group.<gid>`); an empty name gives the group back its automatic one
         "group-rename" => {

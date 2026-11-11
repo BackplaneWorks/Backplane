@@ -255,7 +255,8 @@ pub async fn act(hub: &Arc<Hub>, sh: &Arc<Shared>, action: &str, value: &str, fi
             b.delete(&id).await.or_else(|e| if e.contains("404") { Ok(()) } else if e.contains("api_key_action_forbidden") || e.contains("403") { Err("This key may delete only the Boats it made, and another key made this one. Delete it on boat.dev, or paste a key with sandbox.delete.".to_string()) } else { Err(e) })?;
             let link = sh.saved()["link"].as_str().unwrap_or("").to_string();
             if let (false, Some(p)) = (link.is_empty(), crate::net::start::peering()) {
-                if hub.commit(&json!({"$":"PeerSet","id":link,"name":"","url":"","revoked":true,"at":crate::hub::now_ms() / 1000})).await.is_ok() { p.unpeered(&link) }
+                let name = p.table.with(|t| t.peer(&link).map(|r| r.name.clone()).unwrap_or_default());
+                if hub.commit(&json!({"$":"PeerSet","id":link,"name":"","url":"","revoked":true,"at":crate::hub::now_ms() / 1000})).await.is_ok() { p.unpeered(&link); crate::net::farsync::forget_link(hub, &link, &name).await; }
             }
             save(hub, sh, |k| { *k = json!({}); }).await;
             let mut g = sh.st.lock().unwrap(); g.busy.clear(); g.steps.clear(); g.status = Value::Null; g.cost = Value::Null; g.note = format!("{id} deleted.");

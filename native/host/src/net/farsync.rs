@@ -37,6 +37,23 @@ pub fn findable(url: &str) -> bool {
 pub fn shown_names(peering: &Peering) -> Vec<(String, String)> {
     peering.table.with(|p| p.live().into_iter().filter(|r| p.verified(&r.id) && !p.sync_off(&r.name)).map(|r| (r.id, r.name)).collect())
 }
+/// A machine that is no longer linked (Remove in Settings → Machines, an invite revoked, or a link the log revoked): its mirror is dropped, files
+/// and all, its rows leave the sidebar, Needs you and the bots list (the presenter is rebuilt without them, as Fr.forget does), and the registry
+/// forgets the rows it sent under `name`. Nothing is asked of that machine.
+pub async fn forget_link(hub: &Arc<Hub>, link: &str, name: &str) {
+    let had = match hub.far() {
+        Some(f) => { let _g = hub.mirror_gate().await; let l = link.to_string(); let had = tokio::task::spawn_blocking(move || f.drop_link(&l)).await.unwrap_or(false); hub.mirrors().forget(link); had }
+        None => false,
+    };
+    if had { eprintln!("far: the mirror of {link} was dropped (no longer linked)"); let _ = hub.forget_mirror().await; }
+    if !name.is_empty() { super::registry::forget(hub, name).await; }
+    hub.mirrors().bump(); hub.mirrors().publish(hub).await; hub.bump_views();
+}
+/// The mirrors on disk of links that are gone (`Peers::gone`), once the peer table is replayed.
+pub fn gone_links(store: &FarStore, peering: &Peering) -> Vec<String> {
+    let links = store.links();
+    peering.table.with(|p| links.into_iter().filter(|l| p.gone(l)).collect())
+}
 fn items_of(o: &Value) -> Vec<Item> { o["items"].as_array().into_iter().flatten().map(Item::of).collect() }
 fn forbidden() -> HttpReply { HttpReply::text("403 Forbidden", "threads are shared with the owner's own machines") }
 

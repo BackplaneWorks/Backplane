@@ -282,6 +282,37 @@ fn names_of(list: Vec<(&str, &str)>) -> crate::mirror::Names { let l: Vec<(Strin
     b.hub.commit(&json!({"$":"SettingSet","key":format!("peer.own.{link}"),"value":"no","at":4})).await.unwrap(); settle().await;
     assert!(side(&b.hub, &own).is_empty(), "a link the owner says is not theirs is not shown");
 }
+/// (e) Remove in Settings → Machines: the machine's rows leave the views and its mirror leaves the disk; it does not come back with a start.
+#[tokio::test] async fn far_a_removed_machine_leaves_the_views_and_the_disk() {
+    let a = node("fa5", false).await; let (b, fs) = mirror("fb5").await;
+    let link = linked(&a, &b).await;
+    b.hub.set_far(fs.store.clone());
+    b.hub.mirrors().set_names({ let p = b.p.clone(); Arc::new(move || shown_names(&p)) });
+    fs.store.take(&link, "e", 0, 0, &[]).unwrap();
+    fs.take(&b.hub, &link, "e", 0, 1, vec![proj_item(999_000, "p1", "Far")]).await.unwrap();
+    let own = crate::state::State::new();
+    assert_eq!(side(&b.hub, &own).len(), 1);
+    assert!(gone_links(&fs.store, &b.p).is_empty(), "a live link's mirror is kept");
+    use crate::api::{Caller, RpcHandler};
+    let r = crate::net::peerrpc::PeerRpc(b.p.clone()).call(&b.hub, &Caller { gen: String::new(), client: 1 }, &json!(1), "machines.page.act", &json!({"action": "machine-remove", "value": link})).await.remove(0);
+    assert_eq!(r["ok"], true, "{r}"); settle().await;
+    assert!(side(&b.hub, &own).is_empty(), "its rows are gone");
+    assert!(hub_mirror_gone(&b.hub, &link), "the display mirror forgot it");
+    assert!(!fs.store.links().contains(&link) && !b.home.join(format!("far/{link}.jsonl")).exists(), "and its files");
+    assert!(!FarStore::open(&b.home).unwrap().links().contains(&link), "it does not come back after a restart");
+}
+fn hub_mirror_gone(hub: &Arc<Hub>, link: &str) -> bool { hub.mirrors().counts().iter().all(|(l, _, _)| l != link) }
+/// A mirror on disk of a link the log revoked (an invite revoked, the machine unlinked elsewhere) is found to drop, once the table is read.
+#[tokio::test] async fn far_the_mirror_of_a_revoked_link_is_gone() {
+    let a = node("fa6", false).await; let (b, fs) = mirror("fb6").await;
+    let link = linked(&a, &b).await;
+    fs.store.take(&link, "e", 0, 1, &[crate::net::far::Item::of(&thread(1, "t"))]).unwrap();
+    fs.store.take("pdeadbeefdeadbeef", "e", 0, 1, &[crate::net::far::Item::of(&thread(1, "t"))]).unwrap();
+    assert_eq!(gone_links(&fs.store, &b.p), ["pdeadbeefdeadbeef"], "never linked here");
+    b.hub.commit(&crate::net::start::unpeer_event(&link, 9)).await.unwrap(); settle().await;
+    let mut g = gone_links(&fs.store, &b.p); g.sort(); let mut want = vec![link.clone(), "pdeadbeefdeadbeef".to_string()]; want.sort();
+    assert_eq!(g, want);
+}
 /// (d) the mirror state is rebuilt after a presenter restart / forget_mirror, and a new epoch drops the old history.
 #[tokio::test] async fn far_the_display_mirror_is_rebuilt_after_forget_mirror_and_replaced_by_a_new_epoch() {
     let (hub, _spy, _order, h) = spy_hub("side-rebuild", false).await;

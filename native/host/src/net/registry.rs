@@ -92,6 +92,21 @@ pub async fn put(hub: &Hub, rows: &Value) -> Result<(), String> {
     if !ix.contains(&machine) { ix.push(machine.clone()); ev.push(json!({"$":"SettingSet","key":"registry.index","value":json!(ix).to_string(),"at":now})); }
     hub.commit_many(&ev).await.map(|_| ()).map_err(|e| e.to_string())
 }
+/// A machine that is no longer linked: the rows it sent are forgotten here, and the home (this hub, when it keeps the registry) drops its entry,
+/// so it is never drawn as a machine that is off. A name a live link still has is kept (two links, one name: the other is still linked).
+pub async fn forget(hub: &Arc<Hub>, machine: &str) {
+    let machine = machine.trim();
+    let live = crate::net::start::peering().map_or(false, |p| p.table.with(|t| t.live().iter().any(|r| r.name == machine)));
+    if machine.is_empty() || live { return }
+    received().lock().unwrap().remove(machine);
+    let mut ix = index(hub).await;
+    if ix.iter().any(|m| m == machine) {
+        ix.retain(|m| m != machine);
+        let now = crate::hub::now_ms() / 1000;
+        let _ = hub.commit_many(&[json!({"$":"SettingSet","key":key_of(machine),"value":"","at":now}), json!({"$":"SettingSet","key":"registry.index","value":json!(ix).to_string(),"at":now})]).await;
+    }
+    set_cached(merge(&with_received(all(hub).await)));
+}
 /// Every machine's rows the home holds.
 pub async fn all(hub: &Hub) -> Vec<Value> {
     let mut v = vec![];
