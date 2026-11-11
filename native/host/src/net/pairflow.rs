@@ -165,7 +165,7 @@ impl Peering {
         let Some(base) = normalize(address) else { return Err("that is not an address (like http://box.example:3787)".into()) };
         if code.trim().is_empty() { return Err("enter the code the other machine shows".into()) }
         let here = botnet::url_here(self.tailnet, &self.host, self.port).await;
-        if let Some(why) = refuse_loopback(&here, &base) { return Err(why.into()) }
+        let here = super::peering::announce(&self.home, &here, &base).await.map_err(String::from)?;
         if self.table.with(|p| p.live().iter().any(|x| machines::hostport(&x.url) == machines::hostport(&base))) { return Err("already linked to that machine".into()) }
         let (me, check) = (botnet::name().await, digits6());
         let body = json!({"code": code.trim(), "name": me, "url": here, "check": check}).to_string();

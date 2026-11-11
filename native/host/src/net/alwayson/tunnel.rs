@@ -222,7 +222,7 @@ pub fn install(hub: &Arc<Hub>, peering: Arc<crate::net::peering::Peering>) {
         ok.then(|| crate::net::botnet::peer_secret(&h1, peer))
     }), home: home.clone() }));
     let (p2, h2) = (peering.clone(), home.clone());
-    let links: Links = Arc::new(move || p2.table.with(|t| t.live().into_iter().filter(|x| t.verified(&x.id)).map(|x| (x.id.clone(), x.url.clone(), crate::net::botnet::peer_secret(&h2, &x.id))).filter(|l| !l.2.is_empty() && crate::net::botnet::url_ok(&l.1)).collect()));
+    let links: Links = Arc::new(move || p2.table.with(|t| t.live().into_iter().filter(|x| t.verified(&x.id)).map(|x| (x.id.clone(), x.url.clone(), crate::net::botnet::peer_secret(&h2, &x.id))).filter(|l| !l.2.is_empty() && crate::net::botnet::url_ok(&l.1) && !crate::net::peering::over_link(&l.1)).collect()));
     let p3 = peering;
     let here: Arc<dyn Fn() -> Fut<'static, String> + Send + Sync> = Arc::new(move || { let p = p3.clone(); Box::pin(async move { crate::net::botnet::url_here(p.tailnet, &p.host, p.port).await }) });
     start(hub, links, here);

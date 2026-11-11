@@ -110,7 +110,7 @@ impl Bots {
             let v: Value = serde_json::from_str(&t).unwrap_or(Value::Null);
             for m in v["machines"].as_array().into_iter().flatten() {
                 let (mid, url) = (gs(m, "mid"), gs(m, "url"));
-                if mid == mine || (!mid.is_empty() && self.link_of_mid(mid).is_some()) || url.is_empty() { continue }
+                if mid == mine || (!mid.is_empty() && self.link_of_mid(mid).is_some()) || url.is_empty() || crate::net::peering::over_link(url) { continue }
                 if known.iter().any(|(u, hp)| u == url || hp == crate::net::machines::hostport(url)) { continue }
                 if out.iter().any(|o| o["url"] == url) { continue }
                 out.push(json!({"via": link, "via_name": name, "name": gs(m, "name"), "url": url, "mid": mid}));

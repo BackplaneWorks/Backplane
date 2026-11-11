@@ -132,7 +132,7 @@ impl Peering {
         if !botnet::url_ok(&i.url) || !botnet::safe(&i.id) { return Err("not a usable invite".into()) }
         if self.table.with(|p| p.peer(&i.id).map_or(false, |x| !x.revoked)) { return Err("already linked to that machine".into()) }
         let here = botnet::url_here(self.tailnet, &self.host, self.port).await;
-        if let Some(why) = refuse_loopback(&here, &i.url) { return Err(why.into()) }
+        let here = announce(&self.home, &here, &i.url).await.map_err(String::from)?;
         if !botnet::peer_save(&self.home, &i.id, &i.secret) { return Err("not a usable invite".into()) }
         let me = botnet::name().await;
         let now = (self.now)();
@@ -159,6 +159,19 @@ fn bearer_or_cookie_or_query(r: &PReq) -> String {
     let c = r.header("cookie").split(';').find_map(|c| c.trim().strip_prefix("bp_token=").map(str::to_string)).unwrap_or_default();
     if c.is_empty() { r.param("token") } else { c }
 }
+/// The address a hub that nobody can reach gives the machine it links to: "reach me over my reverse link" (net/alwayson/tunnel.rs). It is a
+/// well-formed address that never resolves (`.invalid`), so a call that does not go over the link fails at once instead of reaching anything.
+pub const TUNNEL_URL: &str = "https://over-its-reverse-link.invalid";
+/// The address to announce to `target`: `here`, or, when `here` is only this computer and `target` takes the reverse link (its `/far/tunnel`
+/// answers an unsigned request with "not a linked machine": a build that has it), `TUNNEL_URL`; everything that machine sends here then comes
+/// over this hub's poll. Err: neither (the old refusal: an older machine could never reach back).
+pub async fn announce(home: &std::path::Path, here: &str, target: &str) -> Result<String, &'static str> {
+    let Some(why) = refuse_loopback(here, target) else { return Ok(here.to_string()) };
+    let r = botnet::post_json(home, &format!("{}/far/tunnel", botnet::url_base(target)), "{}").await;
+    if r.code == 401 && r.body.contains("not a linked machine") { Ok(TUNNEL_URL.to_string()) } else { Err(why) }
+}
+/// A peer address that is the reverse link's, not a place to call.
+pub fn over_link(url: &str) -> bool { url == TUNNEL_URL }
 /// Why a hub may not announce `here` to the hub at `target`: it would hand a machine across the network an address that is
 /// only this computer ("127.0.0.1"), a link that could never reach back.
 pub fn refuse_loopback(here: &str, target: &str) -> Option<&'static str> {
