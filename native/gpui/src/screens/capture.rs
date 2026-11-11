@@ -89,8 +89,8 @@ impl Recording {
     pub fn start(xid: u32, out: &Path) -> Result<Self, String> {
         let (bin, disp) = (ffmpeg()?, display()?);
         let _ = std::fs::remove_file(out);
-        /* i18n-ok: English here, in the catalog for where improvements.rs draws it */ let log = std::fs::File::create(out.with_extension("log")).map_or_else(|_| Stdio::null(), Stdio::from);
-        let child = Command::new(bin).args(record_args(xid, &disp, out)).stdin(Stdio::piped()).stdout(Stdio::null()).stderr(log).spawn().map_err(|_| "ffmpeg did not start.".to_string())?;
+        let log = std::fs::File::create(out.with_extension("log")).map_or_else(|_| Stdio::null(), Stdio::from);
+        /* i18n-ok: English here, in the catalog for where improvements.rs draws it */ let child = Command::new(bin).args(record_args(xid, &disp, out)).stdin(Stdio::piped()).stdout(Stdio::null()).stderr(log).spawn().map_err(|_| "ffmpeg did not start.".to_string())?;
         Ok(Self { child, path: out.to_path_buf(), started: Instant::now() })
     }
     pub fn elapsed(&self) -> Duration { self.started.elapsed() }
