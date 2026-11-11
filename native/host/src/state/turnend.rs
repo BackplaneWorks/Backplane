@@ -151,6 +151,9 @@ pub fn order_note(notify_settled: &str, prev: &str, seq: u64, now: u64, thread: 
 }
 /// Policy.end: what a turn's end records, over the state after the batch: zero or one setting
 pub fn policy_end(post: &State, seq: u64, now: u64, thread: &str, state: &str) -> Vec<Value> {
+    // a mail run's or a back office's turn is the mailroom's own work: its brief is no message from the person, and its end tells neither a desk nor a phone (Nov 10:
+    // "I couldn't dispose of input …" reached the phone). What it leaves undone goes to its bot privately (bots/mail/escalate.rs `run_ended`).
+    if post.runs.contains_key(thread) || post.private_thread(thread) { return vec![] }
     // Triage.managed reads false until mail lands (open work)
     let pid = post.ext.sum.get(thread).map_or("", |s| s.person_id.as_str());
     let mem = parse(&post.get(&format!("alert.{thread}"), "")).settled.to_string();

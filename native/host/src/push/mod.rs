@@ -53,7 +53,7 @@ impl Source {
     fn alert() -> Source { Source { how: "alert", bot: String::new() } }
     /// The one event a push starts from.
     pub fn order(&self, id: &str, reason: &str, thread: &str, ask: &str, text: &str, at: u64) -> Value {
-        json!({"$":"PushOrdered","id":id,"how":self.how,"bot":self.bot,"reason":reason,"thread":thread,"ask":ask,"text":short(text, 500),"at":at})
+        json!({"$":"PushOrdered","id":id,"how":self.how,"bot":self.bot,"reason":reason,"thread":thread,"ask":ask,"text":plain(text, 500),"at":at})
     }
 }
 /// The worker's own check of an order: a known way, and the uberbot's name on a notify.
@@ -61,14 +61,32 @@ pub fn admit(e: &Value, w: &World) -> bool {
     let (how, bot) = (e["how"].as_str().unwrap_or(""), e["bot"].as_str().unwrap_or(""));
     match how { "notify" => w.triage_owner(bot), "reminder" => bot.is_empty() || w.triage_owner(bot), "import" => bot.is_empty() && e["reason"] == "import",
         // a thread's alert record: the hub's own, about a thread
-        "alert" => bot.is_empty() && !e["thread"].as_str().unwrap_or("").is_empty() && matches!(e["reason"].as_str(), Some("done" | "needs_you" | "reminder")),
+        "alert" => bot.is_empty() && matches!(e["reason"].as_str(), Some("done" | "needs_you" | "reminder"))
+            && alert_may(w, e["thread"].as_str().unwrap_or(""), e["kind"].as_str().unwrap_or(match e["reason"].as_str() { Some("needs_you") => "ask", Some("reminder") => "reminder", _ => "done" })),
         _ => false }
 }
 /// A thread's alert record (`kind`: done, fail, ask with the open ask's id in `ask` when known, merged, note, reminder; `key` its own) that no focused desk in use is
 /// showing: the phones hear of it (settings/alerts.rs calls this; `body` is what 0.14's phone said). One order a record; the burst rule collapses a run.
 pub async fn alert(hub: &Arc<Hub>, thread: &str, kind: &str, key: &str, body: &str, ask: &str, at: u64) {
     let reason = match kind { "ask" => "needs_you", "reminder" => "reminder", "" => return, _ => "done" };
-    let _ = hub.commit(&Source::alert().order(&format!("alert-{key}-{at}"), reason, thread, ask, body, at)).await;
+    // the mailroom's own work and the uberbot's own thread never reach a phone this way (`alert_may`); a hub with no bots lane has neither
+    if let Some(b) = crate::bots::api::of(hub) { if !alert_may(&*b.world().await, thread, kind) { return } }
+    let mut e = Source::alert().order(&format!("alert-{key}-{at}"), reason, thread, ask, body, at); e["kind"] = json!(kind);
+    let _ = hub.commit(&e).await;
+}
+/// Whether a thread's alert record may reach the phones by itself (`alert`). Never:
+/// - a mail run's or a back office's (`mailcoord-`) thread: the mailroom's own work, between bots, even when its brief reads like the person's message (Nov 10: seven
+///   runs' "I couldn't dispose of input …" and "this needs no action from me" reached the phone);
+/// - the uberbot's own thread: its notify_person, its own ask and its reminders order their own push, and a tell_person from its back office is private-lane output
+///   (its ride tells it no phone alert went out);
+/// - a reminder: `Source::reminder` orders the ones that may push (the person's, the uberbot's), and no other bot's;
+/// - a note on another bot's thread: a bot's notify_person reaches the uberbot as mail, which decides.
+/// A room's post is no thread's record: at most the room reads unread.
+pub fn alert_may(w: &World, thread: &str, kind: &str) -> bool {
+    if thread.is_empty() || kind.is_empty() || kind == "reminder" { return false }
+    if w.mail.run_of(thread).is_some() || w.private_is(thread) || thread.starts_with("mailcoord-") { return false }
+    if w.chat_is(thread) { return false }
+    !(kind == "note" && w.bots.values().any(|b| !b.deleted && b.thread == thread))
 }
 /// What a client may not write (`setting.set`).
 pub fn reserved(key: &str) -> bool { key == BOOK || key.starts_with(SIGNIN) }
@@ -92,6 +110,63 @@ pub fn short(t: &str, max: usize) -> String {
     if line.chars().count() <= max { return line.to_string() }
     let cut: String = line.chars().take(max.saturating_sub(1)).collect();
     format!("{}…", cut.rsplit_once(' ').map_or(cut.as_str(), |(a, _)| a).trim_end())
+}
+
+/// What a phone shows of a text: its first line with something to say, in plain words, at most `max` characters, ended at a sentence when one fits. Markdown goes (a
+/// link or image is its text; `**`, `*`, `__`, `~~`, backticks, headings, quotes and list marks are dropped), and so do backplane:// and file:// addresses and the hub's
+/// own ids (`t1794347576-102`, `p1794357742-592218`): Nov 10, a body read "The [Boat thread](backplane://thread/t…) has answered my questions. … **You can…".
+pub fn plain(t: &str, max: usize) -> String {
+    let line = t.lines().map(unmark).find(|l| !l.is_empty()).unwrap_or_default();
+    if line.chars().count() <= max { return line }
+    let cut: String = line.chars().take(max).collect();
+    // a whole sentence when one ends inside the limit, past its first quarter
+    // (a list's "1." is no sentence's end)
+    let end = cut.char_indices().filter(|&(i, c)| matches!(c, '.' | '!' | '?') && cut[i + c.len_utf8()..].starts_with(' ') && !cut[..i].ends_with(|p: char| p.is_ascii_digit()))
+        .map(|(i, c)| i + c.len_utf8()).last();
+    if let Some(i) = end.filter(|&i| cut[..i].chars().count() >= max / 4) { return cut[..i].to_string() }
+    short(&line, max)
+}
+/// One line of markdown as plain words.
+fn unmark(line: &str) -> String {
+    let mut s = line.trim();
+    loop { // headings, quotes and list marks, nested
+        let t = s.trim_start_matches(|c| c == '#' || c == '>').trim_start();
+        let t = ["- ", "* ", "+ "].iter().find_map(|m| t.strip_prefix(m)).unwrap_or(t);
+        let t = match t.find(|c: char| !c.is_ascii_digit()) { Some(i) if i > 0 && i <= 3 && (t[i..].starts_with(". ") || t[i..].starts_with(") ")) => &t[i + 2..], _ => t };
+        let t = t.trim_start(); if t.len() == s.len() { break } s = t;
+    }
+    // links and images: their text
+    let c: Vec<char> = s.chars().collect(); let mut out = String::new(); let mut i = 0;
+    while i < c.len() {
+        if c[i] == '!' && c.get(i + 1) == Some(&'[') { i += 1; continue }
+        if c[i] == '[' {
+            if let Some(j) = (i + 1..c.len()).find(|&j| c[j] == ']') {
+                if c.get(j + 1) == Some(&'(') { if let Some(k) = (j + 2..c.len()).find(|&k| c[k] == ')') { out.extend(&c[i + 1..j]); i = k + 1; continue } }
+            }
+        }
+        out.push(c[i]); i += 1;
+    }
+    let out = out.replace("**", "").replace("__", "").replace("~~", "").replace(['`', '*'], "");
+    // addresses a phone cannot open and the hub's own ids, keeping the sentence's own punctuation
+    let words: Vec<String> = out.split_whitespace().filter_map(|w| {
+        let core = w.trim_matches(|c: char| "()[]{}<>\"',;:.!?".contains(c));
+        let gone = core.starts_with("backplane://") || core.starts_with("file://") || internal_id(core);
+        if !gone { return Some(w.to_string()) }
+        // what closed the sentence (or a bracket opened before the word) stays
+        let opened = w.starts_with(['(', '[']);
+        let tail: String = w.chars().rev().take_while(|c| ".,;:!?)]".contains(*c)).filter(|c| !(opened && matches!(c, ')' | ']'))).collect::<Vec<_>>().into_iter().rev().collect();
+        (!tail.is_empty()).then_some(tail)
+    }).collect();
+    let mut s = String::new();
+    for w in words { if !s.is_empty() && !w.chars().all(|c| ".,;:!?)]".contains(c)) { s.push(' ') } s.push_str(&w) }
+    s.replace(" ()", "").replace("()", "").trim().to_string()
+}
+/// The hub's own ids: a few letters, then a run of at least nine digits (a time), then its numbering (`t1794347576-102`, `run1794357742-592223`, `m1794340800-571696.15`).
+fn internal_id(w: &str) -> bool {
+    let rest = w.trim_start_matches(|c: char| c.is_ascii_lowercase());
+    if w.len() - rest.len() > 10 { return false }
+    let digits = rest.chars().take_while(char::is_ascii_digit).count();
+    digits >= 9 && rest.chars().all(|c| c.is_ascii_digit() || "-.:".contains(c))
 }
 
 /// `HH:MM-HH:MM` as minutes of the day: None when off, empty of length, or not that shape.
@@ -138,7 +213,7 @@ impl Book {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Say { pub key: String, pub title: String, pub body: String, pub thread: String, pub ask: String, pub reason: String, pub link: String }
 pub fn collapse(items: &[Item], title: &str, home: &str, stamp: &str) -> Say {
-    if let [i] = items { return Say { key: format!("push-{}", i.id), title: if title.is_empty() { "Backplane".into() } else { title.into() }, body: short(&i.text, 180), thread: i.thread.clone(), ask: i.ask.clone(), reason: i.reason.clone(), link: i.link.clone() } }
+    if let [i] = items { return Say { key: format!("push-{}", i.id), title: if title.is_empty() { "Backplane".into() } else { title.into() }, body: plain(&i.text, 180), thread: i.thread.clone(), ask: i.ask.clone(), reason: i.reason.clone(), link: i.link.clone() } }
     let same = items.iter().all(|i| i.thread == items[0].thread);
     let need = items.iter().filter(|i| i.reason == "needs_you").count();
     let body = if need > 0 { format!("{need} of {} need you", items.len()) } else { format!("{} updates", items.len()) };

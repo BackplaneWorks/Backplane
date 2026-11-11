@@ -26,6 +26,15 @@ uses). It says what 0.14's phone said: the record's own text (an ask, a merge, a
 a needs_you carries the ask's id so its answer clears it. The person's alert settings (`notify.settled`, `notify.needs`, which leave a quiet record) and everything under
 Respect apply. The uberbot's own orders are unchanged.
 
+**Which records never push** (`push::alert_may`, checked before the order and again by `admit`; Nov 10, the phone showed a run's "I couldn't dispose of input …" and a bot's "this needs no action from me"):
+
+- a mailroom run's or a back office's (`mailcoord-`) thread: the mailroom's own work between bots. Its brief is no message from the person, so its end writes no alert record at all (`state/turnend.rs` `policy_end`); what it leaves undone goes to its bot privately (`run_ended`), never to a room;
+- the uberbot's own thread: its notify_person, its own ask and its reminders order their own push, so the record is not a second one, and a `tell_person` from its back office stays on screen (its ride tells it no phone heard);
+- a reminder: `Source::reminder` orders the ones that may push, and no other bot's;
+- a note on another bot's thread: that bot's notify_person reaches the uberbot as mail.
+
+A room's post is no thread's record: between bots it reaches no phone; the room at most reads unread.
+
 The worker checks each order against the world again (`push::admit`), `setting.set` refuses `push.book`, and a test fails if any other file names the event or a source.
 
 ## Respect
@@ -45,7 +54,7 @@ Settings → Notifications on the desktop (GPUI) and on both phones (`notify.pag
 
 ## What a phone gets
 
-`aps.thread-id` groups by thread; `thread`, `ask`, `key` and `kind` ride beside it. The body is the first line, at most 180 characters. A tap opens the thread, at the approval when there is one.
+`aps.thread-id` groups by thread; `thread`, `ask`, `key` and `kind` ride beside it. The body is plain words (`push::plain`): the first line with something to say, markdown gone (a link or image is its text; `**`, backticks, headings, quotes and list marks dropped), no backplane:// or file:// address and none of the hub's ids (`t1794347576-102`), at most 180 characters, ended at a sentence when one fits. A tap opens the thread, at the approval when there is one.
 
 The badge counts open asks plus the waiting items not about an ask. An item leaves when its ask closes or, with no ask, when the person writes in its thread or any device opens it (`push.seen`; a focused desk showing the thread, `desk.look`, counts as opening it). `push.clear` deals with everything waiting at once; the open asks still count. Opening an approval does not answer it. Every device then gets a silent clear, and a phone drops anything stale on connect and when it comes to the front (`push.state`).
 
