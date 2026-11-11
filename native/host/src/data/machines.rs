@@ -164,6 +164,8 @@ pub fn project_rows(far: &Far, pick: &str, join: &HashMap<String, String>, un: &
         let mark = un.marks.get(m).cloned().unwrap_or_else(|| crate::mirror::mark_of(m, false));
         for id in st.projects.keys() {
             if id == crate::sidebar::SCRATCH || join.contains_key(id) { continue }
+            // (a copy in no merged row waits for its machine's origin, present/merged.rs: not listed until it is known)
+            if !un.rows.is_empty() && !un.rows.contains_key(id) { continue }
             if let Some(v) = project_json(id, st, &mark, un, m) { out.push((v["updatedAt"].as_u64().unwrap_or(0), id.clone(), v)) }
         }
     }
