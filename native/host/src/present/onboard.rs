@@ -350,7 +350,7 @@ fn kicad_row(f: &Facts, pkg: Option<&crate::files::kicad::install::Package>) -> 
     let (status, version) = (i("kicad.status"), i("kicad.version"));
     let prog: Value = serde_json::from_str(i("kicad.install")).unwrap_or_default();
     let (pstate, note) = (s(&prog, "state"), s(&prog, "note"));
-    let action = decide(pkg, status, pstate);
+    let action = decide(pkg, status, version, pstate);
     let done = f.runs("kicad") || matches!(status, "ok" | "stock" | "old");
     let v = |v: &str| if v.is_empty() { String::new() } else { format!(" {v}") };
     let found = if !i("kicad.cli").is_empty() { format!("{}{} at {}.", if status == "stock" { "Stock KiCad" } else { "KiCad" }, v(version), i("kicad.cli")) }
@@ -364,6 +364,7 @@ fn kicad_row(f: &Facts, pkg: Option<&crate::files::kicad::install::Package>) -> 
         Action::Wait => row("KiCad", looking(f), vec![rel]),
         Action::Auto => row("KiCad", &format!("Not found. Downloading Backplane KiCad{} into Backplane's own folder. This takes a few minutes.", v(pkg.map_or("", |p| p.version))), vec![rel]),
         Action::Offer if pstate == "failed" => warn(row("KiCad", &format!("{}.", note.trim_end_matches('.')), vec![btn("Try again", "ob-kicad-install", "", true), rel])),
+        Action::Offer if status == "ok" => row("KiCad", &format!("Backplane KiCad{} at {}. Backplane KiCad{} is out: it brings the KiCad editor inside Backplane's viewer.", v(version), i("kicad.cli"), v(pkg.map_or("", |p| p.version))), vec![btn("Update KiCad", "ob-kicad-install", "", true), rel]),
         Action::Offer => row("KiCad", &format!("{} {} Backplane KiCad adds editing by agents.", found, offer_lead(status)).trim().replace("  ", " "), vec![btn("Install Backplane KiCad", "ob-kicad-install", "", true), rel]),
         Action::NoPackage => row("KiCad", &if found.is_empty() { format!("{} No Backplane KiCad is published for this computer. Stock KiCad 9 or later works for viewing and export.", if f.checked { "Not found." } else { looking(f) }) } else { found.clone() }.trim().to_string(),
             vec![link("Download KiCad", KICAD_STOCK), rel]),
