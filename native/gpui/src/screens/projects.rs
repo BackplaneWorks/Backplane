@@ -20,6 +20,12 @@ pub struct Projects {
     /// Send on a project's page (0.14's home composer): (the thread on show before, the message, when), sent once the new thread the page
     /// asked for is the one on show; back in the box if none came.
     pub first_send: Option<(String, String, std::time::Instant)>,
+    /// Text a page's Send could not deliver, while the box holds something else: shown over the box with Restore (never merged into it)
+    pub restore: Option<String>,
+    /// The thread a New thread's reply named (raw id, `<link>~<id>` for a linked machine's), opened once the lists hold it
+    pub made: Option<(String, std::time::Instant)>,
+    /// A first message on its way to the thread just made (kept until its answer, so a refusal gives it back)
+    pub sending: Option<String>,
 }
 
 /// What Edit puts in the composer: `/intent` and the goal and notes (the hub's `intent_edit`; its Send saves them), the template for none.
@@ -104,6 +110,16 @@ pub fn page_send(data: &Value, pid: &str, text: &str) -> Option<(Command, String
 }
 /// The hub refused the new thread a page's Send asked for: the text goes back in the box (never lost), the window says why.
 pub fn take_back(first_send: &mut Option<(String, String, std::time::Instant)>) -> Option<String> { first_send.take().map(|(_, text, _)| text) }
+/// A page's Send, once the hub has made its thread (`id` from the reply, `<link>~<id>` on a linked machine): the typed text as that thread's first
+/// message, sent by id (never to whatever thread is open).
+pub fn first_message(id: &str, text: &str) -> Command {
+    let msg = format!("m{}-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis()), id.len());
+    Command::Rpc("turn.start".into(), crate::screens::settings::Secret(serde_json::json!({"thread": id, "text": text, "msg": msg})), "first-message")
+}
+/// Where text that came back goes: into the box when it is empty, else held to restore (`restore`), so it is never merged with what is there.
+pub fn give_back(text: String, box_now: &str, restore: &mut Option<String>) -> Option<String> {
+    if box_now.trim().is_empty() { Some(text) } else { *restore = Some(text); None }
+}
 pub fn close_cmd() -> Command { Command::Action("proj-close".into(), String::new()) }
 /// Esc leaves the folder picker while it is open.
 pub fn close_on_escape(data: &Value) -> Option<Command> { data["folders"].is_object().then(close_cmd) }
@@ -120,7 +136,8 @@ pub fn sync(this: &mut Backplane, cx: &mut Context<Backplane>) {
             let _ = this.tx.try_send(Command::Send(text));
         } else if at.elapsed() > std::time::Duration::from_secs(10) {
             this.screens.projects.first_send = None;
-            this.input.update(cx, |i, cx| i.set(text, cx));
+            let now = this.input.read(cx).content.to_string();
+            if let Some(t) = give_back(text, &now, &mut this.screens.projects.restore) { this.input.update(cx, |i, cx| i.set(t, cx)); }
         }
     }
     // the page's Edit opened its thread: once that thread is on show, the goal and notes go in its composer
@@ -330,6 +347,11 @@ mod home_tests {
         assert!(page_send(&d, "pA1", "  ").is_none(), "nothing typed: nothing sent");
         let mut fs = Some(("t0".to_string(), "a thread sent to boat-hub".to_string(), std::time::Instant::now()));
         assert_eq!(take_back(&mut fs).as_deref(), Some("a thread sent to boat-hub")); assert!(fs.is_none());
+        // given back: into an empty box exactly; a box with new text keeps it, and the old text waits to be restored (never merged)
+        match first_message("L~t9", "a thread sent to boat-hub") { Command::Rpc(m, p, _) => { assert_eq!(m, "turn.start"); assert_eq!((p.0["thread"].as_str(), p.0["text"].as_str()), (Some("L~t9"), Some("a thread sent to boat-hub"))) } other => panic!("{other:?}") }
+        let mut r = None;
+        assert_eq!(give_back("old".into(), "", &mut r).as_deref(), Some("old")); assert!(r.is_none());
+        assert_eq!(give_back("old".into(), "new words", &mut r), None); assert_eq!(r.as_deref(), Some("old"));
     }
 
     use super::*; use serde_json::json; use core::prelude::v1::test;
