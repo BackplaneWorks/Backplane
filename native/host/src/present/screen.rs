@@ -34,7 +34,7 @@ impl super::Screen for Recent {
         // a 0.14 import of this hub: its card goes over any page (present/onboard.rs import_overlay)
         let withmig; let params=match crate::import014::last_published(&_hub.cfg.home) { Some(v) => { let mut c=params.clone(); c["importV014"]=v; withmig=c; &withmig } None => params };
         let m=_hub.mirrors();
-        match policies.with_state(|st|m.shown(|far| { let map=unified_of(st,far,&|id|m.origin(id)); let marks: HashMap<String,Value>=far.iter().map(|(n,_)|(n.clone(),m.mark(n))).collect(); let here=m.here(); recent_unified(st,far,&Unified{ far:&map, marks:&marks, here:&here },params) })) { Some(out)=>out,None=>refused("state.booting") }
+        match policies.with_state(|st|m.shown(|far| { let j=join_full(st,far,m); let marks: HashMap<String,Value>=far.iter().map(|(n,_)|(n.clone(),m.mark(n))).collect(); let here=m.here(); recent_unified(st,far,&Unified{ far:&j.far, marks:&marks, here:&here, rows:&j.rows },params) })) { Some(out)=>out,None=>refused("state.booting") }
     }
 }
 fn mine(p: &Value) -> bool {
@@ -113,20 +113,28 @@ fn find_go(st: &State,p: &Value) -> Option<Value> {
 pub fn recent(st: &State,p: &Value) -> Option<Value> { recent_far(st,&[],p) }
 /// `recent` with the linked machines' display-only states (`crate::mirror`): `(machine, state)`, their projects after this hub's own, each labelled by machine.
 /// Nothing of theirs is read for a decision: every action and the open thread are this hub's (`st`).
-pub fn recent_far(st: &State,far: &[(String,&State)],p: &Value) -> Option<Value> { let marks=far.iter().map(|(n,_)|(n.clone(),crate::mirror::mark_of(n,false))).collect(); recent_unified(st,far,&Unified{ far:&HashMap::new(), marks:&marks, here:"" },p) }
+pub fn recent_far(st: &State,far: &[(String,&State)],p: &Value) -> Option<Value> { let marks=far.iter().map(|(n,_)|(n.clone(),crate::mirror::mark_of(n,false))).collect(); recent_unified(st,far,&Unified{ far:&HashMap::new(), marks:&marks, here:"", rows:&HashMap::new() },p) }
 /// One repository on two machines is one project: `far` maps a linked machine's project (`<link>~<id>`) to this hub's project of the
 /// same origin (`crate::mirror::unify`); `marks` is each shown machine's marker by name (`crate::mirror::mark_of`), on every row of its threads.
 /// `here` is this machine's name, for the machine switcher ("" when it is not known yet).
-pub struct Unified<'a> { pub far: &'a HashMap<String,String>, pub marks: &'a HashMap<String,Value>, pub here: &'a str }
+/// `rows` is per row owner (`crate::present::merged::Join::rows`): its key, name, machine chips and the copies only the registry knows.
+pub struct Unified<'a> { pub far: &'a HashMap<String,String>, pub marks: &'a HashMap<String,Value>, pub here: &'a str, pub rows: &'a HashMap<String,Value> }
 impl Unified<'_> { fn mark(&self,machine: &str) -> Value { self.marks.get(machine).cloned().unwrap_or_else(||crate::mirror::mark_of(machine,false)) } }
-/// The unified map for the sidebar: the linked projects whose machine said their origin, against this hub's projects (oldest first).
+/// The unified map for the sidebar: every live copy of a project (one key: its origin, a hand link, else machine/id; `present::merged`) that
+/// does not draw the row -> the copy that does (this hub's, else the first shown machine's). Two linked machines' copies join each other too,
+/// on a hub that has none (the home, boat-hub).
 pub fn unified_of(st: &State,far: &[(String,&State)],origin: &dyn Fn(&str)->String) -> HashMap<String,String> {
-    let fo: Vec<(String,String)>=far.iter().flat_map(|(_,f)|f.projects.iter().filter(|(_,p)|!p.removed).map(|(id,_)|(id.clone(),origin(id)))).filter(|(_,o)|!o.is_empty()).collect();
-    if fo.is_empty() { return HashMap::new() }
-    let mut lp: Vec<(&String,&crate::state::Project)>=st.projects.iter().filter(|(id,p)|!p.removed && id.as_str()!=sidebar::SCRATCH && !p.root.is_empty()).collect();
-    lp.sort_by(|a,b|a.1.created.cmp(&b.1.created).then(a.0.cmp(b.0)));
-    let lo: Vec<(String,String)>=lp.into_iter().map(|(id,p)|(id.clone(),crate::mirror::origin_of_root(&p.root))).collect();
-    crate::mirror::unify(&lo,&fo)
+    let list=super::merged::merged_projects(st,far,&|_|false,origin,"",&[]);
+    super::merged::join_of(&list,&far.iter().map(|(n,_)|n.clone()).collect::<Vec<_>>()).far
+}
+/// The join over this hub's mirrors and the registry: what the sidebar and data/1 draw from.
+pub fn join_full(st: &State,far: &[(String,&State)],m: &crate::mirror::Mirrors) -> super::merged::Join {
+    let reg=crate::net::registry::cached(); let here=m.here();
+    let list=super::merged::merged_projects(st,far,&|n|m.mark(n)["away"]==true,&|id|m.origin(id),&here,&reg);
+    let mut j=super::merged::join_of(&list,&far.iter().map(|(n,_)|n.clone()).collect::<Vec<_>>());
+    // a project every machine of which is off: a row of its own, drawn from the registry (`@off:<key>`)
+    for p in super::merged::all_off(&list) { let mut r=super::merged::row_json(p); r["off"]=json!({"copies":p.ids.iter().map(|(m,i)|json!({"machine":m,"id":i})).collect::<Vec<_>>(),"threads":p.threads.iter().map(|t|json!({"machine":t.machine,"id":t.id,"title":t.title,"status":t.status,"activity":t.activity,"pinned":t.pinned})).collect::<Vec<_>>()}); r["machineChips"]=r["machines"].take(); j.rows.insert(format!("@off:{}",p.key),r); }
+    j
 }
 /// The machine switcher over the sidebar, when machines are linked: every machine, this one, then each linked one (an away one says so).
 /// `value` is what `side-machine` takes; `on` the one in force.
@@ -147,6 +155,86 @@ pub fn new_on<'a>(local: &str,linked: impl Iterator<Item=(&'a str,&'a str)>,un: 
     for (m,fid) in linked { if !seen.insert(m) { continue } let mk=un.mark(m); let away=mk["away"].as_bool().unwrap_or(false);
         v.push(json!({"value":fid,"label":format!("New thread on {}{}",text(&mk,"short"),if away {" (away)"} else {""}),"away":away})); }
     json!(v)
+}
+/// A row drawn from a linked machine's copy (none here) that other machines share: a new thread on each of them, the drawing one first.
+pub fn new_on_far<'a>(copies: impl Iterator<Item=(&'a str,&'a str)>,un: &Unified) -> Value {
+    let mut seen=HashSet::new(); let mut v=vec![];
+    for (m,fid) in copies { if !seen.insert(m) { continue } let mk=un.mark(m); let away=mk["away"].as_bool().unwrap_or(false);
+        v.push(json!({"value":fid,"label":format!("New thread on {}{}",text(&mk,"short"),if away {" (away)"} else {""}),"away":away})); }
+    json!(v)
+}
+/// A machine only the registry knows (it is off): its chip as `merged` makes them.
+fn off_mark(row: Option<&Value>,machine: &str) -> Value {
+    row.and_then(|r|r["machineChips"].as_array()).and_then(|a|a.iter().find(|c|text(c,"name")==machine).cloned()).unwrap_or_else(||{ let mut m=crate::mirror::mark_of(machine,true); m["state"]=json!("off"); m["dim"]=json!(true); m })
+}
+/// A registry thread (its machine is off) as a sidebar row: dimmed, not opened (`off`), its machine's chip as its mark.
+fn off_thread(t: &Value,row: Option<&Value>,hub: &str,now: u64) -> Value {
+    let m=text(t,"machine"); let mk=off_mark(row,m);
+    json!({"depth":0,"expanded":false,"children":0,"id":format!("{hub}|{}",text(t,"id")),"title":text(t,"title"),"state":"idle","ago":crate::sidebar::ago(now,t["activity"].as_u64().unwrap_or(0)),
+        "agents":"","pinned":t["pinned"],"status":text(t,"status"),"want":"","canChild":false,"lead":[],"trail":[],"off":true,"machine":m,"mark":mk})
+}
+/// The machine picker of a merged row (D6), on its `newOn` (the + and the composer offer these; the first is where it runs by default):
+/// this machine's copy first, else the most recently active machine's; an away machine's entry says "Wait for <machine>" (a held launch: the far
+/// outbox delivers it when that machine answers); "Clone it here" when this machine has no copy and the project has a remote; "A Boat (fresh
+/// clone)" when it has a remote, disabled until a Boat account is connected (`net::registry::boat_ready`). `runsOn` says where: "runs on desktop".
+pub fn picker(project: &mut Value,row: &Value,here: &str) {
+    let default=text(&row["default"],"id").to_string();
+    let mut on: Vec<Value>=project["newOn"].as_array().cloned().unwrap_or_default();
+    if on.is_empty() && !default.is_empty() { on.push(json!({"value":default,"label":"New thread","away":false})); }
+    on.sort_by_key(|o| text(o,"value")!=default);
+    for o in on.iter_mut() { if o["away"]==true { let l=text(o,"label").trim_start_matches("New thread on ").trim_end_matches(" (away)").to_string(); o["label"]=json!(format!("Wait for {l}")); o["kind"]=json!("wait"); } else { o["kind"]=json!("machine"); } }
+    let here_has=row["machineChips"].as_array().map_or(false,|c|c.iter().any(|c|c["here"]==true));
+    let origin=text(row,"origin");
+    if !origin.is_empty() && !here_has { on.push(json!({"value":origin,"label":"Clone it here","away":false,"kind":"clone","action":"proj-clone"})); }
+    if !origin.is_empty() { on.push(json!({"value":origin,"label":"A Boat (fresh clone)","away":false,"kind":"boat","action":"proj-boat","disabled":!crate::net::registry::boat_ready()})); }
+    let first=on.first().cloned().unwrap_or(Value::Null);
+    let m=if here_has || first.is_null() { if here.is_empty() { "this machine".to_string() } else { crate::mirror::short_name(here) } } else {
+        row["machineChips"].as_array().and_then(|c|c.iter().find(|c|text(&row["default"],"machine")==text(c,"name"))).map(|c|text(c,"short").to_string()).unwrap_or_default() };
+    project["runsOn"]=json!(if m.is_empty() { String::new() } else { format!("runs on {m}") });
+    project["newOn"]=json!(on);
+}
+/// Link with… on the menu of this machine's project that has no remote (`key` is `<machine>/<id>`, or a hand link's): the other machines'
+/// projects with no remote, by name and machine (`proj-link` `<id>|<their key>`); a linked one offers Unlink (`<id>|`).
+pub fn link_with(owner: &str,rows: &HashMap<String,Value>) -> Value {
+    let Some(me)=rows.get(owner) else { return json!([]) };
+    if !text(me,"origin").is_empty() { return json!([]) }
+    let mine=text(me,"key");
+    let linked=me["machineChips"].as_array().map_or(0,|c|c.len())>1;
+    let mut v: Vec<Value>=rows.iter().filter(|(o,r)|o.as_str()!=owner && text(r,"origin").is_empty() && text(r,"key")!=mine && !o.starts_with("@off:") && !r["machineChips"].as_array().map_or(false,|c|c.iter().any(|c|c["here"]==true)))
+        .map(|(_,r)|{ let m=r["machineChips"][0]["short"].as_str().unwrap_or(""); json!({"label":format!("Link with {} on {m}",text(r,"name")),"value":format!("{owner}|{}",text(r,"key"))}) }).collect();
+    v.sort_by(|a,b|text(a,"label").cmp(text(b,"label")));
+    if linked { v.insert(0,json!({"label":"Unlink","value":format!("{owner}|")})); }
+    json!(v)
+}
+/// The merged row's own fields on a sidebar project: `key`, `machineChips` (every machine with a copy: here/on/away/off, dimmed when away or
+/// off, a `note` "desktop is off"), and the threads of its machines that are off, from the registry, after the live ones.
+fn merged_fields(project: &mut Value,row: Option<&Value>,hub: &str,now: u64) {
+    let Some(r)=row else { return };
+    project["key"]=r["key"].clone(); project["machineChips"]=r["machineChips"].clone(); picker(project,r,"");
+    let off: Vec<Value>=r["off"]["threads"].as_array().into_iter().flatten().map(|t|off_thread(t,row,hub,now)).collect();
+    if !off.is_empty() { if let Some(a)=project["threads"].as_array_mut() { a.extend(off); } }
+}
+/// A project all of whose machines are off: its row from the registry (`@off:<key>`), threads dimmed, nothing to start there.
+fn off_project(id: &str,r: &Value,hub: &str,now: u64) -> Value {
+    let threads: Vec<Value>=r["off"]["threads"].as_array().into_iter().flatten().map(|t|off_thread(t,Some(r),hub,now)).collect();
+    let marks: Vec<Value>=r["machineChips"].as_array().cloned().unwrap_or_default();
+    json!({"machine":"","quiet":false,"id":format!("{hub}|{id}"),"title":text(r,"name"),"root":text(r,"folder"),"icon":r["icon"],"color":r["color"],"css":r["css"],"open":false,
+        "snoozedShelf":"Snoozed","shelf":"Settled 0","settledCount":0,"value":"","archOpen":false,"archivedCount":0,"threads":threads,"snoozed":[],"settled":[],"archived":[],
+        "key":r["key"],"machineChips":marks,"marks":marks,"also":crate::sidebar::also_label(&marks).replacen("also on","on",1),"off":true,"newOn":[]})
+}
+/// The switcher's pick over merged rows: "@here" keeps the rows this machine has a copy of and their rows of this machine (no mark); a machine's
+/// name keeps the rows that machine has and its rows. A row with no merged fields (no join yet) is judged by its own machine.
+pub fn pick_filter(projects: Vec<Value>,pick: &str) -> Vec<Value> {
+    let here=pick=="@here";
+    let mine=|r: &Value| if here { r.get("mark").map_or(true,|m|m.is_null()) } else { r["mark"]["name"]==json!(pick) };
+    projects.into_iter().filter_map(|mut p| {
+        let has=match p["machineChips"].as_array() { Some(c) => c.iter().any(|c| if here { c["here"]==json!(true) } else { c["name"]==json!(pick) }), None => if here { text(&p,"machine").is_empty() } else { text(&p,"machine")==pick || p["machines"].as_array().map_or(false,|a|a.iter().any(|m|m==&json!(pick))) } };
+        if !has { return None }
+        for k in ["threads","snoozed","settled","archived"] { if let Some(a)=p[k].as_array_mut() { a.retain(|r|mine(r)); } }
+        let n=p["settled"].as_array().map_or(0,|a|a.iter().filter(|r|r["depth"].as_u64().unwrap_or(0)==0).count());
+        if p["open"]==json!(true) { p["settledCount"]=json!(n); p["shelf"]=json!(format!("Settled {n}")); }
+        Some(p)
+    }).collect()
 }
 /// The marker in the header of a thread drawn from `tst`: that machine's (full name), or none when it is this hub's state.
 fn header_mark(far: &[(String,&State)],tst: &State,un: &Unified) -> Option<Value> { far.iter().find(|(_,f)|std::ptr::eq(*f,tst)).map(|(m,_)|un.mark(m)) }
@@ -424,7 +512,8 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
     // the machine switcher's choice (`@machine`): one no longer linked is every machine again
     let mpick=text(&session["drafts"],"@machine"); let mpick=if mpick=="@here" || far.iter().any(|(n,_)|n==mpick) { mpick.to_string() } else { String::new() };
     let here_on=mpick.is_empty() || mpick=="@here";
-    let no_join: HashMap<String,String>=HashMap::new(); let un_far: &HashMap<String,String>=if mpick.is_empty() { un.far } else { &no_join };
+    // (a machine picked filters the merged rows: the join stays, so a project is the same row whichever machine is picked)
+    let un_far: &HashMap<String,String>=un.far;
     let Some(mut ns)=NativeSidebar::prepare(p,mode,&query,&session["open"],st.projects.keys().cloned().chain(far.iter().flat_map(|(_,f)|f.projects.keys().cloned())).collect()) else { return refused("sidebar.key-or-capability") };
     if action=="native-sidebar-page" && !ns.accept(value) { return Some(json!({"refused":true,"local":p.get("local").cloned().unwrap_or(json!({}))})) }
     if action=="native-sidebar-page" { session["drafts"]["@menu"]=json!(""); session["drafts"]["@del"]=json!(""); }
@@ -436,20 +525,21 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
     let mut fopen=open.clone();
     for (f,l) in un_far.iter() { if open.contains(l) { fopen.insert(f.clone()); } if open.contains(&format!("arch:{l}")) { fopen.insert(format!("arch:{f}")); } }
     let fopts=sidebar::Opts { open:&fopen,..opts };
-    let fplans: Vec<(&str,&State,sidebar::Plan)>=far.iter().filter(|(m,_)|mpick.is_empty() || *m==mpick).map(|(m,f)|(m.as_str(),*f,sidebar::plan(f,&fopts))).collect();
-    // this hub's project -> the linked ones shown in it: (machine, state, plan, far id)
+    let fplans: Vec<(&str,&State,sidebar::Plan)>=far.iter().map(|(m,f)|(m.as_str(),*f,sidebar::plan(f,&fopts))).collect();
+    // the project that draws a merged row (this hub's, else a linked machine's) -> the other copies shown in it: (machine, state, plan, far id)
+    let owner_live=|l: &str| st.projects.contains_key(l) || far.iter().any(|(_,f)|f.projects.contains_key(l));
     let mut partners: HashMap<&str,Vec<(&str,&State,&sidebar::Plan,&str)>>=HashMap::new();
-    for (m,f,fp) in &fplans { for id in fp.ids() { if let Some(l)=un_far.get(id) { if st.projects.contains_key(l.as_str()) { partners.entry(l.as_str()).or_default().push((*m,*f,fp,id)); } } } }
+    for (m,f,fp) in &fplans { for id in fp.ids() { if let Some(l)=un_far.get(id) { if l!=id && owner_live(l) { partners.entry(l.as_str()).or_default().push((*m,*f,fp,id)); } } } }
     let selected_project=st.threads.get(thread).map(|t|t.project.as_str()).unwrap_or("");
     // Find.rows: the projects whose name fuzzy-matches, and those holding a thread the search finds; the one holding the open thread stays (Side.cur.held)
     let far_hit=|id: &str| partners.get(id).map_or(false,|v|v.iter().any(|(_,_,fp,f)|fp.has_hit(f)));
-    let mut ids: Vec<&str>=plan.ids().into_iter().filter(|id| here_on || *id==selected_project).filter(|id| query.is_empty() || *id==selected_project || st.projects.get(*id).map_or(false,|p|fuzzy_hit(&p.title,&query)) || plan.has_hit(id) || far_hit(id)).collect();
-    let joined: HashSet<&str>=ids.iter().filter_map(|id|partners.get(id)).flatten().map(|(_,_,_,f)|*f).collect();
+    let mut ids: Vec<&str>=plan.ids().into_iter().filter(|id| query.is_empty() || *id==selected_project || st.projects.get(*id).map_or(false,|p|fuzzy_hit(&p.title,&query)) || plan.has_hit(id) || far_hit(id)).collect();
+    let joined: HashSet<&str>=partners.values().flatten().map(|(_,_,_,f)|*f).collect();
     // one list over machines: each machine's projects keep their order, and stand by recency among the others' (live first, then the newest);
     // a project shown as one with a linked machine's stands where the livelier of them would
     let lowest=|pl: &sidebar::Plan,id: &str| pl.place(id).unwrap_or((2,std::cmp::Reverse(0)));
     let mut lists=vec![ids.drain(..).map(|id|(partners.get(id).into_iter().flatten().map(|(_,_,fp,f)|lowest(fp,f)).fold(lowest(&plan,id),std::cmp::min),id)).collect::<Vec<_>>()];
-    for (_,f,fp) in &fplans { lists.push(fp.ids().into_iter().filter(|id| !joined.contains(id)).filter(|id| query.is_empty() || f.projects.get(*id).map_or(false,|p|fuzzy_hit(&p.title,&query)) || fp.has_hit(id)).map(|id|(lowest(fp,id),id)).collect()); }
+    for (_,f,fp) in &fplans { lists.push(fp.ids().into_iter().filter(|id| !joined.contains(id)).filter(|id| query.is_empty() || f.projects.get(*id).map_or(false,|p|fuzzy_hit(&p.title,&query)) || fp.has_hit(id) || far_hit(id)).map(|id|(partners.get(id).into_iter().flatten().map(|(_,_,pp,x)|lowest(pp,x)).fold(lowest(fp,id),std::cmp::min),id)).collect()); }
     let ids: Vec<&str>=sidebar::merge_ordered(lists,&|x|x.0).into_iter().map(|x|x.1).collect();
     let project_limit=ns.project_limit();
     // For now an explicitly opened thread in a folded Older project is unported. The recent list
@@ -465,7 +555,7 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
     // a thread row's place among another machine's rows of the same project: its shelf's order key (sidebar::merge_rows)
     let row_state=|qid: &str| -> Option<(&State,String)> { let id=qid.strip_prefix(&format!("{hub}|")).unwrap_or(qid); if id.contains('~') { far.iter().map(|(_,f)|*f).find(|f|f.threads.contains_key(id)).map(|f|(f,id.to_string())) } else { st.threads.get(id).map(|_|(st,id.to_string())) } };
     let row_key=|kind: &str,qid: &str| -> i128 { row_state(qid).map_or(0,|(s,id)| sidebar::row_key(s,kind,&id)) };
-    let projects: Vec<Value>=selected.into_iter().filter_map(|owner| {
+    let mut projects: Vec<Value>=selected.into_iter().filter_map(|owner| {
         // the plan (and state) that holds this project: this hub's, else the linked machine's it came from
         let (pst,pplan,machine)=match fplans.iter().find(|(_,f,_)|f.projects.contains_key(owner)) { Some((m,f,fp)) if !st.projects.contains_key(owner) => (*f,fp,*m), _ => (st,&plan,"") };
         let mut project=pplan.project(owner,&mut |kind,ids| {
@@ -485,8 +575,10 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
         // another machine's project: its marker after the name ("on desktop"); this machine's has none
         if !machine.is_empty() { let m=un.mark(machine); sidebar::label_rows(&mut project,&m); project["mark"]=m; }
         // the same repository on a linked machine: its threads in this project, each row naming its machine
-        if let Some(ps)=partners.get(owner).filter(|_|machine.is_empty()) {
+        if let Some(ps)=partners.get(owner) {
             let (mut machines,mut marks): (Vec<Value>,Vec<Value>)=(vec![],vec![]);
+            // a row drawn from a linked machine's copy (no copy here) names that machine among its machines, and no single "on <machine>"
+            if !machine.is_empty() { machines.push(json!(machine)); marks.push(un.mark(machine)); project.as_object_mut().unwrap().remove("mark"); }
             for (m,_,fp,fid) in ps {
                 let Some(mut fproj)=fp.project(fid,&mut |kind,ids| { let (mut indices,pager)=ns.slice_ids(ids,kind,fid,row_limit,thread); indices.sort_unstable(); (indices,pager) }) else { continue };
                 sidebar::label_rows(&mut fproj,&un.mark(m));
@@ -495,12 +587,18 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
             }
             project["machines"]=json!(machines);
             // a new thread of this repository on the machine chosen: this one's project, or a linked one's (the request goes there)
-            project["newOn"]=new_on(owner,ps.iter().map(|(m,_,_,fid)|(*m,*fid)),un);
+            project["newOn"]=if machine.is_empty() { new_on(owner,ps.iter().map(|(m,_,_,fid)|(*m,*fid)),un) } else { new_on_far(std::iter::once((machine,owner)).chain(ps.iter().map(|(m,_,_,fid)|(*m,*fid))),un) };
             // the machines it is also on, after its name ("also on desktop"); each of their rows keeps its own marker
-            project["also"]=json!(sidebar::also_label(&marks)); project["marks"]=json!(marks);
+            project["also"]=json!(if machine.is_empty() { sidebar::also_label(&marks) } else { sidebar::also_label(&marks).replacen("also on","on",1) }); project["marks"]=json!(marks);
         }
+        merged_fields(&mut project,un.rows.get(owner),hub,opts.now);
+        if machine.is_empty() { let l=link_with(owner,un.rows); if l.as_array().map_or(false,|a|!a.is_empty()) { project["linkWith"]=l; } }
         Some(project)
     }).collect();
+    // a project every machine of which is off (known from the registry on the home): its row, dimmed, after the live ones
+    if mode!="active" { for (k,r) in un.rows.iter().filter(|(k,_)|k.starts_with("@off:")) { if query.is_empty() || fuzzy_hit(text(r,"name"),&query) { projects.push(off_project(k,r,hub,opts.now)); } } }
+    // the machine switcher filters the merged rows: the rows that machine has a copy of, with that machine's threads only
+    if !mpick.is_empty() { projects=pick_filter(projects,&mpick); }
     let ren=text(&session["drafts"],"@ren");
     let ren_kind=if text(&session["drafts"],"@ren.kind")=="project" {"project"} else {"thread"};
     let renaming=if ren.is_empty() || text(&session["drafts"],"@ren.inline")=="1" { Value::Null }else{json!({"id":format!("{hub}|{ren}"),"kind":ren_kind,"title":if ren_kind=="project" {"Rename project"} else {"Rename thread"},"text":text(&session["drafts"],"@f.title"),"yes":"Rename","no":"Cancel"})};
@@ -516,9 +614,9 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
         let keep=|title:&str,proj:&str| query.is_empty() || fuzzy_hit(title,&query) || fuzzy_hit(proj,&query);
         let (live,faded)=if here_on { plan.active_keyed(&keep) } else { (vec![],vec![]) };
         let (mut lives,mut fadeds)=(vec![live],vec![faded]);
-        for (m,_,fp) in &fplans { let (mut l,mut f)=fp.active_keyed(&keep);
+        for (m,_,fp) in fplans.iter().filter(|(m,_,_)|mpick.is_empty() || *m==mpick) { let (mut l,mut f)=fp.active_keyed(&keep);
             // a linked machine's thread names its machine, and the project it is shown in here
-            for r in l.iter_mut().chain(f.iter_mut()).map(|x|&mut x.1) { r["machine"]=json!(m); r["mark"]=un.mark(m); let fid=text(r,"projectId").strip_prefix(&format!("{hub}|")).unwrap_or("").to_string(); if let Some(lp)=un.far.get(&fid).and_then(|l|st.projects.get(l).map(|p|(l,p))) { r["projectId"]=json!(format!("{hub}|{}",lp.0)); r["project"]=json!(lp.1.title); } }
+            for r in l.iter_mut().chain(f.iter_mut()).map(|x|&mut x.1) { r["machine"]=json!(m); r["mark"]=un.mark(m); let fid=text(r,"projectId").strip_prefix(&format!("{hub}|")).unwrap_or("").to_string(); if let Some(lp)=un.far.get(&fid).and_then(|l|st.projects.get(l).or_else(||far.iter().find_map(|(_,f)|f.projects.get(l))).map(|p|(l,p))) { r["projectId"]=json!(format!("{hub}|{}",lp.0)); r["project"]=json!(lp.1.title); } }
             lives.push(l); fadeds.push(f); }
         // every machine's rows in one order: what needs the person first, then the newest
         let live: Vec<Value>=sidebar::merge_ordered(lives,&|x|x.0).into_iter().map(|x|x.1).collect();
@@ -632,6 +730,59 @@ mod state_tests {
     fn params() -> Value { json!({"target":{"kind":"recent","id":""},"nativeSidebar":1,"nativeKey":"00112233445566778899aabbccddeeff",
         "hub":"h","generation":"g","epoch":"e","viewId":"v","revision":1,"now":1_000_000,"session":{"rid":1,"open":{},"drafts":{}}}) }
     fn event(st: &mut State,e: Value) { assert!(st.apply(&e)); }
+    /// The home (boat-hub) has no copy; desktop and framework each have one: ONE row, drawn from the first machine's copy, holding both machines'
+    /// threads, its chips naming both, no "on <machine>" of one; a machine picked keeps that row with that machine's threads.
+    #[test] fn two_linked_machines_copies_are_one_row_on_a_hub_with_none() {
+        let mut st=State::new(); st.lean=true;
+        let mk=|evs: Vec<Value>| { let mut f=State::new(); f.lean=true; for e in evs { event(&mut f,e); } f };
+        let d=mk(vec![json!({"$":"ProjectCreated","id":"D~p1","title":"repo-desk","root":"/d","at":1}), json!({"$":"ThreadCreated","id":"D~t1","project":"D~p1","title":"on desk","at":5})]);
+        let f=mk(vec![json!({"$":"ProjectCreated","id":"F~p1","title":"repo-fw","root":"/f","at":1}), json!({"$":"ThreadCreated","id":"F~t1","project":"F~p1","title":"on fw","at":7})]);
+        let far=vec![("desktop".to_string(),&d),("framework".to_string(),&f)];
+        let origin=|id: &str| if id.ends_with("~p1") { "github.com/o/r".to_string() } else { String::new() };
+        let list=super::super::merged::merged_projects(&st,&far,&|_|false,&origin,"boat-hub",&[]);
+        let j=super::super::merged::join_of(&list,&["desktop".to_string(),"framework".to_string()]);
+        assert_eq!(j.far.get("F~p1").map(String::as_str),Some("D~p1"));
+        let marks: HashMap<String,Value>=far.iter().map(|(n,_)|(n.clone(),crate::mirror::mark_of(n,false))).collect();
+        let un=Unified{ far:&j.far, marks:&marks, here:"boat-hub", rows:&j.rows };
+        let v=recent_unified(&st,&far,&un,&params()).unwrap(); let ps=v["shown"]["projects"].as_array().unwrap();
+        assert_eq!(ps.len(),1,"{ps:?}");
+        let p=&ps[0]; assert_eq!(p["key"],"github.com/o/r"); assert!(p.get("mark").is_none(),"no single machine's label");
+        assert_eq!(p["also"],"on desktop, framework");
+        assert_eq!(p["machineChips"].as_array().unwrap().iter().map(|c|c["short"].as_str().unwrap()).collect::<Vec<_>>(),["framework","desktop"],"by activity");
+        assert_eq!(p["threads"].as_array().unwrap().iter().map(|r|(r["id"].as_str().unwrap(),r["mark"]["short"].as_str().unwrap())).collect::<Vec<_>>(),[("h|F~t1","framework"),("h|D~t1","desktop")]);
+        // the picker: where it runs by default first (framework: the livelier, no copy here), then Clone it here and a Boat (off: no Boat account)
+        assert_eq!(p["newOn"].as_array().unwrap().iter().map(|o|(o["value"].as_str().unwrap(),o["kind"].as_str().unwrap(),o["disabled"]==true)).collect::<Vec<_>>(),
+            [("F~p1","machine",false),("D~p1","machine",false),("github.com/o/r","clone",false),("github.com/o/r","boat",true)]);
+        assert_eq!(p["runsOn"],"runs on framework");
+        let mut q=params(); q["session"]["drafts"]["@machine"]=json!("framework");
+        let v=recent_unified(&st,&far,&un,&q).unwrap(); let ps=v["shown"]["projects"].as_array().unwrap();
+        assert_eq!((ps.len(),ps[0]["threads"].as_array().unwrap().iter().map(|r|r["id"].as_str().unwrap()).collect::<Vec<_>>()),(1,vec!["h|F~t1"]));
+        // a machine that is off (registry only): its chip dimmed, its threads listed, not opened
+        let reg=vec![super::super::merged::RegProject{ key:"github.com/o/r".into(), name:"repo".into(), origin:"github.com/o/r".into(),
+            machines:vec![super::super::merged::RegMachine{ machine:"laptop".into(), id:"p4".into(), folder:"/l".into(), seen:3 }],
+            threads:vec![super::super::merged::RegThread{ machine:"laptop".into(), id:"laptop~t4".into(), title:"off one".into(), status:"needs".into(), activity:9, pinned:false }] }];
+        let list=super::super::merged::merged_projects(&st,&far,&|_|false,&origin,"boat-hub",&reg);
+        let j=super::super::merged::join_of(&list,&["desktop".to_string(),"framework".to_string()]);
+        let un=Unified{ far:&j.far, marks:&marks, here:"boat-hub", rows:&j.rows };
+        let v=recent_unified(&st,&far,&un,&params()).unwrap(); let p=&v["shown"]["projects"][0];
+        let off=p["threads"].as_array().unwrap().iter().find(|r|r["off"]==true).unwrap();
+        assert_eq!((off["id"].as_str(),off["mark"]["note"].as_str(),off["status"].as_str()),(Some("h|laptop~t4"),Some("laptop is off"),Some("needs")));
+        assert!(p["machineChips"].as_array().unwrap().iter().any(|c|c["short"]=="laptop" && c["dim"]==true));
+    }
+    /// Link with… lists the other machines' projects with no remote; a linked one offers Unlink; a project with a remote offers none.
+    #[test] fn link_with_offers_other_machines_projects_with_no_remote() {
+        let c=|here: bool,short: &str| json!({"here":here,"short":short});
+        let rows: HashMap<String,Value>=[
+            ("p1".to_string(),json!({"key":"desk/p1","origin":"","name":"Notes","machineChips":[c(true,"desk")]})),
+            ("L~p2".to_string(),json!({"key":"fw/p2","origin":"","name":"Jots","machineChips":[c(false,"fw")]})),
+            ("L~p3".to_string(),json!({"key":"github.com/o/r","origin":"github.com/o/r","name":"R","machineChips":[c(false,"fw")]})),
+            ("p4".to_string(),json!({"key":"github.com/o/x","origin":"github.com/o/x","name":"X","machineChips":[c(true,"desk")]})),
+        ].into_iter().collect();
+        assert_eq!(link_with("p1",&rows),json!([{"label":"Link with Jots on fw","value":"p1|fw/p2"}]));
+        assert_eq!(link_with("p4",&rows),json!([]));
+        let mut r2=rows.clone(); r2.insert("p1".into(),json!({"key":"fw/p2","origin":"","name":"Notes","machineChips":[c(true,"desk"),c(false,"fw")]})); r2.remove("L~p2");
+        assert_eq!(link_with("p1",&r2)[0],json!({"label":"Unlink","value":"p1|"}));
+    }
     /// One repository on two machines is one sidebar project: the linked machine's threads sit in this hub's project, each row names its
     /// machine; a linked project of another repository keeps its own row; the Active view names this hub's project for both.
     #[test] fn one_repository_on_two_machines_is_one_project() {
@@ -648,7 +799,7 @@ mod state_tests {
         let origin=|id: &str| match id { "L~p9"=>"github.com/o/r".to_string(), "L~q1"=>"github.com/o/elsewhere".to_string(), _=>String::new() };
         let map=unified_of(&st,&far,&origin); assert_eq!(map.len(),1); assert_eq!(map["L~p9"],"p1");
         let marks: HashMap<String,Value>=[("framework".to_string(),crate::mirror::mark_of("framework",true))].into_iter().collect();
-        let un=Unified{ far:&map, marks:&marks, here:"desk" };
+        let un=Unified{ far:&map, marks:&marks, here:"desk", rows:&HashMap::new() };
         let v=recent_unified(&st,&far,&un,&params()).unwrap(); let ps=v["shown"]["projects"].as_array().unwrap();
         let titles: Vec<(&str,&str)>=ps.iter().map(|p|(p["title"].as_str().unwrap(),p["machine"].as_str().unwrap())).collect();
         assert_eq!(titles,[("backplane-gpui",""),("Other","framework")],"{ps:?}");
@@ -684,9 +835,12 @@ mod state_tests {
         let here=pick("@here"); let hp=here["shown"]["projects"].as_array().unwrap();
         assert_eq!((hp.len(),hp[0]["threads"].as_array().unwrap().iter().map(|r|r["id"].as_str().unwrap()).collect::<Vec<_>>()),(1,vec!["h|t1"]));
         assert_eq!(here["shown"]["machines"][1]["on"],true);
-        // the linked machine only: its projects as it has them (not joined to this one's), labelled
+        // the linked machine only: the merged rows it has a copy of (the same row as under All, not split off), with its threads only
         let fw=pick("framework"); let fp=fw["shown"]["projects"].as_array().unwrap();
-        assert_eq!(fp.iter().map(|p|(p["title"].as_str().unwrap(),p["machine"].as_str().unwrap())).collect::<Vec<_>>(),[("Other","framework"),("Backplane","framework")],"its own order: newest made first");
+        let mut got=fp.iter().map(|p|(p["title"].as_str().unwrap(),p["machine"].as_str().unwrap())).collect::<Vec<_>>(); got.sort();
+        assert_eq!(got,[("Other","framework"),("backplane-gpui","")],"the merged row stays one row");
+        let bp=fp.iter().find(|p|p["title"]=="backplane-gpui").unwrap();
+        assert_eq!(bp["threads"].as_array().unwrap().iter().map(|r|r["id"].as_str().unwrap()).collect::<Vec<_>>(),["h|L~t9","h|L~t8"],"framework's threads only");
         assert_eq!(pick("gone")["shown"]["machines"][0]["on"],true,"a machine no longer linked: every machine again");
         let mut a=params(); a["session"]["drafts"]["@local.view"]=json!("active"); a["session"]["drafts"]["@machine"]=json!("@here");
         assert_eq!(recent_unified(&st,&far,&un,&a).unwrap()["shown"]["active"].as_array().unwrap().iter().map(|r|r["id"].as_str().unwrap()).collect::<Vec<_>>(),["h|t1"]);
@@ -809,7 +963,7 @@ mod state_tests {
             json!({"$":"RoomSet","id":"L~r9","name":"Ring","members":"L~bub","at":3}), json!({"$":"RoomSet","id":"L~r2","name":"Shared","members":"L~bub\nscout@desk","at":3})] { event(&mut boat,e); }
         let far=vec![("boat-hub".to_string(),&boat)];
         let marks: HashMap<String,Value>=[("boat-hub".to_string(),crate::mirror::mark_of("boat-hub",false))].into();
-        let un=Unified{ far:&HashMap::new(), marks:&marks, here:"" };
+        let un=Unified{ far:&HashMap::new(), marks:&marks, here:"", rows:&HashMap::new() };
         let v=recent_unified(&here,&far,&un,&params()).unwrap(); let s=&v["shown"];
         let ids: Vec<&str>=s["bots"].as_array().unwrap().iter().map(|b|b["id"].as_str().unwrap()).collect();
         assert_eq!(ids,["h|L~bub","h|b1","h|L~cal"],"the far uberbot leads, then this hub's bots, then the far ones");

@@ -138,6 +138,10 @@ pub fn act(req: &Req) -> Option<ActOut> {
             } else { a.set("@del", armed_with) } // the menu stays open while an armed Delete waits for its second press (Menu.keep)
         }
         // the project menu's Remove (the client asks twice) and a thread's New subthread (`<parent>|<project>`: the new thread is selected as New thread's is)
+        // the machine picker's Clone it here (present/screen.rs `picker`): this hub clones the remote and adds it (net/registry.rs `project.clone`)
+        "proj-clone" => { if v.is_empty() { return None } a.rpc("project.clone", json!({"origin": v})); a.set("@menu", ""); }
+        // Link with… (a project with no remote): this project shows as one with the other (`project.link.<id>` = the other's key, present/merged.rs); "" unlinks
+        "proj-link" => { let (id, key) = v.split_once('|')?; if id.is_empty() { return None } a.rpc("setting.set", json!({"key": format!("project.link.{id}"), "value": key})); a.set("@menu", ""); }
         "proj-remove" => { if v.is_empty() { return None } a.rpc("project.remove", json!({"project": v})); a.set("@menu", ""); a.set("@del", ""); }
         "thread-child" => {
             let (parent, project) = v.split_once('|')?;

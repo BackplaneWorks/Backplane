@@ -203,7 +203,15 @@ GPUI: `screens/badge.rs` `place_text`/`place`/`runs_text`/`from_machine`, `scree
 newest first across machines. A linked project of the same repository (`present::screen::unified_of`) is not a row of its own: this hub's project holds its threads (counts, `waiting` and
 `updatedAt` too) and says `also` "also on desktop", `marks` (their markers) and `newOn`; a linked project of no shared repository is a row with `id` `<link>~<id>`, `mark`, `machine` and its own
 `newOn`. A linked thread is a `Thread` with `id` `<link>~<id>`, `mark` (`{name, short, away, label, runs}`, the desktop's), `project` this hub's id when the repository is one, `preview` from the mirror.
-- `machine` (on `projects.list`, `threads.list`): "" every machine, "@here" this one, or a linked machine's name (one no longer linked is every machine again; with a machine named a repository keeps its linked row).
+- One project list (docs/ALWAYS-ON.md section 5, `present/merged.rs`): one row per project key (the normalized origin; with no remote `<machine>/<id>`, or a hand link's
+  `project.link.<id>`). Two linked machines' copies are one row too on a hub that has none (the home): the row is drawn from the first shown machine's copy and says `also`
+  "on desktop, framework" (no single `mark`). Each row adds `key`, `machines` (a chip per machine with a copy: `{name, short, here, state: here|on|away|off, dim, note}`,
+  `note` "desktop is off" for a dimmed one), `default` (`{machine, id}`: where a new thread runs unless the person picks another: this machine's copy, else the most
+  recently active machine's) and `picker` (`[{value, label, kind: clone|boat, action, disabled?}]`: "Clone it here" when this machine has no copy and there is a remote,
+  "A Boat (fresh clone)" disabled until a Boat account is connected). `newOn` is default first; an away machine's entry is "Wait for desktop" (a held launch).
+  A project every machine of which is off is a row from the registry on the home (`id` `@off:<key>`, `off: true`, `newOn` empty). `registry.list` gives the merged registry.
+- `machine` (on `projects.list`, `threads.list`): "" every machine, "@here" this one, or a linked machine's name (one no longer linked is every machine again): a filter over the merged
+  rows (the rows that machine has a copy of, its threads), never a split.
 - `machines` in the reply (only with a linked machine): the switcher's chips `[{value, label, on, away, hint}]`, the desktop's `machine_switch`: All, this machine, each linked one.
 - `newOn: [{value, label, away}]`: where a New thread can start (`label` "New thread on desktop", an away machine says so); `thread.create {project: value}` makes it there.
 - On a `<link>~<id>` thread these answer from there: `thread.entries` (the mirror), `subscribe {topic:"thread"}` (new `entry` and `turn` pushes, from a 2 s look at the mirror), `message.send` (text only; images say so), `turn.interrupt`,

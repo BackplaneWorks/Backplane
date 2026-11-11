@@ -88,9 +88,54 @@ pub fn join_project(row: &mut Value, ps: &[Partner], un: &Unified) {
         row["updatedAt"] = json!(row["updatedAt"].as_u64().unwrap_or(0).max(p.updated));
         if seen.insert(p.machine.clone()) { marks.push(un.marks.get(&p.machine).cloned().unwrap_or_else(|| crate::mirror::mark_of(&p.machine, false))) }
     }
-    let local = row["id"].as_str().unwrap_or("").to_string();
-    row["newOn"] = new_on(&local, ps.iter().map(|p| (p.machine.as_str(), p.id.as_str())), un);
-    row["also"] = json!(crate::sidebar::also_label(&marks)); row["marks"] = json!(marks);
+    let own = row["id"].as_str().unwrap_or("").to_string();
+    let machine = row["machine"].as_str().unwrap_or("").to_string();
+    if machine.is_empty() {
+        row["newOn"] = new_on(&own, ps.iter().map(|p| (p.machine.as_str(), p.id.as_str())), un);
+        row["also"] = json!(crate::sidebar::also_label(&marks));
+    } else {
+        // a row drawn from a linked machine's copy (none here): every machine that has it, that one first, and no single "on <machine>"
+        marks.insert(0, un.marks.get(&machine).cloned().unwrap_or_else(|| crate::mirror::mark_of(&machine, false)));
+        row["newOn"] = crate::present::screen::new_on_far(std::iter::once((machine.as_str(), own.as_str())).chain(ps.iter().map(|p| (p.machine.as_str(), p.id.as_str()))), un);
+        row["also"] = json!(crate::sidebar::also_label(&marks).replacen("also on", "on", 1));
+        if let Some(o) = row.as_object_mut() { o.remove("mark"); }
+    }
+    row["marks"] = json!(marks);
+}
+
+/// The merged row's fields on a projects.list row (present/merged.rs, by the id that draws it): `key`, `machines` (a chip per machine with a copy:
+/// here/on/away/off, `dim`, `note` "desktop is off") and `default` (`{machine, id}`: where a new thread runs unless the person picks another).
+pub fn merged_fields(row: &mut Value, un: &Unified) {
+    let id = row["id"].as_str().unwrap_or("").to_string();
+    let Some(r) = un.rows.get(&id) else { return };
+    row["key"] = r["key"].clone(); row["machines"] = r["machineChips"].clone(); row["default"] = r["default"].clone();
+    if !id.starts_with("@off:") {
+        crate::present::screen::picker(row, r, un.here);
+        // the apps take `newOn` entries as projects to start a thread in: a machine (or Wait for one) stays there; Clone it here and a Boat go
+        // to `picker` with their `action` (an app that knows them draws them; one that does not, never sends a remote URL as a project id)
+        let all: Vec<Value> = row["newOn"].as_array().cloned().unwrap_or_default();
+        let (on, more): (Vec<Value>, Vec<Value>) = all.into_iter().partition(|o| matches!(o["kind"].as_str(), Some("machine") | Some("wait") | None));
+        row["newOn"] = json!(on); row["picker"] = json!(more);
+    }
+    let off = r["off"]["threads"].as_array().map_or(0, |a| a.len()) as u64;
+    if off > 0 && !id.starts_with("@off:") { row["threadCount"] = json!(row["threadCount"].as_u64().unwrap_or(0) + off) }
+}
+/// The projects every machine of which is off: a row each, from the registry (`@off:<key>`): no new thread there (`newOn` empty).
+pub fn off_rows(un: &Unified) -> Vec<(u64, String, Value)> {
+    un.rows.iter().filter(|(k, _)| k.starts_with("@off:")).map(|(k, r)| {
+        let at = ms(r["lastActivity"].as_u64().unwrap_or(0));
+        (at, k.clone(), json!({"id":k,"title":r["name"],"root":r["folder"],"origin":r["origin"],"threadCount":r["off"]["threads"].as_array().map_or(0, |a| a.len()),"settledCount":0,"updatedAt":at,"waiting":0,
+            "icon":r["icon"],"css":r["css"],"color":r["color"],"machine":"","mark":null,"newOn":[],"off":true,"also":crate::sidebar::also_label(r["machineChips"].as_array().map(|v| v.as_slice()).unwrap_or(&[])).replacen("also on", "on", 1)}))
+    }).collect()
+}
+/// A machine picked: the merged rows that machine has a copy of ("@here": this one). "" keeps all.
+pub fn pick_rows(items: Vec<(u64, String, Value)>, pick: &str) -> Vec<(u64, String, Value)> {
+    if pick.is_empty() { return items }
+    let here = pick == "@here";
+    items.into_iter().filter(|(_, _, v)| match v["machines"].as_array() {
+        Some(c) => c.iter().any(|c| if here { c["here"] == json!(true) } else { c["name"] == json!(pick) }),
+        None => if here { v["machine"].as_str().unwrap_or("").is_empty() } else { v["machine"] == json!(pick) },
+    }).collect()
 }
 
 /// The linked threads to list: `(updatedAt, id)` for the machines `pick` shows, in a project (`project` here, or a linked one's own id; "" any), archived or not, settled
@@ -165,7 +210,7 @@ mod tests {
         assert_eq!(shown_far(&far, "desktop").len(), 1); assert_eq!(shown_far(&far, "").len(), 1);
     }
     #[test] fn the_chips_are_empty_with_no_machine_and_all_here_and_each_machine_otherwise() {
-        let m = marks(); let un = Unified { far: &HashMap::new(), marks: &m, here: "laptop" };
+        let m = marks(); let e = HashMap::new(); let un = Unified { far: &HashMap::new(), marks: &m, here: "laptop", rows: &e };
         assert_eq!(chips(&[], &un, ""), json!([]));
         let d = desk(); let far = vec![("desktop".to_string(), &d)];
         let c = chips(&far, &un, "desktop"); let v: Vec<(&str, bool)> = c.as_array().unwrap().iter().map(|x| (x["value"].as_str().unwrap(), x["on"].as_bool().unwrap())).collect();
@@ -193,7 +238,7 @@ mod tests {
     #[test] fn a_project_on_both_machines_is_one_row_and_a_linked_only_one_has_its_own() {
         let d = desk(); let far = vec![("desktop".to_string(), &d)]; let m = marks();
         let mut join = HashMap::new(); join.insert("L~p1".to_string(), "p1".to_string());
-        let un = Unified { far: &join, marks: &m, here: "laptop" };
+        let e = HashMap::new(); let un = Unified { far: &join, marks: &m, here: "laptop", rows: &e };
         let rows = project_rows(&far, "", &join, &un); assert_eq!(rows.len(), 1); assert_eq!(rows[0].1, "L~p2");
         assert_eq!(rows[0].2["mark"]["name"], "desktop"); assert_eq!(rows[0].2["newOn"][0]["value"], "L~p2"); assert_eq!(rows[0].2["newOn"][0]["label"], "New thread on desktop");
         assert_eq!(rows[0].2["threadCount"], 1);

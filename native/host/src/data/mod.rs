@@ -119,9 +119,10 @@ fn with_far<R>(hub: &Hub, want: &str, f: impl FnOnce(&machines::Far, &crate::pre
     let m = hub.mirrors(); let here = m.here();
     m.shown(|far| {
         let pick = machines::pick_of(want, far);
-        let join = if pick.is_empty() { crate::statehost::policies().and_then(|p| p.with_state(|st| crate::present::screen::unified_of(st, far, &|id| m.origin(id)))).unwrap_or_default() } else { HashMap::new() };
+        // the join stays whatever is picked: a machine picked filters the merged rows (machines::pick_rows), it never splits them
+        let join = crate::statehost::policies().and_then(|p| p.with_state(|st| crate::present::screen::join_full(st, far, m))).unwrap_or(crate::present::merged::Join { far: HashMap::new(), rows: HashMap::new() });
         let marks: HashMap<String, Value> = far.iter().map(|(n, _)| (n.clone(), m.mark(n))).collect();
-        f(far, &crate::present::screen::Unified { far: &join, marks: &marks, here: &here }, &pick)
+        f(far, &crate::present::screen::Unified { far: &join.far, marks: &marks, here: &here, rows: &join.rows }, &pick)
     })
 }
 /// A thread row of this hub or of a linked machine (`<link>~<id>`, built from its mirror: no log to read, so its preview is the mirror's last words).
@@ -362,11 +363,15 @@ fn attachment_get(hub: &Hub, p: &Value) -> Result<Value, Value> {
 async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Result<Value, Value> {
     match m {
         "projects.list" => { let g = hub.model().await; let asks = open_ask_counts(hub);
+            // one row per project key over every machine (present/merged.rs): this hub's copy, else a linked machine's, holds the others' counts;
+            // `key`, `machines` (chips), `default` (where new work runs) on each; a machine picked keeps the rows it has a copy of
             let (items, chips) = with_far(hub, s(p, "machine"), |far, un, pick| {
-                let ps = machines::partners(far, pick, un.far);
-                let mut items: Vec<(u64, String, Value)> = if machines::here_on(pick) { g.projects.keys().filter_map(|i| project_json(&g, i, &asks).map(|mut v| { if let Some(x) = ps.get(i) { machines::join_project(&mut v, x, un) } (v["updatedAt"].as_u64().unwrap_or(0), i.clone(), v) })).collect() } else { vec![] };
-                items.extend(machines::project_rows(far, pick, un.far, un));
-                (items, machines::chips(far, un, pick))
+                let ps = machines::partners(far, "", un.far);
+                let mut items: Vec<(u64, String, Value)> = g.projects.keys().filter_map(|i| project_json(&g, i, &asks).map(|mut v| { if let Some(x) = ps.get(i) { machines::join_project(&mut v, x, un) } (v["updatedAt"].as_u64().unwrap_or(0), i.clone(), v) })).collect();
+                items.extend(machines::project_rows(far, "", un.far, un).into_iter().map(|(a, i, mut v)| { if let Some(x) = ps.get(&i) { machines::join_project(&mut v, x, un) } (a, i, v) }));
+                items.extend(machines::off_rows(un));
+                for it in items.iter_mut() { machines::merged_fields(&mut it.2, un); }
+                (machines::pick_rows(items, pick), machines::chips(far, un, pick))
             });
             let (projects, next) = page_of(items, limit_of(p, 50, 200), s(p, "before")); Ok(json!({"projects":projects,"next":next,"machines":chips})) }
         "threads.list" => { let g = hub.model().await; let asks = open_ask_counts(hub); let (proj, arch) = (s(p, "project"), p["archived"] == true);

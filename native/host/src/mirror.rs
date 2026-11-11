@@ -160,7 +160,7 @@ pub fn thread_ref(id: &str, here: &str, local: &dyn Fn(&str) -> bool, far: &[(St
 }
 
 /// Ask each linked machine for its projects' origins (machine_list) now and every minute, so the sidebar can show a repository
-/// that is on both machines as one project. Display only: nothing here is a decision.
+/// that is on both machines as one project, and sync this hub's rows with the registry on the home. Display only: nothing here is a decision.
 pub fn watch_origins(hub: Arc<crate::hub::Hub>) {
     tokio::spawn(async move {
         hub.mirrors().set_here(&crate::net::botnet::name().await);
@@ -173,6 +173,8 @@ pub fn watch_origins(hub: Arc<crate::hub::Hub>) {
                     hub.mirrors().set_origins(&link, &ps);
                 }
             }
+            // the registry on the home: this hub's rows go there, the merged list comes back (net/registry.rs)
+            crate::net::registry::tick(&hub, &hub.mirrors().here()).await;
             tokio::time::sleep(std::time::Duration::from_secs(60)).await;
         }
     });
