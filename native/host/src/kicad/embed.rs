@@ -1699,7 +1699,10 @@ async fn spawn_gui_session(
         // pre-warm (bp.9's ShowFrame.prewarm): the other editors opened hidden in KiCad's idle time, so the first switch to them is a show
         if !desc2.is_empty() && proto::load(&desc2).has_field("kiapi.backplane.embed.ShowFrame", "prewarm") {
             tokio::spawn(async move {
+                // spaced out: KiCad opens a pre-warmed frame on its UI thread after replying, and a request sent meanwhile (the person's
+                // own switch) would wait behind it; the first after the shown frame has settled
                 for k in prewarm_kinds(&active2, &have) {
+                    tokio::time::sleep(Duration::from_millis(1500)).await;
                     let _ = raw_on(&me2, &sock2, &desc2, "kiapi.backplane.embed.ShowFrame", json!({"kind": fk_of(k), "prewarm": true}), 30000).await;
                 }
                 let _ = me2.send(Msg::ForkSync { pro: pro2, gen });
