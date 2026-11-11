@@ -237,6 +237,9 @@ fn row_entry_hid(r: &crate::model::Row, bot: bool, backend: &HashSet<String>) ->
         let kind = match r.role.as_str() { "user" => "user", "assistant" => "assistant", _ => "note" };
         if kind == "assistant" && r.text.trim().is_empty() { return None }
         let mut en = json!({"id":r.id,"kind":kind,"text":if kind == "user" { shown_text(&r.text) } else { crate::settings::order::pay_shown(&r.text) },"at":at});
+        // a reply (`<in_reply_to>` block, bots/reply.rs): its body as the text and the message it answers, as the desktop draws it (present/thread.rs)
+        if kind == "user" { if let Some((to, quote, body)) = crate::bots::reply::of(&r.text) {
+            en["text"] = json!(shown_text(&body)); en["replyTo"] = json!({"id": to, "quote": quote.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("")}); } }
         if crate::present::thread::hidden(bot, &r.id, &r.role, &r.text) || (bot && backend.contains(&r.id)) { en["agentOnly"] = json!(true) }
         return Some(en);
     }

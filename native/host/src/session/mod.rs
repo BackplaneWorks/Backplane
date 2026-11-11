@@ -50,7 +50,7 @@ fn target_valid(t: &Value) -> bool {
 
 /// The fields of the presenter's params only the hub makes: the thread's `window` and `page` (rows read from the index), `reads` and `local`. A client's own copy would
 /// be taken for the hub's (an unported native page for indexed rows), so every one is removed from the request's clone before the hub's go in.
-fn strip_hub_owned(params: &mut Value) { if let Some(o) = params.as_object_mut() { for k in ["window", "page", "reads", "local", "wants", "botPage", "roomPage", "subLog", "subView", "liveText"] { o.remove(k); } } }
+fn strip_hub_owned(params: &mut Value) { if let Some(o) = params.as_object_mut() { for k in ["window", "page", "reads", "local", "wants", "botPage", "roomPage", "subLog", "subView", "liveText", "incoming"] { o.remove(k); } } }
 
 /// PRESENTER_UNAVAILABLE is retryable on the wire: a target the Rust presenter has not ported (the helper is not running) or a helper that is restarting answers "not yet", never "no"
 /// (Hub::error has retryable:false for every code).
@@ -151,6 +151,9 @@ impl Hub {
             let mut pj = page_json(th, before, pg); pj["backendBefore"] = json!(bb); params["page"] = pj;
         }
         // the reply the agent is streaming now (Hub::live_delta), drawn in place of "Working" until its message lands
+        // the person's messages the hub took and the thread's agent has not logged yet, on the newest page only (present/thread.rs)
+        if let (Some(th), true, 0) = (shown.as_deref(), page.is_some(), before) { let inc = self.incoming(th); if !inc.is_empty() { if let Some(o) = params.as_object_mut() {
+            o.insert("incoming".into(), Value::Array(inc.into_iter().map(|(id, text, at)| json!({"id": id, "text": text, "at": at})).collect())); } } }
         if let (Some(th), true) = (shown.as_deref(), page.is_some()) { let t = self.live_text(th); if !t.is_empty() { if let Some(o) = params.as_object_mut() { o.insert("liveText".into(), Value::String(t)); } } }
         // the thread's subagent log, for the Subagents panel's rows and their drill-down (present/panels.rs `subs_at`)
         if let (Some(th), true) = (shown.as_deref(), page.is_some()) { let log = self.sub_log_for(th).await; if let Some(o) = params.as_object_mut() { o.insert("subLog".into(), log); } }

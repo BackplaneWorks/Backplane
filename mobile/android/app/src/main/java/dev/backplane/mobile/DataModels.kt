@@ -22,7 +22,10 @@ data class DEntry(
     val tone: String = "",  // a note: error, info…
     val term: DTermRef? = null, // a chat terminal (feature `terms`, kind "term"): its card
     val handoff: DHandoff? = null, // a `/give` received (kind "handoff"): its card
+    val replyTo: DReplyTo? = null, // the person's reply to a message (data/1 `replyTo`): the chip over the bubble
 )
+/** What a reply answers (docs/PHONE-DATA.md, Entry): the message's id and its first line. */
+data class DReplyTo(val id: String, val quote: String)
 /** A `/give` received: where it came from, the person's note, the summary and what the work touched; a reference opens by `link.resolve {url, thread}`. */
 data class DHandoff(val from: String, val title: String, val note: String, val summary: String, val refs: List<DRef>)
 data class DRef(val kind: String, val label: String, val url: String, val thread: String)
@@ -74,6 +77,7 @@ fun parseEntry(o: JSONObject) = DEntry(
     label = o.str("label"), tone = o.str("tone"), agentOnly = o.optBoolean("agentOnly", false),
     term = o.optJSONObject("term")?.let { DTermRef(it.str("key"), it.str("id"), it.str("title"), it.optInt("cols", 80), it.optInt("rows", 24), it.str("cmd")) },
     handoff = o.optJSONObject("handoff")?.let(::parseHandoff),
+    replyTo = o.optJSONObject("replyTo")?.takeIf { it.str("id").isNotEmpty() }?.let { DReplyTo(it.str("id"), it.str("quote")) },
 )
 fun parseProject(o: JSONObject) = DProject(o.str("id"), o.str("title"), o.str("root"), o.optInt("threadCount", 0), o.lng("updatedAt"), o.optInt("waiting", 0), o.optString("icon", "folder"), o.optString("css"), if (o.has("settledCount") && !o.isNull("settledCount")) o.optInt("settledCount") else null,
     parseMark(o.optJSONObject("mark")), o.str("also"), o.optJSONArray("newOn").list { DNewOn(it.str("value"), it.str("label"), it.optBoolean("away")) }, o.str("runsOn"), o.str("key"))

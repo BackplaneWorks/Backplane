@@ -451,6 +451,20 @@ pub fn secret_asks(st: &State) -> Vec<(String, String, String)> {
         Some((n.to_string(), b["purpose"].as_str().unwrap_or("").to_string(), b["thread"].as_str().unwrap_or("").to_string())) }).collect()
 }
 
+/// The page's rows and the unread list with the person's messages on their way in (`params.incoming`) after them: each once (one the agent
+/// logged already is its own row), oldest first, never before the newest row.
+fn with_incoming(mut es: Vec<Ent>, unread: &str, inc: &Value) -> (Vec<Ent>, String) {
+    let mut unread = unread.to_string();
+    let last_at = es.last().map_or(0, |e| e.at);
+    for m in inc.as_array().into_iter().flatten() {
+        let (Some(id), Some(text)) = (m["id"].as_str(), m["text"].as_str()) else { continue };
+        if id.is_empty() || es.iter().any(|e| e.id == id) { continue }
+        es.push(Ent { id: id.to_string(), msg: true, role: "user".into(), akind: String::new(), text: text.to_string(), at: m["at"].as_u64().unwrap_or(0).max(last_at) });
+        if !unread.split(' ').any(|u| u == id) { if !unread.is_empty() { unread.push(' '); } unread.push_str(id); }
+    }
+    (es, unread)
+}
+
 /// shown.thread for a plain idle thread, from the page rows. `hub` is the request's hub key (the id is `<hub>|<thread>`), `draft` the composer's text.
 /// None unless every key is derived.
 pub fn thread_object(st: &State, hub: &str, thread: &str, params: &Value, draft: &str) -> Option<Value> {
@@ -534,6 +548,10 @@ pub fn thread_object_checked(st: &State, hub: &str, thread: &str, params: &Value
     // Signal.out: the turn ended but the thread waits on work it started (a subagent, a background shell, a watched job, a delegated task)
     let waiting = subs["live"].as_u64().unwrap_or(0) > 0 || st.tasks.values().any(|(p, _, term, _)| p == thread && !*term);
     let unread = st.settings.get(&format!("wait.{thread}")).map(String::as_str).unwrap_or("");
+    // the person's messages on their way in (the hub took them; the agent logs each when it takes it, after an account check or behind a turn):
+    // at the end, in the order sent, as the person's own rows (a reply with its "In reply to" chip), "not read yet" while a turn runs
+    let (es, unread) = with_incoming(es, unread, &params["incoming"]);
+    let unread = unread.as_str();
     let mut entries = entries_w(&es, running, waiting, unread, &|id| super::window::fold_choice(params, id), now_ms, zone.as_ref(), &mark, end).ok_or("rows.unsupported")?;
     // Mob.pending: a thread that works shows the agent's "Working" row after its last entry
     if running {
@@ -778,6 +796,25 @@ mod tests {
             assert!(tools_between(at("msg_A:0:aa"), at("msg_B:0:bb")) && tools_between(at("msg_B:0:bb"), at("msg_C:0:cc")), "the tool rows sit between the texts: {seq:?}");
             assert!(at("u") < at("msg_A:0:aa"));
         }
+    }
+    // Nov 11: the person's reply to Bub sat 104 s between the hub taking it and Bub's agent logging it, and showed nowhere. A message on its way
+    // in shows at the end, in time order, as the person's row with its "In reply to" chip; once logged it is its own row, not a second one.
+    #[test] fn a_message_on_its_way_in_shows_at_the_end_with_its_reply_chip() {
+        let quote = "All done:\n- **KiStack PR #14 is merged**"; let reply = format!("<in_reply_to msg=msg_A:0:aa chars={}>\n{quote}\n</in_reply_to>\n\nmake KiCad faster", quote.chars().count());
+        let es = vec![m("u0", "user", "earlier", 1699999000), m("msg_A:0:aa", "assistant", "All done:\n- **KiStack PR #14 is merged**", 1699999010), m("msg_B:0:bb", "assistant", "MCP tab started", 1699999050)];
+        let inc = json!([{"id": "c-1", "text": reply, "at": 1699999040}, {"id": "c-2", "text": "also MCP for agents", "at": 1699999041}]);
+        let (es2, unread) = with_incoming(es.clone(), "", &inc);
+        let out = entries_w(&es2, true, false, &unread, &|_| true, 1700000000_000, Some(&Rule::utc()), &|_| 0, 0).unwrap();
+        let ids: Vec<&str> = out.iter().map(|e| e["id"].as_str().unwrap_or("")).collect();
+        assert_eq!(&ids[ids.len() - 2..], ["c-1", "c-2"], "after the newest row, in the order sent: {ids:?}");
+        let r = &out[out.len() - 2];
+        assert_eq!((r["kind"].as_str(), r["replyTo"]["id"].as_str()), (Some("user"), Some("msg_A:0:aa")));
+        assert_eq!(r["replyTo"]["quote"], "All done:"); assert!(r["text"].as_str().unwrap().starts_with("make KiCad faster"), "{r}");
+        assert_eq!(r["unread"].as_bool(), Some(true), "not read yet while a turn runs");
+        // the agent logged it: one row, the logged one
+        let mut logged = es.clone(); logged.push(m("c-1", "user", &reply, 1699999060));
+        let (es3, _) = with_incoming(logged, "", &inc);
+        assert_eq!(es3.iter().filter(|e| e.id == "c-1").count(), 1); assert_eq!(es3.last().unwrap().id, "c-2");
     }
     // the turn ended but its subagents still work: the last reply waits, it is not Finished
     #[test] fn a_turn_whose_work_still_runs_says_waiting_not_finished() {

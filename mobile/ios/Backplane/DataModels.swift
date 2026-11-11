@@ -73,11 +73,12 @@ struct DEntry: Codable, Equatable, Identifiable {
     var term: DTermInfo?   // a chat terminal (feature `terms`, kind "term")
     var handoff: DHandoff?   // a `/give` received (kind "handoff"): its card
     var attachments: [DAttachment] = []
+    var replyTo: DReplyTo?   // the person's reply to a message (data/1 `replyTo`): the chip over the bubble
     // phone-only, never on the wire: a message sent and not yet confirmed, or one the hub refused
     var sending = false
     var failed = false
     var localImages: [Data] = []   // the pictures of a message this phone is sending (JPEG), shown before the hub has them
-    enum CodingKeys: String, CodingKey { case id, kind, text, at, label, tone, clientId, replaces, live, agentOnly, tool, ask, term, handoff, attachments }
+    enum CodingKeys: String, CodingKey { case id, kind, text, at, label, tone, clientId, replaces, live, agentOnly, tool, ask, term, handoff, attachments, replyTo }
     init(id: String, kind: String, text: String, at: Int, clientId: String? = nil, live: Bool = false) {
         self.id = id; self.kind = kind; self.text = text; self.at = at; self.clientId = clientId; self.live = live
     }
@@ -93,7 +94,16 @@ struct DEntry: Codable, Equatable, Identifiable {
         term = try? c.decode(DTermInfo.self, forKey: .term)
         handoff = try? c.decode(DHandoff.self, forKey: .handoff)
         attachments = (try? c.decode([DAttachment].self, forKey: .attachments)) ?? []
+        replyTo = try? c.decode(DReplyTo.self, forKey: .replyTo)
     }
+}
+
+/// What a reply answers (docs/PHONE-DATA.md, Entry): the message's id and its first line.
+struct DReplyTo: Codable, Equatable {
+    var id: String; var quote: String
+    enum CodingKeys: String, CodingKey { case id, quote }
+    init(id: String, quote: String) { self.id = id; self.quote = quote }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); id = c.str(.id); quote = c.str(.quote) }
 }
 
 /// A `/give` received (docs/PHONE-DATA.md, Handoffs): where it came from, the person's note, the summary and what the work touched; a reference opens by `link.resolve {url, thread}`.

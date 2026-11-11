@@ -24,6 +24,9 @@ pub struct Hub {
     rpc: std::sync::RwLock<Vec<(&'static str, Arc<dyn RpcHandler>)>>, http: std::sync::RwLock<Vec<(&'static str, Arc<dyn HttpHandler>)>>,
     observers: std::sync::RwLock<Vec<Arc<dyn Observer>>>, transforms: std::sync::RwLock<Vec<Arc<dyn Transform>>>, far: std::sync::OnceLock<Arc<dyn FarView>>, far_router: std::sync::OnceLock<Arc<dyn crate::api::FarRouter>>, far_mcp: std::sync::OnceLock<Arc<dyn crate::api::FarMcp>>, mirror_feed: std::sync::OnceLock<Arc<dyn crate::api::MirrorFeed>>, mirror_gate: tokio::sync::Mutex<()>, mirrors: crate::mirror::Mirrors, rebuild_run: tokio::sync::Mutex<()>, rebuild_again: std::sync::atomic::AtomicBool, pairing: std::sync::OnceLock<Arc<dyn Pairing>>, auth_route: std::sync::OnceLock<Arc<dyn AuthRoute>>,
     live: std::sync::Mutex<std::collections::HashMap<String, String>>,
+    /// The person's messages on their way into a thread (agents/mod.rs `deliver_k`): taken by the hub, not yet logged by the thread's agent, which
+    /// logs a message only when it takes it (after an account check, behind a turn). Shown at the end of the thread meanwhile (present/thread.rs).
+    incoming: std::sync::Mutex<std::collections::HashMap<String, Vec<(String, String, u64)>>>,
     pub window_bin: std::sync::OnceLock<PathBuf>,
     /// The hub's one account manager (settings/accounts_hub.rs `manager`): opened by whichever needs it first, the agents' recovery or settings::start, so neither waits on the other.
     pub accounts: std::sync::OnceLock<Arc<crate::settings::accounts_io::Accounts>>,
@@ -119,7 +122,7 @@ impl Hub {
         let model = Model::open(&store)?;
         crate::startup::mark("model built");
         let hub = Arc::new(Hub { cfg, auth, epoch, presenter, store: store.clone(), commits: ctx, model: Mutex::new(model), gen: AtomicU64::new(1), changed: tx, frames: ftx, native_key: { let mut b = [0u8; 16]; let _ = crate::plat::fs::random(&mut b); hex::encode(b) },
-            rpc: Default::default(), mirrors: Default::default(), http: Default::default(), observers: Default::default(), transforms: Default::default(), far: Default::default(), far_router: Default::default(), far_mcp: Default::default(), mirror_feed: Default::default(), mirror_gate: Default::default(), rebuild_run: Default::default(), rebuild_again: Default::default(), pairing: Default::default(), auth_route: Default::default(), outbox_max: std::sync::atomic::AtomicUsize::new(OUTBOX_MAX), signal_seq: AtomicU64::new(store.len() as u64), id_alloc: AtomicU64::new(0), view_bump: AtomicU64::new(0), need_resync: Default::default(), extra_info: Default::default(), live: Default::default(), window_bin: Default::default(), accounts: Default::default(), me: Default::default(), outboxes: Default::default() });
+            rpc: Default::default(), mirrors: Default::default(), http: Default::default(), observers: Default::default(), transforms: Default::default(), far: Default::default(), far_router: Default::default(), far_mcp: Default::default(), mirror_feed: Default::default(), mirror_gate: Default::default(), rebuild_run: Default::default(), rebuild_again: Default::default(), pairing: Default::default(), auth_route: Default::default(), outbox_max: std::sync::atomic::AtomicUsize::new(OUTBOX_MAX), signal_seq: AtomicU64::new(store.len() as u64), id_alloc: AtomicU64::new(0), view_bump: AtomicU64::new(0), need_resync: Default::default(), extra_info: Default::default(), live: Default::default(), incoming: Default::default(), window_bin: Default::default(), accounts: Default::default(), me: Default::default(), outboxes: Default::default() });
         let _ = hub.me.set(Arc::downgrade(&hub));
         // housekeeping that cannot be written (a full disk) must not stop a hub that can still serve what it has
         if let Err(e) = hub.bootstrap() { crate::guard::degraded("log writes", &format!("{e:#}")); }
@@ -497,6 +500,14 @@ impl Hub {
     }
     /// The live text of every streaming thread (for a client that joins mid-turn).
     /// The text a thread's agent is streaming now ("" when none): the thread view draws it as the reply being written.
+    /// A person's message on its way into `thread` (id, text as the agent gets it, seconds): shown until its own row is logged.
+    pub fn incoming_add(&self, thread: &str, msg: &str, text: &str, at: u64) { self.incoming.lock().unwrap().entry(thread.to_string()).or_default().push((msg.to_string(), text.to_string(), at)); self.bump_views(); }
+    pub fn incoming_done(&self, thread: &str, msg: &str) {
+        let mut m = self.incoming.lock().unwrap();
+        if let Some(v) = m.get_mut(thread) { v.retain(|(i, _, _)| i != msg); if v.is_empty() { m.remove(thread); } }
+        drop(m); self.bump_views();
+    }
+    pub fn incoming(&self, thread: &str) -> Vec<(String, String, u64)> { self.incoming.lock().unwrap().get(thread).cloned().unwrap_or_default() }
     pub fn live_text(&self, thread: &str) -> String { self.live.lock().unwrap().get(thread).cloned().unwrap_or_default() }
     /// How much text each streaming thread has so far. Streamed text only grows until its stream ends, so a view that drew `n` bytes of a thread is current while this still says `n`.
     pub fn live_lens(&self) -> Vec<(String, usize)> { self.live.lock().unwrap().iter().map(|(a, b)| (a.clone(), b.len())).collect() }

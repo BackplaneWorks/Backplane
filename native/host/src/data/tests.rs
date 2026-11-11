@@ -672,3 +672,16 @@ impl RpcHandler for FakeStar {
     assert!(crate::present::thread::hidden(true, "t:t9:lr-r1", "user", &report) && !crate::present::thread::hidden(false, "t:t9:lr-r1", "user", &report));
     assert!(crate::present::thread::hidden(false, "h", "user", &format!("{}\"First\" (t1).", crate::present::thread::HANDOFF_HEAD)), "agent_only stays everywhere");
 }
+
+/// Nov 11: the person's Reply to one of Bub's messages. A phone gets what they wrote as the text and what it answers as `replyTo`
+/// (docs/PHONE-DATA.md, Entry), never the raw `<in_reply_to>` block.
+#[test]
+fn a_reply_reaches_a_phone_as_its_body_and_reply_to() {
+    let text = crate::bots::reply::wrap("msg_A:0:aa", "All done:\n- **KiStack PR #14 is merged**", "make KiCad faster");
+    let row = |text: &str| crate::model::Row { seq: 1, ord: 1, id: "c-1".into(), thread: "t1".into(), src: String::new(), kind: "msg", role: "user".into(), akind: String::new(), text: text.into(), at: 1 };
+    let e = row_entry_hid(&row(&text), false, &HashSet::new()).unwrap();
+    assert_eq!((e["kind"].as_str(), e["text"].as_str()), (Some("user"), Some("make KiCad faster")));
+    assert_eq!(e["replyTo"], json!({"id": "msg_A:0:aa", "quote": "All done:"}));
+    let plain = row_entry_hid(&row("just a message"), false, &HashSet::new()).unwrap();
+    assert!(plain.get("replyTo").is_none() && plain["text"] == "just a message");
+}

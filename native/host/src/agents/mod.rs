@@ -210,6 +210,15 @@ impl Agents {
         // a home move (net/homemove.rs): what reaches a thread it carries (another bot, a routine, a room, a webhook, mail, a launched thread's report) is held
         // while it moves and delivered once at the new home; after it, what reaches the old copy goes on there
         if let Some(r) = crate::net::homemove::hold_delivery(&self.hub, thread, &json!({"thread":thread,"msg":msg,"text":text,"role":role,"person":person,"origin":origin,"extra":extra})).await { return r }
+        // the person's own message (typed in a thread or to a bot) shows in the thread from now, not only once the agent takes it: an account check
+        // or a turn ahead of it held Bub's for 104 s, and the person saw their reply nowhere (Nov 11)
+        let shown = role == "user" && origin.is_none() && !msg.is_empty();
+        if shown { self.hub.incoming_add(thread, msg, text, now_s()); }
+        let r = self.deliver_go(person, role, thread, msg, text, origin, extra).await;
+        if shown { self.hub.incoming_done(thread, msg); }
+        r
+    }
+    async fn deliver_go(self: &Arc<Self>, person: bool, role: &str, thread: &str, msg: &str, text: &str, origin: Option<(String, String, String)>, extra: Vec<Value>) -> Result<(), String> {
         self.healthy(thread).await;
         for _ in 0..3 {
             let tx = self.actor(thread); let (reply, rx) = oneshot::channel();
