@@ -101,6 +101,8 @@ impl HttpHandler for HookHttp {
             if req.method != "POST" { return HttpReply::text("405 Method Not Allowed", "POST only") }
             let hid = req.route().strip_prefix("/hook/").unwrap_or("").to_string();
             if !botnet::safe(&hid) { return HttpReply::text("404 Not Found", "no such webhook") }
+            // the ring's front door (bots/front.rs): a hook another of the person's machines owns goes on to it, as it came
+            if let Some((code, text)) = super::front::pass(hub, &hid, &req.headers, &req.body).await { return HttpReply::text(super::front::status(code), &text) }
             let ct = req.header("content-type").to_string(); let form = ring::is_form(&ct);
             if !form && req.body.len() > ring::BODY_MAX { return HttpReply::text("413 Payload Too Large", "a webhook body is at most 256 KB") }
             let body = String::from_utf8_lossy(&req.body).into_owned(); let now = now_s();

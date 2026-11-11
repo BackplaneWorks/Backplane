@@ -74,6 +74,7 @@ pub async fn act(p: &Arc<Peering>, hub: &Arc<Hub>, action: &str, value: &str, fi
     let f = |k: &str| fields[k].as_str().unwrap_or("").trim().to_string();
     match action {
         "machine-code" => p.make_code().await,
+        "machine-home" => super::homemove::start(hub, value).await,
         "machine-approve" => p.approve(hub, value).await.map(|_| json!({})),
         "machine-deny" => p.deny(hub, value).await.map(|_| json!({})),
         "machine-remove" | "machine-mine" => {

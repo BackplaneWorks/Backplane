@@ -148,7 +148,7 @@ impl Bots {
         drop(w);
         let Some(h) = hook else { return json!({"bot": b.id}) };
         let tok = { let (home, id) = (self.hub.cfg.home.clone(), h.id.clone()); blocking(move || super::hooks::token_of(&home, &id)).await.unwrap_or_default() };
-        json!({"bot": b.id, "hook": h.id, "url": format!("{}/hook/{}", base(&self.hub).await, h.id), "token": tok, "last": h.last, "count": h.count})
+        json!({"bot": b.id, "hook": h.id, "url": format!("{}/hook/{}", super::front::base(&self.hub).await, h.id), "token": tok, "last": h.last, "count": h.count})
     }
     /// `ring.setup`: Pebble (a sub-bot of the uberbot), its webhook with a bearer token, and the #ring-requests room of the two; what exists is kept.
     async fn ring_setup(self: &Arc<Self>) -> Result<Value, String> {

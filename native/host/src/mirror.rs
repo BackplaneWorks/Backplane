@@ -23,6 +23,8 @@ impl Mirrors {
         let st = g.entry(link.to_string()).or_insert_with(|| { let mut s = State::new(); s.lean = true; s });
         for e in events { st.apply(e); }
     }
+    /// Whether the mirror of `link` holds that machine's bot `bot` (its own id there), live.
+    pub fn has_bot(&self, link: &str, bot: &str) -> bool { self.st.read().unwrap().get(link).map_or(false, |s| s.bots_nav.contains_key(&format!("{link}~{bot}")) || s.bots_nav.contains_key(bot)) }
     /// A link's history was replaced.
     pub fn forget(&self, link: &str) { self.st.write().unwrap().remove(link); }
     /// Every mirror is given again after a rebuild.
