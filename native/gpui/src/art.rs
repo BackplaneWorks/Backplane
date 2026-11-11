@@ -345,6 +345,9 @@ pub fn probe_rect(id: String) -> AnyElement {
         m.insert(id, [f32::from(b.origin.x) * s, f32::from(b.origin.y) * s, f32::from(b.size.width) * s, f32::from(b.size.height) * s]);
     }).absolute().top_0().left_0().size_full().into_any_element()
 }
+/// A menu that closed (or opened anew): its entries' probes go, so a test never presses where an entry of an earlier menu was drawn (a stale
+/// `run-on:New thread on boat-hub` over what is now another entry).
+pub fn forget_probes(prefix: &str) { if let Some(m) = CTL_RECTS.lock().unwrap().as_mut() { m.retain(|k, _| !k.starts_with(prefix)); } }
 pub fn ctl_rects() -> std::collections::HashMap<String, [f32; 4]> { CTL_RECTS.lock().unwrap().clone().unwrap_or_default() }
 
 #[cfg(test)]

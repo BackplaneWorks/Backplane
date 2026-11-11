@@ -76,8 +76,8 @@ pub fn spawn_loops(hub: Arc<Hub>, table: Arc<PeerTable>, peering: Arc<Peering>) 
                 let missing = missing_own(&p2, &t2);
                 if (missing && !was_missing) || waited >= next_find(missing) { break }
                 // an approved link that is not found answers again (it restarted): found at once, not at the next 15 s pass, so it is the owner's own
-                // again within moments (until then every request to it is refused). Asked every 2 s for the first minute it is missing.
-                if missing && waited <= Duration::from_secs(60) && missing_answers(&p2, &t2).await { break }
+                // again within moments (until then every request to it is refused). Asked every 2 s for the first minute of a pass, then every 6 s.
+                if missing && (waited <= Duration::from_secs(60) || waited.as_secs() % 6 == 0) && missing_answers(&p2, &t2).await { break }
             }
         }
     });

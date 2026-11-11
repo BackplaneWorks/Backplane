@@ -129,6 +129,7 @@ pub fn project_items_of(pid_raw: &str, project: &Value) -> Vec<Item> {
 impl Backplane {
     pub(crate) fn ctx_open(&mut self, at: Point<Pixels>, items: Vec<Item>, cx: &mut Context<Self>) {
         if let Some(c) = self.screens.ctx.as_ref().and_then(disarm) { let _ = self.tx.try_send(c); }
+        crate::art::forget_probes("ctx:"); crate::art::forget_probes("run-on:");
         self.screens.ctx = Some(Menu { at, items, armed: None, probe: "ctx" }); cx.notify();
     }
     /// A file named in a message: the hub opens it (or shows it in its folder) on its machine; a relative path is from the thread's folder.
@@ -142,10 +143,12 @@ impl Backplane {
     pub(crate) fn ctx_open_from(&mut self, from: Bounds<Pixels>, window_h: Pixels, items: Vec<Item>, probe: &'static str, cx: &mut Context<Self>) {
         let at = anchored(from, window_h, items.len());
         if let Some(c) = self.screens.ctx.as_ref().and_then(disarm) { let _ = self.tx.try_send(c); }
+        crate::art::forget_probes("ctx:"); crate::art::forget_probes("run-on:");
         self.screens.ctx = Some(Menu { at, items, armed: None, probe }); cx.notify();
     }
     pub(crate) fn ctx_close(&mut self, cx: &mut Context<Self>) -> bool {
         let Some(m) = self.screens.ctx.take() else { return false };
+        crate::art::forget_probes(&format!("{}:", m.probe));
         if let Some(c) = disarm(&m) { let _ = self.tx.try_send(c); }
         cx.notify(); true
     }
@@ -174,7 +177,7 @@ impl Backplane {
         let Some(m) = self.screens.ctx.as_mut() else { return };
         let step = press(m, i, &self.data);
         if let Some(c) = step.send { let _ = self.tx.try_send(c); }
-        if step.close { self.screens.ctx = None; }
+        if step.close { if let Some(m) = self.screens.ctx.take() { crate::art::forget_probes(&format!("{}:", m.probe)); } }
         cx.notify();
     }
 }
