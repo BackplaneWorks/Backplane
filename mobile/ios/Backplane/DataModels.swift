@@ -110,7 +110,7 @@ struct DHandoffRef: Codable, Equatable {
 
 /// Where a project or thread of another machine runs (docs/PHONE-DATA.md, Your machines): `short` on a row, `name` in the header, `label` "on desktop" after a project's name,
 /// `runs` "runs on desktop" over the composer; `away` draws it dimmer.
-struct DMark: Codable, Equatable {
+struct DMark: Codable, Equatable, Hashable {
     var name: String; var short: String; var away: Bool; var label: String; var runs: String
     enum CodingKeys: String, CodingKey { case name, short, away, label, runs }
     init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); name = c.str(.name); short = c.str(.short); away = c.bool(.away); label = c.str(.label); runs = c.str(.runs) }
