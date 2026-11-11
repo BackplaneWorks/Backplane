@@ -172,6 +172,11 @@ pub fn default_frame_for_path(path: &str, requested: &str) -> &'static str {
 }
 
 /// `kiapi.backplane.embed.FrameKind` enum name for a canonical frame string.
+/// The editors pre-warmed after the first one is shown: the schematic and the 3D viewer, less the one shown and those KiCad has open.
+pub fn prewarm_kinds(active: &str, have: &[String]) -> Vec<&'static str> {
+    ["SCH", "PCB", "PCB_3D"].into_iter().filter(|k| *k != canon_frame(active) && !have.iter().any(|h| h == k)).collect()
+}
+
 pub fn fk_of(kind: &str) -> &'static str {
     match canon_frame(kind) {
         "PCB" => "FK_PCB",
@@ -721,8 +726,13 @@ impl Actor {
         self.close_sock(&s.sock);
         self.close_sock(&s.events_sock);
         if !s.sock_dir.is_empty() {
-            let dir = s.sock_dir.clone();
-            tokio::task::spawn_blocking(move || { let _ = std::fs::remove_dir_all(dir); });
+            // the sockets' folder goes only once that KiCad has exited (a TERM takes a moment; removing api.sock under a running KiCad
+            // left it unreachable): up to 15 s, then it goes anyway
+            let (dir, pid) = (s.sock_dir.clone(), s.pid);
+            tokio::spawn(async move {
+                for _ in 0..60 { if pid == 0 || !crate::plat::proc::alive(pid) { break } tokio::time::sleep(Duration::from_millis(250)).await; }
+                let _ = tokio::task::spawn_blocking(move || { let _ = std::fs::remove_dir_all(dir); }).await;
+            });
         }
     }
 
@@ -1681,7 +1691,18 @@ async fn spawn_gui_session(
             if !ev2.is_empty() { events_sock = ev2; }
             frames = f2;
         }
+        let have: Vec<String> = frames.iter().map(|f| f.kind.clone()).collect();
+        let (me2, sock2, desc2, pro2, active2) = (me.clone(), sock.clone(), desc.clone(), pro.clone(), active.clone());
         let _ = me.send(Msg::Ready { pro, gen, sock, version, holder, events_sock, ev_since, frames, spawn_container, spawn_active: active });
+        // pre-warm (bp.9's ShowFrame.prewarm): the other editors opened hidden in KiCad's idle time, so the first switch to them is a show
+        if !desc2.is_empty() && proto::load(&desc2).has_field("kiapi.backplane.embed.ShowFrame", "prewarm") {
+            tokio::spawn(async move {
+                for k in prewarm_kinds(&active2, &have) {
+                    let _ = raw_on(&me2, &sock2, &desc2, "kiapi.backplane.embed.ShowFrame", json!({"kind": fk_of(k), "prewarm": true}), 30000).await;
+                }
+                let _ = me2.send(Msg::ForkSync { pro: pro2, gen });
+            });
+        }
     } else {
         if let Some(act) = stock_action_for(&active) {
             let _ = run_stock_action(&me, &sock, &desc, act).await;
@@ -1898,6 +1919,8 @@ mod tests {
         assert_eq!(default_frame_for_path("/p/a.kicad_pcb", ""), "PCB");
         assert_eq!(default_frame_for_path("/p/a.kicad_pcb", "PCB_3D"), "PCB_3D");
         assert_eq!(fk_of("SCH"), "FK_SCH");
+        assert_eq!(prewarm_kinds("PCB", &["PCB".to_string()]), ["SCH", "PCB_3D"]);
+        assert_eq!(prewarm_kinds("SCH", &["SCH".to_string(), "PCB".to_string()]), ["PCB_3D"]);
         assert_eq!(fk_of("PCB_3D"), "FK_PCB_3D");
         assert_eq!(kind_of_fk_val(&json!("FK_FOOTPRINT_EDITOR")), "FOOTPRINT_EDITOR");
         assert_eq!(kind_of_fk_val(&json!(5)), "PCB_3D");

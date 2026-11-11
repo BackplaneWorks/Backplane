@@ -39,6 +39,8 @@ const LIMIT: usize = 100; // util.recursionLimit
 pub struct Schema { pool: DescriptorPool, full: bool }
 impl Schema {
     pub fn has_own(&self, name: &str) -> bool { self.pool.get_message_by_name(name.strip_prefix('.').unwrap_or(name)).is_some() }
+    /// Whether the message `name` has a field `field` (a newer fork's addition to an existing command).
+    pub fn has_field(&self, name: &str, field: &str) -> bool { self.pool.get_message_by_name(name.strip_prefix('.').unwrap_or(name)).map_or(false, |m| m.get_field_by_name(field).is_some()) }
     pub fn message(&self, name: &str) -> Option<MessageDescriptor> {
         let n = name.strip_prefix('.').unwrap_or(name);
         self.pool.get_message_by_name(n).or_else(|| if self.full { builtin().pool.get_message_by_name(n) } else { None })
