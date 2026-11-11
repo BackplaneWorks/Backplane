@@ -1237,7 +1237,9 @@ impl Accounts {
 fn token_ok(t: &str) -> bool { t.is_empty() || (t.starts_with("sk-ant-") && (20..=512).contains(&t.len()) && t.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')) }
 /// What a linked machine's announcement does to this machine's profiles.
 #[derive(Debug, Default)]
-pub struct Merge { pub profiles: Vec<Profile>, pub put: Vec<(String, String, String)>, pub del: Vec<String>, pub removed: Vec<String>, pub changed: usize }
+pub struct Merge { pub profiles: Vec<Profile>, pub put: Vec<(String, String, String)>, pub del: Vec<String>, pub removed: Vec<String>, pub changed: usize,
+    /// what changed, one word each (`new`, `token`, `name`, `who`, `dates`, `signed out`, `removed`): for the hub's log, never a value
+    pub why: Vec<&'static str> }
 /// The sync accounts machine `origin` made, as it says they are now (`items`: `{id, label, email, plan, token, madeAt, expiresAt}`, every one it has): each is
 /// added here with its id, or brought up to date (a renewed token, a new name), and the ones of `origin` it no longer names are removed. A profile of this machine's
 /// own, or of another machine, is never touched. `have`: the token kept here now.
@@ -1255,24 +1257,30 @@ pub fn sync_merge(cur: &[Profile], origin: &str, items: &[Value], have: &dyn Fn(
         match m.profiles.iter_mut().find(|p| p.id == id) {
             Some(p) if p.kind != SYNC || p.origin != origin => continue,
             Some(p) => {
-                let before = (p.label.clone(), p.identity.clone(), p.made_at, p.expires_at, p.state.clone());
+                // who it is, as the announcement says it (an identity this machine holds with more in it is the same account)
+                let who = |i: &Value| (i["email"].as_str().unwrap_or("").to_string(), i["plan"].as_str().unwrap_or("").to_string());
+                let before = (p.label.clone(), who(&p.identity), p.made_at, p.expires_at, p.state.clone());
                 p.label = lab.clone(); p.identity = ident; p.made_at = made; p.expires_at = ends;
                 if tok.is_empty() { if p.state != "disconnected" { p.state = "disconnected".into(); p.catalog = vec![]; p.allowance = None; } if have(id).is_some() { m.del.push(id.into()) } }
                 else if new_token { m.put.push((id.into(), lab.clone(), tok.into())); if matches!(p.state.as_str(), "disconnected" | "expired") { p.state = "unchecked".into(); p.expired_at = 0; p.message.clear(); } }
-                if new_token || before != (p.label.clone(), p.identity.clone(), p.made_at, p.expires_at, p.state.clone()) { m.changed += 1 }
+                let after = (p.label.clone(), who(&p.identity), p.made_at, p.expires_at, p.state.clone());
+                if new_token || before != after {
+                    m.changed += 1;
+                    m.why.push(if new_token { "token" } else if before.0 != after.0 { "name" } else if before.1 != after.1 { "who" } else if (before.2, before.3) != (after.2, after.3) { "dates" } else { "signed out" });
+                }
             }
             None => {
                 if m.profiles.len() >= 40 { continue }
                 m.profiles.push(Profile { id: id.into(), provider: "claude".into(), label: lab.clone(), epoch: 1, state: if tok.is_empty() { "disconnected".into() } else { "unchecked".into() }, identity: ident,
                     kind: SYNC.into(), origin: origin.into(), made_at: made, expires_at: ends, ..Profile::default() });
                 if !tok.is_empty() { m.put.push((id.into(), lab.clone(), tok.into())) }
-                m.changed += 1;
+                m.changed += 1; m.why.push("new");
             }
         }
     }
     let gone: Vec<String> = m.profiles.iter().filter(|p| p.kind == SYNC && p.origin == origin && !named.contains(&p.id)).map(|p| p.id.clone()).collect();
     m.profiles.retain(|p| !gone.contains(&p.id));
-    m.changed += gone.len(); m.del.extend(gone.iter().cloned()); m.removed = gone;
+    m.changed += gone.len(); m.why.extend(gone.iter().map(|_| "removed")); m.del.extend(gone.iter().cloned()); m.removed = gone;
     m
 }
 impl Accounts {
@@ -1293,10 +1301,15 @@ impl Accounts {
     }
     /// What machine `origin` (its link id here) says its sync accounts are (`sync_merge`): tokens into this machine's vault, the registry written. Ok(how many changed).
     pub fn sync_in(&self, origin: &str, items: &[Value]) -> Result<usize, ()> {
+        // one announcement at a time: two that arrive together (the ten-minute one and a home move's, Nov 11 on boat-hub) each read the registry before
+        // the other wrote it, and both counted the account as new
+        static ONE: Mutex<()> = Mutex::new(());
+        let _one = ONE.lock().unwrap_or_else(|e| e.into_inner());
         let t = self.tokens.lock().unwrap().clone(); if !t.open() { return Err(()) }
         let cur = { let g = self.inner.lock().unwrap(); if !g.load_error.is_empty() { return Err(()) } g.profiles.clone() };
         let m = sync_merge(&cur, origin, items, &|id| t.get(id));
         if m.changed == 0 { return Ok(0) }
+        eprintln!("accounts: sync accounts from a linked machine: {}", m.why.join(", "));
         for (id, lab, tok) in &m.put { if !t.put(id, lab, tok) { return Err(()) } }
         for p in &m.profiles { if !m.removed.contains(&p.id) && p.kind == SYNC { let _ = self.directory(p); } }
         let mut np = m.profiles.clone();
@@ -1624,6 +1637,9 @@ for l in sys.stdin:
         let m2 = sync_merge(&m.profiles, "L1", &items[..1], &|_| Some(tok("new")));
         assert_eq!((m2.removed.len(), m2.changed), (2, 2), "the ones it no longer names are removed: {:?}", m2.removed); assert!(m2.del.contains(&d) && m2.del.contains(&b));
         assert_eq!(sync_merge(&m2.profiles, "L1", &items[..1], &|_| Some(tok("new"))).changed, 0, "told again unchanged: nothing moves");
+        // a check here wrote more into who it is (its sign-in method, its org): the same account, told again, is no change (Nov 11, boat-hub counted each ten-minute repeat)
+        let mut m3 = m2.profiles.clone(); for p in m3.iter_mut().filter(|p| p.id == a) { p.identity = json!({"email":"w@x","plan":"max","auth":"oauth_token","org":"o1"}); p.state = "connected".into() }
+        assert_eq!(sync_merge(&m3, "L1", &items[..1], &|_| Some(tok("new"))).changed, 0, "who it is is its email and plan");
     }
     #[tokio::test(flavor = "multi_thread")] async fn a_sync_token_is_made_by_setup_token_kept_in_the_vault_used_by_its_turns_and_carried_to_another_machine() {
         let _l = ENV.lock().unwrap_or_else(|e| e.into_inner()); std::env::set_var("CLAUDE_CODE_OAUTH_TOKEN", "sk-ant-oat01-should-not-leak-from-the-host");

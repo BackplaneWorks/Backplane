@@ -78,6 +78,31 @@ def rpc(hub, m, p=None):
         v.close()
 
 
+class Listen:
+    """A client of a hub held open in the background: every frame it is sent, as text (the info frames carry `accounts.live`)."""
+    def __init__(self, hub):
+        import threading
+        self.v, self.seen, self.on = View(hub), [], True
+        threading.Thread(target=self.run, daemon=True).start()
+    def run(self):
+        from settings_revoke import cbor  # noqa
+        while self.on:
+            try:
+                op, body = self.v.frame()
+                if op == 2: self.seen.append(cbor(body)[0])
+            except Exception:
+                if not self.on: return
+    def live(self):
+        """The newest `accounts.live` this client was told, as a value."""
+        for f in reversed(list(self.seen)):
+            if isinstance(f, dict) and f.get("t") == "info" and "accounts.live" in (f.get("info") or {}): return json.loads(f["info"]["accounts.live"])
+        return {}
+    def close(self):
+        self.on = False
+        try: self.v.close()
+        except Exception: pass
+
+
 def acc(hub, **p): return rpc(hub, "accounts", dict(p, accountProfiles=1))
 
 
@@ -122,6 +147,7 @@ def main():
     linked = wait(lambda: any(e.get("$") == "PeerSet" and not e.get("revoked") for e in map(json.loads, open(os.path.join(A.home, "events.jsonl")))), 60)
     check("A and B linked", bool(linked))
 
+    lb = Listen(B)  # what B's clients are told from here on
     # on A: Add account -> Claude (sync)
     s = acc(A, op="add", provider="claude", kind="sync", label="Max sync", start=True)
     pid = s.get("made", "")
@@ -143,6 +169,10 @@ def main():
     st = acc(B, op="status", profile=pid, asked=True)
     pb = prof(B, pid)
     check("B checks it on its own vault's token", (pb or {}).get("state") == "connected", json.dumps(pb)[:300])
+    # Nov 11, boat-hub: the account was there and connected, but B's info accounts.live stayed the empty default, so the move's readiness said Claude was not signed in
+    lv = wait(lambda: next((p for p in lb.live().get("profiles") or [] if p.get("id") == pid and p.get("state") == "connected"), None), 30)
+    check("B's info accounts.live shows the sync account connected", bool(lv) and lv.get("kind") == "sync", json.dumps(lb.live())[:300])
+    check("and says nothing of a token, a link or a code", "sk-ant-oat01" not in json.dumps(lb.live()) and not lb.live().get("attempts"))
     # (the default is checked against the inventory in the log, which follows the live accounts within a second)
     d = wait(lambda: (lambda r: r if isinstance(r, dict) and r.get("ok", True) is not False else None)(rpc(B, "accounts.default", {"provider": "claude", "profile": pid, "epoch": pb.get("epoch"), "accountProfiles": 1})), 30)
     check("it is B's default for new threads", bool(d), json.dumps(d)[:200])
@@ -152,6 +182,24 @@ def main():
     rpc(B, "turn.start", {"thread": tid, "text": "hello from the boat", "msg": "m-sync-1"})
     turn = wait(lambda: [l for l in seen() if l[1] == "TURN"], 90)
     check("the turn on B ran with the sync token", bool(turn) and turn[-1][3] == TOKEN1, str(turn)[:300])
+
+    # after a home move, Bub's and the bots' threads name accounts of the desktop that B does not have: a turn on one takes the sync account, never fails
+    lb.close(); stop("B")
+    with open(os.path.join(B.home, "events.jsonl"), "a") as f:
+        f.write(json.dumps({"$": "SettingSet", "key": f"account.thread.{tid}.claude", "value": json.dumps({"id": "0d5e1f2a-desktop-only-account", "epoch": 3}), "at": int(time.time())}) + "\n")
+    B = start("B")
+    n_turns = len([l for l in seen() if l[1] == "TURN"])
+    rpc(B, "turn.start", {"thread": tid, "text": "after the move", "msg": "m-sync-2"})
+    moved = wait(lambda: [l for l in seen() if l[1] == "TURN"][n_turns:], 120)
+    check("a turn on an account B lacks runs on the sync token", bool(moved) and moved[-1][3] == TOKEN1, str(moved)[:300])
+    def ended():
+        evs = [json.loads(l) for l in open(os.path.join(B.home, "events.jsonl"), errors="replace") if '"thread":"%s"' % tid in l.replace(" ", "")]
+        st = [e for e in evs if e.get("$") == "TurnChanged"]
+        return st[-1] if st and st[-1].get("state") in ("completed", "failed", "interrupted") else None
+    end = wait(ended, 60)
+    check("and completes: no failed turn for the person to see", bool(end) and end.get("state") == "completed", json.dumps(end)[:200])
+    lines = [json.loads(l).get("summary", "") for l in open(os.path.join(B.home, "events.jsonl"), errors="replace") if '"$":"ActivityLogged"' in l.replace(" ", "") and tid in l]
+    check("the timeline says once which account it started on", sum("Started on" in s for s in lines) == 1, str([s for s in lines if s][-3:])[:300])
 
     # renewal on A reaches B
     stop("A"); A = start("A", token=TOKEN2)
@@ -168,7 +216,7 @@ def main():
     r = acc(A, op="remove", profile=pid)
     check("removed on A", not r.get("error") and prof(A, pid) is None, json.dumps(r)[:200])
     check("and gone from B", bool(wait(lambda: prof(B, pid) is None, 60)))
-    stop("A"); stop("B")
+    lb.close(); stop("A"); stop("B")
     finish()
 
 
