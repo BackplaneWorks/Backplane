@@ -554,6 +554,10 @@ async fn a_run(s: &S, n: usize) -> (String, String) {
     }
     s.hub.commit(&posted("p2", "user", "thanks")).await.unwrap(); s.hub.commit(&posted("a3", "assistant", "Any time.")).await.unwrap();
     let hid = crate::data::backend_now(&s.hub, &s.chat).await; assert!(!hid.contains("a3") && !hid.contains("a1"), "{hid:?}");
+    // several inputs that run as one turn: the person's among them makes it theirs
+    s.hub.commit(&posted("h2", "user", "[webhook: ring] another")).await.unwrap(); s.hub.commit(&posted("p3", "user", "and look at this")).await.unwrap();
+    s.hub.commit(&posted("a4", "assistant", "Looked.")).await.unwrap();
+    assert!(!crate::data::backend_now(&s.hub, &s.chat).await.contains("a4"), "a turn the person steered is theirs");
     // in the person's own turn notify_person adds no chat line (the reply says it)
     let n = log(&s.hub).iter().filter(|e| e["msg"].as_str().map_or(false, |m| m.starts_with("tell:"))).count(); let _ = notify(&s, "done", "Done.", now_s()).await;
     assert_eq!(log(&s.hub).iter().filter(|e| e["msg"].as_str().map_or(false, |m| m.starts_with("tell:"))).count(), n);

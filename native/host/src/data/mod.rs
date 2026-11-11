@@ -536,7 +536,7 @@ async fn deltas(hub: &Hub, lines: &[String], subs: &mut Subs) -> Vec<Value> {
     let mut out = vec![]; let (mut upsert, mut gone, mut projects): (Vec<String>, Vec<String>, Vec<(String, bool)>) = (vec![], vec![], vec![]);
     let (mut worked, mut locks_moved, mut bots_moved): (Vec<String>, bool, bool) = (vec![], false, false); let mut swarms: Vec<String> = vec![];
     // Bot.backend: per bot conversation, whether the turn now being written is the person's (the lines before this batch come from the model)
-    let base = hub.store.len().saturating_sub(lines.len()) as u64; let mut last_in: HashMap<String, bool> = HashMap::new();
+    let base = hub.store.len().saturating_sub(lines.len()) as u64; let mut last_in: HashMap<String, crate::present::thread::Turnk> = HashMap::new();
     let mut viewed: Vec<(u64, String, String)> = vec![];
     for l in lines {
         let Ok(e) = serde_json::from_str::<Value>(l) else { continue };
@@ -561,10 +561,10 @@ async fn deltas(hub: &Hub, lines: &[String], subs: &mut Subs) -> Vec<Value> {
                 // as a page has it: a quote's Buy now link ready to open, and the hub's note to the agent marked so no phone shows it
                 let mut en = json!({"id":id,"kind":kind,"text":if kind == "user" { shown_text(s(&e, "text")) } else { crate::settings::order::pay_shown(s(&e, "text")) },"at":ms(e["at"].as_u64().unwrap_or(0))});
                 let bot = bot_chat(&th);
-                if bot && (role == "user" || role == "system") { last_in.insert(th.clone(), crate::present::thread::input_backend(id, role, s(&e, "text"))); }
-                let backend = bot && role == "assistant" && !id.starts_with("tell:") && match last_in.get(&th) { Some(b) => *b, None => {
-                    let m = hub.model().await; let rows: Vec<crate::model::Row> = m.tail(&hub.store, &th, 48).into_iter().filter(|r| r.seq <= base).collect();
-                    let b = crate::present::thread::last_input_backend(&rows); last_in.insert(th.clone(), b); b } };
+                let backend = bot && {
+                    if !last_in.contains_key(&th) { let m = hub.model().await; let rows: Vec<crate::model::Row> = m.tail(&hub.store, &th, 48).into_iter().filter(|r| r.seq <= base).collect(); last_in.insert(th.clone(), crate::present::thread::turn_of(&rows)); }
+                    let t = last_in.get_mut(&th).unwrap(); t.step(id, role, s(&e, "text")) && role == "assistant" && !id.starts_with("tell:")
+                };
                 if crate::present::thread::hidden(bot, id, role, s(&e, "text")) || backend { en["agentOnly"] = json!(true) }
                 if let Some(a) = e.get("attachments") { en["attachments"] = a.clone() }
                 if kind == "user" { if let Some(x) = recalled(id) { if let Some(c) = x.get("clientId") { en["clientId"] = c.clone() } } }

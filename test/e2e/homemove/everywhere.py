@@ -182,6 +182,18 @@ def main():
     item("a webhook (the ring) mid-move reaches Bub on B once", "not held before", hook_mid == 200 and bool(m.wait(lambda: n_said(B, "ring mid-move") == 1, 60)) and n_said(A, "ring mid-move") == 0, f"{hook_mid} B {n_said(B, 'ring mid-move')} A {n_said(A, 'ring mid-move')}")
     item("Bub's row: no move note after the move", "n/a", row_note(A) == "", row_note(A))
     m.rpc(A, "turn.start", {"thread": tb, "text": "zz to the old copy", "msg": "mold1"})
+    # Bot.backend: B's restart-style wake (Bub became its uberbot) answered in plain text shows nothing; the person's turn's reply shows
+    def wake_and_reply(h):
+        ev = m.events(h); w = next((i for i, e in enumerate(ev) if e.get("$") == "MessagePosted" and e.get("thread") == tb and e.get("role") == "system" and "You were restarted" in e.get("text", "")), None)
+        if w is None: return None, None
+        a = next((e.get("msg") for e in ev[w:] if e.get("$") == "MessagePosted" and e.get("thread") == tb and e.get("role") == "assistant"), None)
+        p = next((e.get("msg") for e in ev[next((i for i, e in enumerate(ev) if e.get("msg") == "mmid1"), w):w] if e.get("$") == "MessagePosted" and e.get("thread") == tb and e.get("role") == "assistant"), None)
+        return a, p
+    wa, pa = m.wait(lambda: (lambda r: r if r[0] else None)(wake_and_reply(B)), 60) or (None, None)
+    vb = View(B)
+    try: ids = (vb.request("view.open", {"target": {"kind": "bot", "id": bub}}).get("result") or {}).get("window", {}).get("messageIds", [])
+    finally: vb.close()
+    item("a restart wake's plain reply is not in Bub's chat; the person's turn's reply is", "no (backend chatter shown)", bool(wa) and wa not in ids and (pa is None or pa in ids), f"wake reply {wa} person reply {pa} ids {ids[-6:]}")
     item("a message to the old copy of Bub's thread goes on to B", "no (ran on A's copy)", bool(m.wait(lambda: said(B, tb, "zz to the old copy"), 60)))
     item("ring: B's /hook/<id> lands on B after the move", "yes", m.post_hook(B.base, hid, tok) == 200)
     link_b = json.loads(m.setting(A, "home.at") or "{}").get("link", "")
