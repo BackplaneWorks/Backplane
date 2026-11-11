@@ -33,6 +33,7 @@ pub mod owner;
 pub mod pairflow;
 pub mod pairing;
 pub mod plan;
+pub mod registry;
 pub mod peerrpc;
 pub mod peerhttp;
 pub mod peering;
