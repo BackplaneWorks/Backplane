@@ -235,3 +235,4 @@ This holds at a start with the chosen hub asleep too. The hub lists show which h
 A push may carry `hub` (the sending hub's url) and `link`. A tap on one from another hub on the list connects to that hub first, then opens the
 link: `account:<id>` is that account's sign-in. `scripts/mobile/ios-offer-journey.sh` and `scripts/mobile/android-offer-journey.sh` run the
 whole thing against two stand-in hubs (`test/mobile/offer_stub.py`).
+`scripts/mobile/android-homemove-journey.sh HUB_BIN APK` runs the same against two real temp hubs after a home move (`test/e2e/homemove/hold_phone.py`).
