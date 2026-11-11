@@ -82,7 +82,7 @@ fn project(this: &Backplane, cx: &mut Context<Backplane>, light: bool, p: &Value
         .children((running > 0).then(|| div().text_size(px(11.)).text_color(c("accent")).child(tf("gpui.sections.running", &[("n", running.into())]))))
         .when(pinned, |d| d.child(crate::ui::ic(light, "pin", 12., "dim")))
         // New thread in this project (a project also on linked machines: the + asks which machine)
-        .child(crate::ui::with_rect(div().id(SharedString::from(format!("new-{pid}"))), || "ui:New thread".to_string()).cursor_pointer().tooltip(crate::keys::tip("New thread", "", light)).on_click({ let (new_on, pidn) = (p["newOn"].clone(), pid.clone()); cx.listener(move |this, e: &ClickEvent, _, cx| { cx.stop_propagation();
+        /* i18n-ok: a ctl id the drivers press */ .child(crate::ui::with_rect(div().id(SharedString::from(format!("new-{pid}"))), || "ui:New thread".to_string()).cursor_pointer().tooltip(crate::keys::tip("New thread", "", light)).on_click({ let (new_on, pidn) = (p["newOn"].clone(), pid.clone()); cx.listener(move |this, e: &ClickEvent, _, cx| { cx.stop_propagation();
             let items = crate::screens::ctxmenu::new_items(&pidn, &new_on); if items.len() > 1 { this.ctx_open(e.position(), items, cx); return }
             this.arm_new(); let _ = this.tx.try_send(crate::hub::Command::Action("new-thread".into(), pidn.clone())); cx.notify(); }) }).child(crate::ui::ic(light, "plus", 16., "dim")))
         .into_any_element()
