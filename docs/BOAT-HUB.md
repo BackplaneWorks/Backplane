@@ -38,6 +38,10 @@ The always-on push (docs/ALWAYS-ON.md, D1-D10) made the move a single press with
   - `thread_update {provider, model, account}` moves a thread to another provider or account between turns, here or over the link, with its
     conversation handed over. The fallback chain then leaves that choice alone.
   - kicad_ipc and viewer_show from Bub for a file the home does not have say to launch a thread on the machine that has it.
+- **Bub's chat holds only the person's conversation**: a turn the person did not start (a restart's wake, a launched thread's report, another
+  bot, a room, a routine, a webhook, mail) is private. Its replies stay out of the desktop and phone chats and its end alerts no one. Bub tells
+  the person from it only with notify_person, whose text shows in the chat as its message (present/thread.rs `backend_replies`). A turn in
+  which the person's own message took part is theirs.
 - **Rehearsal**: `test/e2e/homemove/everywhere.sh` (two temp hubs on ports 3901/3902 with a stand-in agent; every item above, with the outcome
   of each before and after this push) and `test/e2e/homemove/run.sh` (move.py). `BACKPLANE_MOVE_PAUSE_MS` holds a test copy open so a message
   can be sent mid-move.

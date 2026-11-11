@@ -173,17 +173,30 @@ pub fn input_backend(id: &str, role: &str, text: &str) -> bool {
     crate::state::fam::ext::classify_kind(crate::model::link_from(id), id, text) != "person"
 }
 /// The backend replies among `rows` (oldest first: (id, is a message, role, text)); `before`: the turn running when the first row was written was a backend one.
-pub fn backend_replies<'a>(rows: impl IntoIterator<Item = (&'a str, bool, &'a str, &'a str)>, mut before: bool) -> std::collections::HashSet<String> {
-    let mut out = std::collections::HashSet::new();
-    for (id, msg, role, text) in rows {
-        if !msg { continue }
-        if role == "user" || role == "system" { before = input_backend(id, role, text) }
-        else if role == "assistant" && before && !id.starts_with("tell:") { out.insert(id.to_string()); }
-    }
+/// A turn is the person's when any of the inputs that started or steered it since the last reply is (several can run as one turn); a reply of `tell:` always shows.
+pub fn backend_replies<'a>(rows: impl IntoIterator<Item = (&'a str, bool, &'a str, &'a str)>, before: bool) -> std::collections::HashSet<String> {
+    let mut out = std::collections::HashSet::new(); let mut t = Turnk { backend: before, fresh: false };
+    for (id, msg, role, text) in rows { if msg && t.step(id, role, text) && role == "assistant" && !id.starts_with("tell:") { out.insert(id.to_string()); } }
     out
 }
-/// Whether the newest input among `rows` (newest first) started a backend turn (false when there is none).
-pub fn last_input_backend(rows: &[crate::model::Row]) -> bool { rows.iter().find(|r| r.kind == "msg" && (r.role == "user" || r.role == "system")).map_or(false, |r| input_backend(&r.id, &r.role, &r.text)) }
+/// The state of that walk: whether the turn being written is a backend one, and whether a reply came since its last input.
+pub struct Turnk { pub backend: bool, pub fresh: bool }
+impl Turnk {
+    /// one message; answers whether the turn is a backend one after it
+    pub fn step(&mut self, id: &str, role: &str, text: &str) -> bool {
+        if role == "user" || role == "system" { let b = input_backend(id, role, text); self.backend = if self.fresh { b } else { self.backend && b }; self.fresh = false }
+        else if role == "assistant" { self.fresh = true }
+        self.backend
+    }
+}
+/// Whether the turn being written now (the newest rows, newest first) is a backend one (false when no input is among them).
+pub fn last_input_backend(rows: &[crate::model::Row]) -> bool { turn_of(rows).backend }
+/// The walk's state after the newest rows (newest first).
+pub fn turn_of(rows: &[crate::model::Row]) -> Turnk {
+    let mut t = Turnk { backend: false, fresh: true };
+    for r in rows.iter().rev().filter(|r| r.kind == "msg") { t.step(&r.id, &r.role, &r.text); }
+    t
+}
 /// `agent_only`, and in a bot's conversation `bot_private` too
 pub fn hidden(bot: bool, id: &str, role: &str, text: &str) -> bool { agent_only(role, text) || (bot && bot_private(id, role, text)) }
 /// Hub.order.note: Backplane's own note of an order's progress in its buy thread (settings/order.rs `progress`, ids "o:<order>:<status>")
