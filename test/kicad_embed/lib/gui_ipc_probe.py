@@ -4,6 +4,7 @@
 Matches native/host/src/kicad/nng.rs and proto.rs without requiring pynng or google.protobuf.
 """
 import json
+import os
 import socket
 import struct
 import sys
@@ -105,13 +106,100 @@ def _read_varint(buf: bytes, i: int) -> tuple[int, int]:
         shift += 7
 
 
-# ---- NNG REQ0 over AF_UNIX -----------------------------------------------------------------------
+# ---- NNG REQ0 over AF_UNIX (Unix) or Named Pipe \\.\pipe\<path> (Windows) -----------------------
+class _WinPipeStream:
+    def __init__(self, sock_path: str) -> None:
+        import ctypes
+        from ctypes import wintypes
+
+        self._k32 = ctypes.WinDLL("kernel32", use_last_error=True)
+        self._k32.CreateFileW.argtypes = [
+            wintypes.LPCWSTR,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            ctypes.c_void_p,
+            wintypes.DWORD,
+            wintypes.DWORD,
+            wintypes.HANDLE,
+        ]
+        self._k32.CreateFileW.restype = wintypes.HANDLE
+        self._k32.ReadFile.argtypes = [
+            wintypes.HANDLE,
+            ctypes.c_void_p,
+            wintypes.DWORD,
+            ctypes.POINTER(wintypes.DWORD),
+            ctypes.c_void_p,
+        ]
+        self._k32.ReadFile.restype = wintypes.BOOL
+        self._k32.WriteFile.argtypes = [
+            wintypes.HANDLE,
+            ctypes.c_void_p,
+            wintypes.DWORD,
+            ctypes.POINTER(wintypes.DWORD),
+            ctypes.c_void_p,
+        ]
+        self._k32.WriteFile.restype = wintypes.BOOL
+        self._k32.CloseHandle.argtypes = [wintypes.HANDLE]
+        self._k32.CloseHandle.restype = wintypes.BOOL
+
+        pipe_name = sock_path if sock_path.startswith("\\\\.\\pipe\\") else f"\\\\.\\pipe\\{sock_path}"
+        invalid = ctypes.c_void_p(-1).value
+        handle = invalid
+        for _ in range(50):
+            handle = self._k32.CreateFileW(pipe_name, 0xC0000000, 0, None, 3, 0, None)
+            if handle not in (None, 0, invalid):
+                break
+            err = ctypes.get_last_error()
+            if err == 231:  # ERROR_PIPE_BUSY
+                time.sleep(0.02)
+                continue
+            raise OSError(err, f"CreateFileW({pipe_name}) failed (winerr={err})")
+        if handle in (None, 0, invalid):
+            err = ctypes.get_last_error()
+            raise OSError(err, f"CreateFileW({pipe_name}) busy/failed (winerr={err})")
+        self._h = handle
+        self._ctypes = ctypes
+        self._wintypes = wintypes
+
+    def sendall(self, data: bytes) -> None:
+        mv = memoryview(data)
+        sent = 0
+        while sent < len(mv):
+            chunk = bytes(mv[sent:])
+            written = self._wintypes.DWORD(0)
+            ok = self._k32.WriteFile(self._h, chunk, len(chunk), self._ctypes.byref(written), None)
+            if not ok or written.value == 0:
+                err = self._ctypes.get_last_error()
+                raise OSError(err, f"WriteFile failed (winerr={err})")
+            sent += written.value
+
+    def recv(self, n: int) -> bytes:
+        buf = self._ctypes.create_string_buffer(n)
+        got = self._wintypes.DWORD(0)
+        ok = self._k32.ReadFile(self._h, buf, n, self._ctypes.byref(got), None)
+        if not ok:
+            err = self._ctypes.get_last_error()
+            if err == 109:  # ERROR_BROKEN_PIPE
+                return b""
+            raise OSError(err, f"ReadFile failed (winerr={err})")
+        return buf.raw[: got.value]
+
+    def close(self) -> None:
+        if getattr(self, "_h", None):
+            self._k32.CloseHandle(self._h)
+            self._h = None
+
+
 class KiCadIpc:
     def __init__(self, sock_path: str, timeout: float = 8.0) -> None:
         self.sock_path = sock_path
-        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self.sock.settimeout(timeout)
-        self.sock.connect(sock_path)
+        if os.name == "nt":
+            self.sock = _WinPipeStream(sock_path)
+        else:
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            s.settimeout(timeout)
+            s.connect(sock_path)
+            self.sock = s
         self.sock.sendall(NNG_HELLO_REQ)
         hello = self._recv_exact(8)
         if hello != NNG_HELLO_REP:

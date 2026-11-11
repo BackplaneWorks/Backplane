@@ -2,19 +2,23 @@
 //! info `editor.kicad.<digest>`; this page makes a container window in the client's window (native_child.rs), tells the hub to attach KiCad to
 //! it (`editor.kicad.attach`), and after every frame gpui draws puts the container over the pane with the rail's editor (Board: PCB,
 //! Schematic: SCH, 3D: PCB_3D) mapped in it and the others unmapped, cutting holes where gpui drew something over the pane (the palette, a menu).
-//! Stock KiCad makes its frames as top-levels: a tick adopts them into the container (the fork's `--embedded` makes them there).
-//! The keyboard: a click in the editor gives it the X focus (the tick sees the button go down over it); a click anywhere in gpui, or Ctrl+`
-//! pressed in the editor, gives it back.
+//! Stock KiCad on Linux makes its frames as top-levels: a tick adopts them into the container (the fork's `--embedded` makes them there).
+//! On Windows, only the fork is embedded (`WS_CHILD` under the container HWND); stock mode explains that Backplane KiCad is needed.
 use super::native_child as nc;
 use crate::{hub::Command, screens::settings::Secret};
 use gpui::{prelude::*, *};
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 
-/// The client window's X11 id (None elsewhere).
-fn top_of(window: &Window) -> Option<u32> {
+/// The client window's native handle (X11 XID or Win32 HWND; None elsewhere).
+fn top_of(window: &Window) -> Option<u64> {
     use raw_window_handle::{HasWindowHandle, RawWindowHandle as R};
-    HasWindowHandle::window_handle(window).ok().map(|h| h.as_raw()).and_then(|h| match h { R::Xcb(x) => Some(x.window.get()), R::Xlib(x) => Some(x.window as u32), _ => None })
+    HasWindowHandle::window_handle(window).ok().map(|h| h.as_raw()).and_then(|h| match h {
+        R::Xcb(x) => Some(x.window.get() as u64),
+        R::Xlib(x) => Some(x.window as u64),
+        R::Win32(w) => Some(w.hwnd.get() as usize as u64),
+        _ => None,
+    })
 }
 
 /// The editor tabs: (kind, label). Board, Schematic and 3D always; the symbol and footprint editors once KiCad has them (or the person asks).
@@ -28,24 +32,56 @@ pub fn next_tab(at: &str, step: i32) -> &'static str {
 /// The hub's frame kind for a rail page.
 pub fn frame_for(open: &str) -> &'static str { match open { "schematic" => "SCH", "3d" => "PCB_3D", _ => "PCB" } } // i18n-ok: wire frame kind enum names
 
+fn is_abs_path(s: &str) -> bool {
+    s.starts_with('/') || s.starts_with('\\')
+        || (s.len() >= 3 && s.as_bytes()[0].is_ascii_alphabetic() && s.as_bytes()[1] == b':' && matches!(s.as_bytes()[2], b'/' | b'\\'))
+}
+
+fn norm_path(s: &str) -> String {
+    let mut n = s.replace('\\', "/");
+    while n.len() > 1 && n.ends_with('/') && !(n.len() == 3 && n.as_bytes()[1] == b':') {
+        n.pop();
+    }
+    if n.len() >= 2 && n.as_bytes()[0].is_ascii_alphabetic() && n.as_bytes()[1] == b':' {
+        n.make_ascii_lowercase();
+    }
+    n
+}
+
 /// The project file the hub attaches to, from a viewer key `<kind>|<root>|<file>` (the file relative to the root, or absolute).
 pub fn project_of(key: &str) -> Option<String> {
     let mut p = key.splitn(3, '|'); let (_, root, file) = (p.next()?, p.next()?, p.next()?);
-    if file.is_empty() { return (!root.is_empty()).then(|| root.trim_end_matches('/').to_string()) }
-    Some(if file.starts_with('/') || root.is_empty() { file.to_string() } else { format!("{}/{}", root.trim_end_matches('/'), file) })
+    let r = root.trim_end_matches(['/', '\\']);
+    if file.is_empty() { return (!r.is_empty()).then(|| r.to_string()) }
+    if is_abs_path(file) || r.is_empty() { return Some(file.to_string()) }
+    let sep = if r.contains('\\') && !r.contains('/') { '\\' } else { '/' };
+    Some(format!("{r}{sep}{file}"))
 }
 
-/// The project root directory from a viewer key `<kind>|<root>|<file>`, trimmed of any trailing `/`.
+/// The project root directory from a viewer key `<kind>|<root>|<file>`, trimmed of any trailing `/` or `\`.
 pub fn root_of(key: &str) -> Option<String> {
     let mut p = key.splitn(3, '|'); let (_, root, _) = (p.next()?, p.next()?, p.next()?);
-    let r = root.trim_end_matches('/');
+    let r = root.trim_end_matches(['/', '\\']);
     (!r.is_empty()).then(|| r.to_string())
+}
+
+/// The `(project, root)` to attach KiCad to: the viewer key's own path when the hub's picture has arrived, else the sidebar project's `root`
+/// (an optimistic rail press draws `Edit` before the hub's `viewer.key` round-trip completes).
+pub fn edit_target(data: &Value, key: &str, pid: &str) -> Option<(String, String)> {
+    if let Some(project) = project_of(key) {
+        return Some((project, root_of(key).unwrap_or_default()));
+    }
+    let root = crate::screens::projects::find(data, pid)
+        .and_then(|p| p["root"].as_str())
+        .map(|r| r.trim_end_matches(['/', '\\']))
+        .filter(|r| !r.is_empty())?;
+    Some((root.to_string(), root.to_string()))
 }
 
 /// Path without any file extension on its final segment (dots in parent folder names are preserved).
 pub fn path_stem(s: &str) -> &str {
-    let s = s.trim_end_matches('/');
-    let base_at = s.rfind('/').map_or(0, |i| i + 1);
+    let s = s.trim_end_matches(['/', '\\']);
+    let base_at = s.rfind(['/', '\\']).map_or(0, |i| i + 1);
     match s[base_at..].rsplit_once('.') {
         Some((stem, _)) if !stem.is_empty() => &s[..base_at + stem.len()],
         _ => s,
@@ -55,27 +91,36 @@ pub fn path_stem(s: &str) -> &str {
 /// Whether a pane opened for `(pane_proj, pane_root, pane_pid)` belongs to the viewer showing `(viewer_key, cur_pid)`.
 pub fn belongs_to(pane_proj: &str, pane_root: &str, pane_pid: &str, viewer_key: &str, cur_pid: &str) -> bool {
     if let Some(vr) = root_of(viewer_key) {
-        if !pane_root.is_empty() { return pane_root == vr }
+        if !pane_root.is_empty() { return norm_path(pane_root) == norm_path(&vr) }
     }
     if let Some(vp) = project_of(viewer_key) {
-        if path_stem(pane_proj) == path_stem(&vp) || (!pane_root.is_empty() && vp.starts_with(&format!("{pane_root}/"))) { return true }
+        let nr = norm_path(pane_root);
+        let nvp = norm_path(&vp);
+        if norm_path(path_stem(pane_proj)) == norm_path(path_stem(&vp))
+            || (!nr.is_empty() && nvp.starts_with(&format!("{nr}/")))
+        {
+            return true;
+        }
     }
     !pane_pid.is_empty() && pane_pid == cur_pid
 }
 
 /// The window to show for `want` among the container's frames, preferring the hub's own list (fork mode: kinds it knows) over titles.
 /// In fork mode, wait until `info["frames"]` lists the window as shown so a half-opened frame parked in `holder` during `ShowFrame` is never mapped early.
-pub fn pick(want: &str, info: &Value, frames: &[nc::Frame]) -> Option<u32> {
+pub fn pick(want: &str, info: &Value, frames: &[nc::Frame]) -> Option<u64> {
     if info["mode"] == "fork" {
-        let hub = info["frames"].as_array().into_iter().flatten().find(|f| f["kind"] == want && f["shown"] != false).and_then(|f| f["xid"].as_u64()).map(|x| x as u32);
+        let hub = info["frames"].as_array().into_iter().flatten().find(|f| f["kind"] == want && f["shown"] != false).and_then(|f| f["xid"].as_u64());
         return hub.filter(|x| frames.iter().any(|f| f.window == *x));
     }
-    let hub = info["frames"].as_array().into_iter().flatten().find(|f| f["kind"] == want).and_then(|f| f["xid"].as_u64()).map(|x| x as u32);
+    let hub = info["frames"].as_array().into_iter().flatten().find(|f| f["kind"] == want).and_then(|f| f["xid"].as_u64());
     hub.filter(|x| frames.iter().any(|f| f.window == *x)).or_else(|| frames.iter().find(|f| f.kind == want).map(|f| f.window))
 }
 
-/// What the pane says when the editor is not on show, from the hub's state (None: the editor is there).
-pub fn waiting(info: &Value, have_frame: bool) -> Option<String> {
+/// Pure OS-aware status text when the editor is not on show, from the hub's state (`None`: the editor is there).
+pub fn waiting_on(info: &Value, have_frame: bool, windows: bool) -> Option<String> {
+    if windows && info["mode"] == "stock" {
+        return Some(crate::i18n::trs("The embedded editor needs Backplane KiCad."));
+    }
     match info["state"].as_str().unwrap_or("") {
         "failed" => Some(format!("{} {}", crate::i18n::trs("KiCad could not start:"), info["reason"].as_str().unwrap_or(""))),
         "unresponsive" => Some(crate::i18n::trs("KiCad is not responding.")),
@@ -85,32 +130,52 @@ pub fn waiting(info: &Value, have_frame: bool) -> Option<String> {
     }
 }
 
+/// What the pane says when the editor is not on show, from the hub's state (None: the editor is there).
+pub fn waiting(info: &Value, have_frame: bool) -> Option<String> {
+    waiting_on(info, have_frame, cfg!(windows))
+}
+
+/// Decide whether a render pass should switch the editor's page from `hub_open` / `pressed_open`,
+/// without letting a stale `hub_open` revert a local `set_open` while the hub's view round-trip is still plotting.
+pub fn hub_open_step<'a>(cur_open: &str, last_hub_open: &mut String, hub_open: &'a str, pressed_open: Option<&'a str>) -> Option<&'a str> {
+    if let Some(p) = pressed_open {
+        return (p != cur_open).then_some(p);
+    }
+    if hub_open != last_hub_open {
+        *last_hub_open = hub_open.to_string();
+        if matches!(hub_open, "board" | "schematic" | "3d") && hub_open != cur_open { // i18n-ok: rail page kinds
+            return Some(hub_open);
+        }
+    }
+    None
+}
+
 pub struct KicadPane {
     /// the .kicad_pro the hub resolved this pane's project to (its attach reply), "" until then
     pub bound: String,
-    pub project: String, pub root: String, pub project_id: String, pub open: String, hub: tokio::sync::mpsc::Sender<Command>,
-    container: Option<u32>, toplevel: u32, attached: bool, pub info: Value, frames: Vec<nc::Frame>,
-    marker: Arc<Mutex<Option<HitboxId>>>, last_root: (i32, i32), placed: Option<(Option<nc::R>, Option<u32>, Vec<nc::R>)>,
+    pub project: String, pub root: String, pub project_id: String, pub open: String, last_hub_open: String, hub: tokio::sync::mpsc::Sender<Command>,
+    container: Option<u64>, toplevel: u64, attached: bool, pub info: Value, frames: Vec<nc::Frame>,
+    marker: Arc<Mutex<Option<HitboxId>>>, last_root: (i32, i32), placed: Option<(Option<nc::R>, Option<u64>, Vec<nc::R>)>,
     focus: FocusHandle, keys: bool, pub light: bool, _subs: Vec<Subscription>,
     /// the fork's holder already in our save-set; reserved chords pressed in KiCad, waiting to be pressed in gpui
-    kept: u32, press: Vec<String>,
+    kept: u64, press: Vec<String>,
     /// stock KiCad: the editor last asked for with its shortcut, and when; auxiliary frame (Symbol/Footprint/3D) opened from inside KiCad
-    poked: Option<(String, std::time::Instant)>, override_kind: Option<String>, pending_show: Option<String>,
+    poked: Option<(String, std::time::Instant)>, unmapped_since: Option<(u64, std::time::Instant)>, override_kind: Option<String>, pending_show: Option<String>,
     /// the theme told to the hub at least once; the main window (its first home), where Pop back in returns it
-    theme_sent: bool, home: u32,
+    theme_sent: bool, home: u64,
     /// files changed on disk that KiCad holds back over the person's unsaved edits (info `kicad.reload.<digest>`)
     pub conflicts: Vec<String>,
 }
 
 impl KicadPane {
-    pub fn new(cx: &mut Context<Self>, project: String, root: String, project_id: String, open: String, hub: tokio::sync::mpsc::Sender<Command>) -> Self {
+    pub fn new(cx: &mut Context<Self>, project: String, root: String, project_id: String, open: String, hub_open: String, hub: tokio::sync::mpsc::Sender<Command>) -> Self {
         // the tick: adopt stock KiCad's new frames, read the container's frames, and give the editor the keyboard on a click over it
         cx.spawn(async move |weak, cx| loop {
             cx.background_executor().timer(std::time::Duration::from_millis(40)).await;
             if weak.update(cx, |this, cx| this.tick(cx)).is_err() { break }
         }).detach();
-        KicadPane { bound: String::new(), project, root, project_id, open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), last_root: (i32::MIN, 0), placed: None,
-            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), poked: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new() }
+        KicadPane { bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), last_root: (i32::MIN, 0), placed: None,
+            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), poked: None, unmapped_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new() }
     }
     fn rpc(&self, name: &str, params: Value) { let _ = self.hub.try_send(Command::Rpc(name.to_string(), Secret(params), "kicad")); }
     /// The hub's `editor.kicad.<digest>` for this project changed.
@@ -122,7 +187,7 @@ impl KicadPane {
         }
         if info["pid"] != self.info["pid"] {
             let had_pid = !self.info["pid"].is_null();
-            self.poked = None; self.kept = 0; self.placed = None; self.override_kind = None;
+            self.poked = None; self.unmapped_since = None; self.kept = 0; self.placed = None; self.override_kind = None;
             if had_pid { self.pending_show = None; }
         }
         if matches!(info["state"].as_str(), Some("failed" | "stopped")) { self.pending_show = None; }
@@ -135,7 +200,7 @@ impl KicadPane {
         }
         if info["frames"] != self.info["frames"] {
             if let Some(c) = self.container { self.frames = nc::frames(c); }
-            self.placed = None;
+            self.placed = None; self.unmapped_since = None;
         }
         self.info = info;
         cx.notify();
@@ -144,34 +209,43 @@ impl KicadPane {
         let p = info["project"].as_str().unwrap_or("");
         // the hub's own name for this pane's project, from its attach reply: the .kicad_pro may sit below the folder the viewer named
         // (a repository whose board is in boards/<name>/), so the viewer's path alone did not match (Nov 11, SOT23_Card)
-        if !self.bound.is_empty() && p == self.bound { return true }
-        let root = info["root"].as_str().unwrap_or("").trim_end_matches('/');
-        (!p.is_empty() && path_stem(p) == path_stem(&self.project))
-            || (!root.is_empty() && (root == self.project.trim_end_matches('/') || (!self.root.is_empty() && root == self.root)))
+        if !self.bound.is_empty() && norm_path(p) == norm_path(&self.bound) { return true }
+        let root = info["root"].as_str().unwrap_or("");
+        (!p.is_empty() && norm_path(path_stem(p)) == norm_path(path_stem(&self.project)))
+            || (!root.is_empty() && (norm_path(root) == norm_path(&self.project) || (!self.root.is_empty() && norm_path(root) == norm_path(&self.root))))
+    }
+    pub fn needs_sync_open(&self, hub_open: &str, pressed_open: Option<&str>) -> bool {
+        pressed_open.map_or(hub_open != self.last_hub_open, |p| p != self.open)
+    }
+    pub fn sync_hub_open(&mut self, hub_open: &str, pressed_open: Option<&str>, cx: &mut Context<Self>) {
+        if let Some(next) = hub_open_step(&self.open, &mut self.last_hub_open, hub_open, pressed_open).map(str::to_string) {
+            self.set_open(&next, cx);
+        }
     }
     /// The rail moved to another page: show its editor (the hub opens it when KiCad has not yet).
     pub fn set_open(&mut self, open: &str, cx: &mut Context<Self>) {
         if self.open == open && self.override_kind.is_none() { return }
         self.open = open.to_string();
         self.override_kind = None;
+        self.unmapped_since = None;
         let kind = frame_for(open);
         // KiCad was closed (or failed): the rail's page starts it again, instead of a "stopped" refusal from show
         if self.attached && matches!(self.info["state"].as_str(), Some("stopped" | "failed")) { self.reattach(); }
         else if self.attached {
-            self.pending_show = Some(kind.to_string());
-            self.rpc("editor.kicad.show", json!({"project": self.project, "frame": kind}));
+            self.pending_show = (self.info["active"].as_str() != Some(kind)).then(|| kind.to_string());
+            self.rpc("editor.kicad.show", json!({"project": self.project, "frame": kind, "focus": self.keys}));
         }
         cx.notify();
     }
     pub fn has_override(&self) -> bool { self.override_kind.is_some() }
     /// KiCad's frames moved into a new container in the window `t` (and the hub told), before the window they were in goes away: a window's
     /// destruction takes its children with it, and KiCad's would be among them. Also how a pane goes back in from its own window.
-    pub fn rehome(&mut self, t: u32) {
+    pub fn rehome(&mut self, t: u64) {
         let Some(old) = self.container else { return };
         if t == self.toplevel { return }
-        let Some(new) = nc::container(t) else { return };
+        let Some(new) = nc::container_for(t, &self.project) else { return };
         nc::move_frames(old, new); nc::destroy(old);
-        self.toplevel = t; self.container = Some(new); self.placed = None; self.last_root = (i32::MIN, 0);
+        self.toplevel = t; self.container = Some(new); self.placed = None; self.unmapped_since = None; self.last_root = (i32::MIN, 0);
         nc::grab_click(new, !self.keys);
         self.reattach();
     }
@@ -186,8 +260,8 @@ impl KicadPane {
         for f in std::mem::take(&mut self.conflicts) { self.rpc("editor.kicad.resolve", json!({"project": self.project, "file": f, "choice": choice})); }
         cx.notify();
     }
-    /// The main window's X11 id (the pane's first home).
-    pub fn home(&self) -> u32 { self.home }
+    /// The main window's native handle (the pane's first home).
+    pub fn home(&self) -> u64 { self.home }
     /// A tab pressed: that editor in the pane (KiCad opens it when it has not yet); the rail's page stays as it is.
     pub fn show_kind(&mut self, kind: &str, cx: &mut Context<Self>) {
         if kind == frame_for(&self.open) { self.override_kind = None; } else { self.override_kind = Some(kind.to_string()); }
@@ -207,20 +281,20 @@ impl KicadPane {
     fn wanted_kind(&self) -> &str { self.override_kind.as_deref().unwrap_or_else(|| frame_for(&self.open)) }
     /// The person took the editor: the hub then refuses an agent's save while anything is unsaved (kicad/embed.rs `Unsaved`).
     fn touched(&self) { self.rpc("editor.kicad.touched", json!({"project": self.project})); }
-    fn want(&self) -> Option<u32> { if self.info.is_null() { return None } pick(self.wanted_kind(), &self.info, &self.frames) }
+    fn want(&self) -> Option<u64> { if self.info.is_null() || (cfg!(windows) && self.info["mode"] == "stock") { return None } pick(self.wanted_kind(), &self.info, &self.frames) }
     fn tick(&mut self, cx: &mut Context<Self>) {
         let Some(c) = self.container else { return };
         if let Some(pid) = self.info["pid"].as_u64().filter(|p| *p > 0) {
             if self.info["mode"] == "fork" {
                 nc::dialogs(pid as u32, c, self.toplevel);
-            } else if !nc::adopt(pid as u32, c, self.toplevel).is_empty() {
+            } else if !cfg!(windows) && !nc::adopt(pid as u32, c, self.toplevel).is_empty() {
                 self.placed = None; cx.notify();
             }
         }
         let f = nc::frames(c);
         if f != self.frames {
-            // If stock KiCad just opened Symbol Editor, Footprint Editor, or 3D Viewer from inside an editor, show it in the pane.
-            if self.info["mode"] == "stock" {
+            // If stock KiCad on Linux just opened Symbol Editor, Footprint Editor, or 3D Viewer from inside an editor, show it in the pane.
+            if !cfg!(windows) && self.info["mode"] == "stock" {
                 for nf in &f {
                     if !self.frames.iter().any(|of| of.window == nf.window)
                         && (matches!(nf.kind, "SYMBOL_EDITOR" | "FOOTPRINT_EDITOR") || (nf.kind == "PCB_3D" && self.open != "3d")) // i18n-ok: wire frame kind enum names
@@ -249,19 +323,32 @@ impl KicadPane {
         }
         let want = self.wanted_kind().to_string();
         // fork KiCad: if the placed frame stayed unmapped (e.g. cold-start wxGTK decor-extents deferral), ask the hub to remount it once cooldown passes.
-        if self.info["mode"] == "fork" && self.info["state"] == "ready" {
+        if self.info["mode"] == "fork" && self.info["state"] == "ready" && self.pending_show.is_none() {
             if let Some((Some(_), Some(w), _)) = &self.placed {
-                if nc::report(*w).is_some_and(|(_, on, _)| !on)
-                    && self.poked.as_ref().map_or(true, |(k, t)| k != &want || t.elapsed() >= std::time::Duration::from_millis(1500))
-                {
-                    self.poked = Some((want.clone(), std::time::Instant::now()));
-                    self.placed = None;
-                    self.rpc("editor.kicad.show", json!({"project": self.project, "frame": &want, "remount": true}));
+                if nc::report(*w).is_some_and(|(_, on, _)| !on) {
+                    let since = match self.unmapped_since {
+                        Some((uw, t)) if uw == *w => t,
+                        _ => { let now = std::time::Instant::now(); self.unmapped_since = Some((*w, now)); now }
+                    };
+                    if since.elapsed() >= std::time::Duration::from_millis(800)
+                        && self.poked.as_ref().map_or(true, |(k, t)| k != &want || t.elapsed() >= std::time::Duration::from_millis(1500))
+                    {
+                        self.poked = Some((want.clone(), std::time::Instant::now()));
+                        self.unmapped_since = None;
+                        self.placed = None;
+                        self.rpc("editor.kicad.show", json!({"project": self.project, "frame": &want, "remount": true, "focus": self.keys}));
+                    }
+                } else {
+                    self.unmapped_since = None;
                 }
+            } else {
+                self.unmapped_since = None;
             }
+        } else {
+            self.unmapped_since = None;
         }
-        // stock KiCad: the wanted editor not open yet, asked for with its own shortcut (at most every 4 s; the fork opens it through ShowFrame)
-        if self.info["mode"] == "stock" && pick(&want, &self.info, &self.frames).is_none() && self.poked.as_ref().map_or(true, |(k, t)| k != &want || t.elapsed().as_secs() >= 4) {
+        // stock KiCad (Linux only): the wanted editor not open yet, asked for with its own shortcut (at most every 4 s; the fork opens it through ShowFrame)
+        if !cfg!(windows) && self.info["mode"] == "stock" && pick(&want, &self.info, &self.frames).is_none() && self.poked.as_ref().map_or(true, |(k, t)| k != &want || t.elapsed().as_secs() >= 4) {
             if let Some((host, ks, m)) = nc::stock_opener(&want) {
                 // the 3D viewer is the PCB editor's: open that first
                 let (host, ks, m) = if host == "PCB" && !self.frames.iter().any(|f| f.kind == "PCB") { nc::stock_opener("PCB").unwrap() } else { (host, ks, m) }; // i18n-ok: wire frame kind enum names
@@ -272,7 +359,7 @@ impl KicadPane {
         if let Some(w) = self.want() { match (nc::button_over(w), nc::has_focus(c)) { (Some(true), false) => nc::focus(w), (Some(false), true) => nc::focus(self.toplevel), _ => {} } }
         let has = nc::has_focus(c);
         if has != self.keys { self.keys = has; nc::grab_escape(self.toplevel, has); nc::grab_click(c, !has); if has { self.touched(); } cx.notify(); }
-        if let Some(h) = self.info["holder"].as_u64().filter(|h| *h > 0 && *h as u32 != self.kept) { nc::keep(h as u32); self.kept = h as u32; }
+        if let Some(h) = self.info["holder"].as_u64().filter(|h| *h > 0 && *h != self.kept) { nc::keep(h); self.kept = h; }
         for e in nc::events() {
             match e {
                 // the keyboard back to the client's window; a reserved chord is then pressed in gpui (after_frame, which has the window)
@@ -298,8 +385,13 @@ impl KicadPane {
         }
         if self.container.is_some() || self.attached { return }
         let Some(top) = top else { self.info = json!({"state": "failed", "reason": crate::i18n::trs("this window cannot hold another program's (only X11 and XWayland for now)")}); self.attached = true; return };
-        self.toplevel = top; self.home = top; self.container = nc::container(top);
-        let Some(c) = self.container else { self.info = json!({"state": "failed", "reason": crate::i18n::trs("no X11 connection")}); self.attached = true; return };
+        self.toplevel = top; self.home = top; self.container = nc::container_for(top, &self.project);
+        let Some(c) = self.container else {
+            let why = if cfg!(windows) { crate::i18n::trs("could not create container window") } else { crate::i18n::trs("no X11 connection") };
+            self.info = json!({"state": "failed", "reason": why});
+            self.attached = true;
+            return;
+        };
         nc::grab_click(c, true);
         self.attached = true;
         let display = std::env::var("DISPLAY").unwrap_or_default();
@@ -333,10 +425,10 @@ impl KicadPane {
             if over.iter().any(|o| *o != p) { over.retain(|o| *o != p); }
         }
         let show = self.want();
-        let managed: Option<Vec<u32>> = (self.info["mode"] == "fork").then(|| {
+        let managed: Option<Vec<u64>> = (self.info["mode"] == "fork").then(|| {
             self.info["frames"].as_array().into_iter().flatten()
                 .filter(|f| f["shown"] != false)
-                .filter_map(|f| f["xid"].as_u64().map(|x| x as u32))
+                .filter_map(|f| f["xid"].as_u64())
                 .collect()
         });
         let prev_show = self.placed.as_ref().and_then(|(_, s, _)| *s);
@@ -360,9 +452,10 @@ impl KicadPane {
     pub fn report(&self) -> Value {
         let live = self.container.map_or_else(Vec::new, nc::frames);
         let frames_src = if !live.is_empty() { &live } else { &self.frames };
-        let shown = (!self.info.is_null()).then(|| pick(self.wanted_kind(), &self.info, frames_src)).flatten();
+        let shown = (!self.info.is_null() && !(cfg!(windows) && self.info["mode"] == "stock"))
+            .then(|| pick(self.wanted_kind(), &self.info, frames_src)).flatten();
         let top_depth = if self.toplevel != 0 { nc::window_meta(self.toplevel, None, self.toplevel).map(|(d, _, _, _)| d) } else { None };
-        let g = |w: u32| nc::report(w).map_or(Value::Null, |(r, on, lit)| {
+        let g = |w: u64| nc::report(w).map_or(Value::Null, |(r, on, lit)| {
             let mut v = json!({"x": r.x, "y": r.y, "w": r.w, "h": r.h, "shown": on, "painted": lit});
             if let Some((depth, (rx, ry), rects, in_tree)) = nc::window_meta(w, self.container, self.toplevel) {
                 v["depth"] = depth.into(); v["root_x"] = rx.into(); v["root_y"] = ry.into(); v["shape_rects"] = rects.into(); v["in_tree"] = in_tree.into();
@@ -409,7 +502,7 @@ impl Render for KicadPane {
 
 #[cfg(test)]
 mod tests {
-    use super::{belongs_to, frame_for, nc, path_stem, pick, project_of, root_of, waiting};
+    use super::{belongs_to, edit_target, frame_for, hub_open_step, nc, path_stem, pick, project_of, root_of, waiting, waiting_on};
     use serde_json::{json, Value};
     #[test] fn ctrl_tab_goes_round_the_editor_tabs() {
         assert_eq!(super::next_tab("PCB", 1), "SCH"); assert_eq!(super::next_tab("PCB", -1), "FOOTPRINT_EDITOR"); assert_eq!(super::next_tab("FOOTPRINT_EDITOR", 1), "PCB"); assert_eq!(super::next_tab("?", 1), "SCH");
@@ -420,12 +513,21 @@ mod tests {
         assert_eq!(project_of("schematic|/p/proj|/abs/x.kicad_sch").as_deref(), Some("/abs/x.kicad_sch"));
         assert_eq!(project_of("0|/p/|").as_deref(), Some("/p"), "the rail's default board: the project's root");
         assert_eq!(root_of("1|/p/proj/|sub/power.kicad_sch").as_deref(), Some("/p/proj"));
+        assert_eq!(project_of(r"board|C:\bp\proj|amp.kicad_pcb").as_deref(), Some(r"C:\bp\proj\amp.kicad_pcb"));
+        assert_eq!(project_of(r"schematic|C:\bp\proj|C:\bp\proj\amp.kicad_sch").as_deref(), Some(r"C:\bp\proj\amp.kicad_sch"));
+        assert_eq!(root_of(r"0|C:\bp\proj\|").as_deref(), Some(r"C:\bp\proj"));
         assert_eq!(project_of("0||"), None); assert_eq!(project_of("nothing"), None);
+        let data = json!({"projects": [{"id": "http://127.0.0.1:4100|p1", "root": r"C:\bp\proj\"}]});
+        assert_eq!(edit_target(&data, "", "p1"), Some((r"C:\bp\proj".into(), r"C:\bp\proj".into())), "early rail press before viewer.key arrives falls back to project root");
+        assert_eq!(edit_target(&data, r"0|C:\bp\proj|amp.kicad_pcb", "p1"), Some((r"C:\bp\proj\amp.kicad_pcb".into(), r"C:\bp\proj".into())));
+        assert_eq!(edit_target(&data, "", "missing"), None);
     }
-    #[test] fn dots_in_parent_folders_do_not_confuse_project_stem_matching() {
+    #[test] fn dots_in_parent_folders_and_windows_separators_match_cleanly() {
         assert_eq!(path_stem("/tmp/bp-kembed-xr.lVLR/editors1/proj"), "/tmp/bp-kembed-xr.lVLR/editors1/proj");
         assert_eq!(path_stem("/tmp/bp-kembed-xr.lVLR/editors1/proj/amp.kicad_pro"), "/tmp/bp-kembed-xr.lVLR/editors1/proj/amp");
+        assert_eq!(path_stem(r"C:\bp\run.1\proj\amp.kicad_pro"), r"C:\bp\run.1\proj\amp");
         assert!(!belongs_to("/tmp/bp-kembed-xr.lVLR/editors1/proj", "", "p1", "0|/tmp/bp-kembed-xr.lVLR/other|", "p2"));
+        assert!(belongs_to(r"C:\bp\proj\amp.kicad_pcb", r"C:\bp\proj", "p1", "1|c:/bp/proj|c:/bp/proj/amp.kicad_sch", "p1"));
     }
     #[test] fn switching_rail_pages_in_same_project_keeps_the_editor_pane() {
         assert!(belongs_to("/p/amp/amp.kicad_pcb", "/p/amp", "p1", "1|/p/amp|/p/amp/amp.kicad_sch", "p1"), "board -> schematic");
@@ -446,6 +548,25 @@ mod tests {
         assert!(waiting(&json!({"state": "starting"}), false).is_some());
         assert!(waiting(&json!({"state": "ready"}), true).is_none());
         assert!(waiting(&json!({"state": "failed", "reason": "no kicad"}), true).unwrap().contains("no kicad"));
+        assert_eq!(
+            waiting_on(&json!({"mode": "stock", "state": "ready"}), false, true).as_deref(),
+            Some("The embedded editor needs Backplane KiCad."),
+            "stock mode on Windows says Backplane KiCad is needed"
+        );
+        assert!(waiting_on(&json!({"mode": "stock", "state": "ready"}), true, false).is_none(), "stock mode on Linux embeds");
+    }
+    #[test] fn stale_hub_open_never_reverts_a_rail_switch_while_svg_plots() {
+        let mut last = "board".to_string();
+        // Person clicked rail:Schematic (`cur_open` became "schematic"); hub's `viewer.open` is still "board" even after PRESSED expires.
+        assert_eq!(hub_open_step("schematic", &mut last, "board", Some("schematic")), None);
+        assert_eq!(hub_open_step("schematic", &mut last, "board", None), None, "stale board must not revert schematic");
+        assert_eq!(last, "board");
+        // Hub finishes plotting schematic and updates `viewer.open` -> "schematic": `last_hub_open` catches up with no duplicate switch.
+        assert_eq!(hub_open_step("schematic", &mut last, "schematic", None), None);
+        assert_eq!(last, "schematic");
+        // Agent or remote client later changes `viewer.open` -> "3d": editor switches.
+        assert_eq!(hub_open_step("schematic", &mut last, "3d", None), Some("3d"));
+        assert_eq!(last, "3d");
     }
 }
 
@@ -508,15 +629,18 @@ impl crate::Backplane {
         let key = crate::screens::viewer::shown_key(viewer);
         let tid = crate::screens::attach::raw_id(thread["id"].as_str().unwrap_or(""));
         let pid = crate::keys::project_of(&self.data, tid);
-        let Some(project) = project_of(&key) else { return false };
-        let root = root_of(&key).unwrap_or_default();
-        let open = viewer["open"].as_str().unwrap_or("board").to_string();
+        let Some((project, root)) = edit_target(&self.data, &key, &pid) else { return false };
+        let open_now = viewer["open"].as_str().unwrap_or("");
+        let open = crate::screens::viewer::pressed(open_now)
+            .filter(|k| matches!(k.as_str(), "board" | "schematic" | "3d")) // i18n-ok: rail page kinds
+            .or_else(|| (!open_now.is_empty()).then(|| open_now.to_string()))
+            .unwrap_or_else(|| "board".to_string()); // i18n-ok: rail page kinds
         if let Some(p) = &self.screens.kicad {
             let pr = p.read(cx);
             if belongs_to(&pr.project, &pr.root, &pr.project_id, &key, &pid) { return true }
         }
-        let (hub, infos) = (self.tx.clone(), self.screens.kicad_infos.clone());
-        let page = cx.new(move |cx| { let mut p = KicadPane::new(cx, project, root, pid, open, hub); if let Some(v) = infos.values().find(|v| p.matches(v)).cloned() { p.info = v; } p });
+        let (hub, infos, hub_open) = (self.tx.clone(), self.screens.kicad_infos.clone(), open_now.to_string());
+        let page = cx.new(move |cx| { let mut p = KicadPane::new(cx, project, root, pid, open, hub_open, hub); if let Some(v) = infos.values().find(|v| p.matches(v)).cloned() { p.info = v; } p });
         self.screens.kicad = Some(page); cx.notify(); true
     }
     /// View: back to Backplane's own viewer (KiCad stays open in the hub, warm for the next Edit).

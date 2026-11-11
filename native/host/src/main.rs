@@ -113,7 +113,7 @@ async fn main() {
     if std::env::args().nth(1).as_deref() == Some("--mcp-stdio") { std::process::exit(agents::mcp_stdio::main()) }
     if std::env::args().nth(1).as_deref() == Some("--render") { std::process::exit(render_cli()) }
     let args = match parse() { Ok(a) => a, Err(code) => std::process::exit(code) };
-    plat::hub::exit_on_signals();
+    plat::hub::exit_on_signals(files::kicad::embed::shutdown_all);
     if let Err(e) = run(args).await { eprintln!("backplane-hub: {e:#}"); std::process::exit(exit_code(&e)) }
 }
 

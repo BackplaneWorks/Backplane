@@ -183,7 +183,8 @@ fn pane_actions(cx: &mut Context<Backplane>, light: bool, thread: &Value, target
     // Edit / View: the real KiCad in this pane (on the hub's own machine), or back to Backplane's viewer
     if has_design(viewer) && !diff_on && crate::viewers::kicad_pane::local(target.map(|t| t.addr.as_str()), thread) {
         let c2 = c(if editing { "accent" } else { "line" });
-        row = row.child(tall(div().id("kicad-edit").px_2().border_1().border_color(c2).bg(c("raise")).cursor_pointer().hover(|s| s.bg(c("panel"))).text_size(px(12.))
+        /* i18n-ok: ctl labels and ui: ids are what drivers press */ let edit_div = crate::ui::with_rect(div().id("kicad-edit"), move || if editing { "ui:View".to_string() } else { "ui:Edit".to_string() });
+        row = row.child(tall(edit_div.px_2().border_1().border_color(c2).bg(c("raise")).cursor_pointer().hover(|s| s.bg(c("panel"))).text_size(px(12.))
             .tooltip(crate::keys::tip(&if editing { trs("Back to Backplane's viewer (KiCad stays open)") } else { trs("Edit in the real KiCad, here in the pane") }, "", light))
             .child(if editing { trs("View") } else { trs("Edit") })
             .on_click(cx.listener(move |this, _, _, cx| { if editing { this.kicad_view(cx); } else { this.kicad_edit(cx); } }))).into_any_element());
@@ -634,8 +635,12 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
     let acts = |cx: &mut Context<Backplane>| pane_actions(cx, light, thread, target, diff_on, editing);
     let body: AnyElement = if editing {
         // the real KiCad, its rail page's editor over the pane (viewers/kicad_pane.rs); the pane's controls in its own row above it, never over KiCad's toolbar
-        let kicad_open = pressed(open).filter(|k| matches!(k.as_str(), "board" | "schematic" | "3d")).unwrap_or_else(|| open.to_string()); // i18n-ok: rail page kinds
-        let e = editor.unwrap().clone(); if e.read(cx).open != kicad_open { e.update(cx, |p, cx| p.set_open(&kicad_open, cx)); }
+        let pressed_open = pressed(open).filter(|k| matches!(k.as_str(), "board" | "schematic" | "3d")); // i18n-ok: rail page kinds
+        let e = editor.unwrap().clone();
+        if e.read(cx).needs_sync_open(open, pressed_open.as_deref()) {
+            let ho = open.to_string();
+            e.update(cx, |p, cx| p.sync_hub_open(&ho, pressed_open.as_deref(), cx));
+        }
         if e.read(cx).light != light { e.update(cx, |p, cx| p.set_light(light, cx)); }
         let a = acts(cx);
         let (popped, full) = (KICAD_POPPED.load(std::sync::atomic::Ordering::Relaxed), KICAD_FULL.load(std::sync::atomic::Ordering::Relaxed));

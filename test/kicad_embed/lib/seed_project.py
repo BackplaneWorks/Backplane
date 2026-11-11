@@ -58,7 +58,8 @@ def main() -> None:
     write(os.path.join(kdir, "ecc83-pp.kicad_pro"), json.dumps(pro, indent=2) + "\n")
 
     # Canonical Backplane pointer + companion metadata to verify byte-preservation across saves/exports
-    write(os.path.join(proj, ".backplane.json"), json.dumps({"project": os.path.join(sub, "ecc83-pp.kicad_pro") if sub else "ecc83-pp.kicad_pro"}, indent=2) + "\n")
+    rel_pro = (os.path.join(sub, "ecc83-pp.kicad_pro").replace("\\", "/") if sub else "ecc83-pp.kicad_pro")
+    write(os.path.join(proj, ".backplane.json"), json.dumps({"project": rel_pro}, indent=2) + "\n")
     companion = {
         "format": "backplane-kicad-metadata",
         "items": {
@@ -180,26 +181,35 @@ def main() -> None:
         "graphics": {"canvas_type": 1},  # 1 = OpenGL GAL (OPENGL_GAL)
         "window": {"maximized": False, "size_x": 900, "size_y": 720, "pos_x": 40, "pos_y": 40},
     }
-    sym_tpl = "/usr/share/kicad/template/sym-lib-table"
-    fp_tpl = "/usr/share/kicad/template/fp-lib-table"
-    sym_text = open(sym_tpl, encoding="utf-8").read() if os.path.isfile(sym_tpl) else "(sym_lib_table\n  (version 7)\n)\n"
-    fp_text = open(fp_tpl, encoding="utf-8").read() if os.path.isfile(fp_tpl) else "(fp_lib_table\n  (version 7)\n)\n"
+    kicad_cli = os.environ.get("KICAD_CLI", "").strip()
+    kicad_tpl_dir = (
+        os.path.join(os.path.dirname(os.path.dirname(kicad_cli)), "share", "kicad", "template")
+        if kicad_cli
+        else ""
+    )
+    sym_candidates = [p for p in [os.path.join(kicad_tpl_dir, "sym-lib-table") if kicad_tpl_dir else "", "/usr/share/kicad/template/sym-lib-table"] if p and os.path.isfile(p)]
+    fp_candidates = [p for p in [os.path.join(kicad_tpl_dir, "fp-lib-table") if kicad_tpl_dir else "", "/usr/share/kicad/template/fp-lib-table"] if p and os.path.isfile(p)]
+    sym_text = open(sym_candidates[0], encoding="utf-8").read() if sym_candidates else "(sym_lib_table\n  (version 7)\n)\n"
+    fp_text = open(fp_candidates[0], encoding="utf-8").read() if fp_candidates else "(fp_lib_table\n  (version 7)\n)\n"
 
-    for ver in ("10.0", "10.99"):
-        cdir = os.path.join(out_dir, "fh", ".config", "kicad", ver)
-        write(os.path.join(cdir, "kicad_common.json"), json.dumps(common_cfg, indent=2) + "\n")
-        write(os.path.join(cdir, "pcbnew.json"), json.dumps(editor_cfg("pcbnew.json", 5), indent=2) + "\n")
-        write(os.path.join(cdir, "fpedit.json"), json.dumps(editor_cfg("fpedit.json", 5), indent=2) + "\n")
-        write(os.path.join(cdir, "eeschema.json"), json.dumps(editor_cfg("eeschema.json", 3), indent=2) + "\n")
-        write(os.path.join(cdir, "symbol_editor.json"), json.dumps(editor_cfg("symbol_editor.json", 1), indent=2) + "\n")
-        write(os.path.join(cdir, "3d_viewer.json"), json.dumps(editor_cfg("3d_viewer.json", 4), indent=2) + "\n")
-        write(os.path.join(cdir, "sym-lib-table"), sym_text)
-        write(os.path.join(cdir, "fp-lib-table"), fp_text)
-        write(os.path.join(cdir, "design-block-lib-table"), "(design_block_lib_table\n  (version 7)\n)\n")
+    cfg_bases = [os.path.join(out_dir, "fh", ".config", "kicad")]
+    if os.name == "nt":
+        cfg_bases.append(os.path.join(out_dir, "fh", "AppData", "Roaming", "kicad"))
+    for base in cfg_bases:
+        for ver in ("10.0", "10.99"):
+            cdir = os.path.join(base, ver)
+            write(os.path.join(cdir, "kicad_common.json"), json.dumps(common_cfg, indent=2) + "\n")
+            write(os.path.join(cdir, "pcbnew.json"), json.dumps(editor_cfg("pcbnew.json", 5), indent=2) + "\n")
+            write(os.path.join(cdir, "fpedit.json"), json.dumps(editor_cfg("fpedit.json", 5), indent=2) + "\n")
+            write(os.path.join(cdir, "eeschema.json"), json.dumps(editor_cfg("eeschema.json", 3), indent=2) + "\n")
+            write(os.path.join(cdir, "symbol_editor.json"), json.dumps(editor_cfg("symbol_editor.json", 1), indent=2) + "\n")
+            write(os.path.join(cdir, "3d_viewer.json"), json.dumps(editor_cfg("3d_viewer.json", 4), indent=2) + "\n")
+            write(os.path.join(cdir, "sym-lib-table"), sym_text)
+            write(os.path.join(cdir, "fp-lib-table"), fp_text)
+            write(os.path.join(cdir, "design-block-lib-table"), "(design_block_lib_table\n  (version 7)\n)\n")
 
     # Seed Backplane hub events.jsonl and stand-in agent shims
     now = int(time.time())
-    kicad_cli = os.environ.get("KICAD_CLI", "").strip()
     events = [
         {"$": "ProjectCreated", "id": "p1", "title": "ecc83-pp", "root": proj, "at": now},
         {
@@ -225,9 +235,15 @@ def main() -> None:
 
     bun = shutil.which("bun") or "/usr/bin/env bun"
     standin = os.path.join(repo_root, "test", "tools", "claude_standin.ts")
-    write(os.path.join(out_dir, "bin", "claude"), f'#!/bin/sh\nexec "{bun}" "{standin}" "$@"\n', executable=True)
+    standin_sh = standin.replace("\\", "/")
+    bun_sh = bun.replace("\\", "/")
+    write(os.path.join(out_dir, "bin", "claude"), f'#!/bin/sh\nexec "{bun_sh}" "{standin_sh}" "$@"\n', executable=True)
     for blocked in ("codex", "grok", "muse", "opencode"):
         write(os.path.join(out_dir, "bin", blocked), "#!/bin/sh\nexit 1\n", executable=True)
+    if os.name == "nt":
+        write(os.path.join(out_dir, "bin", "claude.cmd"), f'@echo off\r\n"{bun}" "{standin}" %*\r\n')
+        for blocked in ("codex", "grok", "muse", "opencode"):
+            write(os.path.join(out_dir, "bin", f"{blocked}.cmd"), "@echo off\r\nexit /b 1\r\n")
 
 
 if __name__ == "__main__":

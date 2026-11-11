@@ -1148,7 +1148,10 @@ mod tests {
             let t = std::time::Instant::now();
             let Some(SolidFrame::Model(_, m)) = parse_frame(&b) else { eprintln!("{}: not a model", f.display()); continue };
             let decode = t.elapsed().as_secs_f64() * 1000.0;
-            let t = std::time::Instant::now(); let v = super::super::solid_gpu::bench_vertices(&m); let verts = t.elapsed().as_secs_f64() * 1000.0;
+            #[cfg(target_os = "linux")]
+            let (v, verts) = { let t = std::time::Instant::now(); let v = super::super::solid_gpu::bench_vertices(&m); (v, t.elapsed().as_secs_f64() * 1000.0) };
+            #[cfg(not(target_os = "linux"))]
+            let (v, verts) = (0usize, 0.0f64);
             let cam = Camera::fitted(&m); let m = Arc::new(m); let l = Layers::of(Some(m.clone()), vec![]).unwrap();
             let mut d = Drawer::default(); let t = std::time::Instant::now();
             let px = d.cpu_mesh(&l).and_then(|mm| render(&mm, &cam, 1280, 800, 1, &|| true)); let cpu = t.elapsed().as_secs_f64() * 1000.0;

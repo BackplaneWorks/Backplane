@@ -89,10 +89,10 @@ pub mod hub {
     }
     /// A signal that ends the hub says so in hub.log and exits nonzero (128 + the signal); SIGKILL cannot be caught.
     /// SIGHUP and SIGINT stay as the parent left them when it ignored them (nohup, a background `&`): registering would override that.
-    pub fn exit_on_signals() {
+    pub fn exit_on_signals(on_exit: fn()) {
         for (kind, name, n) in [(tokio::signal::unix::SignalKind::terminate(), "SIGTERM", 15), (tokio::signal::unix::SignalKind::interrupt(), "SIGINT", 2), (tokio::signal::unix::SignalKind::hangup(), "SIGHUP", 1)] {
             if n != 15 && signal_ignored(n) { continue }
-            if let Ok(mut sig) = tokio::signal::unix::signal(kind) { tokio::spawn(async move { sig.recv().await; eprintln!("backplane-hub: {name} received, exiting"); std::process::exit(128 + n) }); }
+            if let Ok(mut sig) = tokio::signal::unix::signal(kind) { tokio::spawn(async move { sig.recv().await; on_exit(); eprintln!("backplane-hub: {name} received, exiting"); std::process::exit(128 + n) }); }
         }
     }
     /// A shell or other program by its Unix name: itself.

@@ -165,6 +165,9 @@ mod reaper {
 #[cfg(any(target_os = "linux", windows))]
 mod reaper { pub fn add(_pid: u32) {} pub fn remove(_pid: u32) {} }
 
+pub(crate) fn watch_group(pid: u32) { reaper::add(pid); }
+pub(crate) fn unwatch_group(pid: u32) { reaper::remove(pid); }
+
 /// `backplane-hub --agent-reaper`: read "+pid" / "-pid" lines from stdin; at end of input (the hub is gone) kill each process group still listed. Returns the exit code.
 pub fn reaper_main() -> i32 {
     use std::io::BufRead;

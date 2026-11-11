@@ -232,10 +232,10 @@ pub mod hub {
     /// No descriptor limit to raise.
     pub fn raise_nofile() {}
     /// Ctrl+C or Ctrl+Break, the console closing, logoff or shutdown end the hub, said in hub.log, exit 130 (as SIGINT).
-    pub fn exit_on_signals() {
-        tokio::spawn(async { if tokio::signal::ctrl_c().await.is_ok() { eprintln!("backplane-hub: Ctrl+C received, exiting"); std::process::exit(130) } });
+    pub fn exit_on_signals(on_exit: fn()) {
+        tokio::spawn(async move { if tokio::signal::ctrl_c().await.is_ok() { on_exit(); eprintln!("backplane-hub: Ctrl+C received, exiting"); std::process::exit(130) } });
         use tokio::signal::windows as w;
-        macro_rules! on { ($name:expr, $s:expr) => { if let Ok(mut s) = $s { tokio::spawn(async move { s.recv().await; eprintln!("backplane-hub: {} received, exiting", $name); std::process::exit(130) }); } } }
+        macro_rules! on { ($name:expr, $s:expr) => { if let Ok(mut s) = $s { tokio::spawn(async move { s.recv().await; on_exit(); eprintln!("backplane-hub: {} received, exiting", $name); std::process::exit(130) }); } } }
         on!("Ctrl+Break", w::ctrl_break()); on!("close", w::ctrl_close()); on!("shutdown", w::ctrl_shutdown()); on!("logoff", w::ctrl_logoff());
     }
     /// The hub's scripts are POSIX shell: `sh`/`bash` mean Git for Windows' (on PATH, or beside git.exe), which Windows agents need anyway.
