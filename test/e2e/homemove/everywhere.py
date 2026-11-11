@@ -43,7 +43,7 @@ def agents():
                 "if [ \"$1\" = auth ] && [ \"$2\" = status ]; then\n"
                 "  if [ -f \"$HOME/signed\" ]; then echo '{\"loggedIn\":true,\"email\":\"standin@example.com\"}'; exit 0; fi\n"
                 "  echo '{\"loggedIn\":false}'; exit 1\nfi\n"
-                "export FAKE_LOG=\"$HOME/standin.log\" BP_STANDIN_MODE=stream BP_STREAM_N=1 BP_STREAM_MS=20; printf '%s\\n' \"$*\" | cut -c1-2000 >> \"$HOME/argv.log\"\n"
+                "export FAKE_LOG=\"$HOME/standin.log\" BP_STANDIN_MODE=stream BP_STREAM_N=1 BP_STREAM_MS=20 BP_STANDIN_SUMMARY=1; printf '%s\\n' \"$*\" | cut -c1-2000 >> \"$HOME/argv.log\"\n"
                 f"exec {bun} {ROOT}/test/tools/claude_standin.ts \"$@\"\n")
     os.chmod(os.path.join(d, "claude"), 0o755)
 

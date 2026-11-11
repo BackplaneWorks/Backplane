@@ -329,7 +329,7 @@ impl Backplane {
                     // the open thread's conversation as the window holds it (its id, then one "role: text" line per entry), for e2e checks that a view
                     // follows its thread without a re-open (lane T, run-c); text only, never drafts or fields
                     "timeline" => { let t = &self.data["thread"];
-                        let mut out = vec![format!("thread: {}", t["id"].as_str().unwrap_or(""))];
+                        let mut out = vec![format!("thread: {}", t["id"].as_str().unwrap_or(""))]; // i18n-ok: an e2e script's read, never drawn
                         for e in t["entries"].as_array().map_or(&[][..], |r| r.as_slice()) {
                             out.push(format!("{}: {}", e["role"].as_str().or(e["kind"].as_str()).unwrap_or(""), e["text"].as_str().unwrap_or("").replace('\n', " "))); }
                         (out.join("\n"), true) }
