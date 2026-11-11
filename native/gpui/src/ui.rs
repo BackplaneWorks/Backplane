@@ -422,7 +422,7 @@ impl Backplane {
             }
         }
         } // (not sectioned)
-        for page in self.data["sidebarPages"].as_array().into_iter().flatten() {
+        for page in self.data["sidebarPages"].as_array().into_iter().flatten().filter(|_| !sectioned) { // (the projects' pagers: the sections page nothing)
             for key in ["projects", "active", "legacy"] { if let Some(row) = pager_row(cx, format!("pg-{key}"), &page[key], light, &mut ctl) { rows.push(row); } }
         }
         // Conversation history: the old Scratch chats. Nothing starts here; a chat that wants attention always has its row, the rest open from this row or from a search

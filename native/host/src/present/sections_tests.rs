@@ -244,6 +244,10 @@ fn world() -> State {
         tc("tr", "p1", 7), json!({"$":"RunSet","thread":"tr","bot":"b1","conv":"","mail":"","at":NOW-70}), turn("tr", "failed", NOW - 20)]; // a routine's or mail run
     let mut s = State::new(); s.lean = true; for e in &evs { s.apply(e); } s.apply(&bot);
     for id in ["tb", "tk", "tm", "tr"] { assert!(!own(&s, id), "{id}"); assert!(!visible(&s, id), "{id} is backend chatter"); }
+    // the uberbot is a bot, but what it launches is the person's (ThreadLaunched sets launch.<t>)
+    let mut u = State::new(); u.lean = true; for e in &evs { u.apply(e); } u.apply(&bot);
+    u.apply(&json!({"$":"UberSet","bot":"b1","uid":"u","at":6})); u.apply(&json!({"$":"ThreadLaunched","id":"tm","by":"tb","report":true,"at":7}));
+    assert!(own(&u, "tm") && visible(&u, "tm"), "launched by the uberbot: the person's");
     for id in ["tl", "tn"] { assert!(own(&s, id), "{id}"); assert!(visible(&s, id), "{id}"); }
     let rows = merged_projects(&s, &[], &|_| false, &|_| String::new(), "desk", &[]);
     assert_eq!(titles(sec(&build(&s, &rows, &Value::Null, &ctx(&HashSet::new())), "needs")), ["T tn", "T tl"]);

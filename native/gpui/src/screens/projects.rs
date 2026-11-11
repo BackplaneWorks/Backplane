@@ -214,6 +214,10 @@ pub fn page(cx: &mut Context<Backplane>, light: bool, data: &Value, home: &Home,
         div().text_size(px(22.)).font_weight(FontWeight::BOLD).child(string(p, "title")).into_any_element(),
         div().text_size(px(12.)).text_color(c("dim")).child(string(p, "root")).into_any_element(),
     ];
+    // the hub's lists for this project first (running, needs you, recent, Done (n)), every machine's threads; the goal and notes after them
+    let lists = super::sections::page_lists(cx, light, data, pid, ctl);
+    let listed = lists.is_some();
+    if let Some(l) = lists { out.extend(l); }
     // what the folder holds (the hub's reads): the goal and notes, the parts to order and the boards (no Ready to order bar and no Buy it here: Buy it is a thread's tool)
     let (hp, snap, card) = (home.pid.clone(), home.snap.clone(), home.card.clone());
     if hp == pid {
@@ -251,8 +255,7 @@ pub fn page(cx: &mut Context<Backplane>, light: bool, data: &Value, home: &Home,
     /* i18n-ok: ctl labels and ui: ids are what drivers press */ ctl.push(CtlEntry { id: "page-new-thread".into(), label: "New thread".into(), ctl: Ctl::Node("new-thread".into(), pid.to_string()) });
     out.push(div().id("page-new-thread").px_3().py_1().w(px(140.)).border_1().border_color(c("line")).bg(c("raise")).text_size(px(12.)).cursor_pointer().hover(|s| s.bg(c("panel"))).child(crate::i18n::trs("New thread"))
         .on_click(cx.listener(move |this, _, _, cx| { this.arm_new(); let _ = this.tx.try_send(Command::Action("new-thread".into(), pid2.clone())); cx.notify(); })).into_any_element());
-    // the hub's lists for this project (running, needs you, recent, Done (n)), every machine's threads; else the sidebar's rows
-    if let Some(lists) = super::sections::page_lists(cx, light, data, pid, ctl) { out.extend(lists); return out }
+    if listed { return out } // (the hub's lists are above)
     out.push(div().pt_3().text_size(px(11.)).text_color(c("faint")).child(crate::i18n::tf("gpui.projects.threads", &[("n", threads.len().into())])).into_any_element());
     if threads.is_empty() { out.push(div().text_color(c("dim")).child(crate::i18n::trs("No threads yet.")).into_any_element()); }
     for t in threads {
