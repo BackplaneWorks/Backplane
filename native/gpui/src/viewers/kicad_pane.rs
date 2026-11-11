@@ -11,6 +11,20 @@ use gpui::{prelude::*, *};
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 
+/// The client window's X11 id (None elsewhere).
+fn top_of(window: &Window) -> Option<u32> {
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle as R};
+    HasWindowHandle::window_handle(window).ok().map(|h| h.as_raw()).and_then(|h| match h { R::Xcb(x) => Some(x.window.get()), R::Xlib(x) => Some(x.window as u32), _ => None })
+}
+
+/// The editor tabs: (kind, label). Board, Schematic and 3D always; the symbol and footprint editors once KiCad has them (or the person asks).
+pub const TABS: &[(&str, &str)] = &[("PCB", "Board"), ("SCH", "Schematic"), ("PCB_3D", "3D"), ("SYMBOL_EDITOR", "Symbols"), ("FOOTPRINT_EDITOR", "Footprints")]; // i18n-ok: wire kinds; labels go through trs
+/// The tab Ctrl+Tab (step 1) or Ctrl+Shift+Tab (step -1) goes to from `at`, round the tabs.
+pub fn next_tab(at: &str, step: i32) -> &'static str {
+    let i = TABS.iter().position(|(k, _)| *k == at).unwrap_or(0) as i32;
+    TABS[(i + step).rem_euclid(TABS.len() as i32) as usize].0
+}
+
 /// The hub's frame kind for a rail page.
 pub fn frame_for(open: &str) -> &'static str { match open { "schematic" => "SCH", "3d" => "PCB_3D", _ => "PCB" } } // i18n-ok: wire frame kind enum names
 
@@ -77,11 +91,13 @@ pub struct KicadPane {
     pub project: String, pub root: String, pub project_id: String, pub open: String, hub: tokio::sync::mpsc::Sender<Command>,
     container: Option<u32>, toplevel: u32, attached: bool, pub info: Value, frames: Vec<nc::Frame>,
     marker: Arc<Mutex<Option<HitboxId>>>, last_root: (i32, i32), placed: Option<(Option<nc::R>, Option<u32>, Vec<nc::R>)>,
-    focus: FocusHandle, keys: bool, light: bool, _subs: Vec<Subscription>,
+    focus: FocusHandle, keys: bool, pub light: bool, _subs: Vec<Subscription>,
     /// the fork's holder already in our save-set; reserved chords pressed in KiCad, waiting to be pressed in gpui
     kept: u32, press: Vec<String>,
     /// stock KiCad: the editor last asked for with its shortcut, and when; auxiliary frame (Symbol/Footprint/3D) opened from inside KiCad
     poked: Option<(String, std::time::Instant)>, override_kind: Option<String>, pending_show: Option<String>,
+    /// the theme told to the hub at least once; the main window (its first home), where Pop back in returns it
+    theme_sent: bool, home: u32,
 }
 
 impl KicadPane {
@@ -92,12 +108,16 @@ impl KicadPane {
             if weak.update(cx, |this, cx| this.tick(cx)).is_err() { break }
         }).detach();
         KicadPane { bound: String::new(), project, root, project_id, open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), last_root: (i32::MIN, 0), placed: None,
-            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), poked: None, override_kind: None, pending_show: None }
+            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), poked: None, override_kind: None, pending_show: None, theme_sent: false, home: 0 }
     }
     fn rpc(&self, name: &str, params: Value) { let _ = self.hub.try_send(Command::Rpc(name.to_string(), Secret(params), "kicad")); }
     /// The hub's `editor.kicad.<digest>` for this project changed.
     pub fn set_info(&mut self, info: Value, cx: &mut Context<Self>) {
         if info == self.info { return }
+        // KiCad became ready (a launch, a restart): it is told Backplane's theme again
+        if info["state"] == "ready" && (self.info["state"] != "ready" || info["pid"] != self.info["pid"]) && self.theme_sent {
+            self.rpc("editor.kicad.theme", json!({"project": self.project, "mode": if self.light { "light" } else { "dark" }}));
+        }
         if info["pid"] != self.info["pid"] {
             let had_pid = !self.info["pid"].is_null();
             self.poked = None; self.kept = 0; self.placed = None; self.override_kind = None;
@@ -142,6 +162,35 @@ impl KicadPane {
         cx.notify();
     }
     pub fn has_override(&self) -> bool { self.override_kind.is_some() }
+    /// KiCad's frames moved into a new container in the window `t` (and the hub told), before the window they were in goes away: a window's
+    /// destruction takes its children with it, and KiCad's would be among them. Also how a pane goes back in from its own window.
+    pub fn rehome(&mut self, t: u32) {
+        let Some(old) = self.container else { return };
+        if t == self.toplevel { return }
+        let Some(new) = nc::container(t) else { return };
+        nc::move_frames(old, new); nc::destroy(old);
+        self.toplevel = t; self.container = Some(new); self.placed = None; self.last_root = (i32::MIN, 0);
+        nc::grab_click(new, !self.keys);
+        self.reattach();
+    }
+    /// The main window's X11 id (the pane's first home).
+    pub fn home(&self) -> u32 { self.home }
+    /// A tab pressed: that editor in the pane (KiCad opens it when it has not yet); the rail's page stays as it is.
+    pub fn show_kind(&mut self, kind: &str, cx: &mut Context<Self>) {
+        if kind == frame_for(&self.open) { self.override_kind = None; } else { self.override_kind = Some(kind.to_string()); }
+        self.placed = None;
+        if self.attached && matches!(self.info["state"].as_str(), Some("stopped" | "failed")) { self.reattach(); }
+        else if self.attached { self.pending_show = Some(kind.to_string()); self.rpc("editor.kicad.show", json!({"project": self.project, "frame": kind})); }
+        cx.notify();
+    }
+    pub fn tab(&self) -> String { self.wanted_kind().to_string() }
+    /// Backplane's theme: KiCad follows it (the fork switches live; stock KiCad keeps its own).
+    pub fn set_light(&mut self, light: bool, cx: &mut Context<Self>) {
+        if self.light == light && self.theme_sent { return }
+        self.light = light; self.theme_sent = true;
+        if self.attached { self.rpc("editor.kicad.theme", json!({"project": self.project, "mode": if light { "light" } else { "dark" }})); }
+        cx.notify();
+    }
     fn wanted_kind(&self) -> &str { self.override_kind.as_deref().unwrap_or_else(|| frame_for(&self.open)) }
     /// The person took the editor: the hub then refuses an agent's save while anything is unsaved (kicad/embed.rs `Unsaved`).
     fn touched(&self) { self.rpc("editor.kicad.touched", json!({"project": self.project})); }
@@ -216,6 +265,8 @@ impl KicadPane {
                 // the keyboard back to the client's window; a reserved chord is then pressed in gpui (after_frame, which has the window)
                 nc::Ev::Escape => { nc::focus(self.toplevel); self.keys = false; nc::grab_escape(self.toplevel, false); nc::grab_click(c, true); cx.notify(); }
                 nc::Ev::Click => { if let Some(w) = self.want() { nc::grab_click(c, false); nc::focus(w); self.keys = true; self.touched(); nc::grab_escape(self.toplevel, true); cx.notify(); } }
+                // Ctrl+Tab / Ctrl+Shift+Tab pressed in KiCad: the next editor tab, and KiCad keeps the keyboard
+                nc::Ev::Key(k) if k == "ctrl-tab" || k == "ctrl-shift-tab" => { let to = next_tab(self.wanted_kind(), if k == "ctrl-tab" { 1 } else { -1 }); self.show_kind(to, cx); }
                 nc::Ev::Key(k) => { nc::focus(self.toplevel); self.keys = false; nc::grab_escape(self.toplevel, false); nc::grab_click(c, true); self.press.push(k); cx.notify(); }
                 nc::Ev::Focus(_) => { if !self.keys { self.keys = true; self.touched(); nc::grab_escape(self.toplevel, true); nc::grab_click(c, false); cx.notify(); } }
             }
@@ -223,18 +274,25 @@ impl KicadPane {
     }
     /// First render: the container in the client's window, and the hub asked to attach KiCad to it.
     fn decide(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        use raw_window_handle::{HasWindowHandle, RawWindowHandle as R};
+        let top = top_of(window);
+        // drawn in another window now (popped out into its own, or back): a new container there, KiCad's frames moved into it, the hub told
+        if let (Some(_), Some(t)) = (self.container, top) {
+            if t == self.toplevel { return }
+            self.rehome(t);
+            let weak = cx.entity().downgrade();
+            window.on_frame_drawn(move |window, cx| weak.update(cx, |this, cx| this.after_frame(window, cx)).is_ok());
+            return
+        }
         if self.container.is_some() || self.attached { return }
-        let top = HasWindowHandle::window_handle(window).ok().map(|h| h.as_raw()).and_then(|h| match h { R::Xcb(x) => Some(x.window.get()), R::Xlib(x) => Some(x.window as u32), _ => None });
         let Some(top) = top else { self.info = json!({"state": "failed", "reason": crate::i18n::trs("this window cannot hold another program's (only X11 and XWayland for now)")}); self.attached = true; return };
-        self.toplevel = top; self.container = nc::container(top);
+        self.toplevel = top; self.home = top; self.container = nc::container(top);
         let Some(c) = self.container else { self.info = json!({"state": "failed", "reason": crate::i18n::trs("no X11 connection")}); self.attached = true; return };
         nc::grab_click(c, true);
         self.attached = true;
         let display = std::env::var("DISPLAY").unwrap_or_default();
         let kind = frame_for(&self.open);
         self.pending_show = Some(kind.to_string());
-        self.rpc("editor.kicad.attach", json!({"project": self.project, "container": c, "toplevel": top, "display": display, "frame": kind, "wait": false}));
+        self.rpc("editor.kicad.attach", json!({"project": self.project, "container": c, "toplevel": top, "display": display, "frame": kind, "wait": false, "theme": if self.light { "light" } else { "dark" }}));
         let weak = cx.entity().downgrade();
         window.on_frame_drawn(move |window, cx| weak.update(cx, |this, cx| this.after_frame(window, cx)).is_ok());
     }
@@ -244,10 +302,12 @@ impl KicadPane {
         let display = std::env::var("DISPLAY").unwrap_or_default();
         let kind = self.wanted_kind().to_string();
         self.pending_show = Some(kind.clone());
-        self.rpc("editor.kicad.attach", json!({"project": self.project, "container": c, "toplevel": self.toplevel, "display": display, "frame": kind, "wait": false}));
+        self.rpc("editor.kicad.attach", json!({"project": self.project, "container": c, "toplevel": self.toplevel, "display": display, "frame": kind, "wait": false, "theme": if self.light { "light" } else { "dark" }}));
     }
     /// After every frame: the container over the pane (the marker's bounds) with the wanted editor mapped, holes where gpui drew over it.
     fn after_frame(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        // a window this pane left (popped out, or back in) places nothing
+        if top_of(window) != Some(self.toplevel) { return }
         for k in std::mem::take(&mut self.press) { if let Ok(k) = Keystroke::parse(&k) { window.defer(cx, move |window, cx| { window.dispatch_keystroke(k, cx); }); } }
         let Some(c) = self.container else { return };
         let seen = self.marker.lock().unwrap().and_then(|id| window.hitbox_drawn_after(id));
@@ -338,6 +398,9 @@ impl Render for KicadPane {
 mod tests {
     use super::{belongs_to, frame_for, nc, path_stem, pick, project_of, root_of, waiting};
     use serde_json::{json, Value};
+    #[test] fn ctrl_tab_goes_round_the_editor_tabs() {
+        assert_eq!(super::next_tab("PCB", 1), "SCH"); assert_eq!(super::next_tab("PCB", -1), "FOOTPRINT_EDITOR"); assert_eq!(super::next_tab("FOOTPRINT_EDITOR", 1), "PCB"); assert_eq!(super::next_tab("?", 1), "SCH");
+    }
     #[test] fn rail_pages_name_editors() { assert_eq!(frame_for("board"), "PCB"); assert_eq!(frame_for("schematic"), "SCH"); assert_eq!(frame_for("3d"), "PCB_3D"); }
     #[test] fn the_project_comes_from_the_viewer_key() {
         assert_eq!(project_of("board|/p/proj|boards/a/a.kicad_pcb").as_deref(), Some("/p/proj/boards/a/a.kicad_pcb"));
@@ -453,5 +516,80 @@ impl crate::Backplane {
         let pid = crate::keys::project_of(&self.data, tid);
         let pr = p.read(cx);
         belongs_to(&pr.project, &pr.root, &pr.project_id, &key, &pid).then(|| p.clone())
+    }
+}
+
+/// The editor's own row: a tab per editor (one click; Ctrl+Tab and Ctrl+Shift+Tab go round them), Full size, and Pop out / Pop back in.
+/// `on` (the window it is drawn in): the main window's pane, or the editor's own window.
+pub fn strip<V: 'static>(cx: &mut Context<V>, light: bool, pane: &Entity<KicadPane>, popped: bool, full: bool,
+    act: impl Fn(&mut V, &str, &mut Window, &mut Context<V>) + Clone + 'static) -> AnyElement {
+    let c = |n: &str| crate::theme::color(light, n);
+    let at = pane.read(cx).tab();
+    let have: Vec<String> = pane.read(cx).frames.iter().map(|f| f.kind.to_string()).collect();
+    let mut row = div().id("kicad-strip").flex().items_center().gap_1().px_2().h(px(30.)).flex_shrink_0().bg(c("panel")).border_b_1().border_color(c("rule"));
+    for (kind, label) in TABS {
+        // the symbol and footprint editors: a tab once KiCad has them, or while shown
+        if matches!(*kind, "SYMBOL_EDITOR" | "FOOTPRINT_EDITOR") && !have.iter().any(|h| h == kind) && at != *kind { continue }
+        let on = at == *kind; let k = kind.to_string(); let p = pane.clone();
+        row = row.child(div().id(SharedString::from(format!("kicad-tab-{kind}"))).px_2().py(px(3.)).text_size(px(12.)).cursor_pointer()
+            .text_color(c(if on { "text" } else { "dim" })).when(on, |d| d.border_b_2().border_color(c("accent"))).hover(|s| s.bg(c("raise")))
+            .tooltip(crate::keys::tip(&crate::i18n::trs(label), "Ctrl+Tab", light))
+            .child(crate::i18n::trs(label))
+            .on_click(move |_, _, cx| { let k = k.clone(); p.update(cx, |p, cx| p.show_kind(&k, cx)); }));
+    }
+    row = row.child(div().flex_1());
+    let mk = |id: &'static str, label: String, tip: String, a: &'static str, cx: &mut Context<V>| {
+        let act = act.clone();
+        div().id(id).px_2().py(px(3.)).text_size(px(12.)).border_1().border_color(c("line")).bg(c("raise")).cursor_pointer().hover(|s| s.bg(c("panel")))
+            .tooltip(crate::keys::tip(&tip, "", light)).child(label)
+            .on_click(cx.listener(move |this, _, window, cx| act(this, a, window, cx)))
+    };
+    if !popped { row = row.child(mk("kicad-full", crate::i18n::trs(if full { "Exit full size" } else { "Full size" }), crate::i18n::trs("The editor takes the sidebar's and the thread's room"), "full", cx)); }
+    row = row.child(mk("kicad-pop", crate::i18n::trs(if popped { "Pop back in" } else { "Pop out" }), crate::i18n::trs(if popped { "Back into Backplane's pane, as it is" } else { "The editor in a window of its own, as it is" }), if popped { "popin" } else { "popout" }, cx));
+    row.into_any_element()
+}
+
+/// The editor in a window of its own (Pop out): the strip and the same pane (the same KiCad, nothing restarted). Closing it pops it back in.
+pub struct KicadWindow { pub pane: Entity<KicadPane>, pub app: WeakEntity<crate::Backplane>, pub light: bool }
+impl Render for KicadWindow {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // the pane's own idea of the theme (Backplane's render sets it; Backplane is never read from here, it may be the one updating)
+        let light = self.pane.read(cx).light; self.light = light;
+        let _ = window;
+        let strip = strip(cx, light, &self.pane, true, false, |this: &mut KicadWindow, a, window, cx| {
+            if a == "popin" { if let Some(app) = this.app.upgrade() { app.update(cx, |app, cx| app.kicad_popin(cx)); } window.remove_window(); }
+        });
+        div().size_full().flex().flex_col().bg(crate::theme::color(light, "bg")).child(strip).child(div().flex_1().min_h_0().child(self.pane.clone()))
+    }
+}
+
+impl crate::Backplane {
+    /// Pop out: the editor into a window of its own; the pane says where it went.
+    pub(crate) fn kicad_popout(&mut self, cx: &mut Context<Self>) {
+        let Some(pane) = self.screens.kicad.clone() else { return };
+        if self.screens.kicad_window.is_some() { return }
+        let (app, light) = (cx.entity().downgrade(), self.light());
+        let title = std::path::Path::new(&pane.read(cx).project).file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
+        let opts = WindowOptions { window_bounds: Some(WindowBounds::Windowed(Bounds::centered(None, size(px(1400.), px(900.)), cx))),
+            titlebar: Some(TitlebarOptions { title: Some(format!("{title} — KiCad · Backplane").into()), ..Default::default() }), ..Default::default() };
+        match cx.open_window(opts, move |window, cx| {
+            let app2 = app.clone();
+            window.on_window_should_close(cx, move |_, cx| { if let Some(a) = app2.upgrade() { a.update(cx, |a, cx| a.kicad_popin(cx)); } true });
+            cx.new(|_| KicadWindow { pane, app, light })
+        }) {
+            Ok(h) => { self.screens.kicad_window = Some(h.into()); self.screens.kicad_full = false; }
+            Err(e) => { self.note = format!("{} {e}", crate::i18n::trs("The editor's window could not open:")); }
+        }
+        cx.notify();
+    }
+    /// Pop back in: the pane draws the editor again (its window, if still open, is closed by its own button or its title bar).
+    pub(crate) fn kicad_popin(&mut self, cx: &mut Context<Self>) {
+        // KiCad back into the main window first: the editor's window is about to go, and its children with it
+        if let Some(p) = self.screens.kicad.clone() { p.update(cx, |p, _| { let h = p.home(); if h != 0 { p.rehome(h); } }); }
+        self.screens.kicad_window = None; cx.notify();
+    }
+    /// The strip's buttons in the main window.
+    pub(crate) fn kicad_strip_act(&mut self, a: &str, cx: &mut Context<Self>) {
+        match a { "full" => { self.screens.kicad_full = !self.screens.kicad_full; cx.notify(); } "popout" => self.kicad_popout(cx), _ => {} }
     }
 }
