@@ -160,6 +160,8 @@ pub trait FarRouter: Send + Sync {
     fn mcp<'a>(&'a self, _hub: &'a Arc<Hub>, _link: &'a str, _from: &'a str, _tool: &'a str, _args: &'a Value) -> Fut<'a, Result<(bool, Value), String>> { Box::pin(async { Err("no machine is linked".to_string()) }) }
     /// The machines this hub may act on, as the owner's own: (link id, name, address).
     fn machines(&self) -> Vec<(String, String, String)> { vec![] }
+    /// One signed request `{m, p}` to an owner's machine's /far/rpc: (status, body); 0 when it could not be made (away, not linked, a copy).
+    fn raw<'a>(&'a self, _hub: &'a Arc<Hub>, _link: &'a str, _m: &'a str, _p: &'a Value) -> Fut<'a, (u16, String)> { Box::pin(async { (0, String::new()) }) }
 }
 /// The owning side of a tool call made from another machine (`mcp.call`): the agents lane runs the tool for `from` (an id like "<link>~<thread>").
 pub trait FarMcp: Send + Sync {

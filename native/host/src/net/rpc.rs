@@ -184,6 +184,12 @@ impl FarRouter for Router {
         })
     }
     fn machines(&self) -> Vec<(String, String, String)> { machines_of(&self.sync) }
+    fn raw<'a>(&'a self, hub: &'a Arc<Hub>, link: &'a str, m: &'a str, p: &'a Value) -> Fut<'a, (u16, String)> {
+        Box::pin(async move {
+            if self.copy || !self.sync.own(link) { return (0, String::new()) }
+            post(&self.sync, hub, link, &json!({"id": 0, "m": m, "p": p}).to_string()).await
+        })
+    }
 }
 /// The worker of the held messages: each thread's oldest goes to its machine (several machines at once), the owner's answer decides (farsend::outcome), and when
 /// what the strip shows changes the views are told (the window asks again) and the phones get a `queue` push for the thread.
@@ -294,6 +300,8 @@ pub async fn serve_with(copy: bool, sync: &Arc<FarSync>, hub: &Arc<Hub>, r: &PRe
         _ => {}
     }
     if m == "bots.mesh_code" { return super::mesh::serve_code(sync, hub, &o.get("p").cloned().unwrap_or(Value::Null)).await }
+    if m == "ring.front" { return json_reply(&crate::bots::front::serve(hub, &link, &p).await) }
+    if m.starts_with("home.") { return json_reply(&super::homemove::serve(hub, &link, m, &p).await) }
     if m == "uber.sync" { return HttpReply::text("501 Not Implemented", "uber.sync is not ported on this hub yet") }
     if m == "mcp.call" {
         let tool = p["tool"].as_str().unwrap_or("");

@@ -18,7 +18,9 @@ impl RpcHandler for PeerRpc {
             let s = |k: &str| p.get(k).and_then(Value::as_str).unwrap_or("").to_string();
             match method {
                 "bots.invite" => match self.0.invite_for(&s("url")).await { Ok((inv, peer)) => ok(id, json!({"invite": inv, "peer": peer})), Err(e) => err(id, &e) },
-                "machines.page" => ok(id, json!({"rows": super::machinespage::rows(&self.0.page_data(), &|_| String::new())})),
+                "machines.page" => { let d = self.0.page_data(); let mut r = super::machinespage::rows(&d, &|_| String::new());
+                    let (uber, at) = (!super::homemove::uber(hub).await.is_empty(), hub.setting("home.at").await.unwrap_or_default());
+                    r.extend(super::homemove::rows(uber, &at, hub.info_now()["home.move"].as_str().unwrap_or(""), &d["linked"])); ok(id, json!({"rows": r})) }
                 "machines.page.act" => match super::machinespage::act(&self.0, hub, &s("action"), &s("value"), &p["fields"]).await { Ok(x) => ok(id, x), Err(e) => err(id, &e) },
                 "machines.code" => match self.0.make_code().await { Ok(x) => ok(id, x), Err(e) => err(id, &e) },
                 "machines.pair" => match self.0.pair_with(hub, &s("address"), &s("code")).await { Ok((a, c)) => ok(id, json!({"attempt": a, "check": c})), Err(e) => err(id, &e) },

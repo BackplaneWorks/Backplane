@@ -12,6 +12,7 @@
 #[cfg(test)]
 mod copy_outs;
 pub mod botnet;
+pub mod homemove;
 pub mod farfiles;
 pub mod devices;
 pub mod devicespage;

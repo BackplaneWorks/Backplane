@@ -89,6 +89,10 @@ pub fn alert_may(w: &World, thread: &str, kind: &str) -> bool {
     !(kind == "note" && w.bots.values().any(|b| !b.deleted && b.thread == thread))
 }
 /// What a client may not write (`setting.set`).
+/// This hub's own address as a phone reaches it, carried in every push (`hub`): a phone with several hubs opens the one that sent it.
+static HUB_URL: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+pub fn hub_url() -> String { HUB_URL.get().cloned().unwrap_or_default() }
+pub fn set_hub_url(u: &str) { let _ = HUB_URL.set(crate::net::homemove::public_url(u)); }
 pub fn reserved(key: &str) -> bool { key == BOOK || key.starts_with(SIGNIN) }
 /// The hub's record that a provider's sign-in expired with no account to take over (settings/accounts_hub.rs `signin_alert`): written, the uberbot's one needs_you alert goes
 /// (the uberbot cannot say it itself: it runs on an account too, and on Nov 7 it was the one that had expired); emptied, the alert is dealt with.

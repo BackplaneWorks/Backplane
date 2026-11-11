@@ -20,7 +20,7 @@ use tokio_tungstenite::tungstenite::{protocol::WebSocketConfig, Message};
 
 pub const PROTO: &str = "data/1";
 /// What this hub does beyond the base of data/1; a hub from before an addition does not list it (the app can warn instead of sending what would be dropped).
-pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring"];
+pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer"];
 const PREVIEW: usize = 140;
 const ASK_SCAN: usize = 4000;
 
@@ -433,6 +433,7 @@ async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Result<Value,
         "ask.answer" => { rpc(hub, c, "ask.answer", json!({"id":s(p, "ask"),"answer":s(p, "answer")})).await?; Ok(json!({})) }
         // the same answer every client gets (its `result`, not the reply around it); the phones draw it
         "update.status" | "update.check" | "app.update" | "update.now" => Ok(rpc(hub, c, m, json!({})).await?["result"].clone()),
+        "hub.offer.take" | "hub.offer.done" => Ok(rpc(hub, c, m, p.clone()).await?["result"].clone()),
         "update.channel" => { let ch = s(p, "channel"); if ch != "stable" && ch != "beta" { return Err(err("no such channel")) } rpc(hub, c, "setting.set", json!({"key":"update.channel","value":ch})).await?; Ok(rpc(hub, c, "update.status", json!({})).await?["result"].clone()) }
         // Improvements: the projects of every machine a request may go to (searched on the hub) and the last one chosen, as the desktop gets them
         "improvements.projects" | "improvements.project" => Ok(rpc(hub, c, m, p.clone()).await?["result"].clone()),
@@ -585,6 +586,8 @@ fn live_pushes(f: &Value, subs: &mut Subs) -> Vec<Value> {
         "delta_end" => { if let Some(l) = subs.live.get_mut(&th) { l.end() } }
         // what a thread's queue strip shows changed with no line in the log (a message on its way to another machine: net/farsend.rs): ask thread.queue again
         "queue" => for sub in subs.threads(&th) { out.push(d(sub, "queue", json!({"thread":th}))) },
+        // the hub the person's home moved to (net/homemove.rs): the phone adds it by itself
+        "info" => if let Some(o) = f["info"].get("hub.offer") { out.push(json!({"t":"info","info":{"hub.offer":o}})) },
         _ => {}
     }
     out
@@ -627,7 +630,7 @@ pub async fn socket(hub: Arc<Hub>, s: TcpStream, json_mode: bool, token: String,
     // `name`: the machine's name (BACKPLANE_NAME, else its host name), for the phone's title instead of the address it was paired at
     static NAME: tokio::sync::OnceCell<String> = tokio::sync::OnceCell::const_new();
     let name = NAME.get_or_init(crate::net::botnet::name).await.clone();
-    tx.send(pack(&json!({"t":"hello","proto":PROTO,"hub":host,"name":name,"version":hub.cfg.version,"epoch":hub.epoch,"now":now_ms(),"features":FEATURES,"commands":crate::session::composer::words(),"notice":crate::guard::notice(&crate::guard::status(&hub.cfg.home)),"migrating":crate::import014::phone_state(&hub).await}), json_mode)).await?;
+    tx.send(pack(&json!({"t":"hello","proto":PROTO,"hub":host,"name":name,"version":hub.cfg.version,"epoch":hub.epoch,"now":now_ms(),"features":FEATURES,"hubOffer":hub.info_now()["hub.offer"].as_str().unwrap_or(""),"commands":crate::session::composer::words(),"notice":crate::guard::notice(&crate::guard::status(&hub.cfg.home)),"migrating":crate::import014::phone_state(&hub).await}), json_mode)).await?;
     let (late_tx, mut late_rx) = tokio::sync::mpsc::unbounded_channel::<Value>();
     let (mut changes, mut frames) = (hub.changed.subscribe(), hub.frames.subscribe());
     let mut seen = hub.store.len(); let mut subs = Subs::default();
