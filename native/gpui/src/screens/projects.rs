@@ -334,7 +334,7 @@ pub fn page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, light: bool
     if !loaded { return out }
     // the README, drawn from its Markdown
     if !home.readme.is_empty() {
-        out.push(section(light, "README".into(), None));
+        out.push(section(light, crate::i18n::trs("README"), None));
         reg.borrow_mut().enter(0, "home-readme");
         out.push(div().id("home-readme").flex().flex_col().gap_2().py_2().text_size(px(13.)).children(super::timeline::blocks(cx, reg, light, &home.readme, "home-readme")).into_any_element());
     }
