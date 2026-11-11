@@ -2359,6 +2359,8 @@ gpui.c.kicad.kicad.was.closed	KiCad was closed.	KiCad は閉じられました�
 gpui.c.kicad.starting.kicad	Starting KiCad…	KiCad を起動しています…
 gpui.c.kicad.this.window.cannot.hold.another	this window cannot hold another program's (only X11 and XWayland for now)	このウィンドウには他のプログラムのウィンドウを入れられません（今は X11 と XWayland のみ）
 gpui.c.kicad.no.x11.connection	no X11 connection	X11 に接続できません
+gpui.c.kicad.could.not.create.container	could not create container window	コンテナウィンドウを作成できませんでした
+gpui.c.kicad.the.embedded.editor.needs.backplane	The embedded editor needs Backplane KiCad.	埋め込みエディタには Backplane KiCad が必要です。
 gpui.c.kicad.back.to.backplane.s.viewer	Back to Backplane's viewer (KiCad stays open)	Backplane のビューアに戻る（KiCad は開いたまま）
 gpui.c.kicad.edit.in.the.real.kicad	Edit in the real KiCad, here in the pane	このペインで本物の KiCad で編集
 gpui.c.kicad.view	View	表示
@@ -2375,6 +2377,7 @@ gpui.c.kicad.the.editor.s.window.could	The editor's window could not open:	エ�
 gpui.c.kicad.changed	Changed on disk: {files}. You have unsaved edits.	ディスク上で変更されました: {files}。未保存の編集があります。
 gpui.c.kicad.keep.yours	Keep yours	自分の編集を残す
 gpui.c.kicad.reload.lose.your.edits	Reload (lose your edits)	再読み込み（編集は失われます）
+gpui.c.kicad.a.comment.from.kicad.needs	A comment from KiCad needs an open thread.	KiCad からのコメントにはスレッドを開いておく必要があります。
 gpui.assets.missing	Assets missing in {dir}: {files}	{dir} にアセットがありません: {files}
 gpui.connecting	Connecting…	接続中…
 gpui.connected	Connected	接続済み
@@ -3068,6 +3071,7 @@ gpui.f.quote.files	Send these files for a quote?	これらのファイルを送�
 gpui.f.dictate	Dictate with this device's microphone	このデバイスのマイクで音声入力
 gpui.f.inactive	Inactive: no confirmed active work	非アクティブ: 確認できる作業はありません
 gpui.f.tool.runs.nover	{name}  runs from {path}.	{name}が{path}で動作します。
+android.mcp	MCP servers	MCP サーバー
 android.alerts.ask	Bub can alert you when a thread needs you.	スレッドがあなたを必要とするとき、Bub が通知できます。
 android.alerts.allow	Allow alerts	通知を許可
 android.alerts.later	Not now	今はしない
@@ -3922,6 +3926,35 @@ gpui.board	Board	基板
 gpui.schematic	Schematic	回路図
 gpui.view.three.d	3D	3D
 gpui.files	Files	ファイル
+gpui.usage.bot	Bot chat	ボットチャット
+gpui.usage.tokens	tokens	トークン
+gpui.usage.accounts.tip	Accounts in Settings	設定のアカウント
+gpui.usage.feeds	Each turn starts with	各ターンの冒頭に入るもの
+gpui.usage.lanes	Side lanes today	今日の別レーン
+gpui.usage.turn.live	This turn so far	このターン（途中）
+gpui.usage.chat	This chat	このチャット
+gpui.usage.today	Today	今日
+gpui.usage.prefs	Preferences	設定ルール
+gpui.usage.handover	Handover	引き継ぎ
+gpui.usage.none.waiting	none waiting	待機なし
+gpui.usage.session	Session	セッション
+gpui.usage.last.handover	Last handover	前回の引き継ぎ
+gpui.usage.triage	Mailroom triage	メールルームの仕分け
+gpui.usage.office	Back office	バックオフィス
+gpui.usage.office.lower	back office	バックオフィス
+gpui.usage.compact	Compact	圧縮
+gpui.usage.switch	Switch model	モデルを切り替え
+gpui.usage.note	Costs are estimates at the model's API rates.	費用はモデルのAPI料金での見積もりです。
+gpui.usage.lanes.note	Mail, routines and reports run in sessions of their own: they never fill this chat's context.	メール、ルーティン、報告はそれぞれ別のセッションで動くため、このチャットのコンテキストを使いません。
+gpui.usage.lanes.routines	Routines run as turns of this chat.	ルーティンはこのチャットのターンとして動きます。
+gpui.usage.turns.many	50+ more turns at this rate	このペースならあと50ターン以上
+gpui.usage.turns.full	nearly full at this rate	このペースではまもなく満杯
+gpui.usage.turns.one	about 1 more turn at this rate	このペースならあと約1ターン
+gpui.usage.turns.n	about {n} more turns at this rate	このペースならあと約{n}ターン
+gpui.usage.left	{n} left	残り{n}
+gpui.usage.of	{a} of {b}	{b}中{a}
+gpui.usage.context	{n} context	コンテキスト{n}
+gpui.usage.noread	No reading yet: the first turn's result reports it.	まだ値がありません。最初のターンの結果で分かります。
 """#
 
     /// thread.count = {n, plural, one {# thread} other {# threads}}
@@ -6428,4 +6461,16 @@ gpui.files	Files	ファイル
 
     /// gpui.picker.more.typed = {n} more: type to filter
     static func gpui_picker_more_typed(n: String) -> String { f("gpui.picker.more.typed", ["n": n]) }
+
+    /// gpui.usage.turns.n = about {n} more turns at this rate
+    static func gpui_usage_turns_n(n: String) -> String { f("gpui.usage.turns.n", ["n": n]) }
+
+    /// gpui.usage.left = {n} left
+    static func gpui_usage_left(n: String) -> String { f("gpui.usage.left", ["n": n]) }
+
+    /// gpui.usage.of = {a} of {b}
+    static func gpui_usage_of(a: String, b: String) -> String { f("gpui.usage.of", ["a": a, "b": b]) }
+
+    /// gpui.usage.context = {n} context
+    static func gpui_usage_context(n: String) -> String { f("gpui.usage.context", ["n": n]) }
 }
