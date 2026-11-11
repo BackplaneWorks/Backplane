@@ -111,36 +111,48 @@ internal fun PageRows(title: String, tag: String, rows: List<org.json.JSONObject
         DMono(title, dfaint)
         if (error.isNotEmpty() && !atRow) DMono(Tr.t(error), dcs.error, 12)
         rows.forEach { r ->
-            val label = r.optString("label"); val tone = r.optString("tone")
-            Column(Modifier.fillMaxWidth().testTag("$tag.row.$label"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(Tr.t(label), color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp)
-                if (r.optString("note").isNotEmpty()) Text(Tr.t(r.optString("note")), color = when (tone) { "bad" -> dcs.error; "warn" -> dwarn; else -> dcs.onSurfaceVariant }, fontFamily = BpMono, fontSize = 11.sp,
-                    modifier = Modifier.testTag("$tag.note.$label"))
-                // a code to scan (a pairing link's), as the hub drew it, and its line (the code, the address, until when)
-                val qr = PageRow.qr(r)
-                if (qr.isNotEmpty()) QrCode(qr, Modifier.fillMaxWidth().testTag("$tag.qr.$label"))
-                if (r.optString("qrnote").isNotEmpty()) Text(Tr.t(r.optString("qrnote")), color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 12.sp, modifier = Modifier.testTag("$tag.qrnote.$label"))
-                r.optJSONArray("fields").objs().forEach { f ->
-                    val name = f.optString("name")
-                    val v = typed[name] ?: f.optString("value")
-                    Box(Modifier.fillMaxWidth().background(dview).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(horizontal = 10.dp, vertical = 10.dp).testTag("$tag.field.$name")) {
-                        if (v.isEmpty()) Text(Tr.t(f.optString("hint")), color = dfaint, fontFamily = BpMono, fontSize = 13.sp, maxLines = 1)
-                        BasicTextField(v, { typed[name] = it }, textStyle = TextStyle(color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp), cursorBrush = SolidColor(dcs.primary), singleLine = true,
-                            visualTransformation = if (f.optBoolean("secret")) PasswordVisualTransformation() else VisualTransformation.None, modifier = Modifier.fillMaxWidth())
-                    }
-                }
-                FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    r.optJSONArray("buttons").objs().forEachIndexed { i, b ->
-                        DBtn(Tr.t(b.optString("label")), b.optBoolean("on"), modifier = Modifier.testTag("$tag.btn.$label.$i")) {
-                            val action = b.optString("action"); val value = b.optString("value"); val sent = typed.toMap(); pressed = label
-                            if (!pageLocal(ctx, action, value)) scope.launch { act(action, value, sent)?.let { typed.remove(it) } }
-                        }
-                    }
-                }
-                if (atRow && label == pressed) Text(Tr.t(error), color = dcs.error, fontFamily = BpMono, fontSize = 12.sp, modifier = Modifier.testTag("$tag.error.$label"))
+            val label = r.optString("label")
+            PlainRow(r, tag, { name, hub -> typed[name] ?: hub }, { name, v -> typed[name] = v }, error = if (atRow && label == pressed) error else "") { b ->
+                val action = b.optString("action"); val value = b.optString("value"); val sent = typed.toMap(); pressed = label
+                if (!pageLocal(ctx, action, value)) scope.launch { act(action, value, sent)?.let { typed.remove(it) } }
             }
             DLine()
         }
+    }
+}
+
+/** One of the hub's plain rows {label, note, tone, qr, qrnote, fields, buttons}: each of PageRows' rows, and the MCP page's rows that have no kind.
+ *  [shown] is a field's text (the person's, else the hub's value), [type] takes a keystroke; a press hands its button to [press]. [compact]: small chips. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+internal fun PlainRow(r: JSONObject, tag: String, shown: (String, String) -> String, type: (String, String) -> Unit, compact: Boolean = false, error: String = "", press: (JSONObject) -> Unit) {
+    val label = r.optString("label"); val tone = r.optString("tone")
+    Column(Modifier.fillMaxWidth().testTag("$tag.row.$label"), verticalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 6.dp)) {
+        if (label.isNotEmpty() || !compact) Text(Tr.t(label), color = dcs.onSurface, fontFamily = BpMono, fontSize = if (compact) 12.5.sp else 13.sp)
+        if (r.optString("note").isNotEmpty()) Text(Tr.t(r.optString("note")), color = when (tone) { "bad" -> dcs.error; "warn" -> dwarn; else -> dcs.onSurfaceVariant }, fontFamily = BpMono, fontSize = 11.sp,
+            lineHeight = 15.sp, modifier = Modifier.testTag("$tag.note.$label"))
+        // a code to scan (a pairing link's), as the hub drew it, and its line (the code, the address, until when)
+        val qr = PageRow.qr(r)
+        if (qr.isNotEmpty()) QrCode(qr, Modifier.fillMaxWidth().testTag("$tag.qr.$label"))
+        if (r.optString("qrnote").isNotEmpty()) Text(Tr.t(r.optString("qrnote")), color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 12.sp, modifier = Modifier.testTag("$tag.qrnote.$label"))
+        r.optJSONArray("fields").objs().forEach { f ->
+            val name = f.optString("name")
+            val v = shown(name, f.optString("value"))
+            val lines = f.optInt("lines", 1).coerceIn(1, 12)
+            Box(Modifier.fillMaxWidth().background(dview).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(horizontal = 10.dp, vertical = if (compact) 9.dp else 10.dp).testTag("$tag.field.$name")) {
+                if (v.isEmpty()) Text(Tr.t(f.optString("hint")), color = dfaint, fontFamily = BpMono, fontSize = 13.sp, maxLines = 1)
+                BasicTextField(v, { type(name, it) }, textStyle = TextStyle(color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp), cursorBrush = SolidColor(dcs.primary), singleLine = lines == 1, minLines = lines,
+                    visualTransformation = if (f.optBoolean("secret")) PasswordVisualTransformation() else VisualTransformation.None, modifier = Modifier.fillMaxWidth())
+            }
+        }
+        val bs = r.optJSONArray("buttons").objs()
+        if (bs.isNotEmpty()) FlowRow(Modifier.padding(top = if (compact) 4.dp else 0.dp), horizontalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 6.dp), verticalArrangement = Arrangement.spacedBy(if (compact) 4.dp else 6.dp)) {
+            bs.forEachIndexed { i, b ->
+                if (compact) McpChip(Tr.t(b.optString("label")), b.optBoolean("on"), Modifier.testTag("$tag.btn.$label.$i")) { press(b) }
+                else DBtn(Tr.t(b.optString("label")), b.optBoolean("on"), modifier = Modifier.testTag("$tag.btn.$label.$i")) { press(b) }
+            }
+        }
+        if (error.isNotEmpty()) Text(Tr.t(error), color = dcs.error, fontFamily = BpMono, fontSize = 12.sp, modifier = Modifier.testTag("$tag.error.$label"))
     }
 }
 

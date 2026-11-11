@@ -2745,6 +2745,7 @@ gpui.f.inactive = Inactive: no confirmed active work
 gpui.f.tool.runs.nover = {name}  runs from {path}.
 
 # ---- android: new entries go here ----
+android.mcp = MCP servers
 android.alerts.ask = Bub can alert you when a thread needs you.
 android.alerts.allow = Allow alerts
 android.alerts.later = Not now
