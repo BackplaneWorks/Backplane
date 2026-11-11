@@ -9,16 +9,19 @@ struct DSecRow: Decodable, Identifiable, Equatable {
     // a thread's
     var word: String; var say: String; var want: String; var ago: String; var machine: String; var mark: DMark?; var project: String; var projectKey: String; var off: Bool; var nav: String; var pinned: Bool
     // a project's
+    var kind: String
     var key: String; var projOff: Bool; var running: Int; var needsCount: Int; var threads: [DSecRow]; var icon: String; var css: String; var dots: [DSecDot]; var more: Int
-    enum CodingKeys: String, CodingKey { case id, title, word, say, want, ago, machine, mark, project, projectKey, off, nav, pinned, key, running, needsCount, threads, icon, css, dots, more }
+    enum CodingKeys: String, CodingKey { case id, title, word, say, want, ago, machine, mark, project, projectKey, off, nav, pinned, kind, key, running, needsCount, threads, icon, css, dots, more }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = c.str(.id); title = c.str(.title); word = c.str(.word); say = c.str(.say); want = c.str(.want); ago = c.str(.ago); machine = c.str(.machine)
         mark = try? c.decode(DMark.self, forKey: .mark); project = c.str(.project); projectKey = c.str(.projectKey); off = c.bool(.off); nav = c.str(.nav); pinned = c.bool(.pinned)
-        key = c.str(.key); projOff = (try? c.decode(Bool.self, forKey: .off)) ?? false; running = c.int(.running); needsCount = c.int(.needsCount); threads = (try? c.decode([DSecRow].self, forKey: .threads)) ?? []
+        kind = c.str(.kind); key = c.str(.key); projOff = (try? c.decode(Bool.self, forKey: .off)) ?? false; running = c.int(.running); needsCount = c.int(.needsCount); threads = (try? c.decode([DSecRow].self, forKey: .threads)) ?? []
         icon = c.str(.icon); css = c.str(.css); dots = (try? c.decode([DSecDot].self, forKey: .dots)) ?? []; more = c.int(.more)
     }
     var isProject: Bool { !key.isEmpty }
+    /// a live swarm's row (`kind` swarm): it opens the swarm's page, its room
+    var swarmRoom: String? { kind == "swarm" ? (nav.hasPrefix("@room:") ? String(nav.dropFirst(6)) : nil) : nil }
     /// what a thread row's dot is: red when it asks, the accent while it works, dim when stopped
     var tone: Color { switch word { case "needs": return BackplaneDesign.bad; case "running", "monitoring", "limit": return BackplaneDesign.accent; case "failed", "cut", "interrupted": return BackplaneDesign.bad.opacity(0.6); default: return BackplaneDesign.faint } }
 }
@@ -105,7 +108,7 @@ struct DataProjectPageView: View {
             if let page {
                 ForEach(page.sections.filter { !$0.rows.isEmpty || ($0.fold && $0.count > 0) }) { s in
                     DataSectionHead(s: s) { done.toggle(); Task { await load() } }.dataRow()
-                    ForEach(s.rows) { r in DataSectionThread(r: r) { path.append($0) }.dataRow() }
+                    ForEach(s.rows) { r in DataSectionThread(r: r) { nav in if let room = r.swarmRoom { path.append(DSwarmRoute(id: room, name: r.title)) } else { path.append(nav) } }.dataRow() }
                 }
                 if page.sections.allSatisfy({ $0.rows.isEmpty && $0.count == 0 }) { Text(Tr.t("No threads")).dmono(12).foregroundStyle(BackplaneDesign.faint).padding(14).dataRow() }
             } else { DLoading(text: Tr.t("Loading…")).dataRow() }

@@ -27,13 +27,15 @@ import org.json.JSONObject
 
 /** A row of a section: a thread, or a project (its `key` set) with its visible threads under it. */
 data class DSecRow(val id: String, val title: String, val word: String, val say: String, val want: String, val ago: String, val mark: DMark?, val project: String,
-    val off: Boolean, val nav: String, val pinned: Boolean, val key: String, val running: Int, val threads: List<DSecRow>, val css: String, val dots: List<Pair<Boolean, Boolean>>) {
+    val off: Boolean, val nav: String, val pinned: Boolean, val key: String, val running: Int, val threads: List<DSecRow>, val css: String, val dots: List<Pair<Boolean, Boolean>>, val kind: String = "") {
     companion object {
         fun of(o: JSONObject): DSecRow = DSecRow(o.optString("id"), o.optString("title"), o.optString("word"), o.optString("say"), o.optString("want"), o.optString("ago"),
             parseMark(o.optJSONObject("mark")), o.optString("project"), o.optBoolean("off"), o.optString("nav"), o.optBoolean("pinned"), o.optString("key"), o.optInt("running"),
-            list(o.optJSONArray("threads")), o.optString("css"), (0 until (o.optJSONArray("dots")?.length() ?: 0)).map { i -> o.getJSONArray("dots").getJSONObject(i).let { it.optBoolean("here") to it.optBoolean("dim") } })
+            list(o.optJSONArray("threads")), o.optString("css"), (0 until (o.optJSONArray("dots")?.length() ?: 0)).map { i -> o.getJSONArray("dots").getJSONObject(i).let { it.optBoolean("here") to it.optBoolean("dim") } }, o.optString("kind"))
         fun list(a: JSONArray?): List<DSecRow> = (0 until (a?.length() ?: 0)).map { of(a!!.getJSONObject(it)) }
     }
+    /** a live swarm's row (`kind` swarm): it opens the swarm's page, its room */
+    val swarmRoom: String? get() = if (kind == "swarm") nav.removePrefix("@room:").takeIf { it.isNotEmpty() && nav.startsWith("@room:") } else null
 }
 data class DSection(val id: String, val kind: String, val title: String, val count: Int, val fold: Boolean, val open: Boolean, val toggle: String, val group: String, val rename: Boolean, val rows: List<DSecRow>) {
     companion object {
@@ -78,14 +80,19 @@ fun SectionProject(r: DSecRow, faded: Boolean, onClick: () -> Unit, onLong: () -
 }
 
 /** The sections as the list's items (Bub is drawn above them by the home screen). `page` opens a project's page; `menu` a project's long press; `rename` a group's. */
-fun LazyListScope.sectionItems(open: (String) -> Unit, page: (DSecRow) -> Unit, menu: (DSecRow) -> Unit, rename: (DSection) -> Unit) {
+fun LazyListScope.sectionItems(open: (String) -> Unit, page: (DSecRow) -> Unit, menu: (DSecRow) -> Unit, rename: (DSection) -> Unit, openSwarm: (String) -> Unit = {}) {
+    // a swarm in Needs you is not repeated under its project
+    val asking = DataClient.sections.firstOrNull { it.id == "needs" }?.rows?.mapNotNull { it.swarmRoom }?.toSet() ?: emptySet()
     for (s in DataClient.sections) {
         if (s.kind == "bub" || (s.id == "active" && s.rows.isEmpty())) continue
         item("sec:${s.id}") { SectionHead(s, if (s.rename) ({ rename(s) }) else null) }
         // Needs you: the title has the row (no project name), and a stop says so by its dot; an ask keeps its red word
-        if (s.kind == "threads") items(s.rows, key = { "sn:${it.id}" }) { r -> SectionThread(if (r.want == "failed" || r.want == "stopped") r.copy(want = "", say = "") else r, open = open) }
+        if (s.kind == "threads") items(s.rows, key = { "sn:${it.id}" }) { r -> val room = r.swarmRoom
+            if (room != null) SectionThread(r) { openSwarm(room) } else SectionThread(if (r.want == "failed" || r.want == "stopped") r.copy(want = "", say = "") else r, open = open) }
         else for (p in s.rows) {
             item("sp:${s.id}:${p.key}") { SectionProject(p, s.id == "quiet" || (p.off && p.key.isNotEmpty()), { page(p) }, { menu(p) }) }
+            // its live swarms (the client's own rows, feature swarm), above its threads; their members have no rows
+            if (Swarms.on()) items(SwarmUi.live(Swarms.all, p.id).filter { it.id !in asking }, key = { "ss:${s.id}:${it.id}" }) { x -> SwarmRow(x) { openSwarm(x.id) } }
             items(p.threads, key = { "st:${s.id}:${it.id}" }) { t -> SectionThread(t, 34, open = open) }
         }
     }
@@ -95,17 +102,18 @@ private const val PIN = "project-pin"
 private const val MOVE = "group-move"
 /** A project row's long press: pin or unpin it, move it to a group. */
 @Composable
-fun SectionProjectMenu(p: DSecRow, close: () -> Unit) {
+fun SectionProjectMenu(p: DSecRow, newSwarm: (String) -> Unit = {}, close: () -> Unit) {
     val pin: () -> Unit = { DataClient.sidebarAct(PIN, p.key) }
+    val swarm: () -> Unit = { newSwarm(p.id) }
     val moves = DataClient.groupsTo.map { (gid, label) -> val go: () -> Unit = { DataClient.sidebarAct(MOVE, p.key + "\u001f" + gid) }; Msg.gpui_sections_move_to(label) to go }
-    ActionSheet(p.title, listOf((if (p.pinned) Msg.sidebar_sections_unpin else Msg.sidebar_sections_pin) to pin) + moves, close)
+    ActionSheet(p.title, listOf((if (p.pinned) Msg.sidebar_sections_unpin else Msg.sidebar_sections_pin) to pin) + (if (Swarms.on()) listOf(Msg.android_swarm_new to swarm) else emptyList()) + moves, close)
 }
 @Composable
 fun SectionRename(s: DSection, close: () -> Unit) { TextPrompt(Msg.sidebar_sections_rename, s.title, Msg.menu_rename, close) { DataClient.sidebarAct("group-rename", s.group + "\u001f" + it) } }
 
 /** A project's page: running, then needs you, then recent, then Done (n) folded; every machine's threads. */
 @Composable
-fun ProjectPageScreen(p: DSecRow, open: (String) -> Unit, newThread: (String) -> Unit, back: () -> Unit) {
+fun ProjectPageScreen(p: DSecRow, open: (String) -> Unit, newThread: (String) -> Unit, openSwarm: (String) -> Unit = {}, back: () -> Unit) {
     var done by remember { mutableStateOf(false) }
     var lists by remember { mutableStateOf<List<DSection>?>(null) }
     LaunchedEffect(p.key, done, DataClient.sections) { lists = DataClient.projectPage(p.key, done) }
@@ -126,7 +134,7 @@ fun ProjectPageScreen(p: DSecRow, open: (String) -> Unit, newThread: (String) ->
                         DMono(Tr.t(s.title).uppercase(), dcs.onSurfaceVariant, 11)
                     }
                 }
-                items(s.rows, key = { "pgt:${s.id}:${it.id}" }) { r -> SectionThread(r, open = open) }
+                items(s.rows, key = { "pgt:${s.id}:${it.id}" }) { r -> val room = r.swarmRoom; SectionThread(r) { if (room != null) openSwarm(room) else open(it) } }
             }
             if (ls.all { it.rows.isEmpty() && it.count == 0 }) item("pg:none") { DMono(Msg.android_threads_none, dfaint, 12, Modifier.padding(16.dp)) }
         }

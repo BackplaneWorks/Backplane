@@ -300,3 +300,34 @@ fn world() -> State {
     for r in sec(&v, "needs")["rows"].as_array().into_iter().flatten() { println!("census: needs  {} | {} | {} | {}", r["want"], r["word"], r["project"], r["title"]); }
     for r in sec(&v, "active")["rows"].as_array().into_iter().flatten() { println!("census: active {} running={} threads={}", r["title"], r["running"], r["threads"].as_array().map_or(0, |t| t.len())); }
 }
+
+#[test] fn a_live_swarm_is_one_row_under_its_project_and_in_needs_you_when_it_waits_on_the_person() {
+    let room = |id: &str, state: &str, reason: &str| json!({"$":"RoomSet","id":id,"name":format!("S {id}"),"members":"thread:a\nthread:b","kind":"swarm","project":"p1","state":state,"reason":reason,"at":NOW-30});
+    // an old project whose only life is a running swarm: the swarm's row, the project Active, the members never rows of their own
+    let s = st(&[pc("p1", "P", "/n/p", NOW - 90 * DAY), tc("a", "p1", NOW - 90 * DAY), tc("b", "p1", NOW - 90 * DAY), turn("a", "running", NOW - 40), turn("b", "failed", NOW - 90 * DAY), room("r1", "", "")]);
+    assert!(!visible(&s, "a") && !visible(&s, "b") && !own(&s, "b"), "members: the swarm's row stands for them");
+    let rows = merged_projects(&s, &[], &|_| false, &|_| String::new(), "desk", &[]);
+    let v = build(&s, &rows, &Value::Null, &ctx(&HashSet::new()));
+    // b's failed turn makes the swarm "failed" (sidebar::live_swarms): Needs you, opening the swarm's page
+    let n = sec(&v, "needs"); assert_eq!(n["rows"][0]["kind"], "swarm"); assert_eq!(n["rows"][0]["nav"], "@room:r1"); assert_eq!(n["rows"][0]["title"], "S r1");
+    let p = &sec(&v, "active")["rows"][0]; assert_eq!(p["title"], "P"); assert!(p["threads"].as_array().unwrap().is_empty(), "no member row: {p}");
+    // a running swarm: a row under its project, counted running, not in Needs you
+    let s2 = st(&[pc("p1", "P", "/n/p", NOW - 90 * DAY), tc("a", "p1", NOW - 90 * DAY), tc("b", "p1", NOW - 90 * DAY), turn("a", "running", NOW - 40), room("r1", "", "")]);
+    let rows2 = merged_projects(&s2, &[], &|_| false, &|_| String::new(), "desk", &[]);
+    let v2 = build(&s2, &rows2, &Value::Null, &ctx(&HashSet::new()));
+    assert!(sec(&v2, "needs").is_null());
+    let p2 = &sec(&v2, "active")["rows"][0]; assert_eq!(p2["swarms"][0]["nav"], "@room:r1"); assert_eq!(p2["swarms"][0]["members"], 2); assert!(p2["running"].as_u64().unwrap() >= 1);
+    // a guard's pause asks the person; a member's ask does too
+    for evs in [vec![room("r1", "paused", "circular")], vec![room("r1", "", ""), ask("q", "a", "question")]] {
+        let mut e = vec![pc("p1", "P", "/n/p", 1), tc("a", "p1", 2), tc("b", "p1", 3)]; e.extend(evs);
+        let s3 = st(&e); let rows3 = merged_projects(&s3, &[], &|_| false, &|_| String::new(), "desk", &[]);
+        let n3 = sec(&build(&s3, &rows3, &Value::Null, &ctx(&HashSet::new())), "needs").clone();
+        assert_eq!(n3["count"], 1, "{n3}"); assert_eq!(n3["rows"][0]["kind"], "swarm"); assert_eq!(n3["rows"][0]["word"], "needs");
+    }
+    // one that is over is no row; Ctrl+K reaches a live one and its project's page lists it
+    let s4 = st(&[pc("p1", "P", "/n/p", 1), tc("a", "p1", 2), tc("b", "p1", 3), room("r1", "done", "")]);
+    let rows4 = merged_projects(&s4, &[], &|_| false, &|_| String::new(), "desk", &[]);
+    assert!(sec(&build(&s4, &rows4, &Value::Null, &ctx(&HashSet::new())), "needs").is_null());
+    let j = jump(&rows2, &ctx(&HashSet::new())); assert!(j.as_array().unwrap().iter().any(|x| x["kind"] == "swarm" && x["action"] == "room" && x["value"] == "h|r1"));
+    let pg = page(&s2, &rows2, &rows2[0].key, &ctx(&HashSet::new()), false); assert_eq!(pg["sections"][0]["rows"][0]["kind"], "swarm");
+}

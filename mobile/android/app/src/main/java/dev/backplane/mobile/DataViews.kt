@@ -299,7 +299,8 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
     var secPage by remember { mutableStateOf<DSecRow?>(null) }    // a project's page (sections), over the list until Back
     var secMenu by remember { mutableStateOf<DSecRow?>(null) }
     var secRename by remember { mutableStateOf<DSection?>(null) }
-    secPage?.let { p -> androidx.activity.compose.BackHandler { secPage = null }; ProjectPageScreen(p, open, { id -> secPage = null; newThread(id) }) { secPage = null }; return }
+    var secNewSwarm by remember { mutableStateOf<String?>(null) }   // New swarm from a section project's menu (a project id)
+    secPage?.let { p -> androidx.activity.compose.BackHandler { secPage = null }; ProjectPageScreen(p, open, { id -> secPage = null; newThread(id) }, { room -> secPage = null; openSwarm(room) }) { secPage = null }; return }
     val ctx = androidx.compose.ui.platform.LocalContext.current
     val prefs = remember { ctx.getSharedPreferences("data.ui", android.content.Context.MODE_PRIVATE) }
     var shut by remember { mutableStateOf(prefs.getStringSet("projects.shut", emptySet())!!.toSet()) }
@@ -343,7 +344,7 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
             // no project yet: Bub (and what the hub's sections hold, Needs you) still lead the list; the empty state and Add a project come under them
             LazyColumn(Modifier.fillMaxSize().testTag("home.list")) {
                 items(DataClient.bots.filter { it.uber && it.thread.isNotEmpty() }, key = { "u:${it.id}" }) { b -> SidebarRow("@", b.name, onMachine(Msg.android_kind_uberbot, b.mark)) { open(b.thread) } }
-                if (DataClient.has("sections") && DataClient.sections.isNotEmpty()) sectionItems(open, { secPage = it }, { secMenu = it }, { secRename = it })
+                if (DataClient.has("sections") && DataClient.sections.isNotEmpty()) sectionItems(open, { secPage = it }, { secMenu = it }, { secRename = it }, openSwarm)
                 item("empty") {
                     Column(Modifier.fillMaxWidth().padding(32.dp), horizontalAlignment = Alignment.CenterHorizontally) {
                         Text(if (DataClient.listsLoaded) Msg.android_projects_none else Msg.viewer_loading, color = dcs.onSurface, fontFamily = BpMono, fontSize = 14.sp)
@@ -357,7 +358,7 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
             var at = uber.size; rowOf.clear()
             // a hub with sections (docs/ALWAYS-ON.md section 8): Needs you, Pinned, Active, the groups, Quiet, as it presents them; else every project
             val sectioned = DataClient.has("sections") && DataClient.sections.isNotEmpty()
-            if (sectioned) sectionItems(open, { secPage = it }, { secMenu = it }, { secRename = it })
+            if (sectioned) sectionItems(open, { secPage = it }, { secMenu = it }, { secRename = it }, openSwarm)
             if (!sectioned) for (p in projects) {
                 val closed = p.id in shut
                 rowOf[p.id] = at; at += 1
@@ -432,7 +433,8 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
         }
         projMenu?.let { ProjectMenus(it, projSheet, { newSwarm = it }) { projSheet = false } }
         newSwarm?.let { pr -> NewSwarmSheet(pr.id, { newSwarm = null }) { openSwarm(it) } }
-        secMenu?.let { SectionProjectMenu(it) { secMenu = null } }
+        secMenu?.let { SectionProjectMenu(it, { pid -> secNewSwarm = pid }) { secMenu = null } }
+        secNewSwarm?.let { pid -> NewSwarmSheet(pid, { secNewSwarm = null }) { openSwarm(it) } }
         secRename?.let { SectionRename(it) { secRename = null } }
         pickNew?.let { p -> ActionSheet(p.title, p.newOn.map { n -> (n.label + if (n.away) " · " + Msg.android_away else "") to { pickNew = null; newThread(n.value) } }) { pickNew = null } }
     }
