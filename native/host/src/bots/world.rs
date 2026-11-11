@@ -230,6 +230,10 @@ impl World {
             "RoomDeleted" => { if let Some(r) = self.rooms.get_mut(&id) { r.deleted = true } else { self.rooms.insert(id.clone(), Room { id, name: String::new(), members: vec![], created: 0, deleted: true }); } }
             "ProjectCreated" => { self.projects.insert(id, (s(e, "title").into(), s(e, "root").into(), false)); }
             "ProjectRemoved" => { if let Some(p) = self.projects.get_mut(&id) { p.2 = true } }
+            // a turn stopped only to change accounts (settings/driver.rs, `failover`) goes on at once on the next one: it has not ended, and its run stays live, so the
+            // restarted session lists its mailroom tools again (Nov 10: every run that failed over came back without mail_dispose, decide or escalate)
+            // the room a turn owes its reply to is owed by the turn that goes on
+            "TurnChanged" if e["failover"] == true => { if let Some(rt) = self.room_turns.get_mut(s(e, "thread")) { if rt.0.is_empty() { rt.0 = rt.1.clone() } } }
             "TurnChanged" => { let (st, th) = (s(e, "state"), s(e, "thread"));
                 let run = self.mail.run_of(th).filter(|r| r.live).cloned();
                 if st != "running" { self.steps.push(StepEnd::Turn { thread: th.into(), state: st.into(), run }) }

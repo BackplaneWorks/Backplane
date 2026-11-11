@@ -456,3 +456,73 @@ async fn flip(s: &S, st: &mut crate::state::State, k: &str, v: &str) { press(s, 
     assert_eq!(apns::resolve(none(), Some(("export BACKPLANE_APNS_KEY_ID=KID9\n", &d))), None, "a team missing, or a key file that is not there: off");
     let _ = std::fs::remove_dir_all(&d);
 }
+
+// ---- Nov 10: what reached the phone and should not have (a room's bot-to-bot chatter, a mailroom run's failure, raw markdown) ----
+/// the mailroom's run a filing starts for the uberbot, and its thread
+async fn a_run(s: &S, n: usize) -> (String, String) {
+    until(&s.hub, |l| l.iter().filter(|e| e["$"] == "RunSet").count() >= n).await;
+    let r = log(&s.hub).into_iter().filter(|e| e["$"] == "RunSet").nth(n - 1).unwrap();
+    (r["thread"].as_str().unwrap().to_string(), r["mail"].as_str().unwrap().to_string())
+}
+#[tokio::test] async fn a_room_post_between_bots_and_the_run_it_starts_reach_no_phone() {
+    let s = setup("room").await; let _desks = crate::settings::alerts::start(&s.hub);
+    let ada = bot(&s.hub, "pebble").await; let ada_th = s.bots.world().await.bot(&ada).unwrap().thread.clone();
+    assert_eq!(rpc(&s.hub, "bots.room", json!({"room":"r1","name":"ring-requests","members":format!("{ada}\n{}", s.bub)})).await["ok"], true);
+    let (ok, r) = s.bots.tool_call(&ada_th, "room_post", &json!({"room":"ring-requests","text":"Ring note `n4d35`: when should I set the reminder?"})).await; assert!(ok, "{r}");
+    // the post is filed for the uberbot and a run triages it; the run's end says it needs nothing
+    let (run, _) = a_run(&s, 1).await;
+    turn_said(&s.hub, &run, "completed", "The ring bot already asked the person for a time in #ring-requests, so this needs no action from me.").await;
+    settle().await; settle().await;
+    assert!(s.fake.alerts().is_empty(), "{:?}", s.fake.alerts());
+    let l = log(&s.hub);
+    assert!(!l.iter().any(|e| e["$"] == "PushOrdered"), "nothing was even ordered");
+    let rec = l.iter().rev().find(|e| e["$"] == "SettingSet" && e["key"] == format!("alert.{run}").as_str()).map(|e| e["value"].as_str().unwrap().to_string());
+    assert!(rec.as_ref().map_or(true, |v| v.starts_with('\t')), "a run's end is no alert record with a kind: {rec:?}");
+    // and a record somebody writes for a run anyway is still no push
+    set(&s.hub, &format!("alert.{run}"), "done\tturn-x\tm\t1.1\tforged").await; settle().await; assert!(s.fake.alerts().is_empty());
+}
+#[tokio::test] async fn a_mailroom_run_that_fails_over_keeps_its_tools_and_its_failure_reaches_no_room_and_no_phone() {
+    let s = setup("failover").await; let _desks = crate::settings::alerts::start(&s.hub);
+    assert_eq!(rpc(&s.hub, "bots.room", json!({"room":"r1","name":"ring-requests","members":s.bub.clone()})).await["ok"], true);
+    assert_eq!(rpc(&s.hub, "bots.post", json!({"room":"r1","text":"remind me to get that couch off","msg":"p1"})).await["ok"], true);
+    let (run, input) = a_run(&s, 1).await;
+    s.hub.commit(&json!({"$":"TurnChanged","thread":run,"state":"running","at":now_s()})).await.unwrap(); settle().await;
+    let tools = |w: &crate::bots::world::World| crate::bots::mail::tools::lists(w).get(&run).cloned().unwrap_or_default();
+    assert!(tools(&*s.bots.world().await).contains(&"mail_dispose"), "a live run lists its tools");
+    // the account ran out: the driver stops the turn to change accounts and starts it again at once (settings/driver.rs)
+    s.hub.commit(&json!({"$":"TurnChanged","thread":run,"state":"interrupted","failover":true,"at":now_s()})).await.unwrap(); settle().await;
+    { let w = s.bots.world().await; assert!(w.mail.run_of(&run).map_or(false, |r| r.live), "the run goes on"); assert!(tools(&w).contains(&"mail_dispose"), "and the restarted session lists its tools: {:?}", tools(&w)); }
+    assert_eq!(log(&s.hub).iter().filter(|e| e["$"] == "RunSet").count(), 1, "nothing was forwarded as undone");
+    // a run that still ends without its disposition: its bot hears privately; no room and no phone does
+    let posts = |l: &[Value]| l.iter().filter(|e| e["$"] == "RoomPosted").count();
+    let before = posts(&log(&s.hub));
+    turn_said(&s.hub, &run, "completed", &format!("I couldn't dispose of input `{input}` in this run. The mailroom tools aren't in my tool list.")).await;
+    let (lane, _) = a_run(&s, 2).await; assert!(lane.starts_with(&format!("mailcoord-{}-", s.bub)), "its bot's back office takes it: {lane}");
+    turn_said(&s.hub, &lane, "completed", "Nothing for the person: the ring bot asks them itself.").await;
+    settle().await; settle().await;
+    assert_eq!(posts(&log(&s.hub)), before, "no room post");
+    assert!(s.fake.alerts().is_empty(), "no push: {:?}", s.fake.alerts());
+}
+#[tokio::test] async fn the_uberbots_own_orders_are_not_pushed_twice_by_their_records() {
+    let s = setup("twice").await; let _desks = crate::settings::alerts::start(&s.hub);
+    let r = notify(&s, "needs_you", "Approve the deploy?", now_s()).await; assert!(r.0, "{r:?}");
+    s.fake.wait(1).await; settle().await; settle().await;
+    assert_eq!(s.fake.alerts().len(), 1, "the note record notify_person wrote is no second push: {:?}", s.fake.alerts());
+    // a tell_person from the back office is private-lane output: on screen, no phone
+    set(&s.hub, &format!("alert.{}", s.chat), "note\ttell-x\tm\t1.1\tThe [Boat thread](backplane://thread/t1) has answered my questions.").await; settle().await;
+    assert_eq!(s.fake.alerts().len(), 1);
+}
+#[test] fn a_push_body_is_plain_words() {
+    let p = |t: &str| push::plain(t, 180);
+    assert_eq!(p("The [Boat thread](backplane://thread/t1794347576-102) has answered my questions. Nothing of mine is running on the Boat any more.  **You can set up the Pebble app now.** The ring stays on the desktop hub: 1. Open the desktop's **Settings → Ring**"),
+        "The Boat thread has answered my questions. Nothing of mine is running on the Boat any more. You can set up the Pebble app now.");
+    assert_eq!(p("## Done\n\nMore"), "Done");
+    assert_eq!(p("- **Field-23** is `live` in ~~old~~ *main*"), "Field-23 is live in old main");
+    assert_eq!(p("See [`docs/ring.md`](file:///home/h/x/docs/ring.md#L56) and ![shot](file:///a.png)."), "See docs/ring.md and shot.");
+    assert_eq!(p("I couldn't dispose of input `p1794357742-592218` in this run (thread t1794347576-102)."), "I couldn't dispose of input in this run (thread).");
+    assert_eq!(p("Open backplane://thread/t1 now"), "Open now");
+    assert_eq!(p("1. First step\n2. Second"), "First step");
+    assert_eq!(p("Commit e2246f7e5 and snake_case stay"), "Commit e2246f7e5 and snake_case stay");
+    let long = "word ".repeat(60); let b = p(&long); assert!(b.chars().count() <= 180 && b.ends_with('…'), "{b}");
+    assert_eq!(p("Plain text."), "Plain text.");
+}
