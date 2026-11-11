@@ -35,26 +35,165 @@ const LIMIT: usize = 100; // util.recursionLimit
 
 // The schema ------------------------------------------------------------------------------------------------------------
 
-/// The runtime's descriptor set when it ships one, else [`builtin`], which knows only Ping and GetVersion.
+/// The runtime's descriptor set when it ships one, else [`builtin`], which knows handshake, editor-control and embed commands.
 pub struct Schema { pool: DescriptorPool, full: bool }
 impl Schema {
-    pub fn message(&self, name: &str) -> Option<MessageDescriptor> { self.pool.get_message_by_name(name.strip_prefix('.').unwrap_or(name)) }
-    /// Only Ping and GetVersion without a descriptor set.
-    pub fn knows(&self, name: &str) -> bool { self.full || name == "kiapi.common.commands.Ping" || name == "kiapi.common.commands.GetVersion" }
+    pub fn has_own(&self, name: &str) -> bool { self.pool.get_message_by_name(name.strip_prefix('.').unwrap_or(name)).is_some() }
+    pub fn message(&self, name: &str) -> Option<MessageDescriptor> {
+        let n = name.strip_prefix('.').unwrap_or(name);
+        self.pool.get_message_by_name(n).or_else(|| if self.full { builtin().pool.get_message_by_name(n) } else { None })
+    }
+    /// Handshake, editor-control and embed commands work without an external descriptor set; board/schematic item codecs need `api.desc`.
+    pub fn knows(&self, name: &str) -> bool {
+        self.full || matches!(name,
+            "kiapi.common.commands.Ping"
+            | "kiapi.common.commands.GetVersion"
+            | "kiapi.common.commands.RunAction"
+            | "kiapi.common.commands.GetOpenDocuments"
+            | "kiapi.common.commands.GetDocumentModifiedState"
+            | "kiapi.common.commands.SaveDocument"
+            | "kiapi.backplane.GetCapabilities"
+            | "kiapi.backplane.Shutdown"
+        ) || (name.starts_with("kiapi.backplane.embed.") && self.message(name).is_some())
+    }
 }
-fn message_of(name: &str, fields: &[(&str, i32, Option<(pt::field_descriptor_proto::Type, &str)>)]) -> pt::DescriptorProto {
-    use pt::field_descriptor_proto::{Label, Type};
-    pt::DescriptorProto { name: Some(name.into()), field: fields.iter().map(|(n, id, t)| pt::FieldDescriptorProto {
-        name: Some((*n).into()), number: Some(*id), label: Some(Label::Optional as i32), r#type: Some(t.map(|x| x.0).unwrap_or(Type::Uint32) as i32), type_name: t.and_then(|x| (!x.1.is_empty()).then(|| x.1.to_string())), ..Default::default() }).collect(), ..Default::default() }
+#[derive(Clone, Copy)]
+enum Fld {
+    Opt(pt::field_descriptor_proto::Type, &'static str),
+    Rep(pt::field_descriptor_proto::Type, &'static str),
+    One(i32, pt::field_descriptor_proto::Type, &'static str),
+    P3Opt(i32, pt::field_descriptor_proto::Type),
+}
+fn enum_of(name: &str, vals: &[(&str, i32)]) -> pt::EnumDescriptorProto {
+    pt::EnumDescriptorProto { name: Some(name.into()), value: vals.iter().map(|(n, v)| pt::EnumValueDescriptorProto { name: Some((*n).into()), number: Some(*v), ..Default::default() }).collect(), ..Default::default() }
+}
+fn msg_of(name: &str, oneofs: &[&str], fields: &[(&str, i32, Fld)]) -> pt::DescriptorProto {
+    use pt::field_descriptor_proto::Label;
+    pt::DescriptorProto {
+        name: Some(name.into()),
+        oneof_decl: oneofs.iter().map(|o| pt::OneofDescriptorProto { name: Some((*o).into()), ..Default::default() }).collect(),
+        field: fields.iter().map(|(n, id, f)| {
+            let (label, ty, tname, oneof_index, proto3_optional) = match *f {
+                Fld::Opt(ty, tn) => (Label::Optional, ty, tn, None, None),
+                Fld::Rep(ty, tn) => (Label::Repeated, ty, tn, None, None),
+                Fld::One(ix, ty, tn) => (Label::Optional, ty, tn, Some(ix), None),
+                Fld::P3Opt(ix, ty) => (Label::Optional, ty, "", Some(ix), Some(true)),
+            };
+            pt::FieldDescriptorProto {
+                name: Some((*n).into()), number: Some(*id), label: Some(label as i32), r#type: Some(ty as i32),
+                type_name: (!tname.is_empty()).then(|| tname.to_string()), oneof_index, proto3_optional, ..Default::default()
+            }
+        }).collect(),
+        ..Default::default()
+    }
 }
 pub fn builtin() -> Arc<Schema> {
     static ONE: OnceLock<Arc<Schema>> = OnceLock::new();
     ONE.get_or_init(|| {
-        use pt::field_descriptor_proto::Type;
-        let file = |name: &str, package: &str, dep: &[&str], m: Vec<pt::DescriptorProto>| pt::FileDescriptorProto { name: Some(name.into()), package: Some(package.into()), syntax: Some("proto3".into()), dependency: dep.iter().map(|d| d.to_string()).collect(), message_type: m, ..Default::default() };
+        use pt::field_descriptor_proto::Type as T;
+        use Fld::*;
+        let file = |name: &str, package: &str, dep: &[&str], e: Vec<pt::EnumDescriptorProto>, m: Vec<pt::DescriptorProto>| pt::FileDescriptorProto {
+            name: Some(name.into()), package: Some(package.into()), syntax: Some("proto3".into()),
+            dependency: dep.iter().map(|d| d.to_string()).collect(), enum_type: e, message_type: m, ..Default::default()
+        };
         let set = pt::FileDescriptorSet { file: vec![
-            file("kiapi_types.proto", "kiapi.common.types", &[], vec![message_of("KiCadVersion", &[("major", 1, None), ("minor", 2, None), ("patch", 3, None), ("full_version", 4, Some((Type::String, "")))])]),
-            file("kiapi_commands.proto", "kiapi.common.commands", &["kiapi_types.proto"], vec![message_of("Ping", &[]), message_of("GetVersion", &[]), message_of("GetVersionResponse", &[("version", 1, Some((Type::Message, ".kiapi.common.types.KiCadVersion")))])]),
+            file("kiapi_types.proto", "kiapi.common.types", &[],
+                vec![enum_of("DocumentType", &[
+                    ("DOCTYPE_UNKNOWN", 0), ("DOCTYPE_SCHEMATIC", 1), ("DOCTYPE_SYMBOL", 2), ("DOCTYPE_PCB", 3),
+                    ("DOCTYPE_FOOTPRINT", 4), ("DOCTYPE_DRAWING_SHEET", 5), ("DOCTYPE_PROJECT", 6),
+                ])],
+                vec![
+                    msg_of("KiCadVersion", &[], &[("major", 1, Opt(T::Uint32, "")), ("minor", 2, Opt(T::Uint32, "")), ("patch", 3, Opt(T::Uint32, "")), ("full_version", 4, Opt(T::String, ""))]),
+                    msg_of("KIID", &[], &[("value", 1, Opt(T::String, ""))]),
+                    msg_of("LibraryIdentifier", &[], &[("library_nickname", 1, Opt(T::String, "")), ("entry_name", 2, Opt(T::String, ""))]),
+                    msg_of("SheetPath", &[], &[("path", 1, Rep(T::Message, ".kiapi.common.types.KIID")), ("path_human_readable", 2, Opt(T::String, ""))]),
+                    msg_of("ProjectSpecifier", &[], &[("name", 1, Opt(T::String, "")), ("path", 2, Opt(T::String, ""))]),
+                    msg_of("DocumentSpecifier", &["identifier"], &[
+                        ("type", 1, Opt(T::Enum, ".kiapi.common.types.DocumentType")),
+                        ("lib_id", 2, One(0, T::Message, ".kiapi.common.types.LibraryIdentifier")),
+                        ("sheet_path", 3, One(0, T::Message, ".kiapi.common.types.SheetPath")),
+                        ("board_filename", 4, One(0, T::String, "")),
+                        ("project", 5, Opt(T::Message, ".kiapi.common.types.ProjectSpecifier")),
+                    ]),
+                ]),
+            file("kiapi_commands.proto", "kiapi.common.commands", &["kiapi_types.proto"],
+                vec![
+                    enum_of("DocumentModifiedState", &[("DMS_UNKNOWN", 0), ("DMS_UNMODIFIED", 1), ("DMS_MODIFIED", 2)]),
+                    enum_of("RunActionStatus", &[("RAS_UNKNOWN", 0), ("RAS_OK", 1), ("RAS_INVALID", 2), ("RAS_FRAME_NOT_OPEN", 3)]),
+                ],
+                vec![
+                    msg_of("Ping", &[], &[]),
+                    msg_of("GetVersion", &[], &[]),
+                    msg_of("GetVersionResponse", &[], &[("version", 1, Opt(T::Message, ".kiapi.common.types.KiCadVersion"))]),
+                    msg_of("GetOpenDocuments", &[], &[("type", 1, Opt(T::Enum, ".kiapi.common.types.DocumentType"))]),
+                    msg_of("GetOpenDocumentsResponse", &[], &[("documents", 1, Rep(T::Message, ".kiapi.common.types.DocumentSpecifier"))]),
+                    msg_of("GetDocumentModifiedState", &[], &[("document", 1, Opt(T::Message, ".kiapi.common.types.DocumentSpecifier"))]),
+                    msg_of("GetDocumentModifiedStateResponse", &[], &[("state", 1, Opt(T::Enum, ".kiapi.common.commands.DocumentModifiedState"))]),
+                    msg_of("SaveDocument", &[], &[("document", 1, Opt(T::Message, ".kiapi.common.types.DocumentSpecifier"))]),
+                    msg_of("RunAction", &[], &[("action", 1, Opt(T::String, ""))]),
+                    msg_of("RunActionResponse", &[], &[("status", 1, Opt(T::Enum, ".kiapi.common.commands.RunActionStatus"))]),
+                ]),
+            file("kiapi_backplane.proto", "kiapi.backplane", &[],
+                vec![],
+                vec![
+                    msg_of("GetCapabilities", &[], &[]),
+                    msg_of("GetCapabilitiesResponse", &[], &[
+                        ("fork_version", 1, Opt(T::String, "")), ("upstream_commit", 2, Opt(T::String, "")), ("source_commit", 3, Opt(T::String, "")),
+                        ("api_version", 4, Opt(T::Int32, "")), ("capabilities", 5, Rep(T::String, "")), ("commands", 6, Rep(T::String, "")),
+                        ("board_file_version", 7, Opt(T::Int32, "")), ("schematic_file_version", 8, Opt(T::Int32, "")),
+                    ]),
+                    msg_of("Shutdown", &[], &[("force", 1, Opt(T::Bool, ""))]),
+                    msg_of("ShutdownResponse", &[], &[]),
+                ]),
+            file("kiapi_embed.proto", "kiapi.backplane.embed", &[],
+                vec![
+                    enum_of("FrameKind", &[
+                        ("FK_UNKNOWN", 0), ("FK_PCB", 1), ("FK_SCH", 2), ("FK_SYMBOL_EDITOR", 3),
+                        ("FK_FOOTPRINT_EDITOR", 4), ("FK_PCB_3D", 5), ("FK_OTHER", 6),
+                    ]),
+                    enum_of("EventType", &[
+                        ("ET_UNKNOWN", 0), ("ET_FRAME_OPENED", 1), ("ET_FRAME_CLOSED", 2), ("ET_FRAME_SHOWN", 3), ("ET_FRAME_HIDDEN", 4),
+                        ("ET_TITLE_CHANGED", 5), ("ET_MODIFIED_CHANGED", 6), ("ET_FOCUS_IN", 7), ("ET_FOCUS_OUT", 8), ("ET_SHOW_REQUESTED", 9),
+                        ("ET_DIALOG_OPENED", 10), ("ET_DIALOG_CLOSED", 11), ("ET_DETACHED", 12), ("ET_DOCUMENT_CHANGED", 13),
+                    ]),
+                    enum_of("CloseMode", &[("CM_FAIL_IF_MODIFIED", 0), ("CM_SAVE", 1), ("CM_DISCARD", 2)]),
+                ],
+                vec![
+                    msg_of("FrameInfo", &[], &[
+                        ("kind", 1, Opt(T::Enum, ".kiapi.backplane.embed.FrameKind")), ("document", 2, Opt(T::String, "")), ("title", 3, Opt(T::String, "")),
+                        ("modified", 4, Opt(T::Bool, "")), ("window", 5, Opt(T::Uint64, "")), ("min_width", 6, Opt(T::Int32, "")), ("min_height", 7, Opt(T::Int32, "")),
+                        ("shown", 8, Opt(T::Bool, "")), ("focused", 9, Opt(T::Bool, "")), ("frame_name", 10, Opt(T::String, "")),
+                    ]),
+                    msg_of("AttachToParent", &[], &[("window", 1, Opt(T::Uint64, "")), ("toplevel", 2, Opt(T::Uint64, "")), ("scale", 3, Opt(T::Double, ""))]),
+                    msg_of("AttachToParentResponse", &[], &[("holder", 1, Opt(T::Uint64, "")), ("frames", 2, Rep(T::Message, ".kiapi.backplane.embed.FrameInfo"))]),
+                    msg_of("ShowFrame", &[], &[
+                        ("kind", 1, Opt(T::Enum, ".kiapi.backplane.embed.FrameKind")), ("document", 2, Opt(T::String, "")), ("item", 3, Opt(T::String, "")),
+                        ("focus", 4, Opt(T::Bool, "")), ("x", 5, Opt(T::Int32, "")), ("y", 6, Opt(T::Int32, "")), ("width", 7, Opt(T::Int32, "")), ("height", 8, Opt(T::Int32, "")),
+                    ]),
+                    msg_of("ShowFrameResponse", &[], &[("frame", 1, Opt(T::Message, ".kiapi.backplane.embed.FrameInfo"))]),
+                    msg_of("HideFrame", &[], &[("kind", 1, Opt(T::Enum, ".kiapi.backplane.embed.FrameKind")), ("window", 2, Opt(T::Uint64, ""))]),
+                    msg_of("HideFrameResponse", &[], &[]),
+                    msg_of("GetFrames", &[], &[]),
+                    msg_of("GetFramesResponse", &[], &[
+                        ("frames", 1, Rep(T::Message, ".kiapi.backplane.embed.FrameInfo")), ("parent", 2, Opt(T::Uint64, "")), ("toplevel", 3, Opt(T::Uint64, "")),
+                        ("holder", 4, Opt(T::Uint64, "")), ("scale", 5, Opt(T::Double, "")), ("reserved_keys", 6, Rep(T::String, "")), ("events_socket", 7, Opt(T::String, "")),
+                    ]),
+                    msg_of("Event", &[], &[
+                        ("seq", 1, Opt(T::Uint64, "")), ("type", 2, Opt(T::Enum, ".kiapi.backplane.embed.EventType")),
+                        ("frame", 3, Opt(T::Message, ".kiapi.backplane.embed.FrameInfo")), ("detail", 4, Opt(T::String, "")),
+                    ]),
+                    msg_of("NextEvents", &[], &[("since", 1, Opt(T::Uint64, "")), ("wait_ms", 2, Opt(T::Int32, "")), ("max", 3, Opt(T::Int32, ""))]),
+                    msg_of("NextEventsResponse", &[], &[("events", 1, Rep(T::Message, ".kiapi.backplane.embed.Event")), ("next", 2, Opt(T::Uint64, "")), ("lost", 3, Opt(T::Bool, ""))]),
+                    msg_of("SetChrome", &["_menubar", "_top_toolbar", "_side_toolbars", "_status_bar"], &[
+                        ("menubar", 1, P3Opt(0, T::Bool)), ("top_toolbar", 2, P3Opt(1, T::Bool)),
+                        ("side_toolbars", 3, P3Opt(2, T::Bool)), ("status_bar", 4, P3Opt(3, T::Bool)),
+                    ]),
+                    msg_of("SetChromeResponse", &[], &[("menubar", 1, Opt(T::Bool, "")), ("top_toolbar", 2, Opt(T::Bool, "")), ("side_toolbars", 3, Opt(T::Bool, "")), ("status_bar", 4, Opt(T::Bool, ""))]),
+                    msg_of("SetReservedKeys", &[], &[("chords", 1, Rep(T::String, ""))]),
+                    msg_of("SetReservedKeysResponse", &[], &[("chords", 1, Rep(T::String, ""))]),
+                    msg_of("Close", &[], &[("mode", 1, Opt(T::Enum, ".kiapi.backplane.embed.CloseMode")), ("kind", 2, Opt(T::Enum, ".kiapi.backplane.embed.FrameKind")), ("window", 3, Opt(T::Uint64, ""))]),
+                    msg_of("CloseResponse", &[], &[("modified", 1, Rep(T::Message, ".kiapi.backplane.embed.FrameInfo")), ("exiting", 2, Opt(T::Bool, ""))]),
+                ]),
         ] };
         Arc::new(Schema { pool: DescriptorPool::from_file_descriptor_set(set).expect("the built-in schema is valid"), full: false })
     }).clone()
@@ -447,6 +586,28 @@ mod tests {
         assert!(load("").pool.get_message_by_name("kiapi.common.types.KiCadVersion").is_some());
         assert!(!load("/nonexistent/api.desc").full);
         assert!(load(&fixture("fixtures/kipc/api.desc")).full);
+    }
+    #[test] fn builtin_embed_and_editor_commands_round_trip() {
+        let s = builtin();
+        for ty in ["kiapi.common.commands.RunAction", "kiapi.common.commands.GetOpenDocuments", "kiapi.common.commands.GetDocumentModifiedState",
+            "kiapi.common.commands.SaveDocument", "kiapi.backplane.GetCapabilities", "kiapi.backplane.Shutdown",
+            "kiapi.backplane.embed.AttachToParent", "kiapi.backplane.embed.ShowFrame", "kiapi.backplane.embed.HideFrame",
+            "kiapi.backplane.embed.GetFrames", "kiapi.backplane.embed.NextEvents", "kiapi.backplane.embed.SetChrome",
+            "kiapi.backplane.embed.SetReservedKeys", "kiapi.backplane.embed.Close"] {
+            assert!(s.knows(ty), "{ty}");
+        }
+        let rt = |ty: &str, v: Value| -> Value { let m = s.message(ty).unwrap(); decode_message(&m, &encode_message(&m, &v).unwrap()).unwrap() };
+        assert_eq!(rt("kiapi.common.commands.RunAction", json!({"action":"pcbnew.EditorControl.showEeschema"})), json!({"action":"pcbnew.EditorControl.showEeschema"}));
+        assert_eq!(rt("kiapi.common.commands.GetOpenDocumentsResponse", json!({"documents":[{"type":"DOCTYPE_PCB","board_filename":"a.kicad_pcb","project":{"name":"a","path":"/p"}}]})),
+            json!({"documents":[{"type":"DOCTYPE_PCB","board_filename":"a.kicad_pcb","project":{"name":"a","path":"/p"}}]}));
+        assert_eq!(rt("kiapi.backplane.embed.ShowFrame", json!({"kind":"FK_SCH","focus":true,"width":800,"height":600})),
+            json!({"kind":"FK_SCH","focus":true,"width":800,"height":600}));
+        assert_eq!(rt("kiapi.backplane.embed.GetFramesResponse", json!({"frames":[{"kind":"FK_PCB","document":"/p/a.kicad_pcb","title":"a","modified":true,"window":42,"min_width":320,"min_height":240,"shown":true}],"holder":99,"events_socket":"ipc:///t/api.sock.events"})),
+            json!({"frames":[{"kind":"FK_PCB","document":"/p/a.kicad_pcb","title":"a","modified":true,"window":"42","min_width":320,"min_height":240,"shown":true}],"holder":"99","events_socket":"ipc:///t/api.sock.events"}));
+        assert_eq!(rt("kiapi.backplane.embed.NextEventsResponse", json!({"events":[{"seq":3,"type":"ET_SHOW_REQUESTED","frame":{"kind":"FK_PCB_3D","window":77}}],"next":4,"lost":false})),
+            json!({"events":[{"seq":"3","type":"ET_SHOW_REQUESTED","frame":{"kind":"FK_PCB_3D","window":"77"}}],"next":"4"}));
+        assert_eq!(rt("kiapi.backplane.embed.SetChrome", json!({"menubar":false})), json!({"menubar":false}));
+        assert_eq!(rt("kiapi.backplane.embed.Close", json!({"mode":"CM_SAVE"})), json!({"mode":"CM_SAVE"}));
     }
     #[test] fn base64_round_trip() {
         let cases: [&[u8]; 6] = [b"", b"f", b"fo", b"foo", b"foob", &[0xfb, 0xff, 0xfe]];

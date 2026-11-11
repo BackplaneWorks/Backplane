@@ -2042,6 +2042,15 @@ gpui.c.pad.hint.eraser = 消す部分をドラッグ · {undo}で元に戻す
 gpui.c.pad.pen = ペン
 gpui.c.pad.box = 枠
 gpui.c.pad.eraser = 消しゴム
+gpui.c.kicad.kicad.could.not.start = KiCad を起動できませんでした:
+gpui.c.kicad.kicad.is.not.responding = KiCad が応答していません。
+gpui.c.kicad.kicad.was.closed = KiCad は閉じられました。
+gpui.c.kicad.starting.kicad = KiCad を起動しています…
+gpui.c.kicad.this.window.cannot.hold.another = このウィンドウには他のプログラムのウィンドウを入れられません（今は X11 と XWayland のみ）
+gpui.c.kicad.no.x11.connection = X11 に接続できません
+gpui.c.kicad.back.to.backplane.s.viewer = Backplane のビューアに戻る（KiCad は開いたまま）
+gpui.c.kicad.edit.in.the.real.kicad = このペインで本物の KiCad で編集
+gpui.c.kicad.view = 表示
 
 # ---- gpui-d: setup, pairing, hubs, palette, picker, projects, composer, menus ----
 gpui.assets.missing = {dir} にアセットがありません: {files}

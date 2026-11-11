@@ -796,7 +796,7 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, imp: &Imp) -> Option<AnyEl
         .child(div().flex_shrink_0().child(button(cx, light, "primary", &trs(d.send_label(imp.busy)), !imp.busy, true, false)));
     // a floating window above the app: centred, bordered, shadowed, with the page dimmed behind it (a click on the dim leaves the panel as it is)
     Some(div().id("improvements-float").absolute().inset_0().occlude().bg(gpui::hsla(0., 0., 0., 0.35)).flex().items_center().justify_center().p_6()
-      .child(div().id("improvements").w(px(760.)).max_w_full().max_h_full().h(px(760.)).overflow_hidden().bg(c("bg")).border_1().border_color(c("line")).shadow_lg().flex().flex_col()
+      .child(div().id("improvements").occlude().w(px(760.)).max_w_full().max_h_full().h(px(760.)).overflow_hidden().bg(c("bg")).border_1().border_color(c("line")).shadow_lg().flex().flex_col()
         /* i18n-ok: a shortcut */ .child(div().h(px(36.)).flex_shrink_0().px_3().flex().items_center().gap_3().border_b_1().border_color(c("line")).child(div().flex_1().font_weight(FontWeight::BOLD).child(trs("Improvements"))).child(div().text_color(c("faint")).text_size(px(11.)).child("Ctrl+Alt+I"))
             .child(button(cx, light, "close", &trs("Close"), true, false, false)))
         .child(div().id("improvements-body").flex_1().min_h_0().overflow_y_scroll().flex().justify_center().items_start().child(col))

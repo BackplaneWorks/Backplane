@@ -32,6 +32,8 @@ fn failed(text: &str) -> Value { json!({"ok":false,"error":text,"why":text,"fall
 enum Msg {
     Ask { project: String, env: Env, ty: String, msg: Value, reply: oneshot::Sender<Value> },
     Raw { sock: String, env: Env, ty: String, msg: Value, reply: oneshot::Sender<Value> },
+    Retire { project: String, reply: oneshot::Sender<Value> },
+    Retired { project: String, ok: bool, why: String, reply: oneshot::Sender<Value> },
     Info(oneshot::Sender<String>),
     Argv { project: String, env: Env, reply: oneshot::Sender<String> },
     Clear,
@@ -190,10 +192,35 @@ impl Actor {
             self.fail_project(&project, &format!("{} ({} would not stop: {why})", ks::BUSY, ks::name(&victim))); self.emit();
         } else { self.evicting(&other, &project) }
     }
+    fn retire(&mut self, project: String, reply: oneshot::Sender<Value>) {
+        let s = self.srv(&project);
+        if s.sock.is_empty() || matches!(s.state.as_str(), "none" | "stopped" | "failed") {
+            self.put(s.set("stopped", "")); self.fail_project(&project, "the GUI KiCad took over this project"); self.emit();
+            let _ = reply.send(json!({"ok":true,"retired":false})); return
+        }
+        let sock = s.sock.clone(); let env = self.env.clone(); let me = self.me.clone();
+        tokio::spawn(async move {
+            let (t, r) = oneshot::channel(); let _ = me.send(Msg::Raw { sock, env, ty: "kiapi.backplane.Shutdown".into(), msg: json!({}), reply: t });
+            let o = r.await.unwrap_or_else(|_| failed("no reply"));
+            let _ = me.send(Msg::Retired { project, ok: o["ok"].as_bool().unwrap_or(false), why: o["error"].as_str().unwrap_or("").into(), reply });
+        });
+    }
+    fn retired(&mut self, project: String, ok: bool, why: String, reply: oneshot::Sender<Value>) {
+        if ok {
+            let s = self.srv(&project).set("stopped", ""); self.put(s);
+            self.fail_project(&project, "the GUI KiCad took over this project"); self.emit();
+            let _ = reply.send(json!({"ok":true,"retired":true}));
+        } else {
+            let s = self.srv(&project).hold(); self.put(s); self.emit();
+            let _ = reply.send(json!({"ok":false,"error":why}));
+        }
+    }
     fn handle(&mut self, m: Msg) {
         match m {
             Msg::Ask { project, env, ty, msg, reply } => { self.env = env.clone(); self.ask(Wt { project, ty, msg, env, reply }) }
             Msg::Raw { sock, env, ty, msg, reply } => { let f = self.call_fields(&sock, &env, &ty, msg); self.call(f, reply) }
+            Msg::Retire { project, reply } => self.retire(project, reply),
+            Msg::Retired { project, ok, why, reply } => self.retired(project, ok, why, reply),
             Msg::Info(r) => { let _ = r.send(ks::lines(&self.srvs)); }
             Msg::Argv { project, env, reply } => { let d = ks::dir(&self.rt, &self.home, &project); let _ = reply.send(ks::argv(&env.cli, &project, &d, self.hub_pid, &env.caps).join(" ")); }
             Msg::Clear => { for s in self.srvs.iter_mut().filter(|s| s.state == "failed") { *s = s.clone().cleared() } self.emit() }
@@ -309,12 +336,21 @@ async fn ask(i: &Ipc, project: &str, env: &Env, ty: &str, msg: Value) -> Value {
 async fn info_on(i: &Ipc) -> String { let (t, r) = oneshot::channel(); if i.tx.send(Msg::Info(t)).is_err() { return String::new() } r.await.unwrap_or_default() }
 async fn argv_on(i: &Ipc, project: &str, env: &Env) -> String { let (t, r) = oneshot::channel(); if i.tx.send(Msg::Argv { project: project.into(), env: env.clone(), reply: t }).is_err() { return String::new() } r.await.unwrap_or_default() }
 
-/// KIpc.pro: the project of a path: the .kicad_pro itself, or the one beside a board or schematic ("" for none).
+/// Ask a running headless KiCad for `project` to shut down cleanly (`kiapi.backplane.Shutdown`, never a signal) before a GUI KiCad takes over.
+pub async fn retire(project: &str) -> Value {
+    let Some(i) = IPC.get() else { return json!({"ok":true,"retired":false}) };
+    let (t, r) = oneshot::channel();
+    if i.tx.send(Msg::Retire { project: project.into(), reply: t }).is_err() { return json!({"ok":true,"retired":false}) }
+    r.await.unwrap_or_else(|_| json!({"ok":true,"retired":false}))
+}
+
+/// KIpc.pro: the project of a path: the .kicad_pro itself, a project folder, or the one beside a board or schematic ("" for none).
 /// A canonical document named by its worktree twin resolves to main's copy first (canonical.rs).
 pub fn pro_of(path: &str) -> String {
     if !crate::plat::fs::is_abs(path) { return String::new() }
     let path = super::canonical::route(path);
     if path.ends_with(".kicad_pro") { return path }
+    if Path::new(&path).is_dir() { return project::read(&super::canonical::design_root(&path)).pro }
     Path::new(&path).parent().map(|d| project::read(&d.to_string_lossy()).pro).unwrap_or_default()
 }
 /// A listed KiCad read (`Get*`, `Ping`): the commands a copy may run and a writer lock never gates.
@@ -333,6 +369,13 @@ pub fn check(ty: &str, path: &str, pro: &str, msg: &Value, caps: &[String]) -> S
     if !crate::plat::fs::is_abs(path) { return "path must be the absolute path of the project's .kicad_pro, .kicad_pcb or .kicad_sch".into() }
     if pro.is_empty() { return format!("no KiCad project (.kicad_pro) found for {path}") }
     if ks::headless_refused(ty) { return ks::REFUSAL.into() }
+    ks::guard(ty, msg, caps)
+}
+/// Same validation as [`check`], without the headless-only command refusal when a live GUI KiCad owns `pro`.
+pub fn check_gui(ty: &str, path: &str, pro: &str, msg: &Value, caps: &[String]) -> String {
+    if ty.is_empty() { return "type is required: the protobuf command, e.g. kiapi.board.commands.GetItems".into() }
+    if !crate::plat::fs::is_abs(path) { return "path must be the absolute path of the project's .kicad_pro, .kicad_pcb or .kicad_sch".into() }
+    if pro.is_empty() { return format!("no KiCad project (.kicad_pro) found for {path}") }
     ks::guard(ty, msg, caps)
 }
 
@@ -358,9 +401,22 @@ pub async fn kicad_ipc_status_in(hub: &Arc<Hub>, thread: Option<&str>, path: &st
 
 async fn run(hub: &Arc<Hub>, thread: Option<&str>, path: &str, ty: &str, msg: Value, status: bool) -> Result<Value, String> {
     let msg = if msg.is_object() { msg } else { json!({}) }; // KIpc.msg: a missing message is {}
-    let env = runtime(hub).await;
     let routed = super::canonical::route(path); let path = &routed; // main's copy, whichever thread named it
     let pro = pro_of(path);
+    if let Some(gui) = (!pro.is_empty()).then(|| super::embed::gui_route(&pro)).flatten() {
+        let plain = check_gui(ty, path, &pro, &msg, &gui.caps);
+        if !plain.is_empty() { return Err(plain) }
+        if !super::known_root(hub, Path::new(&pro).parent().map(|p| p.to_str().unwrap_or("")).unwrap_or(""), "").await { return Err(format!("{path} is not in a project this hub knows")) }
+        let setting = hub.setting("kicad.ipc").await.unwrap_or_else(|| "on".into());
+        if setting == "off" { let why = "KiCad IPC is turned off in Settings"; log_fallback(hub, thread, why).await; return Err(ks::unavailable(why, &gui.cli)) }
+        let o = super::embed::gui_call(&gui, ty, msg).await;
+        if o["fallback"].as_bool().unwrap_or(false) { log_fallback(hub, thread, o["why"].as_str().unwrap_or("")).await; return Err(o["error"].as_str().unwrap_or("").into()) }
+        let ok = o["ok"].as_bool().unwrap_or(false);
+        let servers = format!("{pro}|ready|gui ({})", gui.mode);
+        if status { return Ok(json!({"server":format!("gui ({})", gui.mode),"servers":servers,"argv":gui.argv,"version":gui.version,"capabilities":o["message"].clone(),"detail":if ok { String::new() } else { err_of(&o) }})) }
+        return if ok { Ok(json!({"type":o["type"].as_str().unwrap_or(""),"message":o["message"].clone()})) } else { Err(err_of(&o)) };
+    }
+    let env = runtime(hub).await;
     let plain = check(ty, path, &pro, &msg, &env.caps);
     if !plain.is_empty() { return Err(plain) }
     // the project must lie under a folder the hub knows (a deliberate difference from the JS hub, see the header)

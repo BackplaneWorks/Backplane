@@ -2019,6 +2019,15 @@ gpui.c.pad.hint.eraser = Drag over what to erase · {undo} undoes
 gpui.c.pad.pen = Pen
 gpui.c.pad.box = Box
 gpui.c.pad.eraser = Eraser
+gpui.c.kicad.kicad.could.not.start = KiCad could not start:
+gpui.c.kicad.kicad.is.not.responding = KiCad is not responding.
+gpui.c.kicad.kicad.was.closed = KiCad was closed.
+gpui.c.kicad.starting.kicad = Starting KiCad…
+gpui.c.kicad.this.window.cannot.hold.another = this window cannot hold another program's (only X11 and XWayland for now)
+gpui.c.kicad.no.x11.connection = no X11 connection
+gpui.c.kicad.back.to.backplane.s.viewer = Back to Backplane's viewer (KiCad stays open)
+gpui.c.kicad.edit.in.the.real.kicad = Edit in the real KiCad, here in the pane
+gpui.c.kicad.view = View
 
 # ---- gpui-d: setup, pairing, hubs, palette, picker, projects, composer, menus ----
 gpui.assets.missing = Assets missing in {dir}: {files}

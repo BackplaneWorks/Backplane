@@ -468,19 +468,23 @@ int kembed_win_info(
             if (sh > 700) sh = 700;
             XImage *img = XGetImage(d, DefaultRootWindow(d), x1, y1, (unsigned int)sw, (unsigned int)sh, AllPlanes, ZPixmap);
             if (img) {
-                unsigned long first_px = XGetPixel(img, sw / 2, sh / 2);
-                int distinct = 0;
+                unsigned int seen[8];
+                int nseen = 0;
                 for (int py = 12; py < sh - 12; py += 19) {
                     for (int px = 12; px < sw - 12; px += 23) {
                         unsigned long p = XGetPixel(img, px, py);
                         unsigned int r = (p >> 16) & 0xff;
                         unsigned int g = (p >> 8) & 0xff;
                         unsigned int b = p & 0xff;
-                        if (p != first_px) distinct++;
-                        if ((r > 12 || g > 12 || b > 12) && (r < 245 || g < 245 || b < 245)) painted++;
+                        int is_placeholder = (r <= 12 && g >= 8 && g <= 28 && b >= 20 && b <= 52);
+                        if (!is_placeholder && (r > 12 || g > 12 || b > 12) && (r < 245 || g < 245 || b < 245)) painted++;
+                        unsigned int q = ((r >> 4) << 8) | ((g >> 4) << 4) | (b >> 4);
+                        int have = 0;
+                        for (int k = 0; k < nseen; k++) { if (seen[k] == q) { have = 1; break; } }
+                        if (!have && nseen < 8) seen[nseen++] = q;
                     }
                 }
-                if (distinct == 0) painted = 0;
+                if (nseen < 4) painted = 0;
                 XDestroyImage(img);
             }
         }
@@ -876,6 +880,7 @@ def main() -> None:
         cur_focus = lib.kembed_focus(0)
         taken = bool(lib.kembed_is_descendant(c_xid, cur_focus))
         in_gpui = bool(lib.kembed_is_descendant(gpui_xid, ch_xid))
+        in_cont = bool(lib.kembed_is_descendant(c_xid, ch_xid))
         print(
             json.dumps(
                 {
@@ -884,7 +889,9 @@ def main() -> None:
                     "container_xid": fmt_xid(c_xid),
                     "container": c_info,
                     "in_gpui_tree": in_gpui,
+                    "in_container": in_cont,
                     "taken": taken,
+                    "focus_in_child": taken,
                     "focus_xid": fmt_xid(cur_focus),
                     "native": ch_info,
                 }

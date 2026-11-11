@@ -521,6 +521,16 @@ impl Hub {
         }
     }
     pub fn info_frame(&self) -> Value { let mut i = serde_json::Map::new(); i.insert("pair".into(), json!("")); i.insert("pair.qr".into(), json!("")); for (k, v) in self.extra_info.lock().unwrap().iter() { i.insert(k.clone(), json!(v)); } json!({"t":"info","info":Value::Object(i)}) }
+    /// Live module info keys (`hub.offer`, `editor.kicad.*`, `browser.tabs.*`) for a joining `view=1` client, without `pair`/`pair.qr` or startup environment noise.
+    pub fn view_info_frame(&self) -> Option<Value> {
+        let mut i = serde_json::Map::new();
+        for (k, v) in self.extra_info.lock().unwrap().iter() {
+            if !v.is_empty() && (k == "hub.offer" || k.starts_with("editor.kicad.") || k.starts_with("browser.tabs.")) {
+                i.insert(k.clone(), json!(v));
+            }
+        }
+        (!i.is_empty()).then(|| json!({"t":"info","info":Value::Object(i)}))
+    }
     pub fn log_info(&self) -> Value { self.info() }
 
     /// The revision a view notice carries: the log's length, plus one for each change the log does not hold (a watched folder changed on disk).
@@ -702,6 +712,13 @@ mod tests {
         assert!(matches!(o.recv().await, Some(Out::Value(v)) if v["t"] == "info" && v["info"]["term.demo"] == "state-1"));
         assert_eq!(h.log_info()["term.demo"], "state-1", "joiners get it");
         assert_eq!(h.info_frame()["info"]["term.demo"], "state-1");
+        assert!(h.view_info_frame().is_none(), "view_info_frame omits pair/pair.qr and non-view keys");
+        assert!(h.set_info("editor.kicad.abc", "{\"state\":\"ready\"}").await);
+        let vf = h.view_info_frame().expect("view_info_frame carries editor.kicad.*");
+        assert_eq!(vf["info"]["editor.kicad.abc"], "{\"state\":\"ready\"}");
+        assert!(vf["info"].get("pair").is_none() && vf["info"].get("pair.qr").is_none(), "never sends pair keys on view connect");
+        assert!(h.set_info("editor.kicad.abc", "").await);
+        let _ = o.recv().await; let _ = o.recv().await;
         assert!(h.set_info("term.demo", "state-1").await); assert!(o.try_recv().is_err(), "no change, no frame");
         assert!(h.set_info("term.demo", "").await);
         assert!(matches!(o.recv().await, Some(Out::Value(v)) if v["info"]["term.demo"] == ""), "removal is told as an empty value");

@@ -120,7 +120,7 @@ fn which(cmd: &str) -> Option<String> { std::env::var("PATH").ok()?.split(':').m
 fn wrap(argv: Vec<String>, _memory: Option<&str>) -> Vec<String> { argv }
 /// KiCad may choose api-<pid>.sock when the requested path is occupied. Each socket with what tells it from one bound before.
 #[cfg(unix)]
-fn sockets_at(requested: &str) -> HashMap<String, String> {
+pub(super) fn sockets_at(requested: &str) -> HashMap<String, String> {
     use crate::plat::fs::{FileTypeExt, MetadataExt};
     let mut out = HashMap::new();
     let at = Path::new(requested); let (Some(dir), Some(base)) = (at.parent(), at.file_name()) else { return out };
@@ -138,7 +138,7 @@ fn sockets_at(requested: &str) -> HashMap<String, String> {
 }
 /// Windows: nng's sockets are named pipes (`\\.\pipe\<path>`), listed in the pipe namespace; a pipe has no birth stamp, so its name is what tells it.
 #[cfg(windows)]
-fn sockets_at(requested: &str) -> HashMap<String, String> {
+pub(super) fn sockets_at(requested: &str) -> HashMap<String, String> {
     let mut out = HashMap::new();
     let at = Path::new(requested); let (Some(dir), Some(base)) = (at.parent(), at.file_name()) else { return out };
     let Ok(rd) = std::fs::read_dir(r"\\.\pipe\") else { return out };
