@@ -442,7 +442,7 @@ pub async fn check(hub: &Arc<Hub>, link: &str) -> Result<Value, String> {
     let lines = hub.store.all();
     let bytes: u64 = lines.iter().map(|l| l.len() as u64 + 1).sum();
     let need = providers_of(&lines); drop(lines);
-    let st = far(hub, link, "home.ready", &json!({"providers": need})).await.map_err(|e| if e == "that machine is away" { format!("{name} is away: the link is down") } else if e.contains("not something") || e.contains("403") || e.contains("unknown") { format!("{name} runs a Backplane without the move check: update it first") } else { e })?;
+    let st = ask(hub, link, &name, "the move check", "home.ready", &json!({"providers": need})).await?;
     let need_mb = (bytes >> 20) * 3 + 512; // the log and its fold, twice over, and room to run
     let rs = reasons(&name, (&hub.cfg.version, &hub.cfg.commit), &st, &need, need_mb);
     Ok(json!({"ready": rs.is_empty(), "reasons": rs, "machine": name, "needs": need, "checks": st}))
@@ -456,6 +456,28 @@ async fn tell(hub: &Arc<Hub>, state: &str, step: &str, note: &str) {
     *STATE.lock().unwrap() = Some(v.clone());
     hub.set_info("home.move", &v.to_string()).await;
     eprintln!("backplane: home move: {state} {step} {note}");
+}
+/// Why machine `name` gave no answer to `what` (the check, the move), from the code and body of its reply, by the rule Sign in there uses
+/// (settings/accounts_there.rs `answer`): only a hub from before this needs the update: it answers 501, the generic far path's 403 "not something this
+/// machine shares" (it has no home.*), or its own "not something this machine does" (home.* without this request). Any other 403 or a 401 is access.
+pub fn why_not(name: &str, what: &str, code: u16, body: &str) -> String {
+    let body = body.trim();
+    match code {
+        0 => format!("{name} is away: the link is down"),
+        501 => format!("{name} runs a Backplane without {what}: update it first"),
+        403 if body == "not something this machine shares" => format!("{name} runs a Backplane without {what}: update it first"),
+        403 if body.contains("copied log") => format!("{name} refused {what}: it runs on a copy of a log and takes no requests"),
+        403 => format!("{name} refused {what}: it does not count this computer as yours (check Settings, Machines on it)"),
+        401 => format!("{name} refused {what}: it did not take this computer's signature (pair them again in Settings, Machines)"),
+        200 if body.contains("not something this machine does") => format!("{name} runs a Backplane without {what}: update it first"),
+        _ => format!("{name} did not answer {what}: {code} {}", body.chars().take(160).collect::<String>()),
+    }
+}
+/// `far`, with a refusal said as `why_not` says it.
+async fn ask(hub: &Arc<Hub>, link: &str, name: &str, what: &str, m: &str, p: &Value) -> Result<Value, String> {
+    let (code, text) = hub.far_raw(link, m, p).await;
+    if code == 200 { if let Ok(v) = serde_json::from_str::<Value>(&text) { if v["ok"] == true { return Ok(v) } let e = gs(&v, "error").to_string(); return Err(if e.contains("not something this machine does") { why_not(name, what, 200, &e) } else { format!("{m}: {e}") }) } }
+    Err(why_not(name, what, code, &text))
 }
 async fn far(hub: &Arc<Hub>, link: &str, m: &str, p: &Value) -> Result<Value, String> {
     let (code, text) = hub.far_raw(link, m, p).await;
@@ -499,7 +521,7 @@ async fn send_lines(hub: &Arc<Hub>, link: &str, lines: &[String]) -> Result<usiz
 pub async fn move_to(hub: &Arc<Hub>, link: &str) -> Result<Value, String> {
     let Some((_, name, url)) = hub.far_machines().into_iter().find(|(id, _, _)| id == link) else { return Err("no such machine is linked".into()) };
     tell(hub, "moving", "checking", &name).await;
-    let st = far(hub, link, "home.state", &json!({})).await.map_err(|e| if e.contains("not something") || e.contains("403") { format!("{name} runs a Backplane without home moves: update it first") } else { e })?;
+    let st = match ask(hub, link, &name, "home moves", "home.state", &json!({})).await { Ok(v) => v, Err(e) => { tell(hub, "failed", "checking", &e).await; return Err(e) } };
     let uber_here = uber(hub).await;
     if uber_here.is_empty() { tell(hub, "failed", "checking", "the home is not on this machine").await; return Err("the home is not on this machine".into()) }
     if !gs(&st, "uber").is_empty() { tell(hub, "failed", "checking", &format!("{name} has an uberbot of its own")).await; return Err(format!("{name} has an uberbot of its own")) }
@@ -816,5 +838,17 @@ mod tests {
         assert_eq!(moved_thread(&at, "tdesk", Some("p1"), &|_| true), None, "a project's thread never moves");
         assert_eq!(moved_thread(&at, "tother", Some(""), &there), None, "only what the new home has");
         assert_eq!(moved_thread("", "tbub", Some(""), &there), None, "the home is here"); assert_eq!(moved_thread(&at, "L1~tbub", Some(""), &|_| true), None);
+    }
+    #[test] fn a_refused_check_says_access_and_only_an_old_build_is_told_to_update() {
+        let w = |c: u16, b: &str| why_not("boat-hub", "the move check", c, b);
+        let old = "boat-hub runs a Backplane without the move check: update it first";
+        assert_eq!(w(501, "home.ready is not ported"), old, "an unknown method");
+        assert_eq!(w(403, "not something this machine shares"), old, "a hub with no home.* answers the generic path's 403");
+        assert_eq!(w(200, "not something this machine does"), old, "home.* without home.ready");
+        assert_eq!(w(403, "threads are shared with the owner's own machines"), "boat-hub refused the move check: it does not count this computer as yours (check Settings, Machines on it)");
+        assert_eq!(w(403, "a hub on a copied log does not take /far/rpc"), "boat-hub refused the move check: it runs on a copy of a log and takes no requests");
+        assert_eq!(w(401, "bad or stale signature"), "boat-hub refused the move check: it did not take this computer's signature (pair them again in Settings, Machines)");
+        assert_eq!(w(0, ""), "boat-hub is away: the link is down");
+        for (c, b) in [(403, "threads are shared with the owner's own machines"), (401, "unknown sender"), (403, "sync is off")] { assert!(!w(c, b).contains("update it"), "{c} {b}: access, never 'update it'") }
     }
 }
