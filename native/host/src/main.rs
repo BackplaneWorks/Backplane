@@ -1,6 +1,6 @@
 //! backplane-hub: the Backplane hub for native clients (GPUI, SwiftUI, Compose).
 //! HTTP + authenticated WebSocket; renderer `mobile`; the picture comes from the presenter.
-mod agents; mod api; mod google; mod import014; mod auth; mod bots; mod cbor; mod commands; mod data; mod copy; mod delta; mod files; mod guard; mod hub; mod md; mod mirror; mod model; mod net; mod plat; #[cfg(test)] #[path = "plat/tests.rs"] mod plat_tests; mod present;
+mod agents; mod api; mod google; mod import014; mod auth; mod bots; mod cbor; mod commands; mod data; mod copy; mod delta; mod files; mod guard; mod hub; mod md; mod mcpx; mod mirror; mod model; mod net; mod plat; #[cfg(test)] #[path = "plat/tests.rs"] mod plat_tests; mod present;
 mod presenter; mod proc; mod push; mod session; mod settings; mod shelf; mod sidebar; mod signal; mod stamp; mod state; #[path = "state/host.rs"] mod statehost; mod ckpt; mod ckptrun; #[cfg(test)] mod fold_inputs; #[cfg(test)] mod oneshot_script_tests; mod startup; mod store; mod term; mod update; mod voice; mod wire; mod window;
 
 use anyhow::{Context, Result};
