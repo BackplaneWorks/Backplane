@@ -66,12 +66,18 @@ pub fn is_limit(why: &str) -> bool { let l = why.to_lowercase(); l.contains("lim
 fn login_key(id: &str, epoch: u64) -> String { format!("{id}:{epoch}") }
 /// Logins a one-shot found out (key `id:epoch`, "" the default login) and until when; in memory only: a restart tries them again.
 fn limited_logins() -> &'static std::sync::Mutex<std::collections::HashMap<String, u64>> { static M: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<String, u64>>> = std::sync::OnceLock::new(); M.get_or_init(Default::default) }
-/// The logins a one-shot tries, in order: the default login (id "") unless held, then the named Claude accounts by allowance left; none a one-shot found out within the hour.
-pub fn healthy_order(profiles: &[Value], get: &dyn Fn(&str) -> String, now: u64, model: &str, out: &std::collections::HashMap<String, u64>) -> Vec<(String, u64)> {
+/// The logins a one-shot tries, in order: the default login (id "") unless held, then the account a new thread would get (`default`, the id in
+/// `account.default.claude`) when it can take it, then the other named Claude accounts by allowance left; none a one-shot found out within the hour.
+/// Nov 11: on boat-hub, whose CLI login is out and whose one account is a sync account, titles and swarm names must reach that account.
+pub fn healthy_order(profiles: &[Value], get: &dyn Fn(&str) -> String, now: u64, model: &str, out: &std::collections::HashMap<String, u64>, default: &str) -> Vec<(String, u64)> {
     let gone = |id: &str, epoch: u64| out.get(&login_key(id, epoch)).map_or(false, |until| *until > now);
     let mut v = vec![];
     if !crate::settings::fallback::hold_current(get, "claude", "", 0, model, now) && !gone("", 0) { v.push((String::new(), 0)) }
     let mut tried: Vec<String> = vec![];
+    if let Some(p) = profiles.iter().find(|p| !default.is_empty() && p["id"] == default && crate::settings::fallback::eligible(get, now, "claude", model, p)) {
+        let epoch = p["epoch"].as_u64().unwrap_or(0); tried.push(crate::settings::fallback::tried_id(default, epoch));
+        if !gone(default, epoch) { v.push((default.to_string(), epoch)) }
+    }
     while let Some(p) = crate::settings::fallback::pick_untried(profiles, &tried, get, now, "claude", model) {
         let (id, epoch) = (p["id"].as_str().unwrap_or("").to_string(), p["epoch"].as_u64().unwrap_or(0));
         tried.push(crate::settings::fallback::tried_id(&id, epoch));
@@ -122,6 +128,8 @@ impl Agents {
     pub async fn one_shot(&self, system: &str, input: &str) -> Option<String> {
         let (tp, tm) = { let w = self.world().await; (w.setting("text.provider").to_string(), w.setting("text.model").to_string()) };
         let (provider, model) = pick(&tp, &tm);
+        // Claude: the default login, else the account a new thread would get, else another connected one (a hub whose CLI login is out)
+        if provider == "claude" { return self.shot_healthy(&model, system, input, "writing").await }
         self.shot(provider, &model, system, input, &Launch::default()).await
     }
     /// One run of `provider`'s CLI with `model`, the text on stdin, tools off.
@@ -151,7 +159,8 @@ impl Agents {
             (profiles, h)
         };
         let out = limited_logins().lock().unwrap().clone();
-        let order = healthy_order(&profiles, &|k: &str| holds.get(k).cloned().unwrap_or_default(), now, model, &out);
+        let default = self.hub.setting("account.default.claude").await.and_then(|d| serde_json::from_str::<Value>(&d).ok()).and_then(|d| d["id"].as_str().map(str::to_string)).unwrap_or_default();
+        let order = healthy_order(&profiles, &|k: &str| holds.get(k).cloned().unwrap_or_default(), now, model, &out, &default);
         if order.is_empty() { eprintln!("{who}: every Claude login is out; asked again later"); return None }
         for (id, epoch) in order {
             let name = if id.is_empty() { "the default login".to_string() } else { profiles.iter().find(|p| p["id"] == id.as_str()).and_then(|p| p["label"].as_str()).unwrap_or("an account").to_string() };
@@ -182,6 +191,7 @@ impl Agents {
                 if let Some(a) = self.shot(provider, &model, BTW_SYSTEM, &input, &Launch { program: Some(pl.program), args: pl.args, env: pl.env }).await { return a }
             }
         } }
+        if provider == "claude" { return self.shot_healthy(&model, BTW_SYSTEM, &input, &format!("btw: {thread}")).await.unwrap_or_default() }
         self.shot(provider, &model, BTW_SYSTEM, &input, &Launch::default()).await.unwrap_or_default()
     }
     /// A thread's title from `text`: the Writing setting's provider and model when the person chose one, else Haiku under the thread's own account (else the default login), then Haiku on the default login, then Codex's light model.
@@ -265,15 +275,18 @@ mod tests {
         let prof = |id: &str, used: f64| json!({"id":id,"epoch":2,"provider":"claude","state":"connected","allowance":{"state":"ok","at":now - 10,"windows":[{"label":"Weekly","used_percent":used,"resets_at":now + 9999}]}});
         let ps = vec![prof("work", 60.0), prof("home", 5.0), json!({"id":"codex1","epoch":1,"provider":"codex","state":"connected"}), json!({"id":"gone","epoch":1,"provider":"claude","state":"expired"})];
         let none = std::collections::HashMap::new();
-        assert_eq!(healthy_order(&ps, &|_| String::new(), now, TITLE_MODEL, &none), vec![(String::new(), 0), ("home".into(), 2), ("work".into(), 2)], "default, then most allowance left; no codex, no expired login");
+        assert_eq!(healthy_order(&ps, &|_| String::new(), now, TITLE_MODEL, &none, ""), vec![(String::new(), 0), ("home".into(), 2), ("work".into(), 2)], "default, then most allowance left; no codex, no expired login");
         // the default login out for the week (a one-shot met its limit): the accounts take it, as the person's live hub needed on Nov 11
         let mut out = std::collections::HashMap::new(); out.insert(":0".to_string(), now + 3600);
-        assert_eq!(healthy_order(&ps, &|_| String::new(), now, TITLE_MODEL, &out), vec![("home".to_string(), 2), ("work".into(), 2)]);
-        out.insert("home:2".into(), now - 1); assert_eq!(healthy_order(&ps, &|_| String::new(), now, TITLE_MODEL, &out).len(), 2, "an hour later it is tried again");
+        assert_eq!(healthy_order(&ps, &|_| String::new(), now, TITLE_MODEL, &out, ""), vec![("home".to_string(), 2), ("work".into(), 2)]);
+        out.insert("home:2".into(), now - 1); assert_eq!(healthy_order(&ps, &|_| String::new(), now, TITLE_MODEL, &out, "").len(), 2, "an hour later it is tried again");
         // a hold a turn recorded on the default login counts too
         let held = crate::settings::fallback::hold_key("claude", "", 0); let rec = json!({"scope":"claude","reset":now + 600,"at":now - 5}).to_string();
-        let got = healthy_order(&ps, &|k: &str| if k == held { rec.clone() } else { String::new() }, now, TITLE_MODEL, &none);
+        let got = healthy_order(&ps, &|k: &str| if k == held { rec.clone() } else { String::new() }, now, TITLE_MODEL, &none, "");
         assert_eq!(got, vec![("home".to_string(), 2), ("work".into(), 2)], "a held default login is skipped");
+        // the account a new thread would get comes right after the CLI's own login, before one with more allowance (boat-hub: the sync account)
+        assert_eq!(healthy_order(&ps, &|_| String::new(), now, TITLE_MODEL, &none, "work"), vec![(String::new(), 0), ("work".into(), 2), ("home".into(), 2)]);
+        assert_eq!(healthy_order(&ps, &|_| String::new(), now, TITLE_MODEL, &none, "gone"), vec![(String::new(), 0), ("home".into(), 2), ("work".into(), 2)], "a default that cannot take it is passed over");
     }
     #[test] fn a_one_shots_failure_says_why_and_a_limit_is_told_apart() {
         let out = r#"{"type":"result","subtype":"success","is_error":true,"result":"You've hit your weekly limit · resets 3am (America/New_York)","api_error_status":429}"#;

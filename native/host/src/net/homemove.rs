@@ -384,7 +384,8 @@ fn mem_mb() -> Option<u64> { std::fs::read_to_string("/proc/meminfo").ok()?.line
 /// One provider's sign-in here: `yes`, `no` or `unknown` (installed, but its CLI has no status to read), and who. Claude and Codex are asked their own
 /// status (`auth status`, `login status`: no turn, no usage); a connected named account (a sync account included) counts as signed in.
 async fn signed_here(hub: &Arc<Hub>, cli: &crate::agents::proc::Cli, provider: &str) -> Value {
-    let live: Value = hub.info_now()["accounts.live"].as_str().and_then(|t| serde_json::from_str(t).ok()).unwrap_or(Value::Null);
+    // the manager's own snapshot (a sync account counts), the info only where there is no manager
+    let live: Value = match hub.accounts.get() { Some(m) => m.snapshot(), None => hub.info_now()["accounts.live"].as_str().and_then(|t| serde_json::from_str(t).ok()).unwrap_or(Value::Null) };
     let named: Vec<String> = live["profiles"].as_array().into_iter().flatten().filter(|p| p["state"] == "connected" && p["provider"] == provider).filter_map(|p| p["label"].as_str().map(str::to_string)).collect();
     let name = if provider == "claude" { "claude" } else { crate::agents::providers::driver(provider).map_or(provider, |m| m.cli) };
     let Ok(prog) = cli.resolve(name) else { return json!({"installed": false, "signed": if named.is_empty() { "no" } else { "yes" }, "accounts": named}) };

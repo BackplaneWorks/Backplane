@@ -135,6 +135,14 @@ pub async fn alert_start(hub: &Arc<Hub>, provider: &str, profile: &str, title: &
 /// that thread for one whose account was retired under it.
 pub fn fallback_key(thread: &str) -> String { format!("account.fallback.{thread}") }
 
+/// The info `accounts.live`: each account's id, provider, label, kind, state and who, nothing else (no sign-in attempt, link or code, no catalog,
+/// no allowance; never a token, which no snapshot holds). Setup's checks and the home move's readiness read it (settings/onboard.rs, net/homemove.rs).
+/// Nov 11: nothing ever set it, so a hub whose only Claude login was a sync account (boat-hub) read as not signed in and the move was refused.
+pub fn live_info(snapshot: &Value) -> String {
+    let profiles: Vec<Value> = snapshot["profiles"].as_array().into_iter().flatten().map(|p| json!({"id":p["id"],"provider":p["provider"],"label":p["label"],"kind":p["kind"],"origin":p["origin"],
+        "state":p["state"],"epoch":p["epoch"],"identity":{"email":p["identity"]["email"],"plan":p["identity"]["plan"]}})).collect();
+    json!({"version":1,"revision":snapshot["revision"].as_u64().unwrap_or(0),"error":snapshot["error"].as_str().unwrap_or(""),"profiles":profiles,"attempts":[]}).to_string()
+}
 /// One snapshot that changed: the log, the clients, and the turns that lost their account.
 pub async fn found(hub: &Arc<Hub>, agents: &Option<Arc<Agents>>, snapshot: &Value) { found_seen(hub, agents, snapshot, &mut Seen::new()).await }
 pub async fn found_seen(hub: &Arc<Hub>, agents: &Option<Arc<Agents>>, snapshot: &Value, seen: &mut Seen) {
@@ -296,7 +304,7 @@ pub fn start_cli(hub: &Arc<Hub>, agents: Option<Arc<Agents>>, cli: crate::agents
             // the background recheck of connected accounts: never on a copy of a log, never on a test hub (stand-in agents) unless its rig asks (BACKPLANE_USAGE_READ)
             if !crate::copy::on() && (std::env::var_os("BACKPLANE_AGENTS").is_none() || std::env::var("BACKPLANE_USAGE_READ").map_or(false, |v| v == "1")) { let m2 = m.clone(); tokio::spawn(async move { m2.refresh().await }); }
             let snap = m.snapshot(); let text = snap.to_string();
-            if text != last { last = text; found_seen(&h, &agents, &snap, &mut seen).await; }
+            if text != last { last = text; found_seen(&h, &agents, &snap, &mut seen).await; h.set_info("accounts.live", &live_info(&snap)).await; }
             tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         }
     });
@@ -307,6 +315,14 @@ pub fn start_cli(hub: &Arc<Hub>, agents: Option<Arc<Agents>>, cli: crate::agents
 mod tests {
     use super::*;
     fn snap(profiles: Value, error: &str) -> Value { json!({"version":1,"revision":3,"profiles":profiles,"error":error,"attempts":[{"id":"a","url":"https://claude.ai/x","userCode":"C"}]}) }
+    #[test] fn the_live_info_names_each_account_and_its_state_and_nothing_of_a_sign_in() {
+        let s = json!({"revision":4,"error":"","profiles":[{"id":"4f1b","provider":"claude","label":"K sync","kind":"sync","origin":"pc1","state":"connected","epoch":1,"identity":{"email":"k@x.com","plan":"max","auth":"oauth_token"},"catalog":[{"id":"opus"}],"allowance":{"windows":[]}}],
+            "attempts":[{"id":"a","profile":"4f1b","url":"https://claude.com/x","userCode":"C"}]});
+        let v: Value = serde_json::from_str(&live_info(&s)).unwrap();
+        assert_eq!((v["profiles"][0]["state"].as_str(), v["profiles"][0]["kind"].as_str(), v["profiles"][0]["identity"]["email"].as_str()), (Some("connected"), Some("sync"), Some("k@x.com")));
+        assert!(v["attempts"].as_array().unwrap().is_empty() && v["profiles"][0].get("catalog").is_none() && !v.to_string().contains("claude.com/x"), "{v}");
+        assert!(live_info(&s).len() < 64 * 1024);
+    }
     async fn ask(rpc: &AccountsRpc, hub: &Arc<Hub>, who: &Caller) -> Value { rpc.call(hub, who, &json!(1), "accounts", &json!({"op":"list","accountProfiles":true})).await.remove(0) }
     #[tokio::test(flavor = "multi_thread")] async fn only_a_granted_client_may_manage_accounts() {
         let home = std::env::temp_dir().join(format!("bp-acc-hub-{}", std::process::id())); let _ = std::fs::remove_dir_all(&home); std::fs::create_dir_all(&home).unwrap();

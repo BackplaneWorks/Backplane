@@ -40,7 +40,7 @@ for line in sys.stdin:
         emit({"type": "control_response", "response": {"request_id": rid, "subtype": "success", "response": resp}})
         continue
     if o.get("type") != "user": continue
-    emit({"type": "system", "subtype": "init", "cwd": os.getcwd(), "session_id": session, "tools": [], "mcp_servers": [], "model": "claude-opus", "permissionMode": "bypassPermissions", "apiKeySource": "none", "claude_code_version": "2.1.322", "uuid": str(uuid.uuid4())})
+    emit({"type": "system", "subtype": "init", "cwd": os.getcwd(), "session_id": session, "tools": [], "mcp_servers": [], "model": "claude-opus", "permissionMode": "bypassPermissions", "apiKeySource": "none", "claude_code_version": "2.0.0", "uuid": str(uuid.uuid4())})
     if seen:
         with open(seen, "a") as f: f.write(f"{os.getpid()} TURN - {tok or 'none'}\n")
     text = "sync stand-in answered" + (" on a token" if tok else "")
