@@ -310,6 +310,8 @@ pub async fn serve_with(copy: bool, sync: &Arc<FarSync>, hub: &Arc<Hub>, r: &PRe
     if m.starts_with("home.") { return json_reply(&super::homemove::serve(hub, &link, m, &p).await) }
     // the owner's sync accounts (settings/accounts_sync.rs): only ever between the owner's own machines (checked above)
     if m == "accounts.sync" || m == "accounts.drop" { return json_reply(&crate::settings::accounts_sync::serve(hub, &link, m, &p).await) }
+    // sign in there (settings/accounts_there.rs): this machine signed in to its agents from the client the owner is using
+    if m == "signin.state" || m == "signin.act" { return json_reply(&crate::settings::accounts_there::serve(hub, &link, m, &p).await) }
     if m == "uber.sync" { return HttpReply::text("501 Not Implemented", "uber.sync is not ported on this hub yet") }
     if m == "mcp.call" {
         let tool = p["tool"].as_str().unwrap_or("");

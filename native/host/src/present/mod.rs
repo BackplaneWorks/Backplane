@@ -12,6 +12,7 @@ pub mod viewer;
 pub mod settings;
 pub mod onboard;
 pub mod onboard_alwayson;
+pub mod signin_there;
 pub mod botforms;
 pub mod ready;
 pub mod badge;

@@ -19,7 +19,8 @@ pub fn rows(d: &Value, draft: &dyn Fn(&str) -> String) -> Vec<Value> {
     if linked.is_empty() { r.push(row("Linked machines", "None yet. Make a code here and enter it on the other machine, or enter its code below.", vec![])) }
     for l in &linked {
         let (note, mut b) = match s(l, "state") {
-            "paired" => (format!("{} · Paired", s(l, "url")), vec![]),
+            // one of the owner's machines: its agents can be signed in from here (present/signin_there.rs)
+            "paired" => (format!("{} · Paired", s(l, "url")), vec![crate::present::signin_there::open_button(s(l, "id"))]),
             "no" => (format!("{} · Not yours", s(l, "url")), vec![btn("Mine", "machine-mine", s(l, "id"), false)]),
             _ => (format!("{} · Unpaired: nobody approved this link. Confirm it is yours, or pair again with a code.", s(l, "url")), vec![btn("Mine", "machine-mine", s(l, "id"), false)]),
         };
@@ -74,6 +75,7 @@ pub async fn act(p: &Arc<Peering>, hub: &Arc<Hub>, action: &str, value: &str, fi
     let f = |k: &str| fields[k].as_str().unwrap_or("").trim().to_string();
     match action {
         "machine-code" => p.make_code().await,
+        a if a.starts_with("machine-signin") => crate::settings::accounts_there::act(hub, a, value, fields).await,
         "machine-home" => super::homemove::start(hub, value).await,
         "machine-approve" => p.approve(hub, value).await.map(|_| json!({})),
         "machine-deny" => p.deny(hub, value).await.map(|_| json!({})),
