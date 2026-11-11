@@ -4035,6 +4035,7 @@ gpui.picker.none = No folders
 gpui.picker.key.select = select
 gpui.picker.key.into = go into
 gpui.picker.key.complete = complete
+gpui.picker.key.open = open project
 gpui.picker.added = added
 gpui.picker.more.typed = {n} more: type to filter
 gpui.assembly = Assembly
