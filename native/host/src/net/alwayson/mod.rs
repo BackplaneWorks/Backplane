@@ -166,7 +166,7 @@ pub async fn check(hub: &Arc<Hub>, sh: &Arc<Shared>, id: &str, now_s: u64) {
     let saved = sh.saved();
     if up && saved["made"] == true && saved["adopted"] != true {
         if let Some(b) = Boat::from_vault(&hub.cfg.home) {
-            match make::follow(hub, &b, id, saved["build"].as_str().unwrap_or("")).await {
+            match make::follow(hub, &b, id, saved["build"].as_str().unwrap_or(""), saved["network"].as_str().unwrap_or("")).await {
                 Ok(Some(n)) => { save(hub, sh, |k| { k["build"] = json!(n); }).await; }
                 Ok(None) => {}
                 Err(e) => { sh.st.lock().unwrap().note = format!("The Boat could not take this computer's build: {e}"); }
