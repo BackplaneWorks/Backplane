@@ -362,6 +362,12 @@ mod home_tests {
         // boat-hub picked, but the line's choice is desktop (the pick was lost, the rows moved): never sent to desktop, the text stays
         assert!(matches!(page_send(&d2, "pA1", "x", Some("L~pB1")), Some(Err(_))), "a pick of B never becomes a create on A");
         assert!(page_send(&d, "pA1", "  ", None).is_none(), "nothing typed: nothing sent");
+        // boat-hub picked, then it goes away and drops out of the live rows entirely (only desktop is listed): still refused, never desktop
+        let gone: serde_json::Value = serde_json::from_str(r#"{"projects":[{"id":"h|pA1","runsOn":"runs on desktop","newOn":[{"value":"pA1","label":"New thread","kind":"machine","on":true}]}]}"#).unwrap();
+        assert!(matches!(page_send(&gone, "pA1", "x", Some("L~pB1")), Some(Err(_))), "the person's last pick stands when its machine has left the rows");
+        // the window's line still offers it as away: sent there (the hub then refuses it while that machine is away)
+        let away: serde_json::Value = serde_json::from_str(r#"{"projects":[{"id":"h|pA1","runsOn":"boat-hub is away","newOn":[{"value":"L~pB1","label":"Wait for boat-hub","kind":"wait","on":true},{"value":"pA1","label":"New thread on desktop","kind":"machine"}]}]}"#).unwrap();
+        match page_send(&away, "pA1", "x", Some("L~pB1")) { Some(Ok((Command::Action(_, v), _))) => assert_eq!(v, "L~pB1\u{1f}L~pB1"), other => panic!("{other:?}") }
         let mut fs = Some(("t0".to_string(), "a thread sent to boat-hub".to_string(), std::time::Instant::now()));
         assert_eq!(take_back(&mut fs).as_deref(), Some("a thread sent to boat-hub")); assert!(fs.is_none());
         // given back: into an empty box exactly; a box with new text keeps it, and the old text waits to be restored (never merged)
