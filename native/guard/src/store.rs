@@ -36,6 +36,17 @@ impl Dir {
         if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(self.path("incidents.jsonl")) { let _ = writeln!(f, "{v}"); }
         v
     }
+    /// An alert stays open until a record that `clears` it: the app and the phones stop showing it then (native/host/src/guard.rs `notice`).
+    pub fn clear(&self, what: &str, why: &str, cleared: &str, build: &str) -> Value {
+        let v = json!({"at": now(), "what": what, "why": why, "did": "", "clears": cleared, "build": build});
+        if let Ok(mut f) = fs::OpenOptions::new().create(true).append(true).open(self.path("incidents.jsonl")) { let _ = writeln!(f, "{v}"); }
+        v
+    }
+    /// The newest record about `alert` is the alert itself, not a clear of it.
+    pub fn open_alert(&self, alert: &str) -> bool {
+        self.lines("incidents.jsonl").iter().rev().filter_map(|l| serde_json::from_str::<Value>(l).ok())
+            .find(|v| v["what"] == alert || v["clears"] == alert).map_or(false, |v| v["what"] == alert)
+    }
     pub fn incidents(&self, n: usize) -> Vec<Value> { let l = self.lines("incidents.jsonl"); l[l.len().saturating_sub(n)..].iter().filter_map(|x| serde_json::from_str(x).ok()).collect() }
 
     pub fn good(&self) -> Vec<String> { self.lines("good") }
@@ -114,6 +125,15 @@ mod tests {
         assert_eq!(b.bad(), vec!["x", "y"]); assert_eq!(fs::read_to_string(b.0.join(".fresh-bad")).unwrap().trim(), "y");
         assert_eq!(fs::read_to_string(b.0.join("BAD")).unwrap().lines().count(), 2, "one line each, the why on it");
         b.clear_bad("y"); assert_eq!(b.bad(), vec!["x"]); assert!(!b.0.join(".fresh-bad").exists());
+    }
+    #[test] fn an_alert_is_open_until_a_clear_of_it() {
+        let d = Dir::of(&tmp("clr")); d.make();
+        assert!(!d.open_alert("Disk nearly full"));
+        d.incident("Disk nearly full", "7 GB", "free space", "b"); d.incident("Hub crashed", "x", "y", "b");
+        assert!(d.open_alert("Disk nearly full"), "another incident after it does not close it");
+        d.clear("Disk has room again", "200 GB", "Disk nearly full", "b");
+        assert!(!d.open_alert("Disk nearly full")); assert!(d.open_alert("Hub crashed"));
+        d.incident("Disk nearly full", "6 GB", "free space", "b"); assert!(d.open_alert("Disk nearly full"), "full again");
     }
     #[test] fn incidents_read_back_newest_last() { let d = Dir::of(&tmp("inc")); d.make(); d.incident("a", "w", "d", "b"); d.incident("c", "w", "d", "b"); assert_eq!(d.incidents(1)[0]["what"], "c"); assert_eq!(d.incidents(9).len(), 2); }
 }

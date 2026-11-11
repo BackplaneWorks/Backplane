@@ -70,3 +70,59 @@ fn kills_by_name(line: &str) -> bool {
     assert!(dev.join("builds").join(cur.trim()).join("backplane").is_file(), "the guard is not in the published build");
     let _ = fs::remove_dir_all(&d);
 }
+
+/// The disk janitor (scripts/worktree-gc.sh; Nov 11: 157 GB of ~/.cache/bp-tmp and 137 GB of finished lanes' target/ dirs filled the disk): landed worktrees go, idle
+/// build dirs and temp entries go, sccache is trimmed to its cap, and nothing a process holds, nothing unlanded and nothing fresh is touched.
+#[test] fn the_janitor_frees_what_is_done_and_keeps_what_is_used() {
+    use std::os::unix::fs::PermissionsExt;
+    let d = tmp("jan"); let repo = d.join("repo"); let bt = d.join("bptmp"); let scc = d.join("scc");
+    let git = |dir: &Path, a: &[&str]| { let o = Command::new("git").arg("-C").arg(dir).args(a).env("GIT_AUTHOR_NAME", "t").env("GIT_AUTHOR_EMAIL", "t@t").env("GIT_COMMITTER_NAME", "t").env("GIT_COMMITTER_EMAIL", "t@t").output().unwrap(); assert!(o.status.success(), "git {a:?}: {o:?}"); String::from_utf8_lossy(&o.stdout).trim().to_string() };
+    fs::create_dir_all(&repo).unwrap(); git(&repo, &["init", "-q", "-b", "main"]); git(&repo, &["config", "core.hooksPath", "/dev/null"]);
+    fs::write(repo.join("a"), "a").unwrap(); fs::write(repo.join(".gitignore"), "target/\n").unwrap(); git(&repo, &["add", "a", ".gitignore"]); git(&repo, &["commit", "-qm", "a"]);
+    let wt = |n: &str| repo.join(".backplane/worktrees").join(n);
+    let add = |n: &str| { git(&repo, &["worktree", "add", "-q", "-b", n, wt(n).to_str().unwrap()]); };
+    let commit = |n: &str| { fs::write(wt(n).join(n), n).unwrap(); git(&wt(n), &["add", n]); git(&wt(n), &["commit", "-qm", n]); };
+    let target = |n: &str| { let t = wt(n).join("native/host/target/fast/deps"); fs::create_dir_all(&t).unwrap(); fs::write(t.join("lib.rlib"), vec![0u8; 1 << 20]).unwrap(); };
+    // landed: a commit of its own that origin/main now has; fresh: made from main, nothing done yet; mine: unlanded work; dirty: landed but with an edit; busy: landed, a shell in it
+    for n in ["landed", "fresh", "mine", "dirty", "busy", "recent"] { add(n) }
+    for n in ["landed", "dirty", "busy"] { commit(n) }
+    git(&repo, &["checkout", "-q", "--detach"]);
+    for n in ["landed", "dirty", "busy"] { git(&repo, &["merge", "-q", "--no-edit", "--no-ff", n]); }
+    git(&repo, &["update-ref", "refs/remotes/origin/main", "HEAD"]);
+    commit("mine"); fs::write(wt("dirty").join("edit"), "x").unwrap();
+    for n in ["landed", "fresh", "mine", "dirty", "busy", "recent"] { target(n) }
+    // bp-tmp: an old scratch target, an old one a process has open, a fresh one, the sccache server's dir, an old file
+    for (n, f) in [("aot-build", "big"), ("held", "log"), ("new", "x"), ("sccache", "s"), ("claude", "c")] { fs::create_dir_all(bt.join(n)).unwrap(); fs::write(bt.join(n).join(f), vec![0u8; 1 << 20]).unwrap(); }
+    fs::write(bt.join("old.log"), "x").unwrap();
+    fs::create_dir_all(&scc).unwrap(); for i in 0..6 { fs::write(scc.join(format!("o{i}")), vec![1u8; 1 << 20]).unwrap(); }
+    // age everything but what must look fresh (mtimes only: GC_CTIME=0, a test cannot age a ctime)
+    let age = |p: &Path, when: &str| { let o = Command::new("find").arg(p).args(["-depth", "-exec", "touch", "-h", "-d", when, "{}", "+"]).output().unwrap(); assert!(o.status.success()); };
+    age(&repo, "3 days ago"); age(&bt, "3 days ago"); for i in 0..6 { age(&scc.join(format!("o{i}")), &format!("{} days ago", 10 - i)); }
+    age(&wt("recent").join("native/host/target"), "2 hours ago"); age(&bt.join("new"), "1 hour ago");
+    let mut shell = Command::new("sleep").arg("120").current_dir(wt("busy")).spawn().unwrap();
+    let mut open = Command::new("sleep").arg("120").stdin(fs::File::open(bt.join("held/log")).unwrap()).spawn().unwrap();
+    let script = root().join("scripts/worktree-gc.sh"); fs::set_permissions(&script, fs::Permissions::from_mode(0o755)).ok();
+    let run = |apply: bool| { let mut c = Command::new(&script); if apply { c.arg("--apply"); }
+        let o = c.args(["--sccache-size", "3M"]).current_dir(&d).env("GC_REPO", &repo).env("GC_UPSTREAM", "origin/main").env("BP_TMP", &bt).env("GC_TMP_BASES", &bt)
+            .env("GC_LOCK", d.join("lock")).env("SCCACHE_DIR", &scc).env("GC_CTIME", "0").env_remove("TMPDIR").env_remove("CLAUDE_CODE_TMPDIR").output().unwrap();
+        assert!(o.status.success(), "{o:?}"); String::from_utf8_lossy(&o.stdout).to_string() };
+    let dry = run(false); let dry2 = run(false);
+    assert!(dry2.contains("worktree") && dry2.contains("/landed"), "a run does not make a worktree look used (git status writes no index):\n{dry2}");
+    assert!(dry.contains("would have freed") && wt("landed").exists() && bt.join("aot-build").exists(), "a dry run changes nothing:\n{dry}");
+    let out = run(true);
+    let _ = shell.kill(); let _ = open.kill(); let _ = shell.wait(); let _ = open.wait();
+    let tg = |n: &str| wt(n).join("native/host/target").exists();
+    assert!(!wt("landed").exists(), "a landed, clean, idle worktree is removed:\n{out}");
+    assert!(!git(&repo, &["branch", "--list", "landed"]).contains("landed"), "with its branch");
+    assert!(wt("fresh").exists() && !tg("fresh"), "a fresh branch is no landing: the worktree stays, its idle target goes:\n{out}");
+    assert!(wt("mine").exists() && !tg("mine"), "unlanded work stays; its target, idle a day, goes");
+    assert!(wt("dirty").join("edit").exists() && !tg("dirty"), "a landed branch with an edit keeps the edit and loses its target");
+    assert!(wt("busy").exists() && tg("busy"), "a worktree a process works in is left whole:\n{out}");
+    assert!(tg("recent"), "a target built two hours ago stays");
+    assert!(!bt.join("aot-build").exists() && !bt.join("old.log").exists(), "idle bp-tmp entries go:\n{out}");
+    assert!(bt.join("held/log").exists() && bt.join("new").exists() && bt.join("sccache").exists() && bt.join("claude").exists(), "held, fresh, sccache's and claude's stay:\n{out}");
+    let left: Vec<String> = fs::read_dir(&scc).unwrap().flatten().map(|e| e.file_name().to_string_lossy().to_string()).collect();
+    assert!(left.len() <= 3 && left.iter().any(|n| n == "o5") && !left.iter().any(|n| n == "o0"), "sccache trimmed to its cap, oldest first: {left:?}\n{out}");
+    assert!(out.contains("janitor: freed") && out.contains("aot-build") && out.contains("landed"), "it says what it freed:\n{out}");
+    let _ = fs::remove_dir_all(&d);
+}
