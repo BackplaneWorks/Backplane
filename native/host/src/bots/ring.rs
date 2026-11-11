@@ -123,7 +123,7 @@ impl Bots {
     }
 
     /// `ring.notes` for every client: the newest 40 (or those the last search found), each with its link to play it, and `ring.setup`.
-    pub(super) async fn ring_publish(&self) {
+    pub(crate) async fn ring_publish(&self) {
         let (home, q) = (self.hub.cfg.home.clone(), QUERY.lock().unwrap().clone()); let base = base(&self.hub).await;
         let v = blocking(move || {
             let all = ringbox::list(&home); let key = ringbox::link_key(&home);
@@ -135,7 +135,7 @@ impl Bots {
         let s = self.ring_setup_info().await; self.hub.set_info("ring.setup", &s.to_string()).await;
     }
     /// The ring's bot and webhook as they stand (none until `ring.setup`): its URL and the header the Pebble app sends.
-    async fn ring_setup_info(&self) -> Value {
+    pub(crate) async fn ring_setup_info(&self) -> Value {
         let mut v = self.ring_setup_here().await; let home = home_of(&self.hub).await;
         if !home.is_null() { v["home"] = home; v["hook"] = json!(""); }
         let t = TEST.load(std::sync::atomic::Ordering::Relaxed); if t > 0 { v["test"] = json!(t) }
@@ -143,7 +143,12 @@ impl Bots {
     }
     async fn ring_setup_here(&self) -> Value {
         let w = self.world().await;
-        let Some(b) = w.named(BOT_NAME).cloned() else { return json!({}) };
+        let Some(b) = w.named(BOT_NAME).cloned() else {
+            drop(w);
+            // the person's home (and the ring with it) moved to another of their machines (net/homemove.rs): its record, as that machine has it, so this
+            // hub's Ring page (and a phone's on this hub) still copies the one URL and header the Pebble app keeps
+            return crate::net::homemove::ring_elsewhere(&self.hub).await.unwrap_or_else(|| json!({}))
+        };
         let hook = w.hooks.values().filter(|h| !h.revoked && h.bot == b.id).max_by_key(|h| (h.name == HOOK_NAME, h.created)).cloned();
         drop(w);
         let Some(h) = hook else { return json!({"bot": b.id}) };
@@ -154,6 +159,7 @@ impl Bots {
     async fn ring_setup(self: &Arc<Self>) -> Result<Value, String> {
         let home = home_of(&self.hub).await;
         if !home.is_null() { return Err(format!("the ring is on {} now: set it up there", home["machine"].as_str().filter(|m| !m.is_empty()).unwrap_or("another hub"))) }
+        if let Ok(at) = serde_json::from_str::<Value>(&self.hub.setting("home.at").await.unwrap_or_default()) { if let Some(n) = at["name"].as_str().filter(|n| !n.is_empty()) { return Err(format!("the ring is on {n} now, with your home")) } }
         let bot = { let w = self.world().await; w.named(BOT_NAME).map(|b| b.id.clone()) };
         let bot = match bot { Some(b) => b, None => {
             let r = self.create(&json!(0), &json!({"name": BOT_NAME, "persona": PERSONA})).await;

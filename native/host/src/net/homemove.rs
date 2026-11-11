@@ -218,6 +218,8 @@ pub async fn serve(hub: &Arc<Hub>, link: &str, m: &str, p: &Value) -> Value {
             ev.push(json!({"$":"SettingSet","key":"home.here","value":"","at":now}));
             match hub.commit_many(&ev).await { Ok(_) => ok(json!({})), Err(e) => no(&format!("{e:#}")) }
         }
+        // the ring's record on the machine that holds the home now, for the Ring page of the one that asks
+        "home.ring" => match crate::bots::api::of(hub) { Some(b) => ok(json!({"setup": b.ring_setup_info().await})), None => no("bots are not running") },
         "home.mint" => match crate::net::start::routes() {
             Some(rt) => { let j = rt.invite(); if j["error"].is_string() { no(gs(&j, "error")) } else { ok(json!({"link": gs(&j, "link")})) } }
             None => no("no registry"),
@@ -374,6 +376,16 @@ async fn verify(hub: &Arc<Hub>, link: &str, c: &Carry) -> Result<(), String> {
     Err("the other machine did not show the uberbot within two minutes".into())
 }
 
+/// The ring's record from the machine that holds the home (`home.at`), marked as being there; None when the home is here or that machine is away.
+pub async fn ring_elsewhere(hub: &Arc<Hub>) -> Option<Value> {
+    let at: Value = serde_json::from_str(&hub.setting("home.at").await.unwrap_or_default()).ok()?;
+    let link = gs(&at, "link"); if link.is_empty() { return None }
+    let v = far(hub, link, "home.ring", &json!({})).await.ok()?;
+    let mut s = v["setup"].clone();
+    if gs(&s, "hook").is_empty() || gs(&s, "url").is_empty() { return None }
+    s["home"] = json!({"url": gs(&s, "url"), "machine": gs(&at, "name")});
+    Some(s)
+}
 /// The offer the clients take (docs/PHONE-DATA.md `hub.offer`): the holder of the home, when it is another machine.
 pub fn offer_of(at: &str) -> String {
     let Ok(v) = serde_json::from_str::<Value>(at) else { return String::new() };
@@ -459,6 +471,11 @@ pub fn install(hub: &Arc<Hub>) {
     let h = hub.clone(); tokio::spawn(async move {
         tokio::time::sleep(std::time::Duration::from_secs(2)).await; publish_offer(&h).await;
         let me = crate::bots::ring::base(&h).await; if me.starts_with("https://") { crate::push::set_hub_url(&me) }
+        // while the home is elsewhere, this hub's Ring page follows that machine's ring (its record is asked for each minute)
+        loop {
+            if !h.setting("home.at").await.unwrap_or_default().is_empty() { if let Some(b) = crate::bots::api::of(&h) { b.ring_publish().await; } }
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+        }
     });
 }
 
