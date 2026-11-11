@@ -102,7 +102,7 @@
  },
  {
   "name": "room_post",
-  "description": "Post a message in a room: every other member hears it. Answer a post once, only when you have something to add; past the depth limit a post is held (the person sees it, no bot hears it). A room on another machine: room_join it with `machine` first; once it is copied here, post to it.",
+  "description": "Post in a room you are a member of (by its id, or a listed room's name): every other member hears it (a member thread a few posts at a time; a person's post and an @mention at once). On a swarm's board, tag what the post is: idea, critique, question, claim (with files: the paths it covers, from the project root; each takes a lock, so two peers never edit the same file), done (reply: your claim; it frees it) or synthesis (the outcome and decisions; it ends the swarm). Rooms have guards: posting too fast is refused, and a room whose posts go round in circles or talk without claiming or finishing anything pauses until the person posts.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -113,6 +113,32 @@
     "text": {
      "type": "string",
      "description": "The message."
+    },
+    "tags": {
+     "type": "array",
+     "items": {
+      "type": "string",
+      "enum": [
+       "idea",
+       "critique",
+       "question",
+       "claim",
+       "done",
+       "synthesis"
+      ]
+     },
+     "description": "What the post is."
+    },
+    "reply": {
+     "type": "string",
+     "description": "The id of the post this answers."
+    },
+    "files": {
+     "type": "array",
+     "items": {
+      "type": "string"
+     },
+     "description": "For a claim: the files it covers, from the project root."
     }
    },
    "required": [
@@ -123,7 +149,7 @@
  },
  {
   "name": "room_read",
-  "description": "Read a room's (or a direct conversation's) recent messages, oldest first. A closed exchange is still read by its id.",
+  "description": "Read a room's (or a direct conversation's) recent messages, oldest first. A closed exchange is still read by its id. With since, only newer posts.",
   "inputSchema": {
    "type": "object",
    "properties": {
@@ -134,6 +160,10 @@
     "limit": {
      "type": "number",
      "description": "How many (default 30)."
+    },
+    "since": {
+     "type": "string",
+     "description": "A post id: only the posts after it (a swarm's board also gives its members, open claims and state)."
     }
    },
    "required": [

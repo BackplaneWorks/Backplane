@@ -77,14 +77,8 @@ fn routines_of<'a>(w: &'a World, bot: &str) -> Vec<&'a Routine> { let mut v: Vec
 fn id_seq(id: &str) -> u64 { id.rsplit('-').next().and_then(|n| n.parse().ok()).unwrap_or(0) }
 /// Room.dm
 fn dm(a: &str, b: &str) -> String { if a <= b { format!("dm:{a}:{b}") } else { format!("dm:{b}:{a}") } }
-fn held_text(t: &str) -> String { format!("[held: {HOP_MAX} messages between bots without a person, so no bot heard this]\n{t}") }
-const HELD_NOTE: &str = "held: this exchange between bots is 6 messages deep, so no bot was woken. Your message is in the room for the person to read; don't send it again or anywhere else. A message from a person, a routine or a webhook starts a new exchange.";
-const HELD_CLOSED: &str = "held: this exchange between bots is 6 messages deep, so no bot was woken, and its room is closed now. Don't send it again or anywhere else. If the person needs it, tell them yourself (notify_person); a message from a person, a routine or a webhook starts a new exchange.";
-fn held_closed(r: Res) -> Res { if r.0 { (true, json!({"ok":true,"held":true,"closed":true,"note":HELD_CLOSED})) } else { r } }
 /// the RoomSet that closes an ephemeral room (Life.close)
 pub(super) fn close_ev(id: &str, name: &str, members: &[String], now: u64) -> Value { json!({"$":"RoomSet","id":id,"name":name,"members":members.join("\n"),"ephemeral":true,"closed":true,"at":now}) }
-/// Held.res: a held message's answer replaces the plain one
-fn held_res(r: Res) -> Res { if r.0 { (true, json!({"ok":true,"held":true,"note":HELD_NOTE})) } else { r } }
 /// Bots.members: the maker first, then the names given as ids (a name that is no bot is dropped; name@machine stays), one per line
 fn members(w: &World, me: &str, text: &str) -> String {
     let mut v = vec![me.to_string()];
@@ -106,6 +100,9 @@ impl Bots {
         if name == "project_create" { return self.t_project(thread, a, now).await } // it waits for the person, so it holds no lock
         // Bots.call.private/scoped: a back office refuses, a managed thread's notice goes through the coordinator; it takes the world's lock itself
         if name == "notify_person" { if let Some(r) = self.notify_relay(thread, a).await { return r } }
+        // swarms (docs/SWARM.md): every thread may start one; a member thread that is no bot's posts and reads its rooms here
+        if super::swarm::NAMES.contains(&name) { return self.thread_tool(thread, name, a).await }
+        if matches!(name, "room_post" | "room_read") && self.world().await.run_bot(thread).is_none() { return self.thread_tool(thread, name, a).await }
         let w = self.world().await;
         if super::ledger::NAMES.contains(&name) { return self.ledger_call(&w, thread, name, a, now).await } // Bots.route: every thread's, a bot's or not
         let mut later: Option<(Pending, u64)> = None;
@@ -153,7 +150,7 @@ impl Bots {
                 if let Some(r) = w.rooms.get(gs(a, "room")).filter(|r| r.closed && !r.deleted) { return fail(&format!("#{} is closed: that exchange is over. bot_send starts a new one", r.name)) }
                 let Some(room) = find_room(&w, gs(a, "room"), &b.id).cloned() else { return fail("no such room here (room_list). A room on another machine: room_join it with `machine` first (it is copied here), then post; or bot_send name@machine") };
                 let rr = RoomRef { id: room.id, name: room.name, members: room.members };
-                self.t_post(w, &b, now, &rr, gs(a, "text"), vec![], later, |_| said("posted")).await
+                self.t_post_a(w, &b, now, &rr, a, vec![], later, |_| said("posted")).await
             }
             "room_read" => {
                 let room = gs(a, "room"); let n = gn(a, "limit", 30);
@@ -162,7 +159,7 @@ impl Bots {
                 let lines = w.room_lines.get(&id).cloned().unwrap_or_default();
                 let take: Vec<usize> = lines.iter().rev().take(n).rev().copied().collect();
                 let mut out = vec![];
-                for l in take { if let Ok(raw) = self.hub.store.get(l - 1) { if let Ok(e) = serde_json::from_str::<Value>(&raw) { out.push(json!({"from":e["from"],"text":e["text"],"at":e["at"]})) } } }
+                for l in take { if let Ok(raw) = self.hub.store.get(l - 1) { if let Ok(e) = serde_json::from_str::<Value>(&raw) { { let mut x = json!({"from":e["from"],"text":e["text"],"at":e["at"]}); for k in ["tags", "reply", "held"] { if e.get(k).map_or(false, |v| !v.is_null()) { x[k] = e[k].clone() } } out.push(x) } } } }
                 (true, Value::Array(out))
             }
             "memory_save" => {
@@ -247,15 +244,19 @@ impl Bots {
 
     /// A bot's post in a room: within the depth bound the post goes out at the next hop; past it, held (kept in the room for the person, heard by no bot)
     async fn t_post(&self, w: &World, b: &Bot, now: u64, room: &RoomRef, text: &str, before: Vec<Value>, later: &mut Option<(Pending, u64)>, said: impl Fn(&RoomRef) -> Res) -> Res {
+        self.t_post_a(w, b, now, room, &json!({"text":text}), before, later, said).await
+    }
+    /// A bot's post (room_post, bot_send): its hop is one past its turn's, and the room's guards decide (swarm::member_post); the hop past the backstop holds it.
+    #[allow(clippy::too_many_arguments)]
+    async fn t_post_a(&self, w: &World, b: &Bot, now: u64, room: &RoomRef, a: &Value, before: Vec<Value>, later: &mut Option<(Pending, u64)>, said: impl Fn(&RoomRef) -> Res) -> Res {
         let hop = w.hops.get(&b.id).map_or(0, |h| h.now) + 1;
-        let (hop, text, held) = if hop <= HOP_MAX { (hop, text.to_string(), false) } else { (HOP_MAX + 1, held_text(text), true) };
-        let mid = self.hub_id("p", now);
-        let eph = w.rooms.get(&room.id).map_or_else(|| before.iter().any(|e| e["$"] == "RoomSet" && e["id"] == room.id.as_str() && e["ephemeral"] == true), |r| r.ephemeral);
-        let pending = match self.post_decide(w, now, &b.thread, &b.name, &b.id, room, &text, hop, &mid, before).await { Ok(p) => p, Err(e) => return fail(&e) };
+        let who = super::swarm::Who { member: b.id.clone(), meta: b.name.to_lowercase(), name: b.name.clone(), thread: b.thread.clone(), hop, bot: true };
+        let (ans, pending) = match self.member_post(w, now, &who, room, a, before).await { Ok(x) => x, Err(e) => return fail(&e) };
         *later = Some((pending, hop));
-        // Life.cap: an exchange that reaches the conversation cap is over; its room closes (the post stays in the log)
-        if held && eph { if let Err(e) = self.t_commit(w, now, vec![close_ev(&room.id, &room.name, &room.members, now)]).await { eprintln!("bots: room {} not closed: {e}", room.id) } }
-        let r = said(room); if held { if eph { held_closed(r) } else { held_res(r) } } else { r }
+        let r = said(room);
+        if ans["held"] == true { return (true, json!({"ok":true,"held":true,"closed":ans["closed"] == true,"note":ans["note"]})) }
+        if !r.0 { return r }
+        let mut out = r.1; if let Some(o) = out.as_object_mut() { for k in ["mentioned"] { if !ans[k].is_null() { o.insert(k.into(), ans[k].clone()); } } } (true, out)
     }
 
     async fn t_send(&self, w: &World, b: &Bot, now: u64, a: &Value, later: &mut Option<(Pending, u64)>) -> Res {
@@ -491,7 +492,7 @@ fn lenient_json(s: &str) -> bool {
 /// The bots' tools as the agents' MCP server serves them: listed in a bot's thread only (Bots.route: a thread that is no bot's lists and answers none of them)
 pub struct BotToolSet(pub Arc<Bots>);
 impl crate::agents::mcp::ToolSet for BotToolSet {
-    fn list(&self, thread: &str) -> Vec<Value> { let mut v = super::ledger::defs(); if self.0.is_bot_thread(thread) { v.extend(defs()) } v }
-    fn owns(&self, name: &str) -> bool { owns(name) }
+    fn list(&self, thread: &str) -> Vec<Value> { let mut v = super::ledger::defs(); if self.0.is_bot_thread(thread) { v.extend(defs()); v.extend(super::swarm::defs()) } else { v.extend(super::swarm::defs()); if self.0.member_of(thread) { v.extend(super::swarm::room_defs()) } } v }
+    fn owns(&self, name: &str) -> bool { owns(name) || super::swarm::NAMES.contains(&name) }
     fn call<'a>(&'a self, thread: &'a str, name: &'a str, a: &'a Value) -> crate::api::Fut<'a, (bool, Value)> { Box::pin(async move { self.0.tool_call(thread, name, a).await }) }
 }

@@ -45,15 +45,16 @@ fn names(v: &Value) -> Vec<String> { v.as_array().unwrap().iter().map(|r| r["nam
     let (ada, bob) = (bot(&hub, "ada").await, bot(&hub, "bob").await);
     let (ta, tb) = (thread_of(&hub, &ada), thread_of(&hub, &bob));
     let mut room = String::new();
-    for i in 1..=7u64 {
+    let cap = crate::bots::gate::LIMITS.chatter as u64; // the chatter guard closes an exchange (it replaced the 6-hop cap)
+    for i in 1..=cap {
         let (from, to) = if i % 2 == 1 { (&ta, "bob") } else { (&tb, "ada") };
         let (ok, r) = bots.tool_call(from, "bot_send", &json!({"to":to,"text":format!("m{i}"),"topic":"pebble check"})).await; assert!(ok, "{r}");
-        if i == 7 { assert_eq!((r["held"].clone(), r["closed"].clone()), (json!(true), json!(true)), "{r}") }
+        if i == cap { assert_eq!((r["held"].clone(), r["closed"].clone()), (json!(true), json!(true)), "{r}") }
         else if i == 1 { room = r["room"].as_str().unwrap().to_string() } else { assert_eq!(r["room"], room.as_str(), "message {i}") }
     }
     { let w = bots.world().await; let r = &w.rooms[&room]; assert!(r.ephemeral && r.closed); }
     let (ok, p) = bots.tool_call(&ta, "room_post", &json!({"room":room,"text":"one more"})).await; assert!(!ok && p["error"].as_str().unwrap().contains("closed"), "{p}");
-    let (ok, read) = bots.tool_call(&tb, "room_read", &json!({"room":room})).await; assert!(ok); assert_eq!(read.as_array().unwrap().len(), 7, "kept for history, read by id");
+    let (ok, read) = bots.tool_call(&tb, "room_read", &json!({"room":room})).await; assert!(ok); assert_eq!(read.as_array().unwrap().len(), cap as usize + 1, "kept for history, read by id: the posts and the hub's note that it paused");
     // the same topic later is a new exchange in a new room
     let (_, r) = bots.tool_call(&ta, "bot_send", &json!({"to":"bob","text":"new day","topic":"pebble check"})).await;
     assert_ne!(r["room"], room.as_str());

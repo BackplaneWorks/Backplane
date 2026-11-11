@@ -13,13 +13,32 @@ pub struct Room { pub id: String, pub name: String, pub members: Vec<String>, pu
     /// an ephemeral room whose exchange is over (the conversation cap, or a day idle): kept in the log, read only by id
     #[serde(default)] pub closed: bool,
     /// the room's newest change or post (the idle clock of an ephemeral room)
-    #[serde(default)] pub last: u64 }
+    #[serde(default)] pub last: u64,
+    /// "" for a plain room, "swarm" for a swarm (docs/SWARM.md); the swarm's project, goal and starter (a thread, "" for the person)
+    #[serde(default)] pub kind: String, #[serde(default)] pub project: String, #[serde(default)] pub goal: String, #[serde(default)] pub by: String,
+    /// "" (active), paused, stopped or done, and why a room is paused (a guard's word, or person)
+    #[serde(default)] pub state: String, #[serde(default)] pub reason: String,
+    #[serde(default)] pub budget: super::gate::Budget }
 impl Room {
     /// a room shown and listed: the person's own and the role rooms, not a bots' exchange
     pub fn listed(&self) -> bool { !self.deleted && !self.ephemeral }
     /// a room that can still be posted in
     pub fn live(&self) -> bool { !self.deleted && !self.closed }
+    pub fn swarm(&self) -> bool { self.kind == "swarm" }
+    /// posts wake nobody: paused by a guard or the person, or a swarm that is over
+    pub fn paused(&self) -> bool { !self.state.is_empty() }
+    /// a swarm that is over (stopped, or done with a synthesis)
+    pub fn ended(&self) -> bool { self.state == "stopped" || self.state == "done" }
+    /// the member threads (`thread:<id>`), in the room's order
+    pub fn threads(&self) -> Vec<String> { self.members.iter().filter_map(|m| m.strip_prefix(THREAD).map(str::to_string)).collect() }
+    /// the RoomSet that writes this room again with `f` applied (every field given, so nothing is left to "keep")
+    pub fn set_ev(&self, now: u64, f: impl FnOnce(&mut Room)) -> Value {
+        let mut r = self.clone(); f(&mut r);
+        serde_json::json!({"$":"RoomSet","id":r.id,"name":r.name,"members":r.members.join("\n"),"ephemeral":r.ephemeral,"closed":r.closed,"kind":r.kind,"project":r.project,"goal":r.goal,"by":r.by,"state":r.state,"reason":r.reason,"budget":r.budget,"at":now})
+    }
 }
+/// a thread as a room member: `thread:<id>`
+pub const THREAD: &str = "thread:";
 /// A RoomSet's life (ephemeral, closed): `state::room_life`
 pub use crate::state::room_life as life;
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
@@ -62,6 +81,12 @@ pub struct World {
     pub turns: HashMap<String, String>, pub asks: HashMap<String, (String, String, bool)>,
     /// a room's posts as log lines (1-based), oldest first: the text is read from the log when a tool asks
     pub room_lines: HashMap<String, Vec<usize>>,
+    /// what the guards read of a room's newest posts (gate::KEEP of them), oldest first
+    #[serde(default)] pub room_meta: HashMap<String, std::collections::VecDeque<super::gate::PostMeta>>,
+    /// a room's use against its budget: member posts, member turns started, member tokens (since the room was made)
+    #[serde(default)] pub room_used: HashMap<String, super::gate::Budget>,
+    /// the rooms a thread is a member of (`thread:<id>` members), and each member thread's turn state
+    #[serde(default)] pub member_rooms: HashMap<String, Vec<String>>, #[serde(default)] pub member_turns: HashMap<String, String>,
     /// projects (id -> title, root, removed): project_list
     pub projects: std::collections::BTreeMap<String, (String, String, bool)>,
     /// a bot thread's latest ModesSet (runtime, interaction, model); none: full-access, default
@@ -92,7 +117,7 @@ pub enum StepEnd {
 pub const SETTINGS: [&str; 8] = ["agent.provider", "agent.model", "mail.on", "uber.bot", "uber.uid", "person.tz", "person.tz.device", "tz.machine"];
 /// whether a setting key is held: the list above and the zone rules the hub resolved (`tz.rule.<name>`)
 /// plus the families the mailroom's routing reads (run.*, triage.*, owner.mail.*, mail.private.*, the task board, told.*, the text model)
-fn kept(k: &str) -> bool { SETTINGS.contains(&k) || ["tz.rule.", "run.", "triage.", "owner.mail.", "mail.private.", "board.", "told.", "text."].iter().any(|p| k.starts_with(p)) }
+fn kept(k: &str) -> bool { SETTINGS.contains(&k) || ["room.", "tz.rule.", "run.", "triage.", "owner.mail.", "mail.private.", "board.", "told.", "text."].iter().any(|p| k.starts_with(p)) }
 
 fn s<'a>(e: &'a Value, k: &str) -> &'a str { e.get(k).and_then(Value::as_str).unwrap_or("") }
 fn n(e: &Value, k: &str) -> u64 { e.get(k).and_then(Value::as_u64).unwrap_or(0) }
@@ -100,6 +125,14 @@ fn b(e: &Value, k: &str) -> bool { e.get(k).and_then(Value::as_bool).unwrap_or(f
 
 /// Room.members.of: one member per line, empty lines dropped
 pub fn members_of(m: &str) -> Vec<String> { m.split('\n').filter(|x| !x.is_empty()).map(str::to_string).collect() }
+/// What the guards read of a RoomPosted: who (a member thread, a bot by name, "" the person, `hub` a guard's own post), the tags, the start of the text
+pub fn post_meta(e: &Value) -> super::gate::PostMeta {
+    let (from, th) = (s(e, "from"), s(e, "thread"));
+    let member = if e["guard"] == true { "hub".to_string() } else if !th.is_empty() { format!("{THREAD}{th}") } else if from == "you" { String::new() } else { from.to_lowercase() };
+    let tags = e["tags"].as_array().map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default();
+    let text = s(e, "text");
+    super::gate::PostMeta { id: s(e, "id").into(), member, tags, text: text.chars().take(super::gate::TEXT).collect(), at: n(e, "at"), held: !s(e, "held").is_empty() || text.starts_with("[held:") }
+}
 /// Mem.at
 pub fn mem_at(bot: &str, key: &str) -> String { format!("{bot}/{key}") }
 
@@ -201,17 +234,18 @@ impl World {
     pub fn apply_numbered(&mut self, line: usize, text: &str) { self.line = line; self.apply_line(text); self.seen = self.seen.max(line); self.steps.clear(); }
     pub fn apply_line(&mut self, line: &str) {
         let Some(t) = crate::session::event_type(line) else { return };
-        const READ: [&str; 45] = ["MessageFrom", "DeviceRegistered", "DeviceDropped", "DevicePrefs", "ThreadLaunched", "ActivityLogged", "RunSet", "CharterSet", "DecisionLogged", "ModesSet", "BotSet", "BotDeleted", "RoomSet", "RoomDeleted", "RoomPosted", "HookSet", "HookHit", "RoutineSet", "RoutineDeleted", "RoutineFired",
+        const READ: [&str; 46] = ["TurnUsage", "MessageFrom", "DeviceRegistered", "DeviceDropped", "DevicePrefs", "ThreadLaunched", "ActivityLogged", "RunSet", "CharterSet", "DecisionLogged", "ModesSet", "BotSet", "BotDeleted", "RoomSet", "RoomDeleted", "RoomPosted", "HookSet", "HookHit", "RoutineSet", "RoutineDeleted", "RoutineFired",
             "MemorySaved", "MemoryForgot", "SpaceSet", "SpacePageSet", "PeerSet", "RoutinePlan", "RoutineSlot", "RoutineDone", "SettingSet", "MessagePosted", "ThreadCreated", "TaskSet", "UberSet", "UberOp", "ConvSet", "MailPosted", "MailMarked", "MailTagged", "TurnChanged", "AskOpened", "AskClosed", "QueueTaken", "BotWoke", "ProjectCreated", "ProjectRemoved"];
         if !READ.contains(&t) { return }
         // cheap tests before a parse: most lines of a big log are messages of other threads and settings nobody here reads
-        if t == "SettingSet" && !["agent.", "mail.on", "uber.", "person.tz", "tz.", "machine.id", "run.", "triage.", "owner.mail.", "mail.private.", "board.", "told.", "text."].iter().any(|k| line.contains(k)) { return }
+        if t == "SettingSet" && !["room.", "agent.", "mail.on", "uber.", "person.tz", "tz.", "machine.id", "run.", "triage.", "owner.mail.", "mail.private.", "board.", "told.", "text."].iter().any(|k| line.contains(k)) { return }
         if t == "TurnChanged" || t == "QueueTaken" {
             let th = line.split_once("\"thread\":\"").and_then(|(_, r)| r.split('"').next()).unwrap_or("");
             // Triage.thread.end: any thread's end is the uberbot's news once there is one (rare lines); every other turn line only matters for bots and runs
             let end = t == "TurnChanged" && (line.contains("\"state\":\"completed\"") || line.contains("\"state\":\"failed\"")) && !self.uber_bot().is_empty();
-            if !end && !self.bot_threads.contains(th) && self.mail.run_of(th).is_none() { return }
+            if !end && !self.bot_threads.contains(th) && self.mail.run_of(th).is_none() && !self.member_rooms.contains_key(th) { return }
         }
+        if t == "TurnUsage" { let th = line.split_once("\"thread\":\"").and_then(|(_, r)| r.split('"').next()).unwrap_or(""); if !self.member_rooms.contains_key(th) { return } }
         if t == "ActivityLogged" && !line.contains("fallback-blocked") { return }
         if t == "ModesSet" {
             let th = line.split_once("\"id\":\"").and_then(|(_, r)| r.split('"').next()).unwrap_or("");
@@ -240,12 +274,23 @@ impl World {
             }
             "BotDeleted" => { self.mail.bot_deleted(&id); if let Some(x) = self.bots.get_mut(&id) { x.deleted = true } else { self.bots.insert(id.clone(), Bot { id, name: String::new(), thread: String::new(), look: 0, persona: String::new(), created: 0, deleted: true }); } }
             "RoomSet" => {
-                let (created, deleted, was) = self.rooms.get(&id).map_or((0, true, (false, false)), |r| (r.created, r.deleted, (r.ephemeral, r.closed)));
-                let (ephemeral, closed) = life(e, if deleted { (false, false) } else { was });
+                let old = self.rooms.get(&id).cloned().filter(|r| !r.deleted);
+                let (created, was) = old.as_ref().map_or((at, (false, false)), |r| (r.created, (r.ephemeral, r.closed)));
+                let (ephemeral, closed) = life(e, was);
                 self.mail.room_set(&id, s(e, "name"), s(e, "members"), at);
-                self.rooms.insert(id.clone(), Room { id, name: s(e, "name").into(), members: members_of(s(e, "members")), created: if deleted { at } else { created }, deleted: false, ephemeral, closed, last: at });
+                // the swarm's fields: one left out keeps what the room had (a line from before them, a linked machine's copy)
+                let keep = |k: &str, o: Option<&String>| e.get(k).and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| o.cloned().unwrap_or_default());
+                let o = old.as_ref();
+                let budget = e.get("budget").and_then(|v| serde_json::from_value(v.clone()).ok()).unwrap_or_else(|| o.map(|r| r.budget).unwrap_or_default());
+                let room = Room { id: id.clone(), name: s(e, "name").into(), members: members_of(s(e, "members")), created, deleted: false, ephemeral, closed, last: at,
+                    kind: keep("kind", o.map(|r| &r.kind)), project: keep("project", o.map(|r| &r.project)), goal: keep("goal", o.map(|r| &r.goal)), by: keep("by", o.map(|r| &r.by)),
+                    state: keep("state", o.map(|r| &r.state)), reason: keep("reason", o.map(|r| &r.reason)), budget };
+                for th in o.map(|r| r.threads()).unwrap_or_default() { if let Some(v) = self.member_rooms.get_mut(&th) { v.retain(|x| x != &id); if v.is_empty() { self.member_rooms.remove(&th); } } }
+                for th in room.threads() { let v = self.member_rooms.entry(th).or_default(); if !v.contains(&id) { v.push(id.clone()) } }
+                self.rooms.insert(id, room);
             }
-            "RoomDeleted" => { if let Some(r) = self.rooms.get_mut(&id) { r.deleted = true } else { self.rooms.insert(id.clone(), Room { id, name: String::new(), members: vec![], created: 0, deleted: true, ephemeral: false, closed: false, last: 0 }); } }
+            "RoomDeleted" => { if let Some(r) = self.rooms.get_mut(&id) { r.deleted = true; for th in r.threads() { if let Some(v) = self.member_rooms.get_mut(&th) { v.retain(|x| x != &id); if v.is_empty() { self.member_rooms.remove(&th); } } } }
+                else { self.rooms.insert(id.clone(), Room { id, name: String::new(), members: vec![], created: 0, deleted: true, ephemeral: false, closed: false, last: 0, kind: String::new(), project: String::new(), goal: String::new(), by: String::new(), state: String::new(), reason: String::new(), budget: Default::default() }); } }
             "ProjectCreated" => { self.projects.insert(id, (s(e, "title").into(), s(e, "root").into(), false)); }
             "ProjectRemoved" => { if let Some(p) = self.projects.get_mut(&id) { p.2 = true } }
             // a turn stopped only to change accounts (settings/driver.rs, `failover`) goes on at once on the next one: it has not ended, and its run stays live, so the
@@ -261,7 +306,10 @@ impl World {
                     if st == "running" { rt.1 = std::mem::take(&mut rt.0); rt.2 = 0 }
                     else { let (room, line) = (std::mem::take(&mut rt.1), rt.2); if st == "completed" && !room.is_empty() && line > 0 { self.steps.push(StepEnd::RoomReply { thread: th.into(), room, line }) } }
                 }
+                if let Some(rs) = self.member_rooms.get(th).cloned() { self.member_turns.insert(th.into(), st.into());
+                    if st == "running" { for r in rs { self.room_used.entry(r).or_default().turns += 1 } } }
                 self.turns.insert(th.into(), st.into()); }
+            "TurnUsage" => { if let Some(rs) = self.member_rooms.get(s(e, "thread")).cloned() { let t = ["input", "output", "cwrite", "reasoning"].iter().map(|k| n(e, k)).sum::<u64>(); for r in rs { self.room_used.entry(r).or_default().tokens += t } } }
             "ThreadLaunched" => { self.launched.insert(id, s(e, "by").into()); }
             "ActivityLogged" => { if s(e, "kind") == "fallback-blocked" { let th = s(e, "thread"); self.steps.push(StepEnd::Fallback { thread: th.into(), run: self.mail.run_of(th).filter(|r| r.live).cloned() }) } }
             "RunSet" => { self.mail.run_set(s(e, "thread"), s(e, "bot"), s(e, "conv"), s(e, "mail"), at); }
@@ -277,6 +325,8 @@ impl World {
                 // Room.answer: a bot that posted in the room it was asked in has answered there itself
                 if let (Some(room), Some(th)) = (self.rooms.get(s(e, "room")).map(|r| r.name.to_lowercase()), self.named(s(e, "from")).map(|b| b.thread.clone())) { if let Some(rt) = self.room_turns.get_mut(&th) { if rt.1.to_lowercase() == room { rt.1.clear() } } }
                 if let Some(r) = self.rooms.get_mut(s(e, "room")) { r.last = r.last.max(at) }
+                { let meta = post_meta(e); if !meta.person() && !meta.hub() { self.room_used.entry(s(e, "room").to_string()).or_default().posts += 1 }
+                  let q = self.room_meta.entry(s(e, "room").to_string()).or_default(); q.push_back(meta); while q.len() > super::gate::KEEP { q.pop_front(); } }
                 self.room_lines.entry(s(e, "room").to_string()).or_default().push(self.line); if self.settings.get("mail.on").map_or(true, |v| v != "on") { self.mail.room_post(&id, s(e, "room"), s(e, "from"), s(e, "text"), at); } self.post_ids.insert(id); }
             "ConvSet" => { self.mail.conv_set(&id, s(e, "subject"), s(e, "kind"), super::mail::mailbox::lines_of(s(e, "parts")), s(e, "project"), super::mail::mailbox::lines_of(s(e, "tags")), at); }
             "MailPosted" => { self.mail.mail(super::mail::Hdr { id, conv: s(e, "conv").into(), from: s(e, "from").into(), to: s(e, "to").into(), kind: s(e, "kind").into(), r#ref: s(e, "ref").into(), want: s(e, "want").into(), head: s(e, "head").into(), size: n(e, "size"), at }); }

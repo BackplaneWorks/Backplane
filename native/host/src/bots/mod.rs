@@ -9,6 +9,8 @@ pub mod hooks;
 pub mod life;
 pub mod front;
 pub mod far;
+pub mod gate;
+pub mod swarm;
 pub mod mesh;
 pub mod ledger;
 pub mod plane;

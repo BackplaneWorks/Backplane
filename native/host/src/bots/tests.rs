@@ -191,8 +191,12 @@ async fn bot(hub: &Arc<Hub>, name: &str) -> String {
 }
 
 #[test] fn bot_held_wakes_none() {
-    // law bot_held_wakes_none: a message past the bound (Hop.held) is heard by no bot
-    assert!(hop_live(0) && hop_live(HOP_MAX) && !hop_live(HOP_MAX + 1));
+    // law bot_held_wakes_none: a message the guards hold (a paused room, a hop past the backstop) is heard by no bot (docs/SWARM.md)
+    use super::gate::{verdict, Budget, PostMeta, Verdict, LIMITS};
+    let p = PostMeta { member: "ada".into(), text: "x".into(), at: 1, ..Default::default() };
+    assert_eq!(verdict(&[], &p, false, LIMITS.backstop + 1, &Budget::default(), &Budget::default(), &LIMITS), Verdict::Hold("backstop"));
+    assert_eq!(verdict(&[], &p, true, 1, &Budget::default(), &Budget::default(), &LIMITS), Verdict::Hold("paused"));
+    assert!(hop_live(0) && hop_live(HOP_MAX));
 }
 
 #[tokio::test] async fn bots_remember_normalises_and_forget_removes() {
@@ -838,23 +842,25 @@ fn tool_norm(v: &Value) -> Value {
     assert_eq!(bots.tool_call("t-none", "bot_whoami", &json!({})).await, (false, json!({"error":"unknown tool"})));
 }
 #[tokio::test] async fn bot_messages_past_the_depth_bound_are_held_and_wake_nobody() {
-    // BT.Hop: a message goes out one hop past the turn that sent it, never past 6; the seventh is kept in its room for the person
+    // the chatter guard (docs/SWARM.md; it replaced the 6-hop cap): twelve messages back and forth with no claim, no done and no person, and the twelfth
+    // is kept in its room for the person and wakes nobody
     let (hub, bots, rec) = start("tools-held", "").await;
     let (ada, bob) = (bot(&hub, "ada").await, bot(&hub, "bob").await);
     let lt = |b: &str| log(&hub).iter().find(|e| e["$"] == "BotSet" && e["id"] == b).unwrap()["thread"].as_str().unwrap().to_string();
     let (ta, tb) = (lt(&ada), lt(&bob));
     let mut hop = 0;
-    for i in 1..=7u64 {
+    let cap = super::gate::LIMITS.chatter as u64;
+    for i in 1..=cap {
         let (from, to) = if i % 2 == 1 { (&ta, "bob") } else { (&tb, "ada") };
         let before = rec.got.lock().unwrap().len();
         let (ok, body) = bots.tool_call(from, "bot_send", &json!({"to":to,"text":format!("m{i}"),"direct":true})).await;
         assert!(ok, "{body}");
         let woke = rec.got.lock().unwrap().len() > before;
-        if i <= 6 { assert!(woke && body["held"].is_null(), "message {i}: {body}"); hop = i } else { assert!(!woke && body["held"] == true, "message {i}: {body}") }
+        if i < cap { assert!(woke && body["held"].is_null(), "message {i}: {body}"); hop = i } else { assert!(!woke && body["held"] == true, "message {i}: {body}") }
         // the person's turn does not end between them: the hop the last woken bot stands at is what the next message goes past
         let _ = hop;
     }
-    assert!(log(&hub).iter().any(|e| e["$"] == "RoomPosted" && e["hop"] == 7 && e["text"].as_str().unwrap().starts_with("[held: 6 messages")));
+    assert!(log(&hub).iter().any(|e| e["$"] == "RoomPosted" && e["hop"] == cap && e["held"] == "chatter" && e["text"] == format!("m{cap}")));
 }
 #[tokio::test] async fn bot_request_in_room() {
     // law bot_request_in_room: a request goes in a room the person can follow, never a dm; a found room is used only when it is not dm:, and a new id is not dm: either.
@@ -1133,9 +1139,10 @@ impl mail::owner::OwnerLink for Held {
     let ada = bot(&hub, "ada").await;
     let th = log(&hub).iter().find(|e| e["$"] == "BotSet" && e["id"] == ada.as_str()).unwrap()["thread"].as_str().unwrap().to_string();
     let set = tools::BotToolSet(bots.clone());
-    assert_eq!(set.list(&th).len(), ledger::NAMES.len() + tools::NAMES.len(), "a bot's thread lists every bot tool");
+    assert_eq!(set.list(&th).len(), ledger::NAMES.len() + super::swarm::NAMES.len() + tools::NAMES.len(), "a bot's thread lists every bot tool");
     let plain: Vec<String> = set.list("t-other").iter().map(|d| d["name"].as_str().unwrap().to_string()).collect();
-    assert_eq!(plain, ledger::NAMES, "a thread that is no bot's lists the ledgers' only");
+    let want: Vec<&str> = ledger::NAMES.iter().chain(super::swarm::NAMES.iter()).copied().collect();
+    assert_eq!(plain, want, "a thread that is no bot's lists the ledgers' and the swarm's only (no room tools: it is in no room)");
     assert!(set.owns("memory_save") && !set.owns("thread_list"));
     let (ok, body) = set.call(&th, "memory_save", &json!({"key":"k","text":"v"})).await; assert!(ok, "{body}");
     assert_eq!(set.call("t-other", "memory_save", &json!({})).await, (false, json!({"error":"unknown tool"})));
@@ -1287,8 +1294,11 @@ fn stored(e: &Value) -> Value {
     let set = tools::BotToolSet(bots.clone()); let list = |t: &str| set.list(t).iter().map(|d| d["name"].as_str().unwrap().to_string()).collect::<Vec<_>>();
     let mut mine = list(rec["thread"].as_str().unwrap()); mine.retain(|n| n != "room_join" && n != "room_leave"); // (ours, beside the JS hub's)
     mine.retain(|n| n != "room_keep"); // (ours: Keep a bots' exchange)
+    let ours = |n: &String| !crate::bots::swarm::NAMES.contains(&n.as_str()); // (ours: swarms, every thread's)
+    mine.retain(ours);
     assert_eq!(mine, names("listBot"), "a bot's tools in the JS order");
-    assert_eq!(list("t1700000001-2"), names("listPlain"), "a plain thread's");
+    let mut plain = list("t1700000001-2"); plain.retain(ours);
+    assert_eq!(plain, names("listPlain"), "a plain thread's");
     let _ = std::fs::remove_dir_all(&work);
 }
 #[test] fn told_keys_words_and_overlap_follow_told() {
