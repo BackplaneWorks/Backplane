@@ -20,7 +20,7 @@ use tokio_tungstenite::tungstenite::{protocol::WebSocketConfig, Message};
 
 pub const PROTO: &str = "data/1";
 /// What this hub does beyond the base of data/1; a hub from before an addition does not list it (the app can warn instead of sending what would be dropped).
-pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer"];
+pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm"];
 const PREVIEW: usize = 140;
 const ASK_SCAN: usize = 4000;
 
@@ -91,14 +91,14 @@ fn thread_json(hub: &Hub, m: &crate::model::Model, id: &str, asks: &HashMap<Stri
     let (pinned, settled, settled_at) = flags(hub, id);
     // a model chosen within the provider is a ModesSet (the policy state), a switch of provider a ProviderSet (the model's fold)
     // `status`: the sidebar dot's word (signal.rs, children's work included): "finished" is the desktop's green dot, a turn done and not yet settled
-    let (model, effort, runtime, combo, status, pin_order) = crate::statehost::policies().and_then(|p| p.with_state(|st| (st.threads.get(id).map_or(String::new(), |t| t.model.clone()), st.settings.get(&format!("effort.{id}")).cloned().unwrap_or_default(), st.runtime.get(id).cloned().unwrap_or_default(),
-        crate::present::keys::combo_of(st, id, crate::hub::now_ms() / 1000), crate::signal::index(st).get(id).map_or("", |n| crate::signal::display_name(st, *n, id)), crate::sidebar::pin_place(st, id)))).unwrap_or_default();
+    let (model, effort, runtime, combo, status, pin_order, swarm) = crate::statehost::policies().and_then(|p| p.with_state(|st| (st.threads.get(id).map_or(String::new(), |t| t.model.clone()), st.settings.get(&format!("effort.{id}")).cloned().unwrap_or_default(), st.runtime.get(id).cloned().unwrap_or_default(),
+        crate::present::keys::combo_of(st, id, crate::hub::now_ms() / 1000), crate::signal::index(st).get(id).map_or("", |n| crate::signal::display_name(st, *n, id)), crate::sidebar::pin_place(st, id), st.swarm_of.get(id).cloned().unwrap_or_default()))).unwrap_or_default();
     let model = if model.is_empty() { t.model.clone() } else { model };
     // the composer's one chip: the model and what the account has left (present/keys.rs `combo`, its short form: a phone's row has room for about 20 characters;
     // the picker's title says it all)
     let chip = combo["short"].as_str().filter(|c| !c.is_empty()).map(str::to_string).unwrap_or_else(|| ext::chip(&t.provider, &model, &effort));
     Some(json!({"id":id,"project":t.project,"title":t.title,"state":state,"updatedAt":ms(t.activity.max(t.created)),"pinned":pinned,"pinOrder":pin_order,"settled":settled,"settledAt":settled_at,"archived":t.archived,
-        "provider":t.provider,"model":model,"effort":effort,"runtime":runtime,"chip":chip,"preview":preview,"waiting":waiting,"status":status,"parent":setting_of(&format!("thread.parent.{id}")),"history":t.project == crate::sidebar::SCRATCH}))
+        "provider":t.provider,"model":model,"effort":effort,"runtime":runtime,"chip":chip,"preview":preview,"waiting":waiting,"status":status,"parent":setting_of(&format!("thread.parent.{id}")),"history":t.project == crate::sidebar::SCRATCH,"swarm":swarm}))
 }
 fn project_json(m: &crate::model::Model, id: &str, asks: &HashMap<String, u64>) -> Option<Value> {
     let settled = m.threads.iter().filter(|(i, t)| t.project == id && !t.deleted && !t.archived && flags_of(i).1).count();
@@ -467,6 +467,8 @@ impl Subs {
     fn sub_views(&self, th: &str, key: Option<&str>) -> Vec<(u64, String)> { self.subs.iter().filter_map(|(i, t)| match t { Topic::Sub(x, k) if x == th && key.map_or(true, |w| w == k) => Some((*i, k.clone())), _ => None }).collect() }
     fn lists(&self) -> Vec<u64> { self.subs.iter().filter(|(_, t)| *t == Topic::Lists).map(|(i, _)| *i).collect() }
 }
+fn swarm_of(th: &str) -> Option<String> { crate::statehost::policies().and_then(|p| p.with_state(|st| st.swarm_of.get(th).cloned())).flatten() }
+fn is_swarm(room: &str) -> bool { crate::statehost::policies().and_then(|p| p.with_state(|st| st.rooms_nav.get(room).map_or(false, |r| r.swarm()))).unwrap_or(false) }
 fn d(sub: u64, k: &str, mut body: Value) -> Value { body["t"] = json!("d"); body["sub"] = json!(sub); body["k"] = json!(k); body }
 fn turn_word(state: &str) -> &'static str { match state { "running" => "working", "failed" => "failed", _ => "idle" } }
 
@@ -474,7 +476,7 @@ fn turn_word(state: &str) -> &'static str { match state { "running" => "working"
 async fn deltas(hub: &Hub, lines: &[String], subs: &mut Subs) -> Vec<Value> {
     if subs.subs.is_empty() { return vec![] }
     let mut out = vec![]; let (mut upsert, mut gone, mut projects): (Vec<String>, Vec<String>, Vec<(String, bool)>) = (vec![], vec![], vec![]);
-    let (mut worked, mut locks_moved): (Vec<String>, bool) = (vec![], false);
+    let (mut worked, mut locks_moved): (Vec<String>, bool) = (vec![], false); let mut swarms: Vec<String> = vec![];
     let mut viewed: Vec<(u64, String, String)> = vec![];
     for l in lines {
         let Ok(e) = serde_json::from_str::<Value>(l) else { continue };
@@ -516,7 +518,10 @@ async fn deltas(hub: &Hub, lines: &[String], subs: &mut Subs) -> Vec<Value> {
                 let open: Vec<(u64, String)> = subs.subs.iter().filter_map(|(i, t)| match t { Topic::Thread(x) if at.is_empty() || *x == at => Some((*i, x.clone())), _ => None }).collect(); // (an ended ask names no thread: each open thread looks again)
                 for (sub, x) in open { out.push(d(sub, "secret", json!({"thread":x}))) }
             }
-            "TurnChanged" => { for sub in subs.threads(&th) { out.push(d(sub, "turn", json!({"thread":th,"state":turn_word(s(&e, "state"))}))) } },
+            "TurnChanged" => { for sub in subs.threads(&th) { out.push(d(sub, "turn", json!({"thread":th,"state":turn_word(s(&e, "state"))}))) }
+                if let Some(r) = swarm_of(&th) { if !swarms.contains(&r) { swarms.push(r) } } },
+            // a swarm's board or members moved (docs/SWARM.md): the phone reads `swarm.get {since}` again
+            "RoomSet" | "RoomPosted" => { let r = if s(&e, "$") == "RoomSet" { s(&e, "id") } else { s(&e, "room") }.to_string(); if is_swarm(&r) && !swarms.contains(&r) { swarms.push(r) } },
             _ => {}
         }
         if !th.is_empty() && !matches!(s(&e, "$"), "ThreadDeleted") && !th.starts_with("remind") { if !upsert.contains(&th) { upsert.push(th.clone()) } }
@@ -527,6 +532,7 @@ async fn deltas(hub: &Hub, lines: &[String], subs: &mut Subs) -> Vec<Value> {
     for (sub, th, k) in &viewed { let v = hub.sub_view_for(th, k).await; out.push(d(*sub, "sub", json!({"thread":th,"key":k,"view":v}))) }
     for th in &worked { let subs_now = ext::work_now(hub, th).await; for sub in subs.threads(th) { out.push(d(sub, "work", json!({"thread":th,"subs":subs_now}))) } }
     if locks_moved { let l = ext::locks_now(hub).await; for sub in subs.lists() { out.push(d(sub, "locks", json!({"locks":l}))) } }
+    for r in &swarms { for sub in subs.lists() { out.push(d(sub, "swarm", json!({"room":r}))) } }
     if upsert.is_empty() && gone.is_empty() && projects.is_empty() { return out }
     let g = hub.model().await; let asks = open_ask_counts(hub);
     for th in &upsert { if let Some(t) = thread_json(hub, &g, th, &asks) { for sub in subs.lists().into_iter().chain(subs.threads(th)) { out.push(d(sub, "thread", json!({"thread":t}))) } } }

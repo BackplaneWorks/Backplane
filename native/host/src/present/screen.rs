@@ -85,7 +85,7 @@ fn rooms(st: &State, far: &[(String,&State)], un: &Unified, hub: &str) -> Vec<Va
 }
 fn room_rows(st: &State, hub: &str, mark: &Value, here: &dyn Fn(&str)->bool) -> Vec<Value> {
     let far=!mark.is_null();
-    let mut rooms: Vec<_>=st.rooms_nav.iter().filter(|(id,r)|!r.ephemeral && !crate::net::far::local(id).starts_with("dm:") && id.contains('~')==far && !here(id)).collect(); rooms.sort_by_key(|(id,_)|*id);
+    let mut rooms: Vec<_>=st.rooms_nav.iter().filter(|(id,r)|!r.ephemeral && !r.swarm() && !crate::net::far::local(id).starts_with("dm:") && id.contains('~')==far && !here(id)).collect(); rooms.sort_by_key(|(id,_)|*id);
     rooms.iter().map(|(id,r)| {
         let name=if rooms.iter().filter(|(_,other)|other.name.eq_ignore_ascii_case(&r.name)).count()>1 { format!("{} · {}",r.name,crate::net::far::local(id)) }else{r.name.clone()};
         json!({"id":format!("{hub}|{id}"),"name":name,"members":r.members,"sel":false,"nav":format!("@room:{id}"),"mark":mark})
@@ -269,6 +269,12 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
         "room-keep" if room_page["keep"]==json!(true) => {
             let rid=session["rid"].as_u64().unwrap_or(0);
             cmds.push(json!({"type":"send","hub":hub,"text":json!({"id":rid,"m":"bots.room_keep","p":{"room":text(&p["target"],"id")}}).to_string()}));
+            session["rid"]=json!(rid+1);
+        },
+        // a swarm's controls on its room page (`roomPage.swarm.actions`): pause, resume, stop (`swarm.act`); the hub refuses what does not apply
+        "swarm-act" if room_page["swarm"].is_object() && matches!(value, "pause"|"resume"|"stop") => {
+            let rid=session["rid"].as_u64().unwrap_or(0);
+            cmds.push(json!({"type":"send","hub":hub,"text":json!({"id":rid,"m":"swarm.act","p":{"room":text(&p["target"],"id"),"action":value}}).to_string()}));
             session["rid"]=json!(rid+1);
         },
         "room-post" if room_page.is_object() => {

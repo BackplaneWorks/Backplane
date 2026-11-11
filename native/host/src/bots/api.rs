@@ -168,7 +168,7 @@ pub fn far_rooms(rows: Vec<Value>, here: &std::collections::HashSet<String>) -> 
 pub fn rows_of(w: &super::world::World, uber: &str, mark: &Value) -> (Vec<Value>, Vec<Value>) {
     let mut bots: Vec<_> = w.bots.values().filter(|x| !x.deleted).map(|x| (x.created, x.id.clone(), json!({"id":x.id,"name":x.name,"thread":x.thread,"uber":!uber.is_empty() && x.id == uber,"mark":mark}))).collect();
     bots.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
-    let mut rooms: Vec<_> = w.rooms.values().filter(|x| x.listed() && !crate::net::far::local(&x.id).starts_with("dm:")).map(|x| (x.created, x.id.clone(), json!({"id":x.id,"name":x.name,"members":x.members,"mark":mark}))).collect();
+    let mut rooms: Vec<_> = w.rooms.values().filter(|x| x.listed() && !x.swarm() && !crate::net::far::local(&x.id).starts_with("dm:")).map(|x| (x.created, x.id.clone(), json!({"id":x.id,"name":x.name,"members":x.members,"mark":mark}))).collect();
     rooms.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
     (bots.into_iter().map(|x| x.2).collect(), rooms.into_iter().map(|x| x.2).collect())
 }
@@ -184,11 +184,20 @@ pub async fn room_page(hub: &Arc<Hub>, room: &str, now: u64) -> Option<Value> {
         return Some(json!({"kind":"room","id":room,"name":name,"title":name,"members":members.join(", "),"posts":posts,"mark":mark,"ephemeral":life.0,"closed":life.1,"keep":false}))
     }
     let b = of(hub)?;
-    let (name, members, life) = { let w = b.world().await; let r = w.room(room).filter(|r| !r.deleted)?; (r.name.clone(), r.members.iter().map(|m| w.bot(m).map_or(m.clone(), |b| b.name.clone())).collect::<Vec<_>>(), (r.ephemeral, r.closed)) };
+    let (name, members, life, swarm) = { let w = b.world().await; let r = w.room(room).filter(|r| !r.deleted)?; (r.name.clone(), super::swarm::names(&w, r).into_iter().map(|x| x.1).collect::<Vec<_>>(), (r.ephemeral, r.closed), r.swarm()) };
     let posts: Vec<Value> = room_posts(hub, room, 200).await?.into_iter().map(|p| { let from = p["from"].as_str().unwrap_or("").to_string();
         json!({"id":p["id"],"from":from,"text":p["text"],"ago":ago(now, p["at"].as_u64().unwrap_or(0)),"mine":from == "you"}) }).collect();
     // Life.keep: a bots' exchange opened by its id offers Keep (a linked machine's is kept there)
-    Some(json!({"kind":"room","id":room,"name":name,"title":name,"members":members.join(", "),"posts":posts,"ephemeral":life.0,"closed":life.1,"keep":life.0}))
+    let mut pg = json!({"kind":"room","id":room,"name":name,"title":name,"members":members.join(", "),"posts":posts,"ephemeral":life.0,"closed":life.1,"keep":life.0});
+    // a swarm's room (docs/SWARM.md): its board as the swarm page draws it (members with live state and colour, posts with tags, claims) and the controls it offers
+    if swarm { if let Some(mut sw) = b.board(room, "", 200, false).await {
+        let st = sw["room"]["state"].as_str().unwrap_or("").to_string();
+        let acts: Vec<Value> = match st.as_str() { "active" => vec![json!({"label":"Pause","action":"swarm-act","value":"pause"}), json!({"label":"Stop","action":"swarm-act","value":"stop"})],
+            "paused" => vec![json!({"label":"Resume","action":"swarm-act","value":"resume"}), json!({"label":"Stop","action":"swarm-act","value":"stop"})], _ => vec![] };
+        sw["actions"] = json!(acts); sw["ended"] = json!(st == "done" || st == "stopped");
+        for p in sw["posts"].as_array_mut().into_iter().flatten() { let at = p["at"].as_u64().unwrap_or(0); p["ago"] = json!(ago(now, at)); p["mine"] = json!(p["from"] == "you" && p["guard"] != true) }
+        pg["swarm"] = sw; } }
+    Some(pg)
 }
 /// a room's life (ephemeral, closed), here or in a linked machine's mirror; None for an unknown room
 pub async fn room_life(hub: &Arc<Hub>, room: &str) -> Option<(bool, bool)> {
