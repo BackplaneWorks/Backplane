@@ -4058,6 +4058,7 @@ gpui.picker.none = フォルダなし
 gpui.picker.key.select = 選択
 gpui.picker.key.into = 中へ
 gpui.picker.key.complete = 補完
+gpui.picker.key.open = プロジェクトを開く
 gpui.picker.added = 追加済み
 gpui.picker.more.typed = ほか{n}件: 入力して絞り込む
 gpui.assembly = アセンブリ

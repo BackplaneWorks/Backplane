@@ -12,7 +12,8 @@ pub struct Projects {
     pub search: Option<Entity<Composer>>, pub folder: Option<Entity<Composer>>,
     sent_q: Vec<String>, sent_f: Vec<String>, echo_q: Option<String>, echo_f: Option<String>,
     /// Set when a box wants the keys on the next frame: "search" or "folder".
-    pub focus: Option<&'static str>, folder_open: bool,
+    pub focus: Option<&'static str>, folder_open: bool, /// What the folder field held before its last change, whoever made it (`back`).
+    prev_f: String,
     /// The picker's row under the arrow keys (an index into the hub's rows; none: the field, where Enter is Add or Create), and its list's scroll.
     pub folder_ix: Option<usize>, pub folder_scroll: ScrollHandle,
     /// The project page's own reads: `project.home` (the folder's goal and notes, board and files) and `fab.look {project}` (the parts its fab files name).
@@ -89,7 +90,8 @@ pub fn boards(snap: &Value, card: &Value, root: &str) -> Vec<String> {
 #[derive(Clone, Debug, PartialEq)]
 pub struct Item { pub label: String, pub action: String, pub value: String, pub kind: String, /// "project", "KiCad", "git" or none: what the folder is or looks like.
     pub tag: String, /// What the field shows on going into the row ("~/x/"); an older hub sends none and the value is shown.
-    pub field: String }
+    pub field: String, /// The project this folder is already (its id): a click opens its page.
+    pub project: String }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Folders { pub text: String, pub hint: String, pub error: String, pub items: Vec<Item>, /// Folders that match past the rows sent.
     pub more: u64 }
@@ -97,7 +99,7 @@ pub struct Folders { pub text: String, pub hint: String, pub error: String, pub 
 pub fn folders(data: &Value) -> Option<Folders> {
     let f = data["folders"].as_object()?;
     let s = |k: &str| f.get(k).and_then(Value::as_str).unwrap_or("").to_string();
-    let items = f.get("items").and_then(Value::as_array).into_iter().flatten().take(200).map(|i| Item { label: string(i, "label"), action: string(i, "action"), value: string(i, "value"), kind: string(i, "kind"), tag: string(i, "tag"), field: string(i, "field") }).collect();
+    let items = f.get("items").and_then(Value::as_array).into_iter().flatten().take(200).map(|i| Item { label: string(i, "label"), action: string(i, "action"), value: string(i, "value"), kind: string(i, "kind"), tag: string(i, "tag"), field: string(i, "field"), project: string(i, "project") }).collect();
     Some(Folders { text: s("text"), hint: s("hint"), error: s("error"), items, more: f.get("more").and_then(Value::as_u64).unwrap_or(0) })
 }
 pub fn query(data: &Value) -> String { string(&data["search"], "query") }
@@ -162,7 +164,8 @@ pub fn marked(f: &Folders, ix: Option<usize>) -> Option<&Item> { ix.and_then(|i|
 #[derive(Debug, PartialEq)]
 pub enum Key { /// Go into this folder: the field takes the path (and tells the hub as typing does).
     Cd(String), /// The Add, Create or Clone row.
-    Run(String, String) }
+    Run(String, String), /// The folder is a project already: its page is opened and the picker shut.
+    Open(String) }
 /// What the field takes on going into a row: its `field` ("~/x/"), else its value.
 fn into(i: &Item) -> String { if i.field.is_empty() { i.value.clone() } else { i.field.clone() } }
 /// How the hub's rows stand to what the field holds: made from it (`Now`); made in the same folder for another name (`Same`: the name typed now,
@@ -196,7 +199,7 @@ pub fn back(before: &str, now: &str) -> Option<String> {
 pub fn hints(f: &Folders, typed: &str, ix: Option<usize>) -> Vec<(&'static str, &'static str)> {
     let mut out = vec![];
     if f.items.iter().any(walkable) { out.push(("↑↓", "select")); }
-    if marked(f, ix).is_some() { out.push(("Enter", "go into")); } // i18n-ok: a key and its words, drawn through trs
+    if let Some(i) = marked(f, ix) { out.push(("Enter", if matches!(take(i), Key::Open(_)) { "open project" } else { "go into" })); } // i18n-ok: a key and its words, drawn through trs
     if marked(f, ix).is_some() || (!typed.ends_with('/') && f.items.iter().any(|i| i.kind == "dir")) { out.push(("Tab", "complete")); }  // i18n-ok: a key and its words, drawn through trs
     out
 }
@@ -207,18 +210,35 @@ pub fn fit(s: &str, max: usize) -> String {
     let keep = max - head.chars().count() - 1;
     format!("{head}…{}", s.chars().skip(n - keep).collect::<String>())
 }
-/// Enter: the marked folder is gone into; with none marked it is the Add or Create row (`submit_cmd`).
+/// The marked row once the hub's rows are for what the field holds (until then the mark is on a row of an older list and no key takes it).
+fn marked_now<'a>(f: &'a Folders, typed: &str, ix: Option<usize>) -> Option<&'a Item> { if f.text == typed { marked(f, ix) } else { None } }
+/// What taking a folder row does: a project's page is opened, any other folder is gone into.
+fn take(i: &Item) -> Key { if i.kind == "dir" && !i.project.is_empty() { Key::Open(i.project.clone()) } else { Key::Cd(into(i)) } }
+/// Enter: the marked folder is taken; with none marked it is the Add or Create row (`submit_cmd`).
 pub fn enter(data: &Value, typed: &str, ix: Option<usize>) -> Option<Key> {
     let f = folders(data)?;
-    if let Some(i) = marked(&f, ix) { return Some(Key::Cd(into(i))) }
+    if let Some(i) = marked_now(&f, typed, ix) { return Some(take(i)) }
     match submit_cmd(data, typed) { Some(Command::Action(a, v)) => Some(Key::Run(a, v)), _ => None }
 }
-/// Tab: the marked folder, else the first folder that matches the name being typed (none while no name is typed, or while the rows are for an older text).
+/// Tab: the marked folder (gone into, a project's too), else the first folder that matches the name being typed (none while no name is typed, or while the rows are for an older text).
 pub fn complete(data: &Value, typed: &str, ix: Option<usize>) -> Option<String> {
     let f = folders(data)?;
-    if let Some(i) = marked(&f, ix) { return Some(into(i)) }
+    if let Some(i) = marked_now(&f, typed, ix) { return Some(into(i)) }
     if f.text != typed || typed.ends_with('/') || typed == "~" { return None }
     f.items.iter().find(|i| i.kind == "dir" && !i.action.is_empty()).map(into)
+}
+/// A click on row `n`, judged when it lands against what the field holds then: a row drawn faint or not drawn (made for an older text or
+/// another folder) does nothing, so "Add ~" can never be taken once the field says "~/board/".
+pub fn click(data: &Value, typed: &str, n: usize) -> Option<Key> {
+    let f = folders(data)?; let i = f.items.get(n)?;
+    if i.action.is_empty() || shows(i, &fresh(&f.text, typed)) != (true, false) { return None }
+    Some(match i.kind.as_str() { "dir" | "up" if i.action == "proj-cd" => take(i), _ => Key::Run(i.action.clone(), i.value.clone()) })
+}
+/// Up and Down: only once the rows are for what the field holds.
+pub fn walk(data: &Value, typed: &str, ix: Option<usize>, d: i32) -> Option<(Option<usize>, usize)> {
+    let f = folders(data)?; if f.text != typed { return None }
+    let to = step(&f.items, ix, d);
+    Some((to, to.map_or(0, |t| f.items[..t].iter().filter(|i| i.kind != "add" && i.kind != "note").count())))
 }
 /// Going into a folder from here: the field shows the path at once and its change goes to the hub as typing does (no wait for the hub's echo).
 fn cd(this: &mut Backplane, path: String, cx: &mut Context<Backplane>) {
@@ -227,7 +247,7 @@ fn cd(this: &mut Backplane, path: String, cx: &mut Context<Backplane>) {
     cx.notify();
 }
 fn key(this: &mut Backplane, k: Option<Key>, cx: &mut Context<Backplane>) {
-    match k { Some(Key::Cd(p)) => cd(this, p, cx), Some(Key::Run(a, v)) => { if a == "proj-add" || a == "proj-new" { this.arm_new(); } let _ = this.tx.try_send(Command::Action(a, v)); cx.notify(); } None => {} }
+    match k { Some(Key::Cd(p)) => cd(this, p, cx), Some(Key::Open(pid)) => { let _ = this.tx.try_send(close_cmd()); this.open_project(pid, cx); } Some(Key::Run(a, v)) => { if a == "proj-add" || a == "proj-new" { this.arm_new(); } let _ = this.tx.try_send(Command::Action(a, v)); cx.notify(); } None => {} }
 }
 pub fn close_cmd() -> Command { Command::Action("proj-close".into(), String::new()) }
 /// Esc leaves the folder picker while it is open.
@@ -291,10 +311,12 @@ pub fn sync(this: &mut Backplane, cx: &mut Context<Backplane>) {
                 input.update(cx, |i, _| i.popup_open = true);
                 cx.observe(&input, |this, input, cx| {
                     let text = input.read(cx).content.to_string(); let p = &mut this.screens.projects;
+                    // `prev`: what the field held before this change, typed here or put by the hub (a notify with the same text is no change)
+                    let prev = std::mem::replace(&mut p.prev_f, text.clone()); if prev == text { return; }
                     if p.echo_f.as_deref() == Some(text.as_str()) { p.echo_f = None; return; }
                     if p.sent_f.last() == Some(&text) { return; }
                     p.folder_ix = None;
-                    if let Some(up) = p.sent_f.last().and_then(|b| back(b, &text)) { input.update(cx, |i, cx| i.set(up, cx)); return; }
+                    if let Some(up) = back(&prev, &text) { input.update(cx, |i, cx| i.set(up, cx)); return; }
                     remember(&mut p.sent_f, &text); let _ = this.tx.try_send(type_cmd(&text));
                 }).detach();
                 // Enter: the marked folder, else the picker's Add or Create row, as a click on it would (only once the hub's rows are for what the field holds)
@@ -303,9 +325,9 @@ pub fn sync(this: &mut Backplane, cx: &mut Context<Backplane>) {
                     match ev {
                         ComposerEvent::Submit => { let k = enter(&this.data, &typed, ix); key(this, k, cx); }
                         ComposerEvent::PopupPick => { let k = complete(&this.data, &typed, ix).map(Key::Cd); key(this, k, cx); }
-                        ComposerEvent::PopupMove(d) => if let Some(f) = folders(&this.data) {
-                            let to = step(&f.items, ix, *d); let p = &mut this.screens.projects;
-                            if to != p.folder_ix { p.folder_ix = to; p.folder_scroll.scroll_to_item(to.map_or(0, |t| f.items[..t].iter().filter(|i| i.kind != "add" && i.kind != "note").count())); cx.notify(); }
+                        ComposerEvent::PopupMove(d) => if let Some((to, row)) = walk(&this.data, &typed, ix, *d) {
+                            let p = &mut this.screens.projects;
+                            if to != p.folder_ix { p.folder_ix = to; p.folder_scroll.scroll_to_item(row); cx.notify(); }
                         }
                         _ => {}
                     }
@@ -338,33 +360,34 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, p: &Projects, data: &Value
     let now = fresh(&f.text, &typed);
     let mark = marked(&f, p.folder_ix).map(|_| p.folder_ix.unwrap_or(0));
     let mut top: Vec<AnyElement> = vec![];
-    let mut list = div().id("folders-list").track_scroll(&p.folder_scroll).flex().flex_col().w_full().flex_1().min_h_0().overflow_y_scroll();
+    let mut list = div().id("folders-list").track_scroll(&p.folder_scroll).flex().flex_col().w_full().flex_initial().min_h_0().overflow_y_scroll();
     let mut dirs = 0;
     for (i, it) in f.items.iter().enumerate() {
         let (show, faint) = shows(it, &now); if !show { continue }
-        let (a, v) = (it.action.clone(), it.value.clone()); let live = !a.is_empty();
-        let row = crate::ui::with_rect(div().id(SharedString::from(format!("folder-{i}"))), move || format!("folder-{i}")).flex().flex_none().items_center().gap_2().px(px(10.)).w_full().when(faint, |d| d.opacity(0.45));
+        let a = it.action.as_str(); let live = !a.is_empty();
+        // a click is judged when it lands (`click`): the rows may be older than the field by then
+        let hit = cx.listener(move |this, _: &gpui::ClickEvent, _, cx| { let typed = this.screens.projects.folder.as_ref().map(|i| i.read(cx).content.to_string()); let k = typed.and_then(|t| click(&this.data, &t, i)); key(this, k, cx); });
+        let row = crate::ui::with_rect(div().id(SharedString::from(format!("folder-{i}"))), move || format!("folder-{i}")).flex().flex_none().items_center().gap_2().w_full().when(faint, |d| d.opacity(0.45));
         match it.kind.as_str() {
-            "add" => top.push(row.h(px(34.)).bg(c("accent")).text_size(px(13.)).text_color(c("on-accent")).cursor_pointer().hover(|s| s.opacity(0.9))
+            "add" => top.push(row.h(px(34.)).px(px(11.)).bg(c("accent")).text_size(px(13.)).text_color(c("on-accent")).when(!faint, |d| d.cursor_pointer().hover(|s| s.opacity(0.9)))
                 .child(crate::ui::ic(light, if a == "proj-add" { "plus" } else if a == "proj-new" { "folder-plus" } else { "folder-down" }, 15., "on-accent"))
                 .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(fit(&crate::i18n::trs(&it.label), 72)))
                 .when(mark.is_none() && !faint, |d| d.child(div().flex_none().text_size(px(11.)).opacity(0.7).child("Enter" /* i18n-ok: a key's name */)))
-                .on_click(cx.listener(move |this, _, _, cx| key(this, Some(Key::Run(a.clone(), v.clone())), cx))).into_any_element()),
-            "note" => top.push(row.h(px(34.)).border_1().border_color(c("line")).text_size(px(13.)).text_color(c("dim"))
+                .on_click(hit).into_any_element()),
+            "note" => top.push(row.h(px(34.)).px(px(10.)).border_1().border_color(c("line")).text_size(px(13.)).text_color(c("dim"))
                 .child(crate::ui::ic(light, "circle-check", 14., "ok"))
                 .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(fit(&crate::i18n::trs(&it.label), 76))).into_any_element()),
             kind => {
                 let up = kind == "up"; if !up { dirs += 1; }
                 let on = mark == Some(i); let added = it.tag == "project";
                 let name = if up { it.label.clone() } else { it.label.trim_end_matches('/').to_string() };
-                let to = into(it);
                 // the marked row: a bar of the accent on its left over the raised colour; the pointer's row only the panel's colour
-                list = list.child(row.h(px(28.)).border_l_2().border_color(if on { c("accent") } else { gpui::Rgba { r: 0., g: 0., b: 0., a: 0. } })
-                    .text_size(px(13.)).text_color(c(if !live { "faint" } else if added { "dim" } else { "text" })).when(on, |d| d.bg(c("raise"))).when(live && !on, |d| d.cursor_pointer().hover(|s| s.bg(c("panel"))))
+                list = list.child(row.h(px(28.)).px(px(10.)).border_l_2().border_color(if on { c("accent") } else { gpui::Rgba { r: 0., g: 0., b: 0., a: 0. } })
+                    .text_size(px(13.)).text_color(c(if !live { "faint" } else if added { "dim" } else { "text" })).when(on, |d| d.bg(c("raise"))).when(live && !on && !faint, |d| d.cursor_pointer().hover(|s| s.bg(c("panel"))))
                     .child(crate::ui::ic(light, if up { "corner-left-up" } else if added { "circle-check" } else { "folder" }, 14., if added { "ok" } else if it.tag.is_empty() { "dim" } else { "accent" }))
                     .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(name))
                     .when(!it.tag.is_empty(), |d| d.child(div().flex_none().text_size(px(11.)).text_color(c("faint")).child(crate::i18n::trs(if added { "added" } else { it.tag.as_str() }))))
-                    .on_click(cx.listener(move |this, _, _, cx| if !a.is_empty() { if a == "proj-cd" { cd(this, to.clone(), cx) } else { let _ = this.tx.try_send(Command::Action(a.clone(), v.clone())); cx.notify(); } })));
+                    .on_click(hit));
             }
         }
     }
@@ -374,7 +397,7 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, p: &Projects, data: &Value
     let cancel = crate::ui::with_rect(div().id("folders-cancel"), || "folders-cancel".to_string()).flex().items_center().gap_2().h(px(26.)).px_2().cursor_pointer().hover(|s| s.bg(c("raise")))
         .child(div().text_size(px(11.)).text_color(c("faint")).child("Esc" /* i18n-ok: a key's name */)).child(crate::ui::ic(light, "x", 14., "dim"))
         .on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(close_cmd()); cx.notify(); }));
-    let keys = hints(&f, &typed, p.folder_ix).into_iter().map(|(k, w)| div().flex().gap_1().child(div().text_color(c("dim")).child(k)).child(crate::i18n::trs(w)));
+    let keys: Vec<_> = hints(&f, &typed, p.folder_ix).into_iter().map(|(k, w)| div().flex().gap_1().child(div().text_color(c("dim")).child(k)).child(crate::i18n::trs(w))).collect();
     Some(div().id("folders-q").absolute().inset_0().occlude().bg(c("bg")).flex().flex_col().items_center().px_6().pt(px(56.)).pb_4()
         .child(div().flex().flex_col().w_full().max_w(px(680.)).flex_1().min_h_0().gap_2()
             .child(div().flex().flex_none().items_center().justify_between().pb_1().child(div().text_size(px(15.)).font_weight(FontWeight::SEMIBOLD).child(crate::i18n::trs("Add project"))).child(cancel))
@@ -383,7 +406,8 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, p: &Projects, data: &Value
             .when(!f.error.is_empty(), |d| d.child(div().flex_none().px(px(10.)).text_size(px(12.)).text_color(c("bad")).child(fit(&crate::i18n::trs(&f.error), 90))))
             .children(top)
             .child(list)
-            .child(div().flex().flex_none().gap_4().h(px(22.)).items_end().border_t_1().border_color(c("line")).text_size(px(11.)).text_color(c("faint")).children(keys)))
+            // the keys sit right under the last row (the list takes only the height of its rows), not at the foot of the window
+            .when(!keys.is_empty(), |d| d.child(div().flex().flex_none().gap_4().h(px(22.)).px(px(12.)).items_end().text_size(px(11.)).text_color(c("faint")).children(keys))))
         .into_any_element())
 }
 
@@ -599,6 +623,35 @@ mod tests {
         assert_eq!(hints(&f, "~/", Some(1)), [("↑↓", "select"), ("Enter", "go into"), ("Tab", "complete")]);
         assert_eq!(hints(&f, "~/al", None), [("↑↓", "select"), ("Tab", "complete")]);
         let empty = folders(&j(r#"{"folders":{"text":"~/x/","items":[]}}"#)).unwrap(); assert!(hints(&empty, "~/x/", None).is_empty());
+    }
+    #[test] fn a_click_is_judged_against_the_field_when_it_lands_and_a_project_row_opens_its_page() {
+        let d = j(r#"{"folders":{"text":"~/","items":[{"label":"Add ~","action":"proj-add","value":"/h","kind":"add"},{"label":"..","action":"proj-cd","value":"/","field":"/","kind":"up"},
+            {"label":"alpha/","action":"proj-cd","value":"/h/alpha/","field":"~/alpha/","kind":"dir"},{"label":"mine/","action":"proj-cd","value":"/h/mine/","field":"~/mine/","kind":"dir","tag":"project","project":"p9"},
+            {"label":"x is there","action":"","value":"","kind":"note"}]}}"#);
+        assert_eq!(click(&d, "~/", 0), Some(Key::Run("proj-add".into(), "/h".into()))); assert_eq!(click(&d, "~/", 1), Some(Key::Cd("/".into()))); assert_eq!(click(&d, "~/", 2), Some(Key::Cd("~/alpha/".into())));
+        assert_eq!(click(&d, "~/", 3), Some(Key::Open("p9".into())), "a folder that is a project: its page"); assert_eq!(click(&d, "~/", 4), None, "a note"); assert_eq!(click(&d, "~/", 9), None);
+        // the field has moved on and the hub has not answered: "Add ~" must not add the home, and a row of the older folder is not gone into
+        assert_eq!(click(&d, "~/alpha/", 0), None); assert_eq!(click(&d, "~/alpha/", 2), None); assert_eq!(click(&d, "~/alpha/", 3), None);
+        assert_eq!(click(&d, "~/al", 0), None, "the Add row is for \"~/\""); assert_eq!(click(&d, "~/al", 2), Some(Key::Cd("~/alpha/".into())), "the same folder, and the row matches"); assert_eq!(click(&d, "~/al", 3), None, "narrowed away");
+        assert_eq!(click(&d, "~/al", 1), Some(Key::Cd("/".into())));
+        // the keys: Enter opens the project, Tab still goes in; neither takes a mark while the rows are for an older text
+        assert_eq!(enter(&d, "~/", Some(3)), Some(Key::Open("p9".into()))); assert_eq!(complete(&d, "~/", Some(3)).as_deref(), Some("~/mine/"));
+        assert_eq!(enter(&d, "~/alpha/", Some(3)), None); assert_eq!(complete(&d, "~/alpha/", Some(3)), None);
+        assert_eq!(walk(&d, "~/", None, 1), Some((Some(1), 0))); assert_eq!(walk(&d, "~/", Some(2), 1), Some((Some(3), 2)), "the mark and its place in the list (the Add row is above it)"); assert_eq!(walk(&d, "~/alpha/", None, 1), None, "the arrows wait for the hub's rows");
+        let f = folders(&d).unwrap(); assert_eq!(hints(&f, "~/", Some(3))[1], ("Enter", "open project")); assert_eq!(hints(&f, "~/", Some(2))[1], ("Enter", "go into"));
+    }
+    #[test] fn names_that_are_not_ascii_are_cut_narrowed_and_gone_up_from_without_a_panic() {
+        assert_eq!(fit("Add ~/基板/日本語のとても長いフォルダ名/プロジェクト", 15), "Add …ルダ名/プロジェクト"); assert_eq!(fit("基板基板基板基板基板基板", 8), "…板基板基板基板"); assert_eq!(fit("éééé", 3), "éééé", "too narrow to cut: as it is");
+        assert_eq!(fit(&"é ".repeat(20), 9).chars().count(), 9);
+        assert_eq!(fresh("~/基板/É", "~/基板/éc"), Fresh::Same("éc".into())); assert_eq!(fresh("~/基板/", "~/基"), Fresh::Away);
+        let it = |l: &str| Item { label: l.into(), action: "proj-cd".into(), value: String::new(), kind: "dir".into(), tag: String::new(), field: String::new(), project: String::new() };
+        assert_eq!(shows(&it("Écran/"), &Fresh::Same("éc".into())), (true, false)); assert_eq!(shows(&it("基板/"), &Fresh::Same("é".into())), (false, false));
+        assert_eq!(back("~/基板/", "~/基板").as_deref(), Some("~/")); assert_eq!(back("~/a/é/", "~/a/é").as_deref(), Some("~/a/")); assert_eq!(back("é/", "é"), None, "no folder above");
+    }
+    #[test] fn the_pickers_words_are_in_the_japanese_catalog() {
+        let c = crate::i18n::catalog();
+        for w in ["No folders", "select", "go into", "open project", "complete", "added", "7 more: type to filter", "Add project"] { assert!(c.japanese(w).is_some(), "{w}"); }
+        assert_eq!(c.japanese("open project").as_deref(), Some("プロジェクトを開く")); assert_eq!(c.japanese("7 more: type to filter").as_deref(), Some("ほか7件: 入力して絞り込む"));
     }
     #[test] fn a_long_label_keeps_its_first_word_and_the_end_of_its_path() {
         assert_eq!(fit("Add ~/x", 72), "Add ~/x");
