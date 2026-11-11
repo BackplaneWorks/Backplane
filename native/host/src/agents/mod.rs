@@ -763,7 +763,7 @@ impl Actor {
             let msg = hub_id("s", now, self.ag.seq()); self.steer_now = true; self.claude_send(&t, &cwd, &msg, &text, &text, now).await; return Ok(()) }
         if providers::driver(&t.provider).is_none() { return Err(format!("{} threads are not run by the Rust hub yet", t.provider)) }
         self.stop().await; self.lines = None; self.exit = None; self.next_ride = false; self.live_proc = None; self.asked.clear();
-        let mut ev = vec![json!({"$":"ActivityLogged","thread":th,"act":hub_id("s", now, self.ag.seq()),"tone":"info","kind":"steer","summary":"Steered: the turn starts again with this message","at":now})];
+        let mut ev = vec![json!({"$":"ActivityLogged","thread":th,"act":hub_id("s", now, self.ag.seq()),"tone":"info","kind":"steer","summary":rules::steer_summary(&text),"at":now})];
         let run = if ride.is_empty() { text.clone() } else { ev.extend(codex::ride_done(&th, &ride, "with the steer", now)); if text.trim().is_empty() { codex::ride_input(&ride) } else { format!("{}\n\n{}", codex::ride_input(&ride), text) } };
         ev.push(json!({"$":"TurnChanged","thread":th,"state":"running","at":now}));
         self.live_close().await; self.commit(ev).await; self.cwd = cwd.clone(); self.cx.running = true; self.codex = true; self.prov = t.provider.clone(); self.model = t.model.clone();
