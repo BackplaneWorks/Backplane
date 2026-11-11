@@ -61,6 +61,14 @@ fn unit(m: f32) -> u32 { um(m * 100.0) }
 pub fn ints(ts: &[Tri3]) -> impl Iterator<Item = ([i32; 9], u32)> + '_ {
     ts.iter().map(|t| { let mut o = [0i32; 9]; for (k, v) in [t.a, t.b, t.c].into_iter().enumerate() { o[3 * k] = unit(v[0]) as i32; o[3 * k + 1] = unit(v[2]) as i32; o[3 * k + 2] = unit(v[1]) as i32 } (o, t.color) })
 }
+/// Each triangle's face as runs (Solid::faces): a varint a face, how many triangles in a row are of it. Empty when `faces` is not one a
+/// triangle (a model thinned, or one whose mesher said none).
+pub fn face_runs(faces: &[u32], n: usize) -> Vec<u8> {
+    if faces.len() != n || n == 0 { return vec![] }
+    let mut o = vec![]; let mut run = 1u32;
+    for w in faces.windows(2) { if w[1] == w[0] { run += 1 } else { num(&mut o, run); run = 1 } }
+    num(&mut o, run); o
+}
 /// A part frame's `n` and `mesh` (plot::part_frame) of these triangles, placed by the identity: the same bytes as `of`'s mesh.
 pub fn part_mesh(ts: &[Tri3]) -> (u32, Vec<u8>) {
     let (mut d, mut c, mut p) = (Vec::with_capacity(ts.len() * 16), 0u32, [0u32; 3]);
@@ -83,7 +91,7 @@ pub fn of(ts: &[Tri3]) -> Option<Solid> {
             b = Some(match b { None => [i, j, k, i, j, k], Some([x0, y0, z0, x1, y1, z1]) => [x0.min(i), y0.min(j), z0.min(k), x1.max(i), y1.max(j), z1.max(k)] });
         }
     }
-    Some(Solid { n: ts.len() as u32, b: b.unwrap().map(|v| v as u32), d })
+    Some(Solid { n: ts.len() as u32, b: b.unwrap().map(|v| v as u32), d, faces: vec![] })
 }
 /// Plot.of.solid: the plot of a model: no chunks, Box.empty, thickness 0 (None: Line.solid prints nothing and no mesh goes out)
 pub fn plot(so: Option<Solid>) -> Plot {
@@ -104,6 +112,11 @@ mod tests {
         assert!(thin(model.clone()).len() < 120, "the old grid (a 4000th of 2 m: 0.5 mm) kept {} of the 6 mm rim's 200", thin(model.clone()).len());
         let f = fit(model.clone(), 199); assert!(f.len() <= 199 && f.len() > 150, "over it: the finest grid that fits ({})", f.len());
         assert!(fits_for(MOST_STEP, true) && !fits_for(MOST + 1, false) && fits_for(MOST, false));
+    }
+    #[test] fn faces_go_as_runs_and_none_when_they_are_not_one_a_triangle() {
+        assert_eq!(face_runs(&[0, 0, 0, 1, 2, 2], 6), vec![3, 1, 2]);
+        assert_eq!(face_runs(&vec![7; 200], 200), vec![200 & 127 | 128, 1], "a long run is a varint");
+        assert!(face_runs(&[0, 1], 3).is_empty() && face_runs(&[], 0).is_empty(), "thinned (fewer triangles): none");
     }
     #[test] fn a_part_of_ints_is_the_same_bytes_as_the_solid() {
         let t = [tri([0.001, 0.002, 0.003], [0.002, 0.002, -0.003], [0.001, -0.002, 0.003], 0xff0000), tri([0.5, 0.0, 1.0], [0.0; 3], [-0.25, 0.1, 0.0], 0x00ff01)];

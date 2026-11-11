@@ -8,7 +8,9 @@ pub struct Chunk { pub sig: u32, pub layer: u32, pub color: u32, pub alpha: u32,
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
 pub struct Rect { pub x0: u32, pub y0: u32, pub x1: u32, pub y1: u32 }
 #[derive(Clone, Debug, PartialEq)]
-pub struct Solid { pub n: u32, pub b: [u32; 6], pub d: Vec<u8> }
+/// `faces`: the triangles' B-rep faces as runs (varints, one a face: how many triangles in a row are of it), when the model's mesher said
+/// them (a STEP's, unthinned): a client smooths normals within a face and leaves every face's edge crisp. Empty otherwise.
+pub struct Solid { pub n: u32, pub b: [u32; 6], pub d: Vec<u8>, pub faces: Vec<u8> }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Plot { pub cs: Vec<Chunk>, pub b: Rect, pub thick: u32, pub solid: Option<Solid>, pub edge: Rect }
 #[derive(Clone, Debug, PartialEq)]
@@ -50,7 +52,7 @@ pub fn parse_child(out: &str) -> Plot {
                 if at + dl > cs.len() { return p }
                 let d: Vec<u8> = cs[at..at + dl].iter().map(|c| *c as u32 as u8).collect(); at += dl;
                 if cs.get(at) == Some(&'\n') { at += 1 }
-                p.solid = Some(Solid { n: nums[0], b: [nums[1], nums[2], nums[3], nums[4], nums[5], nums[6]], d });
+                p.solid = Some(Solid { n: nums[0], b: [nums[1], nums[2], nums[3], nums[4], nums[5], nums[6]], d, faces: vec![] });
             }
             _ => {}
         }
@@ -104,9 +106,10 @@ pub fn mesh_id(d: &[u8]) -> u64 { d.iter().fold(0xcbf29ce484222325u64, |h, b| (h
 /// Plot.msg.solid: `{1: "plot", 31: key, box3, n, mesh}`.
 pub fn solid_frame(key: &str, so: &Solid) -> Vec<u8> {
     let mut o = Vec::with_capacity(64 + so.d.len());
-    head(&mut o, 5, 5); uint(&mut o, 1); text(&mut o, "plot"); uint(&mut o, 31); text(&mut o, key);
+    head(&mut o, 5, if so.faces.is_empty() { 5 } else { 6 }); uint(&mut o, 1); text(&mut o, "plot"); uint(&mut o, 31); text(&mut o, key);
     text(&mut o, "box3"); head(&mut o, 4, 6); for v in so.b { int(&mut o, v) }
     text(&mut o, "n"); uint(&mut o, so.n); text(&mut o, "mesh"); bytes(&mut o, &so.d);
+    if !so.faces.is_empty() { text(&mut o, "faces"); bytes(&mut o, &so.faces); } // a client that does not know it skips it
     o
 }
 
@@ -118,14 +121,18 @@ pub fn parts_frame(key: &str, of: u32, rev: &str) -> Vec<u8> {
     o
 }
 /// One part model and its instances: `{1: "plot", 31: key, part, n, mesh, at, refs, done}`; `at` is 12 little-endian f32 an instance.
-pub fn part_frame(key: &str, id: &str, n: u32, mesh: &[u8], at: &[[f32; 12]], refs: &[String], done: u32) -> Vec<u8> {
-    let mut o = Vec::with_capacity(96 + mesh.len() + at.len() * 48 + refs.iter().map(|r| r.len() + 2).sum::<usize>());
-    head(&mut o, 5, 8); uint(&mut o, 1); text(&mut o, "plot"); uint(&mut o, 31); text(&mut o, key);
+pub fn part_frame(key: &str, id: &str, n: u32, mesh: &[u8], at: &[[f32; 12]], refs: &[String], done: u32) -> Vec<u8> { part_frame_faces(key, id, n, mesh, at, refs, done, &[]) }
+/// `part_frame` with its triangles' B-rep faces (`Solid::faces`), when its mesher said them.
+#[allow(clippy::too_many_arguments)]
+pub fn part_frame_faces(key: &str, id: &str, n: u32, mesh: &[u8], at: &[[f32; 12]], refs: &[String], done: u32, faces: &[u8]) -> Vec<u8> {
+    let mut o = Vec::with_capacity(96 + mesh.len() + faces.len() + at.len() * 48 + refs.iter().map(|r| r.len() + 2).sum::<usize>());
+    head(&mut o, 5, if faces.is_empty() { 8 } else { 9 }); uint(&mut o, 1); text(&mut o, "plot"); uint(&mut o, 31); text(&mut o, key);
     text(&mut o, "part"); text(&mut o, id); text(&mut o, "n"); uint(&mut o, n); text(&mut o, "mesh"); bytes(&mut o, mesh);
     let ab: Vec<u8> = at.iter().flatten().flat_map(|x| x.to_le_bytes()).collect();
     text(&mut o, "at"); bytes(&mut o, &ab);
     text(&mut o, "refs"); head(&mut o, 4, refs.len() as u32); for r in refs { text(&mut o, r) }
     text(&mut o, "done"); uint(&mut o, done);
+    if !faces.is_empty() { text(&mut o, "faces"); bytes(&mut o, faces); }
     o
 }
 
@@ -146,7 +153,7 @@ mod tests {
     }
     #[test] fn scan_reads_a_solid() {
         let t = "m3 1 2 3 4 5 6 4 \u{0}\u{80}\u{ff}\u{41}\n";
-        let p = parse_child(t); assert_eq!(p.solid, Some(Solid { n: 3, b: [1, 2, 3, 4, 5, 6], d: vec![0, 128, 255, 65] }));
+        let p = parse_child(t); assert_eq!(p.solid, Some(Solid { n: 3, b: [1, 2, 3, 4, 5, 6], d: vec![0, 128, 255, 65], faces: vec![] }));
     }
     // law plot_delta_exact: what the phone rebuilds from the delta is exactly the new plot, whatever it held
     #[test] fn plot_delta_exact() {
@@ -170,7 +177,7 @@ mod tests {
         assert_eq!(&f[..9], &[0xa8, 0x01, 0x64, b'p', b'l', b'o', b't', 0x18, 0x1f]); // map(8), 1:"plot", 31:
         let s = String::from_utf8_lossy(&f).into_owned(); assert!(s.contains("fam") && s.contains("base") && s.contains("thick"));
         assert!(f.windows(3).any(|w| w == [0x41, 0x01, 0x02] || w == [0x42, 0x01, 0x02])); // d as a byte string
-        let m = solid_frame("2|/p|", &Solid { n: 1, b: [1, 2, 3, 4, 5, 6], d: vec![9] }); assert_eq!(m[0], 0xa5);
+        let m = solid_frame("2|/p|", &Solid { n: 1, b: [1, 2, 3, 4, 5, 6], d: vec![9], faces: vec![] }); assert_eq!(m[0], 0xa5);
         let p = parts_frame("2|p|", 3, "r"); assert_eq!(&p[..9], &[0xa3, 0x01, 0x64, b'p', b'l', b'o', b't', 0x18, 0x1f]);
         let q = part_frame("2|p|", "0123456789abcdef", 1, &[9], &[[1.0; 12]], &["R1".into()], 1); assert_eq!(q[0], 0xa8);
         assert!(q.windows(6).any(|w| w[0] == 0x58 && w[1] == 48 && w[2..6] == 1.0f32.to_le_bytes()), "at: 48 bytes an instance");

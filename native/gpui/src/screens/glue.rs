@@ -277,8 +277,11 @@ impl Backplane {
             let page = cx.new(crate::viewers::solid::SolidPage::new);
             let back = self.local.viewer_backdrop(self.light()); page.update(cx, |p, _| p.set_backdrop(back));
             // the page's Retry: the same source asked for again (a failed source is read again when it is watched)
-            cx.subscribe(&page, |this, _, ev: &crate::viewers::solid::SolidEvent, _| { let crate::viewers::solid::SolidEvent::Retry(key) = ev;
-                if let Some(p) = crate::viewers::solid::retry_watch(key) { let _ = this.tx.try_send(Command::Rpc("kicad.watch".into(), super::settings::Secret(p), "watch")); } }).detach();
+            cx.subscribe(&page, |this, _, ev: &crate::viewers::solid::SolidEvent, _| match ev {
+                crate::viewers::solid::SolidEvent::Retry(key) => if let Some(p) = crate::viewers::solid::retry_watch(key) { let _ = this.tx.try_send(Command::Rpc("kicad.watch".into(), super::settings::Secret(p), "watch")); },
+                // zoomed in on a STEP: its solids there meshed finer by the hub, the model replaced when they are
+                crate::viewers::solid::SolidEvent::Refine(key, at, r) => { let _ = this.tx.try_send(Command::Rpc("kicad.refine".into(), super::settings::Secret(serde_json::json!({"key": key, "at": at, "r": r})), "refine")); }
+            }).detach();
             self.screens.solid = Some(page);
         }
         let solid = self.screens.solid.clone().unwrap();

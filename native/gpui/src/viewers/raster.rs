@@ -55,7 +55,11 @@ impl Hasher for Fx {
 
 /// A normal for each corner of each triangle. `keys` is the integer position of each corner (3 a triangle, in order): corners with the same
 /// key are one vertex. A corner's normal is the angle-weighted mean of the faces around its vertex that lie within the crease angle of its own face.
-pub fn smooth_normals(tris: &[[f32; 9]], keys: &[[i32; 3]]) -> Vec<[f32; 9]> {
+pub fn smooth_normals(tris: &[[f32; 9]], keys: &[[i32; 3]]) -> Vec<[f32; 9]> { smooth_normals_in(tris, keys, None) }
+/// `smooth_normals` with each triangle's B-rep face (a STEP's, from the hub's `faces`): a corner then blends the triangles of its own face
+/// only, whatever their angle, so a curve is smooth and every real edge crisp, a shallow chamfer's too. None: the angle decides (CREASE_COS).
+pub fn smooth_normals_in(tris: &[[f32; 9]], keys: &[[i32; 3]], faces: Option<&[u32]>) -> Vec<[f32; 9]> {
+    let faces = faces.filter(|f| f.len() == tris.len());
     let n = tris.len();
     let mut ids: HashMap<[i32; 3], u32, BuildHasherDefault<Fx>> = HashMap::with_capacity_and_hasher(n * 3 / 2 + 16, Default::default());
     let vid: Vec<u32> = keys.iter().map(|k| { let next = ids.len() as u32; *ids.entry(*k).or_insert(next) }).collect();
@@ -84,7 +88,9 @@ pub fn smooth_normals(tris: &[[f32; 9]], keys: &[[i32; 3]]) -> Vec<[f32; 9]> {
         let v = vid[c] as usize; let list = &around[start[v] as usize..start[v + 1] as usize];
         let mut acc = [0f32; 3];
         if list.len() <= 64 && dot(own, own) > 0.0 {
-            for &d in list { let d = d as usize; let f = face[d / 3]; if dot(f, own) >= CREASE_COS { for a in 0..3 { acc[a] += f[a] * ang[d]; } } }
+            for &d in list { let d = d as usize; let f = face[d / 3];
+                let blend = match faces { Some(g) => g[d / 3] == g[t], None => dot(f, own) >= CREASE_COS };
+                if blend { for a in 0..3 { acc[a] += f[a] * ang[d]; } } }
         }
         let nrm = if dot(acc, acc) > 1e-20 { norm(acc) } else { own };
         out[t][3 * k..3 * k + 3].copy_from_slice(&nrm);
