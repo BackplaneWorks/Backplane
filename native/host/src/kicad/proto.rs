@@ -544,9 +544,11 @@ mod tests {
         let s = from_bytes(&std::fs::read(fixture("fixtures/kipc/api.desc")).unwrap()).unwrap();
         assert!(golden(&s, "files/fixtures/kipc_golden_fixture.json") >= 10);
     }
-    /// The runtime's descriptor set is KiCad's and stays out of this repository: on a machine without the runtime this says so and passes.
+    /// The runtime's descriptor set is KiCad's and stays out of this repository: BACKPLANE_TEST_API_DESC names a runtime's
+    /// `share/backplane/api.desc` (e.g. `<home>/kicad/10.99.0-bp.9/share/backplane/api.desc`); without it, or with no file there, this says so and passes.
+    /// No default path: 0.14's `~/.backplane-bend/kicad` is gone, and a test does not go looking in a person's home.
     #[test] fn golden_runtime_schema() {
-        let p = std::env::var("BACKPLANE_TEST_API_DESC").unwrap_or_else(|_| format!("{}/.backplane-bend/kicad/10.99.0-bp.4/share/backplane/api.desc", std::env::var("HOME").unwrap_or_default()));
+        let Some(p) = std::env::var("BACKPLANE_TEST_API_DESC").ok().filter(|s| !s.is_empty()) else { eprintln!("SKIPPED golden_runtime_schema: BACKPLANE_TEST_API_DESC is not set"); return };
         let Ok(b) = std::fs::read(&p) else { eprintln!("SKIPPED golden_runtime_schema: no {p}"); return };
         let s = from_bytes(&b).unwrap();
         assert!(golden(&s, "files/fixtures/kipc_golden_runtime.json") >= 20);
