@@ -39,9 +39,10 @@ fn main() {
         std::process::exit(r.code)
     }
     if k == "--frame" {
-        let Some(out) = a.get(2) else { eprintln!("bp-plot --frame MODEL.glb OUT"); std::process::exit(64) };
+        let Some(out) = a.get(2) else { eprintln!("bp-plot --frame MODEL.glb OUT [step]"); std::process::exit(64) };
         let bytes = std::fs::read(file).unwrap_or_default();
-        let plot = solidread::plot_of(&bytes, false).unwrap_or_else(|_| { eprintln!("model too big"); std::process::exit(3) });
+        // `step`: the GLB is a STEP's mesh, made a plot as the Mech tab makes it (millimetres, Z up)
+        let plot = solidread::plot_of(&bytes, a.get(3).map_or(false, |x| x == "step")).unwrap_or_else(|_| { eprintln!("model too big"); std::process::exit(3) });
         let Some(so) = plot.solid else { eprintln!("no triangles"); std::process::exit(3) };
         let text = |f: &mut Vec<u8>, s: &str| { f.push(0x60 | s.len() as u8); f.extend(s.as_bytes()) };
         let mut f = vec![0xa3]; text(&mut f, "key"); text(&mut f, "2|bench"); text(&mut f, "n"); f.push(0x1a); f.extend(so.n.to_be_bytes());

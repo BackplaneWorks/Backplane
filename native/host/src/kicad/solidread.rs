@@ -21,15 +21,22 @@ fn revision(path: &str) -> String {
 fn in_dir(dir: &str, name: &str) -> String { std::path::Path::new(dir).join(name).to_string_lossy().into_owned() }
 /// Pv.step.out, Pv.board.out.recipe: a model's name in the cache, with the source's exact revision unhashed
 pub fn cached(dir: &str, path: &str, rev: &str, step: bool, bare: bool, full: bool) -> String {
-    let name = if step { format!("step6p-{}.{rev}.normal.glb", stepglb::fnv(path)) }
+    let name = if step { format!("step7p-{}.{rev}.normal.glb", stepglb::fnv(path)) }
         else if full { format!("board-full-outer-v1-{}{}.{rev}.glb", if bare { "bare-" } else { "parts-" }, stepglb::fnv(path)) }
         else { format!("board-{}.{rev}.glb", stepglb::fnv(&format!("{}{path}", if bare { "bare3|" } else { "parts3|" }))) };
     in_dir(dir, &name)
 }
 /// Pv.solid.out: where a model's GLB comes from. A STEP's is named by its content (`step_by_content`), so every copy of a part (the same
 /// file in each of a project's worktrees) finds the mesh made once; one meshed under 0.14's name (path and revision) is taken over.
-pub fn glb_of(kind: u32, path: &str) -> String {
+pub fn glb_of(kind: u32, path: &str) -> String { glb_at(kind, path, None) }
+/// `glb_of` at a detail: a STEP refined around a box (`stepglb::Detail::refined`) is a mesh of its own beside the first, named by the box.
+pub fn glb_at(kind: u32, path: &str, fine: Option<[f64; 6]>) -> String {
     if path.ends_with(".glb") { return path.to_string() }
+    if let (Some(b), true) = (fine, is_step(path)) {
+        let dir = stepglb::cache_dir();
+        let tag = stepglb::fnv(&b.map(|v| format!("{v:.3}")).join(","));
+        if let Some(own) = step_by_content(&dir, path) { return own.replace(".normal.glb", &format!(".fine-{tag:08x}.glb")) }
+    }
     let dir = stepglb::cache_dir();
     let legacy = cached(&dir, path, &revision(path), is_step(path), kind == 3, kind == 4);
     if !is_step(path) { return legacy }
@@ -44,13 +51,13 @@ fn step_by_content(dir: &str, path: &str) -> Option<String> {
     static KEYS: std::sync::Mutex<Option<std::collections::HashMap<(String, String), String>>> = std::sync::Mutex::new(None);
     let at = (path.to_string(), revision(path));
     if at.1.is_empty() { return None }
-    if let Some(k) = KEYS.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|m| m.get(&at)) { return Some(in_dir(dir, &format!("step6-{k}.normal.glb"))) }
+    if let Some(k) = KEYS.lock().unwrap_or_else(|e| e.into_inner()).as_ref().and_then(|m| m.get(&at)) { return Some(in_dir(dir, &format!("step7-{k}.normal.glb"))) }
     let bytes = std::fs::read(path).ok()?;
     let k: String = Sha256::digest(&bytes).iter().map(|b| format!("{b:02x}")).collect();
     let mut g = KEYS.lock().unwrap_or_else(|e| e.into_inner()); let m = g.get_or_insert_with(Default::default);
     if m.len() > 4096 { m.clear() }
     m.insert(at, k.clone());
-    Some(in_dir(dir, &format!("step6-{k}.normal.glb")))
+    Some(in_dir(dir, &format!("step7-{k}.normal.glb")))
 }
 /// A mesh made under its old name, given its content name too: a hard link, else a copy put in place whole.
 fn take_over(from: &str, to: &str) {
@@ -83,7 +90,7 @@ pub fn stage_name(path: &str) -> String {
     format!("{}.glb", if stem.is_empty() { "model" } else { &stem })
 }
 /// Pv.glb.staged: the export, in a folder of its own, promoted to `out` only when it worked; the folder goes either way
-fn export(step: bool, bare: bool, full: bool, path: &str, out: &str, cli: &str, tools: &[Mesher], on: Option<&mut dyn FnMut(Streamed)>) -> Ran {
+fn export(step: bool, bare: bool, full: bool, path: &str, out: &str, cli: &str, tools: &[Mesher], detail: stepglb::Detail, on: Option<&mut dyn FnMut(Streamed)>) -> Ran {
     if !step && cli.is_empty() { return Ran { code: 127, out: "KiCad is not installed on this machine (no kicad-cli): get it from kicad.org/download or its package manager".into() } }
     if let Some(d) = std::path::Path::new(out).parent() { let _ = std::fs::create_dir_all(d); }
     let Ok(dir) = stepglb::stage(out, "export-") else { return Ran { code: 3, out: "Unable to create model staging directory".into() } };
@@ -95,7 +102,7 @@ fn export(step: bool, bare: bool, full: bool, path: &str, out: &str, cli: &str, 
             stepglb::Event::Of { leaves, .. } => f(Streamed::Of(leaves)),
             stepglb::Event::Part { leaves, glb, .. } => if let Some(ts) = std::fs::read(&glb).ok().and_then(|b| part_tris(&b)) { f(Streamed::Part { tris: ts, leaves }) },
         } };
-        stepglb::convert_streaming(tools, path, &at, Some(stepglb::NORMAL), true, Some(&mut each))
+        stepglb::convert_streaming(tools, path, &at, Some(detail), true, Some(&mut each))
     } else {
         let a = flags(bare, full, &at, path);
         let mut argv = vec![cli]; argv.extend(a.iter().map(String::as_str));
@@ -120,7 +127,8 @@ pub fn part_tris(bytes: &[u8]) -> Option<Vec<glb::Tri3>> {
 pub fn plot_of(bytes: &[u8], step: bool) -> Result<Plot, glb::TooBig> {
     let mut ts = glb::tris(bytes)?;
     if step { solid::metres(&mut ts); solid::upright(&mut ts) } // a part from STEP stands Z up, in metres
-    let ts = solid::thin(ts);
+    // a STEP is sent as meshed while it fits (the grid of `thin` made small holes in big assemblies jagged); a board as always
+    let ts = if step { solid::fit(ts, solid::STEP_TRIS) } else { solid::thin(ts) };
     Ok(solid::plot(solid::of(&ts)))
 }
 /// A STEP part meshed into the models cache ahead of its showing (Mech's read-ahead): whether it was meshed now (false: already there,
@@ -129,19 +137,21 @@ pub fn warm(path: &str, tools: &[Mesher]) -> bool {
     if !is_step(path) || std::fs::metadata(path).map_or(true, |m| m.len() > 48 << 20) { return false }
     let out = glb_of(2, path);
     if stepglb::have(&out) { return false }
-    export(true, false, false, path, &out, "", tools, None).code == 0
+    export(true, false, false, path, &out, "", tools, stepglb::NORMAL, None).code == 0
 }
 /// Pv.child.solid: what `--plot KIND FILE INFOS` does for a 3D model. The note (parts without a model) goes to `infos`, as the child left it.
-pub fn read(kind: u32, path: &str, cli: &str, tools: &[Mesher], infos: &str) -> Got { read_streaming(kind, path, cli, tools, infos, None) }
-/// `read`, a STEP not meshed yet streaming its parts to `on` while it is (a cached one, a board or a GLB says nothing there).
-pub fn read_streaming(kind: u32, path: &str, cli: &str, tools: &[Mesher], infos: &str, on: Option<&mut dyn FnMut(Streamed)>) -> Got {
+pub fn read(kind: u32, path: &str, cli: &str, tools: &[Mesher], infos: &str) -> Got { read_streaming(kind, path, cli, tools, infos, None, None) }
+/// `read`, a STEP not meshed yet streaming its parts to `on` while it is (a cached one, a board or a GLB says nothing there). `fine`: a
+/// STEP refined around that box (its solids there meshed finer: `stepglb::Detail::refined`), kept as a mesh of its own.
+pub fn read_streaming(kind: u32, path: &str, cli: &str, tools: &[Mesher], infos: &str, fine: Option<[f64; 6]>, on: Option<&mut dyn FnMut(Streamed)>) -> Got {
     let (isglb, step) = (path.ends_with(".glb"), is_step(path));
-    let out = glb_of(kind, path);
-    let r = if isglb || stepglb::have(&out) { Ran::default() } else { export(step, kind == 3, kind == 4, path, &out, cli, tools, on) };
+    let out = glb_at(kind, path, fine);
+    let detail = fine.map_or(stepglb::NORMAL, stepglb::Detail::refined);
+    let r = if isglb || stepglb::have(&out) { Ran::default() } else { export(step, kind == 3, kind == 4, path, &out, cli, tools, detail, on) };
     if r.code != 0 { return fail(format!("3D export failed: {}", r.out.trim().chars().take(600).collect::<String>())) }
     plotgen::write_infos(infos, &missing_note(&r.out));
     let size = std::fs::metadata(&out).map(|m| m.len()).unwrap_or(0);
-    if !solid::fits(size) { return fail(solid::big(size)) }
+    if !solid::fits_for(size, step) { return fail(solid::big(size)) }
     match plot_of(&std::fs::read(&out).unwrap_or_default(), step) { Ok(p) => Got { code: 0, text: String::new(), plot: Some(p) }, Err(_) => fail(solid::big(size)) }
 }
 
@@ -154,7 +164,7 @@ mod tests {
         assert_eq!(cached("/c", "/p/b.kicad_pcb", r, false, false, false), c(format!("board-{}.{r}.glb", stepglb::fnv("parts3|/p/b.kicad_pcb"))));
         assert_eq!(cached("/c", "/p/b.kicad_pcb", r, false, true, false), c(format!("board-{}.{r}.glb", stepglb::fnv("bare3|/p/b.kicad_pcb"))));
         assert_eq!(cached("/c", "/p/b.kicad_pcb", r, false, false, true), c(format!("board-full-outer-v1-parts-{}.{r}.glb", stepglb::fnv("/p/b.kicad_pcb"))));
-        assert_eq!(cached("/c", "/p/a.step", r, true, false, false), c(format!("step6p-{}.{r}.normal.glb", stepglb::fnv("/p/a.step"))));
+        assert_eq!(cached("/c", "/p/a.step", r, true, false, false), c(format!("step7p-{}.{r}.normal.glb", stepglb::fnv("/p/a.step"))));
         assert_eq!(glb_of(2, "/p/own.glb"), "/p/own.glb");
     }
     #[test] fn a_steps_mesh_is_found_by_its_content_from_any_copy_and_an_old_name_is_taken_over() {
@@ -189,7 +199,7 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("bp-realboard-{}", std::process::id())); std::fs::create_dir_all(&dir).unwrap();
         let out = dir.join("board.glb").to_string_lossy().into_owned();
         let t = std::time::Instant::now();
-        let r = export(false, false, false, &board, &out, &cli, &[], None);
+        let r = export(false, false, false, &board, &out, &cli, &[], stepglb::NORMAL, None);
         assert_eq!(r.code, 0, "export: {}", r.out);
         let bytes = std::fs::read(&out).unwrap(); let _ = std::fs::remove_dir_all(&dir);
         let stem = std::path::Path::new(&board).file_stem().unwrap().to_string_lossy().into_owned();

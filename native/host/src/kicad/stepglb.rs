@@ -57,13 +57,28 @@ pub fn publish(r: Ran, from: &Path, out: &str) -> Ran {
 pub enum Mesher { Step2glb(String), FreeCad { gui: String, cmd: String } }
 /// Mech.detail.args as numbers (mm, radians); None is step2glb's own default (FreeCAD meshes at NORMAL then)
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Detail { pub linear: f64, pub angular: f64 }
-/// Fine enough that a 1 mm hole is round and a curve shades smooth (the clients crease at about 55 degrees: 0.2 rad steps blend), and
-/// still cheap: FreeCAD meshes a 64-pin QFP so in 0.1 s, the STEP's import being most of a conversion.
-pub const NORMAL: Detail = Detail { linear: 0.03, angular: 0.2 };
+pub struct Detail { pub linear: f64, pub angular: f64, pub relative: bool, pub fine: Option<[f64; 6]> }
+/// What every STEP is meshed at first: at most 0.1 rad (5.7 degrees) a segment, so a hole is round in 63 or more, and a linear deflection
+/// a 500th of each edge's size (OpenCascade's relative mode), so a small hole is as round as a big one and a big flat face stays cheap.
+/// About twice the triangles 0.03 mm and 0.2 rad made (the 9.5 MB USB Sniffer board: 391,000), still a second on a board.
+pub const NORMAL: Detail = Detail { linear: 0.002, angular: 0.1, relative: true, fine: None };
+/// What the solids in a zoomed view are meshed at (`refined`): 0.05 rad (126 segments a circle) and a 1000th of each edge.
+pub const FINE: (f64, f64) = (0.001, 0.05);
+/// FreeCAD's scripts take millimetres, not a share of each edge: the deflection they get for a relative detail.
+const FREECAD_MM: f64 = 0.03;
 impl Detail {
+    /// `NORMAL` with the solids that meet `box` (x0 y0 z0 x1 y1 z1, the model's millimetres) meshed at `FINE`.
+    pub fn refined(b: [f64; 6]) -> Detail { Detail { fine: Some(b), ..NORMAL } }
     /// The FreeCAD scripts' environment: BP_TOL the linear deflection (mm), BP_ANG the angular (radians).
-    pub fn env(self) -> [(&'static str, String); 2] { [("BP_TOL", self.linear.to_string()), ("BP_ANG", self.angular.to_string())] }
+    pub fn env(self) -> [(&'static str, String); 2] { [("BP_TOL", (if self.relative { FREECAD_MM } else { self.linear }).to_string()), ("BP_ANG", self.angular.to_string())] }
+    /// backplane-step2glb's arguments for this detail.
+    pub fn args(self) -> Vec<String> {
+        let mut a = vec!["--linear".to_string(), self.linear.to_string()];
+        if self.relative { a.push("--relative".into()) }
+        a.extend(["--angular".to_string(), self.angular.to_string()]);
+        if let Some(b) = self.fine { a.extend(["--fine".to_string(), b.map(|v| format!("{v:.3}")).join(","), "--fine-linear".into(), FINE.0.to_string(), "--fine-angular".into(), FINE.1.to_string()]) }
+        a
+    }
 }
 
 /// The tools to try, in order, from what this machine has: `env` is BACKPLANE_STEP2GLB, `beside` a step2glb found by the hub.
@@ -244,7 +259,7 @@ fn step2glb_run(tool: &str, src: &str, stage: &str, detail: Option<Detail>, nice
     use std::io::BufRead;
     let parts = format!("{stage}.parts");
     let mut c = command(nice, tool); c.args([src, stage]);
-    if let Some(d) = detail { c.args(["--linear", &d.linear.to_string(), "--angular", &d.angular.to_string()]); }
+    if let Some(d) = detail { c.args(d.args()); }
     if on.is_some() { if std::fs::create_dir_all(&parts).is_err() { on = None } else { c.args(["--parts", &parts]); } }
     let started = (|| {
         let (r, w) = std::io::pipe()?;
@@ -329,6 +344,12 @@ mod tests {
         assert_eq!(attempts(Some("off"), "", "", "/s"), vec![]);
         assert_eq!(attempts(Some(""), "/g", "/c", "/s"), vec![s("/s"), fc()]);
     }
+    #[test] fn a_detail_is_the_meshers_arguments_and_freecads_millimetres() {
+        assert_eq!(NORMAL.args().join(" "), "--linear 0.002 --relative --angular 0.1");
+        assert_eq!(Detail::refined([0.0, 1.0, 2.0, 3.5, 4.0, 5.25]).args().join(" "), "--linear 0.002 --relative --angular 0.1 --fine 0.000,1.000,2.000,3.500,4.000,5.250 --fine-linear 0.001 --fine-angular 0.05");
+        assert_eq!(NORMAL.env(), [("BP_TOL", "0.03".to_string()), ("BP_ANG", "0.1".to_string())], "FreeCAD takes millimetres");
+        assert!(std::f64::consts::TAU / NORMAL.angular >= 62.0, "a circle in 63 segments or more (at most 5.7 degrees each)");
+    }
     #[test] fn the_native_meshers_lines_are_read() {
         assert_eq!(event("OF 76 1348"), Some(Event::Of { leaves: 76, faces: 1348 }));
         assert_eq!(event("PART 20378 68 /c/my parts/0000.glb"), Some(Event::Part { tris: 20378, leaves: 68, glb: "/c/my parts/0000.glb".into() }), "a path with spaces is whole");
@@ -374,7 +395,7 @@ echo 'TRIS 42'
         let t = tool.to_string_lossy();
         let r = convert(&[Mesher::Step2glb("/nonexistent/tool".into()), Mesher::Step2glb(t.to_string())], "/a.step", &out, Some(NORMAL), false);
         assert_eq!((r.code, r.out.trim()), (0, "said"));
-        assert_eq!(std::fs::read_to_string(&log).unwrap().trim(), format!("/a.step {out} --linear 0.03 --angular 0.2"));
+        assert_eq!(std::fs::read_to_string(&log).unwrap().trim(), format!("/a.step {out} --linear 0.002 --relative --angular 0.1"));
         let r = convert(&[Mesher::Step2glb(t.to_string())], "/a.step", &out, None, true); assert_eq!(r.code, 0); // nice
         assert_eq!(std::fs::read_to_string(&log).unwrap().trim(), format!("/a.step {out}"));
     }

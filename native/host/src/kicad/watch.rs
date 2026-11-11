@@ -33,6 +33,15 @@ pub fn stamp(path: &str) -> Stamp {
 /// A saved version or a comparison: immutable, read once.
 pub fn is_version(path: &str) -> bool { path.starts_with("git\t") || path.starts_with("diff\n") }
 pub fn solid_kind(k: u32) -> bool { matches!(k, 2..=4) }
+/// The box a refine meshes finer: the sphere at `at` of radius `r`, out to a grid of the next power of two above its size, so views a
+/// little apart share one refined mesh (it is cached by the box). Millimetres: x0 y0 z0 x1 y1 z1.
+pub fn focus_box(at: [f64; 3], r: f64) -> [f64; 6] {
+    let q = (2.0 * r.max(0.01)).log2().ceil().exp2();
+    let lo = at.map(|v| ((v - r) / q).floor() * q); let hi = at.map(|v| ((v + r) / q).ceil() * q);
+    [lo[0], lo[1], lo[2], hi[0], hi[1], hi[2]]
+}
+/// Whether box `a` lies inside box `b`.
+pub fn within(a: [f64; 6], b: [f64; 6]) -> bool { (0..3).all(|k| a[k] >= b[k] && a[k + 3] <= b[k + 3]) }
 /// How long a 3D source's first read should take (ms; 0: not worth saying), by the tool that will mesh a STEP not meshed yet:
 /// backplane-step2glb about 50 ms and 0.12 s a megabyte (measured 2026-11-11: a 9 MB board 1.2 s, a 5.6 MB assembly 0.7 s), FreeCAD its
 /// start (about 2.5 s) and 0.35 s a megabyte (2026-11-09: a 7.4 MB connector 3.3 s, a 10 MB assembly 5.5 s). After that, the last read's time.
@@ -58,7 +67,8 @@ pub fn fnv(s: &str) -> u32 { s.chars().fold(2166136261u32, |h, c| (h ^ c as u32)
 
 #[derive(Default)]
 /// `parts`: a board model's part frames so far (the one that starts them first), `stop` its stream's (set when another replaces it)
-struct Src { kind: u32, file: String, stamp: Option<Stamp>, busy: bool, plot: Option<Arc<Plot>>, again: bool, parts: Vec<Arc<Vec<u8>>>, stop: Option<Arc<std::sync::atomic::AtomicBool>> }
+/// `focus`: a STEP the person zoomed in on, refined around this box (kicad.refine): read at that detail from then on
+struct Src { kind: u32, file: String, stamp: Option<Stamp>, busy: bool, plot: Option<Arc<Plot>>, again: bool, parts: Vec<Arc<Vec<u8>>>, stop: Option<Arc<std::sync::atomic::AtomicBool>>, focus: Option<[f64; 6]> }
 /// `kept`: the id (`plot::mesh_id`) of the model the client already holds from an earlier visit; that model is not sent again
 /// `parts_at`: how many of its source's part frames this watcher has been sent
 struct Sub { key: String, held: Vec<plot::Chunk>, mesh: Vec<u8>, fresh: bool, base: String, kept: u64, parts_at: usize }
@@ -300,6 +310,20 @@ impl Plots {
         s.parts.clear();
         for subs in st.subs.values_mut() { for sub in subs.iter_mut().filter(|s| s.key == ky) { sub.parts_at = 0 } }
     }
+    /// kicad.refine: a client zoomed in on a STEP it watches, around `at` (the model's millimetres) within `r`. The source is read again
+    /// with its solids in that box meshed finer, and the finer model replaces the one on show (same key); a box already refined, or within
+    /// the one refined, asks nothing. Err: not a STEP this client watches.
+    pub fn refine(self: &Arc<Self>, hub: &Arc<Hub>, client: u64, ky: &str, at: [f64; 3], r: f64) -> Result<bool, &'static str> {
+        let b = focus_box(at, r);
+        { let mut st = self.st.lock().unwrap();
+          if !st.subs.get(&client).map_or(false, |v| v.iter().any(|s| s.key == ky)) { return Err("that model is not on show here") }
+          let Some(s) = st.srcs.get_mut(ky) else { return Err("that model is not on show here") };
+          if !solid_kind(s.kind) || !solidread::is_step(&s.file) || is_version(&s.file) { return Err("only a STEP part is refined") }
+          if s.focus.map_or(false, |f| within(b, f)) { return Ok(false) }
+          s.focus = Some(b); }
+        self.read(hub, ky);
+        Ok(true)
+    }
     /// A board model's parts, streamed: the plan's frames go onto the source as they are made and out to its watchers. A newer model's
     /// stream stops this one (its flag), and so does the source leaving.
     fn start_parts(self: &Arc<Self>, hub: &Arc<Hub>, ky: &str, file: &str, rev: String, made: Arc<(pcb3d::stream::Plan, u64)>) {
@@ -428,7 +452,7 @@ impl Plots {
             // Pv.read.at: a model whose GLB is known too big is refused at once, not behind another model's read
             let native3d = solid3 && file.ends_with(".kicad_pcb") && !file.starts_with("diff\n") && Self::board3d_native(&hub).await;
             let known = if solid3 && !native3d { solidread::known(kind, &file) } else { 0 };
-            let _one = if solid3 && !native3d && solid::fits(known) {
+            let _one = if solid3 && !native3d && solid::fits_for(known, solidread::is_step(&file)) {
                 let g = match me.solid.try_lock() { Ok(g) => g, Err(_) => { say("Waiting for another 3D model to finish…"); me.solid.lock().await } };
                 Some(g)
             } else { None };
@@ -436,7 +460,7 @@ impl Plots {
             let before = if is_version(&file) { Stamp::default() } else { stamp(&file) };
             let mut parts = None;
             let out = if native3d { me.run_board3d(&hub, kind, &file, &ky).await.map(|r| match r { Ok((p, plan)) => { parts = plan; (0, String::new(), Some(p)) } Err(e) => (3, e, None) }) }
-                else if !solid::fits(known) { Some((3, solid::big(known), None)) } else if native() { me.run_native(&hub, kind, &file, &ky).await } else { me.run_child(kind, &file, &ky).await.map(|(c, t)| (c, t, None)) };
+                else if !solid::fits_for(known, solidread::is_step(&file)) { Some((3, solid::big(known), None)) } else if native() { me.run_native(&hub, kind, &file, &ky).await } else { me.run_child(kind, &file, &ky).await.map(|(c, t)| (c, t, None)) };
             let after = if is_version(&file) { Stamp::default() } else { stamp(&file) };
             let (code, text, made) = match out { Some((c, t, m)) => if before != after { (2, String::new(), None) } else { (c, t, m) }, None => (1, "cannot run the plot reader".into(), None) };
             let mut again = false;
@@ -473,8 +497,10 @@ impl Plots {
         let (f, infos) = (file.to_string(), self.infos(ky));
         if solid_kind(kind) {
             let (cli, home) = (super::ipc::runtime(hub).await.cli, self.home.clone());
-            // a STEP not meshed yet streams: its parts go out as they are meshed, its whole model after them replaces them
-            let stream = (solidread::is_step(file) && !is_version(file) && solidread::known(kind, file) == 0).then(|| self.step_stream(ky));
+            // a STEP not meshed yet streams: its parts go out as they are meshed, its whole model after them replaces them. A refined one
+            // (zoomed in on) does not: the model on show stays until the finer one replaces it
+            let focus = self.st.lock().unwrap().srcs.get(ky).and_then(|s| s.focus);
+            let stream = (focus.is_none() && solidread::is_step(file) && !is_version(file) && solidread::known(kind, file) == 0).then(|| self.step_stream(ky));
             let (me, hub, ky) = (self.clone(), hub.clone(), ky.to_string());
             return tokio::task::spawn_blocking(move || {
                 let i = infos.to_string_lossy().into_owned();
@@ -492,9 +518,9 @@ impl Plots {
                                 emit(plot::part_frame(&ky, &format!("step{n}"), count, &mesh, &[IDENTITY], &[], done))
                             }
                         };
-                        solidread::read_streaming(kind, &f, &cli, &tools, &i, Some(&mut on))
+                        solidread::read_streaming(kind, &f, &cli, &tools, &i, None, Some(&mut on))
                     }
-                    None => solidread::read(kind, &f, &cli, &tools, &i),
+                    None => solidread::read_streaming(kind, &f, &cli, &tools, &i, focus, None),
                 }));
                 let o = match r { Ok(g) => (g.code, g.text, g.plot), Err(_) => (3, plotgen::UNREAD.to_string(), None) };
                 #[cfg(all(target_os = "linux", target_env = "gnu"))] unsafe { libc::malloc_trim(0); }
@@ -644,7 +670,7 @@ pub fn viewer_state(thread: &str) -> (u64, Value) { vs().lock().unwrap().get(thr
 
 pub struct KicadRpc(pub Arc<Plots>);
 impl RpcHandler for KicadRpc {
-    fn methods(&self) -> &'static [&'static str] { &["kicad.watch", "kicad.info", "kicad.warm", "kicad.probe", "kicad.open", "kicad.install", "viewer.state", "history.steps"] }
+    fn methods(&self) -> &'static [&'static str] { &["kicad.watch", "kicad.refine", "kicad.info", "kicad.warm", "kicad.probe", "kicad.open", "kicad.install", "viewer.state", "history.steps"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let s = |k: &str| p.get(k).and_then(Value::as_str).unwrap_or("").to_string();
@@ -662,6 +688,16 @@ impl RpcHandler for KicadRpc {
                     let keys = if kind == "split" { self.0.watch_split(hub, who.client, &root, &path, &s("tree"), &board) }
                     else { self.0.watch(hub, who.client, kind_of(&kind), &root, &path, &s("tree"), kept_of(&k)) };
                     vec![json!({"t":"reply","id":id,"ok":true,"result":{"keys":keys}})]
+                }
+                // the client zoomed in on a STEP: its solids there meshed finer, the model replaced when they are (Plots::refine)
+                "kicad.refine" => {
+                    let n = |v: Option<&Value>| v.and_then(Value::as_f64).filter(|x| x.is_finite());
+                    let at = p.get("at").and_then(Value::as_array).map(|a| a.iter().map(|v| n(Some(v))).collect::<Option<Vec<f64>>>()).flatten();
+                    let (Some(at), Some(r)) = (at.filter(|a| a.len() == 3), n(p.get("r")).filter(|r| *r > 0.0)) else { return vec![json!({"t":"reply","id":id,"ok":false,"error":"refine takes at [x, y, z] and r"})] };
+                    match self.0.refine(hub, who.client, &s("key"), [at[0], at[1], at[2]], r) {
+                        Ok(started) => vec![json!({"t":"reply","id":id,"ok":true,"result":{"started":started}})],
+                        Err(why) => vec![json!({"t":"reply","id":id,"ok":false,"error":why})],
+                    }
                 }
                 "kicad.warm" => { // the saved versions before and after a step, plotted ahead
                     let (kind, root) = (s("kind"), s("root"));
@@ -749,7 +785,7 @@ mod tests {
         let plots = Plots::new(&home); let ky = "2|/p/mech/lid.step|".to_string();
         let mut out = hub.attach(7);
         { let mut st = plots.st.lock().unwrap();
-          st.srcs.insert(ky.clone(), Src { kind: 2, file: "/p/mech/lid.step".into(), stamp: None, busy: true, plot: None, again: false, parts: vec![], stop: None });
+          st.srcs.insert(ky.clone(), Src { kind: 2, file: "/p/mech/lid.step".into(), stamp: None, busy: true, plot: None, again: false, parts: vec![], stop: None, focus: None });
           st.subs.insert(7, vec![Sub { key: ky.clone(), held: vec![], mesh: vec![], fresh: true, base: String::new(), kept: 0, parts_at: 0 }]); }
         let raw = |out: &mut crate::hub::Outbox| { let mut v = vec![]; while let Ok(o) = out.try_recv() { if let Out::Raw(b) = o { v.push(String::from_utf8_lossy(&b).into_owned()) } } v };
         let old = plots.step_stream(&ky);
@@ -763,6 +799,13 @@ mod tests {
         assert!(raw(&mut out).is_empty(), "nothing of the stream after its end (the model goes next)");
         assert!(plots.st.lock().unwrap().srcs[&ky].parts.is_empty(), "a later view is sent the model alone");
         let _ = std::fs::remove_dir_all(&home);
+    }
+    #[test] fn a_refine_box_is_snapped_out_to_a_power_of_two_so_near_views_share_it() {
+        let b = focus_box([1960.0, 150.0, 10.0], 5.0);
+        assert_eq!(b, [1952.0, 144.0, 0.0, 1968.0, 160.0, 16.0], "a 10 mm view: a 16 mm grid");
+        assert_eq!(focus_box([1961.0, 151.0, 9.0], 5.0), b, "a view a millimetre over: the same box, the same cached mesh");
+        assert!(within(focus_box([1958.0, 150.0, 10.0], 2.0), b), "a closer look inside it asks nothing");
+        assert!(!within(focus_box([1990.0, 150.0, 10.0], 5.0), b));
     }
     #[test] fn a_step_not_meshed_yet_has_an_estimate_by_its_size() {
         let d = std::env::temp_dir().join(format!("bp-est-{}", std::process::id())); let _ = std::fs::create_dir_all(&d);

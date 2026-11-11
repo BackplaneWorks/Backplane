@@ -1112,6 +1112,26 @@ mod tests {
             eprintln!("BENCH {} tris {} bytes {} decode {decode:.1} ms gpu-vertices {verts:.1} ms ({v}) cpu-picture-1280x800 {cpu:.1} ms {}", f.file_name().unwrap().to_string_lossy(), m.tris.len(), b.len(), if px.is_some() { "" } else { "(none)" });
         }
     }
+    /// A close-up of a model frame as the page draws it, written as PNG: the CPU's picture, and the GPU's where there is one. Opt in:
+    /// BP_CLOSE="FRAME|OUT_STEM|x,y,z|dist|view" cargo test close_up -- --ignored --nocapture (x y z: the point looked at, in the model's
+    /// millimetres; view: iso, top, front...; several close-ups separated by `;`). bp-plot --frame MODEL.glb FRAME step makes a STEP's frame.
+    #[test] #[ignore] fn close_up() {
+        let Ok(spec) = std::env::var("BP_CLOSE") else { eprintln!("skipped: no BP_CLOSE"); return };
+        for one in spec.split(';').filter(|s| !s.trim().is_empty()) {
+            let f: Vec<&str> = one.split('|').collect();
+            let b = std::fs::read(f[0]).unwrap();
+            let Some(SolidFrame::Model(_, m)) = parse_frame(&b) else { panic!("{}: not a model", f[0]) };
+            let t: Vec<f32> = f[2].split(',').map(|x| x.parse().unwrap()).collect();
+            let mut c = Camera::fitted_for(&m, 1.5).named(f[4]);
+            c.pivot = [t[0], t[1], t[2]]; c.shift = [0.0, 0.0]; c.target = c.pivot; c.dist = f[3].parse().unwrap();
+            let (w, h) = (900usize, 600usize);
+            let save = |px: Vec<u8>, tag: &str| { let mut px = px; for p in px.chunks_exact_mut(4) { p.swap(0, 2); } image::RgbaImage::from_raw(w as u32, h as u32, px).unwrap().save(format!("{}.{tag}.png", f[1])).unwrap(); };
+            let m = Arc::new(m);
+            save(render(&m, &c, w, h, 3, &|| true).unwrap(), "cpu");
+            #[cfg(target_os = "linux")] if let Some(g) = super::super::solid_gpu::shared().lock().unwrap().as_mut() { if let Some(px) = g.render_layers(&[(&m, None)], &[], &c, w, h, &super::super::raster::Backdrop::DARK) { save(px, "gpu") } }
+            eprintln!("CLOSE {} tris {}", f[1], m.tris.len());
+        }
+    }
     #[test] fn the_cpu_mesh_grows_by_the_parts_that_came_and_is_the_same_as_made_whole() {
         let m = mesh(); let (a, b, c) = (at(&m, [0.0; 3]), at(&m, [3.0, 0.0, 0.0]), at(&m, [0.0, 7.0, 0.0]));
         let mut d = Drawer::default();
