@@ -129,6 +129,7 @@ fn space_cmd(v: &str) -> Command { act("space-act", v) }
 fn hook_revoke(id: &str) -> Command { act("hook-revoke", id) }
 fn create_bot(_: &str) -> Command { act("bot-create", "") }
 fn save_room(_: &str) -> Command { act("room-save", "") }
+fn keep_room(id: &str) -> Command { act("room-keep", id) }
 fn close_bot_form(_: &str) -> Command { act("form-close", "@bnew") }
 fn close_room_form(_: &str) -> Command { act("form-close", "@rnew") }
 fn provider_cmd(v: &str) -> Command { Command::Action("bfield".into(), format!("provider{SEP}{v}")) }
@@ -460,7 +461,12 @@ pub fn page(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
     let header = |t: String| div().h(px(36.)).flex_shrink_0().px_3().flex().items_center().border_b_1().border_color(c("line")).font_weight(FontWeight::BOLD).child(t);
     let frame = |inner: AnyElement, top: f32, header: Option<Div>| div().id("bot-page").absolute().top(px(top)).left_0().right_0().bottom_0().occlude().bg(c("bg")).flex().flex_col().children(header).child(div().id("bot-body").flex_1().min_h_0().overflow_y_scroll().child(inner)).into_any_element();
     match kind {
-        "room" => Some(div().id("room-page").absolute().inset_0().occlude().bg(c("bg")).flex().flex_col().child(header(bot["title"].as_str().map(str::to_string).unwrap_or_else(|| string(bot, "name"))).gap_2().children(super::badge::place(light, &bot["mark"], "", "room-head"))).child(div().flex_1().min_h_0().child(talk_page(cx, light, fields, bot, "rpost", "room-post"))).into_any_element()),
+        "room" => {
+            // a bots' exchange opened by its id: Keep this room makes it permanent (`roomPage.keep`); a closed one says so
+            let keep = (bot["keep"] == true).then(|| div().ml_auto().font_weight(FontWeight::NORMAL).child(btn(cx, light, "room-keep".into(), trs("Keep this room"), false, keep_room, string(bot, "id"))));
+            let closed = (bot["closed"] == true).then(|| div().px_3().py_1().text_size(px(12.)).text_color(c("dim")).border_b_1().border_color(c("line")).child(trs("This exchange between bots is over. It is kept for reference.")));
+            Some(div().id("room-page").absolute().inset_0().occlude().bg(c("bg")).flex().flex_col().child(header(bot["title"].as_str().map(str::to_string).unwrap_or_else(|| string(bot, "name"))).gap_2().children(super::badge::place(light, &bot["mark"], "", "room-head")).children(keep)).children(closed).child(div().flex_1().min_h_0().child(talk_page(cx, light, fields, bot, "rpost", "room-post"))).into_any_element())
+        }
         "remote" => Some(div().id("remote-page").absolute().inset_0().occlude().bg(c("bg")).flex().flex_col().child(header(bot["title"].as_str().map(str::to_string).unwrap_or_else(|| string(bot, "name")))).child(div().flex_1().min_h_0().child(talk_page(cx, light, fields, bot, "rtext", "remote-send"))).into_any_element()),
         "bot" => {
             let tab = bot["tab"].as_str().unwrap_or("chat");

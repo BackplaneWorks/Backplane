@@ -185,6 +185,7 @@ impl Bots {
                 let Some(b) = me.upgrade() else { return };
                 b.tick_at(now_s()).await;
                 b.mail_due(now_s()).await;
+                b.rooms_due(now_s()).await;
                 b.uber_heal(now_s()).await;
                 b.uber_init(now_s()).await;
             }

@@ -38,7 +38,7 @@ pub fn find(w: &World, sel: &str, word: &str) -> Option<(Hit, String)> {
             ts.first().map(|(id, t)| (Hit { kind: "thread", id: (*id).clone(), name: t.title.clone() }, format!(">{slug}"))) }
         "project" => { let mut ps: Vec<(&String, &(String, bool))> = w.projects.iter().filter(|(_, p)| !p.1).collect(); ps.sort();
             ps.into_iter().find(|(id, p)| thread_slug(&p.0, id) == slug).map(|(id, p)| (Hit { kind: "project", id: id.clone(), name: p.0.clone() }, format!("%{slug}"))) }
-        _ => { let mut rs: Vec<(&String, &(String, bool))> = w.rooms.iter().filter(|(_, r)| !r.1).collect(); rs.sort();
+        _ => { let mut rs: Vec<(&String, &(String, bool))> = w.rooms.iter().filter(|(id, r)| !r.1 && !w.eph_rooms.contains(*id)).collect(); rs.sort();
             rs.into_iter().find(|(id, r)| thread_slug(&r.0, id) == slug).map(|(id, r)| (Hit { kind: "room", id: id.clone(), name: r.0.clone() }, format!("#{slug}"))) }
     }
 }

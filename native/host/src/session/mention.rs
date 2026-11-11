@@ -134,7 +134,7 @@ pub fn rows(st: &State, here: &str, draft: &str) -> Vec<Value> {
             let s = slug(&p.title); let sc = score(&s, &p.title, &q);
             if sc > 0 && !s.is_empty() { c.push(Cand { word: format!("%{s}"), about: about(st, _id, "project".into()), score: sc, same: false, at: p.created }) }
         },
-        _ => for r in st.rooms_nav.values() {
+        _ => for r in st.rooms_nav.values().filter(|r| !r.ephemeral) {
             let s = slug(&r.name); let sc = score(&s, &r.name, &q);
             if sc > 0 && !s.is_empty() { c.push(Cand { word: format!("#{s}"), about: if r.members == 1 { "1 member".into() } else { format!("{} members", r.members) }, score: sc, same: false, at: 0 }) }
         },
@@ -194,7 +194,7 @@ pub fn refs_in(st: &State, hub: &str, text: &str) -> Vec<Value> {
             '>' => st.threads.iter().filter(|(_, t)| !t.deleted).find(|(id, t)| { let s = slug(&t.title); let n = slugs.get(&s).copied().unwrap_or(0);
                     !s.is_empty() && (rest == s || (n > 1 && rest == format!("{s}-{}", id.rsplit('-').next().unwrap_or("")))) }).map(|(id, t)| ("thread", q(id), t.title.clone())),
             '%' => st.projects.iter().filter(|(_, p)| !p.removed).find(|(_, p)| slug(&p.title) == rest.to_ascii_lowercase()).map(|(id, p)| ("project", q(id), p.title.clone())),
-            '#' => st.rooms_nav.iter().find(|(_, r)| slug(&r.name) == rest.to_ascii_lowercase()).map(|(id, r)| ("room", q(id), r.name.clone())),
+            '#' => st.rooms_nav.iter().find(|(_, r)| !r.ephemeral && slug(&r.name) == rest.to_ascii_lowercase()).map(|(id, r)| ("room", q(id), r.name.clone())),
             _ => rest.split_once('/').and_then(|(pr, m)| all[pr].as_array().and_then(|rows| rows.iter().find(|r| r["value"].as_str() == Some(m))).map(|r| ("model", String::new(), r["label"].as_str().unwrap_or(m).to_string()))),
         } };
         if let Some((kind, id, label)) = hit { out.push(json!({"word": w, "kind": kind, "id": id, "label": label})) }

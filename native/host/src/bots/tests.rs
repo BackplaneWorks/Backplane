@@ -812,6 +812,8 @@ fn tool_norm(v: &Value) -> Value {
         let name = c["name"].as_str().unwrap();
         if !tools::owns(name) { continue }
         let mut args = c["args"].clone();
+        // the JS hub's rooms were all permanent: a bot's room is for one exchange now unless the person asked for one that lasts (bots/life.rs)
+        if (name == "room_create" || (name == "bot_send" && args["direct"] != true)) && args.is_object() { args["keep"] = json!(true) }
         if let Some(o) = args.as_object_mut() { for v in o.values_mut() { if v.as_str().map_or(false, |s| s.starts_with('r') && s.contains('-') && s[1..].chars().next().map_or(false, |x| x.is_ascii_digit())) { *v = json!(room) } } }
         let (ok, body) = bots.tool_call(&th, name, &args).await;
         let want: Value = serde_json::from_str(c["result"]["content"][0]["text"].as_str().unwrap()).unwrap();
@@ -1284,6 +1286,7 @@ fn stored(e: &Value) -> Value {
     use crate::agents::mcp::ToolSet;
     let set = tools::BotToolSet(bots.clone()); let list = |t: &str| set.list(t).iter().map(|d| d["name"].as_str().unwrap().to_string()).collect::<Vec<_>>();
     let mut mine = list(rec["thread"].as_str().unwrap()); mine.retain(|n| n != "room_join" && n != "room_leave"); // (ours, beside the JS hub's)
+    mine.retain(|n| n != "room_keep"); // (ours: Keep a bots' exchange)
     assert_eq!(mine, names("listBot"), "a bot's tools in the JS order");
     assert_eq!(list("t1700000001-2"), names("listPlain"), "a plain thread's");
     let _ = std::fs::remove_dir_all(&work);
@@ -1371,6 +1374,7 @@ fn stored(e: &Value) -> Value {
 mod triage;
 mod push;
 mod standin;
+mod life;
 
 async fn call_hook(hub: &Arc<Hub>, hid: &str, hs: Vec<(String, String)>, body: &str) -> (String, String) {
     let h = hub.http_for(&format!("/hook/{hid}")).expect("the /hook route is registered");
@@ -1585,7 +1589,7 @@ fn room_members(hub: &Arc<Hub>, room: &str) -> Option<String> { log(hub).iter().
     let t = two("member").await;
     let (th_a, th_b) = (thread_of(&t.ha, &t.ada), thread_of(&t.hb, &t.bob));
     // bob makes a room on B; ada joins it from A by naming the machine: it is copied to A
-    assert!(t.bb.tool_call(&th_b, "room_create", &json!({"name":"b-room","members":""})).await.0);
+    assert!(t.bb.tool_call(&th_b, "room_create", &json!({"name":"b-room","members":"","keep":true})).await.0);
     let rid = log(&t.hb).iter().find(|e| e["$"] == "RoomSet").unwrap()["id"].as_str().unwrap().to_string();
     let (ok, r) = t.ba.tool_call(&th_a, "room_join", &json!({"room":"b-room","machine":"deskB"})).await; assert!(ok, "{r}");
     until(&t.ha, |l| l.iter().any(|e| e["$"] == "RoomSet" && e["id"] == rid.as_str())).await;
@@ -1694,7 +1698,7 @@ async fn three(tag: &str) -> Three {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn a_bot_joining_from_a_third_machine_reaches_both_others_and_a_downed_link_is_routed_around_nowhere() {
     let t = three("join").await;
     // bob makes a room on B with ada; cy joins it from C by naming B; A learns of cy from B without a link of its own having carried cy's name
-    assert!(t.b[1].tool_call(&t.th[1], "room_create", &json!({"name":"b-room","members":"ada@m0"})).await.0);
+    assert!(t.b[1].tool_call(&t.th[1], "room_create", &json!({"name":"b-room","members":"ada@m0","keep":true})).await.0);
     let rid = log(&t.h[1]).iter().find(|e| e["$"] == "RoomSet").unwrap()["id"].as_str().unwrap().to_string();
     until(&t.h[0], |l| l.iter().any(|e| e["$"] == "RoomSet" && e["id"] == rid.as_str())).await;
     let (ok, r) = t.b[2].tool_call(&t.th[2], "room_join", &json!({"room":"b-room","machine":"m1"})).await; assert!(ok, "{r}");

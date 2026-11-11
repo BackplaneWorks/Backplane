@@ -81,7 +81,7 @@ impl Bots {
         if self.machines().is_empty() { return }
         for e in events {
             let (kind, room) = (gs(&e, "$").to_string(), if gs(&e, "$") == "RoomPosted" { gs(&e, "room").to_string() } else { gs(&e, "id").to_string() });
-            let (members, name) = { let w = self.world().await; match w.rooms.get(&room) { Some(r) => (r.members.clone(), r.name.clone()), None => continue } };
+            let (members, name, life) = { let w = self.world().await; match w.rooms.get(&room) { Some(r) => (r.members.clone(), r.name.clone(), (r.ephemeral, r.closed)), None => continue } };
             let had: Vec<String> = self.far.sent.lock().unwrap().keys().filter(|(r, _)| *r == room).map(|(_, l)| l.clone()).collect();
             let now_links = if kind == "RoomDeleted" { vec![] } else { self.remote_link(&members) };
             match kind.as_str() {
@@ -97,7 +97,7 @@ impl Bots {
                         let gone = !live.contains(&l);
                         let key = (room.clone(), l.clone());
                         let wire = if gone { vec![] } else { self.to_wire(&l, &members).await };
-                        let sig = if gone { "\u{0}deleted".to_string() } else { format!("{name}\n{}", wire.join("\n")) };
+                        let sig = if gone { "\u{0}deleted".to_string() } else { format!("{name}\n{}\n{life:?}", wire.join("\n")) };
                         let came = { let mut ap = self.far.applied.lock().unwrap(); let hit = ap.get(&key).map_or(false, |m| *m == if gone { sig.clone() } else { members.join("\n") }); if hit { ap.remove(&key); } hit };
                         if came { // it came from that machine: not sent back
                             if gone { self.far.sent.lock().unwrap().remove(&key); } else { self.far.sent.lock().unwrap().insert(key, sig); }
@@ -105,7 +105,7 @@ impl Bots {
                         }
                         if self.far.sent.lock().unwrap().get(&key) == Some(&sig) { continue }
                         if gone && kind != "RoomDeleted" && !self.far.sent.lock().unwrap().contains_key(&key) { continue }
-                        let r = self.far_send(&l, "bots.room_sync", json!({"room":room,"name":name,"members":wire,"deleted":gone})).await;
+                        let r = self.far_send(&l, "bots.room_sync", json!({"room":room,"name":name,"members":wire,"deleted":gone,"ephemeral":life.0,"closed":life.1})).await;
                         if matches!(r, Some((200, _))) { if gone { self.far.sent.lock().unwrap().remove(&key); } else { self.far.sent.lock().unwrap().insert(key, sig); } }
                         else { eprintln!("bots: room {room} was not taken by {l}: {r:?}") }
                     }
@@ -146,10 +146,13 @@ impl Bots {
         }
         let name = if gs(p, "name").is_empty() { "room" } else { gs(p, "name") };
         // the state this machine already holds is not stored again: with several machines the same change arrives from each of them, and nothing loops
-        if let Some(r) = existing.as_ref().filter(|r| !r.deleted) { let (mut a, mut b) = (r.members.clone(), members.clone()); a.sort(); b.sort(); if a == b && r.name == name { return (200, "ok".into()) } }
+        // the room's life as the other machine has it (world.rs `life`: a machine from before the fields sends neither, and the copy keeps its own)
+        let was = existing.as_ref().filter(|r| !r.deleted).map_or((false, false), |r| (r.ephemeral, r.closed));
+        let life = super::world::life(p, was);
+        if let Some(r) = existing.as_ref().filter(|r| !r.deleted) { let (mut a, mut b) = (r.members.clone(), members.clone()); a.sort(); b.sort(); if a == b && r.name == name && life == was { return (200, "ok".into()) } }
         let text = members.join("\n");
         self.far.applied.lock().unwrap().insert((room.clone(), link.to_string()), text.clone());
-        match self.hub.commit(&json!({"$":"RoomSet","id":room,"name":name,"members":text,"at":now})).await { Ok(_) => (200, "ok".into()), Err(e) => (503, format!("{e:#}")) }
+        match self.hub.commit(&json!({"$":"RoomSet","id":room,"name":name,"members":text,"ephemeral":life.0,"closed":life.1,"at":now})).await { Ok(_) => (200, "ok".into()), Err(e) => (503, format!("{e:#}")) }
     }
     async fn far_room_post(self: &Arc<Self>, link: &str, p: &Value) -> (u16, String) {
         let (room, from, text, now) = (gs(p, "room"), gs(p, "from"), gs(p, "text"), now_s());
@@ -174,7 +177,7 @@ impl Bots {
         if bot.is_empty() { return (400, "which bot?".into()) }
         let w = self.world().await;
         let l = word.to_lowercase();
-        let Some(r) = w.rooms.values().filter(|r| !r.deleted && !r.id.starts_with("dm:")).find(|r| r.id == word || r.name.to_lowercase() == l).cloned() else { return (404, "no such room".into()) };
+        let Some(r) = w.rooms.values().filter(|r| r.live() && !r.id.starts_with("dm:")).find(|r| r.id == word || (r.listed() && r.name.to_lowercase() == l)).cloned() else { return (404, "no such room".into()) };
         let me = format!("{bot}@{link}");
         let mut ms: Vec<String> = r.members.iter().filter(|m| !m.eq_ignore_ascii_case(&me)).cloned().collect();
         if join { ms.push(me) }
