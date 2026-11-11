@@ -1738,6 +1738,7 @@ fn spawn_fork_events_loop(me: mpsc::UnboundedSender<Msg>, pro: String, gen: u64,
                     if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("kicad embed event: {ev}"); }
                     if ty == "ET_SELECTION_CHANGED" || ty_n == 14 { super::xprobe::kicad_selected(&pro, ev); continue }
                     if super::reload::on_event(&pro, ev) { need_sync = true; continue }
+                    if super::comment::on_event(&pro, ev) { continue }
                     if ty == "ET_SHOW_REQUESTED" || ty_n == 9 {
                         show_req = Some(kind_of_fk_val(&ev["frame"]["kind"]).to_string());
                     } else if matches!(ty, "ET_FRAME_OPENED" | "ET_FRAME_CLOSED" | "ET_FRAME_SHOWN" | "ET_FRAME_HIDDEN"
