@@ -112,7 +112,7 @@ mod tests {
         fn view(&self, p: &Value) -> Option<Value> { if p["target"]["kind"] == "thread" { Some(json!({"shown":{"by":"rust"}})) } else { None } }
     }
     fn helper() -> Arc<dyn Presenter> { Arc::new(Canned { reply: json!({"shown":{"by":"helper"}}) }) }
-    fn tmp(n: &str) -> PathBuf { let d = std::env::temp_dir().join(format!("bp-present-{n}-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); d }
+    fn tmp(n: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::uncreated(&format!("present-{n}")) }
 
     #[tokio::test] async fn a_screen_answers_what_it_has_and_the_helper_the_rest() {
         let r = Routed { helper: helper(), screens: vec![Box::new(Mine)], dump: None };
@@ -145,7 +145,7 @@ mod tests {
     }
     #[tokio::test] async fn the_dump_records_the_helper_pairs_and_only_on_a_copy_run() {
         let d = tmp("on");
-        let r = Routed { helper: helper(), screens: vec![Box::new(Mine)], dump: Routed::open_dump(Some(d.clone()), true, true, 1000) };
+        let r = Routed { helper: helper(), screens: vec![Box::new(Mine)], dump: Routed::open_dump(Some(d.to_path_buf()), true, true, 1000) };
         r.view(&json!({"target":{"kind":"recent"}})).await.unwrap();   // helper answered: recorded
         r.view(&json!({"target":{"kind":"thread","id":"t"}})).await.unwrap(); // rust answered: not recorded (nothing to compare with)
         let text = std::fs::read_to_string(d.join("views.jsonl")).unwrap();
@@ -153,9 +153,9 @@ mod tests {
         let l: Value = serde_json::from_str(text.lines().next().unwrap()).unwrap();
         assert_eq!(l["params"]["target"]["kind"], "recent"); assert_eq!(l["out"]["shown"]["by"], "helper");
         let d2 = tmp("off");
-        assert!(Routed::open_dump(Some(d2.clone()), false, true, 1000).is_none() && !d2.exists(), "a non-copy run writes no dump");
-        assert!(Routed::open_dump(Some(d2.clone()), true, false, 1000).is_none() && !d2.exists(), "no helper, nothing to record");
-        assert!(Routed::open_dump(Some(d2.clone()), true, true, crate::copy::BIG_LOG + 1).is_none() && !d2.exists(), "a log of real size is never dumped");
+        assert!(Routed::open_dump(Some(d2.to_path_buf()), false, true, 1000).is_none() && !d2.exists(), "a non-copy run writes no dump");
+        assert!(Routed::open_dump(Some(d2.to_path_buf()), true, false, 1000).is_none() && !d2.exists(), "no helper, nothing to record");
+        assert!(Routed::open_dump(Some(d2.to_path_buf()), true, true, crate::copy::BIG_LOG + 1).is_none() && !d2.exists(), "a log of real size is never dumped");
         use crate::plat::fs::PermissionsExt;
         assert_eq!(crate::plat::fs::mode_bits(std::fs::metadata(d.join("views.jsonl")).unwrap().permissions().mode() & 0o777, 0o600), 0o600, "the dump is private");
     }

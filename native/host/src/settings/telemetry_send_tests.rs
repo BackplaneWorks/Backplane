@@ -153,11 +153,11 @@ async fn receiver() -> Recv {
     Recv { port, bodies, status }
 }
 fn tcfg(port: u16) -> Cfg { Cfg { url: format!("http://127.0.0.1:{port}/api/v1/events"), kid: "dev-test".into(), key: KEY.into(), channel: "dev".into() } }
-async fn hub(name: &str) -> Arc<Hub> {
-    let home = std::env::temp_dir().join(format!("bp-tm-{}-{name}", std::process::id())); let _ = std::fs::remove_dir_all(&home); std::fs::create_dir_all(&home).unwrap();
-    let h = Hub::start(crate::hub::Cfg { home, version: "0.15.3".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(crate::presenter::Canned { reply: json!({}) })).await.unwrap();
+async fn hub(name: &str) -> crate::hub::TestHub {
+    let home = crate::plat::tmp::dir(&format!("tm-{name}"));
+    let h = Hub::start(crate::hub::Cfg { home: home.to_path_buf(), version: "0.15.3".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(crate::presenter::Canned { reply: json!({}) })).await.unwrap();
     h.register_rpc(Arc::new(tc::TelemetryRpc)); observe(&h); TEST_CAPABLE.store(true, Relaxed); tu::clear(); HUMAN.store(0, Relaxed);
-    h
+    crate::hub::TestHub::new(h, home)
 }
 async fn set(h: &Arc<Hub>, kv: &[(&str, &str)]) { let evs: Vec<Value> = kv.iter().map(|(k, v)| json!({"$":"SettingSet","key":k,"value":v,"at":1})).collect(); h.commit_many(&evs).await.unwrap(); }
 async fn call(h: &Arc<Hub>, m: &str, p: Value) -> Value { h.rpc_for(m).unwrap().call(h, &crate::api::Caller { gen: String::new(), client: 0 }, &json!(1), m, &p).await.remove(0) }

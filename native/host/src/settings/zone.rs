@@ -82,6 +82,21 @@ impl RpcHandler for ZoneRpc {
 }
 
 #[cfg(test)]
+pub(crate) struct TestZoneinfo { _lock: std::sync::MutexGuard<'static, ()>, _dir: crate::plat::tmp::TempDir }
+#[cfg(test)]
+impl Drop for TestZoneinfo { fn drop(&mut self) { std::env::remove_var("BACKPLANE_ZONEINFO"); } }
+#[cfg(test)]
+pub(crate) fn test_zoneinfo() -> TestZoneinfo {
+    static LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let lock = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let d = crate::plat::tmp::dir("zi");
+    std::fs::create_dir_all(d.join("Europe")).unwrap();
+    std::fs::write(d.join("Europe/Helsinki"), b"TZif2\0\0binary\n\nEET-2EEST,M3.5.0/3,M10.5.0/4\n").unwrap();
+    std::env::set_var("BACKPLANE_ZONEINFO", &*d);
+    TestZoneinfo { _lock: lock, _dir: d }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::{hub::Cfg, presenter::Canned};
@@ -99,22 +114,16 @@ mod tests {
         for bad in ["", "/etc/passwd", "../x", "a//b", "Europe/", "has space", "semi;colon", &"a".repeat(65)] { assert!(!valid(bad), "{bad}") }
         assert!(utc("Etc/UTC") && !utc("Europe/Helsinki"));
     }
-    /// One zoneinfo folder for every test (the environment is process-wide).
-    fn zi() {
-        let d = std::env::temp_dir().join(format!("bp-zi-{}", std::process::id())); std::fs::create_dir_all(d.join("Europe")).unwrap();
-        std::fs::write(d.join("Europe/Helsinki"), b"TZif2\0\0binary\n\nEET-2EEST,M3.5.0/3,M10.5.0/4\n").unwrap(); std::env::set_var("BACKPLANE_ZONEINFO", &d);
-    }
     #[test] fn a_fixed_offset_is_a_posix_rule() { assert_eq!(fixed_rule("+0530"), "<+0530>-5:30"); assert_eq!(fixed_rule("-0300"), "<-0300>3"); assert_eq!(fixed_rule("+0000"), "<+0000>-0"); }
     #[test] fn the_rule_is_the_footer_of_the_tzif_file() {
-        let d = std::env::temp_dir().join(format!("bp-zi-rule-{}", std::process::id())); std::fs::create_dir_all(d.join("Europe")).unwrap();
+        let d = crate::plat::tmp::dir("zi-rule"); std::fs::create_dir_all(d.join("Europe")).unwrap();
         std::fs::write(d.join("Europe/Helsinki"), b"TZif2\0\0binary\n\nEET-2EEST,M3.5.0/3,M10.5.0/4\n").unwrap();
         assert_eq!(rule_in(&d, "Europe/Helsinki"), "EET-2EEST,M3.5.0/3,M10.5.0/4"); assert_eq!(rule_in(&d, "Europe/Nowhere"), ""); assert_eq!(rule_in(&d, "../../etc/passwd"), "");
-        let _ = std::fs::remove_dir_all(&d);
     }
     #[tokio::test(flavor = "multi_thread")] async fn report_and_set_write_the_settings_the_hub_writes() {
-        zi();
-        let home = std::env::temp_dir().join(format!("bp-zh-{}", std::process::id())); let _ = std::fs::remove_dir_all(&home); std::fs::create_dir_all(&home).unwrap();
-        let hub = Hub::start(Cfg { home: home.clone(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+        let _zi = test_zoneinfo();
+        let home = crate::plat::tmp::dir("zh");
+        let hub = Hub::start(Cfg { home: home.to_path_buf(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
         let call = |p: Value, m: &'static str| { let hub = hub.clone(); async move { ZoneRpc.call(&hub, &Caller { gen: "1".into(), client: 1 }, &json!(3), m, &p).await.remove(0) } };
         assert_eq!(call(json!({"zone":"not a zone"}), "zone.report").await["error"], "not a time zone name");
         assert_eq!(call(json!({"zone":"Europe/Helsinki"}), "zone.report").await["ok"], true); assert_eq!(hub.setting("person.tz.device").await.as_deref(), Some("Europe/Helsinki"));
@@ -124,6 +133,5 @@ mod tests {
         assert_eq!(call(json!({"zone":"Mars/Olympus"}), "zone.set").await["error"], "I don't know a time zone called Mars/Olympus");
         assert_eq!(call(json!({"zone":"a b"}), "zone.set").await["error"], "that is not a time zone name (like Europe/Helsinki)");
         assert_eq!(call(json!({"zone":"auto"}), "zone.set").await["ok"], true); assert_eq!(hub.setting("person.tz").await, None, "follows the phone again");
-        let _ = std::fs::remove_dir_all(&home);
     }
 }

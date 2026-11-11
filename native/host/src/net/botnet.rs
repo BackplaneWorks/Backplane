@@ -158,7 +158,7 @@ mod tests {
         assert_eq!(c("", false, "", "", "127.0.0.1", 3797), "http://127.0.0.1:3797");
     }
     use super::*;
-    fn tmp(tag: &str) -> PathBuf { let d = std::env::temp_dir().join(format!("bp-botnet-{tag}-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap(); d }
+    fn tmp(tag: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("botnet-{tag}")) }
 
     #[test] fn bot_ids_and_names_are_cleaned() {
         assert!(safe("p0123") && safe("a-b_C") && !safe("") && !safe("a.b") && !safe("a/b") && !safe(&"a".repeat(81)) && safe(&"a".repeat(80)));
@@ -177,7 +177,6 @@ mod tests {
         assert_eq!(crate::plat::fs::mode_bits(std::fs::metadata(h.join("secrets/peers")).unwrap().permissions().mode() & 0o777, 0o700), 0o700);
         assert_eq!(peer_secret(&h, "../p1"), "");
         peer_forget(&h, "p1"); assert_eq!(peer_secret(&h, "p1"), "");
-        let _ = std::fs::remove_dir_all(h);
     }
     #[test] fn bot_check_peer_accepts_only_fresh_matching_signatures() {
         let s = fresh_secret(); let body = "{\"a\":1}";

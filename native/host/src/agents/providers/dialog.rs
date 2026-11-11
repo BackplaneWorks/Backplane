@@ -191,7 +191,7 @@ mod e2e {
     const PI: &str = include_str!("../../../../../test/agents/prov-pi/standin-pi.sh");
     const OMP: &str = include_str!("../../../../../test/agents/prov-pi/standin-omp.sh");
 
-    fn dir(name: &str) -> PathBuf { static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0); let p = std::env::temp_dir().join(format!("bp-pi-{}-{}-{}", std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::Relaxed), name)); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
+    fn dir(name: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("pi-{name}")) }
     fn script(d: &Path, name: &str, body: &str) { use crate::plat::fs::PermissionsExt; let p = d.join(name); std::fs::write(&p, body).unwrap(); std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap(); }
     /// Ids and clocks: a run of 3+ digits is N, and a hub's own counter after a dash (`m17N-150`, `c9-171`) is S.
     fn digits(s: &str) -> String {
@@ -216,7 +216,7 @@ mod e2e {
         let log = format!("{{\"$\":\"ProjectCreated\",\"id\":\"p1\",\"title\":\"fixture\",\"root\":{},\"at\":1700000000}}\n{{\"$\":\"ThreadCreated\",\"id\":\"{T1}\",\"project\":\"p1\",\"title\":\"Fixture 0\",\"env\":\"local\",\"branch\":\"\",\"worktree\":\"\",\"provider\":\"{prov}\",\"model\":\"\",\"at\":1700000001}}\n{{\"$\":\"ModesSet\",\"id\":\"{T1}\",\"runtime\":\"{runtime}\",\"interaction\":\"default\",\"model\":\"\",\"at\":1700000002}}\n",
             serde_json::to_string(&work.to_string_lossy()).unwrap());
         std::fs::write(home.join("events.jsonl"), log).unwrap();
-        let hub = Hub::start(Cfg { home: home.clone(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+        let hub = Hub::start(Cfg { home: home.to_path_buf(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
         let ag = Agents::start_with(hub.clone(), Cli::standin(&sd)).await.unwrap();
         let from = hub.store.len();
         let rpc = |m: &'static str, p: Value| { let hub = hub.clone(); async move { let h = hub.rpc_for(m).expect("handler"); h.call(&hub, &Caller { gen: "1".into(), client: 1 }, &json!(7), m, &p).await.remove(0) } };

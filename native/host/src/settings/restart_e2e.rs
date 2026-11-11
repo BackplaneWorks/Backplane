@@ -13,13 +13,13 @@ const BUB: &str = "b1790292962-8017";
 const BUB_T: &str = "t1790292962-8017";
 const NOT_AVAILABLE: &str = "Accounts are not available";
 
-fn fresh(name: &str) -> PathBuf { static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0); let p = std::env::temp_dir().join(format!("bp-rs-{}-{name}-{}", std::process::id(), N.fetch_add(1, std::sync::atomic::Ordering::Relaxed))); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
+fn fresh(name: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("rs-{name}")) }
 fn now() -> u64 { crate::hub::now_ms() / 1000 }
 fn tid(i: usize) -> String { format!("t17000020{i:02}-{i}") }
 fn cfg(home: &Path) -> Cfg { Cfg { home: home.to_path_buf(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() } }
 
 /// The stand-ins, their record folder and a work folder.
-struct Bins { rec: PathBuf, bin: PathBuf, work: PathBuf }
+struct Bins { rec: crate::plat::tmp::TempDir, bin: crate::plat::tmp::TempDir, work: crate::plat::tmp::TempDir }
 fn bins(name: &str) -> Bins {
     use crate::plat::fs::PermissionsExt;
     let (rec, bin, work) = (fresh(&format!("{name}-rec")), fresh(&format!("{name}-bin")), fresh(&format!("{name}-work")));

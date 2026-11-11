@@ -141,7 +141,7 @@ pub fn run(root: &Path, p: &serde_json::Value) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*; use crate::plat::fs::symlink;
-    fn tmp(n: &str) -> PathBuf { let p = std::env::temp_dir().join(format!("bp-ops-{}-{n}", std::process::id())); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
+    fn tmp(n: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("ops-{n}")) }
     #[test] fn mkdir_write_rename_delete_roundtrip() {
         let b = tmp("rt"); let r = b.join("r"); std::fs::create_dir_all(&r).unwrap();
         mkdir(&r, "docs").unwrap(); write(&r, "docs/a.txt", b"hello").unwrap();

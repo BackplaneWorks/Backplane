@@ -8,6 +8,8 @@ mod hub;
 mod i18n;
 #[cfg(test)]
 mod i18n_scan;
+#[cfg(test)]
+mod tmp;
 mod input;
 mod keys;
 mod plat;

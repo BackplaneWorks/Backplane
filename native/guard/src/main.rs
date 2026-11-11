@@ -1,5 +1,6 @@
 //! `backplane hub ...`: one command to look after a hub, the same on Windows, Linux and macOS.
 mod http; mod pair; mod plan; mod run; mod store; mod sys;
+#[cfg(test)] mod tmp;
 #[cfg(all(test, unix))] mod scripts;
 use serde_json::{json, Value};
 use std::{fs::{self, File}, path::PathBuf, process::{Command, Stdio}, time::Duration};

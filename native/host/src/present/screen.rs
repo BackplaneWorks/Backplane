@@ -958,7 +958,7 @@ mod state_tests {
     /// A KiCad file clicked in a message opens inside Backplane: the target moves to its project's thread with the Schematic tab on that file,
     /// and its watch is sent; in the thread on show it stays there; nothing goes to the system's app (`file.open`).
     #[test] fn a_kicad_file_link_opens_its_projects_thread_on_the_viewer_tab() {
-        let d=std::env::temp_dir().join(format!("bp-filelink-{}",std::process::id())); let _=std::fs::remove_dir_all(&d);
+        let d=crate::plat::tmp::dir("filelink");
         std::fs::create_dir_all(d.join("amp/boards/main")).unwrap(); std::fs::create_dir_all(d.join("other")).unwrap();
         std::fs::write(d.join("amp/boards/main/main.kicad_sch"),"(kicad_sch)").unwrap(); std::fs::write(d.join("amp/boards/main/main.kicad_pcb"),"(kicad_pcb)").unwrap();
         let (amp,other)=(d.join("amp").to_string_lossy().to_string(),d.join("other").to_string_lossy().to_string());
@@ -990,7 +990,7 @@ mod state_tests {
         let _=std::fs::remove_dir_all(&d);
     }
     #[test] fn one_repository_on_two_machines_is_one_project() {
-        let d=std::env::temp_dir().join(format!("bp-unify-{}",std::process::id())); let _=std::fs::remove_dir_all(&d);
+        let d=crate::plat::tmp::dir("unify");
         std::fs::create_dir_all(d.join(".git")).unwrap(); std::fs::write(d.join(".git/config"),"[remote \"origin\"]\n\turl = git@github.com:o/r.git\n").unwrap();
         let mut st=State::new(); st.lean=true;
         event(&mut st,json!({"$":"ProjectCreated","id":"p1","title":"backplane-gpui","root":d.to_string_lossy(),"at":1}));

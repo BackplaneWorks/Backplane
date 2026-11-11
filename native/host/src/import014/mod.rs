@@ -54,7 +54,7 @@ pub fn candidates(windows: bool, user: Option<PathBuf>, local_app_data: Option<P
 /// 0.14 both ways keeps its newest data). A home under the temp folder (tests) looks only at `from`.
 pub fn source_in(home: &Path, from: Option<PathBuf>, candidates: Vec<PathBuf>) -> Option<PathBuf> {
     if let Some(f) = from { return is_old_home(&f, home).then_some(f) }
-    if home.starts_with(std::env::temp_dir()) { return None }
+    if crate::plat::dirs::in_temp(home) { return None }
     let when = |p: &PathBuf| std::fs::metadata(p.join("events.jsonl")).and_then(|m| m.modified()).ok();
     candidates.into_iter().filter(|c| is_old_home(c, home)).max_by_key(when)
 }

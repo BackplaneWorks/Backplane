@@ -97,7 +97,7 @@ mod tests {
         assert!(is_step("/p/A.STEP") && is_step("a.Stp") && !is_step("a.glb"));
         #[cfg(windows)] { assert_eq!(path_of(r"C:\p dir\a.step", "iso"), r"C:\p dir/renders/a.iso.png"); assert_eq!(parent(r"C:\p\a.step"), r"C:\p"); }
     }
-    fn work(tag: &str) -> String { let d = std::env::temp_dir().join(format!("bp-render-{tag}-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap(); d.to_string_lossy().into_owned() }
+    fn work(tag: &str) -> crate::plat::tmp::TempStr { crate::plat::tmp::dir_str(&format!("render-{tag}")) }
     fn cube() -> Vec<u8> {
         let v = |x: f32, y: f32, z: f32| [x, y, z];
         let (a, b, c, d, e, f, g, h) = (v(0.,0.,0.), v(1.,0.,0.), v(1.,1.,0.), v(0.,1.,0.), v(0.,0.,1.), v(1.,0.,1.), v(1.,1.,1.), v(0.,1.,1.));

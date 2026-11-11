@@ -64,7 +64,7 @@ mod tests {
         assert_eq!(range("bytes=10-", 10), Err(())); assert_eq!(range("bytes=5-2", 10), Err(())); assert_eq!(range("bytes=-0", 10), Err(())); assert_eq!(range("bytes=0-0", 0), Err(()));
         for ignored in ["bytes=-", "bytes=a-b", "bytes=0-1,3-4", "items=0-1", "bytes=0", "bytes= 0-1"] { assert_eq!(range(ignored, 10), Ok(None), "{ignored}") }
     }
-    fn tmp(n: &str) -> std::path::PathBuf { let p = std::env::temp_dir().join(format!("bp-srv-{}-{n}", std::process::id())); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
+    fn tmp(n: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("srv-{n}")) }
     #[test] fn serves_ranges_and_refuses_non_files_and_links() {
         let d = tmp("s"); let f = d.join("a.png"); std::fs::write(&f, b"0123456789").unwrap();
         let r = send(f.to_str().unwrap(), "image/png", ""); assert_eq!((r.status, r.body.as_slice()), ("200 OK", &b"0123456789"[..]));

@@ -23,8 +23,8 @@ mod tests {
     use super::*;
     use crate::{hub::Cfg, presenter::Canned};
     #[tokio::test(flavor = "multi_thread")] async fn a_hub_refreshes_the_models_it_has() {
-        let home = std::env::temp_dir().join(format!("bp-misc-{}", std::process::id())); let _ = std::fs::remove_dir_all(&home); std::fs::create_dir_all(&home).unwrap();
-        let hub = Hub::start(Cfg { home: home.clone(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+        let home = crate::plat::tmp::dir("misc");
+        let hub = Hub::start(Cfg { home: home.to_path_buf(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
         let call = |m: &'static str| { let hub = hub.clone(); async move { SettingsMisc.call(&hub, &Caller { gen: "1".into(), client: 1 }, &json!(4), m, &json!({})).await.remove(0) } };
         assert_eq!(call("models.refresh").await, json!({"t":"reply","id":4,"ok":true}));
         let _ = std::fs::remove_dir_all(&home);

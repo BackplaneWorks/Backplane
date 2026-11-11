@@ -71,6 +71,23 @@ pub fn kicad_config_roots_in(os: Os, env: Env) -> Vec<String> {
 }
 pub fn kicad_config_roots() -> Vec<String> { kicad_config_roots_in(OS, &process_env) }
 
+/// Whether `p` is under the temp folder (`std::env::temp_dir()`, its real path when `TMPDIR` is a link, or on Unix the lane scratch
+/// folder `BP_TMP` / `~/.cache/bp-tmp` from `scripts/lib-bptmp.sh`). Tests keep their hub homes there so they never touch `~/.backplane*`.
+pub fn in_temp(p: &std::path::Path) -> bool {
+    let td = std::env::temp_dir();
+    if p.starts_with(&td) || super::fs::canonicalize(&td).is_ok_and(|c| p.starts_with(&c)) { return true }
+    #[cfg(unix)] {
+        if let Some(b) = std::env::var_os("BP_TMP").filter(|v| !v.is_empty()).map(std::path::PathBuf::from) {
+            if p.starts_with(&b) || super::fs::canonicalize(&b).is_ok_and(|c| p.starts_with(&c)) { return true }
+        }
+        if let Some(h) = std::env::var_os("HOME").filter(|v| !v.is_empty()) {
+            let b = std::path::PathBuf::from(h).join(".cache").join("bp-tmp");
+            if p.starts_with(&b) || super::fs::canonicalize(&b).is_ok_and(|c| p.starts_with(&c)) { return true }
+        }
+    }
+    false
+}
+
 /// The version folder of KiCad's settings a `kicad-cli` belongs to ("10.99" for `.../kicad/10.99.0-bp.6/bin/kicad-cli.exe`, "9.0" for
 /// `C:\Program Files\KiCad\9.0\bin\kicad-cli.exe`): its nearest folder named as a version, major.minor. None when no folder says (`/usr/bin`).
 pub fn kicad_version_of(cli: &str) -> Option<String> {

@@ -422,7 +422,7 @@ mod tests {
     }
 
     #[test] fn a_projects_names_come_from_its_board_and_every_sheet() {
-        let d = std::env::temp_dir().join(format!("bp-xprobe-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap();
+        let d = crate::plat::tmp::dir("xprobe");
         std::fs::write(d.join("a.kicad_pcb"), r#"(kicad_pcb (version 20240108) (net 0 "") (net 1 "GND") (net 2 "/SDA")
   (footprint "R_0603" (layer "F.Cu") (property "Reference" "R12") (pad "1" smd rect (net 1 "GND")))
   (footprint "SOT23" (layer "F.Cu") (property "Reference" "U3")))"#).unwrap();

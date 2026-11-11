@@ -3,12 +3,12 @@ use super::*;
 use crate::{api::Caller, hub::{Cfg, Hub, Out}, presenter::Canned};
 use std::time::{Duration, Instant};
 
-fn dir(name: &str) -> PathBuf { let p = std::env::temp_dir().join(format!("bp-term-{}-{}", std::process::id(), name)); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
-async fn hub_in(name: &str) -> (Arc<Hub>, PathBuf, PathBuf) {
+fn dir(name: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("term-{name}")) }
+async fn hub_in(name: &str) -> (Arc<Hub>, crate::plat::tmp::TempDir, crate::plat::tmp::TempDir) {
     let home = dir(&format!("{name}-home")); let work = dir(&format!("{name}-work"));
     std::fs::write(home.join("events.jsonl"), format!("{{\"$\":\"ProjectCreated\",\"id\":\"p1\",\"title\":\"f\",\"root\":{},\"at\":1700000000}}\n{{\"$\":\"ThreadCreated\",\"id\":\"t1\",\"project\":\"p1\",\"title\":\"T\",\"env\":\"local\",\"branch\":\"\",\"worktree\":\"\",\"provider\":\"claude\",\"model\":\"\",\"at\":1700000001}}\n", serde_json::to_string(&work.to_string_lossy()).unwrap())).unwrap();
     std::env::set_var("SHELL", "/bin/sh");
-    let hub = Hub::start(Cfg { home: home.clone(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+    let hub = Hub::start(Cfg { home: home.to_path_buf(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
     start(hub.clone()); (hub, home, work)
 }
 fn caller() -> Caller { Caller { gen: "1".into(), client: 1 } }
@@ -175,10 +175,11 @@ fn drain(rx: &Tap, key: &str, acc: &mut Vec<u8>, resets: &mut Vec<Value>) {
 }
 
 #[tokio::test] async fn a_copy_hub_runs_no_chat_terminal_but_logs_the_entry() {
-    let (hub, _home, _work) = hub_in("copy").await; let t = get(&hub).unwrap();
-    t.run_with(true, "x:t1:xcopy-1", "T", "/tmp", "touch /tmp/bp-term-copy-must-not-exist", 40, 5, false).await;
-    t.run_with(true, "x:t1:xcopy-1", "T", "/tmp", "touch /tmp/bp-term-copy-must-not-exist", 40, 5, true).await;
-    assert_eq!(t.shell_count().await, 0); assert!(!t.read_known("x:t1:xcopy-1").await); assert!(!std::path::Path::new("/tmp/bp-term-copy-must-not-exist").exists());
+    let (hub, home, _work) = hub_in("copy").await; let t = get(&hub).unwrap();
+    let marker = home.join("copy-must-not-exist"); let cmd = format!("touch {}", marker.display());
+    t.run_with(true, "x:t1:xcopy-1", "T", &home.to_string_lossy(), &cmd, 40, 5, false).await;
+    t.run_with(true, "x:t1:xcopy-1", "T", &home.to_string_lossy(), &cmd, 40, 5, true).await;
+    assert_eq!(t.shell_count().await, 0); assert!(!t.read_known("x:t1:xcopy-1").await); assert!(!marker.exists());
     // the person's own panel shell still opens, as in (TermOp is allowed on a copy)
     t.open_shell("t1", 80, 24).await; assert_eq!(t.shell_count().await, 1); t.kill("t1").await;
 }

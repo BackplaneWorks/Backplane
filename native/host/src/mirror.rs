@@ -261,14 +261,13 @@ mod origin_tests {
     #[test] fn the_origin_is_read_from_the_config_and_through_a_worktree() {
         let cfg = "[core]\n\tbare = false\n[remote \"upstream\"]\n\turl = git@x.org:a/b\n[remote \"origin\"]\n\turl = https://github.com/BackplaneWorks/Backplane.git\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n";
         assert_eq!(origin_in_config(cfg), "https://github.com/BackplaneWorks/Backplane.git"); assert_eq!(origin_in_config("[remote \"upstream\"]\nurl = a:b\n"), "");
-        let d = std::env::temp_dir().join(format!("bp-origin-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d);
+        let d = crate::plat::tmp::dir("origin");
         let (main, wt) = (d.join("main"), d.join("main/.backplane/worktrees/w"));
         std::fs::create_dir_all(main.join(".git/worktrees/w")).unwrap(); std::fs::create_dir_all(wt.join("sub")).unwrap();
         std::fs::write(main.join(".git/config"), cfg).unwrap(); std::fs::write(main.join(".git/worktrees/w/commondir"), "../..\n").unwrap();
         std::fs::write(wt.join(".git"), format!("gitdir: {}\n", main.join(".git/worktrees/w").display())).unwrap();
         for r in [main.clone(), wt.clone(), wt.join("sub")] { assert_eq!(origin_of_root(&r.to_string_lossy()), "github.com/BackplaneWorks/Backplane", "{r:?}"); }
         assert_eq!(origin_of_root(&d.to_string_lossy()), ""); assert_eq!(origin_of_root(""), "");
-        let _ = std::fs::remove_dir_all(&d);
     }
     #[test] fn projects_of_one_repository_are_one_and_others_stay_apart() {
         let s = |v: &[(&str, &str)]| v.iter().map(|(a, b)| (a.to_string(), b.to_string())).collect::<Vec<_>>();

@@ -87,7 +87,7 @@ impl Writer {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn dir(n: &str) -> PathBuf { let d = std::env::temp_dir().join(format!("gpui-drafts-{n}-{}", std::process::id())); std::fs::create_dir_all(&d).unwrap(); d }
+    fn dir(n: &str) -> crate::tmp::TempDir { crate::tmp::dir(&format!("gpui-drafts-{n}")) }
     #[test] fn drafts_round_trip_and_blank_ones_are_dropped() {
         let d = dir("rt"); let f = d.join("drafts.json");
         let mut m = HashMap::new(); m.insert("t1".to_string(), "line one\nline two 😀".to_string()); m.insert("t2".into(), "  \n".into()); m.insert("".into(), "x".into());
@@ -95,7 +95,6 @@ mod tests {
         let back = load(&f);
         assert_eq!(back.len(), 1); assert_eq!(back["t1"], "line one\nline two 😀");
         assert!(load(&d.join("none.json")).is_empty());
-        let _ = std::fs::remove_dir_all(d);
     }
     #[test] fn a_draft_survives_a_switch_away_and_back_after_a_hub_set_selection() {
         // the selection was set by the hub's picture, in its qualified form; the person types, switches to t2 and back
@@ -126,7 +125,6 @@ mod tests {
         let mut m = HashMap::new(); m.insert("t".to_string(), "secret".to_string()); save(&f, &m);
         #[cfg(unix)] { use std::os::unix::fs::PermissionsExt; assert_eq!(std::fs::metadata(&f).unwrap().permissions().mode() & 0o777, 0o600); }
         std::fs::write(&f, vec![b' '; MAX_FILE as usize + 10]).unwrap(); assert!(load(&f).is_empty());
-        let _ = std::fs::remove_dir_all(d);
     }
     #[test] fn the_writer_debounces_and_flushes() {
         let d = dir("w"); let f = d.join("drafts.json");

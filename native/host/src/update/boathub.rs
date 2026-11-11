@@ -40,7 +40,7 @@ pub fn install(hub: &Arc<Hub>) { hub.register_ticker(Arc::new(Cost::default()));
 #[cfg(test)]
 mod tests {
     #[test] fn only_a_json_object_is_read() {
-        let d = std::env::temp_dir().join(format!("bp-boathub-{}", std::process::id())); std::fs::create_dir_all(&d).unwrap();
+        let d = crate::plat::tmp::dir("boathub");
         let f = d.join("cost.json");
         for (body, want) in [("{\"rate_hour\":0.018}\n", "{\"rate_hour\":0.018}"), ("[1]", ""), ("not json", ""), ("", "")] {
             std::fs::write(&f, body).unwrap(); assert_eq!(super::read(&f), want, "{body}");

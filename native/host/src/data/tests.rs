@@ -34,17 +34,17 @@ const LOG: &str = r#"{"$":"ProjectCreated","id":"p1","title":"alpha","root":"/tm
 {"$":"AskOpened","id":"q1","thread":"t1","kind":"approval","tool":"Bash","detail":"rm -rf x","options":"","at":1700000014}
 {"$":"ThreadArchived","id":"t3","archived":true,"at":1700000031}
 "#;
-async fn up(name: &str) -> (Arc<Hub>, u16) { up_with(name, "").await }
+async fn up(name: &str) -> (crate::hub::TestHub, u16) { up_with(name, "").await }
 /// `up` with more of the log after LOG's lines.
-async fn up_with(name: &str, more: &str) -> (Arc<Hub>, u16) {
-    let dir = std::env::temp_dir().join(format!("bp-data-{}-{name}", std::process::id())); let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(&dir).unwrap();
+async fn up_with(name: &str, more: &str) -> (crate::hub::TestHub, u16) {
+    let dir = crate::plat::tmp::dir(&format!("data-{name}"));
     std::fs::write(dir.join("token"), "tok").unwrap(); std::fs::write(dir.join("events.jsonl"), format!("{LOG}{more}")).unwrap();
-    let cfg = Cfg { home: dir, version: "0.14.0".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() };
+    let cfg = Cfg { home: dir.to_path_buf(), version: "0.14.0".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() };
     let hub = Hub::start(cfg, Arc::new(Canned { reply: json!({}) })).await.unwrap();
     hub.register_rpc(Arc::new(Fake(hub.clone())));
     let l = TcpListener::bind("127.0.0.1:0").await.unwrap(); let port = l.local_addr().unwrap().port();
     { let hub = hub.clone(); tokio::spawn(async move { loop { let (st, _) = l.accept().await.unwrap(); let h = hub.clone(); tokio::spawn(async move { let _ = wire::serve_with(h, st, false).await; }); } }); }
-    (hub, port)
+    (crate::hub::TestHub { hub, _tmp: dir }, port)
 }
 type Ws = tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<TcpStream>>;
 async fn open(port: u16, q: &str) -> Ws { connect_async(format!("ws://127.0.0.1:{port}/ws?data=1{q}&token=tok")).await.unwrap().0 }
@@ -103,7 +103,7 @@ async fn ask(ws: &mut Ws, id: u64, m: &str, p: Value) -> Value {
 /// A phone's new thread is made as the desktop's +: its env follows the thread.env setting (a worktree in a git project), or the one it names.
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn a_phones_new_thread_gets_a_worktree_like_the_desktops() {
     let (hub, port) = up("wtenv").await; let mut ws = open(port, "&enc=json").await; next(&mut ws).await;
-    let dir = std::env::temp_dir().join(format!("bp-data-wtenv-{}", std::process::id())); std::fs::create_dir_all(&dir).unwrap();
+    let dir = crate::plat::tmp::dir("data-wtenv");
     let pid = ask(&mut ws, 1, "project.add", json!({"path":dir.to_string_lossy()})).await["result"]["project"]["id"].as_str().unwrap().to_string();
     let env = |r: &Value| r["result"]["thread"]["id"].as_str().unwrap().to_string();
     let a = env(&ask(&mut ws, 2, "thread.create", json!({"project":pid})).await); let b = env(&ask(&mut ws, 3, "thread.create", json!({"project":pid,"env":"local"})).await);
@@ -113,7 +113,7 @@ async fn ask(ws: &mut Ws, id: u64, m: &str, p: Value) -> Value {
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_writes_make_a_project_a_thread_and_a_message_once() {
     let (hub, port) = up("writes").await; let mut ws = open(port, "&enc=json").await; next(&mut ws).await;
     let d = ask(&mut ws, 1, "dirs.list", json!({"path":"/"})).await; if cfg!(unix) { assert_eq!(d["result"]["path"], "/"); } assert!(d["result"]["parent"].is_null()); // Windows: "/" is the drive's root assert!(!d["result"]["dirs"].as_array().unwrap().is_empty());
-    let dir = std::env::temp_dir().join(format!("bp-data-proj-{}", std::process::id())); std::fs::create_dir_all(&dir).unwrap();
+    let dir = crate::plat::tmp::dir("data-proj");
     let r = ask(&mut ws, 2, "project.add", json!({"path":dir.to_string_lossy()})).await; assert_eq!(r["ok"], true, "{r}");
     let pid = r["result"]["project"]["id"].as_str().unwrap().to_string();
     let r = ask(&mut ws, 3, "thread.create", json!({"project":pid,"title":"Mine","text":"first words","permission":"ask"})).await; assert_eq!(r["ok"], true, "{r}");
@@ -512,7 +512,7 @@ impl RpcHandler for FakeStar {
     loop { let v = next(&mut ws).await; if v["t"] == "star" { assert_eq!(v["offer"], Value::Null); break } }
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_link_resolve_says_what_a_link_opens_or_why_not() {
-    let root = std::env::temp_dir().join(format!("bp-links-{}", std::process::id())); let _ = std::fs::remove_dir_all(&root);
+    let root = crate::plat::tmp::dir("links");
     std::fs::create_dir_all(root.join("src")).unwrap(); std::fs::write(root.join("src/x.rs"), "one\ntwo\n").unwrap();
     std::fs::create_dir_all(root.join("boards")).unwrap(); std::fs::write(root.join("boards/a.kicad_sch"), "(kicad_sch)").unwrap();
     let sch = format!("file://{}/boards/a.kicad_sch", root.to_string_lossy());
@@ -637,8 +637,10 @@ impl RpcHandler for FakeStar {
     assert_eq!(Streams::default().finished(), None, "a final message with no stream replaces nothing");
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_improvements_lists_the_projects_and_remembers_the_choice() {
-    for d in ["/tmp/alpha", "/tmp/beta"] { std::fs::create_dir_all(d).unwrap(); } // only a project whose folder is there is offered
-    let (h, port) = up("improve").await; h.register_rpc(Arc::new(crate::settings::improvements::ImprovementsRpc)); let mut ws = open(port, "&enc=json").await; next(&mut ws).await;
+    let roots = crate::plat::tmp::dir("improve-roots"); let (a, b) = (roots.join("alpha"), roots.join("beta"));
+    for d in [&a, &b] { std::fs::create_dir_all(d).unwrap(); } // only a project whose folder is there is offered
+    let more = format!("{{\"$\":\"ProjectCreated\",\"id\":\"p1\",\"title\":\"alpha\",\"root\":{},\"at\":1700000100}}\n{{\"$\":\"ProjectCreated\",\"id\":\"p2\",\"title\":\"beta\",\"root\":{},\"at\":1700000101}}\n", serde_json::Value::from(a.to_string_lossy()), serde_json::Value::from(b.to_string_lossy()));
+    let (h, port) = up_with("improve", &more).await; h.register_rpc(Arc::new(crate::settings::improvements::ImprovementsRpc)); let mut ws = open(port, "&enc=json").await; next(&mut ws).await;
     let r = ask(&mut ws, 1, "improvements.projects", json!({})).await; let ids: Vec<&str> = r["result"]["projects"].as_array().unwrap().iter().map(|t| t["id"].as_str().unwrap()).collect();
     assert_eq!(r["result"]["project"], "", "nothing chosen yet: {r}"); assert!(ids.contains(&"p1") && ids.contains(&"p2"), "{ids:?}");
     let r = ask(&mut ws, 2, "improvements.project", json!({"project":"p2"})).await; assert_eq!(r["ok"], true, "{r}");

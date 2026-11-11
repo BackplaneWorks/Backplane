@@ -132,7 +132,7 @@ fn shortcut(prefix: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn tmp(n: &str) -> PathBuf { let d = std::env::temp_dir().join(format!("bp-inst-{}-{n}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap(); d }
+    fn tmp(n: &str) -> crate::tmp::TempDir { crate::tmp::dir(&format!("inst-{n}")) }
 
     #[test] fn only_an_unpacked_release_run_on_its_own_is_offered_the_install() {
         let all = |_: &str| true;

@@ -146,11 +146,11 @@ impl crate::presenter::Presenter for Spy {
     }
 }
 fn thread_item(n: u64, id: &str) -> Item { Item { n, c: json!({"$":"ThreadCreated","id":id,"project":"","title":"T","env":"","branch":"","worktree":"","provider":"claude","model":"","at":n}) } }
-async fn spy_hub(tag: &str, fail_restart: bool) -> (Arc<Hub>, Arc<Spy>, Arc<Mutex<Vec<String>>>, PathBuf) {
+async fn spy_hub(tag: &str, fail_restart: bool) -> (Arc<Hub>, Arc<Spy>, Arc<Mutex<Vec<String>>>, crate::plat::tmp::TempDir) {
     let order = Arc::new(Mutex::new(vec![]));
-    let h = std::env::temp_dir().join(format!("bp-forget-{tag}-{}", std::process::id())); let _ = std::fs::remove_dir_all(&h); std::fs::create_dir_all(&h).unwrap();
+    let h = crate::plat::tmp::dir(&format!("forget-{tag}"));
     let spy = Arc::new(Spy { restarts: Default::default(), order: order.clone(), fail_restart });
-    let hub = Hub::start(crate::hub::Cfg { home: h.clone(), version: "0.14.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() }, spy.clone()).await.unwrap();
+    let hub = Hub::start(crate::hub::Cfg { home: h.to_path_buf(), version: "0.14.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() }, spy.clone()).await.unwrap();
     (hub, spy, order, h)
 }
 /// Through `FarSync::take`, a batch of another epoch: the presenter is restarted, given the log and then only the new history, once.

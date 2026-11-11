@@ -172,7 +172,7 @@ mod tests {
         assert_eq!(glb_of(2, "/p/own.glb"), "/p/own.glb");
     }
     #[test] fn a_steps_mesh_is_found_by_its_content_from_any_copy_and_an_old_name_is_taken_over() {
-        let d = std::env::temp_dir().join(format!("bp-stepc-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d);
+        let d = crate::plat::tmp::dir("stepc");
         for w in ["a/mech", "b/mech"] { std::fs::create_dir_all(d.join(w)).unwrap(); std::fs::write(d.join(w).join("lid.step"), b"ISO-10303-21; lid").unwrap(); }
         let (a, b) = (d.join("a/mech/lid.step").to_string_lossy().into_owned(), d.join("b/mech/lid.step").to_string_lossy().into_owned());
         let dir = d.join("cache").to_string_lossy().into_owned(); std::fs::create_dir_all(&dir).unwrap();
@@ -180,7 +180,6 @@ mod tests {
         assert_eq!(ca, cb, "two worktrees' copies: one mesh");
         let legacy = cached(&dir, &a, &revision(&a), true, false, false); std::fs::write(&legacy, b"glb").unwrap();
         take_over(&legacy, &ca); assert_eq!(std::fs::read(&cb).unwrap(), b"glb", "0.14's mesh serves the copy too");
-        let _ = std::fs::remove_dir_all(&d);
     }
     #[test] fn the_export_flags_are_the_childs() {
         assert_eq!(flags(false, false, "o", "b").join(" "), "pcb export glb --subst-models --include-pads --include-soldermask --include-silkscreen -f -o o b");
@@ -200,12 +199,12 @@ mod tests {
     /// (the GNSS tracker: design/Tracker_nRF9251/Tracker_nRF9251.kicad_pcb with KiCad 10.99).
     #[test] #[ignore] fn a_real_board_exports_to_a_model_a_phone_takes() {
         let (Ok(board), Ok(cli)) = (std::env::var("BACKPLANE_TEST_BOARD"), std::env::var("BACKPLANE_KICAD_CLI")) else { eprintln!("skipped: no BACKPLANE_TEST_BOARD / BACKPLANE_KICAD_CLI"); return };
-        let dir = std::env::temp_dir().join(format!("bp-realboard-{}", std::process::id())); std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::plat::tmp::dir("realboard");
         let out = dir.join("board.glb").to_string_lossy().into_owned();
         let t = std::time::Instant::now();
         let r = export(false, false, false, &board, &out, &cli, &[], stepglb::NORMAL, None);
         assert_eq!(r.code, 0, "export: {}", r.out);
-        let bytes = std::fs::read(&out).unwrap(); let _ = std::fs::remove_dir_all(&dir);
+        let bytes = std::fs::read(&out).unwrap(); drop(dir);
         let stem = std::path::Path::new(&board).file_stem().unwrap().to_string_lossy().into_owned();
         assert_eq!(glb::kicad_board(&bytes), stem, "the board's layers are known, so their colours are decoded");
         assert!(solid::fits(bytes.len() as u64), "{} bytes: the hub reads it", bytes.len());
@@ -246,7 +245,7 @@ mod tests {
         assert!(missing_note("Could not add 3D model for R1.\nx\nCould not add 3D model for R2.").starts_with("2 parts have no 3D model"));
     }
     #[test] fn steps_by_suffix() { assert!(is_step("a.step") && is_step("a.STP") && !is_step("a.Step") && !is_step("a.glb")); }
-    fn work(tag: &str) -> std::path::PathBuf { let d = std::env::temp_dir().join(format!("bp-solidread-{tag}-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap(); d }
+    fn work(tag: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("solidread-{tag}")) }
     #[test] fn a_glb_too_big_is_refused_saying_so_and_garbage_is_no_model() {
         let d = work("big"); let f = d.join("m.glb"); let infos = d.join("i").to_string_lossy().into_owned();
         let big = vec![0u8; solid::MOST as usize + 1]; std::fs::write(&f, &big).unwrap();

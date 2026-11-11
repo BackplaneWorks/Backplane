@@ -116,12 +116,11 @@ mod tests {
         assert_eq!(kind(b"<svg width=\"1\"/>"), Some("image/svg+xml")); assert_eq!(kind(b"<!DOCTYPE html><html>"), None); assert_eq!(kind(b""), None);
     }
     #[test] fn a_kept_picture_is_served_without_the_web_and_a_kept_failure_is_not_retried() {
-        let d = std::env::temp_dir().join(format!("bp-webimg-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap();
+        let d = crate::plat::tmp::dir("webimg");
         let url = "https://example.invalid/a.png";
         std::fs::write(d.join(key(url)), b"\x89PNG\r\n\x1a\n....").unwrap();
         assert_eq!(get(&d, url).map(|x| x.0), Some("image/png"));
         let other = "https://example.invalid/b.png"; std::fs::write(d.join(format!("{}.failed", key(other))), b"").unwrap();
         assert_eq!(get(&d, other), None, "a recent failure is not fetched again");
-        let _ = std::fs::remove_dir_all(&d);
     }
 }

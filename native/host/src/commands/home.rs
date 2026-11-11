@@ -259,7 +259,7 @@ pub async fn read(root: &str, req: &Value) -> Value {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn proj(name: &str) -> PathBuf { let d = std::env::temp_dir().join(format!("bp-home-{}-{name}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap(); d }
+    fn proj(name: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("home-{name}")) }
     #[test] fn a_kicad_project_lists_its_board_schematic_goal_and_checks() {
         let d = proj("snap"); std::fs::create_dir_all(d.join(".backplane")).unwrap(); std::fs::create_dir_all(d.join("build/reports")).unwrap();
         std::fs::write(d.join("a.kicad_pro"), "{}").unwrap(); std::fs::write(d.join("a.kicad_pcb"), "(kicad_pcb)").unwrap(); std::fs::write(d.join("a.kicad_sch"), "(kicad_sch)").unwrap();

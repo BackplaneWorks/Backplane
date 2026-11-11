@@ -1016,7 +1016,7 @@ mod tests {
         assert!(bug_url(&json!({"os": "plan9"})).contains("OS%3A%20unknown%20unknown"));
     }
     #[test] fn api_keys_list_names_only_and_forgetting_asks_once() {
-        let dir = std::env::temp_dir().join(format!("bp-keys-page-{}", std::process::id())); let _ = std::fs::remove_dir_all(&dir);
+        let dir = crate::plat::tmp::uncreated("keys-page");
         crate::settings::keys::add(&dir, "OPENAI_API_KEY", "sk-secret-123").unwrap();
         let info = json!({"home": dir.to_str().unwrap()});
         let r = pg_rows("keys", &[], json!({}), info.clone());

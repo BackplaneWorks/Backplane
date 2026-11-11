@@ -1,7 +1,7 @@
 //! The session against a stand-in helper (a shell script that speaks the helper's NDJSON): no microphone, no network, no model.
 use super::*;
 use crate::{hub::{Cfg, Out}, presenter::Canned};
-use std::sync::OnceLock; use crate::plat::fs::PermissionsExt;
+use crate::plat::fs::PermissionsExt;
 
 const HELPER: &str = r#"#!/bin/sh
 here=$(dirname "$0")
@@ -33,33 +33,29 @@ live)
   echo '{"event":"end"}';;
 esac
 "#;
-/// One folder for the whole test run: `BACKPLANE_VOICE_BIN` is read by every session test.
-fn bin() -> &'static Path {
-    static DIR: OnceLock<PathBuf> = OnceLock::new();
-    DIR.get_or_init(|| {
-        let d = std::env::temp_dir().join(format!("bp-voice-helper-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap();
-        let f = d.join("backplane-voice"); std::fs::write(&f, HELPER).unwrap(); std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
-        // Another test's fork while the script was open for writing keeps it open in that child until its exec, and an exec meanwhile fails
-        // "Text file busy". Wait until one exec works: no writer is left after that, so no later exec can fail so.
-        for _ in 0..1000 {
-            match crate::proc::std_cmd(crate::proc::Kind::Local, &f).arg("probe").output() {
-                Err(e) if e.raw_os_error() == Some(crate::plat::errno::ETXTBSY) => std::thread::sleep(std::time::Duration::from_millis(5)),
-                r => { r.expect("the stand-in helper runs"); break }
-            }
+/// Writes the stand-in helper inside `home/helper` and points `BACKPLANE_VOICE_BIN` at it (serialized by `ONE`).
+fn setup_bin(home: &Path) -> PathBuf {
+    let d = home.join("helper"); std::fs::create_dir_all(&d).unwrap();
+    let f = d.join("backplane-voice"); std::fs::write(&f, HELPER).unwrap(); std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o755)).unwrap();
+    // Another test's fork while the script was open for writing keeps it open in that child until its exec, and an exec meanwhile fails
+    // "Text file busy". Wait until one exec works: no writer is left after that, so no later exec can fail so.
+    for _ in 0..1000 {
+        match crate::proc::std_cmd(crate::proc::Kind::Local, &f).arg("probe").output() {
+            Err(e) if e.raw_os_error() == Some(crate::plat::errno::ETXTBSY) => std::thread::sleep(std::time::Duration::from_millis(5)),
+            r => { r.expect("the stand-in helper runs"); break }
         }
-        std::env::set_var("BACKPLANE_VOICE_BIN", &f); d
-    })
+    }
+    std::env::set_var("BACKPLANE_VOICE_BIN", &f); d
 }
-/// The tests share the helper's folder: one at a time.
+/// The tests share `BACKPLANE_VOICE_BIN`: one at a time.
 static ONE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
-struct Rig { hub: Arc<Hub>, v: Arc<Voice>, out: crate::hub::Outbox, home: PathBuf }
-impl Drop for Rig { fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.home); } }
+struct Rig { hub: Arc<Hub>, v: Arc<Voice>, out: crate::hub::Outbox, bin: PathBuf, home: crate::plat::tmp::TempDir }
 async fn rig(tag: &str) -> Rig {
-    bin();
-    let home = std::env::temp_dir().join(format!("bp-voice-{tag}-{}", std::process::id())); let _ = std::fs::remove_dir_all(&home); std::fs::create_dir_all(&home).unwrap();
-    let hub = Hub::start(Cfg { home: home.clone(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+    let home = crate::plat::tmp::dir(&format!("voice-{tag}"));
+    let bin = setup_bin(&home);
+    let hub = Hub::start(Cfg { home: home.to_path_buf(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
     let out = hub.attach(1); let v = start(&hub);
-    Rig { hub, v, out, home }
+    Rig { hub, v, out, bin, home }
 }
 impl Rig {
     async fn rpc(&self, p: Value) -> Value { let h = self.hub.rpc_for("bots.voice").unwrap(); h.call(&self.hub, &Caller { gen: "1".into(), client: 1 }, &json!(7), "bots.voice", &p).await.remove(0) }
@@ -97,7 +93,7 @@ fn replay(fs: &[Value], draft: &str) -> String {
     all.extend(r.until(|v| off(v) && v["thread"] == "t1").await);
     assert_eq!(replay(&all, "see"), "see open KiCad.");
     let last = all.last().unwrap(); assert_eq!(last["view"]["fixes"][0]["label"], "KiCad ← key cad ↶"); assert_eq!(last["view"]["bad"], false);
-    let args = std::fs::read_to_string(bin().join("args")).unwrap(); assert!(args.contains("--key-file") && args.contains("--keywords-file") && !args.contains("sk-"), "{args}");
+    let args = std::fs::read_to_string(r.bin.join("args")).unwrap(); assert!(args.contains("--key-file") && args.contains("--keywords-file") && !args.contains("sk-"), "{args}");
     assert_eq!(std::fs::read_to_string(keywords_path(&r.home)).unwrap(), "KiCad");
 }
 #[tokio::test(flavor = "multi_thread")] async fn a_clients_audio_goes_to_its_session_and_only_its_key_opens_it() {
@@ -108,7 +104,7 @@ fn replay(fs: &[Value], draft: &str) -> String {
     assert!(r.v.sink("").is_none() && r.v.sink("wrong").is_none(), "no key, no way in");
     let (id, tx) = r.v.sink(&key).unwrap(); tx.unwrap().send(b"pcm-bytes".to_vec()).await.unwrap(); r.v.close_audio(id);
     r.until(off).await;
-    assert_eq!(std::fs::read(bin().join("audio")).unwrap(), b"pcm-bytes"); assert!(std::fs::read_to_string(bin().join("args")).unwrap().contains("--source stdin --rate 16000"));
+    assert_eq!(std::fs::read(r.bin.join("audio")).unwrap(), b"pcm-bytes"); assert!(std::fs::read_to_string(r.bin.join("args")).unwrap().contains("--source stdin --rate 16000"));
     assert!(r.v.sink(&key).is_none(), "the session is gone, and its key with it");
 }
 #[tokio::test(flavor = "multi_thread")] async fn a_client_that_goes_away_stops_the_microphone() {
@@ -140,9 +136,9 @@ fn replay(fs: &[Value], draft: &str) -> String {
     assert_eq!(r.rpc(json!({"op":"page-act","action":"voice-op","value":"install:parakeet-v2"})).await["ok"], true);
     let fs = r.until(|v| v["ev"] == "page" && v["rows"][1]["note"].as_str().map_or(false, |n| n.contains("Not downloaded"))).await;
     assert!(fs.iter().any(|f| f["rows"][1]["note"] == "Downloading Parakeet v2 · 0 / 1 MB (50%)"), "{fs:?}");
-    std::fs::write(bin().join("fail-install"), "").unwrap();
+    std::fs::write(r.bin.join("fail-install"), "").unwrap();
     r.rpc(json!({"op":"install","model":"parakeet-v2"})).await;
-    let fs = r.until(|v| v["ev"] == "page" && v["rows"][1]["note"] == "Download failed: checksum mismatch").await; let _ = std::fs::remove_file(bin().join("fail-install"));
+    let fs = r.until(|v| v["ev"] == "page" && v["rows"][1]["note"] == "Download failed: checksum mismatch").await; let _ = std::fs::remove_file(r.bin.join("fail-install"));
     assert_eq!(fs.last().unwrap()["rows"][1]["buttons"][2]["label"], "Retry download");
 }
 #[tokio::test(flavor = "multi_thread")] async fn chips_change_the_draft_and_the_dictionary() {
@@ -164,7 +160,7 @@ fn replay(fs: &[Value], draft: &str) -> String {
     r.key(); commit(&r.hub, &[("voice.e.kicad".to_string(), "KiCad = key cad".to_string())]).await.unwrap();
     let h = hear_file(&r.hub, &p, "audio/mp4", "").await.unwrap();
     assert_eq!((h.text.as_str(), h.model.as_str(), h.conf), ("Open KiCad now.", "gpt-live-transcribe", Some(87))); assert_eq!(h.segs, vec![(12, 180, 87, "Open key cad now.".to_string())]);
-    assert_eq!(std::fs::read(bin().join("form")).unwrap(), b"bytes \xff"); assert!(std::fs::read_to_string(bin().join("file-args")).unwrap().contains("--content-type audio/mp4"));
+    assert_eq!(std::fs::read(r.bin.join("form")).unwrap(), b"bytes \xff"); assert!(std::fs::read_to_string(r.bin.join("file-args")).unwrap().contains("--content-type audio/mp4"));
     assert!(p.exists(), "the recording stays where it is kept");
 }
 #[test] fn a_hearing_picks_its_engine() {
@@ -174,23 +170,23 @@ fn replay(fs: &[Value], draft: &str) -> String {
 }
 #[test] fn the_engine_a_setting_picks() { assert_eq!([engine_of("auto", true), engine_of("auto", false), engine_of("local", false), engine_of("cloud", true), engine_of("cloud", false)], ["local", "openai", "local", "openai", "openai"]); }
 #[tokio::test(flavor = "multi_thread")] async fn the_local_engine_keeps_one_recognizer_loaded_for_every_session_and_lets_it_go_with_the_cloud() {
-    let _g = ONE.lock().await; let mut r = rig("resident").await; let _ = std::fs::remove_file(bin().join("serve-stopped"));
+    let _g = ONE.lock().await; let mut r = rig("resident").await; let _ = std::fs::remove_file(r.bin.join("serve-stopped"));
     let res = resident::of(&r.home).unwrap();
     let up = |r: &Rig| r.hub.info_now()["voice.resident"].as_str().map_or(false, |s| s.contains("\"loaded\""));
     tokio::time::sleep(Duration::from_millis(200)).await; assert!(!up(&r), "no model: nothing loads");
     std::fs::create_dir_all(local_dir(&r.home)).unwrap(); std::fs::write(local_dir(&r.home).join("ready-parakeet-v2"), "ok").unwrap(); res.kick();
     for _ in 0..100 { if up(&r) { break } tokio::time::sleep(Duration::from_millis(50)).await }
     assert!(up(&r), "{}", r.hub.info_now()); assert!(r.hub.info_now()["voice.resident"].as_str().unwrap().contains("\"rss_mb\":700"));
-    assert!(std::fs::read_to_string(bin().join("serve-args")).unwrap().contains(&format!("--socket {}", r.home.join("voice/engine.sock").display())));
+    assert!(std::fs::read_to_string(r.bin.join("serve-args")).unwrap().contains(&format!("--socket {}", r.home.join("voice/engine.sock").display())));
     // a dictation and a ring's recording both decode through it
     r.rpc(json!({"op":"start","thread":"t1","draft":"","src":"hub"})).await; r.until(|v| v["ev"] == "edit").await; r.rpc(json!({"op":"stop"})).await; r.until(off).await;
-    assert!(std::fs::read_to_string(bin().join("args")).unwrap().contains("--engine local") && std::fs::read_to_string(bin().join("args")).unwrap().contains("--server "), "live goes to the server");
+    assert!(std::fs::read_to_string(r.bin.join("args")).unwrap().contains("--engine local") && std::fs::read_to_string(r.bin.join("args")).unwrap().contains("--server "), "live goes to the server");
     let p = r.home.join("note.m4a"); std::fs::write(&p, b"a").unwrap(); let _ = hear_file(&r.hub, &p, "audio/mp4", "").await;
-    assert!(std::fs::read_to_string(bin().join("file-args")).unwrap().contains("--server "), "and the ring's file too");
+    assert!(std::fs::read_to_string(r.bin.join("file-args")).unwrap().contains("--server "), "and the ring's file too");
     // the cloud chosen: let go
     assert_eq!(r.rpc(json!({"op":"page-act","action":"setting","value":"voice.engine=cloud"})).await["ok"], true);
-    for _ in 0..100 { if bin().join("serve-stopped").exists() { break } tokio::time::sleep(Duration::from_millis(50)).await }
-    assert!(bin().join("serve-stopped").exists(), "the server's stdin closed"); 
+    for _ in 0..100 { if r.bin.join("serve-stopped").exists() { break } tokio::time::sleep(Duration::from_millis(50)).await }
+    assert!(r.bin.join("serve-stopped").exists(), "the server's stdin closed"); 
     for _ in 0..100 { if r.hub.info_now().get("voice.resident").is_none() { break } tokio::time::sleep(Duration::from_millis(50)).await }
     assert_eq!(r.hub.info_now().get("voice.resident"), None);
 }

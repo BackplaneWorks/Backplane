@@ -53,7 +53,7 @@ pub fn read(root: &str) -> Files {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn tmp(n: &str) -> std::path::PathBuf { let p = std::env::temp_dir().join(format!("bp-kp-{}-{n}", std::process::id())); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
+    fn tmp(n: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("kp-{n}")) }
     fn touch(p: std::path::PathBuf) { std::fs::create_dir_all(p.parent().unwrap()).unwrap(); std::fs::write(p, "").unwrap() }
     #[test] fn project_in_the_root_wins_and_prefers_the_matching_name() {
         let r = tmp("a"); for f in ["x.kicad_pro", "x.kicad_pcb", "other.kicad_pcb", "x.kicad_sch", "sub/y.kicad_pro", "sub/y.kicad_pcb"] { touch(r.join(f)) }

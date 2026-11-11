@@ -48,7 +48,7 @@ mod tests {
     }
     #[test] fn a_skill_link_installs_once_into_the_providers_folder() {
         if crate::proc::std_cmd(crate::proc::Kind::Net, "curl").arg("--version").output().is_err() { eprintln!("no curl: skipped"); return }
-        let h = std::env::temp_dir().join(format!("bp-inst-{}", std::process::id())); let _ = std::fs::remove_dir_all(&h); let hs = h.to_string_lossy().into_owned();
+        let h = crate::plat::tmp::uncreated("inst"); let hs = h.to_string_lossy().into_owned();
         let url = serve("---\nname: unslop-zq\ndescription: cut filler\n---\nSteps.");
         let (n, p) = install(&hs, &url, "claude", false).unwrap(); assert_eq!(n, "unslop-zq"); assert!(std::fs::read_to_string(format!("{p}/SKILL.md")).unwrap().contains("Steps."));
         assert!(p.replace('\\', "/").contains("/.claude/skills/")); assert!(install(&hs, &url, "claude", false).unwrap_err().contains("already installed"));

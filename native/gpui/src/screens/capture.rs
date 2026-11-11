@@ -128,7 +128,7 @@ mod tests {
     }
     #[test] fn a_file_is_a_screenshot_or_a_recording_only_by_its_bytes() {
         let mut png = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a]; png.extend(vec![0; 200]); assert!(is_png(&png)); assert!(!is_png(b"\x89PNG") && !is_png(&vec![0; 300]));
-        let d = std::env::temp_dir().join(format!("bp-cap-{}", std::process::id())); std::fs::create_dir_all(&d).unwrap();
+        let d = crate::tmp::dir("cap");
         let ok = d.join("a.webm"); std::fs::write(&ok, [0x1a, 0x45, 0xdf, 0xa3, 1, 2, 3]).unwrap(); assert!(is_webm(&ok));
         let bad = d.join("b.webm"); std::fs::write(&bad, b"nope").unwrap(); assert!(!is_webm(&bad)); assert!(!is_webm(&d.join("missing")));
         let _ = std::fs::remove_dir_all(&d);

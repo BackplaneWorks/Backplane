@@ -12,7 +12,7 @@ const JS_INTERRUPT: &str = include_str!("../../../../test/agents/fixtures/js-int
 const T1: &str = "t1700000001-2";
 
 /// a folder per call: helpers shared by several tests (`deliveries`) ask by the same name, and tests run side by side
-fn dir(name: &str) -> PathBuf { static N: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0); let p = std::env::temp_dir().join(format!("bp-ag-{}-{}-{}", std::process::id(), name, N.fetch_add(1, Relaxed))); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
+fn dir(name: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("ag-{name}")) }
 fn script(d: &Path, name: &str, body: &str) { use crate::plat::fs::PermissionsExt; let p = d.join(name); std::fs::write(&p, body).unwrap(); std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap(); }
 /// The JS test fleet's stand-in (test/tools/perf_standin.ts) with the settings the recordings used.
 fn perf_standin(d: &Path, secs: u32) { script(d, "claude", &STANDIN.replacen("\n", &format!("\nexport FAKE_PER=2 FAKE_CYCLE=5 FAKE_SECS={secs} FAKE_LOG=/dev/null\n"), 1)); }
@@ -23,10 +23,10 @@ fn base_log(work: &Path, n: usize, extra: &str) -> String {
         s += &format!("{{\"$\":\"ThreadCreated\",\"id\":\"{id}\",\"project\":\"p1\",\"title\":\"Fixture {i}\",\"env\":\"local\",\"branch\":\"\",\"worktree\":\"\",\"provider\":\"claude\",\"model\":\"\",\"at\":{}}}\n", 1700000001 + i) }
     s + extra
 }
-async fn start(name: &str, log: impl FnOnce(&Path) -> String, cli: impl FnOnce(&Path) -> Cli) -> (Arc<Hub>, Arc<Agents>, PathBuf, PathBuf) {
+async fn start(name: &str, log: impl FnOnce(&Path) -> String, cli: impl FnOnce(&Path) -> Cli) -> (Arc<Hub>, Arc<Agents>, crate::plat::tmp::TempDir, crate::plat::tmp::TempDir) {
     let home = dir(&format!("{name}-home")); let work = dir(&format!("{name}-work"));
     std::fs::write(home.join("events.jsonl"), log(&work)).unwrap();
-    let hub = Hub::start(Cfg { home: home.clone(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+    let hub = Hub::start(Cfg { home: home.to_path_buf(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
     let ag = Agents::start_with(hub.clone(), cli(&work)).await.unwrap();
     (hub, ag, home, work)
 }
@@ -246,7 +246,7 @@ fn renames(ev: &[Value]) -> Vec<String> { ev.iter().filter(|e| is(e, "ThreadRena
 #[tokio::test(flavor = "multi_thread")] #[ignore] async fn real_haiku_titles_a_thread() {
     let home = dir("real-home"); let work = dir("real-work");
     std::fs::write(home.join("events.jsonl"), base_log(&work, 1, &format!("{{\"$\":\"MessagePosted\",\"thread\":\"{T1}\",\"msg\":\"m1\",\"role\":\"user\",\"text\":\"the \\\"buy boards\\\" thing shows up at inopportune times on the thread header, make it only appear once a board file has changed\",\"at\":1700000005}}\n")).replace("Fixture 0", "New thread")).unwrap();
-    let hub = Hub::start(Cfg { home, version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+    let hub = Hub::start(Cfg { home: home.to_path_buf(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
     let ag = Agents::start(hub.clone()).await.unwrap(); let from = len(&hub).await;
     let r = ag.retitle(T1, Some("New thread"), false).await; println!("REAL TITLE: {r:?}");
     assert!(r.is_ok(), "{r:?}"); assert!(renames(&log_from(&hub, from).await).len() == 1); ag.shutdown();
@@ -573,8 +573,8 @@ fn tool_text(r: &Value) -> Value { serde_json::from_str(r["result"]["content"][0
     std::fs::set_permissions(sd.join("claude"), std::fs::Permissions::from_mode(0o755)).unwrap();
     let (hub, ag, home, work) = {
         let home = dir("a-home"); let work = dir("a-work"); std::fs::write(home.join("events.jsonl"), base_log(&work, 1, "")).unwrap();
-        let hub = Hub::start(Cfg { home: home.clone(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
-        let host = host::HostInfo { home: home.clone(), fc: "/home/h/.local/bin/freecadcmd".into(), render: "/home/h/Documents/i2cjak/backplane-gpui/build/gpui/backplane-serve-current".into(), kicad: prompt::Kicad { status: "stock".into(), cli: "/home/h/.local/bin/kicad-cli".into(), version: "10.0.7".into(), ..Default::default() },
+        let hub = Hub::start(Cfg { home: home.to_path_buf(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+        let host = host::HostInfo { home: home.to_path_buf(), fc: "/home/h/.local/bin/freecadcmd".into(), render: "/home/h/Documents/i2cjak/backplane-gpui/build/gpui/backplane-serve-current".into(), kicad: prompt::Kicad { status: "stock".into(), cli: "/home/h/.local/bin/kicad-cli".into(), version: "10.0.7".into(), ..Default::default() },
             models: json!({"claude":["fable","opus","sonnet","haiku"],"codex":["gpt-6.1-sol","gpt-6-astra","gpt-6.1-terra","gpt-6-sol","gpt-6-luna","gpt-5.6-sol","gpt-5.6-terra","gpt-5.6-luna"]}), ..Default::default() };
         let ag = Agents::start_host(hub.clone(), Cli::standin(&sd), host).await.unwrap(); (hub, ag, home, work)
     };
@@ -656,8 +656,8 @@ fn norm_steps(s: &str, roots: &[&str]) -> String {
     std::fs::write(sd.join("replay.ndjson"), include_str!("../../../../test/agents/fixtures/replay-steps.ndjson")).unwrap();
     let home = dir("st-home"); let work = dir("st-work"); std::fs::write(home.join("events.jsonl"), base_log(&work, 1, "")).unwrap();
     std::fs::write(work.join("b.kicad_pcb"), "(kicad_pcb (version 20240108))\n").unwrap();
-    let hub = Hub::start(Cfg { home: home.clone(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
-    let host = host::HostInfo { home: home.clone(), ..Default::default() };
+    let hub = Hub::start(Cfg { home: home.to_path_buf(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+    let host = host::HostInfo { home: home.to_path_buf(), ..Default::default() };
     let ag = Agents::start_host(hub.clone(), Cli::standin(&sd), host).await.unwrap(); let from = len(&hub).await;
     rpc(&hub, "turn.start", json!({"thread":T1,"text":"hello"})).await;
     until(&hub, from, 30, |ev| ev.iter().any(|e| turn_is(e, "completed")) && ev.iter().any(|e| e["tone"] == "step")).await;
@@ -732,9 +732,9 @@ async fn recovered(extra: &str, state: &str) -> Vec<Value> {
 /// A `codex` stand-in: reads the turn's text from its last argument; "slow" turns wait; every turn says thread.started, a delta, a command and a reply that echoes the text.
 const CODEX_STANDIN: &str = include_str!("../../../../test/agents/standin-codex.sh");
 fn codex_log(work: &Path) -> String { base_log(work, 1, "").replace("\"provider\":\"claude\"", "\"provider\":\"codex\"") }
-async fn codex_start(name: &str) -> (Arc<Hub>, Arc<Agents>, PathBuf) {
-    let sd = dir(&format!("{name}-bin")); script(&sd, "codex", CODEX_STANDIN);
-    let (hub, ag, _h, _w) = start(name, |w| codex_log(w), |_| Cli::standin(&sd)).await; (hub, ag, sd)
+async fn codex_start(name: &str) -> (Arc<Hub>, Arc<Agents>, crate::plat::tmp::TempDir) {
+    let mut sd = dir(&format!("{name}-bin")); script(&sd, "codex", CODEX_STANDIN);
+    let (hub, ag, h, w) = start(name, |w| codex_log(w), |_| Cli::standin(&sd)).await; sd.keep(h); sd.keep(w); (hub, ag, sd)
 }
 #[tokio::test(flavor = "multi_thread")] async fn a_codex_turn_reads_in_codex_shapes() {
     let (hub, ag, _sd) = codex_start("cx1").await; let from = len(&hub).await;
@@ -1273,9 +1273,10 @@ const T2: &str = "t1700001001-1"; const T3: &str = "t1700001002-2";
 fn lock_ev(name: &str, l: Value) -> String { format!("{}\n", json!({"$":"LockChanged","name":name,"lock":l,"at":1700000006})) }
 fn rows_ev(th: &str, rows: &[String]) -> String { format!("{}\n", json!({"$":"WorkSet","thread":th,"kind":"watch","rows":rows.join("\n"),"at":1700000005})) }
 fn party(id: &str, kind: &str, th: &str, lease: u64) -> Value { json!({"id":id,"kind":kind,"thread":th,"note":"","since":1700000000u64,"lease":lease}) }
-async fn locks_up(name: &str, extra: impl FnOnce(&Path) -> String) -> (Arc<Hub>, Arc<Agents>, PathBuf, PathBuf) {
+async fn locks_up(name: &str, extra: impl FnOnce(&Path) -> String) -> (Arc<Hub>, Arc<Agents>, crate::plat::tmp::TempDir, crate::plat::tmp::TempDir) {
     let sd = dir(&format!("{name}-bin")); script(&sd, "codex", CODEX_STANDIN);
-    start(name, |w| { let x = extra(w); base_log(w, 3, &x).replace("\"provider\":\"claude\"", "\"provider\":\"codex\"") }, |_| Cli::standin(&sd)).await
+    let (hub, ag, mut h, w) = start(name, |w| { let x = extra(w); base_log(w, 3, &x).replace("\"provider\":\"claude\"", "\"provider\":\"codex\"") }, |_| Cli::standin(&sd)).await;
+    h.keep(sd); (hub, ag, h, w)
 }
 /// The hub's own message (role system), never the stand-in agent's echo of one.
 fn hub_says(e: &Value, what: &str) -> bool { is(e, "MessagePosted") && e["role"] == "system" && e["text"].as_str().map_or(false, |t| t.contains(what)) }
@@ -1594,7 +1595,7 @@ fn watch_log(work: &Path, rows: &[String], extra: &str) -> String { base_log(wor
 }
 #[test] fn side_by_side_runs_only_the_persons_turn_with_the_persons_agent_and_guards() {
     // the child gets a clean PATH below: `person_dirs` puts the hub's own PATH first, so a real `claude` on the machine's PATH (~/.local/bin) would be run instead of the person's stand-in
-    let me = std::env::current_exe().unwrap(); let person = dir("sbs-person"); let live = dir("sbs-live").join("events.jsonl"); std::fs::write(&live, "{\"$\":\"ProjectCreated\",\"id\":\"z\",\"title\":\"z\",\"root\":\"/nonexistent-live\",\"at\":1}\n").unwrap();
+    let me = std::env::current_exe().unwrap(); let person = dir("sbs-person"); let live_d = dir("sbs-live"); let live = live_d.join("events.jsonl"); std::fs::write(&live, "{\"$\":\"ProjectCreated\",\"id\":\"z\",\"title\":\"z\",\"root\":\"/nonexistent-live\",\"at\":1}\n").unwrap();
     let o = std::process::Command::new(me).args(["agents::tests::sbs_child_probe", "--exact", "--nocapture", "--test-threads=1"]).env("PATH", "/usr/bin:/bin").env("BACKPLANE_COPY", "1").env("BACKPLANE_SIDE_BY_SIDE", "1").env("BACKPLANE_PERSON_HOME", &person).env("BACKPLANE_LIVE_LOG", &live).env("BP_SBS_PROBE", "1").env("BP_SBS_PERSON", &person).env("BP_SBS_LIVE", &live).env_remove("BACKPLANE_AGENTS").output().unwrap();
     assert!(o.status.success(), "{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
     assert!(String::from_utf8_lossy(&o.stdout).contains("sbs_child_probe ... ok"), "the probe ran: {}", String::from_utf8_lossy(&o.stdout));
@@ -1655,7 +1656,7 @@ fn watch_log(work: &Path, rows: &[String], extra: &str) -> String { base_log(wor
     ag.shutdown();
 }
 #[test] fn a_routine_run_in_side_by_side_reaches_no_real_agent() {
-    let me = std::env::current_exe().unwrap(); let person = dir("sbr-person"); let live = dir("sbr-live").join("events.jsonl"); std::fs::write(&live, "{\"$\":\"ProjectCreated\",\"id\":\"z\",\"title\":\"z\",\"root\":\"/nonexistent-live\",\"at\":1}\n").unwrap();
+    let me = std::env::current_exe().unwrap(); let person = dir("sbr-person"); let live_d = dir("sbr-live"); let live = live_d.join("events.jsonl"); std::fs::write(&live, "{\"$\":\"ProjectCreated\",\"id\":\"z\",\"title\":\"z\",\"root\":\"/nonexistent-live\",\"at\":1}\n").unwrap();
     let o = std::process::Command::new(me).args(["agents::tests::sbs_routine_probe", "--exact", "--nocapture", "--test-threads=1"]).env("BACKPLANE_COPY", "1").env("BACKPLANE_SIDE_BY_SIDE", "1").env("BACKPLANE_PERSON_HOME", &person).env("BACKPLANE_LIVE_LOG", &live).env("BP_SBS_ROUTINE", "1").env("BP_SBS_PERSON", &person).env_remove("BACKPLANE_AGENTS").output().unwrap();
     assert!(o.status.success(), "{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr));
     assert!(String::from_utf8_lossy(&o.stdout).contains("sbs_routine_probe ... ok"), "the probe ran: {}", String::from_utf8_lossy(&o.stdout));
@@ -1679,8 +1680,8 @@ async fn a_dollar_skill_of_the_persons_own_reaches_the_agent_as_a_slash_command_
     let uh = dir("sk-userhome"); // a fake user: a Claude skill, a Codex-only skill
     for (rel, name) in [(".claude/skills/unslop-zq", "unslop-zq"), (".agents/skills/codexonly-zq", "codexonly-zq")] { std::fs::create_dir_all(uh.join(rel)).unwrap(); std::fs::write(uh.join(rel).join("SKILL.md"), format!("---\nname: {name}\ndescription: d\n---\nbody")).unwrap(); }
     let home = dir("sk-home"); let work = dir("sk-work"); std::fs::write(home.join("events.jsonl"), base_log(&work, 1, "")).unwrap();
-    let hub = Hub::start(Cfg { home: home.clone(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
-    let ag = Agents::start_host(hub.clone(), Cli::standin(&sd), host::HostInfo { user_home: uh.to_string_lossy().into_owned(), home: home.clone(), ..Default::default() }).await.unwrap(); let from = len(&hub).await;
+    let hub = Hub::start(Cfg { home: home.to_path_buf(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+    let ag = Agents::start_host(hub.clone(), Cli::standin(&sd), host::HostInfo { user_home: uh.to_string_lossy().into_owned(), home: home.to_path_buf(), ..Default::default() }).await.unwrap(); let from = len(&hub).await;
     rpc(&hub, "turn.start", json!({"thread":T1,"text":"zqskill run $unslop-zq and $codexonly-zq"})).await;
     until(&hub, from, 30, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await;
     let got = std::fs::read_to_string(&rec).unwrap(); let line = got.lines().find(|l| l.contains("zqskill")).expect("the user line"); let v: Value = serde_json::from_str(line).unwrap();
@@ -1706,8 +1707,8 @@ async fn a_dollar_skill_of_the_persons_own_reaches_the_agent_as_a_slash_command_
         else { script(&sd, "codex", &format!("#!/bin/sh\ncase \"$1\" in --version) echo codex-cli 0.0.0; exit 0;; esac\nfor a in \"$@\"; do X=\"$a\"; done\n{find}\necho '{{\"type\":\"thread.started\",\"thread_id\":\"cs-1\"}}'\nprintf '{{\"type\":\"item.completed\",\"item\":{{\"id\":\"i\",\"type\":\"agent_message\",\"text\":\"The skill says %s\"}}}}\\n' \"$w\"\necho '{{\"type\":\"turn.completed\",\"usage\":{{\"input_tokens\":1,\"cached_input_tokens\":0,\"output_tokens\":1}}}}'\n")) }
         let home = dir(&format!("sc-home-{provider}")); let work = dir(&format!("sc-work-{provider}"));
         let log = if provider == "codex" { codex_log(&work) } else { base_log(&work, 1, "") }; std::fs::write(home.join("events.jsonl"), log).unwrap();
-        let hub = Hub::start(Cfg { home: home.clone(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
-        let ag = Agents::start_host(hub.clone(), Cli::standin(&sd), host::HostInfo { user_home: uh.to_string_lossy().into_owned(), home: home.clone(), ..Default::default() }).await.unwrap(); let from = len(&hub).await;
+        let hub = Hub::start(Cfg { home: home.to_path_buf(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+        let ag = Agents::start_host(hub.clone(), Cli::standin(&sd), host::HostInfo { user_home: uh.to_string_lossy().into_owned(), home: home.to_path_buf(), ..Default::default() }).await.unwrap(); let from = len(&hub).await;
         rpc(&hub, "turn.start", json!({"thread":T1,"text":"use $zqwhale please"})).await;
         let ev = until(&hub, from, 30, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await;
         assert!(ev.iter().any(|e| is(e, "MessagePosted") && e["role"] == "assistant" && e["text"].as_str().map_or(false, |t| t.contains("PURPLE-OTTER-77"))), "{provider}: the reply must carry the skill's secret: {ev:?}");

@@ -29,14 +29,14 @@ impl Inbox for Arc<Peers> {
         let mut l = self.locks.lock().unwrap(); for n in locks { if l.get(&n).map_or(false, |h| h == th) { l.remove(&n); } } }) }
 }
 
-async fn hub_of(name: &str) -> (Arc<Hub>, Arc<Bots>, Arc<Peers>) {
-    let home = std::env::temp_dir().join(format!("bp-swarm-{}-{name}", std::process::id())); let _ = std::fs::remove_dir_all(&home); std::fs::create_dir_all(&home).unwrap();
+async fn hub_of(name: &str) -> (crate::hub::TestHub, Arc<Bots>, Arc<Peers>) {
+    let home = crate::plat::tmp::dir(&format!("swarm-{name}"));
     std::fs::write(home.join("events.jsonl"), "{\"$\":\"ProjectCreated\",\"id\":\"p1\",\"title\":\"toy\",\"root\":\"/w\",\"at\":1}\n").unwrap();
-    let hub = Hub::start(Cfg { home, version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+    let hub = Hub::start(Cfg { home: home.to_path_buf(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
     let peers = Arc::new(Peers::default());
     let bots = Bots::start_with(hub.clone(), Arc::new(peers.clone())).await;
     let _ = peers.bots.set(Arc::downgrade(&bots));
-    (hub, bots, peers)
+    (crate::hub::TestHub { hub, _tmp: home }, bots, peers)
 }
 fn rides_to(p: &Peers, th: &str) -> Vec<String> { p.rides.lock().unwrap().iter().filter(|r| r.0 == th).map(|r| r.2.clone()).collect() }
 async fn post(b: &Arc<Bots>, th: &str, a: Value) -> (bool, Value) { b.tool_call(th, "room_post", &a).await }

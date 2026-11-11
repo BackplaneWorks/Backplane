@@ -16,7 +16,7 @@ impl Fake {
     fn clears(&self) -> Vec<Value> { self.sent.lock().unwrap().iter().filter(|x| x.1.push_type == "background").map(|x| x.1.payload.clone()).collect() }
     async fn wait(&self, n: usize) -> Vec<Value> { for _ in 0..2000 { if self.alerts().len() >= n { break } tokio::time::sleep(std::time::Duration::from_millis(30)).await } self.alerts() }
 }
-struct S { hub: Arc<Hub>, bots: Arc<Bots>, rec: Arc<Rec>, bub: String, chat: String, fake: Arc<Fake>, push: Arc<push::Push> }
+struct S { bots: Arc<Bots>, rec: Arc<Rec>, bub: String, chat: String, fake: Arc<Fake>, push: Arc<push::Push>, hub: crate::hub::TestHub }
 async fn set(hub: &Arc<Hub>, k: &str, v: &str) { hub.commit(&json!({"$":"SettingSet","key":k,"value":v,"at":now_s()})).await.unwrap() ; }
 async fn device(hub: &Arc<Hub>, token: &str) { hub.commit(&json!({"$":"DeviceRegistered","token":token,"platform":"ios","kind":"alert","thread":"","env":"sandbox","bundle":"dev.backplane.mobile","at":now_s()})).await.unwrap(); }
 async fn setup_with(name: &str, fake: Fake) -> S {
@@ -289,7 +289,7 @@ fn item(id: &str, th: &str, ask: &str, reason: &str) -> Item { Item { id: id.int
     assert!(apns::raw_sig(&[0x31, 0]).is_none() && apns::raw_sig(&[]).is_none());
 }
 #[test] fn a_real_key_signs_a_token_openssl_verifies() {
-    let d = std::env::temp_dir().join(format!("bp-push-jwt-{}", std::process::id())); std::fs::create_dir_all(&d).unwrap(); let (k, p) = (d.join("k.pem"), d.join("p.pem"));
+    let d = crate::plat::tmp::dir("push-jwt"); let (k, p) = (d.join("k.pem"), d.join("p.pem"));
     let sh = |a: &[&str]| std::process::Command::new("openssl").args(a).output().unwrap();
     assert!(sh(&["ecparam", "-name", "prime256v1", "-genkey", "-noout", "-out", k.to_str().unwrap()]).status.success());
     assert!(sh(&["ec", "-in", k.to_str().unwrap(), "-pubout", "-out", p.to_str().unwrap()]).status.success());
@@ -302,7 +302,7 @@ fn item(id: &str, th: &str, ask: &str, reason: &str) -> Item { Item { id: id.int
     let (r, s2) = (int(&raw[..32]), int(&raw[32..])); let mut der = vec![0x30, (r.len() + s2.len()) as u8]; der.extend(r); der.extend(s2);
     std::fs::write(d.join("sig"), der).unwrap(); std::fs::write(d.join("msg"), format!("{}.{}", parts[0], parts[1])).unwrap();
     let o = sh(&["dgst", "-sha256", "-verify", p.to_str().unwrap(), "-signature", d.join("sig").to_str().unwrap(), d.join("msg").to_str().unwrap()]);
-    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stdout)); let _ = std::fs::remove_dir_all(d);
+    assert!(o.status.success(), "{}", String::from_utf8_lossy(&o.stdout));
 }
 
 #[tokio::test] async fn an_expired_sign_in_is_one_alert_in_the_uberbots_name_that_opens_the_account_and_leaves_when_it_is_back() {
@@ -443,7 +443,7 @@ async fn flip(s: &S, st: &mut crate::state::State, k: &str, v: &str) { press(s, 
 }
 
 #[test] fn apns_credentials_come_from_the_settings_else_the_env_file_so_push_cannot_silently_be_off() {
-    let d = std::env::temp_dir().join(format!("bp-apns-env-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(d.join("apns")).unwrap();
+    let d = crate::plat::tmp::dir("apns-env"); std::fs::create_dir_all(d.join("apns")).unwrap();
     std::fs::write(d.join("apns/AuthKey_KID1.p8"), "k").unwrap(); std::fs::write(d.join("own.p8"), "k").unwrap();
     let env = "export BACKPLANE_APNS_TEAM_ID=TEAM1\nexport BACKPLANE_APNS_KEY_ID=\"KID1\"\n# c\nexport BACKPLANE_APNS_BUNDLE_ID=x.y\n";
     let none = || (String::new(), String::new(), String::new());
@@ -454,7 +454,6 @@ async fn flip(s: &S, st: &mut crate::state::State, k: &str, v: &str) { press(s, 
     let r = apns::resolve((own.clone(), "K".into(), "T".into()), Some((env, &d))).unwrap(); assert_eq!((r.0, r.1, r.2, r.3), (own.clone(), "K".into(), "T".into(), "settings"), "settings win and the file is not used");
     let env2 = format!("{env}export BACKPLANE_APNS_PRIVATE_KEY_PATH={own}\n"); assert_eq!(apns::resolve(none(), Some((&env2, &d))).unwrap().0, own, "the file's own key path");
     assert_eq!(apns::resolve(none(), Some(("export BACKPLANE_APNS_KEY_ID=KID9\n", &d))), None, "a team missing, or a key file that is not there: off");
-    let _ = std::fs::remove_dir_all(&d);
 }
 
 // ---- Nov 10: what reached the phone and should not have (a room's bot-to-bot chatter, a mailroom run's failure, raw markdown) ----

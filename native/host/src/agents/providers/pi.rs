@@ -264,7 +264,7 @@ mod tests {
     // law pi_run_turn: a thread's turn is one run of `pi`, carrying its model, session, runtime and text. (cwd goes through the actor, which spawns in it.)
     #[test] fn pi_run_turn() {
         let m = driver("pi").unwrap(); assert_eq!(m.cli, "pi"); assert!(driver("omp").is_none() && driver("claude").is_none());
-        let mut d = m.driver; let dir = std::env::temp_dir().join(format!("bp-pi-run-{}", std::process::id()));
+        let mut d = m.driver; let dir = crate::plat::tmp::uncreated("pi-run");
         let a = TurnIn { thread: "th".into(), home: dir.to_string_lossy().into(), model: "openai/gpt".into(), session: "S9".into(), runtime: "approval-required".into(), text: "say this".into(), prompt: "P".into(), mcp_url: "http://mcp".into(), ..TurnIn::default() };
         let argv = d.argv(&a);
         assert!(argv.windows(2).any(|w| w == ["--model", "openai/gpt"]) && argv.windows(2).any(|w| w == ["--session-id", "S9"]), "model and session reach argv");
@@ -272,7 +272,6 @@ mod tests {
         d.start(&a);
         let r = d.on_line(&json!({"type":"response","id":"1","success":true,"data":{"sessionId":"S9","messageCount":4}}));
         assert_eq!(r.send, vec![r#"{"id":"2","type":"prompt","message":"say this"}"#], "the text reaches the prompt");
-        let _ = std::fs::remove_dir_all(dir);
     }
     #[test] fn pi_exits_with_its_own_words() { assert_eq!(PiDriver::new().exit_why(1).unwrap(), "pi exited before the turn ended (is it signed in? run `pi` and use /login)") }
     #[test] fn pi_acp_like() {
@@ -284,14 +283,13 @@ mod tests {
 
     #[test] fn the_command_line_is_the_hubs() {
         let d = PiDriver::new(); let mut a = ti("approval-required"); a.model = "anthropic/claude-x".into(); a.effort = "high".into();
-        let dir = std::env::temp_dir().join(format!("bp-pi-argv-{}", std::process::id())); a.home = dir.to_string_lossy().into();
+        let dir = crate::plat::tmp::uncreated("pi-argv"); a.home = dir.to_string_lossy().into();
         let v = d.argv(&a);
         assert_eq!(v, vec!["--mode", "rpc", "--session-id", "bp-t1-9-0", "-e", &format!("{}/pi/backplane.js", a.home), "--append-system-prompt", "P", "--model", "anthropic/claude-x", "--thinking", "high"]);
         assert_eq!(std::fs::read_to_string(dir.join("pi/backplane.js")).unwrap(), EXT);
         assert_eq!(d.env(&a), vec![("BACKPLANE_PI_MCP".to_string(), a.mcp_url.clone()), ("BACKPLANE_PI_MODE".into(), "ask".into())]);
         a.model = "default".into(); a.effort = "".into(); a.session = "sess-1".into();
         assert_eq!(d.argv(&a)[3], "sess-1"); assert_eq!(d.argv(&a).len(), 8);
-        let _ = std::fs::remove_dir_all(dir);
     }
     // the file is generated from pi by test/agents/prov-pi/gen_ext.py; its bytes are pinned
     #[test] fn the_extension_is_pi_byte_for_byte() { use sha2::{Digest, Sha256}; assert_eq!(hex::encode(Sha256::digest(EXT.as_bytes())), "97e272d8ae5d6a2bbb06895fa13c4b03053ef17772fe5d7bb813cc858fa6af5f") }

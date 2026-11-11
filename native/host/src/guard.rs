@@ -307,12 +307,12 @@ impl crate::api::RpcHandler for Rpc {
 mod tests {
     use super::*;
     #[test] fn a_waiting_request_is_never_replaced() {
-        let g = std::env::temp_dir().join(format!("bp-ask-{}", std::process::id())); let _ = std::fs::remove_dir_all(&g);
+        let g = crate::plat::tmp::uncreated("ask");
         ask(&g, "a", "{\"id\":\"a\"}").unwrap();
         let e = ask(&g, "b", "{\"id\":\"b\"}").unwrap_err(); assert_eq!(e.kind(), std::io::ErrorKind::AlreadyExists);
         assert_eq!(std::fs::read_to_string(g.join("request")).unwrap(), "{\"id\":\"a\"}", "the first one still waits");
         std::fs::remove_file(g.join("request")).unwrap(); ask(&g, "c", "c").unwrap(); assert_eq!(std::fs::read_to_string(g.join("request")).unwrap(), "c", "taken: the next one goes in");
-        assert_eq!(std::fs::read_dir(&g).unwrap().count(), 1, "no temp files left"); let _ = std::fs::remove_dir_all(&g);
+        assert_eq!(std::fs::read_dir(&g).unwrap().count(), 1, "no temp files left");
     }
     #[test] fn skips_parse() { assert_eq!(parse_skips(" bots, ,agents"), vec!["bots", "agents"]); assert!(parse_skips("").is_empty()); }
     #[test] fn a_stale_check_names_what_stopped() {

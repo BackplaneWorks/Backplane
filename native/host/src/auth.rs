@@ -177,7 +177,7 @@ mod tests {
         for v in [json!(true), json!(1), json!("yes"), json!("false"), json!([]), json!({}), json!(-1), json!(0.5)] { assert!(truthy(&v), "{v}") }
         for v in [json!(false), json!(null), json!(0), json!(""), json!(0.0)] { assert!(!truthy(&v), "{v}") }
         // end to end through load(): a device whose revoked field is 1 or "yes" is not admitted
-        let dir = std::env::temp_dir().join(format!("bp-auth-rev-{}", std::process::id())); let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::plat::tmp::dir("auth-rev");
         let tok = "0123456789abcdef0123456789abcdef"; let hash = hex::encode(Sha256::digest(tok.as_bytes()));
         std::fs::write(dir.join("token"), "roottoken").unwrap();
         for (revoked, admitted) in [("false", true), ("null", true), ("0", true), ("1", false), ("\"yes\"", false), ("true", false)] {

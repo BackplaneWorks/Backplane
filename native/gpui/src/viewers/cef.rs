@@ -615,17 +615,17 @@ fn child_of(wi: &mut WindowInfo, h: native::Host, r: native::R) {
 mod tests {
     use super::*;
     #[test] fn downloads_never_overwrite_and_names_are_plain() {
-        let d = std::env::temp_dir().join(format!("bp-dl-{}", std::process::id())); std::fs::create_dir_all(&d).unwrap();
+        let d = crate::tmp::dir("dl-cef");
         assert_eq!(unique_path(&d, "a.txt"), d.join("a.txt")); std::fs::write(d.join("a.txt"), b"x").unwrap();
         assert_eq!(unique_path(&d, "a.txt"), d.join("a (2).txt")); std::fs::write(d.join("a (2).txt"), b"x").unwrap(); assert_eq!(unique_path(&d, "a.txt"), d.join("a (3).txt"));
-        assert_eq!(safe_name("../x/y.txt"), "_x_y.txt"); assert_eq!(safe_name(""), "download"); let _ = std::fs::remove_dir_all(&d);
+        assert_eq!(safe_name("../x/y.txt"), "_x_y.txt"); assert_eq!(safe_name(""), "download");
     }
     #[test] fn runtime_files_are_linked_beside_the_executable_or_refused() {
-        let b = std::env::temp_dir().join(format!("bp-cefrt-{}", std::process::id())); let (rt, ex) = (b.join("rt"), b.join("exe")); std::fs::create_dir_all(rt.join("locales")).unwrap(); std::fs::create_dir_all(&ex).unwrap();
+        let b = crate::tmp::dir("cefrt"); let (rt, ex) = (b.join("rt"), b.join("exe")); std::fs::create_dir_all(rt.join("locales")).unwrap(); std::fs::create_dir_all(&ex).unwrap();
         assert!(ensure_beside(&rt, &ex).is_err()); // nothing anywhere: refused, not a crash
         for f in RUNTIME_FILES { if f != "locales" { std::fs::write(rt.join(f), b"x").unwrap(); } }
         assert!(ensure_beside(&rt, &ex).is_ok()); for f in RUNTIME_FILES { assert!(ex.join(f).exists(), "{f}"); }
-        assert!(ensure_beside(&rt, &rt).is_ok()); let _ = std::fs::remove_dir_all(&b);
+        assert!(ensure_beside(&rt, &rt).is_ok());
     }
     #[test] fn a_character_on_windows_carries_itself_not_its_key() {
         assert_eq!(char_code(2, 65, 'a' as u16, true), 'a' as i32, "WM_CHAR of 'a', not VK_A ('A')"); assert_eq!(char_code(2, 0, 'h' as u16, true), 'h' as i32);

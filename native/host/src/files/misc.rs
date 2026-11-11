@@ -177,35 +177,34 @@ mod tests {
         assert_eq!(mech_error(1, &"x".repeat(500)).len(), 300);
     }
     #[tokio::test] async fn mech_list_script_lists_models_and_renders_sorted() {
-        let d = std::env::temp_dir().join(format!("bp-mech-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d);
+        let d = crate::plat::tmp::dir("mech");
         for f in ["mech/a.step", "mech/b.png", "mech/sub/c.glb", "mech/.hid/x.step", "mech/readme.txt"] { std::fs::create_dir_all(d.join(f).parent().unwrap()).unwrap(); std::fs::write(d.join(f), "x").unwrap() }
         let r = proc("sh", &["-c", MECH_LIST], &d.to_string_lossy(), &[]).await; assert_eq!(r.code, 0);
         let names: Vec<&str> = r.out.lines().map(|l| l.rsplit(' ').next().unwrap()).collect(); assert_eq!(names, ["mech/a.step", "mech/b.png", "mech/sub/c.glb"], "{}", r.out);
-        let e = std::env::temp_dir().join(format!("bp-mech-empty-{}", std::process::id())); std::fs::create_dir_all(&e).unwrap();
+        let e = crate::plat::tmp::dir("mech-empty");
         assert_eq!(proc("sh", &["-c", MECH_LIST], &e.to_string_lossy(), &[]).await.out, "");
     }
     #[test] fn file_picker_walk_skips_hidden_and_node_modules() {
-        let d = std::env::temp_dir().join(format!("bp-walk-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d);
+        let d = crate::plat::tmp::dir("walk");
         for f in ["a.txt", "sub/b.txt", ".hid/c.txt", "node_modules/n.js", "sub/.dot", "x/y/z/w.txt"] { std::fs::create_dir_all(d.join(f).parent().unwrap()).unwrap(); std::fs::write(d.join(f), "").unwrap() }
         assert_eq!(walk_files(&d), ["a.txt", "sub/b.txt", "x/y/z/w.txt"]);
     }
     #[tokio::test] async fn resolve_script_names_a_ref_as_a_commit() {
-        let d = std::env::temp_dir().join(format!("bp-res-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap(); let cwd = d.to_string_lossy().into_owned();
+        let d = crate::plat::tmp::dir("res"); let cwd = d.to_string_lossy().into_owned();
         let g = |a: &[&str]| { let o = std::process::Command::new("git").args(a).current_dir(&d).env("GIT_AUTHOR_NAME", "t").env("GIT_AUTHOR_EMAIL", "t@t").env("GIT_COMMITTER_NAME", "t").env("GIT_COMMITTER_EMAIL", "t@t").output().unwrap(); String::from_utf8_lossy(&o.stdout).trim().to_string() };
         g(&["init", "-q"]); std::fs::write(d.join("f"), "x").unwrap(); g(&["add", "."]); g(&["commit", "-qm", "i"]); g(&["tag", "v1"]); let head = g(&["rev-parse", "HEAD"]);
         let r = proc("sh", &["-c", RESOLVE, "sh", &cwd, "v1"], "/", &[]).await; let ls: Vec<&str> = r.out.split('\n').collect(); assert_eq!((r.code, ls[0]), (0, head.as_str())); assert!(ls[1].ends_with(".git") && ls[2].len() > 1);
         let r = proc("sh", &["-c", RESOLVE, "sh", &cwd, "nope"], "/", &[]).await; assert_eq!(r.code, 1); assert!(r.out.contains("no commit, branch or tag named nope"));
     }
     #[test] fn a_links_path_is_made_whole_and_loses_its_line() {
-        let d = std::env::temp_dir().join(format!("bp-lp-{}", std::process::id())); std::fs::create_dir_all(d.join("mfg")).unwrap(); std::fs::write(d.join("mfg/a.zip"), "x").unwrap();
+        let d = crate::plat::tmp::dir("lp"); std::fs::create_dir_all(d.join("mfg")).unwrap(); std::fs::write(d.join("mfg/a.zip"), "x").unwrap();
         let root = d.to_string_lossy().into_owned();
         assert_eq!(link_path("mfg/a.zip", &root), format!("{root}/mfg/a.zip")); assert_eq!(link_path("./mfg/a.zip:12:3", &root), format!("{root}/mfg/a.zip"));
         assert_eq!(link_path("/abs/none.rs:5", &root), "/abs/none.rs:5"); assert_eq!(link_path("~/x", &root), "~/x");
-        let _ = std::fs::remove_dir_all(&d);
     }
     #[tokio::test] async fn file_open_refuses_a_missing_file_and_the_pdf_script_a_missing_pdf() {
         let r = proc("sh", &["-c", FILE_OPEN, "sh", "/nonexistent/file"], "/", &[]).await; assert_eq!(r.code, 1); assert!(r.out.contains("No such file"));
-        let d = std::env::temp_dir().join(format!("bp-pdf-{}", std::process::id())); std::fs::create_dir_all(&d).unwrap();
+        let d = crate::plat::tmp::dir("pdf");
         let r = proc("sh", &["-c", PDF, "sh", "/nonexistent.pdf", "1", &d.to_string_lossy()], "/", &[]).await; assert_ne!(r.code, 0);
     }
 }

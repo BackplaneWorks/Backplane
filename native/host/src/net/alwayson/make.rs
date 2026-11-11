@@ -488,7 +488,7 @@ mod tests {
         let mut bad = manifest("v0.15.3", "0.15.3", "stable"); let s = kp.sk.sign(&bad, None).as_ref().to_vec(); let n = bad.len(); bad[n - 3] ^= 1; add("v0.15.3", bad, s);
         let rel = |tag: &str, pre: bool| format!(r#"{{"tag_name":"{tag}","prerelease":{pre},"draft":false,"assets":[{{"name":"manifest.json","browser_download_url":"mem://{tag}/manifest.json"}},{{"name":"manifest.json.sig","browser_download_url":"mem://{tag}/manifest.json.sig"}},{{"name":"manifest.json.keyid","browser_download_url":"mem://{tag}/manifest.json.keyid"}},{{"name":"backplane-{tag}-linux-x64-native.tar.gz","browser_download_url":"https://github.com/x/{tag}.tgz"}}]}}"#);
         let list = listing(format!("[{},{},{}]", rel("v0.15.2", false), rel("v0.16.0-beta.1", true), rel("v0.15.3", false)).as_bytes()).unwrap();
-        let d = std::env::temp_dir().join(format!("bp-aon-rel-{}", std::process::id())); std::fs::create_dir_all(&d).unwrap();
+        let d = crate::plat::tmp::dir("aon-rel");
         let get = |u: &str, p: &Path, _max: u64| -> Result<(), String> { std::fs::write(p, files.borrow().get(u).ok_or("404")?).map_err(|e| e.to_string()) };
         let f = release_for("0.15.2", &list, &d, &get, &keys).unwrap();
         assert_eq!((f.tag.as_str(), f.url.as_str(), f.sha256.as_str(), f.size, f.commit.as_str()), ("v0.15.2", "https://github.com/x/v0.15.2.tgz", sha.as_str(), 1234, "c0ffee"), "linux-x64, never this machine's own target");

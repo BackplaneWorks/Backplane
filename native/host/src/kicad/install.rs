@@ -254,7 +254,7 @@ pub async fn install(hub: &Arc<Hub>, consent: bool) -> Result<String, String> {
 mod tests {
     use super::*;
     #[cfg(unix)] use std::os::unix::fs::PermissionsExt;
-    fn tmp(n: &str) -> PathBuf { let p = std::env::temp_dir().join(format!("bp-kinst-{}-{n}", std::process::id())); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
+    fn tmp(n: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("kinst-{n}")) }
     #[cfg(unix)] fn exe(p: &Path, body: &str) { std::fs::write(p, body).unwrap(); std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o755)).unwrap() }
     fn rt() -> tokio::runtime::Runtime { tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap() }
 
@@ -379,8 +379,8 @@ mod tests {
 
     // ---- the real thing, for CI (windows-latest) and any machine with a network: `cargo test real_ -- --ignored --nocapture --test-threads=1` ----
     /// A hub on a temp home whose "user folder" is a temp folder with a space in its name (so Windows' %LOCALAPPDATA% and the home hold one too).
-    async fn real_hub(name: &str) -> (Arc<Hub>, PathBuf) {
-        let root = std::env::temp_dir().join(format!("bp real {name} {}", std::process::id())); let _ = std::fs::remove_dir_all(&root);
+    async fn real_hub(name: &str) -> (Arc<Hub>, crate::plat::tmp::TempDir) {
+        let root = crate::plat::tmp::dir(&format!("bp real {name}"));
         let user = root.join("Some Name"); let local = user.join("AppData").join("Local"); std::fs::create_dir_all(&local).unwrap();
         // SAFETY of the process env: these tests run one at a time (--test-threads=1) and nothing else reads them
         for (k, v) in [("HOME", &user), ("USERPROFILE", &user), ("LOCALAPPDATA", &local), ("XDG_DATA_HOME", &user.join(".local/share"))] { std::env::set_var(k, v); }

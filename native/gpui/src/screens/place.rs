@@ -163,7 +163,7 @@ impl Backplane {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn file(n: &str) -> PathBuf { let d = std::env::temp_dir().join(format!("gpui-place-{n}-{}", std::process::id())); std::fs::create_dir_all(&d).unwrap(); d.join("gpui-place.json") }
+    fn file(n: &str) -> crate::tmp::TempFile { crate::tmp::file(&format!("gpui-place-{n}"), "gpui-place.json") }
     #[test] fn each_paired_hub_keeps_its_own_place() {
         let (a, b, local) = (Path::new("/c/hubs/desk.ts.net_3797.token"), Path::new("/c/hubs/other_3797.token"), Path::new("/h/home/token"));
         assert_ne!(beside_credential(a, "gpui-place.json"), beside_credential(b, "gpui-place.json"));
@@ -206,10 +206,11 @@ mod tests {
         let f = file("none2"); save(&f, &Place::default()); assert!(!f.exists());
     }
     #[test] fn the_writer_waits_for_quiet_and_flush_writes_now() {
-        let f = file("w"); let w = Writer::start(f.clone(), Place::default());
+        let f = file("w"); let w = Writer::start(f.to_path_buf(), Place::default());
         for i in 0..20 { w.send(Msg::View(json!({"kind": "thread", "id": format!("t{i}")}), json!({"sel": format!("t{i}"), "rid": i}))); }
         assert!(!f.exists(), "written before the debounce");
         w.flush(); let p = load(&f).unwrap(); assert_eq!(p.target["id"], "t19"); assert_eq!(p.session, json!({"sel": "t19"}));
         w.send(Msg::Window(place().offsets, false)); w.flush(); let p = load(&f).unwrap(); assert_eq!(p.offsets["t1"], ("m7".to_string(), 12.5)); assert!(!p.sidebar);
+        drop(w);
     }
 }

@@ -221,7 +221,7 @@ mod tests {
     use super::*;
     fn put(d: &Path, rel: &str, body: &str) { let p = d.join(rel); std::fs::create_dir_all(p.parent().unwrap()).unwrap(); std::fs::write(p, body).unwrap(); }
     fn sk(n: &str, d: &str) -> String { format!("---\nname: {n}\ndescription: {d}\n---\nbody") }
-    fn tmp(tag: &str) -> PathBuf { let d = std::env::temp_dir().join(format!("bp-skills-{tag}-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap(); d }
+    fn tmp(tag: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("skills-{tag}")) }
 
     #[test] fn every_provider_place_is_read_with_its_source() {
         let t = tmp("places"); let (home, proj) = (t.join("h"), t.join("h/work/proj"));

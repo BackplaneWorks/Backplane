@@ -161,9 +161,8 @@ pub fn revoked(op: &str, j: &Value) -> (Vec<u64>, Option<String>) {
 mod tests {
     use super::*;
     use std::path::PathBuf;
-    fn setup(tag: &str, host: &str) -> (AuthRoutes, PathBuf) {
-        let dir = std::env::temp_dir().join(format!("bp-net-routes-{tag}-{}-{}", std::process::id(), hex::encode(pairing::urandom(4))));
-        std::fs::create_dir_all(&dir).unwrap();
+    fn setup(tag: &str, host: &str) -> (AuthRoutes, crate::plat::tmp::TempDir) {
+        let dir = crate::plat::tmp::dir(&format!("net-routes-{tag}"));
         let r = Arc::new(Registry::open(&dir, "root").unwrap());
         let a = AuthRoutes::new(r, host, 3787, |l| format!("QR:{l}")).with_ifaces(Vec::new); a.address("https://me.tail.ts.net/ignored?x=1#y");
         (a, dir)
@@ -260,22 +259,19 @@ mod tests {
     /// Settings → Add a device on a hub bound to 127.0.0.1 with no tailnet listener (`--no-tailscale`): the link names only this computer, and says so
     /// (`localOnly`, which Settings and Setup turn into a warning); once the tailnet listener confirms its address, the link names that first.
     #[test] fn pair_a_loopback_hub_invites_with_local_only_until_it_has_a_tailnet_address() {
-        let dir = std::env::temp_dir().join(format!("bp-net-routes-local-{}-{}", std::process::id(), hex::encode(pairing::urandom(4))));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::plat::tmp::dir("net-routes-local");
         let a = AuthRoutes::new(Arc::new(Registry::open(&dir, "root").unwrap()), "127.0.0.1", 3797, |l| format!("QR:{l}")).with_ifaces(Vec::new);
         let j = a.invite();
         assert_eq!(j["localOnly"], true, "{j}"); assert_eq!(j["routes"], json!(["http://127.0.0.1:3797"]));
         a.address("http://100.64.84.41:3797");
         let j = a.invite();
         assert_eq!(j["localOnly"], false, "{j}"); assert!(j["link"].as_str().unwrap().starts_with("http://100.64.84.41:3797/pair#invite="), "{j}");
-        let _ = std::fs::remove_dir_all(dir);
     }
     fn home_ifaces() -> Vec<(String, String)> { vec![("lo".into(), "127.0.0.1".into()), ("enp9s0".into(), "192.168.77.2".into()), ("docker0".into(), "172.17.0.1".into()), ("ts0".into(), "100.101.102.103".into())] }
     /// One invitation, shown at each address (Tailscale, the local network, this computer): each its own link and QR code, the same code;
     /// the older fields stay the default address's.
     #[test] fn pair_an_invitation_names_every_address_it_can_be_shown_with() {
-        let dir = std::env::temp_dir().join(format!("bp-net-routes-addrs-{}-{}", std::process::id(), hex::encode(pairing::urandom(4))));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::plat::tmp::dir("net-routes-addrs");
         let a = AuthRoutes::new(Arc::new(Registry::open(&dir, "root").unwrap()), "127.0.0.1", 3871, |l| format!("QR:{l}")).with_ifaces(home_ifaces);
         a.address("http://100.101.102.103:3871");
         let b = body(&a.handle(&req("POST", "/auth/invitations", &[("Authorization", "Bearer root"), ("Host", "127.0.0.1:3871")]), 1).unwrap());

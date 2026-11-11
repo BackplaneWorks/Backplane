@@ -232,7 +232,7 @@ mod tests {
     /// The leak the end-to-end test found: a key saved right after the api.env cache was read stayed unmasked until the cache expired.
     #[test] fn an_api_key_is_masked_the_instant_it_is_saved_not_when_the_cache_expires() {
         let _l = TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let home = std::env::temp_dir().join(format!("bp-apirace-{}", std::process::id())); let _ = std::fs::remove_dir_all(&home); std::fs::create_dir_all(&home).unwrap();
+        let home = crate::plat::tmp::dir("apirace");
         clear_api(); set_vault_values(vec![]); set_api_path(crate::settings::keys::path(&home));
         for i in 0..20 {
             let _ = snapshot(); // a commit just read (and cached) the file, which has no such key yet

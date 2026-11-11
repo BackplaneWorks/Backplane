@@ -232,7 +232,7 @@ mod tests {
     fn version_reply() -> Vec<u8> { hex_of("0a040a02746b120208011a5c0a3c747970652e676f6f676c65617069732e636f6d2f6b696170692e636f6d6d6f6e2e636f6d6d616e64732e47657456657273696f6e526573706f6e7365121c0a1a080a1063221431302e39392e302d756e6b6e6f776e2d62702e34") }
 
     #[tokio::test] async fn request_and_token_through_a_stand_in() {
-        let (path, l) = stand_in::sock("native");
+        let (path, l, _d) = stand_in::sock("native");
         let srv = tokio::spawn(async move {
             let (mut s, _) = stand_in::accept(&l).await;
             let (id, first) = stand_in::read_req(&mut s).await.unwrap(); stand_in::write_rep(&mut s, id, &version_reply()).await;
@@ -262,7 +262,7 @@ mod tests {
         assert_eq!(o, json!({"id":9,"ok":false,"status":"AS_BAD_REQUEST","error":"bad message for kiapi.common.commands.GetVersion: .kiapi.common.commands.GetVersion: object expected"}));
     }
     #[tokio::test] async fn a_timeout_drops_the_connection_and_the_next_dials_again() {
-        let (path, l) = stand_in::sock("late");
+        let (path, l, _d) = stand_in::sock("late");
         let srv = tokio::spawn(async move {
             let (mut s, _) = stand_in::accept(&l).await; let _ = stand_in::read_req(&mut s).await; // no answer; the client hangs up
             let (mut s2, _) = stand_in::accept(&l).await; let (id, _) = stand_in::read_req(&mut s2).await.unwrap(); stand_in::write_rep(&mut s2, id, &version_reply()).await; drop(s);
@@ -273,7 +273,7 @@ mod tests {
         srv.await.unwrap();
     }
     #[tokio::test] async fn close_answers_what_it_holds() {
-        let (path, l) = stand_in::sock("close");
+        let (path, l, _d) = stand_in::sock("close");
         tokio::spawn(async move { let (mut s, _) = stand_in::accept(&l).await; let _ = stand_in::read_req(&mut s).await; std::future::pending::<()>().await; });
         let (mut n, mut r) = native("");
         for id in 1..=2 { n.handle(json!({"id":id,"sock":path,"type":"kiapi.common.commands.Ping"})) }
@@ -283,7 +283,7 @@ mod tests {
         assert_eq!(got, vec![json!({"id":1,"ok":false,"error":CONN_CLOSED}), json!({"id":2,"ok":false,"error":CONN_CLOSED}), json!({"id":3,"ok":true})]);
     }
     fn script(d: &str, body: &str) -> String { let p = format!("{d}/fake"); std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap(); use crate::plat::fs::PermissionsExt; std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap(); p }
-    fn tmp(name: &str) -> String { let d = std::env::temp_dir().join(format!("kipc-{}-{name}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap(); d.to_string_lossy().into() }
+    fn tmp(name: &str) -> crate::plat::tmp::TempStr { crate::plat::tmp::short_dir_str(&format!("kipc-{name}")) }
     #[tokio::test] async fn spawn_reports_lines_and_exit() {
         let d = tmp("spawn");
         let f = script(&d, "echo hello\nprintf 'KiCad API server listening at ipc://%s\\n' \"$2\"\necho bad >&2\nprintf 'caf\\377\\n'\nexit 3");

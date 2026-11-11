@@ -25,9 +25,9 @@ mod tests {
     #[tokio::test] async fn the_route_needs_the_token_answers_json_and_only_to_get() {
         // its GET runs diagnostics::export, which flushes the shared recorder: never beside the recorder's own tests
         let _l = crate::settings::diagnostics::TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        let dir = std::env::temp_dir().join(format!("bp-diag-http-{}", std::process::id())); let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::plat::tmp::dir("diag-http");
         std::fs::write(dir.join("token"), TOKEN).unwrap(); std::fs::write(dir.join("events.jsonl"), "").unwrap();
-        let cfg = crate::hub::Cfg { home: dir.clone(), version: "0.14.0".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() };
+        let cfg = crate::hub::Cfg { home: dir.to_path_buf(), version: "0.14.0".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() };
         let hub = Hub::start(cfg, Arc::new(crate::presenter::Canned { reply: serde_json::json!({}) })).await.unwrap();
         hub.register_http(Arc::new(DiagnosticsJson));
         let l = TcpListener::bind("127.0.0.1:0").await.unwrap(); let port = l.local_addr().unwrap().port();

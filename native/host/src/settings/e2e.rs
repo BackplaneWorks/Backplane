@@ -9,7 +9,7 @@ const SECRET: &str = "PLANTED-s3cr3t-Zk9vQ27x";
 const API_SECRET: &str = "apikey-VALUE-Qw83Lm5t";
 const T1: &str = "t1700000001-2";
 
-fn dir(name: &str) -> PathBuf { let p = std::env::temp_dir().join(format!("bp-set-e2e-{}-{}", std::process::id(), name)); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
+fn dir(name: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("set-e2e-{name}")) }
 
 /// A `claude` that records every line it is sent and says the secret in every way an agent can: streamed text, a message, a tool call,
 /// its own stderr.
@@ -60,7 +60,7 @@ async fn a_planted_secret_is_in_no_log_line_no_client_frame_no_agent_line_and_no
     settings::open(&home);
     assert_eq!(settings::vault::put("planted", SECRET, "e2e", "person"), "ok");
     settings::keys::add(&home, "E2E_KEY", API_SECRET).unwrap();
-    let hub = Hub::start(Cfg { home: home.clone(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+    let hub = Hub::start(Cfg { home: home.to_path_buf(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
     let ag = Agents::start_with(hub.clone(), Cli::standin(&sd)).await.unwrap();
     settings::start(hub.clone(), Some(ag.clone()));
 
@@ -180,7 +180,7 @@ async fn a_thread_bound_to_a_named_account_runs_under_that_profiles_own_folder_a
     std::env::set_var("CLAUDE_CONFIG_DIR", "/nonexistent/providers/accounts-v1/inherited/store");
     let (t2, ev) = ("t1700000002-3", |t: &str| format!("{{\"$\":\"ThreadCreated\",\"id\":\"{t}\",\"project\":\"p1\",\"title\":\"x\",\"env\":\"local\",\"branch\":\"\",\"worktree\":\"\",\"provider\":\"claude\",\"model\":\"\",\"at\":1700000001}}\n"));
     std::fs::write(home.join("events.jsonl"), format!("{{\"$\":\"ProjectCreated\",\"id\":\"p1\",\"title\":\"fixture\",\"root\":{},\"at\":1700000000}}\n{}{}", serde_json::to_string(&work.to_string_lossy()).unwrap(), ev(T1), ev(t2))).unwrap();
-    let hub = Hub::start(Cfg { home: home.clone(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+    let hub = Hub::start(Cfg { home: home.to_path_buf(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
     let ag = Agents::start_with(hub.clone(), Cli::standin(&sd)).await.unwrap();
     let mgr = settings::accounts_hub::start_cli(&hub, Some(ag.clone()), Cli::standin(&sd)); assert!(ag.accounts.get().is_some(), "the agents are given the account manager");
     let c = Caller { gen: "1".into(), client: 1 };
@@ -236,7 +236,7 @@ async fn the_agents_have_the_hubs_account_manager_before_settings_start_and_shar
     let p = sd.join("claude"); std::fs::write(&p, ACCOUNT_CLAUDE.replace(r#"open(os.environ["STANDIN_LOG"], "a").write(json.dumps({"dir": d, "args": a}) + "\n")"#, "pass")).unwrap();
     std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
     std::fs::write(home.join("events.jsonl"), format!("{{\"$\":\"ProjectCreated\",\"id\":\"p1\",\"title\":\"fixture\",\"root\":{},\"at\":1700000000}}\n{{\"$\":\"ThreadCreated\",\"id\":\"{T1}\",\"project\":\"p1\",\"title\":\"x\",\"env\":\"local\",\"branch\":\"\",\"worktree\":\"\",\"provider\":\"claude\",\"model\":\"\",\"at\":1700000001}}\n", serde_json::to_string(&work.to_string_lossy()).unwrap())).unwrap();
-    let hub = Hub::start(Cfg { home: home.clone(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+    let hub = Hub::start(Cfg { home: home.to_path_buf(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
     let ag = Agents::start_with(hub.clone(), Cli::standin(&sd)).await.unwrap();
     let mgr = ag.accounts.get().cloned().expect("the agents have the hub's account manager from their start, before settings::start");
     assert!(Arc::ptr_eq(&mgr, &settings::accounts_hub::manager(&hub, Cli::standin(&sd))), "one manager per hub");

@@ -932,8 +932,8 @@ mod tests {
     }
     /// The receiver takes a chunk sent again once: the lines of a home.import (by their hash) and a file's chunk (at its offset).
     #[tokio::test(flavor = "multi_thread")] async fn a_chunk_sent_again_is_taken_once() {
-        let home = std::env::temp_dir().join(format!("bp-hm-again-{}", std::process::id())); let _ = std::fs::remove_dir_all(&home); std::fs::create_dir_all(&home).unwrap();
-        let hub = crate::hub::Hub::start(crate::hub::Cfg { home: home.clone(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, std::sync::Arc::new(crate::presenter::Canned { reply: json!({}) })).await.unwrap();
+        let home = crate::plat::tmp::dir("hm-again");
+        let hub = crate::hub::Hub::start(crate::hub::Cfg { home: home.to_path_buf(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, std::sync::Arc::new(crate::presenter::Canned { reply: json!({}) })).await.unwrap();
         let lines = vec![l(json!({"$":"MemorySaved","bot":"b1","key":"k","text":"the desktop","at":5}))];
         let a = serve(&hub, "L", "home.import", &json!({"lines": lines})).await; let b = serve(&hub, "L", "home.import", &json!({"lines": lines})).await;
         assert_eq!((a["took"].as_u64(), b["took"].as_u64()), (Some(1), Some(0)), "{a} {b}");

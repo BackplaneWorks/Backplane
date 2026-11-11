@@ -66,20 +66,20 @@ async fn serve(m: Arc<Mock>) -> String {
     base
 }
 
-fn dir(tag: &str) -> std::path::PathBuf { let h = std::env::temp_dir().join(format!("bp-google-{tag}-{}", std::process::id())); let _ = std::fs::remove_dir_all(&h); std::fs::create_dir_all(&h).unwrap(); h }
+fn dir(tag: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("google-{tag}")) }
 fn log(hub: &Arc<Hub>) -> Vec<Value> { hub.store.range(0, usize::MAX).unwrap().iter().filter_map(|l| serde_json::from_str(l).ok()).collect() }
 async fn until<T>(f: impl Fn() -> Option<T>) -> T { for _ in 0..200 { if let Some(x) = f() { return x } tokio::time::sleep(std::time::Duration::from_millis(25)).await } panic!("timed out") }
 fn text(r: &(bool, Value)) -> String { r.1.as_str().unwrap_or("").to_string() }
 fn req(target: &str, host: &str) -> crate::auth::Req { crate::auth::Req { method: "GET".into(), target: target.into(), headers: vec![("Host".into(), host.into()), ("Sec-Fetch-Mode".into(), "navigate".into()), ("Sec-Fetch-Dest".into(), "document".into()), ("Sec-Fetch-Site".into(), "cross-site".into())], body: vec![], peer: Some("127.0.0.1:5555".parse().unwrap()), trusted: true } }
 
-struct Rig { hub: Arc<Hub>, ag: Arc<Agents>, g: Arc<Google>, mock: Arc<Mock>, bot: String, thread: String, _lock: std::sync::MutexGuard<'static, ()> }
+struct Rig { hub: Arc<Hub>, ag: Arc<Agents>, g: Arc<Google>, mock: Arc<Mock>, bot: String, thread: String, _dirs: (crate::plat::tmp::TempDir, crate::plat::tmp::TempDir), _lock: std::sync::MutexGuard<'static, ()> }
 async fn rig(tag: &str) -> Rig {
     let lock = crate::settings::vault::TEST_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     std::env::set_var("BACKPLANE_VAULT_KEYRING", "file");
     let (home, sd) = (dir(&format!("{tag}-home")), dir(&format!("{tag}-standins")));
     std::fs::write(home.join("events.jsonl"), "").unwrap();
     crate::settings::vault::open(&home);
-    let hub = Hub::start(Cfg { home: home.clone(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "127.0.0.1:3799".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+    let hub = Hub::start(Cfg { home: home.to_path_buf(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "127.0.0.1:3799".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
     let ag = Agents::start_with(hub.clone(), Cli::standin(&sd)).await.unwrap();
     let bots = crate::bots::start(hub.clone(), ag.clone()).await;
     let mock = Arc::new(Mock::default()); let base = serve(mock.clone()).await;
@@ -90,7 +90,7 @@ async fn rig(tag: &str) -> Rig {
     let bot = r["bot"].as_str().unwrap().to_string();
     let thread = until(|| log(&hub).iter().find(|e| e["$"] == "BotSet" && e["id"] == bot.as_str()).and_then(|e| e["thread"].as_str().map(str::to_string))).await;
     until(|| bots.thread_bot(&thread)).await;
-    Rig { hub, ag, g, mock, bot, thread, _lock: lock }
+    Rig { hub, ag, g, mock, bot, thread, _dirs: (home, sd), _lock: lock }
 }
 /// a sign-in through the hub's own route, as the browser comes back
 async fn sign_in(r: &Rig) -> String {

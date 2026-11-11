@@ -107,22 +107,20 @@ pub fn take<T: 'static>(name: &str, store: &Store, f: impl FnOnce() -> Option<T>
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn rig(t: &str) -> (PathBuf, Store) {
-        let d = std::env::temp_dir().join(format!("bp-ckpt-{}-{t}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap();
-        let p = d.join("events.jsonl"); std::fs::write(&p, "{\"$\":\"A\",\"at\":1}\n").unwrap(); let s = Store::open(&p).unwrap(); (d, s)
+    fn rig(t: &str) -> (Store, crate::plat::tmp::TempDir) {
+        let d = crate::plat::tmp::dir(&format!("ckpt-{t}"));
+        let p = d.join("events.jsonl"); std::fs::write(&p, "{\"$\":\"A\",\"at\":1}\n").unwrap(); let s = Store::open(&p).unwrap(); (s, d)
     }
     fn load(p: &Path, s: &Store, stamp: u64) -> Option<usize> { load_json(p, s, stamp, |n: &usize| *n) }
     #[test] fn a_checkpoint_loads_only_for_the_fold_that_wrote_it() {
-        let (d, s) = rig("stamp"); let p = d.join("x.json"); save_json(&p, &s, 1, 11, &1usize);
+        let (s, d) = rig("stamp"); let p = d.join("x.json"); save_json(&p, &s, 1, 11, &1usize);
         assert_eq!(load(&p, &s, 11), Some(1), "the same fold: it must load, or every start would refold");
         assert_eq!(load(&p, &s, 12), None, "another fold read this log differently: it folds the log itself");
-        let _ = std::fs::remove_dir_all(&d);
     }
     #[test] fn a_checkpoint_from_before_stamps_is_not_trusted() {
-        let (d, s) = rig("old"); let p = d.join("x.json");
+        let (s, d) = rig("old"); let p = d.join("x.json");
         std::fs::write(&p, format!("{{\"v\":{VERSION},\"lines\":1,\"fp\":{},\"data\":1}}", fingerprint(&s, 1))).unwrap();
         assert_eq!(load(&p, &s, stamps::COMMANDS), None, "this is what repairs a home a stale checkpoint already lost state on");
-        let _ = std::fs::remove_dir_all(&d);
     }
     #[test] fn every_fold_has_its_own_stamp() {
         let all = [stamps::MODEL, stamps::STATE, stamps::COMMANDS, stamps::AGENTS, stamps::BOTS, stamps::WAKES, stamps::FEED, stamps::PEERS];

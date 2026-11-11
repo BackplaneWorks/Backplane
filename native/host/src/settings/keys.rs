@@ -134,7 +134,7 @@ mod tests {
     #[test] fn values_are_read_back_with_their_quotes() { assert_eq!(values("A='it'\\''s'\n# c\nB='2'\nlower='x'\n"), vec!["it's", "2"]); }
     #[test] fn a_key_is_kept_under_0600_and_only_its_name_is_listed() {
         use crate::plat::fs::PermissionsExt;
-        let h = std::env::temp_dir().join(format!("bp-keys-{}", std::process::id())); let _ = std::fs::remove_dir_all(&h);
+        let h = crate::plat::tmp::uncreated("keys");
         add(&h, "TOKEN_A", "s3cret-value").unwrap(); add(&h, "TOKEN_B", "other-value-1").unwrap(); add(&h, "TOKEN_A", "replaced-val").unwrap();
         assert_eq!(names_kept(&h), "TOKEN_B\nTOKEN_A");
         assert_eq!(crate::plat::fs::mode_bits(std::fs::metadata(path(&h)).unwrap().permissions().mode() & 0o777, 0o600), 0o600);

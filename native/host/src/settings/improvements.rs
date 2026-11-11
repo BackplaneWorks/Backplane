@@ -135,7 +135,7 @@ mod tests {
     }
     #[test] fn a_body_over_the_bound_is_dropped_not_cut() { assert_eq!(limit("short"), "short"); assert_eq!(limit(&"x".repeat(120_001)), ""); assert_eq!(limit(&"x".repeat(120_000)).len(), 120_000); }
     #[tokio::test(flavor = "multi_thread")] async fn context_lists_live_projects_and_report_reads_only_a_finished_report_thread() {
-        let home = std::env::temp_dir().join(format!("bp-imp-{}", std::process::id())); let _ = std::fs::remove_dir_all(&home); std::fs::create_dir_all(&home).unwrap();
+        let home = crate::plat::tmp::dir("imp");
         let k = "ab".repeat(16); let th = thread_for(&k); let board = home.join("board"); std::fs::create_dir_all(&board).unwrap(); let board = board.to_string_lossy().into_owned();
         let log = format!("{}\n{}\n{}\n{}\n{}\n{}\n{}\n",
             format!(r#"{{"$":"ProjectCreated","id":"p1","title":"Board","root":"{board}","at":1}}"#), r#"{"$":"ProjectCreated","id":"p3","title":"Deleted folder","root":"/nonexistent/bp-imp-gone","at":1}"#, r#"{"$":"ProjectCreated","id":"p2","title":"Gone","root":"/work/gone","at":1}"#, r#"{"$":"ProjectRemoved","id":"p2","at":2}"#,
@@ -143,7 +143,7 @@ mod tests {
             format!(r#"{{"$":"MessagePosted","thread":"{th}","msg":"m1","role":"assistant","text":"The draft report.","at":4}}"#),
             r#"{"$":"SettingSet","key":"account.thread.improvement-X.claude","value":"{}","at":4}"#);
         std::fs::write(home.join("events.jsonl"), log).unwrap();
-        let hub = Hub::start(Cfg { home: home.clone(), version: "9.9.9".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+        let hub = Hub::start(Cfg { home: home.to_path_buf(), version: "9.9.9".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
         let c = context(&hub, &th).await;
         assert_eq!((c["appVersion"].clone(), c["thread"].clone(), c["project"].clone()), (json!("9.9.9"), json!(th), json!("p1")));
         assert_eq!(c["projects"], json!([{"id":"p1","title":"Board","root":board}]), "a removed project, or one whose folder is gone, is not offered");

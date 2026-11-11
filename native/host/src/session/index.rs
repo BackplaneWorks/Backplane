@@ -151,8 +151,8 @@ pub fn start(store: &Store) {
 mod tests {
     use super::*;
     use serde_json::json;
-    fn rig(t: &str, lines: &[String]) -> (std::path::PathBuf, Store) {
-        let d = std::env::temp_dir().join(format!("bp-index-{}-{t}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap();
+    fn rig(t: &str, lines: &[String]) -> (crate::plat::tmp::TempDir, Store) {
+        let d = crate::plat::tmp::dir(&format!("index-{t}"));
         let p = d.join("events.jsonl"); std::fs::write(&p, lines.iter().map(|l| format!("{l}\n")).collect::<String>()).unwrap(); let s = Store::open(&p).unwrap(); (d, s)
     }
     pub fn line(th: &str, msg: &str, role: &str, text: &str, at: u64) -> String { json!({"$":"MessagePosted","thread":th,"msg":msg,"role":role,"text":text,"at":at}).to_string() }

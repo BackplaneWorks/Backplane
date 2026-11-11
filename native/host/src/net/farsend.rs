@@ -199,7 +199,7 @@ mod tests {
         let mut no = a; no.state = "refused".into(); assert_eq!(due(&[no, b], 10, &[])[0].msg, "m2");
     }
     #[test] fn the_outbox_keeps_its_messages_across_a_restart_and_holds_one_id_once() {
-        let dir = std::env::temp_dir().join(format!("bp-farsend-{}", std::process::id())); let _ = std::fs::create_dir_all(&dir); let f = dir.join("far-sends.json"); let _ = std::fs::remove_file(&f);
+        let dir = crate::plat::tmp::dir("farsend"); let f = dir.join("far-sends.json");
         let o = Outbox::open(Some(f.clone()));
         o.hold("L~t", "L", json!({"thread": "t", "text": "one", "msg": "m1"}), 1); o.hold("L~t", "L", json!({"thread": "t", "text": "one", "msg": "m1"}), 2);
         o.hold("L~t", "L", json!({"thread": "t", "text": "two", "msg": "m2"}), 3);
@@ -208,6 +208,5 @@ mod tests {
         assert_eq!(items.iter().map(|h| (h.msg.as_str(), h.state.as_str())).collect::<Vec<_>>(), vec![("m1", "away"), ("m2", "")]);
         assert_eq!(again.remove("L~t", "m2").as_deref(), Some("two")); assert_eq!(again.remove("L~t", "m2"), None, "gone already");
         again.answered("m1", 200, r#"{"ok":true}"#, 9); assert!(Outbox::open(Some(f)).items().is_empty());
-        let _ = std::fs::remove_dir_all(&dir);
     }
 }

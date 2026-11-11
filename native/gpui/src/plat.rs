@@ -90,7 +90,7 @@ mod win_acl {
     mod tests {
         /// A file written in a folder that lets every user read: after make_private only the user, SYSTEM and Administrators are on it, none inherited.
         #[test] fn a_private_file_lists_only_the_user_system_and_administrators() {
-            let d = std::env::temp_dir().join(format!("bp-acl-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap();
+            let d = crate::tmp::dir("acl");
             let f = d.join("x.token"); std::fs::write(&f, "secret").unwrap();
             super::user_only(&f).unwrap();
             let out = std::process::Command::new("icacls").arg(&f).output().unwrap(); let t = String::from_utf8_lossy(&out.stdout).to_string();

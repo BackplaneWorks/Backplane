@@ -182,8 +182,8 @@ mod tests {
     use super::*;
     #[tokio::test] async fn a_package_install_answers_and_changes_nothing() {
         use crate::{hub::Cfg, presenter::Canned};
-        let home = std::env::temp_dir().join(format!("bp-upd-pkg-{}", std::process::id())); let _ = fs::remove_dir_all(&home); fs::create_dir_all(&home).unwrap();
-        let hub = Hub::start(Cfg { home: home.clone(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+        let home = crate::plat::tmp::dir("upd-pkg");
+        let hub = Hub::start(Cfg { home: home.to_path_buf(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
         let u = Arc::new(Updates::default()); u.start(&hub).await; let r = Rpc(u);
         let call = |m: &'static str| { let (hub, r) = (hub.clone(), &r); async move { r.call(&hub, &Caller { gen: "1".into(), client: 1 }, &json!(4), m, &json!({})).await.remove(0) } };
         let v = call("update.check").await; assert_eq!((v["result"]["version"].as_str(), v["result"]["channel"].as_str(), v["result"]["state"].as_str()), (Some(""), Some("stable"), Some("package")));
@@ -192,7 +192,6 @@ mod tests {
         hub.commit(&json!({"$":"SettingSet","key":"update.channel","value":"beta","at":2})).await.unwrap(); assert_eq!(call("update.status").await["result"]["channel"], "beta");
         assert_eq!(call("update.now").await["ok"], true, "Update now answers like app.update");
         assert_eq!(call("app.update").await["ok"], true); assert!(!home.join("update").exists(), "a package install keeps no update files");
-        let _ = fs::remove_dir_all(&home);
     }
     #[test] fn a_test_build_ignores_the_callers_update_environment() {
         // nothing sets the TEST names, so whatever BACKPLANE_BUILDS and BACKPLANE_NO_UPDATE the caller's shell has, a test hub is a package install, updates on
@@ -206,14 +205,14 @@ mod tests {
         assert!(due(100, 0), "never checked"); assert!(!due(1000, 100)); assert!(due(100 + EVERY, 100)); assert!(due(50, 100), "the clock went back");
     }
     #[test] fn the_bad_list_keeps_its_reason() {
-        let d = std::env::temp_dir().join(format!("bp-upd-svc-{}", std::process::id())); let _ = fs::remove_dir_all(&d); fs::create_dir_all(&d).unwrap();
+        let d = crate::plat::tmp::dir("upd-svc");
         fs::write(d.join("BAD"), "v0.16.0\tit panicked\nv0.16.1\n").unwrap();
         assert_eq!(bad_lines(&d), vec![("v0.16.0".to_string(), "it panicked".to_string()), ("v0.16.1".to_string(), String::new())]);
-        assert_eq!(bad_lines(&d.join("none")), vec![]); let _ = fs::remove_dir_all(&d);
+        assert_eq!(bad_lines(&d.join("none")), vec![]);
     }
     /// The real `tar`, on archives made to escape: each is refused before a byte of it is written, and the good one unpacks.
     #[cfg(unix)] #[test] fn tar_lists_before_it_writes() {
-        let d = std::env::temp_dir().join(format!("bp-upd-tar-{}", std::process::id())); let _ = fs::remove_dir_all(&d);
+        let d = crate::plat::tmp::dir("upd-tar");
         let (src, out) = (d.join("src"), d.join("out")); fs::create_dir_all(src.join("in")).unwrap(); fs::create_dir_all(&out).unwrap();
         fs::write(src.join("in/backplane-hub"), b"x").unwrap(); fs::write(src.join("evil"), b"x").unwrap(); fs::hard_link(src.join("in/backplane-hub"), src.join("in/twin")).unwrap();
         let mk = |name: &str, args: &[&str]| { let a = d.join(name); assert!(std::process::Command::new("tar").arg("-czf").arg(&a).args(args).current_dir(&src).status().unwrap().success()); a };
@@ -223,7 +222,6 @@ mod tests {
         let hard = mk("hard.tgz", &["in/backplane-hub", "in/twin"]);
         for (a, why) in [(&up, "outside"), (&abs, "outside"), (&hard, "hard link")] { let e = tar(a, &out).unwrap_err(); assert!(e.contains(why), "{a:?}: {e}"); assert_eq!(fs::read_dir(&out).unwrap().count(), 0, "nothing written"); }
         tar(&good, &out).unwrap(); assert!(out.join("backplane-hub").is_file());
-        let _ = fs::remove_dir_all(&d);
     }
     /// A zip of stored members, written by hand so a test can make the names a real tool would not.
     #[cfg(windows)] fn zip_of(members: &[(&str, &[u8])]) -> Vec<u8> {
@@ -245,7 +243,7 @@ mod tests {
     }
     /// Windows' own tar.exe on a Windows build's zip: one that escapes is refused before a byte is written, a good one unpacks with its folders.
     #[cfg(windows)] #[test] fn a_zip_is_listed_before_it_is_written() {
-        let d = std::env::temp_dir().join(format!("bp-upd-zip-{}", std::process::id())); let _ = fs::remove_dir_all(&d);
+        let d = crate::plat::tmp::dir("upd-zip");
         let out = d.join("out"); fs::create_dir_all(&out).unwrap();
         let mk = |n: &str, m: &[(&str, &[u8])]| { let a = d.join(n); fs::write(&a, zip_of(m)).unwrap(); a };
         let up = mk("up.zip", &[("backplane-hub.exe", b"MZ"), ("../evil", b"x")]);
@@ -253,6 +251,5 @@ mod tests {
         for (a, why) in [(&up, "outside"), (&abs, "outside")] { let e = tar(a, &out).unwrap_err(); assert!(e.contains(why), "{a:?}: {e}"); assert_eq!(fs::read_dir(&out).unwrap().count(), 0, "nothing written"); }
         let good = mk("good.zip", &[("backplane-hub.exe", b"MZ"), ("assets/", b""), ("assets/a.txt", b"hi")]);
         tar(&good, &out).unwrap(); assert_eq!(fs::read(out.join("backplane-hub.exe")).unwrap(), b"MZ"); assert_eq!(fs::read(out.join("assets/a.txt")).unwrap(), b"hi");
-        let _ = fs::remove_dir_all(&d);
     }
 }

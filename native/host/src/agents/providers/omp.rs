@@ -225,7 +225,7 @@ mod tests {
     // law omp_run_turn: a thread's turn is one run of `omp`, carrying its model, session, runtime and text. (cwd goes through the actor, which spawns in it.)
     #[test] fn omp_run_turn() {
         let m = driver("omp").unwrap(); assert_eq!(m.cli, "omp"); assert!(driver("pi").is_none() && driver("claude").is_none());
-        let mut d = m.driver; let dir_ = std::env::temp_dir().join(format!("bp-omp-run-{}", std::process::id()));
+        let mut d = m.driver; let dir_ = crate::plat::tmp::uncreated("omp-run");
         let a = TurnIn { thread: "th".into(), home: dir_.to_string_lossy().into(), model: "openai/gpt".into(), session: "S9".into(), runtime: "approval-required".into(), text: "say this".into(), prompt: "P".into(), mcp_url: "http://mcp".into(), ..TurnIn::default() };
         let argv = d.argv(&a);
         assert!(argv.windows(2).any(|w| w == ["--model", "openai/gpt"]) && argv.windows(2).any(|w| w == ["--approval-mode", "always-ask"]), "model and runtime reach argv");
@@ -234,15 +234,14 @@ mod tests {
         let r = d.on_line(&json!({"type":"response","id":"1","success":true,"data":{"sessionId":"S9","messageCount":4}}));
         assert_eq!(r.send, vec![r#"{"id":"2","type":"prompt","message":"say this"}"#], "the text reaches the prompt; the session is the one resumed");
         assert_eq!(r.shapes, vec![json!({"type":"thread.started","thread_id":"S9"})]);
-        drop(d); let _ = std::fs::remove_dir_all(dir_);
+        drop(d);
     }
     #[test] fn omp_exits_with_its_own_words() { assert_eq!(OmpDriver::new().exit_why(1).unwrap(), "omp exited before the turn ended (is it signed in? run `omp` and use /login)") }
     #[test] fn a_launch_folder_that_cannot_be_made_fails_the_turn_with_the_install_hint() {
-        let blocker = std::env::temp_dir().join(format!("bp-omp-block-{}", std::process::id())); std::fs::write(&blocker, "x").unwrap();
+        let blocker = crate::plat::tmp::file("omp-block", "blocker"); std::fs::write(&blocker, "x").unwrap();
         let d = OmpDriver::new(); let a = TurnIn { home: blocker.to_string_lossy().into(), ..TurnIn::default() };
         let mut d = d; let e = d.prepare(&a).unwrap_err(); assert!(!e.is_empty(), "{e}"); assert_eq!(d.install_hint().unwrap(), "Install Oh My Pi (https://github.com/can1357/oh-my-pi), then sign in: run `omp` and use /login.");
         assert_eq!(launch_why(&std::io::Error::from_raw_os_error(2)), "Oh My Pi CLI or a required launch path was not found (ENOENT); check omp on the hub's PATH and its working directory");
-        let _ = std::fs::remove_file(blocker);
     }
     #[test] fn omp_acp_like() {
         let mut d = OmpDriver::new(); d.start(&ti("full-access"));
@@ -256,7 +255,7 @@ mod tests {
     }
     #[test] fn the_command_line_is_the_hubs() {
         let d = OmpDriver::new(); let mut a = ti("auto-accept-edits"); a.model = "default".into(); a.effort = "auto".into();
-        let dir_ = std::env::temp_dir().join(format!("bp-omp-argv-{}", std::process::id())); a.home = dir_.to_string_lossy().into(); a.prompt = "THE PROMPT".into();
+        let dir_ = crate::plat::tmp::uncreated("omp-argv"); a.home = dir_.to_string_lossy().into(); a.prompt = "THE PROMPT".into();
         let v = d.argv(&a); let launch = d.launch.borrow().clone().unwrap();
         assert_eq!(v, vec!["--mode", "rpc-ui", "--approval-mode", "write", "--session-dir", &format!("{}/omp/sessions/t1", a.home), "--continue", "-e", &format!("{}/backplane.js", launch.display()),
             "--append-system-prompt", &format!("{}/system-prompt.txt", launch.display()), "--thinking", "auto"]);
@@ -266,7 +265,6 @@ mod tests {
         assert_eq!(d.env(&a), vec![("BACKPLANE_OMP_MCP".to_string(), "http://m".to_string())]);
         drop(d); assert!(!launch.exists());
         a.model = "openai/gpt".into(); a.effort = "turbo".into(); let d2 = OmpDriver::new(); let v2 = d2.argv(&a); assert_eq!(&v2[v2.len() - 2..], ["--model", "openai/gpt"]); drop(d2);
-        let _ = std::fs::remove_dir_all(dir_);
     }
     #[test] fn a_completed_turn_counts_the_sessions_totals() {
         let mut d = OmpDriver::new(); d.start(&ti("full-access"));

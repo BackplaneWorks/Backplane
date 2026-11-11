@@ -48,7 +48,7 @@ mod tests {
     }
     // the tour's Skip: the app sends setting.set onboard.done=1 (and onboard.uber=1); it must be answered, logged and still there after a restart
     #[tokio::test(flavor = "multi_thread")] async fn the_tours_skip_is_answered_logged_and_survives_a_restart() {
-        let home = std::env::temp_dir().join(format!("bp-set-skip-{}", std::process::id())); let _ = std::fs::remove_dir_all(&home); std::fs::create_dir_all(&home).unwrap();
+        let home = crate::plat::tmp::dir("set-skip");
         let hub = start(&home).await;
         for k in ["onboard.done", "onboard.uber"] { let r = call(&hub, "setting.set", json!({"key":k,"value":"1"})).await; assert_eq!(r, json!({"t":"reply","id":5,"ok":true})); }
         assert_eq!(hub.setting("onboard.done").await.as_deref(), Some("1"));
@@ -65,24 +65,22 @@ mod tests {
         // the telemetry answer: Off applies at once and is remembered
         let r = call(&again, "telemetry.choice", json!({"value":"off","expected":"","decision":"d1","popup":true})).await;
         assert_eq!(r["ok"], true); assert_eq!(again.setting("telemetry.share").await.as_deref(), Some("off")); assert_eq!(again.setting("telemetry.asked").await.as_deref(), Some("1"));
-        let _ = std::fs::remove_dir_all(&home);
     }
 
     // setting.set person.tz is zone.set: the rule is looked up and stored with the zone, a name that is no zone is refused and nothing is written
     #[tokio::test(flavor = "multi_thread")] async fn setting_set_person_tz_resolves_the_rule_like_zone_set() {
-        let home = std::env::temp_dir().join(format!("bp-set-tz-{}", std::process::id())); let _ = std::fs::remove_dir_all(&home); std::fs::create_dir_all(&home).unwrap();
+        let home = crate::plat::tmp::dir("set-tz");
         let hub = start(&home).await; hub.register_rpc(Arc::new(super::super::zone::ZoneRpc));
         let r = call(&hub, "setting.set", json!({"key":"person.tz","value":"Not/AZone"})).await; assert_eq!(r["ok"], false, "{r}"); assert_eq!(hub.setting("person.tz").await, None);
         let r = call(&hub, "setting.set", json!({"key":"person.tz","value":"Asia/Tokyo"})).await;
         if r["ok"] == true { assert_eq!(hub.setting("person.tz").await.as_deref(), Some("Asia/Tokyo")); assert_eq!(hub.setting("tz.rule.Asia/Tokyo").await.as_deref(), Some("JST-9"), "the rule came with the zone") }
         else { assert!(r["error"].as_str().unwrap().contains("time zone"), "no zoneinfo on this machine: {r}"); assert_eq!(hub.setting("person.tz").await, None) }
         let r = call(&hub, "setting.set", json!({"key":"person.tz","value":""})).await; assert_eq!(r["ok"], true); assert_eq!(hub.setting("person.tz").await, None);
-        let _ = std::fs::remove_dir_all(&home);
     }
 
     // slim's `private` scenario: a client writes a turn's input; the JS hub logs it whole and sends it blank
     #[tokio::test(flavor = "multi_thread")] async fn a_turn_input_written_by_a_client_is_logged_whole_and_goes_out_blank() {
-        let home = std::env::temp_dir().join(format!("bp-set-input-{}", std::process::id())); let _ = std::fs::remove_dir_all(&home); std::fs::create_dir_all(&home).unwrap();
+        let home = crate::plat::tmp::dir("set-input");
         std::fs::write(home.join("events.jsonl"), "{\"$\":\"SettingSet\",\"key\":\"launch.input.t1\",\"value\":\"PRIVLAUNCH-0004 a turn input\",\"at\":1}\n").unwrap();
         let hub = start(&home).await;
         let mut rx = hub.frames.subscribe();

@@ -72,12 +72,11 @@ fn open(thread: &str, pid: &str, action: &'static str, value: &str) -> Plan { Pl
     assert!(crate::files::kicad::allowed(&["/w/amp".to_string()], "/w/amp", "") && !crate::files::kicad::allowed(&["/w/amp".to_string()], "/w/amp", "/x/loose.kicad_pcb"), "only the link's allow lets it in");
 }
 #[test] fn a_design_file_named_alone_is_found_below_the_root() {
-    let d = std::env::temp_dir().join(format!("bp-findnamed-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d);
+    let d = crate::plat::tmp::dir("findnamed");
     std::fs::create_dir_all(d.join("boards/main")).unwrap(); std::fs::create_dir_all(d.join(".backplane/worktrees/w/boards/main")).unwrap();
     std::fs::write(d.join("boards/main/main.kicad_sch"), "x").unwrap(); std::fs::write(d.join(".backplane/worktrees/w/boards/main/other.kicad_sch"), "x").unwrap();
     let root = d.to_string_lossy().to_string();
     assert_eq!(find_named(&root, "main.kicad_sch"), Some(format!("{root}/boards/main/main.kicad_sch")));
     assert_eq!(find_named(&root, "other.kicad_sch"), None, "a hidden folder (a worktree's copy) is not looked in");
     assert_eq!(find_named(&root, "x.rs"), None); assert_eq!(find_named(&root, "boards/main/main.kicad_sch"), None);
-    let _ = std::fs::remove_dir_all(&d);
 }

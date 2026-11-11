@@ -38,7 +38,7 @@ pub fn start(hub: Arc<Hub>) {
 mod tests {
     use super::*;
     #[test] fn a_new_file_is_reported_once_and_a_drawn_listing_is_not() {
-        let d = std::env::temp_dir().join(format!("bp-wd-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap();
+        let d = crate::plat::tmp::dir("wd");
         let root = d.to_string_lossy().into_owned();
         let sig = |r: &str| signature(&super::super::dir::list(Path::new(r), "").unwrap());
         touch(&root, "", sig(&root));
@@ -47,6 +47,5 @@ mod tests {
         assert_eq!(poll(), 1, "an added file differs"); assert_eq!(poll(), 0, "reported once");
         touch(&root, "", sig(&root)); std::fs::write(d.join("new.txt"), "xyz").unwrap(); assert_eq!(poll(), 1, "a changed size too");
         std::fs::remove_file(d.join("new.txt")).unwrap(); assert_eq!(poll(), 1, "a removed file too");
-        let _ = std::fs::remove_dir_all(&d);
     }
 }

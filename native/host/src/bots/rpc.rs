@@ -220,10 +220,17 @@ impl Bots {
     pub(super) async fn home_pub(&self, bot: &str, thread: &str) { self.home(bot, thread).await }
     async fn home(&self, bot: &str, thread: &str) {
         if !safe_id(bot) { eprintln!("bots: not a folder name: {bot}"); return }
-        let path = super::relocate::root(&self.hub.cfg.home).join(bot);
+        let home = self.hub.cfg.home.clone();
+        if !home.exists() { return }
+        let path = super::relocate::root(&home).join(bot);
         let p2 = path.clone();
-        let _ = tokio::task::spawn_blocking(move || { let _ = std::fs::create_dir_all(&p2); let _ = crate::proc::std_cmd(crate::proc::Kind::Local, "git").args(["init", "-q"]).current_dir(&p2).output(); }).await;
-        let _ = self.hub.commit(&json!({"$":"WorktreeSet","id":thread,"branch":"","worktree":path.to_string_lossy(),"at":now_s()})).await;
+        let ran = tokio::task::spawn_blocking(move || {
+            if !home.exists() { return false }
+            let _ = std::fs::create_dir_all(&p2);
+            let _ = crate::proc::std_cmd(crate::proc::Kind::Local, "git").args(["init", "-q"]).current_dir(&p2).output();
+            true
+        }).await.unwrap_or(false);
+        if ran { let _ = self.hub.commit(&json!({"$":"WorktreeSet","id":thread,"branch":"","worktree":path.to_string_lossy(),"at":now_s()})).await; }
     }
 
     async fn edit(&self, id: &Value, p: &Value) -> Vec<Value> {

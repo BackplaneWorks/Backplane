@@ -196,7 +196,7 @@ mod tests {
         assert_eq!(seen.join().unwrap().first(), Some(&0x16), "a TLS hub gets a TLS handshake, not a plain GET");
     }
     #[test] fn a_request_for_the_guard_lands_whole() {
-        let d = std::env::temp_dir().join(format!("bp-hubbar-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap();
+        let d = crate::tmp::dir("hubbar");
         leave_request(&d, "restart").unwrap(); let v: Value = serde_json::from_str(&std::fs::read_to_string(d.join("request")).unwrap()).unwrap();
         assert_eq!((v["action"].as_str(), v["from"].as_str()), (Some("restart"), Some("local")));
         assert_eq!(std::fs::read_dir(&d).unwrap().count(), 1, "nothing left beside it");

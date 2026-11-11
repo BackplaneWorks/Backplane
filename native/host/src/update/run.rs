@@ -147,9 +147,8 @@ mod tests {
     use ed25519_compact::{KeyPair, Seed};
     use std::{cell::RefCell, collections::HashMap};
 
-    struct Rig { d: PathBuf }
-    impl Rig { fn new(t: &str) -> Rig { let d = std::env::temp_dir().join(format!("bp-upd-{}-{t}", std::process::id())); let _ = fs::remove_dir_all(&d); fs::create_dir_all(d.join("scratch")).unwrap(); fs::create_dir_all(d.join("b/builds")).unwrap(); Rig { d } } }
-    impl Drop for Rig { fn drop(&mut self) { let _ = fs::remove_dir_all(&self.d); } }
+    struct Rig { d: crate::plat::tmp::TempDir }
+    impl Rig { fn new(t: &str) -> Rig { let d = crate::plat::tmp::dir(&format!("upd-{t}")); fs::create_dir_all(d.join("scratch")).unwrap(); fs::create_dir_all(d.join("b/builds")).unwrap(); Rig { d } } }
     fn pair() -> KeyPair { KeyPair::from_seed(Seed::new([9; 32])) }
     fn keys() -> Vec<(String, [u8; 32])> { vec![("k".into(), *pair().pk)] }
     const T: &str = "linux-x64";

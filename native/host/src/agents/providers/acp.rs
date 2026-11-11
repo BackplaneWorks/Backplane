@@ -258,7 +258,7 @@ mod e2e {
     const TH: &str = "t1700000009-9";
     macro_rules! fx { ($n:literal) => { include_str!(concat!("../../../../../test/agents/fixtures/acp-", $n, ".json")) } }
 
-    fn dir(name: &str) -> PathBuf { let p = std::env::temp_dir().join(format!("bp-acp-{}-{}", std::process::id(), name)); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); crate::plat::fs::canonicalize(&p).unwrap() } // canonical: macOS /var is /private/var
+    fn dir(name: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::canonical(&format!("acp-{name}")) } // canonical: macOS /var is /private/var
     fn script(d: &Path, name: &str, body: &str) { use crate::plat::fs::PermissionsExt; let p = d.join(name); std::fs::write(&p, body).unwrap(); std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap(); }
     fn caller() -> Caller { Caller { gen: "1".into(), client: 1 } }
     async fn rpc(hub: &Arc<Hub>, m: &str, p: Value) -> Value { let h = hub.rpc_for(m).expect("handler"); h.call(hub, &caller(), &json!(7), m, &p).await.remove(0) }
@@ -311,7 +311,7 @@ mod e2e {
         if runtime != "full-access" { log += &format!("{{\"$\":\"ModesSet\",\"id\":\"{TH}\",\"runtime\":\"{runtime}\",\"interaction\":\"default\",\"model\":\"{model}\",\"at\":1700000006}}\n") }
         if !session.is_empty() { log += &format!("{{\"$\":\"SessionSet\",\"id\":\"{TH}\",\"session\":\"{session}\",\"at\":1700000007}}\n") }
         std::fs::write(home.join("events.jsonl"), &log).unwrap();
-        let hub = Hub::start(Cfg { home: home.clone(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+        let hub = Hub::start(Cfg { home: home.to_path_buf(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
         let ag = Agents::start_with(hub.clone(), Cli::standin(&sd)).await.unwrap();
         let from = hub.store.len();
         for (i, m) in msgs.iter().enumerate() {

@@ -37,7 +37,7 @@ fn write_agent(d: &Path, out: &Path) { use crate::plat::fs::PermissionsExt; let 
 
 #[tokio::test(flavor = "multi_thread")] async fn the_uberbot_answers_remembers_and_wakes_for_a_routine_with_a_stand_in_agent() {
     std::env::set_var("TZ", "Etc/UTC");
-    let root = std::env::temp_dir().join(format!("bp-uber-e2e-{}", std::process::id())); let _ = std::fs::remove_dir_all(&root);
+    let root = crate::plat::tmp::dir("uber-e2e");
     let (home, bin) = (root.join("home"), root.join("bin")); std::fs::create_dir_all(&home).unwrap(); std::fs::create_dir_all(&bin).unwrap();
     let out = root.join("agent.log"); write_agent(&bin, &out);
     std::fs::write(home.join("events.jsonl"), "{\"$\":\"SettingSet\",\"key\":\"machine.id\",\"value\":\"m1\",\"at\":1}\n").unwrap();

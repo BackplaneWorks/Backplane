@@ -172,22 +172,21 @@ mod tests {
         assert_eq!(sanitize(&"a".repeat(70)).len(), 64);
     }
     #[tokio::test] async fn a_folder_that_is_not_a_repository_is_skipped() {
-        let d = std::env::temp_dir().join(format!("bp-wt-{}", std::process::id())); std::fs::create_dir_all(&d).unwrap();
+        let d = crate::plat::tmp::dir("wt");
         assert_eq!(thread_wt(d.to_str().unwrap(), false, "backplane/x", "").await, "skip: not a git repository");
     }
     #[tokio::test] async fn a_folder_inside_a_repository_that_does_not_track_it_is_skipped_and_a_tracked_one_is_not() {
-        let d = std::env::temp_dir().join(format!("bp-wt-nest-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(d.join("build/board")).unwrap(); std::fs::create_dir_all(d.join("boards/main")).unwrap();
+        let d = crate::plat::tmp::dir("wt-nest"); std::fs::create_dir_all(d.join("build/board")).unwrap(); std::fs::create_dir_all(d.join("boards/main")).unwrap();
         let g = |a: &[&str]| { let o = std::process::Command::new("git").args(a).current_dir(&d).env("GIT_AUTHOR_NAME", "t").env("GIT_AUTHOR_EMAIL", "t@t").env("GIT_COMMITTER_NAME", "t").env("GIT_COMMITTER_EMAIL", "t@t").output().unwrap(); assert!(o.status.success(), "{a:?}"); };
         std::fs::write(d.join(".gitignore"), "build/\n").unwrap(); std::fs::write(d.join("build/board/b.txt"), "b").unwrap(); std::fs::write(d.join("boards/main/m.txt"), "m").unwrap();
         g(&["init", "-q"]); g(&["add", "."]); g(&["commit", "-qm", "x"]);
         let r = thread_wt(d.join("build/board").to_str().unwrap(), false, "backplane/n1", "").await; assert!(r.starts_with("skip: not a git repository"), "{r}");
         let r = thread_wt(d.join("boards/main").to_str().unwrap(), false, "backplane/n2", "").await; assert!(r.ends_with("/.backplane/worktrees/backplane-n2/boards/main"), "{r}");
-        let _ = std::fs::remove_dir_all(&d);
     }
     #[tokio::test] async fn a_repository_gets_a_worktree_on_its_own_branch_and_carries_code_but_never_kicad_documents() {
         // The hybrid split: uncommitted code rides into the thread's worktree; KiCad documents
         // do not (they live once in the main folder — kicad/canonical.rs).
-        let d = std::env::temp_dir().join(format!("bp-wt2-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap();
+        let d = crate::plat::tmp::dir("wt2");
         let p = d.to_str().unwrap();
         let g = |a: &[&str]| { let o = std::process::Command::new("git").args(a).current_dir(p).env("GIT_AUTHOR_NAME", "t").env("GIT_AUTHOR_EMAIL", "t@t").env("GIT_COMMITTER_NAME", "t").env("GIT_COMMITTER_EMAIL", "t@t").output().unwrap(); assert!(o.status.success(), "{a:?}"); };
         g(&["init", "-q"]); std::fs::write(d.join("a.kicad_pro"), "{}").unwrap(); g(&["add", "."]); g(&["commit", "-qm", "x"]);

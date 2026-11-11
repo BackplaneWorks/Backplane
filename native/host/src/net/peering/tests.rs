@@ -5,10 +5,10 @@ use super::*;
 use crate::{hub::{Cfg, Hub}, presenter::Canned};
 use tokio::{io::{AsyncReadExt, AsyncWriteExt}, net::TcpListener};
 
-pub(crate) struct Node { pub(crate) hub: Arc<Hub>, pub(crate) p: Arc<Peering>, pub(crate) port: u16, pub(crate) home: PathBuf }
+pub(crate) struct Node { pub(crate) hub: Arc<Hub>, pub(crate) p: Arc<Peering>, pub(crate) port: u16, pub(crate) home: PathBuf, _dir: crate::plat::tmp::TempDir }
 /// A handler tried before `Peering::handle` (a test's stand-in for the other routes).
 pub(crate) type Extra = Arc<dyn Fn(Arc<Hub>, PReq) -> std::pin::Pin<Box<dyn std::future::Future<Output = Option<HttpReply>> + Send>> + Send + Sync>;
-fn home(tag: &str) -> PathBuf { let p = std::env::temp_dir().join(format!("bp-peering-{tag}-{}-{}", std::process::id(), hex::encode(super::super::pairing::urandom(3)))); std::fs::create_dir_all(&p).unwrap(); p }
+fn home(tag: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("peering-{tag}")) }
 
 /// A node: a hub on a fresh home, its token, registry, peer table, and a front that serves `Peering::handle`.
 /// `trusted`: the front tags every socket as the owner's own device (what the tailnet listener would do after whois).
@@ -20,7 +20,8 @@ pub(crate) async fn node_with(tag: &str, trusted: bool, own_device: bool) -> Nod
 /// A test that needs its hub on a fixed port (the JS-peer test, ports 3915-3919) sets this before `node_extra`; 0 is any port.
 pub(crate) static FIXED_PORT: std::sync::atomic::AtomicU16 = std::sync::atomic::AtomicU16::new(0);
 pub(crate) async fn node_extra(tag: &str, trusted: bool, own_device: bool, extra: Option<Extra>) -> Node {
-    let home = home(tag);
+    let dir = home(tag);
+    let home = dir.to_path_buf();
     std::fs::write(home.join("token"), format!("token-{tag}\n")).unwrap();
     let hub = Hub::start(Cfg { home: home.clone(), version: "0.14.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() },
         Arc::new(Canned { reply: json!({}) })).await.unwrap();
@@ -54,7 +55,7 @@ pub(crate) async fn node_extra(tag: &str, trusted: bool, own_device: bool, extra
             let _ = s.write_all(&rep.body).await;
         });
     } });
-    Node { hub, p, port, home }
+    Node { hub, p, port, home, _dir: dir }
 }
 pub(crate) fn url(n: &Node) -> String { format!("http://127.0.0.1:{}", n.port) }
 /// `a` knows `b` as one of the owner's machines (named, so a no-tailnet hub pairs with it).

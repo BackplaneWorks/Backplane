@@ -381,14 +381,14 @@ pub mod ipc {
 mod lock_tests {
     /// hub.lock: one holder; another cannot take it, but anyone can read the `<pid> <port>` it says.
     #[test] fn a_held_lock_excludes_and_its_text_stays_readable() {
-        let p = std::env::temp_dir().join(format!("bp-lock-{}", std::process::id()));
+        let p = crate::plat::tmp::file("lock", "hub.lock");
         std::fs::write(&p, "123 3800 flock\n").unwrap();
         let open = || std::fs::OpenOptions::new().read(true).write(true).open(&p).unwrap();
         let (a, b) = (open(), open());
         assert!(super::hub::lock(&a)); assert!(!super::hub::lock(&b), "a second holder");
         assert_eq!(std::fs::read_to_string(&p).unwrap(), "123 3800 flock\n", "readable while held");
         drop(a); assert!(super::hub::lock(&b), "free once the holder closes it");
-        drop(b); let _ = std::fs::remove_file(&p);
+        drop(b);
     }
 }
 
@@ -410,9 +410,9 @@ mod f23_tests {
     }
     /// F23: a hub killed hard (TerminateProcess, as taskkill /F) leaves no agent behind: its leader and the leader's own child end with it.
     #[test] fn a_hub_killed_hard_takes_its_agents_and_their_children_with_it() {
-        let out = std::env::temp_dir().join(format!("bp-f23-{}", std::process::id())); let _ = std::fs::remove_file(&out);
+        let out = crate::plat::tmp::file("f23", "out");
         let mut hub = std::process::Command::new(std::env::current_exe().unwrap()).args(["--exact", "plat::windows::f23_tests::f23_hub_probe", "--ignored", "--nocapture"])
-            .env("BP_F23_PROBE", &out).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().unwrap();
+            .env("BP_F23_PROBE", out.path()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().unwrap();
         let t0 = Instant::now(); while !out.exists() && t0.elapsed() < Duration::from_secs(20) { std::thread::sleep(Duration::from_millis(100)) }
         let leader: u32 = std::fs::read_to_string(&out).expect("the probe made its agent").trim().parse().unwrap();
         let t0 = Instant::now(); let mut kids = vec![]; while kids.is_empty() && t0.elapsed() < Duration::from_secs(10) { kids = children(leader); }
@@ -420,6 +420,5 @@ mod f23_tests {
         hub.kill().unwrap(); let _ = hub.wait(); // TerminateProcess: no clean shutdown, as a crash or taskkill /F
         let t0 = Instant::now(); while (super::proc::alive(leader) || kids.iter().any(|k| super::proc::alive(*k))) && t0.elapsed() < Duration::from_secs(5) { std::thread::sleep(Duration::from_millis(100)) }
         assert!(!super::proc::alive(leader), "the agent outlived its hub"); for k in &kids { assert!(!super::proc::alive(*k), "the agent's child {k} outlived the hub") }
-        let _ = std::fs::remove_file(&out);
     }
 }

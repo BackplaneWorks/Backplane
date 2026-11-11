@@ -100,16 +100,16 @@ mod tests {
         assert_eq!(split_line(":12"), (":12", 0));
     }
     #[test] fn inside_only_files_of_the_project() {
-        let d = std::env::temp_dir().join(format!("bp-link-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(d.join("src")).unwrap(); std::fs::write(d.join("src/x.rs"), "a\nb\n").unwrap(); std::fs::write(d.parent().unwrap().join(format!("bp-link-out-{}", std::process::id())), "x").unwrap();
+        let base = crate::plat::tmp::dir("link");
+        let d = base.join("proj"); let out = base.join("out");
+        std::fs::create_dir_all(d.join("src")).unwrap(); std::fs::write(d.join("src/x.rs"), "a\nb\n").unwrap(); std::fs::write(&out, "x").unwrap();
         let root = d.to_string_lossy().to_string();
         assert_eq!(inside(&root, "src/x.rs").as_deref(), Some("src/x.rs"));
         assert_eq!(inside(&root, &format!("{root}/src/x.rs")).as_deref(), Some("src/x.rs"));
         assert_eq!(inside(&root, "src"), None, "a folder is no file");
         assert_eq!(inside(&root, "src/none.rs"), None);
         assert_eq!(inside(&root, "../x"), None);
-        assert_eq!(inside(&root, &format!("{}/bp-link-out-{}", d.parent().unwrap().to_string_lossy(), std::process::id())), None, "an absolute path outside");
+        assert_eq!(inside(&root, &out.to_string_lossy()), None, "an absolute path outside");
         assert_eq!(inside("", "src/x.rs"), None);
-        let _ = std::fs::remove_dir_all(&d); let _ = std::fs::remove_file(d.parent().unwrap().join(format!("bp-link-out-{}", std::process::id())));
     }
 }

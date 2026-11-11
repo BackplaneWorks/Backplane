@@ -611,10 +611,7 @@ pub fn wrl_to_glb(text: &str) -> Result<Vec<u8>, String> {
 mod tests {
     use super::*;
     use std::sync::Mutex;
-    fn dir(tag: &str) -> PathBuf {
-        let base = std::env::var("BP_TMP").map(PathBuf::from).unwrap_or_else(|_| std::env::temp_dir());
-        let d = base.join(format!("bp-models-{tag}-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap(); d
-    }
+    fn dir(tag: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("models-{tag}")) }
     fn touch(p: &Path) { std::fs::create_dir_all(p.parent().unwrap()).unwrap(); std::fs::write(p, "x").unwrap(); }
 
     #[test] fn variables_expand_in_both_syntaxes() {
@@ -741,7 +738,7 @@ mod tests {
     }
     #[test] fn a_model_inside_the_board_is_written_out_once_and_resolved_by_name() {
         use base64::Engine;
-        let d = std::env::temp_dir().join(format!("bp-embed-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d);
+        let d = crate::plat::tmp::uncreated("embed");
         // a zstd frame of "ISO-10303-21;" (raw block), as KiCad 9 writes its embedded files
         let step = b"ISO-10303-21;";
         let mut z = vec![0x28, 0xb5, 0x2f, 0xfd, 0x20, step.len() as u8]; z.extend([(step.len() as u8) << 3 | 0x01, 0, 0]); z.extend(step);
@@ -755,7 +752,6 @@ mod tests {
         assert_eq!(resolve_in("kicad-embed://r.step", &d, &Env::empty(), &m).as_ref(), Some(f));
         assert_eq!(resolve_in("kicad-embed://gone.step", &d, &Env::empty(), &m), None);
         assert!(embedded(b"(kicad_pcb (embedded_files (file (name \"x\") (data |AAAA|))))", &d).is_empty(), "no footprint names one: nothing is read");
-        let _ = std::fs::remove_dir_all(&d);
     }
     #[test] fn convert_streams_in_completion_order_and_caches() {
         TEST_WORKERS.store(2, Ordering::Relaxed); // never reset: more workers only make the other tests faster

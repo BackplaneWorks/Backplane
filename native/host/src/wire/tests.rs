@@ -53,14 +53,14 @@ async fn join(port: u16, since: Option<(usize, String)>) -> Probe {
 }
 fn norm(v: &Value) -> String { let mut v = v.clone(); if let Some(k) = v["key"].as_str() { if k.starts_with("fallback.input.") || k.starts_with("launch.input.") { v["value"] = json!(""); } } v.to_string() }
 
-async fn test_hub(name: &str, log: &str) -> (Arc<Hub>, u16) {
-    let dir = std::env::temp_dir().join(format!("bp-{name}-{}", std::process::id())); let _ = std::fs::remove_dir_all(&dir); std::fs::create_dir_all(&dir).unwrap();
+async fn test_hub(name: &str, log: &str) -> (hub::TestHub, u16) {
+    let dir = crate::plat::tmp::dir(name);
     std::fs::write(dir.join("token"), "tok").unwrap(); std::fs::write(dir.join("events.jsonl"), log).unwrap();
-    let cfg = hub::Cfg { home: dir.clone(), version: "0.14.0".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() };
+    let cfg = hub::Cfg { home: dir.to_path_buf(), version: "0.14.0".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() };
     let hub = Hub::start(cfg, Arc::new(presenter::Canned { reply: json!({}) })).await.unwrap();
     let l = TcpListener::bind("127.0.0.1:0").await.unwrap(); let port = l.local_addr().unwrap().port();
     { let hub = hub.clone(); tokio::spawn(async move { loop { let (s, _) = l.accept().await.unwrap(); let h = hub.clone(); tokio::spawn(async move { let _ = serve(h, s).await; }); } }); }
-    (hub, port)
+    (hub::TestHub { hub, _tmp: dir }, port)
 }
 const FIXTURE: &str = "{\"$\":\"ProjectCreated\",\"id\":\"p1\",\"title\":\"p\",\"root\":\"/x\",\"at\":1700000000}\n";
 
@@ -85,7 +85,7 @@ async fn junk_and_unknown_requests_get_the_replies_gives() {
 async fn a_requests_changes_come_before_its_reply() {
     let (hub, port) = test_hub("wire-order", FIXTURE).await;
     crate::commands::start(hub.clone()); // project.add is the commands lane's handler
-    let proj = std::env::temp_dir().join(format!("wire-order-proj-{}", std::process::id())); std::fs::create_dir_all(&proj).unwrap(); // the handler refuses a folder that does not exist
+    let proj = crate::plat::tmp::dir("wire-order-proj"); // the handler refuses a folder that does not exist
     let mut c = join(port, None).await;
     // a request of no kind is answered after the join's whole backlog, so once its reply is in, the next request starts from a caught-up client (a loaded runner joins slowly)
     c.send(json!({"id":0,"m":"no.such.request"})).await; for _ in 0..3000 { if c.frames.lock().unwrap().iter().any(|f| f["t"] == "reply") { break } tokio::time::sleep(Duration::from_millis(10)).await }

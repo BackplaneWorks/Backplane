@@ -115,7 +115,7 @@ pub fn next_theme(now: &str) -> &'static str { cycle(&THEMES, now) }
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn tmp(n: &str) -> PathBuf { std::env::temp_dir().join(format!("bp-local-{}-{n}.json", std::process::id())) }
+    fn tmp(n: &str) -> crate::tmp::TempFile { crate::tmp::file(&format!("local-{n}"), "local.json") }
     #[test] fn defaults_are_a_working_client_and_a_damaged_file_is_the_defaults() {
         let p = tmp("dmg"); std::fs::write(&p, b"{ not json").unwrap(); assert_eq!(Local::read(&p), Local::default());
         assert_eq!(Local::read(&tmp("none")), Local::default());

@@ -201,7 +201,7 @@ impl Store {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn tmp(name: &str) -> PathBuf { let p = std::env::temp_dir().join(format!("bp-store-{}-{}", std::process::id(), name)); let _ = std::fs::remove_file(&p); p }
+    fn tmp(name: &str) -> crate::plat::tmp::TempFile { crate::plat::tmp::file("store", name) }
     #[test] fn reads_whole_lines_and_ignores_a_torn_tail() {
         let p = tmp("torn"); std::fs::write(&p, "{\"$\":\"A\",\"at\":1}\n{\"$\":\"B\",\"at\":2}\n{\"$\":\"C\",\"a").unwrap();
         let s = Store::open(&p).unwrap(); assert_eq!(s.len(), 2); assert!(s.torn_bytes > 0);
@@ -219,14 +219,14 @@ mod tests {
         let s = Store::open(&p).unwrap(); assert_eq!(s.len(), 2, "the good lines"); assert_eq!(s.bad, 2);
     }
     #[test] fn a_flipped_index_is_not_trusted() {
-        let d = std::env::temp_dir().join(format!("bp-store-idx-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap();
+        let d = crate::plat::tmp::dir("store-idx");
         let p = d.join("events.jsonl"); let s = Store::open(&p).unwrap(); for i in 0..200 { s.append(&format!("{{\"$\":\"X\",\"at\":{i}}}")).unwrap(); } s.save_index().unwrap();
         let f = crate::ckpt::dir(&p).join("index.bin"); let mut b = std::fs::read(&f).unwrap(); let n = b.len(); b[n - 900] ^= 0x40; std::fs::write(&f, b).unwrap();
         let again = Store::open(&p).unwrap(); assert_eq!(again.len(), 200); assert_eq!(again.get(150).unwrap(), "{\"$\":\"X\",\"at\":150}", "scanned from the log itself");
         std::fs::write(&f, "not an index at all").unwrap(); assert_eq!(Store::open(&p).unwrap().len(), 200);
     }
     #[test] fn a_line_that_breaks_a_fold_is_quarantined_for_good_and_the_log_keeps_it() {
-        let d = std::env::temp_dir().join(format!("bp-store-q-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap();
+        let d = crate::plat::tmp::dir("store-q");
         let p = d.join("events.jsonl"); std::fs::write(&p, "{\"$\":\"A\"}\n{\"$\":\"Poison\"}\n{\"$\":\"C\"}\n").unwrap();
         let before = std::fs::read(&p).unwrap();
         let s = Store::open(&p).unwrap(); let mut seen = vec![];
@@ -269,7 +269,7 @@ mod tests {
         let s = Store::open(&part).unwrap(); for y in &ys { s.append(y).unwrap(); }
         assert_eq!(Store::open(&part).unwrap().all(), Store::open(&whole).unwrap().all());
     }
-    fn tmp_dir(name: &str) -> PathBuf { let d = std::env::temp_dir().join(format!("bp-store-ck-{}-{}", std::process::id(), name)); let _ = std::fs::remove_dir_all(&d); std::fs::create_dir_all(&d).unwrap(); d }
+    fn tmp_dir(name: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("store-ck-{name}")) }
     // the saved index is the index: same lines, and only the bytes past it are scanned
     #[test] fn a_saved_index_is_the_index_and_the_tail_past_it_is_scanned() {
         let d = tmp_dir("idx"); let p = d.join("events.jsonl");

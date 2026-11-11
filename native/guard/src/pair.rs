@@ -162,13 +162,12 @@ mod tests {
         assert!(parse(&v(&["--join", "a"])).is_err() && parse(&v(&["--bogus"])).is_err() && parse(&v(&["--port", "x"])).is_err());
     }
     #[test] fn the_port_comes_from_the_homes_lock_or_the_override() {
-        let d = std::env::temp_dir().join(format!("bp-pair-cli-{}", std::process::id())); let _ = fs::remove_dir_all(&d); fs::create_dir_all(&d).unwrap();
-        let o = |port| Opts { home: Some(d.clone()), port, mode: Mode::Device };
+        let d = crate::tmp::dir("pair-cli");
+        let o = |port| Opts { home: Some(d.to_path_buf()), port, mode: Mode::Device };
         assert!(locate(&o(None)).is_err(), "no hub, no port");
         fs::write(d.join("hub.lock"), "123 3811 flock\n").unwrap();
         assert_eq!(locate(&o(None)).unwrap().1, 3811);
         assert_eq!(locate(&o(Some(4000))).unwrap().1, 4000);
-        let _ = fs::remove_dir_all(&d);
     }
     #[test] fn a_qr_prints_two_rows_a_line_with_a_quiet_zone() {
         let t = qr_text("10\n01");

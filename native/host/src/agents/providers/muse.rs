@@ -134,7 +134,7 @@ mod tests {
     use serde_json::{json, Value};
     use std::{path::{Path, PathBuf}, time::Duration};
 
-    pub fn dir(name: &str) -> PathBuf { let p = std::env::temp_dir().join(format!("bp-prov-{}-{}", std::process::id(), name)); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p }
+    pub fn dir(name: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("prov-{name}")) }
     pub fn script(p: &Path, body: &str) { use crate::plat::fs::PermissionsExt; std::fs::write(p, body).unwrap(); std::fs::set_permissions(p, std::fs::Permissions::from_mode(0o755)).unwrap(); }
     /// The events a driver decides, in the JS hub's fields (ids and clocks left out).
     pub fn project(e: &Value) -> Option<String> {

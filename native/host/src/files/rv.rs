@@ -407,7 +407,7 @@ impl RpcHandler for Rv {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn tmp(n: &str) -> String { let p = std::env::temp_dir().join(format!("bp-rv-{}-{n}", std::process::id())); let _ = std::fs::remove_dir_all(&p); std::fs::create_dir_all(&p).unwrap(); p.to_string_lossy().into_owned() }
+    fn tmp(n: &str) -> crate::plat::tmp::TempStr { crate::plat::tmp::dir_str(&format!("rv-{n}")) }
     #[test] fn versions_rebase_on_their_commit() {
         assert_eq!(rebase("/p/x.kicad_sch", "/p/a.kicad_sch"), "/p/a.kicad_sch"); assert_eq!(rebase("git\t/g\tc\t2\t/t/x", "/t/y"), "git\t/g\tc\t2\t/t/y"); assert_eq!(rebase("diff\na\nb", "/t/y"), "/t/y");
         assert_eq!(hist_git("/g", "c", "/tøp", "a/b"), "git\t/g\tc\t4\t/tøp/a/b");
@@ -458,13 +458,13 @@ mod tests {
         let env = [("GIT_AUTHOR_NAME", "t"), ("GIT_AUTHOR_EMAIL", "t@t"), ("GIT_COMMITTER_NAME", "t"), ("GIT_COMMITTER_EMAIL", "t@t")];
         let d = tmp("snap"); let home = tmp("snap-home");
         let g = |a: Vec<&'static str>, d: String| async move { proc("git", &a, &d, &env).await };
-        g(vec!["init", "-q"], d.clone()).await; std::fs::write(format!("{d}/a.kicad_pro"), "{}").unwrap();
+        g(vec!["init", "-q"], d.to_string()).await; std::fs::write(format!("{d}/a.kicad_pro"), "{}").unwrap();
         std::fs::write(format!("{d}/a.kicad_sch"), "(kicad_sch (sheet (property \"Sheetname\" \"x\") (property \"Sheetfile\" \"../../outside.kicad_sch\")))").unwrap();
-        g(vec!["add", "."], d.clone()).await; g(vec!["commit", "-qm", "i"], d.clone()).await;
-        let c = g(vec!["rev-parse", "HEAD"], d.clone()).await.out.trim().to_string();
+        g(vec!["add", "."], d.to_string()).await; g(vec!["commit", "-qm", "i"], d.to_string()).await;
+        let c = g(vec!["rev-parse", "HEAD"], d.to_string()).await.out.trim().to_string();
         let o = check_run("", &d, &c, &home, "manual").await; assert!(o.get_str("err", "").contains("release input"), "{o:?}");
-        crate::plat::fs::symlink("/etc/passwd", format!("{d}/l")).unwrap(); g(vec!["add", "."], d.clone()).await; g(vec!["commit", "-qm", "l"], d.clone()).await;
-        let c = g(vec!["rev-parse", "HEAD"], d.clone()).await.out.trim().to_string();
+        crate::plat::fs::symlink("/etc/passwd", format!("{d}/l")).unwrap(); g(vec!["add", "."], d.to_string()).await; g(vec!["commit", "-qm", "l"], d.to_string()).await;
+        let c = g(vec!["rev-parse", "HEAD"], d.to_string()).await.out.trim().to_string();
         let o = check_run("", &d, &c, &home, "manual").await; assert!(o.get_str("err", "").contains("snapshot contains symlinks"), "{o:?}");
         assert_eq!(check_run("", &d, "nosuchcommit", &home, "manual").await.get("gate"), None);
     }

@@ -27,16 +27,16 @@ impl Inbox for Arc<Rec> {
     fn note<'a>(&'a self, th: &'a str, id: &'a str, text: &'a str) -> Fut<'a, Result<(), String>> { Box::pin(async move { self.notes.lock().unwrap().push((th.into(), id.into(), text.into())); Ok(()) }) }
     fn ride<'a>(&'a self, th: &'a str, id: &'a str, text: &'a str) -> Fut<'a, Result<(), String>> { Box::pin(async move { self.rides.lock().unwrap().push((th.into(), id.into(), text.into())); Ok(()) }) }
 }
-async fn start_slow(name: &str, log: &str, slow: bool) -> (Arc<Hub>, Arc<Bots>, Arc<Rec>) {
-    let home = std::env::temp_dir().join(format!("bp-bots-{}-{name}", std::process::id())); let _ = std::fs::remove_dir_all(&home); std::fs::create_dir_all(&home).unwrap();
+async fn start_slow(name: &str, log: &str, slow: bool) -> (crate::hub::TestHub, Arc<Bots>, Arc<Rec>) {
+    let home = crate::plat::tmp::dir(&format!("bots-{name}"));
     std::fs::write(home.join("events.jsonl"), log).unwrap();
-    let hub = Hub::start(Cfg { home, version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+    let hub = Hub::start(Cfg { home: home.to_path_buf(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
     let rec = Arc::new(Rec { slow, ..Default::default() });
     if name.starts_with("parity") { let _ = rec.hub.set(hub.clone()); }
     let bots = Bots::start_with(hub.clone(), Arc::new(rec.clone())).await;
-    (hub, bots, rec)
+    (crate::hub::TestHub { hub, _tmp: home }, bots, rec)
 }
-async fn start(name: &str, log: &str) -> (Arc<Hub>, Arc<Bots>, Arc<Rec>) { start_slow(name, log, false).await }
+async fn start(name: &str, log: &str) -> (crate::hub::TestHub, Arc<Bots>, Arc<Rec>) { start_slow(name, log, false).await }
 const DESK_ONLY: &str = "shown on the person's desktop; only the uberbot reaches their phone";
 fn caller() -> Caller { Caller { gen: "1".into(), client: 1 } }
 async fn rpc(hub: &Arc<Hub>, m: &str, p: Value) -> Value { let h = hub.rpc_for(m).expect("handler"); h.call(hub, &caller(), &json!(7), m, &p).await.remove(0) }
@@ -743,7 +743,7 @@ mod store_tests {
         Body { conv: Conv { id: conv.into(), subject: "s".into(), kind: "pair".into(), parts: vec![], project: String::new(), tags: vec![], made: 1, last: 1, n: 0 },
             mail: Hdr { id: id.into(), conv: conv.into(), from: "a".into(), to: "b".into(), kind: "bot".into(), r#ref: String::new(), want: "fyi".into(), head: "h".into(), size: 1, at: 1 }, text: "SECRET".into() }
     }
-    fn home(name: &str) -> std::path::PathBuf { let h = std::env::temp_dir().join(format!("bp-store-{}-{name}", std::process::id())); let _ = std::fs::remove_dir_all(&h); std::fs::create_dir_all(&h).unwrap(); h }
+    fn home(name: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("store-{name}")) }
     #[test] fn journal_reads_skip_a_line_that_is_not_text_and_open_without_blocking() {
         use std::io::Write;
         let h = home("nonutf"); let p = store::path(&h, "c1"); std::fs::create_dir_all(p.parent().unwrap()).unwrap();
@@ -883,8 +883,7 @@ fn tool_norm(v: &Value) -> Value {
     assert!(log(&hub).iter().filter(|e| e["$"] == "RoomPosted" && (e["text"] == "one" || e["text"] == "two")).all(|e| e["room"] == room.as_str()));
 }
 #[tokio::test(flavor = "multi_thread")] async fn person_timezone_looks_up_an_unknown_zone_and_sets_it() {
-    let d = std::env::temp_dir().join(format!("bp-zi-bots-{}", std::process::id())); std::fs::create_dir_all(d.join("Europe")).unwrap();
-    std::fs::write(d.join("Europe/Helsinki"), b"TZif2\0\0binary\n\nEET-2EEST,M3.5.0/3,M10.5.0/4\n").unwrap(); std::env::set_var("BACKPLANE_ZONEINFO", &d);
+    let _zi = crate::settings::zone::test_zoneinfo();
     let (hub, bots, _r) = start("tools-zone", "").await;
     hub.register_rpc(Arc::new(crate::settings::zone::ZoneRpc));
     let ada = bot(&hub, "ada").await;
@@ -1005,7 +1004,7 @@ impl mail::owner::OwnerLink for ToHolder {
 }
 /// Walk A's outbox until `f` holds for its pending tickets (a walk already going makes ours return at once; the clock only bounds a hang).
 async fn walk_until(b: &Arc<Bots>, f: impl Fn(&[Value]) -> bool) { for _ in 0..800 { b.owner_outbox().await; if f(&b.owner_records().await) { return } tokio::time::sleep(std::time::Duration::from_millis(25)).await } panic!("the outbox never got there") }
-struct Pair { hb: Arc<Hub>, bb: Arc<Bots>, ha: Arc<Hub>, ba: Arc<Bots>, ua: String, ubb: String, uid: String, ame: String, bme: String }
+struct Pair { bb: Arc<Bots>, ba: Arc<Bots>, ua: String, ubb: String, uid: String, ame: String, bme: String, hb: crate::hub::TestHub, ha: crate::hub::TestHub }
 /// machine B holds the uberbot's conversation; machine A has a replica of it (same uid, the lease held by B) and the two know each other's links
 async fn owner_pair(tag: &str) -> Pair {
     std::env::set_var("TZ", "Etc/UTC");
@@ -1176,7 +1175,8 @@ impl mail::owner::OwnerLink for Held {
     for i in 2..=8 { assert!(bots.tool_call(&t0, "bot_create", &json!({"name":format!("k{i}")})).await.0) }
     assert_eq!(bots.tool_call(&t0, "bot_create", &json!({"name":"k9"})).await.1["error"], "you keep 8 sub-bots already; ask the person to retire one");
     // the new bot is listed at once in its own thread
-    bots.world().await; assert!(bots.is_bot_thread(&thread_of(&kid)));
+    let _ = bots.world().await; assert!(bots.is_bot_thread(&thread_of(&kid)));
+    until(&hub, |l| l.iter().filter(|e| e["$"] == "WorktreeSet").count() >= l.iter().filter(|e| e["$"] == "BotSet").count()).await;
 }
 #[tokio::test] async fn a_bots_thread_starts_on_the_default_account() {
     // Accounts.created: the binding follows ThreadCreated for claude and codex (the default account, else none), for bots.create and bot_create; other providers get none
@@ -1193,6 +1193,7 @@ impl mail::owner::OwnerLink for Held {
     let (ok, r) = bots.tool_call(&ta, "bot_create", &json!({"name":"kidg","provider":"grok"})).await; assert!(ok, "{r}");
     let tg = th(r["bot"].as_str().unwrap());
     assert_eq!(hub.setting(&format!("account.thread.{tg}.grok")).await, None); assert_eq!(hub.setting(&format!("account.thread.{tg}.claude")).await, None);
+    until(&hub, |l| l.iter().filter(|e| e["$"] == "WorktreeSet").count() >= l.iter().filter(|e| e["$"] == "BotSet").count()).await;
 }
 /// the unprompted work of the lane: a due routine, the uberbot's first ops and a journal body whose header never reached the log
 fn unprompted_probe() {
@@ -1258,7 +1259,7 @@ fn stored(e: &Value) -> Value {
     let js: Vec<Value> = include_str!("../../../../test/bots/fixtures/js-ledger.jsonl").lines().map(|l| serde_json::from_str(l).unwrap()).collect();
     let (hub, bots, inbox) = start("ledger", "").await;
     hub.commit(&json!({"$":"SettingSet","key":"room.answer","value":"off","at":1})).await.unwrap(); // the recording is of a hub that left a bot's reply in its chat (Room.answer posts it in the room)
-    let work = std::env::temp_dir().join(format!("bp-ledger-{}", std::process::id())); let _ = std::fs::remove_dir_all(&work); std::fs::create_dir_all(&work).unwrap(); let work = crate::plat::fs::canonicalize(&work).unwrap();
+    let work = crate::plat::tmp::canonical("ledger");
     std::fs::write(work.join("afile"), "x").unwrap(); let w = work.to_str().unwrap().to_string();
     let (mut done, mut n) = (0usize, 0); let mut ids: Vec<(String, String)> = vec![];
     for c in rec["calls"].as_array().unwrap() {
@@ -1504,8 +1505,8 @@ fn ring_form(words: &str, audio: &[u8], at: u64) -> Vec<u8> {
 
 #[tokio::test] async fn a_task_run_asked_for_wakes_the_bot_with_its_parameters() {
     // main.rs starts the browser driver before the bots: this hub does the same, so Bots wires the driver's wake
-    let home = std::env::temp_dir().join(format!("bp-bots-{}-taskrun", std::process::id())); let _ = std::fs::remove_dir_all(&home); std::fs::create_dir_all(&home).unwrap(); std::fs::write(home.join("events.jsonl"), "").unwrap();
-    let hub = Hub::start(Cfg { home, version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
+    let home = crate::plat::tmp::dir("bots-taskrun"); std::fs::write(home.join("events.jsonl"), "").unwrap();
+    let hub = Hub::start(Cfg { home: home.to_path_buf(), version: "0.1.0-dev".into(), commit: "c".into(), listen: "x".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
     crate::term::start(hub.clone());
     let rec = Arc::new(Rec::default()); let _bots = Bots::start_with(hub.clone(), Arc::new(rec.clone())).await;
     let a = bot(&hub, "ada").await; let d = crate::term::driver::get(&hub).expect("driver");
@@ -1560,7 +1561,7 @@ impl mail::owner::OwnerLink for Wire {
     }
     fn machines(&self) -> Vec<(String, String, String)> { vec![("L1".into(), self.peer_name.clone(), "http://x".into())] }
 }
-struct Two { ha: Arc<Hub>, ba: Arc<Bots>, ra: Arc<Rec>, hb: Arc<Hub>, bb: Arc<Bots>, rb: Arc<Rec>, ada: String, bob: String, wa: Arc<Wire> }
+struct Two { ba: Arc<Bots>, ra: Arc<Rec>, bb: Arc<Bots>, rb: Arc<Rec>, ada: String, bob: String, wa: Arc<Wire>, ha: crate::hub::TestHub, hb: crate::hub::TestHub }
 async fn two(tag: &str) -> Two {
     let (ha, ba, ra) = start(&format!("far{tag}A"), "").await; let (hb, bb, rb) = start(&format!("far{tag}B"), "").await;
     let wa = Arc::new(Wire { to: Default::default(), as_link: "L1".into(), peer_name: "deskB".into(), up: true.into(), seen: Default::default() });
@@ -1667,7 +1668,7 @@ impl mail::owner::OwnerLink for Mesh3 {
     }
     fn machines(&self) -> Vec<(String, String, String)> { (0..3).filter(|j| *j != self.me).map(|j| (format!("L{}{}", j.min(self.me), j.max(self.me)), format!("m{j}"), format!("http://m{j}:3797"))).collect() }
 }
-struct Three { h: Vec<Arc<Hub>>, b: Vec<Arc<Bots>>, bots: Vec<String>, th: Vec<String>, down: Arc<StdMutex<Vec<(usize, usize)>>>, sent: Arc<StdMutex<Vec<(usize, usize, String)>>> }
+struct Three { b: Vec<Arc<Bots>>, bots: Vec<String>, th: Vec<String>, down: Arc<StdMutex<Vec<(usize, usize)>>>, sent: Arc<StdMutex<Vec<(usize, usize, String)>>>, h: Vec<crate::hub::TestHub> }
 async fn three(tag: &str) -> Three {
     let (mut h, mut b) = (vec![], vec![]);
     for (i, n) in ["ada", "bob", "cy"].iter().enumerate() { let (hub, bots, _r) = start(&format!("mesh{tag}{i}"), "").await; let _ = n; h.push(hub); b.push(bots); }

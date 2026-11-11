@@ -169,14 +169,13 @@ mod tests {
     use super::*;
     /// An installed release starts its hub under the guard; a build tree, or an install missing a piece of the layout, starts the hub beside it.
     #[test] fn an_install_laid_out_for_the_guard_is_found() {
-        let d = std::env::temp_dir().join(format!("bp-launch-guard-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d);
+        let d = crate::tmp::uncreated("launch-guard");
         let tag = d.join("builds/v0.16.0"); std::fs::create_dir_all(&tag).unwrap(); let me = tag.join("backplane-gpui");
         assert_eq!(guarded_install(&me), None, "no CURRENT, no guard");
         std::fs::write(d.join("CURRENT"), "v0.16.0\n").unwrap(); assert_eq!(guarded_install(&me), None, "no guard");
         let g = d.join(if cfg!(windows) { "backplane.exe" } else { "backplane" }); std::fs::write(&g, b"x").unwrap();
-        assert_eq!(guarded_install(&me), Some((g, d.clone())));
+        assert_eq!(guarded_install(&me), Some((g, d.to_path_buf())));
         assert_eq!(guarded_install(&d.join("target/release/backplane-gpui")), None, "a build tree");
-        let _ = std::fs::remove_dir_all(&d);
     }
     #[test] fn each_system_has_its_own_default_home() {
         assert_eq!(default_home("linux", Path::new("/home/a")), Path::new("/home/a/.backplane/hub"));
@@ -193,7 +192,7 @@ mod tests {
         else { assert!(home_problem(r"C:\h\.backplane-bend\x", Some(Path::new(r"C:\h\.backplane-bend"))).contains("0.14")); }
     }
     #[test] fn a_new_hub_on_an_empty_home_is_refused_when_another_local_home_has_data() {
-        let d = std::env::temp_dir().join(format!("bp-launch-expect-{}", std::process::id())); let _ = std::fs::remove_dir_all(&d);
+        let d = crate::tmp::uncreated("launch-expect");
         let (old, new) = (d.join("fresh/home"), d.join("default/hub")); std::fs::create_dir_all(&old).unwrap(); std::fs::create_dir_all(&new).unwrap();
         let mut l = crate::hubs::Hub::local(); l.origin = "http://127.0.0.1:3797".into(); l.token_file = old.join("token").to_string_lossy().into_owned();
         assert_eq!(expected_elsewhere(&new, &[l.clone()]), None, "the earlier home has no data either");

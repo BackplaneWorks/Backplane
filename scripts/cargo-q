@@ -15,7 +15,8 @@ j=(); case " $* " in *" -j"*|*" --jobs"*) ;; *) j=(-j "$(bq_jobs)");; esac
 # `test` also gets its own TMPDIR (the tests leak temp dirs made with std::env::temp_dir()), removed when it ends; kept, bounded, when it failed (lib-buildslot.sh bpt_new).
 # `cargo xwin build ...` (the Windows -msvc cross-build, scripts/windows-check.sh): -j goes after the second word
 n=1; [ "$1" = xwin ] && n=2
-t=; [ "${!n}" = test ] && { t=$(bpt_new) || exit 1; }; pid=
+is_test=; for a in "${@:n}"; do case "$a" in --) break;; test) is_test=1; break;; -*) ;; *) break;; esac; done
+t=; [ -n "$is_test" ] && { t=$(bpt_new) || exit 1; }; pid=
 stop() { trap - EXIT INT TERM HUP; [ -n "$pid" ] && { kill -TERM "$pid" 2>/dev/null; wait "$pid" 2>/dev/null; }; bpt_rm "$t"; exit "$1"; }
 trap 'stop 130' INT; trap 'stop 143' TERM HUP; trap 'stop 1' EXIT
 # (a background job starts with SIGINT ignored; the subshell puts it back so ^C still stops cargo)
