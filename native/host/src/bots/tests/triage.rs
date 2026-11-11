@@ -325,7 +325,7 @@ fn triage_view(ev: &[Value]) -> Vec<String> {
     until(&hub, |l| l.iter().filter(|e| e["$"] == "WorktreeSet").count() == 2).await;
     let at = bots.world().await.bot(&ada).unwrap().thread.clone();
     let p = bots.bot_prompt(&at).await; assert!(p.contains("# You are ada, a Backplane bot") && p.contains("dry and brief") && p.contains(&format!("/bots/{ada})")), "{p}"); assert!(!p.contains("You are the uberbot"));
-    assert!(p.contains("stop after 6 messages") && p.contains("in their time zone, which is "), "{p}"); // the zone itself is the host's, or whatever TZ another test of this process set
+    assert!(p.contains("A room pauses after 12 messages in a row") && p.contains("in their time zone, which is "), "{p}"); // the zone itself is the host's, or whatever TZ another test of this process set
     let u = bots.bot_prompt(&chat).await; assert!(u.contains("# You are the uberbot") && u.contains("<recent_private_triage_assessments>"), "{u}");
     assert_eq!(bots.bot_prompt("t-plain").await, "", "a plain thread has no bot part");
     routine(&hub, &bub, "r1").await; until(&hub, |l| l.iter().any(|e| e["$"] == "RunSet")).await; settle().await;

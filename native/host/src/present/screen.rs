@@ -580,7 +580,7 @@ mod tests {
         p["viewId"]=expected["viewId"].clone(); p["revision"]=json!(st.seq); p["now"]=json!(now*1000); p["nativeKey"]=json!("00112233445566778899aabbccddeeff");
         let mut actual=recent(&st,&p).expect("recorded recent request is ported");
         // approved differences: a project carries its badge colour (`color`, `css`; present/badge.rs) and whether its chevron folded it (`closed`), which 0.14's recording does not have
-        for path in ["/shown/projects","/overlay/j/projects"] { for pr in actual.pointer_mut(path).and_then(|v| v.as_array_mut()).into_iter().flatten() { if let Some(o)=pr.as_object_mut() { o.remove("color"); o.remove("css"); o.remove("closed");
+        for path in ["/shown/projects","/overlay/j/projects"] { for pr in actual.pointer_mut(path).and_then(|v| v.as_array_mut()).into_iter().flatten() { if let Some(o)=pr.as_object_mut() { o.remove("color"); o.remove("css"); o.remove("closed"); o.remove("swarms"); /* a project's swarms (docs/SWARM.md), which 0.14 had none of */
             // and a red row's want word (sidebar::want), drawn where its age goes
             for k in ["threads","settled","snoozed","archived"] { for r in o.get_mut(k).and_then(|v| v.as_array_mut()).into_iter().flatten() { if let Some(r)=r.as_object_mut() { r.remove("want"); } } } } } }
         let mut shown=expected["shown"].clone(); retain_root(&mut shown,OMITTED);
