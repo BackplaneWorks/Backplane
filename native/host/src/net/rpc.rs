@@ -108,6 +108,8 @@ impl Router {
         let l = if viewer { self.viewer_link(client, m, p) } else { far::params_link(p) };
         if self.copy { return Err(err(id, "a hub on a copied log does not reach other machines")) }
         // (Far.rpc.pick: only the owner's own machines with sync on, and only what Fr.methods lets through; the viewers' reads are theirs)
+        // (one of the owner's machines that is not listed as theirs right now: it is away or still starting, which is what the person is told)
+        if !self.sync.own(&l) && self.sync.mine(&l) && (viewer || far::may(m)) { return Err(err(id, "that machine is away")) }
         if !self.sync.own(&l) || !(viewer || far::may(m)) { return Err(err(id, "that is done on its own machine")) }
         { let mut w = self.waiting.lock().unwrap(); let n = w.entry(client).or_insert(0); if *n >= IN_FLIGHT { return Err(err(id, "too many requests to other machines are waiting")) } *n += 1; }
         Ok(l)
@@ -339,7 +341,9 @@ pub async fn serve_with(copy: bool, sync: &Arc<FarSync>, hub: &Arc<Hub>, r: &PRe
     let msg = if m == "turn.start" { p["msg"].as_str().unwrap_or("").to_string() } else { String::new() };
     if taken_before(&link, &msg) { return json_reply(&json!({"t":"reply","id":0,"ok":true})) }
     let mut c = Conn { sent: vec![], client: hub.fresh_client(), gen: "far".into(), view_id: String::new(), target: Value::Null, cbor: false, lastrev: 0 };
+    let t0 = std::time::Instant::now();
     let out = hub.request_here(&mut c, &json!({"id": 0, "m": m, "p": p})).await;
+    if t0.elapsed() > std::time::Duration::from_secs(3) { eprintln!("far: {m} from {link} took {} ms here", t0.elapsed().as_millis()); }
     match out.into_iter().find(|v| v["t"] == "reply") { Some(v) => { if v["ok"] == true { taken(&link, &msg) } json_reply(&v) } None => HttpReply::text("500 Internal Server Error", "no answer") }
 }
 /// The bots lane's requests between machines: a room's members, a post in it

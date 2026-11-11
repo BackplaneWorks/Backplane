@@ -142,7 +142,9 @@ impl RpcHandler for Commands {
                 }
                 if let Some(s) = self.agents() { s.stop(&th).await }
             }
+            let tc = std::time::Instant::now();
             if !pl.events.is_empty() && hub.commit_many(&pl.events).await.is_err() { return vec![json!({"t":"reply","id":id,"ok":false,"error":"store write failed"})] }
+            if tc.elapsed() > std::time::Duration::from_secs(2) { eprintln!("commands: {method}: its commit took {} ms", tc.elapsed().as_millis()); }
             // BotFx gone (thread.delete): the thread's browser page closes (the term lane's `browser.close`; no events)
             let wtc = pl.wt.clone().map(|(th, root, mode, src, op)| { let (pv, bd) = capture(&f, &th, &pl.events); (th, root, mode, src, pv, bd, op) });
             drop(f); // what follows may wait on an agent or a helper: the next command must not wait with it

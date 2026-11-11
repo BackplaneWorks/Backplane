@@ -185,6 +185,13 @@ pub fn picker_on(project: &mut Value,row: &Value,here: &str,chosen: &str) {
     let default=if chosen.is_empty() { text(&row["default"],"id").to_string() } else { chosen.to_string() };
     let mut on: Vec<Value>=project["newOn"].as_array().cloned().unwrap_or_default();
     if on.is_empty() && !default.is_empty() { on.push(json!({"value":default,"label":"New thread","away":false})); }
+    // the machine picked is no longer listed (it went off and its copy left the live rows): it stays the choice, as one to wait for; never
+    // another machine in its place (the line says it is away, the person picks another or waits)
+    if !chosen.is_empty() && !on.iter().any(|o| text(o,"value")==chosen) {
+        let dim: Vec<&str>=row["machineChips"].as_array().into_iter().flatten().filter(|c|c["dim"]==true).filter_map(|c|c["short"].as_str()).collect();
+        let name=if dim.len()==1 { dim[0].to_string() } else { "that machine".to_string() };
+        on.push(json!({"value":chosen,"label":format!("New thread on {name} (away)"),"away":true}));
+    }
     on.sort_by_key(|o| text(o,"value")!=default);
     for o in on.iter_mut() { if o["away"]==true { let l=text(o,"label").trim_start_matches("New thread on ").trim_end_matches(" (away)").to_string(); o["label"]=json!(format!("Wait for {l}")); o["kind"]=json!("wait"); } else { o["kind"]=json!("machine"); } }
     let here_has=row["machineChips"].as_array().map_or(false,|c|c.iter().any(|c|c["here"]==true));
@@ -195,7 +202,8 @@ pub fn picker_on(project: &mut Value,row: &Value,here: &str,chosen: &str) {
     if let Some(f)=on.first_mut() { if matches!(f["kind"].as_str(),Some("machine")|Some("wait")) { f["on"]=json!(true); } }
     // the machine the first entry is on: a linked copy's id is `<link>~<id>`; its chip says which machine that is
     let first_id=text(&first,"value");
-    let m=if !first_id.contains('~') { if here.is_empty() { "this machine".to_string() } else { crate::mirror::short_name(here) } } else {
+    let waiting=text(&first,"label").strip_prefix("Wait for ").map(str::to_string);
+    let m=if let Some(w)=waiting.filter(|_|first_id.contains('~')) { w } else if !first_id.contains('~') { if here.is_empty() { "this machine".to_string() } else { crate::mirror::short_name(here) } } else {
         let ids=row["ids"].as_array().cloned().unwrap_or_default();
         let mach=ids.iter().find(|i|text(i,"id")==first_id).map(|i|text(i,"machine").to_string()).unwrap_or_else(||text(&row["default"],"machine").to_string());
         row["machineChips"].as_array().and_then(|c|c.iter().find(|c|text(c,"name")==mach)).map(|c|text(c,"short").to_string()).unwrap_or_else(||crate::mirror::short_name(&mach)) };
@@ -844,6 +852,15 @@ mod state_tests {
         let off=p["threads"].as_array().unwrap().iter().find(|r|r["off"]==true).unwrap();
         assert_eq!((off["id"].as_str(),off["mark"]["note"].as_str(),off["status"].as_str()),(Some("h|laptop~t4"),Some("laptop is off"),Some("needs")));
         assert!(p["machineChips"].as_array().unwrap().iter().any(|c|c["short"]=="laptop" && c["dim"]==true));
+    }
+    /// A picked machine that has gone off and left the live rows stays the choice, as one to wait for, and the line says it is away.
+    #[test] fn a_picked_machine_that_left_the_rows_stays_picked_and_away() {
+        let row=json!({"default":{"machine":"","id":"pA1"},"machineChips":[{"name":"desktop","short":"desktop","here":true,"dim":false},{"name":"boat-hub","short":"boat-hub","here":false,"dim":true,"state":"off"}],"origin":""});
+        let mut p=json!({"id":"h|pA1","newOn":[{"value":"pA1","label":"New thread on desktop","away":false}]});
+        picker_on(&mut p,&row,"desktop","L~pB1");
+        assert_eq!((p["newOn"][0]["value"].as_str(),p["newOn"][0]["kind"].as_str(),p["newOn"][0]["on"]==true),(Some("L~pB1"),Some("wait"),true));
+        assert_eq!(p["newOn"][0]["label"],"Wait for boat-hub"); assert_eq!(p["newOn"][1]["on"],Value::Null);
+        assert_eq!(p["runsOn"],"boat-hub is away");
     }
     /// Link with… lists the other machines' projects with no remote; a linked one offers Unlink; a project with a remote offers none.
     #[test] fn link_with_offers_other_machines_projects_with_no_remote() {
