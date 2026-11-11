@@ -402,8 +402,10 @@ fn back(f: &Fold, at: u64, id: &Value, fork: &str, cx: &Ctx) -> Option<Plan> {
 /// Hub.switch.as: the thread goes on with provider `to` from its next turn, on `model` and, when named, that effort: all of it between turns or none of it.
 /// `auto`: the fallback chain moved it (`fallback.switch`): the turn starts again at once, so nothing is held, and `say` is the timeline's line.
 fn switch(f: &Fold, at: u64, id: &Value, p: &Value, cx: &Ctx, auto: bool) -> Option<Plan> {
-    let th = s(p, "thread", ""); let to = s(p, "provider", ""); let model = s(p, "model", "");
+    let th = s(p, "thread", ""); let to = s(p, "provider", ""); let mut model = s(p, "model", "");
     let from = f.threads.get(&th).map(|t| t.provider.clone()).unwrap_or_default();
+    // back to the provider the failover order moved it off, with no model named (Nov 11, Bub): the very model the thread asked for there, never the provider's default
+    if model.is_empty() && from != to { let asked = crate::settings::fallback::Target::parse(f.setting(&format!("fallback.intent.{th}"))); if asked.provider == to { model = asked.model } }
     if running(f, &th) { return Some(Plan { events: vec![], reply: err(id, "a provider changes between turns: stop this one first"), stop: None, wt: None, scratch: None, act: None }) }
     // the same agent: the model and effort it names, if any (a picker that pressed an agent and then a model before it heard the first back asks this way)
     if from == to {

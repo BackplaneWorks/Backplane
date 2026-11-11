@@ -451,6 +451,8 @@ impl Accounts {
 
     /// A test's account: saved, signed in (the stand-in CLI reads `login.json` / `auth.json` from its store) and connected, with no sign-in ceremony.
     #[cfg(test)]
+    /// A test's catalog for a planted profile (what the CLI lists: aliases such as "opus").
+    #[cfg(test)] pub fn set_catalog(&self, id: &str, ids: &[&str]) { let _ = self.update(id, |p| p.catalog = ids.iter().map(|i| serde_json::json!({"id":i})).collect()); }
     pub async fn plant(self: &Arc<Self>, provider: &str, label: &str, email: &str, allowance: Value) -> (String, u64) {
         let s = self.request(&json!({"op":"add","provider":provider,"label":label})).await;
         let id = s["profiles"].as_array().and_then(|a| a.last()).and_then(|p| p["id"].as_str()).expect("added").to_string();

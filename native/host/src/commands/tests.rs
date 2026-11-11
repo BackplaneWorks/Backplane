@@ -129,6 +129,19 @@ fn ok() -> Value { json!({"t":"reply","id":7,"ok":true}) }
     let (_, r) = ask(&h, "thread.create", json!({"project":"p1","creationKey":"short"})).await; assert_eq!(r["error"], "Choose an existing project and retry this request.");
 }
 
+/// Nov 11: Bub put a thread the failover order had moved to Codex back on Claude naming no model, and it ran on Claude's default ("opus"), not claude-opus-5-5.
+#[tokio::test] async fn a_switch_back_to_the_provider_the_order_moved_off_keeps_the_exact_model_asked_for() {
+    let h = hub("intent").await;
+    h.commit(&json!({"$":"ThreadCreated","id":"t9","project":"p1","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"claude-opus-5-5","at":1})).await.unwrap();
+    h.commit(&json!({"$":"ProviderSet","id":"t9","provider":"codex","model":"","at":2})).await.unwrap(); // the order moved it (fallback.switch is the hub's own)
+    h.commit(&json!({"$":"SettingSet","key":"fallback.intent.t9","value":"claude/claude-opus-5-5","at":2})).await.unwrap();
+    let (e, r) = ask(&h, "thread.provider", json!({"thread":"t9","provider":"claude"})).await; assert_eq!(r, ok());
+    let set = e.iter().find(|x| x["$"] == "ProviderSet").expect("switched"); assert_eq!((set["provider"].as_str(), set["model"].as_str()), (Some("claude"), Some("claude-opus-5-5")), "{e:?}");
+    // a person who names a model gets that one
+    h.commit(&json!({"$":"ProviderSet","id":"t9","provider":"codex","model":"","at":3})).await.unwrap(); h.commit(&json!({"$":"SettingSet","key":"fallback.intent.t9","value":"claude/claude-opus-5-5","at":3})).await.unwrap();
+    let (e, _) = ask(&h, "thread.provider", json!({"thread":"t9","provider":"claude","model":"sonnet"})).await; assert_eq!(e.iter().find(|x| x["$"] == "ProviderSet").unwrap()["model"], "sonnet");
+}
+
 async fn say(h: &Arc<Hub>, th: &str, role: &str, text: &str, n: u32) { h.commit(&json!({"$":"MessagePosted","thread":th,"msg":format!("m{n}"),"role":role,"text":text,"at":10})).await.unwrap(); }
 
 // Hub.modes: what the request leaves out stays; naming a model holds the old work (Config.hold)

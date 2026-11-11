@@ -155,7 +155,7 @@ impl Rig {
     r.tick(reset + 1).await; assert_eq!(r.binding(T, "claude").await, w.0);
     assert!(r.lines(T).iter().any(|l| l == "Back on Work: it has reset"), "{:?}", r.lines(T)); assert_eq!(r.hub.setting(&fb::preference_key(T)).await.unwrap_or_default(), "");
     r.say(T, "m3", "THREE").await; r.rest(T, "completed", 4).await; let ts = r.turns();
-    assert_eq!((ts[3]["who"].as_str().unwrap(), ts[3]["resume"].as_str().unwrap()), ("w@x.com", sid.as_str()), "its own session, in its own store");
+    assert_eq!((ts[3]["who"].as_str().unwrap(), ts[3]["resume"].as_str().unwrap()), ("w@x.com", sid.as_str()), "its own session, in its own store: {:?}\n{:?}", r.lines(T), r.log().iter().filter(|e| e["$"] == "SettingSet" && e["key"].as_str().map_or(false, |k| k.starts_with("account."))).map(|e| format!("{}={}", e["key"], e["value"])).collect::<Vec<_>>());
     let got = ts[3]["text"].as_str().unwrap(); assert!(got.contains("answered by p@x.com") && got.contains("THREE"), "what happened meanwhile is handed over:\n{got}");
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn every_account_out_is_said_plainly_never_loops_and_goes_on_at_the_earliest_reset() {
@@ -408,4 +408,63 @@ impl Rig {
     // later Claude's Personal resets too: the thread goes back up
     std::fs::remove_file(r.dir.join("mode.p@x.com")).unwrap(); r.tick(rp + 1).await;
     assert_eq!((r.provider(T).await, r.binding(T, "claude").await), ("claude".to_string(), p.0.clone()), "{:?}", r.lines(T));
+}
+/// Nov 11 (the person's rule: stay on the account asked for while it can run; otherwise the next account of the same provider; never a failed turn to find out): the
+/// account the thread is bound to is known to be out (its hold). The turn starts on the next healthy account at once, says so in one line, and goes back when it resets.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn a_launch_on_an_account_known_to_be_out_starts_on_the_next_healthy_one_with_no_failed_turn() {
+    let r = rig("healthy", "claude").await; let (w, p) = r.two("claude").await; let reset = now() + 3600;
+    r.hub.commit(&json!({"$":"SettingSet","key":fb::hold_key("claude", &w.0, w.1),"value":json!({"scope":"claude","reason":"You've hit your weekly limit","reset":reset,"at":now()}).to_string(),"at":now()})).await.unwrap();
+    r.mode("w@x.com", &format!("limit:{reset}")); // were it started there, it would fail
+    r.say(T, "m1", "LAUNCH-REQUEST").await; r.rest(T, "completed", 1).await; tokio::time::sleep(Duration::from_millis(300)).await;
+    let ts = r.turns(); assert_eq!(ts.len(), 1, "no turn spent on Work: {ts:#?}"); assert_eq!(ts[0]["who"], "p@x.com"); assert!(ts[0]["text"].as_str().unwrap().contains("LAUNCH-REQUEST"));
+    assert_eq!(r.binding(T, "claude").await, p.0);
+    let say = format!("Started on Personal: Work is out until {}", crate::agents::rules::when(&r.zone().await, reset, now()));
+    assert!(r.lines(T).contains(&say), "{:?}", r.lines(T));
+    assert!(!r.log().iter().any(|e| e["$"] == "TurnChanged" && e["thread"] == T && matches!(e["state"].as_str(), Some("failed" | "interrupted"))), "no failed or stopped turn first");
+    // Work resets: between turns the thread goes back to the account it asked for
+    std::fs::remove_file(r.dir.join("mode.w@x.com")).unwrap(); r.tick(reset + 1).await;
+    assert_eq!(r.binding(T, "claude").await, w.0, "{:?}", r.lines(T));
+}
+/// The hub remembers an account's health from its own reading: a full weekly window is a hold (reason, since, until) that Settings shows and every start skips, before any
+/// turn has run on it.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn a_full_window_in_a_reading_marks_the_account_out_settings_says_so_and_no_turn_starts_there() {
+    let r = rig("health", "claude").await; let reset = now() + 7200;
+    let w = r.mgr.plant("claude", "Work", "w@x.com", json!({"provider":"claude","state":"ok","phase":"complete","at":now() - 3000,"windows":[{"scope":"seven_day","used_percent":100.0,"resets_at":reset}]})).await;
+    let p = r.mgr.plant("claude", "Personal", "p@x.com", json!({"provider":"claude","state":"ok","phase":"complete","at":now(),"windows":[{"scope":"five_hour","used_percent":10.0}]})).await;
+    r.settled(&[&w.0, &p.0]).await; r.bind(T, "claude", &w).await;
+    r.tick(now()).await;
+    let hold: Value = serde_json::from_str(&r.hub.setting(&fb::hold_key("claude", &w.0, w.1)).await.unwrap()).unwrap();
+    assert_eq!((hold["reason"].as_str(), hold["reset"].as_u64()), (Some("Usage window seven_day is full"), Some(reset)), "kept as a setting: it outlives a restart");
+    let who = Caller { gen: "g".into(), client: 77011 }; accounts_hub::grant_client("g", 77011);
+    let snap = r.hub.rpc_for("accounts").unwrap().call(&r.hub, &who, &json!(1), "accounts", &json!({"op":"list"})).await.remove(0);
+    assert_eq!(snap["result"]["holds"][&w.0]["text"], accounts_hub::limited_text(&r.zone().await, reset, now()), "Settings: limited until its reset: {snap}"); assert!(snap["result"]["holds"][&p.0].is_null());
+    r.say(T, "m1", "GO").await; r.rest(T, "completed", 1).await; let ts = r.turns();
+    assert_eq!((ts.len(), ts[0]["who"].as_str().unwrap()), (1, "p@x.com"), "{ts:#?}");
+}
+/// Nov 11, t1794379217-272 exactly: claude-opus-5-5 on a catalog of aliases, the default account's first turn hits its weekly limit. It goes to the provider's next account
+/// with usage left (it went to Codex), keeps claude-opus-5-5 (it came back on "opus"), only leaves Claude once every Claude account is out, never hops back within the
+/// request, and climbs back to the exact model once Claude has reset.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn nov11_the_limit_goes_to_the_next_claude_account_keeps_the_model_and_leaves_claude_only_when_all_are_out() {
+    let r = rig("nov11", "claude").await; let (w, p, c) = r.across().await; let (rw, rp) = (now() + 7200, now() + 3600);
+    for a in [&w, &p] { r.mgr.set_catalog(&a.0, &["default", "opus", "fable", "sonnet", "haiku"]); }
+    let t2 = "t1794379217-272";
+    r.hub.commit(&json!({"$":"ThreadCreated","id":t2,"project":"p1","title":"KiCad","env":"local","branch":"","worktree":"","provider":"claude","model":"claude-opus-5-5","at":now()})).await.unwrap();
+    r.bind(t2, "claude", &w).await;
+    r.mode("w@x.com", &format!("limit:{rw}"));
+    r.say(t2, "n1", "KICAD-GOAL make it first-party").await; r.rest(t2, "completed", 2).await;
+    let ts = r.turns(); assert_eq!((ts[0]["who"].as_str().unwrap(), ts[1]["who"].as_str().unwrap()), ("w@x.com", "p@x.com"), "Personal, not Codex: {ts:#?}");
+    let th = |m: &crate::model::Model| m.threads.get(t2).map(|t| (t.provider.clone(), t.model.clone())).unwrap();
+    assert_eq!(th(&*r.hub.model().await), ("claude".to_string(), "claude-opus-5-5".to_string()), "the model asked for, on the next account");
+    assert!(!r.log().iter().any(|e| e["$"] == "ProviderSet" && e["id"] == t2), "no provider change while a Claude account has usage left");
+    // Personal runs out too: now, and only now, Codex; this request never goes back to Claude
+    r.mode("p@x.com", &format!("limit:{rp}"));
+    r.say(t2, "n2", "SECOND").await; r.rest(t2, "completed", 4).await; tokio::time::sleep(Duration::from_millis(400)).await;
+    let ts = r.turns(); assert_eq!((ts[2]["who"].as_str().unwrap(), ts[3]["who"].as_str().unwrap(), ts.len()), ("p@x.com", "c@x.com", 4), "{ts:#?}");
+    assert_eq!(th(&*r.hub.model().await).0, "codex"); assert_eq!(r.binding(t2, "codex").await, c.0);
+    let tried: Vec<String> = serde_json::from_str(&r.hub.setting(&driver::tried_key(t2)).await.unwrap()).unwrap();
+    for must in [fb::tried_id(&p.0, p.1), driver::left_id("claude")] { assert!(tried.contains(&must), "{tried:?}") }
+    // Claude's Personal resets: between turns it climbs back, on claude-opus-5-5 exactly
+    std::fs::remove_file(r.dir.join("mode.p@x.com")).unwrap(); r.tick(rp + 1).await;
+    assert_eq!(th(&*r.hub.model().await), ("claude".to_string(), "claude-opus-5-5".to_string()), "{:?}", r.lines(t2));
+    assert_eq!(r.binding(t2, "claude").await, p.0);
 }
