@@ -119,12 +119,14 @@ func dAgo(_ ms: Int) -> String {
 struct DButton: ButtonStyle {
     var primary = false
     var danger = false
+    /// smaller: a row drawn inside a card
+    var compact = false
     @Environment(\.isEnabled) private var enabled
     func makeBody(configuration: Configuration) -> some View {
         let solid = primary && enabled
-        configuration.label.dmono(13, bold: true).lineLimit(1)
+        configuration.label.dmono(compact ? 11.5 : 13, bold: true).lineLimit(1)
             .foregroundStyle(solid ? BackplaneDesign.onAccent : !enabled ? BackplaneDesign.faint : danger ? BackplaneDesign.bad : BackplaneDesign.text)
-            .padding(.horizontal, 14).frame(minHeight: 40)
+            .padding(.horizontal, compact ? 10 : 14).frame(minHeight: compact ? 30 : 40)
             .background(solid ? BackplaneDesign.accent : BackplaneDesign.raised)
             .overlay(Rectangle().strokeBorder(solid ? BackplaneDesign.accent : BackplaneDesign.line, lineWidth: 1))
             .opacity(configuration.isPressed ? 0.7 : 1).contentShape(Rectangle())
