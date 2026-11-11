@@ -145,7 +145,7 @@ if [ "$BP9" = 1 ]; then
   # the view is zoomed on U1: a click at its centre is the person selecting it
   python3 "$XINPUT_PY" click $((BX + BW / 2)) $((BY + BH / 2)); sleep 0.4
   python3 "$XINPUT_PY" click $((BX + BW / 2)) $((BY + BH / 2)); sleep 1.2
-  INFO=$(hub_rpc "[]" | grep '^INFO ' | grep 'kicad.sel.' | tail -1 | cut -c6-)
+  INFO=$(hub_rpc "[]" | grep '^INFO ' | grep 'kicad.sel.' | tail -1 | cut -c6- || true)
   X3_OK=$(python3 -c 'import json,sys; v=(json.loads(sys.argv[1] or "{}").get("value") or {}); s=v.get("selection",{}); print(int(v.get("frame")=="PCB" and ("U1" in s.get("references",[]) or any(p.startswith("U1.") for p in s.get("pins",[]))) and "ref=U1" in v.get("probe","")))' "$INFO" 2>/dev/null || echo 0)
   check "The person's click on U1 in KiCad became the hub's selection (kicad.sel) and the viewers' probe" "$X3_OK" "$INFO"
 else
