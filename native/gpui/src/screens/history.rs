@@ -46,7 +46,7 @@ pub fn merge_point(rows: &[Value], fresh: &[Value]) -> Option<usize> { first_sha
 /// a run the rows held have whole. Shares nothing: the thread moved on by more than a page, and the picture stands alone.
 pub fn merge(mut rows: Vec<Value>, fresh: Vec<Value>) -> Vec<Value> {
     match first_shared_tail(&rows, &fresh) {
-        Some((i, j)) => { rows.truncate(i); rows.extend(fresh.into_iter().skip(j)); rows }
+        Some((i, j)) => { rows.truncate(i); rows.retain(anchor); rows.extend(fresh.into_iter().skip(j)); rows }
         None => fresh,
     }
 }
@@ -130,6 +130,10 @@ mod tests {
     use serde_json::json;
     fn rows(ids: &[&str]) -> Vec<Value> { ids.iter().map(|i| json!({"id": i, "text": i})).collect() }
     fn ids(r: &[Value]) -> Vec<&str> { r.iter().map(id).collect() }
+    #[test] fn a_stale_live_row_above_a_picture_does_not_stay() {
+        assert_eq!(ids(&merge(rows(&["a", "@working:t", "b", "@working:t"]), rows(&["b", "c", "@working:t"]))), ["a", "b", "c", "@working:t"]);
+        assert_eq!(ids(&merge(rows(&["a", "b", "@working:t", "c"]), rows(&["c", "d", "@working:t"]))), ["a", "b", "c", "d", "@working:t"]);
+    }
     #[test] fn a_new_picture_keeps_the_rows_above_it_and_takes_the_rest() {
         assert_eq!(ids(&merge(rows(&["a", "b", "c", "d"]), rows(&["c", "d", "e"]))), ["a", "b", "c", "d", "e"]);
     }
