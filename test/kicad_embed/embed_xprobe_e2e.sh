@@ -138,6 +138,9 @@ check "KiCad's selection is now C1 ($SEL2)" "$(python3 -c 'import json,sys; prin
 if [ "$BP9" = 1 ]; then
   hub_rpc "[{\"method\":\"editor.kicad.select\",\"params\":{\"project\":\"$PROJ/ecc83-pp.kicad_pro\",\"references\":[\"U1\"],\"zoom\":true}}]" >/dev/null
   sleep 1.0
+  # a person first clicks into KiCad (it takes the keyboard); Escape then clears KiCad's selection. Pressed while Backplane has the
+  # keyboard, Escape is Backplane's (it leaves the editor), and the clicks after it never reach KiCad
+  python3 "$XINPUT_PY" click $((BX + BW / 2)) $((BY + BH / 2)); sleep 0.6
   python3 "$XINPUT_PY" key Escape; sleep 0.3
   # the view is zoomed on U1: a click at its centre is the person selecting it
   python3 "$XINPUT_PY" click $((BX + BW / 2)) $((BY + BH / 2)); sleep 0.4
