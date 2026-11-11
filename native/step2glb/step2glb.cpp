@@ -3,7 +3,7 @@
 //   backplane-step2glb IN.step OUT.glb [--linear MM] [--relative] [--angular RAD] [--parts DIR]
 //   (--relative: --linear is a share of each edge's size, not millimetres)
 //   [--fine x0,y0,z0,x1,y1,z1 --fine-linear L --fine-angular A [--fine-min MM]]: the solids that meet that box (millimetres) are meshed at L
-//   and A instead, no segment under MM (finer than the wire's 10 um corners carry, a facet's normal is noise)
+//   and A instead, no segment under MM if given (careful: that also makes a small part coarser than L and A alone)
 //
 // Reads IN through XCAF (STEPCAFControl_Reader, colours on), meshes every distinct solid once with BRepMesh (several solids at a time on
 // the machine's cores, each solid's faces in parallel when there are few), and writes OUT: millimetres, Z up, one mesh whose primitives
@@ -250,7 +250,9 @@ int main(int argc, char** argv) {
     leaves.push_back(Leaf{n.Location, ix, tint});
     // --fine: a solid with a leaf in the box is meshed finer (the part the person zoomed in on)
     if (fine && !solids[ix].fine) {
-      Bnd_Box bb; BRepBndLib::Add(s.Located(n.Location), bb, false);
+      // its box; an unhealed solid's can come out open (unbounded, every axis +-1e100, which meets any box): then its vertices' box
+      Bnd_Box bb; TopoDS_Shape at = s.Located(n.Location); BRepBndLib::Add(at, bb, false);
+      if (bb.IsOpen() || bb.IsVoid()) { bb.SetVoid(); for (TopExp_Explorer v(at, TopAbs_VERTEX); v.More(); v.Next()) bb.Add(BRep_Tool::Pnt(TopoDS::Vertex(v.Current()))); }
       if (!bb.IsVoid()) { double x0, y0, z0, x1, y1, z1; bb.Get(x0, y0, z0, x1, y1, z1);
         solids[ix].fine = x1 >= fine_box[0] && x0 <= fine_box[3] && y1 >= fine_box[1] && y0 <= fine_box[4] && z1 >= fine_box[2] && z0 <= fine_box[5]; }
     }

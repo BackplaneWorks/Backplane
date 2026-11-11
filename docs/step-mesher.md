@@ -9,7 +9,21 @@ A STEP is meshed by `backplane-step2glb` (`native/step2glb/step2glb.cpp`): OpenC
   inside the transfer, and it was about 90% of a big file's transfer time (callgrind on the SOT-23 card). So the reader transfers without
   it, and each distinct solid is healed afterwards with the reader's own parameters (`XSAlgo_ShapeProcessor`, FixShape), several at once.
 - **Mesh:** each distinct solid (an instanced part once) is healed and meshed by `BRepMesh_IncrementalMesh` on its own thread, biggest
-  first, at the hub's `NORMAL` detail (0.03 mm, 0.2 rad). With fewer solids than cores, each one's faces are meshed in parallel too.
+  first. With fewer solids than cores, each one's faces are meshed in parallel too. The detail is `stepglb::NORMAL`: 0.2 rad, which
+  OCCT meshes as 5.7° a segment at most (a hole gets 63 or more segments), plus a linear deflection of 1/500 of each edge (OCCT's
+  relative mode).
+- **Detail when zoomed:** at rest, a view that sees less than 35% of a STEP's size asks the hub to refine around the point it looks
+  at (`kicad.refine`, `solid::refine_focus`). The hub snaps that region to a power-of-two box, so nearby views share one cached mesh,
+  and re-meshes the solids meeting it at 0.1 rad, twice the segments on every curve (126 on a hole). Not finer: the wire carries
+  corners to 10 µm, and a 3 mm fillet at 0.05 rad (0.07 mm segments) shaded as ridges. Not coarser anywhere either: a floor on
+  segment length made small parts coarser than the default. The finer model replaces the one on show under the
+  same key, and the camera stays where the person left it. Only the native mesher refines.
+- **No grid:** a STEP model is sent exactly as meshed, as long as it fits 600,000 triangles (`solid::fit`). The old `thin()` grid, a
+  4000th of the model's size, was 0.5 mm on a 2 m assembly. It turned a 6 mm hole into a jagged 16-gon with a broken rim and a
+  banded wall, and shattered fillets. Past the budget, the finest grid that fits is used.
+- **Normals:** the mesher writes where each B-rep face starts (`extras.faces`), and the hub sends it as runs (`faces` in solid and
+  part frames). The desktop smooths normals only within a face, so curves are smooth and every real edge is crisp, a shallow
+  chamfer included. Phones skip the field and shade per triangle as before.
 - **Colours:** a face's own colour, else its solid's, else a tint from the palette `freecad_gui.py` uses. The colours move from each
   unhealed face to what healing made of it, through the processor's map. FreeCAD's default grey-blue counts as no colour.
 - **Output:** the same GLB the FreeCAD scripts write (mm, Z up, one primitive a colour, linear light), so the hub reads both the same way.
