@@ -13,6 +13,8 @@ pub struct Projects {
     sent_q: Vec<String>, sent_f: Vec<String>, echo_q: Option<String>, echo_f: Option<String>,
     /// Set when a box wants the keys on the next frame: "search" or "folder".
     pub focus: Option<&'static str>, folder_open: bool,
+    /// The picker's row under the arrow keys (an index into the hub's rows; none: the field, where Enter is Add or Create), and its list's scroll.
+    pub folder_ix: Option<usize>, pub folder_scroll: ScrollHandle,
     /// The project page's own reads: `project.home` (the folder's goal and notes, board and files) and `fab.look {project}` (the parts its fab files name).
     pub home: Home,
     /// The page's Edit: (the thread it opened, the text for its composer), put there once that thread is on show.
@@ -85,14 +87,15 @@ pub fn boards(snap: &Value, card: &Value, root: &str) -> Vec<String> {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Item { pub label: String, pub action: String, pub value: String, pub kind: String }
+pub struct Item { pub label: String, pub action: String, pub value: String, pub kind: String, /// "project", "KiCad", "git" or none: what the folder is or looks like.
+    pub tag: String }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Folders { pub text: String, pub hint: String, pub error: String, pub items: Vec<Item> }
 
 pub fn folders(data: &Value) -> Option<Folders> {
     let f = data["folders"].as_object()?;
     let s = |k: &str| f.get(k).and_then(Value::as_str).unwrap_or("").to_string();
-    let items = f.get("items").and_then(Value::as_array).into_iter().flatten().take(200).map(|i| Item { label: string(i, "label"), action: string(i, "action"), value: string(i, "value"), kind: string(i, "kind") }).collect();
+    let items = f.get("items").and_then(Value::as_array).into_iter().flatten().take(200).map(|i| Item { label: string(i, "label"), action: string(i, "action"), value: string(i, "value"), kind: string(i, "kind"), tag: string(i, "tag") }).collect();
     Some(Folders { text: s("text"), hint: s("hint"), error: s("error"), items })
 }
 pub fn query(data: &Value) -> String { string(&data["search"], "query") }
@@ -136,6 +139,49 @@ pub fn first_message(id: &str, text: &str) -> Command {
 pub fn give_back(text: String, box_now: &str, restore: &mut Option<String>) -> Option<String> {
     if box_now == text { return None } // (still in the box: the send keeps it there until the hub answers)
     if box_now.trim().is_empty() { Some(text) } else { *restore = Some(text); None }
+}
+/// The rows the arrow keys walk: the folders and "..", never the Add row (that is Enter in the field) or a note.
+fn walkable(i: &Item) -> bool { !i.action.is_empty() && i.kind != "add" }
+/// Up and Down in the picker: from the field (none) Down takes the first folder row; Up from the first goes back to the field; the ends hold.
+/// A row that is gone (the hub's rows changed) counts as the field.
+pub fn step(items: &[Item], cur: Option<usize>, d: i32) -> Option<usize> {
+    let rows: Vec<usize> = items.iter().enumerate().filter(|(_, i)| walkable(i)).map(|(n, _)| n).collect();
+    let at = cur.and_then(|c| rows.iter().position(|r| *r == c));
+    match (at, d) {
+        (None, d) if d > 0 => rows.first().copied(),
+        (None, _) => None,
+        (Some(0), d) if d < 0 => None,
+        (Some(p), d) => rows.get((p as i32 + d.signum()).clamp(0, rows.len() as i32 - 1) as usize).copied(),
+    }
+}
+/// The row under the arrow keys, when it is still one of the hub's rows.
+pub fn marked(f: &Folders, ix: Option<usize>) -> Option<&Item> { ix.and_then(|i| f.items.get(i)).filter(|i| walkable(i)) }
+/// What a key in the field does.
+#[derive(Debug, PartialEq)]
+pub enum Key { /// Go into this folder: the field takes the path (and tells the hub as typing does).
+    Cd(String), /// The Add, Create or Clone row.
+    Run(String, String) }
+/// Enter: the marked folder is gone into; with none marked it is the Add or Create row (`submit_cmd`).
+pub fn enter(data: &Value, typed: &str, ix: Option<usize>) -> Option<Key> {
+    let f = folders(data)?;
+    if let Some(i) = marked(&f, ix) { return Some(Key::Cd(i.value.clone())) }
+    match submit_cmd(data, typed) { Some(Command::Action(a, v)) => Some(Key::Run(a, v)), _ => None }
+}
+/// Tab: the marked folder, else the first folder that matches the name being typed (none while no name is typed, or while the rows are for an older text).
+pub fn complete(data: &Value, typed: &str, ix: Option<usize>) -> Option<String> {
+    let f = folders(data)?;
+    if let Some(i) = marked(&f, ix) { return Some(i.value.clone()) }
+    if f.text != typed || typed.ends_with('/') || typed == "~" { return None }
+    f.items.iter().find(|i| i.kind == "dir" && !i.action.is_empty()).map(|i| i.value.clone())
+}
+/// Going into a folder from here: the field shows the path at once and its change goes to the hub as typing does (no wait for the hub's echo).
+fn cd(this: &mut Backplane, path: String, cx: &mut Context<Backplane>) {
+    this.screens.projects.folder_ix = None; this.screens.projects.folder_scroll.scroll_to_item(0);
+    if let Some(i) = this.screens.projects.folder.clone() { i.update(cx, |i, cx| i.set(path, cx)); }
+    cx.notify();
+}
+fn key(this: &mut Backplane, k: Option<Key>, cx: &mut Context<Backplane>) {
+    match k { Some(Key::Cd(p)) => cd(this, p, cx), Some(Key::Run(a, v)) => { if a == "proj-add" || a == "proj-new" { this.arm_new(); } let _ = this.tx.try_send(Command::Action(a, v)); cx.notify(); } None => {} }
 }
 pub fn close_cmd() -> Command { Command::Action("proj-close".into(), String::new()) }
 /// Esc leaves the folder picker while it is open.
@@ -191,19 +237,31 @@ pub fn sync(this: &mut Backplane, cx: &mut Context<Backplane>) {
         if adopt(&q, &typed, &this.screens.projects.sent_q) { this.screens.projects.echo_q = Some(q.clone()); input.update(cx, |i, cx| i.set(q, cx)); }
     }
     match folders(&this.data) {
-        None => { this.screens.projects.folder_open = false; this.screens.projects.sent_f.clear(); }
+        None => { this.screens.projects.folder_open = false; this.screens.projects.sent_f.clear(); this.screens.projects.folder_ix = None; }
         Some(f) => {
             if this.screens.projects.folder.is_none() {
                 let input = cx.new(|cx| Composer::with_context(cx, "AskInput"));
+                // the arrows and Tab come here as the popup's keys do (one line: they have nothing to move in the field)
+                input.update(cx, |i, _| i.popup_open = true);
                 cx.observe(&input, |this, input, cx| {
                     let text = input.read(cx).content.to_string(); let p = &mut this.screens.projects;
                     if p.echo_f.as_deref() == Some(text.as_str()) { p.echo_f = None; return; }
                     if p.sent_f.last() == Some(&text) { return; }
+                    p.folder_ix = None;
                     remember(&mut p.sent_f, &text); let _ = this.tx.try_send(type_cmd(&text));
                 }).detach();
-                // Enter: the picker's Add or Create row, as a click on it would (only once the hub's rows are for what the field holds)
-                cx.subscribe(&input, |this, input, ev: &ComposerEvent, cx| if matches!(ev, ComposerEvent::Submit) {
-                    if let Some(c) = submit_cmd(&this.data, &input.read(cx).content.to_string()) { this.arm_new(); let _ = this.tx.try_send(c); cx.notify(); }
+                // Enter: the marked folder, else the picker's Add or Create row, as a click on it would (only once the hub's rows are for what the field holds)
+                cx.subscribe(&input, |this, input, ev: &ComposerEvent, cx| {
+                    let typed = input.read(cx).content.to_string(); let ix = this.screens.projects.folder_ix;
+                    match ev {
+                        ComposerEvent::Submit => { let k = enter(&this.data, &typed, ix); key(this, k, cx); }
+                        ComposerEvent::PopupPick => { let k = complete(&this.data, &typed, ix).map(Key::Cd); key(this, k, cx); }
+                        ComposerEvent::PopupMove(d) => if let Some(f) = folders(&this.data) {
+                            let to = step(&f.items, ix, *d); let p = &mut this.screens.projects;
+                            if to != p.folder_ix { p.folder_ix = to; p.folder_scroll.scroll_to_item(to.map_or(0, |t| f.items[..t].iter().filter(|i| i.kind != "add" && i.kind != "note").count())); cx.notify(); }
+                        }
+                        _ => {}
+                    }
                 }).detach();
                 this.screens.projects.folder = Some(input);
             }
@@ -223,24 +281,52 @@ pub fn search_box(light: bool, p: &Projects) -> AnyElement {
     div().flex_1().min_w_0().px_2().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).children(p.search.clone()).into_any_element()
 }
 
-/// The folder picker over the main area, while the hub shows `folders`.
+/// The folder picker over the main area, while the hub shows `folders`: a column with the title (Esc and × on its right), the path field, the
+/// Add or Create row under it, then "..", and the folders with what each is ("project", "KiCad", "git") on the right.
 pub fn view(cx: &mut Context<Backplane>, light: bool, p: &Projects, data: &Value) -> Option<AnyElement> {
     let f = folders(data)?;
     let c = |n: &str| theme::color(light, n);
-    let mut list = div().id("folders-list").flex().flex_col().w_full().max_w(px(640.)).flex_1().min_h_0().overflow_y_scroll();
+    let mark = marked(&f, p.folder_ix).map(|_| p.folder_ix.unwrap_or(0));
+    let mut top: Vec<AnyElement> = vec![];
+    let mut list = div().id("folders-list").track_scroll(&p.folder_scroll).flex().flex_col().w_full().flex_1().min_h_0().overflow_y_scroll();
+    let mut dirs = 0;
     for (i, it) in f.items.iter().enumerate() {
         let (a, v) = (it.action.clone(), it.value.clone()); let live = !a.is_empty();
-        let icon = match it.kind.as_str() { "up" => "↰", "dir" => "▸", "add" => "+", _ => " " };
-        list = list.child(crate::ui::with_rect(div().id(SharedString::from(format!("folder-{i}"))), move || format!("folder-{i}")).flex().gap_2().px_2().py_1().text_size(px(12.)).text_color(c(if live { "text" } else { "faint" })).when(live, |d| d.cursor_pointer().hover(|s| s.bg(c("raise"))))
-            .child(div().w(px(14.)).text_color(c("dim")).child(icon)).child(div().flex_1().overflow_hidden().whitespace_nowrap().child(crate::i18n::trs(&it.label)))
-            .on_click(cx.listener(move |this, _, _, cx| { if !a.is_empty() { if a == "proj-add" || a == "proj-new" { this.arm_new(); } let _ = this.tx.try_send(Command::Action(a.clone(), v.clone())); } cx.notify(); })));
+        let row = crate::ui::with_rect(div().id(SharedString::from(format!("folder-{i}"))), move || format!("folder-{i}")).flex().flex_none().items_center().gap_2().px(px(10.)).w_full();
+        match it.kind.as_str() {
+            "add" => top.push(row.h(px(34.)).bg(c("accent")).text_size(px(13.)).text_color(c("bg")).cursor_pointer().hover(|s| s.opacity(0.9))
+                .child(crate::ui::ic(light, if a == "proj-add" { "plus" } else if a == "proj-new" { "folder-plus" } else { "folder-down" }, 15., "bg"))
+                .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(crate::i18n::trs(&it.label)))
+                .child(div().flex_none().text_size(px(11.)).opacity(0.75).child("Enter" /* i18n-ok: a key's name */))
+                .on_click(cx.listener(move |this, _, _, cx| key(this, Some(Key::Run(a.clone(), v.clone())), cx))).into_any_element()),
+            "note" => top.push(row.h(px(34.)).border_1().border_color(c("line")).text_size(px(13.)).text_color(c("dim"))
+                .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(crate::i18n::trs(&it.label))).into_any_element()),
+            kind => {
+                let up = kind == "up"; if !up { dirs += 1; }
+                let on = mark == Some(i);
+                let name = if up { it.label.clone() } else { it.label.trim_end_matches('/').to_string() };
+                list = list.child(row.h(px(28.)).text_size(px(13.)).text_color(c(if live { "text" } else { "faint" })).when(on, |d| d.bg(c("raise"))).when(live, |d| d.cursor_pointer().hover(|s| s.bg(c("raise"))))
+                    .child(crate::ui::ic(light, if up { "corner-left-up" } else { "folder" }, 14., if it.tag.is_empty() { "dim" } else { "accent" }))
+                    .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(name))
+                    .when(!it.tag.is_empty(), |d| d.child(div().flex_none().text_size(px(11.)).text_color(c("faint")).child(it.tag.clone())))
+                    .on_click(cx.listener(move |this, _, _, cx| if !a.is_empty() { if a == "proj-cd" { cd(this, v.clone(), cx) } else { let _ = this.tx.try_send(Command::Action(a.clone(), v.clone())); cx.notify(); } })));
+            }
+        }
     }
-    Some(div().id("folders-q").absolute().inset_0().occlude().bg(c("bg")).flex().flex_col().items_start().p_4().gap_3()
-        .child(div().font_weight(FontWeight::BOLD).child(crate::i18n::trs("Add project")))
-        .children(p.folder.clone().map(|i| div().w_full().max_w(px(640.)).px_2().py_1().border_1().border_color(c("line")).bg(c("view")).child(i)))
-        .when(!f.error.is_empty(), |d| d.child(div().text_size(px(12.)).text_color(c("bad")).child(crate::i18n::trs(&f.error))))
-        .child(list)
-        .child(crate::ui::with_rect(div().id("folders-cancel"), || "folders-cancel".to_string()).px_3().py_1().text_size(px(12.)).cursor_pointer().border_1().border_color(c("line")).bg(c("raise")).child(crate::i18n::trs("Cancel")).on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(close_cmd()); cx.notify(); })))
+    if dirs == 0 && f.error.is_empty() { list = list.child(div().px(px(10.)).h(px(28.)).flex().items_center().text_size(px(12.)).text_color(c("faint")).child(crate::i18n::trs("No folders"))); }
+    let cancel = crate::ui::with_rect(div().id("folders-cancel"), || "folders-cancel".to_string()).flex().items_center().gap_2().h(px(26.)).px_2().cursor_pointer().hover(|s| s.bg(c("raise")))
+        .child(div().text_size(px(11.)).text_color(c("faint")).child("Esc" /* i18n-ok: a key's name */)).child(crate::ui::ic(light, "x", 14., "dim"))
+        .on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(close_cmd()); cx.notify(); }));
+    Some(div().id("folders-q").absolute().inset_0().occlude().bg(c("bg")).flex().flex_col().items_center().px_6().pt(px(56.)).pb_4()
+        .child(div().flex().flex_col().w_full().max_w(px(680.)).flex_1().min_h_0().gap_2()
+            .child(div().flex().flex_none().items_center().justify_between().pb_1().child(div().text_size(px(15.)).font_weight(FontWeight::SEMIBOLD).child(crate::i18n::trs("Add project"))).child(cancel))
+            .children(p.folder.clone().map(|i| div().flex().flex_none().items_center().gap_2().w_full().h(px(36.)).px(px(10.)).border_1().border_color(c("line")).bg(c("view")).text_size(px(14.))
+                .child(crate::ui::ic(light, "folder", 15., "dim")).child(div().flex_1().min_w_0().child(i))))
+            .when(!f.error.is_empty(), |d| d.child(div().flex_none().px(px(10.)).text_size(px(12.)).text_color(c("bad")).child(crate::i18n::trs(&f.error))))
+            .children(top)
+            .child(list)
+            .child(div().flex().flex_none().gap_4().pt_1().border_t_1().border_color(c("line")).text_size(px(11.)).text_color(c("faint"))
+                .child(crate::i18n::trs("↑↓ select")).child(crate::i18n::trs("Enter open")).child(crate::i18n::trs("Tab complete"))))
         .into_any_element())
 }
 
@@ -416,6 +502,23 @@ mod tests {
         assert!(submit_cmd(&d, "~/Docs").is_none(), "rows for an older text: Enter waits"); assert!(matches!(close_on_escape(&d), Some(Command::Action(a, _)) if a == "proj-close"));
         assert!(folders(&Value::Null).is_none() && close_on_escape(&Value::Null).is_none());
         assert_eq!(controls(&d).iter().map(|c| c.0.as_str()).collect::<Vec<_>>(), ["ui:Add project", "folder-0", "folder-1", "folders-cancel"]);
+        assert_eq!(f.items[0].tag, "", "an older hub sends no tag");
+    }
+    #[test] fn the_arrows_walk_the_folder_rows_and_enter_and_tab_go_into_the_marked_one() {
+        let d = j(r#"{"folders":{"text":"~/a","hint":"","error":"","items":[{"label":"Create ~/a","action":"proj-new","value":"/h/a","kind":"add"},{"label":"..","action":"proj-cd","value":"/","kind":"up"},
+            {"label":"alpha/","action":"proj-cd","value":"/h/alpha/","kind":"dir","tag":"KiCad"},{"label":"avr/","action":"proj-cd","value":"/h/avr/","kind":"dir"}]}}"#);
+        let f = folders(&d).unwrap(); assert_eq!(f.items[2].tag, "KiCad");
+        assert_eq!(step(&f.items, None, 1), Some(1), "Down from the field: the first row under the Add row"); assert_eq!(step(&f.items, None, -1), None);
+        assert_eq!(step(&f.items, Some(1), 1), Some(2)); assert_eq!(step(&f.items, Some(3), 1), Some(3), "the last row holds");
+        assert_eq!(step(&f.items, Some(2), -1), Some(1)); assert_eq!(step(&f.items, Some(1), -1), None, "Up from the first: the field again");
+        assert_eq!(step(&f.items, Some(9), 1), Some(1), "a row that is gone counts as the field"); assert_eq!(step(&[], None, 1), None);
+        assert_eq!(enter(&d, "~/a", Some(2)), Some(Key::Cd("/h/alpha/".into())), "Enter on a marked folder goes into it");
+        assert_eq!(enter(&d, "~/a", None), Some(Key::Run("proj-new".into(), "/h/a".into())), "Enter with none marked is the Add or Create row");
+        assert_eq!(enter(&d, "~/a", Some(0)), enter(&d, "~/a", None), "the Add row is never the marked one"); assert_eq!(enter(&d, "~/ab", None), None);
+        assert_eq!(complete(&d, "~/a", None).as_deref(), Some("/h/alpha/"), "Tab: the first folder that matches"); assert_eq!(complete(&d, "~/a", Some(3)).as_deref(), Some("/h/avr/"));
+        assert_eq!(complete(&d, "~/al", None), None, "rows for an older text: Tab waits");
+        let bare = j(r#"{"folders":{"text":"~/","items":[{"label":"alpha/","action":"proj-cd","value":"/h/alpha/","kind":"dir"}]}}"#);
+        assert_eq!(complete(&bare, "~/", None), None, "no name typed: nothing to complete"); assert_eq!(complete(&bare, "~/", Some(0)).as_deref(), Some("/h/alpha/"));
     }
     #[test] fn a_project_is_found_by_its_raw_id_with_or_without_the_hub_prefix() {
         let d = j(r#"{"projects":[{"id":"http://h|p1","title":"A","threads":[{"id":"http://h|t1","title":"T"}]},{"id":"p2","title":"B"}]}"#);
