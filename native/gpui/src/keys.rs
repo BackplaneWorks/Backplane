@@ -88,7 +88,7 @@ pub const TABLE: &[Entry] = &[
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("term-leave", "Leave the terminal: put it away, or take the keyboard back to it", "Terminal", "shift-escape", Fixed),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("term-copy", "Copy the terminal's selection", "Terminal", "secondary-shift-c", Fixed),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("term-paste", "Paste into the terminal", "Terminal", "secondary-shift-v", Fixed),
-    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("kcomment", "Comment on what is selected in KiCad, from Backplane or from inside the editor: Enter posts, Esc cancels", "KiCad", "ctrl-;", Fixed),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("kcomment", "Comment on what is selected in KiCad, from Backplane or from inside the editor: Enter posts, Esc cancels", "Viewer", "ctrl-;", Fixed),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("rail", "Rail views: B board, S schematic, 3 3D, V split, M mech, F files, D diff, R review, W browser", "Viewer", "b s 3 v m f d r w", Fixed),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("mgmt-bom", "BOM panel beside the design: open or close", "Viewer", "alt-shift-b", Rebind),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("mgmt-checks", "Checks panel beside the design: open or close", "Viewer", "alt-shift-c", Rebind),
