@@ -11,5 +11,6 @@ pub mod ring;
 pub mod ringbox;
 pub mod ringpage;
 pub mod session;
+pub mod speaker;
 pub mod vdict;
 pub mod words;

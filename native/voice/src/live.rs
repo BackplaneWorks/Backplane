@@ -41,6 +41,10 @@ impl Sink for Events {
         emit(json!({"event": "hyp", "item": item, "words": words_json(words), "end": end}));
     }
 
+    fn voice(&mut self, item: &str, emb: &[f32]) {
+        emit(json!({"event": "voice", "item": item, "emb": emb.iter().map(|x| (x * 10000.0).round() / 10000.0).collect::<Vec<f32>>()}));
+    }
+
     fn turn(&mut self, item: &str, p: f32, ms: i64) {
         emit(json!({"event": "turn", "item": item, "p": (p * 1000.0).round() / 1000.0, "ms": ms}));
     }

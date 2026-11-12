@@ -192,8 +192,19 @@ starts:
 Idle cost on this desktop (2026-11-11, 30 s of quiet, the resident recognizer already loaded): the helper 0.33 %
 of one core and 41 MB, pw-record 0.1 % and 9 MB.
 
-Not yet: the speaker check (only the person's voice starts a message), echo cancellation against Backplane's
-own sound, a tray icon and a system-wide hotkey, and the phones.
+- **Speaker check** (on by default; `voice/speaker.rs`). Only the person's voice starts a message. The helper
+  gives each live segment of a second or more its embedding (NeMo TitaNet small, 40 MB, CC-BY-4.0 like
+  NVIDIA's TitaNet cards: worth a look before it ships on; `local-speaker` fetches it, the hub once by
+  itself) as `voice` before its `done`. The voiceprint is their mean over the person's own dictation with the
+  mic button (whoever presses it is the person), in `<home>/voice/voiceprint.json` (0600), never sent; Re-enrol
+  clears it. Once it has 3 stretches, an always-on message starts only at the end of a segment within 0.5
+  (cosine) of it: its words show at the first pause, not as they come, and a segment too short to tell (under
+  a second) starts nothing. Chosen on this desktop (2026-11-11) over CAM++ and WeSpeaker ResNet34, which put
+  other voices as close as the same one: TitaNet, enrolled from 20 s of the person's narration, gave their own
+  other passages 0.75 and 0.79 and three other voices below 0; the test clips (Kokoro-82M) 0.77 for the
+  enrolled voice, 0.24 and 0.45 for two others. A segment takes ~15 ms.
+
+Not yet: echo cancellation against Backplane's own sound, a tray icon and a system-wide hotkey, and the phones.
 
 ## Hold to talk
 

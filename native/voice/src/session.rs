@@ -37,6 +37,8 @@ pub trait Decoder: Send {
     fn decode(&mut self, samples: &[f32]) -> Vec<Word>;
     /// The end-of-turn model's probability that the speaker has finished (turn.rs), from the last 8 s of audio; None when there is no model.
     fn turn(&mut self, _audio: &[f32]) -> Option<f32> { None }
+    /// The speaker model's embedding of a segment (always-on's speaker check); None when there is no model.
+    fn voice(&mut self, _samples: &[f32]) -> Option<Vec<f32>> { None }
 }
 
 pub trait Sink {
@@ -46,6 +48,8 @@ pub trait Sink {
     fn at(&mut self, _from_cs: i64) {}
     /// A pause closed segment `item`: the end-of-turn model says `p` that the speaker has finished, in `ms` (live only).
     fn turn(&mut self, _item: &str, _p: f32, _ms: i64) {}
+    /// A segment's voice (its speaker embedding), told before its `done` (live only, segments of a second or more).
+    fn voice(&mut self, _item: &str, _emb: &[f32]) {}
 }
 
 pub enum In {
@@ -58,12 +62,14 @@ enum Job {
     Hyp { item: String, from: i64, to: i64, samples: Vec<f32> },
     Done { item: String, from: i64, samples: Vec<f32>, min: f64, speech_end: Option<Instant> },
     Turn { item: String, audio: Vec<f32> },
+    Voice { item: String, samples: Vec<f32> },
 }
 
 pub enum Reply {
     Hyp { item: String, from: i64, to: i64, words: Vec<Word> },
     Done { item: String, from: i64, words: Vec<Word>, decode_ms: i64, final_ms: i64 },
     Turn { item: String, p: Option<f32>, ms: i64 },
+    Voice { item: String, emb: Option<Vec<f32>> },
 }
 
 fn decoder_thread<D: Decoder + 'static>(mut d: D, jobs: Receiver<Job>, inbox: Sender<In>) {
@@ -78,6 +84,7 @@ fn decoder_thread<D: Decoder + 'static>(mut d: D, jobs: Receiver<Job>, inbox: Se
                     Reply::Done { item, from, words, decode_ms, final_ms: speech_end.map_or(0, |e| e.elapsed().as_millis() as i64) }
                 }
                 Job::Turn { item, audio } => { let t = Instant::now(); let p = d.turn(&audio); Reply::Turn { item, p, ms: t.elapsed().as_millis() as i64 } }
+                Job::Voice { item, samples } => Reply::Voice { item, emb: d.voice(&samples) },
             };
             if inbox.send(In::Decoded(reply)).is_err() {
                 break;
@@ -240,6 +247,8 @@ impl<V: Detector, S: Sink> Session<V, S> {
         self.seg_start = -1;
         self.seq += 1;
         let samples = self.audio(from, to.max(from + 1));
+        // whose voice: a second or more of a live segment (before its last decode, so it comes first)
+        if self.live && samples.len() as f64 >= SR { self.send(Job::Voice { item: item.clone(), samples: samples.clone() }) }
         self.send(Job::Done { item, from, samples, min: 0.2, speech_end: Some(Instant::now()) });
     }
 
@@ -255,6 +264,7 @@ impl<V: Detector, S: Sink> Session<V, S> {
             }
             Reply::Done { item, from, words, decode_ms, final_ms } => { self.out.at(cs(from as f64 / SR)); self.out.done(&item, &words, decode_ms, final_ms) }
             Reply::Turn { item, p, ms } => if let Some(p) = p { self.out.turn(&item, p, ms) },
+            Reply::Voice { item, emb } => if let Some(e) = emb { self.out.voice(&item, &e) },
         }
     }
 

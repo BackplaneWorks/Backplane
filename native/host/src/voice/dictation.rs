@@ -112,20 +112,26 @@ pub struct Reader { d: VDict, timed: bool, place: Place, set: Settle, acc: Strin
     /// the voice commands on; when words were last heard; whether any were written since the last cut (auto-send has something to send)
     cmds: Cmds, heard: Option<std::time::Instant>, wrote: bool, eot: Eot,
     /// always on (always.rs): what starts a message, whether one has started, and the leading words of an item that named where it goes
-    gate: Option<super::always::Gate>, started: bool, skip: (String, usize) }
+    gate: Option<super::always::Gate>, started: bool, skip: (String, usize),
+    /// always on's speaker check (speaker.rs): the person's voiceprint, and the last segment's voice (its item, and whether it is the person's)
+    print: Option<super::speaker::Print>, voice: (String, bool) }
 const HIST: usize = 64;
 impl Reader {
     pub fn new(d: VDict, timed: bool, draft: &str, caret: usize) -> Reader {
-        Reader { d, timed, place: Place::new(draft, caret), set: Settle::default(), acc: String::new(), seg: vec![], ask: vec![], tail: String::new(), fixes: vec![], cuts: 0, seq: 0, hist: Default::default(), done: Default::default(), cmds: Cmds::default(), heard: None, wrote: false, eot: Eot::default(), gate: None, started: false, skip: Default::default() }
+        Reader { d, timed, place: Place::new(draft, caret), set: Settle::default(), acc: String::new(), seg: vec![], ask: vec![], tail: String::new(), fixes: vec![], cuts: 0, seq: 0, hist: Default::default(), done: Default::default(), cmds: Cmds::default(), heard: None, wrote: false, eot: Eot::default(), gate: None, started: false, skip: Default::default(), print: None, voice: Default::default() }
     }
     pub fn with_cmds(mut self, c: Cmds) -> Reader { self.cmds = c; self }
+    /// Always on's speaker check: only a segment in this voice starts a message (one too short to tell, under a second, does not).
+    pub fn with_speaker(mut self, p: super::speaker::Print) -> Reader { if p.enrolled() { self.print = Some(p) } self }
     /// Always on: a message starts only at real words (always.rs `Gate`); until then nothing heard is written.
     pub fn with_gate(mut self, g: super::always::Gate) -> Reader { self.gate = Some(g); self }
     /// Whether these words may be written: always words while a message is going; before one, only when they start one (and a name said first is
     /// taken off and told: Out::Route). None: drop them.
-    fn admit(&mut self, item: &str, ws: Vec<VW>, out: &mut Vec<Out>) -> Option<Vec<VW>> {
+    fn admit(&mut self, item: &str, ws: Vec<VW>, fin: bool, out: &mut Vec<Out>) -> Option<Vec<VW>> {
         if let (Some(g), false) = (self.gate, self.started) {
             if !g.passes(&ws) { return None }
+            // the speaker check: known only at the segment's end, and only the person's voice starts a message
+            if self.print.is_some() && !(fin && self.voice.0 == item && self.voice.1) { return None }
             self.started = true;
             if let Some((n, name)) = super::always::route(&ws) { self.skip = (item.to_string(), n); out.push(Out::Route(name)) }
         }
@@ -239,22 +245,27 @@ impl Reader {
         let s = |k: &str| o[k].as_str().unwrap_or("").to_string();
         if matches!(o["event"].as_str(), Some("hyp" | "delta" | "done")) { self.heard = Some(std::time::Instant::now()) }
         let mut pre = if matches!(o["event"].as_str(), Some("hyp" | "delta")) { self.speech() } else { vec![] };
+        if o["event"] == "voice" {
+            let emb: Vec<f32> = o["emb"].as_array().map(|a| a.iter().filter_map(|x| x.as_f64().map(|f| f as f32)).collect()).unwrap_or_default();
+            if let Some(p) = &self.print { self.voice = (s("item"), p.sim(&emb) >= super::speaker::MATCH) }
+            return pre
+        }
         if o["event"] == "turn" { let p = o["p"].as_f64().map(|p| p as f32); pre.extend(self.speech()); self.eot.audio = p; self.eot.audio_item = s("item"); return pre }
         match s("event").as_str() {
             "ready" => { st.state = "live".into(); st.device = if s("label").is_empty() { s("device") } else { s("label") }; st.hint.clear(); st.engine = engine.to_string(); vec![Out::View] }
             "delta" => {
                 let item = s("item"); self.acc = if self.set.item == item { format!("{}{}", self.acc, s("text")) } else { s("text") };
-                let Some(ws) = self.admit(&item, vdict::words_text(&self.acc), &mut pre) else { return pre };
+                let Some(ws) = self.admit(&item, vdict::words_text(&self.acc), false, &mut pre) else { return pre };
                 let x = self.set.hyp(false, &item, ws, 0, &self.d.waits().to_vec()); pre.extend(self.words(&item, x, false, st)); pre
             }
             "hyp" => {
-                let item = s("item"); let Some(ws) = self.admit(&item, vdict::words_json(&o["words"]), &mut pre) else { return pre };
+                let item = s("item"); let Some(ws) = self.admit(&item, vdict::words_json(&o["words"]), false, &mut pre) else { return pre };
                 let x = self.set.hyp(true, &item, ws, o["end"].as_u64().unwrap_or(0) as u32, &self.d.waits().to_vec()); pre.extend(self.words(&item, x, false, st)); pre
             }
             "done" => {
                 let item = s("item"); let ws = if self.timed { vdict::words_json(&o["words"]) } else { vdict::words_text(&s("text")) };
                 // always on, no message yet and these do not start one: the segment is forgotten (its settling with it)
-                let Some(ws) = self.admit(&item, ws, &mut pre) else { let _ = self.set.done(self.timed, &item, &[]); self.acc.clear(); return pre };
+                let Some(ws) = self.admit(&item, ws, true, &mut pre) else { let _ = self.set.done(self.timed, &item, &[]); self.acc.clear(); return pre };
                 let x = self.set.done(self.timed, &item, &ws); self.done = (item.clone(), ws);
                 // a segment's end is new speech too (a short one had no hypothesis): the audio model's word on this very pause stays
                 let mut out = pre; if self.eot.audio_item != item { out.extend(self.speech()) }
@@ -469,6 +480,19 @@ mod tests {
         assert!(o.iter().any(|x| matches!(x, Out::Route(n) if n == "bub")), "{o:?}"); c.take(&r, o);
         c.hear(&mut r, &mut st, &[segp("l0", &[("Bub,", 0, 20, 95), ("what's", 25, 40, 95), ("on", 40, 50, 95), ("today?", 50, 80, 95)])]);
         assert_eq!(c.text, "What's on today?");
+    }
+    #[test] fn always_on_with_the_speaker_check_only_the_persons_voice_starts_a_message() {
+        let mut p = crate::voice::speaker::Print::default(); for _ in 0..3 { p.add(&[1.0, 0.1, 0.0]) }
+        let (mut r, mut st, mut c) = (gated(1).with_speaker(p), Dictation::default(), Cl::new());
+        let voice = |item: &str, e: [f32; 3]| json!({"event":"voice","item":item,"emb":e});
+        // the TV: words, but another voice
+        c.hear(&mut r, &mut st, &[json!({"event":"hyp","item":"l0","words":[["Tonight's",0,30,95],["weather",30,60,95]],"end":70}), voice("l0", [0.0, 1.0, 0.2]), segp("l0", &[("Tonight's", 0, 30, 95), ("weather.", 30, 60, 95)])]);
+        assert_eq!(c.text, "", "another voice starts nothing");
+        // too short to tell (no voice for it): nothing either
+        c.hear(&mut r, &mut st, &[segp("l1", &[("Okay.", 100, 120, 95)])]); assert_eq!(c.text, "");
+        // the person: written at the segment's end
+        let o = r.step(&json!({"event":"hyp","item":"l2","words":[["Add",200,220,95],["a",220,225,95]],"end":230}).to_string(), &mut st, "local"); assert!(!o.iter().any(|x| matches!(x, Out::Edit(_))), "nothing before it is known whose voice it is"); c.take(&r, o);
+        c.hear(&mut r, &mut st, &[voice("l2", [0.9, 0.15, 0.0]), segp("l2", &[("Add", 200, 220, 95), ("a", 220, 225, 95), ("button.", 225, 260, 95)])]); assert_eq!(c.text, "Add a button.");
     }
     #[test] fn the_cloud_engine_cut_mid_segment_counts_the_words_already_sent() {
         let (mut r, mut st, mut c) = (Reader::new(dict(), false, "", 0), Dictation::default(), Cl::new());
