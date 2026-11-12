@@ -678,6 +678,8 @@ object DataClient {
     // the composer's text with its caret, kept per thread: dictation edits it from the hub's frames whether or not the thread is on screen
     private val fields = mutableStateMapOf<String, TextFieldValue>()
     fun field(tid: String): TextFieldValue = fields[tid] ?: TextFieldValue(draft(tid))
+    /** some composer has words in it (the star card waits) */
+    fun typing() = fields.values.any { it.text.isNotBlank() }
     fun setField(tid: String, v: TextFieldValue, typed: Boolean = true) {
         val old = field(tid).text; fields[tid] = v; setDraft(tid, v.text)
         if (typed && old != v.text) DataVoice.typed(tid, old, v.text)
@@ -1008,13 +1010,17 @@ object DataClient {
 
 /** The GitHub star suggestion while the hub says it is out and undecided (feature "star", native/host/src/state/star.rs): from star.offer at every
  *  (re)connect and from a `{"t":"star","offer"}` frame (null hides it). The hub decides when; the app shows exactly this. */
-data class DStarOffer(val token: String, val text: String, val url: String, val label: String) {
+data class DStarOffer(val token: String, val text: String, val url: String, val label: String, val repo: String = "", val why: String = "") {
+    /** where the card says the repository is: the address without its scheme */
+    val place get() = if (repo.isNotEmpty()) "github.com/$repo" else url.removePrefix("https://")
     companion object {
         fun of(o: JSONObject?): DStarOffer? {
             if (o == null) return null
-            val s = DStarOffer(o.optString("token"), o.optString("text"), o.optString("url"), o.optString("label"))
+            val s = DStarOffer(o.optString("token"), o.optString("text"), o.optString("url"), o.optString("label"), o.optString("repo"), o.optString("why"))
             return if (s.token.isNotEmpty() && s.text.isNotEmpty() && s.url.startsWith("https://")) s else null
         }
+        /** The card is drawn at a pause: an offer, no turn running, nothing typed (docs/PHONE-DATA.md, as the desktop's star::due). */
+        fun due(s: DStarOffer?, running: Boolean, typing: Boolean) = s != null && !running && !typing
     }
 }
 

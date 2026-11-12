@@ -1,5 +1,5 @@
 //! The one-time telemetry notice of an install that predates the sender (hub: settings/telemetry.rs, docs/telemetry.md): a strip along the
-//! bottom of the window, above the star strip, while the hub offers it. The hub decides everything: it answers `telemetry.notice` on every
+//! bottom of the window while the hub offers it. The hub decides everything: it answers `telemetry.notice` on every
 //! (re)connect and sends `{"t":"telemetry.notice","notice"}` when it changes (null hides it). Drawing it the first time sends `shown`
 //! (the hub starts sending only once the notice was on a screen); Turn off sends `off`, the close sends `close`; Settings opens Privacy.
 use crate::{hub::Command, screens::settings::Secret, theme, Backplane};

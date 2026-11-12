@@ -99,7 +99,7 @@ impl Policies {
     /// (not for a retry, an agent's mail or a forwarded hub). Returns nothing until the policies have folded the log.
     pub fn star_prompt(&self, msg_id: &str, now_s: u64) -> (Vec<Value>, Option<Value>) { self.policy.star_prompt(msg_id, now_s) }
     /// The star offer every client shows while it is out and undecided (`star::offer`), null otherwise
-    pub fn star_offer(&self) -> Value { self.policy.star_offer() }
+    pub fn star_offer(&self) -> Value { self.policy.star_offer(std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0)) }
     /// Borrow the existing lean fold; no state clone or second log projection. None during boot/resync.
     pub fn with_state<R>(&self, f: impl FnOnce(&crate::state::State) -> R) -> Option<R> { self.policy.with_state(f) }
     /// Watchdog.line: call for every provider line of a thread's agent (the stream-json line as parsed), commit the events it returns
@@ -133,7 +133,8 @@ async fn boot_task(policy: Arc<Policy>, hub: Arc<Hub>, _folding: crate::guard::F
     if !derived.is_empty() && !policy.passive() { let _ = hub.commit_many(&derived).await; }
 }
 
-/// star.nudge {token, action}: the person opened the suggestion or dismissed it (terminal; reliable, so the reply follows the commit); every client
+/// star.nudge {token, action}: the person opened the suggestion, said don't ask again (dismiss; both terminal) or later (a week's snooze; reliable,
+/// so the reply follows the commit); every client
 /// is then told to hide it (`{"t":"star","offer":null}`). star.offer: `{offer}`, what a (re)connecting client shows (`star::offer`).
 struct StarRpc { policy: Arc<Policy> }
 impl RpcHandler for StarRpc {
@@ -146,11 +147,11 @@ impl RpcHandler for StarRpc {
                 let ev = self.policy.star_replay(now);
                 if ev.is_empty() { return vec![serde_json::json!({"t":"reply","id":id,"ok":false,"error":"the hub is still starting"})] }
                 if hub.commit_many(&ev).await.is_err() { return vec![serde_json::json!({"t":"reply","id":id,"ok":false,"error":"store write failed"})] }
-                hub.push_all(&crate::state::fam::star::frame(self.policy.star_offer()));
+                hub.push_all(&crate::state::fam::star::frame(self.policy.star_offer(now)));
                 return vec![serde_json::json!({"t":"reply","id":id,"ok":true})]
             }
-            if method == "star.offer" { return vec![serde_json::json!({"t":"reply","id":id,"ok":true,"result":{"offer":self.policy.star_offer()}})] }
             let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0);
+            if method == "star.offer" { return vec![serde_json::json!({"t":"reply","id":id,"ok":true,"result":{"offer":self.policy.star_offer(now)}})] }
             let ev = self.policy.star_decide(params.get("token").and_then(|v| v.as_str()).unwrap_or(""), params.get("action").and_then(|v| v.as_str()).unwrap_or(""), now);
             if !ev.is_empty() && hub.commit_many(&ev).await.is_err() { return vec![serde_json::json!({"t":"reply","id":id,"ok":false,"error":"store write failed"})] }
             if !ev.is_empty() { hub.push_all(&crate::state::fam::star::frame(Value::Null)); }

@@ -409,12 +409,18 @@ struct DLocks: Decodable { let locks: [DLock] }
 /// when; the app shows exactly this: from star.offer at every (re)connect, and from a `{"t":"star","offer"}` frame (null hides it).
 struct DStarOffer: Codable, Equatable {
     var token: String; var text: String; var url: String; var label: String
+    /// the repository the card names and the line on why stars help (an older hub sends neither)
+    var repo: String?; var why: String?
     var valid: DStarOffer? { !token.isEmpty && !text.isEmpty && url.hasPrefix("https://") ? self : nil }
+    /// where the card says the repository is: the address without its scheme
+    var place: String { if let r = repo, !r.isEmpty { return "github.com/" + r }; return url.hasPrefix("https://") ? String(url.dropFirst(8)) : url }
     static func of(_ o: Any?) -> DStarOffer? {
         guard let d = o as? [String: Any] else { return nil }
         let g = { (k: String) in d[k] as? String ?? "" }
-        return DStarOffer(token: g("token"), text: g("text"), url: g("url"), label: g("label")).valid
+        return DStarOffer(token: g("token"), text: g("text"), url: g("url"), label: g("label"), repo: g("repo"), why: g("why")).valid
     }
+    /// The card is drawn at a pause: an offer, no turn running, nothing typed (docs/PHONE-DATA.md, as the desktop's star::due).
+    static func due(_ s: DStarOffer?, running: Bool, typing: Bool) -> Bool { s != nil && !running && !typing }
 }
 struct DStarReply: Decodable { var offer: DStarOffer? }
 

@@ -65,10 +65,11 @@ On reconnect the app resubscribes and re-reads lists and the open thread (no res
 Viewer, files and browser requests are not here: the lanes adding them in `native/host` (viewers, files, cef) define them; the phones will take them as further features.
 
 ## Star suggestion (feature `star`; `native/host/src/state/star.rs`)
-- After a person's fifth prompt (counted once per hub home: `turn.start`, `bots.say`, `bots.post` from a client, never a retry, blank text or agent mail) the hub offers a GitHub star.
-- `star.offer` → `{offer}`: `null`, or `{token, text, url, label}` while the offer is out and undecided. Ask it on every (re)connect.
-- Frame `{"t":"star","offer":…}`: to the prompting socket when the offer is made, and `offer:null` to every socket once it is decided (hide the banner).
-- `star.nudge {token, action: open|dismiss}` → `{}`: final. `open` also opens `url`. The desktop shows the same strip from the same frames.
+- After a person's fifth prompt, or a prompt three days after their first with at least two counted (counted once per hub home: `turn.start`, `bots.say`, `bots.post` from a client, never a retry, blank text or agent mail) the hub offers a GitHub star.
+- `star.offer` → `{offer}`: `null`, or `{token, text, url, label, repo, why}` while the offer is out and undecided. Ask it on every (re)connect.
+- Frame `{"t":"star","offer":…}`: to the prompting socket when the offer is made (or when a snoozed one is out again, at the next prompt), and `offer:null` to every socket once it is decided (hide the card).
+- `star.nudge {token, action: open|dismiss|later}` → `{}`. `open` (Star on GitHub, which also opens `url`) and `dismiss` (Don't ask again) are final; `later` hides it for a week, then `star.offer` answers it again under the same token.
+- Shown as a card centred over the app: `text` as its title, `repo`, `why`, a large Star on GitHub button, then Later and Don't ask again. It waits (`star::due` on the desktop, the same rule on the phones) while the thread on screen runs a turn, while the composer has text, and during setup, so it comes after a turn has ended.
 
 ## Telemetry notice (feature `telemetryNotice`)
 - A one-time strip saying what anonymous usage the hub sends, with Turn off, Settings and a close ✕. Only when the hello's `features` has `telemetryNotice`.

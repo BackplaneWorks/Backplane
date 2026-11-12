@@ -146,22 +146,29 @@ struct DataTelemetryBanner: View {
     }
 }
 
-/// The GitHub star suggestion (DataClient.star), one line: the link opens the page and decides open; Dismiss decides dismiss.
+/// The GitHub star suggestion (DataClient.star): a large card along the top with the hub's title, the repository, why stars help, a large Star on
+/// GitHub (opens the page, decides open), Later (a week, decides later) and Don't ask again (decides dismiss). It waits for a pause (DStarOffer.due).
 struct DataStarBanner: View {
     let client: DataClient
     @Environment(\.openURL) private var openURL
     var body: some View {
-        if let s = client.star {
-            VStack(spacing: 0) {
+        if let s = client.star, DStarOffer.due(s, running: client.threads.contains { $0.state == "working" || $0.state == "asking" }, typing: client.drafts.values.contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 10) {
+                    Image(systemName: "star.fill").font(.system(size: 22)).foregroundStyle(BackplaneDesign.accent)
+                    Text(Tr.t(s.text)).dmono(16, bold: true).foregroundStyle(BackplaneDesign.text)
+                }
+                Text(s.place).dmono(12).foregroundStyle(BackplaneDesign.faint)
+                if let w = s.why, !w.isEmpty { Text(Tr.t(w)).dmono(13).foregroundStyle(BackplaneDesign.dim).fixedSize(horizontal: false, vertical: true) }
+                Button { if let u = URL(string: s.url) { openURL(u) }; client.starDecide("open") } label: {
+                    HStack(spacing: 8) { Image(systemName: "star.fill"); Text(Tr.t(s.label.isEmpty ? "Star on GitHub" : s.label)).dmono(15, bold: true) }
+                        .frame(maxWidth: .infinity, minHeight: 46).foregroundStyle(BackplaneDesign.onAccent).background(BackplaneDesign.accent)
+                }.buttonStyle(.plain).accessibilityIdentifier("star.open")
                 HStack(spacing: 8) {
-                    Text(Tr.t(s.text)).dmono(12).foregroundStyle(BackplaneDesign.text).lineLimit(2)
-                    Spacer(minLength: 0)
-                    Button(Tr.t(s.label.isEmpty ? "Star on GitHub" : s.label)) { if let u = URL(string: s.url) { openURL(u) }; client.starDecide("open") }
-                        .buttonStyle(DButton(primary: true)).accessibilityIdentifier("star.open")
-                    Button(Tr.t("Dismiss")) { client.starDecide("dismiss") }.dmono(12).foregroundStyle(BackplaneDesign.dim).accessibilityIdentifier("star.dismiss")
-                }.padding(.horizontal, 12).padding(.vertical, 6).background(BackplaneDesign.raised)
-                DLine()
-            }
+                    Button(Tr.t("Later")) { client.starDecide("later") }.buttonStyle(DButton()).frame(maxWidth: .infinity).accessibilityIdentifier("star.later")
+                    Button(Tr.t("Don't ask again")) { client.starDecide("dismiss") }.buttonStyle(DButton()).frame(maxWidth: .infinity).accessibilityIdentifier("star.dismiss")
+                }
+            }.padding(16).background(BackplaneDesign.raised).overlay(Rectangle().stroke(BackplaneDesign.accent, lineWidth: 1)).padding(8)
         }
     }
 }

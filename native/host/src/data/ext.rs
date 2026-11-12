@@ -277,8 +277,8 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Re
             "work-cancel" => rpc(hub, c, "work.cancel", json!({"thread":th,"id":v})).await.map(|_| json!({})),
             "task-stop" => rpc(hub, c, "task.stop", json!({"thread":th,"id":v})).await.map(|_| json!({})),
             _ => Err(err("act: lock-release, lock-cancel, work-cancel or task-stop")) } }
-        // feature "star": the GitHub star suggestion. `star.offer` → `{offer}` (null, or {token,text,url,label}) on (re)connect; a `{"t":"star","offer"}` frame shows it
-        // (to this socket, at the fifth prompt) or hides it (every socket, once decided); `star.nudge {token, action: open|dismiss}` → `{}`
+        // feature "star": the GitHub star suggestion. `star.offer` → `{offer}` (null, or {token,text,url,label,repo,why}) on (re)connect; a `{"t":"star","offer"}` frame shows it
+        // (to this socket, at the fifth prompt) or hides it (every socket, once decided); `star.nudge {token, action: open|dismiss|later}` → `{}`
         "star.offer" => rpc(hub, c, "star.offer", json!({})).await.map(|r| r["result"].clone()),
         "star.nudge" => rpc(hub, c, "star.nudge", json!({"token":s(p, "token"),"action":s(p, "action")})).await.map(|_| json!({})),
         // the one-time telemetry notice (settings/telemetry.rs): asked on (re)connect; "shown" once it is drawn, "close", "off"

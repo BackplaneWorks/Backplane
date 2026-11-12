@@ -2263,6 +2263,8 @@ gpui.inactive = 休止中
 gpui.stalled = 停滞
 gpui.the.right.spelling = 正しい綴り
 gpui.star.on.github = GitHubでスターを付ける
+gpui.star.dont.ask = 今後表示しない
+gpui.star.why = スターは、ほかのハードウェア設計者がBackplaneを見つける助けになり、私たちが何を作り続けるべきかを知る手がかりにもなります。
 
 # ---- gpui-e: hub settings and panels ----
 gpui.e.files.max.mb = 添付の上限（MB）
