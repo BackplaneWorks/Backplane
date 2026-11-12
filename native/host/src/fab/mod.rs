@@ -137,7 +137,8 @@ impl RpcHandler for Rpc {
             if sv(p, "action") != "get" && !sv(p, "action").is_empty() && crate::copy::on() { return vec![json!({"t":"reply","id":id,"ok":false,"error":crate::copy::HOME_ONLY})] }
             // the panel names the project by its .kicad_pro
             let pro = sv(p, "pro");
-            let r = if pro.is_empty() { act(hub, sv(p, "thread"), sv(p, "project"), p).await } else { match panel::root_of_pro(hub, pro).await { Some(root) => act_in(hub, Some(root), p).await, None => Err("not in a project this hub knows".into()) } };
+            let r = if !pro.is_empty() && sv(p, "action") == "review" { panel::review(hub, pro).await }
+                else if pro.is_empty() { act(hub, sv(p, "thread"), sv(p, "project"), p).await } else { match panel::root_of_pro(hub, pro).await { Some(root) => act_in(hub, Some(root), p).await, None => Err("not in a project this hub knows".into()) } };
             if !pro.is_empty() && r.is_ok() { panel::publish(hub, pro).await }
             vec![match r { Ok(v) => json!({"t":"reply","id":id,"ok":true,"result":v}), Err(e) => json!({"t":"reply","id":id,"ok":false,"error":e}) }]
         })

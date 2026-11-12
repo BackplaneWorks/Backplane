@@ -53,9 +53,27 @@ pub async fn publish(hub: &Arc<Hub>, pro: &str) {
     let Some(root) = root_of_pro(hub, pro).await else { return };
     crate::review::policy::watch(&root); // a shown design is reviewed on save
     let home = hub.cfg.home.clone();
-    let v = tokio::task::spawn_blocking(move || super::view_in(&home, Some(&root))).await;
-    let d = match v { Ok(Ok(v)) => data(&v), Ok(Err(e)) => json!({"badge": {"n": 0, "tone": ""}, "error": e}), Err(_) => return };
+    let r0 = root.clone(); let v = tokio::task::spawn_blocking(move || super::view_in(&home, Some(&r0))).await;
+    let mut d = match v { Ok(Ok(v)) => data(&v), Ok(Err(e)) => json!({"badge": {"n": 0, "tone": ""}, "error": e}), Err(_) => return };
+    // the design review's last run: its verdict and counts (its findings are in the Checks list)
+    let r2 = root.clone(); d["review"] = tokio::task::spawn_blocking(move || crate::review::last(&r2)).await.unwrap_or(Value::Null);
+    d["review"]["running"] = json!(REVIEWING.lock().unwrap().contains(&root));
     mgmt::publish(hub, "fab", pro, d).await;
+}
+/// The projects whose design review the panel started and is running now.
+pub static REVIEWING: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
+/// The panel's Run review: a full review in the background, the panel published when it starts and when it ends.
+pub async fn review(hub: &Arc<Hub>, pro: &str) -> Result<Value, String> {
+    let root = root_of_pro(hub, pro).await.ok_or("not in a project this hub knows")?;
+    { let mut r = REVIEWING.lock().unwrap(); if r.contains(&root) { return Ok(json!({"running": true})) } r.push(root.clone()) }
+    let (h, p, r) = (hub.clone(), pro.to_string(), root.clone());
+    tokio::spawn(async move {
+        let out = crate::review::run(&h, &r, "full").await;
+        REVIEWING.lock().unwrap().retain(|x| x != &r);
+        if let Err(e) = out { eprintln!("review: {e}") }
+        publish(&h, &p).await;
+    });
+    Ok(json!({"running": true}))
 }
 /// Publish again for every project shown on that fab (after a gather changed it).
 pub async fn publish_all(hub: &Arc<Hub>) {
