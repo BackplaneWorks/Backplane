@@ -21,14 +21,17 @@ SUITES=(
   "embed_xprobe_e2e.sh:xprobe"
   "embed_bp9_e2e.sh:bp9"
   "embed_checks_e2e.sh:checks"
+  # the editor row on a schematic every load must repair (test/files/fixtures/broken-toplevel, the shape of the person's Hubble_DK after a
+  # bp.11 headless save): Board -> Schematic must draw (bp.11/bp.12-pre hung behind a hidden "automatically fixed" modal). Fork mode only.
+  "embed_ux_e2e.sh:ux-broken-toplevel:KEMBED_PROJ_SRC=$REPO_ROOT/test/files/fixtures/broken-toplevel"
 )
 
 FAILED=0
 for entry in "${SUITES[@]}"; do
-  script=${entry%%:*}
-  tag=${entry##*:}
-  echo "=== Running $script (EMBED_MODE=${EMBED_MODE:-spike}) -> $OUT_ROOT/$tag ==="
-  if OUT="$OUT_ROOT/$tag" "$HERE/$script"; then
+  IFS=: read -r script tag extra <<<"$entry"
+  if [ -n "$extra" ] && [ "${EMBED_MODE:-spike}" != "fork" ]; then echo "=== SKIP $tag (fork mode only) ==="; continue; fi
+  echo "=== Running $script${extra:+ ($extra)} (EMBED_MODE=${EMBED_MODE:-spike}) -> $OUT_ROOT/$tag ==="
+  if env ${extra:+"$extra"} OUT="$OUT_ROOT/$tag" "$HERE/$script"; then
     echo "=== OK $script ==="
   else
     echo "=== FAILED $script ==="
