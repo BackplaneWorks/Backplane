@@ -94,6 +94,7 @@ pub fn answered(app: &mut Backplane, id: u64, reply: &Value, cx: &mut Context<Ba
     if reply["ok"] == false { app.screens.mgmt.error = crate::hub::rpc_error(reply); }
     if let Some(d) = r["digest"].as_str() { app.screens.mgmt.digest = d.to_string(); app.screens.mgmt.project = r["project"].as_str().unwrap_or(&app.screens.mgmt.asked).to_string(); }
     if let (Some(d), true) = (r["digest"].as_str(), r["state"].is_object()) { app.screens.mgmt.infos.entry(format!("mgmt.state.{d}")).or_insert(r["state"].clone()); }
+    if let (Some(d), Some(data)) = (r["digest"].as_str(), r["data"].as_object()) { for (id, v) in data { app.screens.mgmt.infos.entry(format!("mgmt.{id}.{d}")).or_insert(v.clone()); } }
     cx.notify(); true
 }
 /// A change of the panel state, sent to the hub and drawn at once.
