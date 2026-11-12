@@ -59,6 +59,11 @@ marked section, merged, never overwritten:
 - Clearance is written only between net classes whose own clearance is under the fab's, so no net class is ever loosened.
 - The person's rules that allow less than the fab are listed in `drc.conflicts`, never changed.
 - `tier` (picked with the project, default `free`) chooses the base-price limits or what the fab makes for more.
+- A suggestion the person approves is applied by the Fab panel's Apply (`fab.profile {pro, action: "apply", key}`; agents are refused
+  and name it instead, `fab/setup.rs`): one board minimum raised to the fab's through KiCad's API (GetBoardDesignRules, then
+  SetBoardDesignRules with the constraints alone, never lowering one). With the person's KiCad up it is set there and they save the
+  board (KiCad keeps design rules out of its undo history: the answer says what it was); otherwise the project's headless KiCad sets
+  and saves it, only while no thread holds the board's lock.
 - A pick regenerates a section that is already there. The view's `drc` says `{file, present, current, suggestions, conflicts}`.
 - Everything in the section loads in stock KiCad: `test/fab/stock_drc.sh [kicad-cli] [demo project]` writes it for each board kind
   and tier into a copy of a KiCad demo with a sentinel rule after it and runs stock `kicad-cli pcb drc` (KiCad drops a whole rules file
@@ -82,3 +87,17 @@ before the number, which number after them, a factor for a mil or a ring). More 
   values are the bundled baseline's; a changed page changes the value and the revision; a missing page or row keeps the old.
   `fab_gather_live_refresh` (ignored; `FAB_LIVE_HOME=<temp home>`) runs a real one by hand: on 2026-11-12, 121 values read, none
   missing, none different from the baseline.
+
+## The Fab panel (`fab/panel.rs`)
+
+A management panel beside the design (docs/MANAGEMENT.md), info `mgmt.fab.<digest>`: `{badge, fab, rev, updated, by, tier, board,
+gathered, missing, drc: {state: current|stale|none|noproject, file}, suggestions, conflicts, changed, limits: [{key, label, free: {text,
+source, fetched, confidence, note}, extra, changed, inherited}], stackups}`. The badge counts conflicts (bad), suggestions, changes since
+the project last looked and a stale section (warnings). Its buttons are `fab.profile {pro, action}` (`drc`, `apply` with `key`, `seen`,
+`refresh`); the hub publishes the panel again after each, and after a gather that changed a profile.
+
+## The review prompt
+
+The manufacturing review (`agents/prompt_text.rs`, `ORDER_PROMPT_REVIEW`) takes the fab's limits from `fab_profile`, not from numbers of
+its own. Where Backplane recommends more than the fab's limit (tracks and gaps 0.127 mm, vias a 0.3 mm hole in a 0.45 mm pad, copper
+0.3 mm from the edge) a design between the two is a note, not a must-change.

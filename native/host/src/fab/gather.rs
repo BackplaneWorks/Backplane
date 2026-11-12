@@ -228,6 +228,12 @@ pub const JLCPCB: Adapter = Adapter { fab: "jlcpcb", stackups: Some("impedance")
     r!("assembly", "assembly economic", "qty_min", "free", "{}", After("Order Volume", 1, "", 0)),
     r!("assembly", "assembly economic", "qty_max", "free", "{}", After("Order Volume", 1, "", 1)),
     r!("assembly", "assembly standard", "qty_min", "free", "{}", After("Order Volume", 2, "", 0)),
+    r!("assembly", "assembly economic", "board_min", "free", "{}", After("Dimension", 2, "", 0)),
+    r!("assembly", "assembly economic", "board_max_x", "free", "{}", After("Dimension", 2, "", 2)),
+    r!("assembly", "assembly economic", "board_max_y", "free", "{}", After("Dimension", 2, "", 3)),
+    r!("assembly", "assembly standard", "board_min", "free", "{}", After("Dimension", 6, "", 0)),
+    r!("assembly", "assembly standard", "board_max_x", "free", "{}", After("Dimension", 6, "", 2)),
+    r!("assembly", "assembly standard", "board_max_y", "free", "{}", After("Dimension", 6, "", 3)),
     r!("assembly", "assembly economic", "thickness_min", "free", "{}", After("Thickness", 1, "", 0)),
     r!("assembly", "assembly economic", "thickness_max", "free", "{}", After("Thickness", 1, "", 1)),
 ]};
@@ -410,6 +416,7 @@ pub async fn refresh_said(hub: &Arc<crate::hub::Hub>, fab: &str) -> Result<Value
         let keys: Vec<String> = rep.changes.iter().map(|c| c.key.clone()).collect(); let fab2 = fab.to_string();
         let projects = tokio::task::spawn_blocking(move || roots.into_iter().filter(|(_, r)| { let c = super::choice(Path::new(r)); c.fab == fab2 }).map(|(id, _)| id).collect::<Vec<_>>()).await.unwrap_or_default();
         hub.push_all(&json!({"t": "fab.changed", "fab": fab, "rev": p.rev, "changes": rep.changes.iter().map(Change::line).collect::<Vec<_>>(), "keys": keys, "projects": projects}));
+        super::panel::publish_all(hub).await;
     }
     Ok(json!({"fab": fab, "rev": p.rev, "updated": p.updated, "report": rep.json()}))
 }
