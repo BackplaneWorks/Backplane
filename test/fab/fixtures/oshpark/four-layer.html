@@ -1,0 +1,597 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+ <meta charset="utf-8">
+ <meta content="width=device-width, initial-scale=1.0" name="viewport">
+ <meta content="IE=edge,chrome=1" http-equiv="X-UA-Compatible">
+ <title>OSH Park Docs ~ Services ~ 4 Layer Prototype Service</title>
+ <meta content="" name="description">
+ <meta content="" name="author">
+ <link href="/assets/images/favicon.ico" rel="shortcut icon">
+ <link href="/assets/images/apple-touch-icon.png" rel="apple-touch-icon">
+ <link href="/assets/stylesheets/application.css" media="screen" rel="stylesheet">
+ <meta content="authenticity_token" name="csrf-param">
+ <meta content="12XONXZi8eSbg5TwpjoRGe3S1OlO1QCB+wibb4I1+WTCI2fGLcFRQKJKyyZbReUR7HoNyxA6N6EL08iAiJvTAw==" name="csrf-token">
+</head>
+<body>
+ <div class="off-canvas-wrapper">
+ <div class="off-canvas-wrapper-inner" data-off-canvas-wrapper>
+ <div class="off-canvas-content" data-off-canvas-content>
+<nav class="top-bar hide-for-small-only" id="user-panel" role="navigation">
+ <div class="row columns small-12">
+ <div class="top-bar--left">
+ <ul class="menu">
+ <li><a href="https://oshpark.com/"><span class='logo'>OSH<b>PARK</b></span></a></li>
+ <li><a href="/services/">Services</a></li>
+<li><a href="/">Support</a></li>
+ </ul>
+ </div>
+ <div class="top-bar--right ">
+ <div id="breadcrumbs" class='row small-12 columns'>
+ <ul class="breadcrumbs">
+<li><a href="/">OSH Park Docs</a></li>
+ <li><a href="/services/">Fabrication Services</a></li>
+ <li><a href="/services/four-layer/">4 Layer Prototype Service</a></li>
+</ul>
+ </div>
+ </div>
+ </div>
+</nav>
+<nav class="title-bar hide-for-medium" data-responsive-toggle="widemenu" data-hide-for="medium">
+ <div class="title-bar-left">
+ <button class="menu-icon" type="button" data-toggle="offCanvasLeft"></button>
+ <span class="title-bar-title">
+ <ul class="menu">
+ <li><a href="https://oshpark.com/"><span class='logo'>OSH<b>PARK</b></span></a></li>
+ </ul>
+ </span>
+ </div>
+</nav>
+<div class="off-canvas position-left" id="offCanvasLeft" data-off-canvas>
+ <ul class="vertical dropdown menu" data-dropdown-menu>
+ <li><a href="/services/">Services</a></li>
+<li><a href="/">Support</a></li>
+ </ul>
+</div>
+ <div class="home" id="content">
+<img src="/images/services/hero-twolayer.jpg" class="hero"/>
+<div class="row small-12 columns"><ul class="breadcrumbs show-for-small-only breadcrumbs__small">
+<li><a href="/">OSH Park Docs</a></li>
+ <li><a href="/services/">Fabrication Services</a></li>
+ <li><a href="/services/four-layer/">4 Layer Prototype Service</a></li>
+</ul>
+</div>
+<div class='row small-12 columns'>
+ <h1 class="top-header">
+ 4 Layer Prototype Service
+ </h1>
+ <div class="content">
+<h2 id="pricing">Pricing</h2>
+<p>$10 per square inch, which includes three copies of your design.</p>
+<p>For example, a 2 square inch board would cost $20 and you’d get three copies of your board. You can order as many copies as you want, as long as they’re in multiples of three.</p>
+<h2 id="turn-times">Turn Times</h2>
+<p>Orders will ship within 9-14 calendar days of ordering.</p>
+<p>You can get a quote, approve a design, and pay for an order at <a href="https://oshpark.com/">OSH Park</a>.</p>
+<p>For a faster turn time, you may be interested in our <a href="/services/four-layer-swift">4 Layer Super Swift Service</a>.</p>
+<p>Need more than 100 square inches of boards? Our <a href="/services/four-layer-medium-run/">4 Layer Medium Run Service</a> is a less expensive option for larger orders.</p>
+<h2 id="common-specs">Common Specs</h2>
+<p>These specs apply to all our PCB services.</p>
+<table>
+ <thead>
+ <tr>
+ <th>Spec</th>
+ <th>Value</th>
+ <th> </th>
+ </tr>
+ </thead>
+ <tbody>
+ <tr>
+ <td>Manufactured in the United States</td>
+ <td>Yes</td>
+ <td> </td>
+ </tr>
+ <tr>
+ <td>Lead Free compatible</td>
+ <td>Yes</td>
+ <td> </td>
+ </tr>
+ <tr>
+ <td>RoHS Compliant</td>
+ <td>Yes</td>
+ <td> </td>
+ </tr>
+ <tr>
+ <td>REACH Compliant</td>
+ <td>Yes</td>
+ <td> </td>
+ </tr>
+ <tr>
+ <td>High Temp</td>
+ <td>Yes, 175 Tg or higher (see Material Specs)</td>
+ <td> </td>
+ </tr>
+ <tr>
+ <td>PCB Finish</td>
+ <td>ENIG (Gold), compliant with IPC-4552</td>
+ <td> </td>
+ </tr>
+ <tr>
+ <td>Soldermask Type</td>
+ <td>SMOBC (Soldermask Over Bare Copper), both sides</td>
+ <td> </td>
+ </tr>
+ <tr>
+ <td>Silkscreen Type</td>
+ <td>High Res DLP, both sides</td>
+ <td> </td>
+ </tr>
+ <tr>
+ <td>Flammability Rating</td>
+ <td>UL 94 V-0</td>
+ <td> </td>
+ </tr>
+ </tbody>
+</table>
+<h3 id="stackup">Stackup</h3>
+<table>
+ <thead>
+ <tr>
+ <th style="text-align: left">Thickness</th>
+ <th style="text-align: left">Layer</th>
+ <th style="text-align: left">Tolerance</th>
+ <th>dk</th>
+ </tr>
+ </thead>
+ <tbody>
+ <tr>
+ <td style="text-align: left">0.6 mil (0.0152mm)</td>
+ <td style="text-align: left"><span style="display:inline-block;width:2em;background:#EEEEEE;"> </span> silkscreen</td>
+ <td style="text-align: left">+/-0.2mil (0.00508mm)</td>
+ <td> </td>
+ </tr>
+ <tr>
+ <td style="text-align: left">0.6 mil (0.0152mm)</td>
+ <td style="text-align: left"><span style="display:inline-block;width:2em;background:#4E1D5E;"> </span> solder resist</td>
+ <td style="text-align: left">+/-0.2mil (0.0051mm)</td>
+ <td> </td>
+ </tr>
+ <tr>
+ <td style="text-align: left">1.7 mil (0.0432mm)</td>
+ <td style="text-align: left"><span style="display:inline-block;width:2em;background:#CE9172;"> </span> 1 oz copper clad+plated</td>
+ <td style="text-align: left"> </td>
+ <td> </td>
+ </tr>
+ <tr>
+ <td style="text-align: left">7.87 mil (0.1999mm)</td>
+ <td style="text-align: left"><span style="display:inline-block;width:2em;background:#CCCCCC;"> </span> FR408HR 2113 prepreg</td>
+ <td style="text-align: left">+/-.797mil (0.0202mm)</td>
+ <td>3.61 at 1GHz</td>
+ </tr>
+ <tr>
+ <td style="text-align: left">0.68 mil (0.0175mm)</td>
+ <td style="text-align: left"><span style="display:inline-block;width:2em;background:#CE9172;"> </span> 0.5 oz copper clad</td>
+ <td style="text-align: left"> </td>
+ <td> </td>
+ </tr>
+ <tr>
+ <td style="text-align: left">39 mil (0.9906mm)</td>
+ <td style="text-align: left"><span style="display:inline-block;width:2em;background:#CCCCCC;"> </span><br /><span style="display:inline-block;width:2em;background:#CCCCCC;"> </span> FR408HR core<br /><span style="display:inline-block;width:2em;background:#CCCCCC;"> </span></td>
+ <td style="text-align: left">+/-3.9mil (0.0991mm)</td>
+ <td> </td>
+ </tr>
+ <tr>
+ <td style="text-align: left">0.68 mil (0.0175mm)</td>
+ <td style="text-align: left"><span style="display:inline-block;width:2em;background:#CE9172;"> </span> 0.5 oz copper clad</td>
+ <td style="text-align: left"> </td>
+ <td> </td>
+ </tr>
+ <tr>
+ <td style="text-align: left">7.87 mil (0.1999mm)</td>
+ <td style="text-align: left"><span style="display:inline-block;width:2em;background:#CCCCCC;"> </span> FR408HR 2113 prepreg</td>
+ <td style="text-align: left">+/-.797mil (0.0202mm)</td>
+ <td>3.61 at 1GHz</td>
+ </tr>
+ <tr>
+ <td style="text-align: left">1.7 mil (0.0432mm)</td>
+ <td style="text-align: left"><span style="display:inline-block;width:2em;background:#CE9172;"> </span> 1 oz copper clad+plated</td>
+ <td style="text-align: left"> </td>
+ <td> </td>
+ </tr>
+ <tr>
+ <td style="text-align: left">0.6 mil (0.0152mm)</td>
+ <td style="text-align: left"><span style="display:inline-block;width:2em;background:#4E1D5E;"> </span> solder resist</td>
+ <td style="text-align: left">+/-0.2mil (0.0051mm)</td>
+ <td> </td>
+ </tr>
+ <tr>
+ <td style="text-align: left">0.6 mil (0.0152mm)</td>
+ <td style="text-align: left"><span style="display:inline-block;width:2em;background:#EEEEEE;"> </span> silkscreen</td>
+ <td style="text-align: left">+/-0.2mil (0.00508mm)</td>
+ <td> </td>
+ </tr>
+ </tbody>
+</table>
+<p><a href="/resources/four-layer-stackup.png">Complete construction diagram</a></p>
+<p><a href="/resources/four-layer-impedance-table.png">Impedance Constraint Table</a></p>
+<h2 id="material-specs">Material Specs</h2>
+<table>
+ <thead>
+ <tr>
+ <th>Spec</th>
+ <th>Value</th>
+ <th> </th>
+ </tr>
+ </thead>
+ <tbody>
+ <tr>
+ <td>Substrate</td>
+ <td>190Tg FR408-HR</td>
+ <td><a href="/resources/four-layer-substrate-FR408HR.pdf">ISOLA FR408-HR Datasheet PDF</a></td>
+ </tr>
+ <tr>
+ <td>Board Thickness</td>
+ <td>63mil (1.6mm) nominal</td>
+ <td> </td>
+ </tr>
+ <tr>
+ <td>Dielectric</td>
+ <td>3.61 at 1GHz</td>
+ <td> </td>
+ </tr>
+ <tr>
+ <td>Soldermask Color</td>
+ <td>Purple</td>
+ <td><a href="/resources/rigid-soldermask-taiyo-PSR-4000BN.pdf">Mask Datasheet</a></td>
+ </tr>
+ <tr>
+ <td>Minimum soldermask web</td>
+ <td>4 mil (0.1016mm)</td>
+ <td> </td>
+ </tr>
+ <tr>
+ <td>Maximum soldermask alignment</td>
+ <td>3mil (0.0762mm)</td>
+ <td>Covers retraction, expansion, and shift</td>
+ </tr>
+ <tr>
+ <td>Silkscreen minimum line width</td>
+ <td>5 mil (0.127mm) (recommended minimum) <br />3 mil (0.0762mm) (short lines, text, graphics)</td>
+ <td><a href="/resources/rigid-silkscreen-Taiyo-PSR-4100WL-HD.pdf">Silkscreen Datasheet</a></td>
+ </tr>
+ <tr>
+ <td>Maximum board size</td>
+ <td>16in (406.4mm) by 22in (558.8mm)</td>
+ <td> </td>
+ </tr>
+ <tr>
+ <td>Minimum board size</td>
+ <td>0.25in (6.35mm) by 0.25in (6.35mm)</td>
+ <td> </td>
+ </tr>
+ </tbody>
+</table>
+<h2 id="copper-specifications">Copper Specifications</h2>
+<table>
+ <thead>
+ <tr>
+ <th>Spec</th>
+ <th>Value</th>
+ <th> </th>
+ </tr>
+ </thead>
+ <tbody>
+ <tr>
+ <td>Copper Layers</td>
+ <td>4</td>
+ <td> </td>
+ </tr>
+ <tr>
+ <td>Copper Weight</td>
+ <td>1oz outer<br />1/2oz inner</td>
+ <td> </td>
+ </tr>
+ <tr>
+ <td>Trace Spacing</td>
+ <td>5mil (0.127mm)</td>
+ <td> </td>
+ </tr>
+ <tr>
+ <td>Trace Width</td>
+ <td>5mil (0.127mm)</td>
+ <td> </td>
+ </tr>
+ <tr>
+ <td>Annular Ring</td>
+ <td>4mil (0.1016mm)</td>
+ <td> </td>
+ </tr>
+ <tr>
+ <td>Board Edge Keepout</td>
+ <td>15mil (0.381) from nominal board edge</td>
+ <td> </td>
+ </tr>
+ <tr>
+ <td>Via Plating Thickness</td>
+ <td>1mil (0.0254mm)</td>
+ <td> </td>
+ </tr>
+ <tr>
+ <td>Plated Drill to Internal Layer Copper Clearance</td>
+ <td>10mil (0.254mm)</td>
+ <td> </td>
+ </tr>
+ </tbody>
+</table>
+<h2 id="drill-specifications">Drill Specifications</h2>
+<table>
+ <thead>
+ <tr>
+ <th>Spec</th>
+ <th>Value</th>
+ <th> </th>
+ </tr>
+ </thead>
+ <tbody>
+ <tr>
+ <td>Minimum Annular Ring</td>
+ <td>4mil (0.1016mm)</td>
+ <td> </td>
+ </tr>
+ <tr>
+ <td>Minimum Drill Size</td>
+ <td>10mil (0.254mm)</td>
+ <td> </td>
+ </tr>
+ <tr>
+ <td>Minimum Slot Size</td>
+ <td>20mil (0.508mm) (drill slot only)</td>
+ <td><a href="/submitting-orders/slots/">Additional information on slots</a></td>
+ </tr>
+ <tr>
+ <td>Milling tool diameter</td>
+ <td>Outline/profile milling: 0.068” (1.72mm)<br />Interior/cutout milling: 0.040” (1.01mm)</td>
+ <td><a href="/submitting-orders/board-outline/">Additional outline/profile detail</a></td>
+ </tr>
+ <tr>
+ <td>Drill Size tolerance</td>
+ <td>Max: +/- 2.5mil (0.0635mm) <br />Typical: +/- 1.0mil (0.0254)</td>
+ <td> </td>
+ </tr>
+ <tr>
+ <td>Drill Positional Tolerance</td>
+ <td>Max: 2mil (0.0508mm) <br />Typical: &lt;1mil (0.0254mm)</td>
+ <td> </td>
+ </tr>
+ <tr>
+ <td>Via Tenting</td>
+ <td>Yes (filled hole and flat surface not guaranteed)</td>
+ <td> </td>
+ </tr>
+ <tr>
+ <td>Buried Via</td>
+ <td>No</td>
+ <td> </td>
+ </tr>
+ <tr>
+ <td>Blind Via</td>
+ <td>No</td>
+ <td> </td>
+ </tr>
+ <tr>
+ <td>Filled+Plated Vias (via-in-pad)</td>
+ <td>No</td>
+ <td> </td>
+ </tr>
+ <tr>
+ <td>Overlapping drills</td>
+ <td>Allowed, but not guaranteed. May result in missing or slotted holes. <br /> 5 mil (0.127mm) clearance is recommended between holes.</td>
+ <td> </td>
+ </tr>
+ <tr>
+ <td>Castellations</td>
+ <td>Allowed, but not guaranteed</td>
+ <td><a href="/tips+tricks/castellation/">Details and recommendations</a></td>
+ </tr>
+ <tr>
+ <td>Maximum Drill Size</td>
+ <td>None</td>
+ <td>Drill sizes above 250mil (6.35mm) will be fabbed, but with larger milling tolerances.</td>
+ </tr>
+ <tr>
+ <td>Plated Drill to Internal Layer Copper Clearance</td>
+ <td>10mil (0.254mm)</td>
+ <td> </td>
+ </tr>
+ </tbody>
+</table>
+<h3 id="outgassing">Outgassing</h3>
+<table>
+ <thead>
+ <tr>
+ <th>Material</th>
+ <th>TML %</th>
+ <th>CVCM %</th>
+ <th>WVR %</th>
+ </tr>
+ </thead>
+ <tbody>
+ <tr>
+ <td>FR408HR</td>
+ <td>0.11%</td>
+ <td>0.01%</td>
+ <td>0.10%</td>
+ </tr>
+ </tbody>
+</table>
+<p><a href="https://www.isola-group.com/wp-content/uploads/Outgassing-Data-041224.pdf">Isola Outgassing documentation</a></p>
+<h3 id="layer-naming">Layer Naming</h3>
+<p>We automatically detect intended layer order from many tools, using
+common naming conventions and meta-data formats like Gerber X2.
+In most cases, renaming files should not be needed, and you 
+can use your default export settings.</p>
+<p>If your tool or files requires configuration or manual renaming 
+of layers, we suggest this pattern to ensure your layer order
+is interpreted correctly.</p>
+<table>
+ <thead>
+ <tr>
+ <th style="text-align: left">Layer</th>
+ <th style="text-align: left">Suggested File Extension</th>
+ <th style="text-align: left"> </th>
+ </tr>
+ </thead>
+ <tbody>
+ <tr>
+ <td style="text-align: left">Layer 1</td>
+ <td style="text-align: left">.GTL</td>
+ <td style="text-align: left">Top or Front layer</td>
+ </tr>
+ <tr>
+ <td style="text-align: left">Layer 2</td>
+ <td style="text-align: left">.G2L</td>
+ <td style="text-align: left">Internal layer (adjacent to Top)</td>
+ </tr>
+ <tr>
+ <td style="text-align: left">Layer 3</td>
+ <td style="text-align: left">.G3L</td>
+ <td style="text-align: left">Internal layer (adjacent to Bottom)</td>
+ </tr>
+ <tr>
+ <td style="text-align: left">Layer 4</td>
+ <td style="text-align: left">.GBL</td>
+ <td style="text-align: left">Bottom or Back layer</td>
+ </tr>
+ </tbody>
+</table>
+<p>For additional info or other layers, see our 
+<a href="/troubleshooting/naming-pattern/">Suggested Naming Pattern</a></p>
+<h3 id="internal-plane-polarity">Internal Plane Polarity</h3>
+<p>When submitting gerbers, we need the “positive” internal planes,
+meaning that lines represent copper, not the absence of copper.</p>
+<p>Some CAD tools will generate the internal planes as power planes 
+with “negative” polarity so the lines indicate where copper should
+be removed. To work around this, declare the internal planes
+as signal layers and use a copper pour to define the power plane.</p>
+<p>In most cases, our software will detect and resolve this automatically during 
+our pre-production steps.</p>
+<p>Take a look at our <a href="/troubleshooting/inverted-gerbers/">Positive and Negative Gerbers</a>
+page for more information.</p>
+<h3 id="drill-internal-layer-clearance">Drill Internal Layer Clearance</h3>
+<p>Some tools will often suppress annular rings on vias that do not connect to internal layers. However, this may not accurately capture required production specs, leading to inadvertent spec violations. While these violations do not always result in issues, they can lead to surprising defects and yield issues.</p>
+<p>This DRC requirement is not always obvious inside design tools, with some tools defaulting to a violation, and not providing clear warnings. Care should be taken to ensure compliance. Tools handle this differently, but one of the following methods should help:</p>
+<ul>
+ <li>Configuring the tool to always include annular rings, regardless of net connections</li>
+ <li>Increasing ground plane clearance on internal layer copper pours</li>
+ <li>Configuring custom net rules to increase isolation on internal layer copper pours.</li>
+</ul>
+<p>Your design tool’s documentation will assist with these steps.</p>
+<p><img src="/assets/images/specs/drill-innerplane-spacing-ok.svg" alt="Examples of drill configurations that comply with specs" /></p>
+<p><img src="/assets/images/specs/drill-innerplane-spacing-notok.svg" alt="Examples of drill configurations that violate specs" /></p>
+<h2 id="changelog">Changelog</h2>
+<p><em>28-JAN-2026</em> 
+Added notes regarding the temporary alternate stackup used for some 4 layer orders.</p>
+<p><em>9-SEP-2025</em>
+Removed notice for stackup change, as no stackup change will be occouring.</p>
+<p><em>27-AUG-2025</em>
+Added notice for potential future stackup change due to concern regarding material availabillity</p>
+<p><em>25-JUL-2024</em> 
+Corrected prepreg thickness from 7.96mil to 7.87mil to better match the boards as fabricated. This is a documentation correction, and does not reflect a production change.</p>
+<p><em>17-JUN-2024</em> 
+Added DRC item for vias passing through internal layers without generating annular rings.</p>
+</div>
+</div>
+ <div class="footer osh-grad">
+ <div class="row footer-links">
+ <div class="small-6 medium-3 column">
+ <ul>
+ <li class="footer-head">COMPANY</li>
+ <li>
+ <a href="https://oshpark.com">Home</a>
+ </li>
+ <li>
+ <a href="https://blog.oshpark.com/">Blog</a>
+ </li>
+ <li>
+ <a href="https://store.oshpark.com/">Shop</a>
+ </li>
+ <li>
+ <a href="/compliance/">Compliance Statements</a>
+ </li>
+ </ul>
+ </div>
+ <div class="small-6 medium-3 column">
+ <ul>
+ <li class="footer-head">SERVICES</li>
+ <li>
+ <a href="https://oshpark.com/">Upload Your File</a>
+ </li>
+ <li>
+ <a href="/services/">Prototypes</a>
+ </li>
+ </ul>
+ </div>
+ <div class="show-for-small-only clearfix"></div>
+ <div class="small-6 medium-3 column">
+ <ul>
+ <li class="footer-head">HELP</li>
+ <li>
+ <a href="/">Support</a>
+ </li>
+ <li class='list-break'></li>
+ <li>If you can't find what you're looking for, please contact us at <a class="support-link" href="/cdn-cgi/l/email-protection#87f4f2f7f7e8f5f3c7e8f4eff7e6f5eca9e4e8ea"><span class="__cf_email__" data-cfemail="6e1d1b1e1e011c1a2e011d061e0f1c05400d0103">[email&#160;protected]</span></a>
+ </li>
+ </ul>
+ </div>
+ <div class="small-6 medium-3 column">
+ <ul>
+ <li class="footer-head">CONNECT</li>
+ <li>
+ <a href="https://oshpark.com/shared_projects">Shared Projects</a>
+ </li>
+ <li>
+ <a href="https://oshpark.com/users/sign_in">Log in / Sign Up</a>
+ </li>
+ </ul>
+ </div>
+</div>
+<div class='row small-12 columns center top-pad'><img alt="Whaleshark white" height="152" src="/assets/images/whaleshark-white.svg" width="215"></div>
+<div class="footer__social-media">
+ <div class="row small-12 center footer__social-links">
+ <b>Follow us</b>
+ </div>
+ <div class="row small-12 footer__social-links">
+ <ul class="center menu simple">
+ <li>
+ <a href="https://twitter.com/oshpark"><i aria-hidden="true" class="fa fa-twitter-square"></i></a>
+ </li>
+ <li>
+ <a href="https://www.facebook.com/oshpark/"><i aria-hidden="true" class="fa fa-facebook-square"></i></a>
+ </li>
+ <li>
+ <a href="https://hackaday.io/oshpark"><i aria-hidden="true" class="hackaday"></i></a>
+ </li>
+ <li>
+ <a href="https://www.instagram.com/oshpark/"><i aria-hidden="true" class="fa fa-instagram"></i></a>
+ </li>
+ <li>
+ <a href="https://www.flickr.com/photos/144141882@N07/"><i aria-hidden="true" class="fa fa-flickr"></i></a>
+ </li>
+ <li>
+ <a href="https://medium.com/@oshpark"><i aria-hidden="true" class="fa fa-medium"></i></a>
+ </li>
+ <li>
+ <a href="https://pinterest.com/oshpark/"><i aria-hidden="true" class="fa fa-pinterest-square"></i></a>
+ </li>
+ </ul>
+ </div>
+ <div class="row small-12 center footer__copyright">
+ &copy; Copyright 2023 OSH Park, LLC <span class='vert-div'>|</span> <a href="/privacy/">Privacy</a>
+ </div>
+</div>
+ </div>
+ </div>
+ </div>
+ </div>
+ </div>
+</body>
+</html>

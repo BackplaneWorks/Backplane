@@ -154,7 +154,7 @@ pub fn label(key: &str) -> &'static str {
         "microvia_hole_min" => "microvia hole", "microvia_hole_max" => "largest microvia hole", "buried_via_hole_min" => "buried via hole",
         "sides" => "sides placed", "thickness_min" => "thinnest board", "thickness_max" => "thickest board", "qty_min" => "fewest boards", "qty_max" => "most boards",
         "min_package" => "smallest package", "ic_pitch_min" => "IC pin pitch", "bga_pitch_min" => "BGA pitch", "reflow_c" => "reflow peak",
-        "rails_needed" => "edge rails needed", "fiducials_needed" => "fiducials needed",
+        "rails_needed" => "edge rails needed", "pth_to_inner_copper_min" => "plated hole to inner copper", "fiducials_needed" => "fiducials needed",
         _ => "",
     }
 }
@@ -293,7 +293,10 @@ mod tests {
     fn extra(sel: &[Sel], k: &str) -> f64 { sel.iter().find(|s| s.key == k).and_then(|s| s.extra.as_ref()).and_then(Limit::num).unwrap_or(f64::NAN) }
 
     #[test] fn fab_model_every_baseline_value_has_a_source_a_date_and_a_label() {
-        let p = baseline();
+        for (fab, text) in super::super::store::BASELINE { let p = Profile::parse(text).unwrap(); assert_eq!(&p.fab, fab); check(&p) }
+        for k in KINDS { assert!(baseline().kinds.contains_key(k), "{k}") }
+    }
+    fn check(p: &Profile) {
         assert_eq!(p.schema, SCHEMA);
         for (at, l) in p.all() {
             assert!(l.source.starts_with("https://"), "{at} {} has no source", l.key);
@@ -304,7 +307,6 @@ mod tests {
             assert!(!l.note.is_empty(), "{at} {} says nothing of where on the page it is", l.key);
         }
         for s in &p.stackups { assert!(s.source.starts_with("https://") && s.fetched.len() == 10, "{}", s.id); let t: f64 = s.seq.iter().map(|p| p.thickness_mm).sum(); assert!((t - s.thickness_mm).abs() <= 0.2, "{} adds up to {t}", s.id) }
-        for k in KINDS { assert!(p.kinds.contains_key(k), "{k}") }
     }
     #[test] fn fab_model_the_tier_follows_layers_copper_and_cost() {
         let p = baseline();

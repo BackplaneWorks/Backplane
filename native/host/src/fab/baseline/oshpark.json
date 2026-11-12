@@ -1,0 +1,44 @@
+{"schema": 1, "fab": "oshpark", "orders": false, "rev": 1, "updated": "2026-11-12",
+ "pages": {
+  "two": {"url": "https://docs.oshpark.com/services/two-layer/", "fetched": "2026-11-12"},
+  "four": {"url": "https://docs.oshpark.com/services/four-layer/", "fetched": "2026-11-12"}
+ },
+ "kinds": {
+  "pcb": {"limits": [
+   {"key": "layers", "value": [2, 4], "unit": "", "page": "two", "note": "Two-layer and four-layer services (pages of their own)"},
+   {"key": "track_min", "value": 0.1524, "unit": "mm", "when": {"layers": [1, 2]}, "page": "two", "note": "Trace Width 6mil (0.1524mm)"},
+   {"key": "space_min", "value": 0.1524, "unit": "mm", "when": {"layers": [1, 2]}, "page": "two", "note": "Trace Spacing 6mil (0.1524mm)"},
+   {"key": "pth_ring_min", "value": 0.127, "unit": "mm", "when": {"layers": [1, 2]}, "page": "two", "note": "Annular Ring 5mil (0.127mm)"},
+   {"key": "via_ring_min", "value": 0.127, "unit": "mm", "when": {"layers": [1, 2]}, "page": "two", "note": "Minimum Annular Ring 5mil (0.127mm)"},
+   {"key": "drill_min", "value": 0.254, "unit": "mm", "when": {"layers": [1, 2]}, "page": "two", "note": "Minimum Drill Size 10mil (0.254mm)"},
+   {"key": "via_hole_min", "value": 0.254, "unit": "mm", "when": {"layers": [1, 2]}, "page": "two", "note": "Minimum Drill Size 10mil (0.254mm)"},
+   {"key": "plated_slot_min", "value": 0.508, "unit": "mm", "when": {"layers": [1, 2]}, "page": "two", "note": "Minimum Slot Size 20mil (0.508mm) (drill slot only)"},
+   {"key": "copper_to_edge_min", "value": 0.381, "unit": "mm", "when": {"layers": [1, 2]}, "page": "two", "note": "Board Edge Keepout 15mil (0.381) from nominal board edge"},
+   {"key": "mask_bridge_min", "value": 0.1016, "unit": "mm", "when": {"layers": [1, 2]}, "page": "two", "note": "Minimum soldermask web 4 mil (0.1016mm)"},
+   {"key": "silk_line_min", "value": 0.127, "unit": "mm", "when": {"layers": [1, 2]}, "page": "two", "note": "Silkscreen minimum line width 5 mil (0.127mm) (recommended minimum); 3 mil for short lines, text, graphics"},
+   {"key": "board_max_x", "value": 558.8, "unit": "mm", "when": {"layers": [1, 2]}, "page": "two", "note": "Maximum board size 16in (406.4mm) by 22in (558.8mm)"},
+   {"key": "board_max_y", "value": 406.4, "unit": "mm", "when": {"layers": [1, 2]}, "page": "two", "note": "Maximum board size 16in (406.4mm) by 22in (558.8mm)"},
+   {"key": "board_min", "value": 6.35, "unit": "mm", "when": {"layers": [1, 2]}, "page": "two", "note": "Minimum board size 0.25in (6.35mm) by 0.25in (6.35mm)"},
+   {"key": "track_min", "value": 0.127, "unit": "mm", "when": {"layers": [4, 4]}, "page": "four", "note": "Trace Width 5mil (0.127mm)"},
+   {"key": "space_min", "value": 0.127, "unit": "mm", "when": {"layers": [4, 4]}, "page": "four", "note": "Trace Spacing 5mil (0.127mm)"},
+   {"key": "pth_ring_min", "value": 0.1016, "unit": "mm", "when": {"layers": [4, 4]}, "page": "four", "note": "Annular Ring 4mil (0.1016mm)"},
+   {"key": "via_ring_min", "value": 0.1016, "unit": "mm", "when": {"layers": [4, 4]}, "page": "four", "note": "Minimum Annular Ring 4mil (0.1016mm)"},
+   {"key": "drill_min", "value": 0.254, "unit": "mm", "when": {"layers": [4, 4]}, "page": "four", "note": "Minimum Drill Size 10mil (0.254mm)"},
+   {"key": "via_hole_min", "value": 0.254, "unit": "mm", "when": {"layers": [4, 4]}, "page": "four", "note": "Minimum Drill Size 10mil (0.254mm)"},
+   {"key": "plated_slot_min", "value": 0.508, "unit": "mm", "when": {"layers": [4, 4]}, "page": "four", "note": "Minimum Slot Size 20mil (0.508mm) (drill slot only)"},
+   {"key": "copper_to_edge_min", "value": 0.381, "unit": "mm", "when": {"layers": [4, 4]}, "page": "four", "note": "Board Edge Keepout 15mil (0.381) from nominal board edge"},
+   {"key": "pth_to_inner_copper_min", "value": 0.254, "unit": "mm", "when": {"layers": [4, 4]}, "page": "four", "note": "Plated Drill to Internal Layer Copper Clearance 10mil (0.254mm)"},
+   {"key": "mask_bridge_min", "value": 0.1016, "unit": "mm", "when": {"layers": [4, 4]}, "page": "four", "note": "Minimum soldermask web 4 mil (0.1016mm)"},
+   {"key": "silk_line_min", "value": 0.127, "unit": "mm", "when": {"layers": [4, 4]}, "page": "four", "note": "Silkscreen minimum line width 5 mil (0.127mm) (recommended minimum)"},
+   {"key": "board_max_x", "value": 558.8, "unit": "mm", "when": {"layers": [4, 4]}, "page": "four", "note": "Maximum board size 16in (406.4mm) by 22in (558.8mm)"},
+   {"key": "board_max_y", "value": 406.4, "unit": "mm", "when": {"layers": [4, 4]}, "page": "four", "note": "Maximum board size 16in (406.4mm) by 22in (558.8mm)"},
+   {"key": "board_min", "value": 6.35, "unit": "mm", "when": {"layers": [4, 4]}, "page": "four", "note": "Minimum board size 0.25in (6.35mm) by 0.25in (6.35mm)"},
+   {"key": "finishes", "value": ["enig"], "unit": "", "page": "two", "note": "PCB Finish: ENIG (Gold), compliant with IPC-4552"}
+  ]}
+ },
+ "stackups": [
+  {"id": "oshpark-4layer", "layers": 4, "thickness_mm": 1.6, "outer_oz": 1, "inner_oz": 0.5, "default": true, "page": "four",
+   "seq": [{"type": "copper", "thickness_mm": 0.0432}, {"type": "prepreg", "material": "FR408HR 2113", "thickness_mm": 0.1999, "er": 3.61}, {"type": "copper", "thickness_mm": 0.0175}, {"type": "core", "material": "FR408HR", "thickness_mm": 0.9906}, {"type": "copper", "thickness_mm": 0.0175}, {"type": "prepreg", "material": "FR408HR 2113", "thickness_mm": 0.1999, "er": 3.61}, {"type": "copper", "thickness_mm": 0.0432}]}
+ ],
+ "assembly": {}
+}
