@@ -438,7 +438,18 @@ async fn run(hub: &Arc<Hub>, thread: Option<&str>, path: &str, ty: &str, msg: Va
         if short == "BeginCommit" { super::embed::unsaved_update(&pro, |u| u.agent_begins()); }
         let commits = short == "EndCommit" && msg_commits(&msg);
         let actor = if coedit { thread.filter(|t| !t.is_empty()).map(|t| format!("agent:{t}")).unwrap_or_else(|| "agent".into()) } else { String::new() };
+        let mut held = None;
+        if let Some(th) = thread.filter(|t| coedit && !t.is_empty()) {
+            // what this thread works on, in the editor's Agents panel and as an area on the canvas
+            if super::coedit::due(th) {
+                let task = match crate::agents::handle() { Some(a) => a.thread_title(th).await, None => String::new() };
+                let _ = super::embed::gui_call_as(&gui, "kiapi.backplane.coedit.SetAgentActivity", super::coedit::activity(th, &task, "working"), &actor).await;
+            }
+            // the person paused this agent in KiCad: its writes wait for "Resume" (reads go on)
+            if !is_read(ty) { held = super::coedit::wait_resumed(th).await; }
+        }
         let o = super::embed::gui_call_as(&gui, ty, msg, &actor).await;
+        if let Some(note) = held { log_fallback(hub, thread, &note).await; }
         if commits && o["ok"].as_bool().unwrap_or(false) { super::embed::unsaved_update(&pro, |u| u.agent_committed()); }
         if o["fallback"].as_bool().unwrap_or(false) { log_fallback(hub, thread, o["why"].as_str().unwrap_or("")).await; return Err(o["error"].as_str().unwrap_or("").into()) }
         let ok = o["ok"].as_bool().unwrap_or(false);
