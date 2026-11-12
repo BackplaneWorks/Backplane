@@ -11,7 +11,7 @@ actions!(keys, [NewThread, OpenDiff, OpenFiles, StopTurn, ModelPicker, PrevThrea
     PickUp, PickDown, PickLeft, PickRight, PickTab, PickBackTab, PickEnter,
     Project1, Project2, Project3, Project4, Project5, Project6, Project7, Project8, Project9,
     Thread1, Thread2, Thread3, Thread4, Thread5, Thread6, Thread7, Thread8, Thread9,
-    RailBoard, RailSchematic, Rail3d, RailSplit, RailMech, RailFiles, RailDiff, RailReview, RailBrowser, ToggleTerminal, DismissTerminal, ShowKeys, FoldProject, UnfoldProject, MgmtBom, MgmtChecks, MgmtLife, CommentKicad]);
+    RailBoard, RailSchematic, Rail3d, RailSplit, RailMech, RailFiles, RailDiff, RailReview, RailBrowser, ToggleTerminal, DismissTerminal, ShowKeys, FoldProject, UnfoldProject, MgmtBom, MgmtChecks, MgmtLife, MgmtFab, CommentKicad]);
 
 /// Where no text field, file list or viewer has the keyboard: a bare key may act.
 /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ pub const FREE: &str = "!AccountMenu && !Composer && !TextInput && !PickInput && !FindInput && !AskInput && !ImpInput && !Viewer && !BrowserBar && !FilesPage";
@@ -93,6 +93,7 @@ pub const TABLE: &[Entry] = &[
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("mgmt-bom", "BOM panel beside the design: open or close", "Viewer", "alt-shift-b", Rebind),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("mgmt-checks", "Checks panel beside the design: open or close", "Viewer", "alt-shift-c", Rebind),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("mgmt-life", "Lifecycle panel beside the design: open or close", "Viewer", "alt-shift-l", Rebind),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("mgmt-fab", "Fab panel beside the design: open or close", "Viewer", "alt-shift-f", Rebind),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("help", "Keyboard shortcuts: this list. ? outside a text box, F1 anywhere", "Window", "? or F1", Fixed),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("perf", "Performance overlay: the last few seconds of the window's work", "Window", "ctrl-shift-h", Rebind),
 ];
@@ -182,7 +183,7 @@ pub fn bindings(l: &Local) -> Vec<KeyBinding> {
     v.extend([KeyBinding::new("b", RailBoard, Some(RAIL)), KeyBinding::new("s", RailSchematic, Some(RAIL)), KeyBinding::new("3", Rail3d, Some(RAIL)), KeyBinding::new("v", RailSplit, Some(RAIL)),
         KeyBinding::new("m", RailMech, Some(RAIL)), KeyBinding::new("f", RailFiles, Some(RAIL)), KeyBinding::new("d", RailDiff, Some(RAIL)), KeyBinding::new("r", RailReview, Some(RAIL)),
         KeyBinding::new("w", RailBrowser, Some(RAIL))]);
-    v.extend([KeyBinding::new(&k("mgmt-bom"), MgmtBom, alt), KeyBinding::new(&k("mgmt-checks"), MgmtChecks, alt), KeyBinding::new(&k("mgmt-life"), MgmtLife, alt)]);
+    v.extend([KeyBinding::new(&k("mgmt-bom"), MgmtBom, alt), KeyBinding::new(&k("mgmt-checks"), MgmtChecks, alt), KeyBinding::new(&k("mgmt-life"), MgmtLife, alt), KeyBinding::new(&k("mgmt-fab"), MgmtFab, alt)]);
     let key = |id: &str| find(id).map_or("", |x| x.key);
     for c in PICK_SCOPES.map(Some) {
         v.extend([KeyBinding::new(key("menu-up"), PickUp, c), KeyBinding::new(key("menu-down"), PickDown, c), KeyBinding::new(key("menu-left"), PickLeft, c), KeyBinding::new(key("menu-right"), PickRight, c),
@@ -429,6 +430,7 @@ pub fn attach(el: Div, picker: bool, cx: &mut Context<Backplane>) -> Div {
     let el = on!(el, MgmtBom, |this: &mut Backplane, _, cx: &mut Context<Backplane>| crate::screens::mgmt::toggle(this, "bom", cx));
     let el = on!(el, MgmtChecks, |this: &mut Backplane, _, cx: &mut Context<Backplane>| crate::screens::mgmt::toggle(this, "checks", cx));
     let el = on!(el, MgmtLife, |this: &mut Backplane, _, cx: &mut Context<Backplane>| crate::screens::mgmt::toggle(this, "life", cx));
+    let el = on!(el, MgmtFab, |this: &mut Backplane, _, cx: &mut Context<Backplane>| crate::screens::mgmt::toggle(this, "fab", cx));
     macro_rules! rail { ($el:expr, $($a:ty => ($k:literal, $v:literal)),*) => {{ let mut e = $el; $( e = on!(e, $a, |this: &mut Backplane, _, cx: &mut Context<Backplane>| this.key_rail($k, $v, cx)); )* e }} }
     let el = rail!(el, RailBoard => ("view-kind", "board"), RailSchematic => ("view-kind", "schematic"), Rail3d => ("view-kind", "3d"), RailSplit => ("view-kind", "split"),
         RailMech => ("view-kind", "mech"), RailFiles => ("view-kind", "files"), RailDiff => ("diff", ""), RailReview => ("view-kind", "review"), RailBrowser => ("view-kind", "browser"));

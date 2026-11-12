@@ -46,6 +46,10 @@ pub mod open;
 pub mod install;
 pub mod mgmt;
 pub mod bompanel;
+pub mod bomedit;
+pub mod parts;
+pub mod parthist;
+pub mod lifepanel;
 
 use crate::hub::Hub;
 use std::sync::Arc;
@@ -62,6 +66,8 @@ pub fn start(hub: &Arc<Hub>) {
     checkrun::start(hub);
     mgmt::start(hub);
     bompanel::start(hub);
+    parts::start(hub);
+    lifepanel::start(hub);
 }
 
 /// `kicad.watch` names a folder and maybe a file: both must lie under a folder the hub knows (a project's root or a
