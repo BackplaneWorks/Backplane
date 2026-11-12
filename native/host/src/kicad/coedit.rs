@@ -4,14 +4,66 @@
 //!     `idle` at the turn's end. KiCad draws the area the agent's recent changes cover, labelled with the task.
 //!   - ET_AGENT_CONTROL (23) from the editor: `pause` holds that thread's KiCad writes here until `resume` (the turn keeps running: its
 //!     tool call just waits), `steer` goes into the thread as a steering message.
+//!   - What the person is doing (`person`): their selection (ET_SELECTION_CHANGED, bp.9+) and their own recent edits (ET_DOCUMENT_EDITED
+//!     with actor "", bp.11), per project; every live kicad_ipc result carries the last two minutes of it, so an agent sees when it is
+//!     about to touch what the person is working on and asks them instead of editing over them.
 use serde_json::{json, Value};
 use std::{collections::{HashMap, HashSet}, sync::{Mutex, OnceLock}, time::{Duration, Instant}};
 use tokio::sync::Notify;
 
-struct State { paused: HashSet<String>, announced: HashMap<String, Instant>, wake: std::sync::Arc<Notify> }
+struct State { paused: HashSet<String>, announced: HashMap<String, Instant>, wake: std::sync::Arc<Notify>, person: HashMap<String, Person> }
 fn state() -> &'static Mutex<State> {
     static S: OnceLock<Mutex<State>> = OnceLock::new();
-    S.get_or_init(|| Mutex::new(State { paused: HashSet::new(), announced: HashMap::new(), wake: std::sync::Arc::new(Notify::new()) }))
+    S.get_or_init(|| Mutex::new(State { paused: HashSet::new(), announced: HashMap::new(), wake: std::sync::Arc::new(Notify::new()), person: HashMap::new() }))
+}
+
+/// The person's activity in one project's editors.
+#[derive(Default)]
+struct Person { selection: Option<(String, Value, Instant)>, edits: std::collections::VecDeque<(Instant, Value)> }
+
+/// How long the person's activity is news to an agent.
+const PERSON_RECENT: Duration = Duration::from_secs(120);
+
+/// The person selected something in KiCad (ET_SELECTION_CHANGED): `frame` "pcb"/"sch", `names` its ItemNames (empty: cleared).
+pub fn person_selected(pro: &str, frame: &str, names: Value) {
+    let mut s = state().lock().unwrap();
+    let p = s.person.entry(pro.to_string()).or_default();
+    let empty = names.as_object().map(|o| o.values().all(|v| v.as_array().map(|a| a.is_empty()).unwrap_or(true))).unwrap_or(true);
+    p.selection = if empty { None } else { Some((frame.to_string(), names, Instant::now())) };
+}
+
+/// ET_DOCUMENT_EDITED (20): the person's own change (actor ""), kept for PERSON_RECENT. Returns whether `ev` was one.
+pub fn on_edited(pro: &str, ev: &Value) -> bool {
+    if !(ev["type"] == "ET_DOCUMENT_EDITED" || ev["type"].as_i64() == Some(20)) { return false }
+    let Ok(d) = serde_json::from_str::<Value>(ev["detail"].as_str().unwrap_or("")) else { return true };
+    if !d["actor"].as_str().unwrap_or("").is_empty() || d["undo"].as_bool().unwrap_or(false) { return true }
+    let ids = |k: &str| d[k].as_array().cloned().unwrap_or_default();
+    let mut items: Vec<Value> = ids("created"); items.extend(ids("modified")); items.extend(ids("deleted")); items.truncate(24);
+    let edit = json!({"doc": d["doc"], "description": d["description"], "items": items});
+    let mut s = state().lock().unwrap();
+    let p = s.person.entry(pro.to_string()).or_default();
+    let now = Instant::now();
+    p.edits.retain(|(t, _)| now.duration_since(*t) < PERSON_RECENT);
+    p.edits.push_back((now, edit));
+    while p.edits.len() > 12 { p.edits.pop_front(); }
+    true
+}
+
+/// What the person has been doing in this project's KiCad in the last two minutes, for an agent: None when nothing.
+pub fn person_now(pro: &str) -> Option<Value> {
+    let s = state().lock().unwrap();
+    let p = s.person.get(pro)?;
+    let now = Instant::now();
+    let ago = |t: &Instant| now.duration_since(*t).as_secs();
+    let sel = p.selection.as_ref().filter(|(_, _, t)| now.duration_since(*t) < PERSON_RECENT)
+        .map(|(f, n, t)| json!({"editor": f, "items": n, "seconds_ago": ago(t)}));
+    let edits: Vec<Value> = p.edits.iter().rev().filter(|(t, _)| now.duration_since(*t) < PERSON_RECENT)
+        .map(|(t, e)| { let mut e = e.clone(); e["seconds_ago"] = json!(ago(t)); e }).collect();
+    if sel.is_none() && edits.is_empty() { return None }
+    let mut v = json!({"note": "The person is working in KiCad now. If your change touches these items or their area, ask them first (wait, or take it?) and do other work meanwhile."});
+    if let Some(sel) = sel { v["selected"] = sel; }
+    if !edits.is_empty() { v["recent_edits"] = json!(edits); }
+    Some(v)
 }
 
 /// The thread an actor names ("agent:t123" -> "t123").
@@ -87,4 +139,17 @@ mod tests {
     }
     #[test] fn announcing_is_throttled() { assert!(due("ta1")); assert!(!due("ta1")); forget("ta1"); assert!(due("ta1")); }
     #[tokio::test] async fn an_unpaused_thread_never_waits() { assert_eq!(wait_resumed("tz").await, None); }
+    #[test] fn the_persons_selection_and_edits_reach_agents() {
+        let pro = "/p/person-test.kicad_pro";
+        assert!(person_now(pro).is_none());
+        person_selected(pro, "sch", json!({"references": ["U3"], "pins": [], "nets": []}));
+        let ev = |actor: &str| json!({"type": "ET_DOCUMENT_EDITED", "detail": json!({"seq": 4, "doc": "sch", "actor": actor, "description": "Move", "modified": ["k1"]}).to_string()});
+        assert!(on_edited(pro, &ev("")) && on_edited(pro, &ev("agent:t9")) && !on_edited(pro, &json!({"type": "ET_FRAME_SHOWN"})));
+        let v = person_now(pro).unwrap();
+        assert_eq!(v["selected"]["items"]["references"][0], "U3");
+        assert_eq!(v["recent_edits"].as_array().unwrap().len(), 1, "an agent's own edit is not the person's");
+        assert_eq!(v["recent_edits"][0]["items"][0], "k1");
+        person_selected(pro, "sch", json!({"references": []}));
+        assert!(person_now(pro).unwrap().get("selected").is_none());
+    }
 }
