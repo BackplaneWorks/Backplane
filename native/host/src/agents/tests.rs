@@ -517,6 +517,40 @@ fn tool_text(r: &Value) -> Value { serde_json::from_str(r["result"]["content"][0
     assert_eq!(call("thread_interrupt", json!({"threadId":other})).await, (true, json!({"threadId":other,"state":"not running"})));
     ag.shutdown();
 }
+#[tokio::test(flavor = "multi_thread")] async fn thread_update_with_parent_alone_moves_the_thread_and_keeps_its_title() {
+    let (hub, ag, _h, _w) = start("tup", |w| base_log(w, 3, ""), |_| Cli::standin(&dir("tup-bin"))).await; let (other, third) = ("t1700001001-1", "t1700001002-2");
+    let call = |name: &'static str, a: Value| { let ag = ag.clone(); async move { let (_, r) = rpc_mcp(&ag, T1, "", "tools/call", json!({"name":name,"arguments":a})).await; (r["result"]["isError"] == false, tool_text(&r)) } };
+    let parent_of = |id: &'static str| { let ag = ag.clone(); async move { let (_, l) = ag.tool_list(T1).await; l["threads"].as_array().unwrap().iter().find(|t| t["id"] == id).unwrap()["parent"].clone() } };
+    let from = len(&hub).await;
+    assert_eq!(call("thread_update", json!({"threadId":other,"parent":T1})).await, (true, json!({"threadId":other,"parent":T1})));
+    let ev = log_from(&hub, from).await;
+    assert!(ev.iter().any(|e| is(e, "ThreadParentSet") && e["id"] == other && e["parent"] == T1) && ev.iter().any(|e| e["key"] == format!("thread.tree.{T1}") && e["value"] == "1"), "{ev:?}");
+    assert!(!ev.iter().any(|e| is(e, "ThreadRenamed")), "the title is left alone: {ev:?}");
+    assert_eq!(parent_of(other).await, T1);
+    let (_, l) = ag.tool_list(T1).await; assert_eq!(l["threads"].as_array().unwrap().iter().find(|t| t["id"] == other).unwrap()["title"], "Fixture 1");
+    // a grandchild, then the moves that are refused: a cycle, itself, an unknown thread, with a title
+    assert_eq!(call("thread_update", json!({"threadId":third,"parent":other})).await.0, true); assert_eq!(parent_of(third).await, other);
+    assert_eq!(call("thread_update", json!({"threadId":T1,"parent":third})).await, (false, json!({"error":"that parent would make a cycle"})));
+    assert_eq!(call("thread_update", json!({"threadId":other,"parent":other})).await.0, false);
+    assert_eq!(call("thread_update", json!({"threadId":other,"parent":"t-nope"})).await.0, false);
+    assert_eq!(call("thread_update", json!({"threadId":other,"parent":T1,"title":"x"})).await, (false, json!({"error":"parent cannot be combined with title or report"})));
+    // empty moves it to the top level
+    assert_eq!(call("thread_update", json!({"threadId":third,"parent":""})).await, (true, json!({"threadId":third,"parent":""}))); assert_eq!(parent_of(third).await, "");
+    ag.shutdown();
+}
+#[tokio::test(flavor = "multi_thread")] async fn a_delegated_child_logged_without_a_parent_is_put_under_its_delegator_at_start() {
+    let (c, d) = ("t1700001001-1", "t1700001002-2");
+    let extra = format!("{{\"$\":\"TaskDelegated\",\"task\":\"k1\",\"parent\":\"{T1}\",\"child\":\"{c}\",\"depth\":1,\"provider\":\"claude\",\"model\":\"\",\"at\":1700000100}}\n\
+        {{\"$\":\"TaskDelegated\",\"task\":\"k2\",\"parent\":\"{T1}\",\"child\":\"{d}\",\"depth\":1,\"provider\":\"claude\",\"model\":\"\",\"at\":1700000100}}\n\
+        {{\"$\":\"ThreadParentSet\",\"id\":\"{d}\",\"parent\":\"\",\"at\":1700000101}}\n");
+    let (hub, ag, _h, _w) = start("bfp", |w| base_log(w, 3, &extra), |_| Cli::standin(&dir("bfp-bin"))).await;
+    let ev = log_from(&hub, 0).await;
+    assert_eq!(ev.iter().filter(|e| is(e, "ThreadParentSet") && e["id"] == c && e["parent"] == T1).count(), 1, "{ev:?}");
+    assert!(!ev.iter().any(|e| is(e, "ThreadParentSet") && e["id"] == d && e["parent"] == T1), "a child moved to the top level stays there");
+    let (_, l) = ag.tool_list(T1).await; let p = |id: &str| l["threads"].as_array().unwrap().iter().find(|t| t["id"] == id).unwrap()["parent"].clone();
+    assert_eq!((p(c), p(d)), (json!(T1), json!("")));
+    ag.shutdown();
+}
 #[tokio::test(flavor = "multi_thread")] async fn an_approval_waits_for_the_person_and_a_session_allowance_answers_the_next() {
     let sd = dir("p-bin"); perf_standin(&sd, 1);
     let (hub, ag, _h, _w) = start("p", |w| base_log(w, 1, ""), |_| Cli::standin(&sd)).await; let from = len(&hub).await;
@@ -920,6 +954,10 @@ const TESTCLI: &str = "#!/bin/sh\nread hello\necho '{\"q\":1}'\nread ans\necho \
     let (hub, ag, _sd) = codex_start("dg1").await; let from = len(&hub).await;
     let (ok, r) = ag.tool_delegate(T1, &json!({"prompt":"do the child work","title":"Child"})).await; assert!(ok, "{r}");
     let (task, child) = (r["taskId"].as_str().unwrap().to_string(), r["childThreadId"].as_str().unwrap().to_string()); assert_eq!(r["depth"], 1);
+    // the child is a subthread of its caller: the log says so, and thread_list and thread_read show it
+    assert!(log_from(&hub, from).await.iter().any(|e| is(e, "ThreadParentSet") && e["id"] == child.as_str() && e["parent"] == T1));
+    let (_, l) = ag.tool_list(T1).await; assert_eq!(l["threads"].as_array().unwrap().iter().find(|t| t["id"] == child.as_str()).unwrap()["parent"], T1, "{l}");
+    let (_, rd) = ag.tool_read(T1, &json!({"threadId":child,"limit":1})).await; assert_eq!(rd["status"]["parent"], T1);
     let ev = until(&hub, from, 30, |ev| ev.iter().any(|e| is(e, "TaskDelivered"))).await;
     assert!(ev.iter().any(|e| is(e, "ThreadCreated") && e["id"] == child.as_str() && e["title"] == "Child"));
     assert!(ev.iter().any(|e| is(e, "TaskStateSet") && e["state"] == "done"), "{ev:?}");

@@ -128,6 +128,7 @@ impl Agents {
         crate::startup::mark("agents: mcp started");
         if crate::copy::person_turn_allowed() { let w = ag.world().await; let n = hub.store.len(); let last = if n > 0 { hub.store.range(n.saturating_sub(50), n).unwrap_or_default() } else { vec![] }; *ag.copy_point.lock().unwrap() = (w.threads.iter().map(|(id, x)| (id.clone(), w.cwd(id), x.turn == "running")).collect(), last); } // threads running at the copy point: the live hub may still be running them
         if crate::copy::person_only() { let cleared: Vec<Value> = { let w = ag.world().await; w.threads.keys().filter(|t| !w.setting(&format!("ride.{t}")).is_empty()).map(|t| set(format!("ride.{t}"), String::new(), now_s())).collect() }; if !cleared.is_empty() { let _ = hub.commit_many(&cleared).await; } } // mail copied from the real log is not this app's to deliver to a fresh agent (any copy: copy::person_only)
+        { let ev = { let w = ag.world().await; tasks::parent_backfill(&w, now_s()) }; if !ev.is_empty() { eprintln!("agents: put {} delegated thread(s) under the thread that delegated them", ev.len()); let _ = hub.commit_many(&ev).await; } }
         let repair = { let w = ag.world().await; tasks::repair_plan(&w) }; // Task.repair judges the state the hub started from, before recovery
         crate::startup::mark("agents: before recover");
         let before_recover = now_s(); // the sidebar's look baseline: a turn this start's recovery cuts is after it, so it still shows (groupname.rs)
