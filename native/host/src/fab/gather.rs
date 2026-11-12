@@ -237,7 +237,28 @@ pub const JLCPCB: Adapter = Adapter { fab: "jlcpcb", stackups: Some("impedance")
     r!("assembly", "assembly economic", "thickness_min", "free", "{}", After("Thickness", 1, "", 0)),
     r!("assembly", "assembly economic", "thickness_max", "free", "{}", After("Thickness", 1, "", 1)),
 ]};
-pub const ADAPTERS: &[&Adapter] = &[&JLCPCB];
+const CAP: &str = "capabilities";
+/// A second fab, read off its published capability page (the standard PCB table).
+pub const PCBWAY: Adapter = Adapter { fab: "pcbway", stackups: None, pages: &[(CAP, "https://www.pcbway.com/capabilities.html")], rules: &[
+    r!(CAP, PCB, "layers_max", "free", "{}", Row("Number of Layers", "", 1, 1.0)),
+    r!(CAP, PCB, "track_min", "free", "{}", Row("Min Trace", "", 0, 1.0)),
+    r!(CAP, PCB, "space_min", "free", "{}", Row("Min Spacing", "spacing is", 1, 1.0)),
+    r!(CAP, PCB, "drill_min", "free", "{}", Row("Drill Sizes (CNC)", "smaller than", 0, 1.0)),
+    r!(CAP, PCB, "drill_min", "extra", "{}", Row("Drill Sizes (CNC)", "", 0, 1.0)),
+    r!(CAP, PCB, "drill_max", "free", "{}", Row("Drill Sizes (CNC)", "", 1, 1.0)),
+    r!(CAP, PCB, "pth_ring_min", "free", "{}", Row("Min Width of Annular Ring", "", 0, 1.0)),
+    r!(CAP, PCB, "hole_tolerance_plus", "free", "{}", Row("Finished Hole Size Tolerance(CNC)", "PTH:", 0, 1.0)),
+    r!(CAP, PCB, "hole_tolerance_minus", "free", "{}", Row("Finished Hole Size Tolerance(CNC)", "PTH:", 0, 1.0)),
+    r!(CAP, PCB, "silk_line_min", "free", "{}", Row("Minimum Character Width(Legend)", "", 0, 1.0)),
+    r!(CAP, PCB, "silk_text_height_min", "free", "{}", Row("Minimum Character Height (Legend)", "", 0, 1.0)),
+    r!(CAP, PCB, "castellated_hole_min", "free", "{}", Row("Minimum Diameter of Plated Half Holes", "", 0, 1.0)),
+    r!(CAP, PCB, "board_min", "free", "{}", Row("Maximum PCB Size(Dimension)", "(min", 0, 1.0)),
+    r!(CAP, PCB, "board_max_x", "free", r#"{"layers":[1,2]}"#, Row("Maximum PCB Size(Dimension)", "double-sided PCB:", 1, 1.0)),
+    r!(CAP, PCB, "board_max_y", "free", r#"{"layers":[1,2]}"#, Row("Maximum PCB Size(Dimension)", "double-sided PCB:", 0, 1.0)),
+    r!(CAP, PCB, "board_max_x", "free", r#"{"layers":[4,32]}"#, Row("Maximum PCB Size(Dimension)", "Multilayer PCB:", 1, 1.0)),
+    r!(CAP, PCB, "board_max_y", "free", r#"{"layers":[4,32]}"#, Row("Maximum PCB Size(Dimension)", "Multilayer PCB:", 0, 1.0)),
+]};
+pub const ADAPTERS: &[&Adapter] = &[&JLCPCB, &PCBWAY];
 pub fn adapter(fab: &str) -> Option<&'static Adapter> { ADAPTERS.iter().copied().find(|a| a.fab == fab) }
 
 fn cell(l: &str) -> &str { l.trim().trim_end_matches('|').trim() }
@@ -443,6 +464,14 @@ mod tests {
         assert!(p.stackups.len() >= 10 && p.stackups.iter().any(|s| s.layers == 6), "every published stackup: {}", p.stackups.len());
         for s in &p.stackups { let t: f64 = s.seq.iter().map(|x| x.thickness_mm).sum(); assert!((t - s.thickness_mm).abs() <= 0.2, "{} adds up to {t} (the fab lists 2116E at 1.446 mm for a 1.6 mm board)", s.id); assert!(s.seq.iter().filter(|x| x.kind != "copper" && x.material != "2313").all(|x| x.er.is_some()), "{}: an Er for every dielectric the page's table names (2313 is not in it, so it has none)", s.id) }
     }
+    #[test] fn fab_gather_the_second_fabs_adapter_reads_its_saved_page_as_its_baseline_has_it() {
+        let base = store::baseline("pcbway").unwrap();
+        let page = std::fs::read_to_string(format!("{}/../../test/fab/fixtures/pcbway/capabilities.html", env!("CARGO_MANIFEST_DIR"))).unwrap();
+        let (p, rep) = apply(&base, &PCBWAY, &[("capabilities", Some(page))], "2026-11-12");
+        assert!(rep.missing.is_empty(), "{:#?}", rep.missing); assert_eq!(rep.read, PCBWAY.rules.len());
+        assert!(rep.changes.is_empty(), "{:#?}", rep.changes.iter().map(Change::line).collect::<Vec<_>>()); assert_eq!(p.rev, base.rev);
+        assert!(!base.orders, "Backplane orders from one fab; this one is for designing against");
+    }
     #[test] fn fab_gather_a_changed_page_changes_the_value_and_the_revision_and_a_missing_one_keeps_the_old() {
         let base = store::baseline("jlcpcb").unwrap();
         let mut ps = pages(); let rigid = ps[0].1.take().unwrap();
@@ -465,6 +494,6 @@ mod tests {
 #[test] #[ignore] fn fab_gather_dump_stackups() { let ls = lines(&std::fs::read_to_string(format!("{}/../../test/fab/fixtures/jlcpcb/impedance.html", env!("CARGO_MANIFEST_DIR"))).unwrap()); println!("STACKUPS {}", serde_json::to_string(&stackups(&ls, "impedance", "", "")).unwrap()) }
 /// A real refresh into the home FAB_LIVE_HOME (a temp home), by hand only: it reaches the fab's pages.
 #[cfg(test)]
-#[test] #[ignore] fn fab_gather_live_refresh() { let Ok(h) = std::env::var("FAB_LIVE_HOME") else { return }; std::env::remove_var("BACKPLANE_AGENTS"); match refresh(Path::new(&h), "jlcpcb") { Ok((p, r)) => println!("LIVE rev {} {}", p.rev, r.json()), Err(e) => println!("LIVE error {e}") } }
+#[test] #[ignore] fn fab_gather_live_refresh() { let Ok(h) = std::env::var("FAB_LIVE_HOME") else { return }; std::env::remove_var("BACKPLANE_AGENTS"); match refresh(Path::new(&h), &std::env::var("FAB_LIVE_FAB").unwrap_or("jlcpcb".into())) { Ok((p, r)) => println!("LIVE rev {} {}", p.rev, r.json()), Err(e) => println!("LIVE error {e}") } }
 #[cfg(test)]
-#[test] #[ignore] fn fab_gather_dump_lines() { let n = std::env::var("FAB_PAGE").unwrap_or("rigid".into()); for (i, l) in lines(&std::fs::read_to_string(format!("{}/../../test/fab/fixtures/jlcpcb/{n}.html", env!("CARGO_MANIFEST_DIR"))).unwrap()).iter().enumerate() { eprintln!("{i}: {l}") } }
+#[test] #[ignore] fn fab_gather_dump_lines() { let n = std::env::var("FAB_PAGE").unwrap_or("jlcpcb/rigid".into()); for (i, l) in lines(&std::fs::read_to_string(format!("{}/../../test/fab/fixtures/{n}.html", env!("CARGO_MANIFEST_DIR"))).unwrap()).iter().enumerate() { eprintln!("{i}: {l}") } }

@@ -71,7 +71,8 @@ marked section, merged, never overwritten:
 
 ## Gathering (`fab/gather.rs`)
 
-Per fab an adapter: its published pages and, per value of the profile, where on which page it is (a table row's label, the words
+Fabs with a profile and an adapter: `jlcpcb` (the fab Backplane orders from: rigid, flex, HDI and metal-core pages, assembly, impedance
+stackups) and `pcbway` (its standard PCB table; pick it with `fab_profile {action: "pick", fab: "pcbway"}` to design against it). Per fab an adapter: its published pages and, per value of the profile, where on which page it is (a table row's label, the words
 before the number, which number after them, a factor for a mil or a ring). More fabs are a baseline file plus an adapter.
 
 - `refresh` GETs each page with curl (`proc::Kind::Net`, a second apart, a Backplane user agent, https only, 8 MB at most); nothing of
