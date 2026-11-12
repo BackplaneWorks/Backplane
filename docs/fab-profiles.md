@@ -62,8 +62,9 @@ marked section, merged, never overwritten:
 - A suggestion the person approves is applied by the Fab panel's Apply (`fab.profile {pro, action: "apply", key}`; agents are refused
   and name it instead, `fab/setup.rs`): one board minimum raised to the fab's through KiCad's API (GetBoardDesignRules, then
   SetBoardDesignRules with the constraints alone, never lowering one). With the person's KiCad up it is set there and they save the
-  board (KiCad keeps design rules out of its undo history: the answer says what it was); otherwise the project's headless KiCad sets
-  and saves it, only while no thread holds the board's lock.
+  board (KiCad keeps design rules out of its undo history: the answer says what it was); otherwise (the headless KiCad has no
+  design-rules API: it answers AS_UNHANDLED), only while no thread holds the board's lock, the headless KiCad is retired and the one
+  number is changed in the .kicad_pro, every other byte kept.
 - A pick regenerates a section that is already there. The view's `drc` says `{file, present, current, suggestions, conflicts}`.
 - Everything in the section loads in stock KiCad: `test/fab/stock_drc.sh [kicad-cli] [demo project]` writes it for each board kind
   and tier into a copy of a KiCad demo with a sentinel rule after it and runs stock `kicad-cli pcb drc` (KiCad drops a whole rules file
