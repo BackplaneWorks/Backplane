@@ -848,7 +848,7 @@ impl Actor {
         let (mut args, mut env, start) = (driver.argv(&a), driver.env(&a), driver.start(&a));
         if !acct_args.is_empty() { acct_args.extend(args); args = acct_args } env.extend(acct_env); env.extend(self.ag.kicad_env.lock().unwrap().clone());
         // the KiCad actor its own scripts (KiStack's layout tools) name themselves by, so their edits are this thread's in the open editor
-        env.push(("BACKPLANE_KICAD_ACTOR".into(), format!("agent:{th}")));
+        env.push(("BACKPLANE_KICAD_ACTOR".into(), crate::files::kicad::coedit::client_name(&crate::files::kicad::coedit::Who::Agent(&th))));
         let spawned = if self.person { match self.person_child() { Ok(pc) => proc::spawn_person(&pc, &prog, &args, std::path::Path::new(cwd), &env), Err(e) => Err(std::io::Error::new(std::io::ErrorKind::Other, e)) } } else { proc::spawn(&prog, &args, std::path::Path::new(cwd), self.ag.cli.dir(), &env) };
         match spawned {
             Ok(mut p) => { self.ag.stats.procs_spawned.fetch_add(1, Relaxed); self.heard = Instant::now(); for l in start { let _ = p.input.try_send(l); }
