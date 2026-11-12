@@ -171,6 +171,8 @@ pub struct KicadPane {
     theme_sent: bool, home: u64,
     /// files changed on disk that KiCad holds back over the person's unsaved edits (info `kicad.reload.<digest>`)
     pub conflicts: Vec<String>,
+    /// KiCad's long jobs now (bp.12 ET_PROGRESS via info `kicad.progress.<digest>`): id, title, detail, fraction (-1 indeterminate), cancellable
+    pub jobs: Vec<Value>,
     /// the fork's frames KiCad has shown at least once (bp.9: the client may map and unmap them itself, so a tab switch is local)
     ever_shown: Vec<u64>,
     /// the other editors were asked pre-warmed (once per KiCad process: its pid)
@@ -187,7 +189,7 @@ impl KicadPane {
             if weak.update(cx, |this, cx| this.tick(cx)).is_err() { break }
         }).detach();
         KicadPane { bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), last_root: (i32::MIN, 0), placed: None,
-            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), poked: None, unmapped_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None }
+            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), poked: None, unmapped_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None }
     }
     fn rpc(&self, name: &str, params: Value) { let _ = self.hub.try_send(Command::Rpc(name.to_string(), Secret(params), "kicad")); }
     /// The hub's `editor.kicad.<digest>` for this project changed.
@@ -271,6 +273,14 @@ impl KicadPane {
         let c: Vec<String> = v["conflicts"].as_array().into_iter().flatten().filter_map(|f| f.as_str().map(String::from)).collect();
         if c != self.conflicts { self.conflicts = c; cx.notify(); }
     }
+    /// The hub's `kicad.progress.<digest>`: this project's running jobs, if it is this pane's.
+    pub fn set_progress(&mut self, v: Value, cx: &mut Context<Self>) {
+        if !self.matches(&v) { return }
+        let j = v["jobs"].as_array().cloned().unwrap_or_default();
+        if j != self.jobs { self.jobs = j; cx.notify(); }
+    }
+    /// The × on a job's bar.
+    pub fn cancel_job(&mut self, id: u64) { self.rpc("editor.kicad.cancel", json!({"project": self.project, "id": id})); }
     /// The person's answer to a file changed on disk (Keep yours / Reload), for every waiting file.
     pub fn resolve(&mut self, choice: &str, cx: &mut Context<Self>) {
         for f in std::mem::take(&mut self.conflicts) { self.rpc("editor.kicad.resolve", json!({"project": self.project, "file": f, "choice": choice})); }
@@ -502,7 +512,7 @@ impl KicadPane {
         });
         let pane = self.placed.as_ref().and_then(|(at, _, _)| *at).map_or(Value::Null, |p| json!({"x": p.x, "y": p.y, "w": p.w, "h": p.h}));
         let shown_meta = shown.and_then(|w| nc::window_meta(w, self.container, self.toplevel));
-        json!({"ok": true, "project": self.project, "root": self.root, "open": self.open, "want": self.wanted_kind(), "local_map": self.info["local_map"], "ever_shown": self.ever_shown.len(), "conflicts": self.conflicts,
+        json!({"ok": true, "project": self.project, "root": self.root, "open": self.open, "want": self.wanted_kind(), "jobs": self.jobs, "local_map": self.info["local_map"], "ever_shown": self.ever_shown.len(), "conflicts": self.conflicts,
             "state": self.info["state"], "reason": self.info["reason"], "mode": self.info["mode"], "pid": self.info["pid"],
             "holder": self.info["holder"], "sock": self.info["sock"], "pane": pane,
             "container": self.container.map_or(Value::Null, |c| { let mut v = g(c); v["xid"] = c.into(); v }),
@@ -730,6 +740,20 @@ pub fn strip<V: 'static>(cx: &mut Context<V>, light: bool, pane: &Entity<KicadPa
                 .on_click(move |_, _, cx| pk.update(cx, |p, cx| p.resolve("keep", cx))))
             .child(div().id("kicad-reload-btn").px_2().border_1().border_color(c("line")).bg(c("raise")).cursor_pointer().text_color(c("text")).child(crate::i18n::trs("Reload (lose your edits)"))
                 .on_click(move |_, _, cx| pr.update(cx, |p, cx| p.resolve("reload", cx)))));
+    }
+    // KiCad's long job (loading, zone fill, DRC, plot): a slim bar here instead of KiCad's own progress window (bp.12)
+    let jobs = if pane.read(cx).info["state"] == "ready" { pane.read(cx).jobs.clone() } else { Vec::new() };
+    if let Some(j) = jobs.first() {
+        let (id, f) = (j["id"].as_u64().unwrap_or(0), j["fraction"].as_f64().unwrap_or(-1.0));
+        let title = j["title"].as_str().unwrap_or("").to_string(); let detail = j["detail"].as_str().unwrap_or("").to_string();
+        let text = if detail.is_empty() { crate::i18n::trs(&title) } else { format!("{} · {detail}", crate::i18n::trs(&title)) };
+        let w = 120.0f32; let p = pane.clone();
+        row = row.child(div().id("kicad-progress").ml_2().flex().items_center().gap_1().text_size(px(11.)).text_color(c("dim"))
+            .child(div().max_w(px(220.)).overflow_hidden().whitespace_nowrap().text_ellipsis().child(text))
+            .child(div().w(px(w)).h(px(4.)).bg(c("line")).child(div().h_full().bg(c("accent")).w(px(if f >= 0.0 { w * f.min(1.0) as f32 } else { w * 0.3 }))))
+            .when(jobs.len() > 1, |d| d.child(format!("+{}", jobs.len() - 1)))
+            .when(j["cancellable"] == true, |d| d.child(div().id("kicad-progress-cancel").px_1().cursor_pointer().child("×").tooltip(crate::keys::tip(&crate::i18n::trs("Cancel"), "", light))
+                .on_click(move |_, _, cx| p.update(cx, |p, _| p.cancel_job(id))))));
     }
     row = row.child(div().flex_1());
     let mk = |id: &'static str, label: String, tip: String, a: &'static str, cx: &mut Context<V>| {
