@@ -47,7 +47,7 @@ pub fn view_of(p: &Profile, c: &project::Choice, home: &Path) -> Value {
         "stackup": stackup::view(p, &o, &c.options, tm, sm),
         "assembly": assembly, "pages": p.pages, "changed": changes.iter().map(|x| x.line()).collect::<Vec<_>>()})
 }
-fn profile_of(home: &Path, fab: &str) -> Result<Profile, String> { store::load(home, fab).ok_or_else(|| format!("Backplane has no profile of the fab {fab:?} (it has {})", store::fabs(home).join(", "))) }
+pub fn profile_of(home: &Path, fab: &str) -> Result<Profile, String> { store::load(home, fab).ok_or_else(|| format!("Backplane has no profile of the fab {fab:?} (it has {})", store::fabs(home).join(", "))) }
 pub fn view_in(home: &Path, root: Option<&Path>) -> Result<Value, String> {
     let Some(root) = root else { return Err("this thread has no project folder".into()) };
     let c = choice(root);
@@ -58,7 +58,7 @@ pub fn view_in(home: &Path, root: Option<&Path>) -> Result<Value, String> {
 }
 fn rel(root: &Path, p: &Path) -> String { p.strip_prefix(root).unwrap_or(p).to_string_lossy().into_owned() }
 /// The project's rules file and the section the profile makes for it (none without a KiCad project).
-fn drc_plan(root: &Path, p: &Profile, c: &project::Choice) -> Option<(PathBuf, drc::Plan)> {
+pub fn drc_plan(root: &Path, p: &Profile, c: &project::Choice) -> Option<(PathBuf, drc::Plan)> {
     let pro = crate::files::kicad::project::read(&root.to_string_lossy()).pro;
     let dru = drc::dru_path(&pro)?;
     let rules = drc::project_rules(&std::fs::read_to_string(&pro).unwrap_or_default());
@@ -177,7 +177,7 @@ mod tests {
         let v = view_in(home, Some(r)).unwrap();
         assert_eq!((v["fab"].clone(), v["choice"]["by"].clone(), v["choice"]["options"]["layers"].clone()), (json!("jlcpcb"), json!("board"), json!(4.0)));
         let track = v["limits"].as_array().unwrap().iter().find(|l| l["key"] == "track_min").unwrap();
-        assert_eq!((track["free"]["value"].clone(), track["extra"]["value"].clone()), (json!(0.09), json!(0.076)));
+        assert_eq!((track["free"]["value"].clone(), track["extra"]["value"].clone()), (json!(0.09), json!(0.075)));
         assert!(track["free"]["source"].as_str().unwrap().starts_with("https://") && track["free"]["fetched"].as_str().unwrap().len() == 10, "{track}");
         assert!(v["stackups"].as_array().unwrap().iter().any(|s| s["id"] == "JLC04161H-7628"), "a 4-layer 1.6 mm board gets the published stackups");
         assert!(v["assembly"]["economic"].as_array().unwrap().iter().any(|l| l["key"] == "min_package"));

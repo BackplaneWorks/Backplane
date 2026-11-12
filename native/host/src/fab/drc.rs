@@ -67,7 +67,9 @@ fn rule(name: &str, cond: &str, constraint: &str, v: f64) -> String {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Plan { pub section: String, pub suggestions: Vec<Value>, pub conflicts: Vec<String> }
+pub struct Plan { pub section: String, pub suggestions: Vec<Value>, pub conflicts: Vec<String>,
+    /// the person's rules that allow less than the fab's base price but no less than it makes for more
+    pub costs_more: Vec<String> }
 
 /// Fab.drc.plan: the section for this profile and choice, given the project's own settings and the text of its rules file.
 pub fn plan(p: &Profile, c: &Choice, pr: &ProjectRules, existing: &str) -> Plan {
@@ -107,13 +109,18 @@ pub fn plan(p: &Profile, c: &Choice, pr: &ProjectRules, existing: &str) -> Plan 
     }
     s += END; s += "\n";
     // the person's rules that allow less than the fab (outside the section)
-    let mut conflicts = vec![];
-    for (name, constraint, v) in own_mins(&outside(existing)) {
-        for k in keys_of(&constraint) {
-            if let Some(l) = at_tier(&sel, k, tier) { let f = l.num().unwrap(); if v < f - 1e-9 { conflicts.push(format!("rule \"{name}\" allows {constraint} {}, under the fab's {} ({})", mm(v), mm(f), label(k))); break } }
+    let (mut conflicts, mut costs_more) = (vec![], vec![]);
+    for (name, constraint, v, cond) in own_rules(&outside(existing)) {
+        for k in keys_for(&constraint, &cond) {
+            if let Some(l) = at_tier(&sel, k, tier) { let f = l.num().unwrap(); if v < f - 1e-9 {
+                let floor = at_tier(&sel, k, "extra").and_then(Limit::num).unwrap_or(f);
+                let line = format!("rule \"{name}\" allows {constraint} {}, under the fab's {} ({})", mm(v), mm(f), label(k));
+                if v >= floor - 1e-9 { costs_more.push(format!("{line}; the fab makes down to {} for more", mm(floor))) } else { conflicts.push(line) }
+                break
+            } }
         }
     }
-    Plan { section: s, suggestions, conflicts }
+    Plan { section: s, suggestions, conflicts, costs_more }
 }
 
 /// (start, end) byte offsets of the section, the END line's newline included.
@@ -148,6 +155,27 @@ fn version_end(text: &str) -> Option<usize> {
     None
 }
 
+/// The profile keys a constraint of a rule is held to, by what its condition is about: a microvia's or blind via's hole is held to the
+/// microvia minimum and a buried via's to the buried minimum (their diameters and clearances have no published limit of their own).
+fn keys_for(constraint: &str, cond: &str) -> &'static [&'static str] {
+    let micro = cond.contains("'Micro'") || cond.contains("'Blind'") || cond.contains("'blind'") || cond.contains("'micro'");
+    let buried = cond.contains("'Buried'") || cond.contains("'buried'");
+    match (micro, buried, constraint) {
+        (true, _, "hole_size") => &["microvia_hole_min"], (_, true, "hole_size") => &["buried_via_hole_min"],
+        (true, _, _) | (_, true, _) => &[],
+        _ => keys_of(constraint),
+    }
+}
+/// The person's rules' minimums with each rule's condition: (rule name, constraint, value in mm, condition).
+pub fn own_rules(text: &str) -> Vec<(String, String, f64, String)> {
+    let clean: String = text.lines().filter(|l| !l.trim_start().starts_with('#')).collect::<Vec<_>>().join("\n");
+    let mut out = vec![];
+    for chunk in clean.split("(rule ").skip(1) {
+        let cond = chunk.find("(condition ").map(|i| chunk[i + 11..].split('"').nth(1).unwrap_or("").to_string()).unwrap_or_default();
+        for (n, c, v) in own_mins(&format!("(rule {chunk}")) { out.push((n, c, v, cond.clone())) }
+    }
+    out
+}
 /// The person's rules' minimums: (rule name, constraint, value in mm).
 pub fn own_mins(text: &str) -> Vec<(String, String, f64)> {
     let clean: String = text.lines().filter(|l| !l.trim_start().starts_with('#')).collect::<Vec<_>>().join("\n");
@@ -175,7 +203,7 @@ pub fn dru_path(pro: &str) -> Option<PathBuf> { pro.strip_suffix(".kicad_pro").m
 /// What the project's rules file holds against the plan.
 pub fn status(text: &str, plan: &Plan) -> Value {
     let cur = section(text);
-    json!({"present": cur.is_some(), "current": cur == Some(plan.section.as_str()), "suggestions": plan.suggestions, "conflicts": plan.conflicts})
+    json!({"present": cur.is_some(), "current": cur == Some(plan.section.as_str()), "suggestions": plan.suggestions, "conflicts": plan.conflicts, "costs_more": plan.costs_more})
 }
 
 /// Write the section into the project's rules file (a copy hub writes nothing). Answers the new text.
@@ -219,7 +247,11 @@ mod tests {
         assert!(s.contains("(rule \"fab: non-plated hole\"\n\t(condition \"A.Type == 'Pad' && A.Pad_Type == 'NPTH, mechanical'\")\n\t(constraint hole_size (min 0.5mm)))"));
         assert!(s.contains("https://jlcpcb.com/capabilities/pcb-capabilities, read 2026-11-12"), "each value with its source and date");
         assert_eq!(pl.suggestions.iter().map(|v| v["key"].as_str().unwrap()).collect::<Vec<_>>(), ["min_clearance"], "board setup minimums under the fab's are suggestions");
-        assert_eq!(pl.conflicts, ["rule \"BGA fanout\" allows clearance 0.08mm, under the fab's 0.09mm (copper to copper spacing)", "rule \"BGA fanout\" allows track_width 0.0762mm, under the fab's 0.09mm (track width)"]);
+        assert_eq!(pl.costs_more, ["rule \"BGA fanout\" allows clearance 0.08mm, under the fab's 0.09mm (copper to copper spacing); the fab makes down to 0.075mm for more", "rule \"BGA fanout\" allows track_width 0.0762mm, under the fab's 0.09mm (track width); the fab makes down to 0.075mm for more"]);
+        assert!(pl.conflicts.is_empty(), "within what the fab makes for more: notes, not conflicts");
+        let tight = "(version 1)\n(rule t (constraint clearance (min 0.05mm)))\n(rule m (condition \"A.Via_Type == 'Micro'\") (constraint hole_size (min 0.075mm)) (constraint via_diameter (min 0.2mm)))\n";
+        let hdi = plan(&p, &choice("hdi", json!({"layers": 6}), "free"), &pro(), tight);
+        assert_eq!(hdi.conflicts.len(), 1, "a microvia rule is held to the microvia minimum: {:?}", hdi.conflicts); assert!(hdi.conflicts[0].contains("rule \"t\""));
         // costs-more tier: the BGA fanout is within what the fab makes for more
         let ex = plan(&p, &choice("pcb", json!({"layers": 4}), "extra"), &pro(), HAND); assert!(ex.section.contains("costs-more limits")); assert!(ex.conflicts.is_empty(), "0.08 mm and 3 mil are both within what it makes for more: {:?}", ex.conflicts);
         // every net class at or above the fab: no clearance rule

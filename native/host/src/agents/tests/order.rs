@@ -19,7 +19,9 @@ async fn cwd(ag: &Arc<Agents>) -> std::path::PathBuf { std::path::PathBuf::from(
     std::fs::write(dir.join("a.kicad_pcb"), "(kicad_pcb)").unwrap();
     let (ok, t) = call(&r.ag, "order_review", json!({"action":"check"})).await; assert!(ok, "{t}"); assert_eq!(serde_json::from_str::<Value>(&t).unwrap()["state"], "none");
     let (ok, t) = call(&r.ag, "order_review", json!({"action":"record","verdict":"issues","summary":"one thing","issues":["Shade: walls 0.6 mm, need 0.8"]})).await; assert!(ok, "{t}");
-    assert_eq!(serde_json::from_str::<Value>(&t).unwrap(), json!({"recorded":true,"verdict":"issues"}));
+    let said: Value = serde_json::from_str(&t).unwrap(); assert_eq!((said["recorded"].clone(), said["verdict"].clone()), (json!(true), json!("issues")));
+    assert!(said["design_review"]["counts"].is_object(), "the record rests on Backplane's own design review: {said}");
+    assert!(std::fs::read_to_string(dir.join(".backplane/review.md")).unwrap().contains("one thing"), "review.md is the run's findings with the reviewer's notes");
     let rec: Value = serde_json::from_str(&std::fs::read_to_string(dir.join(".backplane/review.json")).unwrap()).unwrap();
     assert_eq!(rec["verdict"], "issues"); assert_eq!(rec["issues"], json!(["Shade: walls 0.6 mm, need 0.8"])); assert_eq!(rec["fingerprint"].as_str().unwrap().len(), 32);
     let (_, t) = call(&r.ag, "order_review", json!({"action":"check"})).await; let s: Value = serde_json::from_str(&t).unwrap(); assert_eq!((s["state"].clone(), s["verdict"].clone()), (json!("current"), json!("issues")));

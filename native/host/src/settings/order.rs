@@ -67,6 +67,7 @@ pub async fn call(ag: &Arc<Agents>, thread: &str, name: &str, a: &Value) -> (boo
         "order_review" => match sv(a, "action") {
             "gate" => gate(ag, thread, &cwd).await,
             "record" if crate::copy::on() => fail(crate::copy::HOME_ONLY),
+            "record" => record(ag, &cwd, a).await,
             _ => review(&cwd, a).await,
         },
         _ => fail("unknown tool"),
@@ -149,6 +150,32 @@ async fn review(cwd: &str, a: &Value) -> (bool, Value) {
         match review_write(&cwd, &rec) { Ok(()) => (true, json!({"recorded":true,"verdict":rec["verdict"]})), Err(_) => fail("the review could not be written") }
     }).await;
     r.unwrap_or_else(|_| fail("the review could not be read"))
+}
+
+/// Order.review.record with the design review (review/): the recorded verdict and issues rest on Backplane's own run for the design as
+/// it is now (run first, scope "order", when there is none): its must-changes lead the issues and make the verdict "issues" whatever the
+/// agent says; the agent's own issues follow (eight at most in all); `.backplane/review.md` is the run's findings with the agent's notes.
+pub fn merge_record(run: &Value, a: &Value) -> Value {
+    let mut issues = crate::review::must_lines(run, ISSUES_KEPT);
+    for x in review_lines(&a["issues"]) { if issues.len() >= ISSUES_KEPT { break } if !issues.contains(&x) { issues.push(x) } }
+    let verdict = if run["verdict"] == "issues" || verdict(sv(a, "verdict")) == "issues" { "issues" } else { "ok" };
+    let c = &run["counts"]; let own = sv(a, "summary").trim();
+    let summary = format!("{}{}{} must change, {} should, {} notes (design review)", own, if own.is_empty() { "" } else { "; " }, c["error"], c["warning"], c["info"]);
+    json!({"verdict": verdict, "summary": summary, "issues": issues})
+}
+async fn record(ag: &Arc<Agents>, cwd: &str, a: &Value) -> (bool, Value) {
+    if cwd.is_empty() { return fail("this thread has no folder") }
+    let root = std::path::PathBuf::from(cwd);
+    let r2 = root.clone();
+    let run = match tokio::task::spawn_blocking(move || crate::review::current(&r2)).await.ok().flatten() { Some(v) => v, None => match crate::review::run(&ag.hub, &root, "order").await { Ok(v) => v, Err(e) => return fail(&format!("the design review could not run: {e}")) } };
+    let merged = merge_record(&run, a);
+    let (ok, mut out) = review(cwd, &json!({"action": "record", "verdict": merged["verdict"], "summary": merged["summary"], "issues": merged["issues"]})).await;
+    if ok {
+        let (r3, notes, run2) = (root.clone(), sv(a, "summary").to_string(), run.clone());
+        let _ = tokio::task::spawn_blocking(move || std::fs::write(r3.join(".backplane/review.md"), crate::review::md(&run2, &notes))).await;
+        out["design_review"] = json!({"counts": run["counts"], "verdict": run["verdict"], "must_change": merged["issues"]});
+    }
+    (ok, out)
 }
 
 /// Order.gate: 0 current and passed, 1 none or stale, 2 current with issues.

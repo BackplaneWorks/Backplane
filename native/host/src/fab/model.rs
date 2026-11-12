@@ -314,7 +314,7 @@ mod tests {
         let p = baseline();
         let two = select(&p, "pcb", &o(2.0, 1.0)); let four = select(&p, "pcb", &o(4.0, 1.0));
         assert_eq!((free(&two, "track_min"), free(&four, "track_min")), (0.10, 0.09));
-        assert!(extra(&two, "track_min").is_nan(), "no cheaper-limit-for-more on 2 layers"); assert_eq!(extra(&four, "track_min"), 0.076);
+        assert!(extra(&two, "track_min").is_nan(), "no cheaper-limit-for-more on 2 layers"); assert_eq!(extra(&four, "track_min"), 0.075);
         assert_eq!((free(&two, "via_hole_min"), extra(&two, "via_hole_min"), free(&two, "via_diameter_min"), extra(&two, "via_diameter_min")), (0.2, 0.15, 0.45, 0.25));
         assert_eq!(free(&select(&p, "pcb", &o(2.0, 2.0)), "track_min"), 0.16); assert_eq!(free(&select(&p, "pcb", &o(6.0, 2.0)), "space_min"), 0.15);
         assert_eq!((free(&two, "pth_ring_min"), free(&four, "pth_ring_min"), free(&select(&p, "pcb", &o(2.0, 2.0)), "pth_ring_min")), (0.18, 0.15, 0.254));

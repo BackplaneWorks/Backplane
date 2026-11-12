@@ -310,7 +310,8 @@ pub fn read(ls: &[String], how: &Read) -> Option<Value> {
         Row(label, words, nth, scale) => {
             let t = row(ls, label)?;
             let v = num_after(&t, words, *nth)?;
-            Some(json!(if (*scale - 1.0).abs() < 1e-12 { v } else { round(v * scale) }))
+            // a mil in mm to the nearest 5 µm, as fabs write them (4 mil 0.1 mm, 3.5 mil 0.09 mm, 3 mil 0.075 mm)
+            Some(json!(if (*scale - 1.0).abs() < 1e-12 { v } else if (*scale - MIL).abs() < 1e-12 { (v * MIL * 200.0).round() / 200.0 } else { round(v * scale) }))
         }
         After(label, k, words, nth) => { let cl = content(ls); let at = cl.iter().position(|l| *l == *label)?; num_after(cl.get(at + k)?, words, *nth).map(|v| json!(v)) }
         Text(words, nth) => num_after(&content(ls).join("\n"), words, *nth).map(|v| json!(v)),

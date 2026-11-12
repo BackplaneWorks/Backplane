@@ -1,101 +1,50 @@
-# Design review (AllSpice, locally)
+# Design review
 
-> Paths under `src/` below (`src/core`, `src/server`, `src/web`, `src/mobile`, `src/app`) name the Bend JS tree, removed from this checkout (tag `main-bend-final`). Where the current Rust code for each is, is unverified; look under `native/host/src/` and `native/gpui/`.
+Backplane's own review of a design, deterministic checks first. Code: `native/host/src/review/`; findings in lane E's model
+(`kicad/findings.rs`: `{id, source, severity, rule, title, detail, anchors, fix}`), so the Checks list, the phones and "Fix with agent"
+take them as they take DRC and ERC.
 
-AllSpice is "GitHub for hardware". This page lists its features, marks which
-ones Backplane can run locally, and gives the plan for building the missing
-ones. KiCad comes first. Other CAD tools plug in through `src/core/cad`.
+## Severity
 
-Sources: allspice.io/product, allspice.io/features, learn.allspice.io (index
-`llms.txt`: Design Reviews, Create a Release, Automations, file formats,
-comment → issue, checklists).
+`error` must change (the fab refuses it, or the order cannot be made), `warning` should change, `info` a note (a capability that costs
+more, a value between the fab's limit and Backplane's recommendation, a board setup minimum the person may raise). In `review.md` and
+the tool's answer: "must change", "should", "note".
 
-## Inventory
+## Sources (`review/checks.rs`)
 
-| AllSpice feature | Status | Backplane today / what to build |
-|---|---|---|
-| Visual PCB diff, colour-coded added/removed/changed, object level | have | `Hist.mark`: layers 26-28 in red, amber and green, the rest dimmed; `Pv.child.diff` |
-| Visual schematic diff | have, one sheet at a time | Same path. Missing: whole hierarchy with changes per sheet, and moving through sheets while comparing (`Hist.rebase` drops a comparison to the live file) |
-| Diff any two commits or branches ("arbitrary commits without a review") | partial | The compare menu offers only the 40 newest branches and commits, HEAD, turns and steps. Missing: tags, any ref or SHA typed in, `a..b` vs `a...b` (base of the merge) |
-| Per-layer diff | missing | Marks collapse onto layers 26-28 and lose their source layer. Build: keep the source layer so layer flips and focus filter marks |
-| Side by side | missing | Build an Old / Diff / New flip on all four clients (same scene, so it costs nothing). True two-pane view: later, web first |
-| Design review = PR with a hardware view | have | `Git.act` commit, push, create_pr; `gh` accounts; thread worktrees |
-| Comments pinned to a sheet or layer location | missing | Build: `src/core/review`, anchors (file, commit, sheet, layer, x/y in mm), stored in the event log, pins in every viewer, MCP tools for agents |
-| Version-linked comments | missing | An anchor names its commit. On a later version, a pin shows "moved" when its item changed (by `Hist.mark` key) |
-| Comment → issue | missing (GitHub) | Comment menu: Open issue (`gh issue create`, from the person's click) |
-| Approvals / sign-off | partial | PR merge exists. Build: checklist sign-off per review (below) |
-| Review checklists and templates | missing | Build: `.backplane/checklist.md` in the repo (a markdown task list), ticked per PR or commit, results in the report |
-| BOM generation | missing | Build: `src/core/bom` reads symbols from `.kicad_sch` (Reference, Value, Footprint, MPN, Manufacturer, DNP, in BOM), groups them, writes CSV; `kicad-cli sch export bom` for releases |
-| BOM diff, parts-change summary | missing | Build: BOM diff between any two versions as a markdown table; appended to PR bodies `Git.act` creates |
-| BOM checks (missing footprint, duplicate refdes, bad or missing MPN, ratings) | missing | Build: rules in `checks`. Rating mismatch needs part data: KiStack bom skill, agent-side |
-| Automations (Actions): deterministic checks, triggers, jobs | missing | Build: "design checks" (ERC, DRC, BOM rules, checklist, and custom scripts from `.backplane/checks.json`) on a commit, PR or working copy, run in a detached worktree; triggers: on demand, before PR creation, at tag (release gate) |
-| Release management, tag + attached outputs | missing | Build: tag, then from a clean worktree of the tag: Gerbers, drill, CPL, BOM CSV, schematic and board PDFs, STEP, optional IPC-2581/ODB++. Stored in `<repo>/.backplane/releases/<tag>/`, and as `gh release` assets when the remote is GitHub (the person's click publishes) |
-| Release gating | missing | A release refuses while checks fail, unless forced |
-| Milestones, issues | cloud (GitHub's) | Skip. `gh` covers it |
-| DRCY AI review, grounded Q&A, connections checker | have (agents) | Claude, Codex, Grok and Muse with KiStack skills. Build: the agent sees open comments and check results, and can comment and run checks through MCP |
-| Full revision search, traceability | partial | Steps and turns and `git log`. Skip anything beyond that for now |
-| Headless API/MCP/SDK, CI/CD | partial | Agents' MCP plus `/debug`. New MCP tools above |
-| Altium / OrCAD / Allegro / Xpedition parsing | later | Integration layer only: `cad` adapters (detect, roles, check and output commands). Proprietary formats need parsers or exporters we lack |
-| Library management | skip | Out of scope |
-| Hosted repos, mirroring, SSO, MFA, SOC 2, GovCloud, billing, teams, Slack | cloud-only | Skip |
+- `drc`, `erc`: E's runs (kicad/checkrun.rs). A full or order review asks for them fresh and waits (5 minutes at most); what is not
+  fresh then is listed as not checked.
+- `fab`: the DRC rules' fab section missing or stale (fix: `fab_profile {action: "drc"}`); the person's rules that allow less than the
+  fab (a conflict) or only what costs more (a note); board setup minimums under the fab's (notes: the person applies them from the Fab
+  panel); the fab file's options against the fab (layer count, thickness and finish it offers, layers and thickness against the board);
+  the board's size; the narrowest track, the smallest via (a microvia against the microvia minimum) and pad hole against the free and
+  costs-more limits and the recommendation (tracks 0.127 mm, vias 0.3/0.45 mm).
+- `bom`: the BOM the hub publishes (`mgmt.bom.<digest>`, lane D's): an MPN on every placed line; with D's stock, lifecycle and library
+  fields, out of stock or short at the order's quantity (must change), NRND (should), EOL (must change), extended parts (note). Lines not
+  checked yet are listed, never guessed; the parts service is never asked from here.
+- `outputs`: the newest Gerber set in `mfg/`: every copper layer of the board, the outline, both masks, the drill files, and their smallest
+  tools against the fab's smallest hole (laser files against the microvia minimum).
+- `assembly` (assembled rigid boards): parts on both sides (a note: the standard service), fiducials then, the placement file in the
+  outputs against the board (parts missing, parts on the other side).
+- `mech`: fab files of 3D-printed, CNC and sheet metal parts: their own DFM results (a SendCutSend part's failed rules with their sources).
+  Geometry rules (walls, radii) need the model: they belong to the agent-judged review.
 
-## Integration layer
+## A run (`review/mod.rs`)
 
-`src/core/cad`, pure data. Each `Cad.Tool` has:
-- a name;
-- its file extensions, each with a role (board, schematic, project, symbol library);
-- its checks (an argv template, the report format, a parser id);
-- its outputs (an argv template, an output folder);
-- whether the viewer can draw its files.
+`design_review {scope}` (every thread's tool): `full` (default) or `order` (DRC and ERC fresh) or `save` (file checks only). It keeps the run
+in `.backplane/design-review.json` (`{at, scope, fingerprint, rev, took_ms, counts, by_source, skipped, verdict, findings}`), writes
+`.backplane/review.md` and publishes it as info `review.<digest>` (findings cut at 300). On a copy hub nothing is written.
 
-KiCad is the first adapter, built over `kicad-cli` 10 (`sch erc`, `pcb drc` with `--format json`, `sch export bom|pdf|netlist`, `pcb export gerbers|drill|pos|pdf|step|ipc2581|odb`). The server runs the templates, so it holds no per-tool logic. A later adapter (Altium through its own CLI or an exported netlist, Eagle through KiCad's importer) adds a record, a parser and a test.
+`order_review {action: "record"}` rests on it: the run for the design as it is now (the order fingerprint), else a run of scope `order`
+first; its must-changes lead the issues and make the verdict "issues" whatever the agent says; `review.md` is the run's findings with the
+agent's notes. The Buy gate is unchanged: a review older than the design is stale and asks again.
 
-## Plan, in increments (one PR each)
+## When (`review/policy.rs`)
 
-1. **Compare anything.** Tags and any typed ref in the compare menu; merge-base (`...`) compares; the whole hierarchy with changes per sheet, moving through sheets inside a comparison; per-layer marks; Old / Diff / New flip. All four clients.
-2. **BOM and BOM diff.** `bom`, a Review tab in the viewer that shows markdown reports (BOM, BOM diff, later checks and releases) through the existing `Md.render` on all four clients; a parts-change summary on PRs.
-3. **Design checks.** ERC, DRC, BOM rules, checklist, custom scripts, on any version, in a detached worktree. Violations drawn as markers at their positions; MCP `design_check`; a PR gate.
-4. **Review comments.** Anchored pins on all four clients (right-click or long-press "Comment here"), replies, resolve; event log variants; MCP `review_comments`/`review_comment`; open comments in the agent's prompt; export to the PR and to an issue.
-5. **Releases.** Tag, gate on checks, outputs from the tag, notes from the BOM diff and checks since the last tag, local folder plus `gh release`.
+On demand (the tool); before an order (`order_review record`); on save, scope `save`, for a project shown in the last 30 minutes, after
+1.5 s of quiet, one run at a time, not with under 400 MB free.
 
-## Status
+## Phones
 
-1. Compare anything: done (window, web, iOS, Android). Typed refs, tags and the branch point; per-layer marks follow the active layer; sheets keep comparing; Old / Diff / New; the bar under every board and schematic.
-2. BOM and BOM change: done. The Review tab on all four clients; a BOM of the working copy, or what changed between a comparison's versions (the BOM button in the comparison bar); BOM rules; a pull request Backplane opens gets its parts change as a comment.
-3. Design checks: the Checks page (ERC, DRC, BOM rules, the checklist's boxes ticked into `.backplane/checklist.md`, custom checks, the gate) on the working copy or the comparison's new commit.
-4. Review comments: pinned to a place on a board or schematic by the person (right-click, long press) or the agent (MCP `review_comment`), answered, resolved, reopened; the open ones go to the agent with each message; listed on the Review tab's Comments page.
-5. Releases: the Review tab's Release page. A tag (the next one proposed), gated by the design checks unless forced; Gerbers, drill, CPL, BOM, PDFs and STEP from a clean checkout of the tag into `.backplane/releases/<tag>/` with notes (the BOM change since the tag before) and a manifest; published on GitHub only when the person turns Publish on.
-
-### Release transaction failures and retries
-
-A release first resolves HEAD to an immutable commit and refuses staged,
-unstaged and untracked work outside generated release/worktree/history output. Review
-configuration and checklist changes must be committed as well. Tracked
-configuration changes are also refused. Commit or stash that work first.
-Checks run against an archive of the resolved commit. If HEAD changes during
-validation, no tag is created; retry to validate the new commit. A tag names the
-validated commit explicitly, and exports and the manifest use that same commit.
-
-Check invocation failures and missing/malformed report schemas are execution
-errors, separate from design findings. The ERC/DRC gate settings and force
-control still govern design findings. Execution errors always stop a release
-and are shown in the checks/release report; an absent child gate cannot pass.
-
-Exports are built in a private sibling staging directory under
-`.backplane/releases`. Failed commands, directory creation, listing and metadata
-writes leave no final output directory. Successful notes and manifest are written
-before the complete directory is renamed into place. Existing complete output
-is preserved byte for byte. A failed export may leave the local annotated tag;
-retry the same tag only while it still names the validated commit. Existing
-complete outputs are never regenerated over: choose a new tag for another build.
-A running per-tag transaction reports its lock; after an interrupted process,
-inspect the named stale lock and staging directory before retrying. Publishing
-remains an explicit user action after successful output generation.
-
-Snapshot releases refuse symlinks and reject configured CAD files or hierarchical
-sheets whose resolved paths escape the committed repository archive. An internal
-parent reference to another committed folder is allowed. Export commands must
-produce new nonempty output; a zero exit status without the selected output is a
-failure. Publication pushes the captured annotated tag object by immutable refspec
-and verifies the remote object before and after the GitHub call. Publication
-failures remain visible while complete local outputs are preserved.
+`review.<digest>` is hub data: the verdict, counts by source, what was skipped and the findings, as the Checks list will show them once E's
+list takes these sources (`kicad.checks.set`).
