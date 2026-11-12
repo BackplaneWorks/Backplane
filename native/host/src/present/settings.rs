@@ -624,7 +624,9 @@ fn bug_url(info: &Value) -> String {
 /// Settings > Voice: the same rows the phones get (voice/page.rs), with the Add a term field as typed here.
 fn voice(st: &State, session: &Value, info: &Value) -> Vec<Value> {
     let p: crate::voice::page::Prefs = st.settings.iter().filter(|(k, _)| k.starts_with("voice.")).filter(|(_, v)| !v.is_empty()).map(|(k, v)| (k.clone(), v.clone())).collect();
-    crate::voice::page::rows(&p, info, draft(session, "@f.vterm"), draft(session, "@key.err"))
+    let mut rows = crate::voice::page::rows(&p, info, draft(session, "@f.vterm"), draft(session, "@key.err"));
+    for r in rows.iter_mut().filter(|r| r["label"] == "Send by voice") { r["fields"][0]["value"] = json!(draft(session, "@f.vphrase")); }
+    rows
 }
 
 /// Settings > Usage: the thread totals the agents lane counts (`tok.<epoch>.t.<thread>`: "turns/in/cread/cwrite/out/reasoning/cost/costTurns/knownTurns"), added up per provider.
@@ -757,6 +759,7 @@ pub fn act(hub: &str, session: &Value, action: &str, value: &str) -> Option<Out>
             send(session, hub, m, p, &mut cmds, &mut rid);
             if action == "ring-search" && value == "clear" { json!({"drafts": {"@f.ringq": ""}}) } else { json!({}) }
         }
+        "voice-phrases" => { let (k, v) = crate::voice::page::phrases_setting(draft(session, "@f.vphrase")); send(session, hub, "setting.set", json!({"key": k, "value": v}), &mut cmds, &mut rid); json!({"drafts": {"@f.vphrase": ""}}) }
         "voice-term" => { for (k, v) in crate::voice::page::term_settings(draft(session, "@f.vterm")) { send(session, hub, "setting.set", json!({"key": k, "value": v}), &mut cmds, &mut rid); } json!({"drafts": {"@f.vterm": ""}}) }
         // Machines: every press goes to the hub as machines.page.act, with the fields as typed
         a if a.starts_with("machine-") => {

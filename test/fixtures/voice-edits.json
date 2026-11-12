@@ -388,6 +388,74 @@
         "mark": 3,
         "caret": 3
       }
+    },
+    {
+      "name": "a command takes back its words before the mark",
+      "text": "Buy milk. Message complete.",
+      "mark": 27,
+      "edit": {
+        "del": 0,
+        "ins": "",
+        "adv": 0,
+        "to": 0,
+        "back": 18
+      },
+      "want": {
+        "text": "Buy milk.",
+        "mark": 9,
+        "caret": 9
+      }
+    },
+    {
+      "name": "taking back keeps what follows the tail",
+      "text": "one two three|after",
+      "mark": 13,
+      "edit": {
+        "del": 0,
+        "ins": "",
+        "adv": 0,
+        "to": 0,
+        "back": 6
+      },
+      "want": {
+        "text": "one two|after",
+        "mark": 7,
+        "caret": 7
+      }
+    },
+    {
+      "name": "a new line after taking back the tail",
+      "text": "Done. maybe",
+      "mark": 5,
+      "edit": {
+        "del": 6,
+        "ins": "\n",
+        "adv": 1,
+        "to": 1,
+        "back": 0
+      },
+      "want": {
+        "text": "Done.\n",
+        "mark": 6,
+        "caret": 6
+      }
+    },
+    {
+      "name": "back past the start is the start",
+      "text": "ab",
+      "mark": 2,
+      "edit": {
+        "del": 0,
+        "ins": "x",
+        "adv": 1,
+        "to": 1,
+        "back": 9
+      },
+      "want": {
+        "text": "x",
+        "mark": 1,
+        "caret": 1
+      }
     }
   ],
   "shift": [

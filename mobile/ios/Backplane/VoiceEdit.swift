@@ -7,10 +7,17 @@ enum VoiceEdit {
     static func scalars(_ s: String) -> [Unicode.Scalar] { Array(s.unicodeScalars) }
     static func string(_ a: some Sequence<Unicode.Scalar>) -> String { var v = String.UnicodeScalarView(); v.append(contentsOf: a); return String(v) }
     static func count(_ s: String) -> Int { s.unicodeScalars.count }
-    /// Replace `del` characters after the mark with `ins`; the mark moves `adv`, the caret goes `to` past the old mark. A mark past the end is the end.
-    static func apply(_ draft: String, mark: Int, del: Int, ins: String, adv: Int, to: Int) -> (text: String, mark: Int, caret: Int) {
-        let cs = scalars(draft), m = min(mark, cs.count), end = min(m + del, cs.count)
-        return (string(cs[..<m] + scalars(ins) + cs[end...]), m + adv, m + to)
+    /// Replace `back` characters before the mark and `del` after it with `ins`; the mark goes `adv`, the caret `to` past where that began (the old
+    /// mark less `back`; `back` is a voice command taking words back). A mark past the end is the end.
+    static func apply(_ draft: String, mark: Int, del: Int, ins: String, adv: Int, to: Int, back: Int = 0) -> (text: String, mark: Int, caret: Int) {
+        let cs = scalars(draft), m = min(mark, cs.count), end = min(m + del, cs.count), s = max(0, m - back)
+        return (string(cs[..<s] + scalars(ins) + cs[end...]), s + adv, s + to)
+    }
+    /// Undo of a voice send: the taken text back in front of what was dictated since; the mark moves as typing before it would.
+    static func undo(_ taken: String, _ now: String, mark: Int) -> (text: String, mark: Int) {
+        if now.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return (taken, count(taken)) }
+        let t = taken + (taken.hasSuffix("\n") ? "" : " ") + now
+        return (t, mark + count(t) - count(now))
     }
     /// The person typed: the mark moves with what changed before it.
     static func shift(_ old: String, _ new: String, mark: Int) -> Int {

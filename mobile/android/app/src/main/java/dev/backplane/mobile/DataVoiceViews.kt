@@ -47,11 +47,17 @@ private fun VChip(label: String, primary: Boolean = false, tag: String, press: (
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun VoiceStrip(tid: String) {
-    val v = DataVoice.views[tid] ?: return
+    val p = DataVoice.pending?.takeIf { it.tid == tid }; val said = DataVoice.said?.takeIf { it.first == tid }?.second
+    val v = DataVoice.views[tid] ?: if (p != null || said != null) JSONObject() else return
     val on = v.optBoolean("on"); val note = v.optString("note")
     val fixes = v.optJSONArray("fixes").objs(); val ask = v.optJSONObject("ask")
-    if (!on && note.isEmpty() && fixes.isEmpty() && ask == null) return
+    if (!on && note.isEmpty() && fixes.isEmpty() && ask == null && p == null && said == null) return
     Column(Modifier.fillMaxWidth().testTag("voice"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        if (p != null) Row(Modifier.fillMaxWidth().testTag("voice.pending"), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            DDot(if (p.cmd == "send") dcs.primary else dcs.error, 8)
+            Text(if (p.cmd == "send") Msg.voice_cmd_sending else Msg.voice_cmd_cleared, Modifier.weight(1f), color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 12.sp)
+            VChip(Msg.voice_cmd_undo, true, "voice.undo") { DataVoice.undo() }
+        } else if (said != null) Text(said, color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 12.sp, modifier = Modifier.testTag("voice.said"))
         if (note.isNotEmpty()) Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Text(Tr.t(note), Modifier.weight(1f).testTag("voice.note"), color = if (v.optBoolean("bad")) dcs.error else dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 12.sp)
             VChip(Msg.common_close, tag = "voice.close") { DataVoice.act(tid, "voice-err", "") }
@@ -88,7 +94,7 @@ internal fun VoiceSettings() {
     PageRows(Msg.android_voice_head, "voice", DataVoice.rows, DataVoice.pageError) { action, value, sent ->
         DataVoice.pageAct(action, value, sent)
         // the key and the term are spent once the hub has them
-        setOf("secret-save" to "kval", "voice-term" to "vterm").firstOrNull { it.first == action }?.second
+        setOf("secret-save" to "kval", "voice-term" to "vterm", "voice-phrases" to "vphrase").firstOrNull { it.first == action }?.second
     }
 }
 

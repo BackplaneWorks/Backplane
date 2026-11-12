@@ -20,9 +20,10 @@ for c in f["edits"] as! [[String: Any]] {
 }
 for c in f["apply"] as! [[String: Any]] {
     let e = c["edit"] as! [String: Any], w = c["want"] as! [String: Any]
-    let r = VoiceEdit.apply(str(c["text"]), mark: int(c["mark"]), del: int(e["del"]), ins: str(e["ins"]), adv: int(e["adv"]), to: int(e["to"]))
+    let r = VoiceEdit.apply(str(c["text"]), mark: int(c["mark"]), del: int(e["del"]), ins: str(e["ins"]), adv: int(e["adv"]), to: int(e["to"]), back: int(e["back"]))
     check(r.text == str(w["text"]) && r.mark == int(w["mark"]) && r.caret == int(w["caret"]), c["name"], r)
 }
+do { let u = VoiceEdit.undo("Buy milk.", "And eggs.", mark: 9); check(u.text == "Buy milk. And eggs." && u.mark == 19, "undo", u) }
 for c in f["shift"] as! [[String: Any]] {
     let m = VoiceEdit.shift(str(c["old"]), str(c["new"]), mark: int(c["mark"]))
     check(m == int(c["want"]), c["name"], m)

@@ -9,7 +9,22 @@ use std::collections::HashMap;
 /// `cuts`: this session's sends while dictating, per thread; `seqs`: the number of the last edit written; `held`: edits that came after a send, kept until
 /// the box is empty (the hub's answer to the send), then written at the new mark 0 (voice/dictation.rs `Reader::cut`).
 pub struct Voice { pub views: HashMap<String, Value>, marks: HashMap<String, usize>, pub level: u32, pub fix: Option<Entity<Composer>>, upload: Option<super::voice_mic::Upload>,
-    cuts: HashMap<String, u64>, seqs: HashMap<String, u64>, held: HashMap<String, (std::time::Instant, Vec<Value>)> }
+    cuts: HashMap<String, u64>, seqs: HashMap<String, u64>, held: HashMap<String, (std::time::Instant, Vec<Value>)>,
+    /// a voice command's message in its undo window; when the send button flashed for it; the line said after it ("Sent by voice") and until when
+    pub pending: Option<Pending>, next: u64, pub flash: Option<std::time::Instant>, pub said: Option<(String, std::time::Instant)> }
+/// A draft a voice command took (cmds.rs): `send` goes when the window ends, `cancel` is gone then; Undo puts the text back in front of the draft.
+#[derive(Clone, Debug)]
+pub struct Pending { pub id: u64, pub thread: String, pub text: String, pub cmd: String }
+/// The undo window, and how long the send button flashes and the line after it stays.
+pub const UNDO: std::time::Duration = std::time::Duration::from_secs(3);
+pub const FLASH: std::time::Duration = std::time::Duration::from_millis(600);
+const SAID: std::time::Duration = std::time::Duration::from_secs(2);
+/// Undo: the taken text back in front of what was dictated since, and where the mark moves (as typing before it would move it).
+pub fn undo_text(taken: &str, now: &str, mark: usize) -> (String, usize) {
+    if now.trim().is_empty() { return (taken.to_string(), taken.chars().count()) }
+    let sep = if taken.ends_with('\n') { "" } else { " " }; let t = format!("{taken}{sep}{now}");
+    let n = t.chars().count() - now.chars().count(); (t, mark + n)
+}
 /// An edit held after a send waits at most this long for the box to empty; past it the send did not go and the edits are written at the end.
 const HOLD: std::time::Duration = std::time::Duration::from_secs(3);
 /// Whether an edit frame was made before this client's last send while dictating (the hub's `cut` count is behind ours): it belongs to nothing now.
@@ -18,9 +33,10 @@ pub fn stale(f: &Value, mine: u64) -> bool { f["cut"].as_u64().map_or(false, |c|
 fn chars(s: &str) -> Vec<char> { s.chars().collect() }
 fn byte_at(s: &str, c: usize) -> usize { s.char_indices().nth(c).map_or(s.len(), |(i, _)| i) }
 /// The hub's edit applied at the mark: the byte range it replaces, the new mark and the new caret (characters). A mark past the end is the end.
-pub fn edit_range(text: &str, mark: usize, del: usize, adv: usize, to: usize) -> (std::ops::Range<usize>, usize, usize) {
-    let n = text.chars().count(); let m = mark.min(n); let end = (m + del).min(n);
-    (byte_at(text, m)..byte_at(text, end), m + adv, m + to)
+/// `back`: characters before the mark replaced too (a voice command taking words back); the mark and caret are then counted from where that begins.
+pub fn edit_range(text: &str, mark: usize, del: usize, adv: usize, to: usize, back: usize) -> (std::ops::Range<usize>, usize, usize) {
+    let n = text.chars().count(); let m = mark.min(n); let end = (m + del).min(n); let s = m.saturating_sub(back);
+    (byte_at(text, s)..byte_at(text, end), s + adv, s + to)
 }
 /// The person typed: the mark moves with what changed before it.
 pub fn shift(old: &str, new: &str, mark: usize) -> usize {
@@ -62,6 +78,7 @@ impl Win {
                 let caret = new.chars().count(); self.voice_put(&thread, 0..old.len(), &new, caret, cx);
             }
             "audio" => self.voice_mic_send(s(&f, "path")),
+            "command" => self.voice_command(&thread, &f, cx),
             _ => {}
         }
         cx.notify();
@@ -70,7 +87,7 @@ impl Win {
         let text = if thread == self.selected { self.input.read(cx).content.to_string() } else { self.voice_text(thread) };
         let mark = self.screens.voice.marks.get(thread).copied().unwrap_or(text.chars().count());
         let n = |k: &str| f[k].as_u64().unwrap_or(0) as usize;
-        let (range, m, caret) = edit_range(&text, mark, n("del"), n("adv"), n("to"));
+        let (range, m, caret) = edit_range(&text, mark, n("del"), n("adv"), n("to"), n("back"));
         self.screens.voice.marks.insert(thread.to_string(), m);
         if let Some(q) = f["seq"].as_u64() { self.screens.voice.seqs.insert(thread.to_string(), q); }
         self.voice_put(thread, range, s(f, "ins"), caret, cx);
@@ -88,6 +105,44 @@ impl Win {
         let v = &mut self.screens.voice; let n = { let c = v.cuts.entry(t.clone()).or_insert(0); *c += 1; *c }; let seq = v.seqs.get(&t).copied().unwrap_or(0);
         v.marks.insert(t.clone(), 0); if hold { v.held.insert(t.clone(), (std::time::Instant::now(), vec![])); }
         rpc(self, json!({"op": "act", "thread": t, "action": "voice-clear", "value": "", "draft": "", "cut": n, "seq": seq}));
+    }
+    /// A voice command (the hub's `command` frame): "send" or "cancel". The whole draft is taken from the box now (dictation goes on into the empty
+    /// box), the send button flashes, and the strip says so with Undo; when the window ends a send goes through the outbox (turn.start, mode steer: it
+    /// steers a running turn as the button does, and waits for the hub when it is away), a cancel is dropped.
+    fn voice_command(&mut self, thread: &str, f: &Value, cx: &mut Context<Self>) {
+        let cmd = s(f, "cmd").to_string(); if !matches!(cmd.as_str(), "send" | "cancel") { return }
+        let v = &mut self.screens.voice; let c = v.cuts.entry(thread.to_string()).or_insert(0); *c = (*c).max(f["cut"].as_u64().unwrap_or(0));
+        v.marks.insert(thread.to_string(), 0); v.held.remove(thread);
+        if let Some(p) = self.screens.voice.pending.as_ref().map(|p| p.id) { self.voice_deliver(p, cx) } // the one before goes now
+        let text = if thread == self.selected { self.input.read(cx).content.to_string() } else { self.voice_text(thread) };
+        if text.trim().is_empty() { return }
+        self.voice_put(thread, 0..text.len(), "", 0, cx); self.screens.voice.marks.insert(thread.to_string(), 0);
+        let v = &mut self.screens.voice; v.next += 1; let id = v.next;
+        v.pending = Some(Pending { id, thread: thread.to_string(), text, cmd: cmd.clone() }); if cmd == "send" { v.flash = Some(std::time::Instant::now()) }
+        cx.spawn(async move |w, cx| { cx.background_executor().timer(FLASH).await; let _ = w.update(cx, |_, cx| cx.notify()); cx.background_executor().timer(UNDO - FLASH).await; let _ = w.update(cx, |w, cx| w.voice_deliver(id, cx)); }).detach();
+    }
+    /// The undo window of command `id` ended (or another came): a send goes, a cancel is gone.
+    pub fn voice_deliver(&mut self, id: u64, cx: &mut Context<Self>) {
+        let Some(p) = self.screens.voice.pending.take_if(|p| p.id == id) else { return };
+        let line = if p.cmd == "send" {
+            let th = p.thread.rsplit('|').next().unwrap_or("").to_string();
+            let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
+            if p.thread == self.selected { self.echo_sent(&p.text); }
+            /* i18n-ok: drawn through trs in pending_view */ self.screens.unsent.push(&th, &p.text, now); self.send_unsent(); "Sent by voice"
+        /* i18n-ok: drawn through trs in pending_view */ } else { "Draft cleared by voice" };
+        self.screens.voice.said = Some((line.to_string(), std::time::Instant::now()));
+        cx.spawn(async move |w, cx| { cx.background_executor().timer(SAID).await; let _ = w.update(cx, |_, cx| cx.notify()); }).detach();
+        cx.notify();
+    }
+    /// Undo: the message stays; its text goes back in front of whatever was dictated since.
+    pub fn voice_undo(&mut self, cx: &mut Context<Self>) {
+        let Some(p) = self.screens.voice.pending.take() else { return };
+        let now = if p.thread == self.selected { self.input.read(cx).content.to_string() } else { self.voice_text(&p.thread) };
+        let mark = self.screens.voice.marks.get(&p.thread).copied().unwrap_or(0);
+        let (text, m) = undo_text(&p.text, &now, mark); let caret = text.chars().count();
+        self.voice_put(&p.thread, 0..now.len(), &text, caret, cx);
+        if self.screens.voice.marks.contains_key(&p.thread) { self.screens.voice.marks.insert(p.thread.clone(), m); }
+        self.screens.voice.flash = None; cx.notify();
     }
     /// The person typed in the open thread: `draft_changed` calls this with the old and new text.
     pub fn voice_typed(&mut self, old: &str, new: &str) { let t = self.selected.clone(); if let Some(m) = self.screens.voice.marks.get_mut(&t) { *m = shift(old, new, *m); } }
@@ -150,13 +205,37 @@ pub fn view(cx: &mut Context<Win>, light: bool, v: &Value, level: u32, fix: Opti
     }
     Some(col.into_any_element())
 }
+/// Over the composer after a voice command: its undo window ("Sending by voice…" with Undo), then for a moment what happened.
+pub fn pending_view(cx: &mut Context<Win>, light: bool, v: &Voice, thread: &str) -> Option<AnyElement> {
+    let c = |n: &str| theme::color(light, n);
+    if let Some(p) = v.pending.as_ref().filter(|p| p.thread == thread) {
+        /* i18n-ok: drawn through trs below */ let line = if p.cmd == "send" { "Sending by voice…" } else { "Draft cleared by voice" };
+        return Some(div().id("voice-pending").flex().items_center().gap_2().text_size(px(12.)).child(div().size(px(8.)).bg(c(if p.cmd == "send" { "ok" } else { "warn" }))).child(div().flex_1().text_color(c("dim")).child(crate::i18n::trs(line)))
+            /* i18n-ok: drawn through trs in button */ .child(button(cx, light, "voice-undo".into(), "Undo".into(), true, false, |w, cx| w.voice_undo(cx))).into_any_element());
+    }
+    let (line, at) = v.said.as_ref()?; if at.elapsed() > SAID { return None }
+    Some(div().id("voice-said").text_size(px(12.)).text_color(c("dim")).child(crate::i18n::trs(line)).into_any_element())
+}
+/// The send button flashes for a voice send.
+pub fn flashing(v: &Voice) -> bool { v.flash.map_or(false, |t| t.elapsed() < FLASH) }
 impl Win { pub(crate) fn voice_upload(&mut self) -> &mut Option<super::voice_mic::Upload> { &mut self.screens.voice.upload } }
 
 #[cfg(test)]
 mod tests {
     use super::*; use core::prelude::v1::test;
-    fn run(text: &str, mark: usize, del: usize, ins: &str, adv: usize, to: usize) -> (String, usize, usize) { let (r, m, c) = edit_range(text, mark, del, adv, to); let mut t = text.to_string(); t.replace_range(r, ins); (t, m, c) }
+    fn run(text: &str, mark: usize, del: usize, ins: &str, adv: usize, to: usize) -> (String, usize, usize) { runb(text, mark, del, ins, adv, to, 0) }
+    fn runb(text: &str, mark: usize, del: usize, ins: &str, adv: usize, to: usize, back: usize) -> (String, usize, usize) { let (r, m, c) = edit_range(text, mark, del, adv, to, back); let mut t = text.to_string(); t.replace_range(r, ins); (t, m, c) }
     // the hub's own vectors (voice/place.rs): an edit is replace `del` at the mark, move the mark `adv`, the caret `to`
+    #[test] fn undo_puts_the_message_back_in_front_of_what_was_said_since() {
+        assert_eq!(undo_text("Buy milk.", "", 0), ("Buy milk.".into(), 9));
+        assert_eq!(undo_text("Buy milk.", "And eggs.", 9), ("Buy milk. And eggs.".into(), 19), "the mark moves as typing before it would");
+        assert_eq!(undo_text("Lines\n", "next", 4), ("Lines\nnext".into(), 10));
+    }
+    #[test] fn a_voice_send_goes_as_the_button_does_steering_a_running_turn() {
+        // the outbox's request: turn.start, mode steer, to the command's thread whichever is open (the hub steers a running turn, else starts one)
+        let mut u = crate::screens::unsent::Unsent::default(); let msg = u.push("t9", "Buy milk.", 1);
+        let i = u.next().unwrap(); assert_eq!(crate::screens::unsent::Unsent::request(&i), json!({"thread": "t9", "text": "Buy milk.", "msg": msg, "mode": "steer"}));
+    }
     #[test] fn an_edit_made_before_this_clients_send_is_dropped() {
         assert!(stale(&json!({"cut": 0}), 1), "made before the hub heard of the send"); assert!(!stale(&json!({"cut": 1}), 1)); assert!(!stale(&json!({"cut": 2}), 1));
         assert!(!stale(&json!({}), 3), "a hub without cuts: every edit is written");
@@ -177,7 +256,7 @@ mod tests {
         }
         for c in f["apply"].as_array().unwrap() {
             let (e, w) = (&c["edit"], &c["want"]);
-            assert_eq!(run(c["text"].as_str().unwrap(), u(&c["mark"]), u(&e["del"]), e["ins"].as_str().unwrap(), u(&e["adv"]), u(&e["to"])), (w["text"].as_str().unwrap().to_string(), u(&w["mark"]), u(&w["caret"])), "{}", c["name"]);
+            assert_eq!(runb(c["text"].as_str().unwrap(), u(&c["mark"]), u(&e["del"]), e["ins"].as_str().unwrap(), u(&e["adv"]), u(&e["to"]), e["back"].as_u64().unwrap_or(0) as usize), (w["text"].as_str().unwrap().to_string(), u(&w["mark"]), u(&w["caret"])), "{}", c["name"]);
         }
         for c in f["shift"].as_array().unwrap() { assert_eq!(shift(c["old"].as_str().unwrap(), c["new"].as_str().unwrap(), u(&c["mark"])), u(&c["want"]), "{}", c["name"]); }
     }

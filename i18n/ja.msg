@@ -2467,6 +2467,23 @@ hub.acct.connected.sync.token = 接続済み（同期トークン）
 hub.acct.sync.token.ended = 同期トークンの期限切れ
 hub.acct.sync.token.ends = 同期トークンの期限: {when}
 gpui.e.telemetry.notice = Backplaneは匿名の利用集計を送るようになりました：インストール、更新、日々の利用、そしてスレッド、メッセージ、モデルのトークン、ボットの通信量、作成した基板、注文した基板の1日ごとの合計で、ランダムなインストールID、バージョン、OS、日付が付きます。会話、プロジェクト、ファイル、名前、パス、キーは送りません。現在オンです。ここか、設定 → プライバシーでオフにできます。
+voice.cmd.sending = 音声で送信しています…
+voice.cmd.cleared = 音声で下書きを消去しました
+voice.cmd.sent = 音声で送信しました
+voice.cmd.undo = 元に戻す
+settings.voice.cmd.send = 音声で送信
+settings.voice.cmd.send.note = 最後に少し間を置いて「{phrase}」と言うと、メッセージを送信します（実行中のターンには指示として送ります）。3秒後に送信され、「元に戻す」で取り消せます。現在: {now}。
+settings.voice.cmd.off = オフ: どのフレーズでも送信しません。使うフレーズを入力するか、「既定」を押してください。
+settings.voice.cmd.hint = フレーズ（カンマ区切り）
+settings.voice.cmd.default = 既定
+settings.voice.cmds = 音声コマンド
+settings.voice.cmds.note = 発話の最後に単独で言います。「Scratch that」で最後の文を削除、「New line」で改行、「Cancel message」で下書きを消去します（元に戻せます）。
+voice.cmd.scratch = Scratch that（最後の文を削除）
+voice.cmd.newline = New line（改行）
+voice.cmd.cancel = Cancel message（下書きを消去）
+settings.voice.auto = 無音の後に送信
+settings.voice.auto.note = この時間黙っていると、音声入力した内容を送信します。既定ではオフです。
+voice.cmd.secs = {s}秒
 
 # ---- gpui-f: hub setup flow and thread ----
 gpui.f.group.install = インストール

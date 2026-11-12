@@ -1,6 +1,6 @@
 //! A thread's dictation as a client draws it (pure): the state, the fixes that can be undone, the words to clarify, and what each chip does. `view` is the one shape
 //! every client shows; `Reader` turns the helper's events into edits of the draft and changes of this state.
-use super::{place::{Edit, Place}, vdict::{self, Settle, VDict, VFix, VFx, VW}, words::{self as v, Unsure}};
+use super::{cmds::{Cmd, Cmds}, place::{Edit, Place}, vdict::{self, Settle, VDict, VFix, VFx, VW}, words::{self as v, Unsure}};
 use serde_json::{json, Value};
 
 #[derive(Clone, Debug, Default)]
@@ -88,24 +88,36 @@ pub struct Acted { pub draft: Option<String>, pub settings: Vec<(String, String)
 
 /// What one helper line gives a client.
 #[derive(Debug, PartialEq, Eq)]
-pub enum Out { Edit(Edit), View, Level(u32) }
+pub enum Out { Edit(Edit), View, Level(u32), /** a voice command for the client: "send" or "cancel" (cmds.rs), after the cut that ends the message */ Command(&'static str) }
 
 /// A live session's reader: the settling segment, the cloud's text so far, the segment's corrected words and guesses so far, the tail last sent.
 /// `cuts`: how many sends cut this session, and `seq` the edits written: every edit carries both, so a client drops an edit made before its cut and says
 /// which edit it had last when it sent. `hist`: how far each recent edit had written its segment (None: the segment was done), to cut exactly there.
 pub struct Reader { d: VDict, timed: bool, place: Place, set: Settle, acc: String, seg: Vec<VW>, ask: Vec<Unsure>, tail: String, fixes: Vec<VFx>,
-    pub cuts: u64, pub seq: u64, hist: std::collections::VecDeque<(u64, String, Option<vdict::Mark>)>, done: (String, Vec<VW>) }
+    pub cuts: u64, pub seq: u64, hist: std::collections::VecDeque<(u64, String, Option<vdict::Mark>)>, done: (String, Vec<VW>),
+    /// the voice commands on; when words were last heard; whether any were written since the last cut (auto-send has something to send)
+    cmds: Cmds, heard: Option<std::time::Instant>, wrote: bool }
 const HIST: usize = 64;
 impl Reader {
     pub fn new(d: VDict, timed: bool, draft: &str, caret: usize) -> Reader {
-        Reader { d, timed, place: Place::new(draft, caret), set: Settle::default(), acc: String::new(), seg: vec![], ask: vec![], tail: String::new(), fixes: vec![], cuts: 0, seq: 0, hist: Default::default(), done: Default::default() }
+        Reader { d, timed, place: Place::new(draft, caret), set: Settle::default(), acc: String::new(), seg: vec![], ask: vec![], tail: String::new(), fixes: vec![], cuts: 0, seq: 0, hist: Default::default(), done: Default::default(), cmds: Cmds::default(), heard: None, wrote: false }
+    }
+    pub fn with_cmds(mut self, c: Cmds) -> Reader { self.cmds = c; self }
+    /// The message ends here by a voice command: the same as a client's cut, made by the hub (the client takes its count from the command's frame).
+    fn cut_here(&mut self) { self.cuts += 1; self.place = Place::new("", 0); self.seg.clear(); self.ask.clear(); self.fixes.clear(); self.tail.clear(); self.wrote = false; }
+    fn edit(&mut self, item: &str, e: Edit) -> Out { self.seq += 1; self.hist.push_back((self.seq, item.to_string(), None)); if self.hist.len() > HIST { self.hist.pop_front(); } Out::Edit(e) }
+    /// Auto-send (cmds.rs `AUTO`): after that many seconds with no words heard, no segment open and words written since the last send, the message goes.
+    pub fn idle(&mut self, now: std::time::Instant) -> Vec<Out> {
+        let s = self.cmds.auto_s; if s == 0 || !self.wrote || !self.set.item.is_empty() || self.place.is_empty() { return vec![] }
+        if self.heard.map_or(true, |h| now.duration_since(h).as_secs() < s as u64) { return vec![] }
+        self.cut_here(); vec![Out::Command("send")]
     }
     /// The message was sent while dictating: cut `n` (the client's count), with edit `seq` the last the client had written (0: none). Every word up to that
     /// edit went with the message; the next draft is empty, its mark at 0, and starts with what was heard after it, including words of edits the client
     /// dropped because they came after its send (that one comes back as an edit). No word of the sent message is written again.
     pub fn cut(&mut self, n: u64, seq: u64, st: &mut Dictation) -> Vec<Out> {
         if n <= self.cuts { return vec![] }
-        self.cuts = n; self.place = Place::new("", 0); self.seg.clear(); self.ask.clear(); self.fixes.clear(); self.tail.clear();
+        self.cuts = n; self.place = Place::new("", 0); self.seg.clear(); self.ask.clear(); self.fixes.clear(); self.tail.clear(); self.wrote = false;
         let at = self.hist.iter().find(|h| h.0 == seq).cloned(); let open = self.set.item.clone();
         let all = vdict::Mark::default();
         match at {
@@ -125,8 +137,13 @@ impl Reader {
     fn words(&mut self, item: &str, x: vdict::Step, fin: bool, st: &mut Dictation) -> Vec<Out> {
         let fx = self.d.fix(&x.commit); let tail = vdict::text(&self.d.fix(&x.tail).words);
         if !fin && fx.words.is_empty() && tail == self.tail { return vec![] }
+        // a command at the very end of the utterance (the segment's last decode, after its pause): its words are not written, or are taken back
+        let cmd = if fin { let all: Vec<&str> = self.seg.iter().chain(fx.words.iter()).map(|w| w.w.as_str()).collect(); self.cmds.at_end(&all) } else { None };
+        let mut fx = fx; let mut unsay = 0;
+        if let Some((_, k)) = cmd { let f = fx.words.len(); if k <= f { fx.words.truncate(f - k) } else { fx.words.clear(); unsay = k - f } }
         let commit = vdict::text(&fx.words); let first = self.seg.is_empty();
-        let e = self.place.words(first, v::firm(self.d.terms(), &commit), &commit, &tail);
+        if !commit.trim().is_empty() { self.wrote = true }
+        let e = if unsay > 0 { self.place.unsay(unsay) } else { self.place.words(first, v::firm(self.d.terms(), &commit), &commit, &tail) };
         self.seq += 1; let m = (!fin).then(|| self.set.mark(self.timed, &x.tail)); self.hist.push_back((self.seq, item.to_string(), m)); if self.hist.len() > HIST { self.hist.pop_front(); }
         self.seg.extend(fx.words); self.ask.extend(fx.ask); self.fixes.extend(fx.fixes);
         let was = st.writing; st.writing = !tail.trim().is_empty();
@@ -135,6 +152,12 @@ impl Reader {
             let all = VFix { words: std::mem::take(&mut self.seg), fixes: vec![], ask: std::mem::take(&mut self.ask) };
             st.merge(self.d.asks(&st.ignored, &all)); st.fixes = std::mem::take(&mut self.fixes);
             self.acc.clear(); self.tail.clear(); out.push(Out::View);
+            match cmd.map(|c| c.0) {
+                Some(Cmd::Scratch) => { let e = self.place.scratch(); out.push(self.edit(item, e)) }
+                Some(Cmd::NewLine) => { let e = self.place.newline(); out.push(self.edit(item, e)) }
+                Some(c @ (Cmd::Send | Cmd::Cancel)) => { self.cut_here(); out.push(Out::Command(c.name())) }
+                None => {}
+            }
         } else { self.tail = tail; if was != st.writing { out.push(Out::View) } }
         out
     }
@@ -142,6 +165,7 @@ impl Reader {
     pub fn step(&mut self, line: &str, st: &mut Dictation, engine: &str) -> Vec<Out> {
         let Ok(o) = serde_json::from_str::<Value>(line) else { return vec![] };
         let s = |k: &str| o[k].as_str().unwrap_or("").to_string();
+        if matches!(o["event"].as_str(), Some("hyp" | "delta" | "done")) { self.heard = Some(std::time::Instant::now()) }
         match s("event").as_str() {
             "ready" => { st.state = "live".into(); st.device = if s("label").is_empty() { s("device") } else { s("label") }; st.hint.clear(); st.engine = engine.to_string(); vec![Out::View] }
             "delta" => {
@@ -184,10 +208,16 @@ mod tests {
         assert_eq!(t, "see open the board."); assert!(outs.iter().filter(|o| matches!(o, Out::Edit(_))).count() >= 2);
     }
     /// A client: applies an edit only when it is of its own cut or later (the frame's `cut`), and keeps the number of the last it applied (`seq`).
-    struct Cl { text: String, mark: usize, mine: u64, seq: u64 }
+    /// `went`: what voice commands did to the draft ("send:<text>", "cancel:<text>").
+    struct Cl { text: String, mark: usize, mine: u64, seq: u64, went: Vec<String> }
     impl Cl {
-        fn new() -> Cl { Cl { text: String::new(), mark: 0, mine: 0, seq: 0 } }
-        fn take(&mut self, r: &Reader, outs: Vec<Out>) { for o in outs { if let Out::Edit(e) = &o { if r.cuts >= self.mine { (self.text, self.mark, _) = apply(&self.text, self.mark, e); self.seq = r.seq; } } } }
+        fn new() -> Cl { Cl { text: String::new(), mark: 0, mine: 0, seq: 0, went: vec![] } }
+        fn take(&mut self, r: &Reader, outs: Vec<Out>) { for o in outs { match &o {
+            Out::Edit(e) => if r.cuts >= self.mine { (self.text, self.mark, _) = apply(&self.text, self.mark, e); self.seq = r.seq; },
+            // a voice command: the draft goes (into the undo window), the box is empty, the count is the hub's
+            Out::Command(c) => { self.went.push(format!("{c}:{}", std::mem::take(&mut self.text))); self.mark = 0; self.mine = self.mine.max(r.cuts); }
+            _ => {}
+        } } }
         fn hear(&mut self, r: &mut Reader, st: &mut Dictation, lines: &[Value]) { for l in lines { let o = r.step(&l.to_string(), st, "local"); self.take(r, o); } }
         /// Send: the draft goes with the message, the box is empty, the mark at 0; the hub hears of it (`voice-clear` with cut and seq) a little later.
         fn send(&mut self) -> (String, u64, u64) { self.mine += 1; self.mark = 0; (std::mem::take(&mut self.text), self.mine, self.seq) }
@@ -224,6 +254,58 @@ mod tests {
         let (mut r, mut st, mut c) = (Reader::new(dict(), true, "", 0), Dictation::default(), Cl::new());
         let (_, n, seq) = c.send(); c.hear(&mut r, &mut st, &[hyp(said(2), 50)]); let o = r.cut(n, seq, &mut st); c.take(&r, o); assert_eq!(r.cut(n, seq, &mut st), vec![], "a cut is once");
         c.hear(&mut r, &mut st, &[json!({"event":"done","item":"l0","text":"","words":said(4)})]); assert_eq!(c.text, "I bought some stuff.");
+    }
+    fn cmds(kv: &[(&str, &str)]) -> Cmds { Cmds::of(&kv.iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()) }
+    fn seg(item: &str, words: &[(&str, u32, u32)]) -> Value { Value::Array(words.iter().map(|(w, s, e)| json!([w, s, e, 99])).collect()).pipe(|w| json!({"event":"done","item":item,"text":"","words":w})) }
+    trait Pipe: Sized { fn pipe<T>(self, f: impl FnOnce(Self) -> T) -> T { f(self) } } impl Pipe for Value {}
+    #[test] fn message_complete_at_the_end_of_an_utterance_sends_the_draft_without_it_and_what_follows_starts_the_next() {
+        let (mut r, mut st, mut c) = (Reader::new(dict(), true, "", 0).with_cmds(cmds(&[])), Dictation::default(), Cl::new());
+        let w = json!([["Buy",0,20,99],["milk.",20,50,99],["Message",80,110,99],["complete.",110,150,99]]);
+        // "Message" is committed before the pause (two hypotheses agree, well before the audio's end); the segment's end takes it back
+        c.hear(&mut r, &mut st, &[json!({"event":"hyp","item":"l0","words":w,"end":200}), json!({"event":"hyp","item":"l0","words":w,"end":210}), json!({"event":"done","item":"l0","text":"","words":w})]);
+        assert_eq!(c.went, ["send:Buy milk."], "sent without the phrase"); assert_eq!(c.text, "");
+        c.hear(&mut r, &mut st, &[seg("l1", &[("And", 300, 320), ("eggs.", 320, 350)])]); assert_eq!(c.text, "And eggs.", "the next draft has only what came after");
+        c.hear(&mut r, &mut st, &[seg("l2", &[("Send", 400, 420), ("it.", 420, 440)])]); assert_eq!(c.went[1], "send:And eggs.");
+    }
+    #[test] fn send_it_mid_sentence_is_words_and_only_a_pause_after_it_sends() {
+        let (mut r, mut st, mut c) = (Reader::new(dict(), true, "", 0).with_cmds(cmds(&[])), Dictation::default(), Cl::new());
+        c.hear(&mut r, &mut st, &[seg("l0", &[("Send", 0, 20), ("it", 20, 30), ("to", 30, 40), ("Kati.", 40, 70)]), seg("l1", &[("I", 100, 110), ("sent", 110, 130), ("it.", 130, 150)])]);
+        assert!(c.went.is_empty(), "{:?}", c.went); assert_eq!(c.text, "Send it to Kati. I sent it.");
+        // the phrase heard in a hypothesis, the speaker going on: nothing until the segment ends, and it ends elsewhere
+        c.hear(&mut r, &mut st, &[json!({"event":"hyp","item":"l2","words":[["message",200,220,99],["complete",220,250,99]],"end":260}), seg("l2", &[("message", 200, 220), ("complete", 220, 250), ("by", 250, 260), ("Friday.", 260, 300)])]);
+        assert!(c.went.is_empty()); assert!(c.text.ends_with("message complete by Friday."), "{:?}", c.text);
+    }
+    #[test] fn sending_by_voice_turned_off_writes_the_words() {
+        let (mut r, mut st, mut c) = (Reader::new(dict(), true, "", 0).with_cmds(cmds(&[("voice.cmd.send", "-")])), Dictation::default(), Cl::new());
+        c.hear(&mut r, &mut st, &[seg("l0", &[("Message", 0, 20), ("complete.", 20, 40)])]); assert!(c.went.is_empty()); assert_eq!(c.text, "Message complete.");
+    }
+    #[test] fn scratch_that_new_line_and_cancel_message_when_turned_on() {
+        let on = cmds(&[("voice.cmd.scratch", "on"), ("voice.cmd.newline", "on"), ("voice.cmd.cancel", "on")]);
+        let (mut r, mut st, mut c) = (Reader::new(dict(), true, "", 0).with_cmds(on), Dictation::default(), Cl::new());
+        c.hear(&mut r, &mut st, &[seg("l0", &[("First", 0, 20), ("one.", 20, 40)]), seg("l1", &[("Wrong", 50, 70), ("one.", 70, 90)]), seg("l2", &[("Scratch", 100, 120), ("that.", 120, 140)])]);
+        assert_eq!(c.text, "First one.");
+        c.hear(&mut r, &mut st, &[seg("l3", &[("New", 150, 160), ("line.", 160, 180)]), seg("l4", &[("Second", 200, 220), ("line.", 220, 240)])]);
+        assert_eq!(c.text, "First one.\nSecond line.");
+        c.hear(&mut r, &mut st, &[seg("l5", &[("Cancel", 300, 320), ("message.", 320, 340)])]); assert_eq!(c.went, ["cancel:First one.\nSecond line."]); assert_eq!(c.text, "");
+        c.hear(&mut r, &mut st, &[seg("l6", &[("Fresh.", 400, 420)])]); assert_eq!(c.text, "Fresh.");
+    }
+    #[test] fn auto_send_after_the_silence_set_and_only_with_words_to_send() {
+        let (mut r, mut st, mut c) = (Reader::new(dict(), true, "", 0).with_cmds(cmds(&[("voice.cmd.auto", "3")])), Dictation::default(), Cl::new());
+        let t0 = std::time::Instant::now();
+        assert!(r.idle(t0 + std::time::Duration::from_secs(9)).is_empty(), "nothing said: nothing sent");
+        c.hear(&mut r, &mut st, &[seg("l0", &[("Ship", 0, 20), ("it", 20, 30), ("today.", 30, 60)])]);
+        let now = std::time::Instant::now();
+        assert!(r.idle(now + std::time::Duration::from_secs(2)).is_empty(), "not yet");
+        let o = r.idle(now + std::time::Duration::from_secs(4)); c.take(&r, o); assert_eq!(c.went, ["send:Ship it today."]);
+        assert!(r.idle(now + std::time::Duration::from_secs(20)).is_empty(), "once");
+        let (mut r2, mut st2, mut c2) = (Reader::new(dict(), true, "", 0).with_cmds(cmds(&[])), Dictation::default(), Cl::new());
+        c2.hear(&mut r2, &mut st2, &[seg("l0", &[("Hi.", 0, 20)])]); assert!(r2.idle(std::time::Instant::now() + std::time::Duration::from_secs(60)).is_empty(), "off by default");
+    }
+    #[test] fn a_client_send_after_a_voice_send_counts_on_from_the_hubs_cut() {
+        let (mut r, mut st, mut c) = (Reader::new(dict(), true, "", 0).with_cmds(cmds(&[])), Dictation::default(), Cl::new());
+        c.hear(&mut r, &mut st, &[seg("l0", &[("One.", 0, 20), ("Send", 30, 40), ("it.", 40, 50)])]); assert_eq!((c.mine, r.cuts), (1, 1));
+        c.hear(&mut r, &mut st, &[seg("l1", &[("Two.", 60, 80)])]); let (sent, n, seq) = c.send(); assert_eq!((sent.as_str(), n), ("Two.", 2));
+        let o = r.cut(n, seq, &mut st); c.take(&r, o); c.hear(&mut r, &mut st, &[seg("l2", &[("Three.", 100, 120)])]); assert_eq!(c.text, "Three.");
     }
     #[test] fn the_cloud_engine_cut_mid_segment_counts_the_words_already_sent() {
         let (mut r, mut st, mut c) = (Reader::new(dict(), false, "", 0), Dictation::default(), Cl::new());

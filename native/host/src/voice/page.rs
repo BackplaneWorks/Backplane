@@ -90,8 +90,26 @@ pub fn rows(p: &Prefs, info: &Value, term: &str, key_err: &str) -> Vec<Value> {
             "fields": [{"name": "vterm", "hint": "Add a term", "secret": false, "value": term}], "buttons": dict}),
         row("Learned fixes", if learned.is_empty() { "No fixes learned yet. After dictating, use Fix on a misheard word or accept a suggested correction." } else { "Fixes you made after dictating. Each applies by itself once you have made it twice." }, fixes),
         row("Pebble ring", "Set its webhook to send the recording; it is transcribed here with this dictionary.", vec![]),
+    ].into_iter().chain(command_rows(p)).collect()
+}
+/// Voice commands (cmds.rs): the send phrases, the extras, auto-send.
+fn command_rows(p: &Prefs) -> Vec<Value> {
+    use super::cmds::{self, AUTO, AUTO_CHOICES, CANCEL, NEWLINE, SCRATCH, SEND};
+    let own = set(p, SEND, "").trim(); let off = own == "-"; let now = cmds::send_text(p);
+    let note = if off { "Off: no phrase sends. Type the phrases to use, or press Default.".to_string() }
+        else { format!("Say “{}” at the end, after a short pause, to send the message (or steer the running turn). It sends after 3 seconds; Undo keeps it. Now: {now}.", now.split(',').next().unwrap_or("").trim()) };
+    let b = vec![btn("Save", "voice-phrases", "", true), btn("Default", "setting", &format!("{SEND}="), own.is_empty()), btn("Off", "setting", &format!("{SEND}=-"), off)];
+    let toggle = |label: &str, k: &str| { let on = set(p, k, "") == "on"; btn(label, "setting", &format!("{k}={}", if on { "" } else { "on" }), on) };
+    let auto = set(p, AUTO, ""); let mut ab = vec![btn("Off", "setting", &format!("{AUTO}="), auto.is_empty())];
+    for s in AUTO_CHOICES { ab.push(btn(&format!("{s} s"), "setting", &format!("{AUTO}={s}"), auto == s.to_string())) }
+    vec![
+        json!({"label": "Send by voice", "note": note, "fields": [{"name": "vphrase", "hint": "Phrases, separated by commas", "secret": false, "value": ""}], "buttons": b}),
+        row("Voice commands", "Said alone at the end of an utterance. Scratch that removes the last sentence, New line starts one, Cancel message clears the draft (with Undo).", vec![toggle("Scratch that", SCRATCH), toggle("New line", NEWLINE), toggle("Cancel message", CANCEL)]),
+        row("Send after silence", "Sends what was dictated once you have been quiet this long. Off by default.", ab),
     ]
 }
+/// What Save on Send by voice does: the phrases typed, as the setting (blank: the defaults).
+pub fn phrases_setting(text: &str) -> (String, String) { (super::cmds::SEND.to_string(), super::cmds::phrases(text).iter().map(|p| p.join(" ")).collect::<Vec<_>>().join(", ")) }
 /// What Add does: a setting for each line typed (blank lines and comments are nothing).
 pub fn term_settings(text: &str) -> Vec<(String, String)> { text.lines().filter(|l| vdict::line_ok(l)).map(super::dictation::entry_kv).collect() }
 
@@ -141,6 +159,16 @@ mod tests {
         let r = rows(&prefs(&[("voice.e.kicad", "KiCad = key cad"), ("voice.e.gone", ""), ("voice.l.jason", "JSON\t2\t0"), ("voice.l.bend", "Bend\t1\t0")]), &json!({}), "typed", "");
         let d = find(&r, "Dictionary"); assert_eq!(labels(d), ["Add", "KiCad = key cad ×"]); assert_eq!(d["buttons"][1]["value"], "voice.e.kicad="); assert_eq!(d["fields"][0]["value"], "typed");
         let l = find(&r, "Learned fixes"); assert_eq!(labels(l), ["bend → Bend · 1× ×", "jason → JSON · 2× ×"]); assert_eq!(l["buttons"][1]["on"], true, "lit once it applies by itself");
+    }
+    #[test] fn voice_commands_have_their_rows_and_send_is_on_by_default() {
+        let r = rows(&prefs(&[]), &json!({}), "", "");
+        let s = find(&r, "Send by voice"); assert!(s["note"].as_str().unwrap().starts_with("Say “message complete” at the end")); assert_eq!(s["buttons"][1]["on"], true, "Default lit");
+        assert_eq!(labels(find(&r, "Voice commands")), ["Scratch that", "New line", "Cancel message"]); assert_eq!(find(&r, "Voice commands")["buttons"][0]["on"], false, "extras off");
+        assert_eq!(find(&r, "Voice commands")["buttons"][0]["value"], "voice.cmd.scratch=on"); assert_eq!(find(&r, "Send after silence")["buttons"][0]["on"], true);
+        let r = rows(&prefs(&[("voice.cmd.send", "-"), ("voice.cmd.scratch", "on"), ("voice.cmd.auto", "5")]), &json!({}), "", "");
+        assert!(find(&r, "Send by voice")["note"].as_str().unwrap().starts_with("Off")); assert_eq!(find(&r, "Voice commands")["buttons"][0]["value"], "voice.cmd.scratch=");
+        assert_eq!(find(&r, "Send after silence")["buttons"][2]["on"], true);
+        assert_eq!(phrases_setting(" Over and OUT, ship it!\n"), ("voice.cmd.send".to_string(), "over and out, ship it".to_string()));
     }
     #[test] fn add_takes_many_lines_at_once() {
         assert_eq!(term_settings("KiCad = key cad\n\n# no\njason -> JSON\n!um\n"), vec![("voice.e.kicad".to_string(), "KiCad = key cad".to_string()), ("voice.e.jason>".to_string(), "jason -> JSON".to_string()), ("voice.e.!um".to_string(), "!um".to_string())]);

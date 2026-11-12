@@ -16,11 +16,18 @@ object VoiceText {
     fun length(s: String) = s.codePointCount(0, s.length)
     /** UTF-16 index of the c-th character (the end when c is past it). */
     fun index(s: String, c: Int): Int = s.offsetByCodePoints(0, c.coerceIn(0, length(s)))
-    /** Replace the `del` characters after the mark with `ins`; the caret goes to mark + to, the mark to mark + adv. A mark past the end is the end. */
-    fun edit(text: String, mark: Int, del: Int, ins: String, adv: Int, to: Int): Applied {
-        val n = length(text); val m = mark.coerceIn(0, n); val end = minOf(m + del, n)
-        val out = text.substring(0, index(text, m)) + ins + text.substring(index(text, end))
-        return Applied(out, m + adv, m + to)
+    /** Replace the `back` characters before the mark and the `del` after it with `ins`; the mark goes `adv`, the caret `to` past where that began (the
+     *  old mark less `back`; `back` is a voice command taking words back). A mark past the end is the end. */
+    fun edit(text: String, mark: Int, del: Int, ins: String, adv: Int, to: Int, back: Int = 0): Applied {
+        val n = length(text); val m = mark.coerceIn(0, n); val end = minOf(m + del, n); val s = maxOf(0, m - back)
+        val out = text.substring(0, index(text, s)) + ins + text.substring(index(text, end))
+        return Applied(out, s + adv, s + to)
+    }
+    /** Undo of a voice send: the taken text back in front of what was dictated since; the mark moves as typing before it would. */
+    fun undo(taken: String, now: String, mark: Int): Pair<String, Int> {
+        if (now.isBlank()) return taken to length(taken)
+        val t = taken + (if (taken.endsWith("\n")) "" else " ") + now
+        return t to (mark + length(t) - length(now))
     }
     /** The person typed: the mark moves with what changed before it. */
     fun shift(old: String, new: String, mark: Int): Int {
@@ -116,7 +123,7 @@ object DataVoice {
                 if (o.has("cut") && o.optInt("cut") < (cuts[tid] ?: 0)) return // made before this phone's send: it belongs to nothing now
                 if (o.has("seq")) seqs[tid] = o.optInt("seq")
                 val tf = DataClient.field(tid)
-                val r = VoiceText.edit(tf.text, marks[tid] ?: VoiceText.length(tf.text), o.optInt("del"), o.optString("ins"), o.optInt("adv"), o.optInt("to"))
+                val r = VoiceText.edit(tf.text, marks[tid] ?: VoiceText.length(tf.text), o.optInt("del"), o.optString("ins"), o.optInt("adv"), o.optInt("to"), o.optInt("back"))
                 marks[tid] = r.mark
                 DataClient.setField(tid, TextFieldValue(r.text, TextRange(VoiceText.index(r.text, r.caret))), typed = false)
             }
@@ -125,8 +132,40 @@ object DataVoice {
                 marks[tid]?.let { marks[tid] = VoiceText.shift(old, new, it) }
                 DataClient.setField(tid, TextFieldValue(new, TextRange(new.length)), typed = false)
             }
+            "command" -> command(tid, o.optString("cmd"), o.optInt("cut"))
             "page" -> rows = objects(o.optJSONArray("rows"))
         }
+    }
+
+    /** A voice command's draft in its undo window (cmds.rs on the hub): a send goes when it ends, a cancel is gone; and what happened, shown a moment. */
+    data class Pending(val id: Int, val tid: String, val text: String, val cmd: String)
+    var pending by mutableStateOf<Pending?>(null); private set
+    var said by mutableStateOf<Pair<String, String>?>(null); private set
+    private var nextPending = 0
+    /** The hub's `command` frame: the whole draft is taken now (dictation goes on into the empty draft), and sent (or dropped, for cancel) after the
+     *  undo window. A send goes as the Send button's does: turn.start, which steers a running turn. */
+    private fun command(tid: String, cmd: String, cut: Int) {
+        if (cmd != "send" && cmd != "cancel") return
+        cuts[tid] = maxOf(cuts[tid] ?: 0, cut); marks[tid] = 0
+        pending?.let { deliver(it.id) }
+        val text = DataClient.field(tid).text; if (text.isBlank()) return
+        DataClient.setField(tid, TextFieldValue(""), typed = false)
+        val id = ++nextPending; pending = Pending(id, tid, text, cmd)
+        scope.launch { delay(3000); deliver(id) }
+    }
+    fun deliver(id: Int) {
+        val p = pending?.takeIf { it.id == id } ?: return
+        pending = null
+        if (p.cmd == "send") DataClient.send(p.tid, p.text)
+        val line = if (p.cmd == "send") Msg.voice_cmd_sent else Msg.voice_cmd_cleared; said = p.tid to line
+        scope.launch { delay(2000); if (said?.second == line) said = null }
+    }
+    /** Undo: the message stays; its text goes back in front of whatever was dictated since. */
+    fun undo() {
+        val p = pending ?: return; pending = null
+        val (t, m) = VoiceText.undo(p.text, DataClient.field(p.tid).text, marks[p.tid] ?: 0)
+        if (marks.containsKey(p.tid)) marks[p.tid] = m
+        DataClient.setField(p.tid, TextFieldValue(t, TextRange(t.length)), typed = false)
     }
 
     private fun objects(a: JSONArray?): List<JSONObject> = if (a == null) emptyList() else (0 until a.length()).mapNotNull { a.optJSONObject(it) }
@@ -139,7 +178,7 @@ object DataVoice {
     suspend fun pageAct(action: String, value: String, fields: Map<String, String>) {
         try {
             if (action == "secret-save") DataClient.call("voice.key", JSONObject().put("key", fields["kval"] ?: ""))
-            else DataClient.call("voice.page.act", JSONObject().put("action", action).put("value", if (action == "voice-term") fields["vterm"] ?: "" else value))
+            else DataClient.call("voice.page.act", JSONObject().put("action", action).put("value", when (action) { "voice-term" -> fields["vterm"] ?: ""; "voice-phrases" -> fields["vphrase"] ?: ""; else -> value }))
             pageError = ""
         } catch (e: Exception) { pageError = e.message ?: "" }
         loadPage()

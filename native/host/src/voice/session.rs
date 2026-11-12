@@ -102,7 +102,7 @@ impl Voice {
         self.with(&thread, |x| { x.begin(); x.engine = engine.to_string(); });
         self.tell(hub, client, &thread);
         if upload { hub.push(client, frame(&thread, "audio", json!({"path": format!("/voice/in?s={key}")}))); }
-        let reader = Reader::new(d, engine == "local", draft, caret);
+        let reader = Reader::new(d, engine == "local", draft, caret).with_cmds(super::cmds::Cmds::of(&pr));
         { let (v, hub, thread, engine) = (self.clone(), hub.clone(), thread.clone(), engine.to_string()); tokio::spawn(async move { let _hold = hold; v.read(hub, client, id, thread, engine, reader, child, stdout, cut_rx).await }); }
         json!({"path": if upload { format!("/voice/in?s={key}") } else { String::new() }})
     }
@@ -115,6 +115,7 @@ impl Voice {
                 }
                 Some((n, seq)) = cuts.recv() => { let outs = self.with(&thread, |d| r.cut(n, seq, d)); self.out(&hub, client, &thread, &r, outs); }
                 _ = tick.tick() => {
+                    let outs = self.with(&thread, |_| r.idle(Instant::now())); self.out(&hub, client, &thread, &r, outs);
                     if !hub.is_attached(client) { self.close_audio(id) } // the client went away: nobody is listening to this microphone
                     let late = self.st.lock().unwrap().live.as_ref().filter(|l| l.id == id).and_then(|l| l.stopped).map_or(false, |t| t.elapsed() > STOP_LIMIT);
                     if late { let _ = child.start_kill(); }
@@ -129,7 +130,9 @@ impl Voice {
     /// What a reader's step gives, to the client: each edit with the session's cut count and its number (`Reader::cut`).
     fn out(&self, hub: &Hub, client: u64, thread: &str, r: &Reader, outs: Vec<Out>) {
         for o in outs { match o {
-            Out::Edit(e) => { hub.push(client, frame(thread, "edit", json!({"del": e.del, "ins": e.ins, "adv": e.adv, "to": e.to, "cut": r.cuts, "seq": r.seq}))); }
+            Out::Edit(e) => { hub.push(client, frame(thread, "edit", json!({"del": e.del, "ins": e.ins, "adv": e.adv, "to": e.to, "back": e.back, "cut": r.cuts, "seq": r.seq}))); }
+            // a voice command: the client sends (or steers) the draft it has now, or clears it, with its undo window; `cut` is the count it takes
+            Out::Command(c) => { hub.push(client, frame(thread, "command", json!({"cmd": c, "cut": r.cuts}))); }
             Out::View => self.tell(hub, client, thread),
             Out::Level(v) => { hub.push(client, frame(thread, "level", json!({"v": v}))); }
         } }
@@ -201,6 +204,7 @@ impl Voice {
         match action {
             "setting" => { let (k, v) = value.split_once('=').unwrap_or((value, "")); if !k.starts_with("voice.") { return Err("not a voice setting".into()) } commit(hub, &[(k.to_string(), v.to_string())]).await?; if let Some(r) = resident::of(&hub.cfg.home) { r.kick() } }
             "voice-term" => commit(hub, &page::term_settings(value)).await?,
+            "voice-phrases" => commit(hub, &[page::phrases_setting(value)]).await?,
             "voice-op" => { self.op(hub, client, value).await?; }
             _ => return Err("unknown voice action".into()),
         }
@@ -320,6 +324,8 @@ pub async fn hear_file(hub: &Hub, path: &Path, ct: &str, want: &str) -> Result<s
     let evs: Vec<Value> = out.lines().filter_map(|l| serde_json::from_str::<Value>(l).ok()).collect();
     let Some(done) = evs.iter().find(|o| o["event"] == "done") else { return Err(evs.iter().find(|o| o["event"] == "error").map_or("the voice helper stopped without words".to_string(), |e| s(e, "error").to_string())) };
     let heard = s(done, "text").trim().to_string();
+    // a ring's note is its own message: a send phrase said at its end out of habit is not part of it
+    let heard = super::cmds::Cmds::of(&pr).strip_send(&heard);
     let fx = d.fix(&vdict::words_text(&heard)); let text = vdict::text(&fx.words); let none: [&str; 0] = [];
     let note = words::note(&d.asks(&none, &vdict::VFix { words: vdict::words_text(&text), fixes: vec![], ask: fx.ask }));
     let segs: Vec<(i64, i64, i64, String)> = done["segments"].as_array().map(|a| a.iter().filter_map(|x| Some((x[0].as_i64()?, x[1].as_i64()?, x[2].as_i64()?, x[3].as_str()?.to_string()))).collect()).unwrap_or_default();

@@ -78,6 +78,11 @@ final class VoiceModel {
     @ObservationIgnored private var cuts: [String: Int] = [:]
     @ObservationIgnored private var seqs: [String: Int] = [:]
     @ObservationIgnored let recorder = VoiceRecorder()
+    /// A voice command's draft in its undo window (cmds.rs on the hub): a send goes when it ends, a cancel is gone; and what happened, shown a moment.
+    struct Pending { var id: Int; var thread: String; var text: String; var cmd: String }
+    private(set) var pending: Pending?
+    private(set) var said: (thread: String, text: String, until: Date)?
+    @ObservationIgnored private var nextPending = 0
     @ObservationIgnored weak var client: DataClient?
 
     init() { recorder.onGone = { [weak self] in self?.recorderGone() } }
@@ -86,6 +91,7 @@ final class VoiceModel {
         var v = views[thread] ?? DVoiceView()
         if v.note.isEmpty, let n = local[thread] { v.note = n; v.bad = true }
         if active == thread { v.on = true }
+        if pending?.thread == thread || (said?.thread == thread && said!.until > Date()) { return v }
         return v.showing ? v : nil
     }
     func listening(_ thread: String) -> Bool { active == thread || views[thread]?.on == true }
@@ -164,7 +170,7 @@ final class VoiceModel {
             if let q = o["seq"] as? Int { seqs[thread] = q }
             let text = client.drafts[thread] ?? ""
             let mark = marks[thread] ?? VoiceEdit.count(text)
-            let r = VoiceEdit.apply(text, mark: mark, del: n("del"), ins: o["ins"] as? String ?? "", adv: n("adv"), to: n("to"))
+            let r = VoiceEdit.apply(text, mark: mark, del: n("del"), ins: o["ins"] as? String ?? "", adv: n("adv"), to: n("to"), back: n("back"))
             marks[thread] = r.mark
             client.putDraft(thread, r.text)
             caret = (thread, r.caret, caret.rev + 1)
@@ -173,9 +179,40 @@ final class VoiceModel {
             if let m = marks[thread] { marks[thread] = VoiceEdit.shift(old, new, mark: m) }
             client.putDraft(thread, new)
             caret = (thread, VoiceEdit.count(new), caret.rev + 1)
+        case "command": command(thread, cmd: o["cmd"] as? String ?? "", cut: n("cut"))
         case "page": setRows(o["rows"])
         default: break
         }
+    }
+
+    // MARK: voice commands
+    /// The hub's `command` frame: the whole draft is taken now (dictation goes on into the empty draft), and sent (or dropped, for cancel) after
+    /// the undo window. A send goes as the Send button's does: turn.start, which steers a running turn.
+    private func command(_ thread: String, cmd: String, cut: Int) {
+        guard let client, cmd == "send" || cmd == "cancel" else { return }
+        cuts[thread] = max(cuts[thread] ?? 0, cut); marks[thread] = 0
+        if let p = pending { deliver(p.id) }
+        let text = client.drafts[thread] ?? ""
+        guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
+        client.putDraft(thread, ""); caret = (thread, 0, caret.rev + 1)
+        nextPending += 1; let id = nextPending
+        pending = Pending(id: id, thread: thread, text: text, cmd: cmd)
+        Task { @MainActor [weak self] in try? await Task.sleep(nanoseconds: 3_000_000_000); self?.deliver(id) }
+    }
+    func deliver(_ id: Int) {
+        guard let client, let p = pending, p.id == id else { return }
+        pending = nil
+        if p.cmd == "send" { client.send(p.thread, p.text) }
+        said = (p.thread, p.cmd == "send" ? "Sent by voice" : "Draft cleared by voice", Date().addingTimeInterval(2))
+    }
+    /// Undo: the message stays; its text goes back in front of whatever was dictated since.
+    func undo() {
+        guard let client, let p = pending else { return }
+        pending = nil
+        let now = client.drafts[p.thread] ?? ""
+        let u = VoiceEdit.undo(p.text, now, mark: marks[p.thread] ?? 0)
+        client.putDraft(p.thread, u.text); if marks[p.thread] != nil { marks[p.thread] = u.mark }
+        caret = (p.thread, VoiceEdit.count(u.text), caret.rev + 1)
     }
 
     // MARK: Settings, Voice
@@ -189,7 +226,7 @@ final class VoiceModel {
         guard let client else { return "" }
         do {
             if action == "secret-save" { _ = try await client.call("voice.key", ["key": fields["kval"] ?? ""], as: DEmpty.self) }
-            else { _ = try await client.call("voice.page.act", ["action": action, "value": action == "voice-term" ? (fields["vterm"] ?? "") : value], as: DEmpty.self) }
+            else { _ = try await client.call("voice.page.act", ["action": action, "value": action == "voice-term" ? (fields["vterm"] ?? "") : action == "voice-phrases" ? (fields["vphrase"] ?? "") : value], as: DEmpty.self) }
             await loadPage()
             return ""
         } catch { await loadPage(); return error.localizedDescription }
@@ -238,6 +275,15 @@ struct DVoiceStrip: View {
     var body: some View {
         if let v = client.voice.shown(thread) {
             VStack(alignment: .leading, spacing: 6) {
+                if let p = client.voice.pending, p.thread == thread {
+                    HStack(spacing: 8) {
+                        Rectangle().fill(p.cmd == "send" ? BackplaneDesign.accent : BackplaneDesign.bad).frame(width: 8, height: 8)
+                        Text(Tr.t(p.cmd == "send" ? "Sending by voice…" : "Draft cleared by voice")).dmono(12).foregroundStyle(BackplaneDesign.dim).frame(maxWidth: .infinity, alignment: .leading).accessibilityIdentifier("voice.pending")
+                        Button(Tr.t("Undo")) { client.voice.undo() }.buttonStyle(DButton()).accessibilityIdentifier("voice.undo")
+                    }
+                } else if let s = client.voice.said, s.thread == thread, s.until > Date() {
+                    Text(Tr.t(s.text)).dmono(12).foregroundStyle(BackplaneDesign.dim).accessibilityIdentifier("voice.said")
+                }
                 if !v.note.isEmpty {
                     HStack(spacing: 8) {
                         Text(Tr.t(v.note)).dmono(12).foregroundStyle(v.bad ? BackplaneDesign.bad : BackplaneDesign.dim).frame(maxWidth: .infinity, alignment: .leading).accessibilityIdentifier("voice.note")
