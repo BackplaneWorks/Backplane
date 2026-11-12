@@ -278,15 +278,53 @@ pub struct Sched {
     /// a run going: since when, and of which revision
     pub running_since: u64,
     pub running_rev: String,
+    /// memory available now (MB; 0 unknown: this platform cannot say), what a run is expected to take at its peak (MB)
+    pub free_mb: u64,
+    pub need_mb: u64,
+    /// another heavy KiCad job running on this machine now, in words ("" none): a DRC or zone fill in the open KiCad, a kicad-cli
+    /// that is not ours
+    pub heavy: String,
 }
 #[derive(Clone, Debug, PartialEq)]
-pub enum Do { Nothing, Wait(u64), Run, Cancel }
+pub enum Do { Nothing, Wait(u64), Run, Cancel, /** not now, for this reason; look again in ms */ Defer(String, u64) }
+
+/// Memory kept free for the person's desktop, the hub and KiCad itself beside a run (MB).
+pub const MEM_MARGIN_MB: u64 = 1536;
+/// How often a deferred run looks again.
+pub const DEFER_MS: u64 = 5000;
+/// A run's expected peak before it ever ran here (MB), from the document's size (with the library checks left out, a 2.5 MB board's
+/// DRC peaked at 0.40 GB and its ERC at 0.27 GB, 2026-11-12). After a run, its measured peak and a tenth.
+pub fn need_mb(source: &str, doc_bytes: u64, last_peak_mb: u64) -> u64 {
+    if last_peak_mb > 0 { return last_peak_mb + last_peak_mb / 10 }
+    let mb = doc_bytes / 1_048_576;
+    if source == "drc" { 500 + 150 * mb } else { 500 + 50 * mb }
+}
+/// The library checks (a footprint or symbol against its library copy, a footprint that is in no library) are left out of the hub's
+/// kicad-cli runs: they load every library of the global tables (a 2.5 MB board's DRC took 3.8 GB with them, 0.40 GB without;
+/// its ERC 1.8 GB and 0.27 GB). KiCad's own checks in the open editor (bp.13 RunChecks) have them.
+pub fn library_rule(source: &str, rule: &str) -> bool {
+    match source { "drc" => matches!(rule, "lib_footprint_issues" | "lib_footprint_mismatch"), "erc" => matches!(rule, "lib_symbol_issues" | "lib_symbol_mismatch" | "footprint_link_issues"), _ => false }
+}
+pub const LIBRARY_NOTE: &str = "Library checks run in KiCad";
+/// Why a run must wait for the machine ("" when it may go): too little memory free for its expected peak, or another heavy KiCad job.
+pub fn machine_guard(s: &Sched) -> String {
+    if !s.heavy.is_empty() { return format!("deferred: {} is running", s.heavy) }
+    if s.free_mb > 0 && s.free_mb < s.need_mb + MEM_MARGIN_MB { return format!("deferred: low memory ({} MB free, needs about {} MB)", s.free_mb, s.need_mb) }
+    String::new()
+}
 
 /// The re-run policy: Run when the design on disk differs from the last result's (a save, an agent's turn end) and it has been quiet
 /// for DEBOUNCE_MS, the person has not touched KiCad for QUIET_MS and no agent turn holds the document (or it has held it for
 /// AGENT_MAX_MS); Run at once on demand. A run of a revision that is no longer the one on disk is cancelled (a newer save arrived);
-/// never two runs of one check at once. Wait(ms) is when to look again.
+/// never two runs of one check at once. Wait(ms) is when to look again. A run that may go is still Deferred while the machine cannot
+/// take it (machine_guard), on demand too.
 pub fn next(now: u64, s: &Sched) -> Do {
+    match next_ignoring_machine(now, s) {
+        Do::Run => { let why = machine_guard(s); if why.is_empty() { Do::Run } else { Do::Defer(why, DEFER_MS) } }
+        d => d,
+    }
+}
+fn next_ignoring_machine(now: u64, s: &Sched) -> Do {
     let pending = s.disk_rev != s.ran_rev;
     if s.running_since > 0 {
         return if pending && !s.running_rev.is_empty() && s.running_rev != s.disk_rev { Do::Cancel } else { Do::Nothing }
@@ -424,6 +462,18 @@ mod tests {
         assert_eq!(next(12_000, &Sched { demand: true, ..running.clone() }), Do::Nothing);
         // a first result (none ran yet) is pending too
         assert_eq!(next(20_000, &Sched { ran_rev: String::new(), disk_rev: "a".into(), ..Default::default() }), Do::Run);
+        // the machine: a run that may go waits while memory is short or another heavy KiCad job runs; on demand too
+        let go = Sched { free_mb: 16_000, need_mb: 4_000, ..saved.clone() };
+        assert_eq!(next(11_500, &go), Do::Run);
+        let low = Sched { free_mb: 5_000, ..go.clone() };
+        assert_eq!(next(11_500, &low), Do::Defer("deferred: low memory (5000 MB free, needs about 4000 MB)".into(), DEFER_MS));
+        assert!(matches!(next(11_500, &Sched { demand: true, ..low.clone() }), Do::Defer(..)));
+        assert_eq!(next(11_500, &Sched { free_mb: 0, ..low.clone() }), Do::Run, "a platform that cannot say how much is free is not held back");
+        assert_eq!(next(11_500, &Sched { heavy: "a DRC in KiCad".into(), ..go.clone() }), Do::Defer("deferred: a DRC in KiCad is running".into(), DEFER_MS));
+        assert_eq!(next(10_500, &low), Do::Wait(1000), "the debounce comes first");
+        assert_eq!(next(12_000, &Sched { running_since: 11_600, running_rev: "b".into(), disk_rev: "c".into(), ..low.clone() }), Do::Cancel, "a cancel is never held back");
+        assert_eq!(need_mb("drc", 2_520_857, 0), 800); assert_eq!(need_mb("erc", 25_418, 0), 500);
+        assert!(library_rule("drc", "lib_footprint_mismatch") && library_rule("erc", "footprint_link_issues") && !library_rule("drc", "clearance") && !library_rule("x", "lib_footprint_issues")); assert_eq!(need_mb("drc", 0, 3800), 4180);
         assert_eq!(fraction(500, 0), -1.0); assert_eq!(fraction(500, 1000), 0.5); assert_eq!(fraction(5000, 1000), 0.95);
     }
     #[test] fn the_chip() {

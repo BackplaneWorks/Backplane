@@ -6,6 +6,7 @@
 #       the filters (severity, words) work
 #   C3  a save of the board makes DRC stale, then it runs again by itself (debounced) and is fresh; ERC is left fresh; the ids of
 #       the findings that are still there are the same
+#   C0  with too little memory free (BACKPLANE_CHECKS_FREE_MB) the checks say deferred and run none
 #   C4  kicad.checks.fix gives the agent's message; kicad.checks.focus without a KiCad answers kicad:false
 # Copies only (seed_project.py); no KiCad GUI is needed (kicad-cli on the saved files). EMBED_MODE=stock|fork.
 set -euo pipefail
@@ -26,9 +27,27 @@ discover_kicad
 init_isolated_dirs
 python3 "$SEED_PY" "$OUT" "$REPO_ROOT"
 DISP=${DISP:-}
-start_hub
 PROJ="$OUT/proj"
 PRO="$PROJ/ecc83-pp.kicad_pro"
+# a known ERC finding besides the library ones: a label on no wire
+python3 - "$PROJ/ecc83-pp.kicad_sch" <<'PY'
+import sys
+p = sys.argv[1]; s = open(p).read()
+lab = '\t(label "DANGLE"\n\t\t(at 30.48 30.48 0)\n\t\t(effects\n\t\t\t(font\n\t\t\t\t(size 1.27 1.27)\n\t\t\t)\n\t\t\t(justify left bottom)\n\t\t)\n\t\t(uuid "5b0c1e6e-0000-4000-8000-00000000d00d")\n\t)\n'
+open(p, "w").write(s.replace("\t(sheet_instances", lab + "\t(sheet_instances", 1))
+PY
+
+# C0: a hub that sees 100 MB free defers both checks and says why
+BACKPLANE_CHECKS_FREE_MB=100 start_hub
+for _ in $(seq 20); do
+  R0=$(hub_rpc "[{\"method\":\"kicad.checks.watch\",\"params\":{\"project\":\"$PRO\"}}]" | grep -v '^INFO ' | head -1)
+  python3 -c 'import json,sys; r=json.loads(sys.argv[1])["result"]; sys.exit(0 if r["drc"]["state"]=="deferred" and r["erc"]["state"]=="deferred" else 1)' "$R0" 2>/dev/null && break
+  sleep 0.5
+done
+check "Low memory: both checks deferred, with the reason, none run" "$(python3 -c 'import json,sys; r=json.loads(sys.argv[1])["result"]; print(int(r["drc"]["state"]=="deferred" and "low memory" in r["drc"]["reason"] and not r["drc"]["has_result"] and r["erc"]["state"]=="deferred"))' "$R0" 2>/dev/null || echo 0)" "$R0"
+own_stop || true; OWN_GROUPS=()
+rm -rf "$OUT/home/cache/checks"
+start_hub
 
 # kicad-cli's own counts, the oracle
 mkdir -p "$OUT/oracle"
@@ -37,10 +56,12 @@ mkdir -p "$OUT/oracle"
 read -r OD OE < <(python3 - "$OUT/oracle" <<'PY'
 import json, sys
 d = json.load(open(sys.argv[1] + "/drc.json")); e = json.load(open(sys.argv[1] + "/erc.json"))
-print(sum(len(d[k]) for k in ("violations", "unconnected_items", "schematic_parity")), sum(len(s["violations"]) for s in e["sheets"]))
+# the hub leaves the library checks to KiCad (findings.rs library_rule)
+lib = {"lib_footprint_issues", "lib_footprint_mismatch", "lib_symbol_issues", "lib_symbol_mismatch", "footprint_link_issues"}
+print(sum(1 for k in ("violations", "unconnected_items", "schematic_parity") for v in d[k] if v["type"] not in lib), sum(1 for s in e["sheets"] for v in s["violations"] if v["type"] not in lib))
 PY
 )
-echo "oracle: drc=$OD erc=$OE"
+echo "oracle (library checks left out): drc=$OD erc=$OE"
 
 # The summary once both checks are in this state ("" when they never were)
 wait_state() {
@@ -82,8 +103,8 @@ print(int(ok))
 PY
 )
 check "kicad.checks.list: every finding with source, rule, severity, anchors and a unique id, errors first" "$C2"
-LF=$(hub_rpc "[{\"method\":\"kicad.checks.list\",\"params\":{\"project\":\"$PRO\",\"source\":\"erc\",\"q\":\"U1\"}}]" | grep -v '^INFO ' | head -1)
-check "Filtered by check and words (ERC, \"U1\")" "$(python3 -c 'import json,sys; r=json.loads(sys.argv[1])["result"]; print(int(r["total"]>0 and all(f["source"]=="erc" and "U1" in json.dumps(f) for f in r["findings"])))' "$LF")"
+LF=$(hub_rpc "[{\"method\":\"kicad.checks.list\",\"params\":{\"project\":\"$PRO\",\"source\":\"erc\",\"q\":\"dangle\"}}]" | grep -v '^INFO ' | head -1)
+check "Filtered by check and words (ERC, \"dangle\"): the label, with its net and place" "$(python3 -c 'import json,sys; r=json.loads(sys.argv[1])["result"]; f=r["findings"]; print(int(r["total"]==1 and f[0]["source"]=="erc" and f[0]["rule"]=="label_dangling" and f[0]["anchors"][0].get("net")=="DANGLE" and abs(f[0]["anchors"][0]["x"]-30.48)<0.01))' "$LF")" "$LF"
 
 # C3: a save of the board (the same board, written again) makes DRC run again by itself
 ERC_AT=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["result"]["erc"]["at"])' "$S1")

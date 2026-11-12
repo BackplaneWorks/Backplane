@@ -4,8 +4,16 @@ import { encode, decode } from '../../wire.mjs';
 
 const [port, tokenFile, stepsJson] = process.argv.slice(2);
 const token = readFileSync(tokenFile, 'utf8').trim();
-const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?view=1&mobile=1&enc=cbor&token=${token}`);
-ws.binaryType = 'arraybuffer';
+// a refused connection (the hub busy accepting, a socket not ready) is tried again a few times before it counts as an error
+let ws = null;
+for (let i = 0; ; i++) {
+  ws = new WebSocket(`ws://127.0.0.1:${port}/ws?view=1&mobile=1&enc=cbor&token=${token}`);
+  ws.binaryType = 'arraybuffer';
+  const up = await new Promise(res => { ws.onopen = () => res(true); ws.onerror = () => res(false); });
+  if (up) break;
+  if (i >= 4) { console.error('error: ws error'); process.exit(1); }
+  await new Promise(r => setTimeout(r, 300));
+}
 
 const replies = new Map();
 const infos = new Map();
@@ -30,7 +38,6 @@ ws.onmessage = ({ data }) => {
   }
 };
 
-await new Promise((res, rej) => { ws.onopen = res; ws.onerror = () => rej(new Error('ws error')); });
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 await sleep(250);
 

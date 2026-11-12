@@ -40,6 +40,8 @@ pub fn on_event(pro: &str, ev: &Value) -> bool {
     }
     true
 }
+/// The jobs running now in every open KiCad, by title (the checks wait for them: kicad/checkrun.rs).
+pub fn running() -> Vec<String> { state().lock().unwrap().values().flat_map(|j| j.values().map(|x| x.title.clone())).collect() }
 /// KiCad went away or was restarted: nothing of its runs any more.
 pub fn clear(pro: &str) { state().lock().unwrap().remove(pro); }
 
