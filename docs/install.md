@@ -7,6 +7,12 @@ curl -fsSL https://github.com/BackplaneWorks/Backplane/releases/latest/download/
 backplane-app
 ```
 
+A stock Ubuntu desktop has no curl; use wget there (the installer then downloads with wget, and so does the KiCad install):
+
+```sh
+wget -qO- https://github.com/BackplaneWorks/Backplane/releases/latest/download/install.sh | sh
+```
+
 x64 and arm64. It lays the release out for the guard (docs/deploy.md): the build in `~/.local/share/backplane/builds/<tag>/`, `CURRENT` naming the one that runs, and the guard at `~/.local/share/backplane/backplane`, linked as `backplane` in `~/.local/bin` beside `backplane-app` (the desktop app). It adds Backplane to your applications menu (`BACKPLANE_NO_DESKTOP=1` skips that). The desktop app starts its home's hub under the guard, which keeps it up to date from signed releases, takes each new build on probation and goes back when one fails (`backplane hub status`, `restart`, `rollback`). `BACKPLANE_NO_DESKTOP_APP=1` installs the hub alone and starts the guard at once (home `BACKPLANE_HOME`, default `~/.backplane/hub`; port `BACKPLANE_PORT`, default the first free from 3800); `BACKPLANE_START=1` starts it with the desktop app too. Run the installer again while the guard runs and it hands the new build to the guard, on probation. Add `~/.local/bin` to your `PATH` if asked.
 
 ## macOS (Apple silicon)
