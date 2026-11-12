@@ -13,7 +13,15 @@ pub struct Voice { pub views: HashMap<String, Value>, marks: HashMap<String, usi
     /// a voice command's message in its undo window; when the send button flashed for it; the line said after it ("Sent by voice") and until when
     pub pending: Option<Pending>, next: u64, pub flash: Option<std::time::Instant>, pub said: Option<(String, std::time::Instant)>,
     /// an end-of-turn countdown running (the hub's `countdown`): its thread and when it ends
-    pub countdown: Option<(String, std::time::Instant)> }
+    pub countdown: Option<(String, std::time::Instant)>,
+    /// the mic chip pressed: when, and whether that press started dictation; threads whose dictation ends in a send (hold-to-talk released)
+    press: Option<(std::time::Instant, bool)>, send_on_end: std::collections::HashSet<String> }
+/// Held this long, the mic chip is hold-to-talk: letting go stops and sends.
+pub const PRESS_HOLD: std::time::Duration = std::time::Duration::from_millis(400);
+/// What a press of the mic chip does on release: `held` how long, `started` whether its press started dictation.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Release { /** a click that started dictation: it goes on */ Keep, /** a click while dictating: stop */ Stop, /** held: stop and send */ StopSend }
+pub fn release(held: std::time::Duration, started: bool) -> Release { if held >= PRESS_HOLD && started { Release::StopSend } else if started { Release::Keep } else { Release::Stop } }
 /// A draft a voice command took (cmds.rs): `send` goes when the window ends, `cancel` is gone then; Undo puts the text back in front of the draft.
 #[derive(Clone, Debug)]
 pub struct Pending { pub id: u64, pub thread: String, pub text: String, pub cmd: String }
@@ -65,6 +73,8 @@ impl Win {
         match s(&f, "ev") {
             "view" => {
                 let on = f["view"]["on"] == true; if !on { let v = &mut self.screens.voice; v.marks.remove(&thread); v.cuts.remove(&thread); v.seqs.remove(&thread); v.held.remove(&thread); v.level = 0; self.voice_mic_stop(); }
+                // hold-to-talk let go: the session has ended with its last words written; the draft goes, with the undo window
+                if !on && self.screens.voice.send_on_end.remove(&thread) { self.voice_command(&thread, &json!({"cmd": "send", "cut": 0}), cx); }
                 if f["view"]["ask"]["fixing"] == true { self.voice_fix_open(s(&f["view"]["ask"]["field"], "value").to_string(), cx); } else { self.screens.voice.fix = None; }
                 self.screens.voice.views.insert(thread, f["view"].clone());
             }
@@ -141,6 +151,21 @@ impl Win {
         self.screens.voice.said = Some((line.to_string(), std::time::Instant::now()));
         cx.spawn(async move |w, cx| { cx.background_executor().timer(SAID).await; let _ = w.update(cx, |_, cx| cx.notify()); }).detach();
         cx.notify();
+    }
+    /// The mic chip pressed: dictation starts now when it was off (hold-to-talk or a click; the release tells which).
+    pub fn voice_down(&mut self, cx: &mut Context<Self>) {
+        let t = self.selected.clone(); let on = self.screens.voice.views.get(&t).map_or(false, |v| v["on"] == true);
+        if !on { self.voice_press(cx) }
+        self.screens.voice.press = Some((std::time::Instant::now(), !on));
+    }
+    /// The mic chip let go: a click keeps what it started or stops dictation; held, it stops and the message goes once the last words are in.
+    pub fn voice_up(&mut self, cx: &mut Context<Self>) {
+        let Some((at, started)) = self.screens.voice.press.take() else { return };
+        match release(at.elapsed(), started) {
+            Release::Keep => {}
+            Release::Stop => self.voice_press(cx),
+            Release::StopSend => { let t = self.selected.clone(); self.screens.voice.send_on_end.insert(t); self.voice_press(cx) }
+        }
     }
     /// Keep talking: no end-of-turn send for this pause.
     pub fn voice_hold(&mut self, cx: &mut Context<Self>) {
@@ -248,6 +273,13 @@ mod tests {
     fn run(text: &str, mark: usize, del: usize, ins: &str, adv: usize, to: usize) -> (String, usize, usize) { runb(text, mark, del, ins, adv, to, 0) }
     fn runb(text: &str, mark: usize, del: usize, ins: &str, adv: usize, to: usize, back: usize) -> (String, usize, usize) { let (r, m, c) = edit_range(text, mark, del, adv, to, back); let mut t = text.to_string(); t.replace_range(r, ins); (t, m, c) }
     // the hub's own vectors (voice/place.rs): an edit is replace `del` at the mark, move the mark `adv`, the caret `to`
+    #[test] fn the_mic_chip_held_is_hold_to_talk_and_a_click_toggles() {
+        use std::time::Duration as D;
+        assert_eq!(release(D::from_millis(120), true), Release::Keep, "a click starts and dictation goes on");
+        assert_eq!(release(D::from_millis(120), false), Release::Stop, "a click while dictating stops");
+        assert_eq!(release(D::from_millis(900), true), Release::StopSend, "held: let go and it sends");
+        assert_eq!(release(D::from_millis(900), false), Release::Stop, "held while already dictating: just stops");
+    }
     #[test] fn undo_puts_the_message_back_in_front_of_what_was_said_since() {
         assert_eq!(undo_text("Buy milk.", "", 0), ("Buy milk.".into(), 9));
         assert_eq!(undo_text("Buy milk.", "And eggs.", 9), ("Buy milk. And eggs.".into(), 19), "the mark moves as typing before it would");

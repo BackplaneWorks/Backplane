@@ -13,6 +13,8 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.platform.testTag
@@ -30,8 +32,14 @@ private fun JSONArray?.objs(): List<JSONObject> = if (this == null) emptyList() 
 
 /** The composer's mic chip: red while the hub has a session on. */
 @Composable
-internal fun MicChip(on: Boolean, press: () -> Unit) {
-    Box(Modifier.size(40.dp).background(if (on) dcs.error else dcs.surfaceVariant).border(BorderStroke(1.dp, if (on) dcs.error else dcs.outlineVariant)).clickable(onClick = press).testTag("thread.mic"), contentAlignment = Alignment.Center) {
+internal fun MicChip(on: Boolean, held: (Boolean) -> Unit = {}, press: () -> Unit) {
+    // a tap starts or stops; held (0.4 s), it is hold-to-talk: `held(true)` when the hold begins, `held(false)` when it is let go
+    val hold = Modifier.pointerInput(on) { detectTapGestures(
+        onTap = { press() },
+        onLongPress = { held(true) },
+        onPress = { tryAwaitRelease(); held(false) },
+    ) }
+    Box(Modifier.size(40.dp).background(if (on) dcs.error else dcs.surfaceVariant).border(BorderStroke(1.dp, if (on) dcs.error else dcs.outlineVariant)).then(hold).testTag("thread.mic"), contentAlignment = Alignment.Center) {
         Icon(if (on) Icons.Default.Stop else Icons.Default.Mic, Msg.android_dictate, tint = if (on) dcs.onError else dcs.onSurfaceVariant, modifier = Modifier.size(18.dp))
     }
 }

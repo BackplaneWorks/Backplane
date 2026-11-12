@@ -165,6 +165,12 @@ where in a narration the next sentence usually starts and cancels it. The clips 
 (Kokoro-82M, Apache-2.0) are the recorded-sample tests: a finished request 0.99, a thinking pause 0.03, "So I'll
 send it to Kati, and then" 0.02.
 
+## Hold to talk
+
+The mic chip held (0.4 s or more) is hold-to-talk on the desktop, iOS and Android: dictation starts on the
+press (on the phones when the hold is recognised), and letting go stops it; once its last words are in, the
+draft goes with the same undo window as any voice send. A tap still starts or stops dictation.
+
 ## Voice commands
 
 `voice/cmds.rs`. What is said at the very end of an utterance (the segment the
