@@ -455,7 +455,11 @@ async fn run(hub: &Arc<Hub>, thread: Option<&str>, path: &str, ty: &str, msg: Va
         let ok = o["ok"].as_bool().unwrap_or(false);
         let servers = format!("{pro}|ready|gui ({})", gui.mode);
         if status { return Ok(json!({"server":format!("gui ({})", gui.mode),"servers":servers,"argv":gui.argv,"version":gui.version,"capabilities":o["message"].clone(),"detail":if ok { String::new() } else { err_of(&o) }})) }
-        return if ok { Ok(json!({"type":o["type"].as_str().unwrap_or(""),"message":o["message"].clone()})) } else { Err(err_of(&o)) };
+        if !ok { return Err(err_of(&o)) }
+        let mut out = json!({"type":o["type"].as_str().unwrap_or(""),"message":o["message"].clone()});
+        // what the person is doing in this KiCad right now, so the agent asks before working over them (docs/kicad-coedit.md)
+        if thread.is_some_and(|t| !t.is_empty()) { if let Some(p) = super::coedit::person_now(&pro) { out["person"] = p; } }
+        return Ok(out);
     }
     let env = runtime(hub).await;
     let plain = check(ty, path, &pro, &msg, &env.caps);

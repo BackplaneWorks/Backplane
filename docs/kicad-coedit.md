@@ -19,3 +19,14 @@ What the hub does:
   writes until resume (the turn keeps running), steer goes into the thread.
 
 Older runtimes keep the earlier rules (one writer per document, refused saves).
+
+## What the person is doing
+
+There is no accept or review step: an agent's kicad_ipc edits land in the open editor as the person's do, and the person undoes any of
+them from KiCad's Agents panel (per author; their own Ctrl+Z never takes an agent's change back). So that an agent does not work over
+the person, the hub keeps, per project, the person's selection (ET_SELECTION_CHANGED, bp.9+) and their own recent edits
+(ET_DOCUMENT_EDITED with actor "", bp.11) for two minutes (`kicad/coedit.rs`). Every live kicad_ipc result an agent gets carries them
+as `person` (`selected`: editor, items, seconds ago; `recent_edits`: document, description, item KIIDs, seconds ago). The prompt tells
+the agent to ask the person first when its next change touches those items or their area, and to keep working on other things
+meanwhile. Agents never start their own api-server or write the design files of a project the person has open: kicad_ipc is the one way
+in, so nothing reloads under the person.
