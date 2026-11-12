@@ -178,3 +178,25 @@ EMBED_MODE=fork BACKPLANE_KICAD_BIN=/path/to/bp8/bin/kicad BACKPLANE_KICAD_CLI=/
    - After `SIGKILL` of KiCad `10.99.0-bp.8` with unsaved edits, `LocalHistory` opens a modal `"Recover Unsaved Changes"` dialog (`WM_TRANSIENT_FOR == gpui_toplevel`) inside `PGM_KICAD::OnPgmInit()` *before* `SetReadyToReply()`. Polling `<sock>.events` (`ET_DIALOG_OPENED` / `ET_DIALOG_CLOSED`) while `Ping` returns `AS_NOT_READY` extends the startup deadline so the hub never kills KiCad while the user is answering the recovery prompt.
 6. **KiCad `10.99-bp.8` companion `custom_properties` migration:**
    - On board load/save, `10.99-bp.8` migrates item `custom_properties` from `<board>.kicad_pcb.backplane.json` into native `(custom_property ...)` S-expressions inside `<board>.kicad_pcb` while keeping `<proj>/.backplane.json` byte-identical.
+
+---
+
+## 9. Remote venue: `test/kicad_embed/remote.sh` (h@backplane)
+
+The desktop's one lock (`kicad-embed-e2e`) queues every lane. A second venue is h@backplane (16 cores, idle). `remote.sh` runs a suite from the current worktree there and behaves like a local run: same stdout/stderr, same exit code, the run's output directory copied to `$BP_TMP/bp-kembed-remote-out/<id>/`.
+
+```sh
+# a lane starts it with work_run and this lock (never the desktop's kicad-embed-e2e; the two venues run in parallel)
+work_run lock=kicad-embed-e2e-remote:
+  EMBED_MODE=fork test/kicad_embed/remote.sh run_all.sh BACKPLANE_KICAD_BIN=$HOME/.backplane-gpui-fresh/home/kicad/10.99.0-bp.11/bin/kicad
+  test/kicad_embed/remote.sh embed_ux_e2e.sh EMBED_MODE=fork BACKPLANE_KICAD_BIN=$HOME/.cache/kicad-test/10.99.0-bp.12/bin/kicad KEMBED_PROJ_SRC=$BP_TMP/my-board-copy
+```
+
+`[VAR=value ...]` go to the suite's environment; `EMBED_MODE`, `BACKPLANE_KICAD_BIN`, `BACKPLANE_KICAD_CLI`, `KICAD_BIN`, `KEMBED_PROJ_SRC` and `REAL_HARDWARE` are also taken from the caller's environment when not given. An absolute local path in a value is shipped: inside the worktree it maps to the synced tree; a KiCad runtime (`.../bin/kicad`) is rsynced whole; any other path is copied to the remote cache (h@backplane only, since it is the person's machine; `--host` anything else refuses unless `KEMBED_REMOTE_DATA_OK=1`). Real boards are copied only when you pass them as `KEMBED_PROJ_SRC`, and only from a copy.
+
+- **Build:** the worktree is synced and the hub and client (fast profile, no cef) are built by `scripts/bp-build.sh` (lane `kembed`, tree `~/bp-gpui-build/kembed`, warm `.target/`); no second build path.
+- **Scratch:** `~/.cache/bp-kembed-remote/` holds `tools/` (i3, i3-msg, ImageMagick, bun and only the shared libraries the remote lacks, copied from here, no root), `kicad/<runtime>` (rsynced with `--checksum` only when the file list changed; `KEMBED_REMOTE_VERIFY=1` forces a full check), `data/`, and `r/<id>/` per run (removed after the copy back). Each run has its own `HOME`, so nothing under the remote's `~/.backplane*` is read or written.
+- **Lock:** besides the work_run lock, the script holds `flock ~/.cache/bp-kembed-remote/lock` for the whole run, so a skipped lock queues instead of clobbering.
+- **Processes:** the suite runs in its own session; on hangup its group is stopped. Every process of the run carries `BP_KEMBED_RUN=<id>`; after the suite the runner asserts none is left (a straggler is killed by pid and fails the run with exit 97).
+- **Numbers:** software GL (llvmpipe) as on Boats; the script says so. Timings are not real-hardware numbers.
+- Exit codes: the suite's own; 70 build or setup failure; 69 host unreachable; 97 leftover processes.
