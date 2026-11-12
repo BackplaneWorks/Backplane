@@ -1,0 +1,31 @@
+{"schema": 1, "fab": "pcbway", "orders": false, "rev": 1, "updated": "2026-11-12",
+ "pages": {
+  "capabilities": {"url": "https://www.pcbway.com/capabilities.html", "fetched": "2026-11-12"}
+ },
+ "kinds": {
+  "pcb": {"limits": [
+   {"key": "layers_max", "value": 14, "unit": "", "page": "capabilities", "note": "Standard PCB: number of layers 1-14 layers"},
+   {"key": "track_min", "value": 0.1, "unit": "mm", "page": "capabilities", "note": "Min Trace 0.1mm/4mil"},
+   {"key": "space_min", "value": 0.1, "unit": "mm", "page": "capabilities", "note": "Min manufacturable spacing is 4mil (0.1mm)"},
+   {"key": "drill_min", "value": 0.2, "unit": "mm", "page": "capabilities", "note": "Any holes greater than 6mm or smaller than 0.2mm will be subject to extra charges"},
+   {"key": "drill_min", "value": 0.15, "unit": "mm", "cost": "extra", "page": "capabilities", "note": "Drill Sizes (CNC) 0.15-6.0mm; smaller than 0.2mm costs extra"},
+   {"key": "drill_max", "value": 6.0, "unit": "mm", "page": "capabilities", "note": "Min drill size is 0.15mm, max drill is 6.0mm"},
+   {"key": "pth_ring_min", "value": 0.15, "unit": "mm", "page": "capabilities", "note": "Min Width of Annular Ring 0.15mm (6mil)"},
+   {"key": "hole_tolerance_plus", "value": 0.08, "unit": "mm", "page": "capabilities", "note": "Finished Hole Size Tolerance (CNC): PTH +/-0.08mm, NPTH +/-0.05mm"},
+   {"key": "hole_tolerance_minus", "value": 0.08, "unit": "mm", "page": "capabilities", "note": "Finished Hole Size Tolerance (CNC): PTH +/-0.08mm, NPTH +/-0.05mm"},
+   {"key": "silk_line_min", "value": 0.15, "unit": "mm", "page": "capabilities", "note": "Minimum Character Width (Legend) 0.15mm"},
+   {"key": "silk_text_height_min", "value": 0.8, "unit": "mm", "page": "capabilities", "note": "Minimum Character Height (Legend) 0.8mm"},
+   {"key": "castellated_hole_min", "value": 0.4, "unit": "mm", "page": "capabilities", "note": "Minimum Diameter of Plated Half Holes 0.4mm"},
+   {"key": "board_min", "value": 3, "unit": "mm", "page": "capabilities", "note": "Maximum PCB Size: ... (min 3*3mm)"},
+   {"key": "board_max_x", "value": 1200, "unit": "mm", "when": {"layers": [1, 2]}, "page": "capabilities", "note": "Single-sided PCB and double-sided PCB: 600*1200mm"},
+   {"key": "board_max_y", "value": 600, "unit": "mm", "when": {"layers": [1, 2]}, "page": "capabilities", "note": "Single-sided PCB and double-sided PCB: 600*1200mm"},
+   {"key": "board_max_x", "value": 1150, "unit": "mm", "when": {"layers": [4, 32]}, "page": "capabilities", "note": "Multilayer PCB: 560*1150mm"},
+   {"key": "board_max_y", "value": 560, "unit": "mm", "when": {"layers": [4, 32]}, "page": "capabilities", "note": "Multilayer PCB: 560*1150mm"},
+   {"key": "thicknesses", "value": [0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.6, 2.0, 2.4, 2.6, 2.8, 3.0, 3.2], "unit": "mm", "page": "capabilities", "note": "Board Thickness 0.2-3.2mm: 0.2, 0.4, 0.6, 0.8, 1.0, 1.2, 1.6, 2.0, 2.4, 2.6, 2.8, 3.0, 3.2mm"},
+   {"key": "finishes", "value": ["hasl", "hasl_lead_free", "enig", "osp"], "unit": "", "page": "capabilities", "note": "Surface Finishing: HASL with lead, HASL lead free, Immersion gold, OSP, Hard Gold, Immersion Silver, Immersion Tin, ENEPIG (catalog words for the first four)"},
+   {"key": "castellated", "value": true, "unit": "", "page": "capabilities", "note": "Plated half holes from 0.4mm"}
+  ]}
+ },
+ "stackups": [],
+ "assembly": {}
+}
