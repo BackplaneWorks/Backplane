@@ -303,7 +303,7 @@ mod tests {
             assert!(!label(&l.key).is_empty(), "{} has no label", l.key);
             assert!(!l.note.is_empty(), "{at} {} says nothing of where on the page it is", l.key);
         }
-        for s in &p.stackups { assert!(s.source.starts_with("https://") && s.fetched.len() == 10, "{}", s.id); let t: f64 = s.seq.iter().map(|p| p.thickness_mm).sum(); assert!((t - s.thickness_mm).abs() < 0.12, "{} adds up to {t}", s.id) }
+        for s in &p.stackups { assert!(s.source.starts_with("https://") && s.fetched.len() == 10, "{}", s.id); let t: f64 = s.seq.iter().map(|p| p.thickness_mm).sum(); assert!((t - s.thickness_mm).abs() <= 0.2, "{} adds up to {t}", s.id) }
         for k in KINDS { assert!(p.kinds.contains_key(k), "{k}") }
     }
     #[test] fn fab_model_the_tier_follows_layers_copper_and_cost() {

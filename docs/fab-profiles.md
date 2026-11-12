@@ -63,3 +63,22 @@ marked section, merged, never overwritten:
 - Everything in the section loads in stock KiCad: `test/fab/stock_drc.sh [kicad-cli] [demo project]` writes it for each board kind
   and tier into a copy of a KiCad demo with a sentinel rule after it and runs stock `kicad-cli pcb drc` (KiCad drops a whole rules file
   that does not load, so the sentinel firing proves it loaded); last run on KiCad 10.0.7, all six cases.
+
+## Gathering (`fab/gather.rs`)
+
+Per fab an adapter: its published pages and, per value of the profile, where on which page it is (a table row's label, the words
+before the number, which number after them, a factor for a mil or a ring). More fabs are a baseline file plus an adapter.
+
+- `refresh` GETs each page with curl (`proc::Kind::Net`, a second apart, a Backplane user agent, https only, 8 MB at most); nothing of
+  the person's is ever sent. A copy hub, a test hub (stand-in agents) or `BACKPLANE_FAB_OFFLINE=1` never fetches.
+- Every value it reads gets today's date; one it cannot read (a page that did not come, a row that moved) keeps its old value and
+  date and is listed in the report's `missing`. A changed value bumps the revision; the history keeps every one. Stackups are read
+  whole from the impedance page (plies, thickness, Er from the page's own table; a prepreg its table does not name has no Er).
+- The hub runs it 3 minutes after start and then daily; `fab_profile {action: "refresh"}` and `fab.profile {action: "refresh"}` run
+  it now. A change is pushed to clients as `{t: "fab.changed", fab, rev, changes, keys, projects}` (the open projects on that fab);
+  a project's view marks its values `changed` until it is `seen`. The last run is `<home>/fab/gathered-<fab>.json`, shown as the
+  view's `gathered`.
+- Tests read saved copies of the pages (`test/fab/fixtures/<fab>/`, scripts and styles stripped): every rule finds its value and the
+  values are the bundled baseline's; a changed page changes the value and the revision; a missing page or row keeps the old.
+  `fab_gather_live_refresh` (ignored; `FAB_LIVE_HOME=<temp home>`) runs a real one by hand: on 2026-11-12, 121 values read, none
+  missing, none different from the baseline.
