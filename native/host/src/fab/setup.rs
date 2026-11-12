@@ -47,7 +47,7 @@ pub async fn apply(hub: &Arc<Hub>, root: &Path, key: &str) -> Result<Value, Stri
         let f = crate::files::kicad::project::read(&r.to_string_lossy()); Ok((s, f.pcb, f.pro))
     }).await.map_err(|_| "failed".to_string())??;
     let mm = sug["fab"].as_f64().ok_or("the suggestion has no value")?;
-    let gui = crate::files::kicad::embed::gui_route(&pro).is_some();
+    let route = crate::files::kicad::embed::gui_route(&pro); let gui = route.is_some();
     if !gui {
         let name = crate::files::kicad::canonical::doc_lock(&pcb);
         let l = crate::agents::lockrec::Lock::read(&hub.setting(&format!("lock.{name}")).await.unwrap_or_default());
@@ -55,9 +55,12 @@ pub async fn apply(hub: &Arc<Hub>, root: &Path, key: &str) -> Result<Value, Stri
     }
     if gui {
         let board = spec(&pcb);
-        let got = crate::files::kicad::ipc::kicad_ipc_in(hub, None, &pcb, "kiapi.board.commands.GetBoardDesignRules", json!({"board": board})).await?;
-        let (msg, was) = set_message(&board, got.get("message").unwrap_or(&got), key, mm)?;
-        crate::files::kicad::ipc::kicad_ipc_in(hub, None, &pcb, "kiapi.board.commands.SetBoardDesignRules", msg).await?;
+        // the person's press: sent as the person (a co-editing KiCad, bp.13+, puts it in their own undo; older ones keep it apart)
+        let (r, me) = (route.unwrap(), crate::files::kicad::coedit::client_name(&crate::files::kicad::coedit::Who::Person));
+        let call = |ty: &'static str, m: Value| { let (r, me) = (r.clone(), me.clone()); async move { let o = crate::files::kicad::embed::gui_call_as(&r, ty, m, &me).await; if o["ok"].as_bool().unwrap_or(false) { Ok(o["message"].clone()) } else { Err(format!("KiCad: {}", o["error"].as_str().or(o["status"].as_str()).unwrap_or("no answer"))) } } };
+        let got = call("kiapi.board.commands.GetBoardDesignRules", json!({"board": board})).await?;
+        let (msg, was) = set_message(&board, &got, key, mm)?;
+        call("kiapi.board.commands.SetBoardDesignRules", msg).await?;
         return Ok(json!({"applied": key, "was_mm": was, "now_mm": mm, "in": "kicad", "saved": false, "note": format!("set in KiCad's Board Setup; save the board to keep it (it was {was} mm)")}))
     }
     // no KiCad of the person's: the headless KiCad (which has no design-rules API) is retired first so it holds no older copy, then the

@@ -96,7 +96,9 @@ wait_for_log "$OUT/client.log" '"name":"fab_open","event":"mark"' 60 || true
 sleep 0.5; shot "f1_fab_open"
 FAB=$(fab_info)
 check "The hub published the fab's limits with source and date" "$(python3 -c 'import json,sys; v=json.loads(sys.argv[1]); t=[l for l in v.get("limits",[]) if l.get("key")=="track_min"]; print(int(bool(t) and t[0]["free"]["source"].startswith("https://") and len(t[0]["free"]["fetched"])==10))' "$FAB" 2>/dev/null || echo 0)" "$(echo "$FAB" | head -c 300)"
-check "Before Write the panel says the DRC rules lack the fab's limits" "$(python3 -c 'import json,sys; print(int(json.loads(sys.argv[1])["drc"]["state"] in ("none","stale")))' "$FAB" 2>/dev/null || echo 0)"
+# (the client offered Write, which it does only while the rules lack the fab's section: read from its controls, since on a slow venue the
+# script's press can come before this check reads the hub)
+check "Before Write the panel offered to write the fab's limits into the DRC rules" "$(has_ctl mgmt:fab:drc)"
 check "The clearance minimum under the fab's is a suggestion" "$(has_ctl mgmt:fab:apply:min_clearance)"
 
 # F2: Write
