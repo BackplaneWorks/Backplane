@@ -443,6 +443,11 @@ fn norm_pro_key(pro: &str) -> String {
 static ROUTES: OnceLock<Mutex<HashMap<String, GuiRoute>>> = OnceLock::new();
 fn routes() -> &'static Mutex<HashMap<String, GuiRoute>> { ROUTES.get_or_init(Default::default) }
 
+/// Every ready co-editing GUI (bp.11 `coedit`): told when an agent's turn ends.
+pub fn coedit_routes() -> Vec<GuiRoute> {
+    routes().lock().unwrap().values().filter(|r| r.caps.iter().any(|c| c == "coedit")).cloned().collect()
+}
+
 /// Active `"ready"` GUI session route for `pro`, if any (`ipc::run` checks this before headless `kserve`).
 pub fn gui_route(pro: &str) -> Option<GuiRoute> {
     routes().lock().unwrap().get(&norm_pro_key(pro)).cloned()
@@ -1816,6 +1821,7 @@ fn spawn_fork_events_loop(me: mpsc::UnboundedSender<Msg>, pro: String, gen: u64,
                     if super::reload::on_event(&pro, ev) { need_sync = true; continue }
                     if super::comment::on_event(&pro, ev) { continue }
                     if super::progress::on_event(&pro, ev) { continue }
+                    if super::coedit::on_event(ev) { continue }
                     if ty == "ET_SHOW_REQUESTED" || ty_n == 9 {
                         show_req = Some(kind_of_fk_val(&ev["frame"]["kind"]).to_string());
                     } else if matches!(ty, "ET_FRAME_OPENED" | "ET_FRAME_CLOSED" | "ET_FRAME_SHOWN" | "ET_FRAME_HIDDEN"

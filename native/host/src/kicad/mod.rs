@@ -40,6 +40,7 @@ pub mod comment;
 pub mod progress;
 pub mod findings;
 pub mod checkrun;
+pub mod coedit;
 pub mod histsteps;
 pub mod open;
 pub mod install;

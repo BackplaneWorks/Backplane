@@ -107,7 +107,14 @@ impl Agents {
         if crate::copy::on() { return }
         self.design_record(th, "turn").await;
         self.doc_locks_free(th).await;
+        // the open co-editing editors stop showing this agent at work (docs/kicad-coedit.md)
+        crate::files::kicad::coedit::forget(th);
+        for route in crate::files::kicad::embed::coedit_routes() {
+            let _ = crate::files::kicad::embed::gui_call_as(&route, "kiapi.backplane.coedit.SetAgentActivity", crate::files::kicad::coedit::activity(th, "", "idle"), &format!("agent:{th}")).await;
+        }
     }
+    /// The thread's title ("" for none): the task an open co-editing KiCad shows for it.
+    pub async fn thread_title(&self, th: &str) -> String { self.world().await.threads.get(th).map(|t| t.title.clone()).unwrap_or_default() }
     /// A hardware thread's code worktree is there before its turn: one removed after it settled is
     /// made again from its branch, without design files.
     pub async fn design_ensure(&self, th: &str) {
