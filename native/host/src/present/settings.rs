@@ -760,6 +760,7 @@ pub fn act(hub: &str, session: &Value, action: &str, value: &str) -> Option<Out>
             send(session, hub, m, p, &mut cmds, &mut rid);
             if action == "ring-search" && value == "clear" { json!({"drafts": {"@f.ringq": ""}}) } else { json!({}) }
         }
+        "voice-always-ignore" => { send(session, hub, "bots.voice", json!({"op": "page-act", "action": "voice-always-ignore", "value": draft(session, "@f.valwign")}), &mut cmds, &mut rid); json!({"drafts": {"@f.valwign": ""}}) }
         "voice-jev-model" => { send(session, hub, "setting.set", json!({"key": crate::voice::eot::MODEL, "value": draft(session, "@f.vjevmodel").trim()}), &mut cmds, &mut rid); json!({"drafts": {"@f.vjevmodel": ""}}) }
         "voice-phrases" => { let (k, v) = crate::voice::page::phrases_setting(draft(session, "@f.vphrase")); send(session, hub, "setting.set", json!({"key": k, "value": v}), &mut cmds, &mut rid); json!({"drafts": {"@f.vphrase": ""}}) }
         "voice-term" => { for (k, v) in crate::voice::page::term_settings(draft(session, "@f.vterm")) { send(session, hub, "setting.set", json!({"key": k, "value": v}), &mut cmds, &mut rid); } json!({"drafts": {"@f.vterm": ""}}) }

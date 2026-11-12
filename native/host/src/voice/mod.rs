@@ -1,4 +1,5 @@
 //! Dictation (docs/voice.md). `words`, `vdict`, `place`, `dictation`, `page`, `ring` and `ringbox`'s rules are pure; `session` is the IO: `bots.voice`, `/voice/in` and the helper; `resident` keeps the one recognizer loaded.
+pub mod always;
 pub mod cmds;
 pub mod dictation;
 pub mod eot;

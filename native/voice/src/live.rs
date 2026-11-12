@@ -232,7 +232,9 @@ pub async fn live(a: Args) -> ! {
 
     let stop = Stop::new(true);
     stop::on_signals(stop.clone());
-    stop::after(stop.clone(), LIVE_LIMIT);
+    if !a.always {
+        stop::after(stop.clone(), LIVE_LIMIT);
+    }
     let from_stdin = a.source == "stdin";
     if !from_stdin {
         stop::watch_stdin(stop.clone());

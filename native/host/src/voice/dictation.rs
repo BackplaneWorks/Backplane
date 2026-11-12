@@ -8,6 +8,8 @@ pub struct Dictation {
     /// "starting", "live", "stopping", "" when off
     pub state: String, pub device: String, pub engine: String, pub loaded: bool, pub writing: bool, pub level: u32, pub hint: String, pub err: String,
     pub fixes: Vec<VFx>, pub unsure: Vec<Unsure>, pub ignored: Vec<String>, pub fixing: bool,
+    /// always on (always.rs): it is this thread's, and why it is paused ("" listening)
+    pub always: bool, pub paused: String,
 }
 fn btn(label: &str, action: &str, value: &str, primary: bool) -> Value { json!({"label": label, "action": action, "value": value, "primary": primary}) }
 
@@ -19,6 +21,7 @@ impl Dictation {
             "stopping" => "Finishing…".into(),
             _ if self.engine == "local" && !self.loaded => "Loading the model…".into(),
             _ if self.writing => "Writing".into(),
+            _ if self.always => "Always on · listening".into(),
             _ if self.device.is_empty() => "Listening".into(),
             _ => format!("Listening · {}", self.device),
         }
@@ -26,6 +29,7 @@ impl Dictation {
     fn note(&self) -> String {
         let dev = if self.device.is_empty() { "the microphone" } else { &self.device };
         if !self.err.is_empty() { return format!("Dictation: {}", self.err) }
+        if self.always && !self.paused.is_empty() { return format!("Always on is paused: {}. It listens again when that ends.", self.paused) }
         if !self.on() { return String::new() }
         match self.hint.as_str() {
             "no-audio" => format!("Nothing received from {dev} yet. Is it plugged in? Pick another in Settings, Voice."),
@@ -50,11 +54,11 @@ impl Dictation {
     pub fn view(&self) -> Value {
         let fixes: Vec<Value> = self.fixes.iter().enumerate().map(|(i, f)| json!({"label": format!("{} ↶", if f.out.is_empty() { format!("{} dropped", f.heard) } else { format!("{} ← {}", f.out, f.heard) }),
             "tip": format!("Put back what was heard ({}), and stop fixing it this way", f.heard), "action": "voice-undo", "value": i.to_string(), "primary": false})).collect();
-        json!({"on": self.on(), "state": self.state, "status": self.status(), "level": self.level, "note": self.note(), "bad": !self.err.is_empty(),
+        json!({"always": {"on": self.always, "paused": self.paused}, "on": self.on(), "state": self.state, "status": self.status(), "level": self.level, "note": self.note(), "bad": !self.err.is_empty(),
             "mic": "Dictate with this device's microphone", "stop": "Stop dictating", "fixes": fixes, "ask": self.ask()})
     }
     /// A session begins: a fresh strip, what was left to clarify stays until it is answered.
-    pub fn begin(&mut self) { *self = Dictation { state: "starting".into(), unsure: std::mem::take(&mut self.unsure), ignored: std::mem::take(&mut self.ignored), ..Dictation::default() } }
+    pub fn begin(&mut self) { *self = Dictation { state: "starting".into(), unsure: std::mem::take(&mut self.unsure), ignored: std::mem::take(&mut self.ignored), always: self.always, paused: std::mem::take(&mut self.paused), ..Dictation::default() } }
     /// The session ended.
     pub fn idle(&mut self) { self.state.clear(); self.writing = false; self.level = 0; self.hint.clear(); self.loaded = false; }
     /// New words to clarify, after those still waiting, never one skipped, at most five.
@@ -91,7 +95,8 @@ pub struct Acted { pub draft: Option<String>, pub settings: Vec<(String, String)
 pub enum Out { Edit(Edit), View, Level(u32), /** a voice command for the client: "send" or "cancel" (cmds.rs), after the cut that ends the message */ Command(&'static str),
     /** end of turn (eot.rs): ask Jev now about pause `gen` (the session asks, then calls `Reader::eot_answer`) */ Ask(Ask),
     /** the countdown before an end-of-turn send: its length in ms, 0 when it was cancelled; and who decided */ Countdown(u64, &'static str),
-    /** an end-of-turn send went: the undo log counts it */ AutoSent }
+    /** an end-of-turn send went: the undo log counts it */ AutoSent,
+    /** always on: the message was said to this name first ("Bub, …"); the session finds the thread it means */ Route(String) }
 /// A pause to ask Jev about: its number, the draft, the audio model's probability.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Ask { pub gen: u64, pub draft: String, pub audio: Option<f32>, pub pause_ms: u64 }
@@ -105,13 +110,33 @@ struct Eot { cfg: Option<eot::Cfg>, gen: u64, audio: Option<f32>, audio_item: St
 pub struct Reader { d: VDict, timed: bool, place: Place, set: Settle, acc: String, seg: Vec<VW>, ask: Vec<Unsure>, tail: String, fixes: Vec<VFx>,
     pub cuts: u64, pub seq: u64, hist: std::collections::VecDeque<(u64, String, Option<vdict::Mark>)>, done: (String, Vec<VW>),
     /// the voice commands on; when words were last heard; whether any were written since the last cut (auto-send has something to send)
-    cmds: Cmds, heard: Option<std::time::Instant>, wrote: bool, eot: Eot }
+    cmds: Cmds, heard: Option<std::time::Instant>, wrote: bool, eot: Eot,
+    /// always on (always.rs): what starts a message, whether one has started, and the leading words of an item that named where it goes
+    gate: Option<super::always::Gate>, started: bool, skip: (String, usize) }
 const HIST: usize = 64;
 impl Reader {
     pub fn new(d: VDict, timed: bool, draft: &str, caret: usize) -> Reader {
-        Reader { d, timed, place: Place::new(draft, caret), set: Settle::default(), acc: String::new(), seg: vec![], ask: vec![], tail: String::new(), fixes: vec![], cuts: 0, seq: 0, hist: Default::default(), done: Default::default(), cmds: Cmds::default(), heard: None, wrote: false, eot: Eot::default() }
+        Reader { d, timed, place: Place::new(draft, caret), set: Settle::default(), acc: String::new(), seg: vec![], ask: vec![], tail: String::new(), fixes: vec![], cuts: 0, seq: 0, hist: Default::default(), done: Default::default(), cmds: Cmds::default(), heard: None, wrote: false, eot: Eot::default(), gate: None, started: false, skip: Default::default() }
     }
     pub fn with_cmds(mut self, c: Cmds) -> Reader { self.cmds = c; self }
+    /// Always on: a message starts only at real words (always.rs `Gate`); until then nothing heard is written.
+    pub fn with_gate(mut self, g: super::always::Gate) -> Reader { self.gate = Some(g); self }
+    /// Whether these words may be written: always words while a message is going; before one, only when they start one (and a name said first is
+    /// taken off and told: Out::Route). None: drop them.
+    fn admit(&mut self, item: &str, ws: Vec<VW>, out: &mut Vec<Out>) -> Option<Vec<VW>> {
+        if let (Some(g), false) = (self.gate, self.started) {
+            if !g.passes(&ws) { return None }
+            self.started = true;
+            if let Some((n, name)) = super::always::route(&ws) { self.skip = (item.to_string(), n); out.push(Out::Route(name)) }
+        }
+        if self.skip.0 == item && self.skip.1 > 0 {
+            // the name is not written; what follows it opens the message, with its capital
+            let mut rest: Vec<VW> = ws.into_iter().skip(self.skip.1).collect();
+            if let Some(f) = rest.first_mut() { let mut c = f.w.chars(); if let Some(h) = c.next() { f.w = h.to_uppercase().chain(c).collect() } }
+            return Some(rest)
+        }
+        Some(ws)
+    }
     /// End of turn on (eot.rs `Cfg`): the hub decides when the message is done.
     pub fn with_eot(mut self, c: eot::Cfg) -> Reader { if c.on { self.eot.cfg = Some(c) } self }
     /// New speech: whatever was being decided about the last pause no longer holds; a countdown running is cancelled.
@@ -141,10 +166,12 @@ impl Reader {
     }
     /// The person pressed Keep talking in the countdown: no send for this pause.
     pub fn eot_hold(&mut self) -> Vec<Out> { let o = if self.eot.countdown.take().is_some() { vec![Out::Countdown(0, "")] } else { vec![] }; self.eot.gen += 1; o }
+    /// Always on: a message has started (and goes to the thread it started in).
+    pub fn started(&self) -> bool { self.started }
     /// The countdown running: its pause, to fire when it ends.
     pub fn eot_counting(&self) -> Option<u64> { self.eot.countdown.map(|c| c.0) }
     /// The message ends here by a voice command: the same as a client's cut, made by the hub (the client takes its count from the command's frame).
-    fn cut_here(&mut self) { self.cuts += 1; self.place = Place::new("", 0); self.seg.clear(); self.ask.clear(); self.fixes.clear(); self.tail.clear(); self.wrote = false; }
+    fn cut_here(&mut self) { self.cuts += 1; self.place = Place::new("", 0); self.seg.clear(); self.ask.clear(); self.fixes.clear(); self.tail.clear(); self.wrote = false; self.started = false; self.skip = Default::default(); }
     fn edit(&mut self, item: &str, e: Edit) -> Out { self.seq += 1; self.hist.push_back((self.seq, item.to_string(), None)); if self.hist.len() > HIST { self.hist.pop_front(); } Out::Edit(e) }
     /// Auto-send (cmds.rs `AUTO`): after that many seconds with no words heard, no segment open and words written since the last send, the message goes.
     pub fn idle(&mut self, now: std::time::Instant) -> Vec<Out> {
@@ -162,7 +189,7 @@ impl Reader {
     /// dropped because they came after its send (that one comes back as an edit). No word of the sent message is written again.
     pub fn cut(&mut self, n: u64, seq: u64, st: &mut Dictation) -> Vec<Out> {
         if n <= self.cuts { return vec![] }
-        self.cuts = n; self.place = Place::new("", 0); self.seg.clear(); self.ask.clear(); self.fixes.clear(); self.tail.clear(); self.wrote = false;
+        self.cuts = n; self.place = Place::new("", 0); self.seg.clear(); self.ask.clear(); self.fixes.clear(); self.tail.clear(); self.wrote = false; self.started = false;
         let at = self.hist.iter().find(|h| h.0 == seq).cloned(); let open = self.set.item.clone();
         let all = vdict::Mark::default();
         match at {
@@ -217,13 +244,20 @@ impl Reader {
             "ready" => { st.state = "live".into(); st.device = if s("label").is_empty() { s("device") } else { s("label") }; st.hint.clear(); st.engine = engine.to_string(); vec![Out::View] }
             "delta" => {
                 let item = s("item"); self.acc = if self.set.item == item { format!("{}{}", self.acc, s("text")) } else { s("text") };
-                let x = self.set.hyp(false, &item, vdict::words_text(&self.acc), 0, &self.d.waits().to_vec()); pre.extend(self.words(&item, x, false, st)); pre
+                let Some(ws) = self.admit(&item, vdict::words_text(&self.acc), &mut pre) else { return pre };
+                let x = self.set.hyp(false, &item, ws, 0, &self.d.waits().to_vec()); pre.extend(self.words(&item, x, false, st)); pre
             }
-            "hyp" => { let item = s("item"); let x = self.set.hyp(true, &item, vdict::words_json(&o["words"]), o["end"].as_u64().unwrap_or(0) as u32, &self.d.waits().to_vec()); pre.extend(self.words(&item, x, false, st)); pre }
+            "hyp" => {
+                let item = s("item"); let Some(ws) = self.admit(&item, vdict::words_json(&o["words"]), &mut pre) else { return pre };
+                let x = self.set.hyp(true, &item, ws, o["end"].as_u64().unwrap_or(0) as u32, &self.d.waits().to_vec()); pre.extend(self.words(&item, x, false, st)); pre
+            }
             "done" => {
-                let item = s("item"); let ws = if self.timed { vdict::words_json(&o["words"]) } else { vdict::words_text(&s("text")) }; let x = self.set.done(self.timed, &item, &ws); self.done = (item.clone(), ws);
+                let item = s("item"); let ws = if self.timed { vdict::words_json(&o["words"]) } else { vdict::words_text(&s("text")) };
+                // always on, no message yet and these do not start one: the segment is forgotten (its settling with it)
+                let Some(ws) = self.admit(&item, ws, &mut pre) else { let _ = self.set.done(self.timed, &item, &[]); self.acc.clear(); return pre };
+                let x = self.set.done(self.timed, &item, &ws); self.done = (item.clone(), ws);
                 // a segment's end is new speech too (a short one had no hypothesis): the audio model's word on this very pause stays
-                let mut out = if self.eot.audio_item == item { vec![] } else { self.speech() };
+                let mut out = pre; if self.eot.audio_item != item { out.extend(self.speech()) }
                 out.extend(self.words(&item, x, true, st));
                 // a pause closed the segment (a command already ended the message otherwise): has the person finished?
                 if !out.iter().any(|o| matches!(o, Out::Command(_))) { out.extend(self.pause()) }
@@ -409,6 +443,32 @@ mod tests {
     #[test] fn end_of_turn_off_asks_nothing() {
         let (mut r, mut st, mut c) = (Reader::new(dict(), true, "", 0).with_cmds(cmds(&[])).with_eot(crate::voice::eot::Cfg::of(&[("voice.eot".to_string(), "off".to_string())].into_iter().collect())), Dictation::default(), Cl::new());
         assert!(pause(&mut r, &mut st, &mut c, "l0", &[("Ship", 0, 20), ("it.", 20, 40)], 0.99, Some(0.99)).is_empty());
+    }
+    // ---- always on
+    fn gated(min_words: usize) -> Reader { Reader::new(dict(), true, "", 0).with_cmds(cmds(&[])).with_eot(eot_on(false)).with_gate(crate::voice::always::Gate { min_words, min_ms: 0, min_p: crate::voice::always::MIN_P }) }
+    fn segp(item: &str, words: &[(&str, u32, u32, u32)]) -> Value { json!({"event":"done","item":item,"text":"","words": words.iter().map(|(w, s, e, p)| json!([w, s, e, p])).collect::<Vec<_>>()}) }
+    #[test] fn always_on_noise_and_fillers_write_nothing_and_real_words_start_a_message() {
+        let (mut r, mut st, mut c) = (gated(1), Dictation::default(), Cl::new());
+        c.hear(&mut r, &mut st, &[segp("l0", &[("Um.", 0, 20, 90)]), segp("l1", &[("the", 50, 60, 25)]), json!({"event":"hyp","item":"l2","words":[["uh",100,110,80]],"end":120})]);
+        assert_eq!(c.text, "", "a filler, a word the engine was unsure of (a cough, a fan): nothing");
+        c.hear(&mut r, &mut st, &[segp("l3", &[("Add", 200, 220, 95), ("a", 220, 225, 95), ("button.", 225, 260, 95)])]); assert_eq!(c.text, "Add a button.");
+        // once a message is going, every word counts, fillers too (the dictionary drops them as always)
+        c.hear(&mut r, &mut st, &[segp("l4", &[("Okay.", 300, 320, 95)])]); assert_eq!(c.text, "Add a button. Okay.");
+        // after it is sent, the gate is back
+        let o = r.eot_hold(); c.take(&r, o); r.cut_here(); c.text.clear(); c.mark = 0; c.mine = r.cuts;
+        c.hear(&mut r, &mut st, &[segp("l5", &[("Hmm.", 400, 420, 95)])]); assert_eq!(c.text, "");
+    }
+    #[test] fn two_words_when_asked() {
+        let (mut r, mut st, mut c) = (gated(2), Dictation::default(), Cl::new());
+        c.hear(&mut r, &mut st, &[segp("l0", &[("Yes.", 0, 20, 95)])]); assert_eq!(c.text, "");
+        c.hear(&mut r, &mut st, &[segp("l1", &[("Yes", 50, 60, 95), ("please.", 60, 80, 95)])]); assert_eq!(c.text, "Yes please.");
+    }
+    #[test] fn a_name_said_first_routes_and_is_not_written() {
+        let (mut r, mut st, mut c) = (gated(1), Dictation::default(), Cl::new());
+        let o = r.step(&json!({"event":"hyp","item":"l0","words":[["Bub,",0,20,95],["what's",25,40,95],["on",40,50,95]],"end":60}).to_string(), &mut st, "local");
+        assert!(o.iter().any(|x| matches!(x, Out::Route(n) if n == "bub")), "{o:?}"); c.take(&r, o);
+        c.hear(&mut r, &mut st, &[segp("l0", &[("Bub,", 0, 20, 95), ("what's", 25, 40, 95), ("on", 40, 50, 95), ("today?", 50, 80, 95)])]);
+        assert_eq!(c.text, "What's on today?");
     }
     #[test] fn the_cloud_engine_cut_mid_segment_counts_the_words_already_sent() {
         let (mut r, mut st, mut c) = (Reader::new(dict(), false, "", 0), Dictation::default(), Cl::new());
