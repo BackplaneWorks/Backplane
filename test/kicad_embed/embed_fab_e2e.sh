@@ -42,14 +42,28 @@ last_ev() {
 import json, sys
 found = {}
 for line in open(sys.argv[1], encoding="utf-8", errors="replace"):
-    if "GPUI_LOG " in line:
-        try: o = json.loads(line.split("GPUI_LOG ", 1)[1])
-        except Exception: continue
-        if o.get("event") == sys.argv[2]: found = o
+    for tag in ("GPUI_LOG ", "GPUI_METRIC "):
+        if tag in line:
+            try: o = json.loads(line.split(tag, 1)[1])
+            except Exception: continue
+            if o.get("event") == sys.argv[2]: found = o
 print(json.dumps(found))
 PY
 }
-has_ctl() { python3 -c 'import json,sys; c=json.loads(sys.argv[1]).get("controls",[]); print(int(any((x.get("id") if isinstance(x,dict) else x)==sys.argv[2] for x in c)))' "$(last_ev controls)" "$1" 2>/dev/null || echo 0; }
+# whether any controls list the client reported so far had this control (the panel's buttons come and go as the hub's data changes)
+has_ctl() {
+  python3 - "$OUT/client.log" "$1" <<'PY'
+import json, sys
+seen = 0
+for line in open(sys.argv[1], encoding="utf-8", errors="replace"):
+    for tag in ("GPUI_LOG ", "GPUI_METRIC "):
+        if tag in line:
+            try: o = json.loads(line.split(tag, 1)[1])
+            except Exception: continue
+            if o.get("event") == "controls" and any((x.get("id") if isinstance(x, dict) else x) == sys.argv[2] for x in o.get("controls", [])): seen = 1
+print(seen)
+PY
+}
 
 # the suggestion F3 applies: the project's clearance minimum, set under the fab's
 python3 - "$PRO" <<'PY'
