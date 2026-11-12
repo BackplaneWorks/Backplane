@@ -237,7 +237,9 @@ fn plain_spans(s: &str) -> Vec<Span> { vec![Span { text: s.to_string(), style: D
 /// A person's message whose text may wrap gets the bubble's full width (640 px at most) instead of shrinking to its text: a shrink-to-fit
 /// parent let the layout measure the wrapping text at one width and paint it at another, so a long message was drawn over what follows it.
 /// A message of short lines never wraps and keeps its snug bubble.
-pub fn bubble_full_width(text: &str) -> bool { text.lines().any(|l| l.chars().count() > 60) }
+/// A message with pictures is laid out in blocks too: in the snug flex bubble the pictures' wrapping row was measured on one line and painted on
+/// two, so the second picture spilled out of the bubble over the rows below and the composer.
+pub fn bubble_full_width(text: &str, attachments: &Value) -> bool { text.lines().any(|l| l.chars().count() > 60) || !split_attachments(attachments).0.is_empty() }
 
 /// A user's message text.
 pub fn user_text(reg: &Reg, light: bool, s: &str, refs: &[String]) -> AnyElement { text(reg, light, md::chips(md::linkify(s), refs), Kind::Body) }
@@ -634,8 +636,12 @@ mod tests {
         let (p, f) = split_attachments(&l); assert_eq!(p.len(), 1); assert_eq!(f, vec!["b.pdf".to_string()]); assert_eq!(split_attachments(&Value::Null), (vec![], vec![]));
     }
     #[test] fn a_message_that_may_wrap_takes_the_bubbles_full_width() {
-        assert!(bubble_full_width(&"word ".repeat(40))); assert!(bubble_full_width(&format!("short\n{}", "x".repeat(61))));
-        assert!(!bubble_full_width("hello from the test")); assert!(!bubble_full_width("a\nb\nc")); assert!(!bubble_full_width(&"y".repeat(60)));
+        let none = Value::Null;
+        assert!(bubble_full_width(&"word ".repeat(40), &none)); assert!(bubble_full_width(&format!("short\n{}", "x".repeat(61)), &none));
+        assert!(!bubble_full_width("hello from the test", &none)); assert!(!bubble_full_width("a\nb\nc", &none)); assert!(!bubble_full_width(&"y".repeat(60), &none));
+        // pictures: block layout, so a wrapped second picture is inside the bubble's height; a file chip alone keeps the snug bubble
+        assert!(bubble_full_width("add these", &serde_json::json!([{"image": true, "url": "/a.png", "path": "a.png"}, {"image": true, "url": "/b.png", "path": "b.png"}])));
+        assert!(!bubble_full_width("add these", &serde_json::json!([{"label": "notes.txt", "path": "notes.txt"}])));
     }
     fn info(id: &str, idx: usize, text: &str) -> Info { Info { text: text.into(), entry: id[1..].parse().unwrap_or(0), id: id.into(), idx, links: vec![], layout: None } }
     fn frame(r: &mut Registry, blocks: &[(&str, usize, &str)]) { r.begin(); for (id, idx, t) in blocks { r.blocks.push(info(id, *idx, t)); } r.resolve(); }
