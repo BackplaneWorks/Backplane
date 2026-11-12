@@ -244,6 +244,7 @@ impl KicadPane {
         let kind = frame_for(open);
         // KiCad was closed (or failed): the rail's page starts it again, instead of a "stopped" refusal from show
         if self.attached && matches!(self.info["state"].as_str(), Some("stopped" | "failed")) { self.reattach(); }
+        else if self.attached && self.locally_shown(kind) { self.placed = None; }
         else if self.attached {
             self.pending_show = (self.info["active"].as_str() != Some(kind)).then(|| kind.to_string());
             self.rpc("editor.kicad.show", json!({"project": self.project, "frame": kind, "focus": self.keys}));
@@ -280,8 +281,16 @@ impl KicadPane {
         if kind == frame_for(&self.open) { self.override_kind = None; } else { self.override_kind = Some(kind.to_string()); }
         self.placed = None;
         if self.attached && matches!(self.info["state"].as_str(), Some("stopped" | "failed")) { self.reattach(); }
+        else if self.attached && self.locally_shown(kind) {}
         else if self.attached { self.pending_show = Some(kind.to_string()); self.rpc("editor.kicad.show", json!({"project": self.project, "frame": kind})); }
         cx.notify();
+    }
+    /// bp.10+ local map: `kind`'s frame is one KiCad has shown or pre-warmed, so the client maps it itself and asks KiCad nothing. A hub
+    /// ShowFrame here hid the other frames in KiCad while the client was mapping them (a quick Board, 3D, Board left the board's Show a
+    /// no-op until the hub's re-show ~0.9 s later).
+    fn locally_shown(&self, kind: &str) -> bool {
+        self.info["mode"] == "fork" && self.info["local_map"] == true
+            && pick_local(kind, &self.info, &self.frames, &self.ever_shown).is_some_and(|x| self.ever_shown.contains(&x))
     }
     pub fn tab(&self) -> String { self.wanted_kind().to_string() }
     /// Backplane's theme: KiCad follows it (the fork switches live; stock KiCad keeps its own).
