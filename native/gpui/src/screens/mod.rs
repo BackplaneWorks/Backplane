@@ -69,6 +69,7 @@ pub mod viewer;
 pub mod keysheet;
 pub mod mgmt;
 pub mod mgmt_bom;
+pub mod mgmt_fab;
 mod glue;
 
 use gpui::{Context, Entity, FocusHandle};

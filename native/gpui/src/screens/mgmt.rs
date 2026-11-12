@@ -11,7 +11,7 @@ use std::{collections::HashMap, time::{Duration, Instant}};
 
 /// A panel's client side: drawn from the hub's `mgmt.<id>.<digest>` value (`data`; Null until it arrives).
 pub struct View { pub id: &'static str, pub body: fn(&mut Backplane, &Value, bool, &mut Context<Backplane>) -> AnyElement }
-pub const VIEWS: &[View] = &[View { id: "bom", body: super::mgmt_bom::body }];
+pub const VIEWS: &[View] = &[View { id: "bom", body: super::mgmt_bom::body }, View { id: "fab", body: super::mgmt_fab::body }];
 
 /// The `mgmt.watch` answer's tag (Command::Ask).
 pub const WATCH_TAG: u64 = 0x6d67_6d74;
@@ -124,6 +124,7 @@ pub fn controls(thread: &Value, m: &Mgmt) -> Vec<(String, String, String)> {
     let mut v: Vec<(String, String, String)> = st["panels"].as_array().into_iter().flatten().map(|p| (format!("mgmt:{}", p["id"].as_str().unwrap_or("")), p["label"].as_str().unwrap_or("").to_string(), format!("toggle:{}", p["id"].as_str().unwrap_or("")))).collect();
     if st["open"].as_str().map_or(false, |o| !o.is_empty()) { /* i18n-ok: ctl ids and labels the drivers press */ v.extend([("mgmt:right".into(), "Right".into(), "dock:right".into()), ("mgmt:bottom".into(), "Bottom".into(), "dock:bottom".into())]); }
     v.extend(super::mgmt_bom::controls(m));
+    v.extend(super::mgmt_fab::controls(m));
     v
 }
 /// A press of one of `controls` (or a key): `toggle:<id>`, `dock:<side>`, or a panel's own (`bom:...`).
@@ -131,6 +132,7 @@ pub fn act(app: &mut Backplane, a: &str, cx: &mut Context<Backplane>) {
     if let Some(id) = a.strip_prefix("toggle:") { toggle(app, id, cx) }
     else if let Some(s) = a.strip_prefix("dock:") { dock(app, s, cx) }
     else if let Some(b) = a.strip_prefix("bom:") { super::mgmt_bom::act(app, b, cx) }
+    else if let Some(b) = a.strip_prefix("fab:") { super::mgmt_fab::act(app, b, cx) }
 }
 
 struct EdgeDrag;
