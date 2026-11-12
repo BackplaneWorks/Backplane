@@ -202,7 +202,7 @@ object DataClient {
                 notice = HubRescue.notice(o.optJSONObject("notice"))
                 heardMigrating(o.optJSONObject("migrating"))
                 commands = o.optJSONArray("commands")?.let { a -> (0 until a.length()).map { val w = a.getJSONObject(it); Word(w.optString("word"), w.optString("label"), w.optString("desc")) } } ?: emptyList()
-                conn = Conn.ONLINE; failure = ""; backoff = 250; plots.reset()
+                conn = Conn.ONLINE; failure = ""; backoff = 250; plots.reset(); DataVoice.connected()
                 if (!onHome) downSince = 0L
                 scope.launch { synchronise(g) }
                 heardOffer(o.optString("hubOffer"))

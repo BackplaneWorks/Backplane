@@ -48,6 +48,6 @@ class DataActivity : ComponentActivity() {
         if (u.host == "thread") u.pathSegments.firstOrNull()?.let { if (it.contains('~')) DataClient.openLink(u.toString(), "") else DataClient.openFromIntent = it }
         else if (u.host == "account") u.pathSegments.firstOrNull()?.let { DataClient.openAccount = it } else DataClient.askLink = u.toString()
     }
-    override fun onResume() { super.onResume(); DataClient.foreground = true; DataClient.foreground() }
-    override fun onPause() { super.onPause(); DataClient.foreground = false }
+    override fun onResume() { super.onResume(); DataClient.foreground = true; DataClient.foreground(); DataVoice.background(false) }
+    override fun onPause() { super.onPause(); DataClient.foreground = false; DataVoice.background(true) }
 }

@@ -184,8 +184,14 @@ starts:
   excepted: Discord in a voice channel or a game's voice chat count, as a call would), and, when asked, Backplane
   in the background. Paused, the helper stops (the microphone is closed) and the strip says why; it listens
   again when that ends.
-- **Controls.** The sidebar's top line shows it whenever it is on (listening, paused, muted); a press, or
-  Ctrl/Cmd+Shift+M in the window, mutes or listens. Stop dictating in the strip mutes it too.
+- **Controls.** A pill beside the mic in the composer, on the desktop and the phones, whenever it is on in
+  Settings: "● Listening · Stop" (or "Paused · Stop"); one press stops it, and muted it reads "Always on ·
+  Listen", the same press to listen again. The desktop's sidebar top line says the same, and Ctrl/Cmd+Shift+M
+  in the window toggles it. No tray icon, and no system-wide hotkey (none without a new dependency).
+- **Phones**, while the app is open: the phone records itself (as its dictation does) and the hub restarts
+  the session as on the desktop, telling the phone where to send the audio next (`audio`); the app going to
+  the background stops it and coming back starts it again. This machine's lock and microphone do not pause a
+  phone's always-on.
 - **Privacy.** Audio stays on this machine; nothing is kept or sent before a message starts; only a message's
   words go to its thread (and to Jev at its pauses, when Jev is on).
 
@@ -204,7 +210,8 @@ of one core and 41 MB, pw-record 0.1 % and 9 MB.
   other passages 0.75 and 0.79 and three other voices below 0; the test clips (Kokoro-82M) 0.77 for the
   enrolled voice, 0.24 and 0.45 for two others. A segment takes ~15 ms.
 
-Not yet: echo cancellation against Backplane's own sound, a tray icon and a system-wide hotkey, and the phones.
+Not done: echo cancellation against Backplane's own sound (the speaker check also turns its voice away), and
+the cloud end-of-turn modes (the person's call, 2026-11-11: Jev decides).
 
 ## Hold to talk
 

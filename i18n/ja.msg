@@ -2535,6 +2535,9 @@ settings.voice.speaker = 話者の確認
 settings.voice.speaker.on = メッセージを始められるのはあなたの声だけです（テレビや他の人、スピーカーの音では始まりません）。このマシン上でのみ、あなたの音声入力 {n} 回分から学習しました。
 settings.voice.speaker.learning = メッセージを始められるのはあなたの声だけになります。マイクボタンでの音声入力からあなたの声を学習します（現在 {n} / {k} 回）。それまではどの声でも始まります。
 settings.voice.speaker.reenrol = 再登録
+voice.always.pill.listening = 聞き取り中
+voice.always.pill.paused = 一時停止中
+voice.always.pill.listen = 聞く
 
 # ---- gpui-f: hub setup flow and thread ----
 gpui.f.group.install = インストール

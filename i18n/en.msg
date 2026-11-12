@@ -2512,6 +2512,9 @@ settings.voice.speaker = Speaker check
 settings.voice.speaker.on = Only your voice starts a message, not the TV, someone else or the speakers. Learned from {n} stretches of your dictation, on this machine only.
 settings.voice.speaker.learning = Only your voice will start a message. It learns your voice from your dictation with the mic button: {n} of {k} stretches so far; until then any voice can.
 settings.voice.speaker.reenrol = Re-enrol
+voice.always.pill.listening = Listening
+voice.always.pill.paused = Paused
+voice.always.pill.listen = Listen
 
 # ---- gpui-f: hub setup flow and thread ----
 gpui.f.group.install = Install

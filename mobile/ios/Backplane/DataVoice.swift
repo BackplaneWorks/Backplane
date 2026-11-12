@@ -85,6 +85,12 @@ final class VoiceModel {
     /// An end-of-turn countdown running (the hub's `countdown`): the hub sends when it ends unless more is said or Keep talking is pressed.
     private(set) var countdown: (thread: String, until: Date)?
     @ObservationIgnored private var nextPending = 0
+    /// Always on (the hub's always.rs), while the app is open: this phone runs it; Settings has it on; why it is paused; the thread open now.
+    private(set) var always = false
+    private(set) var alwaysWanted = false
+    private(set) var alwaysPaused = ""
+    @ObservationIgnored private var openThread = ""
+    @ObservationIgnored private var resumeAlways = false
     /// Threads whose dictation ends in a send (hold-to-talk let go).
     @ObservationIgnored private var sendsOnEnd: Set<String> = []
     func sendOnEnd(_ thread: String) { sendsOnEnd.insert(thread) }
@@ -167,6 +173,7 @@ final class VoiceModel {
         case "view":
             guard let v = o["view"] as? [String: Any] else { return }
             let view = DVoiceView(v)
+            if let a = v["always"] as? [String: Any], a["on"] as? Bool == true { alwaysPaused = a["paused"] as? String ?? "" }
             views[thread] = view
             if !view.on { marks[thread] = nil; cuts[thread] = nil; seqs[thread] = nil; level = 0; if active == thread { recorder.gone(); active = nil } }
             // hold-to-talk let go: the session ended with its last words written; the draft goes, with the undo window
@@ -187,11 +194,46 @@ final class VoiceModel {
             client.putDraft(thread, new)
             caret = (thread, VoiceEdit.count(new), caret.rev + 1)
         case "command": countdown = nil; command(thread, cmd: o["cmd"] as? String ?? "", cut: n("cut"))
+        case "always":
+            alwaysWanted = o["want"] as? Bool ?? false
+            if alwaysWanted, o["running"] as? Bool != true, !always { alwaysStart() } else if !alwaysWanted { always = false; alwaysPaused = "" }
+        case "audio":
+            // always on started again by the hub: the microphone goes on into the new session
+            if always, let path = o["path"] as? String, !path.isEmpty, let link = client.link {
+                Task { if !recorder.active { _ = await recorder.begin(link: link) }; active = thread; recorder.address(path: path) }
+            }
         case "countdown": countdown = n("ms") > 0 ? (thread, Date().addingTimeInterval(Double(n("ms")) / 1000)) : nil
         case "page": setRows(o["rows"])
         default: break
         }
     }
+
+    // MARK: always on
+    /// The app connected: the hub says whether always-on is wanted (its `always` frame starts it).
+    func connected() { guard let client, client.has("voice") else { return }; Task { _ = try? await client.call("voice.always", [:], as: DEmpty.self) } }
+    /// The thread the person has open ("" none): the next message goes there (Bub's chat when none).
+    func open(_ thread: String) {
+        guard openThread != thread else { return }; openThread = thread
+        if always, let client { Task { _ = try? await client.call("voice.act", ["thread": "", "action": "voice-target", "value": thread, "draft": ""], as: DEmpty.self) } }
+    }
+    func alwaysStart() {
+        guard let client, let link = client.link, active == nil else { return }
+        always = true; alwaysPaused = ""
+        let thread = openThread
+        Task {
+            guard await recorder.begin(link: link) == .ok else { always = false; return }
+            active = thread; marks[thread] = 0
+            if let r: DVoiceStart = try? await client.call("voice.start", ["thread": thread, "draft": "", "caret": 0, "always": true]), !r.path.isEmpty { recorder.address(path: r.path) }
+            else { recorder.gone(); active = nil; always = false }
+        }
+    }
+    /// The pill: stop listening (always-on is muted until pressed again), or listen.
+    func alwaysToggle() {
+        guard let client else { return }
+        if always { always = false; recorder.stop(); active = nil; Task { _ = try? await client.call("voice.stop", [:], as: DEmpty.self) } } else { alwaysStart() }
+    }
+    /// The app went to the background (it stops listening) or came back (it listens again if it was).
+    func background(_ away: Bool) { if away { resumeAlways = always; if always { alwaysToggle() } } else if resumeAlways { resumeAlways = false; alwaysStart() } }
 
     // MARK: voice commands
     /// The hub's `command` frame: the whole draft is taken now (dictation goes on into the empty draft), and sent (or dropped, for cancel) after
