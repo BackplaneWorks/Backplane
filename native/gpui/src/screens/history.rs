@@ -51,10 +51,16 @@ pub fn merge(mut rows: Vec<Value>, fresh: Vec<Value>) -> Vec<Value> {
     }
 }
 
+/// A history page's own rows: the hub ends every page with the thread's live rows (`@stream:`, `@working:`) while a turn runs, older pages too.
+/// Those belong to the newest page the rows held already end with; matched as shared rows they made a page replace every row held from its
+/// first shared row to the end, so two pages in, the newest rows were gone, the next picture shared nothing and the list started over, reading
+/// the same two pages again and again (Nov 12, after a restart resumed every thread's turn: Bub's chat stuck at its last dozen rows).
+fn page_rows(mut page: Vec<Value>) -> Vec<Value> { page.retain(anchor); page }
 /// A page read for history laid into the rows held. Rows it shares are replaced by the page's, its rows above them go on top, and the rows held below
 /// the last row it shares stay. A top row held before the first shared one is the cut head of a run the older page has whole. A page with nothing
 /// shared sits above everything: it is the page just older than the rows held.
 pub fn splice(rows: Vec<Value>, page: Vec<Value>) -> Vec<Value> {
+    let page = page_rows(page);
     let Some((first, j)) = first_shared(&rows, &page) else { return page.into_iter().chain(rows).collect() };
     let (keep_top, last, last_in_page) = splice_plan(&rows, &page, first, j);
     let tail = rows[last + 1..].to_vec();
@@ -73,6 +79,7 @@ fn splice_plan(rows: &[Value], page: &[Value], first: usize, j: usize) -> (usize
 /// `splice` and what it changed (as `changed(&rows, &spliced, 0)` says), without copying the rows held: they are moved, and only the stretch the
 /// page replaces is compared. A long thread read far back holds thousands of rows; each page that lands used to copy and compare all of them.
 pub fn splice_changed(mut rows: Vec<Value>, page: Vec<Value>) -> (Vec<Value>, Range<usize>, Range<usize>) {
+    let page = page_rows(page);
     let Some((first, j)) = first_shared(&rows, &page) else {
         let (n, held) = (page.len(), rows.len());
         let (a, b) = if n == 0 { (held..held, held..held) } else { (0..0, 0..n) };
@@ -173,6 +180,15 @@ mod tests {
             let (got, x, y) = splice_changed(rows.clone(), page.clone());
             assert_eq!(ids(&got), ids(&want), "{rows:?} + {page:?}"); assert_eq!(got, want); assert_eq!((x, y), (a, b), "{rows:?} + {page:?}");
         }
+    }
+    #[test] fn a_history_page_read_while_a_turn_runs_keeps_the_newest_rows() {
+        let held = rows(&["c", "d", "e", "@stream:t", "@working:t"]);
+        let page = rows(&["a", "b", "c", "@stream:t", "@working:t"]);
+        assert_eq!(ids(&splice(held.clone(), page.clone())), ["a", "b", "c", "d", "e", "@stream:t", "@working:t"]);
+        let (got, _, _) = splice_changed(held, page); assert_eq!(ids(&got), ["a", "b", "c", "d", "e", "@stream:t", "@working:t"]);
+        // the next older page, then the newest picture again: it still finds its place, nothing starts over
+        let (got, _, _) = splice_changed(got, rows(&["x", "y", "a", "@working:t"]));
+        assert_eq!(merge_point(&got, &rows(&["d", "e", "f", "@working:t"])), Some(5));
     }
     #[test] fn an_older_page_with_no_overlap_sits_above() { assert_eq!(ids(&splice(rows(&["c"]), rows(&["a", "b"]))), ["a", "b", "c"]); }
     #[test] fn a_page_read_again_opens_a_run_in_the_middle_and_leaves_the_rest() {
