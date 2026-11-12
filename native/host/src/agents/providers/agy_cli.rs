@@ -260,6 +260,14 @@ mod tests {
         let mut s = St::default(); let got = feed(&mut s, r#"{"event":"result","result":{"status":"ERROR","error":"429 RESOURCE_EXHAUSTED"}}"#);
         assert_eq!(got.len(), 1); assert!(got[0].contains("turn.failed") && got[0].contains("does not retry or move to another account"));
     }
+    /// Nov 11: agy's turn ended on Google draining a frontend. The failure it reports is one the hub reconnects on (settings/fallback.rs `transient`), never a sign-in hint.
+    #[test] fn a_goaway_is_a_failure_the_hub_reconnects_on() {
+        let mut s = St { session: "C1".into(), ..Default::default() };
+        let got = feed(&mut s, r#"{"event":"step_update","step_update":{"conversation_id":"C1","step_index":1,"state":"ACTIVE","step_type":"agent_response","text_delta":"half a rep"}}
+{"event":"result","result":{"conversation_id":"C1","status":"ERROR","error":"agent executor error: generating and executing: stream reading error: http2: server sent GOAWAY and closed the connection; LastStreamID=129, ErrCode=NO_ERROR, debug=\"server_shutting_down\""}}"#);
+        let failed: Value = serde_json::from_str(got.last().unwrap()).unwrap(); assert_eq!(failed["type"], "turn.failed");
+        assert!(crate::settings::fallback::transient(&failed).is_some(), "{failed}"); assert!(!failed["message"].as_str().unwrap().contains("sign in"));
+    }
     #[test] fn tool_lines() {
         assert_eq!(tool_line(&j(r#"{"parameters":{"CommandLine":"ls -l"}}"#), "run_command"), "ls -l");
         assert_eq!(tool_line(&j(r#"{"parameters":{"ServerName":"backplane","ToolName":"thread_list"}}"#), "call_mcp_tool"), "call_mcp_tool backplane.thread_list");
