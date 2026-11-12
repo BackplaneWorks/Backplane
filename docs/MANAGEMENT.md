@@ -25,11 +25,61 @@ projects, the oldest dropped). A press on a tab is drawn at once and confirmed b
 
 `{badge, source, at, parts, missing_mpn, dnp, more, lines: [{id, refs, qty, value, footprint, mpn, mfr, fab, dnp}]}`
 
-- `source`: `file` (the saved schematic and every sheet it reaches, read again within a second of a save).
+- `source`: `kicad` while the project's GUI KiCad has its schematic open (GetItems over its API once a second: an edit in KiCad, or an
+  agent's through it, shows before it is saved), else `file` (the saved schematic and every sheet it reaches, read again within a second of
+  a save).
 - Lines group parts with the same value, footprint, MPN and DNP (`kicad/bom.rs group`), in natural order of their first reference; `id` is
   that reference. `fab` is the fab's part number (the symbol's `LCSC` field). At most 400 lines; `more` counts the rest.
 - The badge counts lines without an MPN (DNP lines excepted) once some line has an MPN or a fab number.
 - A press on a line selects its parts in the open KiCad and lights them in the viewers (`editor.kicad.select`).
+- Each line that has an MPN or a fab number carries `key` (`mpn:<MPN>` or `fab:<number>`) and `stock`: `{status, stock, class, price,
+  need, fab, at}`, `status` one of `in`, `low` (under five builds' worth), `out` (fewer than `need`: the line's quantity on every board),
+  `unknown` (with `why`), `checking`. `boards` is the board fab file's `qty`; `cost` is one board's parts at the prices for `need`, over
+  `priced` of `lookups` lines. The badge counts lines without an MPN and lines out of stock (`bad` when any is out).
+- What a line says of its part, each with `checked` (unix seconds of the reading; the design review reads these, never the parts search;
+  a field is absent while the part was never checked):
+  - `stock: {status, stock, need, price, class, fab, at, checked}`: the fab's stock at the project's quantity (`need`);
+  - `library: {class, checked}`: the fab's library class, `basic`, `preferred` or `extended`;
+  - `lifecycle: {status, words, source, checked}`: `status` is `active`, `nrnd`, `eol` (EOL, obsolete, discontinued) or `unknown`;
+    `words` are the distributor's own ("Obsolete", "Not Recommended for New Designs", "" when it states none); `source` is `mouser`.
+
+## BOM edits
+
+`mgmt.bom.edit {project, refs, field, value}` → `{via, changed}` sets `mpn` (the MPN field, or the MPN alias the symbol has), `fab`
+(`LCSC`), `value`, `footprint` (`Library:Name`) or `dnp` (`yes`|`no`) on every symbol (each unit) of a line. Only standard symbol fields and
+the DNP attribute are written; a new MPN or LCSC field is hidden.
+
+- `via: "kicad"`: the project's GUI KiCad has the schematic open. One commit (BeginCommit, UpdateItems, EndCommit with the words
+  "BOM: MPN of R1, R2 = …"), not saved: Ctrl+Z in KiCad takes it back, and the person saves it with the rest.
+- `via: "file"`: no KiCad has it open. The headless KiCad writes and saves it while the hub holds the schematic's named lock
+  (`agents/design.rs`, one writer); an agent holding the lock gets the edit refused with its name.
+
+## Stock
+
+The fab's stock comes from the `pcbparts` MCP server (Settings > MCP servers can turn it off: `mcp.pcbparts`; the tests' stand-in is
+`BACKPLANE_PCBPARTS_URL`), through the hub (`kicad/parts.rs`): a fab number by `jlc_get_part`; an MPN by `jlc_get_part`, then
+`jlc_stock_check` (it also finds parts out of stock), then the fab number's price breaks; a part found before (within 7 days) is asked
+by its fab number only, one call. One worker asks, one call every 3 s at most and 300 an hour (the jlc tools take one part a call, so
+there is nothing to batch); answers are cached 6 h (a failure 15 min), outlive a restart through the history's last sample, and are
+refreshed on that schedule while a BOM shows them. A 429 pauses every lookup for the `retry_after` it names (at least a minute, doubled
+for each limit in a row, at most 30 minutes; the key goes back to the head of the queue, never retried in a loop), and the BOM says
+"Stock check paused" (`paused`). A typed MPN is looked up once it is on the line, never per keystroke. `mgmt.bom.alts {project, fab, need}` → `{alternatives: [{fab, model, mfr, stock, class, price,
+package}]}` asks `jlc_find_alternatives` on demand.
+
+## Lifecycle (`mgmt.life.<digest>`)
+
+`{badge, counts: {active, nrnd, eol, unknown}, samples, since, boards, parts: [{key, id, refs, mpn, lifecycle, stock, price, n, first,
+last}], bom: {cost: [[day, $ a board]], instock: [[day, lines in stock]], lines}}`; `mgmt.life.part {project, key}` → `{key, samples:
+[{at, stock, price, lifecycle, class}]}`.
+
+- History: `<home>/parts/history/<key digest>.jsonl` (`kicad/parthist.rs`), one sample a line, appended at every fresh stock answer and
+  lifecycle reading, and the fab's own recorded stock changes (`jlc_stock_history`, once a week a part, through the same limits;
+  `source: "fab_history"`, stock only: the service records changes that leave 1,000 or fewer, so the graphs have a past from the first
+  day for parts that ran low); at most 2000 a part (past 2500 the oldest go). It starts when Backplane first looks a part up; with one reading the
+  panel says so and shows the values it has.
+- Lifecycle readings: `mouser_get_part`, ten parts a call, each part once a day, at most 40 calls a day (the distributors' allowance is
+  shared), mapped to active, NRND, EOL or unknown (Mouser states none for most parts: unknown). The badge counts NRND and EOL parts (`bad`
+  with any EOL).
 
 ## Checks (`mgmt.checks.<digest>`)
 
@@ -79,4 +129,5 @@ While KiCad has the keyboard, its keys are KiCad's.
 
 ## Tests
 
-`kicad::mgmt`, `kicad::bompanel` (hub), `screens::mgmt`, `screens::mgmt_bom` (client); `test/kicad_embed/embed_mgmt_e2e.sh`.
+`kicad::{mgmt, bompanel, bomedit, parts, parthist, lifepanel}`, `mcpx::health` (hub); `screens::{mgmt, mgmt_bom, mgmt_life}` (client);
+`test/kicad_embed/embed_mgmt_e2e.sh` (stand-in parts server: `test/kicad_embed/lib/pcbparts_stub.py`).

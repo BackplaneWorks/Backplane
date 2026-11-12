@@ -152,6 +152,40 @@ async fn http(s: &Resolved) -> Report {
     let e = r.error.clone(); digest(&mut r, &answers); if !e.is_empty() && !r.ok { r.error = e } r
 }
 
+/// One tool call on a streamable-HTTP server, as a client of its own (the hub's parts lookups, kicad/parts.rs): initialize, initialized,
+/// tools/call. The tool's result: its `structuredContent`, else its first text content parsed as JSON (or as a string). Err on a JSON-RPC
+/// error, an `isError` result, or the transport's.
+pub async fn call_tool(url: &str, tool: &str, args: &Value) -> Result<Value, String> {
+    let s = Resolved { transport: "http".into(), url: url.into(), ..Default::default() };
+    let go = async {
+        let (code, sid, m) = post(&s, "", &init()).await?; if code == 429 { return Err(rate_limited(&m)) } if !(200..300).contains(&code) { return Err(http_err(code)) }
+        if let Some(e) = m.iter().find(|a| a["id"] == 1).and_then(|a| a.get("error")) { return Err(format!("initialize failed: {}", e["message"].as_str().unwrap_or(""))) }
+        let _ = post(&s, &sid, &json!({"jsonrpc":"2.0","method":"notifications/initialized"})).await;
+        let (code, _, m) = post(&s, &sid, &json!({"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":tool,"arguments":args}})).await?;
+        if code == 429 { return Err(rate_limited(&m)) }
+        if !(200..300).contains(&code) { return Err(http_err(code)) }
+        let a = m.into_iter().find(|a| a["id"] == 2).ok_or("no answer to tools/call")?;
+        tool_result(&a)
+    };
+    match tokio::time::timeout(std::time::Duration::from_secs(45), go).await { Ok(r) => r, Err(_) => Err("no answer in 45 s".into()) }
+}
+/// A 429's error: "429 retry_after=<s>", the seconds the server asked for (its body's `retry_after`, any depth; 60 when it gave none).
+pub fn rate_limited(m: &[Value]) -> String {
+    fn find(v: &Value) -> Option<u64> { match v { Value::Object(o) => o.get("retry_after").or(o.get("retryAfter")).and_then(|x| x.as_u64().or_else(|| x.as_f64().map(|f| f.ceil() as u64)).or_else(|| x.as_str().and_then(|s| s.parse().ok()))).or_else(|| o.values().find_map(find)), Value::Array(a) => a.iter().find_map(find), _ => None } }
+    format!("429 retry_after={}", m.iter().find_map(find).unwrap_or(60))
+}
+/// The seconds a `rate_limited` error asks to wait, None for any other error.
+pub fn retry_after(e: &str) -> Option<u64> { e.strip_prefix("429 retry_after=").and_then(|s| s.parse().ok()) }
+/// A tools/call answer's value (see `call_tool`).
+pub fn tool_result(a: &Value) -> Result<Value, String> {
+    if let Some(e) = a.get("error") { return Err(e["message"].as_str().unwrap_or("error").to_string()) }
+    let r = &a["result"];
+    let text = r["content"].as_array().into_iter().flatten().find(|c| c["type"] == "text").and_then(|c| c["text"].as_str()).unwrap_or("");
+    if r["isError"] == true { return Err(if text.is_empty() { "the tool failed".into() } else { text.chars().take(300).collect() }) }
+    if r["structuredContent"].is_object() { return Ok(r["structuredContent"].clone()) }
+    Ok(serde_json::from_str(text).unwrap_or_else(|_| json!(text)))
+}
+
 /// The older SSE transport: GET the stream, wait for its `endpoint` event, POST there; the answers come on the stream.
 async fn sse(s: &Resolved) -> Report {
     let mut r = Report::default(); let mut answers = vec![];
@@ -197,6 +231,17 @@ mod tests {
         assert!(r.ok); assert_eq!((r.server.as_str(), r.tools.len(), r.resources, r.prompts), ("everything", 2, 2, 0)); assert_eq!(r.tools[0].description, "Echoes back");
         let mut r = Report::default(); digest(&mut r, &[json!({"id":1,"error":{"message":"bad version"}})]); assert!(!r.ok && r.error.contains("bad version"));
         let mut r = Report::default(); digest(&mut r, &[]); assert_eq!(r.error, "it did not answer initialize");
+    }
+    #[test] fn a_tool_calls_answer() {
+        assert_eq!(tool_result(&json!({"id":2,"result":{"content":[{"type":"text","text":"{\"stock\":5}"}]}})).unwrap(), json!({"stock":5}));
+        assert_eq!(tool_result(&json!({"id":2,"result":{"content":[{"type":"text","text":"x"}],"structuredContent":{"a":1}}})).unwrap(), json!({"a":1}));
+        assert_eq!(tool_result(&json!({"id":2,"result":{"content":[{"type":"text","text":"plain"}]}})).unwrap(), json!("plain"));
+        assert!(tool_result(&json!({"id":2,"result":{"isError":true,"content":[{"type":"text","text":"quota"}]}})).unwrap_err().contains("quota"));
+        assert!(tool_result(&json!({"id":2,"error":{"message":"bad"}})).is_err());
+        // the server's "Rate limit exceeded, retry_after 60"
+        assert_eq!(rate_limited(&[json!({"error": {"message": "Rate limit exceeded", "data": {"retry_after": 60}}})]), "429 retry_after=60");
+        assert_eq!(rate_limited(&[json!({"detail": "slow down", "retry_after": "120"})]), "429 retry_after=120"); assert_eq!(rate_limited(&[]), "429 retry_after=60");
+        assert_eq!(retry_after("429 retry_after=60"), Some(60)); assert_eq!(retry_after("it answered HTTP 500"), None);
     }
     #[test] fn sse_and_json_bodies_both_read() {
         assert_eq!(messages("{\"id\":1}"), vec![json!({"id":1})]);

@@ -72,6 +72,7 @@ pub mod mgmt_bom;
 pub mod mgmt_fab;
 pub mod kcomment;
 pub mod mgmt_checks;
+pub mod mgmt_life;
 mod glue;
 
 use gpui::{Context, Entity, FocusHandle};

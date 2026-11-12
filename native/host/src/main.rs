@@ -185,6 +185,7 @@ async fn run(a: Args) -> Result<()> {
         files::tools::register(&hub, ag);
         fab::start(&hub, Some(ag)); // fab profiles: fab.profile and the agents' fab_profile
         review::start(&hub, Some(ag)); // the design review: design_review, its runs on save
+        files::kicad::bomedit::set_agents(ag); // the BOM panel's edits hold the schematic's named lock
         let _mcp = mcpx::svc::start(&hub, ag, std::path::PathBuf::from(&ag.host.user_home)); // Settings > MCP: the servers every agent gets, the mcp_ tools, mcp.page
         let a2 = ag.clone(); guard::watch("agents", move || { let a = a2.clone(); Box::pin(async move { drop(a.world().await); }) });
     }

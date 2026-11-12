@@ -11,7 +11,7 @@ use std::{collections::HashMap, time::{Duration, Instant}};
 
 /// A panel's client side: drawn from the hub's `mgmt.<id>.<digest>` value (`data`; Null until it arrives).
 pub struct View { pub id: &'static str, pub body: fn(&mut Backplane, &Value, bool, &mut Context<Backplane>) -> AnyElement }
-pub const VIEWS: &[View] = &[View { id: "bom", body: super::mgmt_bom::body }, View { id: "fab", body: super::mgmt_fab::body }, View { id: "checks", body: super::mgmt_checks::body }];
+pub const VIEWS: &[View] = &[View { id: "bom", body: super::mgmt_bom::body }, View { id: "fab", body: super::mgmt_fab::body }, View { id: "checks", body: super::mgmt_checks::body }, View { id: "life", body: super::mgmt_life::body }];
 
 /// The `mgmt.watch` answer's tag (Command::Ask).
 pub const WATCH_TAG: u64 = 0x6d67_6d74;
@@ -34,6 +34,7 @@ pub struct Mgmt {
     /// an error the hub gave for a panel's request
     pub error: String,
     pub bom: super::mgmt_bom::Ui,
+    pub life: super::mgmt_life::Ui,
 }
 
 /// The pages a panel sits beside: the design's (board, schematic, 3D, split; the embedded editor is on these too).
@@ -89,6 +90,9 @@ fn want(app: &mut Backplane, project: &str) {
 }
 /// `mgmt.watch`'s answer: the project's digest (what its info keys end in).
 pub fn answered(app: &mut Backplane, id: u64, reply: &Value, cx: &mut Context<Backplane>) -> bool {
+    if id == super::mgmt_bom::EDIT_TAG { super::mgmt_bom::edited(app, reply, cx); return true }
+    if id == super::mgmt_life::PART_TAG { super::mgmt_life::answered(app, reply, cx); return true }
+    if id == super::mgmt_bom::ALTS_TAG { super::mgmt_bom::alts_answered(app, reply, cx); return true }
     if id != WATCH_TAG { return false }
     let r = if reply["result"].is_object() { &reply["result"] } else { reply };
     if reply["ok"] == false { app.screens.mgmt.error = crate::hub::rpc_error(reply); }
@@ -135,6 +139,7 @@ pub fn act(app: &mut Backplane, a: &str, cx: &mut Context<Backplane>) {
     else if let Some(b) = a.strip_prefix("bom:") { super::mgmt_bom::act(app, b, cx) }
     else if let Some(b) = a.strip_prefix("fab:") { super::mgmt_fab::act(app, b, cx) }
     else if let Some(b) = a.strip_prefix("checks:") { super::mgmt_checks::act(app, b, cx) }
+    else if let Some(b) = a.strip_prefix("life:") { super::mgmt_life::act(app, b, cx) }
 }
 
 struct EdgeDrag;
