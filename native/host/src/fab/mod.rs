@@ -7,6 +7,7 @@ pub mod model;
 pub mod panel;
 pub mod project;
 pub mod setup;
+pub mod stackup;
 pub mod store;
 
 use crate::{agents::mcp::ToolSet, api::{Caller, Fut, RpcHandler}, hub::Hub};
@@ -39,8 +40,11 @@ pub fn view_of(p: &Profile, c: &project::Choice, home: &Path) -> Value {
     let changed: Vec<String> = changes.iter().map(|x| x.key.clone()).collect();
     let limits: Vec<Value> = select(p, &c.kind, &o).iter().map(|s| sel_json(s, &changed)).collect();
     let assembly = if c.kind == "pcb" { p.assembly.keys().map(|k| (k.clone(), json!(select_assembly(p, k, &o).iter().map(|s| sel_json(s, &changed)).collect::<Vec<_>>()))).collect::<serde_json::Map<_, _>>() } else { Default::default() };
+    let sel = select(p, &c.kind, &o);
+    let (tm, sm) = (model::free_num(&sel, "track_min").unwrap_or(0.0), model::free_num(&sel, "space_min").unwrap_or(0.0));
     json!({"fab": p.fab, "rev": p.rev, "updated": p.updated, "choice": c.json(), "limits": limits,
-        "stackups": stackups(p, &o).iter().map(|s| serde_json::to_value(s).unwrap_or_default()).collect::<Vec<_>>(),
+        "stackups": stackups(p, &o).iter().map(|s| json!({"id": s.id, "layers": s.layers, "thickness_mm": s.thickness_mm, "default": s.default})).collect::<Vec<_>>(),
+        "stackup": stackup::view(p, &o, &c.options, tm, sm),
         "assembly": assembly, "pages": p.pages, "changed": changes.iter().map(|x| x.line()).collect::<Vec<_>>()})
 }
 fn profile_of(home: &Path, fab: &str) -> Result<Profile, String> { store::load(home, fab).ok_or_else(|| format!("Backplane has no profile of the fab {fab:?} (it has {})", store::fabs(home).join(", "))) }
@@ -88,6 +92,15 @@ pub async fn act_in(hub: &Arc<Hub>, root: Option<PathBuf>, a: &Value) -> Result<
         let action = match sv(&a, "action") { "" => "get", x => x };
         match action {
             "get" => view_in(&home, root.as_deref()),
+            // the person takes a proposed stackup (the Fab panel's Use): kept with the project's other options
+            "stackup" => {
+                let Some(r) = root.as_deref() else { return Err("this thread has no project folder".to_string()) };
+                let c = choice(r); let p = profile_of(&home, &c.fab)?; let id = sv(&a, "id");
+                if !p.stackups.iter().any(|s| s.id == id) { return Err(format!("{id:?} is not a stackup the fab publishes")) }
+                let mut o = if c.options.is_object() { c.options.clone() } else { json!({}) }; o["stackup"] = json!(id);
+                project::write(r, &c.fab, &c.kind, &o, &c.tier, c.rev_seen)?;
+                view_in(&home, Some(r))
+            }
             "pick" | "seen" => {
                 let Some(r) = root.as_deref() else { return Err("this thread has no project folder".to_string()) };
                 let c = choice(r);
@@ -134,7 +147,7 @@ impl RpcHandler for Rpc {
 pub struct Tools(pub Arc<Hub>);
 pub const TOOL: &str = "fab_profile";
 pub fn tool_def() -> Value {
-    json!({"name": TOOL, "description": "The project's fab profile: what the fab it is made at can make, read from the fab's published pages. Per capability (track width, spacing, drills, via hole and diameter, rings, hole and edge clearances, silkscreen, solder mask, board size, finishes, via types, ...) the free limit and the one that costs more, each with its unit, source page, the day it was read and its confidence (published, derived or inherited); the stackups that fit the board (dielectric thicknesses and Er); the assembly services' limits. Use these numbers, with their source, instead of remembered ones. get (default): the profile for the project's fab, board kind and options (picked, else its board fab file's, else its KiCad board's layers and thickness). pick: keep the fab, kind (pcb, flex, hdi, aluminum, copper_core, rogers, ptfe), options (layers, copper_oz, thickness_mm, finish, color) and tier (free: DRC holds the board to the fab's base-price limits, the default; extra: to what it makes for more) with the project; only when the person chose them. seen: mark the changes since the project last looked as read. drc: write the fab's limits into the project's .kicad_dru as a marked section (the project's own rules and stricter settings are kept and win); drc in the answer says whether that section is current, the board setup minimums under the fab's (suggestions: tell the person, never change the board setup yourself) and the project's own rules that allow less than the fab (conflicts). refresh: read the fab's published pages again now (Backplane also does daily); values it cannot read keep their old value and date.",
+    json!({"name": TOOL, "description": "The project's fab profile: what the fab it is made at can make, read from the fab's published pages. Per capability (track width, spacing, drills, via hole and diameter, rings, hole and edge clearances, silkscreen, solder mask, board size, finishes, via types, ...) the free limit and the one that costs more, each with its unit, source page, the day it was read and its confidence (published, derived or inherited); the stackups that fit the board; stackup: the one picked, else proposed (best first in proposals, each with why; propose it to the person, pick it only when they agree), and per copper layer (F.Cu, In1.Cu, ... B.Cu) its reference planes above and below with the dielectric's height and Er, and the trace widths for the project's impedances (key 50, pairs as 90d at diff_gap_mm; closed-form estimates): feed these to floorplanning, stackup and routing; the assembly services' limits. Use these numbers, with their source, instead of remembered ones. get (default): the profile for the project's fab, board kind and options (picked, else its board fab file's, else its KiCad board's layers and thickness). pick: keep the fab, kind (pcb, flex, hdi, aluminum, copper_core, rogers, ptfe), options (layers, copper_oz, thickness_mm, finish, color; and for impedance work impedance [ohms], diff_impedance [ohms], diff_gap_mm, stackup: a published stackup's id) and tier (free: DRC holds the board to the fab's base-price limits, the default; extra: to what it makes for more) with the project; only when the person chose them. seen: mark the changes since the project last looked as read. drc: write the fab's limits into the project's .kicad_dru as a marked section (the project's own rules and stricter settings are kept and win); drc in the answer says whether that section is current, the board setup minimums under the fab's (suggestions: tell the person, never change the board setup yourself) and the project's own rules that allow less than the fab (conflicts). refresh: read the fab's published pages again now (Backplane also does daily); values it cannot read keep their old value and date.",
         "inputSchema": {"type": "object", "properties": {
             "action": {"type": "string", "description": "get (default), pick, seen, drc or refresh"},
             "tier": {"type": "string", "description": "pick: free (default) or extra"},
