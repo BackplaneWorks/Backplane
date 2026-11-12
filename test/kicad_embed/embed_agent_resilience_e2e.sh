@@ -105,7 +105,7 @@ print(int(n1 == n0 + 1 and mod1 == 1 and diff["changed_pixels"] > 40))
 
   N_UNDO=$(python3 "$IPC_PY" items-count "$API_SOCK" pcb 11 | python3 -c 'import json,sys; print(json.load(sys.stdin)["count"])')
   KDESC="$(dirname "$KICAD_BIN")/../share/backplane/api.desc"
-  if grep -qa "kiapi.backplane.coedit.UndoAgentChange" "$KDESC" 2>/dev/null; then
+  if grep -qa "UndoAgentChange" "$KDESC" 2>/dev/null; then
     # bp.11 co-edit, per-actor undo: the person's Ctrl+Z leaves the agent's edit alone; the person takes it back from the Agents pane
     # (the same as UndoAgentChange over IPC)
     check "Human Ctrl+Z leaves the agent's IPC commit alone (per-actor undo: $N1 -> $N_UNDO)" "$([ "$N_UNDO" -eq "$N1" ] && echo 1 || echo 0)" "expected $N1 got $N_UNDO"
