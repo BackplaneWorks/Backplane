@@ -63,17 +63,18 @@ if ! alive "$(pid hub)"; then
   if [ ! -s "$H/events.jsonl" ] && [ -n "$AGENT" ]; then   # a new home: new threads start on this provider and model
     t=$(date +%s); printf '{"$":"SettingSet","key":"agent.provider","value":"%s","at":%s}\n{"$":"SettingSet","key":"agent.model","value":"%s","at":%s}\n' "${AGENT%%:*}" "$t" "${AGENT#*:}" "$t" > "$H/events.jsonl"
   fi
-  # the hub: your own HOME (the agents' sign-ins are yours), no copy switches, in its own scope
+  # the hub: your own HOME (the agents' sign-ins are yours), no copy switches, in its own scope. ManagedOOMPreference=avoid: under memory pressure systemd-oomd kills anything else
+  # first (the builds and tests agents start run in scopes of their own, scripts/lib-buildslot.sh); it took the whole hub scope on Nov 12 01:25 and 02:16
   TN=; if [ -n "${FRESH_TAILNET_PORT:-}" ]; then case "$FRESH_TAILNET_PORT" in 443|3787|3788|"$PORT") die "FRESH_TAILNET_PORT $FRESH_TAILNET_PORT is not free to use";; esac; if tailscale serve status 2>/dev/null | grep -q "ts.net:$FRESH_TAILNET_PORT "; then die "tailscale serve port $FRESH_TAILNET_PORT is already used on this machine (tailscale serve status): pick another FRESH_TAILNET_PORT"; fi; TN="--tailnet-only"; echo "$FRESH_TAILNET_PORT" > "$D/tailnet.port"; fi
   # under the guard when the build has one (it keeps the hub up: docs/HUB-RESILIENCE.md). hub.pid is then the guard's, and stopping it stops the hub. The log is kept across starts: a crash's last words are what matters.
   if [ -x "$BIN/backplane" ]; then
     case "$(realpath -m "$BIN")" in "$(realpath -m "$DEV/builds")"/*) WHICH=(--builds "$DEV" --build "$(basename "$BIN")");; *) WHICH=(--bin "$BIN");; esac
     ( exec setsid env -u BACKPLANE_AGENT_OWNER BACKPLANE_NO_UPDATE=1 ${FRESH_TAILNET_PORT:+BACKPLANE_HTTPS_PORT=$FRESH_TAILNET_PORT} ${BACKPLANE_COMMIT:+BACKPLANE_COMMIT=$BACKPLANE_COMMIT} \
-        systemd-run --user --scope -q -- "$BIN/backplane" hub run --home "$H" --port "$PORT" --host 127.0.0.1 "${WHICH[@]}" --log "$D/hub.log" --pidfile "$D/hub.pid" --default -- ${TN:---no-tailscale} --foreground \
+        systemd-run --user --scope -q -p ManagedOOMPreference=avoid -- "$BIN/backplane" hub run --home "$H" --port "$PORT" --host 127.0.0.1 "${WHICH[@]}" --log "$D/hub.log" --pidfile "$D/hub.pid" --default -- ${TN:---no-tailscale} --foreground \
         >> "$D/hub.log" 2>&1 < /dev/null ) &
   else
     ( exec setsid env BACKPLANE_NO_UPDATE=1 ${FRESH_TAILNET_PORT:+BACKPLANE_HTTPS_PORT=$FRESH_TAILNET_PORT} ${BACKPLANE_COMMIT:+BACKPLANE_COMMIT=$BACKPLANE_COMMIT} \
-        systemd-run --user --scope -q -- "$BIN/backplane-hub" --home "$H" --port "$PORT" --host 127.0.0.1 ${TN:---no-tailscale} --foreground \
+        systemd-run --user --scope -q -p ManagedOOMPreference=avoid -- "$BIN/backplane-hub" --home "$H" --port "$PORT" --host 127.0.0.1 ${TN:---no-tailscale} --foreground \
         >> "$D/hub.log" 2>&1 < /dev/null ) &
   fi
   echo $! > "$D/hub.pid"
@@ -85,6 +86,8 @@ if ! alive "$(pid hub)"; then
   fi
 fi
 alive "$(pid client)" && { echo "window already open (pid $(pid client))"; exit 0; }
+# the window: in a scope of its own, oomd's last pick too (it used to land in whatever cgroup started it: the watchdog's, a watcher's)
+SCOPE=(); command -v systemd-run > /dev/null && [ -S "${XDG_RUNTIME_DIR:-/nonexistent}/bus" ] && SCOPE=(systemd-run --user --scope -q --collect -p ManagedOOMPreference=avoid --)
 ( exec setsid env DISPLAY="$DISPLAY" ${BACKPLANE_GPUI_ASSETS:+BACKPLANE_GPUI_ASSETS="$BACKPLANE_GPUI_ASSETS"} BACKPLANE_GPUI_ASSETS="${BACKPLANE_GPUI_ASSETS:-$BIN/assets}" \
-    "$BIN/backplane-gpui" --url "http://127.0.0.1:$PORT" --token-file "$H/token" > "$D/client.log" 2>&1 < /dev/null ) &
+    ${SCOPE[@]+"${SCOPE[@]}"} "$BIN/backplane-gpui" --url "http://127.0.0.1:$PORT" --token-file "$H/token" > "$D/client.log" 2>&1 < /dev/null ) &
 echo $! > "$D/client.pid"; echo "window open on $DISPLAY (pid $(pid client)); stop with: $0 stop"
