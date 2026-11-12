@@ -126,6 +126,16 @@ else:
         {"click": "rail:Board"},
         {"kicad": {"wait_painted": 5000, "kind": "PCB", "tag": "warm_pcb_2"}},
         {"mark": "11_switch_pcb"}, {"wait": 900},
+        # A real agent (agent:*) edits the board: KiCad opens its Agents pane beside the canvas.
+        # The person keeps switching tabs; the PCB must still repaint at once.
+        {"mark": "agent_commit"}, {"wait": 2500},
+        {"click": "rail:Schematic"},
+        {"kicad": {"wait_painted": 5000, "kind": "SCH", "tag": "agent_warm_sch"}},
+        {"click": "rail:3D"},
+        {"kicad": {"wait_painted": 5000, "kind": "PCB_3D", "tag": "agent_warm_3d"}},
+        {"click": "rail:Board"},
+        {"kicad": {"wait_painted": 5000, "kind": "PCB", "tag": "agent_warm_pcb"}},
+        {"mark": "13_agent_switch_pcb"}, {"wait": 900},
         # Return to Backplane View mode (KiCad stays warm in hub)
         {"click": "ui:View"}, {"wait": 1200},
         {"kicad": {"report": True, "tag": "view_mode"}},
@@ -310,6 +320,16 @@ while kill -0 "$CP" 2>/dev/null; do
           fi
           python3 "$XINPUT_PY" chord ctrl grave
           sleep 0.2
+          ;;
+        agent_commit)
+          # As an agent thread's kicad_ipc would: its own client name, one commit.
+          R_AG=$(last_kicad_report "$OUT/client.log" "warm_pcb_2")
+          AG_SOCK=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("sock") or "-")' "$R_AG")
+          [ "$AG_SOCK" = "-" ] && AG_SOCK="$API_SOCK"
+          BP_IPC_CLIENT="agent:twindow" python3 "$IPC_PY" agent-add-track "$AG_SOCK" 28.0 94.0 155.0 132.0 0.5 3 \
+            >"$OUT/agent_commit.json" 2>"$OUT/agent_commit.err" || echo '{"ok": false}' >"$OUT/agent_commit.json"
+          sleep 1.2
+          shot "12_agent_commit"
           ;;
         *)
           shot "$m"
@@ -637,6 +657,31 @@ else:
             "pcb_painted": f_wpcb.get("painted"),
         },
     )
+
+    if mode != "spike":
+        try:
+            agent_commit = json.load(open(os.path.join(out_dir, "agent_commit.json")))
+        except (OSError, ValueError):
+            agent_commit = {}
+        r_awsch = reps.get("agent_warm_sch", {})
+        r_aw3d = reps.get("agent_warm_3d", {})
+        r_awpcb = reps.get("agent_warm_pcb", {})
+        f_awpcb = shown_frame(r_awpcb)
+        check(
+            "After a real agent (agent:*) commit opens KiCad's Agents pane, switching tabs still repaints the PCB at once",
+            agent_commit.get("ok") is True
+            and (f_awpcb.get("painted") or 0) > 15
+            and (r_awsch.get("wait_ms") or 9999) < 250
+            and (r_aw3d.get("wait_ms") or 9999) < 250
+            and (r_awpcb.get("wait_ms") or 9999) < 250,
+            {
+                "agent_commit": agent_commit,
+                "warm_sch_ms": r_awsch.get("wait_ms"),
+                "warm_3d_ms": r_aw3d.get("wait_ms"),
+                "warm_pcb_ms": r_awpcb.get("wait_ms"),
+                "pcb_painted": f_awpcb.get("painted"),
+            },
+        )
 
     r_view = reps.get("view_mode", {})
     check(
