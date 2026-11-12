@@ -81,7 +81,7 @@ internal fun HubScreen(back: () -> Unit) {
             Text(Tr.t(panel.text), Modifier.testTag("hub.text"), color = dcs.onSurface, fontFamily = BpMono, fontSize = 14.sp)
             panel.actions.forEach { a -> DBtn(Tr.t(a.label), false, !busy, Modifier.fillMaxWidth().testTag("hub.action.${a.id}")) { asking = a } }
             if (answer.isNotEmpty()) Text(Tr.t(answer), Modifier.testTag("hub.answer"), color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp)
-            if (progress.isNotEmpty()) Text(Tr.t(progress), Modifier.testTag("hub.progress"), color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 13.sp)
+            if (progress.isNotEmpty()) Text(Tr.t(progress), Modifier.testTag("hub.progress"), color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 12.sp)
             if (fetch != HubFetch.Loading) DBtn(Msg.common_refresh, false, !busy, Modifier.testTag("hub.refresh")) { fetch = HubFetch.Loading; scope.launch { load() } }
             panel.incidents.forEach { i ->
                 DLine()
@@ -148,7 +148,7 @@ internal fun TelemetryBanner(settings: () -> Unit) {
     }
 }
 
-/** The GitHub star suggestion (DataClient.star): a large card along the top with the hub's title, the repository, why stars help, a large Star on
+/** The GitHub star suggestion (DataClient.star): a small card under the top bar with the hub's title, the repository, why stars help, a Star on
  *  GitHub (opens the page, decides open), Later (a week, decides later) and Don't ask again (decides dismiss). It waits for a pause (DStarOffer.due). */
 @Composable
 internal fun StarBanner() {
@@ -156,19 +156,19 @@ internal fun StarBanner() {
     if (!DStarOffer.due(s, DataClient.threads.any { it.state == "working" || it.state == "asking" }, DataClient.typing())) return
     val ctx = LocalContext.current
     run {
-        Column(Modifier.fillMaxWidth().padding(8.dp).background(dcs.surfaceContainerHigh).border(androidx.compose.foundation.BorderStroke(1.dp, dcs.primary)).padding(16.dp).testTag("star.banner"), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Column(Modifier.fillMaxWidth().padding(8.dp).background(dcs.surfaceContainerHigh).border(androidx.compose.foundation.BorderStroke(1.dp, dcs.primary)).padding(12.dp).testTag("star.banner"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Star, null, tint = dcs.primary, modifier = Modifier.size(26.dp)); Spacer(Modifier.width(10.dp))
-                Text(Tr.t(s.text), color = dcs.onSurface, fontFamily = BpMono, fontSize = 17.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                Icon(Icons.Default.Star, null, tint = dcs.primary, modifier = Modifier.size(16.dp)); Spacer(Modifier.width(8.dp))
+                Text(Tr.t(s.text), color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
             }
-            DMono(s.place, dfaint, 12)
-            if (s.why.isNotEmpty()) Text(Tr.t(s.why), color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 13.sp)
-            Row(Modifier.fillMaxWidth().height(48.dp).background(dcs.primary).testTag("star.open").clickable {
+            DMono(s.place, dfaint, 11)
+            if (s.why.isNotEmpty()) Text(Tr.t(s.why), color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 12.sp)
+            Row(Modifier.fillMaxWidth().height(36.dp).background(dcs.primary).testTag("star.open").clickable {
                 runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(s.url)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
                 DataClient.starDecide("open")
             }, horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.Default.Star, null, tint = dcs.onPrimary, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(8.dp))
-                Text(Tr.t(s.label.ifEmpty { "Star on GitHub" }), color = dcs.onPrimary, fontFamily = BpMono, fontSize = 15.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+                Icon(Icons.Default.Star, null, tint = dcs.onPrimary, modifier = Modifier.size(14.dp)); Spacer(Modifier.width(6.dp))
+                Text(Tr.t(s.label.ifEmpty { "Star on GitHub" }), color = dcs.onPrimary, fontFamily = BpMono, fontSize = 13.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 DBtn(Tr.t("Later"), false, modifier = Modifier.weight(1f).testTag("star.later")) { DataClient.starDecide("later") }
