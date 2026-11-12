@@ -90,7 +90,37 @@ pub fn rows(p: &Prefs, info: &Value, term: &str, key_err: &str) -> Vec<Value> {
             "fields": [{"name": "vterm", "hint": "Add a term", "secret": false, "value": term}], "buttons": dict}),
         row("Learned fixes", if learned.is_empty() { "No fixes learned yet. After dictating, use Fix on a misheard word or accept a suggested correction." } else { "Fixes you made after dictating. Each applies by itself once you have made it twice." }, fixes),
         row("Pebble ring", "Set its webhook to send the recording; it is transcribed here with this dictionary.", vec![]),
-    ].into_iter().chain(command_rows(p)).collect()
+    ].into_iter().chain(eot_rows(p, info)).chain(command_rows(p)).collect()
+}
+/// End of turn (eot.rs): on/off and how eager, and Jev (TypeSafe) with its key in the vault, its model, a test and what it last decided.
+fn eot_rows(p: &Prefs, info: &Value) -> Vec<Value> {
+    use super::eot::{self, CHOICES, JEV, KEY, LEARNED, MODEL, MODEL_DEFAULT, ON, THRESHOLD, THRESHOLD_DEFAULT};
+    let on = set(p, ON, "") != "off"; let jev = set(p, JEV, "") == "on";
+    let base: f64 = set(p, THRESHOLD, "").parse().unwrap_or(THRESHOLD_DEFAULT); let l = eot::Learned::parse(set(p, LEARNED, ""));
+    let mut sens = vec![];
+    for (t, name) in CHOICES { let label = if name.is_empty() { format!("{t:.2}") } else { format!("{name} {t:.2}") }; sens.push(btn(&label, "setting", &format!("{THRESHOLD}={}", if t == THRESHOLD_DEFAULT { String::new() } else { format!("{t}") }), (base - t).abs() < 1e-9)) }
+    let now = (base + l.nudge).clamp(0.3, 0.95);
+    let eager = if l.undone > 0 || l.sends > 0 { format!("Eager sends sooner; Patient waits for a surer sign. Now {now:.2}, {:+.2} learned from your undos ({} sent, {} undone).", l.nudge, l.sends, l.undone) }
+        else { format!("Eager sends sooner; Patient waits for a surer sign. Now {now:.2}.") };
+    let mut b = vec![btn("On", "setting", &format!("{ON}="), on), btn("Off", "setting", &format!("{ON}=off"), !on)]; if on && (l.undone > 0 || l.sends > 0) { b.push(btn("Reset learning", "setting", &format!("{LEARNED}="), false)) }
+    let key_set = info["voice.eot.key"] == "set"; let test = parsed(info, "voice.eot.test"); let last = parsed(info, "voice.eot.last");
+    let check = if let Some(e) = test["error"].as_str() { format!("Test failed: {e}") }
+        else if let (Some(a), Some(b)) = (test["results"].get(0), test["results"].get(1)) { format!("Test: {:.2} in {} ms for a finished sentence, {:.2} in {} ms for one ending in “um”.", a["p"].as_f64().unwrap_or(0.0), a["ms"].as_u64().unwrap_or(0), b["p"].as_f64().unwrap_or(0.0), b["ms"].as_u64().unwrap_or(0)) }
+        else if let (Some("jev"), Some(ms)) = (last["by"].as_str(), last["ms"].as_u64()) { format!("Last pause: Jev answered in {ms} ms.") }
+        else if let Some(e) = last["error"].as_str() { format!("Last pause: the on-device model decided ({e}).") } else { String::new() };
+    let mut jb = vec![btn("Save", "secret-save", &format!("{KEY}\u{1f}TypeSafe Jev API key, for dictation's end of turn"), true), btn("Use Jev", "setting", &format!("{JEV}={}", if jev { "" } else { "on" }), jev)];
+    if key_set { jb.push(btn("Test", "voice-op", "jev-test", false)) }
+    jb.push(btn("Save model", "voice-jev-model", "", false));
+    let model = set(p, MODEL, MODEL_DEFAULT);
+    let mut v = vec![
+        row("Send when I'm done", "When you pause after a finished thought, the message sends itself: a short countdown that more speech cancels, then 3 seconds to undo. A thinking pause, “and…” or “um” keeps listening.", b),
+        row("How eager", &eager, sens),
+        json!({"label": "End of turn: Jev (TypeSafe)", "note": if key_set { "Its key is saved in the vault. Asked at each pause with only the current draft; over 400 ms or failing, the on-device model decides." } else { "Paste a TypeSafe API key (console.typesafe.ai) to use Jev. Without it, the on-device model decides." },
+            "fields": [{"name": "tskey", "hint": "TypeSafe API key", "secret": true, "vault": true, "value": ""}, {"name": "vjevmodel", "hint": MODEL_DEFAULT, "secret": false, "value": if model == MODEL_DEFAULT { "" } else { model }}],
+            "buttons": jb}),
+    ];
+    if !check.is_empty() { v.push(row("Jev check", &check, vec![])) }
+    v
 }
 /// Voice commands (cmds.rs): the send phrases, the extras, auto-send.
 fn command_rows(p: &Prefs) -> Vec<Value> {

@@ -41,6 +41,10 @@ impl Sink for Events {
         emit(json!({"event": "hyp", "item": item, "words": words_json(words), "end": end}));
     }
 
+    fn turn(&mut self, item: &str, p: f32, ms: i64) {
+        emit(json!({"event": "turn", "item": item, "p": (p * 1000.0).round() / 1000.0, "ms": ms}));
+    }
+
     fn done(&mut self, item: &str, words: &[Word], decode_ms: i64, final_ms: i64) {
         let text: Vec<&str> = words.iter().map(|w| w.0.as_str()).collect();
         emit(json!({"event": "done", "item": item, "text": text.join(" "), "words": words_json(words), "decode_ms": decode_ms, "final_ms": final_ms}));

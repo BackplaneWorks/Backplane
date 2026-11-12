@@ -305,10 +305,16 @@ pub fn local_cmd(a: Args) -> ! {
     match a.cmd.as_str() {
         "local-status" => {}
         "local-remove" => local::remove(&dir, &a.model),
+        "local-turn" => {
+            let mut progress = |what: &str, done: u64, total: u64, phase: &str| emit(json!({"event": "progress", "what": what, "done": done, "total": total, "phase": phase}));
+            if let Err(e) = local::install_turn(&dir, &mut progress) { error(&e) }
+        }
         _ => {
             let mut progress = |what: &str, done: u64, total: u64, phase: &str| emit(json!({"event": "progress", "what": what, "done": done, "total": total, "phase": phase}));
-            if let Err(e) = local::install(&dir, &a.model, &Pins::pinned(), &mut progress) {
-                error(&e);
+            match local::install(&dir, &a.model, &Pins::pinned(), &mut progress) {
+                Err(e) => error(&e),
+                // the end-of-turn model comes along; without it dictation still works, so a failure is said and not an error
+                Ok(()) => if let Err(e) = local::install_turn(&dir, &mut progress) { log(&format!("end-of-turn model not fetched: {e}")) },
             }
         }
     }

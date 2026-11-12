@@ -444,6 +444,7 @@ impl Drop for Vad {
 /// resident one at SERVER when it answers (the bool says so), else built here.
 pub fn engine(dir: &Path, id: &str, server: &str) -> Result<(crate::resident::Rec, Vad, bool), String> {
     let api = Api::load(dir)?;
+    crate::resident::turn_from(dir);
     let vad = Vad::create(&api, dir)?;
     let (rec, resident) = crate::resident::recognizer(&api, dir, id, server)?;
     Ok((rec, vad, resident))

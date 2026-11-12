@@ -11,7 +11,9 @@ use std::collections::HashMap;
 pub struct Voice { pub views: HashMap<String, Value>, marks: HashMap<String, usize>, pub level: u32, pub fix: Option<Entity<Composer>>, upload: Option<super::voice_mic::Upload>,
     cuts: HashMap<String, u64>, seqs: HashMap<String, u64>, held: HashMap<String, (std::time::Instant, Vec<Value>)>,
     /// a voice command's message in its undo window; when the send button flashed for it; the line said after it ("Sent by voice") and until when
-    pub pending: Option<Pending>, next: u64, pub flash: Option<std::time::Instant>, pub said: Option<(String, std::time::Instant)> }
+    pub pending: Option<Pending>, next: u64, pub flash: Option<std::time::Instant>, pub said: Option<(String, std::time::Instant)>,
+    /// an end-of-turn countdown running (the hub's `countdown`): its thread and when it ends
+    pub countdown: Option<(String, std::time::Instant)> }
 /// A draft a voice command took (cmds.rs): `send` goes when the window ends, `cancel` is gone then; Undo puts the text back in front of the draft.
 #[derive(Clone, Debug)]
 pub struct Pending { pub id: u64, pub thread: String, pub text: String, pub cmd: String }
@@ -78,7 +80,13 @@ impl Win {
                 let caret = new.chars().count(); self.voice_put(&thread, 0..old.len(), &new, caret, cx);
             }
             "audio" => self.voice_mic_send(s(&f, "path")),
-            "command" => self.voice_command(&thread, &f, cx),
+            "command" => { self.screens.voice.countdown = None; self.voice_command(&thread, &f, cx) }
+            // end of turn: the hub will send when this runs out unless more is said (or Keep talking is pressed)
+            "countdown" => {
+                let ms = f["ms"].as_u64().unwrap_or(0);
+                self.screens.voice.countdown = (ms > 0).then(|| (thread.clone(), std::time::Instant::now() + std::time::Duration::from_millis(ms)));
+                if ms > 0 { cx.spawn(async move |w, cx| { for _ in 0..(ms / 100 + 2) { cx.background_executor().timer(std::time::Duration::from_millis(100)).await; if w.update(cx, |_, cx| cx.notify()).is_err() { break } } }).detach(); }
+            }
             _ => {}
         }
         cx.notify();
@@ -134,9 +142,16 @@ impl Win {
         cx.spawn(async move |w, cx| { cx.background_executor().timer(SAID).await; let _ = w.update(cx, |_, cx| cx.notify()); }).detach();
         cx.notify();
     }
-    /// Undo: the message stays; its text goes back in front of whatever was dictated since.
+    /// Keep talking: no end-of-turn send for this pause.
+    pub fn voice_hold(&mut self, cx: &mut Context<Self>) {
+        let Some((t, _)) = self.screens.voice.countdown.take() else { return };
+        rpc(self, json!({"op": "act", "thread": t, "action": "voice-hold", "value": "", "draft": ""})); cx.notify();
+    }
+    /// Undo: the message stays; its text goes back in front of whatever was dictated since. The hub hears of it (an end-of-turn send undone
+    /// teaches its threshold to wait a little more; only on this machine).
     pub fn voice_undo(&mut self, cx: &mut Context<Self>) {
         let Some(p) = self.screens.voice.pending.take() else { return };
+        rpc(self, json!({"op": "act", "thread": p.thread, "action": "voice-undid", "value": p.cmd, "draft": ""}));
         let now = if p.thread == self.selected { self.input.read(cx).content.to_string() } else { self.voice_text(&p.thread) };
         let mark = self.screens.voice.marks.get(&p.thread).copied().unwrap_or(0);
         let (text, m) = undo_text(&p.text, &now, mark); let caret = text.chars().count();
@@ -208,6 +223,13 @@ pub fn view(cx: &mut Context<Win>, light: bool, v: &Value, level: u32, fix: Opti
 /// Over the composer after a voice command: its undo window ("Sending by voice…" with Undo), then for a moment what happened.
 pub fn pending_view(cx: &mut Context<Win>, light: bool, v: &Voice, thread: &str) -> Option<AnyElement> {
     let c = |n: &str| theme::color(light, n);
+    if let Some((_, until)) = v.countdown.as_ref().filter(|(t, u)| t == thread && *u > std::time::Instant::now()) {
+        let left = until.saturating_duration_since(std::time::Instant::now()).as_secs_f32();
+        return Some(div().id("voice-countdown").flex().items_center().gap_2().text_size(px(12.)).child(div().size(px(8.)).bg(c("ok")))
+            .child(div().text_color(c("dim")).child(crate::i18n::trs("Sending…")))
+            .child(div().w(px(72.)).h(px(4.)).bg(c("line")).child(div().h_full().w(px(72. * (left / 2.0).min(1.0))).bg(c("ok")))).child(div().flex_1())
+            /* i18n-ok: drawn through trs in button */ .child(button(cx, light, "voice-hold".into(), "Keep talking".into(), true, false, |w, cx| w.voice_hold(cx))).into_any_element());
+    }
     if let Some(p) = v.pending.as_ref().filter(|p| p.thread == thread) {
         /* i18n-ok: drawn through trs below */ let line = if p.cmd == "send" { "Sending by voice…" } else { "Draft cleared by voice" };
         return Some(div().id("voice-pending").flex().items_center().gap_2().text_size(px(12.)).child(div().size(px(8.)).bg(c(if p.cmd == "send" { "ok" } else { "warn" }))).child(div().flex_1().text_color(c("dim")).child(crate::i18n::trs(line)))

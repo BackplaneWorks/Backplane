@@ -132,7 +132,8 @@ object DataVoice {
                 marks[tid]?.let { marks[tid] = VoiceText.shift(old, new, it) }
                 DataClient.setField(tid, TextFieldValue(new, TextRange(new.length)), typed = false)
             }
-            "command" -> command(tid, o.optString("cmd"), o.optInt("cut"))
+            "command" -> { countdown = null; command(tid, o.optString("cmd"), o.optInt("cut")) }
+            "countdown" -> countdown = if (o.optInt("ms") > 0) tid else null
             "page" -> rows = objects(o.optJSONArray("rows"))
         }
     }
@@ -141,6 +142,10 @@ object DataVoice {
     data class Pending(val id: Int, val tid: String, val text: String, val cmd: String)
     var pending by mutableStateOf<Pending?>(null); private set
     var said by mutableStateOf<Pair<String, String>?>(null); private set
+    /** The thread whose end-of-turn countdown runs (the hub's `countdown`): it sends when that ends unless more is said or Keep talking is pressed. */
+    var countdown by mutableStateOf<String?>(null); private set
+    /** Keep talking: no end-of-turn send for this pause. */
+    fun hold() { val t = countdown ?: return; countdown = null; scope.launch { runCatching { DataClient.call("voice.act", JSONObject().put("thread", t).put("action", "voice-hold").put("value", "").put("draft", "")) } } }
     private var nextPending = 0
     /** The hub's `command` frame: the whole draft is taken now (dictation goes on into the empty draft), and sent (or dropped, for cancel) after the
      *  undo window. A send goes as the Send button's does: turn.start, which steers a running turn. */
@@ -163,6 +168,8 @@ object DataVoice {
     /** Undo: the message stays; its text goes back in front of whatever was dictated since. */
     fun undo() {
         val p = pending ?: return; pending = null
+        // the hub hears of it: an end-of-turn send undone teaches its threshold to wait a little more (on the hub only)
+        scope.launch { runCatching { DataClient.call("voice.act", JSONObject().put("thread", p.tid).put("action", "voice-undid").put("value", p.cmd).put("draft", "")) } }
         val (t, m) = VoiceText.undo(p.text, DataClient.field(p.tid).text, marks[p.tid] ?: 0)
         if (marks.containsKey(p.tid)) marks[p.tid] = m
         DataClient.setField(p.tid, TextFieldValue(t, TextRange(t.length)), typed = false)

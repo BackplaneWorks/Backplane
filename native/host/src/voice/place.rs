@@ -55,6 +55,7 @@ impl Place {
         e.ins = "\n".into(); e.adv = 1; e.to = 1; e
     }
     pub fn is_empty(&self) -> bool { self.draft.trim().is_empty() }
+    pub fn text(&self) -> &str { &self.draft }
 }
 
 /// What a client does with an `Edit`: the new draft, mark and caret. A mark past the end is the end.

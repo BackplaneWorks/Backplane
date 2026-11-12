@@ -35,6 +35,8 @@ pub trait Detector {
 
 pub trait Decoder: Send {
     fn decode(&mut self, samples: &[f32]) -> Vec<Word>;
+    /// The end-of-turn model's probability that the speaker has finished (turn.rs), from the last 8 s of audio; None when there is no model.
+    fn turn(&mut self, _audio: &[f32]) -> Option<f32> { None }
 }
 
 pub trait Sink {
@@ -42,6 +44,8 @@ pub trait Sink {
     fn done(&mut self, item: &str, words: &[Word], decode_ms: i64, final_ms: i64);
     /// A closed segment's start, in centiseconds from the start of the audio, told just before its `done`.
     fn at(&mut self, _from_cs: i64) {}
+    /// A pause closed segment `item`: the end-of-turn model says `p` that the speaker has finished, in `ms` (live only).
+    fn turn(&mut self, _item: &str, _p: f32, _ms: i64) {}
 }
 
 pub enum In {
@@ -53,11 +57,13 @@ pub enum In {
 enum Job {
     Hyp { item: String, from: i64, to: i64, samples: Vec<f32> },
     Done { item: String, from: i64, samples: Vec<f32>, min: f64, speech_end: Option<Instant> },
+    Turn { item: String, audio: Vec<f32> },
 }
 
 pub enum Reply {
     Hyp { item: String, from: i64, to: i64, words: Vec<Word> },
     Done { item: String, from: i64, words: Vec<Word>, decode_ms: i64, final_ms: i64 },
+    Turn { item: String, p: Option<f32>, ms: i64 },
 }
 
 fn decoder_thread<D: Decoder + 'static>(mut d: D, jobs: Receiver<Job>, inbox: Sender<In>) {
@@ -71,6 +77,7 @@ fn decoder_thread<D: Decoder + 'static>(mut d: D, jobs: Receiver<Job>, inbox: Se
                     let decode_ms = t.elapsed().as_millis() as i64;
                     Reply::Done { item, from, words, decode_ms, final_ms: speech_end.map_or(0, |e| e.elapsed().as_millis() as i64) }
                 }
+                Job::Turn { item, audio } => { let t = Instant::now(); let p = d.turn(&audio); Reply::Turn { item, p, ms: t.elapsed().as_millis() as i64 } }
             };
             if inbox.send(In::Decoded(reply)).is_err() {
                 break;
@@ -104,6 +111,7 @@ pub struct Session<V: Detector, S: Sink> {
     seq: u64,
     carry: Option<u8>,
     pending: usize, // decodes not answered yet
+    hist: std::collections::VecDeque<f32>, // the last 8 s heard, silence and all, for the end-of-turn model (live)
 }
 
 impl<V: Detector, S: Sink> Session<V, S> {
@@ -125,6 +133,7 @@ impl<V: Detector, S: Sink> Session<V, S> {
             seq: 0,
             carry: None,
             pending: 0,
+            hist: std::collections::VecDeque::with_capacity(if live { crate::turn::RATE * crate::turn::SECONDS } else { 0 }),
         }
     }
 
@@ -156,6 +165,7 @@ impl<V: Detector, S: Sink> Session<V, S> {
         }
         self.buf[self.n] = x;
         self.n += 1;
+        if self.live { if self.hist.len() == crate::turn::RATE * crate::turn::SECONDS { self.hist.pop_front(); } self.hist.push_back(x); }
         self.win.push(x);
         if self.win.len() == WINDOW {
             self.vad.accept(&self.win);
@@ -185,6 +195,8 @@ impl<V: Detector, S: Sink> Session<V, S> {
             self.seg_start = self.base.max(self.now() - samples(PRE_ROLL + MIN_SPEECH));
         }
         if self.seg_start >= 0 && ended > 0 {
+            // a pause (not a segment cut at MAX_SEG while still speaking): has the speaker finished? asked before the segment's last decode, so it comes first
+            if self.live && !speaking { let (item, audio) = (self.item(), self.hist.iter().copied().collect()); self.send(Job::Turn { item, audio }); }
             // a segment cut at MAX_SEG while still speaking goes on as the next
             self.close(if speaking { 0.5 } else { TAIL });
             if speaking {
@@ -242,6 +254,7 @@ impl<V: Detector, S: Sink> Session<V, S> {
                 self.decoding = false;
             }
             Reply::Done { item, from, words, decode_ms, final_ms } => { self.out.at(cs(from as f64 / SR)); self.out.done(&item, &words, decode_ms, final_ms) }
+            Reply::Turn { item, p, ms } => if let Some(p) = p { self.out.turn(&item, p, ms) },
         }
     }
 

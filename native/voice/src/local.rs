@@ -157,6 +157,25 @@ pub fn vad_path(dir: &Path) -> PathBuf {
     dir.join("silero_vad.onnx")
 }
 
+/// The end-of-turn model (turn.rs): optional; without it dictation has no `turn` events and the hub decides by what it has.
+pub fn turn_path(dir: &Path) -> PathBuf {
+    dir.join(crate::turn::FILE)
+}
+/// It is there at its pinned size (the fetch checked its sha256).
+pub fn turn_ok(dir: &Path) -> bool {
+    fs::metadata(turn_path(dir)).is_ok_and(|m| m.is_file() && m.len() == crate::turn::SIZE) && runtime_ok(dir, false)
+}
+/// `local-turn`: fetches the end-of-turn model alone, checked, beside the rest; the speech model's ready mark is not touched.
+pub fn install_turn(dir: &Path, progress: Progress) -> Result<(), String> {
+    if turn_ok(dir) { return Ok(()) }
+    fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    let stage = dir.join(format!(".stage-{}", std::process::id())); rm(&stage); fs::create_dir_all(&stage).map_err(|e| e.to_string())?;
+    let pin = Pin { url: std::env::var("BACKPLANE_VOICE_TURN_URL").unwrap_or_else(|_| crate::turn::URL.to_string()), size: Some(crate::turn::SIZE), sha256: Some(crate::turn::SHA256.to_string()), sha512: None };
+    let p = stage.join(crate::turn::FILE);
+    let r = fetch_to(&pin, &p, "end-of-turn model", progress).and_then(|_| sync_file(&p)).and_then(|_| fs::rename(&p, turn_path(dir)).map_err(|e| e.to_string()));
+    rm(&stage); sync_dir(dir); r
+}
+
 /// Where model ID's files are, if ID is a model.
 pub fn model_dir(dir: &Path, id: &str) -> Option<PathBuf> {
     Pins::pinned().model(id).map(|m| dir.join(&m.dir))
@@ -294,6 +313,7 @@ pub fn status_with(dir: &Path, pins: &Pins) -> Value {
         "runtime": rt,
         "vad": vad,
         "vadBundled": bundled_ok(pins), // a release's copy beside the helper, which an install takes instead of a download
+        "turn": turn_ok(dir), // the end-of-turn model (turn.rs), optional
         "models": models,
     })
 }
@@ -580,10 +600,11 @@ pub fn remove(dir: &Path, id: &str) {
         rm(&dir.join(format!("ready-{id}")));
         rm(&dir.join(&m.dir));
     }
-    // the runtime and VAD go with the last model
+    // the runtime, the VAD and the end-of-turn model go with the last model
     if !pins.models.iter().any(|m| installed(dir, m)) {
         rm(&runtime_dir(dir));
         rm(&vad_path(dir));
+        rm(&turn_path(dir));
     }
 }
 

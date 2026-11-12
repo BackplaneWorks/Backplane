@@ -23,6 +23,12 @@ file)
   echo '{"event":"ready"}'; echo '{"event":"done","item":"file","text":"Open key cad now.","segments":[[12,180,87,"Open key cad now."]]}'; echo '{"event":"end"}';;
 live)
   echo "$*" > "$here/args"
+  if [ -e "$here/eot" ]; then
+    echo '{"event":"ready","recorder":"pw-record","device":"m","label":"Desk mic"}'; echo '{"event":"loaded","ms":5,"resident":true}'
+    echo '{"event":"turn","item":"l0","p":0.93,"ms":30}'
+    echo '{"event":"done","item":"l0","text":"","words":[["Ship",0,20,99],["it",20,30,99],["today.",30,60,99]]}'
+    cat > /dev/null; echo '{"event":"stopping"}'; echo '{"event":"end"}'; exit 0
+  fi
   echo '{"event":"ready","recorder":"pw-record","device":"m","label":"Desk mic"}'
   echo '{"event":"level","v":40}'
   echo '{"event":"delta","item":"a","text":"Open key"}'
@@ -189,4 +195,37 @@ fn replay(fs: &[Value], draft: &str) -> String {
     assert!(r.bin.join("serve-stopped").exists(), "the server's stdin closed"); 
     for _ in 0..100 { if r.hub.info_now().get("voice.resident").is_none() { break } tokio::time::sleep(Duration::from_millis(50)).await }
     assert_eq!(r.hub.info_now().get("voice.resident"), None);
+}
+
+/// Jev's stand-in: answers every request with `p`, and keeps what it was sent.
+async fn jev_mock(p: f64) -> (String, Arc<Mutex<Vec<String>>>) {
+    use tokio::io::{AsyncReadExt, AsyncWriteExt};
+    let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap(); let url = format!("http://{}", l.local_addr().unwrap());
+    let got = Arc::new(Mutex::new(vec![])); let g = got.clone();
+    tokio::spawn(async move { loop {
+        let Ok((mut s, _)) = l.accept().await else { return };
+        let mut buf = vec![0u8; 65536]; let mut n = 0;
+        loop { let k = s.read(&mut buf[n..]).await.unwrap_or(0); if k == 0 { break } n += k; let t = String::from_utf8_lossy(&buf[..n]).to_string();
+            if let Some(h) = t.find("\r\n\r\n") { let len = t.to_lowercase().split("content-length:").nth(1).and_then(|x| x.trim().split('\r').next()?.trim().parse::<usize>().ok()).unwrap_or(0); if n >= h + 4 + len { break } } }
+        g.lock().unwrap().push(String::from_utf8_lossy(&buf[..n]).to_string());
+        let body = json!({"model": "jev-1.14.0", "answers": {"done": {"type": "noul", "noul": p}}}).to_string();
+        let _ = s.write_all(format!("HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len()).as_bytes()).await;
+    } });
+    (url, got)
+}
+#[tokio::test(flavor = "multi_thread")] async fn a_finished_sentence_is_sent_by_jevs_word_after_the_countdown_and_an_undo_teaches_patience() {
+    let _g = ONE.lock().await; let mut r = rig("eot").await; std::fs::write(r.bin.join("eot"), "").unwrap();
+    std::fs::create_dir_all(local_dir(&r.home)).unwrap(); std::fs::write(local_dir(&r.home).join("ready-parakeet-v2"), "ok").unwrap(); // the local engine: timed words
+    let (url, got) = jev_mock(0.8).await; std::env::set_var("BACKPLANE_JEV_URL", &url); *super::super::jev::TEST_KEY.lock().unwrap() = Some("ts-test-key".into());
+    commit(&r.hub, &[("voice.eot.jev".to_string(), "on".to_string())]).await.unwrap();
+    r.rpc(json!({"op":"start","thread":"t1","draft":"","src":"hub"})).await;
+    let fs = r.until(|v| v["ev"] == "command").await;
+    let cd = fs.iter().find(|f| f["ev"] == "countdown").expect("a countdown"); assert_eq!((cd["ms"].as_u64(), cd["by"].as_str()), (Some(1500), Some("jev")));
+    assert_eq!(fs.last().unwrap()["cmd"], "send");
+    let req = got.lock().unwrap().join("\n"); assert!(req.contains("Bearer ts-test-key") && req.contains(r#"Transcript so far: \"Ship it today.\""#) && req.contains("gives 0.93"), "{req}");
+    assert!(r.hub.info_now()["voice.eot.last"].as_str().unwrap().contains("\"by\":\"jev\""));
+    r.rpc(json!({"op":"act","thread":"t1","action":"voice-undid","value":"","draft":""})).await;
+    let l = crate::voice::eot::Learned::parse(&r.hub.setting("voice.eot.learned").await.unwrap_or_default()); assert_eq!((l.sends, l.undone), (1, 1)); assert!(l.nudge > 0.0);
+    r.rpc(json!({"op":"stop"})).await; r.until(off).await;
+    let _ = std::fs::remove_file(r.bin.join("eot")); std::env::remove_var("BACKPLANE_JEV_URL"); *super::super::jev::TEST_KEY.lock().unwrap() = None;
 }

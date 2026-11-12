@@ -9,6 +9,7 @@ pub const USAGE: &str = "usage:
   backplane-voice local-status --local-dir D
   backplane-voice local-install --local-dir D [--model ID]
   backplane-voice local-remove --local-dir D [--model ID]
+  backplane-voice local-turn --local-dir D
   backplane-voice live [--keywords-file F] [--prompt P] [--language xx]... [--delay low]
                        [--source auto|pw-record|parecord|arecord|stdin] [--device NAME] [--key-file F]
   backplane-voice file PATH [--content-type CT] [--keywords-file F] [--prompt P]
@@ -18,7 +19,7 @@ pub const USAGE: &str = "usage:
 The key comes from --key-file, else OPENAI_API_KEY. OPENAI_BASE_URL overrides the API base.
 ";
 
-const COMMANDS: [&str; 8] = ["live", "file", "devices", "local-status", "local-install", "local-remove", "record", "serve"];
+const COMMANDS: [&str; 9] = ["live", "file", "devices", "local-status", "local-install", "local-remove", "local-turn", "record", "serve"];
 const SOURCES: [&str; 5] = ["auto", "pw-record", "parecord", "arecord", "stdin"];
 
 #[derive(Clone, Debug, Default)]

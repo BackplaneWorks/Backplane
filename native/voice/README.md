@@ -119,6 +119,18 @@ server serves many clients, one decode at a time. On the socket: `bpv1
 count and f32 LE samples, each answered by a u32 LE length and sherpa-onnx's
 JSON. Unix only.
 
+### The end-of-turn model, and local-turn
+
+`src/turn.rs`: Smart Turn v3.2 (pipecat-ai, BSD-2-Clause, `smart-turn-v3.2-cpu.onnx`, 8 MB, pinned by size and
+sha256) hears from the last 8 s of audio whether the speaker has finished. Whisper's log-mel features are made
+here (a 400-point mixed-radix FFT, Slaney mel bands; equal to transformers' to 2e-6), and the model runs through
+onnxruntime's C API from the runtime already loaded (`OrtGetApiBase`, entries by their OrtApi index). One check
+is ~20 ms of features and ~27 ms of model on one thread. In `live` with the local engine, every pause that closes
+a segment asks it (the resident server answers when there is one: a frame whose count has bit 31 set) and prints
+`turn`. `local-turn --local-dir D` fetches it alone, checked, without touching the speech model's ready mark;
+`local-install` fetches it too (a failure there is said, not an error); `local-status` says `"turn"`. Without
+it there are no `turn` events. Lab numbers and the choice against LiveKit's turn-detector: docs/voice.md.
+
 ### record
 
 Raw s16le mono PCM on stdout at `--rate` (default 16000) until SIGTERM,
@@ -151,6 +163,8 @@ NDJSON on stdout, one object a line, written at once; diagnostics on stderr.
 {"event":"done","item":"<id>","text":"...","words":[...],"decode_ms":40,"final_ms":55}
                                             live, local: final_ms is from the VAD's end to here,
                                             0 for a segment cut by the stop
+{"event":"turn","item":"<id>","p":0.93,"ms":30} live, local: a pause closed segment <id>; the end-of-turn model (turn.rs) says p
+                                            that the speaker has finished; comes before that segment's `done`
 {"event":"stopping"}                        live: a stop began
 {"event":"error","error":"<one line>"}      no key, 401, no recorder, network, server errors
 {"event":"local","platform":"linux-x64","supported":true,"runtime":true,"vad":true,"vadBundled":true,

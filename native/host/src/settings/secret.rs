@@ -52,6 +52,7 @@ fn list_reply(id: &Value) -> Value {
 /// Secret.saved: the request closed, and the thread that asked for it and the one it was saved from (/secret in a chat) told its handle.
 async fn saved(hub: &Arc<Hub>, agents: &Option<Arc<crate::agents::Agents>>, name: &str, from: &str) {
     if let Some(m) = crate::mcpx::svc::get() { m.publish().await } // Settings > MCP says which keys are set
+    if name == crate::voice::eot::KEY { hub.set_info("voice.eot.key", "set").await; } // Settings > Voice: Jev's key is there
     let key = ask_key(name);
     let asked = hub.setting(&key).await.unwrap_or_default();
     let asker = serde_json::from_str::<Value>(&asked).ok().map(|v| sv(&v, "thread").to_string()).unwrap_or_default();
