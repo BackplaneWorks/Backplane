@@ -116,6 +116,8 @@ pub fn load_turn(dir: &Path) -> Option<crate::turn::Turn> {
     match crate::turn::Turn::load(&local::runtime_dir(dir).join(local::onnx_library()), &local::turn_path(dir)) { Ok(t) => Some(t), Err(e) => { log(&format!("end-of-turn model: {e}")); None } }
 }
 static SPK_HERE: std::sync::Mutex<Option<Option<crate::sherpa::Speaker>>> = std::sync::Mutex::new(None);
+/// Whether this session tells each segment's voice (`live --speaker`: the speaker check is on); off, the speaker model is never loaded.
+pub static SPEAKER: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// The speaker model in `dir`, when it is there.
 pub fn load_speaker(api: &Arc<Api>, dir: &Path) -> Option<crate::sherpa::Speaker> {
     if !local::speaker_ok(dir) { return None }
@@ -201,7 +203,7 @@ mod unix {
         }
     }
 
-    fn client(mut s: UnixStream, rec: &Mutex<Recognizer>, turn: Option<&Mutex<crate::turn::Turn>>, spk: Option<&Mutex<crate::sherpa::Speaker>>, model: &str) {
+    fn client(mut s: UnixStream, rec: &Mutex<Recognizer>, turn: Option<&Mutex<crate::turn::Turn>>, spk: (&Mutex<Option<Option<crate::sherpa::Speaker>>>, &Arc<Api>, &Path), model: &str) {
         let mut r = BufReader::new(match s.try_clone() {
             Ok(c) => c,
             Err(_) => return,
@@ -234,7 +236,8 @@ mod unix {
             let samples: Vec<f32> = raw.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect();
             drop(raw);
             let j = if is_voice {
-                match spk.and_then(|s| s.lock().unwrap_or_else(|e| e.into_inner()).embed(&samples)) { Some(e) => json!({"emb": e}).to_string(), None => "{}".into() }
+                let mut g = spk.0.lock().unwrap_or_else(|e| e.into_inner()); if g.is_none() { *g = Some(load_speaker(spk.1, spk.2)) }
+                match g.as_ref().and_then(|s| s.as_ref()).and_then(|s| s.embed(&samples)) { Some(e) => json!({"emb": e}).to_string(), None => "{}".into() }
             } else if is_turn {
                 match turn.map(|t| t.lock().unwrap_or_else(|e| e.into_inner()).predict(&samples)) { Some(Ok(p)) => json!({"p": p}).to_string(), Some(Err(e)) => { log(&format!("end-of-turn model failed: {e}")); "{}".into() } None => "{}".into() }
             } else {
@@ -271,7 +274,7 @@ mod unix {
             let _ = std::fs::set_permissions(&a.socket, std::fs::Permissions::from_mode(0o600));
         }
         let has_turn = local::turn_ok(&dir);
-        emit(json!({"event": "loaded", "ms": ms, "rss_kb": rss_kb(), "model": a.model, "turn": has_turn, "speaker": local::speaker_ok(&dir)}));
+        emit(json!({"event": "loaded", "ms": ms, "rss_kb": rss_kb(), "model": a.model, "turn": has_turn}));
         let sock = a.socket.clone();
         std::thread::spawn(move || {
             let mut line = String::new();
@@ -284,11 +287,13 @@ mod unix {
         });
         let rec: &'static Mutex<Recognizer> = Box::leak(Box::new(Mutex::new(rec)));
         let turn: Option<&'static Mutex<crate::turn::Turn>> = load_turn(&dir).map(|t| &*Box::leak(Box::new(Mutex::new(t))));
-        let spk: Option<&'static Mutex<crate::sherpa::Speaker>> = load_speaker(&api, &dir).map(|t| &*Box::leak(Box::new(Mutex::new(t))));
+        // the speaker model loads at its first question (the speaker check is off unless turned on; then nothing of it is loaded)
+        let spk: &'static Mutex<Option<Option<crate::sherpa::Speaker>>> = Box::leak(Box::new(Mutex::new(None)));
+        let (spk_api, spk_dir): (&'static Arc<Api>, &'static Path) = (Box::leak(Box::new(api.clone())), Box::leak(dir.clone().into_boxed_path()));
         let model: &'static str = Box::leak(a.model.clone().into_boxed_str());
         for s in l.incoming().flatten() {
             std::thread::spawn(move || {
-                client(s, rec, turn, spk, model);
+                client(s, rec, turn, (spk, spk_api, spk_dir), model);
                 trim();
             });
         }

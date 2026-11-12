@@ -4,6 +4,8 @@
 //! numbers every message, activity and reminder in log order), exactly the store.db hub
 //! keeps; a page is thinq's Q.sql.page over those indexes (law: same log, same pages).
 use crate::store::Store;
+#[path = "voice/mark.rs"]
+pub mod voice_mark;
 use anyhow::Result;
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -184,6 +186,8 @@ impl Model {
             _ => (format!("remind:{}:{}", s("id"), at), "act", "remind".into(), "reminder".into(), s("text")),
         };
         let text = if cut && kind == "act" && role != "handoff" /* a handoff's card is its text, whole */ { text.chars().take(513).collect() } else { text };
+        // a spoken message (voice/mark.rs): its words alone; what its wrapper said rides in `akind` ("voice{...}"), which a message has no other use for
+        let (text, akind) = match (kind, voice_mark::split(&text)) { ("msg", (t, Some(m))) => (t, format!("voice{}", m.json())), (_, _) => (text, akind) };
         let _ = thread; let th = s("thread");
         let src = { let f = link_from(&id).to_string(); if !f.is_empty() && f != th { f } else { String::new() } };
         Ok(Row { seq: ent.seq as u64, ord: ent.ord as u64, id, thread: th, src, kind, role, akind, text, at })

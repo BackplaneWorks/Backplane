@@ -249,6 +249,8 @@ impl Backplane {
             self.screens.unsent.push(&th,&text,std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0,|d|d.as_millis() as u64));
             self.voice_cut(false);self.input.update(cx,|i,cx|i.set(String::new(),cx));self.drafts.remove(&self.selected);self.screens.drafts.set(&self.selected,"");cx.notify();return;
         }
+        // a dictated draft (no picture, no command): it goes as a spoken message, the agent told so
+        if !has_att&&!text.trim().is_empty()&&self.status=="Connected"&&!screens::sidebox::is_command(&self.data["thread"]["commands"],&text)&&self.voice_send_dictated(&text,cx) {self.input.update(cx,|i,cx|i.set(String::new(),cx));self.drafts.remove(&self.selected);self.screens.drafts.set(&self.selected,"");let _=self.tx.try_send(Command::Draft(String::new()));cx.notify();return;}
         if (!text.trim().is_empty()||has_att)&&self.status=="Connected" {self.voice_cut(true);if !text.trim().is_empty()&&!screens::sidebox::is_command(&self.data["thread"]["commands"],&text){self.echo_sent(&text);}let _=self.tx.try_send(Command::Send(text));self.error.clear();self.note.clear();}cx.notify();
     }
     /// The message is drawn at the end of the open thread the moment it is sent; the hub's picture, which has the real entry, replaces it (history::merge

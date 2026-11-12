@@ -214,7 +214,7 @@ impl Agents {
         // the person's own message (typed in a thread or to a bot) shows in the thread from now, not only once the agent takes it: an account check
         // or a turn ahead of it held Bub's for 104 s, and the person saw their reply nowhere (Nov 11)
         let shown = role == "user" && origin.is_none() && !msg.is_empty();
-        if shown { self.hub.incoming_add(thread, msg, text, now_s()); }
+        if shown { self.hub.incoming_add(thread, msg, &crate::voice::mark::split(text).0, now_s()); }
         let r = self.deliver_go(person, role, thread, msg, text, origin, extra).await;
         if shown { self.hub.incoming_done(thread, msg); }
         r
@@ -480,6 +480,9 @@ impl Agents {
                     let shown = p.get("text").and_then(Value::as_str).unwrap_or("");
                     // `agentText` (the phone data API: the text with the paths of the images attached) is what the agent is told and the message carries; `attachments` (their metadata) ride as a MessageAttached event in the same commit
                     let text = p.get("agentText").and_then(Value::as_str).filter(|t| !t.is_empty()).unwrap_or(shown);
+                    // dictated (voice/mark.rs): the agent is told it was spoken, by whom it was heard and which words to doubt; every provider alike
+                    let spoken = p.get("voice").and_then(crate::voice::mark::Meta::of).map(|m| crate::voice::mark::wrap(text, &m));
+                    let text = spoken.as_deref().unwrap_or(text);
                     let msg = p.get("msg").and_then(Value::as_str).filter(|m| !m.is_empty()).map(str::to_string).unwrap_or_else(|| hub_id("m", now_s(), self.seq()));
                     let retry = p.get("retry").and_then(Value::as_bool).unwrap_or(false);
                     let attached: Vec<Value> = p.get("attachments").filter(|a| a.as_array().map_or(false, |x| !x.is_empty())).map(|a| vec![json!({"$":"MessageAttached","thread":th,"msg":msg,"attachments":a,"at":now_s()})]).unwrap_or_default();

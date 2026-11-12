@@ -1466,8 +1466,9 @@ fn ring_form(words: &str, audio: &[u8], at: u64) -> Vec<u8> {
     let (st, body) = call_ring(&hub, &hid, hs("d-1", "single-click-hold"), &ring_form("Remind me to call Jeff at five", audio, now - 7200)).await;
     assert_eq!((st.as_str(), String::from_utf8_lossy(&body).as_ref()), ("200 OK", "received"));
     for _ in 0..400 { if rec.got.lock().unwrap().iter().any(|g| g.2.starts_with("[voice note from your Pebble ring")) { break } tokio::time::sleep(std::time::Duration::from_millis(50)).await }
-    let got: Vec<_> = rec.got.lock().unwrap().iter().filter(|g| g.2.starts_with("[voice note")).cloned().collect(); assert_eq!(got.len(), 1, "{got:?}");
-    assert!(got[0].2.contains("Hold & talk") && got[0].2.contains("came 2 h after it was said") && got[0].2.ends_with("\nRemind me to call Jeff at five"), "{}", got[0].2);
+    let got: Vec<_> = rec.got.lock().unwrap().iter().filter(|g| g.2.contains("[voice note")).cloned().collect(); assert_eq!(got.len(), 1, "{got:?}");
+    assert!(got[0].2.starts_with("<voice_message via=\"ring\""), "a ring note is a spoken message like any other (voice/mark.rs): {}", got[0].2);
+    assert!(got[0].2.contains("Hold & talk") && got[0].2.contains("came 2 h after it was said") && crate::voice::mark::split(&got[0].2).0.ends_with("\nRemind me to call Jeff at five"), "{}", got[0].2);
     // the app tries again (it missed the answer, or the phone was offline): the same note, a 2xx, nobody hears it twice
     let (st, body) = call_ring(&hub, &hid, hs("d-1", "single-click-hold"), &ring_form("Remind me to call Jeff at five", audio, now - 7200)).await;
     assert_eq!((st.as_str(), String::from_utf8_lossy(&body).as_ref()), ("200 OK", "already received"));
@@ -1476,8 +1477,8 @@ fn ring_form(words: &str, audio: &[u8], at: u64) -> Vec<u8> {
     let mut m = format!("v1\n{now}\nd-2\ndouble-click-hold\n0\n").into_bytes(); m.extend_from_slice(&body2); let sig = hex::encode(crate::net::owner::hmac_sha256(secret.as_bytes(), &m));
     let signed = vec![ct.clone(), ("X-Index-Webhook-Version".into(), "1".into()), ("X-Index-Delivery".into(), "d-2".into()), ("X-Index-Trigger".into(), "double-click-hold".into()), ("X-Index-Timestamp".into(), now.to_string()), ("X-Index-Signature".into(), sig)];
     assert_eq!(call_ring(&hub, &hid, signed, &body2).await.0, "200 OK");
-    for _ in 0..400 { if rec.got.lock().unwrap().iter().filter(|g| g.2.starts_with("[voice note")).count() == 2 { break } tokio::time::sleep(std::time::Duration::from_millis(50)).await }
-    assert_eq!(rec.got.lock().unwrap().iter().filter(|g| g.2.starts_with("[voice note")).count(), 2);
+    for _ in 0..400 { if rec.got.lock().unwrap().iter().filter(|g| g.2.contains("[voice note")).count() == 2 { break } tokio::time::sleep(std::time::Duration::from_millis(50)).await }
+    assert_eq!(rec.got.lock().unwrap().iter().filter(|g| g.2.contains("[voice note")).count(), 2);
     // kept as it came, listed newest said first, found by its words, played by its link and nothing else
     let mut l = json!({}); for _ in 0..400 { l = rpc(&hub, "ring.list", json!({})).await; if l["notes"].as_array().map_or(false, |a| a.len() == 2 && a.iter().all(|n| n["state"] == "sent")) { break } tokio::time::sleep(std::time::Duration::from_millis(50)).await }
     assert_eq!(l["total"], 2, "{l}"); let n = &l["notes"][0];

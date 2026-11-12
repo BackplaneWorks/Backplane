@@ -2515,6 +2515,9 @@ settings.voice.speaker.reenrol = Re-enrol
 voice.always.pill.listening = Listening
 voice.always.pill.paused = Paused
 voice.always.pill.listen = Listen
+voice.mark.tip = Spoken, transcribed by {stt}, {conf}% sure
+voice.mark.unsure = unsure: {words}
+voice.mark.edited = edited
 
 # ---- gpui-f: hub setup flow and thread ----
 gpui.f.group.install = Install

@@ -248,8 +248,10 @@ impl<V: Detector, S: Sink> Session<V, S> {
         self.seq += 1;
         let samples = self.audio(from, to.max(from + 1));
         // whose voice: a second or more of a live segment (before its last decode, so it comes first)
-        if self.live && samples.len() as f64 >= SR { self.send(Job::Voice { item: item.clone(), samples: samples.clone() }) }
-        self.send(Job::Done { item, from, samples, min: 0.2, speech_end: Some(Instant::now()) });
+        // whose voice (the speaker check, when it is on): after the segment's last decode, so the words are not kept waiting for it
+        let voice = (self.live && samples.len() as f64 >= SR && crate::resident::SPEAKER.load(std::sync::atomic::Ordering::Relaxed)).then(|| samples.clone());
+        self.send(Job::Done { item: item.clone(), from, samples, min: 0.2, speech_end: Some(Instant::now()) });
+        if let Some(samples) = voice { self.send(Job::Voice { item, samples }) }
     }
 
     fn on_reply(&mut self, r: Reply) {

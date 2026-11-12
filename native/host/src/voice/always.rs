@@ -25,7 +25,7 @@ impl Cfg {
     pub fn of(p: &Prefs) -> Cfg {
         let get = |k: &str| p.get(k).map_or("", String::as_str);
         Cfg { ignore: get(IGNORE).split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect(), on: get(ON) == "on", gate: Gate { min_words: get(WORDS).parse().unwrap_or(1).clamp(1, 5), min_ms: get(SPEECH_MS).parse().unwrap_or(0).min(3000), min_p: MIN_P },
-            speaker: get(SPEAKER) != "off", pause_call: get(PAUSE_CALL) != "off", pause_lock: get(PAUSE_LOCK) != "off", pause_away: get(PAUSE_AWAY) == "on",
+            speaker: get(SPEAKER) == "on", pause_call: get(PAUSE_CALL) != "off", pause_lock: get(PAUSE_LOCK) != "off", pause_away: get(PAUSE_AWAY) == "on",
             target: if get(TARGET) == "bub" { "bub".into() } else { "open".into() } }
     }
 }
@@ -93,7 +93,7 @@ mod tests {
         assert_eq!(resolve("export", &t), Some("t3")); assert_eq!(resolve("so", &t), None); assert_eq!(resolve("", &t), None);
     }
     #[test] fn settings() {
-        let c = Cfg::of(&Prefs::new()); assert!(!c.on && c.speaker && c.pause_call && c.pause_lock && !c.pause_away); assert_eq!((c.gate.min_words, c.gate.min_ms, c.target.as_str()), (1, 0, "open"));
+        let c = Cfg::of(&Prefs::new()); assert!(!c.on && !c.speaker && c.pause_call && c.pause_lock && !c.pause_away); assert_eq!((c.gate.min_words, c.gate.min_ms, c.target.as_str()), (1, 0, "open"));
         let c = Cfg::of(&[(ON, "on"), (WORDS, "2"), (SPEECH_MS, "400"), (TARGET, "bub")].iter().map(|(k, v)| (k.to_string(), v.to_string())).collect()); assert!(c.on); assert_eq!((c.gate.min_words, c.gate.min_ms, c.target.as_str()), (2, 400, "bub"));
     }
 }

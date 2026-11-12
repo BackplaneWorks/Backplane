@@ -106,6 +106,8 @@ impl Voice {
         let (server, hold) = if engine == "local" { resident::of(&home).and_then(|r| r.server(&home, &model)).map_or((String::new(), None), |(p, h)| (p, Some(h))) } else { (String::new(), None) };
         let mut cmd = proc::tokio_cmd(if engine == "local" { Kind::Local } else { Kind::Net }, &bin);
         let mut args = live_args(&home, engine, &model, upload, &device, &server); if always { args.push("--always".into()) }
+        // the speaker check (off unless turned on): only then does the helper hear whose voice each segment is
+        let speaker_on = super::always::Cfg::of(&pr).speaker; if speaker_on && engine == "local" { args.push("--speaker".into()) }
         cmd.args(args).current_dir("/").stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).kill_on_drop(true);
         let Ok(mut child) = cmd.spawn() else { return self.fail(hub, client, &thread, NO_HELPER) };
         let (Some(mut stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else { return self.fail(hub, client, &thread, NO_HELPER) };
@@ -117,9 +119,11 @@ impl Voice {
         self.with(&thread, |x| { x.begin(); x.engine = engine.to_string(); x.always = always; });
         self.tell(hub, client, &thread);
         if upload { hub.push(client, frame(&thread, "audio", json!({"path": format!("/voice/in?s={key}")}))); }
-        let reader = Reader::new(d, engine == "local", draft, caret).with_cmds(super::cmds::Cmds::of(&pr)).with_eot(super::eot::Cfg::of(&pr));
+        let reader = Reader::new(d, engine == "local", draft, caret).with_cmds(super::cmds::Cmds::of(&pr)).with_eot(super::eot::Cfg::of(&pr))
+            .with_stt(if engine == "local" { vdict::model_id(&model) } else { "gpt-live-transcribe" });
         let ac = super::always::Cfg::of(&pr);
         let reader = if always { let r = reader.with_gate(ac.gate); if ac.speaker { r.with_speaker(super::speaker::Print::load(&home)) } else { r } } else { reader };
+        let _ = speaker_on;
         { let (v, hub, thread, engine) = (self.clone(), hub.clone(), thread.clone(), engine.to_string()); tokio::spawn(async move { let _hold = hold; v.read(hub, client, id, thread, engine, reader, child, stdout, ctl_rx, ctl_tx).await }); }
         json!({"path": if upload { format!("/voice/in?s={key}") } else { String::new() }})
     }
@@ -227,8 +231,14 @@ impl Voice {
             }
             Out::Edit(e) => { hub.push(client, frame(thread, "edit", json!({"del": e.del, "ins": e.ins, "adv": e.adv, "to": e.to, "back": e.back, "cut": r.cuts, "seq": r.seq}))); }
             // a voice command: the client sends (or steers) the draft it has now, or clears it, with its undo window; `cut` is the count it takes
-            Out::Command(c) => { hub.push(client, frame(thread, "command", json!({"cmd": c, "cut": r.cuts}))); }
-            Out::View => self.tell(hub, client, thread),
+            Out::Command(c) => {
+                // the mark the client sends it with (voice/mark.rs): always on's, else how it was ended (end of turn, a spoken command)
+                let always = self.st.lock().unwrap().live.as_ref().map_or(false, |l| l.always);
+                let mut m = r.sent_meta().cloned().unwrap_or_else(|| r.meta("command")); if always { m.via = "always".into() }
+                hub.push(client, frame(thread, "command", json!({"cmd": c, "cut": r.cuts, "voice": m.json()})));
+            }
+            // with every change of state: what is known of the draft dictated so far, for a Send by the button (voice/mark.rs)
+            Out::View => { self.tell(hub, client, thread); hub.push(client, frame(thread, "meta", json!({"voice": r.meta("dictated").json()}))); }
             Out::Route(_) => {} // the read loop moved the session to the named thread already
             Out::Level(v) => { hub.push(client, frame(thread, "level", json!({"v": v}))); }
         } }
@@ -299,6 +309,15 @@ impl Voice {
             // always on: the window's focus (for "pause while in the background"), and the thread now open (the next message goes there)
             "voice-focus" => { if let Some(a) = self.st.lock().unwrap().always.as_mut() { a.focused = s(p, "value") != "0" } return Ok(()) }
             "voice-target" => { let g = self.st.lock().unwrap(); if let Some(l) = g.live.as_ref().filter(|l| l.always) { let _ = l.ctl.send(Ctl::Target(s(p, "value").to_string())); } return Ok(()) }
+            // Undo on a message just sent by voice: still queued, it is taken out; its turn running, it stops (the words go back into the draft, the client's part)
+            "voice-undo" => {
+                let msg = s(p, "value").to_string(); let th = thread.rsplit('|').next().unwrap_or("").to_string();
+                let last = { let m = hub.model().await; m.threads.get(&th).map(|t| t.last_user_msg.clone()).unwrap_or_default() };
+                let caller = Caller { gen: String::new(), client };
+                if let Some(h) = hub.rpc_for("queue.remove") { let _ = h.call(hub, &caller, &json!(0), "queue.remove", &json!({"thread": th, "msg": msg})).await; }
+                if last == msg { if let Some(h) = hub.rpc_for("turn.interrupt") { let _ = h.call(hub, &caller, &json!(0), "turn.interrupt", &json!({"thread": th})).await; } }
+                return Ok(())
+            }
             // Keep talking, in an end-of-turn countdown
             "voice-hold" => { let g = self.st.lock().unwrap(); if let Some(l) = g.live.as_ref().filter(|l| l.thread == thread) { let _ = l.ctl.send(Ctl::Hold); } return Ok(()) }
             // Undo of a voice send: when it was an end-of-turn send a moment ago, the threshold learns to wait a little more (only here, never sent)
@@ -319,6 +338,7 @@ impl Voice {
         match action {
             "setting" => {
                 let (k, v) = value.split_once('=').unwrap_or((value, "")); if !k.starts_with("voice.") { return Err("not a voice setting".into()) } commit(hub, &[(k.to_string(), v.to_string())]).await?; if let Some(r) = resident::of(&hub.cfg.home) { r.kick() }
+                if k == super::always::SPEAKER && v == "on" { if let Some(r) = resident::of(&hub.cfg.home) { r.may_fetch() } }
                 // always on turned on: this client starts it in its open thread; off: it stops
                 if k == super::always::ON { if v == "on" { hub.push(client, frame("", "always", json!({"want": true}))); } else { self.stop(); self.st.lock().unwrap().always = None; hub.push(client, frame("", "always", json!({"want": false}))); } }
             }

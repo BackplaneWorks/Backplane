@@ -2,6 +2,8 @@
 pub mod always;
 pub mod cmds;
 pub mod dictation;
+/// Spoken messages' wrapper: compiled with the model (model.rs `voice_mark`), which the tools that read the log include alone.
+pub use crate::model::voice_mark as mark;
 pub mod eot;
 pub mod jev;
 pub mod page;

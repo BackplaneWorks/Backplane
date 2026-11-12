@@ -102,6 +102,10 @@ impl Bots {
         let z = super::clock::Zones { settings: &w.settings }; let said = n.recorded_ms / 1000;
         let when = z.rule_of("person").map_or_else(|| format!("{said} (unix time)"), |r| r.show(said));
         let text = ringbox::message(n, &when); let mid = self.hub_id("m", now);
+        // a spoken message like any other (voice/mark.rs): the agent is told to doubt it, every client draws its mic
+        let text = match n.best().filter(|_| !n.words().is_empty()) {
+            Some(h) => crate::voice::mark::wrap(&text, &crate::voice::mark::Meta { via: "ring".into(), stt: h.model.clone(), conf: h.conf.map(|c| c as f64 / 100.0), doubt: vec![], edited: false }),
+            None => text };
         let woke = self.hub.commit_many(&[json!({"$":"BotWoke","bot":bot,"hop":0,"at":now})]).await.map_err(|e| format!("{e:#}"));
         drop(w); woke?;
         self.inbox_deliver_raw(&th, &mid, &text, None).await?;

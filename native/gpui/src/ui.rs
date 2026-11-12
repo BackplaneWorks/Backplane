@@ -218,7 +218,8 @@ impl Backplane {
                 let cards = ref_cards(cx, light, &id, &e["refs"]);
                 // r05: a follow-up the agent has not read yet: its text a step dimmer, its time ("not read yet · 06:13") in the queued colour
                 let unread = e["unread"] == true;
-                let stamp_row = div().flex().justify_end().items_center().gap_3().text_size(px(11.)).text_color(c("faint")).child(tools).child(div().when(unread, |d| d.text_color(c("queued"))).child(crate::i18n::trs(&stamp)));
+                let spoken = crate::screens::voice::bubble_mark(cx, light, &self.screens.voice, &id, &e["voice"]);
+                let stamp_row = div().flex().justify_end().items_center().gap_3().text_size(px(11.)).text_color(c("faint")).children(spoken).child(tools).child(div().when(unread, |d| d.text_color(c("queued"))).child(crate::i18n::trs(&stamp)));
                 let body = div().when(unread, |d| d.opacity(0.7)).child(body);
                 let reply_to = e["replyTo"].is_object().then(|| {
                     let (target, quote) = (string(&e["replyTo"], "id"), string(&e["replyTo"], "quote"));

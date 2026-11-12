@@ -85,6 +85,11 @@ final class VoiceModel {
     /// An end-of-turn countdown running (the hub's `countdown`): the hub sends when it ends unless more is said or Keep talking is pressed.
     private(set) var countdown: (thread: String, until: Date)?
     @ObservationIgnored private var nextPending = 0
+    /// What the hub knows of each thread's dictated draft (its `meta` frame), and whether the person typed in it since.
+    @ObservationIgnored private var meta: [String: [String: Any]] = [:]
+    @ObservationIgnored private var typedIn: Set<String> = []
+    /// The message just sent by voice (its thread, client id, words, when): its bubble offers Undo for a moment.
+    private(set) var recent: (thread: String, cid: String, text: String, at: Date)?
     /// Always on (the hub's always.rs), while the app is open: this phone runs it; Settings has it on; why it is paused; the thread open now.
     private(set) var always = false
     private(set) var alwaysWanted = false
@@ -156,6 +161,7 @@ final class VoiceModel {
     /// The person typed (or the draft was set by something else): the mark moves with what changed before it.
     func typed(_ thread: String, old: String, new: String) {
         if let m = marks[thread] { marks[thread] = VoiceEdit.shift(old, new, mark: m) }
+        if meta[thread] != nil { typedIn.insert(thread) }
     }
     func resync() async {
         guard let client else { return }
@@ -177,7 +183,7 @@ final class VoiceModel {
             views[thread] = view
             if !view.on { marks[thread] = nil; cuts[thread] = nil; seqs[thread] = nil; level = 0; if active == thread { recorder.gone(); active = nil } }
             // hold-to-talk let go: the session ended with its last words written; the draft goes, with the undo window
-            if !view.on && sendsOnEnd.remove(thread) != nil { command(thread, cmd: "send", cut: 0) }
+            if !view.on && sendsOnEnd.remove(thread) != nil { var v = meta[thread] ?? [:]; v["via"] = "hold"; command(thread, cmd: "send", cut: 0, o: ["voice": v]) }
         case "level": level = max(0, min(100, n("v")))
         case "edit":
             if let c = o["cut"] as? Int, c < (cuts[thread] ?? 0) { return } // made before this phone's send: it belongs to nothing now
@@ -193,7 +199,7 @@ final class VoiceModel {
             if let m = marks[thread] { marks[thread] = VoiceEdit.shift(old, new, mark: m) }
             client.putDraft(thread, new)
             caret = (thread, VoiceEdit.count(new), caret.rev + 1)
-        case "command": countdown = nil; command(thread, cmd: o["cmd"] as? String ?? "", cut: n("cut"))
+        case "command": countdown = nil; command(thread, cmd: o["cmd"] as? String ?? "", cut: n("cut"), o: o)
         case "always":
             alwaysWanted = o["want"] as? Bool ?? false
             if alwaysWanted, o["running"] as? Bool != true, !always { alwaysStart() } else if !alwaysWanted { always = false; alwaysPaused = "" }
@@ -203,6 +209,7 @@ final class VoiceModel {
                 Task { if !recorder.active { _ = await recorder.begin(link: link) }; active = thread; recorder.address(path: path) }
             }
         case "countdown": countdown = n("ms") > 0 ? (thread, Date().addingTimeInterval(Double(n("ms")) / 1000)) : nil
+        case "meta": meta[thread] = o["voice"] as? [String: Any]
         case "page": setRows(o["rows"])
         default: break
         }
@@ -238,13 +245,41 @@ final class VoiceModel {
     // MARK: voice commands
     /// The hub's `command` frame: the whole draft is taken now (dictation goes on into the empty draft), and sent (or dropped, for cancel) after
     /// the undo window. A send goes as the Send button's does: turn.start, which steers a running turn.
-    private func command(_ thread: String, cmd: String, cut: Int) {
+    /// The mark a dictated message goes with: the hub's (`base`, or its last `meta`), "edited" when the person typed in it.
+    private func voiceOf(_ thread: String, base: [String: Any]?) -> [String: Any] {
+        var v = base ?? meta[thread] ?? [:]; if typedIn.remove(thread) != nil { v["edited"] = true }; meta[thread] = nil; return v
+    }
+    /// The Send button on a dictated draft: it goes marked as spoken. Nil when the draft is not dictated.
+    func dictated(_ thread: String) -> [String: Any]? {
+        guard let m = meta[thread], m["conf"] is Double || m["conf"] is Int else { return nil }
+        var v = voiceOf(thread, base: m); v["via"] = "button"; return v
+    }
+    /// Undo on the bubble of a message just sent by voice: the hub takes it back (out of the queue, or its turn stopped) and its words return to the draft.
+    func unsend() {
+        guard let client, let r = recent else { return }
+        recent = nil
+        Task { _ = try? await client.call("voice.act", ["thread": r.thread, "action": "voice-undo", "value": r.cid, "draft": ""], as: DEmpty.self) }
+        Task { _ = try? await client.call("voice.act", ["thread": r.thread, "action": "voice-undid", "value": "send", "draft": ""], as: DEmpty.self) }
+        let now = client.drafts[r.thread] ?? ""
+        let u = VoiceEdit.undo(r.text, now, mark: marks[r.thread] ?? 0)
+        client.putDraft(r.thread, u.text); if marks[r.thread] != nil { marks[r.thread] = u.mark }
+        caret = (r.thread, VoiceEdit.count(u.text), caret.rev + 1)
+    }
+    private func command(_ thread: String, cmd: String, cut: Int, o: [String: Any] = [:]) {
         guard let client, cmd == "send" || cmd == "cancel" else { return }
         cuts[thread] = max(cuts[thread] ?? 0, cut); marks[thread] = 0
         if let p = pending { deliver(p.id) }
         let text = client.drafts[thread] ?? ""
         guard !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         client.putDraft(thread, ""); caret = (thread, 0, caret.rev + 1)
+        if cmd == "send" {
+            // it goes now, shown at once like a typed message; Undo is on its bubble for a moment
+            var v = voiceOf(thread, base: o["voice"] as? [String: Any])
+            if v["via"] == nil { v["via"] = "command" }
+            let cid = client.send(thread, text, voice: v); recent = (thread, cid, text, Date())
+            Task { @MainActor [weak self] in try? await Task.sleep(nanoseconds: 4_000_000_000); if self?.recent?.cid == cid { self?.recent = nil } }
+            return
+        }
         nextPending += 1; let id = nextPending
         pending = Pending(id: id, thread: thread, text: text, cmd: cmd)
         Task { @MainActor [weak self] in try? await Task.sleep(nanoseconds: 3_000_000_000); self?.deliver(id) }

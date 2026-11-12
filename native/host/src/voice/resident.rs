@@ -64,6 +64,8 @@ impl Resident {
         let p = sock_path(home)?; self.busy.fetch_add(1, Ordering::SeqCst);
         Some((p.to_string_lossy().into_owned(), Hold(self.clone())))
     }
+    /// The speaker check was turned on: its model may be fetched now (the one try a run allows is given back).
+    pub fn may_fetch(&self) { self.st.lock().unwrap().turn_tried = false; self.kick() }
     /// Look again now (a voice setting changed, a model was installed or removed).
     pub fn kick(&self) { self.kick.notify_one() }
     /// What Settings shows: `{"state": "off|loading|loaded|held", "model", "rss_mb", "ms"}`.
@@ -90,7 +92,9 @@ impl Resident {
         let want = Self::wanted(hub).await;
         // the end-of-turn model (native/voice/src/turn.rs) came after many installs: fetched once, then the server starts again to load it
         // the speaker model (always-on's speaker check, and learning the voiceprint from dictation) likewise
-        let missing: Vec<&str> = [("smart-turn-v3.2-cpu.onnx", "local-turn"), ("nemo_en_titanet_small.onnx", "local-speaker")].iter().filter(|(f, _)| !hub.cfg.home.join("voice/local").join(f).exists()).map(|x| x.1).collect();
+        // (the speaker model only when the speaker check is turned on: it is off unless asked for)
+        let speaker = super::always::Cfg::of(&session::prefs(hub).await).speaker;
+        let missing: Vec<&str> = [("smart-turn-v3.2-cpu.onnx", "local-turn", true), ("nemo_en_titanet_small.onnx", "local-speaker", speaker)].iter().filter(|(f, _, w)| *w && !hub.cfg.home.join("voice/local").join(f).exists()).map(|x| x.1).collect();
         if want.is_some() && !missing.is_empty() && !std::mem::replace(&mut self.st.lock().unwrap().turn_tried, true) {
             if let Some(bin) = session::exe() {
                 let (me, dir) = (self.clone(), hub.cfg.home.join("voice/local"));

@@ -137,9 +137,14 @@ message sends itself; a thinking pause, "and…" or "um" keeps listening, howeve
    model's probability and the thread's last reply. The key is read from the vault when the request goes and
    passed to curl in a 0600 file that is removed after; nothing is cached. Over 400 ms, failing or off: the audio
    model decides alone. No model at all: a full stop and 2 s of silence.
-3. At or over the threshold (0.65 by default; Eager 0.50 to Patient 0.85) the client shows "Sending…" with
-   Keep talking for 1.5 s (a little longer when patient); new speech or Keep talking cancels it; then the hub
-   cuts the transcript and the message goes with the usual 3 s undo window (`command`).
+3. The countdown starts at the pause itself (the `turn` event) when the audio model says done, and Jev is
+   asked at that moment alongside: its "not done" (under the threshold) stops the countdown, its "done" starts
+   one the audio model did not. The segment's last decode lands while it runs. At or over the threshold (0.65
+   by default; Eager 0.50 to Patient 0.85) the client shows "Sending…" with Keep talking for 1 s (a little
+   longer when patient); new speech or Keep talking cancels it; when it ends the hub cuts the transcript and
+   the client posts the message at once (`command`), shown in the thread like a typed one. Undo is on that
+   message's bubble for 4 s: it takes the message back (out of the queue, or its turn stopped) and its words
+   return to the draft. There is no second "Sending…".
 4. Learning, on the hub only: each end-of-turn send counts; an Undo within 15 s of one (`voice-undid`) makes the
    threshold 0.02 more patient (at most +0.15), each kept send 0.002 less (at most −0.05)
    (`voice.eot.learned`, Reset learning in Settings).
@@ -198,7 +203,8 @@ starts:
 Idle cost on this desktop (2026-11-11, 30 s of quiet, the resident recognizer already loaded): the helper 0.33 %
 of one core and 41 MB, pw-record 0.1 % and 9 MB.
 
-- **Speaker check** (on by default; `voice/speaker.rs`). Only the person's voice starts a message. The helper
+- **Speaker check** (off by default, the person's call 2026-11-11; `voice/speaker.rs`). Off, nothing of it is
+  fetched or loaded: always-on relies on the real-word gate and the Stop pill. On: Only the person's voice starts a message. The helper
   gives each live segment of a second or more its embedding (NeMo TitaNet small, 40 MB, CC-BY-4.0 like
   NVIDIA's TitaNet cards: worth a look before it ships on; `local-speaker` fetches it, the hub once by
   itself) as `voice` before its `done`. The voiceprint is their mean over the person's own dictation with the
@@ -231,11 +237,11 @@ must be exact ("I sent it." is words).
   the person's own phrases (`voice.cmd.send`, comma separated; `-` turns
   sending by voice off). The phrase is not written (or is taken back if it was
   already committed, an edit with `back`), the hub cuts the transcript as for a
-  Send, and sends `{"ev":"command","cmd":"send","cut":n}`. The client takes
-  the whole draft out of the box at once (dictation goes on into the empty
-  box), flashes Send, shows "Sending by voice…" with Undo, and after 3 s sends
-  it as the button does (turn.start, mode steer: it steers a running turn).
-  Undo puts the text back in front of what was dictated since.
+  Send, and sends `{"ev":"command","cmd":"send","cut":n,"voice":{…}}`. The
+  client takes the whole draft out of the box (dictation goes on into the empty
+  box), flashes Send and posts it at once as the button does (turn.start, mode
+  steer: it steers a running turn), marked as spoken; Undo is on its bubble for
+  4 s and puts the text back in front of what was dictated since.
 - Off until turned on: **scratch that** (`voice.cmd.scratch`: the last sentence
   goes), **new line** (`voice.cmd.newline`), **cancel message**
   (`voice.cmd.cancel`: the draft goes, with the same Undo), and **send after
@@ -245,6 +251,32 @@ must be exact ("I sent it." is words).
 
 An edit's `back` (characters before the mark replaced too) exists only for
 commands; every client applies it (`test/fixtures/voice-edits.json`).
+
+## Spoken messages
+
+`voice/mark.rs`. A message sent by dictation (end of turn, a spoken command, hold to talk, always on, the Send
+button on a dictated draft, a Pebble ring note) is posted with `voice` (`turn.start`, the phones'
+`message.send`): `{via, stt, conf, doubt, edited}`. The hub wraps it for the agent, every provider and every bot
+alike:
+
+```text
+<voice_message via="eot" stt="parakeet-v2" confidence="0.86" doubt="PA0; Kati" edited="no">
+Route the reset to PA0 and tell Kati.
+</voice_message>
+(Spoken and transcribed: expect transcription errors such as homophones and misheard part numbers, above all in the doubtful words. Ask if something is ambiguous.)
+```
+
+`confidence` is the mean of the engine's word probabilities, `doubt` the words under 70 %, `edited` whether the
+person typed in the draft. The log keeps the message as the agent got it; the model's rows (`model.rs`) show
+its words alone and carry the mark (`voice`) to every client, which draws a mic on the bubble (the desktop's
+hover says the engine, how sure it was, the unsure words and "edited"; the phones show the percent). The hub
+sends the client what it knows of the draft as it is dictated (`meta`), so a Send by the button is marked too.
+
+Timings on this desktop (2026-11-11), from the end of speech: the segment closes at ~480 ms (the VAD's half
+second); the countdown starts there, and the final decode (~110 ms) and Jev (~140 ms) run inside it; the
+countdown is 1000 ms; then the message is shown at once and the hub has it ~10 ms later (turn.start answered in
+7–11 ms). Before: Jev waited for the final decode, the countdown was 1500 ms and a 3000 ms undo window held the
+message back ("Sending by voice…"), so the message came 3 s or more after the countdown ended.
 
 ## The dictionary
 

@@ -9,7 +9,7 @@ of silence. Generated on 2026-11-11 for `tests/local_e2e.rs`; no person's voice.
 
 Smart Turn v3.2 through the helper (turn.rs) on this desktop: 0.99, 0.01 and 0.01.
 
-Speaker check (`the_speaker_model_tells_the_enrolled_voice_from_others`), the same Kokoro-82M, no trailing silence:
+Speaker check (`the_speaker_model_tells_the_enrolled_voice_from_others`; the check is off by default and only runs with `--speaker`), the same Kokoro-82M, no trailing silence:
 
 - `speaker-a1..a3.wav` (voice `af_heart`): the enrolment; `speaker-a4.wav`: the same voice, another sentence: must match.
 - `speaker-tv-m.wav` (`am_adam`, "The weather tonight will be cloudy with a chance of rain.") and `speaker-tv-f.wav` (`bf_emma`, "And now, back to

@@ -100,7 +100,7 @@ object DataVoice {
         if (hasFixes(tid)) act(tid, "voice-clear", "")
     }
     /** The person typed: the mark moves with what changed before it. */
-    fun typed(tid: String, old: String, new: String) { marks[tid]?.let { marks[tid] = VoiceText.shift(old, new, it) } }
+    fun typed(tid: String, old: String, new: String) { marks[tid]?.let { marks[tid] = VoiceText.shift(old, new, it) }; if (meta.containsKey(tid)) typedIn.add(tid) }
 
     /** After opening a thread or a reconnect: what the hub shows now. */
     suspend fun refresh(tid: String) {
@@ -113,7 +113,7 @@ object DataVoice {
         if (!v.optBoolean("on")) { if (recorder.thread == tid) recorder.gone(); ended(tid) }
         show(tid, v)
         // hold-to-talk let go: the session ended with its last words written; the draft goes, with the undo window
-        if (!v.optBoolean("on") && sendOnEnd.remove(tid)) command(tid, "send", 0)
+        if (!v.optBoolean("on") && sendOnEnd.remove(tid)) command(tid, "send", 0, JSONObject((meta[tid] ?: JSONObject()).toString()).put("via", "hold"))
     }
     private val sendOnEnd = HashSet<String>(); private var holdStarted: String? = null
     /** Always on (the hub's always.rs), while the app is open: this phone runs it; Settings has it on; why it is paused; the thread open now. */
@@ -121,6 +121,24 @@ object DataVoice {
     var alwaysWanted by mutableStateOf(false); private set
     var alwaysPaused by mutableStateOf(""); private set
     private var openThread = ""; private var resumeAlways = false
+    /** What the hub knows of each thread's dictated draft (its `meta` frame), and whether the person typed in it since. */
+    private val meta = HashMap<String, JSONObject>(); private val typedIn = HashSet<String>()
+    /** The message just sent by voice (thread, client id, words): its bubble offers Undo for a moment. */
+    data class Recent(val tid: String, val cid: String, val text: String)
+    var recent by mutableStateOf<Recent?>(null); private set
+    /** The mark a dictated message goes with: the hub's (`base`, or its last `meta`), "edited" when the person typed in it. */
+    private fun voiceOf(tid: String, base: JSONObject?): JSONObject { val v = JSONObject((base ?: meta[tid] ?: JSONObject()).toString()); if (typedIn.remove(tid)) v.put("edited", true); meta.remove(tid); return v }
+    /** The Send button on a dictated draft: it goes marked as spoken. Null when the draft is not dictated. */
+    fun dictated(tid: String): JSONObject? { val m = meta[tid] ?: return null; if (!m.has("conf") || m.isNull("conf")) return null; return voiceOf(tid, m).put("via", "button") }
+    /** Undo on the bubble of a message just sent by voice: the hub takes it back (out of the queue, or its turn stopped) and its words return to the draft. */
+    fun unsend() {
+        val r = recent ?: return; recent = null
+        scope.launch { runCatching { DataClient.call("voice.act", JSONObject().put("thread", r.tid).put("action", "voice-undo").put("value", r.cid).put("draft", "")) } }
+        scope.launch { runCatching { DataClient.call("voice.act", JSONObject().put("thread", r.tid).put("action", "voice-undid").put("value", "send").put("draft", "")) } }
+        val (t, m) = VoiceText.undo(r.text, DataClient.field(r.tid).text, marks[r.tid] ?: 0)
+        if (marks.containsKey(r.tid)) marks[r.tid] = m
+        DataClient.setField(r.tid, TextFieldValue(t, TextRange(t.length)), typed = false)
+    }
     /** The app connected: the hub says whether always-on is wanted (its `always` frame starts it). */
     fun connected() { if (available) scope.launch { runCatching { DataClient.call("voice.always") } } }
     /** The thread the person has open ("" none): the next message goes there (Bub's chat when none). */
@@ -170,7 +188,8 @@ object DataVoice {
                 marks[tid]?.let { marks[tid] = VoiceText.shift(old, new, it) }
                 DataClient.setField(tid, TextFieldValue(new, TextRange(new.length)), typed = false)
             }
-            "command" -> { countdown = null; command(tid, o.optString("cmd"), o.optInt("cut")) }
+            "command" -> { countdown = null; command(tid, o.optString("cmd"), o.optInt("cut"), o.optJSONObject("voice")) }
+            "meta" -> o.optJSONObject("voice")?.let { meta[tid] = it }
             "countdown" -> countdown = if (o.optInt("ms") > 0) tid else null
             "always" -> { alwaysWanted = o.optBoolean("want"); if (alwaysWanted && !o.optBoolean("running") && !always) alwaysStart() else if (!alwaysWanted) { always = false; alwaysPaused = "" } }
             // always on started again by the hub: the microphone goes on into the new session
@@ -190,12 +209,19 @@ object DataVoice {
     private var nextPending = 0
     /** The hub's `command` frame: the whole draft is taken now (dictation goes on into the empty draft), and sent (or dropped, for cancel) after the
      *  undo window. A send goes as the Send button's does: turn.start, which steers a running turn. */
-    private fun command(tid: String, cmd: String, cut: Int) {
+    private fun command(tid: String, cmd: String, cut: Int, voice: JSONObject? = null) {
         if (cmd != "send" && cmd != "cancel") return
         cuts[tid] = maxOf(cuts[tid] ?: 0, cut); marks[tid] = 0
         pending?.let { deliver(it.id) }
         val text = DataClient.field(tid).text; if (text.isBlank()) return
         DataClient.setField(tid, TextFieldValue(""), typed = false)
+        if (cmd == "send") {
+            // it goes now, shown at once like a typed message; Undo is on its bubble for a moment
+            val v = voiceOf(tid, voice); if (!v.has("via")) v.put("via", "command")
+            val cid = DataClient.send(tid, text, voice = v); val r = Recent(tid, cid, text); recent = r
+            scope.launch { delay(4000); if (recent == r) recent = null }
+            return
+        }
         val id = ++nextPending; pending = Pending(id, tid, text, cmd)
         scope.launch { delay(3000); deliver(id) }
     }

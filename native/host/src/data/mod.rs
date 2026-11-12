@@ -238,6 +238,7 @@ fn row_entry_hid(r: &crate::model::Row, bot: bool, backend: &HashSet<String>) ->
         if kind == "assistant" && r.text.trim().is_empty() { return None }
         let mut en = json!({"id":r.id,"kind":kind,"text":if kind == "user" { shown_text(&r.text) } else { crate::settings::order::pay_shown(&r.text) },"at":at});
         // a reply (`<in_reply_to>` block, bots/reply.rs): its body as the text and the message it answers, as the desktop draws it (present/thread.rs)
+        if let Some(v) = r.akind.strip_prefix("voice").and_then(|j| serde_json::from_str::<Value>(j).ok()) { en["voice"] = v }
         if kind == "user" { if let Some((to, quote, body)) = crate::bots::reply::of(&r.text) {
             en["text"] = json!(shown_text(&body)); en["replyTo"] = json!({"id": to, "quote": quote.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("")}); } }
         if crate::present::thread::hidden(bot, &r.id, &r.role, &r.text) || (bot && backend.contains(&r.id)) { en["agentOnly"] = json!(true) }
@@ -359,7 +360,7 @@ fn store_attachments(hub: &Hub, thread: &str, list: &Value) -> Result<(Vec<Value
     }
     Ok((meta, paths))
 }
-async fn send_message(hub: &Arc<Hub>, c: &mut Conn, thread: &str, text: &str, client_id: &str, attachments: &Value) -> Result<Value, Value> {
+async fn send_message(hub: &Arc<Hub>, c: &mut Conn, thread: &str, text: &str, client_id: &str, attachments: &Value, voice: &Value) -> Result<Value, Value> {
     let has = attachments.as_array().map_or(false, |a| !a.is_empty());
     if text.trim().is_empty() && !has { return Err(err("empty message")) }
     // a command of the composer is never a message: an app that does not know `composer.run` would post a side question to the thread, or a secret to the log
@@ -373,8 +374,10 @@ async fn send_message(hub: &Arc<Hub>, c: &mut Conn, thread: &str, text: &str, cl
     let msg = if client_id.is_empty() { format!("m{}-{}", now_ms(), hub.fresh_client()) } else { client_id.to_string() };
     let mut p = json!({"thread":thread,"text":text,"msg":msg});
     if !meta.is_empty() { p["attachments"] = json!(meta); p["agentText"] = json!(agent_text) }
+    if voice.is_object() { p["voice"] = voice.clone() } // dictated (voice/mark.rs): the agent is told
     rpc(hub, c, "turn.start", p).await?;
     let mut e = json!({"id":msg,"kind":"user","text":text,"at":now_ms()});
+    if voice.is_object() { e["voice"] = voice.clone() }
     if !meta.is_empty() { e["attachments"] = json!(meta) }
     if !client_id.is_empty() { e["clientId"] = json!(client_id); remember(client_id, &e) }
     Ok(e)
@@ -484,12 +487,12 @@ async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Result<Value,
             rpc(hub, c, "thread.modes", json!({"thread":id,"runtime":runtime})).await?;
             if !s(p, "effort").is_empty() { rpc(hub, c, "thread.effort", json!({"thread":id,"effort":s(p, "effort")})).await?; }
             // (a thread just made on a linked machine is not in the mirror yet: its first message goes straight there)
-            if !s(p, "text").is_empty() { if far { rpc(hub, c, "turn.start", json!({"thread":id,"text":s(p, "text"),"msg":format!("m{}-{}", now_ms(), hub.fresh_client())})).await?; } else { send_message(hub, c, &id, s(p, "text"), "", &Value::Null).await?; } }
+            if !s(p, "text").is_empty() { if far { rpc(hub, c, "turn.start", json!({"thread":id,"text":s(p, "text"),"msg":format!("m{}-{}", now_ms(), hub.fresh_client())})).await?; } else { send_message(hub, c, &id, s(p, "text"), "", &Value::Null, &Value::Null).await?; } }
             let g = hub.model().await; let asks = open_ask_counts(hub);
             if far { return Ok(json!({"thread":far_made(hub, &g, &id, project, s(p, "title"))})) }
             thread_json(hub, &g, &id, &asks).map(|t| json!({"thread":t})).ok_or_else(|| err("no thread was made"))
         }
-        "message.send" => Ok(json!({"entry":send_message(hub, c, s(p, "thread"), s(p, "text"), s(p, "clientId"), p.get("attachments").unwrap_or(&Value::Null)).await?})),
+        "message.send" => Ok(json!({"entry":send_message(hub, c, s(p, "thread"), s(p, "text"), s(p, "clientId"), p.get("attachments").unwrap_or(&Value::Null), p.get("voice").unwrap_or(&Value::Null)).await?})),
         "attachment.get" => attachment_get(hub, p),
         "ask.answer" => { rpc(hub, c, "ask.answer", json!({"id":s(p, "ask"),"answer":s(p, "answer")})).await?; Ok(json!({})) }
         // the same answer every client gets (its `result`, not the reply around it); the phones draw it
@@ -562,7 +565,9 @@ async fn deltas(hub: &Hub, lines: &[String], subs: &mut Subs) -> Vec<Value> {
                 let (id, role) = (s(&e, "msg"), s(&e, "role"));
                 let kind = match role { "user" => "user", "assistant" => "assistant", _ => "note" };
                 // as a page has it: a quote's Buy now link ready to open, and the hub's note to the agent marked so no phone shows it
-                let mut en = json!({"id":id,"kind":kind,"text":if kind == "user" { shown_text(s(&e, "text")) } else { crate::settings::order::pay_shown(s(&e, "text")) },"at":ms(e["at"].as_u64().unwrap_or(0))});
+                let (said, voice) = crate::voice::mark::split(s(&e, "text"));
+                let mut en = json!({"id":id,"kind":kind,"text":if kind == "user" { shown_text(&said) } else { crate::settings::order::pay_shown(&said) },"at":ms(e["at"].as_u64().unwrap_or(0))});
+                if let Some(v) = voice { en["voice"] = v.json() }
                 let bot = bot_chat(&th);
                 let backend = bot && {
                     if !last_in.contains_key(&th) { let m = hub.model().await; let rows: Vec<crate::model::Row> = m.tail(&hub.store, &th, 48).into_iter().filter(|r| r.seq <= base).collect(); last_in.insert(th.clone(), crate::present::thread::turn_of(&rows)); }
