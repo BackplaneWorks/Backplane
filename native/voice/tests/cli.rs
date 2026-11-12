@@ -575,7 +575,8 @@ fn local_status_and_remove_report_the_folder() {
     assert_eq!(r.done(), 0);
     let e = &r.events()[0];
     let keys: Vec<&String> = e.as_object().unwrap().keys().collect();
-    assert_eq!(keys, vec!["event", "platform", "supported", "runtime", "vad", "vadBundled", "models", "bytes"]);
+    assert_eq!(keys, vec!["event", "platform", "supported", "runtime", "vad", "vadBundled", "turn", "models", "bytes"]);
+    assert_eq!(e["turn"], json!(false), "no end-of-turn model fetched");
     assert_eq!(e["vadBundled"], json!(false), "no release copy beside a test build");
     assert_eq!((&e["event"], &e["vad"], &e["runtime"], &e["bytes"]), (&json!("local"), &json!(true), &json!(false), &json!(643854)));
     assert_eq!(e["models"][0], json!({"id": "parakeet-v2", "label": "Parakeet TDT 0.6B v2 (English)", "size": 482440461, "installed": false}));

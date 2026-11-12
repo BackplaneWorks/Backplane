@@ -124,6 +124,47 @@ did not go and they are written at the end). Nov 11: a send mid-sentence put
 the last word, "stuff.", at the start of the next draft, the uncommitted tail
 being committed into the empty box.
 
+## End of turn
+
+`voice/eot.rs`, `voice/jev.rs`, the helper's `turn.rs`. When the person stops after a finished thought the
+message sends itself; a thinking pause, "and…" or "um" keeps listening, however long.
+
+1. At each pause that closes a segment (≥ 0.5 s of quiet) the helper's end-of-turn model gives a probability
+   from the audio (`turn`), before the segment's last decode.
+2. With that segment written, the hub asks **Jev** (TypeSafe's System One model) when Settings, Voice, End of
+   turn: Jev is on and its key is in the vault (`typesafe-api-key`): one Noul, "The speaker has finished their
+   message and is ready to send it", with the draft so far (only the current draft), the pause, the audio
+   model's probability and the thread's last reply. The key is read from the vault when the request goes and
+   passed to curl in a 0600 file that is removed after; nothing is cached. Over 400 ms, failing or off: the audio
+   model decides alone. No model at all: a full stop and 2 s of silence.
+3. At or over the threshold (0.65 by default; Eager 0.50 to Patient 0.85) the client shows "Sending…" with
+   Keep talking for 1.5 s (a little longer when patient); new speech or Keep talking cancels it; then the hub
+   cuts the transcript and the message goes with the usual 3 s undo window (`command`).
+4. Learning, on the hub only: each end-of-turn send counts; an Undo within 15 s of one (`voice-undid`) makes the
+   threshold 0.02 more patient (at most +0.15), each kept send 0.002 less (at most −0.05)
+   (`voice.eot.learned`, Reset learning in Settings).
+
+Frames: `{"ev":"countdown","ms":1500,"by":"jev|audio|silence"}` (`ms` 0: cancelled), then `command`. Client acts:
+`voice-hold` (Keep talking), `voice-undid` (an Undo of a voice send).
+
+Measured 2026-11-11 on this desktop:
+
+| | accuracy | false sends | missed sends |
+|---|---|---|---|
+| Smart Turn v3.2 (Python reference), 873 English clips of smart-turn-data-v3.1-test (CC-BY-4.0), > 0.5 | 95.6 % | 5.9 % | 2.8 % |
+| the same model through the helper (Rust features, the bundled onnxruntime 1.28) | 95.8 % | 5.4 % | 3.0 % |
+| Parakeet's transcript alone (punctuation, trailing "and"/"um") | 83.4 % | 26.0 % | 7.0 % |
+| Jev on the words and the pause, 200 clips, ≥ 0.5 | 83 % | 18 % | 16 % |
+| Jev given the audio model's probability too, same 200 | 97.5 % | 3 % | 2 % |
+
+Jev's round trip: 137 ms median, 169–174 ms at the 90th percentile (the hub's own smoke test: 120–149 ms). Smart Turn: ~20 ms of features and
+~27 ms of model on one thread. LiveKit's turn-detector was not used: its licence allows it only inside LiveKit
+Agents. On the person's own narrations (23 min, 250 pauses, the audio model alone at 0.65, kept on this machine)
+3 of 58 mid-sentence pauses (5.2 %) would start a countdown, and 72 of 192 pauses after a full sentence (37.5 %),
+where in a narration the next sentence usually starts and cancels it. The clips in native/voice/tests/turn
+(Kokoro-82M, Apache-2.0) are the recorded-sample tests: a finished request 0.99, a thinking pause 0.03, "So I'll
+send it to Kati, and then" 0.02.
+
 ## Voice commands
 
 `voice/cmds.rs`. What is said at the very end of an utterance (the segment the

@@ -62,9 +62,11 @@ fn live_args(home: &Path, engine: &str, model: &str, upload: bool, device: &str,
 fn frame(thread: &str, ev: &str, mut body: Value) -> Value { body["t"] = json!("voice"); body["thread"] = json!(thread); body["ev"] = json!(ev); body }
 
 /// `cut`: a send while dictating, to the session's reader (Reader::cut).
-struct Live { id: u64, client: u64, thread: String, key: String, upload: bool, audio: Option<mpsc::Sender<Vec<u8>>>, stopped: Option<Instant>, cut: mpsc::UnboundedSender<(u64, u64)> }
+struct Live { id: u64, client: u64, thread: String, key: String, upload: bool, audio: Option<mpsc::Sender<Vec<u8>>>, stopped: Option<Instant>, ctl: mpsc::UnboundedSender<Ctl> }
+/// To a live session's reader: a client's send while dictating (cut, seq), Keep talking in an end-of-turn countdown, Jev's answer about a pause.
+enum Ctl { Cut(u64, u64), Hold, Jev(u64, Option<f64>) }
 #[derive(Default)]
-struct St { live: Option<Live>, dicts: HashMap<String, Dictation>, job: bool, next: u64 }
+struct St { live: Option<Live>, dicts: HashMap<String, Dictation>, job: bool, next: u64, /** when each thread's last end-of-turn send went */ auto: HashMap<String, Instant> }
 #[derive(Default)]
 pub struct Voice { st: Mutex<St> }
 
@@ -97,25 +99,34 @@ impl Voice {
         let (tx, mut rx) = mpsc::channel::<Vec<u8>>(64);
         tokio::spawn(async move { while let Some(b) = rx.recv().await { if stdin.write_all(&b).await.is_err() { break } } });
         let key = if upload { hex::encode(pairing::urandom(16)) } else { String::new() };
-        let (cut_tx, cut_rx) = mpsc::unbounded_channel();
-        let id = { let mut g = self.st.lock().unwrap(); g.next += 1; let id = g.next; g.live = Some(Live { id, client, thread: thread.clone(), key: key.clone(), upload, audio: Some(tx), stopped: None, cut: cut_tx }); id };
+        let (ctl_tx, ctl_rx) = mpsc::unbounded_channel();
+        let id = { let mut g = self.st.lock().unwrap(); g.next += 1; let id = g.next; g.live = Some(Live { id, client, thread: thread.clone(), key: key.clone(), upload, audio: Some(tx), stopped: None, ctl: ctl_tx.clone() }); id };
         self.with(&thread, |x| { x.begin(); x.engine = engine.to_string(); });
         self.tell(hub, client, &thread);
         if upload { hub.push(client, frame(&thread, "audio", json!({"path": format!("/voice/in?s={key}")}))); }
-        let reader = Reader::new(d, engine == "local", draft, caret).with_cmds(super::cmds::Cmds::of(&pr));
-        { let (v, hub, thread, engine) = (self.clone(), hub.clone(), thread.clone(), engine.to_string()); tokio::spawn(async move { let _hold = hold; v.read(hub, client, id, thread, engine, reader, child, stdout, cut_rx).await }); }
+        let reader = Reader::new(d, engine == "local", draft, caret).with_cmds(super::cmds::Cmds::of(&pr)).with_eot(super::eot::Cfg::of(&pr));
+        { let (v, hub, thread, engine) = (self.clone(), hub.clone(), thread.clone(), engine.to_string()); tokio::spawn(async move { let _hold = hold; v.read(hub, client, id, thread, engine, reader, child, stdout, ctl_rx, ctl_tx).await }); }
         json!({"path": if upload { format!("/voice/in?s={key}") } else { String::new() }})
     }
-    async fn read(self: Arc<Self>, hub: Arc<Hub>, client: u64, id: u64, thread: String, engine: String, mut r: Reader, mut child: tokio::process::Child, stdout: tokio::process::ChildStdout, mut cuts: mpsc::UnboundedReceiver<(u64, u64)>) {
+    async fn read(self: Arc<Self>, hub: Arc<Hub>, client: u64, id: u64, thread: String, engine: String, mut r: Reader, mut child: tokio::process::Child, stdout: tokio::process::ChildStdout, mut ctl: mpsc::UnboundedReceiver<Ctl>, me: mpsc::UnboundedSender<Ctl>) {
         let mut lines = BufReader::new(stdout).lines(); let mut tick = tokio::time::interval(Duration::from_secs(1));
+        // the end-of-turn countdown: when it ends, and the pause it is about
+        let mut due: Option<(tokio::time::Instant, u64)> = None;
         loop {
+            let at = due.map(|d| d.0);
             tokio::select! {
                 l = lines.next_line() => { let Ok(Some(l)) = l else { break };
-                    let outs = self.with(&thread, |d| r.step(&l, d, &engine)); self.out(&hub, client, &thread, &r, outs);
+                    let outs = self.with(&thread, |d| r.step(&l, d, &engine)); self.out(&hub, client, &thread, &r, outs, &me, &mut due).await;
                 }
-                Some((n, seq)) = cuts.recv() => { let outs = self.with(&thread, |d| r.cut(n, seq, d)); self.out(&hub, client, &thread, &r, outs); }
+                Some(c) = ctl.recv() => {
+                    let outs = match c { Ctl::Cut(n, seq) => self.with(&thread, |d| r.cut(n, seq, d)), Ctl::Hold => r.eot_hold(), Ctl::Jev(gen, p) => r.eot_answer(gen, p) };
+                    self.out(&hub, client, &thread, &r, outs, &me, &mut due).await;
+                }
+                _ = async { match at { Some(t) => tokio::time::sleep_until(t).await, None => std::future::pending().await } } => {
+                    let gen = due.take().map_or(0, |d| d.1); let outs = r.eot_fire(gen); self.out(&hub, client, &thread, &r, outs, &me, &mut due).await;
+                }
                 _ = tick.tick() => {
-                    let outs = self.with(&thread, |_| r.idle(Instant::now())); self.out(&hub, client, &thread, &r, outs);
+                    let outs = self.with(&thread, |_| r.idle(Instant::now())); self.out(&hub, client, &thread, &r, outs, &me, &mut due).await;
                     if !hub.is_attached(client) { self.close_audio(id) } // the client went away: nobody is listening to this microphone
                     let late = self.st.lock().unwrap().live.as_ref().filter(|l| l.id == id).and_then(|l| l.stopped).map_or(false, |t| t.elapsed() > STOP_LIMIT);
                     if late { let _ = child.start_kill(); }
@@ -127,9 +138,35 @@ impl Voice {
         self.with(&thread, |d| { d.idle(); if code != Some(0) && d.err.is_empty() { d.err = "the voice helper stopped".into() } });
         self.tell(&hub, client, &thread);
     }
-    /// What a reader's step gives, to the client: each edit with the session's cut count and its number (`Reader::cut`).
-    fn out(&self, hub: &Hub, client: u64, thread: &str, r: &Reader, outs: Vec<Out>) {
+    /// What a reader's step gives, to the client: each edit with the session's cut count and its number (`Reader::cut`); an end-of-turn question
+    /// goes to Jev (its answer comes back on `me`), a countdown is timed in `due`, an end-of-turn send is counted for the undo log.
+    async fn out(&self, hub: &Arc<Hub>, client: u64, thread: &str, r: &Reader, outs: Vec<Out>, me: &mpsc::UnboundedSender<Ctl>, due: &mut Option<(tokio::time::Instant, u64)>) {
         for o in outs { match o {
+            Out::Ask(a) => {
+                let cfg = super::eot::Cfg::of(&prefs(hub).await);
+                if !cfg.jev { let _ = me.send(Ctl::Jev(a.gen, None)); continue }
+                let (hub, me, th) = (hub.clone(), me.clone(), thread.rsplit('|').next().unwrap_or("").to_string());
+                tokio::spawn(async move {
+                    let last = { let m = hub.model().await; m.page(&hub.store, &th, 0, 32).ok() }.and_then(|p| p.rows.into_iter().filter(|r| r.kind == "msg" && r.role == "assistant" && r.thread == th).max_by_key(|r| r.seq)).map(|r| r.text).unwrap_or_default();
+                    let st = super::eot::state(&a.draft, a.pause_ms, a.audio, &last);
+                    // over the limit, or failing: the audio model decides alone (eot::decide)
+                    let p = match tokio::time::timeout(Duration::from_millis(super::eot::JEV_LIMIT_MS), super::jev::ask(&hub.cfg.home, &cfg.model, &st, 2)).await {
+                        Ok(Ok((p, ms))) => { hub.set_info("voice.eot.last", &json!({"by": "jev", "p": p, "ms": ms}).to_string()).await; Some(p) }
+                        Ok(Err(e)) => { eprintln!("voice: Jev: {e}"); hub.set_info("voice.eot.last", &json!({"by": "audio", "error": e}).to_string()).await; None }
+                        Err(_) => { hub.set_info("voice.eot.last", &json!({"by": "audio", "error": format!("over {} ms", super::eot::JEV_LIMIT_MS)}).to_string()).await; None }
+                    };
+                    let _ = me.send(Ctl::Jev(a.gen, p));
+                });
+            }
+            Out::Countdown(ms, by) => {
+                *due = (ms > 0).then(|| (tokio::time::Instant::now() + Duration::from_millis(ms), r.eot_counting().unwrap_or(0)));
+                hub.push(client, frame(thread, "countdown", json!({"ms": ms, "by": by})));
+            }
+            Out::AutoSent => {
+                self.st.lock().unwrap().auto.insert(thread.to_string(), Instant::now());
+                let l = super::eot::Learned::parse(&prefs(hub).await.get(super::eot::LEARNED).cloned().unwrap_or_default()).after(false);
+                let _ = commit(hub, &[(super::eot::LEARNED.to_string(), l.text())]).await;
+            }
             Out::Edit(e) => { hub.push(client, frame(thread, "edit", json!({"del": e.del, "ins": e.ins, "adv": e.adv, "to": e.to, "back": e.back, "cut": r.cuts, "seq": r.seq}))); }
             // a voice command: the client sends (or steers) the draft it has now, or clears it, with its undo window; `cut` is the count it takes
             Out::Command(c) => { hub.push(client, frame(thread, "command", json!({"cmd": c, "cut": r.cuts}))); }
@@ -148,6 +185,7 @@ impl Voice {
     /// What the hub finds out for Settings, published as info for every client.
     async fn refresh(&self, hub: &Arc<Hub>) -> Value {
         let home = hub.cfg.home.clone(); let masked = words::mask(text_of(&key_path(&home)).trim()); hub.set_info("voice.key", &masked).await;
+        hub.set_info("voice.eot.key", if super::jev::key().is_some() { "set" } else { "" }).await;
         let (mut devs, mut local) = (json!({"default": "", "devices": []}), json!({"error": "The voice helper is not installed beside Backplane."}));
         if let Some(bin) = exe() {
             let run = |args: Vec<String>| { let mut c = proc::tokio_cmd(Kind::Local, &bin); c.args(args).stdin(Stdio::null()).stderr(Stdio::null()).kill_on_drop(true); async move { tokio::time::timeout(Duration::from_secs(10), c.output()).await.ok().and_then(|r| r.ok()).map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default() } };
@@ -193,7 +231,18 @@ impl Voice {
     async fn act(&self, hub: &Arc<Hub>, client: u64, p: &Value) -> Result<(), String> {
         let thread = s(p, "thread"); let pr = prefs(hub).await;
         // a send while dictating: the words up to the client's last edit (`seq`) went with it; `cut` counts the client's sends this session
-        if let (Some(n), true) = (p["cut"].as_u64(), s(p, "action") == "voice-clear") { let g = self.st.lock().unwrap(); if let Some(l) = g.live.as_ref().filter(|l| l.thread == thread) { let _ = l.cut.send((n, p["seq"].as_u64().unwrap_or(0))); } }
+        if let (Some(n), true) = (p["cut"].as_u64(), s(p, "action") == "voice-clear") { let g = self.st.lock().unwrap(); if let Some(l) = g.live.as_ref().filter(|l| l.thread == thread) { let _ = l.ctl.send(Ctl::Cut(n, p["seq"].as_u64().unwrap_or(0))); } }
+        match s(p, "action") {
+            // Keep talking, in an end-of-turn countdown
+            "voice-hold" => { let g = self.st.lock().unwrap(); if let Some(l) = g.live.as_ref().filter(|l| l.thread == thread) { let _ = l.ctl.send(Ctl::Hold); } return Ok(()) }
+            // Undo of a voice send: when it was an end-of-turn send a moment ago, the threshold learns to wait a little more (only here, never sent)
+            "voice-undid" => {
+                let recent = self.st.lock().unwrap().auto.remove(thread).map_or(false, |t| t.elapsed() < Duration::from_secs(15));
+                if recent { let l = super::eot::Learned::parse(&pr.get(super::eot::LEARNED).cloned().unwrap_or_default()).after(true); commit(hub, &[(super::eot::LEARNED.to_string(), l.text())]).await?; }
+                return Ok(())
+            }
+            _ => {}
+        }
         let a = self.with(thread, |d| d.act(s(p, "action"), s(p, "value"), s(p, "draft"), &|k| pr.get(k).cloned().unwrap_or_default()));
         commit(hub, &a.settings).await?;
         if let Some(t) = a.draft { hub.push(client, frame(thread, "draft", json!({"text": t}))); }
@@ -205,6 +254,7 @@ impl Voice {
             "setting" => { let (k, v) = value.split_once('=').unwrap_or((value, "")); if !k.starts_with("voice.") { return Err("not a voice setting".into()) } commit(hub, &[(k.to_string(), v.to_string())]).await?; if let Some(r) = resident::of(&hub.cfg.home) { r.kick() } }
             "voice-term" => commit(hub, &page::term_settings(value)).await?,
             "voice-phrases" => commit(hub, &[page::phrases_setting(value)]).await?,
+            "voice-jev-model" => commit(hub, &[(super::eot::MODEL.to_string(), value.trim().to_string())]).await?,
             "voice-op" => { self.op(hub, client, value).await?; }
             _ => return Err("unknown voice action".into()),
         }
@@ -216,6 +266,11 @@ impl Voice {
             "status" => { self.refresh(hub).await; Ok(()) }
             "install" => self.op_job(hub, client, "local-install", m).await,
             "remove" => self.op_job(hub, client, "local-remove", m).await,
+            "jev-test" => {
+                let model = super::eot::Cfg::of(&prefs(hub).await).model; hub.set_info("voice.eot.test", "").await;
+                let v = match super::jev::test(&hub.cfg.home, &model).await { Ok(r) => json!({"results": r.iter().map(|(d, p, ms)| json!({"draft": d, "p": p, "ms": ms})).collect::<Vec<_>>()}), Err(e) => json!({"error": e}) };
+                hub.set_info("voice.eot.test", &v.to_string()).await; Ok(())
+            }
             "unkey" => { let _ = std::fs::remove_file(key_path(&hub.cfg.home)); self.refresh(hub).await; Ok(()) }
             _ => Err("unknown voice request".into()),
         }

@@ -47,13 +47,17 @@ private fun VChip(label: String, primary: Boolean = false, tag: String, press: (
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun VoiceStrip(tid: String) {
-    val p = DataVoice.pending?.takeIf { it.tid == tid }; val said = DataVoice.said?.takeIf { it.first == tid }?.second
-    val v = DataVoice.views[tid] ?: if (p != null || said != null) JSONObject() else return
+    val p = DataVoice.pending?.takeIf { it.tid == tid }; val said = DataVoice.said?.takeIf { it.first == tid }?.second; val counting = DataVoice.countdown == tid
+    val v = DataVoice.views[tid] ?: if (p != null || said != null || counting) JSONObject() else return
     val on = v.optBoolean("on"); val note = v.optString("note")
     val fixes = v.optJSONArray("fixes").objs(); val ask = v.optJSONObject("ask")
-    if (!on && note.isEmpty() && fixes.isEmpty() && ask == null && p == null && said == null) return
+    if (!on && note.isEmpty() && fixes.isEmpty() && ask == null && p == null && said == null && !counting) return
     Column(Modifier.fillMaxWidth().testTag("voice"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        if (p != null) Row(Modifier.fillMaxWidth().testTag("voice.pending"), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        if (counting) Row(Modifier.fillMaxWidth().testTag("voice.countdown"), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            DDot(dcs.primary, 8)
+            Text(Msg.voice_eot_sending, Modifier.weight(1f), color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 12.sp)
+            VChip(Msg.voice_eot_hold, true, "voice.hold") { DataVoice.hold() }
+        } else if (p != null) Row(Modifier.fillMaxWidth().testTag("voice.pending"), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             DDot(if (p.cmd == "send") dcs.primary else dcs.error, 8)
             Text(if (p.cmd == "send") Msg.voice_cmd_sending else Msg.voice_cmd_cleared, Modifier.weight(1f), color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 12.sp)
             VChip(Msg.voice_cmd_undo, true, "voice.undo") { DataVoice.undo() }

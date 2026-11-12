@@ -22,6 +22,8 @@ pub const THREADS: i32 = 4;
 const HELLO: &str = "bpv1";
 /// 20 s is the longest segment; a frame well over that is not ours.
 const MAX_SAMPLES: u32 = 16000 * 120;
+/// A frame whose count has this bit is an end-of-turn question (turn.rs), not a decode.
+const TURN_BIT: u32 = 1 << 31;
 
 /// Gives freed heap back to the system: building the recognizer leaves about
 /// 300 MB of parsing buffers behind (2026-11-10, Parakeet v2 int8).
@@ -75,6 +77,13 @@ impl Decoder for Rec {
             Rec::There(_) => vec![],
         }
     }
+    fn turn(&mut self, audio: &[f32]) -> Option<f32> {
+        #[cfg(unix)]
+        if let Rec::There(c) = self {
+            if let Ok(j) = c.turn_json(audio) { return serde_json::from_str::<serde_json::Value>(&j).ok().and_then(|v| v["p"].as_f64()).map(|p| p as f32) }
+        }
+        local_turn(audio)
+    }
 }
 
 #[cfg(unix)]
@@ -86,6 +95,21 @@ fn words(j: &str) -> Vec<Word> {
             vec![]
         }
     }
+}
+
+/// Where this process's own end-of-turn model comes from (set once, by `sherpa::engine`), and the model once loaded (None: there is none).
+static TURN_DIR: std::sync::OnceLock<std::path::PathBuf> = std::sync::OnceLock::new();
+static TURN_HERE: std::sync::Mutex<Option<Option<crate::turn::Turn>>> = std::sync::Mutex::new(None);
+pub fn turn_from(dir: &Path) { let _ = TURN_DIR.set(dir.to_path_buf()); }
+/// The model in `dir`, when it is there (runtime and pinned file).
+pub fn load_turn(dir: &Path) -> Option<crate::turn::Turn> {
+    if !local::turn_ok(dir) { return None }
+    match crate::turn::Turn::load(&local::runtime_dir(dir).join(local::onnx_library()), &local::turn_path(dir)) { Ok(t) => Some(t), Err(e) => { log(&format!("end-of-turn model: {e}")); None } }
+}
+fn local_turn(audio: &[f32]) -> Option<f32> {
+    let mut g = TURN_HERE.lock().unwrap_or_else(|e| e.into_inner());
+    if g.is_none() { *g = Some(TURN_DIR.get().and_then(|d| load_turn(d))) }
+    g.as_ref()?.as_ref()?.predict(audio).ok()
 }
 
 /// The recognizer for model ID: the server's at SERVER when it answers for
@@ -138,9 +162,12 @@ mod unix {
             Ok(Remote { s, api: api.clone(), dir: dir.to_path_buf(), model: model.to_string() })
         }
 
-        pub fn decode_json(&mut self, samples: &[f32]) -> Result<String, String> {
+        pub fn decode_json(&mut self, samples: &[f32]) -> Result<String, String> { self.ask(samples, 0) }
+        /// The end-of-turn model's answer from the server: `{"p": 0.93}`, or `{}` when it has none.
+        pub fn turn_json(&mut self, audio: &[f32]) -> Result<String, String> { self.ask(audio, TURN_BIT) }
+        fn ask(&mut self, samples: &[f32], bit: u32) -> Result<String, String> {
             let mut b = Vec::with_capacity(4 + samples.len() * 4);
-            b.extend_from_slice(&(samples.len() as u32).to_le_bytes());
+            b.extend_from_slice(&(samples.len() as u32 | bit).to_le_bytes());
             for x in samples {
                 b.extend_from_slice(&x.to_le_bytes());
             }
@@ -153,7 +180,7 @@ mod unix {
         }
     }
 
-    fn client(mut s: UnixStream, rec: &Mutex<Recognizer>, model: &str) {
+    fn client(mut s: UnixStream, rec: &Mutex<Recognizer>, turn: Option<&Mutex<crate::turn::Turn>>, model: &str) {
         let mut r = BufReader::new(match s.try_clone() {
             Ok(c) => c,
             Err(_) => return,
@@ -175,7 +202,7 @@ mod unix {
             if r.read_exact(&mut n).is_err() {
                 return;
             }
-            let n = u32::from_le_bytes(n);
+            let n = u32::from_le_bytes(n); let is_turn = n & TURN_BIT != 0; let n = n & !TURN_BIT;
             if n > MAX_SAMPLES {
                 return;
             }
@@ -185,10 +212,14 @@ mod unix {
             }
             let samples: Vec<f32> = raw.chunks_exact(4).map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]])).collect();
             drop(raw);
-            let j = rec.lock().unwrap_or_else(|e| e.into_inner()).decode_json(&samples).unwrap_or_else(|e| {
-                log(&format!("decode failed: {e}"));
-                "{}".to_string()
-            });
+            let j = if is_turn {
+                match turn.map(|t| t.lock().unwrap_or_else(|e| e.into_inner()).predict(&samples)) { Some(Ok(p)) => json!({"p": p}).to_string(), Some(Err(e)) => { log(&format!("end-of-turn model failed: {e}")); "{}".into() } None => "{}".into() }
+            } else {
+                rec.lock().unwrap_or_else(|e| e.into_inner()).decode_json(&samples).unwrap_or_else(|e| {
+                    log(&format!("decode failed: {e}"));
+                    "{}".to_string()
+                })
+            };
             let mut out = (j.len() as u32).to_le_bytes().to_vec();
             out.extend_from_slice(j.as_bytes());
             if s.write_all(&out).is_err() {
@@ -216,7 +247,8 @@ mod unix {
             use std::os::unix::fs::PermissionsExt;
             let _ = std::fs::set_permissions(&a.socket, std::fs::Permissions::from_mode(0o600));
         }
-        emit(json!({"event": "loaded", "ms": ms, "rss_kb": rss_kb(), "model": a.model}));
+        let has_turn = local::turn_ok(&dir);
+        emit(json!({"event": "loaded", "ms": ms, "rss_kb": rss_kb(), "model": a.model, "turn": has_turn}));
         let sock = a.socket.clone();
         std::thread::spawn(move || {
             let mut line = String::new();
@@ -228,10 +260,11 @@ mod unix {
             crate::out::end()
         });
         let rec: &'static Mutex<Recognizer> = Box::leak(Box::new(Mutex::new(rec)));
+        let turn: Option<&'static Mutex<crate::turn::Turn>> = load_turn(&dir).map(|t| &*Box::leak(Box::new(Mutex::new(t))));
         let model: &'static str = Box::leak(a.model.clone().into_boxed_str());
         for s in l.incoming().flatten() {
             std::thread::spawn(move || {
-                client(s, rec, model);
+                client(s, rec, turn, model);
                 trim();
             });
         }

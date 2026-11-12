@@ -82,6 +82,8 @@ final class VoiceModel {
     struct Pending { var id: Int; var thread: String; var text: String; var cmd: String }
     private(set) var pending: Pending?
     private(set) var said: (thread: String, text: String, until: Date)?
+    /// An end-of-turn countdown running (the hub's `countdown`): the hub sends when it ends unless more is said or Keep talking is pressed.
+    private(set) var countdown: (thread: String, until: Date)?
     @ObservationIgnored private var nextPending = 0
     @ObservationIgnored weak var client: DataClient?
 
@@ -91,7 +93,7 @@ final class VoiceModel {
         var v = views[thread] ?? DVoiceView()
         if v.note.isEmpty, let n = local[thread] { v.note = n; v.bad = true }
         if active == thread { v.on = true }
-        if pending?.thread == thread || (said?.thread == thread && said!.until > Date()) { return v }
+        if pending?.thread == thread || countdown?.thread == thread || (said?.thread == thread && said!.until > Date()) { return v }
         return v.showing ? v : nil
     }
     func listening(_ thread: String) -> Bool { active == thread || views[thread]?.on == true }
@@ -179,7 +181,8 @@ final class VoiceModel {
             if let m = marks[thread] { marks[thread] = VoiceEdit.shift(old, new, mark: m) }
             client.putDraft(thread, new)
             caret = (thread, VoiceEdit.count(new), caret.rev + 1)
-        case "command": command(thread, cmd: o["cmd"] as? String ?? "", cut: n("cut"))
+        case "command": countdown = nil; command(thread, cmd: o["cmd"] as? String ?? "", cut: n("cut"))
+        case "countdown": countdown = n("ms") > 0 ? (thread, Date().addingTimeInterval(Double(n("ms")) / 1000)) : nil
         case "page": setRows(o["rows"])
         default: break
         }
@@ -205,10 +208,18 @@ final class VoiceModel {
         if p.cmd == "send" { client.send(p.thread, p.text) }
         said = (p.thread, p.cmd == "send" ? "Sent by voice" : "Draft cleared by voice", Date().addingTimeInterval(2))
     }
-    /// Undo: the message stays; its text goes back in front of whatever was dictated since.
+    /// Keep talking: no end-of-turn send for this pause.
+    func hold() {
+        guard let client, let c = countdown else { return }
+        countdown = nil
+        Task { _ = try? await client.call("voice.act", ["thread": c.thread, "action": "voice-hold", "value": "", "draft": ""], as: DEmpty.self) }
+    }
+    /// Undo: the message stays; its text goes back in front of whatever was dictated since. The hub hears of it (an end-of-turn send undone teaches
+    /// its threshold to wait a little more, on the hub only).
     func undo() {
         guard let client, let p = pending else { return }
         pending = nil
+        Task { _ = try? await client.call("voice.act", ["thread": p.thread, "action": "voice-undid", "value": p.cmd, "draft": ""], as: DEmpty.self) }
         let now = client.drafts[p.thread] ?? ""
         let u = VoiceEdit.undo(p.text, now, mark: marks[p.thread] ?? 0)
         client.putDraft(p.thread, u.text); if marks[p.thread] != nil { marks[p.thread] = u.mark }
@@ -275,7 +286,13 @@ struct DVoiceStrip: View {
     var body: some View {
         if let v = client.voice.shown(thread) {
             VStack(alignment: .leading, spacing: 6) {
-                if let p = client.voice.pending, p.thread == thread {
+                if let c = client.voice.countdown, c.thread == thread, c.until > Date() {
+                    HStack(spacing: 8) {
+                        Rectangle().fill(BackplaneDesign.ok).frame(width: 8, height: 8)
+                        Text(Tr.t("Sending…")).dmono(12).foregroundStyle(BackplaneDesign.dim).frame(maxWidth: .infinity, alignment: .leading).accessibilityIdentifier("voice.countdown")
+                        Button(Tr.t("Keep talking")) { client.voice.hold() }.buttonStyle(DButton()).accessibilityIdentifier("voice.hold")
+                    }
+                } else if let p = client.voice.pending, p.thread == thread {
                     HStack(spacing: 8) {
                         Rectangle().fill(p.cmd == "send" ? BackplaneDesign.accent : BackplaneDesign.bad).frame(width: 8, height: 8)
                         Text(Tr.t(p.cmd == "send" ? "Sending by voice…" : "Draft cleared by voice")).dmono(12).foregroundStyle(BackplaneDesign.dim).frame(maxWidth: .infinity, alignment: .leading).accessibilityIdentifier("voice.pending")

@@ -266,3 +266,20 @@ fn a_resident_server_decodes_for_live_and_file_and_a_session_without_it_loads_it
     assert_eq!(srv.done(), 0);
     assert!(!Path::new(sock).exists(), "the socket is removed");
 }
+
+/// End of turn on recorded clips (tests/turn): each said live, its pause's `turn` event read. Needs the end-of-turn model in the local folder.
+#[test]
+fn the_end_of_turn_model_tells_a_finished_request_from_a_thinking_pause_and_a_mid_sentence_send_it() {
+    let Some((dir, _)) = rig() else { return };
+    if !local::turn_ok(Path::new(&dir)) { eprintln!("no end-of-turn model in {dir}: skipped (backplane-voice local-turn)"); return }
+    let here = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/turn");
+    for (clip, done) in [("finished", true), ("midthought", false), ("kati", false)] {
+        let pcm = pcm_of(&here.join(format!("{clip}.wav")));
+        let r = live_run(&dir, &here, &[], |r| { r.write(&pcm); r.write(&vec![0u8; 32000]); r.close_stdin(); });
+        let t = r.next("turn"); let p = t["p"].as_f64().unwrap(); let ms = t["ms"].as_i64().unwrap();
+        eprintln!("{clip}: p {p:.3} in {ms} ms");
+        assert_eq!(p > 0.5, done, "{clip}: {p}");
+        assert!(ms < 1000, "{clip}: {ms} ms (the first check loads the model)");
+        let at = |n: &str| r.names().iter().position(|e| e == n).unwrap(); assert!(at("turn") < at("done"), "the turn comes before the segment's last decode");
+    }
+}

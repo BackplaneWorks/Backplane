@@ -626,6 +626,7 @@ fn voice(st: &State, session: &Value, info: &Value) -> Vec<Value> {
     let p: crate::voice::page::Prefs = st.settings.iter().filter(|(k, _)| k.starts_with("voice.")).filter(|(_, v)| !v.is_empty()).map(|(k, v)| (k.clone(), v.clone())).collect();
     let mut rows = crate::voice::page::rows(&p, info, draft(session, "@f.vterm"), draft(session, "@key.err"));
     for r in rows.iter_mut().filter(|r| r["label"] == "Send by voice") { r["fields"][0]["value"] = json!(draft(session, "@f.vphrase")); }
+    for r in rows.iter_mut().filter(|r| r["label"] == "End of turn: Jev (TypeSafe)") { let d = draft(session, "@f.vjevmodel"); if !d.is_empty() { r["fields"][1]["value"] = json!(d); } }
     rows
 }
 
@@ -759,6 +760,7 @@ pub fn act(hub: &str, session: &Value, action: &str, value: &str) -> Option<Out>
             send(session, hub, m, p, &mut cmds, &mut rid);
             if action == "ring-search" && value == "clear" { json!({"drafts": {"@f.ringq": ""}}) } else { json!({}) }
         }
+        "voice-jev-model" => { send(session, hub, "setting.set", json!({"key": crate::voice::eot::MODEL, "value": draft(session, "@f.vjevmodel").trim()}), &mut cmds, &mut rid); json!({"drafts": {"@f.vjevmodel": ""}}) }
         "voice-phrases" => { let (k, v) = crate::voice::page::phrases_setting(draft(session, "@f.vphrase")); send(session, hub, "setting.set", json!({"key": k, "value": v}), &mut cmds, &mut rid); json!({"drafts": {"@f.vphrase": ""}}) }
         "voice-term" => { for (k, v) in crate::voice::page::term_settings(draft(session, "@f.vterm")) { send(session, hub, "setting.set", json!({"key": k, "value": v}), &mut cmds, &mut rid); } json!({"drafts": {"@f.vterm": ""}}) }
         // Machines: every press goes to the hub as machines.page.act, with the fields as typed

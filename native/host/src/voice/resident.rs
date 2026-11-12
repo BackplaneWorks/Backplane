@@ -45,7 +45,7 @@ fn rss_kb(pid: u32) -> u64 {
 pub fn sock_path(home: &Path) -> Option<PathBuf> { let p = home.join("voice/engine.sock"); (cfg!(unix) && p.as_os_str().len() < 100).then_some(p) }
 
 #[derive(Default)]
-struct St { model: Option<String>, up: bool, gen: u64, stdin: Option<tokio::process::ChildStdin>, pid: u32, held: bool, fails: u32, retry: Option<Instant>, ms: u64, rss_mb: u64, said: String }
+struct St { turn_tried: bool, model: Option<String>, up: bool, gen: u64, stdin: Option<tokio::process::ChildStdin>, pid: u32, held: bool, fails: u32, retry: Option<Instant>, ms: u64, rss_mb: u64, said: String }
 #[derive(Default)]
 pub struct Resident { st: Mutex<St>, busy: AtomicUsize, kick: Notify }
 /// A session or recording decoding through the server: while one is held, memory pressure does not take the server away.
@@ -88,6 +88,18 @@ impl Resident {
     }
     async fn step(self: &Arc<Self>, hub: &Arc<Hub>) {
         let want = Self::wanted(hub).await;
+        // the end-of-turn model (native/voice/src/turn.rs) came after many installs: fetched once, then the server starts again to load it
+        if want.is_some() && !hub.cfg.home.join("voice/local/smart-turn-v3.2-cpu.onnx").exists() && !std::mem::replace(&mut self.st.lock().unwrap().turn_tried, true) {
+            if let Some(bin) = session::exe() {
+                let (me, hub, dir) = (self.clone(), hub.clone(), hub.cfg.home.join("voice/local"));
+                tokio::spawn(async move {
+                    let mut c = proc::tokio_cmd(Kind::Net, &bin); c.args(["local-turn", "--local-dir", &dir.to_string_lossy()]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).kill_on_drop(true);
+                    let ok = tokio::time::timeout(Duration::from_secs(300), c.status()).await.ok().and_then(|r| r.ok()).map_or(false, |s| s.success());
+                    eprintln!("voice: the end-of-turn model {}", if ok { "is fetched; the resident recognizer loads it" } else { "could not be fetched; dictation decides without it" });
+                    if ok && me.busy.load(Ordering::SeqCst) == 0 { me.stop() } let _ = hub; me.kick();
+                });
+            }
+        }
         let (running, pid, up) = { let s = self.st.lock().unwrap(); (s.model.clone(), s.pid, s.up) };
         let busy = self.busy.load(Ordering::SeqCst) > 0;
         let (d, held) = decide(want.as_deref(), running.as_deref(), avail_mb(), busy);

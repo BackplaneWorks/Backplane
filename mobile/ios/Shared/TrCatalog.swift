@@ -2791,6 +2791,29 @@ voice.cmd.cancel	Cancel message	Cancel message（下書きを消去）
 settings.voice.auto	Send after silence	無音の後に送信
 settings.voice.auto.note	Sends what was dictated once you have been quiet this long. Off by default.	この時間黙っていると、音声入力した内容を送信します。既定ではオフです。
 voice.cmd.secs	{s} s	{s}秒
+voice.eot.sending	Sending…	送信します…
+voice.eot.hold	Keep talking	話を続ける
+settings.voice.eot	Send when I'm done	話し終えたら送信
+settings.voice.eot.note	When you pause after a finished thought, the message sends itself: a short countdown that more speech cancels, then 3 seconds to undo. A thinking pause, “and…” or “um” keeps listening.	話の区切りで間を置くと、メッセージが自動で送信されます。短いカウントダウン中に話し始めると取り消され、送信後も3秒間は元に戻せます。考え中の間や「and…」「um」では聞き続けます。
+settings.voice.eot.eager	How eager	送信の早さ
+settings.voice.eot.eager.note	Eager sends sooner; Patient waits for a surer sign. Now {now}.	「Eager」は早めに送信し、「Patient」はより確かな合図を待ちます。現在 {now}。
+settings.voice.eot.eager.learned	Eager sends sooner; Patient waits for a surer sign. Now {now}, {nudge} learned from your undos ({sent} sent, {undone} undone).	「Eager」は早めに送信し、「Patient」はより確かな合図を待ちます。現在 {now}（元に戻した操作から {nudge} を学習: 送信 {sent} 件、取り消し {undone} 件）。
+settings.voice.eot.reset	Reset learning	学習をリセット
+settings.voice.jev	End of turn: Jev (TypeSafe)	話し終わりの判定: Jev（TypeSafe）
+settings.voice.jev.set	Its key is saved in the vault. Asked at each pause with only the current draft; over 400 ms or failing, the on-device model decides.	キーはボールトに保存されています。間のたびに現在の下書きだけを送って判定します。400 ms を超えるか失敗した場合は、端末上のモデルが判定します。
+settings.voice.jev.unset	Paste a TypeSafe API key (console.typesafe.ai) to use Jev. Without it, the on-device model decides.	Jev を使うには TypeSafe の API キー（console.typesafe.ai）を貼り付けてください。キーがない場合は端末上のモデルが判定します。
+settings.voice.jev.key	TypeSafe API key	TypeSafe API キー
+settings.voice.jev.use	Use Jev	Jev を使う
+settings.voice.jev.test	Test	テスト
+settings.voice.jev.model	Save model	モデルを保存
+settings.voice.jev.check	Jev check	Jev の確認
+settings.voice.jev.failed	Test failed: {e}	テスト失敗: {e}
+settings.voice.jev.result	Test: {a} in {ams} ms for a finished sentence, {b} in {bms} ms for one ending in “um”.	テスト: 言い終えた文は {a}（{ams} ms）、「um」で終わる文は {b}（{bms} ms）。
+settings.voice.jev.last	Last pause: Jev answered in {ms} ms.	直前の間: Jev は {ms} ms で応答しました。
+settings.voice.jev.fallback	Last pause: the on-device model decided ({e}).	直前の間: 端末上のモデルが判定しました（{e}）。
+voice.eot.eager.label	Eager {t}	Eager {t}
+voice.eot.default.label	Default {t}	既定 {t}
+voice.eot.patient.label	Patient {t}	Patient {t}
 gpui.f.group.install	Install	インストール
 gpui.f.group.agents	Agents	エージェント
 gpui.f.group.cad	CAD tools	CADツール
@@ -5447,6 +5470,33 @@ gpui.usage.noread	No reading yet: the first turn's result reports it.	まだ値�
 
     /// voice.cmd.secs = {s} s
     static func voice_cmd_secs(s: String) -> String { f("voice.cmd.secs", ["s": s]) }
+
+    /// settings.voice.eot.eager.note = Eager sends sooner; Patient waits for a surer sign. Now {now}.
+    static func settings_voice_eot_eager_note(now: String) -> String { f("settings.voice.eot.eager.note", ["now": now]) }
+
+    /// settings.voice.eot.eager.learned = Eager sends sooner; Patient waits for a surer sign. Now {now}, {nudge} learned from your undos ({sent} sent, {undone} undone).
+    static func settings_voice_eot_eager_learned(now: String, nudge: String, sent: String, undone: String) -> String { f("settings.voice.eot.eager.learned", ["now": now, "nudge": nudge, "sent": sent, "undone": undone]) }
+
+    /// settings.voice.jev.failed = Test failed: {e}
+    static func settings_voice_jev_failed(e: String) -> String { f("settings.voice.jev.failed", ["e": e]) }
+
+    /// settings.voice.jev.result = Test: {a} in {ams} ms for a finished sentence, {b} in {bms} ms for one ending in “um”.
+    static func settings_voice_jev_result(a: String, ams: String, b: String, bms: String) -> String { f("settings.voice.jev.result", ["a": a, "ams": ams, "b": b, "bms": bms]) }
+
+    /// settings.voice.jev.last = Last pause: Jev answered in {ms} ms.
+    static func settings_voice_jev_last(ms: String) -> String { f("settings.voice.jev.last", ["ms": ms]) }
+
+    /// settings.voice.jev.fallback = Last pause: the on-device model decided ({e}).
+    static func settings_voice_jev_fallback(e: String) -> String { f("settings.voice.jev.fallback", ["e": e]) }
+
+    /// voice.eot.eager.label = Eager {t}
+    static func voice_eot_eager_label(t: String) -> String { f("voice.eot.eager.label", ["t": t]) }
+
+    /// voice.eot.default.label = Default {t}
+    static func voice_eot_default_label(t: String) -> String { f("voice.eot.default.label", ["t": t]) }
+
+    /// voice.eot.patient.label = Patient {t}
+    static func voice_eot_patient_label(t: String) -> String { f("voice.eot.patient.label", ["t": t]) }
 
     /// gpui.f.counter = {i, number} of {n, number}
     static func gpui_f_counter(i: Int, n: Int) -> String { f("gpui.f.counter", ["i": String(i), "n": String(n)]) }

@@ -43,16 +43,18 @@ impl<'a> Req<'a> {
     }
 }
 
-fn dir(home: &Path) -> std::io::Result<PathBuf> { let d = home.join("secrets").join("google"); std::fs::DirBuilder::new().mode(0o700).recursive(true).create(&d)?; Ok(d) }
+fn dir(home: &Path, sub: &str) -> std::io::Result<PathBuf> { let d = home.join("secrets").join(sub); std::fs::DirBuilder::new().mode(0o700).recursive(true).create(&d)?; Ok(d) }
 fn w(p: &Path, b: &[u8]) -> std::io::Result<()> { std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(p).and_then(|mut f| f.write_all(b)) }
 
 /// The request, off the async threads.
-pub async fn send(home: &Path, r: Req<'_>) -> Resp {
-    let (home, method, url, headers, body, secs) = (home.to_path_buf(), r.method.to_string(), r.url, r.headers, r.body, r.secs);
-    tokio::task::spawn_blocking(move || send_blocking(&home, &method, &url, &headers, body.as_deref(), secs)).await.unwrap_or_default()
+pub async fn send(home: &Path, r: Req<'_>) -> Resp { send_in(home, "google", r).await }
+/// The same through files in `<home>/secrets/<sub>` (0700): another service's key and body (voice/eot.rs: TypeSafe's).
+pub async fn send_in(home: &Path, sub: &str, r: Req<'_>) -> Resp {
+    let (home, sub, method, url, headers, body, secs) = (home.to_path_buf(), sub.to_string(), r.method.to_string(), r.url, r.headers, r.body, r.secs);
+    tokio::task::spawn_blocking(move || send_blocking(&home, &sub, &method, &url, &headers, body.as_deref(), secs)).await.unwrap_or_default()
 }
-fn send_blocking(home: &Path, method: &str, url: &str, headers: &[String], body: Option<&[u8]>, secs: u64) -> Resp {
-    let Ok(d) = dir(home) else { return Resp { code: "000".into(), body: vec![], err: "could not make the secrets folder".into() } };
+fn send_blocking(home: &Path, sub: &str, method: &str, url: &str, headers: &[String], body: Option<&[u8]>, secs: u64) -> Resp {
+    let Ok(d) = dir(home, sub) else { return Resp { code: "000".into(), body: vec![], err: "could not make the secrets folder".into() } };
     let n = super::oauth::nonce(9).unwrap_or_else(|_| format!("{:x}", crate::hub::now_ms())).replace(['-', '_'], "x");
     let (cfg, inp, out) = (d.join(format!("g-{n}.curl")), d.join(format!("g-{n}.in")), d.join(format!("g-{n}.out")));
     let mut c = format!("url = {}\nrequest = {}\n", q(url), q(method));
