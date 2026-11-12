@@ -226,7 +226,7 @@ class KiCadIpc:
         for attempt in range(retries):
             req_id = 0x80000000 | self.seq
             self.seq += 1
-            hdr = pb_field_str(1, self.token) + pb_field_str(2, "bp-embed-e2e")
+            hdr = pb_field_str(1, self.token) + pb_field_str(2, os.environ.get("BP_IPC_CLIENT", "bp-embed-e2e"))
             any_msg = pb_field_str(1, f"type.googleapis.com/{type_name}") + pb_field_bytes(2, payload)
             api_req = pb_field_msg(1, hdr) + pb_field_msg(2, any_msg)
 
