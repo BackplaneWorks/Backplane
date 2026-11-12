@@ -1852,7 +1852,19 @@ def run_resilience_suite(h: SuiteHarness) -> int:
         h.click_control(gpui_hwnd, "ui:View")
         time.sleep(1.0)
         h.click_control(gpui_hwnd, "ui:Edit")
-        pcb_warm = h.wait_embedded_frame(cont1_hwnd, kpid, "PCB Editor", timeout_s=15.0)
+        # bp.11: the client makes a fresh container on re-entry and moves KiCad's holder into it (as on X11), so look under any.
+        pcb_warm = None
+        end_warm = time.time() + 15.0
+        while pcb_warm is None and time.time() < end_warm:
+            for ch in list_child_windows(gpui_hwnd):
+                p = int(u32.GetAncestor(ch["hwnd"], GA_PARENT) or 0)
+                cont = int(u32.GetAncestor(p, GA_PARENT) or 0) if p and hwnd_class(p) == "BackplaneKiCadEmbedHolder" else p
+                if cont and is_frame_parented_in(ch["hwnd"], cont):
+                    pcb_warm = h.wait_embedded_frame(cont, kpid, "PCB Editor", timeout_s=0.3)
+                    if pcb_warm is not None:
+                        break
+            if pcb_warm is None:
+                time.sleep(0.25)
         n_warm = h.ipc_cmd("items-count", api_sock, "pcb", "11")["count"]
         mod_warm = bool(h.ipc_cmd("modified", api_sock, "pcb").get("modified"))
         h.shot("03_after_view_edit_reattach")
