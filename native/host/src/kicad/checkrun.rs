@@ -35,6 +35,9 @@ struct Src {
     took: u64,
     had: bool,
     cancel: Option<Arc<tokio::sync::Notify>>,
+    /// why a run that may go waits for the machine ("" none), and the last run's peak memory (MB; 0 unknown)
+    deferred: String,
+    peak_mb: u64,
 }
 #[derive(Default)]
 struct Proj { files: project::Files, drc: Src, erc: Src, asked: u64, loaded: bool }
@@ -112,7 +115,7 @@ fn disk_revs(f: &project::Files) -> (String, String) {
 fn cache_dir(hub: &Hub) -> PathBuf { hub.cfg.home.join("cache").join("checks") }
 fn cache_file(hub: &Hub, pro: &str) -> PathBuf { cache_dir(hub).join(format!("{}.json", ks::digest(pro))) }
 fn save(hub: &Hub, pro: &str, p: &Proj) {
-    let one = |s: &Src| json!({"rev": s.sched.ran_rev, "at": s.at, "took": s.took, "had": s.had, "failed": if s.state == "failed" { s.reason.clone() } else { String::new() }, "findings": s.findings.iter().map(fd::to_json).collect::<Vec<_>>()});
+    let one = |s: &Src| json!({"rev": s.sched.ran_rev, "at": s.at, "took": s.took, "had": s.had, "peak_mb": s.peak_mb, "failed": if s.state == "failed" { s.reason.clone() } else { String::new() }, "findings": s.findings.iter().map(fd::to_json).collect::<Vec<_>>()});
     let v = json!({"pro": pro, "drc": one(&p.drc), "erc": one(&p.erc)});
     let f = cache_file(hub, pro);
     let _ = std::fs::create_dir_all(cache_dir(hub));
@@ -124,6 +127,7 @@ fn load(hub: &Hub, pro: &str, p: &mut Proj) {
     if v["pro"] != pro { return }
     for s in SOURCES {
         let o = &v[s]; let src = p.src(s);
+        src.peak_mb = o["peak_mb"].as_u64().unwrap_or(0);
         if !o["had"].as_bool().unwrap_or(false) { continue }
         src.findings = o["findings"].as_array().into_iter().flatten().map(fd::from_json).collect();
         src.counts = fd::counts(&src.findings);
@@ -141,12 +145,14 @@ fn src_json(p: &Proj, s: &str, now: u64) -> Value {
     if !p.has(s) { return Value::Null }
     let st = state_word(x);
     let running = x.sched.running_since > 0;
-    json!({"state": st, "reason": x.reason, "running": running, "fraction": if running { fd::fraction(now.saturating_sub(x.sched.running_since), x.took) } else { -1.0 },
-        "counts": x.counts.to_json(), "at": x.at, "took_ms": x.took, "rev": x.sched.ran_rev, "has_result": x.had})
+    let reason = if st == "deferred" { x.deferred.trim_start_matches("deferred: ").to_string() } else { x.reason.clone() };
+    json!({"state": st, "reason": reason, "running": running, "fraction": if running { fd::fraction(now.saturating_sub(x.sched.running_since), x.took) } else { -1.0 },
+        "counts": x.counts.to_json(), "at": x.at, "took_ms": x.took, "rev": x.sched.ran_rev, "has_result": x.had, "peak_mb": x.peak_mb, "note": fd::LIBRARY_NOTE})
 }
-/// none (no result yet), running, fresh (the result is of the design on disk), stale (the design changed since), failed.
+/// none (no result yet), running, deferred (a run waits for memory or another heavy KiCad job), fresh (the result is of the design on
+/// disk), stale (the design changed since), failed.
 fn state_word(x: &Src) -> &'static str {
-    if x.sched.running_since > 0 { "running" } else if x.state == "failed" { "failed" } else if !x.had { "none" } else if x.sched.ran_rev != x.sched.disk_rev && !x.sched.disk_rev.is_empty() { "stale" } else { "fresh" }
+    if x.sched.running_since > 0 { "running" } else if !x.deferred.is_empty() { "deferred" } else if x.state == "failed" { "failed" } else if !x.had { "none" } else if x.sched.ran_rev != x.sched.disk_rev && !x.sched.disk_rev.is_empty() { "stale" } else { "fresh" }
 }
 fn summary(pro: &str, p: &Proj, now: u64) -> Value {
     let pick = |s: &str| { let x = if s == "drc" { &p.drc } else { &p.erc }; p.has(s).then(|| (if x.state == "failed" && x.sched.running_since == 0 { "failed" } else { "ok" }, x.counts, x.had)) };
@@ -183,6 +189,7 @@ async fn tick(hub: &Arc<Hub>) -> u64 {
     };
     if pros.is_empty() { return 60_000 }
     let mut sleep = TICK_MS * 5;
+    let (free, heavy) = tokio::task::spawn_blocking(|| (free_mb(), heavy_job())).await.unwrap_or_default();
     for (pro, files) in pros {
         let f2 = files.clone();
         let (erc_rev, drc_rev) = tokio::task::spawn_blocking(move || disk_revs(&f2)).await.unwrap_or_default();
@@ -197,13 +204,17 @@ async fn tick(hub: &Arc<Hub>) -> u64 {
                 let rev = if s == "drc" { &drc_rev } else { &erc_rev };
                 let x = p.src(s);
                 if x.sched.disk_rev != *rev { if !x.sched.disk_rev.is_empty() { x.sched.changed_at = now } x.sched.disk_rev = rev.clone(); changed = true }
-                x.sched.agent_since = agent; x.sched.person_at = person;
+                x.sched.agent_since = agent; x.sched.person_at = person; x.sched.free_mb = free; x.sched.heavy = heavy.clone();
+                x.sched.need_mb = fd::need_mb(s, doc_bytes(&files, s), x.peak_mb);
+                let was = std::mem::take(&mut x.deferred);
                 match fd::next(now, &x.sched) {
+                    Do::Defer(why, ms) => { x.deferred = why; sleep = sleep.min(ms) }
                     Do::Run => { x.sched.demand = false; x.sched.running_since = now; x.sched.running_rev = rev.clone(); let c = Arc::new(tokio::sync::Notify::new()); x.cancel = Some(c.clone()); acts.push((s, rev.clone(), c)); changed = true; }
                     Do::Cancel => { if let Some(c) = &x.cancel { c.notify_one() } }
                     Do::Wait(ms) => sleep = sleep.min(ms.max(100)),
                     Do::Nothing => {}
                 }
+                if x.deferred != was { changed = true }
                 if x.sched.running_since > 0 { sleep = sleep.min(TICK_MS) }
             }
         }
@@ -218,51 +229,139 @@ type Outcome = Option<Result<Vec<Finding>, String>>;
 
 async fn run(hub: &Arc<Hub>, pro: &str, f: &project::Files, s: &'static str, rev: &str, cancel: Arc<tokio::sync::Notify>) {
     let slot = tokio::select! { g = SLOT.get_or_init(|| tokio::sync::Mutex::new(())).lock() => g, _ = cancel.notified() => { return finish(hub, pro, s, rev, None, 0).await } };
+    // the machine may have changed while this waited for the slot (another project's run): look again
+    let free = tokio::task::spawn_blocking(free_mb).await.unwrap_or(0);
+    let short = { let mut m = state().lock().unwrap(); m.get_mut(pro).map(|p| { let x = p.src(s); x.sched.free_mb = free; fd::machine_guard(&x.sched) }).unwrap_or_default() };
+    if !short.is_empty() {
+        if let Some(p) = state().lock().unwrap().get_mut(pro) { let x = p.src(s); x.deferred = short; x.sched.demand = true }
+        drop(slot);
+        return finish(hub, pro, s, rev, None, 0).await
+    }
     // waiting for the slot is not running: the bar's clock starts now
     if let Some(p) = state().lock().unwrap().get_mut(pro) { p.src(s).sched.running_since = now_ms() }
     publish(hub, pro).await;
     let t0 = now_ms();
-    let o = run_cli(hub, pro, f, s, &cancel).await;
+    let (o, peak) = run_cli(hub, pro, f, s, &cancel).await;
     let took = now_ms() - t0;
     drop(slot);
+    if peak > 0 { if let Some(p) = state().lock().unwrap().get_mut(pro) { p.src(s).peak_mb = peak } }
     finish(hub, pro, s, rev, o, took).await
 }
 
-async fn run_cli(hub: &Arc<Hub>, pro: &str, f: &project::Files, s: &str, cancel: &tokio::sync::Notify) -> Outcome {
-    let cli = ipc::runtime(hub).await.cli;
-    if cli.is_empty() { return Some(Err("KiCad is not installed on this machine (no kicad-cli)".into())) }
+/// One kicad-cli run: its outcome and its peak memory (MB; 0 when this platform cannot say).
+async fn run_cli(hub: &Arc<Hub>, pro: &str, f: &project::Files, s: &str, cancel: &tokio::sync::Notify) -> (Outcome, u64) {
+    let rt = ipc::runtime(hub).await;
+    if rt.cli.is_empty() { return (Some(Err("KiCad is not installed on this machine (no kicad-cli)".into())), 0) }
     let dir = cache_dir(hub).join(ks::digest(pro));
     let _ = std::fs::create_dir_all(&dir);
-    let c = cad::CHECKS.iter().find(|c| c.id == s)?;
-    let argv = cad::fill(c.argv, &[("cli", &cli), ("pcb", &f.pcb), ("sch", &f.sch), ("out", &dir.to_string_lossy())]);
+    let Some(c) = cad::CHECKS.iter().find(|c| c.id == s) else { return (None, 0) };
+    let argv = cad::fill(c.argv, &[("cli", &rt.cli), ("pcb", &f.pcb), ("sch", &f.sch), ("out", &dir.to_string_lossy())]);
     let report = dir.join(c.report);
     let _ = std::fs::remove_file(&report);
     let mut cmd = low_priority(&argv);
+    cmd.env("KICAD_CONFIG_HOME", lib_free_config(hub, &rt.version));
     cmd.kill_on_drop(true).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
-    let child = match cmd.spawn() { Ok(c) => c, Err(e) => return Some(Err(format!("could not start kicad-cli: {e}"))) };
-    let res = tokio::select! {
-        r = tokio::time::timeout(Duration::from_secs(RUN_SECS), child.wait_with_output()) => r,
-        _ = cancel.notified() => return None, // the child is killed as it is dropped
+    let child = match cmd.spawn() { Ok(c) => c, Err(e) => return (Some(Err(format!("could not start kicad-cli: {e}"))), 0) };
+    let pid = child.id().unwrap_or(0);
+    OURS.get_or_init(Default::default).lock().unwrap().push(pid);
+    struct Unlist(u32);
+    impl Drop for Unlist { fn drop(&mut self) { if let Some(o) = OURS.get() { o.lock().unwrap().retain(|p| *p != self.0) } } }
+    let _unlist = Unlist(pid);
+    let mut peak = 0u64;
+    let wait = tokio::time::timeout(Duration::from_secs(RUN_SECS), child.wait_with_output());
+    tokio::pin!(wait);
+    let mut every = tokio::time::interval(Duration::from_millis(200));
+    let res = loop {
+        tokio::select! {
+            r = &mut wait => break r,
+            _ = cancel.notified() => return (None, peak), // the child is killed as it is dropped
+            _ = every.tick() => { peak = peak.max(rss_peak_mb(pid)) }
+        }
     };
-    let o = match res { Ok(Ok(o)) => o, Ok(Err(e)) => return Some(Err(format!("kicad-cli: {e}"))), Err(_) => return Some(Err(format!("{} took longer than {RUN_SECS} s", s.to_uppercase()))) };
+    let o = match res { Ok(Ok(o)) => o, Ok(Err(e)) => return (Some(Err(format!("kicad-cli: {e}"))), peak), Err(_) => return (Some(Err(format!("{} took longer than {RUN_SECS} s", s.to_uppercase()))), peak) };
     let text = std::fs::read_to_string(&report).unwrap_or_default();
     let parsed = if s == "drc" { fd::drc(&text) } else { fd::erc(&text) };
-    match parsed {
-        Some(fs) => Some(Ok(fs)),
+    let out = match parsed {
+        Some(mut fs) => { fs.retain(|x| !fd::library_rule(s, &x.rule)); Some(Ok(fs)) }
+        None if String::from_utf8_lossy(&o.stderr).contains("transient scope") && !NO_SCOPE.swap(true, std::sync::atomic::Ordering::Relaxed) => {
+            eprintln!("checks: systemd made no scope ({}); runs go without one", String::from_utf8_lossy(&o.stderr).trim());
+            return Box::pin(run_cli(hub, pro, f, s, cancel)).await
+        }
+        None if killed(&o.status) => Some(Err("stopped at its memory limit (the machine needed the memory)".into())),
         None => {
             let why = String::from_utf8_lossy(&o.stderr).trim().lines().last().unwrap_or("").to_string();
             let why = if why.is_empty() { String::from_utf8_lossy(&o.stdout).trim().lines().last().unwrap_or("").to_string() } else { why };
             Some(Err(format!("kicad-cli {} failed (exit {}){}", s, o.status.code().unwrap_or(-1), if why.is_empty() { String::new() } else { format!(": {why}") })))
         }
-    }
+    };
+    (out, peak)
 }
-/// kicad-cli at a low priority: `nice -n 15` on Unix, below-normal on Windows. Its folder is the root: every path is absolute.
+#[cfg(unix)] fn killed(st: &std::process::ExitStatus) -> bool { use std::os::unix::process::ExitStatusExt; st.signal() == Some(9) }
+#[cfg(not(unix))] fn killed(_: &std::process::ExitStatus) -> bool { false }
+
+/// A KiCad settings folder whose global footprint and symbol tables are empty (`KICAD_CONFIG_HOME`, every platform): kicad-cli then
+/// loads only the project's own libraries (fd::library_rule). KiCad reads `<KICAD_CONFIG_HOME>/<major.minor>/`.
+fn lib_free_config(hub: &Hub, version: &str) -> PathBuf {
+    let root = cache_dir(hub).join("kicad-config");
+    let mm: String = { let mut it = version.split(['.', '-']); match (it.next(), it.next()) { (Some(a), Some(b)) if !a.is_empty() => format!("{a}.{b}"), _ => String::new() } };
+    for v in ["10.99", "10.0", "9.0"].into_iter().map(String::from).chain((!mm.is_empty()).then_some(mm)) {
+        let d = root.join(&v);
+        if d.join("fp-lib-table").is_file() { continue }
+        let _ = std::fs::create_dir_all(&d);
+        let _ = std::fs::write(d.join("fp-lib-table"), "(fp_lib_table\n  (version 7)\n)\n");
+        let _ = std::fs::write(d.join("sym-lib-table"), "(sym_lib_table\n  (version 7)\n)\n");
+    }
+    root
+}
+
+/// kicad-cli at a low priority, in a scope of its own outside the hub's where systemd can make one (Linux: `systemd-run --user --scope`
+/// in bpkicad.slice, MemoryMax 50%, so a runaway run is stopped alone and the hub's scope is never the one picked), then `nice -n 15`;
+/// below-normal priority on Windows. Its folder is the root: every path is absolute.
 fn low_priority(argv: &[String]) -> tokio::process::Command {
-    #[cfg(unix)] let mut c = { let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Local, "nice"); c.arg("-n").arg("15").args(argv); c };
+    #[cfg(unix)] let mut c = {
+        let scope = cfg!(target_os = "linux") && std::env::var_os("BACKPLANE_CHECKS_NO_SCOPE").is_none() && !NO_SCOPE.load(std::sync::atomic::Ordering::Relaxed) && on_path("systemd-run")
+            && std::env::var_os("XDG_RUNTIME_DIR").map_or(false, |d| Path::new(&d).join("bus").exists());
+        let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Local, if scope { "systemd-run" } else { "nice" });
+        if scope { c.args(["--user", "--scope", "-q", "--collect", "--slice=bpkicad.slice", "-p", "MemoryMax=50%", "-p", "ManagedOOMPreference=none", "--", "nice"]); }
+        c.arg("-n").arg("15").args(argv); c
+    };
     #[cfg(windows)] let mut c = { const BELOW_NORMAL: u32 = 0x0000_4000; let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Local, &argv[0]); c.args(&argv[1..]); c.creation_flags(crate::plat::proc::NO_WINDOW | BELOW_NORMAL); c };
     c.current_dir(std::path::MAIN_SEPARATOR_STR);
     c
 }
+
+// The machine ----------------------------------------------------------------------------------------------------------------------
+
+/// Memory available now (MB; 0 when this platform cannot say: the guard then does not hold runs back).
+fn free_mb() -> u64 {
+    // a test hub says how much is free (embed_checks_e2e's low-memory case)
+    if let Some(n) = std::env::var("BACKPLANE_CHECKS_FREE_MB").ok().and_then(|v| v.parse().ok()) { return n }
+    std::fs::read_to_string("/proc/meminfo").ok().and_then(|m| m.lines().find(|l| l.starts_with("MemAvailable:"))?.split_whitespace().nth(1)?.parse::<u64>().ok()).map_or(0, |kb| kb / 1024)
+}
+/// A process's peak resident memory so far (MB; Linux, 0 elsewhere).
+fn rss_peak_mb(pid: u32) -> u64 {
+    if pid == 0 { return 0 }
+    std::fs::read_to_string(format!("/proc/{pid}/status")).ok().and_then(|t| t.lines().find(|l| l.starts_with("VmHWM:"))?.split_whitespace().nth(1)?.parse::<u64>().ok()).map_or(0, |kb| kb / 1024)
+}
+/// Another heavy KiCad job on this machine, in words ("" none): a long job in an open KiCad (a DRC, a zone fill, a load), or a
+/// kicad-cli this hub did not start (an agent's export, a release's checks). Linux reads /proc; elsewhere only the open KiCad's jobs.
+fn heavy_job() -> String {
+    if let Some(t) = super::progress::running().into_iter().next() { return if t.is_empty() { "a job in KiCad".into() } else { format!("{t} in KiCad") } }
+    let mine: Vec<u32> = OURS.get_or_init(Default::default).lock().unwrap().clone();
+    let Ok(rd) = std::fs::read_dir("/proc") else { return String::new() };
+    for e in rd.flatten() {
+        let Some(pid) = e.file_name().to_str().and_then(|n| n.parse::<u32>().ok()) else { continue };
+        if mine.contains(&pid) { continue }
+        if std::fs::read_to_string(format!("/proc/{pid}/comm")).map_or(false, |c| c.trim() == "kicad-cli") { return "another kicad-cli".into() }
+    }
+    String::new()
+}
+/// systemd would not make a scope here once: every run after goes without one.
+static NO_SCOPE: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+fn on_path(c: &str) -> bool { std::env::var_os("PATH").map_or(false, |p| std::env::split_paths(&p).any(|d| d.join(c).is_file())) }
+/// The kicad-cli runs this hub has going (their PIDs).
+static OURS: OnceLock<Mutex<Vec<u32>>> = OnceLock::new();
+fn doc_bytes(f: &project::Files, s: &str) -> u64 { std::fs::metadata(if s == "drc" { &f.pcb } else { &f.sch }).map_or(0, |m| m.len()) }
 
 async fn finish(hub: &Arc<Hub>, pro: &str, s: &str, rev: &str, o: Outcome, took: u64) {
     {
