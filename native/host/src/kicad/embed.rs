@@ -484,10 +484,26 @@ pub fn theme_of(pro: &str) -> String { themes().lock().unwrap().get(&norm_pro_ke
 /// The fork's ThemeMode for Backplane's theme ("" for none).
 pub fn theme_mode(theme: &str) -> &'static str { match theme { "light" => "TM_LIGHT", "dark" => "TM_DARK", _ => "" } }
 
+/// `<runtime>/backplane/kicad/<digest>/live.sock`: the open co-editing KiCad's API socket, beside the headless server's `api.sock`, so
+/// an agent's own scripts (KiStack's layout tools) edit the live document instead of a file under the person (docs/kicad-coedit.md).
+/// Removed when the editor is not ready. Only under $XDG_RUNTIME_DIR (the headless sockets' own place on a desktop).
+fn publish_live_sock(pro: &str, sock: &str) {
+    let rt = std::env::var("XDG_RUNTIME_DIR").unwrap_or_default();
+    if rt.is_empty() || pro.is_empty() { return }
+    let dir = std::path::PathBuf::from(ks::dir(&rt, "", pro));
+    let link = dir.join("live.sock");
+    let _ = std::fs::remove_file(&link);
+    if sock.is_empty() { return }
+    let _ = std::fs::create_dir_all(&dir);
+    #[cfg(unix)]
+    { let _ = std::os::unix::fs::symlink(sock, &link); }
+}
+
 fn put_route(s: &Session, tx: &mpsc::UnboundedSender<Msg>) {
     unsaved_update(&s.pro, |u| u.seen(s.frames.iter().any(|f| f.modified)));
     let k = norm_pro_key(&s.pro);
     let mut r = routes().lock().unwrap();
+    publish_live_sock(&s.pro, if s.state == "ready" && s.caps.iter().any(|c| c == "coedit") { &s.sock } else { "" });
     if s.state == "ready" && !s.sock.is_empty() {
         r.insert(k, GuiRoute {
             pro: s.pro.clone(), mode: s.mode.clone(), sock: s.sock.clone(), desc: s.desc.clone(),
@@ -501,9 +517,11 @@ fn put_route(s: &Session, tx: &mpsc::UnboundedSender<Msg>) {
 
 /// Forward one IPC command through the embed actor's shared `kipc::Native` transport so GUI requests and agent `kicad_ipc`
 /// requests serialize cleanly on one socket connection and share its `kicad_token`.
-pub async fn gui_call(route: &GuiRoute, ty: &str, msg: Value) -> Value {
+pub async fn gui_call(route: &GuiRoute, ty: &str, msg: Value) -> Value { gui_call_as(route, ty, msg, "").await }
+/// The same, as `client` (an agent's actor, `agent:<thread>`): the fork's co-editing attributes, groups and undoes its changes by it.
+pub async fn gui_call_as(route: &GuiRoute, ty: &str, msg: Value, client: &str) -> Value {
     let (t, r) = oneshot::channel();
-    if route.tx.send(Msg::Raw { sock: route.sock.clone(), desc: route.desc.clone(), ty: ty.into(), msg, timeout: 30000, reply: t }).is_err() {
+    if route.tx.send(Msg::Raw { sock: route.sock.clone(), desc: route.desc.clone(), ty: ty.into(), msg, timeout: 30000, client: client.into(), reply: t }).is_err() {
         return json!({"ok":false,"error":"no reply","why":"no reply","fallback":true})
     }
     r.await.unwrap_or_else(|_| json!({"ok":false,"error":"no reply","why":"no reply","fallback":true}))
@@ -686,7 +704,7 @@ enum Msg {
         client: u64, pro: String, frames: Vec<Frame>, reply: oneshot::Sender<Result<Value, String>>,
     },
     Raw {
-        sock: String, desc: String, ty: String, msg: Value, timeout: u64, reply: oneshot::Sender<Value>,
+        sock: String, desc: String, ty: String, msg: Value, timeout: u64, client: String, reply: oneshot::Sender<Value>,
     },
     TransportLine(u64, Value),
     Spawned { pro: String, gen: u64, pid: u32 },
@@ -725,7 +743,7 @@ impl Actor {
         self.helper = Some((n, g));
     }
 
-    fn raw_call(&mut self, sock: &str, desc: &str, ty: &str, msg: Value, timeout: u64, reply: oneshot::Sender<Value>) {
+    fn raw_call(&mut self, sock: &str, desc: &str, ty: &str, msg: Value, timeout: u64, client: &str, reply: oneshot::Sender<Value>) {
         self.ensure_helper();
         let Some((n, _)) = &mut self.helper else {
             let _ = reply.send(json!({"ok":false,"error":"transport unavailable"})); return;
@@ -733,7 +751,7 @@ impl Actor {
         self.next_id += 1;
         let id = self.next_id.to_string();
         self.pend.insert(id, reply);
-        n.handle(json!({"id": self.next_id, "sock": sock, "desc": desc, "type": ty, "message": msg, "timeout": timeout}));
+        n.handle(json!({"id": self.next_id, "sock": sock, "desc": desc, "type": ty, "message": msg, "timeout": timeout, "client": client}));
     }
 
     fn close_sock(&mut self, sock: &str) {
@@ -1158,7 +1176,7 @@ impl Actor {
                     let _ = reply.send(Ok(json!({"ok":true})));
                 }
             }
-            Msg::Raw { sock, desc, ty, msg, timeout, reply } => self.raw_call(&sock, &desc, &ty, msg, timeout, reply),
+            Msg::Raw { sock, desc, ty, msg, timeout, client, reply } => self.raw_call(&sock, &desc, &ty, msg, timeout, &client, reply),
             Msg::TransportLine(g, o) => {
                 if self.helper.as_ref().map(|(_, hg)| *hg) != Some(g) { return }
                 let id = match &o["id"] { Value::String(s) => s.clone(), v => v.to_string() };
@@ -1349,7 +1367,7 @@ impl Actor {
 
 async fn raw_on(me: &mpsc::UnboundedSender<Msg>, sock: &str, desc: &str, ty: &str, msg: Value, timeout: u64) -> Value {
     let (t, r) = oneshot::channel();
-    if me.send(Msg::Raw { sock: sock.into(), desc: desc.into(), ty: ty.into(), msg, timeout, reply: t }).is_err() {
+    if me.send(Msg::Raw { sock: sock.into(), desc: desc.into(), ty: ty.into(), msg, timeout, client: String::new(), reply: t }).is_err() {
         return json!({"ok":false,"error":"embed actor stopped"})
     }
     r.await.unwrap_or_else(|_| json!({"ok":false,"error":"no reply"}))
