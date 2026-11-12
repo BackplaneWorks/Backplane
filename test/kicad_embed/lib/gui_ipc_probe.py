@@ -300,6 +300,65 @@ def decode_doc_spec(raw: bytes) -> dict:
     return {"type": dtype, "board_filename": board_fn, "sheet_path": sheet_hr, "project_name": proj_name, "project_path": proj_path}
 
 
+EMBED_KIND_MAP = {"pcb": 1, "board": 1, "sch": 2, "schematic": 2, "sym": 3, "fp": 4, "3d": 5}
+
+
+def _decode_double(raw: bytes) -> float:
+    return struct.unpack("<d", raw[:8])[0] if len(raw) >= 8 else 0.0
+
+
+def _decode_box_mm(raw: bytes) -> dict:
+    f = pb_decode_fields(raw)
+    return {
+        "x_min": _decode_double(f.get(1, [b""])[0]),
+        "y_min": _decode_double(f.get(2, [b""])[0]),
+        "x_max": _decode_double(f.get(3, [b""])[0]),
+        "y_max": _decode_double(f.get(4, [b""])[0]),
+    }
+
+
+def _decode_item_names(raw: bytes) -> dict:
+    f = pb_decode_fields(raw)
+    s = lambda tag: [b.decode("utf-8", errors="replace") for b in f.get(tag, [])]
+    return {"references": s(1), "nets": s(2), "pins": s(3)}
+
+
+def _decode_comment(raw: bytes) -> dict:
+    f = pb_decode_fields(raw)
+    items = []
+    for iraw in f.get(3, []):
+        it = pb_decode_fields(iraw)
+        items.append(
+            {
+                "kind": it.get(1, [b""])[0].decode("utf-8", errors="replace"),
+                "id": it.get(2, [b""])[0].decode("utf-8", errors="replace"),
+                "reference": it.get(3, [b""])[0].decode("utf-8", errors="replace"),
+                "pin": it.get(4, [b""])[0].decode("utf-8", errors="replace"),
+                "net": it.get(5, [b""])[0].decode("utf-8", errors="replace"),
+                "layer": it.get(6, [b""])[0].decode("utf-8", errors="replace"),
+                "sheet_path": it.get(7, [b""])[0].decode("utf-8", errors="replace"),
+                "x_mm": _decode_double(it.get(8, [b""])[0]),
+                "y_mm": _decode_double(it.get(9, [b""])[0]),
+                "bbox": _decode_box_mm(it.get(10, [b""])[0]) if 10 in it else None,
+                "value": it.get(11, [b""])[0].decode("utf-8", errors="replace"),
+            }
+        )
+    return {
+        "note": f.get(1, [b""])[0].decode("utf-8", errors="replace"),
+        "names": _decode_item_names(f.get(2, [b""])[0]) if 2 in f else {"references": [], "nets": [], "pins": []},
+        "items": items,
+        "truncated": bool(f.get(4, [0])[0]),
+        "bbox": _decode_box_mm(f.get(5, [b""])[0]) if 5 in f else None,
+        "empty_selection": bool(f.get(6, [0])[0]),
+        "sheet_path": f.get(7, [b""])[0].decode("utf-8", errors="replace"),
+        "screenshot": f.get(8, [b""])[0].decode("utf-8", errors="replace"),
+        "screenshot_region": _decode_box_mm(f.get(9, [b""])[0]) if 9 in f else None,
+        "screenshot_width": int(f.get(10, [0])[0]),
+        "screenshot_height": int(f.get(11, [0])[0]),
+        "from_api": bool(f.get(12, [0])[0]),
+    }
+
+
 def mm_to_nm(mm: float) -> int:
     return int(round(mm * 1_000_000))
 
@@ -484,6 +543,33 @@ def main() -> None:
             cli.call("kiapi.common.commands.EndCommit", ec_req)
             print(json.dumps({"ok": irs == 1 and len(created) == 1, "irs": irs, "created": len(created)}))
             sys.exit(0 if (irs == 1 and len(created) == 1) else 1)
+
+        if cmd == "select-items":
+            fk = EMBED_KIND_MAP[args[0]]
+            refs = [r.strip() for r in (args[1].split(",") if len(args) > 1 and args[1] else []) if r.strip()]
+            zoom = int(args[2]) != 0 if len(args) > 2 else True
+            req = pb_field_varint(1, fk)
+            for r in refs:
+                req += pb_field_str(2, r)
+            if zoom:
+                req += pb_field_varint(5, 1)
+            _, val = cli.call("kiapi.backplane.embed.SelectItems", req)
+            f = pb_decode_fields(val)
+            found = _decode_item_names(f.get(1, [b""])[0]) if 1 in f else {"references": [], "nets": [], "pins": []}
+            not_found = _decode_item_names(f.get(2, [b""])[0]) if 2 in f else {"references": [], "nets": [], "pins": []}
+            print(json.dumps({"ok": True, "found": found, "not_found": not_found}))
+            return
+
+        if cmd == "comment-selection":
+            fk = EMBED_KIND_MAP[args[0]]
+            note = args[1] if len(args) > 1 else ""
+            req = pb_field_varint(1, fk) + pb_field_str(2, note)
+            _, val = cli.call("kiapi.backplane.embed.CommentSelection", req)
+            f = pb_decode_fields(val)
+            seq = int(f.get(1, [0])[0])
+            comment = _decode_comment(f.get(2, [b""])[0]) if 2 in f else {}
+            print(json.dumps({"ok": True, "seq": seq, "comment": comment}))
+            return
 
         sys.exit(f"unknown command: {cmd}")
     finally:

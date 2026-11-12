@@ -8,16 +8,29 @@ use crate::{api::{Caller, Fut, RpcHandler}, hub::Hub};
 use serde_json::{json, Value};
 use std::{collections::{BTreeSet, HashMap}, sync::{Arc, Mutex, OnceLock, Weak}};
 
+fn norm_file(p: &str) -> String {
+    let mut s = p.replace('\\', "/");
+    if s.as_bytes().get(1) == Some(&b':') && s.as_bytes()[0].is_ascii_alphabetic() {
+        let lo = (s.as_bytes()[0].to_ascii_lowercase() as char).to_string();
+        s.replace_range(0..1, &lo);
+    }
+    s
+}
+
 /// Per project: the files KiCad holds back because the person has unsaved edits in them.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Pending { pub conflicts: BTreeSet<String>, pub last: Option<(String, &'static str)> }
 impl Pending {
     /// An event from the fork: a conflict is waiting; a reload (by itself, or the person's Reload) clears that file.
     pub fn on(mut self, event: &str, file: &str) -> Self {
+        let nf = norm_file(file);
         match event {
-            "conflict" => { self.conflicts.insert(file.to_string()); self.last = Some((file.to_string(), "conflict")); }
-            "reloaded" => { self.conflicts.remove(file); self.last = Some((file.to_string(), "reloaded")); }
-            "kept" => { self.conflicts.remove(file); self.last = Some((file.to_string(), "kept")); }
+            "conflict" => {
+                if !self.conflicts.iter().any(|x| norm_file(x) == nf) { self.conflicts.insert(file.to_string()); }
+                self.last = Some((file.to_string(), "conflict"));
+            }
+            "reloaded" => { self.conflicts.retain(|x| norm_file(x) != nf); self.last = Some((file.to_string(), "reloaded")); }
+            "kept" => { self.conflicts.retain(|x| norm_file(x) != nf); self.last = Some((file.to_string(), "kept")); }
             _ => {}
         }
         self
@@ -80,6 +93,8 @@ mod tests {
         let p = p.on("kept", "/p/a.kicad_pcb"); assert_eq!(p.conflicts.iter().collect::<Vec<_>>(), ["/p/a.kicad_sch"]);
         let p = p.on("reloaded", "/p/a.kicad_sch"); assert!(p.conflicts.is_empty()); assert_eq!(p.last, Some(("/p/a.kicad_sch".into(), "reloaded")));
         assert_eq!(p.to_json("/p/a.kicad_pro", 5)["last"]["event"], "reloaded");
+        let w = Pending::default().on("conflict", r"C:\bp\proj\a.kicad_pcb").on("kept", "c:/bp/proj/a.kicad_pcb");
+        assert!(w.conflicts.is_empty());
     }
     #[test] fn only_the_forks_reload_events_are_ours() {
         assert_eq!(kind(&json!({"type": "ET_RELOAD_CONFLICT"})), Some("conflict")); assert_eq!(kind(&json!({"type": 15})), Some("reloaded"));

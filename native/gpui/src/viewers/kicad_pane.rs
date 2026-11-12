@@ -257,7 +257,7 @@ impl KicadPane {
         let Some(old) = self.container else { return };
         if t == self.toplevel { return }
         let Some(new) = nc::container_for(t, &self.project) else { return };
-        nc::move_frames(old, new); nc::destroy(old);
+        if new != old { nc::move_frames(old, new); nc::destroy(old); }
         self.toplevel = t; self.container = Some(new); self.placed = None; self.unmapped_since = None; self.last_root = (i32::MIN, 0);
         nc::grab_click(new, !self.keys);
         self.reattach();
@@ -476,7 +476,7 @@ impl KicadPane {
         let live = self.container.map_or_else(Vec::new, nc::frames);
         let frames_src = if !live.is_empty() { &live } else { &self.frames };
         let shown = (!self.info.is_null() && !(cfg!(windows) && self.info["mode"] == "stock"))
-            .then(|| pick(self.wanted_kind(), &self.info, frames_src)).flatten();
+            .then(|| pick_local(self.wanted_kind(), &self.info, frames_src, &self.ever_shown)).flatten();
         let top_depth = if self.toplevel != 0 { nc::window_meta(self.toplevel, None, self.toplevel).map(|(d, _, _, _)| d) } else { None };
         let g = |w: u64| nc::report(w).map_or(Value::Null, |(r, on, lit)| {
             let mut v = json!({"x": r.x, "y": r.y, "w": r.w, "h": r.h, "shown": on, "painted": lit});
@@ -532,7 +532,7 @@ mod tests {
             "items": [{"kind": "FOOTPRINT", "reference": "U3", "layer": "F.Cu", "x_mm": 10.0, "y_mm": 20.5}], "image": "/h/kicad-comments/a-4.png"});
         let t = super::comment_text(&c);
         assert!(t.starts_with("Move U3 closer to J1\n\nSelected in the KiCad board: U3; nets GND"), "{t}");
-        assert!(t.contains("- footprint U3 on F.Cu at (10.00, 20.50) mm") && t.ends_with("\n\n/h/kicad-comments/a-4.png"), "{t}");
+        assert!(t.contains("- footprint U3 on F.Cu at (10.00, 20.50) mm") && t.ends_with("\n\n[attachment: /h/kicad-comments/a-4.png]"), "{t}");
         assert!(super::comment_text(&json!({"frame": "FK_SCH", "note": "here", "empty": true})).contains("nothing selected"));
     }
     #[test] fn ctrl_tab_goes_round_the_editor_tabs() {
@@ -774,8 +774,8 @@ impl crate::Backplane {
 }
 
 /// A "Comment to Backplane" as the person's message: their note, then what they had selected in KiCad (references, pins and nets, which the
-/// thread draws as links that cross-probe; each item's layer or sheet and position in mm), then the screenshot (its path alone on a line: the
-/// thread draws it). English: it is the person's message to an agent, as they wrote it.
+/// thread draws as links that cross-probe; each item's layer or sheet and position in mm), then the screenshot (`[attachment: <path>]` so the
+/// thread, the phones and the agent all get the image). English: it is the person's message to an agent, as they wrote it.
 pub fn comment_text(c: &Value) -> String {
     let list = |k: &str| c["names"][k].as_array().into_iter().flatten().filter_map(Value::as_str).map(String::from).collect::<Vec<_>>();
     let (refs, nets, pins) = (list("references"), list("nets"), list("pins"));
@@ -798,7 +798,7 @@ pub fn comment_text(c: &Value) -> String {
         t.push_str(&format!("\n- {} {name}{place}{at}", it["kind"].as_str().unwrap_or("item").to_lowercase()));
     }
     if items.len() > 12 || c["truncated"] == true { t.push_str(&format!("\n- … and more ({} items listed of the selection)", items.len().min(12))); } // i18n-ok
-    if let Some(img) = c["image"].as_str().filter(|s| !s.is_empty()) { t.push_str(&format!("\n\n{img}")); }
+    if let Some(img) = c["image"].as_str().filter(|s| !s.is_empty()) { t.push_str(&format!("\n\n[attachment: {img}]")); }
     t
 }
 

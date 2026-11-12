@@ -283,15 +283,55 @@ fn u64_of(v: &Value) -> u64 {
     v.as_u64().or_else(|| v.as_str().and_then(|s| s.parse::<u64>().ok())).unwrap_or(0)
 }
 
+/// On Win32, `bp.9`'s `KIPLATFORM::EMBED::IsMapped` calls `IsWindowVisible(hwnd)`, which returns `false` whenever the host's
+/// `container` HWND is not yet `WS_VISIBLE` (e.g. cold startup before `KicadPane` reveals the container, or while detached).
+/// Read the child frame's own `WS_VISIBLE` style bit directly (excluding off-screen `Prewarm` frames at `(-30000, -30000)`).
+#[cfg(windows)]
+fn win32_frame_mapped(xid: u64) -> bool {
+    if xid == 0 { return false }
+    use std::ffi::c_void;
+    type HWND = *mut c_void;
+    #[repr(C)] #[derive(Default)] struct RECT { left: i32, top: i32, right: i32, bottom: i32 }
+    #[repr(C)] #[derive(Default)] struct POINT { x: i32, y: i32 }
+    const GWL_STYLE: i32 = -16;
+    const GA_PARENT: u32 = 1;
+    const WS_VISIBLE: isize = 0x1000_0000;
+    #[link(name = "user32")]
+    unsafe extern "system" {
+        fn IsWindow(h: HWND) -> i32;
+        fn GetWindowLongPtrW(h: HWND, idx: i32) -> isize;
+        fn GetWindowRect(h: HWND, r: *mut RECT) -> i32;
+        fn GetAncestor(h: HWND, flags: u32) -> HWND;
+        fn ScreenToClient(h: HWND, pt: *mut POINT) -> i32;
+    }
+    unsafe {
+        let h = xid as usize as HWND;
+        if h.is_null() || IsWindow(h) == 0 { return false }
+        if (GetWindowLongPtrW(h, GWL_STYLE) & WS_VISIBLE) == 0 { return false }
+        let mut rc = RECT::default();
+        if GetWindowRect(h, &mut rc) != 0 {
+            let mut pt = POINT { x: rc.left, y: rc.top };
+            let parent = GetAncestor(h, GA_PARENT);
+            if !parent.is_null() && ScreenToClient(parent, &mut pt) != 0 && (pt.x <= -10000 || pt.y <= -10000) {
+                return false;
+            }
+        }
+        true
+    }
+}
+#[cfg(not(windows))]
+fn win32_frame_mapped(_xid: u64) -> bool { false }
+
 pub fn parse_frame_info(v: &Value) -> Frame {
+    let xid = u64_of(&v["window"]);
     Frame {
         kind: kind_of_fk_val(&v["kind"]).into(),
         doc: v["document"].as_str().unwrap_or("").into(),
         title: v["title"].as_str().unwrap_or("").into(),
         modified: v["modified"].as_bool().unwrap_or(false),
-        shown: v["shown"].as_bool().unwrap_or(false),
+        shown: v["shown"].as_bool().unwrap_or(false) || win32_frame_mapped(xid),
         realized: v["realized"].as_bool().unwrap_or(false),
-        xid: u64_of(&v["window"]),
+        xid,
         min_w: v["min_width"].as_i64().unwrap_or(0) as i32,
         min_h: v["min_height"].as_i64().unwrap_or(0) as i32,
     }
@@ -389,12 +429,23 @@ pub struct GuiRoute {
     tx: mpsc::UnboundedSender<Msg>,
 }
 
+fn norm_pro_key(pro: &str) -> String {
+    let mut n = pro.replace('\\', "/");
+    while n.len() > 1 && n.ends_with('/') && !(n.len() == 3 && n.as_bytes()[1] == b':') {
+        n.pop();
+    }
+    if n.len() >= 2 && n.as_bytes()[0].is_ascii_alphabetic() && n.as_bytes()[1] == b':' {
+        n.make_ascii_lowercase();
+    }
+    n
+}
+
 static ROUTES: OnceLock<Mutex<HashMap<String, GuiRoute>>> = OnceLock::new();
 fn routes() -> &'static Mutex<HashMap<String, GuiRoute>> { ROUTES.get_or_init(Default::default) }
 
 /// Active `"ready"` GUI session route for `pro`, if any (`ipc::run` checks this before headless `kserve`).
 pub fn gui_route(pro: &str) -> Option<GuiRoute> {
-    routes().lock().unwrap().get(pro).cloned()
+    routes().lock().unwrap().get(&norm_pro_key(pro)).cloned()
 }
 
 // The person's unsaved edits (the person's rule, Nov 11): an agent's save never writes what the person has open and unsaved. Per project:
@@ -421,28 +472,30 @@ static UNSAVED: OnceLock<Mutex<HashMap<String, Unsaved>>> = OnceLock::new();
 fn unsaved() -> &'static Mutex<HashMap<String, Unsaved>> { UNSAVED.get_or_init(Default::default) }
 /// The project's state, changed by `f`; answers the new state.
 pub fn unsaved_update(pro: &str, f: impl FnOnce(Unsaved) -> Unsaved) -> Unsaved {
-    let mut m = unsaved().lock().unwrap(); let n = f(m.get(pro).copied().unwrap_or_default()); m.insert(pro.to_string(), n); n
+    let k = norm_pro_key(pro);
+    let mut m = unsaved().lock().unwrap(); let n = f(m.get(&k).copied().unwrap_or_default()); m.insert(k, n); n
 }
 
 // Backplane's theme per project ("light" | "dark"), as the client last said it (attach's `theme`, `editor.kicad.theme`): the fork's
 // `--theme` at launch and SetTheme while it runs. Stock KiCad keeps its own.
 static THEMES: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
 fn themes() -> &'static Mutex<HashMap<String, String>> { THEMES.get_or_init(Default::default) }
-pub fn theme_of(pro: &str) -> String { themes().lock().unwrap().get(pro).cloned().unwrap_or_default() }
+pub fn theme_of(pro: &str) -> String { themes().lock().unwrap().get(&norm_pro_key(pro)).cloned().unwrap_or_default() }
 /// The fork's ThemeMode for Backplane's theme ("" for none).
 pub fn theme_mode(theme: &str) -> &'static str { match theme { "light" => "TM_LIGHT", "dark" => "TM_DARK", _ => "" } }
 
 fn put_route(s: &Session, tx: &mpsc::UnboundedSender<Msg>) {
     unsaved_update(&s.pro, |u| u.seen(s.frames.iter().any(|f| f.modified)));
+    let k = norm_pro_key(&s.pro);
     let mut r = routes().lock().unwrap();
     if s.state == "ready" && !s.sock.is_empty() {
-        r.insert(s.pro.clone(), GuiRoute {
+        r.insert(k, GuiRoute {
             pro: s.pro.clone(), mode: s.mode.clone(), sock: s.sock.clone(), desc: s.desc.clone(),
             cli: s.cli.clone(), argv: s.argv.clone(), version: s.version.clone(), caps: s.caps.clone(),
             tx: tx.clone(),
         });
     } else {
-        r.remove(&s.pro);
+        r.remove(&k);
     }
 }
 
@@ -461,7 +514,7 @@ pub async fn gui_call(route: &GuiRoute, ty: &str, msg: Value) -> Value {
 pub async fn show_for(pro: &str, frame: &str, item: &str) -> Result<Value, String> {
     let Some(r) = gui_route(pro) else { return Err("KiCad is not open for this project".into()) };
     let (tx, rx) = oneshot::channel();
-    r.tx.send(Msg::Show { client: 0, pro: pro.into(), frame: frame.into(), doc: String::new(), item: item.into(), focus: false, remount: false, reply: tx })
+    r.tx.send(Msg::Show { client: 0, pro: r.pro, frame: frame.into(), doc: String::new(), item: item.into(), focus: false, remount: false, reply: tx })
         .map_err(|_| "the embedded KiCad actor stopped".to_string())?;
     rx.await.unwrap_or_else(|_| Err("no reply from embedded KiCad actor".into()))
 }
@@ -1832,7 +1885,7 @@ impl RpcHandler for EmbedRpc {
             if !super::known_root(hub, &resolved.root, "").await {
                 return err_reply(id, &format!("{} is not in a project this hub knows", resolved.pro));
             }
-            if let Some(t) = p["theme"].as_str().filter(|t| matches!(*t, "light" | "dark")) { themes().lock().unwrap().insert(resolved.pro.clone(), t.to_string()); }
+            if let Some(t) = p["theme"].as_str().filter(|t| matches!(*t, "light" | "dark")) { themes().lock().unwrap().insert(norm_pro_key(&resolved.pro), t.to_string()); }
             if method == "editor.kicad.prewarm" {
                 // the client, once the first editor is on show: the others opened hidden at the pane's size (KiCad paints a pre-warmed frame at
                 // the size given; at its 1280x800 default the first real show relaid the whole frame out)
@@ -1858,7 +1911,7 @@ impl RpcHandler for EmbedRpc {
             if method == "editor.kicad.theme" {
                 let mode = p["mode"].as_str().unwrap_or("");
                 if theme_mode(mode).is_empty() { return err_reply(id, "mode is light or dark") }
-                themes().lock().unwrap().insert(resolved.pro.clone(), mode.to_string());
+                themes().lock().unwrap().insert(norm_pro_key(&resolved.pro), mode.to_string());
                 // a running fork that can: now, live; otherwise it is used at the next launch
                 let Some(gui) = gui_route(&resolved.pro) else { return ok_reply(id, json!({"applied": false, "why": "KiCad is not running"})) };
                 if gui.mode != "fork" || gui.desc.is_empty() || !proto::load(&gui.desc).has_own("kiapi.backplane.embed.SetTheme") { return ok_reply(id, json!({"applied": false, "why": "this KiCad cannot switch its theme (needs Backplane KiCad bp.9)"})) }
@@ -2606,6 +2659,10 @@ mod tests {
 #[cfg(test)]
 mod theme_tests {
     #[test] fn backplanes_theme_names_the_forks_mode() { assert_eq!(super::theme_mode("light"), "TM_LIGHT"); assert_eq!(super::theme_mode("dark"), "TM_DARK"); assert_eq!(super::theme_mode("auto"), ""); }
+    #[test] fn windows_pro_key_normalizes_separators_and_drive_case() {
+        assert_eq!(super::norm_pro_key(r"C:\bp\proj\a.kicad_pro"), super::norm_pro_key("c:/bp/proj/a.kicad_pro"));
+        assert_eq!(super::norm_pro_key(r"C:\bp\proj/a.kicad_pro"), "c:/bp/proj/a.kicad_pro");
+    }
 }
 
 #[cfg(test)]

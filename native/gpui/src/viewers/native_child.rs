@@ -549,16 +549,16 @@ mod imp {
                 MOD_NOREPEAT, VK_OEM_3,
             },
             WindowsAndMessaging::{
-                CreateWindowExW, DefWindowProcW, EnumChildWindows, EnumWindows, GetAncestor, GetCursorPos,
-                GetGUIThreadInfo, GetSystemMetrics, GetWindowLongPtrW, GetWindowRect,
+                CreateWindowExW, DefWindowProcW, EnumChildWindows, EnumWindows, GetAncestor, GetClassNameW,
+                GetCursorPos, GetGUIThreadInfo, GetSystemMetrics, GetWindow, GetWindowLongPtrW, GetWindowRect,
                 GetWindowThreadProcessId, InternalGetWindowText, IsChild, IsWindow,
-                IsWindowVisible, LoadCursorW, PostMessageW, RegisterClassExW, SetWindowLongPtrW,
-                SetWindowPos, ShowWindowAsync, WindowFromPoint, GA_PARENT, GUITHREADINFO, GWLP_HWNDPARENT,
-                GWL_STYLE, IDC_ARROW, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN,
+                IsWindowVisible, LoadCursorW, PostMessageW, RegisterClassExW, SetParent, SetWindowLongPtrW,
+                SetWindowPos, ShowWindowAsync, WindowFromPoint, GA_PARENT, GA_ROOT, GUITHREADINFO, GWLP_HWNDPARENT,
+                GWL_STYLE, GW_CHILD, IDC_ARROW, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN,
                 SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOSIZE,
                 SWP_NOZORDER, SW_HIDE, SW_SHOWNA, WM_ACTIVATE, WM_APP, WM_HOTKEY, WM_LBUTTONDOWN, WM_MBUTTONDOWN,
                 WM_MOUSEACTIVATE, WM_PARENTNOTIFY, WM_RBUTTONDOWN, WNDCLASSEXW, WS_CAPTION,
-                WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS,
+                WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_POPUP,
             },
         },
     };
@@ -575,7 +575,7 @@ mod imp {
     }
 
     fn events_q() -> &'static Mutex<Vec<Ev>> { static Q: OnceLock<Mutex<Vec<Ev>>> = OnceLock::new(); Q.get_or_init(Default::default) }
-    fn containers_map() -> &'static Mutex<HashMap<(u64, String), u64>> { static M: OnceLock<Mutex<HashMap<(u64, String), u64>>> = OnceLock::new(); M.get_or_init(Default::default) }
+    fn containers_map() -> &'static Mutex<HashMap<String, u64>> { static M: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new(); M.get_or_init(Default::default) }
     fn centered_dialogs() -> &'static Mutex<HashSet<u64>> { static D: OnceLock<Mutex<HashSet<u64>>> = OnceLock::new(); D.get_or_init(Default::default) }
 
     static ACTIVE_CONTAINER: AtomicU64 = AtomicU64::new(0);
@@ -702,8 +702,31 @@ mod imp {
     }
 
     /// Ensure `WS_CLIPCHILDREN` on gpui's `parent` HWND and create (or reuse) the hidden child container HWND for `(parent, key)`.
-    /// Reusing the parked container across `Edit -> View -> Edit` avoids `DestroyWindow` (which would destroy KiCad's `WS_CHILD`
-    /// frames or deadlock on a hung KiCad) and keeps `bp.8`'s `m_holder` valid.
+    unsafe fn parking_parent() -> HWND {
+        static P: AtomicU64 = AtomicU64::new(0);
+        let cur = P.load(Ordering::SeqCst);
+        if cur != 0 && unsafe { IsWindow(hwnd(cur)) } != 0 { return hwnd(cur) }
+        let cls = class_name();
+        let w = unsafe {
+            CreateWindowExW(
+                WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+                cls.as_ptr(),
+                null_mut(),
+                WS_POPUP | WS_CLIPCHILDREN,
+                -32000, -32000, 1, 1,
+                null_mut(),
+                null_mut(),
+                null_mut(),
+                null_mut(),
+            )
+        };
+        if !w.is_null() { P.store(id_of(w), Ordering::SeqCst); }
+        w
+    }
+
+    /// Create or reuse the `WS_CHILD` container HWND for `key`, moving it into `parent` (`SetParent` on GPUI's own thread)
+    /// when `parent` changes (Pop out / Pop back in). Keeping one container per project avoids `DestroyWindow` on a closing
+    /// pop-out window taking KiCad's `WS_CHILD` frames with it and keeps `bp.8`/`bp.9`'s `m_holder` valid.
     pub fn container_for(parent: u64, key: &str) -> Option<u64> {
         unsafe {
             let p = hwnd(parent);
@@ -714,14 +737,19 @@ mod imp {
             }
             if !key.is_empty() {
                 if let Ok(mut map) = containers_map().lock() {
-                    if let Some(&existing) = map.get(&(parent, key.to_string())) {
+                    if let Some(&existing) = map.get(key) {
                         let eh = hwnd(existing);
-                        if IsWindow(eh) != 0 && GetAncestor(eh, GA_PARENT) == p {
+                        if IsWindow(eh) != 0 {
+                            if GetAncestor(eh, GA_PARENT) != p {
+                                SetWindowRgn(eh, null_mut(), 0);
+                                ShowWindowAsync(eh, SW_HIDE);
+                                SetParent(eh, p);
+                            }
                             CHILD_FOCUSED.store(false, Ordering::SeqCst);
                             ACTIVE_CONTAINER.store(existing, Ordering::SeqCst);
                             return Some(existing);
                         }
-                        map.remove(&(parent, key.to_string()));
+                        map.remove(key);
                     }
                 }
             }
@@ -743,7 +771,7 @@ mod imp {
             ACTIVE_CONTAINER.store(cid, Ordering::SeqCst);
             if !key.is_empty() {
                 if let Ok(mut map) = containers_map().lock() {
-                    map.insert((parent, key.to_string()), cid);
+                    map.insert(key.to_string(), cid);
                 }
             }
             Some(cid)
@@ -752,9 +780,24 @@ mod imp {
 
     pub fn container(parent: u64) -> Option<u64> { container_for(parent, "") }
 
-    /// Switch the active container handle; `reattach()` (`AttachToParent`) moves KiCad's `WS_CHILD` frames on KiCad's own UI thread.
-    pub fn move_frames(_old: u64, new: u64) {
+    /// Park `old` (when distinct from `new`) under an immortal off-screen host HWND so closing a pop-out window never destroys it.
+    pub fn move_frames(old: u64, new: u64) {
         ACTIVE_CONTAINER.store(new, Ordering::SeqCst);
+        if old == 0 || old == new { return }
+        if let Ok(mut map) = containers_map().lock() {
+            map.retain(|_, &mut v| v != old);
+        }
+        unsafe {
+            let oh = hwnd(old);
+            if !oh.is_null() && IsWindow(oh) != 0 {
+                SetWindowRgn(oh, null_mut(), 0);
+                ShowWindowAsync(oh, SW_HIDE);
+                let park = parking_parent();
+                if !park.is_null() && GetAncestor(oh, GA_PARENT) != park {
+                    SetParent(oh, park);
+                }
+            }
+        }
     }
 
     /// Hide and park `container` without ever calling `DestroyWindow` or `SetParent(NULL)` on KiCad's cross-process child frames.
@@ -813,28 +856,48 @@ mod imp {
         }
     }
 
-    /// Direct `WS_CHILD` frames inside `container`, reading titles via `InternalGetWindowText` (kernel read, never sends `WM_GETTEXT`).
+    /// `WS_CHILD` frames inside `container` (direct children on bp.8/bp.9, or children of KiCad's `BackplaneKiCadEmbedHolder` on bp.11+),
+    /// reading titles via `InternalGetWindowText` (kernel read, never sends `WM_GETTEXT`).
     pub fn frames(container: u64) -> Vec<Frame> {
         let c = hwnd(container);
         if c.is_null() || unsafe { IsWindow(c) } == 0 { return vec![] }
-        struct Ctx { parent: HWND, out: Vec<Frame> }
+        struct Ctx { parent: HWND, holders: Vec<HWND>, out: Vec<Frame> }
         unsafe extern "system" fn cb(w: HWND, l: LPARAM) -> i32 {
             let ctx = unsafe { &mut *(l as *mut Ctx) };
-            if unsafe { GetAncestor(w, GA_PARENT) } != ctx.parent { return 1 }
+            let p = unsafe { GetAncestor(w, GA_PARENT) };
+            if p == ctx.parent {
+                let mut cls = [0u16; 64];
+                let cn = unsafe { GetClassNameW(w, cls.as_mut_ptr(), cls.len() as i32) };
+                if cn > 0 && String::from_utf16_lossy(&cls[..cn as usize]) == "BackplaneKiCadEmbedHolder" { // i18n-ok: Win32 window class name
+                    ctx.holders.push(w);
+                    return 1;
+                }
+            } else if !ctx.holders.contains(&p) {
+                return 1;
+            }
             let mut buf = [0u16; 512];
             let n = unsafe { InternalGetWindowText(w, buf.as_mut_ptr(), buf.len() as i32) };
             let t = if n > 0 { String::from_utf16_lossy(&buf[..n as usize]) } else { String::new() };
             ctx.out.push(Frame { window: id_of(w), kind: super::kind_of_title(&t), title: t });
             1
         }
-        let mut ctx = Ctx { parent: c, out: Vec::new() };
+        let mut ctx = Ctx { parent: c, holders: Vec::new(), out: Vec::new() };
         unsafe { EnumChildWindows(c, Some(cb), &mut ctx as *mut Ctx as LPARAM); }
         ctx.out
     }
 
     /// Position/size/show `container` and its child frames strictly via `SWP_ASYNCWINDOWPOS` and `ShowWindowAsync`.
-    /// Windows: the fork's frames are KiCad's to show (ShowFrame); the round trip stays.
-    pub fn place_local(container: u64, r: Option<R>, show: Option<u64>, mine: &[u64], last_root: &mut (i32, i32)) { place(container, r, show, Some(mine), last_root) }
+    /// bp.9's local map: toggle `SW_SHOWNA`/`SW_HIDE` asynchronously on frames KiCad has already shown once (`mine`).
+    pub fn place_local(container: u64, r: Option<R>, show: Option<u64>, mine: &[u64], last_root: &mut (i32, i32)) {
+        place(container, r, show, Some(mine), last_root);
+        if r.is_none() { return }
+        for &k in mine {
+            let kh = hwnd(k);
+            if !kh.is_null() && unsafe { IsWindow(kh) } != 0 {
+                unsafe { ShowWindowAsync(kh, if Some(k) == show { SW_SHOWNA } else { SW_HIDE }); }
+            }
+        }
+    }
     pub fn place(container: u64, r: Option<R>, show: Option<u64>, managed: Option<&[u64]>, last_root: &mut (i32, i32)) {
         let c = hwnd(container);
         if c.is_null() || unsafe { IsWindow(c) } == 0 { return }
@@ -906,17 +969,13 @@ mod imp {
     }
 
     unsafe fn focus_target_in_frame(frame: HWND) -> HWND {
-        let mut pt = POINT::default();
-        if unsafe { GetCursorPos(&mut pt) } != 0 {
-            let hit = unsafe { WindowFromPoint(pt) };
-            if !hit.is_null() && (hit == frame || unsafe { IsChild(frame, hit) } != 0) {
-                return hit;
-            }
-        }
         struct Best { best: HWND, area: i64 }
         unsafe extern "system" fn cb(w: HWND, l: LPARAM) -> i32 {
             let b = unsafe { &mut *(l as *mut Best) };
             if unsafe { IsWindowVisible(w) } == 0 { return 1 }
+            // Pick the largest visible leaf child HWND (the GAL / 3D canvas), never an AUI container wxPanel
+            // whose wxControlContainer redirects WM_SETFOCUS to its first toolbar Edit box.
+            if !unsafe { GetWindow(w, GW_CHILD) }.is_null() { return 1 }
             let mut rc = RECT::default();
             if unsafe { GetWindowRect(w, &mut rc) } != 0 {
                 let area = ((rc.right - rc.left).max(0) as i64) * ((rc.bottom - rc.top).max(0) as i64);
@@ -926,6 +985,20 @@ mod imp {
         }
         let mut best = Best { best: frame, area: 0 };
         unsafe { EnumChildWindows(frame, Some(cb), &mut best as *mut Best as LPARAM); }
+        let mut pt = POINT::default();
+        if unsafe { GetCursorPos(&mut pt) } != 0 {
+            let hit = unsafe { WindowFromPoint(pt) };
+            if !hit.is_null() && hit != frame && unsafe { IsChild(frame, hit) } != 0 {
+                let mut cls = [0u16; 64];
+                let n = unsafe { GetClassNameW(hit, cls.as_mut_ptr(), cls.len() as i32) };
+                if n > 0 {
+                    let name = String::from_utf16_lossy(&cls[..n as usize]);
+                    if name.eq_ignore_ascii_case("Edit") || name.eq_ignore_ascii_case("ComboBox") { // i18n-ok: Win32 window class name
+                        return hit;
+                    }
+                }
+            }
+        }
         best.best
     }
 
@@ -1015,10 +1088,15 @@ mod imp {
             if GetCursorPos(&mut pt) == 0 { return None }
             let hit = WindowFromPoint(pt);
             if hit.is_null() { return None }
-            let c = GetAncestor(hwnd(w), GA_PARENT);
-            if c.is_null() { return None }
-            let top = GetAncestor(c, GA_PARENT);
+            let top = GetAncestor(hwnd(w), GA_ROOT);
             if top.is_null() { return None }
+            let mut c = GetAncestor(hwnd(w), GA_PARENT);
+            while !c.is_null() && c != top {
+                let next = GetAncestor(c, GA_PARENT);
+                if next == top { break }
+                c = next;
+            }
+            if c.is_null() || c == top { return None }
             let in_cont = hit == c || IsChild(c, hit) != 0;
             let in_top = hit == top || IsChild(top, hit) != 0;
             if in_cont {

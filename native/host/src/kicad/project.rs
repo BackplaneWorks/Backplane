@@ -29,7 +29,15 @@ pub fn found(root: &Path) -> Vec<String> {
 fn names(dir: &Path) -> Vec<String> { let mut v: Vec<String> = std::fs::read_dir(dir).map(|r| r.flatten().filter_map(|e| e.file_name().to_str().map(str::to_string)).collect()).unwrap_or_default(); v.sort(); v }
 fn dir_of(p: &str) -> &str { p.rsplit_once('/').map(|(d, _)| d).unwrap_or("") }
 fn last_of(p: &str) -> &str { p.rsplit('/').next().unwrap_or(p) }
-fn abs(root: &str, rel: &str) -> String { if rel.is_empty() { String::new() } else if crate::plat::fs::is_abs(rel) { rel.into() } else { format!("{root}/{rel}") } }
+fn abs(root: &str, rel: &str) -> String {
+    if rel.is_empty() { return String::new() }
+    if crate::plat::fs::is_abs(rel) { return rel.into() }
+    if root.contains('\\') && !root.contains('/') {
+        format!("{}\\{}", root.trim_end_matches('\\'), rel.replace('/', "\\"))
+    } else {
+        format!("{root}/{rel}")
+    }
+}
 fn pick(ns: &[String], ext: &str) -> String { ns.iter().find(|n| n.ends_with(ext)).cloned().unwrap_or_default() }
 fn named(ns: &[String], stem: &str, ext: &str) -> String { let w = format!("{stem}{ext}"); if ns.contains(&w) { w } else { pick(ns, ext) } }
 fn in_dir(dir: &str, name: &str) -> String { if dir.is_empty() || name.is_empty() { name.into() } else { format!("{dir}/{name}") } }
@@ -73,5 +81,7 @@ mod tests {
         let f = read(r.to_str().unwrap()); let root = r.to_str().unwrap();
         assert_eq!(f.pcb, format!("{root}/custom/b.kicad_pcb")); assert_eq!(f.sch, format!("{root}/s/top.kicad_sch"));
         let e = tmp("d"); let f = read(e.to_str().unwrap()); assert_eq!((f.pro.as_str(), f.pcb.as_str()), ("", ""));
+        assert_eq!(abs(r"C:\bp\proj", "sub/a.kicad_pcb"), r"C:\bp\proj\sub\a.kicad_pcb");
+        assert_eq!(abs(r"C:\bp\proj\", "ecc83-pp.kicad_pro"), r"C:\bp\proj\ecc83-pp.kicad_pro");
     }
 }
