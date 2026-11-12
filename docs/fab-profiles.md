@@ -44,3 +44,22 @@ nothing goes into a KiCad file. Until picked: the fab Backplane orders from, wit
   inherited?, changed?}], stackups, assembly:{economic, standard}, pages, changed:[line], fabs, kinds}`; each of `free`/`extra` is
   `{value, unit, source, fetched, confidence, note?, preferred?}`. `changed` lists what differs from the revision the project last saw
   (`seen` marks the current one seen). In UI copy the fab is "the fab".
+
+## DRC rules (`fab/drc.rs`)
+
+`fab_profile {action: "drc"}` (and `fab.profile {action: "drc"}`) writes the fab's limits into the project's `<project>.kicad_dru` as a
+marked section, merged, never overwritten:
+
+- Whole-line `#` comments `# BEGIN Backplane fab profile` … `# END Backplane fab profile`, right after the file's `(version 1)` (a new
+  file gets one). Regenerated in place; every byte outside the markers stays as the person wrote it (a test proves the round trip).
+- KiCad lets later rules win, so the person's own rules, after the section, keep precedence where they match.
+- A board setup minimum (the .kicad_pro's `board.design_settings.rules`) already as strict as the fab's gets no rule, only a comment:
+  the project wins. One under it gets the rule and is listed in `drc.suggestions` for the person to approve; Backplane never rewrites
+  the board setup itself.
+- Clearance is written only between net classes whose own clearance is under the fab's, so no net class is ever loosened.
+- The person's rules that allow less than the fab are listed in `drc.conflicts`, never changed.
+- `tier` (picked with the project, default `free`) chooses the base-price limits or what the fab makes for more.
+- A pick regenerates a section that is already there. The view's `drc` says `{file, present, current, suggestions, conflicts}`.
+- Everything in the section loads in stock KiCad: `test/fab/stock_drc.sh [kicad-cli] [demo project]` writes it for each board kind
+  and tier into a copy of a KiCad demo with a sentinel rule after it and runs stock `kicad-cli pcb drc` (KiCad drops a whole rules file
+  that does not load, so the sentinel firing proves it loaded); last run on KiCad 10.0.7, all six cases.

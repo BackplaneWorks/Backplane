@@ -1,6 +1,7 @@
 //! Fab profiles (docs/fab-profiles.md): what each fab (and its assembly service) can make, gathered from its published pages, every value
 //! with its source and date; the project's fab, picked once; the view clients and agents read (`fab.profile`, the tool `fab_profile`).
 //! model.rs is the data and its pure rules, store.rs where profiles are kept, project.rs the project's choice.
+pub mod drc;
 pub mod model;
 pub mod project;
 pub mod store;
@@ -37,11 +38,23 @@ pub fn view_of(p: &Profile, c: &project::Choice, home: &Path) -> Value {
         "stackups": stackups(p, &o).iter().map(|s| serde_json::to_value(s).unwrap_or_default()).collect::<Vec<_>>(),
         "assembly": assembly, "pages": p.pages, "changed": changes.iter().map(|x| x.line()).collect::<Vec<_>>()})
 }
+fn profile_of(home: &Path, fab: &str) -> Result<Profile, String> { store::load(home, fab).ok_or_else(|| format!("Backplane has no profile of the fab {fab:?} (it has {})", store::fabs(home).join(", "))) }
 pub fn view_in(home: &Path, root: Option<&Path>) -> Result<Value, String> {
     let Some(root) = root else { return Err("this thread has no project folder".into()) };
     let c = choice(root);
-    let p = store::load(home, &c.fab).ok_or_else(|| format!("Backplane has no profile of the fab {:?} (it has {})", c.fab, store::fabs(home).join(", ")))?;
-    let mut v = view_of(&p, &c, home); v["fabs"] = json!(store::fabs(home)); v["kinds"] = json!(model::KINDS); Ok(v)
+    let p = profile_of(home, &c.fab)?;
+    let mut v = view_of(&p, &c, home); v["fabs"] = json!(store::fabs(home)); v["kinds"] = json!(model::KINDS);
+    if let Some((dru, plan)) = drc_plan(root, &p, &c) { let text = std::fs::read_to_string(&dru).unwrap_or_default(); let mut s = drc::status(&text, &plan); s["file"] = json!(rel(root, &dru)); v["drc"] = s }
+    Ok(v)
+}
+fn rel(root: &Path, p: &Path) -> String { p.strip_prefix(root).unwrap_or(p).to_string_lossy().into_owned() }
+/// The project's rules file and the section the profile makes for it (none without a KiCad project).
+fn drc_plan(root: &Path, p: &Profile, c: &project::Choice) -> Option<(PathBuf, drc::Plan)> {
+    let pro = crate::files::kicad::project::read(&root.to_string_lossy()).pro;
+    let dru = drc::dru_path(&pro)?;
+    let rules = drc::project_rules(&std::fs::read_to_string(&pro).unwrap_or_default());
+    let text = std::fs::read_to_string(&dru).unwrap_or_default();
+    Some((dru, drc::plan(p, c, &rules, &text)))
 }
 
 /// The design root of a thread (main's checkout for a hardware thread) or of a project by id.
@@ -68,10 +81,21 @@ pub async fn act(hub: &Arc<Hub>, thread: &str, project: &str, a: &Value) -> Resu
                 let p = store::load(&home, &fab).ok_or_else(|| format!("Backplane has no profile of the fab {fab:?} (it has {})", store::fabs(&home).join(", ")))?;
                 let kind = if sv(&a, "kind").is_empty() || action == "seen" { c.kind.clone() } else { sv(&a, "kind").to_string() };
                 let options = match a.get("options") { Some(o @ Value::Object(_)) if action == "pick" => o.clone(), _ => c.options.clone() };
-                project::write(r, &fab, &kind, &options, p.rev)?;
+                let tier = if action == "pick" && !sv(&a, "tier").is_empty() { sv(&a, "tier").to_string() } else { c.tier.clone() };
+                project::write(r, &fab, &kind, &options, &tier, p.rev)?;
+                // a rules file that has the section follows the new pick
+                if let Some((dru, plan)) = drc_plan(r, &p, &choice(r)) { if drc::section(&std::fs::read_to_string(&dru).unwrap_or_default()).is_some() { drc::write(&dru, &plan)?; } }
                 view_in(&home, Some(r))
             }
-            x => Err(format!("unknown action {x:?}: get, pick or seen")),
+            // the fab's limits into the project's rules file, its own rules kept (drc.rs)
+            "drc" => {
+                let Some(r) = root.as_deref() else { return Err("this thread has no project folder".to_string()) };
+                let c = choice(r); let p = profile_of(&home, &c.fab)?;
+                let Some((dru, plan)) = drc_plan(r, &p, &c) else { return Err("this project has no KiCad project (.kicad_pro) to keep DRC rules beside".to_string()) };
+                drc::write(&dru, &plan)?;
+                let mut v = view_in(&home, Some(r))?; v["drc"]["written"] = json!(true); Ok(v)
+            }
+            x => Err(format!("unknown action {x:?}: get, pick, seen or drc")),
         }
     }).await.unwrap_or_else(|_| Err("failed".into()))
 }
@@ -91,9 +115,10 @@ impl RpcHandler for Rpc {
 pub struct Tools(pub Arc<Hub>);
 pub const TOOL: &str = "fab_profile";
 pub fn tool_def() -> Value {
-    json!({"name": TOOL, "description": "The project's fab profile: what the fab it is made at can make, read from the fab's published pages. Per capability (track width, spacing, drills, via hole and diameter, rings, hole and edge clearances, silkscreen, solder mask, board size, finishes, via types, ...) the free limit and the one that costs more, each with its unit, source page, the day it was read and its confidence (published, derived or inherited); the stackups that fit the board (dielectric thicknesses and Er); the assembly services' limits. Use these numbers, with their source, instead of remembered ones. get (default): the profile for the project's fab, board kind and options (picked, else its board fab file's, else its KiCad board's layers and thickness). pick: keep the fab, kind (pcb, flex, hdi, aluminum, copper_core, rogers, ptfe) and options (layers, copper_oz, thickness_mm, finish, color) with the project; only when the person chose them. seen: mark the changes since the project last looked as read.",
+    json!({"name": TOOL, "description": "The project's fab profile: what the fab it is made at can make, read from the fab's published pages. Per capability (track width, spacing, drills, via hole and diameter, rings, hole and edge clearances, silkscreen, solder mask, board size, finishes, via types, ...) the free limit and the one that costs more, each with its unit, source page, the day it was read and its confidence (published, derived or inherited); the stackups that fit the board (dielectric thicknesses and Er); the assembly services' limits. Use these numbers, with their source, instead of remembered ones. get (default): the profile for the project's fab, board kind and options (picked, else its board fab file's, else its KiCad board's layers and thickness). pick: keep the fab, kind (pcb, flex, hdi, aluminum, copper_core, rogers, ptfe), options (layers, copper_oz, thickness_mm, finish, color) and tier (free: DRC holds the board to the fab's base-price limits, the default; extra: to what it makes for more) with the project; only when the person chose them. seen: mark the changes since the project last looked as read. drc: write the fab's limits into the project's .kicad_dru as a marked section (the project's own rules and stricter settings are kept and win); drc in the answer says whether that section is current, the board setup minimums under the fab's (suggestions: tell the person, never change the board setup yourself) and the project's own rules that allow less than the fab (conflicts).",
         "inputSchema": {"type": "object", "properties": {
-            "action": {"type": "string", "description": "get (default), pick or seen"},
+            "action": {"type": "string", "description": "get (default), pick, seen or drc"},
+            "tier": {"type": "string", "description": "pick: free (default) or extra"},
             "fab": {"type": "string", "description": "pick: the fab's id (get lists them in fabs)"},
             "kind": {"type": "string", "description": "pick: the board kind"},
             "options": {"type": "object", "description": "pick: the board's options in fab.json words, e.g. {\"layers\": 4, \"copper_oz\": 1, \"thickness_mm\": 1.6, \"finish\": \"enig\"}"}}, "required": []}})
@@ -124,8 +149,11 @@ mod tests {
         assert!(v["stackups"].as_array().unwrap().iter().any(|s| s["id"] == "JLC04161H-7628"), "a 4-layer 1.6 mm board gets the published stackups");
         assert!(v["assembly"]["economic"].as_array().unwrap().iter().any(|l| l["key"] == "min_package"));
         assert!(view_in(home, None).is_err());
+        assert_eq!((v["drc"]["present"].clone(), v["drc"]["file"].clone()), (json!(false), json!("boards/a/a.kicad_dru")), "the rules file beside the project, not written yet");
+        let (dru, plan) = drc_plan(r, &store::load(home, "jlcpcb").unwrap(), &choice(r)).unwrap(); drc::write(&dru, &plan).unwrap();
+        assert_eq!(view_in(home, Some(r)).unwrap()["drc"]["current"], json!(true));
         // a newer gathered revision shows what changed since the project last looked
-        project::write(r, "jlcpcb", "pcb", &json!({"layers": 4}), 1).unwrap();
+        project::write(r, "jlcpcb", "pcb", &json!({"layers": 4}), "free", 1).unwrap();
         let mut p = store::load(home, "jlcpcb").unwrap(); p.rev = 2; p.updated = "2099-01-01".into();
         p.kinds.get_mut("pcb").unwrap().limits.iter_mut().find(|l| l.key == "copper_to_edge_min").unwrap().value = json!(0.3);
         store::save(home, &p).unwrap();

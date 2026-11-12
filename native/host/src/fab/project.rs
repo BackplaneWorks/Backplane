@@ -19,10 +19,12 @@ pub struct Choice {
     pub rev_seen: u64,
     /// the fab file it came from, if any
     pub from: String,
+    /// which limits DRC holds the board to: "free" (the fab's base price, the default) or "extra" (what it makes for more)
+    pub tier: String,
 }
 impl Choice {
     pub fn opts(&self) -> Opts { Opts::from(&self.options) }
-    pub fn json(&self) -> Value { json!({"fab": self.fab, "kind": self.kind, "options": self.opts().json(), "by": self.by, "rev_seen": self.rev_seen, "from": self.from}) }
+    pub fn json(&self) -> Value { json!({"fab": self.fab, "kind": self.kind, "options": self.opts().json(), "by": self.by, "rev_seen": self.rev_seen, "from": self.from, "tier": self.tier}) }
 }
 
 /// Copper layers and thickness of a KiCad board (its `(layers ...)` and `(general (thickness ...))`), read from its head.
@@ -42,28 +44,30 @@ pub fn choice_in(root: &Path, fab_files: &[(String, String)], board: &str, defau
     if let Some(v) = std::fs::read_to_string(root.join(FILE)).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()) {
         let fab = v["fab"].as_str().unwrap_or("").to_string(); let kind = v["kind"].as_str().unwrap_or("pcb");
         if !fab.is_empty() {
-            return Choice { fab, kind: if KINDS.contains(&kind) { kind.into() } else { "pcb".into() }, options: v.get("options").cloned().unwrap_or(json!({})), by: "picked".into(), rev_seen: v["rev_seen"].as_u64().unwrap_or(0), from: FILE.into() }
+            return Choice { fab, kind: if KINDS.contains(&kind) { kind.into() } else { "pcb".into() }, options: v.get("options").cloned().unwrap_or(json!({})), by: "picked".into(), rev_seen: v["rev_seen"].as_u64().unwrap_or(0), from: FILE.into(), tier: tier_of(v["tier"].as_str().unwrap_or("")) }
         }
     }
     for (path, text) in fab_files {
         let Ok(v) = serde_json::from_str::<Value>(text) else { continue };
         let kind = v["kind"].as_str().unwrap_or("");
         if KINDS.contains(&kind) && v["order"] != json!(false) {
-            return Choice { fab: default_fab.into(), kind: kind.into(), options: v.get("options").cloned().unwrap_or(json!({})), by: "fab.json".into(), rev_seen: 0, from: path.clone() }
+            return Choice { fab: default_fab.into(), kind: kind.into(), options: v.get("options").cloned().unwrap_or(json!({})), by: "fab.json".into(), rev_seen: 0, from: path.clone(), tier: "free".into() }
         }
     }
     let b = board_opts(board);
     let by = if b.as_object().map_or(true, |m| m.is_empty()) { "default" } else { "board" };
-    Choice { fab: default_fab.into(), kind: "pcb".into(), options: b, by: by.into(), rev_seen: 0, from: String::new() }
+    Choice { fab: default_fab.into(), kind: "pcb".into(), options: b, by: by.into(), rev_seen: 0, from: String::new(), tier: "free".into() }
 }
 
+pub fn tier_of(s: &str) -> String { if s == "extra" { "extra".into() } else { "free".into() } }
+
 /// Keep the person's pick (and what revision they have seen). Refused on a copy.
-pub fn write(root: &Path, fab: &str, kind: &str, options: &Value, rev_seen: u64) -> Result<(), String> {
+pub fn write(root: &Path, fab: &str, kind: &str, options: &Value, tier: &str, rev_seen: u64) -> Result<(), String> {
     if crate::copy::on() { return Err(crate::copy::HOME_ONLY.into()) }
     if !KINDS.contains(&kind) { return Err(format!("{kind} is not a board kind (one of {})", KINDS.join(", "))) }
     let p = root.join(FILE);
     std::fs::create_dir_all(p.parent().unwrap()).map_err(|e| e.to_string())?;
-    let text = serde_json::to_string_pretty(&json!({"fab": fab, "kind": kind, "options": options, "rev_seen": rev_seen})).unwrap() + "\n";
+    let text = serde_json::to_string_pretty(&json!({"fab": fab, "kind": kind, "options": options, "tier": tier_of(tier), "rev_seen": rev_seen})).unwrap() + "\n";
     std::fs::write(&p, text).map_err(|e| e.to_string())
 }
 
@@ -78,8 +82,8 @@ mod tests {
         assert_eq!(choice_in(r, &[], "", "jlcpcb").by, "default");
         let files = vec![("mech/case.fab.json".to_string(), r#"{"kind":"3dp"}"#.to_string()), ("boards/a/a.fab.json".to_string(), r#"{"kind":"flex","options":{"layers":2}}"#.to_string())];
         let c = choice_in(r, &files, BOARD, "jlcpcb"); assert_eq!((c.by.as_str(), c.kind.as_str(), c.from.as_str(), c.opts().layers), ("fab.json", "flex", "boards/a/a.fab.json", 2.0));
-        write(r, "jlcpcb", "pcb", &json!({"layers": 6}), 3).unwrap();
-        let c = choice_in(r, &files, BOARD, "jlcpcb"); assert_eq!((c.by.as_str(), c.kind.as_str(), c.opts().layers, c.rev_seen), ("picked", "pcb", 6.0, 3));
-        assert!(write(r, "jlcpcb", "3dp", &json!({}), 0).is_err(), "a profile is a board's");
+        write(r, "jlcpcb", "pcb", &json!({"layers": 6}), "extra", 3).unwrap();
+        let c = choice_in(r, &files, BOARD, "jlcpcb"); assert_eq!((c.by.as_str(), c.kind.as_str(), c.opts().layers, c.rev_seen, c.tier.as_str()), ("picked", "pcb", 6.0, 3, "extra"));
+        assert!(write(r, "jlcpcb", "3dp", &json!({}), "", 0).is_err(), "a profile is a board's");
     }
 }
