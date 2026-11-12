@@ -1,6 +1,6 @@
 //! backplane-hub: the Backplane hub for native clients (GPUI, SwiftUI, Compose).
 //! HTTP + authenticated WebSocket; renderer `mobile`; the picture comes from the presenter.
-mod agents; mod api; mod fab; mod google; mod import014; mod auth; mod bots; mod cbor; mod commands; mod data; mod copy; mod delta; mod files; mod guard; mod hub; mod md; mod mcpx; mod mirror; mod model; mod net; mod plat; #[cfg(test)] #[path = "plat/tests.rs"] mod plat_tests; mod present;
+mod agents; mod api; mod fab; mod review; mod google; mod import014; mod auth; mod bots; mod cbor; mod commands; mod data; mod copy; mod delta; mod files; mod guard; mod hub; mod md; mod mcpx; mod mirror; mod model; mod net; mod plat; #[cfg(test)] #[path = "plat/tests.rs"] mod plat_tests; mod present;
 mod presenter; mod proc; mod push; mod session; mod settings; mod shelf; mod sidebar; mod signal; mod stamp; mod state; #[path = "state/host.rs"] mod statehost; mod ckpt; mod ckptrun; #[cfg(test)] mod fold_inputs; #[cfg(test)] mod oneshot_script_tests; mod startup; mod store; mod term; mod update; mod voice; mod wire; mod window;
 
 use anyhow::{Context, Result};
@@ -184,6 +184,7 @@ async fn run(a: Args) -> Result<()> {
         settings::order::resume(ag.clone()); // Od.resume: follow every order not yet delivered (a copy follows none)
         files::tools::register(&hub, ag);
         fab::start(&hub, Some(ag)); // fab profiles: fab.profile and the agents' fab_profile
+        review::start(&hub, Some(ag)); // the design review: design_review, its runs on save
         let _mcp = mcpx::svc::start(&hub, ag, std::path::PathBuf::from(&ag.host.user_home)); // Settings > MCP: the servers every agent gets, the mcp_ tools, mcp.page
         let a2 = ag.clone(); guard::watch("agents", move || { let a = a2.clone(); Box::pin(async move { drop(a.world().await); }) });
     }

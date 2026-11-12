@@ -1,0 +1,235 @@
+//! The automated design review (docs/design-review.md): one run of deterministic checkers over a project, each a findings source in
+//! lane E's model (kicad/findings.rs): "drc" and "erc" (E's own runs, waited for when the scope needs them fresh), "fab" (the fab's
+//! limits the DRC rules cannot say, and the DRC rules' fab section), "bom", "outputs", "assembly", "mech" (review/checks.rs). Agent-judged
+//! checks (a datasheet against a footprint) are a separate class, never mixed in silently. A run is kept in the project as
+//! `.backplane/design-review.json` (findings, what was skipped and why, the design's fingerprint) and written out as `.backplane/review.md`;
+//! `order_review record` takes its verdict and must-changes from it, so the Buy flow rests on it. Published as info `review.<digest>`.
+//! Triggers: policy.rs. Tool: `design_review {scope}`.
+pub mod checks;
+pub mod policy;
+
+use crate::fab;
+use crate::files::kicad::findings::{self as fd, Finding};
+use crate::hub::Hub;
+use serde_json::{json, Value};
+use std::{path::{Path, PathBuf}, sync::Arc, time::Duration};
+
+pub const FILE: &str = ".backplane/design-review.json";
+/// The sources a deterministic run fills, in the order they are listed.
+pub const SOURCES: &[&str] = &["drc", "erc", "fab", "bom", "outputs", "assembly", "mech"];
+/// A severity in the review's words: error must change, warning should, info is a note.
+pub fn level(sev: &str) -> &'static str { match sev { "error" => "must change", "warning" => "should", "excluded" => "excluded", _ => "note" } }
+
+/// The run as kept and published.
+pub fn run_json(at: u64, scope: &str, fingerprint: &str, rev: &Value, findings: &[Finding], skipped: &[String], took_ms: u64) -> Value {
+    // must-changes first, then the order the sources were checked in
+    let mut sorted: Vec<&Finding> = findings.iter().collect(); sorted.sort_by_key(|f| fd::rank(&f.severity));
+    let findings: Vec<Finding> = sorted.into_iter().cloned().collect(); let findings = &findings[..];
+    let c = fd::counts(findings);
+    let by: serde_json::Map<String, Value> = SOURCES.iter().map(|s| (s.to_string(), fd::counts(&findings.iter().filter(|f| f.source == *s).cloned().collect::<Vec<_>>()).to_json())).collect();
+    json!({"at": at, "scope": scope, "fingerprint": fingerprint, "rev": rev, "took_ms": took_ms, "counts": c.to_json(), "by_source": by, "skipped": skipped,
+        "verdict": if c.error > 0 { "issues" } else { "ok" }, "findings": findings.iter().map(fd::to_json).collect::<Vec<_>>()})
+}
+/// One line per must-change (for order_review's issues and the Buy gate), at most `n`.
+pub fn must_lines(run: &Value, n: usize) -> Vec<String> {
+    run["findings"].as_array().into_iter().flatten().filter(|f| f["severity"] == "error").map(|f| { let refs: Vec<&str> = f["anchors"].as_array().into_iter().flatten().filter_map(|a| a["reference"].as_str()).take(3).collect();
+        let t = f["title"].as_str().unwrap_or(""); if refs.is_empty() || refs.iter().any(|r| t.contains(r)) { t.to_string() } else { format!("{}: {t}", refs.join(", ")) } }).take(n).collect()
+}
+/// `.backplane/review.md` from a run: per severity the findings with where and the fix; what was skipped; the agent's own notes after.
+pub fn md(run: &Value, notes: &str) -> String {
+    let fs: Vec<&Value> = run["findings"].as_array().into_iter().flatten().collect();
+    let mut s = format!("# Design review\n\n{} · scope {} · {} must change, {} should, {} notes\n", run["verdict"].as_str().unwrap_or(""), run["scope"].as_str().unwrap_or(""), run["counts"]["error"], run["counts"]["warning"], run["counts"]["info"]);
+    for (sev, head) in [("error", "Must change"), ("warning", "Should"), ("info", "Notes")] {
+        let xs: Vec<&&Value> = fs.iter().filter(|f| f["severity"] == sev).collect();
+        if xs.is_empty() { continue }
+        s += &format!("\n## {head}\n\n");
+        for f in xs {
+            let at: Vec<String> = f["anchors"].as_array().into_iter().flatten().take(4).map(|a| a["reference"].as_str().filter(|x| !x.is_empty()).or(a["net"].as_str().filter(|x| !x.is_empty())).or(a["text"].as_str()).unwrap_or("").to_string()).filter(|x| !x.is_empty()).collect();
+            s += &format!("- **{}** ({}{}){}{}\n", f["title"].as_str().unwrap_or(""), f["source"].as_str().unwrap_or(""), if at.is_empty() { String::new() } else { format!(": {}", at.join(", ")) },
+                f["detail"].as_str().filter(|d| !d.is_empty()).map(|d| format!(" {d}")).unwrap_or_default(), f["fix"].as_str().filter(|d| !d.is_empty()).map(|d| format!(" Fix: {d}.")).unwrap_or_default());
+        }
+    }
+    let sk: Vec<&str> = run["skipped"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+    if !sk.is_empty() { s += "\n## Not checked\n\n"; for x in sk { s += &format!("- {x}\n") } }
+    if !notes.trim().is_empty() { s += &format!("\n## The reviewer's notes\n\n{}\n", notes.trim()) }
+    s
+}
+
+/// Everything a run reads that is not the hub's: the project's files.
+fn read_files(root: &Path) -> (Vec<(String, String)>, String, String, String) {
+    let files: Vec<(String, String)> = crate::settings::fab::find_fab(root).into_iter().map(|p| { let t = std::fs::read_to_string(root.join(&p)).unwrap_or_default(); (p, t) }).collect();
+    let f = crate::files::kicad::project::read(&root.to_string_lossy());
+    (files, std::fs::read_to_string(&f.pcb).unwrap_or_default(), f.pro, f.pcb)
+}
+/// The newest output set in mfg/ (a folder with Gerbers), its files and drill texts, and its placement file.
+pub fn newest_outputs(root: &Path) -> (Option<checks::Outputs>, Option<(String, String)>) {
+    let mut dirs: Vec<(std::time::SystemTime, PathBuf)> = vec![];
+    fn walk(d: &Path, depth: usize, out: &mut Vec<(std::time::SystemTime, PathBuf)>) {
+        let Ok(rd) = std::fs::read_dir(d) else { return };
+        let mut gerb = false;
+        for e in rd.flatten() { let p = e.path(); if p.is_dir() && depth < 3 { walk(&p, depth + 1, out) } else if p.extension().map_or(false, |x| { let x = x.to_string_lossy().to_ascii_lowercase(); x == "gtl" || x == "gbr" || x == "gbl" }) { gerb = true } }
+        if gerb { if let Ok(m) = std::fs::metadata(d).and_then(|m| m.modified()) { out.push((m, d.to_path_buf())) } }
+    }
+    walk(&root.join("mfg"), 0, &mut dirs);
+    dirs.sort_by(|a, b| b.0.cmp(&a.0));
+    let Some((_, d)) = dirs.into_iter().next() else { return (None, None) };
+    let rel = |p: &Path| p.strip_prefix(root).unwrap_or(p).to_string_lossy().into_owned();
+    let names: Vec<String> = std::fs::read_dir(&d).map(|r| r.flatten().map(|e| e.file_name().to_string_lossy().into_owned()).collect()).unwrap_or_default();
+    let drills = names.iter().filter(|n| n.ends_with(".drl") || n.ends_with(".xln")).map(|n| (n.clone(), std::fs::read_to_string(d.join(n)).unwrap_or_default())).collect();
+    // the placement file: beside the Gerbers or one folder up (a CPL or -pos/-top-pos csv)
+    let pos = [d.clone(), d.parent().map(Path::to_path_buf).unwrap_or_default()].iter().find_map(|dd| std::fs::read_dir(dd).ok()?.flatten().map(|e| e.path()).find(|p| { let n = p.file_name().map(|n| n.to_string_lossy().to_ascii_lowercase()).unwrap_or_default(); n.ends_with(".csv") && (n.contains("cpl") || n.contains("pos")) }))
+        .and_then(|p| Some((rel(&p), std::fs::read_to_string(&p).ok()?)));
+    (Some(checks::Outputs { dir: rel(&d), files: names, drills }), pos)
+}
+
+/// The deterministic checkers that read only files (no kicad-cli): fab, bom, outputs, assembly, mech. `bom_lines` is the published BOM.
+pub fn run_files(home: &Path, root: &Path, bom_lines: &[Value]) -> (Vec<Finding>, Vec<String>) {
+    let (fab_files, pcb, pro, pcb_path) = read_files(root);
+    let mut out: Vec<Finding> = vec![]; let mut skipped: Vec<String> = vec![];
+    let c = fab::choice(root);
+    let parsed: Vec<(String, Value)> = fab_files.iter().filter_map(|(p, t)| Some((p.clone(), serde_json::from_str::<Value>(t).ok()?))).collect();
+    let board_fab = parsed.iter().find(|(_, j)| fab::model::KINDS.contains(&j["kind"].as_str().unwrap_or("")) && j["order"] != false);
+    let u = if pcb.is_empty() { checks::Usage::default() } else { checks::usage(&pcb) };
+    match fab::store::load(home, &c.fab) {
+        Some(p) if !pcb_path.is_empty() => {
+            if let Some((dru, plan)) = fab::drc_plan(root, &p, &c) { let rel = dru.strip_prefix(root).unwrap_or(&dru).to_string_lossy().into_owned(); out.extend(checks::drc_section(&plan, &std::fs::read_to_string(&dru).unwrap_or_default(), &rel)) }
+            match board_fab { Some((path, j)) => out.extend(checks::fab_checks(&p, &c, j, path, &u)), None => skipped.push("Fab options and board size: the board has no fab file (<name>.fab.json) to check".into()) }
+            let sel = fab::model::select(&p, &c.kind, &c.opts());
+            let (o, pos) = newest_outputs(root);
+            out.extend(checks::outputs(o.as_ref(), u.copper_layers, &sel));
+            let assembled = c.kind == "pcb" && board_fab.map_or(false, |(_, j)| j["options"]["assemble"] != false);
+            out.extend(checks::assembly(&u, pos.as_ref().map(|(n, t)| (n.as_str(), t.as_str())), assembled));
+            if o.is_some() { skipped.push("Outputs against the board: a fresh export compared with mfg/ (on demand and before an order, not on save)".into()) }
+        }
+        Some(_) => skipped.push("Fab, outputs and assembly: no KiCad board in this project".into()),
+        None => skipped.push(format!("Fab: no profile of the fab {:?}", c.fab)),
+    }
+    let boards = board_fab.and_then(|(_, j)| j["qty"].as_u64()).unwrap_or(5);
+    if !pcb_path.is_empty() || !bom_lines.is_empty() { let (f, s) = checks::bom(bom_lines, boards); out.extend(f); skipped.extend(s) }
+    let (f, s) = checks::mech(&parsed); out.extend(f); skipped.extend(s);
+    let _ = pro;
+    fd::assign_ids(&mut out);
+    (out, skipped)
+}
+
+/// The project's E-side DRC and ERC: their findings when fresh; with `wait` the run is asked for and waited on (a few minutes at most).
+async fn drc_erc(hub: &Arc<Hub>, pro: &str, wait: bool) -> (Vec<Finding>, Vec<String>, Value) {
+    use crate::files::kicad::checkrun as cr;
+    let p = json!({"project": pro});
+    if cr::request(hub, "kicad.checks.watch", &p).await.is_err() { return (vec![], vec!["DRC and ERC: this project's checks could not be read".into()], Value::Null) }
+    let fresh = |s: &Value| ["drc", "erc"].iter().all(|k| s[*k].is_null() || s[*k]["state"] == "fresh");
+    let mut sum = cr::request(hub, "kicad.checks.watch", &p).await.unwrap_or(Value::Null);
+    if wait && !fresh(&sum) {
+        let _ = cr::request(hub, "kicad.checks.run", &p).await;
+        // until both are fresh or failed; a run that has not even started after 10 s is not waited on
+        let busy = |s: &Value, i: u32| ["drc", "erc"].iter().any(|k| !s[*k].is_null() && match s[*k]["state"].as_str().unwrap_or("") { "running" | "deferred" => true, "stale" | "none" => i < 5, _ => false });
+        for i in 0..150u32 { tokio::time::sleep(Duration::from_secs(2)).await; sum = cr::request(hub, "kicad.checks.watch", &p).await.unwrap_or(Value::Null); if fresh(&sum) || !busy(&sum, i) { break } }
+    }
+    let mut skipped = vec![]; let mut out = vec![];
+    for k in ["drc", "erc"] {
+        let s = &sum[k]; if s.is_null() { continue }
+        if s["state"] != "fresh" { skipped.push(format!("{}: {} ({})", k.to_uppercase(), s["state"].as_str().unwrap_or("not run"), s["reason"].as_str().unwrap_or(""))); continue }
+        let l = cr::request(hub, "kicad.checks.list", &json!({"project": pro, "source": k, "limit": 2000})).await.unwrap_or(Value::Null);
+        out.extend(l["findings"].as_array().into_iter().flatten().map(fd::from_json));
+    }
+    (out, skipped, json!({"drc": sum["drc"]["rev"], "erc": sum["erc"]["rev"]}))
+}
+
+/// Fab.review.run: a run of the scope ("save": the file checks only; "full" and "order": DRC and ERC fresh too), kept, written and published.
+pub async fn run(hub: &Arc<Hub>, root: &Path, scope: &str) -> Result<Value, String> {
+    let t0 = crate::hub::now_ms();
+    let pro = crate::files::kicad::project::read(&root.to_string_lossy()).pro;
+    let bom_lines: Vec<Value> = if pro.is_empty() { vec![] } else {
+        let info = hub.info_now(); info[format!("mgmt.bom.{}", crate::files::kicad::kserve::digest(&pro))].as_str().and_then(|t| serde_json::from_str::<Value>(t).ok()).and_then(|v| v["lines"].as_array().cloned()).unwrap_or_default()
+    };
+    let (home, r) = (hub.cfg.home.clone(), root.to_path_buf());
+    let (mut fs, mut skipped) = tokio::task::spawn_blocking(move || run_files(&home, &r, &bom_lines)).await.map_err(|_| "the review failed".to_string())?;
+    let mut rev = Value::Null;
+    if !pro.is_empty() {
+        if scope == "save" { skipped.push("DRC and ERC: run beside the design (the Checks panel); a full review waits for them fresh".into()) }
+        else { let (d, s, r) = drc_erc(hub, &pro, true).await; let mut d = d; d.extend(fs); fs = d; skipped.extend(s); rev = r }
+    }
+    if scope == "save" { skipped.push("Agent-judged checks (datasheets against footprints): on demand and before an order".into()) }
+    let r = root.to_path_buf(); let (scope2, skipped2) = (scope.to_string(), skipped.clone());
+    let v = tokio::task::spawn_blocking(move || -> Result<Value, String> {
+        let fp = crate::settings::order::fingerprint(&r);
+        let v = run_json(crate::agents::now_s(), &scope2, &fp, &rev, &fs, &skipped2, crate::hub::now_ms() - t0);
+        if !crate::copy::on() {
+            let d = r.join(".backplane"); std::fs::create_dir_all(&d).map_err(|e| e.to_string())?;
+            std::fs::write(r.join(FILE), serde_json::to_string(&v).unwrap_or_default() + "\n").map_err(|e| e.to_string())?;
+            std::fs::write(d.join("review.md"), md(&v, "")).map_err(|e| e.to_string())?;
+        }
+        Ok(v)
+    }).await.map_err(|_| "the review failed".to_string())??;
+    if !pro.is_empty() { let mut small = v.clone(); if let Some(a) = small["findings"].as_array_mut() { a.truncate(300) } let _ = hub.set_info(&info_key(&pro), &small.to_string()).await; }
+    Ok(v)
+}
+pub fn info_key(pro: &str) -> String { format!("review.{}", crate::files::kicad::kserve::digest(pro)) }
+/// The last run kept in the project, if it is of the design as it is now.
+pub fn current(root: &Path) -> Option<Value> {
+    let v: Value = serde_json::from_str(&std::fs::read_to_string(root.join(FILE)).ok()?).ok()?;
+    (v["fingerprint"].as_str()? == crate::settings::order::fingerprint(root)).then_some(v)
+}
+
+/// The tool's answer: the run's summary and its findings (the first `max`), each with its id, severity in the review's words, where and the fix.
+pub fn answer(v: &Value, max: usize) -> Value {
+    let fs: Vec<Value> = v["findings"].as_array().into_iter().flatten().take(max).map(|f| { let mut f = f.clone(); f["level"] = json!(level(f["severity"].as_str().unwrap_or(""))); f }).collect();
+    json!({"verdict": v["verdict"], "scope": v["scope"], "counts": v["counts"], "by_source": v["by_source"], "skipped": v["skipped"], "took_ms": v["took_ms"], "findings": fs,
+        "more": v["findings"].as_array().map_or(0, |a| a.len().saturating_sub(max)), "written": [".backplane/review.md", FILE]})
+}
+
+pub struct Tools(pub Arc<Hub>);
+pub const TOOL: &str = "design_review";
+pub fn tool_def() -> Value {
+    json!({"name": TOOL, "description": "Run Backplane's design review of this project: deterministic checks, each finding with its severity (must change, should, note), where it is (references, nets, files) and how to fix it. Sources: drc and erc (KiCad's, waited for fresh), fab (the project's fab limits DRC rules cannot say: options, board size, the narrowest track and smallest via against the free and costs-more limits, and whether the DRC rules hold the fab's section), bom (MPNs; stock and lifecycle where the BOM has them), outputs (Gerbers and drill files in mfg/: layers, outline, drill sizes), assembly (sides, fiducials, the placement file), mech (fab files' own DFM results). It writes .backplane/review.md and keeps the run; order_review record then takes its verdict and must-changes. scope: full (default) or order (the same, before ordering), or save (file checks only, quick). Agent-judged checks (datasheets against footprints) are not part of it.",
+        "inputSchema": {"type": "object", "properties": {"scope": {"type": "string", "description": "full (default), order or save"}, "max": {"type": "number", "description": "findings in the answer (default 60); all are in .backplane/review.md"}}, "required": []}})
+}
+impl crate::agents::mcp::ToolSet for Tools {
+    fn list(&self, _thread: &str) -> Vec<Value> { vec![tool_def()] }
+    fn owns(&self, name: &str) -> bool { name == TOOL }
+    fn call<'a>(&'a self, thread: &'a str, _name: &'a str, a: &'a Value) -> crate::api::Fut<'a, (bool, Value)> {
+        Box::pin(async move {
+            let Some(r) = crate::files::root_of(&self.0, thread).await else { return (false, json!({"error": "this thread has no project folder"})) };
+            let root = PathBuf::from(crate::files::kicad::canonical::design_root(&r.to_string_lossy()));
+            let scope = match a["scope"].as_str().unwrap_or("") { "save" => "save", "order" => "order", _ => "full" };
+            match run(&self.0, &root, scope).await { Ok(v) => (true, answer(&v, a["max"].as_u64().unwrap_or(60) as usize)), Err(e) => (false, json!({"error": e})) }
+        })
+    }
+}
+pub fn start(hub: &Arc<Hub>, ag: Option<&Arc<crate::agents::Agents>>) {
+    if let Some(ag) = ag { ag.add_tools(Arc::new(Tools(hub.clone()))) }
+    policy::start(hub);
+}
+
+/// A run of the file checks on a project folder named by REVIEW_ROOT (a copy), printed: by hand only.
+#[cfg(test)]
+#[test] #[ignore] fn review_run_on_a_copy() {
+    let Ok(root) = std::env::var("REVIEW_ROOT") else { return };
+    let h = crate::plat::tmp::dir("review-copy"); let (fs, sk) = run_files(&h, Path::new(&root), &[]);
+    let v = run_json(0, "save", "", &Value::Null, &fs, &sk, 0);
+    println!("REVIEW {} {}", v["counts"], v["by_source"]); for f in v["findings"].as_array().unwrap() { println!("  {} [{}] {} | {}", f["severity"], f["source"], f["title"], f["anchors"].as_array().map_or(0, Vec::len)) } for s in sk { println!("  skipped: {s}") }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    fn put(p: PathBuf, t: &str) { std::fs::create_dir_all(p.parent().unwrap()).unwrap(); std::fs::write(p, t).unwrap() }
+    #[test] fn review_run_the_files_of_a_project_give_findings_by_source_and_say_what_they_skipped() {
+        let t = crate::plat::tmp::dir("review-run"); let r: &Path = &t; let h = crate::plat::tmp::dir("review-home");
+        put(r.join("b/b.kicad_pro"), r#"{"board":{"design_settings":{"rules":{"min_clearance":0.0}}},"net_settings":{"classes":[{"name":"Default","clearance":0.2}]}}"#);
+        put(r.join("b/b.kicad_pcb"), "(kicad_pcb\n\t(general\n\t\t(thickness 1.6)\n\t)\n\t(layers\n\t\t(0 \"F.Cu\" signal)\n\t\t(2 \"B.Cu\" signal)\n\t)\n\t(segment\n\t\t(start 1 2)\n\t\t(end 3 4)\n\t\t(width 0.05)\n\t\t(layer \"F.Cu\")\n\t\t(net \"A\")\n\t)\n)\n");
+        put(r.join("b/b.fab.json"), r#"{"kind":"pcb","name":"B","qty":5,"options":{"layers":2},"features":{"width_mm":30,"height_mm":20}}"#);
+        put(r.join("mech/c.fab.json"), r#"{"kind":"3dp","name":"Case"}"#);
+        let lines = vec![json!({"refs": ["R1"], "qty": 1, "mpn": "", "dnp": false})];
+        let (fs, sk) = run_files(&h, r, &lines);
+        let src = |s: &str| fs.iter().filter(|f| f.source == s).map(|f| f.rule.as_str()).collect::<Vec<_>>();
+        assert!(src("fab").contains(&"fab_rules_section") && src("fab").contains(&"fab_limit"), "{:?}", src("fab"));
+        assert_eq!(src("bom"), ["bom_no_mpn"]); assert_eq!(src("outputs"), ["outputs_none"]);
+        assert!(fs.iter().all(|f| !f.id.is_empty() && f.id.starts_with(&f.source)), "ids from E's model");
+        assert!(sk.iter().any(|s| s.contains("stock")) && sk.iter().any(|s| s.contains("walls")), "{sk:?}");
+        let v = run_json(1, "save", "fp", &Value::Null, &fs, &sk, 3);
+        assert_eq!(v["verdict"], "issues"); assert_eq!(v["by_source"]["bom"]["error"], 1);
+        let lines = must_lines(&v, 8); assert!(lines.iter().any(|l| l.starts_with("R1: no manufacturer part number") || l.contains("R1")), "{lines:?}");
+        let m = md(&v, "Checked by hand: the antenna keepout."); assert!(m.contains("## Must change") && m.contains("## Not checked") && m.contains("antenna keepout"), "{m}");
+        assert_eq!(answer(&v, 1)["findings"].as_array().unwrap().len(), 1); assert_eq!(answer(&v, 1)["findings"][0]["level"], "must change");
+    }
+}
