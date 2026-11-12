@@ -1,0 +1,31 @@
+{"schema": 1, "fab": "eurocircuits", "orders": false, "rev": 1, "updated": "2026-11-12",
+ "pages": {
+  "classes": {"url": "https://www.eurocircuits.com/pcb-design-guidelines-classification/", "fetched": "2026-11-12", "image": "https://www.eurocircuits.com/content/uploads/2025/04/EC-classification-ENGLISH-5-2024-V3.png"}
+ },
+ "kinds": {
+  "pcb": {"limits": [
+   {"key": "track_min", "value": 0.15, "unit": "mm", "page": "classes", "note": "Pattern class 6 (all services): OTW 0.150 mm (classification table image of 07/05/2024)"},
+   {"key": "space_min", "value": 0.15, "unit": "mm", "page": "classes", "note": "Pattern class 6 (all services): OTT-OTP-OPP 0.150 mm"},
+   {"key": "track_min", "value": 0.2, "unit": "mm", "when": {"copper_oz": [2, 2]}, "page": "classes", "note": "Base Cu 70 um (2 oz): min OTW 0.200 mm"},
+   {"key": "space_min", "value": 0.2, "unit": "mm", "when": {"copper_oz": [2, 2]}, "page": "classes", "note": "Base Cu 70 um (2 oz): min OTT-OTP-OPP 0.200 mm"},
+   {"key": "track_min", "value": 0.125, "unit": "mm", "cost": "extra", "when": {"copper_oz": [1, 1]}, "page": "classes", "note": "Pattern class 7 (STANDARD, DEFINED IMPEDANCE, RF, SEMI-FLEX pools) 0.125 mm; base Cu 35 um (1 oz) allows no less"},
+   {"key": "space_min", "value": 0.125, "unit": "mm", "cost": "extra", "when": {"copper_oz": [1, 1]}, "page": "classes", "note": "Pattern class 7 0.125 mm; base Cu 35 um (1 oz) allows no less"},
+   {"key": "track_min", "value": 0.09, "unit": "mm", "cost": "extra", "when": {"copper_oz": [0.5, 0.5]}, "page": "classes", "note": "Pattern class 9 (STANDARD, DEFINED IMPEDANCE, RF pools) OTW 0.090 mm, base Cu 18 um (1/2 oz)"},
+   {"key": "space_min", "value": 0.1, "unit": "mm", "cost": "extra", "when": {"copper_oz": [0.5, 0.5]}, "page": "classes", "note": "Base Cu 18 um (1/2 oz): min OTT-OTP-OPP 0.100 mm"},
+   {"key": "pth_ring_min", "value": 0.125, "unit": "mm", "page": "classes", "note": "Pattern class 6: OAR 0.125 mm (outer annular ring = 1/2 (pad diameter - tool size))"},
+   {"key": "pth_ring_min", "value": 0.1, "unit": "mm", "cost": "extra", "page": "classes", "note": "Pattern class 9: OAR 0.100 mm"},
+   {"key": "via_ring_min", "value": 0.125, "unit": "mm", "page": "classes", "note": "Pattern class 6: OAR 0.125 mm (vias are plated through holes)"},
+   {"key": "via_ring_min", "value": 0.1, "unit": "mm", "cost": "extra", "page": "classes", "note": "Pattern class 9: OAR 0.100 mm"},
+   {"key": "pth_to_inner_copper_min", "value": 0.2, "unit": "mm", "page": "classes", "note": "The minimum IPI value is always IAR + 0.075mm, with a minimum of 0.200mm"},
+   {"key": "drill_min", "value": 0.35, "unit": "mm", "page": "classes", "note": "Drill class B (PCB proto and the pools): PTH 0.35 mm finished, tool 0.45 mm"},
+   {"key": "drill_min", "value": 0.1, "unit": "mm", "cost": "extra", "when": {"thickness_mm": [0, 1.6]}, "page": "classes", "note": "Drill class E (STANDARD, DEFINED IMPEDANCE, RF, SEMI-FLEX pools): PTH 0.10 mm finished, tool 0.20 mm; boards up to 1.60 mm (aspect ratio 1:8)"},
+   {"key": "via_hole_min", "value": 0.35, "unit": "mm", "page": "classes", "note": "Drill class B: PTH 0.35 mm"},
+   {"key": "via_hole_min", "value": 0.1, "unit": "mm", "cost": "extra", "when": {"thickness_mm": [0, 1.6]}, "page": "classes", "note": "Drill class E: PTH 0.10 mm, boards up to 1.60 mm"},
+   {"key": "npth_min", "value": 0.45, "unit": "mm", "page": "classes", "note": "Drill class B: NPTH 0.45 mm"},
+   {"key": "npth_min", "value": 0.2, "unit": "mm", "cost": "extra", "page": "classes", "note": "Drill class E: NPTH 0.20 mm"},
+   {"key": "npth_pad_ring_min", "value": 0.3, "unit": "mm", "page": "classes", "note": "For connected non-plated (NPTH) holes we recommend a minimum annular ring of 0.30mm"}
+  ]}
+ },
+ "stackups": [],
+ "assembly": {}
+}
