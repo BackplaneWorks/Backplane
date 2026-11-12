@@ -11,11 +11,12 @@ use std::{path::{Path, PathBuf}, process::Stdio, sync::{atomic::{AtomicBool, Ord
 
 #[derive(Debug, PartialEq)]
 pub struct Package { pub platform: &'static str, pub version: &'static str, pub release: &'static str, pub asset: &'static str, pub sha256: &'static str, pub format: &'static str, pub cli: &'static str }
-/// Linux and Windows: bp.8, the first with the embedded editor (`--embedded`, docs/embedded-editors.md), the person's default (Nov 11); Apple
+/// Linux and Windows: bp.10 (the embedded editor with live theme, reload on disk, cross-probe, comments, align keys and the fast switch; the
+/// person's default, Nov 11: the newest fork release each time); Apple
 /// Silicon keeps bp.6 (bp.8 has no macOS build).
-pub const LINUX: Package = Package { platform: "linux-x86_64", version: "10.99.0-bp.8", release: "backplane-kicad-v10.99.0-bp.8", asset: "backplane-kicad-linux-x86_64-10.99.0-bp.8.tar.gz", sha256: "cac6c434596c76eb351526ecb131b6eed0b32203d0fea7f74185a837d46e1ee4", format: "tar.gz", cli: "bin/kicad-cli" };
+pub const LINUX: Package = Package { platform: "linux-x86_64", version: "10.99.0-bp.10", release: "backplane-kicad-v10.99.0-bp.10", asset: "backplane-kicad-linux-x86_64-10.99.0-bp.10.tar.gz", sha256: "21f67f7fab54800831394e3ef80557016f769d99e46f694e7cccb386f7a41181", format: "tar.gz", cli: "bin/kicad-cli" };
 pub const MAC: Package = Package { platform: "darwin-arm64", version: "10.99.0-bp.6", release: "backplane-kicad-v10.99.0-bp.6", asset: "backplane-kicad-darwin-arm64-10.99.0-bp.6.tar.gz", sha256: "99584fb0ee490354098778d39e3aaed9e0f274ee39972851a9cbeabfb271462d", format: "tar.gz", cli: "bin/kicad-cli" };
-pub const WINDOWS: Package = Package { platform: "windows-x86_64", version: "10.99.0-bp.8", release: "backplane-kicad-v10.99.0-bp.8", asset: "backplane-kicad-windows-x86_64-10.99.0-bp.8.zip", sha256: "f9a2b7b624a77ad453cd2657e189616cb7ea6e97b888d2ffbf3381ef06f2f507", format: "zip", cli: "bin/kicad-cli.exe" };
+pub const WINDOWS: Package = Package { platform: "windows-x86_64", version: "10.99.0-bp.10", release: "backplane-kicad-v10.99.0-bp.10", asset: "backplane-kicad-windows-x86_64-10.99.0-bp.10.zip", sha256: "68b3796f1de3a8c0a39dd20ca96a43f3354de47facbe5de45d0bd4668c32599c", format: "zip", cli: "bin/kicad-cli.exe" };
 /// Where the releases are (said in the consent note, and the script's download base).
 pub const FROM: &str = "github.com/i2cjak/Backplane_KiCad";
 
@@ -282,12 +283,12 @@ mod tests {
         }
     }
     #[test] fn refused_when_found_running_unpublished_or_without_consent() {
-        assert_eq!(refusal("/k/bin/kicad-cli", "ok", "10.99.0-bp.8", true, false, Some(&LINUX)), Some("Backplane KiCad is already installed: /k/bin/kicad-cli".into()));
+        assert_eq!(refusal("/k/bin/kicad-cli", "ok", "10.99.0-bp.10", true, false, Some(&LINUX)), Some("Backplane KiCad is already installed: /k/bin/kicad-cli".into()));
         assert_eq!(refusal("", "missing", "", true, true, Some(&LINUX)), Some("KiCad is being installed already".into()));
         assert!(refusal("", "missing", "", true, false, None).unwrap().starts_with("No Backplane KiCad is published for this computer"));
         for s in ["stock", "old", "broken"] { assert_eq!(refusal("/usr/bin/kicad-cli", s, "", true, false, Some(&LINUX)), None, "{s}: the fork is installed beside it"); }
         let no = refusal("", "missing", "", false, false, Some(&LINUX)).unwrap();
-        assert!(no.starts_with("Installing needs your consent") && no.contains("10.99.0-bp.8") && no.contains(FROM), "{no}");
+        assert!(no.starts_with("Installing needs your consent") && no.contains("10.99.0-bp.10") && no.contains(FROM), "{no}");
         assert_eq!(refusal("", "missing", "", true, false, Some(&LINUX)), None);
     }
     /// The decision setup makes for each computer and each KiCad it finds: (os, arch, status, install state) -> action.
@@ -306,10 +307,10 @@ mod tests {
     }
     /// An older build of the pinned line (bp.4 when bp.8 is pinned) is offered the update; the same or a newer one, or stock, is not.
     #[test] fn an_older_backplane_kicad_is_offered_the_update() {
-        assert!(older("10.99.0-bp.4", &LINUX) && !older("10.99.0-bp.8", &LINUX) && !older("10.99.0-bp.9", &LINUX) && !older("10.0.7", &LINUX) && !older("", &LINUX));
+        assert!(older("10.99.0-bp.4", &LINUX) && older("10.99.0-bp.8", &LINUX) && older("10.99.0-bp.9", &LINUX) && !older("10.99.0-bp.10", &LINUX) && !older("10.99.0-bp.11", &LINUX) && !older("10.0.7", &LINUX) && !older("", &LINUX));
         assert_eq!(decide(Some(&LINUX), "ok", "10.99.0-bp.4", ""), Action::Offer);
         assert_eq!(decide(Some(&LINUX), "ok", "10.99.0-bp.4", "failed"), Action::Nothing, "a failed update leaves the working one alone");
-        assert_eq!(decide(Some(&LINUX), "ok", "10.99.0-bp.8", ""), Action::Nothing);
+        assert_eq!(decide(Some(&LINUX), "ok", "10.99.0-bp.10", ""), Action::Nothing);
         assert_eq!(refusal("/k/bin/kicad-cli", "ok", "10.99.0-bp.4", true, false, Some(&LINUX)), None);
     }
 
@@ -363,7 +364,7 @@ mod tests {
         exe(&s, &format!("#!/bin/sh\necho \"Downloading $5\"\ni=0; while [ ! -e '{}' ] && [ $i -lt 1200 ]; do sleep 0.05; i=$((i+1)); done\necho Unpacking\nmkdir -p \"$1/$3/bin\" && touch \"$1/$3/$8\"\necho \"Installed in $1/$3\"\n", go.display()));
         let parent = r.join("kicad"); let mut steps = vec![];
         let got = rt().block_on(run(Some(&s), &parent, &LINUX, &r.join("log"), |l| { if steps.is_empty() { let _ = std::fs::write(&go, ""); } steps.push(l) }));
-        assert_eq!(got, Ok(parent.join("10.99.0-bp.8").to_string_lossy().to_string()));
+        assert_eq!(got, Ok(parent.join("10.99.0-bp.10").to_string_lossy().to_string()));
         assert!(steps.first().unwrap().starts_with("Downloading backplane-kicad-linux") && steps.last().unwrap().starts_with("Installed in"), "{steps:?}");
     }
     #[cfg(unix)] #[test] fn a_standin_installer_that_fails_is_reported_in_its_own_words() {
