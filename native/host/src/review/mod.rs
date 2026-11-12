@@ -112,6 +112,40 @@ pub fn run_files(home: &Path, root: &Path, bom_lines: &[Value]) -> (Vec<Finding>
     (out, skipped)
 }
 
+/// The newest outputs in mfg/ against a fresh export of the board (kicad-cli with the board's own plot settings, into the hub's cache):
+/// the layers whose drawing differs make the outputs stale. Outputs written with another coordinate format are not compared (said).
+pub async fn outputs_fresh(hub: &Arc<Hub>, root: &Path) -> (Vec<Finding>, Vec<String>) {
+    let (o, _) = { let r = root.to_path_buf(); tokio::task::spawn_blocking(move || newest_outputs(&r)).await.unwrap_or((None, None)) };
+    let Some(o) = o else { return (vec![], vec![]) };
+    let pcb = crate::files::kicad::project::read(&root.to_string_lossy()).pcb;
+    let cli = crate::files::kicad::ipc::runtime(hub).await.cli;
+    if cli.is_empty() || pcb.is_empty() { return (vec![], vec!["Outputs against the board: no kicad-cli to export with".into()]) }
+    let tmp = hub.cfg.home.join("cache").join("review").join(crate::files::kicad::kserve::digest(&pcb));
+    let (dir, odir) = (root.join(&o.dir), o.dir.clone());
+    let r = tokio::task::spawn_blocking(move || stale_vs_export(&cli, &pcb, &tmp, &dir)).await.unwrap_or(Err("failed".into()));
+    match r {
+        Ok((_, 0, _)) => (vec![], vec![format!("Outputs against the board: {odir} was written with other Gerber settings than the board's, so it was not compared")]),
+        Ok((stale, _, other)) => {
+            let skip = if other.is_empty() { vec![] } else { vec![format!("Outputs against the board: {odir} was made by KiCad {other}, whose apertures and fills differ from this KiCad's; only its outline was compared")] };
+            if stale.is_empty() { (vec![], skip) } else { (vec![checks::finding("outputs", "warning", "outputs_stale", format!("The outputs in {odir} are older than the board: {} differ", stale.join(", ")), "A fresh export of the saved board draws these layers differently.".into(), vec![checks::file_anchor(&odir)], "Export the Gerbers and drill files again from the saved board (a buy thread exports fresh ones when it orders)")], skip) }
+        }
+        Err(e) => (vec![], vec![format!("Outputs against the board: the export failed ({e})")]),
+    }
+}
+/// Export the board's Gerbers into `tmp` and compare them with the set in `kept`: (the layers that differ, how many were compared).
+pub fn stale_vs_export(cli: &str, pcb: &str, tmp: &Path, kept: &Path) -> Result<(Vec<String>, usize, String), String> {
+    let _ = std::fs::remove_dir_all(tmp); std::fs::create_dir_all(tmp).map_err(|e| e.to_string())?;
+    let out = crate::proc::std_cmd(crate::proc::Kind::Local, cli).args(["pcb", "export", "gerbers", "--board-plot-params", "-o"]).arg(tmp).arg(pcb).output().map_err(|e| e.to_string())?;
+    if !out.status.success() { return Err(String::from_utf8_lossy(&out.stderr).lines().last().unwrap_or("kicad-cli failed").to_string()) }
+    let read = |d: &Path| -> Vec<(String, String)> { std::fs::read_dir(d).map(|r| r.flatten().filter_map(|e| { let n = e.file_name().to_string_lossy().into_owned(); (n.contains("_Cu") || n.contains("Edge_Cuts") || n.contains("_Mask")).then(|| Some((n, std::fs::read_to_string(e.path()).ok()?))).flatten() }).collect()).unwrap_or_default() };
+    let (a, b) = (read(tmp), read(kept));
+    let (stale, n) = checks::stale_layers(&a, &b);
+    let mine = a.first().map(|x| checks::writer(&x.1)).unwrap_or_default();
+    let other = b.iter().map(|x| checks::writer(&x.1)).find(|w| *w != mine).map(|w| w.rsplit(',').next().unwrap_or("").trim_end_matches("*%").to_string()).unwrap_or_default();
+    let _ = std::fs::remove_dir_all(tmp);
+    Ok((stale, n, other))
+}
+
 /// The project's E-side DRC and ERC: their findings when fresh; with `wait` the run is asked for and waited on (a few minutes at most).
 async fn drc_erc(hub: &Arc<Hub>, pro: &str, wait: bool) -> (Vec<Finding>, Vec<String>, Value) {
     use crate::files::kicad::checkrun as cr;
@@ -143,11 +177,15 @@ pub async fn run(hub: &Arc<Hub>, root: &Path, scope: &str) -> Result<Value, Stri
         let info = hub.info_now(); info[format!("mgmt.bom.{}", crate::files::kicad::kserve::digest(&pro))].as_str().and_then(|t| serde_json::from_str::<Value>(t).ok()).and_then(|v| v["lines"].as_array().cloned()).unwrap_or_default()
     };
     let (home, r) = (hub.cfg.home.clone(), root.to_path_buf());
-    let (mut fs, mut skipped) = tokio::task::spawn_blocking(move || run_files(&home, &r, &bom_lines)).await.map_err(|_| "the review failed".to_string())?;
+    let (mut fs, mut skipped): (Vec<Finding>, Vec<String>) = tokio::task::spawn_blocking(move || run_files(&home, &r, &bom_lines)).await.map_err(|_| "the review failed".to_string())?;
     let mut rev = Value::Null;
     if !pro.is_empty() {
         if scope == "save" { skipped.push("DRC and ERC: run beside the design (the Checks panel); a full review waits for them fresh".into()) }
-        else { let (d, s, r) = drc_erc(hub, &pro, true).await; let mut d = d; d.extend(fs); fs = d; skipped.extend(s); rev = r }
+        else {
+            let (d, s, r) = drc_erc(hub, &pro, true).await; let mut d = d; d.extend(fs); fs = d; skipped.extend(s); rev = r;
+            let (o, s) = outputs_fresh(hub, root).await; fs.extend(o); skipped.extend(s);
+            skipped.retain(|x| !x.starts_with("Outputs against the board: a fresh export"));
+        }
     }
     if scope == "save" { skipped.push("Agent-judged checks (datasheets against footprints): on demand and before an order".into()) }
     let r = root.to_path_buf(); let (scope2, skipped2) = (scope.to_string(), skipped.clone());
@@ -201,6 +239,14 @@ pub fn start(hub: &Arc<Hub>, ag: Option<&Arc<crate::agents::Agents>>) {
     policy::start(hub);
 }
 
+/// The outputs of a project folder (REVIEW_ROOT, a copy) against a fresh export with KICAD_CLI: by hand only.
+#[cfg(test)]
+#[test] #[ignore] fn review_outputs_on_a_copy() {
+    let (Ok(root), Ok(cli)) = (std::env::var("REVIEW_ROOT"), std::env::var("KICAD_CLI")) else { return };
+    let r = Path::new(&root); let (o, _) = newest_outputs(r); let o = o.unwrap(); let pcb = crate::files::kicad::project::read(&root).pcb;
+    let t = crate::plat::tmp::dir("review-export"); let t0 = std::time::Instant::now();
+    println!("OUTPUTS {} {:?} in {} ms", o.dir, stale_vs_export(&cli, &pcb, &t.join("x"), &r.join(&o.dir)), t0.elapsed().as_millis());
+}
 /// A run of the file checks on a project folder named by REVIEW_ROOT (a copy), printed: by hand only.
 #[cfg(test)]
 #[test] #[ignore] fn review_run_on_a_copy() {
