@@ -482,6 +482,27 @@ def main() -> None:
             print(json.dumps({"irs": irs, "kot": kot, "count": len(items)}))
             sys.exit(0 if irs == 1 else 1)
 
+        if cmd == "undo-agent-latest":
+            # bp.11 co-edit: the newest change an agent made (GetChanges, actor non-empty, something created), taken back by
+            # UndoAgentChange: how the person undoes an agent's edit (their own Ctrl+Z skips it: per-actor undo)
+            doc_bytes = cli.first_open_doc_bytes("pcb")
+            _, val = cli.call("kiapi.backplane.coedit.GetChanges", pb_field_varint(1, 0) + pb_field_str(2, "pcb"))
+            best = None
+            for raw in pb_decode_fields(val).get(1, []):
+                ch = pb_decode_fields(raw)
+                seq = ch.get(1, [0])[0]
+                actor = ch.get(3, [b""])[0]
+                actor = actor.decode() if isinstance(actor, bytes) else str(actor)
+                if actor and ch.get(5) and not ch.get(9, [0])[0] and (best is None or seq > best[0]):
+                    best = (seq, actor)
+            if best is None:
+                print(json.dumps({"ok": False, "error": "no agent change"})); sys.exit(1)
+            _, uval = cli.call("kiapi.backplane.coedit.UndoAgentChange", pb_field_msg(1, doc_bytes) + pb_field_varint(2, best[0]))
+            u = pb_decode_fields(uval)
+            err = u.get(2, [b""])[0]
+            print(json.dumps({"ok": bool(u.get(1, [0])[0]), "seq": best[0], "actor": best[1], "error": err.decode() if isinstance(err, bytes) else str(err)}))
+            return
+
         if cmd == "agent-add-track":
             x1, y1, x2, y2, w_mm = map(float, args[:5])
             layer = int(args[5]) if len(args) > 5 else 3  # 3 = BL_F_Cu
