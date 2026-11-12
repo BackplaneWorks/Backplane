@@ -128,10 +128,18 @@ mod tests {
         let Some(ip) = super::super::plan::lan(&interfaces()).into_iter().next() else { eprintln!("no local network address here: skipped"); return };
         let dir = crate::plat::tmp::dir("lan");
         let hub = Hub::start(Cfg { home: dir.to_path_buf(), version: "0.15.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() }, Arc::new(Canned { reply: json!({}) })).await.unwrap();
-        let port = std::net::TcpListener::bind((ip.as_str(), 0)).unwrap().local_addr().unwrap().port();
-        let lan = Lan::new(&dir, "127.0.0.1", port, Arc::downgrade(&hub));
-        assert_eq!(lan.on("203.0.113.77")["error"], "lan_unknown", "only this machine's own local network addresses");
-        let r = lan.on(&ip); assert_eq!((r["ok"].as_bool(), r["listening"].as_bool()), (Some(true), Some(true)), "{r}");
+        // a free port, found by binding and letting go: under the whole suite another test can take it before `on` binds it again
+        // (Nov 12: two landings in a row failed with lan_unavailable), so a few fresh ports are tried before the listener is called broken
+        let (mut lan, mut r, mut port) = (None, Value::Null, 0);
+        for _ in 0..8 {
+            port = std::net::TcpListener::bind((ip.as_str(), 0)).unwrap().local_addr().unwrap().port();
+            let l = Lan::new(&dir, "127.0.0.1", port, Arc::downgrade(&hub));
+            assert_eq!(l.on("203.0.113.77")["error"], "lan_unknown", "only this machine's own local network addresses");
+            r = l.on(&ip); lan = Some(l);
+            if r["error"] != "lan_unavailable" { break }
+        }
+        let lan = lan.unwrap();
+        assert_eq!((r["ok"].as_bool(), r["listening"].as_bool()), (Some(true), Some(true)), "{r}");
         assert_eq!(parse_saved(&std::fs::read_to_string(dir.join("lan-v1.json")).unwrap()), [ip.clone()]);
         assert_eq!(lan.list()[0]["listening"], true);
         let mut held = tokio::net::TcpStream::connect((ip.as_str(), port)).await.expect("it answers there");
