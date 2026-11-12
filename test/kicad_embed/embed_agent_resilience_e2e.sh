@@ -281,9 +281,18 @@ sleep 0.6
 shot "02_after_human_undo"
 
 N_UNDO=$(python3 "$IPC_PY" items-count "$API_SOCK" pcb 11 | python3 -c 'import json,sys; print(json.load(sys.stdin)["count"])')
+if grep -qa "UndoAgentChange" "$(dirname "$KICAD_BIN")/../share/backplane/api.desc" 2>/dev/null; then
+  # bp.11 co-edit, per-actor undo: the person's Ctrl+Z leaves the agent's edit alone; the Agents pane's "Undo this change"
+  # (UndoAgentChange over IPC) takes it back
+  check "Human Ctrl+Z leaves the agent's IPC commit alone (per-actor undo: $N1 -> $N_UNDO)" "$([ "$N_UNDO" -eq "$N1" ] && echo 1 || echo 0)" "expected $N1 got $N_UNDO"
+  UA=$(python3 "$IPC_PY" undo-agent-latest "$API_SOCK" 2>&1 || true); sleep 0.6
+  N_UNDO=$(python3 "$IPC_PY" items-count "$API_SOCK" pcb 11 | python3 -c 'import json,sys; print(json.load(sys.stdin)["count"])')
+  check "The agent's change taken back (UndoAgentChange, as the Agents pane does: $N1 -> $N_UNDO)" "$([ "$N_UNDO" -eq "$N0" ] && echo 1 || echo 0)" "expected $N0 got $N_UNDO: $UA"
+else
 check "Human Ctrl+Z inside embedded PCB Editor atomically undid agent's IPC commit ($N1 -> $N_UNDO)" \
   "$([ "$N_UNDO" -eq "$N0" ] && echo 1 || echo 0)" \
   "expected $N0 got $N_UNDO"
+fi
 
 # 3. Child freeze (SIGSTOP) isolation + Backplane's OWN passive grab_escape (Ctrl+`) host rescue
 python3 "$IPC_PY" agent-add-track "$API_SOCK" 35.0 98.0 140.0 126.0 2.0 3 >/dev/null
