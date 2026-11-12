@@ -250,7 +250,7 @@ fn att_split(text: &str) -> (String, Vec<String>) {
 fn enc(s: &str) -> String { s.bytes().map(|b| if b.is_ascii_alphanumeric() || matches!(b, b'/' | b'.' | b'-' | b'_') { (b as char).to_string() } else { format!("%{b:02X}") }).collect() }
 /// Mob.chip: an attachment as a chip (its name without the upload key, whether it is an image, where the hub serves it)
 fn chip(path: &str) -> Value {
-    let base = path.rsplit('/').next().unwrap_or(path);
+    let base = path.rsplit(['/', '\\']).next().unwrap_or(path);
     let parts: Vec<&str> = base.split('-').collect();
     let label = if parts.len() >= 2 { parts[1..].join("-") } else { base.to_string() };
     let ext = base.rsplit('.').next().unwrap_or("").to_lowercase();
@@ -827,6 +827,8 @@ mod tests {
         let es = [m("u", "user", "buy it", 1699999000), m("a1", "assistant", "quote posted", 1699999020), m("o:r1:paid", "assistant", "**Paid.** Thank you.", 1699999090)];
         let s = stamps(&es, false, false);
         assert_eq!(s[1].1, "Finished 21:57 · 20s"); assert_eq!((s[2].1.as_str(), s[2].2.as_str()), ("21:58", ""));
+        let wc = chip(r"C:\bp\home\kicad-comments\abcd1234-4.png");
+        assert_eq!((wc["label"].as_str(), wc["image"].as_bool()), (Some("4.png"), Some(true)));
     }
     // r05: a follow-up the agent has not read yet says so while the turn runs, and reads as any other once it has (or the turn ended)
     #[test] fn a_follow_up_not_read_yet_says_so() {

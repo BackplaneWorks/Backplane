@@ -117,15 +117,27 @@ pub fn probe_text(n: &Names, board_key: &str) -> String {
     String::new()
 }
 
+fn rel_under(root: &str, path: &str) -> Option<String> {
+    let is_sep = |b: u8| b == b'/' || b == b'\\';
+    let r = root.trim_end_matches(['/', '\\']);
+    if r.is_empty() || path.len() <= r.len() { return None }
+    let same = r.bytes().enumerate().all(|(i, a)| {
+        let b = path.as_bytes()[i];
+        a == b || (is_sep(a) && is_sep(b)) || (i == 0 && r.as_bytes().get(1) == Some(&b':') && a.eq_ignore_ascii_case(&b))
+    });
+    if !same || !is_sep(path.as_bytes()[r.len()]) { return None }
+    Some(path[r.len() + 1..].trim_start_matches(['/', '\\']).replace('\\', "/"))
+}
+
 /// The settings that keep a board's probe (present/viewer.rs `probe_key`): for every project root holding the KiCad project, its own board
 /// ("<root>|") and the board by its path from the root.
 pub fn probe_keys(roots: &[String], pcb: &str) -> Vec<String> {
     let mut out = vec![];
     for r in roots {
-        let r = r.trim_end_matches('/'); if r.is_empty() { continue }
-        let Some(rel) = pcb.strip_prefix(&format!("{r}/")) else { continue };
-        out.push(format!("probe:{r}|"));
-        if !rel.is_empty() { out.push(format!("probe:{r}|{rel}")); }
+        let rt = r.trim_end_matches(['/', '\\']); if rt.is_empty() { continue }
+        let Some(rel) = rel_under(rt, pcb) else { continue };
+        out.push(format!("probe:{rt}|"));
+        if !rel.is_empty() { out.push(format!("probe:{rt}|{rel}")); }
     }
     out
 }
@@ -186,7 +198,7 @@ pub fn project_names(pcb: &str, sch: &str) -> (Vec<String>, Vec<String>) {
         if seen.len() >= 64 || !seen.insert(p.clone()) { continue }
         let Ok(b) = std::fs::read(&p) else { continue };
         let dir = p.parent().map(Path::to_path_buf).unwrap_or_default();
-        for s in sheet_names(&b, &mut refs, &mut nets) { if !s.contains("..") && !s.starts_with('/') { todo.push(dir.join(s)); } }
+        for s in sheet_names(&b, &mut refs, &mut nets) { if !s.contains("..") && !s.starts_with(['/', '\\']) && !crate::plat::fs::is_abs(&s) { todo.push(dir.join(s)); } }
     }
     let mut refs: Vec<String> = refs.into_iter().collect(); refs.sort_by(|a, b| super::bom::cmp_ref(a, b));
     (refs, nets.into_iter().collect())
@@ -220,15 +232,21 @@ pub fn start(hub: &Arc<Hub>) {
 fn files_of(path: &str) -> Option<project::Files> {
     let pro = ipc::pro_of(path);
     if pro.is_empty() { return None }
+    let norm = |s: &str| {
+        let mut n = s.replace('\\', "/");
+        if n.len() >= 2 && n.as_bytes()[0].is_ascii_alphabetic() && n.as_bytes()[1] == b':' { n.make_ascii_lowercase(); }
+        n
+    };
     let dir = Path::new(&pro).parent().map(|d| d.to_string_lossy().to_string()).unwrap_or_default();
     let mut f = project::read(&dir);
-    if f.pro.is_empty() || f.pro != pro {
+    if f.pro.is_empty() || norm(&f.pro) != norm(&pro) {
         let p = Path::new(&pro);
         let (pcb, sch) = (p.with_extension("kicad_pcb"), p.with_extension("kicad_sch"));
-        f = project::Files { pro: pro.clone(), pcb: if pcb.is_file() { pcb.to_string_lossy().into() } else { String::new() }, sch: if sch.is_file() { sch.to_string_lossy().into() } else { String::new() }, all: vec![] };
+        f = project::Files { pro: pro.clone(), pcb: if pcb.is_file() { pcb.to_string_lossy().into() } else { String::new() }, sch: if sch.is_file() { pcb_or_sch_str(&sch) } else { String::new() }, all: vec![] };
     }
     Some(f)
 }
+fn pcb_or_sch_str(p: &Path) -> String { p.to_string_lossy().into() }
 
 /// The path a request names: `project` (or `path`), else the design root of `thread` (its project's root; a worktree's main copy).
 async fn named_path(hub: &Arc<Hub>, p: &Value) -> String {
@@ -246,7 +264,7 @@ async fn roots(hub: &Arc<Hub>) -> Vec<String> { let m = hub.model().await; m.pro
 /// The board probe set for every root holding the project (the viewers light it).
 async fn set_probe(hub: &Arc<Hub>, files: &project::Files, n: &Names) -> String {
     let rs = roots(hub).await;
-    let board_key = rs.iter().find(|r| !files.pcb.is_empty() && files.pcb.starts_with(&format!("{}/", r.trim_end_matches('/')))).map(|r| format!("0|{}|{}", r.trim_end_matches('/'), files.pcb)).unwrap_or_default();
+    let board_key = rs.iter().find(|r| !files.pcb.is_empty() && rel_under(r, &files.pcb).is_some()).map(|r| format!("0|{}|{}", r.trim_end_matches(['/', '\\']), files.pcb)).unwrap_or_default();
     let text = probe_text(n, &board_key);
     let at = crate::hub::now_ms() / 1000;
     let anchor = if files.pcb.is_empty() { files.sch.clone() } else { files.pcb.clone() };
@@ -411,6 +429,8 @@ mod tests {
         assert_eq!(probe_text(&Names::default(), ""), "");
         let keys = probe_keys(&["/p".into(), "/q".into(), "/p/boards".into()], "/p/boards/usb/usb.kicad_pcb");
         assert_eq!(keys, vec!["probe:/p|", "probe:/p|boards/usb/usb.kicad_pcb", "probe:/p/boards|", "probe:/p/boards|usb/usb.kicad_pcb"]);
+        let wkeys = probe_keys(&[r"C:\bp\proj".into(), r"C:\bp\proj\boards\".into(), r"c:\bp\other".into()], r"c:\bp\proj\boards\usb\usb.kicad_pcb");
+        assert_eq!(wkeys, vec![r"probe:C:\bp\proj|", r"probe:C:\bp\proj|boards/usb/usb.kicad_pcb", r"probe:C:\bp\proj\boards|", r"probe:C:\bp\proj\boards|usb/usb.kicad_pcb"]);
     }
 
     #[test] fn a_selection_event_is_read() {

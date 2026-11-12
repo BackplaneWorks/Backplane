@@ -463,6 +463,20 @@ def list_child_windows(parent_hwnd: int, pid: int = 0):
     return out
 
 
+def is_frame_parented_in(frm_h: int, cont_h: int) -> bool:
+    if not frm_h or not cont_h or (hwnd_style(frm_h) & WS_CHILD) == 0:
+        return False
+    p = int(u32.GetAncestor(frm_h, GA_PARENT) or 0)
+    if p == cont_h:
+        return True
+    return bool(
+        p
+        and hwnd_class(p) == "BackplaneKiCadEmbedHolder"
+        and (hwnd_style(p) & WS_CHILD) != 0
+        and int(u32.GetAncestor(p, GA_PARENT) or 0) == cont_h
+    )
+
+
 def list_popup_menus(kicad_pid: int):
     out = []
     if kicad_pid <= 0:
@@ -576,7 +590,7 @@ class SuiteHarness:
         if pid and int(pid) > 0:
             self.tracked_pids.add(int(pid))
 
-    def init_dirs(self):
+    def init_dirs(self, seed_msg: str = ""):
         shutil.rmtree(self.out_dir, ignore_errors=True)
         for sub in (
             "home",
@@ -593,6 +607,8 @@ class SuiteHarness:
         ):
             os.makedirs(self.p(sub), exist_ok=True)
         seed_env = dict(os.environ, KICAD_CLI=self.kicad_cli)
+        if seed_msg:
+            seed_env["KEMBED_SEED_MESSAGE"] = seed_msg
         subprocess.run(
             [sys.executable, SEED_PY, self.out_dir, REPO],
             env=seed_env,
@@ -779,6 +795,44 @@ class SuiteHarness:
                 pr = {r["id"]: r for r in m["rects"]}
         return pr
 
+    def log_line_count(self, log_name: str = "client.log") -> int:
+        path = self.p(log_name)
+        if not os.path.isfile(path):
+            return 0
+        with open(path, encoding="utf-8", errors="replace") as f:
+            return sum(1 for _ in f)
+
+    def last_gpui_log(self, event_name: str, after_line: int = 0, log_name: str = "client.log") -> dict:
+        path = self.p(log_name)
+        if not os.path.isfile(path):
+            return {}
+        found = {}
+        with open(path, encoding="utf-8", errors="replace") as f:
+            for idx, line in enumerate(f):
+                if idx < after_line or "GPUI_LOG " not in line:
+                    continue
+                try:
+                    obj = json.loads(line.split("GPUI_LOG ", 1)[1])
+                except Exception:
+                    continue
+                if obj.get("event") == event_name:
+                    found = obj
+        return found
+
+    def click_link(self, gpui_hwnd: int, href: str, log_name: str = "client.log", timeout_s: float = 12.0) -> bool:
+        end = time.time() + timeout_s
+        while time.time() < end:
+            rect = None
+            for m in self.metrics(log_name):
+                if m.get("event") == "links":
+                    rect = next((l["rect"] for l in (m.get("links") or []) if l.get("href") == href), None)
+            if isinstance(rect, dict) and "x" in rect and "y" in rect:
+                ox, oy = client_origin(gpui_hwnd)
+                screen_click(int(ox + rect["x"] + min(rect["w"] / 2, 8)), int(oy + rect["y"] + rect["h"] / 2))
+                return True
+            time.sleep(0.25)
+        return False
+
     def click_control(self, gpui_hwnd: int, control_id: str, log_name: str = "client.log") -> bool:
         for _ in range(25):
             c = self.controls(log_name).get(control_id)
@@ -838,7 +892,7 @@ class SuiteHarness:
             for ch in list_child_windows(cont_hwnd):
                 if (
                     ch["visible"]
-                    and ch["parent"] == cont_hwnd
+                    and is_frame_parented_in(ch["hwnd"], cont_hwnd)
                     and (not kicad_pid or ch["pid"] == kicad_pid)
                     and sub in ch["title"].lower()
                     and ch["w"] >= 150
@@ -1002,7 +1056,7 @@ def run_window_suite(h: SuiteHarness) -> int:
                     win32_styles_obs = {
                         "top_clipchildren": bool(top_h and (hwnd_style(top_h) & WS_CLIPCHILDREN) != 0),
                         "cont_ws_child": bool(cont_h and (hwnd_style(cont_h) & WS_CHILD) != 0 and int(u32.GetAncestor(cont_h, GA_PARENT) or 0) == top_h),
-                        "frm_ws_child": bool(frm_h and (hwnd_style(frm_h) & WS_CHILD) != 0 and int(u32.GetAncestor(frm_h, GA_PARENT) or 0) == cont_h),
+                        "frm_ws_child": is_frame_parented_in(frm_h, cont_h),
                     }
                     sr = r_shown.get("shown_root") or {}
                     pane = r_shown.get("pane") or {}
@@ -1954,33 +2008,576 @@ def run_resilience_suite(h: SuiteHarness) -> int:
         h.cleanup()
 
 
+def _screen_box_luma(x: int, y: int, w: int, h: int) -> float:
+    from PIL import ImageGrab, ImageStat
+
+    im = ImageGrab.grab(
+        bbox=(int(x), int(y), int(x + max(1, w)), int(y + max(1, h))),
+        all_screens=True,
+    ).convert("L")
+    return float(ImageStat.Stat(im).mean[0])
+
+
+def _extract_hub_infos(raw: str, prefix: str) -> list:
+    out = []
+    for line in (raw or "").splitlines():
+        if not line.startswith("INFO "):
+            continue
+        try:
+            d = json.loads(line[5:])
+            if (d.get("key") or "").startswith(prefix):
+                out.append(d)
+        except Exception:
+            pass
+    return out
+
+
+def _atomic_append_pcb_track(pcb_path: str, y_mm: float):
+    import uuid
+
+    with open(pcb_path, encoding="utf-8") as f:
+        s = f.read().rstrip()
+    if not s.endswith(")"):
+        raise RuntimeError(f"unexpected pcb tail in {pcb_path}")
+    seg = f'\n\t(segment (start 120 {y_mm}) (end 140 {y_mm}) (width 0.25) (layer "F.Cu") (net 0) (uuid "{uuid.uuid4()}"))\n)'
+    tmp = pcb_path + ".tmp"
+    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+        f.write(s[:-1] + seg + "\n")
+    os.replace(tmp, pcb_path)
+
+
+def _box_centre(box: dict) -> tuple[float, float]:
+    return ((box["x_min"] + box["x_max"]) / 2.0, (box["y_min"] + box["y_max"]) / 2.0)
+
+
+# ==============================================================================
+# Suite 4: bp9 (Tabs, Full size, Pop out/in, Live theme, Reload & conflict,
+#               Cross-probe both ways, Comment to Backplane, Alt+V / Alt+H)
+# ==============================================================================
+def run_bp9_suite(h: SuiteHarness) -> int:
+    desc_path = os.path.join(h.kicad_dir, "share", "backplane", "api.desc")
+    has_bp9 = False
+    if os.path.isfile(desc_path):
+        with open(desc_path, "rb") as df:
+            raw_desc = df.read()
+            has_bp9 = b"SetTheme" in raw_desc and b"ReloadDocument" in raw_desc
+    if not has_bp9:
+        print(f"SKIP win_embed_bp9_e2e: {desc_path} has no SetTheme/ReloadDocument (needs bp.9+)", flush=True)
+        return 0
+
+    h.init_dirs(seed_msg="The tube is U1; its plate resistor is R1 and C1 couples the output.")
+    try:
+        h.start_hub(embed_mode="fork")
+        pro_path = h.p("proj", "ecc83-pp.kicad_pro")
+        pcb_path = h.p("proj", "ecc83-pp.kicad_pcb")
+
+        # 1. Tabs (PCB -> SCH -> FOOTPRINT_EDITOR -> PCB), Full size on/off, Pop out / Pop back in
+        script = [
+            {"select": 0},
+            {"wait": 2600},
+            {"click": "rail:Board"},
+            {"wait": 2600},
+            {"click": "ui:Edit"},
+            {"kicad": {"wait_painted": 45000, "kind": "PCB", "tag": "ux_pcb"}},
+            {"click": "kicad-tab:SCH"},
+            {"kicad": {"wait_painted": 35000, "kind": "SCH", "tag": "ux_sch"}},
+            {"click": "kicad-tab:FOOTPRINT_EDITOR"},
+            {"kicad": {"wait_painted": 45000, "kind": "FOOTPRINT_EDITOR", "tag": "ux_fp"}},
+            {"click": "kicad-tab:PCB"},
+            {"wait": 2200},
+            {"kicad": {"report": True, "tag": "ux_pcb2"}},
+            {"click": "kicad:full"},
+            {"wait": 2200},
+            {"kicad": {"report": True, "tag": "ux_full"}},
+            {"mark": "shot_full"},
+            {"wait": 1200},
+            {"click": "kicad:full"},
+            {"wait": 2000},
+            {"kicad": {"report": True, "tag": "ux_unfull"}},
+            {"click": "kicad:popout"},
+            {"wait": 4500},
+            {"kicad": {"report": True, "tag": "ux_popped"}},
+            {"mark": "shot_popped"},
+            {"wait": 1500},
+            {"click": "kicad:popin"},
+            {"wait": 3800},
+            {"kicad": {"report": True, "tag": "ux_back"}},
+            {"mark": "ux_done"},
+        ]
+        cp = h.start_client(script, hold=True, exit_after=360)
+        gpui_hwnd = h.wait_client_hwnd(cp)
+
+        seen_shots = set()
+
+        def _shot_watcher():
+            for mk, fn in (("shot_full", "01_full_size"), ("shot_popped", "02_popped_out")):
+                if h.wait_for_mark(mk, timeout_s=150.0) and mk not in seen_shots:
+                    seen_shots.add(mk)
+                    time.sleep(0.35)
+                    h.shot(fn)
+
+        watcher = threading.Thread(target=_shot_watcher, daemon=True)
+        watcher.start()
+
+        ux_ok = h.wait_for_mark("ux_done", timeout_s=175.0)
+        watcher.join(timeout=2.0)
+        h.shot("02b_popped_back_in")
+
+        p1 = h.last_kicad_report("ux_pcb")
+        s1 = h.last_kicad_report("ux_sch")
+        fp1 = h.last_kicad_report("ux_fp")
+        p2 = h.last_kicad_report("ux_pcb2")
+        fu = h.last_kicad_report("ux_full")
+        un = h.last_kicad_report("ux_unfull")
+        po = h.last_kicad_report("ux_popped")
+        bk = h.last_kicad_report("ux_back")
+
+        kpid = int(p1.get("pid") or bk.get("pid") or 0)
+        api_sock = bk.get("sock") or p1.get("sock") or ""
+        cont_hwnd = int((bk.get("container") or p1.get("container") or {}).get("xid") or 0)
+        h.track_pid(kpid)
+
+        h.check(
+            "Tabs: Board, Schematic, and Footprints tabs each show and paint in the pane",
+            ux_ok
+            and shown_frame_of(p1).get("kind") == "PCB"
+            and shown_frame_of(p1).get("painted", 0) > 0
+            and shown_frame_of(s1).get("kind") == "SCH"
+            and shown_frame_of(s1).get("painted", 0) > 0
+            and shown_frame_of(fp1).get("kind") == "FOOTPRINT_EDITOR"
+            and shown_frame_of(fp1).get("painted", 0) > 0,
+            {"pcb": shown_frame_of(p1), "sch": shown_frame_of(s1), "fp": shown_frame_of(fp1)},
+        )
+        h.check(
+            "Tabs: returning to Board tab keeps the same PCB frame HWND and same KiCad PID",
+            bool(p1.get("pid")) and p2.get("pid") == p1.get("pid") and p2.get("shown") == p1.get("shown"),
+            {"p1": (p1.get("pid"), p1.get("shown")), "p2": (p2.get("pid"), p2.get("shown"))},
+        )
+        cw = lambda r: int((r.get("container") or {}).get("w") or 0)
+        h.check(
+            "Full size: pane expands over sidebar + thread room and restores cleanly when toggled off",
+            cw(fu) > cw(p2) + 250
+            and shown_frame_of(fu).get("w", 0) >= cw(fu) - 6
+            and abs(cw(un) - cw(p2)) <= 6,
+            {"pcb2_w": cw(p2), "full_w": cw(fu), "unfull_w": cw(un)},
+        )
+        h.check(
+            "Pop out: same KiCad PID moves into its own top-level window and paints",
+            bool(po.get("toplevel"))
+            and po.get("toplevel") != p1.get("toplevel")
+            and po.get("pid") == p1.get("pid")
+            and shown_frame_of(po).get("painted", 0) > 0,
+            {"main_top": p1.get("toplevel"), "pop_top": po.get("toplevel"), "po_shown": shown_frame_of(po)},
+        )
+        h.check(
+            "Pop back in: returns to main window's pane with exact same PCB frame HWND and KiCad PID painted",
+            bk.get("toplevel") == p1.get("toplevel")
+            and bk.get("pid") == p1.get("pid")
+            and bk.get("shown") == p1.get("shown")
+            and shown_frame_of(bk).get("painted", 0) > 0,
+            {"bk_top": bk.get("toplevel"), "bk_shown": shown_frame_of(bk)},
+        )
+
+        h.wait_for_ipc(api_sock, timeout_s=20.0)
+
+        # 2. Live theme (editor.kicad.theme: light -> dark on running editor)
+        key_chord("ctrl", "grave")
+        time.sleep(0.15)
+        h.click_control(gpui_hwnd, "rail:Schematic")
+        sch_win = h.wait_embedded_frame(cont_hwnd, kpid, "Schematic Editor", timeout_s=25.0)
+        time.sleep(0.8)
+
+        th_light_raw = h.hub_rpc([{"m": "editor.kicad.theme", "p": {"project": pcb_path, "mode": "light"}}])
+        time.sleep(1.5)
+        h.shot("03_theme_light")
+        luma_light = -1.0
+        if sch_win:
+            luma_light = _screen_box_luma(
+                sch_win["root_x"] + 90,
+                sch_win["root_y"] + 110,
+                max(120, sch_win["w"] - 180),
+                max(120, sch_win["h"] - 190),
+            )
+
+        th_dark_raw = h.hub_rpc([{"m": "editor.kicad.theme", "p": {"project": pcb_path, "mode": "dark"}}])
+        time.sleep(1.6)
+        h.shot("04_theme_dark")
+        luma_dark = 999.0
+        if sch_win:
+            luma_dark = _screen_box_luma(
+                sch_win["root_x"] + 90,
+                sch_win["root_y"] + 110,
+                max(120, sch_win["w"] - 180),
+                max(120, sch_win["h"] - 190),
+            )
+
+        h.check(
+            f"Live theme (editor.kicad.theme): light ({luma_light:.1f}) -> dark ({luma_dark:.1f}) updates running KiCad live",
+            "_builtin_default" in th_light_raw
+            and "_builtin_backplane_dark" in th_dark_raw
+            and luma_light > 150.0
+            and luma_dark < 90.0,
+            {"luma_light": luma_light, "luma_dark": luma_dark, "light_rpc": th_light_raw[:180], "dark_rpc": th_dark_raw[:180]},
+        )
+
+        # Switch back to PCB editor for reload, cross-probe, comment, and alignment checks
+        key_chord("ctrl", "grave")
+        time.sleep(0.15)
+        h.click_control(gpui_hwnd, "rail:Board")
+        pcb_win = h.wait_embedded_frame(cont_hwnd, kpid, "PCB Editor", timeout_s=25.0)
+        time.sleep(0.8)
+
+        # 3. Reload-on-disk (atomic rename) & conflict + Keep yours
+        h.ipc_cmd("save-doc", api_sock, "pcb")
+        time.sleep(1.4)
+        n0 = h.ipc_cmd("items-count", api_sock, "pcb", "11")["count"]
+        _atomic_append_pcb_track(pcb_path, 60.0)
+
+        n1 = n0
+        for _ in range(35):
+            time.sleep(0.3)
+            try:
+                n1 = h.ipc_cmd("items-count", api_sock, "pcb", "11")["count"]
+                if n1 == n0 + 1:
+                    break
+            except Exception:
+                pass
+        h.shot("05_reloaded_on_disk")
+        h.check(
+            f"Reload-on-disk: atomic rename write reloaded automatically in clean PCB editor ({n0} -> {n1} tracks)",
+            n1 == n0 + 1,
+            {"n0": n0, "n1": n1},
+        )
+
+        h.ipc_cmd("agent-add-track", api_sock, "120.0", "70.0", "140.0", "70.0", "0.25", "3")
+        time.sleep(0.6)
+        n2 = h.ipc_cmd("items-count", api_sock, "pcb", "11")["count"]
+        _atomic_append_pcb_track(pcb_path, 80.0)
+
+        conflicts_seen = []
+        for _ in range(35):
+            time.sleep(0.3)
+            rel_infos = _extract_hub_infos(h.hub_rpc([]), "kicad.reload.")
+            if rel_infos:
+                conflicts_seen = (rel_infos[-1].get("value") or {}).get("conflicts") or []
+                if len(conflicts_seen) >= 1:
+                    break
+        n3 = h.ipc_cmd("items-count", api_sock, "pcb", "11")["count"]
+        h.shot("06_reload_conflict")
+        h.check(
+            f"Conflict over unsaved edits: reload held back ({n2} -> {n3}) and kicad.reload published conflicts={conflicts_seen}",
+            n3 == n2 and len(conflicts_seen) >= 1,
+            {"n2": n2, "n3": n3, "conflicts": conflicts_seen},
+        )
+
+        conflict_file = conflicts_seen[0] if conflicts_seen else pcb_path
+        res_keep = h.hub_rpc(
+            [{"m": "editor.kicad.resolve", "p": {"project": pcb_path, "file": conflict_file, "choice": "keep"}}]
+        )
+        time.sleep(0.8)
+        n4 = h.ipc_cmd("items-count", api_sock, "pcb", "11")["count"]
+        rel_after = _extract_hub_infos(h.hub_rpc([]), "kicad.reload.")
+        conflicts_after = (rel_after[-1].get("value") or {}).get("conflicts") or [] if rel_after else []
+        h.check(
+            "Keep yours (editor.kicad.resolve): unsaved edits stay and conflicts clear to 0",
+            '"ok":true' in res_keep.replace(" ", "") and n4 == n2 and len(conflicts_after) == 0,
+            {"n4": n4, "n2": n2, "conflicts_after": conflicts_after, "res_keep": res_keep[:200]},
+        )
+        h.ipc_cmd("save-doc", api_sock, "pcb")
+        time.sleep(1.0)
+
+        # 4. Cross-probe both ways (Chat -> KiCad, RPC -> KiCad, KiCad click -> kicad.sel & View mode, View chat click -> zoom)
+        for _ in range(3):
+            try:
+                h.ipc_cmd("run-action", api_sock, "common.Control.zoomOutCenter")
+            except Exception:
+                pass
+            time.sleep(0.2)
+        time.sleep(0.6)
+        pcb_win = h.wait_embedded_frame(cont_hwnd, kpid, "PCB Editor", timeout_s=15.0) or pcb_win or {"root_x": 800, "root_y": 150, "w": 600, "h": 700}
+        bx, by, bw, bh = pcb_win["root_x"], pcb_win["root_y"], pcb_win["w"], pcb_win["h"]
+
+        shot_xp_before = h.shot("07a_before_xprobe_u1")
+        l_xp0 = h.log_line_count()
+        key_chord("ctrl", "grave")
+        time.sleep(0.15)
+        clicked_u1_link = h.click_link(gpui_hwnd, "kicad:U1", timeout_s=12.0)
+        for _ in range(40):
+            if h.last_gpui_log("xprobe_select", l_xp0):
+                break
+            time.sleep(0.25)
+        time.sleep(1.1)
+        shot_xp_after = h.shot("07b_after_xprobe_u1")
+        sel_u1 = h.ipc_cmd("selection", api_sock, "pcb")
+        xp_diff = img_diff_box(shot_xp_before, shot_xp_after, bx + 30, by + 60, max(80, bw - 60), max(80, bh - 120))
+        h.check(
+            f"Cross-probe (chat U1 -> KiCad): clicking U1 link selected U1 in PCB editor and zoomed view ({xp_diff})",
+            clicked_u1_link and "U1" in (sel_u1.get("refs") or []) and xp_diff["changed_pixels"] > 400,
+            {"clicked_u1_link": clicked_u1_link, "sel": sel_u1, "diff": xp_diff},
+        )
+
+        r2_raw = h.hub_rpc(
+            [{"m": "editor.kicad.select", "p": {"project": pro_path, "references": ["C1", "Q99"], "zoom": True}}]
+        )
+        sel_c1 = h.ipc_cmd("selection", api_sock, "pcb")
+        x2_ok = False
+        for line in r2_raw.splitlines():
+            if not line or line.startswith("INFO "):
+                continue
+            d = json.loads(line)
+            rep_d = d.get("reply") or {}
+            if (
+                d.get("ok") is True
+                and rep_d.get("kicad") is True
+                and "C1" in (rep_d.get("found") or {}).get("references", [])
+                and (rep_d.get("probe") or "").startswith("footprint C1")
+            ):
+                x2_ok = True
+                break
+        h.check(
+            "Cross-probe (editor.kicad.select RPC): found C1 in KiCad and set viewer probe on Windows",
+            x2_ok and "C1" in (sel_c1.get("refs") or []),
+            {"sel_c1": sel_c1, "rpc": r2_raw[:240]},
+        )
+
+        # Person click in KiCad -> ET_SELECTION_CHANGED -> kicad.sel.<digest>
+        h.hub_rpc([{"m": "editor.kicad.select", "p": {"project": pro_path, "references": ["U1"], "zoom": True}}])
+        time.sleep(1.0)
+        cx_mid, cy_mid = int(bx + bw // 2), int(by + bh // 2)
+        screen_click(cx_mid, cy_mid, 1)
+        time.sleep(0.5)
+        key_tap("Escape")
+        time.sleep(0.35)
+        screen_click(cx_mid, cy_mid, 1)
+        time.sleep(0.35)
+        screen_click(cx_mid, cy_mid, 1)
+
+        sel_info_val = {}
+        for _ in range(30):
+            time.sleep(0.3)
+            sinfos = _extract_hub_infos(h.hub_rpc([]), "kicad.sel.")
+            if sinfos:
+                cand = sinfos[-1].get("value") or {}
+                cs = cand.get("selection") or {}
+                if cand.get("frame") == "PCB" and (
+                    "U1" in (cs.get("references") or [])
+                    or any(p.startswith("U1.") for p in (cs.get("pins") or []))
+                ):
+                    sel_info_val = cand
+                    break
+        h.check(
+            "Cross-probe (KiCad click -> kicad.sel): person's click on U1 emitted kicad.sel and set viewer probe",
+            sel_info_val.get("frame") == "PCB" and "ref=U1" in (sel_info_val.get("probe") or ""),
+            sel_info_val,
+        )
+
+        # Switch to View mode to confirm Board viewer lights U1 AND clicking R1 zooms Board viewer
+        key_chord("ctrl", "grave")
+        time.sleep(0.2)
+        l_view = h.log_line_count()
+        h.click_control(gpui_hwnd, "ui:View")
+        for _ in range(50):
+            if h.last_gpui_log("probe_lit", l_view).get("n", 0) > 0:
+                break
+            time.sleep(0.25)
+        p3_sync = h.last_gpui_log("probe_sync", l_view)
+        p3_lit = h.last_gpui_log("probe_lit", l_view)
+        h.shot("08a_view_lit_u1")
+        h.check(
+            "Cross-probe (KiCad -> Board viewer): View mode lights U1 selected in KiCad",
+            "ref=U1" in (p3_sync.get("probe") or "") and p3_lit.get("n", 0) > 0,
+            {"probe_sync": p3_sync, "probe_lit": p3_lit},
+        )
+
+        l_x4 = h.log_line_count()
+        clicked_r1_link = h.click_link(gpui_hwnd, "kicad:R1", timeout_s=10.0)
+        for _ in range(50):
+            if h.last_gpui_log("xprobe_zoom", l_x4):
+                break
+            time.sleep(0.25)
+        time.sleep(0.8)
+        z4 = h.last_gpui_log("xprobe_zoom", l_x4)
+        p4_sync = h.last_gpui_log("probe_sync", l_x4)
+        p4_lit = h.last_gpui_log("probe_lit", l_x4)
+        h.shot("08b_view_zoom_r1")
+        h.check(
+            "Cross-probe (View mode chat R1 -> Board viewer): clicking R1 lit and zoomed R1",
+            clicked_r1_link
+            and "ref=R1" in (z4.get("probe") or "")
+            and "ref=R1" in (p4_sync.get("probe") or "")
+            and p4_lit.get("n", 0) > 0,
+            {"z4": z4, "sync": p4_sync, "lit": p4_lit},
+        )
+
+        # Return to Edit mode on PCB for Comment to Backplane + Alt+V / Alt+H
+        h.click_control(gpui_hwnd, "ui:Edit")
+        pcb_win = h.wait_embedded_frame(cont_hwnd, kpid, "PCB Editor", timeout_s=25.0)
+        time.sleep(1.0)
+
+        # 5. Comment to Backplane (CommentSelection over IPC -> ET_COMMENT -> copied PNG + user message in thread)
+        h.ipc_cmd("select-items", api_sock, "pcb", "U1,C1", "1")
+        time.sleep(0.8)
+        note_text = "Check decoupling near U1 on Windows"
+        cmt_res = h.ipc_cmd("comment-selection", api_sock, "pcb", note_text)
+        cmt_obj = cmt_res.get("comment") or {}
+
+        posted_msg = None
+        copied_imgs = []
+        comments_dir = h.p("home", "kicad-comments")
+        events_jsonl = h.p("home", "events.jsonl")
+        for _ in range(40):
+            time.sleep(0.3)
+            if os.path.isdir(comments_dir):
+                copied_imgs = [
+                    os.path.join(comments_dir, fn)
+                    for fn in os.listdir(comments_dir)
+                    if fn.endswith(".png") and os.path.getsize(os.path.join(comments_dir, fn)) > 300
+                ]
+            if os.path.isfile(events_jsonl):
+                with open(events_jsonl, encoding="utf-8", errors="replace") as ef:
+                    for line in ef:
+                        try:
+                            ev = json.loads(line)
+                        except Exception:
+                            continue
+                        if (
+                            ev.get("$") == "MessagePosted"
+                            and ev.get("thread") == "t1"
+                            and ev.get("role") == "user"
+                            and note_text in (ev.get("text") or "")
+                        ):
+                            posted_msg = ev
+            if posted_msg and copied_imgs:
+                break
+
+        time.sleep(0.8)
+        h.shot("09_comment_to_backplane")
+        msg_txt = (posted_msg or {}).get("text") or ""
+        h.check(
+            "Comment to Backplane (CommentSelection over IPC -> copied screenshot + user message with refs & attachment in thread)",
+            bool(cmt_res.get("seq"))
+            and cmt_obj.get("from_api") is True
+            and sorted((cmt_obj.get("names") or {}).get("references") or []) == ["C1", "U1"]
+            and len(copied_imgs) >= 1
+            and posted_msg is not None
+            and "Selected in the KiCad board:" in msg_txt
+            and "U1" in msg_txt
+            and "[attachment: " in msg_txt,
+            {"seq": cmt_res.get("seq"), "copied_imgs": copied_imgs, "msg_txt": msg_txt[:260]},
+        )
+
+        # 6. Alt+V / Alt+H alignment hotkeys in embedded PCB editor
+        pcb_win = h.wait_embedded_frame(cont_hwnd, kpid, "PCB Editor", timeout_s=15.0) or pcb_win or {"root_x": 800, "root_y": 150, "w": 600, "h": 700}
+        bx, by, bw, bh = pcb_win["root_x"], pcb_win["root_y"], pcb_win["w"], pcb_win["h"]
+        safe_x, safe_y = int(bx + 90), int(by + 95)
+        screen_click(safe_x, safe_y, 1)
+        time.sleep(0.4)
+        if list_popup_menus(kpid):
+            key_tap("Escape")
+            time.sleep(0.2)
+
+        def _pcb_boxes(refs_csv: str, zoom_flag: str = "0") -> dict:
+            h.ipc_cmd("select-items", api_sock, "pcb", refs_csv, zoom_flag)
+            time.sleep(0.5)
+            cr = h.ipc_cmd("comment-selection", api_sock, "pcb", "(probe)")
+            return {
+                it["reference"]: it["bbox"]
+                for it in ((cr.get("comment") or {}).get("items") or [])
+                if it.get("kind") == "FOOTPRINT" and it.get("bbox")
+            }
+
+        refs = ["R2", "R1", "R3"]
+        before_boxes = _pcb_boxes("R2,R1,R3", "1")
+        have_all_3 = set(before_boxes.keys()) == set(refs)
+        anchor_x, anchor_y = _box_centre(before_boxes["R2"]) if have_all_3 else (0.0, 0.0)
+
+        # Ensure focus is inside PCB canvas with cursor off footprints, then select R2,R1,R3 and press Alt+V
+        screen_click(safe_x, safe_y, 1)
+        time.sleep(0.35)
+        h.ipc_cmd("select-items", api_sock, "pcb", "R2,R1,R3", "0")
+        time.sleep(0.45)
+        screen_move(safe_x, safe_y)
+        key_chord("alt", "v")
+        time.sleep(1.1)
+        h.shot("10a_after_alt_v")
+        after_v = _pcb_boxes("R2,R1,R3", "0") if have_all_3 else {}
+        xs_v = [_box_centre(after_v[r])[0] for r in refs] if set(after_v) == set(refs) else [0.0, 99.0]
+        ys_v_ok = (
+            all(abs(_box_centre(after_v[r])[1] - _box_centre(before_boxes[r])[1]) < 0.02 for r in refs)
+            if set(after_v) == set(refs)
+            else False
+        )
+        h.check(
+            f"Alt+V aligns selected footprints (R2, R1, R3) onto R2's X centre ({anchor_x:.3f} mm -> {[round(x, 3) for x in xs_v]})",
+            have_all_3 and all(abs(x - anchor_x) <= 0.05 for x in xs_v) and ys_v_ok,
+            {"anchor_x": anchor_x, "xs_v": xs_v, "ys_v_ok": ys_v_ok},
+        )
+
+        h.ipc_cmd("run-action", api_sock, "common.Interactive.undo")
+        time.sleep(0.5)
+
+        screen_click(safe_x, safe_y, 1)
+        time.sleep(0.35)
+        h.ipc_cmd("select-items", api_sock, "pcb", "R2,R1,R3", "0")
+        time.sleep(0.45)
+        screen_move(safe_x, safe_y)
+        key_chord("alt", "h")
+        time.sleep(1.1)
+        h.shot("10b_after_alt_h")
+        after_h = _pcb_boxes("R2,R1,R3", "0") if have_all_3 else {}
+        ys_h = [_box_centre(after_h[r])[1] for r in refs] if set(after_h) == set(refs) else [0.0, 99.0]
+        xs_h_ok = (
+            all(abs(_box_centre(after_h[r])[0] - _box_centre(before_boxes[r])[0]) < 0.02 for r in refs)
+            if set(after_h) == set(refs)
+            else False
+        )
+        h.check(
+            f"Alt+H aligns selected footprints (R2, R1, R3) onto R2's Y centre ({anchor_y:.3f} mm -> {[round(y, 3) for y in ys_h]})",
+            have_all_3 and all(abs(y - anchor_y) <= 0.05 for y in ys_h) and xs_h_ok,
+            {"anchor_y": anchor_y, "ys_h": ys_h, "xs_h_ok": xs_h_ok},
+        )
+        h.ipc_cmd("run-action", api_sock, "common.Interactive.undo")
+        time.sleep(0.4)
+
+        # Clean teardown
+        h.hub_rpc([{"method": "editor.kicad.close", "params": {"project": pro_path, "save": "discard"}}])
+        kill_pid_tree(cp.pid)
+        for _ in range(35):
+            if not pid_alive(kpid):
+                break
+            time.sleep(0.2)
+        h.check("bp9 suite teardown left zero running KiCad processes", not pid_alive(kpid), {"kpid_alive": pid_alive(kpid)})
+
+        return h.finish()
+    finally:
+        h.cleanup()
+
+
 def main():
     if len(sys.argv) < 7:
         sys.exit(
-            "usage: win_embed_e2e.py <window|editors|resilience|all> <CLIENT_EXE> <HUB_EXE> <ASSETS_DIR> <KICAD_DIR> <OUT_DIR> [PORT]"
+            "usage: win_embed_e2e.py <window|editors|resilience|bp9|all> <CLIENT_EXE> <HUB_EXE> <ASSETS_DIR> <KICAD_DIR> <OUT_DIR> [PORT]"
         )
     suite = sys.argv[1]
     client_exe, hub_exe, assets_dir, kicad_dir, out_dir = sys.argv[2:7]
     port = int(sys.argv[7]) if len(sys.argv) > 7 else 3851
 
+    runners = {
+        "window": run_window_suite,
+        "editors": run_editors_suite,
+        "resilience": run_resilience_suite,
+        "bp9": run_bp9_suite,
+    }
     if suite == "all":
         rc = 0
-        for idx, name in enumerate(("window", "editors", "resilience")):
+        for idx, name in enumerate(("window", "editors", "resilience", "bp9")):
             sub_out = os.path.join(out_dir, name)
             h = SuiteHarness(name, client_exe, hub_exe, assets_dir, kicad_dir, sub_out, port + idx * 20)
-            rc |= {
-                "window": run_window_suite,
-                "editors": run_editors_suite,
-                "resilience": run_resilience_suite,
-            }[name](h)
+            rc |= runners[name](h)
         sys.exit(rc)
-    elif suite in ("window", "editors", "resilience"):
+    elif suite in runners:
         h = SuiteHarness(suite, client_exe, hub_exe, assets_dir, kicad_dir, out_dir, port)
-        rc = {
-            "window": run_window_suite,
-            "editors": run_editors_suite,
-            "resilience": run_resilience_suite,
-        }[suite](h)
+        rc = runners[suite](h)
         sys.exit(rc)
     else:
         sys.exit(f"unknown suite: {suite}")
