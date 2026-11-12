@@ -1,0 +1,27 @@
+[
+ {
+  "key": "violations|copper_outside_board|warning",
+  "why": "KiCad master (the fork) checks copper against the board outline in more cases than 10.0; the fork gives the same count on the native board and on its 10.0 export (Hubble_DK: 35 pads, 2026-11-12)"
+ },
+ {
+  "key": "violations|hole_to_hole|warning",
+  "why": "the fork reports a hole pair in both orders (A-B and B-A) where 10.0 reports it once; same pairs, same distances (Hubble_DK: 6 vs 3, 2026-11-12)"
+ },
+ {
+  "key": "erc|bus_to_bus_conflict|error",
+  "why": "KiCad master's ERC flags bus-to-bus conflicts 10.0 does not; the fork gives the same count on the native schematic and its export (video demo: 5, 2026-11-12)"
+ },
+ {
+  "key": "violations|lib_footprint_mismatch|warning",
+  "why": "compares each footprint with the library's copy, and the fork and the release ship different library versions; the fork gives the same count on native and export (video demo: 0 vs 129, 2026-11-12)"
+ },
+ {
+  "key": "erc|wired_implicit_power|warning",
+  "why": "a check only KiCad master has (upstream 9f93bd95ba, 'Run ERC on published connectivity', 2026-09-15); 10.0.x cannot report it, so it hides nothing 10.0 would (fork lane, 2026-11-12)"
+ },
+ {
+  "key": "schematic_parity|footprint_symbol_mismatch|warning",
+  "drop_description_suffix": "'Exclude from simulation' settings differ",
+  "why": "10.0's parity check has no exclude-from-simulation comparison; only those items are left out, every other parity item still counts (fork lane, 2026-11-12: pic_programmer 7, ecc83 4)"
+ }
+]
