@@ -10,6 +10,8 @@ REPO_ROOT=$(cd "$KEMBED_LIB/../../.." && pwd)
 . "$REPO_ROOT/scripts/lib-bptmp.sh"
 # shellcheck source=../../e2e/lib/own-group.sh
 . "$REPO_ROOT/test/e2e/lib/own-group.sh"
+# shellcheck source=gpu_display.sh
+. "$KEMBED_LIB/gpu_display.sh"
 
 REAL_HOME="$HOME"
 EMBED_MODE=${EMBED_MODE:-spike}
@@ -144,6 +146,10 @@ start_xvfb_and_wm() {
   else
     xvb=$(command -v Xvfb)
   fi
+  # REAL_HARDWARE=1: a private display the GPU draws (lib/gpu_display.sh); Xvfb has none. KEMBED_XVFB=1 keeps Xvfb.
+  if [ "${REAL_HARDWARE:-0}" = "1" ] && [ "${KEMBED_XVFB:-0}" != "1" ] && gpu_display_available; then
+    start_gpu_display || return 1
+  else
   d=$((520 + $$ % 200))
   while [ -e "/tmp/.X11-unix/X$d" ] || [ -e "/tmp/.X$d-lock" ]; do d=$((d + 1)); done
   DISP=":$d"
@@ -151,6 +157,7 @@ start_xvfb_and_wm() {
   own env LD_LIBRARY_PATH="$xld" "$xvb" "$DISP" -screen 0 1800x1050x24 -nolisten tcp -xkbdir /usr/share/X11/xkb >"$OUT/xvfb.log" 2>&1
   for _ in $(seq 30); do [ -e "/tmp/.X11-unix/X$d" ] && break; sleep 0.1; done
   export DISPLAY="$DISP"
+  fi
 
   cat >"$OUT/i3.conf" <<EOF
 font pango:monospace 8
@@ -176,6 +183,9 @@ EOF
 }
 
 start_hub() {
+  # software GL for the hub's KiCad unless REAL_HARDWARE=1 (then KiCad draws with the display's GPU, as for the person)
+  KEMBED_SW_ENV=()
+  [ "${REAL_HARDWARE:-0}" = "1" ] || KEMBED_SW_ENV=(LIBGL_ALWAYS_SOFTWARE="${LIBGL_ALWAYS_SOFTWARE:-1}" GALLIUM_DRIVER="${GALLIUM_DRIVER:-llvmpipe}" LP_NUM_THREADS="${LP_NUM_THREADS:-2}" VK_ICD_FILENAMES="${VK_ICD_FILENAMES:-}")
   HPORT=$(free_port)
   export HPORT
   local mode_env=""
@@ -192,10 +202,7 @@ start_hub() {
     DISPLAY="$DISP" \
     GDK_BACKEND=x11 \
     GDK_SCALE=1 \
-    LIBGL_ALWAYS_SOFTWARE="${LIBGL_ALWAYS_SOFTWARE:-1}" \
-    GALLIUM_DRIVER="${GALLIUM_DRIVER:-llvmpipe}" \
-    LP_NUM_THREADS="${LP_NUM_THREADS:-2}" \
-    VK_ICD_FILENAMES="${VK_ICD_FILENAMES:-}" \
+    ${KEMBED_SW_ENV[@]+"${KEMBED_SW_ENV[@]}"} \
     BACKPLANE_KICAD_CLI="${KICAD_CLI:-}" \
     BACKPLANE_KICAD_EMBED_MODE="$mode_env" \
     BACKPLANE_AGENTS="$OUT/bin" \
