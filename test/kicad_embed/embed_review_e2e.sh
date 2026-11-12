@@ -55,4 +55,6 @@ PY
 )" "$(head -c 400 "$OUT/checks.out")"
 wait_for_log "$OUT/client.log" '"name":"checks_open","event":"mark"' 60 || true
 sleep 0.5; shot "r2_checks_open"
+hub_rpc "[{\"method\":\"mgmt.watch\",\"params\":{\"project\":\"$PRO\"}}]" >"$OUT/mgmt.out" 2>&1 || true
+check "Findings opened the Checks panel" "$(python3 -c 'import json,sys; print(int(any((json.loads(l).get("result") or {}).get("state",{}).get("open")=="checks" for l in open(sys.argv[1]) if l.startswith("{"))))' "$OUT/mgmt.out" 2>/dev/null || echo 0)"
 finish_suite "embed_review_e2e ($EMBED_MODE)"
