@@ -15,14 +15,15 @@
 #   is a guard failure. Each one is logged, put on the desktop once a batch, and the hub is asked to start those turns again (POST /dev/account-retry, the token on stdin).
 #   Every action goes to $D/watchdog.log.
 # Env: FRESH_DIR, FRESH_PORT, GPUI_DEV_DIR, FRESH_TAILNET_PORT, DISPLAY (as fresh.sh), WATCHDOG_TRIES (3), WATCHDOG_BOOT (900 s), WATCHDOG_WAIT (120 s for a restart to answer), WATCHDOG_BACKOFF (120 s),
-#      WATCHDOG_BACKOFF_MAX (3600 s), WATCHDOG_CALM (600 s of health before the backoff resets), WATCHDOG_WATCHER (0: do not look after fresh-watch.sh).
+#      WATCHDOG_BACKOFF_MAX (3600 s), WATCHDOG_CALM (600 s of health before the backoff resets), WATCHDOG_WATCHER (0: do not look after fresh-watch.sh),
+#      WATCHDOG_STUCK (300 s: a check lock taken this long is logged).
 set -u
 unset BACKPLANE_AGENT_OWNER   # the hub reaps what carries its mark: nothing started from here may
 HERE=$(cd "$(dirname "$0")" && pwd)
 D=${FRESH_DIR:-$HOME/.backplane-gpui-fresh}; PORT=${FRESH_PORT:-3797}; DEV=${GPUI_DEV_DIR:-$HOME/.backplane-gpui-dev}
 TRIES=${WATCHDOG_TRIES:-3}; BOOT=${WATCHDOG_BOOT:-900}; WAIT=${WATCHDOG_WAIT:-120}; BACK=${WATCHDOG_BACKOFF:-120}; BACKMAX=${WATCHDOG_BACKOFF_MAX:-3600}; CALM=${WATCHDOG_CALM:-600}; WATCHER=${WATCHDOG_WATCHER:-1}
 FRESH=${WATCHDOG_FRESH:-$HERE/fresh.sh}; CUT=${WATCHDOG_CUT:-$HERE/dev-cut.sh}; WATCH=${WATCHDOG_WATCH:-$HERE/fresh-watch.sh}
-ST=$D/.watchdog; LOG=$D/watchdog.log; UNITS=${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user
+STUCK=${WATCHDOG_STUCK:-300}; ST=$D/.watchdog; LOCK=$ST/run.lock; LOG=$D/watchdog.log; UNITS=${XDG_CONFIG_HOME:-$HOME/.config}/systemd/user
 log() { printf '%s %s\n' "$(date '+%F %T')" "$*" >> "$LOG"; }
 get() { cat "$ST/$1" 2>/dev/null || echo "${2:-0}"; }
 put() { printf '%s\n' "$2" > "$ST/$1"; }
@@ -64,6 +65,18 @@ account_check() {
   r=$(printf 'Authorization: Bearer %s\n' "$(cat "$D/home/token" 2>/dev/null)" | curl -s -m10 -X POST -H @- "http://127.0.0.1:$PORT/dev/account-retry" 2>/dev/null) || r="no answer"
   log "account guard: the hub answered: $r"
 }
+# busy: this check found the lock taken. A check lasts at most the unit's TimeoutStartSec (600 s) and the timer never starts one while one runs, so a lock taken for
+# WATCHDOG_STUCK seconds is a leak: say so, with who holds it, every WATCHDOG_STUCK seconds while it lasts. The watchdog can never be silent again.
+busy() {
+  local since t holders p
+  since=$(get busy-since); [ "$since" != 0 ] || { put busy-since "$(now)"; return; }
+  t=$(( $(now) - since )); [ "$t" -ge "$STUCK" ] || return 0
+  [ $(( $(now) - $(get said-busy) )) -ge "$STUCK" ] || return 0
+  put said-busy "$(now)"
+  holders=; for p in $(fuser "$LOCK" 2>/dev/null); do holders="$holders $p($(cat "/proc/$p/comm" 2>/dev/null || echo '?'))"; done
+  log "the check lock $LOCK has been taken for $t s: no check runs. Held by:${holders:- (fuser shows nobody)}"
+  command -v notify-send > /dev/null && notify-send -a Backplane "Backplane: the hub watchdog is stuck" "Its lock has been taken for $((t/60)) min, so it is not looking after the hub. See $LOG" 2>/dev/null &
+}
 watcher_up() { pgrep -f "fresh-watch\.sh" > /dev/null; }
 relaunching() { # the watcher is swapping builds right now: its own status says so, and it is fresh
   local f=$DEV/STATUS; [ -f "$f" ] && grep -q '"phase":"relaunching"' "$f" && [ $(( $(now) - $(stat -c %Y "$f") )) -lt "$WAIT" ]
@@ -84,10 +97,16 @@ start_watcher() {
 
 check() {
   mkdir -p "$ST"
-  # one check at a time: a restart can outlast the timer. flock(1) holds the lock itself (its descriptor is close-on-exec), so nothing a check starts carries it.
-  # It was `exec 9> lock; flock -n 9`: fresh-watch.sh started from a check inherited descriptor 9, and so did the hub, the window and every agent it started after;
-  # each later check found the lock taken and left without a word (silent from 2026-11-08 21:20 to 11-09). The old file `lock` may still be held by those: a new name.
-  [ -n "${WATCHDOG_LOCKED:-}" ] || exec env WATCHDOG_LOCKED=1 flock -n -E 0 "$ST/check.lock" "$0" check
+  # one check at a time: a restart can outlast the timer. `flock -o`: flock(1) itself holds the lock and closes its descriptor before it starts the check, so nothing a check
+  # starts (fresh.sh, the hub, the window, fresh-watch.sh and every agent and build after them) can carry it. Without -o flock(1) hands its open descriptor to the command:
+  # it was `exec 9> lock; flock -n 9` until Nov 9 and `flock -n -E 0 check.lock "$0" check` after, the same leak both times. Each restart's fresh.sh and everything it
+  # started kept the lock, and every later check left without a word (silent 2026-11-08 21:20 to 11-09, and 2026-11-11 00:06 to 11-12, the hub down 02:16-10:57 meanwhile).
+  # The old files `lock` and `check.lock` may still be held by those: a new name. A check that finds the lock taken says so once it has been taken for WATCHDOG_STUCK s (busy).
+  if [ -z "${WATCHDOG_LOCKED:-}" ]; then
+    WATCHDOG_LOCKED=1 flock -n -o -E 75 "$LOCK" "$0" check; local rc=$?
+    if [ "$rc" = 75 ]; then busy; exit 0; fi
+    rm -f "$ST/busy-since"; exit "$rc"
+  fi
   unset WATCHDOG_LOCKED
   if [ -e "$D/.stopped" ]; then [ "$(get said-stopped)" = 1 ] || { log "the hub was stopped by hand: leaving it stopped"; put said-stopped 1; }; put fails 0; exit 0; fi
   put said-stopped 0

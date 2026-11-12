@@ -10,15 +10,23 @@ bq_slots() { [ -n "${BUILD_SLOTS:-}" ] && { echo "$BUILD_SLOTS"; return; }
   local c m n; c=$(( $(nproc) / 10 )); m=$(( $(bq_mem_gb) / 6 )); n=$(( c < m ? c : m )); [ "$n" -lt 1 ] && n=1; [ "$n" -gt 4 ] && n=4; echo "$n"; }
 # a build goes to a Boat only when every local slot is taken AND (it has already waited BQ_OFFLOAD_AFTER seconds, default 420, or free memory is under BQ_LOW_GB, default 8)
 bq_offload_now() { [ "$1" -ge "${BQ_OFFLOAD_AFTER:-420}" ] || [ "$(bq_mem_gb)" -lt "${BQ_LOW_GB:-8}" ]; }
-# cargo -j for one build holding a slot: about 2 GB a job from what is free, a share of the cores, at most the 28 the builds are pinned to, at least 1
-bq_jobs() { local n g c j; n=$(bq_slots); g=$(( $(bq_mem_gb) / 2 )); c=$(( $(nproc) / n )); j=$g; [ "$c" -lt "$j" ] && j=$c; [ "$j" -gt 28 ] && j=28; [ "$j" -lt 1 ] && j=1; echo "$j"; }
+# cargo -j for one build holding a slot: about 2 GB a job from this slot's share of what is free (every slot may fill at once: each sizing itself from all the free memory
+# is how three builds asked for 60 GB on a 62 GB machine, Nov 12), a share of the cores, at most the 28 the builds are pinned to, at least 1
+bq_jobs() { local n g c j; n=$(bq_slots); g=$(( $(bq_mem_gb) / (2 * n) )); c=$(( $(nproc) / n )); j=$g; [ "$c" -lt "$j" ] && j=$c; [ "$j" -gt 28 ] && j=28; [ "$j" -lt 1 ] && j=1; echo "$j"; }
+# BQ_SCOPE: a build runs in a transient scope of its own in bpbuild.slice, never in the scope of whoever started it. An agent's build used to run inside the hub's scope
+# (the hub, its agents, their builds and tests: 28 GB), so systemd-oomd's pressure kill took the whole hub with it (Nov 12 01:25 and 02:16). Now a build is its own
+# candidate: oomd kills the build, the hub's scope (ManagedOOMPreference=avoid, fresh.sh) is picked last. MemoryMax (BQ_MEM_MAX, 60%) stops one runaway build alone.
+# No user systemd (a Boat box, the Mac, a container) or BQ_NO_SCOPE=1: the command runs as it is.
+bq_scope() { BQ_SCOPE=()
+  [ -z "${BQ_NO_SCOPE:-}" ] && command -v systemd-run > /dev/null 2>&1 && [ -S "${XDG_RUNTIME_DIR:-/nonexistent}/bus" ] || return 0
+  BQ_SCOPE=(systemd-run --user --scope -q --collect --slice=bpbuild.slice -p "MemoryMax=${BQ_MEM_MAX:-60%}" -p ManagedOOMPreference=none --); }
 # bq_run CALLBACK CMD...: run CMD holding a slot, waiting for a free one (CALLBACK, if any, is run once when it has to wait, with the number of local builds ahead of it). `flock -o` closes the lock's descriptor in CMD,
 # so nothing CMD leaves running in the background (a sleep, a server) can keep the slot after CMD ends; the flock process itself holds it until CMD exits.
-bq_run() { local cb=$1 d=${BUILD_LOCK_DIR:-$HOME/.cache/backplane-build.locks} i n rc waited=0 tick=0; shift; mkdir -p "$d"
+bq_run() { local cb=$1 d=${BUILD_LOCK_DIR:-$HOME/.cache/backplane-build.locks} i n rc waited=0 tick=0; shift; mkdir -p "$d"; bq_scope
   while :; do n=$(bq_slots)
     # the main builder has a slot of its own besides the shared ones: lanes starting builds all day cannot starve it (BQ_MAIN=1, set by main-build.sh; one builder, so one slot)
-    if [ -n "${BQ_MAIN:-}" ]; then flock -n -E 200 -o "$d/slot.main" "$@"; rc=$?; [ "$rc" -ne 200 ] && return "$rc"; fi
-    for ((i = 0; i < n; i++)); do flock -n -E 200 -o "$d/slot.$i" "$@"; rc=$?; [ "$rc" -ne 200 ] && return "$rc"; done
+    if [ -n "${BQ_MAIN:-}" ]; then flock -n -E 200 -o "$d/slot.main" ${BQ_SCOPE[@]+"${BQ_SCOPE[@]}"} "$@"; rc=$?; [ "$rc" -ne 200 ] && return "$rc"; fi
+    for ((i = 0; i < n; i++)); do flock -n -E 200 -o "$d/slot.$i" ${BQ_SCOPE[@]+"${BQ_SCOPE[@]}"} "$@"; rc=$?; [ "$rc" -ne 200 ] && return "$rc"; done
     # every slot is taken: with BQ_OFFLOAD=1, and only once the wait is long or memory is low (bq_offload_now), the same command runs on a Boat box (scripts/lib-boat.sh;
     # the command sees BP_BOAT_IDX and does the run there). 98 = no box could be used (it said why): keep waiting locally. 200 = the boxes are busy too: look again every few seconds.
     if [ -n "${BQ_OFFLOAD:-}" ] && [ -z "${BQ_MAIN:-}" ] && [ $((tick % 5)) = 0 ] && bq_offload_now "$tick" && bo_ready; then bo_try "$@"; rc=$?; case "$rc" in 98|200) ;; *) return "$rc";; esac; fi
