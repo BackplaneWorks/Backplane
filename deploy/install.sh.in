@@ -188,6 +188,8 @@ fi
 bp_done
 
 bp_begin 'Start'
+# the command to give: its full path while ~/.local/bin is not on PATH (a fresh install: Ubuntu adds it only at the next login)
+case ":$PATH:" in *":$bin:"*) app=backplane-app ;; *) app="$bin/backplane-app" ;; esac
 home=${BACKPLANE_HOME:-}
 if [ -z "$home" ]; then case $os in darwin) home="$HOME/Library/Application Support/Backplane/hub" ;; *) home="$HOME/.backplane/hub" ;; esac; fi
 running=
@@ -209,7 +211,7 @@ else
     mkdir -p "$home"
     nohup "$prefix/backplane" hub run --home "$home" --port "$port" --builds "$prefix" --default --log "$home/hub.log" -- --foreground ${BACKPLANE_HUB_ARGS:-} >> "$home/guard.log" 2>&1 < /dev/null &
     how="The guard runs the hub of $home on port $port (backplane hub status)."
-  else how="Run: backplane-app (it starts its hub under the guard)."; fi
+  else how="Run: $app (it starts its hub under the guard)."; fi
 fi
 bp_done
 echo
@@ -217,5 +219,5 @@ echo "  Backplane $VER is installed. $how"
 [ -n "$menu" ] && echo "  It is also in your applications menu."
 case ":$PATH:" in
   *":$bin:"*) ;;
-  *) echo "  (add $bin to your PATH)" ;;
+  *) echo "  ($bin is not on your PATH yet: many systems add it at the next login; or add it yourself)" ;;
 esac

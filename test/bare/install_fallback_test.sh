@@ -26,6 +26,7 @@ chmod +x "$T/nocurl/wget"
 run() { env -i HOME="$T/h-$1" PATH="$T/$1" BACKPLANE_NO_DESKTOP=1 sh "$T/install.sh" --quiet >"$T/$1.log" 2>&1; }
 mkdir -p "$T/h-nocurl" "$T/h-none"
 if run nocurl && [ -x "$T/h-nocurl/.local/share/backplane/builds/v9.9.9/backplane-hub" ]; then ok "no curl: install.sh downloads with wget and installs"; else bad "no curl: $(tail -2 "$T/nocurl.log" | tr '\n' ' ')"; fi
+grep -qF "Run: $T/h-nocurl/.local/bin/backplane-app" "$T/nocurl.log" && ok "with ~/.local/bin not on PATH it gives the full path to run" || bad "no full path to run: $(grep -i run "$T/nocurl.log")"
 grep -q -- '--https-only' "$T/wget.args" 2>/dev/null && ok "wget is told https only" || bad "wget called without --https-only: $(cat "$T/wget.args" 2>/dev/null)"
 if run none; then bad "neither curl nor wget: install.sh went on"; else
   grep -q "curl or wget is needed" "$T/none.log" && ok "neither: install.sh says curl or wget is needed" || bad "neither: said $(tail -1 "$T/none.log")"; fi
