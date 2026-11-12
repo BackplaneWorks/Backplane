@@ -229,7 +229,7 @@ pub fn start(hub: &Arc<Hub>) {
 }
 
 /// The KiCad project's files, from any path in it (main's canonical copy).
-fn files_of(path: &str) -> Option<project::Files> {
+pub fn files_of(path: &str) -> Option<project::Files> {
     let pro = ipc::pro_of(path);
     if pro.is_empty() { return None }
     let norm = |s: &str| {
