@@ -4,7 +4,7 @@
 //!   - `mgmt.state.<digest>`  {project, open, side, size, panels: [{id, label}]}
 //!   - `mgmt.<panel>.<digest>` {project, badge: {n, tone}, ...the panel's own fields}
 //! RPCs: `mgmt.watch {project}` (a client shows this project's design: the state, and every panel starts publishing for it) ->
-//! {digest, project, state}; `mgmt.panel {project, open?, side?, size?}` -> {state}.
+//! {digest, project, state, data: {<panel>: what it published so far}}; `mgmt.panel {project, open?, side?, size?}` -> {state}.
 //!
 //! A panel is a `Panel` registered with `register` (the hub side) and a view in the client's `screens/mgmt.rs` `VIEWS` (same id).
 use super::{embed, kserve as ks};
@@ -134,7 +134,10 @@ impl RpcHandler for MgmtRpc {
             }
             let st = publish_state(hub, &pro).await;
             for x in &ps { x.watch(hub, &pro) }
-            vec![json!({"t":"reply","id":id,"ok":true,"result":{"digest": ks::digest(&pro), "project": pro, "state": st}})]
+            // what each panel has published for the project so far (a client or phone that joins draws it at once)
+            let info = hub.info_now();
+            let data: serde_json::Map<String, Value> = ps.iter().filter_map(|x| info[data_key(x.id(), &pro)].as_str().and_then(|t| serde_json::from_str(t).ok()).map(|v| (x.id().to_string(), v))).collect();
+            vec![json!({"t":"reply","id":id,"ok":true,"result":{"digest": ks::digest(&pro), "project": pro, "state": st, "data": data}})]
         })
     }
 }

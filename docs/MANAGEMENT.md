@@ -9,7 +9,7 @@ panel at the pane's right side or bottom. Everything a panel shows is hub data, 
 Per project, the hub keeps which panel is open, its side (`right`|`bottom`) and size in px (`<home>/mgmt/panels.json`, at most 200
 projects, the oldest dropped). A press on a tab is drawn at once and confirmed by the hub's state.
 
-- `mgmt.watch {project}` → `{digest, project, state}`: a client shows this project's design. Every panel starts (or refreshes) what it
+- `mgmt.watch {project}` → `{digest, project, state, data}` (`data`: each panel's value as published so far, by id): a client shows this project's design. Every panel starts (or refreshes) what it
   publishes for the project. `project` is any absolute path of the project (its `.kicad_pro`, board, schematic or folder).
 - `mgmt.panel {project, toggle?, open?, side?, size?}` → `{digest, state}`: `toggle` opens a panel or shuts it when it is the open one;
   `open` names one or `""`; a new `side` takes that side's default size unless `size` is given; `size` is clamped to 160–1600.
