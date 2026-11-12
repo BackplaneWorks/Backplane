@@ -31,6 +31,26 @@ projects, the oldest dropped). A press on a tab is drawn at once and confirmed b
 - The badge counts lines without an MPN (DNP lines excepted) once some line has an MPN or a fab number.
 - A press on a line selects its parts in the open KiCad and lights them in the viewers (`editor.kicad.select`).
 
+## Checks (`mgmt.checks.<digest>`)
+
+One list of everything that checks the design: DRC and ERC (`kicad/checkrun.rs`, kicad-cli on the saved files) and the sources other parts
+of the hub add (the design review's fab rules, BOM, outputs, assembly, mech, agent-judged datasheet checks). The value is the checks
+summary (`kicad.checks.<digest>`: `drc`, `erc`, `sources`, `order`, `chip`) plus `badge` (errors and warnings; red with an error), `total`
+and `groups` (by source and rule, worst first, each with its count `n` and its first rows within the info's size; `kicad.checks.list` has
+the rest). A row: `{id, source, severity, rule, title, names, doc}`.
+
+- Each check's `state`: `none`, `running`, `deferred` (waiting for memory or another heavy KiCad job: `reason`), `fresh`, `stale` (the design
+  changed since), `failed` (`reason`). Background runs leave KiCad's library checks out (`note`); `kicad.checks.run {full: true}` runs them too.
+- A row pressed (or reached with up/down): `kicad.checks.focus {project, id}` selects and zooms its items in KiCad's editor for it (board for
+  DRC, schematic for ERC) and lights them in the viewers. "Fix with agent": `kicad.checks.fix {project, id}` -> `{text}`, sent as the
+  thread's next message. The chip in the editor's row ("DRC 12 · ERC 3") opens the panel.
+- Another source: `checkrun::set_findings(hub, pro, source, findings: Vec<findings::Finding>, meta) -> Result<(), String>` (or the RPC
+  `kicad.checks.set {project, source, findings, meta}`) replaces that source's findings for the project. `meta.label` names it ("Fab rules"),
+  `meta.judged: true` marks every row of it "agent-judged" (with `meta.confidence`; put the datasheet page in a finding's `detail`). An empty
+  finding `id` is made from its anchors (stable across runs when they carry KIIDs or names). It reads `stale` once the design on disk
+  changes after the set, like DRC; set it again to refresh. `summary.sources.<source>` = `{label, state, counts, at, rev, meta, judged}`;
+  the panel filters by source and severity and searches words over all of them.
+
 ## Adding a panel
 
 Hub side (`native/host/src/kicad/<yours>.rs`): implement `mgmt::Panel` and call `mgmt::register(Arc::new(YourPanel))` from your `start`:

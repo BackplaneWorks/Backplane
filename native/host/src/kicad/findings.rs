@@ -220,6 +220,41 @@ pub fn filter<'a>(fs: &'a [Finding], severity: &str, q: &str) -> Vec<&'a Finding
     out
 }
 
+/// The names a row shows for a finding's items: pins, else parts, else nets, else KiCad's words for the first item ("SW3.1 · GND").
+pub fn names(f: &Finding) -> String {
+    let mut v: Vec<String> = vec![];
+    for a in &f.anchors {
+        let n = if !a.pin.is_empty() { a.pin.clone() } else if !a.reference.is_empty() { a.reference.clone() } else if !a.net.is_empty() { a.net.clone() } else { String::new() };
+        if !n.is_empty() && !v.contains(&n) { v.push(n) }
+    }
+    if v.is_empty() { f.anchors.first().map(|a| a.text.clone()).unwrap_or_default() } else { v.join(" · ") }
+}
+/// A row as the panel draws it: small, so a large board's groups fit in the hub's info.
+pub fn row_json(f: &Finding) -> Value {
+    let doc = f.anchors.first().map(|a| a.doc.as_str()).unwrap_or(if f.source == "erc" { "sch" } else { "pcb" });
+    json!({"id": f.id, "source": f.source, "severity": f.severity, "rule": f.rule, "title": f.title, "names": names(f), "doc": doc})
+}
+/// The panel's groups: one per check and rule, the worst severity first, then the most findings; each with its count and its first
+/// `per` rows (errors first within it). Excluded findings are their own groups, last.
+pub fn groups(fs: &[Finding], per: usize) -> Vec<Value> {
+    let mut keys: Vec<(String, String, bool)> = vec![];
+    for f in fs { let k = (f.source.clone(), f.rule.clone(), f.severity == "excluded"); if !keys.contains(&k) { keys.push(k) } }
+    let mut gs: Vec<(u8, usize, Value)> = keys.into_iter().map(|(src, rule, ex)| {
+        let mut items: Vec<&Finding> = fs.iter().filter(|f| f.source == src && f.rule == rule && (f.severity == "excluded") == ex).collect();
+        items.sort_by_key(|f| rank(&f.severity));
+        let worst = items.first().map(|f| rank(&f.severity)).unwrap_or(3);
+        let sev = items.first().map(|f| f.severity.clone()).unwrap_or_default();
+        (worst, items.len(), json!({"source": src, "rule": rule, "severity": sev, "excluded": ex, "n": items.len(), "rows": items.iter().take(per).map(|f| row_json(f)).collect::<Vec<_>>()}))
+    }).collect();
+    gs.sort_by(|a, b| a.0.cmp(&b.0).then(b.1.cmp(&a.1)));
+    gs.into_iter().map(|g| g.2).collect()
+}
+/// The panel's groups within `budget` bytes of JSON: as many rows per group as fit (at most 25, at least none).
+pub fn groups_within(fs: &[Finding], budget: usize) -> Vec<Value> {
+    for per in [25usize, 12, 6, 3, 1, 0] { let g = groups(fs, per); if serde_json::to_string(&g).map_or(0, |t| t.len()) <= budget || per == 0 { return g } }
+    vec![]
+}
+
 /// What `editor.kicad.select` gets for a finding: its parts, pins and nets, in the editor it belongs to (DRC: the board, ERC: the
 /// schematic). A pad selects the pad, not its whole part; a net only when the item has no part (a track, a via, a label), so a
 /// clearance between a via and a pad zooms to the pad and the via's net, not to every item of the net. An item
@@ -303,13 +338,19 @@ pub fn need_mb(source: &str, doc_bytes: u64, last_peak_mb: u64) -> u64 {
     let mb = doc_bytes / 1_048_576;
     if source == "drc" { 500 + 150 * mb } else { 500 + 50 * mb }
 }
+/// The same for a full run (the library checks too: every library of the global tables is loaded).
+pub fn need_full_mb(source: &str, doc_bytes: u64, last_peak_mb: u64) -> u64 {
+    if last_peak_mb > 0 { return last_peak_mb + last_peak_mb / 10 }
+    let mb = doc_bytes / 1_048_576;
+    if source == "drc" { 1500 + 1000 * mb } else { 1500 + 500 * mb }
+}
 /// The library checks (a footprint or symbol against its library copy, a footprint that is in no library) are left out of the hub's
 /// kicad-cli runs: they load every library of the global tables (a 2.5 MB board's DRC took 3.8 GB with them, 0.40 GB without;
 /// its ERC 1.8 GB and 0.27 GB). KiCad's own checks in the open editor (bp.13 RunChecks) have them.
 pub fn library_rule(source: &str, rule: &str) -> bool {
     match source { "drc" => matches!(rule, "lib_footprint_issues" | "lib_footprint_mismatch"), "erc" => matches!(rule, "lib_symbol_issues" | "lib_symbol_mismatch" | "footprint_link_issues"), _ => false }
 }
-pub const LIBRARY_NOTE: &str = "Library checks run in KiCad";
+pub const LIBRARY_NOTE: &str = "Library checks are not in the background runs";
 /// The most checks that run at once (DRC and ERC side by side: Hubble_DK 1.32 s one after the other, 0.98 s together, the same
 /// findings; DRC split into rule groups was slower and took memory per group, so it is not done).
 pub const MAX_AT_ONCE: usize = 2;
@@ -448,6 +489,17 @@ mod tests {
         }
         assert!(fix_message(&erc(ERC).unwrap()[0], "/p/a.kicad_pro").contains("sheet /Debugger/"));
     }
+    #[test] fn the_panel_groups_by_rule_worst_first() {
+        let d = drc(DRC).unwrap();
+        let g = groups(&d, 25);
+        let heads: Vec<(String, u64)> = g.iter().map(|x| (x["rule"].as_str().unwrap().to_string(), x["n"].as_u64().unwrap())).collect();
+        assert_eq!(heads[..3].iter().map(|h| h.0.as_str()).collect::<Vec<_>>(), ["clearance", "courtyards_overlap", "unconnected_items"]);
+        assert_eq!(heads.last().unwrap(), &("silk_overlap".to_string(), 2), "the excluded ones last");
+        assert_eq!(g[0]["rows"][0]["names"], "GND · SW3.1"); assert_eq!(g[0]["rows"][0]["doc"], "pcb");
+        assert_eq!(names(&d[1]), "C76 · U3");
+        let big: Vec<Finding> = (0..600).map(|i| Finding { id: format!("drc:{i}"), source: "drc".into(), severity: "warning".into(), rule: format!("r{}", i % 15), title: "x".repeat(60), ..Default::default() }).collect();
+        let g = groups_within(&big, 40_000); assert!(serde_json::to_string(&g).unwrap().len() <= 40_000); assert_eq!(g.iter().map(|x| x["n"].as_u64().unwrap()).sum::<u64>(), 600, "every finding is counted");
+    }
     #[test] fn the_list_filters_and_sorts() {
         let d = drc(DRC).unwrap();
         let all = filter(&d, "", ""); assert_eq!(all.len(), 6);
@@ -488,7 +540,7 @@ mod tests {
         assert_eq!(next(10_500, &low), Do::Wait(1000), "the debounce comes first");
         assert_eq!(next(12_000, &Sched { running_since: 11_600, running_rev: "b".into(), disk_rev: "c".into(), ..low.clone() }), Do::Cancel, "a cancel is never held back");
         assert_eq!(need_mb("drc", 2_520_857, 0), 800); assert_eq!(need_mb("erc", 25_418, 0), 500);
-        assert!(library_rule("drc", "lib_footprint_mismatch") && library_rule("erc", "footprint_link_issues") && !library_rule("drc", "clearance") && !library_rule("x", "lib_footprint_issues")); assert_eq!(need_mb("drc", 0, 3800), 4180);
+        assert!(library_rule("drc", "lib_footprint_mismatch") && library_rule("erc", "footprint_link_issues") && !library_rule("drc", "clearance") && !library_rule("x", "lib_footprint_issues")); assert_eq!(need_mb("drc", 0, 3800), 4180); assert_eq!(need_full_mb("drc", 2_520_857, 0), 3500);
         assert!(admit(16_000, &[], 400) && admit(16_000, &[400], 300) && !admit(16_000, &[400, 300], 100), "two at once at most");
         assert!(!admit(2_000, &[400], 300), "memory for both peaks and the margin"); assert!(admit(2_300, &[400], 300));
         assert!(admit(0, &[400], 300) && !admit(0, &[1, 1], 1));
