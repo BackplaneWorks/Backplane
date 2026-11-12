@@ -8,7 +8,7 @@ A KiCad dialog that appears on its own (a load warning) is recorded with its tit
 import json, os, re, subprocess, sys, threading, time
 
 OUT, CLOG = sys.argv[1], sys.argv[2]
-JOURNEYS = (sys.argv[3] if len(sys.argv) > 3 else "open,switch,edit,coedit,xprobe,comment,save,sch").split(",")
+JOURNEYS = (sys.argv[3] if len(sys.argv) > 3 else "focus,open,switch,edit,mgmt,coedit,xprobe,comment,save,sch").split(",")
 LIB = os.path.dirname(os.path.abspath(__file__))
 IPC, DRV, RPC = os.environ["IPC_PY"], os.environ["DRIVER_PY"], os.environ["HUB_RPC_MJS"]
 RT, SAMP = os.path.join(LIB, "rt_input.py"), os.path.join(LIB, "pane_sampler.py")
@@ -99,6 +99,58 @@ def analyze(evs, path):
     ef = path + ".events.json"; json.dump(evs, open(ef, "w"))
     return json.loads(sh("python3", SAMP, "analyze", path, ef, timeout=300) or "[]")
 
+def logs(key, val=None):
+    """GPUI_LOG objects with this key (and value): the comment window's open/painted/capture/post/closed."""
+    out = []
+    for l in open(CLOG, errors="ignore"):
+        if "GPUI_LOG " in l and f'"{key}"' in l:
+            try: o = json.loads(l.split("GPUI_LOG ", 1)[1])
+            except Exception: continue
+            if val is None or o.get(key) == val: out.append(o)
+    return out
+def wait_log(key, val, after_n, secs):
+    t = time.time()
+    while time.time() - t < secs:
+        got = logs(key, val)
+        if len(got) > after_n: return got[-1]
+        time.sleep(0.02)
+    return None
+
+# --- memory: the embedded KiCad's process tree, RSS every second; peak = the most at once, steady = after the editors are up and idle
+MEM = {"samples": [], "pid": 0}
+def tree_rss(pid):
+    kids = {}
+    for d in os.listdir("/proc"):
+        if not d.isdigit(): continue
+        try: pp = int(open(f"/proc/{d}/stat").read().rsplit(")", 1)[1].split()[1]); kids.setdefault(pp, []).append(int(d))
+        except Exception: pass
+    tot, hwm, todo = 0, 0, [pid]
+    while todo:
+        q = todo.pop()
+        try:
+            st = open(f"/proc/{q}/status").read()
+            tot += int(re.search(r"VmRSS:\s+(\d+)", st)[1]); hwm += int(re.search(r"VmHWM:\s+(\d+)", st)[1])
+        except Exception: pass
+        todo += kids.get(q, [])
+    return tot // 1024, hwm // 1024
+def mem_watch():
+    while not STOP.is_set():
+        if MEM["pid"]:
+            rss, hwm = tree_rss(MEM["pid"])
+            if rss: MEM["samples"].append((now(), rss, hwm))
+        STOP.wait(1.0)
+def mem_now(): return tree_rss(MEM["pid"])[0] if MEM["pid"] else None
+
+# --- a window's sizes over a span (xwininfo every 25 ms): how many times KiCad's container was resized
+def sizes_during(xid, secs):
+    seen, t = [], time.time()
+    while time.time() - t < secs:
+        o = sh("xwininfo", "-id", str(xid), timeout=5)
+        w = re.search(r"Width:\s+(\d+)", o); h = re.search(r"Height:\s+(\d+)", o)
+        if w and h and (not seen or seen[-1] != (w[1], h[1])): seen.append((w[1], h[1]))
+        time.sleep(0.025)
+    return seen
+
 # --- wait for the client to have the editor up (its script opened it: cold Edit, measured by the script's wait_painted)
 def wait_metric(pred, secs):
     t = time.time()
@@ -125,7 +177,10 @@ import glob
 PROJ_DIR = os.path.join(OUT, "proj")
 if not PCB: PCB = (sorted(glob.glob(os.path.join(PROJ_DIR, "*.kicad_pcb"))) or [""])[0]
 KPRO = PCB[:-len(".kicad_pcb")] + ".kicad_pro" if PCB else ""
-print(f"INFO pane={PANE} sock={SOCK} gpu={(metrics('gpu') or [{}])[0].get('device')}", flush=True)
+MEM["pid"] = int(geo.get("pid") or 0); threading.Thread(target=mem_watch, daemon=True).start()
+time.sleep(1.2); RESULTS["rss_ready_mb"] = {"ms": None, "mb": mem_now()}
+CONT = int((geo.get("container") or {}).get("xid") or 0)
+print(f"INFO pane={PANE} sock={SOCK} kicad_pid={MEM['pid']} rss={RESULTS['rss_ready_mb']['mb']}MB gpu={(metrics('gpu') or [{}])[0].get('device')} client={os.environ.get('CLIENT_BIN')}", flush=True)
 CX, CY = PANE["x"] + PANE["w"] // 2, PANE["y"] + PANE["h"] // 2
 sampler_start(PANE, "pane")
 
@@ -134,6 +189,11 @@ def editor_up():  # a KiCad editor frame mapped over the pane (the X tree, not t
     for w in windows():
         if w.get("shown") and "kicad" in w.get("wm_class", "").lower() and w["w"] > 200 and abs(w["root_x"] - PANE["x"]) < 40 and abs(w["root_y"] - PANE["y"]) < 60: return True
     return False
+def container_now():  # the X parent of the KiCad frame over the pane: Backplane's container (a reopen makes a new one)
+    for w in windows():
+        if w.get("shown") and "kicad" in w.get("wm_class", "").lower() and w["w"] > 200 and abs(w["root_x"] - PANE["x"]) < 40 and abs(w["root_y"] - PANE["y"]) < 60:
+            return int(w["parent"], 16) if isinstance(w["parent"], str) else w["parent"]
+    return CONT
 def restore(after):
     if editor_up(): return
     print(f"LOST editor after {after}: reopening (Board, Edit)", flush=True); RESULTS[f"lost_after_{after}"] = {"ms": None, "lost": 1}
@@ -142,6 +202,24 @@ def tab(kind, tag, settle=1.4):
     t0 = click_ctl(f"kicad-tab:{kind}")
     if t0: EVENTS.append({"kind": "switch", "t0": t0, "tag": tag, "window_ms": settle * 1000}); time.sleep(settle)
 
+XIN = os.path.join(os.environ["REPO_ROOT"], "test/cef/xinput.py")
+def comment_window(tag):
+    """Ctrl+; with the keyboard in KiCad: the key to the comment window's first paint (GPUI_LOG kcomment painted at_ms); then Escape."""
+    n = len(logs("kcomment", "painted")); r = rt("key", "semicolon", "ctrl")
+    got = wait_log("kcomment", "painted", n, 2.0)
+    ms = round(got["at_ms"] - r["t0"], 1) if got and got.get("at_ms") else None
+    perf(tag, ms if ms is not None else -1, opened=int(got is not None))
+    if got: time.sleep(0.4); rt("key", "Escape"); time.sleep(0.6)
+    return got is not None
+# 0. focus: the first click into KiCad, then a reserved chord (Ctrl+;) must reach Backplane at once (the first-click bug: it took a second click)
+if "focus" in JOURNEYS:
+    rt("click", CX, CY + PANE["h"] // 3); time.sleep(0.6)
+    ok1 = comment_window("first_click_ctrl_semicolon")
+    RESULTS["first_click_reserved"] = {"ms": None, "ok": int(ok1)}
+    if not ok1:
+        print("JANK first click into KiCad: Ctrl+; did not reach Backplane; a second click:", flush=True)
+        rt("click", CX, CY + PANE["h"] // 3); time.sleep(0.6)
+        RESULTS["second_click_reserved"] = {"ms": None, "ok": int(comment_window("second_click_ctrl_semicolon"))}
 # 1. open: the pane closed (View) and reopened (Edit) with KiCad warm
 if "open" in JOURNEYS:
     for i in range(3):
@@ -163,6 +241,17 @@ if "switch" in JOURNEYS:
         if t0: EVENTS.append({"kind": "switch", "t0": t0, "tag": f"thread_back{i}", "window_ms": 3000}); time.sleep(3)
         shot(f"thread_back{i}")
     restore("thread_switch")
+    # the same through the sidebar: the project's row lists its threads; a click on the other one, then on this one
+    def side(tid):  # the sidebar's row when it lists the thread (Active), else the project's row and its page's thread row
+        if control(f"thread:{tid}"): return click_ctl(f"thread:{tid}")
+        click_ctl("project:p1"); time.sleep(1.0)
+        return click_ctl(f"page-thread:{tid}")
+    for i in range(3):
+        if not side("t2"): print("DIAG sidebar: no thread:t2 or page-thread:t2 control", flush=True); break
+        time.sleep(1.5); t0 = side("t1")
+        if t0: EVENTS.append({"kind": "switch", "t0": t0, "tag": f"thread_side_back{i}", "window_ms": 3000}); time.sleep(3)
+        shot(f"thread_side_back{i}")
+    restore("thread_sidebar")
 shot("after_switch")
 # 3. edit: pan and zoom 10 s each, a click (select), a drag (move), Delete, Ctrl+Z, a short interactive track
 if "edit" in JOURNEYS:
@@ -192,6 +281,31 @@ if "edit" in JOURNEYS:
     sampler_start(PANE, "pane2")
 else:
     slow, PRE = [], []
+# 3c. management panels beside the editor: each panel's tab clicked open and shut, and Alt+Shift+B / Alt+Shift+C with Backplane's keyboard:
+# click to settled, blank frames over the pane, and how many times KiCad's container changed size (once is right)
+if "mgmt" in JOURNEYS:
+    tab("PCB", "mgmt_board", 1.2)
+    ids = sorted({c["id"] for c in controls_like(r"^mgmt:[a-z]+$") if c["id"] not in ("mgmt:right", "mgmt:bottom", "mgmt:left", "mgmt:close", "mgmt:shut")})
+    print(f"INFO management panels: {ids}", flush=True)
+    def panel(press, tag):
+        box = {}
+        cont = container_now()
+        th = threading.Thread(target=lambda: box.update(s=sizes_during(cont, 2.4))) if cont else None
+        if th: th.start(); time.sleep(0.1)
+        t0 = press()
+        if t0: EVENTS.append({"kind": "switch", "t0": t0, "tag": tag, "window_ms": 2000})
+        if th: th.join()
+        RESULTS[f"{tag}_resizes"] = {"ms": None, "resizes": max(0, len(box.get("s", [])) - 1), "sizes": " ".join("x".join(x) for x in box.get("s", []))}
+        time.sleep(0.6)
+    for pid_ in ids:
+        name = pid_.split(":")[1]
+        panel(lambda: click_ctl(pid_), f"mgmt_{name}_open"); shot(f"mgmt_{name}")
+        panel(lambda: click_ctl(pid_), f"mgmt_{name}_close")
+    rt("click", 600, 500); time.sleep(0.4)  # Backplane's keyboard (the chat), then the keys
+    for key, name in (("b", "bom"), ("c", "checks")):
+        panel(lambda: rt("key", key, "alt", "shift").get("t0"), f"mgmt_key_{name}_open"); shot(f"mgmt_key_{name}")
+        panel(lambda: rt("key", key, "alt", "shift").get("t0"), f"mgmt_key_{name}_close")
+    restore("mgmt")
 # 4. co-edit: an agent's commits while idle, then while the person pans
 if "coedit" in JOURNEYS and SOCK:
     tab("PCB", "coedit_board", 1.5)
@@ -235,6 +349,14 @@ if "sch" in JOURNEYS:
 
 # 6. comment: the fork's "Comment to Backplane" on a selection -> the message in the thread
 if "comment" in JOURNEYS and SOCK:
+    tab("PCB", "comment_board", 1.2); rt("click", CX, CY + PANE["h"] // 3); time.sleep(0.5)
+    for i in range(3):
+        if not comment_window(f"comment_window{i}"):
+            # after the window was closed with Escape, does Ctrl+; need another click into KiCad? (the focus bug's other shape)
+            print("JANK Ctrl+; did not open the comment window after the last one was closed with Escape; a click into KiCad and again:", flush=True)
+            rt("click", CX, CY + PANE["h"] // 3); time.sleep(0.6)
+            RESULTS[f"comment_window{i}_after_click"] = {"ms": None, "ok": int(comment_window(f"comment_window{i}_retry"))}
+            RESULTS["reserved_after_escape"] = {"ms": None, "ok": 0}
     ev = os.path.join(OUT, "home", "events.jsonl"); n0 = sum(1 for _ in open(ev, errors="ignore"))
     t0 = now(); r = ipc("comment-selection", SOCK, "pcb", "real-use comment probe"); t_ipc = now()
     posted = None
@@ -253,6 +375,10 @@ for r in res:
     if kind == "input": perf(tag, r.get("p99"), **{k: v for k, v in r.items() if k != "p99"})
     elif kind == "commit": perf(tag, r.get("first_change_ms"))
     else: perf(tag, r.get("settled_ms"), **{k: r.get(k) for k in ("first_change_ms", "mid_frames", "blank_frames", "changes")})
-summary = {"results": RESULTS, "dialogs": DIALOGS, "pane": PANE, "gpu": (metrics("gpu") or [{}])[0], "cold_edit_click_epoch": edit_click.get("epoch_ms")}
+if MEM["samples"]:
+    RESULTS["rss_peak_mb"] = {"ms": None, "mb": max(x[1] for x in MEM["samples"]), "hwm_mb": max(x[2] for x in MEM["samples"])}
+    RESULTS["rss_end_mb"] = {"ms": None, "mb": MEM["samples"][-1][1]}
+    print(f"PERF memory ready={RESULTS['rss_ready_mb']['mb']}MB peak={RESULTS['rss_peak_mb']['mb']}MB hwm={RESULTS['rss_peak_mb']['hwm_mb']}MB end={RESULTS['rss_end_mb']['mb']}MB", flush=True)
+summary = {"results": RESULTS, "client": os.environ.get("CLIENT_BIN"), "kicad": os.environ.get("KICAD_BIN"), "dialogs": DIALOGS, "pane": PANE, "gpu": (metrics("gpu") or [{}])[0], "cold_edit_click_epoch": edit_click.get("epoch_ms")}
 json.dump(summary, open(os.path.join(OUT, "real_use.json"), "w"), indent=1)
 print("JSON " + json.dumps(summary), flush=True)

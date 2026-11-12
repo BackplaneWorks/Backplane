@@ -6,7 +6,7 @@ import glob, json, os, re, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CFG = json.load(open(os.path.join(HERE, "..", "real_use_budgets.json")))
-BUDGETS = [(b["re"], b["field"], b["max"], b["what"]) for b in CFG["budgets"]]
+BUDGETS = [(b["re"], b["field"], b.get("max"), b["what"], b.get("min")) for b in CFG["budgets"]]
 
 def main():
     root = sys.argv[1]; strict = "--strict" in sys.argv or os.environ.get("KEMBED_REAL_STRICT") == "1" or CFG.get("strict") is True
@@ -30,10 +30,13 @@ def main():
         if v.get("hitch50"): s += f" ({v['hitch50']} >50)"
         if v.get("lost"): s = "lost"
         if v.get("p50") is not None: s += f" p50 {v['p50']}"
-        for rx, field, lim, what in BUDGETS:
+        for k in ("mb", "resizes", "ok"):
+            if v.get(k) is not None and v.get("ms") is None: s = f"{k} {v[k]}" + (f" hwm {v['hwm_mb']}" if v.get("hwm_mb") else "")
+        for rx, field, lim, what, low in BUDGETS:
             if re.search(rx, name):
                 x = v.get(field)
-                if x is None or (isinstance(x, (int, float)) and x < 0) or x > lim: s += " ✗"; misses.append((run, name, field, x, lim, what)); break
+                bad = x is None or (isinstance(x, (int, float)) and x < 0 and low is None) or (lim is not None and x > lim) or (low is not None and x < low)
+                if bad: s += " ✗"; misses.append((run, name, field, x, lim if low is None else low, what)); break
         return s
     for n in names: print(f"| {n} | " + " | ".join(cell(c, n) for c in cols) + " |")
     for c in cols:

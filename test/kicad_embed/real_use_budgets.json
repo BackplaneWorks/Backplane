@@ -2,20 +2,137 @@
  "_": "Budgets for test/kicad_embed/real_use_*.sh (docs/kicad-real-use.md). Each: measures (regex over PERF names), field, the most it may be, what. Non-strict: misses print; KEMBED_REAL_STRICT=1 fails on them.",
  "strict": false,
  "budgets": [
-  {"re": "^open_cold_painted$", "field": "ms", "max": 2500, "what": "cold Edit to PCB painted"},
-  {"re": "^reopen\\d", "field": "ms", "max": 300, "what": "View -> Edit, KiCad warm: settled"},
-  {"re": "^reopen\\d", "field": "blank_frames", "max": 0, "what": "reopen: frames of background"},
-  {"re": "^tab\\d+_", "field": "ms", "max": 50, "what": "tab switch click -> settled"},
-  {"re": "^tab\\d+_", "field": "blank_frames", "max": 0, "what": "tab switch: frames of background"},
-  {"re": "^thread_back\\d", "field": "ms", "max": 50, "what": "thread back: pane settled"},
-  {"re": "^lost_after_", "field": "lost", "max": 0, "what": "the editor still there after a journey"},
-  {"re": "^(pan_10s|zoom_10s|sch_pan_6s|sch_zoom_6s|pan_during_commits)$", "field": "ms", "max": 25, "what": "pan/zoom p99 frame interval (60 Hz display: 16.7 plus sampling jitter)"},
-  {"re": "^(pan_10s|zoom_10s|sch_pan_6s|sch_zoom_6s|pan_during_commits|drag_move|route_track)$", "field": "hitch50", "max": 0, "what": "frames > 50 ms while input runs"},
-  {"re": "^commit_idle\\d", "field": "ms", "max": 100, "what": "agent commit -> repaint"},
-  {"re": "^xprobe\\d", "field": "ms", "max": 100, "what": "editor.kicad.select -> settled"},
-  {"re": "^save_written$", "field": "ms", "max": 300, "what": "Ctrl+S -> file written"},
-  {"re": "^save_clean$", "field": "ms", "max": 300, "what": "Ctrl+S -> KiCad clean"},
-  {"re": "^comment_posted$", "field": "ms", "max": 300, "what": "Comment to Backplane -> in the thread"},
-  {"re": "^dialogs$", "field": "n", "max": 0, "what": "KiCad dialogs that block it during the journeys"}
+  {
+   "re": "^open_cold_painted$",
+   "field": "ms",
+   "max": 2500,
+   "what": "cold Edit to PCB painted"
+  },
+  {
+   "re": "^reopen\\d",
+   "field": "ms",
+   "max": 300,
+   "what": "View -> Edit, KiCad warm: settled"
+  },
+  {
+   "re": "^reopen\\d",
+   "field": "blank_frames",
+   "max": 0,
+   "what": "reopen: frames of background"
+  },
+  {
+   "re": "^tab\\d+_",
+   "field": "ms",
+   "max": 50,
+   "what": "tab switch click -> settled"
+  },
+  {
+   "re": "^tab\\d+_",
+   "field": "blank_frames",
+   "max": 0,
+   "what": "tab switch: frames of background"
+  },
+  {
+   "re": "^thread_back\\d",
+   "field": "ms",
+   "max": 50,
+   "what": "thread back: pane settled"
+  },
+  {
+   "re": "^lost_after_",
+   "field": "lost",
+   "max": 0,
+   "what": "the editor still there after a journey"
+  },
+  {
+   "re": "^(pan_10s|zoom_10s|sch_pan_6s|sch_zoom_6s|pan_during_commits)$",
+   "field": "ms",
+   "max": 25,
+   "what": "pan/zoom p99 frame interval (60 Hz display: 16.7 plus sampling jitter)"
+  },
+  {
+   "re": "^(pan_10s|zoom_10s|sch_pan_6s|sch_zoom_6s|pan_during_commits|drag_move|route_track)$",
+   "field": "hitch50",
+   "max": 0,
+   "what": "frames > 50 ms while input runs"
+  },
+  {
+   "re": "^commit_idle\\d",
+   "field": "ms",
+   "max": 100,
+   "what": "agent commit -> repaint"
+  },
+  {
+   "re": "^xprobe\\d",
+   "field": "ms",
+   "max": 100,
+   "what": "editor.kicad.select -> settled"
+  },
+  {
+   "re": "^save_written$",
+   "field": "ms",
+   "max": 300,
+   "what": "Ctrl+S -> file written"
+  },
+  {
+   "re": "^save_clean$",
+   "field": "ms",
+   "max": 300,
+   "what": "Ctrl+S -> KiCad clean"
+  },
+  {
+   "re": "^comment_posted$",
+   "field": "ms",
+   "max": 300,
+   "what": "Comment to Backplane -> in the thread"
+  },
+  {
+   "re": "^dialogs$",
+   "field": "n",
+   "max": 0,
+   "what": "KiCad dialogs that block it during the journeys"
+  },
+  {
+   "re": "^thread_side_back\\d",
+   "field": "ms",
+   "max": 50,
+   "what": "thread back through the sidebar: pane settled"
+  },
+  {
+   "re": "^first_click_reserved$",
+   "field": "ok",
+   "min": 1,
+   "what": "the first click into KiCad, then Ctrl+; reaches Backplane"
+  },
+  {
+   "re": "^(first_click_ctrl_semicolon|comment_window\\d)$",
+   "field": "ms",
+   "max": 100,
+   "what": "Ctrl+; in KiCad -> comment window painted"
+  },
+  {
+   "re": "^mgmt_.*_(open|close)$",
+   "field": "ms",
+   "max": 100,
+   "what": "management panel open/shut: settled"
+  },
+  {
+   "re": "^mgmt_.*_(open|close)$",
+   "field": "blank_frames",
+   "max": 0,
+   "what": "management panel: frames of background"
+  },
+  {
+   "re": "^mgmt_.*_(open|close)_resizes$",
+   "field": "resizes",
+   "max": 1,
+   "what": "management panel: KiCad's container resized once"
+  },
+  {
+   "re": "^reserved_after_escape$",
+   "field": "ok",
+   "min": 1,
+   "what": "Ctrl+; reaches Backplane again after the comment window closed with Escape"
+  }
  ]
 }
