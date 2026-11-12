@@ -99,9 +99,13 @@ pub fn sch_anchor(d: &str, sheet: &str) -> Anchor {
 fn fnv64(s: &str) -> u64 { s.bytes().fold(0xcbf29ce484222325u64, |h, b| (h ^ b as u64).wrapping_mul(0x100000001b3)) }
 /// A finding's id from what it is about, not how big it is: source, rule, sheet and the items' KIIDs (sorted), or with no KIIDs the
 /// items' words. The measured numbers in the title ("actual 0.0250 mm") are left out, so moving a track a little keeps the id.
+/// A missing connection is keyed by its nets: kicad-cli names any one of the equally short ratsnest edges, so the items (and their KIIDs)
+/// of the same missing connection change from run to run (Hubble_DK: 1 to 3 of 251 in every run, 2026-11-12).
 pub fn base_id(f: &Finding) -> String {
-    let mut keys: Vec<String> = f.anchors.iter().map(|a| if a.uuid.is_empty() { a.text.clone() } else { a.uuid.clone() }).collect();
+    let by_net = f.rule == "unconnected_items" && f.anchors.iter().any(|a| !a.net.is_empty());
+    let mut keys: Vec<String> = f.anchors.iter().map(|a| if by_net { a.net.clone() } else if a.uuid.is_empty() { a.text.clone() } else { a.uuid.clone() }).collect();
     keys.sort();
+    if by_net { keys.dedup() }
     let sheet = f.anchors.first().map(|a| a.sheet.as_str()).unwrap_or("");
     let what = if keys.is_empty() { f.title.clone() } else { keys.join("\u{1}") };
     format!("{}:{:016x}", f.source, fnv64(&format!("{}\u{2}{}\u{2}{sheet}\u{2}{what}", f.source, f.rule)))
@@ -306,6 +310,14 @@ pub fn library_rule(source: &str, rule: &str) -> bool {
     match source { "drc" => matches!(rule, "lib_footprint_issues" | "lib_footprint_mismatch"), "erc" => matches!(rule, "lib_symbol_issues" | "lib_symbol_mismatch" | "footprint_link_issues"), _ => false }
 }
 pub const LIBRARY_NOTE: &str = "Library checks run in KiCad";
+/// The most checks that run at once (DRC and ERC side by side: Hubble_DK 1.32 s one after the other, 0.98 s together, the same
+/// findings; DRC split into rule groups was slower and took memory per group, so it is not done).
+pub const MAX_AT_ONCE: usize = 2;
+/// Whether one more run may start now, beside the ones running (their expected peaks, MB): fewer than MAX_AT_ONCE, and memory for all
+/// of them at their peaks plus the margin (the running ones may not have reached theirs). free_mb 0 (unknown) counts only.
+pub fn admit(free_mb: u64, running: &[u64], need: u64) -> bool {
+    running.len() < MAX_AT_ONCE && (free_mb == 0 || free_mb >= running.iter().sum::<u64>() + need + MEM_MARGIN_MB)
+}
 /// Why a run must wait for the machine ("" when it may go): too little memory free for its expected peak, or another heavy KiCad job.
 pub fn machine_guard(s: &Sched) -> String {
     if !s.heavy.is_empty() { return format!("deferred: {} is running", s.heavy) }
@@ -415,6 +427,9 @@ mod tests {
         let e1 = erc(ERC).unwrap(); let e2 = erc(&ERC.replace("/Debugger/", "/Debugger2/")).unwrap();
         assert_ne!(e1[0].id, e2[0].id);
         assert_eq!(from_json(&to_json(&a[0])), a[0]);
+        // a missing connection keeps its id when kicad-cli names another edge of the same nets
+        let other = DRC.replace(r#"{"description":"PTH pad SH [GND] of J5","uuid":"j5sh"}"#, r#"{"description":"Micro via [GND] on In6.Cu - B.Cu","uuid":"v9"}"#);
+        assert_eq!(drc(&other).unwrap()[5].id, a[5].id);
     }
     #[test] fn a_finding_selects_its_pads_parts_and_bare_nets() {
         let d = drc(DRC).unwrap();
@@ -474,6 +489,9 @@ mod tests {
         assert_eq!(next(12_000, &Sched { running_since: 11_600, running_rev: "b".into(), disk_rev: "c".into(), ..low.clone() }), Do::Cancel, "a cancel is never held back");
         assert_eq!(need_mb("drc", 2_520_857, 0), 800); assert_eq!(need_mb("erc", 25_418, 0), 500);
         assert!(library_rule("drc", "lib_footprint_mismatch") && library_rule("erc", "footprint_link_issues") && !library_rule("drc", "clearance") && !library_rule("x", "lib_footprint_issues")); assert_eq!(need_mb("drc", 0, 3800), 4180);
+        assert!(admit(16_000, &[], 400) && admit(16_000, &[400], 300) && !admit(16_000, &[400, 300], 100), "two at once at most");
+        assert!(!admit(2_000, &[400], 300), "memory for both peaks and the margin"); assert!(admit(2_300, &[400], 300));
+        assert!(admit(0, &[400], 300) && !admit(0, &[1, 1], 1));
         assert_eq!(fraction(500, 0), -1.0); assert_eq!(fraction(500, 1000), 0.5); assert_eq!(fraction(5000, 1000), 0.95);
     }
     #[test] fn the_chip() {
