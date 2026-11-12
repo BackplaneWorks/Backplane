@@ -5,7 +5,7 @@ use super::model::Profile;
 use std::path::{Path, PathBuf};
 
 /// The bundled baselines: (fab, profile JSON).
-pub const BASELINE: &[(&str, &str)] = &[("jlcpcb", include_str!("baseline/jlcpcb.json")), ("pcbway", include_str!("baseline/pcbway.json"))];
+pub const BASELINE: &[(&str, &str)] = &[("jlcpcb", include_str!("baseline/jlcpcb.json")), ("pcbway", include_str!("baseline/pcbway.json")), ("oshpark", include_str!("baseline/oshpark.json"))];
 
 pub fn dir(home: &Path) -> PathBuf { home.join("fab") }
 fn ok_id(fab: &str) -> bool { !fab.is_empty() && fab.len() <= 40 && fab.bytes().all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'_' || b == b'-') }
@@ -57,13 +57,13 @@ mod tests {
     use super::*;
     #[test] fn fab_store_a_fresh_home_has_the_bundled_profile_and_a_newer_one_wins() {
         let h = crate::plat::tmp::dir("fab-store"); let home: &Path = &h;
-        let b = load(home, "jlcpcb").unwrap(); assert_eq!((b.rev, fabs(home)), (1, vec!["jlcpcb".to_string(), "pcbway".to_string()]));
+        let b = load(home, "jlcpcb").unwrap(); assert_eq!((b.rev, fabs(home)), (1, vec!["jlcpcb".to_string(), "pcbway".to_string(), "oshpark".to_string()]));
         assert_eq!(ordering_fab(), "jlcpcb");
         let mut n = b.clone(); n.rev = 2; n.updated = "2099-01-01".into(); save(home, &n).unwrap();
         assert_eq!(load(home, "jlcpcb").unwrap().rev, 2); assert_eq!(revision(home, "jlcpcb", 2).unwrap().updated, "2099-01-01"); assert_eq!(revision(home, "jlcpcb", 1).unwrap().rev, 1, "the bundled revision");
         let mut old = b.clone(); old.rev = 3; old.updated = "2000-01-01".into(); save(home, &old).unwrap();
         assert_eq!(load(home, "jlcpcb").unwrap().updated, b.updated, "a stored profile older than the bundled one loses to it");
         assert!(load(home, "../x").is_none()); assert!(load(home, "nofab").is_none());
-        let mut other = b.clone(); other.fab = "otherfab".into(); save(home, &other).unwrap(); assert_eq!(fabs(home), ["jlcpcb", "pcbway", "otherfab"]);
+        let mut other = b.clone(); other.fab = "otherfab".into(); save(home, &other).unwrap(); assert_eq!(fabs(home), ["jlcpcb", "pcbway", "oshpark", "otherfab"]);
     }
 }

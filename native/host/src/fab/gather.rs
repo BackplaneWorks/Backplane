@@ -87,7 +87,9 @@ pub fn num_after(text: &str, words: &str, nth: usize) -> Option<f64> {
 
 /// Where one value of the profile is: (page, where it sits in the profile ("kind pcb", "assembly economic"), key, cost, its
 /// conditions as JSON, how to read it).
+#[derive(Clone, Copy)]
 pub struct Rule { pub page: &'static str, pub at: &'static str, pub key: &'static str, pub cost: &'static str, pub when: &'static str, pub read: Read }
+#[derive(Clone, Copy)]
 pub enum Read {
     /// a table row: its label, the words before the number, which number after them, and a factor (mil to mm, a diameter to a ring)
     Row(&'static str, &'static str, usize, f64),
@@ -258,7 +260,29 @@ pub const PCBWAY: Adapter = Adapter { fab: "pcbway", stackups: None, pages: &[(C
     r!(CAP, PCB, "board_max_x", "free", r#"{"layers":[4,32]}"#, Row("Maximum PCB Size(Dimension)", "Multilayer PCB:", 1, 1.0)),
     r!(CAP, PCB, "board_max_y", "free", r#"{"layers":[4,32]}"#, Row("Maximum PCB Size(Dimension)", "Multilayer PCB:", 0, 1.0)),
 ]};
-pub const ADAPTERS: &[&Adapter] = &[&JLCPCB, &PCBWAY];
+const L2: &str = r#"{"layers":[1,2]}"#; const L4: &str = r#"{"layers":[4,4]}"#;
+macro_rules! osh { ($page:expr, $w:expr) => { [
+    r!($page, PCB, "track_min", "free", $w, Row("Trace Width", "(", 0, 1.0)),
+    r!($page, PCB, "space_min", "free", $w, Row("Trace Spacing", "(", 0, 1.0)),
+    r!($page, PCB, "pth_ring_min", "free", $w, Row("Annular Ring", "(", 0, 1.0)),
+    r!($page, PCB, "via_ring_min", "free", $w, Row("Minimum Annular Ring", "(", 0, 1.0)),
+    r!($page, PCB, "drill_min", "free", $w, Row("Minimum Drill Size", "(", 0, 1.0)),
+    r!($page, PCB, "via_hole_min", "free", $w, Row("Minimum Drill Size", "(", 0, 1.0)),
+    r!($page, PCB, "plated_slot_min", "free", $w, Row("Minimum Slot Size", "(", 0, 1.0)),
+    r!($page, PCB, "copper_to_edge_min", "free", $w, Row("Board Edge Keepout", "(", 0, 1.0)),
+    r!($page, PCB, "mask_bridge_min", "free", $w, Row("Minimum soldermask web", "(", 0, 1.0)),
+    r!($page, PCB, "silk_line_min", "free", $w, Row("Silkscreen minimum line width", "(", 0, 1.0)),
+    r!($page, PCB, "board_max_x", "free", $w, Row("Maximum board size", "by", 1, 1.0)),
+    r!($page, PCB, "board_max_y", "free", $w, Row("Maximum board size", "(", 0, 1.0)),
+    r!($page, PCB, "board_min", "free", $w, Row("Minimum board size", "(", 0, 1.0)),
+] } }
+const OSH2: [Rule; 13] = osh!("two", L2);
+const OSH4: [Rule; 13] = osh!("four", L4);
+const OSH4X: [Rule; 1] = [r!("four", PCB, "pth_to_inner_copper_min", "free", L4, Row("Plated Drill to Internal Layer Copper Clearance", "(", 0, 1.0))];
+const OSH_RULES: [Rule; 27] = { let mut v = [OSH2[0]; 27]; let mut i = 0; while i < 13 { v[i] = OSH2[i]; v[13 + i] = OSH4[i]; i += 1 } v[26] = OSH4X[0]; v };
+/// A third fab: its two- and four-layer service pages.
+pub const OSHPARK: Adapter = Adapter { fab: "oshpark", stackups: None, pages: &[("two", "https://docs.oshpark.com/services/two-layer/"), ("four", "https://docs.oshpark.com/services/four-layer/")], rules: &OSH_RULES };
+pub const ADAPTERS: &[&Adapter] = &[&JLCPCB, &PCBWAY, &OSHPARK];
 pub fn adapter(fab: &str) -> Option<&'static Adapter> { ADAPTERS.iter().copied().find(|a| a.fab == fab) }
 
 fn cell(l: &str) -> &str { l.trim().trim_end_matches('|').trim() }
@@ -471,6 +495,13 @@ mod tests {
         assert!(rep.missing.is_empty(), "{:#?}", rep.missing); assert_eq!(rep.read, PCBWAY.rules.len());
         assert!(rep.changes.is_empty(), "{:#?}", rep.changes.iter().map(Change::line).collect::<Vec<_>>()); assert_eq!(p.rev, base.rev);
         assert!(!base.orders, "Backplane orders from one fab; this one is for designing against");
+    }
+    #[test] fn fab_gather_the_third_fabs_adapter_reads_its_saved_pages_as_its_baseline_has_them() {
+        let base = store::baseline("oshpark").unwrap();
+        let page = |n: &str| std::fs::read_to_string(format!("{}/../../test/fab/fixtures/oshpark/{n}.html", env!("CARGO_MANIFEST_DIR"))).unwrap();
+        let (p, rep) = apply(&base, &OSHPARK, &[("two", Some(page("two-layer"))), ("four", Some(page("four-layer")))], "2026-11-12");
+        assert!(rep.missing.is_empty(), "{:#?}", rep.missing); assert_eq!(rep.read, OSHPARK.rules.len());
+        assert!(rep.changes.is_empty(), "{:#?}", rep.changes.iter().map(Change::line).collect::<Vec<_>>()); assert_eq!(p.rev, base.rev);
     }
     #[test] fn fab_gather_a_changed_page_changes_the_value_and_the_revision_and_a_missing_one_keeps_the_old() {
         let base = store::baseline("jlcpcb").unwrap();
