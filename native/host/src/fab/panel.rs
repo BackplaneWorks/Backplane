@@ -51,6 +51,7 @@ pub async fn root_of_pro(hub: &Arc<Hub>, pro: &str) -> Option<PathBuf> {
 /// Publish the panel for a project (its .kicad_pro).
 pub async fn publish(hub: &Arc<Hub>, pro: &str) {
     let Some(root) = root_of_pro(hub, pro).await else { return };
+    crate::review::policy::watch(&root); // a shown design is reviewed on save
     let home = hub.cfg.home.clone();
     let v = tokio::task::spawn_blocking(move || super::view_in(&home, Some(&root))).await;
     let d = match v { Ok(Ok(v)) => data(&v), Ok(Err(e)) => json!({"badge": {"n": 0, "tone": ""}, "error": e}), Err(_) => return };
