@@ -225,6 +225,9 @@ def main() -> None:
             "at": now,
         },
     ]
+    # KEMBED_THREADS=N: more threads in the project (the real-use harness switches threads away and back)
+    for i in range(2, int(os.environ.get("KEMBED_THREADS", "1") or 1) + 1):
+        events.append({**events[1], "id": f"t{i}", "title": f"Other thread {i}", "at": now + i})
     if kicad_cli and os.path.isfile(kicad_cli):
         events.append({"$": "SettingSet", "key": "kicad.path", "value": kicad_cli, "at": now})
     # KEMBED_SEED_MESSAGE: an agent's message already in the thread (the cross-probe suite clicks the parts it names)
