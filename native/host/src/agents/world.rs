@@ -82,7 +82,7 @@ impl World {
             "TurnQueued" => { let (th, m) = (g("thread"), g("msg")); if m.starts_with("handoff:") { self.handoffs.entry(th.clone()).or_default().push((m.clone(), g("text"))) } self.queued.entry(th).or_default().push(m) }
             "QueueTaken" => { let th = g("thread"); self.queued.remove(&th); self.handoffs.remove(&th); }
             "QueueRemoved" | "QueueTakenOne" => { let m = g("msg"); if let Some(q) = self.queued.get_mut(&g("thread")) { q.retain(|x| *x != m) } if let Some(q) = self.handoffs.get_mut(&g("thread")) { q.retain(|x| x.0 != m) } }
-            "ThreadParentSet" => { self.parents.insert(g("id"), g("parent")); }
+            "ThreadParentSet" => { self.parents.insert(g("id"), g("parent")); self.st.insert(format!("thread.parent.{}", g("id")), g("parent")); } // the newest move wins over an older thread.parent setting (Tree.raw reads the setting first)
             "ProjectRemoved" => if let Some(p) = self.projects.get_mut(&g("id")) { p.1 = true },
             "BotSet" => { let th = g("thread"); if !th.is_empty() { self.bot_of.insert(th.clone(), g("id")); } let old = self.bots.get(&g("id")).cloned(); let (name, thread, _) = old.unwrap_or_default(); self.bots.insert(g("id"), (if g("name").is_empty() { name } else { g("name") }, if th.is_empty() { thread } else { th }, false)); }
             "BotDeleted" => { let e = self.bots.entry(g("id")).or_default(); e.2 = true; }

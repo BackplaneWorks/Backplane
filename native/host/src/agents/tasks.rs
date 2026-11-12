@@ -98,6 +98,24 @@ impl Agents {
     }
 }
 
+/// Startup backfill: a delegated child with no parent of its own (no ThreadParentSet, no thread.parent setting: an empty one is a detach the
+/// person made) is put under the thread that delegated it, once. Delegations logged before delegate_task wrote ThreadParentSet only had the task
+/// record, so thread_list, the commands' fold and linked machines showed them top level. A bot's delegated work stays a thread of its own (as State does).
+pub fn parent_backfill(w: &super::world::World, now: u64) -> Vec<Value> {
+    let mut ks: Vec<(&String, &super::world::Tk)> = w.tasks.iter().collect(); ks.sort_by(|a, b| a.0.cmp(b.0));
+    let mut done = std::collections::HashSet::new(); let mut ev = vec![];
+    for (_, k) in ks {
+        if k.parent.is_empty() || k.child == k.parent || w.bot_of.contains_key(&k.parent) || !done.insert(k.child.clone()) { continue }
+        if w.parents.contains_key(&k.child) || w.st.contains_key(&format!("thread.parent.{}", k.child)) { continue }
+        let (Some(c), Some(p)) = (w.threads.get(&k.child), w.threads.get(&k.parent)) else { continue };
+        if c.deleted || p.deleted || c.project != p.project { continue }
+        let mut cur = k.parent.clone(); let mut ok = false; // never a cycle
+        for _ in 0..64 { if cur.is_empty() { ok = true; break } if cur == k.child { break } cur = w.tree_raw(&cur) }
+        if ok { ev.push(json!({"$":"ThreadParentSet","id":k.child,"parent":k.parent,"at":now})) }
+    }
+    ev
+}
+
 /// Task.finish.w as a plan over the state: what to log for a child's turn that ended, or None.
 pub struct Finish { pub id: String, pub parent: String, pub child: String, pub want: &'static str, pub summary: String, pub deliver: Option<String> }
 pub fn finish_plan(w: &super::world::World, child: &str, ended: &str) -> Option<Finish> {
@@ -223,6 +241,15 @@ mod laws {
         let handoff = "{\"$\":\"TurnQueued\",\"thread\":\"t1\",\"msg\":\"handoff:1\",\"text\":\"x\",\"at\":9}"; assert!(finish_plan(&world(&[&tc("t1", "completed"), handoff]), "t1", "completed").is_some(), "handed-over context alone never holds");
         let pq = "{\"$\":\"TurnQueued\",\"thread\":\"t0\",\"msg\":\"m2\",\"text\":\"x\",\"at\":9}"; let w = world(&[DONE, MSG, pq]); let p = repair_plan(&w); assert!(p[0].has && !p[0].wake, "Queue.waiting(parent) keeps the idle parent from waking");
         let taken = "{\"$\":\"QueueTaken\",\"thread\":\"t0\",\"at\":9}"; assert!(repair_plan(&world(&[DONE, MSG, pq, taken]))[0].wake) }
+    #[test] fn a_delegated_child_without_a_parent_is_backfilled_once() {
+        let ev = parent_backfill(&world(&[]), 5); assert_eq!(ev, vec![json!({"$":"ThreadParentSet","id":"t1","parent":"t0","at":5})]);
+        let mut w = world(&[]); for e in &ev { w.apply(&e.to_string()) } assert!(parent_backfill(&w, 6).is_empty(), "once"); assert_eq!(w.tree_raw("t1"), "t0");
+        assert!(parent_backfill(&world(&["{\"$\":\"ThreadParentSet\",\"id\":\"t1\",\"parent\":\"\",\"at\":2}"]), 5).is_empty(), "a detach is the person's");
+        assert!(parent_backfill(&world(&["{\"$\":\"SettingSet\",\"key\":\"thread.parent.t1\",\"value\":\"\",\"at\":2}"]), 5).is_empty());
+        assert!(parent_backfill(&world(&["{\"$\":\"BotSet\",\"id\":\"b1\",\"name\":\"b\",\"thread\":\"t0\",\"at\":2}"]), 5).is_empty(), "a bot's work stays its own thread");
+    }
+    #[test] fn the_newest_parent_move_wins_over_an_older_setting() {
+        let w = world(&["{\"$\":\"SettingSet\",\"key\":\"thread.parent.t1\",\"value\":\"\",\"at\":2}", "{\"$\":\"ThreadParentSet\",\"id\":\"t1\",\"parent\":\"t0\",\"at\":3}"]); assert_eq!(w.tree_raw("t1"), "t0") }
     #[test] fn the_launch_chain_is_bounded_and_acyclic() {
         let mut w = world(&[]); for i in 0..70 { w.apply(&format!("{{\"$\":\"ThreadParentSet\",\"id\":\"c{i}\",\"parent\":\"c{}\",\"at\":1}}", i + 1)) }
         assert!(!w.tree_chain_ok("c0"), "a chain beyond 63 is refused"); assert!(w.tree_chain_ok("c10"), "a short one is fine"); assert!(w.tree_chain_ok("t1"));

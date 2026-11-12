@@ -27,7 +27,7 @@ impl Agents {
     pub(super) async fn thread_json(&self, id: &str) -> Option<Value> {
         let m = self.hub.model().await; let t = m.threads.get(id)?.clone(); drop(m);
         let phase = self.phase(id, &t.turn, t.pending).await;
-        let parent = { let w = self.world().await; let p = w.setting(&format!("thread.parent.{id}")).to_string(); // Tree.raw: a link to a live thread of the same project, never to itself
+        let parent = { let w = self.world().await; let p = w.tree_raw(id); // Tree.raw: a link to a live thread of the same project, never to itself
             if !p.is_empty() && p != id && w.threads.get(&p).map_or(false, |x| !x.deleted && x.project == t.project) && w.threads.get(id).map_or(false, |x| !x.deleted) { p } else { String::new() } };
         let (busy, titles, model) = { let w = self.world().await; let (b, ti) = w.work(id); (b, ti, w.threads.get(id).map_or(t.model.clone(), |x| x.model.clone())) }; // the model as the agents run it: a model picked alone is a ModesSet, which the hub's model does not fold
         Some(json!({"id":id,"project":t.project,"title":t.title,"provider":t.provider,"model":model,"turn":t.turn,"activity":t.activity,"parent":parent,"phase":phase,"waiting":busy,"work":titles}))
@@ -86,6 +86,24 @@ impl Agents {
                 if on && keyed { ev.push(json!({"$":"ThreadOrdered","id":target,"section":"pinned","key":"","at":now})) }
                 self.commit_events(ev).await; }
             return (true, json!({"threadId":target,"pinned":on}))
+        }
+        // parent alone: Hub.thread_parent, as the sidebar's move (thread.reparent / thread.detach): empty detaches; the title is left alone
+        if let Some(pv) = a.get("parent") {
+            if a.get("title").is_some() || a.get("report").is_some() { return fail("parent cannot be combined with title or report") }
+            let Some(parent) = pv.as_str().map(str::trim) else { return fail("parent is a thread id, or empty for top level") };
+            if !parent.is_empty() {
+                let w = self.world().await;
+                let live = |id: &str| w.threads.get(id).filter(|t| !t.deleted);
+                let (Some(t), Some(p)) = (live(target), live(parent)) else { return fail("parent must be a live conversation in the same project") };
+                if parent == target || t.project != p.project { return fail("parent must be a live conversation in the same project") }
+                let mut cur = parent.to_string(); // the new ancestry never comes back to the thread (at most 64 deep)
+                for _ in 0..64 { if cur.is_empty() { break } if cur == target { return fail("that parent would make a cycle") } cur = w.tree_raw(&cur) }
+                if !cur.is_empty() { return fail("that parent would make a cycle") }
+            }
+            let now = now_s(); let mut ev = vec![json!({"$":"ThreadParentSet","id":target,"parent":parent,"at":now})];
+            if !parent.is_empty() { ev.push(json!({"$":"SettingSet","key":format!("thread.tree.{parent}"),"value":"1","at":now})) } // its parent opens, so the moved row shows
+            self.commit_events(ev).await;
+            return (true, json!({"threadId":target,"parent":parent}))
         }
         let title = sv(a, "title").trim().to_string();
         let flag = match a.get("report") { Some(Value::Bool(b)) => Some(*b), Some(Value::String(v)) if v == "true" => Some(true), Some(Value::String(v)) if v == "false" => Some(false), _ => None };
