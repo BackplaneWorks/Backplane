@@ -22,7 +22,7 @@ const TIMEOUT_MS: u64 = 30000;
 
 fn fail(id: Value, error: &str, status: Option<&str>) -> Value { match status { Some(s) => json!({"id":id,"ok":false,"status":s,"error":error}), None => json!({"id":id,"ok":false,"error":error}) } }
 
-struct Job { id: Value, schema: Arc<Schema>, ty: String, message: Value, timeout: u64 }
+struct Job { id: Value, schema: Arc<Schema>, ty: String, message: Value, timeout: u64, client: String }
 struct Slot { jobs: mpsc::UnboundedSender<Job>, shut: oneshot::Sender<()> }
 
 /// One hub's transport. `handle` never blocks: the work runs on tasks and answers through the sink. Call it on the runtime.
@@ -44,7 +44,8 @@ impl Native {
         if ty.is_empty() { return (self.sink)(fail(id, "no type", None)) }
         let schema = proto::load(r.get("desc").and_then(Value::as_str).unwrap_or(&self.desc));
         if !schema.knows(&ty) { return (self.sink)(fail(id, proto::NO_SCHEMA, None)) }
-        let job = Job { id, schema, ty, timeout: r["timeout"].as_u64().unwrap_or(TIMEOUT_MS), message: r.get("message").cloned().unwrap_or(Value::Null) };
+        // `client`: the request's actor (the fork's co-editing names undo groups and changes by it); default the hub's own name
+        let job = Job { id, schema, ty, timeout: r["timeout"].as_u64().unwrap_or(TIMEOUT_MS), message: r.get("message").cloned().unwrap_or(Value::Null), client: r["client"].as_str().unwrap_or("").to_string() };
         let slot = self.socks.entry(sock.clone()).or_insert_with(|| {
             let (jobs, rx) = mpsc::unbounded_channel(); let (shut, down) = oneshot::channel();
             tokio::spawn(worker(sock, rx, down, self.client.clone(), self.sink.clone()));
@@ -89,8 +90,8 @@ async fn worker(sock: String, mut rx: mpsc::UnboundedReceiver<Job>, mut down: on
 }
 /// One request. The codec runs off the runtime's threads: a big board's reply takes a while, and a panic there must answer this request, not lose it.
 async fn one(sock: &str, job: Job, conn: &mut Option<nng::Req>, token: &mut String, client: &str) -> Value {
-    let Job { id, schema, ty, message, timeout } = job;
-    let (s, t, tok, cl) = (schema.clone(), ty.clone(), token.clone(), client.to_string());
+    let Job { id, schema, ty, message, timeout, client: actor } = job;
+    let (s, t, tok, cl) = (schema.clone(), ty.clone(), token.clone(), if actor.is_empty() { client.to_string() } else { actor });
     let bytes = match tokio::task::spawn_blocking(move || proto::encode_request(&s, &t, &message, &tok, &cl)).await.unwrap_or_else(|e| Err(e.to_string())) {
         Ok(b) => b,
         Err(e) => return fail(id, &format!("bad message for {ty}: {e}"), Some("AS_BAD_REQUEST")),

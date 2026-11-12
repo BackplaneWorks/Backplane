@@ -426,15 +426,19 @@ async fn run(hub: &Arc<Hub>, thread: Option<&str>, path: &str, ty: &str, msg: Va
         if !super::known_root(hub, Path::new(&pro).parent().map(|p| p.to_str().unwrap_or("")).unwrap_or(""), "").await { return Err(format!("{path} is not in a project this hub knows")) }
         let setting = hub.setting("kicad.ipc").await.unwrap_or_else(|| "on".into());
         if setting == "off" { let why = "KiCad IPC is turned off in Settings"; log_fallback(hub, thread, why).await; return Err(ks::unavailable(why, &gui.cli)) }
-        // the person's unsaved edits are never written by an agent's save (SaveDocument, SaveDocumentAs); its commits are tracked for that
+        // the person's unsaved edits are never written by an agent's save (SaveDocument, SaveDocumentAs); its commits are tracked for that.
+        // A co-editing runtime (bp.11, `coedit`) is different: the agent edits the person's live document, its save includes both
+        // sides' edits on purpose, and nobody is asked to save, revert, close KiCad or wait (docs/kicad-coedit.md).
         let short = ty.rsplit('.').next().unwrap_or(ty);
-        if matches!(short, "SaveDocument" | "SaveDocumentAs") {
+        let coedit = gui.caps.iter().any(|c| c == "coedit");
+        if !coedit && matches!(short, "SaveDocument" | "SaveDocumentAs") {
             let why = super::embed::unsaved_update(&pro, |u| u).refuse_save(Path::new(path).file_name().and_then(|f| f.to_str()).unwrap_or(path));
             if !why.is_empty() { return Err(why) }
         }
         if short == "BeginCommit" { super::embed::unsaved_update(&pro, |u| u.agent_begins()); }
         let commits = short == "EndCommit" && msg_commits(&msg);
-        let o = super::embed::gui_call(&gui, ty, msg).await;
+        let actor = if coedit { thread.filter(|t| !t.is_empty()).map(|t| format!("agent:{t}")).unwrap_or_else(|| "agent".into()) } else { String::new() };
+        let o = super::embed::gui_call_as(&gui, ty, msg, &actor).await;
         if commits && o["ok"].as_bool().unwrap_or(false) { super::embed::unsaved_update(&pro, |u| u.agent_committed()); }
         if o["fallback"].as_bool().unwrap_or(false) { log_fallback(hub, thread, o["why"].as_str().unwrap_or("")).await; return Err(o["error"].as_str().unwrap_or("").into()) }
         let ok = o["ok"].as_bool().unwrap_or(false);
@@ -544,4 +548,11 @@ mod tests {
         for t in ["kiapi.common.commands.SaveDocument", "kiapi.board.commands.CreateItems", "kiapi.board.commands.BeginCommit", "kiapi.board.commands.EndCommit", "kiapi.backplane.Shutdown", "", "GetItemsX.Delete"] { assert!(copy_ipc_refused(true, t).is_some(), "{t}") }
         assert_eq!(copy_ipc_refused(false, "kiapi.common.commands.SaveDocument"), None);
     }
+}
+
+/// Whether `path`'s project is open in a co-editing KiCad (bp.11 `coedit`): agents write its live documents through IPC at once,
+/// with no document lock (the fork defers what the person holds and merges the rest), and never ask the person to wait.
+pub fn coedit_live(path: &str) -> bool {
+    let pro = pro_of(&super::canonical::route(path));
+    !pro.is_empty() && super::embed::gui_route(&pro).is_some_and(|g| g.caps.iter().any(|c| c == "coedit"))
 }

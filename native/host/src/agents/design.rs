@@ -13,6 +13,11 @@ fn fail(m: &str) -> (bool, Value) { (false, json!({"error":m})) }
 /// (agents/world.rs `cwd` reads the same key by its text: a fold input reaches nothing outside its inputs)
 pub fn main_key(th: &str) -> String { format!("kicad.main.{th}") }
 
+/// Commands that rewrite a whole document: the one place a writer still needs the document's lock with a co-editing KiCad.
+pub fn structural(ty: &str) -> bool {
+    matches!(ty.rsplit('.').next().unwrap_or(ty), "ImportNetlist" | "UpdatePCBFromSchematic" | "UpdateSchematicFromPCB" | "Annotate" | "AnnotateSchematic" | "RevertDocument" | "CloseDocument" | "OpenDocument" | "ImportSpecctraSession")
+}
+
 impl Agents {
     /// The thread works in the main checkout for design files.
     pub async fn on_main(&self, th: &str) -> bool { self.world().await.setting(&main_key(th)) == "on" }
@@ -36,6 +41,9 @@ impl Agents {
         if crate::copy::on() || crate::files::kicad::ipc::is_read(ty) { return Ok(routed) }
         let doc = kc::doc_of(&routed);
         if doc.is_empty() || kc::split_worktree(&doc).is_some() { return Ok(routed) } // none (the IPC check names that), or an explicit experiment copy
+        // A co-editing KiCad has the document open: agents and the person edit it live, together (docs/kicad-coedit.md); only
+        // whole-document commands still take the lock (an annotation or a netlist import rewrites everything).
+        if crate::files::kicad::ipc::coedit_live(&routed) && !structural(ty) { return Ok(routed) }
         self.doc_gate(thread, &doc).await.map(|_| routed)
     }
     /// The same gate for a direct write of a board or schematic (`files_write`): Err names the holder.
