@@ -11,6 +11,8 @@ curl -fsSL https://github.com/BackplaneWorks/Backplane/releases/latest/download/
 backplane
 ```
 
+Without curl (a stock Ubuntu desktop has only wget): `wget -qO- https://github.com/BackplaneWorks/Backplane/releases/latest/download/install.sh | sh`.
+
 The installer supports x64 and arm64. It puts Backplane in `~/.local/share/backplane`, links `backplane` into `~/.local/bin` and adds Backplane to your applications menu. If your shell cannot find `backplane`, add `~/.local/bin` to your `PATH`.
 
 ### macOS

@@ -55,7 +55,10 @@ root=backplane-kicad-$platform-$version
 [ "$asset" = "$root.$format" ] || fail 'Invalid runtime archive'
 case "$pinned" in ''|*[!0-9a-f]*) fail 'Invalid pinned digest' ;; esac
 [ "${#pinned}" -eq 64 ] || fail 'Invalid pinned digest'
-command -v curl >/dev/null 2>&1 || fail 'curl is needed to download KiCad and was not found'
+# curl, else wget: a stock Ubuntu desktop has wget and no curl
+if command -v curl >/dev/null 2>&1; then get() { curl --proto '=https' --tlsv1.2 -fsSL -o "$1" "$2"; }
+elif command -v wget >/dev/null 2>&1; then get() { wget -q --https-only -O "$1" "$2"; }
+else fail 'curl or wget is needed to download KiCad, and neither was found'; fi
 dir=$parent/$version
 # Never unpack over an existing runtime (including an incomplete old install).
 [ ! -e "$dir" ] && [ ! -L "$dir" ] || fail "$dir already exists; the installation there is kept. Set its path in Settings, CAD, or remove it and try again"
@@ -71,8 +74,8 @@ stage=$(mktemp -d "$parent/.install-XXXXXX")
 pkg=$stage/$asset
 base=https://github.com/i2cjak/Backplane_KiCad/releases/download/$release/
 echo "Downloading $asset"
-curl --proto '=https' --tlsv1.2 -fsSL -o "$pkg" "$base$asset" || fail "Could not download $base$asset"
-curl --proto '=https' --tlsv1.2 -fsSL -o "$stage/SUMS" "${base}SHA256SUMS" || fail "Could not download ${base}SHA256SUMS"
+get "$pkg" "$base$asset" || fail "Could not download $base$asset"
+get "$stage/SUMS" "${base}SHA256SUMS" || fail "Could not download ${base}SHA256SUMS"
 echo 'Checking the checksum'
 want=$(awk -v n="$asset" '{ f=$2; sub(/^\*/, "", f); sub(/^\.\//, "", f); if (f==n) print $1 }' "$stage/SUMS")
 if command -v sha256sum >/dev/null 2>&1; then
@@ -346,6 +349,32 @@ mod tests {
         let env = crate::files::kicad::ipc::read_runtime(&parent.join("0.0.1-bp.1/bin/kicad-cli")); assert_eq!(env.version, "0.0.1-bp.1");
         // a second run keeps what is there
         let (ok, out) = script(&bin, &parent, &p); assert!(!ok && out.contains("already exists; the installation there is kept"), "{out}");
+    }
+    /// A PATH with this machine's programs but curl and wget, and a stand-in `wget -q --https-only -O OUT URL` serving the fixture's files
+    /// (`wget`: whether to put it there).
+    #[cfg(unix)] fn no_curl(r: &Path, fixture_bin: &Path, wget: bool) -> PathBuf {
+        let b = r.join(if wget { "wget-only" } else { "neither" }); std::fs::create_dir_all(&b).unwrap();
+        for d in ["/usr/local/bin", "/usr/bin", "/bin"] { for e in std::fs::read_dir(d).into_iter().flatten().flatten() {
+            let n = e.file_name(); if n == "curl" || n == "wget" || b.join(&n).exists() { continue } let _ = std::os::unix::fs::symlink(e.path(), b.join(&n));
+        } }
+        let serve = std::fs::read_to_string(fixture_bin.join("curl")).unwrap().split("f=").nth(1).unwrap().split("/$(").next().unwrap().to_string();
+        if wget { exe(&b.join("wget"), &format!("#!/bin/sh
+echo \"$*\" >> {}/wget.args
+while [ $# -gt 1 ]; do [ \"$1\" = -O ] && out=$2; shift; done
+f={serve}/$(basename \"$1\")
+[ -f \"$f\" ] || exit 8
+cp \"$f\" \"$out\"
+", r.display())); }
+        b
+    }
+    #[cfg(unix)] #[test] fn with_no_curl_the_script_downloads_with_wget_and_with_neither_says_so() {
+        let r = tmp("wget"); let (p, bin) = fixture(&r, false); let parent = r.join("home/kicad");
+        let only = |b: &Path| { let o = std::process::Command::new("sh").arg("-c").arg(SCRIPT).arg("sh").args(args(&parent, &p)).env("PATH", b).output().unwrap(); (o.status.success(), format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr))) };
+        let (ok, out) = only(&no_curl(&r, &bin, false));
+        assert!(!ok && out.trim_end().ends_with("curl or wget is needed to download KiCad, and neither was found"), "{out}");
+        let (ok, out) = only(&no_curl(&r, &bin, true));
+        assert!(ok, "{out}"); assert!(parent.join("0.0.1-bp.1/bin/kicad-cli").is_file());
+        let a = std::fs::read_to_string(r.join("wget.args")).unwrap(); assert!(a.lines().count() == 2 && a.lines().all(|l| l.starts_with("-q --https-only -O ")), "{a}");
     }
     #[cfg(unix)] #[test] fn the_real_script_refuses_a_digest_that_is_not_pinned_or_a_wrong_manifest_and_leaves_nothing() {
         let r = tmp("bad"); let (mut p, bin) = fixture(&r, false); let parent = r.join("home/kicad");

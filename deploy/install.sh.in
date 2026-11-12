@@ -1,5 +1,6 @@
 #!/bin/sh
 # Installs Backplane: curl -fsSL https://github.com/BackplaneWorks/Backplane/releases/latest/download/install.sh | sh
+#   (no curl, as on a stock Ubuntu desktop: wget -qO- https://github.com/BackplaneWorks/Backplane/releases/latest/download/install.sh | sh)
 #
 # The release fills in the version and the sha256 of each archive (release.yml, from deploy/install.sh.in), so this script vouches for what it
 # downloads. It lays the release out the way the guard runs and updates it (docs/deploy.md):
@@ -118,14 +119,22 @@ trap 'exit 130' 2 15
 sha_ok() { # file sum
   if command -v sha256sum >/dev/null 2>&1; then echo "$2  $1" | sha256sum -c - >/dev/null 2>&1; else echo "$2  $1" | shasum -a 256 -c - >/dev/null 2>&1; fi
 }
+# curl, else wget (a stock Ubuntu desktop has wget and no curl)
+if command -v curl >/dev/null 2>&1; then bp_get=curl; elif command -v wget >/dev/null 2>&1; then bp_get=wget; else bp_get=; fi
 bp_begin 'Download and verify release'
 if [ -n "${BACKPLANE_ARCHIVE:-}" ]; then
   cp "$BACKPLANE_ARCHIVE" "$tmp/$name" || fail "cannot read $BACKPLANE_ARCHIVE"
 else
   url="https://github.com/$REPO/releases/download/$VER/$name"
+  [ -n "$bp_get" ] || fail "curl or wget is needed to download $url (sudo apt install curl)"
   echo "downloading $url"
-  if [ "$bp_fancy" = 1 ]; then curl --proto '=https' --tlsv1.2 -fL --progress-bar -o "$tmp/$name" "$url" || fail "download failed: $url"
-  else curl --proto '=https' --tlsv1.2 -fsSL -o "$tmp/$name" "$url" || fail "download failed: $url"; fi
+  if [ "$bp_get" = curl ]; then
+    if [ "$bp_fancy" = 1 ]; then curl --proto '=https' --tlsv1.2 -fL --progress-bar -o "$tmp/$name" "$url" || fail "download failed: $url"
+    else curl --proto '=https' --tlsv1.2 -fsSL -o "$tmp/$name" "$url" || fail "download failed: $url"; fi
+  else
+    if [ "$bp_fancy" = 1 ]; then wget -q --show-progress --https-only -O "$tmp/$name" "$url" || fail "download failed: $url"
+    else wget -q --https-only -O "$tmp/$name" "$url" || fail "download failed: $url"; fi
+  fi
 fi
 sha_ok "$tmp/$name" "$sum" || fail "$name does not match its sha256; not installed"
 bp_done
@@ -193,7 +202,9 @@ else
   printf '%s\n' "$VER" > "$tmp/current" && mv -f "$tmp/current" "$prefix/CURRENT"
   if [ -n "${BACKPLANE_START:-}" ] || [ -n "${BACKPLANE_NO_DESKTOP_APP:-}" ]; then
     port=${BACKPLANE_PORT:-}
-    if [ -z "$port" ]; then p=3800; while [ $p -le 3899 ]; do curl -s -m1 -o /dev/null "http://127.0.0.1:$p/" || { port=$p; break; }; p=$((p+1)); done; fi
+    # a port is taken when anything answers on it (wget: 4 is a network failure, any other code had an answer)
+    taken() { if [ "$bp_get" = curl ]; then curl -s -m1 -o /dev/null "http://127.0.0.1:$1/"; else wget -q -T1 -t1 -O /dev/null "http://127.0.0.1:$1/"; [ $? != 4 ]; fi; }
+    if [ -z "$port" ]; then p=3800; while [ $p -le 3899 ]; do taken $p || { port=$p; break; }; p=$((p+1)); done; fi
     [ -n "$port" ] || fail "no free port between 3800 and 3899 (set BACKPLANE_PORT)"
     mkdir -p "$home"
     nohup "$prefix/backplane" hub run --home "$home" --port "$port" --builds "$prefix" --default --log "$home/hub.log" -- --foreground ${BACKPLANE_HUB_ARGS:-} >> "$home/guard.log" 2>&1 < /dev/null &
