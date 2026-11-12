@@ -210,7 +210,7 @@ impl Backplane {
         let was_streamed = kind == "assistant" && !id.starts_with('@') && !self.screens.streamed.is_empty() && { let a: String = self.screens.streamed.trim().chars().take(60).collect(); text.trim_start().starts_with(&a) };
         let row: AnyElement = match kind {
             "user" => {
-                let wide = crate::screens::timeline::bubble_full_width(&text);
+                let wide = crate::screens::timeline::bubble_full_width(&text, &e["attachments"]);
                 let ref_words: Vec<String> = e["refs"].as_array().into_iter().flatten().map(|r| string(r, "word")).collect();
                 let body = crate::screens::timeline::user_text(&reg, light, &text, &ref_words);
                 let atts = crate::screens::timeline::attachments(cx, light, &e["attachments"], &id, self.screens.attacher.target.as_ref(), &self.screens.images);
