@@ -283,3 +283,24 @@ fn the_end_of_turn_model_tells_a_finished_request_from_a_thinking_pause_and_a_mi
         let at = |n: &str| r.names().iter().position(|e| e == n).unwrap(); assert!(at("turn") < at("done"), "the turn comes before the segment's last decode");
     }
 }
+
+/// The speaker check's model, through `live`'s `voice` events: enrolled from three sentences of one voice, a fourth of it matches (cosine
+/// >= 0.5, the hub's speaker::MATCH), two other voices do not. Needs the speaker model in the local folder.
+#[test]
+fn the_speaker_model_tells_the_enrolled_voice_from_others() {
+    let Some((dir, _)) = rig() else { return };
+    if !local::speaker_ok(Path::new(&dir)) { eprintln!("no speaker model in {dir}: skipped (backplane-voice local-speaker)"); return }
+    let here = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/turn");
+    let emb = |clip: &str| -> Vec<f64> {
+        let pcm = pcm_of(&here.join(format!("{clip}.wav")));
+        let r = live_run(&dir, &here, &[], |r| { r.write(&pcm); r.write(&vec![0u8; 32000]); r.close_stdin(); });
+        r.next("voice")["emb"].as_array().unwrap().iter().map(|x| x.as_f64().unwrap()).collect()
+    };
+    let unit = |v: &[f64]| { let n = v.iter().map(|x| x * x).sum::<f64>().sqrt(); v.iter().map(|x| x / n).collect::<Vec<_>>() };
+    let enrol: Vec<Vec<f64>> = ["speaker-a1", "speaker-a2", "speaker-a3"].iter().map(|c| unit(&emb(c))).collect();
+    let mean = unit(&(0..enrol[0].len()).map(|i| enrol.iter().map(|e| e[i]).sum::<f64>() / 3.0).collect::<Vec<_>>());
+    let sim = |c: &str| { let e = unit(&emb(c)); mean.iter().zip(&e).map(|(a, b)| a * b).sum::<f64>() };
+    let (a, m, f) = (sim("speaker-a4"), sim("speaker-tv-m"), sim("speaker-tv-f"));
+    eprintln!("the enrolled voice {a:.3}, others {m:.3} and {f:.3}");
+    assert!(a >= 0.5 && m < 0.5 && f < 0.5, "{a} {m} {f}");
+}

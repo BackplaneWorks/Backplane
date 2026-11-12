@@ -2838,6 +2838,10 @@ settings.voice.always.saveapps	Save apps	アプリを保存
 settings.voice.always.target	Messages go to	メッセージの送り先
 settings.voice.always.target.note	Saying a thread's name first (“KiCad thread, …”) sends that message there.	最初にスレッド名を言うと（「KiCad thread, …」）、そのメッセージはそのスレッドに送られます。
 settings.voice.always.open	The open thread (else Bub)	開いているスレッド（なければ Bub）
+settings.voice.speaker	Speaker check	話者の確認
+settings.voice.speaker.on	Only your voice starts a message, not the TV, someone else or the speakers. Learned from {n} stretches of your dictation, on this machine only.	メッセージを始められるのはあなたの声だけです（テレビや他の人、スピーカーの音では始まりません）。このマシン上でのみ、あなたの音声入力 {n} 回分から学習しました。
+settings.voice.speaker.learning	Only your voice will start a message. It learns your voice from your dictation with the mic button: {n} of {k} stretches so far; until then any voice can.	メッセージを始められるのはあなたの声だけになります。マイクボタンでの音声入力からあなたの声を学習します（現在 {n} / {k} 回）。それまではどの声でも始まります。
+settings.voice.speaker.reenrol	Re-enrol	再登録
 gpui.f.group.install	Install	インストール
 gpui.f.group.agents	Agents	エージェント
 gpui.f.group.cad	CAD tools	CADツール
@@ -5527,6 +5531,12 @@ gpui.usage.noread	No reading yet: the first turn's result reports it.	まだ値�
 
     /// settings.voice.always.pause.note2 = Paused, the microphone is closed; it listens again by itself. These may use the microphone without pausing it: {apps}.
     static func settings_voice_always_pause_note2(apps: String) -> String { f("settings.voice.always.pause.note2", ["apps": apps]) }
+
+    /// settings.voice.speaker.on = Only your voice starts a message, not the TV, someone else or the speakers. Learned from {n} stretches of your dictation, on this machine only.
+    static func settings_voice_speaker_on(n: String) -> String { f("settings.voice.speaker.on", ["n": n]) }
+
+    /// settings.voice.speaker.learning = Only your voice will start a message. It learns your voice from your dictation with the mic button: {n} of {k} stretches so far; until then any voice can.
+    static func settings_voice_speaker_learning(n: String, k: String) -> String { f("settings.voice.speaker.learning", ["n": n, "k": k]) }
 
     /// gpui.f.counter = {i, number} of {n, number}
     static func gpui_f_counter(i: Int, n: Int) -> String { f("gpui.f.counter", ["i": String(i), "n": String(n)]) }

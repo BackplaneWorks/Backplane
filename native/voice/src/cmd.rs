@@ -305,6 +305,10 @@ pub fn local_cmd(a: Args) -> ! {
     match a.cmd.as_str() {
         "local-status" => {}
         "local-remove" => local::remove(&dir, &a.model),
+        "local-speaker" => {
+            let mut progress = |what: &str, done: u64, total: u64, phase: &str| emit(json!({"event": "progress", "what": what, "done": done, "total": total, "phase": phase}));
+            if let Err(e) = local::install_speaker(&dir, &mut progress) { error(&e) }
+        }
         "local-turn" => {
             let mut progress = |what: &str, done: u64, total: u64, phase: &str| emit(json!({"event": "progress", "what": what, "done": done, "total": total, "phase": phase}));
             if let Err(e) = local::install_turn(&dir, &mut progress) { error(&e) }

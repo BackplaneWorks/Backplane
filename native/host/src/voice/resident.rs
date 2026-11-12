@@ -89,14 +89,20 @@ impl Resident {
     async fn step(self: &Arc<Self>, hub: &Arc<Hub>) {
         let want = Self::wanted(hub).await;
         // the end-of-turn model (native/voice/src/turn.rs) came after many installs: fetched once, then the server starts again to load it
-        if want.is_some() && !hub.cfg.home.join("voice/local/smart-turn-v3.2-cpu.onnx").exists() && !std::mem::replace(&mut self.st.lock().unwrap().turn_tried, true) {
+        // the speaker model (always-on's speaker check, and learning the voiceprint from dictation) likewise
+        let missing: Vec<&str> = [("smart-turn-v3.2-cpu.onnx", "local-turn"), ("nemo_en_titanet_small.onnx", "local-speaker")].iter().filter(|(f, _)| !hub.cfg.home.join("voice/local").join(f).exists()).map(|x| x.1).collect();
+        if want.is_some() && !missing.is_empty() && !std::mem::replace(&mut self.st.lock().unwrap().turn_tried, true) {
             if let Some(bin) = session::exe() {
-                let (me, hub, dir) = (self.clone(), hub.clone(), hub.cfg.home.join("voice/local"));
+                let (me, dir) = (self.clone(), hub.cfg.home.join("voice/local"));
+                let cmds: Vec<String> = missing.iter().map(|s| s.to_string()).collect();
                 tokio::spawn(async move {
-                    let mut c = proc::tokio_cmd(Kind::Net, &bin); c.args(["local-turn", "--local-dir", &dir.to_string_lossy()]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).kill_on_drop(true);
-                    let ok = tokio::time::timeout(Duration::from_secs(300), c.status()).await.ok().and_then(|r| r.ok()).map_or(false, |s| s.success());
-                    eprintln!("voice: the end-of-turn model {}", if ok { "is fetched; the resident recognizer loads it" } else { "could not be fetched; dictation decides without it" });
-                    if ok && me.busy.load(Ordering::SeqCst) == 0 { me.stop() } let _ = hub; me.kick();
+                    let mut any = false;
+                    for cmd in cmds {
+                        let mut c = proc::tokio_cmd(Kind::Net, &bin); c.args([cmd.as_str(), "--local-dir", &dir.to_string_lossy()]).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).kill_on_drop(true);
+                        let ok = tokio::time::timeout(Duration::from_secs(300), c.status()).await.ok().and_then(|r| r.ok()).map_or(false, |s| s.success());
+                        eprintln!("voice: {cmd} {}", if ok { "fetched its model; the resident recognizer loads it" } else { "could not fetch its model; dictation goes on without it" }); any |= ok;
+                    }
+                    if any && me.busy.load(Ordering::SeqCst) == 0 { me.stop() } me.kick();
                 });
             }
         }

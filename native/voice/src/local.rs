@@ -168,11 +168,29 @@ pub fn turn_ok(dir: &Path) -> bool {
 /// `local-turn`: fetches the end-of-turn model alone, checked, beside the rest; the speech model's ready mark is not touched.
 pub fn install_turn(dir: &Path, progress: Progress) -> Result<(), String> {
     if turn_ok(dir) { return Ok(()) }
+    let url = std::env::var("BACKPLANE_VOICE_TURN_URL").unwrap_or_else(|_| crate::turn::URL.to_string());
+    install_piece(dir, &url, crate::turn::SIZE, crate::turn::SHA256, crate::turn::FILE, "end-of-turn model", progress)
+}
+/// The speaker model (NeMo TitaNet small, CC-BY-4.0, 40 MB): always-on's speaker check. Optional, like the end-of-turn model.
+pub const SPEAKER_FILE: &str = "nemo_en_titanet_small.onnx";
+pub const SPEAKER_SIZE: u64 = 40257283;
+pub const SPEAKER_SHA256: &str = "ad4a1802485d8b34c722d2a9d04249662f2ece5d28a7a039063ca22f515a789e";
+const SPEAKER_URL: &str = "https://github.com/k2-fsa/sherpa-onnx/releases/download/speaker-recongition-models/nemo_en_titanet_small.onnx";
+pub fn speaker_path(dir: &Path) -> PathBuf { dir.join(SPEAKER_FILE) }
+pub fn speaker_ok(dir: &Path) -> bool { fs::metadata(speaker_path(dir)).is_ok_and(|m| m.is_file() && m.len() == SPEAKER_SIZE) && runtime_ok(dir, false) }
+/// `local-speaker`: fetches the speaker model alone, as `local-turn` does.
+pub fn install_speaker(dir: &Path, progress: Progress) -> Result<(), String> {
+    if speaker_ok(dir) { return Ok(()) }
+    let url = std::env::var("BACKPLANE_VOICE_SPEAKER_URL").unwrap_or_else(|_| SPEAKER_URL.to_string());
+    install_piece(dir, &url, SPEAKER_SIZE, SPEAKER_SHA256, SPEAKER_FILE, "speaker model", progress)
+}
+/// One pinned file fetched into a stage, checked (size, sha256), synced and moved beside the rest.
+fn install_piece(dir: &Path, url: &str, size: u64, sha: &str, file: &str, what: &str, progress: Progress) -> Result<(), String> {
     fs::create_dir_all(dir).map_err(|e| e.to_string())?;
     let stage = dir.join(format!(".stage-{}", std::process::id())); rm(&stage); fs::create_dir_all(&stage).map_err(|e| e.to_string())?;
-    let pin = Pin { url: std::env::var("BACKPLANE_VOICE_TURN_URL").unwrap_or_else(|_| crate::turn::URL.to_string()), size: Some(crate::turn::SIZE), sha256: Some(crate::turn::SHA256.to_string()), sha512: None };
-    let p = stage.join(crate::turn::FILE);
-    let r = fetch_to(&pin, &p, "end-of-turn model", progress).and_then(|_| sync_file(&p)).and_then(|_| fs::rename(&p, turn_path(dir)).map_err(|e| e.to_string()));
+    let pin = Pin { url: url.to_string(), size: Some(size), sha256: Some(sha.to_string()), sha512: None };
+    let p = stage.join(file);
+    let r = fetch_to(&pin, &p, what, progress).and_then(|_| sync_file(&p)).and_then(|_| fs::rename(&p, dir.join(file)).map_err(|e| e.to_string()));
     rm(&stage); sync_dir(dir); r
 }
 
@@ -314,6 +332,7 @@ pub fn status_with(dir: &Path, pins: &Pins) -> Value {
         "vad": vad,
         "vadBundled": bundled_ok(pins), // a release's copy beside the helper, which an install takes instead of a download
         "turn": turn_ok(dir), // the end-of-turn model (turn.rs), optional
+        "speaker": speaker_ok(dir), // the speaker model (always-on's speaker check), optional
         "models": models,
     })
 }
@@ -605,6 +624,7 @@ pub fn remove(dir: &Path, id: &str) {
         rm(&runtime_dir(dir));
         rm(&vad_path(dir));
         rm(&turn_path(dir));
+        rm(&speaker_path(dir));
     }
 }
 

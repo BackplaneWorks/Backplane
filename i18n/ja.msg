@@ -2531,6 +2531,10 @@ settings.voice.always.saveapps = アプリを保存
 settings.voice.always.target = メッセージの送り先
 settings.voice.always.target.note = 最初にスレッド名を言うと（「KiCad thread, …」）、そのメッセージはそのスレッドに送られます。
 settings.voice.always.open = 開いているスレッド（なければ Bub）
+settings.voice.speaker = 話者の確認
+settings.voice.speaker.on = メッセージを始められるのはあなたの声だけです（テレビや他の人、スピーカーの音では始まりません）。このマシン上でのみ、あなたの音声入力 {n} 回分から学習しました。
+settings.voice.speaker.learning = メッセージを始められるのはあなたの声だけになります。マイクボタンでの音声入力からあなたの声を学習します（現在 {n} / {k} 回）。それまではどの声でも始まります。
+settings.voice.speaker.reenrol = 再登録
 
 # ---- gpui-f: hub setup flow and thread ----
 gpui.f.group.install = インストール

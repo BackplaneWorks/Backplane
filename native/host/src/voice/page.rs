@@ -90,10 +90,10 @@ pub fn rows(p: &Prefs, info: &Value, term: &str, key_err: &str) -> Vec<Value> {
             "fields": [{"name": "vterm", "hint": "Add a term", "secret": false, "value": term}], "buttons": dict}),
         row("Learned fixes", if learned.is_empty() { "No fixes learned yet. After dictating, use Fix on a misheard word or accept a suggested correction." } else { "Fixes you made after dictating. Each applies by itself once you have made it twice." }, fixes),
         row("Pebble ring", "Set its webhook to send the recording; it is transcribed here with this dictionary.", vec![]),
-    ].into_iter().chain(always_rows(p)).chain(eot_rows(p, info)).chain(command_rows(p)).collect()
+    ].into_iter().chain(always_rows(p, info)).chain(eot_rows(p, info)).chain(command_rows(p)).collect()
 }
 /// Always on (always.rs): on/off, what starts a message, what pauses it, where messages go.
-fn always_rows(p: &Prefs) -> Vec<Value> {
+fn always_rows(p: &Prefs, info: &Value) -> Vec<Value> {
     use super::always::{Cfg, IGNORE, ON, PAUSE_AWAY, PAUSE_CALL, PAUSE_LOCK, SPEECH_MS, TARGET, WORDS};
     let c = Cfg::of(p);
     let t = |label: &str, k: &str, on: bool, dflt_on: bool| btn(label, "setting", &format!("{k}={}", match (on, dflt_on) { (true, true) => "off", (true, false) => "", (false, true) => "", (false, false) => "on" }), on);
@@ -106,6 +106,10 @@ fn always_rows(p: &Prefs) -> Vec<Value> {
     v.push(json!({"label": "Pause while", "note": if c.ignore.is_empty() { "Paused, the microphone is closed; it listens again by itself.".to_string() } else { format!("Paused, the microphone is closed; it listens again by itself. These may use the microphone without pausing it: {}.", c.ignore.join(", ")) },
         "fields": [{"name": "valwign", "hint": "Apps that may use the microphone (comma separated)", "secret": false, "value": ""}],
         "buttons": [t("The screen is locked", PAUSE_LOCK, c.pause_lock, true), t("Another app uses the microphone", PAUSE_CALL, c.pause_call, true), t("Backplane is in the background", PAUSE_AWAY, c.pause_away, false), btn("Save apps", "voice-always-ignore", "", false)]}));
+    let n: u32 = info["voice.print"].as_str().and_then(|s| s.parse().ok()).unwrap_or(0);
+    let note = if n >= super::speaker::ENROLLED { format!("Only your voice starts a message, not the TV, someone else or the speakers. Learned from {n} stretches of your dictation, on this machine only.") }
+        else { format!("Only your voice will start a message. It learns your voice from your dictation with the mic button: {n} of {} stretches so far; until then any voice can.", super::speaker::ENROLLED) };
+    v.push(row("Speaker check", &note, vec![t("On", super::always::SPEAKER, c.speaker, true), btn("Re-enrol", "voice-op", "speaker-reset", false)]));
     v.push(row("Messages go to", "Saying a thread's name first (“KiCad thread, …”) sends that message there.", vec![btn("The open thread (else Bub)", "setting", &format!("{TARGET}="), c.target == "open"), btn("Bub", "setting", &format!("{TARGET}=bub"), c.target == "bub")]));
     let _ = IGNORE; v
 }

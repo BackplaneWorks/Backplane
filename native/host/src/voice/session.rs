@@ -118,7 +118,8 @@ impl Voice {
         self.tell(hub, client, &thread);
         if upload { hub.push(client, frame(&thread, "audio", json!({"path": format!("/voice/in?s={key}")}))); }
         let reader = Reader::new(d, engine == "local", draft, caret).with_cmds(super::cmds::Cmds::of(&pr)).with_eot(super::eot::Cfg::of(&pr));
-        let reader = if always { reader.with_gate(super::always::Cfg::of(&pr).gate) } else { reader };
+        let ac = super::always::Cfg::of(&pr);
+        let reader = if always { let r = reader.with_gate(ac.gate); if ac.speaker { r.with_speaker(super::speaker::Print::load(&home)) } else { r } } else { reader };
         { let (v, hub, thread, engine) = (self.clone(), hub.clone(), thread.clone(), engine.to_string()); tokio::spawn(async move { let _hold = hold; v.read(hub, client, id, thread, engine, reader, child, stdout, ctl_rx, ctl_tx).await }); }
         json!({"path": if upload { format!("/voice/in?s={key}") } else { String::new() }})
     }
@@ -130,6 +131,12 @@ impl Voice {
             let at = due.map(|d| d.0);
             tokio::select! {
                 l = lines.next_line() => { let Ok(Some(l)) = l else { break };
+                    // the person's own dictation (the mic button, not always-on): each segment's voice teaches the voiceprint (speaker.rs), on this machine
+                    if l.contains("\"event\":\"voice\"") && !self.st.lock().unwrap().live.as_ref().map_or(true, |x| x.always) {
+                        if let Ok(o) = serde_json::from_str::<Value>(&l) { let (home, hub2) = (hub.cfg.home.clone(), hub.clone());
+                            let emb: Vec<f32> = o["emb"].as_array().map(|a| a.iter().filter_map(|x| x.as_f64().map(|f| f as f32)).collect()).unwrap_or_default();
+                            tokio::spawn(async move { let n = tokio::task::spawn_blocking(move || { let mut p = super::speaker::Print::load(&home); p.add(&emb); p.save(&home); p.n }).await.unwrap_or(0); hub2.set_info("voice.print", &n.to_string()).await; }); }
+                    }
                     let outs = self.with(&thread, |d| r.step(&l, d, &engine));
                     // always on: the message was said to a name first ("Bub, …"): it goes there
                     if let Some(name) = outs.iter().find_map(|o| if let Out::Route(n) = o { Some(n.clone()) } else { None }) {
@@ -240,6 +247,7 @@ impl Voice {
     async fn refresh(&self, hub: &Arc<Hub>) -> Value {
         let home = hub.cfg.home.clone(); let masked = words::mask(text_of(&key_path(&home)).trim()); hub.set_info("voice.key", &masked).await;
         hub.set_info("voice.eot.key", if super::jev::key().is_some() { "set" } else { "" }).await;
+        hub.set_info("voice.print", &super::speaker::Print::load(&home).n.to_string()).await;
         let (mut devs, mut local) = (json!({"default": "", "devices": []}), json!({"error": "The voice helper is not installed beside Backplane."}));
         if let Some(bin) = exe() {
             let run = |args: Vec<String>| { let mut c = proc::tokio_cmd(Kind::Local, &bin); c.args(args).stdin(Stdio::null()).stderr(Stdio::null()).kill_on_drop(true); async move { tokio::time::timeout(Duration::from_secs(10), c.output()).await.ok().and_then(|r| r.ok()).map(|o| String::from_utf8_lossy(&o.stdout).into_owned()).unwrap_or_default() } };
@@ -328,6 +336,7 @@ impl Voice {
             "status" => { self.refresh(hub).await; Ok(()) }
             "install" => self.op_job(hub, client, "local-install", m).await,
             "remove" => self.op_job(hub, client, "local-remove", m).await,
+            "speaker-reset" => { let _ = std::fs::remove_file(super::speaker::path(&hub.cfg.home)); hub.set_info("voice.print", "0").await; Ok(()) }
             "jev-test" => {
                 let model = super::eot::Cfg::of(&prefs(hub).await).model; hub.set_info("voice.eot.test", "").await;
                 let v = match super::jev::test(&hub.cfg.home, &model).await { Ok(r) => json!({"results": r.iter().map(|(d, p, ms)| json!({"draft": d, "p": p, "ms": ms})).collect::<Vec<_>>()}), Err(e) => json!({"error": e}) };

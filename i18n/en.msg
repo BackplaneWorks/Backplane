@@ -2508,6 +2508,10 @@ settings.voice.always.saveapps = Save apps
 settings.voice.always.target = Messages go to
 settings.voice.always.target.note = Saying a thread's name first (“KiCad thread, …”) sends that message there.
 settings.voice.always.open = The open thread (else Bub)
+settings.voice.speaker = Speaker check
+settings.voice.speaker.on = Only your voice starts a message, not the TV, someone else or the speakers. Learned from {n} stretches of your dictation, on this machine only.
+settings.voice.speaker.learning = Only your voice will start a message. It learns your voice from your dictation with the mic button: {n} of {k} stretches so far; until then any voice can.
+settings.voice.speaker.reenrol = Re-enrol
 
 # ---- gpui-f: hub setup flow and thread ----
 gpui.f.group.install = Install

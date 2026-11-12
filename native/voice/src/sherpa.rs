@@ -33,6 +33,12 @@ macro_rules! c_structs {
 }
 
 c_structs! {
+    SpeakerConfig = "SherpaOnnxSpeakerEmbeddingExtractorConfig" {
+        model: Str,
+        num_threads: i32,
+        debug: i32,
+        provider: Str,
+    }
     FeatureConfig = "SherpaOnnxFeatureConfig" {
         sample_rate: i32,
         feature_dim: i32,
@@ -233,7 +239,19 @@ struct Fns {
     vad_empty: unsafe extern "C" fn(Handle) -> i32,
     vad_detected: unsafe extern "C" fn(Handle) -> i32,
     vad_pop: unsafe extern "C" fn(Handle),
+    // speaker embeddings (speaker.rs): the extractor and its online stream
+    spk_create: unsafe extern "C" fn(*const SpeakerConfig) -> Handle,
+    spk_destroy: unsafe extern "C" fn(Handle),
+    spk_dim: unsafe extern "C" fn(Handle) -> i32,
+    spk_stream: unsafe extern "C" fn(Handle) -> Handle,
+    spk_ready: unsafe extern "C" fn(Handle, Handle) -> i32,
+    spk_compute: unsafe extern "C" fn(Handle, Handle) -> *const f32,
+    spk_free: unsafe extern "C" fn(*const f32),
+    stream_accept: unsafe extern "C" fn(Handle, i32, *const f32, i32),
+    stream_finished: unsafe extern "C" fn(Handle),
+    stream_destroy: unsafe extern "C" fn(Handle),
 }
+
 
 pub struct Api {
     f: Fns,
@@ -294,6 +312,16 @@ impl Api {
             vad_empty: sym!(lib, "SherpaOnnxVoiceActivityDetectorEmpty"),
             vad_detected: sym!(lib, "SherpaOnnxVoiceActivityDetectorDetected"),
             vad_pop: sym!(lib, "SherpaOnnxVoiceActivityDetectorPop"),
+            spk_create: sym!(lib, "SherpaOnnxCreateSpeakerEmbeddingExtractor"),
+            spk_destroy: sym!(lib, "SherpaOnnxDestroySpeakerEmbeddingExtractor"),
+            spk_dim: sym!(lib, "SherpaOnnxSpeakerEmbeddingExtractorDim"),
+            spk_stream: sym!(lib, "SherpaOnnxSpeakerEmbeddingExtractorCreateStream"),
+            spk_ready: sym!(lib, "SherpaOnnxSpeakerEmbeddingExtractorIsReady"),
+            spk_compute: sym!(lib, "SherpaOnnxSpeakerEmbeddingExtractorComputeEmbedding"),
+            spk_free: sym!(lib, "SherpaOnnxSpeakerEmbeddingExtractorDestroyEmbedding"),
+            stream_accept: sym!(lib, "SherpaOnnxOnlineStreamAcceptWaveform"),
+            stream_finished: sym!(lib, "SherpaOnnxOnlineStreamInputFinished"),
+            stream_destroy: sym!(lib, "SherpaOnnxDestroyOnlineStream"),
         };
         Ok(Arc::new(Api { f, _onnx: onnx, _lib: lib }))
     }
@@ -439,6 +467,31 @@ impl Drop for Vad {
         unsafe { (self.api.f.destroy_vad)(self.h) }
     }
 }
+
+/// A speaker embedding model (CAM++, speaker.rs): one voice's print from a stretch of speech.
+pub struct Speaker { api: Arc<Api>, h: Handle, pub dim: usize }
+unsafe impl Send for Speaker {}
+impl Speaker {
+    pub fn create(api: &Arc<Api>, model: &Path) -> Result<Speaker, String> {
+        let (m, provider) = (c(model)?, lit("cpu"));
+        let cfg = SpeakerConfig { model: m.as_ptr(), num_threads: 1, debug: 0, provider: provider.as_ptr() };
+        let h = unsafe { (api.f.spk_create)(&cfg) };
+        if h.is_null() { return Err("sherpa-onnx refused the speaker model".into()) }
+        let dim = unsafe { (api.f.spk_dim)(h) }.max(0) as usize;
+        Ok(Speaker { api: api.clone(), h, dim })
+    }
+    /// The embedding of `samples` (16 kHz), None when too short for one.
+    pub fn embed(&self, samples: &[f32]) -> Option<Vec<f32>> {
+        let f = &self.api.f;
+        unsafe {
+            let s = (f.spk_stream)(self.h); if s.is_null() { return None }
+            (f.stream_accept)(s, RATE as i32, samples.as_ptr(), samples.len() as i32); (f.stream_finished)(s);
+            let out = if (f.spk_ready)(self.h, s) != 0 { let v = (f.spk_compute)(self.h, s); if v.is_null() { None } else { let e = std::slice::from_raw_parts(v, self.dim).to_vec(); (f.spk_free)(v); Some(e) } } else { None };
+            (f.stream_destroy)(s); out
+        }
+    }
+}
+impl Drop for Speaker { fn drop(&mut self) { unsafe { (self.api.f.spk_destroy)(self.h) } } }
 
 /// What a session needs: both built, ready to run; the recognizer is the
 /// resident one at SERVER when it answers (the bool says so), else built here.
