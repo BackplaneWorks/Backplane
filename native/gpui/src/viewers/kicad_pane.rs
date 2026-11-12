@@ -175,6 +175,8 @@ pub struct KicadPane {
     ever_shown: Vec<u64>,
     /// the other editors were asked pre-warmed (once per KiCad process: its pid)
     prewarmed: Option<u64>,
+    /// when the first editor was placed over the pane (the pre-warm waits 2 s after it)
+    first_placed: Option<std::time::Instant>,
 }
 
 impl KicadPane {
@@ -185,7 +187,7 @@ impl KicadPane {
             if weak.update(cx, |this, cx| this.tick(cx)).is_err() { break }
         }).detach();
         KicadPane { bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), last_root: (i32::MIN, 0), placed: None,
-            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), poked: None, unmapped_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), ever_shown: Vec::new(), prewarmed: None }
+            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), poked: None, unmapped_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None }
     }
     fn rpc(&self, name: &str, params: Value) { let _ = self.hub.try_send(Command::Rpc(name.to_string(), Secret(params), "kicad")); }
     /// The hub's `editor.kicad.<digest>` for this project changed.
@@ -305,6 +307,8 @@ impl KicadPane {
     fn touched(&self) { self.rpc("editor.kicad.touched", json!({"project": self.project})); }
     fn want(&self) -> Option<u64> { if self.info.is_null() || (cfg!(windows) && self.info["mode"] == "stock") { return None } pick_local(self.wanted_kind(), &self.info, &self.frames, &self.ever_shown) }
     fn tick(&mut self, cx: &mut Context<Self>) {
+        // the pre-warm's 2 s are up: a frame drawn now sends it (after_frame), even when nothing else redraws the window
+        if let (Some(t), Some(pid)) = (self.first_placed, self.info["pid"].as_u64()) { if self.prewarmed != Some(pid) && t.elapsed() >= std::time::Duration::from_secs(2) { cx.notify(); } }
         let Some(c) = self.container else { return };
         if let Some(pid) = self.info["pid"].as_u64().filter(|p| *p > 0) {
             if self.info["mode"] == "fork" {
@@ -462,8 +466,10 @@ impl KicadPane {
             return;
         }
         // the first editor on show (bp.9+): the others pre-warmed at this pane's size, so their first switch is one paint with no relayout
+        // (2 s after the first editor was placed: asked at once, KiCad's pre-warm sometimes hid the editor just shown, a rare race)
         if let (true, Some(p), Some(_), Some(pid)) = (local, at, show, self.info["pid"].as_u64()) {
-            if self.prewarmed != Some(pid) {
+            let since = *self.first_placed.get_or_insert_with(std::time::Instant::now);
+            if self.prewarmed != Some(pid) && since.elapsed() >= std::time::Duration::from_secs(2) {
                 self.prewarmed = Some(pid);
                 let have: Vec<&str> = self.frames.iter().map(|f| f.kind).collect();
                 self.rpc("editor.kicad.prewarm", json!({"project": self.project, "width": p.w, "height": p.h, "active": self.wanted_kind(), "have": have}));
