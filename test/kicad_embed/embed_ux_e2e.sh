@@ -12,22 +12,24 @@ init_isolated_dirs
 python3 "$SEED_PY" "$OUT" "$REPO_ROOT"
 start_xvfb_and_wm
 start_hub
+# Each step waits on the editor's state (wait_painted: KiCad ready and the wanted editor shown and painted), not a fixed time, so a slow
+# machine passes; how long each took is a separate timing check against its budget (KEMBED_TIME_SCALE multiplies them on a slow venue).
 python3 - "$OUT/script.json" <<'PY'
 import json, sys
-s = [{"select": 0}, {"wait": 2200}, {"click": "rail:Board"}, {"wait": 2500}, {"click": "ui:Edit"}, {"wait": 14000}]
-def rep(m, w=2500): return [{"mark": m}, {"kicad": {"report": True}}, {"wait": w}]
-s += rep("pcb")
-s += [{"click": "kicad-tab:SCH"}, {"wait": 6000}] + rep("sch")
-s += [{"click": "kicad-tab:FOOTPRINT_EDITOR"}, {"wait": 9000}] + rep("fp")
-s += [{"click": "kicad-tab:PCB"}, {"wait": 2500}] + rep("pcb2")
-s += [{"click": "kicad:full"}, {"wait": 2500}] + rep("full")
-s += [{"click": "kicad:full"}, {"wait": 2500}] + rep("unfull")
-s += [{"click": "kicad:popout"}, {"wait": 5000}] + rep("popped", 3000)
-s += [{"click": "kicad:popin"}, {"wait": 4000}] + rep("back")
+s = [{"select": 0}, {"wait": 2200}, {"click": "rail:Board"}, {"wait": 2500}, {"click": "ui:Edit"}]
+def rep(m, kind, t=120000, w=1500): return [{"kicad": {"wait_painted": t, "kind": kind, "tag": m}}, {"mark": m}, {"wait": w}]
+s += rep("pcb", "PCB")
+s += [{"click": "kicad-tab:SCH"}] + rep("sch", "SCH")
+s += [{"click": "kicad-tab:FOOTPRINT_EDITOR"}] + rep("fp", "FOOTPRINT_EDITOR")
+s += [{"click": "kicad-tab:PCB"}] + rep("pcb2", "PCB")
+s += [{"click": "kicad:full"}, {"wait": 1500}] + rep("full", "PCB")
+s += [{"click": "kicad:full"}, {"wait": 1500}] + rep("unfull", "PCB")
+s += [{"click": "kicad:popout"}, {"wait": 1000}] + rep("popped", "PCB", w=2000)
+s += [{"click": "kicad:popin"}, {"wait": 1000}] + rep("back", "PCB")
 s += [{"click": "ui:View"}, {"wait": 1500}]
 json.dump(s, open(sys.argv[1], "w"))
 PY
-HOME="$OUT/fh" BACKPLANE_GPUI_ASSETS="$ASSETS_DIR" "$CLIENT_BIN" --url "http://127.0.0.1:$HPORT" --token-file "$OUT/home/token" --script "$OUT/script.json" --exit-after 140 >"$OUT/client.log" 2>&1 &
+HOME="$OUT/fh" BACKPLANE_GPUI_ASSETS="$ASSETS_DIR" "$CLIENT_BIN" --url "http://127.0.0.1:$HPORT" --token-file "$OUT/home/token" --script "$OUT/script.json" --exit-after 900 >"$OUT/client.log" 2>&1 &
 CP=$!; track_pid "$CP"
 seen=""
 while kill -0 "$CP" 2>/dev/null; do
@@ -39,10 +41,11 @@ done
 python3 - "$OUT" "$EMBED_MODE" <<'PY'
 import json, os, sys
 out, mode = sys.argv[1], sys.argv[2]
-reps, marks = {}, []
+reps = {}
 for l in open(os.path.join(out, "client.log"), errors="ignore"):
-    if '"event":"mark"' in l: marks.append(json.loads(l[l.index("{"):])["name"])
-    elif '"event":"kicad"' in l and marks: reps.setdefault(marks[-1], json.loads(l[l.index("{"):]))
+    if '"event":"kicad"' in l:
+        r = json.loads(l[l.index("{"):])
+        if r.get("tag"): reps.setdefault(r["tag"], r)
 def shown(r):
     for f in r.get("frames", []):
         if f.get("xid") == r.get("shown"): return f
@@ -62,6 +65,13 @@ check("Full size: the pane takes the sidebar's and the thread's room", cw(fu) > 
 check("Full size off: the pane as it was", abs(cw(un) - cw(p2)) <= 4, (cw(p2), cw(un)))
 check("Pop out: the same KiCad in a window of its own, painted", po.get("toplevel") and po.get("toplevel") != p.get("toplevel") and po.get("pid") == p.get("pid") and shown(po).get("painted", 0) > 0, (p.get("toplevel"), po.get("toplevel"), po.get("pid"), shown(po)))
 check("Pop back in: the main window's pane again, the same frame and KiCad", bk.get("toplevel") == p.get("toplevel") and bk.get("pid") == p.get("pid") and bk.get("shown") == p.get("shown") and shown(bk).get("painted", 0) > 0, (bk.get("toplevel"), bk.get("shown"), shown(bk)))
+# timing budgets, separate from the checks above (a slow venue scales them with KEMBED_TIME_SCALE; real-hardware numbers: real_use_*.sh)
+scale = float(os.environ.get("KEMBED_TIME_SCALE", "1"))
+for tag, what, lim in (("pcb", "Edit to the Board painted", 15000), ("sch", "Schematic tab painted", 5000), ("fp", "Footprints tab painted", 10000),
+                       ("pcb2", "Board tab again painted", 3000), ("back", "Pop back in painted", 5000)):
+    ms = reps.get(tag, {}).get("wait_ms")
+    print(f"PERF ux_{tag} {ms}ms")
+    check(f"time: {what} within {int(lim * scale)} ms", ms is not None and ms <= lim * scale, ms)
 print(f"embed_ux_e2e ({mode}): passed={ok} failed={fail} artifacts={out}")
 sys.exit(1 if fail else 0)
 PY

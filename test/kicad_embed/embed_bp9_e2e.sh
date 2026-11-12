@@ -17,15 +17,17 @@ python3 "$SEED_PY" "$OUT" "$REPO_ROOT"
 start_xvfb_and_wm
 start_hub
 PCB="$OUT/proj/ecc83-pp.kicad_pcb"
-# the client: Edit, then marks the shell acts on (the waits leave it the time)
+# the client: Edit, waits until the board editor is painted (KiCad's state, however slow the machine), then reports the pane every second;
+# the shell acts and polls for each outcome (tracks over the API, the pane's conflicts, the canvas's brightness) up to a ceiling, and how
+# long each took is a separate timing check (KEMBED_TIME_SCALE multiplies the budgets on a slow venue)
 python3 - "$OUT/script.json" <<'PY'
 import json, sys
-s = [{"select": 0}, {"wait": 2200}, {"click": "rail:Board"}, {"wait": 2500}, {"click": "ui:Edit"}, {"wait": 15000}]
-for m, w in [("ready", 9000), ("reloaded", 9000), ("dirty", 9000), ("conflict", 9000), ("kept", 6000), ("light", 6000), ("dark", 4000)]:
-    s += [{"mark": m}, {"kicad": {"report": True, "tag": m}}, {"wait": w}]
+s = [{"select": 0}, {"wait": 2200}, {"click": "rail:Board"}, {"wait": 2500}, {"click": "ui:Edit"},
+     {"kicad": {"wait_painted": 150000, "kind": "PCB", "tag": "ready"}}, {"mark": "ready"}]
+for i in range(240): s += [{"wait": 1000}, {"kicad": {"report": True, "tag": "tick"}}]
 json.dump(s, open(sys.argv[1], "w"))
 PY
-HOME="$OUT/fh" BACKPLANE_GPUI_ASSETS="$ASSETS_DIR" "$CLIENT_BIN" --url "http://127.0.0.1:$HPORT" --token-file "$OUT/home/token" --script "$OUT/script.json" --exit-after 130 >"$OUT/client.log" 2>&1 &
+HOME="$OUT/fh" BACKPLANE_GPUI_ASSETS="$ASSETS_DIR" "$CLIENT_BIN" --url "http://127.0.0.1:$HPORT" --token-file "$OUT/home/token" --script "$OUT/script.json" --exit-after 600 >"$OUT/client.log" 2>&1 &
 CP=$!; track_pid "$CP"
 wait_mark() { for _ in $(seq 600); do grep -q "\"name\":\"$1\",\"event\":\"mark\"" "$OUT/client.log" 2>/dev/null && return 0; kill -0 "$CP" 2>/dev/null || return 1; sleep 0.1; done; return 1; }
 rep() { last_kicad_report "$OUT/client.log" "$1"; }
@@ -51,27 +53,41 @@ out = subprocess.run(["convert", "png:-", "-crop", f"{w}x{h}+{x}+{y}", "+repage"
 print(out or -1)
 PY
 }
-wait_mark ready || true; sleep 1; R=$(rep ready); SOCK=$(field "$R" sock)
+SCALE=${KEMBED_TIME_SCALE:-1}
+now_ms() { python3 -c 'import time; print(int(time.time()*1000))'; }
+# poll CMD until its output satisfies TEST (a python expression on v), at most SECS: prints the last value; $WAITED_MS is how long it took
+poll() { local secs=$1 test=$2; shift 2; local t0 v; t0=$(now_ms)
+  while :; do v=$("$@" 2>/dev/null || echo -1); python3 -c "import sys; v=sys.argv[1]; sys.exit(0 if ($test) else 1)" "$v" && break
+    [ $(( $(now_ms) - t0 )) -ge $((secs * 1000)) ] && break; sleep 0.25; done
+  WAITED_MS=$(( $(now_ms) - t0 )); echo "$v"; }
+timing() { echo "PERF bp9_$1 ${2}ms"; check "time: $3 within $(python3 -c "print(int($4*$SCALE))") ms" "$(python3 -c "print(int(0 <= $2 <= $4*$SCALE))")" "$2 ms"; }
+conflicts() { python3 -c 'import json,sys; print(len(json.loads(sys.argv[1] or "{}").get("conflicts") or []))' "$(rep tick)"; }
+wait_mark ready || true; R=$(rep ready); SOCK=$(field "$R" sock)
+timing edit "$(field "$R" wait_ms)" "Edit to the Board painted" 15000
 # the fixture's board is from an older KiCad, so it opens modified (converted on save): saved first, it is clean
-python3 "$IPC_PY" save-doc "$SOCK" pcb >"$OUT/save.log" 2>&1 || true; sleep 1.5
+python3 "$IPC_PY" save-doc "$SOCK" pcb >"$OUT/save.log" 2>&1 || true
+poll 20 'v == "0"' is_doc_modified "$SOCK" pcb 0 >/dev/null
 N0=$(tracks); write_track 60
-wait_mark reloaded || true; sleep 1; N1=$(tracks)
+N1=$(poll 60 "int(v) == $N0 + 1" tracks); RELOAD_MS=$WAITED_MS
 check "a board written on disk (atomic rename) reloads in the open editor by itself" "$([ "$N0" -ge 0 ] && [ "$N1" -eq $((N0 + 1)) ] && echo 1 || echo 0)" "$N0 -> $N1"
+timing reload "$RELOAD_MS" "the write on disk reloaded" 5000
 shot reloaded
 python3 "$IPC_PY" agent-add-track "$SOCK" 120 70 140 70 0.25 >/dev/null 2>&1 || true   # unsaved edits in the editor (an agent's, uncommitted to disk)
-wait_mark dirty || true; N2=$(tracks); write_track 80
-wait_mark conflict || true; sleep 1; R=$(rep conflict); N3=$(tracks)
-CONF=$(python3 -c 'import json,sys; print(len(json.loads(sys.argv[1]).get("conflicts") or []))' "$R")
-check "written again over unsaved edits: nothing reloaded, the pane says it waits on the person" "$([ "$N3" -eq "$N2" ] && [ "$CONF" -ge 1 ] && echo 1 || echo 0)" "tracks $N2 -> $N3, conflicts=$CONF"
+N2=$(poll 20 "int(v) == $N1 + 1" tracks); write_track 80
+C=$(poll 60 'int(v) >= 1' conflicts); CONF_MS=$WAITED_MS; N3=$(tracks)
+check "written again over unsaved edits: nothing reloaded, the pane says it waits on the person" "$([ "$N3" -eq "$N2" ] && [ "$C" -ge 1 ] && echo 1 || echo 0)" "tracks $N2 -> $N3, conflicts=$C"
+timing conflict "$CONF_MS" "the conflict shown in the pane" 5000
 shot conflict
 RES=$(hub_rpc "[{\"m\":\"editor.kicad.resolve\",\"p\":{\"project\":\"$PCB\",\"file\":\"$PCB\",\"choice\":\"keep\"}}]" || true); echo "$RES" >"$OUT/resolve.log"
-wait_mark kept || true; sleep 1; R=$(rep kept); N4=$(tracks)
-CONF=$(python3 -c 'import json,sys; print(len(json.loads(sys.argv[1]).get("conflicts") or []))' "$R")
-check "Keep yours: the edits stay, and nothing waits any more" "$([ "$N4" -eq "$N2" ] && [ "$CONF" -eq 0 ] && echo 1 || echo 0)" "tracks $N4 (edits $N2), conflicts=$CONF, $RES"
+C=$(poll 30 'int(v) == 0' conflicts); N4=$(tracks)
+check "Keep yours: the edits stay, and nothing waits any more" "$([ "$N4" -eq "$N2" ] && [ "$C" -eq 0 ] && echo 1 || echo 0)" "tracks $N4 (edits $N2), conflicts=$C, $RES"
 hub_rpc "[{\"m\":\"editor.kicad.theme\",\"p\":{\"project\":\"$PCB\",\"mode\":\"light\"}}]" >"$OUT/theme_light.log" 2>&1 || true
-wait_mark light || true; sleep 1.5; L=$(canvas_light "$(rep light)"); shot light
+light_now() { canvas_light "$(rep tick)"; }
+L=$(poll 30 'int(v) > 150' light_now); LIGHT_MS=$WAITED_MS; shot light
 hub_rpc "[{\"m\":\"editor.kicad.theme\",\"p\":{\"project\":\"$PCB\",\"mode\":\"dark\"}}]" >"$OUT/theme_dark.log" 2>&1 || true
-wait_mark dark || true; sleep 2; D=$(canvas_light "$(rep dark)"); shot dark
-check "KiCad follows Backplane's theme live: light, then dark, on the running editor" "$([ "$L" -gt 150 ] && [ "$D" -lt 90 ] && echo 1 || echo 0)" "light=$L dark=$D $(cat "$OUT/theme_light.log" | head -c 200)"
+D=$(poll 30 '0 <= int(v) < 90' light_now); DARK_MS=$WAITED_MS; shot dark
+check "KiCad follows Backplane's theme live: light, then dark, on the running editor" "$([ "$L" -gt 150 ] && [ "$D" -ge 0 ] && [ "$D" -lt 90 ] && echo 1 || echo 0)" "light=$L dark=$D $(cat "$OUT/theme_light.log" | head -c 200)"
+timing theme "$(( LIGHT_MS > DARK_MS ? LIGHT_MS : DARK_MS ))" "a theme change on screen" 5000
+stop_pid "$CP"
 wait "$CP" 2>/dev/null || true
 finish_suite "embed_bp9_e2e ($EMBED_MODE)"
