@@ -199,10 +199,33 @@ pub async fn run(hub: &Arc<Hub>, root: &Path, scope: &str) -> Result<Value, Stri
         }
         Ok(v)
     }).await.map_err(|_| "the review failed".to_string())??;
-    if !pro.is_empty() { let mut small = v.clone(); if let Some(a) = small["findings"].as_array_mut() { a.truncate(300) } let _ = hub.set_info(&info_key(&pro), &small.to_string()).await; }
+    if !pro.is_empty() {
+        let mut small = v.clone(); if let Some(a) = small["findings"].as_array_mut() { a.truncate(300) } let _ = hub.set_info(&info_key(&pro), &small.to_string()).await;
+        publish_checks(hub, &pro, &v).await;
+    }
     Ok(v)
 }
+/// The run's sources in the one Checks list (lane E's, kicad/checkrun.rs): each source's findings, labelled, with the run's when, scope
+/// and what that source could not check. DRC and ERC are E's own and are not set from here.
+pub const LABELS: &[(&str, &str)] = &[("fab", "Fab rules"), ("bom", "BOM"), ("outputs", "Outputs"), ("assembly", "Assembly"), ("mech", "Mechanical")];
+pub async fn publish_checks(hub: &Arc<Hub>, pro: &str, run: &Value) {
+    use crate::files::kicad::checkrun as cr;
+    let _ = cr::request(hub, "kicad.checks.watch", &json!({"project": pro})).await;
+    let all: Vec<Finding> = run["findings"].as_array().into_iter().flatten().map(fd::from_json).collect();
+    let skipped: Vec<&str> = run["skipped"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
+    for (id, label) in LABELS {
+        let fs: Vec<Finding> = all.iter().filter(|f| f.source == *id).cloned().collect();
+        let mine: Vec<&&str> = skipped.iter().filter(|s| { let l = s.to_ascii_lowercase(); match *id { "fab" => l.starts_with("fab"), "bom" => l.starts_with("bom"), "outputs" => l.starts_with("outputs"), "assembly" => l.starts_with("assembly"), _ => l.contains(".fab.json") } }).collect();
+        let meta = json!({"label": label, "review": {"at": run["at"], "scope": run["scope"], "verdict": run["verdict"], "skipped": mine}});
+        if let Err(e) = cr::set_findings(hub, pro, id, fs, meta).await { eprintln!("review: the Checks list did not take {id}: {e}") }
+    }
+}
 pub fn info_key(pro: &str) -> String { format!("review.{}", crate::files::kicad::kserve::digest(pro)) }
+/// The last run kept in the project, whatever design it was of: its summary (no findings).
+pub fn last(root: &Path) -> Value {
+    let Some(v) = std::fs::read_to_string(root.join(FILE)).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()) else { return Value::Null };
+    json!({"at": v["at"], "scope": v["scope"], "verdict": v["verdict"], "counts": v["counts"], "by_source": v["by_source"], "skipped": v["skipped"], "took_ms": v["took_ms"]})
+}
 /// The last run kept in the project, if it is of the design as it is now.
 pub fn current(root: &Path) -> Option<Value> {
     let v: Value = serde_json::from_str(&std::fs::read_to_string(root.join(FILE)).ok()?).ok()?;

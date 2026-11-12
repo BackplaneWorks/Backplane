@@ -46,10 +46,11 @@ pub fn controls(m: &super::mgmt::Mgmt) -> Vec<(String, String, String)> {
     for x in d["suggestions"].as_array().into_iter().flatten() { v.push((format!("mgmt:fab:apply:{}", s(x, "key")), s(x, "key").into(), format!("fab:apply:{}", s(x, "key")))) }
     if d["changed"].as_array().map_or(false, |a| !a.is_empty()) { v.push(("mgmt:fab:seen".into(), "Seen".into(), "fab:seen".into())) } // i18n-ok: ctl ids
     v.push(("mgmt:fab:refresh".into(), "Refresh".into(), "fab:refresh".into())); // i18n-ok: ctl ids
+    if d["review"]["running"] != true { v.push(("mgmt:fab:review".into(), "Review".into(), "fab:review".into())) } // i18n-ok: ctl ids
     v
 }
 pub fn act(app: &mut Backplane, a: &str, cx: &mut Context<Backplane>) {
-    match a { "drc" | "seen" | "refresh" => press(app, a, "", cx), _ => if let Some(k) = a.strip_prefix("apply:") { press(app, "apply", k, cx) } }
+    match a { "drc" | "seen" | "refresh" | "review" => press(app, a, "", cx), _ => if let Some(k) = a.strip_prefix("apply:") { press(app, "apply", k, cx) } }
 }
 
 fn btn(cx: &mut Context<Backplane>, light: bool, id: String, label: &str, on: impl Fn(&mut Backplane, &mut Context<Backplane>) + 'static) -> AnyElement {
@@ -71,6 +72,18 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
         .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().text_color(c("faint")).child(format!("{} · {}", s(d, "board"), trs(tier_words(s(d, "tier"))))))
         .child(btn(cx, light, "mgmt:fab:refresh".into(), "Refresh", |a, cx| press(a, "refresh", "", cx))); // i18n-ok: English the draw passes through trs
     let mut list = div().id("fab-rows").flex_1().min_h_0().overflow_y_scroll().flex().flex_col().text_size(px(12.));
+    // the design review: its last run's verdict and counts; its findings are in the Checks list
+    let rv = &d["review"];
+    let running = rv["running"] == true;
+    let line = if running { trs("Reviewing the design…") } else if rv["at"].is_null() { trs("No design review yet") } else {
+        tf("gpui.mgmt.fab.review", &[("must", rv["counts"]["error"].as_u64().unwrap_or(0).into()), ("should", rv["counts"]["warning"].as_u64().unwrap_or(0).into()), ("notes", rv["counts"]["info"].as_u64().unwrap_or(0).into()), ("scope", s(rv, "scope").to_string().into())])
+    };
+    let bad = rv["counts"]["error"].as_u64().unwrap_or(0) > 0;
+    let mut row = div().flex_shrink_0().flex().items_center().gap_2().px_2().h(px(28.)).border_b_1().border_color(c("line"))
+        .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().text_color(c(if bad { "bad" } else { "dim" })).child(line));
+    if !rv["at"].is_null() { row = row.child(btn(cx, light, "mgmt:fab:checks".into(), "Findings", |a, cx| crate::screens::mgmt::toggle(a, "checks", cx))) } // i18n-ok: English the draw passes through trs
+    if !running { row = row.child(btn(cx, light, "mgmt:fab:review".into(), "Review", |a, cx| press(a, "review", "", cx))) } // i18n-ok: English the draw passes through trs
+    list = list.child(row);
     // the DRC rules
     let (words, button) = drc_words(s(&d["drc"], "state"));
     let mut drc = div().flex_shrink_0().flex().items_center().gap_2().px_2().h(px(28.)).border_b_1().border_color(c("line"))
@@ -134,7 +147,7 @@ mod tests {
         let mut m = super::super::mgmt::Mgmt::default(); m.digest = "d".into();
         m.info("mgmt.state.d", &json!({"open": "fab"}).to_string());
         m.info("mgmt.fab.d", &json!({"drc": {"state": "stale"}, "suggestions": [{"key": "min_clearance"}], "changed": ["x"]}).to_string());
-        assert_eq!(controls(&m).iter().map(|x| x.2.as_str()).collect::<Vec<_>>(), ["fab:drc", "fab:apply:min_clearance", "fab:seen", "fab:refresh"]);
-        m.info("mgmt.fab.d", &json!({"drc": {"state": "current"}}).to_string()); assert_eq!(controls(&m).len(), 1);
+        assert_eq!(controls(&m).iter().map(|x| x.2.as_str()).collect::<Vec<_>>(), ["fab:drc", "fab:apply:min_clearance", "fab:seen", "fab:refresh", "fab:review"]);
+        m.info("mgmt.fab.d", &json!({"drc": {"state": "current"}}).to_string()); assert_eq!(controls(&m).len(), 2);
     }
 }
