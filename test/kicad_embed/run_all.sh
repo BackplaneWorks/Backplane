@@ -25,6 +25,7 @@ SUITES=(
   # bp.11 headless save): Board -> Schematic must draw (bp.11/bp.12-pre hung behind a hidden "automatically fixed" modal). Fork mode only.
   "embed_ux_e2e.sh:ux-broken-toplevel:KEMBED_PROJ_SRC=$REPO_ROOT/test/files/fixtures/broken-toplevel"
   "embed_mgmt_e2e.sh:mgmt"
+  "embed_fab_e2e.sh:fab"
   "embed_comment_e2e.sh:comment"
 )
 
