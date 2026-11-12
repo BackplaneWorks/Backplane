@@ -20,7 +20,8 @@ ws.onmessage = ({ data }) => {
         k.startsWith('editor.kicad.') ||
         k.startsWith('kicad.sel.') ||
         k.startsWith('kicad.reload.') ||
-        k.startsWith('kicad.comment.')
+        k.startsWith('kicad.comment.') ||
+        k.startsWith('kicad.checks.')
       ) {
         infos.set(k, v);
       }

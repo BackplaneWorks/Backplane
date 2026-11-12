@@ -1790,6 +1790,7 @@ fn spawn_fork_events_loop(me: mpsc::UnboundedSender<Msg>, pro: String, gen: u64,
                     let ty = ev["type"].as_str().unwrap_or("");
                     let ty_n = ev["type"].as_i64().unwrap_or(0);
                     if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("kicad embed event: {ev}"); }
+                    super::checkrun::on_event(&pro, ev);
                     if ty == "ET_SELECTION_CHANGED" || ty_n == 14 { super::xprobe::kicad_selected(&pro, ev); continue }
                     if super::reload::on_event(&pro, ev) { need_sync = true; continue }
                     if super::comment::on_event(&pro, ev) { continue }
