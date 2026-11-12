@@ -110,7 +110,7 @@ impl Agents {
         // the open co-editing editors stop showing this agent at work (docs/kicad-coedit.md)
         crate::files::kicad::coedit::forget(th);
         for route in crate::files::kicad::embed::coedit_routes() {
-            let _ = crate::files::kicad::embed::gui_call_as(&route, "kiapi.backplane.coedit.SetAgentActivity", crate::files::kicad::coedit::activity(th, "", "idle"), &format!("agent:{th}")).await;
+            let _ = crate::files::kicad::embed::gui_call_as(&route, "kiapi.backplane.coedit.SetAgentActivity", crate::files::kicad::coedit::activity(th, "", "idle"), &crate::files::kicad::coedit::client_name(&crate::files::kicad::coedit::Who::Agent(th))).await;
         }
     }
     /// The thread's title ("" for none): the task an open co-editing KiCad shows for it.

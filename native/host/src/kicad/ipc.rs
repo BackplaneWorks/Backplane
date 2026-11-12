@@ -437,7 +437,7 @@ async fn run(hub: &Arc<Hub>, thread: Option<&str>, path: &str, ty: &str, msg: Va
         }
         if short == "BeginCommit" { super::embed::unsaved_update(&pro, |u| u.agent_begins()); }
         let commits = short == "EndCommit" && msg_commits(&msg);
-        let actor = if coedit { thread.filter(|t| !t.is_empty()).map(|t| format!("agent:{t}")).unwrap_or_else(|| "agent".into()) } else { String::new() };
+        let actor = if coedit { super::coedit::client_name(&super::coedit::Who::Agent(thread.unwrap_or(""))) } else { String::new() };
         let mut held = None;
         if let Some(th) = thread.filter(|t| coedit && !t.is_empty()) {
             // what this thread works on, in the editor's Agents panel and as an area on the canvas

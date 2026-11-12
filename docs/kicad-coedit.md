@@ -30,3 +30,17 @@ as `person` (`selected`: editor, items, seconds ago; `recent_edits`: document, d
 the agent to ask the person first when its next change touches those items or their area, and to keep working on other things
 meanwhile. Agents never start their own api-server or write the design files of a project the person has open: kicad_ipc is the one way
 in, so nothing reloads under the person.
+
+## Who a request is from
+
+`kicad/coedit.rs` `client_name(&Who)` names every caller of the open KiCad, so its co-editing knows whose change it is:
+
+| `Who` | client name | in KiCad |
+|---|---|---|
+| `Agent(thread)` | `agent:<thread>` | its own actor: the person's Ctrl+Z leaves it, UndoAgentChange / the Agents panel take it back, the Agents pane opens for it |
+| `Person` | `person:backplane-<pid>` | the person's own change (bp.13+: a `person:` name acts as the person), so their Ctrl+Z takes it back: BOM panel edits, fab-profile Apply, panel buttons |
+| `Hub(job)` | `hub:<job>` | the hub's own housekeeping (3D-model migration): an actor of its own, never the person's, so it never eats a Ctrl+Z |
+
+Send with `embed::gui_call_as(route, type, message, &client_name(&who))`. A call with no name goes out as the transport's own
+`backplane-<pid>`, an actor of its own. Before bp.13 KiCad has no person name: `person:` is an actor of its own too, so a
+person-originated schematic edit is not in their undo on bp.10 to bp.12.

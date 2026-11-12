@@ -118,12 +118,42 @@ pub fn due(thread: &str) -> bool {
 }
 pub fn forget(thread: &str) { let mut s = state().lock().unwrap(); s.announced.remove(thread); }
 
+/// Who a request to the open KiCad is from, for its co-editing (the change log, the Agents panel, whose undo takes it back).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Who<'a> {
+    /// An agent turn: its own actor, `agent:<thread>`. The person's Ctrl+Z leaves its changes; UndoAgentChange and the Agents panel take them back.
+    Agent(&'a str),
+    /// The person, through Backplane's UI (a BOM panel edit, fab-profile Apply, a panel's button): `person:backplane-<pid>`, which a
+    /// co-editing KiCad (bp.13+, `person:` prefix) puts in the person's own undo, so their Ctrl+Z takes it back.
+    Person,
+    /// The hub's own housekeeping (3D-model migration and the like): its own actor `hub:<job>`, never the person's, so it never
+    /// eats a Ctrl+Z they meant for their own edit; it shows in the change log under its job's name.
+    Hub(&'a str),
+}
+
+/// The client name for a request from `who`: the one place the hub names KiCad callers (docs/kicad-coedit.md).
+pub fn client_name(who: &Who) -> String {
+    match who {
+        Who::Agent(t) if !t.is_empty() => format!("agent:{t}"),
+        Who::Agent(_) => "agent".into(),
+        Who::Person => format!("person:backplane-{}", std::process::id()),
+        Who::Hub(job) => format!("hub:{}", if job.is_empty() { "backplane" } else { job }),
+    }
+}
+
 /// SetAgentActivity's message.
-pub fn activity(thread: &str, task: &str, state_: &str) -> Value { json!({"actor": format!("agent:{thread}"), "task": task, "state": state_}) }
+pub fn activity(thread: &str, task: &str, state_: &str) -> Value { json!({"actor": client_name(&Who::Agent(thread)), "task": task, "state": state_}) }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn client_names_say_who() {
+        assert_eq!(client_name(&Who::Agent("t42")), "agent:t42");
+        assert_eq!(thread_of(&client_name(&Who::Agent("t42"))), Some("t42"));
+        assert_eq!(client_name(&Who::Person), format!("person:backplane-{}", std::process::id()));
+        assert_eq!(client_name(&Who::Hub("migrate-3d")), "hub:migrate-3d");
+        assert!(thread_of(&client_name(&Who::Person)).is_none() && thread_of(&client_name(&Who::Hub("x"))).is_none());
+    }
     #[test] fn actors_name_threads() {
         assert_eq!(thread_of("agent:t12"), Some("t12"));
         assert_eq!(thread_of("agent:t12#rebased"), Some("t12"));
