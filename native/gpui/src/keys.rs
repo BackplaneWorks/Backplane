@@ -11,7 +11,7 @@ actions!(keys, [NewThread, OpenDiff, OpenFiles, StopTurn, ModelPicker, PrevThrea
     PickUp, PickDown, PickLeft, PickRight, PickTab, PickBackTab, PickEnter,
     Project1, Project2, Project3, Project4, Project5, Project6, Project7, Project8, Project9,
     Thread1, Thread2, Thread3, Thread4, Thread5, Thread6, Thread7, Thread8, Thread9,
-    RailBoard, RailSchematic, Rail3d, RailSplit, RailMech, RailFiles, RailDiff, RailReview, RailBrowser, ToggleTerminal, DismissTerminal, ShowKeys, FoldProject, UnfoldProject, MgmtBom, MgmtChecks, MgmtLife]);
+    RailBoard, RailSchematic, Rail3d, RailSplit, RailMech, RailFiles, RailDiff, RailReview, RailBrowser, ToggleTerminal, DismissTerminal, ShowKeys, FoldProject, UnfoldProject, MgmtBom, MgmtChecks, MgmtLife, CommentKicad]);
 
 /// Where no text field, file list or viewer has the keyboard: a bare key may act.
 /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ pub const FREE: &str = "!AccountMenu && !Composer && !TextInput && !PickInput && !FindInput && !AskInput && !ImpInput && !Viewer && !BrowserBar && !FilesPage";
@@ -88,6 +88,7 @@ pub const TABLE: &[Entry] = &[
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("term-leave", "Leave the terminal: put it away, or take the keyboard back to it", "Terminal", "shift-escape", Fixed),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("term-copy", "Copy the terminal's selection", "Terminal", "secondary-shift-c", Fixed),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("term-paste", "Paste into the terminal", "Terminal", "secondary-shift-v", Fixed),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("kcomment", "Comment on what is selected in KiCad, from Backplane or from inside the editor: Enter posts, Esc cancels", "KiCad", "ctrl-;", Fixed),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("rail", "Rail views: B board, S schematic, 3 3D, V split, M mech, F files, D diff, R review, W browser", "Viewer", "b s 3 v m f d r w", Fixed),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("mgmt-bom", "BOM panel beside the design: open or close", "Viewer", "alt-shift-b", Rebind),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("mgmt-checks", "Checks panel beside the design: open or close", "Viewer", "alt-shift-c", Rebind),
@@ -165,7 +166,7 @@ pub fn bindings(l: &Local) -> Vec<KeyBinding> {
         KeyBinding::new(&k("uber"), UberChat, None), KeyBinding::new(&k("always"), AlwaysOn, None), KeyBinding::new(&k("settle"), SettleThread, None), KeyBinding::new(&k("layers"), CycleLayers, Some(NOT_FIELD)), KeyBinding::new(&k("perf"), PerfOverlay, None),
         KeyBinding::new("/", FocusComposer, Some(SLASH)), KeyBinding::new(&k("focus-key"), FocusComposer, Some(NOT_SHELL)), KeyBinding::new(&k("find"), crate::FindInThreadKey, Some(NOT_SHELL)),
         KeyBinding::new("?", ShowKeys, Some(FREE)), KeyBinding::new("shift-/", ShowKeys, Some(FREE)), KeyBinding::new("shift-?", ShowKeys, Some(FREE)), KeyBinding::new("f1", ShowKeys, None),
-        KeyBinding::new(&k("term"), ToggleTerminal, None), KeyBinding::new("`", ToggleTerminal, Some(TERM_BARE)), KeyBinding::new("shift-escape", DismissTerminal, None)]);
+        KeyBinding::new("ctrl-;", CommentKicad, None), KeyBinding::new(&k("term"), ToggleTerminal, None), KeyBinding::new("`", ToggleTerminal, Some(TERM_BARE)), KeyBinding::new("shift-escape", DismissTerminal, None)]);
     // Super+` (off a Mac: Cmd+` there goes from window to window) toggles the terminal too, from the shell as well, as in the old client
     if !mac() { v.push(KeyBinding::new("super-`", ToggleTerminal, None)); }
     // Shift with a symbol arrives as the shifted symbol and no Shift (Ctrl+Shift+] is "ctrl-}" from Linux): the chords that hold one are bound that way too
@@ -423,6 +424,7 @@ pub fn attach(el: Div, picker: bool, cx: &mut Context<Backplane>) -> Div {
     let el = on!(el, PerfOverlay, |this: &mut Backplane, _, cx: &mut Context<Backplane>| this.perf_toggle(cx));
     let el = on!(el, FoldProject, |this: &mut Backplane, _, cx: &mut Context<Backplane>| this.key_fold(true, cx));
     let el = on!(el, UnfoldProject, |this: &mut Backplane, _, cx: &mut Context<Backplane>| this.key_fold(false, cx));
+    let el = on!(el, CommentKicad, |this: &mut Backplane, w: &mut Window, cx: &mut Context<Backplane>| this.kcomment_key(w, cx));
     let el = on!(el, ShowKeys, |this: &mut Backplane, _, cx: &mut Context<Backplane>| this.keysheet_toggle(cx));
     let el = on!(el, MgmtBom, |this: &mut Backplane, _, cx: &mut Context<Backplane>| crate::screens::mgmt::toggle(this, "bom", cx));
     let el = on!(el, MgmtChecks, |this: &mut Backplane, _, cx: &mut Context<Backplane>| crate::screens::mgmt::toggle(this, "checks", cx));
@@ -523,6 +525,11 @@ mod tests {
         assert_eq!((find("pad-undo").unwrap().kind, find("pad-delete").unwrap().kind), (Fixed, Fixed));
         assert_eq!(hint(&Local::default(), "pad-undo"), show("secondary-z", mac())); assert_eq!(hint(&Local::default(), "pad-delete"), "Delete"); assert_eq!(hint(&Local::default(), "pad-delete-alt"), "Backspace");
         assert!(MISSING.iter().all(|(k, why)| !k.contains("drawing pad") && !why.contains("Drawing pad")));
+    }
+    #[test] fn ctrl_semicolon_comments_on_kicad_from_everywhere_but_the_shell_and_the_pad() {
+        for ctx in [&[][..], &["Composer"][..], &["TextInput"][..], &["AskInput"][..], &["Viewer"][..], &["Viewer", "Plot"][..], &["AskInput", "KComment"][..]] { assert_eq!(d("ctrl-;", ctx), "keys::CommentKicad", "{ctx:?}"); }
+        assert_eq!(d("ctrl-;", &["Terminal"]), "", "the shell's"); assert_eq!(d("ctrl-;", &["DrawPad"]), "", "nothing behind the pad moves");
+        assert_eq!((find("kcomment").unwrap().kind, hint(&Local::default(), "kcomment")), (Fixed, if mac() { "⌃;".to_string() } else { "Ctrl+;".to_string() }));
     }
     #[test] fn ctrl_j_toggles_the_terminal_from_everywhere_including_inside_it() {
         for ctx in [&[][..], &["Composer"][..], &["TextInput"][..], &["PickInput"][..], &["Viewer"][..], &["Terminal"][..]] { assert_eq!(d("ctrl-j", ctx), "keys::ToggleTerminal", "{ctx:?}"); }

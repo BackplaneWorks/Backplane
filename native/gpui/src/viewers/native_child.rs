@@ -78,6 +78,7 @@ pub fn reserved_chord_index(idx: usize) -> Option<&'static str> {
         2 => Some("ctrl-tab"), // i18n-ok: gpui keystroke
         3 => Some("ctrl-shift-tab"), // i18n-ok: gpui keystroke
         4 => Some("ctrl-`"), // i18n-ok: gpui keystroke
+        5 => Some("ctrl-;"), // i18n-ok: gpui keystroke (a comment: host kicad/comment.rs RESERVED)
         _ => None,
     }
 }
@@ -393,6 +394,30 @@ mod imp {
         if viewable { let _ = c.set_input_focus(InputFocus::PARENT, w, x11rb::CURRENT_TIME); let _ = c.flush(); }
     }
     /// Whether the X keyboard focus is in `container` (on one of its frames or their windows): the editor has the keys.
+    /// Pointer input over the container off (`off`) or back: while Backplane's own window over the editor has the keyboard, X would hand every key
+    /// to KiCad when the pointer rests over it (keys go to the window under the pointer when it is inside the focus window), so its input region
+    /// is emptied for that while; the editor stays drawn.
+    pub fn input_off(container: u64, off: bool) {
+        let container = container as u32;
+        let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
+        let _ = if off { c.shape_rectangles(shape::SO::SET, shape::SK::INPUT, ClipOrdering::UNSORTED, container, 0, 0, &[]) } else { c.shape_mask(shape::SO::SET, shape::SK::INPUT, container, 0, 0, x11rb::NONE) };
+        let _ = c.flush();
+    }
+    /// Whether the ';' key is down now (the comment chord held: hold to talk). X11's own state, so a fake release of key repeat reads as held.
+    pub fn semicolon_held() -> Option<bool> {
+        static KC: OnceLock<u8> = OnceLock::new();
+        let g = conn()?; let c = g.as_ref()?;
+        let kc = *KC.get_or_init(|| {
+            let (min, max) = (c.setup().min_keycode, c.setup().max_keycode);
+            c.get_keyboard_mapping(min, max - min + 1).ok().and_then(|r| r.reply().ok()).and_then(|m| {
+                let per = m.keysyms_per_keycode.max(1) as usize;
+                m.keysyms.chunks(per).position(|k| k.contains(&0x3b)).map(|i| min + i as u8)
+            }).unwrap_or(0)
+        });
+        if kc == 0 { return None }
+        let keys = c.query_keymap().ok()?.reply().ok()?.keys;
+        Some(keys[kc as usize / 8] & (1 << (kc % 8)) != 0)
+    }
     pub fn has_focus(container: u64) -> bool {
         let container = container as u32;
         let Some(g) = conn() else { return false }; let c = g.as_ref().unwrap();
@@ -1048,6 +1073,10 @@ mod imp {
     }
 
     /// Whether keyboard focus in the active foreground queue is inside `container`.
+    /// Windows sends keys to the focused window only: nothing to do.
+    pub fn input_off(_container: u64, _off: bool) {}
+    /// Whether the ';' key (VK_OEM_1 on a US layout) is down now: the comment chord held.
+    pub fn semicolon_held() -> Option<bool> { Some(unsafe { windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0xBA) } as u16 & 0x8000 != 0) }
     pub fn has_focus(container: u64) -> bool {
         if FOCUS_ESCAPED.load(Ordering::SeqCst) { return false }
         let c = hwnd(container);
@@ -1287,6 +1316,9 @@ mod imp {
     pub fn sync_root(_container: u64, _r: R, _show: u64, _last_root: &mut (i32, i32)) {}
     pub fn holes(_container: u64, _keep: Option<&[R]>) {}
     pub fn focus(_w: u64) {}
+    pub fn input_off(_container: u64, _off: bool) {}
+    /// Unknown here: the window's own key-up decides.
+    pub fn semicolon_held() -> Option<bool> { None }
     pub fn has_focus(_container: u64) -> bool { false }
     pub fn button_over(_w: u64) -> Option<bool> { None }
     pub fn grab_click(_container: u64, _on: bool) {}
@@ -1319,7 +1351,7 @@ mod tests {
         assert_eq!(chord(0xffbe, 4), None, "F1: not a reserved key");
         assert_eq!(reserved_chord_index(0), Some("ctrl-k"));
         assert_eq!(reserved_chord_index(3), Some("ctrl-shift-tab"));
-        assert_eq!(reserved_chord_index(4), Some("ctrl-`"));
+        assert_eq!(reserved_chord_index(4), Some("ctrl-`")); assert_eq!(reserved_chord_index(5), Some("ctrl-;")); assert_eq!(chord(0x3b, 4).as_deref(), Some("ctrl-;"));
         assert_eq!(reserved_chord_index(9), None);
     }
     #[test] fn overlays_cut_holes_and_nothing_else() {

@@ -2052,6 +2052,12 @@ gpui.c.kicad.changed = Changed on disk: {files}. You have unsaved edits.
 gpui.c.kicad.keep.yours = Keep yours
 gpui.c.kicad.reload.lose.your.edits = Reload (lose your edits)
 gpui.c.kicad.a.comment.from.kicad.needs = A comment from KiCad needs an open thread.
+gpui.kcomment.nothing = Nothing selected: the area in view
+gpui.kcomment.no.capture = KiCad could not say what is selected; the note goes alone
+gpui.kcomment.reading = Reading the selection…
+gpui.kcomment.hint = Enter posts to the thread · Esc cancels
+gpui.kcomment.not.posted = The comment was not posted: {why}
+gpui.keys.kcomment = Comment on what is selected in KiCad, from Backplane or from inside the editor: Enter posts, Esc cancels
 
 # ---- gpui-d: setup, pairing, hubs, palette, picker, projects, composer, menus ----
 gpui.assets.missing = Assets missing in {dir}: {files}

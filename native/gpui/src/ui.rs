@@ -864,6 +864,8 @@ impl Render for Backplane {
             // a 0.14 home coming across: over setup and everything else of the window
             // the keys sheet, over setup too (? and F1 work there)
             .children(crate::screens::keysheet::view(cx, light, self.screens.keysheet, &self.local))
+            // the comment window over the KiCad pane (Ctrl+;)
+            .children(crate::screens::kcomment::view(self, cx, light, window.viewport_size()))
             .children(crate::screens::migrate::view(cx, light, &self.data["migrate"]))
             // the GitHub star suggestion, while the hub says it is out: a small card in the upper right corner, at a pause (screens/star.rs `due`)
             .children(self.star_up(cx).then(|| crate::screens::star::card(cx, self.screens.star.clone().as_ref(), light)).flatten())

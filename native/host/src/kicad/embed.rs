@@ -1756,6 +1756,9 @@ async fn spawn_gui_session(
             if !ev2.is_empty() { events_sock = ev2; }
             frames = f2;
         }
+        // the chords KiCad hands to Backplane, with Ctrl+; for a comment (comment.rs)
+        let rk = raw_on(&me, &sock, &desc, "kiapi.backplane.embed.SetReservedKeys", json!({"chords": super::comment::RESERVED}), 5000).await;
+        eprintln!("kicad embed: reserved keys {}", if rk["ok"] == true { rk["message"]["chords"].to_string() } else { format!("refused: {}", rk["error"]) });
         let _ = me.send(Msg::Ready { pro, gen, sock, version, holder, events_sock, ev_since, frames, spawn_container, spawn_active: active });
     } else {
         if let Some(act) = stock_action_for(&active) {
