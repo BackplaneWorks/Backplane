@@ -2,6 +2,7 @@
 //! with its source and date; the project's fab, picked once; the view clients and agents read (`fab.profile`, the tool `fab_profile`).
 //! model.rs is the data and its pure rules, store.rs where profiles are kept, project.rs the project's choice.
 pub mod drc;
+pub mod gather;
 pub mod model;
 pub mod project;
 pub mod store;
@@ -13,6 +14,7 @@ use std::{path::{Path, PathBuf}, sync::Arc};
 
 pub fn start(hub: &Arc<Hub>, ag: Option<&Arc<crate::agents::Agents>>) {
     hub.register_rpc(Arc::new(Rpc));
+    gather::start(hub); // the fab's published pages, read again a while after start and then daily
     if let Some(ag) = ag { ag.add_tools(Arc::new(Tools(hub.clone()))) }
 }
 
@@ -43,7 +45,7 @@ pub fn view_in(home: &Path, root: Option<&Path>) -> Result<Value, String> {
     let Some(root) = root else { return Err("this thread has no project folder".into()) };
     let c = choice(root);
     let p = profile_of(home, &c.fab)?;
-    let mut v = view_of(&p, &c, home); v["fabs"] = json!(store::fabs(home)); v["kinds"] = json!(model::KINDS);
+    let mut v = view_of(&p, &c, home); v["fabs"] = json!(store::fabs(home)); v["kinds"] = json!(model::KINDS); v["gathered"] = gather::last(home, &p.fab);
     if let Some((dru, plan)) = drc_plan(root, &p, &c) { let text = std::fs::read_to_string(&dru).unwrap_or_default(); let mut s = drc::status(&text, &plan); s["file"] = json!(rel(root, &dru)); v["drc"] = s }
     Ok(v)
 }
@@ -69,6 +71,13 @@ fn sv<'a>(v: &'a Value, k: &str) -> &'a str { v.get(k).and_then(Value::as_str).u
 /// get (default), pick {fab?, kind?, options?} (kept with the project; marks the current revision seen), seen (the changes are read).
 pub async fn act(hub: &Arc<Hub>, thread: &str, project: &str, a: &Value) -> Result<Value, String> {
     let root = root_for(hub, thread, project).await;
+    // read the fab's published pages again now (the project's fab, or the one named)
+    if sv(a, "action") == "refresh" {
+        let fab = if !sv(a, "fab").is_empty() { sv(a, "fab").to_string() } else { match &root { Some(r) => { let r = r.clone(); tokio::task::spawn_blocking(move || choice(&r).fab).await.unwrap_or_default() } None => store::ordering_fab() } };
+        let mut v = gather::refresh_said(hub, &fab).await?;
+        if let Some(r) = root.as_deref() { let (home, r) = (hub.cfg.home.clone(), r.to_path_buf()); if let Ok(Ok(view)) = tokio::task::spawn_blocking(move || view_in(&home, Some(&r))).await { v["profile"] = view } }
+        return Ok(v)
+    }
     let home = hub.cfg.home.clone(); let a = a.clone();
     tokio::task::spawn_blocking(move || {
         let action = match sv(&a, "action") { "" => "get", x => x };
@@ -95,7 +104,7 @@ pub async fn act(hub: &Arc<Hub>, thread: &str, project: &str, a: &Value) -> Resu
                 drc::write(&dru, &plan)?;
                 let mut v = view_in(&home, Some(r))?; v["drc"]["written"] = json!(true); Ok(v)
             }
-            x => Err(format!("unknown action {x:?}: get, pick, seen or drc")),
+            x => Err(format!("unknown action {x:?}: get, pick, seen, drc or refresh")),
         }
     }).await.unwrap_or_else(|_| Err("failed".into()))
 }
@@ -115,9 +124,9 @@ impl RpcHandler for Rpc {
 pub struct Tools(pub Arc<Hub>);
 pub const TOOL: &str = "fab_profile";
 pub fn tool_def() -> Value {
-    json!({"name": TOOL, "description": "The project's fab profile: what the fab it is made at can make, read from the fab's published pages. Per capability (track width, spacing, drills, via hole and diameter, rings, hole and edge clearances, silkscreen, solder mask, board size, finishes, via types, ...) the free limit and the one that costs more, each with its unit, source page, the day it was read and its confidence (published, derived or inherited); the stackups that fit the board (dielectric thicknesses and Er); the assembly services' limits. Use these numbers, with their source, instead of remembered ones. get (default): the profile for the project's fab, board kind and options (picked, else its board fab file's, else its KiCad board's layers and thickness). pick: keep the fab, kind (pcb, flex, hdi, aluminum, copper_core, rogers, ptfe), options (layers, copper_oz, thickness_mm, finish, color) and tier (free: DRC holds the board to the fab's base-price limits, the default; extra: to what it makes for more) with the project; only when the person chose them. seen: mark the changes since the project last looked as read. drc: write the fab's limits into the project's .kicad_dru as a marked section (the project's own rules and stricter settings are kept and win); drc in the answer says whether that section is current, the board setup minimums under the fab's (suggestions: tell the person, never change the board setup yourself) and the project's own rules that allow less than the fab (conflicts).",
+    json!({"name": TOOL, "description": "The project's fab profile: what the fab it is made at can make, read from the fab's published pages. Per capability (track width, spacing, drills, via hole and diameter, rings, hole and edge clearances, silkscreen, solder mask, board size, finishes, via types, ...) the free limit and the one that costs more, each with its unit, source page, the day it was read and its confidence (published, derived or inherited); the stackups that fit the board (dielectric thicknesses and Er); the assembly services' limits. Use these numbers, with their source, instead of remembered ones. get (default): the profile for the project's fab, board kind and options (picked, else its board fab file's, else its KiCad board's layers and thickness). pick: keep the fab, kind (pcb, flex, hdi, aluminum, copper_core, rogers, ptfe), options (layers, copper_oz, thickness_mm, finish, color) and tier (free: DRC holds the board to the fab's base-price limits, the default; extra: to what it makes for more) with the project; only when the person chose them. seen: mark the changes since the project last looked as read. drc: write the fab's limits into the project's .kicad_dru as a marked section (the project's own rules and stricter settings are kept and win); drc in the answer says whether that section is current, the board setup minimums under the fab's (suggestions: tell the person, never change the board setup yourself) and the project's own rules that allow less than the fab (conflicts). refresh: read the fab's published pages again now (Backplane also does daily); values it cannot read keep their old value and date.",
         "inputSchema": {"type": "object", "properties": {
-            "action": {"type": "string", "description": "get (default), pick, seen or drc"},
+            "action": {"type": "string", "description": "get (default), pick, seen, drc or refresh"},
             "tier": {"type": "string", "description": "pick: free (default) or extra"},
             "fab": {"type": "string", "description": "pick: the fab's id (get lists them in fabs)"},
             "kind": {"type": "string", "description": "pick: the board kind"},
