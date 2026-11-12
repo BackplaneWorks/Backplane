@@ -165,6 +165,36 @@ where in a narration the next sentence usually starts and cancels it. The clips 
 (Kokoro-82M, Apache-2.0) are the recorded-sample tests: a finished request 0.99, a thinking pause 0.03, "So I'll
 send it to Kati, and then" 0.02.
 
+## Always on
+
+`voice/always.rs`, Settings, Voice, Always on (off by default; desktop for now). The microphone stays open
+(`live --always`: no time limit; the resident recognizer decodes) and the hub writes nothing until a message
+starts:
+
+- **Start.** Real words: at least one (or two, or 400 ms of speech, as set) that is not a filler ("um", "uh",
+  "hmm", …) and that the engine was at least 60 % sure of; a cough, keys or a fan give no word or an unsure
+  one. Until then a segment is forgotten whole, its settling with it.
+- **Where.** The open thread; none open, Bub's chat. A name said first, before a comma ("Bub, …", "KiCad
+  thread, …", two words at most, or three ending in "thread"), sends that message to the thread whose title
+  starts with it (else the one title that has it as a word) and is not written. The window tells the hub when
+  another thread opens (`voice-target`); a message already going stays where it started.
+- **Send.** End of turn (above) with its countdown and undo; then it listens for the next, no click.
+- **Pause.** Checked every 2 s: the screen locked (logind `LockedHint`), another app using the microphone
+  (`pw-dump` capture streams, else `pactl`; our own recorder and the person's "may use the microphone" list
+  excepted: Discord in a voice channel or a game's voice chat count, as a call would), and, when asked, Backplane
+  in the background. Paused, the helper stops (the microphone is closed) and the strip says why; it listens
+  again when that ends.
+- **Controls.** The sidebar's top line shows it whenever it is on (listening, paused, muted); a press, or
+  Ctrl/Cmd+Shift+M in the window, mutes or listens. Stop dictating in the strip mutes it too.
+- **Privacy.** Audio stays on this machine; nothing is kept or sent before a message starts; only a message's
+  words go to its thread (and to Jev at its pauses, when Jev is on).
+
+Idle cost on this desktop (2026-11-11, 30 s of quiet, the resident recognizer already loaded): the helper 0.33 %
+of one core and 41 MB, pw-record 0.1 % and 9 MB.
+
+Not yet: the speaker check (only the person's voice starts a message), echo cancellation against Backplane's
+own sound, a tray icon and a system-wide hotkey, and the phones.
+
 ## Hold to talk
 
 The mic chip held (0.4 s or more) is hold-to-talk on the desktop, iOS and Android: dictation starts on the

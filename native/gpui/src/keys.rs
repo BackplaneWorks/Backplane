@@ -6,7 +6,7 @@ use crate::i18n::{tr, trs};
 use gpui::{actions, prelude::*, *};
 use serde_json::Value;
 
-actions!(keys, [NewThread, OpenDiff, OpenFiles, StopTurn, ModelPicker, PrevThread, NextThread, UberChat, SettleThread, FocusComposer, CycleLayers, PerfOverlay,
+actions!(keys, [NewThread, OpenDiff, OpenFiles, StopTurn, ModelPicker, PrevThread, NextThread, UberChat, AlwaysOn, SettleThread, FocusComposer, CycleLayers, PerfOverlay,
     AccountMenu, Account1, Account2, Account3, Account4, Account5, Account6, Account7, Account8, Account9,
     PickUp, PickDown, PickLeft, PickRight, PickTab, PickBackTab, PickEnter,
     Project1, Project2, Project3, Project4, Project5, Project6, Project7, Project8, Project9,
@@ -72,6 +72,7 @@ pub const TABLE: &[Entry] = &[
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("fold", "Fold the project's threads (the row under the pointer, else the open one), after a press on a project row", "Sidebar", "left", Fixed),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("unfold", "Unfold the project's threads", "Sidebar", "right", Fixed),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("uber", "Uberbot chat", "Sidebar", "secondary-shift-u", Rebind),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("always", "Always-on dictation: listen or mute", "Window", "secondary-shift-m", Rebind),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("new", "New thread", "Timeline", "secondary-n", Rebind),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("settle", "Settle or unsettle the thread", "Timeline", "secondary-shift-s", Rebind),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("stop", "Stop the running turn", "Timeline", "ctrl-.", Rebind),
@@ -158,7 +159,7 @@ pub fn bindings(l: &Local) -> Vec<KeyBinding> {
         KeyBinding::new(&k("new"), NewThread, None), KeyBinding::new(&k("diff"), OpenDiff, None), KeyBinding::new(&k("files"), OpenFiles, None),
         KeyBinding::new(&k("stop"), StopTurn, None), KeyBinding::new(&k("models"), ModelPicker, None), KeyBinding::new(&k("account"), AccountMenu, None),
         KeyBinding::new(&k("prev"), PrevThread, None), KeyBinding::new(&k("next"), NextThread, None),
-        KeyBinding::new(&k("uber"), UberChat, None), KeyBinding::new(&k("settle"), SettleThread, None), KeyBinding::new(&k("layers"), CycleLayers, Some(NOT_FIELD)), KeyBinding::new(&k("perf"), PerfOverlay, None),
+        KeyBinding::new(&k("uber"), UberChat, None), KeyBinding::new(&k("always"), AlwaysOn, None), KeyBinding::new(&k("settle"), SettleThread, None), KeyBinding::new(&k("layers"), CycleLayers, Some(NOT_FIELD)), KeyBinding::new(&k("perf"), PerfOverlay, None),
         KeyBinding::new("/", FocusComposer, Some(SLASH)), KeyBinding::new(&k("focus-key"), FocusComposer, Some(NOT_SHELL)), KeyBinding::new(&k("find"), crate::FindInThreadKey, Some(NOT_SHELL)),
         KeyBinding::new("?", ShowKeys, Some(FREE)), KeyBinding::new("shift-/", ShowKeys, Some(FREE)), KeyBinding::new("shift-?", ShowKeys, Some(FREE)), KeyBinding::new("f1", ShowKeys, None),
         KeyBinding::new(&k("term"), ToggleTerminal, None), KeyBinding::new("`", ToggleTerminal, Some(TERM_BARE)), KeyBinding::new("shift-escape", DismissTerminal, None)]);
@@ -402,6 +403,7 @@ pub fn attach(el: Div, picker: bool, cx: &mut Context<Backplane>) -> Div {
     let el = on!(el, PickEnter, |this: &mut Backplane, _, cx: &mut Context<Backplane>| this.picker_enter(cx));
     let el = on!(el, PrevThread, |this: &mut Backplane, _, cx: &mut Context<Backplane>| { let n = neighbour(&this.data, &this.selected, false); this.key_go(n, cx) });
     let el = on!(el, NextThread, |this: &mut Backplane, _, cx: &mut Context<Backplane>| { let n = neighbour(&this.data, &this.selected, true); this.key_go(n, cx) });
+    let el = on!(el, AlwaysOn, |this: &mut Backplane, _, cx: &mut Context<Backplane>| this.voice_always_toggle(cx));
     let el = on!(el, UberChat, |this: &mut Backplane, _, cx: &mut Context<Backplane>| {
         let id = this.data["bots"].as_array().into_iter().flatten().find(|b| b["uber"].as_bool().unwrap_or(false)).map(|b| crate::string(b, "id"));
         if let Some(id) = id { this.go("bot", id, cx); }

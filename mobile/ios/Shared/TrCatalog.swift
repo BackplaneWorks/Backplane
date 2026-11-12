@@ -2814,6 +2814,30 @@ settings.voice.jev.fallback	Last pause: the on-device model decided ({e}).	直�
 voice.eot.eager.label	Eager {t}	Eager {t}
 voice.eot.default.label	Default {t}	既定 {t}
 voice.eot.patient.label	Patient {t}	Patient {t}
+voice.always.listening	Always on · listening	常時オン · 聞き取り中
+voice.always.paused	Always on · paused	常時オン · 一時停止中
+voice.always.muted	Always on · muted	常時オン · ミュート
+keys.always	Always-on dictation: listen or mute	常時オンの音声入力: 聞く / ミュート
+voice.always.status	Always on · listening	常時オン · 聞き取り中
+voice.always.note.paused	Always on is paused: {why}. It listens again when that ends.	常時オンは一時停止中です: {why}。それが終わると再び聞き取ります。
+settings.voice.always	Always on	常時オン
+settings.voice.always.note	The microphone stays open on this machine. A message starts when you say real words (not “um”, a cough or the fan), goes into the open thread (or the one you name first: “Bub, …”) and sends itself when you are done. Audio stays on this machine; only the words of a message go anywhere. Stop dictating in the strip mutes it.	このマシンのマイクを開いたままにします。実際の言葉を話すとメッセージが始まり（「um」や咳、ファンの音では始まりません）、開いているスレッド（または最初に名前を言ったスレッド:「Bub, …」）に入り、話し終えると自動で送信されます。音声はこのマシンから出ません。外に出るのはメッセージの言葉だけです。ストリップの「Stop dictating」でミュートできます。
+settings.voice.always.start	Start a message at	メッセージを始める条件
+settings.voice.always.start.note	What has to be heard before a message starts.	メッセージが始まるまでに聞き取る必要があるもの。
+settings.voice.always.word1	1 word	1語
+settings.voice.always.word2	2 words	2語
+settings.voice.always.ms	400 ms of speech	400 ms の発話
+settings.voice.always.pause	Pause while	一時停止する条件
+settings.voice.always.pause.note	Paused, the microphone is closed; it listens again by itself.	一時停止中はマイクを閉じます。条件が終わると自動で再開します。
+settings.voice.always.pause.note2	Paused, the microphone is closed; it listens again by itself. These may use the microphone without pausing it: {apps}.	一時停止中はマイクを閉じます。条件が終わると自動で再開します。次のアプリはマイクを使っても一時停止しません: {apps}。
+settings.voice.always.ignore	Apps that may use the microphone (comma separated)	マイクを使ってもよいアプリ（カンマ区切り）
+settings.voice.always.lock	The screen is locked	画面がロックされている
+settings.voice.always.call	Another app uses the microphone	他のアプリがマイクを使用中
+settings.voice.always.away	Backplane is in the background	Backplane がバックグラウンド
+settings.voice.always.saveapps	Save apps	アプリを保存
+settings.voice.always.target	Messages go to	メッセージの送り先
+settings.voice.always.target.note	Saying a thread's name first (“KiCad thread, …”) sends that message there.	最初にスレッド名を言うと（「KiCad thread, …」）、そのメッセージはそのスレッドに送られます。
+settings.voice.always.open	The open thread (else Bub)	開いているスレッド（なければ Bub）
 gpui.f.group.install	Install	インストール
 gpui.f.group.agents	Agents	エージェント
 gpui.f.group.cad	CAD tools	CADツール
@@ -5497,6 +5521,12 @@ gpui.usage.noread	No reading yet: the first turn's result reports it.	まだ値�
 
     /// voice.eot.patient.label = Patient {t}
     static func voice_eot_patient_label(t: String) -> String { f("voice.eot.patient.label", ["t": t]) }
+
+    /// voice.always.note.paused = Always on is paused: {why}. It listens again when that ends.
+    static func voice_always_note_paused(why: String) -> String { f("voice.always.note.paused", ["why": why]) }
+
+    /// settings.voice.always.pause.note2 = Paused, the microphone is closed; it listens again by itself. These may use the microphone without pausing it: {apps}.
+    static func settings_voice_always_pause_note2(apps: String) -> String { f("settings.voice.always.pause.note2", ["apps": apps]) }
 
     /// gpui.f.counter = {i, number} of {n, number}
     static func gpui_f_counter(i: Int, n: Int) -> String { f("gpui.f.counter", ["i": String(i), "n": String(n)]) }

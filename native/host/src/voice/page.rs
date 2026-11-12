@@ -90,7 +90,24 @@ pub fn rows(p: &Prefs, info: &Value, term: &str, key_err: &str) -> Vec<Value> {
             "fields": [{"name": "vterm", "hint": "Add a term", "secret": false, "value": term}], "buttons": dict}),
         row("Learned fixes", if learned.is_empty() { "No fixes learned yet. After dictating, use Fix on a misheard word or accept a suggested correction." } else { "Fixes you made after dictating. Each applies by itself once you have made it twice." }, fixes),
         row("Pebble ring", "Set its webhook to send the recording; it is transcribed here with this dictionary.", vec![]),
-    ].into_iter().chain(eot_rows(p, info)).chain(command_rows(p)).collect()
+    ].into_iter().chain(always_rows(p)).chain(eot_rows(p, info)).chain(command_rows(p)).collect()
+}
+/// Always on (always.rs): on/off, what starts a message, what pauses it, where messages go.
+fn always_rows(p: &Prefs) -> Vec<Value> {
+    use super::always::{Cfg, IGNORE, ON, PAUSE_AWAY, PAUSE_CALL, PAUSE_LOCK, SPEECH_MS, TARGET, WORDS};
+    let c = Cfg::of(p);
+    let t = |label: &str, k: &str, on: bool, dflt_on: bool| btn(label, "setting", &format!("{k}={}", match (on, dflt_on) { (true, true) => "off", (true, false) => "", (false, true) => "", (false, false) => "on" }), on);
+    let mut v = vec![row("Always on", "The microphone stays open on this machine. A message starts when you say real words (not “um”, a cough or the fan), goes into the open thread (or the one you name first: “Bub, …”) and sends itself when you are done. Audio stays on this machine; only the words of a message go anywhere. Stop dictating in the strip mutes it.",
+        vec![btn("On", "setting", &format!("{ON}=on"), c.on), btn("Off", "setting", &format!("{ON}="), !c.on)])];
+    if !c.on { return v }
+    let (w, ms) = (c.gate.min_words, c.gate.min_ms);
+    v.push(row("Start a message at", "What has to be heard before a message starts.", vec![btn("1 word", "setting", &format!("{WORDS}="), w == 1 && ms == 0), btn("2 words", "setting", &format!("{WORDS}=2"), w == 2),
+        btn("400 ms of speech", "setting", &format!("{SPEECH_MS}={}", if ms > 0 { "" } else { "400" }), ms > 0)]));
+    v.push(json!({"label": "Pause while", "note": if c.ignore.is_empty() { "Paused, the microphone is closed; it listens again by itself.".to_string() } else { format!("Paused, the microphone is closed; it listens again by itself. These may use the microphone without pausing it: {}.", c.ignore.join(", ")) },
+        "fields": [{"name": "valwign", "hint": "Apps that may use the microphone (comma separated)", "secret": false, "value": ""}],
+        "buttons": [t("The screen is locked", PAUSE_LOCK, c.pause_lock, true), t("Another app uses the microphone", PAUSE_CALL, c.pause_call, true), t("Backplane is in the background", PAUSE_AWAY, c.pause_away, false), btn("Save apps", "voice-always-ignore", "", false)]}));
+    v.push(row("Messages go to", "Saying a thread's name first (“KiCad thread, …”) sends that message there.", vec![btn("The open thread (else Bub)", "setting", &format!("{TARGET}="), c.target == "open"), btn("Bub", "setting", &format!("{TARGET}=bub"), c.target == "bub")]));
+    let _ = IGNORE; v
 }
 /// End of turn (eot.rs): on/off and how eager, and Jev (TypeSafe) with its key in the vault, its model, a test and what it last decided.
 fn eot_rows(p: &Prefs, info: &Value) -> Vec<Value> {

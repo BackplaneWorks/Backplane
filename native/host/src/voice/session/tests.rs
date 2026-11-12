@@ -23,6 +23,13 @@ file)
   echo '{"event":"ready"}'; echo '{"event":"done","item":"file","text":"Open key cad now.","segments":[[12,180,87,"Open key cad now."]]}'; echo '{"event":"end"}';;
 live)
   echo "$*" > "$here/args"
+  case "$*" in *--always*)
+    echo "$*" >> "$here/always-args"
+    echo '{"event":"ready","recorder":"pw-record","device":"m","label":"Desk mic"}'; echo '{"event":"loaded","ms":5,"resident":true}'
+    echo '{"event":"turn","item":"l0","p":0.2,"ms":30}'; echo '{"event":"done","item":"l0","text":"","words":[["Um.",0,20,90]]}'
+    echo '{"event":"turn","item":"l1","p":0.95,"ms":30}'; echo '{"event":"done","item":"l1","text":"","words":[["Ship",100,120,99],["it",120,130,99],["today.",130,160,99]]}'
+    cat > /dev/null; echo '{"event":"stopping"}'; echo '{"event":"end"}'; exit 0;;
+  esac
   if [ -e "$here/eot" ]; then
     echo '{"event":"ready","recorder":"pw-record","device":"m","label":"Desk mic"}'; echo '{"event":"loaded","ms":5,"resident":true}'
     echo '{"event":"turn","item":"l0","p":0.93,"ms":30}'
@@ -228,4 +235,21 @@ async fn jev_mock(p: f64) -> (String, Arc<Mutex<Vec<String>>>) {
     let l = crate::voice::eot::Learned::parse(&r.hub.setting("voice.eot.learned").await.unwrap_or_default()); assert_eq!((l.sends, l.undone), (1, 1)); assert!(l.nudge > 0.0);
     r.rpc(json!({"op":"stop"})).await; r.until(off).await;
     let _ = std::fs::remove_file(r.bin.join("eot")); std::env::remove_var("BACKPLANE_JEV_URL"); *super::super::jev::TEST_KEY.lock().unwrap() = None;
+}
+
+#[tokio::test(flavor = "multi_thread")] async fn always_on_writes_only_real_words_sends_by_end_of_turn_and_stays_off_once_muted() {
+    let _g = ONE.lock().await; let mut r = rig("always").await;
+    std::fs::create_dir_all(local_dir(&r.home)).unwrap(); std::fs::write(local_dir(&r.home).join("ready-parakeet-v2"), "ok").unwrap();
+    commit(&r.hub, &[("voice.always".to_string(), "on".to_string())]).await.unwrap();
+    assert_eq!(r.rpc(json!({"op":"always"})).await["want"], true);
+    r.rpc(json!({"op":"start","thread":"t1","always":true,"src":"hub"})).await;
+    let fs = r.until(|v| v["ev"] == "command").await;
+    assert_eq!(replay(&fs, ""), "Ship it today.", "the filler before it was never written");
+    assert!(fs.iter().any(|f| f["ev"] == "countdown" && f["by"] == "audio"), "the on-device model decided (Jev is off)");
+    assert!(fs.iter().any(|f| f["ev"] == "view" && f["view"]["always"]["on"] == true && f["view"]["status"] == "Always on · listening"));
+    assert!(std::fs::read_to_string(r.bin.join("always-args")).unwrap().contains("--always"));
+    // muted: the session ends and does not start again
+    r.rpc(json!({"op":"stop"})).await; r.until(|v| off(v) && v["thread"] == "t1").await;
+    tokio::time::sleep(Duration::from_millis(1500)).await;
+    assert!(r.v.st.lock().unwrap().live.is_none(), "muted stays muted"); assert_eq!(std::fs::read_to_string(r.bin.join("always-args")).unwrap().lines().count(), 1);
 }

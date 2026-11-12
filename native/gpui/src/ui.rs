@@ -332,6 +332,8 @@ impl Backplane {
         let started = self.started;
         let mut rows: Vec<AnyElement> = Vec::new();
         if let Some(r) = crate::screens::onboard::resume_row(cx, light, &self.data) { rows.push(r); }
+        // always on: listening is shown at the top of the sidebar whenever it is on
+        if let Some(r) = crate::screens::voice::always_row(cx, light, &self.screens.voice, false) { rows.push(r); }
         let mut ctl: Vec<CtlEntry> = Vec::new();
         for ((bname, mood, note, _, bid, bsel), rig) in uber_data.iter().zip(uber_rigs.iter()) {
             let note_color = match mood.as_str() { "wait" | "error" => c("bad"), "work" | "talk" => c("accent"), _ => c("faint") };
@@ -527,6 +529,7 @@ impl Backplane {
 
 impl Render for Backplane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.voice_watch(window.is_window_active()); // always on: the open thread and the window's focus, to the hub when they change
         self.screens.plotview.layers_key = crate::keys::hint(&self.local, "layers");
         let t_render = std::time::Instant::now();
         if crate::perf::on() { crate::perf::frame_start(); cx.defer(|_| crate::perf::frame_end()); }

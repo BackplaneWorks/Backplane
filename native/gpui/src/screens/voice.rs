@@ -15,7 +15,9 @@ pub struct Voice { pub views: HashMap<String, Value>, marks: HashMap<String, usi
     /// an end-of-turn countdown running (the hub's `countdown`): its thread and when it ends
     pub countdown: Option<(String, std::time::Instant)>,
     /// the mic chip pressed: when, and whether that press started dictation; threads whose dictation ends in a send (hold-to-talk released)
-    press: Option<(std::time::Instant, bool)>, send_on_end: std::collections::HashSet<String> }
+    press: Option<(std::time::Instant, bool)>, send_on_end: std::collections::HashSet<String>,
+    /// always on (the hub's always.rs): this window runs it; the thread and focus last told; what the hub says of it (listening, why paused)
+    pub always: bool, always_target: String, always_focus: Option<bool>, pub always_paused: String, pub always_live: bool }
 /// Held this long, the mic chip is hold-to-talk: letting go stops and sends.
 pub const PRESS_HOLD: std::time::Duration = std::time::Duration::from_millis(400);
 /// What a press of the mic chip does on release: `held` how long, `started` whether its press started dictation.
@@ -72,6 +74,7 @@ impl Win {
         let thread = s(&f, "thread").to_string();
         match s(&f, "ev") {
             "view" => {
+                if f["view"]["always"]["on"] == true { self.screens.voice.always_live = f["view"]["on"] == true; self.screens.voice.always_paused = s(&f["view"]["always"], "paused").to_string(); }
                 let on = f["view"]["on"] == true; if !on { let v = &mut self.screens.voice; v.marks.remove(&thread); v.cuts.remove(&thread); v.seqs.remove(&thread); v.held.remove(&thread); v.level = 0; self.voice_mic_stop(); }
                 // hold-to-talk let go: the session has ended with its last words written; the draft goes, with the undo window
                 if !on && self.screens.voice.send_on_end.remove(&thread) { self.voice_command(&thread, &json!({"cmd": "send", "cut": 0}), cx); }
@@ -90,6 +93,8 @@ impl Win {
                 let caret = new.chars().count(); self.voice_put(&thread, 0..old.len(), &new, caret, cx);
             }
             "audio" => self.voice_mic_send(s(&f, "path")),
+            // the hub: always-on is wanted (start it here, in the open thread), or not
+            "always" => { if f["want"] == true && f["running"] != true && !self.screens.voice.always { self.voice_always_start(cx) } else if f["want"] == false { let v = &mut self.screens.voice; v.always = false; v.always_live = false; v.always_paused.clear(); } }
             "command" => { self.screens.voice.countdown = None; self.voice_command(&thread, &f, cx) }
             // end of turn: the hub will send when this runs out unless more is said (or Keep talking is pressed)
             "countdown" => {
@@ -151,6 +156,24 @@ impl Win {
         self.screens.voice.said = Some((line.to_string(), std::time::Instant::now()));
         cx.spawn(async move |w, cx| { cx.background_executor().timer(SAID).await; let _ = w.update(cx, |_, cx| cx.notify()); }).detach();
         cx.notify();
+    }
+    /// Always on: listening starts in the open thread (the hub picks Bub's chat when none is), after what is typed there.
+    pub fn voice_always_start(&mut self, cx: &mut Context<Self>) {
+        let thread = self.selected.clone(); let text = self.input.read(cx).content.to_string(); let caret = text.chars().count();
+        self.screens.voice.marks.insert(thread.clone(), caret);
+        let src = if self.voice_mic_begin() { "client" } else { "hub" };
+        let v = &mut self.screens.voice; v.always = true; v.always_target = thread.clone(); v.always_focus = None;
+        rpc(self, json!({"op": "start", "thread": thread, "draft": text, "caret": caret, "src": src, "always": true})); cx.notify();
+    }
+    /// Always on: mute (the hub stops listening until it is turned on again), or listen.
+    pub fn voice_always_toggle(&mut self, cx: &mut Context<Self>) {
+        if self.screens.voice.always { self.screens.voice.always = false; self.screens.voice.always_live = false; self.voice_mic_end(); rpc(self, json!({"op": "stop"})); cx.notify(); } else { self.voice_always_start(cx) }
+    }
+    /// Always on, every frame drawn: the hub hears when another thread opens (the next message goes there) and when the window's focus changes.
+    pub fn voice_watch(&mut self, active: bool) {
+        if !self.screens.voice.always { return }
+        if self.selected != self.screens.voice.always_target { let t = self.selected.clone(); self.screens.voice.always_target = t.clone(); rpc(self, json!({"op": "act", "thread": "", "action": "voice-target", "value": t, "draft": ""})); }
+        if self.screens.voice.always_focus != Some(active) { self.screens.voice.always_focus = Some(active); rpc(self, json!({"op": "act", "thread": "", "action": "voice-focus", "value": if active { "1" } else { "0" }, "draft": ""})); }
     }
     /// The mic chip pressed: dictation starts now when it was off (hold-to-talk or a click; the release tells which).
     pub fn voice_down(&mut self, cx: &mut Context<Self>) {
@@ -262,6 +285,16 @@ pub fn pending_view(cx: &mut Context<Win>, light: bool, v: &Voice, thread: &str)
     }
     let (line, at) = v.said.as_ref()?; if at.elapsed() > SAID { return None }
     Some(div().id("voice-said").text_size(px(12.)).text_color(c("dim")).child(crate::i18n::trs(line)).into_any_element())
+}
+/// The sidebar's always-on line, at the top whenever it is on (listening, paused and why, or muted); a press mutes or listens.
+pub fn always_row(cx: &mut Context<Win>, light: bool, v: &Voice, want: bool) -> Option<AnyElement> {
+    if !v.always && !want { return None }
+    let c = |n: &str| theme::color(light, n);
+    /* i18n-ok: drawn through trs below */ let (dot, line) = if !v.always { ("faint", "Always on · muted".to_string()) } else if !v.always_paused.is_empty() { ("warn", "Always on · paused".to_string()) } else { ("bad", "Always on · listening".to_string()) };
+    let tip = v.always_paused.clone();
+    Some(div().id("always-on").flex().items_center().gap_2().px_3().py_1().text_size(px(12.)).cursor_pointer().child(div().size(px(8.)).bg(c(dot)))
+        .child(div().text_color(c("dim")).child(crate::i18n::trs(&line))).children((!tip.is_empty()).then(|| div().text_color(c("faint")).text_ellipsis().overflow_hidden().whitespace_nowrap().child(tip)))
+        .on_click(cx.listener(|w, _, _, cx| w.voice_always_toggle(cx))).into_any_element())
 }
 /// The send button flashes for a voice send.
 pub fn flashing(v: &Voice) -> bool { v.flash.map_or(false, |t| t.elapsed() < FLASH) }

@@ -62,11 +62,13 @@ fn live_args(home: &Path, engine: &str, model: &str, upload: bool, device: &str,
 fn frame(thread: &str, ev: &str, mut body: Value) -> Value { body["t"] = json!("voice"); body["thread"] = json!(thread); body["ev"] = json!(ev); body }
 
 /// `cut`: a send while dictating, to the session's reader (Reader::cut).
-struct Live { id: u64, client: u64, thread: String, key: String, upload: bool, audio: Option<mpsc::Sender<Vec<u8>>>, stopped: Option<Instant>, ctl: mpsc::UnboundedSender<Ctl> }
+struct Live { always: bool, id: u64, client: u64, thread: String, key: String, upload: bool, audio: Option<mpsc::Sender<Vec<u8>>>, stopped: Option<Instant>, ctl: mpsc::UnboundedSender<Ctl> }
 /// To a live session's reader: a client's send while dictating (cut, seq), Keep talking in an end-of-turn countdown, Jev's answer about a pause.
-enum Ctl { Cut(u64, u64), Hold, Jev(u64, Option<f64>) }
+enum Ctl { Cut(u64, u64), Hold, Jev(u64, Option<f64>), /** always on: the open thread changed (between messages only) */ Target(String) }
+/// Always-on (always.rs): who turned it on and how to start it again; why it is paused ("" listening); muted by the person; the window's focus.
+struct Always { client: u64, params: Value, paused: String, off: bool, focused: bool, watching: bool }
 #[derive(Default)]
-struct St { live: Option<Live>, dicts: HashMap<String, Dictation>, job: bool, next: u64, /** when each thread's last end-of-turn send went */ auto: HashMap<String, Instant> }
+struct St { always: Option<Always>, live: Option<Live>, dicts: HashMap<String, Dictation>, job: bool, next: u64, /** when each thread's last end-of-turn send went */ auto: HashMap<String, Instant> }
 #[derive(Default)]
 pub struct Voice { st: Mutex<St> }
 
@@ -79,7 +81,17 @@ impl Voice {
     fn close_audio(&self, id: u64) { let mut g = self.st.lock().unwrap(); if let Some(l) = g.live.as_mut().filter(|l| l.id == id) { l.audio = None; l.stopped.get_or_insert_with(Instant::now); } }
 
     async fn start(self: &Arc<Self>, hub: &Arc<Hub>, client: u64, p: &Value) -> Value {
-        let (home, thread, upload) = (hub.cfg.home.clone(), s(p, "thread").to_string(), s(p, "src") == "client");
+        let (home, mut thread, upload) = (hub.cfg.home.clone(), s(p, "thread").to_string(), s(p, "src") == "client");
+        let always = p["always"] == true;
+        if always {
+            // no thread open: Bub's chat
+            if thread.is_empty() { thread = bub_thread(hub).await.unwrap_or_default() }
+            if thread.is_empty() { return json!({"path": "", "error": "no thread to dictate into: open one, or set up Bub"}) }
+            let watch = { let mut g = self.st.lock().unwrap(); let a = g.always.get_or_insert_with(|| Always { client, params: Value::Null, paused: String::new(), off: false, focused: true, watching: false });
+                a.client = client; a.params = json!({"thread": thread, "always": true, "src": s(p, "src")}); a.off = false; !std::mem::replace(&mut a.watching, true) };
+            if watch { let (v, h) = (self.clone(), hub.clone()); let w: std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> = Box::pin(async move { v.watch(h).await }); tokio::spawn(w); }
+            if !self.st.lock().unwrap().always.as_ref().map_or(true, |a| a.paused.is_empty()) { self.tell(hub, client, &thread); return json!({"path": ""}) }
+        }
         let draft = s(p, "draft"); let caret = p["caret"].as_u64().map_or(words::len(draft), |c| c as usize);
         self.with(&thread, |d| d.err.clear());
         if self.st.lock().unwrap().live.is_some() { return self.fail(hub, client, &thread, "already listening: stop the other dictation first") }
@@ -93,22 +105,24 @@ impl Voice {
         // the resident recognizer, when it is up: the session starts with the model already loaded
         let (server, hold) = if engine == "local" { resident::of(&home).and_then(|r| r.server(&home, &model)).map_or((String::new(), None), |(p, h)| (p, Some(h))) } else { (String::new(), None) };
         let mut cmd = proc::tokio_cmd(if engine == "local" { Kind::Local } else { Kind::Net }, &bin);
-        cmd.args(live_args(&home, engine, &model, upload, &device, &server)).current_dir("/").stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).kill_on_drop(true);
+        let mut args = live_args(&home, engine, &model, upload, &device, &server); if always { args.push("--always".into()) }
+        cmd.args(args).current_dir("/").stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).kill_on_drop(true);
         let Ok(mut child) = cmd.spawn() else { return self.fail(hub, client, &thread, NO_HELPER) };
         let (Some(mut stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else { return self.fail(hub, client, &thread, NO_HELPER) };
         let (tx, mut rx) = mpsc::channel::<Vec<u8>>(64);
         tokio::spawn(async move { while let Some(b) = rx.recv().await { if stdin.write_all(&b).await.is_err() { break } } });
         let key = if upload { hex::encode(pairing::urandom(16)) } else { String::new() };
         let (ctl_tx, ctl_rx) = mpsc::unbounded_channel();
-        let id = { let mut g = self.st.lock().unwrap(); g.next += 1; let id = g.next; g.live = Some(Live { id, client, thread: thread.clone(), key: key.clone(), upload, audio: Some(tx), stopped: None, ctl: ctl_tx.clone() }); id };
-        self.with(&thread, |x| { x.begin(); x.engine = engine.to_string(); });
+        let id = { let mut g = self.st.lock().unwrap(); g.next += 1; let id = g.next; g.live = Some(Live { always, id, client, thread: thread.clone(), key: key.clone(), upload, audio: Some(tx), stopped: None, ctl: ctl_tx.clone() }); id };
+        self.with(&thread, |x| { x.begin(); x.engine = engine.to_string(); x.always = always; });
         self.tell(hub, client, &thread);
         if upload { hub.push(client, frame(&thread, "audio", json!({"path": format!("/voice/in?s={key}")}))); }
         let reader = Reader::new(d, engine == "local", draft, caret).with_cmds(super::cmds::Cmds::of(&pr)).with_eot(super::eot::Cfg::of(&pr));
+        let reader = if always { reader.with_gate(super::always::Cfg::of(&pr).gate) } else { reader };
         { let (v, hub, thread, engine) = (self.clone(), hub.clone(), thread.clone(), engine.to_string()); tokio::spawn(async move { let _hold = hold; v.read(hub, client, id, thread, engine, reader, child, stdout, ctl_rx, ctl_tx).await }); }
         json!({"path": if upload { format!("/voice/in?s={key}") } else { String::new() }})
     }
-    async fn read(self: Arc<Self>, hub: Arc<Hub>, client: u64, id: u64, thread: String, engine: String, mut r: Reader, mut child: tokio::process::Child, stdout: tokio::process::ChildStdout, mut ctl: mpsc::UnboundedReceiver<Ctl>, me: mpsc::UnboundedSender<Ctl>) {
+    async fn read(self: Arc<Self>, hub: Arc<Hub>, client: u64, id: u64, mut thread: String, engine: String, mut r: Reader, mut child: tokio::process::Child, stdout: tokio::process::ChildStdout, mut ctl: mpsc::UnboundedReceiver<Ctl>, me: mpsc::UnboundedSender<Ctl>) {
         let mut lines = BufReader::new(stdout).lines(); let mut tick = tokio::time::interval(Duration::from_secs(1));
         // the end-of-turn countdown: when it ends, and the pause it is about
         let mut due: Option<(tokio::time::Instant, u64)> = None;
@@ -116,10 +130,16 @@ impl Voice {
             let at = due.map(|d| d.0);
             tokio::select! {
                 l = lines.next_line() => { let Ok(Some(l)) = l else { break };
-                    let outs = self.with(&thread, |d| r.step(&l, d, &engine)); self.out(&hub, client, &thread, &r, outs, &me, &mut due).await;
+                    let outs = self.with(&thread, |d| r.step(&l, d, &engine));
+                    // always on: the message was said to a name first ("Bub, …"): it goes there
+                    if let Some(name) = outs.iter().find_map(|o| if let Out::Route(n) = o { Some(n.clone()) } else { None }) {
+                        if let Some(t) = route_to(&hub, &name).await.filter(|t| *t != thread) { self.retarget(&hub, client, id, &mut thread, &t); }
+                    }
+                    self.out(&hub, client, &thread, &r, outs, &me, &mut due).await;
                 }
                 Some(c) = ctl.recv() => {
-                    let outs = match c { Ctl::Cut(n, seq) => self.with(&thread, |d| r.cut(n, seq, d)), Ctl::Hold => r.eot_hold(), Ctl::Jev(gen, p) => r.eot_answer(gen, p) };
+                    let outs = match c { Ctl::Cut(n, seq) => self.with(&thread, |d| r.cut(n, seq, d)), Ctl::Hold => r.eot_hold(), Ctl::Jev(gen, p) => r.eot_answer(gen, p),
+                        Ctl::Target(t) => { if !r.started() && !t.is_empty() && t != thread { self.retarget(&hub, client, id, &mut thread, &t); } vec![] } };
                     self.out(&hub, client, &thread, &r, outs, &me, &mut due).await;
                 }
                 _ = async { match at { Some(t) => tokio::time::sleep_until(t).await, None => std::future::pending().await } } => {
@@ -137,6 +157,36 @@ impl Voice {
         { let mut g = self.st.lock().unwrap(); if g.live.as_ref().map_or(false, |l| l.id == id) { g.live = None } }
         self.with(&thread, |d| { d.idle(); if code != Some(0) && d.err.is_empty() { d.err = "the voice helper stopped".into() } });
         self.tell(&hub, client, &thread);
+        // always on: it listens again unless the person muted it, it is paused (the watcher starts it when that ends) or nobody is there
+        let again = { let mut g = self.st.lock().unwrap(); match g.always.as_mut() { Some(a) if !a.off && a.paused.is_empty() && hub.is_attached(client) => { a.params["thread"] = json!(thread); Some(a.params.clone()) } _ => None } };
+        if let Some(p) = again { self.with(&thread, |d| d.err.clear()); tokio::time::sleep(Duration::from_secs(1)).await; let _ = self.again(hub.clone(), client, p).await; }
+    }
+    /// Always on: start again (boxed: start, read and watch reach one another).
+    fn again(self: &Arc<Self>, hub: Arc<Hub>, client: u64, p: Value) -> std::pin::Pin<Box<dyn std::future::Future<Output = Value> + Send>> { let v = self.clone(); Box::pin(async move { v.start(&hub, client, &p).await }) }
+    /// Always on: the message goes to another thread from here on (its strip shows there).
+    fn retarget(&self, hub: &Hub, client: u64, id: u64, thread: &mut String, to: &str) {
+        let from = std::mem::replace(thread, to.to_string());
+        { let mut g = self.st.lock().unwrap(); if let Some(l) = g.live.as_mut().filter(|l| l.id == id) { l.thread = to.to_string() } if let Some(a) = g.always.as_mut() { a.params["thread"] = json!(to) } }
+        let st = self.with(&from, |d| { let s = d.clone(); d.idle(); s }); self.with(to, |d| *d = st);
+        self.tell(hub, client, &from); self.tell(hub, client, to);
+    }
+    /// Always on: pauses for a lock, a call or the background (always.rs `pause_reason`) and listens again after; every 2 s while it is on.
+    async fn watch(self: Arc<Self>, hub: Arc<Hub>) {
+        loop {
+            tokio::time::sleep(Duration::from_secs(2)).await;
+            let Some((client, focused, paused, off, params)) = ({ let g = self.st.lock().unwrap(); g.always.as_ref().map(|a| (a.client, a.focused, a.paused.clone(), a.off, a.params.clone())) }) else { break };
+            if off { self.st.lock().unwrap().always.as_mut().map(|a| a.watching = false); break }
+            let cfg = super::always::Cfg::of(&prefs(&hub).await);
+            let (apps, locked) = tokio::task::spawn_blocking({ let ig = cfg.ignore.clone(); move || system_state(&ig) }).await.unwrap_or_default();
+            let why = super::always::pause_reason(&cfg, &apps, locked, focused);
+            let thread = s(&params, "thread").to_string();
+            if why != paused {
+                self.st.lock().unwrap().always.as_mut().map(|a| a.paused = why.clone());
+                self.with(&thread, |d| d.paused = why.clone());
+                if !why.is_empty() { let id = self.st.lock().unwrap().live.as_ref().filter(|l| l.always).map(|l| l.id); if let Some(id) = id { self.close_audio(id) } self.tell(&hub, client, &thread); }
+                else if self.st.lock().unwrap().live.is_none() { let _ = self.again(hub.clone(), client, params).await; }
+            }
+        }
     }
     /// What a reader's step gives, to the client: each edit with the session's cut count and its number (`Reader::cut`); an end-of-turn question
     /// goes to Jev (its answer comes back on `me`), a countdown is timed in `due`, an end-of-turn send is counted for the undo log.
@@ -171,10 +221,14 @@ impl Voice {
             // a voice command: the client sends (or steers) the draft it has now, or clears it, with its undo window; `cut` is the count it takes
             Out::Command(c) => { hub.push(client, frame(thread, "command", json!({"cmd": c, "cut": r.cuts}))); }
             Out::View => self.tell(hub, client, thread),
+            Out::Route(_) => {} // the read loop moved the session to the named thread already
             Out::Level(v) => { hub.push(client, frame(thread, "level", json!({"v": v}))); }
         } }
     }
     fn stop(self: &Arc<Self>) {
+        // the person stopped it: always-on is muted (it starts again only when turned on)
+        let was = { let mut g = self.st.lock().unwrap(); g.always.as_mut().map(|a| { a.off = true; a.paused.clear(); s(&a.params, "thread").to_string() }) };
+        if let Some(t) = was { self.with(&t, |d| { d.always = false; d.paused.clear(); }) }
         let (id, upload) = { let g = self.st.lock().unwrap(); let Some(l) = g.live.as_ref() else { return }; (l.id, l.upload) };
         if !upload { return self.close_audio(id) }
         let v = self.clone(); tokio::spawn(async move { tokio::time::sleep(UPLOAD_GRACE).await; v.close_audio(id) });
@@ -233,6 +287,9 @@ impl Voice {
         // a send while dictating: the words up to the client's last edit (`seq`) went with it; `cut` counts the client's sends this session
         if let (Some(n), true) = (p["cut"].as_u64(), s(p, "action") == "voice-clear") { let g = self.st.lock().unwrap(); if let Some(l) = g.live.as_ref().filter(|l| l.thread == thread) { let _ = l.ctl.send(Ctl::Cut(n, p["seq"].as_u64().unwrap_or(0))); } }
         match s(p, "action") {
+            // always on: the window's focus (for "pause while in the background"), and the thread now open (the next message goes there)
+            "voice-focus" => { if let Some(a) = self.st.lock().unwrap().always.as_mut() { a.focused = s(p, "value") != "0" } return Ok(()) }
+            "voice-target" => { let g = self.st.lock().unwrap(); if let Some(l) = g.live.as_ref().filter(|l| l.always) { let _ = l.ctl.send(Ctl::Target(s(p, "value").to_string())); } return Ok(()) }
             // Keep talking, in an end-of-turn countdown
             "voice-hold" => { let g = self.st.lock().unwrap(); if let Some(l) = g.live.as_ref().filter(|l| l.thread == thread) { let _ = l.ctl.send(Ctl::Hold); } return Ok(()) }
             // Undo of a voice send: when it was an end-of-turn send a moment ago, the threshold learns to wait a little more (only here, never sent)
@@ -251,9 +308,14 @@ impl Voice {
     /// A button of the Voice page (`voice-op`), or a line typed to the dictionary (`voice-term`), or a `setting`.
     pub async fn page_act(self: &Arc<Self>, hub: &Arc<Hub>, client: u64, action: &str, value: &str) -> Result<(), String> {
         match action {
-            "setting" => { let (k, v) = value.split_once('=').unwrap_or((value, "")); if !k.starts_with("voice.") { return Err("not a voice setting".into()) } commit(hub, &[(k.to_string(), v.to_string())]).await?; if let Some(r) = resident::of(&hub.cfg.home) { r.kick() } }
+            "setting" => {
+                let (k, v) = value.split_once('=').unwrap_or((value, "")); if !k.starts_with("voice.") { return Err("not a voice setting".into()) } commit(hub, &[(k.to_string(), v.to_string())]).await?; if let Some(r) = resident::of(&hub.cfg.home) { r.kick() }
+                // always on turned on: this client starts it in its open thread; off: it stops
+                if k == super::always::ON { if v == "on" { hub.push(client, frame("", "always", json!({"want": true}))); } else { self.stop(); self.st.lock().unwrap().always = None; hub.push(client, frame("", "always", json!({"want": false}))); } }
+            }
             "voice-term" => commit(hub, &page::term_settings(value)).await?,
             "voice-phrases" => commit(hub, &[page::phrases_setting(value)]).await?,
+            "voice-always-ignore" => commit(hub, &[(super::always::IGNORE.to_string(), value.split(',').map(str::trim).filter(|s| !s.is_empty()).collect::<Vec<_>>().join(", "))]).await?,
             "voice-jev-model" => commit(hub, &[(super::eot::MODEL.to_string(), value.trim().to_string())]).await?,
             "voice-op" => { self.op(hub, client, value).await?; }
             _ => return Err("unknown voice action".into()),
@@ -308,6 +370,9 @@ impl RpcHandler for VoiceRpc {
                 "start" => { let b = v.start(hub, who.client, p).await; ok(b) }
                 "stop" => { v.stop(); ok(json!({})) }
                 "view" => ok(json!({"view": v.view(s(p, "thread"))})),
+                // a client starting up: whether always-on is wanted (then it starts it), and whether it is already running
+                "always" => { let want = super::always::Cfg::of(&prefs(hub).await).on; let running = v.st.lock().unwrap().always.as_ref().map_or(false, |a| !a.off);
+                    hub.push(who.client, frame("", "always", json!({"want": want, "running": running}))); ok(json!({"want": want, "running": running})) }
                 "act" => done(v.act(hub, who.client, p).await),
                 "page" => { let rows = page::rows(&prefs(hub).await, &hub.info_now(), "", ""); ok(json!({"rows": rows})) }
                 "page-act" => done(v.page_act(hub, who.client, s(p, "action"), s(p, "value")).await),
@@ -386,6 +451,23 @@ pub async fn hear_file(hub: &Hub, path: &Path, ct: &str, want: &str) -> Result<s
     let segs: Vec<(i64, i64, i64, String)> = done["segments"].as_array().map(|a| a.iter().filter_map(|x| Some((x[0].as_i64()?, x[1].as_i64()?, x[2].as_i64()?, x[3].as_str()?.to_string()))).collect()).unwrap_or_default();
     let conf = segs.iter().map(|x| x.2).min();
     Ok(super::ringbox::Heard { model: if engine == "local" { model } else { "gpt-live-transcribe".to_string() }, text, unsure: note, conf, segs, at: now_ms() / 1000 })
+}
+
+/// Bub's chat (the uberbot's), where always-on dictation goes when no thread is open.
+async fn bub_thread(hub: &Arc<Hub>) -> Option<String> { let b = hub.setting("uber.bot").await.filter(|b| !b.is_empty())?; crate::bots::api::chat_thread(hub, &b).await }
+/// The thread a spoken name means: Bub, or a thread's title (always.rs `resolve`).
+async fn route_to(hub: &Arc<Hub>, name: &str) -> Option<String> {
+    let mut ts: Vec<(String, String)> = { let m = hub.model().await; m.threads.iter().filter(|(_, t)| !t.deleted && !t.archived && !t.title.trim().is_empty()).map(|(id, t)| (id.clone(), t.title.clone())).collect() };
+    if let Some(b) = bub_thread(hub).await { ts.retain(|(id, _)| *id != b); ts.push((b, "Bub".into())) }
+    super::always::resolve(name, &ts).map(str::to_string)
+}
+/// Who else has the microphone (pw-dump, else pactl), and whether the screen is locked (loginctl): what always-on pauses for.
+fn system_state(ignore: &[String]) -> (Vec<String>, bool) {
+    let run = |c: &str, a: &[&str]| crate::proc::std_cmd(Kind::Local, c).args(a).stderr(Stdio::null()).output().ok().filter(|o| o.status.success()).map(|o| String::from_utf8_lossy(&o.stdout).into_owned());
+    let apps = run("pw-dump", &[]).or_else(|| run("pactl", &["-f", "json", "list", "source-outputs"])).map_or(vec![], |j| super::always::capturing(&j, ignore));
+    let ids: Vec<String> = run("loginctl", &["list-sessions", "--no-legend"]).unwrap_or_default().lines().filter_map(|l| l.split_whitespace().next().map(String::from)).collect();
+    let shows: Vec<String> = ids.iter().filter_map(|id| run("loginctl", &["show-session", id, "-p", "LockedHint", "-p", "Type"])).collect();
+    (apps, super::always::locked(&shows))
 }
 
 /// Registers `bots.voice` and `/voice/in`, and starts the resident recognizer's keeper (before `settings::start`, which then leaves `bots.voice` alone).
