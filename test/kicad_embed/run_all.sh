@@ -21,6 +21,7 @@ SUITES=(
   "embed_xprobe_e2e.sh:xprobe"
   "embed_bp9_e2e.sh:bp9"
   "embed_checks_e2e.sh:checks"
+  "embed_checks_panel_e2e.sh:checks-panel"
   # the editor row on a schematic every load must repair (test/files/fixtures/broken-toplevel, the shape of the person's Hubble_DK after a
   # bp.11 headless save): Board -> Schematic must draw (bp.11/bp.12-pre hung behind a hidden "automatically fixed" modal). Fork mode only.
   "embed_ux_e2e.sh:ux-broken-toplevel:KEMBED_PROJ_SRC=$REPO_ROOT/test/files/fixtures/broken-toplevel"
