@@ -4,7 +4,9 @@
 pub mod drc;
 pub mod gather;
 pub mod model;
+pub mod panel;
 pub mod project;
+pub mod setup;
 pub mod store;
 
 use crate::{agents::mcp::ToolSet, api::{Caller, Fut, RpcHandler}, hub::Hub};
@@ -15,6 +17,7 @@ use std::{path::{Path, PathBuf}, sync::Arc};
 pub fn start(hub: &Arc<Hub>, ag: Option<&Arc<crate::agents::Agents>>) {
     hub.register_rpc(Arc::new(Rpc));
     gather::start(hub); // the fab's published pages, read again a while after start and then daily
+    crate::files::kicad::mgmt::register(Arc::new(panel::FabPanel)); // the Fab tab beside the design
     if let Some(ag) = ag { ag.add_tools(Arc::new(Tools(hub.clone()))) }
 }
 
@@ -69,8 +72,10 @@ async fn root_for(hub: &Arc<Hub>, thread: &str, project: &str) -> Option<PathBuf
 fn sv<'a>(v: &'a Value, k: &str) -> &'a str { v.get(k).and_then(Value::as_str).unwrap_or("") }
 
 /// get (default), pick {fab?, kind?, options?} (kept with the project; marks the current revision seen), seen (the changes are read).
-pub async fn act(hub: &Arc<Hub>, thread: &str, project: &str, a: &Value) -> Result<Value, String> {
-    let root = root_for(hub, thread, project).await;
+pub async fn act(hub: &Arc<Hub>, thread: &str, project: &str, a: &Value) -> Result<Value, String> { let root = root_for(hub, thread, project).await; act_in(hub, root, a).await }
+pub async fn act_in(hub: &Arc<Hub>, root: Option<PathBuf>, a: &Value) -> Result<Value, String> {
+    // a board setup suggestion the person approved (the panel's Apply)
+    if sv(a, "action") == "apply" { let r = root.as_deref().ok_or("this thread has no project folder")?; return setup::apply(hub, r, sv(a, "key")).await }
     // read the fab's published pages again now (the project's fab, or the one named)
     if sv(a, "action") == "refresh" {
         let fab = if !sv(a, "fab").is_empty() { sv(a, "fab").to_string() } else { match &root { Some(r) => { let r = r.clone(); tokio::task::spawn_blocking(move || choice(&r).fab).await.unwrap_or_default() } None => store::ordering_fab() } };
@@ -112,11 +117,16 @@ pub async fn act(hub: &Arc<Hub>, thread: &str, project: &str, a: &Value) -> Resu
 pub struct Rpc;
 impl RpcHandler for Rpc {
     fn methods(&self) -> &'static [&'static str] { &["fab.profile"] }
-    /// `fab.profile {thread | project, action?: get|pick|seen, fab?, kind?, options?}` → the view (Fab.view).
+    /// `fab.profile {thread | project | pro, action?: get|pick|seen|drc|refresh|apply, fab?, kind?, options?, tier?, key?}` → the view (Fab.view),
+    /// or what an apply did. `pro` (a .kicad_pro, the Fab panel's) publishes the panel again after the action.
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, _who: &'a Caller, id: &'a Value, _method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             if sv(p, "action") != "get" && !sv(p, "action").is_empty() && crate::copy::on() { return vec![json!({"t":"reply","id":id,"ok":false,"error":crate::copy::HOME_ONLY})] }
-            vec![match act(hub, sv(p, "thread"), sv(p, "project"), p).await { Ok(v) => json!({"t":"reply","id":id,"ok":true,"result":v}), Err(e) => json!({"t":"reply","id":id,"ok":false,"error":e}) }]
+            // the panel names the project by its .kicad_pro
+            let pro = sv(p, "pro");
+            let r = if pro.is_empty() { act(hub, sv(p, "thread"), sv(p, "project"), p).await } else { match panel::root_of_pro(hub, pro).await { Some(root) => act_in(hub, Some(root), p).await, None => Err("not in a project this hub knows".into()) } };
+            if !pro.is_empty() && r.is_ok() { panel::publish(hub, pro).await }
+            vec![match r { Ok(v) => json!({"t":"reply","id":id,"ok":true,"result":v}), Err(e) => json!({"t":"reply","id":id,"ok":false,"error":e}) }]
         })
     }
 }
@@ -138,6 +148,7 @@ impl ToolSet for Tools {
     fn call<'a>(&'a self, thread: &'a str, _name: &'a str, a: &'a Value) -> Fut<'a, (bool, Value)> {
         Box::pin(async move {
             if !matches!(sv(a, "action"), "" | "get") && crate::copy::on() { return (false, json!({"error": crate::copy::HOME_ONLY})) }
+            if sv(a, "action") == "apply" { return (false, json!({"error": "applying a board setup suggestion is the person's (the Fab panel's Apply): tell them the suggestion instead"})) }
             match act(&self.0, thread, "", a).await { Ok(v) => (true, v), Err(e) => (false, json!({"error": e})) }
         })
     }
