@@ -269,6 +269,9 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Re
             Ok(json!({"buy": b.map_or(Value::Null, |b| json!({"label":b["label"],"tip":b["tip"]}))})) }
         "order.buy" => { let th = s(p, "thread"); if th.is_empty() { return Some(Err(err("thread"))) }
             rpc(hub, c, "order.buy", json!({"thread":th})).await.map(|r| json!({"thread":r["thread"]})) }
+        // feature "fabprofile": the project's fab profile (fab/mod.rs Fab.view), the same the desktop and the agents' fab_profile read; `action` get, pick or seen
+        "fab.profile" => { let (th, pr) = (s(p, "thread"), s(p, "project")); if th.is_empty() && pr.is_empty() { return Some(Err(err("thread or project"))) }
+            rpc(hub, c, "fab.profile", p.clone()).await.map(|r| json!({"profile":r["result"]})) }
         "locks.list" => Ok(json!({"locks":locks_now(hub).await})),
         // a row's button, as the row names it (present/panels.rs)
         "work.act" => { let (th, v) = (s(p, "thread"), s(p, "value")); match s(p, "act") {
