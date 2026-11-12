@@ -23,6 +23,8 @@ pub struct Page {
     pub fetched: String,
     #[serde(default, skip_serializing_if = "String::is_empty")] pub etag: String,
     #[serde(default, skip_serializing_if = "String::is_empty")] pub sha256: String,
+    /// a table the page publishes only as an image: the image's address its values were read from (a new address is a new table)
+    #[serde(default, skip_serializing_if = "String::is_empty")] pub image: String,
 }
 
 /// The options a value holds for. Ranges are inclusive; a missing field holds for any.
@@ -154,7 +156,7 @@ pub fn label(key: &str) -> &'static str {
         "microvia_hole_min" => "microvia hole", "microvia_hole_max" => "largest microvia hole", "buried_via_hole_min" => "buried via hole",
         "sides" => "sides placed", "thickness_min" => "thinnest board", "thickness_max" => "thickest board", "qty_min" => "fewest boards", "qty_max" => "most boards",
         "min_package" => "smallest package", "ic_pitch_min" => "IC pin pitch", "bga_pitch_min" => "BGA pitch", "reflow_c" => "reflow peak",
-        "rails_needed" => "edge rails needed", "pth_to_inner_copper_min" => "plated hole to inner copper", "fiducials_needed" => "fiducials needed",
+        "rails_needed" => "edge rails needed", "pth_to_inner_copper_min" => "plated hole to inner copper", "npth_pad_ring_min" => "non-plated hole ring", "fiducials_needed" => "fiducials needed",
         _ => "",
     }
 }

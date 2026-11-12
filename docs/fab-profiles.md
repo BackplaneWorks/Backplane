@@ -72,7 +72,8 @@ marked section, merged, never overwritten:
 ## Gathering (`fab/gather.rs`)
 
 Fabs with a profile and an adapter: `jlcpcb` (the fab Backplane orders from: rigid, flex, HDI and metal-core pages, assembly, impedance
-stackups) `pcbway` (its standard PCB table) and `oshpark` (its two- and four-layer service pages, with its 4-layer stackup); pick one with `fab_profile {action: "pick", fab: "<id>"}` to design against it. Per fab an adapter: its published pages and, per value of the profile, where on which page it is (a table row's label, the words
+stackups) `pcbway` (its standard PCB table), `oshpark` (its two- and four-layer service pages, with its 4-layer stackup) and `eurocircuits`
+(its pattern and drill classes: the free values are what every service makes, the costs-more ones its pool services' finest); pick one with `fab_profile {action: "pick", fab: "<id>"}` to design against it. Per fab an adapter: its published pages and, per value of the profile, where on which page it is (a table row's label, the words
 before the number, which number after them, a factor for a mil or a ring). More fabs are a baseline file plus an adapter.
 
 - `refresh` GETs each page with curl (`proc::Kind::Net`, a second apart, a Backplane user agent, https only, 8 MB at most); nothing of
@@ -80,6 +81,10 @@ before the number, which number after them, a factor for a mil or a ring). More 
 - Every value it reads gets today's date; one it cannot read (a page that did not come, a row that moved) keeps its old value and
   date and is listed in the report's `missing`. A changed value bumps the revision; the history keeps every one. Stackups are read
   whole from the impedance page (plies, thickness, Er from the page's own table; a prepreg its table does not name has no Er).
+- A table a fab publishes only as an image (eurocircuits' classification table) was read into the baseline once by hand; its page
+  records the image's address (`pages.<id>.image`). A gather reads the page's text values as usual and watches that address: a new
+  one is said in the report's `notes` ("the table image is now …"), and the values stay as they were read, with their dates, until the
+  baseline is read again. Never a guess, never OCR.
 - The hub runs it 3 minutes after start and then daily; `fab_profile {action: "refresh"}` and `fab.profile {action: "refresh"}` run
   it now. A change is pushed to clients as `{t: "fab.changed", fab, rev, changes, keys, projects}` (the open projects on that fab);
   a project's view marks its values `changed` until it is `seen`. The last run is `<home>/fab/gathered-<fab>.json`, shown as the

@@ -36,7 +36,7 @@ pub fn data(v: &Value) -> Value {
     let n_bad = conf.len(); let n_warn = sugg.len() + changed.len() + usize::from(drc == "stale");
     json!({"badge": {"n": n_bad + n_warn, "tone": if n_bad > 0 { "bad" } else if n_warn > 0 { "warn" } else { "" }},
         "fab": v["fab"], "rev": v["rev"], "updated": v["updated"], "by": ch["by"], "tier": ch["tier"], "board": board,
-        "gathered": v["gathered"]["at"], "missing": v["gathered"]["report"]["missing"].as_array().map_or(0, Vec::len),
+        "gathered": v["gathered"]["at"], "missing": v["gathered"]["report"]["missing"].as_array().map_or(0, Vec::len), "notes": v["gathered"]["report"]["notes"],
         "drc": {"state": drc, "file": d["file"]}, "suggestions": sugg, "conflicts": conf, "changed": changed, "limits": limits,
         "stackups": v["stackups"].as_array().map_or(0, Vec::len),
         "stackup": {"chosen": v["stackup"]["chosen"], "by": v["stackup"]["by"], "why": v["stackup"]["proposals"].as_array().and_then(|a| a.iter().find(|x| x["id"] == v["stackup"]["chosen"])).map_or(Value::Null, |x| x["why"].clone()),

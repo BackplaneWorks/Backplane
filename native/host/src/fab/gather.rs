@@ -97,8 +97,13 @@ pub enum Read {
     After(&'static str, usize, &'static str, usize),
     /// the same as text
     AfterText(&'static str, usize),
+    /// anywhere in the page's text: the words before the number and which number after them
+    Text(&'static str, usize),
 }
-pub struct Adapter { pub fab: &'static str, pub pages: &'static [(&'static str, &'static str)], pub rules: &'static [Rule], pub stackups: Option<&'static str> }
+pub struct Adapter { pub fab: &'static str, pub pages: &'static [(&'static str, &'static str)], pub rules: &'static [Rule], pub stackups: Option<&'static str>,
+    /// tables a page publishes only as an image: (page, a word of the image's address); its values were read from it once, by hand, and
+    /// a gather only watches the address: a new one is said (`notes`), the values kept, never guessed
+    pub images: &'static [(&'static str, &'static str)] }
 
 const MIL: f64 = 0.0254;
 macro_rules! r { ($p:expr, $at:expr, $k:expr, $c:expr, $w:expr, $read:expr) => { Rule { page: $p, at: $at, key: $k, cost: $c, when: $w, read: $read } } }
@@ -108,7 +113,7 @@ const L12_1: &str = r#"{"layers":[1,2],"copper_oz":[1,1]}"#; const L4_1: &str = 
 const L12_2: &str = r#"{"layers":[1,2],"copper_oz":[2,2]}"#; const L4_2: &str = r#"{"layers":[4,32],"copper_oz":[2,2]}"#;
 const L2P: &str = r#"{"layers":[2,32]}"#; const THIN: &str = r#"{"layers":[2,32],"thickness_mm":[0,1.0],"finish":["enig","osp"]}"#;
 /// The fab Backplane orders from.
-pub const JLCPCB: Adapter = Adapter { fab: "jlcpcb", stackups: Some("impedance"), pages: &[
+pub const JLCPCB: Adapter = Adapter { fab: "jlcpcb", stackups: Some("impedance"), images: &[], pages: &[
     ("rigid", "https://jlcpcb.com/capabilities/pcb-capabilities"), ("flex", "https://jlcpcb.com/capabilities/flex-pcb-capabilities"),
     ("assembly", "https://jlcpcb.com/capabilities/pcb-assembly-capabilities"), ("impedance", "https://jlcpcb.com/impedance")], rules: &[
     r!("rigid", PCB, "layers_max", "free", "{}", Row("Layer count", "", 1, 1.0)),
@@ -241,7 +246,7 @@ pub const JLCPCB: Adapter = Adapter { fab: "jlcpcb", stackups: Some("impedance")
 ]};
 const CAP: &str = "capabilities";
 /// A second fab, read off its published capability page (the standard PCB table).
-pub const PCBWAY: Adapter = Adapter { fab: "pcbway", stackups: None, pages: &[(CAP, "https://www.pcbway.com/capabilities.html")], rules: &[
+pub const PCBWAY: Adapter = Adapter { fab: "pcbway", stackups: None, images: &[], pages: &[(CAP, "https://www.pcbway.com/capabilities.html")], rules: &[
     r!(CAP, PCB, "layers_max", "free", "{}", Row("Number of Layers", "", 1, 1.0)),
     r!(CAP, PCB, "track_min", "free", "{}", Row("Min Trace", "", 0, 1.0)),
     r!(CAP, PCB, "space_min", "free", "{}", Row("Min Spacing", "spacing is", 1, 1.0)),
@@ -281,8 +286,18 @@ const OSH4: [Rule; 13] = osh!("four", L4);
 const OSH4X: [Rule; 1] = [r!("four", PCB, "pth_to_inner_copper_min", "free", L4, Row("Plated Drill to Internal Layer Copper Clearance", "(", 0, 1.0))];
 const OSH_RULES: [Rule; 27] = { let mut v = [OSH2[0]; 27]; let mut i = 0; while i < 13 { v[i] = OSH2[i]; v[13 + i] = OSH4[i]; i += 1 } v[26] = OSH4X[0]; v };
 /// A third fab: its two- and four-layer service pages.
-pub const OSHPARK: Adapter = Adapter { fab: "oshpark", stackups: None, pages: &[("two", "https://docs.oshpark.com/services/two-layer/"), ("four", "https://docs.oshpark.com/services/four-layer/")], rules: &OSH_RULES };
-pub const ADAPTERS: &[&Adapter] = &[&JLCPCB, &PCBWAY, &OSHPARK];
+pub const OSHPARK: Adapter = Adapter { fab: "oshpark", stackups: None, images: &[], pages: &[("two", "https://docs.oshpark.com/services/two-layer/"), ("four", "https://docs.oshpark.com/services/four-layer/")], rules: &OSH_RULES };
+/// A fourth fab: its design classification page, whose pattern and drill class table is an image (read once into the baseline; watched).
+pub const EUROCIRCUITS: Adapter = Adapter { fab: "eurocircuits", stackups: None, images: &[("classes", "classification")],
+    pages: &[("classes", "https://www.eurocircuits.com/pcb-design-guidelines-classification/")], rules: &[
+    r!("classes", PCB, "npth_pad_ring_min", "free", "{}", Text("minimum annular ring of", 0)),
+    r!("classes", PCB, "pth_to_inner_copper_min", "free", "{}", Text("with a minimum of", 0)),
+]};
+pub const ADAPTERS: &[&Adapter] = &[&JLCPCB, &PCBWAY, &OSHPARK, &EUROCIRCUITS];
+/// The address of the first image on a page whose address has the word (in the page's own HTML).
+pub fn image_src(html: &str, word: &str) -> Option<String> {
+    html.match_indices("src=\"").map(|(i, _)| &html[i + 5..]).filter_map(|r| r.split('"').next()).find(|s| s.contains(word) && (s.ends_with(".png") || s.ends_with(".jpg") || s.ends_with(".webp") || s.ends_with(".gif"))).map(str::to_string)
+}
 pub fn adapter(fab: &str) -> Option<&'static Adapter> { ADAPTERS.iter().copied().find(|a| a.fab == fab) }
 
 fn cell(l: &str) -> &str { l.trim().trim_end_matches('|').trim() }
@@ -298,6 +313,7 @@ pub fn read(ls: &[String], how: &Read) -> Option<Value> {
             Some(json!(if (*scale - 1.0).abs() < 1e-12 { v } else { round(v * scale) }))
         }
         After(label, k, words, nth) => { let cl = content(ls); let at = cl.iter().position(|l| *l == *label)?; num_after(cl.get(at + k)?, words, *nth).map(|v| json!(v)) }
+        Text(words, nth) => num_after(&content(ls).join("\n"), words, *nth).map(|v| json!(v)),
         AfterText(label, k) => { let cl = content(ls); let at = cl.iter().position(|l| *l == *label)?; cl.get(at + k).map(|v| json!(v)) }
     }
 }
@@ -349,8 +365,8 @@ pub fn stackups(ls: &[String], page: &str, url: &str, today: &str) -> Vec<Stacku
 
 /// One gather's outcome.
 #[derive(Debug, Default)]
-pub struct Report { pub read: usize, pub missing: Vec<String>, pub changes: Vec<Change>, pub pages_failed: Vec<String> }
-impl Report { pub fn json(&self) -> Value { json!({"read": self.read, "missing": self.missing, "changes": self.changes.iter().map(Change::line).collect::<Vec<_>>(), "pages_failed": self.pages_failed}) } }
+pub struct Report { pub read: usize, pub missing: Vec<String>, pub changes: Vec<Change>, pub pages_failed: Vec<String>, pub notes: Vec<String> }
+impl Report { pub fn json(&self) -> Value { json!({"read": self.read, "missing": self.missing, "changes": self.changes.iter().map(Change::line).collect::<Vec<_>>(), "pages_failed": self.pages_failed, "notes": self.notes}) } }
 
 fn find_mut<'a>(p: &'a mut Profile, at: &str, key: &str, cost: &str, when: &When) -> Option<&'a mut Limit> {
     let s = if let Some(k) = at.strip_prefix("kind ") { p.kinds.get_mut(k)? } else { p.assembly.get_mut(at.strip_prefix("assembly ")?)? };
@@ -383,6 +399,16 @@ pub fn apply(old: &Profile, a: &Adapter, pages: &[(&str, Option<String>)], today
             p.stackups = st;
         }
     } }
+    // a table published as an image: a new address is a new table, said; its values stay as read by hand until the baseline is read again
+    for (pg, word) in a.images {
+        let Some(html) = pages.iter().find(|(i, _)| i == pg).and_then(|(_, h)| h.as_deref()) else { continue };
+        let was = old.pages.get(*pg).map(|x| x.image.clone()).unwrap_or_default();
+        match image_src(html, word) {
+            Some(now) if now != was => rep.notes.push(format!("{pg}: the table image is now {now} (its values were read from {was}); they are kept: read the new one into the baseline")),
+            None => rep.notes.push(format!("{pg}: the table image ({word}) is gone from the page; its values are kept")),
+            _ => {}
+        }
+    }
     for (id, h) in pages { if h.is_some() { if let Some(pg) = p.pages.get_mut(*id) { pg.fetched = today.into(); pg.sha256 = sha(h.as_deref().unwrap_or("")) } } }
     rep.changes = diff(old, &p);
     if !rep.changes.is_empty() { p.rev = old.rev + 1 }
@@ -502,6 +528,17 @@ mod tests {
         let (p, rep) = apply(&base, &OSHPARK, &[("two", Some(page("two-layer"))), ("four", Some(page("four-layer")))], "2026-11-12");
         assert!(rep.missing.is_empty(), "{:#?}", rep.missing); assert_eq!(rep.read, OSHPARK.rules.len());
         assert!(rep.changes.is_empty(), "{:#?}", rep.changes.iter().map(Change::line).collect::<Vec<_>>()); assert_eq!(p.rev, base.rev);
+    }
+    #[test] fn fab_gather_a_table_published_as_an_image_is_watched_not_guessed() {
+        let base = store::baseline("eurocircuits").unwrap();
+        let page = std::fs::read_to_string(format!("{}/../../test/fab/fixtures/eurocircuits/classes.html", env!("CARGO_MANIFEST_DIR"))).unwrap();
+        let (p, rep) = apply(&base, &EUROCIRCUITS, &[("classes", Some(page.clone()))], "2026-11-12");
+        assert!(rep.missing.is_empty() && rep.notes.is_empty() && rep.changes.is_empty(), "{:?} {:?}", rep.missing, rep.notes); assert_eq!(rep.read, 2); assert_eq!(p.rev, base.rev);
+        let newer = page.replace("EC-classification-ENGLISH-5-2024-V3.png", "EC-classification-ENGLISH-1-2027-V1.png");
+        let (p, rep) = apply(&base, &EUROCIRCUITS, &[("classes", Some(newer))], "2027-01-10");
+        assert_eq!(rep.notes.len(), 1); assert!(rep.notes[0].contains("1-2027-V1.png"), "{:?}", rep.notes);
+        let t = p.kinds["pcb"].limits.iter().find(|l| l.key == "track_min" && l.cost == "free").unwrap(); assert_eq!((t.value.clone(), t.fetched.as_str()), (json!(0.15), "2026-11-12"), "kept with its date");
+        assert_eq!(p.pages["classes"].image, base.pages["classes"].image, "still says which table its values are from");
     }
     #[test] fn fab_gather_a_changed_page_changes_the_value_and_the_revision_and_a_missing_one_keeps_the_old() {
         let base = store::baseline("jlcpcb").unwrap();

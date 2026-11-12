@@ -1,0 +1,1043 @@
+<!doctype html>
+<html class="no-js min-h-full antialiased" lang="en-GB">
+<head>
+		<meta charset="utf-8">
+	<meta http-equiv="x-ua-compatible" content="ie=edge">
+	<meta name="author" content="Eurocircuits">
+	<meta name="viewport" content="width=device-width, initial-scale=1">
+		<meta name='robots' content='index, follow, max-image-preview:large, max-snippet:-1, max-video-preview:-1' />
+<link rel="alternate" href="https://www.eurocircuits.com/technical-guidelines/pcb-design-guidelines/classification/" hreflang="en" />
+<link rel="alternate" href="https://www.eurocircuits.com/de/technische-richtlinien/leitfaden-leiterplattendesign/klassifizierung/" hreflang="de" />
+<link rel="alternate" href="https://www.eurocircuits.com/hu/muszaki-utmutatok/pcb-tervezesi-utmutato/osztalybasorolas/" hreflang="hu" />
+
+	<!-- This site is optimized with the Yoast SEO plugin v28.6 - https://yoast.com/product/yoast-seo-wordpress/ -->
+	<title>Classification - Eurocircuits</title>
+	<meta name="description" content="PCB pattern classes and drill classes are used to measure the manufacturability of the PCB and wheter is can be pooled or not." />
+	<link rel="canonical" href="https://www.eurocircuits.com/technical-guidelines/pcb-design-guidelines/classification/" />
+	<meta property="og:locale" content="en_GB" />
+	<meta property="og:locale:alternate" content="de_DE" />
+	<meta property="og:locale:alternate" content="hu_HU" />
+	<meta property="og:type" content="article" />
+	<meta property="og:title" content="Classification - Eurocircuits" />
+	<meta property="og:description" content="PCB pattern classes and drill classes are used to measure the manufacturability of the PCB and wheter is can be pooled or not." />
+	<meta property="og:url" content="https://www.eurocircuits.com/technical-guidelines/pcb-design-guidelines/classification/" />
+	<meta property="og:site_name" content="Eurocircuits" />
+	<meta property="article:modified_time" content="2025-06-24T13:34:06+00:00" />
+	<meta name="twitter:card" content="summary_large_image" />
+	<meta name="twitter:label1" content="Est. reading time" />
+	<meta name="twitter:data1" content="1 minute" />
+	<script type="application/ld+json" class="yoast-schema-graph">{"@context":"https:\/\/schema.org","@graph":[{"@type":"WebPage","@id":"https:\/\/www.eurocircuits.com\/technical-guidelines\/pcb-design-guidelines\/classification\/","url":"https:\/\/www.eurocircuits.com\/technical-guidelines\/pcb-design-guidelines\/classification\/","name":"Classification - Eurocircuits","isPartOf":{"@id":"https:\/\/www.eurocircuits.com\/#website"},"primaryImageOfPage":{"@id":"https:\/\/www.eurocircuits.com\/technical-guidelines\/pcb-design-guidelines\/classification\/#primaryimage"},"image":{"@id":"https:\/\/www.eurocircuits.com\/technical-guidelines\/pcb-design-guidelines\/classification\/#primaryimage"},"thumbnailUrl":"https:\/\/www.eurocircuits.com\/content\/uploads\/2025\/04\/EC-classification-ENGLISH-5-2024-V3.png","datePublished":"2019-12-05T13:09:58+00:00","dateModified":"2025-06-24T13:34:06+00:00","description":"PCB pattern classes and drill classes are used to measure the manufacturability of the PCB and wheter is can be pooled or not.","breadcrumb":{"@id":"https:\/\/www.eurocircuits.com\/technical-guidelines\/pcb-design-guidelines\/classification\/#breadcrumb"},"inLanguage":"en-GB","potentialAction":[{"@type":"ReadAction","target":["https:\/\/www.eurocircuits.com\/technical-guidelines\/pcb-design-guidelines\/classification\/"]}]},{"@type":"ImageObject","inLanguage":"en-GB","@id":"https:\/\/www.eurocircuits.com\/technical-guidelines\/pcb-design-guidelines\/classification\/#primaryimage","url":"https:\/\/www.eurocircuits.com\/content\/uploads\/2025\/04\/EC-classification-ENGLISH-5-2024-V3.png","contentUrl":"https:\/\/www.eurocircuits.com\/content\/uploads\/2025\/04\/EC-classification-ENGLISH-5-2024-V3.png"},{"@type":"BreadcrumbList","@id":"https:\/\/www.eurocircuits.com\/technical-guidelines\/pcb-design-guidelines\/classification\/#breadcrumb","itemListElement":[{"@type":"ListItem","position":1,"name":"Homepage","item":"https:\/\/www.eurocircuits.com\/"},{"@type":"ListItem","position":2,"name":"Technical Guidelines","item":"https:\/\/www.eurocircuits.com\/technical-guidelines\/"},{"@type":"ListItem","position":3,"name":"PCB Design Guidelines","item":"https:\/\/www.eurocircuits.com\/technical-guidelines\/pcb-design-guidelines\/"},{"@type":"ListItem","position":4,"name":"Classification"}]},{"@type":"WebSite","@id":"https:\/\/www.eurocircuits.com\/#website","url":"https:\/\/www.eurocircuits.com\/","name":"Eurocircuits","description":"","potentialAction":[{"@type":"SearchAction","target":{"@type":"EntryPoint","urlTemplate":"https:\/\/www.eurocircuits.com\/?s={search_term_string}"},"query-input":{"@type":"PropertyValueSpecification","valueRequired":true,"valueName":"search_term_string"}}],"inLanguage":"en-GB"}]}</script>
+	<!-- / Yoast SEO plugin. -->
+
+
+<link rel="alternate" title="oEmbed (JSON)" type="application/json+oembed" href="https://www.eurocircuits.com/wp-json/oembed/1.0/embed?url=https%3A%2F%2Fwww.eurocircuits.com%2Ftechnical-guidelines%2Fpcb-design-guidelines%2Fclassification%2F&#038;lang=en" />
+<link rel="alternate" title="oEmbed (XML)" type="text/xml+oembed" href="https://www.eurocircuits.com/wp-json/oembed/1.0/embed?url=https%3A%2F%2Fwww.eurocircuits.com%2Ftechnical-guidelines%2Fpcb-design-guidelines%2Fclassification%2F&#038;format=xml&#038;lang=en" />
+<link rel='stylesheet' id='gravity_forms_theme_foundation-css' href='https://www.eurocircuits.com/content/plugins/gravityforms/assets/css/dist/gravity-forms-theme-foundation.min.css?ver=3.1.3.1' media='all' />
+<style id="wp-block-library-inline-css">
+:root{--wp-block-synced-color:#7a00df;--wp-block-synced-color--rgb:122,0,223;--wp-bound-block-color:var(--wp-block-synced-color);--wp-editor-canvas-background:#ddd;--wp-admin-theme-color:#007cba;--wp-admin-theme-color--rgb:0,124,186;--wp-admin-theme-color-darker-10:#006ba1;--wp-admin-theme-color-darker-10--rgb:0,107,160.5;--wp-admin-theme-color-darker-20:#005a87;--wp-admin-theme-color-darker-20--rgb:0,90,135;--wp-admin-border-width-focus:2px}@media (min-resolution:192dpi){:root{--wp-admin-border-width-focus:1.5px}}.wp-element-button{cursor:pointer}:root .has-very-light-gray-background-color{background-color:#eee}:root .has-very-dark-gray-background-color{background-color:#313131}:root .has-very-light-gray-color{color:#eee}:root .has-very-dark-gray-color{color:#313131}:root .has-vivid-green-cyan-to-vivid-cyan-blue-gradient-background{background:linear-gradient(135deg,#00d084,#0693e3)}:root .has-purple-crush-gradient-background{background:linear-gradient(135deg,#34e2e4,#4721fb 50%,#ab1dfe)}:root .has-hazy-dawn-gradient-background{background:linear-gradient(135deg,#faaca8,#dad0ec)}:root .has-subdued-olive-gradient-background{background:linear-gradient(135deg,#fafae1,#67a671)}:root .has-atomic-cream-gradient-background{background:linear-gradient(135deg,#fdd79a,#004a59)}:root .has-nightshade-gradient-background{background:linear-gradient(135deg,#330968,#31cdcf)}:root .has-midnight-gradient-background{background:linear-gradient(135deg,#020381,#2874fc)}:root{--wp--preset--font-size--normal:16px;--wp--preset--font-size--huge:42px}.has-regular-font-size{font-size:1em}.has-larger-font-size{font-size:2.625em}.has-normal-font-size{font-size:var(--wp--preset--font-size--normal)}.has-huge-font-size{font-size:var(--wp--preset--font-size--huge)}:root .has-text-align-center{text-align:center}:root .has-text-align-left{text-align:left}:root .has-text-align-right{text-align:right}.has-fit-text{white-space:nowrap!important}#end-resizable-editor-section{display:none}.aligncenter{clear:both}.items-justified-left{justify-content:flex-start}.items-justified-center{justify-content:center}.items-justified-right{justify-content:flex-end}.items-justified-space-between{justify-content:space-between}.screen-reader-text{word-wrap:normal!important;border:0;clip-path:inset(50%);height:1px;margin:-1px;overflow:hidden;padding:0;position:absolute;width:1px;word-break:normal!important}.screen-reader-text:focus{background-color:#ddd;clip-path:none;color:#444;display:block;font-size:1em;height:auto;left:5px;line-height:normal;padding:15px 23px 14px;text-decoration:none;top:5px;width:auto;z-index:100000}html :where(.has-border-color){border-style:solid}html :where([style^=border-color],[style*=";border-color"],[style*="; border-color"]){border-style:solid}html :where([style^=border-top-color],[style*=";border-top-color"],[style*="; border-top-color"]){border-top-style:solid}html :where([style^=border-right-color],[style*=";border-right-color"],[style*="; border-right-color"]){border-right-style:solid}html :where([style^=border-bottom-color],[style*=";border-bottom-color"],[style*="; border-bottom-color"]){border-bottom-style:solid}html :where([style^=border-left-color],[style*=";border-left-color"],[style*="; border-left-color"]){border-left-style:solid}html :where([style^=border-width],[style*=";border-width"],[style*="; border-width"]){border-style:solid}html :where([style^=border-top-width],[style*=";border-top-width"],[style*="; border-top-width"]){border-top-style:solid}html :where([style^=border-right-width],[style*=";border-right-width"],[style*="; border-right-width"]){border-right-style:solid}html :where([style^=border-bottom-width],[style*=";border-bottom-width"],[style*="; border-bottom-width"]){border-bottom-style:solid}html :where([style^=border-left-width],[style*=";border-left-width"],[style*="; border-left-width"]){border-left-style:solid}html :where(img[class*=wp-image-]){height:auto;max-width:100%}:where(figure){margin:0 0 1em}html :where(.is-position-sticky){--wp-admin--admin-bar--position-offset:var(--wp-admin--admin-bar--height,0px)}@media screen and (max-width:600px){html :where(.is-position-sticky){--wp-admin--admin-bar--position-offset:0px}}
+/*wp_block_styles_on_demand_placeholder:6af64384ac348*/
+/*# sourceURL=wp-block-library-inline-css */
+</style>
+<style id="classic-theme-styles-inline-css">
+/*! This file is auto-generated */
+.wp-block-button__link{color:#fff;background-color:#32373c;border-radius:9999px;box-shadow:none;text-decoration:none;padding:calc(.667em + 2px) calc(1.333em + 2px);font-size:1.125em}.wp-block-file__button{background:#32373c;color:#fff;text-decoration:none}
+/*# sourceURL=/wp-includes/css/classic-themes.min.css */
+</style>
+<style id="wp-block-styles-placeholder-inline-css">
+:root { --wp-internal-comment: "Placeholder for wp_hoist_late_printed_styles() to replace with the block styles printed at wp_footer." }
+/*# sourceURL=wp-block-styles-placeholder-inline-css */
+</style>
+<style id="wp-global-styles-placeholder-inline-css">
+:root { --wp-internal-comment: "Placeholder for wp_hoist_late_printed_styles() to replace with the global-styles printed at wp_footer." }
+/*# sourceURL=wp-global-styles-placeholder-inline-css */
+</style>
+<link rel='stylesheet' id='io-ai-variables-css' href='https://www.eurocircuits.com/content/plugins/io-ai-wp-core/assets/css/variables.css?ver=2.10.2' media='all' />
+<link rel='stylesheet' id='dashicons-css' href='https://www.eurocircuits.com/wp/wp-includes/css/dashicons.min.css?ver=7.1.3' media='all' />
+<link rel='stylesheet' id='io-ai-wp-chatbot-variables-css' href='https://www.eurocircuits.com/content/plugins/io-ai-wp-chatbot/assets/css/variables.css?ver=1.13.2' media='all' />
+<link rel='stylesheet' id='io-search-shared-css' href='https://www.eurocircuits.com/content/plugins/io-ai-wp-chatbot/assets/css/search-shared.css?ver=1.13.2' media='all' />
+<link rel='stylesheet' id='io-conversational-search-css' href='https://www.eurocircuits.com/content/plugins/io-ai-wp-chatbot/assets/css/conversational-search.css?ver=1.13.2' media='all' />
+<link rel='stylesheet' id='main-css-css' href='https://www.eurocircuits.com/content/themes/io/build/css/main-2limI9Ui.css' media='all' />
+<style id="kadence-blocks-global-variables-inline-css">
+:root {--global-kb-font-size-sm:clamp(0.8rem, 0.73rem + 0.217vw, 0.9rem);--global-kb-font-size-md:clamp(1.1rem, 0.995rem + 0.326vw, 1.25rem);--global-kb-font-size-lg:clamp(1.75rem, 1.576rem + 0.543vw, 2rem);--global-kb-font-size-xl:clamp(2.25rem, 1.728rem + 1.63vw, 3rem);--global-kb-font-size-xxl:clamp(2.5rem, 1.456rem + 3.26vw, 4rem);--global-kb-font-size-xxxl:clamp(2.75rem, 0.489rem + 7.065vw, 6rem);}:root {--global-palette1: #3182CE;--global-palette2: #2B6CB0;--global-palette3: #1A202C;--global-palette4: #2D3748;--global-palette5: #4A5568;--global-palette6: #718096;--global-palette7: #EDF2F7;--global-palette8: #F7FAFC;--global-palette9: #ffffff;}
+/*# sourceURL=kadence-blocks-global-variables-inline-css */
+</style>
+<script id="jquery-core-js" src="https://www.eurocircuits.com/wp/wp-includes/js/jquery/jquery.min.js?ver=3.7.1"></script>
+<script id="jquery-migrate-js" src="https://www.eurocircuits.com/wp/wp-includes/js/jquery/jquery-migrate.min.js?ver=3.4.1"></script>
+<script id="jquery-js-after">
+jQuery.event.special.touchstart = {
+        setup: function( _, ns, handle ) {
+            this.addEventListener("touchstart", handle, { passive: !ns.includes("noPreventDefault") });
+        }
+    };
+    jQuery.event.special.touchmove = {
+        setup: function( _, ns, handle ) {
+            this.addEventListener("touchmove", handle, { passive: !ns.includes("noPreventDefault") });
+        }
+    };
+    jQuery.event.special.wheel = {
+        setup: function( _, ns, handle ){
+            this.addEventListener("wheel", handle, { passive: true });
+        }
+    };
+    jQuery.event.special.mousewheel = {
+        setup: function( _, ns, handle ){
+            this.addEventListener("mousewheel", handle, { passive: true });
+        }
+    };
+//# sourceURL=jquery-js-after
+</script>
+<link rel="https://api.w.org/" href="https://www.eurocircuits.com/wp-json/" /><link rel="alternate" title="JSON" type="application/json" href="https://www.eurocircuits.com/wp-json/wp/v2/technical_guideline/3612" /><link rel="EditURI" type="application/rsd+xml" title="RSD" href="https://www.eurocircuits.com/wp/xmlrpc.php?rsd" />
+<link rel='shortlink' href='https://www.eurocircuits.com/?p=3612' />
+<meta name="google-site-verification" content="0BFI80gXtUU9DjzUDEMfDyG9j5RRvpTi5Su8l_IH_TA" />
+	<!-- Start Google Tag Manager -->
+	<script>(function (w, d, s, l, i) {
+			w[l] = w[l] || [];
+			w[l].push({
+				'gtm.start':
+					new Date().getTime(), event: 'gtm.js'
+			});
+			var f = d.getElementsByTagName(s)[0],
+				j = d.createElement(s), dl = l != 'dataLayer' ? '&l=' + l : '';
+			j.async = true;
+			j.src =
+				'https://www.googletagmanager.com/gtm.js?id=' + i + dl;
+			f.parentNode.insertBefore(j, f);
+		})(window, document, 'script', 'dataLayer', 'GTM-KRNKVGZN');</script>
+	<!-- End Google Tag Manager -->
+			<script>
+			window.dataLayer = window.dataLayer || [];
+			window.dataLayer.push({
+				'external_ip': '73.43.27.214'
+			});
+		</script>
+			<link rel="icon" type="image/png" href="https://www.eurocircuits.com/content/themes/io/build/favicon/favicon-96x96.png" sizes="96x96"/>
+	<link rel="icon" type="image/svg+xml" href="https://www.eurocircuits.com/content/themes/io/build/favicon/favicon.svg"/>
+	<link rel="shortcut icon" href="https://www.eurocircuits.com/content/themes/io/build/favicon/favicon.ico"/>
+	<link rel="apple-touch-icon" sizes="180x180" href="https://www.eurocircuits.com/content/themes/io/build/favicon/apple-touch-icon.png"/>
+	<meta name="apple-mobile-web-app-title" content="Eurocircuits"/>
+	<link rel="manifest" href="https://www.eurocircuits.com/content/themes/io/build/favicon/site.webmanifest"/>
+	<style id="wp-custom-css">
+
+/* Hide duplicate Eurocircuits heading on SEO AI blog posts */
+body:has(.seoaic-post) h1:has(> a[href="https://www.eurocircuits.com/"]) {
+    display: none !important;
+}
+
+</style>
+</head>
+<body class="wp-singular technical_guideline-template-default single single-technical_guideline postid-3612 wp-theme-io io-theme flex flex-col min-h-screen">
+<header class="c-header relative top-0 left-0 w-full bg-white font-bold transition duration-300 z-40">
+	<div class="bg-gray-50 py-3 hidden lg:block">
+		<div class="container">
+			<div class="flex items-center justify-end gap-5">
+								<nav class="c-nav-secondary">
+					<ul id="menu-header-secondary" class="list-none m-0 flex items-center justify-end gap-x-5"><li id="menu-item-6937" class="menu-item menu-item-type-custom menu-item-object-custom menu-item-6937"><a target="_blank" href="https://be.eurocircuits.com/shop/eclogin.aspx">Sign In / Register</a></li>
+<li id="menu-item-3199" class="menu-item menu-item-type-custom menu-item-object-custom menu-item-3199"><a target="_blank" href="https://be.eurocircuits.com/shop/assembly/configurator.aspx">PCB Calculator</a></li>
+<li id="menu-item-3201" class="menu-item menu-item-type-post_type menu-item-object-page menu-item-3201"><a href="https://www.eurocircuits.com/contact/">Contact</a></li>
+</ul>				</nav>
+			</div>
+		</div>
+	</div>
+	<div class="container flex justify-between items-center py-2 lg:py-4">
+		<div class="flex items-center">
+			<a href="https://www.eurocircuits.com"
+			   class="c-logo block w-16 lg:w-24 aspect-square me-2 xl:me-5 lg:me-11"
+			   title="Eurocircuits">
+				<img src="https://www.eurocircuits.com/content/themes/io/build/img/logo.png" alt="Logo Eurocircuits">
+			</a>
+							<nav role="navigation" class="c-nav-primary mr-4">
+					<ul id="menu-primary-navigation" class=""><li id="menu-item-8605" class="menu-item menu-item-type-post_type menu-item-object-page menu-item-8605"><a href="https://www.eurocircuits.com/services/">Services</a></li>
+<li id="menu-item-12534" class="menu-item menu-item-type-post_type menu-item-object-page menu-item-has-children menu-item-12534"><a href="https://www.eurocircuits.com/help-knowledge-centre/">Help &amp; Knowledge centre</a>
+<ul class="sub-menu">
+	<li id="menu-item-3495" class="menu-item menu-item-type-post_type menu-item-object-page menu-item-has-children menu-item-3495"><a href="https://www.eurocircuits.com/help-knowledge-centre/help-centre/">Help centre</a>
+	<ul class="sub-menu">
+		<li id="menu-item-10849" class="menu-item menu-item-type-custom menu-item-object-custom menu-item-10849"><a href="https://www.eurocircuits.com/technical-guidelines/">Technical guidelines</a></li>
+		<li id="menu-item-10850" class="menu-item menu-item-type-custom menu-item-object-custom menu-item-10850"><a href="https://www.eurocircuits.com/user-guides/">User guides</a></li>
+		<li id="menu-item-33619" class="menu-item menu-item-type-custom menu-item-object-custom menu-item-33619"><a href="https://www.eurocircuits.com/technical-guidelines/technical-educational-videos/">Technical &#038; Educational Videos</a></li>
+	</ul>
+</li>
+	<li id="menu-item-3494" class="menu-item menu-item-type-post_type menu-item-object-page menu-item-has-children menu-item-3494"><a href="https://www.eurocircuits.com/help-knowledge-centre/knowledge-centre/">Knowledge centre</a>
+	<ul class="sub-menu">
+		<li id="menu-item-10829" class="menu-item menu-item-type-custom menu-item-object-custom menu-item-10829"><a href="https://www.eurocircuits.com/blog/">Blogs</a></li>
+		<li id="menu-item-10830" class="menu-item menu-item-type-custom menu-item-object-custom menu-item-10830"><a href="https://www.eurocircuits.com/events/">Events</a></li>
+		<li id="menu-item-10852" class="menu-item menu-item-type-custom menu-item-object-custom menu-item-10852"><a href="https://www.eurocircuits.com/technical-terms-and-abbreviations/">Glossary</a></li>
+	</ul>
+</li>
+</ul>
+</li>
+<li id="menu-item-3586" class="menu-item menu-item-type-post_type menu-item-object-page menu-item-3586"><a href="https://www.eurocircuits.com/how-it-works/">How it works</a></li>
+<li id="menu-item-8612" class="menu-item menu-item-type-post_type menu-item-object-page menu-item-8612"><a href="https://www.eurocircuits.com/for-students-teachers/">For students &amp; teachers</a></li>
+<li id="menu-item-12775" class="menu-item menu-item-type-post_type menu-item-object-page menu-item-12775"><a href="https://www.eurocircuits.com/downloads/">Downloads</a></li>
+<li id="menu-item-8611" class="menu-item menu-item-type-post_type menu-item-object-page menu-item-8611"><a href="https://www.eurocircuits.com/about-us/">About us</a></li>
+</ul>				</nav>
+					</div>
+
+		<div class="flex justify-end items-center">
+									<a href="https://www.eurocircuits.com/help-knowledge-centre/help-centre/"
+					   class="c-header__search text-black w-14 px-4 h-14 items-center flex mr-3 lg:mr-0">
+												<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><path fill="currentColor" d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16a6.5 6.5 0 1 1 0-13m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>					</a>
+				
+										<a href="https://be.eurocircuits.com/shop/assembly/configurator.aspx"
+						   class="btn btn-primary text-base lg:text-lg px-3 lg:px-5 hidden lg:inline-flex" target=&quot;_blank&quot;>
+							Get an instant price						</a>
+															<div class="c-hamburger js-hamburger group relative w-[30px] h-[22px] ml-auto cursor-pointer lg:hidden">
+						<span
+							class="absolute block w-full h-[3px] bg-primary rounded left-0 opacity-100 transition duration-300 transform-none top-0 group-[.is-open]:top-[7px] group-[.is-open]:-rotate-45"></span>
+						<span
+							class="absolute block w-full h-[3px] bg-primary rounded left-0 opacity-100 transition duration-300 transform-none top-[7px] group-[.is-open]:opacity-0 group-[.is-open]:-left-8"></span>
+						<span
+							class="absolute block w-full h-[3px] bg-primary rounded left-0 opacity-100 transition duration-300 transform-none top-[14px] group-[.is-open]:top-[7px] group-[.is-open]:rotate-45"></span>
+					</div>
+				
+							<div class="c-language-selector hidden md:inline-block text-white uppercase ml-3 lg:ml-4">
+    <div class="group relative bg-primary rounded py-1 px-2 hover:cursor-pointer hover:rounded-t">
+        <div class="flex items-center text-inherit">
+            <span class="block uppercase">en</span>
+            <span class="block w-2.5 h-2.5 ml-2 transition group-hover:-scale-y-100"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 25"><path fill="currentColor" d="M7.41 9.08 12 13.67l4.59-4.59L18 10.5l-6 6-6-6z"/></svg></span>
+        </div>
+
+        <ul class="c-language-selector__list absolute left-0 top-full -translate-y-1 hidden w-full m-0 p-0 bg-primary overflow-hidden rounded-b group-hover:block">
+            	<li class="lang-item lang-item-166 lang-item-de lang-item-first"><a lang="de-DE" hreflang="de-DE" href="https://www.eurocircuits.com/de/technische-richtlinien/leitfaden-leiterplattendesign/klassifizierung/">de</a></li>
+	<li class="lang-item lang-item-171 lang-item-hu"><a lang="hu-HU" hreflang="hu-HU" href="https://www.eurocircuits.com/hu/muszaki-utmutatok/pcb-tervezesi-utmutato/osztalybasorolas/">hu</a></li>
+        </ul>
+    </div>
+</div>
+					</div>
+	</div>
+</header>
+
+<main role="main" class="relative grow transition duration-300 z-10 overflow-clip">
+	
+	<div
+		class="pt-8 pb-20 relative after:absolute after:w-4/5 after:max-w-[75vw] after:h-[450px] after:top-0 after:right-0 after:bg-pattern after:-z-10">
+		<div class="container">
+			
+<div class="grid gap-4 lg:grid-cols-2 items-center">
+    <div><div class="c-breadcrumb bg-white px-4 py-3 inline-block" id="breadcrumbs"><span><span><a href="https://www.eurocircuits.com/">Homepage</a></span> <svg width="24" height="25" viewBox="0 0 24 25" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M8.58984 17.08L13.1698 12.5L8.58984 7.91L9.99984 6.5L15.9998 12.5L9.99984 18.5L8.58984 17.08Z" fill="currentColor"/>
+</svg> <span><a href="https://www.eurocircuits.com/technical-guidelines/">Technical Guidelines</a></span> <svg width="24" height="25" viewBox="0 0 24 25" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M8.58984 17.08L13.1698 12.5L8.58984 7.91L9.99984 6.5L15.9998 12.5L9.99984 18.5L8.58984 17.08Z" fill="currentColor"/>
+</svg> <span><a href="https://www.eurocircuits.com/technical-guidelines/pcb-design-guidelines/">PCB Design Guidelines</a></span> <svg width="24" height="25" viewBox="0 0 24 25" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <path d="M8.58984 17.08L13.1698 12.5L8.58984 7.91L9.99984 6.5L15.9998 12.5L9.99984 18.5L8.58984 17.08Z" fill="currentColor"/>
+</svg> <span class="breadcrumb_last" aria-current="page">Classification</span></span></div></div>		<form role="search" method="get" class="search-form relative" action="https://www.eurocircuits.com/help-centre/search">
+			<label>
+				<span class="screen-reader-text sr-only">
+					Search for:				</span>
+				<input type="search" class="search-field w-full bg-white text-lg font-light text-dark px-5 py-4 border border-gray-100 rounded-lg placeholder:text-gray-700 focus:border-gray focus:ring-0"
+					placeholder="Ask a question &hellip;"
+					value="" name="s" />
+			</label>
+
+			<button type="submit" class="search-submit absolute top-0 right-0 text-secondary w-14 px-4 h-full flex items-center">
+				<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24"><path fill="currentColor" d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16a6.5 6.5 0 1 1 0-13m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>			</button>
+		</form>
+		</div>
+
+			<div class="grid grid-cols-12 gap-8 mb-12 mt-24">
+				<h1 class="text-primary font-normal col-start-4 col-span-8 md:px-4">
+					Classification				</h1>
+			</div>
+
+			<div class="grid grid-cols-12 items-start gap-8">
+									<aside class="col-span-12 md:col-span-4 xl:col-span-3 bg-primary-50 px-3 2xl:px-5 py-14">
+																					<a href="https://www.eurocircuits.com/technical-guidelines/pcb-design-guidelines/"
+								   class="group font-light py-1 gap-2 ps-1 pe-3 xl:px-5 rounded-sm transition hover:bg-primary-100 mb-4 flex items-center text-sm group-hover/active:text-white group-hover:text-primary">
+									<span
+										class="group-hover/active:text-white group-hover:text-primary block w-4 h-4 shrink-0">
+																				<svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 25"><path fill="currentColor" d="m8.59 17.08 4.58-4.58-4.58-4.59L10 6.5l6 6-6 6z"/></svg>									</span>
+									Back toPCB Design Guidelines								</a>
+														<h3 class="text-lg font-normal mx-4 mb-4">
+	Articles in this section</h3>
+<a href="https://www.eurocircuits.com/technical-guidelines/pcb-design-guidelines/10-rules-for-better-data/"class="group font-light py-1 flex items-center gap-2 ps-1 pe-3 xl:px-5 rounded-sm transition hover:bg-primary-100 hover:no-underline"><span class="group-hover/active:text-white group-hover:text-primary block w-4 h-4 shrink-0"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 25"><path fill="currentColor" d="m8.59 17.08 4.58-4.58-4.58-4.59L10 6.5l6 6-6 6z"/></svg></span>10 Rules for Better Data</a><a href="https://www.eurocircuits.com/technical-guidelines/pcb-design-guidelines/bga-components/"class="group font-light py-1 flex items-center gap-2 ps-1 pe-3 xl:px-5 rounded-sm transition hover:bg-primary-100 hover:no-underline"><span class="group-hover/active:text-white group-hover:text-primary block w-4 h-4 shrink-0"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 25"><path fill="currentColor" d="m8.59 17.08 4.58-4.58-4.58-4.59L10 6.5l6 6-6 6z"/></svg></span>BGA Components</a><a href="https://www.eurocircuits.com/technical-guidelines/pcb-design-guidelines/carbon-contacts/"class="group font-light py-1 flex items-center gap-2 ps-1 pe-3 xl:px-5 rounded-sm transition hover:bg-primary-100 hover:no-underline"><span class="group-hover/active:text-white group-hover:text-primary block w-4 h-4 shrink-0"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 25"><path fill="currentColor" d="m8.59 17.08 4.58-4.58-4.58-4.59L10 6.5l6 6-6 6z"/></svg></span>Carbon Contacts</a><a href="https://www.eurocircuits.com/technical-guidelines/pcb-design-guidelines/classification/"class="!bg-primary !text-white font-normal group/active font-light py-1 flex items-center gap-2 ps-1 pe-3 xl:px-5 rounded-sm transition hover:bg-primary-100 hover:no-underline"><span class="group-hover/active:text-white group-hover:text-primary block w-4 h-4 shrink-0"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 25"><path fill="currentColor" d="m8.59 17.08 4.58-4.58-4.58-4.59L10 6.5l6 6-6 6z"/></svg></span>Classification</a><a href="https://www.eurocircuits.com/technical-guidelines/pcb-design-guidelines/copper-layers/"class="group font-light py-1 flex items-center gap-2 ps-1 pe-3 xl:px-5 rounded-sm transition hover:bg-primary-100 hover:no-underline"><span class="group-hover/active:text-white group-hover:text-primary block w-4 h-4 shrink-0"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 25"><path fill="currentColor" d="m8.59 17.08 4.58-4.58-4.58-4.59L10 6.5l6 6-6 6z"/></svg></span>Copper layers</a><a href="https://www.eurocircuits.com/technical-guidelines/pcb-design-guidelines/drilled-holes/"class="group font-light py-1 flex items-center gap-2 ps-1 pe-3 xl:px-5 rounded-sm transition hover:bg-primary-100 hover:no-underline"><span class="group-hover/active:text-white group-hover:text-primary block w-4 h-4 shrink-0"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 25"><path fill="currentColor" d="m8.59 17.08 4.58-4.58-4.58-4.59L10 6.5l6 6-6 6z"/></svg></span>Drilled Holes</a><a href="https://www.eurocircuits.com/technical-guidelines/pcb-design-guidelines/edge-connectors/"class="group font-light py-1 flex items-center gap-2 ps-1 pe-3 xl:px-5 rounded-sm transition hover:bg-primary-100 hover:no-underline"><span class="group-hover/active:text-white group-hover:text-primary block w-4 h-4 shrink-0"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 25"><path fill="currentColor" d="m8.59 17.08 4.58-4.58-4.58-4.59L10 6.5l6 6-6 6z"/></svg></span>Edge Connectors</a><a href="https://www.eurocircuits.com/technical-guidelines/pcb-design-guidelines/heatsink-paste/"class="group font-light py-1 flex items-center gap-2 ps-1 pe-3 xl:px-5 rounded-sm transition hover:bg-primary-100 hover:no-underline"><span class="group-hover/active:text-white group-hover:text-primary block w-4 h-4 shrink-0"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 25"><path fill="currentColor" d="m8.59 17.08 4.58-4.58-4.58-4.59L10 6.5l6 6-6 6z"/></svg></span>Heatsink Paste</a><a href="https://www.eurocircuits.com/technical-guidelines/pcb-design-guidelines/input-data-formats/"class="group font-light py-1 flex items-center gap-2 ps-1 pe-3 xl:px-5 rounded-sm transition hover:bg-primary-100 hover:no-underline"><span class="group-hover/active:text-white group-hover:text-primary block w-4 h-4 shrink-0"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 25"><path fill="currentColor" d="m8.59 17.08 4.58-4.58-4.58-4.59L10 6.5l6 6-6 6z"/></svg></span>Input Data Formats</a><a href="https://www.eurocircuits.com/technical-guidelines/pcb-design-guidelines/legend-print/"class="group font-light py-1 flex items-center gap-2 ps-1 pe-3 xl:px-5 rounded-sm transition hover:bg-primary-100 hover:no-underline"><span class="group-hover/active:text-white group-hover:text-primary block w-4 h-4 shrink-0"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 25"><path fill="currentColor" d="m8.59 17.08 4.58-4.58-4.58-4.59L10 6.5l6 6-6 6z"/></svg></span>Legend Print</a><a href="https://www.eurocircuits.com/technical-guidelines/pcb-design-guidelines/mechanical-layer/"class="group font-light py-1 flex items-center gap-2 ps-1 pe-3 xl:px-5 rounded-sm transition hover:bg-primary-100 hover:no-underline"><span class="group-hover/active:text-white group-hover:text-primary block w-4 h-4 shrink-0"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 25"><path fill="currentColor" d="m8.59 17.08 4.58-4.58-4.58-4.59L10 6.5l6 6-6 6z"/></svg></span>Mechanical Layer</a><a href="https://www.eurocircuits.com/technical-guidelines/pcb-design-guidelines/peel-off-mask/"class="group font-light py-1 flex items-center gap-2 ps-1 pe-3 xl:px-5 rounded-sm transition hover:bg-primary-100 hover:no-underline"><span class="group-hover/active:text-white group-hover:text-primary block w-4 h-4 shrink-0"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 25"><path fill="currentColor" d="m8.59 17.08 4.58-4.58-4.58-4.59L10 6.5l6 6-6 6z"/></svg></span>Peel-off Mask</a><a href="https://www.eurocircuits.com/technical-guidelines/pcb-design-guidelines/soldermask/"class="group font-light py-1 flex items-center gap-2 ps-1 pe-3 xl:px-5 rounded-sm transition hover:bg-primary-100 hover:no-underline"><span class="group-hover/active:text-white group-hover:text-primary block w-4 h-4 shrink-0"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 25"><path fill="currentColor" d="m8.59 17.08 4.58-4.58-4.58-4.59L10 6.5l6 6-6 6z"/></svg></span>Soldermask</a><a href="https://www.eurocircuits.com/technical-guidelines/pcb-design-guidelines/track-width-graphic/"class="group font-light py-1 flex items-center gap-2 ps-1 pe-3 xl:px-5 rounded-sm transition hover:bg-primary-100 hover:no-underline"><span class="group-hover/active:text-white group-hover:text-primary block w-4 h-4 shrink-0"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 25"><path fill="currentColor" d="m8.59 17.08 4.58-4.58-4.58-4.59L10 6.5l6 6-6 6z"/></svg></span>Track Width Graphic</a><a href="https://www.eurocircuits.com/technical-guidelines/pcb-design-guidelines/via-filling/"class="group font-light py-1 flex items-center gap-2 ps-1 pe-3 xl:px-5 rounded-sm transition hover:bg-primary-100 hover:no-underline"><span class="group-hover/active:text-white group-hover:text-primary block w-4 h-4 shrink-0"><svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 25"><path fill="currentColor" d="m8.59 17.08 4.58-4.58-4.58-4.59L10 6.5l6 6-6 6z"/></svg></span>Via Filling</a>					</aside>
+								<main
+					class="col-span-12
+											md:col-span-8 xl:col-span-9  bg-white pt-7 pb-12">
+					<div class="c-single-guide flex flex-col gap-12">
+				    <section class="b-core-html  pb-6 md:pb-12 lg:pb-14 xl:pb-20 relative before:absolute before:h-80 before:top-0 before:w-3/5 before:right-0 before:bg-pattern before:-z-10">
+        <div class="container">
+            <div class="w-full mx-auto flex flex-col items-start gap-8 b-core-html__content">
+                
+<!--
+<section class="av_textblock_section "  itemscope="itemscope" itemtype="https://schema.org/CreativeWork" ><div class='avia_textblock  '   itemprop="text" ><div class="breadcrumb breadcrumbs avia-breadcrumbs"><div class="breadcrumb-trail" ><span class="trail-before"><span class="breadcrumb-title">You are here:</span></span> <span  itemscope="itemscope" itemtype="https://schema.org/BreadcrumbList" ><span  itemscope="itemscope" itemtype="https://schema.org/ListItem" itemprop="itemListElement" ><a itemprop="url" href="https://www.eurocircuits.com" title="Eurocircuits" rel="home" class="trail-begin"><span itemprop="name">Home</span></a><span itemprop="position" class="hidden">1</span></span></span></div></div>
+</div></section>
+<div class="flex_column av_one_fourth  flex_column_div first  avia-builder-el-1  el_after_av_textblock  el_before_av_three_fourth  column-top-margin" style='border-width:1px; border-color:#c6c6c6; border-style:solid; padding:10px; background-color:#f8f8f8; border-radius:10px; '><p><div  class='avia-builder-widget-area clearfix  avia-builder-el-2  el_before_av_textblock  avia-builder-el-first '><section id="block-20" class="widget clearfix widget_block"><div class=""><div class="su-spacer" style="height:5px"></div><h4 style="text-align: center;"><strong><u>PCB Design Guideline Topics</u></strong></h4><div class="su-spacer" style="height:3px"></div><br> <a href="https://www.eurocircuits.com/pcb-design-guidelines/" rel="noopener">Introduction</a><p><a href="https://www.eurocircuits.com/pcb-design-guidelines/input-data-formats/" rel="noopener">Input Data Formats</a></p><p><a href="https://www.eurocircuits.com/pcb-design-guidelines/10-rules-for-better-data/" rel="noopener">10 Rules for Better Data</a></p><p><a href="https://www.eurocircuits.com/pcb-design-guidelines/classification/" rel="noopener">Classification</a></p><p><a href="https://www.eurocircuits.com/pcb-design-guidelines/drilled-holes/" rel="noopener">Drilled Holes</a></p><p><a href="https://www.eurocircuits.com/pcb-design-guidelines/copper-layers/" rel="noopener">Copper Layers</a></p><p><a href="https://www.eurocircuits.com/pcb-design-guidelines/edge-connectors/" rel="noopener">Edge Connectors</a></p><p><a href="https://www.eurocircuits.com/pcb-design-guidelines/bga-components/" rel="noopener">BGA Components</a></p><p><a href="https://www.eurocircuits.com/pcb-design-guidelines/mechanical-layer/" rel="noopener">Mechanical Layer</a></p><p><a href="https://www.eurocircuits.com/pcb-design-guidelines/soldermask/" rel="noopener">Soldermask</a></p><p><a href="https://www.eurocircuits.com/pcb-design-guidelines/legend-print/" rel="noopener">Legend Print</a></p><p><a href="https://www.eurocircuits.com/pcb-design-guidelines/carbon-contacts/" rel="noopener">Carbon Contacts</a></p><p><a href="https://www.eurocircuits.com/pcb-design-guidelines/peel-off-mask/" rel="noopener">Peel-off Mask</a></p><p><a href="https://www.eurocircuits.com/pcb-design-guidelines/via-filling/" rel="noopener">Via Filling</a></p><p><a href="https://www.eurocircuits.com/pcb-design-guidelines/heatsink-paste/" rel="noopener">Heatsink Paste</a></p><p><a href="https://www.eurocircuits.com/pcb-design-guidelines/track-width-graphic/" rel="noopener">Track Width Graphic</a></p></div><span class="seperator extralight-border"></span></section></div><br />
+<section class="av_textblock_section "  itemscope="itemscope" itemtype="https://schema.org/CreativeWork" ><div class='avia_textblock  '   itemprop="text" ><div class="su-divider su-divider-style-default" style="margin:0px 0;border-width:3px;border-color:#999999"></div>
+<p><strong>See also:</strong></p>
+<p><a href="https://www.eurocircuits.com/panel-guidelines/" rel="noopener noreferrer">Panel Guidelines</a></p>
+<p><a href="https://www.eurocircuits.com/pcb-assembly-guidelines/" rel="noopener noreferrer">PCB Assembly Guidelines</a></p>
+<p><a href="https://www.eurocircuits.com/understanding-manufacturing-tolerances-on-a-pcb/" rel="noopener noreferrer">Understand Manufacturing Tolerances on a PCB</a></p>
+<p><a href="https://www.eurocircuits.com/ec-smart-tools-user-guides/" rel="noopener noreferrer">eC-smart-tools User Guides</a></p>
+<p><a href="https://www.eurocircuits.tv/category/electronic-manufacturing-technology/insight-technologyen/" target="_blank" rel="noopener noreferrer">Insight Technology</a></p>
+</div></section><br />
+<div  style='height:50px' class='hr hr-invisible   avia-builder-el-4  el_after_av_textblock  el_before_av_textblock '><span class='hr-inner ' ><span class='hr-inner-style'></span></span></div><br />
+<section class="av_textblock_section "  itemscope="itemscope" itemtype="https://schema.org/CreativeWork" ><div class='avia_textblock  '   itemprop="text" ><div class="su-divider su-divider-style-default" style="margin:10px 0;border-width:3px;border-color:#999999"></div>
+<p><a style="text-decoration: none;" title="Page Update History" href="#PageUpdateHistory">Page Update History</a></p>
+</div></section></p></div> --!>
+<div class="flex_column av_three_fourth  flex_column_div av-zero-column-padding   avia-builder-el-6  el_after_av_one_fourth  el_before_av_one_fourth  column-top-margin" style='border-radius:0px; '><section class="av_textblock_section "  itemscope="itemscope" itemtype="https://schema.org/CreativeWork" ><div class='avia_textblock  '   itemprop="text" ><h3>Introduction</h3>
+<p>We use <strong>&#8220;pattern classes&#8221;</strong> and <strong>&#8220;drill classes&#8221;</strong> as convenient shorthand to measure the manufacturability of the PCB.</p>
+<p>This will define whether your board can be Pooled or not, it also has an impact on the pricing.</p>
+</div></section><br />
+<div  style='height:30px' class='hr hr-invisible   avia-builder-el-8  el_after_av_textblock  el_before_av_textblock '><span class='hr-inner ' ><span class='hr-inner-style'></span></span></div><br />
+<section class="av_textblock_section "  itemscope="itemscope" itemtype="https://schema.org/CreativeWork" ><div class='avia_textblock  '   itemprop="text" ><h3>Pattern Classes</h3>
+<p>The pattern class covers the minimum sizes for copper track (conductor) and gap (isolation) for Outer and Inner layers:</p>
+<div class="su-list" style="margin-left:0px"></p>
+<h6><strong>Outer layer</strong></h6>
+<p><div class="su-spacer" style="height:5px"></div></p>
+<ul class="list-checks">
+<li><i class="sui sui-check" style="color:#aed3a1"></i> <em><strong>OTT</strong> = Track to Track</em></li>
+<li><i class="sui sui-check" style="color:#aed3a1"></i> <em><strong>OTP</strong> = Track to Pad</em></li>
+<li><i class="sui sui-check" style="color:#aed3a1"></i> <em> <strong>OPP</strong> = Pad to Pad</em></li>
+<li><i class="sui sui-check" style="color:#aed3a1"></i> <em><strong>OTW</strong> = Track Width</em></li>
+</ul>
+<p><div class="su-spacer" style="height:10px"></div></p>
+<h6><strong>Inner layer</strong></h6>
+<p><div class="su-spacer" style="height:5px"></div></p>
+<ul class="list-checks">
+<li><i class="sui sui-check" style="color:#aed3a1"></i> <em><strong>ITT</strong> = Track to Track</em></li>
+<li><i class="sui sui-check" style="color:#aed3a1"></i> <em><strong>ITP</strong> = Track to Pad</em></li>
+<li><i class="sui sui-check" style="color:#aed3a1"></i> <em><strong>IPP</strong> = Pad to Pad</em></li>
+<li><i class="sui sui-check" style="color:#aed3a1"></i> <em><strong>ITW</strong> = Track Width</em></li>
+</ul>
+<p><div class="su-spacer" style="height:10px"></div></p>
+<h6><strong>The minimum copper rings on outer and inner layers</strong></h6>
+<p><div class="su-spacer" style="height:5px"></div></p>
+<ul class="list-checks">
+<li><i class="sui sui-check" style="color:#aed3a1"></i> <em><strong>OAR</strong> = Outer Annular Ring</em></li>
+<li><i class="sui sui-check" style="color:#aed3a1"></i> <em><strong>IAR</strong> = Inner Annular Ring</em></li>
+</ul>
+<p><div class="su-spacer" style="height:10px"></div></p>
+<h6><strong>The minimum IPI (Inner layer Pad Isolation)</strong></h6>
+<p><div class="su-spacer" style="height:5px"></div></p>
+<ul class="list-checks">
+<li><i class="sui sui-check" style="color:#aed3a1"></i> <strong>IPI</strong> is the clearance between the edge of any unconnected hole (plated or non-plated) and the nearest copper (plane, track, pad).</li>
+<li><i class="sui sui-check" style="color:#aed3a1"></i> This is measured from the production tool size (actual drill or rout bit diameter).</li>
+<li><i class="sui sui-check" style="color:#aed3a1"></i> The minimum<strong> IPI</strong> value is always <strong>IAR</strong> + 0.075mm, with a minimum of 0.200mm.</li>
+</ul>
+<p></div>
+<h6><span style="color: #ff0000;"><u>IMPORTANT</u></span></h6>
+<div class="su-spacer" style="height:5px"></div>
+<ul>
+<li>The smallest of these values determines the pattern class.</li>
+<li>The Classification table shows the lower limit values of any given class.</li>
+<li>The thickness of the starting copper foil determines the minimum pattern values that are possible.</li>
+<li>Thicker copper needs a wider isolation for reliable etching.</li>
+<li>The highest pattern class possible depends on the copper thicknesses.</li>
+<li>Not all copper thicknesses are available in all services.</li>
+</ul>
+<p>For more information please see our current Classification table on below.</p>
+</div></section><br />
+<div  style='height:30px' class='hr hr-invisible   avia-builder-el-10  el_after_av_textblock  el_before_av_textblock '><span class='hr-inner ' ><span class='hr-inner-style'></span></span></div><br />
+<section class="av_textblock_section "  itemscope="itemscope" itemtype="https://schema.org/CreativeWork" ><div class='avia_textblock  '   itemprop="text" ><h3>Drill Classes</h3>
+<p>The Drill class is based on the smallest production drill size (<strong>TOOLSIZE)</strong> used to manufacture your board,.</p>
+<p>This is not to be confused with the finished size hole size (<strong>ENDSIZE</strong>) that you have defined in your design/CAD system.</p>
+<p>For more information on holes sizes and how to calculate the <strong>TOOLSIZE </strong>vs the <strong>ENDSIZE</strong> please refer to our PCB Design Guidelines &#8211; <a href="https://www.eurocircuits.com/pcb-design-guidelines-drilled-holes/" target="_blank" rel="noopener">Drilled Holes</a> page.</p>
+<h5><span style="color: #ff0000;"><u>IMPORTANT</u></span></h5>
+<ul>
+<li>The smallest of these values determines the pattern class.</li>
+<li>The Classification table shows the lower limit values of any given class.</li>
+<li>The Annular Ring values OAR and IAR in the Classification table are for plated holes (PTH).</li>
+<li>For connected non-plated (NPTH) holes we recommend a minimum annular ring of 0.30mm (300µm or 12mil).
+<ul>
+<li>As NPTH holes have no plated barrel, a smaller annular ring may lift during soldering or break away even during normal operating conditions.</li>
+</ul>
+</li>
+</ul>
+<p>For more information please see our current Classification table on below.</p>
+</div></section><br />
+<div  style='height:30px' class='hr hr-invisible   avia-builder-el-12  el_after_av_textblock  el_before_av_textblock '><span class='hr-inner ' ><span class='hr-inner-style'></span></span></div><br />
+<section class="av_textblock_section "  itemscope="itemscope" itemtype="https://schema.org/CreativeWork" ><div class='avia_textblock  '   itemprop="text" ><h3>Recommendations</h3>
+<ul>
+<li>Do not design your board up to the limits of any given classification.</li>
+<li>Always allow for a small margin above the classification limits, this will allow for any rounding errors etc.</li>
+<li>for more information please see our PCB Design Guidelines &#8211; <a href="https://www.eurocircuits.com/pcb-design-guidelines-input-data-requirements" target="_blank" rel="noopener">Input Data Requirements</a> page.</li>
+</ul>
+</div></section><br />
+<div  style='height:30px' class='hr hr-invisible   avia-builder-el-14  el_after_av_textblock  el_before_av_textblock '><span class='hr-inner ' ><span class='hr-inner-style'></span></span></div><br />
+<section class="av_textblock_section "  itemscope="itemscope" itemtype="https://schema.org/CreativeWork" ><div class='avia_textblock  '   itemprop="text" ><h3>Classification Table</h3> <a href="https://www.eurocircuits.com/content/uploads/2025/04/EC-classification-ENGLISH-5-2024-V3.png"><img loading="lazy" decoding="async" class="aligncenter wp-image-50678 size-full" src="https://www.eurocircuits.com/content/uploads/2025/04/EC-classification-ENGLISH-5-2024-V3.png" alt="EC-classification Table ENGLISH May 2024 V3" width="1300" height="924"</a>
+</div></section></p></div><div class="flex_column av_one_fourth  flex_column_div av-zero-column-padding first  avia-builder-el-16  el_after_av_three_fourth  el_before_av_three_fourth  column-top-margin" style='border-radius:0px; '></div>
+<div class="flex_column av_three_fourth  flex_column_div av-zero-column-padding   avia-builder-el-17  el_after_av_one_fourth  avia-builder-el-last  column-top-margin" style='border-radius:0px; '><p><section class="av_textblock_section "  itemscope="itemscope" itemtype="https://schema.org/CreativeWork" ><div class='avia_textblock  '   itemprop="text" ><p><div class="su-divider su-divider-style-default" style="margin:15px 0;border-width:3px;border-color:#999999"></div><br />
+<a id="PageUpdateHistory"></a></p>
+<h3><u>Page Update History</u></h3>
+</div></section><br />
+<section class="av_textblock_section "  itemscope="itemscope" itemtype="https://schema.org/CreativeWork" ><div class='avia_textblock  '   itemprop="text" ><p>21/01/2020 – Modified – Classification Table &#8211; Service indicators for Drill Class</p>
+<p>17/03/2020 &#8211; Modified &#8211; Classification Table &#8211; Changed minimum IAR value for Pattern Class 9 &#038; 10</p>
+<div class="su-spacer" style="height:15px"></div>
+<p><a class="button button-primary button-large" title="Back to Top" href="#top">Back to Top</a></p>
+</div></section></p></div>
+            </div>
+        </div>
+    </section>
+    			</div>
+		</div>
+	</div>
+
+<section class="b-block b-ctas bg-pattern-gray bg-contain bg-repeat text-left pt-6 md:pt-12 lg:pt-14 xl:pt-20 pb-6 md:pb-12 lg:pb-14 xl:pb-20" >
+	<div class="container">
+					<h2 class="text-center mb-6">
+				Other ways to find help			</h2>
+							<div class="text-center my-16 text-gray-500">
+				<p><br data-mce-bogus="1"></p>
+			</div>
+				<div class="grid lg:grid-flow-col lg:auto-cols-fr gap-4">
+<article class="find-help-card flex flex-col justify-stretch bg-white px-8 xl:px-14 py-8 xl:py-16">
+    <div class="max-w-[410px] h-full flex flex-col items-start justify-between">
+        <div>
+                            <i class="block w-[80px] aspect-square mb-8 text-gray-800">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 80 80"><g fill="currentColor" clip-path="url(#a)"><path d="M72.857 80c-.79 0-1.428-.64-1.428-1.429V75.93c0-1.433.571-2.715 1.071-3.668.771-1.475 2.121-4.179 4.171-8.697a5.1 5.1 0 0 0 .468-2.114V45.007c0-1.182-1.068-2.143-2.382-2.143s-2.379.961-2.379 2.14a1.428 1.428 0 1 1-2.857 0v-1.429c0-1.182-1.067-2.143-2.382-2.143-1.314 0-2.382.96-2.382 2.143a1.428 1.428 0 1 1-2.857 0v-1.429c0-1.182-1.068-2.142-2.382-2.142s-2.379.96-2.379 2.142v.3a1.428 1.428 0 1 1-2.857 0v-20.3c0-1.16-1.303-2.143-2.85-2.143-1.546 0-2.857.983-2.857 2.143v36.425a1.43 1.43 0 0 1-2.475.975l-6.143-6.571c-1.386-1.486-3.44-1.947-5.24-1.172-.2.086-.353.29-.41.54a.92.92 0 0 0 .168.76L49.52 71.476c1.229 1.507 1.904 3.428 1.904 5.418v1.678a1.428 1.428 0 1 1-2.857 0v-1.678c0-1.332-.447-2.615-1.26-3.607L32.26 54.918a3.78 3.78 0 0 1-.747-3.19c.257-1.15 1.032-2.1 2.072-2.546 2.921-1.257 6.239-.532 8.453 1.846l3.672 3.925V22.14c.007-2.757 2.571-4.996 5.718-4.996s5.71 2.243 5.71 5v15.55a5.4 5.4 0 0 1 2.379-.547c1.903 0 3.571.972 4.49 2.425a5.4 5.4 0 0 1 3.131-.996c1.904 0 3.572.971 4.49 2.425a5.4 5.4 0 0 1 3.128-.993c2.89 0 5.24 2.243 5.24 5V61.45a7.9 7.9 0 0 1-.726 3.3c-2.075 4.571-3.453 7.329-4.243 8.832-.346.664-.746 1.532-.746 2.347v2.642c0 .79-.64 1.429-1.428 1.429zM75.714 34.286c-.79 0-1.428-.64-1.428-1.429V1.43a1.428 1.428 0 1 1 2.857 0v31.428c0 .79-.64 1.429-1.429 1.429"/><path d="M38.572 45.714c-.79 0-1.429-.639-1.429-1.428V10A1.428 1.428 0 1 1 40 10v34.286c0 .789-.64 1.428-1.428 1.428"/><path d="M38.572 11.429q-.26-.002-.508-.093C26.372 6.886 15.65 3.743 1.34 2.854A1.43 1.43 0 0 1 0 1.339 1.436 1.436 0 0 1 1.518 0c14.46.896 25.314 4.029 37.054 8.468C50.31 4.032 61.164.9 75.625 0a1.427 1.427 0 1 1 .179 2.85c-14.311.89-25.029 4.032-36.725 8.482q-.249.091-.508.093zM28.764 59.504q-.216 0-.425-.065c-9.864-3.082-17.686-4.578-27-5.153a1.427 1.427 0 1 1 .179-2.85c9.557.593 17.575 2.121 27.675 5.278a1.427 1.427 0 0 1 .935 1.79 1.43 1.43 0 0 1-1.364 1.003z"/><path d="M1.429 54.286c-.79 0-1.429-.64-1.429-1.429V1.43a1.428 1.428 0 1 1 2.857 0v51.428c0 .79-.64 1.429-1.428 1.429M21.429 45.714c-.79 0-1.429-.639-1.429-1.428v-20a1.428 1.428 0 1 1 2.857 0v20c0 .789-.64 1.428-1.428 1.428"/><path d="M24.286 45.714h-5.714a1.428 1.428 0 1 1 0-2.857h5.714a1.428 1.428 0 1 1 0 2.857M21.429 25.714h-2.857a1.428 1.428 0 1 1 0-2.857h2.857a1.428 1.428 0 1 1 0 2.857M21.428 20a2.857 2.857 0 1 0 0-5.714 2.857 2.857 0 0 0 0 5.714"/></g><defs><clipPath id="a"><path fill="#fff" d="M0 0h80v80H0z"/></clipPath></defs></svg>                </i>
+                        <h3 class="font-normal mb-6 leading-[1.15] text-primary">
+                User Guides            </h3>
+                            <div
+                    class="content text-gray-500">
+                    Our User Guides provide step-by-step instructions on how to use our free online smart tools and other available software.                </div>
+                    </div>
+
+                    <a href="https://www.eurocircuits.com/user-guides"
+               class="btn btn-secondary mt-8">
+                View all 5 user guides            </a>
+            </div>
+</article>
+
+<article class="find-help-card flex flex-col justify-stretch bg-white px-8 xl:px-14 py-8 xl:py-16">
+    <div class="max-w-[410px] h-full flex flex-col items-start justify-between">
+        <div>
+                            <i class="block w-[80px] aspect-square mb-8 text-gray-800">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 80 80"><g fill="currentColor" clip-path="url(#a)"><path d="M40 64.615c-13.573 0-24.615-11.042-24.615-24.615S26.427 15.385 40 15.385 64.615 26.427 64.615 40 53.573 64.615 40 64.615m0-46.153c-11.877 0-21.538 9.661-21.538 21.538S28.123 61.539 40 61.539 61.54 51.877 61.54 40 51.877 18.462 40 18.462"/><path d="M44.615 80h-9.23c-.735 0-1.366-.52-1.508-1.242l-1.123-5.7a34 34 0 0 1-10.992-4.562l-4.839 3.243a1.54 1.54 0 0 1-1.946-.189l-6.523-6.523c-.52-.52-.6-1.335-.189-1.946l3.243-4.839A34 34 0 0 1 6.946 47.25l-5.7-1.123a1.54 1.54 0 0 1-1.242-1.508v-9.23c0-.735.52-1.366 1.242-1.508l5.7-1.123a34 34 0 0 1 4.562-10.993l-3.243-4.838a1.54 1.54 0 0 1 .189-1.946l6.523-6.523c.52-.52 1.335-.6 1.946-.189l4.839 3.242A34 34 0 0 1 32.754 6.95l1.123-5.7A1.54 1.54 0 0 1 35.385.008h9.23c.735 0 1.366.519 1.508 1.242l1.123 5.7a34 34 0 0 1 10.993 4.562l4.838-3.243a1.54 1.54 0 0 1 1.946.189l6.523 6.523c.52.519.6 1.334.189 1.946l-3.243 4.838a34 34 0 0 1 4.562 10.993l5.7 1.123a1.54 1.54 0 0 1 1.242 1.508v9.23c0 .735-.519 1.366-1.242 1.508l-5.7 1.123a34 34 0 0 1-4.562 10.992l3.243 4.839c.407.611.33 1.427-.189 1.946l-6.523 6.523c-.52.52-1.334.6-1.946.189l-4.838-3.243a34 34 0 0 1-10.993 4.562l-1.123 5.7A1.54 1.54 0 0 1 44.615 80m-7.965-3.077h6.7l1.077-5.465c.123-.62.608-1.1 1.23-1.216 4.147-.765 8.2-2.45 11.716-4.861a1.53 1.53 0 0 1 1.727-.008l4.642 3.112 4.735-4.735-3.112-4.642a1.54 1.54 0 0 1 .008-1.727c2.415-3.52 4.096-7.57 4.862-11.716a1.54 1.54 0 0 1 1.215-1.23l5.465-1.077v-6.7L71.45 35.58a1.54 1.54 0 0 1-1.215-1.231c-.766-4.146-2.45-8.2-4.862-11.715a1.53 1.53 0 0 1-.008-1.727l3.112-4.643-4.735-4.734-4.642 3.111a1.54 1.54 0 0 1-1.727-.007c-3.52-2.416-7.57-4.096-11.715-4.862a1.54 1.54 0 0 1-1.231-1.215L43.35 3.092h-6.7l-1.077 5.466c-.123.619-.611 1.1-1.23 1.215-4.147.766-8.2 2.45-11.716 4.862a1.53 1.53 0 0 1-1.727.007l-4.642-3.111-4.735 4.734 3.112 4.643c.35.523.346 1.207-.008 1.727-2.415 3.519-4.096 7.569-4.862 11.715a1.54 1.54 0 0 1-1.215 1.23l-5.465 1.078v6.7l5.465 1.077c.62.123 1.1.607 1.215 1.23.766 4.147 2.45 8.2 4.862 11.716a1.53 1.53 0 0 1 .008 1.727l-3.112 4.642 4.735 4.735 4.642-3.112a1.54 1.54 0 0 1 1.727.008c3.52 2.415 7.57 4.096 11.715 4.861.62.116 1.108.596 1.231 1.216z"/><path d="M44.615 55.385h-9.23a1.538 1.538 0 1 1 0-3.077h9.23a1.538 1.538 0 1 1 0 3.077"/><path d="M40 55.385c-.85 0-1.538-.689-1.538-1.539V36.923h-3.077a1.538 1.538 0 1 1 0-3.077H40c.85 0 1.538.689 1.538 1.539v18.461c0 .85-.688 1.539-1.538 1.539M40 30.77a3.077 3.077 0 1 0 0-6.155 3.077 3.077 0 0 0 0 6.154"/></g><defs><clipPath id="a"><path fill="#fff" d="M0 0h80v80H0z"/></clipPath></defs></svg>                </i>
+                        <h3 class="font-normal mb-6 leading-[1.15] text-primary">
+                Glossary            </h3>
+                            <div
+                    class="content text-gray-500">
+                    To simplify communication Eurocircuits uses abbreviations for many of these technical terms. Most of the
+technical terms and abbreviations are international standards in the Printed Circuit Board manufacturing
+industry. However to make it clear to everyone involved, we here present a list of technical terms and
+abbreviations along with their explanation.                </div>
+                    </div>
+
+                    <a href="https://www.eurocircuits.com/technical-terms-and-abbreviations/"
+               class="btn btn-secondary mt-8">
+                View our glossary            </a>
+            </div>
+</article>
+
+<article class="find-help-card flex flex-col justify-stretch bg-primary px-8 xl:px-14 py-8 xl:py-16">
+    <div class="max-w-[410px] h-full flex flex-col items-start justify-between">
+        <div>
+                            <i class="block w-[80px] aspect-square mb-8 text-white">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 36 34"><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M.692 6.23H32.54"/><circle cx="3.462" cy="3.462" r=".692" fill="currentColor"/><circle cx="6.231" cy="3.462" r=".692" fill="currentColor"/><circle cx="9" cy="3.462" r=".692" fill="currentColor"/><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M6.23 29.77H3.463c-1.53 0-2.77-1.24-2.77-2.77V3.461c0-1.53 1.24-2.769 2.77-2.769h29.077c1.53 0 2.769 1.24 2.769 2.77V27c0 1.53-1.24 2.77-2.77 2.77H29.77"/><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M18 25.615a4.846 4.846 0 1 0 0-9.692 4.846 4.846 0 0 0 0 9.692"/><path stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M29.077 18.692h-1.073a.69.69 0 0 1-.665-.519 9.7 9.7 0 0 0-.9-2.16.68.68 0 0 1 .104-.838l.762-.761a.69.69 0 0 0 0-.976l-1.96-1.96a.69.69 0 0 0-.976 0l-.761.762a.7.7 0 0 1-.838.104 9.7 9.7 0 0 0-2.16-.9.694.694 0 0 1-.52-.665V9.706a.694.694 0 0 0-.692-.692H16.63a.694.694 0 0 0-.692.692v1.073a.69.69 0 0 1-.52.665 9.7 9.7 0 0 0-2.16.9.68.68 0 0 1-.837-.104l-.761-.762a.69.69 0 0 0-.977 0l-1.959 1.96a.69.69 0 0 0 0 .976l.762.761a.7.7 0 0 1 .103.838 9.8 9.8 0 0 0-.9 2.16.694.694 0 0 1-.664.52H6.95a.694.694 0 0 0-.693.692v2.769c0 .38.312.692.693.692h1.073c.318 0 .581.215.664.52.215.76.52 1.488.9 2.16a.68.68 0 0 1-.103.837l-.762.762a.69.69 0 0 0 0 .976l1.96 1.959c.27.27.706.27.976 0l.761-.762a.7.7 0 0 1 .838-.103c.671.38 1.398.685 2.16.9.304.083.519.353.519.664v1.073c0 .381.312.693.692.693h2.77c.38 0 .692-.312.692-.693V30.76c0-.318.214-.581.519-.664a9.8 9.8 0 0 0 2.16-.9.68.68 0 0 1 .838.103l.761.762c.27.27.706.27.976 0l1.96-1.96a.69.69 0 0 0 0-.975l-.762-.762a.7.7 0 0 1-.104-.838 9.7 9.7 0 0 0 .9-2.16.694.694 0 0 1 .665-.519h1.073c.38 0 .692-.311.692-.692v-2.77a.694.694 0 0 0-.692-.692"/></svg>                </i>
+                        <h3 class="font-normal mb-6 leading-[1.15] text-white">
+                Still need help?            </h3>
+                            <div
+                    class="content text-white">
+                    Talk to our customer support via our online chat, telephone or email.                </div>
+                    </div>
+
+                    <a href="https://www.eurocircuits.com/contact/"
+               class="btn btn-primary mt-8">
+                Contact us            </a>
+            </div>
+</article>
+</div>	</div>
+</section>
+</main>
+
+<footer class="c-footer relative transition duration-300">
+    <div class="pt-12 sm:pt-20 pb-16 sm:pb-24 md:pb-32 bg-gray-50">
+        <div class="container">
+            <!-- Logo -->
+            <div class="w-24 aspect-square mb-6">
+                <img src="https://www.eurocircuits.com/content/themes/io/build/img/logo.png" alt="Logo Eurocircuits">
+            </div>
+
+            <div class="grid grid-cols-12">
+                <div class="col-span-12 xl:col-span-4">
+                                            <p class="mb-5 text-gray-500 max-w-[362px] pe-8">Eurocircuits gets it right first-time - using digital twin verification and our in-house European manufacturing facilities.
+</p>
+                    
+                                            <ul class="c-socials list-none flex items-center gap-2 ml-0">
+        <li>
+        <a href="https://www.facebook.com/eurocircuits/" target="_blank" class="c-socials__facebook block w-6 h-6 p-1 text-gray-500 hover:text-primary">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14"><path fill="currentColor" d="m10.258 7.875.389-2.534H8.215V3.697c0-.693.34-1.369 1.429-1.369h1.105V.172S9.746 0 8.787 0c-2.002 0-3.31 1.214-3.31 3.41v1.932H3.25v2.533h2.226v6.126h2.738V7.875z"/></svg>        </a>
+    </li>
+                <li>
+        <a href="https://www.linkedin.com/company/eurocircuits/" target="_blank" class="c-socials__linkedin block w-6 h-6 p-1 text-gray-500 hover:text-primary">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 14 14"><path fill="currentColor" d="M3.617 12.25h-2.54V4.071h2.54zM2.346 2.956c-.812 0-1.471-.673-1.471-1.485a1.47 1.47 0 1 1 2.942 0c0 .812-.66 1.485-1.471 1.485m10.776 9.294h-2.534V8.269c0-.95-.019-2.166-1.32-2.166-1.32 0-1.523 1.03-1.523 2.098v4.049H5.208V4.071h2.436v1.116h.035c.34-.643 1.167-1.32 2.403-1.32 2.57 0 3.043 1.692 3.043 3.89v4.493z"/></svg>        </a>
+    </li>
+            <li>
+        <a href="https://twitter.com/Eurocircuits" target="_blank" class="c-socials__twitter block w-6 h-6 p-1 text-gray-500 hover:text-primary">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 16 16"><path d="M5.026 15c6.038 0 9.341-5.003 9.341-9.334q.002-.211-.006-.422A6.7 6.7 0 0 0 16 3.542a6.7 6.7 0 0 1-1.889.518 3.3 3.3 0 0 0 1.447-1.817 6.5 6.5 0 0 1-2.087.793A3.286 3.286 0 0 0 7.875 6.03a9.32 9.32 0 0 1-6.767-3.429 3.29 3.29 0 0 0 1.018 4.382A3.3 3.3 0 0 1 .64 6.575v.045a3.29 3.29 0 0 0 2.632 3.218 3.2 3.2 0 0 1-.865.115 3.2 3.2 0 0 1-.614-.057 3.28 3.28 0 0 0 3.067 2.277A6.6 6.6 0 0 1 .78 13.58a6 6 0 0 1-.78-.045A9.34 9.34 0 0 0 5.026 15"/></svg>        </a>
+    </li>
+            <li>
+        <a href="https://www.youtube.com/user/eurocircuits" target="_blank" class="c-socials__youtube block w-6 h-6 p-1 text-gray-500 hover:text-primary">
+            <svg xmlns="http://www.w3.org/2000/svg" fill="currentColor" viewBox="0 0 16 16"><path d="M8.051 1.999h.089c.822.003 4.987.033 6.11.335a2.01 2.01 0 0 1 1.415 1.42c.101.38.172.883.22 1.402l.01.104.022.26.008.104c.065.914.073 1.77.074 1.957v.075c-.001.194-.01 1.108-.082 2.06l-.008.105-.009.104c-.05.572-.124 1.14-.235 1.558a2.01 2.01 0 0 1-1.415 1.42c-1.16.312-5.569.334-6.18.335h-.142c-.309 0-1.587-.006-2.927-.052l-.17-.006-.087-.004-.171-.007-.171-.007c-1.11-.049-2.167-.128-2.654-.26a2.01 2.01 0 0 1-1.415-1.419c-.111-.417-.185-.986-.235-1.558L.09 9.82l-.008-.104A31 31 0 0 1 0 7.68v-.123c.002-.215.01-.958.064-1.778l.007-.103.003-.052.008-.104.022-.26.01-.104c.048-.519.119-1.023.22-1.402a2.01 2.01 0 0 1 1.415-1.42c.487-.13 1.544-.21 2.654-.26l.17-.007.172-.006.086-.003.171-.007A100 100 0 0 1 7.858 2zM6.4 5.209v4.818l4.157-2.408z"/></svg>        </a>
+    </li>
+    </ul>
+                                    </div>
+
+                <div class="grid grid-cols-12 col-span-12 gap-y-6 xl:contents mt-12 xl:mt-0">
+                                            <nav role="navigation" class="c-nav--footer col-span-12 sm:col-span-6 md:col-span-3 xl:col-span-2">
+                            <h4 class="text-base text-primary font-bold mb-3">Services</h4><ul id="menu-services" class="list-none m-0 p-0 flex flex-col gap-1.5 text-sm"><li id="menu-item-12774" class="menu-item menu-item-type-custom menu-item-object-custom menu-item-12774"><a href="https://www.eurocircuits.com/services/">PCB Manufacturing</a></li>
+<li id="menu-item-12981" class="menu-item menu-item-type-custom menu-item-object-custom menu-item-12981"><a href="https://www.eurocircuits.com/services/">PCB Assembly</a></li>
+<li id="menu-item-15501" class="menu-item menu-item-type-post_type menu-item-object-page menu-item-15501"><a href="https://www.eurocircuits.com/for-students-teachers/">For students &amp; teachers</a></li>
+</ul>                        </nav>
+                                                <nav role="navigation" class="c-nav--footer col-span-12 sm:col-span-6 md:col-span-3 xl:col-span-2">
+                            <h4 class="text-base text-primary font-bold mb-3">Legal</h4><ul id="menu-legal" class="list-none m-0 p-0 flex flex-col gap-1.5 text-sm"><li id="menu-item-32144" class="menu-item menu-item-type-post_type menu-item-object-page menu-item-32144"><a href="https://www.eurocircuits.com/about-us/impressum/">Impressum</a></li>
+<li id="menu-item-15499" class="menu-item menu-item-type-post_type menu-item-object-page menu-item-15499"><a href="https://www.eurocircuits.com/about-us/our-business-etiquette/terms-of-sales/">Eurocircuits Terms of Sales</a></li>
+<li id="menu-item-23827" class="menu-item menu-item-type-post_type menu-item-object-page menu-item-23827"><a href="https://www.eurocircuits.com/termofuse/">Terms of Use</a></li>
+<li id="menu-item-15500" class="menu-item menu-item-type-post_type menu-item-object-page menu-item-15500"><a href="https://www.eurocircuits.com/about-us/our-business-etiquette/eurocircuits-non-disclosure-agreement/">NDA</a></li>
+<li id="menu-item-23828" class="menu-item menu-item-type-post_type menu-item-object-page menu-item-23828"><a href="https://www.eurocircuits.com/about-us/our-business-etiquette/privacypolicy/">Privacy Statement</a></li>
+<li id="menu-item-23829" class="menu-item menu-item-type-post_type menu-item-object-page menu-item-23829"><a href="https://www.eurocircuits.com/disclaimer/">Website disclaimer</a></li>
+<li id="menu-item-23830" class="menu-item menu-item-type-post_type menu-item-object-page menu-item-23830"><a href="https://www.eurocircuits.com/about-us/our-business-etiquette/">Our Business Etiquette</a></li>
+</ul>                        </nav>
+                                                <nav role="navigation" class="c-nav--footer col-span-12 sm:col-span-6 md:col-span-3 xl:col-span-2">
+                            <h4 class="text-base text-primary font-bold mb-3">Resources</h4><ul id="menu-resources" class="list-none m-0 p-0 flex flex-col gap-1.5 text-sm"><li id="menu-item-10440" class="menu-item menu-item-type-custom menu-item-object-custom menu-item-10440"><a target="_blank" href="https://be.eurocircuits.com/shop/assembly/configurator.aspx">PCB Calculator</a></li>
+<li id="menu-item-10441" class="menu-item menu-item-type-custom menu-item-object-custom menu-item-10441"><a target="_blank" href="https://be.eurocircuits.com/shop/eclogin.aspx">Sign in / Register</a></li>
+<li id="menu-item-9306" class="menu-item menu-item-type-custom menu-item-object-custom menu-item-9306"><a href="/help-knowledge-centre/help-centre/">Help centre</a></li>
+<li id="menu-item-9304" class="menu-item menu-item-type-custom menu-item-object-custom menu-item-9304"><a href="/blog">Blogs</a></li>
+<li id="menu-item-10439" class="menu-item menu-item-type-post_type menu-item-object-page menu-item-10439"><a href="https://www.eurocircuits.com/events/">Events</a></li>
+</ul>                        </nav>
+                                                <nav role="navigation" class="c-nav--footer col-span-12 sm:col-span-6 md:col-span-3 xl:col-span-2">
+                            <h4 class="text-base text-primary font-bold mb-3">Contact</h4><ul id="menu-contact" class="list-none m-0 p-0 flex flex-col gap-1.5 text-sm"><li id="menu-item-14682" class="menu-item menu-item-type-post_type menu-item-object-page menu-item-14682"><a href="https://www.eurocircuits.com/contact/sales-customer-support/">Sales &amp; Customer Support</a></li>
+<li id="menu-item-14681" class="menu-item menu-item-type-post_type menu-item-object-page menu-item-14681"><a href="https://www.eurocircuits.com/contact/head-office-subsidiaries/">Head Office &amp; Subsidiaries</a></li>
+<li id="menu-item-23831" class="menu-item menu-item-type-post_type menu-item-object-page menu-item-23831"><a href="https://www.eurocircuits.com/ec-calendar/">eC-calendar</a></li>
+</ul>                        </nav>
+                                        </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="bg-white py-6">
+        <div class="container flex justify-between items-center text-sm text-gray-500">
+            <span>&copy;
+                    2026                Eurocircuits                </span>
+            <nav role="navigation" class="c-nav-legal justify-self-end">
+                            </nav>
+        </div>
+    </div>
+</footer>
+<aside class="hidden fixed z-50 flex-col gap-4 bottom-4 left-4 p-6 m-0 bg-primary text-white shadow-md js-popup-newsletter">
+	<main class="flex gap-8">
+		<div class="w-72">
+			<h2 class="mb-4">
+				Get connected!			</h2>
+			<p>
+				Join the Eurocircuits Community, keep up to date with News &amp; Information.			</p>
+		</div>
+		<div>
+			<img src="https://www.eurocircuits.com/content/uploads/2025/03/11-post-150x150.png" alt="Mailbox illustration">
+		</div>
+	</main>
+	<footer class="text-white/60 text-sm">
+		<div class="flex justify-between">
+			<button class="js-popup-dismiss">No thanks, not interested.</button>
+			<button class="js-popup-close">Remind me later.</button>
+		</div>
+	</footer>
+</aside>
+<aside class="c-sidebar z-[999999] block lg:hidden fixed w-[250px] h-full top-0 right-[-250px] bg-primary text-white transition duration-300 overflow-y-auto">
+	<div class="flex flex-col justify-between gap-5 p-3">
+        <nav role="navigation" class="c-nav-sidebar flex flex-col gap-5">
+            <ul id="menu-primary-navigation-1" class=""><li class="menu-item menu-item-type-post_type menu-item-object-page menu-item-8605"><a href="https://www.eurocircuits.com/services/">Services</a></li>
+<li class="menu-item menu-item-type-post_type menu-item-object-page menu-item-has-children menu-item-12534"><a href="https://www.eurocircuits.com/help-knowledge-centre/">Help &amp; Knowledge centre</a>
+<ul class="sub-menu">
+	<li class="menu-item menu-item-type-post_type menu-item-object-page menu-item-has-children menu-item-3495"><a href="https://www.eurocircuits.com/help-knowledge-centre/help-centre/">Help centre</a>
+	<ul class="sub-menu">
+		<li class="menu-item menu-item-type-custom menu-item-object-custom menu-item-10849"><a href="https://www.eurocircuits.com/technical-guidelines/">Technical guidelines</a></li>
+		<li class="menu-item menu-item-type-custom menu-item-object-custom menu-item-10850"><a href="https://www.eurocircuits.com/user-guides/">User guides</a></li>
+		<li class="menu-item menu-item-type-custom menu-item-object-custom menu-item-33619"><a href="https://www.eurocircuits.com/technical-guidelines/technical-educational-videos/">Technical &#038; Educational Videos</a></li>
+	</ul>
+</li>
+	<li class="menu-item menu-item-type-post_type menu-item-object-page menu-item-has-children menu-item-3494"><a href="https://www.eurocircuits.com/help-knowledge-centre/knowledge-centre/">Knowledge centre</a>
+	<ul class="sub-menu">
+		<li class="menu-item menu-item-type-custom menu-item-object-custom menu-item-10829"><a href="https://www.eurocircuits.com/blog/">Blogs</a></li>
+		<li class="menu-item menu-item-type-custom menu-item-object-custom menu-item-10830"><a href="https://www.eurocircuits.com/events/">Events</a></li>
+		<li class="menu-item menu-item-type-custom menu-item-object-custom menu-item-10852"><a href="https://www.eurocircuits.com/technical-terms-and-abbreviations/">Glossary</a></li>
+	</ul>
+</li>
+</ul>
+</li>
+<li class="menu-item menu-item-type-post_type menu-item-object-page menu-item-3586"><a href="https://www.eurocircuits.com/how-it-works/">How it works</a></li>
+<li class="menu-item menu-item-type-post_type menu-item-object-page menu-item-8612"><a href="https://www.eurocircuits.com/for-students-teachers/">For students &amp; teachers</a></li>
+<li class="menu-item menu-item-type-post_type menu-item-object-page menu-item-12775"><a href="https://www.eurocircuits.com/downloads/">Downloads</a></li>
+<li class="menu-item menu-item-type-post_type menu-item-object-page menu-item-8611"><a href="https://www.eurocircuits.com/about-us/">About us</a></li>
+</ul>			<ul id="menu-header-secondary-1" class="list-none m-0 flex flex-col items-start"><li class="menu-item menu-item-type-custom menu-item-object-custom menu-item-6937"><a target="_blank" href="https://be.eurocircuits.com/shop/eclogin.aspx">Sign In / Register</a></li>
+<li class="menu-item menu-item-type-custom menu-item-object-custom menu-item-3199"><a target="_blank" href="https://be.eurocircuits.com/shop/assembly/configurator.aspx">PCB Calculator</a></li>
+<li class="menu-item menu-item-type-post_type menu-item-object-page menu-item-3201"><a href="https://www.eurocircuits.com/contact/">Contact</a></li>
+</ul>        </nav>
+		        <div class="c-language-selector c-language-selector--mobile text-white uppercase">
+    <ul class="c-language-selector__list border-t border-white/[.1] pt-3 list-none m-0">
+        	<li class="lang-item lang-item-166 lang-item-de lang-item-first"><a lang="de-DE" hreflang="de-DE" href="https://www.eurocircuits.com/de/technische-richtlinien/leitfaden-leiterplattendesign/klassifizierung/">Deutsch</a></li>
+	<li class="lang-item lang-item-171 lang-item-hu"><a lang="hu-HU" hreflang="hu-HU" href="https://www.eurocircuits.com/hu/muszaki-utmutatok/pcb-tervezesi-utmutato/osztalybasorolas/">Magyar</a></li>
+    </ul>
+</div>
+	</div>
+</aside>
+<script type="speculationrules">
+{"prefetch":[{"source":"document","where":{"and":[{"href_matches":"/*"},{"not":{"href_matches":["/wp/wp-*.php","/wp/wp-admin/*","/content/uploads/*","/content/*","/content/plugins/*","/content/themes/io/*","/*\\?(.+)"]}},{"not":{"selector_matches":"a[rel~=\"nofollow\"]"}},{"not":{"selector_matches":".no-prefetch, .no-prefetch a"}}]},"eagerness":"conservative"}]}
+</script>
+<script id="io-conversational-search-js-extra">
+var ioConversationalSearch = {"ajaxUrl":"https://www.eurocircuits.com/wp/wp-admin/admin-ajax.php","nonce":"34998f811e","lang":"en","strings":{"thinking":"Searching and analysing...","error":"An error occurred. Please try again.","noContent":"I couldn't find relevant content about that topic."}};
+//# sourceURL=io-conversational-search-js-extra
+</script>
+<script id="io-conversational-search-js" src="https://www.eurocircuits.com/content/plugins/io-ai-wp-chatbot/assets/js/conversational-search.js?ver=1.13.2"></script>
+<script id="main-js-js" src="https://www.eurocircuits.com/content/themes/io/build/main-CfRRYya-.js"></script>
+<script id="main-php-vars-js-extra">
+var vars = {"ajaxurl":"https://www.eurocircuits.com/wp/wp-admin/admin-ajax.php","templateurl":"https://www.eurocircuits.com/content/themes/io","siteurl":"https://www.eurocircuits.com/wp","countryCode":"{\"ip\":\"73.43.27.214\",\"country\":\"US\"}"};
+//# sourceURL=main-php-vars-js-extra
+</script>
+<script id="seoaiwp-form-tracking-js-extra">
+var SeoaiwpConversionConfig = {"enabled":"","tagId":"","label":""};
+//# sourceURL=seoaiwp-form-tracking-js-extra
+</script>
+<script id="seoaiwp-form-tracking-js-after">
+/**
+ * WordPress & HubSpot Form Events → GTM dataLayer + GA4 gtag
+ *
+ * Listens for successful form submissions from popular WordPress form
+ * plugins and HubSpot forms, then pushes events to both window.dataLayer
+ * (GTM) and gtag (GA4 direct).
+ *
+ * Also tracks clicks on tel: and mailto: links.
+ *
+ * Supported: CF7, Gravity Forms, WPForms, Forminator, Formidable,
+ * Ninja Forms, Fluent Forms, WS Form, Elementor Forms, Enfold (Avia),
+ * HubSpot Forms v3, HubSpot Forms v4, Pipedrive LeadBooster, Leadoo
+ */
+
+// ── IE11 closest() polyfill ───────────────────────────────────────
+
+if (!Element.prototype.closest) {
+    Element.prototype.closest = function (s) {
+        var el = this;
+        do {
+            if (el.matches(s)) return el;
+            el = el.parentElement || el.parentNode;
+        } while (el !== null && el.nodeType === 1);
+        return null;
+    };
+}
+
+(function () {
+    'use strict';
+
+    window.dataLayer = window.dataLayer || [];
+
+    // ── helpers ──────────────────────────────────────────────────
+
+    // Fires a Google Ads conversion event using values from SeoaiwpConversionConfig
+    // (injected via wp_localize_script from WPSEOAI → Settings → SEA).
+    function fireGoogleAdsConversion() {
+        var cfg = window.SeoaiwpConversionConfig;
+        if (!cfg || !cfg.enabled || !cfg.tagId || !cfg.label) return;
+        if (typeof gtag !== 'function') return;
+
+        gtag('event', 'conversion', {
+            send_to: 'AW-' + cfg.tagId + '/' + cfg.label
+        });
+    }
+
+    function pushEvent(formPlugin, formId, formElement, extraData) {
+        var submitBtn = formElement
+            ? formElement.querySelector('[type="submit"]')
+            : null;
+
+        var submitText = '';
+        if (submitBtn) {
+            submitText = submitBtn.tagName === 'INPUT'
+                ? submitBtn.value
+                : submitBtn.textContent.trim();
+        }
+
+        var basePayload = {
+            event:      'wpseoai_form_submission',
+            formPlugin: formPlugin,
+            formId:     formId || '',
+            formClass:  formElement ? (formElement.className || '') : '',
+            submitText: submitText,
+            pageUrl:    window.location.href,
+            pageTitle:  document.title
+        };
+
+        if (extraData) {
+            Object.keys(extraData).forEach(function (key) {
+                basePayload[key] = extraData[key];
+            });
+        }
+
+        // ── GTM dataLayer push ───────────────────────────────────
+
+        window.dataLayer.push(basePayload);
+
+        // ── GA4 gtag direct ──────────────────────────────────────
+
+        if (typeof gtag === 'function') {
+            var gtagPayload = {};
+            Object.keys(basePayload).forEach(function (key) {
+                if (key !== 'event') gtagPayload[key] = basePayload[key];
+            });
+            gtag('event', 'wpseoai_form_submission', gtagPayload);
+        }
+
+        // ── Google Ads conversion ────────────────────────────────
+
+        fireGoogleAdsConversion();
+    }
+
+    function pushLinkClick(eventName, linkType, href, linkText) {
+        var payload = {
+            event:     eventName,
+            linkType:  linkType,
+            linkHref:  href,
+            linkText:  linkText,
+            pageUrl:   window.location.href,
+            pageTitle: document.title
+        };
+
+        window.dataLayer.push(payload);
+
+        if (typeof gtag === 'function') {
+            gtag('event', eventName, {
+                link_type:  linkType,
+                link_href:  href,
+                link_text:  linkText,
+                page_url:   window.location.href,
+                page_title: document.title
+            });
+        }
+
+        // ── Google Ads conversion ────────────────────────────────
+
+        fireGoogleAdsConversion();
+    }
+
+    // ── 1. Contact Form 7 ───────────────────────────────────────
+
+    document.addEventListener('wpcf7mailsent', function (event) {
+        var formId = event.detail.contactFormId;
+        pushEvent('cf7', formId, event.target);
+    }, false);
+
+    // ── 2. Gravity Forms ────────────────────────────────────────
+    //
+    // Three confirmation types need separate handling:
+    //   a) AJAX text confirmation  → 'gform_confirmation_loaded' fires
+    //   b) Non-AJAX page reload    → '.gform_confirmation_message' present on load
+    //   c) Page redirect           → track before redirect via 'gform_pre_submission'
+
+    var gfTrackedForms = {};
+
+    jQuery(function ($) {
+
+        // (a) AJAX text/message confirmation
+        $(document).on('gform_confirmation_loaded', function (event, formId) {
+            if (gfTrackedForms['conf_' + formId]) return;
+            gfTrackedForms['conf_' + formId] = true;
+
+            var formEl = document.getElementById('gform_' + formId) ||
+                document.querySelector('#gform_wrapper_' + formId + ' form');
+            pushEvent('gravity_forms', formId, formEl);
+        });
+
+        // (b) Non-AJAX page reload — confirmation message rendered server-side
+        $('.gform_confirmation_message').each(function () {
+            var wrapper = $(this).closest('.gform_wrapper');
+            var formId = (wrapper.attr('id') || '').replace('gform_wrapper_', '');
+            if (formId && !gfTrackedForms['conf_' + formId]) {
+                gfTrackedForms['conf_' + formId] = true;
+                pushEvent('gravity_forms', formId, null);
+            }
+        });
+
+        // (c) Redirect confirmation — capture before the browser navigates away
+        if (typeof gform !== 'undefined' && typeof gform.addAction === 'function') {
+            gform.addAction('gform_pre_submission', function (formEl) {
+                var formId = formEl ? formEl.getAttribute('id') : '';
+                formId = formId.replace('gform_', '');
+                if (formId) {
+                    pushEvent('gravity_forms', formId, formEl);
+                    gfTrackedForms['conf_' + formId] = true;
+                }
+            });
+        }
+
+        // ── 3. WPForms ─────────────────────────────────────────
+
+        $(document).on('wpformsAjaxSubmitSuccess', 'form.wpforms-form', function (event) {
+            var formId = $(event.target).attr('data-formid');
+            pushEvent('wpforms', formId, event.target);
+        });
+
+        // ── 4. Forminator ──────────────────────────────────────
+
+        $(document).on('forminator:form:submit:success', function (event) {
+            var formId = $(event.target).find('input[name="form_id"]').val();
+            pushEvent('forminator', formId, event.target);
+        });
+
+        // ── 5. Formidable Forms ────────────────────────────────
+        //   a) AJAX → frmFormComplete fires
+        //   b) Non-AJAX page reload → .frm_message present on load
+
+        var frmTrackedForms = {};
+
+        $(document).on('frmFormComplete', function (event, form) {
+            var formId = $(form).find('input[name="form_id"]').val();
+            if (formId) frmTrackedForms['frm_' + formId] = true;
+            pushEvent('formidable', formId, form);
+        });
+
+        // Non-AJAX: detect success message rendered after page reload
+        $('.frm_message').each(function () {
+            var wrapper = $(this).closest('.frm_forms');
+            var formId = wrapper.find('input[name="form_id"]').val() ||
+                (wrapper.attr('id') || '').replace('frm_form_', '').replace('_container', '');
+            if (formId && !frmTrackedForms['frm_' + formId]) {
+                frmTrackedForms['frm_' + formId] = true;
+                pushEvent('formidable', formId, wrapper.find('form')[0] || null);
+            }
+        });
+
+        // ── 6. Ninja Forms ─────────────────────────────────────
+
+        if ($.fn.onFirst) {
+            $(document).onFirst('nfFormSubmitResponse', function (event, data) {
+                var formId = data.response.data.form_id;
+                pushEvent('ninja_forms', formId, event.target);
+            });
+        } else {
+            $(document).on('nfFormSubmitResponse', function (event, data) {
+                var formId = data.response.data.form_id;
+                pushEvent('ninja_forms', formId, event.target);
+            });
+        }
+
+        // ── 7. Fluent Forms ────────────────────────────────────
+
+        $(document).on('fluentform_submission_success', function (event, data) {
+            if (!data || !data.form) return;
+            var formId = data.config.id;
+            pushEvent('fluent_forms', formId, data.form[0] || event.target);
+        });
+
+        // ── 8. WS Form ────────────────────────────────────────
+
+        $(document).on('wsf-submit-complete', function (event, formObject, formId) {
+            pushEvent('ws_form', formId, event.target);
+        });
+
+        // ── 9. Elementor Forms ─────────────────────────────────
+
+        function observeElementorForm(form) {
+            var observer = new MutationObserver(function (mutations) {
+                for (var i = 0; i < mutations.length; i++) {
+                    if (form.querySelector('.elementor-message-success')) {
+                        var formId = form.getAttribute('id') ||
+                            (form.querySelector('input[name="form_id"]') || {}).value || '';
+                        pushEvent('elementor_form', formId, form);
+                        observer.disconnect();
+                        return;
+                    }
+                }
+            });
+
+            observer.observe(form, {
+                attributes: true,
+                childList:  true,
+                subtree:    true
+            });
+        }
+
+        // existing forms on page
+        document.querySelectorAll('.elementor-form').forEach(function (form) {
+            observeElementorForm(form);
+        });
+
+        // forms inside Elementor popups (loaded dynamically)
+        var popupObserver = new MutationObserver(function (mutationsList) {
+            for (var i = 0; i < mutationsList.length; i++) {
+                var popupForm = document.querySelector('[class*="elementor-popup"] form');
+                if (popupForm) {
+                    observeElementorForm(popupForm);
+                    popupObserver.disconnect();
+                    break;
+                }
+            }
+        });
+        popupObserver.observe(document.body, { childList: true, subtree: true });
+
+        // ── 10. Enfold (Avia) Contact Forms ───────────────────────
+        //
+        // Enfold forms submit via AJAX and do not fire custom JS events.
+        // On success the form slides up and the response container
+        // (#ajaxresponse_{id}) becomes visible with an .avia-form-success heading.
+        // We use a MutationObserver to detect this DOM change.
+
+        var enfoldTracked = {};
+
+        function observeEnfoldResponse(responseEl) {
+            var observer = new MutationObserver(function () {
+                if (responseEl.classList.contains('hidden') ||
+                    responseEl.style.display === 'none') {
+                    return;
+                }
+
+                if (!responseEl.querySelector('.avia-form-success')) {
+                    return;
+                }
+
+                var formId = (responseEl.id || '').replace('ajaxresponse_', '');
+                if (enfoldTracked[formId]) return;
+                enfoldTracked[formId] = true;
+
+                var formEl = responseEl.parentElement
+                    ? responseEl.parentElement.querySelector('form.avia_ajax_form') ||
+                    responseEl.parentElement.querySelector('form.ajax_form')
+                    : null;
+
+                pushEvent('enfold', formId, formEl);
+                observer.disconnect();
+            });
+
+            observer.observe(responseEl, {
+                attributes:      true,
+                attributeFilter: ['class', 'style'],
+                childList:       true,
+                subtree:         true
+            });
+        }
+
+        document.querySelectorAll('.ajaxresponse').forEach(function (el) {
+            observeEnfoldResponse(el);
+        });
+
+    });
+
+    // ── 11. HubSpot Forms v3 ───────────────────────────────────
+    //
+    // v3 forms communicate via window.postMessage. On success the
+    // message payload carries the form ID, conversion ID, and field values.
+
+    window.addEventListener('message', function (event) {
+        if (event.data.type === 'hsFormCallback' &&
+            event.data.eventName === 'onFormSubmitted') {
+
+            pushEvent(
+                'hubspot_v3',
+                event.data.id,
+                null,
+                {
+                    conversion_id: event.data.data.conversionId
+                }
+            );
+        }
+    });
+
+    // ── 12. HubSpot Forms v4 ───────────────────────────────────
+    //
+    // v4 forms fire a custom DOM event. Field values are fetched
+    // asynchronously via the HubspotFormsV4 API.
+
+    window.addEventListener('hs-form-event:on-submission:success', function (event) {
+        if (typeof HubspotFormsV4 === 'undefined') return;
+
+        var hsForm = HubspotFormsV4.getFormFromEvent(event);
+        if (!hsForm) return;
+
+        pushEvent(
+            'hubspot_v4',
+            hsForm.getFormId(),
+            null,
+            {
+                conversion_id: hsForm.getConversionId()
+            }
+        );
+    });
+
+    // ── 13. Lead form submissions ─────────────────────────────
+    //
+    // Lead forms dispatch a custom 'wpseoai:lead_form_submit' event on
+    // successful submission. The event detail may carry formId and any
+    // additional metadata the form wishes to surface.
+
+    document.addEventListener('wpseoai:lead_form_submit', function (event) {
+        pushEvent('wpseoai_lead_form', '', null);
+    }, false);
+
+    // ── 14. Pipedrive LeadBooster Forms ──────────────────────────
+    //
+    // Pipedrive forms are embedded as iframes and post a message to the
+    // parent window on submission. The payload includes formUUID which
+    // serves as the form identifier.
+
+    window.addEventListener('message', function (event) {
+        var data = event.data;
+        if (!data || data.event !== 'pipedrive_form_submit') return;
+
+        pushEvent('pipedrive', data.formUUID || '', null, null);
+    });
+
+    // ── 15. Leadoo ────────────────────────────────────────────────
+    //
+    // Leadoo pushes a { event: 'LEAD' } object to window.dataLayer on
+    // form submission. We wrap dataLayer.push to intercept it.
+    // The _busy guard prevents re-entrancy from our own pushEvent calls.
+
+    (function () {
+        var dl = window.dataLayer;
+        if (!dl || typeof dl.push !== 'function') return;
+
+        var _orig = dl.push.bind(dl);
+        var _busy = false;
+
+        dl.push = function () {
+            if (!_busy) {
+                for (var i = 0; i < arguments.length; i++) {
+                    var item = arguments[i];
+                    if (item && typeof item === 'object' && item.event === 'LEAD') {
+                        _busy = true;
+                        try {
+                            pushEvent('leadoo', '', null, null);
+                        } finally {
+                            _busy = false;
+                        }
+                    }
+                }
+            }
+            return _orig.apply(null, arguments);
+        };
+    }());
+
+    // ── 16. tel: and mailto: link clicks ──────────────────────
+    //
+    // Uses event delegation on document so dynamically injected links
+    // (popups, live chat widgets, etc.) are captured without re-binding.
+    // closest() walks up the DOM in case the click lands on a child
+    // element inside the anchor (e.g. an icon or span).
+    // hrefLower handles uppercase protocol variants (e.g. TEL:, MAILTO:).
+
+    document.addEventListener('click', function (event) {
+        var anchor = event.target.closest('a[href]');
+        if (!anchor) return;
+
+        var href = anchor.getAttribute('href') || '';
+        var hrefLower = href.toLowerCase();
+        var linkText = anchor.textContent.trim();
+
+        if (hrefLower.indexOf('tel:') === 0) {
+            pushLinkClick('wpseoai_tel_click', 'tel', href.slice(4), linkText);
+        } else if (hrefLower.indexOf('mailto:') === 0) {
+            pushLinkClick('wpseoai_mail_click', 'mailto', href.slice(7), linkText);
+        }
+    }, false);
+
+})();
+
+//# sourceURL=seoaiwp-form-tracking-js-after
+</script>
+
+	<script>
+	var script = document.createElement("script");
+	script.id = "ccHostSnippet";
+	script.src = "https://chat.eurocircuits.com/static/chat/js/carecoll_host.js?key=ec161&lang=en&v=" + new Date().getTime();
+	document.head.appendChild(script);
+	</script>
+	</body>
+</html>
