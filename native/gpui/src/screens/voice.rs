@@ -19,7 +19,12 @@ pub struct Voice { pub views: HashMap<String, Value>, marks: HashMap<String, usi
     /// always on (the hub's always.rs): this window runs it; the thread and focus last told; what the hub says of it (listening, why paused)
     pub always: bool, always_target: String, always_focus: Option<bool>, pub always_paused: String, pub always_live: bool,
     /// always on is turned on in Settings (the hub's `always` frame): the pill shows even while it is muted, to listen again
-    pub always_wanted: bool }
+    pub always_wanted: bool,
+    /// what the hub knows of each thread's dictated draft (its `meta` frame), and whether the person typed in it since; the message just sent by voice
+    /// (its thread, id, words and when), whose bubble offers Undo for a moment
+    meta: HashMap<String, Value>, typed: std::collections::HashSet<String>, pub recent: Option<(String, String, String, std::time::Instant)> }
+/// How long a message sent by voice offers Undo on its bubble.
+pub const UNDO_ON_BUBBLE: std::time::Duration = std::time::Duration::from_secs(4);
 /// Held this long, the mic chip is hold-to-talk: letting go stops and sends.
 pub const PRESS_HOLD: std::time::Duration = std::time::Duration::from_millis(400);
 /// What a press of the mic chip does on release: `held` how long, `started` whether its press started dictation.
@@ -95,6 +100,7 @@ impl Win {
                 let caret = new.chars().count(); self.voice_put(&thread, 0..old.len(), &new, caret, cx);
             }
             "audio" => self.voice_mic_send(s(&f, "path")),
+            "meta" => { self.screens.voice.meta.insert(thread.clone(), f["voice"].clone()); }
             // the hub: always-on is wanted (start it here, in the open thread), or not
             "always" => { self.screens.voice.always_wanted = f["want"] == true; if f["want"] == true && f["running"] != true && !self.screens.voice.always { self.voice_always_start(cx) } else if f["want"] == false { let v = &mut self.screens.voice; v.always = false; v.always_live = false; v.always_paused.clear(); } }
             "command" => { self.screens.voice.countdown = None; self.voice_command(&thread, &f, cx) }
@@ -142,9 +148,42 @@ impl Win {
         let text = if thread == self.selected { self.input.read(cx).content.to_string() } else { self.voice_text(thread) };
         if text.trim().is_empty() { return }
         self.voice_put(thread, 0..text.len(), "", 0, cx); self.screens.voice.marks.insert(thread.to_string(), 0);
+        if cmd == "send" {
+            // it goes now, shown at once like a typed message; Undo is on its bubble for a moment (the composer is free for the next words)
+            let mut voice = f["voice"].clone(); if self.screens.voice.typed.remove(thread) { voice["edited"] = json!(true) } self.screens.voice.meta.remove(thread);
+            self.voice_post(thread, &text, voice, cx); self.screens.voice.flash = Some(std::time::Instant::now());
+            cx.spawn(async move |w, cx| { cx.background_executor().timer(UNDO_ON_BUBBLE).await; let _ = w.update(cx, |w, cx| { w.screens.voice.recent.take_if(|r| r.3.elapsed() >= UNDO_ON_BUBBLE); cx.notify() }); }).detach();
+            return
+        }
         let v = &mut self.screens.voice; v.next += 1; let id = v.next;
         v.pending = Some(Pending { id, thread: thread.to_string(), text, cmd: cmd.clone() }); if cmd == "send" { v.flash = Some(std::time::Instant::now()) }
         cx.spawn(async move |w, cx| { cx.background_executor().timer(FLASH).await; let _ = w.update(cx, |_, cx| cx.notify()); cx.background_executor().timer(UNDO - FLASH).await; let _ = w.update(cx, |w, cx| w.voice_deliver(id, cx)); }).detach();
+    }
+    /// A dictated message goes now: through the outbox (turn.start, mode steer: it steers a running turn), with what the hub tells the agent of it,
+    /// shown at once in the open thread.
+    pub fn voice_post(&mut self, thread: &str, text: &str, voice: Value, cx: &mut Context<Self>) {
+        let th = thread.rsplit('|').next().unwrap_or("").to_string();
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64);
+        if thread == self.selected { self.echo_sent(text); }
+        let msg = self.screens.unsent.push_voice(&th, text, now, voice); self.send_unsent();
+        self.screens.voice.recent = Some((thread.to_string(), msg, text.to_string(), std::time::Instant::now())); cx.notify();
+    }
+    /// The Send button on a dictated draft: it goes marked as spoken (edited when typed in), as a voice send does. None when the draft is not dictated.
+    pub fn voice_send_dictated(&mut self, text: &str, cx: &mut Context<Self>) -> bool {
+        let t = self.selected.clone(); let Some(mut m) = self.screens.voice.meta.get(&t).cloned().filter(|m| m["conf"].is_number()) else { return false };
+        if self.screens.voice.typed.remove(&t) { m["edited"] = json!(true) } m["via"] = json!("button"); self.screens.voice.meta.remove(&t);
+        self.voice_cut(false); self.voice_post(&t, text, m, cx); true
+    }
+    /// Undo on the bubble of a message just sent by voice: the hub takes it back (out of the queue, or its turn stopped) and its words return to the draft.
+    pub fn voice_unsend(&mut self, cx: &mut Context<Self>) {
+        let Some((thread, msg, text, _)) = self.screens.voice.recent.take() else { return };
+        rpc(self, json!({"op": "act", "thread": thread, "action": "voice-undo", "value": msg, "draft": ""}));
+        rpc(self, json!({"op": "act", "thread": thread, "action": "voice-undid", "value": "send", "draft": ""}));
+        let now = if thread == self.selected { self.input.read(cx).content.to_string() } else { self.voice_text(&thread) };
+        let mark = self.screens.voice.marks.get(&thread).copied().unwrap_or(0);
+        let (t, m) = undo_text(&text, &now, mark); let caret = t.chars().count();
+        self.voice_put(&thread, 0..now.len(), &t, caret, cx); if self.screens.voice.marks.contains_key(&thread) { self.screens.voice.marks.insert(thread, m); }
+        cx.notify();
     }
     /// The undo window of command `id` ended (or another came): a send goes, a cancel is gone.
     pub fn voice_deliver(&mut self, id: u64, cx: &mut Context<Self>) {
@@ -210,7 +249,7 @@ impl Win {
         self.screens.voice.flash = None; cx.notify();
     }
     /// The person typed in the open thread: `draft_changed` calls this with the old and new text.
-    pub fn voice_typed(&mut self, old: &str, new: &str) { let t = self.selected.clone(); if let Some(m) = self.screens.voice.marks.get_mut(&t) { *m = shift(old, new, *m); } }
+    pub fn voice_typed(&mut self, old: &str, new: &str) { let t = self.selected.clone(); if let Some(m) = self.screens.voice.marks.get_mut(&t) { *m = shift(old, new, *m); } if self.screens.voice.meta.contains_key(&t) { self.screens.voice.typed.insert(t); } }
     /// The mic chip: start listening into the open thread, or stop.
     pub fn voice_press(&mut self, cx: &mut Context<Self>) {
         let thread = self.selected.clone(); if thread.is_empty() { return }
@@ -311,6 +350,23 @@ pub fn always_row(cx: &mut Context<Win>, light: bool, v: &Voice, want: bool) -> 
     Some(div().id("always-on").flex().items_center().gap_2().px_3().py_1().text_size(px(12.)).cursor_pointer().child(div().size(px(8.)).bg(c(dot)))
         .child(div().text_color(c("dim")).child(crate::i18n::trs(&line))).children((!tip.is_empty()).then(|| div().text_color(c("faint")).text_ellipsis().overflow_hidden().whitespace_nowrap().child(tip)))
         .on_click(cx.listener(|w, _, _, cx| w.voice_always_toggle(cx))).into_any_element())
+}
+/// On a spoken message's bubble: the mic (its engine and confidence on hover, "edited" when typed in), and Undo while the message just sent by voice
+/// may still be taken back.
+pub fn bubble_mark(cx: &mut Context<Win>, light: bool, v: &Voice, id: &str, voice: &Value) -> Option<AnyElement> {
+    let undo = v.recent.as_ref().filter(|r| r.1 == id && r.3.elapsed() < UNDO_ON_BUBBLE).is_some();
+    if !voice.is_object() && !undo { return None }
+    let c = |n: &str| theme::color(light, n);
+    let tip = if voice.is_object() {
+        let mut parts = vec![crate::i18n::tf("voice.mark.tip", &[("stt", voice["stt"].as_str().unwrap_or("").to_string().into()), ("conf", format!("{:.0}", voice["conf"].as_f64().unwrap_or(0.0) * 100.0).into())])];
+        if let Some(a) = voice["doubt"].as_array().filter(|a| !a.is_empty()) { parts.push(crate::i18n::tf("voice.mark.unsure", &[("words", a.iter().filter_map(|x| x.as_str()).collect::<Vec<_>>().join(", ").into())])) }
+        if voice["edited"] == true { parts.push(crate::i18n::trs("edited")) }
+        parts.join(" · ")
+    } else { String::new() };
+    let mut row = div().flex().items_center().gap_1();
+    if voice.is_object() { row = row.child(div().id(SharedString::from(format!("vm-{id}"))).tooltip(crate::keys::tip(&tip, "", light)).child(crate::ui::ic(light, "mic", 12., "faint"))) }
+    if undo { row = row.child(div().id(SharedString::from(format!("vu-{id}"))).px_1().border_1().border_color(c("line")).cursor_pointer().text_color(c("accent")).child(crate::i18n::trs("Undo")).on_click(cx.listener(|w, _, _, cx| w.voice_unsend(cx)))) }
+    Some(row.into_any_element())
 }
 /// The send button flashes for a voice send.
 pub fn flashing(v: &Voice) -> bool { v.flash.map_or(false, |t| t.elapsed() < FLASH) }

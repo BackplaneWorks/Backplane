@@ -1974,3 +1974,30 @@ impl mailroom::Mailroom for ChatRoom {
     assert!(ev.iter().any(|e| is(e, "MessagePosted") && e["thread"] == "t1700001001-1" && e["role"] == "system"), "a plain settled thread files it as before");
     ag.shutdown();
 }
+
+// ---- spoken messages (voice/mark.rs) ----
+#[tokio::test(flavor = "multi_thread")] async fn a_dictated_message_reaches_the_agent_marked_as_spoken_and_a_typed_one_does_not() {
+    let sd = dir("vm-bin"); let log = sd.join("in.log");
+    // the stand-in writes each line it is handed, as the agent got it
+    let body = STANDIN.replacen("\n", &format!("\nexport FAKE_PER=1 FAKE_CYCLE=1 FAKE_SECS=1 FAKE_LOG={}\n", log.display()), 1).replacen("    *'\"type\":\"user\"'*)\n", "    *'\"type\":\"user\"'*)\n      printf 'IN %s\\n' \"$line\" >> \"$FAKE_LOG\"\n", 1);
+    script(&sd, "claude", &body);
+    let (hub, ag, _h, _w) = start("vm", |w| base_log(w, 1, ""), |_| Cli::standin(&sd)).await;
+    let t0 = std::time::Instant::now();
+    let r = rpc(&hub, "turn.start", json!({"thread":T1,"text":"zqshort Route the reset to PA0.","msg":"mv1","voice":{"via":"eot","stt":"parakeet-v2","conf":0.86,"doubt":["PA0"]}})).await; assert_eq!(r["ok"], true, "{r}");
+    let accepted = t0.elapsed(); let posted = loop { if log_from(&hub, 0).await.iter().any(|e| is(e, "MessagePosted") && e["role"] == "user") { break t0.elapsed() } tokio::time::sleep(Duration::from_millis(2)).await };
+    eprintln!("voice send: turn.start answered in {} ms, the message in the log at {} ms", accepted.as_millis(), posted.as_millis());
+    let from = len(&hub).await; until(&hub, 0, 30, |ev| ev.iter().any(|e| turn_is(e, "completed"))).await;
+    let r = rpc(&hub, "turn.start", json!({"thread":T1,"text":"zqshort typed this one","msg":"mt1"})).await; assert_eq!(r["ok"], true, "{r}");
+    until(&hub, from, 30, |ev| ev.iter().filter(|e| turn_is(e, "completed")).count() >= 1).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let got = std::fs::read_to_string(&log).unwrap(); let ins: Vec<&str> = got.lines().filter(|l| l.starts_with("IN ")).collect();
+    let spoken = ins.iter().find(|l| l.contains("Route the reset")).expect("the dictated one reached the agent");
+    assert!(spoken.contains("<voice_message via=\\\"eot\\\" stt=\\\"parakeet-v2\\\" confidence=\\\"0.86\\\" doubt=\\\"PA0\\\" edited=\\\"no\\\">") && spoken.contains("Spoken and transcribed"), "{spoken}");
+    let typed = ins.iter().find(|l| l.contains("typed this one")).expect("the typed one reached the agent"); assert!(!typed.contains("voice_message"), "{typed}");
+    // the log keeps it as the agent got it; the model's rows (and every client) show its words alone and that it was spoken
+    let posted: Vec<Value> = log_from(&hub, 0).await.into_iter().filter(|e| is(e, "MessagePosted") && e["role"] == "user").collect();
+    let p = posted.iter().find(|e| e["text"].as_str().unwrap_or("").contains("Route the reset")).unwrap();
+    let (words, m) = crate::voice::mark::split(p["text"].as_str().unwrap()); assert_eq!(words, "zqshort Route the reset to PA0."); assert_eq!(m.unwrap().stt, "parakeet-v2");
+    let t = posted.iter().find(|e| e["text"].as_str().unwrap_or("").contains("typed this one")).unwrap(); assert!(crate::voice::mark::split(t["text"].as_str().unwrap()).1.is_none());
+    ag.shutdown();
+}

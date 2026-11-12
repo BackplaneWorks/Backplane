@@ -699,7 +699,7 @@ private fun ThreadScreen(id: String, viewer: () -> Unit, hub: () -> Unit, go: (S
                     notice = ""
                     // sent: the keyboard goes away, so the reply has the screen (a tap on the box brings it back)
                     // (focus first: the keyboard's word in progress is committed before the box empties, never after it)
-                    if (word == null) { val text = draft; focus.clearFocus(); if (dictate) DataVoice.sent(id); DataClient.send(id, text, pending.toList()); pending.clear(); stick = true }
+                    if (word == null) { val text = draft; focus.clearFocus(); val spoken = if (dictate && pending.isEmpty()) DataVoice.dictated(id) else null; if (dictate) DataVoice.sent(id); DataClient.send(id, text, pending.toList(), voice = spoken); pending.clear(); stick = true }
                     // a command of the composer: the hub runs it; a refusal leaves the draft and says why
                     else { val text = draft.trim(); scope.launch { try {
                         val r = DataClient.runCommand(id, text)
@@ -797,9 +797,19 @@ private fun EntryRow(tid: String, e: DEntry, goTo: (String) -> Unit = {}) {
             e.localImages.forEach { Pic(it, 160); Spacer(Modifier.height(4.dp)) }
             e.attachments.filter { e.localImages.isEmpty() }.forEach { PicById(it.id, 160); Spacer(Modifier.height(4.dp)) }
             if (e.text.isNotEmpty()) Box(Modifier.background(dcs.surfaceContainerHigh).border(BorderStroke(1.dp, dcs.outlineVariant)).padding(horizontal = 10.dp, vertical = 8.dp)) { LinkText(e.text, tid, color = dcs.onSurface, size = 13, lineHeight = 19) }
-            if (e.sending) DMono(Msg.thread_sending, dfaint, modifier = Modifier.padding(top = 3.dp))
-            else if (e.failed) DMono(Msg.android_send_retry, dcs.error, modifier = Modifier.clickable { DataClient.retry(tid, e) }.padding(top = 3.dp))
-            else DMono(dStamp(e.at), dfaint, modifier = Modifier.padding(top = 3.dp))
+            Row(Modifier.padding(top = 3.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                // spoken: the mic, and how sure the engine was (edited when typed in); just sent by voice: Undo, for a moment
+                e.voice?.let { v ->
+                    Icon(Icons.Default.Mic, Msg.voice_mark_tip(v.stt, ((v.conf ?: 0.0) * 100).toInt().toString()), tint = dfaint, modifier = Modifier.size(12.dp).testTag("thread.entry.voice"))
+                    v.conf?.let { c -> DMono("${(c * 100).toInt()}%" + if (v.edited) " · " + Msg.voice_mark_edited else "", dfaint) }
+                }
+                DataVoice.recent?.takeIf { it.tid == tid && (e.clientId == it.cid || e.id == it.cid || e.id == "local:" + it.cid) }?.let {
+                    DMono(Msg.voice_cmd_undo, dcs.primary, modifier = Modifier.clickable { DataVoice.unsend() }.testTag("thread.entry.undo"))
+                }
+                if (e.sending) DMono(Msg.thread_sending, dfaint)
+                else if (e.failed) DMono(Msg.android_send_retry, dcs.error, modifier = Modifier.clickable { DataClient.retry(tid, e) })
+                else DMono(dStamp(e.at), dfaint)
+            }
         }
         "assistant" -> Column(Modifier.fillMaxWidth().padding(horizontal = 14.dp, vertical = 6.dp)) {
             MdText(e.text, thread = tid)

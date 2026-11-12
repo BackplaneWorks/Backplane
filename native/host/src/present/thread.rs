@@ -308,6 +308,8 @@ pub fn entries_w(es: &[Ent], running: bool, waiting: bool, unread: &str, open: &
             let stamp = c.unwrap_or_default(); let stamp = if waits { if stamp.is_empty() { "not read yet".to_string() } else { format!("not read yet · {stamp}") } } else { stamp };
             let mut row = json!({"id": e.id, "kind": "user", "text": body, "attachments": paths.iter().map(|p| chip(p)).collect::<Vec<_>>(), "stamp": stamp});
             if waits { row["unread"] = json!(true) }
+            // spoken (voice/mark.rs): the mic mark, with the engine and its confidence for the hover
+            if let Some(v) = e.akind.strip_prefix("voice").and_then(|j| serde_json::from_str::<Value>(j).ok()) { row["voice"] = v }
             if let Some((rid, q)) = reply { row["replyTo"] = json!({"id": rid, "quote": q.lines().map(str::trim).find(|l| !l.is_empty()).unwrap_or("")}); }
             out.push(row);
         } else {

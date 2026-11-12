@@ -23,7 +23,11 @@ data class DEntry(
     val term: DTermRef? = null, // a chat terminal (feature `terms`, kind "term"): its card
     val handoff: DHandoff? = null, // a `/give` received (kind "handoff"): its card
     val replyTo: DReplyTo? = null, // the person's reply to a message (data/1 `replyTo`): the chip over the bubble
+    val voice: DVoiceMark? = null, // spoken (data/1 `voice`): the mic on the bubble, the engine and its confidence
 )
+/** A spoken message's mark: the engine, its mean confidence (0..1, null unknown), the words it was unsure of, typed in after. */
+data class DVoiceMark(val stt: String, val conf: Double?, val doubt: List<String>, val edited: Boolean)
+fun parseVoiceMark(o: JSONObject) = DVoiceMark(o.str("stt"), if (o.has("conf") && !o.isNull("conf")) o.optDouble("conf") else null, o.optJSONArray("doubt")?.let { a -> (0 until a.length()).map { a.optString(it) } } ?: emptyList(), o.optBoolean("edited", false))
 /** What a reply answers (docs/PHONE-DATA.md, Entry): the message's id and its first line. */
 data class DReplyTo(val id: String, val quote: String)
 /** A `/give` received: where it came from, the person's note, the summary and what the work touched; a reference opens by `link.resolve {url, thread}`. */
@@ -78,6 +82,7 @@ fun parseEntry(o: JSONObject) = DEntry(
     term = o.optJSONObject("term")?.let { DTermRef(it.str("key"), it.str("id"), it.str("title"), it.optInt("cols", 80), it.optInt("rows", 24), it.str("cmd")) },
     handoff = o.optJSONObject("handoff")?.let(::parseHandoff),
     replyTo = o.optJSONObject("replyTo")?.takeIf { it.str("id").isNotEmpty() }?.let { DReplyTo(it.str("id"), it.str("quote")) },
+    voice = o.optJSONObject("voice")?.let(::parseVoiceMark),
 )
 fun parseProject(o: JSONObject) = DProject(o.str("id"), o.str("title"), o.str("root"), o.optInt("threadCount", 0), o.lng("updatedAt"), o.optInt("waiting", 0), o.optString("icon", "folder"), o.optString("css"), if (o.has("settledCount") && !o.isNull("settledCount")) o.optInt("settledCount") else null,
     parseMark(o.optJSONObject("mark")), o.str("also"), o.optJSONArray("newOn").list { DNewOn(it.str("value"), it.str("label"), it.optBoolean("away")) }, o.str("runsOn"), o.str("key"))

@@ -3,7 +3,7 @@
 use crate::openai::DELAYS;
 
 pub const USAGE: &str = "usage:
-  backplane-voice live --engine local --local-dir D [--model parakeet-v2] [--source ...] [--device NAME] [--server SOCK] [--always]
+  backplane-voice live --engine local --local-dir D [--model parakeet-v2] [--source ...] [--device NAME] [--server SOCK] [--always] [--speaker]
   backplane-voice file PATH --engine local --local-dir D [--model ID] [--content-type CT] [--server SOCK]
   backplane-voice serve --local-dir D [--model ID] --socket SOCK
   backplane-voice local-status --local-dir D
@@ -45,6 +45,8 @@ pub struct Args {
     pub socket: String,
     /// live: always on (the hub's always-on dictation): no time limit
     pub always: bool,
+    /// live: the speaker check is on: each segment's voice (its embedding) is told
+    pub speaker: bool,
 }
 
 /// Err is the reason to print before the usage, if there is one.
@@ -70,6 +72,10 @@ pub fn parse(argv: &[String]) -> Result<Args, Option<String>> {
         }
         if f == "--always" {
             a.always = true;
+            continue;
+        }
+        if f == "--speaker" {
+            a.speaker = true;
             continue;
         }
         let Some(v) = argv.get(i).cloned() else { return Err(Some(format!("{f} needs a value"))) };

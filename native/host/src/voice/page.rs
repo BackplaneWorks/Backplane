@@ -109,7 +109,9 @@ fn always_rows(p: &Prefs, info: &Value) -> Vec<Value> {
     let n: u32 = info["voice.print"].as_str().and_then(|s| s.parse().ok()).unwrap_or(0);
     let note = if n >= super::speaker::ENROLLED { format!("Only your voice starts a message, not the TV, someone else or the speakers. Learned from {n} stretches of your dictation, on this machine only.") }
         else { format!("Only your voice will start a message. It learns your voice from your dictation with the mic button: {n} of {} stretches so far; until then any voice can.", super::speaker::ENROLLED) };
-    v.push(row("Speaker check", &note, vec![t("On", super::always::SPEAKER, c.speaker, true), btn("Re-enrol", "voice-op", "speaker-reset", false)]));
+    let note = if c.speaker { note } else { "Off: a message starts at real words from anyone. On, only your voice starts one (a 40 MB model is fetched then, and your voice is learned from your dictation on this machine).".to_string() };
+    let mut sb = vec![t("On", super::always::SPEAKER, c.speaker, false)]; if c.speaker { sb.push(btn("Re-enrol", "voice-op", "speaker-reset", false)) }
+    v.push(row("Speaker check", &note, sb));
     v.push(row("Messages go to", "Saying a thread's name first (“KiCad thread, …”) sends that message there.", vec![btn("The open thread (else Bub)", "setting", &format!("{TARGET}="), c.target == "open"), btn("Bub", "setting", &format!("{TARGET}=bub"), c.target == "bub")]));
     let _ = IGNORE; v
 }

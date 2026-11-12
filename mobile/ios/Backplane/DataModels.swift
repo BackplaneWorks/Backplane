@@ -74,11 +74,12 @@ struct DEntry: Codable, Equatable, Identifiable {
     var handoff: DHandoff?   // a `/give` received (kind "handoff"): its card
     var attachments: [DAttachment] = []
     var replyTo: DReplyTo?   // the person's reply to a message (data/1 `replyTo`): the chip over the bubble
+    var voice: DVoiceMark?   // spoken (data/1 `voice`): the mic on the bubble, the engine and its confidence
     // phone-only, never on the wire: a message sent and not yet confirmed, or one the hub refused
     var sending = false
     var failed = false
     var localImages: [Data] = []   // the pictures of a message this phone is sending (JPEG), shown before the hub has them
-    enum CodingKeys: String, CodingKey { case id, kind, text, at, label, tone, clientId, replaces, live, agentOnly, tool, ask, term, handoff, attachments, replyTo }
+    enum CodingKeys: String, CodingKey { case id, kind, text, at, label, tone, clientId, replaces, live, agentOnly, tool, ask, term, handoff, attachments, replyTo, voice }
     init(id: String, kind: String, text: String, at: Int, clientId: String? = nil, live: Bool = false) {
         self.id = id; self.kind = kind; self.text = text; self.at = at; self.clientId = clientId; self.live = live
     }
@@ -95,7 +96,17 @@ struct DEntry: Codable, Equatable, Identifiable {
         handoff = try? c.decode(DHandoff.self, forKey: .handoff)
         attachments = (try? c.decode([DAttachment].self, forKey: .attachments)) ?? []
         replyTo = try? c.decode(DReplyTo.self, forKey: .replyTo)
+        voice = try? c.decode(DVoiceMark.self, forKey: .voice)
     }
+}
+
+/// A spoken message's mark (docs/PHONE-DATA.md, Entry `voice`): the engine, its mean confidence (0…1), the words it was unsure of, typed in after.
+struct DVoiceMark: Codable, Equatable {
+    var stt = ""; var conf: Double?; var doubt: [String] = []; var edited = false
+    enum CodingKeys: String, CodingKey { case stt, conf, doubt, edited }
+    init(stt: String = "", conf: Double? = nil, doubt: [String] = [], edited: Bool = false) { self.stt = stt; self.conf = conf; self.doubt = doubt; self.edited = edited }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); stt = c.str(.stt); conf = try? c.decode(Double.self, forKey: .conf); doubt = (try? c.decode([String].self, forKey: .doubt)) ?? []; edited = c.bool(.edited) }
+    init(_ o: [String: Any]) { stt = o["stt"] as? String ?? ""; conf = (o["conf"] as? Double) ?? (o["conf"] as? Int).map(Double.init); doubt = o["doubt"] as? [String] ?? []; edited = o["edited"] as? Bool ?? false }
 }
 
 /// What a reply answers (docs/PHONE-DATA.md, Entry): the message's id and its first line.

@@ -561,8 +561,9 @@ object DataClient {
 
     // ---- actions
     val canSendImages get() = "images" in features
-    fun send(tid: String, text: String, images: List<ByteArray> = emptyList()) {
-        val t = text.trim(); if (t.isEmpty() && images.isEmpty()) return
+    /** `voice`: dictated (what the hub tells the agent of it, voice/mark.rs). The message's client id. */
+    fun send(tid: String, text: String, images: List<ByteArray> = emptyList(), voice: JSONObject? = null): String {
+        val t = text.trim(); if (t.isEmpty() && images.isEmpty()) return ""
         val cid = UUID.randomUUID().toString()
         sendError = sendError - tid
         // no socket (or older ones still waiting): into the outbox, in order behind them; a turn running is no reason to wait (the hub takes it at once)
@@ -570,21 +571,23 @@ object DataClient {
         if (images.isEmpty() && hub != null && (conn != Conn.ONLINE || outbox.next(hub) != null)) {
             keepOutbox(outbox.push(hub, tid, t, cid)); setDraft(tid, ""); fields[tid] = TextFieldValue("")
             if (conn == Conn.ONLINE) { val g = gen; scope.launch { flushOutbox(g) } }
-            return
+            return cid
         }
-        val local = DEntry("local:$cid", "user", t, System.currentTimeMillis(), clientId = cid, sending = true, localImages = images)
+        val local = DEntry("local:$cid", "user", t, System.currentTimeMillis(), clientId = cid, sending = true, localImages = images, voice = voice?.let(::parseVoiceMark))
         entries = entries + (tid to (entries[tid] ?: emptyList()) + local)
         setDraft(tid, ""); fields[tid] = TextFieldValue("")
-        scope.launch { deliver(tid, t, cid, images) }
+        scope.launch { deliver(tid, t, cid, images, voice) }
+        return cid
     }
     fun retry(tid: String, e: DEntry) {
         val cid = e.clientId ?: return
         entries = entries + (tid to (entries[tid] ?: emptyList()).map { if (it.id == e.id) it.copy(sending = true, failed = false) else it })
         scope.launch { deliver(tid, e.text, cid, e.localImages) }
     }
-    private suspend fun deliver(tid: String, text: String, cid: String, images: List<ByteArray>) {
+    private suspend fun deliver(tid: String, text: String, cid: String, images: List<ByteArray>, voice: JSONObject? = null) {
         try {
             val p = JSONObject().put("thread", tid).put("text", text).put("clientId", cid)
+            if (voice != null) p.put("voice", voice)
             if (images.isNotEmpty()) p.put("attachments", JSONArray(images.mapIndexed { i, b ->
                 JSONObject().put("name", "photo-${i + 1}.jpg").put("mime", "image/jpeg").put("data", android.util.Base64.encodeToString(b, android.util.Base64.NO_WRAP)) }))
             val r = call("message.send", p)

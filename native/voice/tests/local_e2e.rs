@@ -293,7 +293,7 @@ fn the_speaker_model_tells_the_enrolled_voice_from_others() {
     let here = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/turn");
     let emb = |clip: &str| -> Vec<f64> {
         let pcm = pcm_of(&here.join(format!("{clip}.wav")));
-        let r = live_run(&dir, &here, &[], |r| { r.write(&pcm); r.write(&vec![0u8; 32000]); r.close_stdin(); });
+        let r = live_run(&dir, &here, &["--speaker"], |r| { r.write(&pcm); r.write(&vec![0u8; 32000]); r.close_stdin(); });
         r.next("voice")["emb"].as_array().unwrap().iter().map(|x| x.as_f64().unwrap()).collect()
     };
     let unit = |v: &[f64]| { let n = v.iter().map(|x| x * x).sum::<f64>().sqrt(); v.iter().map(|x| x / n).collect::<Vec<_>>() };

@@ -1028,7 +1028,8 @@ struct DataThreadView: View {
         if client.commandOf(t) != nil { run(t); return }
         let images = pending
         text = ""; pending = []; atEnd = true
-        client.send(id, t, images: images)
+        // a dictated draft goes marked as spoken (the agent is told; edited when typed in)
+        client.send(id, t, images: images, voice: images.isEmpty ? client.voice.dictated(id) : nil)
         client.voice.sent(id, draft: "")
     }
     // pictures chosen or pasted: shrunk off the main thread, at most four to a message
@@ -1194,9 +1195,20 @@ struct DataEntryRow: View {
                         if entry.localImages.isEmpty { ForEach(entry.attachments) { a in DataAttachmentImage(client: client, attachment: a) } }
                         if !entry.text.isEmpty { DLinkText(text: entry.text, thread: thread).foregroundStyle(BackplaneDesign.text).lineSpacing(3) }
                     }.padding(.horizontal, 10).padding(.vertical, 8).dbox(fill: BackplaneDesign.raised)
-                    if entry.sending { Text(Tr.t("Sending…")).dmono(11).foregroundStyle(BackplaneDesign.faint) }
-                    else if entry.failed { Button(Tr.t("Not sent · Retry")) { client.retry(thread, entry) }.dmono(11).foregroundStyle(BackplaneDesign.bad) }
-                    else { Text(dStamp(entry.at)).dmono(11).foregroundStyle(BackplaneDesign.faint) }
+                    HStack(spacing: 6) {
+                        // spoken: the mic, and how sure the engine was (edited when typed in); just sent by voice: Undo, for a moment
+                        if let v = entry.voice {
+                            Image(systemName: "mic").font(.system(size: 10)).foregroundStyle(BackplaneDesign.faint)
+                                .accessibilityLabel(Tr.voice_mark_tip(stt: v.stt, conf: String(Int((v.conf ?? 0) * 100))) + (v.edited ? " · " + Tr.t("edited") : "")).accessibilityIdentifier("data.entry.voice")
+                            if let c = v.conf { Text("\(Int(c * 100))%" + (v.edited ? " · " + Tr.t("edited") : "")).dmono(10).foregroundStyle(BackplaneDesign.faint) }
+                        }
+                        if let r = client.voice.recent, r.thread == thread, entry.clientId == r.cid || entry.id == r.cid || entry.id == "local:" + r.cid {
+                            Button(Tr.t("Undo")) { client.voice.unsend() }.dmono(11).foregroundStyle(BackplaneDesign.accent).accessibilityIdentifier("data.entry.undo")
+                        }
+                        if entry.sending { Text(Tr.t("Sending…")).dmono(11).foregroundStyle(BackplaneDesign.faint) }
+                        else if entry.failed { Button(Tr.t("Not sent · Retry")) { client.retry(thread, entry) }.dmono(11).foregroundStyle(BackplaneDesign.bad) }
+                        else { Text(dStamp(entry.at)).dmono(11).foregroundStyle(BackplaneDesign.faint) }
+                    }
                 }
             }.padding(.vertical, 4).accessibilityIdentifier("data.entry.user")
         case "assistant":

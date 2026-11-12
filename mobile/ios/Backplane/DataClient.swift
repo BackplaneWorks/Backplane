@@ -793,31 +793,34 @@ final class DataClient {
     // MARK: actions
     /// A message: message.send at once, whatever the thread is doing (the hub puts it into a running turn). With the socket down, or while older
     /// unsent ones wait, it goes to the outbox instead (a message with pictures is not kept there: it stays in the conversation with Retry).
-    func send(_ tid: String, _ text: String, images: [Data] = []) {
+    /// `voice`: dictated (what the hub tells the agent of it, voice/mark.rs). The message's client id.
+    @discardableResult func send(_ tid: String, _ text: String, images: [Data] = [], voice: [String: Any]? = nil) -> String {
         let text = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !text.isEmpty || !images.isEmpty else { return }
+        guard !text.isEmpty || !images.isEmpty else { return "" }
         let cid = UUID().uuidString
         queueError[tid] = nil
         if images.isEmpty && (conn != .online || !outbox.isEmpty) {
             outbox.push(thread: tid, text: text, clientId: cid); saveOutbox()
             setDraft(tid, "")
             if conn == .online { let g = gen; Task { await flushOutbox(g) } }
-            return
+            return cid
         }
         var local = DEntry(id: "local:" + cid, kind: "user", text: text, at: Int(Date().timeIntervalSince1970 * 1000), clientId: cid)
-        local.sending = true; local.localImages = images
+        local.sending = true; local.localImages = images; local.voice = voice.map(DVoiceMark.init)
         entries[tid, default: []].append(local)
         setDraft(tid, "")
-        Task { await deliver(tid, text, cid, images) }
+        Task { await deliver(tid, text, cid, images, voice: voice) }
+        return cid
     }
     func retry(_ tid: String, _ entry: DEntry) {
         guard let cid = entry.clientId, var l = entries[tid], let i = l.firstIndex(where: { $0.id == entry.id }) else { return }
         l[i].failed = false; l[i].sending = true; entries[tid] = l
         Task { await deliver(tid, entry.text, cid, entry.localImages) }
     }
-    private func deliver(_ tid: String, _ text: String, _ cid: String, _ images: [Data]) async {
+    private func deliver(_ tid: String, _ text: String, _ cid: String, _ images: [Data], voice: [String: Any]? = nil) async {
         do {
             var p: [String: Any] = ["thread": tid, "text": text, "clientId": cid]
+            if let voice { p["voice"] = voice }
             if !images.isEmpty {
                 p["attachments"] = images.enumerated().map { ["name": "photo-\($0.offset + 1).jpg", "mime": "image/jpeg", "data": $0.element.base64EncodedString()] }
             }

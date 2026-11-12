@@ -6,7 +6,8 @@ use serde_json::{json, Value};
 use std::path::PathBuf;
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct Item { pub thread: String, pub text: String, pub msg: String, /** on its way: its answer is awaited */ #[serde(default)] pub out: bool, /** the hub said no */ #[serde(default)] pub why: String }
+pub struct Item { pub thread: String, pub text: String, pub msg: String, /** on its way: its answer is awaited */ #[serde(default)] pub out: bool, /** the hub said no */ #[serde(default)] pub why: String,
+    /** dictated: what the hub tells the agent of it (voice/mark.rs on the hub) */ #[serde(default)] pub voice: Option<Value> }
 
 #[derive(Default)]
 pub struct Unsent { pub items: Vec<Item>, path: Option<PathBuf>, seq: u64, /** the connection has its hub's greeting (requests go out) */ pub live: bool }
@@ -22,8 +23,10 @@ impl Unsent {
     /// Keep a message for `thread`; its id is made here and kept for every try.
     pub fn push(&mut self, thread: &str, text: &str, now_ms: u64) -> String {
         self.seq += 1; let msg = format!("u{now_ms}-{}", self.seq);
-        self.items.push(Item { thread: thread.into(), text: text.into(), msg: msg.clone(), out: false, why: String::new() }); self.save(); msg
+        self.items.push(Item { thread: thread.into(), text: text.into(), msg: msg.clone(), out: false, why: String::new(), voice: None }); self.save(); msg
     }
+    /// The same for a dictated message: it goes with what the hub tells the agent of it.
+    pub fn push_voice(&mut self, thread: &str, text: &str, now_ms: u64, voice: Value) -> String { let m = self.push(thread, text, now_ms); if let Some(i) = self.items.last_mut() { i.voice = Some(voice) } self.save(); m }
     /// Edit or Remove: out of the outbox; its text.
     pub fn remove(&mut self, msg: &str) -> Option<String> { let i = self.items.iter().position(|x| x.msg == msg)?; let t = self.items.remove(i).text; self.save(); Some(t) }
     /// The next to send now (connected): the oldest not refused, when none is on its way. It is marked on its way.
@@ -50,7 +53,7 @@ impl Unsent {
     }
     /// The request that sends one (as the composer's Send does: mode steer, into a running turn at once).
     /// (`thread` is the window's key, `<hub>|<id>`: the hub is asked about its own id.)
-    pub fn request(i: &Item) -> Value { json!({"thread": i.thread.rsplit('|').next().unwrap_or(""), "text": i.text, "msg": i.msg, "mode": "steer"}) }
+    pub fn request(i: &Item) -> Value { let mut r = json!({"thread": i.thread.rsplit('|').next().unwrap_or(""), "text": i.text, "msg": i.msg, "mode": "steer"}); if let Some(v) = &i.voice { r["voice"] = v.clone() } r }
 }
 
 #[cfg(test)]

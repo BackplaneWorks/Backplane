@@ -2538,6 +2538,9 @@ settings.voice.speaker.reenrol = 再登録
 voice.always.pill.listening = 聞き取り中
 voice.always.pill.paused = 一時停止中
 voice.always.pill.listen = 聞く
+voice.mark.tip = 音声入力（{stt} で文字起こし、確信度 {conf}%）
+voice.mark.unsure = 不確かな語: {words}
+voice.mark.edited = 編集済み
 
 # ---- gpui-f: hub setup flow and thread ----
 gpui.f.group.install = インストール

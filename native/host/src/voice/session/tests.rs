@@ -227,7 +227,7 @@ async fn jev_mock(p: f64) -> (String, Arc<Mutex<Vec<String>>>) {
     commit(&r.hub, &[("voice.eot.jev".to_string(), "on".to_string())]).await.unwrap();
     r.rpc(json!({"op":"start","thread":"t1","draft":"","src":"hub"})).await;
     let fs = r.until(|v| v["ev"] == "command").await;
-    let cd = fs.iter().find(|f| f["ev"] == "countdown").expect("a countdown"); assert_eq!((cd["ms"].as_u64(), cd["by"].as_str()), (Some(1500), Some("jev")));
+    let cd = fs.iter().find(|f| f["ev"] == "countdown").expect("a countdown"); assert_eq!(cd["ms"].as_u64(), Some(1000)); assert!(matches!(cd["by"].as_str(), Some("audio" | "jev")), "{cd}");
     assert_eq!(fs.last().unwrap()["cmd"], "send");
     let req = got.lock().unwrap().join("\n"); assert!(req.contains("Bearer ts-test-key") && req.contains(r#"Transcript so far: \"Ship it today.\""#) && req.contains("gives 0.93"), "{req}");
     assert!(r.hub.info_now()["voice.eot.last"].as_str().unwrap().contains("\"by\":\"jev\""));

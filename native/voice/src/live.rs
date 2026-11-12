@@ -239,6 +239,7 @@ pub async fn live(a: Args) -> ! {
     if !a.always {
         stop::after(stop.clone(), LIVE_LIMIT);
     }
+    crate::resident::SPEAKER.store(a.speaker, std::sync::atomic::Ordering::Relaxed);
     let from_stdin = a.source == "stdin";
     if !from_stdin {
         stop::watch_stdin(stop.clone());

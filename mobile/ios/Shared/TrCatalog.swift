@@ -2845,6 +2845,9 @@ settings.voice.speaker.reenrol	Re-enrol	再登録
 voice.always.pill.listening	Listening	聞き取り中
 voice.always.pill.paused	Paused	一時停止中
 voice.always.pill.listen	Listen	聞く
+voice.mark.tip	Spoken, transcribed by {stt}, {conf}% sure	音声入力（{stt} で文字起こし、確信度 {conf}%）
+voice.mark.unsure	unsure: {words}	不確かな語: {words}
+voice.mark.edited	edited	編集済み
 gpui.f.group.install	Install	インストール
 gpui.f.group.agents	Agents	エージェント
 gpui.f.group.cad	CAD tools	CADツール
@@ -5540,6 +5543,12 @@ gpui.usage.noread	No reading yet: the first turn's result reports it.	まだ値�
 
     /// settings.voice.speaker.learning = Only your voice will start a message. It learns your voice from your dictation with the mic button: {n} of {k} stretches so far; until then any voice can.
     static func settings_voice_speaker_learning(n: String, k: String) -> String { f("settings.voice.speaker.learning", ["n": n, "k": k]) }
+
+    /// voice.mark.tip = Spoken, transcribed by {stt}, {conf}% sure
+    static func voice_mark_tip(stt: String, conf: String) -> String { f("voice.mark.tip", ["stt": stt, "conf": conf]) }
+
+    /// voice.mark.unsure = unsure: {words}
+    static func voice_mark_unsure(words: String) -> String { f("voice.mark.unsure", ["words": words]) }
 
     /// gpui.f.counter = {i, number} of {n, number}
     static func gpui_f_counter(i: Int, n: Int) -> String { f("gpui.f.counter", ["i": String(i), "n": String(n)]) }

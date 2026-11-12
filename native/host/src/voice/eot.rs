@@ -23,7 +23,7 @@ pub const CHOICES: [(f64, &str); 5] = [(0.5, "Eager"), (0.6, ""), (0.65, "Defaul
 /// Jev's answer later than this is not waited for.
 pub const JEV_LIMIT_MS: u64 = 400;
 /// The countdown at the default threshold; a more patient threshold waits a little longer.
-pub fn countdown_ms(threshold: f64) -> u64 { (1500.0 + (threshold - THRESHOLD_DEFAULT).max(0.0) * 2500.0).round() as u64 }
+pub fn countdown_ms(threshold: f64) -> u64 { (1000.0 + (threshold - THRESHOLD_DEFAULT).max(0.0) * 2500.0).round() as u64 }
 /// With no model at all: a sentence's end and this much silence.
 pub const SILENCE_MS: u64 = 2000;
 pub const QUESTION: &str = "The speaker has finished their message and is ready to send it";
@@ -110,6 +110,6 @@ mod tests {
         assert!(s.contains("gives 0.12") && s.matches('x').count() == 400);
         assert_eq!(request("jev-latest", "s")["questions"]["done"]["type"], "noul");
         assert_eq!(answer(&json!({"model":"jev-1.14.0","answers":{"done":{"type":"noul","noul":0.79}}})), Some(0.79)); assert_eq!(answer(&json!({"error":"x"})), None);
-        assert_eq!(countdown_ms(0.65), 1500); assert_eq!(countdown_ms(0.85), 2000); assert_eq!(countdown_ms(0.5), 1500);
+        assert_eq!(countdown_ms(0.65), 1000); assert_eq!(countdown_ms(0.85), 1500); assert_eq!(countdown_ms(0.5), 1000);
     }
 }
