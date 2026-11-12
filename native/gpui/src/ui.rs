@@ -848,10 +848,8 @@ impl Render for Backplane {
                 .children(crate::screens::viewer::is_open(thread).then(|| self.screens.parts.el(Backplane::viewer_part, StyleRefinement::default().flex_1().min_h_0(), cx)).and_then(|page| crate::screens::viewer::pane(cx, light, thread, page)))
                 // right rail
                 .child(div().w(px(72.)).h_full().flex_shrink_0().relative().child(art::probe("rail")).children(crate::perf::mark("rail")).border_l_1().border_color(c("rule")).flex().flex_col().py_2().children(rail)))
-            // the GitHub star suggestion, while the hub says it is out: its own row along the bottom (as 0.14's), so the top bar and what is under the pointer do not move when it comes
-            // the one-time telemetry notice, above it (screens/tmnotice.rs)
+            // the one-time telemetry notice (screens/tmnotice.rs)
             .children({ let (n, shown) = (self.screens.tm_notice.clone(), self.screens.tm_shown.clone()); crate::screens::tmnotice::strip(cx, n.as_ref(), &shown, light) })
-            .children(crate::screens::star::strip(cx, self.screens.star.clone().as_ref(), light))
             .children(crate::perf::mark("over"))
             // Settings over the whole window: its dialog is sized from the window (settings::fit), so it must not sit in the thread column
             .children(crate::screens::settings::view(cx, light, &self.screens.fields, &self.data["settings"], &self.screens.settings_focus, &self.screens.settings_ui, &self.local, &self.screens.acct, crate::screens::settings::fit(f32::from(window.viewport_size().width), f32::from(window.viewport_size().height)),&self.hubs,self.screens.offers.on_home.as_deref()))
@@ -864,6 +862,8 @@ impl Render for Backplane {
             // the keys sheet, over setup too (? and F1 work there)
             .children(crate::screens::keysheet::view(cx, light, self.screens.keysheet, &self.local))
             .children(crate::screens::migrate::view(cx, light, &self.data["migrate"]))
+            // the GitHub star suggestion, while the hub says it is out: a card over the window, at a pause (screens/star.rs `due`)
+            .children(self.star_up(cx).then(|| crate::screens::star::card(cx, self.screens.star.clone().as_ref(), light)).flatten())
             // the right-click menu of a sidebar row, over everything
             .children(self.screens.ctx.clone().map(|m| { for it in &m.items { ctl.push(CtlEntry { id: format!("ctx:{}", it.label), label: it.label.clone(), ctl: Ctl::Node(it.action.clone(), it.value.clone()) }); } crate::screens::ctxmenu::render(cx, light, &m) }))
             .children(crate::perf::on().then(|| crate::perf::overlay(light, &crate::keys::hint(&self.local, "perf"))))

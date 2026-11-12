@@ -8,6 +8,8 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Star
+import androidx.compose.foundation.border
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -146,21 +148,32 @@ internal fun TelemetryBanner(settings: () -> Unit) {
     }
 }
 
-/** The GitHub star suggestion (DataClient.star), one line: the link opens the page and decides open; Dismiss decides dismiss. */
+/** The GitHub star suggestion (DataClient.star): a large card along the top with the hub's title, the repository, why stars help, a large Star on
+ *  GitHub (opens the page, decides open), Later (a week, decides later) and Don't ask again (decides dismiss). It waits for a pause (DStarOffer.due). */
 @Composable
 internal fun StarBanner() {
     val s = DataClient.star ?: return
+    if (!DStarOffer.due(s, DataClient.threads.any { it.state == "working" || it.state == "asking" }, DataClient.typing())) return
     val ctx = LocalContext.current
-    Column(Modifier.testTag("star.banner")) {
-        Row(Modifier.fillMaxWidth().background(dcs.surfaceContainerHigh).padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(Tr.t(s.text), Modifier.weight(1f), color = dcs.onSurface, fontFamily = BpMono, fontSize = 12.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Spacer(Modifier.width(8.dp))
-            DMono(Tr.t(s.label.ifEmpty { "Star on GitHub" }), dcs.primary, 12, Modifier.testTag("star.open").clickable {
+    run {
+        Column(Modifier.fillMaxWidth().padding(8.dp).background(dcs.surfaceContainerHigh).border(androidx.compose.foundation.BorderStroke(1.dp, dcs.primary)).padding(16.dp).testTag("star.banner"), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Star, null, tint = dcs.primary, modifier = Modifier.size(26.dp)); Spacer(Modifier.width(10.dp))
+                Text(Tr.t(s.text), color = dcs.onSurface, fontFamily = BpMono, fontSize = 17.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+            }
+            DMono(s.place, dfaint, 12)
+            if (s.why.isNotEmpty()) Text(Tr.t(s.why), color = dcs.onSurfaceVariant, fontFamily = BpMono, fontSize = 13.sp)
+            Row(Modifier.fillMaxWidth().height(48.dp).background(dcs.primary).testTag("star.open").clickable {
                 runCatching { ctx.startActivity(android.content.Intent(android.content.Intent.ACTION_VIEW, android.net.Uri.parse(s.url)).addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)) }
                 DataClient.starDecide("open")
-            }.padding(horizontal = 4.dp, vertical = 4.dp), bold = true)
-            DMono(Msg.approval_dismiss, dcs.onSurfaceVariant, 12, Modifier.testTag("star.dismiss").clickable { DataClient.starDecide("dismiss") }.padding(horizontal = 4.dp, vertical = 4.dp))
+            }, horizontalArrangement = Arrangement.Center, verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Star, null, tint = dcs.onPrimary, modifier = Modifier.size(18.dp)); Spacer(Modifier.width(8.dp))
+                Text(Tr.t(s.label.ifEmpty { "Star on GitHub" }), color = dcs.onPrimary, fontFamily = BpMono, fontSize = 15.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold)
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                DBtn(Tr.t("Later"), false, modifier = Modifier.weight(1f).testTag("star.later")) { DataClient.starDecide("later") }
+                DBtn(Tr.t("Don't ask again"), false, modifier = Modifier.weight(1f).testTag("star.dismiss")) { DataClient.starDecide("dismiss") }
+            }
         }
-        DLine()
     }
 }

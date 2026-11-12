@@ -135,19 +135,22 @@ impl Policy {
     pub fn star_prompt(&self, msg_id: &str, now_s: u64) -> (Vec<Value>, Option<Value>) {
         let g = self.lock();
         if g.booting.is_some() { return (vec![], None) }
-        let ev = super::star::accept(&g.core.st.get(super::star::KEY, ""), msg_id, now_s);
+        let raw = g.core.st.get(super::star::KEY, "");
+        // a snoozed offer whose week is up comes out again at the person's next prompt
+        if super::star::woke(&raw, now_s) { return (vec![], Some(super::star::frame(super::star::offer(&raw, now_s)))) }
+        let ev = super::star::accept(&raw, msg_id, now_s);
         let sent = ev.first().and_then(|e| e["value"].as_str()).map_or(false, |v| v.contains("\"status\":\"sent\""));
-        let offer = if sent { ev.first().and_then(|e| e["value"].as_str()).map(|v| super::star::frame(super::star::offer(v))) } else { None };
+        let offer = if sent { ev.first().and_then(|e| e["value"].as_str()).map(|v| super::star::frame(super::star::offer(v, now_s))) } else { None };
         (ev, offer)
     }
     /// star.offer: the offer while it is out and undecided (null otherwise, and while the log is folded)
-    pub fn star_offer(&self) -> Value {
+    pub fn star_offer(&self, now_s: u64) -> Value {
         let g = self.lock();
-        if g.booting.is_some() { Value::Null } else { super::star::offer(&g.core.st.get(super::star::KEY, "")) }
+        if g.booting.is_some() { Value::Null } else { super::star::offer(&g.core.st.get(super::star::KEY, ""), now_s) }
     }
     /// star.replay: the offer made again (Settings, Developer)
     pub fn star_replay(&self, now_s: u64) -> Vec<Value> { if self.lock().booting.is_some() { vec![] } else { super::star::replay(now_s) } }
-    /// star.nudge {token, action}: the decision (opened / dismissed), terminal, only for the offered token
+    /// star.nudge {token, action}: the decision (opened / dismissed, terminal; later, a week's snooze), only for the offered token
     pub fn star_decide(&self, token: &str, action: &str, now_s: u64) -> Vec<Value> {
         let g = self.lock();
         if g.booting.is_some() { vec![] } else { super::star::decide(&g.core.st.get(super::star::KEY, ""), token, action, now_s) }
@@ -433,13 +436,13 @@ mod tests {
         for i in 1..=4 { let (ev, offer) = p.star_prompt(&format!("m{i}"), 10 + i); assert_eq!(ev.len(), 1); assert!(offer.is_none()); apply(&p, &ev); }
         let (ev, offer) = p.star_prompt("m5", 20);
         assert!(ev[0]["value"].as_str().unwrap().contains(r#""status":"sent""#));
-        assert_eq!(p.star_offer(), Value::Null, "not before the ledger commits");
-        assert_eq!(offer.unwrap(), json!({"t":"star","offer":{"token":"m5","text":"Like Backplane? Give us a star on GitHub!","url":"https://github.com/BackplaneWorks/Backplane","label":"Star on GitHub"}}), "the targeted frame");
+        assert_eq!(p.star_offer(30), Value::Null, "not before the ledger commits");
+        assert_eq!(offer.unwrap(), json!({"t":"star","offer":{"token":"m5","text":"Like Backplane? Give us a star on GitHub!","url":"https://github.com/BackplaneWorks/Backplane","label":"Star on GitHub","repo":"BackplaneWorks/Backplane","why":super::super::star::WHY}}), "the targeted frame");
         apply(&p, &ev);
-        assert_eq!(p.star_offer()["token"], "m5", "a reconnecting client asks and gets the same offer");
+        assert_eq!(p.star_offer(30)["token"], "m5", "a reconnecting client asks and gets the same offer");
         assert_eq!(p.star_prompt("m6", 21), (vec![], None), "after the offer nothing more is counted or offered");
         let done = p.star_decide("m5", "open", 22); assert!(done[0]["value"].as_str().unwrap().contains("opened"));
         assert!(p.star_decide("stale", "open", 22).is_empty());
-        apply(&p, &done); assert_eq!(p.star_offer(), Value::Null, "decided: no client shows it again");
+        apply(&p, &done); assert_eq!(p.star_offer(30), Value::Null, "decided: no client shows it again");
     }
 }

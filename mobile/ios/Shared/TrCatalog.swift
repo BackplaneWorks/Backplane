@@ -2572,6 +2572,8 @@ gpui.inactive	inactive	休止中
 gpui.stalled	stalled	停滞
 gpui.the.right.spelling	The right spelling	正しい綴り
 gpui.star.on.github	Star on GitHub	GitHubでスターを付ける
+gpui.star.dont.ask	Don't ask again	今後表示しない
+gpui.star.why	Stars help other hardware designers find Backplane, and tell us what to keep building.	スターは、ほかのハードウェア設計者がBackplaneを見つける助けになり、私たちが何を作り続けるべきかを知る手がかりにもなります。
 gpui.e.files.max.mb	Largest attachment (MB)	添付の上限（MB）
 gpui.e.files.max.note	A file sent with a message, or shown from this hub, may be up to {mb} MB. Files stream from disk, so a large one costs disk space, not memory.	メッセージで送るファイルやこのハブから表示するファイルは{mb} MBまでです。ファイルはディスクから順に読むので、大きなファイルはメモリではなくディスク容量を使います。
 gpui.e.dev.replay	Replay first run	初回起動をやり直す

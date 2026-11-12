@@ -2240,6 +2240,8 @@ gpui.inactive = inactive
 gpui.stalled = stalled
 gpui.the.right.spelling = The right spelling
 gpui.star.on.github = Star on GitHub
+gpui.star.dont.ask = Don't ask again
+gpui.star.why = Stars help other hardware designers find Backplane, and tell us what to keep building.
 
 # ---- gpui-e: hub settings and panels ----
 gpui.e.files.max.mb = Largest attachment (MB)
