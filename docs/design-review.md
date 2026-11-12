@@ -23,7 +23,10 @@ the tool's answer: "must change", "should", "note".
   fields, out of stock or short at the order's quantity (must change), NRND (should), EOL (must change), extended parts (note). Lines not
   checked yet are listed, never guessed; the parts service is never asked from here.
 - `outputs`: the newest Gerber set in `mfg/`: every copper layer of the board, the outline, both masks, the drill files, and their smallest
-  tools against the fab's smallest hole (laser files against the microvia minimum).
+  tools against the fab's smallest hole (laser files against the microvia minimum). A full or order review also exports the saved board
+  again (kicad-cli, the board's own plot settings, into the hub's cache) and compares it with the set, layer by layer: written by the same
+  KiCad, the whole drawing (dates left out); by another KiCad, whose apertures and zone fills are its own, only the outline's points, and
+  the run says so (Hubble_DK's outputs, made by bp.4: the outline compared, 1.3 s).
 - `assembly` (assembled rigid boards): parts on both sides (a note: the standard service), fiducials then, the placement file in the
   outputs against the board (parts missing, parts on the other side).
 - `mech`: fab files of 3D-printed, CNC and sheet metal parts: their own DFM results (a SendCutSend part's failed rules with their sources).

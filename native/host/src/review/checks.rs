@@ -217,11 +217,29 @@ pub fn outputs(o: Option<&Outputs>, copper: usize, sel: &[Sel]) -> Vec<Finding> 
     }
     v
 }
-/// An output set re-exported from the board now, against the set in mfg/: the layers whose drawing differs (dates and tool names left out).
-pub fn stale_layers(exported: &[(String, String)], kept: &[(String, String)]) -> Vec<String> {
-    let norm = |t: &str| t.lines().filter(|l| !l.contains("CreationDate") && !l.starts_with("G04") && !l.contains("GenerationSoftware") && !l.starts_with("; #@!") && !l.starts_with(";")).collect::<Vec<_>>().join("\n");
-    let tail = |n: &str| n.rsplit_once('-').map_or(n.to_string(), |(_, t)| t.to_string());
-    exported.iter().filter_map(|(n, t)| { let k = kept.iter().find(|(m, _)| tail(m) == tail(n))?; (norm(t) != norm(&k.1)).then(|| tail(n)) }).collect()
+/// Whether two Gerbers were written with the same coordinate format (else their drawings cannot be compared line by line).
+pub fn same_format(a: &str, b: &str) -> bool { let fs = |t: &str| t.lines().find(|l| l.starts_with("%FS")).map(str::to_string); fs(a) == fs(b) && fs(a).is_some() }
+/// A Gerber's layer from its name ("Hubble_DK-F_Cu.gtl" and "x-F_Cu.gbr" are both "F_Cu").
+pub fn layer_key(n: &str) -> String { let t = n.rsplit_once('-').map_or(n, |(_, t)| t); t.rsplit_once('.').map_or(t, |(a, _)| a).to_string() }
+/// The KiCad that wrote a Gerber (its X2 GenerationSoftware line).
+pub fn writer(t: &str) -> String { t.lines().find(|l| l.contains("GenerationSoftware")).unwrap_or("").to_string() }
+fn coords(t: &str) -> Vec<String> {
+    let mut v: Vec<String> = t.split('*').map(str::trim).filter(|s| s.starts_with('X') && (s.ends_with("D01") || s.ends_with("D02") || s.ends_with("D03"))).map(str::to_string).collect(); v.sort(); v
+}
+/// An output set re-exported from the board now, against the set in mfg/, layer by layer: written by the same KiCad, the whole drawing is
+/// compared (dates left out); by another KiCad (its apertures and fills are its own), only the outline's points. Answers the layers that
+/// differ and how many were compared.
+pub fn stale_layers(exported: &[(String, String)], kept: &[(String, String)]) -> (Vec<String>, usize) {
+    let norm = |t: &str| t.lines().filter(|l| !l.contains("CreationDate") && !l.starts_with("G04") && !l.contains("GenerationSoftware") && !l.starts_with(';')).collect::<Vec<_>>().join("\n");
+    let (mut stale, mut n) = (vec![], 0);
+    for (name, t) in exported {
+        let key = layer_key(name);
+        let Some((_, k)) = kept.iter().find(|(m, _)| layer_key(m) == key) else { continue };
+        if !same_format(t, k) { continue }
+        if writer(t) == writer(k) { n += 1; if norm(t) != norm(k) { stale.push(key) } }
+        else if key == "Edge_Cuts" { n += 1; if coords(t) != coords(k) { stale.push(key) } }
+    }
+    (stale, n)
 }
 
 // ---- (e) assembly ----
@@ -320,9 +338,11 @@ mod tests {
         let fs = outputs(Some(&o), 2, &sel);
         assert_eq!(fs.iter().map(|f| f.rule.as_str()).collect::<Vec<_>>(), ["outputs_layers", "outputs_drill_size"]); assert!(fs[0].title.ends_with("Edge.Cuts"), "{}", fs[0].title);
         assert_eq!(outputs(None, 2, &sel)[0].severity, "info");
-        let a = vec![("x-F_Cu.gtl".to_string(), "G04 date 1*\n%TF.CreationDate,1*%\nX1Y1D01*".to_string()), ("x-B_Cu.gbl".to_string(), "X1Y1D01*".to_string())];
-        let b = vec![("y-F_Cu.gtl".to_string(), "G04 date 2*\n%TF.CreationDate,2*%\nX1Y1D01*".to_string()), ("y-B_Cu.gbl".to_string(), "X2Y1D01*".to_string())];
-        assert_eq!(stale_layers(&a, &b), ["B_Cu.gbl"], "dates are no difference; drawing is");
+        let g = |w: &str, d: &str, body: &str| format!("%TF.GenerationSoftware,KiCad,Pcbnew,{w}*%\n%FSLAX46Y46*%\nG04 {d}*\n%TF.CreationDate,{d}*%\n{body}");
+        let a = vec![("x-F_Cu.gbr".to_string(), g("11", "1", "X1Y1D01*")), ("x-B_Cu.gbr".to_string(), g("11", "1", "X1Y1D01*")), ("x-In1_Cu.gbr".to_string(), g("11", "1", "X5Y5D03*")), ("x-Edge_Cuts.gbr".to_string(), g("11", "1", "X0Y0D02*X9Y0D01*"))];
+        let b = vec![("y-F_Cu.gtl".to_string(), g("11", "2", "X1Y1D01*")), ("y-B_Cu.gbl".to_string(), g("11", "2", "X2Y1D01*")), ("y-In1_Cu.g1".to_string(), g("4", "2", "%ADD10C*%X6Y5D03*")), ("y-Edge_Cuts.gm1".to_string(), g("4", "2", "X0Y0D02*X9Y0D01*"))];
+        assert_eq!(stale_layers(&a, &b), (vec!["B_Cu".to_string()], 3), "dates are no difference, drawing is; another KiCad's layers are compared by the outline only");
+        let b2 = vec![("y-Edge_Cuts.gm1".to_string(), g("4", "2", "X0Y0D02*X8Y0D01*"))]; assert_eq!(stale_layers(&a, &b2).0, ["Edge_Cuts"]);
     }
     #[test] fn review_check_assembly_sides_fiducials_and_the_placement_file() {
         let u = usage(PCB);
