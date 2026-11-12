@@ -121,9 +121,11 @@ impl Backplane {
             Event::KicadReply(m,reply)=>self.kicad_reply(m,reply,cx),
             Event::KicadComment(text)=>self.kicad_comment(&text,cx),
             Event::KicadProgress(text)=>{if let Some(p)=self.screens.kicad.clone(){let v:serde_json::Value=serde_json::from_str(&text).unwrap_or_default();p.update(cx,|p,cx|p.set_progress(v,cx));}},
+            Event::Mgmt(key,text)=>{if self.screens.mgmt.info(&key,&text){self.ui_epoch+=1;cx.notify();}},
             Event::KicadReload(text)=>{if let Some(p)=self.screens.kicad.clone(){let v:serde_json::Value=serde_json::from_str(&text).unwrap_or_default();p.update(cx,|p,cx|p.set_reload(v,cx));}},
             Event::Using(home)=>{eprintln!("GPUI_LOG {}",serde_json::json!({"hub":"using","text":home.clone().unwrap_or_default()}));self.screens.offers.on_home=home;cx.notify();},
             Event::Answer(id,reply) if screens::hubpick::answered(self,id,&reply,cx)=>{},
+            Event::Answer(id,reply) if screens::mgmt::answered(self,id,&reply,cx)=>{},
             Event::Answer(id,reply)=>if !screens::projects::answered(self,id,&reply,cx) {screens::improvements::answered(self,id,reply,cx)},
             // a page's Send whose thread the hub would not make (its machine away...): the text goes back in the box, the error is shown (Refused, next)
             Event::Data(tag,why) if tag=="create-refused" => { if let Some(text)=screens::projects::take_back(&mut self.screens.projects.first_send) { self.arm_new=None; self.screens.projects.refused=crate::i18n::tf("gpui.hub.refused.it", &[("why", crate::i18n::trs(why.as_str().unwrap_or("")).into())]);
@@ -150,6 +152,7 @@ impl Backplane {
             Event::Hello=>{let was=std::mem::replace(&mut self.had_hello,true);self.term_rejoin();if was{self.kicad_rejoin(cx);}self.screens.unsent.live=true;self.send_unsent();},
             Event::Star(v)=>self.star_offer(&v,cx),
             Event::TmNotice(v)=>self.tm_notice(&v,cx),
+            Event::Rpc("mgmt",ok,why)=>{self.screens.mgmt.error=if ok{String::new()}else{why};cx.notify();},
             Event::Rpc(tag,ok,why)=>if tag=="term"{if !ok{self.error=format!("Terminal: {why}");}}else if tag=="google"{screens::google::done(self,ok,&why)}else if tag.starts_with("acct"){screens::accounts::done(self,tag,ok,&why,cx)}else if tag=="fileopen" {if !ok {self.error=why;}} else if tag.starts_with("files") {screens::filesui::rpc_done(self,tag,ok,&why,cx)} else {screens::settings::rpc_done(self,tag,ok,&why,cx)},
             Event::PlotTooBig(n)=>self.screens.plot.too_big(n),
             Event::Refs(r)=>{ if r.get("resolved").is_some() { screens::histbar::resolved(self,&r,cx); } else { self.screens.plotview.hist.refs=screens::plot::refs_of(&r); } cx.notify(); }
