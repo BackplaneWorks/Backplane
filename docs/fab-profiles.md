@@ -101,3 +101,21 @@ the project last looked and a stale section (warnings). Its buttons are `fab.pro
 The manufacturing review (`agents/prompt_text.rs`, `ORDER_PROMPT_REVIEW`) takes the fab's limits from `fab_profile`, not from numbers of
 its own. Where Backplane recommends more than the fab's limit (tracks and gaps 0.127 mm, vias a 0.3 mm hole in a 0.45 mm pad, copper
 0.3 mm from the edge) a design between the two is a note, not a must-change.
+
+## Stackup and impedance (`fab/stackup.rs`)
+
+The view's `stackup`: `{chosen, by: picked|proposed, thickness_mm, source, fetched, needs: {single, diff, gap_mm, given}, layers,
+proposals, estimate}`.
+
+- `proposals`: the published stackups that fit the board's layer count and thickness, best first, each `{id, default, feasible, why,
+  outer_50_mm}`. With impedance needs (the project's options `impedance`, `diff_impedance`, `diff_gap_mm`), one whose every width is at
+  or over the fab's free track minimum (and whose pair gap meets its spacing) comes first, then the narrowest 50 Ω outer line; without
+  needs, the fab's default. It is a proposal: the person takes it (the panel's Use, `fab.profile {pro, action: "stackup", id}`), or an
+  agent picks it (`options.stackup`) once they agree.
+- `layers`, per copper layer top to bottom (`F.Cu`, `In1.Cu`, … `B.Cu`): `{layer, copper_mm, kind: microstrip|stripline, above, below,
+  widths}`, `above`/`below` the neighbouring copper layer with the dielectric between (`h_mm`, `er`: series Er of its plies), `widths`
+  the trace width per impedance (`"50"` single-ended, `"90d"` a pair at `gap_mm`). This is what the floorplanner and routing read:
+  reference-plane adjacency and impedance widths per layer.
+- The widths are closed-form estimates without solder mask (microstrip: Hammerstad and Jensen with the copper's thickness; stripline:
+  IPC-2141; pairs: the usual coupling factors), within a few percent of the fab's calculator, which stays the reference for an order
+  with impedance control (the 4-layer 7628 stackup's 50 Ω outer line: 0.367 mm).

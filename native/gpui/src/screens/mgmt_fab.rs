@@ -32,6 +32,12 @@ pub fn press(app: &mut Backplane, action: &str, key: &str, cx: &mut Context<Back
     let _ = app.tx.try_send(Command::Rpc("fab.profile".into(), Secret(p), "mgmt"));
     app.ui_epoch += 1; cx.notify();
 }
+/// The proposed stackup taken: `fab.profile {pro, action: "stackup", id}`.
+pub fn press_stackup(app: &mut Backplane, id: &str, cx: &mut Context<Backplane>) {
+    let pro = app.screens.mgmt.project.clone(); if pro.is_empty() { return }
+    let _ = app.tx.try_send(Command::Rpc("fab.profile".into(), Secret(json!({"pro": pro, "action": "stackup", "id": id})), "mgmt"));
+    app.ui_epoch += 1; cx.notify();
+}
 /// The e2e harness's controls: the DRC button, each Apply, Seen and Refresh (`mgmt:fab:<what>`).
 pub fn controls(m: &super::mgmt::Mgmt) -> Vec<(String, String, String)> {
     if m.peek()["open"] != "fab" { return vec![] }
@@ -78,6 +84,16 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
         list = list.child(div().flex_shrink_0().flex().items_center().gap_2().px_2().h(px(28.)).border_b_1().border_color(c("line"))
             .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().text_color(c("warn")).child(suggestion_line(&x)))
             .child(btn(cx, light, format!("mgmt:fab:apply:{key}"), "Apply", move |a, cx| press(a, "apply", &key, cx)))); // i18n-ok: English the draw passes through trs
+    }
+    // the stackup: the one picked, or the one proposed with Use
+    let st = &d["stackup"];
+    if let Some(id) = st["chosen"].as_str() {
+        let id = id.to_string(); let proposed = st["by"] == "proposed";
+        let line = tf("gpui.mgmt.fab.stackup", &[("id", id.clone().into()), ("w", st["outer_50_mm"].as_f64().map(|w| format!("{w}")).unwrap_or_default().into())]);
+        let mut row = div().flex_shrink_0().flex().items_center().gap_2().px_2().h(px(28.)).border_b_1().border_color(c("line"))
+            .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().text_color(c(if proposed { "warn" } else { "dim" })).child(if proposed { format!("{} {line}", trs("Proposed:")) } else { line })); // i18n-ok: English the draw passes through trs
+        if proposed { row = row.child(btn(cx, light, "mgmt:fab:stackup".into(), "Use", move |a, cx| press_stackup(a, &id, cx))) } // i18n-ok: English the draw passes through trs
+        list = list.child(row);
     }
     let changed: Vec<Value> = d["changed"].as_array().cloned().unwrap_or_default();
     if !changed.is_empty() {

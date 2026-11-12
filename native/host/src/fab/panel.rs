@@ -1,7 +1,7 @@
 //! The Fab management panel (docs/MANAGEMENT.md, docs/fab-profiles.md): the project's fab and tier, its limits with source and date,
 //! what changed since the project last looked, the DRC section's state, the board setup suggestions and the conflicts. Published as
 //! info `mgmt.fab.<digest>` for the desktop and the phones; the panel's buttons are `fab.profile {pro, action}` (drc, apply, seen,
-//! refresh), after which it is published again. Pure `data`, tested.
+//! refresh, stackup), after which it is published again. Pure `data`, tested.
 use crate::{files::kicad::mgmt, hub::Hub};
 use serde_json::{json, Value};
 use std::{path::{Path, PathBuf}, sync::Arc};
@@ -38,7 +38,9 @@ pub fn data(v: &Value) -> Value {
         "fab": v["fab"], "rev": v["rev"], "updated": v["updated"], "by": ch["by"], "tier": ch["tier"], "board": board,
         "gathered": v["gathered"]["at"], "missing": v["gathered"]["report"]["missing"].as_array().map_or(0, Vec::len),
         "drc": {"state": drc, "file": d["file"]}, "suggestions": sugg, "conflicts": conf, "changed": changed, "limits": limits,
-        "stackups": v["stackups"].as_array().map_or(0, Vec::len)})
+        "stackups": v["stackups"].as_array().map_or(0, Vec::len),
+        "stackup": {"chosen": v["stackup"]["chosen"], "by": v["stackup"]["by"], "why": v["stackup"]["proposals"].as_array().and_then(|a| a.iter().find(|x| x["id"] == v["stackup"]["chosen"])).map_or(Value::Null, |x| x["why"].clone()),
+            "outer_50_mm": v["stackup"]["layers"][0]["widths"]["50"]}})
 }
 
 /// The project folder Backplane knows that holds a .kicad_pro (the deepest root that contains it).
