@@ -47,10 +47,11 @@ pub fn controls(m: &super::mgmt::Mgmt) -> Vec<(String, String, String)> {
     if d["changed"].as_array().map_or(false, |a| !a.is_empty()) { v.push(("mgmt:fab:seen".into(), "Seen".into(), "fab:seen".into())) } // i18n-ok: ctl ids
     v.push(("mgmt:fab:refresh".into(), "Refresh".into(), "fab:refresh".into())); // i18n-ok: ctl ids
     if d["review"]["running"] != true { v.push(("mgmt:fab:review".into(), "Review".into(), "fab:review".into())) } // i18n-ok: ctl ids
+    if !d["review"]["at"].is_null() { v.push(("mgmt:fab:checks".into(), "Findings".into(), "fab:checks".into())) } // i18n-ok: ctl ids
     v
 }
 pub fn act(app: &mut Backplane, a: &str, cx: &mut Context<Backplane>) {
-    match a { "drc" | "seen" | "refresh" | "review" => press(app, a, "", cx), _ => if let Some(k) = a.strip_prefix("apply:") { press(app, "apply", k, cx) } }
+    match a { "drc" | "seen" | "refresh" | "review" => press(app, a, "", cx), "checks" => crate::screens::mgmt::toggle(app, "checks", cx), _ => if let Some(k) = a.strip_prefix("apply:") { press(app, "apply", k, cx) } }
 }
 
 fn btn(cx: &mut Context<Backplane>, light: bool, id: String, label: &str, on: impl Fn(&mut Backplane, &mut Context<Backplane>) + 'static) -> AnyElement {
@@ -116,7 +117,7 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
         list = list.child(box_);
     }
     // the limits: what it is, free, for more, the day read (opens the source)
-    let w = |i: usize| -> Div { let d = div().flex_shrink_0().overflow_hidden().whitespace_nowrap().text_ellipsis(); match i { 0 => d.flex_1().min_w_0(), 1 | 2 => d.w(px(90.)), _ => d.w(px(78.)) } };
+    let w = |i: usize| -> Div { let d = div().flex_shrink_0().overflow_hidden().whitespace_nowrap().text_ellipsis(); match i { 0 => d.flex_1().min_w_0(), 1 | 2 => d.w(px(72.)), _ => d.w(px(74.)) } };
     list = list.child(div().flex_shrink_0().flex().items_center().gap_2().px_2().h(px(22.)).border_b_1().border_color(c("line")).text_size(px(11.)).text_color(c("dim"))
         .child(w(0).child(trs("Limit"))).child(w(1).child(trs("Base price"))).child(w(2).child(trs("Costs more"))).child(w(3).child(trs("Read"))));
     for (i, l) in d["limits"].as_array().cloned().unwrap_or_default().into_iter().enumerate() {
