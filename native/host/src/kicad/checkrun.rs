@@ -8,8 +8,8 @@
 //! - `kicad.checks.focus {project, id}`: cross-probe the finding into the open KiCad (its items selected and zoomed, in the board for
 //!   DRC, the schematic for ERC: `editor.kicad.select` with `show`) and light it in the viewers.
 //! - `kicad.checks.fix {project, id}`: {text}: the message "Fix with agent" sends.
-//! Source: `kicad-cli pcb drc` / `sch erc` (JSON) on the saved files, one run at a time in the whole hub (a large board's DRC takes
-//! gigabytes), at low priority, cancelled when a newer save arrives. When it runs is findings::next (saves debounced, held while the
+//! Source: `kicad-cli pcb drc` / `sch erc` (JSON) on the saved files, DRC and ERC side by side when memory allows (findings::admit),
+//! at low priority, cancelled when a newer save arrives. When it runs is findings::next (saves debounced, held while the
 //! person works in KiCad or an agent's turn holds the document). Results are kept in `<home>/cache/checks/` (never beside the design),
 //! so a restart shows the last result at once, fresh or stale.
 use super::{cad, embed, findings::{self as fd, Counts, Do, Finding, Sched}, ipc, kserve as ks, project};
@@ -53,8 +53,8 @@ static PERSON: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new();
 static HUB: Mutex<Option<Weak<Hub>>> = Mutex::new(None);
 static WAKE: OnceLock<tokio::sync::Notify> = OnceLock::new();
 fn wake() { if let Some(n) = WAKE.get() { n.notify_one() } }
-/// One run at a time in the whole hub.
-static SLOT: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+/// The runs going in the whole hub: (project|check, expected peak MB); fd::admit decides whether one more may start.
+static RUNNING: Mutex<Vec<(String, u64)>> = Mutex::new(Vec::new());
 
 pub fn start(hub: &Arc<Hub>) {
     *HUB.lock().unwrap() = Some(Arc::downgrade(hub));
@@ -209,7 +209,8 @@ async fn tick(hub: &Arc<Hub>) -> u64 {
                 let was = std::mem::take(&mut x.deferred);
                 match fd::next(now, &x.sched) {
                     Do::Defer(why, ms) => { x.deferred = why; sleep = sleep.min(ms) }
-                    Do::Run => { x.sched.demand = false; x.sched.running_since = now; x.sched.running_rev = rev.clone(); let c = Arc::new(tokio::sync::Notify::new()); x.cancel = Some(c.clone()); acts.push((s, rev.clone(), c)); changed = true; }
+                    Do::Run if !fd::admit(free, &RUNNING.lock().unwrap().iter().map(|r| r.1).collect::<Vec<_>>(), x.sched.need_mb) => sleep = sleep.min(300),
+                    Do::Run => { RUNNING.lock().unwrap().push((format!("{pro}|{s}"), x.sched.need_mb)); x.sched.demand = false; x.sched.running_since = now; x.sched.running_rev = rev.clone(); let c = Arc::new(tokio::sync::Notify::new()); x.cancel = Some(c.clone()); acts.push((s, rev.clone(), c)); changed = true; }
                     Do::Cancel => { if let Some(c) = &x.cancel { c.notify_one() } }
                     Do::Wait(ms) => sleep = sleep.min(ms.max(100)),
                     Do::Nothing => {}
@@ -228,22 +229,9 @@ async fn tick(hub: &Arc<Hub>) -> u64 {
 type Outcome = Option<Result<Vec<Finding>, String>>;
 
 async fn run(hub: &Arc<Hub>, pro: &str, f: &project::Files, s: &'static str, rev: &str, cancel: Arc<tokio::sync::Notify>) {
-    let slot = tokio::select! { g = SLOT.get_or_init(|| tokio::sync::Mutex::new(())).lock() => g, _ = cancel.notified() => { return finish(hub, pro, s, rev, None, 0).await } };
-    // the machine may have changed while this waited for the slot (another project's run): look again
-    let free = tokio::task::spawn_blocking(free_mb).await.unwrap_or(0);
-    let short = { let mut m = state().lock().unwrap(); m.get_mut(pro).map(|p| { let x = p.src(s); x.sched.free_mb = free; fd::machine_guard(&x.sched) }).unwrap_or_default() };
-    if !short.is_empty() {
-        if let Some(p) = state().lock().unwrap().get_mut(pro) { let x = p.src(s); x.deferred = short; x.sched.demand = true }
-        drop(slot);
-        return finish(hub, pro, s, rev, None, 0).await
-    }
-    // waiting for the slot is not running: the bar's clock starts now
-    if let Some(p) = state().lock().unwrap().get_mut(pro) { p.src(s).sched.running_since = now_ms() }
-    publish(hub, pro).await;
     let t0 = now_ms();
     let (o, peak) = run_cli(hub, pro, f, s, &cancel).await;
     let took = now_ms() - t0;
-    drop(slot);
     if peak > 0 { if let Some(p) = state().lock().unwrap().get_mut(pro) { p.src(s).peak_mb = peak } }
     finish(hub, pro, s, rev, o, took).await
 }
@@ -364,6 +352,7 @@ static OURS: OnceLock<Mutex<Vec<u32>>> = OnceLock::new();
 fn doc_bytes(f: &project::Files, s: &str) -> u64 { std::fs::metadata(if s == "drc" { &f.pcb } else { &f.sch }).map_or(0, |m| m.len()) }
 
 async fn finish(hub: &Arc<Hub>, pro: &str, s: &str, rev: &str, o: Outcome, took: u64) {
+    { let k = format!("{pro}|{s}"); RUNNING.lock().unwrap().retain(|r| r.0 != k); }
     {
         let mut m = state().lock().unwrap();
         let Some(p) = m.get_mut(pro) else { return };
