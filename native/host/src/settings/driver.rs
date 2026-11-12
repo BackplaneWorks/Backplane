@@ -20,7 +20,7 @@ use std::{collections::HashMap, sync::Arc};
 #[derive(Debug, Default)]
 pub struct Verdict { pub events: Vec<Value>, pub drop_turn_end: bool, pub act: Option<Act> }
 #[derive(Debug, Clone, PartialEq)]
-pub enum Act { Restart { text: String } }
+pub enum Act { Restart { text: String }, Retry { text: String, delay_ms: u64 } }
 
 /// Fallback.continue: what the restarted turn is told.
 pub fn continue_text(original: &str) -> String {
@@ -318,14 +318,15 @@ pub async fn on_line(hub: &Arc<Hub>, acc: Option<&Arc<crate::settings::accounts_
         let mut any = false; for k in [format!("account.failover.pending.{thread}"), format!("fallback.pending.{thread}")] { any |= !hub.setting(&k).await.unwrap_or_default().is_empty() } any });
     if end.is_some() && end != Some("failed") && !ran_out { // the turn went well or the person stopped it: what was remembered is over
         // `seen` too: a record written for a line of this same read is not committed yet, so the store does not show it, and left behind it would fail a later turn over
-        let had = seen.take().is_some(); let mut ev = vec![];
+        let had = seen.take().is_some(); let mut ev = vec![]; seen_transient(thread, None);
         for k in [format!("account.failover.pending.{thread}"), format!("fallback.pending.{thread}")] { if had || !hub.setting(&k).await.unwrap_or_default().is_empty() { ev.push(set(&k, "", now_ms() / 1000)) } }
         // a turn that completed on its login is the proof the login is not out: its holds are over (they had outlived the limit by a day on Nov 7)
         if end == Some("completed") && !had { ev.extend(proven_events(hub, thread, &provider, &model).await) }
+        if end == Some("completed") && !hub.setting(&fb::transient_key(thread)).await.unwrap_or_default().is_empty() { ev.push(set(&fb::transient_key(thread), "", now_ms() / 1000)) } // a turn that came back: its tries start again
         return Verdict { events: ev, ..Default::default() };
     }
     if end.is_none() {
-        let Some(lim) = lim else { return Verdict::default() };
+        let Some(lim) = lim else { if let Some(why) = fb::transient(v) { seen_transient(thread, Some(why)); } return Verdict::default() };
         *seen = merged(Some(lim.clone()), seen.take());
         let w = world_of(hub, thread, provider, model).await;
         expire_login(acc, &w, &lim);
@@ -333,6 +334,9 @@ pub async fn on_line(hub: &Arc<Hub>, acc: Option<&Arc<crate::settings::accounts_
     }
     let lim = merged(lim, seen.take());
     let w = world_of(hub, thread, provider, model).await;
+    // a transient transport failure (no limit behind it): reconnect in the same session, with backoff
+    let earlier = seen_transient(thread, None); // taken whatever the end: a turn that went on well after it is over
+    if lim.is_none() && end == Some("failed") { if let Some(why) = fb::transient(v).or(earlier) { let orig = original(hub, thread).await; return on_transient(&w, &why, &orig, jitter()) } }
     let Some(lim) = lim.or_else(|| pending_of(&w).filter(|p| due(p, w.now))) else { return Verdict::default() };
     expire_login(acc, &w, &lim);
     let orig = original(hub, thread).await;
@@ -348,6 +352,34 @@ pub async fn on_missing(hub: &Arc<Hub>, thread: &str, why: &str) -> Verdict {
     let orig = original(hub, thread).await;
     on_limit(&w, &lim, true, &orig)
 }
+/// Fallback.transient: the text a resumed turn is given after the connection dropped.
+pub fn reconnect_text(original: &str) -> String {
+    let head = "[Backplane] The connection to the provider dropped in the middle of this turn (a transient server-side disconnect), so the turn starts again in the same session. Continue the interrupted work from its current state. Check completed tool results before repeating an action. If the request is already satisfied, report that.";
+    if original.trim().is_empty() { head.to_string() } else { format!("{head}\n\nOriginal request (context, not a new task):\n{original}") }
+}
+/// A turn that ended on a transient transport failure (`fb::transient`): resumed in the same session after a pause with jitter, saying "Reconnecting" once a try, its failure
+/// rows dropped; once TRANSIENT_TRIES are spent, the provider is held for TRANSIENT_HOLD_S and the request goes down the order as a limit does.
+pub fn on_transient(w: &World, why: &str, original: &str, jitter: f64) -> Verdict {
+    let (th, at) = (w.thread.as_str(), w.now);
+    let rec: Value = serde_json::from_str(&w.get(&fb::transient_key(th))).unwrap_or(Value::Null);
+    let n = rec["tries"].as_u64().unwrap_or(0) + 1;
+    if n > fb::TRANSIENT_TRIES {
+        let lim = fb::Limit { scope: w.provider.clone(), reason: format!("{} (still failing after {} reconnects)", why.chars().take(300).collect::<String>(), fb::TRANSIENT_TRIES), reset: at + fb::TRANSIENT_HOLD_S, auth: false };
+        let mut v = on_limit(w, &lim, true, original);
+        v.events.insert(0, set(&fb::transient_key(th), "", at));
+        v.events.insert(1, act_row(th, "warn", "reconnect-failed", &format!("{} did not come back after {} reconnects: {}", fb::provider_name(&w.provider), fb::TRANSIENT_TRIES, why.chars().take(200).collect::<String>()), at));
+        return v
+    }
+    let delay_ms = fb::transient_delay_ms(n, jitter);
+    let ev = vec![set(&fb::transient_key(th), &json!({"tries":n,"at":at,"reason":why.chars().take(300).collect::<String>()}).to_string(), at),
+        act_row(th, "info", "reconnecting", &format!("Reconnecting to {}… (try {n} of {}, in {}s)", fb::provider_name(&w.provider), fb::TRANSIENT_TRIES, (delay_ms + 999) / 1000), at),
+        turn(th, "interrupted", at)];
+    Verdict { events: ev, drop_turn_end: true, act: Some(Act::Retry { text: reconnect_text(original), delay_ms }) }
+}
+/// A transient failure seen on a line before the line that ends the turn (Claude Code's error result, then its lifecycle): by thread, taken when the turn ends.
+static TRANSIENT_SEEN: std::sync::LazyLock<std::sync::Mutex<HashMap<String, String>>> = std::sync::LazyLock::new(Default::default);
+fn seen_transient(th: &str, why: Option<String>) -> Option<String> { let mut m = TRANSIENT_SEEN.lock().unwrap(); match why { Some(w) => { m.insert(th.into(), w.clone()); Some(w) } None => m.remove(th) } }
+fn jitter() -> f64 { (now_ms() % 1000) as f64 / 1000.0 }
 /// The events that end the limit holds on a thread's login (and model) after a turn completed on it (fallback.rs `proven`).
 async fn proven_events(hub: &Arc<Hub>, thread: &str, provider: &str, model: &str) -> Vec<Value> {
     let b: Value = serde_json::from_str(&hub.setting(&accounts::binding_key(thread, provider)).await.unwrap_or_default()).unwrap_or(Value::Null);
@@ -363,7 +395,12 @@ async fn proven_events(hub: &Arc<Hub>, thread: &str, provider: &str, model: &str
 /// A running turn's process ended with no line ending the turn: a limit remembered, or one it left on stderr, is acted on as the line would have been.
 pub async fn on_exit(hub: &Arc<Hub>, acc: Option<&Arc<crate::settings::accounts_io::Accounts>>, thread: &str, stderr: &str, seen: &mut Option<fb::Limit>) -> Verdict {
     let (provider, model) = { let m = hub.model().await; match m.threads.get(thread) { Some(t) if t.turn == "running" => (t.provider.clone(), t.model.clone()), _ => return Verdict::default() } };
-    let Some(lim) = merged(fb::from_stderr(&provider, &model, stderr), seen.take()) else { return Verdict::default() };
+    let lim = merged(fb::from_stderr(&provider, &model, stderr), seen.take());
+    if lim.is_none() { // a process that died on a dropped connection (its stderr's last words): reconnect as for the line
+        let n = stderr.chars().count(); let tail: String = stderr.chars().skip(n.saturating_sub(2000)).collect();
+        if fb::transient_text(&tail) { let w = world_of(hub, thread, provider, model).await; let orig = original(hub, thread).await; return on_transient(&w, tail.trim().lines().last().unwrap_or(""), &orig, jitter()) }
+    }
+    let Some(lim) = lim else { return Verdict::default() };
     let w = world_of(hub, thread, provider, model).await; let orig = original(hub, thread).await;
     expire_login(acc, &w, &lim);
     on_limit(&w, &lim, true, &orig)
@@ -402,7 +439,18 @@ async fn apply(hub: &Arc<Hub>, w: &World, step: Next) -> Result<bool, String> {
 /// After the batch with the Interrupted turn is committed: choose what is still eligible, write the switch, and start the same request again.
 pub fn spawn_act(ag: Arc<Agents>, thread: String, act: Act) {
     tokio::spawn(async move {
-        let Act::Restart { text } = act;
+        let text = match act {
+            Act::Restart { text } => text,
+            // the same session, after the pause: the thread stays where it is (a person's message meanwhile has started a turn of its own: that one carries on instead)
+            Act::Retry { text, delay_ms } => {
+                let _ = ag.stop(&thread).await; // the process that lost its connection is ended now, as a limit's is
+                tokio::time::sleep(std::time::Duration::from_millis(if cfg!(test) { delay_ms.min(50) } else { delay_ms })).await;
+                let busy = { let m = ag.hub.model().await; m.threads.get(&thread).map_or(true, |t| t.turn == "running") };
+                if busy { return }
+                if let Err(e) = ag.resume_with(&thread, &text).await { eprintln!("driver: {thread}: could not reconnect: {e}") }
+                return
+            }
+        };
         let hub = ag.hub.clone();
         let _ = ag.stop(&thread).await;
         // the thread is no longer running here: read it as it is, with the hold just written
@@ -631,7 +679,7 @@ mod tests {
         let v = on_limit(&w, &lim("claude", 0), true, "build the board");
         assert_eq!(keys(&v.events), ["fallback.outage.claude", "fallback.pending.t1", "TurnChanged"]); assert!(v.drop_turn_end);
         assert_eq!((v.events[2]["state"].clone(), v.events[2]["failover"].clone()), (json!("interrupted"), json!(true)), "its task and launcher are not told it ended");
-        match v.act.unwrap() { Act::Restart { text } => assert!(text.starts_with("[Backplane] The account this turn ran on stopped") && text.ends_with("build the board")) }
+        match v.act.unwrap() { Act::Restart { text } => assert!(text.starts_with("[Backplane] The account this turn ran on stopped") && text.ends_with("build the board")), a => panic!("{a:?}") }
     }
     #[test] fn the_restart_moves_to_the_next_chain_target_and_never_wraps() {
         let hold = ("fallback.outage.claude", json!({"scope":"claude","reason":"r","reset":0,"at":1}).to_string());
@@ -657,6 +705,25 @@ mod tests {
         assert_eq!(keys(&v.events), ["fallback.outage.antigravity", "fallback.pending.t1", "TurnChanged"]);
         let held = w.with(&v.events); match next(&held) { Next::Chain { to, .. } => assert_eq!(to.provider, "claude"), n => panic!("{n:?}") }
         assert_eq!(next(&held.clone_at(1000 + fb::MISSING_HOLD_S + 1)), Next::Stay, "tried again once the hold is over");
+    }
+    #[test] fn transient_failures_reconnect_with_backoff_then_go_down_the_order() {
+        let goaway = json!({"type":"turn.failed","message":"agent executor error: generating and executing: stream reading error: http2: server sent GOAWAY and closed the connection; LastStreamID=129, ErrCode=NO_ERROR, debug=\"server_shutting_down\""});
+        assert!(fb::transient(&goaway).is_some());
+        for t in ["read: connection reset by peer", "unexpected EOF", "API Error: 529 {\"type\":\"overloaded_error\"}", "502 Bad Gateway", "503 Service Unavailable", "upstream 504 Gateway Timeout", "stream error: stream ID 7; INTERNAL_ERROR"] {
+            assert!(fb::transient(&json!({"type":"turn.failed","message":t})).is_some(), "{t}") }
+        for t in ["You've hit your usage limit", "Failed to authenticate: OAuth session expired", "Antigravity is not installed: install it", "the tests failed"] { assert!(fb::transient(&json!({"type":"turn.failed","message":t})).is_none(), "{t}") }
+        assert!(fb::transient(&json!({"type":"item.completed","item":{"type":"agent_message","text":"server sent GOAWAY"}})).is_none(), "an agent's words are not it");
+        // the pauses double from 4 s with up to half again of jitter: 4 tries within about a minute and a half
+        assert_eq!((fb::transient_delay_ms(1, 0.0), fb::transient_delay_ms(2, 0.0), fb::transient_delay_ms(4, 0.0), fb::transient_delay_ms(1, 1.0)), (4000, 8000, 32000, 6000));
+        let total: u64 = (1..=fb::TRANSIENT_TRIES).map(|n| fb::transient_delay_ms(n, 1.0)).sum(); assert!((60_000..=120_000).contains(&total), "{total}");
+        let w = ordered("antigravity", "gemini-4-carbon", &[]);
+        let v = on_transient(&w, "GOAWAY", "triage", 0.0); assert!(v.drop_turn_end);
+        assert_eq!(keys(&v.events), ["fallback.transient.t1", "ActivityLogged", "TurnChanged"]); assert_eq!(v.events[1]["summary"], "Reconnecting to Antigravity… (try 1 of 4, in 4s)"); assert_eq!(v.events[1]["tone"], "info");
+        match v.act { Some(Act::Retry { text, delay_ms }) => { assert_eq!(delay_ms, 4000); assert!(text.contains("same session") && text.ends_with("triage")) } a => panic!("{a:?}") }
+        let w4 = w.with(&[set(&fb::transient_key("t1"), &json!({"tries":4}).to_string(), 1000)]);
+        let v = on_transient(&w4, "GOAWAY", "triage", 0.0);
+        assert_eq!(keys(&v.events), ["fallback.transient.t1", "ActivityLogged", "fallback.outage.antigravity", "fallback.pending.t1", "TurnChanged"], "spent: the provider is held and the request moves on");
+        assert!(matches!(v.act, Some(Act::Restart { .. }))); match next(&w4.with(&v.events)) { Next::Chain { to, .. } => assert_eq!(to.provider, "claude"), n => panic!("{n:?}") }
     }
     #[test] fn a_chain_target_whose_accounts_are_all_held_is_passed_over() {
         let at = now_ms() / 1000; let (k, i) = inv(json!([{"id":"c","provider":"codex","state":"connected","epoch":1}]));

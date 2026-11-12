@@ -133,6 +133,25 @@ pub fn classify(p: &str, m: &str, o: &Value) -> Option<Limit> {
     let signal = rejected(o) || assistant(o) || envelope(o);
     if signal && !not_quota(&low) && (rejected(o) || assistant(o) || quota_code(code) || quota_words(&low)) { Some(Limit { scope: scope_of(p, m, o), reason: reason(o), reset: reset_of(o), auth: false }) } else { None }
 }
+/// A transport failure the provider's side ends on its own (Nov 11: agy's "http2: server sent GOAWAY and closed the connection ... server_shutting_down" while
+/// Google drained a frontend): the turn is resumed after a pause, never shown failed until the tries are spent. Only the provider's error envelope is read.
+pub fn transient_text(s: &str) -> bool {
+    let low = s.to_lowercase();
+    if not_quota(&low) || quota_words(&low) || missing_text(&low) { return false }
+    ["goaway", "server_shutting_down", "connection reset", "reset by peer", "econnreset", "unexpected eof", "unexpected end of", "stream reading error", "stream error", "broken pipe",
+     "connection closed", "connection was closed", "socket hang up", "connection refused", "timed out", "deadline exceeded", "temporarily unavailable",
+     "stream disconnected", "network error", "fetch failed", "502", "503", "504", "529", "bad gateway", "service unavailable", "gateway timeout", "overloaded", "server is busy", "internal server error", "unavailable: "].iter().any(|w| low.contains(w))
+}
+/// The turn's failure line, when it is a transient transport failure: its words.
+pub fn transient(o: &Value) -> Option<String> { if envelope(o) && transient_text(&reason(o)) { Some(reason(o)) } else { None } }
+/// Tries for one request after a transient failure, and the pause before each (doubling from TRANSIENT_BASE_S, plus up to half again of jitter): about 1.5 minutes in all.
+pub const TRANSIENT_TRIES: u64 = 4;
+pub const TRANSIENT_BASE_S: u64 = 4;
+pub fn transient_key(th: &str) -> String { format!("fallback.transient.{th}") }
+/// The pause before try `n` (1-based), in ms, with `jitter` in 0..1.
+pub fn transient_delay_ms(n: u64, jitter: f64) -> u64 { let base = TRANSIENT_BASE_S * 1000 * (1u64 << (n.saturating_sub(1)).min(6)); base + (base as f64 * 0.5 * jitter.clamp(0.0, 1.0)) as u64 }
+/// After the tries are spent the provider is held this long, so the order moves the request on.
+pub const TRANSIENT_HOLD_S: u64 = 300;
 /// How long a provider whose CLI is not installed here is held before a turn tries it again (it may be installed, or the home may come back to a machine that has it).
 pub const MISSING_HOLD_S: u64 = 900;
 /// Words that say a provider's CLI is not on this machine: the hub's own (`<cli> is not installed (looked in ...)`, a runner's "Antigravity is not installed: ..."),

@@ -115,6 +115,26 @@ impl Rig {
 }
 /// Nov 10, the Calendar bot: on the CLI's own login, Claude Code answered "You've hit your weekly limit · resets Nov 12, 3am" and then cancelled its own command, and the turn
 /// stopped there as Interrupted, as if the person had pressed Stop. It ran out: the request goes on under the next account, says so once, and Settings marks the login limited.
+/// Nov 11: a turn failed on "http2: server sent GOAWAY ... server_shutting_down" (Google draining a frontend). Injected twice mid-stream: the thread says "Reconnecting" once a try,
+/// never shows the error, resumes its own session each time and the third try answers, on the same provider.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn a_dropped_connection_mid_turn_reconnects_in_the_same_session_and_the_turn_goes_on() {
+    let r = rig("goaway", "claude").await;
+    r.say(T, "m1", "FIRST remember the pad size").await; r.rest(T, "completed", 1).await; let sid = r.hub.model().await.threads.get(T).unwrap().session.clone();
+    r.mode("default", "goaway:2"); r.say(T, "m2", "SECOND route the board").await; r.rest(T, "completed", 4).await;
+    let t = r.turns(); assert_eq!(t.len(), 4, "{t:?}");
+    for x in &t[2..4] { assert_eq!(x["resume"], json!(sid), "each try resumes the thread's own session"); assert!(x["text"].as_str().unwrap().contains("The connection to the provider dropped") && x["text"].as_str().unwrap().contains("SECOND route the board")) }
+    let lines = r.lines(T);
+    assert!(lines.iter().any(|l| l.starts_with("Reconnecting to Claude… (try 1 of 4")) && lines.iter().any(|l| l.starts_with("Reconnecting to Claude… (try 2 of 4")), "{lines:?}");
+    assert!(!r.log().iter().any(|e| e["thread"] == T && ((e["$"] == "ActivityLogged" && e["tone"] == "error") || (e["$"] == "TurnChanged" && e["state"] == "failed"))), "no failure is shown");
+    assert_eq!(r.provider(T).await, "claude"); assert_eq!(r.hub.setting(&fb::transient_key(T)).await.unwrap_or_default(), "", "the turn that came back starts the count again");
+}
+/// The same when the process dies mid-stream with "connection reset by peer" on stderr and no result line.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn a_connection_reset_that_kills_the_process_reconnects_too() {
+    let r = rig("reset", "claude").await;
+    r.mode("default", "exit-reset:1"); r.say(T, "m1", "ONLY check the clearances").await; r.rest(T, "completed", 2).await;
+    let lines = r.lines(T); assert!(lines.iter().any(|l| l.starts_with("Reconnecting to Claude… (try 1 of 4")), "{lines:?}");
+    assert!(!r.log().iter().any(|e| e["thread"] == T && e["$"] == "TurnChanged" && e["state"] == "failed"));
+}
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn a_limit_the_cli_ends_by_cancelling_its_command_fails_over_from_the_default_login() {
     let r = rig("cancel", "claude").await; let (w, p) = r.two("claude").await; let reset = now() + 7200;
     r.bind(T, "claude", &(String::new(), 0)).await; // the thread on the CLI's own login, as the Calendar bot was

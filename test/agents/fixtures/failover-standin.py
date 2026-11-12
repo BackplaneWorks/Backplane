@@ -12,6 +12,8 @@
 #   auth              the login failed mid-turn
 #   exit-limit        the limit on stderr, and the process ends with no result
 #   slow:<s>          a word of progress at once, then the answer after <s> seconds (a turn a restart cuts mid-way)
+#   goaway:<n>        the first <n> turns stream a little, then fail on a dropped connection (agy's words of Nov 11: http2 GOAWAY, server_shutting_down); then it answers
+#   exit-reset:<n>    the first <n> turns die mid-stream with "connection reset by peer" on stderr and no result; then it answers
 # @DIR@/usage.<who> is that login's usage reading, the `rate_limits` of the CLI's get_usage answer.
 # A store with a file `dead` in it is a login whose OAuth session died (Nov 7, Claude Code 2.1.319): `auth status` still names the account, every turn fails with
 # "Failed to authenticate: OAuth session expired and could not be refreshed", and get_usage is refused with "OAuth refresh token is no longer valid; run /login".
@@ -45,6 +47,15 @@ def claude_turn(line, sid):
         say({"type": "assistant", "message": {"id": "a" + uuid.uuid4().hex, "role": "assistant", "content": [{"type": "text", "text": "working, by " + who}], "usage": {"input_tokens": 1, "output_tokens": 1}}, "session_id": sid})
         time.sleep(float(m.split(":")[1]))
     if m == "exit-limit": print("Error: You've hit your usage limit. Try again later.", file=sys.stderr, flush=True); os._exit(1)
+    if m.startswith("goaway:") or m.startswith("exit-reset:"):
+        cf = os.path.join(D, "drops." + who); n = int(open(cf).read()) if os.path.exists(cf) else 0
+        if n < int(m.split(":")[1]):
+            open(cf, "w").write(str(n + 1))
+            say({"type": "stream_event", "event": {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "PARTIAL-" + str(n) + " "}}, "session_id": sid})
+            if m.startswith("exit-reset:"): print("Error: read tcp 10.0.0.2:51234->142.250.1.1:443: read: connection reset by peer", file=sys.stderr, flush=True); os._exit(1)
+            words = 'agent executor error: generating and executing: stream reading error: http2: server sent GOAWAY and closed the connection; LastStreamID=129, ErrCode=NO_ERROR, debug="server_shutting_down"'
+            say({"type": "result", "subtype": "error_during_execution", "is_error": True, "result": words, "session_id": sid})
+            lc("completed"); return
     if m == "expired":
         words = "Failed to authenticate: OAuth session expired and could not be refreshed"
         say({"type": "assistant", "message": {"id": "a" + uuid.uuid4().hex, "role": "assistant", "content": [{"type": "text", "text": words}], "usage": {"input_tokens": 0, "output_tokens": 0}}, "error": "authentication_failed", "session_id": sid})
