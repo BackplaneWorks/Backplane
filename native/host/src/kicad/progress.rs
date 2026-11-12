@@ -53,7 +53,9 @@ impl RpcHandler for ProgressRpc {
             let pro = match embed::resolve_pro(p["project"].as_str().unwrap_or("")) { Ok(p) => p, Err(e) => return err(&e) };
             if !super::known_root(hub, std::path::Path::new(&pro).parent().and_then(|p| p.to_str()).unwrap_or(""), "").await { return err("not in a project this hub knows") }
             let Some(gui) = embed::gui_route(&pro) else { return err("KiCad is not running") };
-            let o = embed::gui_call(&gui, "kiapi.backplane.embed.CancelProgress", json!({"id": p["id"].as_u64().unwrap_or(0)})).await;
+            // on KiCad's events socket: a load the hub's own ShowFrame started holds the main socket until it ends (bp.12)
+            let mut ev = gui.clone(); ev.sock = format!("{}.events", gui.sock);
+            let o = embed::gui_call(&ev, "kiapi.backplane.embed.CancelProgress", json!({"id": p["id"].as_u64().unwrap_or(0)})).await;
             if o["ok"].as_bool().unwrap_or(false) { vec![json!({"t":"reply","id":id,"ok":true,"result":o["message"].clone()})] } else { err(&format!("CancelProgress: {}", o["error"].as_str().unwrap_or(""))) }
         })
     }
