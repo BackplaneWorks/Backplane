@@ -1,7 +1,7 @@
-//! The GitHub star suggestion: a card centred over the window (the window behind is dimmed) while the hub says its offer is out and undecided.
+//! The GitHub star suggestion: a small card in the window's upper right corner (nothing behind it is dimmed or blocked) while the hub says its offer is out and undecided.
 //! The hub decides everything (state/star.rs): it sends `{"t":"star","offer"}` at the person's fifth prompt (or after a few days of use, or when a
 //! Later's week is up) and `offer:null` once it is decided, and answers `star.offer` on every (re)connect. Star on GitHub opens the URL and decides
-//! `open`; Later decides `later` (a week, also Esc); Don't ask again decides `dismiss`. The card waits (`due`) while the thread on screen runs a turn,
+//! `open`; Later decides `later` (a week); Don't ask again decides `dismiss`. The card waits (`due`) while the thread on screen runs a turn,
 //! while the composer has text and during setup, so it comes at a pause after a turn, never under the person's typing.
 use crate::{hub::Command, screens::settings::Secret, theme, Backplane};
 use gpui::{prelude::*, *};
@@ -29,28 +29,28 @@ pub fn card(cx: &mut Context<Backplane>, o: Option<&Offer>, light: bool) -> Opti
     let c = |n: &str| theme::color(light, n);
     let tr = crate::i18n::trs;
     let rect = |d: Stateful<Div>, n: &'static str| if crate::art::rects_on() { d.relative().child(canvas(|_, _, _| (), move |r: Bounds<Pixels>, _, w: &mut Window, _| crate::art::report(n, r, w.scale_factor())).absolute().top_0().left_0().size_full()) } else { d };
-    let small = |id: &'static str, label: &str| div().id(id).flex_1().h(px(32.)).flex().items_center().justify_center().cursor_pointer().text_size(px(13.)).text_color(c("dim")).bg(c("raise")).hover(|s| s.bg(c("line"))).child(tr(label));
+    let small = |id: &'static str, label: &str| div().id(id).flex_1().h(px(26.)).flex().items_center().justify_center().cursor_pointer().text_size(px(12.)).text_color(c("dim")).bg(c("raise")).hover(|s| s.bg(c("line"))).child(tr(label));
     let repo = if o.repo.is_empty() { o.url.trim_start_matches("https://").trim_start_matches("github.com/").to_string() } else { o.repo.clone() };
-    let mut card = div().id("star-card").w(px(480.)).max_w_full().flex().flex_col().gap_3().p_6().bg(c("bg")).border_1().border_color(c("accent"))
-        .child(div().flex().items_start().gap_3().child(div().flex_shrink_0().pt(px(2.)).child(crate::ui::ic(light, "star", 26., "accent"))).child(div().flex_1().min_w_0().text_size(px(19.)).line_height(px(26.)).font_weight(FontWeight::BOLD).text_color(c("text")).child(tr(&o.text))))
-        .child(div().text_size(px(13.)).text_color(c("faint")).child(format!("github.com/{repo}")));
-    if !o.why.is_empty() { card = card.child(div().text_size(px(14.)).line_height(px(21.)).text_color(c("dim")).child(tr(&o.why))); }
     /* i18n-ok: drawn through tr */ let label = if o.label.is_empty() { "Star on GitHub".to_string() } else { o.label.clone() };
-    card = card
-        .child(rect(div().id("star-open").mt_2().w_full().h(px(44.)).flex().items_center().justify_center().gap_2().cursor_pointer().bg(c("accent")).text_color(c("on-accent")).text_size(px(15.)).font_weight(FontWeight::BOLD)
-            .child(crate::ui::ic(light, "star", 18., "on-accent")).child(tr(&label)), "star:open").on_click(cx.listener(|this, _, _, cx| this.star_decide("open", cx))))
+    let card = div().id("star-card").w(px(340.)).flex().flex_col().gap_2().p_4().bg(c("bg")).border_1().border_color(c("accent")).shadow_md().occlude()
+        .child(div().flex().items_start().gap_2().child(div().flex_shrink_0().pt(px(1.)).child(crate::ui::ic(light, "star", 16., "accent")))
+            .child(div().flex_1().min_w_0().flex().flex_col().gap_1()
+                .child(div().text_size(px(13.)).font_weight(FontWeight::BOLD).text_color(c("text")).child(tr(&o.text)))
+                .child(div().text_size(px(11.)).text_color(c("faint")).child(format!("github.com/{repo}")))))
+        .when(!o.why.is_empty(), |d| d.child(div().text_size(px(12.)).line_height(px(17.)).text_color(c("dim")).child(tr(&o.why))))
+        .child(rect(div().id("star-open").w_full().h(px(30.)).flex().items_center().justify_center().gap_2().cursor_pointer().bg(c("accent")).text_color(c("on-accent")).text_size(px(13.)).font_weight(FontWeight::BOLD)
+            .child(crate::ui::ic(light, "star", 14., "on-accent")).child(tr(&label)), "star:open").on_click(cx.listener(|this, _, _, cx| this.star_decide("open", cx))))
         .child(div().flex().gap_2()
             /* i18n-ok: drawn through tr */ .child(rect(small("star-later", "Later"), "star:later").on_click(cx.listener(|this, _, _, cx| this.star_decide("later", cx))))
             /* i18n-ok: drawn through tr */ .child(rect(small("star-dismiss", "Don't ask again"), "star:dismiss").on_click(cx.listener(|this, _, _, cx| this.star_decide("dismiss", cx)))));
-    let card = rect(card, "star");
-    Some(div().id("star-nudge").absolute().top_0().left_0().size_full().flex().items_center().justify_center().occlude()
-        .child(div().absolute().top_0().left_0().size_full().bg(c("bg")).opacity(0.75)).child(card).into_any_element())
+    // under the top bar, clear of the right rail: where a conversation is emptiest
+    Some(div().id("star-nudge").absolute().right(px(88.)).top(px(48.)).child(rect(card, "star")).into_any_element())
 }
 
 impl Backplane {
     /// The hub's word on the offer (a frame, or star.offer's answer on connect).
     pub(crate) fn star_offer(&mut self, v: &Value, cx: &mut Context<Self>) { let o = of(v); if self.screens.star != o { self.screens.star = o; cx.notify(); } }
-    /// The card is on screen now (Esc there is Later).
+    /// The card is on screen now.
     pub(crate) fn star_up(&self, cx: &App) -> bool { due(self.screens.star.as_ref(), &self.data, &self.input.read(cx).content) }
     /// The person's choice: open also opens the page. The card goes at once; the hub tells every other client to hide it.
     pub(crate) fn star_decide(&mut self, action: &str, cx: &mut Context<Self>) {

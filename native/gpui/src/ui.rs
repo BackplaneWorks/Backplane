@@ -862,7 +862,7 @@ impl Render for Backplane {
             // the keys sheet, over setup too (? and F1 work there)
             .children(crate::screens::keysheet::view(cx, light, self.screens.keysheet, &self.local))
             .children(crate::screens::migrate::view(cx, light, &self.data["migrate"]))
-            // the GitHub star suggestion, while the hub says it is out: a card over the window, at a pause (screens/star.rs `due`)
+            // the GitHub star suggestion, while the hub says it is out: a small card in the upper right corner, at a pause (screens/star.rs `due`)
             .children(self.star_up(cx).then(|| crate::screens::star::card(cx, self.screens.star.clone().as_ref(), light)).flatten())
             // the right-click menu of a sidebar row, over everything
             .children(self.screens.ctx.clone().map(|m| { for it in &m.items { ctl.push(CtlEntry { id: format!("ctx:{}", it.label), label: it.label.clone(), ctl: Ctl::Node(it.action.clone(), it.value.clone()) }); } crate::screens::ctxmenu::render(cx, light, &m) }))
