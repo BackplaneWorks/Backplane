@@ -179,6 +179,8 @@ pub struct KicadPane {
     prewarmed: Option<u64>,
     /// when the first editor was placed over the pane (the pre-warm waits 2 s after it)
     first_placed: Option<std::time::Instant>,
+    /// where the pane was last drawn (window coordinates): the comment window opens over it (screens/kcomment.rs)
+    pub at_px: Option<Bounds<Pixels>>,
 }
 
 impl KicadPane {
@@ -189,7 +191,7 @@ impl KicadPane {
             if weak.update(cx, |this, cx| this.tick(cx)).is_err() { break }
         }).detach();
         KicadPane { bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), last_root: (i32::MIN, 0), placed: None,
-            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), poked: None, unmapped_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None }
+            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), poked: None, unmapped_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, at_px: None }
     }
     fn rpc(&self, name: &str, params: Value) { let _ = self.hub.try_send(Command::Rpc(name.to_string(), Secret(params), "kicad")); }
     /// The hub's `editor.kicad.<digest>` for this project changed.
@@ -315,6 +317,25 @@ impl KicadPane {
     fn wanted_kind(&self) -> &str { self.override_kind.as_deref().unwrap_or_else(|| frame_for(&self.open)) }
     /// The person took the editor: the hub then refuses an agent's save while anything is unsaved (kicad/embed.rs `Unsaved`).
     fn touched(&self) { self.rpc("editor.kicad.touched", json!({"project": self.project})); }
+    /// What a comment is made on: the project and the editor on show (PCB or SCH; the 3D view comments on its board), when one is.
+    pub fn comment_target(&self) -> Option<(String, &'static str)> {
+        self.want()?; let p = if self.bound.is_empty() { self.project.clone() } else { self.bound.clone() };
+        Some((p, if self.wanted_kind() == "SCH" { "SCH" } else { "PCB" })) // i18n-ok: wire frame kinds
+    }
+    /// Backplane's window over the editor has the keyboard (`on`): the editor takes no pointer input meanwhile, so the keys typed with the pointer
+    /// resting over it come to Backplane (native_child `input_off`).
+    pub fn hold_keys(&mut self, on: bool) {
+        let Some(c) = self.container else { return };
+        nc::input_off(c, on);
+        if on && self.keys { nc::focus(self.toplevel); self.keys = false; nc::grab_escape(self.toplevel, false); nc::grab_click(c, true); }
+    }
+    /// The keyboard back to the editor on show (a comment posted or cancelled), as a click on it gives it.
+    pub fn give_keys(&mut self, cx: &mut Context<Self>) {
+        let Some(c) = self.container else { return };
+        nc::input_off(c, false);
+        let Some(w) = self.want() else { return };
+        nc::grab_click(c, false); nc::focus(w); self.keys = true; nc::grab_escape(self.toplevel, true); cx.notify();
+    }
     fn want(&self) -> Option<u64> { if self.info.is_null() || (cfg!(windows) && self.info["mode"] == "stock") { return None } pick_local(self.wanted_kind(), &self.info, &self.frames, &self.ever_shown) }
     fn tick(&mut self, cx: &mut Context<Self>) {
         // the pre-warm's 2 s are up: a frame drawn now sends it (after_frame), even when nothing else redraws the window
@@ -403,7 +424,7 @@ impl KicadPane {
                 nc::Ev::Click => { if let Some(w) = self.want() { nc::grab_click(c, false); nc::focus(w); self.keys = true; self.touched(); nc::grab_escape(self.toplevel, true); cx.notify(); } }
                 // Ctrl+Tab / Ctrl+Shift+Tab pressed in KiCad: the next editor tab, and KiCad keeps the keyboard
                 nc::Ev::Key(k) if k == "ctrl-tab" || k == "ctrl-shift-tab" => { let to = next_tab(self.wanted_kind(), if k == "ctrl-tab" { 1 } else { -1 }); self.show_kind(to, cx); }
-                nc::Ev::Key(k) => { nc::focus(self.toplevel); self.keys = false; nc::grab_escape(self.toplevel, false); nc::grab_click(c, true); self.press.push(k); cx.notify(); }
+                nc::Ev::Key(k) => { eprintln!("GPUI_LOG {}", json!({"kicad_key": k})); nc::focus(self.toplevel); self.keys = false; nc::grab_escape(self.toplevel, false); nc::grab_click(c, true); self.press.push(k); cx.notify(); }
                 nc::Ev::Focus(_) => { if !self.keys { self.keys = true; self.touched(); nc::grab_escape(self.toplevel, true); nc::grab_click(c, false); cx.notify(); } }
             }
         }
@@ -452,6 +473,7 @@ impl KicadPane {
         for k in std::mem::take(&mut self.press) { if let Ok(k) = Keystroke::parse(&k) { window.defer(cx, move |window, cx| { window.dispatch_keystroke(k, cx); }); } }
         let Some(c) = self.container else { return };
         let seen = self.marker.lock().unwrap().and_then(|id| window.hitbox_drawn_after(id));
+        self.at_px = seen.as_ref().map(|(b, _)| *b);
         let scale = window.scale_factor();
         let r = |b: &Bounds<Pixels>| nc::R { x: (f32::from(b.origin.x) * scale).round() as i32, y: (f32::from(b.origin.y) * scale).round() as i32, w: (f32::from(b.size.width) * scale).round() as i32, h: (f32::from(b.size.height) * scale).round() as i32 };
         let at = seen.as_ref().map(|(b, _)| r(b)).filter(|r| r.w > 0 && r.h > 0);
@@ -552,14 +574,6 @@ impl Render for KicadPane {
 mod tests {
     use super::{belongs_to, edit_target, frame_for, hub_open_step, nc, path_stem, pick, project_of, root_of, waiting, waiting_on};
     use serde_json::{json, Value};
-    #[test] fn a_kicad_comment_reads_as_the_persons_message_with_its_references_and_picture() {
-        let c = json!({"frame": "FK_PCB", "note": "Move U3 closer to J1", "names": {"references": ["U3"], "nets": ["GND"], "pins": []},
-            "items": [{"kind": "FOOTPRINT", "reference": "U3", "layer": "F.Cu", "x_mm": 10.0, "y_mm": 20.5}], "image": "/h/kicad-comments/a-4.png"});
-        let t = super::comment_text(&c);
-        assert!(t.starts_with("Move U3 closer to J1\n\nSelected in the KiCad board: U3; nets GND"), "{t}");
-        assert!(t.contains("- footprint U3 on F.Cu at (10.00, 20.50) mm") && t.ends_with("\n\n[attachment: /h/kicad-comments/a-4.png]"), "{t}");
-        assert!(super::comment_text(&json!({"frame": "FK_SCH", "note": "here", "empty": true})).contains("nothing selected"));
-    }
     #[test] fn ctrl_tab_goes_round_the_editor_tabs() {
         assert_eq!(super::next_tab("PCB", 1), "SCH"); assert_eq!(super::next_tab("PCB", -1), "FOOTPRINT_EDITOR"); assert_eq!(super::next_tab("FOOTPRINT_EDITOR", 1), "PCB"); assert_eq!(super::next_tab("?", 1), "SCH");
     }
@@ -812,37 +826,8 @@ impl crate::Backplane {
     }
 }
 
-/// A "Comment to Backplane" as the person's message: their note, then what they had selected in KiCad (references, pins and nets, which the
-/// thread draws as links that cross-probe; each item's layer or sheet and position in mm), then the screenshot (`[attachment: <path>]` so the
-/// thread, the phones and the agent all get the image). English: it is the person's message to an agent, as they wrote it.
-pub fn comment_text(c: &Value) -> String {
-    let list = |k: &str| c["names"][k].as_array().into_iter().flatten().filter_map(Value::as_str).map(String::from).collect::<Vec<_>>();
-    let (refs, nets, pins) = (list("references"), list("nets"), list("pins"));
-    let ed = if c["frame"] == "FK_SCH" || c["frame"] == 2 { "schematic" } else { "board" }; // i18n-ok: the person's message to an agent
-    let mut t = c["note"].as_str().unwrap_or("").trim().to_string();
-    if c["empty"] == true { t.push_str(&format!("\n\n(KiCad {ed}, nothing selected: the area in view)")); } // i18n-ok: the person's message to an agent
-    else {
-        let mut sel = Vec::new();
-        if !refs.is_empty() { sel.push(refs.join(", ")); }
-        if !pins.is_empty() { sel.push(format!("pins {}", pins.join(", "))); } // i18n-ok: the person's message to an agent
-        if !nets.is_empty() { sel.push(format!("nets {}", nets.join(", "))); } // i18n-ok: the person's message to an agent
-        t.push_str(&format!("\n\nSelected in the KiCad {ed}: {}", sel.join("; "))); // i18n-ok: the person's message to an agent
-        if let Some(sp) = c["sheet_path"].as_str().filter(|s| !s.is_empty() && *s != "/") { t.push_str(&format!(" (sheet {sp})")); } // i18n-ok
-    }
-    let items = c["items"].as_array().cloned().unwrap_or_default();
-    for it in items.iter().take(12) {
-        let name = [it["reference"].as_str(), it["pin"].as_str(), it["net"].as_str()].into_iter().flatten().find(|s| !s.is_empty()).unwrap_or("");
-        let at = match (it["x_mm"].as_f64(), it["y_mm"].as_f64()) { (Some(x), Some(y)) => format!(" at ({x:.2}, {y:.2}) mm"), _ => String::new() }; // i18n-ok
-        let place = it["layer"].as_str().or(it["sheet_path"].as_str()).filter(|s| !s.is_empty()).map(|l| format!(" on {l}")).unwrap_or_default(); // i18n-ok
-        t.push_str(&format!("\n- {} {name}{place}{at}", it["kind"].as_str().unwrap_or("item").to_lowercase()));
-    }
-    if items.len() > 12 || c["truncated"] == true { t.push_str(&format!("\n- … and more ({} items listed of the selection)", items.len().min(12))); } // i18n-ok
-    if let Some(img) = c["image"].as_str().filter(|s| !s.is_empty()) { t.push_str(&format!("\n\n[attachment: {img}]")); }
-    t
-}
-
 impl crate::Backplane {
-    /// A comment from KiCad: posted once (by its seq) into the open thread, when the window shows this project's editor.
+    /// A comment from KiCad's own dialog: posted once (by its seq) into the open thread, when the window shows this project's editor.
     pub(crate) fn kicad_comment(&mut self, text: &str, cx: &mut Context<Self>) {
         let Ok(v) = serde_json::from_str::<Value>(text) else { return };
         let Some(p) = self.screens.kicad.clone() else { return };
@@ -851,7 +836,9 @@ impl crate::Backplane {
         if !self.screens.kicad_comments_seen.insert(key) { return }
         let th = self.data["thread"]["id"].as_str().unwrap_or("").rsplit('|').next().unwrap_or("").to_string();
         if th.is_empty() { self.note = crate::i18n::trs("A comment from KiCad needs an open thread."); cx.notify(); return }
-        let _ = self.tx.try_send(Command::Ask("turn.start".into(), json!({"thread": th, "text": comment_text(&v), "mode": "steer"}), 0));
+        // the hub words it (kicad/comment.rs `text`), as it does for the comment window and a phone's viewer
+        let mut p = v.clone(); p["thread"] = json!(th);
+        let _ = self.tx.try_send(Command::Rpc("kicad.comment.post".into(), Secret(p), "kicad"));
         cx.notify();
     }
 }
