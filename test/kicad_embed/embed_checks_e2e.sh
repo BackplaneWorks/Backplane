@@ -21,6 +21,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 if [ "$EMBED_MODE" = "spike" ]; then echo "SKIP embed_checks_e2e: product modes only (EMBED_MODE=stock|fork)"; exit 0; fi
 
 discover_bins
+[ -x "$REAL_HOME/.bun/bin/bun" ] && PATH="$REAL_HOME/.bun/bin:$PATH"
 discover_kicad
 [ -n "${KICAD_CLI:-}" ] || KICAD_CLI="$(dirname "${KICAD_BIN:-/usr/bin/kicad}")/kicad-cli"
 [ -x "$KICAD_CLI" ] || { echo "SKIP embed_checks_e2e: no kicad-cli"; exit 0; }
@@ -141,4 +142,25 @@ sleep 1
 S4=$(wait_state fresh,fresh 120) || true
 check "Run (on demand) runs ERC again on a fresh design" "$(python3 -c 'import json,sys; print(int(json.loads(sys.argv[1])["result"]["erc"]["at"] > int(sys.argv[2])))' "$S4" "$B4")"
 grep -o 'took_ms":[0-9]*' <<<"$S4" | head -2 | tr '\n' ' '; echo
+# C5: "Run all checks" (full): the library checks too, so the counts are kicad-cli's own, all of them
+read -r FD FE < <(python3 - "$OUT/oracle" <<'PY'
+import json, sys
+d = json.load(open(sys.argv[1] + "/drc.json")); e = json.load(open(sys.argv[1] + "/erc.json"))
+print(sum(len(d[k]) for k in ("violations", "unconnected_items", "schematic_parity")), sum(len(s["violations"]) for s in e["sheets"]))
+PY
+)
+B5=$(python3 -c 'import json,sys; r=json.loads(sys.argv[1])["result"]; print(r["drc"]["at"], r["erc"]["at"])' "$S4")
+hub_rpc "[{\"method\":\"kicad.checks.run\",\"params\":{\"project\":\"$PRO\",\"full\":true}}]" >/dev/null
+S5=""; for _ in $(seq 120); do
+  S5=$(hub_rpc "[{\"method\":\"kicad.checks.watch\",\"params\":{\"project\":\"$PRO\"}}]" | grep -v '^INFO ' | head -1)
+  python3 -c 'import json,sys; r=json.loads(sys.argv[1])["result"]; a,b=map(int,sys.argv[2].split()); sys.exit(0 if r["drc"]["full"] and r["erc"]["full"] and r["drc"]["at"]>a and r["erc"]["at"]>b and r["drc"]["state"]=="fresh" and r["erc"]["state"]=="fresh" else 1)' "$S5" "$B5" && break; sleep 1
+done
+check "A full run counts the library checks too: kicad-cli's whole report (drc $FD, erc $FE), and says so (no note)" "$(python3 -c 'import json,sys; r=json.loads(sys.argv[1])["result"]; n=lambda c: sum(c.values()); print(int(r["drc"]["full"] and n(r["drc"]["counts"])==int(sys.argv[2]) and n(r["erc"]["counts"])==int(sys.argv[3]) and r["drc"]["note"]==""))' "$S5" "$FD" "$FE")" "$S5"
+# C6: another source (the design review's) joins the one list, reads stale after a save, and lists by its id
+hub_rpc "[{\"method\":\"kicad.checks.set\",\"params\":{\"project\":\"$PRO\",\"source\":\"fab\",\"meta\":{\"label\":\"Fab rules\"},\"findings\":[{\"severity\":\"warning\",\"rule\":\"min_annular\",\"title\":\"Annular ring under the fab's minimum\",\"anchors\":[{\"doc\":\"pcb\",\"reference\":\"U1\",\"text\":\"Footprint U1\"}]}]}}]" >/dev/null
+S6=$(hub_rpc "[{\"method\":\"kicad.checks.watch\",\"params\":{\"project\":\"$PRO\"}},{\"method\":\"kicad.checks.list\",\"params\":{\"project\":\"$PRO\",\"source\":\"fab\"}}]" | grep -v '^INFO ')
+check "Another source's findings join the list (summary.sources.fab fresh, listed by source with an id)" "$(python3 -c 'import json,sys; a,b=[json.loads(l)["result"] for l in sys.argv[1].splitlines()[:2]]; f=a["sources"]["fab"]; print(int(f["state"]=="fresh" and f["label"]=="Fab rules" and b["total"]==1 and b["findings"][0]["id"].startswith("fab:") and b["findings"][0]["source"]=="fab"))' "$S6")" "$S6"
+sleep 1.1; cp "$PROJ/ecc83-pp.kicad_pcb" "$OUT/pcb.tmp" && cat "$OUT/pcb.tmp" >"$PROJ/ecc83-pp.kicad_pcb"
+ST6=""; for _ in $(seq 20); do ST6=$(hub_rpc "[{\"method\":\"kicad.checks.watch\",\"params\":{\"project\":\"$PRO\"}}]" | grep -v '^INFO ' | head -1 | python3 -c 'import json,sys; print(json.load(sys.stdin)["result"]["sources"]["fab"]["state"])'); [ "$ST6" = stale ] && break; sleep 0.5; done
+check "After a save the other source reads stale ($ST6)" "$( [ "$ST6" = stale ] && echo 1 || echo 0)"
 finish_suite "embed_checks_e2e ($EMBED_MODE)"

@@ -3,11 +3,15 @@
 //! revision it ran on, and its findings (kicad/findings.rs). Published as info `kicad.checks.<digest>` (the summary, small) and served
 //! by RPC (the list):
 //! - `kicad.checks.watch {project}`: the project's checks are kept live while some client asks at least every WATCH_MS; answers the summary.
-//! - `kicad.checks.run {project, source?: "drc"|"erc"}`: run now (the Run button).
-//! - `kicad.checks.list {project, source?, severity?, q?, offset?, limit?}`: {summary, total, findings: [...]}, errors first.
+//! - `kicad.checks.run {project, source?: "drc"|"erc", full?}`: run now (the Run button); `full` with the library checks too, which
+//!   the background runs leave out (findings::library_rule), under the same memory guard with its own measured peak.
+//! - `kicad.checks.list {project, source?, severity?, rule?, q?, offset?, limit?, rows?}`: {summary, total, findings: [...]}, errors first
+//!   (`rows`: the panel's small rows, findings::row_json).
+//! - The management panel "Checks" (kicad/mgmt.rs): info `mgmt.checks.<digest>`, the summary with `badge`, `total` and `groups`.
 //! - `kicad.checks.focus {project, id}`: cross-probe the finding into the open KiCad (its items selected and zoomed, in the board for
 //!   DRC, the schematic for ERC: `editor.kicad.select` with `show`) and light it in the viewers.
 //! - `kicad.checks.fix {project, id}`: {text}: the message "Fix with agent" sends.
+//! - `kicad.checks.set {project, source, findings, meta}`: another source's findings (`set_findings`, which the hub's own sources call).
 //! Source: `kicad-cli pcb drc` / `sch erc` (JSON) on the saved files, DRC and ERC side by side when memory allows (findings::admit),
 //! at low priority, cancelled when a newer save arrives. When it runs is findings::next (saves debounced, held while the
 //! person works in KiCad or an agent's turn holds the document). Results are kept in `<home>/cache/checks/` (never beside the design),
@@ -15,13 +19,58 @@
 use super::{cad, embed, findings::{self as fd, Counts, Do, Finding, Sched}, ipc, kserve as ks, project};
 use crate::{api::{Caller, Fut, RpcHandler}, hub::{now_ms, Hub}};
 use serde_json::{json, Value};
-use std::{collections::HashMap, path::{Path, PathBuf}, sync::{Arc, Mutex, OnceLock, Weak}, time::Duration};
+use std::{collections::{BTreeMap, HashMap}, path::{Path, PathBuf}, sync::{Arc, Mutex, OnceLock, Weak}, time::Duration};
 
 /// A project stays live this long after a client last asked (clients ask again while their panel or chip shows).
 const WATCH_MS: u64 = 10 * 60_000;
 const TICK_MS: u64 = 1000;
 const RUN_SECS: u64 = 600;
 pub const SOURCES: [&str; 2] = ["erc", "drc"];
+
+// Other sources -------------------------------------------------------------------------------------------------------------------
+
+/// The sources besides DRC and ERC (id, label), in the order they first put findings (or were registered).
+static EXT_SOURCES: Mutex<Vec<(String, String)>> = Mutex::new(Vec::new());
+/// Name a source and its label ahead of its first findings (optional: `set_findings` registers a new id itself, its label from
+/// `meta.label`).
+pub fn register_source(id: &str, label: &str) {
+    let mut v = EXT_SOURCES.lock().unwrap();
+    match v.iter_mut().find(|x| x.0 == id) { Some(x) => { if !label.is_empty() { x.1 = label.to_string() } } None => v.push((id.to_string(), if label.is_empty() { id.to_string() } else { label.to_string() })) }
+}
+fn ext_known(id: &str) -> bool { EXT_SOURCES.lock().unwrap().iter().any(|x| x.0 == id) }
+fn known_source(id: &str) -> bool { SOURCES.contains(&id) || ext_known(id) }
+/// A source's findings for a project (`pro`: any path of it), replacing the ones it set before (the design review's "fab", "bom",
+/// "outputs", "assembly", "mech", ...). `meta` is kept and published as given; the panel reads `label` (the source's name, "Fab rules"),
+/// `judged` (true: an agent's judgement, labelled so in every row) and `confidence`. Each finding's `source` becomes `source`; an empty
+/// `id` is made from what it is about (findings::assign_ids), so give stable anchors (KIIDs, names) for ids that last across runs. The
+/// set is of the design as it is now: it reads stale once the design on disk changes, as DRC's does.
+pub async fn set_findings(hub: &Arc<Hub>, pro: &str, source: &str, mut findings: Vec<Finding>, meta: Value) -> Result<(), String> {
+    if source.is_empty() || SOURCES.contains(&source) || source.len() > 32 { return Err(format!("{source:?} cannot be set from outside")) }
+    register_source(source, meta["label"].as_str().unwrap_or(""));
+    let pro = named(hub, &json!({"project": pro})).await?;
+    let given: Vec<String> = findings.iter().map(|f| f.id.clone()).collect();
+    for f in findings.iter_mut() { f.source = source.to_string(); }
+    fd::assign_ids(&mut findings);
+    for (f, g) in findings.iter_mut().zip(given) { if !g.is_empty() { f.id = g } }
+    let files = with(&pro, |p| p.files.clone()).unwrap_or_default();
+    let rev = tokio::task::spawn_blocking(move || disk_revs(&files)).await.map(|(e, d)| format!("{e}{d}")).unwrap_or_default();
+    {
+        let mut m = state().lock().unwrap();
+        let Some(p) = m.get_mut(&pro) else { return Err("the project is not live".into()) };
+        p.ext.insert(source.to_string(), Ext { at: now_ms(), counts: fd::counts(&findings), findings, rev, meta });
+        save(hub, &pro, p);
+    }
+    publish(hub, &pro).await;
+    Ok(())
+}
+/// Every finding of a project: ERC, DRC, then the other sources in their order.
+fn all_findings(p: &Proj, only: &str) -> Vec<Finding> {
+    let mut v: Vec<Finding> = vec![];
+    if only.is_empty() || only == "erc" { v.extend(p.erc.findings.iter().cloned()) }
+    if only.is_empty() || only == "drc" { v.extend(p.drc.findings.iter().cloned()) }
+    for (id, _) in EXT_SOURCES.lock().unwrap().iter() { if only.is_empty() || only == id { if let Some(e) = p.ext.get(id) { v.extend(e.findings.iter().cloned()) } } }
+    v
+}
 
 #[derive(Default)]
 struct Src {
@@ -38,9 +87,17 @@ struct Src {
     /// why a run that may go waits for the machine ("" none), and the last run's peak memory (MB; 0 unknown)
     deferred: String,
     peak_mb: u64,
+    /// a full run (the library checks too) was asked for; the last result was one; its measured peak
+    full_next: bool,
+    full: bool,
+    peak_full_mb: u64,
 }
+/// Findings another part of the hub puts in this list (the design review's sources: the fab's rules, the BOM, the fab outputs, the
+/// datasheets...): their state and set, replaced whole each time (`put_findings`).
+#[derive(Clone, Default)]
+struct Ext { at: u64, findings: Vec<Finding>, counts: Counts, rev: String, meta: Value }
 #[derive(Default)]
-struct Proj { files: project::Files, drc: Src, erc: Src, asked: u64, loaded: bool }
+struct Proj { files: project::Files, drc: Src, erc: Src, asked: u64, loaded: bool, ext: BTreeMap<String, Ext> }
 impl Proj {
     fn src(&mut self, s: &str) -> &mut Src { if s == "drc" { &mut self.drc } else { &mut self.erc } }
     fn has(&self, s: &str) -> bool { if s == "drc" { !self.files.pcb.is_empty() } else { !self.files.sch.is_empty() } }
@@ -60,6 +117,7 @@ pub fn start(hub: &Arc<Hub>) {
     *HUB.lock().unwrap() = Some(Arc::downgrade(hub));
     let _ = WAKE.set(tokio::sync::Notify::new());
     hub.register_rpc(Arc::new(ChecksRpc));
+    super::mgmt::register(Arc::new(ChecksPanel));
     let h = Arc::downgrade(hub);
     tokio::spawn(async move {
         loop {
@@ -115,8 +173,9 @@ fn disk_revs(f: &project::Files) -> (String, String) {
 fn cache_dir(hub: &Hub) -> PathBuf { hub.cfg.home.join("cache").join("checks") }
 fn cache_file(hub: &Hub, pro: &str) -> PathBuf { cache_dir(hub).join(format!("{}.json", ks::digest(pro))) }
 fn save(hub: &Hub, pro: &str, p: &Proj) {
-    let one = |s: &Src| json!({"rev": s.sched.ran_rev, "at": s.at, "took": s.took, "had": s.had, "peak_mb": s.peak_mb, "failed": if s.state == "failed" { s.reason.clone() } else { String::new() }, "findings": s.findings.iter().map(fd::to_json).collect::<Vec<_>>()});
-    let v = json!({"pro": pro, "drc": one(&p.drc), "erc": one(&p.erc)});
+    let one = |s: &Src| json!({"rev": s.sched.ran_rev, "at": s.at, "took": s.took, "had": s.had, "peak_mb": s.peak_mb, "peak_full_mb": s.peak_full_mb, "full": s.full, "failed": if s.state == "failed" { s.reason.clone() } else { String::new() }, "findings": s.findings.iter().map(fd::to_json).collect::<Vec<_>>()});
+    let ext: serde_json::Map<String, Value> = p.ext.iter().map(|(k, e)| (k.clone(), json!({"rev": e.rev, "meta": e.meta, "at": e.at, "findings": e.findings.iter().map(fd::to_json).collect::<Vec<_>>()}))).collect();
+    let v = json!({"pro": pro, "drc": one(&p.drc), "erc": one(&p.erc), "ext": ext});
     let f = cache_file(hub, pro);
     let _ = std::fs::create_dir_all(cache_dir(hub));
     let tmp = f.with_extension("tmp");
@@ -127,7 +186,7 @@ fn load(hub: &Hub, pro: &str, p: &mut Proj) {
     if v["pro"] != pro { return }
     for s in SOURCES {
         let o = &v[s]; let src = p.src(s);
-        src.peak_mb = o["peak_mb"].as_u64().unwrap_or(0);
+        src.peak_mb = o["peak_mb"].as_u64().unwrap_or(0); src.peak_full_mb = o["peak_full_mb"].as_u64().unwrap_or(0); src.full = o["full"].as_bool().unwrap_or(false);
         if !o["had"].as_bool().unwrap_or(false) { continue }
         src.findings = o["findings"].as_array().into_iter().flatten().map(fd::from_json).collect();
         src.counts = fd::counts(&src.findings);
@@ -135,6 +194,11 @@ fn load(hub: &Hub, pro: &str, p: &mut Proj) {
         src.at = o["at"].as_u64().unwrap_or(0); src.took = o["took"].as_u64().unwrap_or(0); src.had = true;
         let failed = o["failed"].as_str().unwrap_or("");
         if !failed.is_empty() { src.state = "failed".into(); src.reason = failed.into(); }
+    }
+    for (k, o) in v["ext"].as_object().into_iter().flatten() {
+        let findings: Vec<Finding> = o["findings"].as_array().into_iter().flatten().map(fd::from_json).collect();
+        register_source(k, o["meta"]["label"].as_str().unwrap_or(""));
+        p.ext.insert(k.clone(), Ext { rev: o["rev"].as_str().unwrap_or("").into(), meta: o["meta"].clone(), at: o["at"].as_u64().unwrap_or(0), counts: fd::counts(&findings), findings });
     }
 }
 
@@ -147,7 +211,7 @@ fn src_json(p: &Proj, s: &str, now: u64) -> Value {
     let running = x.sched.running_since > 0;
     let reason = if st == "deferred" { x.deferred.trim_start_matches("deferred: ").to_string() } else { x.reason.clone() };
     json!({"state": st, "reason": reason, "running": running, "fraction": if running { fd::fraction(now.saturating_sub(x.sched.running_since), x.took) } else { -1.0 },
-        "counts": x.counts.to_json(), "at": x.at, "took_ms": x.took, "rev": x.sched.ran_rev, "has_result": x.had, "peak_mb": x.peak_mb, "note": fd::LIBRARY_NOTE})
+        "counts": x.counts.to_json(), "at": x.at, "took_ms": x.took, "rev": x.sched.ran_rev, "has_result": x.had, "peak_mb": x.peak_mb, "full": x.full, "full_next": x.full_next, "note": if x.full { "" } else { fd::LIBRARY_NOTE }})
 }
 /// none (no result yet), running, deferred (a run waits for memory or another heavy KiCad job), fresh (the result is of the design on
 /// disk), stale (the design changed since), failed.
@@ -156,11 +220,31 @@ fn state_word(x: &Src) -> &'static str {
 }
 fn summary(pro: &str, p: &Proj, now: u64) -> Value {
     let pick = |s: &str| { let x = if s == "drc" { &p.drc } else { &p.erc }; p.has(s).then(|| (if x.state == "failed" && x.sched.running_since == 0 { "failed" } else { "ok" }, x.counts, x.had)) };
-    json!({"project": pro, "pcb": p.files.pcb, "sch": p.files.sch, "drc": src_json(p, "drc", now), "erc": src_json(p, "erc", now), "chip": fd::chip(pick("drc"), pick("erc"))})
+    // the other sources, by id, in their order (`order`): stale once the design changed since their set
+    let now_rev = format!("{}{}", p.erc.sched.disk_rev, p.drc.sched.disk_rev);
+    let mut sources = serde_json::Map::new(); let mut order = vec![];
+    for (id, label) in EXT_SOURCES.lock().unwrap().iter() {
+        let Some(e) = p.ext.get(id) else { continue };
+        let stale = !e.rev.is_empty() && !p.erc.sched.disk_rev.is_empty() && e.rev != now_rev;
+        sources.insert(id.clone(), json!({"label": label, "state": if stale { "stale" } else { "fresh" }, "counts": e.counts.to_json(), "at": e.at, "rev": e.rev, "meta": e.meta, "judged": e.meta["judged"] == true}));
+        order.push(id.clone());
+    }
+    json!({"project": pro, "pcb": p.files.pcb, "sch": p.files.sch, "drc": src_json(p, "drc", now), "erc": src_json(p, "erc", now), "sources": sources, "order": order, "chip": fd::chip(pick("drc"), pick("erc"))})
 }
 async fn publish(hub: &Arc<Hub>, pro: &str) {
-    let v = { let m = state().lock().unwrap(); match m.get(pro) { Some(p) => summary(pro, p, now_ms()), None => return } };
+    let (v, panel) = { let m = state().lock().unwrap(); match m.get(pro) { Some(p) => { let v = summary(pro, p, now_ms()); (v.clone(), panel_json(p, v)) } None => return } };
     hub.set_info(&info_key(pro), &v.to_string()).await;
+    super::mgmt::publish(hub, "checks", pro, panel).await;
+}
+/// The Checks panel's data (info `mgmt.checks.<digest>`): the summary, the tab's badge (errors red, else warnings amber) and the findings
+/// grouped by rule, as many rows as fit (`kicad.checks.list` has the rest).
+fn panel_json(p: &Proj, mut v: Value) -> Value {
+    let all = all_findings(p, "");
+    let c = fd::counts(&all);
+    v["badge"] = json!({"n": c.error + c.warning, "tone": if c.error > 0 { "bad" } else { "warn" }});
+    v["total"] = json!(all.len());
+    v["groups"] = Value::Array(fd::groups_within(&all, 48_000));
+    v
 }
 pub fn info_key(pro: &str) -> String { format!("kicad.checks.{}", ks::digest(pro)) }
 
@@ -184,7 +268,8 @@ async fn tick(hub: &Arc<Hub>) -> u64 {
     let now = now_ms();
     let pros: Vec<(String, project::Files)> = {
         let mut m = state().lock().unwrap();
-        m.retain(|_, p| now.saturating_sub(p.asked) < WATCH_MS || p.drc.sched.running_since > 0 || p.erc.sched.running_since > 0);
+        // live while a client asked lately, its panel is open, its KiCad is open, or a run goes
+        m.retain(|k, p| now.saturating_sub(p.asked) < WATCH_MS || super::mgmt::is_open(k, "checks") || embed::gui_route(k).is_some() || p.drc.sched.running_since > 0 || p.erc.sched.running_since > 0);
         m.iter().map(|(k, p)| (k.clone(), p.files.clone())).collect()
     };
     if pros.is_empty() { return 60_000 }
@@ -205,12 +290,12 @@ async fn tick(hub: &Arc<Hub>) -> u64 {
                 let x = p.src(s);
                 if x.sched.disk_rev != *rev { if !x.sched.disk_rev.is_empty() { x.sched.changed_at = now } x.sched.disk_rev = rev.clone(); changed = true }
                 x.sched.agent_since = agent; x.sched.person_at = person; x.sched.free_mb = free; x.sched.heavy = heavy.clone();
-                x.sched.need_mb = fd::need_mb(s, doc_bytes(&files, s), x.peak_mb);
+                x.sched.need_mb = if x.full_next { fd::need_full_mb(s, doc_bytes(&files, s), x.peak_full_mb) } else { fd::need_mb(s, doc_bytes(&files, s), x.peak_mb) };
                 let was = std::mem::take(&mut x.deferred);
                 match fd::next(now, &x.sched) {
                     Do::Defer(why, ms) => { x.deferred = why; sleep = sleep.min(ms) }
                     Do::Run if !fd::admit(free, &RUNNING.lock().unwrap().iter().map(|r| r.1).collect::<Vec<_>>(), x.sched.need_mb) => sleep = sleep.min(300),
-                    Do::Run => { RUNNING.lock().unwrap().push((format!("{pro}|{s}"), x.sched.need_mb)); x.sched.demand = false; x.sched.running_since = now; x.sched.running_rev = rev.clone(); let c = Arc::new(tokio::sync::Notify::new()); x.cancel = Some(c.clone()); acts.push((s, rev.clone(), c)); changed = true; }
+                    Do::Run => { RUNNING.lock().unwrap().push((format!("{pro}|{s}"), x.sched.need_mb)); x.sched.demand = false; let full = std::mem::take(&mut x.full_next); x.sched.running_since = now; x.sched.running_rev = rev.clone(); let c = Arc::new(tokio::sync::Notify::new()); x.cancel = Some(c.clone()); acts.push((s, rev.clone(), c, full)); changed = true; }
                     Do::Cancel => { if let Some(c) = &x.cancel { c.notify_one() } }
                     Do::Wait(ms) => sleep = sleep.min(ms.max(100)),
                     Do::Nothing => {}
@@ -220,7 +305,7 @@ async fn tick(hub: &Arc<Hub>) -> u64 {
             }
         }
         if changed { publish(hub, &pro).await }
-        for (s, rev, c) in acts { let (h, p, f) = (hub.clone(), pro.clone(), files.clone()); tokio::spawn(async move { run(&h, &p, &f, s, &rev, c).await }); }
+        for (s, rev, c, full) in acts { let (h, p, f) = (hub.clone(), pro.clone(), files.clone()); tokio::spawn(async move { run(&h, &p, &f, s, &rev, c, full).await }); }
     }
     sleep
 }
@@ -228,16 +313,20 @@ async fn tick(hub: &Arc<Hub>) -> u64 {
 /// What one run found: its findings, or why it failed (None: cancelled).
 type Outcome = Option<Result<Vec<Finding>, String>>;
 
-async fn run(hub: &Arc<Hub>, pro: &str, f: &project::Files, s: &'static str, rev: &str, cancel: Arc<tokio::sync::Notify>) {
+async fn run(hub: &Arc<Hub>, pro: &str, f: &project::Files, s: &'static str, rev: &str, cancel: Arc<tokio::sync::Notify>, full: bool) {
     let t0 = now_ms();
-    let (o, peak) = run_cli(hub, pro, f, s, &cancel).await;
+    let (o, peak) = run_cli(hub, pro, f, s, &cancel, full).await;
     let took = now_ms() - t0;
-    if peak > 0 { if let Some(p) = state().lock().unwrap().get_mut(pro) { p.src(s).peak_mb = peak } }
+    if let Some(p) = state().lock().unwrap().get_mut(pro) {
+        let x = p.src(s);
+        if peak > 0 { if full { x.peak_full_mb = peak } else { x.peak_mb = peak } }
+        if matches!(o, Some(Ok(_))) { x.full = full }
+    }
     finish(hub, pro, s, rev, o, took).await
 }
 
 /// One kicad-cli run: its outcome and its peak memory (MB; 0 when this platform cannot say).
-async fn run_cli(hub: &Arc<Hub>, pro: &str, f: &project::Files, s: &str, cancel: &tokio::sync::Notify) -> (Outcome, u64) {
+async fn run_cli(hub: &Arc<Hub>, pro: &str, f: &project::Files, s: &str, cancel: &tokio::sync::Notify, full: bool) -> (Outcome, u64) {
     let rt = ipc::runtime(hub).await;
     if rt.cli.is_empty() { return (Some(Err("KiCad is not installed on this machine (no kicad-cli)".into())), 0) }
     let dir = cache_dir(hub).join(ks::digest(pro));
@@ -247,7 +336,7 @@ async fn run_cli(hub: &Arc<Hub>, pro: &str, f: &project::Files, s: &str, cancel:
     let report = dir.join(c.report);
     let _ = std::fs::remove_file(&report);
     let mut cmd = low_priority(&argv);
-    cmd.env("KICAD_CONFIG_HOME", lib_free_config(hub, &rt.version));
+    if !full { cmd.env("KICAD_CONFIG_HOME", lib_free_config(hub, &rt.version)); }
     cmd.kill_on_drop(true).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
     let child = match cmd.spawn() { Ok(c) => c, Err(e) => return (Some(Err(format!("could not start kicad-cli: {e}"))), 0) };
     let pid = child.id().unwrap_or(0);
@@ -270,10 +359,10 @@ async fn run_cli(hub: &Arc<Hub>, pro: &str, f: &project::Files, s: &str, cancel:
     let text = std::fs::read_to_string(&report).unwrap_or_default();
     let parsed = if s == "drc" { fd::drc(&text) } else { fd::erc(&text) };
     let out = match parsed {
-        Some(mut fs) => { fs.retain(|x| !fd::library_rule(s, &x.rule)); Some(Ok(fs)) }
+        Some(mut fs) => { if !full { fs.retain(|x| !fd::library_rule(s, &x.rule)) } Some(Ok(fs)) }
         None if String::from_utf8_lossy(&o.stderr).contains("transient scope") && !NO_SCOPE.swap(true, std::sync::atomic::Ordering::Relaxed) => {
             eprintln!("checks: systemd made no scope ({}); runs go without one", String::from_utf8_lossy(&o.stderr).trim());
-            return Box::pin(run_cli(hub, pro, f, s, cancel)).await
+            return Box::pin(run_cli(hub, pro, f, s, cancel, full)).await
         }
         None if killed(&o.status) => Some(Err("stopped at its memory limit (the machine needed the memory)".into())),
         None => {
@@ -389,7 +478,7 @@ async fn named(hub: &Arc<Hub>, p: &Value) -> Result<String, String> {
         let mut tmp = Proj::default();
         load(hub, &pro, &mut tmp);
         let mut m = state().lock().unwrap();
-        if let Some(e) = m.get_mut(&pro) { for s in SOURCES { let (a, b) = (e.src(s), tmp.src(s)); if !a.had && b.had { std::mem::swap(a, b) } } }
+        if let Some(e) = m.get_mut(&pro) { for s in SOURCES { let (a, b) = (e.src(s), tmp.src(s)); if !a.had && b.had { std::mem::swap(a, b) } } for (k, x) in tmp.ext { e.ext.entry(k).or_insert(x); } }
         drop(m);
         wake();
     }
@@ -397,28 +486,36 @@ async fn named(hub: &Arc<Hub>, p: &Value) -> Result<String, String> {
 }
 fn with<T>(pro: &str, f: impl FnOnce(&Proj) -> T) -> Option<T> { state().lock().unwrap().get(pro).map(f) }
 fn find(pro: &str, id: &str) -> Option<Finding> {
-    with(pro, |p| p.drc.findings.iter().chain(p.erc.findings.iter()).find(|f| f.id == id).cloned()).flatten()
+    with(pro, |p| all_findings(p, "").into_iter().find(|f| f.id == id)).flatten()
 }
 
 pub async fn request(hub: &Arc<Hub>, method: &str, p: &Value) -> Result<Value, String> {
     let pro = named(hub, p).await?;
     let src = p["source"].as_str().unwrap_or("");
-    if !src.is_empty() && !SOURCES.contains(&src) { return Err(format!("unknown check {src}: drc or erc")) }
+    if !src.is_empty() && !known_source(src) && method != "kicad.checks.set" { return Err(format!("unknown source {src}")) }
     match method {
         "kicad.checks.watch" => Ok(with(&pro, |x| summary(&pro, x, now_ms())).unwrap_or(Value::Null)),
         "kicad.checks.run" => {
-            { let mut m = state().lock().unwrap(); if let Some(x) = m.get_mut(&pro) { for s in SOURCES { if (src.is_empty() || s == src) && x.has(s) { x.src(s).sched.demand = true } } } }
+            { let mut m = state().lock().unwrap(); if let Some(x) = m.get_mut(&pro) { let full = p["full"] == true; for s in SOURCES { if (src.is_empty() || s == src) && x.has(s) { let y = x.src(s); y.sched.demand = true; y.full_next = full } } } }
             wake();
             Ok(json!({"project": pro, "queued": true}))
         }
         "kicad.checks.list" => {
-            let (sev, q) = (p["severity"].as_str().unwrap_or(""), p["q"].as_str().unwrap_or(""));
+            let (sev, q, rule) = (p["severity"].as_str().unwrap_or(""), p["q"].as_str().unwrap_or(""), p["rule"].as_str().unwrap_or(""));
             let offset = p["offset"].as_u64().unwrap_or(0) as usize; let limit = p["limit"].as_u64().unwrap_or(500).min(2000) as usize;
             Ok(with(&pro, |x| {
-                let all: Vec<Finding> = SOURCES.iter().filter(|s| src.is_empty() || **s == src).flat_map(|s| if *s == "drc" { x.drc.findings.clone() } else { x.erc.findings.clone() }).collect();
-                let l = fd::filter(&all, sev, q);
-                json!({"summary": summary(&pro, x, now_ms()), "total": l.len(), "offset": offset, "findings": l.iter().skip(offset).take(limit).map(|f| fd::to_json(f)).collect::<Vec<_>>()})
+                let all = all_findings(x, src);
+                let mut l = fd::filter(&all, sev, q);
+                if !rule.is_empty() { l.retain(|f| f.rule == rule) }
+                let rows = p["rows"] == true;
+                json!({"summary": summary(&pro, x, now_ms()), "total": l.len(), "offset": offset, "findings": l.iter().skip(offset).take(limit).map(|f| if rows { fd::row_json(f) } else { fd::to_json(f) }).collect::<Vec<_>>()})
             }).unwrap_or(Value::Null))
+        }
+        "kicad.checks.set" => {
+            let fs: Vec<Finding> = p["findings"].as_array().into_iter().flatten().map(fd::from_json).collect();
+            let n = fs.len();
+            set_findings(hub, &pro, src, fs, p["meta"].clone()).await?;
+            Ok(json!({"project": pro, "source": src, "findings": n}))
         }
         "kicad.checks.focus" => {
             let f = find(&pro, p["id"].as_str().unwrap_or("")).ok_or("no such finding (the checks ran again: list them anew)")?;
@@ -442,9 +539,20 @@ pub async fn request(hub: &Arc<Hub>, method: &str, p: &Value) -> Result<Value, S
     }
 }
 
+/// The Checks tab of the management panels (kicad/mgmt.rs): a client shows the project, so its checks are kept live and published.
+pub struct ChecksPanel;
+impl super::mgmt::Panel for ChecksPanel {
+    fn id(&self) -> &'static str { "checks" }
+    fn label(&self) -> &'static str { "Checks" }
+    fn watch(&self, hub: &Arc<Hub>, project: &str) {
+        let (hub, p) = (hub.clone(), json!({"project": project}));
+        tokio::spawn(async move { if let Ok(pro) = named(&hub, &p).await { publish(&hub, &pro).await } });
+    }
+}
+
 pub struct ChecksRpc;
 impl RpcHandler for ChecksRpc {
-    fn methods(&self) -> &'static [&'static str] { &["kicad.checks.watch", "kicad.checks.run", "kicad.checks.list", "kicad.checks.focus", "kicad.checks.fix"] }
+    fn methods(&self) -> &'static [&'static str] { &["kicad.checks.watch", "kicad.checks.run", "kicad.checks.list", "kicad.checks.focus", "kicad.checks.fix", "kicad.checks.set"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, _who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             if method == "kicad.checks.focus" && crate::copy::on() { return vec![json!({"t":"reply","id":id,"ok":false,"error":"a hub on a copied log (BACKPLANE_COPY=1) does not control GUI KiCad"})] }
@@ -476,6 +584,22 @@ mod tests {
         let no_board = project::Files { pcb: String::new(), ..files.clone() };
         assert_eq!(disk_revs(&no_board).1, "");
         let _ = std::fs::remove_dir_all(&d);
+    }
+    #[test] fn another_source_joins_the_one_list() {
+        register_source("fabtest", "Fab rules");
+        let mut p = Proj::default();
+        p.erc.findings = vec![Finding { id: "erc:1".into(), source: "erc".into(), severity: "error".into(), ..Default::default() }];
+        let f = Finding { id: "fabtest:1".into(), source: "fabtest".into(), severity: "warning".into(), rule: "min_drill".into(), title: "Drill 0.15 mm under the fab's 0.2 mm".into(), anchors: vec![fd::Anchor { doc: "pcb".into(), uuid: "v1".into(), ..Default::default() }], ..Default::default() };
+        p.erc.sched.disk_rev = "e1".into(); p.drc.sched.disk_rev = "d1".into();
+        p.ext.insert("fabtest".into(), Ext { counts: fd::counts(&[f.clone()]), findings: vec![f], rev: "e1d1".into(), meta: json!({"label": "Fab rules", "judged": false}), ..Default::default() });
+        let all = all_findings(&p, ""); assert_eq!(all.len(), 2); assert_eq!(all_findings(&p, "fabtest").len(), 1); assert!(all_findings(&p, "drc").is_empty());
+        let v = summary("/p/a.kicad_pro", &p, 0);
+        assert_eq!(v["sources"]["fabtest"]["label"], "Fab rules"); assert_eq!(v["sources"]["fabtest"]["counts"]["warning"], 1); assert_eq!(v["sources"]["fabtest"]["state"], "fresh");
+        p.drc.sched.disk_rev = "d2".into();
+        assert_eq!(summary("/p/a.kicad_pro", &p, 0)["sources"]["fabtest"]["state"], "stale", "the design changed since the set");
+        let pj = panel_json(&p, v); assert_eq!(pj["total"], 2); assert_eq!(pj["badge"]["n"], 2);
+        assert!(pj["groups"].as_array().unwrap().iter().any(|g| g["source"] == "fabtest" && g["rule"] == "min_drill"));
+        assert!(known_source("fabtest") && known_source("drc") && !known_source("nope"));
     }
     #[test] fn the_state_word() {
         let mut x = Src::default();

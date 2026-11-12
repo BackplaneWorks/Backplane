@@ -487,7 +487,7 @@ impl Backplane {
             /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::Bot(k, v) => { crate::screens::bots::press(self, k, v, cx); self.ui_epoch += 1; format!("bots {k}") }
             /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::KicadAct(a) => { match a.as_str() {
                 "popin" => { let h = self.screens.kicad_window; self.kicad_popin(cx); if let Some(h) = h { let _ = h.update(cx, |_, w, _| w.remove_window()); } }
-                "full" | "popout" => self.kicad_strip_act(a, cx),
+                "full" | "popout" | "checks" => self.kicad_strip_act(a, cx),
                 k => { if let Some(p) = self.screens.kicad.clone() { let k = k.to_string(); p.update(cx, |p, cx| p.show_kind(&k, cx)); } } }
                 self.ui_epoch += 1; format!("kicad {a}") } // i18n-ok: an e2e metric
             /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::KicadEdit(on) => { if *on { let ok = self.kicad_edit(cx); self.ui_epoch += 1; format!("kicad edit {ok}") } else { self.kicad_view(cx); self.ui_epoch += 1; "kicad view".into() } }

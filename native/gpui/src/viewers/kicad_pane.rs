@@ -769,6 +769,11 @@ pub fn strip<V: 'static>(cx: &mut Context<V>, light: bool, pane: &Entity<KicadPa
             .when(j["cancellable"] == true, |d| d.child(div().id("kicad-progress-cancel").px_1().cursor_pointer().child("×").tooltip(crate::keys::tip(&crate::i18n::trs("Cancel"), "", light))
                 .on_click(move |_, _, cx| p.update(cx, |p, _| p.cancel_job(id))))));
     }
+    // the design's checks ("DRC 12 · ERC 3", coloured only when not clean): a press opens the Checks panel
+    if let Some((text, tone)) = crate::screens::mgmt_checks::chip_for(&pane.read(cx).project) {
+        let a = act.clone();
+        row = row.child(crate::screens::mgmt_checks::chip_el(&text, tone, light).on_click(cx.listener(move |v, _, w, cx| a(v, "checks", w, cx))));
+    }
     row = row.child(div().flex_1());
     let mk = |id: &'static str, label: String, tip: String, a: &'static str, cx: &mut Context<V>| {
         let act = act.clone();
@@ -822,7 +827,7 @@ impl crate::Backplane {
     }
     /// The strip's buttons in the main window.
     pub(crate) fn kicad_strip_act(&mut self, a: &str, cx: &mut Context<Self>) {
-        match a { "full" => { self.screens.kicad_full = !self.screens.kicad_full; cx.notify(); } "popout" => self.kicad_popout(cx), _ => {} }
+        match a { "full" => { self.screens.kicad_full = !self.screens.kicad_full; cx.notify(); } "popout" => self.kicad_popout(cx), "checks" => crate::screens::mgmt_checks::open_panel(self, cx), _ => {} }
     }
 }
 
