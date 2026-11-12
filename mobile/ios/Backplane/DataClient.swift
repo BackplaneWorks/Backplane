@@ -401,7 +401,7 @@ final class DataClient {
             notice = HubRescue.notice(o["notice"] as? [String: Any])
             heardMigration(o["migrating"])
             commands = ((o["commands"] as? [[String: Any]]) ?? []).map { Word(word: $0["word"] as? String ?? "", label: $0["label"] as? String ?? "", desc: $0["desc"] as? String ?? "") }
-            conn = .online; failure = ""; backoff = 0.25; plots.reset()
+            conn = .online; failure = ""; backoff = 0.25; plots.reset(); voice.connected()
             if !onHome { downSince = nil }
             Task { await self.synchronise(g) }
             heardOffer(o["hubOffer"] as? String ?? "")

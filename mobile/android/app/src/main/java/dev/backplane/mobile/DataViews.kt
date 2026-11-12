@@ -583,6 +583,7 @@ private fun ThreadScreen(id: String, viewer: () -> Unit, hub: () -> Unit, go: (S
     }
     val dictate = DataVoice.available
     LaunchedEffect(id, DataClient.conn, dictate) { if (dictate && DataClient.conn == DataClient.Conn.ONLINE) DataVoice.refresh(id) }
+    DisposableEffect(id) { DataVoice.open(id); onDispose { DataVoice.open("") } }
     // the masked box: a name ("" for a new one) while open; the value stays in this box until Save
     var box by remember(id) { mutableStateOf<String?>(null) }
     LaunchedEffect(id) { DataClient.refreshSecretAsks(id) }
@@ -687,6 +688,7 @@ private fun ThreadScreen(id: String, viewer: () -> Unit, hub: () -> Unit, go: (S
                     }
                 }
                 Box(Modifier.size(40.dp).background(dcs.surfaceVariant).border(BorderStroke(1.dp, dcs.outlineVariant)).clickable { if (DataClient.canSendImages) drawing = true else notice = Msg.android_pictures_old }.testTag("thread.draw"), contentAlignment = Alignment.Center) { Icon(Icons.Default.Draw, Msg.draw_title, tint = dcs.onSurfaceVariant, modifier = Modifier.size(18.dp)) }
+                if (dictate && (DataVoice.always || DataVoice.alwaysWanted)) AlwaysPill()
                 if (dictate) MicChip(DataVoice.on(id), held = { begins -> DataVoice.held(id, begins) { if (androidx.core.content.ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) DataVoice.press(id) else micAsk.launch(android.Manifest.permission.RECORD_AUDIO) } }) {
                     if (DataVoice.on(id) || androidx.core.content.ContextCompat.checkSelfPermission(ctx, android.Manifest.permission.RECORD_AUDIO) == android.content.pm.PackageManager.PERMISSION_GRANTED) DataVoice.press(id)
                     else micAsk.launch(android.Manifest.permission.RECORD_AUDIO)

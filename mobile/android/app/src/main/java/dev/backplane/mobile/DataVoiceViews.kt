@@ -44,6 +44,18 @@ internal fun MicChip(on: Boolean, held: (Boolean) -> Unit = {}, press: () -> Uni
     }
 }
 
+/** Always on: one tap stops it ("● Listening · Stop"), the same to listen again ("Always on · Listen"). */
+@Composable
+internal fun AlwaysPill() {
+    val stops = DataVoice.always; val paused = DataVoice.alwaysPaused.isNotEmpty()
+    Row(Modifier.heightIn(min = 40.dp).background(dcs.surfaceVariant).border(BorderStroke(1.dp, if (stops) dcs.error else dcs.outlineVariant)).clickable { DataVoice.alwaysToggle() }.padding(horizontal = 8.dp).testTag("voice.always"),
+        verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+        DDot(if (!stops) dcs.outlineVariant else if (paused) dcs.onSurfaceVariant else dcs.error, 8)
+        DMono(if (!stops) Msg.settings_voice_always else if (paused) Msg.voice_always_pill_paused else Msg.voice_always_pill_listening, dcs.onSurfaceVariant, 12)
+        DMono(if (stops) Msg.composer_stop else Msg.voice_always_pill_listen, if (stops) dcs.error else dcs.primary, 12)
+    }
+}
+
 @Composable
 private fun VChip(label: String, primary: Boolean = false, tag: String, press: () -> Unit) {
     Box(Modifier.heightIn(min = 36.dp).background(if (primary) dcs.primary else dcs.surfaceVariant).border(BorderStroke(1.dp, if (primary) dcs.primary else dcs.outlineVariant)).clickable(onClick = press).padding(horizontal = 10.dp).testTag(tag), contentAlignment = Alignment.Center) {

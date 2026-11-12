@@ -109,12 +109,42 @@ object DataVoice {
     }
 
     private fun view(tid: String, v: JSONObject) {
+        v.optJSONObject("always")?.let { if (it.optBoolean("on")) alwaysPaused = it.optString("paused") }
         if (!v.optBoolean("on")) { if (recorder.thread == tid) recorder.gone(); ended(tid) }
         show(tid, v)
         // hold-to-talk let go: the session ended with its last words written; the draft goes, with the undo window
         if (!v.optBoolean("on") && sendOnEnd.remove(tid)) command(tid, "send", 0)
     }
     private val sendOnEnd = HashSet<String>(); private var holdStarted: String? = null
+    /** Always on (the hub's always.rs), while the app is open: this phone runs it; Settings has it on; why it is paused; the thread open now. */
+    var always by mutableStateOf(false); private set
+    var alwaysWanted by mutableStateOf(false); private set
+    var alwaysPaused by mutableStateOf(""); private set
+    private var openThread = ""; private var resumeAlways = false
+    /** The app connected: the hub says whether always-on is wanted (its `always` frame starts it). */
+    fun connected() { if (available) scope.launch { runCatching { DataClient.call("voice.always") } } }
+    /** The thread the person has open ("" none): the next message goes there (Bub's chat when none). */
+    fun open(tid: String) {
+        if (openThread == tid) return; openThread = tid
+        if (always) scope.launch { runCatching { DataClient.call("voice.act", JSONObject().put("thread", "").put("action", "voice-target").put("value", tid).put("draft", "")) } }
+    }
+    fun alwaysStart() {
+        val link = DataClient.link ?: return
+        if (recorder.active) return
+        val tid = openThread
+        if (!recorder.start(tid, link)) { always = false; return }
+        always = true; alwaysPaused = ""; marks[tid] = 0
+        scope.launch {
+            val path = runCatching { DataClient.call("voice.start", JSONObject().put("thread", tid).put("draft", "").put("caret", 0).put("always", true)).optString("path") }.getOrDefault("")
+            if (path.isEmpty()) { recorder.gone(); always = false } else recorder.address(path)
+        }
+    }
+    /** The pill: stop listening (always-on is muted until pressed again), or listen. */
+    fun alwaysToggle() {
+        if (always) { always = false; scope.launch { withContext(Dispatchers.IO) { recorder.stop() }; runCatching { DataClient.call("voice.stop", JSONObject()) } } } else alwaysStart()
+    }
+    /** The app went to the background (it stops listening) or came back (it listens again if it was). */
+    fun background(away: Boolean) { if (away) { resumeAlways = always; if (always) alwaysToggle() } else if (resumeAlways) { resumeAlways = false; alwaysStart() } }
     /** Hold-to-talk: the hold begins (`start` starts dictation when it is off), or is let go (dictation stops and the message goes once its last words are in). */
     fun held(tid: String, begins: Boolean, start: () -> Unit) {
         if (begins) { if (!on(tid)) { start(); holdStarted = tid } ; return }
@@ -142,6 +172,9 @@ object DataVoice {
             }
             "command" -> { countdown = null; command(tid, o.optString("cmd"), o.optInt("cut")) }
             "countdown" -> countdown = if (o.optInt("ms") > 0) tid else null
+            "always" -> { alwaysWanted = o.optBoolean("want"); if (alwaysWanted && !o.optBoolean("running") && !always) alwaysStart() else if (!alwaysWanted) { always = false; alwaysPaused = "" } }
+            // always on started again by the hub: the microphone goes on into the new session
+            "audio" -> { val path = o.optString("path"); val link = DataClient.link; if (always && path.isNotEmpty() && link != null) { if (!recorder.active) recorder.start(tid, link); recorder.address(path) } }
             "page" -> rows = objects(o.optJSONArray("rows"))
         }
     }

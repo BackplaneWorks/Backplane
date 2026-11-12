@@ -333,7 +333,7 @@ impl Backplane {
         let mut rows: Vec<AnyElement> = Vec::new();
         if let Some(r) = crate::screens::onboard::resume_row(cx, light, &self.data) { rows.push(r); }
         // always on: listening is shown at the top of the sidebar whenever it is on
-        if let Some(r) = crate::screens::voice::always_row(cx, light, &self.screens.voice, false) { rows.push(r); }
+        if let Some(r) = crate::screens::voice::always_row(cx, light, &self.screens.voice, self.screens.voice.always_wanted) { rows.push(r); }
         let mut ctl: Vec<CtlEntry> = Vec::new();
         for ((bname, mood, note, _, bid, bsel), rig) in uber_data.iter().zip(uber_rigs.iter()) {
             let note_color = match mood.as_str() { "wait" | "error" => c("bad"), "work" | "talk" => c("accent"), _ => c("faint") };
@@ -831,6 +831,7 @@ impl Render for Backplane {
                                 // the hub's words for the thread's tokens, cost and context (0.14's token button), else the context alone
                                 .child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(tok_words)))
                             .child(crate::screens::bar::fit(with_rect(chip(light, String::new()).id("attach"), || "ui:Attach".to_string())).flex_shrink_0().cursor_pointer().on_click(cx.listener(|this, _, _, cx| this.pick_files(cx))).child(ic(light, "paperclip", 16., "dim")))
+                            .children(crate::screens::voice::always_pill(cx, light, &self.screens.voice))
                             .child(crate::screens::bar::fit(with_rect(chip(light, String::new()).id("dictate"), || "ui:Dictate".to_string())).flex_shrink_0().cursor_pointer()
                                 .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| this.voice_down(cx))).on_mouse_up(MouseButton::Left, cx.listener(|this, _, _, cx| this.voice_up(cx))).on_mouse_up_out(MouseButton::Left, cx.listener(|this, _, _, cx| this.voice_up(cx))).child(ic(light, "mic", 16., if dictating { "accent" } else { "dim" })))
                             .child(crate::screens::bar::fit(with_rect(div().id("send"), || "send".to_string())).flex_shrink_0().px_4().py_1().bg(c(if crate::screens::voice::flashing(&self.screens.voice) { "ok" } else { "accent" })).text_color(c("on-accent")).cursor_pointer().child(crate::i18n::trs(&crate::screens::sidebox::send_label(thread))).on_click(cx.listener(|this, _, window, cx| this.send(&Send, window, cx)))))))

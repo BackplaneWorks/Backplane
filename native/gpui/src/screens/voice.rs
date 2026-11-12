@@ -17,7 +17,9 @@ pub struct Voice { pub views: HashMap<String, Value>, marks: HashMap<String, usi
     /// the mic chip pressed: when, and whether that press started dictation; threads whose dictation ends in a send (hold-to-talk released)
     press: Option<(std::time::Instant, bool)>, send_on_end: std::collections::HashSet<String>,
     /// always on (the hub's always.rs): this window runs it; the thread and focus last told; what the hub says of it (listening, why paused)
-    pub always: bool, always_target: String, always_focus: Option<bool>, pub always_paused: String, pub always_live: bool }
+    pub always: bool, always_target: String, always_focus: Option<bool>, pub always_paused: String, pub always_live: bool,
+    /// always on is turned on in Settings (the hub's `always` frame): the pill shows even while it is muted, to listen again
+    pub always_wanted: bool }
 /// Held this long, the mic chip is hold-to-talk: letting go stops and sends.
 pub const PRESS_HOLD: std::time::Duration = std::time::Duration::from_millis(400);
 /// What a press of the mic chip does on release: `held` how long, `started` whether its press started dictation.
@@ -94,7 +96,7 @@ impl Win {
             }
             "audio" => self.voice_mic_send(s(&f, "path")),
             // the hub: always-on is wanted (start it here, in the open thread), or not
-            "always" => { if f["want"] == true && f["running"] != true && !self.screens.voice.always { self.voice_always_start(cx) } else if f["want"] == false { let v = &mut self.screens.voice; v.always = false; v.always_live = false; v.always_paused.clear(); } }
+            "always" => { self.screens.voice.always_wanted = f["want"] == true; if f["want"] == true && f["running"] != true && !self.screens.voice.always { self.voice_always_start(cx) } else if f["want"] == false { let v = &mut self.screens.voice; v.always = false; v.always_live = false; v.always_paused.clear(); } }
             "command" => { self.screens.voice.countdown = None; self.voice_command(&thread, &f, cx) }
             // end of turn: the hub will send when this runs out unless more is said (or Keep talking is pressed)
             "countdown" => {
@@ -286,6 +288,20 @@ pub fn pending_view(cx: &mut Context<Win>, light: bool, v: &Voice, thread: &str)
     let (line, at) = v.said.as_ref()?; if at.elapsed() > SAID { return None }
     Some(div().id("voice-said").text_size(px(12.)).text_color(c("dim")).child(crate::i18n::trs(line)).into_any_element())
 }
+/// What the always-on pill says, and whether its press stops (true) or listens again: listening, paused (why goes in the tip), muted.
+pub fn pill(always: bool, paused: &str, wanted: bool) -> Option<(&'static str, &'static str, bool)> {
+    /* i18n-ok: drawn through trs in always_pill */ if always { Some(if paused.is_empty() { ("Listening", "bad", true) } else { ("Paused", "warn", true) }) } else if wanted { Some(("Always on", "faint", false)) } else { None }
+}
+/// In the composer whenever always-on is on: "● Listening · Stop", one click stops it; muted, "Always on · Listen" starts it again.
+pub fn always_pill(cx: &mut Context<Win>, light: bool, v: &Voice) -> Option<AnyElement> {
+    let (what, dot, stops) = pill(v.always, &v.always_paused, v.always_wanted)?;
+    let c = |n: &str| theme::color(light, n);
+    /* i18n-ok: drawn through trs */ let act = if stops { "Stop" } else { "Listen" };
+    Some(div().id("always-pill").flex().items_center().gap_1().px_2().py_1().border_1().border_color(c(if stops { "bad" } else { "line" })).cursor_pointer().text_size(px(12.)).flex_shrink_0()
+        .child(div().size(px(8.)).bg(c(dot))).child(div().text_color(c("dim")).child(crate::i18n::trs(what))).child(div().text_color(c("faint")).child("·"))
+        .child(div().text_color(c(if stops { "bad" } else { "accent" })).child(crate::i18n::trs(act)))
+        .on_click(cx.listener(|w, _, _, cx| w.voice_always_toggle(cx))).into_any_element())
+}
 /// The sidebar's always-on line, at the top whenever it is on (listening, paused and why, or muted); a press mutes or listens.
 pub fn always_row(cx: &mut Context<Win>, light: bool, v: &Voice, want: bool) -> Option<AnyElement> {
     if !v.always && !want { return None }
@@ -306,6 +322,10 @@ mod tests {
     fn run(text: &str, mark: usize, del: usize, ins: &str, adv: usize, to: usize) -> (String, usize, usize) { runb(text, mark, del, ins, adv, to, 0) }
     fn runb(text: &str, mark: usize, del: usize, ins: &str, adv: usize, to: usize, back: usize) -> (String, usize, usize) { let (r, m, c) = edit_range(text, mark, del, adv, to, back); let mut t = text.to_string(); t.replace_range(r, ins); (t, m, c) }
     // the hub's own vectors (voice/place.rs): an edit is replace `del` at the mark, move the mark `adv`, the caret `to`
+    #[test] fn the_always_on_pill_says_listening_paused_or_muted_and_what_a_click_does() {
+        assert_eq!(pill(true, "", true), Some(("Listening", "bad", true))); assert_eq!(pill(true, "the screen is locked", true), Some(("Paused", "warn", true)));
+        assert_eq!(pill(false, "", true), Some(("Always on", "faint", false)), "muted: a click listens again"); assert_eq!(pill(false, "", false), None, "off in Settings: no pill");
+    }
     #[test] fn the_mic_chip_held_is_hold_to_talk_and_a_click_toggles() {
         use std::time::Duration as D;
         assert_eq!(release(D::from_millis(120), true), Release::Keep, "a click starts and dictation goes on");

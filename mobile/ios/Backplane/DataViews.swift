@@ -59,8 +59,8 @@ struct DataRoot: View {
             #endif
         }
         .onChange(of: phase) { _, p in
-            if p == .background { client.terms.pause() }
-            if p == .active { client.terms.resume(); client.foreground() }
+            if p == .background { client.terms.pause(); client.voice.background(true) }
+            if p == .active { client.terms.resume(); client.foreground(); client.voice.background(false) }
         }
         .fullScreenCover(item: Binding(get: { client.terms.fullscreen }, set: { client.terms.fullscreen = $0 })) { TermFullView(client: client, route: $0) }
         .onChange(of: client.pendingThread, initial: true) { _, id in if let id { path.append(id); client.pendingThread = nil } }
@@ -860,7 +860,7 @@ struct DataThreadView: View {
         }
         .onAppear {
             let had = !(client.entries[id] ?? []).isEmpty
-            text = client.drafts[id] ?? ""; client.openThread(id)
+            text = client.drafts[id] ?? ""; client.openThread(id); client.voice.open(id)
             DispatchQueue.main.async { client.shown(id, hadCopy: had) }
             #if DEBUG
             // BACKPLANE_SHOW: picker, fold (either, comma-separated)
@@ -869,7 +869,7 @@ struct DataThreadView: View {
             if show.contains("fold") { DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { for r in DataFold.rows(client.entries[id] ?? [], running: false) { if case .fold(let f) = r { openRuns.insert(f.id) } } } }
             #endif
         }
-        .onDisappear { client.closeThread(id) }
+        .onDisappear { client.closeThread(id); client.voice.open("") }
         .task(id: at) { if let at { try? await Task.sleep(for: .milliseconds(300)); findGo = at } }
         // the find bar: the hub's `find` a moment after typing stops, the newest match first
         .task(id: findOpen ? findQ : "") {
@@ -947,6 +947,17 @@ struct DataThreadView: View {
                         Button { modelSheet = true } label: { Text(chip).dmono(12).foregroundStyle(BackplaneDesign.text).lineLimit(1).padding(.horizontal, 10).frame(maxWidth: .infinity, minHeight: 40, alignment: .leading).dbox(fill: BackplaneDesign.panel) }
                             .buttonStyle(.plain).accessibilityLabel(Tr.ios_model_label(model: chip)).accessibilityIdentifier("data.thread.model")
                     } else { Spacer(minLength: 0) }
+                    if client.has("voice"), client.voice.always || client.voice.alwaysWanted {
+                        // always on: one tap stops it, the same to listen again
+                        let (what, stops) = client.voice.always ? (client.voice.alwaysPaused.isEmpty ? "Listening" : "Paused", true) : ("Always on", false)
+                        Button { client.voice.alwaysToggle() } label: {
+                            HStack(spacing: 4) {
+                                Rectangle().fill(stops ? (client.voice.alwaysPaused.isEmpty ? BackplaneDesign.bad : BackplaneDesign.dim) : BackplaneDesign.faint).frame(width: 8, height: 8)
+                                Text(Tr.t(what)).dmono(12).foregroundStyle(BackplaneDesign.dim)
+                                Text(Tr.t(stops ? "Stop" : "Listen")).dmono(12).foregroundStyle(stops ? BackplaneDesign.bad : BackplaneDesign.accent)
+                            }.padding(.horizontal, 8).frame(minHeight: 40).dbox(fill: BackplaneDesign.panel)
+                        }.buttonStyle(.plain).accessibilityIdentifier("voice.always")
+                    }
                     if client.has("voice") {
                         let on = client.voice.listening(id)
                         // a tap starts or stops; held (0.4 s) it is hold-to-talk: letting go stops, and the message goes once its last words are in

@@ -237,7 +237,7 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Re
         }
         "mentions.list" => mentions(hub, p).await,
         "viewer.files" | "viewer.watch" | "viewer.probe" | "viewer.info" | "viewer.layers" | "viewer.refs" | "viewer.compare" | "files.entries" | "mech.list" | "browser" => viewers(hub, c, m, p).await?,
-        "voice.start" | "voice.stop" | "voice.act" | "voice.view" | "voice.key" | "voice.page" | "voice.page.act" => voice(hub, c, m, p).await,
+        "voice.start" | "voice.stop" | "voice.act" | "voice.view" | "voice.key" | "voice.page" | "voice.page.act" | "voice.always" => voice(hub, c, m, p).await,
         "machines.page" | "machines.page.act" | "devices.page" | "devices.page.act" | "notify.page" | "notify.page.act" | "ring.list" | "ring.get" | "ring.search" | "ring.hear" | "ring.send" | "ring.setup" | "ring.page" | "ring.page.act" | "mcp.page" | "mcp.page.act" => {
             rpc(hub, c, m, p.clone()).await.map(|mut r| { if let Some(o) = r.as_object_mut() { for k in ["t", "id", "ok"] { o.remove(k); } } r })
         }
@@ -517,7 +517,7 @@ async fn composer_run(hub: &Arc<Hub>, c: &mut Conn, p: &Value) -> Result<Value, 
 // ---- dictation: the hub's `bots.voice`, the same ops the desktop sends (voice/session.rs); its `{"t":"voice"}` frames reach this socket as they are ----
 async fn voice(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Result<Value, Value> {
     let mut q = p.clone();
-    q["op"] = json!(match m { "voice.start" => "start", "voice.stop" => "stop", "voice.act" => "act", "voice.view" => "view", "voice.key" => "key", "voice.page" => "page", _ => "page-act" });
+    q["op"] = json!(match m { "voice.start" => "start", "voice.stop" => "stop", "voice.act" => "act", "voice.view" => "view", "voice.key" => "key", "voice.page" => "page", "voice.always" => "always", _ => "page-act" });
     if m == "voice.start" { q["src"] = json!("client") } // a phone records itself
     let mut r = rpc(hub, c, "bots.voice", q).await?;
     if let Some(o) = r.as_object_mut() { for k in ["t", "id", "ok"] { o.remove(k); } }

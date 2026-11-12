@@ -2842,6 +2842,9 @@ settings.voice.speaker	Speaker check	話者の確認
 settings.voice.speaker.on	Only your voice starts a message, not the TV, someone else or the speakers. Learned from {n} stretches of your dictation, on this machine only.	メッセージを始められるのはあなたの声だけです（テレビや他の人、スピーカーの音では始まりません）。このマシン上でのみ、あなたの音声入力 {n} 回分から学習しました。
 settings.voice.speaker.learning	Only your voice will start a message. It learns your voice from your dictation with the mic button: {n} of {k} stretches so far; until then any voice can.	メッセージを始められるのはあなたの声だけになります。マイクボタンでの音声入力からあなたの声を学習します（現在 {n} / {k} 回）。それまではどの声でも始まります。
 settings.voice.speaker.reenrol	Re-enrol	再登録
+voice.always.pill.listening	Listening	聞き取り中
+voice.always.pill.paused	Paused	一時停止中
+voice.always.pill.listen	Listen	聞く
 gpui.f.group.install	Install	インストール
 gpui.f.group.agents	Agents	エージェント
 gpui.f.group.cad	CAD tools	CADツール

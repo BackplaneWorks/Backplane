@@ -185,7 +185,8 @@ impl Voice {
             if off { self.st.lock().unwrap().always.as_mut().map(|a| a.watching = false); break }
             let cfg = super::always::Cfg::of(&prefs(&hub).await);
             let (apps, locked) = tokio::task::spawn_blocking({ let ig = cfg.ignore.clone(); move || system_state(&ig) }).await.unwrap_or_default();
-            let why = super::always::pause_reason(&cfg, &apps, locked, focused);
+            // a phone's always-on (it records itself) pauses by itself when its app is not open; this machine's lock and microphone are not its
+            let why = if s(&params, "src") == "client" { String::new() } else { super::always::pause_reason(&cfg, &apps, locked, focused) };
             let thread = s(&params, "thread").to_string();
             if why != paused {
                 self.st.lock().unwrap().always.as_mut().map(|a| a.paused = why.clone());
