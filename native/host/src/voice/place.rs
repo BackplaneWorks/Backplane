@@ -3,9 +3,10 @@
 //! the mark. Committed words never move; only the tail after them is rewritten (docs/voice.md, "Live words, calmly").
 use super::words::{chars, len, put};
 
-/// Replace the `del` characters after the mark with `ins`; then the mark moves `adv` on and the caret goes `to` past the old mark.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Edit { pub del: usize, pub ins: String, pub adv: usize, pub to: usize }
+/// Replace the `back` characters before the mark and the `del` after it with `ins`; then the mark is `adv` past where the replaced text began (the
+/// old mark less `back`) and the caret `to` past it. `back` is only ever non-zero for a voice command taking words back (`unsay`, `scratch`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Edit { pub del: usize, pub ins: String, pub adv: usize, pub to: usize, pub back: usize }
 
 /// The shadow: the draft, where the committed words end, and how long the tail after them is.
 #[derive(Clone, Debug, Default)]
@@ -22,17 +23,45 @@ impl Place {
         let t = put(!(first && commit.is_empty()), &c.text, c.caret, tail);
         let to = if tail.trim().is_empty() { c.caret } else { t.caret };
         let ins: String = { let n = chars(&t.text); n[p..n.len() - len(&after)].iter().collect() };
-        let e = Edit { del, adv: c.caret - p, to: to - p, ins };
+        let e = Edit { del, adv: c.caret - p, to: to - p, ins, back: 0 };
         self.tail = len(&t.text) - len(&c.text); self.pos = c.caret; self.draft = t.text;
         e
     }
+    /// Takes back the tail and everything written from character `from` to the committed end, with the spaces before it.
+    fn take(&mut self, from: usize) -> Edit {
+        let cs = chars(&self.draft); let p = self.pos.min(cs.len()); let end = (p + self.tail).min(cs.len());
+        let mut s = from.min(p); while s > 0 && cs[s - 1].is_whitespace() && cs[s - 1] != '\n' { s -= 1 }
+        let e = Edit { back: p - s, del: end - p, ins: String::new(), adv: 0, to: 0 };
+        self.draft = cs[..s].iter().chain(cs[end..].iter()).collect(); self.pos = s; self.tail = 0; e
+    }
+    /// The tail and the last `n` words written before the end go (a voice command already written: "message complete" committed before its pause).
+    pub fn unsay(&mut self, n: usize) -> Edit {
+        let cs = chars(&self.draft); let mut s = self.pos.min(cs.len());
+        for _ in 0..n { while s > 0 && cs[s - 1].is_whitespace() { s -= 1 } while s > 0 && !cs[s - 1].is_whitespace() { s -= 1 } }
+        self.take(s)
+    }
+    /// "Scratch that": the last sentence before the end goes (after the last . ! ? or new line before it; the whole draft when there is none).
+    pub fn scratch(&mut self) -> Edit {
+        let cs = chars(&self.draft); let p = self.pos.min(cs.len());
+        let mut q = p; while q > 0 && cs[q - 1].is_whitespace() { q -= 1 }
+        let body = q.saturating_sub(1); // the sentence's own closing mark is the sentence's
+        let s = (0..body).rev().find(|&i| matches!(cs[i], '.' | '!' | '?' | '\n') && (cs[i] == '\n' || cs.get(i + 1).map_or(true, |c| c.is_whitespace()))).map_or(0, |i| i + 1);
+        self.take(s)
+    }
+    /// "New line": a line break at the end (the tail goes first).
+    pub fn newline(&mut self) -> Edit {
+        let mut e = self.take(self.pos); let cs = chars(&self.draft); let p = self.pos;
+        self.draft = cs[..p].iter().chain(std::iter::once(&'\n')).chain(cs[p..].iter()).collect(); self.pos = p + 1;
+        e.ins = "\n".into(); e.adv = 1; e.to = 1; e
+    }
+    pub fn is_empty(&self) -> bool { self.draft.trim().is_empty() }
 }
 
 /// What a client does with an `Edit`: the new draft, mark and caret. A mark past the end is the end.
 pub fn apply(draft: &str, mark: usize, e: &Edit) -> (String, usize, usize) {
-    let cs = chars(draft); let m = mark.min(cs.len()); let end = (m + e.del).min(cs.len());
-    let text: String = cs[..m].iter().copied().chain(e.ins.chars()).chain(cs[end..].iter().copied()).collect();
-    (text, m + e.adv, m + e.to)
+    let cs = chars(draft); let m = mark.min(cs.len()); let end = (m + e.del).min(cs.len()); let s = m.saturating_sub(e.back);
+    let text: String = cs[..s].iter().copied().chain(e.ins.chars()).chain(cs[end..].iter().copied()).collect();
+    (text, s + e.adv, s + e.to)
 }
 
 #[cfg(test)]
@@ -85,10 +114,26 @@ mod tests {
         }
         for c in f["apply"].as_array().unwrap() {
             let e = &c["edit"]; let n = |k: &str| e[k].as_u64().unwrap() as usize;
-            let (text, mark, at) = apply(c["text"].as_str().unwrap(), c["mark"].as_u64().unwrap() as usize, &Edit { del: n("del"), ins: e["ins"].as_str().unwrap().into(), adv: n("adv"), to: n("to") });
+            let (text, mark, at) = apply(c["text"].as_str().unwrap(), c["mark"].as_u64().unwrap() as usize, &Edit { del: n("del"), ins: e["ins"].as_str().unwrap().into(), adv: n("adv"), to: n("to"), back: e["back"].as_u64().unwrap_or(0) as usize });
             assert_eq!(c["want"], json!({"text": text, "mark": mark, "caret": at}), "{}", c["name"]);
         }
         if bless { std::fs::write(path, serde_json::to_string_pretty(&f).unwrap() + "\n").unwrap() }
     }
-    #[test] fn a_mark_past_the_end_is_the_end() { assert_eq!(apply("ab", 9, &Edit { del: 3, ins: "c".into(), adv: 1, to: 1 }), ("abc".into(), 3, 3)); }
+    /// A command's edit applied by a client lands where the shadow is.
+    fn cmd(p: &mut Place, text: &mut String, mark: &mut usize, f: impl Fn(&mut Place) -> Edit) { let e = f(p); (*text, *mark, _) = apply(text, *mark, &e); assert_eq!(*text, p.draft); }
+    #[test] fn a_command_takes_back_its_own_words_a_sentence_or_adds_a_line() {
+        let (mut p, mut t, mut m) = (Place::new("", 0), String::new(), 0);
+        for (first, commit, tail) in [(true, "Buy some stuff.", ""), (true, "Message", "complete.")] { let e = p.words(first, false, commit, tail); (t, m, _) = apply(&t, m, &e); }
+        assert_eq!(t, "Buy some stuff. Message complete.");
+        cmd(&mut p, &mut t, &mut m, |p| p.unsay(1)); assert_eq!((t.as_str(), m), ("Buy some stuff.", 15), "the committed word and the tail go, with the space before");
+        let e = p.words(true, false, "Then more.", ""); (t, m, _) = apply(&t, m, &e); assert_eq!(t, "Buy some stuff. Then more.");
+        cmd(&mut p, &mut t, &mut m, |p| p.scratch()); assert_eq!((t.as_str(), m), ("Buy some stuff.", 15));
+        cmd(&mut p, &mut t, &mut m, |p| p.newline()); assert_eq!((t.as_str(), m), ("Buy some stuff.\n", 16));
+        let e = p.words(true, false, "Next line.", ""); (t, m, _) = apply(&t, m, &e); assert_eq!(t, "Buy some stuff.\nNext line.");
+        cmd(&mut p, &mut t, &mut m, |p| p.scratch()); assert_eq!(t, "Buy some stuff.\n");
+        cmd(&mut p, &mut t, &mut m, |p| p.scratch()); assert_eq!(t, "", "the first sentence: the whole draft");
+        let mut q = Place::new("typed first", 11); let (mut t, mut m) = ("typed first".to_string(), 11); cmd(&mut q, &mut t, &mut m, |p| p.scratch()); assert_eq!((t.as_str(), m), ("", 0));
+    }
+    #[test] fn text_after_the_mark_stays_when_words_are_taken_back() { assert_eq!(apply("ab cd|xy", 5, &Edit { back: 3, del: 1, ins: String::new(), adv: 0, to: 0 }), ("abxy".into(), 2, 2)); }
+    #[test] fn a_mark_past_the_end_is_the_end() { assert_eq!(apply("ab", 9, &Edit { del: 3, ins: "c".into(), adv: 1, to: 1, back: 0 }), ("abc".into(), 3, 3)); }
 }

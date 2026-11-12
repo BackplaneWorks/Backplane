@@ -2543,6 +2543,11 @@ gpui.attach.uploading	Uploading {name}…	{name} をアップロード中…
 gpui.timeline.more.rows	… {n, plural, one {# more row} other {# more rows}}	{n, plural, other {…ほか#行}}
 gpui.timeline.loading	Loading {name}…	{name} を読み込み中…
 gpui.timeline.could.not.load	Could not load {name}	{name} を読み込めませんでした
+gpui.md.alert.note	Note	注記
+gpui.md.alert.tip	Tip	ヒント
+gpui.md.alert.important	Important	重要
+gpui.md.alert.warning	Warning	警告
+gpui.md.alert.caution	Caution	注意
 gpui.timeline.more.images	+{n, plural, one {# more image} other {# more images}}	{n, plural, other {+ほか#枚の画像}}
 gpui.order.named	Order · {name}	注文 · {name}
 gpui.buy.now	Buy now	今すぐ購入
@@ -2769,6 +2774,23 @@ hub.acct.connected.sync.token	connected, sync token	接続済み（同期トー�
 hub.acct.sync.token.ended	Sync token ended	同期トークンの期限切れ
 hub.acct.sync.token.ends	Sync token ends {when}	同期トークンの期限: {when}
 gpui.e.telemetry.notice	Backplane now sends anonymous usage counts: installs, updates, daily activity, and daily totals of threads, messages, model tokens, bot traffic, boards made and boards ordered, with a random install id, the version, the system and the day. Never your conversations, projects, files, names, paths or keys. It is on. Turn it off here or in Settings, Privacy.	Backplaneは匿名の利用集計を送るようになりました：インストール、更新、日々の利用、そしてスレッド、メッセージ、モデルのトークン、ボットの通信量、作成した基板、注文した基板の1日ごとの合計で、ランダムなインストールID、バージョン、OS、日付が付きます。会話、プロジェクト、ファイル、名前、パス、キーは送りません。現在オンです。ここか、設定 → プライバシーでオフにできます。
+voice.cmd.sending	Sending by voice…	音声で送信しています…
+voice.cmd.cleared	Draft cleared by voice	音声で下書きを消去しました
+voice.cmd.sent	Sent by voice	音声で送信しました
+voice.cmd.undo	Undo	元に戻す
+settings.voice.cmd.send	Send by voice	音声で送信
+settings.voice.cmd.send.note	Say “{phrase}” at the end, after a short pause, to send the message (or steer the running turn). It sends after 3 seconds; Undo keeps it. Now: {now}.	最後に少し間を置いて「{phrase}」と言うと、メッセージを送信します（実行中のターンには指示として送ります）。3秒後に送信され、「元に戻す」で取り消せます。現在: {now}。
+settings.voice.cmd.off	Off: no phrase sends. Type the phrases to use, or press Default.	オフ: どのフレーズでも送信しません。使うフレーズを入力するか、「既定」を押してください。
+settings.voice.cmd.hint	Phrases, separated by commas	フレーズ（カンマ区切り）
+settings.voice.cmd.default	Default	既定
+settings.voice.cmds	Voice commands	音声コマンド
+settings.voice.cmds.note	Said alone at the end of an utterance. Scratch that removes the last sentence, New line starts one, Cancel message clears the draft (with Undo).	発話の最後に単独で言います。「Scratch that」で最後の文を削除、「New line」で改行、「Cancel message」で下書きを消去します（元に戻せます）。
+voice.cmd.scratch	Scratch that	Scratch that（最後の文を削除）
+voice.cmd.newline	New line	New line（改行）
+voice.cmd.cancel	Cancel message	Cancel message（下書きを消去）
+settings.voice.auto	Send after silence	無音の後に送信
+settings.voice.auto.note	Sends what was dictated once you have been quiet this long. Off by default.	この時間黙っていると、音声入力した内容を送信します。既定ではオフです。
+voice.cmd.secs	{s} s	{s}秒
 gpui.f.group.install	Install	インストール
 gpui.f.group.agents	Agents	エージェント
 gpui.f.group.cad	CAD tools	CADツール
@@ -5419,6 +5441,12 @@ gpui.usage.noread	No reading yet: the first turn's result reports it.	まだ値�
 
     /// hub.acct.sync.token.ends = Sync token ends {when}
     static func hub_acct_sync_token_ends(when: String) -> String { f("hub.acct.sync.token.ends", ["when": when]) }
+
+    /// settings.voice.cmd.send.note = Say “{phrase}” at the end, after a short pause, to send the message (or steer the running turn). It sends after 3 seconds; Undo keeps it. Now: {now}.
+    static func settings_voice_cmd_send_note(phrase: String, now: String) -> String { f("settings.voice.cmd.send.note", ["phrase": phrase, "now": now]) }
+
+    /// voice.cmd.secs = {s} s
+    static func voice_cmd_secs(s: String) -> String { f("voice.cmd.secs", ["s": s]) }
 
     /// gpui.f.counter = {i, number} of {n, number}
     static func gpui_f_counter(i: Int, n: Int) -> String { f("gpui.f.counter", ["i": String(i), "n": String(n)]) }

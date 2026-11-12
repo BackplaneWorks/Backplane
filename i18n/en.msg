@@ -2444,6 +2444,23 @@ hub.acct.connected.sync.token = connected, sync token
 hub.acct.sync.token.ended = Sync token ended
 hub.acct.sync.token.ends = Sync token ends {when}
 gpui.e.telemetry.notice = Backplane now sends anonymous usage counts: installs, updates, daily activity, and daily totals of threads, messages, model tokens, bot traffic, boards made and boards ordered, with a random install id, the version, the system and the day. Never your conversations, projects, files, names, paths or keys. It is on. Turn it off here or in Settings, Privacy.
+voice.cmd.sending = Sending by voice…
+voice.cmd.cleared = Draft cleared by voice
+voice.cmd.sent = Sent by voice
+voice.cmd.undo = Undo
+settings.voice.cmd.send = Send by voice
+settings.voice.cmd.send.note = Say “{phrase}” at the end, after a short pause, to send the message (or steer the running turn). It sends after 3 seconds; Undo keeps it. Now: {now}.
+settings.voice.cmd.off = Off: no phrase sends. Type the phrases to use, or press Default.
+settings.voice.cmd.hint = Phrases, separated by commas
+settings.voice.cmd.default = Default
+settings.voice.cmds = Voice commands
+settings.voice.cmds.note = Said alone at the end of an utterance. Scratch that removes the last sentence, New line starts one, Cancel message clears the draft (with Undo).
+voice.cmd.scratch = Scratch that
+voice.cmd.newline = New line
+voice.cmd.cancel = Cancel message
+settings.voice.auto = Send after silence
+settings.voice.auto.note = Sends what was dictated once you have been quiet this long. Off by default.
+voice.cmd.secs = {s} s
 
 # ---- gpui-f: hub setup flow and thread ----
 gpui.f.group.install = Install

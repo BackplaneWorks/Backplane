@@ -124,6 +124,33 @@ did not go and they are written at the end). Nov 11: a send mid-sentence put
 the last word, "stuff.", at the start of the next draft, the uncommitted tail
 being committed into the empty box.
 
+## Voice commands
+
+`voice/cmds.rs`. What is said at the very end of an utterance (the segment the
+VAD closes after its pause) can be a command instead of words; mid-sentence it
+never is ("send it to Kati" is words). Matching ignores case and punctuation and
+takes the engine's endings of long words ("message completed"); short words
+must be exact ("I sent it." is words).
+
+- **Send** (on by default): "message complete", "send it", "send message", or
+  the person's own phrases (`voice.cmd.send`, comma separated; `-` turns
+  sending by voice off). The phrase is not written (or is taken back if it was
+  already committed, an edit with `back`), the hub cuts the transcript as for a
+  Send, and sends `{"ev":"command","cmd":"send","cut":n}`. The client takes
+  the whole draft out of the box at once (dictation goes on into the empty
+  box), flashes Send, shows "Sending by voice…" with Undo, and after 3 s sends
+  it as the button does (turn.start, mode steer: it steers a running turn).
+  Undo puts the text back in front of what was dictated since.
+- Off until turned on: **scratch that** (`voice.cmd.scratch`: the last sentence
+  goes), **new line** (`voice.cmd.newline`), **cancel message**
+  (`voice.cmd.cancel`: the draft goes, with the same Undo), and **send after
+  silence** (`voice.cmd.auto`: 3, 5 or 10 s with no words, no segment open and
+  words written since the last send).
+- A Pebble ring note loses a send phrase said at its end.
+
+An edit's `back` (characters before the mark replaced too) exists only for
+commands; every client applies it (`test/fixtures/voice-edits.json`).
+
 ## The dictionary
 
 Settings (all clients see them; they live in the hub's log):

@@ -46,12 +46,15 @@ class VoiceTextTest {
             assertEquals(name, want.getString("text"), text); assertEquals(name, want.getInt("mark"), mark); assertEquals(name, want.getInt("caret"), caret)
         }
     }
+    @Test fun undoPutsTheMessageBackInFront() {
+        assertEquals("Buy milk. And eggs." to 19, VoiceText.undo("Buy milk.", "And eggs.", 9)); assertEquals("Buy milk." to 9, VoiceText.undo("Buy milk.", "", 0))
+    }
     @Test fun theSharedApplyAndShift() {
         val f = fixture()
         val apply = f.getJSONArray("apply")
         for (i in 0 until apply.length()) {
             val c = apply.getJSONObject(i); val e = c.getJSONObject("edit"); val want = c.getJSONObject("want")
-            val r = VoiceText.edit(c.getString("text"), c.getInt("mark"), e.getInt("del"), e.getString("ins"), e.getInt("adv"), e.getInt("to"))
+            val r = VoiceText.edit(c.getString("text"), c.getInt("mark"), e.getInt("del"), e.getString("ins"), e.getInt("adv"), e.getInt("to"), e.optInt("back"))
             val name = c.getString("name")
             assertEquals(name, want.getString("text"), r.text); assertEquals(name, want.getInt("mark"), r.mark); assertEquals(name, want.getInt("caret"), r.caret)
         }

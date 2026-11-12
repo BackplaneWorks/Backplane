@@ -72,7 +72,7 @@ impl Rig {
 fn off(v: &Value) -> bool { v["ev"] == "view" && v["view"]["on"] == false }
 fn replay(fs: &[Value], draft: &str) -> String {
     let (mut t, mut m) = (draft.to_string(), words::len(draft));
-    for f in fs { if f["ev"] == "edit" { let e = crate::voice::place::Edit { del: f["del"].as_u64().unwrap() as usize, ins: f["ins"].as_str().unwrap().into(), adv: f["adv"].as_u64().unwrap() as usize, to: f["to"].as_u64().unwrap() as usize }; (t, m, _) = crate::voice::place::apply(&t, m, &e); } }
+    for f in fs { if f["ev"] == "edit" { let e = crate::voice::place::Edit { del: f["del"].as_u64().unwrap() as usize, ins: f["ins"].as_str().unwrap().into(), adv: f["adv"].as_u64().unwrap() as usize, to: f["to"].as_u64().unwrap() as usize, back: f["back"].as_u64().unwrap_or(0) as usize }; (t, m, _) = crate::voice::place::apply(&t, m, &e); } }
     t
 }
 
