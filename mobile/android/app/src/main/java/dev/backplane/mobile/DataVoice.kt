@@ -111,6 +111,14 @@ object DataVoice {
     private fun view(tid: String, v: JSONObject) {
         if (!v.optBoolean("on")) { if (recorder.thread == tid) recorder.gone(); ended(tid) }
         show(tid, v)
+        // hold-to-talk let go: the session ended with its last words written; the draft goes, with the undo window
+        if (!v.optBoolean("on") && sendOnEnd.remove(tid)) command(tid, "send", 0)
+    }
+    private val sendOnEnd = HashSet<String>(); private var holdStarted: String? = null
+    /** Hold-to-talk: the hold begins (`start` starts dictation when it is off), or is let go (dictation stops and the message goes once its last words are in). */
+    fun held(tid: String, begins: Boolean, start: () -> Unit) {
+        if (begins) { if (!on(tid)) { start(); holdStarted = tid } ; return }
+        if (holdStarted == tid) { holdStarted = null; sendOnEnd.add(tid); stop(tid) }
     }
 
     /** A `{"t":"voice"}` frame, to the client that started the session. */

@@ -85,6 +85,9 @@ final class VoiceModel {
     /// An end-of-turn countdown running (the hub's `countdown`): the hub sends when it ends unless more is said or Keep talking is pressed.
     private(set) var countdown: (thread: String, until: Date)?
     @ObservationIgnored private var nextPending = 0
+    /// Threads whose dictation ends in a send (hold-to-talk let go).
+    @ObservationIgnored private var sendsOnEnd: Set<String> = []
+    func sendOnEnd(_ thread: String) { sendsOnEnd.insert(thread) }
     @ObservationIgnored weak var client: DataClient?
 
     init() { recorder.onGone = { [weak self] in self?.recorderGone() } }
@@ -166,6 +169,8 @@ final class VoiceModel {
             let view = DVoiceView(v)
             views[thread] = view
             if !view.on { marks[thread] = nil; cuts[thread] = nil; seqs[thread] = nil; level = 0; if active == thread { recorder.gone(); active = nil } }
+            // hold-to-talk let go: the session ended with its last words written; the draft goes, with the undo window
+            if !view.on && sendsOnEnd.remove(thread) != nil { command(thread, cmd: "send", cut: 0) }
         case "level": level = max(0, min(100, n("v")))
         case "edit":
             if let c = o["cut"] as? Int, c < (cuts[thread] ?? 0) { return } // made before this phone's send: it belongs to nothing now

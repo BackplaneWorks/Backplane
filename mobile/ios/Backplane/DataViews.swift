@@ -949,10 +949,14 @@ struct DataThreadView: View {
                     } else { Spacer(minLength: 0) }
                     if client.has("voice") {
                         let on = client.voice.listening(id)
-                        Button { micPress() } label: {
-                            Image(systemName: on ? "mic.fill" : "mic").font(.system(size: 15)).foregroundStyle(on ? BackplaneDesign.bad : BackplaneDesign.dim).frame(width: 40, height: 40).dbox(fill: BackplaneDesign.panel)
-                        }
-                        .buttonStyle(.plain).accessibilityLabel(Tr.t(on ? "Stop dictation" : "Dictate")).accessibilityIdentifier("data.mic")
+                        // a tap starts or stops; held (0.4 s) it is hold-to-talk: letting go stops, and the message goes once its last words are in
+                        Image(systemName: on ? "mic.fill" : "mic").font(.system(size: 15)).foregroundStyle(on ? BackplaneDesign.bad : BackplaneDesign.dim).frame(width: 40, height: 40).dbox(fill: BackplaneDesign.panel)
+                            .contentShape(Rectangle())
+                            .onTapGesture { micPress() }
+                            .onLongPressGesture(minimumDuration: 0.4, perform: { if !on { micPress(); holdStarted = true } }, onPressingChanged: { pressing in
+                                if !pressing && holdStarted { holdStarted = false; client.voice.sendOnEnd(id); micPress() }
+                            })
+                            .accessibilityAddTraits(.isButton).accessibilityLabel(Tr.t(on ? "Stop dictation" : "Dictate")).accessibilityIdentifier("data.mic")
                     }
                     // Attach: a photo from the library, or one taken now with the camera
                     Menu {
@@ -980,6 +984,7 @@ struct DataThreadView: View {
         }
         .background(BackplaneDesign.background)
     }
+    @State private var holdStarted = false
     private func micPress() {
         let at = ComposerHandle.view.map { VoiceEdit.chars(text, utf16: $0.selectedRange.location) } ?? VoiceEdit.count(text)
         client.voice.press(id, draft: text, caret: at)
