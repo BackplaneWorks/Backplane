@@ -2042,6 +2042,7 @@ gpui.c.kicad.edit.in.the.real.kicad = Edit in the real KiCad, here in the pane
 gpui.c.kicad.view = View
 gpui.c.kicad.symbols = Symbols
 gpui.c.kicad.footprints = Footprints
+gpui.c.kicad.gerbers = Gerbers
 gpui.c.kicad.full.size = Full size
 gpui.c.kicad.exit.full.size = Exit full size
 gpui.c.kicad.the.editor.takes.the.sidebar = The editor takes the sidebar's and the thread's room

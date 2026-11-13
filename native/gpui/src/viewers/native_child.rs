@@ -24,6 +24,7 @@ pub fn kind_of_title(title: &str) -> &'static str {
         "3D Viewer" => "PCB_3D", // i18n-ok: stock KiCad frame titles and wire frame kinds
         "Symbol Editor" => "SYMBOL_EDITOR", // i18n-ok: stock KiCad frame titles and wire frame kinds
         "Footprint Editor" => "FOOTPRINT_EDITOR", // i18n-ok: stock KiCad frame titles and wire frame kinds
+        "Gerber Viewer" | "GerbView" => "GERBVIEW", // i18n-ok: stock KiCad frame titles and wire frame kinds
         _ if t.starts_with("3D Viewer") => "PCB_3D", // i18n-ok: stock KiCad frame titles and wire frame kinds
         _ => "MANAGER", // i18n-ok: wire frame kind
     }
@@ -1407,6 +1408,7 @@ mod tests {
         assert_eq!(kind_of_title("*ecc83-pp — Schematic Editor"), "SCH");
         assert_eq!(kind_of_title("3D Viewer"), "PCB_3D");
         assert_eq!(kind_of_title("Device:R — Symbol Editor"), "SYMBOL_EDITOR");
+        assert_eq!(kind_of_title("Hubble_DK-F_Cu.gtl (with X2 attributes) — Gerber Viewer"), "GERBVIEW");
         assert_eq!(kind_of_title("lib:R_0603 — Footprint Editor"), "FOOTPRINT_EDITOR");
         assert_eq!(kind_of_title("KiCad 10.0 — ecc83-pp"), "MANAGER");
         assert!(dirty_title("*ecc83-pp — Schematic Editor") && !dirty_title("ecc83-pp — PCB Editor"));

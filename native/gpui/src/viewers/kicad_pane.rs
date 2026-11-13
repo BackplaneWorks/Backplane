@@ -22,7 +22,7 @@ fn top_of(window: &Window) -> Option<u64> {
 }
 
 /// The editor tabs: (kind, label). Board, Schematic and 3D always; the symbol and footprint editors once KiCad has them (or the person asks).
-pub const TABS: &[(&str, &str)] = &[("PCB", "Board"), ("SCH", "Schematic"), ("PCB_3D", "3D"), ("SYMBOL_EDITOR", "Symbols"), ("FOOTPRINT_EDITOR", "Footprints")]; // i18n-ok: wire kinds; labels go through trs
+pub const TABS: &[(&str, &str)] = &[("PCB", "Board"), ("SCH", "Schematic"), ("PCB_3D", "3D"), ("SYMBOL_EDITOR", "Symbols"), ("FOOTPRINT_EDITOR", "Footprints"), ("GERBVIEW", "Gerbers")]; // i18n-ok: wire kinds; labels go through trs
 /// The tab Ctrl+Tab (step 1) or Ctrl+Shift+Tab (step -1) goes to from `at`, round the tabs.
 pub fn next_tab(at: &str, step: i32) -> &'static str {
     let i = TABS.iter().position(|(k, _)| *k == at).unwrap_or(0) as i32;
@@ -334,6 +334,16 @@ impl KicadPane {
     /// The main window's native handle (the pane's first home).
     pub fn home(&self) -> u64 { self.home }
     /// A tab pressed: that editor in the pane (KiCad opens it when it has not yet); the rail's page stays as it is.
+    /// The embedded KiCad can show Gerbers in its GerbView (bp.13: `embed-gerbview`, from its GetCapabilities).
+    pub fn can_gerbview(&self) -> bool { self.info["embed_caps"].as_array().is_some_and(|a| a.iter().any(|c| c == "embed-gerbview")) }
+    /// Gerbers (a `.gbrjob` for all its layers, or Gerber and drill files) opened in the embedded GerbView and shown in the pane: the
+    /// "Open in GerbView" entry point. Its tab then switches back to it like the editors'.
+    pub fn open_gerbers(&mut self, files: &[String], cx: &mut Context<Self>) -> bool {
+        if !self.attached || !self.can_gerbview() || files.is_empty() { return false }
+        self.override_kind = Some("GERBVIEW".into()); self.placed = None; self.pending_show = Some("GERBVIEW".into()); // i18n-ok: wire frame kind
+        self.rpc("editor.kicad.show", json!({"project": self.project, "frame": "GERBVIEW", "document": files.join("\n")})); // i18n-ok: wire frame kind
+        cx.notify(); true
+    }
     pub fn show_kind(&mut self, kind: &str, cx: &mut Context<Self>) {
         if kind == frame_for(&self.open) { self.override_kind = None; } else { self.override_kind = Some(kind.to_string()); }
         self.placed = None;
@@ -661,7 +671,7 @@ mod tests {
     use super::{belongs_to, edit_target, frame_for, hub_open_step, nc, path_stem, pick, project_of, root_of, waiting, waiting_on};
     use serde_json::{json, Value};
     #[test] fn ctrl_tab_goes_round_the_editor_tabs() {
-        assert_eq!(super::next_tab("PCB", 1), "SCH"); assert_eq!(super::next_tab("PCB", -1), "FOOTPRINT_EDITOR"); assert_eq!(super::next_tab("FOOTPRINT_EDITOR", 1), "PCB"); assert_eq!(super::next_tab("?", 1), "SCH");
+        assert_eq!(super::next_tab("PCB", 1), "SCH"); assert_eq!(super::next_tab("PCB", -1), "GERBVIEW"); assert_eq!(super::next_tab("FOOTPRINT_EDITOR", 1), "GERBVIEW"); assert_eq!(super::next_tab("GERBVIEW", 1), "PCB"); assert_eq!(super::next_tab("?", 1), "SCH");
     }
     #[test] fn rail_pages_name_editors() { assert_eq!(frame_for("board"), "PCB"); assert_eq!(frame_for("schematic"), "SCH"); assert_eq!(frame_for("3d"), "PCB_3D"); }
     #[test] fn the_project_comes_from_the_viewer_key() {
@@ -862,11 +872,13 @@ pub fn strip<V: 'static>(cx: &mut Context<V>, light: bool, pane: &Entity<KicadPa
     act: impl Fn(&mut V, &str, &mut Window, &mut Context<V>) + Clone + 'static) -> AnyElement {
     let c = |n: &str| crate::theme::color(light, n);
     let at = pane.read(cx).tab();
-    let have: Vec<String> = pane.read(cx).frames.iter().map(|f| f.kind.to_string()).collect();
+    // the kinds KiCad says it has (the fork names them; an X title may come later than the frame), and those the X tree shows
+    let have: Vec<String> = { let p = pane.read(cx); p.frames.iter().map(|f| f.kind.to_string())
+        .chain(p.info["frames"].as_array().into_iter().flatten().filter_map(|f| f["kind"].as_str().map(String::from))).collect() };
     let mut row = div().id("kicad-strip").flex().items_center().gap_1().px_2().h(px(30.)).flex_shrink_0().bg(c("panel")).border_b_1().border_color(c("rule"));
     for (kind, label) in TABS {
         // the symbol and footprint editors: a tab once KiCad has them, or while shown
-        if matches!(*kind, "SYMBOL_EDITOR" | "FOOTPRINT_EDITOR") && !have.iter().any(|h| h == kind) && at != *kind { continue }
+        if matches!(*kind, "SYMBOL_EDITOR" | "FOOTPRINT_EDITOR" | "GERBVIEW") && !have.iter().any(|h| h == kind) && at != *kind { continue }
         let on = at == *kind; let k = kind.to_string(); let p = pane.clone();
         row = row.child(crate::ui::with_rect(div().id(SharedString::from(format!("kicad-tab-{kind}"))), { let k = kind.to_string(); move || format!("kicad-tab:{k}") }).px_2().py(px(3.)).text_size(px(12.)).cursor_pointer()
             .text_color(c(if on { "text" } else { "dim" })).when(on, |d| d.border_b_2().border_color(c("accent"))).hover(|s| s.bg(c("raise")))

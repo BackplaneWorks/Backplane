@@ -2065,6 +2065,7 @@ gpui.c.kicad.edit.in.the.real.kicad = このペインで本物の KiCad で編�
 gpui.c.kicad.view = 表示
 gpui.c.kicad.symbols = シンボル
 gpui.c.kicad.footprints = フットプリント
+gpui.c.kicad.gerbers = ガーバー
 gpui.c.kicad.full.size = 最大化
 gpui.c.kicad.exit.full.size = 最大化を解除
 gpui.c.kicad.the.editor.takes.the.sidebar = エディタがサイドバーとスレッドの領域も使います

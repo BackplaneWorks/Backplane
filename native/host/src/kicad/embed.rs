@@ -84,6 +84,9 @@ pub struct Session {
     pub closing: bool,
     /// KiCad said it lost its parent (ET_DETACHED) since the last attach: the next attach re-parents even into a container of the same id
     pub lost_parent: bool,
+    /// the library editor and item last shown on KiCad's ET_EDITOR_REQUESTED: the same request again is not shown again (a ShowFrame on
+    /// the item makes KiCad say ET_EDITOR_REQUESTED once more: shown each time, it looped, hundreds a second)
+    pub editor_req: (String, String, Option<std::time::Instant>),
 }
 
 impl Session {
@@ -94,7 +97,7 @@ impl Session {
             container: 0, toplevel: 0, holder: 0, display: String::new(),
             sock: String::new(), events_sock: String::new(), sock_dir: String::new(),
             argv: String::new(), cli: String::new(), version: String::new(), desc: String::new(),
-            caps: vec![], frames: vec![], missed_pings: 0, dialogs: vec![], rss_mb: 0, parked: false, touched_at: now, closing: false, lost_parent: false,
+            caps: vec![], frames: vec![], missed_pings: 0, dialogs: vec![], rss_mb: 0, parked: false, touched_at: now, closing: false, lost_parent: false, editor_req: (String::new(), String::new(), None),
         }
     }
     pub fn spawned(mut self, pid: u32) -> Self { self.pid = pid; self }
@@ -168,6 +171,8 @@ impl Session {
             "frames": self.frames.iter().map(Frame::to_json).collect::<Vec<_>>(),
             "dialogs": self.dialogs,
             "rss_mb": self.rss_mb,
+            // what the embedded editor can do beyond the basics (embed-gerbview, embed-editor-requested, ...): the client gates on these
+            "embed_caps": self.caps.iter().filter(|c| c.starts_with("embed-")).collect::<Vec<_>>(),
             // bp.9: the client may map and unmap a frame KiCad has shown once (its tab switches need no round trip)
             "local_map": self.mode == "fork" && !self.desc.is_empty() && proto::load(&self.desc).has_field("kiapi.backplane.embed.ShowFrame", "prewarm"),
         })
@@ -207,6 +212,8 @@ pub fn canon_frame(raw: &str) -> &'static str {
         "2" | "PCB_3D" | "FK_PCB_3D" | "3D" | "3D_VIEWER" => "PCB_3D",
         "SYMBOL_EDITOR" | "FK_SYMBOL_EDITOR" | "SYM" => "SYMBOL_EDITOR",
         "FOOTPRINT_EDITOR" | "FK_FOOTPRINT_EDITOR" | "FP" => "FOOTPRINT_EDITOR",
+        // bp.13: GerbView runs in KiCad's process and embeds like the editors
+        "GERBVIEW" | "FK_GERBVIEW" => "GERBVIEW",
         _ => "OTHER",
     }
 }
@@ -225,6 +232,25 @@ pub fn prewarm_kinds(active: &str, have: &[String]) -> Vec<&'static str> {
     ["SCH", "PCB"].into_iter().filter(|k| *k != canon_frame(active) && !have.iter().any(|h| h == k)).collect()
 }
 
+/// The embedded editor's capabilities from its GetCapabilities answer: the names it says, and for a build that says only its commands
+/// (bp.13 77a6ff17d0, before the names came) the ones its commands show.
+pub fn embed_caps(msg: &Value) -> Vec<String> {
+    let strs = |k: &str| msg[k].as_array().into_iter().flatten().filter_map(Value::as_str).map(String::from).collect::<Vec<_>>();
+    let mut caps = strs("capabilities");
+    let cmds = strs("commands");
+    let has = |c: &str| cmds.iter().any(|x| x == c || x.rsplit('.').next() == Some(c));
+    if has("OpenGerbers") && !caps.iter().any(|c| c == "embed-gerbview") { caps.push("embed-gerbview".into()); }
+    caps
+}
+
+/// ET_EDITOR_REQUESTED (25): the editor's kind and the item (FrameInfo.lib_id, "Lib:Name") to open in it.
+pub fn editor_requested(ev: &Value) -> Option<(String, String)> {
+    if !(ev["type"] == "ET_EDITOR_REQUESTED" || ev["type"].as_i64() == Some(25)) { return None }
+    let kind = kind_of_fk_val(&ev["frame"]["kind"]);
+    if !matches!(kind, "SYMBOL_EDITOR" | "FOOTPRINT_EDITOR") { return None }
+    Some((kind.to_string(), ev["frame"]["lib_id"].as_str().or(ev["frame"]["libId"].as_str()).unwrap_or("").to_string()))
+}
+
 pub fn fk_of(kind: &str) -> &'static str {
     match canon_frame(kind) {
         "PCB" => "FK_PCB",
@@ -232,6 +258,7 @@ pub fn fk_of(kind: &str) -> &'static str {
         "SYMBOL_EDITOR" => "FK_SYMBOL_EDITOR",
         "FOOTPRINT_EDITOR" => "FK_FOOTPRINT_EDITOR",
         "PCB_3D" => "FK_PCB_3D",
+        "GERBVIEW" => "FK_GERBVIEW",
         _ => "FK_OTHER",
     }
 }
@@ -245,6 +272,7 @@ pub fn kind_of_fk_val(v: &Value) -> &'static str {
         3 => "SYMBOL_EDITOR",
         4 => "FOOTPRINT_EDITOR",
         5 => "PCB_3D",
+        7 => "GERBVIEW",
         _ => "OTHER",
     }
 }
@@ -858,10 +886,11 @@ enum Msg {
     Spawned { pro: String, gen: u64, pid: u32 },
     EventsSock { pro: String, gen: u64, sock: String },
     StartupReason { pro: String, gen: u64, reason: String },
-    Ready { pro: String, gen: u64, sock: String, version: String, holder: u64, events_sock: String, ev_since: u64, frames: Vec<Frame>, spawn_container: u64, spawn_active: String },
+    Ready { pro: String, gen: u64, sock: String, version: String, holder: u64, events_sock: String, ev_since: u64, frames: Vec<Frame>, spawn_container: u64, spawn_active: String, caps: Vec<String> },
     StartFailed { pro: String, gen: u64, why: String },
     FramesUpdated { pro: String, gen: u64, holder: Option<u64>, frames: Vec<Frame>, reply: Option<(u64, oneshot::Sender<Result<Value, String>>)> },
-    ForkShowRequested { pro: String, gen: u64, kind: String },
+    /// `editor`: KiCad's ET_EDITOR_REQUESTED (a library editor with the item it is for), not a plain ET_SHOW_REQUESTED
+    ForkShowRequested { pro: String, gen: u64, kind: String, item: String, editor: bool },
     Dialog { pro: String, gen: u64, open: bool, title: String },
     /// the dialogs of KiCad's the client sees on screen (a modal one stops KiCad's events and pings: this is how the hub learns of it)
     ClientDialogs { pro: String, open: Vec<String> },
@@ -1399,9 +1428,10 @@ impl Actor {
                     self.publish(&snap, None);
                 }
             }
-            Msg::Ready { pro, gen, sock, version, holder, events_sock, ev_since, frames, spawn_container, spawn_active } => {
+            Msg::Ready { pro, gen, sock, version, holder, events_sock, ev_since, frames, spawn_container, spawn_active, caps } => {
                 let Some(s) = self.sessions.get_mut(&pro).filter(|s| s.gen == gen && s.state == "starting") else { return };
                 *s = s.clone().ready(&sock, &version, ipc::now_s());
+                for c in caps { if !s.caps.contains(&c) { s.caps.push(c); } }
                 s.holder = holder;
                 if !events_sock.is_empty() { s.events_sock = events_sock; }
                 if !frames.is_empty() { s.frames = frames; }
@@ -1466,13 +1496,28 @@ impl Actor {
                     let _ = tx.send(Err("KiCad session ended".into()));
                 }
             }
-            Msg::ForkShowRequested { pro, gen, kind } => {
+            Msg::ForkShowRequested { pro, gen, kind, item, editor } => {
                 let Some(s) = self.sessions.get_mut(&pro).filter(|s| s.gen == gen && s.state == "ready") else { return };
+                // a library editor is shown on KiCad's ET_EDITOR_REQUESTED (embedded, on its item), never on the ET_SHOW_REQUESTED KiCad sends
+                // before it (three of them on Ctrl+E: showing then floated a 900x720 top-level over the pane for ~0.8 s)
+                if !editor && matches!(canon_frame(&kind), "SYMBOL_EDITOR" | "FOOTPRINT_EDITOR") && s.caps.iter().any(|c| c == "embed-editor-requested") {
+                    let _ = self.me.send(Msg::ForkSync { pro, gen });
+                    return;
+                }
+                if editor {
+                    let (k, now) = (canon_frame(&kind).to_string(), std::time::Instant::now());
+                    // the same editor and item again: on show already, or asked within 2 s (KiCad's echo, queued behind another show)
+                    let same = s.editor_req.0 == k && s.editor_req.1 == item;
+                    if same && (s.active == k || s.editor_req.2.is_some_and(|t| now.duration_since(t) < Duration::from_secs(2))) { return }
+                    s.editor_req = (k, item.clone(), Some(now));
+                } else {
+                    s.editor_req = Default::default();
+                }
                 s.active = canon_frame(&kind).into();
                 let snap = s.clone();
                 let me = self.me.clone();
                 tokio::spawn(async move {
-                    if let Ok(Some((holder, _, frames))) = switch_fork_frame(&me, &snap.sock, &snap.desc, &snap.active, "", "", false, false).await {
+                    if let Ok(Some((holder, _, frames))) = switch_fork_frame(&me, &snap.sock, &snap.desc, &snap.active, "", &item, false, false).await {
                         let _ = me.send(Msg::FramesUpdated { pro: snap.pro, gen: snap.gen, holder: Some(holder), frames, reply: None });
                     }
                 });
@@ -1608,6 +1653,14 @@ async fn drain_lines<R: AsyncRead + Unpin>(r: R, mut each: impl FnMut(String)) {
 }
 
 async fn show_fork_frame(me: &mpsc::UnboundedSender<Msg>, sock: &str, desc: &str, kind: &str, doc: &str, item: &str, focus: bool) -> Result<Value, String> {
+    // GerbView (bp.13, in KiCad's process): its files are opened with OpenGerbers (Gerbers and drill files, or one .gbrjob for all its
+    // layers; `doc` lists them a line each), which shows its frame; ShowFrame shows it again after
+    if canon_frame(kind) == "GERBVIEW" && !doc.is_empty() {
+        let files: Vec<&str> = doc.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+        let o = raw_on(me, sock, desc, "kiapi.backplane.embed.OpenGerbers", json!({ "files": files, "show": true }), 60000).await;
+        if o["ok"].as_bool().unwrap_or(false) { return Ok(o) }
+        return Err(format!("OpenGerbers: {}", o["error"].as_str().unwrap_or("failed")));
+    }
     let mut body = json!({ "kind": fk_of(kind), "focus": focus });
     if !doc.is_empty() { body["document"] = json!(doc); }
     if !item.is_empty() { body["item"] = json!(item); }
@@ -1977,6 +2030,13 @@ async fn spawn_gui_session(
     }
 
     phase("answering");
+    // the embedded editor's own capabilities (bp.13's embed-frame-drawn, embed-gerbview, embed-editor-requested are said there, not in the
+    // headless manifest the runtime's caps come from)
+    let mut caps = caps;
+    if mode == "fork" {
+        let gc = raw_on(&me, &sock, &desc, "kiapi.backplane.GetCapabilities", json!({}), 3000).await;
+        for c in embed_caps(&gc["message"]) { if !caps.iter().any(|x| *x == c) { caps.push(c); } }
+    }
     if mode == "fork" {
         let gf0 = raw_on(&me, &sock, &desc, "kiapi.backplane.embed.GetFrames", json!({}), 10000).await;
         let (mut holder, mut events_sock, mut frames) = if gf0["ok"].as_bool().unwrap_or(false) {
@@ -2020,12 +2080,12 @@ async fn spawn_gui_session(
         }); }
         phase("ready");
         eprintln!("kicad embed: running {version} ({})", argv.first().map(String::as_str).unwrap_or(""));
-        let _ = me.send(Msg::Ready { pro, gen, sock, version, holder, events_sock, ev_since, frames, spawn_container, spawn_active: active });
+        let _ = me.send(Msg::Ready { pro, gen, sock, version, holder, events_sock, ev_since, frames, spawn_container, spawn_active: active, caps });
     } else {
         if let Some(act) = stock_action_for(&active) {
             let _ = run_stock_action(&me, &sock, &desc, act).await;
         }
-        let _ = me.send(Msg::Ready { pro, gen, sock, version, holder: 0, events_sock: String::new(), ev_since: 0, frames: vec![], spawn_container, spawn_active: active });
+        let _ = me.send(Msg::Ready { pro, gen, sock, version, holder: 0, events_sock: String::new(), ev_since: 0, frames: vec![], spawn_container, spawn_active: active, caps });
     }
 }
 
@@ -2065,7 +2125,7 @@ fn spawn_fork_events_loop(me: mpsc::UnboundedSender<Msg>, pro: String, gen: u64,
             let next = u64_of(&msg["next"]);
             if next > since { since = next; }
             let mut need_sync = msg["lost"].as_bool().unwrap_or(false);
-            let mut show_req: Option<String> = None;
+            let mut show_req: Option<(String, String, bool)> = None;
             if let Some(evs) = msg["events"].as_array() {
                 for ev in evs {
                     let ty = ev["type"].as_str().unwrap_or("");
@@ -2096,7 +2156,11 @@ fn spawn_fork_events_loop(me: mpsc::UnboundedSender<Msg>, pro: String, gen: u64,
                         continue
                     }
                     if ty == "ET_SHOW_REQUESTED" || ty_n == 9 {
-                        show_req = Some(kind_of_fk_val(&ev["frame"]["kind"]).to_string());
+                        // (an editor request in the same batch wins)
+                        if !show_req.as_ref().is_some_and(|r| r.2) { show_req = Some((kind_of_fk_val(&ev["frame"]["kind"]).to_string(), String::new(), false)); }
+                    } else if let Some((k, item)) = editor_requested(ev) {
+                        // bp.13: KiCad asked for its symbol or footprint editor (Edit Symbol, Edit Footprint...): shown in the pane on that item
+                        show_req = Some((k, item, true));
                     } else if matches!(ty, "ET_FRAME_OPENED" | "ET_FRAME_CLOSED" | "ET_FRAME_SHOWN" | "ET_FRAME_HIDDEN"
                         | "ET_TITLE_CHANGED" | "ET_MODIFIED_CHANGED" | "ET_DETACHED" | "ET_DOCUMENT_CHANGED" | "ET_ATTACHED")
                         || matches!(ty_n, 1 | 2 | 3 | 4 | 5 | 6 | 12 | 13 | 18)
@@ -2105,8 +2169,8 @@ fn spawn_fork_events_loop(me: mpsc::UnboundedSender<Msg>, pro: String, gen: u64,
                     }
                 }
             }
-            if let Some(kind) = show_req {
-                if me.send(Msg::ForkShowRequested { pro: pro.clone(), gen, kind }).is_err() { return }
+            if let Some((kind, item, editor)) = show_req {
+                if me.send(Msg::ForkShowRequested { pro: pro.clone(), gen, kind, item, editor }).is_err() { return }
             } else if need_sync {
                 if me.send(Msg::ForkSync { pro: pro.clone(), gen }).is_err() { return }
             }
@@ -2318,6 +2382,17 @@ pub fn stand_in_route(pro: &str) -> (GuiRoute, mpsc::UnboundedReceiver<(String, 
 
 #[cfg(test)]
 mod tests {
+    #[test] fn gerbview_and_the_editors_kicad_asks_for() {
+        use super::*;
+        assert_eq!(canon_frame("FK_GERBVIEW"), "GERBVIEW"); assert_eq!(fk_of("GERBVIEW"), "FK_GERBVIEW"); assert_eq!(kind_of_fk_val(&json!(7)), "GERBVIEW");
+        // 77a6ff17d0 says its commands only; the names come with batch 3
+        assert_eq!(embed_caps(&json!({"capabilities": ["embed", "embed-frame-drawn"], "commands": ["kiapi.backplane.embed.OpenGerbers"]})), vec!["embed", "embed-frame-drawn", "embed-gerbview"]);
+        assert_eq!(embed_caps(&json!({"capabilities": ["embed-gerbview"], "commands": ["kiapi.backplane.embed.OpenGerbers"]})), vec!["embed-gerbview"]);
+        assert!(embed_caps(&json!({"capabilities": ["embed"], "commands": ["kiapi.backplane.embed.ShowFrame"]})).iter().all(|c| c != "embed-gerbview"));
+        assert_eq!(editor_requested(&json!({"type": "ET_EDITOR_REQUESTED", "frame": {"kind": "FK_SYMBOL_EDITOR", "lib_id": "Device:R"}})), Some(("SYMBOL_EDITOR".into(), "Device:R".into())));
+        assert_eq!(editor_requested(&json!({"type": 25, "frame": {"kind": 4, "libId": "R_SMD:R_0603"}})), Some(("FOOTPRINT_EDITOR".into(), "R_SMD:R_0603".into())));
+        assert_eq!(editor_requested(&json!({"type": "ET_SHOW_REQUESTED", "frame": {"kind": "FK_SYMBOL_EDITOR"}})), None);
+    }
     #[tokio::test] async fn a_commit_as_the_person_carries_the_header_and_the_name_on_every_call() {
         let (tx, mut rx) = mpsc::unbounded_channel::<Msg>();
         let route = GuiRoute { pro: "/p/x.kicad_pro".into(), mode: "fork".into(), sock: "/s".into(), desc: String::new(), cli: String::new(),
