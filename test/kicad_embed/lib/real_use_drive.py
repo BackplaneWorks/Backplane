@@ -386,8 +386,10 @@ if "xprobe" in JOURNEYS:
     if PCB and os.path.exists(PCB): refs = re.findall(r'\(property "Reference" "([A-Z]+[0-9]+)"', open(PCB, errors="ignore").read())[:40:8]
     for i, ref in enumerate(refs[:4]):
         t0 = now(); out = rpc([{"method": "editor.kicad.select", "params": {"project": proj, "references": [ref], "zoom": True}}]); t1 = now()
-        EVENTS.append({"kind": "switch", "t0": t0, "tag": f"xprobe{i}_{ref}", "window_ms": 2000})
-        perf(f"xprobe_rpc_{i}", round(t1 - t0), ref=ref, ok=int('"ok":true' in out.replace(" ", "")))
+        # timed from the request itself (hub_rpc.mjs sent_at / replied_at): the helper's start, connect and 250 ms settle are not the probe's
+        r = jl(out) or {}; sent = r.get("sent_at"); got = r.get("replied_at")
+        EVENTS.append({"kind": "switch", "t0": sent or t0, "tag": f"xprobe{i}_{ref}", "window_ms": 2000})
+        perf(f"xprobe_rpc_{i}", round(got - sent) if sent and got else round(t1 - t0), ref=ref, ok=int('"ok":true' in out.replace(" ", "")), helper_ms=round(t1 - t0))
         time.sleep(2)
 # 7. save: Ctrl+S to the file written and KiCad clean; KiCad's ping latency through it
 if "save" in JOURNEYS and SOCK and PCB:

@@ -16,12 +16,13 @@ for (let i = 0; ; i++) {
 }
 
 const replies = new Map();
+const repliedAt = new Map();
 const infos = new Map();
 let id = 2 ** 40;
 
 ws.onmessage = ({ data }) => {
   const x = decode(data);
-  if (x.t === 'reply') replies.set(x.id, x);
+  if (x.t === 'reply') { replies.set(x.id, x); repliedAt.set(x.id, Date.now()); }
   if (x.info && typeof x.info === 'object') {
     for (const [k, v] of Object.entries(x.info)) {
       if (
@@ -46,11 +47,13 @@ for (const s of JSON.parse(stepsJson || '[]')) {
   const my = ++id;
   const method = s.m ?? s.method;
   const params = s.p ?? s.params ?? {};
+  // sent_at / replied_at (epoch ms): the request's own times, without this helper's start, connect and the 250 ms settle above
+  const sentAt = Date.now();
   ws.send(encode({ id: my, m: method, p: params }));
-  const maxIter = Math.ceil((s.timeout_ms ?? 15000) / 25);
-  for (let i = 0; i < maxIter && !replies.has(my); i++) await sleep(25);
+  const maxIter = Math.ceil((s.timeout_ms ?? 15000) / 5);
+  for (let i = 0; i < maxIter && !replies.has(my); i++) await sleep(5);
   const r = replies.get(my);
-  console.log(JSON.stringify({ m: method, ok: r?.ok ?? null, result: r?.result ?? r ?? null, reply: r ?? null, error: r?.error ?? r?.err ?? '' }));
+  console.log(JSON.stringify({ m: method, ok: r?.ok ?? null, result: r?.result ?? r ?? null, reply: r ?? null, error: r?.error ?? r?.err ?? '', sent_at: sentAt, replied_at: repliedAt.get(my) ?? null }));
   if (s.wait) await sleep(s.wait);
 }
 

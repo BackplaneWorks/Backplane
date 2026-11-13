@@ -81,6 +81,8 @@ pub fn targets(open: &[(String, bool)], show: &str, bp9: bool) -> Vec<&'static s
     }
     let mut out: Vec<&'static str> = vec![];
     if show == "SCH" || show == "PCB" { out.push(if show == "SCH" { "SCH" } else { "PCB" }); }
+    // the frame on screen next: what the person sees is selected first, the hidden frame after
+    if let Some(k) = shown { if has(k) && !out.contains(&k) { out.push(k) } }
     for k in ["PCB", "SCH"] { if has(k) && !out.contains(&k) { out.push(k) } }
     out
 }
@@ -297,8 +299,8 @@ fn has_select_items(route: &embed::GuiRoute) -> bool {
 }
 
 /// Select `n` in the project's open KiCad: Ok({kicad, found, not_found, via}); kicad false when none is open.
-pub async fn select_in_kicad(pro: &str, n: &Names, zoom: bool, show: &str) -> Result<Value, String> { select_in_kicad_steps(pro, n, zoom, show, &mut Steps::new()).await }
-async fn select_in_kicad_steps(pro: &str, n: &Names, zoom: bool, show: &str, st: &mut Steps) -> Result<Value, String> {
+pub async fn select_in_kicad(pro: &str, n: &Names, zoom: bool, show: &str) -> Result<Value, String> { select_in_kicad_steps(pro, n, zoom, show, false, &mut Steps::new()).await }
+async fn select_in_kicad_steps(pro: &str, n: &Names, zoom: bool, show: &str, quick: bool, st: &mut Steps) -> Result<Value, String> {
     let Some(route) = embed::gui_route(pro) else { return Ok(json!({"kicad": false})) };
     let bp9 = has_select_items(&route);
     let open = if route.mode == "fork" { open_frames(&route).await } else { vec![] };
@@ -318,7 +320,14 @@ async fn select_in_kicad_steps(pro: &str, n: &Names, zoom: bool, show: &str, st:
         return Ok(json!({"kicad": true, "via": "ShowFrame", "frames": [target], "found": found.to_json(), "not_found": rest.to_json()}))
     }
     let mut replies = vec![]; let mut sent = vec![];
-    for kind in targets(&open, show, true) {
+    let all = targets(&open, show, true);
+    // quick (a person's press in a panel): the answer as soon as the frame on screen has it; the hidden frames are selected after, unanswered
+    let (now, later): (Vec<&'static str>, Vec<&'static str>) = if quick && all.len() > 1 { (all[..1].to_vec(), all[1..].to_vec()) } else { (all, vec![]) };
+    if !later.is_empty() {
+        let (route, msg_of) = (route.clone(), later.iter().map(|k| (*k, select_msg(k, n, zoom))).collect::<Vec<_>>());
+        tokio::spawn(async move { for (_, m) in msg_of { let _ = embed::gui_call(&route, "kiapi.backplane.embed.SelectItems", m).await; } });
+    }
+    for kind in now {
         let mut tries = 0;
         loop {
             let o = embed::gui_call(&route, "kiapi.backplane.embed.SelectItems", select_msg(kind, n, zoom)).await;
@@ -332,7 +341,7 @@ async fn select_in_kicad_steps(pro: &str, n: &Names, zoom: bool, show: &str, st:
         }
     }
     let (found, missing) = if replies.is_empty() { (Names::default(), n.clone()) } else { merge_found(&replies) };
-    Ok(json!({"kicad": true, "via": "SelectItems", "frames": sent, "found": found.to_json(), "not_found": missing.to_json()}))
+    Ok(json!({"kicad": true, "via": "SelectItems", "frames": sent, "later": later, "found": found.to_json(), "not_found": missing.to_json()}))
 }
 
 /// KiCad's ET_SELECTION_CHANGED (the person's selection in the PCB or schematic editor): info `kicad.sel.<digest>` and the board probe.
@@ -362,7 +371,9 @@ pub async fn select(hub: &Arc<Hub>, p: &Value) -> Result<Value, String> {
     let mut st = Steps::new(); st.mark("checked");
     let probe = if p["from"] == "viewer" { String::new() } else { set_probe(hub, &files, &n).await };
     st.mark("probe");
-    let mut out = select_in_kicad_steps(&files.pro, &n, zoom, show, &mut st).await?;
+    // `quick`: a person's press (the panels): answered once the shown frame has it; agents (kicad_select) get every frame's found/not_found
+    let quick = p["quick"].as_bool().unwrap_or(false);
+    let mut out = select_in_kicad_steps(&files.pro, &n, zoom, show, quick, &mut st).await?;
     st.print("editor.kicad.select");
     out["project"] = json!(files.pro); out["probe"] = json!(probe);
     Ok(out)
@@ -418,6 +429,8 @@ mod tests {
         assert_eq!(targets(&open, "", true), vec!["PCB", "SCH"]);
         assert_eq!(targets(&open, "SCH", true), vec!["SCH", "PCB"]);
         assert_eq!(targets(&open[..1], "", true), vec!["PCB"]);
+        let sch_up = vec![("PCB".to_string(), false), ("SCH".to_string(), true)];
+        assert_eq!(targets(&sch_up, "", true), vec!["SCH", "PCB"], "the shown frame first");
         // bp.8's ShowFrame maps the frame it probes: only the shown one, or the one asked for
         assert_eq!(targets(&open, "", false), vec!["PCB"]);
         assert_eq!(targets(&open, "SCH", false), vec!["SCH"]);

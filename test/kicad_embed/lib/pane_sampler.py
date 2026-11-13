@@ -24,6 +24,7 @@ def run(x, y, w, h, out, stop, max_s):
     root = x11.XDefaultRootWindow(d)
     f = open(out, "w", buffering=1)
     t_end = time.time() + max_s; last = None; last_t = 0.0
+    band = int(os.environ.get("KEMBED_SAMPLE_BANDS", "0") or 0)
     gap = float(os.environ.get("KEMBED_SAMPLE_MIN_MS", "0")) / 1000  # a floor between samples: how much the sampling itself costs the frames
     while time.time() < t_end and not os.path.exists(stop):
         t = time.time()
@@ -40,7 +41,12 @@ def run(x, y, w, h, out, stop, max_s):
             f.write(f'{{"t":{t*1000:.1f},"h":{hv}}}\n'); continue
         a = np.frombuffer(buf, dtype=np.uint32).reshape(h, bpl // 4)[::7, :w:7] & 0xFFFFFF
         vals, counts = np.unique(a, return_counts=True); i = int(counts.argmax())
-        f.write(json.dumps({"t": round(t * 1000, 1), "h": hv, "u": round(float(counts[i]) / a.size, 4), "c": int(vals[i])}) + "\n")
+        row = {"t": round(t * 1000, 1), "h": hv, "u": round(float(counts[i]) / a.size, 4), "c": int(vals[i])}
+        # KEMBED_SAMPLE_BANDS=N: a crc per N-px-wide column band too, so a change can be placed (KiCad's canvas or a panel beside it)
+        if band:
+            full = np.frombuffer(buf, dtype=np.uint32).reshape(h, bpl // 4)[:, :w]
+            row["b"] = [zlib.crc32(full[:, i:i + band].tobytes()) for i in range(0, w, band)]
+        f.write(json.dumps(row) + "\n")
         last = hv
     f.close()
 
