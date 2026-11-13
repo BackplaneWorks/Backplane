@@ -77,6 +77,8 @@ echo "== paper cuts, in the order a person meets them (rank 1 = blocks or mislea
 [ -s "$OUT/findings.tsv" ] && sort -s -t$'\t' -k1,1n "$OUT/findings.tsv" | awk -F'\t' '{printf "  [%s] %-12s %s\n", $1, $2, $3}' || echo "  none"
 echo "== checks: $(grep -c ^PASS "$OUT/checks.tsv" 2>/dev/null) pass, $(grep -c ^FAIL "$OUT/checks.tsv" 2>/dev/null) fail ($OUT)"
 grep ^FAIL "$OUT/checks.tsv" 2>/dev/null | sed 's/^/  /'
+grep ^KNOWN-RED "$OUT/checks.tsv" 2>/dev/null | sed 's/^/  /'   # named, with their reason: not a pass, not a fail
+grep -h '^NOTE' "$OUT/logs/drc-probe.log" 2>/dev/null | sed 's/^/  /'
 [ "$RC" = 0 ] && ! grep -q ^FAIL "$OUT/checks.tsv" 2>/dev/null
 exit $?
 }

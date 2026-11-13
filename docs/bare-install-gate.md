@@ -69,6 +69,16 @@ python3 -I test/bare/stock_compat.py --fork-cli ~/.backplane-gpui-fresh/home/kic
   --out $BP_TMP/compat COPY_OF_PROJECT...
 ```
 
+## DRC correctness probe (test/bare/drc_probe.py)
+
+`drc-zone-fill-short`, lane P's probe: on a copy of the complex_hierarchy demo a foreign-net track (Net-(R313-Pad1), 0.05 x 0.1 mm, B.Cu)
+inside the GND fill at (100.5, 100.9), where the fill's triangulation leaves copper uncovered. DRC must report it with actual 0 under the
+demo's rules and at all under 0.1 mm rules; a control track at (120, 90) checks the probe. Runtimes before 10.99.0-bp.12.1 without the
+capability `drc-zone-guard` miss it: that is a **KNOWN-RED** line by name ("DRC zone-fill triangulation, fixed in bp.12.1"), listed apart
+from passes and fails; from bp.12.1 on a miss is a FAIL. Stock KiCad's DRC on the fork's downgrade of the same boards is recorded (NOTE).
+First results (Nov 13): bp.10, bp.11 and bp.12 report 0.1174 mm (demo rules) and nothing (0.1 mm rules); stock 10.0.7 reports actual
+0.0000 mm on both.
+
 ## Commit mode
 
 `--commit SHA` makes a build box from `bp-build-base` (the build snapshot; never the gate box), copies `git archive SHA` to it and runs
@@ -97,6 +107,7 @@ Boats cost while they run: the gate deletes its gate box and its build box on ev
 - [x] an agent's `kicad_ipc` commit shows live and is saved; an agent's comment
 - [x] DRC by the runtime's kicad-cli
 - [x] export to the current stock KiCad (official packages): loads clean, same ERC/DRC, gerbers and netlist
+- [x] DRC correctness: a short inside a zone fill (known-red before bp.12.1)
 - [ ] the person's own comment from KiCad (the comment window, lane C)
 - [ ] the PCB canvas has a usable size in the pane (first runs: about 80 px wide in a 699 px pane, KiCad's Properties and Appearance panels take the rest)
 - [ ] the DRC/ERC panel (lane E), BOM (lane D), floorplanner plan in the journey (the sample passes stock_compat), review, Gerber viewer
