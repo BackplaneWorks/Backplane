@@ -248,7 +248,7 @@ check_runtime() {
   ran=$(grep -o "kicad embed: running .*" "$OUT/hub.log" | head -1 | sed 's/^kicad embed: running //' || true) # (a suite that opens no editor has no such line)
   [ -n "$ran" ] || return 0
   want=$("${KICAD_CLI:-kicad-cli}" --version 2>/dev/null | tail -1)
-  bin=$(echo "$ran" | sed -n 's/.*(\(.*\))$/\1/p')
+  bin=$(echo "$ran" | sed -n 's/.*(\(.*\))$/\1/p' | sed 's/ = .*//') # (the hub adds " = <resolved path>, BACKPLANE_COMMIT <sha>")
   echo "RUNTIME asked ${KICAD_BIN:-?} ($want) ran $ran"
   local v=${ran%% *} same=1
   if [ -n "$want" ] && [ -n "$v" ] && [[ "$want" != *"$v"* ]] && [[ "$v" != *"$want"* ]]; then same=0; fi
