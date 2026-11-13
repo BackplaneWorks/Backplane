@@ -61,6 +61,27 @@
    "what": "thread back: frames of background"
   },
   {
+   "re": "^(edit|full_size)_gives_kicad_keys$",
+   "field": "ok",
+   "min": 1,
+   "strict": true,
+   "what": "Edit and Full size hand KiCad the keyboard with no canvas click (KiCad's hotkeys work at once)"
+  },
+  {
+   "re": "^dialog_escape$",
+   "field": "ok",
+   "min": 1,
+   "strict": true,
+   "what": "Escape closes a KiCad dialog opened in the pane (the keyboard stays with KiCad's dialog)"
+  },
+  {
+   "re": "^popup_ctrl_(k|semicolon)_ok$",
+   "field": "ok",
+   "min": 1,
+   "strict": true,
+   "what": "a reserved chord pressed while a KiCad menu holds the keyboard closes the menu and reaches Backplane (embed-popup-keys)"
+  },
+  {
    "re": "^thread(_side)?_back\\d_away_ok$",
    "field": "ok",
    "min": 1,

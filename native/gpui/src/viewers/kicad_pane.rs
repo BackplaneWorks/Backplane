@@ -192,6 +192,15 @@ pub struct KicadPane {
     dialogs_open: Vec<String>,
     /// the frame KiCad gave the keyboard to on a click, and when (a click-to-focus window manager may take it back at once)
     took: Option<(u64, std::time::Instant)>,
+    /// fork: a press over the editor, its keyboard given on the release (a focus change mid-press made KiCad lose the release: it took the
+    /// click for a long press and opened Clarify Selection, which then held the keyboard)
+    press_focus: Option<u64>,
+    /// Edit, a tab, Full size: the person chose the editor, so it gets the keyboard the moment its frame is on show (KiCad's hotkeys work with
+    /// no canvas click first; lane A: Ctrl+Shift+R after Edit reached nothing)
+    pub want_keys: bool,
+    /// the keyboard was in a KiCad dialog last tick: when it closes, the keyboard goes back to the editor (a window manager hands it to
+    /// Backplane's window)
+    was_dialog: bool,
 }
 
 /// A chord KiCad handed back that the window acts on at once (the comment window: screens/kcomment.rs).
@@ -234,7 +243,7 @@ impl KicadPane {
             let _ = drained_tx.send(());
         } }).detach();
         KicadPane { bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), last_root: (i32::MIN, 0), placed: None,
-            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), poked: None, unmapped_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, at_px: None, dialogs_open: Vec::new(), took: None }
+            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), poked: None, unmapped_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, at_px: None, dialogs_open: Vec::new(), took: None, press_focus: None, want_keys: true, was_dialog: false }
     }
     fn rpc(&self, name: &str, params: Value) { let _ = self.hub.try_send(Command::Rpc(name.to_string(), Secret(params), "kicad")); }
     /// The hub's `editor.kicad.<digest>` for this project changed.
@@ -350,6 +359,7 @@ impl KicadPane {
         cx.notify(); true
     }
     pub fn show_kind(&mut self, kind: &str, cx: &mut Context<Self>) {
+        self.want_keys = true;
         if kind == frame_for(&self.open) { self.override_kind = None; } else { self.override_kind = Some(kind.to_string()); }
         self.placed = None;
         if self.attached && matches!(self.info["state"].as_str(), Some("stopped" | "failed")) { self.reattach(); }
@@ -484,8 +494,25 @@ impl KicadPane {
             }
         }
         // a click over the editor gives it the keyboard; a click anywhere else in the client's window gives it back
-        if let Some(w) = self.want() { match (nc::button_over(w), nc::has_focus(c)) { (Some(true), false) => nc::focus(w), (Some(false), true) => nc::focus(self.toplevel), _ => {} } }
-        let mut has = nc::has_focus(c);
+        // a KiCad dialog (its own top-level, outside the pane) has the keyboard: it stays there, Escape and all (lane D: Symbol Properties
+        // could not be dismissed with Escape, the keyboard taken back to the frame and Backplane's window)
+        let in_dialog = self.info["mode"] == "fork" && nc::focus_in_pid(self.info["pid"].as_u64().unwrap_or(0) as u32) && !nc::has_focus(c);
+        if let (Some(w), false) = (self.want(), in_dialog) {
+            // BACKPLANE_KICAD_FOCUS_ON_PRESS: the old way (focus mid-press), to check a KiCad that must cope with it
+            let fork = self.info["mode"] == "fork" && std::env::var_os("BACKPLANE_KICAD_FOCUS_ON_PRESS").is_none();
+            match (nc::button_over(w), nc::has_focus(c)) {
+                (Some(true), false) if fork => { self.press_focus = Some(w); }
+                (Some(true), false) => nc::focus(w),
+                (Some(false), true) => nc::focus(self.toplevel),
+                (None, false) => { if let Some(pw) = self.press_focus.take() { if pw == w { nc::focus(w); } } }
+                (None, true) => { self.press_focus = None; }
+                _ => {}
+            }
+        }
+        let mut has = nc::has_focus(c) || in_dialog;
+        if std::mem::replace(&mut self.was_dialog, in_dialog) && !has {
+            if let Some(w) = self.want() { nc::focus(w); has = true; }
+        }
         // KiCad took the keyboard on a click (`_BACKPLANE_FOCUS`) and a window manager that focuses on click (i3) gave it straight back to
         // Backplane's window: the click was KiCad's, so is the keyboard (once, within moments of it)
         if !has && self.keys {
@@ -596,8 +623,17 @@ impl KicadPane {
             }
         }
         if local { nc::place_local(c, at, show, &self.ever_shown, &mut self.last_root); } else { nc::place(c, at, show, managed.as_deref(), &mut self.last_root); }
-        if self.keys && show != prev_show {
-            if let Some(w) = show { nc::focus(w); }
+        if (self.keys || self.want_keys) && show != prev_show {
+            if let Some(w) = show {
+                nc::focus(w);
+                if self.want_keys && !self.keys { self.keys = true; nc::grab_escape(self.toplevel, true); self.grab_click(c, false); self.touched(); }
+                self.want_keys = false;
+            }
+        } else if self.want_keys && show.is_some() && show == prev_show {
+            // already on show (Full size, the tab of the editor shown): the keyboard to it now
+            let w = show.unwrap(); nc::focus(w);
+            if !self.keys { self.keys = true; nc::grab_escape(self.toplevel, true); self.grab_click(c, false); self.touched(); }
+            self.want_keys = false;
         }
         match at { Some(p) if !over.is_empty() => nc::holes(c, Some(&nc::cut(p, &over))), _ => nc::holes(c, None) }
         self.placed = Some(key);
@@ -606,6 +642,8 @@ impl KicadPane {
     pub fn detach(&mut self) {
         let Some(c) = self.container.take() else { return };
         nc::place(c, None, None, None, &mut self.last_root); nc::grab_escape(self.toplevel, false);
+        // the keyboard back to Backplane's window on leaving the pane (View, another thread)
+        if self.keys { nc::focus(self.toplevel); self.keys = false; }
         // kept, unmapped, with KiCad's frames in it (still attached in the hub): the next Edit of this project in this window maps it at once
         // (a fork that maps locally; the oldest kept beyond KEEP is let go as before)
         if self.info["mode"] == "fork" && self.info["local_map"] == true && self.info["state"] == "ready" && self.toplevel == self.home {
@@ -974,7 +1012,7 @@ impl crate::Backplane {
     }
     /// The strip's buttons in the main window.
     pub(crate) fn kicad_strip_act(&mut self, a: &str, cx: &mut Context<Self>) {
-        match a { "full" => { self.screens.kicad_full = !self.screens.kicad_full; cx.notify(); } "popout" => self.kicad_popout(cx), "checks" => crate::screens::mgmt_checks::open_panel(self, cx), _ => {} }
+        match a { "full" => { self.screens.kicad_full = !self.screens.kicad_full; if let Some(p) = self.screens.kicad.clone() { p.update(cx, |p, _| { p.want_keys = true; p.placed = None; }); } cx.notify(); } "popout" => self.kicad_popout(cx), "checks" => crate::screens::mgmt_checks::open_panel(self, cx), _ => {} }
     }
 }
 
