@@ -373,9 +373,7 @@ echo \"PART 30 1 $P/0001.glb\"
 echo 'TRIS 42'
 ").unwrap();
         std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap();
-        // "Text file busy": the script written a moment ago is still open for writing in a child another test thread just forked, until that child's exec (a few ms, longer on a loaded box).
-        // Run it without --parts (it exits at once) until it starts.
-        for _ in 0..400 { match std::process::Command::new(&tool).status() { Err(e) if e.raw_os_error() == Some(crate::plat::errno::ETXTBSY) => std::thread::sleep(std::time::Duration::from_millis(25)), _ => break } }
+        started(&tool);
         let out = d.join("o.glb").to_string_lossy().into_owned();
         let mut seen = vec![];
         let mut on = |e: Event| { if let Event::Part { glb, .. } = &e { seen.push(std::fs::read_to_string(glb).unwrap_or_default()) } seen.push(format!("{e:?}").chars().take(4).collect()) };
@@ -386,12 +384,17 @@ echo 'TRIS 42'
         assert!(!Path::new(&format!("{out}.parts")).exists(), "the batches' folder goes once the tool is done");
     }
     #[test] fn no_tool_says_what_is_missing() { let r = convert(&[], "/a.step", "/o.glb", Some(NORMAL), false); assert_eq!((r.code, r.out.as_str()), (127, NO_MESHER)); }
+    /// "Text file busy": a script written a moment ago is still open for writing in a child another test thread just forked, until that child's exec
+    /// (a few ms, longer on a loaded box: main's build of 13870b64b failed on it). Run the script bare (it exits at once) until it starts.
+    fn started(tool: &Path) {
+        for _ in 0..400 { match std::process::Command::new(tool).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status() { Err(e) if e.raw_os_error() == Some(crate::plat::errno::ETXTBSY) => std::thread::sleep(std::time::Duration::from_millis(25)), _ => break } }
+    }
     fn dir(tag: &str) -> crate::plat::tmp::TempDir { crate::plat::tmp::dir(&format!("stepglb-{tag}")) }
     #[test] fn a_tool_gets_the_detail_and_the_next_is_tried_after_a_failure() {
         use crate::plat::fs::PermissionsExt;
         let d = dir("tool"); let tool = d.join("t"); let log = d.join("log");
         std::fs::write(&tool, format!("#!/bin/sh\necho \"$@\" > {}\nprintf x > \"$2\"\necho said\n", crate::plat::fs::script_path(&log))).unwrap();
-        std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap(); started(&tool);
         let out = d.join("o.glb"); let out = out.to_string_lossy();
         let t = tool.to_string_lossy();
         let r = convert(&[Mesher::Step2glb("/nonexistent/tool".into()), Mesher::Step2glb(t.to_string())], "/a.step", &out, Some(NORMAL), false);
@@ -405,7 +408,7 @@ echo 'TRIS 42'
         use crate::plat::fs::PermissionsExt;
         let base = dir("direct"); let d = base.join("a folder"); std::fs::create_dir_all(&d).unwrap(); let tool = d.join("my tool");
         std::fs::write(&tool, "#!/bin/sh\nprintf glb > \"$2\"\necho out\necho err >&2\n").unwrap();
-        std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap();
+        std::fs::set_permissions(&tool, std::fs::Permissions::from_mode(0o755)).unwrap(); started(&tool);
         let stage = stage(&d.join("m.glb").to_string_lossy(), "export-").unwrap(); let from = stage.join("model.glb"); let out = d.join("cache dir").join("m.glb");
         std::fs::create_dir_all(out.parent().unwrap()).unwrap();
         let r = convert(&[Mesher::Step2glb(tool.to_string_lossy().into())], &d.join("in put.step").to_string_lossy(), &from.to_string_lossy(), None, true);
