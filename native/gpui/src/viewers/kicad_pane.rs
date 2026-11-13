@@ -222,6 +222,10 @@ pub struct KicadPane {
     /// (opening-focus run Bp-repost: ignored at show, accepted once the pane was shown), so it is posted once more on the first
     /// frame both are visible, while the pane still has the keyboard
     refocus: Option<(u64, std::time::Instant)>,
+    /// F5, Windows: after a hand-in to this frame, for 1.5 s: an invisible KiCad window (a pre-warmed editor, wx-shown and
+    /// parked off-screen) that takes the foreground gets the hand-in posted to the shown frame once more (run Fmain5: the
+    /// first tab click after the pre-warm left the keys in a hidden "untitled [Unsaved] — Schematic Editor")
+    verify_handin: Option<(u64, std::time::Instant)>,
     /// the keyboard was in a KiCad dialog last tick: when it closes, the keyboard goes back to the editor (a window manager hands it to
     /// Backplane's window)
     was_dialog: bool,
@@ -267,7 +271,7 @@ impl KicadPane {
             let _ = drained_tx.send(());
         } }).detach();
         KicadPane { busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), last_root: (i32::MIN, 0), placed: None,
-            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), poked: None, unmapped_since: None, unshown_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, at_px: None, dialogs_open: Vec::new(), took: None, press_focus: None, want_keys: true, refocus: None, was_dialog: false }
+            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), poked: None, unmapped_since: None, unshown_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, at_px: None, dialogs_open: Vec::new(), took: None, press_focus: None, want_keys: true, refocus: None, verify_handin: None, was_dialog: false }
     }
     fn rpc(&self, name: &str, params: Value) { let _ = self.hub.try_send(Command::Rpc(name.to_string(), Secret(params), "kicad")); }
     /// The hub's `editor.kicad.<digest>` for this project changed.
@@ -698,6 +702,14 @@ impl KicadPane {
                 nc::focus(w);
             } else { cx.notify(); }
         }
+        if let Some((w, since)) = self.verify_handin {
+            if !self.keys || show != Some(w) || since.elapsed() > std::time::Duration::from_millis(1500) { self.verify_handin = None; }
+            else if let Some((stray, title)) = nc::invisible_kicad_foreground(w) {
+                self.verify_handin = None;
+                eprintln!("GPUI_LOG {}", json!({"kicad_stray_foreground": {"frame": w, "stray": stray, "title": title, "after_ms": since.elapsed().as_millis() as u64}}));
+                nc::focus(w);
+            } else { cx.notify(); }
+        }
         let prev_show = self.placed.as_ref().and_then(|(_, s, _)| *s);
         let key = (at, show, over.clone());
         if self.placed.as_ref() == Some(&key) {
@@ -719,6 +731,7 @@ impl KicadPane {
             if let Some(w) = show {
                 if self.want_keys && nc::button_over(w) == Some(false) { self.press_gave_keys = true; }
                 nc::focus(w);
+                if cfg!(windows) { self.verify_handin = Some((w, std::time::Instant::now())); cx.notify(); }
                 if cfg!(windows) && !nc::frame_visible(c, w) { self.refocus = Some((w, std::time::Instant::now())); cx.notify(); }
                 if self.want_keys && !self.keys { self.keys = true; nc::grab_escape(self.toplevel, true); self.grab_click(c, false); self.touched(); }
                 self.want_keys = false;
@@ -728,6 +741,7 @@ impl KicadPane {
             let w = show.unwrap();
             if nc::button_over(w) == Some(false) { self.press_gave_keys = true; }
             nc::focus(w);
+            if cfg!(windows) { self.verify_handin = Some((w, std::time::Instant::now())); cx.notify(); }
             if cfg!(windows) && !nc::frame_visible(c, w) { self.refocus = Some((w, std::time::Instant::now())); cx.notify(); }
             if !self.keys { self.keys = true; nc::grab_escape(self.toplevel, true); self.grab_click(c, false); self.touched(); }
             self.want_keys = false;

@@ -451,6 +451,8 @@ mod imp {
     /// An explicit hand-back to the client's window (a host chord pressed in the editor): as `focus` here.
     #[track_caller]
     pub fn hand_back(w: u64) { focus(w) }
+    /// Windows only (an invisible KiCad window taking the foreground): never so here.
+    pub fn invisible_kicad_foreground(_frame: u64) -> Option<(u64, String)> { None }
     /// Whether `frame` and its container are both visible now (Windows re-posts an opening focus request on that): always so here.
     pub fn frame_visible(_container: u64, _frame: u64) -> bool { true }
     /// The keyboard to `w` (a frame), when it is viewable.
@@ -1174,6 +1176,26 @@ mod imp {
     /// as `focus`, and the host window is activated too. KiCad's frame can be the active foreground window, where `SetFocus`
     /// alone moves only our background queue's focus and the keys keep going to KiCad. Never used for the reclaims of an
     /// opening or a pointer leaving the pane: activating there took the foreground from the editor just opened.
+    /// F5: the foreground window when it is one of KiCad's (`frame`'s process) that nobody can see: hidden, or parked
+    /// off-screen (a pre-warmed editor: wx-shown, natively unmapped at -30000). Its id and title. A visible KiCad popup
+    /// or dialog never matches. Window-state reads only, no message to KiCad.
+    pub fn invisible_kicad_foreground(frame: u64) -> Option<(u64, String)> {
+        unsafe {
+            let fg = windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow();
+            let f = hwnd(frame);
+            if fg.is_null() || f.is_null() || fg == f || IsChild(fg, f) != 0 || IsChild(f, fg) != 0 { return None }
+            let (mut a, mut b) = (0u32, 0u32);
+            GetWindowThreadProcessId(fg, &mut a);
+            GetWindowThreadProcessId(f, &mut b);
+            if a == 0 || a != b { return None }
+            let mut rc = RECT::default();
+            let off = GetWindowRect(fg, &mut rc) != 0 && (rc.right <= -10000 || rc.bottom <= -10000);
+            if IsWindowVisible(fg) != 0 && !off { return None }
+            let mut t = [0u16; 160];
+            let n = InternalGetWindowText(fg, t.as_mut_ptr(), t.len() as i32);
+            Some((id_of(fg), String::from_utf16_lossy(&t[..n.max(0) as usize])))
+        }
+    }
     pub fn hand_back(w: u64) { HANDED_BACK_AT.store(mono_ms().max(1), Ordering::SeqCst); focus_with(w, true) }
     /// Whether `frame` and `container` are both visible (each with every ancestor): a read of window state, no message to KiCad.
     pub fn frame_visible(container: u64, frame: u64) -> bool {
@@ -1481,6 +1503,7 @@ mod imp {
     pub fn holes(_container: u64, _keep: Option<&[R]>) {}
     pub fn focus(_w: u64) {}
     pub fn hand_back(_w: u64) {}
+    pub fn invisible_kicad_foreground(_frame: u64) -> Option<(u64, String)> { None }
     pub fn frame_visible(_container: u64, _frame: u64) -> bool { true }
     pub fn conn_fd() -> Option<i32> { None }
     pub fn pump() -> bool { false }
