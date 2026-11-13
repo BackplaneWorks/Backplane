@@ -8,6 +8,8 @@ use gpui::{prelude::*, *};
 use serde_json::{json, Value};
 use std::{cell::RefCell, collections::{BTreeMap, BTreeSet}};
 
+/// The rows a shut group shows (the rest behind its "n more": a board's hundreds of missing connections stay one short group).
+pub const SHUT_ROWS: usize = 3;
 /// Answer tags (Command::Ask): a search, a group's rest, a fix's message.
 pub const LIST_TAG: u64 = 0x6368_6b31;
 pub const MORE_TAG: u64 = 0x6368_6b32;
@@ -54,7 +56,8 @@ pub fn visible(d: &Value, search: Option<&[Value]>, more: &BTreeMap<String, Vec<
     let mut out = vec![];
     for g in d["groups"].as_array().into_iter().flatten() {
         let k = group_key(g);
-        match (open.contains(&k), more.get(&k)) { (true, Some(all)) => out.extend(all.iter().cloned()), _ => out.extend(g["rows"].as_array().cloned().unwrap_or_default()) }
+        let shut: Vec<Value> = g["rows"].as_array().cloned().unwrap_or_default();
+        match (open.contains(&k), more.get(&k)) { (true, Some(all)) => out.extend(all.iter().cloned()), (true, None) => out.extend(shut), _ => out.extend(shut.into_iter().take(SHUT_ROWS)) }
     }
     out
 }
@@ -66,7 +69,8 @@ pub fn items(d: &Value, search: Option<&[Value]>, waiting: bool, more: &BTreeMap
     let mut out = vec![];
     for g in d["groups"].as_array().into_iter().flatten() {
         let k = group_key(g); let n = g["n"].as_u64().unwrap_or(0); let is_open = open.contains(&k);
-        let rows: Vec<Value> = match (is_open, more.get(&k)) { (true, Some(all)) => all.clone(), _ => g["rows"].as_array().cloned().unwrap_or_default() };
+        let published: Vec<Value> = g["rows"].as_array().cloned().unwrap_or_default();
+        let rows: Vec<Value> = match (is_open, more.get(&k)) { (true, Some(all)) => all.clone(), (true, None) => published, _ => published.into_iter().take(SHUT_ROWS).collect() };
         let shown = rows.len() as u64;
         out.push(Item::Head(g.clone()));
         out.extend(rows.into_iter().map(Item::Row));
@@ -401,6 +405,15 @@ mod tests {
         assert_eq!(source_label(&d, "drc"), "DRC"); assert_eq!(source_label(&d, "fab"), "Fab rules"); assert_eq!(source_label(&d, "bom"), "bom");
         assert!(judged(&d, "datasheet") && !judged(&d, "fab"));
         assert_eq!(search_key("error", ""), "error"); assert_eq!(search_key("", "fab"), "|fab"); assert!(searching(&search_key("", "fab"), ""));
+    }
+    #[test] fn a_shut_group_shows_three() {
+        let d = json!({"groups": [{"source": "drc", "rule": "unconnected_items", "excluded": false, "n": 251, "rows": [r("a"), r("b"), r("c"), r("d"), r("e")]}]});
+        let ids = |v: Vec<Item>| v.iter().filter_map(|i| if let Item::Row(f) = i { Some(f["id"].as_str().unwrap().to_string()) } else { None }).collect::<Vec<_>>();
+        assert_eq!(ids(items(&d, None, false, &BTreeMap::new(), &BTreeSet::new())), ["a", "b", "c"]);
+        assert!(matches!(items(&d, None, false, &BTreeMap::new(), &BTreeSet::new()).last(), Some(Item::More(_, 248))));
+        let k: BTreeSet<String> = ["drc:unconnected_items:false".to_string()].into();
+        assert_eq!(ids(items(&d, None, false, &BTreeMap::new(), &k)).len(), 5, "opened, before the rest arrives: what was published");
+        assert_eq!(visible(&d, None, &BTreeMap::new(), &BTreeSet::new()).len(), 3);
     }
     #[test] fn the_list_lines() {
         let d = data();
