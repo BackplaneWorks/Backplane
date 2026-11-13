@@ -77,7 +77,7 @@ echo "Downloading $asset"
 get "$pkg" "$base$asset" || fail "Could not download $base$asset"
 get "$stage/SUMS" "${base}SHA256SUMS" || fail "Could not download ${base}SHA256SUMS"
 echo 'Checking the checksum'
-want=$(awk -v n="$asset" '{ f=$2; sub(/^\*/, "", f); sub(/^\.\//, "", f); if (f==n) print $1 }' "$stage/SUMS")
+want=$(awk -v n="$asset" '{ f=$2; sub(/\r$/, "", f); sub(/^\*/, "", f); sub(/^\.\//, "", f); if (f==n) print $1 }' "$stage/SUMS")
 if command -v sha256sum >/dev/null 2>&1; then
   got=$(sha256sum "$pkg" | cut -d' ' -f1)
 else
@@ -376,6 +376,13 @@ f={serve}/$(basename \"$1\")
 cp \"$f\" \"$out\"
 ", r.display())); }
         b
+    }
+    /// The release's SHA256SUMS has the Windows build's lines with CRLF (bp.10, bp.12): the digest is still found for that asset.
+    #[cfg(unix)] #[test] fn the_script_reads_a_sums_line_that_ends_in_crlf() {
+        let r = tmp("crlf"); let (p, bin) = fixture(&r, false); let parent = r.join("home/kicad");
+        std::fs::write(r.join("serve/SHA256SUMS"), format!("00  other.zip\r\n{}  {}\r\n", p.sha256, p.asset)).unwrap();
+        let (ok, out) = script(&bin, &parent, &p);
+        assert!(ok, "{out}"); assert!(parent.join("0.0.1-bp.1/bin/kicad-cli").is_file());
     }
     #[cfg(unix)] #[test] fn with_no_curl_the_script_downloads_with_wget_and_with_neither_says_so() {
         let r = tmp("wget"); let (p, bin) = fixture(&r, false); let parent = r.join("home/kicad");
