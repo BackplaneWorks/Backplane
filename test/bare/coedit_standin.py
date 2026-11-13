@@ -31,7 +31,12 @@ if '--output-format' in a and a[a.index('--output-format') + 1] == 'json':   # a
     sys.exit(0)
 say = lambda o: (print(json.dumps(o)), sys.stdout.flush())
 say({'type': 'system', 'subtype': 'init', 'session_id': 'bare-standin'})
-sys.stdin.readline()
+first = sys.stdin.readline()
+try:
+    m0 = json.loads(first).get('message', {}); c0 = m0.get('content', '')
+    text = c0 if isinstance(c0, str) else ' '.join(x.get('text', '') for x in c0 if isinstance(x, dict))
+except Exception:
+    text = first
 n = [0]
 def tool(name, args):
     n[0] += 1
@@ -49,7 +54,19 @@ C = 'kiapi.common.commands.'
 ipc = lambda ty, m={}: tool('kicad_ipc', {'path': pcb, 'type': ty, 'message': m})
 msg = lambda r: r['body'].get('message', {}) if isinstance(r['body'], dict) else {}
 r = {}
-if url and pcb:
+plan = conf.get('plan')
+if url and pcb and text.startswith('plan-propose'):
+    # the floorplanner's gate: propose, then a route the hub must refuse while nothing is approved
+    out = out.replace('.json', '-plan1.json') if out else ''
+    r['propose'] = tool('plan_propose', {'plan': plan, 'mode': 'merge'})
+    r['get'] = tool('plan_get', {})
+    r['route_refused'] = tool('plan_route', {})
+    r['approve_ask'] = tool('plan_approve', {'ids': [plan['corridors'][0]['id']], 'note': 'bare gate corridor'})
+elif url and pcb and text.startswith('plan-route'):
+    out = out.replace('.json', '-plan2.json') if out else ''
+    r['get'] = tool('plan_get', {})
+    r['route'] = tool('plan_route', {'ids': [plan['corridors'][0]['id']], 'max_nets': 2})
+elif url and pcb:
     r['status'] = tool('kicad_ipc_status', {'path': pcb})
     r['open'] = ipc(C + 'OpenDocument', {'type': 'DOCTYPE_PCB', 'path': pcb})
     # one writer at a time: the hub names the board's lock in its refusal; an agent takes it and goes on (agents/design.rs)

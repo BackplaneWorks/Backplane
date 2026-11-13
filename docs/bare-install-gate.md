@@ -108,9 +108,13 @@ Boats cost while they run: the gate deletes its gate box and its build box on ev
 - [x] DRC by the runtime's kicad-cli
 - [x] export to the current stock KiCad (official packages): loads clean, same ERC/DRC, gerbers and netlist
 - [x] DRC correctness: a short inside a zone fill (known-red before bp.12.1)
-- [ ] the person's own comment from KiCad (the comment window, lane C)
 - [ ] the PCB canvas has a usable size in the pane (first runs: about 80 px wide in a 699 px pane, KiCad's Properties and Appearance panels take the rest)
-- [ ] the DRC/ERC panel (lane E), BOM (lane D), floorplanner plan in the journey (the sample passes stock_compat), review, Gerber viewer
+- [x] BOM panel (Alt+Shift+B) with the board's lines (hub's mgmt.watch data)
+- [x] Checks panel, and a click on a DRC row selects its items in KiCad (GetSelection over KiCad's socket)
+- [x] Fab panel, Review writes `.backplane/design-review.json`
+- [x] Ctrl+; in KiCad opens the comment window; a note posts to the thread
+- [x] Gerbers tab draws the `mfg/` set exported with the runtime's kicad-cli
+- [x] plan tools through the stand-in agent: propose, route refused, the person approves (`plan.approve`), route goes through
 - [ ] footprint and symbol editors, 3D
 - [ ] debian:12 and fedora:41 (the manifest step is Ubuntu's; others report every library)
 - [ ] Windows (bp-win) and macOS (the Mac mini under `mac-heavy`)

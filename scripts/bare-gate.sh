@@ -31,7 +31,7 @@ newbox() { # name, extra args -> id
   echo "$id" >>"$OUT/boxes"; echo "$id"   # called in $( ): the list is a file, read back by gone()
 }
 push() { tar -czf - "${@:2}" | B ssh "$1" -- 'mkdir -p ~/gate && tar -xzf - -C ~/gate'; }
-FILES=(test/bare test/onboarding/pos.py test/tools/claude_standin.ts test/wire.mjs test/wire-codec.js native/host/src/wire_dict.rs test/files/fixtures/plot)
+FILES=(test/bare test/kicad_embed/lib/gui_ipc_probe.py test/onboarding/pos.py test/tools/claude_standin.ts test/wire.mjs test/wire-codec.js native/host/src/wire_dict.rs test/files/fixtures/plot)
 T0=$(date +%s)
 
 ARCH_ARGS=()
@@ -77,7 +77,8 @@ echo "== paper cuts, in the order a person meets them (rank 1 = blocks or mislea
 [ -s "$OUT/findings.tsv" ] && sort -s -t$'\t' -k1,1n "$OUT/findings.tsv" | awk -F'\t' '{printf "  [%s] %-12s %s\n", $1, $2, $3}' || echo "  none"
 echo "== checks: $(grep -c ^PASS "$OUT/checks.tsv" 2>/dev/null) pass, $(grep -c ^FAIL "$OUT/checks.tsv" 2>/dev/null) fail ($OUT)"
 grep ^FAIL "$OUT/checks.tsv" 2>/dev/null | sed 's/^/  /'
-grep ^KNOWN-RED "$OUT/checks.tsv" 2>/dev/null | sed 's/^/  /'   # named, with their reason: not a pass, not a fail
+grep ^KNOWN-RED "$OUT/checks.tsv" 2>/dev/null | sed 's/^/  /'
+grep ^SKIP "$OUT/checks.tsv" 2>/dev/null | sed 's/^/  /'   # named, with their reason: not a pass, not a fail
 grep -h '^NOTE' "$OUT/logs/drc-probe.log" 2>/dev/null | sed 's/^/  /'
 [ "$RC" = 0 ] && ! grep -q ^FAIL "$OUT/checks.tsv" 2>/dev/null
 exit $?
