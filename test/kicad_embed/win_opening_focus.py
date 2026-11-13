@@ -210,6 +210,49 @@ def wait_prewarm(h, top, mode, timeout_s=40):
     return {"prewarm": "not seen", "ms": round((time.monotonic() - start) * 1000)}
 
 
+def frozen_typing(h, cp, frame, gl, cbox, kpid, tag):
+    """Backplane's composer has the keys, KiCad is frozen with the pointer over its canvas: per-key latency (ms)."""
+    top = E.find_main_window(cp.pid)
+    keys_back_to_backplane(h, cp, frame, top, "composer", cbox)
+    E.screen_move(gl["root_x"] + gl["w"] // 2, gl["root_y"] + gl["h"] // 2)
+    time.sleep(0.4)
+    suspended = E.suspend_pid(kpid, True)
+    try:
+        return [key_latency_ms(h, cbox, c, f"{tag}{i}") for i, c in enumerate("abcd")] if suspended else None
+    finally:
+        if suspended:
+            E.suspend_pid(kpid, False)
+        time.sleep(0.8)
+
+
+def f6_check(h, cp, frame, children, timeline, kpid):
+    """F6: does frozen typing slow down from canvas activity alone (wheel zooms over the canvas, no click into the
+    pane, no return), and does it decay with time? One run, numbers only."""
+    gls = [w for w in children if w["visible"] and w["class"] == "wxGLCanvas"]
+    gl = max(gls, key=lambda w: w["w"] * w["h"]) if gls else None
+    top = E.find_main_window(cp.pid)
+    cbox = composer_box(h, top)
+    res = {"baseline": frozen_typing(h, cp, frame, gl, cbox, kpid, "f6base")}
+    # canvas activity with no click and no return: 20 wheel notches over the canvas (KiCad zooms the view under the pointer)
+    E.screen_move(gl["root_x"] + gl["w"] // 2, gl["root_y"] + gl["h"] // 2)
+    for i in range(20):
+        E._send(E._mouse(0x0800, 120 if i % 2 else -120))
+        time.sleep(0.15)
+    time.sleep(1.0)
+    res["after_wheel"] = frozen_typing(h, cp, frame, gl, cbox, kpid, "f6wheel")
+    time.sleep(30)
+    res["after_wheel_plus_30s"] = frozen_typing(h, cp, frame, gl, cbox, kpid, "f6decay")
+    # then one tab return (the sequence L4 repeats ten times), and again
+    keys_back_to_backplane(h, cp, frame, top, "composer", cbox)
+    h.click_control(top, "kicad-tab:PCB")
+    time.sleep(1.0)
+    res["after_one_return"] = frozen_typing(h, cp, frame, gl, cbox, kpid, "f6return")
+    print("DIAG f6 " + json.dumps(res), flush=True)
+    timeline.append({"stage": "f6", **res})
+    h.check("F6 numbers recorded (diagnostic, no bar)", all(v is not None for v in res.values()), res)
+    return h.finish()
+
+
 def zoom_field_box(frame):
     """KiCad's status-bar zoom readout ("Z 2.20"), bottom left of the frame."""
     r = E.W.RECT()
@@ -571,6 +614,8 @@ def run(h):
             h.check("F5: Edit, then the pre-warm with no input: the PCB canvas keeps the keys (F2 acts by the zoom readout)",
                     bool(pw) and after["inside_frame"] and bool(zoomed), d)
             return h.finish()
+        if only == "f6":
+            return f6_check(h, cp, frame, children, timeline, pid)
         if only == "mouse_return":
             return mouse_return_check(h, cp, frame, children, timeline, kpid=pid)
         if not only_click:
