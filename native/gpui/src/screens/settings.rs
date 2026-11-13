@@ -34,7 +34,7 @@ pub fn parse(settings: &Value) -> Vec<Row> {
         fields: r["fields"].as_array().into_iter().flatten().map(|f| { let vault = f["vault"].as_bool().unwrap_or(false); Field { name: string(f, "name"), hint: string(f, "hint"), secret: f["secret"].as_bool().unwrap_or(false), value: if vault { String::new() } else { string(f, "value") }, vault } }).collect(),
         qr: r["qr"].as_array().into_iter().flatten().filter_map(|l| l.as_str().map(str::to_string)).collect(),
         qrnote: string(r, "qrnote"), local: r["local"].as_bool().unwrap_or(false), tone: string(r, "tone"),
-        kind: string(r, "kind"), raw: if r["kind"].is_string() || r["in"] == true { r.clone() } else { Value::Null },
+        kind: string(r, "kind"), raw: if r["kind"].is_string() || r["in"] == true || r["progress"].is_number() { r.clone() } else { Value::Null },
     }).collect()
 }
 
@@ -378,6 +378,12 @@ pub(crate) fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<
     left = if stack { left.w_full() } else { left.flex_none().w(px((avail - GAP - right_w).max(LABEL_MIN))) };
     if !r.label.is_empty() { left = left.child(div().text_size(px(13.)).child(trs(&r.label))); }
     if !r.note.is_empty() { left = left.child(div().text_size(px(12.)).text_color(c(match r.tone.as_str() { "warn" => "warn", "bad" => "bad", _ => "dim" })).child(trs(&r.note))); }
+    // a download's share done (setup's and Settings' KiCad install): a thin bar under the words
+    if let Some(p) = r.raw["progress"].as_f64() {
+        let p = p.clamp(0., 1.) as f32;
+        left = left.child(div().id(SharedString::from(format!("row-progress-{i}"))).mt_1().h(px(4.)).w_full().max_w(px(360.)).rounded(px(2.)).bg(c("raise"))
+            .child(div().h_full().rounded(px(2.)).bg(c("accent")).w(relative(p))));
+    }
     let mut right = if stack { div().flex().flex_col().items_start().gap_2().max_w_full() } else { div().flex().flex_col().items_end().gap_2().flex_shrink_0().max_w(px(CONTROLS_MAX)) };
     for f in &r.fields {
         if let Some(slot) = fields.get(&f.name) { right = right.child(div().w(px(field_w)).max_w_full().px_2().py_1().bg(c("raise")).child(slot.input.clone())); }

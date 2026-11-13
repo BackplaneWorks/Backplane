@@ -235,12 +235,78 @@ async fn tool(prog: &Path, args: &[String], log: &Path, mut tick: impl FnMut()) 
     let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Net, prog);
     c.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::from(err));
     crate::plat::proc::own_group_tokio(&mut c);
+    let from = std::fs::metadata(log).map_or(0, |m| m.len());
     let mut child = c.spawn().map_err(|e| format!("could not start {}: {e}", prog.display()))?;
     let mut so = child.stdout.take();
     let read = tokio::spawn(async move { let mut s = String::new(); if let Some(o) = so.as_mut() { let _ = tokio::io::AsyncReadExt::read_to_string(o, &mut s).await; } s });
     let status = loop { match tokio::time::timeout(std::time::Duration::from_secs(1), child.wait()).await { Ok(r) => break r.map_err(|e| e.to_string())?, Err(_) => tick() } };
     let text = read.await.unwrap_or_default(); drop(out);
-    if status.success() { Ok(text) } else { Err(last_line(&std::fs::read_to_string(log).unwrap_or_default())) }
+    if status.success() { return Ok(text) }
+    // what it said itself (not an earlier step's line), else what its exit code means
+    let said = std::fs::read(log).ok().map(|b| String::from_utf8_lossy(b.get(from as usize..).unwrap_or(&[])).into_owned()).unwrap_or_default();
+    let said = last_line(&said);
+    let name = prog.file_stem().map_or(String::new(), |n| n.to_string_lossy().to_lowercase());
+    Err(if !said.is_empty() { said } else { exit_words(&name, status.code()) })
+}
+/// A downloader's exit code in the person's words (curl's and wget's documented codes), for one that stopped without a word.
+pub fn exit_words(prog: &str, code: Option<i32>) -> String {
+    let w = match (prog, code) {
+        ("curl", Some(6)) => "no internet connection: the address did not resolve",
+        ("curl", Some(7)) => "could not connect to the server",
+        ("curl", Some(18)) => "the connection ended before the file was whole",
+        ("curl", Some(22)) => "the server refused the file",
+        ("curl", Some(28)) => "the connection timed out",
+        ("curl", Some(35 | 60)) => "the secure connection could not be made (check the computer's clock and any proxy)",
+        ("curl", Some(23)) => "the disk refused the download (is it full?)",
+        ("curl", Some(56)) => "the connection was cut",
+        ("wget", Some(3)) => "the disk refused the download (is it full?)",
+        ("wget", Some(4)) => "the network failed",
+        ("wget", Some(5)) => "the secure connection could not be made (check the computer's clock and any proxy)",
+        ("wget", Some(8)) => "the server refused the file",
+        _ => "",
+    };
+    if w.is_empty() { format!("{prog} stopped ({})", code.map_or("killed".into(), |c| format!("exit {c}"))) } else { w.to_string() }
+}
+/// A download's progress: bytes so far, the whole (0: not known yet), bytes a second and seconds left (0: not known).
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+pub struct Bytes { pub done: u64, pub total: u64, pub rate: u64, pub eta: u64 }
+impl Bytes {
+    /// What setup says: "312 of 971 MB, about 40 s left"; "312 MB so far" while the whole is not known.
+    pub fn words(&self) -> String {
+        let mb = |b: u64| (b + (1 << 19)) >> 20;
+        if self.total == 0 { return format!("{} MB so far", mb(self.done)) }
+        let left = match self.eta { 0 => String::new(), s if s < 60 => format!(", about {} s left", ((s + 4) / 5 * 5).max(5)), s => format!(", about {} min left", (s + 30) / 60) };
+        format!("{} of {} MB{left}", mb(self.done).min(mb(self.total)), mb(self.total))
+    }
+    /// The share done, 0 to 1 (0 while the whole is not known).
+    pub fn share(&self) -> f64 { if self.total == 0 { 0. } else { (self.done as f64 / self.total as f64).min(1.) } }
+}
+/// Rate and time left from the last few seconds' samples (a moving window, so a stall shows quickly and a burst does not promise too much).
+#[derive(Default)]
+struct Meter { samples: std::collections::VecDeque<(std::time::Instant, u64)> }
+impl Meter {
+    fn at(&mut self, now: std::time::Instant, done: u64, total: u64) -> Bytes {
+        self.samples.push_back((now, done));
+        while self.samples.len() > 2 && now.duration_since(self.samples[0].0).as_secs_f64() > 6. { self.samples.pop_front(); }
+        let (t0, d0) = self.samples[0]; let dt = now.duration_since(t0).as_secs_f64();
+        let rate = if dt >= 0.9 { (done.saturating_sub(d0) as f64 / dt) as u64 } else { 0 };
+        let eta = if rate > 0 && total > done { (total - done).div_ceil(rate) } else { 0 };
+        Bytes { done, total, rate, eta }
+    }
+}
+/// Where a download is kept until it is installed: it survives a failure and a hub restart, and the next try continues it (`curl -C -`,
+/// `wget -c`). A wrong digest removes it.
+pub fn partial(parent: &Path, p: &Package) -> PathBuf { parent.join(".partial").join(p.asset) }
+/// The size of `url` from its headers (a HEAD through the same downloader, redirects followed: the last Content-Length); 0 when not said.
+async fn length(g: &Getter, url: &str) -> u64 {
+    let (prog, args): (&Path, Vec<&str>) = match g { Getter::Curl(x) => (x, vec!["--proto", "=https", "--tlsv1.2", "-fsSIL", "--max-time", "20", url]), Getter::Wget(x) => (x, vec!["--spider", "-S", "--https-only", "--timeout=20", "--tries=1", url]) };
+    let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Net, prog); c.args(&args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    let Ok(Ok(o)) = tokio::time::timeout(std::time::Duration::from_secs(25), c.output()).await else { return 0 };
+    content_length(&format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr)))
+}
+/// The last Content-Length in a run of response headers (after redirects, the file's own).
+pub fn content_length(headers: &str) -> u64 {
+    headers.lines().filter_map(|l| { let l = l.trim(); let (k, v) = l.split_once(':')?; k.trim().eq_ignore_ascii_case("content-length").then(|| v.trim().parse::<u64>().ok()).flatten() }).last().unwrap_or(0)
 }
 /// The lock folder: `<parent>/.install-<version>.lock` holding the hub's pid. Dropping it removes the stage and the lock.
 struct Held { lock: PathBuf, stage: Option<PathBuf> }
@@ -263,7 +329,7 @@ fn take_lock(parent: &Path, version: &str) -> Result<Held, String> {
     Err("Another KiCad installation is active; retry when it finishes".into())
 }
 /// The fetch, step by step; each step's words go to `step` and the log, as SCRIPT's lines did. Ok(the installed folder).
-pub async fn fetch(t: &Tools, base: &str, parent: &Path, p: &Package, log: &Path, step: &mut impl FnMut(String)) -> Result<PathBuf, String> {
+pub async fn fetch(t: &Tools, base: &str, parent: &Path, p: &Package, log: &Path, step: &mut impl FnMut(String), bytes: &mut impl FnMut(Bytes)) -> Result<PathBuf, String> {
     check_package(p)?;
     let say = |step: &mut dyn FnMut(String), s: String| { if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(log) { let _ = std::io::Write::write_all(&mut f, format!("{s}\n").as_bytes()); } step(s) };
     let dir = parent.join(p.version);
@@ -273,20 +339,32 @@ pub async fn fetch(t: &Tools, base: &str, parent: &Path, p: &Package, log: &Path
     let stage = parent.join(format!(".install-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos())));
     std::fs::create_dir(&stage).map_err(|e| e.to_string())?; held.stage = Some(stage.clone());
     #[cfg(unix)] { use std::os::unix::fs::PermissionsExt; let _ = std::fs::set_permissions(&stage, std::fs::Permissions::from_mode(0o700)); }
-    let (pkg, sums) = (stage.join(p.asset), stage.join("SUMS"));
+    let (pkg, sums) = (partial(parent, p), stage.join("SUMS"));
+    std::fs::create_dir_all(pkg.parent().unwrap_or(parent)).map_err(|e| e.to_string())?;
     let gp = match &t.get { Getter::Curl(x) | Getter::Wget(x) => x.clone() };
-    say(step, format!("Downloading {}", p.asset));
     let url = format!("{base}{}", p.asset);
-    let mut last = std::time::Instant::now();
-    let mut progress = |step: &mut dyn FnMut(String)| { if last.elapsed().as_secs() >= 2 { last = std::time::Instant::now(); let mb = std::fs::metadata(&pkg).map_or(0, |m| m.len()) >> 20; say(step, format!("Downloading {}: {mb} MB", p.asset)) } };
-    let mut ok = Err(String::new());
-    for _ in 0..3 { ok = tool(&gp, &get_args(&t.get, &url, &pkg), log, || progress(step)).await; if ok.is_ok() { break } tokio::time::sleep(std::time::Duration::from_secs(2)).await }
-    ok.map_err(|_| format!("Could not download {url}"))?;
+    let have = |f: &Path| std::fs::metadata(f).map_or(0, |m| m.len());
+    let total = length(&t.get, &url).await;
+    let before = have(&pkg);
+    say(step, if before > 0 { format!("Downloading {} (continuing from {} MB)", p.asset, before >> 20) } else { format!("Downloading {}", p.asset) });
+    let mut meter = Meter::default();
+    bytes(meter.at(std::time::Instant::now(), before, total));
+    // a download already whole (an earlier try ended after it) is not asked for again: a server answers a range past the end with an error
+    if !(total > 0 && before == total) {
+        let mut ok = Err(String::new());
+        for _ in 0..3 { ok = tool(&gp, &get_args(&t.get, &url, &pkg), log, || bytes(meter.at(std::time::Instant::now(), have(&pkg), total))).await; if ok.is_ok() { break } tokio::time::sleep(std::time::Duration::from_secs(2)).await }
+        if let Err(why) = ok {
+            let got = have(&pkg);
+            let at = if got == 0 { String::new() } else { format!(" at {}", Bytes { done: got, total, rate: 0, eta: 0 }.words().replace(" so far", "")) };
+            return Err(format!("The download stopped{at} ({}). It continues from there", if why.is_empty() { "no answer".to_string() } else { why }))
+        }
+    }
+    let got = have(&pkg); bytes(Bytes { done: got, total: total.max(got), rate: 0, eta: 0 });
     tool(&gp, &get_args(&t.get, &format!("{base}SHA256SUMS"), &sums), log, || {}).await.map_err(|_| format!("Could not download {base}SHA256SUMS"))?;
     say(step, "Checking the checksum".into());
     let want = sum_for(&std::fs::read_to_string(&sums).unwrap_or_default(), p.asset).unwrap_or_default();
-    let pk = pkg.clone(); let got = tokio::task::spawn_blocking(move || sha256_file(&pk)).await.map_err(|e| e.to_string())??;
-    if want != got || got != p.sha256 { return Err("KiCad archive checksum mismatch".into()) }
+    let pk = pkg.clone(); let got = tokio::task::spawn_blocking(move || sha256_file(&pk)).await.map_err(|e| e.to_string())??; // the digest
+    if want != got || got != p.sha256 { let _ = std::fs::remove_file(&pkg); if let Some(d) = pkg.parent() { let _ = std::fs::remove_dir(d); } return Err("KiCad archive checksum mismatch (the download was removed; Try again downloads it anew)".into()) }
     let mut magic = [0u8; 4]; let _ = std::io::Read::read(&mut std::fs::File::open(&pkg).map_err(|e| e.to_string())?, &mut magic);
     let fmt_ok = match p.format { "tar.gz" => magic[..3] == [0x1f, 0x8b, 0x08], "zip" => magic == [0x50, 0x4b, 0x03, 0x04], _ => false };
     if !fmt_ok { return Err("KiCad archive header does not match its platform format".into()) }
@@ -312,6 +390,7 @@ pub async fn fetch(t: &Tools, base: &str, parent: &Path, p: &Package, log: &Path
     manifest_ok(&std::fs::read_to_string(runtime.join("manifest.json")).unwrap_or_default(), p)?;
     if dir.exists() || dir.symlink_metadata().is_ok() { return Err("Runtime destination appeared; existing installation preserved".into()) }
     std::fs::rename(&runtime, &dir).map_err(|e| format!("Could not move KiCad into {}: {e}", dir.display()))?;
+    let _ = std::fs::remove_file(&pkg); if let Some(d) = pkg.parent() { let _ = std::fs::remove_dir(d); }
     say(step, format!("Installed in {}", dir.display()));
     drop(held);
     Ok(dir)
@@ -376,12 +455,12 @@ pub fn last_line(text: &str) -> String { text.lines().rev().map(str::trim).find(
 
 /// Run the installer to its end: `standin` (a program given the same arguments) or the script under `sh`, detached, its output into `log`.
 /// `step` hears each new last line while it runs. Ok(the installed folder) or Err(why, the installer's own last words).
-pub async fn run(standin: Option<&Path>, parent: &Path, p: &Package, log: &Path, mut step: impl FnMut(String)) -> Result<String, String> {
+pub async fn run(standin: Option<&Path>, parent: &Path, p: &Package, log: &Path, mut step: impl FnMut(String), mut bytes: impl FnMut(Bytes)) -> Result<String, String> {
     std::fs::create_dir_all(parent).map_err(|e| format!("could not make {}: {e}", parent.display()))?;
     if standin.is_none() && rust_fetch() {
         let _ = std::fs::write(log, "");
         let t = tools()?;
-        return fetch(&t, &base_url(p), parent, p, log, &mut step).await.map(|d| d.to_string_lossy().into_owned());
+        return fetch(&t, &base_url(p), parent, p, log, &mut step, &mut bytes).await.map(|d| d.to_string_lossy().into_owned());
     }
     let out = std::fs::File::create(log).map_err(|e| format!("could not write {}: {e}", log.display()))?;
     let err = out.try_clone().map_err(|e| e.to_string())?;
@@ -415,7 +494,17 @@ pub async fn run(standin: Option<&Path>, parent: &Path, p: &Package, log: &Path,
 static RUNNING: AtomicBool = AtomicBool::new(false);
 /// What Settings > CAD's row says: `{"state":"running"|"failed"|"done","version","note"}` in info `kicad.install`.
 /// An info key is not in the log, so open views are told to ask again (`bump_views`): the row moves with each step.
-async fn say(hub: &Arc<Hub>, state: &str, version: &str, note: &str) { hub.set_info("kicad.install", &json!({"state": state, "version": version, "note": note}).to_string()).await; hub.bump_views(); }
+async fn say(hub: &Arc<Hub>, state: &str, version: &str, note: &str) { say_bytes(hub, state, version, note, None).await }
+/// The same with the download's progress: `done`, `total` (bytes; 0 not known), `rate` (bytes a second), `eta` (seconds; 0 not known).
+async fn say_bytes(hub: &Arc<Hub>, state: &str, version: &str, note: &str, b: Option<Bytes>) {
+    let mut v = json!({"state": state, "version": version, "note": note});
+    if let Some(b) = b { v["phase"] = json!("download"); v["done"] = json!(b.done); v["total"] = json!(b.total); v["rate"] = json!(b.rate); v["eta"] = json!(b.eta); }
+    hub.set_info("kicad.install", &v.to_string()).await; hub.bump_views();
+}
+/// Whether an install runs in this hub now (a "running" left in `kicad.install` by a hub that stopped is not).
+pub fn running() -> bool { RUNNING.load(Ordering::SeqCst) }
+/// A download an earlier try left (`partial`), with its size: the next install continues it.
+pub fn partial_bytes(home: &Path, p: &Package) -> u64 { std::fs::metadata(partial(&parent(home), p)).map_or(0, |m| m.len()) }
 
 /// `kicad.install {consent}`: refused, or started (the reply says so; the info key says the rest).
 pub async fn install(hub: &Arc<Hub>, consent: bool) -> Result<String, String> {
@@ -436,10 +525,19 @@ pub async fn install(hub: &Arc<Hub>, consent: bool) -> Result<String, String> {
     let started = format!("installing Backplane KiCad {} into {}", p.version, parent.display());
     let h = hub.clone();
     tokio::spawn(async move {
-        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<String>();
+        // the steps' words and, while it downloads, its bytes (at most twice a second to the views)
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Result<String, Bytes>>();
         let h2 = h.clone();
-        let relay = tokio::spawn(async move { while let Some(l) = rx.recv().await { say(&h2, "running", p.version, &l).await } });
-        let r = run(standin.as_deref(), &parent, p, &parent.join(".install.log"), |l| { let _ = tx.send(l); }).await;
+        let relay = tokio::spawn(async move {
+            let (mut note, mut last) = (String::new(), std::time::Instant::now() - std::time::Duration::from_secs(1));
+            while let Some(m) = rx.recv().await { match m {
+                Ok(l) => { let dl = l.starts_with("Downloading"); note = l.clone(); if !dl { say(&h2, "running", p.version, &l).await } else { say_bytes(&h2, "running", p.version, &l, Some(Bytes::default())).await } }
+                Err(b) => if last.elapsed().as_millis() >= 500 || (b.total > 0 && b.done >= b.total) { last = std::time::Instant::now(); say_bytes(&h2, "running", p.version, &note, Some(b)).await },
+            } }
+        });
+        let tx2 = tx.clone();
+        let r = run(standin.as_deref(), &parent, p, &parent.join(".install.log"), |l| { let _ = tx.send(Ok(l)); }, |b| { let _ = tx2.send(Err(b)); }).await;
+        drop(tx2);
         drop(tx); let _ = relay.await;
         RUNNING.store(false, Ordering::SeqCst);
         // Settings > CAD names the new KiCad (and its Install row goes) before the install says it is done: whoever reads "done" reads the new status with it
@@ -539,7 +637,8 @@ mod tests {
         std::fs::write(serve.join("SHA256SUMS"), format!("{sum}  {asset}\n")).unwrap();
         let bin = r.join("bin"); std::fs::create_dir_all(&bin).unwrap();
         // curl -fsSL -o OUT URL: the file of that name from serve/ (fails like curl -f for anything else)
-        exe(&bin.join("curl"), &format!("#!/bin/sh\nwhile [ $# -gt 1 ]; do [ \"$1\" = -o ] && out=$2; shift; done\nf={}/$(basename \"$1\")\n[ -f \"$f\" ] || exit 22\ncp \"$f\" \"$out\"\n", serve.display()));
+        // a HEAD (-fsSIL) answers with the file's size; a serve/FAILAT file (<bytes>) stops a download there (a partial file and exit 18, as curl does)
+        exe(&bin.join("curl"), &format!("#!/bin/sh\nhead=; case \"$*\" in *-fsSIL*) head=1;; esac\nwhile [ $# -gt 1 ]; do [ \"$1\" = -o ] && out=$2; shift; done\nf={}/$(basename \"$1\")\n[ -f \"$f\" ] || exit 22\nif [ -n \"$head\" ]; then echo 'HTTP/2 302'; echo 'content-length: 0'; echo; echo 'HTTP/2 200'; echo \"Content-Length: $(wc -c <\"$f\")\"; exit 0; fi\necho x >>\"$f.calls\"\nif [ -f {0}/FAILAT ] && [ \"$(basename \"$f\")\" != SHA256SUMS ]; then head -c \"$(cat {0}/FAILAT)\" \"$f\" >\"$out\"; exit 18; fi\ncp \"$f\" \"$out\"\n", serve.display()).replace("{0}", &serve.display().to_string()));
         let leak = |s: String| -> &'static str { Box::leak(s.into_boxed_str()) };
         (Package { platform: plat, version: v, release: leak(format!("backplane-kicad-v{v}")), asset: leak(asset), sha256: leak(sum), format: "tar.gz", cli: "bin/kicad-cli" }, bin)
     }
@@ -581,7 +680,7 @@ cp \"$f\" \"$out\"
     #[cfg(unix)] fn fetch_run(r: &Path, p: &Package, dirs: &[PathBuf]) -> (Result<PathBuf, String>, Vec<String>) {
         let t = match tools_in(false, None, dirs) { Ok(t) => t, Err(e) => return (Err(e), vec![]) };
         let mut steps = vec![];
-        let got = rt().block_on(fetch(&t, "https://x/r/", &r.join("home/kicad"), p, &r.join("log"), &mut |l| steps.push(l)));
+        let got = rt().block_on(fetch(&t, "https://x/r/", &r.join("home/kicad"), p, &r.join("log"), &mut |l| steps.push(l), &mut |_| {}));
         (got, steps)
     }
     #[cfg(unix)] #[test] fn the_rust_fetch_installs_a_checked_package_and_says_each_step() {
@@ -608,7 +707,7 @@ cp \"$f\" \"$out\"
     }
     #[cfg(unix)] #[test] fn the_rust_fetch_refuses_a_wrong_digest_or_manifest_and_leaves_nothing() {
         let r = tmp("rf-bad"); let (mut p, bin) = fixture(&r, false); p.sha256 = "0000000000000000000000000000000000000000000000000000000000000000";
-        let (got, _) = fetch_run(&r, &p, &sysdirs(&bin)); assert_eq!(got, Err("KiCad archive checksum mismatch".into()));
+        let (got, _) = fetch_run(&r, &p, &sysdirs(&bin)); assert_eq!(got, Err("KiCad archive checksum mismatch (the download was removed; Try again downloads it anew)".into()));
         assert_eq!(std::fs::read_dir(r.join("home/kicad")).unwrap().count(), 0, "the stage and the lock are gone");
         let r = tmp("rf-man"); let (p, bin) = fixture(&r, true);
         let (got, _) = fetch_run(&r, &p, &sysdirs(&bin)); assert_eq!(got, Err("KiCad manifest version mismatch".into()));
@@ -617,8 +716,48 @@ cp \"$f\" \"$out\"
     #[cfg(unix)] #[test] fn the_rust_fetch_downloads_with_wget_without_curl_and_says_what_is_missing() {
         let r = tmp("rf-wget"); let (p, bin) = fixture(&r, false);
         let w = no_curl(&r, &bin, true); let (got, _) = fetch_run(&r, &p, &[w]); assert!(got.is_ok(), "{got:?}");
-        let a = std::fs::read_to_string(r.join("wget.args")).unwrap(); assert!(a.lines().all(|l| l.starts_with("-q --https-only -c ")), "resumes: {a}");
+        let a = std::fs::read_to_string(r.join("wget.args")).unwrap(); assert!(a.lines().filter(|l| !l.starts_with("--spider")).all(|l| l.starts_with("-q --https-only -c ")), "resumes: {a}");
         let n = no_curl(&r, &bin, false); assert_eq!(tools_in(false, None, &[n]).unwrap_err(), "curl or wget is needed to download KiCad, and neither was found");
+    }
+    #[test] fn a_downloader_that_stops_without_a_word_is_said_in_plain_words() {
+        assert_eq!(exit_words("curl", Some(18)), "the connection ended before the file was whole");
+        assert_eq!(exit_words("wget", Some(4)), "the network failed");
+        assert_eq!(exit_words("curl", Some(99)), "curl stopped (exit 99)"); assert_eq!(exit_words("tar", None), "tar stopped (killed)");
+    }
+    #[test] fn progress_is_said_in_megabytes_and_time_left() {
+        let mb = 1u64 << 20;
+        assert_eq!(Bytes { done: 312 * mb, total: 971 * mb, rate: 16 * mb, eta: 41 }.words(), "312 of 971 MB, about 45 s left");
+        assert_eq!(Bytes { done: 12 * mb, total: 971 * mb, rate: 2 * mb, eta: 480 }.words(), "12 of 971 MB, about 8 min left");
+        assert_eq!(Bytes { done: 312 * mb, total: 0, rate: 0, eta: 0 }.words(), "312 MB so far");
+        assert_eq!(Bytes { done: 971 * mb, total: 971 * mb, rate: 0, eta: 0 }.words(), "971 of 971 MB");
+        assert_eq!(Bytes { done: 1, total: 4, ..Default::default() }.share(), 0.25);
+        let t0 = std::time::Instant::now(); let mut m = Meter::default();
+        m.at(t0, 0, 100 * mb); let b = m.at(t0 + std::time::Duration::from_secs(2), 20 * mb, 100 * mb);
+        assert_eq!((b.rate, b.eta), (10 * mb, 8));
+        assert_eq!(content_length("HTTP/2 302\r\ncontent-length: 0\r\n\r\nHTTP/2 200\r\nContent-Length: 1018212352\r\n"), 1018212352);
+        assert_eq!(content_length("  HTTP/1.1 200 OK\n  Content-Length: 42\n"), 42, "wget -S indents its headers");
+        assert_eq!(content_length("HTTP/2 200\n"), 0);
+    }
+    /// A download that stops keeps what it has and says how far it got; the next try continues it; one already whole is not asked for again.
+    #[cfg(unix)] #[test] fn a_stopped_download_is_kept_said_and_continued() {
+        let r = tmp("rf-stop"); let (p, bin) = fixture(&r, false);
+        let t = tools_in(false, None, &sysdirs(&bin)).unwrap(); let parent = r.join("home/kicad");
+        let mut seen: Vec<Bytes> = vec![];
+        std::fs::write(r.join("serve/FAILAT"), "100").unwrap();
+        let got = rt().block_on(fetch(&t, "https://x/r/", &parent, &p, &r.join("log"), &mut |_| {}, &mut |b| seen.push(b)));
+        std::fs::remove_file(r.join("serve/FAILAT")).unwrap();
+        let e = got.unwrap_err(); assert!(e.starts_with("The download stopped at 0 of 0 MB") && e.ends_with("It continues from there"), "{e}");
+        assert_eq!(std::fs::metadata(partial(&parent, &p)).unwrap().len(), 100, "the partial file is kept");
+        assert!(seen.first().map_or(false, |b| b.total > 0), "the size is known from the start: {seen:?}");
+        // the next try: the partial is continued (curl -C -), checked, installed, and removed
+        let (got, steps) = fetch_run(&r, &p, &sysdirs(&bin));
+        assert!(got.is_ok(), "{got:?}"); assert!(steps[0].contains("(continuing from 0 MB)"), "{steps:?}");
+        assert!(!partial(&parent, &p).exists() && !parent.join(".partial").exists());
+        // a whole download left by an earlier try is not downloaded again
+        let r = tmp("rf-whole"); let (p, bin) = fixture(&r, false); let parent = r.join("home/kicad");
+        std::fs::create_dir_all(parent.join(".partial")).unwrap(); std::fs::copy(r.join("serve").join(p.asset), partial(&parent, &p)).unwrap();
+        let (got, _) = fetch_run(&r, &p, &sysdirs(&bin)); assert!(got.is_ok(), "{got:?}");
+        assert!(!r.join("serve").join(format!("{}.calls", p.asset)).exists(), "not downloaded again");
     }
     #[test] fn a_download_resumes_and_retries() {
         let a = get_args(&Getter::Curl("/c".into()), "https://h/f", Path::new("/t/f")).join(" ");
@@ -682,18 +821,18 @@ cp \"$f\" \"$out\"
         let go = r.join("go");
         exe(&s, &format!("#!/bin/sh\necho \"Downloading $5\"\ni=0; while [ ! -e '{}' ] && [ $i -lt 1200 ]; do sleep 0.05; i=$((i+1)); done\necho Unpacking\nmkdir -p \"$1/$3/bin\" && touch \"$1/$3/$8\"\necho \"Installed in $1/$3\"\n", go.display()));
         let parent = r.join("kicad"); let mut steps = vec![];
-        let got = rt().block_on(run(Some(&s), &parent, &LINUX, &r.join("log"), |l| { if steps.is_empty() { let _ = std::fs::write(&go, ""); } steps.push(l) }));
+        let got = rt().block_on(run(Some(&s), &parent, &LINUX, &r.join("log"), |l| { if steps.is_empty() { let _ = std::fs::write(&go, ""); } steps.push(l) }, |_| {}));
         assert_eq!(got, Ok(parent.join("10.99.0-bp.10").to_string_lossy().to_string()));
         assert!(steps.first().unwrap().starts_with("Downloading backplane-kicad-linux") && steps.last().unwrap().starts_with("Installed in"), "{steps:?}");
     }
     #[cfg(unix)] #[test] fn a_standin_installer_that_fails_is_reported_in_its_own_words() {
         let r = tmp("sfail"); let s = r.join("standin");
         exe(&s, "#!/bin/sh\necho Downloading\necho 'Could not download https://x/y' >&2\nexit 1\n");
-        let got = rt().block_on(run(Some(&s), &r.join("kicad"), &LINUX, &r.join("log"), |_| {}));
+        let got = rt().block_on(run(Some(&s), &r.join("kicad"), &LINUX, &r.join("log"), |_| {}, |_| {}));
         assert_eq!(got, Err("Could not download https://x/y".into()));
         // ending well without placing KiCad is a failure too
         exe(&s, "#!/bin/sh\necho done\n");
-        let got = rt().block_on(run(Some(&s), &r.join("kicad"), &LINUX, &r.join("log"), |_| {}));
+        let got = rt().block_on(run(Some(&s), &r.join("kicad"), &LINUX, &r.join("log"), |_| {}, |_| {}));
         assert!(got.unwrap_err().starts_with("the installer ended without"));
     }
 

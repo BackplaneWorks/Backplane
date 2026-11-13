@@ -507,7 +507,7 @@ pub fn install_row(session: &Value, info: &Value, pkg: Option<&crate::files::kic
     if !i("kicad.cli").is_empty() {
         let Some(p) = pkg.filter(|p| i("kicad.status") == "ok" && crate::files::kicad::install::older(i("kicad.version"), p)) else { return None };
         return Some(match state {
-            "running" => row(&format!("Updating to Backplane KiCad {}", p.version), if note.is_empty() { "Starting." } else { note }, vec![]),
+            "running" => running_row(&format!("Updating to Backplane KiCad {}", p.version), &st, p.version, note),
             _ if draft(session, "@kinstall") == "ask" => row("Update Backplane KiCad?", &format!("Downloads Backplane KiCad {} (about 1 GB) from {FROM} and puts it beside {}, which stays. It brings the KiCad editor inside Backplane's viewer (Edit).", p.version, i("kicad.version")),
                 vec![btn("Update", "kicad-install", "", true), btn("Cancel", "kicad-install-cancel", "", false)]),
             "failed" => row("Update Backplane KiCad", &format!("{note}."), vec![btn("Try again", "kicad-install-ask", "", true)]),
@@ -517,7 +517,7 @@ pub fn install_row(session: &Value, info: &Value, pkg: Option<&crate::files::kic
     let Some(p) = pkg else { return Some(row("Install KiCad", &format!("No Backplane KiCad is published for this computer ({}). Install KiCad from kicad.org, then set its path above.", crate::files::kicad::install::this_computer()), vec![])) };
     let home = i("home"); let into = if home.is_empty() { "Backplane's own folder".to_string() } else { format!("{home}/kicad") };
     Some(match state {
-        "running" => row(&format!("Installing Backplane KiCad {}", p.version), if note.is_empty() { "Starting." } else { note }, vec![]),
+        "running" => running_row(&format!("Installing Backplane KiCad {}", p.version), &st, p.version, note),
         _ if draft(session, "@kinstall") == "ask" => row("Install Backplane KiCad?", &format!("Downloads Backplane KiCad {} (about 1 GB) from {FROM}, checks its checksum and unpacks it into {into}. It needs no administrator password and changes nothing else on this computer.", p.version),
             vec![btn("Install", "kicad-install", "", true), btn("Cancel", "kicad-install-cancel", "", false)]),
         "failed" => row("Install KiCad", &format!("{note}."), vec![btn("Try again", "kicad-install-ask", "", true)]),
@@ -525,6 +525,13 @@ pub fn install_row(session: &Value, info: &Value, pkg: Option<&crate::files::kic
     })
 }
 
+/// The install row while it runs: setup's words and bar (`onboard::install_progress`).
+fn running_row(label: &str, st: &Value, version: &str, note: &str) -> Value {
+    let (words, bar) = super::onboard::install_progress(st, &format!(" {version}"), note);
+    // the label names it already: the note is the step alone
+    let step = words.split_once(&format!("KiCad {version}. ")).map(|(_, w)| w.to_string()).or_else(|| words.split_once(&format!("KiCad {version}: ")).map(|(_, w)| format!("Downloading: {w}"))).unwrap_or(words);
+    let mut r = row(label, &step, vec![]); if let Some(b) = bar { r["progress"] = json!(b); } r
+}
 /// Settings > CAD: the KiCad the hub found (what it told: `kicad.*`), Install KiCad while none is, the path field, the IPC switch, and FreeCAD.
 fn cad(st: &State, session: &Value, info: &Value) -> Vec<Value> { cad_with(st, session, info, crate::files::kicad::install::package()) }
 fn cad_with(st: &State, session: &Value, info: &Value, pkg: Option<&crate::files::kicad::install::Package>) -> Vec<Value> {
@@ -1082,7 +1089,7 @@ mod tests {
         let n = ask[1]["note"].as_str().unwrap(); assert!(n.contains("github.com/i2cjak/Backplane_KiCad") && n.contains("/h/kicad") && n.contains("no administrator password"), "{n}");
         assert_eq!(btns(&ask[1]), [("Install".to_string(), "kicad-install".to_string()), ("Cancel".to_string(), "kicad-install-cancel".to_string())]);
         let run = cad_rows(json!({"kicad.status": "missing", "kicad.install": r#"{"state":"running","version":"10.99.0-bp.10","note":"Unpacking"}"#}), json!({}), Some(&LINUX));
-        assert_eq!((run[1]["label"].as_str().unwrap(), run[1]["note"].as_str().unwrap()), ("Installing Backplane KiCad 10.99.0-bp.10", "Unpacking")); assert!(btns(&run[1]).is_empty());
+        assert_eq!((run[1]["label"].as_str().unwrap(), run[1]["note"].as_str().unwrap()), ("Installing Backplane KiCad 10.99.0-bp.10", "Unpacking. This takes about a minute.")); assert!(btns(&run[1]).is_empty());
         let bad = cad_rows(json!({"kicad.status": "missing", "kicad.install": r#"{"state":"failed","note":"KiCad install failed: KiCad archive checksum mismatch"}"#}), json!({}), Some(&LINUX));
         assert_eq!(bad[1]["note"], "KiCad install failed: KiCad archive checksum mismatch."); assert_eq!(btns(&bad[1])[0].1, "kicad-install-ask");
         let done = cad_rows(json!({"kicad.cli": "/h/kicad/10.99.0-bp.10/bin/kicad-cli", "kicad.version": "10.99.0-bp.10", "kicad.install": r#"{"state":"done","note":"Installed Backplane KiCad 10.99.0-bp.10 in /h/kicad/10.99.0-bp.10"}"#}), json!({}), Some(&LINUX));
