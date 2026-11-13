@@ -30,6 +30,9 @@ pub fn next_tab(at: &str, step: i32) -> &'static str {
 }
 
 /// The hub's frame kind for a rail page.
+/// Whether a button down outside the editor leaves it the keyboard: yes while that press began over the editor (a drag, or a layout that
+/// moved under the pointer mid-press), so only a press that starts elsewhere takes the keyboard back to Backplane.
+pub fn press_keeps(press_began_in_editor: bool) -> bool { press_began_in_editor }
 pub fn frame_for(open: &str) -> &'static str { match open { "schematic" => "SCH", "3d" => "PCB_3D", _ => "PCB" } } // i18n-ok: wire frame kind enum names
 
 fn is_abs_path(s: &str) -> bool {
@@ -169,6 +172,8 @@ pub struct KicadPane {
     pub project: String, pub root: String, pub project_id: String, pub open: String, last_hub_open: String, hub: tokio::sync::mpsc::Sender<Command>,
     /// Gerbers asked for before the pane was attached and KiCad ready ("Open in GerbView" from Backplane's Gerbers page): opened then
     want_gerbers: Vec<String>,
+    /// the button now down was pressed over the editor (it keeps the keyboard until the button is up)
+    press_in: bool,
     container: Option<u64>, toplevel: u64, attached: bool, pub info: Value, frames: Vec<nc::Frame>,
     marker: Arc<Mutex<Option<HitboxId>>>, last_root: (i32, i32), placed: Option<(Option<nc::R>, Option<u64>, Vec<nc::R>)>,
     focus: FocusHandle, keys: bool, pub light: bool, _subs: Vec<Subscription>,
@@ -244,7 +249,7 @@ impl KicadPane {
             last = std::time::Instant::now();
             let _ = drained_tx.send(());
         } }).detach();
-        KicadPane { want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), last_root: (i32::MIN, 0), placed: None,
+        KicadPane { press_in: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), last_root: (i32::MIN, 0), placed: None,
             focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), poked: None, unmapped_since: None, unshown_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, at_px: None, dialogs_open: Vec::new(), took: None, press_focus: None, want_keys: true, was_dialog: false }
     }
     fn rpc(&self, name: &str, params: Value) { let _ = self.hub.try_send(Command::Rpc(name.to_string(), Secret(params), "kicad")); }
@@ -527,11 +532,15 @@ impl KicadPane {
             // BACKPLANE_KICAD_FOCUS_ON_PRESS: the old way (focus mid-press), to check a KiCad that must cope with it
             let fork = self.info["mode"] == "fork" && std::env::var_os("BACKPLANE_KICAD_FOCUS_ON_PRESS").is_none();
             match (nc::button_over(w), nc::has_focus(c)) {
-                (Some(true), false) if fork => { self.press_focus = Some(w); }
-                (Some(true), false) => nc::focus(w),
-                (Some(false), true) => nc::focus(self.toplevel),
-                (None, false) => { if let Some(pw) = self.press_focus.take() { if pw == w { nc::focus(w); } } }
-                (None, true) => { self.press_focus = None; }
+                (Some(true), false) if fork => { self.press_focus = Some(w); self.press_in = true; }
+                (Some(true), false) => { nc::focus(w); self.press_in = true; }
+                (Some(true), true) => { self.press_in = true; }
+                // a press that began over the editor stays the editor's until it ends, however the layout moves under it: a drag in KiCad
+                // that hits one of its DRC markers opens the Checks panel, the pane shrinks under the pointer, and the keyboard went to
+                // Backplane mid-drag (lane B, Hubble: the person's next Escape closed the viewer and the editor with it)
+                (Some(false), true) if !press_keeps(self.press_in) => nc::focus(self.toplevel),
+                (None, false) => { self.press_in = false; if let Some(pw) = self.press_focus.take() { if pw == w { nc::focus(w); } } }
+                (None, true) => { self.press_in = false; self.press_focus = None; }
                 _ => {}
             }
         }
@@ -739,6 +748,11 @@ impl Render for KicadPane {
 
 #[cfg(test)]
 mod tests {
+    #[test] fn a_press_that_began_in_kicad_keeps_the_keyboard_until_it_ends() {
+        assert!(super::press_keeps(true), "a drag from the editor out over the panel: KiCad keeps the keys");
+        assert!(!super::press_keeps(false), "a press that starts on Backplane's chrome takes them back");
+    }
+
     use super::{belongs_to, edit_target, frame_for, hub_open_step, nc, path_stem, pick, project_of, root_of, waiting, waiting_on};
     use serde_json::{json, Value};
     #[test] fn ctrl_tab_goes_round_the_editor_tabs() {
