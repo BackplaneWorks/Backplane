@@ -57,5 +57,5 @@ check "The person's approval goes to KiCad" "$(grep -q '"ok":true' "$OUT/approve
 R5=$(ask plan_get '{}'); echo "$R5" | cut -c1-300
 check "The agent's next plan_get says the person approved it" "$(echo "$R5" | python3 -c 'import sys; t=sys.stdin.read(); print(int("c-k" in t and "approved" in t and "changes" in t))')" "$(echo "$R5" | cut -c1-300)"
 R6=$(ask plan_route '{"ids":["c-k"],"max_nets":2}'); echo "$R6" | cut -c1-300
-check "plan_route of the approved corridor goes through to KiCad" "$(echo "$R6" | grep -q 'not approved\|nothing in the plan' && echo 0 || (echo "$R6" | grep -q '"reply"' && echo 1 || echo 0))" "$(echo "$R6" | cut -c1-300)"
+check "plan_route of the approved corridor goes through to KiCad and routes it" "$(echo "$R6" | grep -q 'not approved\|nothing in the plan' && echo 0 || (echo "$R6" | grep -q 'corridor.*c-k.*routed' && echo 1 || echo 0))" "$(echo "$R6" | cut -c1-300)"
 finish_suite "embed_plan_e2e ($EMBED_MODE)"
