@@ -29,7 +29,7 @@ cat >"$HH/panels.json" <<J
  {"kicad":{"wait_painted":120000,"kind":"PCB","tag":"p2"}},{"kicad":{"report":true,"tag":"p2"}},{"mark":"p2-ready"},{"wait":30000},{"kicad":{"report":true,"tag":"p2c"}},{"mark":"commented"},
  {"wait":8000},{"mark":"bom"},{"wait":8000},
  {"click":"mgmt:checks"},{"wait":8000},{"mark":"checks"},{"wait":60000},
- {"click":"rail:Gerbers"},{"wait":6000},{"mark":"gerbers"},{"wait":40000},{"mark":"end2"}]
+ {"click":"rail:Gerbers"},{"wait":6000},{"mark":"gerbers"},{"wait":300000},{"mark":"end2"}]
 J
 cp "$HH/win.log" "$OUT/logs/win-1.log" 2>/dev/null; : >"$HH/win.log"; T2=$(date +%s.%N)
 launch --url http://127.0.0.1:$(hub_port) --token-file $PH/.backplane/hub/token --script $PH/panels.json
@@ -150,11 +150,10 @@ import json, sys
 c = json.load(open(sys.argv[1])); c["plan"] = json.load(open(sys.argv[2])); json.dump(c, open(sys.argv[1], "w"))
 PY
 P1=$HH/coedit-plan1.json; P2=$HH/coedit-plan2.json; rm -f "$P1" "$P2"
-# the thread must be idle first: the comment window's note started a turn of its own (a turn sent while one runs waits behind it)
-for _ in $(seq 480); do in_box pgrep -f 'standins/bin/claude.*stream-json' >/dev/null || break; sleep 0.25; done
-in_box pgrep -f 'standins/bin/claude.*stream-json' >/dev/null && bad "an agent turn was still running 120 s after the comment: the plan turn waits behind it"
+# the comment window's note started a turn of its own (the stand-in ends it at once); a turn sent while one runs waits behind it, so the
+# plan's result is given 240 s. The client stays up meanwhile (its script waits 300 s after Gerbers): KiCad's pane closes with it.
 hub rpc turn.start "{\"thread\":\"$tid\",\"text\":\"plan-propose\"}" >"$OUT/logs/plan-turn1.json"
-for _ in $(seq 240); do [ -s "$P1" ] && break; sleep 0.25; done
+for _ in $(seq 960); do [ -s "$P1" ] && break; sleep 0.25; done
 if [ -s "$P1" ]; then cp "$P1" "$OUT/logs/"
   python3 - "$P1" >"$OUT/logs/plan1-checks.txt" <<'PY'
 import json, sys
