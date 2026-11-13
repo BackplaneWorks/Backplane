@@ -4336,6 +4336,7 @@ gpui.mgmt.bom.paused.tip = 部品検索から間隔を空けるよう求めら�
 gpui.keys.mgmt.fab = 設計の横の製造パネルを開く・閉じる
 gpui.mgmt.bom.putback = 元に戻しました。
 gpui.mgmt.bom.nochange = 変更はありません。
+gpui.mgmt.bom.deferred = KiCad で編集中です。編集を終えると変更が反映されます。
 gpui.mgmt.bom.inkicad.save = KiCadで変更しました。残すにはKiCadで保存してください。
 gpui.mgmt.bom.undo.tip = 前の値に戻す
 gpui.mgmt.bom.undo = 元に戻す

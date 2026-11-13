@@ -85,6 +85,13 @@ pub fn undo_by(version: &str, caps: &[String]) -> &'static str {
     if caps.iter().any(|c| c == "coedit") || super::kserve::version_ge(version, "10.99.0-bp.10") { "kicad" } else { "panel" }
 }
 
+/// How many of an UpdateItems answer's items KiCad holds until the person finishes editing them (co-edit, bp.11 on: ISC_DEFERRED).
+fn deferred_of(up: &Value) -> usize { up["updated_items"].as_array().map_or(0, |a| a.iter().filter(|r| r["status"]["code"] == "ISC_DEFERRED").count()) }
+#[cfg(test)] #[test] fn deferred_items_are_counted() {
+    assert_eq!(deferred_of(&json!({"updated_items": [{"status": {"code": "ISC_OK"}}, {"status": {"code": "ISC_DEFERRED", "error_message": "the person is editing this item"}}]})), 1);
+    assert_eq!(deferred_of(&json!({})), 0);
+}
+
 static AGENTS: OnceLock<Weak<crate::agents::Agents>> = OnceLock::new();
 /// The agents (for the schematic's named lock); main.rs gives them once they run.
 pub fn set_agents(a: &Arc<crate::agents::Agents>) { let _ = AGENTS.set(Arc::downgrade(a)); }
@@ -142,8 +149,10 @@ pub async fn edit(hub: &Arc<Hub>, pro: &str, sch: &str, p: &Value) -> Result<Val
         let g = gui.clone(); let w2 = who.clone();
         let (todo, was) = prepare(&move |ty, msg| { let (g, w) = (g.clone(), w2.clone()); async move { embed::gui_call_as(&g, ty, msg, &w).await } }, &doc, &refs, &field, &value).await?;
         // one commit, ended or dropped on every path, with the document's header and this name on every call (embed::commit_as)
-        if !todo.is_empty() { embed::commit_as(&gui, &who, &doc, todo.clone(), &message(&field, &refs, &value)).await?; embed::unsaved_update(pro, |u| u.touched()); }
-        return Ok(json!({"via": "kicad", "changed": todo.len(), "field": field, "value": value, "was": was, "refs": refs, "undo": undo_by(&gui.version, &gui.caps)}))
+        let mut deferred = 0;
+        if !todo.is_empty() { deferred = deferred_of(&embed::commit_as(&gui, &who, &doc, todo.clone(), &message(&field, &refs, &value)).await?); embed::unsaved_update(pro, |u| u.touched()); }
+        // `deferred`: the person is editing those symbols in KiCad; KiCad applies the change when they finish (a notice follows): not read back yet
+        return Ok(json!({"via": "kicad", "changed": todo.len(), "deferred": deferred, "field": field, "value": value, "was": was, "refs": refs, "undo": undo_by(&gui.version, &gui.caps)}))
     }
     // no KiCad with it open (none, or one with only the board): the headless one writes and saves, under the schematic's lock
     let ag = AGENTS.get().and_then(Weak::upgrade).ok_or("the hub's agents are not running")?;

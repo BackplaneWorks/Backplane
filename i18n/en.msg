@@ -4313,6 +4313,7 @@ gpui.mgmt.bom.paused.tip = The parts search asked Backplane to slow down; the lo
 gpui.keys.mgmt.fab = Fab panel beside the design: open or close
 gpui.mgmt.bom.putback = Put back.
 gpui.mgmt.bom.nochange = Nothing to change.
+gpui.mgmt.bom.deferred = You are editing it in KiCad: the change goes in when you finish there.
 gpui.mgmt.bom.inkicad.save = Changed in KiCad; save there to keep it.
 gpui.mgmt.bom.undo.tip = Put the old value back
 gpui.mgmt.bom.undo = Undo
