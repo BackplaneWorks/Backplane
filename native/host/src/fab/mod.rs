@@ -63,7 +63,10 @@ pub fn drc_plan(root: &Path, p: &Profile, c: &project::Choice) -> Option<(PathBu
     let dru = drc::dru_path(&pro)?;
     let rules = drc::project_rules(&std::fs::read_to_string(&pro).unwrap_or_default());
     let text = std::fs::read_to_string(&dru).unwrap_or_default();
-    Some((dru, drc::plan(p, c, &rules, &text)))
+    let mut plan = drc::plan(p, c, &rules, &text);
+    // an open KiCad that places new rules first takes the whole fab section ahead of the person's rules (drc::Plan.insert_first)
+    plan.insert_first = crate::files::kicad::embed::gui_route(&pro).map_or(false, |r| r.caps.iter().any(|c| c == "rules-insert-position"));
+    Some((dru, plan))
 }
 
 /// The design root of a thread (main's checkout for a hardware thread) or of a project by id.

@@ -2,7 +2,9 @@
 # Suite: the fab's DRC limits into a project whose board is open in KiCad go through KiCad (fab_profile action "drc" -> EditCustomRules),
 #   never behind its back (fab/mod.rs write_rules, fab/drc.rs edit_message).
 #   R1  fab_profile {action: drc} with the board open answers via "kicad"; the rules file then has the fab's rules
-#   R2  the person's own rule is byte-identical, and the fab's track-width rule is left out (the person's track rule keeps deciding)
+#   R2  the person's own rule is byte-identical; the fab's track-width rule (the person's own track rule sets the same constraint):
+#       with rules-insert-position (bp.13 batch 4) written ahead of every rule of the person's, so theirs keeps deciding; without
+#       it left out and named (KiCad would append it after theirs, where it would win)
 #   R3  fab_profile get says the rules are current; a second write changes no byte
 #   R4  stock KiCad 10 (/usr/bin/kicad-cli, when present) runs DRC on the result without a rules error
 # Copies only (seed_project.py), the board open in the embedded editor. Fork mode; skips when the open KiCad lacks rules-merge.
@@ -58,7 +60,17 @@ echo "INFO via $VIA; left out: $LEFT"
 check "the write went through KiCad (EditCustomRules), not behind its back" "$([ "$VIA" = '"kicad"' ] && echo 1 || echo 0)" "$(echo "$W1" | cut -c1-300)"
 check "the rules file has the fab's rules" "$(grep -q '(rule "fab: via ring"' "$DRU" && echo 1 || echo 0)" "$(head -c 600 "$DRU")"
 check "the person's own rule is byte-identical" "$(python3 -c 'import sys; print(int(sys.argv[2] in open(sys.argv[1]).read()))' "$DRU" "$MINE")"
-check "the fab's track-width rule is left out: the person's own track rule keeps deciding" "$({ ! grep -q '"fab: track width"' "$DRU" && echo "$LEFT" | grep -q 'fab: track width'; } && echo 1 || echo 0)" "$LEFT"
+if echo "$CAPS" | grep -q 'rules-insert-position'; then
+  echo "INFO the open KiCad places new rules first (rules-insert-position)"
+  check "every fab rule sits ahead of the person's rules, the colliding track-width one too, and none is left out" "$(python3 -c '
+import re,sys
+t = "\n".join(l for l in open(sys.argv[1]).read().splitlines() if not l.lstrip().startswith("#"))
+n = [m.group(1) or m.group(2) for m in re.finditer(r"\(rule (?:\"([^\"]*)\"|(\S+))", t)]
+fab = [i for i, x in enumerate(n) if x.startswith("fab: ")]; own = [i for i, x in enumerate(n) if not x.startswith("fab: ")]
+print(int("fab: track width" in n and bool(fab) and bool(own) and max(fab) < min(own) and sys.argv[2] in ("[]", "null")))' "$DRU" "$LEFT")" "left=$LEFT; $(grep -o '(rule "[^"]*"' "$DRU" | tr '\n' ' ')"
+else
+  check "the fab's track-width rule is left out: the person's own track rule keeps deciding" "$({ ! grep -q '"fab: track width"' "$DRU" && echo "$LEFT" | grep -q 'fab: track width'; } && echo 1 || echo 0)" "$LEFT"
+fi
 cp "$DRU" "$OUT/dru.after1"
 G=$(ask fab_profile '{}'); CUR=$(echo "$G" | field drc.current)
 check "fab_profile says the rules are current" "$([ "$CUR" = true ] && echo 1 || echo 0)" "current=$CUR"
