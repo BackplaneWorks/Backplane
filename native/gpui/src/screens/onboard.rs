@@ -84,9 +84,10 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
         let (id, state) = (string(s, "id"), string(s, "state"));
         let here = id == on;
         let mark = match state.as_str() { "done" => div().size(px(8.)).bg(c("ok")), "skipped" => div().w(px(8.)).h(px(2.)).bg(c("faint")), _ => div().size(px(8.)).border_1().border_color(c("faint")) };
-        let row = div().id(SharedString::from(format!("setup-step-{i}"))).flex().items_center().gap_2().px_2().py(px(3.)).text_size(px(12.)).cursor_pointer().text_color(c(if here { "text" } else { "dim" }));
+        let row = div().id(SharedString::from(format!("setup-step-{i}"))).flex().items_start().gap_2().px_2().py(px(3.)).text_size(px(12.)).cursor_pointer().text_color(c(if here { "text" } else { "dim" }));
         let row = if here { row.bg(c("raise")) } else { row.hover(|x| x.bg(c("raise"))) };
-        rail = rail.child(row.child(div().w(px(10.)).flex().justify_center().child(mark)).child(trs(&string(s, "title"))).on_click(cx.listener(move |this, _, _, cx| { settings::flush_fields(this); this.error.clear(); let _ = this.tx.try_send(Command::Action("ob-go".into(), id.clone())); cx.notify(); })));
+        // the title wraps in the rail's width (a narrow window clipped "Where your uberbot lives"); the mark stays on its first line
+        rail = rail.child(row.child(div().w(px(10.)).h(px(15.)).flex_shrink_0().flex().items_center().justify_center().child(mark)).child(div().flex_1().min_w_0().child(trs(&string(s, "title")))).on_click(cx.listener(move |this, _, _, cx| { settings::flush_fields(this); this.error.clear(); let _ = this.tx.try_send(Command::Action("ob-go".into(), id.clone())); cx.notify(); })));
     }
     // the step
     let rows = settings::parse(&serde_json::json!({"rows": tour["rows"]}));
