@@ -64,19 +64,43 @@ pub async fn set_findings(hub: &Arc<Hub>, pro: &str, source: &str, mut findings:
     publish(hub, &pro).await;
     Ok(())
 }
-/// A comparison's differences as findings: one a place, its layer the rule, anchored to the set at the place (its id from layer and place).
-pub fn gerber_findings(set: &str, places: &[(String, [f32; 4], bool)]) -> Vec<Finding> {
-    places.iter().take(2000).map(|(layer, b, on_board)| {
+/// What fixes a stale export (the summary's fix, and each of its differences'): the agent's task, not one place's.
+pub const REEXPORT: &str = "Re-export the fab outputs (the Gerbers and drill files) from the board as it is now, to the same folder with the same settings";
+/// A comparison's differences as findings. A set made before the board's last change (`older_ms` > 0) is one must-change, re-export,
+/// saying how much differs on which layers; its differences are notes under it, by layer. A set made after that differs where it must
+/// not: each difference a warning. A difference reads as what it is ("track on GND near U5"), which side has it and its size, anchored
+/// to the set at its place (its id from layer and place).
+pub fn gerber_findings(set: &str, places: &[(String, super::gerber::compare::Place)], older_ms: u64) -> Vec<Finding> {
+    let mut out = vec![];
+    if places.is_empty() { return out }
+    let stale = older_ms > 0;
+    if stale {
+        let mut by: Vec<(String, usize)> = vec![];
+        for (l, _) in places { match by.iter_mut().find(|x| &x.0 == l) { Some(x) => x.1 += 1, None => by.push((l.clone(), 1)) } }
+        by.sort_by(|a, b| b.1.cmp(&a.1));
+        // short, for one row (each layer's count is its group's heading)
+        let n = places.len();
+        out.push(Finding {
+            severity: "error".into(), rule: "export".into(),
+            title: format!("Export {} older than the board", super::gerber::span(older_ms)),
+            detail: format!("{n} difference{} on {} layer{}: re-export", if n == 1 { "" } else { "s" }, by.len(), if by.len() == 1 { "" } else { "s" }), fix: REEXPORT.into(),
+            anchors: vec![fd::Anchor { doc: "file".into(), text: set.to_string(), uuid: "export".into(), layer: by[0].0.clone(), ..Default::default() }],
+            ..Default::default()
+        });
+    }
+    for (layer, p) in places.iter().take(2000) {
+        let b = p.b;
         let (x, y) = ((b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0);
-        Finding {
-            severity: "warning".into(), rule: layer.clone(),
-            title: if *on_board { "Board only".into() } else { "Gerbers only".into() },
-            detail: format!("{} the board and not in these Gerbers; {:.2} × {:.2} mm", if *on_board { "On" } else { "Not on" }, b[2] - b[0], b[3] - b[1]),
-            fix: "Export the Gerbers again from the board as it is now".into(),
+        let side = p.side(); let side = side[..1].to_uppercase() + &side[1..];
+        out.push(Finding {
+            severity: if stale { "info" } else { "warning" }.into(), rule: layer.clone(), title: p.what.clone(),
+            detail: format!("{side} · {:.2} × {:.2} mm", b[2] - b[0], b[3] - b[1]),
+            fix: if stale { REEXPORT.into() } else { "Find why the export differs from the board here (a plot setting, a zone not refilled, a layer left out) and export again".into() },
             anchors: vec![fd::Anchor { doc: "file".into(), text: set.to_string(), uuid: format!("{layer}@{x:.2},{y:.2}"), layer: layer.clone(), x: x as f64, y: y as f64, at: true, ..Default::default() }],
             ..Default::default()
-        }
-    }).collect()
+        });
+    }
+    out
 }
 /// Every finding of a project: ERC, DRC, then the other sources in their order.
 fn all_findings(p: &Proj, only: &str) -> Vec<Finding> {
@@ -293,7 +317,7 @@ async fn tick(hub: &Arc<Hub>) -> u64 {
     let mut sleep = TICK_MS * 5;
     // Gerbers vs board's differences (kicad/gerber/compare.rs), made by the plot reader, into the one list as their own source
     let diffs: Vec<super::gerber::Diffs> = std::mem::take(&mut *super::gerber::DIFFS.lock().unwrap());
-    for (set, board, places) in diffs { let _ = set_findings(hub, &board, "gerbers", gerber_findings(&set, &places), json!({"label": "Gerbers vs board"})).await; }
+    for (set, board, places, older) in diffs { let _ = set_findings(hub, &board, "gerbers", gerber_findings(&set, &places, older), json!({"label": "Gerbers vs board"})).await; }
     let (free, heavy, busy) = tokio::task::spawn_blocking(|| (free_mb(), heavy_job(), busy_now())).await.unwrap_or_default();
     let remote = remote_ready(hub).await;
     for (pro, files) in pros {
@@ -732,12 +756,23 @@ mod tests {
         let _ = std::fs::remove_dir_all(&d);
     }
     #[test] fn a_comparisons_differences_are_findings_with_steady_ids() {
-        let ps = vec![("F.Cu".to_string(), [1.0, 2.0, 1.4, 2.2], true), ("B.Cu".to_string(), [5.0, 5.0, 6.0, 6.0], false)];
-        let mut a = gerber_findings("/p/mfg/g", &ps); fd::assign_ids(&mut a);
-        let mut b = gerber_findings("/p/mfg/g", &ps.iter().rev().cloned().collect::<Vec<_>>()); fd::assign_ids(&mut b);
-        assert_eq!(a[0].id, b[1].id, "the same place keeps its id whatever the order");
-        assert_eq!(fd::row_json(&a[0])["names"], "F.Cu · 1.20, 2.10"); assert_eq!(fd::row_json(&a[0])["at"], "1.20,2.10"); assert_eq!(fd::row_json(&a[0])["file"], "/p/mfg/g");
-        assert_eq!((a[0].title.as_str(), a[1].title.as_str()), ("Board only", "Gerbers only"));
+        use super::super::gerber::compare::Place;
+        let pl = |b: [f32; 4], board: bool, gerbers: bool, what: &str| Place { b, board, gerbers, what: what.into() };
+        let ps = vec![("F.Cu".to_string(), pl([1.0, 2.0, 1.4, 2.2], true, false, "track on GND near U5")), ("B.Cu".to_string(), pl([5.0, 5.0, 6.0, 6.0], false, true, "copper")), ("B.Cu".to_string(), pl([8.0, 5.0, 9.0, 6.0], true, true, "pad C12.1 on VBUS"))];
+        let mut a = gerber_findings("/p/mfg/g", &ps, 0); fd::assign_ids(&mut a);
+        let mut b = gerber_findings("/p/mfg/g", &ps.iter().rev().cloned().collect::<Vec<_>>(), 0); fd::assign_ids(&mut b);
+        assert_eq!(a[0].id, b[2].id, "the same place keeps its id whatever the order");
+        // a row reads without a click: what it is, which side and its size
+        assert_eq!((a[0].title.as_str(), fd::row_json(&a[0])["names"].as_str().unwrap()), ("track on GND near U5", "Board only · 0.40 × 0.20 mm"));
+        assert_eq!(fd::row_json(&a[0])["at"], "1.20,2.10"); assert_eq!(fd::row_json(&a[0])["file"], "/p/mfg/g");
+        assert_eq!(a.iter().map(|f| f.detail.split(' ').next().unwrap()).collect::<Vec<_>>(), ["Board", "Gerbers", "Changed"]);
+        assert!(a.iter().all(|f| f.severity == "warning"), "a fresh export that differs: each difference must be looked at");
+        // a stale export: one must-change, re-export, the differences notes under it by layer
+        let s = gerber_findings("/p/mfg/g", &ps, 26 * 3_600_000);
+        assert_eq!((s[0].severity.as_str(), s[0].title.as_str(), s[0].detail.as_str()), ("error", "Export 26 h older than the board", "3 differences on 2 layers: re-export"));
+        assert_eq!(fd::counts(&s).error, 1); assert!(s[1..].iter().all(|f| f.severity == "info" && f.fix == REEXPORT));
+        assert_eq!(fd::row_json(&s[0])["layer"], "B.Cu"); assert!(fd::row_json(&s[0]).get("at").is_none(), "the summary opens the comparison on its worst layer");
+        assert!(fd::fix_message(&s[0], "/p/a.kicad_pro").starts_with("Re-export the fab outputs"), "{}", fd::fix_message(&s[0], "/p/a.kicad_pro"));
     }
     #[test] fn the_state_word() {
         let mut x = Src::default();
