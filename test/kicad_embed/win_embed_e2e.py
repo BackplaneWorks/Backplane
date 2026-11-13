@@ -2567,8 +2567,17 @@ def run_bp9_suite(h: SuiteHarness) -> int:
             {"anchor_x": anchor_x, "xs_v": xs_v, "ys_v_ok": ys_v_ok},
         )
 
-        h.ipc_cmd("run-action", api_sock, "common.Interactive.undo")
-        time.sleep(0.5)
+        # Undo Alt+V as the person did it: their own Ctrl+Z. An IPC run-action undo comes from the harness's API client, and with per-actor
+        # undo (bp.11+) that client has nothing to undo, so Alt+V's X moves stayed and Alt+H's "X unchanged" check failed on every bp.12 run.
+        screen_click(safe_x, safe_y, 1)
+        time.sleep(0.35)
+        key_chord("ctrl", "z")
+        time.sleep(0.6)
+        # Alt+H is judged against the positions it starts from (whatever the undo left), not the pre-Alt+V ones
+        base_h = _pcb_boxes("R2,R1,R3", "0") if have_all_3 else {}
+        if set(base_h) == set(refs):
+            before_boxes = base_h
+            anchor_y = _box_centre(base_h["R2"])[1]
 
         screen_click(safe_x, safe_y, 1)
         time.sleep(0.35)
@@ -2590,7 +2599,9 @@ def run_bp9_suite(h: SuiteHarness) -> int:
             have_all_3 and all(abs(y - anchor_y) <= 0.05 for y in ys_h) and xs_h_ok,
             {"anchor_y": anchor_y, "ys_h": ys_h, "xs_h_ok": xs_h_ok},
         )
-        h.ipc_cmd("run-action", api_sock, "common.Interactive.undo")
+        screen_click(safe_x, safe_y, 1)
+        time.sleep(0.35)
+        key_chord("ctrl", "z")
         time.sleep(0.4)
 
         # Clean teardown
