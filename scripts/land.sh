@@ -4,7 +4,9 @@
 #   1. git fetch origin main;
 #   2. git rebase origin/main (a conflict stops here: the rebase is aborted and nothing moved; rebase by hand, then land again);
 #   3. checks origin/main..HEAD (scripts/check-author.sh);
-#   4. tests: scripts/dev-build.sh --gate --no-cut (LAND_TEST overrides the command; it is skipped only when this exact tree
+#   4. free space: the build and the tests' scratch (the repo's disk and $TMPDIR/~/.cache's) each need LAND_MIN_FREE_GB (10);
+#      less fails at once ("land: FAILED: only N GB free on /, need M: clean up") instead of as unrelated test failures;
+#      tests: scripts/dev-build.sh --gate --no-cut (LAND_TEST overrides the command; it is skipped only when this exact tree
 #      passed it already, recorded in <git-dir>/land-tested);
 #   5. git push origin HEAD:main, a fast-forward (never forced). Rejected because origin moved: back to 1, up to LAND_TRIES (3);
 #   6. fast-forwards local main to what was pushed (never ahead of origin; the main hook refuses that anyway).
@@ -14,6 +16,17 @@ cd "$(git rev-parse --show-toplevel)"
 here=$(cd "$(dirname "$0")" && pwd)
 die() { echo "land: FAILED: $*" >&2; exit 1; }
 say() { echo "land: $*" >&2; }
+# A full disk fails a build or a dozen unrelated tests ("No space left on device"); say so first, plainly
+need_gb=${LAND_MIN_FREE_GB:-10}
+free_check() {
+  for d in . "${TMPDIR:-/tmp}" "$HOME/.cache"; do
+    [ -d "$d" ] || continue
+    set -- $(df -Pk "$d" 2>/dev/null | awk 'NR == 2 { print $4, $6 }')
+    [ -n "${1:-}" ] || continue
+    gb=$(( $1 / 1048576 ))
+    [ "$gb" -ge "$need_gb" ] || die "only $gb GB free on $2, need $need_gb: clean up (old cargo targets, test scratch in ~/.cache/bp-tmp)"
+  done
+}
 br=$(git symbolic-ref --short -q HEAD) || die "HEAD is detached; land from your lane's branch"
 [ "$br" != main ] || die "you are on main; commit on your lane's branch (from origin/main) and land that"
 [ -z "$(git status --porcelain --untracked-files=no)" ] || die "uncommitted changes in $(pwd); commit them first"
@@ -26,6 +39,7 @@ while :; do
   if ! git rebase -q origin/main; then git rebase --abort 2>/dev/null || true; die "git rebase origin/main conflicts; resolve it by hand (git rebase origin/main), then land again"; fi
   [ -n "$(git rev-list -1 origin/main..HEAD)" ] || { say "nothing to land: $br is already on origin/main"; break; }
   "$here/check-author.sh" origin/main..HEAD || die "a commit has the wrong author or committer (see above)"
+  free_check
   tree=$(git rev-parse 'HEAD^{tree}')
   if [ "$(cat "$mark" 2>/dev/null)" = "$tree" ]; then say "tests already passed on this tree ($(printf %s "$tree" | cut -c1-10))"
   else
