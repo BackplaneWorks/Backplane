@@ -818,9 +818,35 @@ def mem_detail(pid):
 if "memory" in JOURNEYS and SOCK and MEM["pid"]:
     PAUSE.set()
     steps = []
+    def run_procs():
+        """Every process of this run (its environment names the run's folder): pid, what it is, RSS, PSS, anon, file-backed and the
+        shared part (Shared_Clean + Shared_Dirty), in MB, from smaps_rollup. Each KiCad process on its own, not summed."""
+        out = []
+        for p_ in os.listdir("/proc"):
+            if not p_.isdigit(): continue
+            try:
+                if OUT.encode() not in open(f"/proc/{p_}/environ", "rb").read(): continue
+                cmd = open(f"/proc/{p_}/cmdline", "rb").read().split(b"\0")
+                exe = os.path.basename(os.readlink(f"/proc/{p_}/exe"))
+                args = " ".join(a.decode("utf-8", "replace") for a in cmd[:6])
+                if not re.search(r"kicad|pcbnew|eeschema|backplane-(hub|gpui)", args + " " + exe): continue
+                kind = ("api-server" if "api-server" in args else "kicad-cli" if "kicad-cli" in args else "hub" if "backplane-hub" in args
+                        else "client" if "backplane-gpui" in args else "kicad-gui")
+                v = {}
+                for l in open(f"/proc/{p_}/smaps_rollup"):
+                    k = l.split(":")[0]
+                    if k in ("Rss", "Pss", "Anonymous", "Shared_Clean", "Shared_Dirty"): v[k] = int(l.split()[1]) // 1024
+                out.append({"pid": int(p_), "kind": kind, "rss": v.get("Rss"), "pss": v.get("Pss"), "anon": v.get("Anonymous"),
+                            "file": (v.get("Rss", 0) - v.get("Anonymous", 0)), "shared": v.get("Shared_Clean", 0) + v.get("Shared_Dirty", 0),
+                            "args": args[-90:]})
+            except Exception: pass
+        return sorted(out, key=lambda x: (x["kind"], x["pid"]))
     def mstep(name, settle=6.0):
-        time.sleep(settle); m = mem_detail(MEM["pid"]); steps.append([name, m]); RESULTS[f"mem_{name}"] = {"ms": None, **m}
+        time.sleep(settle); m = mem_detail(MEM["pid"]); ps = run_procs(); steps.append([name, m, ps]); RESULTS[f"mem_{name}"] = {"ms": None, **m, "procs": ps}
         print(f"PERF mem_{name} {m['rss_mb']}MB pss={m['pss_mb']} anon={m['anon_mb']} file={m['file_mb']} frames={sorted(kframes())}", flush=True)
+        for q in ps:
+            print(f"INFO mem_{name} {q['kind']:10s} pid={q['pid']} rss={q['rss']} pss={q['pss']} anon={q['anon']} file={q['file']} shared={q['shared']}"
+                  f"{'  (the editors)' if q['pid'] == MEM['pid'] else ''}  {q['args']}", flush=True)
     mstep("board", 2.0)
     tab("SCH", "mem_sch_tab", 1.5); mstep("schematic")
     ipc("show-frame", SOCK, "fp"); mstep("footprint_editor")
