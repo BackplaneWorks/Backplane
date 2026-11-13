@@ -616,6 +616,17 @@ def main() -> None:
             print(json.dumps({"ok": True, "found": found, "not_found": not_found}))
             return
 
+        if cmd == "sym-value":  # the Value of the schematic symbol whose reference is REF (GetItems KOT_SCH_SYMBOL, decoded by hand)
+            doc = cli.first_open_doc_bytes("sch")
+            _, val = cli.call("kiapi.common.commands.GetItems", pb_field_msg(1, pb_field_msg(1, doc)) + pb_field_varint(2, 35))
+            got = None
+            for anyb in pb_decode_fields(val).get(3, []):
+                sym = pb_decode_fields(pb_decode_fields(anyb).get(2, [b""])[0])
+                txt = lambda n: pb_decode_fields(pb_decode_fields(sym.get(n, [b""])[0]).get(3, [b""])[0]).get(5, [b""])[0].decode("utf-8", "replace")
+                if txt(7) == args[0]: got = txt(8); break
+            print(json.dumps({"ok": got is not None, "ref": args[0], "value": got}))
+            return
+
         if cmd == "capabilities":  # GetCapabilities: capability names and every registered command (the embedded GUI's own)
             _, val = cli.call("kiapi.backplane.GetCapabilities", b"")
             f = pb_decode_fields(val); dec = lambda n: [x.decode("utf-8", "replace") for x in f.get(n, [])]
