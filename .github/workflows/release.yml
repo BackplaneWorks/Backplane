@@ -5,7 +5,7 @@ name: release
 on:
   push:
     tags: ['v*']
-  # a nightly (nightly.yml): built, signed and published like a tag, but to the nightly repo (vars.NIGHTLY_REPO), never this one's releases
+  # a nightly (nightly.yml): built, signed and published like a tag, as a prerelease here, its signed files named nightly-manifest.json* (docs/nightly.md)
   workflow_call:
     inputs:
       tag: { type: string, required: true }
@@ -29,7 +29,6 @@ env:
   CARGO_TERM_COLOR: always
   TAG: ${{ inputs.tag || github.event.inputs.tag || github.ref_name }}
   NIGHTLY: ${{ inputs.nightly && '1' || '' }}
-  NIGHTLY_REPO: ${{ vars.NIGHTLY_REPO || 'BackplaneWorks/backplane-nightly' }}
 permissions:
   contents: read
 jobs:
@@ -393,8 +392,7 @@ jobs:
           # deploy/install.sh.in with this release's version and each archive's sha256: the script vouches for what it downloads
           set -e
           sum() { f=backplane-$TAG-$1-native.tar.gz; [ -f "$f" ] && sha256sum "$f" | cut -d' ' -f1 || true; }
-          repo=${{ github.repository }}; [ -z "$NIGHTLY" ] || repo=$NIGHTLY_REPO   # install.sh downloads from where the release is
-          sed -e "s|@REPO@|$repo|" -e "s|@VERSION@|$TAG|" -e "s|@SHA_LINUX_X64@|$(sum linux-x64)|" \
+          sed -e "s|@REPO@|${{ github.repository }}|" -e "s|@VERSION@|$TAG|" -e "s|@SHA_LINUX_X64@|$(sum linux-x64)|" \
               -e "s|@SHA_LINUX_ARM64@|$(sum linux-arm64)|" -e "s|@SHA_DARWIN_ARM64@|$(sum darwin-arm64)|" deploy/install.sh.in > install.sh
           if grep -q '@[A-Z_0-9]*@' install.sh; then echo "::error::install.sh still has a placeholder"; exit 1; fi
           sh -n install.sh
@@ -453,17 +451,19 @@ jobs:
           # all three signed files, or the updater counts the release as half published and never offers it (update/run.rs SIGNED)
           gh release upload "$TAG" manifest.json manifest.json.sig manifest.json.keyid
           gh release edit "$TAG" --draft=false
-      - name: publish the nightly (to the nightly repo, signed only; manifest and signature go last)
+      - name: publish the nightly (signed only; its signed files under their nightly names, uploaded last)
         if: inputs.nightly && steps.sign.outputs.signed == 'true'
         env:
-          GH_TOKEN: ${{ secrets.BACKPLANE_NIGHTLY_TOKEN }}
-          GH_REPO: ${{ env.NIGHTLY_REPO }}
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         run: |
-          [ -n "$GH_TOKEN" ] || { echo "::error::no BACKPLANE_NIGHTLY_TOKEN (contents: write on $GH_REPO): the nightly is built and signed but not published"; exit 1; }
           case "$TAG" in v*-nightly.*) ;; *) echo "::error::$TAG is not a nightly tag"; exit 1;; esac
-          notes="Nightly build of BackplaneWorks/Backplane@${{ github.sha }}. Not a release: Settings, Update channel, nightly takes these."
-          gh release create "$TAG" --prerelease --draft --title "$TAG" --notes "$notes" backplane-*.tar.gz backplane-*.zip $(ls backplane-$TAG-android.apk backplane-$TAG-android.aab 2>/dev/null) install.sh SHA256SUMS
-          gh release upload "$TAG" manifest.json manifest.json.sig manifest.json.keyid
+          # nightly-manifest.json*: 0.15.0-0.15.3 count a release signed only with manifest.json*, so their beta hubs never offer a nightly they would refuse
+          # (update/run.rs NIGHTLY_SIGNED). The tag is made here by the workflow's token, which starts no workflow: no tag-push release of a nightly.
+          for f in manifest.json manifest.json.sig manifest.json.keyid; do cp "$f" "nightly-$f"; done
+          gh release create "$TAG" --prerelease --draft --target "${{ github.sha }}" --title "$TAG" --notes "Nightly build of ${{ github.sha }} (main). Not a release: Settings, Update channel, nightly takes these." \
+            backplane-*.tar.gz backplane-*.zip $(ls backplane-$TAG-android.apk backplane-$TAG-android.aab 2>/dev/null) install.sh SHA256SUMS
+          gh release upload "$TAG" nightly-manifest.json nightly-manifest.json.sig nightly-manifest.json.keyid
           gh release edit "$TAG" --draft=false
 
   # The release-candidate smoke, dry runs only, on each target's own runner (test/update/rc-smoke.sh): the archive installed as a person would, the guard
