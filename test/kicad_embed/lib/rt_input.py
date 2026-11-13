@@ -2,6 +2,7 @@
 """Continuous input through XTest with its timing, for frame-time runs; prints {"t0": epoch ms, "t1": epoch ms, "events": n}.
   rt_input.py pan CX CY RADIUS SECONDS [BUTTON=2] [HZ=120]   the button held while the pointer circles (KiCad pans with the middle button)
   rt_input.py wheel CX CY SECONDS [HZ=30]                     wheel notches, 8 in then 8 out, repeated (KiCad zooms about the pointer)
+  rt_input.py drag_circle X Y R SECONDS [BUTTON=1] [HZ=120]  press on (X,Y), then circle from there (a vertex handle dragged round)
   rt_input.py drag X1 Y1 X2 Y2 [MS=400] [BUTTON=1]            press, move in 60 Hz steps, release (a move of a footprint, a box)
   rt_input.py key NAME [MODS...]                               one key (with modifiers held), timed
   rt_input.py click X Y [BUTTON=1]                             one click, timed"""
@@ -43,6 +44,11 @@ elif cmd == "wheel":
     move(cx, cy); time.sleep(0.05); res["t0"] = now()
     def notch(i): b = 4 if (i // 8) % 2 == 0 else 5; button(b, True); button(b, False)
     n = paced(secs, hz, notch); res.update(t1=now(), events=n)
+elif cmd == "drag_circle":  # drag_circle X Y R SECONDS [BUTTON=1] [HZ=120]: press ON (X,Y), then circle from there (a vertex dragged round)
+    x0, y0, r, secs = float(a[0]), float(a[1]), float(a[2]), float(a[3]); b = int(a[4]) if len(a) > 4 else 1; hz = float(a[5]) if len(a) > 5 else 120
+    move(x0, y0); time.sleep(0.08); res["t0"] = now(); button(b, True); time.sleep(0.05)
+    n = paced(secs, hz, lambda i: move(x0 + r * (math.cos(i / hz * 2.5) - 1), y0 + r * math.sin(i / hz * 2.5)))
+    button(b, False); res.update(t1=now(), events=n)
 elif cmd == "drag":
     x1, y1, x2, y2 = map(float, a[:4]); ms = float(a[4]) if len(a) > 4 else 400; b = int(a[5]) if len(a) > 5 else 1
     move(x1, y1); time.sleep(0.05); res["t0"] = now(); button(b, True); time.sleep(0.05)
