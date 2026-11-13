@@ -23,7 +23,7 @@ in_box() { docker exec -i "$C" "$@"; }
 as_person() { docker exec -i -u person -w $PH -e HOME=$PH "$C" "$@"; }
 # every X call is bounded: a client that holds a grab (or a stuck server) cost a whole run once (46 min in rerun 3); a timeout is a FAIL
 # that says which step and what the box's processes were doing (xstuck)
-STEP=start; step() { STEP=$*; echo "STEP $(python3 -c "import time;print(round(time.time()-$T0))") $*"; }
+STEP=start; phase() { STEP=$*; echo "STEP $(python3 -c "import time;print(round(time.time()-$T0))") $*"; }
 # What it captures, for lane B's grab probe: does a fresh X client get an answer (no: a server grab, held by the one X client that is not
 # waiting on its X socket); was the Backplane client still logging; each X client's state and stack from the host (the container gives
 # no ptrace: host pids from docker top, /proc as root, eu-stack or gdb), Xvfb's too.

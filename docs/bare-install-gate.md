@@ -56,7 +56,7 @@ reads HOLD with a paper cut; any other version fails, and the hold still being t
 that bumps the pin deletes it.
 
 Every X call the harness makes (xdotool, screenshots, xwininfo) and every hub or KiCad IPC call is bounded: a timeout is a FAIL naming
-the step (each step prints `STEP <seconds> <name>`), with the box's processes in `logs/xstuck.txt`. Rerun 3 lost 46 minutes to one
+the step (each phase prints `STEP <seconds> <name>`), with the box's processes in `logs/xstuck.txt`. Rerun 3 lost 46 minutes to one
 unbounded X call in the second session.
 
 ## Stock KiCad compatibility (test/bare/stock_compat.py)
