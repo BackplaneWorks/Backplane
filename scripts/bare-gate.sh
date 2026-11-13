@@ -70,6 +70,7 @@ B ssh "$GATE" -- 'cd ~/run && tar -czf - --exclude=home --exclude=standins --exc
 echo; echo "== timings ($IMAGE, $SRC${SHA:+ $SHA})"
 [ -n "${BUILD_S:-}" ] && printf '  %-28s %8s s\n' build-on-boat "$BUILD_S"
 [ -f "$OUT/timings.tsv" ] && while IFS=$'\t' read -r k v; do printf '  %-28s %8s s\n' "$k" "$v"; done <"$OUT/timings.tsv"
+[ -f "$OUT/backplane-size.txt" ] && echo "  $(cat "$OUT/backplane-size.txt")"
 [ -f "$OUT/kicad-size.txt" ] && echo "  $(cat "$OUT/kicad-size.txt")"
 printf '  %-28s %8s s\n' gate-wall "$(( $(date +%s) - T0 ))"
 echo "== paper cuts, in the order a person meets them (rank 1 = blocks or misleads)"
