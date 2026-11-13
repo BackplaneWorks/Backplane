@@ -152,6 +152,8 @@ struct Src {
     in_editor: bool, unsaved: bool, progress: String,
     /// the check this one waits for in the open editor ("ERC"), until it starts
     behind: String,
+    /// when the last run in the open editor ended (ms)
+    editor_end: u64,
     /// the ids of the last kicad-cli result (an editor's rows the CLI did not have say so: edchecks EDITOR_ONLY)
     cli_ids: std::collections::HashSet<String>,
 }
@@ -171,6 +173,34 @@ impl Proj {
 
 static STATE: OnceLock<Mutex<HashMap<String, Proj>>> = OnceLock::new();
 fn state() -> &'static Mutex<HashMap<String, Proj>> { STATE.get_or_init(Default::default) }
+/// Which document a co-edit change is of (ET_DOCUMENT_EDITED's detail: {doc, actor, description, created, modified, deleted}): the board
+/// (0) or the schematic (1); None for a library editor's (a footprint, a symbol), and for a change that touched nothing.
+pub fn edit_doc(ev: &Value) -> Option<usize> {
+    let d: Value = ev["detail"].as_str().and_then(|t| serde_json::from_str(t).ok()).unwrap_or(Value::Null);
+    let touched = |k: &str| match &d[k] { Value::Array(a) => !a.is_empty(), Value::Number(n) => n.as_u64().unwrap_or(0) > 0, Value::Null => false, _ => true };
+    if d.is_object() && !["created", "modified", "deleted"].iter().any(|k| touched(k)) { return None }
+    match d["doc"].as_str() {
+        Some("pcb") => Some(0),
+        Some("sch") | Some("schematic") => Some(1),
+        Some(_) => None,
+        None => Some(if ev["frame"]["kind"] == "FK_SCH" || ev["frame"]["kind"].as_i64() == Some(2) { 1 } else { 0 }),
+    }
+}
+/// The last edit seen in the open editor, per project (ms): automatic in-editor runs wait EDIT_QUIET_MS after it.
+static EDIT_AT: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new();
+/// While a check runs in KiCad every other client's request is AS_BUSY (upstream's API task gate, bp.13 batches 3 and 4), so automatic
+/// runs there are rare: EDIT_QUIET_MS after the last edit, AFTER_RUN_MS after the last in-editor run ended, none while another client's
+/// request is in flight or was within OTHERS_QUIET_MS, and a running check is never cancelled for a newer edit (it ends; the next follows).
+const EDIT_QUIET_MS: u64 = 3_000;
+const AFTER_RUN_MS: u64 = 10_000;
+const OTHERS_QUIET_MS: u64 = 1_500;
+/// How long an in-editor run must wait now (None: it may go): `demand` (the person's Run) skips the quiet periods, never the others' wait.
+pub fn editor_hold(now: u64, edit_at: u64, last_end: u64, others_busy: bool, demand: bool) -> Option<u64> {
+    if others_busy { return Some(300) }
+    if demand { return None }
+    let a = (edit_at + EDIT_QUIET_MS).saturating_sub(now); let b = (last_end + AFTER_RUN_MS).saturating_sub(now);
+    let w = a.max(b); (w > 0).then_some(w)
+}
 /// Edits in an editor that checks itself, per project: [board, schematic].
 static EDITS: OnceLock<Mutex<HashMap<String, [u64; 2]>>> = OnceLock::new();
 fn edits(pro: &str) -> [u64; 2] { EDITS.get_or_init(Default::default).lock().unwrap().get(pro).copied().unwrap_or_default() }
@@ -226,8 +256,10 @@ pub fn on_event(pro: &str, ev: &Value) {
     let ty = ev["type"].as_str().unwrap_or(""); let n = ev["type"].as_i64().unwrap_or(0);
     // an edit in an editor that checks itself: the document's revision moves without a save (the check sees unsaved edits)
     if (ty == "ET_DOCUMENT_EDITED" || n == 20) && super::edchecks::known(pro) {
-        let k = if ev["frame"]["kind"] == "FK_SCH" || ev["frame"]["kind"].as_i64() == Some(2) { 1 } else { 0 };
-        EDITS.get_or_init(Default::default).lock().unwrap().entry(pro.to_string()).or_default()[k] += 1;
+        if let Some(k) = edit_doc(ev) {
+            EDITS.get_or_init(Default::default).lock().unwrap().entry(pro.to_string()).or_default()[k] += 1;
+            EDIT_AT.get_or_init(Default::default).lock().unwrap().insert(pro.to_string(), now_ms());
+        }
     }
     // a click on one of KiCad's own DRC/ERC markers: its row is the one to show
     if (ty == "ET_MARKER_CLICKED" || n == 26) && ev["drc_marker"].is_object() && ev["marker"]["set"].as_str().map_or(true, str::is_empty) { marker_clicked(pro, ev) }
@@ -422,7 +454,20 @@ async fn tick(hub: &Arc<Hub>) -> u64 {
                     x.sched.demand = false; let full = std::mem::take(&mut x.full_next); x.sched.running_since = now; x.sched.running_rev = rev.clone();
                     let c = Arc::new(tokio::sync::Notify::new()); x.cancel = Some(c.clone()); acts.push((s, rev.clone(), c, full, host));
                 };
-                match fd::next_ignoring_machine(now, &x.sched) {
+                let mut next = fd::next_ignoring_machine(now, &x.sched);
+                if ed {
+                    match &next {
+                        // a check in KiCad is never cancelled for a newer edit: it ends, and the newer revision runs after it
+                        Do::Cancel => next = Do::Nothing,
+                        Do::Run => {
+                            let edit_at = EDIT_AT.get_or_init(Default::default).lock().unwrap().get(&pro).copied().unwrap_or(0);
+                            let busy = embed::gui_route(&pro).is_some_and(|r| embed::others_busy(&r.sock, OTHERS_QUIET_MS));
+                            if let Some(w) = editor_hold(now, edit_at, x.editor_end, busy, x.sched.demand) { next = Do::Wait(w) }
+                        }
+                        _ => {}
+                    }
+                }
+                match next {
                     Do::Run => match if ed { fd::Place::Here } else { fd::place(&fd::machine_guard(&x.sched), remote.is_some(), busy) } {
                         fd::Place::Here if !fd::admit(free, &RUNNING.lock().unwrap().iter().map(|r| r.1).collect::<Vec<_>>(), x.sched.need_mb) => sleep = sleep.min(300),
                         fd::Place::Here => { start(x, None, &mut acts); changed = true }
@@ -474,6 +519,7 @@ async fn run(hub: &Arc<Hub>, pro: &str, f: &project::Files, s: &'static str, rev
         let x = p.src(s);
         if peak > 0 { if full { x.peak_full_mb = peak } else { x.peak_mb = peak } }
         x.progress.clear();
+        if editor.is_some() { x.editor_end = now_ms() }
         if let Some(Ok(fs)) = &o { x.full = full; x.ran_on = host.as_ref().map(|r| r.host.clone()).unwrap_or_default(); x.in_editor = editor.is_some(); x.unsaved = editor.unwrap_or(false);
             if editor.is_none() { x.cli_ids = fs.iter().map(|f| f.id.clone()).collect() } }
     }
@@ -484,6 +530,11 @@ async fn run(hub: &Arc<Hub>, pro: &str, f: &project::Files, s: &'static str, rev
 /// (no editor that checks itself, or it could not take the run now).
 async fn run_editor(hub: &Arc<Hub>, pro: &str, f: &project::Files, s: &str, cancel: &tokio::sync::Notify, full: bool) -> Option<(Outcome, bool)> {
     let route = super::edchecks::ready(hub, pro).await?;
+    // ERC in KiCad only where its schematic editor is open: without one, RunChecks{FK_SCH} answers AS_UNHANDLED (lane B, bp.13 batch 4),
+    // so kicad-cli runs it on the saved files; asked here, with no round trip
+    if s == "erc" && !embed::has_frame(pro, "SCH") { eprintln!("checks: erc with kicad-cli: KiCad has no schematic editor open"); return None }
+    { let e = edits(pro); let rev = with(pro, |p| if s == "drc" { p.drc.sched.running_rev.clone() } else { p.erc.sched.running_rev.clone() }).unwrap_or_default();
+      eprintln!("checks: {s} in KiCad starts (rev {rev}, edits seen: board {} schematic {})", e[0], e[1]); }
     let pro2 = pro.to_string(); let s2 = s.to_string();
     let r = super::edchecks::run(&route, s, &f.sch, cancel, move |id| { if let Some(p) = state().lock().unwrap().get_mut(&pro2) { p.src(&s2).progress = id.to_string() } }).await;
     match r {
@@ -873,6 +924,25 @@ mod tests {
         assert_eq!(clicked_row(pro, &ev, &|_| None), Some(("drc", want)));
         assert_eq!(clicked_row("/other.kicad_pro", &ev, &|_| None), None, "another project's");
         state().lock().unwrap().remove(pro);
+    }
+    /// Which edits move a check's revision: a board or schematic change that touched something; not a library editor's, not an empty one.
+    #[test] fn an_edit_event_counts_for_its_document_only() {
+        let ev = |d: Value| json!({"type": "ET_DOCUMENT_EDITED", "frame": {}, "detail": d.to_string()});
+        assert_eq!(edit_doc(&ev(json!({"doc": "pcb", "actor": "person", "modified": ["a"]}))), Some(0));
+        assert_eq!(edit_doc(&ev(json!({"doc": "sch", "actor": "agent:t1", "created": ["b"]}))), Some(1));
+        assert_eq!(edit_doc(&ev(json!({"doc": "footprint", "modified": ["c"]}))), None, "a library editor's");
+        assert_eq!(edit_doc(&ev(json!({"doc": "pcb", "description": "DRC", "created": [], "modified": [], "deleted": []}))), None, "nothing touched");
+        assert_eq!(edit_doc(&json!({"type": "ET_DOCUMENT_EDITED", "frame": {"kind": "FK_SCH"}})), Some(1), "no detail: the frame says");
+    }
+    /// An automatic run in KiCad waits for quiet after the last edit and after the last run, and always for another client's request.
+    #[test] fn a_run_in_kicad_waits_for_quiet_and_for_other_clients() {
+        let now = 100_000;
+        assert_eq!(editor_hold(now, now - 500, 0, false, false), Some(EDIT_QUIET_MS - 500), "an edit half a second ago");
+        assert_eq!(editor_hold(now, 0, now - 1_000, false, false), Some(AFTER_RUN_MS - 1_000), "a run just ended");
+        assert_eq!(editor_hold(now, now - 60_000, now - 60_000, false, false), None, "quiet: it goes");
+        assert_eq!(editor_hold(now, now - 60_000, now - 60_000, true, false), Some(300), "another client waits");
+        assert_eq!(editor_hold(now, now - 10, now - 10, false, true), None, "the person's Run skips the quiet");
+        assert_eq!(editor_hold(now, now - 10, now - 10, true, true), Some(300), "but never another client's wait");
     }
     #[test] fn an_unguarded_clean_drc_is_not_shown_clean() {
         use crate::review::stockdrc as sd;

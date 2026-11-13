@@ -35,7 +35,7 @@ pub async fn ready(hub: &std::sync::Arc<crate::hub::Hub>, pro: &str) -> Option<G
     if let Some((sock, ok, _)) = m.lock().unwrap().get(pro).cloned() { if sock == route.sock { return ok.then_some(route) } }
     // the embedded GUI's own answer (the headless server's manifest never has the embed capabilities)
     let _ = hub;
-    let o = embed::gui_call(&route, "kiapi.backplane.GetCapabilities", json!({})).await;
+    let o = embed::gui_call_as(&route, "kiapi.backplane.GetCapabilities", json!({}), embed::CHECKS_CLIENT).await;
     if !o["ok"].as_bool().unwrap_or(false) { return None } // no answer now: ask again next time
     let caps = o["message"].clone();
     let ok = capable(&caps);
@@ -278,7 +278,7 @@ pub enum Ran { Found(Vec<Finding>, bool), Cancelled, Failed(String), Cli(String)
 /// progress id, once the editor took the run.
 pub async fn run(route: &GuiRoute, kind: &str, sch: &str, cancel: &tokio::sync::Notify, on_start: impl FnOnce(&str)) -> Ran {
     let fk = if kind == "drc" { "FK_PCB" } else { "FK_SCH" };
-    let o = embed::gui_call(route, "kiapi.backplane.embed.RunChecks", json!({"kind": fk, "parity": kind == "drc"})).await;
+    let o = embed::gui_call_as(route, "kiapi.backplane.embed.RunChecks", json!({"kind": fk, "parity": kind == "drc"}), embed::CHECKS_CLIENT).await;
     if !o["ok"].as_bool().unwrap_or(false) {
         let why = o["error"].as_str().or(o["why"].as_str()).unwrap_or("no answer").to_string();
         return Ran::Cli(format!("KiCad did not run it ({why})"))
@@ -294,7 +294,7 @@ pub async fn run(route: &GuiRoute, kind: &str, sch: &str, cancel: &tokio::sync::
     let checks = tokio::select! {
         c = &mut rx => match c { Ok(c) => c, Err(_) => return Ran::Failed("KiCad's check ended without a result".into()) },
         _ = cancel.notified() => {
-            let _ = embed::gui_call(route, "kiapi.backplane.embed.CancelProgress", json!({"id": id})).await;
+            let _ = embed::gui_call_as(route, "kiapi.backplane.embed.CancelProgress", json!({"id": id}), embed::CHECKS_CLIENT).await;
             let _ = tokio::time::timeout(Duration::from_secs(10), &mut rx).await;
             return Ran::Cancelled
         }
@@ -302,7 +302,7 @@ pub async fn run(route: &GuiRoute, kind: &str, sch: &str, cancel: &tokio::sync::
     };
     if checks["cancelled"].as_bool().unwrap_or(false) { return Ran::Cancelled }
     if let Some(e) = checks["error"].as_str().filter(|e| !e.is_empty()) { return Ran::Failed(format!("KiCad could not run {}: {e}", kind.to_uppercase())) }
-    let g = embed::gui_call(route, "kiapi.backplane.embed.GetMarkers", json!({"kind": fk})).await;
+    let g = embed::gui_call_as(route, "kiapi.backplane.embed.GetMarkers", json!({"kind": fk}), embed::CHECKS_CLIENT).await;
     if !g["ok"].as_bool().unwrap_or(false) { return Ran::Cli(format!("KiCad gave no markers ({})", g["error"].as_str().unwrap_or("no answer"))) }
     let markers: Vec<Value> = g["message"]["markers"].as_array().cloned().unwrap_or_default();
     let mut d = detail_of_markers(&markers);
@@ -320,7 +320,7 @@ async fn look_up(route: &GuiRoute, ids: &[String]) -> Detail {
     if ids.is_empty() { return Detail::new() }
     let header = json!({"document": {"type": "DOCTYPE_PCB"}});
     let get = |ids: Vec<String>| { let h = header.clone(); async move {
-        let o = embed::gui_call(route, "kiapi.common.commands.GetItemsById", json!({"header": h, "items": ids.iter().map(|i| json!({"value": i})).collect::<Vec<_>>()})).await;
+        let o = embed::gui_call_as(route, "kiapi.common.commands.GetItemsById", json!({"header": h, "items": ids.iter().map(|i| json!({"value": i})).collect::<Vec<_>>()}), embed::CHECKS_CLIENT).await;
         o["message"]["items"].as_array().cloned().unwrap_or_default()
     } };
     let items = get(ids.to_vec()).await;
