@@ -67,11 +67,27 @@ import json,sys
 l=sys.stdin.read(); r=json.loads(l[l.index("{"):]) if "{" in l else {}
 sh=[f for f in r.get("frames",[]) if f.get("xid")==r.get("shown")]
 print("%s %s %s" % (r.get("state"), r.get("container",{}).get("painted",0), (sh[0].get("kind") if sh else "-")))' 2>/dev/null; }
+# a box of KiCad's own that the pane does not show: a visible top-level window of KiCad's pid that is not one of its frames (bp-win, no
+# GPU: "Could not use OpenGL, falling back to software rendering" came before any frame, and the pane stayed on "Starting KiCad..." with
+# state ready, frames 0, dialogs []). kicad_box TAG STUCK: STUCK=1 when the pane did not draw (the box is why: rank 1), else rank 2.
+kicad_box() { local r pid xids b
+  r=$(report "$1"); [ -n "$r" ] || r=$(grep -h '"kicad_info"' "$HH/win.log" | tail -1)
+  read -r pid xids < <(printf '%s' "$r" | python3 -c 'import json,sys
+l=sys.stdin.read(); r=json.loads(l[l.index("{"):]) if "{" in l else {}
+print(r.get("pid") or "", *[f.get("xid") for f in r.get("frames",[]) if f.get("xid")])' 2>/dev/null)
+  [ -n "$pid" ] || return 0
+  b=$(DISPLAY=$DISP timeout 40 python3 -I "$HERE/kicad_boxes.py" "$pid" $xids 2>/dev/null)
+  [ -n "$b" ] || return 0
+  printf '%s\n' "$b" >"$OUT/logs/kicad-box-$1.txt"; shot "kicad-box-$1"
+  b=$(printf '%s' "$b" | awk -F'\t' '{printf "%s\"%s\" %s", (NR>1?"; ":""), $3, $2}')
+  if [ "${2:-0}" = 1 ]; then bad "KiCad shows a box the pane does not ($1): $b"; cut_ 1 kicad-box "KiCad opened a box before its frame and the pane stays on 'Starting KiCad...', nothing telling the person ($b; $(basename "$KDIR"))"
+  else cut_ 2 kicad-box "KiCad has a box up beside the pane ($1: $b), which the pane does not show"; fi
+}
 if markt board-view 120; then tm board-viewer "$(since)"; shot 06-board-view; ok "the project's board opens in the viewer"; else bad "the board viewer never came (thread:$tid, rail:Board)"; fi
 if markt pcb 600; then E_T=$(since); tms edit-pcb-painted ui:Edit pcb "$E_T"; sleep 1; shot 07-edit-pcb; set -- $(painted pcb)
-  if [ "${1:-}" = ready ] && [ "${2:-0}" -gt 50 ]; then ok "Edit: KiCad's PCB editor drawn in the pane (state $1, painted $2, $3)"
-  else bad "Edit: PCB not drawn ($(painted pcb))"; cut_ 1 edit "Edit did not draw KiCad's PCB editor: $(report pcb | cut -c1-300)"; fi
-else bad "Edit never reported a painted PCB"; cut_ 1 edit "Edit never showed KiCad (no report in 150 s): $(grep -h 'kicad' "$HH/win.log" | tail -2 | cut -c1-300)"; fi
+  if [ "${1:-}" = ready ] && [ "${2:-0}" -gt 50 ]; then ok "Edit: KiCad's PCB editor drawn in the pane (state $1, painted $2, $3)"; kicad_box pcb 0
+  else bad "Edit: PCB not drawn ($(painted pcb))"; cut_ 1 edit "Edit did not draw KiCad's PCB editor: $(report pcb | cut -c1-300)"; kicad_box pcb 1; fi
+else bad "Edit never reported a painted PCB"; cut_ 1 edit "Edit never showed KiCad (no report in 150 s): $(grep -h 'kicad' "$HH/win.log" | tail -2 | cut -c1-300)"; kicad_box pcb 1; fi
 # which KiCad runs: the pid the pane reports, its executable inside the box (nothing from the harness's shell reaches the box: docker exec -e only)
 KPID=$(report pcb | python3 -c 'import json,sys
 l=sys.stdin.read(); print(json.loads(l[l.index("{"):]).get("pid","") if "{" in l else "")' 2>/dev/null)

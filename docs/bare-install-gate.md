@@ -151,6 +151,9 @@ gaps already known:
 - [x] desktop libraries against the distro's desktop manifest; libraries KiCad's runtime bundles
 - [x] first start, setup to the KiCad step, KiCad fetched by itself, timings and sizes
 - [x] a real-shaped project; Edit draws the PCB editor; Schematic; back to Board
+- [x] a box of KiCad's own the pane does not show (`test/bare/kicad_boxes.py`: a visible top-level window of KiCad's pid that is not one of
+  its frames): a FAIL when the pane did not draw (first Edit, or after reopening), a rank-2 paper cut when it did. From bp-win, no GPU: KiCad's
+  "Could not use OpenGL, falling back to software rendering" came before any frame and the pane stayed on "Starting KiCad..." (ready, 0 frames, no dialogs)
 - [x] an agent's `kicad_ipc` commit shows live and is saved; an agent's comment
 - [x] DRC by the runtime's kicad-cli
 - [x] export to the current stock KiCad (official packages): loads clean, same ERC/DRC, gerbers and netlist
