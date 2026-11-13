@@ -130,6 +130,8 @@ pub fn build(e: &PromptEnv) -> String {
     if !e.skills.is_empty() { s += "\n\n"; s += &bundled_skills(&e.skills) }
     if !e.keys.is_empty() { s += "\n\n"; s += &e.keys }
     if !e.machines.is_empty() { s += "\n\n"; s += &e.machines }
+    // a board on Backplane KiCad: plan before copper (plan/mod.rs)
+    if !e.pcb.is_empty() && crate::plan::plans(&e.kicad.status, &e.kicad.version) { s += "\n\n"; s += &crate::plan::guidance() }
     if e.buy { s += "\n\n"; s += &T::ORDER_PROMPT_BUY.concat() } // every piece: the opening line alone ([0]) left a buy thread without its steps
     let l = lang_line(&e.lang); if l.is_empty() { s } else { s + "\n" + l }
 }
@@ -152,6 +154,7 @@ pub(crate) mod tests {
     #[test] fn kicad_words_follow_the_status() {
         let k = |s: &str| Kicad { status: s.into(), cli: "/k".into(), version: "1".into(), commit: "abc".into(), why: "no\nmore".into() };
         assert!(kicad(&k("ok"), true).contains("blob/abc/BACKPLANE_IPC.md")); assert!(kicad(&k("ok"), false).contains("turned off")); assert!(kicad(&k("broken"), true).contains("doesn't run (no)"));
+        { let mut e = PromptEnv { pcb: "/p/b.kicad_pcb".into(), ..Default::default() }; e.kicad.status = "ok".into(); e.kicad.version = "10.99.0-bp.11".into(); assert!(build(&e).contains("<backplane_routing_plan>")); e.kicad.version = "10.99.0-bp.10".into(); assert!(!build(&e).contains("<backplane_routing_plan>"), "the plan API came with bp.11"); e.kicad.status = "stock".into(); assert!(!build(&e).contains("<backplane_routing_plan>"), "stock KiCad has no plan API"); }
         assert!(kicad(&k("missing"), true).contains("isn't installed") && kicad(&k("missing"), true).starts_with("<kicad_runtime>The selected KiCad CLI path is `/k`.")); assert!(kicad(&k("old"), true).contains(min_version()));
     }
     #[test] fn project_lists_the_files_it_has() {

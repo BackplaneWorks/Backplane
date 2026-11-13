@@ -16,6 +16,16 @@ use serde_json::{json, Value};
 use std::{collections::HashMap, path::{Path, PathBuf}, sync::{Arc, Mutex, OnceLock}};
 
 pub const CAP: &str = "routing-plan";
+/// When a board is routed by plan: 4 or more copper layers, or more than 60 nets (what agents are told; `needs_plan` is the rule).
+pub const LAYERS: usize = 4;
+pub const NETS: usize = 60;
+/// Whether a KiCad (its status and version) has the plan API: Backplane KiCad from bp.11.
+pub fn plans(status: &str, version: &str) -> bool { status == "ok" && version.rsplit('-').next().and_then(|l| l.strip_prefix("bp.")).and_then(|n| n.split('.').next()?.parse::<u32>().ok()).map_or(false, |n| n >= 11) }
+pub fn needs_plan(copper_layers: usize, nets: usize) -> bool { copper_layers >= LAYERS || nets > NETS }
+/// The agents' instructions for a project with a KiCad board on Backplane KiCad (agents/prompt.rs adds it).
+pub fn guidance() -> String {
+    format!("<backplane_routing_plan>Plan before copper on a board with {LAYERS} or more copper layers or more than {NETS} nets (fewer: route as asked): before routing anything, read the stackup with the backplane tool `fab_profile` (its `stackup.layers`: each copper layer's reference planes above and below with the dielectric height and Er, and the trace widths for the project's impedances) and the plan with `plan_get`; then propose with `plan_propose`: on signal layers, one corridor per bus or net group (its nets, the parts it runs between, a path and a width, vias and escapes, the routing order), each next to a solid reference plane, impedance nets at the stackup's widths; on power layers, plane regions per net with their reference; one layer at a time is fine. Ask the person to approve with `plan_approve` and end your turn: Backplane tells you when they have decided. Their edits, locks, notes and constraints win: read `changes` from `plan_get` and never undo them. Route only what they approved, with `plan_route` (one step per call, until done), inside its corridor; nothing else, and no copper outside the plan. `plan_stop` stops; `plan_verify` checks the routed groups. The plan needs the board open in KiCad.</backplane_routing_plan>")
+}
 const NS: &str = "kiapi.backplane.plan.";
 
 // ---- the plan, pure ----
@@ -244,6 +254,7 @@ mod tests {
         "corridors": [{"id": "c1", "group": "g1", "layer": "In1.Cu", "status": "approved"}, {"id": "c2", "group": "g1", "layer": "In1.Cu", "status": "proposed"},
             {"id": "c3", "group": "g2", "layer": "In1.Cu", "status": "approved"}, {"id": "c4", "group": "g1", "layer": "In2.Cu", "status": "approved"}],
         "planes": [{"id": "p1", "net": "GND", "layer": "In1.Cu", "status": "approved"}, {"id": "p2", "net": "+3V3", "layer": "In1.Cu", "status": "proposed"}]}) }
+    #[test] fn plan_needs_a_plan_on_big_boards() { assert!(needs_plan(4, 10)); assert!(needs_plan(2, 61)); assert!(!needs_plan(2, 60)); assert!(guidance().contains("plan_approve") && guidance().contains("fab_profile")); }
     #[test] fn plan_gate_routes_only_what_the_person_approved() {
         let p = plan();
         assert_eq!(gate(&p, &[]).unwrap(), ["c1", "p1"], "approved, its group and layer not rejected");

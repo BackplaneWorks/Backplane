@@ -287,3 +287,10 @@ The hub's own terminals: the chat terminals a thread opens (an agent's `terminal
 - `sidebar.act {action, value}`: `project-pin` key (toggles), `project-fold` key (toggles a project row's fold: its `folded` row has no `threads`/`swarms`, `under` counts what it hides), `group-rename` "gid\u001fname" ("" gives the automatic name back), `group-move` "key\u001fgid" (or "key\u001f+New name").
 - Visibility (D11): a thread is listed while it runs, owns running work, asks the person, or stopped abnormally and was not opened or settled since; pinned ones always.
   A thread that asks the person is never hidden. The rest are on the project's page and in `jump`.
+
+## Routing plan (feature `plan`; docs/floorplanner.md)
+- The Plan panel's data is the management info `mgmt.plan.<digest>` (layers, items with state, what awaits approval, and `draw`: the bands
+  and plane regions to draw over the board, millimetres in board coordinates).
+- `plan.approve {pro, layer?, ids?, approve}` -> `{result}`: the person's approval (or rejection) of items, a layer, or all; `plan.stop {pro}`;
+  `plan.focus {pro, id}`. The same hub calls as the desktop's.
+
