@@ -1143,8 +1143,7 @@ if "undo" in JOURNEYS and SOCK:
         print(f"INFO undo focus before Ctrl+Y: X {fo[:3]}; KiCad frames focused {kf}", flush=True)
         RESULTS["undo_focus_before_ctrl_y"] = {"ms": None, "x": fo[:3], "kicad": kf}
         shot("undo_before_ctrl_y")
-        rt("click", PANE["x"] + 30, PANE["y"] + 12); time.sleep(0.7); shot("undo_edit_menu")  # Edit menu: Redo enabled or grey
-        rt("key", "Escape"); time.sleep(0.3); rt("click", EXs, EYs); time.sleep(0.4)
+        rt("click", EXs, EYs); time.sleep(0.4)  # the toolbar's Redo button shows the stack (no menu: its loop could change the next key)
         ry = rt("key", "y", "ctrl"); time.sleep(1.2); v3 = val(); steps_u.append(["ctrl_y", v3])
         print(f"INFO undo keys: ctrl_z at {rz.get('t0')}, ctrl_y at {ry.get('t0')} (epoch ms)", flush=True)
         v4 = bom("BP-AGAIN", "panel_edit_again")  # a third value: it applies only if KiCad takes the panel's second edit of the item
