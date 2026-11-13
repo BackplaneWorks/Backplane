@@ -29,9 +29,11 @@ STEP=start; phase() { rss "end of: $STEP"; STEP=$*; printf '%s\t%s\n' "$(date +%
 # by command line: KiCad runs through its runtime's own loader (ld-linux), so its process name is not "kicad"
 # KiCad by role, each process on its own line in rss-procs.tsv: api (the agents' api-server), gui (--embedded in a pane: --parent-window),
 # warm (--embedded with no pane yet: a pre-warmed spare), other (kicad-cli runs and the like)
-rss() { local ps t; ps=$(docker exec "$C" ps -eo pid=,rss=,args= 2>/dev/null) || return 0
-  printf '%s\n' "$ps" | awk -v at="$(date +%s)" -v ph="$1" '{a=$0} a~/\/kicad\/[^ ]*\/bin\/kicad|kicad\.real/ && a!~/backplane-(gpui|hub)/ {r = a~/api-server/ ? "api" : (a~/--embedded/ ? (a~/--parent-window/ ? "gui" : "warm") : "other"); printf "%s\t%s\t%s\t%s\t%s\n", at, $1, r, $2, ph}' >>"$OUT/rss-procs.tsv"
-  t=$(printf '%s\n' "$ps" | awk '{a=$0} a~/backplane-gpui/{g+=$2;next} a~/backplane-hub/{h+=$2;next} a~/\/kicad\/[^ ]*\/bin\/kicad|kicad\.real/{r = a~/api-server/ ? 1 : (a~/--embedded/ ? (a~/--parent-window/ ? 2 : 3) : 4); k[r]+=$2} END{printf "%d\t%d\t%d\t%d\t%d\t%d", g, h, k[1], k[2], k[3], k[4]}')
+rss() { local ps t gp; ps=$(docker exec "$C" ps -eo pid=,rss=,args= 2>/dev/null) || return 0
+  # the pane's KiCad is the pid the client reports (in local-map mode it starts without --parent-window and is mapped into the pane later)
+  gp=$(grep -ho '"event":"kicad".*' "$HH/win.log" 2>/dev/null | grep -o '"pid":[0-9]*' | tail -1 | tr -dc 0-9)
+  printf '%s\n' "$ps" | awk -v at="$(date +%s)" -v ph="$1" -v gp="$gp" '{a=$0} a~/\/kicad\/[^ ]*\/bin\/kicad|kicad\.real/ && a!~/backplane-(gpui|hub)/ {r = a~/api-server/ ? "api" : (a~/--embedded/ ? ($1==gp || a~/--parent-window/ ? "gui" : "warm") : "other"); printf "%s\t%s\t%s\t%s\t%s\n", at, $1, r, $2, ph}' >>"$OUT/rss-procs.tsv"
+  t=$(printf '%s\n' "$ps" | awk -v gp="$gp" '{a=$0} a~/backplane-gpui/{g+=$2;next} a~/backplane-hub/{h+=$2;next} a~/\/kicad\/[^ ]*\/bin\/kicad|kicad\.real/{r = a~/api-server/ ? 1 : (a~/--embedded/ ? ($1==gp || a~/--parent-window/ ? 2 : 3) : 4); k[r]+=$2} END{printf "%d\t%d\t%d\t%d\t%d\t%d", g, h, k[1], k[2], k[3], k[4]}')
   printf '%s\t%s\t%s\n' "$(date +%s)" "$t" "$1" >>"$OUT/rss.tsv"; return 0; }
 # What it captures, for lane B's grab probe: does a fresh X client get an answer (no: a server grab, held by the one X client that is not
 # waiting on its X socket); was the Backplane client still logging; each X client's state and stack from the host (the container gives
