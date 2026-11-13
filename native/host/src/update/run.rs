@@ -8,6 +8,9 @@ use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, fs, io::Read, path::{Path, PathBuf}};
 
 pub const FEED: &str = "https://api.github.com/repos/BackplaneWorks/Backplane/releases";
+/// The nightly builds, a repository of their own: in FEED's list a nightly would be offered to 0.15.0-0.15.3's beta hubs, whose rule calls any prerelease beta,
+/// and refused by them (its manifest says nightly), so it would hold up their betas. Only the nightly channel reads this, besides FEED.
+pub const NIGHTLY_FEED: &str = "https://api.github.com/repos/BackplaneWorks/backplane-nightly/releases";
 /// The signed files, which the release workflow uploads last: a release without all three is half published.
 pub const SIGNED: [&str; 3] = ["manifest.json", "manifest.json.sig", "manifest.json.keyid"];
 const SMALL: u64 = 1 << 20;

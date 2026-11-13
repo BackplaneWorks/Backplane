@@ -255,7 +255,7 @@ pub fn units_on(net: &str, name: &str, url: &str, self_updates: bool, channel: &
     let (env_net, flags) = if net == "public" {
         (format!(" BACKPLANE_URL={url} BACKPLANE_PUBLIC_PORT={PUBLIC_PORT}"), "--no-tailscale")
     } else { (" BACKPLANE_HTTPS_PORT=443".to_string(), "--tailnet-only") };
-    let upd = if self_updates { if channel == "beta" { " BACKPLANE_UPDATE_CHANNEL=beta" } else { "" } } else { " BACKPLANE_NO_UPDATE=1" };
+    let upd = if self_updates { match channel { "beta" => " BACKPLANE_UPDATE_CHANNEL=beta", "nightly" => " BACKPLANE_UPDATE_CHANNEL=nightly", _ => "" } } else { " BACKPLANE_NO_UPDATE=1" };
     let after = if net == "public" { "network-online.target" } else { "network-online.target tailscaled.service" };
     vec![
         ("bp-hub.service", format!("[Unit]\nDescription=Backplane hub (always-on)\nAfter={after}\nWants=network-online.target\n[Service]\nUser=user\nWorkingDirectory=/home/user\n\

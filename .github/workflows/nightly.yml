@@ -1,0 +1,74 @@
+name: nightly
+# A nightly build of main: release.yml's build, signing and manifest, tagged vX.Y.Z-nightly.YYYYMMDD.N (Z: one past the newest release) and published
+# as a prerelease in the nightly repo (vars.NIGHTLY_REPO, default BackplaneWorks/backplane-nightly), which only a hub on the nightly channel reads
+# (update/run.rs NIGHTLY_FEED). Nothing is published when main has not moved since the last nightly. The newest 14 nightlies are kept.
+# Needs: the repo secret BACKPLANE_NIGHTLY_TOKEN (contents: write on the nightly repo) besides release.yml's own.
+# The update check on a clean Boat (scripts/nightly-update-gate.sh) runs from this machine after it publishes (scripts/bare-gate-nightly.sh).
+on:
+  # schedule: turned on by the person (docs/nightly.md, "Turning it on"); until then a run is started by hand
+  # schedule:
+  #   - cron: '0 9 * * *'
+  workflow_dispatch:
+    inputs:
+      force:
+        description: Build even when main has not moved since the last nightly
+        type: boolean
+        default: false
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+permissions:
+  contents: read
+jobs:
+  plan:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.t.outputs.tag }}
+      go: ${{ steps.t.outputs.go }}
+    steps:
+      - id: t
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NREPO: ${{ vars.NIGHTLY_REPO || 'BackplaneWorks/backplane-nightly' }}
+          FORCE: ${{ inputs.force && '1' || '' }}
+        run: |
+          set -eu
+          stable=$(gh release list -R "$GITHUB_REPOSITORY" --exclude-pre-releases --exclude-drafts --limit 1 --json tagName -q '.[0].tagName')
+          [[ "$stable" =~ ^v([0-9]+)\.([0-9]+)\.([0-9]+)$ ]] || { echo "::error::newest release '$stable' is not vX.Y.Z"; exit 1; }
+          next="v${BASH_REMATCH[1]}.${BASH_REMATCH[2]}.$((BASH_REMATCH[3] + 1))"
+          day=$(date -u +%Y%m%d)
+          # the nightly repo is public: its list reads with this run's token
+          list=$(gh release list -R "$NREPO" --limit 50 --json tagName -q '.[].tagName' 2>/dev/null || true)
+          last=$(printf '%s\n' "$list" | grep -E -- '-nightly\.[0-9]+\.[0-9]+$' | sort -V | tail -1 || true)
+          n=$(printf '%s\n' "$list" | grep -c -- "^$next-nightly\.$day\." || true)
+          tag="$next-nightly.$day.$((n + 1))"
+          go=true
+          if [ -n "$last" ] && [ -z "$FORCE" ]; then
+            was=$(gh release view "$last" -R "$NREPO" --json body -q .body | grep -oE '[0-9a-f]{40}' | head -1 || true)
+            if [ "$was" = "$GITHUB_SHA" ]; then go=false; echo "main is still at ${GITHUB_SHA:0:10}, the last nightly ($last): nothing to build"; fi
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"; echo "go=$go" >> "$GITHUB_OUTPUT"
+          echo "nightly $tag of ${GITHUB_SHA:0:10} (last: ${last:-none}; go: $go)"
+  release:
+    needs: plan
+    if: needs.plan.outputs.go == 'true'
+    uses: ./.github/workflows/release.yml
+    with:
+      tag: ${{ needs.plan.outputs.tag }}
+      nightly: true
+    secrets: inherit
+    permissions:
+      contents: write
+      actions: read
+  prune:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.BACKPLANE_NIGHTLY_TOKEN }}
+          NREPO: ${{ vars.NIGHTLY_REPO || 'BackplaneWorks/backplane-nightly' }}
+        run: |
+          set -eu
+          # the newest 14 stay: a hub that updated last week still finds its build listed (and the update check its "from")
+          gh release list -R "$NREPO" --limit 100 --json tagName -q '.[].tagName' | grep -E -- '-nightly\.[0-9]+\.[0-9]+$' | sort -V -r | tail -n +15 |
+            while read -r t; do gh release delete "$t" -R "$NREPO" --yes --cleanup-tag && echo "pruned $t"; done
