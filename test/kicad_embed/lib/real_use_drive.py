@@ -615,6 +615,8 @@ if "textkeys" in JOURNEYS and SOCK:
     # (b) the search panel (Ctrl+G): ';' typed in its box stays there
     rt("click", EXk, EYk); time.sleep(0.3)
     g0 = grab(PANE["x"], PANE["y"], PANE["w"], PANE["h"]); rt("key", "g", "ctrl"); time.sleep(1.2); shot("tk_search_open")
+    # a person types in the box: click into it (the search panel docks at the bottom, its box ~143 px above the pane's bottom at 1800x1050)
+    rt("click", PANE["x"] + PANE["w"] // 3, PANE["y"] + PANE["h"] - 143); time.sleep(0.5)
     r, got = comment_after(("semicolon",)); time.sleep(0.3); shot("tk_semicolon_in_search")
     RESULTS["semicolon_in_search_stays"] = {"ms": None, "ok": int(not got)}
     print(f"INFO textkeys: ';' in the search box {'opened the comment window' if got else 'stayed in the box'}", flush=True)
@@ -628,21 +630,19 @@ if "textkeys" in JOURNEYS and SOCK:
         ga = grab(PANE["x"], PANE["y"], PANE["w"], PANE["h"]); ipc("run-action", SOCK, "common.Control.showProperties"); time.sleep(1.5)
         gb = grab(PANE["x"], PANE["y"], PANE["w"], PANE["h"]); shot("tk_properties")
         import numpy as np
-        ys, xs = np.nonzero(ga != gb)
-        # the panel is a column that appears at the canvas's side: the changed columns, the leftmost dense run of them
-        cols = np.bincount(xs, minlength=PANE["w"]) if len(xs) else np.zeros(PANE["w"], int)
-        dense = [x for x in range(PANE["w"]) if cols[x] > PANE["h"] * 0.5]
-        if dense and (max(dense) - min(dense)) > 100:
-            px0, px1 = min(dense), max(dense)
-            fx, fy = PANE["x"] + px0 + (px1 - px0) * 2 // 3, PANE["y"] + 150
-            rt("click", fx, fy); time.sleep(0.5); shot("tk_properties_field")
+        # the panel docks at the pane's left; its Reference value field ~ (pane+154, pane+396) at 1800x1050 (measured)
+        changed = float((ga[:, :240] != gb[:, :240]).mean()) > 0.3
+        if changed:
+            fx, fy = PANE["x"] + 154, PANE["y"] + 396
+            rt("click", fx, fy); time.sleep(0.5); rt("click", fx, fy); time.sleep(0.4); shot("tk_properties_field")
+            rt("key", "End"); time.sleep(0.2)
             r, got = comment_after(("semicolon",)); time.sleep(0.3); shot("tk_semicolon_in_properties")
             RESULTS["semicolon_in_properties_stays"] = {"ms": None, "ok": int(not got), "at": [fx, fy]}
-            print(f"INFO textkeys: properties panel x {px0}-{px1} in the pane; ';' at {fx},{fy} {'opened the comment window' if got else 'stayed in the field'}", flush=True)
+            print(f"INFO textkeys: ';' in the properties Reference field at {fx},{fy} {'opened the comment window' if got else 'stayed in the field'}", flush=True)
             if got: time.sleep(0.3); rt("key", "Escape"); time.sleep(0.5)
-            rt("key", "Escape"); time.sleep(0.3)
+            rt("key", "BackSpace"); time.sleep(0.2); rt("key", "Escape"); time.sleep(0.3)  # the ';' out again, the edit dropped
         else:
-            print(f"DIAG textkeys: the properties panel did not appear as a column ({len(dense)} dense columns)", flush=True)
+            print("DIAG textkeys: the properties panel did not appear at the pane's left", flush=True)
         ipc("run-action", SOCK, "common.Control.showProperties"); time.sleep(0.8)
     # (d) Backplane's chords with KiCad's right-click menu open
     for keys, tag in ((("k", "ctrl"), "popup_ctrl_k"), (("semicolon", "ctrl"), "popup_ctrl_semicolon")):
