@@ -380,6 +380,10 @@ pub fn sheet_action(st: &State, hub: &str, session: &Value, file: &str) -> Optio
 
 const BOARD_LAYERS: [(u32, &str); 17] = [(12, "F.Cu"), (11, "In1.Cu"), (10, "In2.Cu"), (9, "In3.Cu"), (8, "In4.Cu"), (7, "In5.Cu"), (6, "In6.Cu"), (5, "B.Cu"), (13, "Pads"), (23, "Vias"), (24, "Holes"),
     (16, "F.Silkscreen"), (3, "B.Silkscreen"), (19, "User.Drawings"), (20, "User.Comments"), (22, "Edge.Cuts"), (21, "Margin")];
+/// A Gerber set's layers (kicad/gerber, plotgen's look_gerber): the board's, and the fab layers a board view leaves out.
+const GERBER_LAYERS: [(u32, &str); 18] = [(12, "F.Cu"), (11, "In1.Cu"), (10, "In2.Cu"), (9, "In3.Cu"), (8, "In4.Cu"), (7, "In5.Cu"), (6, "In6.Cu"), (5, "B.Cu"), (24, "Drills"),
+    (14, "F.Mask"), (4, "B.Mask"), (15, "F.Paste"), (2, "B.Paste"), (16, "F.Silkscreen"), (3, "B.Silkscreen"), (17, "F.Courtyard"), (1, "B.Courtyard"), (22, "Edge.Cuts")];
+const GERBER_MORE: [(u32, &str); 3] = [(18, "F.Fab"), (0, "B.Fab"), (19, "User.Drawings")];
 /// A comparison's marks (Look.names); a plot has them only while it compares.
 const MARK_LAYERS: [(u32, &str); 3] = [(26, "Removed"), (27, "Changed"), (28, "Added")];
 const SCH_LAYERS: [&str; 24] = ["page", "sheet fill", "body fill", "sheet", "graphic", "note", "body", "pin", "pin name", "pin number", "field", "field other", "bus", "bus entry", "wire", "no connect",
@@ -395,7 +399,7 @@ fn page(template: &Value, kind: &str, root: &str, drafts: &Value, sel: &str) -> 
     let mut v = template.clone();
     let Some(o) = v.as_object_mut() else { return v };
     o.insert("open".into(), json!(kind)); o.insert("key".into(), json!(k));
-    // the Board page drawing a Gerber set (kicad/gerber): the rail lights Gerbers
+    // the Board page drawing a Gerber set (kicad/gerber): the rail lights Gerbers, the layer list is the set's
     if kind == "board" && !sel.is_empty() && s(drafts, &format!("@view.gerbers:{sel}")) == "1" { o.insert("gerbers".into(), json!(true)); }
     // View.layers: a 3D view draws the board's layers on its faces
     o.insert("layers".into(), json!(if kind == "3d" { if file.is_empty() { key("board", root) } else { String::new() } } else { k }));
@@ -404,6 +408,11 @@ fn page(template: &Value, kind: &str, root: &str, drafts: &Value, sel: &str) -> 
     let off: u32 = if draws { s(drafts, &format!("@view.off.{kind}")).parse().unwrap_or(0) } else { 0 };
     let f = if draws { Focus::read(s(drafts, &format!("@view.focus.{kind}"))) } else { Focus { active: NONE, mode: 0 } };
     layer_fields(o, kind, off, f);
+    if o.get("gerbers") == Some(&json!(true)) {
+        let rows: Vec<Value> = GERBER_LAYERS.iter().chain(GERBER_MORE.iter()).map(|(n, name)| json!({"layer": n, "name": name, "on": off & bit(*n) == 0, "active": f.on() && f.active == *n})).collect();
+        o.insert("layerList".into(), Value::Array(rows));
+        if f.on() { if let Some((_, nm)) = GERBER_LAYERS.iter().chain(GERBER_MORE.iter()).find(|(n, _)| *n == f.active) { o.insert("layerHead".into(), json!(format!("Layer: {nm}"))); } }
+    }
     v
 }
 
@@ -1095,6 +1104,8 @@ mod tests {
         let v = viewer_json(&st, &json!({}), &s2).unwrap();
         assert_eq!((v["open"].as_str(), v["gerbers"].as_bool()), (Some("board"), Some(true)));
         assert!(v["choices"].as_array().unwrap().iter().any(|c| c["value"] == "gerbers" && c["on"] == true), "the Gerbers tab is the one on");
+        let names: Vec<&str> = v["layerList"].as_array().unwrap().iter().map(|r| r["name"].as_str().unwrap()).collect();
+        assert!(names.contains(&"F.Mask") && names.contains(&"B.Paste") && names.contains(&"Drills") && !names.contains(&"Vias"), "{names:?}");
         // the Board page again: its own board, not marked
         let o = view_action(&st, "h", &s2, "board").unwrap();
         assert_eq!(o.patch["drafts"][format!("@view.gerbers:{th}")], "");

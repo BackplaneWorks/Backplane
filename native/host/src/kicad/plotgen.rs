@@ -22,7 +22,14 @@ fn look_board(i: u32) -> (u32, u32) {
         17 => (16721634, 0), 18 => (11513775, 0), 22 => (13685453, 255), 23 => (11842740, 255), 24 => (526603, 255), _ => (10000536, 90),
     }
 }
-fn look_plain(kind: u32, layer: u32) -> (u32, u32) { if kind == 1 { schematic::look(layer) } else { look_board(layer) } }
+/// A Gerber set (kicad/gerber): the board's colours, and the fab layers a board view leaves out drawn too (the mask's openings, the
+/// paste, the courtyards and fab drawings), each toggled in the layer list
+fn look_gerber(i: u32) -> (u32, u32) {
+    match i { 14 => (0x9d5ccc, 120), 4 => (0x6a4c93, 120), 15 => (0xb4b4b4, 150), 2 => (0x8c8c8c, 150), 17 => (0xd2d2c8, 110), 1 => (0xa8a8a0, 110), 18 => (0xc9c39b, 120), 0 => (0xa39d7d, 120), _ => look_board(i) }
+}
+/// The kind of a Gerber set's plot (look_gerber; its outline from Edge.Cuts, as a board's)
+pub const GERBER: u32 = 2;
+fn look_plain(kind: u32, layer: u32) -> (u32, u32) { match kind { 1 => schematic::look(layer), GERBER => look_gerber(layer), _ => look_board(layer) } }
 pub const DIFF: u32 = 8;
 /// Look.of: a layer's colour and opacity in a board (0), a schematic (1), or a comparison of either (kind | DIFF)
 pub fn look(kind: u32, layer: u32) -> (u32, u32) {
@@ -180,7 +187,7 @@ struct Shown { kind: u32, edge_layer: u32 }
 thread_local! { static SEEN: std::cell::RefCell<HashSet<Info>> = std::cell::RefCell::new(HashSet::new()); }
 fn shared(i: Info) -> Info { SEEN.with(|m| { let mut m = m.borrow_mut(); match m.get(&*i) { Some(a) => a.clone(), None => { m.insert(i.clone()); i } } }) }
 impl Shown {
-    fn new(kind: u32) -> Shown { Shown { kind, edge_layer: if kind & 7 == 0 { board::EDGE } else { u32::MAX } } }
+    fn new(kind: u32) -> Shown { Shown { kind, edge_layer: if kind & 7 != 1 { board::EDGE } else { u32::MAX } } }
     fn take(&self, it: Item, edge: &mut Bx) -> Option<Piece> {
         if it.layer == self.edge_layer { edge.edge(&it.prim) }
         if look(self.kind, it.layer).1 == 0 { return None }
