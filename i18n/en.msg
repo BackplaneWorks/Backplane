@@ -4250,6 +4250,7 @@ gpui.mgmt.checks.searching = Looking…
 gpui.mgmt.checks.run = Run
 gpui.mgmt.checks.running = running
 gpui.mgmt.checks.stale = changed since
+gpui.mgmt.checks.liveunsaved = live, unsaved
 gpui.mgmt.checks.waiting = waiting: {why}
 gpui.mgmt.checks.failed = failed: {why}
 gpui.mgmt.checks.all = All

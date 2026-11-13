@@ -155,6 +155,8 @@ pub fn state_text(name: &str, c: &Value) -> (String, &'static str) {
         "failed" => (format!("{head} · {}", tf("gpui.mgmt.checks.failed", &[("why", s(c, "reason").to_string().into())])), "bad"), // i18n-ok: DRC/ERC are the checks' names; numbers and joins
         _ => (head, if c["counts"]["error"].as_u64().unwrap_or(0) > 0 { "bad" } else if n > 0 { "warn" } else { "dim" }),
     };
+    // a result of the open editor's unsaved edits says so (bp.13 embed-checks: the check ran in KiCad, not on the saved files)
+    let out = if c["unsaved"] == true && s(c, "state") != "running" { (format!("{} · {}", out.0, tf("gpui.mgmt.checks.liveunsaved", &[])), out.1) } else { out }; // i18n-ok: a join
     // a result made on another of the person's machines says so
     let on = s(c, "ran_on");
     if on.is_empty() || s(c, "state") == "running" { out } else { (format!("{} · {}", out.0, tf("gpui.mgmt.checks.on", &[("host", on.to_string().into())])), out.1) } // i18n-ok: a join
@@ -518,6 +520,7 @@ mod tests {
         let (t, col) = state_text("DRC", &json!({"state": "fresh", "has_result": true, "counts": {"error": 2, "warning": 3, "info": 0}}));
         assert_eq!((t.as_str(), col), ("DRC 5", "bad"));
         assert_eq!(state_text("ERC", &json!({"state": "fresh", "has_result": true, "counts": {"error": 0, "warning": 0}})).0, "ERC ✓");
+        assert_eq!(state_text("DRC", &json!({"state": "fresh", "has_result": true, "unsaved": true, "counts": {"error": 2, "warning": 0}})).0, "DRC 2 · live, unsaved");
         assert!(state_text("DRC", &json!({"state": "stale", "has_result": true, "counts": {"warning": 1}})).0.starts_with("DRC 1 · "));
         assert_eq!(state_text("DRC", &Value::Null).0, "");
         assert!(state_text("DRC", &json!({"state": "fresh", "has_result": true, "counts": {"error": 1}, "ran_on": "h@backplane"})).0.contains("h@backplane"));

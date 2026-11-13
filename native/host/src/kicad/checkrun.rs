@@ -148,6 +148,8 @@ struct Src {
     peak_full_mb: u64,
     /// the machine the last result came from ("" this one)
     ran_on: String,
+    /// the last result came from the open editor (kicad/edchecks.rs), of its unsaved edits; the running one's progress id there
+    in_editor: bool, unsaved: bool, progress: String,
 }
 /// Findings another part of the hub puts in this list (the design review's sources: the fab's rules, the BOM, the fab outputs, the
 /// datasheets...): their state and set, replaced whole each time (`put_findings`).
@@ -165,6 +167,32 @@ impl Proj {
 
 static STATE: OnceLock<Mutex<HashMap<String, Proj>>> = OnceLock::new();
 fn state() -> &'static Mutex<HashMap<String, Proj>> { STATE.get_or_init(Default::default) }
+/// Edits in an editor that checks itself, per project: [board, schematic].
+static EDITS: OnceLock<Mutex<HashMap<String, [u64; 2]>>> = OnceLock::new();
+fn edits(pro: &str) -> [u64; 2] { EDITS.get_or_init(Default::default).lock().unwrap().get(pro).copied().unwrap_or_default() }
+/// The row of a clicked DRC/ERC marker, published as J's review markers publish theirs (info `review.clicked.<digest>`), the panel opened.
+/// The row of a clicked KiCad DRC/ERC marker (ET_MARKER_CLICKED's `drc_marker`) among the project's findings: (check, id).
+fn clicked_row(pro: &str, ev: &Value, read: &dyn Fn(&str) -> Option<String>) -> Option<(&'static str, String)> {
+    let m = &ev["drc_marker"];
+    let kind = if ev["frame"]["kind"] == "FK_SCH" || ev["frame"]["kind"].as_i64() == Some(2) || !m["sheet_path"].as_str().unwrap_or("").is_empty() { "erc" } else { "drc" };
+    let sch = with(pro, |p| p.files.sch.clone()).unwrap_or_default();
+    let sheets = if kind == "erc" { super::edchecks::sheets(&sch, read) } else { HashMap::new() };
+    with(pro, |p| super::edchecks::row_of(kind, m, &sheets, if kind == "drc" { &p.drc.findings } else { &p.erc.findings })).flatten().map(|id| (kind, id))
+}
+fn marker_clicked(pro: &str, ev: &Value) {
+    let (pro, ev) = (pro.to_string(), ev.clone());
+    let Some(ag) = crate::agents::handle() else { eprintln!("checks: KiCad's marker clicked, no hub to show it"); return };
+    let hub = ag.hub.clone();
+    tokio::spawn(async move {
+        let (p2, e2) = (pro.clone(), ev.clone());
+        let Some((kind, id)) = tokio::task::spawn_blocking(move || clicked_row(&p2, &e2, &|f| std::fs::read_to_string(f).ok())).await.ok().flatten() else { eprintln!("checks: KiCad's marker clicked: no row of it in {pro}"); return };
+        // the row first (the panel selects it as it opens), then the panel
+        let _ = hub.set_info(&format!("review.clicked.{}", ks::digest(&pro)), &json!({"id": id, "at": now_ms()}).to_string()).await;
+        eprintln!("checks: KiCad's {kind} marker clicked: row {id}");
+        use crate::api::RpcHandler;
+        let _ = super::mgmt::MgmtRpc.call(&hub, &Caller { gen: String::new(), client: 0 }, &json!(0), "mgmt.panel", &json!({"project": pro, "open": "checks"})).await;
+    });
+}
 /// The person's last action in each project's KiCad (ms).
 static PERSON: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new();
 static HUB: Mutex<Option<Weak<Hub>>> = Mutex::new(None);
@@ -192,6 +220,13 @@ pub fn start(hub: &Arc<Hub>) {
 /// From the fork's events loop (embed.rs): the person acted in KiCad (a selection, an edit, a modified mark): runs wait QUIET_MS.
 pub fn on_event(pro: &str, ev: &Value) {
     let ty = ev["type"].as_str().unwrap_or(""); let n = ev["type"].as_i64().unwrap_or(0);
+    // an edit in an editor that checks itself: the document's revision moves without a save (the check sees unsaved edits)
+    if (ty == "ET_DOCUMENT_EDITED" || n == 20) && super::edchecks::known(pro) {
+        let k = if ev["frame"]["kind"] == "FK_SCH" || ev["frame"]["kind"].as_i64() == Some(2) { 1 } else { 0 };
+        EDITS.get_or_init(Default::default).lock().unwrap().entry(pro.to_string()).or_default()[k] += 1;
+    }
+    // a click on one of KiCad's own DRC/ERC markers: its row is the one to show
+    if (ty == "ET_MARKER_CLICKED" || n == 26) && ev["drc_marker"].is_object() && ev["marker"]["set"].as_str().map_or(true, str::is_empty) { marker_clicked(pro, ev) }
     if matches!(ty, "ET_SELECTION_CHANGED" | "ET_DOCUMENT_EDITED" | "ET_MODIFIED_CHANGED" | "ET_FOCUS_IN") || matches!(n, 14 | 20 | 6 | 7) {
         PERSON.get_or_init(Default::default).lock().unwrap().insert(pro.to_string(), now_ms());
     }
@@ -271,8 +306,9 @@ fn src_json(p: &Proj, s: &str, now: u64) -> Value {
     let st = state_word(x);
     let running = x.sched.running_since > 0;
     let reason = if st == "deferred" { x.deferred.trim_start_matches("deferred: ").to_string() } else { x.reason.clone() };
-    json!({"state": st, "reason": reason, "running": running, "fraction": if running { fd::fraction(now.saturating_sub(x.sched.running_since), x.took) } else { -1.0 },
-        "counts": counts.to_json(), "untrusted": s == "drc" && untrusted(p) > 0, "at": x.at, "took_ms": x.took, "rev": x.sched.ran_rev, "has_result": x.had, "peak_mb": x.peak_mb, "full": x.full, "full_next": x.full_next, "ran_on": x.ran_on, "note": if x.full { "" } else { fd::LIBRARY_NOTE }})
+    let fraction = if !running { -1.0 } else { super::edchecks::fraction(&x.progress).filter(|f| *f >= 0.0).unwrap_or_else(|| fd::fraction(now.saturating_sub(x.sched.running_since), x.took)) };
+    json!({"state": st, "reason": reason, "running": running, "fraction": fraction, "in_editor": x.in_editor, "unsaved": x.in_editor && x.unsaved,
+        "counts": counts.to_json(), "untrusted": s == "drc" && untrusted(p) > 0, "at": x.at, "took_ms": x.took, "rev": x.sched.ran_rev, "has_result": x.had, "peak_mb": x.peak_mb, "full": x.full, "full_next": x.full_next, "ran_on": x.ran_on, "note": if x.in_editor { super::edchecks::NOTE } else if x.full { "" } else { fd::LIBRARY_NOTE }})
 }
 /// none (no result yet), running, deferred (a run waits for memory or another heavy KiCad job), fresh (the result is of the design on
 /// disk), stale (the design changed since), failed.
@@ -361,6 +397,9 @@ async fn tick(hub: &Arc<Hub>) -> u64 {
         let (erc_rev, drc_rev) = tokio::task::spawn_blocking(move || disk_revs(&f2)).await.unwrap_or_default();
         let agent = { let mut held = HELD.get_or_init(Default::default).lock().unwrap().clone(); let a = agent_since(hub, &files, &mut held, &pro).await; *HELD.get().unwrap().lock().unwrap() = held; a };
         let person = PERSON.get_or_init(Default::default).lock().unwrap().get(&pro).copied().unwrap_or(0);
+        // the open editor checks itself: unsaved edits count, no memory of its own, never on another machine
+        let ed = super::edchecks::ready(hub, &pro).await.is_some();
+        let (erc_rev, drc_rev) = if ed { let e = edits(&pro); (format!("{erc_rev}+e{}", e[1]), format!("{drc_rev}+e{}", e[0])) } else { (erc_rev, drc_rev) };
         let mut acts = vec![]; let mut changed = false;
         {
             let mut m = state().lock().unwrap();
@@ -371,7 +410,7 @@ async fn tick(hub: &Arc<Hub>) -> u64 {
                 let x = p.src(s);
                 if x.sched.disk_rev != *rev { if !x.sched.disk_rev.is_empty() { x.sched.changed_at = now } x.sched.disk_rev = rev.clone(); changed = true }
                 x.sched.agent_since = agent; x.sched.person_at = person; x.sched.free_mb = free; x.sched.heavy = heavy.clone();
-                x.sched.need_mb = if x.full_next { fd::need_full_mb(s, doc_bytes(&files, s), x.peak_full_mb) } else { fd::need_mb(s, doc_bytes(&files, s), x.peak_mb) };
+                x.sched.need_mb = if ed { 0 } else if x.full_next { fd::need_full_mb(s, doc_bytes(&files, s), x.peak_full_mb) } else { fd::need_mb(s, doc_bytes(&files, s), x.peak_mb) };
                 let was = std::mem::take(&mut x.deferred);
                 // where a run that may go runs: here, on the person's other machine set up for checks, or not yet
                 let start = |x: &mut Src, host: Option<Remote>, acts: &mut Vec<_>| {
@@ -380,7 +419,7 @@ async fn tick(hub: &Arc<Hub>) -> u64 {
                     let c = Arc::new(tokio::sync::Notify::new()); x.cancel = Some(c.clone()); acts.push((s, rev.clone(), c, full, host));
                 };
                 match fd::next_ignoring_machine(now, &x.sched) {
-                    Do::Run => match fd::place(&fd::machine_guard(&x.sched), remote.is_some(), busy) {
+                    Do::Run => match if ed { fd::Place::Here } else { fd::place(&fd::machine_guard(&x.sched), remote.is_some(), busy) } {
                         fd::Place::Here if !fd::admit(free, &RUNNING.lock().unwrap().iter().map(|r| r.1).collect::<Vec<_>>(), x.sched.need_mb) => sleep = sleep.min(300),
                         fd::Place::Here => { start(x, None, &mut acts); changed = true }
                         fd::Place::There => { start(x, remote.clone(), &mut acts); changed = true }
@@ -406,16 +445,37 @@ type Outcome = Option<Result<Vec<Finding>, String>>;
 
 async fn run(hub: &Arc<Hub>, pro: &str, f: &project::Files, s: &'static str, rev: &str, cancel: Arc<tokio::sync::Notify>, full: bool, host: Option<Remote>) {
     let t0 = now_ms();
-    let (o, peak) = match &host { Some(r) => (run_remote(hub, r, pro, f, s, &cancel, full).await, 0), None => run_cli(hub, pro, f, s, &cancel, full).await };
+    let mut editor = None;
+    let (o, peak) = match &host {
+        Some(r) => (run_remote(hub, r, pro, f, s, &cancel, full).await, 0),
+        None => match run_editor(hub, pro, f, s, &cancel, full).await {
+            Some((o, unsaved)) => { editor = Some(unsaved); (o, 0) }
+            None => run_cli(hub, pro, f, s, &cancel, full).await,
+        },
+    };
     let took = now_ms() - t0;
     if let Some(p) = state().lock().unwrap().get_mut(pro) {
         let x = p.src(s);
         if peak > 0 { if full { x.peak_full_mb = peak } else { x.peak_mb = peak } }
-        if matches!(o, Some(Ok(_))) { x.full = full; x.ran_on = host.as_ref().map(|r| r.host.clone()).unwrap_or_default() }
+        x.progress.clear();
+        if matches!(o, Some(Ok(_))) { x.full = full; x.ran_on = host.as_ref().map(|r| r.host.clone()).unwrap_or_default(); x.in_editor = editor.is_some(); x.unsaved = editor.unwrap_or(false) }
     }
     finish(hub, pro, s, rev, o, took).await
 }
 
+/// One run in the open editor (kicad/edchecks.rs): its outcome and whether it is of unsaved edits; None to run kicad-cli instead
+/// (no editor that checks itself, or it could not take the run now).
+async fn run_editor(hub: &Arc<Hub>, pro: &str, f: &project::Files, s: &str, cancel: &tokio::sync::Notify, full: bool) -> Option<(Outcome, bool)> {
+    let route = super::edchecks::ready(hub, pro).await?;
+    let pro2 = pro.to_string(); let s2 = s.to_string();
+    let r = super::edchecks::run(&route, s, &f.sch, cancel, move |id| { if let Some(p) = state().lock().unwrap().get_mut(&pro2) { p.src(&s2).progress = id.to_string() } }).await;
+    match r {
+        super::edchecks::Ran::Found(mut fs, unsaved) => { if !full { fs.retain(|x| !fd::library_rule(s, &x.rule)) } Some((Some(Ok(fs)), unsaved)) }
+        super::edchecks::Ran::Cancelled => Some((None, false)),
+        super::edchecks::Ran::Failed(why) => Some((Some(Err(why)), false)),
+        super::edchecks::Ran::Cli(why) => { eprintln!("checks: {s} with kicad-cli: {why}"); None }
+    }
+}
 /// One kicad-cli run: its outcome and its peak memory (MB; 0 when this platform cannot say).
 async fn run_cli(hub: &Arc<Hub>, pro: &str, f: &project::Files, s: &str, cancel: &tokio::sync::Notify, full: bool) -> (Outcome, u64) {
     let rt = ipc::runtime(hub).await;
@@ -698,6 +758,20 @@ pub async fn request(hub: &Arc<Hub>, method: &str, p: &Value) -> Result<Value, S
         }
         "kicad.checks.focus" => {
             let f = find(&pro, p["id"].as_str().unwrap_or("")).ok_or("no such finding (the checks ran again: list them anew)")?;
+            // an editor that selects by item and place (bp.13 embed-checks): the exact items (a track, a via, a zone), the box round them
+            if let Some(route) = super::edchecks::ready(hub, &pro).await {
+                let sch = with(&pro, |p| p.files.sch.clone()).unwrap_or_default();
+                let sheets = if f.anchors.first().is_some_and(|a| a.doc == "sch") { tokio::task::spawn_blocking(move || super::edchecks::sheets(&sch, &|p| std::fs::read_to_string(p).ok())).await.unwrap_or_default() } else { HashMap::new() };
+                if let Some(m) = super::edchecks::select_items(&f, &sheets) {
+                    let frame = if m["kind"] == "FK_SCH" { "SCH" } else { "PCB" };
+                    let _ = embed::show_for(&pro, frame, "").await;
+                    let o = embed::gui_call(&route, "kiapi.backplane.embed.SelectItems", m.clone()).await;
+                    if o["ok"].as_bool().unwrap_or(false) {
+                        let missing = o["message"]["ids_not_found"].as_array().map_or(0, |a| a.len());
+                        return Ok(json!({"project": pro, "id": f.id, "kicad": true, "select": m, "ids_not_found": missing}))
+                    }
+                }
+            }
             let mut sel = fd::select_params(&f);
             sel["project"] = json!(pro);
             let empty = ["references", "pins", "nets"].iter().all(|k| sel[*k].as_array().map_or(true, |a| a.is_empty()));
@@ -748,6 +822,22 @@ mod tests {
     use super::*;
     /// A runtime without drc-zone-guard on a board with fills: a clean DRC shows lane J's warning (as J words it) and is not "DRC ✓";
     /// once J's review set its source, its findings stand instead (a second-opinion note leaves DRC clean).
+    /// A real ET_MARKER_CLICKED (Collar on bp.13 batch 3, run 5) finds its row among the project's DRC findings, the same as the
+    /// editor's run gave them (items_detail in the event, KIIDs in the row); a host marker's click is not this one's.
+    #[test] fn a_kicad_marker_click_finds_its_row() {
+        let ev: Value = serde_json::from_str(r#"{"seq":"68","type":"ET_MARKER_CLICKED","frame":{"kind":"FK_PCB","document":"/c/collar_main.kicad_pcb"},"selection":{},
+            "drc_marker":{"type":"clearance","severity":"error","message":"Clearance violation (netclass 'Default' clearance 0.1000 mm; actual 0.0809 mm)","at_nm":{"x_nm":"97870000","y_nm":"99485000"},
+            "items":[{"value":"c9f15f8a-bf39-4aea-963b-9c8e4dd436e9"},{"value":"d91667ae-f923-50be-ade8-fe5056fa2eb3"}],"id":{"value":"d5e72a3b-ba7d-40f1-9233-49be5b27d386"},"layer":"F.Cu",
+            "items_detail":[{"id":{"value":"c9f15f8a-bf39-4aea-963b-9c8e4dd436e9"},"description":"Track [<no net>] on F.Cu, length 10.0000 mm","at_nm":{"x_nm":"95000000","y_nm":"99690945"}},{"id":{"value":"d91667ae-f923-50be-ade8-fe5056fa2eb3"},"description":"Pad 2 [GND] of U3 on F.Cu","at_nm":{"x_nm":"98170000","y_nm":"99350000"}}],"group":"violation"}}"#).unwrap();
+        let rep = super::super::edchecks::report("drc", &[ev["drc_marker"].clone(), json!({"type": "track_dangling", "severity": "warning", "message": "Track has unconnected end", "items": [{"value": "c9f15f8a-bf39-4aea-963b-9c8e4dd436e9"}]})], &super::super::edchecks::detail_of_markers(&[ev["drc_marker"].clone()]), &HashMap::new());
+        let fs = fd::drc(&rep.to_string()).unwrap();
+        let want = fs.iter().find(|f| f.rule == "clearance").unwrap().id.clone();
+        let pro = "/c/collar_main.kicad_pro";
+        { let mut m = state().lock().unwrap(); let mut p = Proj::default(); p.files.pcb = "/c/collar_main.kicad_pcb".into(); p.drc.findings = fs; m.insert(pro.into(), p); }
+        assert_eq!(clicked_row(pro, &ev, &|_| None), Some(("drc", want)));
+        assert_eq!(clicked_row("/other.kicad_pro", &ev, &|_| None), None, "another project's");
+        state().lock().unwrap().remove(pro);
+    }
     #[test] fn an_unguarded_clean_drc_is_not_shown_clean() {
         use crate::review::stockdrc as sd;
         let mut p = Proj::default(); p.files.pcb = "b.kicad_pcb".into(); p.drc.had = true;

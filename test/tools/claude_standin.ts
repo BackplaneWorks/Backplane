@@ -332,7 +332,7 @@ async function run(c: Cmd, firstOne: boolean) {
           body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: t.name, arguments: t.arguments } }) });
         got = await r.text();
       } catch (e) { got = String(e); }
-      log(`MCPCALL ${t.name} ${got.slice(0, 400)}`);
+      log(`MCPCALL ${t.name} ${got.slice(0, Number(process.env.BP_STANDIN_MCPCALL_MAX ?? 400))}`);
     }
     say("ASKED");
     result("ASKED");
@@ -361,7 +361,7 @@ async function run(c: Cmd, firstOne: boolean) {
           body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: t.name, arguments: args } }) });
         got = await r.text();
       } catch (e) { got = String(e); }
-      log(`MCPCALL ${t.name} ${got.slice(0, 400)}`);
+      log(`MCPCALL ${t.name} ${got.slice(0, Number(process.env.BP_STANDIN_MCPCALL_MAX ?? 400))}`);
       prev = got;
     }
     const reply = step?.say ?? "Noted.";
@@ -522,7 +522,7 @@ async function run(c: Cmd, firstOne: boolean) {
           body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: call.name, arguments: call.arguments } }) });
         got = await r.text();
       } catch (e) { got = String(e); }
-      log(`MCPCALL ${call.name} ${got.slice(0, 600)}`);
+      log(`MCPCALL ${call.name} ${got.slice(0, mcpLogMax)}`);
       emit({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: got.slice(0, 600) }] }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
       say(`MCPCALL ${call.name} ${got.slice(0, 600)}`);
     }
