@@ -98,6 +98,40 @@ does; the gate box installs that archive through it. Builds from this desktop do
   (`BACKPLANE_NIGHTLY_HOME`, default `~/.backplane-gpui-fresh/home`). `status` and `uninstall` too.
 Boats cost while they run: the gate deletes its gate box and its build box on every exit (`--keep` leaves the gate box, named in the output).
 
+## Windows and macOS (prepared, not run yet)
+
+The same journey and oracles; what differs is the clean machine, the driver and the install path. Neither runs until the lead says so
+(bp-win stays deallocated when not in use; the Mac mini only under the lock `mac-heavy`).
+
+**Windows (bp-win).** The clean machine: Windows Sandbox inside bp-win (a disposable stock Windows of the host's build: no Git, no Python,
+no VC++ redistributable beyond what Windows ships, nothing of ours); it needs bp-win's size to allow nested virtualization (Dv5 does) and the
+optional feature `Containers-DisposableClientVM`. A `.wsb` file maps one folder read-only (the archive, the harness's PowerShell agent and
+the fixtures) and one read-write (results), and its logon command starts the agent, which polls the results folder for jobs as
+`test/windows/rig/sessagent.ps1` does in bp-win's own session, so `sess.sh` drives it unchanged. Steps: the release zip (or a commit's, made
+by release.yml's Windows packaging run on bp-win) extracted as a person does; `backplane-gpui.exe`; its "Install Backplane to
+%LOCALAPPDATA%" answered Install; setup to Design tools; the WINDOWS package fetched; then `win_embed_e2e.py`'s window/editor checks against
+that install (HWND tree, named-pipe IPC, screenshots) and the same stand-in agent (Python is not on stock Windows: the stand-in is shipped as
+the gate's own embeddable Python in the mapped folder, never installed system-wide). Libraries: the PE imports of every `.exe`/`.dll` of the
+build and the runtime against the Sandbox's System32 (`pefile` on the host side), as the desktop manifest is used on Linux. Stock KiCad:
+the official `kicad-10.0.x-x86_64.exe /S` in the Sandbox. Needed in scripts: `scripts/bare-gate-win.sh` (start bp-win, write the `.wsb`, run,
+pull results, deallocate), `test/windows/bare/agent.ps1`, a PE-import classifier. Product questions the first run answers:
+- Git for Windows is a stated prerequisite (the hub's `sh`), and the KiCad install script runs under `sh` (`install.rs`): on a bare
+  Windows, setup's automatic KiCad fetch cannot start until Git is installed, and setup does not install or explain it. Likely rank 1.
+- The exe is unsigned: SmartScreen's "Windows protected your PC" is the first thing a person sees (documented, not fixed).
+- The WINDOWS KiCad package is bp.10: no `routing-plan` or `coedit`, as on Linux.
+
+**macOS (Mac mini, under `mac-heavy`).** The clean machine: a VM from Cirrus Labs' vanilla macOS image (`tart clone
+ghcr.io/cirruslabs/macos-sequoia-vanilla bare-gate`: stock macOS with only the admin user; about 25 GB on the mini, deleted after),
+run headless with VNC for screenshots; nothing of ours or Homebrew in it. Steps: the documented `curl … install.sh | sh` (macOS has curl);
+`backplane-app`; setup to Design tools; the MAC package fetched; the journey through the client's `--script` (no Xvfb: the VM's real
+window server; screenshots with `screencapture` in the VM; clicks with the client's own script steps, since there is no xdotool). Libraries:
+`otool -L` of the build and the runtime against the VM's `/usr/lib` and `/System`. Stock KiCad: the official `.dmg` copied to `/Applications`.
+Needed in scripts: `scripts/bare-gate-mac.sh` (lockf on the mini as `mac-build.sh` does, tart clone/run/delete, ssh into the VM). Product
+gaps already known:
+- The MAC KiCad package is bp.6 (`install.rs`: bp.8 and later have no macOS build): no `--embedded`, so Edit cannot work on a fresh Mac
+  at all; this is the first thing the Mac run will show. Rank 1, fork/release lane.
+- Not notarized: a downloaded `Backplane.app` is stopped by Gatekeeper (documented); the `curl | sh` path sets no quarantine and is not.
+
 ## Covered so far, and next
 
 - [x] install from the release, and from a commit's build
