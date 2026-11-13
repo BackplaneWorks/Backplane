@@ -218,6 +218,9 @@ impl Backplane {
         let Some(it) = list.get(i.unwrap_or(self.screens.palette.ix)).cloned() else { return };
         self.screens.palette.open = false; self.want_focus = true;
         match it.what {
+            // a thread of this hub: as its sidebar row does (the thread drawn at once from the cache, its viewer and editor as they were left);
+            // the hub's `select` action left a thread with its viewer open closed (the embedded KiCad gone with it)
+            Do::Thread(id) if it.kind == "thread" && !id.contains('~') => self.select_id(id, cx),
             Do::Thread(id) => self.go("select", id, cx),
             // a message found: its thread at the message, marked, with the find bar holding the words for the next and previous ones there
             Do::Message(id, msg) => { let q = self.screens.palette.q.trim().to_string(); self.find_open_at(&id, &msg, &q, cx); }
