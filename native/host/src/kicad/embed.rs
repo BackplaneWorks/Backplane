@@ -657,7 +657,12 @@ fn publish_live_sock(pro: &str, sock: &str) {
     { let _ = std::os::unix::fs::symlink(sock, &link); }
 }
 
+/// The kinds of the frames each project's KiCad has open now ("PCB", "SCH", ...), kept with its route (put_route, at every publish).
+fn open_frames() -> &'static Mutex<HashMap<String, Vec<String>>> { static F: OnceLock<Mutex<HashMap<String, Vec<String>>>> = OnceLock::new(); F.get_or_init(Default::default) }
+/// Whether the project's open KiCad has a frame of `kind` open (shown or not): no round trip.
+pub fn has_frame(pro: &str, kind: &str) -> bool { open_frames().lock().unwrap().get(&norm_pro_key(pro)).is_some_and(|v| v.iter().any(|k| k == kind)) }
 fn put_route(s: &Session, tx: &mpsc::UnboundedSender<Msg>) {
+    open_frames().lock().unwrap().insert(norm_pro_key(&s.pro), s.frames.iter().map(|f| f.kind.clone()).collect());
     unsaved_update(&s.pro, |u| u.seen(s.frames.iter().any(|f| f.modified)));
     let k = norm_pro_key(&s.pro);
     let mut r = routes().lock().unwrap();
@@ -673,11 +678,23 @@ fn put_route(s: &Session, tx: &mpsc::UnboundedSender<Msg>) {
     }
 }
 
+/// The client name of the hub's checks in the open KiCad (kicad/edchecks.rs): their requests are not counted as another client's.
+pub const CHECKS_CLIENT: &str = "hub:checks";
+/// Per GUI socket: the requests in flight from other clients than the checks, and when the last one began or ended (ms).
+fn gui_use() -> &'static Mutex<HashMap<String, (u32, u64)>> { static U: OnceLock<Mutex<HashMap<String, (u32, u64)>>> = OnceLock::new(); U.get_or_init(Default::default) }
+/// Whether another client's request to this KiCad is in flight, or was within `quiet_ms`: a check started now would make it AS_BUSY.
+pub fn others_busy(sock: &str, quiet_ms: u64) -> bool {
+    gui_use().lock().unwrap().get(sock).is_some_and(|(n, at)| *n > 0 || crate::hub::now_ms().saturating_sub(*at) < quiet_ms)
+}
 /// Forward one IPC command through the embed actor's shared `kipc::Native` transport so GUI requests and agent `kicad_ipc`
 /// requests serialize cleanly on one socket connection and share its `kicad_token`.
 pub async fn gui_call(route: &GuiRoute, ty: &str, msg: Value) -> Value { gui_call_as(route, ty, msg, "").await }
 /// The same, as `client` (an agent's actor, `agent:<thread>`): the fork's co-editing attributes, groups and undoes its changes by it.
 pub async fn gui_call_as(route: &GuiRoute, ty: &str, msg: Value, client: &str) -> Value {
+    // every request but the checks' own is counted, so an in-editor check never starts while another client waits (kicad/checkrun.rs)
+    struct Use(String);
+    impl Drop for Use { fn drop(&mut self) { if let Some(e) = gui_use().lock().unwrap().get_mut(&self.0) { e.0 = e.0.saturating_sub(1); e.1 = crate::hub::now_ms() } } }
+    let _use = (client != CHECKS_CLIENT).then(|| { let mut m = gui_use().lock().unwrap(); let e = m.entry(route.sock.clone()).or_default(); e.0 += 1; e.1 = crate::hub::now_ms(); Use(route.sock.clone()) });
     let (t, r) = oneshot::channel();
     if route.tx.send(Msg::Raw { sock: route.sock.clone(), desc: route.desc.clone(), ty: ty.into(), msg, timeout: 30000, client: client.into(), reply: t }).is_err() {
         return json!({"ok":false,"error":"no reply","why":"no reply","fallback":true})
