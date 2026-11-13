@@ -20,11 +20,14 @@ uninstall) systemctl --user disable --now $UNIT.timer; rm -f ~/.config/systemd/u
 status) systemctl --user list-timers $UNIT.timer --no-pager; cat ~/.cache/bare-nightly.last 2>/dev/null ;;
 run)
   T=${2:?THREAD}
+  # a user service starts with a bare PATH and no shell profile: boat (~/.ascii/bin), bun (~/.bun/bin) and cargo's tools are not on it
+  export PATH="$HOME/.ascii/bin:$HOME/.bun/bin:$HOME/.local/bin:$HOME/.cargo/bin:$PATH"
+  for t in boat bun git python3; do command -v $t >/dev/null || { echo "$(date -Is) nightly: $t not found on PATH ($PATH); skipped" | tee ~/.cache/bare-nightly.last; exit 1; }; done
   . "$REPO/scripts/lib-bptmp.sh"
   D=$BP_TMP/bare-nightly/$(date +%Y%m%d-%H%M); mkdir -p "$D"
   [ "$(df -BG --output=avail / | tail -1 | tr -dc 0-9)" -ge 20 ] || { echo "nightly: under 20 GB free; skipped" | tee ~/.cache/bare-nightly.last; exit 0; }
   W=$REPO/.backplane/worktrees/bare-nightly
-  git -C "$REPO" fetch -q origin && { [ -d "$W" ] || git -C "$REPO" worktree add -q --detach "$W" origin/main; } && git -C "$W" checkout -q --detach origin/main || exit 1
+  git -C "$REPO" fetch -q origin && { [ -d "$W" ] || git -C "$REPO" worktree add -q --detach "$W" origin/main; } && git -C "$W" checkout -q --detach origin/main || { echo "$(date -Is) nightly: could not check out origin/main in $W" | tee ~/.cache/bare-nightly.last; exit 1; }
   SHA=$(git -C "$W" rev-parse --short origin/main)
   (cd "$W" && scripts/bare-gate.sh --commit origin/main --out "$D/run") >"$D/gate.log" 2>&1; rc=$?
   { echo "$(date -Is) $SHA rc=$rc $D"; sed -n '/== timings/,$p' "$D/gate.log"; } >~/.cache/bare-nightly.last
