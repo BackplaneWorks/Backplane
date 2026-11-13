@@ -40,7 +40,7 @@ phase "second session: KiCad again"; markt p2-ready 600 || { bad "the second ses
 # window was closed and opened again, Edit stayed on "Starting KiCad..." (state ready, no frames, no holder) while KiCad answered IPC.
 set -- $(painted p2)
 if [ "${1:-}" = ready ] && [ "${3:-}" = PCB ]; then tms reopen-edit-painted ui:Edit p2-ready "$(since2)"; ok "reopened, Edit shows KiCad's PCB editor again ($*)"
-else bad "reopened, Edit never showed KiCad again (pane: $*; still Starting KiCad...)"; cut_ 1 reopen "after closing and opening Backplane again, Edit stays on 'Starting KiCad...' while KiCad itself runs and answers ($(basename "$KDIR"))"; fi
+else kicad_box p2 1; bad "reopened, Edit never showed KiCad again (pane: $*; still Starting KiCad...)"; cut_ 1 reopen "after closing and opening Backplane again, Edit stays on 'Starting KiCad...' while KiCad itself runs and answers ($(basename "$KDIR"))"; fi
 SOCK=$(report p2 | python3 -c 'import json,sys
 l=sys.stdin.read(); print(json.loads(l[l.index("{"):]).get("sock","") if "{" in l else "")' 2>/dev/null); HSOCK=${SOCK/#$PH/$HH}
 SHOWN=$(report p2 | python3 -c 'import json,sys
