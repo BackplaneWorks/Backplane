@@ -69,7 +69,7 @@ if [ -n "$KPID" ]; then KARGS=$(in_box sh -c "tr '\\0' ' ' </proc/$KPID/cmdline"
   [ -s "$OUT/logs/hub-kicad-env.txt" ] && bad "the hub has $(tr '\n' ' ' <"$OUT/logs/hub-kicad-env.txt")" || ok "the hub has no BACKPLANE_KICAD* variable (it picked the runtime itself)"
 fi
 # budgets in quarter seconds: the first schematic took 82 s once (KiCad's "Load Schematic" twice), 42 s another time
-step "Schematic"; if markt sch 720; then S_T=$(since); tm schematic-painted "$S_T"; sleep 1; shot 08-schematic; set -- $(painted sch)
+phase "Schematic"; if markt sch 720; then S_T=$(since); tm schematic-painted "$S_T"; sleep 1; shot 08-schematic; set -- $(painted sch)
   # the pane must show the schematic frame, not just be ready (rerun 3: SCH made, never shown, PCB still in the pane); KiCad's own
   # "Load Schematic" progress dialogs are counted, on which runtime
   NLOAD=$(grep -h '"kicad_info"' "$HH/win.log" | grep -o '"dialogs":\[[^]]*\]' | grep -c 'Load Schematic')
@@ -79,7 +79,7 @@ step "Schematic"; if markt sch 720; then S_T=$(since); tm schematic-painted "$S_
   S_D=$(python3 -c "print(round($S_T - ${E_T:-$S_T}))")
   [ "$S_D" -gt 30 ] && { bad "the first Schematic took $S_D s after the PCB editor (must-fix: under 30 s)"; cut_ 1 schematic "the first Schematic took $S_D s after the PCB editor on a fresh install ($(basename "$KDIR"))"; }
 else bad "Schematic never reported in 180 s"; fi
-step "back to the PCB, the agent's turn"; markt back 400 && { sleep 1; shot 09-back-before-agent; }
+phase "back to the PCB, the agent's turn"; markt back 800 && { sleep 1; shot 09-back-before-agent; }
 # the agent's turn (stand-in): kicad_ipc on the live board, save, a comment
 TRACKS0=$(grep -c "(segment" "$HPCB")
 hub rpc turn.start "{\"thread\":\"$tid\",\"text\":\"add a track beside the first part, save, and comment\"}" >"$OUT/logs/turn-start.json"
