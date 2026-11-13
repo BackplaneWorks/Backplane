@@ -78,6 +78,8 @@ pub struct Session {
     pub dialogs: Vec<String>,
     /// KiCad's resident memory, MB (Linux, sampled on the health tick; 0 unknown): the warm policy's measure of what a KiCad costs
     pub rss_mb: u64,
+    /// in no pane, its frames left in the client's kept (unmapped) container: as good as detached for the warm cap and idleness
+    pub parked: bool,
     pub touched_at: u64,
     pub closing: bool,
 }
@@ -90,7 +92,7 @@ impl Session {
             container: 0, toplevel: 0, holder: 0, display: String::new(),
             sock: String::new(), events_sock: String::new(), sock_dir: String::new(),
             argv: String::new(), cli: String::new(), version: String::new(), desc: String::new(),
-            caps: vec![], frames: vec![], missed_pings: 0, dialogs: vec![], rss_mb: 0, touched_at: now, closing: false,
+            caps: vec![], frames: vec![], missed_pings: 0, dialogs: vec![], rss_mb: 0, parked: false, touched_at: now, closing: false,
         }
     }
     pub fn spawned(mut self, pid: u32) -> Self { self.pid = pid; self }
@@ -175,6 +177,21 @@ impl Session {
 pub fn local_switch(s: &Session, local_map: bool, plain: bool) -> bool {
     plain && local_map && s.mode == "fork" && s.state == "ready"
         && s.frames.iter().any(|f| f.kind == s.active && f.xid > 0 && (f.realized || f.shown))
+}
+
+/// What the hub waits for after KiCad's first ShowFrame at start.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum FirstShow {
+    /// bp.13 (`embed-frame-drawn`): ET_FRAME_DRAWN for that frame, up to this many ms (the 3D viewer never says it: the cap)
+    Drawn(u64),
+    /// older forks: wxGTK's 1000 ms frame-extents timer, then HideFrame and ShowFrame again (its first Show was deferred)
+    Sleep(u64),
+    /// nothing (`BACKPLANE_KICAD_DECOR_SLEEP=0`: the client's remount re-shows a frame left unmapped)
+    None,
+}
+pub fn first_show_wait(caps: &[String], decor_env: Option<&str>) -> FirstShow {
+    if caps.iter().any(|c| c == "embed-frame-drawn") { return FirstShow::Drawn(1500) }
+    match decor_env { Some("0") => FirstShow::None, _ => FirstShow::Sleep(1150) }
 }
 
 /// Stable info key `editor.kicad.<12-hex-sha256>` for a canonical `.kicad_pro` path.
@@ -297,7 +314,7 @@ pub fn evict_warm(sessions: &HashMap<String, Session>, keep_pro: &str, max_warm:
     let live = sessions.values().filter(|s| s.pro != keep_pro && s.is_live()).count();
     if live < max_warm { return None }
     sessions.values()
-        .filter(|s| s.pro != keep_pro && s.state == "ready" && s.container == 0 && s.unsaved_docs().is_empty())
+        .filter(|s| s.pro != keep_pro && s.state == "ready" && (s.container == 0 || s.parked) && s.unsaved_docs().is_empty())
         .min_by_key(|s| s.touched_at)
         .map(|s| s.pro.clone())
 }
@@ -307,12 +324,13 @@ pub fn evict_warm(sessions: &HashMap<String, Session>, keep_pro: &str, max_warm:
 #[derive(Clone, Copy, Debug)]
 pub struct WarmCfg {
     pub max: usize, pub idle_s: u64,
-    /// what a KiCad is taken to cost before one has been measured (a pcbnew parses the global footprint table at start: ~2.7 GB)
+    /// what a KiCad is taken to cost before one has been measured (bp.12 measured on real boards: 4.5-5.1 GB at its peak, the global footprint
+    /// table parsed at start)
     pub kicad_mb: u64,
     /// memory left free for everything else once the new KiCad has started
     pub headroom_mb: u64,
 }
-pub const WARM: WarmCfg = WarmCfg { max: MAX_WARM, idle_s: 30 * 60, kicad_mb: 3000, headroom_mb: 4096 };
+pub const WARM: WarmCfg = WarmCfg { max: MAX_WARM, idle_s: 30 * 60, kicad_mb: 5200, headroom_mb: 4096 };
 
 /// What the next KiCad will cost: the largest one measured running, else the configured guess.
 pub fn kicad_cost_mb(sessions: &HashMap<String, Session>, cfg: WarmCfg) -> u64 {
@@ -351,7 +369,7 @@ pub fn warm_decision(sessions: &HashMap<String, Session>, pro: &str, hardware: b
 /// The sessions to close for idleness: up, in no pane, nothing unsaved, not used for `idle_s`.
 pub fn idle_victims(sessions: &HashMap<String, Session>, now: u64, idle_s: u64) -> Vec<String> {
     let mut v: Vec<String> = sessions.values()
-        .filter(|s| s.state == "ready" && s.container == 0 && !s.closing && s.unsaved_docs().is_empty() && now.saturating_sub(s.touched_at) >= idle_s)
+        .filter(|s| s.state == "ready" && (s.container == 0 || s.parked) && !s.closing && s.unsaved_docs().is_empty() && now.saturating_sub(s.touched_at) >= idle_s)
         .map(|s| s.pro.clone()).collect();
     v.sort(); v
 }
@@ -815,7 +833,7 @@ enum Msg {
         reply: oneshot::Sender<Result<Value, String>>,
     },
     Detach {
-        client: u64, pro: String, reply: oneshot::Sender<Result<Value, String>>,
+        client: u64, pro: String, keep: bool, reply: oneshot::Sender<Result<Value, String>>,
     },
     /// the client shows this project: keep its KiCad warm (detached) if the policy says so
     Warm {
@@ -986,7 +1004,7 @@ impl Actor {
                 if toplevel > 0 { existing.toplevel = toplevel; }
                 if !display.is_empty() { existing.display = display; }
                 existing.active = canon_frame(&frame).into();
-                existing.touched_at = now;
+                existing.touched_at = now; existing.parked = false;
                 let snap = existing.clone();
                 if wait {
                     self.publish(&snap, Some(client));
@@ -1003,8 +1021,15 @@ impl Actor {
                 if toplevel > 0 { existing.toplevel = toplevel; }
                 if !display.is_empty() { existing.display = display; }
                 existing.active = canon_frame(&frame).into();
-                existing.touched_at = now;
+                existing.touched_at = now; existing.parked = false;
                 let snap = existing.clone();
+                // the client's kept container again (its last View kept KiCad's frames in it): nothing to re-parent, and a realized frame is the
+                // client's to map; the attach only says the session is in use again
+                if container > 0 && container == prev_cont && local_switch(&snap, snap.info_json()["local_map"] == true, true) {
+                    let out = snap.info_json();
+                    self.publish_and_reply(&snap, Some(client), reply, Ok(out));
+                    return;
+                }
                 if snap.mode == "fork" {
                     let me = self.me.clone(); let cid = client;
                     tokio::spawn(async move {
@@ -1123,10 +1148,11 @@ impl Actor {
         let spawn_container = sess.container;
         let mode_s = mode.to_string();
         let root_s = root.clone();
+        let caps = env.caps.clone();
         tokio::spawn(async move {
             // Retire any headless kserve for this project before the GUI opens its files.
             let _ = ipc::retire(&pro).await;
-            spawn_gui_session(me, home, pro, root_s, gen, mode_s, argv_vec, sock_dir, req_sock, eff_display, desc, active, spawn_container, sweep_locks).await;
+            spawn_gui_session(me, home, pro, root_s, gen, mode_s, argv_vec, sock_dir, req_sock, eff_display, desc, active, spawn_container, sweep_locks, caps).await;
         });
     }
 
@@ -1185,10 +1211,18 @@ impl Actor {
         }
     }
 
-    fn detach(&mut self, client: u64, pro: String, reply: oneshot::Sender<Result<Value, String>>) {
+    fn detach(&mut self, client: u64, pro: String, keep: bool, reply: oneshot::Sender<Result<Value, String>>) {
         let Some(s) = self.sessions.get_mut(&pro) else {
             let _ = reply.send(Ok(json!({"detached":true}))); return;
         };
+        // View with the client keeping its container: KiCad stays parented in it, only no longer in a pane
+        if keep && s.container > 0 {
+            s.parked = true; s.touched_at = ipc::now_s();
+            let snap = s.clone();
+            let out = snap.info_json();
+            self.publish_and_reply(&snap, Some(client), reply, Ok(out));
+            return;
+        }
         *s = s.clone().detached(ipc::now_s());
         let snap = s.clone();
         if snap.mode == "fork" && snap.state == "ready" && !snap.sock.is_empty() {
@@ -1303,7 +1337,7 @@ impl Actor {
                 self.attach(client, pro, root, files, frame, container, toplevel, display, wait, env, reply);
             }
             Msg::Show { client, pro, frame, doc, item, remount, focus, reply } => self.show(client, pro, frame, doc, item, remount, focus, reply),
-            Msg::Detach { client, pro, reply } => self.detach(client, pro, reply),
+            Msg::Detach { client, pro, keep, reply } => self.detach(client, pro, keep, reply),
             Msg::Warm { client, pro, root, files, frame, display, hardware, locked, env, reply } => {
                 let (desc, _) = discover_desc(&self.hub.cfg.home, &env);
                 let quiet = !desc.is_empty() && proto::load(&desc).has_own("kiapi.backplane.embed.CancelProgress");
@@ -1704,6 +1738,7 @@ fn embed_sock_exists(sock: &str) -> bool {
 async fn spawn_gui_session(
     me: mpsc::UnboundedSender<Msg>, home: PathBuf, pro: String, root: String, gen: u64, mode: String,
     argv: Vec<String>, sock_dir: PathBuf, req_sock: String, display: String, desc: String, active: String, spawn_container: u64, sweep_locks: bool,
+    caps: Vec<String>,
 ) {
     // where a cold start's time goes: one line per phase (hub log), for the perf e2e and the person's own log
     let t0 = std::time::Instant::now();
@@ -1945,9 +1980,17 @@ async fn spawn_gui_session(
             if let Ok(first) = show_fork_frame(&me, &sock, &desc, &active, "", "", false).await {
                 phase("first show");
                 let win = u64_of(&first["message"]["frame"]["window"]);
-                if win > 0 {
-                    tokio::time::sleep(Duration::from_millis(1150)).await;
-                    let _ = raw_on(&me, &sock, &desc, "kiapi.backplane.embed.HideFrame", json!({ "window": win }), 5000).await;
+                match first_show_wait(&caps, std::env::var("BACKPLANE_KICAD_DECOR_SLEEP").ok().as_deref()) {
+                    // bp.13: the fork shows embedded frames at once and says when the first one has drawn (ET_FRAME_DRAWN)
+                    FirstShow::Drawn(cap) if win > 0 => {
+                        let drawn = wait_frame_drawn(&me, &sock, &desc, win, &mut ev_since, cap).await;
+                        phase(if drawn { "drawn" } else { "drawn: not said within the cap" });
+                    }
+                    FirstShow::Sleep(ms) if win > 0 => {
+                        tokio::time::sleep(Duration::from_millis(ms)).await;
+                        let _ = raw_on(&me, &sock, &desc, "kiapi.backplane.embed.HideFrame", json!({ "window": win }), 5000).await;
+                    }
+                    _ => {}
                 }
             }
         }
@@ -1956,9 +1999,11 @@ async fn spawn_gui_session(
             if !ev2.is_empty() { events_sock = ev2; }
             frames = f2;
         }
-        // the chords KiCad hands to Backplane, with Ctrl+; for a comment (comment.rs)
-        let rk = raw_on(&me, &sock, &desc, "kiapi.backplane.embed.SetReservedKeys", json!({"chords": super::comment::RESERVED}), 5000).await;
-        eprintln!("kicad embed: reserved keys {}", if rk["ok"] == true { rk["message"]["chords"].to_string() } else { format!("refused: {}", rk["error"]) });
+        // the chords KiCad hands to Backplane, with Ctrl+; for a comment (comment.rs): beside the ready, not before it
+        { let (me, sock, desc) = (me.clone(), sock.clone(), desc.clone()); tokio::spawn(async move {
+            let rk = raw_on(&me, &sock, &desc, "kiapi.backplane.embed.SetReservedKeys", json!({"chords": super::comment::RESERVED}), 5000).await;
+            eprintln!("kicad embed: reserved keys {}", if rk["ok"] == true { rk["message"]["chords"].to_string() } else { format!("refused: {}", rk["error"]) });
+        }); }
         phase("ready");
         eprintln!("kicad embed: running {version} ({})", argv.first().map(String::as_str).unwrap_or(""));
         let _ = me.send(Msg::Ready { pro, gen, sock, version, holder, events_sock, ev_since, frames, spawn_container, spawn_active: active });
@@ -1968,6 +2013,23 @@ async fn spawn_gui_session(
         }
         let _ = me.send(Msg::Ready { pro, gen, sock, version, holder: 0, events_sock: String::new(), ev_since: 0, frames: vec![], spawn_container, spawn_active: active });
     }
+}
+
+/// ET_FRAME_DRAWN (28) for `win` on the events socket within `cap_ms`; `since` moves past what was read (the events loop starts there).
+async fn wait_frame_drawn(me: &mpsc::UnboundedSender<Msg>, sock: &str, desc: &str, win: u64, since: &mut u64, cap_ms: u64) -> bool {
+    let until = tokio::time::Instant::now() + Duration::from_millis(cap_ms);
+    let ev_path = format!("{sock}.events");
+    let mut seen: Vec<Value> = Vec::new();
+    while tokio::time::Instant::now() < until {
+        let left = until.saturating_duration_since(tokio::time::Instant::now()).as_millis() as u64;
+        let o = raw_on(me, &ev_path, desc, "kiapi.backplane.embed.NextEvents", json!({"since": *since, "wait_ms": left.min(1000), "max": 64}), left + 1000).await;
+        if !o["ok"].as_bool().unwrap_or(false) { tokio::time::sleep(Duration::from_millis(30)).await; continue }
+        let next = u64_of(&o["message"]["next"]);
+        for ev in o["message"]["events"].as_array().into_iter().flatten() { seen.push(ev.clone()); }
+        if next > *since { *since = next; }
+        if seen.iter().any(|ev| (ev["type"] == "ET_FRAME_DRAWN" || ev["type"].as_i64() == Some(28)) && u64_of(&ev["frame"]["window"]) == win) { return true }
+    }
+    false
 }
 
 fn spawn_fork_events_loop(me: mpsc::UnboundedSender<Msg>, pro: String, gen: u64, events_sock: String, desc: String, init_since: u64) {
@@ -2184,7 +2246,7 @@ impl RpcHandler for EmbedRpc {
                     })
                 }
                 "editor.kicad.detach" => {
-                    actor_tx.send(Msg::Detach { client, pro: resolved.pro, reply: tx })
+                    actor_tx.send(Msg::Detach { client, pro: resolved.pro, keep: p["keep"].as_bool().unwrap_or(false), reply: tx })
                 }
                 "editor.kicad.close" => {
                     let save = p["save"].as_str().unwrap_or("ask").to_string();
@@ -2267,6 +2329,13 @@ mod tests {
         assert!(!local_switch(&s, true, false), "a document, item or remount goes to KiCad");
         s.frames = vec![f("PCB", true), f("SCH", false)];
         assert!(!local_switch(&s, true, true), "never shown: KiCad's first show (GTK)");
+    }
+
+    #[test] fn the_first_show_waits_for_the_drawn_frame_where_the_fork_says_it() {
+        assert_eq!(first_show_wait(&["embed".into(), "embed-frame-drawn".into()], None), FirstShow::Drawn(1500));
+        assert_eq!(first_show_wait(&["embed".into()], None), FirstShow::Sleep(1150), "older forks keep wxGTK's timer");
+        assert_eq!(first_show_wait(&[], Some("0")), FirstShow::None);
+        assert_eq!(first_show_wait(&["embed-frame-drawn".into()], Some("0")), FirstShow::Drawn(1500));
     }
 
     #[test] fn kicads_own_dialogs_are_published_until_they_close() {

@@ -121,7 +121,7 @@ mod imp {
         let scr = c.setup().roots.get(SCREEN.load(std::sync::atomic::Ordering::Relaxed))?;
         let id = c.generate_id().ok()?;
         c.create_window(scr.root_depth, id, parent, 0, 0, 1, 1, 0, WindowClass::INPUT_OUTPUT, scr.root_visual,
-            &CreateWindowAux::new().background_pixel(scr.black_pixel).border_pixel(scr.black_pixel).colormap(scr.default_colormap)
+            &CreateWindowAux::new().background_pixmap(x11rb::NONE).border_pixel(scr.black_pixel).colormap(scr.default_colormap)
                 .event_mask(EventMask::SUBSTRUCTURE_NOTIFY)).ok()?.check().ok()?;
         let _ = c.flush(); Some(id as u64)
     }
@@ -334,8 +334,22 @@ mod imp {
         place(container, r, show, Some(mine), last_root);
         if r.is_none() { return }
         let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
-        for k in mine { if Some(*k) == show { let _ = c.map_window(*k as u32); } else { let _ = c.unmap_window(*k as u32); } }
+        // no frame of background between two editors: the one coming has no X background (it and its canvases), goes on top and is mapped
+        // before the others are unmapped, so the old editor's pixels stay on screen until the new one has drawn over them
+        if let Some(k) = show.filter(|k| mine.contains(k)) {
+            keep_pixels(c, k as u32, 3);
+            let _ = c.configure_window(k as u32, &ConfigureWindowAux::new().stack_mode(StackMode::ABOVE));
+            let _ = c.map_window(k as u32);
+        }
+        for k in mine { if Some(*k) != show { let _ = c.unmap_window(*k as u32); } }
         let _ = c.flush();
+    }
+    /// `w` and its windows `depth` levels down keep what is on screen under them until they draw (no X background is painted on map or
+    /// expose): what the person sees between a map and KiCad's first paint is the last good picture, never a flash of background.
+    fn keep_pixels(c: &RustConnection, w: Window, depth: u32) {
+        let _ = c.change_window_attributes(w, &ChangeWindowAttributesAux::new().background_pixmap(x11rb::NONE));
+        if depth == 0 { return }
+        for k in c.query_tree(w).ok().and_then(|r| r.reply().ok()).map(|t| t.children).unwrap_or_default() { keep_pixels(c, k, depth - 1); }
     }
     pub fn place(container: u64, r: Option<R>, show: Option<u64>, managed: Option<&[u64]>, last_root: &mut (i32, i32)) {
         let container = container as u32;
