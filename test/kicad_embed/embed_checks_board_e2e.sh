@@ -20,10 +20,18 @@ echo "{\"project\": \"$(basename "$PRO")\"}" >"$PROJ/.backplane.json"
 ( cd "$PROJ" && git add -A >/dev/null && git commit -qm board >/dev/null )
 start_xvfb_and_wm
 start_hub
-cat >"$OUT/script.json" <<'EOF2'
-[{"select":0},{"wait":2000},{"click":"rail:Board"},{"wait":1500},{"click":"ui:Edit"},{"kicad":{"wait_painted":90000,"kind":"PCB","tag":"pcb_init"}},
- {"wait":1500},{"click":"mgmt:checks"},{"wait":12000},{"mark":"panel"},{"wait":14000},{"read":"perf"},{"mark":"measured"},{"wait":60000}]
-EOF2
+python3 - "$OUT/script.json" <<'PY'
+import json, sys
+s = [{"select": 0}, {"wait": 2000}, {"click": "rail:Board"}, {"wait": 1500}, {"click": "ui:Edit"}, {"kicad": {"wait_painted": 90000, "kind": "PCB", "tag": "pcb_init"}},
+     {"wait": 1500}, {"click": "mgmt:checks"}, {"wait": 12000}, {"mark": "panel"}, {"wait": 3000},
+     # the biggest group opened (its hundreds of rows), then a screen down the list every 80 ms with a run coming in
+     {"click": "mgmt:checks:more:drc:unconnected_items:false"}, {"wait": 2500}, {"mark": "opened"}]
+for i in range(60):
+    s.append({"click": "mgmt:checks:scroll"}); s.append({"wait": 80})
+    if i == 15: s.append({"click": "mgmt:checks:run"})
+s += [{"read": "perf"}, {"mark": "measured"}, {"wait": 60000}]
+json.dump(s, open(sys.argv[1], "w"))
+PY
 HOME="$OUT/fh" BACKPLANE_GPUI_ASSETS="$ASSETS_DIR" BACKPLANE_GPUI_RECTS=1 BACKPLANE_GPUI_HOLD=1 \
 "$CLIENT_BIN" --url "http://127.0.0.1:$HPORT" --token-file "$OUT/home/token" --script "$OUT/script.json" --exit-after 260 >"$OUT/client.log" 2>&1 &
 CP=$!; track_pid "$CP"
@@ -53,13 +61,10 @@ python3 -c 'import json,sys; r=json.loads(sys.argv[1])["result"]
 for k in ("drc","erc"): x=r[k]; print(k, x["state"], x["counts"], "took", x["took_ms"], "ms", "peak", x["peak_mb"], "MB")
 print("chip:", r["chip"])' "$S" | tee "$OUT/counts.txt"
 shot "b1_panel"
-# the biggest group opened (hundreds of rows), the overlay on, then the wheel over the list while a run comes in
-XY=$(ctl_xy "mgmt:checks:more:"); [ -n "$XY" ] && python3 "$XINPUT_PY" click $XY; sleep 2
-python3 "$XINPUT_PY" chord ctrl shift h; sleep 0.5
-LXY=$(ctl_xy "mgmt:checks:row:")
-RXY=$(ctl_xy "mgmt:checks:run")
-for i in $(seq 60); do python3 "$XINPUT_PY" click $LXY 5; [ "$i" = 20 ] && [ -n "$RXY" ] && { python3 "$XINPUT_PY" click $RXY; python3 "$XINPUT_PY" move $LXY; }; sleep 0.05; done
-for i in $(seq 30); do python3 "$XINPUT_PY" click $LXY 4; sleep 0.05; done
+# the perf overlay on (the script then opens the biggest group and scrolls the list while a run comes in)
+python3 "$XINPUT_PY" chord ctrl shift h
+wait_for_log "$OUT/client.log" '"name":"opened","event":"mark"' 60 || true
+shot "b1b_opened"
 wait_for_log "$OUT/client.log" '"name":"measured","event":"mark"' 60 || true
 shot "b2_scrolled"
 python3 - "$OUT/client.log" <<'PY' | tee "$OUT/perf.txt"

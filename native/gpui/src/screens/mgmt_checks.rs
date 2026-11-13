@@ -86,12 +86,12 @@ fn item_el(app: &mut Backplane, i: usize, cx: &mut Context<Backplane>) -> AnyEle
     let d = json!({"sources": srcs});
     let _ = app;
     match it {
-        None => div().h(px(24.)).into_any_element(),
-        Some(Item::Msg(k)) => div().h(px(24.)).px_3().flex().items_center().text_color(c("faint")).child(tf(k, &[])).into_any_element(),
+        None => div().w_full().h(px(24.)).into_any_element(),
+        Some(Item::Msg(k)) => div().w_full().h(px(24.)).px_3().flex().items_center().text_color(c("faint")).child(tf(k, &[])).into_any_element(),
         Some(Item::Head(g)) => {
             let ex = g["excluded"] == true; let n = g["n"].as_u64().unwrap_or(0);
             let src = source_label(&d, s(&g, "source")); let jd = judged(&d, s(&g, "source"));
-            div().h(px(24.)).flex().items_center().gap_2().px_2().border_b_1().border_color(c("line")).bg(c("panel")).text_size(px(11.))
+            div().w_full().h(px(24.)).flex().items_center().gap_2().px_2().border_b_1().border_color(c("line")).bg(c("panel")).text_size(px(11.))
                 .child(div().flex_shrink_0().text_color(c("faint")).child(src))
                 .when(jd, |x| x.child(div().flex_shrink_0().px(px(3.)).text_size(px(10.)).border_1().border_color(c("warn")).text_color(c("warn")).child(tf("gpui.mgmt.checks.judged", &[]))))
                 .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_color(c(if ex { "faint" } else { "dim" }))
@@ -103,13 +103,13 @@ fn item_el(app: &mut Backplane, i: usize, cx: &mut Context<Backplane>) -> AnyEle
             let k = group_key(&g);
             let label = if left == 0 { tf("gpui.mgmt.checks.fewer", &[]) } else { tf("gpui.mgmt.checks.more", &[("n", left.into())]) };
             crate::ui::with_rect(div().id(SharedString::from(format!("checks-more-{k}"))), { let k = k.clone(); move || format!("mgmt:checks:more:{k}") })
-                .h(px(24.)).pl(px(14.)).flex().items_center().text_size(px(11.)).text_color(c("dim")).cursor_pointer().hover(|x| x.text_color(c("text")))
+                .w_full().h(px(24.)).pl(px(14.)).flex().items_center().text_size(px(11.)).text_color(c("dim")).cursor_pointer().hover(|x| x.text_color(c("text")))
                 .child(label).on_click(cx.listener(move |this, _, _, cx| open_group(this, &g, cx))).into_any_element()
         }
         Some(Item::Row(f)) => {
             let id = s(&f, "id").to_string(); let on = sel.as_deref() == Some(id.as_str()); let ex = s(&f, "severity") == "excluded";
             crate::ui::with_rect(div().id(SharedString::from(format!("checks-row-{id}"))), { let id = id.clone(); move || format!("mgmt:checks:row:{id}") })
-                .group("checks-row").flex().items_center().gap_2().pl(px(14.)).pr_2().h(px(24.)).border_b_1().border_color(c("line")).cursor_pointer()
+                .group("checks-row").w_full().flex().items_center().gap_2().pl(px(14.)).pr_2().h(px(24.)).border_b_1().border_color(c("line")).cursor_pointer()
                 .relative().when(on, |x| x.bg(c("raise")).child(div().absolute().left_0().top_0().bottom_0().w(px(2.)).bg(c("accent")))).hover(|x| x.bg(c("panel"))).when(ex, |x| x.text_color(c("faint")))
                 .child(div().flex_shrink_0().size(px(7.)).bg(c(tone(s(&f, "severity")))))
                 .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(s(&f, "title").to_string()))
@@ -177,6 +177,8 @@ pub fn controls(m: &super::mgmt::Mgmt) -> Vec<(String, String, String)> {
     let mut v: Vec<(String, String, String)> = vec![("mgmt:checks:run".into(), "Run".into(), "checks:run".into()), ("mgmt:checks:full".into(), "Run all checks".into(), "checks:full".into())]; // i18n-ok: harness ids and labels
     let (more, open) = ui(|u| (u.more.clone(), u.open.clone()));
     let found = ui(|u| u.found.clone()).map(|x| x.2);
+    v.push(("mgmt:checks:scroll".into(), "Scroll".into(), "checks:scroll".into())); // i18n-ok: a harness id
+    for g in d["groups"].as_array().into_iter().flatten() { let k = group_key(g); v.push((format!("mgmt:checks:more:{k}"), "More".into(), format!("checks:more:{k}"))); } // i18n-ok: harness ids
     for f in visible(&d, found.as_deref(), &more, &open) {
         let id = s(&f, "id");
         v.push((format!("mgmt:checks:row:{id}"), s(&f, "title").to_string(), format!("checks:row:{id}")));
@@ -188,6 +190,12 @@ pub fn controls(m: &super::mgmt::Mgmt) -> Vec<(String, String, String)> {
 pub fn act(app: &mut Backplane, a: &str, cx: &mut Context<Backplane>) {
     if let Some(id) = a.strip_prefix("row:") { select(app, id, cx) } else if let Some(id) = a.strip_prefix("fix:") { fix(app, id, cx) }
     else if a == "run" { run(app, cx) } else if a == "full" { run_full(app, cx) }
+    else if let Some(k) = a.strip_prefix("more:") { if let Some(g) = app.screens.mgmt.data("checks")["groups"].as_array().into_iter().flatten().find(|g| group_key(g) == k).cloned() { open_group(app, &g, cx) } }
+    else if a == "scroll" {
+        // a screen's worth down the list (the e2e's wheel: a synthetic wheel is not delivered to the window)
+        if let Some(h) = ui(|u| u.scroll.clone()) { let b = &h.0.borrow().base_handle; let o = b.offset(); b.set_offset(point(o.x, o.y - px(240.))); }
+        app.ui_epoch += 1; cx.notify();
+    }
 }
 /// "Run all checks": both checks with the library checks too (more memory: the hub's guard still decides when).
 pub fn run_full(app: &mut Backplane, cx: &mut Context<Backplane>) {
