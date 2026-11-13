@@ -92,6 +92,8 @@ wait_summary() {
 # K1: the CLI's baseline, KiCad not open yet
 S0=$(wait_summary 'not d["in_editor"]' 240) || true
 L0D=$(list drc); L0E=$(list erc)
+# lane J's DRC trust: a runtime without drc-zone-guard on a board with fills says DRC may miss a short (stockdrc); one with it does not
+echo "INFO DRC untrusted (no drc-zone-guard): $(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["result"]["drc"].get("untrusted"))' "$S0" 2>/dev/null)"
 check "Before KiCad opens: both checks ran with kicad-cli and are fresh" "$(python3 -c 'import json,sys; r=json.loads(sys.argv[1])["result"]; print(int(r["drc"]["has_result"] and not r["drc"]["in_editor"] and r["erc"]["has_result"]))' "$S0" 2>/dev/null || echo 0)" "$S0"
 
 # the board open in the embedded editor; its tab pressed once KiCad painted (Hubble_DK's copy came up on the schematic by itself)
@@ -144,8 +146,9 @@ print(",".join(f"{r}:{n}" for r, n in sorted(c.items())) or "-", int(noted))
 PY
 )
 read -r EO_RULES EO_NOTED <<<"$EO"
-# the builds whose editor reports more silk_over_copper pairs than kicad-cli (the fork's parity gate, 4d76b37879, follows it up)
-DIFF_BUILDS="c53b5e0800"
+# the builds whose editor reports silk_over_copper pairs the project waives in its .kicad_dru (no solder_mask_min_width: the silk test's
+# per-opening branch overrode the ignore); fixed for batch 5 (5e9b211e3e), whose parity gate holds editor and CLI to the same findings
+DIFF_BUILDS="c53b5e0800 85dde9ab8d"
 if ! echo "$CAPS" | grep -qE "\"($(echo $DIFF_BUILDS | tr ' ' '|'))"; then
   check "The editor reports nothing the CLI does not (a build without the known difference; editor only: $EO_RULES)" "$([ "$EO_RULES" = "-" ] && echo 1 || echo 0)"
 else
