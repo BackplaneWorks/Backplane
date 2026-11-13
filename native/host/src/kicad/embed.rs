@@ -1920,6 +1920,11 @@ async fn spawn_gui_session(
             .env("GDK_SCALE", "1")
             .env_remove("WAYLAND_DISPLAY");
         if !display.is_empty() { c.env("DISPLAY", &display); }
+        // Bound glibc's arenas during the threaded library preload. Five Hubble GPU opens averaged 235 MB (5.7%) less RSS with 8 arenas;
+        // the remaining 532 MB spread is unexplained. The fork's Xvfb preload experiment saved ~650 MB for +0.3 s, specific to that venue.
+        // The person's own value wins, including an explicitly empty value (as in the fork's launcher default).
+        #[cfg(target_os = "linux")]
+        if std::env::var_os("MALLOC_ARENA_MAX").is_none() { c.env("MALLOC_ARENA_MAX", "8"); }
         if mode == "stock" {
             c.env("XDG_CONFIG_HOME", &cfg_dir)
                 .env("XDG_CACHE_HOME", &cache_dir)
