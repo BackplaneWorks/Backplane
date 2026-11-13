@@ -224,6 +224,8 @@ pub const JLCPCB: Adapter = Adapter { fab: "jlcpcb", stackups: Some("impedance")
     r!("flex", "kind flex", "silk_text_height_min", "free", "{}", Row("Character Height", "", 0, 1.0)),
     r!("flex", "kind flex", "silk_line_min", "free", "{}", Row("Character Line Width", "", 0, 1.0)),
     r!("flex", "kind flex", "mask_bridge_min", "free", "{}", Row("Minimum solder bridge width", "", 0, 1.0)),
+    r!("flex", "kind flex", "copper_to_edge_min", "free", "{}", Row("FPC Outline", "Copper to board edge", 0, 1.0)),
+    r!("flex", "kind flex", "pad_to_silk_min", "free", "{}", Row("Character to Pad Clearance", "", 0, 1.0)),
     r!("assembly", "assembly economic", "min_package", "free", "{}", AfterText("Minimum Package", 1)),
     r!("assembly", "assembly standard", "min_package", "free", "{}", AfterText("Minimum Package", 2)),
     r!("assembly", "assembly economic", "ic_pitch_min", "free", "{}", After("Minimum IC Pin Spacing", 1, "", 0)),

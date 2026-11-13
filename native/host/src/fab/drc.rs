@@ -384,6 +384,11 @@ mod tests {
         pl.insert_first = false; let (m4, left4) = edit_message(HAND, &pl);
         assert!(m4.get("insert").is_none() && left4.iter().any(|l| l.starts_with("fab: clearance")));
     }
+    #[test] fn fab_drc_a_flex_board_gets_its_own_edge_clearance() {
+        let p = store::baseline("jlcpcb").unwrap(); let pl = plan(&p, &choice("flex", json!({"layers": 2}), "free"), &ProjectRules::default(), "");
+        let edge = pl.rules.iter().find(|r| r.name == "fab: copper to edge").expect("the flex page's copper to edge");
+        assert_eq!(edge.min, 0.3); assert!(edge.comment.contains("flex-pcb-capabilities"), "{}", edge.comment);
+    }
     #[test] fn fab_drc_the_project_wins_where_it_is_stricter_and_no_net_class_is_loosened() {
         let p = store::baseline("jlcpcb").unwrap(); let pl = plan(&p, &choice("pcb", json!({"layers": 4}), "free"), &pro(), HAND); let s = &pl.section;
         assert!(s.contains("# track width: the project's 0.2mm is as strict"), "{s}"); assert!(!s.contains("(rule \"fab: track width\""));
