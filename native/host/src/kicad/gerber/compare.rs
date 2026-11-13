@@ -228,28 +228,6 @@ fn compared() -> Vec<(&'static str, u32, bool)> {
 }
 const PADS: u32 = 13; const VIAS: u32 = 23;
 
-/// The comparison of a Gerber set's items with its board's: marks (tints on the layers they are of: BOARD_ONLY, GERBERS_ONLY striped) and what each layer came to. Only the layers
-/// the set has are compared (a set without inner layers says nothing of them).
-/// What the board viewer's items leave out and fab output has: the board's top-level copper polygons (gr_poly on a copper layer), read
-/// from the board file's forms here.
-pub fn board_copper_polys(forms: &[&[u8]]) -> Vec<Item> {
-    let mut out = vec![];
-    for f in forms {
-        if super::super::schematic::head(f) != b"gr_poly" { continue }
-        let x = super::super::sexpr::parse(f);
-        let layer = x.get("layer").arg(0);
-        if !layer.ends_with(".Cu") { continue }
-        let ps: Vec<Pt> = x.get("pts").all("xy").map(|q| Pt { x: q.f(0), y: q.f(1) }).collect();
-        let fill = matches!(x.get("fill").arg(0), "yes" | "solid");
-        let w = x.get("stroke").get("width").f(0).max(x.get("width").f(0));
-        let key = format!("grpoly/{}", out.len());
-        out.push(Item { sig: 0, key, layer: board::layer_id(layer), prim: Prim::Poly { ps, w, fill }, info: Arc::from(format!("gr_poly;layer={layer}").as_str()) });
-    }
-    out
-}
-/// A custom pad's own shape the board viewer does not draw (only its anchor): this far round its anchor nothing is called a difference.
-const CUSTOM_PAD: f32 = 1.5;
-
 /// One layer's comparison (None when the set has not got the layer).
 fn one_layer(gerber: &[Item], board_items: &[Item], pads: &[(Pt, &str)], b: [f32; 4], name: &'static str, l: u32, optional: bool) -> Option<(Vec<Item>, Layer)> {
     let mut marks = vec![];
@@ -269,7 +247,6 @@ fn one_layer(gerber: &[Item], board_items: &[Item], pads: &[(Pt, &str)], b: [f32
             if matches!(it.prim, Prim::Tint { .. }) { continue }
             // vias are optional on every layer (a blind or micro via's ring is on its own layers only; the drills are compared apart)
             if (shared && optional) || it.layer == VIAS { may.draw(&it.prim, true) } else { need.draw(&it.prim, true) }
-            if copper && it.info.contains("shape=custom") { let c = match &it.prim { Prim::Circ { c, .. } => *c, Prim::Poly { ps, .. } if !ps.is_empty() => ps[0], _ => continue }; may.capsule(c, c, CUSTOM_PAD, true) }
             cands.push((it, bbox(&[it])));
         }
     }
@@ -303,6 +280,8 @@ fn one_layer(gerber: &[Item], board_items: &[Item], pads: &[(Pt, &str)], b: [f32
     Some((marks, Layer { name: name.into(), removed, added: out.len() - removed, places: out }))
 }
 
+/// The comparison of a Gerber set's items with its board's: marks (tints on the layers they are of: BOARD_ONLY, GERBERS_ONLY striped) and what each layer came to. Only the layers
+/// the set has are compared (a set without inner layers says nothing of them).
 pub fn compare(gerber: &[Item], board_items: &[Item]) -> (Vec<Item>, Vec<Layer>) {
     let (mut marks, mut out) = (vec![], vec![]);
     let all: Vec<&Item> = gerber.iter().chain(board_items.iter()).collect();

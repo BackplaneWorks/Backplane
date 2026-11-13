@@ -97,18 +97,19 @@ fn kind(name: &str) -> u8 {
     else if name == "segment" { 0 } else if name == "arc" { 1 } else { 9 }
 }
 fn graphic(out: &mut Vec<Item>, x: &Sx, key: String, sig: u32, pl: &Place, ctx: &str) {
-    let name = x.name();
-    let k = kind(name);
-    if k == 9 { return }
-    let (layer, info) = (layer_id(x.attr("layer")), info_graphic(name, x, ctx));
-    let prim = match k {
+    let Some(prim) = prim_of(x, pl) else { return };
+    out.push(Item { key, sig, layer: layer_id(x.attr("layer")), prim, info: info_graphic(x.name(), x, ctx) });
+}
+/// A drawing's shape (a line, arc, circle, rectangle or polygon: gr_, fp_, or a custom pad's primitive) placed by `pl`; None for others.
+fn prim_of(x: &Sx, pl: &Place) -> Option<Prim> {
+    Some(match kind(x.name()) {
         0 => Prim::Seg { a: pl.at(at(x, "start")), b: pl.at(at(x, "end")), w: width(x) },
         1 => Prim::Line { ps: arc_points(pl.at(at(x, "start")), pl.at(at(x, "mid")), pl.at(at(x, "end"))), w: width(x) },
         2 => Prim::Circ { c: pl.at(at(x, "center")), r: dist(at(x, "center"), at(x, "end")), w: width(x), fill: filled(x) },
         3 => Prim::Poly { ps: rect(at(x, "start"), at(x, "end"), pl), w: width(x), fill: filled(x) },
-        _ => Prim::Poly { ps: pts(x.get("pts").args(), pl), w: width(x), fill: filled(x) },
-    };
-    out.push(Item { key, sig, layer, prim, info });
+        4 => Prim::Poly { ps: pts(x.get("pts").args(), pl), w: width(x), fill: filled(x) },
+        _ => return None,
+    })
 }
 fn via(out: &mut Vec<Item>, x: &Sx, key: String, sig: u32) {
     let c = at(x, "at");
@@ -124,6 +125,17 @@ fn pad(out: &mut Vec<Item>, x: &Sx, key: String, sig: u32, pl: &Place, ctx: &str
     let (size, shape, drill) = (x.get("size"), x.arg(2), x.get("drill").f(0));
     let (w, h, ang) = (size.f(0), size.f(1), rad(-a.f(2)));
     let fr = Place::new(c.x, c.y, ang);
+    // a custom pad: its anchor (a circle or a rectangle, options' anchor) and its primitives, in the pad's frame, on its layer
+    let layer = layer_id(x.get("layers").arg(0));
+    let shape = if shape == "custom" {
+        for (i, p) in x.get("primitives").args().iter().enumerate() {
+            // a primitive's polygon is filled unless it says otherwise (KiCad's default for pad primitives)
+            let Some(mut prim) = prim_of(p, &fr) else { continue };
+            if let Prim::Poly { fill, .. } = &mut prim { if p.get("fill").name().is_empty() { *fill = true } }
+            out.push(Item { key: format!("{key}/p{i}"), sig, layer, prim, info: info.clone() });
+        }
+        if x.get("options").get("anchor").arg(0) == "circle" { "circle" } else { "rect" }
+    } else { shape };
     let prim = if shape == "circle" { Prim::Circ { c, r: w / 2.0, w: 0.0, fill: true } }
     else if shape == "oval" {
         let horiz = w >= h;
@@ -136,7 +148,7 @@ fn pad(out: &mut Vec<Item>, x: &Sx, key: String, sig: u32, pl: &Place, ctx: &str
         Prim::Poly { ps: vec![fr.at(Pt { x: -hw, y: -hh }), fr.at(Pt { x: hw, y: -hh }), fr.at(Pt { x: hw, y: hh }), fr.at(Pt { x: -hw, y: hh })], w: 0.0, fill: true }
     };
     let hole = if drill > 0.0 { Some(format!("{key}/h")) } else { None };
-    out.push(Item { key, sig, layer: layer_id(x.get("layers").arg(0)), prim, info: info.clone() });
+    out.push(Item { key, sig, layer, prim, info: info.clone() });
     if let Some(k) = hole { out.push(Item { key: k, sig, layer: 24, prim: Prim::Circ { c, r: drill / 2.0, w: 0.0, fill: true }, info }) }
 }
 /// Fp.place: 10.99 writes the footprint origin and angle as a TRS transform; its presence is authoritative.
@@ -232,7 +244,7 @@ fn form_raw(out: &mut Vec<Item>, x: &Sx, i: usize, sig: u32) {
         "via" => via(out, x, k.clone(), sig),
         "footprint" => footprint(out, x, &k, sig),
         "zone" => zone(out, x, &k, sig),
-        "segment" | "arc" | "gr_line" | "gr_arc" | "gr_circle" | "gr_rect" => graphic(out, x, k.clone(), sig, &Place::new(0.0, 0.0, 0.0), ""),
+        "segment" | "arc" | "gr_line" | "gr_arc" | "gr_circle" | "gr_rect" | "gr_poly" => graphic(out, x, k.clone(), sig, &Place::new(0.0, 0.0, 0.0), ""),
         _ => {}
     }
     text_form(out, x, &k, sig);
@@ -262,8 +274,25 @@ mod tests {
         let infos: Vec<&str> = o.iter().map(|it| &*it.info).collect();
         assert_eq!(infos, ["track;net=GND;layer=B.Cu;width=0.25", "via;net=GND;size=0.6;drill=0.3", "via;net=GND;size=0.6;drill=0.3", "track;net=VCC;layer=B.Cu;width=0.25"], "a KiCad 10 track names it already");
     }
-    #[test] fn a_top_level_gr_poly_draws_nothing_as_in() {
-        let mut o = vec![]; form(&mut o, &parse(b"(gr_poly (pts (xy 0 0) (xy 1 1) (xy 2 0)) (layer \"F.Cu\") (uuid \"p\"))"), 0, 0); assert!(o.is_empty());
+    /// A top-level polygon (copper poured by hand, an outline drawn as one) draws as itself: fab output has it, so the board view does.
+    #[test] fn a_top_level_gr_poly_draws() {
+        let mut o = vec![]; form(&mut o, &parse(b"(gr_poly (pts (xy 0 0) (xy 1 1) (xy 2 0)) (stroke (width 0.1) (type solid)) (fill yes) (layer \"F.Cu\") (uuid \"p\"))"), 0, 0);
+        assert_eq!(o.len(), 1); assert_eq!(o[0].layer, layer_id("F.Cu"));
+        assert!(matches!(&o[0].prim, Prim::Poly { ps, fill: true, .. } if ps.len() == 3));
+        assert!(o[0].info.starts_with("gr_poly"));
+    }
+    /// A custom pad draws its anchor and its primitives, turned and placed with the pad, on its layer.
+    #[test] fn a_custom_pad_draws_its_primitives() {
+        let fp = b"(footprint \"X\" (layer \"F.Cu\") (at 10 20) (property \"Reference\" \"U5\") (pad \"1\" smd custom (at 1 0 90) (size 0.5 0.5) (layers \"F.Cu\" \"F.Mask\") (options (clearance outline) (anchor circle)) (primitives (gr_poly (pts (xy 0 0) (xy 2 0) (xy 2 1) (xy 0 1)) (width 0)) (gr_line (start 0 0) (end 0 3) (width 0.2))) (uuid \"q\")))";
+        let mut o = vec![]; form(&mut o, &parse(fp), 0, 0);
+        let pads: Vec<&Item> = o.iter().filter(|i| i.info.starts_with("pad 1")).collect();
+        assert_eq!(pads.len(), 3, "the anchor and two primitives");
+        assert!(pads.iter().all(|i| i.layer == layer_id("F.Cu")));
+        assert!(pads.iter().any(|i| matches!(i.prim, Prim::Circ { r, .. } if (r - 0.25).abs() < 1e-6)), "anchor circle");
+        // the polygon, filled, turned with the pad (90° in the file: KiCad's y down) and moved to it at (11, 20)
+        let poly = pads.iter().find_map(|i| match &i.prim { Prim::Poly { ps, fill: true, .. } => Some(ps.clone()), _ => None }).expect("the polygon");
+        assert!((poly[0].x - 11.0).abs() < 1e-4 && (poly[0].y - 20.0).abs() < 1e-4, "{poly:?}");
+        let far = poly[1]; assert!(((far.x - 11.0).abs() - 0.0).abs() < 1e-4 && ((far.y - 20.0).abs() - 2.0).abs() < 1e-4, "turned a quarter: {far:?}");
     }
     #[test] fn arcs_run_from_a_to_c() {
         let ps = arc_points(Pt { x: 1.0, y: 0.0 }, Pt { x: 0.0, y: 1.0 }, Pt { x: -1.0, y: 0.0 }); assert_eq!(ps.len(), 25);
