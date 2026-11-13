@@ -57,6 +57,7 @@ pub fn usual_dirs(home: &Path) -> Vec<PathBuf> {
 fn login_dirs() -> Vec<PathBuf> { login_dirs_with(None) }
 /// The login shell's PATH; `home`: run it with that HOME (the person's real one in side-by-side mode, where the hub's own is a fake).
 pub fn login_dirs_with(home: Option<&Path>) -> Vec<PathBuf> {
+    if !probes_login_shell(cfg!(windows)) { return vec![] }
     let sh = std::env::var("SHELL").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "/bin/sh".into());
     let mut c = crate::proc::std_cmd(crate::proc::Kind::Local, &sh); c.args(["-lc", "printf %s \"$PATH\""]).stdin(Stdio::null()).stderr(Stdio::null()); if let Some(h) = home { c.env("HOME", h); }
     let Ok(mut child) = c.stdout(Stdio::piped()).spawn() else { return vec![] };
@@ -65,6 +66,10 @@ pub fn login_dirs_with(home: Option<&Path>) -> Vec<PathBuf> {
     let mut out = String::new(); if let Some(mut so) = child.stdout.take() { use std::io::Read; let _ = so.read_to_string(&mut out); }
     std::env::split_paths(out.trim()).collect()
 }
+/// Whether the login shell's PATH is asked for. Not on Windows: there is no login shell whose profile adds to PATH (the hub inherits the
+/// person's PATH from the registry), `$SHELL` there can name PowerShell (it was handed `-lc "printf %s \"$PATH\""` at every hub start on
+/// bp-win), and Git's sh would print an MSYS PATH (`/c/...:...`) that the Windows path list does not read.
+pub fn probes_login_shell(windows: bool) -> bool { !windows }
 static SEARCH: std::sync::OnceLock<Vec<PathBuf>> = std::sync::OnceLock::new();
 /// Where an agent CLI is looked for (and the PATH an agent runs with): the hub's own PATH first, then the login shell's, then the usual install directories. Worked out once.
 pub fn search_dirs() -> &'static [PathBuf] {
@@ -257,6 +262,11 @@ pub fn alive(pid: u32) -> bool { crate::plat::proc::alive(pid) }
 
 #[cfg(test)]
 mod tests {
+    /// Windows has no login shell's PATH to read: nothing is started for it (PowerShell was handed sh's -lc at every hub start).
+    #[test] fn the_login_shell_is_asked_for_its_path_only_where_there_is_one() {
+        assert!(probes_login_shell(false) && !probes_login_shell(true));
+        #[cfg(windows)] { std::env::set_var("SHELL", "powershell.exe"); assert!(super::login_dirs_with(None).is_empty()); }
+    }
     #[test] fn the_usual_directories_are_merged_once_with_the_newest_node_first() {
         let h = dir("usual"); for v in ["v20.1.0", "v24.13.1", "v9.0.0"] { std::fs::create_dir_all(h.join(".nvm/versions/node").join(v).join("bin")).unwrap() } std::fs::create_dir_all(h.join(".local/bin")).unwrap();
         let u = usual_dirs(&h); assert_eq!(u[0], h.join(".nvm/versions/node/v24.13.1/bin"), "{u:?}"); assert_eq!(u[1], h.join(".nvm/versions/node/v20.1.0/bin")); assert_eq!(u[2], h.join(".nvm/versions/node/v9.0.0/bin")); assert!(u.contains(&h.join(".local/bin")) && !u.contains(&h.join(".volta/bin")), "only those that exist");
