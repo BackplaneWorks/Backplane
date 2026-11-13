@@ -54,7 +54,7 @@ pub async fn find(runtime_cli: &str) -> Option<(PathBuf, String)> {
     let mut seen = std::collections::HashSet::new();
     for c in candidates() {
         if !c.is_file() || ours(&c, runtime_cli) || !seen.insert(std::fs::canonicalize(&c).unwrap_or(c.clone())) { continue }
-        let o = tokio::time::timeout(Duration::from_secs(20), tokio::process::Command::new(&c).arg("--version").stdin(std::process::Stdio::null()).kill_on_drop(true).output()).await;
+        let o = tokio::time::timeout(Duration::from_secs(20), crate::proc::tokio_cmd(crate::proc::Kind::Local, &c).arg("--version").stdin(std::process::Stdio::null()).kill_on_drop(true).output()).await;
         if let Ok(Ok(o)) = o { if let Some(v) = stock_version(&String::from_utf8_lossy(&o.stdout)) { return Some((c, v)) } }
     }
     None
@@ -111,7 +111,7 @@ fn free_mb() -> u64 {
     std::fs::read_to_string("/proc/meminfo").ok().and_then(|m| m.lines().find(|l| l.starts_with("MemAvailable:"))?.split_whitespace().nth(1)?.parse::<u64>().ok()).map_or(0, |kb| kb / 1024)
 }
 async fn run_cmd(argv: &[String]) -> Result<std::process::Output, String> {
-    let mut c = tokio::process::Command::new(&argv[0]); c.args(&argv[1..]).stdin(std::process::Stdio::null()).kill_on_drop(true);
+    let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Local, &argv[0]); c.args(&argv[1..]).stdin(std::process::Stdio::null()).kill_on_drop(true);
     match tokio::time::timeout(Duration::from_secs(SECS), c.output()).await { Ok(Ok(o)) => Ok(o), Ok(Err(e)) => Err(format!("could not start {}: {e}", argv[0])), Err(_) => Err(format!("took longer than {SECS} s")) }
 }
 fn last_line(o: &std::process::Output) -> String { let e = String::from_utf8_lossy(&o.stderr); let s = String::from_utf8_lossy(&o.stdout); e.trim().lines().last().or_else(|| s.trim().lines().last()).unwrap_or("").to_string() }
@@ -219,7 +219,7 @@ echo '{"coordinate_units":"mm","violations":[{"type":"shorting_items","severity"
         let (cli, v) = find(&rt).await.expect("a stock 10.0 kicad-cli");
         let t = crate::plat::tmp::dir("stockdrc-live"); let r: &Path = &t;
         let (fs, dropped) = stock_drc(r, &rt, &cli, &pro).await.unwrap();
-        let own = r.join("own.json"); let o = std::process::Command::new(&rt).args(["pcb", "drc", "--format", "json", "--severity-all", "--units", "mm", "-o"]).arg(&own).arg(Path::new(&pro).with_extension("kicad_pcb")).output().unwrap(); assert!(o.status.success() || own.is_file());
+        let own = r.join("own.json"); let o = crate::proc::std_cmd(crate::proc::Kind::Local, &rt).args(["pcb", "drc", "--format", "json", "--severity-all", "--units", "mm", "-o"]).arg(&own).arg(Path::new(&pro).with_extension("kicad_pcb")).output().unwrap(); assert!(o.status.success() || own.is_file());
         let mine = fd::drc(&std::fs::read_to_string(&own).unwrap()).unwrap();
         let ex = soften(extra(&fs, &mine), &dropped);
         println!("STOCKDRC {} {v}: stock {} own {} dropped {:?} extra {:?}", cli.display(), fs.len(), mine.len(), dropped, ex.iter().map(|f| (&f.rule, &f.severity)).collect::<Vec<_>>());
