@@ -4273,6 +4273,7 @@ gpui.mgmt.checks.reading = チェックしています…
 gpui.mgmt.checks.searching = 探しています…
 gpui.mgmt.checks.run = 実行
 gpui.mgmt.checks.running = 実行中
+gpui.mgmt.checks.behind = {what}の後
 gpui.mgmt.checks.stale = その後に変更あり
 gpui.mgmt.checks.liveunsaved = 未保存の編集を含む
 gpui.mgmt.checks.waiting = 待機中: {why}

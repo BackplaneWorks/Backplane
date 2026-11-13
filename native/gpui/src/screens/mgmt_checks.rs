@@ -149,6 +149,7 @@ pub fn state_text(name: &str, c: &Value) -> (String, &'static str) {
     let n = ["error", "warning", "info"].iter().map(|k| c["counts"][*k].as_u64().unwrap_or(0)).sum::<u64>();
     let head = if c["has_result"] == true { format!("{name} {}", if n == 0 { "✓".to_string() } else { n.to_string() }) } else { format!("{name} …") }; // i18n-ok: DRC/ERC are the checks' names; numbers and joins
     let out = match s(c, "state") {
+        "running" if !s(c, "behind").is_empty() => (format!("{head} · {}", tf("gpui.mgmt.checks.behind", &[("what", s(c, "behind").to_string().into())])), "dim"), // i18n-ok: DRC/ERC are the checks' names; numbers and joins
         "running" => (format!("{head} · {}", tf("gpui.mgmt.checks.running", &[])), "dim"), // i18n-ok: DRC/ERC are the checks' names; numbers and joins
         "stale" => (format!("{head} · {}", tf("gpui.mgmt.checks.stale", &[])), "warn"), // i18n-ok: DRC/ERC are the checks' names; numbers and joins
         "deferred" => (format!("{head} · {}", tf("gpui.mgmt.checks.waiting", &[("why", s(c, "reason").to_string().into())])), "warn"), // i18n-ok: DRC/ERC are the checks' names; numbers and joins
@@ -521,6 +522,7 @@ mod tests {
         assert_eq!((t.as_str(), col), ("DRC 5", "bad"));
         assert_eq!(state_text("ERC", &json!({"state": "fresh", "has_result": true, "counts": {"error": 0, "warning": 0}})).0, "ERC ✓");
         assert_eq!(state_text("DRC", &json!({"state": "fresh", "has_result": true, "unsaved": true, "counts": {"error": 2, "warning": 0}})).0, "DRC 2 · live, unsaved");
+        assert_eq!(state_text("DRC", &json!({"state": "running", "has_result": true, "behind": "ERC", "counts": {"error": 2, "warning": 0}})).0, "DRC 2 · after ERC");
         assert!(state_text("DRC", &json!({"state": "stale", "has_result": true, "counts": {"warning": 1}})).0.starts_with("DRC 1 · "));
         assert_eq!(state_text("DRC", &Value::Null).0, "");
         assert!(state_text("DRC", &json!({"state": "fresh", "has_result": true, "counts": {"error": 1}, "ran_on": "h@backplane"})).0.contains("h@backplane"));

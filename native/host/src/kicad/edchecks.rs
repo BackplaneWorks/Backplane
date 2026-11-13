@@ -27,12 +27,12 @@ pub fn capable(caps: &Value) -> bool {
     has("capabilities", CAP) && (caps["commands"].as_array().map_or(true, |a| a.is_empty()) || (has("commands", "RunChecks") && has("commands", "GetMarkers")))
 }
 /// The capability, asked once per editor process (its socket).
-static CAPS: OnceLock<Mutex<HashMap<String, (String, bool)>>> = OnceLock::new();
+static CAPS: OnceLock<Mutex<HashMap<String, (String, bool, bool)>>> = OnceLock::new();
 /// The open editor of the project when it runs checks itself.
 pub async fn ready(hub: &std::sync::Arc<crate::hub::Hub>, pro: &str) -> Option<GuiRoute> {
     let route = embed::gui_route(pro)?;
     let m = CAPS.get_or_init(Default::default);
-    if let Some((sock, ok)) = m.lock().unwrap().get(pro).cloned() { if sock == route.sock { return ok.then_some(route) } }
+    if let Some((sock, ok, _)) = m.lock().unwrap().get(pro).cloned() { if sock == route.sock { return ok.then_some(route) } }
     // the embedded GUI's own answer (the headless server's manifest never has the embed capabilities)
     let _ = hub;
     let o = embed::gui_call(&route, "kiapi.backplane.GetCapabilities", json!({})).await;
@@ -40,14 +40,26 @@ pub async fn ready(hub: &std::sync::Arc<crate::hub::Hub>, pro: &str) -> Option<G
     let caps = o["message"].clone();
     let ok = capable(&caps);
     eprintln!("checks: {pro}: {}", if ok { "DRC and ERC run in the open KiCad (embed-checks)" } else { "the open KiCad has no embed-checks: kicad-cli on the saved files" });
-    m.lock().unwrap().insert(pro.to_string(), (route.sock.clone(), ok));
+    m.lock().unwrap().insert(pro.to_string(), (route.sock.clone(), ok, false));
     ok.then_some(route)
 }
 /// Whether the project's open editor was found to check itself (no asking: the events loop calls it).
 pub fn known(pro: &str) -> bool { CAPS.get_or_init(Default::default).lock().unwrap().get(pro).is_some_and(|x| x.1) && embed::gui_route(pro).is_some_and(|r| CAPS.get().unwrap().lock().unwrap().get(pro).is_some_and(|x| x.0 == r.sock)) }
 /// What the panel says of an editor's result, where it may differ from kicad-cli's (the fork's answer, bp.13).
 pub const NOTE: &str = "Checked in KiCad: unsaved edits included, zones as filled, parity against the open schematic";
-#[cfg(test)] pub fn set_ready(pro: &str, sock: &str, ok: bool) { CAPS.get_or_init(Default::default).lock().unwrap().insert(pro.to_string(), (sock.to_string(), ok)); }
+#[cfg(test)] pub fn set_ready(pro: &str, sock: &str, ok: bool) { CAPS.get_or_init(Default::default).lock().unwrap().insert(pro.to_string(), (sock.to_string(), ok, false)); }
+/// The rules on which the editor and kicad-cli disagree about which items collide (bp.13 batch 3: Hubble_DK's silk-vs-mask test gives 21
+/// pairs more in the editor than the CLI's 67; the fork's parity gate follows it up).
+pub const EDITOR_ONLY: &[&str] = &["silk_over_copper"];
+pub const EDITOR_ONLY_NOTE: &str = "Reported by KiCad's editor only: the last check of the saved files (kicad-cli) did not report it";
+/// The note on an editor's rows of those rules that the last kicad-cli run of the same check did not have (`cli`: its ids; nothing when
+/// there was none): shown, not hidden, so a row that goes away when KiCad closes says why. Once the two agree, no row has it.
+pub fn mark_editor_only(fs: &mut [Finding], cli: &std::collections::HashSet<String>) {
+    if cli.is_empty() { return }
+    for f in fs.iter_mut().filter(|f| EDITOR_ONLY.contains(&f.rule.as_str()) && !cli.contains(&f.id)) {
+        f.detail = if f.detail.is_empty() { EDITOR_ONLY_NOTE.into() } else { format!("{} · {EDITOR_ONLY_NOTE}", f.detail) };
+    }
+}
 
 // Pure ---------------------------------------------------------------------------------------------------------------------------
 
@@ -444,6 +456,17 @@ mod tests {
         let s = select_items(cli.iter().find(|f| f.rule == "track_dangling").unwrap(), &HashMap::new()).unwrap();
         assert_eq!((s["kind"].as_str(), s["ids"].clone()), (Some("FK_PCB"), json!([{"value": "t1"}])));
         assert!(s["sheet_path"].is_null() && s["at_nm"].is_null());
+    }
+    /// The editor's rows of a rule it disagrees on with kicad-cli carry a note when the last CLI run had no such row; the CLI's own rows
+    /// of that rule, other rules, and every row when no CLI run is known, carry none; ids are left as they were.
+    #[test] fn rows_only_the_editor_reports_say_so() {
+        let f = |id: &str, rule: &str| Finding { id: id.into(), source: "drc".into(), severity: "warning".into(), rule: rule.into(), title: "t".into(), detail: "Text 'U3'".into(), anchors: vec![], fix: String::new() };
+        let mk = || vec![f("drc:cli", "silk_over_copper"), f("drc:new", "silk_over_copper"), f("drc:c", "clearance")];
+        let cli: std::collections::HashSet<String> = ["drc:cli", "drc:other"].iter().map(|s| s.to_string()).collect();
+        let mut fs = mk(); mark_editor_only(&mut fs, &cli);
+        assert_eq!(fs.iter().map(|f| f.detail.ends_with(EDITOR_ONLY_NOTE)).collect::<Vec<_>>(), [false, true, false]);
+        assert_eq!(fs.iter().map(|f| f.id.as_str()).collect::<Vec<_>>(), ["drc:cli", "drc:new", "drc:c"]);
+        let mut fs = mk(); mark_editor_only(&mut fs, &Default::default()); assert!(fs.iter().all(|f| f.detail == "Text 'U3'"));
     }
     #[test] fn the_capability_is_the_editors_own() {
         assert!(capable(&json!({"capabilities": ["embed", "embed-checks"], "commands": ["kiapi.backplane.embed.RunChecks", "kiapi.backplane.embed.GetMarkers"]})));

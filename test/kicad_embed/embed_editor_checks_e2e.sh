@@ -130,7 +130,30 @@ L1D=$(list drc); L1E=$(list erc)
 check "In KiCad: both checks ran in the open editor (in_editor), nothing unsaved" "$(python3 -c 'import json,sys; r=json.loads(sys.argv[1])["result"]; print(int(r["drc"]["in_editor"] and r["erc"]["in_editor"] and not r["drc"]["unsaved"]))' "$S1" 2>/dev/null || echo 0)" "$S1"
 sub() { python3 -c 'import sys; a=set(sys.argv[1].split()); b=set(sys.argv[2].split()); print(len(a-b))' "$1" "$2"; }
 check "Every CLI row is in the editor's result with the same id (DRC $(ids "$L0D" | wc -w), ERC $(ids "$L0E" | wc -w))" "$([ "$(sub "$(ids "$L0D")" "$(ids "$L1D")")" = 0 ] && [ "$(sub "$(ids "$L0E")" "$(ids "$L1E")")" = 0 ] && echo 1 || echo 0)" "missing in the editor: drc $(sub "$(ids "$L0D")" "$(ids "$L1D")"), erc $(sub "$(ids "$L0E")" "$(ids "$L1E")")"
-check "The editor reports nothing the CLI does not (editor only: drc $(sub "$(ids "$L1D")" "$(ids "$L0D")"), erc $(sub "$(ids "$L1E")" "$(ids "$L0E")"); see drc_diff.txt)" "$([ "$(sub "$(ids "$L1D")" "$(ids "$L0D")")" = 0 ] && [ "$(sub "$(ids "$L1E")" "$(ids "$L0E")")" = 0 ] && echo 1 || echo 0)"
+# rows only the editor reports: none, but on the builds known to differ (bp.13 batch 3, DIFF_BUILDS):
+# an expected difference: only the known rules (edchecks EDITOR_ONLY), each with its note, and, where CHECKS_EXPECT_EDITOR_ONLY says how many
+# ("silk_over_copper:21" for Hubble_DK), that many; so a fork fix without the capability turns this red, to be told
+EO=$(python3 - "$L0D" "$L1D" <<'PY'
+import json, sys, collections
+a, b = [{f["id"]: f for f in json.load(open(x))["result"]["findings"]} for x in sys.argv[1:3]]
+only = [b[k] for k in set(b) - set(a)]
+c = collections.Counter(f["rule"] for f in only)
+noted = all("editor only" in f.get("detail", "") for f in only)
+print(",".join(f"{r}:{n}" for r, n in sorted(c.items())) or "-", int(noted))
+PY
+)
+read -r EO_RULES EO_NOTED <<<"$EO"
+# the builds whose editor reports more silk_over_copper pairs than kicad-cli (the fork's parity gate, 4d76b37879, follows it up)
+DIFF_BUILDS="c53b5e0800"
+if ! echo "$CAPS" | grep -qE "\"($(echo $DIFF_BUILDS | tr ' ' '|'))"; then
+  check "The editor reports nothing the CLI does not (a build without the known difference; editor only: $EO_RULES)" "$([ "$EO_RULES" = "-" ] && echo 1 || echo 0)"
+else
+  WANT_EO=${CHECKS_EXPECT_EDITOR_ONLY:-}
+  OK_EO=$(python3 -c 'import sys; got=sys.argv[1]; want=sys.argv[2]; known={"silk_over_copper"}
+rules=[] if got=="-" else [x.split(":")[0] for x in got.split(",")]
+print(int(all(r in known for r in rules) and (not want or want==got) and sys.argv[3]=="1"))' "$EO_RULES" "$WANT_EO" "${EO_NOTED:-0}")
+  check "Expected difference (build $DIFF_BUILDS): rows only the editor reports are the known ones, each noted as such ($EO_RULES; expected ${WANT_EO:-any of the known})" "$OK_EO" "a change here means the fork changed its scope: tell lane E"
+fi
 echo "INFO counts: cli drc $(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["result"]["drc"]["counts"])' "$S0" 2>/dev/null) erc $(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["result"]["erc"]["counts"])' "$S0" 2>/dev/null) | editor drc $(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["result"]["drc"]["counts"])' "$S1" 2>/dev/null) erc $(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["result"]["erc"]["counts"])' "$S1" 2>/dev/null)"
 python3 - "$L0D" "$L1D" >"$OUT/drc_diff.txt" <<'PY' || true
 import json, sys
@@ -142,6 +165,7 @@ echo "INFO DRC rows on one side only: $(wc -l <"$OUT/drc_diff.txt") (drc_diff.tx
 info_counts() { echo "INFO counts equal: $1"; }
 info_counts "$(python3 -c 'import json,sys; a,b=[json.loads(x)["result"] for x in sys.argv[1:3]]; print(int(a["drc"]["counts"]==b["drc"]["counts"] and a["erc"]["counts"]==b["erc"]["counts"]))' "$S0" "$S1" 2>/dev/null || echo 0)" "$(echo "$S0" | cut -c1-200) / $(echo "$S1" | cut -c1-200)"
 echo "INFO DRC's bar while it ran:$FRACS"
+echo "INFO in KiCad, ERC first then DRC: $(python3 -c 'import json,sys; r=json.loads(sys.argv[1])["result"]; e,d=r["erc"],r["drc"]; t0=min(e["at"]-e["took_ms"], d["at"]-d["took_ms"]); print("ERC done", e["at"]-t0, "ms after the start (its own", e["took_ms"], "ms), DRC done", d["at"]-t0, "ms (its own", d["took_ms"], "ms); ERC ended before DRC began:", e["at"] <= d["at"]-d["took_ms"]+50)' "$S1" 2>/dev/null)"
 echo "INFO times (ms): $(python3 -c 'import json,sys; a,b=[json.loads(x)["result"] for x in sys.argv[1:3]]; print("cli drc", a["drc"]["took_ms"], "erc", a["erc"]["took_ms"], "| editor drc", b["drc"]["took_ms"], "erc", b["erc"]["took_ms"])' "$S0" "$S1" 2>/dev/null)"
 echo "INFO ids: drc cli $(ids "$L0D" | wc -w) editor $(ids "$L1D" | wc -w) shared $(comm -12 <(ids "$L0D" | tr ' ' '\n' | sort) <(ids "$L1D" | tr ' ' '\n' | sort) | wc -l); erc cli $(ids "$L0E" | wc -w) editor $(ids "$L1E" | wc -w) shared $(comm -12 <(ids "$L0E" | tr ' ' '\n' | sort) <(ids "$L1E" | tr ' ' '\n' | sort) | wc -l)"
 # KiCad sends no progress in a job's first 150 ms: a DRC that quick has no fraction to show
