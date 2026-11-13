@@ -8,7 +8,7 @@ A KiCad dialog that appears on its own (a load warning) is recorded with its tit
 import json, os, re, subprocess, sys, threading, time
 
 OUT, CLOG = sys.argv[1], sys.argv[2]
-JOURNEYS = (sys.argv[3] if len(sys.argv) > 3 else "focus,open,switch,edit,mgmt,coedit,xprobe,comment,save,tools,plan,sch").split(",")
+JOURNEYS = (sys.argv[3] if len(sys.argv) > 3 else "focus,open,switch,edit,mgmt,coedit,xprobe,comment,save,tools,editors,plan,sch").split(",")
 LIB = os.path.dirname(os.path.abspath(__file__))
 IPC, DRV, RPC = os.environ["IPC_PY"], os.environ["DRIVER_PY"], os.environ["HUB_RPC_MJS"]
 RT, SAMP = os.path.join(LIB, "rt_input.py"), os.path.join(LIB, "pane_sampler.py")
@@ -459,6 +459,98 @@ if "tools" in JOURNEYS and SOCK:
         th.join(); perf(tag, round(t1 - t0), rc=rc)
         if box.get("r"): EVENTS.append({"kind": "input", "t0": box["r"]["t0"], "t1": box["r"]["t1"], "tag": f"pan_during_{tag}"})
         time.sleep(0.5)
+def fp_positions():
+    txt = open(PCB, errors="ignore").read(); out = {}
+    for m in re.finditer(r'\(footprint "[^"]*"(.*?)\n\t\)', txt, re.S):
+        body = m.group(1); ref = re.search(r'\(property "Reference" "([^"]+)"', body)
+        at = re.search(r'\n\t\t\(at ([-\d.]+) ([-\d.]+)', body) or re.search(r'\n\t\t\(transform\s*\(translate ([-\d.]+) ([-\d.]+)\)', body)  # 10.0 / 10.99 forms
+        if at and ref: out[ref.group(1)] = (float(at.group(1)), float(at.group(2)))
+    return out
+# 7b. editors (bp.13 batch 2 on): the footprint editor opened from the board as a person does (a footprint clicked, Ctrl+E), then KiCad's
+# own footprint-editor action; GerbView in KiCad's process on the board's Gerbers (OpenGerbers: hidden as a prewarm, then shown over the
+# pane, as a host would; the PCB editor has no GerbView command of its own). What appears where, how long it takes, and what the client shows.
+FK = {1: "PCB", 2: "SCH", 3: "SYM", 4: "FP", 5: "PCB_3D", 6: "OTHER", 7: "GERBVIEW"}
+ET_NAMES = {9: "ET_SHOW_REQUESTED", 25: "ET_EDITOR_REQUESTED"}
+def kframes(): return {FK.get(f["kind"], str(f["kind"])): f for f in ipc("frames", SOCK).get("frames", [])}
+def kicad_tops():  # KiCad top-level windows a person can see (not the pane's own frame): a floating editor, a dialog
+    return [w for w in windows() if w.get("shown") and "kicad" in w.get("wm_class", "").lower() and w["w"] > 100 and w["h"] > 100
+            and not (abs(w["root_x"] - PANE["x"]) < 40 and abs(w["root_y"] - PANE["y"]) < 60)]
+def editor_watch(tag, kind, t0, secs=20):
+    """After an action at t0: when KiCad's KIND frame is shown, the events KiCad posted, any new top-level KiCad window, what the
+    client last reported shown, and screenshots at 1 s and at the end."""
+    tops0 = {w["xid"] for w in kicad_tops()}; shown_ms = None; newtops = []; shot1 = False
+    while now() - t0 < secs * 1000:
+        f = kframes().get(kind) or {}
+        if f.get("shown") and shown_ms is None: shown_ms = round(now() - t0)
+        for w in kicad_tops():
+            if w["xid"] not in tops0 and w["xid"] not in [n["xid"] for n in newtops]:
+                newtops.append({"xid": w["xid"], "title": w.get("title"), "at": [w["root_x"], w["root_y"], w["w"], w["h"]], "ms": round(now() - t0)})
+        if not shot1 and now() - t0 > 1000: shot(f"{tag}_1s"); shot1 = True
+        if shown_ms is not None and now() - t0 > shown_ms + 3000: break
+        time.sleep(0.1)
+    shot(f"{tag}_end")
+    f = kframes().get(kind) or {}
+    sn = (metrics("shown") or [{}])[-1]
+    out = {"ms": shown_ms, "shown": int(bool(f.get("shown"))), "lib_id": f.get("lib_id"), "title": f.get("title"), "files": len(f.get("files") or []),
+           "new_windows": newtops, "client_shown": {k: sn.get(k) for k in ("thread", "open", "active", "kind", "tab") if k in sn},
+           "pane_editor_up": int(editor_up())}
+    RESULTS[tag] = out
+    print(f"PERF {tag} {shown_ms}ms " + " ".join(f"{k}={json.dumps(v)}" for k, v in out.items() if k != "ms"), flush=True)
+    for w in newtops: print(f"JANK {tag}: a KiCad window outside the pane: {w['title']!r} at {w['at']} after {w['ms']} ms", flush=True)
+    return out
+CAPS = ipc("capabilities", SOCK) if SOCK else {}
+def has_cap(cap, command):  # batch 3 on names it in capabilities; 77a6ff17d0 (batch 2) only registers the command
+    return cap in CAPS.get("capabilities", []) or command in CAPS.get("commands", [])
+if "editors" in JOURNEYS and SOCK and not has_cap("embed-gerbview", "kiapi.backplane.embed.OpenGerbers"):
+    print("DIAG editors: this runtime has no in-process editors (no embed-gerbview / OpenGerbers): skipped", flush=True)
+    RESULTS["editors_supported"] = {"ms": None, "ok": 0}
+elif "editors" in JOURNEYS and SOCK:
+    PAUSE.set(); RESULTS["editors_supported"] = {"ms": None, "ok": 1}
+    fr0 = kframes(); print("INFO editors frames before: " + json.dumps({k: [f["shown"], f["lib_id"]] for k, f in fr0.items()}), flush=True)
+    ev0 = ipc("events", SOCK, "0").get("next", 0)
+    tab("PCB", "editors_board", 1.2)
+    refs = sorted(fp_positions(), key=lambda r: (0 if r.startswith("U") else 1, len(r), r))
+    ref = refs[0] if refs else ""
+    sel = ipc("select-items", SOCK, "pcb", ref, "1"); time.sleep(1.0)
+    rt("click", CX, CY); time.sleep(0.5)  # the footprint, centred by the zoom, clicked: the canvas has the keyboard and the footprint is selected
+    print(f"INFO editors: {ref} selected over the API ({sel.get('found')}), clicked; selection {ipc('selection', SOCK, 'pcb')}", flush=True)
+    r = rt("key", "e", "ctrl")
+    a = editor_watch("editor_fp_ctrl_e", "FP", r["t0"])
+    evs = ipc("events", SOCK, str(ev0)).get("events", [])
+    got = [{"type": ET_NAMES.get(e["type"], e["type"]), "kind": FK.get(e["frame"].get("kind")), "lib_id": e["frame"].get("lib_id")}
+           for e in evs if e["type"] in ET_NAMES]
+    RESULTS["editor_fp_ctrl_e"]["events"] = got
+    print(f"INFO editors: KiCad's events after Ctrl+E: {got}", flush=True)
+    RESULTS["editor_fp_from_board_ok"] = {"ms": None, "ok": int(bool(a["shown"] and a["lib_id"] and not a["new_windows"]))}
+    tab("PCB", "editors_back1", 1.5); shot("editors_back1")
+    RESULTS["editor_fp_back_to_board"] = {"ms": None, "ok": int(editor_up() and not (kframes().get("FP") or {}).get("shown"))}
+    # KiCad's own command (the PCB editor's toolbar button "Footprint Editor")
+    t0 = now(); st = ipc("run-action", SOCK, "common.Control.showFootprintEditor")
+    b = editor_watch("editor_fp_action", "FP", t0); RESULTS["editor_fp_action"]["action_ok"] = int(bool(st.get("ok")))
+    tab("PCB", "editors_back2", 1.5)
+    # GerbView: the board's Gerbers and drill files from kicad-cli, as Backplane's mfg/ holds them
+    cli = os.environ.get("KICAD_CLI") or ""; mfg = os.path.join(OUT, "mfg"); os.makedirs(mfg, exist_ok=True)
+    if os.path.exists(cli) and PCB:
+        subprocess.run([cli, "pcb", "export", "gerbers", "-o", mfg + "/", PCB], capture_output=True, timeout=300)
+        subprocess.run([cli, "pcb", "export", "drill", "-o", mfg + "/", PCB], capture_output=True, timeout=300)
+    files = sorted(f for f in glob.glob(os.path.join(mfg, "*")) if re.search(r"\.(g[a-z0-9]{1,3}|drl|gbr)$", f, re.I) and not f.endswith(".gbrjob"))
+    if not files: print("DIAG editors: no Gerbers exported", flush=True)
+    else:
+        tops0 = {w["xid"] for w in kicad_tops()}
+        t0 = now(); g = ipc("open-gerbers", SOCK, ",".join(files), timeout=120); ms = round(now() - t0)
+        newt = [w for w in kicad_tops() if w["xid"] not in tops0]
+        RESULTS["gerbview_prewarm"] = {"ms": ms, "loaded": len(g.get("loaded", [])), "of": len(files), "failed": dict(zip(g.get("failed", []), g.get("errors", []))),
+                                       "shown": int(bool((g.get("frame") or {}).get("shown"))), "new_windows": [w.get("title") for w in newt], "ok": int(bool(g.get("ok")))}
+        print(f"PERF gerbview_prewarm {ms}ms " + json.dumps(RESULTS["gerbview_prewarm"]), flush=True)
+        shot("gerbview_prewarm")
+        t0 = now(); g2 = ipc("open-gerbers", SOCK, ",".join(files), "0", "0", str(PANE["w"]), str(PANE["h"]), timeout=120)
+        c = editor_watch("gerbview_shown", "GERBVIEW", t0, secs=10)
+        RESULTS["gerbview_shown"]["call_ms"] = round(now() - t0); RESULTS["gerbview_shown"]["loaded"] = len(g2.get("loaded", []))
+        ipc("hide-frame", SOCK, "gerbview"); time.sleep(0.8)
+        tab("PCB", "editors_back3", 1.5); shot("editors_back3")
+        RESULTS["gerbview_back_to_board"] = {"ms": None, "ok": int(editor_up() and not (kframes().get("GERBVIEW") or {}).get("shown"))}
+    print("INFO editors frames after: " + json.dumps({k: [f["shown"], f["lib_id"], len(f["files"])] for k, f in kframes().items()}), flush=True)
+    PAUSE.clear()
 # 7c. plan: the routing floorplanner (fork bp.13+, a <board>.kicad_plan beside the board): plan view on/off (Alt+P), the plan layer, a corridor
 # vertex and a plane vertex dragged 5 s each (frame times), W / Shift+W, A / R, and an agent's ProposePlan to the overlay on screen.
 # Board millimetres are put on screen by a two-point calibration: two footprints selected over the API, each found by the pixels that change.
@@ -469,13 +561,6 @@ def changed_centroid(before, after, min_px=20):
     ys, xs = np.nonzero(before != after)
     if len(xs) < min_px: return None
     return float(xs.mean()), float(ys.mean())
-def fp_positions():
-    txt = open(PCB, errors="ignore").read(); out = {}
-    for m in re.finditer(r'\(footprint "[^"]*"(.*?)\n\t\)', txt, re.S):
-        body = m.group(1); ref = re.search(r'\(property "Reference" "([^"]+)"', body)
-        at = re.search(r'\n\t\t\(at ([-\d.]+) ([-\d.]+)', body) or re.search(r'\n\t\t\(transform\s*\(translate ([-\d.]+) ([-\d.]+)\)', body)  # 10.0 / 10.99 forms
-        if at and ref: out[ref.group(1)] = (float(at.group(1)), float(at.group(2)))
-    return out
 def calibrate():
     from pane_sampler import grab
     # small two-pad parts (C, R): their origin is their middle, which is where a selection's changed pixels centre
@@ -511,8 +596,9 @@ if "plan" in JOURNEYS and SOCK:
         to_screen = calibrate()
         RESULTS["plan_calibrated"] = {"ms": None, "ok": int(to_screen is not None)}
         # the plan view's toggle: RunAction(pcbnew.Plan.togglePlanView) where the runtime takes it; else its key after a click on the canvas
-        # (bp.13 builds d5eaa3ae44 and 3de539d24a: Alt+P, the Place menu's mnemonic unless the canvas has the keyboard; later: Ctrl+Shift+R)
-        ALT_P_BUILDS = ("d5eaa3ae44", "3de539d24a")
+        # (bp.13 builds d5eaa3ae44, 3de539d24a and 77a6ff17d0 (batch 2): Alt+P, the Place menu's mnemonic unless the canvas has the keyboard;
+        # batch 3 on: Ctrl+Shift+R)
+        ALT_P_BUILDS = ("d5eaa3ae44", "3de539d24a", "77a6ff17d0")
         bc = (KICAD_RUN.get("backplane_commit") or "")[:10]
         PLAN_KEY = os.environ.get("KEMBED_PLAN_KEY") or ("alt+p" if bc in ALT_P_BUILDS else "ctrl+shift+r")
         def key_plan():
