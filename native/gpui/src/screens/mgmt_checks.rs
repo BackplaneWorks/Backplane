@@ -156,6 +156,21 @@ fn log(ev: &str, v: Value) { let mut o = v; o["event"] = json!(ev); eprintln!("G
 pub fn select(app: &mut Backplane, id: &str, cx: &mut Context<Backplane>) {
     ui(|u| u.sel = Some(id.to_string()));
     log("checks_select", json!({"id": id}));
+    // a place in a file (Gerbers vs board's difference): that comparison on its layer, the difference lit and zoomed on
+    let row = ui(|u| u.items.iter().find_map(|i| if let Item::Row(f) = i { (s(f, "id") == id).then(|| f.clone()) } else { None }));
+    if let Some(f) = row.filter(|f| s(f, "doc") == "file" && !s(f, "at").is_empty()) {
+        let viewer = app.data["thread"]["viewer"].clone();
+        if viewer["gerbersVsBoard"] != true { let _ = app.tx.try_send(Command::Action("view".into(), "gerbers\tboard".into())); }
+        let layer = s(&f, "layer").to_string();
+        if let Some(r) = viewer["layerList"].as_array().into_iter().flatten().find(|r| s(r, "name") == layer || s(r, "name").starts_with(&format!("{layer} ·"))) { // i18n-ok: matches the hub's row name
+            if r["active"] != true { let _ = app.tx.try_send(Command::Action("view-layer-pick".into(), r["layer"].as_u64().unwrap_or(0).to_string())); }
+        }
+        let probe = format!("difference;at={}", s(&f, "at")); // i18n-ok: a probe's text, not drawn
+        let _ = app.tx.try_send(Command::Action("view-probe".into(), probe.clone()));
+        // zoomed on once the page shows that probe (xprobe::zoom_pending)
+        app.screens.xprobe.zoom = Some((probe, std::time::Instant::now()));
+        app.ui_epoch += 1; cx.notify(); return
+    }
     let _ = app.tx.try_send(Command::Rpc("kicad.checks.focus".into(), Secret(json!({"project": project(app), "id": id})), "xsel"));
     if app.screens.kicad.is_none() { app.screens.xprobe.zoom = Some((String::new(), std::time::Instant::now())); }
     app.ui_epoch += 1; cx.notify();
@@ -178,6 +193,7 @@ pub fn controls(m: &super::mgmt::Mgmt) -> Vec<(String, String, String)> {
     let (more, open) = ui(|u| (u.more.clone(), u.open.clone()));
     let found = ui(|u| u.found.clone()).map(|x| x.2);
     v.push(("mgmt:checks:scroll".into(), "Scroll".into(), "checks:scroll".into())); // i18n-ok: a harness id
+    for k in ["", "drc", "erc"].into_iter().map(str::to_string).chain(d["order"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(str::to_string))) { v.push((format!("mgmt:checks:src:{k}"), source_label(&d, &k), format!("checks:src:{k}"))); }
     for g in d["groups"].as_array().into_iter().flatten() { let k = group_key(g); v.push((format!("mgmt:checks:more:{k}"), "More".into(), format!("checks:more:{k}"))); } // i18n-ok: harness ids
     for f in visible(&d, found.as_deref(), &more, &open) {
         let id = s(&f, "id");
@@ -189,6 +205,7 @@ pub fn controls(m: &super::mgmt::Mgmt) -> Vec<(String, String, String)> {
 /// A press of one of `controls`.
 pub fn act(app: &mut Backplane, a: &str, cx: &mut Context<Backplane>) {
     if let Some(id) = a.strip_prefix("row:") { select(app, id, cx) } else if let Some(id) = a.strip_prefix("fix:") { fix(app, id, cx) }
+    else if let Some(k) = a.strip_prefix("src:") { ui(|u| u.src = k.to_string()); app.ui_epoch += 1; cx.notify() }
     else if a == "run" { run(app, cx) } else if a == "full" { run_full(app, cx) }
     else if let Some(k) = a.strip_prefix("more:") { if let Some(g) = app.screens.mgmt.data("checks")["groups"].as_array().into_iter().flatten().find(|g| group_key(g) == k).cloned() { open_group(app, &g, cx) } }
     else if a == "scroll" {

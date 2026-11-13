@@ -4320,3 +4320,5 @@ gpui.mgmt.life.unknown.n = lifecycle unknown for {n}
 gpui.mgmt.life.unknown.tip = Not checked yet: {a}. The distributors state none: {b}.
 gpui.mgmt.bom.stock.out = out {n}
 gpui.mgmt.bom.stock.low = low {n}
+gpui.gerbers.boardonly = board only
+gpui.gerbers.gerbersonly = Gerbers only

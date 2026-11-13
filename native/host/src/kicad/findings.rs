@@ -224,6 +224,8 @@ pub fn filter<'a>(fs: &'a [Finding], severity: &str, q: &str) -> Vec<&'a Finding
 pub fn names(f: &Finding) -> String {
     let mut v: Vec<String> = vec![];
     for a in &f.anchors {
+        // a place in a file (a Gerber set's difference): its layer and where
+        if a.doc == "file" && a.at { let n = format!("{} · {:.2}, {:.2}", a.layer, a.x, a.y); if !v.contains(&n) { v.push(n) } continue }
         let n = if !a.pin.is_empty() { a.pin.clone() } else if !a.reference.is_empty() { a.reference.clone() } else if !a.net.is_empty() { a.net.clone() } else { String::new() };
         if !n.is_empty() && !v.contains(&n) { v.push(n) }
     }
@@ -232,7 +234,10 @@ pub fn names(f: &Finding) -> String {
 /// A row as the panel draws it: small, so a large board's groups fit in the hub's info.
 pub fn row_json(f: &Finding) -> Value {
     let doc = f.anchors.first().map(|a| a.doc.as_str()).unwrap_or(if f.source == "erc" { "sch" } else { "pcb" });
-    json!({"id": f.id, "source": f.source, "severity": f.severity, "rule": f.rule, "title": f.title, "names": names(f), "doc": doc})
+    let mut v = json!({"id": f.id, "source": f.source, "severity": f.severity, "rule": f.rule, "title": f.title, "names": names(f), "doc": doc});
+    // a place in a file: the file (a Gerber set), its layer and where, for the viewer to open and zoom on
+    if let Some(a) = f.anchors.first().filter(|a| a.doc == "file") { v["file"] = json!(a.text); v["layer"] = json!(a.layer); if a.at { v["at"] = json!(format!("{:.2},{:.2}", a.x, a.y)) } }
+    v
 }
 /// The panel's groups: one per check and rule, the worst severity first, then the most findings; each with its count and its first
 /// `per` rows (errors first within it). Excluded findings are their own groups, last.

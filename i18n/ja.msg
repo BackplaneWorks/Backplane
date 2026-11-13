@@ -4343,3 +4343,5 @@ gpui.mgmt.life.unknown.n = {n}点はライフサイクル不明
 gpui.mgmt.life.unknown.tip = まだ確認していない: {a}。代理店の記載なし: {b}。
 gpui.mgmt.bom.stock.out = 欠品 {n}
 gpui.mgmt.bom.stock.low = 少 {n}
+gpui.gerbers.boardonly = 基板だけ
+gpui.gerbers.gerbersonly = ガーバーだけ

@@ -244,7 +244,7 @@ shot() {
 check_runtime() {
   local ran want bin
   [ -f "$OUT/hub.log" ] || return 0
-  ran=$(grep -o "kicad embed: running .*" "$OUT/hub.log" | head -1 | sed 's/^kicad embed: running //')
+  ran=$(grep -o "kicad embed: running .*" "$OUT/hub.log" | head -1 | sed 's/^kicad embed: running //' || true) # (a suite that opens no editor has no such line)
   [ -n "$ran" ] || return 0
   want=$("${KICAD_CLI:-kicad-cli}" --version 2>/dev/null | tail -1)
   bin=$(echo "$ran" | sed -n 's/.*(\(.*\))$/\1/p')

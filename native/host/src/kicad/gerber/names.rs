@@ -71,3 +71,8 @@ pub const CMP: &str = "gerbercmp\n";
 pub fn cmp_path(set: &str, board: &str) -> String { format!("{CMP}{set}\n{board}") }
 /// The set a viewer's file names: itself, or the set of a comparison.
 pub fn set_of(file: &str) -> &str { file.strip_prefix(CMP).map_or(file, |r| r.split_once('\n').map_or(r, |x| x.0)) }
+
+/// The last comparison of each set with its board, layer by layer: (name, on the board only, in the Gerbers only), for the layer list.
+static COUNTS: std::sync::Mutex<Vec<(String, Vec<(String, usize, usize)>)>> = std::sync::Mutex::new(Vec::new());
+pub fn set_counts(set: &str, v: Vec<(String, usize, usize)>) { let mut c = COUNTS.lock().unwrap(); c.retain(|x| x.0 != set); c.push((set.to_string(), v)); if c.len() > 16 { c.remove(0); } }
+pub fn counts_of(set: &str) -> Vec<(String, usize, usize)> { COUNTS.lock().unwrap().iter().find(|x| x.0 == set).map(|x| x.1.clone()).unwrap_or_default() }
