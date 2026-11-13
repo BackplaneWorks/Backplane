@@ -104,14 +104,19 @@ pub fn end_msg(id: &Value, action: &str, message: &str, doc: &Value) -> Value {
     if !message.is_empty() { m["message"] = json!(message) }
     m
 }
-/// Get, change and commit on one API (the GUI's, or the headless one through ipc::kicad_ipc). Answers how many symbols changed and the
-/// field's value before (the first changed symbol's: a line's symbols share it).
-async fn commit<F, Fut>(call: F, doc: Value, refs: &[String], field: &str, value: &str) -> Result<(usize, String), String>
+/// The symbols to update (GetItems' own, changed) and the field's value before (the first changed symbol's: a line's symbols share it).
+async fn prepare<F, Fut>(call: &F, doc: &Value, refs: &[String], field: &str, value: &str) -> Result<(Vec<Value>, String), String>
 where F: Fn(&'static str, Value) -> Fut, Fut: std::future::Future<Output = Value> {
     let got = call("kiapi.common.commands.GetItems", json!({"header": {"document": doc}, "types": ["KOT_SCH_SYMBOL"]})).await;
     let items = ok_of(&got)?["items"].as_array().cloned().unwrap_or_default();
     let was = items.iter().find(|it| refs.iter().any(|r| r == reference(it)) && current(it, field) != value).map(|it| current(it, field)).unwrap_or_default();
-    let todo = plan(&items, refs, field, value);
+    Ok((plan(&items, refs, field, value), was))
+}
+/// Get, change and commit on one API (the GUI's, or the headless one through ipc::kicad_ipc). Answers how many symbols changed and the
+/// field's value before (the first changed symbol's: a line's symbols share it).
+async fn commit<F, Fut>(call: F, doc: Value, refs: &[String], field: &str, value: &str) -> Result<(usize, String), String>
+where F: Fn(&'static str, Value) -> Fut, Fut: std::future::Future<Output = Value> {
+    let (todo, was) = prepare(&call, &doc, refs, field, value).await?;
     if todo.is_empty() { return Ok((0, was)) }
     let begun = call("kiapi.common.commands.BeginCommit", json!({"header": {"document": doc}})).await;
     let id = ok_of(&begun)?["id"].clone();
@@ -129,14 +134,15 @@ pub async fn edit(hub: &Arc<Hub>, pro: &str, sch: &str, p: &Value) -> Result<Val
     if crate::copy::on() { return Err("a hub on a copied log (BACKPLANE_COPY=1) writes no design".into()) }
     let (field, refs, value) = check(p)?;
     if let Some((gui, doc)) = gui_doc(pro).await {
-        let g = gui.clone();
-        // as the person, never an agent's name: from bp.13 their Ctrl+Z takes it back
-        // BACKPLANE_BOM_CLIENT=hub: the tests' run with the hub's own client name, to compare what KiCad's undo does with each
+        // as the person, never an agent's name (an actor of its own before bp.13, their own Ctrl+Z from it);
+        // BACKPLANE_BOM_CLIENT=hub: the tests' run as the hub's own actor, to compare what KiCad's undo does with each
         let as_person = AS_PERSON && std::env::var("BACKPLANE_BOM_CLIENT").map_or(true, |v| v != "hub");
-        let who = if as_person { super::coedit::client_name(&super::coedit::Who::Person) } else { String::new() };
-        let n = commit(move |ty, msg| { let (g, who) = (g.clone(), who.clone()); async move { if who.is_empty() { embed::gui_call(&g, ty, msg).await } else { embed::gui_call_as(&g, ty, msg, &who).await } } }, doc, &refs, &field, &value).await?;
-        if n.0 > 0 { embed::unsaved_update(pro, |u| u.touched()); }
-        return Ok(json!({"via": "kicad", "changed": n.0, "field": field, "value": value, "was": n.1, "refs": refs, "undo": undo_by(&gui.version, as_person)}))
+        let who = super::coedit::client_name(&if as_person { super::coedit::Who::Person } else { super::coedit::Who::Hub("bom") });
+        let g = gui.clone(); let w2 = who.clone();
+        let (todo, was) = prepare(&move |ty, msg| { let (g, w) = (g.clone(), w2.clone()); async move { embed::gui_call_as(&g, ty, msg, &w).await } }, &doc, &refs, &field, &value).await?;
+        // one commit, ended or dropped on every path, with the document's header and this name on every call (embed::commit_as)
+        if !todo.is_empty() { embed::commit_as(&gui, &who, &doc, todo.clone(), &message(&field, &refs, &value)).await?; embed::unsaved_update(pro, |u| u.touched()); }
+        return Ok(json!({"via": "kicad", "changed": todo.len(), "field": field, "value": value, "was": was, "refs": refs, "undo": undo_by(&gui.version, as_person)}))
     }
     // no KiCad with it open: the headless one writes and saves, under the schematic's lock
     let ag = AGENTS.get().and_then(Weak::upgrade).ok_or("the hub's agents are not running")?;
