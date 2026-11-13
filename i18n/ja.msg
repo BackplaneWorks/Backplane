@@ -4316,3 +4316,4 @@ gpui.mgmt.bom.nochange = 変更はありません。
 gpui.mgmt.bom.inkicad.save = KiCadで変更しました。残すにはKiCadで保存してください。
 gpui.mgmt.bom.undo.tip = 前の値に戻す
 gpui.mgmt.bom.undo = 元に戻す
+gpui.mgmt.checks.on = {host}で実行

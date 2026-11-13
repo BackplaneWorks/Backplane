@@ -377,7 +377,7 @@ pub fn next(now: u64, s: &Sched) -> Do {
         d => d,
     }
 }
-fn next_ignoring_machine(now: u64, s: &Sched) -> Do {
+pub fn next_ignoring_machine(now: u64, s: &Sched) -> Do {
     let pending = s.disk_rev != s.ran_rev;
     if s.running_since > 0 {
         return if pending && !s.running_rev.is_empty() && s.running_rev != s.disk_rev { Do::Cancel } else { Do::Nothing }
@@ -390,6 +390,16 @@ fn next_ignoring_machine(now: u64, s: &Sched) -> Do {
     if s.person_at > 0 { wait = wait.max(until(s.person_at, QUIET_MS)) }
     if s.agent_since > 0 && now < s.agent_since + AGENT_MAX_MS { wait = wait.max(until(s.agent_since, AGENT_MAX_MS).min(5000)) }
     if wait > 0 { Do::Wait(wait) } else { Do::Run }
+}
+
+/// Where a run that may go runs.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Place { Here, There, Defer(String) }
+/// Here when this machine can take it (machine_guard is ""), unless it is busy (load at or past its cores) and another machine of the
+/// person's is set up for checks (`remote`: a host with the same KiCad runtime); there when this machine cannot take it and one is;
+/// else deferred with the guard's reason.
+pub fn place(guard: &str, remote: bool, busy: bool) -> Place {
+    if guard.is_empty() { if busy && remote { Place::There } else { Place::Here } } else if remote { Place::There } else { Place::Defer(guard.to_string()) }
 }
 
 /// A run's progress for the bar: kicad-cli says nothing while it runs, so the time so far against the last run's (capped below 1;
@@ -544,6 +554,8 @@ mod tests {
         assert!(admit(16_000, &[], 400) && admit(16_000, &[400], 300) && !admit(16_000, &[400, 300], 100), "two at once at most");
         assert!(!admit(2_000, &[400], 300), "memory for both peaks and the margin"); assert!(admit(2_300, &[400], 300));
         assert!(admit(0, &[400], 300) && !admit(0, &[1, 1], 1));
+        assert_eq!(place("", false, true), Place::Here); assert_eq!(place("", true, false), Place::Here); assert_eq!(place("", true, true), Place::There);
+        assert_eq!(place("deferred: low memory", true, false), Place::There); assert_eq!(place("deferred: low memory", false, false), Place::Defer("deferred: low memory".into()));
         assert_eq!(fraction(500, 0), -1.0); assert_eq!(fraction(500, 1000), 0.5); assert_eq!(fraction(5000, 1000), 0.95);
     }
     #[test] fn the_chip() {

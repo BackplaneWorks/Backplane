@@ -91,6 +91,10 @@ the rest). A row: `{id, source, severity, rule, title, names, doc}`.
 
 - Each check's `state`: `none`, `running`, `deferred` (waiting for memory or another heavy KiCad job: `reason`), `fresh`, `stale` (the design
   changed since), `failed` (`reason`). Background runs leave KiCad's library checks out (`note`); `kicad.checks.run {full: true}` runs them too.
+- Where runs go: here, at low priority in a scope of their own, DRC and ERC side by side when memory allows; when this machine is short
+  of memory (or busy) and the setting `checks.remote` names another machine of the person's (an ssh destination with the same KiCad
+  build, `checks.remote.cli` or found by the runtime's name), the project's design files are copied there and the run goes there
+  (`ran_on` says where; the same findings, checked on Hubble_DK: 558 of 558). Never to a Boat. Empty (the default): never off this machine.
 - A row pressed (or reached with up/down): `kicad.checks.focus {project, id}` selects and zooms its items in KiCad's editor for it (board for
   DRC, schematic for ERC) and lights them in the viewers. "Fix with agent": `kicad.checks.fix {project, id}` -> `{text}`, sent as the
   thread's next message. The chip in the editor's row ("DRC 12 · ERC 3") opens the panel.

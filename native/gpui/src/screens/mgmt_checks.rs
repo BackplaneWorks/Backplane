@@ -27,7 +27,15 @@ pub struct Ui {
     pub asked: Option<(String, String)>,
     pub more: BTreeMap<String, Vec<Value>>,
     pub open: BTreeSet<String>,
+    /// the list as drawn (only its rows in view are built), and what drawing an item needs
+    pub items: Vec<Item>,
+    pub scroll: Option<UniformListScrollHandle>,
+    pub light: bool,
+    pub sources: Value,
 }
+/// One line of the list: a group's heading, a finding, a group's "n more" / "Fewer", or a word (searching, nothing found...).
+#[derive(Clone, Debug, PartialEq)]
+pub enum Item { Head(Value), Row(Value), More(Value, u64), Msg(&'static str) }
 thread_local! { static UI: RefCell<Ui> = RefCell::new(Ui::default()); }
 fn ui<R>(f: impl FnOnce(&mut Ui) -> R) -> R { UI.with(|u| f(&mut u.borrow_mut())) }
 
@@ -50,6 +58,68 @@ pub fn visible(d: &Value, search: Option<&[Value]>, more: &BTreeMap<String, Vec<
     }
     out
 }
+/// The list's lines: a search's rows (or "Looking…" / "Nothing matches"), else each group's heading, its rows (all of them once opened and
+/// fetched) and its "n more" (0: "Fewer"); "No findings" (or "Running the checks…" before a first result) when there are none.
+pub fn items(d: &Value, search: Option<&[Value]>, waiting: bool, more: &BTreeMap<String, Vec<Value>>, open: &BTreeSet<String>) -> Vec<Item> {
+    if waiting { return vec![Item::Msg("gpui.mgmt.checks.searching")] }
+    if let Some(rows) = search { return if rows.is_empty() { vec![Item::Msg("gpui.mgmt.checks.nomatch")] } else { rows.iter().cloned().map(Item::Row).collect() } }
+    let mut out = vec![];
+    for g in d["groups"].as_array().into_iter().flatten() {
+        let k = group_key(g); let n = g["n"].as_u64().unwrap_or(0); let is_open = open.contains(&k);
+        let rows: Vec<Value> = match (is_open, more.get(&k)) { (true, Some(all)) => all.clone(), _ => g["rows"].as_array().cloned().unwrap_or_default() };
+        let shown = rows.len() as u64;
+        out.push(Item::Head(g.clone()));
+        out.extend(rows.into_iter().map(Item::Row));
+        if n > shown { out.push(Item::More(g.clone(), n - shown)) } else if is_open { out.push(Item::More(g.clone(), 0)) }
+    }
+    if out.is_empty() { out.push(Item::Msg(if d["drc"]["has_result"] == true || d["erc"]["has_result"] == true { "gpui.mgmt.checks.none" } else { "gpui.mgmt.checks.reading" })) }
+    out
+}
+/// One item of the list, drawn (uniform_list asks only for the ones in view).
+fn item_el(app: &mut Backplane, i: usize, cx: &mut Context<Backplane>) -> AnyElement {
+    let (it, light, srcs, sel) = ui(|u| (u.items.get(i).cloned(), u.light, u.sources.clone(), u.sel.clone()));
+    let c = |n: &str| theme::color(light, n);
+    let d = json!({"sources": srcs});
+    let _ = app;
+    match it {
+        None => div().h(px(24.)).into_any_element(),
+        Some(Item::Msg(k)) => div().h(px(24.)).px_3().flex().items_center().text_color(c("faint")).child(tf(k, &[])).into_any_element(),
+        Some(Item::Head(g)) => {
+            let ex = g["excluded"] == true; let n = g["n"].as_u64().unwrap_or(0);
+            let src = source_label(&d, s(&g, "source")); let jd = judged(&d, s(&g, "source"));
+            div().h(px(24.)).flex().items_center().gap_2().px_2().border_b_1().border_color(c("line")).bg(c("panel")).text_size(px(11.))
+                .child(div().flex_shrink_0().text_color(c("faint")).child(src))
+                .when(jd, |x| x.child(div().flex_shrink_0().px(px(3.)).text_size(px(10.)).border_1().border_color(c("warn")).text_color(c("warn")).child(tf("gpui.mgmt.checks.judged", &[]))))
+                .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_color(c(if ex { "faint" } else { "dim" }))
+                    .child(if ex { format!("{} · {}", rule_label(s(&g, "rule")), tf("gpui.mgmt.checks.excluded", &[])) } else { rule_label(s(&g, "rule")) })) // i18n-ok: a join
+                .child(div().flex_shrink_0().text_color(c(if ex { "faint" } else { tone(s(&g, "severity")) })).child(n.to_string()))
+                .into_any_element()
+        }
+        Some(Item::More(g, left)) => {
+            let k = group_key(&g);
+            let label = if left == 0 { tf("gpui.mgmt.checks.fewer", &[]) } else { tf("gpui.mgmt.checks.more", &[("n", left.into())]) };
+            crate::ui::with_rect(div().id(SharedString::from(format!("checks-more-{k}"))), { let k = k.clone(); move || format!("mgmt:checks:more:{k}") })
+                .h(px(24.)).pl(px(14.)).flex().items_center().text_size(px(11.)).text_color(c("dim")).cursor_pointer().hover(|x| x.text_color(c("text")))
+                .child(label).on_click(cx.listener(move |this, _, _, cx| open_group(this, &g, cx))).into_any_element()
+        }
+        Some(Item::Row(f)) => {
+            let id = s(&f, "id").to_string(); let on = sel.as_deref() == Some(id.as_str()); let ex = s(&f, "severity") == "excluded";
+            crate::ui::with_rect(div().id(SharedString::from(format!("checks-row-{id}"))), { let id = id.clone(); move || format!("mgmt:checks:row:{id}") })
+                .group("checks-row").flex().items_center().gap_2().pl(px(14.)).pr_2().h(px(24.)).border_b_1().border_color(c("line")).cursor_pointer()
+                .relative().when(on, |x| x.bg(c("raise")).child(div().absolute().left_0().top_0().bottom_0().w(px(2.)).bg(c("accent")))).hover(|x| x.bg(c("panel"))).when(ex, |x| x.text_color(c("faint")))
+                .child(div().flex_shrink_0().size(px(7.)).bg(c(tone(s(&f, "severity")))))
+                .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(s(&f, "title").to_string()))
+                .when(judged(&d, s(&f, "source")), |x| x.child(div().flex_shrink_0().px(px(3.)).text_size(px(10.)).border_1().border_color(c("warn")).text_color(c("warn")).child(tf("gpui.mgmt.checks.judged", &[]))))
+                .child(div().flex_shrink_0().max_w(relative(0.35)).overflow_hidden().whitespace_nowrap().text_ellipsis().text_color(c(if ex { "faint" } else { "dim" })).child(s(&f, "names").to_string()))
+                .child(crate::ui::with_rect(div().id(SharedString::from(format!("checks-fix-{id}"))), { let id = id.clone(); move || format!("mgmt:checks:fix:{id}") })
+                    .flex_shrink_0().px(px(5.)).border_1().border_color(c("line")).text_size(px(11.)).text_color(c("dim")).invisible().group_hover("checks-row", |x| x.visible()).when(on, |x| x.visible())
+                    .hover(|x| x.text_color(c("text")).bg(c("bg"))).child(tf("gpui.mgmt.checks.fix", &[]))
+                    .on_click({ let id = id.clone(); cx.listener(move |this, _, _, cx| { cx.stop_propagation(); fix(this, &id, cx) }) }))
+                .on_click({ let id = id.clone(); cx.listener(move |this, _, window, cx| { if let Some(h) = ui(|u| u.focus.clone()) { window.focus(&h); } select(this, &id, cx) }) })
+                .into_any_element()
+        }
+    }
+}
 /// Up (-1) or down (+1) from the selected row: the next row's id (the first when none is selected); None past either end.
 pub fn step(ids: &[String], sel: Option<&str>, by: i32) -> Option<String> {
     if ids.is_empty() { return None }
@@ -62,13 +132,16 @@ pub fn state_text(name: &str, c: &Value) -> (String, &'static str) {
     if c.is_null() { return (String::new(), "faint") }
     let n = ["error", "warning", "info"].iter().map(|k| c["counts"][*k].as_u64().unwrap_or(0)).sum::<u64>();
     let head = if c["has_result"] == true { format!("{name} {}", if n == 0 { "✓".to_string() } else { n.to_string() }) } else { format!("{name} …") }; // i18n-ok: DRC/ERC are the checks' names; numbers and joins
-    match s(c, "state") {
+    let out = match s(c, "state") {
         "running" => (format!("{head} · {}", tf("gpui.mgmt.checks.running", &[])), "dim"), // i18n-ok: DRC/ERC are the checks' names; numbers and joins
         "stale" => (format!("{head} · {}", tf("gpui.mgmt.checks.stale", &[])), "warn"), // i18n-ok: DRC/ERC are the checks' names; numbers and joins
         "deferred" => (format!("{head} · {}", tf("gpui.mgmt.checks.waiting", &[("why", s(c, "reason").to_string().into())])), "warn"), // i18n-ok: DRC/ERC are the checks' names; numbers and joins
         "failed" => (format!("{head} · {}", tf("gpui.mgmt.checks.failed", &[("why", s(c, "reason").to_string().into())])), "bad"), // i18n-ok: DRC/ERC are the checks' names; numbers and joins
         _ => (head, if c["counts"]["error"].as_u64().unwrap_or(0) > 0 { "bad" } else if n > 0 { "warn" } else { "dim" }),
-    }
+    };
+    // a result made on another of the person's machines says so
+    let on = s(c, "ran_on");
+    if on.is_empty() || s(c, "state") == "running" { out } else { (format!("{} · {}", out.0, tf("gpui.mgmt.checks.on", &[("host", on.to_string().into())])), out.1) } // i18n-ok: a join
 }
 
 fn project(app: &Backplane) -> String { app.screens.mgmt.project.clone() }
@@ -191,7 +264,6 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
     if search { ask_search(app, &sev, &q) }
     let found = ui(|u| u.found.clone()).filter(|(a, b, _)| *a == sev && *b == q.trim()).map(|x| x.2);
     let (more, open) = ui(|u| (u.more.clone(), u.open.clone()));
-    let sel = ui(|u| u.sel.clone());
 
     // the top row: each check's state, Run, the severity filter and the words
     let mut top = div().flex_shrink_0().min_h(px(super::head::ROW_H)).flex().items_center().gap_2().px_2().border_b_1().border_color(c("rule")).text_size(px(11.));
@@ -228,70 +300,33 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
     top = top.child(sevs).child(div().flex_1().min_w(px(80.)).px_2().py(px(2.)).border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).children(ui(|u| u.filter.clone())));
 
     // the list: groups (a heading, its rows, "n more"), or the search's rows
-    let mut list = div().id("checks-rows").flex_1().min_h_0().overflow_y_scroll().flex().flex_col().text_size(px(12.));
-    let row = |f: &Value, cx: &mut Context<Backplane>| -> Stateful<Div> {
-        let id = s(f, "id").to_string(); let on = sel.as_deref() == Some(id.as_str()); let ex = s(f, "severity") == "excluded";
-        crate::ui::with_rect(div().id(SharedString::from(format!("checks-row-{id}"))), { let id = id.clone(); move || format!("mgmt:checks:row:{id}") })
-            .group("checks-row").flex_shrink_0().flex().items_center().gap_2().pl(px(14.)).pr_2().h(px(24.)).border_b_1().border_color(c("line")).cursor_pointer()
-            .relative().when(on, |x| x.bg(c("raise")).child(div().absolute().left_0().top_0().bottom_0().w(px(2.)).bg(c("accent")))).hover(|x| x.bg(c("panel"))).when(ex, |x| x.text_color(c("faint")))
-            .child(div().flex_shrink_0().size(px(7.)).bg(c(tone(s(f, "severity")))))
-            .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(s(f, "title").to_string()))
-            .when(judged(d, s(f, "source")), |x| x.child(div().flex_shrink_0().px(px(3.)).text_size(px(10.)).border_1().border_color(c("warn")).text_color(c("warn")).child(tf("gpui.mgmt.checks.judged", &[]))))
-            .child(div().flex_shrink_0().max_w(relative(0.35)).overflow_hidden().whitespace_nowrap().text_ellipsis().text_color(c(if ex { "faint" } else { "dim" })).child(s(f, "names").to_string()))
-            .child(crate::ui::with_rect(div().id(SharedString::from(format!("checks-fix-{id}"))), { let id = id.clone(); move || format!("mgmt:checks:fix:{id}") })
-                .flex_shrink_0().px(px(5.)).border_1().border_color(c("line")).text_size(px(11.)).text_color(c("dim")).invisible().group_hover("checks-row", |x| x.visible()).when(on, |x| x.visible())
-                .hover(|x| x.text_color(c("text")).bg(c("bg"))).child(tf("gpui.mgmt.checks.fix", &[]))
-                .on_click({ let id = id.clone(); cx.listener(move |this, _, _, cx| { cx.stop_propagation(); fix(this, &id, cx) }) }))
-            .on_click({ let id = id.clone(); cx.listener(move |this, _, window, cx| { if let Some(h) = ui(|u| u.focus.clone()) { window.focus(&h); } select(this, &id, cx) }) })
-    };
-    let total = d["total"].as_u64().unwrap_or(0);
-    if search {
-        match &found {
-            None => list = list.child(div().p_3().text_color(c("faint")).child(tf("gpui.mgmt.checks.searching", &[]))),
-            Some(rows) if rows.is_empty() => list = list.child(div().p_3().text_color(c("faint")).child(tf("gpui.mgmt.checks.nomatch", &[]))),
-            Some(rows) => for f in rows { list = list.child(row(f, cx)) },
-        }
-    } else if total == 0 {
-        let had = d["drc"]["has_result"] == true || d["erc"]["has_result"] == true;
-        list = list.child(div().p_3().text_color(c("faint")).child(if had { tf("gpui.mgmt.checks.none", &[]) } else { tf("gpui.mgmt.checks.reading", &[]) }));
-    } else {
-        for g in d["groups"].as_array().cloned().unwrap_or_default() {
-            let k = group_key(&g); let n = g["n"].as_u64().unwrap_or(0); let is_open = open.contains(&k);
-            let rows: Vec<Value> = match (is_open, more.get(&k)) { (true, Some(all)) => all.clone(), _ => g["rows"].as_array().cloned().unwrap_or_default() };
-            let ex = g["excluded"] == true;
-            let src = source_label(d, s(&g, "source")); let jd = judged(d, s(&g, "source"));
-            list = list.child(div().flex_shrink_0().flex().items_center().gap_2().px_2().h(px(22.)).border_b_1().border_color(c("line")).bg(c("panel")).text_size(px(11.))
-                .child(div().flex_shrink_0().text_color(c("faint")).child(src))
-                .when(jd, |x| x.child(div().flex_shrink_0().px(px(3.)).text_size(px(10.)).border_1().border_color(c("warn")).text_color(c("warn")).child(tf("gpui.mgmt.checks.judged", &[]))))
-                .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_color(c(if ex { "faint" } else { "dim" })).child(if ex { format!("{} · {}", rule_label(s(&g, "rule")), tf("gpui.mgmt.checks.excluded", &[])) } else { rule_label(s(&g, "rule")) }))
-                .child(div().flex_shrink_0().text_color(c(if ex { "faint" } else { tone(s(&g, "severity")) })).child(n.to_string())));
-            let shown = rows.len() as u64;
-            for f in &rows { list = list.child(row(f, cx)) }
-            if n > shown || is_open {
-                let label = if is_open && n <= shown { tf("gpui.mgmt.checks.fewer", &[]) } else { tf("gpui.mgmt.checks.more", &[("n", (n - shown.min(n)).into())]) };
-                list = list.child(crate::ui::with_rect(div().id(SharedString::from(format!("checks-more-{k}"))), { let k = k.clone(); move || format!("mgmt:checks:more:{k}") })
-                    .flex_shrink_0().pl(px(14.)).h(px(22.)).flex().items_center().text_size(px(11.)).text_color(c("dim")).cursor_pointer().hover(|x| x.text_color(c("text")))
-                    .child(label).on_click({ let g = g.clone(); cx.listener(move |this, _, _, cx| open_group(this, &g, cx)) }));
-            }
-        }
-    }
+    // the list: only the rows in view are built (a board's hundreds of findings scroll at the frame rate); every item is one row high
+    let its = items(d, if search { Some(found.as_deref().unwrap_or(&[])) } else { None }, search && found.is_none(), &more, &open);
+    let n = its.len();
+    let scroll = ui(|u| u.scroll.get_or_insert_with(UniformListScrollHandle::new).clone());
+    ui(|u| { u.items = its.clone(); u.light = light; u.sources = d["sources"].clone(); });
+    let list = uniform_list("checks-rows", n, cx.processor(|this, range: std::ops::Range<usize>, _w, cx| range.map(|i| item_el(this, i, cx)).collect::<Vec<_>>()))
+        .track_scroll(scroll.clone()).flex_1().min_h_0().text_size(px(12.));
     // what these results leave out, said plainly: the background runs skip the library checks, so the counts can differ from KiCad's own DRC
     let left_out = ["drc", "erc"].iter().any(|k| !d[*k].is_null() && !s(&d[*k], "note").is_empty());
     let full_ran = ["drc", "erc"].iter().any(|k| d[*k]["full"] == true);
-    list = list.child(div().flex_shrink_0().flex().items_center().gap_2().p_2().text_size(px(11.)).text_color(c("faint"))
-        .child(div().flex_1().min_w_0().child(if left_out { tf("gpui.mgmt.checks.library", &[]) } else if full_ran { tf("gpui.mgmt.checks.withlib", &[]) } else { String::new() }))
+    let foot = (left_out || full_ran).then(|| div().flex_shrink_0().flex().items_center().gap_2().px_2().py(px(4.)).border_t_1().border_color(c("line")).text_size(px(11.)).text_color(c("faint"))
+        .child(div().flex_1().min_w_0().child(if left_out { tf("gpui.mgmt.checks.library", &[]) } else { tf("gpui.mgmt.checks.withlib", &[]) }))
         .when(left_out, |x| x.child(crate::ui::with_rect(div().id("checks-full"), || "mgmt:checks:full".into()).flex_shrink_0().px_2().border_1().border_color(c("line")).text_color(c("dim")).cursor_pointer()
             .hover(|x| x.text_color(c("text")).bg(c("panel"))).child(tf("gpui.mgmt.checks.fullrun", &[])).on_click(cx.listener(|this, _, _, cx| run_full(this, cx))))));
 
-    // up and down move through the rows, each one shown in KiCad as it is reached
-    let ids: Vec<String> = visible(d, found.as_deref().filter(|_| search), &more, &open).iter().map(|f| s(f, "id").to_string()).collect();
+    // up and down move through the rows, each one shown in KiCad as it is reached (and scrolled into view)
+    let ids: Vec<String> = its.iter().filter_map(|i| if let Item::Row(f) = i { Some(s(f, "id").to_string()) } else { None }).collect();
     let focus = ui(|u| u.focus.clone());
     div().size_full().flex().flex_col().when_some(focus, |x, h| x.track_focus(&h).key_context("ChecksPanel"))
         .on_key_down(cx.listener(move |this, e: &KeyDownEvent, _, cx| {
             let by = match e.keystroke.key.as_str() { "down" => 1, "up" => -1, _ => return };
-            if let Some(id) = step(&ids, ui(|u| u.sel.clone()).as_deref(), by) { cx.stop_propagation(); select(this, &id, cx) }
+            let Some(id) = step(&ids, ui(|u| u.sel.clone()).as_deref(), by) else { return };
+            cx.stop_propagation();
+            if let Some(ix) = ui(|u| u.items.iter().position(|i| matches!(i, Item::Row(f) if s(f, "id") == id))) { scroll.scroll_to_item(ix, ScrollStrategy::Center) }
+            select(this, &id, cx)
         }))
-        .child(top).children(srcs).child(list).into_any_element()
+        .child(top).children(srcs).child(list).children(foot).into_any_element()
 }
 
 // The chip in the editor's row ("DRC 12 · ERC 3", coloured only when not clean): every project's, from `mgmt.checks.<digest>` as it arrives.
@@ -367,6 +402,17 @@ mod tests {
         assert!(judged(&d, "datasheet") && !judged(&d, "fab"));
         assert_eq!(search_key("error", ""), "error"); assert_eq!(search_key("", "fab"), "|fab"); assert!(searching(&search_key("", "fab"), ""));
     }
+    #[test] fn the_list_lines() {
+        let d = data();
+        let kinds = |v: &[Item]| v.iter().map(|i| match i { Item::Head(g) => format!("h:{}", g["rule"].as_str().unwrap()), Item::Row(f) => f["id"].as_str().unwrap().to_string(), Item::More(_, n) => format!("+{n}"), Item::Msg(k) => k.to_string() }).collect::<Vec<_>>();
+        assert_eq!(kinds(&items(&d, None, false, &BTreeMap::new(), &BTreeSet::new())), ["h:clearance", "a", "b", "+1", "h:pin_not_driven", "c", "d"]);
+        let k = "drc:clearance:false".to_string();
+        let more: BTreeMap<String, Vec<Value>> = [(k.clone(), vec![r("a"), r("b"), r("e")])].into();
+        assert_eq!(kinds(&items(&d, None, false, &more, &[k].into())), ["h:clearance", "a", "b", "e", "+0", "h:pin_not_driven", "c", "d"]);
+        assert_eq!(kinds(&items(&d, Some(&[]), false, &more, &BTreeSet::new())), ["gpui.mgmt.checks.nomatch"]);
+        assert_eq!(kinds(&items(&d, None, true, &more, &BTreeSet::new())), ["gpui.mgmt.checks.searching"]);
+        assert_eq!(kinds(&items(&json!({"groups": [], "drc": {"has_result": true}}), None, false, &more, &BTreeSet::new())), ["gpui.mgmt.checks.none"]);
+    }
     #[test] fn up_and_down() {
         let ids: Vec<String> = ["a", "b", "c"].iter().map(|x| x.to_string()).collect();
         assert_eq!(step(&ids, None, 1).as_deref(), Some("a")); assert_eq!(step(&ids, Some("a"), 1).as_deref(), Some("b"));
@@ -382,5 +428,6 @@ mod tests {
         assert_eq!(state_text("ERC", &json!({"state": "fresh", "has_result": true, "counts": {"error": 0, "warning": 0}})).0, "ERC ✓");
         assert!(state_text("DRC", &json!({"state": "stale", "has_result": true, "counts": {"warning": 1}})).0.starts_with("DRC 1 · "));
         assert_eq!(state_text("DRC", &Value::Null).0, "");
+        assert!(state_text("DRC", &json!({"state": "fresh", "has_result": true, "counts": {"error": 1}, "ran_on": "h@backplane"})).0.contains("h@backplane"));
     }
 }
