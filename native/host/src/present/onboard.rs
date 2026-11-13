@@ -439,15 +439,6 @@ fn tools_with(f: &Facts, st: &State, session: &Value, pkg: Option<&crate::files:
     let body = "Agents use KiCad for boards and schematics, and FreeCAD for mechanical parts. Skip FreeCAD if you only design boards.".to_string();
     let ((k, kd), (fc, fd)) = (kicad_row(f, pkg), freecad_row(f));
     let mut rows = vec![];
-    // Windows without Git: its row first (agents' shell commands and KiCad's download need it), and KiCad says it waits for it
-    let git = f.checked && crate::files::kicad::install::needs_git(&f.os, f.checks["git"] == true);
-    if git {
-        let (note, b, bad) = install_btns(f, "git", "");
-        let r = row("Git for Windows", &if note.is_empty() { "Not found. Agents' shell commands and the KiCad download need it.".to_string() } else { note }, b);
-        rows.push(if bad { warn(r) } else { r });
-    }
-    // only the row that would say it downloads now: one already installing, failed or found keeps its words
-    let k = if git && !kd && s(&k, "note").starts_with("Not found. Downloading") { row("KiCad", "Downloads by itself once Git for Windows is installed.", vec![link("Releases", KICAD_RELEASES)]) } else { k };
     rows.push(k);
     // while it installs, Locate only once asked for (the KiCad row's quiet "Use a KiCad I already have")
     if !kd && f.checked && (!kicad_installing(f.info) || draft(session, "@ob.kicadlocate") == "1") { rows.push(locate(st, session, "obkicad", "Locate KiCad", "kicad-cli", "kicad.path", "ob-kicad")); }
@@ -883,13 +874,13 @@ mod tests {
     }
     /// Windows with no Git: a Git for Windows row comes first (winget's one press, or the download page) and KiCad waits for it; with Git, or on
     /// Linux and macOS, no such row.
-    #[test] fn windows_without_git_offers_git_first_and_kicad_waits() {
-        let rows = |os: &str, git: bool, winget: bool| { let mut ch = blank(); ch["git"] = json!(git); ch["winget"] = json!(winget); let mut i = info(os); i["arch"] = json!("x64"); i["kicad.status"] = json!("missing"); at(&cst(ch, &[]), "tools", &i, &desk()) };
-        let p = rows("windows", false, true);
-        assert_eq!(p["rows"][0]["label"], "Git for Windows"); assert!(p["rows"].to_string().contains("\"ob-install\",\"value\":\"git\""));
-        assert_eq!(row_of(&p, "KiCad")["note"], "Downloads by itself once Git for Windows is installed.");
-        assert!(rows("windows", false, false)["rows"].to_string().contains("git-scm.com/download/win"), "no winget: the download page");
-        for (os, git) in [("windows", true), ("linux", false), ("darwin", false)] { assert!(!rows(os, git, true)["rows"].to_string().contains("Git for Windows"), "{os} {git}") }
+    /// Windows without Git: KiCad downloads by itself (System32's curl.exe, the zip unpacked by the hub); Git is no row on this step (its one
+    /// line is on First project, for agents' shell commands)
+    #[test] fn windows_without_git_downloads_kicad_itself() {
+        let rows = |os: &str, git: bool| { let mut ch = blank(); ch["git"] = json!(git); ch["winget"] = json!(true); let mut i = info(os); i["arch"] = json!("x64"); i["kicad.status"] = json!("missing"); at(&cst(ch, &[]), "tools", &i, &desk()) };
+        let p = rows("windows", false);
+        assert_eq!(p["rows"][0]["label"], "KiCad"); assert!(row_of(&p, "KiCad")["note"].as_str().unwrap().starts_with("Not found. Downloading Backplane KiCad"), "{p}");
+        for (os, git) in [("windows", false), ("windows", true), ("linux", false)] { assert!(!rows(os, git)["rows"].to_string().contains("Git for Windows"), "{os} {git}") }
     }
     #[test] fn where_your_uberbot_lives_preselects_this_computer_and_next_takes_it() {
         let (s0, i) = (cst(blank(), &[]), info("linux"));
