@@ -45,6 +45,22 @@ J
 launch --url http://127.0.0.1:$(hub_port) --token-file $PH/.backplane/hub/token --script $PH/journey.json   # a script with no --url goes to pairing (hub.rs)
 markt() { for _ in $(seq ${2:-600}); do grep -q "\"name\":\"$1\"" "$HH/win.log" 2>/dev/null && return 0; sleep 0.25; done; return 1; }
 since() { python3 -c "import time;print(round(time.time()-$T1,1))"; }
+# a step's own time, by the client's clock: from the click that starts it to the script mark that ends it (both carry epoch_ms), so no
+# poll interval and nothing of the steps before it; empty when either is missing
+step_s() { python3 - "$HH/win.log" "$1" "$2" <<'PYS'
+import json,sys
+log,click,mark=sys.argv[1:]; c=m=None
+for l in open(log,errors='replace'):
+    i=l.find('GPUI_METRIC {')
+    if i<0: continue
+    try: e=json.loads(l[i+12:])
+    except Exception: continue
+    if e.get('event')=='mark' and e.get('name')==mark: m=e.get('epoch_ms'); break
+    if e.get('event')=='click' and e.get('id')==click: c=e.get('epoch_ms')
+print(round((m-c)/1000,1) if c and m else '')
+PYS
+}
+tms() { local v; v=$(step_s "$2" "$3"); [ -n "$v" ] && tm "$1" "$v" || tm "$1" "$4"; }
 report() { grep -h '"event":"kicad"' "$HH/win.log" | grep "\"tag\":\"$1\"" | tail -1; }
 painted() { report "$1" | python3 -c '
 import json,sys
@@ -52,7 +68,7 @@ l=sys.stdin.read(); r=json.loads(l[l.index("{"):]) if "{" in l else {}
 sh=[f for f in r.get("frames",[]) if f.get("xid")==r.get("shown")]
 print("%s %s %s" % (r.get("state"), r.get("container",{}).get("painted",0), (sh[0].get("kind") if sh else "-")))' 2>/dev/null; }
 if markt board-view 120; then tm board-viewer "$(since)"; shot 06-board-view; ok "the project's board opens in the viewer"; else bad "the board viewer never came (thread:$tid, rail:Board)"; fi
-if markt pcb 600; then E_T=$(since); tm edit-pcb-painted "$E_T"; sleep 1; shot 07-edit-pcb; set -- $(painted pcb)
+if markt pcb 600; then E_T=$(since); tms edit-pcb-painted ui:Edit pcb "$E_T"; sleep 1; shot 07-edit-pcb; set -- $(painted pcb)
   if [ "${1:-}" = ready ] && [ "${2:-0}" -gt 50 ]; then ok "Edit: KiCad's PCB editor drawn in the pane (state $1, painted $2, $3)"
   else bad "Edit: PCB not drawn ($(painted pcb))"; cut_ 1 edit "Edit did not draw KiCad's PCB editor: $(report pcb | cut -c1-300)"; fi
 else bad "Edit never reported a painted PCB"; cut_ 1 edit "Edit never showed KiCad (no report in 150 s): $(grep -h 'kicad' "$HH/win.log" | tail -2 | cut -c1-300)"; fi
@@ -69,7 +85,7 @@ if [ -n "$KPID" ]; then KARGS=$(in_box sh -c "tr '\\0' ' ' </proc/$KPID/cmdline"
   [ -s "$OUT/logs/hub-kicad-env.txt" ] && bad "the hub has $(tr '\n' ' ' <"$OUT/logs/hub-kicad-env.txt")" || ok "the hub has no BACKPLANE_KICAD* variable (it picked the runtime itself)"
 fi
 # budgets in quarter seconds: the first schematic took 82 s once (KiCad's "Load Schematic" twice), 42 s another time
-phase "Schematic"; if markt sch 720; then S_T=$(since); tm schematic-painted "$S_T"; sleep 1; shot 08-schematic; set -- $(painted sch)
+phase "Schematic"; if markt sch 720; then S_T=$(since); tms schematic-painted rail:Schematic sch "$S_T"; sleep 1; shot 08-schematic; set -- $(painted sch)
   # the pane must show the schematic frame, not just be ready (rerun 3: SCH made, never shown, PCB still in the pane); KiCad's own
   # "Load Schematic" progress dialogs are counted, on which runtime
   NLOAD=$(grep -h '"kicad_info"' "$HH/win.log" | grep -o '"dialogs":\[[^]]*\]' | grep -c 'Load Schematic')
