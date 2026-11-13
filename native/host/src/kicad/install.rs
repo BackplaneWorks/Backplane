@@ -318,6 +318,12 @@ mod tests {
         assert_eq!(decide(Some(&LINUX), "ok", "10.99.0-bp.4", ""), Action::Offer);
         assert_eq!(decide(Some(&LINUX), "ok", "10.99.0-bp.4", "failed"), Action::Nothing, "a failed update leaves the working one alone");
         assert_eq!(decide(Some(&LINUX), "ok", "10.99.0-bp.10", ""), Action::Nothing);
+        // Linux to the hotfix: an installed bp.10, bp.11 or bp.12 is offered the update; bp.12.1 itself and anything newer are left alone
+        let hot = Package { version: "10.99.0-bp.12.1", release: "backplane-kicad-v10.99.0-bp.12.1", ..LINUX };
+        for v in ["10.99.0-bp.10", "10.99.0-bp.11", "10.99.0-bp.12"] { assert_eq!(decide(Some(&hot), "ok", v, ""), Action::Offer, "{v}"); assert_eq!(refusal("/k/bin/kicad-cli", "ok", v, true, false, Some(&hot)), None, "{v}"); }
+        for v in ["10.99.0-bp.12.1", "10.99.0-bp.13"] { assert_eq!(decide(Some(&hot), "ok", v, ""), Action::Nothing, "{v}"); }
+        // Windows pinned behind Linux: its bp.10 is current for it while Linux's would be offered the hotfix
+        assert_eq!(decide(Some(&WINDOWS), "ok", "10.99.0-bp.10", ""), Action::Nothing);
         assert_eq!(refusal("/k/bin/kicad-cli", "ok", "10.99.0-bp.4", true, false, Some(&LINUX)), None);
     }
 

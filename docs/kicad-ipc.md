@@ -89,7 +89,7 @@ All in `native/host/src/kicad/`:
 - Persisted data is untouched: no new events. The server lines live in the hub's runtime record only.
 
 - The pin is Backplane KiCad `10.99.0-bp.4` (API 2): `KH.min_version()` / `KH.min_api()`, and `KH.version.ge` orders
-  the `-bp.N` suffix numerically (bp.2 < bp.3 < bp.4 < bp.10; `10.99.0-unknown-bp.3` reads as bp.3; no suffix is bp.0), so
+  the `-bp.N` suffix numerically, a hotfix's parts too (bp.2 < bp.3 < bp.4 < bp.10 < bp.12 < bp.12.1 < bp.13; `10.99.0-unknown-bp.3` reads as bp.3 and a test build `10.99.0-bp.12-851cbefda6` as bp.12; no suffix is bp.0), so
   installs older than the pin are "old" and the notice offers Update. Discovery checks the pinned
   `<data>/kicad/<KiCad.version()>` first, then other managed versions newest-first. Older runtimes offer Update
   and cannot shadow the bp.4 install.

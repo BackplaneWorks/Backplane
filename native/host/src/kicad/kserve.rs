@@ -179,7 +179,9 @@ pub fn status(found: bool, runs: bool, fork: bool, version: &str, api: u64) -> &
     if !found { "missing" } else if !runs { "broken" } else if !fork { "stock" } else if version_ge(version, MIN_VERSION) && api >= MIN_API { "ok" } else { "old" }
 }
 fn num(s: &str) -> u64 { s.chars().take_while(|c| c.is_ascii_digit()).fold(0, |n, c| n * 10 + c.to_digit(10).unwrap() as u64) } // KH.num
-fn bp(v: &str) -> u64 { let l = last(v, '-'); if l.starts_with("bp.") { num(&l[3..]) } else { 0 } } // KH.bp
+/// The `-bp.N` part, with a hotfix's further parts (`-bp.12.1` is [12, 1]; trailing zeros dropped, so 12.0 is 12): 12.1 orders after 12 and before 13.
+/// A test build's suffix after it (`-bp.12-851cbefda6`) is not a part: that build reads as bp.12. None: [0].
+fn bp(v: &str) -> Vec<u64> { if let Some(n) = v.split('-').rev().find_map(|l| l.strip_prefix("bp.")) { let mut v: Vec<u64> = n.split('.').map(num).collect(); while v.len() > 1 && v.last() == Some(&0) { v.pop(); } v } else { vec![0] } } // KH.bp
 pub fn version_ge(v: &str, min: &str) -> bool { // KH.version.ge
     let p = |s: &str, i: usize| s.split('.').nth(i).map_or(0, num);
     let (a, b) = ((p(v, 0), p(v, 1), p(v, 2), bp(v)), (p(min, 0), p(min, 1), p(min, 2), bp(min)));
@@ -192,6 +194,19 @@ mod tests {
     use serde_json::json;
     fn s(x: &[&str]) -> Vec<String> { x.iter().map(|y| y.to_string()).collect() }
     fn up(p: &str, last: u64) -> Srv { Srv::new(p, 1).up(&format!("/s/{p}"), "v", last) }
+
+    #[test]
+    fn a_hotfix_orders_after_its_release_and_before_the_next() {
+        assert!(version_ge("10.99.0-bp.12.1", "10.99.0-bp.12") && !version_ge("10.99.0-bp.12", "10.99.0-bp.12.1"));
+        assert!(version_ge("10.99.0-bp.13", "10.99.0-bp.12.1") && !version_ge("10.99.0-bp.12.1", "10.99.0-bp.13"));
+        assert!(version_ge("10.99.0-bp.12.1", "10.99.0-bp.12.1") && version_ge("10.99.0-bp.12.1", "10.99.0-bp.8") && version_ge("10.99.0-bp.10", "10.99.0-bp.4"));
+        assert!(version_ge("10.99.0-bp.12.0", "10.99.0-bp.12") && version_ge("10.99.0-bp.12", "10.99.0-bp.12.0"));
+        // a test build of a release reads as that release: under its hotfix and the next release, over the one before, never as bp.0
+        let t = "10.99.0-bp.12-851cbefda6";
+        assert!(version_ge("10.99.0-bp.12.1", t) && !version_ge(t, "10.99.0-bp.12.1") && version_ge("10.99.0-bp.13", t) && !version_ge(t, "10.99.0-bp.13"));
+        assert!(version_ge(t, "10.99.0-bp.12") && version_ge("10.99.0-bp.12", t) && version_ge(t, "10.99.0-bp.11") && version_ge(t, "10.99.0-bp.4"));
+        assert!(version_ge("10.99.0-unknown-bp.3", "10.99.0-bp.3") && !version_ge("10.99.0", "10.99.0-bp.1"));
+    }
 
     // KS.argv: kserve_argv_parent_pid_with_idle, _without_idle, _socket_in_dir, _idle_with_cap, _no_idle_without_cap
     #[test] fn kserve_argv() {
