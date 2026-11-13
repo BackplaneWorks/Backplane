@@ -52,6 +52,7 @@ pub mod bomedit;
 pub mod parts;
 pub mod parthist;
 pub mod lifepanel;
+pub mod libtables;
 
 use crate::hub::Hub;
 use std::sync::Arc;

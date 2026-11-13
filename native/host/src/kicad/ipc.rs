@@ -288,6 +288,12 @@ pub async fn publish_cad(hub: &Arc<Hub>) {
     // the found runtime's own capabilities (its manifest), comma-separated: what an update offers over it is said from these
     let caps = env.caps.join(",");
     for (k, v) in [("kicad.cli", env.cli.as_str()), ("kicad.version", version.as_str()), ("kicad.status", status.as_str()), ("kicad.source", source), ("kicad.caps", caps.as_str()), ("freecad", fc.as_str())] { hub.set_info(k, v).await; }
+    // the libraries the selected runtime registers by default reach the person's existing tables (libtables.rs); a copy of the log changes nothing
+    if !env.root.is_empty() && !crate::copy::on() {
+        let (root, ver, home) = (PathBuf::from(&env.root), version.clone(), hub.cfg.home.clone());
+        let said = tokio::task::spawn_blocking(move || super::libtables::config_root().map(|c| super::libtables::sync(&root, &ver, &c, &home)).unwrap_or_default()).await.unwrap_or_default();
+        for l in said { eprintln!("kicad: library tables: {l}") }
+    }
 }
 /// What Settings > CAD says of a runtime: its status and version from the probe's `--version` (None: it did not run). A Backplane
 /// runtime's `--version` prints only KiCad's number (bp.4 prints `10.99.0`), so its manifest's version and status are taken when the
