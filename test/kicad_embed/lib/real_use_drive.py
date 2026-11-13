@@ -809,8 +809,8 @@ elif "markers" in JOURNEYS and SOCK:
 # 7f. side panels (bp.13 batch 3, autopanels): the board in the pane as it opens, then Full size and back: what KiCad shows at each width
 if "panels" in JOURNEYS and SOCK:
     tab("PCB", "panels_board", 1.2); shot("panels_narrow")
-    fs = controls_like(r"(?i)full.?size|fullsize|kicad.*full")
-    print(f"INFO panels: Full size controls {[c.get('id') for c in fs]}", flush=True)
+    fs = [{"id": "kicad:full"}] if control("kicad:full") else []  # the pane's "Full size" (kicad_pane.rs)
+    print(f"INFO panels: Full size control {'found' if fs else 'missing'}", flush=True)
     if fs:
         t0 = click_ctl(fs[0]["id"]); time.sleep(2.0); shot("panels_wide")
         if t0: EVENTS.append({"kind": "switch", "t0": t0, "tag": "panels_full_size", "window_ms": 2000})
