@@ -1108,8 +1108,9 @@ if "undo" in JOURNEYS and SOCK:
     if orig is not None:
         EXs, EYs = PANE["x"] + PANE["w"] // 4, PANE["y"] + PANE["h"] - 60   # low on the canvas's left, off the items
         v1 = bom("BP-REDO", "panel_edit")
-        rt("click", EXs, EYs); time.sleep(0.4); rt("key", "z", "ctrl"); time.sleep(1.2); v2 = val(); steps_u.append(["ctrl_z", v2])
-        rt("key", "y", "ctrl"); time.sleep(1.2); v3 = val(); steps_u.append(["ctrl_y", v3])
+        rt("click", EXs, EYs); time.sleep(0.4); rz = rt("key", "z", "ctrl"); time.sleep(1.2); v2 = val(); steps_u.append(["ctrl_z", v2])
+        ry = rt("key", "y", "ctrl"); time.sleep(1.2); v3 = val(); steps_u.append(["ctrl_y", v3])
+        print(f"INFO undo keys: ctrl_z at {rz.get('t0')}, ctrl_y at {ry.get('t0')} (epoch ms)", flush=True)
         v4 = bom("BP-AGAIN", "panel_edit_again")  # a third value: it applies only if KiCad takes the panel's second edit of the item
         print(f"INFO undo: {sref} {orig!r} -> panel {v1!r} -> Ctrl+Z {v2!r} -> Ctrl+Y {v3!r} -> panel again {v4!r}", flush=True)
         RESULTS["undo_panel_edit_applies"] = {"ms": None, "ok": int(v1 == "BP-REDO")}
