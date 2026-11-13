@@ -5,7 +5,7 @@
 #   P2  plan_route is refused by the hub while nothing is approved (the audit gate), and plan_approve only asks the person
 #   P3  the person approves one corridor (plan.approve, as the Plan panel does); the agent's next plan_get says so in `changes`
 #   P4  plan_route of that corridor is let through to KiCad
-# Copies only (seed_project.py), headless KiCad (no editor opened). Fork mode.
+# Copies only (seed_project.py), the board open in the embedded KiCad (the plan API is the GUI's). Fork mode.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=lib/env_xvfb.sh
@@ -21,6 +21,16 @@ python3 "$SEED_PY" "$OUT" "$REPO_ROOT"
 start_xvfb_and_wm
 start_hub
 PROJ="$OUT/proj"; PCB="$PROJ/ecc83-pp.kicad_pcb"
+# the plan API is the open KiCad's (bp.12's headless server answers AS_UNHANDLED): the board is opened in the embedded editor first
+cat >"$OUT/script.json" <<'EOF'
+[{"select":0},{"wait":2000},{"click":"rail:Board"},{"wait":2500},{"click":"ui:Edit"},
+ {"kicad":{"wait_painted":60000,"kind":"PCB","tag":"pcb_init"}},{"wait":1500},{"mark":"edit_ready"},{"wait":150000}]
+EOF
+HOME="$OUT/fh" BACKPLANE_GPUI_ASSETS="$ASSETS_DIR" BACKPLANE_GPUI_RECTS=1 BACKPLANE_GPUI_HOLD=1 \
+"$CLIENT_BIN" --url "http://127.0.0.1:$HPORT" --token-file "$OUT/home/token" --script "$OUT/script.json" --exit-after 240 >"$OUT/client.log" 2>&1 &
+CP=$!
+track_pid "$CP"
+wait_for_log "$OUT/client.log" '"name":"edit_ready","event":"mark"' 480 || { echo "FAIL the board never opened in KiCad"; tail -n 20 "$OUT/client.log"; exit 1; }
 N=0
 # one agent tool call: a message to the seeded thread t1 that the stand-in turns into the MCP call; its answer from the stand-in's log
 ask() {

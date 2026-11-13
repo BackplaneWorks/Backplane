@@ -133,7 +133,8 @@ async fn capable(hub: &Arc<Hub>, thread: Option<&str>, pcb: &str) -> Result<(), 
     if caps.iter().any(|c| c == CAP) || txt.contains(CAP) { Ok(()) } else { Err(format!("this KiCad ({}) has no routing plan: it needs Backplane KiCad bp.11 or later", st["version"].as_str().unwrap_or("unknown version"))) }
 }
 async fn call(hub: &Arc<Hub>, thread: Option<&str>, pcb: &str, ty: &str, msg: Value) -> Result<Value, String> {
-    let o = crate::files::kicad::ipc::kicad_ipc_in(hub, thread, pcb, &format!("{NS}{ty}"), msg).await?;
+    let o = crate::files::kicad::ipc::kicad_ipc_in(hub, thread, pcb, &format!("{NS}{ty}"), msg).await
+        .map_err(|e| if e.contains("AS_UNHANDLED") { "the routing plan needs the board open in KiCad (Backplane KiCad's background server has no plan API yet): ask the person to open it (Edit), then try again".to_string() } else { e })?;
     Ok(o.get("message").cloned().unwrap_or(o))
 }
 pub async fn read_plan(hub: &Arc<Hub>, thread: Option<&str>, pcb: &str, derived: bool) -> Result<Value, String> {
