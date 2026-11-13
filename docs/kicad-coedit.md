@@ -44,3 +44,7 @@ in, so nothing reloads under the person.
 Send with `embed::gui_call_as(route, type, message, &client_name(&who))`. A call with no name goes out as the transport's own
 `backplane-<pid>`, an actor of its own. Before bp.13 KiCad has no person name: `person:` is an actor of its own too, so a
 person-originated schematic edit is not in their undo on bp.10 to bp.12.
+
+For a commit of item updates use `embed::commit_as(route, &client_name(&who), &doc, items, message)`: it sends BeginCommit,
+UpdateItems and EndCommit (CMA_DROP when the update fails) with the document's header on every call. KiCad routes a commit request
+without a header to the board editor, so a schematic EndCommit without one never ends the commit its BeginCommit opened.

@@ -532,6 +532,26 @@ pub async fn gui_call_as(route: &GuiRoute, ty: &str, msg: Value, client: &str) -
     r.await.unwrap_or_else(|_| json!({"ok":false,"error":"no reply","why":"no reply","fallback":true}))
 }
 
+/// One commit of item updates in the open editor as `client` (`coedit::client_name`): BeginCommit, UpdateItems, EndCommit, every one
+/// with the document's header. KiCad routes a commit request without a header to the board editor (compatibility from before 11.0), so a
+/// schematic commit whose EndCommit lacks it is never ended ("does not has a commit in progress") while its edit shows staged. A failed
+/// update drops the commit (CMA_DROP, with the header too). Returns UpdateItems' reply.
+pub async fn commit_as(route: &GuiRoute, client: &str, doc: &Value, items: Vec<Value>, message: &str) -> Result<Value, String> {
+    let header = json!({"document": doc});
+    let err = |o: &Value| o["error"].as_str().unwrap_or("no reply").to_string();
+    let begun = gui_call_as(route, "kiapi.common.commands.BeginCommit", json!({"header": header}), client).await;
+    if !begun["ok"].as_bool().unwrap_or(false) { return Err(format!("BeginCommit: {}", err(&begun))) }
+    let id = begun["message"]["id"].clone();
+    let up = gui_call_as(route, "kiapi.common.commands.UpdateItems", json!({"header": header, "items": items}), client).await;
+    if !up["ok"].as_bool().unwrap_or(false) {
+        let _ = gui_call_as(route, "kiapi.common.commands.EndCommit", json!({"header": header, "id": id, "action": "CMA_DROP"}), client).await;
+        return Err(format!("UpdateItems: {}", err(&up)))
+    }
+    let end = gui_call_as(route, "kiapi.common.commands.EndCommit", json!({"header": header, "id": id, "action": "CMA_COMMIT", "message": message}), client).await;
+    if !end["ok"].as_bool().unwrap_or(false) { return Err(format!("EndCommit: {}", err(&end))) }
+    Ok(up["message"].clone())
+}
+
 /// The pane of `pro` switched to `frame` from the hub (xprobe.rs: `editor.kicad.select {show}`), as its own rail does; in bp.8 fork mode a
 /// non-empty `item` is a reference KiCad cross-probes there (ShowFrame's item).
 pub async fn show_for(pro: &str, frame: &str, item: &str) -> Result<Value, String> {
@@ -2018,6 +2038,36 @@ impl RpcHandler for EmbedRpc {
 
 #[cfg(test)]
 mod tests {
+    #[tokio::test] async fn a_commit_as_the_person_carries_the_header_and_the_name_on_every_call() {
+        let (tx, mut rx) = mpsc::unbounded_channel::<Msg>();
+        let route = GuiRoute { pro: "/p/x.kicad_pro".into(), mode: "fork".into(), sock: "/s".into(), desc: String::new(), cli: String::new(),
+            argv: String::new(), version: "10.99.0-bp.12".into(), caps: vec![], tx };
+        let seen = tokio::spawn(async move {
+            let mut seen = vec![];
+            while let Some(m) = rx.recv().await {
+                if let Msg::Raw { ty, msg, client, reply, .. } = m {
+                    let message = if ty.ends_with("BeginCommit") { json!({"id": {"value": "c1"}}) } else { json!({}) };
+                    let _ = reply.send(json!({"ok": true, "message": message}));
+                    seen.push((ty, msg, client));
+                    if seen.len() == 3 { break }
+                }
+            }
+            seen
+        });
+        let doc = json!({"type": "DOCTYPE_SCHEMATIC", "sheet_path": {}});
+        let who = super::super::coedit::client_name(&super::super::coedit::Who::Person);
+        commit_as(&route, &who, &doc, vec![json!({"@type": "x"})], "BOM: MPN of R4").await.unwrap();
+        let seen = seen.await.unwrap();
+        let tys: Vec<&str> = seen.iter().map(|(t, _, _)| t.rsplit('.').next().unwrap()).collect();
+        assert_eq!(tys, ["BeginCommit", "UpdateItems", "EndCommit"]);
+        for (ty, msg, client) in &seen {
+            assert_eq!(msg["header"]["document"], doc, "{ty} carries the document's header");
+            assert_eq!(client, &who, "{ty} goes as the person");
+        }
+        assert_eq!(seen[2].1["id"], json!({"value": "c1"}));
+        assert_eq!(seen[2].1["action"], "CMA_COMMIT");
+    }
+
     use super::*;
 
     #[test] fn pure_frame_and_mode_rules() {
