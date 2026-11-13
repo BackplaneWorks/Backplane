@@ -367,7 +367,11 @@ def mouse_return_check(h, cp, frame, children, timeline, rounds=None, kpid=0):
                 timeline.append({"stage": f"return_{entry}_{route}_{n}", **d})
                 print(f"DIAG return_{entry}_{route}_{n} " + json.dumps(d)[:700], flush=True)
                 # a real F2 zoom redraws the whole canvas (~212,000 px here); a hover highlight is a few thousand
-                h.check(name, host_ok and zoomed and fg["no_foreground_samples"] == 0, d)
+                # no key ever reaches a hidden frame: a pre-warmed editor's title gains no "*" (KiCad's modified mark)
+                hidden = [w["title"] for w in kicad_toplevels() + E.list_child_windows(top) if "Schematic Editor" in (w.get("title") or "")]
+                d["hidden_schematic_titles"] = sorted(set(hidden))
+                untouched = not any(t.lstrip().startswith("*") for t in hidden)
+                h.check(name, host_ok and zoomed and fg["no_foreground_samples"] == 0 and untouched, d)
     # Hover never moves the keys: composer focused, the pointer across the pane and back, no click; typing stays in the composer.
     if gl and cbox:
         keys_back_to_backplane(h, cp, frame, top, "composer", cbox)
