@@ -166,7 +166,7 @@ impl Backplane {
             Event::Pick(info)=>{ let slot=self.screens.pick_slot.unwrap_or(0); let card=screens::plot::card(&info); let pv=self.screens.pv(slot); if pv.picked.is_some() { pv.card=card.clone(); } if let Some(c)=card { screens::plotview::cross_probe(self,slot,&c); } screens::plotview::report_state(self); cx.notify(); }
             Event::Probe(slot,m) if slot>=3=>{ screens::plotview::frame_on(self,slot-3,&m); cx.notify(); }
             Event::Probe(slot,m)=>{ eprintln!("GPUI_LOG {}",serde_json::json!({"event":"probe_lit","slot":slot,"n":m.len()})); let pv=self.screens.pv(slot); if pv.lit.len()<20000 { pv.lit.extend(m); } cx.notify(); }
-            Event::Status(s)=>{if s!=self.status {eprintln!("GPUI_LOG {}",serde_json::json!({"status":s})); /* always-on dictation: the hub says whether it is wanted here */ if s=="Connected" {let _=self.tx.try_send(Command::Rpc("bots.voice".into(),screens::settings::Secret(serde_json::json!({"op":"always"})),"voice"));}}self.status=s;if self.status=="Connected"{/* (every shown view says Connected: while setup is up its refusal stays until the person presses something there, or it would be gone before it was read) */ if !self.data["tour"].is_object(){self.error.clear();}screens::hubbar::connected(&mut self.screens.hubbar);self.send_unsent();}},
+            Event::Status(s)=>{if s!=self.status {eprintln!("GPUI_LOG {}",serde_json::json!({"status":s})); /* always-on dictation: the hub says whether it is wanted here */ if s=="Connected" {let _=self.tx.try_send(Command::Rpc("bots.voice".into(),screens::settings::Secret(serde_json::json!({"op":"always"})),"voice"));}}self.status=s;if self.status=="Connected"{/* (every shown view says Connected: while setup is up its refusal stays until the person presses something there, or it would be gone before it was read) */ if hub::clears_on_connect(&self.error,self.data["tour"].is_object()){self.error.clear();}screens::hubbar::connected(&mut self.screens.hubbar);self.send_unsent();}},
             Event::Accepted=>{self.input.update(cx,|input,cx|input.set(String::new(),cx));let _=self.tx.try_send(Command::Draft(String::new())); /* a /give keeps its text in the hub until it took it: the box is empty now, so is that copy */ self.drafts.remove(&self.selected);self.screens.drafts.set(&self.selected,"");self.voice_sent(cx);self.timeline_to_end();}, // (the file too: the box's own change comes after the map entry is gone, and would not clear it)
             Event::Older(cursor,page)=>self.older_landed(cursor,page,cx),
             Event::Error(e)=>{self.error=e;self.screens.unsent.lost();},
@@ -188,7 +188,7 @@ impl Backplane {
     pub fn local_press(&mut self,name:&str,value:&str,cx:&mut Context<Self>){
         if !self.local.set(name,value){return;}
         if name=="sidebar-open"{self.sidebar_open=self.local.sidebar_open;}
-        if name=="lang"{crate::i18n::set_choice(&self.local.lang);}
+        if name=="lang"{crate::i18n::set_choice(&self.local.lang);cx.defer(keys::install_menus);}
         if name.starts_with("shortcut"){let l=self.local.clone();cx.defer(move|cx|bind_all(cx,&l));}
         self.local.save();self.ui_epoch+=1;cx.notify();
     }
@@ -319,7 +319,8 @@ fn main()->anyhow::Result<()> {
     // macOS hands a backplane:// link to the app itself, at launch and while it runs
     app.on_open_urls(|urls|for u in urls {if pairing::is_link(&u) {let _=OPENED.0.try_send(u);}});
     app.run(move|cx:&mut App|{
-        art::load_fonts(cx);bind_all(cx,&local::Local::load());
+        art::load_fonts(cx);bind_all(cx,&local::Local::load());keys::install_menus(cx);
+        cx.on_action(|_:&keys::Quit,cx|quit_later(cx)); // Cmd+Q and Backplane → Quit Backplane: this client only, the hub runs on
         cx.on_window_closed(|cx|if cx.windows().is_empty(){quit_later(cx);}).detach();
         let bounds=Bounds::centered(None,size(px(1400.),px(900.)),cx);
         let opts=WindowOptions{window_bounds:Some(WindowBounds::Windowed(bounds)),titlebar:Some(TitlebarOptions{title:Some("Backplane GPUI · experimental".into()),..Default::default()}),..Default::default()};
@@ -340,6 +341,8 @@ fn main()->anyhow::Result<()> {
             }
         }
         cx.activate(true);
+        // BACKPLANE_GPUI_LOOPTRACE: how late a 100 ms foreground timer wakes (the main loop's stall hunt; vendor/gpui x11 client logs the rest)
+        if std::env::var_os("BACKPLANE_GPUI_LOOPTRACE").is_some() {cx.spawn(async move|cx|{loop{let t=Instant::now();cx.background_executor().timer(Duration::from_millis(100)).await;let late=t.elapsed().as_secs_f64()*1e3-100.;if late>50.{eprintln!("GPUI_LOOP {{\"what\":\"wake\",\"ms\":{late:.1},\"at_ms\":{}}}",std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0,|d|d.as_millis()));}}}).detach();}
         if let Some(secs)=exit_after {cx.spawn(async move|cx|{cx.background_executor().timer(Duration::from_secs_f64(secs)).await;let _=cx.update(|cx|cx.quit());}).detach();}
     });Ok(())
 }

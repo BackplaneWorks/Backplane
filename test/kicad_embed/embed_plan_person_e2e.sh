@@ -7,6 +7,11 @@
 #   Q3  plan_get `changes`: c-p approved, locked, edited by the person, a constraint by the person; c-q rejected
 #   Q4  the Plan panel (mgmt.plan, the hub's data) shows c-p approved and locked, c-q rejected, without a refresh
 #   Q5  the agent that asked is woken with the person's decision
+#   Q6  layer approval is the person's: KiCad's right-click menu "Approve Layer" on B.Cu (PageDown, then the menu by keyboard) approves
+#       it; an agent's kicad_ipc RunAction pcbnew.Plan.approveLayer and ApprovePlan are refused, its plan_approve only asks (F.Cu stays
+#       unapproved); the Plan panel's Approve (plan.approve: ApprovePlan as the person) approves F.Cu with plan view on
+# PLAN_VIA=key: plan view by the real hotkey (Ctrl+Shift+R, or the build's own), pressed straight after the editor opens, no canvas
+# click first; otherwise (default) by RunAction pcbnew.Plan.togglePlanView.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=lib/env_xvfb.sh
@@ -18,18 +23,20 @@ discover_kicad
 grep -qa "planAccept\|Plan.accept" "$(dirname "$KICAD_BIN")/_pcbnew.kiface" 2>/dev/null || { echo "SKIP embed_plan_person_e2e: this KiCad has no plan view edits (bp.13+)"; exit 0; }
 init_isolated_dirs
 python3 "$SEED_PY" "$OUT" "$REPO_ROOT"
+# paint bounds (Nov 13, bp.13 batch 3, 16 cores busy): KiCad painted 0.07-0.08 s after Edit and the board was open, full size, 9.7-13.3 s
+# after the client started; the main-thread stall fixed in 82c67d16a made them 11 s and 88-133 s. So 5 s to paint and 45 s to be ready.
 start_xvfb_and_wm
-export BP_STREAM_N=1 BP_STREAM_MS=10
+export BP_STREAM_N=1 BP_STREAM_MS=10 BP_STANDIN_MCPCALL_MAX=200000
 start_hub
 PROJ="$OUT/proj"; PCB="$PROJ/ecc83-pp.kicad_pcb"; mkdir -p "$OUT/shots"
 cat >"$OUT/script.json" <<'JSON'
 [{"select":0},{"wait":2000},{"click":"rail:Board"},{"wait":2500},{"click":"ui:Edit"},
- {"kicad":{"wait_painted":60000,"kind":"PCB","tag":"ready"}},{"wait":1500},{"click":"kicad:full"},{"wait":2500},{"kicad":{"report":true,"tag":"placed"}},{"mark":"edit_ready"},{"wait":200000}]
+ {"kicad":{"wait_painted":5000,"kind":"PCB","tag":"ready"}},{"wait":1500},{"click":"kicad:full"},{"wait":2500},{"kicad":{"report":true,"tag":"placed"}},{"mark":"edit_ready"},{"wait":200000}]
 JSON
 HOME="$OUT/fh" BACKPLANE_GPUI_ASSETS="$ASSETS_DIR" BACKPLANE_GPUI_RECTS=1 BACKPLANE_GPUI_HOLD=1 \
-"$CLIENT_BIN" --url "http://127.0.0.1:$HPORT" --token-file "$OUT/home/token" --script "$OUT/script.json" --exit-after 260 >"$OUT/client.log" 2>&1 &
+"$CLIENT_BIN" --url "http://127.0.0.1:$HPORT" --token-file "$OUT/home/token" --script "$OUT/script.json" --exit-after 480 >"$OUT/client.log" 2>&1 &
 CP=$!; track_pid "$CP"
-wait_for_log "$OUT/client.log" '"name":"edit_ready","event":"mark"' 480 || { echo "FAIL the board never opened in KiCad"; tail -n 20 "$OUT/client.log"; exit 1; }
+wait_for_log "$OUT/client.log" '"name":"edit_ready","event":"mark"' 180 || { echo "FAIL the board never opened in KiCad"; tail -n 20 "$OUT/client.log"; exit 1; }
 ask() {
   local N; N="$1-$(date +%s%N)"; local before; before=$(grep -c "^MCPCALL" "$OUT/standin.log" 2>/dev/null || echo 0)
   local text; text=$(python3 -c 'import json,sys; print(json.dumps("mcpcall:" + json.dumps({"name": sys.argv[1], "arguments": json.loads(sys.argv[2])})))' "$1" "$2")
@@ -46,7 +53,7 @@ for l in sys.stdin:
     f=((o.get("result") or {}).get("data") or {}).get("plan", f)
 print(json.dumps(f))'; }
 # the board's outline centre (147.3, 113.3); c-p left of it, c-q right, both wide enough for a click; the plane off the active layer
-PLAN='{"layers":[{"layer":"F.Cu","role":"signal","status":"proposed"}],"groups":[{"id":"g-k","name":"Cathodes","color":"#e8a33d","nets":["Net-(U1A-K)","Net-(U1B-K)"],"status":"proposed"}],"corridors":[{"id":"c-p","group":"g-k","layer":"F.Cu","order":1,"path":[[122,113.3],[140,113.3]],"width":12.0,"status":"proposed"},{"id":"c-q","group":"g-k","layer":"F.Cu","order":2,"path":[[155,113.3],[173,113.3]],"width":12.0,"status":"proposed"}],"planes":[{"id":"p-gnd","net":"GND","layer":"B.Cu","outline":[[[122,91],[173,91],[173,136],[122,136]]],"priority":1,"status":"proposed"}]}'
+PLAN='{"layers":[{"layer":"F.Cu","role":"signal","status":"proposed"},{"layer":"B.Cu","role":"plane","status":"proposed"}],"groups":[{"id":"g-k","name":"Cathodes","color":"#e8a33d","nets":["Net-(U1A-K)","Net-(U1B-K)"],"status":"proposed"}],"corridors":[{"id":"c-p","group":"g-k","layer":"F.Cu","order":1,"path":[[122,113.3],[140,113.3]],"width":12.0,"status":"proposed"},{"id":"c-q","group":"g-k","layer":"F.Cu","order":2,"path":[[155,113.3],[173,113.3]],"width":12.0,"status":"proposed"}],"planes":[{"id":"p-gnd","net":"GND","layer":"B.Cu","outline":[[[122,91],[173,91],[173,136],[122,136]]],"priority":1,"status":"proposed"}]}'
 R1=$(ask plan_propose "{\"plan\":$PLAN,\"mode\":\"merge\"}"); echo "$R1" | cut -c1-200
 R2=$(ask plan_get '{}')
 check "the agent's plan is in KiCad, awaiting approval" "$(echo "$R2" | grep -q 'c-q' && echo "$R2" | grep -q awaiting_approval && echo 1 || echo 0)" "$(echo "$R2" | cut -c1-300)"
@@ -65,6 +72,12 @@ fi
 echo "INFO editor frame $FRAME ${FW}x${FH}+${FX}+${FY}"
 check "the board editor is shown full size" "$([ "${FW:-0}" -gt 700 ] && echo 1 || echo 0)" "${FW}x${FH}"
 X() { python3 "$XINPUT_PY" "$@"; sleep "${KEMBED_STEP_S:-0.7}"; }
+HOTKEY="Alt+P"; grep -qa "Routing Plan View" "$(dirname "$KICAD_BIN")/_pcbnew.kiface" 2>/dev/null && HOTKEY="Ctrl+Shift+R"
+hotkey() { if [ "$HOTKEY" = "Ctrl+Shift+R" ]; then X chord ctrl shift r; else X chord alt p; fi; }
+if [ "${PLAN_VIA:-action}" = key ]; then
+  # the real key, straight after the editor opened: no click on the canvas first (bp.13 build #2's Alt+P opened the Place menu here)
+  hotkey; VIA="$HOTKEY (pressed without a canvas click)"; sleep 1.5; shot q0_after_hotkey
+else
 # the keyboard to KiCad: a click on the canvas (its centre is the board's, where nothing of the plan is), then Escape
 X click "$((FX + FW / 2))" "$((FY + FH / 2))"; X key Escape
 # plan view: KiCad's own action (RunAction pcbnew.Plan.togglePlanView, every build); the hotkey only when the action is refused
@@ -72,8 +85,8 @@ X click "$((FX + FW / 2))" "$((FY + FH / 2))"; X key Escape
 RA=$(ask kicad_ipc "{\"path\":\"$PCB\",\"type\":\"kiapi.common.commands.RunAction\",\"message\":{\"action\":\"pcbnew.Plan.togglePlanView\"}}")
 echo "INFO RunAction togglePlanView: $(echo "$RA" | grep -o 'RAS_[A-Z_]*' | head -1)"
 if echo "$RA" | grep -q 'RAS_OK'; then VIA=action
-elif grep -qa "Routing Plan View" "$(dirname "$KICAD_BIN")/_pcbnew.kiface" 2>/dev/null; then VIA="Ctrl+Shift+R"; X chord ctrl shift r
-else VIA="Alt+P"; X chord alt p
+else VIA="$HOTKEY"; hotkey
+fi
 fi
 echo "INFO plan view by $VIA"; sleep 1.5
 X key Home; sleep 1.5                    # zoom to fit
@@ -120,4 +133,55 @@ check "the Plan panel shows c-p approved and locked, c-q rejected (live)" "$(pyt
 for _ in $(seq 60); do grep -q "The person judged" "$OUT/standin.log" 2>/dev/null && break; sleep 0.5; done
 check "the agent that asked is woken with the person's decision in KiCad" "$(grep -q "The person judged.*c-p" "$OUT/standin.log" && echo 1 || echo 0)" "$(grep -o 'The person judged[^"]*' "$OUT/standin.log" | head -2)"
 shot q4_panel
+# Q6 layer approval, by the action and by KiCad's right-click menu
+if grep -qa "pcbnew.Plan.approveLayer" "$(dirname "$KICAD_BIN")/_pcbnew.kiface" 2>/dev/null; then
+  # a layer's status from plan_get: the MCP answer decoded down to the plan's layers list (corridors name layers too, so no regex)
+  layer_status() { ask plan_get '{}' | sed 's/^MCPCALL plan_get //' | python3 -c '
+import json, sys
+def walk(o):
+    if isinstance(o, str):
+        try: o = json.loads(o)
+        except Exception: return None
+        return walk(o) if isinstance(o, (dict, list)) else None
+    if isinstance(o, dict):
+        ls = o.get("layers")
+        if isinstance(ls, list) and all(isinstance(l, dict) and "layer" in l and "id" not in l for l in ls) and ls: return ls
+        o = list(o.values())
+    if isinstance(o, list):
+        for v in o:
+            r = walk(v)
+            if r: return r
+    return None
+try: ls = walk(json.loads(sys.stdin.read())) or []
+except Exception: ls = []
+print(next((l.get("status", "?") for l in ls if l.get("layer") == sys.argv[1]), "?"))' "$1"; }
+  X key Escape; sleep 0.5
+  # the menu: B.Cu active (PageDown), a right-click off the board (left of it: nothing of the plan there, so the selection stays empty),
+  # then the menu by keyboard: Cancel, Add Note, Draw Corridor, Draw Plane Region, Approve Layer (plan_tool.cpp's menu, nothing selected)
+  X key Next; sleep 1
+  S=$(( (QX - PX) / 33 )); [ "$S" -gt 0 ] || S=10
+  MX=$(( PX - 22 * S )); [ "$MX" -gt $((FX + 60)) ] || MX=$((FX + 60))
+  X click "$MX" "$PY" 3; sleep 1; shot q5_menu
+  for _ in 1 2 3 4 5; do X key Down; done; sleep 0.5; shot q5_menu_approve
+  X key Return; sleep 2; shot q5_layer_b
+  LB=$(layer_status B.Cu)
+  check "layer approval from KiCad's right-click menu (Approve Layer on B.Cu)" "$([ "$LB" = approved ] && echo 1 || echo 0)" "B.Cu: $LB (see q5_menu_approve.png)"
+  # F.Cu (PageUp) stays the person's: an agent's kicad_ipc can neither run the plan view's approve-layer nor send ApprovePlan (the hub
+  # refuses both on every build; the fork refuses agent clients too from bp.13 batch 4), and plan_approve only asks
+  X key Prior; sleep 1
+  agent_ipc() { ask kicad_ipc "{\"path\":\"$PCB\",\"type\":\"$1\",\"message\":$2}"; }
+  RA=$(agent_ipc kiapi.common.commands.RunAction '{"action":"pcbnew.Plan.approveLayer"}')
+  check "an agent's RunAction pcbnew.Plan.approveLayer is refused" "$(echo "$RA" | grep -q "the person's alone" && echo 1 || echo 0)" "$(echo "$RA" | cut -c1-200)"
+  RB=$(agent_ipc kiapi.backplane.plan.ApprovePlan "{\"board\":{\"type\":\"DOCTYPE_PCB\"},\"layer\":\"F.Cu\",\"approve\":true}")
+  check "an agent's ApprovePlan is refused" "$(echo "$RB" | grep -q "the person's alone" && echo 1 || echo 0)" "$(echo "$RB" | cut -c1-200)"
+  ask plan_approve '{"layer":"F.Cu","note":"F.Cu"}' >/dev/null; sleep 2
+  LF0=$(layer_status F.Cu)
+  check "F.Cu is still not approved after the agent's attempts and its plan_approve" "$([ "$LF0" != approved ] && echo 1 || echo 0)" "F.Cu: $LF0"
+  # the Plan panel's Approve (plan.approve: KiCad's ApprovePlan as the person), with plan view on
+  PA=$(hub_rpc "[{\"method\":\"plan.approve\",\"params\":{\"pro\":\"$PROJ/ecc83-pp.kicad_pro\",\"layer\":\"F.Cu\",\"approve\":true}}]" 2>&1 | tail -1)
+  sleep 2; LF=$(layer_status F.Cu); shot q6_layers
+  check "the Plan panel's Approve (ApprovePlan as the person) approves F.Cu in plan view" "$([ "$LF" = approved ] && echo 1 || echo 0)" "F.Cu: $LF; plan.approve: $(echo "$PA" | cut -c1-200)"
+else
+  echo "SKIP layer approval: this KiCad has no pcbnew.Plan.approveLayer"
+fi
 finish_suite "embed_plan_person_e2e ($EMBED_MODE)"

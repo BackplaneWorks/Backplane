@@ -21,9 +21,10 @@ pub const LAYERS: usize = 4;
 pub const NETS: usize = 60;
 /// Whether a KiCad (its status and version) has the plan API: Backplane KiCad from bp.11.
 /// Whether the runtime has the plan API: its manifest's `routing-plan` capability; a runtime whose manifest lists no capabilities is
-/// told by its version (bp.11 on; "10.99.0-bp.13" and "10.99.0-unknown-bp.13" alike).
+/// told by its version (bp.11 on; "10.99.0-bp.13", "10.99.0-unknown-bp.13", "10.99.0-bp.12-851cbefda6" and a describe name alike).
 pub fn plans(status: &str, version: &str, caps: &[String]) -> bool {
-    status == "ok" && (caps.iter().any(|c| c == CAP) || (caps.is_empty() && version.rsplit('-').next().and_then(|l| l.strip_prefix("bp.")).and_then(|n| n.split('.').next()?.parse::<u32>().ok()).map_or(false, |n| n >= 11)))
+    // the version by the one reader (ks::bp_number): a test build ("-bp.12-851cbefda6") and a describe name ("...-dirty-bp.13") alike
+    status == "ok" && (caps.iter().any(|c| c == CAP) || (caps.is_empty() && crate::files::kicad::kserve::bp_number(version) >= 11))
 }
 pub fn needs_plan(copper_layers: usize, nets: usize) -> bool { copper_layers >= LAYERS || nets > NETS }
 /// The agents' instructions for a project with a KiCad board on Backplane KiCad (agents/prompt.rs adds it).
@@ -264,6 +265,10 @@ mod tests {
         assert!(plans("ok", "10.99.0-unknown-bp.13", &caps(&["embed", "routing-plan"])));
         assert!(!plans("ok", "10.99.0-bp.13", &caps(&["embed"])), "a manifest that lists capabilities is believed");
         assert!(plans("ok", "10.99.0-unknown-bp.13", &[])); assert!(plans("ok", "10.99.0-bp.11", &[])); assert!(!plans("ok", "10.99.0-bp.10", &[]));
+        // test builds and describe names by the shared reader: bp.12-<hash> is bp.12, the describe name's last "bp." part is the build's
+        assert!(plans("ok", "10.99.0-bp.12-851cbefda6", &[]) && plans("ok", "backplane-kicad-v10.99.0-bp.7-15-g8d903542-dirty-bp.13", &[]) && plans("ok", "10.99.0-bp.12.1", &[]));
+        assert!(!plans("ok", "10.99.0-bp.10-851cbefda6", &[]) && !plans("ok", "10.0.6", &[]) && !plans("broken", "10.99.0-bp.13", &[]));
+        assert!(!plans("ok", "10.99.0-bp.12-851cbefda6", &caps(&["embed"])), "capabilities first, even on a test build");
         assert!(!plans("stock", "10.0.7", &caps(&["routing-plan"])));
     }
     #[test] fn plan_gate_routes_only_what_the_person_approved() {

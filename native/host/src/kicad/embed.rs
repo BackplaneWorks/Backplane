@@ -82,6 +82,8 @@ pub struct Session {
     pub parked: bool,
     pub touched_at: u64,
     pub closing: bool,
+    /// KiCad said it lost its parent (ET_DETACHED) since the last attach: the next attach re-parents even into a container of the same id
+    pub lost_parent: bool,
 }
 
 impl Session {
@@ -92,7 +94,7 @@ impl Session {
             container: 0, toplevel: 0, holder: 0, display: String::new(),
             sock: String::new(), events_sock: String::new(), sock_dir: String::new(),
             argv: String::new(), cli: String::new(), version: String::new(), desc: String::new(),
-            caps: vec![], frames: vec![], missed_pings: 0, dialogs: vec![], rss_mb: 0, parked: false, touched_at: now, closing: false,
+            caps: vec![], frames: vec![], missed_pings: 0, dialogs: vec![], rss_mb: 0, parked: false, touched_at: now, closing: false, lost_parent: false,
         }
     }
     pub fn spawned(mut self, pid: u32) -> Self { self.pid = pid; self }
@@ -864,6 +866,8 @@ enum Msg {
     /// the dialogs of KiCad's the client sees on screen (a modal one stops KiCad's events and pings: this is how the hub learns of it)
     ClientDialogs { pro: String, open: Vec<String> },
     ForkSync { pro: String, gen: u64 },
+    /// KiCad says it lost its parent (ET_DETACHED): the client that held the pane is gone (killed or quit; X destroyed its container)
+    ForkDetached { pro: String, gen: u64 },
     /// ForkSync for the project's current session, whichever generation it is (from outside the actor: the prewarm RPC)
     ForkSyncNow { pro: String },
     HealthResult { pro: String, gen: u64, ok: bool, modified_docs: Option<Vec<String>> },
@@ -1025,7 +1029,8 @@ impl Actor {
                 let snap = existing.clone();
                 // the client's kept container again (its last View kept KiCad's frames in it): nothing to re-parent, and a realized frame is the
                 // client's to map; the attach only says the session is in use again
-                if container > 0 && container == prev_cont && local_switch(&snap, snap.info_json()["local_map"] == true, true) {
+                let lost = std::mem::take(&mut existing.lost_parent);
+                if container > 0 && container == prev_cont && !lost && local_switch(&snap, snap.info_json()["local_map"] == true, true) {
                     let out = snap.info_json();
                     self.publish_and_reply(&snap, Some(client), reply, Ok(out));
                     return;
@@ -1488,6 +1493,15 @@ impl Actor {
             }
             Msg::ForkSyncNow { pro } => {
                 if let Some(gen) = self.sessions.get(&pro).map(|s| s.gen) { let _ = self.me.send(Msg::ForkSync { pro, gen }); }
+            }
+            Msg::ForkDetached { pro, gen } => {
+                // the next attach re-parents whatever its container's id: a client started again gets the same X ids as the one that went
+                // (Xvfb and Xorg hand a new connection the freed resource base), so an equal id is no proof the container is the kept one
+                // (a late one from the hub's own detach only costs the next attach a re-parent)
+                let Some(s) = self.sessions.get_mut(&pro).filter(|s| s.gen == gen) else { return };
+                eprintln!("kicad embed: KiCad lost its parent {}: the next Edit re-parents", s.container);
+                s.lost_parent = true;
+                let _ = self.me.send(Msg::ForkSync { pro, gen });
             }
             Msg::ForkSync { pro, gen } => {
                 let Some(s) = self.sessions.get(&pro).filter(|s| s.gen == gen && s.is_live()).cloned() else { return };
@@ -2001,7 +2015,7 @@ async fn spawn_gui_session(
         }
         // the chords KiCad hands to Backplane, with Ctrl+; for a comment (comment.rs): beside the ready, not before it
         { let (me, sock, desc) = (me.clone(), sock.clone(), desc.clone()); tokio::spawn(async move {
-            let rk = raw_on(&me, &sock, &desc, "kiapi.backplane.embed.SetReservedKeys", json!({"chords": super::comment::RESERVED}), 5000).await;
+            let rk = raw_on(&me, &sock, &desc, "kiapi.backplane.embed.SetReservedKeys", json!({"chords": super::comment::reserved(proto::load(&desc).has_field("kiapi.backplane.embed.CommentSelection", "capture_only"))}), 5000).await;
             eprintln!("kicad embed: reserved keys {}", if rk["ok"] == true { rk["message"]["chords"].to_string() } else { format!("refused: {}", rk["error"]) });
         }); }
         phase("ready");
@@ -2074,6 +2088,10 @@ fn spawn_fork_events_loop(me: mpsc::UnboundedSender<Msg>, pro: String, gen: u64,
                         let open = ty == "ET_DIALOG_OPENED" || ty_n == 10;
                         let title = ev["detail"].as_str().unwrap_or("").to_string();
                         if me.send(Msg::Dialog { pro: pro.clone(), gen, open, title }).is_err() { return }
+                        continue
+                    }
+                    if ty == "ET_DETACHED" || ty_n == 12 {
+                        if me.send(Msg::ForkDetached { pro: pro.clone(), gen }).is_err() { return }
                         continue
                     }
                     if ty == "ET_SHOW_REQUESTED" || ty_n == 9 {

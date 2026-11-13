@@ -11,13 +11,14 @@ use std::{sync::{atomic::{AtomicBool, Ordering}, Arc}, time::Instant};
 /// The card's size (px).
 pub const W: f32 = 440.;
 pub const H: f32 = 132.;
-/// An Enter before the capture came waits this long for it, then posts the note alone.
-const WAIT_CAPTURE_MS: u64 = 2500;
+/// An Enter before the capture came waits this long for it; then the card says KiCad did not answer and nothing is posted (Enter asks again).
+/// A comment never goes without its names and screenshot.
+const WAIT_CAPTURE_MS: u64 = 8000;
 
 pub struct KComment {
     pub project: String, pub frame: &'static str, pub thread: String, pub input: Entity<Composer>,
-    /// the capture (null until it comes), why it could not be made, and whether Enter is waiting on it
-    pub cap: Value, pub err: String, pub post_on_capture: bool,
+    /// the capture (null until it comes), why it could not be made, and whether Enter is waiting on it (`ask`: which request a timeout belongs to)
+    pub cap: Value, pub err: String, pub post_on_capture: bool, pub ask: u32,
     pub opened: Instant, painted: Arc<AtomicBool>,
     /// opened from the pane's event, which has no window: the field takes the keyboard at the next frame
     pub focus_pending: bool,
@@ -42,13 +43,14 @@ pub fn place(pane: Option<(f32, f32, f32, f32)>, win: (f32, f32)) -> (f32, f32) 
     let top = (y + h * 0.18).clamp(0., (win.1 - H).max(0.));
     (left, top)
 }
-/// What Enter posts (`kicad.comment.post`): the capture's names, items and picture with the note; the note alone when no capture came.
-/// None when there is nothing to say.
-pub fn post_params(cap: &Value, note: &str, thread: &str, project: &str, frame: &str) -> Option<Value> {
+/// What Enter posts (`kicad.comment.post`): the capture's names, items and picture with the note. None before the capture is in (a comment
+/// never goes without it) or when there is nothing to say.
+pub fn post_params(cap: &Value, note: &str, thread: &str) -> Option<Value> {
+    if !cap.is_object() { return None }
     let note = note.trim();
     let has_names = !cap.is_null() && (cap["empty"] == true || ["references", "pins", "nets"].iter().any(|k| !list(cap, k).is_empty()));
     if note.is_empty() && !has_names { return None }
-    let mut p = if cap.is_object() { cap.clone() } else { json!({"frame": if frame == "SCH" { "FK_SCH" } else { "FK_PCB" }, "project": project}) }; // i18n-ok: wire frame kinds
+    let mut p = cap.clone();
     p["note"] = json!(note); p["thread"] = json!(thread);
     Some(p)
 }
@@ -75,7 +77,7 @@ impl Win {
         p.update(cx, |p, cx| { p.hold_keys(true); cx.notify(); });
         let _ = self.tx.try_send(Command::Rpc("editor.kicad.capture".into(), Secret(json!({"project": project, "frame": frame})), "kicad"));
         eprintln!("GPUI_LOG {}", json!({"kcomment": "open", "frame": frame, "at_ms": epoch_ms() as u64}));
-        self.screens.kcomment = Some(KComment { project, frame, thread, input, cap: Value::Null, err: String::new(), post_on_capture: false, opened: Instant::now(), painted: Arc::default(), focus_pending });
+        self.screens.kcomment = Some(KComment { project, frame, thread, input, cap: Value::Null, err: String::new(), post_on_capture: false, ask: 0, opened: Instant::now(), painted: Arc::default(), focus_pending });
         cx.notify();
         eprintln!("GPUI_LOG {}", json!({"kcomment": "opened", "at_ms": epoch_ms() as u64}));
         true
@@ -88,25 +90,34 @@ impl Win {
             return cx.notify()
         }
         let Some(k) = self.screens.kcomment.as_mut() else { return };
-        if !k.cap.is_null() || !k.err.is_empty() { return }
-        if why.is_empty() { k.cap = reply["result"].clone(); } else { k.err = why; }
+        if !k.cap.is_null() { return }
+        if why.is_empty() { k.cap = reply["result"].clone(); k.err.clear(); } else { k.err = why; k.post_on_capture = false; }
         eprintln!("GPUI_LOG {}", json!({"kcomment": "capture", "ms": ms(k.opened), "hub_ms": reply["result"]["ms"], "capture_only": reply["result"]["capture_only"], "ok": k.err.is_empty(),
             "references": reply["result"]["names"]["references"], "image": !reply["result"]["image"].as_str().unwrap_or("").is_empty()}));
-        if k.post_on_capture { self.kcomment_post(cx) }
+        if k.post_on_capture && !k.cap.is_null() { self.kcomment_post(cx) }
         cx.notify();
     }
     /// Enter: posted into the thread, the window shut, the keyboard back to KiCad. Before the capture is in, it waits for it (a moment at most).
     pub fn kcomment_post(&mut self, cx: &mut Context<Self>) {
         let Some(k) = self.screens.kcomment.as_mut() else { return };
         let note = k.input.read(cx).content.to_string();
-        if k.cap.is_null() && k.err.is_empty() && !k.post_on_capture && k.opened.elapsed().as_millis() < WAIT_CAPTURE_MS as u128 {
-            k.post_on_capture = true;
-            let wait = WAIT_CAPTURE_MS.saturating_sub(k.opened.elapsed().as_millis() as u64);
-            cx.spawn(async move |w, cx| { cx.background_executor().timer(std::time::Duration::from_millis(wait)).await;
-                let _ = w.update(cx, |w, cx| if w.screens.kcomment.as_ref().is_some_and(|k| k.post_on_capture) { if let Some(k) = w.screens.kcomment.as_mut() { k.err = "no capture".into(); /* i18n-ok: a flag, never drawn */ } w.kcomment_post(cx) }); }).detach();
-            return
+        if k.cap.is_null() {
+            if k.post_on_capture { return } // already waiting: the capture posts it
+            if !k.err.is_empty() { // it failed or timed out: Enter asks KiCad again
+                k.err.clear();
+                let _ = self.tx.try_send(Command::Rpc("editor.kicad.capture".into(), Secret(json!({"project": k.project, "frame": k.frame})), "kicad"));
+            }
+            k.post_on_capture = true; k.ask += 1;
+            let ask = k.ask;
+            eprintln!("GPUI_LOG {}", json!({"kcomment": "waiting", "ms": ms(k.opened), "ask": ask}));
+            cx.spawn(async move |w, cx| { cx.background_executor().timer(std::time::Duration::from_millis(WAIT_CAPTURE_MS)).await;
+                let _ = w.update(cx, |w, cx| if let Some(k) = w.screens.kcomment.as_mut().filter(|k| k.post_on_capture && k.ask == ask && k.cap.is_null()) {
+                    k.post_on_capture = false; k.err = "timeout".into(); /* i18n-ok: a flag, never drawn */
+                    eprintln!("GPUI_LOG {}", json!({"kcomment": "timeout", "ms": ms(k.opened), "ask": ask})); cx.notify();
+                }); }).detach();
+            return cx.notify()
         }
-        let Some(p) = post_params(&k.cap, &note, &k.thread, &k.project, k.frame) else { return };
+        let Some(p) = post_params(&k.cap, &note, &k.thread) else { return };
         if k.thread.is_empty() { self.note = trs("A comment from KiCad needs an open thread."); return cx.notify() }
         eprintln!("GPUI_LOG {}", json!({"kcomment": "post", "ms": ms(k.opened), "note_chars": note.chars().count(), "references": p["names"]["references"], "image": p["image"]}));
         let _ = self.tx.try_send(Command::Rpc("kicad.comment.post".into(), Secret(p), "kicad"));
@@ -131,7 +142,9 @@ pub fn view(w: &Win, cx: &mut Context<Win>, light: bool, win: Size<Pixels>) -> O
     let (x, y) = place(pane, (f32::from(win.width), f32::from(win.height)));
     let (line, tone) = match names_line(&k.cap, 8) {
         Some(l) => (l, "text"),
-        None if !k.err.is_empty() => (trs("KiCad could not say what is selected; the note goes alone"), "bad"),
+        None if k.err == "timeout" => (trs("KiCad did not send the selection. Enter asks again · Esc cancels"), "bad"),
+        None if !k.err.is_empty() => (trs("KiCad could not say what is selected. Enter asks again · Esc cancels"), "bad"),
+        None if k.post_on_capture => (trs("Waiting for KiCad's selection… the comment posts when it comes"), "faint"),
         None => (trs("Reading the selection…"), "faint"),
     };
     let img = k.cap["image"].as_str().filter(|s| !s.is_empty()).map(|p| format!("/img?path={}", super::attach::enc(p)));
@@ -169,13 +182,12 @@ mod tests {
         let (x, y) = place(Some((1200., 850., 400., 400.)), (1400., 900.)); assert!(x + W <= 1400. && y + H <= 900.);
         assert_eq!(place(None, (1000., 800.)).0, (1000. - W) / 2.);
     }
-    #[test] fn enter_posts_the_capture_with_the_note_or_the_note_alone() {
+    #[test] fn enter_posts_the_capture_with_the_note_never_the_note_alone() {
         let cap = json!({"project": "/p/a.kicad_pro", "frame": "FK_PCB", "names": {"references": ["U3"]}, "image": "/h/kicad-comments/a-c1.png", "note": ""});
-        let p = post_params(&cap, " move it ", "t1", "/p/a.kicad_pro", "PCB").unwrap();
+        let p = post_params(&cap, " move it ", "t1").unwrap();
         assert_eq!((p["note"].as_str(), p["thread"].as_str(), p["names"]["references"][0].as_str(), p["image"].as_str()), (Some("move it"), Some("t1"), Some("U3"), Some("/h/kicad-comments/a-c1.png")));
-        assert!(post_params(&cap, "", "t1", "", "PCB").is_some(), "the names alone are a comment");
-        let alone = post_params(&Value::Null, "why so wide?", "t1", "/p/a.kicad_pro", "SCH").unwrap();
-        assert_eq!((alone["frame"].as_str(), alone["note"].as_str()), (Some("FK_SCH"), Some("why so wide?")));
-        assert!(post_params(&Value::Null, "  ", "t1", "", "PCB").is_none() && post_params(&json!({"names": {}}), "", "t1", "", "PCB").is_none(), "nothing to say");
+        assert!(post_params(&cap, "", "t1").is_some(), "the names alone are a comment");
+        assert!(post_params(&Value::Null, "why so wide?", "t1").is_none(), "never the note without its capture");
+        assert!(post_params(&json!({"names": {}}), "", "t1").is_none(), "nothing to say");
     }
 }

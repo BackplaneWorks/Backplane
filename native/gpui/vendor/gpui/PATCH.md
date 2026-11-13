@@ -19,4 +19,11 @@ gpui 0.2.2 (Apache-2.0) vendored without `examples/` (and its `[[example]]` targ
 - `resources/windows/gpui.manifest.xml`: a `compatibility` section (Windows 7 to 11), as CEF's own applications have: without it Windows runs the client as a
   Vista-era program, where a child window cannot be layered and Chromium takes older code paths.
 
+- Trackpad pinch (#1106): `PinchEvent` (`src/interactive.rs`: position, AppKit's magnification as `delta`, modifiers, phase) and `PlatformInput::Pinch`, dispatched
+  as a mouse event (`src/window.rs` keeps the pointer and modifiers from it), with `on_pinch` on elements (`src/elements/div.rs`, hit-tested as the scroll wheel is).
+  `src/platform/mac/window.rs` registers `magnifyWithEvent:` on `GPUIView` and `src/platform/mac/events.rs` turns `NSEventTypeMagnify` into it; upstream dropped
+  pinches. A pinch is its own event, not a ctrl + wheel, so lists, the terminal and pages that scroll never take it for a scroll.
+
 `windows-shaders/shaders_bytes.rs` is made on a Windows machine by `scripts/windows-shaders.sh HOST` (fxc.exe with gpui's own arguments). A Windows build host still compiles the shaders itself, as upstream does.
+
+- `src/platform/linux/x11/client.rs`: `BACKPLANE_GPUI_LOOPTRACE=1` (off unless set) logs the main loop's slow steps on stderr as `GPUI_LOOP {...}`: a foreground task, a frame or an X batch over 50 ms, and each start or stop of a window's refresh loop (mapped, visibility). The client adds a 100 ms foreground timer that logs when it wakes more than 50 ms late (`src/main.rs`). For finding what holds the main thread.

@@ -16,27 +16,33 @@ discover_kicad
 init_isolated_dirs
 python3 "$SEED_PY" "$OUT" "$REPO_ROOT"
 PROJ="$OUT/proj"; PCB="$PROJ/ecc83-pp.kicad_pcb"; mkdir -p "$OUT/shots"
-# one track made 0.05 mm wide (under every fab's limit): the review's fab source anchors its finding to that track
+# one track made 0.05 mm wide (under every fab's limit): the review's fab source (with the fab file below) anchors its finding to that track
 python3 - "$PCB" <<'PY'
 import re, sys
 p = sys.argv[1]; t = open(p).read()
 m = re.search(r"\(segment\b.*?\(width ([\d.]+)\)", t, re.S)
 assert m, "no track"
-t = t[:m.start(1)] + "0.05" + t[m.end(1):]
+t = t[:m.start(1)] + "0.0501" + t[m.end(1):]  # a width nothing else has, so the fix finds this track
 open(p, "w").write(t)
 PY
+# the board's fab file (the fab's checks run only for a board to be ordered): a plain 2-layer FR-4 board
+printf '{"kind":"pcb","name":"ECC83","source":"ecc83-pp.kicad_pcb","qty":5,"options":{"layers":2}}\n' >"$PROJ/ecc83-pp.fab.json"
+git -C "$PROJ" add -A >/dev/null 2>&1 || true
 git -C "$PROJ" commit -qam "a narrow track" 2>/dev/null || true
+# paint bounds (Nov 13, bp.13 batch 3, 16 cores busy): KiCad painted 0.07-0.08 s after Edit and the board was open, full size, 9.7-13.3 s
+# after the client started; the main-thread stall fixed in 82c67d16a made them 11 s and 88-133 s. So 5 s to paint and 45 s to be ready.
 start_xvfb_and_wm
-export BP_STREAM_N=1 BP_STREAM_MS=10
+export BP_STREAM_N=1 BP_STREAM_MS=10 BP_STANDIN_MCPCALL_MAX=200000
 start_hub
 cat >"$OUT/script.json" <<'JSON'
 [{"select":0},{"wait":2000},{"click":"rail:Board"},{"wait":2500},{"click":"ui:Edit"},
- {"kicad":{"wait_painted":60000,"kind":"PCB","tag":"ready"}},{"wait":1500},{"click":"kicad:full"},{"wait":1500},{"mark":"edit_ready"},{"wait":150000}]
+ {"kicad":{"wait_painted":5000,"kind":"PCB","tag":"ready"}},{"wait":1500},
+ {"click":"kicad-tab:SCH"},{"kicad":{"wait_painted":5000,"kind":"SCH","tag":"sch"}},{"wait":1500},{"click":"kicad-tab:PCB"},{"wait":2500},{"click":"kicad:full"},{"wait":1500},{"mark":"edit_ready"},{"wait":150000}]
 JSON
 HOME="$OUT/fh" BACKPLANE_GPUI_ASSETS="$ASSETS_DIR" BACKPLANE_GPUI_RECTS=1 BACKPLANE_GPUI_HOLD=1 \
-"$CLIENT_BIN" --url "http://127.0.0.1:$HPORT" --token-file "$OUT/home/token" --script "$OUT/script.json" --exit-after 200 >"$OUT/client.log" 2>&1 &
+"$CLIENT_BIN" --url "http://127.0.0.1:$HPORT" --token-file "$OUT/home/token" --script "$OUT/script.json" --exit-after 420 >"$OUT/client.log" 2>&1 &
 CP=$!; track_pid "$CP"
-wait_for_log "$OUT/client.log" '"name":"edit_ready","event":"mark"' 480 || { echo "FAIL the board never opened in KiCad"; tail -n 20 "$OUT/client.log"; exit 1; }
+wait_for_log "$OUT/client.log" '"name":"edit_ready","event":"mark"' 180 || { echo "FAIL the board never opened in KiCad"; tail -n 20 "$OUT/client.log"; exit 1; }
 ask() {
   local N; N="$1-$(date +%s%N)"; local before; before=$(grep -c "^MCPCALL" "$OUT/standin.log" 2>/dev/null || echo 0)
   local text; text=$(python3 -c 'import json,sys; print(json.dumps("mcpcall:" + json.dumps({"name": sys.argv[1], "arguments": json.loads(sys.argv[2])})))' "$1" "$2")
@@ -50,22 +56,40 @@ CAPS=$(ask kicad_ipc "{\"path\":\"$PCB\",\"type\":\"kiapi.backplane.GetCapabilit
 echo "$CAPS" | grep -q 'capabilities' || { echo "FAIL the embedded KiCad's GetCapabilities gave no capabilities: $(echo "$CAPS" | cut -c1-200)"; exit 1; }
 echo "$CAPS" | grep -q 'embed-host-markers' || { echo "SKIP embed_review_markers_e2e: the embedded KiCad has no embed-host-markers capability ($(echo "$CAPS" | cut -c1-160))"; finish_suite "embed_review_markers_e2e ($EMBED_MODE)"; exit 0; }
 echo "INFO embed-host-markers: yes; SetHostMarkers in commands: $(echo "$CAPS" | grep -q 'SetHostMarkers' && echo yes || echo no)"
+sch_markers() { ask kicad_ipc "{\"path\":\"$PCB\",\"type\":\"kiapi.backplane.embed.GetMarkers\",\"message\":{\"kind\":\"FK_SCH\",\"include_host\":true}}"; }
 host_markers() { ask kicad_ipc "{\"path\":\"$PCB\",\"type\":\"kiapi.backplane.embed.GetMarkers\",\"message\":{\"kind\":\"FK_PCB\",\"include_host\":true}}"; }
 SHA0=$(sha256sum "$PCB" | cut -d' ' -f1)
 R1=$(ask design_review '{"scope":"save"}'); echo "$R1" | cut -c1-300
-ID=$(echo "$R1" | python3 -c 'import sys,re; t=sys.stdin.read().replace("\\\\\"","\"").replace("\\\"","\""); m=re.search(r"\"id\":\"(fab[^\"]*)\"[^{}]*?\"rule\":\"[^\"]*track", t) or re.search(r"\"id\":\"(fab[^\"]*)\"", t); print(m.group(1) if m else "")')
+# the narrow track's finding (fab_limit, "The narrowest track, ..."), from the MCP answer decoded
+ID=$(echo "$R1" | sed 's/^MCPCALL design_review //' | python3 -c 'import json,sys
+try: o = json.loads(sys.stdin.read()); r = json.loads(o["result"]["content"][0]["text"])
+except Exception: r = {}
+print(next((f["id"] for f in r.get("findings", []) if f.get("rule") == "fab_limit" and "track" in f.get("title", "") and any(a.get("doc") == "pcb" for a in f.get("anchors", []))), ""))')
 echo "INFO the fab finding: $ID"
+check "the review flags the narrow track (fab_limit, anchored on the board)" "$([ -n "$ID" ] && echo 1 || echo 0)" "rules: $(echo "$R1" | grep -o 'fab_[a-z_]*' | sort | uniq -c | tr '\n' ' ')"
 sleep 2
 M1=$(host_markers); echo "$M1" | cut -c1-500
-check "the review's finding is a host marker in KiCad (set review)" "$(echo "$M1" | grep -q 'review' && echo "$M1" | grep -q 'host' && { [ -z "$ID" ] || echo "$M1" | grep -q "$ID"; } && echo 1 || echo 0)" "$(echo "$M1" | cut -c1-300)"
+check "the review's finding is a host marker in KiCad (set review)" "$(echo "$M1" | grep -q 'review' && echo "$M1" | grep -q 'host' && [ -n "$ID" ] && echo "$M1" | grep -q "$ID" && echo 1 || echo 0)" "$(echo "$M1" | cut -c1-300)"
 shot m1_markers
+# the schematic: a missing-MPN finding is a marker on its symbol (its KIID and its instance's sheet, from the schematic)
+SID=$(echo "$R1" | sed 's/^MCPCALL design_review //' | python3 -c 'import json,sys
+try: o = json.loads(sys.stdin.read()); r = json.loads(o["result"]["content"][0]["text"])
+except Exception: r = {}
+f = next((f for f in r.get("findings", []) if f.get("rule") == "bom_no_mpn"), {})
+a = (f.get("anchors") or [{}])[0]
+print(f.get("id", ""), a.get("uuid", "") or "-", a.get("sheet", "") or "-")')
+read -r SFID SUUID SSHEET <<<"$SID"
+echo "INFO the missing-MPN finding: $SFID symbol $SUUID sheet $SSHEET"
+check "a missing-MPN finding names its symbol's KIID and sheet" "$([ -n "$SFID" ] && [ "$SUUID" != - ] && [ "${SSHEET:0:1}" = / ] && echo 1 || echo 0)" "$SID"
+S1=$(sch_markers); echo "$S1" | cut -c1-400
+check "it is a host marker on the schematic, at the symbol" "$(echo "$S1" | grep -q "$SFID" && echo "$S1" | grep -q "$SUUID" && echo 1 || echo 0)" "$(echo "$S1" | cut -c1-300)"
 check "nothing is written to the board (byte-identical)" "$([ "$(sha256sum "$PCB" | cut -d' ' -f1)" = "$SHA0" ] && echo 1 || echo 0)"
 # the track fixed (as a person would, then saved): the next run clears the set
 python3 - "$PCB" <<'PY'
-import sys; p = sys.argv[1]; t = open(p).read(); open(p, "w").write(t.replace("(width 0.05)", "(width 0.25)", 1))
+import sys; p = sys.argv[1]; t = open(p).read(); open(p, "w").write(t.replace("(width 0.0501)", "(width 0.25)", 1))
 PY
 R2=$(ask design_review '{"scope":"save"}'); sleep 2
 M2=$(host_markers); echo "$M2" | cut -c1-300
-check "a run without the finding clears it from KiCad" "$({ [ -n "$ID" ] && ! echo "$M2" | grep -q "$ID"; } && echo 1 || echo 0)" "$(echo "$M2" | cut -c1-300)"
+check "a run without the finding clears it from KiCad" "$({ [ -n "$ID" ] && echo "$M1" | grep -q "$ID" && ! echo "$M2" | grep -q "$ID"; } && echo 1 || echo 0)" "$(echo "$M2" | cut -c1-300)"
 shot m2_cleared
 finish_suite "embed_review_markers_e2e ($EMBED_MODE)"

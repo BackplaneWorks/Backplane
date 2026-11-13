@@ -215,6 +215,8 @@ impl Mcp {
             "thread_wait" => ag.tool_wait(thread, &a).await,
             "thread_interrupt" => ag.tool_interrupt(thread, &a).await,
             "thread_settle" => ag.tool_settle(thread, &a).await,
+            "kicad_ipc" if crate::files::kicad::ipc::approval_refused(sv(&a, "type"), &a["message"]).is_some() =>
+                fail(&crate::files::kicad::ipc::approval_refused(sv(&a, "type"), &a["message"]).unwrap_or_default()),
             "kicad_ipc" => match ag.kicad_gate(thread, sv(&a, "path"), sv(&a, "type")).await {
                 // main's canonical copy, one holder for writes; the holder is named to any other
                 Ok(path) => match crate::files::kicad::ipc::kicad_ipc_in(&ag.hub, Some(thread), &path, sv(&a, "type"), a.get("message").cloned().unwrap_or(json!({}))).await {

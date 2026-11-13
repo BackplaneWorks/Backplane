@@ -180,9 +180,15 @@ pub fn status(found: bool, runs: bool, fork: bool, version: &str, api: u64) -> &
 }
 fn num(s: &str) -> u64 { s.chars().take_while(|c| c.is_ascii_digit()).fold(0, |n, c| n * 10 + c.to_digit(10).unwrap() as u64) } // KH.num
 /// The `-bp.N` part, with a hotfix's further parts (`-bp.12.1` is [12, 1]; trailing zeros dropped, so 12.0 is 12): 12.1 orders after 12 and before 13.
-/// A test build's suffix after it (`-bp.12-851cbefda6`) is not a part: that build reads as bp.12. None: [0].
-fn bp(v: &str) -> Vec<u64> { if let Some(n) = v.split('-').rev().find_map(|l| l.strip_prefix("bp.")) { let mut v: Vec<u64> = n.split('.').map(num).collect(); while v.len() > 1 && v.last() == Some(&0) { v.pop(); } v } else { vec![0] } } // KH.bp
+/// A test build's suffix after it (`-bp.12-851cbefda6`) is not a part: that build reads as bp.12. A `git describe` name has two
+/// (`10.99.0-bp.7-15-g8d903542-dirty-bp.13`): the last one is the build's, bp.13. None: [0].
+/// The one reader of a Backplane KiCad's number: everything that gates on it (bp_number) uses this, never its own parser.
+pub fn bp(v: &str) -> Vec<u64> { if let Some(n) = v.split('-').rev().find_map(|l| l.strip_prefix("bp.")) { let mut v: Vec<u64> = n.split('.').map(num).collect(); while v.len() > 1 && v.last() == Some(&0) { v.pop(); } v } else { vec![0] } } // KH.bp
+/// The `bp.` number alone (13 for bp.13, bp.13.1 and a bp.13 test build; 0 for none), for gates that go by release.
+pub fn bp_number(v: &str) -> u64 { bp(v)[0] }
 pub fn version_ge(v: &str, min: &str) -> bool { // KH.version.ge
+    // a release tag or describe name ("backplane-kicad-v10.99.0-...") reads as its version
+    let t = |s: &str| -> String { s.strip_prefix("backplane-kicad-v").unwrap_or(s).to_string() }; let (v, min) = (&t(v)[..], &t(min)[..]);
     let p = |s: &str, i: usize| s.split('.').nth(i).map_or(0, num);
     let (a, b) = ((p(v, 0), p(v, 1), p(v, 2), bp(v)), (p(min, 0), p(min, 1), p(min, 2), bp(min)));
     a >= b
@@ -206,6 +212,13 @@ mod tests {
         assert!(version_ge("10.99.0-bp.12.1", t) && !version_ge(t, "10.99.0-bp.12.1") && version_ge("10.99.0-bp.13", t) && !version_ge(t, "10.99.0-bp.13"));
         assert!(version_ge(t, "10.99.0-bp.12") && version_ge("10.99.0-bp.12", t) && version_ge(t, "10.99.0-bp.11") && version_ge(t, "10.99.0-bp.4"));
         assert!(version_ge("10.99.0-unknown-bp.3", "10.99.0-bp.3") && !version_ge("10.99.0", "10.99.0-bp.1"));
+        // a git-describe name of a bp.13 test build has two "bp." parts: the last is the build's
+        for d in ["10.99.0-bp.7-15-g8d903542-dirty-bp.13", "backplane-kicad-v10.99.0-bp.7-15-g8d903542-dirty-bp.13"] {
+            assert_eq!(bp_number(d), 13, "{d}");
+            assert!(version_ge(d, "10.99.0-bp.13") && version_ge("10.99.0-bp.13", d) && version_ge(d, "10.99.0-bp.12.1") && !version_ge(d, "10.99.0-bp.14"), "{d}");
+        }
+        assert_eq!((bp_number("10.99.0-bp.12-851cbefda6"), bp_number("10.99.0-bp.12.1"), bp_number("10.99.0-bp.10"), bp_number("10.0.6")), (12, 12, 10, 0));
+        assert!(version_ge("backplane-kicad-v10.99.0-bp.12", "10.99.0-bp.8") && !version_ge("backplane-kicad-v10.99.0-bp.4", "10.99.0-bp.8"));
     }
 
     // KS.argv: kserve_argv_parent_pid_with_idle, _without_idle, _socket_in_dir, _idle_with_cap, _no_idle_without_cap
@@ -224,6 +237,7 @@ mod tests {
     // KS.version_ok: kserve_version_ok_exact, _ok_describe, _other_build, _longer_build, _not_fork
     #[test] fn kserve_version() {
         assert!(version_ok("10.99.0-bp.1", "10.99.0-bp.1")); assert!(version_ok("10.99.0-unknown-bp.1", "10.99.0-bp.1"));
+        assert!(version_ok("backplane-kicad-v10.99.0-bp.7-15-g8d903542-dirty-bp.13", "10.99.0-bp.13") && version_ok("10.99.0-bp.12.1", "10.99.0-bp.12.1") && !version_ok("10.99.0-bp.12", "10.99.0-bp.12.1"));
         assert!(!version_ok("10.99.0-bp.2", "10.99.0-bp.1")); assert!(!version_ok("10.99.0-bp.11", "10.99.0-bp.1")); assert!(!version_ok("10.99.0", "10.99.0-bp.1"));
     }
     // KS.retry: kserve_retry_first, _second, _third, _gives_up, _old_failures_forgotten

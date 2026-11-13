@@ -15,8 +15,9 @@ pub fn under_systemd() -> bool { std::env::var("INVOCATION_ID").map_or(false, |v
 pub fn server_now() -> bool { under_systemd() || SWITCH.load(Relaxed) }
 pub async fn load(hub: &Arc<Hub>) { SWITCH.store(hub.setting(STAYS_ON).await.as_deref() == Some("on"), Relaxed); }
 
-/// The install line for another computer (the newest release's installer).
-pub const INSTALL: &str = "curl -fsSL https://github.com/BackplaneWorks/Backplane/releases/latest/download/install.sh | sh";
+/// The install line for another computer (the newest release's installer): curl where there is one, else wget (a stock Ubuntu desktop has
+/// no curl, macOS no wget), quiet about the one that is missing in sh, bash, dash and zsh.
+pub const INSTALL: &str = "{ curl -fsSL https://github.com/BackplaneWorks/Backplane/releases/latest/download/install.sh 2>/dev/null || wget -qO- https://github.com/BackplaneWorks/Backplane/releases/latest/download/install.sh; } | sh";
 
 async fn set(hub: &Arc<Hub>, k: &str, v: &str) -> Result<(), String> {
     hub.commit(&json!({"$":"SettingSet","key":k,"value":v,"at":crate::hub::now_ms() / 1000})).await.map(|_| ()).map_err(|e| format!("{e:#}"))

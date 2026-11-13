@@ -79,6 +79,7 @@ pub fn reserved_chord_index(idx: usize) -> Option<&'static str> {
         3 => Some("ctrl-shift-tab"), // i18n-ok: gpui keystroke
         4 => Some("ctrl-`"), // i18n-ok: gpui keystroke
         5 => Some("ctrl-;"), // i18n-ok: gpui keystroke (a comment: host kicad/comment.rs RESERVED)
+        6 => Some(";"), // i18n-ok: gpui keystroke (bp.13: KiCad's own comment key, host kicad/comment.rs `reserved`)
         _ => None,
     }
 }
@@ -519,8 +520,13 @@ mod imp {
     }
     /// What came to our own connection since the last call (drained): the grabbed escape chord, and the fork's ClientMessages to the container
     /// (`_BACKPLANE_KEY`: a reserved chord pressed in KiCad, as a gpui keystroke; `_BACKPLANE_FOCUS`: a click gave KiCad the keyboard).
-    pub fn events() -> Vec<super::Ev> {
-        let Some(g) = conn() else { return vec![] }; let c = g.as_ref().unwrap();
+    /// What our connection read for the pane and it has not taken yet (`pump` fills it, `events` empties it).
+    static PENDING: Mutex<Vec<super::Ev>> = Mutex::new(Vec::new());
+    /// Reads every event waiting on our connection, keeping the pane's (a key KiCad hands back, a click, KiCad taking the keyboard) for `events`
+    /// and dropping the rest; true when it kept one. The socket is empty after it, so the pane's wake thread (kicad_pane) sleeps in poll until
+    /// something new comes: woken only for the pane's own events, never by noise it never reads (that spun the main thread for seconds).
+    pub fn pump() -> bool {
+        let Some(g) = conn() else { return false }; let c = g.as_ref().unwrap();
         let (key, focus) = (atom(c, "_BACKPLANE_KEY"), atom(c, "_BACKPLANE_FOCUS"));
         let mut out = Vec::new();
         while let Ok(Some(e)) = c.poll_for_event() {
@@ -539,7 +545,14 @@ mod imp {
             }
         }
         let _ = c.flush();
-        out
+        drop(g);
+        let kept = !out.is_empty();
+        if kept { PENDING.lock().unwrap_or_else(|e| e.into_inner()).extend(out); }
+        kept
+    }
+    pub fn events() -> Vec<super::Ev> {
+        pump();
+        std::mem::take(&mut *PENDING.lock().unwrap_or_else(|e| e.into_inner()))
     }
     /// A key pressed and released in `w` by a synthetic event (no real input): how stock KiCad, which has no IPC to open an editor, is asked
     /// to (Ctrl+P in its project manager opens the PCB editor, even unmapped). `keysym` an X keysym, `mods` an X modifier mask.
@@ -1369,6 +1382,7 @@ mod imp {
     pub fn holes(_container: u64, _keep: Option<&[R]>) {}
     pub fn focus(_w: u64) {}
     pub fn conn_fd() -> Option<i32> { None }
+    pub fn pump() -> bool { false }
     pub fn input_off(_container: u64, _off: bool) {}
     /// Unknown here: the window's own key-up decides.
     pub fn semicolon_held() -> Option<bool> { None }
@@ -1404,7 +1418,7 @@ mod tests {
         assert_eq!(chord(0xffbe, 4), None, "F1: not a reserved key");
         assert_eq!(reserved_chord_index(0), Some("ctrl-k"));
         assert_eq!(reserved_chord_index(3), Some("ctrl-shift-tab"));
-        assert_eq!(reserved_chord_index(4), Some("ctrl-`")); assert_eq!(reserved_chord_index(5), Some("ctrl-;")); assert_eq!(chord(0x3b, 4).as_deref(), Some("ctrl-;"));
+        assert_eq!(reserved_chord_index(4), Some("ctrl-`")); assert_eq!(reserved_chord_index(5), Some("ctrl-;")); assert_eq!(reserved_chord_index(6), Some(";")); assert_eq!(chord(0x3b, 0).as_deref(), Some(";")); assert_eq!(chord(0x3b, 4).as_deref(), Some("ctrl-;"));
         assert_eq!(reserved_chord_index(9), None);
     }
     #[test] fn overlays_cut_holes_and_nothing_else() {

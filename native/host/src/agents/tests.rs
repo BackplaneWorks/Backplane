@@ -357,6 +357,15 @@ fn running_log(work: &Path, extra: &str) -> String { base_log(work, 1, &format!(
     tokio::time::sleep(Duration::from_millis(500)).await;
     assert!(log_from(&hub, 0).await.iter().any(|e| turn_is(e, "interrupted"))); assert_eq!(ag.stats.procs_spawned.load(Relaxed), 0); ag.shutdown();
 }
+#[tokio::test(flavor = "multi_thread")] async fn a_turn_that_failed_on_a_stale_sign_in_lock_is_not_carried_on() { // #1109: a restart does not start it again (it would only fail the same way)
+    let sd = dir("csl-bin"); perf_standin(&sd, 1);
+    let said = super::rules::sign_in_lock_say("Failed to refresh OAuth token: another Claude Code process is refreshing it".into());
+    let failed = format!("{}\n{}\n", json!({"$":"ActivityLogged","thread":T1,"act":"e1","tone":"error","kind":"result","summary":said,"at":1700000101}), json!({"$":"TurnChanged","thread":T1,"state":"failed","at":1700000101}));
+    let (hub, ag, _h, _w) = start("csl", |w| running_log(w, &failed), |_| Cli::standin(&sd)).await;
+    tokio::time::sleep(Duration::from_millis(500)).await; let ev = log_from(&hub, 0).await;
+    assert!(!ev.iter().any(|e| e["text"].as_str().unwrap_or("").starts_with(world::CARRY_TEXT)), "nothing carried"); assert!(!ev.iter().any(|e| turn_is(e, "interrupted")));
+    assert_eq!(ag.stats.procs_spawned.load(Relaxed), 0); ag.shutdown();
+}
 fn tid(i: usize) -> String { if i == 0 { T1.to_string() } else { format!("t17000010{i:02}-{i}") } }
 /// `n` threads cut by a restart; the last by id has run the longest
 fn cut_log(w: &Path, n: usize) -> String { let mut l = base_log(w, n, ""); for i in 0..n { let (id, at) = (tid(i), 1700000100 + n - i); l += &format!("{{\"$\":\"MessagePosted\",\"thread\":\"{id}\",\"msg\":\"u{i}\",\"role\":\"user\",\"text\":\"x\",\"at\":{at}}}\n{{\"$\":\"TurnChanged\",\"thread\":\"{id}\",\"state\":\"running\",\"at\":{at}}}\n") } l }

@@ -1940,6 +1940,8 @@ gpui.open.a.thread.first.that = 先にスレッドを開いてください。そ
 gpui.gerbers.open.on.their.project = ガーバーはプロジェクトのボードで開きます。このファイルはどのプロジェクトにもありません。
 gpui.that.kicad.project.has.no = そのKiCadプロジェクトの隣にボードも回路図もありません。
 gpui.that.file.is.not.on = そのファイルはこのハブにありません。
+gpui.quit.backplane = Backplane を終了
+gpui.quit.backplane.on.a.mac = Backplane を終了（Mac）：ハブは動き続けます
 
 # ---- gpui-c: viewers, plots, terminal, drawing pad ----
 gpui.c.commit = コミット
@@ -2076,8 +2078,10 @@ gpui.c.kicad.keep.yours = 自分の編集を残す
 gpui.c.kicad.reload.lose.your.edits = 再読み込み（編集は失われます）
 gpui.c.kicad.a.comment.from.kicad.needs = KiCad からのコメントにはスレッドを開いておく必要があります。
 gpui.kcomment.nothing = 何も選択されていません: 表示中の範囲
-gpui.kcomment.no.capture = KiCad から選択内容を取得できませんでした。メモだけを送ります
+gpui.kcomment.no.capture = KiCad から選択内容を取得できませんでした。Enter でもう一度取得 · Esc で取り消し
 gpui.kcomment.reading = 選択内容を読み取り中…
+gpui.kcomment.waiting = KiCad の選択内容を待っています… 届いたら投稿します
+gpui.kcomment.timeout = KiCad から選択内容が届きませんでした。Enter でもう一度取得 · Esc で取り消し
 gpui.kcomment.hint = Enter でスレッドに投稿 · Esc で取り消し
 gpui.kcomment.not.posted = コメントは投稿されませんでした: {why}
 gpui.keys.kcomment = KiCad で選択中のものにコメント (Backplane からもエディタ内からも): Enter で投稿、Esc で取り消し
@@ -2864,6 +2868,10 @@ gpui.f.inactive = 非アクティブ: 確認できる作業はありません
 gpui.f.tool.runs.nover = {name}が{path}で動作します。
 
 # ---- android: new entries go here ----
+android.mgmt.all = すべて
+android.mgmt.judged = エージェント判定
+android.mgmt.fix = エージェントで直す
+android.mgmt.sent = スレッドに送りました。
 android.mcp = MCP サーバー
 android.alerts.ask = スレッドがあなたを必要とするとき、Bub が通知できます。
 android.alerts.allow = 通知を許可
@@ -4328,6 +4336,7 @@ gpui.mgmt.bom.paused.tip = 部品検索から間隔を空けるよう求めら�
 gpui.keys.mgmt.fab = 設計の横の製造パネルを開く・閉じる
 gpui.mgmt.bom.putback = 元に戻しました。
 gpui.mgmt.bom.nochange = 変更はありません。
+gpui.mgmt.bom.deferred = KiCad で編集中です。編集を終えると変更が反映されます。
 gpui.mgmt.bom.inkicad.save = KiCadで変更しました。残すにはKiCadで保存してください。
 gpui.mgmt.bom.undo.tip = 前の値に戻す
 gpui.mgmt.bom.undo = 元に戻す

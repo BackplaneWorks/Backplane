@@ -300,7 +300,16 @@ def decode_doc_spec(raw: bytes) -> dict:
     return {"type": dtype, "board_filename": board_fn, "sheet_path": sheet_hr, "project_name": proj_name, "project_path": proj_path}
 
 
-EMBED_KIND_MAP = {"pcb": 1, "board": 1, "sch": 2, "schematic": 2, "sym": 3, "fp": 4, "3d": 5}
+EMBED_KIND_MAP = {"pcb": 1, "board": 1, "sch": 2, "schematic": 2, "sym": 3, "fp": 4, "3d": 5, "gerbview": 7}
+
+
+def _decode_frame(raw: bytes) -> dict:
+    """embed.FrameInfo: kind, document, title, window, shown, focused, realized, lib_id (bp.13), files (bp.13)."""
+    f = pb_decode_fields(raw)
+    s = lambda n: f.get(n, [b""])[0].decode("utf-8", "replace")
+    v = lambda n: int(f.get(n, [0])[0])
+    return {"kind": v(1), "document": s(2), "title": s(3), "window": v(5), "shown": bool(v(8)), "focused": bool(v(9)),
+            "realized": bool(v(11)), "lib_id": s(12), "files": [x.decode("utf-8", "replace") for x in f.get(13, [])]}
 
 
 def _decode_double(raw: bytes) -> float:
@@ -579,6 +588,41 @@ def main() -> None:
             found = _decode_item_names(f.get(1, [b""])[0]) if 1 in f else {"references": [], "nets": [], "pins": []}
             not_found = _decode_item_names(f.get(2, [b""])[0]) if 2 in f else {"references": [], "nets": [], "pins": []}
             print(json.dumps({"ok": True, "found": found, "not_found": not_found}))
+            return
+
+        if cmd == "capabilities":  # GetCapabilities: capability names and every registered command (the embedded GUI's own)
+            _, val = cli.call("kiapi.backplane.GetCapabilities", b"")
+            f = pb_decode_fields(val); dec = lambda n: [x.decode("utf-8", "replace") for x in f.get(n, [])]
+            print(json.dumps({"ok": True, "capabilities": dec(5), "commands": dec(6)}))
+            return
+
+        if cmd == "frames":  # GetFrames: every embedded frame
+            _, val = cli.call("kiapi.backplane.embed.GetFrames", b"")
+            print(json.dumps({"ok": True, "frames": [_decode_frame(x) for x in pb_decode_fields(val).get(1, [])]}))
+            return
+
+        if cmd == "events":  # NextEvents since SEQ (no wait): [{seq, type, frame}] and next; reading does not take them from the host
+            _, val = cli.call("kiapi.backplane.embed.NextEvents", pb_field_varint(1, int(args[0]) if args else 0))
+            f = pb_decode_fields(val); evs = []
+            for raw in f.get(1, []):
+                e = pb_decode_fields(raw)
+                evs.append({"seq": int(e.get(1, [0])[0]), "type": int(e.get(2, [0])[0]),
+                            "frame": _decode_frame(e[3][0]) if 3 in e else {}, "detail": e.get(4, [b""])[0].decode("utf-8", "replace")})
+            print(json.dumps({"ok": True, "events": evs, "next": int(f.get(2, [0])[0])}))
+            return
+
+        if cmd == "open-gerbers":  # OpenGerbers FILES(comma) [X Y W H]: shown at that holder rect when given, else hidden (a prewarm)
+            req = b"".join(pb_field_str(1, x) for x in args[0].split(",") if x)
+            if len(args) >= 5:
+                req += pb_field_varint(2, 1) + b"".join(pb_field_varint(n, int(a)) for n, a in zip((3, 4, 5, 6), args[1:5]))
+            _, val = cli.call("kiapi.backplane.embed.OpenGerbers", req)
+            f = pb_decode_fields(val); dec = lambda n: [x.decode("utf-8", "replace") for x in f.get(n, [])]
+            print(json.dumps({"ok": True, "frame": _decode_frame(f[1][0]) if 1 in f else {}, "loaded": dec(2), "failed": dec(3), "errors": dec(4)}))
+            return
+
+        if cmd == "hide-frame":  # HideFrame KIND
+            cli.call("kiapi.backplane.embed.HideFrame", pb_field_varint(1, EMBED_KIND_MAP[args[0]]))
+            print(json.dumps({"ok": True}))
             return
 
         if cmd == "comment-selection":

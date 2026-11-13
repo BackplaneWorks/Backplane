@@ -141,7 +141,10 @@ impl Actor {
             if !p["ok"].as_bool().unwrap_or(false) { let _ = me.send(Msg::Bad { project, why: format!("it did not answer Ping: {}", p["error"].as_str().unwrap_or("")) }); return }
             let o = ask("kiapi.common.commands.GetVersion").await.unwrap_or_else(|_| failed("no reply"));
             let full = o["message"]["version"]["full_version"].as_str().unwrap_or("").to_string();
-            if o["ok"].as_bool().unwrap_or(false) && ks::version_ok(&full, &env.version) { let _ = me.send(Msg::Up { project, version: full }); }
+            // status says the manifest's version (a test build's GetVersion is a describe name, "...-dirty-bp.13"); KiCad's own string is logged
+            if o["ok"].as_bool().unwrap_or(false) && ks::version_ok(&full, &env.version) {
+                eprintln!("kicad ipc: {project} up, KiCad says {full} (manifest {})", env.version);
+                let _ = me.send(Msg::Up { project, version: shown_version(&env.version, &full) }); }
             else { let err = o["error"].as_str().unwrap_or(""); let _ = me.send(Msg::Bad { project, why: if err.is_empty() { format!("this KiCad is {full}, not the {} Backplane installed", env.version) } else { format!("it did not answer GetVersion: {err}") } }); }
         });
     }
@@ -417,15 +420,31 @@ pub fn copy_ipc_refused(copy: bool, type_: &str) -> Option<String> {
     let name = type_.rsplit('.').next().unwrap_or(type_);
     if copy && !is_read(type_) { Some(format!("a hub on a copied log (BACKPLANE_COPY=1) writes nothing outside its home: {name} is not a listed read")) } else { None }
 }
+/// Approval of the routing plan is the person's alone (the fork refuses it for agent clients from bp.13 batch 4, f74ea40f83; this
+/// refuses it on every build): an agent's `kicad_ipc` may not send ApprovePlan, nor RunAction of the plan view's accept, reject,
+/// approve-layer or reject-layer. `plan_approve` asks the person; the Plan panel and KiCad's own plan view are where they decide.
+pub fn approval_refused(type_: &str, msg: &Value) -> Option<String> {
+    const ACTIONS: &[&str] = &["pcbnew.Plan.accept", "pcbnew.Plan.reject", "pcbnew.Plan.approveLayer", "pcbnew.Plan.rejectLayer"];
+    let short = type_.rsplit('.').next().unwrap_or(type_);
+    let action = msg["action"].as_str().unwrap_or("");
+    (short == "ApprovePlan" || (short == "RunAction" && ACTIONS.contains(&action))).then(|| format!("Approval is the person's alone: an agent cannot {}. Ask them with plan_approve and end your turn; Backplane tells you what they decided.", if short == "ApprovePlan" { "send ApprovePlan".to_string() } else { format!("run {action}") }))
+}
 /// The MCP tool `kicad_ipc_status`: Ok({"server","servers","argv","version","capabilities","detail"}); starts the server if it is not running.
 pub async fn kicad_ipc_status(hub: &Arc<Hub>, path: &str) -> Result<Value, String> { kicad_ipc_status_in(hub, None, path).await }
 pub async fn kicad_ipc_status_in(hub: &Arc<Hub>, thread: Option<&str>, path: &str) -> Result<Value, String> { run(hub, thread, path, "kiapi.backplane.GetCapabilities", json!({}), true).await }
 
-async fn run(hub: &Arc<Hub>, thread: Option<&str>, path: &str, ty: &str, msg: Value, status: bool) -> Result<Value, String> {
+/// One command for the project's headless KiCad even while a GUI KiCad has the project: for a document that GUI does not have open
+/// (the hub's BOM edit with only the board, or nothing, open there: a GUI KiCad refuses OpenDocument).
+pub async fn kicad_ipc_headless(hub: &Arc<Hub>, path: &str, type_: &str, message: Value) -> Result<Value, String> {
+    if let Some(why) = copy_ipc_refused(crate::copy::on(), type_) { return Err(why) }
+    run_on(hub, None, path, type_, message, false, false).await
+}
+async fn run(hub: &Arc<Hub>, thread: Option<&str>, path: &str, ty: &str, msg: Value, status: bool) -> Result<Value, String> { run_on(hub, thread, path, ty, msg, status, true).await }
+async fn run_on(hub: &Arc<Hub>, thread: Option<&str>, path: &str, ty: &str, msg: Value, status: bool, gui_first: bool) -> Result<Value, String> {
     let msg = if msg.is_object() { msg } else { json!({}) }; // KIpc.msg: a missing message is {}
     let routed = super::canonical::route(path); let path = &routed; // main's copy, whichever thread named it
     let pro = pro_of(path);
-    if let Some(gui) = (!pro.is_empty()).then(|| super::embed::gui_route(&pro)).flatten() {
+    if let Some(gui) = (gui_first && !pro.is_empty()).then(|| super::embed::gui_route(&pro)).flatten() {
         let plain = check_gui(ty, path, &pro, &msg, &gui.caps);
         if !plain.is_empty() { return Err(plain) }
         if !super::known_root(hub, Path::new(&pro).parent().map(|p| p.to_str().unwrap_or("")).unwrap_or(""), "").await { return Err(format!("{path} is not in a project this hub knows")) }
@@ -495,8 +514,15 @@ impl RpcHandler for IpcRpc {
     }
 }
 
+/// The version a ready server reports: its manifest's when it has one, else what KiCad said.
+fn shown_version(manifest: &str, full: &str) -> String { if manifest.is_empty() { full } else { manifest }.to_string() }
+
 #[cfg(test)]
 mod tests {
+    #[test] fn status_shows_the_manifests_version_and_kicads_own_only_without_one() {
+        assert_eq!(shown_version("10.99.0-bp.13", "backplane-kicad-v10.99.0-bp.7-15-g8d903542-dirty-bp.13"), "10.99.0-bp.13");
+        assert_eq!(shown_version("", "10.99.0-bp.13"), "10.99.0-bp.13");
+    }
     /// A managed install on Windows has `bin\kicad-cli.exe`: the newest version's is found, with a space in the folder name.
     /// An update installs beside the old runtime: a hotfix (bp.12.1) is taken over its release (bp.12) and older ones, whatever the folder order.
     #[test] fn the_hotfix_runtime_is_taken_over_the_release_it_fixes() {
@@ -581,6 +607,10 @@ mod tests {
     }
     #[test] fn a_copy_runs_only_the_listed_kicad_reads() {
         for t in ["kiapi.board.commands.GetItems", "kiapi.common.commands.Ping", "kiapi.backplane.GetCapabilities"] { assert_eq!(copy_ipc_refused(true, t), None, "{t}") }
+        assert!(approval_refused("kiapi.backplane.plan.ApprovePlan", &json!({"layer": "F.Cu", "approve": true})).is_some());
+        for a in ["pcbnew.Plan.accept", "pcbnew.Plan.reject", "pcbnew.Plan.approveLayer", "pcbnew.Plan.rejectLayer"] { assert!(approval_refused("kiapi.common.commands.RunAction", &json!({"action": a})).is_some(), "{a}") }
+        for a in ["pcbnew.Plan.togglePlanView", "pcbnew.Plan.toggleLock", "common.Control.zoomFitScreen"] { assert_eq!(approval_refused("kiapi.common.commands.RunAction", &json!({"action": a})), None, "{a}") }
+        assert_eq!(approval_refused("kiapi.backplane.plan.GetPlan", &json!({})), None);
         for t in ["kiapi.common.commands.SaveDocument", "kiapi.board.commands.CreateItems", "kiapi.board.commands.BeginCommit", "kiapi.board.commands.EndCommit", "kiapi.backplane.Shutdown", "", "GetItemsX.Delete"] { assert!(copy_ipc_refused(true, t).is_some(), "{t}") }
         assert_eq!(copy_ipc_refused(false, "kiapi.common.commands.SaveDocument"), None);
     }

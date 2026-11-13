@@ -185,6 +185,11 @@ impl Profile {
     }
 }
 
+/// How old a value may be (days since it was read off the fab's page) before it counts as stale: the bundled baseline's test fails
+/// past it (a new, copy or offline hub designs against the baseline until its first refresh) and the review notes a stale value it uses.
+pub const MAX_AGE_DAYS: i64 = 120;
+/// "2026-11-12" as days since 1970-01-01 (UTC).
+pub fn day(s: &str) -> i64 { let n = |a: usize, k: usize| s.get(a..a + k).and_then(|x| x.parse().ok()).unwrap_or(0); crate::google::cal::days(n(0, 4), n(5, 2), n(8, 2)) }
 /// The values that hold for one board: per key the free one and the one that costs more (either may be missing).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Sel { pub key: String, pub free: Option<Limit>, pub extra: Option<Limit>, pub inherited: bool }
@@ -271,6 +276,19 @@ fn same(a: &Value, b: &Value) -> bool {
 }
 
 /// A value as agents and clients get it.
+/// Backplane's own recommended values, above the fab's minimum where the margin buys yield and a cheaper, faster board: one table, for
+/// `fab_profile` (each limit's `recommended`), the design review's notes and the agents' prompt. A design between the fab's limit and
+/// this is a note, never a must-change.
+pub const RECOMMENDED: &[(&str, f64, &str)] = &[
+    ("track_min", 0.127, "5 mil tracks: every rigid-board fab makes them at its base price and etching variation leaves margin"),
+    ("space_min", 0.127, "5 mil gaps: the same margin for spacing"),
+    ("via_hole_min", 0.3, "a 0.3 mm via hole drills at the base price at most fabs and plates reliably through a 1.6 mm board"),
+    ("via_diameter_min", 0.45, "a 0.45 mm via pad around a 0.3 mm hole leaves a 0.075 mm ring with drill wander"),
+    ("copper_to_edge_min", 0.3, "0.3 mm from the routed edge keeps copper clear of the router's tolerance and of exposed copper at the edge"),
+];
+/// Backplane's recommended value for a limit and why, when it has one.
+pub fn recommended(key: &str) -> Option<(f64, &'static str)> { RECOMMENDED.iter().find(|r| r.0 == key).map(|r| (r.1, r.2)) }
+
 pub fn limit_json(l: &Limit) -> Value {
     let mut v = json!({"value": l.value, "unit": l.unit, "source": l.source, "fetched": l.fetched, "confidence": l.confidence});
     if !l.note.is_empty() { v["note"] = json!(l.note) }
@@ -282,6 +300,8 @@ pub fn sel_json(s: &Sel, changed: &[String]) -> Value {
     if let Some(f) = &s.free { v["free"] = limit_json(f) }
     if let Some(e) = &s.extra { v["extra"] = limit_json(e) }
     if s.inherited { v["inherited"] = json!(true) }
+    // Backplane's recommendation, where it asks more than the fab's base-price limit
+    if let Some((r, why)) = recommended(&s.key) { if s.free.as_ref().and_then(Limit::num).map_or(true, |f| r > f + 1e-9) { v["recommended"] = json!({"value": r, "unit": "mm", "by": "Backplane", "why": why}) } }
     if changed.contains(&s.key) { v["changed"] = json!(true) }
     v
 }
@@ -309,6 +329,32 @@ mod tests {
             assert!(!l.note.is_empty(), "{at} {} says nothing of where on the page it is", l.key);
         }
         for s in &p.stackups { assert!(s.source.starts_with("https://") && s.fetched.len() == 10, "{}", s.id); let t: f64 = s.seq.iter().map(|p| p.thickness_mm).sum(); assert!((t - s.thickness_mm).abs() <= 0.2, "{} adds up to {t}", s.id) }
+    }
+    #[test] fn fab_model_no_baseline_value_is_older_than_its_bound() {
+        let today = day(&super::super::gather::today());
+        let mut old = vec![];
+        for (fab, text) in super::super::store::BASELINE {
+            let p = Profile::parse(text).unwrap();
+            let dates = p.all().into_iter().map(|(at, l)| (format!("{at} {}", l.key), l.fetched.clone())).chain(p.stackups.iter().map(|s| (format!("stackup {}", s.id), s.fetched.clone())));
+            for (what, d) in dates { let age = today - day(&d); if age > MAX_AGE_DAYS { old.push(format!("{fab} {what}: read {d}, {age} days ago")) } }
+        }
+        assert!(old.is_empty(), "{} bundled values are older than {MAX_AGE_DAYS} days; read the fab's pages again (FAB_LIVE_HOME=<temp home> cargo test fab_gather_live_refresh -- --ignored) and update fab/baseline/:\n{}", old.len(), old.join("\n"));
+    }
+    #[test] fn fab_model_the_age_bound_sees_an_old_date() {
+        assert_eq!(day("2026-11-12") - day("2026-07-15"), 120); assert_eq!(day("2027-03-12") - day("2026-11-12"), 120);
+        assert!(day("2026-11-12") - day("2026-07-14") > MAX_AGE_DAYS);
+    }
+    #[test] fn fab_model_backplane_recommends_from_one_table_and_only_above_the_fab() {
+        let p = baseline(); let sel = select(&p, "pcb", &Opts { layers: 2.0, ..Default::default() });
+        let j = |k: &str| sel_json(sel.iter().find(|s| s.key == k).unwrap(), &[]);
+        assert_eq!(j("track_min")["recommended"]["value"], json!(0.127), "the fab's 0.1 mm, Backplane's 0.127");
+        assert_eq!(j("via_hole_min")["recommended"]["value"], json!(0.3)); assert_eq!(j("copper_to_edge_min")["recommended"]["value"], json!(0.3));
+        assert!(j("via_hole_min")["recommended"]["why"].as_str().unwrap().len() > 10);
+        assert!(j("pth_ring_min").get("recommended").is_none(), "no recommendation of Backplane's: the fab's own preferred stands");
+        // a fab limit already above the recommendation (2 oz copper's 0.16 mm tracks): nothing to recommend
+        let heavy = select(&p, "pcb", &Opts { layers: 2.0, copper_oz: 2.0, ..Default::default() });
+        assert!(sel_json(heavy.iter().find(|s| s.key == "track_min").unwrap(), &[]).get("recommended").is_none());
+        for (k, v, _) in RECOMMENDED { assert!(!label(k).is_empty() && *v > 0.0, "{k}") }
     }
     #[test] fn fab_model_the_tier_follows_layers_copper_and_cost() {
         let p = baseline();

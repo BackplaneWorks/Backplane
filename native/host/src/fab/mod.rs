@@ -63,7 +63,10 @@ pub fn drc_plan(root: &Path, p: &Profile, c: &project::Choice) -> Option<(PathBu
     let dru = drc::dru_path(&pro)?;
     let rules = drc::project_rules(&std::fs::read_to_string(&pro).unwrap_or_default());
     let text = std::fs::read_to_string(&dru).unwrap_or_default();
-    Some((dru, drc::plan(p, c, &rules, &text)))
+    let mut plan = drc::plan(p, c, &rules, &text);
+    // an open KiCad that places new rules first takes the whole fab section ahead of the person's rules (drc::Plan.insert_first)
+    plan.insert_first = crate::files::kicad::embed::gui_route(&pro).map_or(false, |r| r.caps.iter().any(|c| c == "rules-insert-position"));
+    Some((dru, plan))
 }
 
 /// The design root of a thread (main's checkout for a hardware thread) or of a project by id.
@@ -77,7 +80,44 @@ fn sv<'a>(v: &'a Value, k: &str) -> &'a str { v.get(k).and_then(Value::as_str).u
 
 /// get (default), pick {fab?, kind?, options?} (kept with the project; marks the current revision seen), seen (the changes are read).
 pub async fn act(hub: &Arc<Hub>, thread: &str, project: &str, a: &Value) -> Result<Value, String> { let root = root_for(hub, thread, project).await; act_in(hub, root, a).await }
+/// The section into the project's rules: through the open KiCad when there is one (EditCustomRules: KiCad merges by rule name, keeps
+/// every other rule, and its live DRC and router use the result at once; nothing is written behind its back), else into the file.
+/// Answers what was done ({"via": "kicad"|"file", "left_out": [...]}).
+pub async fn write_rules(dru: &Path, pro: &str, pcb: &str, plan: &drc::Plan) -> Result<Value, String> {
+    if crate::copy::on() { return Err(crate::copy::HOME_ONLY.into()) }
+    if let Some(route) = crate::files::kicad::embed::gui_route(pro).filter(|r| r.caps.iter().any(|c| c == "rules-merge")) {
+        let text = std::fs::read_to_string(dru).unwrap_or_default();
+        let (mut msg, left) = drc::edit_message(&text, plan);
+        if msg["upsert"].as_array().map_or(true, Vec::is_empty) && msg["remove"].as_array().map_or(true, Vec::is_empty) { return Ok(json!({"via": "kicad", "changed": false, "left_out": left})) }
+        msg["board"] = setup::spec(pcb);
+        let me = crate::files::kicad::coedit::client_name(&crate::files::kicad::coedit::Who::Hub("fab"));
+        let o = crate::files::kicad::embed::gui_call_as(&route, "kiapi.backplane.coedit.EditCustomRules", msg, &me).await;
+        if !o["ok"].as_bool().unwrap_or(false) { return Err(format!("KiCad: {}", o["error"].as_str().unwrap_or("no answer"))) }
+        if o["message"]["status"].as_str() == Some("CRS_INVALID") { return Err(format!("KiCad refused the fab's rules: {}", o["message"]["error_text"].as_str().unwrap_or(""))) }
+        return Ok(json!({"via": "kicad", "changed": true, "left_out": left}))
+    }
+    let (d, p) = (dru.to_path_buf(), plan.clone());
+    tokio::task::spawn_blocking(move || drc::write(&d, &p)).await.map_err(|_| "failed".to_string())??;
+    Ok(json!({"via": "file", "changed": true, "left_out": []}))
+}
+/// The project's rules file, its section's plan and the project's .kicad_pro and board.
+fn rules_target(home: &Path, r: &Path) -> Result<(PathBuf, drc::Plan, String, String), String> {
+    let c = choice(r); let p = profile_of(home, &c.fab)?;
+    let Some((dru, plan)) = drc_plan(r, &p, &c) else { return Err("this project has no KiCad project (.kicad_pro) to keep DRC rules beside".to_string()) };
+    let f = crate::files::kicad::project::read(&r.to_string_lossy());
+    Ok((dru, plan, f.pro, f.pcb))
+}
+
 pub async fn act_in(hub: &Arc<Hub>, root: Option<PathBuf>, a: &Value) -> Result<Value, String> {
+    // the fab's limits into the project's rules, its own rules kept (drc.rs): through KiCad when it has the project open
+    if sv(a, "action") == "drc" {
+        let r = root.clone().ok_or("this thread has no project folder")?; let home = hub.cfg.home.clone();
+        let (dru, plan, pro, pcb) = { let (h, r) = (home.clone(), r.clone()); tokio::task::spawn_blocking(move || rules_target(&h, &r)).await.map_err(|_| "failed".to_string())?? };
+        let how = write_rules(&dru, &pro, &pcb, &plan).await?;
+        let mut v = tokio::task::spawn_blocking(move || view_in(&home, Some(&r))).await.map_err(|_| "failed".to_string())??;
+        v["drc"]["written"] = json!(true); v["drc"]["via"] = how["via"].clone(); v["drc"]["left_out"] = how["left_out"].clone();
+        return Ok(v)
+    }
     // a board setup suggestion the person approved (the panel's Apply)
     if sv(a, "action") == "apply" { let r = root.as_deref().ok_or("this thread has no project folder")?; return setup::apply(hub, r, sv(a, "key")).await }
     // read the fab's published pages again now (the project's fab, or the one named)
@@ -87,8 +127,8 @@ pub async fn act_in(hub: &Arc<Hub>, root: Option<PathBuf>, a: &Value) -> Result<
         if let Some(r) = root.as_deref() { let (home, r) = (hub.cfg.home.clone(), r.to_path_buf()); if let Ok(Ok(view)) = tokio::task::spawn_blocking(move || view_in(&home, Some(&r))).await { v["profile"] = view } }
         return Ok(v)
     }
-    let home = hub.cfg.home.clone(); let a = a.clone();
-    tokio::task::spawn_blocking(move || {
+    let home = hub.cfg.home.clone(); let a = a.clone(); let root2 = root.clone();
+    let mut out = tokio::task::spawn_blocking(move || {
         let action = match sv(&a, "action") { "" => "get", x => x };
         match action {
             "get" => view_in(&home, root.as_deref()),
@@ -110,21 +150,25 @@ pub async fn act_in(hub: &Arc<Hub>, root: Option<PathBuf>, a: &Value) -> Result<
                 let options = match a.get("options") { Some(o @ Value::Object(_)) if action == "pick" => o.clone(), _ => c.options.clone() };
                 let tier = if action == "pick" && !sv(&a, "tier").is_empty() { sv(&a, "tier").to_string() } else { c.tier.clone() };
                 project::write(r, &fab, &kind, &options, &tier, p.rev)?;
-                // a rules file that has the section follows the new pick
-                if let Some((dru, plan)) = drc_plan(r, &p, &choice(r)) { if drc::section(&std::fs::read_to_string(&dru).unwrap_or_default()).is_some() { drc::write(&dru, &plan)?; } }
-                view_in(&home, Some(r))
-            }
-            // the fab's limits into the project's rules file, its own rules kept (drc.rs)
-            "drc" => {
-                let Some(r) = root.as_deref() else { return Err("this thread has no project folder".to_string()) };
-                let c = choice(r); let p = profile_of(&home, &c.fab)?;
-                let Some((dru, plan)) = drc_plan(r, &p, &c) else { return Err("this project has no KiCad project (.kicad_pro) to keep DRC rules beside".to_string()) };
-                drc::write(&dru, &plan)?;
-                let mut v = view_in(&home, Some(r))?; v["drc"]["written"] = json!(true); Ok(v)
+                // a rules file that has the fab's rules follows the new pick (below, through KiCad when it is open)
+                let mut v = view_in(&home, Some(r))?;
+                if drc_plan(r, &p, &choice(r)).map_or(false, |(dru, _)| drc::present(&std::fs::read_to_string(&dru).unwrap_or_default())) { v["_rewrite"] = json!(true) }
+                Ok(v)
             }
             x => Err(format!("unknown action {x:?}: get, pick, seen, drc or refresh")),
         }
-    }).await.unwrap_or_else(|_| Err("failed".into()))
+    }).await.unwrap_or_else(|_| Err("failed".into()))?;
+    // a new pick: the fab's rules already in the project follow it
+    if out.get("_rewrite").is_some() {
+        if let Some(obj) = out.as_object_mut() { obj.remove("_rewrite"); }
+        if let Some(r) = root2 {
+            let h = hub.cfg.home.clone();
+            let (dru, plan, pro, pcb) = tokio::task::spawn_blocking(move || rules_target(&h, &r)).await.map_err(|_| "failed".to_string())??;
+            let how = write_rules(&dru, &pro, &pcb, &plan).await?;
+            out["drc"]["written"] = json!(true); out["drc"]["via"] = how["via"].clone(); out["drc"]["current"] = json!(true);
+        }
+    }
+    Ok(out)
 }
 
 pub struct Rpc;
@@ -148,7 +192,7 @@ impl RpcHandler for Rpc {
 pub struct Tools(pub Arc<Hub>);
 pub const TOOL: &str = "fab_profile";
 pub fn tool_def() -> Value {
-    json!({"name": TOOL, "description": "The project's fab profile: what the fab it is made at can make, read from the fab's published pages. Per capability (track width, spacing, drills, via hole and diameter, rings, hole and edge clearances, silkscreen, solder mask, board size, finishes, via types, ...) the free limit and the one that costs more, each with its unit, source page, the day it was read and its confidence (published, derived or inherited); the stackups that fit the board; stackup: the one picked, else proposed (best first in proposals, each with why; propose it to the person, pick it only when they agree), and per copper layer (F.Cu, In1.Cu, ... B.Cu) its reference planes above and below with the dielectric's height and Er, and the trace widths for the project's impedances (key 50, pairs as 90d at diff_gap_mm; closed-form estimates): feed these to floorplanning, stackup and routing; the assembly services' limits. Use these numbers, with their source, instead of remembered ones. get (default): the profile for the project's fab, board kind and options (picked, else its board fab file's, else its KiCad board's layers and thickness). pick: keep the fab, kind (pcb, flex, hdi, aluminum, copper_core, rogers, ptfe), options (layers, copper_oz, thickness_mm, finish, color; and for impedance work impedance [ohms], diff_impedance [ohms], diff_gap_mm, stackup: a published stackup's id) and tier (free: DRC holds the board to the fab's base-price limits, the default; extra: to what it makes for more) with the project; only when the person chose them. seen: mark the changes since the project last looked as read. drc: write the fab's limits into the project's .kicad_dru as a marked section (the project's own rules and stricter settings are kept and win); drc in the answer says whether that section is current, the board setup minimums under the fab's (suggestions: tell the person, never change the board setup yourself) and the project's own rules that allow less than the fab (conflicts). refresh: read the fab's published pages again now (Backplane also does daily); values it cannot read keep their old value and date.",
+    json!({"name": TOOL, "description": "The project's fab profile: what the fab it is made at can make, read from the fab's published pages. Per capability (track width, spacing, drills, via hole and diameter, rings, hole and edge clearances, silkscreen, solder mask, board size, finishes, via types, ...) the free limit and the one that costs more, each with its unit, source page, the day it was read and its confidence (published, derived or inherited), and where Backplane recommends more than the fab's base-price limit its `recommended` value and why (a design between the two is a note, not a must-change); the stackups that fit the board; stackup: the one picked, else proposed (best first in proposals, each with why; propose it to the person, pick it only when they agree), and per copper layer (F.Cu, In1.Cu, ... B.Cu) its reference planes above and below with the dielectric's height and Er, and the trace widths for the project's impedances (key 50, pairs as 90d at diff_gap_mm; closed-form estimates): feed these to floorplanning, stackup and routing; the assembly services' limits. Use these numbers, with their source, instead of remembered ones. get (default): the profile for the project's fab, board kind and options (picked, else its board fab file's, else its KiCad board's layers and thickness). pick: keep the fab, kind (pcb, flex, hdi, aluminum, copper_core, rogers, ptfe), options (layers, copper_oz, thickness_mm, finish, color; and for impedance work impedance [ohms], diff_impedance [ohms], diff_gap_mm, stackup: a published stackup's id) and tier (free: DRC holds the board to the fab's base-price limits, the default; extra: to what it makes for more) with the project; only when the person chose them. seen: mark the changes since the project last looked as read. drc: write the fab's limits into the project's DRC rules, through KiCad when it has the project open (the project's own rules and stricter settings are kept and win; via says how, left_out names any fab rule left out so the person's own rule keeps deciding); drc in the answer says whether that section is current, the board setup minimums under the fab's (suggestions: tell the person, never change the board setup yourself) and the project's own rules that allow less than the fab (conflicts). refresh: read the fab's published pages again now (Backplane also does daily); values it cannot read keep their old value and date.",
         "inputSchema": {"type": "object", "properties": {
             "action": {"type": "string", "description": "get (default), pick, seen, drc or refresh"},
             "tier": {"type": "string", "description": "pick: free (default) or extra"},

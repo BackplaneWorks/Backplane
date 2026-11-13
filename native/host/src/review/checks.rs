@@ -81,9 +81,8 @@ pub fn usage(pcb: &str) -> Usage {
 /// the board setup minimums under the fab's.
 pub fn drc_section(plan: &drc::Plan, dru_text: &str, dru_rel: &str) -> Vec<Finding> {
     let mut v = vec![];
-    let cur = drc::section(dru_text);
-    if cur != Some(plan.section.as_str()) {
-        let (t, d) = if cur.is_none() { ("The fab's limits are not in the project's DRC rules", "DRC does not check the board against the fab: tracks, holes, rings and clearances the fab cannot make pass unseen.") }
+    if !drc::current(dru_text, plan) {
+        let (t, d) = if !drc::present(dru_text) { ("The fab's limits are not in the project's DRC rules", "DRC does not check the board against the fab: tracks, holes, rings and clearances the fab cannot make pass unseen.") }
             else { ("The project's DRC rules have older fab limits", "The fab's profile, the board's options or its net classes changed since the section was written.") };
         v.push(finding("fab", "warning", "fab_rules_section", t.into(), d.into(), vec![file_anchor(dru_rel)], "Call fab_profile with action \"drc\" (the Fab panel's Write): it writes the fab's section and keeps every rule of the project's own"));
     }
@@ -134,16 +133,26 @@ pub fn fab_checks(p: &Profile, c: &Choice, fab_json: &Value, fab_rel: &str, u: &
         let (mx, my) = (get(&sel, "board_max_x").and_then(|s| s.free.as_ref()).and_then(Limit::num), get(&sel, "board_max_y").and_then(|s| s.free.as_ref()).and_then(Limit::num));
         if let (Some(mx), Some(my)) = (mx, my) { if long > mx || short > my { v.push(finding("fab", "error", "fab_board_size", format!("The board, {} by {}, is over the fab's largest {} by {}", mm(long), mm(short), mm(mx), mm(my)), String::new(), fa(), "Make it smaller or split it")) } }
     }
-    if let Some((w, a)) = &u.track_min { against(&mut v, &sel, "track_min", "The narrowest track,", *w, a.clone(), Some(0.127)) }
+    if let Some((w, a)) = &u.track_min { against(&mut v, &sel, "track_min", "The narrowest track,", *w, a.clone(), model::recommended("track_min").map(|r| r.0)) }
     if let Some((d, h, a)) = &u.via_min {
         let micro = a.text.starts_with("Micro");
         if micro { against(&mut v, &sel, "microvia_hole_min", "The smallest microvia hole,", *h, a.clone(), None) } else {
-            against(&mut v, &sel, "via_hole_min", "The smallest via hole,", *h, a.clone(), Some(0.3));
-            against(&mut v, &sel, "via_diameter_min", "The smallest via diameter,", *d, a.clone(), Some(0.45));
+            against(&mut v, &sel, "via_hole_min", "The smallest via hole,", *h, a.clone(), model::recommended("via_hole_min").map(|r| r.0));
+            against(&mut v, &sel, "via_diameter_min", "The smallest via diameter,", *d, a.clone(), model::recommended("via_diameter_min").map(|r| r.0));
         }
     }
     if let Some((d, a)) = &u.drill_min { against(&mut v, &sel, "drill_min", "The smallest pad hole,", *d, a.clone(), None) }
+    v.extend(stale(&sel, &crate::fab::gather::today()));
     v
+}
+/// One note naming each of the board's profile values (its kind and options) that was read more than model::MAX_AGE_DAYS ago (the fab's page could not be read
+/// again since): the value may no longer be the fab's.
+pub fn stale(sel: &[Sel], today: &str) -> Vec<Finding> {
+    let now = model::day(today);
+    let old: Vec<String> = sel.iter().flat_map(|s| s.free.iter().chain(s.extra.iter())).filter(|l| now - model::day(&l.fetched) > model::MAX_AGE_DAYS)
+        .map(|l| format!("{} ({}, read {}, {} days ago)", model::label(&l.key), l.cost, l.fetched, now - model::day(&l.fetched))).collect();
+    if old.is_empty() { return vec![] }
+    vec![finding("fab", "info", "fab_stale", format!("{} of the fab's values for this board were read more than {} days ago", old.len(), model::MAX_AGE_DAYS), format!("The fab's pages could not be read again since, so these may no longer be its limits: {}.", old.join("; ")), vec![], "Refresh the fab profile (fab_profile action \"refresh\"); check the values against the fab's pages if it still cannot read them")]
 }
 
 // ---- (c) the BOM ----
@@ -316,6 +325,15 @@ mod tests {
         let four = fab_checks(&p, &choice(json!({"layers": 4, "finish": "pink"})), &json!({"options": {"finish": "pink"}}), "a.fab.json", &u);
         assert!(four.iter().any(|f| f.rule == "fab_option_board"), "the fab file says 4, the board 2"); assert!(four.iter().any(|f| f.rule == "fab_option" && f.title.starts_with("Finish")));
         assert!(!four.iter().any(|f| f.rule == "fab_limit"), "0.09 mm is the 4-layer free limit");
+    }
+    #[test] fn review_check_notes_values_read_too_long_ago() {
+        let p = store::baseline("jlcpcb").unwrap(); let sel = model::select(&p, "pcb", &choice(json!({"layers": 2})).opts());
+        let read = sel.iter().filter_map(|s| s.free.as_ref()).map(|l| l.fetched.clone()).max().unwrap();
+        assert!(stale(&sel, &read).is_empty(), "read today: nothing stale");
+        assert!(stale(&sel, &crate::google::cal::plus_days(&read, model::MAX_AGE_DAYS)).is_empty(), "the bound itself is not stale");
+        let f = stale(&sel, &crate::google::cal::plus_days(&read, model::MAX_AGE_DAYS + 1));
+        assert_eq!((f.len(), f[0].rule.as_str(), f[0].severity.as_str()), (1, "fab_stale", "info"));
+        assert!(f[0].detail.contains("Minimum track width") || f[0].detail.contains("track"), "{}", f[0].detail); assert!(f[0].detail.contains("121 days ago"), "{}", f[0].detail);
     }
     #[test] fn review_check_the_drc_section_and_its_conflicts() {
         let p = store::baseline("jlcpcb").unwrap(); let c = choice(json!({"layers": 2}));

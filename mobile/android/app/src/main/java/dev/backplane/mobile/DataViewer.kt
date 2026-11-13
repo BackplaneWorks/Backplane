@@ -74,7 +74,7 @@ fun ViewerScreen(thread: DThread, file: String = "", line: Int = 0, back: () -> 
         files = runCatching { DataClient.viewerFiles(thread.id) }.getOrNull(); if (files?.pcb?.isNotEmpty() == true && tab == "Files" && file.isEmpty()) tab = "Board"
         DataClient.openViewerTab?.takeIf { it in tabs }?.let { tab = it; DataClient.openViewerTab = null }
     }
-    DisposableEffect(thread.id) { onDispose { DataClient.stopWatch(thread.id) } }
+    DisposableEffect(thread.id) { DataClient.viewerThread = thread.id; onDispose { DataClient.stopWatch(thread.id); DataClient.lightRefs = emptyList() } }
     Column(Modifier.fillMaxSize()) {
         DBar(Msg.android_viewer_title(thread.title.ifEmpty { Msg.thread_new }), back)
         Row(Modifier.fillMaxWidth().background(dcs.surfaceVariant).horizontalScroll(rememberScrollState())) {
@@ -85,8 +85,9 @@ fun ViewerScreen(thread: DThread, file: String = "", line: Int = 0, back: () -> 
         DLine()
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when (tab) {
-                "Board" -> PlotTab(thread, "board", target?.path?.takeIf { target?.tab == "Board" } ?: "", files == null || files?.pcb.orEmpty().isNotEmpty() || target != null, Msg.android_viewer_noboard)
-                "Schematic" -> PlotTab(thread, "schematic", target?.path?.takeIf { target?.tab == "Schematic" } ?: "", files == null || files?.sch.orEmpty().isNotEmpty() || target != null, Msg.android_viewer_nosch)
+                // the management panels (BOM, Checks, Lifecycle, Fab) beside the drawing: tabs under it, a panel over its lower part (DataMgmt.kt)
+                "Board" -> Column(Modifier.fillMaxSize()) { Box(Modifier.weight(1f)) { PlotTab(thread, "board", target?.path?.takeIf { target?.tab == "Board" } ?: "", files == null || files?.pcb.orEmpty().isNotEmpty() || target != null, Msg.android_viewer_noboard) }; MgmtHost(files?.root.orEmpty()) }
+                "Schematic" -> Column(Modifier.fillMaxSize()) { Box(Modifier.weight(1f)) { PlotTab(thread, "schematic", target?.path?.takeIf { target?.tab == "Schematic" } ?: "", files == null || files?.sch.orEmpty().isNotEmpty() || target != null, Msg.android_viewer_nosch) }; MgmtHost(files?.root.orEmpty()) }
                 "3D" -> PlotTab(thread, "3d", "", files == null || files?.pcb.orEmpty().isNotEmpty(), Msg.android_viewer_noboard)
                 "Split" -> SplitTab(thread, files)
                 "Diff" -> DiffTab(thread)
@@ -134,6 +135,14 @@ private fun PlotTab(thread: DThread, kind: String, path: String, has: Boolean, n
         Unit
     }; Unit }
     LaunchedEffect(kind, path, bits) { if (!three && bits != 0 && DataClient.has("layers")) act("", "") }
+    // a management row (a BOM line, a finding) lights its parts here, through the hub's probe of the plot on show
+    val asked = DataClient.lightRefs
+    LaunchedEffect(asked, frame?.key) {
+        val k = frame?.key ?: return@LaunchedEffect
+        if (three) return@LaunchedEffect
+        lit = asked.flatMap { r -> runCatching { DataClient.probe(k, "ref", r) }.getOrDefault(emptyList()) }.distinct()
+        if (BuildConfig.DEBUG) android.util.Log.i("bpview", "$kind: lit ${asked.joinToString(",")} -> ${lit.size}")
+    }
     val off = layers?.off ?: 0; val dim = layers?.dim ?: 0; val lift = layers?.lift ?: 255
     // debug builds: what is on show, by the hub's keys, to logcat (tag bpview; the switch test reads it: an interop view's semantics do not reach uiautomator)
     val onShow = listOfNotNull(frame?.key, mesh?.takeIf { it.mesh != null }?.key).joinToString(" + ").ifEmpty { "nothing" }

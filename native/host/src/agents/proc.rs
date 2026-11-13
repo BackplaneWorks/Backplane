@@ -168,7 +168,24 @@ mod reaper { pub fn add(_pid: u32) {} pub fn remove(_pid: u32) {} }
 pub(crate) fn watch_group(pid: u32) { reaper::add(pid); }
 pub(crate) fn unwatch_group(pid: u32) { reaper::remove(pid); }
 
-/// `backplane-hub --agent-reaper`: read "+pid" / "-pid" lines from stdin; at end of input (the hub is gone) kill each process group still listed. Returns the exit code.
+/// How long the reaper lets each agent group end on SIGTERM before SIGKILL (#1109: a Claude CLI killed outright in the middle of its OAuth refresh leaves its refresh lock behind,
+/// and every later start in that account folder refuses to refresh).
+pub const REAPER_GRACE: std::time::Duration = std::time::Duration::from_millis(2500);
+/// End each listed process group: SIGTERM to all at once, then wait up to `grace` for them to go, then SIGKILL to each group (and its leader) still there.
+/// Returns how many groups needed the SIGKILL.
+pub fn end_groups(pids: &[i32], grace: std::time::Duration) -> usize {
+    use crate::plat::proc::{group_alive, kill, kill_group, KILL, TERM};
+    let pids: Vec<u32> = pids.iter().filter(|p| **p > 1).map(|p| *p as u32).collect();
+    for &p in &pids { kill_group(p, TERM); kill(p, TERM); }
+    let gone = |p: u32| !group_alive(p);
+    let end = std::time::Instant::now() + grace;
+    while std::time::Instant::now() < end && !pids.iter().all(|p| gone(*p)) { std::thread::sleep(std::time::Duration::from_millis(50)) }
+    let mut n = 0;
+    for &p in &pids { if !gone(p) { n += 1; kill_group(p, KILL); kill(p, KILL); } }
+    n
+}
+
+/// `backplane-hub --agent-reaper`: read "+pid" / "-pid" lines from stdin; at end of input (the hub is gone) end each process group still listed (`end_groups`: TERM, a short grace, KILL). Returns the exit code.
 pub fn reaper_main() -> i32 {
     use std::io::BufRead;
     let mut live = std::collections::BTreeSet::<i32>::new();
@@ -178,7 +195,7 @@ pub fn reaper_main() -> i32 {
         let Ok(pid) = n.trim().parse::<i32>() else { continue };
         match sign { "+" => { live.insert(pid); } "-" => { live.remove(&pid); } _ => {} }
     }
-    for pid in live { if pid > 1 { crate::plat::proc::kill_group(pid as u32, crate::plat::proc::KILL); crate::plat::proc::kill(pid as u32, crate::plat::proc::KILL); } }
+    end_groups(&live.into_iter().collect::<Vec<_>>(), REAPER_GRACE);
     0
 }
 
@@ -288,6 +305,37 @@ mod tests {
         assert!(e.signal.is_some() || e.code.is_some());
         for _ in 0..50 { if !alive(kid) { break } tokio::time::sleep(std::time::Duration::from_millis(50)).await }
         assert!(!alive(kid), "the child's own child outlived it"); assert!(!alive(p.pid));
+    }
+    /// A group whose leader prints "ready" once its TERM trap is set; a thread reaps it (in the hub the reaper is never the agents' parent, so it never holds a zombie).
+    #[cfg(unix)]
+    fn group(d: &Path, name: &str, body: &str) -> u32 {
+        use std::io::BufRead;
+        let p = script(d, name, body);
+        let mut c = crate::proc::std_cmd(crate::proc::Kind::Local, &p); c.stdout(Stdio::piped()).stdin(Stdio::null()); crate::plat::proc::own_group(&mut c);
+        let mut ch = c.spawn().unwrap(); let pid = ch.id();
+        let mut l = String::new(); std::io::BufReader::new(ch.stdout.take().unwrap()).read_line(&mut l).unwrap(); assert_eq!(l.trim(), "ready");
+        std::thread::spawn(move || { let _ = ch.wait(); });
+        pid
+    }
+    #[cfg(unix)]
+    #[test] fn the_reaper_asks_with_term_first_so_an_agent_can_clean_up() { // #1109: a CLI mid-refresh gets to remove its lock
+        let d = dir("reap-term"); let out = d.join("cleaned");
+        let pid = group(&d, "polite", &format!("trap 'echo done > \"{}\"; exit 0' TERM\necho ready\nwhile :; do sleep 0.05; done", out.display()));
+        let t = std::time::Instant::now();
+        assert_eq!(end_groups(&[pid as i32], std::time::Duration::from_secs(5)), 0, "it ended on TERM, no KILL was needed");
+        assert!(t.elapsed() < std::time::Duration::from_secs(4), "the reaper does not sit out the whole grace once the group is gone");
+        assert_eq!(std::fs::read_to_string(&out).unwrap_or_default().trim(), "done", "its TERM handler ran");
+        assert!(!crate::plat::proc::group_alive(pid));
+    }
+    #[cfg(unix)]
+    #[test] fn the_reaper_kills_what_is_left_after_the_grace() {
+        let d = dir("reap-kill");
+        let pid = group(&d, "stubborn", "trap '' TERM\necho ready\nwhile :; do sleep 0.05; done");
+        let t = std::time::Instant::now();
+        assert_eq!(end_groups(&[pid as i32, 0, 1, -5], std::time::Duration::from_millis(300)), 1, "one group needed the KILL; 0, 1 and negatives are never signalled");
+        assert!(t.elapsed() >= std::time::Duration::from_millis(300), "it waited the grace");
+        for _ in 0..50 { if !crate::plat::proc::group_alive(pid) { break } std::thread::sleep(std::time::Duration::from_millis(50)) }
+        assert!(!crate::plat::proc::group_alive(pid), "nothing of the group is left");
     }
     #[tokio::test] async fn an_overlong_line_is_cut_not_buffered_whole() {
         let data = format!("{}\nshort\n", "x".repeat(5000)); let mut r = BufReader::new(data.as_bytes());

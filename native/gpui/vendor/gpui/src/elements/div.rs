@@ -21,7 +21,7 @@ use crate::{
     Hitbox, HitboxBehavior, HitboxId, InspectorElementId, IntoElement, IsZero, KeyContext,
     KeyDownEvent, KeyUpEvent, KeyboardButton, KeyboardClickEvent, LayoutId, ModifiersChangedEvent,
     MouseButton, MouseClickEvent, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Overflow,
-    ParentElement, Pixels, Point, Render, ScrollWheelEvent, SharedString, Size, Style,
+    ParentElement, PinchEvent, Pixels, Point, Render, ScrollWheelEvent, SharedString, Size, Style,
     StyleRefinement, Styled, Task, TooltipId, Visibility, Window, WindowControlArea, point, px,
     size,
 };
@@ -314,6 +314,19 @@ impl Interactivity {
         listener: impl Fn(&ScrollWheelEvent, &mut Window, &mut App) + 'static,
     ) {
         self.scroll_wheel_listeners
+            .push(Box::new(move |event, phase, hitbox, window, cx| {
+                if phase == DispatchPhase::Bubble && hitbox.should_handle_scroll(window) {
+                    (listener)(event, window, cx);
+                }
+            }));
+    }
+
+    /// Bind the given callback to trackpad pinch events during the bubble phase
+    /// The imperative API equivalent to [`InteractiveElement::on_pinch`]
+    ///
+    /// See [`Context::listener`](crate::Context::listener) to get access to a view's state from this callback.
+    pub fn on_pinch(&mut self, listener: impl Fn(&PinchEvent, &mut Window, &mut App) + 'static) {
+        self.pinch_listeners
             .push(Box::new(move |event, phase, hitbox, window, cx| {
                 if phase == DispatchPhase::Bubble && hitbox.should_handle_scroll(window) {
                     (listener)(event, window, cx);
@@ -835,6 +848,15 @@ pub trait InteractiveElement: Sized {
         self
     }
 
+    /// Bind the given callback to trackpad pinch events during the bubble phase
+    /// The fluent API equivalent to [`Interactivity::on_pinch`]
+    ///
+    /// See [`Context::listener`](crate::Context::listener) to get access to a view's state from this callback.
+    fn on_pinch(mut self, listener: impl Fn(&PinchEvent, &mut Window, &mut App) + 'static) -> Self {
+        self.interactivity().on_pinch(listener);
+        self
+    }
+
     /// Capture the given action, before normal action dispatch can fire
     /// The fluent API equivalent to [`Interactivity::on_scroll_wheel`]
     ///
@@ -1192,6 +1214,9 @@ pub(crate) type MouseMoveListener =
 pub(crate) type ScrollWheelListener =
     Box<dyn Fn(&ScrollWheelEvent, DispatchPhase, &Hitbox, &mut Window, &mut App) + 'static>;
 
+pub(crate) type PinchListener =
+    Box<dyn Fn(&PinchEvent, DispatchPhase, &Hitbox, &mut Window, &mut App) + 'static>;
+
 pub(crate) type ClickListener = Rc<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 
 pub(crate) type DragListener =
@@ -1510,6 +1535,7 @@ pub struct Interactivity {
     pub(crate) mouse_up_listeners: Vec<MouseUpListener>,
     pub(crate) mouse_move_listeners: Vec<MouseMoveListener>,
     pub(crate) scroll_wheel_listeners: Vec<ScrollWheelListener>,
+    pub(crate) pinch_listeners: Vec<PinchListener>,
     pub(crate) key_down_listeners: Vec<KeyDownListener>,
     pub(crate) key_up_listeners: Vec<KeyUpListener>,
     pub(crate) modifiers_changed_listeners: Vec<ModifiersChangedListener>,
@@ -1705,6 +1731,7 @@ impl Interactivity {
             || !self.mouse_move_listeners.is_empty()
             || !self.click_listeners.is_empty()
             || !self.scroll_wheel_listeners.is_empty()
+            || !self.pinch_listeners.is_empty()
             || self.drag_listener.is_some()
             || !self.drop_listeners.is_empty()
             || self.tooltip_builder.is_some()
@@ -2061,6 +2088,13 @@ impl Interactivity {
         for listener in self.scroll_wheel_listeners.drain(..) {
             let hitbox = hitbox.clone();
             window.on_mouse_event(move |event: &ScrollWheelEvent, phase, window, cx| {
+                listener(event, phase, &hitbox, window, cx);
+            })
+        }
+
+        for listener in self.pinch_listeners.drain(..) {
+            let hitbox = hitbox.clone();
+            window.on_mouse_event(move |event: &PinchEvent, phase, window, cx| {
                 listener(event, phase, &hitbox, window, cx);
             })
         }
