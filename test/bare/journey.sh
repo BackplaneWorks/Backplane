@@ -188,6 +188,12 @@ shot 03-kicad
 KDIR=$(ls -d "$HUBH"/kicad/10.* 2>/dev/null | sort -V | tail -1)
 if [ -n "$KDIR" ]; then
   KV=$(basename "$KDIR"); echo "$KV" >"$OUT/kicad-version.txt"
+  # what a new person receives must be the newest Backplane KiCad release (GitHub's "latest"), or we never notice it falling behind
+  LATEST=$(curl -fsSL https://api.github.com/repos/BackplaneWorks/Backplane_KiCad/releases/latest 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("tag_name","").replace("backplane-kicad-v",""))' 2>/dev/null)
+  echo "fresh install got Backplane KiCad $KV; latest release $LATEST" | tee "$OUT/kicad-runtime.txt"
+  if [ -z "$LATEST" ]; then bad "could not read the latest Backplane KiCad release from GitHub"
+  elif [ "$KV" = "$LATEST" ]; then ok "a fresh install gets the latest Backplane KiCad release ($KV)"
+  else bad "a fresh install gets Backplane KiCad $KV, not the latest release $LATEST"; cut_ 2 runtime "a fresh install gets Backplane KiCad $KV while the latest release is $LATEST (install.rs pins it)"; fi
   A=$(python3 -c "import json;print(json.load(open('$KDIR/manifest.json')).get('platform',''))" 2>/dev/null)
   SZ=$(curl -sfIL "https://github.com/i2cjak/Backplane_KiCad/releases/download/backplane-kicad-v$KV/backplane-kicad-linux-x86_64-$KV.tar.gz" | awk 'tolower($1)=="content-length:"{n=$2} END{print n+0}')
   echo "kicad $KV ($A): download $((SZ/1048576)) MB, installed $(du -sm "$KDIR" | cut -f1) MB" | tee "$OUT/kicad-size.txt"
