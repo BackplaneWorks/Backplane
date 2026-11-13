@@ -157,6 +157,31 @@ def ctrl_k_round(h, cp, frame, rep, timeline, n, rounds, pre=None):
 
 
 
+def prewarm_frames(top):
+    """The editors the pane pre-warms (~2 s after the first is placed): frames titled Schematic Editor / 3D Viewer."""
+    return [w for w in E.list_child_windows(top) if w["class"] == "wxWindowNR" and any(t in (w.get("title") or "") for t in ("Schematic Editor", "3D Viewer"))]
+
+
+def wait_prewarm(h, top, mode, timeout_s=40):
+    """mode "after": until the pre-warmed frames exist, then 1 s more; "during": until the client asks for the pre-warm.
+    Returns what was seen, for the log."""
+    start = time.monotonic()
+    while time.monotonic() - start < timeout_s:
+        if mode == "during":
+            try:
+                if "editor.kicad.prewarm" in open(h.p("client.log"), encoding="utf-8", errors="replace").read():
+                    return {"prewarm": "requested", "ms": round((time.monotonic() - start) * 1000)}
+            except OSError:
+                pass
+        else:
+            pw = prewarm_frames(top)
+            if len(pw) >= 1:
+                time.sleep(1.0)
+                return {"prewarm": "done", "frames": [(w["hwnd"], w["title"]) for w in prewarm_frames(top)], "ms": round((time.monotonic() - start) * 1000)}
+        time.sleep(0.05)
+    return {"prewarm": "not seen", "ms": round((time.monotonic() - start) * 1000)}
+
+
 def zoom_field_box(frame):
     """KiCad's status-bar zoom readout ("Z 2.20"), bottom left of the frame."""
     r = E.W.RECT()
@@ -262,9 +287,11 @@ def mouse_return_check(h, cp, frame, children, timeline, rounds=None, kpid=0):
     gl = max(gls, key=lambda w: w["w"] * w["h"]) if gls else None
     top = E.find_main_window(cp.pid)
     cbox = composer_box(h, top)
-    # The pane pre-warms the other editors ~2 s after the first is placed; one of those frames took the foreground
-    # during the first return of run F4c. Let it settle first (that is its own finding, not the return under test).
-    time.sleep(float(os.environ.get("BP_RETURN_SETTLE_S", "5")))
+    # The pane pre-warms the other editors ~2 s after the first is placed; one of those frames took the foreground during
+    # the first return of run F4c (F5). BP_RETURN_PREWARM=after (default) makes the first return after it, =during on it.
+    pw = wait_prewarm(h, top, os.environ.get("BP_RETURN_PREWARM", "after"))
+    timeline.append({"stage": "return_prewarm", **pw})
+    print("DIAG return_prewarm " + json.dumps(pw), flush=True)
     for entry in ("composer", "hotkey"):
         for n in range(1, rounds + 1):
             for route in [r for r in ("tab", "canvas") if r in os.environ.get("BP_RETURN_ROUTES", "tab,canvas").split(",")]:
@@ -488,6 +515,27 @@ def run(h):
             timeline.append({"stage": "before_ctrl_k_from_edit", **pre})
             ctrl_k_round(h, cp, frame, rep, timeline, 1, 1, pre=pre)
             return h.finish()
+        if only == "prewarm_idle":
+            # F5: Edit, keys in the PCB canvas, then nothing but the pre-warm: does the PCB editor keep the keys?
+            gls = [w for w in children if w["visible"] and w["class"] == "wxGLCanvas"]
+            gl = max(gls, key=lambda w: w["w"] * w["h"]) if gls else None
+            top = E.find_main_window(cp.pid)
+            before = focus_snapshot(frame)
+            samples = []
+            t0 = time.monotonic()
+            while time.monotonic() - t0 < 12:
+                snap = focus_snapshot(frame)
+                if not samples or (snap["focus"], snap["foreground"]) != (samples[-1]["focus"], samples[-1]["foreground"]):
+                    samples.append({"ms": round((time.monotonic() - t0) * 1000), **snap})
+                time.sleep(0.02)
+            pw = prewarm_frames(top)
+            px, zoomed = plain_key_acts(h, gl, "prewarm_idle", frame) if gl else (0, False)
+            after = focus_snapshot(frame)
+            d = {"before": before, "changes": samples, "prewarmed": [(w["hwnd"], w["title"]) for w in pw], "after": after, "zoom_readout_changed": zoomed}
+            print("DIAG prewarm_idle " + json.dumps(d)[:1500], flush=True)
+            h.check("F5: Edit, then the pre-warm with no input: the PCB canvas keeps the keys (F2 acts by the zoom readout)",
+                    bool(pw) and after["inside_frame"] and bool(zoomed), d)
+            return h.finish()
         if only == "mouse_return":
             return mouse_return_check(h, cp, frame, children, timeline, kpid=pid)
         if not only_click:
@@ -510,7 +558,7 @@ def run(h):
             time.sleep(1.0)
             E.grab_screen(zshots[1])
             zoom = E.img_diff_box(zshots[0], zshots[1], px, py, pw, ph)
-            plain_key = zoom["changed_pixels"] > 2000
+            plain_key = E.img_diff_box(zshots[0], zshots[1], *zoom_field_box(frame))["changed_pixels"] > 15
             if plain_key:
                 E.key_tap("F1")
                 time.sleep(0.6)
