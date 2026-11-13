@@ -27,11 +27,12 @@ pub const RESERVED: [&str; 10] = ["Ctrl+K", "Ctrl+J", "Ctrl+Tab", "Ctrl+Shift+Ta
 
 /// The chords to reserve on a runtime: `RESERVED`, and on bp.13 (its CommentSelection has `capture_only`, and ';' is KiCad's own "Comment to
 /// Backplane…" key there) a bare ';' too, so that key opens Backplane's window and never KiCad's dialog. Index 10 on Windows. A runtime with
-/// "comment-key-handoff" (bp.13 batch 4 on) hands its comment key over itself (the same key message) and only when no text field has the
+/// "comment-key-63" (bp.13 batch 5 on: key message index 63, out of the reserved list's range) or "comment-key-handoff" (batch 4 only: index 6, read
+/// by its keysym on X11; no Windows build carried it) hands its comment key over itself (the same key message) and only when no text field has the
 /// keyboard, so ';' is not reserved there: it types in the properties panel, search and every field.
 pub fn reserved(semicolon_is_kicads: bool, caps: &[String]) -> Vec<&'static str> {
     let mut v = RESERVED.to_vec();
-    if semicolon_is_kicads && !caps.iter().any(|c| c == "comment-key-handoff") { v.push(";") }
+    if semicolon_is_kicads && !caps.iter().any(|c| c == "comment-key-63" || c == "comment-key-handoff") { v.push(";") }
     v
 }
 
@@ -218,6 +219,7 @@ mod tests {
         assert_eq!(RESERVED[6..], ["Alt+Shift+B", "Alt+Shift+C", "Alt+Shift+L", "Alt+Shift+F"], "the management panels' keys reach Backplane from KiCad");
         assert_eq!(reserved(false, &[]).len(), 10); assert_eq!(reserved(true, &[])[10], ";", "bp.13: KiCad's own ';' comes to Backplane");
         assert_eq!(reserved(true, &["api-descriptor".into(), "comment-key-handoff".into()]).len(), 10, "a runtime that hands ';' over keeps it for text fields");
+        assert_eq!(reserved(true, &["comment-key-63".into()]).len(), 10, "batch 5: index 63");
     }
     #[test] fn a_comment_reads_as_the_persons_message_with_its_references_and_picture() {
         let c = json!({"frame": "FK_PCB", "note": "Move U3 closer to J1", "names": {"references": ["U3"], "nets": ["GND"], "pins": []},
