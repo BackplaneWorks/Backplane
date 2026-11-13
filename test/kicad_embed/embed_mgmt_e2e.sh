@@ -42,7 +42,7 @@ for key, fab, rows in (("mpn:E2E-FILE", "C1001", [(7000, 0.012), (6200, 0.011), 
         for i, (stock, price) in enumerate(rows):
             f.write(json.dumps({"at": now - (3 - i) * 86400, "key": key, "stock": stock, "class": "basic", "price": price, "breaks": [[1, price]], "lifecycle": "", "fab": fab, "model": key[4:]}) + "\n")
 PY
-export BACKPLANE_PARTS_LIFE_GAP_S=3 BACKPLANE_PARTS_GAP_MS=500
+export BACKPLANE_PARTS_LIFE_GAP_S=3 BACKPLANE_PARTS_GAP_MS=500 BACKPLANE_PARTS_DK_GAP_S=2
 STUB_PORT=$(free_port)
 own python3 "$KEMBED_LIB/pcbparts_stub.py" "$STUB_PORT" "$OUT/pcbparts.log"
 export BACKPLANE_PCBPARTS_URL="http://127.0.0.1:$STUB_PORT/mcp"
@@ -157,6 +157,9 @@ shot "m8_alts"
 # M9: lifecycle: NRND and EOL from the distributors' readings; the BOM's cost and a part's stock over time from the history store
 wait_for_log "$OUT/client.log" '"name":"life","event":"mark"' 60 || true
 for _ in $(seq 20); do L9=$(mgmt_info life); python3 -c 'import json,sys; v=json.loads(sys.argv[1]); sys.exit(0 if v.get("counts",{}).get("nrnd",0)>=1 else 1)' "$L9" && break; sleep 0.5; done
+for _ in $(seq 30); do L9=$(mgmt_info life); python3 -c 'import json,sys; v=json.loads(sys.argv[1]); sys.exit(0 if v.get("counts",{}).get("active",0)>=1 else 1)' "$L9" && break; sleep 0.5; done
+check "DigiKey's product status reaches the part it knows (R1 Active), EOL and NRND first in the list" "$(python3 -c '
+import json,sys; v=json.loads(sys.argv[1]); ps=v.get("parts",[]); print(int(v["counts"].get("active")==1 and [p["lifecycle"] for p in ps[:2]]==["eol","nrnd"]))' "$L9" 2>/dev/null || echo 0)" "$(echo "$L9" | head -c 300)"
 check "Lifecycle per part: C1 NRND, C2 EOL (the distributors' words), the tab's badge counts them" "$(python3 -c '
 import json,sys; v=json.loads(sys.argv[1]); c=v.get("counts",{}); print(int(c.get("nrnd")==1 and c.get("eol")==1 and v["badge"]["n"]==2 and v["badge"]["tone"]=="bad"))' "$L9" 2>/dev/null || echo 0)" "$(echo "$L9" | head -c 500)"
 check "The whole BOM over time: a point a day from the history (cost a board)" "$(python3 -c 'import json,sys; v=json.loads(sys.argv[1]); print(int(len(v["bom"]["cost"])>=4))' "$L9" 2>/dev/null || echo 0)"
@@ -236,10 +239,16 @@ PY
   UNDO_OK=$([ "$M_UNDO" != "E2E-UNDO" ] && [ "$M_UNDO" != "?" ] && echo 1 || echo 0)
   if [ "$MODE" = kicad ]; then
     # a runtime that puts the hub's (the person's) edits in their undo (bp.13, person: client)
-    check "KiCad's Ctrl+Z takes the panel's edit back (R4's MPN now '$M_UNDO')" "$UNDO_OK"
-    python3 "$XINPUT_PY" chord ctrl y >/dev/null 2>&1 || true
+    check "KiCad's Ctrl+Z takes the panel's edit back, as the hub promises on this runtime (R4's MPN now '$M_UNDO')" "$UNDO_OK"
+    python3 "$XINPUT_PY" chord ctrl y >/dev/null 2>&1 || true; sleep 1
+    # the panel's own Undo too (offered everywhere)
+    wait_for_log "$OUT/client.log" '"name":"panel_undo","event":"mark"' 60 || true
+    M_PU=""; for _ in $(seq 20); do M_PU=$(mpn_of R4); [ "$M_PU" != "E2E-UNDO" ] && break; sleep 0.5; done
+    check "The panel's Undo put R4's MPN back (now '$M_PU')" "$([ "$M_PU" = "" ] && echo 1 || echo 0)"
   else
-    echo "KNOWN KiCad's Ctrl+Z is not the person's for the hub's edits before bp.13 (R4: $M_UNDO); the panel offers its own Undo"
+    # the hub promises no Ctrl+Z on this runtime: what KiCad did is said, for the gate (bomedit.rs undo_by)
+    echo "CTRLZ runtime=$(basename "$(dirname "$(dirname "$KICAD_BIN")")") took_it_back=$UNDO_OK"
+    if [ "$UNDO_OK" = 1 ]; then python3 "$XINPUT_PY" chord ctrl y >/dev/null 2>&1 || true; sleep 1; fi
     # the panel's own Undo: the old value written back (the script pressed it after this)
     wait_for_log "$OUT/client.log" '"name":"panel_undo","event":"mark"' 60 || true
     M_PU=""; for _ in $(seq 20); do M_PU=$(mpn_of R4); [ "$M_PU" != "E2E-UNDO" ] && break; sleep 0.5; done

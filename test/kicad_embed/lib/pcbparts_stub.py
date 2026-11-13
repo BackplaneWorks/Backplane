@@ -8,6 +8,7 @@ Parts it knows (by MPN or by fab number):
   E2E-LOW  / C1003  3 in stock (low for one board), extended, 0.50
 mouser_get_part: E2E-LIVE is NRND, E2E-LOW obsolete, E2E-FILE states none.
 jlc_stock_history: C1003 had 400 then 90 in October; the others no recorded change.
+digikey_get_part: E2E-FILE is Active; the others it does not have.
 Every call is a line in LOG ({"tool", "args"}), so a test can count them.
 """
 import json
@@ -40,6 +41,9 @@ def call(tool, args):
     if tool == "mouser_get_part":
         life = {"E2E-LIVE": "Not Recommended for New Designs", "E2E-LOW": "Obsolete"}
         return {"results": [{"mfr_part_number": m, "manufacturer": "Stub", "lifecycle": life.get(m)} for m in args.get("part_number", "").split("|") if m in PARTS]}
+    if tool == "digikey_get_part":
+        m = args.get("product_number", "")
+        return {"mfr_part_number": m, "lifecycle": "Active"} if m == "E2E-FILE" else {"error": "not found"}
     if tool == "jlc_stock_history":
         if args.get("lcsc") == "C1003":
             return {"lcsc": "C1003", "events": [{"date": "2026-10-01", "type": "change", "stock_after": 400}, {"date": "2026-10-15", "type": "change", "stock_after": 90}, {"date": "2026-10-20", "type": "gone", "stock_after": None}]}

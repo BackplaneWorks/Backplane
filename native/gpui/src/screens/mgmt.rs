@@ -33,6 +33,8 @@ pub struct Mgmt {
     drag: Option<(f32, f32)>, live: Option<f32>, drag_n: u64,
     /// an error the hub gave for a panel's request
     pub error: String,
+    /// the open panel's width as last drawn (the BOM's columns fit it)
+    pub panel_w: f32,
     pub bom: super::mgmt_bom::Ui,
     pub life: super::mgmt_life::Ui,
 }
@@ -128,6 +130,7 @@ pub fn controls(thread: &Value, m: &Mgmt) -> Vec<(String, String, String)> {
     let mut v: Vec<(String, String, String)> = st["panels"].as_array().into_iter().flatten().map(|p| (format!("mgmt:{}", p["id"].as_str().unwrap_or("")), p["label"].as_str().unwrap_or("").to_string(), format!("toggle:{}", p["id"].as_str().unwrap_or("")))).collect();
     if st["open"].as_str().map_or(false, |o| !o.is_empty()) { /* i18n-ok: ctl ids and labels the drivers press */ v.extend([("mgmt:right".into(), "Right".into(), "dock:right".into()), ("mgmt:bottom".into(), "Bottom".into(), "dock:bottom".into())]); }
     v.extend(super::mgmt_bom::controls(m));
+    v.extend(super::mgmt_life::controls(m));
     v.extend(super::mgmt_fab::controls(m));
     v.extend(super::mgmt_plan::controls(m));
     v.extend(super::mgmt_checks::controls(m));
@@ -167,7 +170,6 @@ pub fn host(app: &mut Backplane, page: AnyElement, window: &mut Window, cx: &mut
         let tab = crate::ui::with_rect(div().id(SharedString::from(format!("mgmt-tab-{id}"))), { let id = id.clone(); move || format!("mgmt:{id}") })
             .h_full().px_2().flex().items_center().gap_1().cursor_pointer().text_color(c(if on { "text" } else { "dim" })).hover(|s| s.bg(c("raise")))
             .when(on, |d| d.border_t_2().border_color(c("accent")))
-            .tooltip(crate::keys::tip(&trs(label), &crate::keys::hint(&app.local, &format!("mgmt-{id}")), light))
             .child(trs(label))
             .children(badge(&data).map(|(n, tone)| div().px(px(4.)).h(px(14.)).flex().items_center().text_size(px(10.)).text_color(c(tone)).border_1().border_color(c(tone)).child(n)))
             .on_click(cx.listener(move |this, _, _, cx| toggle(this, &idc, cx)));
@@ -186,10 +188,11 @@ pub fn host(app: &mut Backplane, page: AnyElement, window: &mut Window, cx: &mut
     if open.is_empty() { return div().size_full().flex().flex_col().child(page).child(strip).into_any_element() }
     // the panel: its view drawn from the hub's data, or nothing yet
     let data = app.screens.mgmt.data(&open);
-    let body = match VIEWS.iter().find(|v| v.id == open) { Some(v) => (v.body)(app, &data, light, cx), None => div().into_any_element() };
     let vp = window.viewport_size();
     let avail = if bottom { f32::from(vp.height) * 0.8 } else { (super::viewer::pane_width() as f32).max(f32::from(vp.width) * 0.4) };
     let size = fit(app.screens.mgmt.live.unwrap_or(st["size"].as_f64().unwrap_or(400.) as f32), avail);
+    app.screens.mgmt.panel_w = if bottom { super::viewer::pane_width() as f32 } else { size };
+    let body = match VIEWS.iter().find(|v| v.id == open) { Some(v) => (v.body)(app, &data, light, cx), None => div().into_any_element() };
     let handle = div().id("mgmt-edge").flex_shrink_0().bg(c("rule")).hover(|s| s.bg(c("accent")))
         .map(|d| if bottom { d.h(px(1.)).w_full().cursor_row_resize() } else { d.w(px(1.)).h_full().cursor_col_resize() })
         .child(div().absolute().map(|d| if bottom { d.left_0().right_0().top(px(-2.)).h(px(HANDLE)) } else { d.top_0().bottom_0().left(px(-2.)).w(px(HANDLE)) }))

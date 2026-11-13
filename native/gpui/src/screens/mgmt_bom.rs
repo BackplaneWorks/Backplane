@@ -7,8 +7,8 @@ use gpui::{prelude::*, *};
 use serde_json::{json, Value};
 
 #[derive(Clone, Copy, Debug, PartialEq, Default)]
-pub enum Col { #[default] Refs, Qty, Value, Footprint, Mpn, Stock }
-pub const COLS: &[(Col, &str, &str)] = &[(Col::Refs, "refs", "Refs"), (Col::Qty, "qty", "Qty"), (Col::Value, "value", "Value"), (Col::Footprint, "footprint", "Footprint"), (Col::Mpn, "mpn", "MPN"), (Col::Stock, "stock", "Stock")]; // i18n-ok: ids; labels go through trs
+pub enum Col { #[default] Refs, Qty, Value, Footprint, Mpn, Stock, Price, Class }
+pub const COLS: &[(Col, &str, &str)] = &[(Col::Refs, "refs", "Refs"), (Col::Qty, "qty", "Qty"), (Col::Value, "value", "Value"), (Col::Footprint, "footprint", "Footprint"), (Col::Mpn, "mpn", "MPN"), (Col::Stock, "stock", "Stock"), (Col::Price, "price", "Price"), (Col::Class, "class", "Class")]; // i18n-ok: ids; labels go through trs
 
 #[derive(Default)]
 pub struct Ui { pub sort: Col, pub desc: bool, pub filter: Option<Entity<Composer>>, pub sel: Option<String>,
@@ -35,7 +35,8 @@ pub fn matches(l: &Value, q: &str) -> bool {
 /// The lines in a column's order (natural order of the first reference for Refs; the hub's order breaks ties).
 pub fn sorted(lines: &[Value], col: Col, desc: bool) -> Vec<Value> {
     let mut v: Vec<(usize, &Value)> = lines.iter().enumerate().collect();
-    let key = |l: &Value| -> String { match col { Col::Refs | Col::Qty => String::new(), Col::Stock => stock_rank(l).to_string(), Col::Value => s(l, "value").to_lowercase(), Col::Footprint => short_fp(s(l, "footprint")).to_lowercase(), Col::Mpn => s(l, "mpn").to_lowercase() } };
+    let key = |l: &Value| -> String { match col { Col::Refs | Col::Qty => String::new(), Col::Stock => stock_rank(l).to_string(),
+        Col::Price => format!("{:020.6}", l["stock"]["price"].as_f64().unwrap_or(f64::MAX / 1e300)), Col::Class => l["stock"]["class"].as_str().unwrap_or("~").to_string(), Col::Value => s(l, "value").to_lowercase(), Col::Footprint => short_fp(s(l, "footprint")).to_lowercase(), Col::Mpn => s(l, "mpn").to_lowercase() } };
     v.sort_by(|(i, a), (j, b)| {
         let o = match col { Col::Refs => i.cmp(j), Col::Qty => a["qty"].as_u64().cmp(&b["qty"].as_u64()).then(i.cmp(j)), _ => key(a).cmp(&key(b)).then(i.cmp(j)) };
         if desc { o.reverse() } else { o }
@@ -77,10 +78,48 @@ pub fn cost_text(d: &Value) -> Option<String> {
     let v = format!("${cost:.2}");
     Some(if priced < looked { tf("gpui.mgmt.bom.cost.least", &[("cost", v.into())]) } else { tf("gpui.mgmt.bom.cost", &[("cost", v.into())]) })
 }
+/// The columns a panel `width` px wide shows, each with its width (None: the rest, the MPN). The MPN is the one that matters: it takes
+/// what is left; narrower, Class, then Price, then Footprint go, in that order.
+pub fn layout(width: f32) -> Vec<(Col, Option<f32>)> {
+    let mut v = vec![(Col::Qty, Some(26.)), (Col::Refs, Some(if width >= 700. { 150. } else { 104. })), (Col::Value, Some(if width >= 700. { 84. } else { 66. }))];
+    if width >= 700. { v.push((Col::Footprint, Some(132.))) }
+    v.push((Col::Mpn, None));
+    v.push((Col::Stock, Some(62.)));
+    if width >= 520. { v.push((Col::Price, Some(58.))) }
+    if width >= 700. { v.push((Col::Class, Some(64.))) }
+    v
+}
+/// How many characters fit in `px` at the panel's 12 px monospace (7.2 px a character).
+pub fn chars_in(px: f32) -> usize { (px / 7.2).floor().max(4.0) as usize }
+/// A long part number shortened in its middle ("GRM033R6…E47D"), both ends kept: they tell parts apart.
+pub fn mid_ellipsis(s: &str, max: usize) -> String {
+    let cs: Vec<char> = s.chars().collect();
+    if cs.len() <= max || max < 5 { return s.to_string() }
+    let head = (max - 1 + 1) / 2; let tail = max - 1 - head;
+    format!("{}…{}", cs[..head].iter().collect::<String>(), cs[cs.len() - tail..].iter().collect::<String>())
+}
+/// A line's references in `max` characters: as many as fit, then "+n" ("C2, C4, C37 +1").
+pub fn refs_fit(refs: &[String], max: usize) -> String {
+    let all = refs.join(", ");
+    if all.chars().count() <= max { return all }
+    let mut out = String::new();
+    for (i, r) in refs.iter().enumerate() {
+        let more = format!(" +{}", refs.len() - i);
+        let next = if out.is_empty() { r.clone() } else { format!("{out}, {r}") }; // i18n-ok: a list of references
+        if next.chars().count() + format!(" +{}", refs.len() - i - 1).chars().count() > max { return if out.is_empty() { format!("{}{more}", refs[0].chars().take(max.saturating_sub(more.len())).collect::<String>()) } else { format!("{out}{more}") } }
+        out = next;
+    }
+    out
+}
+/// The stock cell's words: the count, with what it means said in words where it is not plain "in stock" (never colour alone).
+pub fn stock_words(st: &Value) -> Option<String> {
+    let n = st["stock"].as_i64().unwrap_or(-1);
+    Some(match st["status"].as_str()? { "checking" => "…".into(), "unknown" => "?".into(), "out" => tf("gpui.mgmt.bom.stock.out", &[("n", abbrev(n.max(0)).into())]), "low" => tf("gpui.mgmt.bom.stock.low", &[("n", abbrev(n).into())]), _ => abbrev(n) })
+}
 /// What a header press does: the same column turns its order round, another sorts by it ascending.
 pub fn press(cur: (Col, bool), col: Col) -> (Col, bool) { if cur.0 == col { (col, !cur.1) } else { (col, false) } }
 /// The source line: where the parts come from.
-pub fn source_text(d: &Value) -> String { if d["source"] == "kicad" { trs("live from KiCad") } else { trs("from the saved schematic") } }
+pub fn source_text(d: &Value) -> String { if d["source"] == "kicad" { trs("Live from the open KiCad: its unsaved edits are in it") } else { trs("From the saved schematic: KiCad is not open on it") } }
 
 fn filter_text(app: &Backplane, cx: &App) -> String { app.screens.mgmt.bom.filter.as_ref().map_or(String::new(), |f| f.read(cx).content.to_string()) }
 /// A line pressed: its parts selected in KiCad and lit in the viewers (zoomed on there, with no editor in the pane).
@@ -115,7 +154,7 @@ fn send_edit(app: &mut Backplane, id: &str, refs: Value, field: &str, value: &st
     app.screens.mgmt.bom.sending = true; app.screens.mgmt.bom.said = None; cx.notify();
 }
 /// What the editor says after an edit: (tone, words, whether it offers its own Undo). KiCad's Ctrl+Z is promised only where the hub said
-/// KiCad takes it back (`undo: "kicad"`); elsewhere the panel's Undo writes the old value back.
+/// KiCad takes it back (`undo: "kicad"`); the panel's own Undo (the old value written back) is offered after every edit.
 pub fn edit_note(said: Option<&(bool, String)>, last: Option<&Value>) -> Option<(&'static str, String, bool)> {
     let (ok, what) = said?;
     if !ok { return Some(("bad", what.clone(), false)) }
@@ -123,7 +162,7 @@ pub fn edit_note(said: Option<&(bool, String)>, last: Option<&Value>) -> Option<
     let undo = last.map_or("", |l| l["undo"].as_str().unwrap_or("")); let changed = last.map_or(0, |l| l["changed"].as_u64().unwrap_or(0));
     if changed == 0 { return Some(("dim", trs("Nothing to change."), false)) }
     Some(match (what.as_str(), undo) {
-        ("kicad", "kicad") => ("ok", trs("Changed in KiCad: Ctrl+Z there takes it back; save there to keep it."), false),
+        ("kicad", "kicad") => ("ok", trs("Changed in KiCad: Ctrl+Z there takes it back; save there to keep it."), true),
         ("kicad", _) => ("ok", trs("Changed in KiCad; save there to keep it."), true),
         _ => ("ok", trs("Saved in the schematic."), true),
     })
@@ -133,7 +172,7 @@ pub const EDIT_TAG: u64 = 0x6d67_6564;
 /// The panel's own undo of its last edit (offered where KiCad's Ctrl+Z does not take it back): the old value written back the same way.
 pub fn undo(app: &mut Backplane, cx: &mut Context<Backplane>) {
     let Some(last) = app.screens.mgmt.bom.last.take() else { return };
-    if last["undo"] != "panel" || last["changed"].as_u64().unwrap_or(0) == 0 { return }
+    if last["changed"].as_u64().unwrap_or(0) == 0 { return }
     let (field, was) = (last["field"].as_str().unwrap_or("").to_string(), last["was"].as_str().unwrap_or("").to_string());
     let id = last["refs"][0].as_str().unwrap_or("").to_string();
     app.screens.mgmt.bom.undoing = true;
@@ -199,38 +238,62 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
     let summary = tf("gpui.mgmt.bom.summary", &[("parts", d["parts"].as_u64().unwrap_or(0).into()), ("lines", (all.len() as u64).into())]);
     let top = div().flex_shrink_0().min_h(px(super::head::ROW_H)).flex().items_center().gap_2().px_2().border_b_1().border_color(c("rule")).text_size(px(11.))
         .child(div().flex_shrink_0().text_color(c("dim")).child(summary))
-        .child(div().flex_shrink_0().text_color(c("faint")).child(source_text(d)))
+        // where the lines come from, as a state: live from the open KiCad (its unsaved edits too), or the saved file
+        .child({ let live = d["source"] == "kicad"; div().id("bom-source").flex_shrink_0().flex().items_center().gap_1().px(px(5.)).h(px(18.)).border_1().border_color(c(if live { "accent" } else { "line" }))
+            .text_size(px(10.)).text_color(c(if live { "accent" } else { "dim" })).tooltip(crate::keys::tip(&source_text(d), "", light))
+            .child(if live { trs("Live") } else { trs("Saved") }) })
         .children(cost_text(d).map(|t| div().flex_shrink_0().text_color(c("dim")).child(t)))
         // the parts search asked to slow down: the lookups wait, quietly
         .when(d["paused"] == true, |r| r.child(div().id("bom-paused").flex_shrink_0().text_color(c("faint")).tooltip(crate::keys::tip(&trs("The parts search asked Backplane to slow down; the lookups go on by themselves shortly."), "", light)).child(trs("Stock check paused"))))
         .child(div().flex_1().min_w(px(80.)).px_2().py(px(2.)).border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).children(app.screens.mgmt.bom.filter.clone()));
-    // the header: a press sorts by that column
-    let w = |col: Col| -> Div { let d = div().flex_shrink_0().overflow_hidden().whitespace_nowrap().text_ellipsis(); match col { Col::Qty => d.w(px(30.)), Col::Refs => d.w(relative(0.22)), Col::Value => d.w(relative(0.15)), Col::Footprint => d.w(relative(0.18)), Col::Mpn => d.flex_1().min_w_0(), Col::Stock => d.w(px(48.)).flex().justify_end() } };
-    let order = [Col::Qty, Col::Refs, Col::Value, Col::Footprint, Col::Mpn, Col::Stock];
-    let mut head = div().flex_shrink_0().flex().items_center().gap_2().px_2().h(px(22.)).border_b_1().border_color(c("line")).text_size(px(11.)).text_color(c("dim"));
-    for k in order {
+    // the columns this width shows (MPN first in priority), the same gutter between every two
+    let width = app.screens.mgmt.panel_w.max(240.);
+    let cols = layout(width);
+    const GUTTER: f32 = 8.0;
+    let fixed: f32 = cols.iter().filter_map(|c| c.1).sum::<f32>() + GUTTER * (cols.len() as f32 - 1.0) + 16.0;
+    let mpn_chars = chars_in(width - fixed);
+    let cell = |w: Option<f32>, right: bool| -> Div { let d = div().flex_shrink_0().overflow_hidden().whitespace_nowrap(); let d = match w { Some(x) => d.w(px(x)), None => d.flex_1().min_w_0() }; if right { d.flex().justify_end() } else { d } };
+    let right = |k: Col| matches!(k, Col::Qty | Col::Stock | Col::Price);
+    let mut head = div().flex_shrink_0().flex().items_center().gap(px(GUTTER)).px_2().h(px(22.)).border_b_1().border_color(c("line")).text_size(px(11.)).text_color(c("dim"));
+    for (k, wd) in cols.iter().copied() {
         let (_, id, label) = COLS.iter().find(|x| x.0 == k).copied().unwrap();
         let mark = if col == k { if desc { " ↓" } else { " ↑" } } else { "" };
-        head = head.child(w(k).id(SharedString::from(format!("bom-h-{id}"))).cursor_pointer().hover(|s| s.text_color(c("text"))).child(format!("{}{mark}", trs(label)))
+        head = head.child(cell(wd, right(k)).id(SharedString::from(format!("bom-h-{id}"))).cursor_pointer().hover(|s| s.text_color(c("text"))).child(format!("{}{mark}", trs(label)))
             .on_click(cx.listener(move |this, _, _, cx| { let (a, b) = press((this.screens.mgmt.bom.sort, this.screens.mgmt.bom.desc), k); this.screens.mgmt.bom.sort = a; this.screens.mgmt.bom.desc = b; cx.notify(); })));
     }
     let mut list = div().id("bom-rows").flex_1().min_h_0().overflow_y_scroll().flex().flex_col().text_size(px(12.));
     if rows.is_empty() { list = list.child(div().p_3().text_color(c("faint")).child(if all.is_empty() { trs("No parts.") } else { trs("No line matches the filter.") })); }
     for l in rows {
         let id = s(&l, "id").to_string(); let dnp = l["dnp"] == true; let on = sel.as_deref() == Some(id.as_str());
-        let mpn = s(&l, "mpn").to_string();
-        let mpn_cell = if !mpn.is_empty() { div().child(mpn) } else if started && !dnp { div().text_color(c("warn")).child(trs("no MPN")) } else { div().text_color(c("faint")).child("—") };
-        let row = crate::ui::with_rect(div().id(SharedString::from(format!("bom-row-{id}"))), { let id = id.clone(); move || format!("mgmt:bom:row:{id}") })
-            .flex_shrink_0().flex().items_center().gap_2().px_2().h(px(24.)).border_b_1().border_color(c("line")).cursor_pointer()
-            .when(on, |d| d.bg(c("raise"))).hover(|d| d.bg(c("panel"))).when(dnp, |d| d.text_color(c("faint")))
-            .child(w(Col::Qty).text_color(c("dim")).child(l["qty"].as_u64().unwrap_or(0).to_string()))
-            .child(w(Col::Refs).child(refs_text(&l)))
-            .child(w(Col::Value).child(s(&l, "value").to_string()))
-            .child(w(Col::Footprint).text_color(c(if dnp { "faint" } else { "dim" })).child(short_fp(s(&l, "footprint")).to_string()))
-            .child(w(Col::Mpn).flex().items_center().gap_1().child(mpn_cell.overflow_hidden().text_ellipsis()).when(dnp, |d| d.child(div().flex_shrink_0().px(px(3.)).text_size(px(10.)).border_1().border_color(c("line")).child(trs("DNP")))))
-            .child(match stock_view(&l["stock"]) { Some((t, tone, tip)) => w(Col::Stock).id(SharedString::from(format!("bom-stock-{id}"))).text_color(c(tone)).tooltip(crate::keys::tip(&tip, "", light)).child(t).into_any_element(), None => w(Col::Stock).into_any_element() })
-            .on_click({ let id = id.clone(); cx.listener(move |this, _, _, cx| select(this, &id, cx)) });
-        list = list.child(row);
+        let refs: Vec<String> = l["refs"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
+        let st = &l["stock"];
+        let mut row = crate::ui::with_rect(div().id(SharedString::from(format!("bom-row-{id}"))), { let id = id.clone(); move || format!("mgmt:bom:row:{id}") })
+            .flex_shrink_0().flex().items_center().gap(px(GUTTER)).px_2().h(px(24.)).border_b_1().border_color(c("line")).cursor_pointer()
+            .when(on, |d| d.bg(c("raise"))).hover(|d| d.bg(c("panel"))).when(dnp, |d| d.text_color(c("faint")));
+        for (k, wd) in cols.iter().copied() {
+            let base = cell(wd, right(k));
+            let chars = wd.map_or(mpn_chars, chars_in);
+            let el: AnyElement = match k {
+                Col::Qty => base.text_color(c("dim")).child(l["qty"].as_u64().unwrap_or(0).to_string()).into_any_element(),
+                Col::Refs => { let t = refs_fit(&refs, chars); let full = refs.join(", "); base.id(SharedString::from(format!("bom-refs-{id}"))).when(t != full, |d| d.tooltip(crate::keys::tip(&full, "", light))).child(t).into_any_element() }
+                Col::Value => base.child(mid_ellipsis(s(&l, "value"), chars)).into_any_element(),
+                Col::Footprint => base.text_color(c(if dnp { "faint" } else { "dim" })).child(mid_ellipsis(short_fp(s(&l, "footprint")), chars)).into_any_element(),
+                Col::Mpn => {
+                    let mpn = s(&l, "mpn").to_string();
+                    if !mpn.is_empty() { let t = mid_ellipsis(&mpn, chars); base.id(SharedString::from(format!("bom-mpn-{id}"))).when(t != mpn, |d| d.tooltip(crate::keys::tip(&mpn, "", light))).child(t).into_any_element() }
+                    else if started && !dnp { base.text_color(c("warn")).child(trs("no MPN")).into_any_element() } else { base.text_color(c("faint")).child("—").into_any_element() }
+                }
+                // a DNP line is not ordered: its stock cell says DNP, in its own place
+                Col::Stock if dnp => base.child(div().px(px(3.)).text_size(px(10.)).border_1().border_color(c("line")).child(trs("DNP"))).into_any_element(),
+                Col::Stock => match (stock_words(st), stock_view(st)) {
+                    (Some(t), Some((_, tone, tip))) => base.id(SharedString::from(format!("bom-stock-{id}"))).text_color(c(tone)).tooltip(crate::keys::tip(&tip, "", light)).child(t).into_any_element(),
+                    _ => base.into_any_element() },
+                Col::Price => base.text_color(c("dim")).child(st["price"].as_f64().map(money).unwrap_or_default()).into_any_element(),
+                Col::Class => base.text_color(c(if st["class"] == "basic" { "dim" } else { "faint" })).child(st["class"].as_str().map(trs).unwrap_or_default()).into_any_element(),
+            };
+            row = row.child(el);
+        }
+        list = list.child(row.on_click({ let id = id.clone(); cx.listener(move |this, _, _, cx| select(this, &id, cx)) }));
     }
     if d["more"].as_u64().unwrap_or(0) > 0 { list = list.child(div().p_2().text_color(c("faint")).child(tf("gpui.mgmt.bom.more", &[("n", d["more"].as_u64().unwrap_or(0).into())]))); }
     let editor = sel.as_ref().and_then(|id| all.iter().find(|l| s(l, "id") == id.as_str())).map(|l| line_editor(app, l, light, cx));
@@ -353,12 +416,23 @@ mod tests {
     #[test] fn after_an_edit_ctrl_z_is_promised_only_where_kicad_takes_it_back() {
         let ok = |w: &str| (true, w.to_string());
         let k = json!({"undo": "kicad", "changed": 2}); let p = json!({"undo": "panel", "changed": 2});
-        assert!(!edit_note(Some(&ok("kicad")), Some(&k)).unwrap().2);
+        let kn = edit_note(Some(&ok("kicad")), Some(&k)).unwrap(); assert!(kn.1.contains("Ctrl+Z") && kn.2, "Ctrl+Z said, and the panel's Undo kept");
         let n = edit_note(Some(&ok("kicad")), Some(&p)).unwrap(); assert!(n.2 && !n.1.contains("Ctrl+Z"), "{}", n.1);
         assert!(edit_note(Some(&ok("file")), Some(&p)).unwrap().2);
         assert!(!edit_note(Some(&ok("undone")), None).unwrap().2);
         assert_eq!(edit_note(Some(&(false, "locked".into())), None).unwrap(), ("bad", "locked".to_string(), false));
         assert!(!edit_note(Some(&ok("file")), Some(&json!({"undo": "panel", "changed": 0}))).unwrap().2); assert_eq!(edit_note(None, None), None);
+    }
+    #[test] fn columns_fit_the_width_and_the_mpn_shows_whole_or_shortened_in_its_middle() {
+        let ids = |w: f32| layout(w).iter().map(|c| c.0).collect::<Vec<_>>();
+        assert_eq!(ids(400.), [Col::Qty, Col::Refs, Col::Value, Col::Mpn, Col::Stock]);
+        assert_eq!(ids(560.), [Col::Qty, Col::Refs, Col::Value, Col::Mpn, Col::Stock, Col::Price]);
+        assert_eq!(ids(800.), [Col::Qty, Col::Refs, Col::Value, Col::Footprint, Col::Mpn, Col::Stock, Col::Price, Col::Class]);
+        assert_eq!(mid_ellipsis("GRM033R60J225ME47D", 12), "GRM033…ME47D"); assert_eq!(mid_ellipsis("CL05A475MP5NRNC", 15), "CL05A475MP5NRNC"); assert_eq!(mid_ellipsis("GRM033R60J225ME47D", 12).chars().count(), 12);
+        let r = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(refs_fit(&r(&["C2", "C4", "C37", "C40"]), 14), "C2, C4, C37 +1"); assert_eq!(refs_fit(&r(&["C1", "C36"]), 14), "C1, C36");
+        assert!(refs_fit(&r(&["C12", "C32", "C33", "C34", "C35", "C40", "C41"]), 14).chars().count() <= 14);
+        assert_eq!(stock_words(&json!({"status": "low", "stock": 12})).unwrap(), "low 12"); assert_eq!(stock_words(&json!({"status": "out", "stock": 0})).unwrap(), "out 0"); assert_eq!(stock_words(&json!({"status": "in", "stock": 717000})).unwrap(), "717k");
     }
     #[test] fn short_names() { assert_eq!(short_fp("Resistor_SMD:R_0603"), "R_0603"); assert_eq!(short_fp("R_0603"), "R_0603"); assert_eq!(refs_text(&sample()[0]), "C1, C2"); }
 }
