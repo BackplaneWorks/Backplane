@@ -237,6 +237,7 @@ mod tests {
     // KS.version_ok: kserve_version_ok_exact, _ok_describe, _other_build, _longer_build, _not_fork
     #[test] fn kserve_version() {
         assert!(version_ok("10.99.0-bp.1", "10.99.0-bp.1")); assert!(version_ok("10.99.0-unknown-bp.1", "10.99.0-bp.1"));
+        assert!(version_ok("backplane-kicad-v10.99.0-bp.7-15-g8d903542-dirty-bp.13", "10.99.0-bp.13") && version_ok("10.99.0-bp.12.1", "10.99.0-bp.12.1") && !version_ok("10.99.0-bp.12", "10.99.0-bp.12.1"));
         assert!(!version_ok("10.99.0-bp.2", "10.99.0-bp.1")); assert!(!version_ok("10.99.0-bp.11", "10.99.0-bp.1")); assert!(!version_ok("10.99.0", "10.99.0-bp.1"));
     }
     // KS.retry: kserve_retry_first, _second, _third, _gives_up, _old_failures_forgotten
