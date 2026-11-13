@@ -176,6 +176,8 @@ impl Importer {
         *NOW.lock().unwrap() = Some(prog.clone()); let _folding = crate::guard::Folding::begin();
         struct Clear; impl Drop for Clear { fn drop(&mut self) { *NOW.lock().unwrap() = None; } }
         let _clear = Clear;
+        // every step is published as it begins, not only by the 1-second tick: a step shorter than a tick (reading a small log) was never shown, and a client could not tell
+        publish(hub, &prog.full(now())).await;
         let tick = { let (h, p) = (hub.clone(), prog.clone()); tokio::spawn(async move { loop { publish(&h, &p.full(now())).await; tokio::time::sleep(std::time::Duration::from_secs(1)).await; } }) };
         struct Stop(tokio::task::JoinHandle<()>); impl Drop for Stop { fn drop(&mut self) { self.0.abort() } }
         let _tick = Stop(tick);
@@ -188,7 +190,7 @@ impl Importer {
         };
         prog.totals(p.counts.projects as u64, p.counts.threads as u64);
         // files first: the lines name them (bots' folders, accounts), and a cut-off import copies again without harm
-        prog.step("copying", 0, "files", now());
+        prog.step("copying", 0, "files", now()); publish(hub, &prog.full(now())).await;
         let (h2, o2, bots) = (hub.cfg.home.clone(), old.clone(), p.bots.clone());
         let hooks = p.hooks.clone();
         let have_profiles = crate::settings::accounts_hub::live(&hub.cfg.home).map(|m| m.ids()).unwrap_or_default();
@@ -208,7 +210,7 @@ impl Importer {
         if secrets { let g = crate::google::store::adopt_014(&old); if g > 0 { extra.push(json!({"k":"google","n":g})) } }
         // the lines: each chunk joins the policies' state as it is written (the views keep answering, nothing is derived); a client's request waits for at most one chunk
         let total = p.lines.len(); let mut done = 0usize; let mut err = String::new();
-        prog.step("writing", total as u64, "events", now());
+        prog.step("writing", total as u64, "events", now()); publish(hub, &prog.full(now())).await;
         let throttle = Some(self.throttle_ms.load(std::sync::atomic::Ordering::Relaxed)).filter(|ms| *ms > 0); // tests only: a slow import on purpose
         let mut titles: std::collections::HashMap<String, String> = Default::default();
         let (mut at, mut size) = (0usize, 500usize);
@@ -232,7 +234,7 @@ impl Importer {
             // tests only: a slow import on purpose, the same per 2,000 lines whatever the chunk
             if let Some(ms) = throttle { tokio::time::sleep(std::time::Duration::from_millis(ms * ch.len() as u64 / 2000)).await; }
         }
-        prog.step("finishing", 0, "", now());
+        prog.step("finishing", 0, "", now()); publish(hub, &prog.full(now())).await;
         if !err.is_empty() { return self.failed(hub, &from, &format!("Writing into this hub stopped after {done} of {total} events: {err}")).await }
         let mut c = p.counts.clone(); c.devices = devices;
         let r = json!({"state":"done","from":from,"counts":c,"bots":p.bots.iter().map(|(_, n)| n).collect::<Vec<_>>(),"devices":devices,"accounts":accounts.added,"signin":accounts.signin,"keys":keys.added,
