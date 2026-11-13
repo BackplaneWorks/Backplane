@@ -809,6 +809,7 @@ pub async fn request(hub: &Arc<Hub>, method: &str, p: &Value) -> Result<Value, S
             }
             let mut sel = fd::select_params(&f);
             sel["project"] = json!(pro);
+            sel["quick"] = json!(true); // a person's press: answered once the frame on screen has it (xprobe.rs), hidden frames after
             let empty = ["references", "pins", "nets"].iter().all(|k| sel[*k].as_array().map_or(true, |a| a.is_empty()));
             if empty {
                 // nothing with a name (a board edge, a drawing): show the editor
