@@ -215,13 +215,46 @@ pub fn links_inside(dir: &Path, inside: &Path) -> Result<(), String> {
     }
     Ok(())
 }
+/// The most a KiCad zip may unpack to (the Windows runtime is about 3 GB unpacked): a bound on a zip bomb, checked before anything is written.
+pub const UNZIP_CAP: u64 = 12 << 30;
+/// A name Windows will not make as asked: a device (CON, PRN, AUX, NUL, COM1-9, LPT1-9, with any extension: "nul.txt" is NUL too), or one
+/// ending in a dot or a space (Windows drops them, so it would land on another name).
+pub fn windows_reserved(component: &str) -> bool {
+    let stem = component.split('.').next().unwrap_or("").trim_end().to_ascii_uppercase();
+    let dev = matches!(stem.as_str(), "CON" | "PRN" | "AUX" | "NUL" | "CONIN$" | "CONOUT$")
+        || (stem.len() == 4 && (stem.starts_with("COM") || stem.starts_with("LPT")) && matches!(stem.as_bytes()[3], b'1'..=b'9'))
+        || ((stem.starts_with("COM") || stem.starts_with("LPT")) && ["\u{b9}", "\u{b2}", "\u{b3}"].iter().any(|d| stem[3..] == **d));
+    dev || component.ends_with('.') || component.ends_with(' ')
+}
+/// A zip's member names (a backslash read as `/`, any trailing `/` dropped) checked for Windows: no reserved component, and no two paths
+/// (a member or a folder one implies) that differ only in case (on Windows one would land on the other).
+pub fn names_ok_for_windows(names: &[String]) -> Result<(), String> {
+    let mut seen: std::collections::HashMap<String, String> = std::collections::HashMap::new();
+    for n in names {
+        let n = n.strip_prefix("./").unwrap_or(n).trim_end_matches('/');
+        let parts: Vec<&str> = n.split('/').filter(|c| !c.is_empty()).collect();
+        if let Some(c) = parts.iter().find(|c| windows_reserved(c)) { return Err(format!("A name Windows reserves in the KiCad archive: {c} (in {n})")) }
+        for k in 1..=parts.len() {
+            let path = parts[..k].join("/");
+            match seen.insert(path.to_lowercase(), path.clone()) { Some(was) if was != path => return Err(format!("Two names in the KiCad archive differ only in case: {was} and {path}")), _ => {} }
+        }
+    }
+    Ok(())
+}
 /// A zip archive unpacked in-process into `into` (Windows' package; no tar or PowerShell): every member under `root` and none climbing out
-/// (`members_ok`, with a Windows backslash read as a separator), no links, each file written new and its CRC checked as it is read.
-pub fn unzip(zip: &Path, root: &str, into: &Path) -> Result<(), String> {
+/// (`members_ok`, with a Windows backslash read as a separator), no name Windows reserves or two differing only in case, no links, at most
+/// `UNZIP_CAP` bytes in all (declared sizes summed first; each file then read no further than its declared size), each file written new
+/// and its CRC checked as it is read.
+pub fn unzip(zip: &Path, root: &str, into: &Path) -> Result<(), String> { unzip_capped(zip, root, into, UNZIP_CAP) }
+pub fn unzip_capped(zip: &Path, root: &str, into: &Path, cap: u64) -> Result<(), String> {
     let f = std::fs::File::open(zip).map_err(|e| format!("Could not read the KiCad archive: {e}"))?;
     let mut a = zip::ZipArchive::new(std::io::BufReader::new(f)).map_err(|e| format!("Could not read the KiCad archive: {e}"))?;
     let names: Vec<String> = (0..a.len()).map(|i| a.name_for_index(i).unwrap_or("").replace('\\', "/")).collect();
     members_ok(&names.join("\n"), root)?;
+    names_ok_for_windows(&names)?;
+    let mut total = 0u64;
+    for i in 0..a.len() { total = total.saturating_add(a.by_index_raw(i).map_err(|e| format!("Could not read the KiCad archive: {e}"))?.size()); }
+    if total > cap { return Err(format!("The KiCad archive would unpack to {} MB, more than the {} MB allowed", total >> 20, cap >> 20)) }
     for (i, n) in names.iter().enumerate() {
         let mut e = a.by_index(i).map_err(|e| format!("Could not read the KiCad archive: {e}"))?;
         if e.is_symlink() { return Err(format!("Unsafe link in the KiCad archive: {n}")) }
@@ -229,7 +262,9 @@ pub fn unzip(zip: &Path, root: &str, into: &Path) -> Result<(), String> {
         if e.is_dir() || n.ends_with('/') { std::fs::create_dir_all(&to).map_err(|e| format!("Could not unpack KiCad: {e}"))?; continue }
         if let Some(d) = to.parent() { std::fs::create_dir_all(d).map_err(|e| format!("Could not unpack KiCad: {e}"))?; }
         let mut out = std::fs::OpenOptions::new().write(true).create_new(true).open(&to).map_err(|e| format!("Could not unpack KiCad ({n}): {e}"))?;
-        std::io::copy(&mut e, &mut out).map_err(|e| format!("Could not unpack KiCad ({n}): {e}"))?;
+        let size = e.size();
+        let wrote = std::io::copy(&mut std::io::Read::take(&mut e, size + 1), &mut out).map_err(|e| format!("Could not unpack KiCad ({n}): {e}"))?;
+        if wrote != size { return Err(format!("Could not unpack KiCad ({n}): {wrote} bytes where the archive says {size}")) }
         #[cfg(unix)] if let Some(m) = e.unix_mode() { use std::os::unix::fs::PermissionsExt; let _ = std::fs::set_permissions(&to, std::fs::Permissions::from_mode(m & 0o755)); }
     }
     Ok(())
@@ -750,6 +785,18 @@ cp \"$f\" \"$out\"
         bad("absolute", &[("/evil", b"x")], &[], "Unsafe runtime archive path");
         bad("root", &[("another-root/evil", b"x")], &[], "Unexpected runtime archive root");
         bad("link", &[], &[(&format!("{root}/bin/out"), "../../../evil")], "Unsafe link in the KiCad archive");
+        // Windows: two names one file there, a device name, a name Windows trims
+        bad("case", &[(&format!("{root}/BIN/kicad-cli.exe"), b"x")], &[], "differ only in case");
+        bad("case2", &[(&format!("{root}/Manifest.json"), b"x")], &[], "differ only in case");
+        for (k, dev) in ["CON", "nul.txt", "com1", "LPT9.dll", "aux.", "x "].iter().enumerate() {
+            bad(&format!("dev{k}"), &[(&format!("{root}/share/{dev}"), b"x")], &[], "A name Windows reserves");
+        }
+        bad("devdir", &[(&format!("{root}/Prn/a"), b"x")], &[], "A name Windows reserves");
+        assert!(!windows_reserved("console.txt") && !windows_reserved("com10") && !windows_reserved("nullable.h") && !windows_reserved("lpt"));
+        // more than the cap, refused before anything is written
+        let o = r.join("cap"); std::fs::create_dir(&o).unwrap();
+        assert!(unzip_capped(&r.join("ok.zip"), root, &o, 1 << 20).unwrap_err().contains("more than the 1 MB allowed"));
+        assert_eq!(std::fs::read_dir(&o).unwrap().count(), 0, "nothing written");
         // a file whose bytes changed after it was written (its CRC no longer matches) is not taken
         zip_of(&r.join("crc.zip"), &[(&format!("{root}/manifest.json"), b"0123456789abcdef")], &[], true);
         let mut b = std::fs::read(r.join("crc.zip")).unwrap(); let at = b.windows(16).position(|w| w == b"0123456789abcdef").unwrap(); b[at] = b'X'; std::fs::write(r.join("crc.zip"), b).unwrap();
