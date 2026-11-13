@@ -96,10 +96,11 @@ L0D=$(list drc); L0E=$(list erc)
 echo "INFO DRC untrusted (no drc-zone-guard): $(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["result"]["drc"].get("untrusted"))' "$S0" 2>/dev/null)"
 check "Before KiCad opens: both checks ran with kicad-cli and are fresh" "$(python3 -c 'import json,sys; r=json.loads(sys.argv[1])["result"]; print(int(r["drc"]["has_result"] and not r["drc"]["in_editor"] and r["erc"]["has_result"]))' "$S0" 2>/dev/null || echo 0)" "$S0"
 
-# the board open in the embedded editor; its tab pressed once KiCad painted (Hubble_DK's copy came up on the schematic by itself)
+# the board open in the embedded editor; the Schematic tab pressed once, then Board: checks go to KiCad only once its schematic editor
+# is open (kicad/checkrun.rs; the pre-warm opens it only with memory to spare)
 cat >"$OUT/script.json" <<'JSON'
 [{"select":0},{"wait":2000},{"click":"rail:Board"},{"wait":2500},{"click":"ui:Edit"},
- {"kicad":{"wait_painted":60000,"tag":"painted"}},{"wait":3000},{"click":"kicad-tab:PCB"},{"wait":4000},{"mark":"ready"},{"kicad":{"report":true,"tag":"ready"}},{"wait":200000}]
+ {"kicad":{"wait_painted":60000,"tag":"painted"}},{"wait":3000},{"click":"kicad-tab:SCH"},{"wait":6000},{"click":"kicad-tab:PCB"},{"wait":4000},{"mark":"ready"},{"kicad":{"report":true,"tag":"ready"}},{"wait":200000}]
 JSON
 HOME="$OUT/fh" BACKPLANE_GPUI_ASSETS="$ASSETS_DIR" BACKPLANE_GPUI_RECTS=1 BACKPLANE_GPUI_HOLD=1 \
 "$CLIENT_BIN" --url "http://127.0.0.1:$HPORT" --token-file "$OUT/home/token" --script "$OUT/script.json" --exit-after 260 >"$OUT/client.log" 2>&1 &
@@ -119,6 +120,13 @@ CAPS=$(python3 "$IPC_PY" caps "$SOCK" 2>>"$OUT/ipc.err" || echo '{}'); echo "INF
 echo "$CAPS" | grep -q 'names' || { echo "FAIL the embedded KiCad's GetCapabilities gave nothing on $SOCK: $(cut -c1-200 "$OUT/ipc.err" 2>/dev/null)"; exit 1; }
 echo "$CAPS" | grep -q 'embed-checks' || { echo "SKIP embed_editor_checks_e2e: the embedded KiCad has no embed-checks capability ($(echo "$CAPS" | cut -c1-160))"; finish_suite "embed_editor_checks_e2e ($EMBED_MODE)"; exit 0; }
 
+# BACKPLANE_CHECKS_IN_KICAD=0 (the hub's switch): with the board open in KiCad, a run still goes to kicad-cli, and KiCad never runs a check
+if [ "${BACKPLANE_CHECKS_IN_KICAD:-}" = "0" ]; then
+  hub_rpc "[{\"method\":\"kicad.checks.run\",\"params\":{\"project\":\"$PRO\"}}]" >>"$OUT/rpc.log" 2>&1 || true
+  SW=$(wait_summary 'd["at"] > 0' 240) || true; sleep 2; SW=$(watch)
+  check "BACKPLANE_CHECKS_IN_KICAD=0: with KiCad open the checks ran with kicad-cli (not in_editor), none in KiCad" "$(python3 -c 'import json,sys; r=json.loads(sys.argv[1])["result"]; print(int(r["drc"]["has_result"] and not r["drc"]["in_editor"] and not r["erc"]["in_editor"]))' "$SW" 2>/dev/null || echo 0)$( grep -q 'in KiCad starts' "$OUT/hub.log" && echo x)" "$SW"
+  finish_suite "embed_editor_checks_e2e ($EMBED_MODE)"; exit 0
+fi
 # K2: both checks in the editor, sampled for KiCad's progress while DRC runs
 hub_rpc "[{\"method\":\"kicad.checks.run\",\"params\":{\"project\":\"$PRO\"}}]" >>"$OUT/rpc.log" 2>&1 || true
 FRACS=""

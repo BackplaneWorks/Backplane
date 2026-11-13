@@ -696,7 +696,7 @@ fn put_route(s: &Session, tx: &mpsc::UnboundedSender<Msg>) {
 
 /// The client name of the hub's checks in the open KiCad (kicad/edchecks.rs): their requests are not counted as another client's.
 pub const CHECKS_CLIENT: &str = "hub:checks";
-/// Per GUI socket: the requests in flight from other clients than the checks, and when the last one began or ended (ms).
+/// Per GUI socket: the requests in flight from other clients than the checks, and when the last named client's began or ended (ms).
 fn gui_use() -> &'static Mutex<HashMap<String, (u32, u64)>> { static U: OnceLock<Mutex<HashMap<String, (u32, u64)>>> = OnceLock::new(); U.get_or_init(Default::default) }
 /// Whether another client's request to this KiCad is in flight, or was within `quiet_ms`: a check started now would make it AS_BUSY.
 pub fn others_busy(sock: &str, quiet_ms: u64) -> bool {
@@ -708,9 +708,12 @@ pub async fn gui_call(route: &GuiRoute, ty: &str, msg: Value) -> Value { gui_cal
 /// The same, as `client` (an agent's actor, `agent:<thread>`): the fork's co-editing attributes, groups and undoes its changes by it.
 pub async fn gui_call_as(route: &GuiRoute, ty: &str, msg: Value, client: &str) -> Value {
     // every request but the checks' own is counted, so an in-editor check never starts while another client waits (kicad/checkrun.rs)
-    struct Use(String);
-    impl Drop for Use { fn drop(&mut self) { if let Some(e) = gui_use().lock().unwrap().get_mut(&self.0) { e.0 = e.0.saturating_sub(1); e.1 = crate::hub::now_ms() } } }
-    let _use = (client != CHECKS_CLIENT).then(|| { let mut m = gui_use().lock().unwrap(); let e = m.entry(route.sock.clone()).or_default(); e.0 += 1; e.1 = crate::hub::now_ms(); Use(route.sock.clone()) });
+    // a named client's (an agent, the person's edit from a panel or a phone) also holds checks a moment after it ends; the hub's own
+    // unnamed reads (the live BOM's poll, every second) only while in flight
+    struct Use(String, bool);
+    impl Drop for Use { fn drop(&mut self) { if let Some(e) = gui_use().lock().unwrap().get_mut(&self.0) { e.0 = e.0.saturating_sub(1); if self.1 { e.1 = crate::hub::now_ms() } } } }
+    let named = !client.is_empty();
+    let _use = (client != CHECKS_CLIENT).then(|| { let mut m = gui_use().lock().unwrap(); let e = m.entry(route.sock.clone()).or_default(); e.0 += 1; if named { e.1 = crate::hub::now_ms() } Use(route.sock.clone(), named) });
     let (t, r) = oneshot::channel();
     if route.tx.send(Msg::Raw { sock: route.sock.clone(), desc: route.desc.clone(), ty: ty.into(), msg, timeout: 30000, client: client.into(), reply: t }).is_err() {
         return json!({"ok":false,"error":"no reply","why":"no reply","fallback":true})
@@ -2378,7 +2381,7 @@ impl RpcHandler for EmbedRpc {
                 let _ = actor_tx.send(Msg::ClientDialogs { pro: resolved.pro, open });
                 return ok_reply(id, json!({}))
             }
-            if method == "editor.kicad.touched" { unsaved_update(&resolved.pro, |u| u.touched()); return ok_reply(id, json!({})) }
+            if method == "editor.kicad.touched" { unsaved_update(&resolved.pro, |u| u.touched()); super::checkrun::person_touched(&resolved.pro); return ok_reply(id, json!({})) }
             let (tx, rx) = oneshot::channel();
             let sent = match method {
                 "editor.kicad.attach" => {
@@ -2465,6 +2468,23 @@ pub fn stand_in_route(pro: &str) -> (GuiRoute, mpsc::UnboundedReceiver<(String, 
 
 #[cfg(test)]
 mod tests {
+    /// A named client's request holds the checks while in flight and a moment after; the hub's unnamed reads only while in flight.
+    #[tokio::test] async fn others_busy_counts_named_clients_after_and_polls_only_during() {
+        let (route, mut rx) = stand_in_route("/p/busy.kicad_pro");
+        let sock = route.sock.clone();
+        gui_use().lock().unwrap().remove(&sock);
+        tokio::spawn(async move { while let Some((_, _, reply)) = rx.recv().await { let _ = reply.send(json!({"ok": true, "message": {}})); } });
+        let _ = gui_call(&route, "kiapi.common.commands.GetOpenDocuments", json!({})).await;
+        assert!(!others_busy(&sock, 1_500), "a poll that ended holds nothing");
+        let _ = gui_call_as(&route, "kiapi.common.commands.GetItems", json!({}), "agent:t1").await;
+        assert!(others_busy(&sock, 1_500), "an agent's request just ended: wait a moment");
+        assert!(!others_busy(&sock, 0));
+        let _ = gui_call_as(&route, "kiapi.backplane.embed.GetMarkers", json!({}), CHECKS_CLIENT).await;
+        gui_use().lock().unwrap().remove(&sock);
+        let _ = gui_call_as(&route, "kiapi.backplane.embed.GetMarkers", json!({}), CHECKS_CLIENT).await;
+        assert!(!others_busy(&sock, 1_500), "the checks' own never count");
+    }
+
     #[test] fn gerbview_and_the_editors_kicad_asks_for() {
         use super::*;
         assert_eq!(canon_frame("FK_GERBVIEW"), "GERBVIEW"); assert_eq!(fk_of("GERBVIEW"), "FK_GERBVIEW"); assert_eq!(kind_of_fk_val(&json!(7)), "GERBVIEW");

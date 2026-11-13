@@ -186,6 +186,14 @@ pub fn edit_doc(ev: &Value) -> Option<usize> {
         None => Some(if ev["frame"]["kind"] == "FK_SCH" || ev["frame"]["kind"].as_i64() == Some(2) { 1 } else { 0 }),
     }
 }
+/// The person working in the open KiCad (a press or drag over its canvas, from the client: `editor.kicad.touched`): automatic in-editor
+/// runs wait EDIT_QUIET_MS after it, so a check never takes KiCad's UI thread mid-gesture (a pan, a zoom, a drag: lane B, Hubble).
+pub fn person_touched(pro: &str) {
+    let now = now_ms();
+    TOUCHED.get_or_init(Default::default).lock().unwrap().insert(pro.to_string(), now);
+    PERSON.get_or_init(Default::default).lock().unwrap().insert(pro.to_string(), now);
+}
+static TOUCHED: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new();
 /// The last edit seen in the open editor, per project (ms): automatic in-editor runs wait EDIT_QUIET_MS after it.
 static EDIT_AT: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new();
 /// While a check runs in KiCad every other client's request is AS_BUSY (upstream's API task gate, bp.13 batches 3 and 4), so automatic
@@ -461,6 +469,9 @@ async fn tick(hub: &Arc<Hub>) -> u64 {
                         Do::Cancel => next = Do::Nothing,
                         Do::Run => {
                             let edit_at = EDIT_AT.get_or_init(Default::default).lock().unwrap().get(&pro).copied().unwrap_or(0);
+                            // the person's last press in KiCad's canvas holds a run as an edit does 
+                            let touched = TOUCHED.get_or_init(Default::default).lock().unwrap().get(&pro).copied().unwrap_or(0);
+                            let edit_at = edit_at.max(touched);
                             let busy = embed::gui_route(&pro).is_some_and(|r| embed::others_busy(&r.sock, OTHERS_QUIET_MS));
                             if let Some(w) = editor_hold(now, edit_at, x.editor_end, busy, x.sched.demand) { next = Do::Wait(w) }
                         }

@@ -37,6 +37,8 @@ pub fn capable(caps: &Value) -> bool {
 static CAPS: OnceLock<Mutex<HashMap<String, (String, bool, bool)>>> = OnceLock::new();
 /// The open editor of the project when it runs checks itself.
 pub async fn ready(hub: &std::sync::Arc<crate::hub::Hub>, pro: &str) -> Option<GuiRoute> {
+    // BACKPLANE_CHECKS_IN_KICAD=0: never in the open KiCad, kicad-cli on the saved files (a test that wants KiCad free of checks)
+    if std::env::var("BACKPLANE_CHECKS_IN_KICAD").is_ok_and(|v| v == "0") { return None }
     let route = embed::gui_route(pro)?;
     if crate::hub::now_ms() < stuck_until(&route.sock) { return None }
     let m = CAPS.get_or_init(Default::default);

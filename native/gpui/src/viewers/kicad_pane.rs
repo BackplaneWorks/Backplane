@@ -174,6 +174,8 @@ pub struct KicadPane {
     want_gerbers: Vec<String>,
     /// the button now down was pressed over the editor (it keeps the keyboard until the button is up)
     press_in: bool,
+    /// when the hub was last told the person is working in KiCad's canvas
+    busy_sent: Option<std::time::Instant>,
     container: Option<u64>, toplevel: u64, attached: bool, pub info: Value, frames: Vec<nc::Frame>,
     marker: Arc<Mutex<Option<HitboxId>>>, last_root: (i32, i32), placed: Option<(Option<nc::R>, Option<u64>, Vec<nc::R>)>,
     focus: FocusHandle, keys: bool, pub light: bool, _subs: Vec<Subscription>,
@@ -249,7 +251,7 @@ impl KicadPane {
             last = std::time::Instant::now();
             let _ = drained_tx.send(());
         } }).detach();
-        KicadPane { press_in: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), last_root: (i32::MIN, 0), placed: None,
+        KicadPane { busy_sent: None, press_in: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), last_root: (i32::MIN, 0), placed: None,
             focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), poked: None, unmapped_since: None, unshown_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, at_px: None, dialogs_open: Vec::new(), took: None, press_focus: None, want_keys: true, was_dialog: false }
     }
     fn rpc(&self, name: &str, params: Value) { let _ = self.hub.try_send(Command::Rpc(name.to_string(), Secret(params), "kicad")); }
@@ -364,6 +366,13 @@ impl KicadPane {
         self.override_kind = Some("GERBVIEW".into()); self.placed = None; self.pending_show = Some("GERBVIEW".into()); // i18n-ok: wire frame kind
         self.rpc("editor.kicad.show", json!({"project": self.project, "frame": "GERBVIEW", "document": files.join("\n")})); // i18n-ok: wire frame kind
         cx.notify(); true
+    }
+    /// The person is working in KiCad's canvas (a button down over it: a pan, a drag, a click): the hub hears it at most every 500 ms,
+    /// so its automatic checks wait for the gesture to end rather than take KiCad's UI thread mid-way.
+    fn busy_in_kicad(&mut self) {
+        if self.busy_sent.is_some_and(|t| t.elapsed() < std::time::Duration::from_millis(500)) { return }
+        self.busy_sent = Some(std::time::Instant::now());
+        self.rpc("editor.kicad.touched", json!({"project": self.project}));
     }
     /// open_gerbers now if it can, else as soon as the pane is attached and KiCad ready (the tick); dropped if KiCad then has no GerbView.
     pub fn open_gerbers_soon(&mut self, files: &[String], cx: &mut Context<Self>) {
@@ -532,9 +541,9 @@ impl KicadPane {
             // BACKPLANE_KICAD_FOCUS_ON_PRESS: the old way (focus mid-press), to check a KiCad that must cope with it
             let fork = self.info["mode"] == "fork" && std::env::var_os("BACKPLANE_KICAD_FOCUS_ON_PRESS").is_none();
             match (nc::button_over(w), nc::has_focus(c)) {
-                (Some(true), false) if fork => { self.press_focus = Some(w); self.press_in = true; }
-                (Some(true), false) => { nc::focus(w); self.press_in = true; }
-                (Some(true), true) => { self.press_in = true; }
+                (Some(true), false) if fork => { self.press_focus = Some(w); self.press_in = true; self.busy_in_kicad(); }
+                (Some(true), false) => { nc::focus(w); self.press_in = true; self.busy_in_kicad(); }
+                (Some(true), true) => { self.press_in = true; self.busy_in_kicad(); }
                 // a press that began over the editor stays the editor's until it ends, however the layout moves under it: a drag in KiCad
                 // that hits one of its DRC markers opens the Checks panel, the pane shrinks under the pointer, and the keyboard went to
                 // Backplane mid-drag (lane B, Hubble: the person's next Escape closed the viewer and the editor with it)
