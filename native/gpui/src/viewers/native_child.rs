@@ -728,6 +728,9 @@ mod imp {
     /// that followed the hand-back is the click's own, never stale (opening-focus run B5: a canvas click 0.5 s after Ctrl+` lost
     /// its notice to a time-only rule).
     static PANE_PRESS_AT: AtomicU64 = AtomicU64::new(0);
+    /// The frames Backplane has handed the keys to: past their cold construction, so `has_focus`'s reclaim (for wxMSW
+    /// focusing a canvas by itself while a frame is built) never undoes a hand-in Backplane asked for (the editor tab's was)
+    fn handed_in() -> &'static Mutex<HashSet<u64>> { static S: OnceLock<Mutex<HashSet<u64>>> = OnceLock::new(); S.get_or_init(Default::default) }
 
     unsafe fn in_child_focus(c: HWND) -> bool {
         if c.is_null() || unsafe { IsWindow(c) } == 0 { return false }
@@ -1184,6 +1187,7 @@ mod imp {
             let cur = GetCurrentThreadId();
             let target_tid = GetWindowThreadProcessId(h, null_mut());
             if target_tid != 0 && target_tid != cur {
+                if let Ok(mut set) = handed_in().lock() { set.insert(w); }
                 FOCUS_ESCAPED.store(false, Ordering::SeqCst);
                 CHILD_FOCUSED.store(true, Ordering::SeqCst);
                 CLICK_GRACE_UNTIL.store(mono_ms() + 500, Ordering::SeqCst);
@@ -1237,7 +1241,12 @@ mod imp {
         if c.is_null() || unsafe { IsWindow(c) } == 0 { return false }
         unsafe {
             if in_child_focus(c) {
-                if !CHILD_FOCUSED.load(Ordering::SeqCst) {
+                // only during a frame's cold construction: a frame Backplane has handed the keys to is past it
+                let mut gti = GUITHREADINFO { cbSize: std::mem::size_of::<GUITHREADINFO>() as u32, ..std::mem::zeroed() };
+                let focused = if GetGUIThreadInfo(0, &mut gti) != 0 { gti.hwndFocus } else { null_mut() };
+                let handed = handed_in().lock().map(|set| frames(container).iter().any(|f| set.contains(&f.window)
+                    && (hwnd(f.window) == focused || IsChild(hwnd(f.window), focused) != 0))).unwrap_or(false);
+                if !CHILD_FOCUSED.load(Ordering::SeqCst) && !handed {
                     // wxMSW calls ::SetFocus(canvasHwnd) during cold frame construction even when ShowFrame(focus=false);
                     // reclaim focus back to GPUI's top-level HWND so opening an editor never steals the keyboard before a click.
                     let top = GetAncestor(c, GA_PARENT);

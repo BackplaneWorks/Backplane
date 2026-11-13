@@ -1193,8 +1193,10 @@ def run_window_suite(h: SuiteHarness) -> int:
             {"frame_painted": f_shown.get("painted"), "container_painted": c_shown.get("painted")},
         )
         h.check(
-            "Opening embedded KiCad did not steal keyboard focus before user click",
-            r_shown.get("keys") is False,
+            # Edit gives the editor the keyboard as its frame comes on show (kicad_pane want_keys; lane A on Linux, the
+            # opening fix on Windows): keys False here only ever meant the hand-in was lost
+            "Edit gives the embedded KiCad the keyboard with no click",
+            r_shown.get("keys") is True,
             {"keys": r_shown.get("keys")},
         )
 
