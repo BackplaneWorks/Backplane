@@ -67,12 +67,12 @@ pub fn picker(cx: &mut Context<Backplane>, light: bool, viewer: &Value, ui: &Boa
     let c = |n: &str| theme::color(light, n);
     let cur = all.iter().find(|b| b.on).map(|b| b.value.clone()).unwrap_or_default();
     let (name, folder) = if cur.is_empty() { (trs("Select board"), String::new()) } else { (stem(&cur), parent(&cur)) };
-    let btn = div().id("boards-btn").flex().items_center().gap_2().h(px(28.)).px_2().w(px(260.)).min_w(px(96.)).flex_shrink().border_1().border_color(c(if ui.open { "accent" } else { "line" })).bg(c("raise"))
+    let btn = div().id("boards-btn").flex().items_center().gap_2().h(crate::scale::tpx(28.)).px_2().w(px(260.)).min_w(px(96.)).flex_shrink().border_1().border_color(c(if ui.open { "accent" } else { "line" })).bg(c("raise"))
         .cursor_pointer().hover(|s| s.bg(c("panel"))).when(!ui.open, |d| d.tooltip(crate::keys::tip(&if cur.is_empty() { trs("Select board") } else { cur.clone() }, "", light)))
         .child(crate::art::icon("circuit-board", 14., c("dim")))
-        .child(div().flex_1().min_w_0().flex().flex_col().justify_center().line_height(px(13.))
-            .child(div().overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(px(12.)).child(name))
-            .when(!folder.is_empty(), |d| d.child(div().overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(px(10.)).text_color(c("dim")).child(folder))))
+        .child(div().flex_1().min_w_0().flex().flex_col().justify_center().line_height(crate::scale::tpx(13.))
+            .child(div().overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(crate::scale::tpx(12.)).child(name))
+            .when(!folder.is_empty(), |d| d.child(div().overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(crate::scale::tpx(10.)).text_color(c("dim")).child(folder))))
         .child(crate::art::icon("chevron-down", 12., c("dim")))
         .on_click(cx.listener(|this, _, window, cx| toggle(this, window, cx)));
     let mut wrap = div().relative().flex().flex_shrink().min_w_0().child(btn);
@@ -80,19 +80,19 @@ pub fn picker(cx: &mut Context<Backplane>, light: bool, viewer: &Value, ui: &Boa
         let q = find_text(ui, cx);
         let rows = matching(&all, &q);
         let mut menu = div().id("boards-menu").mt(px(4.)).w(px(420.)).max_h(px(480.)).overflow_y_scroll().flex().flex_col().gap(px(3.)).p(px(7.))
-            .bg(c("panel")).border_1().border_color(c("line")).shadow_lg().text_size(px(12.)).occlude()
+            .bg(c("panel")).border_1().border_color(c("line")).shadow_lg().text_size(crate::scale::tpx(12.)).occlude()
             .on_mouse_down_out(cx.listener(|this, _, _, cx| { this.screens.plotview.boards.open = false; cx.notify(); }))
-            .child(div().px_1().text_size(px(11.)).text_color(c("dim")).child(trs("Find a board")));
+            .child(div().px_1().text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(trs("Find a board")));
         if let Some(f) = ui.find.clone() { menu = menu.child(div().id("boards-find").px_2().py_1().bg(c("bg")).border_1().border_color(c("line")).child(f)); }
         let root = viewer["boardsRoot"].as_str().unwrap_or("");
-        if !root.is_empty() { menu = menu.child(div().px_2().py_1().text_size(px(11.)).text_color(c("dim")).child(tf("gpui.c.boards.folder", &[("folder", root.into())]))); }
+        if !root.is_empty() { menu = menu.child(div().px_2().py_1().text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(tf("gpui.c.boards.folder", &[("folder", root.into())]))); }
         for (i, b) in rows.iter().enumerate() {
             let v = b.value.clone();
             menu = menu.child(div().id(SharedString::from(format!("board-opt-{i}"))).flex().flex_col().gap(px(2.)).px(px(10.)).py(px(6.)).cursor_pointer()
                 .when(b.on, |d| d.bg(c("raise")).border_l_2().border_color(c("accent"))).hover(|s| s.bg(c("raise")))
                 .child(div().text_color(c("text")).child(stem(&b.value)))
-                .child(div().text_size(px(11.)).text_color(c("dim")).child(b.value.clone()))
-                .when(b.default, |d| d.child(div().text_size(px(11.)).text_color(c("accent")).child(trs("Default board"))))
+                .child(div().text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(b.value.clone()))
+                .when(b.default, |d| d.child(div().text_size(crate::scale::tpx(11.)).text_color(c("accent")).child(trs("Default board"))))
                 .on_click(cx.listener(move |this, _, _, cx| pick(this, v.clone(), cx))));
         }
         if rows.is_empty() { menu = menu.child(div().px_2().py_1().text_color(c("dim")).child(trs("No matching boards"))); }

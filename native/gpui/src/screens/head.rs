@@ -94,8 +94,8 @@ impl Head {
             f32::from(window.text_system().shape_line(SharedString::from(text.to_string()), px(size), &[run], None).width)
         };
         let now = { let mut s = self.shaped.borrow_mut(); if s.0 != title || (s.1 <= 0. && !title.is_empty()) { *s = (title.to_string(), shape(window, title, title_size, FontWeight::BOLD)); } s.1 };
-        let key = items.iter().map(|t| format!("{}\u{1f}{}\u{1f}{}", t.action, t.icon, t.label)).collect::<Vec<_>>().join("\u{1e}") + font + crate::i18n::tag();
-        let (full, _) = { let mut s = self.strip.borrow_mut(); if s.0 != key { let w = strip_width(items, &mut |t| shape(window, t, TEXT, FontWeight::NORMAL)); *s = (key, w); } s.1 };
+        let key = items.iter().map(|t| format!("{}\u{1f}{}\u{1f}{}", t.action, t.icon, t.label)).collect::<Vec<_>>().join("\u{1e}") + font + crate::i18n::tag() + &crate::scale::s().to_string();
+        let (full, _) = { let mut s = self.strip.borrow_mut(); if s.0 != key { let w = strip_width(items, &mut |t| shape(window, t, TEXT * crate::scale::s(), FontWeight::NORMAL)); *s = (key, w); } s.1 };
         let one = one_row(win_w, left_now(self.left.get(), self.title.get(), now), self.state.get(), full, self.right.get());
         Layout { one, icons: !one && icons_only(self.row.get(), self.state.get(), full) }
     }
@@ -126,7 +126,7 @@ pub fn state(cx: &mut Context<Backplane>, light: bool, thread: &Value, cells: Ve
     let shown = crate::i18n::trs(&word);
     let room = shown_room(&shown);
     div().id("thread-state").relative().flex_shrink_0().h_full().flex().items_center().child(measure(cx, cell))
-        .child(div().px_3().flex().items_center().gap_2().text_size(px(TEXT)).child(div().text_color(c("faint")).child(crate::i18n::trs("STATE")))
+        .child(div().px_3().flex().items_center().gap_2().text_size(crate::scale::tpx(TEXT)).child(div().text_color(c("faint")).child(crate::i18n::trs("STATE")))
             // the thread's dot in the sidebar rows' 0.14 colours
             .child(super::siderow::dot(light, &serde_json::json!({"status": word, "state": thread["state"]})))
             // two lines in one: the widest word sets the width (with no height), the word itself shows
@@ -142,8 +142,8 @@ fn button(cx: &mut Context<Backplane>, light: bool, i: usize, t: &Item, fold: bo
     let label = crate::i18n::trs(&t.label);
     let (word, est) = if buy { split_buy(&label) } else { (label.as_str(), "") };
     let (fg, ic) = if t.danger { ("bad", "bad") } else if buy { ("accent", "accent") } else if t.on { ("text", "accent") } else { ("dim", "dim") };
-    let d = crate::ui::with_rect(div().id(SharedString::from(format!("tool-{i}"))), move || rect).h(px(BTN_H)).flex().items_center().gap(px(ICON_GAP)).pl(px(PL)).pr(px(if fold { PL } else { PR }))
-        .text_size(px(TEXT)).whitespace_nowrap().cursor_pointer().text_color(c(fg)).hover(|s| s.bg(c("raise")).text_color(c(if t.danger { "bad" } else if buy { "accent" } else { "text" })))
+    let d = crate::ui::with_rect(div().id(SharedString::from(format!("tool-{i}"))), move || rect).h(crate::scale::tpx(BTN_H)).flex().items_center().gap(px(ICON_GAP)).pl(px(PL)).pr(px(if fold { PL } else { PR }))
+        .text_size(crate::scale::tpx(TEXT)).whitespace_nowrap().cursor_pointer().text_color(c(fg)).hover(|s| s.bg(c("raise")).text_color(c(if t.danger { "bad" } else if buy { "accent" } else { "text" })))
         .when(t.on && !buy, |d| d.bg(c("raise")))
         // Buy it is the one framed chip; it alone gives way (its estimate ellipsised) when even the icons do not fit
         .when(buy, |d| d.flex_shrink().min_w_0().border_1().border_color(c("line")).bg(c("panel"))).when(!buy, |d| d.flex_shrink_0());

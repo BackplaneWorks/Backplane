@@ -117,7 +117,53 @@ pub const CONTROLS_MAX: f32 = 430.0;
 const GAP: f32 = 16.0;
 /// A chip's width at the settings' 12 px (its 12 px padding each side): wide (CJK) characters count as a full em. An estimate on the generous side,
 /// so a line of chips is never wider than the room it was packed for.
-pub fn chip_w(label: &str) -> f32 { 24. + label.chars().map(|c| if (c as u32) >= 0x1100 && !c.is_whitespace() { 12.5 } else { 7.6 }).sum::<f32>() }
+/// The words grow with the text size (scale.rs); the padding does not.
+pub fn chip_w(label: &str) -> f32 { 24. + crate::scale::s() * label.chars().map(|c| if (c as u32) >= 0x1100 && !c.is_whitespace() { 12.5 } else { 7.6 }).sum::<f32>() }
+
+/// A row's slider (a local row's `raw.slider`: the `local:<name>` it sets, its range, step and value): dragged or pressed anywhere on its
+/// track, it sets the value at that point, snapped to a step.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Slider { pub name: String, pub min: u32, pub max: u32, pub step: u32, pub value: u32 }
+pub const SLIDER_W: f32 = 220.;
+const THUMB: f32 = 14.;
+pub fn slider_of(raw: &Value) -> Option<Slider> {
+    let o = raw["slider"].as_object()?; let n = |k: &str| o.get(k).and_then(Value::as_u64).map(|v| v as u32);
+    let (min, max) = (n("min")?, n("max")?); if max <= min { return None }
+    Some(Slider { name: o.get("name")?.as_str()?.to_string(), min, max, step: n("step").unwrap_or(1).max(1), value: n("value").unwrap_or(min).clamp(min, max) })
+}
+/// Where along the track (0 to 1) a value sits.
+pub fn slider_frac(sl: &Slider) -> f32 { (sl.value.clamp(sl.min, sl.max) - sl.min) as f32 / (sl.max - sl.min) as f32 }
+/// The value at `x` on a track that starts at `left` and is `w` wide: the thumb's centre runs from half a thumb in to half a thumb from the end.
+pub fn slider_at(sl: &Slider, x: f32, left: f32, w: f32) -> u32 {
+    let run = (w - THUMB).max(1.); let f = ((x - left - THUMB / 2.) / run).clamp(0., 1.);
+    let v = sl.min as f32 + f * (sl.max - sl.min) as f32;
+    crate::local::snap(v.round() as u32, (sl.min, sl.max, sl.step))
+}
+struct SliderDrag(Slider);
+struct NoGhost;
+impl Render for NoGhost { fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement { div() } }
+// the track's left edge and width as last drawn, and the value last set (a drag sets it only when it moves to another stop)
+thread_local! { static SLIDER_BOX: std::cell::Cell<(f32, f32)> = const { std::cell::Cell::new((0., 0.)) }; static SLIDER_LAST: std::cell::Cell<u32> = const { std::cell::Cell::new(0) }; }
+fn slider_set(this: &mut Backplane, sl: &Slider, x: f32, cx: &mut Context<Backplane>) {
+    let (left, w) = SLIDER_BOX.with(|b| b.get()); if w <= 0. { return }
+    let v = slider_at(sl, x, left, w);
+    if SLIDER_LAST.with(|l| l.replace(v)) != v { this.local_press(&sl.name, &v.to_string(), cx); }
+}
+fn slider_el(cx: &mut Context<Backplane>, light: bool, sl: &Slider) -> AnyElement {
+    let c = |n: &str| theme::color(light, n);
+    let f = slider_frac(sl);
+    let down = sl.clone();
+    let n = format!("slider:{}", sl.name);
+    div().id(SharedString::from(n.clone())).relative().w(px(SLIDER_W)).h(px(24.)).flex_none().cursor_pointer()
+        .child(canvas(move |b, w, _| { SLIDER_BOX.with(|x| x.set((f32::from(b.left()), f32::from(b.size.width)))); crate::art::report(&n, b, w.scale_factor()); }, |_, _, _, _| {}).absolute().size_full())
+        // the track, filled up to the thumb
+        .child(div().absolute().left(px(THUMB / 2.)).right(px(THUMB / 2.)).top(px(10.)).h(px(4.)).bg(c("raise")).child(div().h_full().w(relative(f)).bg(c("accent"))))
+        .child(div().absolute().top(px(5.)).left(px(f * (SLIDER_W - THUMB))).size(px(THUMB)).bg(c("accent")).border_2().border_color(c("bg")))
+        .on_mouse_down(MouseButton::Left, cx.listener(move |this, e: &MouseDownEvent, _, cx| { SLIDER_LAST.with(|l| l.set(down.value)); slider_set(this, &down, f32::from(e.position.x), cx) }))
+        .on_drag(SliderDrag(sl.clone()), |_, _, _, cx| cx.new(|_| NoGhost))
+        .on_drag_move(cx.listener(move |this, e: &DragMoveEvent<SliderDrag>, _, cx| { let sl = e.drag(cx).0.clone(); slider_set(this, &sl, f32::from(e.event.position.x), cx) }))
+        .into_any_element()
+}
 /// How a row lays out in `avail` px: whether its controls go under its words (`stack`), and its chips as lines (how many on each), each line
 /// no wider than the room it has (a single chip wider than that has a line of its own). `field`/`qr`: the widths of a text field, a QR code.
 #[derive(Clone, Debug, PartialEq)]
@@ -363,21 +409,24 @@ pub(crate) fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<
     let has_field = r.fields.iter().any(|f| fields.contains_key(&f.name));
     let controls = !r.buttons.is_empty() || has_field || !r.qr.is_empty();
     if !controls && r.note.is_empty() {
-        return div().pt_4().pb_1().text_size(px(14.)).font_weight(FontWeight::BOLD).child(trs(&r.label)).into_any_element();
+        return div().pt_4().pb_1().text_size(crate::scale::tpx(14.)).font_weight(FontWeight::BOLD).child(trs(&r.label)).into_any_element();
     }
     // a text field takes the room the controls have beside the words (a folder path or an address is longer than 260 px, and wrapped in the field)
     let field_w = (avail - LABEL_MIN - GAP).clamp(260., CONTROLS_MAX).min(avail);
-    let widths: Vec<f32> = r.buttons.iter().map(|b| chip_w(&trs(&b.label))).collect();
-    let RowFit { stack, lines } = row_fit(avail, &widths, if has_field { field_w } else { 0. }, if r.qr.is_empty() { 0. } else { qr_w(r.qr.len()) });
+    let slider = slider_of(&r.raw);
+    // a slider and its buttons are one line: the slider then the chips
+    let widths: Vec<f32> = if slider.is_some() { vec![] } else { r.buttons.iter().map(|b| chip_w(&trs(&b.label))).collect() };
+    let slider_w = slider.as_ref().map_or(0., |_| SLIDER_W + r.buttons.iter().map(|b| 8. + chip_w(&trs(&b.label))).sum::<f32>());
+    let RowFit { stack, lines } = row_fit(avail, &widths, if has_field { field_w } else { slider_w }, if r.qr.is_empty() { 0. } else { qr_w(r.qr.len()) });
     // the words keep their least width beside the controls (never squeezed to a letter a line), or the whole row's under a stack
     let mut left = div().flex().flex_col().gap_1().min_w_0();
     // beside the controls, the words get the row's width less the controls' (their widest line, field or QR code), as a fixed width: a flex
     // share alone let a long note be measured wider than its column in setup's page, and run on under the button
     let right_w = { let mut at = 0; let mut w = 0f32; for &n in &lines { w = w.max(widths[at..at + n].iter().sum::<f32>() + 4. * (n.max(1) - 1) as f32); at += n; }
-        w.max(if has_field { field_w } else { 0. }).max(if r.qr.is_empty() { 0. } else { qr_w(r.qr.len()) }) };
+        w.max(if has_field { field_w } else { slider_w }).max(if r.qr.is_empty() { 0. } else { qr_w(r.qr.len()) }) };
     left = if stack { left.w_full() } else { left.flex_none().w(px((avail - GAP - right_w).max(LABEL_MIN))) };
-    if !r.label.is_empty() { left = left.child(div().text_size(px(13.)).child(trs(&r.label))); }
-    if !r.note.is_empty() { left = left.child(div().text_size(px(12.)).text_color(c(match r.tone.as_str() { "warn" => "warn", "bad" => "bad", _ => "dim" })).child(trs(&r.note))); }
+    if !r.label.is_empty() { left = left.child(div().text_size(crate::scale::tpx(13.)).child(trs(&r.label))); }
+    if !r.note.is_empty() { left = left.child(div().text_size(crate::scale::tpx(12.)).text_color(c(match r.tone.as_str() { "warn" => "warn", "bad" => "bad", _ => "dim" })).child(trs(&r.note))); }
     // a download's share done (setup's and Settings' KiCad install): a thin bar under the words
     if let Some(p) = r.raw["progress"].as_f64() {
         let p = p.clamp(0., 1.) as f32;
@@ -388,7 +437,7 @@ pub(crate) fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<
     if let Some(l) = r.raw["sublink"].as_object() {
         let b = Btn { label: l.get("label").and_then(|v| v.as_str()).unwrap_or("").into(), action: l.get("action").and_then(|v| v.as_str()).unwrap_or("").into(), value: l.get("value").and_then(|v| v.as_str()).unwrap_or("").into(), on: false };
         let id = SharedString::from(format!("btn:{}:{}", b.action, b.value)); let label = trs(&b.label); let b2 = b.clone();
-        let d = div().id(id).mt_1().text_size(px(12.)).text_color(c("dim")).underline().cursor_pointer().hover(|x| x.text_color(c("text")));
+        let d = div().id(id).mt_1().text_size(crate::scale::tpx(12.)).text_color(c("dim")).underline().cursor_pointer().hover(|x| x.text_color(c("text")));
         let d = if crate::art::rects_on() { let n = format!("btn:{}:{}", b.action, b.value); d.relative().child(canvas(|_, _, _| (), move |r: Bounds<Pixels>, _, w: &mut Window, _| crate::art::report(&n, r, w.scale_factor())).absolute().size_full()) } else { d };
         left = left.child(div().flex().child(d.child(label).on_click(cx.listener(move |this, _, _, cx| on_press(this, &b2, cx)))));
     }
@@ -397,9 +446,16 @@ pub(crate) fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<
         if let Some(slot) = fields.get(&f.name) { right = right.child(div().w(px(field_w)).max_w_full().px_2().py_1().bg(c("raise")).child(slot.input.clone())); }
     }
     // the note under the code (code, address, until when) wraps in the room planned for the controls: one line of it widened the column past the dialog
-    if !r.qr.is_empty() && crate::streamer::is_on() { right = right.child(div().w(px(qr_w(r.qr.len()))).h(px(qr_w(r.qr.len()))).flex().items_center().justify_center().p_3().border_1().border_color(c("line")).text_size(px(11.)).text_color(c("dim")).child(trs("The code is hidden in streamer mode."))); }
-    else if !r.qr.is_empty() { right = right.child(qr(light, &r.qr)); if !r.qrnote.is_empty() { right = right.child(div().max_w(px(right_w)).text_size(px(11.)).text_color(c("dim")).child(trs(&r.qrnote))); } }
-    if !r.buttons.is_empty() {
+    if !r.qr.is_empty() && crate::streamer::is_on() { right = right.child(div().w(px(qr_w(r.qr.len()))).h(px(qr_w(r.qr.len()))).flex().items_center().justify_center().p_3().border_1().border_color(c("line")).text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(trs("The code is hidden in streamer mode."))); }
+    else if !r.qr.is_empty() { right = right.child(qr(light, &r.qr)); if !r.qrnote.is_empty() { right = right.child(div().max_w(px(right_w)).text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(trs(&r.qrnote))); } }
+    if let Some(sl) = &slider {
+        right = right.child(div().flex().items_center().gap_2().child(slider_el(cx, light, sl)).children(r.buttons.iter().enumerate().map(|(j, b)| {
+            let b2 = b.clone();
+            let d = div().id(SharedString::from(format!("set-{i}-{j}"))).px_3().py_1().text_size(crate::scale::tpx(12.)).cursor_pointer();
+            let d = if b.on { d.bg(c("accent")).text_color(c("on-accent")) } else { d.bg(c("raise")).hover(|s| s.bg(c("line"))) };
+            d.child(trs(&b.label)).on_click(cx.listener(move |this, _, _, cx| on_press(this, &b2, cx))).into_any_element()
+        })));
+    } else if !r.buttons.is_empty() {
         // (not a wrapping flex row: it does not grow its parent's height in gpui, and the next row would be drawn over it)
         // chips in lines packed to the room they have (row_fit), at most CHIPS_PER_LINE each
         let mut start = 0;
@@ -407,7 +463,7 @@ pub(crate) fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<
             let (first, chunk) = (start, &r.buttons[start..start + n]); start += n;
             right = right.child(div().flex().when(!stack, |d| d.justify_end()).gap_1().children(chunk.iter().enumerate().map(|(k, b)| {
                 let j = first + k; let b2 = b.clone();
-                let d = div().id(SharedString::from(format!("set-{i}-{j}"))).px_3().py_1().text_size(px(12.)).cursor_pointer();
+                let d = div().id(SharedString::from(format!("set-{i}-{j}"))).px_3().py_1().text_size(crate::scale::tpx(12.)).cursor_pointer();
                 let d = if b.on { d.bg(c("accent")).text_color(c("on-accent")) } else { d.bg(c("raise")).hover(|s| s.bg(c("line"))) };
                 // its rectangle for the e2e drivers (BACKPLANE_GPUI_RECTS=1 only), named by what it does: `btn:<action>:<value>`
                 let d = if crate::art::rects_on() { let n = format!("btn:{}:{}", b.action, b.value); d.relative().child(canvas(|_, _, _| (), move |r: Bounds<Pixels>, _, w: &mut Window, _| crate::art::report(&n, r, w.scale_factor())).absolute().top_0().left_0().size_full()) } else { d };
@@ -455,18 +511,18 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
     let mut nav = div().id("settings-nav").flex().flex_col().gap(px(2.)).p_3().w(px(fit.nav)).flex_shrink_0().min_h_0().overflow_y_scroll().overflow_x_hidden().border_r_1().border_color(c("line"));
     if let Some(input) = &ui.search { nav = nav.child(div().flex().items_center().gap_2().px_2().py_1().mb_2().bg(c("raise")).child(crate::art::icon("search", 14., c("dim"))).child(div().flex_1().child(input.clone()))); }
     {
-        let item = div().id("set-nav-device").flex().items_center().gap_3().px_3().py(px(6.)).cursor_pointer().text_size(px(13.));
+        let item = div().id("set-nav-device").flex().items_center().gap_3().px_3().py(px(6.)).cursor_pointer().text_size(crate::scale::tpx(13.));
         let item = if on_device { item.bg(c("raise")) } else { item.hover(|s| s.bg(c("panel"))) };
-        nav = nav.child(div().px_3().pb_1().text_size(px(11.)).text_color(c("dim")).child(trs("This device").to_uppercase()))
+        nav = nav.child(div().px_3().pb_1().text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(trs("This device").to_uppercase()))
             /* i18n-ok: drawn through trs by row_el, nav_title or the title */ .child(item.child(nav_icon_el(crate::art::icon("settings", 16., c(if on_device { "text" } else { "dim" })))).child(nav_title("This device")).on_click(cx.listener(|this, _, _, cx| { flush_fields(this); this.screens.settings_ui.device = true; this.screens.settings_ui.accounts = false; this.screens.settings_ui.hubs = false; cx.notify(); })));
-        let hubs_item = div().id("set-nav-hubs").flex().items_center().gap_3().px_3().py(px(6.)).cursor_pointer().text_size(px(13.));
+        let hubs_item = div().id("set-nav-hubs").flex().items_center().gap_3().px_3().py(px(6.)).cursor_pointer().text_size(crate::scale::tpx(13.));
         let hubs_item = if on_hubs { hubs_item.bg(c("raise")) } else { hubs_item.hover(|s| s.bg(c("panel"))) };
         /* i18n-ok: drawn through trs by row_el, nav_title or the title */ nav = nav.child(hubs_item.child(nav_icon_el(crate::art::icon("globe", 16., c(if on_hubs { "text" } else { "dim" })))).child(nav_title("Hubs")).on_click(cx.listener(|this, _, _, cx| { flush_fields(this); this.screens.settings_ui.device = false; this.screens.settings_ui.accounts = false; this.screens.settings_ui.hubs = true; cx.notify(); })));
-        let acct_item = div().id("set-nav-accounts").flex().items_center().gap_3().px_3().py(px(6.)).cursor_pointer().text_size(px(13.));
+        let acct_item = div().id("set-nav-accounts").flex().items_center().gap_3().px_3().py(px(6.)).cursor_pointer().text_size(crate::scale::tpx(13.));
         let acct_item = if on_acct { acct_item.bg(c("raise")) } else { acct_item.hover(|s| s.bg(c("panel"))) };
-        nav = nav.child(div().my_2().mx_2().h(px(1.)).bg(c("line"))).child(div().px_3().pb_1().text_size(px(11.)).text_color(c("dim")).child(trs("All devices (hub)").to_uppercase()))
+        nav = nav.child(div().my_2().mx_2().h(px(1.)).bg(c("line"))).child(div().px_3().pb_1().text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(trs("All devices (hub)").to_uppercase()))
             /* i18n-ok: drawn through trs by row_el, nav_title or the title */ .child(acct_item.child(nav_icon_el(crate::art::icon("user", 16., c(if on_acct { "text" } else { "dim" })))).child(nav_title("Accounts")).on_click(cx.listener(|this, _, _, cx| { flush_fields(this); this.screens.settings_ui.device = false; this.screens.settings_ui.hubs = false; this.screens.settings_ui.accounts = true; super::accounts::open_page(this, cx); cx.notify(); })));
-        if !hub_on { nav = nav.child(div().px_3().pt_2().text_size(px(11.)).text_color(c("dim")).child(trs("The hub's other settings open here when it serves them."))); }
+        if !hub_on { nav = nav.child(div().px_3().pt_2().text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(trs("The hub's other settings open here when it serves them."))); }
     }
     let mut last = usize::MAX;
     let title_now = rows.first().map(|r| r.label.clone()).unwrap_or_default();
@@ -476,21 +532,21 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
         if last != usize::MAX && g != last { nav = nav.child(div().my_2().mx_2().h(px(1.)).bg(c("line"))); }
         last = g;
         let (p2, on) = (page.clone(), !on_device && !on_acct && !on_hubs && if on_page { title_now == *t_nav } else { *page == ui.page });
-        let item = div().id(SharedString::from(format!("set-nav-{n}"))).flex().items_center().gap_3().px_3().py(px(6.)).cursor_pointer().text_size(px(13.));
+        let item = div().id(SharedString::from(format!("set-nav-{n}"))).flex().items_center().gap_3().px_3().py(px(6.)).cursor_pointer().text_size(crate::scale::tpx(13.));
         let item = if on { item.bg(c("raise")) } else { item.hover(|s| s.bg(c("panel"))) };
         nav = nav.child(item.child(nav_icon_el(crate::art::icon(nav_icon(page), 16., c(if on { "text" } else { "dim" })))).child(nav_title(title))
             .on_click(cx.listener(move |this, _, _, cx| { go_page(this, &p2); cx.notify(); })));
     }
     /* i18n-ok: drawn through trs by row_el, nav_title or the title */ let title = if on_hubs { "Hubs".to_string() } else if on_acct { "Accounts".to_string() } else if on_device { "This device".to_string() } else if on_page { rows[0].label.clone() } else { ui.nav.iter().find(|(p, _)| *p == ui.page).map(|(_, t)| t.clone()).unwrap_or_default() };
     let dialog = div().id("settings-dialog").occlude().flex().flex_col().w(px(1040.)).max_w_full().h(px(760.)).max_h_full().border_1().border_color(c("line")).bg(c("bg")).overflow_hidden().on_mouse_down_out(cx.listener(|this, _, _, cx| close(this, cx)))
-        .child(div().h(px(44.)).flex_shrink_0().px_4().flex().items_center().border_b_1().border_color(c("line"))
-            .child(div().flex_1().font_weight(FontWeight::BOLD).text_size(px(14.)).child(trs("Settings")))
+        .child(div().h(crate::scale::tpx(44.)).flex_shrink_0().px_4().flex().items_center().border_b_1().border_color(c("line"))
+            .child(div().flex_1().font_weight(FontWeight::BOLD).text_size(crate::scale::tpx(14.)).child(trs("Settings")))
             .child(div().id("settings-close").p_1().cursor_pointer().text_color(c("dim")).hover(|s| s.text_color(c("text")).bg(c("raise"))).child(crate::art::icon("x", 16., c("dim")))
                 .on_click(cx.listener(|this, _, _, cx| close(this, cx)))))
         .child(div().flex().flex_1().min_h_0().child(nav)
             .child(div().id("settings-rows").flex_1().min_w_0().min_h_0().overflow_y_scroll().px(px(fit.gutter)).py_3().flex().flex_col()
-                .child(div().pb_1().text_size(px(15.)).font_weight(FontWeight::BOLD).child(trs(&title)))
-                /* i18n-ok: drawn through trs by row_el, nav_title or the title */ .child(div().pb_2().text_size(px(12.)).text_color(c(if on_device || on_hubs { "accent" } else { "dim" })).child(trs(if on_hubs { "Kept on this computer only. Each hub has its own credential here." } else if on_acct { "Kept in the hub for this machine; sign-ins never leave it." } else if on_device { "Kept on this computer only. Never sent to the hub, and other devices keep their own." } else { "Stored in the hub: the same on all your devices." }))).children(els)));
+                .child(div().pb_1().text_size(crate::scale::tpx(15.)).font_weight(FontWeight::BOLD).child(trs(&title)))
+                /* i18n-ok: drawn through trs by row_el, nav_title or the title */ .child(div().pb_2().text_size(crate::scale::tpx(12.)).text_color(c(if on_device || on_hubs { "accent" } else { "dim" })).child(trs(if on_hubs { "Kept on this computer only. Each hub has its own credential here." } else if on_acct { "Kept in the hub for this machine; sign-ins never leave it." } else if on_device { "Kept on this computer only. Never sent to the hub, and other devices keep their own." } else { "Stored in the hub: the same on all your devices." }))).children(els)));
     // (the dim backdrop lets a press through: a thread clicked while Settings is open shuts Settings and shows that thread, as 0.14 did;
     // the dialog itself takes its own presses)
     Some(div().id("settings").absolute().inset_0().track_focus(focus).bg(gpui::hsla(0., 0., 0., 0.55)).flex().items_center().justify_center().p(px(fit.pad)).child(dialog).into_any_element())
@@ -509,7 +565,9 @@ pub fn device_rows(l: &crate::local::Local) -> Vec<Row> {
         /* i18n-ok: drawn through trs by row_el, nav_title or the title */ r("3D viewer background", "Behind Mech parts and the 3D board: Auto follows the theme.", lo::VIEWER_BGS.iter().map(|(k, lab)| b(lab, "viewer-bg", k, l.viewer_bg == *k)).collect()),
         /* i18n-ok: drawn through trs by row_el, nav_title or the title */ r("Custom background colour", "Pick a colour, then a lighter or darker shade of it.", lo::VIEWER_BG_SWATCHES.iter().map(|(lab, c)| b(lab, "viewer-bg-color", &format!("{c:06x}"), l.viewer_bg == "custom" && l.viewer_bg_rgb == *c))
             /* i18n-ok: drawn through trs by row_el */ .chain([b("Lighter", "viewer-bg-shade", "+", false), b("Darker", "viewer-bg-shade", "-", false)]).collect()),
-        /* i18n-ok: drawn through trs by row_el, nav_title or the title */ r("Text size", &tf("gpui.settings.textpct", &[("pct", l.text_pct.into())]), vec![b("Smaller", "text", "-", false), b("Larger", "text", "+", false), b("Reset", "text-reset", "", l.text_pct == 100)]),
+        // the text size: a slider (its stops are the setting's steps) and Reset beside it
+        Row { raw: serde_json::json!({"slider": {"name": "text", "min": lo::TEXT_PCT.0, "max": lo::TEXT_PCT.1, "step": lo::TEXT_PCT.2, "value": l.text_pct}}),
+            /* i18n-ok: drawn through trs by row_el, nav_title or the title */ ..r("Text size", &tf("gpui.settings.textpct", &[("pct", l.text_pct.into())]), vec![b("Reset", "text-reset", "", l.text_pct == 100)]) },
         /* i18n-ok: drawn through trs by row_el, nav_title or the title */ r("Font", "The typeface of the interface and the thread.", lo::FONTS.iter().map(|(k, lab)| b(lab, "font", k, l.font == *k)).collect()),
         /* i18n-ok: drawn through trs by row_el, nav_title or the title */ r("Layout", "", vec![]),
         /* i18n-ok: drawn through trs by row_el, nav_title or the title */ r("Sidebar width", &tf("gpui.settings.px", &[("px", l.sidebar_px.into())]), vec![b("Narrower", "sidebar-width", "-", false), b("Wider", "sidebar-width", "+", false)]),
@@ -563,6 +621,22 @@ mod tests {
         assert_eq!(row_fit(100., &[300.], 0., 0.).lines, vec![1], "a chip wider than the room still has a line");
         assert_eq!(row_fit(2000., &[50.; 9], 0., 0.).lines, vec![6, 3], "at most CHIPS_PER_LINE a line");
         assert!(chip_w("日本語") > chip_w("abc"));
+    }
+    #[test] fn the_text_size_is_a_slider_with_a_reset_and_a_press_on_its_track_is_a_snapped_value() {
+        let rows = device_rows(&crate::local::Local { text_pct: 130, ..Default::default() });
+        let r = rows.iter().find(|r| r.label == "Text size").unwrap();
+        let sl = slider_of(&r.raw).expect("a slider");
+        assert_eq!(sl, Slider { name: "text".into(), min: 80, max: 160, step: 5, value: 130 });
+        assert_eq!(r.buttons.iter().map(|b| b.value.as_str()).collect::<Vec<_>>(), [""], "only Reset beside it");
+        assert_eq!(slider_frac(&sl), 0.625);
+        let (left, w) = (100., SLIDER_W);
+        assert_eq!(slider_at(&sl, left, left, w), 80, "the start"); assert_eq!(slider_at(&sl, left + w, left, w), 160, "the end");
+        assert_eq!(slider_at(&sl, left - 50., left, w), 80); assert_eq!(slider_at(&sl, left + w + 50., left, w), 160, "past the ends, the ends");
+        assert_eq!(slider_at(&sl, left + THUMB / 2. + (w - THUMB) / 2., left, w), 120, "the middle");
+        assert!(slider_of(&serde_json::json!({"slider": {"name": "x", "min": 5, "max": 5}})).is_none());
+        // a slider row lays out the slider and its chips as one line beside the words, or under them in a thin window
+        assert!(!row_fit(fit(1400., 900.).rows, &[], SLIDER_W + 8. + chip_w("Reset"), 0.).stack);
+        assert!(row_fit(fit(420., 700.).rows, &[], SLIDER_W + 8. + chip_w("Reset"), 0.).stack);
     }
     use core::prelude::v1::test;
     fn j(s: &str) -> Value { serde_json::from_str(s).unwrap() }

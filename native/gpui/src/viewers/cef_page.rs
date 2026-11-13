@@ -249,7 +249,7 @@ impl Render for CefPage {
         // (never in a row of their own: the page would move whenever one appeared)
         let strip = if windowed && (!err.is_empty() || !status.is_empty()) {
             div().flex().flex_row().items_center().bg(c("panel")).child(div().flex_1().min_w_0().child(strip))
-                .child(div().flex_none().max_w(px(360.)).overflow_hidden().whitespace_nowrap().px_2().text_size(px(12.))
+                .child(div().flex_none().max_w(px(360.)).overflow_hidden().whitespace_nowrap().px_2().text_size(crate::scale::tpx(12.))
                     .text_color(if err.is_empty() { rgb(0xd7dbe3) } else { rgb(0xf06a6a) }).child(crate::i18n::trs(if err.is_empty() { &status } else { &err }))).into_any_element()
         } else { strip };
         div().id("cef-page").size_full().flex().flex_col().bg(c("bg")).child(strip).child(chrome)
@@ -264,8 +264,8 @@ impl Render for CefPage {
                 }, move |b, _, window, cx| { window.handle_input(&focus, ElementInputHandler::new(b, me), cx); }).absolute().size_full())
                 .children(self.image.clone().map(|i| img(i).absolute().size_full().object_fit(ObjectFit::Fill)))
                 .when(windowed && covered && !title.is_empty(), |d| d.child(div().absolute().top_2().left_2().text_color(rgb(0x8a93a3)).child(title.clone())))
-                .when(!windowed && !err.is_empty(), |d| d.child(div().absolute().top_2().left_2().px_2().py_1().text_size(px(12.)).bg(rgb(0x1a1e25)).text_color(rgb(0xf06a6a)).child(crate::i18n::trs(&err))))
-                .when(!windowed && !status.is_empty(), |d| d.child(div().absolute().bottom_2().left_2().px_2().py_1().text_size(px(12.)).bg(rgb(0x1a1e25)).text_color(rgb(0xd7dbe3)).child(crate::i18n::trs(&status))))
+                .when(!windowed && !err.is_empty(), |d| d.child(div().absolute().top_2().left_2().px_2().py_1().text_size(crate::scale::tpx(12.)).bg(rgb(0x1a1e25)).text_color(rgb(0xf06a6a)).child(crate::i18n::trs(&err))))
+                .when(!windowed && !status.is_empty(), |d| d.child(div().absolute().bottom_2().left_2().px_2().py_1().text_size(crate::scale::tpx(12.)).bg(rgb(0x1a1e25)).text_color(rgb(0xd7dbe3)).child(crate::i18n::trs(&status))))
                 .when(!windowed && self.image.is_none() && !title.is_empty(), |d| d.child(div().absolute().top_2().left_2().text_color(rgb(0x8a93a3)).child(title)))
                 .on_mouse_move(cx.listener(|this, e: &MouseMoveEvent, _, _| { let (x, y) = this.local(e.position); this.last_mouse = (x, y); if let Some(t) = this.tab() { t.mouse_move(x, y, Self::mods(&e.modifiers, this.buttons), false); } }))
                 .on_mouse_down(MouseButton::Left, cx.listener(|this, e: &MouseDownEvent, w, cx| this.mouse(e, 0, w, cx)))

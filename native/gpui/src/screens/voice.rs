@@ -276,14 +276,14 @@ impl Win {
 fn button(cx: &mut Context<Win>, light: bool, id: SharedString, label: String, primary: bool, tip: bool, f: impl Fn(&mut Win, &mut Context<Win>) + 'static) -> Stateful<Div> {
     let c = |n: &str| theme::color(light, n); let _ = tip;
     div().id(id).px_2().py_1().cursor_pointer().border_1().border_color(c(if primary { "accent" } else { "line" })).bg(c(if primary { "accent" } else { "panel" })).text_color(c(if primary { "on-accent" } else { "text" }))
-        .text_size(px(12.)).whitespace_nowrap().child(crate::i18n::trs(&label)).on_click(cx.listener(move |this, _, _, cx| f(this, cx)))
+        .text_size(crate::scale::tpx(12.)).whitespace_nowrap().child(crate::i18n::trs(&label)).on_click(cx.listener(move |this, _, _, cx| f(this, cx)))
 }
 /// What shows above the composer for this thread: a strip while on, a note when something is wrong, the fixes as chips that undo, the word to clarify.
 pub fn view(cx: &mut Context<Win>, light: bool, v: &Value, level: u32, fix: Option<&Entity<Composer>>) -> Option<AnyElement> {
     let (note, on, ask) = (s(v, "note"), v["on"] == true, &v["ask"]); let fixes = v["fixes"].as_array().cloned().unwrap_or_default();
     if !on && note.is_empty() && fixes.is_empty() && ask.is_null() { return None }
     let c = |n: &str| theme::color(light, n);
-    let mut col = div().id("voice").flex().flex_col().gap_1().text_size(px(12.));
+    let mut col = div().id("voice").flex().flex_col().gap_1().text_size(crate::scale::tpx(12.));
     if !note.is_empty() {
         col = col.child(div().flex().items_center().gap_2().child(div().flex_1().min_w_0().text_color(c(if v["bad"] == true { "bad" } else { "dim" })).child(crate::i18n::trs(note)))
             /* i18n-ok: drawn through trs in button */ .child(button(cx, light, "voice-err".into(), "Close".into(), false, false, |w, cx| w.voice_act("voice-err", "", cx))));
@@ -300,7 +300,7 @@ pub fn view(cx: &mut Context<Win>, light: bool, v: &Value, level: u32, fix: Opti
     }
     if !ask.is_null() {
         let mut row = div().flex().flex_wrap().items_center().gap_1().child(div().text_color(c("dim")).child(crate::i18n::trs(s(ask, "text"))));
-        if let (true, Some(i)) = (ask["fixing"] == true, fix) { row = row.child(div().w(px(220.)).px_2().py_1().border_1().border_color(c("line")).bg(c("view")).child(i.clone())); }
+        if let (true, Some(i)) = (ask["fixing"] == true, fix) { row = row.child(div().w(crate::scale::tpx(220.)).px_2().py_1().border_1().border_color(c("line")).bg(c("view")).child(i.clone())); }
         for (n, b) in ask["buttons"].as_array().cloned().unwrap_or_default().iter().enumerate() {
             let (a, val, input) = (s(b, "action").to_string(), s(b, "value").to_string(), fix.cloned());
             row = row.child(button(cx, light, format!("voice-ask-{n}").into(), s(b, "label").to_string(), b["primary"] == true, false, move |w, cx| { let typed = if a == "voice-fixed" { input.as_ref().map(|i| i.read(cx).content.to_string()) } else { None }; w.voice_act(&a, typed.as_deref().unwrap_or(&val), cx) }));
@@ -314,18 +314,18 @@ pub fn pending_view(cx: &mut Context<Win>, light: bool, v: &Voice, thread: &str)
     let c = |n: &str| theme::color(light, n);
     if let Some((_, until)) = v.countdown.as_ref().filter(|(t, u)| t == thread && *u > std::time::Instant::now()) {
         let left = until.saturating_duration_since(std::time::Instant::now()).as_secs_f32();
-        return Some(div().id("voice-countdown").flex().items_center().gap_2().text_size(px(12.)).child(div().size(px(8.)).bg(c("ok")))
+        return Some(div().id("voice-countdown").flex().items_center().gap_2().text_size(crate::scale::tpx(12.)).child(div().size(px(8.)).bg(c("ok")))
             .child(div().text_color(c("dim")).child(crate::i18n::trs("Sending…")))
             .child(div().w(px(72.)).h(px(4.)).bg(c("line")).child(div().h_full().w(px(72. * (left / 2.0).min(1.0))).bg(c("ok")))).child(div().flex_1())
             /* i18n-ok: drawn through trs in button */ .child(button(cx, light, "voice-hold".into(), "Keep talking".into(), true, false, |w, cx| w.voice_hold(cx))).into_any_element());
     }
     if let Some(p) = v.pending.as_ref().filter(|p| p.thread == thread) {
         /* i18n-ok: drawn through trs below */ let line = if p.cmd == "send" { "Sending by voice…" } else { "Draft cleared by voice" };
-        return Some(div().id("voice-pending").flex().items_center().gap_2().text_size(px(12.)).child(div().size(px(8.)).bg(c(if p.cmd == "send" { "ok" } else { "warn" }))).child(div().flex_1().text_color(c("dim")).child(crate::i18n::trs(line)))
+        return Some(div().id("voice-pending").flex().items_center().gap_2().text_size(crate::scale::tpx(12.)).child(div().size(px(8.)).bg(c(if p.cmd == "send" { "ok" } else { "warn" }))).child(div().flex_1().text_color(c("dim")).child(crate::i18n::trs(line)))
             /* i18n-ok: drawn through trs in button */ .child(button(cx, light, "voice-undo".into(), "Undo".into(), true, false, |w, cx| w.voice_undo(cx))).into_any_element());
     }
     let (line, at) = v.said.as_ref()?; if at.elapsed() > SAID { return None }
-    Some(div().id("voice-said").text_size(px(12.)).text_color(c("dim")).child(crate::i18n::trs(line)).into_any_element())
+    Some(div().id("voice-said").text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(crate::i18n::trs(line)).into_any_element())
 }
 /// What the always-on pill says, and whether its press stops (true) or listens again: listening, paused (why goes in the tip), muted.
 pub fn pill(always: bool, paused: &str, wanted: bool) -> Option<(&'static str, &'static str, bool)> {
@@ -336,7 +336,7 @@ pub fn always_pill(cx: &mut Context<Win>, light: bool, v: &Voice) -> Option<AnyE
     let (what, dot, stops) = pill(v.always, &v.always_paused, v.always_wanted)?;
     let c = |n: &str| theme::color(light, n);
     /* i18n-ok: drawn through trs */ let act = if stops { "Stop" } else { "Listen" };
-    Some(div().id("always-pill").flex().items_center().gap_1().px_2().py_1().border_1().border_color(c(if stops { "bad" } else { "line" })).cursor_pointer().text_size(px(12.)).flex_shrink_0()
+    Some(div().id("always-pill").flex().items_center().gap_1().px_2().py_1().border_1().border_color(c(if stops { "bad" } else { "line" })).cursor_pointer().text_size(crate::scale::tpx(12.)).flex_shrink_0()
         .child(div().size(px(8.)).bg(c(dot))).child(div().text_color(c("dim")).child(crate::i18n::trs(what))).child(div().text_color(c("faint")).child("·"))
         .child(div().text_color(c(if stops { "bad" } else { "accent" })).child(crate::i18n::trs(act)))
         .on_click(cx.listener(|w, _, _, cx| w.voice_always_toggle(cx))).into_any_element())
@@ -347,7 +347,7 @@ pub fn always_row(cx: &mut Context<Win>, light: bool, v: &Voice, want: bool) -> 
     let c = |n: &str| theme::color(light, n);
     /* i18n-ok: drawn through trs below */ let (dot, line) = if !v.always { ("faint", "Always on · muted".to_string()) } else if !v.always_paused.is_empty() { ("warn", "Always on · paused".to_string()) } else { ("bad", "Always on · listening".to_string()) };
     let tip = v.always_paused.clone();
-    Some(div().id("always-on").flex().items_center().gap_2().px_3().py_1().text_size(px(12.)).cursor_pointer().child(div().size(px(8.)).bg(c(dot)))
+    Some(div().id("always-on").flex().items_center().gap_2().px_3().py_1().text_size(crate::scale::tpx(12.)).cursor_pointer().child(div().size(px(8.)).bg(c(dot)))
         .child(div().text_color(c("dim")).child(crate::i18n::trs(&line))).children((!tip.is_empty()).then(|| div().text_color(c("faint")).text_ellipsis().overflow_hidden().whitespace_nowrap().child(tip)))
         .on_click(cx.listener(|w, _, _, cx| w.voice_always_toggle(cx))).into_any_element())
 }

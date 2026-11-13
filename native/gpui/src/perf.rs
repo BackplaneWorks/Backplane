@@ -178,7 +178,7 @@ pub fn overlay(light: bool, key: &str) -> AnyElement {
         window.on_mouse_event(|_: &ScrollWheelEvent, phase, _, _| if phase == DispatchPhase::Capture { with(|p, t| p.input(t)); });
         window.on_key_event(|_: &KeyDownEvent, phase, _, _| if phase == DispatchPhase::Capture { with(|p, t| p.input(t)); });
     }).absolute().size_0();
-    deferred(div().absolute().top(px(60.)).right(px(84.)).px_2().py_1().bg(c("raise")).border_1().border_color(c("line")).text_color(c("text")).text_size(px(11.)).line_height(px(15.)).font(art::mono_font()).whitespace_nowrap()
+    deferred(div().absolute().top(px(60.)).right(px(84.)).px_2().py_1().bg(c("raise")).border_1().border_color(c("line")).text_color(c("text")).text_size(crate::scale::tpx(11.)).line_height(crate::scale::tpx(15.)).font(art::mono_font()).whitespace_nowrap()
         .children(mark("overlay")).children(lines.into_iter().map(|l| div().child(l))).child(end)).with_priority(1000).into_any_element()
 }
 

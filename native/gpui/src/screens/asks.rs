@@ -51,7 +51,7 @@ pub fn typed_answer(ask: &Ask, text: &str) -> Option<Command> {
 fn pill(cx: &mut Context<Backplane>, light: bool, key: String, rect: String, b: &Button) -> Stateful<Div> {
     let c = |n: &str| theme::color(light, n);
     let value = b.value.clone();
-    let d = crate::ui::with_rect(div().id(SharedString::from(key)), || rect).px_3().py_1().text_size(px(12.)).cursor_pointer().border_1();
+    let d = crate::ui::with_rect(div().id(SharedString::from(key)), || rect).px_3().py_1().text_size(crate::scale::tpx(12.)).cursor_pointer().border_1();
     let d = if b.primary { d.bg(c("accent")).text_color(c("on-accent")).border_color(c("accent")) } else { d.bg(c("raise")).border_color(c("line")).hover(|s| s.bg(c("panel"))) };
     d.child(trs(&b.label)).on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(answer(&value)); cx.notify(); }))
 }
@@ -59,24 +59,24 @@ fn pill(cx: &mut Context<Backplane>, light: bool, key: String, rect: String, b: 
 fn card(cx: &mut Context<Backplane>, light: bool, input: Option<Entity<Composer>>, ask: &Ask, i: usize) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let mut col = div().flex().flex_col().gap_2().p_3().bg(c("panel")).border_1().border_color(if ask.needs { c("accent") } else { c("bad") });
-    let mut head = div().flex().items_center().child(div().flex_1().font_weight(FontWeight::BOLD).text_size(px(13.)).text_color(if ask.needs { c("accent") } else { c("text") }).child(trs(&ask.head)));
+    let mut head = div().flex().items_center().child(div().flex_1().font_weight(FontWeight::BOLD).text_size(crate::scale::tpx(13.)).text_color(if ask.needs { c("accent") } else { c("text") }).child(trs(&ask.head)));
     if let Some(skip) = &ask.skip {
         let v = skip.value.clone();
-        head = head.child(div().id(SharedString::from(format!("ask-{i}-skip"))).text_size(px(11.)).text_color(c("dim")).cursor_pointer().hover(|s| s.text_color(c("text"))).child(trs(&skip.label))
+        head = head.child(div().id(SharedString::from(format!("ask-{i}-skip"))).text_size(crate::scale::tpx(11.)).text_color(c("dim")).cursor_pointer().hover(|s| s.text_color(c("text"))).child(trs(&skip.label))
             .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(answer(&v)); cx.notify(); })));
     }
     col = col.child(head);
     if !ask.blocks.is_empty() {
         col = col.child(div().id(SharedString::from(format!("ask-{i}-body"))).max_h(px(220.)).overflow_y_scroll().flex().flex_col().gap_1().children(ask.blocks.iter().map(|b| crate::ui::block(b, light, 0))));
     } else if !ask.detail.is_empty() {
-        col = col.child(div().id(SharedString::from(format!("ask-{i}-detail"))).max_h(px(300.)).overflow_y_scroll().text_size(px(12.)).text_color(c("dim")).child(ask.detail.clone()));
+        col = col.child(div().id(SharedString::from(format!("ask-{i}-detail"))).max_h(px(300.)).overflow_y_scroll().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(ask.detail.clone()));
     }
     let chips = div().flex().flex_wrap().gap_2().children(ask.buttons.iter().enumerate().map(|(j, b)| pill(cx, light, format!("ask-{i}-b{j}"), format!("ask:{i}:{j}"), b).into_any_element()).collect::<Vec<_>>());
     if let (true, Some(input)) = (ask.needs && !ask.pre.is_empty(), input) {
         let id = ask.id.clone();
         let boxed = div().flex().gap_2().items_center()
             .child(crate::ui::with_rect(div(), || format!("ask:{i}:box")).flex_1().px_2().py_1().border_1().border_color(c("line")).bg(c("view")).child(input))
-            .child(crate::ui::with_rect(div().id(SharedString::from(format!("ask-{i}-go"))), || format!("ask:{i}:go")).px_3().py_1().cursor_pointer().text_size(px(12.))
+            .child(crate::ui::with_rect(div().id(SharedString::from(format!("ask-{i}-go"))), || format!("ask:{i}:go")).px_3().py_1().cursor_pointer().text_size(crate::scale::tpx(12.))
                 .bg(if ask.typed { c("accent") } else { c("raise") }).text_color(if ask.typed { c("on-accent") } else { c("text") }).child(trs(&ask.go))
                 .on_click(cx.listener(move |this, _, _, cx| submit(this, &id, cx))));
         col = if ask.typed { col.child(boxed).child(chips) } else { col.child(chips).child(boxed) };

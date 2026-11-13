@@ -68,22 +68,22 @@ pub fn act(app: &mut Backplane, a: &str, cx: &mut Context<Backplane>) {
 fn btn(cx: &mut Context<Backplane>, light: bool, id: String, label: &str, on: impl Fn(&mut Backplane, &mut Context<Backplane>) + 'static) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let rect = id.clone();
-    crate::ui::with_rect(div().id(SharedString::from(id)), move || rect).flex_shrink_0().h(px(22.)).px_2().flex().items_center().text_size(px(11.)).cursor_pointer()
+    crate::ui::with_rect(div().id(SharedString::from(id)), move || rect).flex_shrink_0().h(crate::scale::tpx(22.)).px_2().flex().items_center().text_size(crate::scale::tpx(11.)).cursor_pointer()
         .bg(c("raise")).hover(|s| s.bg(c("line"))).child(trs(label)).on_click(cx.listener(move |this, _, _, cx| { on(this, cx); cx.notify(); })).into_any_element()
 }
 
 pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backplane>) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
-    if d.is_null() { return div().p_3().text_size(px(12.)).text_color(c("faint")).child(trs("Reading the fab's profile…")).into_any_element() }
-    if !s(d, "error").is_empty() { return div().p_3().text_size(px(12.)).text_color(c("warn")).child(s(d, "error").to_string()).into_any_element() }
+    if d.is_null() { return div().p_3().text_size(crate::scale::tpx(12.)).text_color(c("faint")).child(trs("Reading the fab's profile…")).into_any_element() }
+    if !s(d, "error").is_empty() { return div().p_3().text_size(crate::scale::tpx(12.)).text_color(c("warn")).child(s(d, "error").to_string()).into_any_element() }
     // the top row: the fab, its revision and day, the board it is for, the tier, Refresh
     let read = tf("gpui.mgmt.fab.read", &[("rev", d["rev"].as_u64().unwrap_or(0).into()), ("day", s(d, "updated").to_string().into())]);
-    let top = div().flex_shrink_0().min_h(px(super::head::ROW_H)).flex().items_center().gap_2().px_2().border_b_1().border_color(c("rule")).text_size(px(11.))
+    let top = div().flex_shrink_0().min_h(crate::scale::tpx(super::head::ROW_H)).flex().items_center().gap_2().px_2().border_b_1().border_color(c("rule")).text_size(crate::scale::tpx(11.))
         .child(div().flex_shrink_0().text_color(c("text")).child(trs("The fab")))
         .child(div().flex_shrink_0().text_color(c("dim")).child(read))
         .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().text_color(c("faint")).child(format!("{} · {}", s(d, "board"), trs(tier_words(s(d, "tier"))))))
         .child(btn(cx, light, "mgmt:fab:refresh".into(), "Refresh", |a, cx| press(a, "refresh", "", cx))); // i18n-ok: English the draw passes through trs
-    let mut list = div().id("fab-rows").flex_1().min_h_0().overflow_y_scroll().flex().flex_col().text_size(px(12.));
+    let mut list = div().id("fab-rows").flex_1().min_h_0().overflow_y_scroll().flex().flex_col().text_size(crate::scale::tpx(12.));
     // the design review: its last run's verdict and counts; its findings are in the Checks list
     let rv = &d["review"];
     let running = rv["running"] == true;
@@ -91,7 +91,7 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
         tf("gpui.mgmt.fab.review", &[("must", rv["counts"]["error"].as_u64().unwrap_or(0).into()), ("should", rv["counts"]["warning"].as_u64().unwrap_or(0).into()), ("notes", rv["counts"]["info"].as_u64().unwrap_or(0).into()), ("scope", s(rv, "scope").to_string().into())])
     };
     let bad = rv["counts"]["error"].as_u64().unwrap_or(0) > 0;
-    let mut row = div().flex_shrink_0().flex().items_center().gap_2().px_2().h(px(28.)).border_b_1().border_color(c("line"))
+    let mut row = div().flex_shrink_0().flex().items_center().gap_2().px_2().h(crate::scale::tpx(28.)).border_b_1().border_color(c("line"))
         .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().text_color(c(if bad { "bad" } else { "dim" })).child(line));
     if !rv["at"].is_null() { row = row.child(btn(cx, light, "mgmt:fab:checks".into(), "Findings", |a, cx| crate::screens::mgmt::toggle(a, "checks", cx))) } // i18n-ok: English the draw passes through trs
     if !running { row = row.child(btn(cx, light, "mgmt:fab:review".into(), "Review", |a, cx| press(a, "review", "", cx))) } // i18n-ok: English the draw passes through trs
@@ -99,7 +99,7 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
     list = list.child(row);
     // the DRC rules
     let (words, button) = drc_words(s(&d["drc"], "state"));
-    let mut drc = div().flex_shrink_0().flex().items_center().gap_2().px_2().h(px(28.)).border_b_1().border_color(c("line"))
+    let mut drc = div().flex_shrink_0().flex().items_center().gap_2().px_2().h(crate::scale::tpx(28.)).border_b_1().border_color(c("line"))
         .child(div().flex_1().min_w_0().text_color(c(if button.is_some() { "warn" } else { "dim" })).child(trs(words)));
     if let Some(b) = button { drc = drc.child(btn(cx, light, "mgmt:fab:drc".into(), b, |a, cx| press(a, "drc", "", cx))) }
     list = list.child(drc);
@@ -107,7 +107,7 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
     for x in d["conflicts"].as_array().into_iter().flatten() { list = list.child(div().flex_shrink_0().px_2().py_1().border_b_1().border_color(c("line")).text_color(c("bad")).child(x.as_str().unwrap_or("").to_string())) }
     for x in d["suggestions"].as_array().cloned().unwrap_or_default() {
         let key = s(&x, "key").to_string();
-        list = list.child(div().flex_shrink_0().flex().items_center().gap_2().px_2().h(px(28.)).border_b_1().border_color(c("line"))
+        list = list.child(div().flex_shrink_0().flex().items_center().gap_2().px_2().h(crate::scale::tpx(28.)).border_b_1().border_color(c("line"))
             .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().text_color(c("warn")).child(suggestion_line(&x)))
             .child(btn(cx, light, format!("mgmt:fab:apply:{key}"), "Apply", move |a, cx| press(a, "apply", &key, cx)))); // i18n-ok: English the draw passes through trs
     }
@@ -116,7 +116,7 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
     if let Some(id) = st["chosen"].as_str() {
         let id = id.to_string(); let proposed = st["by"] == "proposed";
         let line = tf("gpui.mgmt.fab.stackup", &[("id", id.clone().into()), ("w", st["outer_50_mm"].as_f64().map(|w| format!("{w}")).unwrap_or_default().into())]);
-        let mut row = div().flex_shrink_0().flex().items_center().gap_2().px_2().h(px(28.)).border_b_1().border_color(c("line"))
+        let mut row = div().flex_shrink_0().flex().items_center().gap_2().px_2().h(crate::scale::tpx(28.)).border_b_1().border_color(c("line"))
             .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().text_color(c(if proposed { "warn" } else { "dim" })).child(if proposed { format!("{} {line}", trs("Proposed:")) } else { line })); // i18n-ok: English the draw passes through trs
         if proposed { row = row.child(btn(cx, light, "mgmt:fab:stackup".into(), "Use", move |a, cx| press_stackup(a, &id, cx))) } // i18n-ok: English the draw passes through trs
         list = list.child(row);
@@ -125,12 +125,12 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
     if !changed.is_empty() {
         let mut box_ = div().flex_shrink_0().flex().flex_col().px_2().py_1().gap_1().border_b_1().border_color(c("line"))
             .child(div().flex().items_center().gap_2().child(div().flex_1().text_color(c("warn")).child(trs("Changed since you last looked"))).child(btn(cx, light, "mgmt:fab:seen".into(), "Seen", |a, cx| press(a, "seen", "", cx)))); // i18n-ok: English the draw passes through trs
-        for l in changed.iter().take(12) { box_ = box_.child(div().text_size(px(11.)).text_color(c("dim")).child(l.as_str().unwrap_or("").to_string())) }
+        for l in changed.iter().take(12) { box_ = box_.child(div().text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(l.as_str().unwrap_or("").to_string())) }
         list = list.child(box_);
     }
     // the limits: what it is, free, for more, the day read (opens the source)
     let w = |i: usize| -> Div { let d = div().flex_shrink_0().overflow_hidden().whitespace_nowrap().text_ellipsis(); match i { 0 => d.flex_1().min_w_0(), 1 | 2 => d.w(px(72.)), _ => d.w(px(74.)) } };
-    list = list.child(div().flex_shrink_0().flex().items_center().gap_2().px_2().h(px(22.)).border_b_1().border_color(c("line")).text_size(px(11.)).text_color(c("dim"))
+    list = list.child(div().flex_shrink_0().flex().items_center().gap_2().px_2().h(crate::scale::tpx(22.)).border_b_1().border_color(c("line")).text_size(crate::scale::tpx(11.)).text_color(c("dim"))
         .child(w(0).child(trs("Limit"))).child(w(1).child(trs("Base price"))).child(w(2).child(trs("Costs more"))).child(w(3).child(trs("Read"))));
     for (i, l) in d["limits"].as_array().cloned().unwrap_or_default().into_iter().enumerate() {
         let side = if l["free"].is_object() { &l["free"] } else { &l["extra"] };
@@ -138,13 +138,13 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
         let mark = if l["changed"] == true { "• " } else { "" };
         let label = format!("{mark}{}", s(&l, "label"));
         let cell = |v: &Value| v["text"].as_str().map(str::to_string).unwrap_or_else(|| "—".into());
-        list = list.child(div().id(SharedString::from(format!("fab-l-{i}"))).flex_shrink_0().flex().items_center().gap_2().px_2().h(px(22.)).border_b_1().border_color(c("line"))
+        list = list.child(div().id(SharedString::from(format!("fab-l-{i}"))).flex_shrink_0().flex().items_center().gap_2().px_2().h(crate::scale::tpx(22.)).border_b_1().border_color(c("line"))
             .child(w(0).text_color(c(if l["changed"] == true { "warn" } else if l["inherited"] == true { "dim" } else { "text" })).child(label))
             .child(w(1).child(cell(&l["free"]))).child(w(2).text_color(c("dim")).child(cell(&l["extra"])))
             .child(w(3).id(SharedString::from(format!("fab-src-{i}"))).text_color(c("faint")).cursor_pointer().hover(|x| x.text_color(c("text")))
                 .child(if derived { format!("{day}*") } else { day }).on_click(move |_, _, cx| { if url.starts_with("https://") { cx.open_url(&url) } })));
     }
-    list = list.child(div().p_2().text_size(px(11.)).text_color(c("faint")).child(trs("* worked out from the fab's page (a mil in mm, a ring from a diameter). Dimmed: the rigid board's value, where this board's page says nothing else. A date opens the page it was read from.")));
+    list = list.child(div().p_2().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(trs("* worked out from the fab's page (a mil in mm, a ring from a diameter). Dimmed: the rigid board's value, where this board's page says nothing else. A date opens the page it was read from.")));
     div().size_full().flex().flex_col().child(top).child(list).into_any_element()
 }
 

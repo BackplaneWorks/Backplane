@@ -310,7 +310,7 @@ impl Render for Tip {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         let c = |n: &str| theme::color(self.1, n);
         let font = TIP_FONT.lock().unwrap().clone();
-        div().px_2().py_1().bg(c("panel")).border_1().border_color(c("line")).text_size(px(11.)).text_color(c("text")).when(!font.is_empty(), |d| d.font_family(font)).child(self.0.clone())
+        div().px_2().py_1().bg(c("panel")).border_1().border_color(c("line")).text_size(crate::scale::tpx(11.)).text_color(c("text")).when(!font.is_empty(), |d| d.font_family(font)).child(self.0.clone())
     }
 }
 /// A tooltip builder for `.tooltip(...)`: `text` through the catalog (English written in the code; a name or title the catalog does not know comes

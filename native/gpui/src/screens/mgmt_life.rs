@@ -86,8 +86,8 @@ fn chart(app: &mut Backplane, id: &'static str, title: String, pts: Vec<(f64, f6
     let n = pts.len(); let p3 = pts.clone();
     let (first_at, last_at) = (pts.first().map_or(0, |p| p.0 as u64), pts.last().map_or(0, |p| p.0 as u64));
     div().flex().flex_col().gap(px(2.)).px_2().py_1()
-        .child(div().flex().items_center().gap_2().text_size(px(11.)).child(div().text_color(c("dim")).child(title)).child(div().flex_1()).child(div().text_color(c("text")).child(label)))
-        .child(div().flex().gap_1().child(div().w(px(46.)).flex_shrink_0().h(px(64.)).flex().flex_col().justify_between().items_end().text_size(px(10.)).text_color(c("faint"))
+        .child(div().flex().items_center().gap_2().text_size(crate::scale::tpx(11.)).child(div().text_color(c("dim")).child(title)).child(div().flex_1()).child(div().text_color(c("text")).child(label)))
+        .child(div().flex().gap_1().child(div().w(px(46.)).flex_shrink_0().h(px(64.)).flex().flex_col().justify_between().items_end().text_size(crate::scale::tpx(10.)).text_color(c("faint"))
                 .child(fmt(top_of(&pts))).child(fmt(0.0)))
             .child(div().flex_1().min_w_0().flex().flex_col().child(div().id(id).h(px(64.)).w_full().relative().child(plot)
             .on_mouse_move(cx.listener(move |this, e: &MouseMoveEvent, _, cx| {
@@ -99,7 +99,7 @@ fn chart(app: &mut Backplane, id: &'static str, title: String, pts: Vec<(f64, f6
             }))
             .on_hover(cx.listener(move |this, on: &bool, _, cx| { if !*on && this.screens.mgmt.life.hover.map_or(false, |h| h.0 == id) { this.screens.mgmt.life.hover = None; cx.notify(); } })))
             // the days the line spans
-            .child(div().flex().justify_between().text_size(px(10.)).text_color(c("faint")).child(day(first_at)).child(day(last_at)))))
+            .child(div().flex().justify_between().text_size(crate::scale::tpx(10.)).text_color(c("faint")).child(day(first_at)).child(day(last_at)))))
         .into_any_element()
 }
 
@@ -123,9 +123,9 @@ pub fn act(app: &mut Backplane, a: &str, cx: &mut Context<Backplane>) { if let S
 
 pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backplane>) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
-    if d.is_null() { return div().p_3().text_size(px(12.)).text_color(c("faint")).child(trs("Reading the schematic…")).into_any_element() }
+    if d.is_null() { return div().p_3().text_size(crate::scale::tpx(12.)).text_color(c("faint")).child(trs("Reading the schematic…")).into_any_element() }
     let counts = &d["counts"];
-    let mut top = div().flex_shrink_0().min_h(px(super::head::ROW_H)).flex().items_center().gap_3().px_2().border_b_1().border_color(c("rule")).text_size(px(11.));
+    let mut top = div().flex_shrink_0().min_h(crate::scale::tpx(super::head::ROW_H)).flex().items_center().gap_3().px_2().border_b_1().border_color(c("rule")).text_size(crate::scale::tpx(11.));
     for k in ["active", "nrnd", "eol"] {
         let (w, tone) = life_word(k); let n = counts[k].as_u64().unwrap_or(0);
         top = top.child(div().flex().items_center().gap_1().child(div().text_color(c(if n > 0 { tone } else { "faint" })).child(w)).child(div().text_color(c(if n > 0 { "text" } else { "faint" })).child(n.to_string())));
@@ -143,10 +143,10 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
     let cost = pairs(&d["bom"]["cost"]); let instock = pairs(&d["bom"]["instock"]);
     let lines = d["bom"]["lines"].as_u64().unwrap_or(0);
     if cost.is_empty() {
-        col = col.child(div().px_2().py_2().text_size(px(12.)).text_color(c("faint")).child(if lines == 0 { trs("No line has an MPN or a fab part number to follow yet.") } else { trs("No reading of the fab's stock yet: the BOM panel's lookups start it.") }));
+        col = col.child(div().px_2().py_2().text_size(crate::scale::tpx(12.)).text_color(c("faint")).child(if lines == 0 { trs("No line has an MPN or a fab part number to follow yet.") } else { trs("No reading of the fab's stock yet: the BOM panel's lookups start it.") }));
     } else if cost.len() < 2 {
         let (at, v) = cost[0]; let n = instock.first().map(|p| p.1).unwrap_or(0.0);
-        col = col.child(div().px_2().py_2().flex().flex_col().gap_1().text_size(px(12.))
+        col = col.child(div().px_2().py_2().flex().flex_col().gap_1().text_size(crate::scale::tpx(12.))
             .child(div().text_color(c("dim")).child(tf("gpui.mgmt.life.one", &[("day", day(at as u64).into())])))
             .child(div().text_color(c("text")).child(tf("gpui.mgmt.life.now", &[("cost", money(v).into()), ("n", (n as u64).into()), ("lines", lines.into())]))));
     } else {
@@ -156,13 +156,14 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
     // the parts: a press shows the part's own graphs
     let sel = app.screens.mgmt.life.sel.clone();
     let parts: Vec<Value> = d["parts"].as_array().cloned().unwrap_or_default();
-    let mut list = div().flex().flex_col().text_size(px(12.)).border_t_1().border_color(c("rule"));
+    let mut list = div().flex().flex_col().text_size(crate::scale::tpx(12.)).border_t_1().border_color(c("rule"));
     // the lifecycle column only once some part has one; the MPN takes what the others leave, shortened in its middle
     let any_known = parts.iter().any(|p| p["lifecycle"] != "unknown");
     // narrow, the price goes (the part's own graphs say it) and the MPN keeps the room
-    let show_price = app.screens.mgmt.panel_w >= 460.;
+    let sc = crate::scale::s();
+    let show_price = app.screens.mgmt.panel_w >= 460. * sc;
     let n_cols = 3. + if any_known { 1. } else { 0. } + if show_price { 1. } else { 0. };
-    let fixed = 16. + 92. + 56. + if show_price { 56. } else { 0. } + if any_known { 56. } else { 0. } + 8. * (n_cols - 1.);
+    let fixed = 16. + sc * (92. + 56. + if show_price { 56. } else { 0. } + if any_known { 56. } else { 0. }) + 8. * (n_cols - 1.);
     let mpn_chars = super::mgmt_bom::chars_in(app.screens.mgmt.panel_w.max(240.) - fixed);
     for p in &parts {
         let key = p["key"].as_str().unwrap_or("").to_string(); let on = sel.as_deref() == Some(key.as_str());
@@ -173,19 +174,19 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
         let stock_t = match (p["stock_status"].as_str(), p["stock"].as_i64()) { (Some(st @ ("out" | "low")), Some(n)) => super::mgmt_bom::stock_words(&json!({"status": st, "stock": n})).unwrap_or_default(), (_, Some(n)) => super::mgmt_bom::abbrev(n), _ => "—".into() };
         let stock_tone = match p["stock_status"].as_str() { Some("out") => "bad", Some("low") => "warn", _ => "dim" };
         list = list.child(crate::ui::with_rect(div().id(SharedString::from(format!("life-{key}"))), { let k = key.clone(); move || format!("mgmt:life:{k}") })
-            .flex_shrink_0().flex().items_center().gap_2().px_2().h(px(24.)).border_b_1().border_color(c("line")).cursor_pointer().when(on, |d| d.bg(c("raise"))).hover(|d| d.bg(c("panel")))
-            .child(div().w(px(92.)).flex_shrink_0().overflow_hidden().whitespace_nowrap().text_color(c("dim")).child(refs))
+            .flex_shrink_0().flex().items_center().gap_2().px_2().h(crate::scale::tpx(24.)).border_b_1().border_color(c("line")).cursor_pointer().when(on, |d| d.bg(c("raise"))).hover(|d| d.bg(c("panel")))
+            .child(div().w(crate::scale::tpx(92.)).flex_shrink_0().overflow_hidden().whitespace_nowrap().text_color(c("dim")).child(refs))
             .child({ let m = p["mpn"].as_str().unwrap_or("").to_string(); let t = super::mgmt_bom::mid_ellipsis(&m, mpn_chars);
                 div().id(SharedString::from(format!("life-mpn-{key}"))).flex_1().min_w_0().overflow_hidden().whitespace_nowrap().when(t != m, |d| d.tooltip(crate::keys::tip(&m, "", light))).child(t) })
-            .when(any_known, |r| r.child(div().w(px(56.)).flex_shrink_0().text_color(c(tone)).child(if p["lifecycle"] == "unknown" { String::new() } else { w })))
-            .child(div().w(px(56.)).flex_shrink_0().flex().justify_end().text_color(c(stock_tone)).child(stock_t))
-            .when(show_price, |r| r.child(div().w(px(56.)).flex_shrink_0().flex().justify_end().text_color(c("dim")).child(p["price"].as_f64().map(money).unwrap_or_else(|| "—".into()))))
+            .when(any_known, |r| r.child(div().w(crate::scale::tpx(56.)).flex_shrink_0().text_color(c(tone)).child(if p["lifecycle"] == "unknown" { String::new() } else { w })))
+            .child(div().w(crate::scale::tpx(56.)).flex_shrink_0().flex().justify_end().text_color(c(stock_tone)).child(stock_t))
+            .when(show_price, |r| r.child(div().w(crate::scale::tpx(56.)).flex_shrink_0().flex().justify_end().text_color(c("dim")).child(p["price"].as_f64().map(money).unwrap_or_else(|| "—".into()))))
             .on_click({ let k = key.clone(); cx.listener(move |this, _, _, cx| select(this, &k, cx)) }));
     }
     // the part pressed: its own graphs, above the list (in view, whatever row it was)
     let detail = sel.as_ref().and_then(|k| parts.iter().find(|p| p["key"].as_str() == Some(k.as_str()))).map(|p| {
         let name = format!("{} · {}", super::mgmt_bom::refs_fit(&p["refs"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect::<Vec<_>>(), 20), p["mpn"].as_str().unwrap_or(""));
-        div().flex().flex_col().border_t_1().border_color(c("rule")).child(div().px_2().pt_1().text_size(px(11.)).text_color(c("text")).child(name)).child(part_detail(app, light, cx))
+        div().flex().flex_col().border_t_1().border_color(c("rule")).child(div().px_2().pt_1().text_size(crate::scale::tpx(11.)).text_color(c("text")).child(name)).child(part_detail(app, light, cx))
     });
     div().size_full().flex().flex_col().child(top).child(col.children(detail).child(list)).into_any_element()
 }
@@ -194,7 +195,7 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
 fn part_detail(app: &mut Backplane, light: bool, cx: &mut Context<Backplane>) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let s = app.screens.mgmt.life.samples.clone();
-    let wrap = div().flex().flex_col().bg(c("panel")).border_b_1().border_color(c("rule")).text_size(px(12.));
+    let wrap = div().flex().flex_col().bg(c("panel")).border_b_1().border_color(c("rule")).text_size(crate::scale::tpx(12.));
     if s.is_null() { return wrap.child(div().px_2().py_2().text_color(c("faint")).child(trs("Reading its history…"))).into_any_element() }
     let (stock, price) = series(&s);
     match if stock.is_empty() { 0 } else { days_in(&stock) } {
@@ -206,7 +207,7 @@ fn part_detail(app: &mut Backplane, light: bool, cx: &mut Context<Backplane>) ->
             let w = wrap.child(chart(app, "life-part-stock", trs("Stock"), stock, count, light, cx));
             // one price reading is a number and the day it starts, not a line
             if days_in(&price) >= 2 { w.child(chart(app, "life-part-price", trs("Unit price"), price, money, light, cx)).into_any_element() }
-            else { w.children(price.first().map(|p| div().px_2().py_1().text_size(px(11.)).flex().gap_2().child(div().text_color(c("dim")).child(trs("Unit price"))).child(div().text_color(c("text")).child(money(p.1)))
+            else { w.children(price.first().map(|p| div().px_2().py_1().text_size(crate::scale::tpx(11.)).flex().gap_2().child(div().text_color(c("dim")).child(trs("Unit price"))).child(div().text_color(c("text")).child(money(p.1)))
                 .child(div().text_color(c("faint")).child(tf("gpui.mgmt.life.price.since", &[("day", day(p.0 as u64).into())]))))).into_any_element() }
         }
     }

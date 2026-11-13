@@ -183,16 +183,16 @@ pub fn section(cx: &mut Context<Backplane>, light: bool, g: &Google) -> Vec<AnyE
     let c = |n: &str| theme::color(light, n);
     let v = &g.view;
     if !v.is_object() { return vec![] }
-    let mut out: Vec<AnyElement> = vec![div().pt_3().pb_2().text_size(px(14.)).font_weight(FontWeight::BOLD).child("Google" /* i18n-ok: the product name */).into_any_element()];
-    if !g.notice.is_empty() { out.push(div().mb_3().p_3().bg(c("raise")).text_size(px(12.)).text_color(c("dim")).child(crate::i18n::trs(&g.notice)).into_any_element()); }
+    let mut out: Vec<AnyElement> = vec![div().pt_3().pb_2().text_size(crate::scale::tpx(14.)).font_weight(FontWeight::BOLD).child("Google" /* i18n-ok: the product name */).into_any_element()];
+    if !g.notice.is_empty() { out.push(div().mb_3().p_3().bg(c("raise")).text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(crate::i18n::trs(&g.notice)).into_any_element()); }
     for (i, a) in account_rows(v).into_iter().enumerate() {
         let (id, armed) = (a.id.clone(), g.armed == a.id);
         let head = div().flex().items_center().gap_3()
             .child(div().flex().flex_col().gap(px(2.)).flex_1().min_w(px(140.))
-                .child(div().text_size(px(14.)).font_weight(FontWeight::BOLD).child(a.email.clone()))
-                .child(div().text_size(px(12.)).text_color(c("dim")).child(a.scopes.clone()))
-                .child(div().text_size(px(12.)).text_color(c("dim")).child(crate::i18n::trs(&a.bots))))
-            .child(div().flex().items_center().gap_2().flex_shrink_0().child(div().size(px(8.)).bg(c(&a.tone))).child(div().text_size(px(12.)).text_color(c(&a.tone)).child(a.line.clone())));
+                .child(div().text_size(crate::scale::tpx(14.)).font_weight(FontWeight::BOLD).child(a.email.clone()))
+                .child(div().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(a.scopes.clone()))
+                .child(div().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(crate::i18n::trs(&a.bots))))
+            .child(div().flex().items_center().gap_2().flex_shrink_0().child(div().size(px(8.)).bg(c(&a.tone))).child(div().text_size(crate::scale::tpx(12.)).text_color(c(&a.tone)).child(a.line.clone())));
         let mut row = div().flex().items_center().gap_2().mt_3().flex_wrap();
         let aid = id.clone();
         /* i18n-ok: notices and button labels are drawn through trs; HTTP text */ row = row.child(button(cx, light, format!("g-again-{i}"), "Sign in again", false, false, move |this, cx| start_signin(this, Some(aid.clone()), cx)));
@@ -213,17 +213,17 @@ pub fn section(cx: &mut Context<Backplane>, light: bool, g: &Google) -> Vec<AnyE
             let label = format!("{} {}", if on { "✓" } else { "○" }, email);
             toggles = toggles.child(button(cx, light, format!("g-grant-{bi}-{ai}"), &label, on, false, move |this, _| ask(this, json!({"op": "grant", "bot": bot, "account": account, "on": !on}))));
         }
-        out.push(div().flex().flex_col().gap_2().p_3().mb_2().border_1().border_color(c("line")).bg(c("view")).child(div().text_size(px(13.)).child(b.name)).child(toggles).into_any_element());
+        out.push(div().flex().flex_col().gap_2().p_3().mb_2().border_1().border_color(c("line")).bg(c("view")).child(div().text_size(crate::scale::tpx(13.)).child(b.name)).child(toggles).into_any_element());
     }
-    if let Some(l) = client_line(v) { out.push(div().mb_3().p_3().bg(c("raise")).text_size(px(12.)).text_color(c("dim")).child(l).into_any_element()); }
+    if let Some(l) = client_line(v) { out.push(div().mb_3().p_3().bg(c("raise")).text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(l).into_any_element()); }
     if v["signin"].is_object() && v["signin"]["state"] != "done" {
         let s = &v["signin"];
         let mut col = div().flex().flex_col().gap_2().mb_3().p_3().bg(c("panel")).border_1().border_color(c("line"));
-        let text = string(s, "text"); if !text.is_empty() { col = col.child(div().text_size(px(12.)).text_color(c("dim")).child(text)); }
-        let err = string(s, "error"); if !err.is_empty() { col = col.child(div().text_size(px(12.)).text_color(c("bad")).child(err)); }
+        let text = string(s, "text"); if !text.is_empty() { col = col.child(div().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(text)); }
+        let err = string(s, "error"); if !err.is_empty() { col = col.child(div().text_size(crate::scale::tpx(12.)).text_color(c("bad")).child(err)); }
         if let Some(input) = g.paste.as_ref().filter(|_| wants_paste(v)) {
             col = col.child(div().flex().items_center().gap_2()
-                .child(div().flex_1().h(px(28.)).px_2().flex().items_center().bg(c("raise")).child(input.clone()))
+                .child(div().flex_1().h(crate::scale::tpx(28.)).px_2().flex().items_center().bg(c("raise")).child(input.clone()))
                 /* i18n-ok: notices and button labels are drawn through trs; HTTP text */ .child(button(cx, light, "g-paste".into(), "Submit", true, false, |this, cx| paste(this, cx))));
         }
         /* i18n-ok: notices and button labels are drawn through trs; HTTP text */ col = col.child(div().flex().child(button(cx, light, "g-cancel".into(), "Cancel", false, false, |this, _| cancel(this))));

@@ -154,15 +154,15 @@ pub fn view(w: &Win, cx: &mut Context<Win>, light: bool, win: Size<Pixels>) -> O
         .children(pic.map(|im| gpui::img(ImageSource::Image(im)).w(px(96.)).h(px(72.)).object_fit(ObjectFit::Contain)));
     let (opened, painted) = (k.opened, k.painted.clone());
     let card = div().id("kcomment").key_context("KComment").absolute().left(px(x)).top(px(y)).w(px(W)).flex().flex_col().gap_2().p_3()
-        .bg(c("panel")).border_1().border_color(c("accent")).text_color(c("text")).text_size(px(13.)).occlude()
+        .bg(c("panel")).border_1().border_color(c("accent")).text_color(c("text")).text_size(crate::scale::tpx(13.)).occlude()
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
         // the first paint after the key: how long the window took to appear (and where it is, for the e2e)
         .child(canvas(|_, _, _| (), move |b, _, w, _| { if !painted.swap(true, Ordering::Relaxed) { eprintln!("GPUI_LOG {}", json!({"kcomment": "painted", "ms": ms(opened), "at_ms": epoch_ms() as u64})); } crate::art::report("kcomment", b, w.scale_factor()); }).absolute().size_full())
-        .child(div().id("kcomment-names").h(px(16.)).text_size(px(12.)).text_color(c(tone)).overflow_hidden().whitespace_nowrap().text_ellipsis().child(line))
+        .child(div().id("kcomment-names").h(px(16.)).text_size(crate::scale::tpx(12.)).text_color(c(tone)).overflow_hidden().whitespace_nowrap().text_ellipsis().child(line))
         .child(div().flex().gap_2().items_start().child(thumb)
             .child(div().flex_1().min_w_0().flex().flex_col().gap_1()
-                .child(div().min_h(px(52.)).px_2().py_1().bg(c("bg")).border_1().border_color(c("line")).child(k.input.clone()))
-                .child(div().text_size(px(11.)).text_color(c("faint")).child(trs("Enter posts to the thread · Esc cancels")))));
+                .child(div().min_h(crate::scale::tpx(52.)).px_2().py_1().bg(c("bg")).border_1().border_color(c("line")).child(k.input.clone()))
+                .child(div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(trs("Enter posts to the thread · Esc cancels")))));
     Some(card.into_any_element())
 }
 

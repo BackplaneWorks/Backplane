@@ -493,7 +493,7 @@ pub fn lightbox(cx: &mut Context<crate::Backplane>, lb: Option<&Lightbox>, scale
     let pct = g.map(|g| format!("{}%", lb.zoom.percent(&g)));
     let state = match lb.full { Full::Loading => Some(crate::i18n::t("gpui.c.image.loading.full")), Full::Failed => Some(crate::i18n::t("gpui.c.image.full.failed")), _ => None };
     /* i18n-ok: a number with its unit */ let actual_label = "100%".to_string();
-    let bar = div().id("lightbox-bar").flex().flex_wrap().items_center().justify_center().gap_2().px_4().py_2().text_size(px(12.)).text_color(fg)
+    let bar = div().id("lightbox-bar").flex().flex_wrap().items_center().justify_center().gap_2().px_4().py_2().text_size(crate::scale::tpx(12.)).text_color(fg)
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
         .child(div().child(lb.shown.name.clone()))
         .children(size.map(|s| div().text_color(gpui::rgb(0x9aa0aa)).child(s)))

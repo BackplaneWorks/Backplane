@@ -166,14 +166,14 @@ pub fn host(app: &mut Backplane, page: AnyElement, window: &mut Window, cx: &mut
     let open = st["open"].as_str().unwrap_or("").to_string();
     let bottom = st["side"] == "bottom";
     // tabs: the panel's name and its badge (the hub's count of what needs doing); the open one underlined
-    let mut strip = div().id("mgmt-strip").flex_shrink_0().h(px(STRIP_H)).flex().items_center().gap(px(2.)).px_2().bg(c("panel")).border_t_1().border_color(c("rule")).text_size(px(11.));
+    let mut strip = div().id("mgmt-strip").flex_shrink_0().h(crate::scale::tpx(STRIP_H)).flex().items_center().gap(px(2.)).px_2().bg(c("panel")).border_t_1().border_color(c("rule")).text_size(crate::scale::tpx(11.));
     for (id, label) in &panels {
         let on = *id == open; let data = app.screens.mgmt.data(id); let idc = id.clone();
         let tab = crate::ui::with_rect(div().id(SharedString::from(format!("mgmt-tab-{id}"))), { let id = id.clone(); move || format!("mgmt:{id}") })
             .h_full().px_2().flex().items_center().gap_1().cursor_pointer().text_color(c(if on { "text" } else { "dim" })).hover(|s| s.bg(c("raise")))
             .when(on, |d| d.border_t_2().border_color(c("accent")))
             .child(trs(label))
-            .children(badge(&data).map(|(n, tone)| div().px(px(4.)).h(px(14.)).flex().items_center().text_size(px(10.)).text_color(c(tone)).border_1().border_color(c(tone)).child(n)))
+            .children(badge(&data).map(|(n, tone)| div().px(px(4.)).h(px(14.)).flex().items_center().text_size(crate::scale::tpx(10.)).text_color(c(tone)).border_1().border_color(c(tone)).child(n)))
             .on_click(cx.listener(move |this, _, _, cx| toggle(this, &idc, cx)));
         strip = strip.child(tab);
     }

@@ -23,7 +23,7 @@ pub fn card_buttons(r: &Row) -> Vec<Btn> {
 fn chip(cx: &mut Context<Backplane>, light: bool, b: &Btn, id: String, small: bool) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let b2 = b.clone();
-    let d = div().id(SharedString::from(id)).px(px(if small { 8. } else { 12. })).py(px(if small { 2. } else { 4. })).text_size(px(if small { 11. } else { 12. })).cursor_pointer().whitespace_nowrap();
+    let d = div().id(SharedString::from(id)).px(px(if small { 8. } else { 12. })).py(px(if small { 2. } else { 4. })).text_size(crate::scale::tpx(if small { 11. } else { 12. })).cursor_pointer().whitespace_nowrap();
     let d = if b.on { d.bg(c("accent")).text_color(c("on-accent")) } else { d.bg(c("raise")).hover(|s| s.bg(c("line"))) };
     let d = if crate::art::rects_on() { let n = format!("btn:{}:{}", b.action, b.value); d.relative().child(canvas(|_, _, _| (), move |r: Bounds<Pixels>, _, w: &mut Window, _| crate::art::report(&n, r, w.scale_factor())).absolute().top_0().left_0().size_full()) } else { d };
     d.child(trs(&b.label)).on_click(cx.listener(move |this, _, _, cx| on_press(this, &b2, cx))).into_any_element()
@@ -52,70 +52,70 @@ fn switch(cx: &mut Context<Backplane>, light: bool, t: &Value, id: String) -> Op
 fn pill(light: bool, p: &Value) -> Option<AnyElement> {
     let text = string(p, "text"); if text.is_empty() { return None }
     let col = theme::color(light, tone_token(&string(p, "tone")));
-    Some(div().flex_none().px(px(6.)).py(px(1.)).text_size(px(10.5)).text_color(col).bg(alpha(col, if light { 0.12 } else { 0.16 })).whitespace_nowrap().child(trs(&text)).into_any_element())
+    Some(div().flex_none().px(px(6.)).py(px(1.)).text_size(crate::scale::tpx(10.5)).text_color(col).bg(alpha(col, if light { 0.12 } else { 0.16 })).whitespace_nowrap().child(trs(&text)).into_any_element())
 }
 fn tile(light: bool, icon: &Value, size: f32) -> AnyElement {
     let bg = hex(&string(icon, "bg")).unwrap_or(theme::color(light, "raise"));
     let text = string(icon, "text");
-    div().flex_none().size(px(size)).flex().items_center().justify_center().bg(bg).border_1().border_color(gpui::hsla(0., 0., 1., if light { 0. } else { 0.10 })).text_color(gpui::rgb(0xffffff)).font_weight(FontWeight::BOLD).text_size(px(if text.chars().count() > 1 { size * 0.34 } else { size * 0.44 }))
+    div().flex_none().size(px(size)).flex().items_center().justify_center().bg(bg).border_1().border_color(gpui::hsla(0., 0., 1., if light { 0. } else { 0.10 })).text_color(gpui::rgb(0xffffff)).font_weight(FontWeight::BOLD).text_size(crate::scale::tpx(if text.chars().count() > 1 { size * 0.34 } else { size * 0.44 }))
         .child(if text.is_empty() { "·".to_string() } else { text }).into_any_element()
 }
 fn field_box(fields: &HashMap<String, FieldSlot>, light: bool, raw: &Value, name: &str) -> Option<AnyElement> {
     let slot = fields.get(name)?; let c = |n: &str| theme::color(light, n);
     let lines = raw["fields"].as_array().into_iter().flatten().find(|f| f["name"] == name).and_then(|f| f["lines"].as_u64()).unwrap_or(1).max(1) as f32;
     let mono = lines > 1.;
-    Some(div().w_full().px_2().py(px(6.)).bg(c("raise")).border_1().border_color(c("line")).when(mono, |d| d.min_h(px(lines * 17. + 12.)).text_size(px(12.))).child(slot.input.clone()).into_any_element())
+    Some(div().w_full().px_2().py(px(6.)).bg(c("raise")).border_1().border_color(c("line")).when(mono, |d| d.min_h(px(lines * 17. + 12.)).text_size(crate::scale::tpx(12.))).child(slot.input.clone()).into_any_element())
 }
 
 /// The row drawn by its kind; None for a kind this client does not know (it is then drawn as a plain row).
 pub fn el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, FieldSlot>, r: &Row, i: usize, avail: f32) -> Option<AnyElement> {
     let c = |n: &str| theme::color(light, n);
     let raw = &r.raw;
-    let note = |d: Div, t: &str, tone: &str| if t.is_empty() { d } else { d.child(div().text_size(px(12.)).text_color(c(tone)).child(trs(t))) };
+    let note = |d: Div, t: &str, tone: &str| if t.is_empty() { d } else { d.child(div().text_size(crate::scale::tpx(12.)).text_color(c(tone)).child(trs(t))) };
     Some(match r.kind.as_str() {
         "head" => div().flex().items_start().justify_between().gap_4().pb_3().mb_1().border_b_1().border_color(c("line"))
             .child(note(div().flex().flex_col().gap_1().min_w_0().flex_1(), &r.note, "dim"))
             .child(chips_p(cx, light, &r.buttons, i, false, raw["primary"].as_u64().map(|x| x as usize))).into_any_element(),
-        "group" => div().pt_4().pb(px(4.)).flex().items_baseline().gap_2().min_w_0().child(div().flex_none().text_size(px(11.)).text_color(c("dim")).child(trs(&r.label).to_uppercase()))
-            .when(!r.note.is_empty(), |d| d.child(div().min_w_0().text_size(px(11.)).text_color(c("faint")).whitespace_nowrap().overflow_hidden().text_ellipsis().child(r.note.clone()))).into_any_element(),
+        "group" => div().pt_4().pb(px(4.)).flex().items_baseline().gap_2().min_w_0().child(div().flex_none().text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(trs(&r.label).to_uppercase()))
+            .when(!r.note.is_empty(), |d| d.child(div().min_w_0().text_size(crate::scale::tpx(11.)).text_color(c("faint")).whitespace_nowrap().overflow_hidden().text_ellipsis().child(r.note.clone()))).into_any_element(),
         "notice" => {
             let col = c(tone_token(&r.tone));
             div().flex().items_center().gap_3().my_1().px_3().py_2().border_l_2().border_color(col).bg(alpha(col, 0.07))
-                .child(div().flex().flex_col().gap(px(2.)).flex_1().min_w_0().child(div().text_size(px(12.)).text_color(if r.tone == "ok" || r.tone == "busy" { c("text") } else { col }).child(trs(&r.label)))
-                    .when(!r.note.is_empty(), |d| d.child(div().text_size(px(11.)).text_color(c("dim")).child(trs(&r.note)))))
+                .child(div().flex().flex_col().gap(px(2.)).flex_1().min_w_0().child(div().text_size(crate::scale::tpx(12.)).text_color(if r.tone == "ok" || r.tone == "busy" { c("text") } else { col }).child(trs(&r.label)))
+                    .when(!r.note.is_empty(), |d| d.child(div().text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(trs(&r.note)))))
                 .when(!r.buttons.is_empty(), |d| d.child(chips(cx, light, &r.buttons, i, true))).into_any_element()
         }
-        "code" => div().my_1().px_3().py_2().bg(c("view")).border_1().border_color(c("line")).text_size(px(11.)).text_color(c("dim")).flex().flex_col()
+        "code" => div().my_1().px_3().py_2().bg(c("view")).border_1().border_color(c("line")).text_size(crate::scale::tpx(11.)).text_color(c("dim")).flex().flex_col()
             .children(string(raw, "text").lines().take(14).map(|l| div().whitespace_nowrap().overflow_hidden().text_ellipsis().child(l.to_string())).collect::<Vec<_>>()).into_any_element(),
         "empty" => div().my_2().p_6().flex().flex_col().items_center().gap_2().border_1().border_dashed().border_color(c("line"))
-            .child(crate::art::icon("plug", 22., c("faint"))).child(div().text_size(px(14.)).font_weight(FontWeight::BOLD).child(trs(&r.label)))
-            .child(div().max_w(px(460.)).text_size(px(12.)).text_color(c("dim")).text_center().child(trs(&r.note))).child(div().pt_2().child(chips(cx, light, &r.buttons, i, false))).into_any_element(),
+            .child(crate::art::icon("plug", 22., c("faint"))).child(div().text_size(crate::scale::tpx(14.)).font_weight(FontWeight::BOLD).child(trs(&r.label)))
+            .child(div().max_w(px(460.)).text_size(crate::scale::tpx(12.)).text_color(c("dim")).text_center().child(trs(&r.note))).child(div().pt_2().child(chips(cx, light, &r.buttons, i, false))).into_any_element(),
         "panel" => div().mt_3().pt_3().pb_2().flex().items_center().justify_between().gap_3().border_t_1().border_color(c("accent"))
-            .child(note(div().flex().flex_col().gap_1().min_w_0().flex_1().child(div().text_size(px(13.)).font_weight(FontWeight::BOLD).child(trs(&r.label))), &r.note, "dim"))
+            .child(note(div().flex().flex_col().gap_1().min_w_0().flex_1().child(div().text_size(crate::scale::tpx(13.)).font_weight(FontWeight::BOLD).child(trs(&r.label))), &r.note, "dim"))
             .child(chips(cx, light, &r.buttons, i, false)).into_any_element(),
         "paste" => div().py_2().flex().flex_col().gap_2()
-            .child(div().text_size(px(12.)).text_color(c("dim")).child(trs(&r.note)))
+            .child(div().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(trs(&r.note)))
             .children(r.fields.iter().filter_map(|f| field_box(fields, light, raw, &f.name))).into_any_element(),
         "actions" => div().py_3().flex().items_center().justify_between().gap_3()
-            .child(div().text_size(px(11.)).text_color(c(if r.note.contains("again") { "bad" } else { "dim" })).child(trs(&r.note)))
+            .child(div().text_size(crate::scale::tpx(11.)).text_color(c(if r.note.contains("again") { "bad" } else { "dim" })).child(trs(&r.note)))
             .child(chips(cx, light, &r.buttons, i, false)).into_any_element(),
         "tool" => div().ml(px(48.)).py(px(6.)).flex().items_center().gap_3().border_b_1().border_color(c("line"))
             .child(div().flex_1().min_w_0().flex().flex_col().gap(px(1.))
-                .child(div().text_size(px(12.)).text_color(if raw["toggle"]["on"] == false { c("faint") } else { c("text") }).child(r.label.clone()))
-                .when(!r.note.is_empty(), |d| d.child(div().text_size(px(11.)).text_color(c("dim")).whitespace_nowrap().overflow_hidden().text_ellipsis().child(r.note.clone()))))
+                .child(div().text_size(crate::scale::tpx(12.)).text_color(if raw["toggle"]["on"] == false { c("faint") } else { c("text") }).child(r.label.clone()))
+                .when(!r.note.is_empty(), |d| d.child(div().text_size(crate::scale::tpx(11.)).text_color(c("dim")).whitespace_nowrap().overflow_hidden().text_ellipsis().child(r.note.clone()))))
             .children(switch(cx, light, &raw["toggle"], format!("set-{i}-t"))).into_any_element(),
         "card" => {
             let open = raw["open"] == true;
             let narrow = avail < 560.;
             let title = string(raw, "title");
-            let mut head = div().flex().items_center().gap_2().min_w_0().child(div().text_size(px(13.)).font_weight(FontWeight::BOLD).whitespace_nowrap().overflow_hidden().text_ellipsis().child(trs(if title.is_empty() { &r.label } else { &title })));
+            let mut head = div().flex().items_center().gap_2().min_w_0().child(div().text_size(crate::scale::tpx(13.)).font_weight(FontWeight::BOLD).whitespace_nowrap().overflow_hidden().text_ellipsis().child(trs(if title.is_empty() { &r.label } else { &title })));
             let badge = string(raw, "badge");
-            if !badge.is_empty() { head = head.child(div().flex_none().px(px(5.)).text_size(px(10.)).text_color(c("dim")).border_1().border_color(c("line")).child(trs(&badge))) }
+            if !badge.is_empty() { head = head.child(div().flex_none().px(px(5.)).text_size(crate::scale::tpx(10.)).text_color(c("dim")).border_1().border_color(c("line")).child(trs(&badge))) }
             if let Some(p) = pill(light, &raw["pill"]) { head = head.child(p) }
             let (sub, meta) = (string(raw, "sub"), string(raw, "meta"));
             let body = div().flex_1().min_w_0().flex().flex_col().gap(px(3.)).child(head)
-                .when(!sub.is_empty(), |d| d.child(div().text_size(px(11.5)).text_color(c("dim")).whitespace_nowrap().overflow_hidden().text_ellipsis().child(sub.clone())))
-                .when(!meta.is_empty(), |d| d.child(div().text_size(px(11.)).text_color(c("faint")).child(trs(&meta))));
+                .when(!sub.is_empty(), |d| d.child(div().text_size(crate::scale::tpx(11.5)).text_color(c("dim")).whitespace_nowrap().overflow_hidden().text_ellipsis().child(sub.clone())))
+                .when(!meta.is_empty(), |d| d.child(div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(trs(&meta))));
             let extra = card_buttons(r);
             let mut right = div().flex_none().flex().items_center().gap_2();
             if !extra.is_empty() { right = right.child(chips(cx, light, &extra, i, true)) }

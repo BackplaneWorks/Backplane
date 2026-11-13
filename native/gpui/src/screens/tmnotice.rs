@@ -23,15 +23,15 @@ pub fn strip(cx: &mut Context<Backplane>, n: Option<&Notice>, shown: &str, light
     // drawn now: the hub hears it once per notice (deferred: a render sends nothing itself)
     if shown != n.token { let me = cx.entity(); cx.defer(move |cx| me.update(cx, |this, cx| this.tm_notice_shown(cx))); }
     let c = |k: &str| theme::color(light, k);
-    let btn = |id: &'static str, label: String, strong: bool| div().id(id).px_2().h(px(16.)).flex().items_center().cursor_pointer().text_size(px(11.)).font_weight(FontWeight::BOLD)
+    let btn = |id: &'static str, label: String, strong: bool| div().id(id).px_2().h(px(16.)).flex().items_center().cursor_pointer().text_size(crate::scale::tpx(11.)).font_weight(FontWeight::BOLD)
         .bg(if strong { c("accent") } else { c("raise") }).text_color(if strong { c("on-accent") } else { c("dim") }).child(crate::i18n::trs(&label));
     let or = |s: &str, d: &str| if s.is_empty() { d.to_string() } else { s.to_string() };
     let row = div().flex().items_center().gap_1().flex_shrink_0()
         /* i18n-ok: drawn through trs in btn */ .child(btn("tm-off", or(&n.off, "Turn off"), true).on_click(cx.listener(|this, _, _, cx| this.tm_notice_act("off", cx))))
         /* i18n-ok: drawn through trs in btn */ .child(btn("tm-settings", or(&n.settings, "Settings"), false).on_click(cx.listener(|this, _, _, cx| this.tm_notice_settings(cx))))
         /* i18n-ok: drawn through trs in btn */ .child(btn("tm-close", "Close".into(), false).on_click(cx.listener(|this, _, _, cx| this.tm_notice_act("close", cx))));
-    Some(div().id("tm-notice").min_h(px(22.)).flex_shrink_0().flex().items_center().justify_between().gap_2().px_3().py_1().bg(c("raise")).border_t_1().border_color(c("accent"))
-        .child(div().flex_1().min_w_0().text_size(px(11.)).text_color(c("text")).child(crate::i18n::trs(&n.text))).child(row).into_any_element())
+    Some(div().id("tm-notice").min_h(crate::scale::tpx(22.)).flex_shrink_0().flex().items_center().justify_between().gap_2().px_3().py_1().bg(c("raise")).border_t_1().border_color(c("accent"))
+        .child(div().flex_1().min_w_0().text_size(crate::scale::tpx(11.)).text_color(c("text")).child(crate::i18n::trs(&n.text))).child(row).into_any_element())
 }
 
 impl Backplane {

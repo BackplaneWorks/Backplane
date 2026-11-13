@@ -19,6 +19,7 @@ mod local;
 mod pairing;
 mod hubs;
 mod perf;
+mod scale;
 mod part;
 mod screens;
 mod script;
@@ -45,7 +46,7 @@ pub struct Backplane { pub pair:Option<screens::pair::Ui>, pub paired:bool, /** 
     first_frame:bool, script_done:bool, pub timeline:ListState, pub cats:art::Cats, pub links_sent:bool, pub links_last:String, pub sidebar_open:bool, pub models_pending:bool, pub local:local::Local, pub project_page:Option<String>, pub arm_new:Option<(Instant,std::collections::HashSet<String>)>, pub echo_seq:u64, pub thread_cache:Vec<(String,Value)>, pub thread_source:&'static str, pub confirm:Option<(String,Instant)>, pub ack_pending:Option<(String,Instant)>, pub recording:Option<(String,Vec<f64>)>, pub ui_epoch:u64, pub controls:Vec<script::CtlEntry>, pub ctl_last:String, pub probes_last:String, pub last_layout:String, pub wake_at:Option<Instant>, pub reconnected:bool, pub had_hello:bool, pub click_info:Option<(String,String)>, pub timing:Option<hub::Timing>, pub applied_at:Option<Instant>, pub apply_ms:f64, pub render_us:u64, swatches:bool, gallery:bool, fonts:bool, theme_override:Option<bool>, steps:VecDeque<Step>, pending:Option<Pending>, seq:u64, want_focus:bool, script_total:usize, screens:screens::Screens,
 }
 fn pager_row(cx:&mut Context<Backplane>,id:String,pager:&Value,light:bool)->Option<AnyElement> {let c=|name:&str|theme::color(light,name);
-    let mut row=div().flex().gap_2().px_3().py_1().text_size(px(11.));let mut any=false;
+    let mut row=div().flex().gap_2().px_3().py_1().text_size(crate::scale::tpx(11.));let mut any=false;
     for (name,key) in [("Newer","previous"),("Older","next")] {
         let control=&pager[key];
         if let Some(value)=control["value"].as_str() {

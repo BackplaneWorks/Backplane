@@ -29,16 +29,16 @@ pub fn card(cx: &mut Context<Backplane>, o: Option<&Offer>, light: bool) -> Opti
     let c = |n: &str| theme::color(light, n);
     let tr = crate::i18n::trs;
     let rect = |d: Stateful<Div>, n: &'static str| if crate::art::rects_on() { d.relative().child(canvas(|_, _, _| (), move |r: Bounds<Pixels>, _, w: &mut Window, _| crate::art::report(n, r, w.scale_factor())).absolute().top_0().left_0().size_full()) } else { d };
-    let small = |id: &'static str, label: &str| div().id(id).flex_1().h(px(26.)).flex().items_center().justify_center().cursor_pointer().text_size(px(12.)).text_color(c("dim")).bg(c("raise")).hover(|s| s.bg(c("line"))).child(tr(label));
+    let small = |id: &'static str, label: &str| div().id(id).flex_1().h(crate::scale::tpx(26.)).flex().items_center().justify_center().cursor_pointer().text_size(crate::scale::tpx(12.)).text_color(c("dim")).bg(c("raise")).hover(|s| s.bg(c("line"))).child(tr(label));
     let repo = if o.repo.is_empty() { o.url.trim_start_matches("https://").trim_start_matches("github.com/").to_string() } else { o.repo.clone() };
     /* i18n-ok: drawn through tr */ let label = if o.label.is_empty() { "Star on GitHub".to_string() } else { o.label.clone() };
     let card = div().id("star-card").w(px(340.)).flex().flex_col().gap_2().p_4().bg(c("bg")).border_1().border_color(c("accent")).shadow_md().occlude()
         .child(div().flex().items_start().gap_2().child(div().flex_shrink_0().pt(px(1.)).child(crate::ui::ic(light, "star", 16., "accent")))
             .child(div().flex_1().min_w_0().flex().flex_col().gap_1()
-                .child(div().text_size(px(13.)).font_weight(FontWeight::BOLD).text_color(c("text")).child(tr(&o.text)))
-                .child(div().text_size(px(11.)).text_color(c("faint")).child(format!("github.com/{repo}")))))
-        .when(!o.why.is_empty(), |d| d.child(div().text_size(px(12.)).line_height(px(17.)).text_color(c("dim")).child(tr(&o.why))))
-        .child(rect(div().id("star-open").w_full().h(px(30.)).flex().items_center().justify_center().gap_2().cursor_pointer().bg(c("accent")).text_color(c("on-accent")).text_size(px(13.)).font_weight(FontWeight::BOLD)
+                .child(div().text_size(crate::scale::tpx(13.)).font_weight(FontWeight::BOLD).text_color(c("text")).child(tr(&o.text)))
+                .child(div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(format!("github.com/{repo}")))))
+        .when(!o.why.is_empty(), |d| d.child(div().text_size(crate::scale::tpx(12.)).line_height(crate::scale::tpx(17.)).text_color(c("dim")).child(tr(&o.why))))
+        .child(rect(div().id("star-open").w_full().h(crate::scale::tpx(30.)).flex().items_center().justify_center().gap_2().cursor_pointer().bg(c("accent")).text_color(c("on-accent")).text_size(crate::scale::tpx(13.)).font_weight(FontWeight::BOLD)
             .child(crate::ui::ic(light, "star", 14., "on-accent")).child(tr(&label)), "star:open").on_click(cx.listener(|this, _, _, cx| this.star_decide("open", cx))))
         .child(div().flex().gap_2()
             /* i18n-ok: drawn through tr */ .child(rect(small("star-later", "Later"), "star:later").on_click(cx.listener(|this, _, _, cx| this.star_decide("later", cx))))

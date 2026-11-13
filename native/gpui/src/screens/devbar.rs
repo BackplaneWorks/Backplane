@@ -65,13 +65,13 @@ pub fn strip(cx: &mut Context<Backplane>, bar: &Bar, light: bool, confirming: bo
     let c = |n: &str| theme::color(light, n);
     let ready = bar.restart;
     let hue = match bar.phase.as_str() { "building" => c("accent"), "failed" => c("bad"), _ => c("ok") };
-    let mut el = div().h(px(22.)).flex_shrink_0().relative().overflow_hidden().bg(c("raise")).border_b_1().border_color(c("line"))
+    let mut el = div().h(crate::scale::tpx(22.)).flex_shrink_0().relative().overflow_hidden().bg(c("raise")).border_b_1().border_color(c("line"))
         .child(div().absolute().top_0().left_0().bottom_0().w(relative(bar.frac.unwrap_or(1.0))).bg(hue).opacity(if ready || bar.phase == "failed" { 0.5 } else { 0.35 }))
-        .child(div().absolute().inset_0().flex().items_center().px_3().text_size(px(11.)).text_color(c("text")).child(bar.text.clone()).when(!bar.haiku.is_empty(), |d| d.child(div().ml_3().opacity(0.75).italic().child(bar.haiku.clone()))));
+        .child(div().absolute().inset_0().flex().items_center().px_3().text_size(crate::scale::tpx(11.)).text_color(c("text")).child(bar.text.clone()).when(!bar.haiku.is_empty(), |d| d.child(div().ml_3().opacity(0.75).italic().child(bar.haiku.clone()))));
     if ready {
         /* i18n-ok: the developer build bar, for dev builds only */ let label = if confirming { format!("Click again: stops {} running turn{}", bar.turns, if bar.turns == 1 { "" } else { "s" }) } else { "Restart now".to_string() };
         el = el.child(div().absolute().top_0().right_0().bottom_0().flex().items_center().pr_2().child(
-            div().id("devbar-restart").px_2().h(px(16.)).flex().items_center().cursor_pointer().text_size(px(11.)).font_weight(FontWeight::BOLD)
+            div().id("devbar-restart").px_2().h(px(16.)).flex().items_center().cursor_pointer().text_size(crate::scale::tpx(11.)).font_weight(FontWeight::BOLD)
                 .bg(c(if confirming { "bad" } else { "ok" })).text_color(c("on-accent")).child(label)
                 .on_click(cx.listener(|this, _, _, cx| { this.devbar_click(cx); }))));
     }

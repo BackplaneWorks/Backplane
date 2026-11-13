@@ -259,7 +259,7 @@ pub fn step_row(cx: &mut Context<Backplane>, light: bool, e: &Value) -> AnyEleme
     let (id, text) = (e["id"].as_str().unwrap_or("").to_string(), e["text"].as_str().unwrap_or("").to_string());
     let value = e["value"].as_str().filter(|v| !v.is_empty()).map_or(id.clone(), str::to_string);
     let can = !row_kinds(&text).is_empty();
-    let d = div().id(SharedString::from(format!("e-{id}"))).flex().items_center().gap_2().py_1().font(art::mono_font()).text_size(px(12.)).text_color(c("dim"))
+    let d = div().id(SharedString::from(format!("e-{id}"))).flex().items_center().gap_2().py_1().font(art::mono_font()).text_size(crate::scale::tpx(12.)).text_color(c("dim"))
         .child(art::icon("history", 14., theme::color(light, "dim"))).child(div().min_w_0().child(hub_words(&text)));
     if !can { return d.into_any_element() }
     d.cursor_pointer().hover(|s| s.text_color(c("text"))).tooltip(crate::keys::tip("Show this change in the viewer", "", light))
@@ -330,7 +330,7 @@ pub fn menu_rows(h: Option<&Steps>, r: Option<&super::plot::Refs>) -> Vec<(Strin
 
 fn btn(cx: &mut Context<Backplane>, light: bool, id: &str, label: &str, on: bool, enabled: bool, tip: &str, f: impl Fn(&mut Backplane, &mut Context<Backplane>) + 'static) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
-    let d = div().id(SharedString::from(id.to_string())).px_2().py(px(3.)).text_size(px(12.)).border_1().flex_none()
+    let d = div().id(SharedString::from(id.to_string())).px_2().py(px(3.)).text_size(crate::scale::tpx(12.)).border_1().flex_none()
         .border_color(if on { c("accent") } else { c("line") }).bg(c("raise")).text_color(if !enabled { c("faint") } else if on { c("accent") } else { c("text") }).child(label.to_string());
     let d = if tip.is_empty() { d } else { d.tooltip(crate::keys::tip_raw(tip, "", light)) };
     if !enabled { return d.into_any_element() }
@@ -347,7 +347,7 @@ fn icon_btn(cx: &mut Context<Backplane>, light: bool, id: &str, icon: &'static s
 fn legend(light: bool) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     /* i18n-ok: drawn through trs */ let keys: [(u32, &str); 3] = if light { [(0xCD2F31, "Removed"), (0xB86D00, "Changed"), (0x18794E, "Added")] } else { [(0xE5484D, "Removed"), (0xF5A524, "Changed"), (0x30A46C, "Added")] };
-    div().flex().flex_none().items_center().gap(px(14.)).text_size(px(12.)).text_color(c("dim"))
+    div().flex().flex_none().items_center().gap(px(14.)).text_size(crate::scale::tpx(12.)).text_color(c("dim"))
         .children(keys.into_iter().map(|(col, l)| div().flex().items_center().gap(px(6.)).child(div().size(px(10.)).bg(rgb(col))).child(trs(l)))).into_any_element()
 }
 
@@ -378,7 +378,7 @@ pub fn bar_el(cx: &mut Context<Backplane>, light: bool, pv: &PlotView, key: &str
     let step = at.and_then(|i| hist.steps.as_ref().map(|h| h.steps[i].clone()));
     let cmp = pv.compare.as_ref().filter(|c| c.base == key);
     let comparing = cmp.is_some() && at.is_none();
-    let mut bar = div().id("hist-bar").relative().flex().flex_col().flex_none().gap(px(6.)).px(px(10.)).pt(px(6.)).pb(px(8.)).border_t_1().border_color(c("line")).bg(c("bg")).text_size(px(12.));
+    let mut bar = div().id("hist-bar").relative().flex().flex_col().flex_none().gap(px(6.)).px(px(10.)).pt(px(6.)).pb(px(8.)).border_t_1().border_color(c("line")).bg(c("bg")).text_size(crate::scale::tpx(12.));
     if let (true, Some(cmp)) = (comparing, cmp) {
         // the comparison: its sides (the old one opens the versions menu), Close; then the legend and Old / Diff / New
         let row = div().flex().items_center().gap(px(4.)).min_w_0()

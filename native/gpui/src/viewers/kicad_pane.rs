@@ -1032,12 +1032,12 @@ pub fn strip<V: 'static>(cx: &mut Context<V>, light: bool, pane: &Entity<KicadPa
     // the kinds KiCad says it has (the fork names them; an X title may come later than the frame), and those the X tree shows
     let have: Vec<String> = { let p = pane.read(cx); p.frames.iter().map(|f| f.kind.to_string())
         .chain(p.info["frames"].as_array().into_iter().flatten().filter_map(|f| f["kind"].as_str().map(String::from))).collect() };
-    let mut row = div().id("kicad-strip").flex().items_center().gap_1().px_2().h(px(30.)).flex_shrink_0().bg(c("panel")).border_b_1().border_color(c("rule"));
+    let mut row = div().id("kicad-strip").flex().items_center().gap_1().px_2().h(crate::scale::tpx(30.)).flex_shrink_0().bg(c("panel")).border_b_1().border_color(c("rule"));
     for (kind, label) in TABS {
         // the symbol and footprint editors: a tab once KiCad has them, or while shown
         if matches!(*kind, "SYMBOL_EDITOR" | "FOOTPRINT_EDITOR" | "GERBVIEW") && !have.iter().any(|h| h == kind) && at != *kind { continue }
         let on = at == *kind; let k = kind.to_string(); let p = pane.clone();
-        row = row.child(crate::ui::with_rect(div().id(SharedString::from(format!("kicad-tab-{kind}"))), { let k = kind.to_string(); move || format!("kicad-tab:{k}") }).px_2().py(px(3.)).text_size(px(12.)).cursor_pointer()
+        row = row.child(crate::ui::with_rect(div().id(SharedString::from(format!("kicad-tab-{kind}"))), { let k = kind.to_string(); move || format!("kicad-tab:{k}") }).px_2().py(px(3.)).text_size(crate::scale::tpx(12.)).cursor_pointer()
             .text_color(c(if on { "text" } else { "dim" })).when(on, |d| d.border_b_2().border_color(c("accent"))).hover(|s| s.bg(c("raise")))
             .tooltip(crate::keys::tip(&crate::i18n::trs(label), "Ctrl+Tab", light))
             .child(crate::i18n::trs(label))
@@ -1047,7 +1047,7 @@ pub fn strip<V: 'static>(cx: &mut Context<V>, light: bool, pane: &Entity<KicadPa
     if !pane.read(cx).conflicts.is_empty() {
         let names: Vec<String> = pane.read(cx).conflicts.iter().map(|f| std::path::Path::new(f).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()).collect();
         let (pk, pr) = (pane.clone(), pane.clone());
-        row = row.child(div().id("kicad-reload").ml_2().flex().items_center().gap_1().text_size(px(12.)).text_color(c("bad"))
+        row = row.child(div().id("kicad-reload").ml_2().flex().items_center().gap_1().text_size(crate::scale::tpx(12.)).text_color(c("bad"))
             .child(crate::i18n::tf("gpui.c.kicad.changed", &[("files", names.join(", ").into())]))
             .child(div().id("kicad-keep").px_2().border_1().border_color(c("line")).bg(c("raise")).cursor_pointer().text_color(c("text")).child(crate::i18n::trs("Keep yours"))
                 .on_click(move |_, _, cx| pk.update(cx, |p, cx| p.resolve("keep", cx))))
@@ -1061,7 +1061,7 @@ pub fn strip<V: 'static>(cx: &mut Context<V>, light: bool, pane: &Entity<KicadPa
         let title = j["title"].as_str().unwrap_or("").to_string(); let detail = j["detail"].as_str().unwrap_or("").to_string();
         let text = if detail.is_empty() { crate::i18n::trs(&title) } else { format!("{} · {detail}", crate::i18n::trs(&title)) };
         let w = 120.0f32; let p = pane.clone();
-        row = row.child(div().id("kicad-progress").ml_2().flex().items_center().gap_1().text_size(px(11.)).text_color(c("dim"))
+        row = row.child(div().id("kicad-progress").ml_2().flex().items_center().gap_1().text_size(crate::scale::tpx(11.)).text_color(c("dim"))
             .child(div().max_w(px(220.)).overflow_hidden().whitespace_nowrap().text_ellipsis().child(text))
             .child(div().w(px(w)).h(px(4.)).bg(c("line")).child(div().h_full().bg(c("accent")).w(px(if f >= 0.0 { w * f.min(1.0) as f32 } else { w * 0.3 }))))
             .when(jobs.len() > 1, |d| d.child(format!("+{}", jobs.len() - 1)))
@@ -1076,7 +1076,7 @@ pub fn strip<V: 'static>(cx: &mut Context<V>, light: bool, pane: &Entity<KicadPa
     row = row.child(div().flex_1());
     let mk = |id: &'static str, label: String, tip: String, a: &'static str, cx: &mut Context<V>| {
         let act = act.clone();
-        div().id(id).px_2().py(px(3.)).text_size(px(12.)).border_1().border_color(c("line")).bg(c("raise")).cursor_pointer().hover(|s| s.bg(c("panel")))
+        div().id(id).px_2().py(px(3.)).text_size(crate::scale::tpx(12.)).border_1().border_color(c("line")).bg(c("raise")).cursor_pointer().hover(|s| s.bg(c("panel")))
             .tooltip(crate::keys::tip(&tip, "", light)).child(label)
             .on_click(cx.listener(move |this, _, window, cx| act(this, a, window, cx)))
     };

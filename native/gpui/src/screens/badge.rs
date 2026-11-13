@@ -50,8 +50,8 @@ pub fn editor(cx: &mut Context<Backplane>, light: bool, pid: &str, look: &Value)
             .child(art::icon(drawable(icon_name(&label), art::has_icon), 14., c(if on { "text" } else { "dim" }))));
     }
     // Pick again: the hub's model chooses anew (the person's choice is cleared); the hub names the press (`again`)
-    let again = again(look).map(|(label, value)| crate::ui::with_rect(div().id(SharedString::from(format!("look-again-{pid}"))), || "look:again".to_string()).px_2().h(px(22.)).flex().items_center()
-        .text_size(px(12.)).text_color(c("dim")).cursor_pointer().border_1().border_color(c("line")).hover(|s| s.bg(c("raise")).text_color(c("text"))).child(crate::i18n::trs(&label))
+    let again = again(look).map(|(label, value)| crate::ui::with_rect(div().id(SharedString::from(format!("look-again-{pid}"))), || "look:again".to_string()).px_2().h(crate::scale::tpx(22.)).flex().items_center()
+        .text_size(crate::scale::tpx(12.)).text_color(c("dim")).cursor_pointer().border_1().border_color(c("line")).hover(|s| s.bg(c("raise")).text_color(c("text"))).child(crate::i18n::trs(&label))
         .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("look-again".into(), value.clone())); cx.notify(); })));
     div().id(SharedString::from(format!("look-{pid}"))).flex().flex_col().gap_2().px_3().py_2().border_b_1().border_color(c("line")).bg(c("panel")).child(colors).child(icons).children(again.map(|b| div().flex().child(b))).into_any_element()
 }
@@ -68,7 +68,7 @@ pub fn machine_text(mark: &Value, full: bool) -> Option<(String, f32, String)> {
 pub fn machine_mark(light: bool, mark: &Value, full: bool, id: &str) -> Option<AnyElement> {
     let (t, o, hover) = machine_text(mark, full)?;
     Some(div().id(SharedString::from(format!("mark-{id}"))).flex_shrink_0().max_w(px(if full { 200. } else { 80. })).overflow_hidden().text_ellipsis().whitespace_nowrap()
-        .text_size(px(11.)).text_color(theme::color(light, "faint")).opacity(o).tooltip(crate::keys::tip(&hover, "", light)).child(t).into_any_element())
+        .text_size(crate::scale::tpx(11.)).text_color(theme::color(light, "faint")).opacity(o).tooltip(crate::keys::tip(&hover, "", light)).child(t).into_any_element())
 }
 /// Where a project or thread is when it is another machine's, as the hub words it (`mark.label` "on desktop"; a project of this machine that
 /// is also on others: its `also` "also on desktop"): the text, its opacity (dimmer when away) and the hover (the full name). None: this machine's, drawn as always.
@@ -83,7 +83,7 @@ pub fn place(light: bool, mark: &Value, also: &str, id: &str) -> Option<AnyEleme
     let (t, o, hover) = place_text(mark, also)?;
     let col = theme::color(light, "dim");
     Some(div().id(SharedString::from(format!("place-{id}"))).flex_shrink_0().flex().items_center().gap(px(3.)).max_w(px(220.)).overflow_hidden().whitespace_nowrap()
-        .text_size(px(11.)).text_color(col).opacity(o).tooltip(crate::keys::tip(&hover, "", light))
+        .text_size(crate::scale::tpx(11.)).text_color(col).opacity(o).tooltip(crate::keys::tip(&hover, "", light))
         .child(art::icon("link", 11., col)).child(div().overflow_hidden().text_ellipsis().child(t)).into_any_element())
 }
 /// The note under the composer of another machine's thread: where an agent sent from here runs (`mark.runs` "runs on desktop"). None for this machine's.

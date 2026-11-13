@@ -18,14 +18,14 @@ pub fn strip(cx: &mut Context<Backplane>, light: bool, thread: &Value, unsent: &
     if rs.is_empty() { return None }
     let c = |n: &str| theme::color(light, n);
     let more = string(thread, "queued");
-    Some(div().id("queue-strip").border_1().border_color(c("line")).bg(c("panel")).flex().flex_col().text_size(px(12.))
+    Some(div().id("queue-strip").border_1().border_color(c("line")).bg(c("panel")).flex().flex_col().text_size(crate::scale::tpx(12.))
         .children(rs.into_iter().enumerate().map(|(i, r)| {
             div().id(("queue-row", i)).flex().items_center().gap_2().px_2().py(px(3.)).when(i > 0, |d| d.border_t_1().border_color(c("line")))
-                .child(div().flex_shrink_0().w(px(56.)).text_size(px(10.)).text_color(c("faint")).child(crate::i18n::trs(&r.tag).to_uppercase()))
+                .child(div().flex_shrink_0().w(crate::scale::tpx(56.)).text_size(crate::scale::tpx(10.)).text_color(c("faint")).child(crate::i18n::trs(&r.tag).to_uppercase()))
                 // w_0: a long line must not size the composer's column by its unwrapped width (the draft box then stopped growing and its text ran under the chips)
                 .child(div().flex_1().w_0().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(r.text))
                 .children(r.buttons.into_iter().map(|(label, action, value)| {
-                    div().id(SharedString::from(format!("q-{i}-{action}"))).flex_shrink_0().px_2().border_1().border_color(c("line")).text_size(px(11.)).text_color(c("dim")).cursor_pointer()
+                    div().id(SharedString::from(format!("q-{i}-{action}"))).flex_shrink_0().px_2().border_1().border_color(c("line")).text_size(crate::scale::tpx(11.)).text_color(c("dim")).cursor_pointer()
                         .hover(|s| s.bg(c("raise")).text_color(c("text"))).child(label)
                         .on_click(cx.listener(move |this, _, _, cx| {
                             // the window's own (unsent.rs): Edit puts the text back after the draft, Remove drops it; nothing goes to the hub
@@ -39,7 +39,7 @@ pub fn strip(cx: &mut Context<Backplane>, light: bool, thread: &Value, unsent: &
                         }))
                 })).into_any_element()
         }).collect::<Vec<_>>())
-        .when(!more.is_empty(), |d| d.child(div().px_2().py(px(2.)).border_t_1().border_color(c("line")).text_size(px(11.)).text_color(c("faint")).child(more)))
+        .when(!more.is_empty(), |d| d.child(div().px_2().py(px(2.)).border_t_1().border_color(c("line")).text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(more)))
         .into_any_element())
 }
 

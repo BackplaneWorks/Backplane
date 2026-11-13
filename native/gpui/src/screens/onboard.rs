@@ -64,7 +64,7 @@ pub fn press(this: &mut Backplane, b: &settings::Btn, cx: &mut Context<Backplane
 
 fn foot(cx: &mut Context<Backplane>, light: bool, id: &'static str, label: String, action: &'static str, primary: bool) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
-    let d = div().id(id).h(px(30.)).px_4().flex().items_center().text_size(px(13.)).cursor_pointer();
+    let d = div().id(id).h(crate::scale::tpx(30.)).px_4().flex().items_center().text_size(crate::scale::tpx(13.)).cursor_pointer();
     let d = if primary { d.bg(c("accent")).text_color(c("on-accent")) } else { d.bg(c("raise")).hover(|s| s.bg(c("line"))) };
     d.child(label).on_click(cx.listener(move |this, _, _, cx| { settings::flush_fields(this); this.error.clear(); let _ = this.tx.try_send(Command::Action(action.into(), String::new())); cx.notify(); })).into_any_element()
 }
@@ -80,11 +80,11 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
     let (mut group, on) = (String::new(), string(tour, "id"));
     for (i, s) in tour["steps"].as_array().into_iter().flatten().enumerate() {
         let g = string(s, "group");
-        if g != group { rail = rail.child(div().pt_3().pb_1().text_size(px(11.)).text_color(c("faint")).child(trs(&g))); group = g; }
+        if g != group { rail = rail.child(div().pt_3().pb_1().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(trs(&g))); group = g; }
         let (id, state) = (string(s, "id"), string(s, "state"));
         let here = id == on;
         let mark = match state.as_str() { "done" => div().size(px(8.)).bg(c("ok")), "skipped" => div().w(px(8.)).h(px(2.)).bg(c("faint")), _ => div().size(px(8.)).border_1().border_color(c("faint")) };
-        let row = div().id(SharedString::from(format!("setup-step-{i}"))).flex().items_start().gap_2().px_2().py(px(3.)).text_size(px(12.)).cursor_pointer().text_color(c(if here { "text" } else { "dim" }));
+        let row = div().id(SharedString::from(format!("setup-step-{i}"))).flex().items_start().gap_2().px_2().py(px(3.)).text_size(crate::scale::tpx(12.)).cursor_pointer().text_color(c(if here { "text" } else { "dim" }));
         let row = if here { row.bg(c("raise")) } else { row.hover(|x| x.bg(c("raise"))) };
         // the title wraps in the rail's width (a narrow window clipped "Where your uberbot lives"); the mark stays on its first line
         rail = rail.child(row.child(div().w(px(10.)).h(px(15.)).flex_shrink_0().flex().items_center().justify_center().child(mark)).child(div().flex_1().min_w_0().child(trs(&string(s, "title")))).on_click(cx.listener(move |this, _, _, cx| { settings::flush_fields(this); this.error.clear(); let _ = this.tx.try_send(Command::Action("ob-go".into(), id.clone())); cx.notify(); })));
@@ -92,22 +92,22 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
     // the step
     let rows = settings::parse(&serde_json::json!({"rows": tour["rows"]}));
     let mut body = div().flex().flex_col().flex_shrink_0().gap_2().w_full().max_w(px(760.));
-    body = body.child(div().text_size(px(12.)).text_color(c("faint")).child(format!("{} · {}", trs(&string(tour, "counter")), trs(&string(tour, "progress")))));
-    body = body.child(div().text_size(px(22.)).font_weight(FontWeight::BOLD).child(trs(&string(tour, "title"))));
-    body = body.child(div().flex_shrink_0().w_full().text_size(px(14.)).text_color(c("dim")).line_height(px(21.)).child(trs(&string(tour, "body")))); // measured at the width it is drawn at, so its rows start below its last line
+    body = body.child(div().text_size(crate::scale::tpx(12.)).text_color(c("faint")).child(format!("{} · {}", trs(&string(tour, "counter")), trs(&string(tour, "progress")))));
+    body = body.child(div().text_size(crate::scale::tpx(22.)).font_weight(FontWeight::BOLD).child(trs(&string(tour, "title"))));
+    body = body.child(div().flex_shrink_0().w_full().text_size(crate::scale::tpx(14.)).text_color(c("dim")).line_height(crate::scale::tpx(21.)).child(trs(&string(tour, "body")))); // measured at the width it is drawn at, so its rows start below its last line
     for (i, r) in rows.iter().enumerate() { body = body.child(settings::row_el(cx, light, fields, r, 1000 + i, avail)); }
     let panel = string(tour, "panel");
     if !panel.is_empty() { body = body.child(div().pt_3().flex().flex_col().gap_2().children(super::accounts::panel(cx, light, acct, &panel))); }
     for (i, ch) in tour["choices"].as_array().into_iter().flatten().enumerate() {
         let (a, v) = (string(ch, "action"), string(ch, "value"));
-        body = body.child(div().pt_2().flex().child(div().id(SharedString::from(format!("setup-choice-{i}"))).h(px(30.)).px_4().flex().items_center().text_size(px(13.)).cursor_pointer().bg(c("raise")).hover(|x| x.bg(c("line"))).child(trs(&string(ch, "label")))
+        body = body.child(div().pt_2().flex().child(div().id(SharedString::from(format!("setup-choice-{i}"))).h(crate::scale::tpx(30.)).px_4().flex().items_center().text_size(crate::scale::tpx(13.)).cursor_pointer().bg(c("raise")).hover(|x| x.bg(c("line"))).child(trs(&string(ch, "label")))
             .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action(a.clone(), v.clone())); cx.notify(); }))));
     }
     let mut left = div().flex().gap_2();
     if tour["first"] != true { left = left.child(foot(cx, light, "setup-back", trs(&string(tour, "back")), "ob-back", false)); }
     let footer = div().flex().justify_between().items_center().gap_3().px_6().py_3().border_t_1().border_color(c("line")).child(left)
         // what the hub refused (a folder it cannot make, a path it cannot open): setup covers the window's own error line, so it is said here
-        .child(div().id("setup-refused").flex_1().min_w_0().text_size(px(12.)).text_color(c("bad")).child(trs(refused)))
+        .child(div().id("setup-refused").flex_1().min_w_0().text_size(crate::scale::tpx(12.)).text_color(c("bad")).child(trs(refused)))
         .child(div().flex().flex_shrink_0().gap_2().child(foot(cx, light, "setup-end", trs(&string(tour, "end")), "ob-end", false)).child(foot(cx, light, "setup-later", trs(&string(tour, "skip")), "ob-skip", false)).child(foot(cx, light, "setup-next", trs(&string(tour, "next")), "ob-next", tour["quiet_next"] != true)));
     let main = div().flex().flex_col().flex_1().min_w_0().child(div().id("setup-main").flex_1().min_h_0().overflow_y_scroll().track_scroll(scroll).px_6().py_5().child(body)).child(footer);
     Some(div().id("setup").absolute().top_0().left_0().size_full().flex().bg(c("bg")).text_color(c("text")).occlude().key_context("Setup").track_focus(focus)
@@ -120,7 +120,7 @@ pub fn resume_row(cx: &mut Context<Backplane>, light: bool, data: &Value) -> Opt
     let r = &data["setup"]; if !r.is_object() { return None }
     let c = |n: &str| theme::color(light, n);
     let (a, v) = (string(r, "action"), string(r, "value"));
-    Some(div().id("setup-resume").mx_2().my_1().px_3().py_2().bg(c("raise")).text_size(px(12.)).cursor_pointer().hover(|x| x.bg(c("line"))).child(trs(&string(r, "label"))).on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action(a.clone(), v.clone())); cx.notify(); })).into_any_element())
+    Some(div().id("setup-resume").mx_2().my_1().px_3().py_2().bg(c("raise")).text_size(crate::scale::tpx(12.)).cursor_pointer().hover(|x| x.bg(c("line"))).child(trs(&string(r, "label"))).on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action(a.clone(), v.clone())); cx.notify(); })).into_any_element())
 }
 
 #[cfg(test)]

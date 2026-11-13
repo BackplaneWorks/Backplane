@@ -27,10 +27,10 @@ fn icon_button(light: bool, id: &'static str, name: &'static str, on: bool) -> S
 /// (the tab strip, the toolbar).
 pub fn render<T: 'static>(i: In, cx: &mut Context<T>, on: fn(&mut T, Act, &mut Window, &mut Context<T>), key: fn(&mut T, &KeyDownEvent, &mut Window, &mut Context<T>)) -> (AnyElement, AnyElement) {
     let light = i.light; let c = |n: &str| theme::color(light, n);
-    let mut strip = div().h(px(32.)).flex().flex_row().items_end().bg(c("panel")).border_b_1().border_color(c("line")).text_size(px(12.)).px_1().gap_px().overflow_hidden();
+    let mut strip = div().h(crate::scale::tpx(32.)).flex().flex_row().items_end().bg(c("panel")).border_b_1().border_color(c("line")).text_size(crate::scale::tpx(12.)).px_1().gap_px().overflow_hidden();
     for (n, t) in i.tabs.iter().enumerate() {
         let (sel, close, active) = (t.id.clone(), t.id.clone(), t.active);
-        strip = strip.child(div().h(px(28.)).min_w(px(96.)).max_w(px(200.)).flex().flex_row().items_center().gap_1().pl_3().pr_1()
+        strip = strip.child(div().h(crate::scale::tpx(28.)).min_w(px(96.)).max_w(px(200.)).flex().flex_row().items_center().gap_1().pl_3().pr_1()
             .border_1().border_b_0().border_color(c(if active { "line" } else { "panel" })).bg(c(if active { "bg" } else { "panel" })).text_color(c(if active { "text" } else { "dim" }))
             .child(div().id(("btab", n)).flex_1().h_full().flex().items_center().cursor_pointer().overflow_hidden().child(tab_label(&t.title, &t.url))
                 .on_click(cx.listener(move |this, _, w, cx| on(this, Act::Select(sel.clone()), w, cx))))
@@ -41,17 +41,17 @@ pub fn render<T: 'static>(i: In, cx: &mut Context<T>, on: fn(&mut T, Act, &mut W
         .on_click(cx.listener(move |this, _, w, cx| on(this, Act::NewTab, w, cx))));
     let border = if i.focused { c("accent") } else { c("line") };
     let shown = if i.value.is_empty() { crate::i18n::trs("Search or enter address") } else { i.value.clone() };
-    let bar = div().h(px(40.)).flex().flex_row().items_center().gap_1().px_2().bg(c("bg")).border_b_1().border_color(c("line"))
+    let bar = div().h(crate::scale::tpx(40.)).flex().flex_row().items_center().gap_1().px_2().bg(c("bg")).border_b_1().border_color(c("line"))
         .child(icon_button(light, "br-back", "chevron-left", i.have && i.can_back).on_click(cx.listener(move |this, _, w, cx| on(this, Act::Back, w, cx))))
         .child(icon_button(light, "br-fwd", "chevron-right", i.have && i.can_forward).on_click(cx.listener(move |this, _, w, cx| on(this, Act::Forward, w, cx))))
         .child(icon_button(light, "br-reload", if i.loading { "x" } else { "undo" }, i.have).on_click(cx.listener(move |this, _, w, cx| on(this, Act::Reload, w, cx))))
-        .child(div().id("br-url").flex_1().h(px(28.)).px_2().flex().flex_row().items_center().gap_2().text_size(px(13.)).bg(c("panel")).border_1().border_color(border)
+        .child(div().id("br-url").flex_1().h(crate::scale::tpx(28.)).px_2().flex().flex_row().items_center().gap_2().text_size(crate::scale::tpx(13.)).bg(c("panel")).border_1().border_color(border)
             .track_focus(i.bar_focus).key_context("BrowserBar").key_context("Viewer").cursor_text()
             .on_key_down(cx.listener(move |this, e, w, cx| key(this, e, w, cx)))
             .on_click(cx.listener(move |this, _, w, cx| on(this, Act::FocusBar, w, cx)))
             .child(art::icon("globe", 14., c("dim")))
             .child(div().flex_1().overflow_hidden().text_color(c(if i.value.is_empty() { "dim" } else { "text" })).child(format!("{}{}", shown, if i.focused { "▏" } else { "" }))))
-        .when(i.taken, |d| d.child(div().id("br-hand").h(px(28.)).px_3().flex().items_center().cursor_pointer().bg(c("accent")).text_color(c("on-accent")).text_size(px(12.)).child(crate::i18n::trs("Hand back"))
+        .when(i.taken, |d| d.child(div().id("br-hand").h(crate::scale::tpx(28.)).px_3().flex().items_center().cursor_pointer().bg(c("accent")).text_color(c("on-accent")).text_size(crate::scale::tpx(12.)).child(crate::i18n::trs("Hand back"))
             .on_click(cx.listener(move |this, _, w, cx| on(this, Act::HandBack, w, cx)))));
     (strip.into_any_element(), bar.into_any_element())
 }
