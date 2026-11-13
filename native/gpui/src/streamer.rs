@@ -94,7 +94,7 @@ impl Masker {
             if word_at(&lower, i, u.len()) && lower[end..].starts_with('@') { found.push((i..end, USER)) }
         } }
         ipv4(s, &mut found); ipv6(s, &mut found);
-        keys(s, &mut found); url_secrets(&lower, &mut found); phones(s, &mut found); codes(&lower, s, &mut found);
+        keys(s, &mut found); url_secrets(&lower, &mut found); phones(s, &mut found); codes(&lower, s, &mut found); invites(s, &mut found); hex_secrets(s, &mut found);
         merge(found)
     }
     /// `s` as drawn.
@@ -233,6 +233,27 @@ fn keys<'a>(s: &str, out: &mut Vec<(Range<usize>, &'a str)>) {
         let start = if p == "Bearer " { i + p.len() } else { i };
         if e - (i + p.len()) >= 16 { out.push((start..e, HIDDEN)) }
     } }
+}
+/// A machine invite `bp1:<url>:<peer>:<64 hex>` (`net/sign.rs::invite_make`; the url holds colons itself): the last two colon fields are hidden, `bp1:<url>:` stays.
+fn invites<'a>(s: &str, out: &mut Vec<(Range<usize>, &'a str)>) {
+    let b = s.as_bytes();
+    for (i, _) in s.match_indices("bp1:") {
+        if i > 0 && is_word(b[i - 1]) { continue }
+        let mut e = i; while e < b.len() && !(b[e].is_ascii_whitespace() || matches!(b[e], b'"' | b'\'' | b'`' | b')' | b']' | b'>' | b'<' | b',')) { e += 1 }
+        let cols: Vec<usize> = s[i + 4..e].match_indices(':').map(|(k, _)| i + 4 + k).collect();
+        if cols.len() >= 2 && cols[cols.len() - 2] > i + 4 { out.push((cols[cols.len() - 2] + 1..e, HIDDEN)) }
+    }
+}
+/// A bare hex secret of exactly 32, 48 or 64 characters (hub token, device token, peer secret), on its own; 40 (a git SHA) and short SHAs stay.
+fn hex_secrets<'a>(s: &str, out: &mut Vec<(Range<usize>, &'a str)>) {
+    let b = s.as_bytes(); let mut i = 0;
+    while i < b.len() {
+        if !b[i].is_ascii_hexdigit() { i += 1; continue }
+        let mut j = i; while j < b.len() && b[j].is_ascii_hexdigit() { j += 1 }
+        let alone = (i == 0 || !(is_word(b[i - 1]) || b[i - 1] == b'_')) && (j >= b.len() || !(is_word(b[j]) || b[j] == b'_'));
+        if alone && matches!(j - i, 32 | 48 | 64) { out.push((i..j, HIDDEN)) }
+        i = j;
+    }
 }
 /// A link's secret part: the value after `token=`, `invite=`, `code=`, `key=` ... in a query or a `#` fragment.
 fn url_secrets<'a>(lower: &str, out: &mut Vec<(Range<usize>, &'a str)>) {
@@ -502,6 +523,19 @@ mod tests {
         assert_eq!(m.mask("Short code K7QP2MXA, for ten minutes"), "Short code •••, for ten minutes");
         assert_eq!(m.mask("Code: ABCD-EFGH"), "Code: •••");
         assert_eq!(m.mask("the code is fine"), "the code is fine");
+    }
+    #[test] fn invites_and_bare_hex_secrets_are_hidden() {
+        let m = m();
+        let sec = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff";
+        let inv = format!("bp1:https://hub.example.org:8443:peer-7:{sec}");
+        assert_eq!(m.mask(&format!("paste {inv} now")), "paste bp1:https://hub.example.org:8443:••• now");
+        assert_eq!(m.mask("bp1:http://x:1:id:ab"), "bp1:http://x:1:•••");
+        for n in [32, 48, 64] { let h = "a1".repeat(n / 2); assert_eq!(m.mask(&format!("tok {h}.")), "tok •••.", "{n}"); }
+        let sha = "3245f6fef0123456789abcdef0123456789abcde";
+        assert_eq!(m.mask(&format!("commit {sha} 3245f6fef 3245f6f")), format!("commit {sha} 3245f6fef 3245f6f"));
+        let long = "a1".repeat(33);
+        assert_eq!(m.mask(&format!("x{} {long}", "a1".repeat(16))), format!("x{} {long}", "a1".repeat(16)));
+        assert_eq!(m.mask("ghp_0123456789abcdef0123 and tskey-auth-kAbc123456789012"), "••• and •••");
     }
     #[test] fn the_same_identifiers_in_markdown_are_masked_in_every_piece_drawn() {
         let m = m();
