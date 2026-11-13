@@ -235,6 +235,12 @@ def _kbd(vk: int = 0, scan: int = 0, flags: int = 0) -> INPUT:
     return i
 
 
+def cursor_pos():
+    pt = W.POINT()
+    u32.GetCursorPos(ctypes.byref(pt))
+    return [int(pt.x), int(pt.y)]
+
+
 def screen_move(x: int, y: int):
     u32.SetCursorPos(int(x), int(y))
     time.sleep(0.05)
@@ -1103,10 +1109,27 @@ def run_window_suite(h: SuiteHarness) -> int:
                     move_click_pt = (gx, gy)
                     screen_click(gx, gy, 1)
                     time.sleep(0.25)
+                    screen_move(gx, gy)
+                    rclick_diag = {"click": [gx, gy], "cursor_before": cursor_pos()}
                     screen_click(gx, gy, 3)
                     time.sleep(0.65)
+                    rclick_diag["cursor_menu_up"] = cursor_pos()
                     h.shot("04_pure_moved_popup")
                     popups_captured = list_popup_menus(kpid)
+                    # where the fork's PopupMenu could have taken its origin from: the holder, the frame and its GL canvas after the move
+                    try:
+                        frm = int((shown_frame_of(r_mv) or {}).get("xid") or r_mv.get("shown") or 0)
+                        hold = int(u32.GetAncestor(frm, GA_PARENT) or 0) if frm else 0
+                        rclick_diag["holder"] = {"hwnd": hold, "class": hwnd_class(hold), "rect": list(hwnd_rect(hold))} if hold else None
+                        rclick_diag["frame"] = {"hwnd": frm, "rect": list(hwnd_rect(frm))} if frm else None
+                        rclick_diag["canvases"] = [{"hwnd": c["hwnd"], "rect": [c["root_x"], c["root_y"], c["w"], c["h"]]}
+                                                   for c in list_child_windows(frm) if c["class"] == "wxGLCanvas" and c["visible"]] if frm else []
+                        rclick_diag["menus"] = [{"hwnd": p["hwnd"], "rect": [p["root_x"], p["root_y"], p["w"], p["h"]]} for p in popups_captured]
+                        with open(h.p("rclick_moved.json"), "w", encoding="utf-8") as rf:
+                            json.dump(rclick_diag, rf, indent=1)
+                        print("DIAG rclick_moved " + json.dumps(rclick_diag))
+                    except Exception as e:
+                        print(f"DIAG rclick_moved failed: {e}")
                     if popups_captured:
                         key_tap("Escape")
                         time.sleep(0.2)
