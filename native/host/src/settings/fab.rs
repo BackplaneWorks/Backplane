@@ -188,7 +188,9 @@ pub(crate) fn transient(a: &Value) -> bool {
 pub(crate) fn curl(home: &Path, url: &str, headers: &[String], body: Option<&str>) -> (String, String) {
     let dir = home.join("secrets");
     if std::fs::DirBuilder::new().mode(0o700).recursive(true).create(&dir).is_err() { return ("000".into(), String::new()) }
-    let nonce = format!("{:x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos()));
+    // unique per call: two requests in one home (a watch and a status ask) must never share a config/out file, whatever the clock says
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let nonce = format!("{:x}-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos()), SEQ.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
     let (cfg, out, data) = (dir.join(format!("o-{nonce}.curl")), dir.join(format!("o-{nonce}.out")), dir.join(format!("o-{nonce}.json")));
     let w = |p: &Path, t: &str| std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(p).and_then(|mut f| f.write_all(t.as_bytes()));
     let mut c = super::webhook::curl_config(url, headers, &data.to_string_lossy(), &out.to_string_lossy());
