@@ -60,7 +60,13 @@ pub async fn apply(hub: &Arc<Hub>, root: &Path, key: &str) -> Result<Value, Stri
         let call = |ty: &'static str, m: Value| { let (r, me) = (r.clone(), me.clone()); async move { let o = crate::files::kicad::embed::gui_call_as(&r, ty, m, &me).await; if o["ok"].as_bool().unwrap_or(false) { Ok(o["message"].clone()) } else { Err(format!("KiCad: {}", o["error"].as_str().or(o["status"].as_str()).unwrap_or("no answer"))) } } };
         let got = call("kiapi.board.commands.GetBoardDesignRules", json!({"board": board})).await?;
         let (msg, was) = set_message(&board, &got, key, mm)?;
+        // nothing unsaved in KiCad before (the editor not opened, or saved): the press is kept at once, as without KiCad; else it
+        // joins the person's unsaved edits and is kept with their next save
+        let clean = !crate::files::kicad::embed::unsaved_update(&pro, |u| u).modified;
         call("kiapi.board.commands.SetBoardDesignRules", msg).await?;
+        if clean && call("kiapi.common.commands.SaveDocument", json!({"document": board})).await.is_ok() {
+            return Ok(json!({"applied": key, "was_mm": was, "now_mm": mm, "in": "kicad", "saved": true, "note": format!("set in the board setup (it was {was} mm)")}))
+        }
         return Ok(json!({"applied": key, "was_mm": was, "now_mm": mm, "in": "kicad", "saved": false, "note": format!("set in KiCad's Board Setup; save the board to keep it (it was {was} mm)")}))
     }
     // no KiCad of the person's: the headless KiCad (which has no design-rules API) is retired first so it holds no older copy, then the
