@@ -8,7 +8,7 @@ A KiCad dialog that appears on its own (a load warning) is recorded with its tit
 import json, os, re, subprocess, sys, threading, time
 
 OUT, CLOG = sys.argv[1], sys.argv[2]
-JOURNEYS = (sys.argv[3] if len(sys.argv) > 3 else "focus,open,switch,edit,mgmt,coedit,xprobe,comment,save,tools,textkeys,editors,plan,checks,markers,panels,sch").split(",")
+JOURNEYS = (sys.argv[3] if len(sys.argv) > 3 else "focus,open,switch,edit,mgmt,coedit,xprobe,comment,save,tools,textkeys,editors,plan,undo,checks,markers,panels,sch").split(",")
 LIB = os.path.dirname(os.path.abspath(__file__))
 IPC, DRV, RPC = os.environ["IPC_PY"], os.environ["DRIVER_PY"], os.environ["HUB_RPC_MJS"]
 RT, SAMP = os.path.join(LIB, "rt_input.py"), os.path.join(LIB, "pane_sampler.py")
@@ -791,17 +791,21 @@ def calibrate():
     fps = fp_positions(); refs = [r for r in fps if re.match(r"^[CR]\d+$", r)] or [r for r in fps if re.match(r"^[A-Z]+\d+$", r)]
     if len(refs) < 2: print(f"DIAG plan calibration: {len(refs)} footprints parsed", flush=True); return None
     # two far-apart footprints
-    a = min(refs, key=lambda r: fps[r][0] + fps[r][1]); b = max(refs, key=lambda r: fps[r][0] + fps[r][1])
-    pts = []
-    for ref in (a, b):
+    ranked = sorted(refs, key=lambda r: fps[r][0] + fps[r][1])
+    pts = []; used = []
+    for ref in ranked[:6] + ranked[::-1][:6]:  # from each end, the first two (one per end) whose selection shows
+        if len(pts) == 2: break
+        if len(pts) == 1 and (ref in used or ranked.index(ref) < len(ranked) // 2): continue
         # the canvas only (not the toolbars, the header or the status bar, which a selection changes too): measured at 1800x1050
         CV = (PANE["x"] + 40, PANE["y"] + 110, 720, 715)
         rt("key", "Escape"); time.sleep(0.4); g0 = grab(*CV)
         ipc("select-items", SOCK, "pcb", ref, 0); time.sleep(0.6); g1 = grab(*CV)
         c = changed_centroid(g0, g1)
         if c: c = (c[0] + 40, c[1] + 110)
-        if not c: print(f"DIAG plan calibration: selecting {ref} changed no pixels", flush=True); return None
-        pts.append((fps[ref], (PANE["x"] + c[0], PANE["y"] + c[1])))
+        if not c: print(f"DIAG plan calibration: selecting {ref} changed no pixels; the next one", flush=True); continue
+        pts.append((fps[ref], (PANE["x"] + c[0], PANE["y"] + c[1]))); used.append(ref)
+    if len(pts) < 2: print("DIAG plan calibration: fewer than two footprints showed their selection", flush=True); return None
+    a, b = used
     rt("key", "Escape"); time.sleep(0.3)
     (b1, s1), (b2, s2) = pts
     k = ((s2[0] - s1[0]) / (b2[0] - b1[0]) + (s2[1] - s1[1]) / (b2[1] - b1[1])) / 2 if b2[0] != b1[0] and b2[1] != b1[1] else None
@@ -917,15 +921,27 @@ if "plan" in JOURNEYS and SOCK:
         shot("plan_view")
         cor = pj["corridors"][0]; cl = cor["layer"]
         order = sorted({l["layer"] for l in pj.get("layers", [])}, key=lambda n: 0 if n == "F.Cu" else (99 if n == "B.Cu" else int(re.sub(r"\D", "", n) or 50)))
-        def panel_click(layer, tag):  # the plan view's mini panel for LAYER (measured at 1800x1050: x pane+708, y pane+179+120*i)
+        def panel_click(layer, tag):  # the plan view's mini panel for LAYER, in stack order (L1 = F.Cu)
             i = order.index(layer) if layer in order else 0
-            r = rt("click", PANE["x"] + 708, PANE["y"] + 179 + 120 * i)
+            if len(order) <= 4: px, py = PANE["x"] + 708, PANE["y"] + 179 + 120 * i            # one column (measured at 1800x1050)
+            else: px, py = PANE["x"] + 679 + 52 * (i % 2), PANE["y"] + 185 + 135 * (i // 2)  # two columns: L1 L2 / L3 L4 ... (Hubble, 8 layers)
+            before = plan("layer", SOCK).get("layer")
+            r = rt("click", px, py)
             EVENTS.append({"kind": "switch", "t0": r["t0"], "tag": tag, "window_ms": 1500}); time.sleep(1.5)
-            print(f"INFO plan layer after the {layer} panel: {plan('layer', SOCK).get('layer')}", flush=True)
+            print(f"INFO plan layer after the {layer} panel (L{i + 1} at {px},{py}): {before} -> {plan('layer', SOCK).get('layer')}", flush=True)
         panel_click(cl, "plan_layer_corridor"); shot("plan_layer_corridor")
         if to_screen:
             path = cor["path"]; mid = ((path[0][0] + path[1][0]) / 2, (path[0][1] + path[1][1]) / 2)
+            ly0 = plan("layer", SOCK).get("layer")
             mx, my = to_screen(*mid); rt("click", mx, my); time.sleep(0.6); shot("plan_corridor_selected")
+            ly1 = plan("layer", SOCK).get("layer")
+            selp = ipc("selection", SOCK, "pcb")
+            RESULTS["plan_corridor_click"] = {"ms": None, "ok": int(ly1 == cl), "board_mm": [round(mid[0], 3), round(mid[1], 3)], "screen": [round(mx), round(my)],
+                                              "layer_before": ly0, "layer_after": ly1, "selection": selp.get("types")}
+            print(f"INFO plan corridor click: {cor['id']} on {cl} at board {mid[0]:.3f},{mid[1]:.3f} mm (screen {mx:.0f},{my:.0f}); active layer {ly0} -> {ly1}; selection {selp.get('types')}", flush=True)
+            sn = (metrics("shown") or [{}])[-1]
+            if pane_now()["w"] < PANE["w"] - 100:
+                print(f"JANK plan: the click narrowed the pane (a management panel opened: {sn})", flush=True); RESULTS["plan_click_opened_panel"] = {"ms": None, "ok": 0}
             print(f"INFO plan corridor {cor['id']} on {cl}: clicked {mx:.0f},{my:.0f}; vertex {to_screen(*path[1])}", flush=True)
             vx, vy = to_screen(*path[1])
             r = rt("drag_circle", vx, vy, 25, 5, 1, 120); EVENTS.append({"kind": "input", "t0": r["t0"], "t1": r["t1"], "tag": "plan_drag_corridor_vertex"}); time.sleep(1)
@@ -1028,7 +1044,59 @@ if "memory" in JOURNEYS and SOCK and MEM["pid"]:
     if gf: ipc("open-gerbers", SOCK, ",".join(gf), timeout=120); mstep("gerbview")
     tab("PCB_3D", "mem_3d_tab", 1.5); mstep("3d", 10.0)
     tab("PCB", "mem_back", 1.5); mstep("end", 3.0)
+    # DRC in the editor, then kicad-cli DRC (a process of its own): KiCad's memory before, right after and 20 s after each
+    if has_cap("embed-checks", "kiapi.backplane.embed.RunChecks"):
+        since = ipc("events", SOCK, "0").get("next", 0); t0 = now(); ipc("run-checks", SOCK, "pcb")
+        while now() - t0 < 120000 and not any(e["type"] == 27 for e in ipc("events", SOCK, str(since)).get("events", [])): time.sleep(0.2)
+        print(f"INFO memory: in-editor DRC took {round(now() - t0)} ms", flush=True)
+        mstep("after_drc_embed", 0.5); mstep("after_drc_embed_20s", 20.0)
+    if os.path.exists(cli) and PCB:
+        cpk = {"peak": 0}; stop_ = threading.Event()
+        def cli_peak():  # kicad-cli's own RSS, its high-water mark
+            while not stop_.is_set():
+                for p_ in os.listdir("/proc"):
+                    try:
+                        if p_.isdigit() and b"kicad-cli" in open(f"/proc/{p_}/cmdline", "rb").read() and OUT.encode() in open(f"/proc/{p_}/cmdline", "rb").read():
+                            for l in open(f"/proc/{p_}/status"):
+                                if l.startswith("VmHWM"): cpk["peak"] = max(cpk["peak"], int(l.split()[1]) // 1024)
+                    except Exception: pass
+                time.sleep(0.2)
+        th = threading.Thread(target=cli_peak, daemon=True); th.start()
+        t0 = now(); subprocess.run([cli, "pcb", "drc", "--format", "json", "-o", os.path.join(OUT, "drc_mem.json"), PCB], capture_output=True, timeout=300)
+        stop_.set(); th.join()
+        print(f"INFO memory: kicad-cli DRC took {round(now() - t0)} ms, its own peak {cpk['peak']} MB", flush=True)
+        RESULTS["mem_cli_drc_peak"] = {"ms": None, "mb": cpk["peak"]}
+        mstep("after_drc_cli", 0.5); mstep("after_drc_cli_20s", 20.0)
     print("INFO memory steps: " + json.dumps(steps), flush=True)
+    PAUSE.clear()
+# 7c1. undo across a co-edit (bp.13 batch 4's fix 90eb907189): the BOM panel edits a symbol's Value (mgmt.bom.edit, as the person),
+# the person's Ctrl+Z and Ctrl+Y in the schematic, then the panel edits the same symbol again: that edit must apply (it was dropped as
+# "unchanged" before the fix). The Value read back from KiCad after each step; the original put back at the end.
+if "undo" in JOURNEYS and SOCK:
+    PAUSE.set()
+    tab("SCH", "undo_sch", 1.5)
+    sref = next((r_ for r_ in re.findall(r'\(property "Reference" "([RC][0-9]+)"', open(PCB, errors="ignore").read())), "")
+    val = lambda: ipc("sym-value", SOCK, sref).get("value")
+    orig = val() if sref else None
+    steps_u = []
+    def bom(value, tag):
+        out = rpc([{"method": "mgmt.bom.edit", "params": {"project": KPRO, "refs": [sref], "field": "value", "value": value}}])
+        time.sleep(1.0); v = val(); steps_u.append([tag, v]); print(f"INFO undo {tag}: {v!r} ({out.strip()[-140:]})", flush=True); return v
+    if orig is not None:
+        EXs, EYs = PANE["x"] + PANE["w"] // 4, PANE["y"] + PANE["h"] - 60   # low on the canvas's left, off the items
+        v1 = bom("BP-REDO", "panel_edit")
+        rt("click", EXs, EYs); time.sleep(0.4); rt("key", "z", "ctrl"); time.sleep(1.2); v2 = val(); steps_u.append(["ctrl_z", v2])
+        rt("key", "y", "ctrl"); time.sleep(1.2); v3 = val(); steps_u.append(["ctrl_y", v3])
+        v4 = bom(orig, "panel_edit_again")
+        print(f"INFO undo: {sref} {orig!r} -> panel {v1!r} -> Ctrl+Z {v2!r} -> Ctrl+Y {v3!r} -> panel again {v4!r}", flush=True)
+        RESULTS["undo_panel_edit_applies"] = {"ms": None, "ok": int(v1 == "BP-REDO")}
+        RESULTS["undo_ctrl_z_takes_it_back"] = {"ms": None, "ok": int(v2 == orig)}
+        RESULTS["undo_ctrl_y_redoes_it"] = {"ms": None, "ok": int(v3 == "BP-REDO")}
+        RESULTS["undo_then_panel_edit_applies"] = {"ms": None, "ok": int(v4 == orig), "steps": steps_u}
+        if val() != orig: bom(orig, "put_back")
+    else:
+        print(f"DIAG undo: no schematic symbol {sref!r} to read", flush=True)
+    tab("PCB", "undo_back", 1.2)
     PAUSE.clear()
 # 7d. checks (bp.13 batch 3, embed-checks): DRC and ERC in the open editors (RunChecks) as the client's Checks panel can run them: the call
 # to ET_CHECKS_DONE, a pan of the board meanwhile (does the editor stay smooth), the counts, GetMarkers, and a picture of the markers.

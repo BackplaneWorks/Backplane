@@ -389,6 +389,18 @@
    "field": "ok",
    "min": 1,
    "what": "';' typed in a KiCad text field stays there (no comment window)"
+  },
+  {
+   "re": "^undo_(panel_edit_applies|ctrl_z_takes_it_back|ctrl_y_redoes_it|then_panel_edit_applies)$",
+   "field": "ok",
+   "min": 1,
+   "what": "undo across a co-edit: the panel's edit, Ctrl+Z, Ctrl+Y, the panel's next edit of the same symbol applies"
+  },
+  {
+   "re": "^plan_corridor_click$",
+   "field": "ok",
+   "min": 1,
+   "what": "a click on a corridor of another plan layer makes its layer active"
   }
  ]
 }

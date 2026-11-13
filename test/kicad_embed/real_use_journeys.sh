@@ -3,7 +3,7 @@
 # the pane's pixels sampled for flashes, pan/zoom frame times, select/move/delete/undo/route, an agent's commits idle and during a pan,
 # editor.kicad.select, Comment to Backplane, Ctrl+S, the schematic). One board x runtime per call; real_use_all.sh runs the matrix.
 #   REAL_HARDWARE=1 EMBED_MODE=fork BACKPLANE_KICAD_BIN=.../bin/kicad KEMBED_PROJ_SRC=<staged copy> test/kicad_embed/real_use_journeys.sh
-#   KEMBED_JOURNEYS=focus,open,switch,edit,mgmt,coedit,xprobe,comment,save,tools,textkeys,editors,checks,markers,panels,sch (default all)
+#   KEMBED_JOURNEYS=focus,open,switch,edit,mgmt,coedit,xprobe,comment,save,tools,textkeys,editors,undo,checks,markers,panels,sch (default all)
 # Prints PERF lines and a JSON line; writes $OUT/real_use.json.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -20,7 +20,7 @@ HOME="$OUT/fh" BACKPLANE_GPUI_RECTS=1 BACKPLANE_GPUI_ASSETS="$ASSETS_DIR" "$CLIE
 CP=$!; track_pid "$CP"
 export IPC_PY DRIVER_PY HUB_RPC_MJS HPORT REPO_ROOT REAL_HOME
 RC=0
-python3 "$KEMBED_LIB/real_use_drive.py" "$OUT" "$OUT/client.log" "${KEMBED_JOURNEYS:-focus,open,switch,edit,mgmt,coedit,xprobe,comment,save,tools,textkeys,editors,checks,markers,panels,sch}" || RC=$?
+python3 "$KEMBED_LIB/real_use_drive.py" "$OUT" "$OUT/client.log" "${KEMBED_JOURNEYS:-focus,open,switch,edit,mgmt,coedit,xprobe,comment,save,tools,textkeys,editors,undo,checks,markers,panels,sch}" || RC=$?
 shot end
 stop_pid "$CP"
 # the client's memory over the run (env_xvfb rss_watch): a runaway is a failure here, never the machine's OOM killer
