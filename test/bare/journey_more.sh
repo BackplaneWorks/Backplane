@@ -27,9 +27,9 @@ WP=$(cat "$HH/.client.pid" 2>/dev/null); [ -n "$WP" ] && in_box kill "$WP" 2>/de
 cat >"$HH/panels.json" <<J
 [{"wait":3000},{"click":"project:$pid_"},{"wait":2000},{"click":"page-thread:$tid"},{"wait":2500},{"click":"rail:Board"},{"wait":2500},{"click":"ui:Edit"},
  {"kicad":{"wait_painted":120000,"kind":"PCB","tag":"p2"}},{"kicad":{"report":true,"tag":"p2"}},{"mark":"p2-ready"},{"wait":30000},{"kicad":{"report":true,"tag":"p2c"}},{"mark":"commented"},
- {"keys":"alt-shift-b"},{"wait":3000},{"mark":"bom"},{"wait":8000},
+ {"wait":8000},{"mark":"bom"},{"wait":8000},
  {"click":"mgmt:checks"},{"wait":8000},{"mark":"checks"},{"wait":60000},
- {"click":"rail:Gerbers"},{"wait":6000},{"mark":"gerbers"},{"wait":20000},{"mark":"end2"}]
+ {"click":"rail:Gerbers"},{"wait":6000},{"mark":"gerbers"},{"wait":40000},{"mark":"end2"}]
 J
 cp "$HH/win.log" "$OUT/logs/win-1.log" 2>/dev/null; : >"$HH/win.log"; T2=$(date +%s.%N)
 launch --url http://127.0.0.1:$(hub_port) --token-file $PH/.backplane/hub/token --script $PH/panels.json
@@ -62,7 +62,9 @@ elif [ -n "${ww:-}" ]; then X mousemove $((wx + ww / 2)) $((wy + wh / 2)) click 
   else bad "Ctrl+; opened no comment window (selection: $(head -c 160 "$OUT/logs/comment-select.json"))"; cut_ 2 comment "Ctrl+; in the embedded KiCad opened no comment window on a fresh install"; fi
 else bad "no KiCad frame to give the keyboard to (shown=$SHOWN)"; fi
 
-phase "BOM (Alt+Shift+B)"; markt bom 200; sleep 1; shot 12-bom
+# the chord as a person presses it, through X (after the comment the keyboard is in KiCad's frame: the client's reserved chords get it
+# there, an injected key would not have to)
+phase "BOM (Alt+Shift+B)"; markt commented 200 && { sleep 1; X key alt+shift+b; }; markt bom 200; sleep 1; shot 12-bom
 BOM=$(hub rpc mgmt.watch "{\"project\":\"$PRO\"}" | python3 -c 'import json,sys
 r=json.load(sys.stdin); d=((r.get("result") or {}).get("data") or {}); b=d.get("bom") or {}; s=(r.get("result") or {}).get("state") or {}
 print(json.dumps({"open": s.get("open"), "lines": len(b.get("lines") or []), "parts": b.get("parts"), "source": b.get("source")}))' 2>/dev/null)
@@ -102,7 +104,10 @@ else bad "no Fab panel or Review button (mgmt:fab, mgmt:fab:review)"; fi
 
 # Gerbers tab (the script's own click): the mfg/ set drawn
 # the script clicks Gerbers 60 s after its checks mark (the room for Fab and Review); the paint follows the click
-phase "Gerbers tab"; markt gerbers 600; for _ in $(seq 80); do grep '"event":"plot_painted"' "$HH/win.log" | grep -q '/mfg' && break; sleep 0.25; done; sleep 1; shot 17-gerbers
+# what is on screen 3 s after the click (the window lives 40 s more), then the paint is waited for; KiCad's own report says if the
+# pane holds GerbView
+phase "Gerbers tab"; markt gerbers 600; sleep 3; shot 17-gerbers; for _ in $(seq 80); do grep '"event":"plot_painted"' "$HH/win.log" | grep -q '/mfg' && break; sleep 0.25; done
+grep -h '"event":"kicad"' "$HH/win.log" | tail -1 | cut -c1-400 >"$OUT/logs/gerbers-kicad-report.txt"
 grep '"event":"plot_painted"' "$HH/win.log" | grep -q '/mfg' && ok "the Gerbers tab drew the project's mfg/ set ($(grep '"event":"plot_painted"' "$HH/win.log" | grep '/mfg' | tail -1 | grep -o '"ms":[0-9.]*'))" \
   || { bad "the Gerbers tab drew no mfg/ set ($(grep -o '"id":"rail:Gerbers"[^}]*' "$HH/win.log" | tail -1))"; cut_ 2 gerbers "the Gerbers tab did not draw the exported mfg/ set"; }
 
