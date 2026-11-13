@@ -1314,6 +1314,11 @@ fn party(id: &str, kind: &str, th: &str, lease: u64) -> Value { json!({"id":id,"
 async fn locks_up(name: &str, extra: impl FnOnce(&Path) -> String) -> (Arc<Hub>, Arc<Agents>, crate::plat::tmp::TempDir, crate::plat::tmp::TempDir) {
     let sd = dir(&format!("{name}-bin")); script(&sd, "codex", CODEX_STANDIN);
     let (hub, ag, mut h, w) = start(name, |w| { let x = extra(w); base_log(w, 3, &x).replace("\"provider\":\"claude\"", "\"provider\":\"codex\"") }, |_| Cli::standin(&sd)).await;
+    // These tests drive the locks themselves (locks_tick where they need one): the hub's timer tick, which can land mid-test
+    // on a loaded machine (a fresh holder read as one whose flock a restart lost), is let run once and then only counts.
+    let end = Instant::now() + Duration::from_secs(30);
+    while ag.lock_ticks.load(std::sync::atomic::Ordering::SeqCst) == 0 && Instant::now() < end { tokio::time::sleep(Duration::from_millis(5)).await }
+    ag.lock_tick_manual.store(true, std::sync::atomic::Ordering::SeqCst);
     h.keep(sd); (hub, ag, h, w)
 }
 /// The hub's own message (role system), never the stand-in agent's echo of one.

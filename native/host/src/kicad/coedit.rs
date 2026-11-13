@@ -4,10 +4,19 @@
 //!     `idle` at the turn's end. KiCad draws the area the agent's recent changes cover, labelled with the task.
 //!   - ET_AGENT_CONTROL (23) from the editor: `pause` holds that thread's KiCad writes here until `resume` (the turn keeps running: its
 //!     tool call just waits), `steer` goes into the thread as a steering message.
+//!   - ET_AGENT_NOTICE (21) from the editor: what happened to an agent's change (the person's undo took it back, it waited for the person
+//!     and was rebased, it was dropped, a settings merge conflicted). Published as info `kicad.coedit.<digest of the .kicad_pro>`
+//!     {project, seq, kind, actor, agent, doc, text, at} (the pane's strip and the phones show it) and handed to that agent's thread as a
+//!     note it reads with its next tool result.
 //!   - What the person is doing (`person`): their selection (ET_SELECTION_CHANGED, bp.9+) and their own recent edits (ET_DOCUMENT_EDITED
 //!     with actor "", bp.11), per project; every live kicad_ipc result carries the last two minutes of it, so an agent sees when it is
 //!     about to touch what the person is working on and asks them instead of editing over them.
+use crate::hub::Hub;
 use serde_json::{json, Value};
+use std::sync::{Arc, Weak};
+
+static HUB: Mutex<Option<Weak<Hub>>> = Mutex::new(None);
+pub fn start(hub: &Arc<Hub>) { *HUB.lock().unwrap() = Some(Arc::downgrade(hub)); }
 use std::{collections::{HashMap, HashSet}, sync::{Mutex, OnceLock}, time::{Duration, Instant}};
 use tokio::sync::Notify;
 
@@ -141,12 +150,98 @@ pub fn client_name(who: &Who) -> String {
     }
 }
 
+/// Whether `ev` is ET_AGENT_NOTICE.
+pub fn is_notice(ev: &Value) -> bool { ev["type"] == "ET_AGENT_NOTICE" || ev["type"].as_i64() == Some(21) }
+
+/// The agent's name as the person reads it: the thread's title when there is one, else "an agent".
+fn agent_label(actor: &str, title: &str) -> String {
+    if !title.trim().is_empty() { return title.trim().to_string() }
+    if thread_of(actor).is_some() { "an agent".into() } else if actor.is_empty() { "you".into() } else { actor.to_string() }
+}
+
+/// A notice in words, for the person and for the agent (English: the hub's own sentences). `d`: {kind, actor, doc, details}.
+pub fn notice_text(d: &Value, agent: &str) -> String {
+    let det: Value = match &d["details"] { Value::String(t) => serde_json::from_str(t).unwrap_or(Value::Null), v => v.clone() };
+    let what = det["description"].as_str().filter(|t| !t.is_empty()).map(|t| format!(" \u{201c}{t}\u{201d}")).unwrap_or_default();
+    match d["kind"].as_str().unwrap_or("") {
+        "undo_took_back" => {
+            let by = det["by"].as_str().unwrap_or("person");
+            let because = det["because"].as_str().filter(|t| !t.is_empty()).map(|t| format!(" (it touched what \u{201c}{t}\u{201d} changed)")).unwrap_or_default();
+            if by == "person" { format!("Your undo also took back {agent}'s change{what}{because}.") } else { format!("An undo took back {agent}'s change{what}{because}.") }
+        }
+        "deferred" => format!("{agent}'s change{what} waits until you finish editing those items, then merges with your edit."),
+        "rebased" => format!("{agent}'s change{what} was applied after your edit, merged with it."),
+        "dropped" => format!("{agent}'s change{what} was dropped: it no longer fit what you had changed."),
+        "settings_conflict" => format!("Board settings: you and {agent} changed the same value; yours was kept."),
+        other => format!("{agent}: {other}{what}"),
+    }
+}
+
+/// The same notice for the agent whose change it is (to its thread).
+pub fn agent_text(d: &Value) -> String {
+    let det: Value = match &d["details"] { Value::String(t) => serde_json::from_str(t).unwrap_or(Value::Null), v => v.clone() };
+    let what = det["description"].as_str().filter(|t| !t.is_empty()).map(|t| format!(" \u{201c}{t}\u{201d}")).unwrap_or_default();
+    let body = match d["kind"].as_str().unwrap_or("") {
+        "undo_took_back" => {
+            let because = det["because"].as_str().filter(|t| !t.is_empty()).map(|t| format!(", because it touched what \u{201c}{t}\u{201d} changed")).unwrap_or_default();
+            if det["by"].as_str().unwrap_or("person") == "person" { format!("the person's undo took back your change{what}{because}. Re-read those items before changing them again; ask the person if you are unsure they want it.") }
+            else { format!("an undo took back your change{what}{because}.") }
+        }
+        "deferred" => format!("your change{what} waits while the person edits those items; it is applied, merged with their edit, when they finish."),
+        "rebased" => format!("your change{what} was applied after the person's edit, merged with it. Re-read the items if you depend on their exact state."),
+        "dropped" => format!("your change{what} was dropped because it no longer fit the person's edit. Re-read the items and decide again."),
+        "settings_conflict" => "the person and you changed the same board setting; theirs was kept.".to_string(),
+        other => format!("{other}{what}."),
+    };
+    format!("KiCad co-editing: {body}")
+}
+
+/// The published value for one notice.
+pub fn notice_value(pro: &str, seq: u64, d: &Value, title: &str, at: u64) -> Value {
+    let actor = d["actor"].as_str().unwrap_or("");
+    let agent = agent_label(actor, title);
+    json!({"project": pro, "seq": seq, "kind": d["kind"], "actor": actor, "agent": agent, "doc": d["doc"], "text": notice_text(d, &agent), "at": at})
+}
+
+/// ET_AGENT_NOTICE: publish it for the pane and the phones, and tell the agent's thread. Returns whether `ev` was one.
+pub fn on_notice(pro: &str, ev: &Value) -> bool {
+    if !is_notice(ev) { return false }
+    let Ok(d) = serde_json::from_str::<Value>(ev["detail"].as_str().unwrap_or("")) else { return true };
+    let Some(hub) = HUB.lock().unwrap().as_ref().and_then(Weak::upgrade) else { return true };
+    let pro = pro.to_string();
+    static SEQ: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = SEQ.fetch_add(1, std::sync::atomic::Ordering::SeqCst) + 1;
+    tokio::spawn(async move {
+        let actor = d["actor"].as_str().unwrap_or("").to_string();
+        let th = thread_of(&actor).map(String::from);
+        let ag = crate::agents::handle();
+        let title = match (&ag, &th) { (Some(a), Some(t)) => a.thread_title(t).await, _ => String::new() };
+        let v = notice_value(&pro, seq, &d, &title, crate::hub::now_ms());
+        hub.set_info(&format!("kicad.coedit.{}", super::kserve::digest(&pro)), &v.to_string()).await;
+        // the agent learns what happened to its change, in its own terms
+        if let (Some(a), Some(t)) = (ag, th) {
+            let _ = a.ride_note(&t, &format!("kicad-notice-{seq}"), &agent_text(&d)).await;
+        }
+    });
+    true
+}
+
 /// SetAgentActivity's message.
 pub fn activity(thread: &str, task: &str, state_: &str) -> Value { json!({"actor": client_name(&Who::Agent(thread)), "task": task, "state": state_}) }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn notices_read_as_sentences_for_the_person_and_the_agent() {
+        let d = json!({"kind": "undo_took_back", "actor": "agent:t7", "doc": "pcb",
+                       "details": json!({"seq": 9, "description": "Route USB", "because": "Move U3", "by": "person"}).to_string()});
+        let v = notice_value("/p/b.kicad_pro", 3, &d, "Route the USB pair", 1000);
+        assert_eq!(v["text"], "Your undo also took back Route the USB pair's change \u{201c}Route USB\u{201d} (it touched what \u{201c}Move U3\u{201d} changed).");
+        assert_eq!((v["seq"].clone(), v["kind"].clone(), v["actor"].clone(), v["agent"].clone(), v["at"].clone()), (json!(3), json!("undo_took_back"), json!("agent:t7"), json!("Route the USB pair"), json!(1000)));
+        assert!(agent_text(&d).starts_with("KiCad co-editing: the person's undo took back your change \u{201c}Route USB\u{201d}, because it touched what \u{201c}Move U3\u{201d} changed."), "{}", agent_text(&d));
+        assert!(is_notice(&json!({"type": 21})) && is_notice(&json!({"type": "ET_AGENT_NOTICE"})) && !is_notice(&json!({"type": 20})));
+        assert_eq!(notice_value("/p", 1, &json!({"kind": "deferred", "actor": "agent:t1"}), "", 0)["text"], "an agent's change waits until you finish editing those items, then merges with your edit.");
+    }
     #[test] fn client_names_say_who() {
         assert_eq!(client_name(&Who::Agent("t42")), "agent:t42");
         assert_eq!(thread_of(&client_name(&Who::Agent("t42"))), Some("t42"));

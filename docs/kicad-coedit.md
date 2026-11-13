@@ -48,3 +48,11 @@ person-originated schematic edit is not in their undo on bp.10 to bp.12.
 For a commit of item updates use `embed::commit_as(route, &client_name(&who), &doc, items, message)`: it sends BeginCommit,
 UpdateItems and EndCommit (CMA_DROP when the update fails) with the document's header on every call. KiCad routes a commit request
 without a header to the board editor, so a schematic EndCommit without one never ends the commit its BeginCommit opened.
+
+## Notices
+
+KiCad posts ET_AGENT_NOTICE (21) when something happens to an agent's change: the person's undo took it back (`undo_took_back`),
+it waited for the person's edit and was merged (`deferred`, `rebased`), it was dropped, or a board-setting merge kept the person's value
+(`settings_conflict`). The hub (`kicad/coedit.rs` `on_notice`) publishes it as info `kicad.coedit.<digest>`
+`{project, seq, kind, actor, agent, doc, text, at}` for the KiCad pane's strip and the phones (docs/PHONE-DATA.md), and hands the agent's
+thread a note in its own terms ("the person's undo took back your change …; re-read those items …"), read with its next tool result.
