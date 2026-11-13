@@ -103,11 +103,27 @@ pub fn gerber_findings(set: &str, places: &[(String, super::gerber::compare::Pla
     out
 }
 /// Every finding of a project: ERC, DRC, then the other sources in their order.
+/// Lane J's standing warning (a runtime without `drc-zone-guard`, a board with filled zones) while J's review has not set its own
+/// source: its finding, as J words it, so a zero-error DRC is never shown as clean. Once the review ran, its findings stand instead.
+fn trust(p: &Proj) -> Vec<Finding> {
+    use crate::review::stockdrc as sd;
+    if !p.guard.unguarded || p.ext.contains_key(sd::SOURCE) || !p.has("drc") { return vec![] }
+    let mut v = sd::findings(false, true, None).0;
+    fd::assign_ids(&mut v);
+    v
+}
+/// How many of the DRC-trust findings say the DRC cannot be trusted (they count against DRC's own chip and line).
+fn untrusted(p: &Proj) -> usize {
+    use crate::review::stockdrc as sd;
+    let ext = p.ext.get(sd::SOURCE).map(|e| e.findings.as_slice()).unwrap_or(&[]);
+    ext.iter().chain(trust(p).iter()).filter(|f| f.rule == sd::RULE_WARN).count()
+}
 fn all_findings(p: &Proj, only: &str) -> Vec<Finding> {
     let mut v: Vec<Finding> = vec![];
     if only.is_empty() || only == "erc" { v.extend(p.erc.findings.iter().cloned()) }
     if only.is_empty() || only == "drc" { v.extend(p.drc.findings.iter().cloned()) }
     for (id, _) in EXT_SOURCES.lock().unwrap().iter() { if only.is_empty() || only == id { if let Some(e) = p.ext.get(id) { v.extend(e.findings.iter().cloned()) } } }
+    if only.is_empty() || only == crate::review::stockdrc::SOURCE { v.extend(trust(p)) }
     v
 }
 
@@ -138,7 +154,10 @@ struct Src {
 #[derive(Clone, Default)]
 struct Ext { at: u64, findings: Vec<Finding>, counts: Counts, rev: String, meta: Value }
 #[derive(Default)]
-struct Proj { files: project::Files, drc: Src, erc: Src, asked: u64, loaded: bool, ext: BTreeMap<String, Ext> }
+struct Proj { files: project::Files, drc: Src, erc: Src, asked: u64, loaded: bool, ext: BTreeMap<String, Ext>, guard: Guard }
+/// Whether this runtime's DRC can be trusted on this board (review/stockdrc.rs): looked at again when the DRC result's revision changes.
+#[derive(Default)]
+struct Guard { rev: String, unguarded: bool }
 impl Proj {
     fn src(&mut self, s: &str) -> &mut Src { if s == "drc" { &mut self.drc } else { &mut self.erc } }
     fn has(&self, s: &str) -> bool { if s == "drc" { !self.files.pcb.is_empty() } else { !self.files.sch.is_empty() } }
@@ -248,11 +267,12 @@ fn load(hub: &Hub, pro: &str, p: &mut Proj) {
 fn src_json(p: &Proj, s: &str, now: u64) -> Value {
     let x = if s == "drc" { &p.drc } else { &p.erc };
     if !p.has(s) { return Value::Null }
+    let mut counts = x.counts; if s == "drc" { counts.warning += untrusted(p) }
     let st = state_word(x);
     let running = x.sched.running_since > 0;
     let reason = if st == "deferred" { x.deferred.trim_start_matches("deferred: ").to_string() } else { x.reason.clone() };
     json!({"state": st, "reason": reason, "running": running, "fraction": if running { fd::fraction(now.saturating_sub(x.sched.running_since), x.took) } else { -1.0 },
-        "counts": x.counts.to_json(), "at": x.at, "took_ms": x.took, "rev": x.sched.ran_rev, "has_result": x.had, "peak_mb": x.peak_mb, "full": x.full, "full_next": x.full_next, "ran_on": x.ran_on, "note": if x.full { "" } else { fd::LIBRARY_NOTE }})
+        "counts": counts.to_json(), "untrusted": s == "drc" && untrusted(p) > 0, "at": x.at, "took_ms": x.took, "rev": x.sched.ran_rev, "has_result": x.had, "peak_mb": x.peak_mb, "full": x.full, "full_next": x.full_next, "ran_on": x.ran_on, "note": if x.full { "" } else { fd::LIBRARY_NOTE }})
 }
 /// none (no result yet), running, deferred (a run waits for memory or another heavy KiCad job), fresh (the result is of the design on
 /// disk), stale (the design changed since), failed.
@@ -260,7 +280,8 @@ fn state_word(x: &Src) -> &'static str {
     if x.sched.running_since > 0 { "running" } else if !x.deferred.is_empty() { "deferred" } else if x.state == "failed" { "failed" } else if !x.had { "none" } else if x.sched.ran_rev != x.sched.disk_rev && !x.sched.disk_rev.is_empty() { "stale" } else { "fresh" }
 }
 fn summary(pro: &str, p: &Proj, now: u64) -> Value {
-    let pick = |s: &str| { let x = if s == "drc" { &p.drc } else { &p.erc }; p.has(s).then(|| (if x.state == "failed" && x.sched.running_since == 0 { "failed" } else { "ok" }, x.counts, x.had)) };
+    let pick = |s: &str| { let x = if s == "drc" { &p.drc } else { &p.erc }; let mut c = x.counts; if s == "drc" { c.warning += untrusted(p) }
+        p.has(s).then(|| (if x.state == "failed" && x.sched.running_since == 0 { "failed" } else { "ok" }, c, x.had)) };
     // the other sources, by id, in their order (`order`): stale once the design changed since their set
     let now_rev = format!("{}{}", p.erc.sched.disk_rev, p.drc.sched.disk_rev);
     let mut sources = serde_json::Map::new(); let mut order = vec![];
@@ -270,9 +291,24 @@ fn summary(pro: &str, p: &Proj, now: u64) -> Value {
         sources.insert(id.clone(), json!({"label": label, "state": if stale { "stale" } else { "fresh" }, "counts": e.counts.to_json(), "at": e.at, "rev": e.rev, "meta": e.meta, "judged": e.meta["judged"] == true}));
         order.push(id.clone());
     }
+    let t = trust(p);
+    if !t.is_empty() {
+        use crate::review::stockdrc as sd;
+        sources.insert(sd::SOURCE.into(), json!({"label": sd::LABEL, "state": "fresh", "counts": fd::counts(&t).to_json(), "at": p.drc.at, "rev": "", "meta": {"label": sd::LABEL}, "judged": false}));
+        order.push(sd::SOURCE.into());
+    }
     json!({"project": pro, "pcb": p.files.pcb, "sch": p.files.sch, "drc": src_json(p, "drc", now), "erc": src_json(p, "erc", now), "sources": sources, "order": order, "chip": fd::chip(pick("drc"), pick("erc"))})
 }
 async fn publish(hub: &Arc<Hub>, pro: &str) {
+    // the DRC's trust (the runtime's capability, the board's fills), once per DRC result
+    let look = with(pro, |p| (p.drc.had && p.guard.rev != p.drc.sched.ran_rev).then(|| (p.drc.sched.ran_rev.clone(), p.files.pcb.clone()))).flatten();
+    if let Some((rev, pcb)) = look {
+        let rt = ipc::runtime(hub).await;
+        let guarded = crate::review::stockdrc::guarded(&rt.caps, &rt.version);
+        let fills = guarded || tokio::task::spawn_blocking(move || std::fs::read_to_string(&pcb).map(|t| crate::review::stockdrc::has_fills(&t)).unwrap_or(false)).await.unwrap_or(false);
+        if let Some(p) = state().lock().unwrap().get_mut(pro) { p.guard = Guard { rev, unguarded: !guarded && fills } }
+        if !guarded && fills { use crate::review::stockdrc as sd; register_source(sd::SOURCE, sd::LABEL) }
+    }
     let (v, panel) = { let m = state().lock().unwrap(); match m.get(pro) { Some(p) => { let v = summary(pro, p, now_ms()); (v.clone(), panel_json(p, v)) } None => return } };
     hub.set_info(&info_key(pro), &v.to_string()).await;
     super::mgmt::publish(hub, "checks", pro, panel).await;
@@ -710,6 +746,27 @@ impl RpcHandler for ChecksRpc {
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// A runtime without drc-zone-guard on a board with fills: a clean DRC shows lane J's warning (as J words it) and is not "DRC ✓";
+    /// once J's review set its source, its findings stand instead (a second-opinion note leaves DRC clean).
+    #[test] fn an_unguarded_clean_drc_is_not_shown_clean() {
+        use crate::review::stockdrc as sd;
+        let mut p = Proj::default(); p.files.pcb = "b.kicad_pcb".into(); p.drc.had = true;
+        let chip = |p: &Proj| summary("x.kicad_pro", p, 0)["chip"].as_str().unwrap().to_string();
+        assert_eq!(chip(&p), "DRC ✓");
+        p.guard.unguarded = true;
+        let all = all_findings(&p, "");
+        assert_eq!(all.len(), 1); assert_eq!(all[0].title, sd::WARN); assert_eq!(all[0].source, sd::SOURCE); assert!(!all[0].id.is_empty());
+        assert_eq!(chip(&p), "DRC 1");
+        let v = summary("x.kicad_pro", &p, 0);
+        assert_eq!(v["drc"]["counts"]["warning"], 1); assert_eq!(v["drc"]["untrusted"], true); assert_eq!(v["sources"][sd::SOURCE]["label"], sd::LABEL);
+        // the review's own result: a note (stock ran, nothing more) leaves DRC clean, and nothing is added beside it
+        let (note, _) = sd::findings(false, true, Some(Ok(("10.0.8".into(), vec![]))));
+        p.ext.insert(sd::SOURCE.into(), Ext { findings: note, ..Default::default() });
+        assert!(trust(&p).is_empty()); assert_eq!(chip(&p), "DRC ✓");
+        let (warn, _) = sd::findings(false, true, None);
+        p.ext.insert(sd::SOURCE.into(), Ext { findings: warn, ..Default::default() });
+        assert!(trust(&p).is_empty()); assert_eq!(chip(&p), "DRC 1");
+    }
     #[test] fn revisions_follow_saves_of_any_sheet_and_ignore_copies() {
         let d = crate::plat::tmp::dir("checkrun");
         std::fs::create_dir_all(d.join("sheets")).unwrap(); std::fs::create_dir_all(d.join("backups")).unwrap();
