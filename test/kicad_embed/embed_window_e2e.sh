@@ -374,6 +374,10 @@ import json, os, sys
 out_dir, mode, warm_alive, closed_clean = sys.argv[1], sys.argv[2], int(sys.argv[3]), int(sys.argv[4])
 
 ok = fail = 0
+def wait_ms(r):
+    # a missing wait counts as slow; 0 ms (a client-only switch of a realized frame) is the fastest, not missing
+    v = r.get("wait_ms")
+    return 9999 if v is None else v
 def check(what, cond, detail=""):
     global ok, fail
     if cond:
@@ -643,9 +647,9 @@ else:
         (f_wsch.get("painted") or 0) > 15
         and (f_w3d.get("painted") or 0) > 15
         and (f_wpcb.get("painted") or 0) > 15
-        and (r_wsch.get("wait_ms") or 9999) < 250
-        and (r_w3d.get("wait_ms") or 9999) < 250
-        and (r_wpcb.get("wait_ms") or 9999) < 250,
+        and wait_ms(r_wsch) < 250
+        and wait_ms(r_w3d) < 250
+        and wait_ms(r_wpcb) < 250,
         {
             "cold_sch_ms": r_csch.get("wait_ms"),
             "cold_3d_ms": r_c3d.get("wait_ms"),
@@ -671,9 +675,9 @@ else:
             "After a real agent (agent:*) commit opens KiCad's Agents pane, switching tabs still repaints the PCB at once",
             agent_commit.get("ok") is True
             and (f_awpcb.get("painted") or 0) > 15
-            and (r_awsch.get("wait_ms") or 9999) < 250
-            and (r_aw3d.get("wait_ms") or 9999) < 250
-            and (r_awpcb.get("wait_ms") or 9999) < 250,
+            and wait_ms(r_awsch) < 250
+            and wait_ms(r_aw3d) < 250
+            and wait_ms(r_awpcb) < 250,
             {
                 "agent_commit": agent_commit,
                 "warm_sch_ms": r_awsch.get("wait_ms"),
