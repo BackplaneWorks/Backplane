@@ -136,6 +136,191 @@ mv "$runtime" "$dir"
 echo "Installed in $dir"
 "#;
 
+// ---- The fetch in Rust (Linux and macOS; Windows next): the same steps as SCRIPT, with no shell. The system's own downloader (curl, else wget;
+// %SystemRoot%\System32\curl.exe on Windows) and tar are the only programs started, through proc.rs; the digest, the SHA256SUMS line, the
+// archive's member names, links and the runtime's manifest are checked here. A lock folder with the hub's pid; a lock whose holder is gone (a hub
+// restarted mid-install) is taken over, its stage removed. Nothing is ever unpacked over an existing runtime; the last step is one rename.
+
+/// The downloader the fetch uses.
+#[derive(Debug, Clone, PartialEq)]
+pub enum Getter { Curl(PathBuf), Wget(PathBuf) }
+/// The programs the fetch starts.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Tools { pub get: Getter, pub tar: PathBuf }
+/// Where the fetch finds its programs: Windows' own System32 copies (curl.exe and tar.exe ship with Windows 10 1803 and later), elsewhere the
+/// first curl (else wget) and tar on `path` (the hub's PATH). Err says what is missing.
+pub fn tools_in(windows: bool, system_root: Option<&Path>, path: &[PathBuf]) -> Result<Tools, String> {
+    if windows {
+        let s = system_root.map(|r| r.join("System32")).ok_or("SystemRoot is not set")?;
+        let (curl, tar) = (s.join("curl.exe"), s.join("tar.exe"));
+        if !curl.is_file() || !tar.is_file() { return Err(format!("Windows' own curl.exe and tar.exe were not found in {}", s.display())) }
+        return Ok(Tools { get: Getter::Curl(curl), tar })
+    }
+    let find = |n: &str| path.iter().map(|d| d.join(n)).find(|f| f.is_file());
+    let get = find("curl").map(Getter::Curl).or_else(|| find("wget").map(Getter::Wget)).ok_or("curl or wget is needed to download KiCad, and neither was found")?;
+    let tar = find("tar").ok_or("tar is needed to unpack KiCad and was not found")?;
+    Ok(Tools { get, tar })
+}
+pub fn tools() -> Result<Tools, String> {
+    let path: Vec<PathBuf> = std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).filter(|d| !d.as_os_str().is_empty()).collect();
+    tools_in(cfg!(windows), std::env::var_os("SystemRoot").map(PathBuf::from).as_deref(), &path)
+}
+/// The arguments for one download of `url` into `to`, resuming what a cut earlier try left there and retrying cut connections itself.
+pub fn get_args(g: &Getter, url: &str, to: &Path) -> Vec<String> {
+    let to = to.to_string_lossy().into_owned();
+    match g {
+        Getter::Curl(_) => ["--proto", "=https", "--tlsv1.2", "-fsSL", "--retry", "3", "--retry-delay", "2", "--retry-connrefused", "-C", "-", "-o", &to, url].iter().map(|s| s.to_string()).collect(),
+        Getter::Wget(_) => ["-q", "--https-only", "-c", "--tries=3", "--waitretry=2", "-O", &to, url].iter().map(|s| s.to_string()).collect(),
+    }
+}
+/// The package's fields as SCRIPT checks them (they come only from the catalog, but a pin is a one-line change and is checked here too).
+pub fn check_package(p: &Package) -> Result<(), String> {
+    if p.version.is_empty() || !p.version.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-') { return Err("Invalid runtime version".into()) }
+    if p.release != format!("backplane-kicad-v{}", p.version) { return Err("Invalid runtime release".into()) }
+    if p.asset != format!("backplane-kicad-{}-{}.{}", p.platform, p.version, p.format) { return Err("Invalid runtime archive".into()) }
+    if p.sha256.len() != 64 || !p.sha256.chars().all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)) { return Err("Invalid pinned digest".into()) }
+    if !matches!((p.platform, p.format), ("linux-x86_64" | "darwin-arm64", "tar.gz") | ("windows-x86_64", "zip")) { return Err("No published Backplane KiCad package for this hub platform".into()) }
+    Ok(())
+}
+/// The digest SHA256SUMS lists for `asset` ("<hex>  <name>", the name maybe after `*` or `./`).
+pub fn sum_for(sums: &str, asset: &str) -> Option<String> {
+    sums.lines().find_map(|l| { let mut it = l.split_whitespace(); let (h, f) = (it.next()?, it.next()?); let f = f.trim_start_matches('*').trim_start_matches("./"); (f == asset).then(|| h.to_ascii_lowercase()) })
+}
+/// Every member of the archive under `root`, none climbing out (`..`, an absolute path, a drive, a backslash path).
+pub fn members_ok(list: &str, root: &str) -> Result<(), String> {
+    let mut n = 0;
+    for m in list.lines().map(str::trim_end).filter(|m| !m.is_empty()) {
+        let m = m.strip_prefix("./").unwrap_or(m);
+        if m.starts_with('/') || m.contains('\\') || m.contains(':') || m.split('/').any(|c| c == ".." || c == ".") { return Err("Unsafe runtime archive path".into()) }
+        if m.trim_end_matches('/') != root && !m.starts_with(&format!("{root}/")) { return Err("Unexpected runtime archive root".into()) }
+        n += 1;
+    }
+    if n == 0 { Err("The KiCad archive is empty".into()) } else { Ok(()) }
+}
+/// Every link under `dir` points inside `inside` (a link out of the runtime would let a later write land elsewhere).
+pub fn links_inside(dir: &Path, inside: &Path) -> Result<(), String> {
+    let inside = inside.canonicalize().map_err(|e| e.to_string())?;
+    let mut todo = vec![dir.to_path_buf()];
+    while let Some(d) = todo.pop() {
+        for e in std::fs::read_dir(&d).map_err(|e| e.to_string())?.flatten() {
+            let (p, t) = (e.path(), e.file_type().map_err(|e| e.to_string())?);
+            if t.is_symlink() {
+                let target = std::fs::read_link(&p).map_err(|e| e.to_string())?;
+                // the link's target as a path, resolved lexically from the link's folder (it need not exist)
+                let mut at = if target.is_absolute() { PathBuf::new() } else { d.canonicalize().map_err(|e| e.to_string())? };
+                for c in target.components() { match c { std::path::Component::ParentDir => { at.pop(); } std::path::Component::CurDir => {} c => at.push(c) } }
+                if !at.starts_with(&inside) { return Err(format!("Unsafe link in the KiCad archive: {}", p.strip_prefix(dir).unwrap_or(&p).display())) }
+            } else if t.is_dir() { todo.push(p) }
+        }
+    }
+    Ok(())
+}
+/// The runtime's manifest says this version and platform.
+pub fn manifest_ok(text: &str, p: &Package) -> Result<(), String> {
+    let m: serde_json::Value = serde_json::from_str(text).map_err(|_| "KiCad manifest is not JSON".to_string())?;
+    if m["version"] != p.version { return Err("KiCad manifest version mismatch".into()) }
+    if m["platform"] != p.platform { return Err("KiCad manifest platform mismatch".into()) }
+    Ok(())
+}
+fn sha256_file(f: &Path) -> Result<String, String> {
+    use sha2::{Digest, Sha256};
+    let mut h = Sha256::new(); let mut r = std::fs::File::open(f).map_err(|e| e.to_string())?; let mut b = vec![0u8; 1 << 20];
+    loop { let n = std::io::Read::read(&mut r, &mut b).map_err(|e| e.to_string())?; if n == 0 { break } h.update(&b[..n]) }
+    Ok(hex::encode(h.finalize()))
+}
+/// One program to its end (through proc.rs, in its own group, its output into the log); Err with its last line when it fails.
+async fn tool(prog: &Path, args: &[String], log: &Path, mut tick: impl FnMut()) -> Result<String, String> {
+    let out = std::fs::OpenOptions::new().create(true).append(true).open(log).map_err(|e| e.to_string())?;
+    let err = out.try_clone().map_err(|e| e.to_string())?;
+    let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Net, prog);
+    c.args(args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::from(err));
+    crate::plat::proc::own_group_tokio(&mut c);
+    let mut child = c.spawn().map_err(|e| format!("could not start {}: {e}", prog.display()))?;
+    let mut so = child.stdout.take();
+    let read = tokio::spawn(async move { let mut s = String::new(); if let Some(o) = so.as_mut() { let _ = tokio::io::AsyncReadExt::read_to_string(o, &mut s).await; } s });
+    let status = loop { match tokio::time::timeout(std::time::Duration::from_secs(1), child.wait()).await { Ok(r) => break r.map_err(|e| e.to_string())?, Err(_) => tick() } };
+    let text = read.await.unwrap_or_default(); drop(out);
+    if status.success() { Ok(text) } else { Err(last_line(&std::fs::read_to_string(log).unwrap_or_default())) }
+}
+/// The lock folder: `<parent>/.install-<version>.lock` holding the hub's pid. Dropping it removes the stage and the lock.
+struct Held { lock: PathBuf, stage: Option<PathBuf> }
+impl Drop for Held { fn drop(&mut self) { if let Some(s) = &self.stage { let _ = std::fs::remove_dir_all(s); } let _ = std::fs::remove_dir_all(&self.lock); } }
+fn take_lock(parent: &Path, version: &str) -> Result<Held, String> {
+    let lock = parent.join(format!(".install-{version}.lock"));
+    for _ in 0..2 {
+        match std::fs::create_dir(&lock) {
+            Ok(()) => { let _ = std::fs::write(lock.join("pid"), std::process::id().to_string()); return Ok(Held { lock, stage: None }) }
+            Err(_) => {
+                // a holder that is gone (a hub restarted mid-install, or 0.14's script) leaves its lock: take it over with its stage
+                let pid: u32 = std::fs::read_to_string(lock.join("pid")).ok().and_then(|s| s.trim().parse().ok()).unwrap_or(0);
+                if pid != 0 && crate::plat::proc::alive(pid) { return Err("Another KiCad installation is active; retry when it finishes".into()) }
+                if pid == 0 && std::fs::metadata(&lock).and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).map_or(false, |a| a.as_secs() < 3600) { return Err("Another KiCad installation is active; retry when it finishes".into()) }
+                for e in std::fs::read_dir(parent).into_iter().flatten().flatten() { let n = e.file_name().to_string_lossy().into_owned(); if n.starts_with(".install-") && !n.ends_with(".lock") && e.path().is_dir() { let _ = std::fs::remove_dir_all(e.path()); } }
+                let _ = std::fs::remove_dir_all(&lock);
+            }
+        }
+    }
+    Err("Another KiCad installation is active; retry when it finishes".into())
+}
+/// The fetch, step by step; each step's words go to `step` and the log, as SCRIPT's lines did. Ok(the installed folder).
+pub async fn fetch(t: &Tools, base: &str, parent: &Path, p: &Package, log: &Path, step: &mut impl FnMut(String)) -> Result<PathBuf, String> {
+    check_package(p)?;
+    let say = |step: &mut dyn FnMut(String), s: String| { if let Ok(mut f) = std::fs::OpenOptions::new().create(true).append(true).open(log) { let _ = std::io::Write::write_all(&mut f, format!("{s}\n").as_bytes()); } step(s) };
+    let dir = parent.join(p.version);
+    if dir.exists() || dir.symlink_metadata().is_ok() { return Err(format!("{} already exists; the installation there is kept. Set its path in Settings, CAD, or remove it and try again", dir.display())) }
+    std::fs::create_dir_all(parent).map_err(|e| format!("Could not make {}: {e}", parent.display()))?;
+    let mut held = take_lock(parent, p.version)?;
+    let stage = parent.join(format!(".install-{}-{}", std::process::id(), std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos())));
+    std::fs::create_dir(&stage).map_err(|e| e.to_string())?; held.stage = Some(stage.clone());
+    #[cfg(unix)] { use std::os::unix::fs::PermissionsExt; let _ = std::fs::set_permissions(&stage, std::fs::Permissions::from_mode(0o700)); }
+    let (pkg, sums) = (stage.join(p.asset), stage.join("SUMS"));
+    let gp = match &t.get { Getter::Curl(x) | Getter::Wget(x) => x.clone() };
+    say(step, format!("Downloading {}", p.asset));
+    let url = format!("{base}{}", p.asset);
+    let mut last = std::time::Instant::now();
+    let mut progress = |step: &mut dyn FnMut(String)| { if last.elapsed().as_secs() >= 2 { last = std::time::Instant::now(); let mb = std::fs::metadata(&pkg).map_or(0, |m| m.len()) >> 20; say(step, format!("Downloading {}: {mb} MB", p.asset)) } };
+    let mut ok = Err(String::new());
+    for _ in 0..3 { ok = tool(&gp, &get_args(&t.get, &url, &pkg), log, || progress(step)).await; if ok.is_ok() { break } tokio::time::sleep(std::time::Duration::from_secs(2)).await }
+    ok.map_err(|_| format!("Could not download {url}"))?;
+    tool(&gp, &get_args(&t.get, &format!("{base}SHA256SUMS"), &sums), log, || {}).await.map_err(|_| format!("Could not download {base}SHA256SUMS"))?;
+    say(step, "Checking the checksum".into());
+    let want = sum_for(&std::fs::read_to_string(&sums).unwrap_or_default(), p.asset).unwrap_or_default();
+    let pk = pkg.clone(); let got = tokio::task::spawn_blocking(move || sha256_file(&pk)).await.map_err(|e| e.to_string())??;
+    if want != got || got != p.sha256 { return Err("KiCad archive checksum mismatch".into()) }
+    let mut magic = [0u8; 4]; let _ = std::io::Read::read(&mut std::fs::File::open(&pkg).map_err(|e| e.to_string())?, &mut magic);
+    let fmt_ok = match p.format { "tar.gz" => magic[..3] == [0x1f, 0x8b, 0x08], "zip" => magic == [0x50, 0x4b, 0x03, 0x04], _ => false };
+    if !fmt_ok { return Err("KiCad archive header does not match its platform format".into()) }
+    say(step, "Unpacking".into());
+    let root = format!("backplane-kicad-{}-{}", p.platform, p.version);
+    let (list, x) = if p.format == "zip" { ("-tf", "-xf") } else { ("-tzf", "-xzf") };
+    let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+    let members = tool(&t.tar, &s(&[list, &pkg.to_string_lossy()]), log, || {}).await.map_err(|e| format!("Could not read the KiCad archive: {e}"))?;
+    members_ok(&members, &root)?;
+    let unpack = stage.join("unpack"); std::fs::create_dir(&unpack).map_err(|e| e.to_string())?;
+    tool(&t.tar, &s(&[x, &pkg.to_string_lossy(), "-C", &unpack.to_string_lossy()]), log, || {}).await.map_err(|e| format!("Could not unpack KiCad: {e}"))?;
+    let runtime = unpack.join(&root);
+    links_inside(&unpack, &runtime)?;
+    let cli = runtime.join(p.cli);
+    let has = |f: &Path| std::fs::metadata(f).map_or(false, |m| m.is_file() && m.len() > 0);
+    if !cli.is_file() || !has(&runtime.join("manifest.json")) || !has(&runtime.join("share/backplane/api.desc")) { return Err("KiCad archive runtime layout is incomplete".into()) }
+    if p.platform == "windows-x86_64" {
+        let mut mz = [0u8; 2]; let _ = std::io::Read::read(&mut std::fs::File::open(&cli).map_err(|e| e.to_string())?, &mut mz);
+        if mz != *b"MZ" { return Err("Windows KiCad CLI is not a PE executable".into()) }
+    } else {
+        #[cfg(unix)] { use std::os::unix::fs::PermissionsExt; if std::fs::metadata(&cli).map_or(0, |m| m.permissions().mode()) & 0o111 == 0 { return Err("KiCad launcher is not executable".into()) } }
+    }
+    manifest_ok(&std::fs::read_to_string(runtime.join("manifest.json")).unwrap_or_default(), p)?;
+    if dir.exists() || dir.symlink_metadata().is_ok() { return Err("Runtime destination appeared; existing installation preserved".into()) }
+    std::fs::rename(&runtime, &dir).map_err(|e| format!("Could not move KiCad into {}: {e}", dir.display()))?;
+    say(step, format!("Installed in {}", dir.display()));
+    drop(held);
+    Ok(dir)
+}
+/// Where the fetch downloads from (the script's base).
+pub fn base_url(p: &Package) -> String { format!("https://{FROM}/releases/download/{}/", p.release) }
+/// The systems that use the fetch in Rust; the rest still run SCRIPT (Windows, until its bare gate has proved the fetch there).
+pub fn rust_fetch() -> bool { !cfg!(windows) }
+
 /// The installer's arguments (the script's $1..$8).
 pub fn args(parent: &Path, p: &Package) -> Vec<String> {
     [parent.to_string_lossy().as_ref(), p.platform, p.version, p.release, p.asset, p.sha256, p.format, p.cli].iter().map(|s| s.to_string()).collect()
@@ -189,6 +374,11 @@ pub fn last_line(text: &str) -> String { text.lines().rev().map(str::trim).find(
 /// `step` hears each new last line while it runs. Ok(the installed folder) or Err(why, the installer's own last words).
 pub async fn run(standin: Option<&Path>, parent: &Path, p: &Package, log: &Path, mut step: impl FnMut(String)) -> Result<String, String> {
     std::fs::create_dir_all(parent).map_err(|e| format!("could not make {}: {e}", parent.display()))?;
+    if standin.is_none() && rust_fetch() {
+        let _ = std::fs::write(log, "");
+        let t = tools()?;
+        return fetch(&t, &base_url(p), parent, p, log, &mut step).await.map(|d| d.to_string_lossy().into_owned());
+    }
     let out = std::fs::File::create(log).map_err(|e| format!("could not write {}: {e}", log.display()))?;
     let err = out.try_clone().map_err(|e| e.to_string())?;
     // Net: it downloads (a copy of the log runs none)
@@ -376,6 +566,77 @@ f={serve}/$(basename \"$1\")
 cp \"$f\" \"$out\"
 ", r.display())); }
         b
+    }
+    // ---- the fetch in Rust ----
+    #[cfg(unix)] fn sysdirs(bin: &Path) -> Vec<PathBuf> { vec![bin.to_path_buf(), "/usr/bin".into(), "/bin".into()] }
+    #[cfg(unix)] fn fetch_run(r: &Path, p: &Package, dirs: &[PathBuf]) -> (Result<PathBuf, String>, Vec<String>) {
+        let t = match tools_in(false, None, dirs) { Ok(t) => t, Err(e) => return (Err(e), vec![]) };
+        let mut steps = vec![];
+        let got = rt().block_on(fetch(&t, "https://x/r/", &r.join("home/kicad"), p, &r.join("log"), &mut |l| steps.push(l)));
+        (got, steps)
+    }
+    #[cfg(unix)] #[test] fn the_rust_fetch_installs_a_checked_package_and_says_each_step() {
+        let r = tmp("rf-ok"); let (p, bin) = fixture(&r, false);
+        let (got, steps) = fetch_run(&r, &p, &sysdirs(&bin));
+        let parent = r.join("home/kicad");
+        assert_eq!(got, Ok(parent.join("0.0.1-bp.1")));
+        assert_eq!(steps.iter().filter(|s| !s.contains(": ")).cloned().collect::<Vec<_>>(), [format!("Downloading {}", p.asset), "Checking the checksum".into(), "Unpacking".into(), format!("Installed in {}/0.0.1-bp.1", parent.display())]);
+        assert!(parent.join("0.0.1-bp.1/bin/kicad-cli").is_file());
+        let left: Vec<_> = std::fs::read_dir(&parent).unwrap().flatten().map(|e| e.file_name()).collect(); assert_eq!(left.len(), 1, "no stage or lock is left: {left:?}");
+        assert_eq!(crate::files::kicad::ipc::read_runtime(&parent.join("0.0.1-bp.1/bin/kicad-cli")).version, "0.0.1-bp.1");
+        let (again, _) = fetch_run(&r, &p, &sysdirs(&bin)); assert!(again.unwrap_err().contains("already exists; the installation there is kept"));
+        assert!(std::fs::read_to_string(r.join("log")).unwrap().contains("Checking the checksum"), "the steps are in the log as before");
+    }
+    #[cfg(unix)] #[test] fn the_rust_fetch_refuses_a_wrong_digest_or_manifest_and_leaves_nothing() {
+        let r = tmp("rf-bad"); let (mut p, bin) = fixture(&r, false); p.sha256 = "0000000000000000000000000000000000000000000000000000000000000000";
+        let (got, _) = fetch_run(&r, &p, &sysdirs(&bin)); assert_eq!(got, Err("KiCad archive checksum mismatch".into()));
+        assert_eq!(std::fs::read_dir(r.join("home/kicad")).unwrap().count(), 0, "the stage and the lock are gone");
+        let r = tmp("rf-man"); let (p, bin) = fixture(&r, true);
+        let (got, _) = fetch_run(&r, &p, &sysdirs(&bin)); assert_eq!(got, Err("KiCad manifest version mismatch".into()));
+        assert!(!r.join("home/kicad/0.0.1-bp.1").exists());
+    }
+    #[cfg(unix)] #[test] fn the_rust_fetch_downloads_with_wget_without_curl_and_says_what_is_missing() {
+        let r = tmp("rf-wget"); let (p, bin) = fixture(&r, false);
+        let w = no_curl(&r, &bin, true); let (got, _) = fetch_run(&r, &p, &[w]); assert!(got.is_ok(), "{got:?}");
+        let a = std::fs::read_to_string(r.join("wget.args")).unwrap(); assert!(a.lines().all(|l| l.starts_with("-q --https-only -c ")), "resumes: {a}");
+        let n = no_curl(&r, &bin, false); assert_eq!(tools_in(false, None, &[n]).unwrap_err(), "curl or wget is needed to download KiCad, and neither was found");
+    }
+    #[test] fn a_download_resumes_and_retries() {
+        let a = get_args(&Getter::Curl("/c".into()), "https://h/f", Path::new("/t/f")).join(" ");
+        assert!(a.contains("-C - ") && a.contains("--retry 3") && a.contains("--proto =https") && a.ends_with("-o /t/f https://h/f"), "{a}");
+        assert_eq!(get_args(&Getter::Wget("/w".into()), "https://h/f", Path::new("/t/f")).join(" "), "-q --https-only -c --tries=3 --waitretry=2 -O /t/f https://h/f");
+    }
+    #[test] fn windows_uses_its_own_curl_and_tar() {
+        let r = tmp("rf-win"); let s = r.join("System32"); std::fs::create_dir_all(&s).unwrap();
+        assert!(tools_in(true, Some(&r), &[]).unwrap_err().contains("curl.exe and tar.exe were not found"));
+        for f in ["curl.exe", "tar.exe"] { std::fs::write(s.join(f), "").unwrap() }
+        assert_eq!(tools_in(true, Some(&r), &[PathBuf::from("/elsewhere")]), Ok(Tools { get: Getter::Curl(s.join("curl.exe")), tar: s.join("tar.exe") }));
+        assert_eq!(tools_in(true, None, &[]).unwrap_err(), "SystemRoot is not set");
+    }
+    #[test] fn the_sums_line_and_the_members_are_read_here() {
+        assert_eq!(sum_for("abc  other.tgz\nDEF *./a.tar.gz\n", "a.tar.gz").as_deref(), Some("def"));
+        assert_eq!(sum_for("abc  a.tar.gz.sig\n", "a.tar.gz"), None);
+        assert_eq!(members_ok("r/\nr/bin/x\n./r/lib/y\n", "r"), Ok(()));
+        for (bad, why) in [("r/../etc/x", "Unsafe"), ("/r/x", "Unsafe"), ("r\\..\\x", "Unsafe"), ("C:/r/x", "Unsafe"), ("other/x", "Unexpected"), ("rr/x", "Unexpected"), ("r/./x", "Unsafe")] {
+            assert!(members_ok(&format!("r/\n{bad}\n"), "r").unwrap_err().starts_with(why), "{bad}");
+        }
+        assert!(members_ok("", "r").is_err());
+        for p in [&LINUX, &MAC, &WINDOWS] { assert_eq!(check_package(p), Ok(()), "{}", p.version) }
+    }
+    #[cfg(unix)] #[test] fn a_link_out_of_the_runtime_is_refused() {
+        let r = tmp("rf-link"); let rt_ = r.join("u/root"); std::fs::create_dir_all(rt_.join("lib")).unwrap();
+        std::os::unix::fs::symlink("libx.so.1", rt_.join("lib/libx.so")).unwrap(); std::os::unix::fs::symlink("lib", rt_.join("bin")).unwrap(); std::os::unix::fs::symlink("../lib/libx.so.1", rt_.join("lib/up")).unwrap();
+        assert_eq!(links_inside(&r.join("u"), &rt_), Ok(()));
+        std::os::unix::fs::symlink("../../../etc", rt_.join("lib/out")).unwrap();
+        assert!(links_inside(&r.join("u"), &rt_).unwrap_err().starts_with("Unsafe link"));
+    }
+    #[cfg(unix)] #[test] fn a_lock_left_by_a_gone_hub_is_taken_over_and_a_live_one_is_not() {
+        let r = tmp("rf-lock"); let parent = r.join("k"); let lock = parent.join(".install-1.lock"); std::fs::create_dir_all(&lock).unwrap();
+        std::fs::write(lock.join("pid"), std::process::id().to_string()).unwrap();
+        assert!(take_lock(&parent, "1").err().unwrap().starts_with("Another KiCad installation is active"));
+        std::fs::write(lock.join("pid"), "999999999").unwrap(); std::fs::create_dir_all(parent.join(".install-old")).unwrap();
+        let h = take_lock(&parent, "1").expect("a dead holder's lock is taken over");
+        assert!(!parent.join(".install-old").exists(), "its stage is gone"); drop(h); assert!(!lock.exists());
     }
     #[cfg(unix)] #[test] fn with_no_curl_the_script_downloads_with_wget_and_with_neither_says_so() {
         let r = tmp("wget"); let (p, bin) = fixture(&r, false); let parent = r.join("home/kicad");
