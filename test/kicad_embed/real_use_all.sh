@@ -13,7 +13,7 @@ one() {
   [ -d "$ROOT/src-$bn" ] || stage_board "$bs" "$ROOT/src-$bn"
   echo "=== $bn on $rn"
   OUT="$ROOT/$bn-$rn" EMBED_MODE=fork BACKPLANE_KICAD_BIN="$rk" BACKPLANE_KICAD_CLI="$(dirname "$rk")/kicad-cli" KEMBED_PROJ_SRC="$ROOT/src-$bn" \
-    timeout 1500 "$HERE/real_use_journeys.sh" >"$ROOT/$bn-$rn.log" 2>&1
+    timeout --foreground 1500 "$HERE/real_use_journeys.sh" >"$ROOT/$bn-$rn.log" 2>&1
   echo "rc=$?" >>"$ROOT/$bn-$rn.log"
   grep -h "^PERF\|^DIALOG\|^INFO\|^FAIL\|^DIAG\|rc=" "$ROOT/$bn-$rn.log"
 }
