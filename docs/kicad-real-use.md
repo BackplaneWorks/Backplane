@@ -223,3 +223,27 @@ before and after, so a drag that missed its handle is reported, not timed as one
 
 Also on bp.13: "File Open Warning" ("Project ... is already open by 'h' at 'desktop'") on Edit in 2 of 5 Hubble runs and 1 Collar run (KiCad
 waits on it; the hub reports "waiting on dialog: File Open Warning").
+
+## bp.13 batch 3 (c53b5e0800, builds/10.99.0-bp.13-c53b5e0800), client/hub 1862e060d pinned, 2026-11-13
+
+`KEMBED_RUNTIMES=bp13 REAL_HARDWARE=1 test/kicad_embed/real_use_all.sh` in an 8 GB scope; both boards, every journey, plan copies.
+No strict miss. A run on the 03:3x client builds (f8f74b981, b64ecc48f) is void: their X-wake thread spun the client's main thread
+(fixed by 82c67d16a), so no tab, thread or reopen click took effect (bp.12 the same).
+
+| measure | Collar | Hubble_DK | budget |
+|---|---|---|---|
+| reopen (warm) | 85 / 19 / 29 ms, 0 blank | 89 / 23 / 30 ms, 0 blank | 300 |
+| later tab switch | 12-57 ms, 0 blank | 15-54 ms, 0 blank | 50 |
+| first 3D | 1235 ms, 1 blank | 15 ms (prewarmed) | 50 |
+| thread back (sidebar) | 60-72 ms | 64-74 ms | 50 |
+| pan / zoom 10 s p99 | 19.5 / 18.1 | 14.6 / 17.9 | 25 |
+| comment window / posted | 9 / 55 ms | 10 / 61 ms | 100 / 300 |
+| in-editor DRC / ERC (RunChecks) | 132 / 47 ms | 491 / 122 ms | 30 s |
+| pan during in-editor DRC | p50 33, 64 frames > 50 ms | p50 49, 55 > 50 ms | 0 |
+| host markers set -> on screen | 22 ms | 22 ms | 100 |
+| Ctrl+E -> footprint editor | (click missed U1) | 760 ms, floating first | 1000 |
+| GerbView shown -> hidden again | after 118 ms | after 117 ms | stays |
+| plan: Ctrl+Shift+R, no canvas click | nothing | nothing | toggles |
+| plan: key after a click x10 / toolbar x10 | 10/10, 15-38 ms / 10/10, 86-130 ms | 10/10, 27-38 ms / 10/10, 80-153 ms | 100 |
+| plan vertex drag p99 | 37 / 35 ms, 1-2 > 50 | (missed the handle) | 16.7 |
+| KiCad RSS, editors up | 4.17 GB | 4.23 GB | ~1.7 |
