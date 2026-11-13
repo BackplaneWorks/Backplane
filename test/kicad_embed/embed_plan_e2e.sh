@@ -36,7 +36,7 @@ wait_for_log "$OUT/client.log" '"name":"edit_ready","event":"mark"' 480 || { ech
 N=0
 # one agent tool call: a message to the seeded thread t1 that the stand-in turns into the MCP call; its answer from the stand-in's log
 ask() {
-  N=$((N + 1)); local before; before=$(grep -c "^MCPCALL" "$OUT/standin.log" 2>/dev/null || echo 0)
+  local N; N="$1-$(date +%s%N)"; local before;  # a fresh message id each call (this runs in a $(...) subshell: a counter would not move) before=$(grep -c "^MCPCALL" "$OUT/standin.log" 2>/dev/null || echo 0)
   local text; text=$(python3 -c 'import json,sys; print(json.dumps("mcpcall:" + json.dumps({"name": sys.argv[1], "arguments": json.loads(sys.argv[2])})))' "$1" "$2")
   hub_rpc "[{\"method\":\"turn.start\",\"params\":{\"thread\":\"t1\",\"text\":$text,\"msg\":\"mplan$N\"}}]" >>"$OUT/rpc.log" 2>&1 || true
   for _ in $(seq 240); do [ "$(grep -c "^MCPCALL" "$OUT/standin.log" 2>/dev/null || echo 0)" -gt "$before" ] && break; sleep 0.25; done
