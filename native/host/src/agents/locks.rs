@@ -226,7 +226,14 @@ impl Agents {
     /// At start, and every TICK after. What the log says is the truth: a restart with a holder and waiters goes on from it.
     pub fn locks_start(self: &Arc<Self>) {
         if crate::copy::on() { return }
-        let me = self.clone(); tokio::spawn(async move { me.locks_extend().await; loop { me.locks_tick().await; tokio::time::sleep(TICK).await } });
+        let me = self.clone(); tokio::spawn(async move {
+            me.locks_extend().await;
+            loop {
+                if !me.lock_tick_manual.load(std::sync::atomic::Ordering::SeqCst) { me.locks_tick().await }
+                me.lock_ticks.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                tokio::time::sleep(TICK).await
+            }
+        });
     }
 }
 

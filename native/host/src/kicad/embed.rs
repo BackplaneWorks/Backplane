@@ -2063,6 +2063,7 @@ fn spawn_fork_events_loop(me: mpsc::UnboundedSender<Msg>, pro: String, gen: u64,
                         super::xprobe::kicad_selected(&pro, ev); continue
                     }
                     if super::coedit::on_edited(&pro, ev) { continue }
+                    if super::coedit::on_notice(&pro, ev) { continue }
                     if super::reload::on_event(&pro, ev) { need_sync = true; continue }
                     if super::comment::on_event(&pro, ev) { continue }
                     if super::progress::on_event(&pro, ev) { continue }

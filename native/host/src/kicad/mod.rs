@@ -64,6 +64,7 @@ pub fn start(hub: &Arc<Hub>) {
     reload::start(hub);
     comment::start(hub);
     progress::start(hub);
+    coedit::start(hub);
     checkrun::start(hub);
     mgmt::start(hub);
     bompanel::start(hub);

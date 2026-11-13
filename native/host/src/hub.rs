@@ -542,11 +542,11 @@ impl Hub {
         }
     }
     pub fn info_frame(&self) -> Value { let mut i = serde_json::Map::new(); i.insert("pair".into(), json!("")); i.insert("pair.qr".into(), json!("")); for (k, v) in self.extra_info.lock().unwrap().iter() { i.insert(k.clone(), json!(v)); } json!({"t":"info","info":Value::Object(i)}) }
-    /// Live module info keys (`hub.offer`, `editor.kicad.*`, `kicad.checks.*`, `browser.tabs.*`) for a joining `view=1` client, without `pair`/`pair.qr` or startup environment noise.
+    /// Live module info keys (`hub.offer`, `editor.kicad.*`, `kicad.checks.*`, `kicad.coedit.*`, `browser.tabs.*`) for a joining `view=1` client, without `pair`/`pair.qr` or startup environment noise.
     pub fn view_info_frame(&self) -> Option<Value> {
         let mut i = serde_json::Map::new();
         for (k, v) in self.extra_info.lock().unwrap().iter() {
-            if !v.is_empty() && (k == "hub.offer" || k.starts_with("editor.kicad.") || k.starts_with("kicad.reload.") || k.starts_with("kicad.sel.") || k.starts_with("kicad.progress.") || k.starts_with("kicad.checks.") || k.starts_with("browser.tabs.")) {
+            if !v.is_empty() && (k == "hub.offer" || k.starts_with("editor.kicad.") || k.starts_with("kicad.reload.") || k.starts_with("kicad.sel.") || k.starts_with("kicad.coedit.") || k.starts_with("kicad.progress.") || k.starts_with("kicad.checks.") || k.starts_with("browser.tabs.")) {
                 i.insert(k.clone(), json!(v));
             }
         }
