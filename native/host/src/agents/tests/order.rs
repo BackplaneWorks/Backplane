@@ -349,3 +349,21 @@ async fn quoted_rig(name: &str, pilot: bool) -> (super::lost::Rig, Shared) {
     }
     r.ag.shutdown();
 }
+#[tokio::test(flavor = "multi_thread")] async fn the_judged_review_hands_the_evidence_and_keeps_the_answer_apart() {
+    let r = rig("or-judged", "result", SESSION_OK).await; let dir = cwd(&r.ag).await;
+    r.ag.add_tools(std::sync::Arc::new(crate::review::Tools(r.hub.clone()))); // main.rs registers them; the rig does not
+    assert!(names(&r.ag).await.contains(&"design_review_judged".to_string()));
+    std::fs::write(dir.join("a.kicad_pro"), "{}").unwrap();
+    std::fs::write(dir.join("a.kicad_sch"), "(kicad_sch\n\t(lib_symbols\n\t\t(symbol \"lib:LDO\"\n\t\t\t(property \"Datasheet\" \"https://x/ldo.pdf\")\n\t\t\t(symbol \"LDO_1_1\"\n\t\t\t\t(pin power_in line\n\t\t\t\t\t(name \"VIN\")\n\t\t\t\t\t(number \"1\")\n\t\t\t\t)\n\t\t\t)\n\t\t)\n\t)\n\t(symbol\n\t\t(lib_id \"lib:LDO\")\n\t\t(at 10 10 0)\n\t\t(unit 1)\n\t\t(property \"Reference\" \"U1\")\n\t\t(property \"Value\" \"LDO\")\n\t\t(property \"Footprint\" \"x:SOT-23-5\")\n\t\t(property \"MPN\" \"AP2112K\")\n\t)\n)\n").unwrap();
+    std::fs::write(dir.join("a.kicad_pcb"), "(kicad_pcb\n\t(footprint \"x:SOT-23-5\"\n\t\t(layer \"F.Cu\")\n\t\t(property \"Reference\" \"U1\"\n\t\t)\n\t\t(pad \"1\" smd rect (at -0.95 1.1) (size 0.6 1))\n\t\t(pad \"2\" smd rect (at 0 1.1) (size 0.6 1))\n\t)\n)\n").unwrap();
+    let (ok, t) = call(&r.ag, "design_review", json!({"scope": "judged"})).await; assert!(ok, "{t}");
+    let ev: Value = serde_json::from_str(&t).unwrap();
+    assert_eq!(ev["parts"][0]["reference"], "U1", "{ev}"); assert_eq!(ev["parts"][0]["datasheet"], "https://x/ldo.pdf"); assert!(ev["how"].as_str().unwrap().contains("never guess"));
+    let (ok, t) = call(&r.ag, "design_review_judged", json!({"findings": [{"reference": "U1", "pin": "1", "severity": "must change", "title": "pin 1 is GND in the datasheet", "page": "p. 2, Figure 1", "confidence": 0.8}], "checked": ["U1"]})).await; assert!(ok, "{t}");
+    let run: Value = serde_json::from_str(&std::fs::read_to_string(dir.join(".backplane/design-review.json")).unwrap()).unwrap();
+    assert_eq!(run["judged"]["findings"][0]["source"], "judged"); assert!(run["findings"].as_array().unwrap().iter().all(|f| f["source"] != "judged"), "never mixed into the deterministic findings");
+    assert!(std::fs::read_to_string(dir.join(".backplane/review.md")).unwrap().contains("## Agent-judged (datasheets)"));
+    assert!(crate::review::must_lines(&run, 8).iter().any(|l| l.contains("pin 1 is GND")), "a judged must-change reaches the order's issues");
+    let (ok, _) = call(&r.ag, "design_review_judged", json!({"findings": [{"reference": "U1", "title": "x"}], "checked": []})).await; assert!(!ok, "no page, no finding");
+    r.ag.shutdown();
+}

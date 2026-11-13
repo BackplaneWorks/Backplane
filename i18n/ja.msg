@@ -4237,6 +4237,7 @@ gpui.mgmt.fab.reviewing = 設計をレビューしています…
 gpui.mgmt.fab.noreview = 設計レビューはまだありません
 gpui.mgmt.fab.findings = 指摘
 gpui.mgmt.fab.reviewbtn = レビュー
+gpui.mgmt.fab.judge = データシート
 gpui.mgmt.fab.review = レビュー：必須{must}・推奨{should}・メモ{notes}
 gpui.mgmt.fab.stackup = 層構成 {id}、外層50 Ωの線幅 {w} mm
 gpui.mgmt.fab.proposed = 提案：
