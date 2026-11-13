@@ -156,7 +156,7 @@ fn paint_lit(window: &mut Window, p: &super::plot::Pick, v: &View, o: Point<Pixe
 /// `slot` is the camera this canvas drives: 0 the Board/Schematic page, 1 and 2 a Split's schematic and board panes (`Screens::pv`).
 pub fn canvas_el(cx: &mut Context<Backplane>, slot: usize, focus: Option<FocusHandle>, light: bool, frame: &Frame, view: Option<View>, masks: crate::viewers::layers::Masks) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
-    let chunks = frame.chunks.clone();
+    let chunks = frame.chunks.clone(); let fkey = frame.key.clone();
     // the hub's masks decide which chunks are drawn, dimmed, and which one is painted last
     let order = crate::viewers::layers::plan(&chunks.iter().map(|c| c.layer).collect::<Vec<_>>(), &masks);
     let this = cx.entity();
@@ -189,7 +189,8 @@ pub fn canvas_el(cx: &mut Context<Backplane>, slot: usize, focus: Option<FocusHa
             this.update(cx, |app, _| { let pv = &mut app.screens.pv(slot); if pv.paint_ms.len() >= 4096 { pv.paint_ms.remove(0); } pv.paint_ms.push(ms); if pv.split.len() >= 4096 { pv.split.remove(0); } pv.split.push(sp); });
         }
         // click to the first painted plot: what the person feels (the metric the gate asks for)
-        this.update(cx, |app, _| { if let Some(t) = app.screens.plot_click.take() { app.m("plot_painted", serde_json::json!({"ms": (t.elapsed().as_secs_f64() * 1e6).round() / 1e3, "chunks": chunks.len()})); } });
+        // (a paint of the plot that was on show at the press is not it: the press asked for another)
+        this.update(cx, |app, _| { if app.screens.plot_click.as_ref().map_or(false, |c| c.1 != fkey) { let (t, _) = app.screens.plot_click.take().unwrap(); app.m("plot_painted", serde_json::json!({"ms": (t.elapsed().as_secs_f64() * 1e6).round() / 1e3, "key": fkey.clone(), "chunks": chunks.len()})); } });
     }).size_full();
     div().id(SharedString::from(format!("plot-{slot}"))).flex_1().min_h_0().bg(c("view")).child(el)
         .when_some(focus, |d, f| d.track_focus(&f).key_context("Viewer Plot").on_key_down(cx.listener(move |this, e: &KeyDownEvent, _, cx| {

@@ -367,8 +367,13 @@ pub fn pro_of(path: &str) -> String {
     if !crate::plat::fs::is_abs(path) { return String::new() }
     let path = super::canonical::route(path);
     if path.ends_with(".kicad_pro") { return path }
-    if Path::new(&path).is_dir() { return project::read(&super::canonical::design_root(&path)).pro }
-    Path::new(&path).parent().map(|d| project::read(&d.to_string_lossy()).pro).unwrap_or_default()
+    let here = if Path::new(&path).is_dir() { project::read(&super::canonical::design_root(&path)).pro } else { Path::new(&path).parent().map(|d| project::read(&d.to_string_lossy()).pro).unwrap_or_default() };
+    if !here.is_empty() { return here }
+    // fab output (mfg/<board>/gerber/...: kicad/gerber) is its project's: the folders above it, three at most
+    if super::gerber::is_set_path(Path::new(&path)) {
+        for d in Path::new(&path).ancestors().skip(1).take(4) { let p = project::read(&d.to_string_lossy()).pro; if !p.is_empty() { return p } }
+    }
+    String::new()
 }
 /// A listed KiCad read (`Get*`, `Ping`): the commands a copy may run and a writer lock never gates.
 pub fn is_read(type_: &str) -> bool {
@@ -522,6 +527,15 @@ mod tests {
     #[test] fn err_words() {
         assert_eq!(err_of(&json!({"status":"AS_BAD_REQUEST","error":"nope"})), "KiCad answered AS_BAD_REQUEST: nope"); assert_eq!(err_of(&json!({})), "KiCad did not answer"); assert_eq!(err_of(&json!({"error":"x"})), "x");
         assert_eq!(failed("w")["fallback"], json!(true));
+    }
+    #[test] fn fab_output_is_its_projects() {
+        let d = crate::plat::tmp::dir("pro-fab"); std::fs::create_dir_all(d.join("mfg/b/gerber")).unwrap();
+        std::fs::write(d.join("b.kicad_pro"), "{}").unwrap(); std::fs::write(d.join("mfg/b/gerber/b-F_Cu.gtl"), "x").unwrap();
+        let want = d.join("b.kicad_pro").to_string_lossy().into_owned();
+        assert_eq!(pro_of(&d.join("mfg/b/gerber").to_string_lossy()), want);
+        assert_eq!(pro_of(&d.join("mfg/b/gerber/b-F_Cu.gtl").to_string_lossy()), want);
+        assert_eq!(pro_of(&d.join("mfg/b").to_string_lossy()), "", "a folder with no fab files is no set");
+        let _ = std::fs::remove_dir_all(&d);
     }
     #[test] fn pro_paths() { assert_eq!(pro_of("/p/a.kicad_pro"), "/p/a.kicad_pro"); assert_eq!(pro_of("a.kicad_pro"), ""); }
 

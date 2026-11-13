@@ -6,4 +6,5 @@
 /// The folder watcher needs the hub; the audit has none, so its calls do nothing.
 pub mod watch_dir { pub fn touch(_root: &str, _dir: &str, _sig: u64) {} pub fn signature(_listing: &str) -> u64 { 0 } }
 /// The audit reads no project folders: a thread's design is shown from the folder it names.
-pub mod kicad { pub mod canonical { pub fn design_root(root: &str) -> String { root.to_string() } } }
+pub mod kicad { pub mod canonical { pub fn design_root(root: &str) -> String { root.to_string() } } pub mod gerber { pub use super::super::gerber_names::*; } }
+#[path="../kicad/gerber/names.rs"] #[allow(dead_code)] pub mod gerber_names;

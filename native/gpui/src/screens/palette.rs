@@ -85,7 +85,7 @@ pub fn items(data: &Value) -> Vec<Item> {
             if label.is_empty() || action.is_empty() || action == "delete" || t["options"].as_array().map_or(false, |o| !o.is_empty()) { continue }
             v.push(Item { label: trs(&label), place: String::new(), kind: "action", what: Do::Action(action, value), row: Value::Null });
         }
-        /* i18n-ok: viewer kinds, drawn through trs in the label */ for (l, k) in [("Board", "board"), ("Schematic", "schematic"), ("3D", "3d"), ("Split", "split"), ("Mech", "mech"), ("Files", "files"), ("Review", "review"), ("Browser", "browser")] {
+        /* i18n-ok: viewer kinds, drawn through trs in the label */ for (l, k) in [("Board", "board"), ("Schematic", "schematic"), ("3D", "3d"), ("Gerbers", "gerbers"), ("Split", "split"), ("Mech", "mech"), ("Files", "files"), ("Review", "review"), ("Browser", "browser")] {
             v.push(Item { label: tf("gpui.palette.open", &[("kind", trs(l).into())]), place: trs("viewer"), kind: "action", what: Do::Action("view-kind".into(), k.into()), row: Value::Null });
         }
     }

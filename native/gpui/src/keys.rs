@@ -329,7 +329,7 @@ impl Backplane {
         let opens = matches!(&cmd, Command::Action(_, k) if !k.is_empty());
         if opens { if let Some(p) = self.screens.kicad.clone() { p.update(cx, |p, cx| p.set_open(v, cx)); } }
         self.screens.rail_pending = Some(if opens { v.to_string() } else { String::new() }); self.screens.rail_at = Some(std::time::Instant::now());
-        self.screens.plot_click = (opens && matches!(v, "board" | "schematic")).then(std::time::Instant::now);
+        let shown = self.screens.plot.frame.as_ref().map(|f| f.key.clone()).unwrap_or_default(); self.screens.plot_click = (opens && matches!(v, "board" | "schematic" | "gerbers")).then(|| (std::time::Instant::now(), shown));
         cmd
     }
     /// A bare key does nothing while something covers the page.

@@ -17,6 +17,7 @@
 #[path = "../kicad/plot.rs"] mod plot;
 #[path = "../kicad/plotgen.rs"] mod plotgen;
 #[path = "../kicad/plotread.rs"] mod plotread;
+#[path = "../kicad/gerber/mod.rs"] mod gerber;
 #[path = "../kicad/glb.rs"] mod glb;
 #[path = "../kicad/mesh.rs"] mod mesh;
 #[path = "../kicad/png.rs"] mod png;
