@@ -614,6 +614,31 @@ def run(h):
             h.check("F5: Edit, then the pre-warm with no input: the PCB canvas keeps the keys (F2 acts by the zoom readout)",
                     bool(pw) and after["inside_frame"] and bool(zoomed), d)
             return h.finish()
+        if only == "idle_prewarm_tab":
+            # Lane B's idle pre-warm (46343fe7e): Edit, 10 s with no input (pre-warm starts by itself), then the first
+            # editor-tab click and the first canvas hotkey: the keys must be the shown editor's, the hidden schematic untouched.
+            gls = [w for w in children if w["visible"] and w["class"] == "wxGLCanvas"]
+            gl = max(gls, key=lambda w: w["w"] * w["h"]) if gls else None
+            top = E.find_main_window(cp.pid)
+            time.sleep(10)
+            before = focus_snapshot(frame)
+            pw = prewarm_frames(top)
+            h.click_control(top, "kicad-tab:PCB")
+            time.sleep(0.6)
+            after = focus_snapshot(frame)
+            if after["foreground"]:
+                after["foreground_title"] = window_title(after["foreground"])
+                after["foreground_class"] = E.hwnd_class(after["foreground"])
+            fg = foreground_never_lost(400)
+            px, zoomed = plain_key_acts(h, gl, "idle_prewarm_tab", frame) if gl else (0, False)
+            hidden = sorted(set(w["title"] for w in kicad_toplevels() + E.list_child_windows(top) if "Schematic Editor" in (w.get("title") or "")))
+            stray = [l.strip() for l in open(h.p("client.log"), encoding="utf-8", errors="replace") if "kicad_stray_foreground" in l]
+            d = {"before_click": before, "prewarmed_seen": [(w["hwnd"], w["title"]) for w in pw], "after_click": after, **fg,
+                 "zoom_readout_changed": zoomed, "hidden_schematic_titles": hidden, "guard_fired": stray}
+            print("DIAG idle_prewarm_tab " + json.dumps(d)[:2000], flush=True)
+            h.check("Idle pre-warm, then first tab click and first hotkey: the shown editor gets the keys (F2 by the readout), hidden schematic untouched",
+                    after["inside_frame"] and bool(zoomed) and fg["no_foreground_samples"] == 0 and not any(t.lstrip().startswith("*") for t in hidden), d)
+            return h.finish()
         if only == "f6":
             return f6_check(h, cp, frame, children, timeline, pid)
         if only == "mouse_return":
