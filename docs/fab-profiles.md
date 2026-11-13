@@ -10,6 +10,10 @@ A profile is one fab's capabilities, `schema` 1, with a `rev` that goes up with 
 - `pages`: each page or API it is read from, `{url, fetched, etag?, sha256?}`.
 - `kinds`: per board kind (`pcb`, `flex`, `hdi`, `aluminum`, `copper_core`, `rogers`, `ptfe`, catalog.py's words) a list of values. A
   kind whose page lists only what differs `inherits` the rest from another kind (the rigid page's), and those values say `inherited`.
+  For the fab Backplane orders from, `rogers` and `ptfe` inherit every manufacturing limit from the rigid page on purpose: that page
+  lists "RF PCB: 1 oz copper, 2-layer RF PCBs with Rogers and PTFE cores" among its board types and gives them only their own sizes
+  (590 x 438 mm, 3 x 3 mm); its track, drill and ring tables cover them. Its `rf-pcb-capabilities` and
+  `high-frequency-pcb-capabilities` addresses serve the same page (checked 2026-11-13), so there is no other page to read.
 - every value: `{key, value, unit, cost, when, page, source, fetched, confidence, note, preferred?}`.
   - `cost`: `free` is what the fab makes at its base price, `extra` what it makes for more (the manufacturing review says "costs more",
     never "error", for a design between the two).
