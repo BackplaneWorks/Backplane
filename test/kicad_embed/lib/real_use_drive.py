@@ -100,6 +100,8 @@ def xfocus():
         cur = par.value
     x.XCloseDisplay.argtypes = [vp]; x.XCloseDisplay(d)
     return out
+FK = {1: "PCB", 2: "SCH", 3: "SYM", 4: "FP", 5: "PCB_3D", 6: "OTHER", 7: "GERBVIEW"}
+def kframes(): return {FK.get(f["kind"], str(f["kind"])): f for f in ipc("frames", SOCK).get("frames", [])}
 def shot(name): sh("import", "-window", "root", os.path.join(OUT, "shots", f"{name}.png"), timeout=20)
 # --- dialogs: KiCad windows that are neither an editor frame nor embedded: recorded, then Return
 STOP = threading.Event(); KNOWN = set(); PAUSE = threading.Event()  # PAUSE: a journey opens KiCad's dialogs on purpose
@@ -674,9 +676,7 @@ if "textkeys" in JOURNEYS and SOCK:
 # 7b. editors (bp.13 batch 2 on): the footprint editor opened from the board as a person does (a footprint clicked, Ctrl+E), then KiCad's
 # own footprint-editor action; GerbView in KiCad's process on the board's Gerbers (OpenGerbers: hidden as a prewarm, then shown over the
 # pane, as a host would; the PCB editor has no GerbView command of its own). What appears where, how long it takes, and what the client shows.
-FK = {1: "PCB", 2: "SCH", 3: "SYM", 4: "FP", 5: "PCB_3D", 6: "OTHER", 7: "GERBVIEW"}
 ET_NAMES = {9: "ET_SHOW_REQUESTED", 25: "ET_EDITOR_REQUESTED"}
-def kframes(): return {FK.get(f["kind"], str(f["kind"])): f for f in ipc("frames", SOCK).get("frames", [])}
 def kicad_tops():  # KiCad top-level windows a person can see (not the pane's own frame): a floating editor, a dialog
     return [w for w in windows() if w.get("shown") and "kicad" in w.get("wm_class", "").lower() and w["w"] > 100 and w["h"] > 100
             and not (abs(w["root_x"] - PANE["x"]) < 40 and abs(w["root_y"] - PANE["y"]) < 60)
