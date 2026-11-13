@@ -24,7 +24,7 @@ B() { boat --no-update "$@"; }
 # every box this run made, and only those, are deleted at the end ($OUT/boxes)
 gone() { [ -f "$OUT/boxes" ] || return 0; for id in $(sort -u "$OUT/boxes"); do case $id in bx_[a-z0-9]*) ;; *) continue;; esac   # never an empty id: `boat delete` alone deletes the current sandbox
   [ -n "$KEEP" ] && [ "$id" = "${GATE:-}" ] && { echo "kept gate box $id (boat delete $id)"; continue; }; B delete "$id" --yes >/dev/null 2>&1 && echo "deleted box $id" || echo "bare-gate: could not delete $id: boat delete $id --yes" >&2; done; }
-trap gone EXIT; trap "exit 130" INT TERM HUP   # a stop runs the EXIT trap too: no box is left
+trap '[ -n "${PULLER:-}" ] && kill "$PULLER" 2>/dev/null; gone' EXIT; trap "exit 130" INT TERM HUP   # a stop runs the EXIT trap too: no box is left
 newbox() { # name, extra args -> id
   local j id; j=$(B new --name "$1" --environment bp-build --no-env --no-snapshots --type "${BARE_BOAT_TYPE:-large}" --ttl 10800 --json "${@:2}" 2>&1 | tail -1)
   id=$(printf '%s' "$j" | python3 -c 'import json,sys;print(json.load(sys.stdin)["id"])' 2>/dev/null) || { echo "bare-gate: could not make a box: $j" >&2; return 1; }
@@ -63,9 +63,14 @@ if [ $SRC = commit ]; then
   B scp "$OUT/archive/backplane-$TAGC-linux-x64-native.tar.gz" "$GATE:gate/" >/dev/null && B scp "$OUT/archive/install.sh" "$GATE:gate/" >/dev/null || exit 1
   ENV="IMAGE=$IMAGE SOURCE=archive ARCHIVE=\$HOME/gate/backplane-$TAGC-linux-x64-native.tar.gz INSTALLER=\$HOME/gate/install.sh"
 fi
+# the box's run folder comes here as the run goes (every minute, and once at the end): a restart of this machine costs the last minute,
+# not the run (rerun 5 lost all its logs to one)
+pull() { B ssh "$GATE" -- 'cd ~/run 2>/dev/null && tar -czf - --exclude=home --exclude=standins --exclude=projects .' 2>/dev/null | tar -xzf - -C "$OUT" 2>/dev/null; }
+( while sleep "${BARE_PULL_S:-60}"; do pull; done ) & PULLER=$!
 timeout "${BARE_TIMEOUT:-3600}" python3 scripts/boat-run.py "$GATE" "cd ~/gate && env $ENV bash test/bare/journey.sh ~/run" 2>&1 | tee "$OUT/journey.log"
+kill "$PULLER" 2>/dev/null; wait "$PULLER" 2>/dev/null
 RC=${PIPESTATUS[0]}
-B ssh "$GATE" -- 'cd ~/run && tar -czf - --exclude=home --exclude=standins --exclude=projects .' | tar -xzf - -C "$OUT" 2>/dev/null
+pull
 
 echo; echo "== timings ($IMAGE, $SRC${SHA:+ $SHA})"
 [ -n "${BUILD_S:-}" ] && printf '  %-28s %8s s\n' build-on-boat "$BUILD_S"

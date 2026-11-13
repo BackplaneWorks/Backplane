@@ -23,7 +23,11 @@ in_box() { docker exec -i "$C" "$@"; }
 as_person() { docker exec -i -u person -w $PH -e HOME=$PH "$C" "$@"; }
 # every X call is bounded: a client that holds a grab (or a stuck server) cost a whole run once (46 min in rerun 3); a timeout is a FAIL
 # that says which step and what the box's processes were doing (xstuck)
-STEP=start; phase() { STEP=$*; printf '%s\t%s\n' "$(date +%s%3N)" "$*" >>"$OUT/phases.tsv"; echo "STEP $(python3 -c "import time;print(round(time.time()-$T0))") $*"; }
+STEP=start; phase() { rss "end of: $STEP"; STEP=$*; printf '%s\t%s\n' "$(date +%s%3N)" "$*" >>"$OUT/phases.tsv"; echo "STEP $(python3 -c "import time;print(round(time.time()-$T0))") $*"; }
+# resident memory (KB) of the client, the hub and KiCad at each phase boundary: a client once grew to 45 GB on the person's machine
+# (OOM-killed, 2026-11-13); the box's processes from the host side, by name, summed per program
+rss() { local t; t=$(docker exec "$C" ps -eo rss=,comm= 2>/dev/null | awk '{k=$2} k~/^backplane-gpui/{g+=$1} k~/^backplane-hub/{h+=$1} k~/^kicad/{c+=$1} END{printf "%d\t%d\t%d", g, h, c}')
+  [ -n "$t" ] && printf '%s\t%s\t%s\n' "$(date +%s)" "$t" "$1" >>"$OUT/rss.tsv"; return 0; }
 # What it captures, for lane B's grab probe: does a fresh X client get an answer (no: a server grab, held by the one X client that is not
 # waiting on its X socket); was the Backplane client still logging; each X client's state and stack from the host (the container gives
 # no ptrace: host pids from docker top, /proc as root, eu-stack or gdb), Xvfb's too.
@@ -247,6 +251,22 @@ for d in "$HH"/compat-saved/* "$HH"/compat-demos/*; do [ -d "$d" ] || continue; 
   for x in fork stock fork-on-export result.json downgrade-report.json fork.log stock.log; do [ -e "$d/$x" ] && cp -r "$d/$x" "$n/"; done; done
 for f in "$HUBH/hub.log" "$HH/win.log" "$HH/standin.log" "$HH/coedit.json.argv" "$HUBH/kicad/.install.log"; do [ -f "$f" ] && cp "$f" "$OUT/logs/" 2>/dev/null; done
 
+# --- memory: the samples, the peak of each program, growth from the first sample; over RSS_MAX_GB (8) is a FAIL (the bound tightens from the runs)
+rss "end of: $STEP"
+if [ -s "$OUT/rss.tsv" ]; then
+  RS=$(python3 - "$OUT/rss.tsv" "${RSS_MAX_GB:-8}" <<'PYR'
+import sys
+rows = [l.rstrip("\n").split("\t") for l in open(sys.argv[1]) if l.count("\t") >= 4]
+lim = float(sys.argv[2]) * 1024 * 1024
+for name, i in (("client", 1), ("hub", 2), ("kicad", 3)):
+    v = [(int(r[i]), r[4]) for r in rows if r[i].isdigit() and int(r[i]) > 0]
+    if not v: print(f"NONE {name}"); continue
+    pk = max(v); print(f"{'OVER' if pk[0] > lim else 'PEAK'} {name} {pk[0]//1024} MB at '{pk[1]}', first {v[0][0]//1024} MB, last {v[-1][0]//1024} MB, {len(v)} samples")
+PYR
+)
+  echo "$RS" | sed 's/^/  rss: /'; cp "$OUT/rss.tsv" "$OUT/logs/" 2>/dev/null
+  while read -r k rest; do case $k in OVER) bad "memory: $rest (over ${RSS_MAX_GB:-8} GB)";; PEAK) tm "rss-peak-${rest%% *}-mb" "$(echo "$rest" | awk '{print $2}')";; esac; done <<<"$RS"
+fi
 # --- the client's main thread never held (lane C's stall, fixed at 82c67d16a): BACKPLANE_GPUI_LOOPTRACE logs every main-loop step over
 # 50 ms (a task, an X batch, a frame) and a 100 ms timer waking over 50 ms late, each with its time; the gate fails on a step over 500 ms
 # or a timer over 1 s late (the Boat's software rendering is slower than a desktop), naming the journey's phase it fell in
