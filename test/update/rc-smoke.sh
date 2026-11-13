@@ -38,7 +38,9 @@ py - "$H/events.jsonl" "$T/proj" <<'PY'
 import json, sys, time
 now = int(time.time()); out, proj = sys.argv[1], sys.argv[2]
 ev = [{"$": "ProjectCreated", "id": "p1", "title": "smoke", "root": proj, "at": now},
-      {"$": "ThreadCreated", "id": "t1", "project": "p1", "title": "browser", "env": "local", "branch": "", "worktree": "", "provider": "claude", "model": "", "at": now}]
+      {"$": "ThreadCreated", "id": "t1", "project": "p1", "title": "browser", "env": "local", "branch": "", "worktree": "", "provider": "claude", "model": "", "at": now},
+      # pinned: since the sidebar's sections (61e75c8d4) an idle thread is not listed, so there was no thread:t1 to click and no Browser tab to open
+      {"$": "ThreadPinned", "id": "t1", "pinned": True, "at": now}]
 # setup done (or the window opens on the first-run steps and never shows the thread), and no carrying on of turns
 ev += [{"$": "SettingSet", "key": k, "value": v, "at": now} for k, v in (("onboard.done", "1"), ("onboard.uber", "1"), ("restart.continue", "off"))]
 open(out, "w").write("".join(json.dumps(e, separators=(",", ":")) + "\n" for e in ev))
