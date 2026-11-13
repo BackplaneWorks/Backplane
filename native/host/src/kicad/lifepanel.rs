@@ -34,8 +34,13 @@ pub fn bom_series(lines: &[(String, u64)], hist: &HashMap<String, Vec<Value>>, b
     let mut days: Vec<u64> = hist.values().flatten().filter_map(|s| s["at"].as_u64()).map(|a| a / DAY * DAY).collect();
     days.sort(); days.dedup();
     let (mut cost, mut instock) = (vec![], vec![]);
+    // a day counts once every line that has a price now had one by then: before that the sum would be some lines' only (the fab's
+    // recorded stock changes reach back months for parts that ran low, but carry no price), and the graphs would climb for no reason
+    let priced = lines.iter().filter(|(k, _)| hist.get(k).map_or(false, |v| v.iter().any(|s| s["price"].is_f64()))).count();
     for d in days {
         let end = d + DAY;
+        let known = lines.iter().filter(|(k, _)| hist.get(k).map_or(false, |v| v.iter().any(|s| s["price"].is_f64() && s["at"].as_u64().map_or(false, |a| a < end)))).count();
+        if priced == 0 || known < priced { continue }
         let (mut c, mut n, mut any) = (0.0, 0u64, false);
         for (k, q) in lines {
             let before = |f: &str| hist.get(k).and_then(|v| v.iter().rev().find(|s| s["at"].as_u64().map_or(false, |a| a < end) && !s[f].is_null()).cloned());
@@ -179,10 +184,8 @@ mod tests {
         h.insert("mpn:B".to_string(), vec![s(DAY * 11 + 9, 50, 1.0)]);
         h.get_mut("mpn:A").unwrap().push(json!({"at": DAY * 12 + 1, "stock": 30, "source": "fab_history"}));
         let (cost, instock) = bom_series(&[("mpn:A".into(), 2), ("mpn:B".into(), 1)], &h, 1);
-        assert_eq!((cost[2], instock[2]), ((DAY * 12, 1.24), (DAY * 12, 2)), "a fab history day keeps the last price and counts its stock");
-        let (cost, instock) = (cost[..2].to_vec(), instock[..2].to_vec());
-        assert_eq!(cost, vec![(DAY * 10, 0.2), (DAY * 11, 1.24)]);
-        assert_eq!(instock, vec![(DAY * 10, 1), (DAY * 11, 1)], "A dropped below the 2 a board needs on day 11; B arrived");
+        assert_eq!(cost, vec![(DAY * 11, 1.24), (DAY * 12, 1.24)], "from the day every priced line had a price; a fab history day keeps the last price");
+        assert_eq!(instock, vec![(DAY * 11, 1), (DAY * 12, 2)], "A dropped below the 2 a board needs on day 11, back on 12");
     }
     #[test] fn the_panels_data() {
         let mut h = HashMap::new();

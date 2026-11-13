@@ -30,16 +30,17 @@ for ref, mpn in (("R1", "E2E-FILE"), ("C1", "E2E-LIVE"), ("C2", "E2E-LOW")):
 open(p, "w", encoding="utf-8").write(s)
 PY
 git -C "$OUT/proj" commit -qam "MPNs for the stock stand-in" 2>/dev/null || true
-# three earlier days of R1's part in the history store, so the graphs have a line to draw (the store is the hub's own, under its home)
+# three earlier days of the three parts in the history store, so the graphs have a line to draw (the store is the hub's own, under its home)
 python3 - "$OUT/home/parts/history" <<'PY'
 import json, os, sys, time
 d = sys.argv[1]; os.makedirs(d, exist_ok=True)
-key = "mpn:E2E-FILE"; h = 0xcbf29ce484222325
-for b in key.encode(): h = ((h ^ b) * 0x100000001b3) & 0xFFFFFFFFFFFFFFFF
 now = int(time.time())
-with open(os.path.join(d, f"{h:016x}.jsonl"), "w") as f:
-    for i, (stock, price) in enumerate([(7000, 0.012), (6200, 0.011), (5600, 0.010)]):
-        f.write(json.dumps({"at": now - (3 - i) * 86400, "key": key, "stock": stock, "class": "basic", "price": price, "breaks": [[1, price]], "lifecycle": "", "fab": "C1001", "model": "E2E-FILE"}) + "\n")
+for key, fab, rows in (("mpn:E2E-FILE", "C1001", [(7000, 0.012), (6200, 0.011), (5600, 0.010)]), ("mpn:E2E-LIVE", "C1002", [(40, 1.3), (12, 1.25), (0, 1.2)]), ("mpn:E2E-LOW", "C1003", [(9, 0.6), (5, 0.55), (3, 0.5)])):
+    h = 0xcbf29ce484222325
+    for b in key.encode(): h = ((h ^ b) * 0x100000001b3) & 0xFFFFFFFFFFFFFFFF
+    with open(os.path.join(d, f"{h:016x}.jsonl"), "w") as f:
+        for i, (stock, price) in enumerate(rows):
+            f.write(json.dumps({"at": now - (3 - i) * 86400, "key": key, "stock": stock, "class": "basic", "price": price, "breaks": [[1, price]], "lifecycle": "", "fab": fab, "model": key[4:]}) + "\n")
 PY
 export BACKPLANE_PARTS_LIFE_GAP_S=3 BACKPLANE_PARTS_GAP_MS=500
 STUB_PORT=$(free_port)
