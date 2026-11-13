@@ -265,6 +265,7 @@ impl KicadPane {
     /// The hub's `editor.kicad.<digest>` for this project changed.
     pub fn set_info(&mut self, info: Value, cx: &mut Context<Self>) {
         if info == self.info { return }
+        let was_tab = self.tab(); let mut cause = String::from("hub info"); // i18n-ok: a debug log cause (BACKPLANE_KICAD_DEBUG)
         if info["pid"] != self.info["pid"] { self.ever_shown.clear(); }
         // shown once, or realized (bp.9: KiCad says the client may map it itself, e.g. a pre-warmed editor): the client's to map
         for f in info["frames"].as_array().into_iter().flatten().filter(|f| f["shown"] == true || f["realized"] == true) { if let Some(x) = f["xid"].as_u64() { if !self.ever_shown.contains(&x) { self.ever_shown.push(x); } } }
@@ -274,7 +275,7 @@ impl KicadPane {
         }
         if info["pid"] != self.info["pid"] {
             let had_pid = !self.info["pid"].is_null();
-            self.poked = None; self.unmapped_since = None; self.kept = 0; self.placed = None; self.override_kind = None;
+            self.poked = None; self.unmapped_since = None; self.kept = 0; self.placed = None; self.override_kind = None; cause = format!("hub info: KiCad pid {} -> {}", self.info["pid"], info["pid"]); // i18n-ok: a debug log cause (BACKPLANE_KICAD_DEBUG)
             if had_pid { self.pending_show = None; }
         }
         if matches!(info["state"].as_str(), Some("failed" | "stopped")) { self.pending_show = None; }
@@ -283,6 +284,7 @@ impl KicadPane {
                 self.pending_show = None;
             } else if self.pending_show.is_none() && Some(act) != self.info["active"].as_str() {
                 self.override_kind = (act != frame_for(&self.open)).then(|| act.to_string());
+                cause = format!("hub info active {} -> {act} (KiCad's active frame)", self.info["active"]); // i18n-ok: a debug log cause (BACKPLANE_KICAD_DEBUG)
             }
         }
         if info["mode"] == "fork" && self.info["mode"] != "fork" { if let Some(c) = self.container { nc::grab_click(c, false); } }
@@ -291,6 +293,7 @@ impl KicadPane {
             self.placed = None; self.unmapped_since = None;
         }
         self.info = info;
+        self.note_tab(&was_tab, &cause);
         cx.notify();
     }
     pub fn matches(&self, info: &Value) -> bool {
@@ -307,11 +310,15 @@ impl KicadPane {
     }
     pub fn sync_hub_open(&mut self, hub_open: &str, pressed_open: Option<&str>, cx: &mut Context<Self>) {
         if let Some(next) = hub_open_step(&self.open, &mut self.last_hub_open, hub_open, pressed_open).map(str::to_string) {
-            self.set_open(&next, cx);
+            self.set_open_by(&next, "hub open (sync_hub_open)", cx); // i18n-ok: a debug log cause (BACKPLANE_KICAD_DEBUG)
         }
     }
     /// The rail moved to another page: show its editor (the hub opens it when KiCad has not yet).
-    pub fn set_open(&mut self, open: &str, cx: &mut Context<Self>) {
+    pub fn set_open(&mut self, open: &str, cx: &mut Context<Self>) { self.set_open_by(open, "rail page (set_open)", cx) } // i18n-ok: a debug log cause (BACKPLANE_KICAD_DEBUG)
+    pub fn set_open_by(&mut self, open: &str, cause: &str, cx: &mut Context<Self>) {
+        let was_tab = self.tab(); self.set_open_inner(open, cx); self.note_tab(&was_tab, cause);
+    }
+    fn set_open_inner(&mut self, open: &str, cx: &mut Context<Self>) {
         if self.open == open && self.override_kind.is_none() { return }
         self.open = open.to_string();
         self.override_kind = None;
@@ -370,7 +377,7 @@ impl KicadPane {
     /// "Open in GerbView" entry point. Its tab then switches back to it like the editors'.
     pub fn open_gerbers(&mut self, files: &[String], cx: &mut Context<Self>) -> bool {
         if !self.attached || !self.can_gerbview() || files.is_empty() { return false }
-        self.override_kind = Some("GERBVIEW".into()); self.placed = None; self.pending_show = Some("GERBVIEW".into()); // i18n-ok: wire frame kind
+        let was_tab = self.tab(); self.override_kind = Some("GERBVIEW".into()); self.note_tab(&was_tab, "open_gerbers"); self.placed = None; self.pending_show = Some("GERBVIEW".into()); // i18n-ok: wire frame kind
         self.rpc("editor.kicad.show", json!({"project": self.project, "frame": "GERBVIEW", "document": files.join("\n")})); // i18n-ok: wire frame kind
         cx.notify(); true
     }
@@ -385,7 +392,11 @@ impl KicadPane {
     pub fn open_gerbers_soon(&mut self, files: &[String], cx: &mut Context<Self>) {
         if !self.open_gerbers(files, cx) { self.want_gerbers = files.to_vec(); cx.notify(); }
     }
-    pub fn show_kind(&mut self, kind: &str, cx: &mut Context<Self>) {
+    pub fn show_kind(&mut self, kind: &str, cx: &mut Context<Self>) { self.show_kind_by(kind, "show_kind", cx) }
+    pub fn show_kind_by(&mut self, kind: &str, cause: &str, cx: &mut Context<Self>) {
+        let was_tab = self.tab(); self.show_kind_inner(kind, cx); self.note_tab(&was_tab, cause);
+    }
+    fn show_kind_inner(&mut self, kind: &str, cx: &mut Context<Self>) {
         self.want_keys = true;
         if kind == frame_for(&self.open) { self.override_kind = None; } else { self.override_kind = Some(kind.to_string()); }
         self.placed = None;
@@ -404,6 +415,15 @@ impl KicadPane {
             && pick_local(kind, &self.info, &self.frames, &self.ever_shown).is_some_and(|x| self.ever_shown.contains(&x))
     }
     pub fn tab(&self) -> String { self.wanted_kind().to_string() }
+    /// BACKPLANE_KICAD_DEBUG: one line the moment the pane's tab changes, with its cause (a click, a shortcut, the hub's active frame
+    /// that KiCad asked for, the rail, a script). A periodic state log cannot place a switch within the ~40 ms of a race: on Nov 13 it
+    /// took this line to see the hub following KiCad's show request 102 ms before a Ctrl+Y (fixed in 0decc2de6).
+    fn note_tab(&self, was: &str, cause: &str) {
+        let now = self.wanted_kind();
+        if now == was || std::env::var_os("BACKPLANE_KICAD_DEBUG").is_none() { return }
+        let epoch = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs_f64() * 1000.0).unwrap_or(0.0);
+        eprintln!("GPUI_LOG {}", json!({"kicad_tab": {"epoch_ms": epoch, "from": was, "to": now, "cause": cause, "open": self.open, "override": self.override_kind, "hub_active": self.info["active"], "pending_show": self.pending_show}}));
+    }
     /// Backplane's theme: KiCad follows it (the fork switches live; stock KiCad keeps its own).
     pub fn set_light(&mut self, light: bool, cx: &mut Context<Self>) {
         if self.light == light && self.theme_sent { return }
@@ -462,6 +482,7 @@ impl KicadPane {
         }
         let f = nc::frames(c);
         if f != self.frames {
+            let was_tab = self.tab();
             // If stock KiCad on Linux just opened Symbol Editor, Footprint Editor, or 3D Viewer from inside an editor, show it in the pane.
             if !cfg!(windows) && self.info["mode"] == "stock" {
                 for nf in &f {
@@ -485,7 +506,9 @@ impl KicadPane {
                     self.override_kind = None;
                 }
             }
-            self.frames = f; self.placed = None; cx.notify();
+            self.frames = f; self.placed = None;
+            self.note_tab(&was_tab, "X frames changed (stock new editor / overridden editor closed)"); // i18n-ok: a debug log cause (BACKPLANE_KICAD_DEBUG)
+            cx.notify();
         }
         if let Some((Some(at), Some(show), _)) = &self.placed {
             nc::sync_root(c, *at, *show, &mut self.last_root);
@@ -579,7 +602,7 @@ impl KicadPane {
                 nc::Ev::Escape => { nc::focus(self.toplevel); self.keys = false; nc::grab_escape(self.toplevel, false); self.grab_click(c, true); cx.notify(); }
                 nc::Ev::Click => { if let Some(w) = self.want() { self.grab_click(c, false); nc::focus(w); self.keys = true; self.touched(); nc::grab_escape(self.toplevel, true); cx.notify(); } }
                 // Ctrl+Tab / Ctrl+Shift+Tab pressed in KiCad: the next editor tab, and KiCad keeps the keyboard
-                nc::Ev::Key(k) if k == "ctrl-tab" || k == "ctrl-shift-tab" => { let to = next_tab(self.wanted_kind(), if k == "ctrl-tab" { 1 } else { -1 }); self.show_kind(to, cx); }
+                nc::Ev::Key(k) if k == "ctrl-tab" || k == "ctrl-shift-tab" => { let to = next_tab(self.wanted_kind(), if k == "ctrl-tab" { 1 } else { -1 }); self.show_kind_by(to, &format!("host shortcut {k} (KiCad key hook)"), cx); } // i18n-ok: a debug log cause (BACKPLANE_KICAD_DEBUG)
                 nc::Ev::Key(k) => { eprintln!("GPUI_LOG {}", json!({"kicad_key": k, "at_ms": crate::screens::kcomment::epoch_ms() as u64})); nc::focus(self.toplevel); self.keys = false; nc::grab_escape(self.toplevel, false); self.grab_click(c, true);
                     // the comment chord (and bp.13's ';', KiCad's own comment key) opens the window now, from this event (no keystroke round trip through the next frame)
                     // the comment chord and the management panels' keys are acted on here, from the event: replayed as a keystroke after a
@@ -1018,7 +1041,7 @@ pub fn strip<V: 'static>(cx: &mut Context<V>, light: bool, pane: &Entity<KicadPa
             .text_color(c(if on { "text" } else { "dim" })).when(on, |d| d.border_b_2().border_color(c("accent"))).hover(|s| s.bg(c("raise")))
             .tooltip(crate::keys::tip(&crate::i18n::trs(label), "Ctrl+Tab", light))
             .child(crate::i18n::trs(label))
-            .on_mouse_down(MouseButton::Left, move |_, _, cx| { let k = k.clone(); p.update(cx, |p, cx| p.show_kind(&k, cx)); }));
+            .on_mouse_down(MouseButton::Left, move |_, _, cx| { let k = k.clone(); p.update(cx, |p, cx| p.show_kind_by(&k, "click on the pane's tab strip", cx)); }));
     }
     // a file changed on disk over the person's unsaved edits: said here too (KiCad asks in its own infobar), with the same two answers
     if !pane.read(cx).conflicts.is_empty() {
