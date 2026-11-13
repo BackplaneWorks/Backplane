@@ -57,6 +57,11 @@ again, then the panel's `BP-AGAIN` must apply; any miss exits 1). It needs `KEMB
 root coordinates (Collar on the GPU display: `1126,700`): a screenshot taken just before the click must show canvas background there, on a
 span of at least 300 px each way, else the journey fails without pressing a key (the pane's toolbars and the message panel are no canvas, and
 GTK3 gives the canvas no X window to measure). `KEMBED_UNDO_NO_CTRL_Y=1` leaves out the Ctrl+Y only (a diagnostic: what happens without it).
+Between Ctrl+Z and Ctrl+Y it idles `KEMBED_UNDO_IDLE_S` seconds (10 by default, 0 leaves it out) after one agent track on the board: no
+key and no IPC read, so the hub's automatic DRC runs in KiCad while the person is on the schematic. It must have run
+(`undo_idle_ran_a_drc_in_kicad`, else the idle proved nothing) and the schematic must still be KiCad's focused, shown frame with the board
+hidden (`undo_idle_stays_on_schematic`); the hub's "not followed" show requests are counted (`undo_idle_show_requests_not_followed`: 0 on
+bp.13 batch 6, which no longer sends one; on batch 5 each is the board's raise that 0decc2de6 keeps off the pane).
 A run that pins `CLIENT_BIN` must pin `HUB_BIN` too (it fails otherwise: the worktree's own `target/fast` hub would be taken, whatever
 its age); each run logs both binaries (`INFO hub` / `INFO client`: path, sha256, mtime, the build folder's `COMMIT`) and `real_use.json` keeps them.
 Not yet: schematic-to-board cross-probe by a click, DRC/ERC/Gerbers, hierarchical sheet/move symbol/wire/annotate.
@@ -354,3 +359,23 @@ Misses, ranked:
 
 Not measured (harness): ';' in the search box and the properties panel (the search box was not clicked into; the panel was looked for
 on the wrong side); the review-marker click.
+
+## Undo/redo on bp.13 batch 5 (2026-11-13): what failed and why
+
+Collar, GPU display, batch 5 `332ac3bb99` (canvas-click focus). The undo journey first reported Ctrl+Y not redoing, then redoing one run
+in two. Two causes, neither in KiCad's undo:
+1. **The harness clicked outside the canvas.** The focus click was `PANE.y + PANE.h - 60` (y 932), on the message panel below the schematic
+   canvas (which ends near y 785 when that panel shows), so 332ac3bb99's canvas branch never ran. Now an explicit point, checked on a
+   screenshot (`KEMBED_UNDO_POINT`, f4424c080). First reading corrected: X11 cannot measure the canvas (GTK3 draws it inside the frame's
+   one X window), so the check is on pixels.
+2. **The hub moved the pane to the board just before Ctrl+Y.** The runs had pinned the client (46cd43ec0) but not the hub: the runner took
+   the worktree's own hub, an older 015eb3206. That hub ran an automatic DRC in KiCad right after the schematic edit; DRC's schematic
+   parity `Raise()`s the hidden board (`PCB_EDIT_FRAME::FetchNetlistFromSchematic`), which the embedded KiCad turns into
+   `ET_SHOW_REQUESTED FK_PCB` with no actor, and the hub followed it as the person's switch: the pane went to the board (in
+   realuse-tab-oldhub2 102 ms before Ctrl+Y) and the key with it. KiCad itself did not show the board, hide the schematic or take focus
+   (first reading corrected): that was the hub's ShowFrame after following the request. When the DRC came after Ctrl+Y, redo passed and the
+   pane still flipped afterwards. Fixes: the runner refuses a pinned client without a pinned hub and logs both (a1bdbbbc9); the hub does not
+   follow a show request with no actor while its own check or pre-warm drives KiCad (0decc2de6; d4727ae95 had done it only for runtimes
+   without actors); the fork drops the Raise when embedded (bp.13 batch 6, 532da6fbf3). The idle step above is the regression test.
+How it was found: client and hub builds logging every pane tab change with its cause and every KiCad event (diagnostic only, not landed);
+with them, 9 of 9 redo passes on the 46cd43ec0 and main hubs (no check reached KiCad in those runs) and the switch caught on 015eb3206.

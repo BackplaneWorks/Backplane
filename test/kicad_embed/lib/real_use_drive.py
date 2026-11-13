@@ -1180,6 +1180,25 @@ if "undo" in JOURNEYS and SOCK:
         v1 = bom("BP-REDO", "panel_edit")
         rt("click", EXs, EYs); time.sleep(0.4); shot("undo_focus_click")
         rz = rt("key", "z", "ctrl"); time.sleep(1.2); v2 = val(); steps_u.append(["ctrl_z", v2])
+        # Between Ctrl+Z and Ctrl+Y the person stays on the schematic while an agent edits the board: the hub's automatic DRC then runs
+        # in KiCad. With schematic parity, bp.13 batch 5 Raise()s the hidden board (no actor) and a hub before 0decc2de6 followed it: the
+        # pane went to the board and the Ctrl+Y with it (Nov 13, realuse-tab-oldhub2). Batch 6 (fork 532da6fbf3) sends no such request.
+        idle = float(os.environ.get("KEMBED_UNDO_IDLE_S", "10") or 0)
+        if idle > 0:
+            hub_log = os.path.join(OUT, "hub.log"); log_at = os.path.getsize(hub_log) if os.path.exists(hub_log) else 0
+            ipc("agent-add-track", SOCK, 10, 10, 12, 10, 0.25)  # off the parts, on the board copy only
+            t_idle = time.time() * 1000; time.sleep(idle)  # no key, no IPC read: the hub's checks wait for a quiet KiCad
+            new = open(hub_log, errors="ignore").read()[log_at:] if os.path.exists(hub_log) else ""
+            drc = [l for l in new.splitlines() if "drc in KiCad starts" in l]
+            held = [l for l in new.splitlines() if "KiCad asked to show" in l and "not followed" in l]
+            kf = {k: f.get("focused") for k, f in kframes().items()}; shown = {k: f.get("shown") for k, f in kframes().items()}
+            print(f"INFO undo idle {idle}s from {t_idle:.1f}: DRC in KiCad {len(drc)}; show requests not followed {len(held)} {held}; "
+                  f"KiCad frames focused {kf} shown {shown}", flush=True)
+            # no DRC in KiCad: the idle proved nothing (a check that never ran cannot move the pane)
+            RESULTS["undo_idle_ran_a_drc_in_kicad"] = {"ms": None, "ok": int(bool(drc)), "lines": drc}
+            RESULTS["undo_idle_stays_on_schematic"] = {"ms": None, "ok": int(kf.get("SCH") is True and shown.get("SCH") is not False and shown.get("PCB") is not True),
+                                                       "focused": kf, "shown": shown, "from": t_idle}
+            RESULTS["undo_idle_show_requests_not_followed"] = {"ms": None, "count": len(held), "lines": held}
         # before Ctrl+Y: where the keyboard is (X's focus chain, KiCad's focused frames), and the Redo button's look (enabled or grey)
         fo = xfocus(); kf = {k: f.get("focused") for k, f in kframes().items()}
         print(f"INFO undo focus before Ctrl+Y: X {fo[:3]}; KiCad frames focused {kf}", flush=True)

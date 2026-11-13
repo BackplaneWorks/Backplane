@@ -398,7 +398,7 @@
    "what": "';' typed in a KiCad text field stays there (no comment window)"
   },
   {
-   "re": "^undo_(panel_edit_applies|ctrl_z_takes_it_back|ctrl_y_redoes_it|then_panel_edit_applies)$",
+   "re": "^undo_(panel_edit_applies|ctrl_z_takes_it_back|ctrl_y_redoes_it|then_panel_edit_applies|idle_ran_a_drc_in_kicad|idle_stays_on_schematic)$",
    "field": "ok",
    "min": 1,
    "strict": true,
