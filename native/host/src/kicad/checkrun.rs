@@ -150,6 +150,10 @@ struct Src {
     ran_on: String,
     /// the last result came from the open editor (kicad/edchecks.rs), of its unsaved edits; the running one's progress id there
     in_editor: bool, unsaved: bool, progress: String,
+    /// the check this one waits for in the open editor ("ERC"), until it starts
+    behind: String,
+    /// the ids of the last kicad-cli result (an editor's rows the CLI did not have say so: edchecks EDITOR_ONLY)
+    cli_ids: std::collections::HashSet<String>,
 }
 /// Findings another part of the hub puts in this list (the design review's sources: the fab's rules, the BOM, the fab outputs, the
 /// datasheets...): their state and set, replaced whole each time (`put_findings`).
@@ -306,8 +310,8 @@ fn src_json(p: &Proj, s: &str, now: u64) -> Value {
     let st = state_word(x);
     let running = x.sched.running_since > 0;
     let reason = if st == "deferred" { x.deferred.trim_start_matches("deferred: ").to_string() } else { x.reason.clone() };
-    let fraction = if !running { -1.0 } else { super::edchecks::fraction(&x.progress).filter(|f| *f >= 0.0).unwrap_or_else(|| fd::fraction(now.saturating_sub(x.sched.running_since), x.took)) };
-    json!({"state": st, "reason": reason, "running": running, "fraction": fraction, "in_editor": x.in_editor, "unsaved": x.in_editor && x.unsaved,
+    let fraction = if !running || !x.behind.is_empty() { -1.0 } else { super::edchecks::fraction(&x.progress).filter(|f| *f >= 0.0).unwrap_or_else(|| fd::fraction(now.saturating_sub(x.sched.running_since), x.took)) };
+    json!({"state": st, "reason": reason, "running": running, "fraction": fraction, "in_editor": x.in_editor, "unsaved": x.in_editor && x.unsaved, "behind": x.behind,
         "counts": counts.to_json(), "untrusted": s == "drc" && untrusted(p) > 0, "at": x.at, "took_ms": x.took, "rev": x.sched.ran_rev, "has_result": x.had, "peak_mb": x.peak_mb, "full": x.full, "full_next": x.full_next, "ran_on": x.ran_on, "note": if x.in_editor { super::edchecks::NOTE } else if x.full { "" } else { fd::LIBRARY_NOTE }})
 }
 /// none (no result yet), running, deferred (a run waits for memory or another heavy KiCad job), fresh (the result is of the design on
@@ -435,7 +439,16 @@ async fn tick(hub: &Arc<Hub>) -> u64 {
             }
         }
         if changed { publish(hub, &pro).await }
-        for (s, rev, c, full, host) in acts { let (h, p, f) = (hub.clone(), pro.clone(), files.clone()); tokio::spawn(async move { run(&h, &p, &f, s, &rev, c, full, host).await }); }
+        // in KiCad the two checks take its main thread one after the other: ERC (the short one) first, so its result shows at once, then
+        // DRC, which says it waits for ERC until then (each with its own progress and time); elsewhere they run side by side
+        if ed && acts.len() == 2 && acts.iter().all(|a| a.4.is_none()) {
+            acts.sort_by_key(|a| if a.0 == "erc" { 0 } else { 1 });
+            if let Some(p) = state().lock().unwrap().get_mut(&pro) { p.src(acts[1].0).behind = acts[0].0.to_uppercase() }
+            let (h, p, f) = (hub.clone(), pro.clone(), files.clone());
+            tokio::spawn(async move { for (s, rev, c, full, host) in acts { run(&h, &p, &f, s, &rev, c, full, host).await } });
+        } else {
+            for (s, rev, c, full, host) in acts { let (h, p, f) = (hub.clone(), pro.clone(), files.clone()); tokio::spawn(async move { run(&h, &p, &f, s, &rev, c, full, host).await }); }
+        }
     }
     sleep
 }
@@ -444,6 +457,9 @@ async fn tick(hub: &Arc<Hub>) -> u64 {
 type Outcome = Option<Result<Vec<Finding>, String>>;
 
 async fn run(hub: &Arc<Hub>, pro: &str, f: &project::Files, s: &'static str, rev: &str, cancel: Arc<tokio::sync::Notify>, full: bool, host: Option<Remote>) {
+    // its own turn now (it may have waited for the other check in the editor): its time and bar start here
+    let waited = { let mut m = state().lock().unwrap(); m.get_mut(pro).map(|p| { let x = p.src(s); let w = !std::mem::take(&mut x.behind).is_empty(); if w { x.sched.running_since = now_ms() } w }).unwrap_or(false) };
+    if waited { publish(hub, pro).await }
     let t0 = now_ms();
     let mut editor = None;
     let (o, peak) = match &host {
@@ -458,7 +474,8 @@ async fn run(hub: &Arc<Hub>, pro: &str, f: &project::Files, s: &'static str, rev
         let x = p.src(s);
         if peak > 0 { if full { x.peak_full_mb = peak } else { x.peak_mb = peak } }
         x.progress.clear();
-        if matches!(o, Some(Ok(_))) { x.full = full; x.ran_on = host.as_ref().map(|r| r.host.clone()).unwrap_or_default(); x.in_editor = editor.is_some(); x.unsaved = editor.unwrap_or(false) }
+        if let Some(Ok(fs)) = &o { x.full = full; x.ran_on = host.as_ref().map(|r| r.host.clone()).unwrap_or_default(); x.in_editor = editor.is_some(); x.unsaved = editor.unwrap_or(false);
+            if editor.is_none() { x.cli_ids = fs.iter().map(|f| f.id.clone()).collect() } }
     }
     finish(hub, pro, s, rev, o, took).await
 }
@@ -470,7 +487,12 @@ async fn run_editor(hub: &Arc<Hub>, pro: &str, f: &project::Files, s: &str, canc
     let pro2 = pro.to_string(); let s2 = s.to_string();
     let r = super::edchecks::run(&route, s, &f.sch, cancel, move |id| { if let Some(p) = state().lock().unwrap().get_mut(&pro2) { p.src(&s2).progress = id.to_string() } }).await;
     match r {
-        super::edchecks::Ran::Found(mut fs, unsaved) => { if !full { fs.retain(|x| !fd::library_rule(s, &x.rule)) } Some((Some(Ok(fs)), unsaved)) }
+        super::edchecks::Ran::Found(mut fs, unsaved) => {
+            if !full { fs.retain(|x| !fd::library_rule(s, &x.rule)) }
+            let cli = with(pro, |p| if s == "drc" { p.drc.cli_ids.clone() } else { p.erc.cli_ids.clone() }).unwrap_or_default();
+            super::edchecks::mark_editor_only(&mut fs, &cli);
+            Some((Some(Ok(fs)), unsaved))
+        }
         super::edchecks::Ran::Cancelled => Some((None, false)),
         super::edchecks::Ran::Failed(why) => Some((Some(Err(why)), false)),
         super::edchecks::Ran::Cli(why) => { eprintln!("checks: {s} with kicad-cli: {why}"); None }
