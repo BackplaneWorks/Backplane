@@ -55,7 +55,7 @@ pub fn plot(path: &str) -> super::plotgen::Read {
         None => (r.items, super::plotgen::GERBER),
         Some(b) => {
             let bytes = std::fs::read(&b).unwrap_or_default();
-            let bi = super::sexpr::forms(&bytes).map(|fs| { let mut v = super::plotgen::board_items(&fs); v.extend(compare::board_copper_polys(&fs)); v }).unwrap_or_default();
+            let bi = super::sexpr::forms(&bytes).map(|fs| super::plotgen::board_items(&fs)).unwrap_or_default();
             let t0 = std::time::Instant::now();
             let (marks, layers) = compare::compare(&r.items, &bi);
             eprintln!("gerber: {} compared with its board in {} ms ({} marks)", set, t0.elapsed().as_millis(), marks.len());
@@ -305,7 +305,7 @@ mod tests {
     #[test] fn a_real_set_compared_with_its_board() {
         let (Ok(dir), Ok(pcb)) = (std::env::var("BACKPLANE_TEST_GERBERS"), std::env::var("BACKPLANE_TEST_BOARD")) else { eprintln!("skipped"); return };
         let r = read_set(Path::new(&dir));
-        let b = std::fs::read(&pcb).unwrap(); let fs = super::super::sexpr::forms(&b).unwrap(); let mut bi = super::super::plotgen::board_items(&fs); bi.extend(compare::board_copper_polys(&fs));
+        let b = std::fs::read(&pcb).unwrap(); let fs = super::super::sexpr::forms(&b).unwrap(); let bi = super::super::plotgen::board_items(&fs);
         let t = std::time::Instant::now();
         let (marks, layers) = compare::compare(&r.items, &bi);
         eprintln!("compared in {} ms", t.elapsed().as_millis());
