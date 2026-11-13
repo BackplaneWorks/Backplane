@@ -2002,6 +2002,7 @@ fn spawn_fork_events_loop(me: mpsc::UnboundedSender<Msg>, pro: String, gen: u64,
                     if super::reload::on_event(&pro, ev) { need_sync = true; continue }
                     if super::comment::on_event(&pro, ev) { continue }
                     if super::progress::on_event(&pro, ev) { continue }
+                    if crate::plan::events::on_event(&pro, ev) { continue }
                     if super::coedit::on_event(ev) { continue }
                     if matches!(ty, "ET_DIALOG_OPENED" | "ET_DIALOG_CLOSED") || matches!(ty_n, 10 | 11) {
                         let open = ty == "ET_DIALOG_OPENED" || ty_n == 10;

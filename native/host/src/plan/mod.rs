@@ -158,12 +158,12 @@ pub async fn tool(hub: &Arc<Hub>, thread: &str, name: &str, a: &Value) -> Result
         // the agent asks; the person approves (the Plan panel, KiCad, a phone): nothing is approved here
         let what = if !sv(a, "layer").is_empty() { format!("layer {}", sv(a, "layer")) } else if let Some(ids) = a["ids"].as_array().filter(|x| !x.is_empty()) { ids.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", ") } else { "the plan".into() };
         events::ask(hub, thread, &pcb, &what, sv(a, "note")).await;
-        return Ok(json!({"asked": true, "what": what, "next": "The person approves in the Plan panel or in KiCad; end your turn or wait: plan_get answers their decision in `changes`."}))
+        return Ok(json!({"asked": true, "what": what, "next": "The person approves in the Plan panel or in KiCad. End your turn: once they have judged it, Backplane sends you a message saying what they approved or rejected (plan_get answers the details in `changes`)."}))
     }
     capable(hub, Some(thread), &pcb).await?;
     let ids: Vec<String> = a["ids"].as_array().map(|x| x.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default();
     let reply = match name {
-        "plan_get" => { let (p, ch) = read_with_changes(hub, thread, &pcb, a["derived"] != false).await?; return Ok(json!({"summary": summary(&p), "changes": ch, "plan": p})) }
+        "plan_get" => { let (p, ch) = read_with_changes(hub, thread, &pcb, a["derived"] != false).await?; events::changed(hub, &pcb).await; return Ok(json!({"summary": summary(&p), "changes": ch, "plan": p})) }
         "plan_propose" => {
             let plan = if a["plan"].is_string() { a["plan"].as_str().unwrap_or("").to_string() } else { a["plan"].to_string() };
             if plan.len() < 3 { return Err("plan: the plan JSON to propose".into()) }
@@ -182,6 +182,7 @@ pub async fn tool(hub: &Arc<Hub>, thread: &str, name: &str, a: &Value) -> Result
         _ => return Err("unknown tool".into()),
     };
     let (p, ch) = read_with_changes(hub, thread, &pcb, false).await.unwrap_or((Value::Null, vec![]));
+    events::changed(hub, &pcb).await;
     Ok(json!({"reply": reply, "summary": if p.is_null() { Value::Null } else { summary(&p) }, "changes": ch}))
 }
 
@@ -202,7 +203,7 @@ pub async fn approve(hub: &Arc<Hub>, pcb: &str, layer: &str, ids: &[String], yes
         Some(r) => { let o = crate::files::kicad::embed::gui_call_as(&r, &format!("{NS}ApprovePlan"), msg, &crate::files::kicad::coedit::client_name(&crate::files::kicad::coedit::Who::Person)).await; if o["ok"].as_bool().unwrap_or(false) { o["message"].clone() } else { return Err(format!("KiCad: {}", o["error"].as_str().unwrap_or("no answer"))) } }
         None => call(hub, None, pcb, "ApprovePlan", msg).await?,
     };
-    events::changed(hub, pcb).await;
+    events::settle(hub, pcb).await;
     Ok(o)
 }
 pub struct Rpc;
@@ -217,7 +218,7 @@ impl RpcHandler for Rpc {
                 let ids: Vec<String> = p["ids"].as_array().map(|x| x.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default();
                 match m {
                     "plan.approve" => approve(hub, &pcb, sv(p, "layer"), &ids, p["approve"] != false).await,
-                    "plan.stop" => { let r = call(hub, None, &pcb, "StopPlanRouting", json!({"board": spec(&pcb)})).await; events::changed(hub, &pcb).await; r }
+                    "plan.stop" => { let r = call(hub, None, &pcb, "StopPlanRouting", json!({"board": spec(&pcb)})).await; events::settle(hub, &pcb).await; r }
                     _ => read_plan(hub, None, &pcb, true).await,
                 }
             }.await;

@@ -5,6 +5,7 @@
 #   P2  plan_route is refused by the hub while nothing is approved (the audit gate), and plan_approve only asks the person
 #   P3  the person approves one corridor (plan.approve, as the Plan panel does); the agent's next plan_get says so in `changes`
 #   P4  plan_route of that corridor is let through to KiCad
+#   P5  the agent that asked is woken with the person's decision (ET_PLAN_CHANGED / plan.approve -> a message in its thread)
 # Copies only (seed_project.py), the board open in the embedded KiCad (the plan API is the GUI's). Fork mode.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -54,6 +55,10 @@ R4=$(ask plan_approve '{"ids":["c-k"],"note":"the cathode corridor"}'); echo "$R
 check "plan_approve only asks the person" "$(echo "$R4" | grep -q 'asked' && echo 1 || echo 0)"
 hub_rpc "[{\"method\":\"plan.approve\",\"params\":{\"path\":\"$PCB\",\"ids\":[\"c-k\"],\"approve\":true}}]" >"$OUT/approve.out" 2>&1 || true
 check "The person's approval goes to KiCad" "$(grep -q '"ok":true' "$OUT/approve.out" && echo 1 || echo 0)" "$(head -c 300 "$OUT/approve.out")"
+# the agent that asked is woken with what the person decided (a message in its thread)
+for _ in $(seq 60); do grep -q "The person judged c-k" "$OUT/standin.log" 2>/dev/null && break; sleep 0.5; done
+check "The agent that asked is woken with the person's decision" "$(grep -q "The person judged c-k in the routing plan: approved c-k" "$OUT/standin.log" && echo 1 || echo 0)"
+sleep 3 # its turn ends
 R5=$(ask plan_get '{}'); echo "$R5" | cut -c1-300
 check "The agent's next plan_get says the person approved it" "$(echo "$R5" | python3 -c 'import sys; t=sys.stdin.read(); print(int("c-k" in t and "approved" in t and "changes" in t))')" "$(echo "$R5" | cut -c1-300)"
 R6=$(ask plan_route '{"ids":["c-k"],"max_nets":2}'); echo "$R6" | cut -c1-300
