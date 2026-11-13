@@ -34,7 +34,8 @@ export BP_STREAM_N=1 BP_STREAM_MS=10 BP_STANDIN_MCPCALL_MAX=200000
 start_hub
 cat >"$OUT/script.json" <<'JSON'
 [{"select":0},{"wait":2000},{"click":"rail:Board"},{"wait":2500},{"click":"ui:Edit"},
- {"kicad":{"wait_painted":180000,"kind":"PCB","tag":"ready"}},{"wait":1500},{"click":"kicad:full"},{"wait":1500},{"mark":"edit_ready"},{"wait":150000}]
+ {"kicad":{"wait_painted":180000,"kind":"PCB","tag":"ready"}},{"wait":1500},
+ {"click":"kicad-tab:SCH"},{"kicad":{"wait_painted":180000,"kind":"SCH","tag":"sch"}},{"wait":1500},{"click":"kicad-tab:PCB"},{"wait":2500},{"click":"kicad:full"},{"wait":1500},{"mark":"edit_ready"},{"wait":150000}]
 JSON
 HOME="$OUT/fh" BACKPLANE_GPUI_ASSETS="$ASSETS_DIR" BACKPLANE_GPUI_RECTS=1 BACKPLANE_GPUI_HOLD=1 \
 "$CLIENT_BIN" --url "http://127.0.0.1:$HPORT" --token-file "$OUT/home/token" --script "$OUT/script.json" --exit-after 420 >"$OUT/client.log" 2>&1 &
@@ -53,6 +54,7 @@ CAPS=$(ask kicad_ipc "{\"path\":\"$PCB\",\"type\":\"kiapi.backplane.GetCapabilit
 echo "$CAPS" | grep -q 'capabilities' || { echo "FAIL the embedded KiCad's GetCapabilities gave no capabilities: $(echo "$CAPS" | cut -c1-200)"; exit 1; }
 echo "$CAPS" | grep -q 'embed-host-markers' || { echo "SKIP embed_review_markers_e2e: the embedded KiCad has no embed-host-markers capability ($(echo "$CAPS" | cut -c1-160))"; finish_suite "embed_review_markers_e2e ($EMBED_MODE)"; exit 0; }
 echo "INFO embed-host-markers: yes; SetHostMarkers in commands: $(echo "$CAPS" | grep -q 'SetHostMarkers' && echo yes || echo no)"
+sch_markers() { ask kicad_ipc "{\"path\":\"$PCB\",\"type\":\"kiapi.backplane.embed.GetMarkers\",\"message\":{\"kind\":\"FK_SCH\",\"include_host\":true}}"; }
 host_markers() { ask kicad_ipc "{\"path\":\"$PCB\",\"type\":\"kiapi.backplane.embed.GetMarkers\",\"message\":{\"kind\":\"FK_PCB\",\"include_host\":true}}"; }
 SHA0=$(sha256sum "$PCB" | cut -d' ' -f1)
 R1=$(ask design_review '{"scope":"save"}'); echo "$R1" | cut -c1-300
@@ -67,6 +69,18 @@ sleep 2
 M1=$(host_markers); echo "$M1" | cut -c1-500
 check "the review's finding is a host marker in KiCad (set review)" "$(echo "$M1" | grep -q 'review' && echo "$M1" | grep -q 'host' && [ -n "$ID" ] && echo "$M1" | grep -q "$ID" && echo 1 || echo 0)" "$(echo "$M1" | cut -c1-300)"
 shot m1_markers
+# the schematic: a missing-MPN finding is a marker on its symbol (its KIID and its instance's sheet, from the schematic)
+SID=$(echo "$R1" | sed 's/^MCPCALL design_review //' | python3 -c 'import json,sys
+try: o = json.loads(sys.stdin.read()); r = json.loads(o["result"]["content"][0]["text"])
+except Exception: r = {}
+f = next((f for f in r.get("findings", []) if f.get("rule") == "bom_no_mpn"), {})
+a = (f.get("anchors") or [{}])[0]
+print(f.get("id", ""), a.get("uuid", "") or "-", a.get("sheet", "") or "-")')
+read -r SFID SUUID SSHEET <<<"$SID"
+echo "INFO the missing-MPN finding: $SFID symbol $SUUID sheet $SSHEET"
+check "a missing-MPN finding names its symbol's KIID and sheet" "$([ -n "$SFID" ] && [ "$SUUID" != - ] && [ "${SSHEET:0:1}" = / ] && echo 1 || echo 0)" "$SID"
+S1=$(sch_markers); echo "$S1" | cut -c1-400
+check "it is a host marker on the schematic, at the symbol" "$(echo "$S1" | grep -q "$SFID" && echo "$S1" | grep -q "$SUUID" && echo 1 || echo 0)" "$(echo "$S1" | cut -c1-300)"
 check "nothing is written to the board (byte-identical)" "$([ "$(sha256sum "$PCB" | cut -d' ' -f1)" = "$SHA0" ] && echo 1 || echo 0)"
 # the track fixed (as a person would, then saved): the next run clears the set
 python3 - "$PCB" <<'PY'
