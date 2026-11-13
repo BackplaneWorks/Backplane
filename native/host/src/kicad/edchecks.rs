@@ -19,7 +19,14 @@ use std::sync::{Mutex, OnceLock};
 use std::time::Duration;
 
 pub const CAP: &str = "embed-checks";
-const RUN_SECS: u64 = 600;
+const RUN_SECS: u64 = 300;
+/// A check in KiCad that shows no progress for this long is taken as stuck (a message box inside the task, which no one sees): it is
+/// cancelled, kicad-cli runs it, and KiCad is not asked again for STUCK_OFF_MS. KiCad sends progress at once and then as it moves.
+#[cfg(not(test))] const STALL_MS: u64 = 30_000;
+#[cfg(test)] const STALL_MS: u64 = 300;
+const STUCK_OFF_MS: u64 = 10 * 60_000;
+static STUCK: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new();
+fn stuck_until(sock: &str) -> u64 { STUCK.get_or_init(Default::default).lock().unwrap().get(sock).copied().unwrap_or(0) }
 
 /// Whether the open editor runs checks itself (its `GetCapabilities`: the capability, and the commands when it lists them).
 pub fn capable(caps: &Value) -> bool {
@@ -31,6 +38,7 @@ static CAPS: OnceLock<Mutex<HashMap<String, (String, bool, bool)>>> = OnceLock::
 /// The open editor of the project when it runs checks itself.
 pub async fn ready(hub: &std::sync::Arc<crate::hub::Hub>, pro: &str) -> Option<GuiRoute> {
     let route = embed::gui_route(pro)?;
+    if crate::hub::now_ms() < stuck_until(&route.sock) { return None }
     let m = CAPS.get_or_init(Default::default);
     if let Some((sock, ok, _)) = m.lock().unwrap().get(pro).cloned() { if sock == route.sock { return ok.then_some(route) } }
     // the embedded GUI's own answer (the headless server's manifest never has the embed capabilities)
@@ -246,7 +254,7 @@ pub fn select_items(f: &Finding, sheets: &HashMap<String, String>) -> Option<Val
 
 /// A run that waits for its ET_CHECKS_DONE (by progress id), and one done before its waiter came.
 #[derive(Default)]
-struct Waits { waiting: HashMap<String, tokio::sync::oneshot::Sender<Value>>, done: HashMap<String, Value>, fraction: HashMap<String, (String, f64)> }
+struct Waits { waiting: HashMap<String, tokio::sync::oneshot::Sender<Value>>, done: HashMap<String, Value>, fraction: HashMap<String, (String, f64)>, seen: HashMap<String, std::time::Instant> }
 static WAITS: OnceLock<Mutex<Waits>> = OnceLock::new();
 fn waits() -> std::sync::MutexGuard<'static, Waits> { WAITS.get_or_init(Default::default).lock().unwrap() }
 fn pid_of(v: &Value) -> String { match v { Value::String(s) => s.clone(), Value::Number(n) => n.to_string(), _ => String::new() } }
@@ -264,6 +272,7 @@ pub fn on_event(ev: &Value) -> bool {
     if t == "ET_PROGRESS" || t.as_i64() == Some(24) {
         let p = &ev["progress"]; let id = pid_of(&p["id"]);
         let mut w = waits();
+        if w.waiting.contains_key(&id) { w.seen.insert(id.clone(), std::time::Instant::now()); }
         if w.waiting.contains_key(&id) && !p["done"].as_bool().unwrap_or(false) { let f = p["fraction"].as_f64().unwrap_or(-1.0); w.fraction.insert(id, (p["title"].as_str().unwrap_or("").to_string(), f)); }
     }
     false
@@ -288,17 +297,39 @@ pub async fn run(route: &GuiRoute, kind: &str, sch: &str, cancel: &tokio::sync::
     let rx = { let mut w = waits(); match w.done.remove(&id) { Some(c) => { let (tx, rx) = tokio::sync::oneshot::channel(); let _ = tx.send(c); rx } None => { let (tx, rx) = tokio::sync::oneshot::channel(); w.waiting.insert(id.clone(), tx); rx } } };
     on_start(&id);
     struct Forget(String);
-    impl Drop for Forget { fn drop(&mut self) { let mut w = waits(); w.waiting.remove(&self.0); w.fraction.remove(&self.0); } }
+    impl Drop for Forget { fn drop(&mut self) { let mut w = waits(); w.waiting.remove(&self.0); w.fraction.remove(&self.0); w.seen.remove(&self.0); } }
     let _forget = Forget(id.clone());
     tokio::pin!(rx);
-    let checks = tokio::select! {
-        c = &mut rx => match c { Ok(c) => c, Err(_) => return Ran::Failed("KiCad's check ended without a result".into()) },
-        _ = cancel.notified() => {
-            let _ = embed::gui_call_as(route, "kiapi.backplane.embed.CancelProgress", json!({"id": id}), embed::CHECKS_CLIENT).await;
-            let _ = tokio::time::timeout(Duration::from_secs(10), &mut rx).await;
-            return Ran::Cancelled
+    let t0 = std::time::Instant::now();
+    waits().seen.insert(id.clone(), t0);
+    // every way out but its end cancels it in KiCad: while it runs, every other client's request is AS_BUSY
+    let stop = |why: String| { let id = id.clone(); async move {
+        let _ = embed::gui_call_as(route, "kiapi.backplane.embed.CancelProgress", json!({"id": id}), embed::CHECKS_CLIENT).await;
+        why
+    } };
+    let mut tick = tokio::time::interval(Duration::from_millis((STALL_MS / 4).max(50)));
+    let checks = loop {
+        tokio::select! {
+            c = &mut rx => match c { Ok(c) => break c, Err(_) => { let _ = stop(String::new()).await; return Ran::Failed("KiCad's check ended without a result".into()) } },
+            _ = cancel.notified() => {
+                let _ = stop(String::new()).await;
+                let _ = tokio::time::timeout(Duration::from_secs(10), &mut rx).await;
+                return Ran::Cancelled
+            }
+            _ = tick.tick() => {
+                let last = waits().seen.get(&id).copied().unwrap_or(t0);
+                let stalled = last.elapsed() >= Duration::from_millis(STALL_MS);
+                let long = t0.elapsed() >= Duration::from_secs(RUN_SECS);
+                if stalled || long {
+                    let why = if long { format!("{} in KiCad took longer than {RUN_SECS} s", kind.to_uppercase()) } else { format!("{} in KiCad showed no progress for {} s (a message box in KiCad?)", kind.to_uppercase(), STALL_MS / 1000) };
+                    let why = stop(why).await;
+                    let _ = tokio::time::timeout(Duration::from_secs(3), &mut rx).await;
+                    STUCK.get_or_init(Default::default).lock().unwrap().insert(route.sock.clone(), crate::hub::now_ms() + STUCK_OFF_MS);
+                    eprintln!("checks: {why}: cancelled; kicad-cli for the next {} min", STUCK_OFF_MS / 60_000);
+                    return Ran::Cli(why)
+                }
+            }
         }
-        _ = tokio::time::sleep(Duration::from_secs(RUN_SECS)) => return Ran::Failed(format!("{} in KiCad took longer than {RUN_SECS} s", kind.to_uppercase())),
     };
     if checks["cancelled"].as_bool().unwrap_or(false) { return Ran::Cancelled }
     if let Some(e) = checks["error"].as_str().filter(|e| !e.is_empty()) { return Ran::Failed(format!("KiCad could not run {}: {e}", kind.to_uppercase())) }
@@ -478,6 +509,24 @@ mod tests {
         assert_eq!(layer_name("BL_In1_Cu"), "In1.Cu"); assert_eq!(layer_name("BL_Edge_Cuts"), "Edge.Cuts");
     }
 
+    /// A KiCad whose check never ends and never moves (lane D, batch 4: a message box inside the task): the run is cancelled in KiCad
+    /// within the stall time, kicad-cli takes it, nothing is left waiting, and KiCad is not asked again for a while.
+    #[tokio::test] async fn a_check_that_never_ends_is_cancelled_and_kicad_left_alone() {
+        let (route, mut rx) = embed::stand_in_route("/p/stuck.kicad_pro");
+        let seen = std::sync::Arc::new(Mutex::new(Vec::<(String, Value)>::new())); let s2 = seen.clone();
+        tokio::spawn(async move { while let Some((ty, msg, reply)) = rx.recv().await {
+            s2.lock().unwrap().push((ty.clone(), msg));
+            let _ = reply.send(if ty.ends_with("RunChecks") { json!({"ok": true, "message": {"progress_id": "901"}}) } else { json!({"ok": true, "message": {}}) });
+        } });
+        let t0 = std::time::Instant::now();
+        let r = tokio::time::timeout(Duration::from_secs(10), run(&route, "drc", "", &tokio::sync::Notify::new(), |_| {})).await.expect("the run ends");
+        assert!(matches!(&r, Ran::Cli(w) if w.contains("no progress")), "kicad-cli takes it");
+        assert!(t0.elapsed() < Duration::from_secs(5));
+        assert!(seen.lock().unwrap().iter().any(|(t, m)| t.ends_with("CancelProgress") && pid_of(&m["id"]) == "901"), "cancelled in KiCad");
+        assert!(waits().waiting.get("901").is_none() && waits().seen.get("901").is_none(), "nothing left waiting");
+        assert!(stuck_until("/stand-in") > crate::hub::now_ms(), "KiCad is left alone a while");
+        STUCK.get_or_init(Default::default).lock().unwrap().remove("/stand-in");
+    }
     /// A stand-in editor: RunChecks answers with an id, its progress and ET_CHECKS_DONE come as events, GetMarkers and GetItemsById
     /// answer from the fixtures. The run finds what the CLI finds; a busy editor sends the run to kicad-cli; a cancel cancels it in KiCad.
     #[tokio::test] async fn a_run_in_a_stand_in_editor() {
@@ -538,6 +587,6 @@ mod tests {
         tokio::spawn(async move { tokio::time::sleep(Duration::from_millis(60)).await; c3.notify_one() });
         assert!(matches!(run(&route, "erc", "", &c2, |_| {}).await, Ran::Cancelled));
         assert!(seen.lock().unwrap().iter().any(|(t, m)| t.ends_with("CancelProgress") && pid_of(&m["id"]) == "42"));
-        assert!(waits().waiting.is_empty() && waits().fraction.get("42").is_none(), "nothing left waiting");
+        assert!(waits().waiting.get("42").is_none() && waits().fraction.get("42").is_none(), "nothing left waiting");
     }
 }
