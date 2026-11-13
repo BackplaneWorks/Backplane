@@ -394,6 +394,32 @@ def main() -> None:
             print(json.dumps({"ok": True, "token": cli.token}))
             return
 
+        if cmd == "caps":
+            # kiapi.backplane.GetCapabilities on this KiCad (the embedded GUI's own, not the headless manifest): every string in it
+            _, val = cli.call("kiapi.backplane.GetCapabilities")
+            out = []
+            def strings(buf: bytes, depth: int) -> None:
+                if depth > 4:
+                    return
+                try:
+                    fields = pb_decode_fields(buf)
+                except Exception:
+                    return
+                for vals in fields.values():
+                    for v in vals:
+                        if isinstance(v, (bytes, bytearray)):
+                            try:
+                                t = v.decode("utf-8")
+                                if t.isprintable():
+                                    out.append(t)
+                                    continue
+                            except UnicodeDecodeError:
+                                pass
+                            strings(v, depth + 1)
+            strings(val, 0)
+            print(json.dumps({"names": out}))
+            return
+
         if cmd == "version":
             _, val = cli.call("kiapi.common.commands.GetVersion")
             outer = pb_decode_fields(val)

@@ -2072,6 +2072,7 @@ fn spawn_fork_events_loop(me: mpsc::UnboundedSender<Msg>, pro: String, gen: u64,
                     let ty_n = ev["type"].as_i64().unwrap_or(0);
                     if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("kicad embed event: {ev}"); }
                     super::checkrun::on_event(&pro, ev);
+                    if super::edchecks::on_event(ev) { continue }
                     if ty == "ET_SELECTION_CHANGED" || ty_n == 14 {
                         if let Some((kind, names)) = super::xprobe::selection_event(ev) { super::coedit::person_selected(&pro, &kind.to_lowercase(), names.to_json()); }
                         super::xprobe::kicad_selected(&pro, ev); continue
@@ -2304,6 +2305,15 @@ impl RpcHandler for EmbedRpc {
             }
         })
     }
+}
+
+/// Tests: a route to a stand-in editor, whose requests come out of the receiver as (type, message, reply).
+#[cfg(test)]
+pub fn stand_in_route(pro: &str) -> (GuiRoute, mpsc::UnboundedReceiver<(String, Value, oneshot::Sender<Value>)>) {
+    let (tx, mut rx) = mpsc::unbounded_channel::<Msg>();
+    let (otx, orx) = mpsc::unbounded_channel();
+    tokio::spawn(async move { while let Some(m) = rx.recv().await { if let Msg::Raw { ty, msg, reply, .. } = m { if otx.send((ty, msg, reply)).is_err() { return } } } });
+    (GuiRoute { pro: pro.into(), mode: "fork".into(), sock: "/stand-in".into(), desc: String::new(), cli: String::new(), argv: String::new(), version: "10.99.0-bp.13".into(), caps: vec![], tx }, orx)
 }
 
 #[cfg(test)]

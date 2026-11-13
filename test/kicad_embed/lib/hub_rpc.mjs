@@ -30,7 +30,8 @@ ws.onmessage = ({ data }) => {
         k.startsWith('kicad.reload.') ||
         k.startsWith('kicad.comment.') ||
         k.startsWith('kicad.checks.') ||
-        k.startsWith('mgmt.')
+        k.startsWith('mgmt.') ||
+        k.startsWith('review.clicked.')
       ) {
         infos.set(k, v);
       }
