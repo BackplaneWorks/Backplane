@@ -49,6 +49,11 @@ pub fn write_refused(copy: bool, write: bool, cmd: &str) -> Option<String> {
 /// A READ, killed when the future waiting for it is dropped: a caller's `tokio::time::timeout` (commands/home.rs wraps `git log` and `gh pr list` in
 /// 1.5 s, as the JS effect's execFile timeout does) must not leave the child running. Only for commands that change nothing.
 pub async fn read(cmd: &str, args: &[&str], cwd: &str, env: &[(&str, &str)]) -> Ran { spawn(cmd, args, cwd, env, true, false).await }
+/// `read` under a time limit: past it the child is killed (its future dropped) and the answer is code 124. A read that could hang the caller
+/// (a git on a large history, a child exit the hub missed: #1108, #1110) is bounded with this, never with a bare `proc_ro`.
+pub async fn read_within(limit: std::time::Duration, cmd: &str, args: &[&str], cwd: &str, env: &[(&str, &str)]) -> Ran {
+    match tokio::time::timeout(limit, read(cmd, args, cwd, env)).await { Ok(r) => r, Err(_) => Ran { code: 124, out: format!("{cmd} did not finish within {} s", limit.as_secs_f32()) } }
+}
 async fn sh(script: &str, args: &[&str], cwd: &str, env: &[(&str, &str)]) -> Ran {
     let mut a = vec!["-c", script, "sh"]; a.extend(args);
     proc("sh", &a, cwd, env).await
@@ -57,6 +62,11 @@ async fn sh(script: &str, args: &[&str], cwd: &str, env: &[(&str, &str)]) -> Ran
 pub async fn sh_ro(script: &str, args: &[&str], cwd: &str, env: &[(&str, &str)]) -> Ran {
     let mut a = vec!["-c", script, "sh"]; a.extend(args);
     proc_ro("sh", &a, cwd, env).await
+}
+/// `sh_ro`, killed (the `sh`, which execs or waits on its git) when the future waiting for it is dropped.
+pub async fn sh_read(script: &str, args: &[&str], cwd: &str, env: &[(&str, &str)]) -> Ran {
+    let mut a = vec!["-c", script, "sh"]; a.extend(args);
+    read("sh", &a, cwd, env).await
 }
 /// Git.run: a write, or unknown (refused on a copy); `run_ro` is the read.
 pub async fn run(cwd: &str, args: &[&str]) -> Ran { sh(&format!("{SAFE}bp_safe; exec git \"$@\""), args, cwd, &[]).await }
@@ -155,9 +165,10 @@ pub async fn checkpoint_revert(cwd: &str, thread: &str, n: u64) -> String {
 /// Git.step.capture: a step of the thread's KiCad files ("" when nothing changed); `reg` is the hub's history.trusted file.
 pub async fn step_capture(cwd: &str, thread: &str, reg: &str) -> String {
     if !super::threadpath::absolute(cwd) { return String::new() } let r = sh(STEP, &[cwd, &b64url(thread), reg], "/", &[]).await; if r.code == 0 { r.out } else { String::new() } }
-/// Git.refs: what a file may be compared with (git dir, top, then `kind\tlabel\tcommit` lines).
+/// Git.refs: what a file may be compared with (git dir, top, then `kind\tlabel\tcommit` lines). A pure read: killed with its future, so a
+/// caller's timeout (history.steps, #1110) leaves no git running.
 pub async fn refs(cwd: &str, thread: &str) -> String {
-    if !super::threadpath::absolute(cwd) { return String::new() } let r = sh_ro(REFS, &[cwd, &b64url(thread)], "/", &[]).await; if r.code == 0 { r.out } else { String::new() } }
+    if !super::threadpath::absolute(cwd) { return String::new() } let r = sh_read(REFS, &[cwd, &b64url(thread)], "/", &[]).await; if r.code == 0 { r.out } else { String::new() } }
 /// Git.show: a file as a commit has it (`git --git-dir G show OBJ`), None when it is not there.
 pub async fn show(gitdir: &str, obj: &str) -> Option<Vec<u8>> {
     let o = crate::proc::tokio_cmd(crate::proc::Kind::Local, "sh").args(["-c", "exec 2>/dev/null; git --git-dir=\"$1\" show \"$2\"", "sh", gitdir, obj]).current_dir("/").stdin(std::process::Stdio::null()).envs(GIT_ENV.iter().copied()).kill_on_drop(true).output().await.ok()?; // a pure read: killed with its future
@@ -344,6 +355,18 @@ mod tests {
         assert!(std::fs::read_dir(format!("{f}/.backplane")).unwrap().any(|e| e.unwrap().file_name().to_string_lossy().contains("untrusted")));
     }
     // Copy.write: a copy runs only what a caller listed as a read; everything else is refused, whatever it is
+    /// #1108/#1110: a read under a limit is killed at it, and answers 124, however long the child would have run.
+    #[tokio::test(flavor = "multi_thread")] async fn a_read_past_its_limit_is_killed() {
+        let d = crate::plat::tmp::dir("git-read-within"); let pidf = d.join("pid"); let pf = pidf.to_string_lossy().into_owned();
+        let t0 = std::time::Instant::now();
+        let r = read_within(std::time::Duration::from_millis(500), "sh", &["-c", "echo $$ > \"$1\"; exec sleep 30", "sh", &pf], "/", &[]).await;
+        assert_eq!(r.code, 124, "{}", r.out); assert!(t0.elapsed() < std::time::Duration::from_secs(5));
+        let pid: u32 = std::fs::read_to_string(&pidf).unwrap().trim().parse().unwrap();
+        let end = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while crate::plat::proc::alive(pid) && std::time::Instant::now() < end { tokio::time::sleep(std::time::Duration::from_millis(50)).await }
+        assert!(!crate::plat::proc::alive(pid), "the child was killed");
+        assert_eq!(read_within(std::time::Duration::from_secs(10), "sh", &["-c", "echo ok"], "/", &[]).await.out.trim(), "ok");
+    }
     #[test] fn a_copy_refuses_every_command_not_listed_as_a_read() {
         assert!(write_refused(true, true, "touch").is_some()); assert!(write_refused(true, true, "git").unwrap().contains("BACKPLANE_COPY=1"));
         assert_eq!(write_refused(true, false, "git"), None); assert_eq!(write_refused(false, true, "touch"), None); assert_eq!(write_refused(false, false, "git"), None);
