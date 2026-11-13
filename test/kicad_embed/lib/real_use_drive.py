@@ -451,10 +451,14 @@ shot("after_switch")
 # 3. edit: pan and zoom 10 s each, a click (select), a drag (move), Delete, Ctrl+Z, a short interactive track
 if "edit" in JOURNEYS:
     tab("PCB", "edit_board", 1.5)
-    rt("click", CX, CY + PANE["h"] // 3)  # focus into KiCad (an empty spot low in the pane)
+    # focus into KiCad: an empty canvas corner, then Escape (a click on overlapping items, e.g. Hubble's U17 pad over its footprint, opens
+    # KiCad's "which item?" menu, which then takes the pan's drag)
+    rt("click", PANE["x"] + 60, PANE["y"] + PANE["h"] - 140); time.sleep(0.4); rt("key", "Escape")
     time.sleep(0.5)
     def gesture_state(tag):  # which frames KiCad shows and which has the keyboard, the X focus, and the pane: before each gesture
-        st = {"frames": {k: [f.get("shown"), f.get("focused")] for k, f in kframes().items()} if SOCK else {}, "x": xfocus()[:2], "pane": pane_now()}
+        st = {"frames": {k: [f.get("shown"), f.get("focused")] for k, f in kframes().items()} if SOCK else {}, "x": xfocus()[:2], "pane": pane_now(),
+              "popup": [[w["w"], w["h"]] for w in windows() if w.get("shown") and w.get("override_redirect") and 60 < w["w"] < 1200 and 40 < w["h"] < 900]}
+        if st["popup"]: print(f"JANK {tag}: a KiCad popup is open before the gesture {st['popup']}", flush=True)
         RESULTS[f"{tag}_state"] = {"ms": None, **st}; print(f"INFO {tag} state: {st}", flush=True); shot(f"{tag}_before")
     gesture_state("pan_10s")
     r = rt("pan", CX, CY, min(PANE["w"], PANE["h"]) // 5, 10, 2, 120); EVENTS.append({"kind": "input", "t0": r["t0"], "t1": r["t1"], "tag": "pan_10s"}); time.sleep(1)
@@ -1149,7 +1153,7 @@ if "undo" in JOURNEYS and SOCK:
         RESULTS["undo_focus_before_ctrl_y"] = {"ms": None, "x": fo[:3], "kicad": kf}
         shot("undo_before_ctrl_y")
         rt("click", EXs, EYs); time.sleep(0.4)  # the toolbar's Redo button shows the stack (no menu: its loop could change the next key)
-        ry = rt("key", "y", "ctrl"); time.sleep(1.2); v3 = val(); steps_u.append(["ctrl_y", v3])
+        ry = rt("key", "y", "ctrl"); time.sleep(1.2); v3 = val(); steps_u.append(["ctrl_y", v3]); shot("undo_after_ctrl_y")  # Undo/Redo after
         print(f"INFO undo keys: ctrl_z at {rz.get('t0')}, ctrl_y at {ry.get('t0')} (epoch ms)", flush=True)
         v4 = bom("BP-AGAIN", "panel_edit_again")  # a third value: it applies only if KiCad takes the panel's second edit of the item
         print(f"INFO undo: {sref} {orig!r} -> panel {v1!r} -> Ctrl+Z {v2!r} -> Ctrl+Y {v3!r} -> panel again {v4!r}", flush=True)
