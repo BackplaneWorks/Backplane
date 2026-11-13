@@ -93,6 +93,16 @@ fn detached(cmd: &mut std::process::Command) {
     // started from this window program with nothing, Windows would open a console window for the hub
     #[cfg(windows)] { use std::os::windows::process::CommandExt; cmd.creation_flags(0x0800_0000 | 0x0000_0200); }
 }
+/// systemd-run's arguments for the hub's own scope, when a user systemd answers here (probed: a scope that runs `true`); None elsewhere, or with
+/// BACKPLANE_NO_SCOPE.
+fn hub_scope() -> Option<Vec<String>> {
+    if !cfg!(target_os = "linux") || std::env::var_os("BACKPLANE_NO_SCOPE").is_some() { return None }
+    if !std::env::var_os("XDG_RUNTIME_DIR").map_or(false, |d| Path::new(&d).join("bus").exists()) { return None }
+    let mut c = std::process::Command::new("systemd-run").args(["--user", "--scope", "-q", "--collect", "--", "true"]).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).spawn().ok()?;
+    let t = Instant::now();
+    let ok = loop { if let Ok(Some(s)) = c.try_wait() { break s.success() } if t.elapsed() > Duration::from_secs(5) { let _ = c.kill(); let _ = c.wait(); break false } std::thread::sleep(Duration::from_millis(20)); };
+    /* i18n-ok: systemd-run arguments, never drawn */ ok.then(|| ["--user", "--scope", "-q", "--collect", "-p", "OOMPolicy=continue", "-p", "ManagedOOMPreference=avoid", "--"].iter().map(|s| s.to_string()).collect())
+}
 /// The end of the hub's log, for the words when it did not start.
 fn log_tail(log: &Path) -> String { let t = std::fs::read_to_string(log).unwrap_or_default(); t.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").chars().take(200).collect() }
 
@@ -109,7 +119,10 @@ pub fn ensure_hub(home: &Path) -> Result<(String, PathBuf)> {
     let port = want.or_else(|| free_port(PORT_FIRST, PORT_LAST)).with_context(|| crate::i18n::trs("No free port between 3800 and 3899."))?;
     let log_path = home.join("hub.log");
     let log = std::fs::OpenOptions::new().create(true).append(true).open(&log_path)?;
-    let mut cmd = std::process::Command::new(&bin);
+    // Linux: the hub in a systemd scope of its own with OOMPolicy=continue, so the kernel killing one process there (a runaway the hub started) never
+    // makes systemd stop the hub with it; oomd's last pick (ManagedOOMPreference=avoid). Agents and jobs get scopes of their own (host memscope.rs).
+    let scoped = hub_scope();
+    let mut cmd = match &scoped { Some(pre) => { let mut c = std::process::Command::new("systemd-run"); c.args(pre).arg(&bin); c } None => std::process::Command::new(&bin) };
     match &guarded {
         // the guard starts the hub of CURRENT and owns it from here: restarts, updates, rollback (docs/deploy.md)
         Some((_, prefix)) => { cmd.args(["hub", "run", "--home"]).arg(home).args(["--port", &port.to_string(), "--host", "127.0.0.1", "--builds"]).arg(prefix).arg("--default").args(["--", "--foreground"]); }

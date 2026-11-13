@@ -81,12 +81,19 @@ impl Agents {
         let dir: PathBuf = self.hub.cfg.home.join("work").join(&id); let _ = std::fs::create_dir_all(&dir);
         let outp = dir.join("out"); let _ = std::fs::write(dir.join("cmd"), &cmd);
         let (so, se) = match std::fs::File::create(&outp).and_then(|f| f.try_clone().map(|g| (f, g))) { Ok(x) => x, Err(e) => { self.work_end(&th, &id, "gone", &format!("could not open the output file: {e}")).await; return } };
-        let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Shell, "sh"); c.args(["-c", cmd.as_str()]).current_dir(if cwd.is_empty() { self.hub.cfg.home.clone() } else { PathBuf::from(&cwd) }).env("BACKPLANE_LOCK_HOME", &self.hub.cfg.home).stdin(Stdio::null()).stdout(so).stderr(se).kill_on_drop(false);
+        // in a memory scope of its own (memscope.rs), the command in an inner sh: the outer one stays 0.6 s after it, so the scope is still there
+        // when its watcher looks for a kill (a fast eater's sh ends with it, and the scope with them)
+        let scope = crate::memscope::wrap("work"); let scoped = scope.is_some();
+        let mut c = crate::proc::tokio_cmd_in(crate::proc::Kind::Shell, "sh", scope); crate::memscope::raise_oom(&mut c);
+        if scoped { c.args(["-c", "sh -c \"$0\"; e=$?; sleep 0.6; exit $e", cmd.as_str()]); } else { c.args(["-c", cmd.as_str()]); }
+        c.current_dir(if cwd.is_empty() { self.hub.cfg.home.clone() } else { PathBuf::from(&cwd) }).env("BACKPLANE_LOCK_HOME", &self.hub.cfg.home).stdin(Stdio::null()).stdout(so).stderr(se).kill_on_drop(false);
         for (k, v) in super::kicadsel::job_env(&self.kicad_env.lock().unwrap(), std::env::var_os("PATH")) { c.env(k, v); } // the KiCad the agent was given (kicadsel.rs)
         crate::plat::proc::own_group_tokio(&mut c);
         if let Some(f) = &guard { crate::plat::proc::inherit(&mut c, f) } // the job inherits its lock's flock
         let mut child = match c.spawn() { Ok(c) => c, Err(e) => { self.work_end(&th, &id, "gone", &format!("could not start: {e}")).await; return } };
         let pid = child.id().unwrap_or(0); crate::plat::proc::adopt(pid, false); drop(guard);
+        let killed: Arc<std::sync::Mutex<Option<String>>> = Arc::default(); // a process of the job killed for memory in its scope (memscope.rs): said with its end
+        { let k = killed.clone(); crate::memscope::watch(pid, move |w| { *k.lock().unwrap() = Some(w); }); }
         { let _g = self.work_lock.lock().await; let rows = self.watch_rows(&th).await;
           if let Some(l) = rows.iter().find(|l| bg::field(l, 0) == bg::clean(&id)) { if bg::doing(l) == "launching" { // only this row, only if it is still launching (a cancel meanwhile keeps "cancelling")
               let nr: Vec<String> = rows.iter().map(|x| if bg::field(x, 0) == bg::clean(&id) { row(&id, "watching", &bg::work_title(x), "run", &target(x), &ident_of(pid), deadline(x)) } else { x.clone() }).collect(); self.put_watch(&th, &nr).await } } }
@@ -101,7 +108,9 @@ impl Agents {
             }
         };
         if pid > 0 { crate::plat::proc::kill_group(pid, crate::plat::proc::KILL); } // anything the command left running in its group
-        self.work_end(&th, &id, &status, &tail(&outp)).await;
+        tokio::time::sleep(Duration::from_millis(150)).await; // the watcher's last word lands before the end is told
+        let detail = match killed.lock().unwrap().take() { Some(w) => format!("{w}\n{}", tail(&outp)), None => tail(&outp) };
+        self.work_end(&th, &id, &status, &detail).await;
     }
     /// Watch.end: the row is dropped and the thread told once (a timeout keeps the row, ended with the outcome unknown).
     pub async fn work_end(self: &Arc<Self>, th: &str, id: &str, status: &str, detail: &str) {
@@ -121,8 +130,13 @@ impl Agents {
         self.put_watch(th, &rows).await;
         self.work_tell(th, say).await;
     }
+    /// An agent process of `th` watched in its memory scope: a process it started that the kernel kills for memory is told to the thread at once.
+    pub(super) fn memory_watch(self: &Arc<Self>, th: &str, pid: u32) {
+        let (me, th) = (self.clone(), th.to_string()); let rt = tokio::runtime::Handle::current();
+        crate::memscope::watch(pid, move |w| { let (me, th) = (me.clone(), th.clone()); rt.spawn(async move { me.work_tell(&th, w).await }); });
+    }
     /// The outcome told: a stopped thread hears it without waking; an archived or deleted one is told nothing.
-    async fn work_tell(self: &Arc<Self>, th: &str, say: String) {
+    pub(super) async fn work_tell(self: &Arc<Self>, th: &str, say: String) {
         let (live, interrupted) = { let w = self.world().await; (w.threads.get(th).map_or(false, |t| !t.archived && !t.deleted), w.threads.get(th).map_or(false, |t| t.turn == "interrupted")) };
         if !live { return }
         let msg = format!("t:backplane:{}", hub_id("l", now_s(), self.seq_n()));

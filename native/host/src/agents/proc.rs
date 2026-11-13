@@ -210,7 +210,8 @@ pub fn spawn(program: &Path, args: &[String], cwd: &Path, extra_path: Option<&Pa
 /// The only place a REAL agent CLI is made on a copy (`Kind::PersonTurn`, refused unless `copy::person_turn_allowed()`); the actor calls it only for a turn the person started.
 pub fn spawn_person(person: &PersonChild, program: &Path, args: &[String], cwd: &Path, env: &[(String, String)]) -> std::io::Result<Proc> { spawn_with(crate::proc::Kind::PersonTurn, Some(person), program, args, cwd, None, env) }
 fn spawn_with(kind: crate::proc::Kind, person: Option<&PersonChild>, program: &Path, args: &[String], cwd: &Path, extra_path: Option<&Path>, env: &[(String, String)]) -> std::io::Result<Proc> {
-    let mut c = crate::proc::tokio_cmd(kind, program);
+    // its own memory scope (memscope.rs): a runaway it starts is killed alone, never the hub's scope with every agent in it
+    let mut c = crate::proc::tokio_cmd_in(kind, program, crate::memscope::wrap("agent")); crate::memscope::raise_oom(&mut c);
     let args: Vec<String> = args.iter().map(|a| crate::settings::mask::mask(a)).collect(); // settings lane: Spawn.agent masks every launch argument
     c.args(&args).current_dir(cwd).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true);
     // production: the agent runs with the merged PATH (its own children find node, git...); a test's stand-in folder comes first on the hub's own

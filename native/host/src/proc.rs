@@ -70,6 +70,16 @@ pub fn tokio_cmd<S: AsRef<OsStr>>(kind: Kind, program: S) -> tokio::process::Com
     if scrubbed(kind) { for k in hub_only_present() { c.env_remove(k); } }
     c
 }
+/// `tokio_cmd`, in a memory scope of its own when `wrap` is given (memscope.rs: systemd-run's arguments, the program after them). A refused
+/// program is never wrapped. The caller raises its oom_score_adj (memscope::raise_oom).
+#[allow(dead_code)] // bp-plot includes this file and starts no agent
+pub fn tokio_cmd_in<S: AsRef<OsStr>>(kind: Kind, program: S, wrap: Option<Vec<String>>) -> tokio::process::Command {
+    let Some(w) = wrap.filter(|_| refusal(kind, &program.as_ref().to_string_lossy()).is_none()) else { return tokio_cmd(kind, program) };
+    let (prog, pre) = crate::plat::hub::launch(program.as_ref());
+    let mut c = tokio::process::Command::new("systemd-run"); c.args(w).arg(prog).args(pre);
+    if scrubbed(kind) { for k in hub_only_present() { c.env_remove(k); } }
+    c
+}
 /// `std::process::Command::new`, gated.
 pub fn std_cmd<S: AsRef<OsStr>>(kind: Kind, program: S) -> std::process::Command {
     let p = program.as_ref().to_string_lossy().into_owned();

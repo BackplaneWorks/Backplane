@@ -425,6 +425,18 @@ async function run(c: Cmd, firstOne: boolean) {
       await sleep(ms);
       emit({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: `${k}: (footprint "${tag}" (layer "F.Cu"))` }] }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
     }
+    // "eatchild:MB": a Bash call whose child eats MB of memory (touched) and is killed for it (memscope e2e), its end said: the agent goes on
+    const eat = /eatchild:(\d+)/.exec(c.text);
+    if (eat) {
+      const id = `toolu_${rnd()}`;
+      const cmd = `python3 -c "import time; b=[bytearray(64<<20) for _ in range(${Number(eat[1])} // 64)]; time.sleep(30)"`;
+      emit({ type: "assistant", message: { id: `msg_${rnd()}`, type: "message", role: "assistant", model: "claude-haiku-4-5-20251001",
+        content: [{ type: "tool_use", id, name: "Bash", input: { command: cmd } }], usage: { input_tokens: 10, output_tokens: 5 } }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
+      const end: string = await new Promise((res) => { const k = spawn("sh", ["-c", cmd], { stdio: "ignore" }); log(`EATCHILD ${k.pid}`); k.on("exit", (code, sig) => res(sig ? `signal ${sig}` : `exit ${code}`)); });
+      log(`EATCHILD END ${end}`);
+      emit({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: `EATCHILD ${end}` }] }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
+      say(`EATCHILD ${end}`);
+    }
     // "ask:" / "approve:": a question (AskUserQuestion) or a tool approval
     // (Bash) through the hub's permission_prompt, waiting for the answer
     for (const [kw, tool, input] of [
