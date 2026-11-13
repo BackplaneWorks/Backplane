@@ -14,6 +14,8 @@ pub const SHUT_ROWS: usize = 3;
 pub const LIST_TAG: u64 = 0x6368_6b31;
 pub const MORE_TAG: u64 = 0x6368_6b32;
 pub const FIX_TAG: u64 = 0x6368_6b33;
+/// The answer that finds the group of a finding a KiCad marker click named (`review.clicked.<digest>`).
+pub const WANT_TAG: u64 = 0x6368_6b34;
 
 #[derive(Default)]
 pub struct Ui {
@@ -34,6 +36,8 @@ pub struct Ui {
     pub scroll: Option<UniformListScrollHandle>,
     pub light: bool,
     pub sources: Value,
+    /// a finding to show (a click on its marker in KiCad): its id, and whether its group was asked for
+    pub want: Option<(String, bool)>,
 }
 /// One line of the list: a group's heading, a finding, a group's "n more" / "Fewer", or a word (searching, nothing found...).
 #[derive(Clone, Debug, PartialEq)]
@@ -245,12 +249,20 @@ fn open_group(app: &mut Backplane, g: &Value, cx: &mut Context<Backplane>) {
 
 /// The hub's answers to this panel's asks (main.rs routes them here first).
 pub fn answered(app: &mut Backplane, id: u64, reply: &Value, cx: &mut Context<Backplane>) -> bool {
-    if ![LIST_TAG, MORE_TAG, FIX_TAG].contains(&id) { return false }
+    if ![LIST_TAG, MORE_TAG, FIX_TAG, WANT_TAG].contains(&id) { return false }
     let r = if reply["result"].is_object() { &reply["result"] } else { reply };
     if reply["ok"] == false { app.screens.mgmt.error = crate::hub::rpc_error(reply); cx.notify(); return true }
     let rows = r["findings"].as_array().cloned().unwrap_or_default();
     match id {
         LIST_TAG => ui(|u| if let Some((a, b)) = u.asked.clone() { u.found = Some((a, b, rows)) }),
+        // the wanted finding's group: opened (its rows fetched), so the row is there to select
+        WANT_TAG => {
+            let want = ui(|u| u.want.as_ref().map(|w| w.0.clone())).unwrap_or_default();
+            if let Some(f) = rows.iter().find(|f| s(f, "id") == want) {
+                let g = json!({"source": s(f, "source"), "rule": s(f, "rule"), "excluded": s(f, "severity") == "excluded"});
+                if !ui(|u| u.open.contains(&group_key(&g))) { open_group(app, &g, cx) }
+            } else { ui(|u| u.want = None) } // gone (the checks ran again): nothing to show
+        }
         MORE_TAG => {
             // the group these rows are: the rule and check of the first one (all of one group)
             if let Some(f) = rows.first() { let k = format!("{}:{}:{}", s(f, "source"), s(f, "rule"), s(f, "severity") == "excluded"); ui(|u| { u.more.insert(k, rows.clone()); }); }
@@ -333,6 +345,20 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
     let its = items(d, if search { Some(found.as_deref().unwrap_or(&[])) } else { None }, search && found.is_none(), &more, &open);
     let n = its.len();
     let scroll = ui(|u| u.scroll.get_or_insert_with(UniformListScrollHandle::new).clone());
+    // a finding named by a KiCad marker click: selected and scrolled to once its row is in the list; else its group is found and opened
+    if let Some((want, asked)) = ui(|u| u.want.clone()) {
+        if let Some(ix) = its.iter().position(|i| matches!(i, Item::Row(f) if s(f, "id") == want)) {
+            ui(|u| { u.want = None; u.sel = Some(want.clone()); });
+            scroll.scroll_to_item(ix, ScrollStrategy::Center);
+            log("checks_reveal", json!({"id": want}));
+        } else if !asked {
+            ui(|u| u.want = Some((want.clone(), true)));
+            // a word typed in the filter could hide it too
+            if let Some(f) = ui(|u| u.filter.clone()) { f.update(cx, |i, cx| i.set(String::new(), cx)); }
+            let src = want.split(':').next().unwrap_or("").to_string();
+            let _ = app.tx.try_send(Command::Ask("kicad.checks.list".into(), json!({"project": project(app), "source": src, "rows": true, "limit": 2000}), WANT_TAG));
+        }
+    }
     ui(|u| { u.items = its.clone(); u.light = light; u.sources = d["sources"].clone(); });
     let list = uniform_list("checks-rows", n, cx.processor(|this, range: std::ops::Range<usize>, _w, cx| range.map(|i| item_el(this, i, cx)).collect::<Vec<_>>()))
         .track_scroll(scroll.clone()).flex_1().min_h_0().text_size(px(12.));
@@ -368,6 +394,12 @@ pub fn chip_tone(d: &Value) -> &'static str {
 }
 /// A `mgmt.*` info arrived (main.rs): the chip of its project, when it is the Checks panel's.
 pub fn seen(key: &str, text: &str) {
+    // a click on a review marker in KiCad (bp.13; lane J's review/markers.rs): that finding is the one to show
+    if key.starts_with("review.clicked.") {
+        let v: Value = serde_json::from_str(text).unwrap_or(Value::Null);
+        if let Some(id) = v["id"].as_str().filter(|i| !i.is_empty()) { ui(|u| { u.want = Some((id.to_string(), false)); u.sev.clear(); u.src.clear(); u.found = None; u.asked = None; }); }
+        return
+    }
     if !key.starts_with("mgmt.checks.") { return }
     let v: Value = serde_json::from_str(text).unwrap_or(Value::Null);
     let (pro, chip) = (s(&v, "project").to_string(), s(&v, "chip").to_string());
@@ -450,6 +482,13 @@ mod tests {
         assert_eq!(kinds(&items(&d, Some(&[]), false, &more, &BTreeSet::new())), ["gpui.mgmt.checks.nomatch"]);
         assert_eq!(kinds(&items(&d, None, true, &more, &BTreeSet::new())), ["gpui.mgmt.checks.searching"]);
         assert_eq!(kinds(&items(&json!({"groups": [], "drc": {"has_result": true}}), None, false, &more, &BTreeSet::new())), ["gpui.mgmt.checks.none"]);
+    }
+    #[test] fn a_marker_click_names_the_finding_to_show() {
+        ui(|u| { u.sev = "error".into(); u.src = "drc".into(); u.want = None; });
+        seen("review.clicked.abc", r#"{"id":"review:1f","at":5}"#);
+        assert_eq!(ui(|u| (u.want.clone(), u.sev.clone(), u.src.clone())), (Some(("review:1f".to_string(), false)), String::new(), String::new()), "the filters that could hide it are cleared");
+        seen("review.clicked.abc", r#"{"id":""}"#); assert!(ui(|u| u.want.is_some()), "an empty one changes nothing");
+        ui(|u| u.want = None);
     }
     #[test] fn up_and_down() {
         let ids: Vec<String> = ["a", "b", "c"].iter().map(|x| x.to_string()).collect();
