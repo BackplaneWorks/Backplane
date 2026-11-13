@@ -57,11 +57,21 @@ WARNED = set()
 TAB_AT = {"PCB": 31, "SCH": 92, "PCB_3D": 146}
 def click_ctl(cid):
     r = control(cid)
+    if not r and cid in ("kicad:full", "kicad:popout") and PANE:
+        pn = pane_now(); off = {"kicad:full": 114, "kicad:popout": 39}[cid]  # measured at 1800x1050 from the pane's right edge
+        return rt("click", pn["x"] + pn["w"] - off, pn["y"] - 15).get("t0")
     if not r and cid.startswith("kicad-tab:") and PANE:
         print(f"DIAG {cid}: no rect, clicking its measured place", flush=True) if cid not in WARNED else None; WARNED.add(cid)
         return rt("click", PANE["x"] + TAB_AT[cid.split(":", 1)[1]], PANE["y"] - 15).get("t0")
     if not r: print(f"DIAG no control {cid}", flush=True); return None
     return rt("click", GX + r["x"] + r["w"] / 2, GY + r["y"] + r["h"] / 2).get("t0")
+def pane_now():
+    """The pane as it is now: the widest KiCad frame mapped near the pane's top (Full size widens it); else PANE."""
+    best = None
+    for w in windows():
+        if w.get("shown") and "kicad" in w.get("wm_class", "").lower() and w["w"] > 300 and w["h"] > 300 and abs(w["root_y"] - PANE.get("y", 0)) < 60 and w["root_x"] >= 0:
+            if not best or w["w"] > best["w"]: best = w
+    return {"x": best["root_x"], "y": best["root_y"], "w": best["w"], "h": best["h"]} if best else PANE
 def kicad_report(tag):
     rs = [m for m in metrics("kicad") if m.get("tag") == tag]
     return rs[-1] if rs else {}
@@ -541,8 +551,10 @@ elif "editors" in JOURNEYS and SOCK:
     ref = refs[0] if refs else ""
     sel = ipc("select-items", SOCK, "pcb", ref, "1"); time.sleep(1.0)
     rt("click", CX, CY); time.sleep(0.5)  # the footprint, centred by the zoom, clicked: the canvas has the keyboard and the footprint is selected
-    if not ipc("selection", SOCK, "pcb").get("count"):  # the click missed the footprint's body (and cleared the selection): select it again
-        sel = ipc("select-items", SOCK, "pcb", ref, "0"); time.sleep(0.5)
+    sl = ipc("selection", SOCK, "pcb")
+    if not sl.get("count") or not any("FootprintInstance" in t for t in sl.get("types", [])):
+        # the click hit a pad (a module's pads cover its middle) or nothing: the footprint itself, selected again (the keyboard stays in the canvas)
+        rt("key", "Escape"); time.sleep(0.3); sel = ipc("select-items", SOCK, "pcb", ref, "0"); time.sleep(0.5)
     print(f"INFO editors: {ref} selected over the API ({sel.get('found')}), clicked; selection {ipc('selection', SOCK, 'pcb')}", flush=True)
     r = rt("key", "e", "ctrl")
     a = editor_watch("editor_fp_ctrl_e", "FP", r["t0"])
@@ -715,13 +727,16 @@ if "plan" in JOURNEYS and SOCK:
                 g_2 = grab(m2["root_x"], m2["root_y"], m2["w"], m2["h"]); bb = bbox(g_1, g_2)
                 if bb: item = (m2["root_x"] + m2["w"] // 2, m2["root_y"] + (bb[1] + bb[3]) // 2)
             rt("key", "Escape"); time.sleep(0.4)
+        if not item and m1:  # no checkmark difference found: the row as measured at 1800x1050 (95 px below the menu's top)
+            item = (m1["root_x"] + 100, m1["root_y"] + 95)
         print(f"INFO plan view menu: {'open' if m1 else 'did not open'}; item at {item}", flush=True)
-        RESULTS["plan_menu_found"] = {"ms": None, "ok": int(bool(item))}
+        menu_ok = []
         if item:
             for i in range(2):
                 def by_menu():
                     open_view(); return rt("click", *item)["t0"]
-                toggled(f"plan_menu{i}_{'on' if not STATE['on'] else 'off'}", by_menu)
+                menu_ok.append(toggled(f"plan_menu{i}_{'on' if not STATE['on'] else 'off'}", by_menu))
+        RESULTS["plan_menu_found"] = {"ms": None, "ok": int(bool(item) and any(menu_ok))}
         # D. the key with the canvas holding the keyboard (a click on an empty corner first)
         def key_after_click():
             rt("click", PANE["x"] + 60, PANE["y"] + PANE["h"] - 140); time.sleep(0.2); return press_plan_key()
@@ -864,6 +879,14 @@ elif "markers" in JOURNEYS and SOCK:
     fps = fp_positions(); refs = sorted(fps)[:: max(1, len(fps) // 8)][:8]
     ms_ = [{"id": f"rv-{r}", "title": f"review finding at {r}", "severity": i % 3, "x_mm": fps[r][0], "y_mm": fps[r][1]} for i, r in enumerate(refs)]
     CVm = (PANE["x"] + 40, PANE["y"] + 110, PANE["w"] - 80, PANE["h"] - 180)
+    # where the first marker's ring is drawn: it alone, the pixels it changes (KiCad draws it a fixed size on screen)
+    ring = None
+    if ms_:
+        ga = grab(*CVm); ipc("set-host-markers", SOCK, "pcb", "review", json.dumps(ms_[:1])); time.sleep(0.6); gb = grab(*CVm)
+        c_ = changed_centroid(ga, gb, 10)
+        if c_: ring = (CVm[0] + c_[0], CVm[1] + c_[1])
+        ipc("set-host-markers", SOCK, "pcb", "review", "[]"); time.sleep(0.6)
+        print(f"INFO markers: {ms_[0]['id']} drawn at {ring}", flush=True)
     g0 = grab(*CVm); t0 = now(); r_ = ipc("set-host-markers", SOCK, "pcb", "review", json.dumps(ms_)); call_ms = round(now() - t0)
     seen = None
     while now() - t0 < 3000:
@@ -873,9 +896,9 @@ elif "markers" in JOURNEYS and SOCK:
     time.sleep(0.5); shot("markers_drawn")
     gm = ipc("get-markers", SOCK, "pcb", "host"); print(f"INFO markers: GetMarkers(include_host) {gm.get('counts')}", flush=True)
     clicked = None
-    if to_scr and ms_:
+    if (ring or to_scr) and ms_:
         since = ipc("events", SOCK, "0").get("next", 0); m0 = ms_[0]
-        sx, sy = to_scr(m0["x_mm"], m0["y_mm"]); t1 = rt("click", sx, sy)["t0"]
+        sx, sy = ring if ring else to_scr(m0["x_mm"], m0["y_mm"]); t1 = rt("click", sx, sy)["t0"]
         e = wait_event(since, 26, 3)
         clicked = e.get("marker") if e else None
         perf("marker_click_event", round(now() - t1) if e else -1, marker=json.dumps(clicked), at=f"{sx:.0f},{sy:.0f}")
