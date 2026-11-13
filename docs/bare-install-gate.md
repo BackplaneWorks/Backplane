@@ -34,7 +34,7 @@ and exits non-zero on any FAIL.
 
 | Step | How | Oracle |
 |---|---|---|
-| Install | `curl -fsSL …/install.sh \| sh` as `person` (release), or `BACKPLANE_ARCHIVE=… sh install.sh` (commit); with no curl on the desktop, the `wget -qO- … \| sh` the docs give | `backplane-app` installed; the installer's words |
+| Install | the README's first install line as `person` (curl, else wget: the stock desktop has wget only), on the release's installer; a commit's build installs with `BACKPLANE_ARCHIVE=… sh install.sh`, and the README's line is checked to fetch install.sh with what the desktop has | `backplane-app` in `~/.local/bin` |
 | Desktop libraries | `ldd` on every ELF of the build | classified against the desktop manifest |
 | First start | `backplane-app` as from the menu; Use this folder (xdotool on the rectangle the client logs) | hub answers `/hello`; time to the first window and to the hub |
 | Setup to KiCad | Next (Enter) until the step with KiCad | `onboard.step`; KiCad's install starts by itself (else a paper cut, and Install is pressed) |

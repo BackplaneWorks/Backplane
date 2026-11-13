@@ -31,11 +31,36 @@ run)
   SHA=$(git -C "$W" rev-parse --short origin/main)
   (cd "$W" && scripts/bare-gate.sh --commit origin/main --out "$D/run") >"$D/gate.log" 2>&1; rc=$?
   { echo "$(date -Is) $SHA rc=$rc $D"; sed -n '/== timings/,$p' "$D/gate.log"; } >~/.cache/bare-nightly.last
+  # since when each check fails: ~/.cache/bare-nightly.fails keeps "<check>\t<first failing commit>\t<date>" for the checks failing now
+  F=~/.cache/bare-nightly.fails; touch "$F"
+  NOW=$(grep '^FAIL' "$D/run/checks.tsv" 2>/dev/null | cut -f2- | cut -c1-200)
+  { while IFS= read -r c; do [ -z "$c" ] && continue; prev=$(awk -F'\t' -v c="$c" '$1==c{print $2"\t"$3}' "$F" | head -1)
+      printf '%s\t%s\n' "$c" "${prev:-$SHA	$(date +%F)}"; done <<<"$NOW"; } >"$F.new"; mv "$F.new" "$F"
   if [ $rc != 0 ]; then
     H=${BACKPLANE_NIGHTLY_HOME:-$HOME/.backplane-gpui-fresh/home}; P=$(cut -d' ' -f2 "$H/hub.lock" 2>/dev/null)
-    MSG=$(printf 'Bare-install gate FAILED on %s (nightly, %s). Failed checks and paper cuts:\n%s\nLog: %s' "$SHA" "$(date +%F)" \
-      "$(sed -n '/== paper cuts/,$p' "$D/gate.log" | head -40)" "$D/gate.log")
-    [ -n "$P" ] && bun "$W/test/bare/hub.mjs" "$P" "$H/token" rpc turn.start "$(python3 -c 'import json,sys;print(json.dumps({"thread":sys.argv[1],"text":sys.argv[2]}))' "$T" "$MSG")" >"$D/post.json" 2>&1 \
+    # one message that stands on its own: what failed and since when, the paper cuts, where the screenshots and logs are
+    MSG=$(python3 - "$F" "$SHA" "$D" <<'PYM'
+import sys, os
+f, sha, d = sys.argv[1:4]
+rows = [l.rstrip("\n").split("\t") for l in open(f) if l.strip()]
+out = [f"Bare-install gate FAILED on {sha} (nightly {os.path.basename(d)}): {len(rows)} check(s)."]
+for c, since, day in ((r + ["", ""])[:3] for r in rows):
+    out.append(f"- {c} (failing since {since}{', ' + day if day else ''}{'; new tonight' if since == sha else ''})")
+g = os.path.join(d, "gate.log")
+cuts = []
+if os.path.exists(g):
+    lines = open(g, errors="replace").read().splitlines()
+    if "== paper cuts" in "\n".join(lines):
+        i = next(n for n, l in enumerate(lines) if l.startswith("== paper cuts"))
+        cuts = [l.strip() for l in lines[i + 1:i + 12] if l.startswith("  [")]
+if cuts: out += ["Paper cuts:"] + [f"  {c}" for c in cuts]
+shots = os.path.join(d, "run", "shots")
+if os.path.isdir(shots): out.append(f"Screenshots: {shots}/ ({len(os.listdir(shots))} files; 12-bom.png, 17-gerbers.png and the like by step)")
+out.append(f"Log: {g}; the run's logs: {os.path.join(d, 'run', 'logs')}/")
+print("\n".join(out))
+PYM
+)
+    [ -n "$P" ] && bun "$W/test/bare/hub.mjs" "$P" "$H/token" rpc turn.start "$(python3 -c 'import json,sys;print(json.dumps({"thread":sys.argv[1],"text":sys.argv[2]}))' "$T" "$MSG")" >"$D/post.json" \
       || echo "nightly: could not post to $T (no hub at $H)" >>~/.cache/bare-nightly.last
   fi
   exit $rc ;;
