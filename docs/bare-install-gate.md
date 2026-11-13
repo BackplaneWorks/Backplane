@@ -59,6 +59,10 @@ Every X call the harness makes (xdotool, screenshots, xwininfo) and every hub or
 the step (each phase prints `STEP <seconds> <name>`), with the box's processes in `logs/xstuck.txt`. Rerun 3 lost 46 minutes to one
 unbounded X call in the second session.
 
+The stand-in stays alive across turns and reloads its plan configuration each turn: the journey supplies the plan after the co-edit and
+comment. Run `python3 test/bare/coedit_standin_test.py` to check that sequence without a model or KiCad. Fab is opened by the client's
+script before its `fab` mark, so Review's rectangle is captured before the harness reads it.
+
 ## Stock KiCad compatibility (test/bare/stock_compat.py)
 
 The fork saves natively; a person with a release KiCad gets the fork's export, `kicad-cli project downgrade --target 10.0`. For each project:

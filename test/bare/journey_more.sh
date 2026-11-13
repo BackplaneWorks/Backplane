@@ -28,7 +28,8 @@ cat >"$HH/panels.json" <<J
 [{"wait":3000},{"click":"project:$pid_"},{"wait":2000},{"click":"page-thread:$tid"},{"wait":2500},{"click":"rail:Board"},{"wait":2500},{"click":"ui:Edit"},
  {"kicad":{"wait_painted":120000,"kind":"PCB","tag":"p2"}},{"kicad":{"report":true,"tag":"p2"}},{"mark":"p2-ready"},{"wait":30000},{"kicad":{"report":true,"tag":"p2c"}},{"mark":"commented"},
  {"wait":8000},{"mark":"bom"},{"wait":8000},
- {"click":"mgmt:checks"},{"wait":8000},{"mark":"checks"},{"wait":60000},
+ {"click":"mgmt:checks"},{"wait":8000},{"mark":"checks"},{"wait":30000},
+ {"click":"mgmt:fab"},{"wait":3000},{"mark":"fab"},{"wait":60000},
  {"click":"rail:Gerbers"},{"wait":6000},{"mark":"gerbers"},{"wait":300000},{"mark":"end2"}]
 J
 cp "$HH/win.log" "$OUT/logs/win-1.log" 2>/dev/null; : >"$HH/win.log"; T2=$(date +%s.%N)
@@ -101,7 +102,7 @@ if [ -n "$ROW" ]; then
 else bad "the Checks panel has no DRC row ($CHK)"; fi
 
 # Fab, then Review: the design review writes .backplane/design-review.json in the project
-phase "Fab and Review"; read -r fx fy _ < <(ctl_xy "mgmt:fab"); [ -n "${fx:-}" ] && X mousemove "$fx" "$fy" click 1; sleep 3; shot 15-fab
+phase "Fab and Review"; markt fab 120; shot 15-fab
 read -r rx ry _ < <(ctl_xy "mgmt:fab:review")
 if [ -n "${rx:-}" ]; then t=$(date +%s.%N); X mousemove "$rx" "$ry" click 1
   for _ in $(seq 100); do [ -s "$HH/Documents/pic_programmer/.backplane/design-review.json" ] && break; sleep 0.5; done; shot 16-review
@@ -110,7 +111,7 @@ if [ -n "${rx:-}" ]; then t=$(date +%s.%N); X mousemove "$rx" "$ry" click 1
 else bad "no Fab panel or Review button (mgmt:fab, mgmt:fab:review)"; fi
 
 # Gerbers tab (the script's own click): the mfg/ set drawn
-# the script clicks Gerbers 60 s after its checks mark (the room for Fab and Review); the paint follows the click
+# the script clicks Gerbers 60 s after its Fab mark (the room for Review); the paint follows the click
 # what is on screen 3 s after the click (the window lives 40 s more), then the paint is waited for; KiCad's own report says if the
 # pane holds GerbView
 phase "Gerbers tab"; markt gerbers 600; sleep 3; shot 17-gerbers; for _ in $(seq 80); do grep '"event":"plot_painted"' "$HH/win.log" | grep -q '/mfg' && break; sleep 0.25; done
