@@ -20,7 +20,7 @@ const MAX_PARTS: usize = 400;
 pub fn lifecycle_of(s: &str) -> &'static str {
     let l = s.to_ascii_lowercase();
     if l.is_empty() { "unknown" }
-    else if l.contains("not recommended") || l.contains("nrnd") { "nrnd" }
+    else if l.contains("not recommended") || l.contains("nrnd") || l.contains("not for new designs") { "nrnd" }
     else if l.contains("end of life") || l.contains("obsolete") || l.contains("discontinued") || l.contains("eol") || l.contains("last time buy") { "eol" }
     else if l.contains("active") || l.contains("new product") || l.contains("production") { "active" }
     else { "unknown" }
@@ -56,26 +56,38 @@ pub fn bom_series(lines: &[(String, u64)], hist: &HashMap<String, Vec<Value>>, b
 }
 
 /// The panel's data from the BOM's lines (as published: id, refs, mpn, key, qty) and each key's samples.
+/// How much a part's lifecycle matters, by its reference's letters (0 first): ICs, crystals and modules (often single-source), then
+/// connectors and switches, diodes and LEDs, inductors and ferrites, and the jellybean resistors and capacitors last.
+pub fn risk(reference: &str) -> u8 {
+    let p: String = reference.chars().take_while(|c| c.is_ascii_alphabetic()).collect::<String>().to_ascii_uppercase();
+    match p.as_str() { "U" | "IC" | "Q" | "Y" | "X" | "M" | "MOD" | "ANT" | "AE" => 0, "J" | "P" | "CN" | "SW" | "S" | "BT" | "K" => 1, "D" | "LED" | "TVS" | "F" => 2, "L" | "FB" | "T" => 3, _ => 4 }
+}
+/// The parts list's order: EOL, NRND, out of stock, low, then the rest as the BOM has them.
+pub fn order(p: &Value) -> u8 {
+    match (p["lifecycle"].as_str(), p["stock_status"].as_str()) { (Some("eol"), _) => 0, (Some("nrnd"), _) => 1, (_, Some("out")) => 2, (_, Some("low")) => 3, _ => 4 }
+}
 pub fn data(lines: &[Value], hist: &HashMap<String, Vec<Value>>, boards: u64) -> Value {
     let mut counts: BTreeMap<&str, usize> = [("active", 0), ("nrnd", 0), ("eol", 0), ("unknown", 0)].into_iter().collect();
-    let (mut ps, mut total, mut since) = (vec![], 0usize, u64::MAX);
+    let (mut ps, mut total, mut since, mut unchecked) = (vec![], 0usize, u64::MAX, 0usize);
     for l in lines {
         let Some(k) = l["key"].as_str() else { continue };
         let ss = hist.get(k).cloned().unwrap_or_default();
         let life = last_life(&ss); *counts.get_mut(life).unwrap() += 1;
+        if life == "unknown" && !ss.iter().any(|s| s["life_at"].is_u64()) { unchecked += 1 }
         total += ss.len();
         if let Some(a) = ss.first().and_then(|s| s["at"].as_u64()) { since = since.min(a) }
         let last = ss.iter().rev().find(|s| s["stock"].is_i64());
         if ps.len() < MAX_PARTS {
             ps.push(json!({"key": k, "id": l["id"], "refs": l["refs"], "mpn": if l["mpn"].as_str().map_or(true, str::is_empty) { last.map_or(json!(""), |s| s["model"].clone()) } else { l["mpn"].clone() },
-                "lifecycle": life, "stock": last.map_or(json!(null), |s| s["stock"].clone()), "price": last.map_or(json!(null), |s| s["price"].clone()), "n": ss.len(),
+                "lifecycle": life, "stock_status": l["stock"]["status"], "risk": risk(l["refs"][0].as_str().unwrap_or("")), "stock": last.map_or(json!(null), |s| s["stock"].clone()), "price": last.map_or(json!(null), |s| s["price"].clone()), "n": ss.len(),
                 "first": ss.first().map_or(json!(null), |s| s["at"].clone()), "last": ss.last().map_or(json!(null), |s| s["at"].clone())}));
         }
     }
+    ps.sort_by_key(order);
     let keyed: Vec<(String, u64)> = lines.iter().filter_map(|l| Some((l["key"].as_str()?.to_string(), l["qty"].as_u64().unwrap_or(1)))).collect();
     let (cost, instock) = bom_series(&keyed, hist, boards);
     let bad = counts["eol"]; let n = bad + counts["nrnd"];
-    json!({"badge": {"n": n, "tone": if bad > 0 { "bad" } else if n > 0 { "warn" } else { "" }}, "counts": counts, "samples": total, "since": if since == u64::MAX { json!(null) } else { json!(since) },
+    json!({"badge": {"n": n, "tone": if bad > 0 { "bad" } else if n > 0 { "warn" } else { "" }}, "counts": counts, "unchecked": unchecked, "samples": total, "since": if since == u64::MAX { json!(null) } else { json!(since) },
         "parts": ps, "boards": boards.max(1), "bom": {"cost": cost, "instock": instock, "lines": keyed.len()}})
 }
 
@@ -84,7 +96,7 @@ pub async fn publish(hub: &Arc<Hub>, pro: &str, bom: &Value, hist: &HashMap<Stri
     let lines: Vec<Value> = bom["lines"].as_array().cloned().unwrap_or_default();
     let boards = bom["boards"].as_u64().unwrap_or(1);
     mgmt::publish(hub, "life", pro, data(&lines, hist, boards)).await;
-    { let mut w = wanted().lock().unwrap(); for l in &lines { if let (Some(k), Some(m)) = (l["key"].as_str(), l["mpn"].as_str().filter(|m| !m.is_empty())) { w.insert(k.to_string(), m.to_string()); } } }
+    { let mut w = wanted().lock().unwrap(); for l in &lines { if let (Some(k), Some(m)) = (l["key"].as_str(), l["mpn"].as_str().filter(|m| !m.is_empty())) { w.insert(k.to_string(), m.to_string()); dk_wanted().lock().unwrap().insert(k.to_string(), (m.to_string(), risk(l["refs"][0].as_str().unwrap_or("")))); } } }
 }
 
 pub struct LifePanel;
@@ -96,6 +108,27 @@ impl mgmt::Panel for LifePanel {
 }
 
 // Lifecycle readings ---------------------------------------------------------------------------------------------------
+
+/// Parts (key -> MPN, risk) of the BOMs shown, for DigiKey's readings.
+fn dk_wanted() -> &'static Mutex<HashMap<String, (String, u8)>> { static W: OnceLock<Mutex<HashMap<String, (String, u8)>>> = OnceLock::new(); W.get_or_init(Default::default) }
+/// DigiKey's product status is read for a part once a month at most.
+pub const DK_EVERY: u64 = 30 * DAY;
+pub const DK_PER_DAY: usize = 30;
+const DK_GAP: Duration = Duration::from_secs(300);
+/// The next part DigiKey should be asked about: the most at risk (`risk`) with no DigiKey reading in DK_EVERY, by key for ties.
+pub fn dk_next(home: &Path, wanted: &HashMap<String, (String, u8)>, now: u64) -> Option<(String, String)> {
+    let mut v: Vec<(&String, &(String, u8))> = wanted.iter().collect();
+    v.sort_by_key(|(k, (_, r))| (*r, (*k).clone()));
+    v.into_iter().find(|(k, _)| !parthist::read(home, k).iter().any(|s| s["source"] == "digikey" && s["life_at"].as_u64().map_or(false, |a| now.saturating_sub(a) < DK_EVERY))).map(|(k, (m, _))| (k.clone(), m.clone()))
+}
+/// DigiKey's answer: Some(words) for a reading ("" when it has the part but states no status, or has no such part), None for an answer
+/// that is no reading (a quota, a limit, an outage: asked again later, and no more today).
+pub fn dk_words(v: &Value, mpn: &str) -> Option<String> {
+    if let Some(e) = v["error"].as_str() { return e.to_ascii_lowercase().contains("not found").then(String::new) }
+    let rs: Vec<&Value> = match v["results"].as_array() { Some(a) => a.iter().collect(), None => vec![v] };
+    Some(rs.iter().find(|r| r["mfr_part_number"].as_str().or(r["manufacturer_part_number"].as_str()).map_or(false, |m| parts::same_mpn(m, mpn)))
+        .and_then(|r| r["lifecycle"].as_str().or(r["product_status"].as_str())).unwrap_or("").to_string())
+}
 
 /// Parts (key -> MPN) of the BOMs shown, for lifecycle readings.
 fn wanted() -> &'static Mutex<HashMap<String, String>> { static W: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new(); W.get_or_init(Default::default) }
@@ -121,6 +154,7 @@ pub fn start(hub: &Arc<Hub>) {
     mgmt::register(Arc::new(LifePanel));
     hub.register_rpc(Arc::new(LifeRpc));
     if crate::copy::on() { return }
+    dk_loop();
     tokio::spawn(async move {
         let (mut day, mut calls) = (0u64, 0usize);
         // BACKPLANE_PARTS_LIFE_GAP_S: the tests' shorter wait between lifecycle readings
@@ -156,6 +190,37 @@ pub fn start(hub: &Arc<Hub>) {
     });
 }
 
+/// DigiKey's slow schedule: one part every DK_GAP, at most DK_PER_DAY a day (the allowance is shared), the most at risk first.
+fn dk_loop() {
+    tokio::spawn(async move {
+        let gap = std::env::var("BACKPLANE_PARTS_DK_GAP_S").ok().and_then(|s| s.parse().ok()).map(Duration::from_secs).unwrap_or(DK_GAP);
+        let (mut day, mut calls) = (0u64, 0usize);
+        loop {
+            tokio::time::sleep(gap).await;
+            let Some(hub) = HUB.lock().unwrap().as_ref().and_then(Weak::upgrade) else { return };
+            let now = super::ipc::now_s();
+            if now / DAY != day { day = now / DAY; calls = 0; }
+            if calls >= DK_PER_DAY || hub.setting(crate::mcpx::svc::PCBPARTS_KEY).await.as_deref() == Some("off") { continue }
+            let w = dk_wanted().lock().unwrap().clone(); let home = hub.cfg.home.clone();
+            let Some((k, mpn)) = ({ let h = home.clone(); tokio::task::spawn_blocking(move || dk_next(&h, &w, now)).await.ok().flatten() }) else { continue };
+            calls += 1;
+            match crate::mcpx::health::call_tool(&parts::url(), "digikey_get_part", &json!({"product_number": mpn})).await {
+                Ok(v) => match dk_words(&v, &mpn) {
+                    Some(words) => {
+                        let mut s = parthist::read(&home, &k).into_iter().rev().find(|s| s["stock"].is_i64()).unwrap_or(json!({}));
+                        s["at"] = json!(now); s["life_at"] = json!(now); s["key"] = json!(k); s["lifecycle"] = json!(words); s["source"] = json!("digikey");
+                        parthist::append(&home, &k, &s); parts::bump();
+                    }
+                    // a quota or another failure said as an answer: no reading, and no more today
+                    None => calls = DK_PER_DAY,
+                },
+                // a quota, a 429 or an outage: no more today
+                Err(_) => calls = DK_PER_DAY,
+            }
+        }
+    });
+}
+
 pub struct LifeRpc;
 impl crate::api::RpcHandler for LifeRpc {
     fn methods(&self) -> &'static [&'static str] { &["mgmt.life.part"] }
@@ -173,6 +238,23 @@ impl crate::api::RpcHandler for LifeRpc {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn digikey_first_for_the_parts_most_at_risk() {
+        assert_eq!((risk("U3"), risk("J1"), risk("D2"), risk("FB1"), risk("C12"), risk("R1"), risk("Y1")), (0, 1, 2, 3, 4, 4, 0));
+        let d = crate::plat::tmp::dir("dknext"); let mut w = HashMap::new();
+        w.insert("mpn:C".to_string(), ("GRM".to_string(), 4)); w.insert("mpn:U".to_string(), ("NRF".to_string(), 0)); w.insert("mpn:J".to_string(), ("SM04".to_string(), 1));
+        assert_eq!(dk_next(&d, &w, 1000).unwrap().0, "mpn:U");
+        parthist::append(&d, "mpn:U", &json!({"at": 900, "key": "mpn:U", "life_at": 900, "source": "digikey", "lifecycle": "Active"}));
+        assert_eq!(dk_next(&d, &w, 1000).unwrap().0, "mpn:J", "read this month");
+        assert_eq!(dk_next(&d, &w, 900 + DK_EVERY).unwrap().0, "mpn:U", "a month later");
+        // its answer as the parts search gives it (2026-11-13, NRF54LM20B-PAAA-R)
+        assert_eq!(dk_words(&json!({"results": [{"source": "digikey", "mfr_part_number": "NRF54LM20B-PAAA-R", "lifecycle": "Active"}], "total": 1}), "NRF54LM20B-PAAA-R").as_deref(), Some("Active"));
+        assert_eq!(dk_words(&json!({"mfr_part_number": "NRF", "lifecycle": "Not For New Designs"}), "NRF").as_deref(), Some("Not For New Designs"));
+        assert_eq!(lifecycle_of("Not For New Designs"), "nrnd"); assert_eq!(dk_words(&json!({"results": [{"mfr_part_number": "OTHER", "lifecycle": "Active"}]}), "NRF").as_deref(), Some(""));
+        assert_eq!(dk_words(&json!({"error": "Part not found: X"}), "X").as_deref(), Some(""), "no such part: a reading that says nothing");
+        assert_eq!(dk_words(&json!({"error": "Daily request limit reached"}), "X"), None, "a limit is no reading");
+        let parts = vec![json!({"lifecycle": "active", "stock_status": "low"}), json!({"lifecycle": "eol"}), json!({"lifecycle": "unknown", "stock_status": "out"}), json!({"lifecycle": "nrnd"})];
+        let mut p = parts.clone(); p.sort_by_key(order); assert_eq!(p.iter().map(order).collect::<Vec<_>>(), [0, 1, 2, 3]);
+    }
     #[test] fn lifecycle_words() {
         for (w, l) in [("Not Recommended for New Designs", "nrnd"), ("End of Life", "eol"), ("Obsolete", "eol"), ("Discontinued at Digi-Key", "eol"), ("Active", "active"), ("New Product", "active"), ("", "unknown"), ("Something", "unknown")] { assert_eq!(lifecycle_of(w), l, "{w}") }
         assert_eq!(last_life(&[json!({"lifecycle": "Active"}), json!({"lifecycle": ""}), json!({})]), "active"); assert_eq!(last_life(&[]), "unknown");
@@ -195,7 +277,7 @@ mod tests {
         let d = data(&lines, &h, 1);
         assert_eq!(d["counts"], json!({"active": 0, "eol": 1, "nrnd": 1, "unknown": 1}));
         assert_eq!((d["badge"]["n"].as_u64(), d["badge"]["tone"].as_str(), d["samples"].as_u64(), d["since"].as_u64()), (Some(2), Some("bad"), Some(3), Some(100)));
-        assert_eq!(d["parts"].as_array().unwrap().len(), 3); assert_eq!(d["parts"][0]["lifecycle"], "nrnd"); assert_eq!(d["parts"][2]["n"], 0);
+        assert_eq!(d["parts"].as_array().unwrap().len(), 3); assert_eq!(d["parts"][0]["lifecycle"], "eol", "EOL first"); assert_eq!(d["parts"][1]["lifecycle"], "nrnd"); assert_eq!(d["parts"][2]["n"], 0); assert_eq!(d["unchecked"], 1);
     }
     #[test] fn mouser_readings_and_whats_due() {
         let asked = vec![("mpn:A".to_string(), "AP2553W6-7".to_string()), ("mpn:B".to_string(), "X1".to_string())];

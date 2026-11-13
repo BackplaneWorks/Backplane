@@ -42,10 +42,17 @@ for l in ls:
     s = l.get("stock") or {}
     if s.get("status") in ("out", "low", "unknown"): print(f"  {', '.join(l['refs'])[:30]:30} {l.get('mpn') or l.get('fab'):28} {s.get('status'):8} {s.get('stock', '')} {s.get('why', '')}")
 PY
-python3 "$XINPUT_PY" move 10 10 >/dev/null 2>&1 || true
-shot "real_bom"
 GX=$(python3 "$DRIVER_PY" list-windows --pid "$CP" | python3 -c 'import json,sys; w=sorted([x for x in json.load(sys.stdin) if x.get("shown")], key=lambda x: -x.get("w",0)*x.get("h",0)); print(w[0]["xid"] if w else "")')
+# narrow: docked at the right, 400 px; wide: docked at the bottom, the pane's whole width
+size() { local side=right sz=400; [ "$1" = wide ] && side=bottom sz=460; hub_rpc "[{\"method\":\"mgmt.panel\",\"params\":{\"project\":\"$PRO\",\"side\":\"$side\",\"size\":$sz}}]" >/dev/null; sleep 2; python3 "$XINPUT_PY" move 10 10 >/dev/null 2>&1 || true; sleep 0.5; }
+size narrow; shot "real_bom_narrow"
+size wide; shot "real_bom_wide"
 click_gpui_control "$OUT/client.log" "$GX" "mgmt:life" || true
-sleep 3; python3 "$XINPUT_PY" move 10 10 >/dev/null 2>&1 || true; shot "real_life"
-L=$(info life); python3 -c 'import json,sys; v=json.loads(sys.argv[1]); print("lifecycle:", v.get("counts"), "samples:", v.get("samples"))' "$L"
+# lifecycle readings come on their slow schedule: give DigiKey and Mouser LIFE_WAIT_S to read the parts most at risk
+sleep "${LIFE_WAIT_S:-240}"
+L=$(info life); python3 -c 'import json,sys; v=json.loads(sys.argv[1]); print("lifecycle:", v.get("counts"), "unchecked:", v.get("unchecked"), "samples:", v.get("samples"))' "$L"
+KEY=$(python3 -c 'import json,sys; v=json.loads(sys.argv[1]); ps=sorted(v.get("parts",[]), key=lambda p: -p.get("n",0)); print(ps[0]["key"] if ps else "")' "$L")
+size narrow; click_gpui_control "$OUT/client.log" "$GX" "mgmt:life:$KEY" || true; sleep 3; python3 "$XINPUT_PY" move 10 10 >/dev/null 2>&1 || true; shot "real_life_narrow"
+size wide; shot "real_life_wide"
+echo "part shown: $KEY"
 echo "artifacts: $OUT"

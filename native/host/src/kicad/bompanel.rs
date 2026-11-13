@@ -70,7 +70,9 @@ pub fn data(ps: &[bom::Part], source: &str, at: u64, boards: u64, quote: &dyn Fn
 pub fn annotate(l: &mut Value, hist: &HashMap<String, Vec<Value>>) {
     let Some(k) = l["key"].as_str().map(str::to_string) else { return };
     let ss = hist.get(&k).map(Vec::as_slice).unwrap_or(&[]);
-    if let Some(r) = ss.iter().rev().find(|s| s["life_at"].is_u64()) {
+    // the latest reading that said something (a distributor that states none does not undo another's word), else the latest reading
+    let said = ss.iter().rev().find(|s| s["life_at"].is_u64() && s["lifecycle"].as_str().map_or(false, |w| !w.is_empty()));
+    if let Some(r) = said.or_else(|| ss.iter().rev().find(|s| s["life_at"].is_u64())) {
         let words = r["lifecycle"].as_str().unwrap_or("");
         l["lifecycle"] = json!({"status": super::lifepanel::lifecycle_of(words), "words": words, "source": r["source"].as_str().unwrap_or("mouser"), "checked": r["life_at"]});
     }

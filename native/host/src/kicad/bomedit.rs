@@ -77,11 +77,12 @@ pub fn message(field: &str, refs: &[String], value: &str) -> String {
 /// KiCad (bp.13 on) puts them in the person's own undo; before that the name is an actor of its own and the panel offers its own Undo.
 
 pub const AS_PERSON: bool = true;
-/// Who takes a GUI edit back: "kicad" when it went as the person to a runtime that puts it in their undo (bp.13 on), else "panel" (the
-/// panel offers its own undo: the old value, `was`, written back).
-pub fn undo_by(version: &str, as_person: bool) -> &'static str {
+/// Who takes a GUI edit back: "kicad" on the runtimes where the e2e proved the person's Ctrl+Z takes the panel's commit back
+/// (test/kicad_embed/embed_mgmt_e2e.sh M6: Backplane KiCad bp.10, bp.11, bp.12; bp.13 puts `person:` edits in the person's own undo by
+/// design), else "panel". The panel offers its own Undo either way.
+pub fn undo_by(version: &str, _as_person: bool) -> &'static str {
     let bp = version.split("-bp.").nth(1).and_then(|t| t.split(|c: char| !c.is_ascii_digit()).next()).and_then(|n| n.parse::<u32>().ok()).unwrap_or(0);
-    if as_person && bp >= 13 { "kicad" } else { "panel" }
+    if bp >= 10 { "kicad" } else { "panel" }
 }
 
 static AGENTS: OnceLock<Weak<crate::agents::Agents>> = OnceLock::new();
@@ -242,8 +243,8 @@ mod tests {
         assert!(check(&json!({"field": "footprint", "refs": ["R1"], "value": "R_0603"})).is_err());
         assert_eq!(check(&json!({"field": "mpn", "refs": ["R1", "bad ref", "R2"], "value": " RC0603 "})).unwrap(), ("mpn".into(), vec!["R1".into(), "R2".into()], "RC0603".into()));
         assert_eq!(message("mpn", &["R1".into(), "R2".into()], "RC0603"), "BOM: MPN of R1, R2 = RC0603");
-        assert_eq!(undo_by("10.99.0-bp.13", true), "kicad"); assert_eq!(undo_by("10.99.0-bp.13-rc1", true), "kicad"); assert_eq!(undo_by("10.99.0-bp.13", false), "panel");
-        assert_eq!(undo_by("10.99.0-bp.12", true), "panel"); assert_eq!(undo_by("10.0.6", true), "panel"); assert_eq!(undo_by("", true), "panel");
+        for v in ["10.99.0-bp.10", "10.99.0-bp.11", "10.99.0-bp.12", "10.99.0-bp.12-851cbefda6", "10.99.0-bp.13"] { assert_eq!(undo_by(v, true), "kicad", "{v}"); assert_eq!(undo_by(v, false), "kicad", "{v}"); }
+        for v in ["10.99.0-bp.9", "10.0.6", ""] { assert_eq!(undo_by(v, true), "panel", "{v}"); }
         assert_eq!(message("dnp", &["R1".into(), "R2".into(), "R3".into(), "R4".into(), "R5".into()], "yes"), "BOM: DNP of R1, R2, R3 and 2 more = yes");
     }
 }
