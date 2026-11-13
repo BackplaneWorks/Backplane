@@ -187,11 +187,14 @@ pub fn sum_for(sums: &str, asset: &str) -> Option<String> {
     sums.lines().find_map(|l| { let mut it = l.split_whitespace(); let (h, f) = (it.next()?, it.next()?); let f = f.trim_start_matches('*').trim_start_matches("./"); (f == asset).then(|| h.to_ascii_lowercase()) })
 }
 /// Every member of the archive under `root`, none climbing out (`..`, an absolute path, a drive, a backslash path).
-pub fn members_ok(list: &str, root: &str) -> Result<(), String> {
+/// `windows`: names are also refused with a colon (a drive, or an alternate data stream there) or a backslash; elsewhere a colon is an
+/// ordinary character (Linux's runtime carries Debian's license folders, `licenses/debian/libc6:amd64`, and refusing them stopped every
+/// install in the bare gate's rerun 6).
+pub fn members_ok(list: &str, root: &str, windows: bool) -> Result<(), String> {
     let mut n = 0;
     for m in list.lines().map(str::trim_end).filter(|m| !m.is_empty()) {
         let m = m.strip_prefix("./").unwrap_or(m);
-        if m.starts_with('/') || m.contains('\\') || m.contains(':') || m.split('/').any(|c| c == ".." || c == ".") { return Err("Unsafe runtime archive path".into()) }
+        if m.starts_with('/') || (windows && (m.contains('\\') || m.contains(':'))) || m.split('/').any(|c| c == ".." || c == ".") { return Err("Unsafe runtime archive path".into()) }
         if m.trim_end_matches('/') != root && !m.starts_with(&format!("{root}/")) { return Err("Unexpected runtime archive root".into()) }
         n += 1;
     }
@@ -250,7 +253,7 @@ pub fn unzip_capped(zip: &Path, root: &str, into: &Path, cap: u64) -> Result<(),
     let f = std::fs::File::open(zip).map_err(|e| format!("Could not read the KiCad archive: {e}"))?;
     let mut a = zip::ZipArchive::new(std::io::BufReader::new(f)).map_err(|e| format!("Could not read the KiCad archive: {e}"))?;
     let names: Vec<String> = (0..a.len()).map(|i| a.name_for_index(i).unwrap_or("").replace('\\', "/")).collect();
-    members_ok(&names.join("\n"), root)?;
+    members_ok(&names.join("\n"), root, true)?;
     names_ok_for_windows(&names)?;
     let mut total = 0u64;
     for i in 0..a.len() { total = total.saturating_add(a.by_index_raw(i).map_err(|e| format!("Could not read the KiCad archive: {e}"))?.size()); }
@@ -431,7 +434,7 @@ pub async fn fetch(t: &Tools, base: &str, parent: &Path, p: &Package, log: &Path
     } else {
         let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
         let members = tool(&t.tar, &s(&["-tzf", &pkg.to_string_lossy()]), log, || {}).await.map_err(|e| format!("Could not read the KiCad archive: {e}"))?;
-        members_ok(&members, &root)?;
+        members_ok(&members, &root, p.platform.starts_with("windows"))?;
         tool(&t.tar, &s(&["-xzf", &pkg.to_string_lossy(), "-C", &unpack.to_string_lossy()]), log, || {}).await.map_err(|e| format!("Could not unpack KiCad: {e}"))?;
     }
     let runtime = unpack.join(&root);
@@ -515,7 +518,9 @@ pub async fn run(standin: Option<&Path>, parent: &Path, p: &Package, log: &Path,
     if standin.is_none() && rust_fetch() {
         let _ = std::fs::write(log, "");
         let t = tools()?;
-        return fetch(&t, &base_url(p), parent, p, log, &mut step, &mut bytes).await.map(|d| d.to_string_lossy().into_owned());
+        let r = fetch(&t, &base_url(p), parent, p, log, &mut step, &mut bytes).await.map(|d| d.to_string_lossy().into_owned());
+        if let Err(why) = &r { if let Ok(mut f) = std::fs::OpenOptions::new().append(true).create(true).open(log) { let _ = std::io::Write::write_all(&mut f, format!("Failed: {why}\n").as_bytes()); } }
+        return r;
     }
     let out = std::fs::File::create(log).map_err(|e| format!("could not write {}: {e}", log.display()))?;
     let err = out.try_clone().map_err(|e| e.to_string())?;
@@ -898,11 +903,15 @@ cp \"$f\" \"$out\"
     #[test] fn the_sums_line_and_the_members_are_read_here() {
         assert_eq!(sum_for("abc  other.tgz\nDEF *./a.tar.gz\n", "a.tar.gz").as_deref(), Some("def"));
         assert_eq!(sum_for("abc  a.tar.gz.sig\n", "a.tar.gz"), None);
-        assert_eq!(members_ok("r/\nr/bin/x\n./r/lib/y\n", "r"), Ok(()));
-        for (bad, why) in [("r/../etc/x", "Unsafe"), ("/r/x", "Unsafe"), ("r\\..\\x", "Unsafe"), ("C:/r/x", "Unsafe"), ("other/x", "Unexpected"), ("rr/x", "Unexpected"), ("r/./x", "Unsafe")] {
-            assert!(members_ok(&format!("r/\n{bad}\n"), "r").unwrap_err().starts_with(why), "{bad}");
+        assert_eq!(members_ok("r/\nr/bin/x\n./r/lib/y\n", "r", false), Ok(()));
+        // the Linux runtime's own Debian license folders: a colon is ordinary there (rerun 6 stopped on it), not on Windows
+        assert_eq!(members_ok("r/\nr/licenses/debian/libc6:amd64/\nr/licenses/debian/libc6:amd64/copyright\n", "r", false), Ok(()));
+        assert!(members_ok("r/\nr/licenses/debian/libc6:amd64/copyright\n", "r", true).unwrap_err().starts_with("Unsafe"));
+        for (bad, why) in [("r/../etc/x", "Unsafe"), ("/r/x", "Unsafe"), ("other/x", "Unexpected"), ("rr/x", "Unexpected"), ("r/./x", "Unsafe")] {
+            for w in [false, true] { assert!(members_ok(&format!("r/\n{bad}\n"), "r", w).unwrap_err().starts_with(why), "{bad} {w}"); }
         }
-        assert!(members_ok("", "r").is_err());
+        for bad in ["r\\..\\x", "C:/r/x", "r/x:stream"] { assert!(members_ok(&format!("r/\n{bad}\n"), "r", true).unwrap_err().starts_with("Unsafe"), "{bad}"); }
+        assert!(members_ok("", "r", false).is_err());
         for p in [&LINUX, &MAC, &WINDOWS] { assert_eq!(check_package(p), Ok(()), "{}", p.version) }
     }
     #[cfg(unix)] #[test] fn a_link_out_of_the_runtime_is_refused() {
