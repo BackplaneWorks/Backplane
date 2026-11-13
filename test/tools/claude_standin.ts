@@ -113,6 +113,8 @@ if (process.env.BP_STANDIN_SUMMARY === "1" && args.includes("--no-session-persis
 const at = args.indexOf("--resume");
 const session = at >= 0 ? args[at + 1] : `sess-${process.pid}-${Date.now()}`;
 const logf = process.env.FAKE_LOG ?? "";
+// how much of an MCP call's answer the log keeps (a suite that decodes the answer raises it: plan_get, GetCapabilities)
+const mcpLogMax = Number(process.env.BP_STANDIN_MCPCALL_MAX ?? 600);
 const log = (s: string) => {
   if (logf) appendFileSync(logf, s + "\n");
 };
@@ -457,7 +459,7 @@ async function run(c: Cmd, firstOne: boolean) {
           body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: call.name, arguments: call.arguments } }) });
         got = await r.text();
       } catch (e) { got = String(e); }
-      log(`MCPCALL ${call.name} ${got.slice(0, 600)}`);
+      log(`MCPCALL ${call.name} ${got.slice(0, mcpLogMax)}`);
       emit({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: `MCPRESULT ${got.slice(0, 1500)}` }] }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
       mcGot = got;
     }

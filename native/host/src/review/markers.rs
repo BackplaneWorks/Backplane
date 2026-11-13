@@ -35,14 +35,18 @@ pub fn markers(fs: &[Finding], doc: &str) -> Vec<Value> {
     v.into_iter().take(MAX).map(|x| x.1).collect()
 }
 fn items_empty(m: &Value) -> bool { m["items"].as_array().map_or(true, Vec::is_empty) }
-/// Whether the open KiCad has the command (its capabilities name it).
-pub fn capable(caps: &Value) -> bool { caps.to_string().contains("SetHostMarkers") }
+/// Whether the open KiCad shows host markers: its own GetCapabilities (the embedded editor's, not the headless server's) lists the
+/// capability `embed-host-markers` or the command SetHostMarkers.
+pub fn capable(caps: &Value) -> bool {
+    let has = |k: &str, f: &dyn Fn(&str) -> bool| caps[k].as_array().map_or(false, |a| a.iter().filter_map(Value::as_str).any(|s| f(s)));
+    has("capabilities", &|s| s == "embed-host-markers") || has("commands", &|s| s.ends_with("SetHostMarkers"))
+}
 
 /// Send a run's findings to the open KiCad of the project, if it can show them (the hub's own actor).
-pub async fn send(hub: &Arc<Hub>, pro: &str, fs: &[Finding]) {
+pub async fn send(_hub: &Arc<Hub>, pro: &str, fs: &[Finding]) {
     let Some(route) = crate::files::kicad::embed::gui_route(pro) else { return };
-    let caps = crate::files::kicad::ipc::kicad_ipc_status_in(hub, None, pro).await.map(|v| v["capabilities"].clone()).unwrap_or(Value::Null);
-    if !capable(&caps) { return }
+    let caps = crate::files::kicad::embed::gui_call(&route, "kiapi.backplane.GetCapabilities", json!({})).await;
+    if !capable(&caps["message"]) { return }
     let me = crate::files::kicad::coedit::client_name(&crate::files::kicad::coedit::Who::Hub("review"));
     for (doc, kind) in [("pcb", "FK_PCB"), ("sch", "FK_SCH")] {
         let ms = markers(fs, doc);
@@ -82,6 +86,8 @@ mod tests {
         assert!(p[0]["detail"].as_str().unwrap().ends_with("Fix: fix it"));
         let s = markers(&fs, "sch"); assert_eq!((s.len(), s[0]["sheet_path"].clone()), (1, Value::Null), "items carry their sheet");
         assert!(capable(&json!({"commands": ["kiapi.backplane.embed.SetHostMarkers"]}))); assert!(!capable(&json!({"commands": []})));
+        assert!(capable(&json!({"capabilities": ["routing-plan", "embed-host-markers"], "commands": []})));
+        assert!(!capable(&json!({"capabilities": ["routing-plan"], "commands": ["kiapi.backplane.embed.GetMarkers"]})));
         assert!(!on_event("/p/a.kicad_pro", &json!({"type": "ET_MARKER_CLICKED", "marker": {"set": "agent:router", "id": "x"}})), "another set is not ours");
         assert!(!on_event("/p/a.kicad_pro", &json!({"type": "ET_SELECTION_CHANGED"})));
     }
