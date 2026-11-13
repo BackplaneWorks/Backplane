@@ -11,14 +11,13 @@ use std::{path::{Path, PathBuf}, process::Stdio, sync::{atomic::{AtomicBool, Ord
 
 #[derive(Debug, PartialEq)]
 pub struct Package { pub platform: &'static str, pub version: &'static str, pub release: &'static str, pub asset: &'static str, pub sha256: &'static str, pub format: &'static str, pub cli: &'static str }
-/// Linux and Windows: bp.10 (the embedded editor with live theme, reload on disk, cross-probe, comments, align keys and the fast switch; the
-/// person's default, Nov 11: the newest fork release each time); Apple
-/// Silicon keeps bp.6 (bp.8 has no macOS build).
-pub const LINUX: Package = Package { platform: "linux-x86_64", version: "10.99.0-bp.10", release: "backplane-kicad-v10.99.0-bp.10", asset: "backplane-kicad-linux-x86_64-10.99.0-bp.10.tar.gz", sha256: "21f67f7fab54800831394e3ef80557016f769d99e46f694e7cccb386f7a41181", format: "tar.gz", cli: "bin/kicad-cli" };
+/// Linux: bp.12.1 (bp.12 with the DRC zone guard, `drc-zone-guard`). Windows: bp.10 until its fixes ship. Apple Silicon keeps bp.6
+/// (no newer macOS build yet; bp.13 brings darwin-arm64, then only MAC changes). Each pin is its one line; the tests read them.
+pub const LINUX: Package = Package { platform: "linux-x86_64", version: "10.99.0-bp.12.1", release: "backplane-kicad-v10.99.0-bp.12.1", asset: "backplane-kicad-linux-x86_64-10.99.0-bp.12.1.tar.gz", sha256: "9dbaf96fc8bf0ec998080184ca88cac28a12e985e04496173f2094c68b2fac9b", format: "tar.gz", cli: "bin/kicad-cli" };
 pub const MAC: Package = Package { platform: "darwin-arm64", version: "10.99.0-bp.6", release: "backplane-kicad-v10.99.0-bp.6", asset: "backplane-kicad-darwin-arm64-10.99.0-bp.6.tar.gz", sha256: "99584fb0ee490354098778d39e3aaed9e0f274ee39972851a9cbeabfb271462d", format: "tar.gz", cli: "bin/kicad-cli" };
 pub const WINDOWS: Package = Package { platform: "windows-x86_64", version: "10.99.0-bp.10", release: "backplane-kicad-v10.99.0-bp.10", asset: "backplane-kicad-windows-x86_64-10.99.0-bp.10.zip", sha256: "68b3796f1de3a8c0a39dd20ca96a43f3354de47facbe5de45d0bd4668c32599c", format: "zip", cli: "bin/kicad-cli.exe" };
 /// Where the releases are (said in the consent note, and the script's download base).
-pub const FROM: &str = "github.com/i2cjak/Backplane_KiCad";
+pub const FROM: &str = "github.com/BackplaneWorks/Backplane_KiCad";
 
 /// Install.pick: the package for an OS and architecture (Rust's names or uname's), None where none is published.
 pub fn pick(os: &str, arch: &str) -> Option<&'static Package> {
@@ -72,7 +71,7 @@ trap cleanup 0
 trap 'exit 1' 1 2 15
 stage=$(mktemp -d "$parent/.install-XXXXXX")
 pkg=$stage/$asset
-base=https://github.com/i2cjak/Backplane_KiCad/releases/download/$release/
+base=https://github.com/BackplaneWorks/Backplane_KiCad/releases/download/$release/
 echo "Downloading $asset"
 get "$pkg" "$base$asset" || fail "Could not download $base$asset"
 get "$stage/SUMS" "${base}SHA256SUMS" || fail "Could not download ${base}SHA256SUMS"

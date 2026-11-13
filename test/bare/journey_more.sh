@@ -77,7 +77,14 @@ CHK=$(hub rpc mgmt.watch "{\"project\":\"$PRO\"}" | python3 -c 'import json,sys
 r=json.load(sys.stdin); c=(((r.get("result") or {}).get("data") or {}).get("checks") or {})
 rows=[x for g in c.get("groups",[]) for x in g.get("rows",[])[:3]]
 d=[x for x in rows if x.get("source")=="drc"]
-print(json.dumps({"drc": c.get("drc",{}).get("state"), "erc": c.get("erc",{}).get("state"), "rows": len(rows), "row": (d[0]["id"] if d else "")}))' 2>/dev/null)
+w=[g for g in c.get("groups",[]) if g.get("source")=="stockdrc" and g.get("rule")=="drc_zone_guard_missing"]
+print(json.dumps({"drc": c.get("drc",{}).get("state"), "erc": c.get("erc",{}).get("state"), "rows": len(rows), "row": (d[0]["id"] if d else ""), "untrusted": len(w)}))' 2>/dev/null)
+# DRC is trusted where the runtime has drc-zone-guard (no standing "zone guard missing" warning counted against DRC's chip); without it the
+# warning must be there (a zero-error DRC is never shown as clean)
+G=$(python3 -c "import json;print('drc-zone-guard' in json.load(open('$KDIR/manifest.json')).get('capabilities',[]))" 2>/dev/null)
+U=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("untrusted",-1))' "$CHK" 2>/dev/null)
+if [ "$G" = True ]; then [ "$U" = 0 ] && ok "DRC is trusted: the runtime has drc-zone-guard and the Checks panel shows no zone-guard warning" || bad "the runtime has drc-zone-guard, but the Checks panel still warns DRC is not trusted ($CHK)"
+else [ "${U:-0}" -gt 0 ] 2>/dev/null && ok "DRC is not shown as clean without drc-zone-guard (the warning is there)" || bad "a runtime without drc-zone-guard and no zone-guard warning in Checks ($CHK)"; fi
 echo "checks: $CHK"
 ROW=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("row",""))' "$CHK" 2>/dev/null)
 if [ -n "$ROW" ]; then

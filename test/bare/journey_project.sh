@@ -162,13 +162,12 @@ if [ -n "$SV" ]; then
 else bad "stock KiCad did not install from the official packages ($(tail -2 "$OUT/logs/box-pkg.log" | tr '\n' ' '))"; fi
 tm stock-compat "$(python3 -c "import time;print(round(time.time()-$t,1))")"
 
-# --- 8. a DRC correctness probe: a short inside a zone fill (test/bare/drc_probe.py; known-red by name before bp.12.1) ---
+# --- 8. a DRC correctness probe: a short inside a zone fill (test/bare/drc_probe.py; a miss FAILs) ---
 cp "$HERE/drc_probe.py" "$HH/"
 SC=; [ -n "${SV:-}" ] && SC="--stock-cli /usr/bin/kicad-cli"
 as_person python3 -I $PH/drc_probe.py --fork-cli "$KB/bin/kicad-cli" $SC --demo "$KB/share/kicad/demos/complex_hierarchy" --out $PH/drc-probe >"$OUT/logs/drc-probe.log" 2>&1
 cp "$HH/drc-probe/result.json" "$OUT/logs/drc-probe.json" 2>/dev/null
 while IFS= read -r l; do case $l in
   PASS*) ok "${l#PASS }";; FAIL*) bad "${l#FAIL }";;
-  KNOWN-RED*) printf 'KNOWN-RED\t%s\n' "${l#KNOWN-RED }" >>"$OUT/checks.tsv"; echo "$l";;
   NOTE*) echo "$l";; esac; done <"$OUT/logs/drc-probe.log"
-grep -qE '^(PASS|FAIL|KNOWN-RED)' "$OUT/logs/drc-probe.log" || bad "the DRC probe did not run: $(tail -2 "$OUT/logs/drc-probe.log")"
+grep -qE '^(PASS|FAIL)' "$OUT/logs/drc-probe.log" || bad "the DRC probe did not run: $(tail -2 "$OUT/logs/drc-probe.log")"

@@ -1086,7 +1086,7 @@ mod tests {
         use crate::files::kicad::install::LINUX;
         let ask = cad_rows(json!({"kicad.status": "missing", "home": "/h"}), json!({"@kinstall": "ask"}), Some(&LINUX));
         assert_eq!(ask[1]["label"], "Install Backplane KiCad?");
-        let n = ask[1]["note"].as_str().unwrap(); assert!(n.contains("github.com/i2cjak/Backplane_KiCad") && n.contains("/h/kicad") && n.contains("no administrator password"), "{n}");
+        let n = ask[1]["note"].as_str().unwrap(); assert!(n.contains("github.com/BackplaneWorks/Backplane_KiCad") && n.contains("/h/kicad") && n.contains("no administrator password"), "{n}");
         assert_eq!(btns(&ask[1]), [("Install".to_string(), "kicad-install".to_string()), ("Cancel".to_string(), "kicad-install-cancel".to_string())]);
         let run = cad_rows(json!({"kicad.status": "missing", "kicad.install": json!({"state": "running", "version": LINUX.version, "note": "Unpacking"}).to_string()}), json!({}), Some(&LINUX));
         assert_eq!((run[1]["label"].as_str().unwrap(), run[1]["note"].as_str().unwrap()), (format!("Installing Backplane KiCad {}", LINUX.version).as_str(), "Unpacking. This takes about a minute.")); assert!(btns(&run[1]).is_empty());
