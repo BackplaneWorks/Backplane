@@ -83,6 +83,13 @@ pub fn edit_target(data: &Value, key: &str, pid: &str) -> Option<(String, String
     Some((root.to_string(), root.to_string()))
 }
 
+/// What a shown thread asks warm: the KiCad file the viewer shows (Edit's own target), else its folder (a viewer on a STEP or a page of
+/// another kind leaves the folder's choice to the hub, as before).
+pub fn warm_target(project: String, root: String) -> String {
+    let kicad = [".kicad_pcb", ".kicad_sch", ".kicad_pro"].iter().any(|x| project.ends_with(x));
+    if kicad || root.is_empty() { project } else { root }
+}
+
 /// Path without any file extension on its final segment (dots in parent folder names are preserved).
 pub fn path_stem(s: &str) -> &str {
     let s = s.trim_end_matches(['/', '\\']);
@@ -759,12 +766,20 @@ impl Render for KicadPane {
 
 #[cfg(test)]
 mod tests {
+    #[test] fn warm_target_is_the_shown_board() {
+        assert_eq!(warm_target("/p/Day_11/Day_11.kicad_pcb".into(), "/p".into()), "/p/Day_11/Day_11.kicad_pcb");
+        assert_eq!(warm_target("/p/mech/case.step".into(), "/p".into()), "/p");
+        assert_eq!(warm_target("/p".into(), "/p".into()), "/p");
+        let key = "board|/p|Day_11/Day_11.kicad_pcb";
+        let (proj, root) = edit_target(&serde_json::Value::Null, key, "").unwrap();
+        assert_eq!(warm_target(proj, root), "/p/Day_11/Day_11.kicad_pcb");
+    }
     #[test] fn a_press_that_began_in_kicad_keeps_the_keyboard_until_it_ends() {
         assert!(super::press_keeps(true), "a drag from the editor out over the panel: KiCad keeps the keys");
         assert!(!super::press_keeps(false), "a press that starts on Backplane's chrome takes them back");
     }
 
-    use super::{belongs_to, edit_target, frame_for, hub_open_step, nc, path_stem, pick, project_of, root_of, waiting, waiting_on};
+    use super::{belongs_to, edit_target, frame_for, hub_open_step, nc, path_stem, pick, project_of, root_of, waiting, waiting_on, warm_target};
     use serde_json::{json, Value};
     #[test] fn ctrl_tab_goes_round_the_editor_tabs() {
         assert_eq!(super::next_tab("PCB", 1), "SCH"); assert_eq!(super::next_tab("PCB", -1), "GERBVIEW"); assert_eq!(super::next_tab("FOOTPRINT_EDITOR", 1), "GERBVIEW"); assert_eq!(super::next_tab("GERBVIEW", 1), "PCB"); assert_eq!(super::next_tab("?", 1), "SCH");
@@ -921,10 +936,15 @@ impl crate::Backplane {
         let tid = crate::screens::attach::raw_id(thread["id"].as_str().unwrap_or(""));
         if tid.is_empty() { return }
         let pid = crate::keys::project_of(&self.data, tid);
-        let Some(root) = crate::screens::projects::find(&self.data, &pid).and_then(|p| p["root"].as_str()).map(|r| r.trim_end_matches(['/', '\\']).to_string()).filter(|r| !r.is_empty()) else { return };
-        { let mut last = WARM_LAST.lock().unwrap(); if *last == root { return } *last = root.clone(); }
+        // the board Edit will open (the viewer's own file once the hub's picture says it), not only the folder: in a folder of several
+        // boards the folder resolves to its first one, and the board the person edits started cold (Nov 13, Framework_Expansion_Cards:
+        // Day_01 warmed, Day_11 opened in 10.3 s)
+        let key = crate::screens::viewer::shown_key(&thread["viewer"]);
+        let Some((project, root)) = edit_target(&self.data, &key, &pid) else { return };
+        let project = warm_target(project, root);
+        { let mut last = WARM_LAST.lock().unwrap(); if *last == project { return } *last = project.clone(); }
         let display = std::env::var("DISPLAY").unwrap_or_default();
-        let _ = self.tx.try_send(Command::Rpc("editor.kicad.warm".into(), Secret(json!({"project": root, "display": display, "theme": if self.light() { "light" } else { "dark" }})), "kicad"));
+        let _ = self.tx.try_send(Command::Rpc("editor.kicad.warm".into(), Secret(json!({"project": project, "display": display, "theme": if self.light() { "light" } else { "dark" }})), "kicad"));
     }
     pub(crate) fn kicad_rejoin(&mut self, cx: &mut Context<Self>) {
         // a new hub (a restart ends its KiCads): the shown project is asked warm again
