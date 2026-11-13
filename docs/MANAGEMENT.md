@@ -98,6 +98,8 @@ the rest). A row: `{id, source, severity, rule, title, names, doc}`.
 - A row pressed (or reached with up/down): `kicad.checks.focus {project, id}` selects and zooms its items in KiCad's editor for it (board for
   DRC, schematic for ERC) and lights them in the viewers. "Fix with agent": `kicad.checks.fix {project, id}` -> `{text}`, sent as the
   thread's next message. The chip in the editor's row ("DRC 12 · ERC 3") opens the panel.
+- Gerbers vs board (kicad/gerber/compare.rs) is a source of its own, `gerbers` ("Gerbers vs board"): each difference a finding, its rule the
+  layer, a `file` anchor at its place; a press on one opens the Gerbers tab compared with the board on that layer, the difference lit and zoomed on.
 - Another source: `checkrun::set_findings(hub, pro, source, findings: Vec<findings::Finding>, meta) -> Result<(), String>` (or the RPC
   `kicad.checks.set {project, source, findings, meta}`) replaces that source's findings for the project. `meta.label` names it ("Fab rules"),
   `meta.judged: true` marks every row of it "agent-judged" (with `meta.confidence`; put the datasheet page in a finding's `detail`). An empty

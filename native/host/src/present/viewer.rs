@@ -177,6 +177,8 @@ pub fn view_action(st: &State, hub: &str, session: &Value, kind: &str) -> Option
     let mut drafts = serde_json::Map::new();
     drafts.insert(format!("@view.file:{sel}"), json!(if kind == "split" { "" } else { picked.as_str() })); drafts.insert(format!("@view:{sel}"), json!(kind));
     drafts.insert(format!("@view.gerbers:{sel}"), json!(if gerbers { "1" } else { "" }));
+    // vs board starts on one layer's differences (F.Cu, the others dimmed) unless a layer is already in focus: the list picks another
+    if gerbers_vs_board && !Focus::read(s(d, "@view.focus.board")).on() { drafts.insert("@view.focus.board".into(), json!(Focus { active: 12, mode: 1 }.show())); }
     drafts.insert(format!("@view.sheet:{sel}"), json!(""));
     if kind == "mech" { drafts.insert(format!("@mech.part:{sel}"), json!(rel_in(&root, part))); } // another page leaves Mech's choice as it is
     for k in ["@pick", "@card", "@pick.rid"] { drafts.insert(k.into(), json!("")); }
@@ -407,6 +409,8 @@ fn page(template: &Value, kind: &str, root: &str, drafts: &Value, sel: &str) -> 
     let mut v = template.clone();
     let Some(o) = v.as_object_mut() else { return v };
     o.insert("open".into(), json!(kind)); o.insert("key".into(), json!(k));
+    // whether the project has fab output for a Gerbers tab (phones list the tab only then; the desktop's rail has it always)
+    if matches!(kind, "board" | "schematic" | "3d") && !root.is_empty() { o.insert("hasGerbers".into(), json!(crate::files::kicad::gerber::default_set(std::path::Path::new(root)).is_some())); }
     // the Board page drawing a Gerber set (kicad/gerber): the rail lights Gerbers, the layer list is the set's
     if kind == "board" && !sel.is_empty() && s(drafts, &format!("@view.gerbers:{sel}")) == "1" {
         o.insert("gerbers".into(), json!(true));
@@ -421,7 +425,10 @@ fn page(template: &Value, kind: &str, root: &str, drafts: &Value, sel: &str) -> 
     let f = if draws { Focus::read(s(drafts, &format!("@view.focus.{kind}"))) } else { Focus { active: NONE, mode: 0 } };
     layer_fields(o, kind, off, f);
     if o.get("gerbers") == Some(&json!(true)) {
-        let rows: Vec<Value> = GERBER_LAYERS.iter().chain(GERBER_MORE.iter()).map(|(n, name)| json!({"layer": n, "name": name, "on": off & bit(*n) == 0, "active": f.on() && f.active == *n})).collect();
+        // compared with its board: each layer's differences in its row ("F.Cu · 154"), from the last comparison of this set
+        let counts = if file.starts_with(crate::files::kicad::gerber::CMP) { crate::files::kicad::gerber::counts_of(crate::files::kicad::gerber::set_of(file)) } else { vec![] };
+        let named = |n: &str| { let c = counts.iter().find(|c| c.0 == n || (n == "Drills" && c.0 == "Drills")); match c { Some((_, a, b)) => format!("{n} · {}", a + b), None => n.to_string() } };
+        let rows: Vec<Value> = GERBER_LAYERS.iter().chain(GERBER_MORE.iter()).map(|(n, name)| json!({"layer": n, "name": named(name), "on": off & bit(*n) == 0, "active": f.on() && f.active == *n})).collect();
         o.insert("layerList".into(), Value::Array(rows));
         if f.on() { if let Some((_, nm)) = GERBER_LAYERS.iter().chain(GERBER_MORE.iter()).find(|(n, _)| *n == f.active) { o.insert("layerHead".into(), json!(format!("Layer: {nm}"))); } }
     }
@@ -1114,7 +1121,7 @@ mod tests {
         let w = o.before[0]["text"].as_str().unwrap(); assert!(w.contains("\"kind\":\"board\"") && w.contains(&set), "{w}");
         let mut s2 = session.clone(); crate::session::patch::merge(&mut s2, &o.patch);
         let v = viewer_json(&st, &json!({}), &s2).unwrap();
-        assert_eq!((v["open"].as_str(), v["gerbers"].as_bool()), (Some("board"), Some(true)));
+        assert_eq!((v["open"].as_str(), v["gerbers"].as_bool(), v["hasGerbers"].as_bool()), (Some("board"), Some(true), Some(true)));
         assert!(v["choices"].as_array().unwrap().iter().any(|c| c["value"] == "gerbers" && c["on"] == true), "the Gerbers tab is the one on");
         let names: Vec<&str> = v["layerList"].as_array().unwrap().iter().map(|r| r["name"].as_str().unwrap()).collect();
         assert!(names.contains(&"F.Mask") && names.contains(&"B.Paste") && names.contains(&"Drills") && !names.contains(&"Vias"), "{names:?}");
@@ -1125,6 +1132,10 @@ mod tests {
         assert_eq!(f, format!("gerbercmp\n{set}\n{root}/b.kicad_pcb"));
         let mut s3 = s2.clone(); crate::session::patch::merge(&mut s3, &o2.patch);
         assert_eq!(viewer_json(&st, &json!({}), &s3).unwrap()["gerbersVsBoard"], true);
+        assert_eq!(o2.patch["drafts"]["@view.focus.board"], "12|1", "on F.Cu's differences, the other layers dimmed");
+        crate::files::kicad::gerber::set_counts(&set, vec![("F.Cu".into(), 3, 1)]);
+        let v3 = viewer_json(&st, &json!({}), &s3).unwrap();
+        assert!(v3["layerList"].as_array().unwrap().iter().any(|r| r["name"] == "F.Cu · 4"), "{}", v3["layerList"]);
         // and back to the set alone
         let o3 = view_action(&st, "h", &s3, "gerbers").unwrap();
         assert_eq!(o3.patch["drafts"][format!("@view.file:{th}")], set.as_str());

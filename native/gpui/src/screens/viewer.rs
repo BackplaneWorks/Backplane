@@ -342,6 +342,10 @@ fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, 
             tools.push(tall(crate::ui::with_rect(div().id("gerbers-vs-board"), || "ui:vs board".into()).px_2().text_size(px(12.))).cursor_pointer().border_1().border_color(c(if on { "accent" } else { "line" })).bg(c("raise")).hover(|s| s.bg(c("panel"))) // i18n-ok: a harness id
                 .tooltip(crate::keys::tip(&trs("Mark where these Gerbers differ from the board: red on the board only, green in the Gerbers only"), "", light))
                 .child(trs("vs board")).on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("view".into(), if on { "gerbers".into() } else { "gerbers\tboard".into() })); cx.notify(); })).into_any_element());
+            // the marks told apart without colour too: the board's solid, the Gerbers' striped
+            if on { tools.push(div().id("gerbers-legend").flex_shrink_0().flex().items_center().gap_1().text_size(px(11.)).text_color(c("dim"))
+                .child(div().size(px(9.)).bg(rgb(0xe5484d))).child(trs("board only"))
+                .child(div().ml_1().w(px(9.)).h(px(9.)).flex().flex_col().justify_between().children((0..3).map(|_| div().h(px(2.)).bg(rgb(0x30a46c))))).child(trs("Gerbers only")).into_any_element()); }
             if !frame.note.is_empty() { tools.push(div().id("gerbers-note").min_w_0().flex_shrink().overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(px(11.)).text_color(c(if frame.warn { "warn" } else { "dim" })).child(frame.note.clone()).into_any_element()); }
         }
     }

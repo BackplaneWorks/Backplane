@@ -314,7 +314,8 @@ pub fn probe_one(app: &mut Backplane, slot: usize, key: &str, card: &super::plot
     let net = get("net").and_then(|n| if board(key) { Some(n) } else if board(&card.src) { Some(format!("{}\u{1}{n}", card.src)) } else { None });
     // (a pin or a symbol is its part; a wire, label or junction is its connection)
     let group = (!card.g.is_empty() && !card.src.is_empty() && !card.title.starts_with("pin") && !card.title.starts_with("symbol")).then(|| format!("{}\u{1}{}", card.src, card.g));
-    for (name, value) in [("ref", get("ref").or_else(|| get("symbol"))), ("net", net), ("g", group)] {
+    // (a difference of Gerbers vs board is lit by its place: kicad/gerber/compare.rs)
+    for (name, value) in [("ref", get("ref").or_else(|| get("symbol"))), ("net", net), ("g", group), ("at", get("at"))] {
         let Some(value) = value else { continue };
         let _ = app.tx.try_send(Command::Rpc("kicad.probe".into(), crate::screens::settings::Secret(serde_json::json!({"key": key, "name": name, "value": value})), tag));
     }
@@ -369,10 +370,11 @@ pub fn lit_box(chunks: &[std::sync::Arc<super::plot::Chunk>], lit: &[(usize, usi
 pub fn bring_into_view(app: &mut Backplane, slot: usize) {
     let key = if slot == 0 { app.screens.plot.frame.as_ref().map(|f| f.key.clone()) } else { app.data["thread"]["viewer"]["panes"][slot - 1]["key"].as_str().map(str::to_string) }.unwrap_or_default();
     let card = app.screens.pv(slot).card.clone().or_else(|| app.data["thread"]["viewer"]["probe"].as_str().and_then(super::plot::card));
-    let r = card.and_then(|c| c.rows.iter().find(|x| x.0 == "ref" || x.0 == "symbol").map(|x| x.1.clone())).filter(|r| !r.is_empty());
-    if let (Some(r), false) = (r, key.is_empty()) {
+    // a part by its reference; a place (Gerbers vs board's difference) by its `at`: asked again, framed when the answer comes
+    let r = card.and_then(|c| c.rows.iter().find(|x| x.0 == "ref" || x.0 == "symbol").map(|x| ("ref", x.1.clone())).or_else(|| c.rows.iter().find(|x| x.0 == "at").map(|x| ("at", x.1.clone())))).filter(|r| !r.1.is_empty());
+    if let (Some((name, r)), false) = (r, key.is_empty()) {
         let tag: &'static str = ["probe3", "probe4", "probe5"][slot.min(2)];
-        let _ = app.tx.try_send(Command::Rpc("kicad.probe".into(), crate::screens::settings::Secret(serde_json::json!({"key": key, "name": "ref", "value": r})), tag));
+        let _ = app.tx.try_send(Command::Rpc("kicad.probe".into(), crate::screens::settings::Secret(serde_json::json!({"key": key, "name": name, "value": r})), tag));
         return
     }
     let lit = app.screens.pv(slot).lit.clone();

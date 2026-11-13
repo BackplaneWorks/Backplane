@@ -32,6 +32,11 @@ fn label_of(set: &Path, board: Option<&Path>) -> String {
 /// What did not read in the sets read last (by path), for their viewers' note.
 static NOTES: std::sync::Mutex<Vec<(String, Vec<String>)>> = std::sync::Mutex::new(Vec::new());
 pub fn notes_of(path: &str) -> Vec<String> { NOTES.lock().unwrap().iter().find(|(p, _)| p == path).map(|x| x.1.clone()).unwrap_or_default() }
+/// Differences found by comparisons not yet taken up by the Checks panel (kicad/checkrun.rs): (set, board, [(layer, box mm, on the board)]).
+pub type Diffs = (String, String, Vec<(String, [f32; 4], bool)>);
+pub static DIFFS: std::sync::Mutex<Vec<Diffs>> = std::sync::Mutex::new(Vec::new());
+fn cmp_board_is(path: &str) -> bool { path.starts_with(CMP) }
+
 /// A set as a plot, as the board viewer draws one (kicad/plotread.rs `read` sends a Gerber path here), with its note: the set, its age
 /// against the board, what did not read; compared with the board (a CMP path), the differences marked and counted.
 pub fn plot(path: &str) -> super::plotgen::Read {
@@ -51,8 +56,12 @@ pub fn plot(path: &str) -> super::plotgen::Read {
             let t0 = std::time::Instant::now();
             let (marks, layers) = compare::compare(&r.items, &bi);
             eprintln!("gerber: {} compared with its board in {} ms ({} marks)", set, t0.elapsed().as_millis(), marks.len());
-            let diff: Vec<String> = layers.iter().filter(|l| l.removed + l.added > 0).map(|l| format!("{} {}", l.name, [(l.removed, "on the board only"), (l.added, "in the Gerbers only")].iter().filter(|x| x.0 > 0).map(|x| format!("{} {}", x.0, x.1)).collect::<Vec<_>>().join(", "))).collect();
-            if diff.is_empty() { note.push_str(&format!(" · vs board: the same on {} layers", layers.len())) } else { warn = true; note.push_str(&format!(" · vs board: {}", diff.join("; "))) }
+            // the bar: the total (each layer's count is in the layer list: names.rs COUNTS); each difference to the Checks panel (DIFFS)
+            let total: usize = layers.iter().map(|l| l.removed + l.added).sum();
+            let differ = layers.iter().filter(|l| l.removed + l.added > 0).count();
+            if total == 0 { note.push_str(&format!(" · vs board: the same on {} layers", layers.len())) } else { warn = true; note.push_str(&format!(" · vs board: {total} difference{} on {differ} layer{}", if total == 1 { "" } else { "s" }, if differ == 1 { "" } else { "s" })) }
+            set_counts(&set, layers.iter().map(|l| (l.name.clone(), l.removed, l.added)).collect());
+            { let mut d = DIFFS.lock().unwrap(); d.retain(|x| x.0 != set); d.push((set.clone(), b.clone(), layers.iter().flat_map(|l| l.places.iter().map(|(bx, on_board)| (l.name.clone(), *bx, *on_board))).collect())); }
             let mut items = r.items; items.extend(marks);
             (items, super::plotgen::GERBER | super::plotgen::DIFF)
         }
@@ -62,6 +71,8 @@ pub fn plot(path: &str) -> super::plotgen::Read {
     // a set (or a file) with no outline is fitted to what it draws
     if (p.edge.x0 as i32) > (p.edge.x1 as i32) { p.edge = p.b }
     p.note = note; p.warn = warn;
+    // Fit fits the board's outline (not parts placed off it, nor marks of theirs)
+    if (p.edge.x0 as i32) <= (p.edge.x1 as i32) && cmp_board_is(path) { p.b = p.edge }
     super::plotgen::Read::Plot(Box::new(p), t)
 }
 

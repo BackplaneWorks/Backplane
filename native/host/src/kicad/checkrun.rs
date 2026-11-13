@@ -64,6 +64,20 @@ pub async fn set_findings(hub: &Arc<Hub>, pro: &str, source: &str, mut findings:
     publish(hub, &pro).await;
     Ok(())
 }
+/// A comparison's differences as findings: one a place, its layer the rule, anchored to the set at the place (its id from layer and place).
+pub fn gerber_findings(set: &str, places: &[(String, [f32; 4], bool)]) -> Vec<Finding> {
+    places.iter().take(2000).map(|(layer, b, on_board)| {
+        let (x, y) = ((b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0);
+        Finding {
+            severity: "warning".into(), rule: layer.clone(),
+            title: if *on_board { "Board only".into() } else { "Gerbers only".into() },
+            detail: format!("{} the board and not in these Gerbers; {:.2} × {:.2} mm", if *on_board { "On" } else { "Not on" }, b[2] - b[0], b[3] - b[1]),
+            fix: "Export the Gerbers again from the board as it is now".into(),
+            anchors: vec![fd::Anchor { doc: "file".into(), text: set.to_string(), uuid: format!("{layer}@{x:.2},{y:.2}"), layer: layer.clone(), x: x as f64, y: y as f64, at: true, ..Default::default() }],
+            ..Default::default()
+        }
+    }).collect()
+}
 /// Every finding of a project: ERC, DRC, then the other sources in their order.
 fn all_findings(p: &Proj, only: &str) -> Vec<Finding> {
     let mut v: Vec<Finding> = vec![];
@@ -277,6 +291,9 @@ async fn tick(hub: &Arc<Hub>) -> u64 {
     };
     if pros.is_empty() { return 60_000 }
     let mut sleep = TICK_MS * 5;
+    // Gerbers vs board's differences (kicad/gerber/compare.rs), made by the plot reader, into the one list as their own source
+    let diffs: Vec<super::gerber::Diffs> = std::mem::take(&mut *super::gerber::DIFFS.lock().unwrap());
+    for (set, board, places) in diffs { let _ = set_findings(hub, &board, "gerbers", gerber_findings(&set, &places), json!({"label": "Gerbers vs board"})).await; }
     let (free, heavy, busy) = tokio::task::spawn_blocking(|| (free_mb(), heavy_job(), busy_now())).await.unwrap_or_default();
     let remote = remote_ready(hub).await;
     for (pro, files) in pros {
@@ -713,6 +730,14 @@ mod tests {
         assert_eq!(got, ["a.kicad_dru", "a.kicad_pcb", "a.kicad_pro", "a.kicad_sch", "fp-lib-table", "sheets/io.kicad_sch"]);
         assert_eq!(shell_quote("it's"), "'it'\\''s'");
         let _ = std::fs::remove_dir_all(&d);
+    }
+    #[test] fn a_comparisons_differences_are_findings_with_steady_ids() {
+        let ps = vec![("F.Cu".to_string(), [1.0, 2.0, 1.4, 2.2], true), ("B.Cu".to_string(), [5.0, 5.0, 6.0, 6.0], false)];
+        let mut a = gerber_findings("/p/mfg/g", &ps); fd::assign_ids(&mut a);
+        let mut b = gerber_findings("/p/mfg/g", &ps.iter().rev().cloned().collect::<Vec<_>>()); fd::assign_ids(&mut b);
+        assert_eq!(a[0].id, b[1].id, "the same place keeps its id whatever the order");
+        assert_eq!(fd::row_json(&a[0])["names"], "F.Cu · 1.20, 2.10"); assert_eq!(fd::row_json(&a[0])["at"], "1.20,2.10"); assert_eq!(fd::row_json(&a[0])["file"], "/p/mfg/g");
+        assert_eq!((a[0].title.as_str(), a[1].title.as_str()), ("Board only", "Gerbers only"));
     }
     #[test] fn the_state_word() {
         let mut x = Src::default();

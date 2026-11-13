@@ -12,8 +12,6 @@ pub const CELL: f32 = 0.025;
 const SLACK: usize = 2;
 /// The smallest difference marked (mm, its larger side).
 const MIN: f32 = 0.3;
-pub const REMOVED: u32 = 26;
-pub const ADDED: u32 = 28;
 
 pub struct Grid { x0: f32, y0: f32, pub w: usize, pub h: usize, bits: Vec<bool> }
 impl Grid {
@@ -112,7 +110,35 @@ fn places(g: &Grid, cells: &[bool]) -> Vec<[f32; 4]> {
 
 /// What a comparison found on one layer.
 #[derive(Debug, Default, PartialEq)]
-pub struct Layer { pub name: String, pub removed: usize, pub added: usize }
+pub struct Layer { pub name: String, pub removed: usize, pub added: usize, /** each difference: its box (mm) and whether the board has it (else the Gerbers) */ pub places: Vec<([f32; 4], bool)> }
+/// A difference's colours: the board's copper the Gerbers lack (solid red), the Gerbers' copper the board lacks (green, striped: told apart without colour).
+pub const BOARD_ONLY: u32 = 0xe5484d;
+pub const GERBERS_ONLY: u32 = 0x30a46c;
+/// A difference's place as its info says it (the probe that lights and zooms on it): "at=x,y" to the hundredth of a mm.
+pub fn at_text(b: [f32; 4]) -> String { format!("{:.2},{:.2}", (b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0) }
+/// A difference drawn as itself: its cells (grid resolution) merged into rectangles, on the layer it is of, as tints (their own colour, shown and
+/// hidden with the layer); `striped` leaves out every other pair of rows.
+fn shapes(g: &Grid, raw: &[bool], b: [f32; 4], layer: u32, color: u32, striped: bool, info: &board::Info, key: &str, out: &mut Vec<Item>) {
+    let (i0, i1) = g.span(b[0], b[2], g.w, g.x0); let (j0, j1) = g.span(b[1], b[3], g.h, g.y0);
+    let mut open: Vec<(usize, usize, usize)> = vec![]; // (from, to, first row) of runs still growing down
+    let mut emit = |a: usize, z: usize, r0: usize, r1: usize, out: &mut Vec<Item>| {
+        let (x0, x1, y0, y1) = (g.x0 + a as f32 * CELL, g.x0 + z as f32 * CELL, g.y0 + r0 as f32 * CELL, g.y0 + r1 as f32 * CELL);
+        let k = format!("{key}/{}", out.len());
+        out.push(Item { sig: board::hash(k.as_bytes(), board::FNV), key: k, layer, prim: board::tint_of(vec![Pt { x: x0, y: y0 }, Pt { x: x1, y: y0 }, Pt { x: x1, y: y1 }, Pt { x: x0, y: y1 }], color, 235), info: info.clone() });
+    };
+    for j in j0..=j1 {
+        let mut runs: Vec<(usize, usize)> = vec![];
+        if j < j1 && !(striped && (j / 2) % 2 == 1) {
+            let mut i = i0;
+            while i < i1 { if raw[j * g.w + i] { let a = i; while i < i1 && raw[j * g.w + i] { i += 1 } runs.push((a, i)) } else { i += 1 } }
+        }
+        let mut next = vec![];
+        for (a, z, r0) in open.drain(..) { if runs.contains(&(a, z)) { next.push((a, z, r0)) } else { emit(a, z, r0, j, out) } }
+        for (a, z) in runs { if !next.iter().any(|x| x.0 == a && x.1 == z) { next.push((a, z, j)) } }
+        open = next;
+        if out.len() > 40_000 { return }
+    }
+}
 
 fn bbox(items: &[&Item]) -> [f32; 4] {
     let mut b = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
@@ -126,12 +152,6 @@ fn bbox(items: &[&Item]) -> [f32; 4] {
     } }
     b
 }
-fn mark(layer: u32, name: &str, what: &str, b: [f32; 4], i: usize) -> Item {
-    let ps = vec![Pt { x: b[0], y: b[1] }, Pt { x: b[2], y: b[1] }, Pt { x: b[2], y: b[3] }, Pt { x: b[0], y: b[3] }];
-    let info: board::Info = Arc::from(format!("{what};layer={name};at={:.2},{:.2};size={:.2}x{:.2} mm", (b[0] + b[2]) / 2.0, (b[1] + b[3]) / 2.0, b[2] - b[0], b[3] - b[1]).as_str());
-    let key = format!("cmp/{name}/{what}/{i}");
-    Item { sig: board::hash(key.as_bytes(), board::FNV), key, layer, prim: Prim::Poly { ps, w: 0.0, fill: true }, info }
-}
 
 /// The layers compared: (name, the board's layer, whether its pads and vias may be left out of the Gerber).
 fn compared() -> Vec<(&'static str, u32, bool)> {
@@ -139,7 +159,7 @@ fn compared() -> Vec<(&'static str, u32, bool)> {
 }
 const PADS: u32 = 13; const VIAS: u32 = 23;
 
-/// The comparison of a Gerber set's items with its board's: marks (on REMOVED and ADDED) and what each layer came to. Only the layers
+/// The comparison of a Gerber set's items with its board's: marks (tints on the layers they are of: BOARD_ONLY, GERBERS_ONLY striped) and what each layer came to. Only the layers
 /// the set has are compared (a set without inner layers says nothing of them).
 /// What the board viewer's items leave out and fab output has: the board's top-level copper polygons (gr_poly on a copper layer), read
 /// from the board file's forms here.
@@ -187,9 +207,19 @@ fn one_layer(gerber: &[Item], board_items: &[Item], b: [f32; 4], name: &'static 
         let mut either = Grid::new(b); for k in 0..either.bits.len() { either.bits[k] = need.bits[k] || may.bits[k] }
         let removed = places(&need, &only(&need, &gg, None));
         let added = places(&gg, &only(&gg, &either, None));
-        for (i, r) in removed.iter().enumerate() { marks.push(mark(REMOVED, name, "on the board, not in the Gerbers", *r, i)) }
-        for (i, r) in added.iter().enumerate() { marks.push(mark(ADDED, name, "in the Gerbers, not on the board", *r, i)) }
-        Some((marks, Layer { name: name.into(), removed: removed.len(), added: added.len() }))
+        // the differences as themselves: the cells that differ, within each place, on the layer they are of
+        let raw_removed: Vec<bool> = (0..need.bits.len()).map(|k| need.bits[k] && !gg.bits[k]).collect();
+        let raw_added: Vec<bool> = (0..gg.bits.len()).map(|k| gg.bits[k] && !either.bits[k]).collect();
+        let mut places_out = vec![];
+        for (i, r) in removed.iter().enumerate() {
+            let info: board::Info = Arc::from(format!("difference: on the board, not in the Gerbers;layer={name};at={};size={:.2}x{:.2} mm", at_text(*r), r[2] - r[0], r[3] - r[1]).as_str());
+            shapes(&need, &raw_removed, *r, l, BOARD_ONLY, false, &info, &format!("cmp/{name}/b{i}"), &mut marks); places_out.push((*r, true));
+        }
+        for (i, r) in added.iter().enumerate() {
+            let info: board::Info = Arc::from(format!("difference: in the Gerbers, not on the board;layer={name};at={};size={:.2}x{:.2} mm", at_text(*r), r[2] - r[0], r[3] - r[1]).as_str());
+            shapes(&gg, &raw_added, *r, l, GERBERS_ONLY, true, &info, &format!("cmp/{name}/g{i}"), &mut marks); places_out.push((*r, false));
+        }
+        Some((marks, Layer { name: name.into(), removed: removed.len(), added: added.len(), places: places_out }))
     }
 
 pub fn compare(gerber: &[Item], board_items: &[Item]) -> (Vec<Item>, Vec<Layer>) {
@@ -217,7 +247,7 @@ mod tests {
         let gerb = vec![it(12, Prim::Poly { ps: vec![p(0.0, 0.0), p(1.0, 0.0), p(1.0, 0.5), p(0.0, 0.5), p(0.0, 0.0)], w: 0.0, fill: true }), it(12, Prim::Line { ps: vec![p(2.0, 0.0), p(4.0, 0.0), p(6.0, 0.0)], w: 0.25 })];
         let (m, l) = compare(&gerb, &board);
         assert!(m.is_empty(), "{:?}", m.iter().map(|i| i.info.to_string()).collect::<Vec<_>>());
-        assert_eq!(l, vec![Layer { name: "F.Cu".into(), removed: 0, added: 0 }]);
+        assert_eq!((l.len(), l[0].name.as_str(), l[0].removed, l[0].added), (1, "F.Cu", 0, 0));
     }
     #[test] fn a_moved_track_and_a_missing_pad_are_marked() {
         let board = vec![it(12, Prim::Seg { a: p(0.0, 0.0), b: p(5.0, 0.0), w: 0.2 }), it(13, Prim::Circ { c: p(10.0, 0.0), r: 0.5, w: 0.0, fill: true })];
@@ -225,12 +255,18 @@ mod tests {
         let gerb = vec![it(12, Prim::Seg { a: p(0.0, 0.3), b: p(5.0, 0.3), w: 0.2 })];
         let (m, l) = compare(&gerb, &board);
         assert_eq!((l[0].removed, l[0].added), (2, 1), "{:?}", m.iter().map(|i| i.info.to_string()).collect::<Vec<_>>());
-        assert!(m.iter().any(|i| i.layer == REMOVED && i.info.contains("at=10.00,0.00")), "the pad");
+        assert!(m.iter().any(|i| i.layer == 12 && i.info.contains("on the board, not in the Gerbers") && i.info.contains("at=10.00,0.00")), "the pad, marked on F.Cu where it is");
+        // drawn as itself: the marks lie within the pad's own extent (its cells), not a grown block
+        let pad: Vec<&Item> = m.iter().filter(|i| i.info.contains("at=10.00,0.00")).collect();
+        let ext = pad.iter().flat_map(|i| match &i.prim { Prim::Tint { ps, .. } => ps.clone(), _ => vec![] }).fold([f32::MAX, f32::MAX, f32::MIN, f32::MIN], |a, q| [a[0].min(q.x), a[1].min(q.y), a[2].max(q.x), a[3].max(q.y)]);
+        assert!(ext[0] >= 9.45 && ext[2] <= 10.55 && ext[1] >= -0.55 && ext[3] <= 0.55, "{ext:?}");
+        // the Gerbers' extra copper striped: fewer rows drawn than it has
+        assert!(m.iter().any(|i| i.info.contains("in the Gerbers, not on the board")));
         // on an inner layer a missing pad is no difference (fab output leaves unused ones out), an extra one is
         let board = vec![it(13, Prim::Circ { c: p(10.0, 0.0), r: 0.5, w: 0.0, fill: true })];
         let gerb = vec![it(11, Prim::Circ { c: p(3.0, 0.0), r: 0.5, w: 0.0, fill: true })];
         let (_, l) = compare(&gerb, &board);
-        assert_eq!(l, vec![Layer { name: "In1.Cu".into(), removed: 0, added: 1 }]);
+        assert_eq!((l[0].name.as_str(), l[0].removed, l[0].added), ("In1.Cu", 0, 1));
         // a layer the set has not got is not compared
         assert!(compare(&[], &board).1.is_empty());
     }

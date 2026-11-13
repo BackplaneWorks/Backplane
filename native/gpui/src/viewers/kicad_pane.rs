@@ -51,6 +51,8 @@ fn norm_path(s: &str) -> String {
 /// The project file the hub attaches to, from a viewer key `<kind>|<root>|<file>` (the file relative to the root, or absolute).
 pub fn project_of(key: &str) -> Option<String> {
     let mut p = key.splitn(3, '|'); let (_, root, file) = (p.next()?, p.next()?, p.next()?);
+    // Gerbers vs board ("gerbercmp\n<set>\n<board>": kicad/gerber) is its set's project
+    let file = file.strip_prefix("gerbercmp\n").map_or(file, |r| r.split('\n').next().unwrap_or(r));
     let r = root.trim_end_matches(['/', '\\']);
     if file.is_empty() { return (!r.is_empty()).then(|| r.to_string()) }
     if is_abs_path(file) || r.is_empty() { return Some(file.to_string()) }
