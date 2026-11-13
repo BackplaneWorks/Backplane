@@ -34,7 +34,7 @@ pub fn parse(settings: &Value) -> Vec<Row> {
         fields: r["fields"].as_array().into_iter().flatten().map(|f| { let vault = f["vault"].as_bool().unwrap_or(false); Field { name: string(f, "name"), hint: string(f, "hint"), secret: f["secret"].as_bool().unwrap_or(false), value: if vault { String::new() } else { string(f, "value") }, vault } }).collect(),
         qr: r["qr"].as_array().into_iter().flatten().filter_map(|l| l.as_str().map(str::to_string)).collect(),
         qrnote: string(r, "qrnote"), local: r["local"].as_bool().unwrap_or(false), tone: string(r, "tone"),
-        kind: string(r, "kind"), raw: if r["kind"].is_string() || r["in"] == true || r["progress"].is_number() { r.clone() } else { Value::Null },
+        kind: string(r, "kind"), raw: if r["kind"].is_string() || r["in"] == true || r["progress"].is_number() || r["sublink"].is_object() { r.clone() } else { Value::Null },
     }).collect()
 }
 
@@ -383,6 +383,14 @@ pub(crate) fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<
         let p = p.clamp(0., 1.) as f32;
         left = left.child(div().id(SharedString::from(format!("row-progress-{i}"))).mt_1().h(px(4.)).w_full().max_w(px(360.)).rounded(px(2.)).bg(c("raise"))
             .child(div().h_full().rounded(px(2.)).bg(c("accent")).w(relative(p))));
+    }
+    // a quiet way out under the words (not a button: the row's own action, or none, stays the thing to press)
+    if let Some(l) = r.raw["sublink"].as_object() {
+        let b = Btn { label: l.get("label").and_then(|v| v.as_str()).unwrap_or("").into(), action: l.get("action").and_then(|v| v.as_str()).unwrap_or("").into(), value: l.get("value").and_then(|v| v.as_str()).unwrap_or("").into(), on: false };
+        let id = SharedString::from(format!("btn:{}:{}", b.action, b.value)); let label = trs(&b.label); let b2 = b.clone();
+        let d = div().id(id).mt_1().text_size(px(12.)).text_color(c("dim")).underline().cursor_pointer().hover(|x| x.text_color(c("text")));
+        let d = if crate::art::rects_on() { let n = format!("btn:{}:{}", b.action, b.value); d.relative().child(canvas(|_, _, _| (), move |r: Bounds<Pixels>, _, w: &mut Window, _| crate::art::report(&n, r, w.scale_factor())).absolute().size_full()) } else { d };
+        left = left.child(div().flex().child(d.child(label).on_click(cx.listener(move |this, _, _, cx| on_press(this, &b2, cx)))));
     }
     let mut right = if stack { div().flex().flex_col().items_start().gap_2().max_w_full() } else { div().flex().flex_col().items_end().gap_2().flex_shrink_0().max_w(px(CONTROLS_MAX)) };
     for f in &r.fields {

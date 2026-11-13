@@ -371,9 +371,14 @@ fn kicad_row(f: &Facts, pkg: Option<&crate::files::kicad::install::Package>) -> 
             else { row("KiCad", &format!("Not found. Backplane KiCad {} is not downloaded yet.", p.version), vec![btn("Download Backplane KiCad", "ob-kicad-install", "", true), rel]) }
         }
         Action::Auto => row("KiCad", &format!("Not found. Downloading Backplane KiCad{} into Backplane's own folder.", v(pkg.map_or("", |p| p.version))), vec![rel]),
+        // a stopped download: where it got to (its bar stays), one press to continue; the releases page is a quiet way to do it by hand
         Action::Offer if pstate == "failed" => {
             let kept = pkg.map_or(0, |p| crate::files::kicad::install::partial_bytes(std::path::Path::new(&f.home), p));
-            warn(row("KiCad", &format!("{}.", note.trim_end_matches('.')), vec![btn(if kept > 0 { "Continue the download" } else { "Try again" }, "ob-kicad-install", "", true), rel]))
+            let mut r = warn(row("KiCad", &format!("{}.", note.trim_end_matches('.')), vec![btn(if kept > 0 { "Continue the download" } else { "Try again" }, "ob-kicad-install", "", true)]));
+            let total = prog["total"].as_u64().unwrap_or(0);
+            if kept > 0 && total > 0 { r["progress"] = json!(((kept.min(total) as f64 / total as f64) * 1000.).round() / 1000.); }
+            r["sublink"] = json!({"label": "Download it yourself", "action": "open-url", "value": KICAD_RELEASES});
+            r
         }
         Action::Offer if status == "ok" => row("KiCad", &format!("Backplane KiCad{} at {}. Backplane KiCad{} is out: it brings the KiCad editor inside Backplane's viewer.", v(version), i("kicad.cli"), v(pkg.map_or("", |p| p.version))), vec![btn("Update KiCad", "ob-kicad-install", "", true), rel]),
         Action::Offer => row("KiCad", &format!("{} {} Backplane KiCad adds editing by agents.", found, offer_lead(status)).trim().replace("  ", " "), vec![btn("Install Backplane KiCad", "ob-kicad-install", "", true), rel]),
@@ -386,8 +391,10 @@ fn kicad_row(f: &Facts, pkg: Option<&crate::files::kicad::install::Package>) -> 
 /// way to a KiCad the person already has (setup's Locate row comes back with it).
 fn installing_row(prog: &Value, v: String, note: &str) -> Value {
     let (words, bar) = install_progress(prog, &v, note);
-    let mut r = row("KiCad", &words, vec![btn("Use a KiCad I already have", "ob-kicad-locate", "", false)]);
+    let mut r = row("KiCad", &words, vec![]);
     if let Some(b) = bar { r["progress"] = json!(b); }
+    // the way out, quiet under the bar: nothing in this row is to be pressed while it downloads
+    r["sublink"] = json!({"label": "Use a KiCad I already have", "action": "ob-kicad-locate", "value": ""});
     r
 }
 /// How a running install of Backplane KiCad (`v`: " <version>") is going, from info `kicad.install`: the words, and the share done for a bar
@@ -804,7 +811,7 @@ mod tests {
         let k = rows.iter().find(|r| r["label"] == "KiCad").unwrap();
         assert_eq!(k["note"], format!("Downloading Backplane KiCad {}: 312 of 971 MB, about 1 min left", LINUX.version));
         assert_eq!(k["progress"], json!(0.321));
-        let b = &k["buttons"][0]; assert_eq!((b["label"].as_str(), b["action"].as_str(), b["on"].as_bool()), (Some("Use a KiCad I already have"), Some("ob-kicad-locate"), Some(false)));
+        assert!(k["buttons"].as_array().unwrap().is_empty(), "nothing to press while it downloads"); assert_eq!((k["sublink"]["label"].as_str(), k["sublink"]["action"].as_str()), (Some("Use a KiCad I already have"), Some("ob-kicad-locate")));
         assert!(!rows.iter().any(|r| r["label"] == "Locate KiCad"), "no Locate while it downloads");
         assert!(rows_for(&i, json!({"@ob.kicadlocate": "1"})).iter().any(|r| r["label"] == "Locate KiCad"), "the quiet link brings it back");
         let pg = at(&s0, "tools", &i, &desk()); assert_eq!((pg["next"].as_str(), pg["quiet_next"].as_bool()), (Some("Skip step"), Some(true)));
@@ -825,6 +832,13 @@ mod tests {
         let x = tools_with(&Facts::of(&s1, &i2), &s1, &sess(json!({})), pick("linux", "x86_64"));
         let k = x.rows.iter().find(|r| r["label"] == "KiCad").unwrap();
         assert!(k["note"].as_str().unwrap().contains("stopped at 3 MB"), "{k}"); assert_eq!(k["buttons"][0]["label"], "Continue the download");
+        // stopped (this hub saw it): its own words, the bar where it got to, one press, the releases page as a quiet link
+        i2["kicad.install"] = json!(json!({"state": "failed", "version": LINUX.version, "note": "The download stopped at 3 of 12 MB (the connection ended before the file was whole)", "phase": "download", "done": 3 << 20, "total": 12u64 << 20}).to_string());
+        let x = tools_with(&Facts::of(&s1, &i2), &s1, &sess(json!({})), pick("linux", "x86_64"));
+        let k = x.rows.iter().find(|r| r["label"] == "KiCad").unwrap();
+        assert_eq!(k["note"], "The download stopped at 3 of 12 MB (the connection ended before the file was whole).");
+        assert_eq!(k["progress"], json!(0.25)); assert_eq!(k["buttons"].as_array().unwrap().len(), 1); assert_eq!(k["buttons"][0]["label"], "Continue the download");
+        assert_eq!((k["sublink"]["label"].as_str(), k["sublink"]["action"].as_str()), (Some("Download it yourself"), Some("open-url")));
     }
     /// What the KiCad row does for each computer and each KiCad found: the same decision `install::decide` is tested on, as the person sees it.
     #[test] fn the_kicad_row_installs_offers_or_explains_by_what_was_found() {
