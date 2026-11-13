@@ -36,7 +36,7 @@ fn short(k: &str) -> String {
             _ => k.to_string() },
         None => k.to_string() }
 }
-pub(crate) fn shown_name(k: &str) -> String { if todo(k) { "To-do".into() } else { short(k) } }
+pub(crate) fn shown_name(k: &str) -> String { if todo(k) { "To-do".into() } else if k == "halt" { "Stopped".into() } else { short(k) } } // halt: a turn ended out of memory or context (agents/halt.rs); the phones draw it as a note
 fn calls(n: usize) -> String { format!("{} tool {}", n, if n == 1 { "call" } else { "calls" }) }
 
 fn steps_label(d: usize) -> String { format!("{} design {}", d, if d == 1 { "change" } else { "changes" }) }
@@ -148,6 +148,8 @@ pub fn handoff_card(text: &str) -> Option<Value> { let v: Value = serde_json::fr
 pub fn agent_only(role: &str, text: &str) -> bool {
     // a `/give` handoff: the agent reads the message, the person sees its card (the activity that carries it)
     (role == "user" && text.starts_with(HANDOFF_HEAD)) ||
+    // a halt card's Resume (agents/halt.rs): the card says "Resumed"; the note is the agent's
+    ((role == "user" || role == "system") && text == crate::agents::halt::RESUME_TEXT) ||
     (role == "user" && text.starts_with("{\"secret\":") && text.ends_with(SAVED_NOTE)) || role == "system" && ["The quote is posted in this thread. ", "The quote could not be worked out: ", "The files were not taken: ", "The person chose not to send the files (Not now)."].iter().any(|h| text.starts_with(&format!("[Backplane] {h}")))
 }
 /// Bot.private: in a bot's conversation (the uberbot's chat, thread `bot_threads_has`), what the hub hands the bot is the bot's input, not the person's
@@ -579,6 +581,10 @@ pub fn thread_object_checked(st: &State, hub: &str, thread: &str, params: &Value
     o.insert("readingSeen".into(), json!(newest_id.as_deref().unwrap_or("-")));
     // a sent message's references (@bot >thread %project #room &model) as cards the client draws under it
     let mut entries = entries;
+    // halt cards (agents/halt.rs): a turn ended out of memory or out of context, its row drawn as a card with its actions
+    for e in entries.iter_mut() { if e["kind"] == "act" { let id = e["id"].as_str().unwrap_or("").to_string();
+        if let Some(c) = st.settings.get(&crate::agents::halt::key(thread, &id)).and_then(|c| serde_json::from_str::<Value>(c).ok()) { *e = crate::agents::halt::entry(&id, e["text"].as_str().unwrap_or(""), &c) } } }
+    crate::agents::halt::drop_echoes(&mut entries);
     for e in entries.iter_mut() {
         if e["kind"] == "term" { let id = e["id"].as_str().unwrap_or("").to_string(); e["key"] = json!(term_key(thread, &id)); }
         if e["kind"] == "user" { let text = e["text"].as_str().unwrap_or("").to_string(); let mut refs = crate::session::composer::mention::refs_in(st, hub, &text);

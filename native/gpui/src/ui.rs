@@ -277,6 +277,7 @@ impl Backplane {
             }
             "term" => self.term_card(&e, light, cx),
             "handoff" => crate::screens::handoff::card(cx, light, &e),
+            "halt" => crate::screens::halt::card(self, cx, light, &e),
             "step" => crate::screens::histbar::step_row(cx, light, &e),
             // an Agent or Task call: its subagent's own view opens from it (the hub names it `sub`)
             _ if !string(&e, "sub").is_empty() => {

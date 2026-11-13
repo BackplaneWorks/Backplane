@@ -68,6 +68,8 @@ fn head(id: &str, title: &str) -> String { format!("[Backplane] Launched thread 
 pub fn word(e: u8, reply: &str) -> &'static str { match e { 1 => if reply.trim().ends_with('?') { "finished its turn and waits for an answer" } else { "completed" }, 2 => "failed", _ => "was interrupted" } }
 /// Lr.note: the state and the last reply, whole.
 pub fn note(id: &str, title: &str, word: &str, reply: &str) -> String { format!("{} {}{}", head(id, title), word, if reply.trim().is_empty() { ".".to_string() } else { format!(":\n\n{reply}") }) }
+/// A failed thread's report: why it failed (the error it ended on, plain words), then its last reply under it.
+pub fn with_why(why: &str, reply: &str) -> String { let why = why.trim(); if reply.trim().is_empty() { why.to_string() } else { format!("{why}\n\nIts last reply:\n\n{reply}") } }
 /// Lr.ask.note
 pub fn ask_note(id: &str, title: &str, ask: &str) -> String { format!("{} needs the person: {}\nIt waits until they answer in that thread.", head(id, title), ask) }
 /// Lr.loop.note
@@ -94,6 +96,10 @@ pub fn report_plan_to(w: &super::world::World, thread: &str, events: &[Value], f
     if e == 1 && busy > 0 { return None } // launch_waits_for_work
     if w.said_to.get(thread).map_or(false, |s| s.contains(&to)) { return None } // launch_said_quiet
     let reply = w.threads.get(thread).map(|t| t.last_assistant.clone()).unwrap_or_default();
+    // a failure says why first, in plain words (a halt card's: out of memory, out of context), then the last reply
+    let why = events.iter().rev().find(|x| x["$"] == "ActivityLogged" && x["thread"] == thread && x["tone"] == "error").and_then(|x| x["summary"].as_str()).map(str::to_string)
+        .or_else(|| w.threads.get(thread).map(|t| t.why.clone())).unwrap_or_default();
+    let reply = if e == 2 && !why.trim().is_empty() { with_why(&why, &reply) } else { reply };
     let own = !by.is_empty() && w.threads.get(thread).map_or(false, |t| t.last_user.strip_prefix("t:").and_then(|r| r.split(':').next()) == Some(by.as_str()));
     let prev: u64 = w.setting(&format!("launch.n.{thread}")).parse().unwrap_or(0);
     let n = if own { prev + 1 } else { 0 };
@@ -143,6 +149,13 @@ mod laws {
     #[test] fn launch_reports_turn_end() { let r = plan(&demo(true, false, false, &[]), &[tc("completed")]).unwrap(); assert_eq!(r.to, "t0"); assert_eq!(r.text, "[Backplane] Launched thread \"work\" (t1) completed:\n\ndone it") }
     #[test] fn launch_ask_at_once() { let r = plan(&demo(true, false, false, &[]), &[json!({"$":"AskOpened","id":"q1","thread":"t1","kind":"question","tool":"AskUserQuestion","detail":"which board?","options":"","at":9})]).unwrap(); assert!(r.text.contains("needs the person: question (AskUserQuestion): which board?")) }
     #[test] fn launch_fail_told() { assert!(plan(&demo(true, false, false, &[]), &[tc("failed")]).unwrap().text.contains(" failed:")) }
+    #[test] fn a_failure_is_told_with_its_cause_in_plain_words() {
+        let why = "Claude was stopped for memory: claude was using about 412 MB and reached this thread's memory limit (400 MB).";
+        let ev = [json!({"$":"ActivityLogged","thread":"t1","act":"oom1","tone":"error","kind":"halt","summary":why,"at":3}), tc("failed")];
+        let t = plan(&demo(true, false, false, &[]), &ev).unwrap().text;
+        assert!(t.contains(&format!(" failed:\n\n{why}")), "{t}");
+        assert_eq!(with_why(" x ", "r"), "x\n\nIts last reply:\n\nr"); assert_eq!(with_why("x", ""), "x");
+    }
     #[test] fn launch_once_per_end() { assert!(plan(&demo(true, false, false, &[]), &[json!({"$":"MessagePosted","thread":"t1","msg":"a2","role":"assistant","text":"more","at":9})]).is_none()); assert!(plan(&demo(true, false, false, &[]), &[tc("completed"), tc("running")]).is_none(), "the last change is a start") }
     #[test] fn launch_muted_quiet() { assert!(plan(&demo(false, false, false, &[]), &[tc("completed")]).is_none()) }
     #[test] fn launch_waits_for_work() { let w = demo(true, false, false, &["{\"$\":\"SettingSet\",\"key\":\"bg.t1\",\"value\":\"a\\tx\",\"at\":2}"]); assert!(plan(&w, &[tc("completed")]).is_none()); assert!(plan(&w, &[tc("failed")]).is_some(), "a failure ends it even busy") }

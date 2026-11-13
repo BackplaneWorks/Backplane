@@ -339,6 +339,23 @@ async function run(c: Cmd, firstOne: boolean) {
     lc(c.uuid, "completed");
     return;
   }
+  // "eatself:MB" (halt e2e): the agent itself eats MB of memory (touched, 64 MB at a time) and holds it, so its scope's cap kills it, not a child
+  const eatSelf = /eatself:(\d+)/.exec(c.text);
+  if (eatSelf) {
+    log(`EATSELF ${process.pid}`);
+    const keep: Buffer[] = [];
+    for (let i = 0; i < Number(eatSelf[1]) / 64; i++) { keep.push(Buffer.alloc(64 << 20, 1)); await sleep(30); }
+    log(`EATSELF HELD ${keep.length * 64} MB`);
+    await sleep(60000);
+    return;
+  }
+  // "toolong" (halt e2e): Claude Code's full context: an API error reply "Prompt is too long", then the turn's error result with the same words
+  if (c.text.includes("toolong")) {
+    emit({ type: "assistant", error: "invalid_request", message: { id: `msg_${rnd()}`, type: "message", role: "assistant", model: "claude-haiku-4-5-20251001", content: [{ type: "text", text: "Prompt is too long" }], usage: { input_tokens: 0, output_tokens: 0 } }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
+    emit({ type: "result", subtype: "success", is_error: true, duration_ms: 10, num_turns: 1, result: "Prompt is too long", session_id: session, total_cost_usd: 0, usage: {}, modelUsage: {}, uuid: rnd() });
+    lc(c.uuid, "completed");
+    return;
+  }
   if (mode === "buyflow") {
     type Step = { when: string; shell?: string; calls?: { name: string; arguments: object; if?: string }[]; say?: string };
     const step = (JSON.parse(process.env.BP_BUY_SCRIPT ?? "[]") as Step[]).find((s) => new RegExp(s.when).test(c.text));

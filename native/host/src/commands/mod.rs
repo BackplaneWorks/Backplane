@@ -193,6 +193,16 @@ async fn entries_upto(hub: &Arc<Hub>, th: &str, max: usize) -> Ctx {
     Ctx { entries: out, ..Default::default() }
 }
 
+/// Start fresh (a halt card, agents/halt.rs): the recent conversation as a hand-over under `head`, and the person's newest message (newest
+/// first entries; one Backplane wrote is not theirs), which runs again in the new session with the hand-over ahead of it.
+pub(crate) async fn fresh_context(hub: &Arc<Hub>, th: &str, head: &str) -> (String, String) {
+    let es = entries_upto(hub, th, 129).await.entries;
+    let last = es.iter().find(|l| l.msg && l.role == "user" && !l.text.starts_with("[Backplane]") && !l.text.trim().is_empty()).map(|l| l.text.clone()).unwrap_or_default();
+    let mut es = es; if es.first().map_or(false, |l| l.msg && l.role == "user" && l.text.trim() == last.trim()) { es.remove(0); }
+    es.truncate(128);
+    (if es.is_empty() { String::new() } else { plan::hand_text(head, &es, th) }, last)
+}
+
 /// The recent conversation of a thread whose agent session is gone, as the text that goes ahead of the message being run again (at most 128 items, the message itself left out):
 /// "" when the thread has nothing yet. The same hand-over a fork or a provider switch makes (plan.rs `hand_text`).
 pub(crate) async fn lost_session_context(hub: &Arc<Hub>, th: &str, sent: &str) -> String {

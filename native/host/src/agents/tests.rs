@@ -193,7 +193,10 @@ const DEAF: &str = "#!/bin/sh\nsleep 600\n";
     let (hub, ag, _h, _w) = start("k", |w| base_log(w, 1, ""), |_| Cli::standin(&sd)).await; let from = len(&hub).await;
     rpc(&hub, "turn.start", json!({"thread":T1,"text":"go"})).await;
     let ev = until(&hub, from, 10, |ev| ev.iter().any(|e| turn_is(e, "failed"))).await;
-    assert!(ev.iter().any(|e| e["kind"] == "exit" && e["summary"].as_str().unwrap_or("").contains("signal 9")), "{ev:?}");
+    // halt.rs: no scope to ask in a test, so the card says it was killed and that memory is the usual cause, with Resume; never a bare exit line too
+    assert!(ev.iter().any(|e| e["kind"] == "halt" && e["summary"].as_str().unwrap_or("").contains("killed (signal 9)") && e["summary"].as_str().unwrap_or("").contains("ran out of memory")), "{ev:?}");
+    assert!(ev.iter().any(|e| e["key"].as_str().map_or(false, |k| k.starts_with(&format!("halt.{T1}."))) && e["value"].as_str().unwrap_or("").contains("\"cause\":\"memory\"")), "{ev:?}");
+    assert_eq!(ev.iter().filter(|e| e["$"] == "ActivityLogged" && e["tone"] == "error").count(), 1, "one row: {ev:?}");
     ag.shutdown();
 }
 #[tokio::test(flavor = "multi_thread")] async fn an_agent_outside_the_standin_folder_is_refused_and_the_turn_fails() {
