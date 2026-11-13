@@ -315,6 +315,13 @@ ws.onmessage = e => { const v = JSON.parse(e.data); if (v.t === "reply" && v.id 
   check "Held: R1's MPN is not changed yet (R1: $M_H)" "$([ "$M_H" != "E2E-HELD" ] && echo 1 || echo 0)"
   # the person closes the dialog (Cancel): the keyboard to the dialog first, else Escape goes to Backplane's window
   # Escape, as a person would (lane B's a8bbdc74e: the keyboard stays with KiCad's dialog); its Cancel button only if that failed
+  # where the keyboard is right before Escape (lane B): the X input focus's window and name, and the dialog's own xid
+  FOC=$(python3 -c '
+import ctypes, ctypes.util
+x=ctypes.CDLL(ctypes.util.find_library("X11")); x.XOpenDisplay.restype=ctypes.c_void_p; d=x.XOpenDisplay(None)
+w=ctypes.c_ulong(); r=ctypes.c_int(); x.XGetInputFocus(ctypes.c_void_p(d), ctypes.byref(w), ctypes.byref(r))
+n=ctypes.c_char_p(); x.XFetchName(ctypes.c_void_p(d), w, ctypes.byref(n)); print(hex(w.value), (n.value or b"").decode(errors="replace"))' 2>&1)
+  echo "FOCUS before Escape: $FOC; dialog: $(xwininfo -name 'Symbol Properties' 2>/dev/null | grep -o 'Window id: [^ ]*' || echo none)"
   python3 "$XINPUT_PY" key Escape; sleep 1.5
   ESC_LEFT=$(xwininfo -root -tree 2>/dev/null | grep -c '"Symbol Properties"' || true)
   check "Escape closes KiCad's dialog in the pane ($ESC_LEFT left)" "$([ "${ESC_LEFT:-0}" = 0 ] && echo 1 || echo 0)"
@@ -328,6 +335,14 @@ ws.onmessage = e => { const v = JSON.parse(e.data); if (v.t === "reply" && v.id 
   fi
   # M10: the management panels' keys pressed through X while KiCad has the keyboard (a click on its canvas): KiCad hands each to Backplane
   # (SetReservedKeys) and that panel opens: Alt+Shift+C Checks, L Lifecycle, F Fab, B BOM
+  # first lane K's order: a comment from KiCad (Ctrl+; opens Backplane's comment window, a note, Enter) and about a second later Alt+Shift+B
+  read -r CX CY CW CH < <(xwininfo -id "$CONT" | awk -F: '/Absolute upper-left X/{x=$2}/Absolute upper-left Y/{y=$2}/Width/{w=$2}/Height/{h=$2}END{print x+0, y+0, w+0, h+0}')
+  python3 "$XINPUT_PY" click $((CX + CW / 2)) $((CY + CH * 9 / 10)); sleep 0.5; python3 "$XINPUT_PY" key Escape; sleep 0.3
+  OPEN0=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("open",""))' "$(mgmt_info state)" 2>/dev/null)
+  python3 "$XINPUT_PY" chord ctrl semicolon; sleep 2; python3 "$XINPUT_PY" type "M10 note"; sleep 0.5; python3 "$XINPUT_PY" key Return; sleep 1
+  python3 "$XINPUT_PY" chord alt shift b
+  OPEN=""; for _ in $(seq 12); do OPEN=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("open",""))' "$(mgmt_info state)" 2>/dev/null); [ "$OPEN" != "$OPEN0" ] && break; sleep 0.5; done
+  check "After a comment from KiCad, Alt+Shift+B toggles the BOM panel ('$OPEN0' -> '$OPEN'; $(grep -a '"mgmt_toggle":"bom"' "$OUT/client.log" | tail -1))" "$([ "$OPEN" != "$OPEN0" ] && echo 1 || echo 0)"
   for kp in c:checks l:life f:fab b:bom; do
     k=${kp%%:*}; want=${kp#*:}
     read -r CX CY CW CH < <(xwininfo -id "$CONT" | awk -F: '/Absolute upper-left X/{x=$2}/Absolute upper-left Y/{y=$2}/Width/{w=$2}/Height/{h=$2}END{print x+0, y+0, w+0, h+0}')
