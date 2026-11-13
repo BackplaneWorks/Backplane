@@ -78,7 +78,7 @@ pub fn diff_sign(k: u32) -> &'static str { match k { 1 => "+", 2 => "-", _ => " 
 /// Browser) is its open kind; a file opened from Files is Files'.
 pub fn active_kind(viewer: &Value, pending: Option<&str>) -> String {
     pending.map(str::to_string).or_else(|| tabs(viewer).into_iter().find(|t| t.on).map(|t| t.value))
-        .unwrap_or_else(|| match viewer["open"].as_str().unwrap_or("") { "image" | "pdf" | "text" => "files".into(), o => o.to_string() })
+        .unwrap_or_else(|| match viewer["open"].as_str().unwrap_or("") { "image" | "pdf" | "text" => "files".into(), "board" if viewer["gerbers"] == true => "gerbers".into(), o => o.to_string() })
 }
 
 #[derive(Clone, Debug, PartialEq)]

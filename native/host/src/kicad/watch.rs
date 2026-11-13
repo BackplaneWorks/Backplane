@@ -27,6 +27,8 @@ const WAIT_TICKS: u32 = 7; // a view waiting for its project's first board or sc
 pub struct Stamp { rev: String, ok: bool }
 pub fn stamp(path: &str) -> Stamp {
     use crate::plat::fs::MetadataExt;
+    // a Gerber set's folder: its files' stamps (an export rewrites them in place)
+    if std::path::Path::new(path).is_dir() { return Stamp { rev: super::gerber::set_stamp(std::path::Path::new(path)), ok: true } }
     // FS.revision: "dev:ino:size:mtime s:ns:ctime s:ns" (a same-size save within a second still changes it)
     match std::fs::metadata(path) { Ok(m) => Stamp { rev: format!("{}:{}:{}:{}:{}:{}:{}", m.dev(), m.ino(), m.len(), m.mtime(), m.mtime_nsec(), m.ctime(), m.ctime_nsec()), ok: true }, Err(_) => Stamp::default() }
 }
@@ -223,7 +225,7 @@ impl Plots {
     /// Bring watchers of `key` (or just `only`) up to its plot; a source with none yet is read.
     fn fan_one(self: &Arc<Self>, hub: &Arc<Hub>, ky: &str, only: Option<u64>) {
         let (plot, need_read, kind) = { let st = self.st.lock().unwrap(); match st.srcs.get(ky) { Some(s) => (s.plot.clone(), s.plot.is_none() && !s.busy, s.kind), None => return } };
-        if let Some(p) = plot { self.send_to(hub, ky, &p, only); self.sync_parts(hub, ky, only); self.revision(hub, ky, only); if solid_kind(kind) { self.note(hub, ky, only) } }
+        if let Some(p) = plot { self.send_to(hub, ky, &p, only); self.sync_parts(hub, ky, only); self.revision(hub, ky, only); if solid_kind(kind) { self.note(hub, ky, only) } else { self.gerber_note(hub, ky, only) } }
         if need_read { self.read(hub, ky) }
     }
     /// Pv.revision.ready: the exact revision of the file the plot is of, to the watchers (nothing for a version).
@@ -239,6 +241,14 @@ impl Plots {
         let text = std::fs::read_to_string(self.infos(ky)).unwrap_or_default();
         let who: Vec<u64> = { let st = self.st.lock().unwrap(); st.subs.iter().filter(|(c, v)| only.map_or(true, |o| o == **c) && v.iter().any(|s| s.key == ky)).map(|(c, _)| *c).collect() };
         for c in who { hub.push(c, json!({"t":"plotnote","key":ky,"text":text.trim()})); }
+    }
+    /// A Gerber set's note (kicad/gerber: what did not read, file and line) to its watchers; nothing for any other source.
+    fn gerber_note(&self, hub: &Arc<Hub>, ky: &str, only: Option<u64>) {
+        let file = { let st = self.st.lock().unwrap(); st.srcs.get(ky).map(|s| s.file.clone()).unwrap_or_default() };
+        if file.is_empty() || !super::gerber::is_set_path(std::path::Path::new(&file)) { return }
+        let text = super::gerber::notes_of(&file).join("\n");
+        let who: Vec<u64> = { let st = self.st.lock().unwrap(); st.subs.iter().filter(|(c, v)| only.map_or(true, |o| o == **c) && v.iter().any(|s| s.key == ky)).map(|(c, _)| *c).collect() };
+        for c in who { hub.push(c, json!({"t":"plotnote","key":ky,"text":text})); }
     }
     /// A 3D source's loading stage to its watchers: what the hub is doing for it now (`text`, "" when it is done), for how long already
     /// (`ms`) and, when known, about how long it took the last time (`about`, ms; 0 unknown). The window shows the text with the time running.

@@ -78,8 +78,8 @@ pub fn plan(st: &State, sel: &str, href: &str, home: &str, exists: &dyn Fn(&str)
                     if exists(&format!("{root}{stem}.kicad_pcb")) { go("fm-open", format!("{stem}.kicad_pcb")) }
                     else if exists(&format!("{root}{stem}.kicad_sch")) { go("fm-open", format!("{stem}.kicad_sch")) }
                     else { go("fm-cd", crate::files::fm::parent(&rel)) } }
-                // Gerbers are the board's: its Board tab
-                "gerber" => go("view", "board".into()),
+                // a Gerber or drill file: drawn itself on the Board page (kicad/gerber), as the Files tab opens it
+                "gerber" => go("fm-open", rel),
                 _ if !preview.is_empty() => go("fm-open", rel),
                 _ => Plan::Os(path),
             }
@@ -91,7 +91,7 @@ pub fn plan(st: &State, sel: &str, href: &str, home: &str, exists: &dyn Fn(&str)
             if exists(&format!("{stem}.kicad_pcb")) { return scoped_plan(st, sel, "board", format!("{stem}.kicad_pcb")) }
             if exists(&format!("{stem}.kicad_sch")) { return scoped_plan(st, sel, "schematic", format!("{stem}.kicad_sch")) }
             return Plan::Note("That KiCad project has no board or schematic beside it.") }
-        "gerber" => return Plan::Note("Gerbers open on their project's Board; this one is in no project."),
+        "gerber" => "board",
         _ => "" };
     if scoped.is_empty() { return Plan::Os(path) }
     scoped_plan(st, sel, scoped, path)

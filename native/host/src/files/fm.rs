@@ -14,6 +14,8 @@ fn ends(xs: &[&str], e: &str) -> bool { xs.iter().any(|x| e.ends_with(x)) }
 pub fn kind(name: &str) -> &'static str {
     let e = ext(name);
     if e.ends_with(".kicad_pcb") { "board" } else if e.ends_with(".kicad_sch") { "schematic" }
+    // a Gerber, drill or job file: drawn on the Board page (kicad/gerber)
+    else if crate::files::kicad::gerber::is_fab_file(name) { "board" }
     else if ends(&[".step", ".stp", ".glb"], &e) { "3d" }
     else if ends(&[".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"], &e) { "image" }
     else if e.ends_with(".pdf") { "pdf" } else { "" }

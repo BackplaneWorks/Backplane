@@ -145,7 +145,8 @@ pub struct Screens {
     /// What the bots/rooms screens want focused when they open (a field name), once; and the page last seen open.
     pub focus_field: Option<String>,
     pub bots_open: String,
-    pub plot_click: Option<std::time::Instant>,
+    /// a rail press that opens a drawing: when, and the plot on show then (the metric waits for another one)
+    pub plot_click: Option<(std::time::Instant, String)>,
     pub plot: plot::Store,
     pub plotview: plotview::PlotView,
     /// The cameras of a Split's schematic and board panes (`pv(1)`, `pv(2)`).

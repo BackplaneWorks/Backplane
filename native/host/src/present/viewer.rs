@@ -51,7 +51,7 @@ pub fn show_refusal(kind: &str, path: &str, roots: &[String]) -> Option<String> 
         "mech" if path.is_empty() => None,
         "mech" | "3d" if is_model(path) => (!there()).then(|| format!("no such file: {path} (Mech shows a STEP, STP or GLB file that exists)")),
         "mech" => Some(format!("Mech shows STEP, STP and GLB files, not {path}")),
-        "board" | "pcb" | "schematic" | "sch" | "3d" | "split" | "browser" | "files" | "review" => None,
+        "board" | "pcb" | "schematic" | "sch" | "3d" | "split" | "browser" | "files" | "review" | "gerbers" => None,
         "" if is_model(path) => (!there()).then(|| format!("no such file: {path}")),
         "" if l.ends_with(".kicad_pcb") || l.ends_with(".kicad_sch") => None,
         "" => Some(format!("the viewer has no page for {path}: give a kind (board, schematic, 3d, mech, files) or a .kicad_pcb, .kicad_sch, .step or .glb")),
@@ -135,6 +135,9 @@ fn board_file(kind: &str, root: &str, rel: &str) -> String {
 pub fn view_action(st: &State, hub: &str, session: &Value, kind: &str) -> Option<ViewOut> {
     // "mech\t<part>": an agent's viewer_show of a model opens Mech on that part (a path from the project's root, or absolute under it)
     let (kind, part) = kind.split_once('\t').unwrap_or((kind, ""));
+    // Gerbers: the Board page drawing the project's fab output (its newest set under mfg/: kicad/gerber), the page marked as theirs
+    let gerbers = kind == "gerbers";
+    let kind = if gerbers { "board" } else { kind };
     if !(shows(kind) || kind.is_empty() || kind == "review") { return None }
     let sel = s(session, "sel");
     // the Review tab: its first page (pages.rs asks for it; no source to watch)
@@ -154,7 +157,8 @@ pub fn view_action(st: &State, hub: &str, session: &Value, kind: &str) -> Option
     let kept_part = s(d, &format!("@mech.part:{sel}")).to_string();
     let part = if kind == "mech" && part.is_empty() { kept_part.as_str() } else { part };
     // (a board picked in the Boards menu stays the one shown on Board, Schematic, 3D and Split: its file is the source)
-    let picked = if matches!(kind, "board" | "schematic" | "3d" | "split") { board_file(kind, &root, &chosen_board(d, sel)) } else { String::new() };
+    let picked = if gerbers { crate::files::kicad::gerber::default_set(std::path::Path::new(&root))?.to_string_lossy().into_owned() }
+        else if matches!(kind, "board" | "schematic" | "3d" | "split") { board_file(kind, &root, &chosen_board(d, sel)) } else { String::new() };
     let (want, wkind, wpath, board) = if kind == "mech" { let part = rel_in(&root, part); let ps = parts_of(&root, sel, &part); let (w, a) = mech_want(&root, &ps, &part); let k = if w.is_empty() { "" } else { "3d" }; (w, k.to_string(), a, String::new()) }
         else { let base = key(kind, &root); let want = if base.is_empty() { base } else { format!("{base}{picked}") };
             // (Split watches its three sources from the board: the path stays its schematic's sheet, "" the root)
@@ -164,6 +168,7 @@ pub fn view_action(st: &State, hub: &str, session: &Value, kind: &str) -> Option
     let mut before = Vec::new();
     let mut drafts = serde_json::Map::new();
     drafts.insert(format!("@view.file:{sel}"), json!(if kind == "split" { "" } else { picked.as_str() })); drafts.insert(format!("@view:{sel}"), json!(kind));
+    drafts.insert(format!("@view.gerbers:{sel}"), json!(if gerbers { "1" } else { "" }));
     drafts.insert(format!("@view.sheet:{sel}"), json!(""));
     if kind == "mech" { drafts.insert(format!("@mech.part:{sel}"), json!(rel_in(&root, part))); } // another page leaves Mech's choice as it is
     for k in ["@pick", "@card", "@pick.rid"] { drafts.insert(k.into(), json!("")); }
@@ -390,6 +395,8 @@ fn page(template: &Value, kind: &str, root: &str, drafts: &Value, sel: &str) -> 
     let mut v = template.clone();
     let Some(o) = v.as_object_mut() else { return v };
     o.insert("open".into(), json!(kind)); o.insert("key".into(), json!(k));
+    // the Board page drawing a Gerber set (kicad/gerber): the rail lights Gerbers
+    if kind == "board" && !sel.is_empty() && s(drafts, &format!("@view.gerbers:{sel}")) == "1" { o.insert("gerbers".into(), json!(true)); }
     // View.layers: a 3D view draws the board's layers on its faces
     o.insert("layers".into(), json!(if kind == "3d" { if file.is_empty() { key("board", root) } else { String::new() } } else { k }));
     // View.masks / View.lmode / View.lhead: what the person hid, the focus, and what the canvas draws from them
@@ -567,6 +574,7 @@ pub fn files_action(st: &State, hub: &str, session: &Value, action: &str, value:
     let at = s(d, "@view.at");
     let mut rid = session["rid"].as_u64().unwrap_or(0); let mut before = vec![]; let mut drafts = serde_json::Map::new();
     drafts.insert(format!("@view:{sel}"), json!(kind)); drafts.insert(format!("@view.file:{sel}"), json!(file)); drafts.insert(format!("@files.dir:{sel}"), json!(dir));
+    drafts.insert(format!("@view.gerbers:{sel}"), json!(if kind == "board" && crate::files::kicad::gerber::is_fab_file(fm::last(value)) { "1" } else { "" }));
     drafts.insert(format!("@view.sheet:{sel}"), json!("")); drafts.insert(format!("@mech.part:{sel}"), json!(""));
     for k in ["@pick", "@card", "@pick.rid"] { drafts.insert(k.into(), json!("")); }
     if want != at {
@@ -659,8 +667,10 @@ pub fn viewer_json(st: &State, template: &Value, session: &Value) -> Option<Valu
         if let Some(ps) = v["panes"].as_array_mut() { for p in ps.iter_mut() { p["probe"] = json!(pr); } }
         v["probe"] = json!(pr);
     }
-    let tab = if matches!(kind, "image" | "pdf" | "text") { "files" } else { kind };
-    let chips: Vec<Value> = [("Board", "board"), ("Schematic", "schematic"), ("3D", "3d"), ("Mech", "mech"), ("Files", "files"), ("Review", "review")].iter().map(|(l, val)| json!({"label": l, "value": val, "on": *val == tab})).collect();
+    let tab = if matches!(kind, "image" | "pdf" | "text") { "files" } else if v["gerbers"] == true { "gerbers" } else { kind };
+    // (Gerbers is a chip while it is on show: a project's fab output, when there is some, is the Board page's file)
+    let chips: Vec<Value> = [("Board", "board"), ("Schematic", "schematic"), ("3D", "3d"), ("Gerbers", "gerbers"), ("Mech", "mech"), ("Files", "files"), ("Review", "review")].iter()
+        .filter(|(_, val)| *val != "gerbers" || tab == "gerbers").map(|(l, val)| json!({"label": l, "value": val, "on": *val == tab})).collect();
     v.as_object_mut()?.insert("choices".into(), Value::Array(chips));
     Some(v)
 }
@@ -1067,6 +1077,31 @@ mod tests {
         let o = view_action(&st, "h", &session, "mech").unwrap();
         assert_eq!(o.patch["drafts"][format!("@mech.part:{th}")], "mech/b.step");
         let w = o.before[0]["text"].as_str().unwrap(); assert!(w.contains(&format!("{root}/mech/b.step")), "{w}");
+    }
+
+    #[test] fn the_gerbers_page_is_the_board_page_on_the_newest_set() {
+        let d = crate::plat::tmp::dir("gerb-view"); std::fs::create_dir_all(d.join("mfg/b/gerber")).unwrap();
+        std::fs::write(d.join("mfg/b/gerber/b-F_Cu.gbr"), "%FSLAX46Y46*%M02*").unwrap();
+        let root = d.to_string_lossy().into_owned();
+        let mut st = State::new(); for l in include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../test/slim/fixtures/thread-log.jsonl")).lines() { st.apply_line(l); }
+        let th = "t1700000003-8"; let proj = st.threads.get(th).map(|t| t.project.clone()).unwrap();
+        if let Some(p) = st.projects.get_mut(&proj) { p.root = root.clone(); }
+        let session = json!({"sel": th, "rid": 1, "drafts": {}, "open": {}, "adding": false, "panel": false, "info": {}});
+        let o = view_action(&st, "h", &session, "gerbers").unwrap();
+        let set = format!("{root}/mfg/b/gerber");
+        assert_eq!((o.patch["drafts"][format!("@view:{th}")].as_str(), o.patch["drafts"][format!("@view.file:{th}")].as_str(), o.patch["drafts"][format!("@view.gerbers:{th}")].as_str()), (Some("board"), Some(set.as_str()), Some("1")));
+        let w = o.before[0]["text"].as_str().unwrap(); assert!(w.contains("\"kind\":\"board\"") && w.contains(&set), "{w}");
+        let mut s2 = session.clone(); crate::session::patch::merge(&mut s2, &o.patch);
+        let v = viewer_json(&st, &json!({}), &s2).unwrap();
+        assert_eq!((v["open"].as_str(), v["gerbers"].as_bool()), (Some("board"), Some(true)));
+        assert!(v["choices"].as_array().unwrap().iter().any(|c| c["value"] == "gerbers" && c["on"] == true), "the Gerbers tab is the one on");
+        // the Board page again: its own board, not marked
+        let o = view_action(&st, "h", &s2, "board").unwrap();
+        assert_eq!(o.patch["drafts"][format!("@view.gerbers:{th}")], "");
+        // a project with no fab output: no Gerbers page
+        std::fs::remove_dir_all(d.join("mfg")).unwrap();
+        assert!(view_action(&st, "h", &session, "gerbers").is_none());
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     /// Issue 1102: a GLB or STEP shown from outside mech/ (build/f1_model/picobiscuit.glb) is the part on show, not mech/'s first.

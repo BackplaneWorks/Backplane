@@ -36,10 +36,10 @@ fn open(thread: &str, pid: &str, action: &'static str, value: &str) -> Plan { Pl
     assert_eq!(plan_of("tk", "file:///w/amp/boards/main/main.kicad_pcb"), open("tb", "pa", "fm-open", "boards/main/main.kicad_pcb"));
     // the deepest project folder holds it
     assert_eq!(plan_of("ta", "/w/amp/kit/k.kicad_sch"), open("tk", "pk", "fm-open", "k.kicad_sch"));
-    // a model on Mech (by its path), a KiCad project on its board, Gerbers on the project's Board, a note on Files
+    // a model on Mech (by its path), a KiCad project on its board, a Gerber drawn itself on the Board page, a note on Files
     assert_eq!(plan_of("ta", "/w/amp/mech/case.step"), open("ta", "pa", "view", "mech\t/w/amp/mech/case.step"));
     assert_eq!(plan_of("tk", "/w/amp/boards/main/main.kicad_pro"), open("tb", "pa", "fm-open", "boards/main/main.kicad_pcb"));
-    assert_eq!(plan_of("ta", "/w/amp/mfg/gerbers/main-F_Cu.gbr"), open("ta", "pa", "view", "board"));
+    assert_eq!(plan_of("ta", "/w/amp/mfg/gerbers/main-F_Cu.gbr"), open("ta", "pa", "fm-open", "mfg/gerbers/main-F_Cu.gbr"));
     assert_eq!(plan_of("ta", "/w/amp/README.md"), open("ta", "pa", "fm-open", "README.md"));
     // a file the viewer does not draw, in a project: the system's, as before
     assert_eq!(plan_of("ta", "/w/amp/src/main.rs"), Plan::Os("/w/amp/src/main.rs".into()));
@@ -51,7 +51,7 @@ fn open(thread: &str, pid: &str, action: &'static str, value: &str) -> Plan { Pl
     assert_eq!(plan_of("ta", "/w/empty/e.kicad_sch"), Plan::Scoped { thread: "ta".into(), kind: "schematic", path: "/w/empty/e.kicad_sch".into() });
     // no thread on show: said, not opened elsewhere
     assert!(matches!(plan_of("", "/x/loose.kicad_pcb"), Plan::Note(_)));
-    assert!(matches!(plan_of("ta", "/x/b.gbr"), Plan::Note(_)));
+    assert_eq!(plan_of("ta", "/x/b.gbr"), Plan::Scoped { thread: "ta".into(), kind: "board", path: "/x/b.gbr".into() }, "a loose Gerber is drawn too");
     // anything else in no project: the system's
     assert_eq!(plan_of("ta", "/x/notes.txt"), Plan::Os("/x/notes.txt".into()));
 }
