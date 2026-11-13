@@ -304,3 +304,46 @@ not a regression (Collar and the earlier Hubble run: 19 ms / 78 ms).
 
 Harness, not KiCad: the review-marker click lands on KiCad's own DRC arrow beside the ring (Hubble: an event without the host
 marker; Collar: none); the side-panel journey did not reach Full size in this run (fixed after it).
+
+## bp.13 batch 4 (85dde9ab8d, builds/10.99.0-bp.13-85dde9ab8d), client a8bbdc74e (94b65170f, b8acf3295 in), 2026-11-13 08:0x
+
+Both boards, every journey, plan copies, 10 GB scope. One strict miss (Hubble `switch_shows_the_asked_frame`). Hubble's main run again
+overlapped other lanes' builds (pan p99 1269 ms, cross-probe 1.6 s: load; Collar 19 ms / 69 ms). Against batch 3 (realuse-b3m):
+
+| measure | Collar b3 -> b4 | Hubble b3 -> b4 | budget |
+|---|---|---|---|
+| KiCad keyboard after Edit / Full size (no canvas click) | no -> **yes** | no -> **yes** | yes |
+| Ctrl+Shift+R straight after Edit (plan copy) | nothing -> **toggles** | nothing -> nothing | toggles |
+| Ctrl+K / Ctrl+; after the first click | 9 / 9 -> 34 / 55 ms | 47 / 26 -> 21 / 33 ms | 100 |
+| ';' on the canvas -> comment window | - -> 32 ms | - -> 36 ms | 100 |
+| Ctrl+K / Ctrl+; with a KiCad menu open | - -> 0.4 / 17 ms | - -> 29 / 28 ms | 100 |
+| Ctrl+E -> footprint editor | 910 -> 566 ms, in the pane | 947 -> 681 ms, **floats first** | 1000, in the pane |
+| GerbView through the hub | 1383 -> 1246 ms, stays | 1657 -> 1561 ms, stays | stays |
+| kicad-cli DRC | 1714 -> **409 ms** | 2162 -> **919 ms** | - |
+| in-editor DRC (RunChecks) / ERC | 222 / 37 -> 135 / 39 ms | 635 / 136 -> 353 / 117 ms | 30 s |
+| pan during in-editor DRC: frames > 50 ms | 64 -> 38 | 54 -> 57 | 0 |
+| DRC dialog run (busy) | - -> 958 ms | - -> 4914 ms | - |
+| plan corridor on another layer: click, then W | (calibration failed) | B.Cu stays active, nothing | changes |
+| Full size (side panels) | - -> 199 ms, 0 blank | - -> 71 ms, 0 blank | - |
+| first 3D | 1240 -> 1220 ms, 1 blank | 1180 -> 1177 ms, 1 blank | first-time |
+| thread back from the sidebar | 69-77 -> 154 ms | 83-90 -> 151 ms | 50 |
+| KiCad RSS, editors up | 4.75 -> 4.79 GB | 4.37 -> 5.54 GB | ~1.7 |
+| client RSS peak (lane C's guard) | - | 732 MB | 2 GB |
+
+Misses, ranked:
+1. **Hubble: a tab switch back to the board can leave the pane with no KiCad frame** (strict `switch_shows_the_asked_frame`: after the
+   management panel, the schematic and the comment journeys, "asked for PCB, the pane shows no KiCad frame 4.2-4.5 s after the press").
+   Owner: client, lane B. Repro: Hubble_DK, Edit, Schematic tab, Board tab (or open and shut a management panel).
+2. **Hubble: KiCad holds 5.5 GB** (4.4 GB in batch 3). Owner: fork.
+3. **Plan: a click on a corridor of another layer does not select it on Hubble** (batch 4's other-layer hit test): the layer stays
+   B.Cu, the drag misses, W / Shift+W / A / R change nothing. Owner: fork. Repro: Hubble_DK plan copy, plan view, click c-1 (In1.Cu).
+   Collar: the harness's calibration failed this run, so not measured.
+4. **Hubble: Ctrl+E's footprint editor still floats 0.5 s outside the pane** (Collar: in the pane). Owner: lane B / fork.
+5. **Hubble: Ctrl+Shift+R straight after Edit still does nothing on the plan copy**, though KiCad's frame has the keyboard after Edit
+   in the main run (Collar: works). Owner: lane B to look (the plan copy's run also showed a KiCad window before Edit).
+6. **Panning during in-editor DRC still stutters** (38-57 frames > 50 ms); the DRC itself is 1.7-4x faster. Owner: fork.
+7. **Thread back from the sidebar 151-154 ms** (was 69-90). Owner: lane B. Low, but it doubled.
+8. **ERC from the API does nothing** (schematic editor has no RunAction): until a376ea22f0. Owner: fork.
+
+Not measured (harness): ';' in the search box and the properties panel (the search box was not clicked into; the panel was looked for
+on the wrong side); the review-marker click.
