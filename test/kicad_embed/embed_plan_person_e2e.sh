@@ -178,6 +178,16 @@ print(next((l.get("status", "?") for l in ls if l.get("layer") == sys.argv[1]), 
   check "an agent's RunAction pcbnew.Plan.approveLayer is refused" "$(echo "$RA" | grep -q "the person's alone" && echo 1 || echo 0)" "$(echo "$RA" | cut -c1-200)"
   RB=$(agent_ipc kiapi.backplane.plan.ApprovePlan "{\"board\":{\"type\":\"DOCTYPE_PCB\"},\"layer\":\"F.Cu\",\"approve\":true}")
   check "an agent's ApprovePlan is refused" "$(echo "$RB" | grep -q "the person's alone" && echo 1 || echo 0)" "$(echo "$RB" | cut -c1-200)"
+  # past the hub's guard, straight to KiCad as an agent's client: the fork itself refuses the approval actions (bp.13 batch 4, f74ea40f83;
+  # before the busy check, so in plan view too). Batch 3 does not: there it is not sent (it would approve F.Cu), only told
+  SOCK=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1] or "{}").get("sock",""))' "$R")
+  B4=$(ask kicad_ipc "{\"path\":\"$PCB\",\"type\":\"kiapi.backplane.GetCapabilities\",\"message\":{}}" | grep -q 'rules-insert-position' && echo 1 || echo 0)
+  if [ "$B4" = 1 ] && [ -S "$SOCK" ]; then
+    for act in pcbnew.Plan.approveLayer pcbnew.Plan.rejectLayer pcbnew.Plan.accept pcbnew.Plan.reject; do
+      A=$(python3 "$KEMBED_LIB/agent_runaction.py" "$SOCK" "$act" agent:t1 2>&1 | tail -1)
+      check "KiCad itself refuses an agent's RunAction $act" "$(echo "$A" | grep -q "approval is the person's" && echo 1 || echo 0)" "$A"
+    done
+  else echo "XFAIL KiCad itself refusing an agent's approval actions: not this build (bp.13 batch 4), or no socket ($SOCK)"; fi
   ask plan_approve '{"layer":"F.Cu","note":"F.Cu"}' >/dev/null; sleep 2
   LF0=$(layer_status F.Cu)
   check "F.Cu is still not approved after the agent's attempts and its plan_approve" "$([ "$LF0" != approved ] && echo 1 || echo 0)" "F.Cu: $LF0"
@@ -202,7 +212,8 @@ active_layer() { ask kicad_ipc "{\"path\":\"$PCB\",\"type\":\"kiapi.board.comman
 xcheck() { # $1 what, $2 1|0, $3 detail: a FAIL only where the build is expected to have the fix
   if [ "$XL" = expect ] || [ "$2" = 1 ]; then check "$1" "$2" "$3"; else echo "XFAIL $1 (this build's hit test sees only the active layer; fixed in bp.13 batch 4): $3"; fi
 }
-X key Escape; sleep 0.3; X key Next; sleep 1                      # B.Cu active, nothing selected
+# no Escape here: with nothing selected it ends KiCad's plan tool (the plan stays drawn, the select tool takes the clicks)
+X key Next; sleep 1                                                # B.Cu active, nothing selected
 # c-r's middle (147.5, 129) on the screen, from c-p's (131, 113.3) and c-q's (164, 113.3); the B.Cu plane stops at y 108, so nothing of
 # the active layer is under the click
 read -r RX RY < <(python3 -c 'import sys; px,py,qx=map(float,sys.argv[1:]); s=(qx-px)/33; print(round(px+(147.5-131)*s), round(py+(129-113.3)*s))' "$PX" "$PY" "$QX")
@@ -213,7 +224,20 @@ W1=$(plan_field c-r); L1=$(active_layer)
 xcheck "with B.Cu active, a click on an F.Cu corridor and W widen it" "$(python3 -c 'import sys; a,b=sys.argv[1:]; print(int(a!="?" and b!="?" and float(b)>float(a)+1e-9))' "$W0" "$W1")" "c-r width $W0 -> $W1"
 xcheck "the click makes the corridor's layer (F.Cu) active" "$([ "$L1" = BL_F_Cu ] && echo 1 || echo 0)" "active $L0 -> $L1"
 # W with nothing selected: nothing changes
-X key Escape; sleep 0.5; REV1=$(plan_field rev); X key w; sleep 1.5; REV2=$(plan_field rev)
+# nothing selected: a click off the board, left of it, where nothing of the plan is (Escape would end the plan tool)
+S7=$(( (QX - PX) / 33 )); [ "$S7" -gt 0 ] || S7=10
+X click "$(( PX - 22 * S7 > FX + 60 ? PX - 22 * S7 : FX + 60 ))" "$PY"; sleep 0.8; REV1=$(plan_field rev); shot q7_before_w; X key w; sleep 1.0; shot q7_after_w; REV2=$(plan_field rev)
+BAND=$(python3 - "$OUT/shots/q7_before_w.png" "$OUT/shots/q7_after_w.png" "$FX" "$FY" "$FW" <<'PY'
+import sys
+import numpy as np
+from PIL import Image
+a, b = (np.asarray(Image.open(f).convert("RGB")).astype(int) for f in sys.argv[1:3]); fx, fy, fw = map(int, sys.argv[3:6])
+# the infobar opens at the top of the canvas, under the toolbars (about 105-150 px into the frame)
+band = (slice(fy + 100, fy + 160), slice(fx + 40, fx + fw - 40))
+print(int((np.abs(a[band] - b[band]).sum(axis=2) > 60).sum()))
+PY
+)
+xcheck "W with nothing selected says so on KiCad's infobar" "$([ "${BAND:-0}" -gt 1500 ] && echo 1 || echo 0)" "$BAND pixels changed at the top of the canvas (q7_before_w/q7_after_w)"
 check "W with nothing selected changes nothing in the plan" "$([ "$REV1" != "?" ] && [ "$REV1" = "$REV2" ] && echo 1 || echo 0)" "revision $REV1 -> $REV2"
 shot q7_nothing_selected
 finish_suite "embed_plan_person_e2e ($EMBED_MODE)"
