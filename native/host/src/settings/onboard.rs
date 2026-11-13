@@ -122,7 +122,8 @@ impl OnboardRpc {
         let devices = crate::net::start::routes().map_or(0, |r| r.reg.list()["devices"].as_array().map_or(0, |d| d.iter().filter(|x| x["revoked"] != true && x["revoked"] != "true").count()));
         let exe = std::env::current_exe().map(|e| e.to_string_lossy().into_owned()).unwrap_or_default();
         let on_path = on_path(crate::present::onboard::platform(&hub.cfg.os).launcher).map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
-        let checks = json!({"exe": exe, "onPath": on_path, "agents": a, "accounts": accounts(&info), "kicad": k, "freecad": f, "devices": devices, "tailscale": info["tailscale"], "winget": winget, "node": node, "git": git});
+        let checks = json!({"exe": exe, "onPath": on_path, "agents": a, "accounts": accounts(&info), "kicad": k, "freecad": f, "devices": devices, "tailscale": info["tailscale"], "winget": winget, "node": node, "git": git,
+            "gitFix": if git { String::new() } else { crate::present::onboard::git_fix(&hub.cfg.os, |p| p == "winget" && winget || std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()).any(|d| d.join(p).is_file())) }});
         // a path typed here goes where FreeCAD is looked for, then Settings, CAD reads the same machine
         if checks["freecad"]["runs"] == true && !g("freecad").is_empty() { let d = hub.cfg.home.join("freecad"); let _ = std::fs::create_dir_all(&d); let _ = std::fs::write(d.join("command"), g("freecad")); }
         crate::files::kicad::ipc::publish_cad(hub).await;
@@ -154,7 +155,8 @@ impl OnboardRpc {
         let state: Value = serde_json::from_str(info["kicad.install"].as_str().unwrap_or("")).unwrap_or_default();
         let Some(p) = package() else { return };
         if decide(Some(p), info["kicad.status"].as_str().unwrap_or(""), info["kicad.version"].as_str().unwrap_or(""), state["state"].as_str().unwrap_or("")) != Action::Auto { return }
-        if hub.setting("onboard.kicad.auto").await.as_deref() == Some(p.version) { return }
+        // once by itself; again only to continue a download a stopped hub left (the person pressed nothing to stop it)
+        if hub.setting("onboard.kicad.auto").await.as_deref() == Some(p.version) && crate::files::kicad::install::partial_bytes(&hub.cfg.home, p) == 0 { return }
         let _ = hub.commit(&json!({"$":"SettingSet","key":"onboard.kicad.auto","value":p.version,"at":now_ms() / 1000})).await;
         if let Err(why) = crate::files::kicad::install::install(hub, true).await { eprintln!("setup: KiCad install not started: {why}"); }
     }

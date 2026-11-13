@@ -107,7 +107,7 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
     let footer = div().flex().justify_between().items_center().gap_3().px_6().py_3().border_t_1().border_color(c("line")).child(left)
         // what the hub refused (a folder it cannot make, a path it cannot open): setup covers the window's own error line, so it is said here
         .child(div().id("setup-refused").flex_1().min_w_0().text_size(px(12.)).text_color(c("bad")).child(trs(refused)))
-        .child(div().flex().flex_shrink_0().gap_2().child(foot(cx, light, "setup-end", trs(&string(tour, "end")), "ob-end", false)).child(foot(cx, light, "setup-later", trs(&string(tour, "skip")), "ob-skip", false)).child(foot(cx, light, "setup-next", trs(&string(tour, "next")), "ob-next", true)));
+        .child(div().flex().flex_shrink_0().gap_2().child(foot(cx, light, "setup-end", trs(&string(tour, "end")), "ob-end", false)).child(foot(cx, light, "setup-later", trs(&string(tour, "skip")), "ob-skip", false)).child(foot(cx, light, "setup-next", trs(&string(tour, "next")), "ob-next", tour["quiet_next"] != true)));
     let main = div().flex().flex_col().flex_1().min_w_0().child(div().id("setup-main").flex_1().min_h_0().overflow_y_scroll().track_scroll(scroll).px_6().py_5().child(body)).child(footer);
     Some(div().id("setup").absolute().top_0().left_0().size_full().flex().bg(c("bg")).text_color(c("text")).occlude().key_context("Setup").track_focus(focus)
         .on_key_down(cx.listener(|this, e: &KeyDownEvent, _, cx| { if e.keystroke.key == "enter" && !e.keystroke.modifiers.modified() { settings::flush_fields(this); this.error.clear(); let _ = this.tx.try_send(Command::Action("ob-next".into(), String::new())); cx.notify(); } }))

@@ -359,16 +359,51 @@ fn kicad_row(f: &Facts, pkg: Option<&crate::files::kicad::install::Package>) -> 
     let rel = link("Releases", KICAD_RELEASES);
     let r = match action {
         Action::Nothing => row("KiCad", &format!("Backplane KiCad{} at {}. Agents can edit a board in a running KiCad.", v(version), i("kicad.cli")), vec![]),
-        Action::Wait if pstate == "running" => row("KiCad", &format!("Installing Backplane KiCad{}. {}", v(s(&prog, "version")), if note.is_empty() { "Starting." } else { note }), vec![]),
+        Action::Wait if pstate == "running" => installing_row(&prog, v(s(&prog, "version")), note),
         Action::Wait => row("KiCad", looking(f), vec![rel]),
-        Action::Auto => row("KiCad", &format!("Not found. Downloading Backplane KiCad{} into Backplane's own folder. This takes a few minutes.", v(pkg.map_or("", |p| p.version))), vec![rel]),
-        Action::Offer if pstate == "failed" => warn(row("KiCad", &format!("{}.", note.trim_end_matches('.')), vec![btn("Try again", "ob-kicad-install", "", true), rel])),
+        // setup starts it once by itself (settings/onboard.rs, `onboard.kicad.auto`); when that once has passed and nothing runs (a hub stopped
+        // mid-download, or a try that never started) the row offers the press, and says how far an earlier download got: never a
+        // "Downloading" that nothing does (the Windows bare run sat on one for 12 minutes)
+        Action::Auto if pkg.map_or(false, |p| set(f.st, "onboard.kicad.auto") == p.version) && !crate::files::kicad::install::running() => {
+            let p = pkg.expect("checked");
+            let kept = crate::files::kicad::install::partial_bytes(std::path::Path::new(&f.home), p);
+            if kept > 0 { row("KiCad", &format!("The download of Backplane KiCad {} stopped at {} MB. It continues from there.", p.version, kept >> 20), vec![btn("Continue the download", "ob-kicad-install", "", true), rel]) }
+            else { row("KiCad", &format!("Not found. Backplane KiCad {} is not downloaded yet.", p.version), vec![btn("Download Backplane KiCad", "ob-kicad-install", "", true), rel]) }
+        }
+        Action::Auto => row("KiCad", &format!("Not found. Downloading Backplane KiCad{} into Backplane's own folder.", v(pkg.map_or("", |p| p.version))), vec![rel]),
+        Action::Offer if pstate == "failed" => {
+            let kept = pkg.map_or(0, |p| crate::files::kicad::install::partial_bytes(std::path::Path::new(&f.home), p));
+            warn(row("KiCad", &format!("{}.", note.trim_end_matches('.')), vec![btn(if kept > 0 { "Continue the download" } else { "Try again" }, "ob-kicad-install", "", true), rel]))
+        }
         Action::Offer if status == "ok" => row("KiCad", &format!("Backplane KiCad{} at {}. Backplane KiCad{} is out: it brings the KiCad editor inside Backplane's viewer.", v(version), i("kicad.cli"), v(pkg.map_or("", |p| p.version))), vec![btn("Update KiCad", "ob-kicad-install", "", true), rel]),
         Action::Offer => row("KiCad", &format!("{} {} Backplane KiCad adds editing by agents.", found, offer_lead(status)).trim().replace("  ", " "), vec![btn("Install Backplane KiCad", "ob-kicad-install", "", true), rel]),
         Action::NoPackage => row("KiCad", &if found.is_empty() { format!("{} No Backplane KiCad is published for this computer. Stock KiCad 9 or later works for viewing and export.", if f.checked { "Not found." } else { looking(f) }) } else { found.clone() }.trim().to_string(),
             vec![link("Download KiCad", KICAD_STOCK), rel]),
     };
     (r, done)
+}
+/// The row while KiCad installs: the download's bytes ("312 of 971 MB, about 40 s left") over a bar, then its checking and unpacking; a quiet
+/// way to a KiCad the person already has (setup's Locate row comes back with it).
+fn installing_row(prog: &Value, v: String, note: &str) -> Value {
+    let (words, bar) = install_progress(prog, &v, note);
+    let mut r = row("KiCad", &words, vec![btn("Use a KiCad I already have", "ob-kicad-locate", "", false)]);
+    if let Some(b) = bar { r["progress"] = json!(b); }
+    r
+}
+/// How a running install of Backplane KiCad (`v`: " <version>") is going, from info `kicad.install`: the words, and the share done for a bar
+/// while it downloads with its size known. Setup's KiCad row and Settings, CAD say the same.
+pub fn install_progress(prog: &Value, v: &str, note: &str) -> (String, Option<f64>) {
+    let (done, total) = (prog["done"].as_u64().unwrap_or(0), prog["total"].as_u64().unwrap_or(0));
+    let b = crate::files::kicad::install::Bytes { done, total, rate: prog["rate"].as_u64().unwrap_or(0), eta: prog["eta"].as_u64().unwrap_or(0) };
+    if prog["phase"] == "download" {
+        return (format!("Downloading Backplane KiCad{v}: {}", if done == 0 && total == 0 { "starting".into() } else { b.words() }), (total > 0).then(|| (b.share() * 1000.).round() / 1000.))
+    }
+    let what = match note { "" => "Starting the download.".to_string(), n if n.starts_with("Checking") => "Checking the download.".into(), "Unpacking" => "Unpacking. This takes about a minute.".into(), n => format!("{}.", n.trim_end_matches('.')) };
+    (format!("Installing Backplane KiCad{v}. {what}"), None)
+}
+/// Whether KiCad's install runs now (setup keeps its Skip and Locate quiet meanwhile).
+fn kicad_installing(info: &Value) -> bool {
+    serde_json::from_str::<Value>(s(info, "kicad.install")).map_or(false, |v| v["state"] == "running")
 }
 fn offer_lead(status: &str) -> &'static str {
     match status { "stock" => "It works for viewing and export.", "old" => "It is too old for editing.", _ => "It does not run." }
@@ -404,7 +439,8 @@ fn tools_with(f: &Facts, st: &State, session: &Value, pkg: Option<&crate::files:
     // only the row that would say it downloads now: one already installing, failed or found keeps its words
     let k = if git && !kd && s(&k, "note").starts_with("Not found. Downloading") { row("KiCad", "Downloads by itself once Git for Windows is installed.", vec![link("Releases", KICAD_RELEASES)]) } else { k };
     rows.push(k);
-    if !kd && f.checked { rows.push(locate(st, session, "obkicad", "Locate KiCad", "kicad-cli", "kicad.path", "ob-kicad")); }
+    // while it installs, Locate only once asked for (the KiCad row's quiet "Use a KiCad I already have")
+    if !kd && f.checked && (!kicad_installing(f.info) || draft(session, "@ob.kicadlocate") == "1") { rows.push(locate(st, session, "obkicad", "Locate KiCad", "kicad-cli", "kicad.path", "ob-kicad")); }
     rows.push(fc);
     if !fd && f.checked { rows.push(locate(st, session, "obfreecad", "Locate FreeCAD", "freecadcmd", "freecad.path", "ob-freecad")); }
     Step { id: "tools", group: "", title: "Design tools".into(), body, rows, choices: vec![], panel: String::new(), done: kd && fd, task: true, accept: false }
@@ -435,6 +471,21 @@ fn phone_rows(session: &Value) -> Vec<Value> {
     else { vec![row("Pair a phone", "Optional. Get the app, then show the code here and scan it. The phone opens your uberbot.", [vec![btn("Show the code", "device-invite", "", false)], apps()].concat())] }
 }
 
+/// Git missing (the checks say so): one line on what it costs and the one command that fixes it. Nothing is installed by itself.
+fn git_row(f: &Facts) -> Option<Value> {
+    if !f.checked || f.checks["git"] != false { return None }
+    let fix = s(&f.checks, "gitFix"); let fix = if fix.is_empty() { git_fix(&f.os, |_| false) } else { fix.to_string() };
+    Some(warn(row("Git", &format!("Git is not installed, so a project's threads get no worktree of their own and its design files are not committed (no history to go back to). To add it: {fix}"), vec![copy(&fix)])))
+}
+/// The one command that installs Git here, by system and the package manager it has (`has`: whether a program is on this computer).
+pub fn git_fix(os: &str, has: impl Fn(&str) -> bool) -> String {
+    match os {
+        "macos" => "xcode-select --install".into(),
+        "windows" => if has("winget") { "winget install --id Git.Git -e".into() } else { "the installer from https://git-scm.com/download/win".into() },
+        _ => [("apt-get", "sudo apt install git"), ("dnf", "sudo dnf install git"), ("pacman", "sudo pacman -S git"), ("zypper", "sudo zypper install git"), ("apk", "sudo apk add git")]
+            .iter().find(|(p, _)| has(p)).map_or("your system's package manager (the package is git)".into(), |(_, c)| c.to_string()),
+    }
+}
 fn project(f: &Facts, session: &Value, user_home: &str) -> Step {
     let ps = f.projects();
     let done = !ps.is_empty();
@@ -454,6 +505,7 @@ fn project(f: &Facts, session: &Value, user_home: &str) -> Step {
         add["fields"] = json!([{"name": "obproject", "hint": "Folder", "secret": false, "value": path}]);
         rows.push(add);
     }
+    if let Some(r) = git_row(f) { rows.push(r); }
     rows.extend(phone_rows(session));
     Step { id: "project", group: "", title: "First project".into(), body, rows, choices: vec![], panel: String::new(), done, task: true, accept: false }
 }
@@ -515,10 +567,12 @@ pub fn page(st: &State, session: &Value, info: &Value, c: &Client, user_home: &s
     let (steps, marks, i) = walk(&f, st, session, c, user_home);
     let x = &steps[i]; let last = i + 1 == steps.len();
     let next = if last { "Done" } else if x.task && !x.done && !x.accept { "Skip step" } else { "Next" };
+    // while KiCad downloads on its step, Skip is not the thing to press: drawn quiet (still there)
+    let quiet_next = x.id == "tools" && kicad_installing(info);
     let rail: Vec<Value> = steps.iter().zip(marks.iter()).map(|(x, m)| json!({"id": x.id, "title": x.title, "group": x.group, "state": m.2.word()})).collect();
     let done_n = marks.iter().filter(|m| m.2 == Mark::Done).count();
     json!({"id": x.id, "step": i, "count": steps.len(), "counter": format!("{} of {}", i + 1, steps.len()), "title": x.title, "body": x.body, "next": next, "back": "Back", "skip": "Finish later", "first": i == 0, "off": "",
-        "end": "End setup", "group": x.group, "panel": x.panel, "rows": x.rows, "choices": x.choices, "steps": rail, "state": mark(st, x).word(), "progress": format!("{done_n} of {} done", marks.len() - 1)})
+        "end": "End setup", "quiet_next": quiet_next, "group": x.group, "panel": x.panel, "rows": x.rows, "choices": x.choices, "steps": rail, "state": mark(st, x).word(), "progress": format!("{done_n} of {} done", marks.len() - 1)})
 }
 
 /// The rows of Settings, Setup: where it stands, and the way back in. A phone only says where setup is.
@@ -604,6 +658,7 @@ pub fn act(st: &State, hub: &str, session: &Value, info: &Value, c: &Client, use
         }
         "ob-install" => { if value.is_empty() { return None } ask.send("onboard.install", json!({"tool": value})); json!({}) }
         "ob-kicad-install" => { ask.send("kicad.install", json!({"consent": true})); json!({}) }
+        "ob-kicad-locate" => json!({"drafts": {"@ob.kicadlocate": "1"}}),
         "ob-check" => { ask.send("onboard.check", json!({})); json!({}) }
         "ob-more" => json!({"drafts": {"@ob.more": if draft(session, "@ob.more") == "1" { "" } else { "1" }}}),
         "ob-connect" => { if !matches!(value, "claude" | "codex") { return None } json!({"drafts": {"@ob.panel": value}}) }
@@ -723,6 +778,53 @@ mod tests {
         assert_eq!(at_with(&s0, json!({"@ob.step": "agents", "@ob.panel": "claude"}), &i)["panel"], "claude");
         assert!(act(&s0, "h", &sess(json!({})), &i, &desk(), "/h", "ob-connect", "grok").is_none());
         let n = act(&s0, "h", &sess(json!({"@ob.step": "agents", "@ob.panel": "claude"})), &i, &desk(), "/h", "ob-next", "").unwrap(); assert_eq!(n.patch["drafts"]["@ob.panel"], "");
+    }
+    /// Git missing: one line on the First project step with what it costs and the one command (copied by its button); nothing when Git is there
+    /// or not checked yet.
+    #[test] fn a_missing_git_is_said_once_with_its_cost_and_the_command() {
+        assert_eq!(git_fix("linux", |p| p == "apt-get"), "sudo apt install git"); assert_eq!(git_fix("linux", |p| p == "dnf"), "sudo dnf install git");
+        assert_eq!(git_fix("macos", |_| false), "xcode-select --install"); assert_eq!(git_fix("windows", |p| p == "winget"), "winget install --id Git.Git -e");
+        assert!(git_fix("linux", |_| false).contains("package is git"));
+        let rows = |git: Value| { let mut ch = blank(); ch["git"] = git; ch["gitFix"] = json!("sudo apt install git"); let s0 = cst(ch, &[]); let i = info("linux"); project(&Facts::of(&s0, &i), &sess(json!({})), "/h").rows };
+        let r = rows(json!(false)); let g = r.iter().find(|x| x["label"] == "Git").expect("a Git row");
+        let n = g["note"].as_str().unwrap(); assert!(n.contains("no worktree") && n.contains("not committed") && n.ends_with("To add it: sudo apt install git"), "{n}");
+        assert_eq!(g["buttons"][0]["value"], "sudo apt install git");
+        assert!(!rows(json!(true)).iter().any(|x| x["label"] == "Git") && !rows(Value::Null).iter().any(|x| x["label"] == "Git"));
+    }
+    /// While KiCad downloads: its bytes over a bar, Locate and Skip quiet until asked for; when the one automatic start has passed and nothing
+    /// runs, a press (continuing a kept download), never a "Downloading" that nothing does.
+    #[test] fn the_kicad_download_shows_its_bytes_and_never_claims_one_that_does_not_run() {
+        use crate::files::kicad::install::{pick, LINUX};
+        let mb = 1u64 << 20;
+        let run = json!({"state": "running", "version": LINUX.version, "note": "Downloading x", "phase": "download", "done": 312 * mb, "total": 971 * mb, "rate": 8 * mb, "eta": 82}).to_string();
+        let mut i = info("linux"); i["kicad.status"] = json!("missing"); i["kicad.install"] = json!(run);
+        let s0 = cst(blank(), &[]);
+        let rows_for = |i: &Value, sess_: Value| tools_with(&Facts::of(&s0, i), &s0, &sess(sess_), pick("linux", "x86_64")).rows;
+        let rows = rows_for(&i, json!({}));
+        let k = rows.iter().find(|r| r["label"] == "KiCad").unwrap();
+        assert_eq!(k["note"], format!("Downloading Backplane KiCad {}: 312 of 971 MB, about 1 min left", LINUX.version));
+        assert_eq!(k["progress"], json!(0.321));
+        let b = &k["buttons"][0]; assert_eq!((b["label"].as_str(), b["action"].as_str(), b["on"].as_bool()), (Some("Use a KiCad I already have"), Some("ob-kicad-locate"), Some(false)));
+        assert!(!rows.iter().any(|r| r["label"] == "Locate KiCad"), "no Locate while it downloads");
+        assert!(rows_for(&i, json!({"@ob.kicadlocate": "1"})).iter().any(|r| r["label"] == "Locate KiCad"), "the quiet link brings it back");
+        let pg = at(&s0, "tools", &i, &desk()); assert_eq!((pg["next"].as_str(), pg["quiet_next"].as_bool()), (Some("Skip step"), Some(true)));
+        // its checking and unpacking say so; the bar goes
+        i["kicad.install"] = json!(json!({"state": "running", "version": LINUX.version, "note": "Checking the checksum"}).to_string());
+        let k = rows_for(&i, json!({})).into_iter().find(|r| r["label"] == "KiCad").unwrap();
+        assert_eq!(k["note"], format!("Installing Backplane KiCad {}. Checking the download.", LINUX.version)); assert!(k["progress"].is_null());
+        // the automatic start has passed, nothing runs, nothing was kept: a press, not "Downloading"
+        let mut i2 = info("linux"); i2["kicad.status"] = json!("missing");
+        let s1 = cst(blank(), &[("onboard.kicad.auto", LINUX.version)]);
+        let x = tools_with(&Facts::of(&s1, &i2), &s1, &sess(json!({})), pick("linux", "x86_64"));
+        let k = x.rows.iter().find(|r| r["label"] == "KiCad").unwrap();
+        assert!(!k["note"].as_str().unwrap().contains("Downloading"), "{k}"); assert_eq!(k["buttons"][0]["action"], "ob-kicad-install");
+        // a kept download: continued
+        let home = crate::plat::tmp::dir("ob-partial"); let part = crate::files::kicad::install::partial(&crate::files::kicad::install::parent(AsRef::<std::path::Path>::as_ref(&home)), &LINUX);
+        std::fs::create_dir_all(part.parent().unwrap()).unwrap(); std::fs::write(&part, vec![0u8; 3 << 20]).unwrap();
+        i2["home"] = json!(AsRef::<std::path::Path>::as_ref(&home).to_string_lossy());
+        let x = tools_with(&Facts::of(&s1, &i2), &s1, &sess(json!({})), pick("linux", "x86_64"));
+        let k = x.rows.iter().find(|r| r["label"] == "KiCad").unwrap();
+        assert!(k["note"].as_str().unwrap().contains("stopped at 3 MB"), "{k}"); assert_eq!(k["buttons"][0]["label"], "Continue the download");
     }
     /// What the KiCad row does for each computer and each KiCad found: the same decision `install::decide` is tested on, as the person sees it.
     #[test] fn the_kicad_row_installs_offers_or_explains_by_what_was_found() {
