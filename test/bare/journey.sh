@@ -27,8 +27,12 @@ STEP=start; phase() { rss "end of: $STEP"; STEP=$*; printf '%s\t%s\n' "$(date +%
 # resident memory (KB) of the client, the hub and KiCad at each phase boundary: a client once grew to 45 GB on the person's machine
 # (OOM-killed, 2026-11-13); the box's processes from the host side, by name, summed per program
 # by command line: KiCad runs through its runtime's own loader (ld-linux), so its process name is not "kicad"
-rss() { local t; t=$(docker exec "$C" ps -eo rss=,args= 2>/dev/null | awk '{a=$0} a~/backplane-gpui/{g+=$1;next} a~/backplane-hub/{h+=$1;next} a~/\/kicad\/[^ ]*\/bin\/kicad|kicad\.real/{c+=$1} END{printf "%d\t%d\t%d", g, h, c}')
-  [ -n "$t" ] && printf '%s\t%s\t%s\n' "$(date +%s)" "$t" "$1" >>"$OUT/rss.tsv"; return 0; }
+# KiCad by role, each process on its own line in rss-procs.tsv: api (the agents' api-server), gui (--embedded in a pane: --parent-window),
+# warm (--embedded with no pane yet: a pre-warmed spare), other (kicad-cli runs and the like)
+rss() { local ps t; ps=$(docker exec "$C" ps -eo pid=,rss=,args= 2>/dev/null) || return 0
+  printf '%s\n' "$ps" | awk -v at="$(date +%s)" -v ph="$1" '{a=$0} a~/\/kicad\/[^ ]*\/bin\/kicad|kicad\.real/ && a!~/backplane-(gpui|hub)/ {r = a~/api-server/ ? "api" : (a~/--embedded/ ? (a~/--parent-window/ ? "gui" : "warm") : "other"); printf "%s\t%s\t%s\t%s\t%s\n", at, $1, r, $2, ph}' >>"$OUT/rss-procs.tsv"
+  t=$(printf '%s\n' "$ps" | awk '{a=$0} a~/backplane-gpui/{g+=$2;next} a~/backplane-hub/{h+=$2;next} a~/\/kicad\/[^ ]*\/bin\/kicad|kicad\.real/{r = a~/api-server/ ? 1 : (a~/--embedded/ ? (a~/--parent-window/ ? 2 : 3) : 4); k[r]+=$2} END{printf "%d\t%d\t%d\t%d\t%d\t%d", g, h, k[1], k[2], k[3], k[4]}')
+  printf '%s\t%s\t%s\n' "$(date +%s)" "$t" "$1" >>"$OUT/rss.tsv"; return 0; }
 # What it captures, for lane B's grab probe: does a fresh X client get an answer (no: a server grab, held by the one X client that is not
 # waiting on its X socket); was the Backplane client still logging; each X client's state and stack from the host (the container gives
 # no ptrace: host pids from docker top, /proc as root, eu-stack or gdb), Xvfb's too.
@@ -64,6 +68,11 @@ need() { command -v "$1" >/dev/null 2>&1; }
 need Xvfb && need i3 && need xdotool && need import && need xwininfo && need xdpyinfo && need eu-stack || sudo -n env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq xvfb i3 xdotool imagemagick x11-utils elfutils >"$OUT/logs/harness-apt.log" 2>&1
 need bun || { echo "no bun on the host for the stand-in agent" >&2; exit 3; }
 Xvfb $DISP -screen 0 1600x1000x24 -nolisten tcp >"$OUT/logs/xvfb.log" 2>&1 & XP=$!; sleep 1.5
+# what the box is, so its timings compare with a desktop's (first Edit 4.1 s here against 2.2 s on a GPU desktop): no GPU, KiCad and the
+# client draw with Mesa's llvmpipe on the CPU (LIBGL_ALWAYS_SOFTWARE=1), llvmpipe held to 2 threads (LP_NUM_THREADS=2), into Xvfb
+{ echo "cpu: $(nproc) cores, $(grep -m1 'model name' /proc/cpuinfo | cut -d: -f2- | sed 's/^ *//')"
+  echo "memory: $(awk '/MemTotal/{printf "%.1f GB", $2/1048576}' /proc/meminfo)"
+  echo "display: Xvfb 1600x1000x24, no GPU; GL: Mesa llvmpipe in software (LIBGL_ALWAYS_SOFTWARE=1, LP_NUM_THREADS=2)"; } >"$OUT/machine.txt"
 printf 'ipc-socket %s/i3.sock\nnew_window none\nfor_window [class=".*"] border none\ndefault_border none\n' "$OUT" >"$OUT/i3.conf"
 DISPLAY=$DISP i3 -c "$OUT/i3.conf" >"$OUT/logs/i3.log" 2>&1 & IP=$!; sleep 1
 X() { xrun 15 xdotool "$@"; }
@@ -253,21 +262,28 @@ for d in "$HH"/compat-saved/* "$HH"/compat-demos/*; do [ -d "$d" ] || continue; 
   for x in fork stock fork-on-export result.json downgrade-report.json fork.log stock.log; do [ -e "$d/$x" ] && cp -r "$d/$x" "$n/"; done; done
 for f in "$HUBH/hub.log" "$HH/win.log" "$HH/standin.log" "$HH/coedit.json.argv" "$HUBH/kicad/.install.log"; do [ -f "$f" ] && cp "$f" "$OUT/logs/" 2>/dev/null; done
 
-# --- memory: the samples, the peak of each program, growth from the first sample; over RSS_MAX_GB (8) is a FAIL (the bound tightens from the runs)
+# --- memory: the samples, the peak of each program and KiCad role, growth from the first sample; over a bound is a FAIL
 rss "end of: $STEP"
 if [ -s "$OUT/rss.tsv" ]; then
-  RS=$(python3 - "$OUT/rss.tsv" "${RSS_MAX_GB:-8}" <<'PYR'
-import sys
-rows = [l.rstrip("\n").split("\t") for l in open(sys.argv[1]) if l.count("\t") >= 4]
-lim = float(sys.argv[2]) * 1024 * 1024
-for name, i in (("client", 1), ("hub", 2), ("kicad", 3)):
-    v = [(int(r[i]), r[4]) for r in rows if r[i].isdigit() and int(r[i]) > 0]
+  # bounds (MB): the client 1 GB, the hub 512 MB (rerun 8: 301 and 208), each KiCad process 6 GB as a guard only (3.4 GB before a board
+  # was loaded is a finding with the fork, not a pass mark)
+  RS=$(python3 - "$OUT/rss.tsv" "$OUT/rss-procs.tsv" "${RSS_CLIENT_MB:-1024}" "${RSS_HUB_MB:-512}" "${RSS_KICAD_MB:-6144}" <<'PYR'
+import sys, os
+rows = [l.rstrip("\n").split("\t") for l in open(sys.argv[1]) if l.count("\t") >= 7]
+lim = {"client": int(sys.argv[3]), "hub": int(sys.argv[4])}
+for name, i in (("client", 1), ("hub", 2), ("kicad-api", 3), ("kicad-gui", 4), ("kicad-warm", 5), ("kicad-other", 6)):
+    v = [(int(r[i]), r[7]) for r in rows if r[i].isdigit() and int(r[i]) > 0]
     if not v: print(f"NONE {name}"); continue
-    pk = max(v); print(f"{'OVER' if pk[0] > lim else 'PEAK'} {name} {pk[0]//1024} MB at '{pk[1]}', first {v[0][0]//1024} MB, last {v[-1][0]//1024} MB, {len(v)} samples")
+    pk = max(v); over = name in lim and pk[0] // 1024 > lim[name]
+    print(f"{'OVER' if over else 'PEAK'} {name} {pk[0]//1024} MB at '{pk[1]}', first {v[0][0]//1024} MB, last {v[-1][0]//1024} MB, {len(v)} samples")
+procs = [l.rstrip("\n").split("\t") for l in open(sys.argv[2])] if os.path.exists(sys.argv[2]) else []
+big = max(((int(p[3]), p) for p in procs if len(p) >= 5 and p[3].isdigit()), default=None)
+if big:
+    print(f"{'OVER' if big[0]//1024 > int(sys.argv[5]) else 'PROC'} kicad-process {big[0]//1024} MB: pid {big[1][1]} ({big[1][2]}) at '{big[1][4]}'")
 PYR
 )
-  echo "$RS" | sed 's/^/  rss: /'; cp "$OUT/rss.tsv" "$OUT/logs/" 2>/dev/null
-  while read -r k rest; do case $k in OVER) bad "memory: $rest (over ${RSS_MAX_GB:-8} GB)";; PEAK) printf '%s\t%s\n' "rss-peak-${rest%% *}-mb" "$(echo "$rest" | awk '{print $2}')" >>"$OUT/memory.tsv";; esac; done <<<"$RS"
+  echo "$RS" | sed 's/^/  rss: /'; cp "$OUT/rss.tsv" "$OUT/rss-procs.tsv" "$OUT/logs/" 2>/dev/null
+  while read -r k rest; do case $k in OVER) bad "memory over its bound: $rest";; PEAK) printf '%s\t%s\n' "rss-peak-${rest%% *}-mb" "$(echo "$rest" | awk '{print $2}')" >>"$OUT/memory.tsv";; esac; done <<<"$RS"
 fi
 # --- the client's main thread never held (lane C's stall, fixed at 82c67d16a): BACKPLANE_GPUI_LOOPTRACE logs every main-loop step over
 # 50 ms (a task, an X batch, a frame) and a 100 ms timer waking over 50 ms late, each with its time; the gate fails on a step over 500 ms
