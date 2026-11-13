@@ -116,6 +116,8 @@ if [ "$EMBED_MODE" != "spike" ]; then
   wait_for_log "$OUT/client.log" '"name":"applied","event":"mark"' 90 || true
   sleep 0.5; shot "f3_applied"
   V=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["board"]["design_settings"]["rules"].get("min_clearance"))' "$PRO" 2>/dev/null || echo "?")
+  # what the hub answers an Apply now (the panel's press logs no reply): said when the value did not move
+  python3 -c 'import sys; sys.exit(0 if float(sys.argv[1]) >= 0.09 - 1e-9 else 1)' "$V" 2>/dev/null || echo "INFO a second Apply answers: $(hub_rpc "[{\"method\":\"fab.profile\",\"params\":{\"pro\":\"$PROJ/ecc83-pp.kicad_pro\",\"action\":\"apply\",\"key\":\"min_clearance\"}}]" 2>&1 | grep -a "^{\"m\":\"fab.profile\"" | cut -c1-700)"
   check "Apply raised the project's clearance minimum to the fab's (now $V)" "$(python3 -c 'import sys; print(int(float(sys.argv[1]) >= 0.09 - 1e-9))' "$V" 2>/dev/null || echo 0)" "$(grep -i 'fab.profile\|apply' "$OUT/client.log" | tail -n 5)"
   FAB=$(fab_info)
   check "The suggestion is gone once applied" "$(python3 -c 'import json,sys; print(int(not any(s.get("key")=="min_clearance" for s in json.loads(sys.argv[1]).get("suggestions",[]))))' "$FAB" 2>/dev/null || echo 0)"
