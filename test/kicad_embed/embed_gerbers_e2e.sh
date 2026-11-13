@@ -38,7 +38,7 @@ start_hub
 python3 - "$OUT/script.json" "$SET_FILE" <<'PY'
 import json, sys
 s = [{"select": 0}, {"wait": 2500}, {"click": "rail:Gerbers"}, {"wait": 8000}, {"mark": "gerbers"}, {"wait": 3000},
-     {"click": "rail:Board"}, {"wait": 4000}, {"mark": "board"}, {"wait": 2000}, {"click": "rail:Gerbers"}, {"wait": 4000}, {"mark": "gerbers2"}, {"wait": 3000},
+     {"click": "rail:Board"}, {"wait": 4000}, {"mark": "board"}, {"wait": 2000}, {"click": "rail:Gerbers"}, {"wait": 4000}, {"mark": "gerbers2"}, {"wait": 2000}, {"layers": True}, {"wait": 2500}, {"mark": "layers"}, {"wait": 2500}, {"layers": False}, {"wait": 1000},
      {"click": "rail:Files"}, {"wait": 2500}, *[x for part in sys.argv[2].split("/") for x in ({"files": "filter:" + part}, {"wait": 1200}, {"files": "open:0"}, {"wait": 1500})], {"wait": 2500}, {"mark": "files"}, {"wait": 60000}]
 json.dump(s, open(sys.argv[1], "w"))
 PY
@@ -68,11 +68,13 @@ shot "g1_gerbers"
 check "The Gerbers tab drew the project's set ($P1)" "$(python3 -c 'import json,sys; p=json.loads(sys.argv[1]); print(int(p.get("chunks",0) > 0 and "mfg" in p.get("key","")))' "$P1")"
 SETDIR=$(dirname "$PROJ/$SET_FILE")
 check "The plot is of the mfg/ set (its key names $SETDIR)" "$(grep -q "\"key\":\"0|$PROJ|$SETDIR\"" "$OUT/client.log" && echo 1 || echo 0)"
-wait_for_log "$OUT/client.log" '"name":"gerbers2","event":"mark"' 60 || true
+wait_for_log "$OUT/client.log" '"name":"gerbers2","event":"mark"' 200 || true
 L=$(lineno board); P2=$(ev plot_painted "${L:-0}")
 check "Gerbers again after Board: the set painted within 300 ms of the press ($P2)" "$(python3 -c 'import json,sys; p=json.loads(sys.argv[1]); print(int(p.get("chunks",0)>0 and p.get("ms",1e9) <= 300 and "mfg" in p.get("key","")))' "$P2")"
 shot "g2_gerbers_again"
-wait_for_log "$OUT/client.log" '"name":"files","event":"mark"' 60 || true
+wait_for_log "$OUT/client.log" '"name":"layers","event":"mark"' 200 || true
+shot "g2b_layers"
+wait_for_log "$OUT/client.log" '"name":"files","event":"mark"' 200 || true
 shot "g3_files"
 check "A Gerber opened from the Files tab is drawn itself (its key names the file)" "$(grep -q "\"key\":\"0|$PROJ|$PROJ/$SET_FILE\"" "$OUT/client.log" && echo 1 || echo 0)"
 grep -h "plotnote" "$OUT/client.log" | tail -2 || true

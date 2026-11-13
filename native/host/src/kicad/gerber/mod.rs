@@ -20,7 +20,7 @@ pub fn notes_of(path: &str) -> Vec<String> { NOTES.lock().unwrap().iter().find(|
 pub fn plot(path: &str) -> super::plotgen::Read {
     let r = read_set(Path::new(path));
     { let mut n = NOTES.lock().unwrap(); n.retain(|(p, _)| p != path); n.push((path.to_string(), r.notes.clone())); if n.len() > 32 { n.remove(0); } }
-    let (mut p, t) = super::plotgen::items_plot(r.items, 0);
+    let (mut p, t) = super::plotgen::items_plot(r.items, super::plotgen::GERBER);
     p.thick = 0;
     // a set (or a file) with no outline is fitted to what it draws
     if (p.edge.x0 as i32) > (p.edge.x1 as i32) { p.edge = p.b }
@@ -70,6 +70,11 @@ pub fn job_functions(text: &str) -> Vec<(String, String)> {
     let v: serde_json::Value = serde_json::from_str(text).unwrap_or_default();
     v["FilesAttributes"].as_array().into_iter().flatten().filter_map(|f| Some((f["Path"].as_str()?.to_string(), f["FileFunction"].as_str()?.to_string()))).collect()
 }
+
+/// Files read (content hash with name and job function -> items, layer, notes), so a set opened again, or with one file exported anew,
+/// parses only what changed.
+type Cached = (String, Vec<Item>, String, Vec<String>);
+static CACHE: std::sync::Mutex<Vec<Cached>> = std::sync::Mutex::new(Vec::new());
 
 /// One file of a set as read: its board layer, what it held, what did not read.
 #[derive(Debug, Default)]
@@ -129,8 +134,15 @@ pub fn read_set(path: &Path) -> Read {
     for f in files.iter().filter(|f| !is_job(&f.to_string_lossy())) {
         let name = f.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
         let bytes = match std::fs::read(f) { Ok(b) => b, Err(e) => { r.notes.push(format!("{name}: {e}")); continue } };
+        // a file read before (the same bytes, name and job) is not parsed again: its items, layer and notes are kept (CACHE)
+        let job_fn = jobs.iter().find(|(p, _)| p.rsplit(['/', '\\']).next() == Some(&name)).map(|(_, f)| f.clone()).unwrap_or_default();
+        let h = format!("{:016x}{name}\u{1}{job_fn}", bytes.iter().fold(0xcbf29ce484222325u64, |h, b| (h ^ *b as u64).wrapping_mul(0x100000001b3)));
+        if let Some((items, layer, notes)) = CACHE.lock().unwrap().iter().find(|e| e.0 == h).map(|e| (e.1.clone(), e.2.clone(), e.3.clone())) {
+            r.layers.push((name, layer, items.len())); r.items.extend(items); r.notes.extend(notes);
+            continue
+        }
+        let (n0, k0) = (r.items.len(), r.notes.len());
         let text = String::from_utf8_lossy(&bytes);
-        let n0 = r.items.len();
         let layer_name = if is_drill(&name) {
             let d = excellon::parse(&text);
             let plated = d.plated.unwrap_or_else(|| !name.to_ascii_uppercase().contains("NPTH"));
@@ -152,7 +164,11 @@ pub fn read_set(path: &Path) -> Read {
             if g.negative && ln.ends_with(".Cu") { r.notes.push(format!("{name}: a negative copper layer (a plane): drawn as written, which is the copper removed")) }
             ln
         };
-        r.layers.push((name, layer_name, r.items.len() - n0));
+        r.layers.push((name.clone(), layer_name.clone(), r.items.len() - n0));
+        let mut c = CACHE.lock().unwrap();
+        c.push((h, r.items[n0..].to_vec(), layer_name, r.notes[k0..].to_vec()));
+        // about the files of a few sets
+        while c.len() > 256 { c.remove(0); }
     }
     if files.is_empty() { r.notes.push("no Gerber or drill files here".into()) }
     r
@@ -254,6 +270,12 @@ mod tests {
         std::fs::create_dir_all(d.join("mfg/b/gerber")).unwrap(); std::fs::write(d.join("mfg/b/gerber/b-F_Cu.gbr"), "%FSLAX46Y46*%M02*").unwrap(); std::fs::write(d.join("mfg/b/b.zip"), "x").unwrap();
         assert_eq!(default_set(&d), Some(d.join("mfg/b/gerber")), "the set written last");
         assert!(is_set_path(&d.join("gerbers")) && is_set_path(&d.join("gerbers/b-PTH.drl")) && !is_set_path(&d.join("notes.txt")) && !is_set_path(&d.join("mfg/b")));
+        // read again: the same items (from the cache); a file exported anew is read anew
+        let again = read_set(&d.join("gerbers"));
+        assert_eq!(again.items, read_set(&d.join("gerbers")).items);
+        std::fs::write(d.join("gerbers/b-PTH.drl"), "M48\nMETRIC\nT1C0.500\n%\nT1\nX1.0Y-2.0\nM30\n").unwrap();
+        let hole = |r: &Read| r.items.iter().find(|i| i.layer == board::layer_id("hole")).map(|i| i.prim.clone());
+        assert_eq!(hole(&read_set(&d.join("gerbers"))), Some(Prim::Circ { c: Pt { x: 1.0, y: 2.0 }, r: 0.25, w: 0.0, fill: true }));
         let s0 = set_stamp(&d); std::fs::write(d.join("gerbers/b-PTH.drl"), "M48\nMETRIC\nT1C0.400\n%\nT1\nX1.0Y-2.0\nM30\n").unwrap(); assert_ne!(set_stamp(&d), s0);
         let _ = std::fs::remove_dir_all(&d);
     }
