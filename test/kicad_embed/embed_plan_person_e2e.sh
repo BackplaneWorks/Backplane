@@ -7,8 +7,9 @@
 #   Q3  plan_get `changes`: c-p approved, locked, edited by the person, a constraint by the person; c-q rejected
 #   Q4  the Plan panel (mgmt.plan, the hub's data) shows c-p approved and locked, c-q rejected, without a refresh
 #   Q5  the agent that asked is woken with the person's decision
-#   Q6  layer approval: RunAction pcbnew.Plan.approveLayer approves the active layer (F.Cu); KiCad's right-click menu "Approve Layer"
-#       on B.Cu (PageDown, then the menu by keyboard) approves B.Cu; both reach plan_get (skipped on builds without the action)
+#   Q6  layer approval is the person's: KiCad's right-click menu "Approve Layer" on B.Cu (PageDown, then the menu by keyboard) approves
+#       it; an agent's kicad_ipc RunAction pcbnew.Plan.approveLayer and ApprovePlan are refused, its plan_approve only asks (F.Cu stays
+#       unapproved); the Plan panel's Approve (plan.approve: ApprovePlan as the person) approves F.Cu with plan view on
 # PLAN_VIA=key: plan view by the real hotkey (Ctrl+Shift+R, or the build's own), pressed straight after the editor opens, no canvas
 # click first; otherwise (default) by RunAction pcbnew.Plan.togglePlanView.
 set -euo pipefail
@@ -163,14 +164,21 @@ print(next((l.get("status", "?") for l in ls if l.get("layer") == sys.argv[1]), 
   X key Return; sleep 2; shot q5_layer_b
   LB=$(layer_status B.Cu)
   check "layer approval from KiCad's right-click menu (Approve Layer on B.Cu)" "$([ "$LB" = approved ] && echo 1 || echo 0)" "B.Cu: $LB (see q5_menu_approve.png)"
-  # the action on F.Cu (PageUp): in plan view first; if KiCad answers busy there (its plan tool is the running tool), once more with plan view off
+  # F.Cu (PageUp) stays the person's: an agent's kicad_ipc can neither run the plan view's approve-layer nor send ApprovePlan (the hub
+  # refuses both on every build; the fork refuses agent clients too from bp.13 batch 4), and plan_approve only asks
   X key Prior; sleep 1
-  approve_layer() { ask kicad_ipc "{\"path\":\"$PCB\",\"type\":\"kiapi.common.commands.RunAction\",\"message\":{\"action\":\"pcbnew.Plan.approveLayer\"}}" | grep -o 'RAS_[A-Z_]*\|AS_[A-Z_]*' | head -1; }
-  RL=$(approve_layer); echo "INFO RunAction approveLayer in plan view: ${RL:-no answer}"; WHERE="in plan view"
-  if [ "$RL" != RAS_OK ]; then hotkey; sleep 1.5; RL=$(approve_layer); echo "INFO RunAction approveLayer with plan view off: ${RL:-no answer}"; WHERE="only with plan view off"; fi
-  sleep 2; LF=$(layer_status F.Cu)
-  check "layer approval by RunAction pcbnew.Plan.approveLayer: F.Cu approved ($WHERE)" "$([ "$LF" = approved ] && echo 1 || echo 0)" "F.Cu: $LF, RunAction: ${RL:-no answer}"
-  [ "$WHERE" = "in plan view" ] || echo "FORK pcbnew.Plan.approveLayer by RunAction is refused while plan view is on (the API answers busy): an agent can't approve a layer the way the person does"
+  agent_ipc() { ask kicad_ipc "{\"path\":\"$PCB\",\"type\":\"$1\",\"message\":$2}"; }
+  RA=$(agent_ipc kiapi.common.commands.RunAction '{"action":"pcbnew.Plan.approveLayer"}')
+  check "an agent's RunAction pcbnew.Plan.approveLayer is refused" "$(echo "$RA" | grep -q "the person's alone" && echo 1 || echo 0)" "$(echo "$RA" | cut -c1-200)"
+  RB=$(agent_ipc kiapi.backplane.plan.ApprovePlan "{\"board\":{\"type\":\"DOCTYPE_PCB\"},\"layer\":\"F.Cu\",\"approve\":true}")
+  check "an agent's ApprovePlan is refused" "$(echo "$RB" | grep -q "the person's alone" && echo 1 || echo 0)" "$(echo "$RB" | cut -c1-200)"
+  ask plan_approve '{"layer":"F.Cu","note":"F.Cu"}' >/dev/null; sleep 2
+  LF0=$(layer_status F.Cu)
+  check "F.Cu is still not approved after the agent's attempts and its plan_approve" "$([ "$LF0" != approved ] && echo 1 || echo 0)" "F.Cu: $LF0"
+  # the Plan panel's Approve (plan.approve: KiCad's ApprovePlan as the person), with plan view on
+  PA=$(hub_rpc "[{\"method\":\"plan.approve\",\"params\":{\"pro\":\"$PROJ/ecc83-pp.kicad_pro\",\"layer\":\"F.Cu\",\"approve\":true}}]" 2>&1 | tail -1)
+  sleep 2; LF=$(layer_status F.Cu); shot q6_layers
+  check "the Plan panel's Approve (ApprovePlan as the person) approves F.Cu in plan view" "$([ "$LF" = approved ] && echo 1 || echo 0)" "F.Cu: $LF; plan.approve: $(echo "$PA" | cut -c1-200)"
 else
   echo "SKIP layer approval: this KiCad has no pcbnew.Plan.approveLayer"
 fi

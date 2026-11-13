@@ -417,6 +417,15 @@ pub fn copy_ipc_refused(copy: bool, type_: &str) -> Option<String> {
     let name = type_.rsplit('.').next().unwrap_or(type_);
     if copy && !is_read(type_) { Some(format!("a hub on a copied log (BACKPLANE_COPY=1) writes nothing outside its home: {name} is not a listed read")) } else { None }
 }
+/// Approval of the routing plan is the person's alone (the fork refuses it for agent clients from bp.13 batch 4, f74ea40f83; this
+/// refuses it on every build): an agent's `kicad_ipc` may not send ApprovePlan, nor RunAction of the plan view's accept, reject,
+/// approve-layer or reject-layer. `plan_approve` asks the person; the Plan panel and KiCad's own plan view are where they decide.
+pub fn approval_refused(type_: &str, msg: &Value) -> Option<String> {
+    const ACTIONS: &[&str] = &["pcbnew.Plan.accept", "pcbnew.Plan.reject", "pcbnew.Plan.approveLayer", "pcbnew.Plan.rejectLayer"];
+    let short = type_.rsplit('.').next().unwrap_or(type_);
+    let action = msg["action"].as_str().unwrap_or("");
+    (short == "ApprovePlan" || (short == "RunAction" && ACTIONS.contains(&action))).then(|| format!("Approval is the person's alone: an agent cannot {}. Ask them with plan_approve and end your turn; Backplane tells you what they decided.", if short == "ApprovePlan" { "send ApprovePlan".to_string() } else { format!("run {action}") }))
+}
 /// The MCP tool `kicad_ipc_status`: Ok({"server","servers","argv","version","capabilities","detail"}); starts the server if it is not running.
 pub async fn kicad_ipc_status(hub: &Arc<Hub>, path: &str) -> Result<Value, String> { kicad_ipc_status_in(hub, None, path).await }
 pub async fn kicad_ipc_status_in(hub: &Arc<Hub>, thread: Option<&str>, path: &str) -> Result<Value, String> { run(hub, thread, path, "kiapi.backplane.GetCapabilities", json!({}), true).await }
@@ -581,6 +590,10 @@ mod tests {
     }
     #[test] fn a_copy_runs_only_the_listed_kicad_reads() {
         for t in ["kiapi.board.commands.GetItems", "kiapi.common.commands.Ping", "kiapi.backplane.GetCapabilities"] { assert_eq!(copy_ipc_refused(true, t), None, "{t}") }
+        assert!(approval_refused("kiapi.backplane.plan.ApprovePlan", &json!({"layer": "F.Cu", "approve": true})).is_some());
+        for a in ["pcbnew.Plan.accept", "pcbnew.Plan.reject", "pcbnew.Plan.approveLayer", "pcbnew.Plan.rejectLayer"] { assert!(approval_refused("kiapi.common.commands.RunAction", &json!({"action": a})).is_some(), "{a}") }
+        for a in ["pcbnew.Plan.togglePlanView", "pcbnew.Plan.toggleLock", "common.Control.zoomFitScreen"] { assert_eq!(approval_refused("kiapi.common.commands.RunAction", &json!({"action": a})), None, "{a}") }
+        assert_eq!(approval_refused("kiapi.backplane.plan.GetPlan", &json!({})), None);
         for t in ["kiapi.common.commands.SaveDocument", "kiapi.board.commands.CreateItems", "kiapi.board.commands.BeginCommit", "kiapi.board.commands.EndCommit", "kiapi.backplane.Shutdown", "", "GetItemsX.Delete"] { assert!(copy_ipc_refused(true, t).is_some(), "{t}") }
         assert_eq!(copy_ipc_refused(false, "kiapi.common.commands.SaveDocument"), None);
     }
