@@ -416,6 +416,10 @@ fn page(template: &Value, kind: &str, root: &str, drafts: &Value, sel: &str) -> 
         o.insert("gerbers".into(), json!(true));
         // compared with its board, or not (the bar's toggle)
         o.insert("gerbersVsBoard".into(), json!(file.starts_with(crate::files::kicad::gerber::CMP)));
+        // what "Open in GerbView" opens (the set's job, else its files): the desktop offers it where its KiCad has GerbView in process
+        let set = crate::files::kicad::gerber::set_of(file);
+        let set = if set.is_empty() { crate::files::kicad::gerber::default_set(std::path::Path::new(root)) } else { Some(std::path::PathBuf::from(set)) };
+        o.insert("gerberFiles".into(), json!(set.map(|p| crate::files::kicad::gerber::gerbview_files(&p)).unwrap_or_default()));
     }
     // View.layers: a 3D view draws the board's layers on its faces
     o.insert("layers".into(), json!(if kind == "3d" { if file.is_empty() { key("board", root) } else { String::new() } } else { k }));
