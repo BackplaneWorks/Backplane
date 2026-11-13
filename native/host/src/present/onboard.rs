@@ -283,8 +283,10 @@ fn import(f: &Facts, c: &Client) -> Option<Step> {
 /// The anonymous-usage step: On is preselected, and finishing setup with it on is the choice (docs/telemetry.md).
 fn usage(f: &Facts) -> Step {
     let off = crate::settings::telemetry::off(set(f.st, "telemetry.share"), set(f.st, "telemetry.usage.asked"), set(f.st, "onboard.usage"));
+    // a press is still what marks the step done (0.15.2); sending waits for setup to finish either way (settings/telemetry.rs)
+    let answered = crate::settings::telemetry::answered(set(f.st, "telemetry.share"), set(f.st, "telemetry.asked"), set(f.st, "telemetry.usage.asked")) || !set(f.st, "onboard.usage").is_empty();
     let rows = vec![row("Share anonymous usage", "", vec![btn("On", "ob-usage", "on", !off), btn("Off", "ob-usage", "off", off)])];
-    Step { id: "usage", group: "Install", title: "Anonymous usage".into(), body: USAGE_NOTE.to_string(), rows, choices: vec![], panel: "", done: true, task: true }
+    Step { id: "usage", group: "Install", title: "Anonymous usage".into(), body: USAGE_NOTE.to_string(), rows, choices: vec![], panel: "", done: answered, task: true }
 }
 /// What the telemetry step says is sent, all of it.
 pub const USAGE_NOTE: &str = "On unless you turn it off. Backplane sends anonymous counts: installs, updates, daily activity, and daily totals of threads, messages, model tokens, bot traffic, boards made and boards ordered, with a random install id, the version, the system and the day. Never your conversations, projects, files, names, paths or keys. Settings, Privacy changes it.";
@@ -1039,6 +1041,7 @@ mod tests {
     #[test] fn usage_off_writes_the_real_choice_and_nothing_counts_as_answered_before_a_press() {
         let (s0, i) = (cst(blank(), &[]), info("linux"));
         assert_eq!(at(&s0, "usage", &i, &desk())["state"], "todo");
+        assert_eq!(at(&s0, "usage", &i, &desk())["rows"][0]["buttons"][0]["on"], true, "opt-out: On is preselected on a new install");
         let o = act(&s0, "h", &sess(json!({})), &i, &desk(), "/h", "ob-usage", "off").unwrap(); assert_eq!(setting_of(&o, "telemetry.share").as_deref(), Some("off"));
         assert_eq!(at(&cst(blank(), &[("onboard.usage", "on")]), "usage", &i, &desk())["state"], "done");
     }
