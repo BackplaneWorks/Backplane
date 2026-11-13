@@ -279,6 +279,15 @@ pub fn canvas_el(cx: &mut Context<Backplane>, slot: usize, focus: Option<FocusHa
             let factor = (1.0 + d * 0.0015).clamp(0.5, 2.0); pv.touched = true;
             pv.view = Some(v.zoom(factor, f32::from(e.position.x - b.origin.x), f32::from(e.position.y - b.origin.y), f32::from(b.size.width), f32::from(b.size.height), pv.fitted));
             cx.notify();
+        }))
+        // a trackpad pinch: macOS sends it as a magnify gesture (gpui's PinchEvent), never as a wheel, so it zooms here at the pointer
+        .on_pinch(cx.listener(move |this, e: &PinchEvent, _, cx| {
+            let pv = this.screens.pv(slot);
+            let (Some(v), Some(b)) = (pv.view, pv.bounds) else { return };
+            let factor = crate::viewers::solid::pinch_zoom(e.delta); if factor == 1.0 { return }
+            pv.touched = true;
+            pv.view = Some(v.zoom(factor, f32::from(e.position.x - b.origin.x), f32::from(e.position.y - b.origin.y), f32::from(b.size.width), f32::from(b.size.height), pv.fitted));
+            cx.notify();
         })).into_any_element()
 }
 
