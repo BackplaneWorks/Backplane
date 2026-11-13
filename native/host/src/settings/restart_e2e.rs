@@ -319,11 +319,13 @@ async fn the_retire_watch_cuts_a_turn_running_on_the_changed_account_but_not_one
     let store = std::fs::read_dir(home.join("providers/accounts-v1").join(&ps[0].0)).unwrap().flatten().map(|e| e.path()).find(|p| p.join("login.json").exists()).expect("Work's store");
     std::fs::write(store.join("login.json"), json!({"email":"someone-else@x.com"}).to_string()).unwrap();
     let s = up.mgr.request(&json!({"op":"status","profile":ps[0].0})).await; assert_eq!(s["error"], "", "{s}");
-    accounts_hub::found(&up.hub, &Some(up.ag.clone()), &up.mgr.snapshot()).await;
+    // two watches at once (the hub's own 1-second loop is one more): the turn is cut once, not once for each that read it as running
+    { let (snap, ag) = (up.mgr.snapshot(), Some(up.ag.clone())); tokio::join!(accounts_hub::found(&up.hub, &ag, &snap), accounts_hub::found(&up.hub, &ag, &snap)); }
     assert!(lines(&up.hub, &tid(0)).iter().any(cut), "the turn on the changed account is cut: {:?}", lines(&up.hub, &tid(0)));
     assert_eq!(turn_of(&up.hub, &tid(0)).await, "interrupted");
     quiet(&up.mgr, &threads(1)).await; let _ = std::fs::remove_file(b.rec.join("mode.w@x.com"));
     let cuts = lines(&up.hub, &tid(0)).iter().filter(|l| cut(l)).count();
+    assert_eq!(cuts, 1, "cut once: {:?}", lines(&up.hub, &tid(0)));
     // the next start: Work is not the account the thread chose any more, so it goes to Personal, where a routine check is running: the start waits for it (launch_plan
     // waits out a check), running and on no login, and the watch runs then
     assert!(up.mgr.hold_check(&ps[1].0).await, "Personal comes free for the check");

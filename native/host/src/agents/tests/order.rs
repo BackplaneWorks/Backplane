@@ -290,7 +290,9 @@ async fn quoted_rig(name: &str, pilot: bool) -> (super::lost::Rig, Shared) {
     let from = len(&r.hub).await; crate::settings::order::resume(r.ag.clone());
     // the watch would look again only after its pause (ten minutes once paid); the restart says it at once, once
     let ev = until(&r.hub, from, 20, |ev| posted(ev, "o:q_fake1:shipped") == 1).await; assert!(ev.iter().any(|e| e["text"] == "**Shipped.** Tracking: TRK9"), "{ev:?}");
-    assert!(std::fs::read_to_string(o.join("q_fake1.json")).unwrap().contains("\"status\":\"shipped\""), "the record follows, so the next restart does not say it again");
+    // the record is kept after the message is posted (a crash between says it twice, never not at all), so it follows a moment later: wait for it, not for a sleep
+    let (rec, end) = (o.join("q_fake1.json"), std::time::Instant::now() + Duration::from_secs(20));
+    while !std::fs::read_to_string(&rec).unwrap().contains("\"status\":\"shipped\"") { assert!(std::time::Instant::now() < end, "the record follows, so the next restart does not say it again"); tokio::time::sleep(Duration::from_millis(10)).await }
     tokio::time::sleep(Duration::from_millis(250)).await; assert_eq!(posted(&log_from(&r.hub, from).await, "o:q_fake1:shipped"), 1, "said once");
     r.ag.shutdown();
 }

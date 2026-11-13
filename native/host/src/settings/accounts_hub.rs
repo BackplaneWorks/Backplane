@@ -156,6 +156,10 @@ pub async fn found_seen(hub: &Arc<Hub>, agents: &Option<Arc<Agents>>, snapshot: 
     let inventory = public(snapshot);
     // not broadcast: the live profiles go only to clients granted account access (the `accounts` request)
     // threads whose account changed under them
+    // One cut at a time, with the running turns read inside it: the watch runs from its own 1-second loop and from callers (a sign-out, a test), and two runs that both
+    // read a turn as running each cut it, so one turn was interrupted and logged twice (restart_e2e's retire-watch test under load counted the second cut).
+    static CUTTING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    let _one_cut = CUTTING.lock().await;
     let running: Vec<(String, String)> = { let m = hub.model().await; m.threads.iter().filter(|(_, t)| !t.deleted && t.turn == "running").map(|(id, t)| (id.clone(), t.provider.clone())).collect() };
     for (id, provider) in running {
         let raw = hub.setting(&accounts::binding_key(&id, &provider)).await.unwrap_or_default();
@@ -170,6 +174,7 @@ pub async fn found_seen(hub: &Arc<Hub>, agents: &Option<Arc<Agents>>, snapshot: 
             json!({"$":"ActivityLogged","thread":id,"act":format!("account-retired:{at}"),"tone":"error","kind":"account","summary":"This account's verified identity changed or disconnected. Check status and explicitly select an account to continue.","at":at})]).await;
         if let Some(a) = agents { let _ = a.stop(&id).await; }
     }
+    drop(_one_cut);
     if !snapshot["error"].as_str().unwrap_or("").is_empty() { return }
     let (_, back) = signin_steps(seen, snapshot);
     let profiles = snapshot["profiles"].as_array().cloned().unwrap_or_default();
