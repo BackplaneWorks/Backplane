@@ -158,7 +158,8 @@ pub enum Action {
 /// Whether the Backplane KiCad found (`version`, as `kicad.version` says it) is an older build of the same line than the package: one press
 /// updates it (the new one goes beside it, and `ipc::runtime` takes the newest). Stock and other lines are never "older".
 pub fn older(version: &str, p: &Package) -> bool {
-    let bp = |v: &str| v.split_once("-bp.").and_then(|(base, n)| n.parse::<u32>().ok().map(|n| (base.to_string(), n)));
+    // "-bp.12" and a hotfix's "-bp.12.1" (each dot part a number; a build suffix like "-851cbefda6" is not one, so not comparable)
+    let bp = |v: &str| v.split_once("-bp.").and_then(|(base, n)| n.split('.').map(|x| x.parse::<u32>().ok()).collect::<Option<Vec<u32>>>().map(|n| (base.to_string(), n)));
     matches!((bp(version), bp(p.version)), (Some((a, n)), Some((b, m))) if a == b && n < m)
 }
 pub fn decide(pkg: Option<&Package>, status: &str, version: &str, install_state: &str) -> Action {
@@ -310,6 +311,9 @@ mod tests {
     }
     /// An older build of the pinned line (bp.4 when bp.8 is pinned) is offered the update; the same or a newer one, or stock, is not.
     #[test] fn an_older_backplane_kicad_is_offered_the_update() {
+        let at = |v: &'static str| Package { version: v, ..LINUX };
+        assert!(older("10.99.0-bp.12", &at("10.99.0-bp.12.1")) && older("10.99.0-bp.11", &at("10.99.0-bp.12.1")) && !older("10.99.0-bp.12.1", &at("10.99.0-bp.12.1")));
+        assert!(!older("10.99.0-bp.12.1", &at("10.99.0-bp.12")) && older("10.99.0-bp.12.1", &at("10.99.0-bp.13")) && !older("10.99.0-bp.12-851cbefda6", &at("10.99.0-bp.13")));
         assert!(older("10.99.0-bp.4", &LINUX) && older("10.99.0-bp.8", &LINUX) && older("10.99.0-bp.9", &LINUX) && !older("10.99.0-bp.10", &LINUX) && !older("10.99.0-bp.11", &LINUX) && !older("10.0.7", &LINUX) && !older("", &LINUX));
         assert_eq!(decide(Some(&LINUX), "ok", "10.99.0-bp.4", ""), Action::Offer);
         assert_eq!(decide(Some(&LINUX), "ok", "10.99.0-bp.4", "failed"), Action::Nothing, "a failed update leaves the working one alone");
