@@ -75,6 +75,17 @@ fn read_files(root: &Path) -> (Vec<(String, String)>, String, String, String) {
     let f = crate::files::kicad::project::read(&root.to_string_lossy());
     (files, std::fs::read_to_string(&f.pcb).unwrap_or_default(), f.pro, f.pcb)
 }
+/// Findings that name a symbol by reference (the BOM's) get its KIID and sheet path from the schematic, so they show as markers on it.
+fn place_symbols(fs: &mut [Finding], root: &str) {
+    if !fs.iter().any(|f| f.anchors.iter().any(|a| a.doc == "sch" && a.uuid.is_empty() && !a.reference.is_empty())) { return }
+    let p = crate::files::kicad::project::read(root);
+    if p.sch.is_empty() { return }
+    let project = Path::new(&p.pro).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let at = crate::files::kicad::bom::places(&project, &crate::files::kicad::bompanel::read_sheets(&p.sch));
+    for a in fs.iter_mut().flat_map(|f| f.anchors.iter_mut()).filter(|a| a.doc == "sch" && a.uuid.is_empty()) {
+        if let Some((u, s)) = at.get(&a.reference) { a.uuid = u.clone(); if a.sheet.is_empty() { a.sheet = s.clone() } }
+    }
+}
 /// The newest output set in mfg/ (a folder with Gerbers), its files and drill texts, and its placement file.
 pub fn newest_outputs(root: &Path) -> (Option<checks::Outputs>, Option<(String, String)>) {
     let mut dirs: Vec<(std::time::SystemTime, PathBuf)> = vec![];
@@ -119,7 +130,11 @@ pub fn run_files(home: &Path, root: &Path, bom_lines: &[Value]) -> (Vec<Finding>
         None => skipped.push(format!("Fab: no profile of the fab {:?}", c.fab)),
     }
     let boards = board_fab.and_then(|(_, j)| j["qty"].as_u64()).unwrap_or(5);
-    if !pcb_path.is_empty() || !bom_lines.is_empty() { let (f, s) = checks::bom(bom_lines, boards); out.extend(f); skipped.extend(s) }
+    if !pcb_path.is_empty() || !bom_lines.is_empty() {
+        let (mut f, s) = checks::bom(bom_lines, boards);
+        place_symbols(&mut f, &root.to_string_lossy());
+        out.extend(f); skipped.extend(s)
+    }
     let (f, s) = checks::mech(&parsed); out.extend(f); skipped.extend(s);
     let _ = pro;
     fd::assign_ids(&mut out);
