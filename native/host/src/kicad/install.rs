@@ -318,6 +318,10 @@ pub async fn fetch(t: &Tools, base: &str, parent: &Path, p: &Package, log: &Path
 }
 /// Where the fetch downloads from (the script's base).
 pub fn base_url(p: &Package) -> String { format!("https://{FROM}/releases/download/{}/", p.release) }
+/// Whether a KiCad install here must wait for Git for Windows (`git`: whether git answers): on Windows while it still runs SCRIPT in Git's sh.
+pub fn needs_git(os: &str, git: bool) -> bool { os == "windows" && !git && !rust_fetch_on(os) }
+/// The systems that use the fetch in Rust, by the hub's os word.
+pub fn rust_fetch_on(os: &str) -> bool { os != "windows" }
 /// The systems that use the fetch in Rust; the rest still run SCRIPT (Windows, until its bare gate has proved the fetch there).
 pub fn rust_fetch() -> bool { !cfg!(windows) }
 
@@ -419,6 +423,10 @@ pub async fn install(hub: &Arc<Hub>, consent: bool) -> Result<String, String> {
     let env = super::ipc::runtime(hub).await;
     if let Some(why) = refusal(&env.cli, &env.status, &env.version, consent, RUNNING.load(Ordering::SeqCst), package()) { return Err(why) }
     let p = package().expect("refusal checks the package");
+    let git = async { crate::proc::tokio_cmd(crate::proc::Kind::Local, "git").arg("--version").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status().await.map_or(false, |s| s.success()) };
+    if hub.cfg.os == "windows" && needs_git(&hub.cfg.os, git.await) {
+        return Err("KiCad's download needs Git for Windows: install it (Settings, Setup, Design tools has the button), then try again".into())
+    }
     if RUNNING.swap(true, Ordering::SeqCst) { return Err("KiCad is being installed already".into()) }
     let parent = parent(&hub.cfg.home);
     // a stand-in installer (tests and rigs): the same arguments, so no real KiCad is downloaded or touched
