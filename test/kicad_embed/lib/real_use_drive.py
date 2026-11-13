@@ -208,6 +208,12 @@ asked = os.environ.get("KICAD_BIN", "")
 KICAD_RUN["asked"] = asked
 if asked and KICAD_RUN.get("exe") and os.path.dirname(os.path.dirname(os.path.realpath(asked))) != os.path.dirname(os.path.dirname(KICAD_RUN["exe"])):
     print(f"FAIL the KiCad running is not the one asked for: {KICAD_RUN}", flush=True); RESULTS["kicad_mismatch"] = {"ms": None, "ok": 0}
+# the runtime asked for is known by its BACKPLANE_COMMIT (bp.13 builds all read "10.99.0-unknown-bp.13"): the running one must carry the same
+want_bc = ""
+try: want_bc = open(os.path.join(os.path.dirname(os.path.dirname(os.path.realpath(asked))), "BACKPLANE_COMMIT")).read().strip()
+except Exception: pass
+if want_bc and KICAD_RUN.get("backplane_commit") != want_bc:
+    print(f"FAIL the KiCad running is BACKPLANE_COMMIT {KICAD_RUN.get('backplane_commit')}, asked for {want_bc}", flush=True); RESULTS["kicad_mismatch"] = {"ms": None, "ok": 0}
 print(f"INFO kicad {KICAD_RUN}", flush=True)
 # after Edit and the other editors' pre-warm, before any edit: is any document marked modified (a pre-warm that "repairs" a file)?
 if SOCK:
@@ -504,22 +510,35 @@ if "plan" in JOURNEYS and SOCK:
         tab("PCB", "plan_board", 1.2); rt("click", CX, PANE["y"] + PANE["h"] - 30); time.sleep(0.3); rt("key", "Home"); time.sleep(1.0)
         to_screen = calibrate()
         RESULTS["plan_calibrated"] = {"ms": None, "ok": int(to_screen is not None)}
-        r = rt("key", "p", "alt"); time.sleep(0.6)
-        menu = [w for w in windows() if w.get("shown") and w.get("override_redirect") and w["w"] > 100 and w["h"] > 100]
-        RESULTS["plan_alt_p_is_plan_view"] = {"ms": None, "ok": int(not menu)}
-        if menu:
-            print(f"JANK Alt+P opened a menu ({menu[0]['w']}x{menu[0]['h']} popup: KiCad's Place menu mnemonic) instead of the plan view; driving plan view by its action", flush=True)
-            shot("plan_alt_p_menu"); rt("key", "Escape"); time.sleep(0.3); rt("key", "Escape"); time.sleep(0.5)
+        # the plan view's toggle: RunAction(pcbnew.Plan.togglePlanView) where the runtime takes it; else its key after a click on the canvas
+        # (bp.13 builds d5eaa3ae44 and 3de539d24a: Alt+P, the Place menu's mnemonic unless the canvas has the keyboard; later: Ctrl+Shift+R)
+        ALT_P_BUILDS = ("d5eaa3ae44", "3de539d24a")
+        bc = (KICAD_RUN.get("backplane_commit") or "")[:10]
+        PLAN_KEY = os.environ.get("KEMBED_PLAN_KEY") or ("alt+p" if bc in ALT_P_BUILDS else "ctrl+shift+r")
+        def key_plan():
+            rt("click", PANE["x"] + 60, PANE["y"] + PANE["h"] - 140); time.sleep(0.2)  # the canvas gets the keyboard (an empty corner)
+            mods = PLAN_KEY.split("+"); return rt("key", mods[-1], *mods[:-1])["t0"]
+        probe_t = now(); st = ipc("run-action", SOCK, "pcbnew.Plan.togglePlanView"); USE_ACTION = bool(st.get("ok"))
+        print(f"INFO plan view toggle: {'RunAction' if USE_ACTION else 'key ' + PLAN_KEY} (BACKPLANE_COMMIT {bc})", flush=True)
+        RESULTS["plan_toggle_by_action"] = {"ms": None, "ok": int(USE_ACTION)}
         def toggle_plan():
-            t0 = now(); st = ipc("run-action", SOCK, "pcbnew.Plan.togglePlanView")
-            if not st.get("ok"): print(f"DIAG togglePlanView: {st}", flush=True)
-            return t0
-        EVENTS.append({"kind": "switch", "t0": r["t0"], "tag": "plan_alt_p", "window_ms": 1500})
-        if menu: t0 = toggle_plan()  # Alt+P opened a menu: the plan view by its action (RunAction may not reach it: its status is printed)
-        else: t0 = r["t0"]
+            if not USE_ACTION: return key_plan()
+            t0 = now(); ipc("run-action", SOCK, "pcbnew.Plan.togglePlanView"); return t0
+        if USE_ACTION: t0 = probe_t
+        else:
+            # the person's key pressed without a click first: a menu that opens instead is recorded
+            r = rt("key", "p", "alt") if PLAN_KEY == "alt+p" else rt("key", "r", "ctrl", "shift"); time.sleep(0.6)
+            menu = [w for w in windows() if w.get("shown") and w.get("override_redirect") and w["w"] > 100 and w["h"] > 100]
+            RESULTS["plan_key_without_click_ok"] = {"ms": None, "ok": int(not menu)}
+            if menu:
+                print(f"JANK {PLAN_KEY} without a click on the canvas opened a menu ({menu[0]['w']}x{menu[0]['h']})", flush=True)
+                shot("plan_key_menu"); rt("key", "Escape"); time.sleep(0.3); rt("key", "Escape"); time.sleep(0.5)
+                t0 = key_plan()
+            else: t0 = r["t0"]
+        menu = False
         EVENTS.append({"kind": "switch", "t0": t0, "tag": "plan_view_on", "window_ms": 2000}); time.sleep(2); shot("plan_view")
         for i in range(10):
-            t0 = toggle_plan() if menu else rt("key", "p", "alt")["t0"]
+            t0 = toggle_plan()
             EVENTS.append({"kind": "switch", "t0": t0, "tag": f"plan_toggle{i:02d}_{'off' if i % 2 == 0 else 'on'}", "window_ms": 1200}); time.sleep(1.2)
         cor = pj["corridors"][0]; cl = cor["layer"]
         order = sorted({l["layer"] for l in pj.get("layers", [])}, key=lambda n: 0 if n == "F.Cu" else (99 if n == "B.Cu" else int(re.sub(r"\D", "", n) or 50)))
@@ -566,7 +585,7 @@ if "plan" in JOURNEYS and SOCK:
         EVENTS.append({"kind": "commit", "t0": t0, "tag": "plan_propose_to_overlay", "window_ms": 2000})
         perf("plan_propose_rpc", round(t1 - t0), applied=len(res.get("applied") or []), refused=len(res.get("refused") or []))
         time.sleep(2); shot("plan_proposed")
-        (toggle_plan() if menu else rt("key", "p", "alt")); time.sleep(1)  # plan view off again
+        toggle_plan(); time.sleep(1)  # plan view off again
 # 8. schematic: pan/zoom there too
 if "sch" in JOURNEYS:
     tab("SCH", "sch_tab", 1.5)

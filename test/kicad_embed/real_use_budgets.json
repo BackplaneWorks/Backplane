@@ -279,12 +279,6 @@
    "what": "ProposePlan -> overlay changed on screen"
   },
   {
-   "re": "^plan_alt_p_is_plan_view$",
-   "field": "ok",
-   "min": 1,
-   "what": "Alt+P toggles the plan view (not KiCad's Place menu)"
-  },
-  {
    "re": "^plan_calibrated$",
    "field": "ok",
    "min": 1,
@@ -295,6 +289,12 @@
    "field": "ok",
    "min": 1,
    "what": "the plan edit took (GetPlan before/after)"
+  },
+  {
+   "re": "^plan_key_without_click_ok$",
+   "field": "ok",
+   "min": 1,
+   "what": "the plan view's key works without a click on the canvas first"
   }
  ]
 }
