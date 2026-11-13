@@ -302,8 +302,10 @@ impl KicadPane {
     /// bp.10+ local map: `kind`'s frame is one KiCad has shown or pre-warmed, so the client maps it itself and asks KiCad nothing. A hub
     /// ShowFrame here hid the other frames in KiCad while the client was mapping them (a quick Board, 3D, Board left the board's Show a
     /// no-op until the hub's re-show ~0.9 s later).
+    /// Not on Windows: there a frame shown only by the client (`ShowWindowAsync`) kept its canvas unpainted, showing the board's pixels
+    /// under the Schematic Editor's toolbars (bp.10 and bp.12 alike), so the hub's ShowFrame still switches it.
     fn locally_shown(&self, kind: &str) -> bool {
-        self.info["mode"] == "fork" && self.info["local_map"] == true
+        !cfg!(windows) && self.info["mode"] == "fork" && self.info["local_map"] == true
             && pick_local(kind, &self.info, &self.frames, &self.ever_shown).is_some_and(|x| self.ever_shown.contains(&x))
     }
     pub fn tab(&self) -> String { self.wanted_kind().to_string() }
