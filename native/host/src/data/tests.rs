@@ -697,4 +697,8 @@ fn a_reply_reaches_a_phone_as_its_body_and_reply_to() {
     for k in ["hub.offer", "mgmt.state.abc", "mgmt.bom.abc", "mgmt.life.abc", "mgmt.fab.abc", "kicad.checks.abc"] { assert!(phone_info(k), "{k}") }
     for k in ["editor.kicad.abc", "kicad.progress.abc", "browser.tabs.x", "terms"] { assert!(!phone_info(k), "{k}") }
     assert!(super::FEATURES.contains(&"mgmt"));
+    // a set_info frame as the hub pushes it: the phone's keys kept, the rest left out
+    let f = super::phone_info_frame(&json!({"t":"info","info":{"mgmt.bom.d1":"{}","editor.kicad.d1":"x"}})).unwrap();
+    assert_eq!(f, json!({"t":"info","info":{"mgmt.bom.d1":"{}"}}));
+    assert!(super::phone_info_frame(&json!({"t":"info","info":{"terms":"[]"}})).is_none());
 }

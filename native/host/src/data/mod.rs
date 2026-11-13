@@ -691,7 +691,12 @@ fn live_pushes(f: &Value, subs: &mut Subs) -> Vec<Value> {
 
 /// The hub info a phone gets as `{"t":"info"}` frames: the hub offer, the management panels' state and data (`mgmt.*`, docs/MANAGEMENT.md)
 /// and the design checks (`kicad.checks.*`).
-pub fn phone_info(key: &str) -> bool { key == "hub.offer" || key.starts_with("mgmt.") || key.starts_with("kicad.checks.") }
+/// An info frame as a phone gets it: only its keys `phone_info` keeps; None when none is left.
+pub fn phone_info_frame(v: &Value) -> Option<Value> {
+    let keep: serde_json::Map<String, Value> = v["info"].as_object()?.iter().filter(|(k, _)| phone_info(k)).map(|(k, v)| (k.clone(), v.clone())).collect();
+    (!keep.is_empty()).then(|| json!({"t":"info","info":keep}))
+}
+pub fn phone_info(key: &str) -> bool { key == "hub.offer" || key.starts_with("mgmt.") || key.starts_with("kicad.checks.") || key.starts_with("review.") }
 
 async fn handle(hub: &Arc<Hub>, c: &mut Conn, subs: &mut Subs, v: &Value) -> Value {
     let (id, m, p) = (v["id"].clone(), s(v, "m"), v.get("p").cloned().unwrap_or(Value::Null));
@@ -767,6 +772,8 @@ pub async fn socket(hub: Arc<Hub>, s: TcpStream, json_mode: bool, token: String,
                     Out::Raw(b) => if ext::wants_raw(&b) { tx.send(Message::Binary(b.into())).await?; },
                     // a terminal this socket watches: its bytes and where they start (data/term.rs)
                     Out::Value(v) if v["t"] == "term" => if let Some(f) = term::push_of(&subs.terms, &v) { tx.send(pack(&f, json_mode)).await?; },
+                    // hub info (set_info): what a phone draws of it (phone_info), as `{"t":"info","info":{...}}`
+                    Out::Value(v) if v["t"] == "info" => if let Some(f) = phone_info_frame(&v) { tx.send(pack(&f, json_mode)).await?; },
                     Out::Value(v) => if ext::wants_value(&v) {
                         // a plot's "none" is binary like the plots (one decoder in the app); a browser frame's announcement is JSON
                         if v["t"] == "plot" { let mut b = Vec::new(); cbor_plain(&v, &mut b); tx.send(Message::Binary(b.into())).await?; } else { tx.send(pack(&v, json_mode)).await?; } } } }

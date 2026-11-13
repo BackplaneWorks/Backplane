@@ -2866,6 +2866,10 @@ gpui.f.inactive = 非アクティブ: 確認できる作業はありません
 gpui.f.tool.runs.nover = {name}が{path}で動作します。
 
 # ---- android: new entries go here ----
+android.mgmt.all = すべて
+android.mgmt.judged = エージェント判定
+android.mgmt.fix = エージェントで直す
+android.mgmt.sent = スレッドに送りました。
 android.mcp = MCP サーバー
 android.alerts.ask = スレッドがあなたを必要とするとき、Bub が通知できます。
 android.alerts.allow = 通知を許可
