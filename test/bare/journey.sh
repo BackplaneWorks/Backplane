@@ -23,7 +23,7 @@ in_box() { docker exec -i "$C" "$@"; }
 as_person() { docker exec -i -u person -w $PH -e HOME=$PH "$C" "$@"; }
 # every X call is bounded: a client that holds a grab (or a stuck server) cost a whole run once (46 min in rerun 3); a timeout is a FAIL
 # that says which step and what the box's processes were doing (xstuck)
-STEP=start; phase() { STEP=$*; echo "STEP $(python3 -c "import time;print(round(time.time()-$T0))") $*"; }
+STEP=start; phase() { STEP=$*; printf '%s\t%s\n' "$(date +%s%3N)" "$*" >>"$OUT/phases.tsv"; echo "STEP $(python3 -c "import time;print(round(time.time()-$T0))") $*"; }
 # What it captures, for lane B's grab probe: does a fresh X client get an answer (no: a server grab, held by the one X client that is not
 # waiting on its X socket); was the Backplane client still logging; each X client's state and stack from the host (the container gives
 # no ptrace: host pids from docker top, /proc as root, eu-stack or gdb), Xvfb's too.
@@ -164,7 +164,7 @@ for p in $RT; do [ ! -s "$MAN" ] || on_desktop $p || cut_ 3 runtime "$p is not o
 
 # --- 2. first start, as from the applications menu ---
 ENVS=(-e DISPLAY=$DISP -e GDK_BACKEND=x11 -e XDG_RUNTIME_DIR=$PH/.run -e BACKPLANE_AGENTS=/opt/standins/bin -e BACKPLANE_NO_TAILSCALE=1 -e BACKPLANE_NO_UPDATE=1
-      -e BACKPLANE_ORDER_SERVER=http://127.0.0.1:9 -e BACKPLANE_GPUI_RECTS=1 -e LP_NUM_THREADS=2 -e LIBGL_ALWAYS_SOFTWARE=1 -e BARE_COEDIT_OUT=$PH/coedit.json -e BARE_COEDIT_PCB=$PH/Documents/pic_programmer/pic_programmer.kicad_pcb)
+      -e BACKPLANE_ORDER_SERVER=http://127.0.0.1:9 -e BACKPLANE_GPUI_RECTS=1 -e BACKPLANE_GPUI_LOOPTRACE=1 -e LP_NUM_THREADS=2 -e LIBGL_ALWAYS_SOFTWARE=1 -e BARE_COEDIT_OUT=$PH/coedit.json -e BARE_COEDIT_PCB=$PH/Documents/pic_programmer/pic_programmer.kicad_pcb)
 mkdir -p "$HH/.run"; chmod 700 "$HH/.run"
 launch() { docker exec -d -u person -w $PH -e HOME=$PH "${ENVS[@]}" "$C" sh -c "echo \$\$ > $PH/.client.pid; exec $PH/.local/bin/backplane-app $* >>$PH/win.log 2>&1"; }
 HUBH=$HH/.backplane/hub
@@ -246,4 +246,33 @@ if [ -n "${KDIR:-}" ]; then . "$HERE/journey_project.sh"; else bad "no KiCad: th
 for d in "$HH"/compat-saved/* "$HH"/compat-demos/*; do [ -d "$d" ] || continue; n=$OUT/logs/compat/$(basename "$(dirname "$d")")-$(basename "$d"); mkdir -p "$n"
   for x in fork stock fork-on-export result.json downgrade-report.json fork.log stock.log; do [ -e "$d/$x" ] && cp -r "$d/$x" "$n/"; done; done
 for f in "$HUBH/hub.log" "$HH/win.log" "$HH/standin.log" "$HH/coedit.json.argv" "$HUBH/kicad/.install.log"; do [ -f "$f" ] && cp "$f" "$OUT/logs/" 2>/dev/null; done
+
+# --- the client's main thread never held (lane C's stall, fixed at 82c67d16a): BACKPLANE_GPUI_LOOPTRACE logs every main-loop step over
+# 50 ms (a task, an X batch, a frame) and a 100 ms timer waking over 50 ms late, each with its time; the gate fails on a step over 500 ms
+# or a timer over 1 s late (the Boat's software rendering is slower than a desktop), naming the journey's phase it fell in
+LOOP=$(python3 - "$HH/win.log" "$OUT/phases.tsv" "${LOOP_TASK_MS:-500}" "${LOOP_WAKE_MS:-1000}" <<'PYEOF2'
+import json,sys,bisect
+log,ph,task_b,wake_b=sys.argv[1],sys.argv[2],float(sys.argv[3]),float(sys.argv[4])
+phases=[(int(l.split('\t',1)[0]),l.split('\t',1)[1].strip()) for l in open(ph) if '\t' in l] if ph else []
+at=[p[0] for p in phases]
+ev=[]
+for l in open(log,errors='replace'):
+    i=l.find('GPUI_LOOP {')
+    if i<0: continue
+    try: e=json.loads(l[i+10:])
+    except Exception: continue
+    if 'ms' in e: ev.append(e)
+over=[e for e in ev if (e['what']=='wake' and e['ms']>wake_b) or (e['what']!='wake' and e['ms']>task_b)]
+worst={}
+for e in ev: k='wake' if e['what']=='wake' else 'step'; worst[k]=max(worst.get(k,0),e['ms'])
+print(f"SUM {len(ev)} logged over 50 ms; worst step {worst.get('step',0):.0f} ms, worst late timer {worst.get('wake',0):.0f} ms; {len(over)} over the bounds")
+for e in over[:12]:
+    j=bisect.bisect_right(at,e.get('at_ms',0))-1
+    print(f"OVER {e['what']} {e['ms']:.0f} ms in phase '{phases[j][1] if j>=0 else 'before the journey'}'")
+PYEOF2
+)
+printf '%s\n' "$LOOP" | tee "$OUT/logs/looptrace.txt"
+if ! grep -q '^SUM' <<<"$LOOP"; then bad "the client's loop trace could not be read"
+elif grep -q '^OVER' <<<"$LOOP"; then bad "the client's main thread held: $(grep '^SUM' <<<"$LOOP" | cut -c5-); first: $(grep -m1 '^OVER' <<<"$LOOP" | cut -c6-)"
+else ok "the client's main thread never held: $(grep '^SUM' <<<"$LOOP" | cut -c5-)"; fi
 echo "fails=$fails"; [ "$fails" = 0 ]
