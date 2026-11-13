@@ -45,13 +45,16 @@ pub fn capable(caps: &Value) -> bool {
 /// Send a run's findings to the open KiCad of the project, if it can show them (the hub's own actor).
 pub async fn send(_hub: &Arc<Hub>, pro: &str, fs: &[Finding]) {
     let Some(route) = crate::files::kicad::embed::gui_route(pro) else { return };
-    let caps = crate::files::kicad::embed::gui_call(&route, "kiapi.backplane.GetCapabilities", json!({})).await;
-    if !capable(&caps["message"]) { return }
+    // the route's capabilities (read when the editor came up), else the editor's own GetCapabilities
+    let caps = if capable(&json!({"capabilities": route.caps})) { json!({"capabilities": route.caps}) } else {
+        crate::files::kicad::embed::gui_call(&route, "kiapi.backplane.GetCapabilities", json!({})).await["message"].clone()
+    };
+    if !capable(&caps) { eprintln!("review: no markers: the open KiCad does not list embed-host-markers ({} capabilities)", route.caps.len()); return }
     let me = crate::files::kicad::coedit::client_name(&crate::files::kicad::coedit::Who::Hub("review"));
     for (doc, kind) in [("pcb", "FK_PCB"), ("sch", "FK_SCH")] {
         let ms = markers(fs, doc);
         let o = crate::files::kicad::embed::gui_call_as(&route, "kiapi.backplane.embed.SetHostMarkers", json!({"kind": kind, "set": SET, "markers": ms}), &me).await;
-        if !o["ok"].as_bool().unwrap_or(false) { eprintln!("review: KiCad took no {doc} markers: {}", o["error"].as_str().unwrap_or("no answer")) }
+        if o["ok"].as_bool().unwrap_or(false) { eprintln!("review: {} {doc} markers sent to KiCad", ms.len()) } else { eprintln!("review: KiCad took no {doc} markers: {}", o["error"].as_str().unwrap_or("no answer")) }
     }
 }
 
