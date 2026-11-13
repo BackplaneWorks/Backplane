@@ -144,7 +144,7 @@ pub fn select(app: &mut Backplane, id: &str, cx: &mut Context<Backplane>) {
     app.screens.mgmt.bom.sel = Some(id.to_string());
     let tid = crate::screens::attach::raw_id(app.data["thread"]["id"].as_str().unwrap_or("")).to_string();
     eprintln!("GPUI_LOG {}", json!({"event": "bom_select", "id": id, "refs": refs}));
-    let _ = app.tx.try_send(Command::Rpc("editor.kicad.select".into(), Secret(json!({"thread": tid, "references": refs, "zoom": true})), "xsel"));
+    let _ = app.tx.try_send(Command::Rpc("editor.kicad.select".into(), Secret(json!({"thread": tid, "references": refs, "zoom": true, "quick": true})), "xsel"));
     if app.screens.kicad.is_none() { app.screens.xprobe.zoom = Some((String::new(), std::time::Instant::now())); }
     app.ui_epoch += 1; cx.notify();
 }
@@ -213,7 +213,7 @@ pub fn alts_answered(app: &mut Backplane, reply: &Value, cx: &mut Context<Backpl
 pub fn edited(app: &mut Backplane, reply: &Value, cx: &mut Context<Backplane>) {
     let ok = reply["ok"] != false; let why = if ok { String::new() } else { crate::hub::rpc_error(reply) };
     let r = if reply["result"].is_object() { reply["result"].clone() } else { reply.clone() };
-    eprintln!("GPUI_LOG {}", json!({"event": "bom_edited", "ok": ok, "why": why, "via": r["via"], "undo": r["undo"], "was": r["was"]}));
+    eprintln!("GPUI_LOG {}", json!({"event": "bom_edited", "ok": ok, "why": why, "via": r["via"], "undo": r["undo"], "was": r["was"], "deferred": r["deferred"]}));
     let b = &mut app.screens.mgmt.bom; b.sending = false;
     // an undo's own answer offers no undo of itself
     b.last = if ok && !b.undoing { Some(r.clone()) } else { None };
@@ -437,6 +437,9 @@ mod tests {
         let n = edit_note(Some(&ok("kicad")), Some(&p)).unwrap(); assert!(n.2 && !n.1.contains("Ctrl+Z"), "{}", n.1);
         assert!(edit_note(Some(&ok("file")), Some(&p)).unwrap().2);
         assert!(!edit_note(Some(&ok("undone")), None).unwrap().2);
+        // held by KiCad (the person is editing those symbols there): said so, no Ctrl+Z promise and no Undo for what has not gone in yet
+        let held = edit_note(Some(&ok("kicad")), Some(&json!({"undo": "kicad", "changed": 1, "deferred": 1}))).unwrap();
+        assert!(held.1.contains("finish there") && !held.2, "{}", held.1);
         assert_eq!(edit_note(Some(&(false, "locked".into())), None).unwrap(), ("bad", "locked".to_string(), false));
         assert!(!edit_note(Some(&ok("file")), Some(&json!({"undo": "panel", "changed": 0}))).unwrap().2); assert_eq!(edit_note(None, None), None);
     }
