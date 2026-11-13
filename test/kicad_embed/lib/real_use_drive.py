@@ -6,6 +6,7 @@ throughout (pane_sampler.py). Writes $OUT/real_use.json and prints PERF lines.
 Environment from env_xvfb.sh: DISPLAY, HPORT, IPC_PY, DRIVER_PY, HUB_RPC_MJS.
 A KiCad dialog that appears on its own (a load warning) is recorded with its title and time and dismissed with Return: it blocks KiCad."""
 import json, os, re, subprocess, sys, threading, time
+from real_use_undo_assert import check_undo
 
 OUT, CLOG = sys.argv[1], sys.argv[2]
 JOURNEYS = (sys.argv[3] if len(sys.argv) > 3 else "focus,open,switch,edit,mgmt,coedit,xprobe,comment,save,tools,textkeys,editors,plan,undo,checks,markers,panels,sch").split(",")
@@ -102,6 +103,26 @@ def xfocus():
     return out
 FK = {1: "PCB", 2: "SCH", 3: "SYM", 4: "FP", 5: "PCB_3D", 6: "OTHER", 7: "GERBVIEW"}
 def kframes(): return {FK.get(f["kind"], str(f["kind"])): f for f in ipc("frames", SOCK).get("frames", [])}
+def gal_bounds(png, x, y, need=300):
+    """The canvas around (x, y) in a screenshot: the point's colour must be the canvas background (an empty spot), seen on at
+    least `need` pixels of its row and its column inside the pane (a toolbar or the message panel is far shorter), and the point
+    must lie inside the span of that colour with a 10 px margin. Returns {x0, y0, x1, y1, bg} or None."""
+    from PIL import Image
+    im = Image.open(png).convert("RGB"); bg = im.getpixel((x, y))
+    px0, py0, px1, py1 = PANE["x"], PANE["y"], PANE["x"] + PANE["w"], PANE["y"] + PANE["h"]
+    col = [yy for yy in range(py0, py1) if im.getpixel((x, yy)) == bg]
+    row = [xx for xx in range(px0, px1) if im.getpixel((xx, y)) == bg]
+    if len(col) < need or len(row) < need: return None
+    # the span of the background run that contains the point (drawn items inside it are allowed, a 40 px gap is not)
+    def span(vals, v):
+        lo = hi = v
+        s_ = set(vals)
+        while any((lo - d) in s_ for d in range(1, 41)): lo = next(lo - d for d in range(1, 41) if (lo - d) in s_)
+        while any((hi + d) in s_ for d in range(1, 41)): hi = next(hi + d for d in range(1, 41) if (hi + d) in s_)
+        return lo, hi
+    y0, y1 = span(col, y); x0, x1 = span(row, x)
+    if y1 - y0 < need or x1 - x0 < need or not (y0 + 10 <= y <= y1 - 10 and x0 + 10 <= x <= x1 - 10): return None
+    return {"x0": x0, "y0": y0, "x1": x1, "y1": y1, "bg": list(bg)}
 def shot(name): sh("import", "-window", "root", os.path.join(OUT, "shots", f"{name}.png"), timeout=20)
 # --- dialogs: KiCad windows that are neither an editor frame nor embedded: recorded, then Return
 STOP = threading.Event(); KNOWN = set(); PAUSE = threading.Event()  # PAUSE: a journey opens KiCad's dialogs on purpose
@@ -1143,10 +1164,22 @@ if "undo" in JOURNEYS and SOCK:
     def bom(value, tag):
         out = rpc([{"method": "mgmt.bom.edit", "params": {"project": KPRO, "refs": [sref], "field": "value", "value": value}}])
         time.sleep(1.0); v = val(); steps_u.append([tag, v]); print(f"INFO undo {tag}: {v!r} ({out.strip()[-140:]})", flush=True); return v
-    if orig is not None:
-        EXs, EYs = PANE["x"] + PANE["w"] // 4, PANE["y"] + PANE["h"] - 60   # low on the canvas's left, off the items
+    # An explicit empty GAL point, checked on a screenshot taken just before the click. GTK3 draws the GAL canvas inside the
+    # frame's one X window (no child window to measure), and the pane also holds toolbars and a message panel below the canvas.
+    point = os.environ.get("KEMBED_UNDO_POINT", "")
+    NO_Y = os.environ.get("KEMBED_UNDO_NO_CTRL_Y") == "1"
+    target = None
+    if re.fullmatch(r"\d+,\d+", point):
+        EXs, EYs = map(int, point.split(","))
+        shot("undo_focus_target")
+        target = gal_bounds(os.path.join(OUT, "shots", "undo_focus_target.png"), EXs, EYs)
+        RESULTS["undo_focus_click"] = {"ms": None, "ok": int(target is not None), "point": [EXs, EYs], "canvas": target,
+                                       "pane": PANE, "windows": [w for w in windows() if w.get("title", "").endswith("Schematic Editor")]}
+        print(f"INFO undo click: point={[EXs, EYs]} canvas={target} pane={PANE}", flush=True)
+    if orig is not None and target is not None:
         v1 = bom("BP-REDO", "panel_edit")
-        rt("click", EXs, EYs); time.sleep(0.4); rz = rt("key", "z", "ctrl"); time.sleep(1.2); v2 = val(); steps_u.append(["ctrl_z", v2])
+        rt("click", EXs, EYs); time.sleep(0.4); shot("undo_focus_click")
+        rz = rt("key", "z", "ctrl"); time.sleep(1.2); v2 = val(); steps_u.append(["ctrl_z", v2])
         # before Ctrl+Y: where the keyboard is (X's focus chain, KiCad's focused frames), and the Redo button's look (enabled or grey)
         fo = xfocus(); kf = {k: f.get("focused") for k, f in kframes().items()}
         print(f"INFO undo focus before Ctrl+Y: X {fo[:3]}; KiCad frames focused {kf}", flush=True)
@@ -1156,17 +1189,20 @@ if "undo" in JOURNEYS and SOCK:
         # the display's keyboard: layout (setxkbmap -query) and what y / z / Control_L map to (the keycodes XTest sends)
         print(f"INFO undo keyboard: {sh('setxkbmap', '-query').strip()!r}; " + "; ".join(l.strip() for l in sh('xmodmap', '-pke').splitlines()
               if re.search(r"= (y Y|z Z|Control_L)\b", l)), flush=True)
-        ry = rt("key", "y", "ctrl"); time.sleep(1.2); v3 = val(); steps_u.append(["ctrl_y", v3]); shot("undo_after_ctrl_y")  # Undo/Redo after
+        if NO_Y:  # diagnostic: everything as usual but the key, to see whether the pane changes tab without Ctrl+Y
+            ry = {"t0": None}; time.sleep(1.2); v3 = val(); steps_u.append(["no_ctrl_y", v3]); shot("undo_after_no_ctrl_y")
+        else:
+            ry = rt("key", "y", "ctrl"); time.sleep(1.2); v3 = val(); steps_u.append(["ctrl_y", v3]); shot("undo_after_ctrl_y")  # Undo/Redo after
         print(f"INFO undo keys: ctrl_z at {rz.get('t0')}, ctrl_y at {ry.get('t0')} (epoch ms)", flush=True)
         v4 = bom("BP-AGAIN", "panel_edit_again")  # a third value: it applies only if KiCad takes the panel's second edit of the item
         print(f"INFO undo: {sref} {orig!r} -> panel {v1!r} -> Ctrl+Z {v2!r} -> Ctrl+Y {v3!r} -> panel again {v4!r}", flush=True)
         RESULTS["undo_panel_edit_applies"] = {"ms": None, "ok": int(v1 == "BP-REDO")}
         RESULTS["undo_ctrl_z_takes_it_back"] = {"ms": None, "ok": int(v2 == orig)}
-        RESULTS["undo_ctrl_y_redoes_it"] = {"ms": None, "ok": int(v3 == "BP-REDO")}
+        RESULTS["undo_ctrl_y_redoes_it"] = {"ms": None, "ok": None if NO_Y else int(v3 == "BP-REDO"), "skipped": NO_Y}
         RESULTS["undo_then_panel_edit_applies"] = {"ms": None, "ok": int(v4 == "BP-AGAIN"), "steps": steps_u}
         if val() != orig: bom(orig, "put_back")
     else:
-        print(f"DIAG undo: no schematic symbol {sref!r} to read", flush=True)
+        print(f"FAIL undo: need a readable symbol and KEMBED_UNDO_POINT=x,y inside GAL; symbol={sref!r} value={orig!r} point={point!r}", flush=True)
     tab("PCB", "undo_back", 1.2)
     PAUSE.clear()
 # 7d. checks (bp.13 batch 3, embed-checks): DRC and ERC in the open editors (RunChecks) as the client's Checks panel can run them: the call
@@ -1341,3 +1377,5 @@ RESULTS["switch_shows_the_asked_frame"] = {"ms": None, "ok": int(not SHOW_MISSES
 summary = {"results": RESULTS, "client": os.environ.get("CLIENT_BIN"), "kicad": os.environ.get("KICAD_BIN"), "kicad_running": KICAD_RUN, "dialogs": DIALOGS, "pane": PANE, "gpu": (metrics("gpu") or [{}])[0], "cold_edit_click_epoch": edit_click.get("epoch_ms")}
 json.dump(summary, open(os.path.join(OUT, "real_use.json"), "w"), indent=1)
 print("JSON " + json.dumps(summary), flush=True)
+if "undo" in JOURNEYS:
+    sys.exit(check_undo(RESULTS, skip=("undo_ctrl_y_redoes_it",) if os.environ.get("KEMBED_UNDO_NO_CTRL_Y") == "1" else ()))
