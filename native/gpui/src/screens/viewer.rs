@@ -645,7 +645,9 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
     let diff_on = thread["diff"].is_object();
     // no tab bar: the rail picks the page. The pane's own controls (where it comes from, Open in KiCad, Close) end the page's toolbar row,
     // or float in the top right corner of a page drawn to its edges (3D, Split, Browser)
-    let editing = editor.is_some() && matches!(open, "board" | "schematic" | "3d") && !diff_on;
+    // the Gerbers page is the Board page drawing a Gerber set (viewer.gerbers): Backplane's own, never KiCad's, Edit on or not (lane K's
+    // rerun 9: the rail lit Gerbers while the pane kept KiCad's PCB editor and never asked for the set's plot)
+    let editing = editor.is_some() && matches!(open, "board" | "schematic" | "3d") && viewer["gerbers"] != true && !diff_on;
     let acts = |cx: &mut Context<Backplane>| pane_actions(cx, light, thread, target, diff_on, editing);
     let body: AnyElement = if editing {
         // the real KiCad, its rail page's editor over the pane (viewers/kicad_pane.rs); the pane's controls in its own row above it, never over KiCad's toolbar
