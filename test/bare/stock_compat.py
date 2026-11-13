@@ -55,6 +55,16 @@ def complaints(out):
     return bad
 
 
+def exact_items(project):
+    """known entries for one project that name exact violations: [(key, description start, sorted item descriptions)]; by the items'
+    descriptions, as the fork's gate does (a teardrop's uuid is made again at each load)"""
+    try:
+        return [(e["key"], i["description"], sorted(i["items"])) for e in json.load(open(KNOWN)) if e.get("items") and e.get("project") == project
+                for i in e["items"]]
+    except FileNotFoundError:
+        return []
+
+
 def drops():
     """known entries that name a description suffix: those items alone are left out on both sides (the type stays counted)"""
     try:
@@ -63,17 +73,21 @@ def drops():
         return []
 
 
-def tally(report, excluded=False):
+def tally(report, excluded=False, project=""):
     """(kind, type, severity) -> count from a kicad-cli ERC or DRC JSON report. Exclusions the person made (kept in the .kicad_pro)
     are counted apart: 10.0 lists a stale one (whose items are gone) under --severity-all, the fork drops it."""
     j = json.load(open(report))
     c = collections.Counter()
     vs = [("erc", v) for s in j.get("sheets", []) for v in s.get("violations", [])]
     vs += [(k, v) for k in ("violations", "unconnected_items", "schematic_parity") for v in j.get(k, [])]
-    dr = drops()
+    dr = drops(); exact = exact_items(project)
     for k, v in vs:
         key = (k, v.get("type"), v.get("severity"))
         if any("|".join(map(str, key)) == dk and str(v.get("description", "")).endswith(sfx) for dk, sfx in dr):
+            continue
+        # one reviewed violation, by its project, type, rule words and its exact items (their descriptions)
+        uu = sorted(i.get("description", "") for i in v.get("items", []))
+        if any("|".join(map(str, key)) == ek and str(v.get("description", "")).startswith(ed) and uu == eu for ek, ed, eu in exact):
             continue
         if bool(v.get("excluded")) == excluded:
             c[key] += 1
@@ -93,7 +107,7 @@ def pending():
 
 def known():
     try:
-        return {e["key"]: e["why"] for e in json.load(open(KNOWN)) if not e.get("drop_description_suffix") and not e.get("pending")}
+        return {e["key"]: e["why"] for e in json.load(open(KNOWN)) if not e.get("drop_description_suffix") and not e.get("pending") and not e.get("items")}
     except FileNotFoundError:
         return {}
 
@@ -262,7 +276,7 @@ def check(args, src):
     key = lambda x: "|".join(map(str, x))
     for k in ("erc", "drc"):
         if k in fork_r and k in stock_r:
-            a, b = tally(fork_r[k]), tally(stock_r[k]); c = tally(fx[k]) if k in fx else None
+            a, b = tally(fork_r[k], project=name), tally(stock_r[k], project=name); c = tally(fx[k], project=name) if k in fx else None
             res[k] = {"fork": {key(x): n for x, n in sorted(a.items(), key=str)}, "stock": {key(x): n for x, n in sorted(b.items(), key=str)}}
             diff = {}
             for x in set(a) | set(b):
@@ -277,7 +291,7 @@ def check(args, src):
             res.setdefault("engine_known", {}).update(engine)
             pend = pending(); named = [f"{x}: {pend[(name, x)]}" for x in hard if (name, x) in pend]
             chk(not hard, f"{k.upper()} identical, fork vs stock ({sum(a.values())} vs {sum(b.values())}{'; known engine differences: ' + ', '.join(engine) if engine else ''}{'; being chased: ' + '; '.join(named) if named else ''})", {"difference": hard})
-            ea, eb = tally(fork_r[k], True), tally(stock_r[k], True)
+            ea, eb = tally(fork_r[k], True, name), tally(stock_r[k], True, name)
             if ea != eb:
                 res.setdefault("excluded_differ", {})[k] = {"fork": {key(x): n for x, n in ea.items()}, "stock": {key(x): n for x, n in eb.items()}}
                 print(f"NOTE {name}: {k.upper()} exclusions listed differently (fork {sum(ea.values())}, stock {sum(eb.values())}; stale ones in the .kicad_pro)")

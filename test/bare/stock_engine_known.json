@@ -27,6 +27,22 @@
  {
   "project": "complex_hierarchy",
   "key": "violations|clearance|error",
-  "pending": "a DRC false positive in the fork's engine: RV301 pad 3 and its teardrop against the bottom GND fill measure 0.4695/0.4872 mm in the fork's DRC, 0.5085/0.5115 mm outside KiCad (rule 0.508); lane P is finding whether it is upstream master or ours (2026-11-13)"
+  "items": [
+   {
+    "description": "Clearance violation (zone clearance 0.5080 mm;",
+    "items": [
+     "PTH pad 3 [/ampli_ht_horizontal/S_OUT+] of RV301",
+     "Zone [GND] on bottom_copper, priority 0"
+    ]
+   },
+   {
+    "description": "Clearance violation (zone clearance 0.5080 mm;",
+    "items": [
+     "Teardrop [/ampli_ht_horizontal/S_OUT+] on bottom_copper",
+     "Zone [GND] on bottom_copper, priority 0"
+    ]
+   }
+  ],
+  "why": "upstream DRC false positive, post-10.0: RV301 pad 3 and its teardrop against the bottom GND fill measure 0.5085 / 0.5115 mm outside KiCad (rule 0.508); upstream master at the fork's merge base gives the same errors (lane P, 2026-11-13). REMOVE this entry when upstream fixes it."
  }
 ]
