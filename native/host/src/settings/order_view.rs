@@ -32,7 +32,7 @@ pub fn status_text(st: &str, tracking: &str) -> String {
     match st {
         "paid" => "**Paid.** Thank you. We're placing the order now; this thread will say when it ships.".into(),
         "placed" => "**Ordered.** It's in production.".into(),
-        "shipped" => if tracking.is_empty() { "**Shipped.**".into() } else { format!("**Shipped.** Tracking: {tracking}") },
+        "shipped" => if tracking.is_empty() { "**Shipped.**".into() } else { format!("**Shipped.** Tracking: {}", plain(tracking)) },
         "delivered" => "**Delivered.**".into(),
         "refunded" => "**Refunded.** The money is on its way back to you.".into(),
         "expired" => "This quote has expired. Ask here for a new one when you're ready.".into(),
@@ -44,9 +44,43 @@ pub fn status_text(st: &str, tracking: &str) -> String {
 pub fn status_note(st: &str, tracking: &str) -> String {
     match st {
         "paid" => "Paid: your order is being placed.".into(), "placed" => "Ordered: your order is in production.".into(),
-        "shipped" => if tracking.is_empty() { "Shipped.".into() } else { format!("Shipped. Tracking: {tracking}") },
+        "shipped" => if tracking.is_empty() { "Shipped.".into() } else { format!("Shipped. Tracking: {}", plain(tracking)) },
         "delivered" => "Delivered.".into(), "refunded" => "Refunded: the money is on its way back to you.".into(), _ => String::new(),
     }
+}
+/// The order server's own words made safe to draw: no image (a remote one is fetched by every client and tells its host the quote was opened), no raw HTML,
+/// no hidden-href link (`[text](url)` becomes text with its URL in code beside it), no reference-style link definitions. Plain text and tables stay.
+pub fn plain(md: &str) -> String {
+    let c: Vec<char> = md.chars().collect(); let mut o = String::new(); let mut i = 0;
+    // the end of a `[..]` starting at c[i] (c[i] == '['), and what follows it
+    let close = |i: usize| -> Option<usize> { let mut d = 0; for (j, ch) in c.iter().enumerate().skip(i) { match ch { '[' => d += 1, ']' => { d -= 1; if d == 0 { return Some(j) } } '\n' => return None, _ => {} } } None };
+    let paren = |j: usize| -> Option<usize> { if c.get(j + 1) != Some(&'(') { return None } let mut d = 0; for (k, ch) in c.iter().enumerate().skip(j + 1) { match ch { '(' => d += 1, ')' => { d -= 1; if d == 0 { return Some(k) } } '\n' => return None, _ => {} } } None };
+    while i < c.len() {
+        let line_start = i == 0 || c[i - 1] == '\n';
+        if line_start && c[i..].iter().take_while(|x| **x != '\n').collect::<String>().trim_start().starts_with('[') {
+            let l: String = c[i..].iter().take_while(|x| **x != '\n').collect(); let t = l.trim_start();
+            if t.find("]:").is_some_and(|p| !t[1..p].contains(']')) { i += l.chars().count(); continue }
+        }
+        match c[i] {
+            '!' if c.get(i + 1) == Some(&'[') => { // an image: only its alt text stays
+                if let Some(j) = close(i + 1) { let alt: String = c[i + 2..j].iter().collect();
+                    let e = if let Some(k) = paren(j) { k } else if c.get(j + 1) == Some(&'[') { close(j + 1).unwrap_or(j) } else { j };
+                    if !alt.trim().is_empty() { o.push_str(&format!("[image: {}]", alt.trim())) } else { o.push_str("[image]") } i = e + 1; continue }
+                o.push('!'); i += 1 }
+            '[' => { if let Some(j) = close(i) { if let Some(k) = paren(j) {
+                    let text: String = c[i + 1..j].iter().collect(); let url: String = c[j + 2..k].iter().collect();
+                    let url = url.split_whitespace().next().unwrap_or("").replace('`', "");
+                    o.push_str(&plain(&text)); if !url.is_empty() && !text.trim().eq_ignore_ascii_case(&url) { o.push_str(&format!(" (`{url}`)")) } i = k + 1; continue } }
+                o.push('['); i += 1 }
+            '<' => { let end = c[i..].iter().take(2000).position(|x| *x == '>' || *x == '\n');
+                match end { Some(p) if c[i + p] == '>' => { let inner: String = c[i + 1..i + p].iter().collect();
+                    if inner.starts_with("http://") || inner.starts_with("https://") { if !inner.contains(char::is_whitespace) { o.push_str(&format!("`{}`", inner.replace('`', ""))) } }
+                    i += p + 1 }
+                    _ => { o.push_str("&lt;"); i += 1 } } }
+            ch => { o.push(ch); i += 1 }
+        }
+    }
+    o
 }
 /// Order.said: what the agent hears back: never the token or the Buy now link.
 pub fn said(q: &Value) -> Value {
@@ -59,7 +93,7 @@ pub fn said(q: &Value) -> Value {
 }
 /// Order.quote.md after Order.quote.customs: the order server's text, what the price covers, and Buy now only when it can be paid. The link names the quote, never its token.
 pub fn quote_md(q: &Value) -> String {
-    let md = sv(&q["quote"], "markdown");
+    let md = plain(sv(&q["quote"], "markdown")); let md = md.as_str();
     let md = if md.trim().is_empty() { md.to_string() } else { format!("{md}\n\n{}", customs(ddp(q))) };
     if payable(q) { let l = sv(&q["quote"], "pay_label"); format!("{md}\n\n[{}]({LINK}{})", if l.is_empty() { "Buy now" } else { l }, sv(q, "id")) } else { md }
 }
