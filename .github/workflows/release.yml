@@ -149,13 +149,21 @@ jobs:
           bun --version
       # The STEP mesher (native/step2glb): OpenCascade, natively, linked statically from its pinned source (scripts/build-occt.sh, only the
       # toolkits it uses). That build takes minutes and is kept in the Actions cache by its version, script and platform.
-      - uses: actions/cache@v4
+      # restored here and saved at once after the mesher is built, not at the job's end: actions/cache saves only when the whole job passes, so a job failing
+      # later (packaging) built OpenCascade again on every run (Windows: 61 minutes cold)
+      - id: occt
+        uses: actions/cache/restore@v4
         with:
           path: ~/.cache/backplane/occt-7.9.2-static-*
           key: occt-7.9.2-${{ hashFiles('scripts/build-occt.sh') }}-${{ matrix.target }}
       - name: STEP mesher
         env: { MACOSX_DEPLOYMENT_TARGET: "12.0" }
         run: STATIC=1 scripts/build-step2glb.sh dist/backplane-step2glb${{ runner.os == 'Windows' && '.exe' || '' }}
+      - if: steps.occt.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.cache/backplane/occt-7.9.2-static-*
+          key: ${{ steps.occt.outputs.cache-primary-key }}
       # licenses/rust: the notices of the Rust crates in each program, for this target (scripts/rust-licenses.sh). A crate under a licence outside
       # deploy/licenses/rust/about.toml's allow-list fails the release here. cargo-about is kept in ~/.cargo/bin by the rust cache.
       - name: rust notices
