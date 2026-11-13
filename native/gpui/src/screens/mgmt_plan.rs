@@ -77,7 +77,7 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
         let lid = layer.clone(); let lid2 = layer.clone();
         let mut head = div().flex_shrink_0().flex().items_center().gap_2().px_2().h(px(24.)).bg(c("panel")).border_b_1().border_color(c("line")).text_size(px(11.))
             .child(div().flex_shrink_0().text_color(c("text")).child(layer.clone()))
-            .child(div().flex_shrink_0().text_color(c("dim")).child(format!("{} · {}/{} {}", s(&l, "role"), l["done"].as_u64().unwrap_or(0), total, trs("done"))))
+            .child(div().flex_shrink_0().text_color(c("dim")).child(format!("{}{}/{} {}", if s(&l, "role").is_empty() { String::new() } else { format!("{} · ", s(&l, "role")) }, l["done"].as_u64().unwrap_or(0), total, trs("done"))))
             .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().text_color(c("faint")).child(s(&l, "stackup").to_string()));
         if s(&l, "status") != "approved" && total > 0 {
             head = head.child(btn(cx, light, format!("mgmt:plan:layer-ok:{layer}"), "Approve layer", move |a, cx| approve(a, &lid, &[], true, cx))) // i18n-ok: English the draw passes through trs
