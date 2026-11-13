@@ -11,7 +11,7 @@ use serde_json::{json, Value};
 use std::sync::Arc;
 
 /// Accounts.public: what a client is told of the snapshot (no attempts: their links and codes are for the connection that asked).
-pub fn public(snapshot: &Value) -> String { json!({"version":1,"revision":snapshot["revision"].as_u64().unwrap_or(0),"profiles":snapshot["profiles"].clone(),"error":snapshot["error"].as_str().unwrap_or("")}).to_string() }
+pub fn public(snapshot: &Value) -> String { json!({"version":1,"revision":snapshot["revision"].as_u64().unwrap_or(0),"profiles":snapshot["profiles"].clone(),"defaultLogin":snapshot["default_login"].clone(),"error":snapshot["error"].as_str().unwrap_or("")}).to_string() }
 
 /// Accounts.changes: the inventory when it moved, and a default whose profile is gone (only from a snapshot without an error).
 pub fn changes(get: &dyn Fn(&str) -> String, snapshot: &Value, at: u64) -> Vec<Value> {
