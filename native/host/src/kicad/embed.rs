@@ -255,6 +255,16 @@ pub fn hold_shows(pro: &str, for_: Duration) { host_holds().lock().unwrap().inse
 /// The hub's drive is over: follow show requests again after a short grace (KiCad's last ones are still on their way).
 pub fn release_shows(pro: &str) { hold_shows(pro, Duration::from_millis(1500)); }
 fn shows_held(pro: &str) -> bool { host_holds().lock().unwrap().get(pro).is_some_and(|t| std::time::Instant::now() < *t) }
+/// Why a KiCad show request (ET_SHOW_REQUESTED) is not followed, or None to follow it. `actor`: the API client that caused it (with
+/// embed-request-actor; "" for the person or KiCad itself); `other`: it asks for a frame other than the active one; `held`: the hub is
+/// driving KiCad (a check run, a pre-warm). A request with no actor during the hub's own drive is KiCad's, not the person's: on bp.13
+/// batch 5 a DRC with schematic parity Raise()s the hidden board (FetchNetlistFromSchematic) with no actor, and the pane followed it to
+/// the board while the person was on the schematic (lane A, Nov 13: a Ctrl+Y typed then went to the board). Fork batch 6 drops that Raise.
+fn show_not_followed(by_actor: bool, actor: &str, editor: bool, other: bool, held: bool) -> Option<&'static str> {
+    if by_actor && !actor.is_empty() && !actor.starts_with("person:") { return Some("an API client's") }
+    if !editor && other && held && (!by_actor || actor.is_empty()) { return Some("while the hub drives it") }
+    None
+}
 
 /// ET_EDITOR_REQUESTED (25): the editor's kind and the item (FrameInfo.lib_id, "Lib:Name") to open in it.
 pub fn editor_requested(ev: &Value) -> Option<(String, String)> {
@@ -1554,16 +1564,11 @@ impl Actor {
                 // a library editor is shown on KiCad's ET_EDITOR_REQUESTED (embedded, on its item), never on the ET_SHOW_REQUESTED KiCad sends
                 // before it (three of them on Ctrl+E: showing then floated a 900x720 top-level over the pane for ~0.8 s)
                 // embed-request-actor (bp.13 after batch 4): the request says which API client caused it, "" for the person or KiCad itself:
-                // only those are followed (the hub's own pre-warm, check runs and an agent's actions never move the person's pane); without
-                // it, the hub's drive is told by time (hold_shows)
+                // only those are followed (the hub's own pre-warm, check runs and an agent's actions never move the person's pane); one with
+                // no actor while the hub drives KiCad (hold_shows) is KiCad's own and not followed either (show_not_followed)
                 let by_actor = s.caps.iter().any(|c| c == "embed-request-actor");
-                if by_actor && !actor.is_empty() && !actor.starts_with("person:") {
-                    eprintln!("kicad embed: {pro}: KiCad asked to show {kind} for {actor}: not followed");
-                    let _ = self.me.send(Msg::ForkSync { pro, gen });
-                    return;
-                }
-                if !by_actor && !editor && canon_frame(&kind) != s.active && shows_held(&pro) {
-                    eprintln!("kicad embed: {pro}: KiCad asked to show {kind} while the hub drives it: not followed");
+                if let Some(why) = show_not_followed(by_actor, &actor, editor, canon_frame(&kind) != s.active, shows_held(&pro)) {
+                    eprintln!("kicad embed: {pro}: KiCad asked to show {kind} ({why}, actor {actor:?}): not followed");
                     let _ = self.me.send(Msg::ForkSync { pro, gen });
                     return;
                 }
@@ -2492,6 +2497,22 @@ mod tests {
         assert!(!others_busy(&sock, 1_500), "the checks' own never count");
     }
 
+    #[test] fn a_show_request_with_no_actor_during_the_hubs_own_check_is_not_followed() {
+        // bp.13 batch 5: DRC parity's Raise() of the hidden board, no actor, while the hub's check holds shows
+        assert_eq!(show_not_followed(true, "", false, true, true), Some("while the hub drives it"));
+        // the same with no hub drive: the person's (or KiCad's on their action), followed
+        assert_eq!(show_not_followed(true, "", false, true, false), None);
+        // a person's request through a client, even during a check: followed
+        assert_eq!(show_not_followed(true, "person:phone", false, true, true), None);
+        // an agent's or the hub's own client: never followed
+        assert_eq!(show_not_followed(true, "hub:checks", false, false, false), Some("an API client's"));
+        // the frame already on show, or a library editor's request: followed (nothing moves / the person asked for it)
+        assert_eq!(show_not_followed(true, "", false, false, true), None);
+        assert_eq!(show_not_followed(true, "", true, true, true), None);
+        // a runtime without actors: told by time only, as before
+        assert_eq!(show_not_followed(false, "", false, true, true), Some("while the hub drives it"));
+        assert_eq!(show_not_followed(false, "", false, true, false), None);
+    }
     #[test] fn gerbview_and_the_editors_kicad_asks_for() {
         use super::*;
         assert_eq!(canon_frame("FK_GERBVIEW"), "GERBVIEW"); assert_eq!(fk_of("GERBVIEW"), "FK_GERBVIEW"); assert_eq!(kind_of_fk_val(&json!(7)), "GERBVIEW");
