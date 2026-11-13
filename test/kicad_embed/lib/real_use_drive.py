@@ -1096,12 +1096,12 @@ if "undo" in JOURNEYS and SOCK:
         v1 = bom("BP-REDO", "panel_edit")
         rt("click", EXs, EYs); time.sleep(0.4); rt("key", "z", "ctrl"); time.sleep(1.2); v2 = val(); steps_u.append(["ctrl_z", v2])
         rt("key", "y", "ctrl"); time.sleep(1.2); v3 = val(); steps_u.append(["ctrl_y", v3])
-        v4 = bom(orig, "panel_edit_again")
+        v4 = bom("BP-AGAIN", "panel_edit_again")  # a third value: it applies only if KiCad takes the panel's second edit of the item
         print(f"INFO undo: {sref} {orig!r} -> panel {v1!r} -> Ctrl+Z {v2!r} -> Ctrl+Y {v3!r} -> panel again {v4!r}", flush=True)
         RESULTS["undo_panel_edit_applies"] = {"ms": None, "ok": int(v1 == "BP-REDO")}
         RESULTS["undo_ctrl_z_takes_it_back"] = {"ms": None, "ok": int(v2 == orig)}
         RESULTS["undo_ctrl_y_redoes_it"] = {"ms": None, "ok": int(v3 == "BP-REDO")}
-        RESULTS["undo_then_panel_edit_applies"] = {"ms": None, "ok": int(v4 == orig), "steps": steps_u}
+        RESULTS["undo_then_panel_edit_applies"] = {"ms": None, "ok": int(v4 == "BP-AGAIN"), "steps": steps_u}
         if val() != orig: bom(orig, "put_back")
     else:
         print(f"DIAG undo: no schematic symbol {sref!r} to read", flush=True)
