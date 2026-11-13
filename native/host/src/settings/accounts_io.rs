@@ -243,7 +243,9 @@ enum Cmd { Respond(String), Cancel }
 #[derive(Default)]
 struct Inner { profiles: Vec<Profile>,
     /// a sync token a sign-in caught, by profile, while it is checked (never kept here longer, never in the registry)
-    caught: HashMap<String, String>, attempts: Vec<Attempt>, jobs: HashMap<String, String>, cmds: HashMap<String, mpsc::UnboundedSender<Cmd>>, revision: u64, load_error: String, default_allowance: Option<Value>, default_identity: String, refresh_at: HashMap<String, u64>, busy: HashMap<String, usize>, launching: HashMap<String, usize>, launch_locks: HashMap<String, Arc<tokio::sync::Mutex<()>>>, runs_on: HashMap<String, (String, u64)>, runs_seq: u64 }
+    caught: HashMap<String, String>, attempts: Vec<Attempt>, jobs: HashMap<String, String>, cmds: HashMap<String, mpsc::UnboundedSender<Cmd>>, revision: u64, load_error: String, default_allowance: Option<Value>, default_identity: String,
+    /// who each provider's CLI login is, by provider (`default_login`); none until it was asked
+    default_login: HashMap<String, Value>, refresh_at: HashMap<String, u64>, busy: HashMap<String, usize>, launching: HashMap<String, usize>, launch_locks: HashMap<String, Arc<tokio::sync::Mutex<()>>>, runs_on: HashMap<String, (String, u64)>, runs_seq: u64 }
 
 /// A launch waiting or running on a profile; dropped (finished, refused or its future dropped) it leaves the queue, so the profile is never stranded.
 struct Queued { me: Arc<Accounts>, id: String }
@@ -642,7 +644,8 @@ impl Accounts {
             if code != 0 || data["loggedIn"] != true || data["authMethod"] != "claude.ai" { return Err("Claude subscription sign-in could not be verified; Console profiles and API credentials use a different store.".into()) }
             let dir = self.directory(&p).map_err(|e| e.to_string())?;
             if data["configDirectory"].as_str().map(|d| crate::plat::fs::canonicalize(d).unwrap_or_else(|_| PathBuf::from(d))) != Some(crate::plat::fs::canonicalize(&dir).unwrap_or(dir)) { return Err(DIRECTORY_ERR.into()) }
-            identity = json!({"email":label(data["email"].as_str().unwrap_or("")),"plan":label(data["subscriptionType"].as_str().unwrap_or("")),"auth":"claude.ai"});
+            identity = json!({"email":label(data["email"].as_str().unwrap_or("")),"plan":label(data["subscriptionType"].as_str().unwrap_or("")),"auth":"claude.ai",
+                "account":label(data["accountUuid"].as_str().or(data["userId"].as_str()).unwrap_or("")),"org":label(data["orgUuid"].as_str().or(data["organizationId"].as_str()).unwrap_or(""))});
             fp_identity = json!([identity["email"], label(data["accountUuid"].as_str().or(data["userId"].as_str()).unwrap_or("")), label(data["orgUuid"].as_str().or(data["organizationId"].as_str()).unwrap_or(""))]);
             // the catalog is read again each hour (a model the provider adds shows without a restart), and the old one stays when the read gives none
             let ck = format!("catalog:{}", p.id);
@@ -674,7 +677,7 @@ impl Accounts {
                 rpc.initialize().await?;
                 let a = rpc.request("account/read", json!({"refreshToken":false}), 12).await?;
                 if a["account"]["type"] != "chatgpt" { return Err(()) }
-                let ident = json!({"email":label(a["account"]["email"].as_str().unwrap_or("")),"plan":label(a["account"]["planType"].as_str().unwrap_or("")),"auth":"chatgpt"});
+                let ident = json!({"email":label(a["account"]["email"].as_str().unwrap_or("")),"plan":label(a["account"]["planType"].as_str().unwrap_or("")),"auth":"chatgpt","account":label(a["workspaceRouting"]["chatgptAccountId"].as_str().unwrap_or(""))});
                 let at = last(&format!("usage:{}", p.id));
                 let fresh = !new_login && !asked && p.state != "expired" && at != 0 && now_s().saturating_sub(at) < 300;
                 if !fresh { self.inner.lock().unwrap().refresh_at.insert(format!("usage:{}", p.id), now_s()); }
@@ -731,7 +734,8 @@ pub struct LaunchPlan { pub program: PathBuf, pub env: Vec<(String, String)>, pu
 impl Accounts {
     pub fn snapshot(&self) -> Value {
         let g = self.inner.lock().unwrap();
-        json!({"version":1,"revision":g.revision,"default_allowance":g.default_allowance,"error":g.load_error,"profiles":g.profiles.iter().map(Profile::public).collect::<Vec<_>>(),
+        let profiles: Vec<Value> = g.profiles.iter().map(|p| { let mut o = p.public(); if g.default_login.get(&p.provider).map_or(false, |d| same_login(d, &o)) { o["sameAsDefault"] = json!(true) } o }).collect();
+        json!({"version":1,"revision":g.revision,"default_allowance":g.default_allowance,"default_login":g.default_login,"error":g.load_error,"profiles":profiles,
             "attempts":g.attempts.iter().map(|a| json!({"id":a.id,"profile":a.profile,"state":a.state,"url":a.url,"userCode":a.user_code,"expiresAt":a.expires_at,"message":a.message})).collect::<Vec<_>>()})
     }
     fn profile(&self, id: &str) -> Result<Profile, ()> { let g = self.inner.lock().unwrap(); if !g.load_error.is_empty() { return Err(()) } g.profiles.iter().find(|p| p.id == id).cloned().ok_or(()) }
@@ -1245,22 +1249,71 @@ impl Accounts {
             let Ok(_job) = self.hold(&id, "refresh", !dead) else { continue };
             if let Ok(p) = self.profile(&id) { if let Ok(np) = self.verify(&p, false).await { let _ = self.update(&id, |slot| *slot = merge_checked(slot, np)); } }
         }
-        let due = { let g = self.inner.lock().unwrap(); let at = g.refresh_at.get("default-claude").copied().unwrap_or(0); at == 0 || now.saturating_sub(at) >= 300 };
-        if due && std::env::var_os("ANTHROPIC_API_KEY").is_none() {
+        self.read_defaults(now).await;
+    }
+    /// Who each provider's CLI login is (`default_login`), and the Claude login's usage (`default_allowance`), every five minutes: `claude auth status`, Codex's
+    /// `account/read`, with no profile's store. A provider whose CLI is not here has none.
+    pub async fn read_defaults(self: &Arc<Self>, now: u64) {
+        let due = |k: &str| { let g = self.inner.lock().unwrap(); let at = g.refresh_at.get(k).copied().unwrap_or(0); at == 0 || now.saturating_sub(at) >= 300 };
+        let say = |provider: &str, v: Value| { let mut g = self.inner.lock().unwrap(); if g.default_login.get(provider) != Some(&v) { g.default_login.insert(provider.into(), v); g.revision += 1; } };
+        if due("default-claude") && std::env::var_os("ANTHROPIC_API_KEY").is_some() {
             self.inner.lock().unwrap().refresh_at.insert("default-claude".into(), now);
-            if let Ok((0, data)) = self.cli(None, "claude", &["auth", "status"]).await {
-                if data["loggedIn"] == true && data["authMethod"] == "claude.ai" {
+            say("claude", json!({"state":"unknown","reason":"ANTHROPIC_API_KEY is set: Claude Code uses that key, not a sign-in"}));
+        } else if due("default-claude") && (self.resolve)("claude").is_ok() {
+            self.inner.lock().unwrap().refresh_at.insert("default-claude".into(), now);
+            match self.cli(None, "claude", &["auth", "status"]).await {
+                Ok((0, data)) if data["loggedIn"] == true && data["authMethod"] == "claude.ai" => {
+                    let who = login_of(&data["email"], &data["subscriptionType"], data["accountUuid"].as_str().or(data["userId"].as_str()), data["orgUuid"].as_str().or(data["organizationId"].as_str()));
+                    say("claude", who);
                     use sha2::{Digest, Sha256};
                     let ident = hex::encode(Sha256::digest(json!([data["email"], data["accountUuid"].as_str().or(data["userId"].as_str()), data["orgUuid"].as_str().or(data["organizationId"].as_str())]).to_string().as_bytes()));
-                    let changed = { let mut g = self.inner.lock().unwrap(); let c = g.default_identity != ident; if c { g.default_allowance = None } g.default_identity = ident; c }; let _ = changed;
+                    { let mut g = self.inner.lock().unwrap(); if g.default_identity != ident { g.default_allowance = None } g.default_identity = ident; }
                     match self.claude_usage(None).await {
                         Ok(u) => { let n = now_s(); let mut g = self.inner.lock().unwrap(); g.default_allowance = Some(u.allowance(n, &label(data["email"].as_str().unwrap_or("")))); g.revision += 1; }
                         Err(reason) => { let mut g = self.inner.lock().unwrap(); self.refresh_at_retry(&mut g); if g.default_allowance.as_ref().map_or(true, |a| a["state"] != "ok") { g.default_allowance = Some(json!({"provider":"claude","state":"unavailable","at":0,"attempted_at":now,"source":"claude-cli-usage","reason":reason,"windows":[]})); g.revision += 1; } }
                     }
-                } else { let mut g = self.inner.lock().unwrap(); g.default_identity.clear(); g.default_allowance = Some(json!({"provider":"claude","state":"unavailable","at":0,"attempted_at":now,"source":"claude-cli-usage","windows":[]})); g.revision += 1; }
+                }
+                r => {
+                    // signed in some other way (a Console key), signed out, or no answer: said plainly, never a guess at who
+                    say("claude", match &r {
+                        Ok((_, d)) if d["loggedIn"] == true => json!({"state":"unknown","reason":"Claude Code is signed in without a subscription (a Console or API key): it does not say whose","email":label(d["email"].as_str().unwrap_or(""))}),
+                        Ok((_, d)) if d["loggedIn"] == false => json!({"state":"signed-out"}),
+                        _ => json!({"state":"unknown","reason":"Claude Code did not say who is signed in"}),
+                    });
+                    let mut g = self.inner.lock().unwrap(); g.default_identity.clear(); g.default_allowance = Some(json!({"provider":"claude","state":"unavailable","at":0,"attempted_at":now,"source":"claude-cli-usage","windows":[]})); g.revision += 1;
+                }
             }
         }
+        if due("default-codex") {
+            self.inner.lock().unwrap().refresh_at.insert("default-codex".into(), now);
+            let Ok(prog) = (self.resolve)("codex") else { return };
+            let read = async {
+                let mut rpc = Rpc::open(&prog, &self.environment(None).unwrap_or_default(), true).await.map_err(|_| ())?;
+                let r = async { rpc.initialize().await?; rpc.request("account/read", json!({"refreshToken":false}), 12).await }.await;
+                rpc.close().await; r
+            }.await;
+            say("codex", match read {
+                Ok(a) if a["account"]["type"] == "chatgpt" => login_of(&a["account"]["email"], &a["account"]["planType"], a["workspaceRouting"]["chatgptAccountId"].as_str(), None),
+                Ok(a) if a["account"].is_null() => json!({"state":"signed-out"}),
+                Ok(_) => json!({"state":"unknown","reason":"Codex is signed in with an API key: it does not say whose"}),
+                Err(_) => json!({"state":"unknown","reason":"Codex did not say who is signed in"}),
+            });
+        }
     }
+}
+/// A CLI login whose provider said who it is: `{state: "known", email, plan, account, org}`.
+fn login_of(email: &Value, plan: &Value, account: Option<&str>, org: Option<&str>) -> Value {
+    let email = label(email.as_str().unwrap_or(""));
+    if email.is_empty() { return json!({"state":"unknown","reason":"The CLI is signed in but did not give an email"}) }
+    json!({"state":"known","email":email,"plan":label(plan.as_str().unwrap_or("")),"account":label(account.unwrap_or("")),"org":label(org.unwrap_or(""))})
+}
+/// Profile.sameAsDefault: this added account is the provider's CLI login under another name. The same email (any case), and the same account and organisation wherever
+/// both sides name one (a sync account names neither: its email decides). An account that is not signed in is no one yet.
+pub fn same_login(dflt: &Value, p: &Value) -> bool {
+    if dflt["state"] != "known" { return false }
+    let e = |v: &Value| v.as_str().unwrap_or("").trim().to_lowercase();
+    let (a, b) = (e(&dflt["email"]), e(&p["identity"]["email"]));
+    !a.is_empty() && a == b && ["account", "org"].iter().all(|k| { let (x, y) = (e(&dflt[*k]), e(&p["identity"][*k])); x.is_empty() || y.is_empty() || x == y })
 }
 
 // ---- sync accounts between the owner's machines (accounts_sync.rs carries them) ----
@@ -1522,6 +1575,19 @@ for l in sys.stdin:
         assert_eq!(sign_in_url("https://claude.com/cai/oauth/authorize?code=abc&state=s", "claude"), "", "an OAuth code is not the code-entry flag");
         for bad in ["http://claude.ai/x", "https://evil.example/x", "https://claude.ai.evil.com/x", "https://user:pw@claude.ai/x", "https://claude.ai:8443/x", "https://claude.ai/x?access_token=1", "https://claude.ai/x y", "https://auth.openai.com/x"] { assert_eq!(sign_in_url(bad, "claude"), "", "{bad}") }
         assert!(!sign_in_url("https://auth.openai.com/codex/device", "codex").is_empty()); assert_eq!(sign_in_url("https://claude.ai/x", "codex"), "");
+    }
+    /// Nov 13: the CLI's own login was helmut@backplaneworks.com, and the same account added again was not recognised.
+    #[test] fn an_added_account_is_the_cli_login_when_the_provider_names_the_same_account() {
+        let d = login_of(&json!("Helmut@BackplaneWorks.com"), &json!("max"), Some("u1"), Some("o1"));
+        assert_eq!((d["state"].as_str(), d["email"].as_str()), (Some("known"), Some("Helmut@BackplaneWorks.com")));
+        let p = |email: &str, account: &str, org: &str| json!({"identity":{"email":email,"account":account,"org":org}});
+        assert!(same_login(&d, &p("helmut@backplaneworks.com", "u1", "o1")), "the same email in any case, the same account and org");
+        assert!(same_login(&d, &json!({"identity":{"email":"helmut@backplaneworks.com"}})), "a sync account names no account: its email decides");
+        assert!(!same_login(&d, &p("helmut@backplaneworks.com", "u2", "o1")), "another account of that email");
+        assert!(!same_login(&d, &p("helmut@backplaneworks.com", "u1", "o2")), "the same person in another organisation");
+        assert!(!same_login(&d, &p("kellyhlord@gmail.com", "u1", "o1")) && !same_login(&d, &json!({"identity":{}})), "someone else, or no one yet");
+        assert!(!same_login(&json!({"state":"unknown","email":"helmut@backplaneworks.com"}), &p("helmut@backplaneworks.com", "", "")), "a login that could not say who is never matched");
+        assert_eq!(login_of(&json!(""), &json!(""), None, None)["state"], "unknown");
     }
     #[test] fn allowance_windows_are_read_as_the_js_hub_reads_them() {
         let w = Accounts::claude_windows(&json!({"rate_limits_available":true,"rate_limits":{"five_hour":{"utilization":42.5,"resets_at":"2026-11-05T12:00:00Z"},"seven_day":{"utilization":120},"seven_day_opus":{"utilization":3}}}));

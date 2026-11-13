@@ -135,6 +135,29 @@ impl Rig {
     let lines = r.lines(T); assert!(lines.iter().any(|l| l.starts_with("Reconnecting to Claude… (try 1 of 4")), "{lines:?}");
     assert!(!r.log().iter().any(|e| e["thread"] == T && e["$"] == "TurnChanged" && e["state"] == "failed"));
 }
+/// Nov 13: the CLI's own login was helmut@backplaneworks.com and the same account was added again: the menu showed two accounts, and a limit on one could "move" to the other.
+/// Here the CLI's login is w@x.com and Work is w@x.com: the hub says who the login is, marks Work as it, and a limit on the login goes to Personal, never Work.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn the_cli_login_and_the_same_account_added_again_are_one_account() {
+    let r = rig("twin", "claude").await; let (w, p) = r.two("claude").await; let reset = now() + 7200;
+    std::fs::write(r.dir.join("default.login"), json!({"email":"w@x.com","subscriptionType":"max","accountUuid":"w@x.com","orgUuid":"o1"}).to_string()).unwrap();
+    r.mgr.read_defaults(now()).await;
+    let end = Instant::now() + Duration::from_secs(PATIENCE);
+    loop { let inv: Value = serde_json::from_str(&r.hub.setting("accounts.inventory").await.unwrap_or_default()).unwrap_or(Value::Null);
+        if ac::profile(&inv.to_string(), &w.0)["sameAsDefault"] == true { assert_eq!(inv["defaultLogin"]["claude"]["email"], "w@x.com"); assert!(ac::profile(&inv.to_string(), &p.0)["sameAsDefault"].is_null(), "Personal is someone else"); break }
+        assert!(Instant::now() < end, "Work never marked as the CLI's login: {inv}"); tokio::time::sleep(Duration::from_millis(100)).await; }
+    let who = Caller { gen: "g".into(), client: 77013 }; accounts_hub::grant_client("g", 77013);
+    let snap = r.hub.rpc_for("accounts").unwrap().call(&r.hub, &who, &json!(1), "accounts", &json!({"op":"list","thread":T})).await.remove(0);
+    assert_eq!((snap["result"]["default_login"]["claude"]["state"].as_str(), snap["result"]["default_login"]["claude"]["email"].as_str()), (Some("known"), Some("w@x.com")), "{snap}");
+    assert_eq!(snap["result"]["default_login"]["codex"]["state"], "known", "Codex's CLI login is asked too: {snap}");
+    // the thread on the CLI's own login runs out: the login and Work are one account, so the request goes on on Personal
+    r.bind(T, "claude", &(String::new(), 0)).await;
+    r.mode("w@x.com", &format!("cancel:{reset}"));
+    r.say(T, "m1", "ROUTE the power plane").await; r.rest(T, "completed", 2).await;
+    let ts = r.turns(); assert_eq!(ts.iter().map(|t| t["who"].as_str().unwrap().to_string()).collect::<Vec<_>>(), ["w@x.com", "p@x.com"], "never Work after its own login ran out: {ts:#?}");
+    assert_eq!(r.binding(T, "claude").await, p.0);
+    for (id, e) in [(String::new(), 0), w.clone()] { let h: Value = serde_json::from_str(&r.hub.setting(&fb::hold_key("claude", &id, e)).await.unwrap_or_default()).unwrap_or(Value::Null); assert_eq!(h["reset"], reset, "held: {id:?}") }
+    let lines = r.lines(T); assert!(lines.iter().any(|l| l.starts_with("Switched to Personal: Default account ran out")), "{lines:?}");
+}
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn a_limit_the_cli_ends_by_cancelling_its_command_fails_over_from_the_default_login() {
     let r = rig("cancel", "claude").await; let (w, p) = r.two("claude").await; let reset = now() + 7200;
     r.bind(T, "claude", &(String::new(), 0)).await; // the thread on the CLI's own login, as the Calendar bot was

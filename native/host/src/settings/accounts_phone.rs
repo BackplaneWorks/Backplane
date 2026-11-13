@@ -46,6 +46,8 @@ pub fn limit_lines(p: &Value, zone: &str, now: u64) -> Vec<String> {
 pub fn row(p: &Value, holds: &Value, zone: &str, now: u64) -> Value {
     let id = s(p, "id"); let (line, tone) = state_line(s(p, "state"));
     let line = if s(p, "kind") == super::accounts_io::SYNC && s(p, "state") == "connected" { "connected, sync token" } else { line };
+    // the hub's own CLI login under another name: one account, said so (its usage and holds count once)
+    let line = if p["sameAsDefault"] == true && s(p, "state") == "connected" { "connected, the same account as the hub's own sign-in" } else { line };
     json!({"id":id,"provider":s(p, "provider"),"label":s(p, "label"),"email":s(&p["identity"], "email"),"state":s(p, "state"),"line":line,"tone":tone,
         "limits":limit_lines(p, zone, now).join(" · "),"hold":s(&holds[id], "text")})
 }

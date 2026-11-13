@@ -96,14 +96,34 @@ fn left_of(holds: &Value, id: &str, al: &Value, now: u64) -> (String, bool) {
         .max_by(|a, b| { let u = |w: &Value| w["used_percent"].as_f64().or_else(|| w["used_permille"].as_f64().map(|p| p / 10.0)).unwrap_or(0.0); u(a).total_cmp(&u(b)) });
     (fullest.and_then(|w| window_line(w, now)).unwrap_or_default(), false)
 }
+/// Who the provider's CLI login is, as the hub found it (`default_login`): its email, else why it cannot say.
+pub fn default_who(snap: &Value, provider: &str) -> (Option<String>, String) {
+    let d = &snap["default_login"][provider];
+    match d["state"].as_str() {
+        Some("known") => (d["email"].as_str().filter(|e| !e.is_empty()).map(str::to_string), String::new()),
+        Some("signed-out") => (None, trs("signed out")),
+        Some(_) => (None, d["reason"].as_str().map(trs).unwrap_or_else(|| trs("can't tell who is signed in"))),
+        None => (None, trs("not checked yet")),
+    }
+}
+/// The added accounts that are the provider's CLI login under another name (the hub marks them `sameAsDefault`): drawn as that login, never as a second account.
+pub fn twins(snap: &Value, provider: &str) -> Vec<Value> { profiles(snap).into_iter().filter(|p| p["provider"] == provider && p["sameAsDefault"] == true).collect() }
 /// The menu's rows: the thread's provider's logins, the CLI's own first, each of the first nine with its digit. The hub's snapshot decides all of it.
 pub fn menu_rows(snap: &Value, now: u64) -> Vec<MenuRow> {
     let (bound, _) = binding(snap);
     let provider = snap["thread"]["provider"].as_str().filter(|p| !p.is_empty()).unwrap_or("claude");
     let holds = &snap["holds"];
-    let (left, out) = left_of(holds, "", if provider == "claude" { &snap["default_allowance"] } else { &Value::Null }, now);
-    let mut rows = vec![MenuRow { key: None, label: trs("Default account"), detail: trs("CLI login"), left, out, on: bound.is_empty(), usable: true, profile: String::new(), epoch: 0 }];
-    for p in profiles(snap).iter().filter(|p| p["provider"] == provider) {
+    // the CLI's own login and any added account of the same identity are one row: its usage and holds are theirs together, and a thread on either is on it
+    let twins = twins(snap, provider);
+    let own_al = if provider == "claude" { snap["default_allowance"].clone() } else { Value::Null };
+    let al = if own_al["windows"].as_array().map_or(true, |w| w.is_empty()) { twins.first().map(|t| t["allowance"].clone()).unwrap_or(own_al) } else { own_al };
+    let (mut left, mut out) = left_of(holds, "", &al, now);
+    if !out { if let Some(t) = twins.iter().find(|t| holds[string(t, "id")]["text"].is_string()) { (left, out) = left_of(holds, &string(t, "id"), &Value::Null, now) } }
+    let (who, why) = default_who(snap, provider);
+    let (label, detail) = match who { Some(e) => (format!("{} · {e}", trs("Default account")), trs("CLI login")), None => (trs("Default account"), format!("{} · {why}", trs("CLI login"))) };
+    let on = bound.is_empty() || twins.iter().any(|t| string(t, "id") == bound);
+    let mut rows = vec![MenuRow { key: None, label, detail, left, out, on, usable: true, profile: String::new(), epoch: 0 }];
+    for p in profiles(snap).iter().filter(|p| p["provider"] == provider && p["sameAsDefault"] != true) {
         let (id, ok) = (string(p, "id"), p["state"] == "connected");
         let (left, out) = left_of(holds, &id, &p["allowance"], now);
         let detail = if ok { p["identity"]["email"].as_str().unwrap_or("").to_string() } else { trs(badge(p["state"].as_str().unwrap_or("")).0) };
@@ -320,6 +340,44 @@ fn card(cx: &mut Context<Backplane>, light: bool, st: &Accounts, p: &Value, i: u
 }
 fn state_of(snap: &Value, id: &str) -> String { profiles(snap).iter().find(|p| p["id"] == id).map(|p| string(p, "state")).unwrap_or_default() }
 
+/// What the CLI login's card says under its name: "Claude · a@b.com · max · this computer's own Claude Code sign-in", or why it cannot say who.
+pub fn default_line(snap: &Value, provider: &str) -> String {
+    /* i18n-ok: product names */ let name = if provider == "codex" { "Codex" } else { "Claude" };
+    let d = &snap["default_login"][provider];
+    match default_who(snap, provider) {
+        (Some(e), _) => { let mut parts = vec![name.to_string(), e]; if let Some(p) = d["plan"].as_str().filter(|p| !p.is_empty()) { parts.push(p.to_string()) } parts.push(trs("CLI login")); parts.join(" · ") }
+        (None, why) => format!("{name} · {} · {why}", trs("CLI login")),
+    }
+}
+/// The added accounts folded into the CLI login's card: "Also added as Work: the same account, counted once".
+pub fn twin_line(snap: &Value, provider: &str) -> Option<String> {
+    let names: Vec<String> = twins(snap, provider).iter().map(|t| string(t, "label")).collect();
+    if names.is_empty() { None } else { Some(format!("{} {}: {}", trs("Also added as"), names.join(", "), trs("the same account, counted once"))) }
+}
+fn default_card(cx: &mut Context<Backplane>, light: bool, st: &Accounts, provider: &str, narrow: bool) -> AnyElement {
+    let c = |n: &str| theme::color(light, n);
+    let def_default = !profiles(&st.snap).iter().any(|p| p["provider"] == provider && is_default(&st.snap, p));
+    let twins = twins(&st.snap, provider);
+    // a hold on the login or on an added account of the same identity: one account, out once
+    let held = std::iter::once(String::new()).chain(twins.iter().map(|t| string(t, "id"))).find_map(|id| st.snap["holds"][&id]["text"].as_str().map(str::to_string));
+    let card_row = if narrow { div().flex().flex_col().items_start() } else { div().flex().items_center() };
+    let mut words = div().flex().flex_col().gap(px(2.)).flex_1().min_w(px(160.)).max_w_full().child(div().text_size(px(14.)).font_weight(FontWeight::BOLD).child(trs("Default account")))
+        .child(div().text_size(px(12.)).text_color(c("dim")).child(default_line(&st.snap, provider)));
+    if let Some(t) = twin_line(&st.snap, provider) { words = words.child(div().text_size(px(12.)).text_color(c("dim")).child(t)); }
+    let mut row = card_row.gap_3().p_4().mb_3().border_1().border_color(c("line")).bg(c("view")).child(words)
+        .child({ let (word, tok) = match held { Some(t) => (trs(&t), "warn"), None => (if def_default { trs("Used for new threads") } else { trs("Available") }, "ok") };
+            div().flex().flex_shrink_0().items_center().gap_2().child(div().size(px(8.)).bg(c(tok))).child(div().text_size(px(12.)).text_color(c(tok)).child(word)) });
+    // the added copy can still be deleted from here (threads on it go on on the CLI login's identity once it is gone)
+    for t in &twins {
+        let pid = string(t, "id");
+        row = row.child(if st.armed == pid {
+            div().flex().gap_2().child(button(cx, light, format!("acct-twin-rm-{pid}"), &format!("{} {}", trs("Confirm delete"), string(t, "label")), false, true, { let pid = pid.clone(); move |this, _| { this.screens.acct.armed.clear(); ask(this, json!({"op": "remove", "profile": pid})) } }))
+                .child(button(cx, light, format!("acct-twin-keep-{pid}"), &trs("Keep"), false, false, |this, _| this.screens.acct.armed.clear())).into_any_element()
+        } else { button(cx, light, format!("acct-twin-del-{pid}"), &format!("{} {}", trs("Delete"), string(t, "label")), false, true, { let pid = pid.clone(); move |this, _| this.screens.acct.armed = pid.clone() }) });
+    }
+    row.into_any_element()
+}
+
 /// The page: the profiles as cards, then the add box.
 /// The width under which the label box and Add go one under the other (settings::Fit::rows).
 pub const ADD_ROW_MIN: f32 = 380.0;
@@ -330,16 +388,13 @@ pub fn page(cx: &mut Context<Backplane>, light: bool, st: &Accounts, avail: f32)
     out.push(div().pb_3().text_size(px(12.)).text_color(c("dim")).child(trs("Each account is a separate Claude subscription sign-in kept on this machine. A thread uses the account picked beside its model; when one runs out of allowance the thread carries on with the next account that has some left.")).into_any_element());
     if !st.notice.is_empty() { out.push(div().mb_3().p_3().bg(c("raise")).text_size(px(12.)).text_color(c("bad")).child(trs(&st.notice)).into_any_element()); }
     if !st.info.is_empty() { out.push(div().mb_3().p_3().bg(c("raise")).text_size(px(12.)).text_color(c("text")).child(st.info.clone()).into_any_element()); }
-    // the CLI's own login is always there
-    let def_default = !profiles(&st.snap).iter().any(|p| is_default(&st.snap, p));
-    // narrow, the state goes under the words instead of squeezing them
-    let card_row = if avail < ADD_ROW_MIN { div().flex().flex_col().items_start() } else { div().flex().items_center() };
-    out.push(card_row.gap_3().p_4().mb_3().border_1().border_color(c("line")).bg(c("view"))
-        .child(div().flex().flex_col().gap(px(2.)).flex_1().min_w(px(160.)).max_w_full().child(div().text_size(px(14.)).font_weight(FontWeight::BOLD).child(trs("Default account"))).child(div().text_size(px(12.)).text_color(c("dim")).child(trs("The Claude CLI's own sign-in on this machine, as before."))))
-        .child({ let (word, tok) = match st.snap["holds"][""]["text"].as_str() { Some(t) => (trs(t), "warn"), None => (if def_default { trs("Used for new threads") } else { trs("Available") }, "ok") };
-            div().flex().flex_shrink_0().items_center().gap_2().child(div().size(px(8.)).bg(c(tok))).child(div().text_size(px(12.)).text_color(c(tok)).child(word)) }).into_any_element());
+    // the CLI's own login is always there, for each provider whose CLI said anything (Claude always): who it is, and an added account of the same identity folded in
+    for provider in ["claude", "codex"] {
+        if provider == "codex" && st.snap["default_login"]["codex"].is_null() { continue }
+        out.push(default_card(cx, light, st, provider, avail < ADD_ROW_MIN));
+    }
     let ps = profiles(&st.snap);
-    for (i, p) in ps.iter().enumerate() { out.push(card(cx, light, st, p, i, avail < ADD_ROW_MIN)); }
+    for (i, p) in ps.iter().enumerate().filter(|(_, p)| p["sameAsDefault"] != true) { out.push(card(cx, light, st, p, i, avail < ADD_ROW_MIN)); }
     if let Some(input) = &st.label {
         let row = if avail < ADD_ROW_MIN { div().flex().flex_col().items_start().gap_2().mt_2().child(div().w_full().h(px(32.)).px_3().flex().items_center().bg(c("raise")).child(input.clone())) }
             else { div().flex().items_center().gap_2().mt_2().child(div().flex_1().min_w_0().h(px(32.)).px_3().flex().items_center().bg(c("raise")).child(input.clone())) };
@@ -485,6 +540,22 @@ mod tests {
         s["holds"] = json!({"w":{"until":5000,"text":"limited until 15:40"}}); let r = menu_rows(&s, 100); assert_eq!((r[1].left.as_str(), r[1].out), ("limited until 15:40", true), "the hub's word for one that ran out");
         assert_eq!(state_word(&s, "w", "connected"), ("limited until 15:40".to_string(), "warn"), "Settings marks a held account limited until its reset");
         assert_eq!(state_word(&s, "w", "expired").1, "bad", "a dead sign-in says so, not the hold"); assert_eq!(state_word(&s, "p", "connected").1, "ok");
+    }
+    /// Nov 13: the CLI's own login and an added account were the same helmut@backplaneworks.com, and the menu listed them as 1 and 4.
+    #[test] fn the_cli_login_says_who_it_is_and_an_account_added_again_is_one_row() {
+        let mut s = snap(); s["holds"] = json!({});
+        s["default_login"] = json!({"claude":{"state":"known","email":"a@b.com","plan":"max"},"codex":{"state":"unknown","reason":"Codex is signed in with an API key: it does not say whose"}});
+        s["profiles"][0]["sameAsDefault"] = json!(true); // Work is the CLI's own login, added again; the thread is on it
+        let r = menu_rows(&s, 100);
+        assert_eq!(r.iter().map(|x| (x.label.as_str(), x.detail.as_str(), x.on)).collect::<Vec<_>>(), vec![("Default account · a@b.com", "CLI login", true), ("Old", "Not connected", false)], "one row, ticked for a thread on either name");
+        assert_eq!(r[0].left, "5-hour  38% left", "its usage is the copy's when the login has no reading of its own");
+        s["holds"] = json!({"w":{"until":5000,"text":"limited until 15:40"}}); let r = menu_rows(&s, 100); assert_eq!((r[0].left.as_str(), r[0].out), ("limited until 15:40", true), "out through its copy");
+        assert_eq!(default_line(&s, "claude"), "Claude · a@b.com · max · CLI login"); assert_eq!(twin_line(&s, "claude").as_deref(), Some("Also added as Work: the same account, counted once"));
+        // a CLI that cannot say who: said plainly, and nothing is folded into it
+        assert_eq!(default_line(&s, "codex"), "Codex · CLI login · Codex is signed in with an API key: it does not say whose"); assert_eq!(twin_line(&s, "codex"), None);
+        s["thread"]["provider"] = json!("codex"); assert_eq!((menu_rows(&s, 100)[0].label.as_str(), menu_rows(&s, 100)[0].detail.as_str()), ("Default account", "CLI login · Codex is signed in with an API key: it does not say whose"));
+        s["default_login"]["codex"] = json!({"state":"signed-out"}); assert_eq!(default_line(&s, "codex"), "Codex · CLI login · signed out");
+        assert_eq!(default_line(&snap(), "claude"), "Claude · CLI login · not checked yet");
     }
     #[test] fn only_the_first_nine_logins_have_a_digit_and_other_providers_are_left_out() {
         let ps: Vec<Value> = (0..11).map(|i| json!({"id":format!("p{i}"),"provider":"claude","label":format!("A{i}"),"epoch":1,"state":"connected","identity":{}})).chain([json!({"id":"c","provider":"codex","label":"C","epoch":1,"state":"connected"})]).collect();

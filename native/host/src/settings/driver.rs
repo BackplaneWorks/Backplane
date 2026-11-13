@@ -109,8 +109,12 @@ pub fn on_limit(w: &World, lim: &fb::Limit, terminal: bool, original: &str) -> V
         let (id, epoch) = w.binding();
         let mut lim = lim.clone();
         if lim.reset == 0 && !lim.auth { lim.reset = fb::window_reset(&accounts::profile(&w.get("accounts.inventory"), &id), &w.model, at) } // the limit's own words had none: the window that filled has
-        ev.push(fb::hold_mark(&w.provider, &id, epoch, &lim, at, at));
-        let mut tried = w.tried(); let me = fb::tried_id(&id, epoch); if !tried.contains(&me) { tried.push(me) }
+        // the login and every other login of its identity (the CLI's own login added again under another name): one account, out once
+        let mut tried = w.tried();
+        for (i, e) in std::iter::once((id.clone(), epoch)).chain(fb::same_logins(&w.inventory(), &w.provider, &id, epoch)) {
+            ev.push(fb::hold_mark(&w.provider, &i, e, &lim, at, at));
+            let me = fb::tried_id(&i, e); if !tried.contains(&me) { tried.push(me) }
+        }
         ev.push(set(&format!("account.failover.pending.{th}"), "", at)); ev.push(set(&tried_key(th), &json!(tried).to_string(), at));
     } else if w.chain_on() {
         // Fallback.limited: the outage is the provider's (or the model's) until its reset
@@ -161,9 +165,10 @@ fn wait_all(w: &World, profiles: &[Value], from: &str, cur_id: &str, cur_epoch: 
     let signin = !cur_id.is_empty() && hold_of(w, cur_id, cur_epoch).1;
     let until = fb::next_reset(profiles, &get, at, &w.provider, &w.model, cur_id, cur_epoch);
     let until = if until > at { until } else { 0 };
-    let mut names: Vec<String> = profiles.iter().filter(|p| p["provider"] == w.provider.as_str() && p["state"] == "connected").filter_map(|p| p["label"].as_str().map(str::to_string)).collect();
-    // the CLI's own login counts when the thread is on it or this request already ran out on it
-    if cur_id.is_empty() || w.tried().contains(&fb::tried_id("", 0)) { names.insert(0, "Default account".into()) }
+    // the CLI's own login counts when the thread is on it or this request already ran out on it; an added account that is the same login is named once, as it
+    let dflt = cur_id.is_empty() || w.tried().contains(&fb::tried_id("", 0));
+    let mut names: Vec<String> = profiles.iter().filter(|p| p["provider"] == w.provider.as_str() && p["state"] == "connected" && !(dflt && p["sameAsDefault"] == true)).filter_map(|p| p["label"].as_str().map(str::to_string)).collect();
+    if dflt { names.insert(0, "Default account".into()) }
     let list = if names.is_empty() { String::new() } else { format!(" ({})", names.join(", ")) };
     let say = if signin && until == 0 { format!("{}'s sign-in expired and no other {} account can take over. Continuing once you sign in again.", w.name(cur_id), w.provider) }
         else if until > 0 { format!("Every {} account is out{list}. Continuing at {}, when the first one resets.", w.provider, rules::when(&w.zone(), until, at)) } else { format!("Every {} account is out{list} and no reset time is known. Waiting for you.", w.provider) };
@@ -190,7 +195,7 @@ pub fn next(w: &World) -> Next {
             return Next::Account { id, epoch, say };
         }
         // the thread's own login, when this request did not run out on it: the wait below is over before it began
-        if !tried.contains(&fb::tried_id(&cur_id, cur_epoch)) && !fb::hold_current(&get, &w.provider, &cur_id, cur_epoch, &w.model, at) { return Next::Stay }
+        if !tried.contains(&fb::tried_id(&cur_id, cur_epoch)) && !fb::login_held(&get, &profiles, &w.provider, &cur_id, cur_epoch, &w.model, at) { return Next::Stay }
         if !w.chain_on() { return wait_all(w, &profiles, &from.key(), &cur_id, cur_epoch) }
     } else if !(w.chain_on() && fb::target_held(&get, &from, at)) {
         return Next::Stay;
@@ -220,7 +225,9 @@ fn wait_everything(w: &World, profiles: &[Value], from: &str, cur_id: &str, cur_
     let names_of = |p: &str| -> Vec<String> { profiles.iter().filter(|x| x["provider"] == p && x["state"] == "connected").filter_map(|x| x["label"].as_str().map(str::to_string)).collect() };
     let mut until = if w.managed() { fb::next_reset(profiles, &get, at, &w.provider, &w.model, cur_id, cur_epoch) } else { provider_hold(w, &fb::Target { provider: w.provider.clone(), model: w.model.clone() }) };
     let mut parts = vec![]; let mut seen: Vec<String> = vec![];
-    let mut own = names_of(&w.provider); if w.managed() && (cur_id.is_empty() || w.tried().contains(&fb::tried_id("", 0))) { own.insert(0, "Default account".into()) }
+    let dflt = w.managed() && (cur_id.is_empty() || w.tried().contains(&fb::tried_id("", 0)));
+    let mut own: Vec<String> = profiles.iter().filter(|x| x["provider"] == w.provider.as_str() && x["state"] == "connected" && !(dflt && x["sameAsDefault"] == true)).filter_map(|x| x["label"].as_str().map(str::to_string)).collect();
+    if dflt { own.insert(0, "Default account".into()) }
     parts.push(if own.is_empty() { fb::provider_name(&w.provider) } else { format!("{}: {}", fb::provider_name(&w.provider), own.join(", ")) }); seen.push(w.provider.clone());
     for t in &others {
         let r = if profiles.iter().any(|p| p["provider"] == t.provider.as_str()) { fb::next_reset(profiles, &get, at, &t.provider, &t.model, "", 0) } else { provider_hold(w, t) };
@@ -248,7 +255,7 @@ pub fn preflight_pick(w: &World) -> Option<(String, u64, String)> {
     let (at, get) = (w.now, |k: &str| w.get(k));
     let (cur_id, cur_epoch) = w.binding();
     let cur = if cur_id.is_empty() { fb::default_profile(&w.provider, &w.get(&format!("allowance.{}", w.provider))) } else { accounts::profile(&w.get("accounts.inventory"), &cur_id) };
-    let held = fb::hold_current(&get, &w.provider, &cur_id, cur_epoch, &w.model, at);
+    let held = fb::login_held(&get, &w.inventory(), &w.provider, &cur_id, cur_epoch, &w.model, at);
     let full = fb::exhausted(&cur, at, &w.model);
     if !held && full.is_none() && fb::usage_score(&cur, at, &w.model) != Some(0) { return None }
     let p = fb::pick_account(&w.inventory(), &get, at, &w.provider, &w.model)?;
@@ -799,6 +806,44 @@ mod tests {
         // only when every Claude account is out does the provider change
         let w2 = w1.with(&[set(&fb::hold_key("claude", "4e76a62f", 2), &json!({"scope":"claude","reset":at + 1183,"at":at}).to_string(), 1), set(&tried_key("t1"), &json!([fb::tried_id("abbffbf3", 2), fb::tried_id("4e76a62f", 2)]).to_string(), 1)]);
         match next(&w2) { Next::Chain { to, account, .. } => assert_eq!((to.provider.as_str(), account), ("codex", Some(("cx".to_string(), 1)))), n => panic!("{n:?}") }
+    }
+    /// The accounts as they were on Nov 13 (account_list): the CLI's own login is helmut@backplaneworks.com, added again as 643ca352 (the hub marks it `sameAsDefault`);
+    /// kellyhlord and helmut.lord out.
+    fn nov13(at: u64) -> (&'static str, String) { inv(json!([
+        {"id":"abbffbf3","provider":"claude","state":"connected","epoch":2,"label":"kellyhlord@gmail.com","allowance":{"state":"ok","at":at - 10,"provider":"claude","windows":[{"scope":"seven_day","used_percent":100.0,"resets_at":at + 430000}]}},
+        {"id":"4e76a62f","provider":"claude","state":"connected","epoch":2,"label":"helmut.lord@amemb.com","allowance":{"state":"ok","at":at - 10,"provider":"claude","windows":[{"scope":"five_hour","used_percent":100.0,"resets_at":at + 3000}]}},
+        {"id":"643ca352","provider":"claude","state":"connected","epoch":2,"label":"helmut@backplaneworks.com","sameAsDefault":true,"allowance":{"state":"ok","at":at - 10,"provider":"claude","windows":[{"scope":"seven_day","used_percent":0.0,"resets_at":at + 480000}]}},
+        {"id":"cx","provider":"codex","state":"connected","epoch":1,"label":"Codex","allowance":{"state":"ok","at":at - 10,"provider":"codex","windows":[{"scope":"five_hour","used_percent":1.0}]}}])) }
+    #[test] fn nov13_the_default_login_and_the_account_added_again_are_one_account_to_failover() {
+        let at = now_ms() / 1000;
+        // on the CLI's own login, out: never "moved" to the same account under its other name; every other Claude account is out, so Codex
+        let mut w = ordered("claude", "claude-opus-5-5", &[nov13(at), ("account.thread.t1.claude", accounts::binding_show("", 0))]); w.now = at; w.caps = json!({"claude":["opus"],"codex":["gpt-6"]});
+        let v = on_limit(&w, &lim("claude", at + 480000), true, "go");
+        let held: Vec<String> = v.events.iter().filter(|e| e["key"].as_str().map_or(false, |k| k.starts_with("account.limit."))).map(|e| e["key"].as_str().unwrap().to_string()).collect();
+        assert_eq!(held, vec![fb::hold_key("claude", "", 0), fb::hold_key("claude", "643ca352", 2)], "out once, for both names");
+        let w1 = w.with(&v.events);
+        let tried: Vec<String> = serde_json::from_str(&w1.get(&tried_key("t1"))).unwrap(); assert_eq!(tried, vec![fb::tried_id("", 0), fb::tried_id("643ca352", 2)]);
+        match next(&w1) { Next::Chain { to, account, say } => { assert_eq!((to.provider.as_str(), account), ("codex", Some(("cx".to_string(), 1)))); assert!(!say.contains("helmut@backplaneworks.com"), "{say}") } n => panic!("not the same account again: {n:?}") }
+        // the same from the other side: a thread on the added copy runs out, and the CLI's own login is out with it
+        let mut w = ordered("claude", "claude-opus-5-5", &[nov13(at), ("account.thread.t1.claude", accounts::binding_show("643ca352", 2))]); w.now = at; w.caps = json!({"claude":["opus"],"codex":["gpt-6"]});
+        let w1 = w.with(&on_limit(&w, &lim("claude", at + 480000), true, "go").events);
+        assert!(fb::hold_current(&|k: &str| w1.get(k), "claude", "", 0, "", at), "the CLI's own login is held too");
+        match next(&w1) { Next::Chain { to, .. } => assert_eq!(to.provider, "codex"), n => panic!("{n:?}") }
+        // with no chain the wait names it once, as the Default account
+        let mut solo = ordered("claude", "claude-opus-5-5", &[nov13(at), ("account.thread.t1.claude", accounts::binding_show("", 0)), ("fallback.chain", "claude".into())]); solo.now = at;
+        let s1 = solo.with(&on_limit(&solo, &lim("claude", at + 480000), true, "go").events);
+        match next(&s1) { Next::Wait { events, .. } => { let say = events.iter().find(|e| e["$"] == "ActivityLogged").unwrap()["summary"].as_str().unwrap().to_string();
+            assert!(say.contains("(Default account, kellyhlord@gmail.com, helmut.lord@amemb.com)"), "{say}") } n => panic!("{n:?}") }
+        // a turn start on the CLI's own login while it is held: the copy of it is no way out
+        let mut pre = ordered("claude", "claude-opus-5-5", &[nov13(at), ("account.thread.t1.claude", accounts::binding_show("", 0))]); pre.now = at;
+        let pre = pre.with(&[hold("claude", "", 0, at + 480000)]);
+        assert_eq!(preflight_pick(&pre), None, "nothing of Claude can run: the turn finds out and fails over");
+        // a hold on the copy alone holds the CLI's own login at a turn start too
+        let mut pre2 = ordered("claude", "claude-opus-5-5", &[nov13(at), ("account.thread.t1.claude", accounts::binding_show("", 0))]); pre2.now = at;
+        let pre2 = pre2.with(&[hold("claude", "643ca352", 2, at + 480000), set(&fb::hold_key("claude", "4e76a62f", 2), "", 1)]);
+        let mut fresh = pre2.clone_at(at); let mut inv: Value = serde_json::from_str(&fresh.get("accounts.inventory")).unwrap(); inv["profiles"][1]["allowance"]["windows"][0]["used_percent"] = json!(10.0);
+        fresh.settings.insert("accounts.inventory".into(), inv.to_string());
+        assert_eq!(preflight_pick(&fresh).map(|x| x.0), Some("4e76a62f".to_string()), "held through its copy: the next account that can run");
     }
     #[test] fn a_request_never_hops_back_to_a_provider_it_left() {
         let at = now_ms() / 1000;

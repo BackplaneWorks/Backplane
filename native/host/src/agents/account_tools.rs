@@ -12,20 +12,26 @@ fn fail(m: &str) -> (bool, Value) { (false, json!({"error":m})) }
 pub struct Chosen { pub provider: String, pub id: String, pub epoch: u64, pub label: String }
 
 /// What `account_list` says of one login. `get` reads a setting. No credential or store path: label, email, plan, state and the provider's own windows.
-pub fn account_json(p: &Value, get: &dyn Fn(&str) -> String, now: u64, model: &str, current: Option<(&str, u64)>, default: bool) -> Value {
+/// `all`: every profile (a login's holds count for the others of its identity, `fb::same_logins`).
+pub fn account_json(p: &Value, all: &[Value], get: &dyn Fn(&str) -> String, now: u64, model: &str, current: Option<(&str, u64)>, default: bool) -> Value {
     let (id, provider, epoch) = (p["id"].as_str().unwrap_or(""), p["provider"].as_str().unwrap_or(""), p["epoch"].as_u64().unwrap_or(0));
-    let held = fb::hold_current(get, provider, id, epoch, model, now);
+    let held = fb::login_held(get, all, provider, id, epoch, model, now);
+    let until = |i: &str, e: u64| if fb::hold_current(get, provider, i, e, model, now) { fb::hold_until(get, provider, i, e, model) } else { 0 };
+    let held_until = std::iter::once((id.to_string(), epoch)).chain(fb::same_logins(all, provider, id, epoch)).map(|(i, e)| until(&i, e)).max().unwrap_or(0);
     let windows: Vec<Value> = p["allowance"]["windows"].as_array().into_iter().flatten().map(|w| json!({"scope":w["scope"],"usedPercent":w["used_percent"],"resetsAt":w["resets_at"]})).collect();
     json!({"id":id,"label":p["label"].as_str().unwrap_or(if id.is_empty() { "Default account" } else { "" }),"provider":provider,"email":p["identity"]["email"],"plan":p["identity"]["plan"],"state":p["state"],
-        "remainingPercent":fb::usage_score(p, now, model).map(|x| x as f64 / 1000.0),"held":held,"heldUntil":if held { fb::hold_until(get, provider, id, epoch, model) } else { 0 },"windows":windows,
-        "current":current == Some((id, epoch)),"default":default})
+        "remainingPercent":fb::usage_score(p, now, model).map(|x| x as f64 / 1000.0),"held":held,"heldUntil":if held { held_until } else { 0 },"windows":windows,
+        "current":current == Some((id, epoch)),"default":default,"sameAsDefault":p["sameAsDefault"] == true})
 }
 
 impl Agents {
     /// The accounts as they are now (the manager's snapshot; the log's copy on a hub without one).
-    async fn accounts_now(&self) -> Vec<Value> {
-        if let Some(m) = self.accounts.get() { return m.snapshot()["profiles"].as_array().cloned().unwrap_or_default() }
-        serde_json::from_str::<Value>(&self.hub.setting("accounts.inventory").await.unwrap_or_default()).ok().and_then(|v| v["profiles"].as_array().cloned()).unwrap_or_default()
+    async fn accounts_now(&self) -> Vec<Value> { self.accounts_snapshot().await.0 }
+    /// The profiles and who each provider's CLI login is (`default_login`).
+    async fn accounts_snapshot(&self) -> (Vec<Value>, Value) {
+        if let Some(m) = self.accounts.get() { let s = m.snapshot(); return (s["profiles"].as_array().cloned().unwrap_or_default(), s["default_login"].clone()) }
+        let v = serde_json::from_str::<Value>(&self.hub.setting("accounts.inventory").await.unwrap_or_default()).unwrap_or(Value::Null);
+        (v["profiles"].as_array().cloned().unwrap_or_default(), v["defaultLogin"].clone())
     }
     /// Who is choosing: a bot by its name, else the agent of a thread, named by the thread.
     pub(crate) async fn chooser(&self, thread: &str) -> (String, String) {
@@ -98,17 +104,22 @@ impl Agents {
         let get = |k: &str| settings.get(k).cloned().unwrap_or_default();
         let is_default = |p: &str, id: &str, e: u64| serde_json::from_str::<Value>(&get(&format!("account.default.{p}"))).map_or(id.is_empty(), |d| d["id"].as_str().unwrap_or("") == id && d["epoch"].as_u64().unwrap_or(0) == e);
         let want = s(a, "provider"); let now = now_s();
-        let mut out = vec![];
+        let mut out = vec![]; let (all, logins) = self.accounts_snapshot().await;
         for prov in ["claude", "codex"] { // the CLI's own login first, as the menus list it; its windows are kept for Claude only
             if !want.is_empty() && want != prov { continue }
             let al: Value = if prov == "claude" { serde_json::from_str(&self.hub.setting("allowance.claude").await.unwrap_or_default()).unwrap_or(Value::Null) } else { Value::Null };
-            let own = json!({"id":"","epoch":0,"provider":prov,"label":"Default account","state":"connected","allowance":al});
-            out.push(account_json(&own, &get, now, &model, (prov == tprov).then_some(("", 0)).filter(|_| current.0.is_empty()), is_default(prov, "", 0)));
+            // the CLI's own login says who it is when its CLI could; with no reading of its own, an added account of the same identity has the same windows
+            let al = if al.is_null() { all.iter().find(|p| p["provider"] == prov && p["sameAsDefault"] == true).map(|p| p["allowance"].clone()).unwrap_or(Value::Null) } else { al };
+            let who = &logins[prov];
+            let own = json!({"id":"","epoch":0,"provider":prov,"label":"Default account","state":"connected","allowance":al,"identity":{"email":who["email"],"plan":who["plan"]}});
+            let mut row = account_json(&own, &all, &get, now, &model, (prov == tprov).then_some(("", 0)).filter(|_| current.0.is_empty()), is_default(prov, "", 0));
+            if who["state"] != "known" { row["whoUnknown"] = json!(who["reason"].as_str().unwrap_or(if who["state"] == "signed-out" { "the CLI is signed out" } else { "not checked yet" })) }
+            out.push(row);
         }
-        for p in self.accounts_now().await {
+        for p in all.iter() {
             let prov = p["provider"].as_str().unwrap_or(""); if !want.is_empty() && want != prov { continue }
             let on = (prov == tprov).then_some((current.0.as_str(), current.1));
-            out.push(account_json(&p, &get, now, &model, on, is_default(prov, p["id"].as_str().unwrap_or(""), p["epoch"].as_u64().unwrap_or(0))));
+            out.push(account_json(p, &all, &get, now, &model, on, is_default(prov, p["id"].as_str().unwrap_or(""), p["epoch"].as_u64().unwrap_or(0))));
         }
         (true, json!({"accounts":out,"threadId":target,"pinnedByPerson":chosen["by"] == "person"}))
     }

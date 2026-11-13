@@ -277,6 +277,20 @@ fn usage_score_live(profile: &Value, now: u64, model: &str) -> Option<u32> {
     }
     used.map(|u| 100_000u32.saturating_sub(u))
 }
+/// The other logins of the same identity as this one (`id` "" is the CLI's own login): an added account the inventory marks `sameAsDefault` (accounts_io `same_login`) is the
+/// CLI's own login under another name, so the two are one account to failover: out on one is out on the other, and a request that ran out on one never moves to the other.
+/// Nov 13: the default login and an added account were both helmut@backplaneworks.com, and the menu showed them as two accounts.
+pub fn same_logins(profiles: &[Value], provider: &str, id: &str, epoch: u64) -> Vec<(String, u64)> {
+    let twin = |p: &&Value| p["provider"] == provider && p["sameAsDefault"] == true;
+    let twins = || profiles.iter().filter(twin).map(|p| (p["id"].as_str().unwrap_or("").to_string(), p["epoch"].as_u64().unwrap_or(0)));
+    if id.is_empty() { return twins().collect() }
+    if !profiles.iter().any(|p| p["id"] == id && p["epoch"].as_u64().unwrap_or(0) == epoch && twin(&p)) { return vec![] }
+    std::iter::once((String::new(), 0)).chain(twins().filter(|(i, e)| !(i == id && *e == epoch))).collect()
+}
+/// Hold.current for a login and every other login of its identity (`same_logins`).
+pub fn login_held(get: &dyn Fn(&str) -> String, profiles: &[Value], provider: &str, id: &str, epoch: u64, model: &str, now: u64) -> bool {
+    hold_current(get, provider, id, epoch, model, now) || same_logins(profiles, provider, id, epoch).iter().any(|(i, e)| hold_current(get, provider, i, *e, model, now))
+}
 /// Profile.eligible: connected, the provider's, offers the model, has allowance left, and is not held.
 pub fn eligible(get: &dyn Fn(&str) -> String, now: u64, provider: &str, model: &str, profile: &Value) -> bool {
     let id = profile["id"].as_str().unwrap_or("");
@@ -284,16 +298,19 @@ pub fn eligible(get: &dyn Fn(&str) -> String, now: u64, provider: &str, model: &
 }
 /// Pick.account: the eligible profile with the most remaining allowance. A reading that is unknown ranks as zero, so it comes after every known one; a tie goes to the
 /// earliest saved profile.
-pub fn pick_account(profiles: &[Value], get: &dyn Fn(&str) -> String, now: u64, provider: &str, model: &str) -> Option<Value> {
-    let xs: Vec<&Value> = profiles.iter().filter(|p| eligible(get, now, provider, model, p)).collect();
+pub fn pick_account(profiles: &[Value], get: &dyn Fn(&str) -> String, now: u64, provider: &str, model: &str) -> Option<Value> { pick_where(profiles, get, now, provider, model, &|_| true) }
+/// Pick.account among the profiles `ok` lets through; every profile still counts for the holds of the ones of the same identity (`login_held`).
+fn pick_where(profiles: &[Value], get: &dyn Fn(&str) -> String, now: u64, provider: &str, model: &str, ok: &dyn Fn(&Value) -> bool) -> Option<Value> {
+    let xs: Vec<&Value> = profiles.iter().filter(|p| ok(p) && eligible(get, now, provider, model, p) && !login_held(get, profiles, provider, p["id"].as_str().unwrap_or(""), p["epoch"].as_u64().unwrap_or(0), model, now)).collect();
     let mut best = *xs.first()?; let mut score = usage_score(best, now, model).unwrap_or(0);
     for p in xs.iter().skip(1) { let v = usage_score(p, now, model).unwrap_or(0); if v > score { best = p; score = v } }
     Some(best.clone())
 }
-/// Pick.account without the accounts this request already ran out on: a request never goes back to one, whatever its hold says now.
+/// Pick.account without the accounts this request already ran out on: a request never goes back to one, whatever its hold says now. A profile of the same identity as one it
+/// ran out on (`same_logins`: the CLI's own login under another name) counts as one it ran out on.
 pub fn pick_untried(profiles: &[Value], tried: &[String], get: &dyn Fn(&str) -> String, now: u64, provider: &str, model: &str) -> Option<Value> {
-    let xs: Vec<Value> = profiles.iter().filter(|p| !tried.contains(&accounts_id(p))).cloned().collect();
-    pick_account(&xs, get, now, provider, model)
+    let out = |p: &Value| tried.contains(&accounts_id(p)) || same_logins(profiles, provider, p["id"].as_str().unwrap_or(""), p["epoch"].as_u64().unwrap_or(0)).iter().any(|(i, e)| tried.contains(&tried_id(i, *e)));
+    pick_where(profiles, get, now, provider, model, &|p| !out(p))
 }
 fn accounts_id(p: &Value) -> String { format!("{}:{}", p["id"].as_str().unwrap_or(""), p["epoch"].as_u64().unwrap_or(0)) }
 /// One entry of the list of logins a request has run out on.
@@ -475,6 +492,13 @@ mod outage_tests {
         let xs = vec![json!({"id":"a","epoch":1,"provider":"claude","state":"connected"}), json!({"id":"b","epoch":1,"provider":"claude","state":"connected"})];
         assert_eq!(pick_untried(&xs, &[tried_id("a", 1)], &none, 5, "claude", "m").unwrap()["id"], "b");
         assert_eq!(pick_untried(&xs, &[tried_id("a", 1), tried_id("b", 1)], &none, 5, "claude", "m"), None);
+        // b is the CLI's own login added again: a request that ran out on the CLI's login does not take it, and a hold on the login holds it
+        let mut ys = xs.clone(); ys[1]["sameAsDefault"] = json!(true);
+        assert_eq!(same_logins(&ys, "claude", "", 0), vec![("b".to_string(), 1)]); assert_eq!(same_logins(&ys, "claude", "b", 1), vec![(String::new(), 0)]); assert!(same_logins(&ys, "claude", "a", 1).is_empty());
+        assert_eq!(pick_untried(&ys, &[tried_id("", 0)], &none, 5, "claude", "m").unwrap()["id"], "a", "not b: the same account");
+        let held = |k: &str| if k == hold_key("claude", "", 0) { json!({"scope":"claude","reset":99,"at":1}).to_string() } else { String::new() };
+        assert!(login_held(&held, &ys, "claude", "b", 1, "m", 5) && !login_held(&held, &ys, "claude", "a", 1, "m", 5));
+        assert_eq!(pick_account(&ys, &held, 5, "claude", "m").unwrap()["id"], "a");
     }
     #[test] fn the_preference_is_the_first_login_of_a_run_and_ready_when_its_reset_has_come() {
         let (a, b, c) = (r#"{"id":"a","epoch":1}"#, r#"{"id":"b","epoch":1}"#, r#"{"id":"c","epoch":1}"#);
