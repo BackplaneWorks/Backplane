@@ -104,6 +104,9 @@ print("%dx%d+%d+%d" % (c.get("w",0), c.get("h",0), c.get("root_x",0), c.get("roo
 else bad "the agent's turn wrote nothing in 120 s"; cut_ 1 agent "an agent's turn on the open board did nothing: $(tail -3 "$HUBH/hub.log" 2>/dev/null | tr '\n' ' ' | cut -c1-300)"; fi
 markt end 400; WP=$(cat "$HH/.client.pid" 2>/dev/null); [ -n "$WP" ] && in_box kill "$WP" 2>/dev/null
 
+# --- 5b. the management panels, cross-probe, comment window, Gerbers, plan tools (journey_more.sh) ---
+. "$HERE/journey_more.sh"
+
 # --- 6. DRC with the runtime's kicad-cli on the saved board ---
 t=$(date +%s.%N)
 as_person "$KB/bin/kicad-cli" pcb drc --format json --severity-all -o $PH/drc.json "$PCB" >"$OUT/logs/drc.log" 2>&1
