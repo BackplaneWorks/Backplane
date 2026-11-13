@@ -586,8 +586,20 @@ elif "editors" in JOURNEYS and SOCK:
         print(f"PERF gerbview_prewarm {ms}ms " + json.dumps(RESULTS["gerbview_prewarm"]), flush=True)
         shot("gerbview_prewarm")
         evg = ipc("events", SOCK, "0").get("next", 0)
-        t0 = now(); g2 = ipc("open-gerbers", SOCK, ",".join(files), "0", "0", str(PANE["w"]), str(PANE["h"]), timeout=120); call_ms = round(now() - t0)
-        print(f"INFO editors: OpenGerbers shown answered in {call_ms} ms, frame shown={(g2.get('frame') or {}).get('shown')}", flush=True); shot("gerbview_call_returned")
+        # shown the way a person gets it: through the hub (editor.kicad.show GERBVIEW with the board's job file, as the client's
+        # open_gerbers() and the Checks panel's "Open in GerbView" do), so the hub and the client know GerbView is the active editor
+        job = next((f for f in glob.glob(os.path.join(mfg, "*.gbrjob"))), "")
+        if job:
+            t0 = now(); out = rpc([{"method": "editor.kicad.show", "params": {"project": KPRO, "frame": "GERBVIEW", "document": job}}])
+            r = jl(out) or {}; sent = r.get("sent_at"); got = r.get("replied_at")
+            if sent: t0 = sent
+            call_ms = round((got or now()) - t0); g2 = {"loaded": files}
+            print(f"INFO editors: editor.kicad.show GERBVIEW ({os.path.basename(job)}) answered in {call_ms} ms: {out.strip()[-160:]}", flush=True)
+        else:  # no job file: KiCad's own OpenGerbers, which the hub does not see (the client will hide it)
+            t0 = now(); g2 = ipc("open-gerbers", SOCK, ",".join(files), "0", "0", str(PANE["w"]), str(PANE["h"]), timeout=120); call_ms = round(now() - t0)
+            print(f"INFO editors: no .gbrjob; OpenGerbers shown over the API (the hub is not told) in {call_ms} ms", flush=True)
+        RESULTS["gerbview_via_hub"] = {"ms": None, "ok": int(bool(job))}
+        shot("gerbview_call_returned")
         # who has the pane for the next 5 s: each frame's shown flag every 100 ms, its changes, and KiCad's events
         trace, last = [], None
         while now() - t0 < call_ms + 5000:
