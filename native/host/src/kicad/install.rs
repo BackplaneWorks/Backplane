@@ -356,7 +356,7 @@ pub async fn fetch(t: &Tools, base: &str, parent: &Path, p: &Package, log: &Path
         if let Err(why) = ok {
             let got = have(&pkg);
             let at = if got == 0 { String::new() } else { format!(" at {}", Bytes { done: got, total, rate: 0, eta: 0 }.words().replace(" so far", "")) };
-            return Err(format!("The download stopped{at} ({}). It continues from there", if why.is_empty() { "no answer".to_string() } else { why }))
+            return Err(format!("The download stopped{at} ({})", if why.is_empty() { "no answer".to_string() } else { why }))
         }
     }
     let got = have(&pkg); bytes(Bytes { done: got, total: total.max(got), rate: 0, eta: 0 });
@@ -529,21 +529,24 @@ pub async fn install(hub: &Arc<Hub>, consent: bool) -> Result<String, String> {
         let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<Result<String, Bytes>>();
         let h2 = h.clone();
         let relay = tokio::spawn(async move {
-            let (mut note, mut last) = (String::new(), std::time::Instant::now() - std::time::Duration::from_secs(1));
+            let (mut note, mut last, mut seen) = (String::new(), std::time::Instant::now() - std::time::Duration::from_secs(1), Bytes::default());
             while let Some(m) = rx.recv().await { match m {
                 Ok(l) => { let dl = l.starts_with("Downloading"); note = l.clone(); if !dl { say(&h2, "running", p.version, &l).await } else { say_bytes(&h2, "running", p.version, &l, Some(Bytes::default())).await } }
-                Err(b) => if last.elapsed().as_millis() >= 500 || (b.total > 0 && b.done >= b.total) { last = std::time::Instant::now(); say_bytes(&h2, "running", p.version, &note, Some(b)).await },
+                Err(b) => { seen = b; if last.elapsed().as_millis() >= 500 || (b.total > 0 && b.done >= b.total) { last = std::time::Instant::now(); say_bytes(&h2, "running", p.version, &note, Some(b)).await } }
             } }
+            seen
         });
         let tx2 = tx.clone();
         let r = run(standin.as_deref(), &parent, p, &parent.join(".install.log"), |l| { let _ = tx.send(Ok(l)); }, |b| { let _ = tx2.send(Err(b)); }).await;
         drop(tx2);
-        drop(tx); let _ = relay.await;
+        drop(tx); let seen = relay.await.unwrap_or_default();
         RUNNING.store(false, Ordering::SeqCst);
         // Settings > CAD names the new KiCad (and its Install row goes) before the install says it is done: whoever reads "done" reads the new status with it
         super::ipc::publish_cad(&h).await;
         match &r {
             Ok(dir) => { eprintln!("kicad: installed Backplane KiCad {} in {dir}", p.version); say(&h, "done", p.version, &format!("Installed Backplane KiCad {} in {dir}", p.version)).await }
+            // a stopped download is not a failure for good: its own words, and its bytes (the bar stays where it got to)
+            Err(why) if why.starts_with("The download stopped") => { eprintln!("kicad: download stopped: {why}"); say_bytes(&h, "failed", p.version, why, Some(Bytes { rate: 0, eta: 0, ..seen })).await }
             Err(why) => { eprintln!("kicad: install failed: {why}"); say(&h, "failed", p.version, &format!("KiCad install failed: {why}")).await }
         }
         h.bump_views();
@@ -746,7 +749,7 @@ cp \"$f\" \"$out\"
         std::fs::write(r.join("serve/FAILAT"), "100").unwrap();
         let got = rt().block_on(fetch(&t, "https://x/r/", &parent, &p, &r.join("log"), &mut |_| {}, &mut |b| seen.push(b)));
         std::fs::remove_file(r.join("serve/FAILAT")).unwrap();
-        let e = got.unwrap_err(); assert!(e.starts_with("The download stopped at 0 of 0 MB") && e.ends_with("It continues from there"), "{e}");
+        let e = got.unwrap_err(); assert!(e.starts_with("The download stopped at 0 of 0 MB") && e.ends_with(")"), "{e}");
         assert_eq!(std::fs::metadata(partial(&parent, &p)).unwrap().len(), 100, "the partial file is kept");
         assert!(seen.first().map_or(false, |b| b.total > 0), "the size is known from the start: {seen:?}");
         // the next try: the partial is continued (curl -C -), checked, installed, and removed
