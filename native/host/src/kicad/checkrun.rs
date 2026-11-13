@@ -779,18 +779,31 @@ pub async fn request(hub: &Arc<Hub>, method: &str, p: &Value) -> Result<Value, S
             Ok(json!({"project": pro, "source": src, "findings": n}))
         }
         "kicad.checks.focus" => {
+            // each step's time (BACKPLANE_HUB_TIMING=1: one HUB_TIMING line, as xprobe's), and in the reply
+            let t0 = std::time::Instant::now(); let mut steps: Vec<(&str, u64)> = vec![];
+            let mut mark = |s: &'static str| steps.push((s, t0.elapsed().as_micros() as u64 / 100));
             let f = find(&pro, p["id"].as_str().unwrap_or("")).ok_or("no such finding (the checks ran again: list them anew)")?;
+            mark("found");
             // an editor that selects by item and place (bp.13 embed-checks): the exact items (a track, a via, a zone), the box round them
-            if let Some(route) = super::edchecks::ready(hub, &pro).await {
+            let route = super::edchecks::ready(hub, &pro).await;
+            mark("ready");
+            if let Some(route) = route {
+                // the sheets' names only when the editor has not given the sheet's path already (a big schematic is slow to read)
+                let need = f.anchors.first().is_some_and(|a| a.doc == "sch" && super::edchecks::seen_path(&a.sheet).is_none());
                 let sch = with(&pro, |p| p.files.sch.clone()).unwrap_or_default();
-                let sheets = if f.anchors.first().is_some_and(|a| a.doc == "sch") { tokio::task::spawn_blocking(move || super::edchecks::sheets(&sch, &|p| std::fs::read_to_string(p).ok())).await.unwrap_or_default() } else { HashMap::new() };
+                let sheets = if need { tokio::task::spawn_blocking(move || super::edchecks::sheets(&sch, &|p| std::fs::read_to_string(p).ok())).await.unwrap_or_default() } else { HashMap::new() };
                 if let Some(m) = super::edchecks::select_items(&f, &sheets) {
+                    mark("sheets");
                     let frame = if m["kind"] == "FK_SCH" { "SCH" } else { "PCB" };
                     let _ = embed::show_for(&pro, frame, "").await;
+                    mark("shown");
                     let o = embed::gui_call(&route, "kiapi.backplane.embed.SelectItems", m.clone()).await;
+                    mark("selected");
+                    let timing: Vec<Value> = steps.iter().map(|(s, t)| json!([s, *t as f64 / 10.0])).collect();
+                    if std::env::var_os("BACKPLANE_HUB_TIMING").is_some() { eprintln!("HUB_TIMING {}", json!({"what": "kicad.checks.focus", "steps": timing})) }
                     if o["ok"].as_bool().unwrap_or(false) {
                         let missing = o["message"]["ids_not_found"].as_array().map_or(0, |a| a.len());
-                        return Ok(json!({"project": pro, "id": f.id, "kicad": true, "select": m, "ids_not_found": missing}))
+                        return Ok(json!({"project": pro, "id": f.id, "kicad": true, "select": m, "ids_not_found": missing, "timing": timing}))
                     }
                 }
             }

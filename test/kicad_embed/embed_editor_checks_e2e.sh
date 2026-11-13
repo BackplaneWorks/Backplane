@@ -54,6 +54,7 @@ export BP_STREAM_N=1 BP_STREAM_MS=10
 export BP_STANDIN_MCPCALL_MAX=4000000
 # KiCad's events in the hub log (K5 reads ET_MARKER_CLICKED there)
 export BACKPLANE_KICAD_DEBUG=1
+export BACKPLANE_HUB_TIMING=1
 start_hub
 export HPORT
 
@@ -195,6 +196,25 @@ SEL=$(python3 "$IPC_PY" selection "$SOCK" pcb 2>>"$OUT/ipc.err" || echo '{}')
 check "A focus on $FID selects its items in KiCad by id (SelectItems ids: $(python3 -c 'import json,sys; print(len(json.loads(sys.argv[1])["result"]["select"]["ids"]))' "$FO" 2>/dev/null || echo 0), selected $(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("count",0))' "$SEL" 2>/dev/null || echo 0))" \
   "$(python3 -c 'import json,sys; r=json.loads(sys.argv[1])["result"]; s=json.loads(sys.argv[2]); print(int(r["kicad"] and len(r["select"]["ids"])>0 and r.get("ids_not_found",0)==0 and s.get("count",0)>=1))' "$FO" "$SEL" 2>/dev/null || echo 0)" "$(echo "$FO" | cut -c1-300) / $SEL"
 import -window root "$OUT/shots/k4_focus.png" 2>/dev/null || true
+# K4 timing: ten focuses on different findings with board items, each step's time in the hub (the reply's timing): where a row's press goes
+python3 - "$L3D" >"$OUT/focus_timing.txt" <<'PY' || true
+import json, os, subprocess, sys, statistics
+fs = [f for f in json.load(open(sys.argv[1]))["result"]["findings"] if any(a.get("uuid") for a in f["anchors"])][:10]
+rows = []
+for f in fs:
+    steps = json.dumps([{"method": "kicad.checks.focus", "params": {"project": os.environ["PRO"], "id": f["id"]}}])
+    r = subprocess.run(["bun", os.environ["HUB_RPC_MJS"], os.environ["HPORT"], os.environ["OUT"] + "/home/token", steps], capture_output=True, text=True).stdout
+    line = next((l for l in r.splitlines() if l.startswith("{")), "{}")
+    t = (json.loads(line).get("result") or {}).get("timing") or []
+    if t: rows.append(dict(t))
+names = ["found", "ready", "sheets", "shown", "selected"]
+for i, n in enumerate(names):
+    v = [r[n] - (r[names[i - 1]] if i else 0) for r in rows if n in r and (i == 0 or names[i - 1] in r)]
+    if v: print(f"{n}: median {statistics.median(v):.1f} ms, max {max(v):.1f}")
+tot = [r["selected"] for r in rows if "selected" in r]
+if tot: print(f"total: median {statistics.median(tot):.1f} ms, max {max(tot):.1f} ({len(tot)} focuses)")
+PY
+echo "INFO focus in the hub (step: own time): $(tr '\n' ';' <"$OUT/focus_timing.txt")"
 # K5: KiCad's own marker clicked in the canvas. GetMarkers gives an error marker's place and items; SelectItems centres the view on it in
 # a 4 mm box; the marker is KiCad's DRC error colour (default theme rgba(215, 91, 107), blended) nearest the frame's centre.
 ask kicad_ipc "{\"path\":\"$PCB\",\"type\":\"kiapi.backplane.embed.GetMarkers\",\"message\":{\"kind\":\"FK_PCB\"}}" >"$OUT/markers.txt"

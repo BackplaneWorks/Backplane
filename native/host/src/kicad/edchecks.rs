@@ -197,6 +197,8 @@ pub fn sheet_name(sheets: &HashMap<String, String>, kiid_path: &str) -> String {
 }
 /// The editor's own KIID path of each sheet name it has given (SelectItems takes the path as KiCad writes it).
 static SEEN_SHEETS: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+/// The editor's own KIID path for a sheet name, when a run gave it (no need to read the schematic files then).
+pub fn seen_path(name: &str) -> Option<String> { SEEN_SHEETS.get_or_init(Default::default).lock().unwrap().get(name).cloned() }
 fn seen_sheet(name: &str, kiid_path: &str) { if !kiid_path.is_empty() { SEEN_SHEETS.get_or_init(Default::default).lock().unwrap().insert(name.to_string(), kiid_path.to_string()); } }
 /// A KIID path as the sheet map keys it: "/a/b/" (KiCad writes "/a/b").
 fn slashed(p: &str) -> String { let t = p.trim_matches('/'); if t.is_empty() { "/".into() } else { format!("/{t}/") } }
