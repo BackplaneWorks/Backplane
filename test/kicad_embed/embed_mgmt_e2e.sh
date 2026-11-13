@@ -207,7 +207,7 @@ PY
 import subprocess, sys, time
 xid, out = sys.argv[1], sys.argv[2]
 t0 = time.time(); seen = []
-while time.time() - t0 < 6.5:
+while time.time() - t0 < 15:   # long enough for a slow client to open the panel (the press is ~4 s in)
     o = subprocess.run(["xwininfo", "-id", xid], capture_output=True, text=True).stdout
     w = next((l.split(":")[1].strip() for l in o.splitlines() if l.strip().startswith("Width:")), "")
     h = next((l.split(":")[1].strip() for l in o.splitlines() if l.strip().startswith("Height:")), "")
@@ -220,7 +220,8 @@ PY
   wait_for_log "$OUT/client.log" '"name":"edit_panel","event":"mark"' 60 || true
   sleep 0.5; shot "m4b_editor_panel"
   wait "$SAMPLER" 2>/dev/null || true
-  R1=$(last_kicad_report "$OUT/client.log" "with_panel")
+  # the report is asked before the mark but written when KiCad answers: it can come after the mark
+  R1="{}"; for _ in $(seq 40); do R1=$(last_kicad_report "$OUT/client.log" "with_panel"); [ "$R1" != "{}" ] && break; sleep 0.5; done
   GEO=$(cat "$OUT/geo.txt" 2>/dev/null || echo "")
   W0=$(python3 -c 'import json,sys; print(int(((json.loads(sys.argv[1] or "{}").get("container") or {}).get("w") or 0)))' "$R0")
   W1=$(python3 -c 'import json,sys; print(int(((json.loads(sys.argv[1] or "{}").get("container") or {}).get("w") or 0)))' "$R1")
