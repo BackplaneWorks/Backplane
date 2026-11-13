@@ -605,6 +605,8 @@ def fp_positions():
 # KiCad right-click menu is open reach Backplane.
 def popups(): return [w for w in windows() if w.get("shown") and w.get("override_redirect") and 60 < w["w"] < 1200 and 60 < w["h"] < 900]
 def comment_after(keys, secs=1.5):
+    fo = xfocus(); kf = {k: f.get("focused") for k, f in kframes().items()}
+    print(f"INFO textkeys focus before {'+'.join(keys[::-1])}: X {fo[:2]}; KiCad frames focused {kf}", flush=True)
     n = len(logs("kcomment", "painted")); r = rt("key", *keys); got = wait_log("kcomment", "painted", n, secs)
     return r, got
 def palette_after(keys):
@@ -656,7 +658,8 @@ if "textkeys" in JOURNEYS and SOCK:
     # (d) Backplane's chords with KiCad's right-click menu open
     for keys, tag in ((("k", "ctrl"), "popup_ctrl_k"), (("semicolon", "ctrl"), "popup_ctrl_semicolon")):
         rt("click", EXk, EYk); time.sleep(0.3); rt("click", EXk, EYk - 60, 3); time.sleep(0.8)
-        m = popups(); shot(f"tk_{tag}_menu")
+        m = popups() or [w for w in windows() if w.get("shown") and w.get("override_redirect") and w["w"] > 40 and w["h"] > 40 and w["w"] < 1500]
+        shot(f"tk_{tag}_menu")
         if not m: print(f"DIAG textkeys: the right-click opened no menu ({tag})", flush=True); continue
         if tag == "popup_ctrl_k":
             ck = palette_after(keys); perf(tag, ck if ck is not None else -1, opened=int(ck is not None), menu_open=1)
