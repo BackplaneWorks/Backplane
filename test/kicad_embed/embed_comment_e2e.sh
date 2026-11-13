@@ -81,7 +81,7 @@ wait_mark posted || true; sleep 1.5; R=$(rep posted)
 check "the keyboard is back in KiCad" "$(field "$R" keys | grep -qi true && echo 1 || echo 0)" "keys=$(field "$R" keys)"
 # a runtime that hands its comment key over itself (bp.13 batch 4: "comment-key-handoff"): ';' is not reserved, so it types in KiCad's text fields;
 # on the canvas and from the "Comment to Backplane..." action (the menu item's) it opens Backplane's window
-if grep -qa "comment-key-handoff" "$(dirname "$(dirname "$BACKPLANE_KICAD_CLI")")/manifest.json" 2>/dev/null; then
+if grep -qaE "comment-key-(63|handoff)" "$(dirname "$(dirname "$BACKPLANE_KICAD_CLI")")/manifest.json" 2>/dev/null; then
   RK=$(grep "reserved keys" "$OUT/hub.log" | tail -1)
   check "handoff: the bare ';' is not reserved (text fields keep it)" "$(echo "$RK" | grep -q '";"' && echo 0 || echo 1)" "$RK"
   opens() { grep -c '"kcomment":"open"' "$OUT/client.log" || true; }; semis() { grep -c '"kicad_key":";"' "$OUT/client.log" || true; }
