@@ -89,6 +89,13 @@
    "what": "every editor switch ends with the asked-for frame on show at the pane (not a frame made and left hidden)"
   },
   {
+   "re": "^ctrl_k_after_comment_ok$",
+   "field": "ok",
+   "min": 1,
+   "strict": true,
+   "what": "Ctrl+K from KiCad still opens the palette after a comment window"
+  },
+  {
    "re": "^thread(_side)?_back\\d_away_ok$",
    "field": "ok",
    "min": 1,

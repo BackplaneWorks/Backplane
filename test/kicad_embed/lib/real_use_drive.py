@@ -339,6 +339,15 @@ if "focus" in JOURNEYS:
         print("JANK first click into KiCad: Ctrl+; did not reach Backplane; a second click:", flush=True)
         rt("click", EX, EY); time.sleep(0.6)
         RESULTS["second_click_reserved"] = {"ms": None, "ok": int(comment_window("second_click_ctrl_semicolon"))}
+    # after a comment window: a reserved key KiCad hands over still reaches Backplane's actions (lane D: the panels' keys replayed as a
+    # keystroke reached nothing after Ctrl+;); Ctrl+K opens the palette
+    rt("click", EX, EY); time.sleep(0.6)
+    box = {"x": 600, "y": 0, "w": 700, "h": 420}
+    sampler_stop(); sampler_start(box, "ctrlk_after_comment"); r = rt("key", "k", "ctrl"); time.sleep(1.2); kp = sampler_stop(); sampler_start(PANE, "pane")
+    a = analyze([{"kind": "commit", "t0": r["t0"], "tag": "ctrlk_after_comment", "window_ms": 1000}], kp)
+    ck2 = a[0].get("first_change_ms") if a else None
+    perf("ctrl_k_after_comment", ck2 if ck2 is not None else -1, opened=int(ck2 is not None)); RESULTS["ctrl_k_after_comment_ok"] = {"ms": None, "ok": int(ck2 is not None)}
+    if ck2 is not None: rt("key", "Escape"); time.sleep(0.4)
 # 0a. a KiCad dialog keeps the keyboard: a footprint selected, `e` opens its properties dialog (KiCad's own top-level), Escape closes it
 # (lane D: the keyboard was taken back from Symbol Properties, so Escape reached Backplane's window and the dialog stayed)
 if "focus" in JOURNEYS and SOCK:
