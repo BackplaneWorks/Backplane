@@ -150,7 +150,10 @@ import json, sys
 c = json.load(open(sys.argv[1])); c["plan"] = json.load(open(sys.argv[2])); json.dump(c, open(sys.argv[1], "w"))
 PY
 P1=$HH/coedit-plan1.json; P2=$HH/coedit-plan2.json; rm -f "$P1" "$P2"
-hub rpc turn.start "{\"thread\":\"$tid\",\"text\":\"plan-propose\"}" >/dev/null
+# the thread must be idle first: the comment window's note started a turn of its own (a turn sent while one runs waits behind it)
+for _ in $(seq 480); do in_box pgrep -f 'standins/bin/claude.*stream-json' >/dev/null || break; sleep 0.25; done
+in_box pgrep -f 'standins/bin/claude.*stream-json' >/dev/null && bad "an agent turn was still running 120 s after the comment: the plan turn waits behind it"
+hub rpc turn.start "{\"thread\":\"$tid\",\"text\":\"plan-propose\"}" >"$OUT/logs/plan-turn1.json"
 for _ in $(seq 240); do [ -s "$P1" ] && break; sleep 0.25; done
 if [ -s "$P1" ]; then cp "$P1" "$OUT/logs/"
   python3 - "$P1" >"$OUT/logs/plan1-checks.txt" <<'PY'
@@ -165,11 +168,11 @@ PY
   grep -q "^refused yes" "$OUT/logs/plan1-checks.txt" && ok "plan_route is refused while nothing is approved" || bad "plan_route was not refused: $(sed -n 2p "$OUT/logs/plan1-checks.txt")"
   sleep 2; hub rpc plan.approve "{\"path\":\"$PCB\",\"ids\":[\"c-bare\"],\"approve\":true}" >"$OUT/logs/plan-approve.json"
   grep -q '"ok":true' "$OUT/logs/plan-approve.json" && ok "the person's approval went to KiCad" || bad "plan.approve: $(head -c 200 "$OUT/logs/plan-approve.json")"
-  sleep 3; hub rpc turn.start "{\"thread\":\"$tid\",\"text\":\"plan-route\"}" >/dev/null
+  sleep 3; hub rpc turn.start "{\"thread\":\"$tid\",\"text\":\"plan-route\"}" >"$OUT/logs/plan-turn2.json"
   for _ in $(seq 240); do [ -s "$P2" ] && break; sleep 0.25; done; cp "$P2" "$OUT/logs/" 2>/dev/null; shot 18-plan-routed
   python3 -c 'import json,sys; r=json.load(open(sys.argv[1])); t=json.dumps(r.get("route",{})); sys.exit(0 if not r.get("route",{}).get("error") and "not approved" not in t and "nothing in the plan" not in t else 1)' "$P2" 2>/dev/null \
     && ok "plan_route of the approved corridor went through ($(python3 -c 'import json,sys; print(json.dumps(json.load(open(sys.argv[1])).get("route"))[:160])' "$P2"))" \
     || bad "plan_route after approval: $(head -c 300 "$P2" 2>/dev/null)"
-else bad "the plan turn wrote nothing"; fi
+else bad "the plan turn wrote nothing (turn.start said: $(head -c 200 "$OUT/logs/plan-turn1.json" 2>/dev/null); KiCad $(in_box pgrep -f kicad.real >/dev/null && echo running || echo gone))"; fi
 fi
 markt end2 120; cp "$HH/win.log" "$OUT/logs/win-2.log"; WP=$(cat "$HH/.client.pid" 2>/dev/null); [ -n "$WP" ] && in_box kill "$WP" 2>/dev/null; sleep 1

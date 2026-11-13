@@ -66,6 +66,10 @@ elif url and pcb and text.startswith('plan-route'):
     out = out.replace('.json', '-plan2.json') if out else ''
     r['get'] = tool('plan_get', {})
     r['route'] = tool('plan_route', {'ids': [plan['corridors'][0]['id']], 'max_nets': 2})
+elif url and pcb and not text.startswith('add a track'):
+    # any other message (the comment window's note posts one to the thread): a turn that touches nothing and ends at once
+    r['note'] = 'nothing to do'
+    out = ''
 elif url and pcb:
     r['status'] = tool('kicad_ipc_status', {'path': pcb})
     r['open'] = ipc(C + 'OpenDocument', {'type': 'DOCTYPE_PCB', 'path': pcb})
