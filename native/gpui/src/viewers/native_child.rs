@@ -90,6 +90,17 @@ pub fn reserved_chord_index(idx: usize) -> Option<&'static str> {
     }
 }
 
+/// Windows: whether a visible top-level window of KiCad's is a floating dialog that `dialogs` owns and centres over Backplane's window:
+/// not a child, with a real caption (both WS_CAPTION bits: WS_BORDER|WS_DLGFRAME), and never a popup menu (#32768) or a tooltip.
+/// A popup menu is WS_POPUP|WS_BORDER (one caption bit): taking it for a dialog re-owned and re-centred KiCad's right-click menu,
+/// which moved it off the cursor or closed it at once.
+pub fn floating_dialog(style: u32, class: &str) -> bool {
+    const WS_CHILD: u32 = 0x4000_0000;
+    const WS_CAPTION: u32 = 0x00C0_0000;
+    if style & WS_CHILD != 0 || style & WS_CAPTION != WS_CAPTION { return false }
+    !matches!(class, "#32768" | "tooltips_class32") // i18n-ok: Win32 window class names
+}
+
 /// A frame the container holds: its window, its title as the program last set it, and its kind.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Frame { pub window: u64, pub title: String, pub kind: &'static str }
@@ -677,7 +688,7 @@ mod imp {
                 GWL_STYLE, GW_CHILD, IDC_ARROW, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN,
                 SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOSIZE,
                 SWP_NOZORDER, SW_HIDE, SW_SHOWNA, WM_ACTIVATE, WM_APP, WM_HOTKEY, WM_LBUTTONDOWN, WM_MBUTTONDOWN,
-                WM_MOUSEACTIVATE, WM_PARENTNOTIFY, WM_RBUTTONDOWN, WNDCLASSEXW, WS_CAPTION,
+                WM_MOUSEACTIVATE, WM_PARENTNOTIFY, WM_RBUTTONDOWN, WNDCLASSEXW,
                 WS_CHILD, WS_CLIPCHILDREN, WS_CLIPSIBLINGS, WS_EX_NOACTIVATE, WS_EX_TOOLWINDOW, WS_POPUP,
             },
         },
@@ -941,7 +952,8 @@ mod imp {
     /// Windows: `dialogs` already centres them over Backplane's window.
     pub fn centre_dialogs(_pid: u32, _over: R) -> Vec<String> { vec![] }
 
-    /// Own and centre floating KiCad dialogs (`WS_CAPTION`, non-child top-levels of `pid`) over Backplane's `toplevel` HWND asynchronously.
+    /// Own and centre floating KiCad dialogs (`floating_dialog`: captioned, non-child top-levels of `pid`, never menus or tooltips) over
+    /// Backplane's `toplevel` HWND asynchronously.
     pub fn dialogs(pid: u32, container: u64, toplevel: u64) {
         if pid == 0 || toplevel == 0 { return }
         struct Ctx { pid: u32, container: HWND, toplevel: HWND }
@@ -953,7 +965,9 @@ mod imp {
             if wpid != ctx.pid { return 1 }
             if unsafe { IsWindowVisible(w) } == 0 { return 1 }
             let st = unsafe { GetWindowLongPtrW(w, GWL_STYLE) } as u32;
-            if (st & WS_CHILD) != 0 || (st & WS_CAPTION) == 0 { return 1 }
+            let mut cls = [0u16; 64];
+            let cn = unsafe { GetClassNameW(w, cls.as_mut_ptr(), cls.len() as i32) }.max(0) as usize;
+            if !super::floating_dialog(st, &String::from_utf16_lossy(&cls[..cn])) { return 1 }
             let wid = id_of(w);
             let cur_owner = unsafe { GetWindowLongPtrW(w, GWLP_HWNDPARENT) } as usize;
             if cur_owner != ctx.toplevel as usize {
@@ -1438,6 +1452,15 @@ pub use imp::*;
 #[cfg(test)]
 mod tests {
     use super::*;
+    /// KiCad's right-click menu (WS_POPUP|WS_VISIBLE|WS_CLIPSIBLINGS|WS_BORDER, class #32768) was taken for a dialog and re-centred.
+    #[test] fn only_captioned_top_levels_are_dialogs_and_menus_never_are() {
+        let dialog = 0x94C8_0000; // WS_POPUP|WS_VISIBLE|WS_CLIPSIBLINGS|WS_CAPTION|WS_SYSMENU
+        assert!(floating_dialog(dialog, "#32770") && floating_dialog(dialog, "wxWindowNR"));
+        assert!(!floating_dialog(0x9480_0000, "#32768"), "a popup menu: one caption bit");
+        assert!(!floating_dialog(0x9480_0000, "wxWindowNR"), "a bordered wx popup: one caption bit");
+        assert!(!floating_dialog(dialog, "#32768") && !floating_dialog(dialog, "tooltips_class32"), "menus and tooltips by class");
+        assert!(!floating_dialog(dialog | 0x4000_0000, "wxWindowNR"), "a child");
+    }
     #[test] fn titles_name_their_editor() {
         assert_eq!(kind_of_title("pic_programmer — PCB Editor"), "PCB");
         assert_eq!(kind_of_title("*ecc83-pp — Schematic Editor"), "SCH");
