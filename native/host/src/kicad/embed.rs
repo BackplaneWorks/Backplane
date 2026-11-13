@@ -929,7 +929,7 @@ enum Msg {
     StartFailed { pro: String, gen: u64, why: String },
     FramesUpdated { pro: String, gen: u64, holder: Option<u64>, frames: Vec<Frame>, reply: Option<(u64, oneshot::Sender<Result<Value, String>>)> },
     /// `editor`: KiCad's ET_EDITOR_REQUESTED (a library editor with the item it is for), not a plain ET_SHOW_REQUESTED
-    ForkShowRequested { pro: String, gen: u64, kind: String, item: String, editor: bool },
+    ForkShowRequested { pro: String, gen: u64, kind: String, item: String, editor: bool, actor: String },
     Dialog { pro: String, gen: u64, open: bool, title: String },
     /// the dialogs of KiCad's the client sees on screen (a modal one stops KiCad's events and pings: this is how the hub learns of it)
     ClientDialogs { pro: String, open: Vec<String> },
@@ -1535,11 +1535,20 @@ impl Actor {
                     let _ = tx.send(Err("KiCad session ended".into()));
                 }
             }
-            Msg::ForkShowRequested { pro, gen, kind, item, editor } => {
+            Msg::ForkShowRequested { pro, gen, kind, item, editor, actor } => {
                 let Some(s) = self.sessions.get_mut(&pro).filter(|s| s.gen == gen && s.state == "ready") else { return };
                 // a library editor is shown on KiCad's ET_EDITOR_REQUESTED (embedded, on its item), never on the ET_SHOW_REQUESTED KiCad sends
                 // before it (three of them on Ctrl+E: showing then floated a 900x720 top-level over the pane for ~0.8 s)
-                if !editor && canon_frame(&kind) != s.active && shows_held(&pro) {
+                // embed-request-actor (bp.13 after batch 4): the request says which API client caused it, "" for the person or KiCad itself:
+                // only those are followed (the hub's own pre-warm, check runs and an agent's actions never move the person's pane); without
+                // it, the hub's drive is told by time (hold_shows)
+                let by_actor = s.caps.iter().any(|c| c == "embed-request-actor");
+                if by_actor && !actor.is_empty() && !actor.starts_with("person:") {
+                    eprintln!("kicad embed: {pro}: KiCad asked to show {kind} for {actor}: not followed");
+                    let _ = self.me.send(Msg::ForkSync { pro, gen });
+                    return;
+                }
+                if !by_actor && !editor && canon_frame(&kind) != s.active && shows_held(&pro) {
                     eprintln!("kicad embed: {pro}: KiCad asked to show {kind} while the hub drives it: not followed");
                     let _ = self.me.send(Msg::ForkSync { pro, gen });
                     return;
@@ -2175,7 +2184,7 @@ fn spawn_fork_events_loop(me: mpsc::UnboundedSender<Msg>, pro: String, gen: u64,
             let next = u64_of(&msg["next"]);
             if next > since { since = next; }
             let mut need_sync = msg["lost"].as_bool().unwrap_or(false);
-            let mut show_req: Option<(String, String, bool)> = None;
+            let mut show_req: Option<(String, String, bool, String)> = None;
             if let Some(evs) = msg["events"].as_array() {
                 for ev in evs {
                     let ty = ev["type"].as_str().unwrap_or("");
@@ -2207,10 +2216,10 @@ fn spawn_fork_events_loop(me: mpsc::UnboundedSender<Msg>, pro: String, gen: u64,
                     }
                     if ty == "ET_SHOW_REQUESTED" || ty_n == 9 {
                         // (an editor request in the same batch wins)
-                        if !show_req.as_ref().is_some_and(|r| r.2) { show_req = Some((kind_of_fk_val(&ev["frame"]["kind"]).to_string(), String::new(), false)); }
+                        if !show_req.as_ref().is_some_and(|r| r.2) { show_req = Some((kind_of_fk_val(&ev["frame"]["kind"]).to_string(), String::new(), false, ev["detail"].as_str().unwrap_or("").to_string())); }
                     } else if let Some((k, item)) = editor_requested(ev) {
                         // bp.13: KiCad asked for its symbol or footprint editor (Edit Symbol, Edit Footprint...): shown in the pane on that item
-                        show_req = Some((k, item, true));
+                        show_req = Some((k, item, true, ev["detail"].as_str().unwrap_or("").to_string()));
                     } else if matches!(ty, "ET_FRAME_OPENED" | "ET_FRAME_CLOSED" | "ET_FRAME_SHOWN" | "ET_FRAME_HIDDEN"
                         | "ET_TITLE_CHANGED" | "ET_MODIFIED_CHANGED" | "ET_DETACHED" | "ET_DOCUMENT_CHANGED" | "ET_ATTACHED")
                         || matches!(ty_n, 1 | 2 | 3 | 4 | 5 | 6 | 12 | 13 | 18)
@@ -2219,8 +2228,8 @@ fn spawn_fork_events_loop(me: mpsc::UnboundedSender<Msg>, pro: String, gen: u64,
                     }
                 }
             }
-            if let Some((kind, item, editor)) = show_req {
-                if me.send(Msg::ForkShowRequested { pro: pro.clone(), gen, kind, item, editor }).is_err() { return }
+            if let Some((kind, item, editor, actor)) = show_req {
+                if me.send(Msg::ForkShowRequested { pro: pro.clone(), gen, kind, item, editor, actor }).is_err() { return }
             } else if need_sync {
                 if me.send(Msg::ForkSync { pro: pro.clone(), gen }).is_err() { return }
             }
@@ -2317,7 +2326,13 @@ impl RpcHandler for EmbedRpc {
                 let have: Vec<String> = p["have"].as_array().into_iter().flatten().filter_map(|k| k.as_str().map(|k| canon_frame(k).to_string())).collect();
                 let kinds = prewarm_kinds(p["active"].as_str().unwrap_or("PCB"), &have);
                 let (me, gui2, pro) = (actor_tx.clone(), gui.clone(), resolved.pro.clone());
+                // a pre-warm is the hub's own drive: KiCad's show requests for the frames it opens are not the person's (Hubble_DK on
+                // bp.13 batch 4 posts ET_SHOW_REQUESTED for the pre-warmed schematic, and the pane flipped to it after Edit)
+                if !kinds.is_empty() { hold_shows(&pro, Duration::from_secs(60)); }
                 tokio::spawn(async move {
+                    struct Release(String);
+                    impl Drop for Release { fn drop(&mut self) { release_shows(&self.0); } }
+                    let _release = Release(pro.clone());
                     for k in kinds {
                         let mut body = json!({"kind": fk_of(k), "prewarm": true});
                         if w > 0 && h > 0 { body["width"] = json!(w); body["height"] = json!(h); }
