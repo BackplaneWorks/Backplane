@@ -438,6 +438,23 @@ pub fn project_locked(files: &Files) -> bool {
     })
 }
 
+/// What a starting KiCad waited for, from its cgroup's pressure stall totals (its memory scope holds only it, so the totals are its
+/// start's) and the machine's load: a slow open on a busy machine says so in the hub log (Nov 13: Day_11 took 10.3 s on the person's
+/// desktop during main-build's tests, 3.4 s on a quiet test instance). Linux; None elsewhere or when unreadable.
+fn start_waits(pid: u32) -> Option<String> {
+    if !cfg!(target_os = "linux") || pid == 0 { return None }
+    let cg = std::fs::read_to_string(format!("/proc/{pid}/cgroup")).ok()?;
+    let dir = format!("/sys/fs/cgroup{}", cg.lines().find_map(|l| l.strip_prefix("0::"))?.trim());
+    let some = |r: &str| std::fs::read_to_string(format!("{dir}/{r}.pressure")).ok().and_then(|t| stall_total_us(&t)).map(|us| format!("{:.2}", us as f64 / 1e6)).unwrap_or_else(|| "?".into());
+    let load = std::fs::read_to_string("/proc/loadavg").ok().and_then(|t| t.split_whitespace().next().map(str::to_string)).unwrap_or_else(|| "?".into());
+    let cpus = std::thread::available_parallelism().map(|n| n.get()).unwrap_or(0);
+    Some(format!("cpu {} s, io {} s, memory {} s (stall totals of its scope); load {load} on {cpus} cpus", some("cpu"), some("io"), some("memory")))
+}
+/// The `some` line's `total=` (microseconds) of a cgroup `*.pressure` file.
+pub fn stall_total_us(text: &str) -> Option<u64> {
+    text.lines().find(|l| l.starts_with("some "))?.split_whitespace().find_map(|f| f.strip_prefix("total="))?.parse().ok()
+}
+
 /// A process's resident memory in MB (Linux; None elsewhere).
 fn rss_mb(pid: u32) -> Option<u64> {
     let st = std::fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
@@ -2164,6 +2181,7 @@ async fn spawn_gui_session(
             eprintln!("kicad embed: reserved keys {}", if rk["ok"] == true { rk["message"]["chords"].to_string() } else { format!("refused: {}", rk["error"]) });
         }); }
         phase("ready");
+        if let Some(w) = start_waits(pid) { eprintln!("kicad embed: start waited {w}"); }
         eprintln!("kicad embed: running {version} ({})", argv.first().map(String::as_str).unwrap_or(""));
         let _ = me.send(Msg::Ready { pro, gen, sock, version, holder, events_sock, ev_since, frames, spawn_container, spawn_active: active, caps });
     } else {
@@ -2704,6 +2722,11 @@ mod tests {
         assert!(project_locked(&f));
     }
 
+    #[test] fn stall_total_reads_the_some_line() {
+        let t = "some avg10=0.00 avg60=0.00 avg300=0.08 total=3057047\nfull avg10=0.00 avg60=0.00 avg300=0.06 total=2641386\n";
+        assert_eq!(super::stall_total_us(t), Some(3057047));
+        assert_eq!(super::stall_total_us("full avg10=0.00 total=5\n"), None);
+    }
     #[test] fn warm_eviction_picks_oldest_detached_clean_session() {
         let mut m = HashMap::new();
         let mk = |pro: &str, container: u64, dirty: bool, t: u64| {
