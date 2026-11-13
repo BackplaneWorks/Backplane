@@ -10,6 +10,9 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 [ "$EMBED_MODE" = "fork" ] || { echo "embed_comment_e2e: fork only"; exit 0; }
 discover_bins
 discover_kicad
+# the runtime this run is on (the hub takes the GUI kicad from beside BACKPLANE_KICAD_CLI: both must name the same runtime)
+echo "embed_comment_e2e: KiCad $("$KICAD_CLI" --version 2>/dev/null) (cli $KICAD_CLI, bin $KICAD_BIN)"
+[ "$(dirname "$KICAD_CLI")" = "$(dirname "$KICAD_BIN")" ] || { echo "FAIL BACKPLANE_KICAD_CLI and BACKPLANE_KICAD_BIN name different runtimes"; exit 1; }
 DESC="$(dirname "$KICAD_BIN")/../share/backplane/api.desc"
 if ! grep -qa "CommentSelection" "$DESC" 2>/dev/null || ! grep -qa "SetReservedKeys" "$DESC" 2>/dev/null; then echo "embed_comment_e2e: SKIP (this KiCad has no CommentSelection/SetReservedKeys)"; exit 0; fi
 init_isolated_dirs
@@ -45,13 +48,28 @@ xfocus() { python3 -c 'import ctypes,ctypes.util,os
 x=ctypes.CDLL(ctypes.util.find_library("X11")); x.XOpenDisplay.restype=ctypes.c_void_p; d=ctypes.c_void_p(x.XOpenDisplay(os.environ["DISPLAY"].encode()))
 w=ctypes.c_ulong(); r=ctypes.c_int(); x.XGetInputFocus(d, ctypes.byref(w), ctypes.byref(r)); print(hex(w.value))'; }
 echo "x focus before the chord: $(xfocus) (editor $(printf 0x%x "$SHOWN"))"
-T0=$(now_ms); python3 "$XINPUT_PY" chord ctrl semicolon
+# Ctrl held, then ';' pressed: T0 is the moment the ';' press reached the X server (XSync), the key event KiCad acts on
+T0=$(python3 - <<'PY2'
+import ctypes, ctypes.util, os, time
+x = ctypes.CDLL(ctypes.util.find_library('X11')); t = ctypes.CDLL(ctypes.util.find_library('Xtst'))
+x.XOpenDisplay.restype = ctypes.c_void_p; x.XStringToKeysym.restype = ctypes.c_ulong; x.XKeysymToKeycode.restype = ctypes.c_ubyte
+x.XKeysymToKeycode.argtypes = [ctypes.c_void_p, ctypes.c_ulong]; t.XTestFakeKeyEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int, ctypes.c_ulong]; x.XSync.argtypes = [ctypes.c_void_p, ctypes.c_int]
+d = x.XOpenDisplay(os.environ['DISPLAY'].encode()); kc = lambda n: x.XKeysymToKeycode(d, x.XStringToKeysym(n))
+ctrl, semi = kc(b'Control_L'), kc(b'semicolon')
+t.XTestFakeKeyEvent(d, ctrl, 1, 0); x.XSync(d, 0); time.sleep(0.05)
+t.XTestFakeKeyEvent(d, semi, 1, 0); x.XSync(d, 0); t0 = int(time.time() * 1000)
+time.sleep(0.03); t.XTestFakeKeyEvent(d, semi, 0, 0); t.XTestFakeKeyEvent(d, ctrl, 0, 0); x.XSync(d, 0)
+print(t0)
+PY2
+)
 wait_klog painted || true; OPEN=$(klog open); PAINT=$(klog painted)
 OPEN_MS=$(python3 -c 'import json,sys; p=json.loads(sys.argv[1] or "{}"); print(p.get("at_ms",0)-int(sys.argv[2]) if p else -1)' "$PAINT" "$T0")
 check "Ctrl+; in KiCad opens Backplane's comment window" "$([ -n "$OPEN" ] && [ -n "$PAINT" ] && echo 1 || echo 0)" "open=$OPEN painted=$PAINT"
 shot opened
 wait_klog capture || true; CAP=$(klog capture); echo "x focus with the window open: $(xfocus)"
 check "the capture names the selection" "$(python3 -c 'import json,sys; c=json.loads(sys.argv[1] or "{}"); print(1 if c.get("ok") and set(c.get("references") or []) >= {"R1","C1"} else 0)' "$CAP")" "$CAP"
+SIZES=$(grep -o 'GPUI_RECT {"name":"kcomment"[^}]*}' "$OUT/client.log" | python3 -c 'import json,sys; print(" ".join(sorted({"%dx%d" % (json.loads(l[10:])["w"], json.loads(l[10:])["h"]) for l in sys.stdin})))')
+check "the card keeps its size when the capture fills it in" "$([ -n "$SIZES" ] && [ "$(echo $SIZES | wc -w)" = 1 ] && echo 1 || echo 0)" "$SIZES"
 python3 "$XINPUT_PY" type "move these closer"; sleep 0.3; shot typed; echo "x focus while typing: $(xfocus)"; python3 "$XINPUT_PY" key Return
 wait_klog post || true; wait_klog closed || true; POST=$(klog post)
 check "Enter posts the comment and the window shuts" "$([ -n "$POST" ] && [ -n "$(klog closed)" ] && echo 1 || echo 0)" "$POST"
@@ -75,6 +93,19 @@ IMG=$(ls "$OUT/home/kicad-comments/"*.png 2>/dev/null | head -1)
 check "the screenshot is kept beside the hub's data" "$([ -s "$IMG" ] && echo 1 || echo 0)" "$IMG"
 DLG=$(grep -c "Comment to Backplane" "$OUT/shots/opened.tree" 2>/dev/null || true)
 check "KiCad showed no dialog of its own" "$([ "$DLG" = 0 ] && echo 1 || echo 0)" "dialogs=$DLG"
+python3 - "$OUT/client.log" "$T0" <<'PY2'
+import json, sys
+t0 = int(sys.argv[2]); hops = {}
+for l in open(sys.argv[1], errors="replace"):
+    if not l.startswith("GPUI_LOG "): continue
+    try: v = json.loads(l[9:])
+    except Exception: continue
+    k = ("received" if v.get("kicad_key") == "ctrl-;" else "dispatched" if v.get("kicad_key_dispatch") == "ctrl-;" else v.get("kcomment") if v.get("kcomment") in ("open", "opened", "rendered", "painted") else None)
+    if k and k not in hops and v.get("at_ms", 0) >= t0: hops[k] = v["at_ms"]
+prev = t0; print("hop table (ms after the ';' press reached X; 'painted' is when gpui drew, not pixels on screen):")
+for k in ("received", "dispatched", "open", "opened", "rendered", "painted"):
+    if k in hops: print(f"  {k:<11} +{hops[k]-t0:>4}  (step {hops[k]-prev})"); prev = hops[k]
+PY2
 echo "embed_comment_e2e: open_ms=$OPEN_MS (XTest key -> first paint) capture_ms=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1] or "{}").get("ms"))' "$CAP") hub_ms=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1] or "{}").get("hub_ms"))' "$CAP")"
 wait "$CP" 2>/dev/null || true
 finish_suite "embed_comment_e2e ($EMBED_MODE)"

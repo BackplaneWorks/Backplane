@@ -439,7 +439,6 @@ mod imp {
         let viewable = c.get_window_attributes(w).ok().and_then(|r| r.reply().ok()).map_or(false, |a| a.map_state == MapState::VIEWABLE);
         if viewable { let _ = c.set_input_focus(InputFocus::PARENT, w, x11rb::CURRENT_TIME); let _ = c.flush(); }
     }
-    /// Whether the X keyboard focus is in `container` (on one of its frames or their windows): the editor has the keys.
     /// Pointer input over the container off (`off`) or back: while Backplane's own window over the editor has the keyboard, X would hand every key
     /// to KiCad when the pointer rests over it (keys go to the window under the pointer when it is inside the focus window), so its input region
     /// is emptied for that while; the editor stays drawn.
@@ -449,6 +448,8 @@ mod imp {
         let _ = if off { c.shape_rectangles(shape::SO::SET, shape::SK::INPUT, ClipOrdering::UNSORTED, container, 0, 0, &[]) } else { c.shape_mask(shape::SO::SET, shape::SK::INPUT, container, 0, 0, x11rb::NONE) };
         let _ = c.flush();
     }
+    /// Our connection's socket: readable when an event (a ClientMessage KiCad sends the container) is waiting.
+    pub fn conn_fd() -> Option<i32> { use std::os::fd::AsRawFd; let g = conn()?; Some(g.as_ref()?.stream().as_raw_fd()) }
     /// Whether the ';' key is down now (the comment chord held: hold to talk). X11's own state, so a fake release of key repeat reads as held.
     pub fn semicolon_held() -> Option<bool> {
         static KC: OnceLock<u8> = OnceLock::new();
@@ -464,6 +465,7 @@ mod imp {
         let keys = c.query_keymap().ok()?.reply().ok()?.keys;
         Some(keys[kc as usize / 8] & (1 << (kc % 8)) != 0)
     }
+    /// Whether the X keyboard focus is in `container` (on one of its frames or their windows): the editor has the keys.
     pub fn has_focus(container: u64) -> bool {
         let container = container as u32;
         let Some(g) = conn() else { return false }; let c = g.as_ref().unwrap();
@@ -1120,11 +1122,12 @@ mod imp {
         }
     }
 
-    /// Whether keyboard focus in the active foreground queue is inside `container`.
+    pub fn conn_fd() -> Option<i32> { None }
     /// Windows sends keys to the focused window only: nothing to do.
     pub fn input_off(_container: u64, _off: bool) {}
     /// Whether the ';' key (VK_OEM_1 on a US layout) is down now: the comment chord held.
     pub fn semicolon_held() -> Option<bool> { Some(unsafe { windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0xBA) } as u16 & 0x8000 != 0) }
+    /// Whether keyboard focus in the active foreground queue is inside `container`.
     pub fn has_focus(container: u64) -> bool {
         if FOCUS_ESCAPED.load(Ordering::SeqCst) { return false }
         let c = hwnd(container);
@@ -1365,6 +1368,7 @@ mod imp {
     pub fn sync_root(_container: u64, _r: R, _show: u64, _last_root: &mut (i32, i32)) {}
     pub fn holes(_container: u64, _keep: Option<&[R]>) {}
     pub fn focus(_w: u64) {}
+    pub fn conn_fd() -> Option<i32> { None }
     pub fn input_off(_container: u64, _off: bool) {}
     /// Unknown here: the window's own key-up decides.
     pub fn semicolon_held() -> Option<bool> { None }
