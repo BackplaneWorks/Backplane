@@ -127,7 +127,7 @@ impl OnboardRpc {
         // a path typed here goes where FreeCAD is looked for, then Settings, CAD reads the same machine
         if checks["freecad"]["runs"] == true && !g("freecad").is_empty() { let d = hub.cfg.home.join("freecad"); let _ = std::fs::create_dir_all(&d); let _ = std::fs::write(d.join("command"), g("freecad")); }
         crate::files::kicad::ipc::publish_cad(hub).await;
-        Self::auto_kicad(hub, git).await;
+        Self::auto_kicad(hub).await;
         // a setting, not info: its log line redraws every client, and the answer outlives a restart. Only a change is logged.
         let text = checks.to_string();
         if hub.setting("onboard.checks").await.as_deref() != Some(text.as_str()) { let _ = hub.commit(&json!({"$":"SettingSet","key":"onboard.checks","value":text,"at":now_ms() / 1000})).await; }
@@ -146,11 +146,9 @@ impl OnboardRpc {
     }
     /// On the Design tools step with no KiCad found and a package for this computer, the install starts by itself, once per version (a failure shows Try again
     /// and is not retried): the person reached the step, the step says what is downloaded, and the install checks the digest and stages as before.
-    async fn auto_kicad(hub: &Arc<Hub>, git: bool) {
-        use crate::files::kicad::install::{decide, needs_git, package, Action};
+    async fn auto_kicad(hub: &Arc<Hub>) {
+        use crate::files::kicad::install::{decide, package, Action};
         if hub.setting("onboard.step").await.as_deref() != Some("tools") { return }
-        // Windows: the download runs in Git's sh until the fetch in Rust reaches Windows; the Git for Windows row comes first
-        if needs_git(&hub.cfg.os, git) { return }
         let info = hub.info_now();
         let state: Value = serde_json::from_str(info["kicad.install"].as_str().unwrap_or("")).unwrap_or_default();
         let Some(p) = package() else { return };

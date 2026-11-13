@@ -147,13 +147,13 @@ pub enum Getter { Curl(PathBuf), Wget(PathBuf) }
 /// The programs the fetch starts.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Tools { pub get: Getter, pub tar: PathBuf }
-/// Where the fetch finds its programs: Windows' own System32 copies (curl.exe and tar.exe ship with Windows 10 1803 and later), elsewhere the
+/// Where the fetch finds its programs: Windows' own System32 curl.exe (Windows 10 1803 and later; its zip is unpacked in-process), elsewhere the
 /// first curl (else wget) and tar on `path` (the hub's PATH). Err says what is missing.
 pub fn tools_in(windows: bool, system_root: Option<&Path>, path: &[PathBuf]) -> Result<Tools, String> {
     if windows {
         let s = system_root.map(|r| r.join("System32")).ok_or("SystemRoot is not set")?;
-        let (curl, tar) = (s.join("curl.exe"), s.join("tar.exe"));
-        if !curl.is_file() || !tar.is_file() { return Err(format!("Windows' own curl.exe and tar.exe were not found in {}", s.display())) }
+        let (curl, tar) = (s.join("curl.exe"), s.join("tar.exe")); // tar: never started for a zip
+        if !curl.is_file() { return Err(format!("Windows' own curl.exe was not found in {}", s.display())) }
         return Ok(Tools { get: Getter::Curl(curl), tar })
     }
     let find = |n: &str| path.iter().map(|d| d.join(n)).find(|f| f.is_file());
@@ -212,6 +212,25 @@ pub fn links_inside(dir: &Path, inside: &Path) -> Result<(), String> {
                 if !at.starts_with(&inside) { return Err(format!("Unsafe link in the KiCad archive: {}", p.strip_prefix(dir).unwrap_or(&p).display())) }
             } else if t.is_dir() { todo.push(p) }
         }
+    }
+    Ok(())
+}
+/// A zip archive unpacked in-process into `into` (Windows' package; no tar or PowerShell): every member under `root` and none climbing out
+/// (`members_ok`, with a Windows backslash read as a separator), no links, each file written new and its CRC checked as it is read.
+pub fn unzip(zip: &Path, root: &str, into: &Path) -> Result<(), String> {
+    let f = std::fs::File::open(zip).map_err(|e| format!("Could not read the KiCad archive: {e}"))?;
+    let mut a = zip::ZipArchive::new(std::io::BufReader::new(f)).map_err(|e| format!("Could not read the KiCad archive: {e}"))?;
+    let names: Vec<String> = (0..a.len()).map(|i| a.name_for_index(i).unwrap_or("").replace('\\', "/")).collect();
+    members_ok(&names.join("\n"), root)?;
+    for (i, n) in names.iter().enumerate() {
+        let mut e = a.by_index(i).map_err(|e| format!("Could not read the KiCad archive: {e}"))?;
+        if e.is_symlink() { return Err(format!("Unsafe link in the KiCad archive: {n}")) }
+        let to = n.strip_prefix("./").unwrap_or(n).split('/').filter(|c| !c.is_empty()).fold(into.to_path_buf(), |p, c| p.join(c));
+        if e.is_dir() || n.ends_with('/') { std::fs::create_dir_all(&to).map_err(|e| format!("Could not unpack KiCad: {e}"))?; continue }
+        if let Some(d) = to.parent() { std::fs::create_dir_all(d).map_err(|e| format!("Could not unpack KiCad: {e}"))?; }
+        let mut out = std::fs::OpenOptions::new().write(true).create_new(true).open(&to).map_err(|e| format!("Could not unpack KiCad ({n}): {e}"))?;
+        std::io::copy(&mut e, &mut out).map_err(|e| format!("Could not unpack KiCad ({n}): {e}"))?;
+        #[cfg(unix)] if let Some(m) = e.unix_mode() { use std::os::unix::fs::PermissionsExt; let _ = std::fs::set_permissions(&to, std::fs::Permissions::from_mode(m & 0o755)); }
     }
     Ok(())
 }
@@ -370,12 +389,16 @@ pub async fn fetch(t: &Tools, base: &str, parent: &Path, p: &Package, log: &Path
     if !fmt_ok { return Err("KiCad archive header does not match its platform format".into()) }
     say(step, "Unpacking".into());
     let root = format!("backplane-kicad-{}-{}", p.platform, p.version);
-    let (list, x) = if p.format == "zip" { ("-tf", "-xf") } else { ("-tzf", "-xzf") };
-    let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
-    let members = tool(&t.tar, &s(&[list, &pkg.to_string_lossy()]), log, || {}).await.map_err(|e| format!("Could not read the KiCad archive: {e}"))?;
-    members_ok(&members, &root)?;
     let unpack = stage.join("unpack"); std::fs::create_dir(&unpack).map_err(|e| e.to_string())?;
-    tool(&t.tar, &s(&[x, &pkg.to_string_lossy(), "-C", &unpack.to_string_lossy()]), log, || {}).await.map_err(|e| format!("Could not unpack KiCad: {e}"))?;
+    if p.format == "zip" {
+        let (z, r, u) = (pkg.clone(), root.clone(), unpack.clone());
+        tokio::task::spawn_blocking(move || unzip(&z, &r, &u)).await.map_err(|e| e.to_string())??;
+    } else {
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        let members = tool(&t.tar, &s(&["-tzf", &pkg.to_string_lossy()]), log, || {}).await.map_err(|e| format!("Could not read the KiCad archive: {e}"))?;
+        members_ok(&members, &root)?;
+        tool(&t.tar, &s(&["-xzf", &pkg.to_string_lossy(), "-C", &unpack.to_string_lossy()]), log, || {}).await.map_err(|e| format!("Could not unpack KiCad: {e}"))?;
+    }
     let runtime = unpack.join(&root);
     links_inside(&unpack, &runtime)?;
     let cli = runtime.join(p.cli);
@@ -397,12 +420,9 @@ pub async fn fetch(t: &Tools, base: &str, parent: &Path, p: &Package, log: &Path
 }
 /// Where the fetch downloads from (the script's base).
 pub fn base_url(p: &Package) -> String { format!("https://{FROM}/releases/download/{}/", p.release) }
-/// Whether a KiCad install here must wait for Git for Windows (`git`: whether git answers): on Windows while it still runs SCRIPT in Git's sh.
-pub fn needs_git(os: &str, git: bool) -> bool { os == "windows" && !git && !rust_fetch_on(os) }
-/// The systems that use the fetch in Rust, by the hub's os word.
-pub fn rust_fetch_on(os: &str) -> bool { os != "windows" }
-/// The systems that use the fetch in Rust; the rest still run SCRIPT (Windows, until its bare gate has proved the fetch there).
-pub fn rust_fetch() -> bool { !cfg!(windows) }
+/// Every system uses the fetch in Rust (Windows too: System32's curl.exe and the zip unpacked here, so no Git for Windows is needed); SCRIPT
+/// runs only as the stand-in path's reference and in its own tests.
+pub fn rust_fetch() -> bool { true }
 
 /// The installer's arguments (the script's $1..$8).
 pub fn args(parent: &Path, p: &Package) -> Vec<String> {
@@ -512,10 +532,6 @@ pub async fn install(hub: &Arc<Hub>, consent: bool) -> Result<String, String> {
     let env = super::ipc::runtime(hub).await;
     if let Some(why) = refusal(&env.cli, &env.status, &env.version, consent, RUNNING.load(Ordering::SeqCst), package()) { return Err(why) }
     let p = package().expect("refusal checks the package");
-    let git = async { crate::proc::tokio_cmd(crate::proc::Kind::Local, "git").arg("--version").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status().await.map_or(false, |s| s.success()) };
-    if hub.cfg.os == "windows" && needs_git(&hub.cfg.os, git.await) {
-        return Err("KiCad's download needs Git for Windows: install it (Settings, Setup, Design tools has the button), then try again".into())
-    }
     if RUNNING.swap(true, Ordering::SeqCst) { return Err("KiCad is being installed already".into()) }
     let parent = parent(&hub.cfg.home);
     // a stand-in installer (tests and rigs): the same arguments, so no real KiCad is downloaded or touched
@@ -698,6 +714,64 @@ cp \"$f\" \"$out\"
         let (again, _) = fetch_run(&r, &p, &sysdirs(&bin)); assert!(again.unwrap_err().contains("already exists; the installation there is kept"));
         assert!(std::fs::read_to_string(r.join("log")).unwrap().contains("Checking the checksum"), "the steps are in the log as before");
     }
+    // ---- Windows' zip, unpacked in-process ----
+    /// A zip of `entries` (name, bytes, a link when Some(target)); stored (not deflated) when `stored`, so a test can corrupt a file's bytes.
+    fn zip_of(to: &Path, entries: &[(&str, &[u8])], links: &[(&str, &str)], stored: bool) {
+        use std::io::Write;
+        let mut w = zip::ZipWriter::new(std::fs::File::create(to).unwrap());
+        let o = zip::write::SimpleFileOptions::default().compression_method(if stored { zip::CompressionMethod::Stored } else { zip::CompressionMethod::Deflated });
+        for (n, b) in entries { if n.ends_with('/') { w.add_directory(*n, o).unwrap() } else { w.start_file(*n, o).unwrap(); w.write_all(b).unwrap() } }
+        for (n, t) in links { w.add_symlink(*n, *t, o).unwrap() }
+        w.finish().unwrap();
+    }
+    fn win_runtime(root: &str, v: &str) -> Vec<(String, Vec<u8>)> {
+        vec![(format!("{root}/"), vec![]), (format!("{root}/bin/kicad-cli.exe"), b"MZ\x90\0 a PE stand-in".to_vec()),
+             (format!("{root}/manifest.json"), format!(r#"{{"version": "{v}", "platform": "windows-x86_64"}}"#).into_bytes()),
+             (format!("{root}/share/backplane/api.desc"), b"x".to_vec()), (format!("{root}/share/kicad/big.bin"), vec![7u8; 3 << 20])]
+    }
+    #[test] fn a_zip_unpacks_here_and_anything_climbing_out_or_linking_is_refused() {
+        let r = tmp("rf-zip"); let root = "backplane-kicad-windows-x86_64-0.0.1-bp.1";
+        let ents = win_runtime(root, "0.0.1-bp.1"); let e: Vec<(&str, &[u8])> = ents.iter().map(|(n, b)| (n.as_str(), b.as_slice())).collect();
+        zip_of(&r.join("ok.zip"), &e, &[], false);
+        let out = r.join("out"); std::fs::create_dir(&out).unwrap();
+        assert_eq!(unzip(&r.join("ok.zip"), root, &out), Ok(()));
+        assert_eq!(std::fs::read(out.join(root).join("share/kicad/big.bin")).unwrap(), vec![7u8; 3 << 20]);
+        assert!(std::fs::read(out.join(root).join("bin/kicad-cli.exe")).unwrap().starts_with(b"MZ"));
+        // each refused before anything is written
+        let bad = |name: &str, extra: &[(&str, &[u8])], links: &[(&str, &str)], why: &str| {
+            let z = r.join(format!("{name}.zip")); let mut e2 = e.clone(); e2.extend_from_slice(extra); zip_of(&z, &e2, links, false);
+            let o = r.join(name); std::fs::create_dir(&o).unwrap();
+            let got = unzip(&z, root, &o).unwrap_err(); assert!(got.contains(why), "{name}: {got}");
+            assert!(!r.join("evil").exists(), "{name}: nothing outside");
+        };
+        bad("dotdot", &[(&format!("{root}/../../evil"), b"x")], &[], "Unsafe runtime archive path");
+        bad("backslash", &[(&format!("{root}\\..\\..\\evil"), b"x")], &[], "Unsafe runtime archive path");
+        bad("drive", &[("C:/evil", b"x")], &[], "Unsafe runtime archive path");
+        bad("absolute", &[("/evil", b"x")], &[], "Unsafe runtime archive path");
+        bad("root", &[("another-root/evil", b"x")], &[], "Unexpected runtime archive root");
+        bad("link", &[], &[(&format!("{root}/bin/out"), "../../../evil")], "Unsafe link in the KiCad archive");
+        // a file whose bytes changed after it was written (its CRC no longer matches) is not taken
+        zip_of(&r.join("crc.zip"), &[(&format!("{root}/manifest.json"), b"0123456789abcdef")], &[], true);
+        let mut b = std::fs::read(r.join("crc.zip")).unwrap(); let at = b.windows(16).position(|w| w == b"0123456789abcdef").unwrap(); b[at] = b'X'; std::fs::write(r.join("crc.zip"), b).unwrap();
+        let o = r.join("crc"); std::fs::create_dir(&o).unwrap();
+        assert!(unzip(&r.join("crc.zip"), root, &o).unwrap_err().contains("Could not unpack KiCad"));
+    }
+    /// The Windows package through the whole Rust fetch (the stand-in curl serves it): checked, unzipped here, its .exe a PE, its manifest read.
+    #[cfg(unix)] #[test] fn the_rust_fetch_installs_a_windows_zip_without_tar() {
+        let r = tmp("rf-winzip"); let (_, bin) = fixture(&r, false); let v = "0.0.1-bp.1"; let root = format!("backplane-kicad-windows-x86_64-{v}");
+        let asset = format!("{root}.zip"); let ents = win_runtime(&root, v);
+        zip_of(&r.join("serve").join(&asset), &ents.iter().map(|(n, b)| (n.as_str(), b.as_slice())).collect::<Vec<_>>(), &[], false);
+        let sum = sha256_file(&r.join("serve").join(&asset)).unwrap(); std::fs::write(r.join("serve/SHA256SUMS"), format!("{sum}  {asset}\n")).unwrap();
+        let leak = |s: String| -> &'static str { Box::leak(s.into_boxed_str()) };
+        let p = Package { platform: "windows-x86_64", version: v, release: "backplane-kicad-v0.0.1-bp.1", asset: leak(asset), sha256: leak(sum), format: "zip", cli: "bin/kicad-cli.exe" };
+        // no tar anywhere: the fetch is given only the stand-in curl's folder and a tar that fails if it is ever started
+        let nt = r.join("notar"); std::fs::create_dir_all(&nt).unwrap(); exe(&nt.join("tar"), "#!/bin/sh\necho tar was started >&2; exit 9\n");
+        let (got, steps) = fetch_run(&r, &p, &[bin.clone(), nt]);
+        let parent = r.join("home/kicad");
+        assert_eq!(got, Ok(parent.join(v)), "{steps:?}");
+        assert_eq!(std::fs::read(parent.join(v).join("share/kicad/big.bin")).unwrap().len(), 3 << 20);
+        let left: Vec<_> = std::fs::read_dir(&parent).unwrap().flatten().map(|e| e.file_name()).collect(); assert_eq!(left.len(), 1, "no stage, partial or lock is left: {left:?}");
+    }
     /// The Linux bump to a hotfix: a four-part version installs beside the release it fixes, checked the same, and is the runtime taken.
     #[cfg(unix)] #[test] fn the_rust_fetch_installs_a_hotfix_beside_its_release() {
         let r = tmp("rf-hot"); let (p, bin) = fixture_v(&r, false, "10.99.0-bp.12.1"); assert_eq!(check_package(&p), Ok(()));
@@ -767,10 +841,10 @@ cp \"$f\" \"$out\"
         assert!(a.contains("-C - ") && a.contains("--retry 3") && a.contains("--proto =https") && a.ends_with("-o /t/f https://h/f"), "{a}");
         assert_eq!(get_args(&Getter::Wget("/w".into()), "https://h/f", Path::new("/t/f")).join(" "), "-q --https-only -c --tries=3 --waitretry=2 -O /t/f https://h/f");
     }
-    #[test] fn windows_uses_its_own_curl_and_tar() {
+    #[test] fn windows_uses_its_own_curl_and_unzips_itself() {
         let r = tmp("rf-win"); let s = r.join("System32"); std::fs::create_dir_all(&s).unwrap();
-        assert!(tools_in(true, Some(&r), &[]).unwrap_err().contains("curl.exe and tar.exe were not found"));
-        for f in ["curl.exe", "tar.exe"] { std::fs::write(s.join(f), "").unwrap() }
+        assert!(tools_in(true, Some(&r), &[]).unwrap_err().contains("curl.exe was not found"));
+        std::fs::write(s.join("curl.exe"), "").unwrap();
         assert_eq!(tools_in(true, Some(&r), &[PathBuf::from("/elsewhere")]), Ok(Tools { get: Getter::Curl(s.join("curl.exe")), tar: s.join("tar.exe") }));
         assert_eq!(tools_in(true, None, &[]).unwrap_err(), "SystemRoot is not set");
     }
