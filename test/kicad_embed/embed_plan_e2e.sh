@@ -6,6 +6,7 @@
 #   P3  the person approves one corridor (plan.approve, as the Plan panel does); the agent's next plan_get says so in `changes`
 #   P4  plan_route of that corridor is let through to KiCad
 #   P6  the Plan panel (mgmt.plan) lists the plan by layer with what awaits approval, then the approval; screenshots
+#   P7  back in Backplane's board viewer, the plan's bands drawn over the board (screenshot p4_viewer_bands)
 #   P5  the agent that asked is woken with the person's decision (ET_PLAN_CHANGED / plan.approve -> a message in its thread)
 # Copies only (seed_project.py), the board open in the embedded KiCad (the plan API is the GUI's). Fork mode.
 set -euo pipefail
@@ -28,7 +29,8 @@ PROJ="$OUT/proj"; PCB="$PROJ/ecc83-pp.kicad_pcb"
 # the plan API is the open KiCad's (bp.12's headless server answers AS_UNHANDLED): the board is opened in the embedded editor first
 cat >"$OUT/script.json" <<'EOF'
 [{"select":0},{"wait":2000},{"click":"rail:Board"},{"wait":2500},{"click":"ui:Edit"},
- {"kicad":{"wait_painted":60000,"kind":"PCB","tag":"pcb_init"}},{"wait":1500},{"click":"mgmt:plan"},{"wait":1500},{"mark":"edit_ready"},{"wait":150000}]
+ {"kicad":{"wait_painted":60000,"kind":"PCB","tag":"pcb_init"}},{"wait":1500},{"click":"mgmt:plan"},{"wait":1500},{"mark":"edit_ready"},{"wait":110000},
+ {"click":"ui:View"},{"wait":6000},{"mark":"viewer"},{"wait":20000}]
 EOF
 HOME="$OUT/fh" BACKPLANE_GPUI_ASSETS="$ASSETS_DIR" BACKPLANE_GPUI_RECTS=1 BACKPLANE_GPUI_HOLD=1 \
 "$CLIENT_BIN" --url "http://127.0.0.1:$HPORT" --token-file "$OUT/home/token" --script "$OUT/script.json" --exit-after 240 >"$OUT/client.log" 2>&1 &
@@ -89,4 +91,7 @@ check "The agent's next plan_get says the person approved it" "$(echo "$R5" | py
 R6=$(ask plan_route '{"ids":["c-k"],"max_nets":2}'); echo "$R6" | cut -c1-300
 check "plan_route of the approved corridor goes through to KiCad and routes it" "$(echo "$R6" | grep -q 'not approved\|nothing in the plan' && echo 0 || (echo "$R6" | grep -q 'corridor.*c-k.*routed' && echo 1 || echo 0))" "$(echo "$R6" | cut -c1-300)"
 sleep 3; shot "p3_routed"
+# P7: Backplane's own board viewer draws the plan's bands read-only (the Plan panel's data)
+wait_for_log "$OUT/client.log" '"name":"viewer","event":"mark"' 600 || true
+sleep 1; shot "p4_viewer_bands"
 finish_suite "embed_plan_e2e ($EMBED_MODE)"

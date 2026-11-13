@@ -56,8 +56,25 @@ pub fn data(plan: &Value, asks: &[Value], live: bool) -> Value {
     let awaiting = rows.iter().filter(|(_, v)| matches!(v["state"].as_str(), Some("proposed") | Some("edited"))).count();
     let blocked = rows.iter().filter(|(_, v)| v["state"] == "blocked").count();
     let routing = rows.iter().any(|(_, v)| v["state"] == "routing");
-    json!({"badge": {"n": awaiting + blocked, "tone": if blocked > 0 { "bad" } else if awaiting > 0 { "warn" } else { "" }}, "revision": plan["revision"], "live": live,
+    let draw = draw(plan, &rows);
+    json!({"draw": draw, "badge": {"n": awaiting + blocked, "tone": if blocked > 0 { "bad" } else if awaiting > 0 { "warn" } else { "" }}, "revision": plan["revision"], "live": live,
         "awaiting": awaiting, "blocked": blocked, "routing": routing, "asks": asks, "layers": ls, "empty": rows.is_empty()})
+}
+
+/// What the viewers draw over the board (read-only bands and regions, the floorplanner's look per state): corridors as bands along their
+/// path at their width, plane regions as their outline; millimetres, board coordinates. At most `MAX_POINTS` points in all (the info's bound).
+pub const MAX_POINTS: usize = 3000;
+pub fn draw(plan: &Value, rows: &[(String, Value)]) -> Value {
+    let state = |id: &str| rows.iter().find(|(_, v)| v["id"] == id).map(|(_, v)| v["state"].clone()).unwrap_or(json!("proposed"));
+    let colour = |id: &str| rows.iter().find(|(_, v)| v["id"] == id).map(|(_, v)| v["color"].clone()).unwrap_or(json!("#8a8a8a"));
+    let nets = |id: &str| rows.iter().find(|(_, v)| v["id"] == id).map(|(_, v)| v["nets"].clone()).unwrap_or(json!(0));
+    let mut left = MAX_POINTS;
+    let mut take = |pts: &Value| -> Option<Value> { let n = pts.as_array().map_or(0, Vec::len); if n == 0 || n > left { return None } left -= n; Some(pts.clone()) };
+    let bands: Vec<Value> = plan["corridors"].as_array().into_iter().flatten().filter_map(|c| { let id = st(c, "id");
+        Some(json!({"id": id, "layer": c["layer"], "width": c["width"].as_f64().unwrap_or(1.0), "path": take(&c["path"])?, "state": state(id), "color": colour(id), "nets": nets(id), "vias": c["vias"]})) }).collect();
+    let regions: Vec<Value> = plan["planes"].as_array().into_iter().flatten().filter_map(|p| { let id = st(p, "id");
+        Some(json!({"id": id, "layer": p["layer"], "net": p["net"], "outline": take(&p["outline"][0])?, "state": state(id), "color": colour(id)})) }).collect();
+    json!({"bands": bands, "regions": regions})
 }
 
 /// The board of a project's .kicad_pro.
@@ -109,5 +126,9 @@ mod tests {
         assert_eq!((d["awaiting"].clone(), d["blocked"].clone(), d["routing"].clone()), (json!(2), json!(1), json!(true)));
         assert_eq!(d["badge"], json!({"n": 3, "tone": "bad"}));
         assert_eq!(data(&json!({}), &[], false)["empty"], true);
+        let mut p2 = plan.clone(); p2["corridors"][0]["path"] = json!([[10.0, 20.0], [30.0, 20.0]]); p2["corridors"][0]["width"] = json!(2.4); p2["planes"][0]["outline"] = json!([[[0, 0], [5, 0], [5, 5]]]);
+        let dr = data(&p2, &[], true)["draw"].clone();
+        assert_eq!((dr["bands"].as_array().unwrap().len(), dr["bands"][0]["width"].clone(), dr["bands"][0]["state"].clone(), dr["bands"][0]["color"].clone()), (1, json!(2.4), json!("proposed"), json!("#e8a33d")), "corridors without a path are not drawn");
+        assert_eq!(dr["regions"][0]["outline"].as_array().unwrap().len(), 3);
     }
 }
