@@ -9,6 +9,7 @@
 //! KiCad's ApprovePlan as the person. `plan_route` is refused here, before KiCad is asked, unless what it would route is approved.
 //! Laws `plan_*`.
 pub mod events;
+pub mod panel;
 
 use crate::{agents::mcp::ToolSet, api::{Caller, Fut, RpcHandler}, hub::Hub};
 use serde_json::{json, Value};
@@ -208,7 +209,7 @@ pub async fn approve(hub: &Arc<Hub>, pcb: &str, layer: &str, ids: &[String], yes
 }
 pub struct Rpc;
 impl RpcHandler for Rpc {
-    fn methods(&self) -> &'static [&'static str] { &["plan.approve", "plan.stop", "plan.get"] }
+    fn methods(&self) -> &'static [&'static str] { &["plan.approve", "plan.stop", "plan.get", "plan.focus"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, _who: &'a Caller, id: &'a Value, m: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             let path = if !sv(p, "pro").is_empty() { sv(p, "pro") } else { sv(p, "path") };
@@ -218,6 +219,7 @@ impl RpcHandler for Rpc {
                 let ids: Vec<String> = p["ids"].as_array().map(|x| x.iter().filter_map(Value::as_str).map(str::to_string).collect()).unwrap_or_default();
                 match m {
                     "plan.approve" => approve(hub, &pcb, sv(p, "layer"), &ids, p["approve"] != false).await,
+                    "plan.focus" => panel::focus(hub, if sv(p, "pro").is_empty() { sv(p, "path") } else { sv(p, "pro") }, sv(p, "id")).await,
                     "plan.stop" => { let r = call(hub, None, &pcb, "StopPlanRouting", json!({"board": spec(&pcb)})).await; events::settle(hub, &pcb).await; r }
                     _ => read_plan(hub, None, &pcb, true).await,
                 }
@@ -231,6 +233,7 @@ pub fn start(hub: &Arc<Hub>, ag: Option<&Arc<crate::agents::Agents>>) {
     hub.register_rpc(Arc::new(Rpc));
     if let Some(ag) = ag { ag.add_tools(Arc::new(Tools(hub.clone()))) }
     events::start(hub);
+    crate::files::kicad::mgmt::register(Arc::new(panel::PlanPanel)); // the Plan tab beside the design
 }
 
 #[cfg(test)]

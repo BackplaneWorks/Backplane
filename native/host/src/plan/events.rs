@@ -19,9 +19,12 @@ pub async fn ask(hub: &Arc<Hub>, thread: &str, pcb: &str, what: &str, note: &str
 }
 /// The plan changed (or was asked about): read it and publish it; requests the person answered are dropped.
 pub async fn changed(hub: &Arc<Hub>, pcb: &str) {
-    let plan = super::read_plan(hub, None, pcb, true).await.unwrap_or(Value::Null);
+    let plan = super::panel::plan_now(hub, pcb).await.0;
     let v = json!({"board": pcb, "summary": if plan.is_null() { Value::Null } else { super::summary(&plan) }, "items": super::items(&plan).iter().map(item_json).collect::<Vec<_>>(), "asks": open_asks(pcb), "revision": plan["revision"]});
     let _ = hub.set_info(&info_key(pcb), &v.to_string()).await;
+    // the Plan panel follows (its project is the board's .kicad_pro)
+    let pro = crate::files::kicad::project::read(&std::path::Path::new(pcb).parent().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default()).pro;
+    if !pro.is_empty() { super::panel::publish(hub, &pro).await }
 }
 pub fn item_json(i: &super::Item) -> Value { json!({"id": i.id, "kind": i.kind, "layer": i.layer, "group": i.group, "status": i.status, "edited": i.edited, "locked": i.locked, "nets": i.nets, "progress": i.progress.map(|(r, t)| json!([r, t]))}) }
 static HUB: OnceLock<std::sync::Weak<Hub>> = OnceLock::new();
@@ -58,7 +61,7 @@ pub fn judged(plan: &Value, what: &str) -> Option<String> {
 }
 /// Publish the plan and wake the threads whose asks were judged (each told once, in its own words).
 pub async fn settle(hub: &Arc<Hub>, pcb: &str) {
-    let plan = super::read_plan(hub, None, pcb, false).await.unwrap_or(Value::Null);
+    let plan = super::panel::plan_now(hub, pcb).await.0;
     let mut tell: Vec<(String, String)> = vec![];
     if !plan.is_null() {
         let mut m = asks().lock().unwrap();

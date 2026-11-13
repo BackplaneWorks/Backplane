@@ -129,6 +129,7 @@ pub fn controls(thread: &Value, m: &Mgmt) -> Vec<(String, String, String)> {
     if st["open"].as_str().map_or(false, |o| !o.is_empty()) { /* i18n-ok: ctl ids and labels the drivers press */ v.extend([("mgmt:right".into(), "Right".into(), "dock:right".into()), ("mgmt:bottom".into(), "Bottom".into(), "dock:bottom".into())]); }
     v.extend(super::mgmt_bom::controls(m));
     v.extend(super::mgmt_fab::controls(m));
+    v.extend(super::mgmt_plan::controls(m));
     v.extend(super::mgmt_checks::controls(m));
     v
 }
@@ -138,6 +139,7 @@ pub fn act(app: &mut Backplane, a: &str, cx: &mut Context<Backplane>) {
     else if let Some(s) = a.strip_prefix("dock:") { dock(app, s, cx) }
     else if let Some(b) = a.strip_prefix("bom:") { super::mgmt_bom::act(app, b, cx) }
     else if let Some(b) = a.strip_prefix("fab:") { super::mgmt_fab::act(app, b, cx) }
+    else if let Some(b) = a.strip_prefix("plan:") { super::mgmt_plan::act(app, b, cx) }
     else if let Some(b) = a.strip_prefix("checks:") { super::mgmt_checks::act(app, b, cx) }
     else if let Some(b) = a.strip_prefix("life:") { super::mgmt_life::act(app, b, cx) }
 }

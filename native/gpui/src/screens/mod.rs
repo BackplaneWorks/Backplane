@@ -70,6 +70,7 @@ pub mod keysheet;
 pub mod mgmt;
 pub mod mgmt_bom;
 pub mod mgmt_fab;
+pub mod mgmt_plan;
 pub mod kcomment;
 pub mod mgmt_checks;
 pub mod mgmt_life;
