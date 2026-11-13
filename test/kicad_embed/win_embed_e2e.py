@@ -614,6 +614,10 @@ class SuiteHarness:
             env=seed_env,
             check=True,
         )
+        # BP_SEED_KICAD_PROFILE=<dir>: start KiCad from a profile an earlier session left (e.g. a saved AUI layout with panes open)
+        seed_prof = os.environ.get("BP_SEED_KICAD_PROFILE", "")
+        if seed_prof and os.path.isdir(seed_prof):
+            shutil.copytree(seed_prof, self.p("fh/AppData/Roaming/kicad/10.99"), dirs_exist_ok=True)
 
     def base_env(self, embed_mode: str = "fork") -> dict:
         env = dict(os.environ)
@@ -1053,6 +1057,17 @@ def run_window_suite(h: SuiteHarness) -> int:
                     frm_h = int(r_shown.get("shown") or 0)
                     kpid = int(r_shown.get("pid") or 0)
                     h.track_pid(kpid)
+                    # the PCB frame's window tree as shown (AUI panes: canvas, toolbars, Appearance, Properties, Agents...) and its
+                    # client size, for diagnosing a squeezed canvas
+                    try:
+                        fh = frm_h or int((shown_frame_of(r_shown) or {}).get("xid") or 0)
+                        rc = W.RECT()
+                        u32.GetClientRect(fh, ctypes.byref(rc))
+                        kids = [c for c in list_child_windows(fh) if c["visible"] and c["w"] >= 8 and c["h"] >= 8]
+                        with open(h.p("panes_01_shown.json"), "w", encoding="utf-8") as pf:
+                            json.dump({"frame": fh, "client": [rc.right - rc.left, rc.bottom - rc.top], "children": kids}, pf, indent=1)
+                    except Exception as e:
+                        print(f"DIAG panes dump failed: {e}")
                     win32_styles_obs = {
                         "top_clipchildren": bool(top_h and (hwnd_style(top_h) & WS_CLIPCHILDREN) != 0),
                         "cont_ws_child": bool(cont_h and (hwnd_style(cont_h) & WS_CHILD) != 0 and int(u32.GetAncestor(cont_h, GA_PARENT) or 0) == top_h),
@@ -1786,11 +1801,38 @@ def run_resilience_suite(h: SuiteHarness) -> int:
         time.sleep(0.7)
         h.shot("02_after_human_undo")
         n_undo = h.ipc_cmd("items-count", api_sock, "pcb", "11")["count"]
-        h.check(
-            f"Human Ctrl+Z inside embedded PCB Editor atomically undid agent's IPC commit ({n1} -> {n_undo})",
-            n_undo == n0,
-            f"expected {n0} got {n_undo}",
-        )
+        kdesc = os.path.join(h.kicad_dir, "share", "backplane", "api.desc")
+        per_actor = False
+        try:
+            with open(kdesc, "rb") as df:
+                per_actor = b"UndoAgentChange" in df.read()
+        except OSError:
+            pass
+        if per_actor:
+            # bp.11+ co-edit, per-actor undo: the person's Ctrl+Z leaves the agent's edit alone; the Agents pane's "Undo this change"
+            # (UndoAgentChange over IPC) takes it back (as test/kicad_embed/embed_agent_resilience_e2e.sh)
+            h.check(
+                f"Human Ctrl+Z leaves the agent's IPC commit alone (per-actor undo: {n1} -> {n_undo})",
+                n_undo == n1,
+                f"expected {n1} got {n_undo}",
+            )
+            try:
+                ua = h.ipc_cmd("undo-agent-latest", api_sock)
+            except Exception as e:
+                ua = {"error": str(e)}
+            time.sleep(0.6)
+            n_undo = h.ipc_cmd("items-count", api_sock, "pcb", "11")["count"]
+            h.check(
+                f"The agent's change taken back (UndoAgentChange, as the Agents pane does: {n1} -> {n_undo})",
+                n_undo == n0,
+                f"expected {n0} got {n_undo}: {ua}",
+            )
+        else:
+            h.check(
+                f"Human Ctrl+Z inside embedded PCB Editor atomically undid agent's IPC commit ({n1} -> {n_undo})",
+                n_undo == n0,
+                f"expected {n0} got {n_undo}",
+            )
 
         # 3. Child freeze (NtSuspendProcess) isolation + RegisterHotKey grab_escape (Ctrl+`) host rescue
         h.ipc_cmd("agent-add-track", api_sock, "35.0", "98.0", "140.0", "126.0", "2.0", "3")
