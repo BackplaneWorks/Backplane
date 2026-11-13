@@ -29,7 +29,7 @@ cat >"$HH/panels.json" <<J
  {"kicad":{"wait_painted":120000,"kind":"PCB","tag":"p2"}},{"kicad":{"report":true,"tag":"p2"}},{"mark":"p2-ready"},{"wait":30000},{"kicad":{"report":true,"tag":"p2c"}},{"mark":"commented"},
  {"keys":"alt-shift-b"},{"wait":3000},{"mark":"bom"},{"wait":8000},
  {"click":"mgmt:checks"},{"wait":8000},{"mark":"checks"},{"wait":60000},
- {"click":"rail:Gerbers"},{"wait":6000},{"mark":"gerbers"},{"wait":5000},{"mark":"end2"}]
+ {"click":"rail:Gerbers"},{"wait":6000},{"mark":"gerbers"},{"wait":20000},{"mark":"end2"}]
 J
 cp "$HH/win.log" "$OUT/logs/win-1.log" 2>/dev/null; : >"$HH/win.log"; T2=$(date +%s.%N)
 launch --url http://127.0.0.1:$(hub_port) --token-file $PH/.backplane/hub/token --script $PH/panels.json
