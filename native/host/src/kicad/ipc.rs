@@ -141,7 +141,10 @@ impl Actor {
             if !p["ok"].as_bool().unwrap_or(false) { let _ = me.send(Msg::Bad { project, why: format!("it did not answer Ping: {}", p["error"].as_str().unwrap_or("")) }); return }
             let o = ask("kiapi.common.commands.GetVersion").await.unwrap_or_else(|_| failed("no reply"));
             let full = o["message"]["version"]["full_version"].as_str().unwrap_or("").to_string();
-            if o["ok"].as_bool().unwrap_or(false) && ks::version_ok(&full, &env.version) { let _ = me.send(Msg::Up { project, version: full }); }
+            // status says the manifest's version (a test build's GetVersion is a describe name, "...-dirty-bp.13"); KiCad's own string is logged
+            if o["ok"].as_bool().unwrap_or(false) && ks::version_ok(&full, &env.version) {
+                eprintln!("kicad ipc: {project} up, KiCad says {full} (manifest {})", env.version);
+                let _ = me.send(Msg::Up { project, version: shown_version(&env.version, &full) }); }
             else { let err = o["error"].as_str().unwrap_or(""); let _ = me.send(Msg::Bad { project, why: if err.is_empty() { format!("this KiCad is {full}, not the {} Backplane installed", env.version) } else { format!("it did not answer GetVersion: {err}") } }); }
         });
     }
@@ -504,8 +507,15 @@ impl RpcHandler for IpcRpc {
     }
 }
 
+/// The version a ready server reports: its manifest's when it has one, else what KiCad said.
+fn shown_version(manifest: &str, full: &str) -> String { if manifest.is_empty() { full } else { manifest }.to_string() }
+
 #[cfg(test)]
 mod tests {
+    #[test] fn status_shows_the_manifests_version_and_kicads_own_only_without_one() {
+        assert_eq!(shown_version("10.99.0-bp.13", "backplane-kicad-v10.99.0-bp.7-15-g8d903542-dirty-bp.13"), "10.99.0-bp.13");
+        assert_eq!(shown_version("", "10.99.0-bp.13"), "10.99.0-bp.13");
+    }
     /// A managed install on Windows has `bin\kicad-cli.exe`: the newest version's is found, with a space in the folder name.
     /// An update installs beside the old runtime: a hotfix (bp.12.1) is taken over its release (bp.12) and older ones, whatever the folder order.
     #[test] fn the_hotfix_runtime_is_taken_over_the_release_it_fixes() {
