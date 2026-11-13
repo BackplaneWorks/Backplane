@@ -50,6 +50,15 @@ and exits non-zero on any FAIL.
 The three oracles of docs/kicad-embed-e2e.md: the window system and pixels (screenshots, the pane's report with its X tree, before/after
 diffs), the live IPC (the hub's `kicad_ipc` answers in the agent's turn), the files and `kicad-cli` (the saved board, DRC, the stock checks).
 
+The KiCad a fresh install gets must be the latest release of the repository setup downloads from (`install.rs` `FROM`), or the check
+fails. A deliberate hold is declared in `test/bare/kicad-hold` (`<version> <why>`): while the install is exactly that version the check
+reads HOLD with a paper cut; any other version fails, and the hold still being there once the install is the latest fails too. The commit
+that bumps the pin deletes it.
+
+Every X call the harness makes (xdotool, screenshots, xwininfo) and every hub or KiCad IPC call is bounded: a timeout is a FAIL naming
+the step (each step prints `STEP <seconds> <name>`), with the box's processes in `logs/xstuck.txt`. Rerun 3 lost 46 minutes to one
+unbounded X call in the second session.
+
 ## Stock KiCad compatibility (test/bare/stock_compat.py)
 
 The fork saves natively; a person with a release KiCad gets the fork's export, `kicad-cli project downgrade --target 10.0`. For each project:
