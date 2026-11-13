@@ -282,7 +282,8 @@ try:
             got = once(h14, h15); clean = expect_once or {}
             out = [(k, v["twice"], v["once"], clean.get(k, {}).get("once", v["once"])) for k, v in got.items()]   # without --expect-from: only that nothing came twice
             if all(t == 0 and there == want for _, t, there, want in out):
-                ok("resume", f"{gtag} finished the import ({', '.join(f'{there} {k}' for k, _, there, _ in out)}, each once{", as a clean import of this home brings" if expect_once else ""}); elapsed {result.get('elapsed_s')} s")
+                counts = ', '.join(f'{there} {k}' for k, _, there, _ in out); as_clean = ", as a clean import of this home brings" if expect_once else ""   # no nested quotes: Python 3.10 (ubuntu-22.04)
+                ok("resume", f"{gtag} finished the import ({counts}, each once{as_clean}); elapsed {result.get('elapsed_s')} s")
             else: no("resume", f"(kind, twice, there once, a clean import) {out}")
             if device:
                 w2 = Ws(hub15, device); hi = w2.hello() if w2.status == 101 else None
