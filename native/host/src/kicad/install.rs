@@ -403,7 +403,9 @@ pub async fn fetch(t: &Tools, base: &str, parent: &Path, p: &Package, log: &Path
     let have = |f: &Path| std::fs::metadata(f).map_or(0, |m| m.len());
     let total = length(&t.get, &url).await;
     let before = have(&pkg);
-    say(step, if before > 0 { format!("Downloading {} (continuing from {} MB)", p.asset, before >> 20) } else { format!("Downloading {}", p.asset) });
+    // megabytes rounded as Bytes::words rounds them (the stop said 102, the continue said 101 for the same file)
+    let mb = |b: u64| (b + (1 << 19)) >> 20;
+    say(step, if total > 0 && before >= total { format!("Downloading {} (already downloaded)", p.asset) } else if before > 0 { format!("Downloading {} (continuing from {} MB)", p.asset, mb(before)) } else { format!("Downloading {}", p.asset) });
     let mut meter = Meter::default();
     bytes(meter.at(std::time::Instant::now(), before, total));
     // a download already whole (an earlier try ended after it) is not asked for again: a server answers a range past the end with an error
@@ -411,6 +413,7 @@ pub async fn fetch(t: &Tools, base: &str, parent: &Path, p: &Package, log: &Path
         let mut ok = Err(String::new());
         for _ in 0..3 { ok = tool(&gp, &get_args(&t.get, &url, &pkg), log, || bytes(meter.at(std::time::Instant::now(), have(&pkg), total))).await; if ok.is_ok() { break } tokio::time::sleep(std::time::Duration::from_secs(2)).await }
         if let Err(why) = ok {
+            bytes(Bytes { done: have(&pkg), total, rate: 0, eta: 0 }); // the row's bar where it stopped (the failure carries these bytes)
             let got = have(&pkg);
             let at = if got == 0 { String::new() } else { format!(" at {}", Bytes { done: got, total, rate: 0, eta: 0 }.words().replace(" so far", "")) };
             return Err(format!("The download stopped{at} ({})", if why.is_empty() { "no answer".to_string() } else { why }))
@@ -885,7 +888,8 @@ cp \"$f\" \"$out\"
         // a whole download left by an earlier try is not downloaded again
         let r = tmp("rf-whole"); let (p, bin) = fixture(&r, false); let parent = r.join("home/kicad");
         std::fs::create_dir_all(parent.join(".partial")).unwrap(); std::fs::copy(r.join("serve").join(p.asset), partial(&parent, &p)).unwrap();
-        let (got, _) = fetch_run(&r, &p, &sysdirs(&bin)); assert!(got.is_ok(), "{got:?}");
+        let (got, steps) = fetch_run(&r, &p, &sysdirs(&bin)); assert!(got.is_ok(), "{got:?}");
+        assert!(steps[0].ends_with("(already downloaded)"), "nothing left to fetch is not 'continuing': {steps:?}");
         assert!(!r.join("serve").join(format!("{}.calls", p.asset)).exists(), "not downloaded again");
     }
     #[test] fn a_download_resumes_and_retries() {
