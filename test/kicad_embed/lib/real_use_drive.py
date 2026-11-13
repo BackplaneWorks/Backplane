@@ -799,6 +799,29 @@ def changed_centroid(before, after, min_px=20):
     ys, xs = np.nonzero(before != after)
     if len(xs) < min_px: return None
     return float(xs.mean()), float(ys.mean())
+def calibrate_markers():
+    """Board millimetres on screen from two host review markers (drawn in any view, plan view included): each set alone at a known
+    board point, found by the pixels it changes; then cleared."""
+    from pane_sampler import grab
+    fps = fp_positions()
+    if len(fps) < 2: return None
+    xs = sorted(v[0] for v in fps.values()); ys = sorted(v[1] for v in fps.values())
+    pts_b = [(xs[len(xs) // 5], ys[len(ys) // 5]), (xs[4 * len(xs) // 5], ys[4 * len(ys) // 5])]
+    CV = (PANE["x"] + 40, PANE["y"] + 110, PANE["w"] - 80, PANE["h"] - 180)
+    pts = []
+    for i, (bx, by) in enumerate(pts_b):
+        g0 = grab(*CV); ipc("set-host-markers", SOCK, "pcb", "calib", json.dumps([{"id": f"cal{i}", "title": "calibration", "severity": 2, "x_mm": bx, "y_mm": by}]))
+        time.sleep(0.6); g1 = grab(*CV); ipc("set-host-markers", SOCK, "pcb", "calib", "[]"); time.sleep(0.5)
+        c = changed_centroid(g0, g1, 10)
+        if not c: print(f"DIAG plan calibration (markers): the marker at {bx},{by} mm changed no pixels", flush=True); return None
+        pts.append(((bx, by), (CV[0] + c[0], CV[1] + c[1])))
+    (b1, s1), (b2, s2) = pts
+    if b2[0] == b1[0] or b2[1] == b1[1]: return None
+    k = ((s2[0] - s1[0]) / (b2[0] - b1[0]) + (s2[1] - s1[1]) / (b2[1] - b1[1])) / 2
+    if k <= 0: return None
+    ox, oy = s1[0] - k * b1[0], s1[1] - k * b1[1]
+    print(f"INFO plan calibration (markers): {b1}@{s1} {b2}@{s2} -> {k:.3f} px/mm", flush=True)
+    return lambda x, y: (ox + k * x, oy + k * y)
 def calibrate():
     from pane_sampler import grab
     # small two-pad parts (C, R): their origin is their middle, which is where a selection's changed pixels centre
@@ -933,7 +956,8 @@ if "plan" in JOURNEYS and SOCK:
         if not STATE["on"]: toggled("plan_view_on2", key_after_click, 2.0)
         RESULTS["plan_view_reached"] = {"ms": None, "ok": int(STATE["on"])}
         if STATE["on"]:  # entering plan view refits the view (PLAN_TOOL::fitBesideOverview): the mapping measured before it is stale
-            t2 = calibrate()
+            t2 = calibrate_markers() if has_cap("embed-host-markers", "kiapi.backplane.embed.SetHostMarkers") else None
+            t2 = t2 or calibrate()
             if t2: to_screen = t2; print("INFO plan: recalibrated in plan view", flush=True)
             else: print("DIAG plan: no calibration in plan view; the one from before it is used (clicks may miss)", flush=True)
             RESULTS["plan_calibrated_in_plan_view"] = {"ms": None, "ok": int(bool(t2))}
