@@ -120,11 +120,11 @@ pub fn part_of_item(it: &Value) -> Option<bom::Part> {
         lib: String::new(), sheet: String::new(), unit: it["unit"]["unit"].as_u64().unwrap_or(1) as u128 })
 }
 /// The parts the GUI KiCad holds for the project now (its open schematic, unsaved edits included); None when no GUI KiCad has the
-/// schematic open or it would not answer.
+/// schematic open or it would not answer (busy: `refresh` keeps what it showed, see `busy_now`).
 pub async fn live_parts(pro: &str) -> Option<Vec<bom::Part>> {
     let gui = super::embed::gui_route(pro)?;
     let docs = super::embed::gui_call(&gui, "kiapi.common.commands.GetOpenDocuments", json!({"type": "DOCTYPE_SCHEMATIC"})).await;
-    let doc = docs["message"]["documents"].as_array()?.first()?.clone();
+    let doc = match super::embed::open_docs(&docs) { super::embed::OpenDocs::Docs(d) => d.first()?.clone(), _ => return None };
     let r = super::embed::gui_call(&gui, "kiapi.common.commands.GetItems", json!({"header": {"document": doc}, "types": ["KOT_SCH_SYMBOL"]})).await;
     if r["ok"] != true { return None }
     let items = r["message"]["items"].as_array()?;
@@ -149,10 +149,18 @@ pub fn parts_now(pro: &str, sch: &str) -> (Vec<bom::Part>, Vec<String>) {
     let paths = shs.iter().map(|s| s.path.clone()).collect();
     (bom::parts(&project_name(pro), &shs), paths)
 }
+/// Whether the project's GUI KiCad answers busy (AS_BUSY) right now.
+async fn busy_now(pro: &str) -> bool {
+    let Some(gui) = super::embed::gui_route(pro) else { return false };
+    let docs = super::embed::gui_call(&gui, "kiapi.common.commands.GetOpenDocuments", json!({"type": "DOCTYPE_SCHEMATIC"})).await;
+    matches!(super::embed::open_docs(&docs), super::embed::OpenDocs::Busy(_))
+}
 /// Read and publish a project's BOM now: from the GUI KiCad when it has the schematic open (its unsaved edits too), else from the files.
 /// Published only when it changed (the time it was read aside).
 pub async fn refresh(hub: &Arc<Hub>, pro: &str) {
     let Some((sch, known, old)) = w().lock().unwrap().get(pro).map(|x| (x.sch.clone(), x.paths.clone(), x.stamps.clone())) else { return };
+    // a busy KiCad (a task running) may hold the schematic with unsaved edits: what is shown stays, never swapped for the files
+    if busy_now(pro).await { return }
     let live = live_parts(pro).await.filter(|l| !l.is_empty());
     // the files are read when they changed (or never were): their sheets are what is watched while KiCad is closed
     let files = if known.is_empty() || stamps(&known) != old || live.is_none() {

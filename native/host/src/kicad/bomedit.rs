@@ -92,17 +92,65 @@ fn deferred_of(up: &Value) -> usize { up["updated_items"].as_array().map_or(0, |
     assert_eq!(deferred_of(&json!({})), 0);
 }
 
+/// Whether any of the project's KiCad frames is on screen (GetFrames' `shown`); a runtime without GetFrames counts as shown (never saved for the person).
+async fn shown_to_person(gui: &embed::GuiRoute) -> bool {
+    let o = embed::gui_call(gui, "kiapi.backplane.embed.GetFrames", json!({})).await;
+    if o["ok"] != true { return true }
+    embed::parse_get_frames(&o["message"]).2.iter().any(|f| f.shown)
+}
+
 static AGENTS: OnceLock<Weak<crate::agents::Agents>> = OnceLock::new();
 /// The agents (for the schematic's named lock); main.rs gives them once they run.
 pub fn set_agents(a: &Arc<crate::agents::Agents>) { let _ = AGENTS.set(Arc::downgrade(a)); }
 
-/// The schematic open in the project's GUI KiCad: its document specifier, None when it has none open.
-async fn gui_doc(pro: &str) -> Option<(embed::GuiRoute, Value)> {
-    let gui = embed::gui_route(pro)?;
-    let docs = embed::gui_call(&gui, "kiapi.common.commands.GetOpenDocuments", json!({"type": "DOCTYPE_SCHEMATIC"})).await;
-    let doc = docs["message"]["documents"].as_array()?.first()?.clone();
-    Some((gui, doc))
+/// The schematic the project's GUI KiCad has open. Err when it stays busy (a task running, AS_BUSY) past BUSY_WAIT: it may well have the
+/// schematic open, so the headless path never writes the file behind its back; the panel shows the edit as waiting.
+pub const BUSY_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+pub const BUSY_PREFIX: &str = "waiting: ";
+async fn gui_doc(pro: &str) -> Result<Option<(embed::GuiRoute, Value)>, String> {
+    let Some(gui) = embed::gui_route(pro) else { return Ok(None) };
+    let g = gui.clone();
+    let doc = open_schematic(&move |ty, msg| { let g = g.clone(); async move { embed::gui_call(&g, ty, msg).await } }, BUSY_WAIT).await?;
+    Ok(doc.map(|d| (gui, d)))
 }
+/// The open schematic through `call` (GetOpenDocuments), asked again every 250 ms while KiCad is busy, for at most `wait`.
+async fn open_schematic<F, Fut>(call: &F, wait: std::time::Duration) -> Result<Option<Value>, String>
+where F: Fn(&'static str, Value) -> Fut, Fut: std::future::Future<Output = Value> {
+    let until = std::time::Instant::now() + wait;
+    loop {
+        let docs = call("kiapi.common.commands.GetOpenDocuments", json!({"type": "DOCTYPE_SCHEMATIC"})).await;
+        match embed::open_docs(&docs) {
+            embed::OpenDocs::Busy(_) if std::time::Instant::now() < until => tokio::time::sleep(std::time::Duration::from_millis(250)).await,
+            embed::OpenDocs::Busy(why) => return Err(busy_text(&why)),
+            embed::OpenDocs::Docs(d) => return Ok(d.first().cloned()),
+            embed::OpenDocs::Unknown => return Ok(None),
+        }
+    }
+}
+#[cfg(test)] #[tokio::test] async fn a_busy_kicad_is_waited_for_then_refused_and_nothing_is_written() {
+    let log = Arc::new(std::sync::Mutex::new(Vec::<String>::new()));
+    let l = log.clone();
+    let busy = move |ty: &'static str, _m: Value| { let l = l.clone(); async move { l.lock().unwrap().push(ty.to_string()); json!({"ok": false, "status": "AS_BUSY", "error": "a task is running"}) } };
+    let t0 = std::time::Instant::now();
+    let r = open_schematic(&busy, std::time::Duration::from_millis(600)).await;
+    let e = r.expect_err("busy past the wait is a refusal, never 'no schematic open' (which would send the edit to the file)");
+    assert!(e.starts_with(BUSY_PREFIX) && e.contains("a task is running"), "{e}");
+    assert!(t0.elapsed() >= std::time::Duration::from_millis(600), "it waited");
+    let asked = log.lock().unwrap().clone();
+    assert!(asked.len() >= 2 && asked.iter().all(|t| t.ends_with("GetOpenDocuments")), "asked again while busy, and nothing else (no update, no save): {asked:?}");
+    // KiCad free again within the wait: the schematic it has open
+    let n = Arc::new(std::sync::atomic::AtomicUsize::new(0)); let n2 = n.clone();
+    let later = move |_t: &'static str, _m: Value| { let n = n2.clone(); async move {
+        if n.fetch_add(1, std::sync::atomic::Ordering::SeqCst) == 0 { json!({"ok": false, "status": "AS_BUSY", "error": "x"}) }
+        else { json!({"ok": true, "message": {"documents": [{"type": "DOCTYPE_SCHEMATIC"}]}}) } } };
+    assert_eq!(open_schematic(&later, std::time::Duration::from_secs(5)).await.unwrap(), Some(json!({"type": "DOCTYPE_SCHEMATIC"})));
+}
+/// The refusal for a KiCad busy past the wait: what KiCad says it is doing, marked so the panel shows the edit as waiting, not failed.
+pub fn busy_text(why: &str) -> String { format!("{BUSY_PREFIX}KiCad is busy ({why}); the change is not made yet: try again when it has finished") }
+#[cfg(test)] #[test] fn a_busy_kicad_is_waiting_not_failed() {
+    let t = busy_text("a task is running"); assert!(t.starts_with(BUSY_PREFIX) && t.contains("a task is running"), "{t}");
+}
+
 fn ok_of(v: &Value) -> Result<&Value, String> { if v["ok"] == true { Ok(&v["message"]) } else { Err(v["error"].as_str().or(v["why"].as_str()).unwrap_or("no answer").to_string()) } }
 
 /// An EndCommit for the document the commit was begun on: its header names the document, or KiCad's API takes a header-less commit
@@ -141,7 +189,7 @@ where F: Fn(&'static str, Value) -> Fut, Fut: std::future::Future<Output = Value
 pub async fn edit(hub: &Arc<Hub>, pro: &str, sch: &str, p: &Value) -> Result<Value, String> {
     if crate::copy::on() { return Err("a hub on a copied log (BACKPLANE_COPY=1) writes no design".into()) }
     let (field, refs, value) = check(p)?;
-    if let Some((gui, doc)) = gui_doc(pro).await {
+    if let Some((gui, doc)) = gui_doc(pro).await? {
         // as the person, never an agent's name (an actor of its own before bp.13, their own Ctrl+Z from it);
         // BACKPLANE_BOM_CLIENT=hub: the tests' run as the hub's own actor, to compare what KiCad's undo does with each
         let as_person = AS_PERSON && std::env::var("BACKPLANE_BOM_CLIENT").map_or(true, |v| v != "hub");
@@ -150,9 +198,19 @@ pub async fn edit(hub: &Arc<Hub>, pro: &str, sch: &str, p: &Value) -> Result<Val
         let (todo, was) = prepare(&move |ty, msg| { let (g, w) = (g.clone(), w2.clone()); async move { embed::gui_call_as(&g, ty, msg, &w).await } }, &doc, &refs, &field, &value).await?;
         // one commit, ended or dropped on every path, with the document's header and this name on every call (embed::commit_as)
         let mut deferred = 0;
-        if !todo.is_empty() { deferred = deferred_of(&embed::commit_as(&gui, &who, &doc, todo.clone(), &message(&field, &refs, &value)).await?); embed::unsaved_update(pro, |u| u.touched()); }
+        let mut saved = false;
+        if !todo.is_empty() {
+            deferred = deferred_of(&embed::commit_as(&gui, &who, &doc, todo.clone(), &message(&field, &refs, &value)).await?);
+            // a KiCad the person has not on screen (pre-warmed, or its view closed): nobody would save the change there, and it would go with
+            // that KiCad; it is saved at once, as the headless path does
+            // (co-editing runtimes only: there a save of the person's own unsaved edits too is by design; before, it is never done for them)
+            if deferred == 0 && gui.caps.iter().any(|c| c == "coedit") && !shown_to_person(&gui).await {
+                saved = embed::gui_call_as(&gui, "kiapi.common.commands.SaveDocument", json!({"document": doc}), &who).await["ok"] == true;
+            }
+            if !saved { embed::unsaved_update(pro, |u| u.touched()); }
+        }
         // `deferred`: the person is editing those symbols in KiCad; KiCad applies the change when they finish (a notice follows): not read back yet
-        return Ok(json!({"via": "kicad", "changed": todo.len(), "deferred": deferred, "field": field, "value": value, "was": was, "refs": refs, "undo": undo_by(&gui.version, &gui.caps)}))
+        return Ok(json!({"via": if saved { "file" } else { "kicad" }, "changed": todo.len(), "deferred": deferred, "field": field, "value": value, "was": was, "refs": refs, "undo": undo_by(&gui.version, &gui.caps)}))
     }
     // no KiCad with it open (none, or one with only the board): the headless one writes and saves, under the schematic's lock
     let ag = AGENTS.get().and_then(Weak::upgrade).ok_or("the hub's agents are not running")?;

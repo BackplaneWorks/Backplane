@@ -19,12 +19,14 @@ use std::{collections::{HashMap, HashSet}, sync::{Arc, Mutex, Weak}};
 static HUB: Mutex<Option<Weak<Hub>>> = Mutex::new(None);
 pub fn start(hub: &Arc<Hub>) { *HUB.lock().unwrap() = Some(Arc::downgrade(hub)); hub.register_rpc(Arc::new(CommentRpc)); }
 
-/// The chords the embedded editors hand to Backplane (SetReservedKeys, at each KiCad's start): the fork's own five, and Ctrl+; for a comment
-/// (no KiCad default and no Backplane shortcut uses it). The order is the Windows message's index (native_child.rs `reserved_chord_index`).
-pub const RESERVED: [&str; 6] = ["Ctrl+K", "Ctrl+J", "Ctrl+Tab", "Ctrl+Shift+Tab", "Ctrl+`", "Ctrl+;"];
+/// The chords the embedded editors hand to Backplane (SetReservedKeys, at each KiCad's start): the fork's own five, Ctrl+; for a comment
+/// (no KiCad default and no Backplane shortcut uses it), and the management panels' Alt+Shift+B/C/L/F (BOM, Checks, Lifecycle, Fab: client
+/// keys.rs `mgmt-*`, their default bindings), so they open the panel while KiCad has the keyboard. The order is the Windows message's index
+/// (native_child.rs `reserved_chord_index`).
+pub const RESERVED: [&str; 10] = ["Ctrl+K", "Ctrl+J", "Ctrl+Tab", "Ctrl+Shift+Tab", "Ctrl+`", "Ctrl+;", "Alt+Shift+B", "Alt+Shift+C", "Alt+Shift+L", "Alt+Shift+F"];
 
 /// The chords to reserve on a runtime: `RESERVED`, and on bp.13 (its CommentSelection has `capture_only`, and ';' is KiCad's own "Comment to
-/// Backplane…" key there) a bare ';' too, so that key opens Backplane's window and never KiCad's dialog. Index 6 on Windows.
+/// Backplane…" key there) a bare ';' too, so that key opens Backplane's window and never KiCad's dialog. Index 10 on Windows.
 pub fn reserved(semicolon_is_kicads: bool) -> Vec<&'static str> { let mut v = RESERVED.to_vec(); if semicolon_is_kicads { v.push(";") } v }
 
 /// Whether `ev` is a comment (ET_COMMENT = 19).
@@ -206,8 +208,9 @@ mod tests {
         assert_eq!(request("FK_SCH", true), json!({"kind": "FK_SCH", "capture_only": true}));
         assert_eq!(request("FK_PCB", false), json!({"kind": "FK_PCB", "note": ""}));
         assert_eq!((kind_of("SCH"), kind_of("sch"), kind_of("FK_SCH"), kind_of("PCB"), kind_of("")), ("FK_SCH", "FK_SCH", "FK_SCH", "FK_PCB", "FK_PCB"));
-        assert_eq!(RESERVED[5], "Ctrl+;"); assert_eq!(RESERVED.len(), 6, "the Windows index of each stays");
-        assert_eq!(reserved(false).len(), 6); assert_eq!(reserved(true)[6], ";", "bp.13: KiCad's own ';' comes to Backplane");
+        assert_eq!(RESERVED[5], "Ctrl+;"); assert_eq!(RESERVED.len(), 10, "the Windows index of each stays");
+        assert_eq!(RESERVED[6..], ["Alt+Shift+B", "Alt+Shift+C", "Alt+Shift+L", "Alt+Shift+F"], "the management panels' keys reach Backplane from KiCad");
+        assert_eq!(reserved(false).len(), 10); assert_eq!(reserved(true)[10], ";", "bp.13: KiCad's own ';' comes to Backplane");
     }
     #[test] fn a_comment_reads_as_the_persons_message_with_its_references_and_picture() {
         let c = json!({"frame": "FK_PCB", "note": "Move U3 closer to J1", "names": {"references": ["U3"], "nets": ["GND"], "pins": []},

@@ -171,7 +171,8 @@ fn send_edit(app: &mut Backplane, id: &str, refs: Value, field: &str, value: &st
 /// KiCad takes it back (`undo: "kicad"`); the panel's own Undo (the old value written back) is offered after every edit.
 pub fn edit_note(said: Option<&(bool, String)>, last: Option<&Value>) -> Option<(&'static str, String, bool)> {
     let (ok, what) = said?;
-    if !ok { return Some(("bad", what.clone(), false)) }
+    // the hub's "waiting: …" (KiCad busy with a task past the hub's wait): the edit is not made yet, said as waiting, not as a failure
+    if !ok { return Some(match what.strip_prefix("waiting: ") { Some(w) => ("dim", w.to_string(), false), None => ("bad", what.clone(), false) }) }
     if what == "undone" { return Some(("ok", trs("Put back."), false)) }
     let undo = last.map_or("", |l| l["undo"].as_str().unwrap_or("")); let changed = last.map_or(0, |l| l["changed"].as_u64().unwrap_or(0));
     if changed == 0 { return Some(("dim", trs("Nothing to change."), false)) }
@@ -441,6 +442,7 @@ mod tests {
         let held = edit_note(Some(&ok("kicad")), Some(&json!({"undo": "kicad", "changed": 1, "deferred": 1}))).unwrap();
         assert!(held.1.contains("finish there") && !held.2, "{}", held.1);
         assert_eq!(edit_note(Some(&(false, "locked".into())), None).unwrap(), ("bad", "locked".to_string(), false));
+        assert_eq!(edit_note(Some(&(false, "waiting: KiCad is busy (x)".into())), None).unwrap().0, "dim", "a busy KiCad: waiting, not failed");
         assert!(!edit_note(Some(&ok("file")), Some(&json!({"undo": "panel", "changed": 0}))).unwrap().2); assert_eq!(edit_note(None, None), None);
     }
     #[test] fn columns_fit_the_width_and_the_mpn_shows_whole_or_shortened_in_its_middle() {

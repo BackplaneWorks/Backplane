@@ -4,6 +4,7 @@
 #   M2  a press on a line selects its parts: the viewer's probe lights them (bom_select, probe_sync)
 #   M3  docking at the bottom is the hub's per-project state, kept in <home>/mgmt/panels.json
 #   M4  (stock|fork) in the embedded editor, opening the panel shrinks KiCad's container once (one geometry change), and KiCad stays painted
+#   M10 the panels' keys (Alt+Shift+B/C/L/F) through X with KiCad focused open their panels
 # Copies only (seed_project.py), on a private Xvfb + i3. EMBED_MODE=spike runs M1-M3 only.
 set -euo pipefail
 
@@ -96,13 +97,14 @@ if [ "$EMBED_MODE" != "spike" ]; then
   python3 - "$OUT/script.json" <<'PY'
 import json, sys
 p = sys.argv[1]; s = json.load(open(p))
-s += [{"click": "mgmt:bom"}, {"wait": 1000}, {"mgmt": "bom:row:R3"}, {"wait": 300}, {"mgmt": "bom:set:mpn=E2E-FILE"}, {"wait": 9000}, {"mark": "file_edit"}, {"wait": 500},
+s += [{"mark": "close_kicad"}, {"wait": 8000}, {"click": "mgmt:bom"}, {"wait": 1000}, {"mgmt": "bom:row:R3"}, {"wait": 300}, {"mgmt": "bom:set:mpn=E2E-FILE"}, {"wait": 9000}, {"mark": "file_edit"}, {"wait": 500},
       {"click": "mgmt:bom"}, {"wait": 1500}, {"click": "ui:Edit"},
       {"kicad": {"wait_painted": 45000, "kind": "PCB", "tag": "pcb_init"}}, {"wait": 1500}, {"mark": "edit_ready"}, {"wait": 2500},
       {"click": "mgmt:bom"}, {"wait": 2500}, {"kicad": {"report": True, "tag": "with_panel"}}, {"mark": "edit_panel"}, {"wait": 2500},
       {"click": "kicad-tab:SCH"}, {"kicad": {"wait_painted": 45000, "kind": "SCH", "tag": "sch_init"}}, {"wait": 3000}, {"mark": "sch_ready"}, {"wait": 6000},
       {"mgmt": "bom:row:R4"}, {"wait": 300}, {"mgmt": "bom:set:mpn=E2E-UNDO"}, {"wait": 3000}, {"mark": "live_edit"}, {"wait": 12000},
-      {"mgmt": "bom:undo"}, {"wait": 3000}, {"mark": "panel_undo"}, {"wait": 5000}, {"mgmt": "bom:set:mpn=E2E-UNDO"}, {"wait": 3000}, {"mark": "final"}, {"wait": 8000}]
+      {"mgmt": "bom:undo"}, {"wait": 3000}, {"mark": "panel_undo"}, {"wait": 5000}, {"mgmt": "bom:set:mpn=E2E-UNDO"}, {"wait": 3000}, {"mark": "final"}, {"wait": 20000},
+      {"mark": "hold_now"}, {"wait": 12000}, {"mgmt": "bom:row:R1"}, {"wait": 300}, {"mgmt": "bom:set:mpn=E2E-HELD"}, {"wait": 3000}, {"mark": "held_edit"}, {"wait": 25000}]
 json.dump(s, open(p, "w"))
 PY
 fi
@@ -123,7 +125,7 @@ sleep 0.5; shot "m1_bom_open"
 ST=$(mgmt_info state)
 check "The hub's state has the BOM panel open ($ST)" "$(python3 -c 'import json,sys; v=json.loads(sys.argv[1]); print(int(v.get("open")=="bom" and v.get("side")=="right"))' "$ST" 2>/dev/null || echo 0)"
 BOM=$(mgmt_info bom)
-check "The hub published the schematic's BOM lines" "$(python3 -c 'import json,sys; v=json.loads(sys.argv[1]); ids=[l["id"] for l in v.get("lines",[])]; print(int(v.get("source")=="file" and "R1" in ids and "C1" in ids and "U1" in ids))' "$BOM" 2>/dev/null || echo 0)" "$(echo "$BOM" | head -c 300)"
+check "The hub published the schematic's BOM lines" "$(python3 -c 'import json,sys; v=json.loads(sys.argv[1]); ids=[l["id"] for l in v.get("lines",[])]; print(int(v.get("source") in ("file","kicad") and "R1" in ids and "C1" in ids and "U1" in ids))' "$BOM" 2>/dev/null || echo 0)" "$(echo "$BOM" | head -c 300)"
 check "The panel draws a row per line (R1's row is a control)" "$(has_ctl mgmt:bom:row:R1)"
 
 # M7: each line's part in the fab's stock (the stand-in), cached and asked once each; the badge counts what cannot be ordered
@@ -182,6 +184,9 @@ print(int(n==2))' "$OUT/home/parts/history")"
 
 # M4: beside the embedded editor
 if [ "$EMBED_MODE" != "spike" ]; then
+  # (main pre-warms KiCad with the schematic loaded when the thread is shown: closed here so M6a is the no-KiCad case it says)
+  wait_for_log "$OUT/client.log" '"name":"close_kicad","event":"mark"' 90 || true
+  hub_rpc "[{\"method\":\"editor.kicad.close\",\"params\":{\"project\":\"$PRO\",\"save\":\"discard\"}}]" >/dev/null || true
   # M6a: with no KiCad open, the panel's edit is written to the schematic file (headless KiCad, holding the schematic's lock)
   wait_for_log "$OUT/client.log" '"name":"file_edit","event":"mark"' 90 || true
   # R3's own MPN: R1 is seeded with E2E-FILE, so a match anywhere in the file proved nothing
@@ -289,6 +294,48 @@ ws.onmessage = e => { const v = JSON.parse(e.data); if (v.t === "reply" && v.id 
   M_PH=""; for _ in $(seq 20); do M_PH=$(mpn_of R2); [ "$M_PH" = "E2E-PHONE" ] && break; sleep 0.5; done
   check "KiCad holds the phone's MPN and the BOM shows it (R2: $M_PH)" "$([ "$M_PH" = "E2E-PHONE" ] && echo 1 || echo 0)"
   check "The schematic file does not have the phone's MPN until KiCad saves" "$(grep -q 'E2E-PHONE' "$PROJ/ecc83-pp.kicad_sch" && echo 0 || echo 1)"
+  # M6h: an edit while the person is editing that symbol in KiCad (its properties dialog open): KiCad holds it (ISC_DEFERRED), the panel
+  # says so, and the change goes in when the dialog closes
+  wait_for_log "$OUT/client.log" '"name":"hold_now","event":"mark"' 90 || true
+  COEDIT=$("$(dirname "$KICAD_BIN")/kicad-cli" api-server --describe 2>/dev/null | grep -c '"coedit"' || true)
+  if [ "${COEDIT:-0}" = 0 ]; then
+    echo "KNOWN no co-edit before bp.11: with a KiCad dialog open the panel's edit is refused as busy, and the panel says so (M6h skipped)"
+  else
+  read -r CX CY CW CH < <(xwininfo -id "$CONT" | awk -F: '/Absolute upper-left X/{x=$2}/Absolute upper-left Y/{y=$2}/Width/{w=$2}/Height/{h=$2}END{print x+0, y+0, w+0, h+0}')
+  python3 "$XINPUT_PY" click $((CX + CW / 2)) $((CY + CH * 9 / 10)); sleep 0.5; python3 "$XINPUT_PY" key Escape; sleep 0.3
+  hub_rpc "[{\"method\":\"editor.kicad.select\",\"params\":{\"project\":\"$PRO\",\"references\":[\"R1\"],\"show\":\"SCH\"}}]" >/dev/null || true
+  sleep 1.5; python3 "$XINPUT_PY" key e; sleep 2.5
+  DLG=$(xwininfo -root -tree 2>/dev/null | grep -c "Symbol Properties" || true)
+  check "The person's properties dialog for R1 is open in KiCad ($DLG)" "$([ "${DLG:-0}" -gt 0 ] && echo 1 || echo 0)"
+  wait_for_log "$OUT/client.log" '"name":"held_edit","event":"mark"' 60 || true
+  shot "m6h_held"
+  EH=$(last_ev bom_edited)
+  check "KiCad held the panel's edit while the person edits R1 ($EH)" "$(python3 -c 'import json,sys; e=json.loads(sys.argv[1]); print(int(e.get("ok") is True and (e.get("deferred") or 0)>=1))' "$EH" 2>/dev/null || echo 0)"
+  M_H=$(mpn_of R1)
+  check "Held: R1's MPN is not changed yet (R1: $M_H)" "$([ "$M_H" != "E2E-HELD" ] && echo 1 || echo 0)"
+  # the person closes the dialog (Cancel): the keyboard to the dialog first, else Escape goes to Backplane's window
+  # Escape, as a person would (lane B's a8bbdc74e: the keyboard stays with KiCad's dialog); its Cancel button only if that failed
+  python3 "$XINPUT_PY" key Escape; sleep 1.5
+  ESC_LEFT=$(xwininfo -root -tree 2>/dev/null | grep -c '"Symbol Properties"' || true)
+  check "Escape closes KiCad's dialog in the pane ($ESC_LEFT left)" "$([ "${ESC_LEFT:-0}" = 0 ] && echo 1 || echo 0)"
+  # its Cancel button, measured from the dialog's bottom-right corner (151, 22 px in; GTK at 1800x1050): a key would go to Backplane's window
+  read -r DX DY DW DH < <(xwininfo -root -tree 2>/dev/null | { grep '"Symbol Properties"' || true; } | head -1 | sed -E 's/.* ([0-9]+)x([0-9]+)\+-?[0-9]+\+-?[0-9]+ +\+(-?[0-9]+)\+(-?[0-9]+).*/\3 \4 \1 \2/') || true
+  [ -n "${DW:-}" ] && { python3 "$XINPUT_PY" click $((DX + DW - 151)) $((DY + DH - 22)) || true; }; sleep 1.5
+  DLG=$(xwininfo -root -tree 2>/dev/null | grep -c '"Symbol Properties"' || true)
+  check "The person closed the properties dialog ($DLG left)" "$([ "${DLG:-0}" = 0 ] && echo 1 || echo 0)"
+  for _ in $(seq 30); do M_H=$(mpn_of R1); [ "$M_H" = "E2E-HELD" ] && break; sleep 0.5; done
+  check "When the person closes the dialog the held edit goes in (R1: $M_H)" "$([ "$M_H" = "E2E-HELD" ] && echo 1 || echo 0)"
+  fi
+  # M10: the management panels' keys pressed through X while KiCad has the keyboard (a click on its canvas): KiCad hands each to Backplane
+  # (SetReservedKeys) and that panel opens: Alt+Shift+C Checks, L Lifecycle, F Fab, B BOM
+  for kp in c:checks l:life f:fab b:bom; do
+    k=${kp%%:*}; want=${kp#*:}
+    read -r CX CY CW CH < <(xwininfo -id "$CONT" | awk -F: '/Absolute upper-left X/{x=$2}/Absolute upper-left Y/{y=$2}/Width/{w=$2}/Height/{h=$2}END{print x+0, y+0, w+0, h+0}')
+    python3 "$XINPUT_PY" click $((CX + CW / 2)) $((CY + CH * 9 / 10)); sleep 0.5; python3 "$XINPUT_PY" key Escape; sleep 0.3
+    python3 "$XINPUT_PY" chord alt shift "$k"
+    OPEN=""; for _ in $(seq 12); do OPEN=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("open",""))' "$(mgmt_info state)" 2>/dev/null); [ "$OPEN" = "$want" ] && break; sleep 0.5; done
+    check "With KiCad's keyboard, Alt+Shift+${k^^} opens the $want panel (open: '$OPEN'; KiCad handed: $(grep -ac "\"kicad_key\":\"alt-shift-$k\"" "$OUT/client.log"))" "$([ "$OPEN" = "$want" ] && echo 1 || echo 0)"
+  done
   hub_rpc "[{\"method\":\"editor.kicad.close\",\"params\":{\"project\":\"$PRO\",\"save\":\"discard\"}}]" >/dev/null || true
 fi
 
