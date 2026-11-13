@@ -27,13 +27,16 @@ pub fn markers(fs: &[Finding], doc: &str) -> Vec<Value> {
             "detail": if f.fix.is_empty() { f.detail.clone() } else { format!("{} Fix: {}", f.detail, f.fix).trim().to_string() }});
         if let Some(a) = at { if items_empty(&m) { m["at_nm"] = json!({"x_nm": (a.x * 1e6).round() as i64, "y_nm": (a.y * 1e6).round() as i64}) } }
         if let Some(l) = mine.iter().map(|a| a.layer.as_str()).find(|l| !l.is_empty()) { if doc == "pcb" { m["layer"] = json!(l) } }
-        // the sheet only for a marker without items (ERC's reports name sheets by path, KiCad's field wants KIIDs; items carry their own)
-        if doc == "sch" && items_empty(&m) { if let Some(s) = mine.iter().map(|a| a.sheet.as_str()).find(|s| s.starts_with('/')) { m["sheet_path"] = json!(s) } }
+        // the sheet as KIIDs ("/<root>/<sheet>", the symbol's instance: the right one of a sheet used twice); a sheet named by its
+        // names ("/Power/", ERC's) only for a marker without items, which carry their own
+        if doc == "sch" { if let Some(s) = mine.iter().map(|a| a.sheet.as_str()).find(|s| kiid_path(s) || (s.starts_with('/') && items_empty(&m))) { m["sheet_path"] = json!(s) } }
         v.push((crate::files::kicad::findings::rank(&f.severity), m));
     }
     v.sort_by_key(|x| x.0);
     v.into_iter().take(MAX).map(|x| x.1).collect()
 }
+/// "/<uuid>/<uuid>": a sheet path of KIIDs
+fn kiid_path(s: &str) -> bool { s.starts_with('/') && s.len() > 1 && s.trim_matches('/').split('/').all(|k| k.len() == 36 && k.chars().all(|c| c.is_ascii_hexdigit() || c == '-')) }
 fn items_empty(m: &Value) -> bool { m["items"].as_array().map_or(true, Vec::is_empty) }
 /// Whether the open KiCad shows host markers: its own GetCapabilities (the embedded editor's, not the headless server's) lists the
 /// capability `embed-host-markers` or the command SetHostMarkers.
@@ -88,6 +91,9 @@ mod tests {
         assert_eq!(p[1]["at_nm"], json!({"x_nm": 10500000, "y_nm": 20000000}), "no items: its point, in nanometres");
         assert!(p[0]["detail"].as_str().unwrap().ends_with("Fix: fix it"));
         let s = markers(&fs, "sch"); assert_eq!((s.len(), s[0]["sheet_path"].clone()), (1, Value::Null), "items carry their sheet");
+        let k = "11111111-2222-3333-4444-555555555555"; let kp = format!("/{k}/{k}");
+        let s = markers(&[f("m", "error", vec![Anchor { doc: "sch".into(), uuid: "k4".into(), sheet: kp.clone(), reference: "R5".into(), ..Default::default() }])], "sch");
+        assert_eq!((s[0]["items"].clone(), s[0]["sheet_path"].clone()), (json!([{"value": "k4"}]), json!(kp)), "a symbol's instance sheet, as KIIDs, goes with its items");
         assert!(capable(&json!({"commands": ["kiapi.backplane.embed.SetHostMarkers"]}))); assert!(!capable(&json!({"commands": []})));
         assert!(capable(&json!({"capabilities": ["routing-plan", "embed-host-markers"], "commands": []})));
         assert!(!capable(&json!({"capabilities": ["routing-plan"], "commands": ["kiapi.backplane.embed.GetMarkers"]})));

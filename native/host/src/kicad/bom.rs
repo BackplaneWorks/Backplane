@@ -84,6 +84,26 @@ fn is_sym(b: &[u8]) -> bool { b.len() >= 8 && &b[..7] == b"(symbol" && matches!(
 fn sheet(project: &str, sh: &Sheet) -> Vec<Part> {
     forms(&sh.text).map(|fs| fs.into_iter().filter(|f| is_sym(f)).flat_map(|f| sym(&sh.path, project, &parse(f))).collect()).unwrap_or_default()
 }
+/// Where each placed symbol is, by reference: its KIID and the instance's sheet path (KIIDs, "/<root>/<sheet>"), for findings that
+/// name a symbol (a missing MPN) to be shown on it. The instances of `project` when a symbol has any, else all; the first place of a
+/// reference wins (another unit of the same part is the same symbol for a marker's purpose).
+pub fn places(project: &str, shs: &[Sheet]) -> std::collections::HashMap<String, (String, String)> {
+    let mut m = std::collections::HashMap::new();
+    for sh in shs {
+        let Some(fs) = forms(&sh.text) else { continue };
+        for f in fs.into_iter().filter(|f| is_sym(f)) {
+            let x = parse(f); let uuid = x.attr("uuid").to_string();
+            if uuid.is_empty() { continue }
+            let i = x.get("instances"); let all: Vec<&Sx> = i.all("project").collect();
+            let mine: Vec<&Sx> = all.iter().copied().filter(|p| p.arg(0) == project).collect();
+            for q in (if mine.is_empty() { all } else { mine }).iter().flat_map(|p| p.all("path")) {
+                let r = q.attr("reference"); if r.is_empty() || r.starts_with('#') { continue }
+                m.entry(r.to_string()).or_insert_with(|| (uuid.clone(), q.arg(0).to_string()));
+            }
+        }
+    }
+    m
+}
 /// Bom.parts: natural order, a multi-unit part once, parts KiCad leaves out of the BOM dropped; a reference two symbols share stays twice
 pub fn parts(project: &str, shs: &[Sheet]) -> Vec<Part> {
     let ps: Vec<Part> = shs.iter().flat_map(|s| sheet(project, s)).filter(|p| p.inbom).collect();
@@ -257,6 +277,15 @@ mod tests {
     /// Bom.sample
     fn sample() -> Vec<Part> { vec![mk("R2", "10k", "0603"), mk("R1", "10k", "0603"), mk("C1", "1u", "0402")] }
     #[test] fn bom_nat_c2_c10() { assert!(before("C2", "C10")) }
+    #[test] fn bom_places_symbols_by_reference_with_their_instance_sheet() {
+        let s = |u: &str, insts: &str| format!("(symbol (lib_id \"Device:R\") (at 0 0 0) (unit 1) (uuid \"{u}\") (property \"Reference\" \"R?\" (at 0 0 0)) (pin \"1\" (uuid \"p-{u}\")) (instances {insts}))");
+        let sub = format!("(kicad_sch {} {})", s("u1", "(project \"a\" (path \"/r/s1\" (reference \"R5\") (unit 1)) (path \"/r/s2\" (reference \"R6\") (unit 1))) (project \"old\" (path \"/x\" (reference \"R9\") (unit 1)))"),
+            s("u2", "(project \"a\" (path \"/r/s1\" (reference \"#PWR01\") (unit 1)))"));
+        let m = places("a", &[Sheet { path: "sub.kicad_sch".into(), text: sub.into_bytes() }]);
+        assert_eq!(m.get("R5"), Some(&("u1".to_string(), "/r/s1".to_string())));
+        assert_eq!(m.get("R6"), Some(&("u1".to_string(), "/r/s2".to_string())), "a sheet used twice: each reference its own instance");
+        assert!(m.get("R9").is_none() && m.get("#PWR01").is_none(), "another project's instances and power symbols are not placed");
+    }
     #[test] fn bom_nat_r10_r2() { assert!(!before("R10", "R2")) }
     #[test] fn bom_diff_self() { assert!(diff(&sample(), &sample()).is_empty()) }
     #[test] fn bom_group_qty() { assert!(qty_ok(&group(&sample()))) }
