@@ -1445,7 +1445,15 @@ impl Actor {
                     let _ = reply.send(Ok(json!({"ok":true})));
                 }
             }
-            Msg::Raw { sock, desc, ty, msg, timeout, client, reply } => self.raw_call(&sock, &desc, &ty, msg, timeout, &client, reply),
+            Msg::Raw { sock, desc, ty, msg, timeout, client, reply } => {
+                // BACKPLANE_KICAD_DEBUG: every request the hub sends the embedded KiCad, in order, with the time, its kind and KiCad's memory
+                // then (what is loaded at open, and which request separates a 4.8 GB open from a 5.5 GB one)
+                if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() && !ty.ends_with("NextEvents") && !ty.ends_with("Ping") {
+                    let pid = self.sessions.values().find(|s| s.sock == sock).map_or(0, |s| s.pid);
+                    eprintln!("kicad embed: request {ty} kind={} client={client} rss={}MB (at {})", msg["kind"].as_str().unwrap_or(""), rss_mb(pid).unwrap_or(0), ipc::now_ms());
+                }
+                self.raw_call(&sock, &desc, &ty, msg, timeout, &client, reply)
+            }
             Msg::TransportLine(g, o) => {
                 if self.helper.as_ref().map(|(_, hg)| *hg) != Some(g) { return }
                 let id = match &o["id"] { Value::String(s) => s.clone(), v => v.to_string() };
