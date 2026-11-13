@@ -23,7 +23,7 @@ Backplane is an open-source workspace for agentic hardware development. Your age
 **Linux**
 
 ```sh
-curl -fsSL https://github.com/BackplaneWorks/Backplane/releases/latest/download/install.sh | sh
+{ curl -fsSL https://github.com/BackplaneWorks/Backplane/releases/latest/download/install.sh 2>/dev/null || wget -qO- https://github.com/BackplaneWorks/Backplane/releases/latest/download/install.sh; } | sh
 backplane
 ```
 

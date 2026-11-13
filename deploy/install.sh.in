@@ -1,6 +1,6 @@
 #!/bin/sh
-# Installs Backplane: curl -fsSL https://github.com/BackplaneWorks/Backplane/releases/latest/download/install.sh | sh
-#   (no curl, as on a stock Ubuntu desktop: wget -qO- https://github.com/BackplaneWorks/Backplane/releases/latest/download/install.sh | sh)
+# Installs Backplane: { curl -fsSL https://github.com/BackplaneWorks/Backplane/releases/latest/download/install.sh 2>/dev/null || wget -qO- https://github.com/BackplaneWorks/Backplane/releases/latest/download/install.sh; } | sh
+#   (curl where there is one, else wget: a stock Ubuntu desktop has only wget, macOS only curl)
 #
 # The release fills in the version and the sha256 of each archive (release.yml, from deploy/install.sh.in), so this script vouches for what it
 # downloads. It lays the release out the way the guard runs and updates it (docs/deploy.md):
