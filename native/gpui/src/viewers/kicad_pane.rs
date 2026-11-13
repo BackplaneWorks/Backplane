@@ -226,6 +226,11 @@ pub struct KicadPane {
     /// parked off-screen) that takes the foreground gets the hand-in posted to the shown frame once more (run Fmain5: the
     /// first tab click after the pre-warm left the keys in a hidden "untitled [Unsaved] — Schematic Editor")
     verify_handin: Option<(u64, std::time::Instant)>,
+    /// F5 while the pane pre-warms the other editors (Windows): from the pre-warm request until the hub lists every frame it
+    /// builds, plus 2 s, an invisible KiCad window that takes the foreground while KiCad has the keys gets the hand-in posted
+    /// to the shown editor once per stray (run IB1: the self-started pre-warm took it 1,244 ms after the opening hand-in,
+    /// caught only by verify_handin's 1.5 s window; a slower build would land outside it). Started at, done at.
+    prewarm_guard: Option<(std::time::Instant, Option<std::time::Instant>, u64)>,
     /// the keyboard was in a KiCad dialog last tick: when it closes, the keyboard goes back to the editor (a window manager hands it to
     /// Backplane's window)
     was_dialog: bool,
@@ -271,7 +276,7 @@ impl KicadPane {
             let _ = drained_tx.send(());
         } }).detach();
         KicadPane { busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), last_root: (i32::MIN, 0), placed: None,
-            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), poked: None, unmapped_since: None, unshown_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, at_px: None, dialogs_open: Vec::new(), took: None, press_focus: None, want_keys: true, refocus: None, verify_handin: None, was_dialog: false }
+            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), poked: None, unmapped_since: None, unshown_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, at_px: None, dialogs_open: Vec::new(), took: None, press_focus: None, want_keys: true, refocus: None, verify_handin: None, prewarm_guard: None, was_dialog: false }
     }
     fn rpc(&self, name: &str, params: Value) { let _ = self.hub.try_send(Command::Rpc(name.to_string(), Secret(params), "kicad")); }
     /// The hub's `editor.kicad.<digest>` for this project changed.
@@ -473,6 +478,26 @@ impl KicadPane {
     }
     fn want(&self) -> Option<u64> { if self.info.is_null() || (cfg!(windows) && self.info["mode"] == "stock") { return None } pick_local(self.wanted_kind(), &self.info, &self.frames, &self.ever_shown) }
     fn tick(&mut self, cx: &mut Context<Self>) {
+        if let Some((started, done, last_stray)) = self.prewarm_guard {
+            let shown = self.wanted_kind();
+            let built = ["SCH", "PCB"].iter().filter(|k| **k != shown).all(|k| self.info["frames"].as_array().is_some_and(|a| a.iter().any(|f| f["kind"].as_str() == Some(*k)))); // i18n-ok: wire frame kind enum names
+            let done = done.or_else(|| built.then(std::time::Instant::now));
+            if done.is_some_and(|d| d.elapsed() > std::time::Duration::from_secs(2)) || started.elapsed() > std::time::Duration::from_secs(60) {
+                self.prewarm_guard = None;
+            } else {
+                let mut last = last_stray;
+                if let (true, Some(w)) = (self.keys, self.want()) {
+                    if let Some((stray, title)) = nc::invisible_kicad_foreground(w) {
+                        if stray != last_stray {
+                            last = stray;
+                            eprintln!("GPUI_LOG {}", json!({"kicad_stray_foreground": {"frame": w, "stray": stray, "title": title, "during": "prewarm", "after_prewarm_request_ms": started.elapsed().as_millis() as u64}}));
+                            nc::focus(w);
+                        }
+                    }
+                }
+                self.prewarm_guard = Some((started, done, last));
+            }
+        }
         if !self.want_gerbers.is_empty() && self.attached && self.info["state"] == "ready" {
             let f = std::mem::take(&mut self.want_gerbers);
             if !self.open_gerbers(&f, cx) { eprintln!("GPUI_LOG {}", json!({"gerbview": "not opened", "why": if self.can_gerbview() { "refused" } else { "no embed-gerbview" }})); }
@@ -720,6 +745,7 @@ impl KicadPane {
                 self.prewarmed = Some(pid);
                 let have: Vec<&str> = self.frames.iter().map(|f| f.kind).collect();
                 self.rpc("editor.kicad.prewarm", json!({"project": self.project, "width": p.w, "height": p.h, "active": self.wanted_kind(), "have": have}));
+                if cfg!(windows) { self.prewarm_guard = Some((std::time::Instant::now(), None, 0)); }
             }
         }
         let prev_show = self.placed.as_ref().and_then(|(_, s, _)| *s);

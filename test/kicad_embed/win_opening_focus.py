@@ -614,6 +614,34 @@ def run(h):
             h.check("F5: Edit, then the pre-warm with no input: the PCB canvas keeps the keys (F2 acts by the zoom readout)",
                     bool(pw) and after["inside_frame"] and bool(zoomed), d)
             return h.finish()
+        if only == "idle_hotkey":
+            # The self-started pre-warm, slowed on purpose (BP_PREWARM_STALL_S: KiCad suspended that long from the client's
+            # pre-warm request, so its frames are built and any steal lands well after the opening hand-in), then no input
+            # until 15 s after the stall, then a plain hotkey with no click: the shown editor must act, the schematic untouched.
+            gls = [w for w in children if w["visible"] and w["class"] == "wxGLCanvas"]
+            gl = max(gls, key=lambda w: w["w"] * w["h"]) if gls else None
+            top = E.find_main_window(cp.pid)
+            stall = float(os.environ.get("BP_PREWARM_STALL_S", "0") or 0)
+            seen = wait_prewarm(h, top, "during", 20)
+            stalled = False
+            if stall and seen.get("prewarm") == "requested":
+                stalled = E.suspend_pid(pid, True)
+                time.sleep(stall)
+                if stalled:
+                    E.suspend_pid(pid, False)
+            time.sleep(15)
+            snap = focus_snapshot(frame)
+            if snap["foreground"]:
+                snap["foreground_title"] = window_title(snap["foreground"])
+            px, zoomed = plain_key_acts(h, gl, "idle_hotkey", frame) if gl else (0, False)
+            hidden = sorted(set(w["title"] for w in kicad_toplevels() + E.list_child_windows(top) if "Schematic Editor" in (w.get("title") or "")))
+            stray = [l.strip()[9:] for l in open(h.p("client.log"), encoding="utf-8", errors="replace") if "kicad_stray_foreground" in l]
+            d = {"stall_s": stall, "stalled": stalled, "prewarm": seen, "before_hotkey": snap, "zoom_readout_changed": zoomed,
+                 "hidden_schematic_titles": hidden, "guard_fired": stray}
+            print("DIAG idle_hotkey " + json.dumps(d)[:2000], flush=True)
+            h.check(f"Slowed idle pre-warm ({stall:g} s), no input, then a plain hotkey: the shown editor acts, hidden schematic untouched",
+                    snap["inside_frame"] and bool(zoomed) and not any(t.lstrip().startswith("*") for t in hidden), d)
+            return h.finish()
         if only == "idle_prewarm_tab":
             # Lane B's idle pre-warm (46343fe7e): Edit, 10 s with no input (pre-warm starts by itself), then the first
             # editor-tab click and the first canvas hotkey: the keys must be the shown editor's, the hidden schematic untouched.
