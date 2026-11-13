@@ -103,6 +103,9 @@ pub fn plan(tool: &str, os: &str, arch: &str, winget: bool, node: bool) -> Optio
     let unix = os == "linux" || os == "darwin";
     match tool {
         "tailscale" => match os { "windows" if winget => Some(Plan::Winget("Tailscale.Tailscale")), "windows" => Some(Plan::Link("https://tailscale.com/download/windows")), "darwin" => Some(Plan::Link("https://tailscale.com/download/mac")), _ => Some(Plan::Link("https://tailscale.com/download/linux")) },
+        // Git for Windows: the hub's shell commands and (until the fetch in Rust reaches Windows) KiCad's download run in its sh
+        "git" if os == "windows" && winget => Some(Plan::Winget("Git.Git")),
+        "git" if os == "windows" => Some(Plan::Link("https://git-scm.com/download/win")),
         "freecad" => match os { "windows" if winget => Some(Plan::Winget("FreeCAD.FreeCAD")), _ => Some(Plan::Link("https://www.freecad.org/downloads.php")) },
         "claude" if unix => Some(Plan::Sh(VENDOR_SH, vec![CLAUDE_SH.into()])),
         "claude" if os == "windows" => Some(Plan::Ps(CLAUDE_PS)),
