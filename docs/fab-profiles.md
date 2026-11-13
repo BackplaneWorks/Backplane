@@ -94,6 +94,8 @@ before the number, which number after them, a factor for a mil or a ring). More 
   values are the bundled baseline's; a changed page changes the value and the revision; a missing page or row keeps the old.
   `fab_gather_live_refresh` (ignored; `FAB_LIVE_HOME=<temp home>`) runs a real one by hand: on 2026-11-12, 121 values read, none
   missing, none different from the baseline.
+- `fab_model_no_baseline_value_is_older_than_its_bound` fails once any bundled value or stackup was read more than 120 days ago
+  (a new, copy or offline hub designs against the bundled baseline until its first refresh): read the pages again and update it.
 
 ## The Fab panel (`fab/panel.rs`)
 
