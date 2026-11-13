@@ -367,3 +367,16 @@ async fn quoted_rig(name: &str, pilot: bool) -> (super::lost::Rig, Shared) {
     let (ok, _) = call(&r.ag, "design_review_judged", json!({"findings": [{"reference": "U1", "title": "x"}], "checked": []})).await; assert!(!ok, "no page, no finding");
     r.ag.shutdown();
 }
+#[tokio::test(flavor = "multi_thread")] async fn an_agents_plan_approve_only_asks_the_person() {
+    let r = rig("or-plan", "result", SESSION_OK).await; let dir = cwd(&r.ag).await;
+    r.ag.add_tools(std::sync::Arc::new(crate::plan::Tools(r.hub.clone())));
+    std::fs::write(dir.join("a.kicad_pro"), "{}").unwrap(); std::fs::write(dir.join("a.kicad_pcb"), "(kicad_pcb)").unwrap();
+    for n in crate::plan::NAMES { assert!(names(&r.ag).await.contains(&n.to_string()), "{n}") }
+    let (ok, t) = call(&r.ag, "plan_approve", json!({"layer": "In1.Cu", "note": "the DDR corridors"})).await; assert!(ok, "{t}");
+    let v: Value = serde_json::from_str(&t).unwrap(); assert_eq!((v["asked"].clone(), v["what"].clone()), (json!(true), json!("layer In1.Cu")));
+    let pcb = dir.join("a.kicad_pcb").to_string_lossy().into_owned();
+    let asks = crate::plan::events::open_asks(&pcb); assert_eq!(asks.len(), 1, "the request waits for the person"); assert_eq!(asks[0]["what"], "layer In1.Cu");
+    // nothing the agent can call approves: no tool sends ApprovePlan (the person's plan.approve does, as the person)
+    assert!(!crate::plan::defs().iter().any(|d| d["description"].as_str().unwrap_or("").contains("ApprovePlan")));
+    r.ag.shutdown();
+}
