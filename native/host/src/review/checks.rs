@@ -133,12 +133,12 @@ pub fn fab_checks(p: &Profile, c: &Choice, fab_json: &Value, fab_rel: &str, u: &
         let (mx, my) = (get(&sel, "board_max_x").and_then(|s| s.free.as_ref()).and_then(Limit::num), get(&sel, "board_max_y").and_then(|s| s.free.as_ref()).and_then(Limit::num));
         if let (Some(mx), Some(my)) = (mx, my) { if long > mx || short > my { v.push(finding("fab", "error", "fab_board_size", format!("The board, {} by {}, is over the fab's largest {} by {}", mm(long), mm(short), mm(mx), mm(my)), String::new(), fa(), "Make it smaller or split it")) } }
     }
-    if let Some((w, a)) = &u.track_min { against(&mut v, &sel, "track_min", "The narrowest track,", *w, a.clone(), Some(0.127)) }
+    if let Some((w, a)) = &u.track_min { against(&mut v, &sel, "track_min", "The narrowest track,", *w, a.clone(), model::recommended("track_min").map(|r| r.0)) }
     if let Some((d, h, a)) = &u.via_min {
         let micro = a.text.starts_with("Micro");
         if micro { against(&mut v, &sel, "microvia_hole_min", "The smallest microvia hole,", *h, a.clone(), None) } else {
-            against(&mut v, &sel, "via_hole_min", "The smallest via hole,", *h, a.clone(), Some(0.3));
-            against(&mut v, &sel, "via_diameter_min", "The smallest via diameter,", *d, a.clone(), Some(0.45));
+            against(&mut v, &sel, "via_hole_min", "The smallest via hole,", *h, a.clone(), model::recommended("via_hole_min").map(|r| r.0));
+            against(&mut v, &sel, "via_diameter_min", "The smallest via diameter,", *d, a.clone(), model::recommended("via_diameter_min").map(|r| r.0));
         }
     }
     if let Some((d, a)) = &u.drill_min { against(&mut v, &sel, "drill_min", "The smallest pad hole,", *d, a.clone(), None) }
