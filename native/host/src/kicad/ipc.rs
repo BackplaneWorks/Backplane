@@ -433,11 +433,18 @@ pub fn approval_refused(type_: &str, msg: &Value) -> Option<String> {
 pub async fn kicad_ipc_status(hub: &Arc<Hub>, path: &str) -> Result<Value, String> { kicad_ipc_status_in(hub, None, path).await }
 pub async fn kicad_ipc_status_in(hub: &Arc<Hub>, thread: Option<&str>, path: &str) -> Result<Value, String> { run(hub, thread, path, "kiapi.backplane.GetCapabilities", json!({}), true).await }
 
-async fn run(hub: &Arc<Hub>, thread: Option<&str>, path: &str, ty: &str, msg: Value, status: bool) -> Result<Value, String> {
+/// One command for the project's headless KiCad even while a GUI KiCad has the project: for a document that GUI does not have open
+/// (the hub's BOM edit with only the board, or nothing, open there: a GUI KiCad refuses OpenDocument).
+pub async fn kicad_ipc_headless(hub: &Arc<Hub>, path: &str, type_: &str, message: Value) -> Result<Value, String> {
+    if let Some(why) = copy_ipc_refused(crate::copy::on(), type_) { return Err(why) }
+    run_on(hub, None, path, type_, message, false, false).await
+}
+async fn run(hub: &Arc<Hub>, thread: Option<&str>, path: &str, ty: &str, msg: Value, status: bool) -> Result<Value, String> { run_on(hub, thread, path, ty, msg, status, true).await }
+async fn run_on(hub: &Arc<Hub>, thread: Option<&str>, path: &str, ty: &str, msg: Value, status: bool, gui_first: bool) -> Result<Value, String> {
     let msg = if msg.is_object() { msg } else { json!({}) }; // KIpc.msg: a missing message is {}
     let routed = super::canonical::route(path); let path = &routed; // main's copy, whichever thread named it
     let pro = pro_of(path);
-    if let Some(gui) = (!pro.is_empty()).then(|| super::embed::gui_route(&pro)).flatten() {
+    if let Some(gui) = (gui_first && !pro.is_empty()).then(|| super::embed::gui_route(&pro)).flatten() {
         let plain = check_gui(ty, path, &pro, &msg, &gui.caps);
         if !plain.is_empty() { return Err(plain) }
         if !super::known_root(hub, Path::new(&pro).parent().map(|p| p.to_str().unwrap_or("")).unwrap_or(""), "").await { return Err(format!("{path} is not in a project this hub knows")) }
