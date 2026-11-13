@@ -81,9 +81,8 @@ pub fn usage(pcb: &str) -> Usage {
 /// the board setup minimums under the fab's.
 pub fn drc_section(plan: &drc::Plan, dru_text: &str, dru_rel: &str) -> Vec<Finding> {
     let mut v = vec![];
-    let cur = drc::section(dru_text);
-    if cur != Some(plan.section.as_str()) {
-        let (t, d) = if cur.is_none() { ("The fab's limits are not in the project's DRC rules", "DRC does not check the board against the fab: tracks, holes, rings and clearances the fab cannot make pass unseen.") }
+    if !drc::current(dru_text, plan) {
+        let (t, d) = if !drc::present(dru_text) { ("The fab's limits are not in the project's DRC rules", "DRC does not check the board against the fab: tracks, holes, rings and clearances the fab cannot make pass unseen.") }
             else { ("The project's DRC rules have older fab limits", "The fab's profile, the board's options or its net classes changed since the section was written.") };
         v.push(finding("fab", "warning", "fab_rules_section", t.into(), d.into(), vec![file_anchor(dru_rel)], "Call fab_profile with action \"drc\" (the Fab panel's Write): it writes the fab's section and keeps every rule of the project's own"));
     }
