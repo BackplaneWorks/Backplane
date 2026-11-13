@@ -320,6 +320,12 @@ pub fn wheel_zoom(lines: Option<f32>, pixels: f32, ctrl: bool) -> f32 {
     let k = match lines { Some(l) => l * 0.05, None => pixels * if ctrl { 0.01 } else { 0.004 } };
     k.clamp(-2.0, 2.0).exp()
 }
+/// A trackpad pinch (gpui's `PinchEvent`, AppKit's magnification) as a zoom factor (over 1: closer): AppKit's convention is a scale of
+/// 1 + magnification per event; one event's step is held to 0.5 .. 2 so a stray huge value cannot jump the view, and anything not finite is no zoom.
+pub fn pinch_zoom(magnification: f32) -> f32 {
+    if !magnification.is_finite() { return 1.0 }
+    (1.0 + magnification).clamp(0.5, 2.0)
+}
 impl Camera {
     /// Looking at the model from the front-right and above, fitted to its bounding sphere.
     pub fn fitted(mesh: &Mesh) -> Camera { Camera::fitted_for(mesh, 1.0) }
@@ -857,6 +863,13 @@ impl Render for SolidPage {
                 if let Some(c) = &mut this.cam { c.zoom_by(k, nx.clamp(-1.0, 1.0), ny.clamp(-1.0, 1.0), pw / ph.max(1.0)); }
                 cx.stop_propagation(); this.moved(cx); // drafts while the wheel turns, the full picture when it rests
             }))
+            // a trackpad pinch (macOS sends it as a magnify gesture, not a wheel) zooms at the pointer; two-finger scrolling stays the wheel's
+            .on_pinch(cx.listener(|this, e: &PinchEvent, _, cx| {
+                let [pw, ph, _, ox, oy] = *this.size.lock().unwrap();
+                let (nx, ny) = if pw > 0.0 && ph > 0.0 { ((f32::from(e.position.x) - ox) / pw * 2.0 - 1.0, 1.0 - (f32::from(e.position.y) - oy) / ph * 2.0) } else { (0.0, 0.0) };
+                if let Some(c) = &mut this.cam { c.zoom_by(pinch_zoom(e.delta), nx.clamp(-1.0, 1.0), ny.clamp(-1.0, 1.0), pw / ph.max(1.0)); }
+                cx.stop_propagation(); this.moved(cx);
+            }))
     }
 }
 
@@ -880,7 +893,7 @@ mod tests {
         assert!(!super::note_keeps_model("", "2|/b|"));
     }
     // not `use super::*`: that glob brings gpui's own `test` attribute macro into scope and #[test] then expands into itself
-    use super::{decode_mesh, parse_frame, render, wheel_zoom, Camera, Drawer, Layers, Mesh, SolidFrame, add, dot, mul, refit, sub};
+    use super::{decode_mesh, parse_frame, pinch_zoom, render, wheel_zoom, Camera, Drawer, Layers, Mesh, SolidFrame, add, dot, mul, refit, sub};
     use std::sync::Arc;
     use super::super::raster::smooth_normals;
     fn put(out: &mut Vec<u8>, mut v: u32) { loop { let b = (v & 0x7f) as u8; v >>= 7; if v == 0 { out.push(b); return } out.push(b | 0x80); } }
@@ -999,6 +1012,14 @@ mod tests {
         let pad = wheel_zoom(None, 10.0, false); assert!(pad > 1.0 && pad < 1.05, "{pad}");
         assert!(wheel_zoom(None, 10.0, true) > pad, "a pinch zooms faster");
         assert!(wheel_zoom(Some(1e9), 0.0, false).is_finite());
+    }
+    /// A pinch's magnification: spreading the fingers zooms in, pinching them zooms out, nothing is no zoom, and a wild value is held to one step.
+    #[test] fn a_pinch_zooms_by_its_magnification() {
+        assert!((pinch_zoom(0.1) - 1.1).abs() < 1e-6);
+        assert!(pinch_zoom(-0.1) < 1.0);
+        assert_eq!(pinch_zoom(0.0), 1.0);
+        assert_eq!(pinch_zoom(50.0), 2.0); assert_eq!(pinch_zoom(-5.0), 0.5);
+        assert_eq!(pinch_zoom(f32::NAN), 1.0); assert_eq!(pinch_zoom(f32::INFINITY), 1.0);
     }
     #[test] fn a_turn_keeps_the_model_where_it_was_put_and_pans_follow_the_pointer() {
         let m = mesh(); let mut c = Camera::fitted(&m);

@@ -390,6 +390,40 @@ impl Deref for ScrollWheelEvent {
     }
 }
 
+/// A trackpad pinch (macOS: AppKit's `magnifyWithEvent:`), delivered as its own event so that
+/// scrollable content never mistakes a pinch for a scroll. Hit testing follows `ScrollWheelEvent`.
+#[derive(Clone, Debug, Default)]
+pub struct PinchEvent {
+    /// The position of the pointer on the window.
+    pub position: Point<Pixels>,
+
+    /// The change in magnification for this event: AppKit's `magnification`, so positive spreads
+    /// the fingers (zoom in) and the view's scale should be multiplied by `1.0 + delta`.
+    pub delta: f32,
+
+    /// The modifiers that were held down during the pinch.
+    pub modifiers: Modifiers,
+
+    /// The phase of the gesture.
+    pub touch_phase: TouchPhase,
+}
+
+impl Sealed for PinchEvent {}
+impl InputEvent for PinchEvent {
+    fn to_platform_input(self) -> PlatformInput {
+        PlatformInput::Pinch(self)
+    }
+}
+impl MouseEvent for PinchEvent {}
+
+impl Deref for PinchEvent {
+    type Target = Modifiers;
+
+    fn deref(&self) -> &Self::Target {
+        &self.modifiers
+    }
+}
+
 /// The scroll delta for a scroll wheel event.
 #[derive(Clone, Copy, Debug)]
 pub enum ScrollDelta {
@@ -561,6 +595,8 @@ pub enum PlatformInput {
     MouseExited(MouseExitEvent),
     /// The scroll wheel was used.
     ScrollWheel(ScrollWheelEvent),
+    /// A trackpad pinch.
+    Pinch(PinchEvent),
     /// Files were dragged and dropped onto the window.
     FileDrop(FileDropEvent),
 }
@@ -576,6 +612,7 @@ impl PlatformInput {
             PlatformInput::MouseMove(event) => Some(event),
             PlatformInput::MouseExited(event) => Some(event),
             PlatformInput::ScrollWheel(event) => Some(event),
+            PlatformInput::Pinch(event) => Some(event),
             PlatformInput::FileDrop(event) => Some(event),
         }
     }
@@ -590,6 +627,7 @@ impl PlatformInput {
             PlatformInput::MouseMove(_) => None,
             PlatformInput::MouseExited(_) => None,
             PlatformInput::ScrollWheel(_) => None,
+            PlatformInput::Pinch(_) => None,
             PlatformInput::FileDrop(_) => None,
         }
     }
