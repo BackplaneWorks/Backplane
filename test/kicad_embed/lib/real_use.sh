@@ -10,6 +10,7 @@ REAL_BOARDS=(
 # name=KiCad runtime's bin/kicad: the released one the person runs, the bp.12 test build (KEMBED_BP12=<dir> for another; each run passes
 # BACKPLANE_KICAD_BIN and BACKPLANE_KICAD_CLI from the same dir: the hub starts the KiCad beside the CLI, and agent shells export bp.11's CLI)
 REAL_RUNTIMES=(
+  "bp10=$HOME/.backplane-gpui-fresh/home/kicad/10.99.0-bp.10/bin/kicad"
   "bp11=$HOME/.backplane-gpui-fresh/home/kicad/10.99.0-bp.11/bin/kicad"
   "bp12=${KEMBED_BP12:-$HOME/.cache/kicad-test/10.99.0-bp.12}/bin/kicad"
   # bp.13 is a symlink to builds/10.99.0-bp.13-<sha10>, switched by the fork lead: resolved once here, so a switch mid-run never mixes builds

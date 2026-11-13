@@ -275,9 +275,28 @@ def restore(after):
     if editor_up(): return
     print(f"LOST editor after {after}: reopening (Board, Edit)", flush=True); RESULTS[f"lost_after_{after}"] = {"ms": None, "lost": 1}
     click_ctl("rail:Board"); time.sleep(2); click_ctl("ui:Edit"); time.sleep(4)
-def tab(kind, tag, settle=1.4):
+TITLE_KIND = [("PCB Editor", "PCB"), ("Schematic Editor", "SCH"), ("3D Viewer", "PCB_3D"), ("Symbol Editor", "SYMBOL_EDITOR"), ("Footprint Editor", "FOOTPRINT_EDITOR"), ("Gerber Viewer", "GERBVIEW")]
+def on_show():
+    """The kinds of the KiCad frames shown at the pane's place now (from the X tree, not the client's word)."""
+    out = []
+    for w in windows():
+        if not w.get("shown") or "kicad" not in w.get("wm_class", "").lower() or not PANE: continue
+        if abs(w["root_x"] - PANE["x"]) > 2 or abs(w["root_y"] - PANE["y"]) > 2: continue
+        t = (w.get("title") or "").rstrip()
+        out += [k for (s, k) in TITLE_KIND if t.endswith(s) or (s == "3D Viewer" and t.startswith("3D Viewer"))]
+    return out
+SHOW_MISSES = []
+def tab(kind, tag, settle=1.4, check=True):
     t0 = click_ctl(f"kicad-tab:{kind}")
     if t0: EVENTS.append({"kind": "switch", "t0": t0, "tag": tag, "window_ms": settle * 1000}); time.sleep(settle)
+    # the switch's end state: the asked-for editor is what the pane shows (a frame made but never shown failed only a paint wait before)
+    if t0 and check:
+        got = on_show()
+        if got != [kind]:
+            time.sleep(3); got = on_show()
+            if got != [kind]:
+                SHOW_MISSES.append({"tag": tag, "want": kind, "shown": got}); print(f"JANK {tag}: asked for {kind}, the pane shows {got or 'no KiCad frame'} {settle + 3:.1f} s after the press", flush=True)
+            else: print(f"JANK {tag}: {kind} on show only after {settle + 3:.1f} s", flush=True)
 
 XIN = os.path.join(os.environ["REPO_ROOT"], "test/cef/xinput.py")
 def comment_window(tag):
@@ -1113,6 +1132,7 @@ if MEM["samples"]:
     RESULTS["rss_peak_mb"] = {"ms": None, "mb": max(x[1] for x in MEM["samples"]), "hwm_mb": max(x[2] for x in MEM["samples"])}
     RESULTS["rss_end_mb"] = {"ms": None, "mb": MEM["samples"][-1][1]}
     print(f"PERF memory ready={RESULTS['rss_ready_mb']['mb']}MB peak={RESULTS['rss_peak_mb']['mb']}MB hwm={RESULTS['rss_peak_mb']['hwm_mb']}MB end={RESULTS['rss_end_mb']['mb']}MB", flush=True)
+RESULTS["switch_shows_the_asked_frame"] = {"ms": None, "ok": int(not SHOW_MISSES), "misses": SHOW_MISSES}
 summary = {"results": RESULTS, "client": os.environ.get("CLIENT_BIN"), "kicad": os.environ.get("KICAD_BIN"), "kicad_running": KICAD_RUN, "dialogs": DIALOGS, "pane": PANE, "gpu": (metrics("gpu") or [{}])[0], "cold_edit_click_epoch": edit_click.get("epoch_ms")}
 json.dump(summary, open(os.path.join(OUT, "real_use.json"), "w"), indent=1)
 print("JSON " + json.dumps(summary), flush=True)
