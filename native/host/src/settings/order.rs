@@ -260,14 +260,14 @@ fn linked(cwd: &Path, dir: &str) -> bool {
 }
 fn sha(b: &[u8]) -> String { hex::encode(Sha256::digest(b)) }
 /// Order.ask.detail: what the person approves before anything is sent: how many files, from where, to where they ship, and each file (the first 40).
-pub fn ask_detail(dir: &str, m: &Value, ps: &[String]) -> String {
+pub fn ask_detail(dir: &str, m: &Value, ps: &[String], server: &str) -> String {
     let parts: Vec<String> = m["parts"].as_array().into_iter().flatten().map(|p| {
         let qty = match &p["qty"] { Value::Null => "1".to_string(), Value::String(s) => s.clone(), v => v.to_string() };
         let name = p["name"].as_str().unwrap_or("?"); let asm = match &p["assemble"] { Value::Null => String::new(), Value::String(s) => s.clone(), v => v.to_string() };
         if asm.is_empty() || asm == "0" { format!("{name} ×{qty}") } else { format!("{name} ×{qty} ({asm} assembled)") } }).collect();
     let n = ps.len(); let mut list: String = ps.iter().take(40).map(|p| format!("\n{p}")).collect(); if n > 40 { list.push_str("\n…") }
     let to = match (m["ship_to"].as_str().unwrap_or("?"), m["ship_region"].as_str().map(str::trim).filter(|r| !r.is_empty())) { (c, Some(r)) => format!("{c} ({r})"), (c, None) => c.to_string() };
-    format!("Send {n} {} from {dir} to Backplane's quote service? They are kept only to make what you order.\nShips to {to} · {}\n{list}", if n == 1 { "file" } else { "files" }, parts.join(", "))
+    format!("Send {n} {} from {dir} to Backplane's quote service ({})? They are kept only to make what you order.\nShips to {to} · {}\n{list}", if n == 1 { "file" } else { "files" }, crate::settings::fab::server_label(server), parts.join(", "))
 }
 /// The manifest's files (`"files": {path: sha256}`), when the folder may be sent.
 fn sendable(cwd: &Path, dir: &str) -> Option<(Value, Vec<String>, String)> {
@@ -301,7 +301,8 @@ async fn quote(ag: &Arc<Agents>, thread: &str, cwd: &str, a: &Value) -> (bool, V
     let got = tokio::task::spawn_blocking(move || sendable(&r2, &d2)).await.ok().flatten();
     let Some((m, files, manifest)) = got else { return fail(&format!("no manifest.json with files to send in {dir} (paths must stay inside the folder, plain characters only, and the folder must hold plain files, no links)")) };
     let server = crate::settings::fab::server_of(&ag.hub.setting("order.server").await.unwrap_or_default());
-    let now = now_s(); let ask = hub_id("q", now, ag.seq_n()); let detail = ask_detail(&dir, &m, &files);
+    if server.is_empty() { return fail("the order server setting is not a usable address (https, or http to this machine only): nothing was sent") }
+    let now = now_s(); let ask = hub_id("q", now, ag.seq_n()); let detail = ask_detail(&dir, &m, &files, &server);
     let open: Vec<String> = ag.world().await.asks.keys().cloned().collect();
     let asked = Asked { thread: thread.into(), cwd: root, dir, files, manifest, server }; let _ = asked_keep(&ag.hub.cfg.home, &ask, &asked);
     { let mut q = ag.order_asks.lock().unwrap(); q.retain(|k, _| open.contains(k)); q.insert(ask.clone(), asked); }
@@ -328,12 +329,13 @@ fn heads(install: &str) -> Vec<String> { vec![format!("X-Backplane-Install: {ins
 fn upload(home: &Path, server: &str, install: &str, dir: &Path, ps: &[String]) -> Value {
     let q = crate::settings::webhook::q; let sec = home.join("secrets");
     if std::fs::DirBuilder::new().mode(0o700).recursive(true).create(&sec).is_err() { return json!({"error":"the upload could not be prepared"}) }
+    if crate::settings::fab::server_host(server).is_none() { return json!({"error":"the order server is not a usable address: nothing was sent"}) }
     let nonce = format!("{:x}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_nanos())); let (cfg, out) = (sec.join(format!("o-{nonce}.curl")), sec.join(format!("o-{nonce}.out")));
     let mut c = format!("url = {}\n", q(&format!("{server}/v1/quotes"))); for h in heads(install) { c.push_str(&format!("header = {}\n", q(&h))) }
     c.push_str(&format!("form = {}\n", q("manifest=<manifest.json"))); for p in ps { c.push_str(&format!("form = {}\n", q(&format!("file=@\"{p}\";filename=\"{p}\"")))) }
     c.push_str(&format!("output = {}\nwrite-out = \"%{{http_code}}\"\n", q(&out.to_string_lossy())));
     let wrote = std::fs::OpenOptions::new().write(true).create(true).truncate(true).mode(0o600).open(&cfg).and_then(|mut f| f.write_all(c.as_bytes()));
-    let code = if wrote.is_ok() { crate::proc::std_cmd(crate::proc::Kind::Net, "curl").args(["-sS", "--max-time", "300", "-K"]).arg(&cfg).current_dir(dir).output().ok()
+    let code = if wrote.is_ok() { crate::proc::std_cmd(crate::proc::Kind::Net, "curl").args(["-sS", "--max-time", "300"]).args(crate::settings::fab::order_proto(server)).args(["-K"]).arg(&cfg).current_dir(dir).output().ok()
         .map(|o| { let s = String::from_utf8_lossy(&o.stdout).trim().to_string(); let c: String = s.chars().rev().take(3).collect::<Vec<_>>().into_iter().rev().collect(); if c.len() == 3 { c } else { "000".into() } }).unwrap_or_else(|| "000".into()) } else { "000".into() };
     let body = std::fs::read_to_string(&out).unwrap_or_default(); let _ = std::fs::remove_file(&cfg); let _ = std::fs::remove_file(&out);
     crate::settings::fab::est_got(&code, &body)
@@ -531,13 +533,23 @@ mod tests {
         PAY.write().unwrap().insert("q_shown".into(), "http://s/q/q_shown?t=tok".into());
         assert_eq!(pay_shown("a\n\n[Buy now · $1](order:q_shown) b"), "a\n\n[Buy now · $1](http://s/q/q_shown?t=tok) b"); assert_eq!(pay_shown("[x](order:q_none)"), "[x](order:q_none)", "unknown stays inert"); assert_eq!(pay_shown("plain (order:q_shown)"), "plain (order:q_shown)");
     }
+    #[test] fn the_order_servers_text_draws_without_images_or_hidden_links() {
+        let md = "| a | b |\n\n![pixel](https://evil.example/p.gif?q=1) ![](https://evil.example/q.png) <img src=\"https://evil.example/r.png\"> [pay here](https://evil.example/pay) [x][r] <https://evil.example/a>\n[r]: https://evil.example/ref\n![z][r]\nplain";
+        let mut q = json!({"id":"q_1","status":"ready","quote":{"markdown":md,"problems":[],"total":"5"}}); q["quote"]["pay_label"] = json!("Buy now");
+        let out = quote_md(&q);
+        for bad in ["![", "<img", "p.gif](", "](https://evil", "[r]:", "<https"] { assert!(!out.contains(bad), "{bad:?} in {out}") }
+        assert!(out.contains("pay here (`https://evil.example/pay`)"), "a link shows its real URL: {out}"); assert!(out.contains("[image: pixel]") && out.contains("`https://evil.example/a`") && out.contains("| a | b |") && out.contains("plain"));
+        assert!(out.ends_with("[Buy now](order:q_1)"), "the hub's own pay link is untouched: {out}");
+        let t = status_text("shipped", "![t](https://evil.example/t.gif) [track](https://evil.example/t)"); assert!(!t.contains("![") && !t.contains("](") && t.contains("`https://evil.example/t`"), "{t}");
+        assert_eq!(status_text("shipped", "1Z999"), "**Shipped.** Tracking: 1Z999");
+    }
     #[test] fn only_plain_paths_and_plain_files_are_sent() {
         for p in ["a.zip", "main/gerbers.zip", "with space.csv"] { assert!(safe(p), "{p}") }
         for p in ["", "/etc/passwd", "../x", "a/../../b", "a\"b", "a\\b", "a;b", "a\nb", "a\u{7f}"] { assert!(!safe(p), "{p:?}") }
         let r = tmp("send"); let f = "mfg/1/a.zip"; put(r.join(f), "z"); let m = json!({"ship_to":"Germany","parts":[{"name":"Main","qty":5,"assemble":2}],"files":{"a.zip":"h"}}); put(r.join("mfg/1/manifest.json"), &m.to_string());
         let (_, ps, h) = sendable(&r, "mfg/1").unwrap(); assert_eq!(ps, ["a.zip"]); assert_eq!(h.len(), 64);
-        assert_eq!(ask_detail("mfg/1", &m, &ps), "Send 1 file from mfg/1 to Backplane's quote service? They are kept only to make what you order.\nShips to Germany · Main ×5 (2 assembled)\n\na.zip");
-        let us = json!({"ship_to":"US","ship_region":"GA","parts":[{"name":"Main","qty":5}],"files":{"a.zip":"h"}}); assert!(ask_detail("mfg/1", &us, &ps).contains("\nShips to US (GA) · Main ×5\n"), "the state it ships to is shown with the country");
+        assert_eq!(ask_detail("mfg/1", &m, &ps, crate::settings::fab::DEFAULT_SERVER), "Send 1 file from mfg/1 to Backplane's quote service (2.29.106.88)? They are kept only to make what you order.\nShips to Germany · Main ×5 (2 assembled)\n\na.zip");
+        let us = json!({"ship_to":"US","ship_region":"GA","parts":[{"name":"Main","qty":5}],"files":{"a.zip":"h"}}); assert!(ask_detail("mfg/1", &us, &ps, "https://evil.example").contains("(evil.example, NOT Backplane's built-in"), "the real host is named and flagged"); assert!(ask_detail("mfg/1", &us, &ps, "https://evil.example").contains("\nShips to US (GA) · Main ×5\n"), "the state it ships to is shown with the country");
         assert!(sendable(&r, "mfg/../mfg/1").is_none()); assert!(sendable(&r, "mfg/2").is_none(), "no manifest");
         crate::plat::fs::symlink("/etc/passwd", r.join("mfg/1/b.zip")).unwrap(); assert!(sendable(&r, "mfg/1").is_none(), "a folder holding a link is refused, listed or not"); std::fs::remove_file(r.join("mfg/1/b.zip")).unwrap();
         let o = tmp("elsewhere"); put(o.join("3/manifest.json"), &m.to_string()); put(o.join("3/a.zip"), "z"); crate::plat::fs::symlink(&o, r.join("linked")).unwrap(); assert!(sendable(&r, "linked/3").is_none(), "nor a link on the way there");

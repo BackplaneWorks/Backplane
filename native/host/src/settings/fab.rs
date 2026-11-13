@@ -157,12 +157,40 @@ pub fn order_status(orders: &Path, ids: &[String]) -> String {
 
 // ---- the order server (estimates only) ----
 
+/// The host (with its port) of an order-server URL that may be used: https anywhere, http only on loopback; no userinfo, query, fragment, spaces or quotes. None otherwise.
+pub(crate) fn server_host(url: &str) -> Option<String> {
+    let (https, rest) = if let Some(r) = url.strip_prefix("https://") { (true, r) } else { (false, url.strip_prefix("http://")?) };
+    if url.chars().any(|c| c.is_control() || c.is_whitespace() || matches!(c, '"' | '\\' | '\'' | '`' | ';')) { return None }
+    let (auth, path) = rest.split_at(rest.find('/').unwrap_or(rest.len()));
+    if auth.is_empty() || auth.contains('@') || path.contains(['?', '#']) || auth.contains(['?', '#']) { return None }
+    let (host, port) = if let Some(b) = auth.strip_prefix('[') { let (h, p) = b.split_once(']')?; (format!("[{h}]"), p) } else { match auth.find(':') { Some(i) => (auth[..i].to_string(), &auth[i..]), None => (auth.to_string(), "") } };
+    if host.is_empty() || host == "[]" || !(port.is_empty() || (port.len() > 1 && port.starts_with(':') && port[1..].bytes().all(|b| b.is_ascii_digit()))) { return None }
+    if host.starts_with('[') { if !host[1..host.len() - 1].bytes().all(|b| b.is_ascii_hexdigit() || b == b':' || b == b'.') { return None } }
+    else if !host.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'.' || b == b'-') { return None }
+    if !https && !matches!(host.to_ascii_lowercase().as_str(), "127.0.0.1" | "[::1]" | "localhost") { return None }
+    Some(format!("{host}{port}"))
+}
+/// The order server to use: the setting (or the default), or "" when the setting is not a usable address (nothing is then sent anywhere).
 pub(crate) fn server_of(setting: &str) -> String {
     let s = setting.trim(); let s = if s.is_empty() { DEFAULT_SERVER } else { s };
     let env = std::env::var("BACKPLANE_ORDER_SERVER").unwrap_or_default();
-    if s == DEFAULT_SERVER && !env.is_empty() { env }
+    let chosen = if s == DEFAULT_SERVER && !env.is_empty() { env }
     // a test hub (stand-in agents) with no address of its own never reaches the real server
-    else if s == DEFAULT_SERVER && std::env::var_os("BACKPLANE_AGENTS").is_some() { "http://127.0.0.1:9".into() } else { s.to_string() }
+    else if s == DEFAULT_SERVER && std::env::var_os("BACKPLANE_AGENTS").is_some() { "http://127.0.0.1:9".into() } else { s.to_string() };
+    let chosen = chosen.trim_end_matches('/').to_string();
+    if server_host(&chosen).is_some() { chosen } else { String::new() }
+}
+/// curl's scheme limits for a request to `server`: https only, except http to loopback; redirects only to https, and none followed at all.
+pub(crate) fn order_proto(server: &str) -> [&'static str; 6] {
+    ["--proto", if server.starts_with("http://") { "=http,https" } else { "=https" }, "--proto-redir", "=https", "--max-redirs", "0"]
+}
+/// What the person reads of where files go: the host, and a flag when it is not the built-in one.
+pub(crate) fn server_label(server: &str) -> String {
+    match server_host(server) {
+        None => "NO VALID ADDRESS: nothing can be sent".into(),
+        Some(h) if server_host(DEFAULT_SERVER).as_deref() == Some(h.as_str()) => h,
+        Some(h) => format!("{h}, NOT Backplane's built-in server: send only if you set this address yourself"),
+    }
 }
 pub(crate) fn install_id(home: &Path) -> String {
     let dir = home.join("secrets"); let f = dir.join("install-id");
@@ -197,7 +225,7 @@ pub(crate) fn curl(home: &Path, url: &str, headers: &[String], body: Option<&str
     if body.is_none() { c = c.lines().filter(|l| !l.starts_with("data-binary")).collect::<Vec<_>>().join("\n") + "\n" }
     let r = (|| -> Option<(String, String)> {
         w(&data, body.unwrap_or("")).ok()?; w(&cfg, &c).ok()?;
-        let o = crate::proc::std_cmd(crate::proc::Kind::Net, "curl").args(["-sS", "--max-time", "20", "-K"]).arg(&cfg).output().ok()?;
+        let o = crate::proc::std_cmd(crate::proc::Kind::Net, "curl").args(["-sS", "--max-time", "20"]).args(order_proto(url)).args(["-K"]).arg(&cfg).output().ok()?;
         let s = String::from_utf8_lossy(&o.stdout).trim().to_string();
         let code: String = s.chars().rev().take(3).collect::<Vec<_>>().into_iter().rev().collect();
         Some((if code.len() == 3 { code } else { "000".into() }, std::fs::read_to_string(&out).unwrap_or_default()))
@@ -385,6 +413,14 @@ mod tests {
         assert_eq!(look_in(&home, Some(&work), "t1", false, "http://127.0.0.1:9", &[])["boards"], json!(1), "a KiCad project's own board does count");
     }
     static ENV: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    #[test] fn only_https_or_loopback_order_servers_are_accepted() {
+        for ok in ["https://order.example.com", "https://order.example.com:8443/", "https://2.29.106.88", "http://127.0.0.1:8080", "http://localhost", "http://[::1]:9", "https://[2001:db8::1]"] { assert!(server_host(ok).is_some(), "{ok}"); assert_eq!(server_of(ok), ok.trim_end_matches('/')) }
+        for bad in ["http://order.example.com", "http://10.0.0.5", "http://127.0.0.1.evil.com", "https://user@evil.com", "https://user:pw@evil.com", "http://127.0.0.1@evil.com", "ftp://x", "file:///etc/passwd", "garbage", "https://", "https://a b", "https://e.com/?x=1", "https://e.com#f", "https://e.com:80x", "https://evil.com\"x", "//evil.com"] { assert_eq!(server_of(bad), "", "{bad}"); assert!(server_host(bad).is_none(), "{bad}") }
+    }
+    #[test] fn curl_to_the_order_server_is_https_only_off_loopback() {
+        assert_eq!(order_proto("https://a.b")[1], "=https"); assert_eq!(order_proto("http://127.0.0.1:9")[1], "=http,https"); assert!(order_proto("https://a.b").windows(2).any(|w| w == ["--proto-redir", "=https"]));
+        assert!(server_label("https://order.example.com").contains("NOT Backplane's built-in")); assert!(!server_label(DEFAULT_SERVER).contains("NOT")); assert!(server_label("").contains("NO VALID"));
+    }
     #[test] fn the_order_server_of_a_test_hub_is_never_the_real_one() {
         let _l = ENV.lock().unwrap_or_else(|e| e.into_inner());
         std::env::remove_var("BACKPLANE_ORDER_SERVER"); std::env::set_var("BACKPLANE_AGENTS", "/tmp/x");
