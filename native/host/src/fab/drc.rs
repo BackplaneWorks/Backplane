@@ -220,7 +220,7 @@ pub fn present(text: &str) -> bool { section(text).is_some() || !fab_rules_in(te
 /// the rules its own way) the same rules by name, constraint and minimum.
 pub fn current(text: &str, plan: &Plan) -> bool {
     if section(text) == Some(plan.section.as_str()) { return true }
-    let mut have = fab_rules_in(text); let mut want: Vec<(String, String, f64)> = plan.rules.iter().map(|r| (r.name.clone(), r.constraint.clone(), r.min)).collect();
+    let mut have = fab_rules_in(text); let mut want: Vec<(String, String, f64)> = live_rules(text, plan).0.into_iter().map(|r| (r.name.clone(), r.constraint.clone(), r.min)).collect();
     let key = |x: &(String, String, f64)| format!("{}|{}", x.0, x.1);
     have.sort_by_key(key); want.sort_by_key(key);
     !want.is_empty() && have.len() == want.len() && have.iter().zip(&want).all(|(a, b)| a.0 == b.0 && a.1 == b.1 && (a.2 - b.2).abs() < 1e-6)
@@ -233,19 +233,29 @@ fn crct(constraint: &str) -> Option<&'static str> {
         "edge_clearance" => "CRCT_EDGE_CLEARANCE", "text_height" => "CRCT_TEXT_HEIGHT", "text_thickness" => "CRCT_TEXT_THICKNESS", _ => return None,
     })
 }
+/// The plan's rules an open KiCad gets, and those left out: KiCad appends a rule whose name the file does not have yet after every
+/// other rule, so such a rule is left out where one of the person's own rules sets the same constraint (theirs keeps deciding).
+fn live_rules<'a>(text: &str, plan: &'a Plan) -> (Vec<&'a FabRule>, Vec<String>) {
+    let had: Vec<String> = fab_rules_in(text).into_iter().map(|r| r.0).collect();
+    let own: Vec<String> = own_rules(&outside(text)).into_iter().map(|r| r.1).collect();
+    let (mut keep, mut left) = (vec![], vec![]);
+    for r in &plan.rules {
+        if crct(&r.constraint).is_none() { continue }
+        if !had.contains(&r.name) && own.contains(&r.constraint) { left.push(format!("{} (your own {} rule keeps deciding)", r.name, r.constraint)) } else { keep.push(r) }
+    }
+    (keep, left)
+}
 /// The EditCustomRules message for an open KiCad (bp.11 `rules-merge`): the plan's rules upserted by name, the fab's rules it no
 /// longer has removed; every other rule stays as it is. KiCad replaces a rule of the same name where it stands, but appends a new
-/// one after everything else, where it would win over the person's own rules (later rules win). So where the file has no fab rules
-/// yet, a rule whose constraint one of the person's rules also sets is left out (named in the answer's second part): the person's
+/// one after everything else, where it would win over the person's own rules (later rules win). So a rule the file does not have yet
+/// whose constraint one of the person's rules also sets is left out (named in the answer's second part): the person's
 /// rule keeps deciding. Answers (message fields but the board, the rules left out).
 pub fn edit_message(text: &str, plan: &Plan) -> (Value, Vec<String>) {
     let had: Vec<String> = fab_rules_in(text).into_iter().map(|r| r.0).collect();
-    let appended = had.is_empty();
-    let own: Vec<String> = own_rules(&outside(text)).into_iter().map(|r| r.1).collect();
-    let (mut upsert, mut left) = (vec![], vec![]);
-    for r in &plan.rules {
+    let (keep, left) = live_rules(text, plan);
+    let mut upsert = vec![];
+    for r in keep {
         let Some(ty) = crct(&r.constraint) else { continue };
-        if appended && own.contains(&r.constraint) { left.push(format!("{} (your own {} rule keeps deciding)", r.name, r.constraint)); continue }
         let mut j = json!({"name": r.name, "constraints": [{"type": ty, "numeric": {"min": (r.min * 1e6).round() as i64}}], "comments": r.comment});
         if !r.cond.is_empty() { j["condition"] = json!(r.cond) }
         upsert.push(j);
@@ -311,6 +321,13 @@ mod tests {
         let with = merge(HAND, &pl.section).replace("(version 1)\n", "(version 1)\n(rule \"fab: old\" (constraint track_width (min 0.3mm)))\n");
         let (m2, left2) = edit_message(&with, &pl);
         assert!(left2.is_empty(), "{left2:?}"); assert_eq!(m2["upsert"].as_array().unwrap().len(), pl.rules.len()); assert_eq!(m2["remove"], json!(["fab: old"]));
+        // after a live first write (the kept rules appended): a second write still leaves the colliding rule out, and that file is current
+        let fmt = |r: &FabRule| format!("(rule \"{}\"\n\t# {}\n\t(constraint {} (min {}mm)))\n", r.name, r.comment, r.constraint, r.min);
+        let first: String = format!("{HAND}{}", pl.rules.iter().filter(|r| !left.iter().any(|l| l.starts_with(&format!("{} ", r.name)))).map(fmt).collect::<String>());
+        let (m3, left3) = edit_message(&first, &pl);
+        assert_eq!(left3, left, "the person's rule keeps deciding on every write");
+        assert!(m3["upsert"].as_array().unwrap().iter().all(|r| r["name"] != "fab: clearance"));
+        assert!(current(&first, &pl), "what was written live, the left-out rule aside, is current");
         // KiCad's own formatting of the rules it wrote counts as current; the person's rules are never taken for the fab's
         let live: String = pl.rules.iter().map(|r| format!("(rule \"{}\"\n\t# {}\n\t(constraint {} (min {}mm)))\n", r.name, r.comment, r.constraint, r.min)).collect();
         let file = format!("{HAND}{live}");
