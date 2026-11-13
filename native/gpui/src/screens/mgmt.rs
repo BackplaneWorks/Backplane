@@ -115,7 +115,9 @@ pub fn set(app: &mut Backplane, want: Value, patch: Value, cx: &mut Context<Back
 /// A tab pressed (or its key): opens that panel, or shuts it.
 pub fn toggle(app: &mut Backplane, id: &str, cx: &mut Context<Backplane>) {
     let st = app.screens.mgmt.state();
-    if !st["panels"].as_array().map_or(false, |ps| ps.iter().any(|p| p["id"] == id)) { return }
+    let known = st["panels"].as_array().map_or(false, |ps| ps.iter().any(|p| p["id"] == id));
+    eprintln!("GPUI_LOG {}", json!({"mgmt_toggle": id, "known": known, "open": st["open"]}));
+    if !known { return }
     set(app, toggled(&st, id), json!({"toggle": id}), cx);
 }
 pub fn dock(app: &mut Backplane, side: &str, cx: &mut Context<Backplane>) {

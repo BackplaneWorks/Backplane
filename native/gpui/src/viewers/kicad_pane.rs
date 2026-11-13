@@ -180,7 +180,7 @@ pub struct KicadPane {
     marker: Arc<Mutex<Option<HitboxId>>>, last_root: (i32, i32), placed: Option<(Option<nc::R>, Option<u64>, Vec<nc::R>)>,
     focus: FocusHandle, keys: bool, pub light: bool, _subs: Vec<Subscription>,
     /// the fork's holder already in our save-set; reserved chords pressed in KiCad, waiting to be pressed in gpui
-    kept: u64, press: Vec<String>,
+    kept: u64, pub press: Vec<String>,
     /// stock KiCad: the editor last asked for with its shortcut, and when; auxiliary frame (Symbol/Footprint/3D) opened from inside KiCad
     poked: Option<(String, std::time::Instant)>, unmapped_since: Option<(u64, std::time::Instant)>, unshown_since: Option<(String, std::time::Instant)>, override_kind: Option<String>, pending_show: Option<String>,
     /// the theme told to the hub at least once; the main window (its first home), where Pop back in returns it
@@ -575,7 +575,9 @@ impl KicadPane {
                 nc::Ev::Key(k) if k == "ctrl-tab" || k == "ctrl-shift-tab" => { let to = next_tab(self.wanted_kind(), if k == "ctrl-tab" { 1 } else { -1 }); self.show_kind(to, cx); }
                 nc::Ev::Key(k) => { eprintln!("GPUI_LOG {}", json!({"kicad_key": k, "at_ms": crate::screens::kcomment::epoch_ms() as u64})); nc::focus(self.toplevel); self.keys = false; nc::grab_escape(self.toplevel, false); self.grab_click(c, true);
                     // the comment chord (and bp.13's ';', KiCad's own comment key) opens the window now, from this event (no keystroke round trip through the next frame)
-                    if k == "ctrl-;" || k == ";" { cx.emit(PaneKey(k)); } else { self.press.push(k); } cx.notify(); }
+                    // the comment chord and the management panels' keys are acted on here, from the event: replayed as a keystroke after a
+                    // comment window had the keyboard they reached no action (gpui's dispatch in this window found none), so they go by name
+                    if k == "ctrl-;" || k == ";" || k.starts_with("alt-shift-") { cx.emit(PaneKey(k)); } else { self.press.push(k); } cx.notify(); }
                 nc::Ev::Focus(_) => { if let Some(w) = self.want() { self.took = Some((w, std::time::Instant::now())); } if !self.keys { self.keys = true; self.touched(); nc::grab_escape(self.toplevel, true); self.grab_click(c, false); cx.notify(); } }
             }
         }
@@ -957,7 +959,12 @@ impl crate::Backplane {
         }
         let (hub, infos, hub_open) = (self.tx.clone(), self.screens.kicad_infos.clone(), open_now.to_string());
         let page = cx.new(move |cx| { let mut p = KicadPane::new(cx, project, root, pid, open, hub_open, hub); if let Some(v) = infos.values().find(|v| p.matches(v)).cloned() { p.info = v; } p });
-        cx.subscribe(&page, |this, _, _: &PaneKey, cx| { this.kcomment_open(None, cx); }).detach();
+        cx.subscribe(&page, |this, _, e: &PaneKey, cx| {
+            if e.0 == "ctrl-;" || e.0 == ";" { this.kcomment_open(None, cx); return }
+            // a management panel's key handed over by KiCad: the panel whose binding it is (the person's, from Settings)
+            if let Some(id) = ["bom", "checks", "life", "fab"].into_iter().find(|id| this.local.key(&format!("mgmt-{id}")) == e.0) { crate::screens::mgmt::toggle(this, id, cx); }
+            else { this.screens.kicad.as_ref().map(|p| p.update(cx, |p, cx| { p.press.push(e.0.clone()); cx.notify(); })); }
+        }).detach();
         self.screens.kicad = Some(page); cx.notify(); true
     }
     /// View: back to Backplane's own viewer (KiCad stays open in the hub, warm for the next Edit).
