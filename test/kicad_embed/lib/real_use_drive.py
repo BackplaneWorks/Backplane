@@ -289,21 +289,92 @@ def comment_window(tag):
     if got: time.sleep(0.4); rt("key", "Escape"); time.sleep(0.6)
     return got is not None
 # 0. focus: the first click into KiCad, then a reserved chord (Ctrl+;) must reach Backplane at once (the first-click bug: it took a second click)
+# an empty spot of the board canvas (bottom left, inside the left toolbar and above the message panel; the board is zoomed to fit, so
+# its margin): a click there selects nothing, so KiCad has no Clarify Selection to ask and a menu after it is a bug
+EX, EY = PANE["x"] + 70, PANE["y"] + PANE["h"] - 90
+def kicad_focused():
+    """Which KiCad frame has the keyboard now, KiCad's own word (FrameInfo.focused), and the X focus."""
+    fr = ipc("frames", SOCK).get("frames", []) if SOCK else []
+    return [f.get("kind") for f in fr if f.get("focused")]
 if "focus" in JOURNEYS:
-    rt("click", CX, CY + PANE["h"] // 3); time.sleep(0.6)
+    # Edit gives KiCad the keyboard: with no click into the canvas, KiCad's frame is focused and a reserved chord pressed now reaches
+    # Backplane through KiCad (lane A: after Edit the keyboard stayed in Backplane's window, so KiCad's hotkeys reached nothing)
+    fk = kicad_focused(); print(f"INFO after Edit, no click: KiCad focused frames {fk}", flush=True)
+    RESULTS["edit_gives_kicad_keys"] = {"ms": None, "ok": int(bool(fk)), "focused": fk}
+    if not fk: print("JANK after Edit: no KiCad frame has the keyboard", flush=True)
+    t0 = click_ctl("kicad:full"); time.sleep(1.2)
+    fk2 = kicad_focused(); RESULTS["full_size_gives_kicad_keys"] = {"ms": None, "ok": int(bool(fk2)), "focused": fk2}
+    if not fk2: print("JANK after Full size: no KiCad frame has the keyboard", flush=True)
+    click_ctl("kicad:full"); time.sleep(1.2)
+    rt("click", EX, EY); time.sleep(0.6)
     # Ctrl+K (Backplane's command palette, a reserved key) right after the one click: the palette's place over the chat changes?
     box = {"x": 600, "y": 0, "w": 700, "h": 420}
-    sampler_stop(); sampler_start(box, "ctrlk"); r = rt("key", "k", "ctrl"); time.sleep(1.2); kp = sampler_stop(); sampler_start(PANE, "pane")
+    sampler_stop(); sampler_start(box, "ctrlk"); r = rt("key", "k", "ctrl"); print(f"INFO Ctrl+K sent at {r.get('t0')}", flush=True); time.sleep(1.2); kp = sampler_stop(); sampler_start(PANE, "pane")
     a = analyze([{"kind": "commit", "t0": r["t0"], "tag": "ctrlk", "window_ms": 1000}], kp)
     ck = a[0].get("first_change_ms") if a else None
     perf("first_click_ctrl_k", ck if ck is not None else -1, opened=int(ck is not None)); RESULTS["first_click_ctrl_k_ok"] = {"ms": None, "ok": int(ck is not None)}
-    rt("key", "Escape"); time.sleep(0.4); rt("click", CX, CY + PANE["h"] // 3); time.sleep(0.6)
+    rt("key", "Escape"); time.sleep(0.4); rt("click", EX, EY); time.sleep(0.6)
     ok1 = comment_window("first_click_ctrl_semicolon")
     RESULTS["first_click_reserved"] = {"ms": None, "ok": int(ok1)}
     if not ok1:
         print("JANK first click into KiCad: Ctrl+; did not reach Backplane; a second click:", flush=True)
-        rt("click", CX, CY + PANE["h"] // 3); time.sleep(0.6)
+        rt("click", EX, EY); time.sleep(0.6)
         RESULTS["second_click_reserved"] = {"ms": None, "ok": int(comment_window("second_click_ctrl_semicolon"))}
+# 0a. a KiCad dialog keeps the keyboard: a footprint selected, `e` opens its properties dialog (KiCad's own top-level), Escape closes it
+# (lane D: the keyboard was taken back from Symbol Properties, so Escape reached Backplane's window and the dialog stayed)
+if "focus" in JOURNEYS and SOCK:
+    refs = [r for r in re.findall(r'\(property "Reference" "([A-Z]+[0-9]+)"', open(PCB, errors="ignore").read()) if r[0] in "URCJ"] if PCB else []
+    if refs:
+        rt("click", EX, EY); time.sleep(0.5)
+        ipc("select-items", SOCK, "pcb", refs[0], "1"); time.sleep(0.8)
+        rt("key", "e"); dlg = None
+        for _ in range(40):
+            dlg = next((w for w in windows() if w.get("shown") and "Properties" in (w.get("title") or "") and "kicad" in w.get("wm_class", "").lower()), None)
+            if dlg: break
+            time.sleep(0.1)
+        if not dlg:
+            print(f"DIAG dialog escape: no properties dialog for {refs[0]} after `e`", flush=True); RESULTS["dialog_escape"] = {"ms": None, "ok": 0, "opened": 0}
+        else:
+            time.sleep(0.8); t0 = rt("key", "Escape").get("t0"); gone_ms = None
+            for _ in range(30):
+                if not any(w.get("xid") == dlg["xid"] and w.get("shown") for w in windows()): gone_ms = round(now() - t0); break
+                time.sleep(0.1)
+            RESULTS["dialog_escape"] = {"ms": gone_ms, "ok": int(gone_ms is not None), "opened": 1, "title": dlg.get("title")}
+            print(f"PERF dialog_escape {gone_ms}ms title={dlg.get('title')!r}", flush=True)
+            if gone_ms is None:
+                print(f"JANK {dlg.get('title')!r}: Escape did not close it (3 s): clicking its Cancel", flush=True); rt("key", "Escape")
+# 0b. popup keys (bp.13 batch 4, embed-popup-keys): a KiCad popup (a right-click menu) holds the keyboard; Ctrl+K and Ctrl+; pressed then close
+# it and reach Backplane. The menu is confirmed up first (another client holds the keyboard: an XGrabKeyboard from here is refused)
+def kb_held():
+    import ctypes, ctypes.util
+    x = ctypes.CDLL(ctypes.util.find_library("X11")); x.XOpenDisplay.restype = ctypes.c_void_p; x.XOpenDisplay.argtypes = [ctypes.c_char_p]
+    x.XDefaultRootWindow.argtypes = [ctypes.c_void_p]; x.XDefaultRootWindow.restype = ctypes.c_ulong
+    x.XGrabKeyboard.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.c_int, ctypes.c_int, ctypes.c_ulong]
+    x.XUngrabKeyboard.argtypes = [ctypes.c_void_p, ctypes.c_ulong]; x.XCloseDisplay.argtypes = [ctypes.c_void_p]
+    d = x.XOpenDisplay(os.environ.get("DISPLAY", ":0").encode())
+    if not d: return None
+    st = x.XGrabKeyboard(d, x.XDefaultRootWindow(d), 0, 1, 1, 0)
+    if st == 0: x.XUngrabKeyboard(d, 0)
+    x.XCloseDisplay(d); return st != 0
+if "focus" in JOURNEYS and SOCK:
+    pc = ipc("capabilities", SOCK)
+    if "embed-popup-keys" not in pc.get("capabilities", []):
+        print("DIAG popup keys: this runtime has no embed-popup-keys: skipped", flush=True)
+    else:
+        for i, (keyname, tag) in enumerate([("k", "popup_ctrl_k"), ("semicolon", "popup_ctrl_semicolon")]):
+            rt("click", EX, EY); time.sleep(0.4); rt("click", EX, EY, 3); time.sleep(0.8)
+            up = kb_held(); print(f"INFO {tag}: right-click menu up (keyboard held by KiCad): {up}", flush=True)
+            if keyname == "k":
+                box = {"x": 600, "y": 0, "w": 700, "h": 420}
+                sampler_stop(); sampler_start(box, tag); r = rt("key", "k", "ctrl"); time.sleep(1.2); kp = sampler_stop(); sampler_start(PANE, "pane")
+                a = analyze([{"kind": "commit", "t0": r["t0"], "tag": tag, "window_ms": 1000}], kp)
+                ok = a[0].get("first_change_ms") if a else None; perf(tag, ok if ok is not None else -1, menu_up=int(bool(up)), opened=int(ok is not None))
+                got = ok is not None; rt("key", "Escape"); time.sleep(0.4)
+            else:
+                got = comment_window(tag)
+            closed = kb_held() is False
+            RESULTS[f"{tag}_ok"] = {"ms": None, "ok": int(bool(up) and got and closed), "menu_up": int(bool(up)), "reached": int(got), "menu_closed": int(closed)}
+            if not (up and got and closed): print(f"JANK {tag}: menu_up={up} reached_backplane={got} menu_closed={closed}", flush=True)
 # 1. open: the pane closed (View) and reopened (Edit) with KiCad warm
 if "open" in JOURNEYS:
     for i in range(3):

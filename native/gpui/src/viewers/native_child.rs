@@ -65,7 +65,7 @@ pub enum Ev { /** Ctrl+`: the keyboard back to the client */ Escape, /** a butto
 
 /// A reserved chord from `_BACKPLANE_KEY` (an X keysym and modifier mask) as gpui's keystroke text: `ctrl-k`, `ctrl-shift-tab`, `ctrl-``.
 pub fn chord(keysym: u32, mods: u32) -> Option<String> {
-    let key = match keysym { 0x20..=0x7e => char::from_u32(keysym)?.to_ascii_lowercase().to_string(), 0xff09 => "tab".into(), 0xff0d => "enter".into(), 0xff1b => "escape".into(), _ => return None };
+    let key = match keysym { 0x20..=0x7e => char::from_u32(keysym)?.to_ascii_lowercase().to_string(), 0xff09 | 0xfe20 /* ISO_Left_Tab: GTK's Shift+Tab */ => "tab".into(), 0xff0d => "enter".into(), 0xff1b => "escape".into(), _ => return None };
     let mut s = String::new();
     if mods & 4 != 0 { s.push_str("ctrl-"); } if mods & 8 != 0 { s.push_str("alt-"); } if mods & 0x40 != 0 { s.push_str("super-"); } if mods & 1 != 0 { s.push_str("shift-"); }
     Some(s + &key)
@@ -466,6 +466,21 @@ mod imp {
         if kc == 0 { return None }
         let keys = c.query_keymap().ok()?.reply().ok()?.keys;
         Some(keys[kc as usize / 8] & (1 << (kc % 8)) != 0)
+    }
+    /// Whether the X keyboard focus is in a top-level window of the program `pid` (a KiCad dialog: its own top-level, outside the pane):
+    /// the keyboard is KiCad's there, never taken back to the frame or to Backplane while it is.
+    pub fn focus_in_pid(pid: u32) -> bool {
+        if pid == 0 { return false }
+        let Some(g) = conn() else { return false }; let c = g.as_ref().unwrap();
+        let Some(mut w) = c.get_input_focus().ok().and_then(|r| r.reply().ok()).map(|f| f.focus) else { return false };
+        let pid_atom = atom(c, "_NET_WM_PID");
+        let root = root(c).unwrap_or(0);
+        for _ in 0..32 {
+            if w == root || w <= 1 { return false }
+            if prop32(c, w, pid_atom, AtomEnum::CARDINAL).first() == Some(&pid) { return true }
+            match c.query_tree(w).ok().and_then(|r| r.reply().ok()) { Some(t) => w = t.parent, None => return false }
+        }
+        false
     }
     /// Whether the X keyboard focus is in `container` (on one of its frames or their windows): the editor has the keys.
     pub fn has_focus(container: u64) -> bool {
@@ -1141,6 +1156,7 @@ mod imp {
     pub fn input_off(_container: u64, _off: bool) {}
     /// Whether the ';' key (VK_OEM_1 on a US layout) is down now: the comment chord held.
     pub fn semicolon_held() -> Option<bool> { Some(unsafe { windows_sys::Win32::UI::Input::KeyboardAndMouse::GetAsyncKeyState(0xBA) } as u16 & 0x8000 != 0) }
+    pub fn focus_in_pid(_pid: u32) -> bool { false }
     /// Whether keyboard focus in the active foreground queue is inside `container`.
     pub fn has_focus(container: u64) -> bool {
         if FOCUS_ESCAPED.load(Ordering::SeqCst) { return false }
@@ -1388,6 +1404,7 @@ mod imp {
     /// Unknown here: the window's own key-up decides.
     pub fn semicolon_held() -> Option<bool> { None }
     pub fn has_focus(_container: u64) -> bool { false }
+    pub fn focus_in_pid(_pid: u32) -> bool { false }
     pub fn button_over(_w: u64) -> Option<bool> { None }
     pub fn grab_click(_container: u64, _on: bool) {}
     pub fn grab_escape(_top: u64, _on: bool) {}
@@ -1416,6 +1433,7 @@ mod tests {
     #[test] fn reserved_chords_become_gpui_keystrokes() {
         assert_eq!(chord(0x6b, 4).as_deref(), Some("ctrl-k"));
         assert_eq!(chord(0xff09, 5).as_deref(), Some("ctrl-shift-tab"));
+        assert_eq!(chord(0xfe20, 5).as_deref(), Some("ctrl-shift-tab"), "ISO_Left_Tab, as GTK names Shift+Tab");
         assert_eq!(chord(0x60, 4).as_deref(), Some("ctrl-`"));
         assert_eq!(chord(0xffbe, 4), None, "F1: not a reserved key");
         assert_eq!(reserved_chord_index(0), Some("ctrl-k"));
