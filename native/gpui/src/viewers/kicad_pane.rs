@@ -167,6 +167,8 @@ pub struct KicadPane {
     /// the .kicad_pro the hub resolved this pane's project to (its attach reply), "" until then
     pub bound: String,
     pub project: String, pub root: String, pub project_id: String, pub open: String, last_hub_open: String, hub: tokio::sync::mpsc::Sender<Command>,
+    /// Gerbers asked for before the pane was attached and KiCad ready ("Open in GerbView" from Backplane's Gerbers page): opened then
+    want_gerbers: Vec<String>,
     container: Option<u64>, toplevel: u64, attached: bool, pub info: Value, frames: Vec<nc::Frame>,
     marker: Arc<Mutex<Option<HitboxId>>>, last_root: (i32, i32), placed: Option<(Option<nc::R>, Option<u64>, Vec<nc::R>)>,
     focus: FocusHandle, keys: bool, pub light: bool, _subs: Vec<Subscription>,
@@ -242,7 +244,7 @@ impl KicadPane {
             last = std::time::Instant::now();
             let _ = drained_tx.send(());
         } }).detach();
-        KicadPane { bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), last_root: (i32::MIN, 0), placed: None,
+        KicadPane { want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), last_root: (i32::MIN, 0), placed: None,
             focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), poked: None, unmapped_since: None, unshown_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, at_px: None, dialogs_open: Vec::new(), took: None, press_focus: None, want_keys: true, was_dialog: false }
     }
     fn rpc(&self, name: &str, params: Value) { let _ = self.hub.try_send(Command::Rpc(name.to_string(), Secret(params), "kicad")); }
@@ -358,6 +360,10 @@ impl KicadPane {
         self.rpc("editor.kicad.show", json!({"project": self.project, "frame": "GERBVIEW", "document": files.join("\n")})); // i18n-ok: wire frame kind
         cx.notify(); true
     }
+    /// open_gerbers now if it can, else as soon as the pane is attached and KiCad ready (the tick); dropped if KiCad then has no GerbView.
+    pub fn open_gerbers_soon(&mut self, files: &[String], cx: &mut Context<Self>) {
+        if !self.open_gerbers(files, cx) { self.want_gerbers = files.to_vec(); cx.notify(); }
+    }
     pub fn show_kind(&mut self, kind: &str, cx: &mut Context<Self>) {
         self.want_keys = true;
         if kind == frame_for(&self.open) { self.override_kind = None; } else { self.override_kind = Some(kind.to_string()); }
@@ -414,6 +420,10 @@ impl KicadPane {
     }
     fn want(&self) -> Option<u64> { if self.info.is_null() || (cfg!(windows) && self.info["mode"] == "stock") { return None } pick_local(self.wanted_kind(), &self.info, &self.frames, &self.ever_shown) }
     fn tick(&mut self, cx: &mut Context<Self>) {
+        if !self.want_gerbers.is_empty() && self.attached && self.info["state"] == "ready" {
+            let f = std::mem::take(&mut self.want_gerbers);
+            if !self.open_gerbers(&f, cx) { eprintln!("GPUI_LOG {}", json!({"gerbview": "not opened", "why": if self.can_gerbview() { "refused" } else { "no embed-gerbview" }})); }
+        }
         // the pre-warm's 2 s are up: a frame drawn now sends it (after_frame), even when nothing else redraws the window
         if let (Some(t), Some(pid)) = (self.first_placed, self.info["pid"].as_u64()) { if self.prewarmed != Some(pid) && t.elapsed() >= std::time::Duration::from_secs(2) { cx.notify(); } }
         let Some(c) = self.container else { return };
@@ -825,6 +835,8 @@ fn take_kept(toplevel: u64, project: &str) -> Option<Kept> {
     m.iter().position(|x| x.toplevel == toplevel && x.project == project).map(|i| m.remove(i))
 }
 
+/// Whether this hub's KiCad runtime has GerbView in process (a session said `embed-gerbview`).
+pub static GERBVIEW: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// The project last asked warm (kicad_warm), so each project shown in a row is asked once.
 static WARM_LAST: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 
@@ -832,6 +844,8 @@ impl crate::Backplane {
     /// The hub's `editor.kicad.<digest>` (JSON text; "" when the editor went away): kept, and given to the pane when it is this project's.
     pub(crate) fn kicad_info(&mut self, digest: String, text: &str, cx: &mut Context<Self>) {
         let v: Value = serde_json::from_str(text).unwrap_or(Value::Null);
+        // the runtime has GerbView in process (any of its sessions says embed-gerbview): Backplane's Gerbers page offers "Open in GerbView"
+        if v["embed_caps"].as_array().is_some_and(|a| a.iter().any(|c| c == "embed-gerbview")) { GERBVIEW.store(true, std::sync::atomic::Ordering::Relaxed); }
         if v.is_null() { self.screens.kicad_infos.remove(&digest); } else { self.screens.kicad_infos.insert(digest.clone(), v.clone()); }
         let (has_pane, matched, pane_proj) = match self.screens.kicad.clone() {
             Some(p) => {
@@ -893,6 +907,15 @@ impl crate::Backplane {
         if let Some(p) = self.screens.kicad.clone() { p.update(cx, |p, _| p.reattach()); }
     }
     /// Edit: the thread's design in the real KiCad, in the pane (the page stays on the rail's Board, Schematic or 3D).
+    /// "Open in GerbView" on a Gerber set: the Board page with Edit on (the pane attaches where it is drawn), then the set in KiCad's
+    /// GerbView (lane B's open_gerbers, once the pane is attached and KiCad ready). `files`: the set's job, else its files (the hub's).
+    pub(crate) fn open_in_gerbview(&mut self, files: Vec<String>, cx: &mut Context<Self>) {
+        if files.is_empty() { return }
+        eprintln!("GPUI_LOG {}", json!({"gerbview": "open", "files": files.len()}));
+        self.rail_press("view-kind", "board", cx); // i18n-ok: rail page kind
+        if !self.kicad_edit(cx) { return }
+        if let Some(p) = self.screens.kicad.clone() { p.update(cx, |p, cx| p.open_gerbers_soon(&files, cx)); }
+    }
     pub(crate) fn kicad_edit(&mut self, cx: &mut Context<Self>) -> bool {
         let thread = &self.data["thread"];
         let viewer = &thread["viewer"];

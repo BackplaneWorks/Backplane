@@ -342,6 +342,13 @@ fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, 
             tools.push(tall(crate::ui::with_rect(div().id("gerbers-vs-board"), || "ui:vs board".into()).px_2().text_size(px(12.))).cursor_pointer().border_1().border_color(c(if on { "accent" } else { "line" })).bg(c("raise")).hover(|s| s.bg(c("panel"))) // i18n-ok: a harness id
                 .tooltip(crate::keys::tip(&trs("Mark where these Gerbers differ from the board: red on the board only, green in the Gerbers only"), "", light))
                 .child(trs("vs board")).on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("view".into(), if on { "gerbers".into() } else { "gerbers\tboard".into() })); cx.notify(); })).into_any_element());
+            // the set in KiCad's own GerbView, where this runtime has it in process (embed-gerbview): Edit on the Board page, then the set
+            let files: Vec<String> = viewer["gerberFiles"].as_array().map(|a| a.iter().filter_map(|f| f.as_str().map(str::to_string)).collect()).unwrap_or_default();
+            if !files.is_empty() && crate::viewers::kicad_pane::GERBVIEW.load(std::sync::atomic::Ordering::Relaxed) {
+                tools.push(tall(crate::ui::with_rect(div().id("gerbers-gerbview"), || "ui:Open in GerbView".into()).px_2().text_size(px(12.))).cursor_pointer().border_1().border_color(c("line")).bg(c("raise")).hover(|s| s.bg(c("panel"))) // i18n-ok: a harness id
+                    .tooltip(crate::keys::tip(&trs("Open these Gerbers in KiCad's GerbView, here in the pane"), "", light))
+                    .child(trs("Open in GerbView")).on_click(cx.listener(move |this, _, _, cx| this.open_in_gerbview(files.clone(), cx))).into_any_element());
+            }
             // the marks told apart without colour too: the board's solid, the Gerbers' striped
             if on { tools.push(div().id("gerbers-legend").flex_shrink_0().flex().items_center().gap_1().text_size(px(11.)).text_color(c("dim"))
                 .child(div().size(px(9.)).bg(rgb(0xe5484d))).child(trs("board only"))

@@ -67,6 +67,13 @@ pub fn board_of(set: &Path) -> Option<std::path::PathBuf> {
     None
 }
 /// The path of a set compared with its board (kicad/plotread.rs reads it here): "gerbercmp\n<set>\n<board>".
+/// What "Open in GerbView" opens of a set (Backplane KiCad's in-process GerbView, `OpenGerbers`): its job file, which brings all its
+/// layers, else its Gerber and drill files.
+pub fn gerbview_files(set: &Path) -> Vec<String> {
+    let fs = set_files(set);
+    if let Some(j) = fs.iter().find(|f| is_job(&f.to_string_lossy())) { return vec![j.to_string_lossy().into_owned()] }
+    fs.iter().map(|f| f.to_string_lossy().into_owned()).collect()
+}
 pub const CMP: &str = "gerbercmp\n";
 pub fn cmp_path(set: &str, board: &str) -> String { format!("{CMP}{set}\n{board}") }
 /// The set a viewer's file names: itself, or the set of a comparison.
@@ -76,3 +83,16 @@ pub fn set_of(file: &str) -> &str { file.strip_prefix(CMP).map_or(file, |r| r.sp
 static COUNTS: std::sync::Mutex<Vec<(String, Vec<(String, usize, usize)>)>> = std::sync::Mutex::new(Vec::new());
 pub fn set_counts(set: &str, v: Vec<(String, usize, usize)>) { let mut c = COUNTS.lock().unwrap(); c.retain(|x| x.0 != set); c.push((set.to_string(), v)); if c.len() > 16 { c.remove(0); } }
 pub fn counts_of(set: &str) -> Vec<(String, usize, usize)> { COUNTS.lock().unwrap().iter().find(|x| x.0 == set).map(|x| x.1.clone()).unwrap_or_default() }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test] fn gerbview_opens_a_sets_job_else_its_files() {
+        let t = crate::plat::tmp::dir("gerbview-files"); let d: &Path = &t;
+        for f in ["b-F_Cu.gbr", "b-B_Cu.gbr", "b-PTH.drl", "notes.txt"] { std::fs::write(d.join(f), "x").unwrap() }
+        let mut v = gerbview_files(d); v.sort();
+        assert_eq!(v.iter().map(|f| f.rsplit('/').next().unwrap()).collect::<Vec<_>>(), ["b-B_Cu.gbr", "b-F_Cu.gbr", "b-PTH.drl"]);
+        std::fs::write(d.join("b-job.gbrjob"), "{}").unwrap();
+        assert_eq!(gerbview_files(d).iter().map(|f| f.rsplit('/').next().unwrap()).collect::<Vec<_>>(), ["b-job.gbrjob"]);
+    }
+}
