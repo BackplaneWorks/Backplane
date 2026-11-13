@@ -1077,7 +1077,7 @@ mod tests {
         let r = cad_rows(json!({"kicad.status": "missing", "home": "/h"}), json!({}), Some(&LINUX));
         assert_eq!(r[0]["note"], "KiCad was not found. Install it below, or set the folder of one you have.");
         assert_eq!(r[1]["label"], "Install KiCad"); assert_eq!(btns(&r[1]), [("Install KiCad".to_string(), "kicad-install-ask".to_string())]);
-        assert!(r[1]["note"].as_str().unwrap().contains("10.99.0-bp.10"));
+        assert!(r[1]["note"].as_str().unwrap().contains(LINUX.version));
         // no package for this computer: said, nothing to press
         let r = cad_rows(json!({"kicad.status": "missing"}), json!({}), None);
         assert!(r[1]["note"].as_str().unwrap().starts_with("No Backplane KiCad is published for this computer") && btns(&r[1]).is_empty());
@@ -1088,12 +1088,12 @@ mod tests {
         assert_eq!(ask[1]["label"], "Install Backplane KiCad?");
         let n = ask[1]["note"].as_str().unwrap(); assert!(n.contains("github.com/i2cjak/Backplane_KiCad") && n.contains("/h/kicad") && n.contains("no administrator password"), "{n}");
         assert_eq!(btns(&ask[1]), [("Install".to_string(), "kicad-install".to_string()), ("Cancel".to_string(), "kicad-install-cancel".to_string())]);
-        let run = cad_rows(json!({"kicad.status": "missing", "kicad.install": r#"{"state":"running","version":"10.99.0-bp.10","note":"Unpacking"}"#}), json!({}), Some(&LINUX));
-        assert_eq!((run[1]["label"].as_str().unwrap(), run[1]["note"].as_str().unwrap()), ("Installing Backplane KiCad 10.99.0-bp.10", "Unpacking. This takes about a minute.")); assert!(btns(&run[1]).is_empty());
+        let run = cad_rows(json!({"kicad.status": "missing", "kicad.install": json!({"state": "running", "version": LINUX.version, "note": "Unpacking"}).to_string()}), json!({}), Some(&LINUX));
+        assert_eq!((run[1]["label"].as_str().unwrap(), run[1]["note"].as_str().unwrap()), (format!("Installing Backplane KiCad {}", LINUX.version).as_str(), "Unpacking. This takes about a minute.")); assert!(btns(&run[1]).is_empty());
         let bad = cad_rows(json!({"kicad.status": "missing", "kicad.install": r#"{"state":"failed","note":"KiCad install failed: KiCad archive checksum mismatch"}"#}), json!({}), Some(&LINUX));
         assert_eq!(bad[1]["note"], "KiCad install failed: KiCad archive checksum mismatch."); assert_eq!(btns(&bad[1])[0].1, "kicad-install-ask");
-        let done = cad_rows(json!({"kicad.cli": "/h/kicad/10.99.0-bp.10/bin/kicad-cli", "kicad.version": "10.99.0-bp.10", "kicad.install": r#"{"state":"done","note":"Installed Backplane KiCad 10.99.0-bp.10 in /h/kicad/10.99.0-bp.10"}"#}), json!({}), Some(&LINUX));
-        assert_eq!(done[0]["note"], "version 10.99.0-bp.10 · /h/kicad/10.99.0-bp.10/bin/kicad-cli. Installed by Backplane just now.");
+        let done = cad_rows(json!({"kicad.cli": format!("/h/kicad/{}/bin/kicad-cli", LINUX.version), "kicad.version": LINUX.version, "kicad.install": json!({"state": "done", "note": format!("Installed Backplane KiCad {0} in /h/kicad/{0}", LINUX.version)}).to_string()}), json!({}), Some(&LINUX));
+        assert_eq!(done[0]["note"], format!("version {0} · /h/kicad/{0}/bin/kicad-cli. Installed by Backplane just now.", LINUX.version));
         assert_eq!(done[1]["label"], "FreeCAD");
     }
     /// An older Backplane KiCad (bp.4 when bp.8 is published) gets the Update row, through the same ask; the current one gets none.
@@ -1103,7 +1103,7 @@ mod tests {
         let r = cad_rows(old.clone(), json!({}), Some(&LINUX));
         assert_eq!(r[1]["label"], "Update Backplane KiCad"); assert_eq!(btns(&r[1])[0].1, "kicad-install-ask");
         let ask = cad_rows(old, json!({"@kinstall": "ask"}), Some(&LINUX)); assert_eq!(btns(&ask[1])[0], ("Update".to_string(), "kicad-install".to_string()));
-        let cur = cad_rows(json!({"kicad.cli": "/h/kicad/10.99.0-bp.10/bin/kicad-cli", "kicad.version": "10.99.0-bp.10", "kicad.status": "ok"}), json!({}), Some(&LINUX));
+        let cur = cad_rows(json!({"kicad.cli": format!("/h/kicad/{}/bin/kicad-cli", LINUX.version), "kicad.version": LINUX.version, "kicad.status": "ok"}), json!({}), Some(&LINUX));
         assert_eq!(cur[1]["label"], "FreeCAD", "no update row for the current one");
     }
     #[test] fn install_is_sent_only_after_the_ask_and_cancel_sends_nothing() {

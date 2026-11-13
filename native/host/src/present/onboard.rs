@@ -840,17 +840,17 @@ mod tests {
         use crate::files::kicad::install::{pick, LINUX};
         let step = |os: &str, arch: &str, status: &str, ins: Option<&str>| {
             let mut i = info(os); i["kicad.status"] = json!(status);
-            if status != "missing" { i["kicad.cli"] = json!("/k/bin/kicad-cli"); i["kicad.version"] = json!(if status == "ok" { "10.99.0-bp.10" } else { "10.0.6" }); }
+            if status != "missing" { i["kicad.cli"] = json!("/k/bin/kicad-cli"); i["kicad.version"] = json!(if status == "ok" { crate::files::kicad::install::LINUX.version } else { "10.0.6" }); }
             if let Some(s) = ins { i["kicad.install"] = json!(s); }
             let s0 = cst(blank(), &[]);
             let x = tools_with(&Facts::of(&s0, &i), &s0, &sess(json!({})), pick(os, arch));
             (Value::Array(x.rows.clone()), x.rows.iter().find(|r| r["label"] == "KiCad").cloned().unwrap())
         };
         let acts = |rows: &Value| -> Vec<String> { rows.as_array().unwrap().iter().flat_map(|r| r["buttons"].as_array().into_iter().flatten()).map(|b| s_(b, "action")).collect() };
-        let (rows, k) = step("linux", "x86_64", "missing", None); assert!(k["note"].as_str().unwrap().contains("Downloading Backplane KiCad 10.99.0-bp.10"), "{k}");
+        let (rows, k) = step("linux", "x86_64", "missing", None); assert!(k["note"].as_str().unwrap().contains(&format!("Downloading Backplane KiCad {}", crate::files::kicad::install::LINUX.version)), "{k}");
         assert!(!acts(&rows).contains(&"ob-kicad-install".to_string()), "no button to press: it starts by itself");
         let (_, r) = step("windows", "x86_64", "missing", Some(r#"{"state":"running","version":"10.99.0-bp.6","note":"Unpacking"}"#)); assert!(r["note"].as_str().unwrap().contains("Installing Backplane KiCad 10.99.0-bp.6. Unpacking"));
-        let (rows, ok) = step("linux", "x86_64", "ok", Some(r#"{"state":"done","version":"10.99.0-bp.10","note":"x"}"#)); assert!(ok["note"].as_str().unwrap().contains("10.99.0-bp.10"));
+        let (rows, ok) = step("linux", "x86_64", "ok", Some(json!({"state": "done", "version": crate::files::kicad::install::LINUX.version, "note": "x"}).to_string().as_str())); assert!(ok["note"].as_str().unwrap().contains(crate::files::kicad::install::LINUX.version));
         assert!(!rows.to_string().contains("Locate KiCad"), "found: nothing to locate");
         let (rows, bad) = step("linux", "x86_64", "missing", Some(r#"{"state":"failed","note":"KiCad install failed: KiCad archive checksum mismatch"}"#)); assert!(acts(&rows).contains(&"ob-kicad-install".to_string()) && bad["note"].as_str().unwrap().contains("checksum mismatch") && bad["tone"] == "warn");
         let (rows, stock) = step("macos", "aarch64", "stock", None); let n = stock["note"].as_str().unwrap(); assert!(n.contains("Stock KiCad 10.0.6") && n.contains("works for viewing and export") && n.contains("adds editing"), "{n}"); assert!(acts(&rows).contains(&"ob-kicad-install".to_string()));
