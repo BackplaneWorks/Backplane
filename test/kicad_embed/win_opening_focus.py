@@ -519,6 +519,9 @@ def run(h):
         settled = False
         clicked_edit = False
         at_request = None
+        # idle_hotkey: KiCad suspended from 0.5 s after its first paint (before the client's pre-warm request at ~2 s)
+        stall_s = float(os.environ.get("BP_PREWARM_STALL_S", "0") or 0) if os.environ.get("BP_OPENING_FOCUS_ONLY") == "idle_hotkey" else 0
+        stall_started, stall_pid = None, 0
         while cp.poll() is None and time.monotonic() - started < 65:
             snap = focus_snapshot()
             if snap != previous:
@@ -529,6 +532,17 @@ def run(h):
                 if at_request:
                     timeline.append({"stage": "guard_clauses_at_request", "ms": round((time.monotonic() - started) * 1000), **at_request})
                     print("DIAG guard_at_request " + json.dumps(timeline[-1]), flush=True)
+            if stall_s and not stall_started:
+                fp = [m for m in h.metrics() if m.get("event") == "kicad" and m.get("tag") == "first_paint" and m.get("pid")]
+                if fp:
+                    stall_pid = int(fp[0]["pid"])
+                    time.sleep(0.5)
+                    stall_started = E.suspend_pid(stall_pid, True) and time.monotonic()
+                    timeline.append({"stage": "stall_started", "pid": stall_pid, "ok": bool(stall_started)})
+            if stall_started and time.monotonic() - stall_started >= stall_s:
+                E.suspend_pid(stall_pid, False)
+                timeline.append({"stage": "stall_ended", "s": stall_s})
+                stall_started, stall_s = None, 0
             marks = {m.get("name") for m in h.metrics() if m.get("event") == "mark"}
             if "ready_for_edit" in marks and not clicked_edit:
                 clicked_edit = h.click_control(E.find_main_window(cp.pid), "ui:Edit")
@@ -537,6 +551,12 @@ def run(h):
                 settled = True
                 break
             time.sleep(0.05)
+        if stall_started:
+            rest = stall_s - (time.monotonic() - stall_started)
+            if rest > 0:
+                time.sleep(rest)
+            E.suspend_pid(stall_pid, False)
+            timeline.append({"stage": "stall_ended_after_settle", "s": stall_s})
         reps = h.kicad_reports()
         first, rep = reps.get("first_paint", {}), reps.get("settled", {})
         frame, pid = int(rep.get("shown") or 0), int(rep.get("pid") or 0)
@@ -625,18 +645,8 @@ def run(h):
             # KiCad suspended from before the client's pre-warm request (it asks ~2 s after the first placement), so the
             # pre-warmed frame is built and shown only after the resume: the steal lands ~stall s after the opening hand-in,
             # outside verify_handin's 1.5 s window
-            stalled = False
-            t_stall = time.monotonic()
-            if stall:
-                stalled = E.suspend_pid(pid, True)
-                seen = wait_prewarm(h, top, "during", stall + 10)
-                rest = stall - (time.monotonic() - t_stall)
-                if rest > 0:
-                    time.sleep(rest)
-                if stalled:
-                    E.suspend_pid(pid, False)
-            else:
-                seen = wait_prewarm(h, top, "during", 20)
+            stalled = any(x.get("stage") == "stall_started" and x.get("ok") for x in timeline)
+            seen = wait_prewarm(h, top, "during", 20)
             time.sleep(15)
             snap = focus_snapshot(frame)
             if snap["foreground"]:
