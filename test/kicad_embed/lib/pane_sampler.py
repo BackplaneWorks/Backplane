@@ -44,6 +44,26 @@ def run(x, y, w, h, out, stop, max_s):
         last = hv
     f.close()
 
+_GRAB = {}
+def grab(x, y, w, h):
+    """One picture of a root rectangle as a numpy array (h, w) of 0xRRGGBB, for the drivers' pixel diffs."""
+    import numpy as np
+    if not _GRAB:
+        x11 = ctypes.CDLL(ctypes.util.find_library("X11"))
+        x11.XOpenDisplay.restype = ctypes.c_void_p; x11.XOpenDisplay.argtypes = [ctypes.c_char_p]
+        x11.XDefaultRootWindow.restype = ctypes.c_ulong; x11.XDefaultRootWindow.argtypes = [ctypes.c_void_p]
+        x11.XGetImage.restype = ctypes.c_void_p
+        x11.XGetImage.argtypes = [ctypes.c_void_p, ctypes.c_ulong, ctypes.c_int, ctypes.c_int, ctypes.c_uint, ctypes.c_uint, ctypes.c_ulong, ctypes.c_int]
+        x11.XDestroyImage.argtypes = [ctypes.c_void_p]
+        d = x11.XOpenDisplay(os.environ.get("DISPLAY", ":0").encode())
+        _GRAB.update(x11=x11, d=d, root=x11.XDefaultRootWindow(d))
+    x11, d = _GRAB["x11"], _GRAB["d"]
+    img = x11.XGetImage(d, _GRAB["root"], x, y, w, h, 0xFFFFFFFF, 2)
+    data = ctypes.c_void_p.from_address(img + 16).value; bpl = ctypes.c_int.from_address(img + 44).value
+    a = np.frombuffer(ctypes.string_at(data, bpl * h), dtype=np.uint32).reshape(h, bpl // 4)[:, :w] & 0xFFFFFF
+    x11.XDestroyImage(img)
+    return a.copy()
+
 def pct(v, q):
     if not v: return None
     v = sorted(v); return v[min(len(v) - 1, max(0, int(-(-q * len(v) // 1)) - 1))]
