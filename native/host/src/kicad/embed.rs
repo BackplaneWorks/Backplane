@@ -2106,8 +2106,8 @@ async fn spawn_gui_session(
             frames = f2;
         }
         // the chords KiCad hands to Backplane, with Ctrl+; for a comment (comment.rs): beside the ready, not before it
-        { let (me, sock, desc) = (me.clone(), sock.clone(), desc.clone()); tokio::spawn(async move {
-            let rk = raw_on(&me, &sock, &desc, "kiapi.backplane.embed.SetReservedKeys", json!({"chords": super::comment::reserved(proto::load(&desc).has_field("kiapi.backplane.embed.CommentSelection", "capture_only"))}), 5000).await;
+        { let (me, sock, desc, caps) = (me.clone(), sock.clone(), desc.clone(), caps.clone()); tokio::spawn(async move {
+            let rk = raw_on(&me, &sock, &desc, "kiapi.backplane.embed.SetReservedKeys", json!({"chords": super::comment::reserved(proto::load(&desc).has_field("kiapi.backplane.embed.CommentSelection", "capture_only"), &caps)}), 5000).await;
             eprintln!("kicad embed: reserved keys {}", if rk["ok"] == true { rk["message"]["chords"].to_string() } else { format!("refused: {}", rk["error"]) });
         }); }
         phase("ready");
