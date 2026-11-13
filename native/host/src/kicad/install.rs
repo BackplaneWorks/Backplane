@@ -526,10 +526,11 @@ mod tests {
     }
 
     /// A disposable package for the real script: its archive and SHA256SUMS, served by a stand-in `curl` on PATH.
-    #[cfg(unix)] fn fixture(r: &Path, bad_manifest: bool) -> (Package, PathBuf) {
-        let (v, plat) = ("0.0.1-bp.1", "linux-x86_64"); let root = format!("backplane-kicad-{plat}-{v}");
+    #[cfg(unix)] fn fixture(r: &Path, bad_manifest: bool) -> (Package, PathBuf) { fixture_v(r, bad_manifest, "0.0.1-bp.1") }
+    #[cfg(unix)] fn fixture_v(r: &Path, bad_manifest: bool, v: &'static str) -> (Package, PathBuf) {
+        let plat = "linux-x86_64"; let root = format!("backplane-kicad-{plat}-{v}");
         let src = r.join("src").join(&root); std::fs::create_dir_all(src.join("bin")).unwrap(); std::fs::create_dir_all(src.join("share/backplane")).unwrap();
-        exe(&src.join("bin/kicad-cli"), "#!/bin/sh\necho 0.0.1-bp.1\n");
+        exe(&src.join("bin/kicad-cli"), &format!("#!/bin/sh\necho {v}\n"));
         std::fs::write(src.join("manifest.json"), format!(r#"{{"version": "{}", "platform": "{plat}"}}"#, if bad_manifest { "9.9" } else { v })).unwrap();
         std::fs::write(src.join("share/backplane/api.desc"), "x").unwrap();
         let serve = r.join("serve"); std::fs::create_dir_all(&serve).unwrap(); let asset = format!("{root}.tar.gz");
@@ -594,6 +595,16 @@ cp \"$f\" \"$out\"
         assert_eq!(crate::files::kicad::ipc::read_runtime(&parent.join("0.0.1-bp.1/bin/kicad-cli")).version, "0.0.1-bp.1");
         let (again, _) = fetch_run(&r, &p, &sysdirs(&bin)); assert!(again.unwrap_err().contains("already exists; the installation there is kept"));
         assert!(std::fs::read_to_string(r.join("log")).unwrap().contains("Checking the checksum"), "the steps are in the log as before");
+    }
+    /// The Linux bump to a hotfix: a four-part version installs beside the release it fixes, checked the same, and is the runtime taken.
+    #[cfg(unix)] #[test] fn the_rust_fetch_installs_a_hotfix_beside_its_release() {
+        let r = tmp("rf-hot"); let (p, bin) = fixture_v(&r, false, "10.99.0-bp.12.1"); assert_eq!(check_package(&p), Ok(()));
+        let parent = r.join("home/kicad"); let old = parent.join("10.99.0-bp.12/bin"); std::fs::create_dir_all(&old).unwrap(); exe(&old.join("kicad-cli"), "#!/bin/sh\necho 10.99.0-bp.12\n");
+        let (got, _) = fetch_run(&r, &p, &sysdirs(&bin));
+        assert_eq!(got, Ok(parent.join("10.99.0-bp.12.1")));
+        assert!(old.join("kicad-cli").is_file(), "the release it replaces is left where it is");
+        assert_eq!(crate::files::kicad::ipc::read_runtime(&parent.join("10.99.0-bp.12.1/bin/kicad-cli")).version, "10.99.0-bp.12.1");
+        assert!(older("10.99.0-bp.12", &p) && !older("10.99.0-bp.12.1", &p));
     }
     #[cfg(unix)] #[test] fn the_rust_fetch_refuses_a_wrong_digest_or_manifest_and_leaves_nothing() {
         let r = tmp("rf-bad"); let (mut p, bin) = fixture(&r, false); p.sha256 = "0000000000000000000000000000000000000000000000000000000000000000";
