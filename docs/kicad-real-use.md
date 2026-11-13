@@ -28,7 +28,10 @@ Each run prints `PERF <measure> <ms> key=value...` lines and a `JSON` line, and 
 - **Boards.** `lib/real_use.sh` stages a slim copy (KiCad files, sheets, libraries, 3D models; no backups, build, mfg, git, locks) of
   `~/Documents/Nordic/Hubble_DK` (hubble) and `~/Documents/i2cjak/Collar_Wearable/boards/main` (collar_main).
 - **Runtimes.** bp11: the released runtime the person runs (`~/.backplane-gpui-fresh/home/kicad/10.99.0-bp.11`, only read); bp12: the test build
-  (`~/.cache/kicad-test/10.99.0-bp.12*`). Add a runtime (bp.13 for the floorplanner) as one line in `REAL_RUNTIMES`.
+  (`~/.cache/kicad-test/10.99.0-bp.12`, or `KEMBED_BP12=<dir>`). Add a runtime (bp.13 for the floorplanner) as one line in `REAL_RUNTIMES`.
+  Each run passes `BACKPLANE_KICAD_BIN` and `BACKPLANE_KICAD_CLI` from the same runtime: the hub starts the KiCad beside the CLI, and agent shells
+  export bp.11's CLI, so a run that sets only the first runs bp.11. The KiCad actually running is recorded in `real_use.json` (`kicad_running`:
+  its executable, its runtime's SOURCE_VERSION/SOURCE_COMMIT, its API's version), and a run whose KiCad is not the one asked for says FAIL.
 
 ### What is measured, and how
 
@@ -61,7 +64,10 @@ save written and clean <= 300 ms; comment posted <= 300 ms; no KiCad dialog duri
 
 ## Numbers (2026-11-12, origin/main 5c6dd03c4, RTX 5080, 1800x1050 at 60 Hz, pane 804x920)
 
-ms. Matrix run `realuse-m1`: real_use_all.sh, both boards, both runtimes.
+ms. Matrix run `realuse-m1`: real_use_all.sh, both boards, both runtimes. Its bp12 columns are the bp.12 pre-release build 441259d2
+(`10.99.0-bp.12-851cbefda6`, the only bp.12 then): real_use_all.sh set both the GUI and CLI variables, so these are not bp.11 relabelled, but
+they are not the final bp.12 (8e57d691) either; they are re-run when it is installed. The same holds for the baseline below. The screenshot run
+that found Hubble's "automatically fixed" modal (real_use_watch.sh) set only `BACKPLANE_KICAD_BIN`, so it ran bp.11.
 
 | measure | collar bp11 | collar bp12 | hubble bp11 | hubble bp12 | budget |
 |---|---|---|---|---|---|

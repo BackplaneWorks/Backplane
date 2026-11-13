@@ -185,7 +185,7 @@ pub fn page_lists(cx: &mut Context<Backplane>, light: bool, data: &Value, pid: &
             if t["off"] != true { ctl.push(CtlEntry { id: format!("page-thread:{raw}"), label: string(t, "title"), ctl: Ctl::Select(id.clone()) }); }
             let off = t["off"] == true;
             if t["kind"] == "swarm" { out.extend(crate::screens::swarm::side_rows(cx, light, &serde_json::json!({"swarms": [t]}), "", ctl)); continue }
-            out.push(div().id(SharedString::from(format!("page-thread-{raw}"))).flex().items_center().gap_2().px_2().h(px(30.)).border_b_1().border_color(c("line")).when(off, |d| d.opacity(0.55))
+            out.push(crate::ui::with_rect(div().id(SharedString::from(format!("page-thread-{raw}"))), { let r = raw.clone(); move || format!("page-thread:{r}") }).flex().items_center().gap_2().px_2().h(px(30.)).border_b_1().border_color(c("line")).when(off, |d| d.opacity(0.55))
                 .when(!off, |d| d.cursor_pointer().hover(|s| s.bg(c("raise"))))
                 .child(super::siderow::dot(light, t)).child(div().flex_1().overflow_hidden().whitespace_nowrap().child(string(t, "title")))
                 .children(crate::screens::badge::machine_mark(light, &t["mark"], false, &id))
