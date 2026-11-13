@@ -448,6 +448,11 @@ mod imp {
         let _ = c.flush();
     }
 
+    /// An explicit hand-back to the client's window (a host chord pressed in the editor): as `focus` here.
+    #[track_caller]
+    pub fn hand_back(w: u64) { focus(w) }
+    /// Whether `frame` and its container are both visible now (Windows re-posts an opening focus request on that): always so here.
+    pub fn frame_visible(_container: u64, _frame: u64) -> bool { true }
     /// The keyboard to `w` (a frame), when it is viewable.
     #[track_caller]
     pub fn focus(w: u64) {
@@ -684,7 +689,7 @@ mod imp {
                 GetCursorPos, GetGUIThreadInfo, GetSystemMetrics, GetWindow, GetWindowLongPtrW, GetWindowRect,
                 GetWindowThreadProcessId, InternalGetWindowText, IsChild, IsWindow,
                 IsWindowVisible, LoadCursorW, PostMessageW, RegisterClassExW, SetParent, SetWindowLongPtrW,
-                SetWindowPos, ShowWindowAsync, WindowFromPoint, GA_PARENT, GA_ROOT, GUITHREADINFO, GWLP_HWNDPARENT,
+                SetForegroundWindow, SetWindowPos, ShowWindowAsync, WindowFromPoint, GA_PARENT, GA_ROOT, GUITHREADINFO, GWLP_HWNDPARENT,
                 GWL_STYLE, GW_CHILD, IDC_ARROW, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN,
                 SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN, SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE, SWP_NOSIZE,
                 SWP_NOZORDER, SW_HIDE, SW_SHOWNA, WM_ACTIVATE, WM_APP, WM_HOTKEY, WM_LBUTTONDOWN, WM_MBUTTONDOWN,
@@ -715,6 +720,14 @@ mod imp {
     static CLICK_GRACE_UNTIL: AtomicU64 = AtomicU64::new(0);
     static FOCUS_ESCAPED: AtomicBool = AtomicBool::new(false);
     static CHILD_FOCUSED: AtomicBool = AtomicBool::new(false);
+    /// When an explicit hand-back last made gpui's window the keyboard's (`hand_back`): a KiCad focus notice still in flight then
+    /// (sent for a focus request KiCad accepted just before) is stale and must not attach the queues and take the keyboard back
+    /// (opening-focus run Bp-7f4: Ctrl+K opened the palette, a late notice gave KiCad the keys, the typing reached the board).
+    static HANDED_BACK_AT: AtomicU64 = AtomicU64::new(0);
+    /// When a button last went down in the pane (the container's WM_PARENTNOTIFY / WM_MOUSEACTIVATE): a focus notice after a press
+    /// that followed the hand-back is the click's own, never stale (opening-focus run B5: a canvas click 0.5 s after Ctrl+` lost
+    /// its notice to a time-only rule).
+    static PANE_PRESS_AT: AtomicU64 = AtomicU64::new(0);
 
     unsafe fn in_child_focus(c: HWND) -> bool {
         if c.is_null() || unsafe { IsWindow(c) } == 0 { return false }
@@ -739,6 +752,7 @@ mod imp {
     }
 
     unsafe fn handle_child_mouse_down(container: HWND, button_msg: u32) {
+        PANE_PRESS_AT.store(mono_ms(), Ordering::SeqCst);
         let already = unsafe { in_child_focus(container) };
         FOCUS_ESCAPED.store(false, Ordering::SeqCst);
         CHILD_FOCUSED.store(true, Ordering::SeqCst);
@@ -759,6 +773,14 @@ mod imp {
             WM_BP_FOCUS => {
                 // `bp.8` casts the 32-bit kernel HWND handle through `long` (`i32`) on Win64; zero-extend via `u32`.
                 let fw = (lparam as u32) as u64;
+                let back = HANDED_BACK_AT.load(Ordering::SeqCst);
+                let since = mono_ms().saturating_sub(back);
+                if since < 1000 && PANE_PRESS_AT.load(Ordering::SeqCst) < back {
+                    if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() {
+                        eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_focus_notice_ignored": {"frame": fw, "ms_after_hand_back": since}}));
+                    }
+                    return 0;
+                }
                 FOCUS_ESCAPED.store(false, Ordering::SeqCst);
                 CHILD_FOCUSED.store(true, Ordering::SeqCst);
                 if fw != 0 {
@@ -1140,10 +1162,22 @@ mod imp {
 
     /// Focus `w` without ever making a synchronous Win32 call into KiCad's thread:
     /// - When `w` is KiCad's child frame (`target_tid != cur`), attach the foreground input queue and `PostMessageW(target, WM_ACTIVATE, 1, 0)`
-    ///   so `DefWindowProcW` on KiCad's own UI thread calls `::SetFocus` directly on the clicked canvas/control asynchronously.
+    ///   so `DefWindowProcW` on KiCad's own UI thread calls `::SetFocus` directly on the clicked canvas/control asynchronously. Posted before
+    ///   the frame is visible it is lost (the pane re-posts it once shown: kicad_pane `refocus`).
     /// - When `w` is gpui's top-level window (`target_tid == cur`), detach thread input queues first so `SetFocus(h)` never sends synchronous
     ///   `WM_KILLFOCUS` into KiCad (staying instant even when KiCad is `NtSuspendProcess`-frozen and preserving KiCad's `m_lostFocus` state).
-    pub fn focus(w: u64) {
+    pub fn focus(w: u64) { focus_with(w, false) }
+    /// An explicit hand-back to gpui's window (Ctrl+` or another host chord pressed in KiCad, also while KiCad is frozen):
+    /// as `focus`, and the host window is activated too. KiCad's frame can be the active foreground window, where `SetFocus`
+    /// alone moves only our background queue's focus and the keys keep going to KiCad. Never used for the reclaims of an
+    /// opening or a pointer leaving the pane: activating there took the foreground from the editor just opened.
+    pub fn hand_back(w: u64) { HANDED_BACK_AT.store(mono_ms().max(1), Ordering::SeqCst); focus_with(w, true) }
+    /// Whether `frame` and `container` are both visible (each with every ancestor): a read of window state, no message to KiCad.
+    pub fn frame_visible(container: u64, frame: u64) -> bool {
+        let (c, f) = (hwnd(container), hwnd(frame));
+        !c.is_null() && !f.is_null() && unsafe { IsWindowVisible(c) != 0 && IsWindowVisible(f) != 0 }
+    }
+    fn focus_with(w: u64, activate: bool) {
         let h = hwnd(w);
         if h.is_null() { return }
         unsafe {
@@ -1172,6 +1206,13 @@ mod imp {
                 if focus_tid != 0 && focus_tid != cur {
                     AttachThreadInput(focus_tid, cur, 0);
                     AttachThreadInput(cur, focus_tid, 0);
+                }
+            }
+            // Activate only on an explicit hand-back, after detaching; never a foreign HWND here.
+            if activate {
+                let ok = SetForegroundWindow(h);
+                if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() {
+                    eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_hand_back": {"window": w, "activated": ok != 0}}));
                 }
             }
             SetFocus(h);
@@ -1430,6 +1471,8 @@ mod imp {
     pub fn sync_root(_container: u64, _r: R, _show: u64, _last_root: &mut (i32, i32)) {}
     pub fn holes(_container: u64, _keep: Option<&[R]>) {}
     pub fn focus(_w: u64) {}
+    pub fn hand_back(_w: u64) {}
+    pub fn frame_visible(_container: u64, _frame: u64) -> bool { true }
     pub fn conn_fd() -> Option<i32> { None }
     pub fn pump() -> bool { false }
     pub fn input_off(_container: u64, _off: bool) {}

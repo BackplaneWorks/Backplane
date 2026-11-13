@@ -214,6 +214,11 @@ pub struct KicadPane {
     /// Edit, a tab, Full size: the person chose the editor, so it gets the keyboard the moment its frame is on show (KiCad's hotkeys work with
     /// no canvas click first; lane A: Ctrl+Shift+R after Edit reached nothing)
     pub want_keys: bool,
+    /// Windows: the editor given the keyboard as its frame came on show, and when. The focus request posted then can reach KiCad
+    /// before the client's ShowWindowAsync of the frame and container, and KiCad rejects a request for a frame not yet visible
+    /// (opening-focus run Bp-repost: ignored at show, accepted once the pane was shown), so it is posted once more on the first
+    /// frame both are visible, while the pane still has the keyboard
+    refocus: Option<(u64, std::time::Instant)>,
     /// the keyboard was in a KiCad dialog last tick: when it closes, the keyboard goes back to the editor (a window manager hands it to
     /// Backplane's window)
     was_dialog: bool,
@@ -259,7 +264,7 @@ impl KicadPane {
             let _ = drained_tx.send(());
         } }).detach();
         KicadPane { busy_sent: None, press_in: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), last_root: (i32::MIN, 0), placed: None,
-            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), poked: None, unmapped_since: None, unshown_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, at_px: None, dialogs_open: Vec::new(), took: None, press_focus: None, want_keys: true, was_dialog: false }
+            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), poked: None, unmapped_since: None, unshown_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, at_px: None, dialogs_open: Vec::new(), took: None, press_focus: None, want_keys: true, refocus: None, was_dialog: false }
     }
     fn rpc(&self, name: &str, params: Value) { let _ = self.hub.try_send(Command::Rpc(name.to_string(), Secret(params), "kicad")); }
     /// The hub's `editor.kicad.<digest>` for this project changed.
@@ -599,11 +604,11 @@ impl KicadPane {
             eprintln!("GPUI_LOG {}", json!({"kicad_ev": match &e { nc::Ev::Escape => "escape".to_string(), nc::Ev::Click => "click".to_string(), nc::Ev::Key(k) => format!("key {k}"), nc::Ev::Focus(w) => format!("focus {w}") }}));
             match e {
                 // the keyboard back to the client's window; a reserved chord is then pressed in gpui (after_frame, which has the window)
-                nc::Ev::Escape => { nc::focus(self.toplevel); self.keys = false; nc::grab_escape(self.toplevel, false); self.grab_click(c, true); cx.notify(); }
+                nc::Ev::Escape => { self.refocus = None; nc::hand_back(self.toplevel); self.keys = false; nc::grab_escape(self.toplevel, false); self.grab_click(c, true); cx.notify(); }
                 nc::Ev::Click => { if let Some(w) = self.want() { self.grab_click(c, false); nc::focus(w); self.keys = true; self.touched(); nc::grab_escape(self.toplevel, true); cx.notify(); } }
                 // Ctrl+Tab / Ctrl+Shift+Tab pressed in KiCad: the next editor tab, and KiCad keeps the keyboard
                 nc::Ev::Key(k) if k == "ctrl-tab" || k == "ctrl-shift-tab" => { let to = next_tab(self.wanted_kind(), if k == "ctrl-tab" { 1 } else { -1 }); self.show_kind_by(to, &format!("host shortcut {k} (KiCad key hook)"), cx); } // i18n-ok: a debug log cause (BACKPLANE_KICAD_DEBUG)
-                nc::Ev::Key(k) => { eprintln!("GPUI_LOG {}", json!({"kicad_key": k, "at_ms": crate::screens::kcomment::epoch_ms() as u64})); nc::focus(self.toplevel); self.keys = false; nc::grab_escape(self.toplevel, false); self.grab_click(c, true);
+                nc::Ev::Key(k) => { eprintln!("GPUI_LOG {}", json!({"kicad_key": k, "at_ms": crate::screens::kcomment::epoch_ms() as u64})); self.refocus = None; nc::hand_back(self.toplevel); self.keys = false; nc::grab_escape(self.toplevel, false); self.grab_click(c, true);
                     // the comment chord (and bp.13's ';', KiCad's own comment key) opens the window now, from this event (no keystroke round trip through the next frame)
                     // the comment chord and the management panels' keys are acted on here, from the event: replayed as a keystroke after a
                     // comment window had the keyboard they reached no action (gpui's dispatch in this window found none), so they go by name
@@ -682,6 +687,14 @@ impl KicadPane {
                 .filter_map(|f| f["xid"].as_u64())
                 .collect()
         }) };
+        if let Some((w, since)) = self.refocus {
+            if !self.keys || show != Some(w) || since.elapsed() > std::time::Duration::from_secs(3) { self.refocus = None; }
+            else if nc::frame_visible(c, w) {
+                self.refocus = None;
+                if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {}", json!({"kicad_refocus_shown": {"frame": w, "after_ms": since.elapsed().as_millis() as u64}})); }
+                nc::focus(w);
+            } else { cx.notify(); }
+        }
         let prev_show = self.placed.as_ref().and_then(|(_, s, _)| *s);
         let key = (at, show, over.clone());
         if self.placed.as_ref() == Some(&key) {
@@ -702,12 +715,14 @@ impl KicadPane {
         if (self.keys || self.want_keys) && show != prev_show {
             if let Some(w) = show {
                 nc::focus(w);
+                if cfg!(windows) && !nc::frame_visible(c, w) { self.refocus = Some((w, std::time::Instant::now())); cx.notify(); }
                 if self.want_keys && !self.keys { self.keys = true; nc::grab_escape(self.toplevel, true); self.grab_click(c, false); self.touched(); }
                 self.want_keys = false;
             }
         } else if self.want_keys && show.is_some() && show == prev_show {
             // already on show (Full size, the tab of the editor shown): the keyboard to it now
             let w = show.unwrap(); nc::focus(w);
+            if cfg!(windows) && !nc::frame_visible(c, w) { self.refocus = Some((w, std::time::Instant::now())); cx.notify(); }
             if !self.keys { self.keys = true; nc::grab_escape(self.toplevel, true); self.grab_click(c, false); self.touched(); }
             self.want_keys = false;
         }
