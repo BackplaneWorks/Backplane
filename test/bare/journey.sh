@@ -24,20 +24,44 @@ as_person() { docker exec -i -u person -w $PH -e HOME=$PH "$C" "$@"; }
 # every X call is bounded: a client that holds a grab (or a stuck server) cost a whole run once (46 min in rerun 3); a timeout is a FAIL
 # that says which step and what the box's processes were doing (xstuck)
 STEP=start; step() { STEP=$*; echo "STEP $(python3 -c "import time;print(round(time.time()-$T0))") $*"; }
-xstuck() { [ -f "$OUT/logs/xstuck.txt" ] && return 0; { echo "step: $STEP ($1 timed out)"; in_box ps -eo pid,stat,wchan:24,etime,args 2>&1 | cut -c1-220; } >"$OUT/logs/xstuck.txt" 2>&1
-  bad "the X server did not answer during: $STEP ($1 timed out; logs/xstuck.txt)"; }
-shot() { DISPLAY=$DISP timeout 20 import -window root "$OUT/shots/$1.png" 2>/dev/null; [ $? = 124 ] && xstuck "screenshot $1"; return 0; }
+# What it captures, for lane B's grab probe: does a fresh X client get an answer (no: a server grab, held by the one X client that is not
+# waiting on its X socket); was the Backplane client still logging; each X client's state and stack from the host (the container gives
+# no ptrace: host pids from docker top, /proc as root, eu-stack or gdb), Xvfb's too.
+# xrun LIMIT CMD...: CMD with DISPLAY set, watched; past LIMIT seconds xstuck looks at it while it is still stuck, then it is killed (124)
+xrun() { local lim=$1 p i; shift; DISPLAY=$DISP "$@" & p=$!
+  for i in $(seq $((lim * 20))); do kill -0 $p 2>/dev/null || { wait $p; return $?; }; sleep 0.05; done
+  xstuck "$*" $p; kill -9 $p 2>/dev/null; wait $p 2>/dev/null; return 124; }
+xstuck() { [ -f "$OUT/logs/xstuck.txt" ] && return 0; local f=$OUT/logs/xstuck.txt pid sp=${2:-}
+  { echo "step: $STEP ($1 timed out) at $(date -u +%T)"
+    if [ -n "$sp" ]; then echo "--- the stuck call: pid $sp: $(tr '\0' ' ' </proc/$sp/cmdline 2>/dev/null)"
+      grep -E '^State' /proc/$sp/status 2>/dev/null; echo "wchan $(cat /proc/$sp/wchan 2>/dev/null)  (read on the X socket: a grab; nanosleep/poll loop: a wait like --sync)"
+      echo "syscall $(sudo -n cat /proc/$sp/syscall 2>/dev/null)"; ls -l /proc/$sp/fd 2>/dev/null | grep -o 'socket:.*' | head -3
+      sudo -n cat /proc/$sp/stack 2>/dev/null | head -12; command -v eu-stack >/dev/null && sudo -n timeout 30 eu-stack -p $sp 2>&1 | head -40; fi
+    if DISPLAY=$DISP timeout 5 xdpyinfo >/dev/null 2>&1; then echo "a fresh X client is answered: no server grab (the call itself was stuck)"
+    else echo "a fresh X client is NOT answered in 5 s: the server is grabbed or stuck"; fi
+    echo "client log: last line $(( $(date +%s) - $(stat -c %Y "$HH/win.log" 2>/dev/null || echo 0) )) s ago; last timed event: $(grep -o '"t_ms":[0-9.]*' "$HH/win.log" 2>/dev/null | tail -1)"
+    echo "--- box processes"; in_box ps -eo pid,stat,wchan:24,etime,args 2>&1 | cut -c1-220
+    echo "--- host side (docker top), per process: state, wchan, kernel stack, user stack"
+    for pid in $(docker top "$C" -eo pid,args 2>/dev/null | awk 'NR>1 && /kicad|backplane-app|backplane-hub/ {print $1}') $XP; do
+      echo "=== $pid $(tr '\0' ' ' </proc/$pid/cmdline 2>/dev/null | cut -c1-160)"
+      grep -E '^(State|Threads)' /proc/$pid/status 2>/dev/null | tr '\n' ' '; echo "wchan $(cat /proc/$pid/wchan 2>/dev/null)"
+      sudo -n cat /proc/$pid/stack 2>/dev/null | head -12
+      if command -v eu-stack >/dev/null; then sudo -n timeout 30 eu-stack -p $pid 2>&1 | head -80
+      elif command -v gdb >/dev/null; then sudo -n timeout 40 gdb -batch -p $pid -ex 'thread apply all bt 12' 2>&1 | grep -v '^\[' | head -80; fi
+    done; } >"$f" 2>&1
+  bad "an X call did not return during: $STEP ($1; logs/xstuck.txt: $(grep -m1 "fresh X client" "$f"))"; }
+shot() { xrun 20 import -window root "$OUT/shots/$1.png" 2>/dev/null; return 0; }
 cleanup() { docker rm -f "$C" >/dev/null 2>&1; [ -n "$IP" ] && kill "$IP" 2>/dev/null; [ -n "$XP" ] && kill "$XP" 2>/dev/null; }
 trap cleanup EXIT
 
 # --- harness on the host (never in the box) ---
 need() { command -v "$1" >/dev/null 2>&1; }
-need Xvfb && need i3 && need xdotool && need import && need xwininfo || sudo -n env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq xvfb i3 xdotool imagemagick x11-utils >"$OUT/logs/harness-apt.log" 2>&1
+need Xvfb && need i3 && need xdotool && need import && need xwininfo && need xdpyinfo && need eu-stack || sudo -n env DEBIAN_FRONTEND=noninteractive apt-get install -y -qq xvfb i3 xdotool imagemagick x11-utils elfutils >"$OUT/logs/harness-apt.log" 2>&1
 need bun || { echo "no bun on the host for the stand-in agent" >&2; exit 3; }
 Xvfb $DISP -screen 0 1600x1000x24 -nolisten tcp >"$OUT/logs/xvfb.log" 2>&1 & XP=$!; sleep 1.5
 printf 'ipc-socket %s/i3.sock\nnew_window none\nfor_window [class=".*"] border none\ndefault_border none\n' "$OUT" >"$OUT/i3.conf"
 DISPLAY=$DISP i3 -c "$OUT/i3.conf" >"$OUT/logs/i3.log" 2>&1 & IP=$!; sleep 1
-X() { DISPLAY=$DISP timeout 15 xdotool "$@"; local r=$?; [ $r = 124 ] && xstuck "xdotool $1"; return $r; }
+X() { xrun 15 xdotool "$@"; }
 pos() { python3 "$ROOT/test/onboarding/pos.py" "$HH/win.log" "$1" 2>/dev/null; }
 click_id() { local p; for _ in $(seq ${2:-40}); do p=$(pos "$1") && { X mousemove $p click 1; return 0; }; sleep 0.5; done; return 1; }
 

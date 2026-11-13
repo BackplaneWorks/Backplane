@@ -70,9 +70,14 @@ if [ -n "$KPID" ]; then KARGS=$(in_box sh -c "tr '\\0' ' ' </proc/$KPID/cmdline"
 fi
 # budgets in quarter seconds: the first schematic took 82 s once (KiCad's "Load Schematic" twice), 42 s another time
 step "Schematic"; if markt sch 720; then S_T=$(since); tm schematic-painted "$S_T"; sleep 1; shot 08-schematic; set -- $(painted sch)
-  [ "${1:-}" = ready ] && ok "Schematic: shown ($*)" || bad "Schematic not shown ($(painted sch))"
+  # the pane must show the schematic frame, not just be ready (rerun 3: SCH made, never shown, PCB still in the pane); KiCad's own
+  # "Load Schematic" progress dialogs are counted, on which runtime
+  NLOAD=$(grep -h '"kicad_info"' "$HH/win.log" | grep -o '"dialogs":\[[^]]*\]' | grep -c 'Load Schematic')
+  echo "schematic: $* after the click; Load Schematic seen in $NLOAD reports; runtime $(basename "$KDIR")" | tee "$OUT/logs/schematic.txt"
+  if [ "${1:-}" = ready ] && [ "${3:-}" = SCH ]; then ok "Schematic: shown ($*)"
+  else bad "Schematic clicked, but the pane shows ${3:--} ($*; $(basename "$KDIR"))"; cut_ 1 schematic "Schematic on a fresh install left the pane on ${3:--}: the schematic editor was made but not shown ($(basename "$KDIR"))"; fi
   S_D=$(python3 -c "print(round($S_T - ${E_T:-$S_T}))")
-  [ "$S_D" -gt 30 ] && cut_ 3 schematic "the first Schematic took $S_D s after the PCB editor on a fresh install (KiCad's Load Schematic)"
+  [ "$S_D" -gt 30 ] && { bad "the first Schematic took $S_D s after the PCB editor (must-fix: under 30 s)"; cut_ 1 schematic "the first Schematic took $S_D s after the PCB editor on a fresh install ($(basename "$KDIR"))"; }
 else bad "Schematic never reported in 180 s"; fi
 step "back to the PCB, the agent's turn"; markt back 400 && { sleep 1; shot 09-back-before-agent; }
 # the agent's turn (stand-in): kicad_ipc on the live board, save, a comment

@@ -44,7 +44,7 @@ IPC="$HERE/../kicad_embed/lib/gui_ipc_probe.py"
 
 # Ctrl+; in KiCad (the comment window), first, while no panel narrows the pane: the keyboard into KiCad by a click on its frame, a part
 # selected there (over KiCad's IPC, as embed_comment_e2e.sh does), the chord, a note, Enter -> one message in the thread
-step "comment window (Ctrl+;)"; sleep 4; eval "$(DISPLAY=$DISP timeout 10 xwininfo -id "$SHOWN" 2>/dev/null | awk '/Absolute upper-left X/{print "wx="$NF} /Absolute upper-left Y/{print "wy="$NF} /Width:/{print "ww="$NF} /Height:/{print "wh="$NF}')"
+step "comment window (Ctrl+;)"; sleep 4; eval "$(xrun 10 xwininfo -id "$SHOWN" 2>/dev/null | awk '/Absolute upper-left X/{print "wx="$NF} /Absolute upper-left Y/{print "wy="$NF} /Width:/{print "ww="$NF} /Height:/{print "wh="$NF}')"
 if [ -n "${ww:-}" ]; then X mousemove $((wx + ww / 2)) $((wy + wh / 2)) click 1; sleep 0.8
   timeout 30 python3 "$IPC" select-items "$HSOCK" pcb "JP1" 0 >"$OUT/logs/comment-select.json" 2>&1; sleep 0.5
   t=$(date +%s.%N); X key ctrl+semicolon
