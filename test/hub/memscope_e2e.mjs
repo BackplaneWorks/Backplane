@@ -10,7 +10,7 @@ import {makeFixture} from '../parity/fixture.mjs';
 const [bin,port,out]=process.argv.slice(2);
 const work=out+'/memscope';rmSync(work,{recursive:true,force:true});mkdirSync(work+'/fixroot',{recursive:true});mkdirSync(work+'/bin',{recursive:true});
 const home=work+'/home';makeFixture(home,work+'/fixroot');
-writeFileSync(work+'/bin/claude',`#!/bin/sh\nexec bun ${process.cwd()}/test/tools/claude_standin.ts "$@"\n`);chmodSync(work+'/bin/claude',0o755);
+writeFileSync(work+'/bin/claude',`#!/bin/sh\nexec ${process.execPath} ${process.cwd()}/test/tools/claude_standin.ts "$@"\n`);chmodSync(work+'/bin/claude',0o755);
 for(const n of['codex','grok','muse'])writeFileSync(work+'/bin/'+n,'#!/bin/sh\nexit 1\n'),chmodSync(work+'/bin/'+n,0o755);
 const SLICE='bpmemscopetest.slice';
 const h=await startHub({bin,home,port:Number(port),standins:work+'/bin',log:work+'/hub.log',cap:'2G',

@@ -160,6 +160,24 @@ pub mod proc {
             if die_with_hub { KEPT.lock().unwrap_or_else(|e| e.into_inner()).push((pid, job as usize)) } else { CloseHandle(job); } // a closed handle leaves the job for as long as a process is in it
         }
     }
+    /// The machine's physical memory in bytes.
+    pub fn total_ram() -> Option<u64> {
+        use windows_sys::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
+        unsafe { let mut m: MEMORYSTATUSEX = std::mem::zeroed(); m.dwLength = std::mem::size_of::<MEMORYSTATUSEX>() as u32; (GlobalMemoryStatusEx(&mut m) != 0).then_some(m.ullTotalPhys) }
+    }
+    /// A memory limit on the Job Object `adopt` made for `pid` (JOB_OBJECT_LIMIT_JOB_MEMORY), keeping the limits it has (kill-on-close).
+    pub fn cap_job_memory(pid: u32, bytes: u64) {
+        if pid == 0 || bytes == 0 { return }
+        unsafe {
+            let j = OpenJobObjectW(0x0004 /* JOB_OBJECT_QUERY */ | 0x0002 /* JOB_OBJECT_SET_ATTRIBUTES */, 0, job_name(pid).as_ptr()); if j.is_null() { return }
+            let mut l: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = std::mem::zeroed();
+            let mut got = 0u32;
+            QueryInformationJobObject(j, JobObjectExtendedLimitInformation, &mut l as *mut _ as *mut _, std::mem::size_of_val(&l) as u32, &mut got);
+            l.BasicLimitInformation.LimitFlags |= JOB_OBJECT_LIMIT_JOB_MEMORY; l.JobMemoryLimit = bytes as usize;
+            SetInformationJobObject(j, JobObjectExtendedLimitInformation, &l as *const _ as *const _, std::mem::size_of_val(&l) as u32);
+            CloseHandle(j);
+        }
+    }
     /// End the group a leader made (any signal ends it). True if anything was ended.
     pub fn kill_group(pid: u32, sig: i32) -> bool {
         if pid == 0 { return false }

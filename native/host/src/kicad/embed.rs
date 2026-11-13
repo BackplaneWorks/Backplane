@@ -1906,7 +1906,8 @@ async fn spawn_gui_session(
 
     let before = kipc::sockets_at(&req_sock);
     let cwd = Path::new(&pro).parent().filter(|p| !p.as_os_str().is_empty()).map(PathBuf::from).unwrap_or_else(std::env::temp_dir);
-    let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Local, &argv[0]);
+    // a memory scope of its own (memscope.rs `wrap_helper`): KiCad killed for memory is killed alone, never with or instead of the hub
+    let mut c = crate::proc::tokio_cmd_in(crate::proc::Kind::Local, &argv[0], crate::memscope::wrap_helper("kicad")); crate::memscope::raise_oom(&mut c);
     c.args(&argv[1..])
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -1951,7 +1952,8 @@ async fn spawn_gui_session(
         }
     };
     let pid = child.id().unwrap_or(0);
-    crate::plat::proc::adopt(pid, true);
+    crate::memscope::watch_helper(pid, "KiCad");
+    crate::plat::proc::adopt(pid, true); crate::memscope::cap_job(pid, "kicad");
     if pid > 0 {
         live_pids().lock().unwrap_or_else(|e| e.into_inner()).insert(pid);
         crate::agents::proc::watch_group(pid);
