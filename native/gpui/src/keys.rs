@@ -11,7 +11,7 @@ actions!(keys, [NewThread, OpenDiff, OpenFiles, StopTurn, ModelPicker, PrevThrea
     PickUp, PickDown, PickLeft, PickRight, PickTab, PickBackTab, PickEnter,
     Project1, Project2, Project3, Project4, Project5, Project6, Project7, Project8, Project9,
     Thread1, Thread2, Thread3, Thread4, Thread5, Thread6, Thread7, Thread8, Thread9,
-    RailBoard, RailSchematic, Rail3d, RailSplit, RailMech, RailFiles, RailDiff, RailReview, RailBrowser, ToggleTerminal, DismissTerminal, ShowKeys, FoldProject, UnfoldProject, MgmtBom, MgmtChecks, MgmtLife, MgmtFab, CommentKicad]);
+    RailBoard, RailSchematic, Rail3d, RailSplit, RailMech, RailFiles, RailDiff, RailReview, RailBrowser, ToggleTerminal, DismissTerminal, ShowKeys, FoldProject, UnfoldProject, MgmtBom, MgmtChecks, MgmtLife, MgmtFab, CommentKicad, Quit]);
 
 /// Where no text field, file list or viewer has the keyboard: a bare key may act.
 /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ pub const FREE: &str = "!AccountMenu && !Composer && !TextInput && !PickInput && !FindInput && !AskInput && !ImpInput && !Viewer && !BrowserBar && !FilesPage";
@@ -95,6 +95,7 @@ pub const TABLE: &[Entry] = &[
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("mgmt-life", "Lifecycle panel beside the design: open or close", "Viewer", "alt-shift-l", Rebind),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("mgmt-fab", "Fab panel beside the design: open or close", "Viewer", "alt-shift-f", Rebind),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("help", "Keyboard shortcuts: this list. ? outside a text box, F1 anywhere", "Window", "? or F1", Fixed),
+    /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("quit", "Quit Backplane, on a Mac: the hub keeps running", "Window", "secondary-q", Fixed),
     /* i18n-ok: key contexts, and the table's words are drawn by Settings through trs */ e("perf", "Performance overlay: the last few seconds of the window's work", "Window", "ctrl-shift-h", Rebind),
 ];
 /// Keys the old client had that this one cannot do yet (no equivalent): listed, not faked.
@@ -192,7 +193,16 @@ pub fn bindings(l: &Local) -> Vec<KeyBinding> {
     v.extend(pad_bindings(&v, &k("close")));
     let term = term_bindings(&v, &k("term"));
     v.extend(term);
+    v.extend(quit_bindings(mac()));
     v
+}
+/// Cmd+Q quits the desktop client on a Mac (the hub runs on by itself). Bound after the pad's and the terminal's mutes, and left out of them,
+/// so it quits from every keyboard owner: the composer, a viewer, the shell, the drawing pad. Off a Mac, Ctrl+Q and Super+Q stay the fields' and the desktop's.
+pub fn quit_bindings(mac: bool) -> Vec<KeyBinding> { if mac { vec![KeyBinding::new("cmd-q", Quit, None)] } else { vec![] } }
+/// The macOS application menu: Backplane, with Quit Backplane (also Cmd+Q). Installed at launch and again when the language changes; nothing elsewhere.
+pub fn install_menus(cx: &mut App) {
+    if !mac() { return }
+    cx.set_menus(vec![Menu { name: "Backplane".into(), items: vec![MenuItem::action(tr("Quit Backplane").into_owned(), Quit)] }]);
 }
 /// The floating terminal's own keys, and every other shortcut muted in it: Ctrl+C, Ctrl+K, Esc, a backtick and the rest are the shell's.
 /// Its toggle and Shift+Esc stay (they are bound everywhere). Last, so the mutes win the tie with the bindings that have no context.
@@ -567,6 +577,27 @@ mod tests {
         assert_eq!(hint(&Local::default(), "term-leave"), if mac() { "⇧Esc" } else { "Shift+Esc" }); assert_eq!(hint(&Local::default(), "term-alt"), "`");
         assert!(["term-alt", "term-leave", "term-copy", "term-paste"].iter().all(|id| find(id).unwrap().kind == Fixed));
         assert!(MISSING.iter().all(|(k, why)| !k.contains("Ctrl+J") && !why.contains("terminal")), "listed as done, not missing");
+    }
+    /// What `key` does on a Mac's keymap (this device's bindings, with the Mac's Cmd+Q added last when the tests run elsewhere, as `bindings` adds it there).
+    fn on_mac(key: &str, ctx: &[&str]) -> String {
+        let mut all = bindings(&Local::default()); if !mac() { all.extend(quit_bindings(true)); }
+        let map = Keymap::new(all);
+        let stack: Vec<KeyContext> = ["Backplane"].iter().chain(ctx.iter()).map(|c| KeyContext::parse(c).unwrap()).collect();
+        map.bindings_for_input(&[Keystroke::parse(key).unwrap()], &stack).0.first().map(|b| b.action().name().to_string()).unwrap_or_default()
+    }
+    #[test] fn cmd_q_quits_on_a_mac_from_every_keyboard_owner() {
+        for ctx in [&[][..], &["Composer"][..], &["TextInput"][..], &["AskInput"][..], &["Viewer"][..], &["Viewer Plot"][..], &["Viewer", "FilesPage"][..], &["Viewer", "BrowserBar"][..],
+            &["Terminal"][..], &["Viewer", "Terminal"][..], &["DrawPad"][..], &["DrawPad", "PadLength"][..], &["AccountMenu"][..], &["Picker", "Composer"][..]] {
+            assert_eq!(on_mac("cmd-q", ctx), "keys::Quit", "{ctx:?}");
+        }
+        assert_eq!(on_mac("cmd-n", &["DrawPad"]), "", "the pad's mute still holds the other shortcuts"); assert_eq!(on_mac("cmd-k", &["Terminal"]), "", "and the shell's");
+    }
+    #[test] fn quit_is_bound_only_on_a_mac_and_listed() {
+        assert!(quit_bindings(false).is_empty());
+        if !mac() { for ctx in [&[][..], &["Composer"][..], &["Terminal"][..]] { assert_eq!(d("ctrl-q", ctx), "", "Ctrl+Q stays the field's and the shell's off a Mac"); assert_eq!(d("super-q", ctx), ""); } }
+        assert_eq!(find("quit").map(|x| (x.key, x.kind)), Some(("secondary-q", Fixed)));
+        assert_eq!(hint(&Local::default(), "quit"), if mac() { "⌘Q" } else { "Ctrl+Q" });
+        assert_eq!(crate::i18n::JA_MSG.lines().filter(|l| l.starts_with("gpui.quit.backplane")).count(), 2, "the menu item and the table's words are in the catalog");
     }
     #[test] fn viewer_scope_keeps_its_keys_but_the_chords_work() {
         assert_eq!(d("ctrl-d", &["Viewer"]), "keys::OpenDiff"); assert_eq!(d("ctrl-p", &["Viewer"]), "keys::OpenFiles"); assert_eq!(d("m", &["Viewer"]), "");

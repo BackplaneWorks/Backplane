@@ -188,7 +188,7 @@ impl Backplane {
     pub fn local_press(&mut self,name:&str,value:&str,cx:&mut Context<Self>){
         if !self.local.set(name,value){return;}
         if name=="sidebar-open"{self.sidebar_open=self.local.sidebar_open;}
-        if name=="lang"{crate::i18n::set_choice(&self.local.lang);}
+        if name=="lang"{crate::i18n::set_choice(&self.local.lang);cx.defer(keys::install_menus);}
         if name.starts_with("shortcut"){let l=self.local.clone();cx.defer(move|cx|bind_all(cx,&l));}
         self.local.save();self.ui_epoch+=1;cx.notify();
     }
@@ -319,7 +319,8 @@ fn main()->anyhow::Result<()> {
     // macOS hands a backplane:// link to the app itself, at launch and while it runs
     app.on_open_urls(|urls|for u in urls {if pairing::is_link(&u) {let _=OPENED.0.try_send(u);}});
     app.run(move|cx:&mut App|{
-        art::load_fonts(cx);bind_all(cx,&local::Local::load());
+        art::load_fonts(cx);bind_all(cx,&local::Local::load());keys::install_menus(cx);
+        cx.on_action(|_:&keys::Quit,cx|quit_later(cx)); // Cmd+Q and Backplane → Quit Backplane: this client only, the hub runs on
         cx.on_window_closed(|cx|if cx.windows().is_empty(){quit_later(cx);}).detach();
         let bounds=Bounds::centered(None,size(px(1400.),px(900.)),cx);
         let opts=WindowOptions{window_bounds:Some(WindowBounds::Windowed(bounds)),titlebar:Some(TitlebarOptions{title:Some("Backplane GPUI · experimental".into()),..Default::default()}),..Default::default()};
