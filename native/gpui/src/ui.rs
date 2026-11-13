@@ -865,7 +865,7 @@ impl Render for Backplane {
             // the keys sheet, over setup too (? and F1 work there)
             .children(crate::screens::keysheet::view(cx, light, self.screens.keysheet, &self.local))
             // the comment window over the KiCad pane (Ctrl+;)
-            .children(crate::screens::kcomment::view(self, cx, light, window.viewport_size()))
+            .children({ if let Some(k) = self.screens.kcomment.as_mut().filter(|k| k.focus_pending) { k.focus_pending = false; window.focus(&k.input.focus_handle(cx)); eprintln!("GPUI_LOG {}", serde_json::json!({"kcomment": "rendered", "at_ms": crate::screens::kcomment::epoch_ms() as u64})); } crate::screens::kcomment::view(self, cx, light, window.viewport_size()) })
             .children(crate::screens::migrate::view(cx, light, &self.data["migrate"]))
             // the GitHub star suggestion, while the hub says it is out: a small card in the upper right corner, at a pause (screens/star.rs `due`)
             .children(self.star_up(cx).then(|| crate::screens::star::card(cx, self.screens.star.clone().as_ref(), light)).flatten())

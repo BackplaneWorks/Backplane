@@ -192,12 +192,30 @@ pub struct KicadPane {
     took: Option<(u64, std::time::Instant)>,
 }
 
+/// A chord KiCad handed back that the window acts on at once (the comment window: screens/kcomment.rs).
+pub struct PaneKey(pub String);
+impl EventEmitter<PaneKey> for KicadPane {}
+
 impl KicadPane {
     pub fn new(cx: &mut Context<Self>, project: String, root: String, project_id: String, open: String, hub_open: String, hub: tokio::sync::mpsc::Sender<Command>) -> Self {
         // the tick: adopt stock KiCad's new frames, read the container's frames, and give the editor the keyboard on a click over it
+        // and at once when our X connection has something to read (a key KiCad hands back: the comment window opens on it with no 40 ms wait;
+        // Linux: a thread waits on the connection's socket, native_child `conn_fd`)
+        let (wake_tx, wake_rx) = async_channel::bounded::<()>(1);
+        let (drained_tx, drained_rx) = std::sync::mpsc::channel::<()>();
+        if let Some(fd) = nc::conn_fd().filter(|_| std::env::var_os("BACKPLANE_KICAD_NO_XWAKE").is_none()) {
+            std::thread::spawn(move || loop {
+                let mut p = libc::pollfd { fd, events: libc::POLLIN, revents: 0 };
+                let r = unsafe { libc::poll(&mut p, 1, 1000) };
+                if wake_tx.is_closed() { break }
+                if r > 0 { while drained_rx.try_recv().is_ok() {} let _ = wake_tx.try_send(()); let _ = drained_rx.recv_timeout(std::time::Duration::from_millis(40)); }
+            });
+        }
         cx.spawn(async move |weak, cx| loop {
-            cx.background_executor().timer(std::time::Duration::from_millis(40)).await;
+            let timer = cx.background_executor().timer(std::time::Duration::from_millis(40));
+            let _ = futures_util::future::select(Box::pin(timer), Box::pin(wake_rx.recv())).await;
             if weak.update(cx, |this, cx| this.tick(cx)).is_err() { break }
+            let _ = drained_tx.send(());
         }).detach();
         KicadPane { bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), last_root: (i32::MIN, 0), placed: None,
             focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), poked: None, unmapped_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, at_px: None, dialogs_open: Vec::new(), took: None }
@@ -458,7 +476,9 @@ impl KicadPane {
                 nc::Ev::Click => { if let Some(w) = self.want() { self.grab_click(c, false); nc::focus(w); self.keys = true; self.touched(); nc::grab_escape(self.toplevel, true); cx.notify(); } }
                 // Ctrl+Tab / Ctrl+Shift+Tab pressed in KiCad: the next editor tab, and KiCad keeps the keyboard
                 nc::Ev::Key(k) if k == "ctrl-tab" || k == "ctrl-shift-tab" => { let to = next_tab(self.wanted_kind(), if k == "ctrl-tab" { 1 } else { -1 }); self.show_kind(to, cx); }
-                nc::Ev::Key(k) => { eprintln!("GPUI_LOG {}", json!({"kicad_key": k})); nc::focus(self.toplevel); self.keys = false; nc::grab_escape(self.toplevel, false); self.grab_click(c, true); self.press.push(k); cx.notify(); }
+                nc::Ev::Key(k) => { eprintln!("GPUI_LOG {}", json!({"kicad_key": k, "at_ms": crate::screens::kcomment::epoch_ms() as u64})); nc::focus(self.toplevel); self.keys = false; nc::grab_escape(self.toplevel, false); self.grab_click(c, true);
+                    // the comment chord opens the window now, from this event (no keystroke round trip through the next frame)
+                    if k == "ctrl-;" { cx.emit(PaneKey(k)); } else { self.press.push(k); } cx.notify(); }
                 nc::Ev::Focus(_) => { if let Some(w) = self.want() { self.took = Some((w, std::time::Instant::now())); } if !self.keys { self.keys = true; self.touched(); nc::grab_escape(self.toplevel, true); self.grab_click(c, false); cx.notify(); } }
             }
         }
@@ -512,7 +532,7 @@ impl KicadPane {
     fn after_frame(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         // a window this pane left (popped out, or back in) places nothing
         if top_of(window) != Some(self.toplevel) { return }
-        for k in std::mem::take(&mut self.press) { if let Ok(k) = Keystroke::parse(&k) { window.defer(cx, move |window, cx| { window.dispatch_keystroke(k, cx); }); } }
+        for k in std::mem::take(&mut self.press) { if let Ok(k) = Keystroke::parse(&k) { eprintln!("GPUI_LOG {}", json!({"kicad_key_dispatch": k.unparse(), "at_ms": crate::screens::kcomment::epoch_ms() as u64})); window.defer(cx, move |window, cx| { window.dispatch_keystroke(k, cx); }); } }
         let Some(c) = self.container else { return };
         let seen = self.marker.lock().unwrap().and_then(|id| window.hitbox_drawn_after(id));
         self.at_px = seen.as_ref().map(|(b, _)| *b);
@@ -809,6 +829,7 @@ impl crate::Backplane {
         }
         let (hub, infos, hub_open) = (self.tx.clone(), self.screens.kicad_infos.clone(), open_now.to_string());
         let page = cx.new(move |cx| { let mut p = KicadPane::new(cx, project, root, pid, open, hub_open, hub); if let Some(v) = infos.values().find(|v| p.matches(v)).cloned() { p.info = v; } p });
+        cx.subscribe(&page, |this, _, _: &PaneKey, cx| { this.kcomment_open(None, cx); }).detach();
         self.screens.kicad = Some(page); cx.notify(); true
     }
     /// View: back to Backplane's own viewer (KiCad stays open in the hub, warm for the next Edit).

@@ -19,6 +19,8 @@ pub struct KComment {
     /// the capture (null until it comes), why it could not be made, and whether Enter is waiting on it
     pub cap: Value, pub err: String, pub post_on_capture: bool,
     pub opened: Instant, painted: Arc<AtomicBool>,
+    /// opened from the pane's event, which has no window: the field takes the keyboard at the next frame
+    pub focus_pending: bool,
 }
 
 fn list(c: &Value, k: &str) -> Vec<String> { c["names"][k].as_array().into_iter().flatten().filter_map(Value::as_str).map(String::from).collect() }
@@ -52,22 +54,31 @@ pub fn post_params(cap: &Value, note: &str, thread: &str, project: &str, frame: 
 }
 
 fn ms(t: Instant) -> f64 { (t.elapsed().as_secs_f64() * 1e4).round() / 10. }
-fn epoch_ms() -> u128 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis()) }
+pub fn epoch_ms() -> u128 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis()) }
 
 impl Win {
-    /// Ctrl+;: the window opens now over the pane (the capture fills it in when it comes); pressed again while it is open, nothing.
+    /// Ctrl+; in Backplane: the window opens now over the pane; pressed again while it is open, nothing.
     pub fn kcomment_key(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if self.screens.kcomment.is_some() { return }
-        let Some(p) = self.screens.kicad.clone() else { eprintln!("GPUI_LOG {}", json!({"kcomment": "no-pane"})); cx.propagate(); return };
-        let Some((project, frame)) = p.read(cx).comment_target() else { eprintln!("GPUI_LOG {}", json!({"kcomment": "no-editor"})); cx.propagate(); return };
+        if !self.kcomment_open(Some(window), cx) { cx.propagate() }
+    }
+    /// Opens the window (the capture fills it in when it comes): from the key in Backplane (`window`), or from the pane's event when KiCad handed
+    /// the chord back (the keyboard goes to the field at the next frame). False when no editor is on show.
+    pub fn kcomment_open(&mut self, window: Option<&mut Window>, cx: &mut Context<Self>) -> bool {
+        if self.screens.kcomment.is_some() { return true }
+        let Some(p) = self.screens.kicad.clone() else { eprintln!("GPUI_LOG {}", json!({"kcomment": "no-pane"})); return false };
+        let Some((project, frame)) = p.read(cx).comment_target() else { eprintln!("GPUI_LOG {}", json!({"kcomment": "no-editor"})); return false };
         let thread = self.data["thread"]["id"].as_str().unwrap_or("").rsplit('|').next().unwrap_or("").to_string();
         let input = cx.new(|cx| { let mut c = Composer::with_context(cx, "AskInput"); /* i18n-ok: drawn through trs by the composer */ c.set_placeholder("Comment"); c });
         cx.subscribe(&input, |this, _, e: &ComposerEvent, cx| if matches!(e, ComposerEvent::Submit) { this.kcomment_post(cx) }).detach();
-        window.focus(&input.focus_handle(cx)); p.update(cx, |p, _| p.hold_keys(true));
+        let focus_pending = match window { Some(w) => { w.focus(&input.focus_handle(cx)); false } None => true };
+        p.update(cx, |p, cx| { p.hold_keys(true); cx.notify(); });
         let _ = self.tx.try_send(Command::Rpc("editor.kicad.capture".into(), Secret(json!({"project": project, "frame": frame})), "kicad"));
         eprintln!("GPUI_LOG {}", json!({"kcomment": "open", "frame": frame, "at_ms": epoch_ms() as u64}));
-        self.screens.kcomment = Some(KComment { project, frame, thread, input, cap: Value::Null, err: String::new(), post_on_capture: false, opened: Instant::now(), painted: Arc::default() });
+        self.screens.kcomment = Some(KComment { project, frame, thread, input, cap: Value::Null, err: String::new(), post_on_capture: false, opened: Instant::now(), painted: Arc::default(), focus_pending });
         cx.notify();
+        eprintln!("GPUI_LOG {}", json!({"kcomment": "opened", "at_ms": epoch_ms() as u64}));
+        true
     }
     /// The hub's answer to the capture or to a post.
     pub fn kcomment_reply(&mut self, method: &str, reply: Value, cx: &mut Context<Self>) {
@@ -124,19 +135,18 @@ pub fn view(w: &Win, cx: &mut Context<Win>, light: bool, win: Size<Pixels>) -> O
         None => (trs("Reading the selection…"), "faint"),
     };
     let img = k.cap["image"].as_str().filter(|s| !s.is_empty()).map(|p| format!("/img?path={}", super::attach::enc(p)));
-    let thumb = img.and_then(|u| match w.screens.images.get(w.screens.attacher.target.as_ref(), &u) {
-        super::images::Slot::Ready(im) => Some(div().w(px(96.)).h(px(72.)).flex_none().overflow_hidden().bg(c("raise")).child(gpui::img(ImageSource::Image(im)).w(px(96.)).h(px(72.)).object_fit(ObjectFit::Contain)).into_any_element()),
-        super::images::Slot::Loading => Some(div().w(px(96.)).h(px(72.)).flex_none().bg(c("raise")).into_any_element()),
-        super::images::Slot::Failed => None,
-    });
+    // the picture's box is there from the first frame (a quiet empty square until the capture's screenshot comes), so nothing moves when it does
+    let pic = img.and_then(|u| match w.screens.images.get(w.screens.attacher.target.as_ref(), &u) { super::images::Slot::Ready(im) => Some(im), _ => None });
+    let thumb = div().w(px(96.)).h(px(72.)).flex_none().overflow_hidden().bg(c("raise"))
+        .children(pic.map(|im| gpui::img(ImageSource::Image(im)).w(px(96.)).h(px(72.)).object_fit(ObjectFit::Contain)));
     let (opened, painted) = (k.opened, k.painted.clone());
     let card = div().id("kcomment").key_context("KComment").absolute().left(px(x)).top(px(y)).w(px(W)).flex().flex_col().gap_2().p_3()
         .bg(c("panel")).border_1().border_color(c("accent")).text_color(c("text")).text_size(px(13.)).occlude()
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
         // the first paint after the key: how long the window took to appear (and where it is, for the e2e)
         .child(canvas(|_, _, _| (), move |b, _, w, _| { if !painted.swap(true, Ordering::Relaxed) { eprintln!("GPUI_LOG {}", json!({"kcomment": "painted", "ms": ms(opened), "at_ms": epoch_ms() as u64})); } crate::art::report("kcomment", b, w.scale_factor()); }).absolute().size_full())
-        .child(div().id("kcomment-names").text_size(px(12.)).text_color(c(tone)).overflow_hidden().whitespace_nowrap().text_ellipsis().child(line))
-        .child(div().flex().gap_2().items_start().children(thumb)
+        .child(div().id("kcomment-names").h(px(16.)).text_size(px(12.)).text_color(c(tone)).overflow_hidden().whitespace_nowrap().text_ellipsis().child(line))
+        .child(div().flex().gap_2().items_start().child(thumb)
             .child(div().flex_1().min_w_0().flex().flex_col().gap_1()
                 .child(div().min_h(px(52.)).px_2().py_1().bg(c("bg")).border_1().border_color(c("line")).child(k.input.clone()))
                 .child(div().text_size(px(11.)).text_color(c("faint")).child(trs("Enter posts to the thread · Esc cancels")))));
