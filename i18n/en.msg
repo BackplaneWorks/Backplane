@@ -4214,6 +4214,7 @@ gpui.mgmt.fab.reviewing = Reviewing the design…
 gpui.mgmt.fab.noreview = No design review yet
 gpui.mgmt.fab.findings = Findings
 gpui.mgmt.fab.reviewbtn = Review
+gpui.mgmt.fab.judge = Datasheets
 gpui.mgmt.fab.review = Review: {must} must · {should} should · {notes} notes
 gpui.mgmt.fab.stackup = stackup {id}, 50 Ω outer line {w} mm
 gpui.mgmt.fab.proposed = Proposed:

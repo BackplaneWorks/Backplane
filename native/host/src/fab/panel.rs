@@ -58,6 +58,7 @@ pub async fn publish(hub: &Arc<Hub>, pro: &str) {
     // the design review's last run: its verdict and counts (its findings are in the Checks list)
     let r2 = root.clone(); d["review"] = tokio::task::spawn_blocking(move || crate::review::last(&r2)).await.unwrap_or(Value::Null);
     d["review"]["running"] = json!(REVIEWING.lock().unwrap().contains(&root));
+    d["review"]["judge"] = json!(crate::review::judged::ASK);
     mgmt::publish(hub, "fab", pro, d).await;
 }
 /// The projects whose design review the panel started and is running now.

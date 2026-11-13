@@ -6,6 +6,7 @@
 //! `order_review record` takes its verdict and must-changes from it, so the Buy flow rests on it. Published as info `review.<digest>`.
 //! Triggers: policy.rs. Tool: `design_review {scope}`.
 pub mod checks;
+pub mod judged;
 pub mod policy;
 
 use crate::fab;
@@ -32,7 +33,7 @@ pub fn run_json(at: u64, scope: &str, fingerprint: &str, rev: &Value, findings: 
 }
 /// One line per must-change (for order_review's issues and the Buy gate), at most `n`.
 pub fn must_lines(run: &Value, n: usize) -> Vec<String> {
-    run["findings"].as_array().into_iter().flatten().filter(|f| f["severity"] == "error").map(|f| { let refs: Vec<&str> = f["anchors"].as_array().into_iter().flatten().filter_map(|a| a["reference"].as_str()).take(3).collect();
+    run["findings"].as_array().into_iter().flatten().chain(run["judged"]["findings"].as_array().into_iter().flatten()).filter(|f| f["severity"] == "error").map(|f| { let refs: Vec<&str> = f["anchors"].as_array().into_iter().flatten().filter_map(|a| a["reference"].as_str()).take(3).collect();
         let t = f["title"].as_str().unwrap_or(""); if refs.is_empty() || refs.iter().any(|r| t.contains(r)) { t.to_string() } else { format!("{}: {t}", refs.join(", ")) } }).take(n).collect()
 }
 /// `.backplane/review.md` from a run: per severity the findings with where and the fix; what was skipped; the agent's own notes after.
@@ -48,6 +49,11 @@ pub fn md(run: &Value, notes: &str) -> String {
             s += &format!("- **{}** ({}{}){}{}\n", f["title"].as_str().unwrap_or(""), f["source"].as_str().unwrap_or(""), if at.is_empty() { String::new() } else { format!(": {}", at.join(", ")) },
                 f["detail"].as_str().filter(|d| !d.is_empty()).map(|d| format!(" {d}")).unwrap_or_default(), f["fix"].as_str().filter(|d| !d.is_empty()).map(|d| format!(" Fix: {d}.")).unwrap_or_default());
         }
+    }
+    let j = &run["judged"];
+    if j.is_object() {
+        s += &format!("\n## Agent-judged (datasheets)\n\nChecked: {}. Not checked: {}.\n\n", j["checked"].as_array().map(|a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", ")).unwrap_or_default(), j["unchecked"].as_array().map(|a| a.iter().filter_map(Value::as_str).collect::<Vec<_>>().join(", ")).filter(|x| !x.is_empty()).unwrap_or("none".into()));
+        for f in j["findings"].as_array().into_iter().flatten() { s += &format!("- **{}** ({}) {}\n", f["title"].as_str().unwrap_or(""), level(f["severity"].as_str().unwrap_or("")), f["detail"].as_str().unwrap_or("")) }
     }
     let sk: Vec<&str> = run["skipped"].as_array().into_iter().flatten().filter_map(Value::as_str).collect();
     if !sk.is_empty() { s += "\n## Not checked\n\n"; for x in sk { s += &format!("- {x}\n") } }
@@ -206,7 +212,9 @@ pub async fn run(hub: &Arc<Hub>, root: &Path, scope: &str) -> Result<Value, Stri
     let r = root.to_path_buf(); let (scope2, skipped2) = (scope.to_string(), skipped.clone());
     let v = tokio::task::spawn_blocking(move || -> Result<Value, String> {
         let fp = crate::settings::order::fingerprint(&r);
-        let v = run_json(crate::agents::now_s(), &scope2, &fp, &rev, &fs, &skipped2, crate::hub::now_ms() - t0);
+        let mut v = run_json(crate::agents::now_s(), &scope2, &fp, &rev, &fs, &skipped2, crate::hub::now_ms() - t0);
+        // the agent-judged section stays while the design is the one it judged
+        if let Some(old) = std::fs::read_to_string(r.join(FILE)).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()) { if old["judged"]["fingerprint"] == json!(fp) { v["judged"] = old["judged"].clone() } }
         if !crate::copy::on() {
             let d = r.join(".backplane"); std::fs::create_dir_all(&d).map_err(|e| e.to_string())?;
             std::fs::write(r.join(FILE), serde_json::to_string(&v).unwrap_or_default() + "\n").map_err(|e| e.to_string())?;
@@ -254,19 +262,67 @@ pub fn answer(v: &Value, max: usize) -> Value {
         "more": v["findings"].as_array().map_or(0, |a| a.len().saturating_sub(max)), "written": [".backplane/review.md", FILE]})
 }
 
+/// The evidence an agent judges (scope "judged"): the parts worth checking against their datasheets, what to do, and how to answer.
+pub async fn judged_evidence(root: &Path) -> Result<Value, String> {
+    let r = root.to_path_buf();
+    tokio::task::spawn_blocking(move || -> Result<Value, String> {
+        let f = crate::files::kicad::project::read(&r.to_string_lossy());
+        if f.pro.is_empty() { return Err("this project has no KiCad project".into()) }
+        let sch = crate::files::kicad::bompanel::sch_of(&f.pro);
+        let sheets = crate::files::kicad::bompanel::read_sheets(&sch);
+        let texts: Vec<String> = sheets.iter().map(|s| String::from_utf8_lossy(&s.text).into_owned()).collect();
+        let parts = crate::files::kicad::bom::parts(&crate::files::kicad::bompanel::project_name(&f.pro), &sheets);
+        let pcb = std::fs::read_to_string(&f.pcb).unwrap_or_default();
+        let (ev, more) = judged::evidence(&parts, &texts, &pcb, 24);
+        Ok(json!({"scope": "judged", "parts": ev, "more": more, "how": judged::HOW, "answer_with": "design_review_judged {findings: [{reference, pin?, severity, title, detail, page, confidence, fix?}], checked: [references], unchecked: [references]}"}))
+    }).await.map_err(|_| "failed".to_string())?
+}
+/// An agent's judged answer kept: in the run (its own section, for the design as it is now), review.md, and the Checks list as "judged".
+pub async fn judged_record(hub: &Arc<Hub>, root: &Path, a: &Value) -> Result<Value, String> {
+    if crate::copy::on() { return Err(crate::copy::HOME_ONLY.into()) }
+    let mut fs = judged::findings_of(a)?; fd::assign_ids(&mut fs);
+    let names = |k: &str| a[k].as_array().map(|x| x.iter().filter_map(Value::as_str).map(str::to_string).collect::<Vec<_>>()).unwrap_or_default();
+    let (checked, unchecked) = (names("checked"), names("unchecked"));
+    let (r, fs2, c2, u2) = (root.to_path_buf(), fs.clone(), checked.clone(), unchecked.clone());
+    let v = tokio::task::spawn_blocking(move || -> Result<Value, String> {
+        let fp = crate::settings::order::fingerprint(&r);
+        let mut v = std::fs::read_to_string(r.join(FILE)).ok().and_then(|t| serde_json::from_str::<Value>(&t).ok()).unwrap_or(json!({"findings": [], "skipped": [], "counts": {}, "verdict": "ok"}));
+        v["judged"] = json!({"at": crate::agents::now_s(), "fingerprint": fp, "findings": fs2.iter().map(fd::to_json).collect::<Vec<_>>(), "checked": c2, "unchecked": u2, "counts": fd::counts(&fs2).to_json()});
+        std::fs::create_dir_all(r.join(".backplane")).map_err(|e| e.to_string())?;
+        std::fs::write(r.join(FILE), serde_json::to_string(&v).unwrap_or_default() + "\n").map_err(|e| e.to_string())?;
+        std::fs::write(r.join(".backplane/review.md"), md(&v, "")).map_err(|e| e.to_string())?;
+        Ok(v)
+    }).await.map_err(|_| "failed".to_string())??;
+    let pro = crate::files::kicad::project::read(&root.to_string_lossy()).pro;
+    if !pro.is_empty() {
+        let _ = crate::files::kicad::checkrun::request(hub, "kicad.checks.watch", &json!({"project": pro})).await;
+        let meta = json!({"label": "Datasheets", "judged": true, "checked": checked, "unchecked": unchecked});
+        if let Err(e) = crate::files::kicad::checkrun::set_findings(hub, &pro, "judged", fs, meta).await { eprintln!("review: the Checks list did not take judged: {e}") }
+    }
+    Ok(json!({"recorded": true, "counts": v["judged"]["counts"], "checked": v["judged"]["checked"].as_array().map_or(0, Vec::len), "written": ".backplane/review.md"}))
+}
+
 pub struct Tools(pub Arc<Hub>);
 pub const TOOL: &str = "design_review";
+pub const JUDGED: &str = "design_review_judged";
+pub fn judged_def() -> Value {
+    json!({"name": JUDGED, "description": "Record the agent-judged part of the design review (after design_review with scope \"judged\" handed you the parts and their evidence): each mismatch between a part's symbol or footprint and its datasheet, with the datasheet page it rests on and your confidence. They are kept apart from Backplane's deterministic findings, marked agent-judged, in .backplane/review.md and the Checks list.",
+        "inputSchema": {"type": "object", "properties": {"findings": {"type": "array", "items": {"type": "object"}, "description": "[{reference, pin?, severity: must change|should|note, title, detail, page (datasheet page and table or figure), confidence (0-1), fix?}]; none when everything matched"},
+            "checked": {"type": "array", "items": {"type": "string"}, "description": "the references you checked"}, "unchecked": {"type": "array", "items": {"type": "string"}, "description": "the references you could not check (no datasheet)"}}, "required": ["findings", "checked"]}})
+}
 pub fn tool_def() -> Value {
-    json!({"name": TOOL, "description": "Run Backplane's design review of this project: deterministic checks, each finding with its severity (must change, should, note), where it is (references, nets, files) and how to fix it. Sources: drc and erc (KiCad's, waited for fresh), fab (the project's fab limits DRC rules cannot say: options, board size, the narrowest track and smallest via against the free and costs-more limits, and whether the DRC rules hold the fab's section), bom (MPNs; stock and lifecycle where the BOM has them), outputs (Gerbers and drill files in mfg/: layers, outline, drill sizes), assembly (sides, fiducials, the placement file), mech (fab files' own DFM results). It writes .backplane/review.md and keeps the run; order_review record then takes its verdict and must-changes. scope: full (default) or order (the same, before ordering), or save (file checks only, quick). Agent-judged checks (datasheets against footprints) are not part of it.",
-        "inputSchema": {"type": "object", "properties": {"scope": {"type": "string", "description": "full (default), order or save"}, "max": {"type": "number", "description": "findings in the answer (default 60); all are in .backplane/review.md"}}, "required": []}})
+    json!({"name": TOOL, "description": "Run Backplane's design review of this project: deterministic checks, each finding with its severity (must change, should, note), where it is (references, nets, files) and how to fix it. Sources: drc and erc (KiCad's, waited for fresh), fab (the project's fab limits DRC rules cannot say: options, board size, the narrowest track and smallest via against the free and costs-more limits, and whether the DRC rules hold the fab's section), bom (MPNs; stock and lifecycle where the BOM has them), outputs (Gerbers and drill files in mfg/: layers, outline, drill sizes), assembly (sides, fiducials, the placement file), mech (fab files' own DFM results). It writes .backplane/review.md and keeps the run; order_review record then takes its verdict and must-changes. scope: full (default) or order (the same, before ordering), or save (file checks only, quick); judged hands you the parts to check against their datasheets (symbol pins, footprint pads and pitch) with how to answer (design_review_judged): run it on request and before an order.",
+        "inputSchema": {"type": "object", "properties": {"scope": {"type": "string", "description": "full (default), order, save or judged"}, "max": {"type": "number", "description": "findings in the answer (default 60); all are in .backplane/review.md"}}, "required": []}})
 }
 impl crate::agents::mcp::ToolSet for Tools {
-    fn list(&self, _thread: &str) -> Vec<Value> { vec![tool_def()] }
-    fn owns(&self, name: &str) -> bool { name == TOOL }
-    fn call<'a>(&'a self, thread: &'a str, _name: &'a str, a: &'a Value) -> crate::api::Fut<'a, (bool, Value)> {
+    fn list(&self, _thread: &str) -> Vec<Value> { vec![tool_def(), judged_def()] }
+    fn owns(&self, name: &str) -> bool { name == TOOL || name == JUDGED }
+    fn call<'a>(&'a self, thread: &'a str, name: &'a str, a: &'a Value) -> crate::api::Fut<'a, (bool, Value)> {
         Box::pin(async move {
             let Some(r) = crate::files::root_of(&self.0, thread).await else { return (false, json!({"error": "this thread has no project folder"})) };
             let root = PathBuf::from(crate::files::kicad::canonical::design_root(&r.to_string_lossy()));
+            if name == JUDGED { return match judged_record(&self.0, &root, a).await { Ok(v) => (true, v), Err(e) => (false, json!({"error": e})) } }
+            if a["scope"] == "judged" { return match judged_evidence(&root).await { Ok(v) => (true, v), Err(e) => (false, json!({"error": e})) } }
             let scope = match a["scope"].as_str().unwrap_or("") { "save" => "save", "order" => "order", _ => "full" };
             match run(&self.0, &root, scope).await { Ok(v) => (true, answer(&v, a["max"].as_u64().unwrap_or(60) as usize)), Err(e) => (false, json!({"error": e})) }
         })
@@ -284,6 +340,14 @@ pub fn start(hub: &Arc<Hub>, ag: Option<&Arc<crate::agents::Agents>>) {
     let r = Path::new(&root); let (o, _) = newest_outputs(r); let o = o.unwrap(); let pcb = crate::files::kicad::project::read(&root).pcb;
     let t = crate::plat::tmp::dir("review-export"); let t0 = std::time::Instant::now();
     println!("OUTPUTS {} {:?} in {} ms", o.dir, stale_vs_export(&cli, &pcb, &t.join("x"), &r.join(&o.dir)), t0.elapsed().as_millis());
+}
+/// The judged evidence of a project folder (REVIEW_ROOT, a copy), printed: by hand only.
+#[cfg(test)]
+#[test] #[ignore] fn review_judged_on_a_copy() {
+    let Ok(root) = std::env::var("REVIEW_ROOT") else { return };
+    let rt = tokio::runtime::Runtime::new().unwrap(); let v = rt.block_on(judged_evidence(Path::new(&root))).unwrap();
+    println!("JUDGED {} parts, {} more", v["parts"].as_array().unwrap().len(), v["more"]);
+    for p in v["parts"].as_array().unwrap().iter().take(6) { println!("  {} {} pins {} pads {} pitch {} ds {}", p["reference"], p["mpn"], p["symbol_pins"].as_array().unwrap().len(), p["pads"]["count"], p["pads"]["pitch_mm"], !p["datasheet"].as_str().unwrap_or("").is_empty()) }
 }
 /// A run of the file checks on a project folder named by REVIEW_ROOT (a copy), printed: by hand only.
 #[cfg(test)]

@@ -32,6 +32,23 @@ the tool's answer: "must change", "should", "note".
 - `mech`: fab files of 3D-printed, CNC and sheet metal parts: their own DFM results (a SendCutSend part's failed rules with their sources).
   Geometry rules (walls, radii) need the model: they belong to the agent-judged review.
 
+## Agent-judged checks (`review/judged.rs`)
+
+Kept apart from the deterministic ones, never mixed in silently: a part's symbol and footprint against its datasheet.
+
+- `design_review {scope: "judged"}` hands the agent the evidence: for each part worth it (ICs, connectors, transistors, crystals, anything
+  with six pads or more, with an MPN), most pins first, 24 at most (`more` counts the rest): reference, value, MPN, maker, the datasheet
+  link (the symbol's), the symbol's pins `[number, name, type]` from the schematic's own library copy, the footprint's pad count, numbers
+  and smallest centre-to-centre distance from the board; and what to do (`how`): the parts service (pcbparts jlc_get_part, jlc_get_pinout,
+  cse_get_kicad) and the datasheet, mismatches only, never a guessed pinout.
+- `design_review_judged {findings: [{reference, pin?, severity, title, detail, page, confidence, fix?}], checked, unchecked}` records the
+  answer: source `judged` in the Checks list (`meta.judged: true`, label "Datasheets"), each finding anchored to the part (and pin), with
+  the datasheet page (required) and the confidence in its detail; a section of its own in the run (`judged`, kept while the design is the
+  one judged) and in `review.md` ("Agent-judged (datasheets)"). Its must-changes join the order's issues.
+- When: on request (the Fab panel's Datasheets sends the hub's request as the person's message in the pane's thread), and before an order
+  (the manufacturing review's instructions: `design_review` scope order, then judged). Never on save.
+- On copies: Hubble_DK hands 24 parts (3 more), from the nRF54LM20 (98 pins and pads) down; Collar main 5.
+
 ## A run (`review/mod.rs`)
 
 `design_review {scope}` (every thread's tool): `full` (default) or `order` (DRC and ERC fresh) or `save` (file checks only). It keeps the run
@@ -49,5 +66,6 @@ On demand (the tool); before an order (`order_review record`); on save, scope `s
 
 ## Phones
 
-`review.<digest>` is hub data: the verdict, counts by source, what was skipped and the findings, as the Checks list will show them once E's
-list takes these sources (`kicad.checks.set`).
+All hub data: `review.<digest>` (the run: verdict, counts by source, what was skipped, findings), the Checks list's sources (`mgmt.checks.<digest>`
+and `kicad.checks.list`, with `judged` rows marked), and the Fab panel's `review` (`mgmt.fab.<digest>`: the last run's verdict and counts,
+`running`, `judge`: the request Datasheets sends).

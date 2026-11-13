@@ -32,6 +32,16 @@ pub fn press(app: &mut Backplane, action: &str, key: &str, cx: &mut Context<Back
     let _ = app.tx.try_send(Command::Rpc("fab.profile".into(), Secret(p), "mgmt"));
     app.ui_epoch += 1; cx.notify();
 }
+/// Datasheets: the hub's request for the agent-judged review, sent as the person's message in the pane's thread.
+pub fn judge(app: &mut Backplane, cx: &mut Context<Backplane>) {
+    let text = app.screens.mgmt.data("fab")["review"]["judge"].as_str().unwrap_or("").to_string();
+    let tid = crate::screens::attach::raw_id(app.data["thread"]["id"].as_str().unwrap_or("")).to_string();
+    if text.is_empty() || tid.is_empty() { return }
+    let msg = format!("m{}-judge", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis()));
+    eprintln!("GPUI_LOG {}", json!({"event": "fab_judge", "thread": tid}));
+    let _ = app.tx.try_send(Command::Rpc("turn.start".into(), Secret(json!({"thread": tid, "text": text, "msg": msg})), "mgmt"));
+    app.ui_epoch += 1; cx.notify();
+}
 /// The proposed stackup taken: `fab.profile {pro, action: "stackup", id}`.
 pub fn press_stackup(app: &mut Backplane, id: &str, cx: &mut Context<Backplane>) {
     let pro = app.screens.mgmt.project.clone(); if pro.is_empty() { return }
@@ -48,10 +58,11 @@ pub fn controls(m: &super::mgmt::Mgmt) -> Vec<(String, String, String)> {
     v.push(("mgmt:fab:refresh".into(), "Refresh".into(), "fab:refresh".into())); // i18n-ok: ctl ids
     if d["review"]["running"] != true { v.push(("mgmt:fab:review".into(), "Review".into(), "fab:review".into())) } // i18n-ok: ctl ids
     if !d["review"]["at"].is_null() { v.push(("mgmt:fab:checks".into(), "Findings".into(), "fab:checks".into())) } // i18n-ok: ctl ids
+    if !d["review"]["judge"].is_null() { v.push(("mgmt:fab:judge".into(), "Datasheets".into(), "fab:judge".into())) } // i18n-ok: ctl ids
     v
 }
 pub fn act(app: &mut Backplane, a: &str, cx: &mut Context<Backplane>) {
-    match a { "drc" | "seen" | "refresh" | "review" => press(app, a, "", cx), "checks" => crate::screens::mgmt::toggle(app, "checks", cx), _ => if let Some(k) = a.strip_prefix("apply:") { press(app, "apply", k, cx) } }
+    match a { "drc" | "seen" | "refresh" | "review" => press(app, a, "", cx), "checks" => crate::screens::mgmt::toggle(app, "checks", cx), "judge" => judge(app, cx), _ => if let Some(k) = a.strip_prefix("apply:") { press(app, "apply", k, cx) } }
 }
 
 fn btn(cx: &mut Context<Backplane>, light: bool, id: String, label: &str, on: impl Fn(&mut Backplane, &mut Context<Backplane>) + 'static) -> AnyElement {
@@ -84,6 +95,7 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
         .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().text_color(c(if bad { "bad" } else { "dim" })).child(line));
     if !rv["at"].is_null() { row = row.child(btn(cx, light, "mgmt:fab:checks".into(), "Findings", |a, cx| crate::screens::mgmt::toggle(a, "checks", cx))) } // i18n-ok: English the draw passes through trs
     if !running { row = row.child(btn(cx, light, "mgmt:fab:review".into(), "Review", |a, cx| press(a, "review", "", cx))) } // i18n-ok: English the draw passes through trs
+    if !s(rv, "judge").is_empty() { row = row.child(btn(cx, light, "mgmt:fab:judge".into(), "Datasheets", |a, cx| judge(a, cx))) } // i18n-ok: English the draw passes through trs
     list = list.child(row);
     // the DRC rules
     let (words, button) = drc_words(s(&d["drc"], "state"));
