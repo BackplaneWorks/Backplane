@@ -132,10 +132,13 @@ fps = []
 for m in re.finditer(r'\(footprint "[^"]*"', s):
     end = s.find('\n\t(footprint', m.end()); blk = s[m.start(): end if end > 0 else len(s)]
     ref = re.search(r'\(property "Reference" "([^"]+)"', blk) or re.search(r'\(fp_text reference "([^"]+)"', blk)
-    at = re.search(r'\n\t\t\(at ([-\d.]+) ([-\d.]+)', blk); nets = re.findall(r'\(net (?:\d+ )?"([^"]+)"\)', blk)
+    # a footprint's place: (at x y r) before bp.12.1, (transform (translate x y) (rotate r)) in its native format (20261031)
+    at = re.search(r'\n\t\t\(at ([-\d.]+) ([-\d.]+)', blk) or re.search(r'\n\t\t\(transform\s*\(translate ([-\d.]+) ([-\d.]+)', blk); nets = re.findall(r'\(net (?:\d+ )?"([^"]+)"\)', blk)
     nets = [n for n in nets if n and n not in ("GND", "VCC") and not n.startswith("unconnected")]
     if ref and at and nets: fps.append((ref.group(1), float(at.group(1)), float(at.group(2)), nets[0]))
-a, b = fps[0], next(f for f in fps[1:] if f[3] != fps[0][3])
+pair = [(x, y) for x in fps for y in fps if x[3] != y[3]][:1]
+if not pair: sys.exit(f"the saved board gave {len(fps)} footprints with a signal net: no two on different nets for the plan")
+a, b = pair[0]
 plan = {"layers": [{"layer": "B.Cu", "role": "signal", "status": "proposed"}],
         "groups": [{"id": "g-bare", "name": "Bare gate", "color": "#e8a33d", "nets": [a[3], b[3]], "status": "proposed"}],
         "corridors": [{"id": "c-bare", "group": "g-bare", "layer": "B.Cu", "order": 1, "path": [[a[1], a[2]], [b[1], b[2]]], "width": 2.0,
