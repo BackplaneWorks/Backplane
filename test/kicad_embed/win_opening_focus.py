@@ -1,0 +1,416 @@
+"""Windows Edit focus regression; run under the shared bp-win-ui lock.
+
+Uses the existing suite's isolated home/project and stand-in agents. No canvas
+click or IPC focus request precedes the native focus and hotkey checks.
+Usage: python win_opening_focus.py CLIENT HUB ASSETS KICAD OUT [PORT]
+Set BP_OPENING_FOCUS_ONLY=click_control to run only the canvas-click control
+(after the same Ctrl+` handback), e.g. to recheck a baseline after a change to it.
+Set BP_OPENING_FOCUS_ONLY=ctrl_k to run only the Ctrl+K-from-KiCad check.
+Set BP_OPENING_FOCUS_ONLY=mouse_return for the route with no hotkey hand-back: a real
+click in Backplane's composer, then a real click on the editor tab or the canvas, x3 each.
+Set BP_OPENING_FOCUS_HOST_FG=1 to make Backplane's window foreground from the
+harness before that click when the handback left KiCad foreground, so clients
+are compared from the same Backplane-foreground state.
+"""
+import json
+import os
+import sys
+import time
+
+import win_embed_e2e as E
+
+
+def focus_snapshot(frame=0):
+    focus = E.foreground_focus_hwnd()
+    return {
+        "focus": focus,
+        "focus_class": E.hwnd_class(focus) if focus else "",
+        "focus_pid": E.hwnd_pid(focus) if focus else 0,
+        "foreground": int(E.u32.GetForegroundWindow() or 0),
+        "frame": frame,
+        "inside_frame": bool(frame and focus and (focus == frame or E.u32.IsChild(frame, focus))),
+    }
+
+
+def thread_info():
+    """The foreground queue's active/focus windows and the foreground window, as
+    the fork's F3 diagnostic asks: read just before and ~50 ms after a click."""
+    gti = E.GUITHREADINFO()
+    gti.cbSize = E.ctypes.sizeof(E.GUITHREADINFO)
+    ok = bool(E.u32.GetGUIThreadInfo(0, E.ctypes.byref(gti)))
+    act, foc = (int(gti.hwndActive or 0), int(gti.hwndFocus or 0)) if ok else (0, 0)
+    return {"foreground": int(E.u32.GetForegroundWindow() or 0), "active": act,
+            "active_class": E.hwnd_class(act) if act else "", "focus": foc,
+            "focus_class": E.hwnd_class(foc) if foc else ""}
+
+
+def traced_click(x, y):
+    before = thread_info()
+    E.screen_click(x, y, 1)  # SendInput: hardware-level input with foreground rights
+    time.sleep(0.05)
+    return {"before_click": before, "after_click_50ms": thread_info()}
+
+
+def window_box(hwnd):
+    r = E.W.RECT()
+    E.u32.GetWindowRect(hwnd, E.ctypes.byref(r))
+    return int(r.left), int(r.top), int(r.right - r.left), int(r.bottom - r.top)
+
+
+def wait_focus_in(frame, timeout_s, cls=None):
+    """Poll until Win32 focus is inside `frame` (and of class `cls`) and a
+    foreground window exists; a click activates asynchronously, so a fixed
+    sleep can read the transient no-foreground state. Returns (snap, ms)."""
+    start = time.monotonic()
+    snap = focus_snapshot(frame)
+    while time.monotonic() - start < timeout_s:
+        snap = focus_snapshot(frame)
+        if snap["foreground"] and snap["inside_frame"] and (cls is None or snap["focus_class"] == cls):
+            return snap, round((time.monotonic() - start) * 1000)
+        time.sleep(0.02)
+    return snap, None
+
+
+def request_clauses(h):
+    """The window-state clauses of the runtime's canvas-focus guard, read as soon as the
+    client's first kicad_focus_request reaches its log (the frame and container named in it)."""
+    try:
+        with open(h.p("client.log"), encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if line.startswith("GPUI_LOG ") and "kicad_focus_request" in line:
+                    r = json.loads(line[9:])["kicad_focus_request"]
+                    fr, ho, pa = int(r["frame"]), int(r["holder"]), int(r["parent"])
+                    fg = int(E.u32.GetForegroundWindow() or 0)
+                    return {"frame": fr, "holder": ho, "parent": pa,
+                            "frame_visible": bool(E.u32.IsWindowVisible(fr)), "holder_visible": bool(E.u32.IsWindowVisible(ho)),
+                            "parent_visible": bool(E.u32.IsWindowVisible(pa)), "frame_in_holder": bool(E.u32.IsChild(ho, fr)),
+                            "holder_parent_ok": int(E.u32.GetParent(ho) or 0) == pa, "foreground": fg,
+                            "foreground_is_frame_or_inside": bool(fg and (fg == fr or E.u32.IsChild(fr, fg)))}
+    except (OSError, ValueError, KeyError):
+        pass
+    return None
+
+
+def give_kicad_keys(h, cp, frame, kind="PCB"):
+    """The keys to the editor on show the way a person does without touching
+    its canvas: its tab (kicad_pane: the tab of the editor shown takes the
+    keyboard). Edit is no use once editing: it becomes View."""
+    # The control list can outlive the viewer (run A5: a stray Escape closed it and the
+    # "click" landed on empty space): the editor must be on show, or this fails as such.
+    if not (frame and E.u32.IsWindow(frame) and E.u32.IsWindowVisible(frame)):
+        snap = focus_snapshot(frame)
+        return {"tab_clicked": False, "target_missing": "editor frame not on show", "settle_ms": None, **snap}
+    clicked = h.click_control(E.find_main_window(cp.pid), "kicad-tab:" + kind)
+    snap, ms = wait_focus_in(frame, 3)
+    return {"tab_clicked": clicked, "settle_ms": ms, **snap}
+
+
+def ctrl_k_check(h, cp, frame, rep, timeline):
+    # A focus race (a stale KiCad focus notice took the keys back after the palette opened):
+    # BP_CTRL_K_REPEAT runs it N times in one session; each round is its own check.
+    rounds = max(1, int(os.environ.get("BP_CTRL_K_REPEAT", "1") or 1))
+    for n in range(1, rounds + 1):
+        ctrl_k_round(h, cp, frame, rep, timeline, n, rounds)
+    return h.finish()
+
+
+def ctrl_k_round(h, cp, frame, rep, timeline, n, rounds):
+    # Ctrl+K pressed in KiCad (a host chord): Backplane's window comes forward and its
+    # palette takes the keys (Linux real_use ctrl_k_after_comment_ok is the model).
+    time.sleep(0.5)
+    pre = give_kicad_keys(h, cp, frame)
+    timeline.append({"stage": "before_ctrl_k", **pre})
+    top = int(rep.get("toplevel") or 0)
+    wx, wy, ww, wh = window_box(top)
+    pane_x = int((rep.get("container") or {}).get("root_x") or (wx + ww))
+    box = (wx, wy, max(1, pane_x - wx), min(wh, 480))
+    shots = [h.p(f"ctrlk{n}_0_before.png"), h.p(f"ctrlk{n}_1_open.png"), h.p(f"ctrlk{n}_2_typed.png")]
+    E.grab_screen(shots[0])
+    E.key_chord("ctrl", "k")
+    back, back_ms = None, None
+    start = time.monotonic()
+    while time.monotonic() - start < 2:
+        back = focus_snapshot(frame)
+        if back["foreground"] == top and back["focus_pid"] == cp.pid:
+            back_ms = round((time.monotonic() - start) * 1000)
+            break
+        time.sleep(0.02)
+    time.sleep(0.6)
+    E.grab_screen(shots[1])
+    for ch in "zq":
+        E.key_tap(ch)
+    time.sleep(0.6)
+    E.grab_screen(shots[2])
+    opened = E.img_diff_box(shots[0], shots[1], *box)
+    typed = E.img_diff_box(shots[1], shots[2], *box)
+    ck = {"round": n, "tab_clicked": pre.get("tab_clicked"), "target_missing": pre.get("target_missing"), "precondition_inside_kicad": pre["inside_frame"], "foreground_ms": back_ms, "after": back,
+          "palette_change_px": opened["changed_pixels"], "typed_change_px": typed["changed_pixels"], "box": opened["box"]}
+    timeline.append({"stage": "ctrl_k_from_kicad", **ck})
+    print("DIAG ctrl_k " + json.dumps(ck), flush=True)
+    h.check(f"Ctrl+K from KiCad brings Backplane forward and its palette takes keys ({n}/{rounds})",
+            pre["inside_frame"] and back_ms is not None and opened["changed_pixels"] > 500 and typed["changed_pixels"] > 20, ck)
+    # One Escape closes the palette; a second reached Backplane's window and closed the KiCad viewer (run A5).
+    E.key_tap("Escape")
+    time.sleep(0.6)
+
+
+
+def plain_key_acts(h, gl, tag):
+    """Plain F2 (KiCad's zoom out) changes the canvas: the keys are KiCad's. F1 zooms back."""
+    x, y, w, hh = int(gl["root_x"]), int(gl["root_y"]), int(gl["w"]), int(gl["h"])
+    a, b = h.p(f"{tag}_0.png"), h.p(f"{tag}_1.png")
+    E.grab_screen(a)
+    E.key_tap("F2")
+    time.sleep(1.0)
+    E.grab_screen(b)
+    px = E.img_diff_box(a, b, x, y, w, hh)["changed_pixels"]
+    if px > 2000:
+        E.key_tap("F1")
+        time.sleep(0.6)
+    return px
+
+
+def mouse_return_check(h, cp, frame, children, timeline, rounds=3):
+    """Backplane foreground and focused by a real click in its composer (no hotkey), then a
+    real click on (a) the editor tab, (b) the canvas: does KiCad get the keys (F2 acts)?"""
+    gls = [w for w in children if w["visible"] and w["class"] == "wxGLCanvas"]
+    gl = max(gls, key=lambda w: w["w"] * w["h"]) if gls else None
+    top = E.find_main_window(cp.pid)
+    for n in range(1, rounds + 1):
+        for route in ("tab", "canvas"):
+            attach = h.controls().get("ui:Attach") or h.probes().get("ui:Attach")
+            r = (attach.get("rect") if attach and "rect" in attach else attach) or {}
+            ox, oy = E.client_origin(top)
+            on_show = bool(frame and E.u32.IsWindowVisible(frame))
+            if not (gl and r and on_show):
+                h.check(f"Mouse return {route} {n}/{rounds}: KiCad gets the keys (F2 acts)", False, {"target_missing": {"canvas": bool(gl), "composer": bool(r), "editor_on_show": on_show}})
+                continue
+            # The composer sits above the Attach button row (screens: message box, then its buttons).
+            E.screen_click(int(ox + r["x"] - 150), int(oy + r["y"] - 55), 1)
+            start = time.monotonic()
+            host = focus_snapshot(frame)
+            while time.monotonic() - start < 2 and not (host["foreground"] == top and host["focus_pid"] == cp.pid):
+                time.sleep(0.02)
+                host = focus_snapshot(frame)
+            host_ok = host["foreground"] == top and host["focus_pid"] == cp.pid
+            if route == "tab":
+                clicked = h.click_control(top, "kicad-tab:PCB")
+                around = {"clicked": clicked}
+            else:
+                around = traced_click(gl["root_x"] + 20, gl["root_y"] + gl["h"] - 30)
+            time.sleep(0.6)
+            after = focus_snapshot(frame)
+            px = plain_key_acts(h, gl, f"mouse_{route}{n}")
+            d = {"host_first": host_ok, "host": host, "after": after, "f2_changed_px": px, **around}
+            timeline.append({"stage": f"mouse_return_{route}_{n}", **d})
+            print(f"DIAG mouse_return_{route}_{n} " + json.dumps(d)[:600], flush=True)
+            h.check(f"Mouse return {route} {n}/{rounds}: KiCad gets the keys (F2 acts)", host_ok and px > 2000, d)
+    return h.finish()
+
+
+def run(h):
+    only = os.environ.get("BP_OPENING_FOCUS_ONLY", "")
+    only_click = only == "click_control"
+    only_ctrl_k = only == "ctrl_k"
+    h.init_dirs()
+    timeline = []
+    try:
+        provenance = {}
+        for name, path in (("client", h.client_exe), ("hub", h.hub_exe), ("kicad", h.kicad_bin)):
+            provenance[name] = {"path": path, "sha256": E.sha256_file(path)}
+        with open(h.p("binaries.json"), "w", encoding="utf-8") as f:
+            json.dump(provenance, f, indent=2)
+        h.start_hub(embed_mode="fork")
+        cp = h.start_client([
+            {"select": 0}, {"wait": 2800}, {"click": "rail:Board"},
+            {"wait": 2800}, {"mark": "ready_for_edit"}, {"wait": 1800},
+            {"kicad": {"wait_painted": 45000, "kind": "PCB", "tag": "first_paint"}},
+            {"wait": 2000}, {"kicad": {"report": True, "tag": "settled"}},
+            {"mark": "opening_settled"},
+        ], hold=True, exit_after=120)
+        started = time.monotonic()
+        previous = None
+        settled = False
+        clicked_edit = False
+        at_request = None
+        while cp.poll() is None and time.monotonic() - started < 65:
+            snap = focus_snapshot()
+            if snap != previous:
+                timeline.append({"ms": round((time.monotonic() - started) * 1000), **snap})
+                previous = snap
+            if not at_request:
+                at_request = request_clauses(h)
+                if at_request:
+                    timeline.append({"stage": "guard_clauses_at_request", "ms": round((time.monotonic() - started) * 1000), **at_request})
+                    print("DIAG guard_at_request " + json.dumps(timeline[-1]), flush=True)
+            marks = {m.get("name") for m in h.metrics() if m.get("event") == "mark"}
+            if "ready_for_edit" in marks and not clicked_edit:
+                clicked_edit = h.click_control(E.find_main_window(cp.pid), "ui:Edit")
+                timeline.append({"stage": "native_edit_click", "clicked": clicked_edit, **focus_snapshot()})
+            if "opening_settled" in marks:
+                settled = True
+                break
+            time.sleep(0.05)
+        reps = h.kicad_reports()
+        first, rep = reps.get("first_paint", {}), reps.get("settled", {})
+        frame, pid = int(rep.get("shown") or 0), int(rep.get("pid") or 0)
+        h.track_pid(pid)
+        snap = focus_snapshot(frame)
+        children = E.list_child_windows(frame)
+        with open(h.p("opening_children.json"), "w", encoding="utf-8") as f:
+            json.dump(children, f, indent=2)
+        timeline.append({"stage": "before_canvas_input", "first_keys": first.get("keys"), "settled_keys": rep.get("keys"), **snap})
+        print("DIAG opening_focus " + json.dumps(timeline[-1]), flush=True)
+        # Which of the runtime's guard clauses can hold now (B' ignored the opening request
+        # though the frame itself was foreground): native visibility walks ancestors, and the
+        # client keeps its container hidden until the frame paints.
+        reqs = []
+        with open(h.p("client.log"), encoding="utf-8", errors="replace") as f:
+            for line in f:
+                if line.startswith("GPUI_LOG ") and "kicad_focus_request" in line:
+                    try:
+                        reqs.append(json.loads(line[9:])["kicad_focus_request"])
+                    except ValueError:
+                        pass
+        holder = int(reqs[0]["holder"]) if reqs else 0
+        parent = int(reqs[0]["parent"]) if reqs else 0
+        top = int(rep.get("toplevel") or 0)
+        vis = {"holder": holder, "parent": parent, "holder_visible": bool(holder and E.u32.IsWindowVisible(holder)),
+               "frame_visible": bool(frame and E.u32.IsWindowVisible(frame)), "parent_visible": bool(parent and E.u32.IsWindowVisible(parent)),
+               "frame_in_holder": bool(holder and frame and E.u32.IsChild(holder, frame)), "frame_in_top": bool(top and frame and E.u32.IsChild(top, frame)),
+               "holder_parent_ok": bool(holder and parent and int(E.u32.GetParent(holder) or 0) == parent), "frame_enabled": bool(frame and E.u32.IsWindowEnabled(frame))}
+        timeline.append({"stage": "guard_clauses_at_settle", **vis})
+        print("DIAG guard_clauses " + json.dumps(vis), flush=True)
+        if os.environ.get("BP_OPENING_FOCUS_REPOST") == "1" and holder and frame and parent:
+            # Diagnostic only: the client's own request, posted again once the pane is shown.
+            ok = E.u32.PostMessageW(holder, 0x8000 + 0x103, frame, parent)
+            start = time.monotonic()
+            snap, ms = focus_snapshot(frame), None
+            while time.monotonic() - start < 2:
+                snap = focus_snapshot(frame)
+                if snap["inside_frame"] and snap["focus_class"] != "Edit":
+                    ms = round((time.monotonic() - start) * 1000)
+                    break
+                time.sleep(0.02)
+            timeline.append({"stage": "after_repost", "posted": bool(ok), "settle_ms": ms, **snap})
+            print("DIAG repost " + json.dumps(timeline[-1]), flush=True)
+        h.shot("01_before_input")
+        if only_ctrl_k:
+            return ctrl_k_check(h, cp, frame, rep, timeline)
+        if only == "mouse_return":
+            return mouse_return_check(h, cp, frame, children, timeline)
+        if not only_click:
+            # Keys must be on KiCad's drawing panel (EDA_DRAW_PANEL_GAL, which binds key events to
+            # the tool dispatcher) or its wxGLCanvas child: focus in the frame's toolbar Edit box
+            # leaves every canvas hotkey dead even though the frame keeps the foreground.
+            gls = [w for w in children if w["visible"] and w["class"] == "wxGLCanvas"]
+            gl = max(gls, key=lambda w: w["w"] * w["h"]) if gls else None
+            panel = int(gl["parent"]) if gl else 0
+            on_canvas = bool(snap["focus_pid"] == pid and (snap["focus_class"] == "wxGLCanvas" or (panel and snap["focus"] == panel)))
+            # 1. A plain, unmodified canvas hotkey the tool dispatcher handles: F2 (zoom out),
+            # seen as the pane's pixels changing; F1 zooms back. Pressed with no click.
+            pane = rep.get("container") or {}
+            px, py, pw, ph = int(pane.get("root_x") or 0), int(pane.get("root_y") or 0), int(pane.get("w") or 0), int(pane.get("h") or 0)
+            if gl:
+                px, py, pw, ph = int(gl["root_x"]), int(gl["root_y"]), int(gl["w"]), int(gl["h"])
+            zshots = [h.p("zoom_0_before.png"), h.p("zoom_1_after_f2.png")]
+            E.grab_screen(zshots[0])
+            E.key_tap("F2")
+            time.sleep(1.0)
+            E.grab_screen(zshots[1])
+            zoom = E.img_diff_box(zshots[0], zshots[1], px, py, pw, ph)
+            plain_key = zoom["changed_pixels"] > 2000
+            if plain_key:
+                E.key_tap("F1")
+                time.sleep(0.6)
+            print("DIAG plain_key_f2 " + json.dumps({"changed_px": zoom["changed_pixels"], "box": zoom["box"], "focus": focus_snapshot(frame)}), flush=True)
+            # 2. A real KiCad shortcut (a frame accelerator), rather than trusting the client's
+            # cached `keys` or a ShowFrame/RunAction API call.
+            E.key_chord("ctrl", "f")
+            dialog = h.wait_kicad_dialog(pid, "Find", timeout_s=6)
+            h.shot("02_find_without_click")
+            find_detail = {"dialog": dialog, "focus": focus_snapshot(frame)}
+            if dialog:
+                E.key_tap("Escape")
+                time.sleep(0.6)
+            h.check("Edit puts the keys on KiCad's drawing panel or its wxGLCanvas without a click: focus there, plain F2 zooms, Ctrl+F opens Find",
+                    settled and rep.get("keys") is True and on_canvas and plain_key and bool(dialog),
+                    {**timeline[-1], "panel": panel, "on_canvas": on_canvas, "f2_changed_px": zoom["changed_pixels"], "find": bool(dialog)})
+            h.check("Ctrl+F immediately after Edit opens KiCad Find without a canvas click", bool(dialog), find_detail)
+        E.key_chord("ctrl", "grave")
+        deadline = time.monotonic() + 3
+        handback = focus_snapshot(frame)
+        while time.monotonic() < deadline:
+            handback = focus_snapshot(frame)
+            if handback["focus_pid"] == cp.pid:
+                break
+            time.sleep(0.05)
+        timeline.append({"stage": "after_handback", **handback})
+        top = int(rep.get("toplevel") or 0)
+        if os.environ.get("BP_OPENING_FOCUS_HOST_FG") == "1" and top and int(E.u32.GetForegroundWindow() or 0) != top:
+            E.u32.SetForegroundWindow(top)
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline and int(E.u32.GetForegroundWindow() or 0) != top:
+                time.sleep(0.02)
+            timeline.append({"stage": "harness_host_foreground", **focus_snapshot(frame)})
+            print("DIAG harness_host_foreground " + json.dumps(timeline[-1]), flush=True)
+        if not only_click:
+            h.check("Ctrl+` returns actual Win32 keyboard focus to Backplane", handback["focus_pid"] == cp.pid and not handback["inside_frame"], handback)
+        h.shot("03_handback")
+        # Positive control after the no-click checks: the same runtime can serve
+        # the shortcut when the person explicitly clicks its canvas.
+        canvases = [w for w in children if w["visible"] and w["class"] == "wxGLCanvas"]
+        canvas = max(canvases, key=lambda w: w["w"] * w["h"]) if canvases else None
+        control = None
+        if canvas:
+            around = traced_click(canvas["root_x"] + 20, canvas["root_y"] + canvas["h"] - 30)
+            clicked, settle_ms = wait_focus_in(frame, 3, "wxGLCanvas")
+            timeline.append({"stage": "after_real_canvas_click", "settle_ms": settle_ms, **clicked, **around})
+            print("DIAG canvas_click " + json.dumps(timeline[-1]), flush=True)
+            if settle_ms is not None:
+                E.key_chord("ctrl", "f")
+                control = h.wait_kicad_dialog(pid, "Find", timeout_s=3)
+        h.check("Control: native canvas click then Ctrl+F opens KiCad Find", bool(control), {"dialog": control, "focus": focus_snapshot(frame)})
+        if only_click:
+            return h.finish()
+        if control:
+            E.key_tap("Escape")
+            time.sleep(0.3)
+        if canvas:
+            E.screen_click(canvas["root_x"] + 20, canvas["root_y"] + canvas["h"] - 30, 1)
+        before_freeze, _ = wait_focus_in(frame, 3) if canvas else (focus_snapshot(frame), None)
+        if not before_freeze["inside_frame"]:
+            # F3 (a canvas click from a Backplane foreground leaves no foreground window) would
+            # make the freeze check vacuous; the editor's tab gives KiCad the keys instead.
+            via = give_kicad_keys(h, cp, frame)
+            before_freeze = focus_snapshot(frame)
+            timeline.append({"stage": "before_freeze_via_tab", **via})
+        suspended = E.suspend_pid(pid, True) if before_freeze["inside_frame"] else False
+        rescue = before_freeze
+        elapsed = None
+        try:
+            if suspended:
+                start = time.monotonic()
+                E.key_chord("ctrl", "grave")
+                while time.monotonic() - start < 1.5:
+                    rescue = focus_snapshot(frame)
+                    if rescue["focus_pid"] == cp.pid:
+                        elapsed = round((time.monotonic() - start) * 1000)
+                        break
+                    time.sleep(0.02)
+            h.check("Frozen KiCad: Ctrl+` rescues actual focus within 1.5s and hub answers", suspended and elapsed is not None and h.hub_hello(), {"suspended": suspended, "elapsed_ms": elapsed, **rescue})
+        finally:
+            if suspended:
+                E.suspend_pid(pid, False)
+
+        return ctrl_k_check(h, cp, frame, rep, timeline)
+    finally:
+        with open(h.p("focus_timeline.json"), "w", encoding="utf-8") as f:
+            json.dump(timeline, f, indent=2)
+        h.cleanup()
+
+
+if __name__ == "__main__":
+    if len(sys.argv) not in (6, 7):
+        sys.exit(__doc__)
+    sys.exit(run(E.SuiteHarness("opening_focus", *sys.argv[1:6], int(sys.argv[6]) if len(sys.argv) == 7 else 3937)))
