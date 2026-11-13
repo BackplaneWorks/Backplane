@@ -243,6 +243,19 @@ pub fn embed_caps(msg: &Value) -> Vec<String> {
     caps
 }
 
+/// Shows KiCad asks for (ET_SHOW_REQUESTED) while the hub itself is driving it are not the person's: a check run in the editor (ERC opens the
+/// schematic editor, and KiCad asks to show it) moved the pane to the schematic after a warm Edit on Hubble (lanes A, E). Until the instant
+/// stored, a show request for a frame other than the active one is not followed.
+fn host_holds() -> &'static std::sync::Mutex<HashMap<String, std::time::Instant>> {
+    static H: std::sync::OnceLock<std::sync::Mutex<HashMap<String, std::time::Instant>>> = std::sync::OnceLock::new();
+    H.get_or_init(Default::default)
+}
+/// The hub is about to drive KiCad for `pro` (a check run): KiCad's show requests are not followed until `for_` has passed, or `release`.
+pub fn hold_shows(pro: &str, for_: Duration) { host_holds().lock().unwrap().insert(pro.to_string(), std::time::Instant::now() + for_); }
+/// The hub's drive is over: follow show requests again after a short grace (KiCad's last ones are still on their way).
+pub fn release_shows(pro: &str) { hold_shows(pro, Duration::from_millis(1500)); }
+fn shows_held(pro: &str) -> bool { host_holds().lock().unwrap().get(pro).is_some_and(|t| std::time::Instant::now() < *t) }
+
 /// ET_EDITOR_REQUESTED (25): the editor's kind and the item (FrameInfo.lib_id, "Lib:Name") to open in it.
 pub fn editor_requested(ev: &Value) -> Option<(String, String)> {
     if !(ev["type"] == "ET_EDITOR_REQUESTED" || ev["type"].as_i64() == Some(25)) { return None }
@@ -1526,6 +1539,11 @@ impl Actor {
                 let Some(s) = self.sessions.get_mut(&pro).filter(|s| s.gen == gen && s.state == "ready") else { return };
                 // a library editor is shown on KiCad's ET_EDITOR_REQUESTED (embedded, on its item), never on the ET_SHOW_REQUESTED KiCad sends
                 // before it (three of them on Ctrl+E: showing then floated a 900x720 top-level over the pane for ~0.8 s)
+                if !editor && canon_frame(&kind) != s.active && shows_held(&pro) {
+                    eprintln!("kicad embed: {pro}: KiCad asked to show {kind} while the hub drives it: not followed");
+                    let _ = self.me.send(Msg::ForkSync { pro, gen });
+                    return;
+                }
                 if !editor && matches!(canon_frame(&kind), "SYMBOL_EDITOR" | "FOOTPRINT_EDITOR") && s.caps.iter().any(|c| c == "embed-editor-requested") {
                     let _ = self.me.send(Msg::ForkSync { pro, gen });
                     return;

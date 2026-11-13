@@ -287,6 +287,11 @@ pub enum Ran { Found(Vec<Finding>, bool), Cancelled, Failed(String), Cli(String)
 /// progress id, once the editor took the run.
 pub async fn run(route: &GuiRoute, kind: &str, sch: &str, cancel: &tokio::sync::Notify, on_start: impl FnOnce(&str)) -> Ran {
     let fk = if kind == "drc" { "FK_PCB" } else { "FK_SCH" };
+    // DRC's schematic parity opens KiCad's schematic editor, which asks to be shown: not the person's switch (the pane stays where it is)
+    embed::hold_shows(&route.pro, Duration::from_secs(120));
+    struct Release(String);
+    impl Drop for Release { fn drop(&mut self) { embed::release_shows(&self.0); } }
+    let _release = Release(route.pro.clone());
     let o = embed::gui_call_as(route, "kiapi.backplane.embed.RunChecks", json!({"kind": fk, "parity": kind == "drc"}), embed::CHECKS_CLIENT).await;
     if !o["ok"].as_bool().unwrap_or(false) {
         let why = o["error"].as_str().or(o["why"].as_str()).unwrap_or("no answer").to_string();
