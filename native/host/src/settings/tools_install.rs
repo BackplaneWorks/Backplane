@@ -30,9 +30,13 @@ pub const NODE: &str = "https://nodejs.org/en/download";
 
 /// A vendor's own installer script: downloaded to a file (so a failed download stops here) and run with bash.
 pub const VENDOR_SH: &str = r#"set -eu
+# curl, else wget: a stock Ubuntu desktop has wget and no curl
+if command -v curl >/dev/null 2>&1; then get() { curl --proto '=https' --tlsv1.2 -fsSL -o "$1" "$2"; }
+elif command -v wget >/dev/null 2>&1; then get() { wget -q --https-only -O "$1" "$2"; }
+else get() { echo 'curl or wget is needed to download it, and neither was found' >&2; return 1; }; fi
 t=$(mktemp); trap 'rm -f "$t"' 0
 echo "Downloading the installer"
-curl --proto '=https' --tlsv1.2 -fsSL -o "$t" "$1" || { echo "Could not download $1" >&2; exit 1; }
+get "$t" "$1" || { echo "Could not download $1" >&2; exit 1; }
 echo "Running the installer"
 bash "$t"
 "#;
@@ -42,19 +46,22 @@ bash "$t"
 pub const CODEX_SH: &str = r#"set -eu
 dest=$1; asset=$2; name=$3; kind=$4
 fail() { echo "$*" >&2; exit 1; }
-command -v curl >/dev/null 2>&1 || fail 'curl is needed to download Codex and was not found'
+command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1 || fail 'curl or wget is needed to download Codex, and neither was found'
+if command -v curl >/dev/null 2>&1; then get() { curl --proto '=https' --tlsv1.2 -fsSL -o "$1" "$2"; }
+elif command -v wget >/dev/null 2>&1; then get() { wget -q --https-only -O "$1" "$2"; }
+else get() { echo 'curl or wget is needed to download it, and neither was found' >&2; return 1; }; fi
 if command -v cygpath >/dev/null 2>&1; then dest=$(cygpath -u "$dest"); fi
 case "$asset" in codex-*) ;; *) fail 'Invalid Codex asset' ;; esac
 tmp=$(mktemp -d); trap 'rm -rf "$tmp"' 0
 echo "Looking up the latest Codex release"
-curl --proto '=https' --tlsv1.2 -fsSL -o "$tmp/rel.json" https://api.github.com/repos/openai/codex/releases/latest || fail 'Could not read the Codex release list'
+get "$tmp/rel.json" https://api.github.com/repos/openai/codex/releases/latest || fail 'Could not read the Codex release list'
 # the API answers on one line: one field per line, then read the tag and the digest that follows the asset's name
 tr ',{}' '\n\n\n' < "$tmp/rel.json" | tr -d ' \r' > "$tmp/fields"
 tag=$(sed -n 's/^"tag_name":"\([^"]*\)".*/\1/p' "$tmp/fields" | head -n 1)
 want=$(awk -v n="\"name\":\"$asset\"" '$0==n { f=1 } f && index($0, "\"digest\":\"sha256:") == 1 { sub(/^"digest":"sha256:/, ""); sub(/".*/, ""); print; exit }' "$tmp/fields")
 [ -n "$tag" ] && [ "${#want}" -eq 64 ] || fail "The Codex release lists no checksum for $asset"
 echo "Downloading $asset"
-curl --proto '=https' --tlsv1.2 -fsSL -o "$tmp/pkg" "https://github.com/openai/codex/releases/download/$tag/$asset" || fail "Could not download $asset"
+get "$tmp/pkg" "https://github.com/openai/codex/releases/download/$tag/$asset" || fail "Could not download $asset"
 echo 'Checking the checksum'
 if command -v sha256sum >/dev/null 2>&1; then got=$(sha256sum "$tmp/pkg" | cut -d' ' -f1); else got=$(shasum -a 256 "$tmp/pkg" | cut -d' ' -f1); fi
 [ "$want" = "$got" ] || fail 'Codex checksum mismatch'
@@ -242,6 +249,25 @@ mod tests {
         assert!(ok, "{out}");
         assert_eq!(out.lines().collect::<Vec<_>>(), ["Looking up the latest Codex release", "Downloading codex-x86_64-unknown-linux-musl.tar.gz", "Checking the checksum", &format!("Installed in {}/codex", dest.display())]);
         let v = std::process::Command::new(dest.join("codex")).arg("--version").output().unwrap(); assert_eq!(String::from_utf8_lossy(&v.stdout).trim(), "codex 9.9.9", "it runs");
+        let _ = std::fs::remove_dir_all(&r);
+    }
+    /// A PATH with this machine's programs but curl and wget (a stock Ubuntu desktop has wget only): `wget` adds the stand-in `wget -O OUT URL`.
+    #[cfg(unix)] fn no_curl(r: &Path, serve: &Path, wget: bool) -> PathBuf {
+        let b = r.join(if wget { "wget-only" } else { "neither" }); std::fs::create_dir_all(&b).unwrap();
+        for d in ["/usr/local/bin", "/usr/bin", "/bin"] { for e in std::fs::read_dir(d).into_iter().flatten().flatten() {
+            let n = e.file_name(); if n == "curl" || n == "wget" || b.join(&n).exists() { continue } let _ = std::os::unix::fs::symlink(e.path(), b.join(&n));
+        } }
+        if wget { exe(&b.join("wget"), &format!("#!/bin/sh\nwhile [ $# -gt 1 ]; do [ \"$1\" = -O ] && out=$2; shift; done\nf={}/$(basename \"$1\")\n[ -f \"$f\" ] || exit 8\ncp \"$f\" \"$out\"\n", serve.display())); }
+        b
+    }
+    #[cfg(unix)] #[test] fn with_no_curl_the_codex_script_downloads_with_wget_and_with_neither_says_so() {
+        let r = tmp("wget"); let _ = codex_run(&r, true); let serve = r.join("serve"); let dest = r.join("w/bin");
+        let run = |p: &Path| { let o = std::process::Command::new("sh").arg("-c").arg(CODEX_SH).arg("sh").arg(&dest).arg("codex-x86_64-unknown-linux-musl.tar.gz").arg("codex").arg("tar.gz").env("PATH", p).output().unwrap(); (o.status.success(), format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr))) };
+        let (ok, out) = run(&no_curl(&r, &serve, false)); assert!(!ok && out.contains("curl or wget is needed to download Codex"), "{out}");
+        let (ok, out) = run(&no_curl(&r, &serve, true)); assert!(ok, "{out}"); assert!(dest.join("codex").is_file());
+        // the vendor wrapper (Claude, Grok, OpenCode) downloads its installer with wget too
+        let o = std::process::Command::new("sh").arg("-c").arg(VENDOR_SH).arg("sh").arg("https://x/latest").env("PATH", no_curl(&r, &serve, true)).output().unwrap();
+        let t = format!("{}{}", String::from_utf8_lossy(&o.stdout), String::from_utf8_lossy(&o.stderr)); assert!(t.contains("Running the installer") && !t.contains("Could not download"), "{t}");
         let _ = std::fs::remove_dir_all(&r);
     }
     #[cfg(unix)] #[test] fn the_codex_script_places_nothing_when_the_digest_differs() {
