@@ -101,7 +101,7 @@ impl Browser {
     async fn spawn(self: &Arc<Self>, st: &mut St) -> Option<mpsc::Sender<String>> {
         let exe = self.exe.clone()?; let home = &self.hub.cfg.home;
         let _ = std::fs::create_dir_all(home.join("shots"));
-        let mut child = crate::proc::tokio_cmd(crate::proc::Kind::Browser, exe).args(["--profile".into(), home.join("browser-profile").to_string_lossy().into_owned(), "--jpeg-dir".into(), home.join("shots").to_string_lossy().into_owned()])
+        let mut child = crate::proc::tokio_cmd_in(crate::proc::Kind::Browser, exe, crate::memscope::wrap_helper("browser")).args(["--profile".into(), home.join("browser-profile").to_string_lossy().into_owned(), "--jpeg-dir".into(), home.join("shots").to_string_lossy().into_owned()])
             .stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::null()).kill_on_drop(true).spawn().ok()?;
         let (mut stdin, stdout) = (child.stdin.take()?, child.stdout.take()?);
         st.gen += 1; let gen = st.gen;

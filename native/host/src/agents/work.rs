@@ -91,7 +91,7 @@ impl Agents {
         crate::plat::proc::own_group_tokio(&mut c);
         if let Some(f) = &guard { crate::plat::proc::inherit(&mut c, f) } // the job inherits its lock's flock
         let mut child = match c.spawn() { Ok(c) => c, Err(e) => { self.work_end(&th, &id, "gone", &format!("could not start: {e}")).await; return } };
-        let pid = child.id().unwrap_or(0); crate::plat::proc::adopt(pid, false); drop(guard);
+        let pid = child.id().unwrap_or(0); crate::plat::proc::adopt(pid, false); crate::memscope::cap_job(pid, "work"); drop(guard);
         let killed: Arc<std::sync::Mutex<Option<String>>> = Arc::default(); // a process of the job killed for memory in its scope (memscope.rs): said with its end
         { let k = killed.clone(); crate::memscope::watch(pid, move |w| { *k.lock().unwrap() = Some(w); }); }
         { let _g = self.work_lock.lock().await; let rows = self.watch_rows(&th).await;

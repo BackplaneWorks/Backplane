@@ -231,7 +231,7 @@ fn spawn_with(kind: crate::proc::Kind, person: Option<&PersonChild>, program: &P
     crate::plat::proc::agent_group(&mut c);
     let mut child = c.spawn()?;
     let pid = child.id().unwrap_or(0);
-    crate::plat::proc::adopt(pid, true);
+    crate::plat::proc::adopt(pid, true); crate::memscope::cap_job(pid, "agent"); // Windows: its Job Object's memory limit (Linux: its scope)
     reaper::add(pid);
     let mut stdin = child.stdin.take().expect("piped"); let stdout = child.stdout.take().expect("piped"); let mut stderr = child.stderr.take().expect("piped");
     let (in_tx, mut in_rx) = mpsc::channel::<String>(IN_QUEUE);
