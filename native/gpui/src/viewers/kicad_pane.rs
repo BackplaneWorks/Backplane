@@ -132,6 +132,11 @@ pub fn waiting_on(info: &Value, have_frame: bool, windows: bool) -> Option<Strin
         "unresponsive" => Some(crate::i18n::trs("KiCad is not responding.")),
         "stopped" => Some(crate::i18n::trs("KiCad was closed.")),
         _ if have_frame => None,
+        // KiCad has a dialog of its own open (a notice from loading a file, its own progress): said, not a silent "Starting KiCad…"
+        _ if info["dialogs"].as_array().is_some_and(|d| !d.is_empty()) => {
+            let title = info["dialogs"].as_array().and_then(|d| d.last()).and_then(Value::as_str).unwrap_or("");
+            Some(crate::i18n::tf("gpui.c.kicad.dialog", &[("title", title.to_string().into())]))
+        }
         _ => Some(crate::i18n::trs("Starting KiCad…")),
     }
 }
@@ -181,6 +186,10 @@ pub struct KicadPane {
     first_placed: Option<std::time::Instant>,
     /// where the pane was last drawn (window coordinates): the comment window opens over it (screens/kcomment.rs)
     pub at_px: Option<Bounds<Pixels>>,
+    /// KiCad's dialogs on screen now (their titles), as the client's X connection sees them
+    dialogs_open: Vec<String>,
+    /// the frame KiCad gave the keyboard to on a click, and when (a click-to-focus window manager may take it back at once)
+    took: Option<(u64, std::time::Instant)>,
 }
 
 impl KicadPane {
@@ -191,7 +200,7 @@ impl KicadPane {
             if weak.update(cx, |this, cx| this.tick(cx)).is_err() { break }
         }).detach();
         KicadPane { bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), last_root: (i32::MIN, 0), placed: None,
-            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), poked: None, unmapped_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, at_px: None }
+            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), poked: None, unmapped_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, at_px: None, dialogs_open: Vec::new(), took: None }
     }
     fn rpc(&self, name: &str, params: Value) { let _ = self.hub.try_send(Command::Rpc(name.to_string(), Secret(params), "kicad")); }
     /// The hub's `editor.kicad.<digest>` for this project changed.
@@ -217,6 +226,7 @@ impl KicadPane {
                 self.override_kind = (act != frame_for(&self.open)).then(|| act.to_string());
             }
         }
+        if info["mode"] == "fork" && self.info["mode"] != "fork" { if let Some(c) = self.container { nc::grab_click(c, false); } }
         if info["frames"] != self.info["frames"] {
             if let Some(c) = self.container { self.frames = nc::frames(c); }
             self.placed = None; self.unmapped_since = None;
@@ -258,6 +268,10 @@ impl KicadPane {
         cx.notify();
     }
     pub fn has_override(&self) -> bool { self.override_kind.is_some() }
+    /// The passive grab that turns a click on the unfocused editor into the keyboard for it: stock KiCad only. The fork takes the keyboard on
+    /// its own click (and says so with `_BACKPLANE_FOCUS`); a grab there froze the click until the pane's next tick replayed it, after the
+    /// button was up, and KiCad dropped the keys until a second click (one click must do).
+    fn grab_click(&self, c: u64, on: bool) { nc::grab_click(c, on && self.info["mode"] != "fork") }
     /// KiCad's frames moved into a new container in the window `t` (and the hub told), before the window they were in goes away: a window's
     /// destruction takes its children with it, and KiCad's would be among them. Also how a pane goes back in from its own window.
     pub fn rehome(&mut self, t: u64) {
@@ -266,7 +280,7 @@ impl KicadPane {
         let Some(new) = nc::container_for(t, &self.project) else { return };
         if new != old { nc::move_frames(old, new); nc::destroy(old); }
         self.toplevel = t; self.container = Some(new); self.placed = None; self.unmapped_since = None; self.last_root = (i32::MIN, 0);
-        nc::grab_click(new, !self.keys);
+        self.grab_click(new, !self.keys);
         self.reattach();
     }
     /// The hub's `kicad.reload.<digest>`: this project's waiting files, if it is this pane's.
@@ -316,6 +330,12 @@ impl KicadPane {
         if self.attached { self.rpc("editor.kicad.theme", json!({"project": self.project, "mode": if light { "light" } else { "dark" }})); }
         cx.notify();
     }
+    /// The hub's state with KiCad's dialogs as this window sees them on screen (a modal one stops KiCad's events, so the hub may not know yet).
+    fn seen_info(&self) -> Value {
+        let mut i = self.info.clone();
+        if !self.dialogs_open.is_empty() && i["dialogs"].as_array().map_or(true, |d| d.is_empty()) { i["dialogs"] = json!(self.dialogs_open); }
+        i
+    }
     fn wanted_kind(&self) -> &str { self.override_kind.as_deref().unwrap_or_else(|| frame_for(&self.open)) }
     /// The person took the editor: the hub then refuses an agent's save while anything is unsaved (kicad/embed.rs `Unsaved`).
     fn touched(&self) { self.rpc("editor.kicad.touched", json!({"project": self.project})); }
@@ -329,14 +349,14 @@ impl KicadPane {
     pub fn hold_keys(&mut self, on: bool) {
         let Some(c) = self.container else { return };
         nc::input_off(c, on);
-        if on && self.keys { nc::focus(self.toplevel); self.keys = false; nc::grab_escape(self.toplevel, false); nc::grab_click(c, true); }
+        if on && self.keys { nc::focus(self.toplevel); self.keys = false; nc::grab_escape(self.toplevel, false); self.grab_click(c, true); }
     }
     /// The keyboard back to the editor on show (a comment posted or cancelled), as a click on it gives it.
     pub fn give_keys(&mut self, cx: &mut Context<Self>) {
         let Some(c) = self.container else { return };
         nc::input_off(c, false);
         let Some(w) = self.want() else { return };
-        nc::grab_click(c, false); nc::focus(w); self.keys = true; nc::grab_escape(self.toplevel, true); cx.notify();
+        self.grab_click(c, false); nc::focus(w); self.keys = true; nc::grab_escape(self.toplevel, true); cx.notify();
     }
     fn want(&self) -> Option<u64> { if self.info.is_null() || (cfg!(windows) && self.info["mode"] == "stock") { return None } pick_local(self.wanted_kind(), &self.info, &self.frames, &self.ever_shown) }
     fn tick(&mut self, cx: &mut Context<Self>) {
@@ -346,6 +366,11 @@ impl KicadPane {
         if let Some(pid) = self.info["pid"].as_u64().filter(|p| *p > 0) {
             if self.info["mode"] == "fork" {
                 nc::dialogs(pid as u32, c, self.toplevel);
+                // what KiCad asks (a load-time notice, a question) comes up over its pane, not in the middle of the screen; and the hub is told
+                // which are open (a modal one stops KiCad's API: no events, no pings), so the pane names it and KiCad is not called hung
+                let over = match (&self.placed, self.last_root.0 != i32::MIN) { (Some((Some(at), _, _)), true) => nc::R { x: self.last_root.0, y: self.last_root.1, w: at.w, h: at.h }, _ => nc::R { x: 0, y: 0, w: 0, h: 0 } };
+                let open = nc::centre_dialogs(pid as u32, over);
+                if open != self.dialogs_open { self.dialogs_open = open; self.rpc("editor.kicad.dialogs", json!({"project": self.project, "open": self.dialogs_open})); cx.notify(); }
             } else if !cfg!(windows) && !nc::adopt(pid as u32, c, self.toplevel).is_empty() {
                 self.placed = None; cx.notify();
             }
@@ -416,18 +441,25 @@ impl KicadPane {
         }
         // a click over the editor gives it the keyboard; a click anywhere else in the client's window gives it back
         if let Some(w) = self.want() { match (nc::button_over(w), nc::has_focus(c)) { (Some(true), false) => nc::focus(w), (Some(false), true) => nc::focus(self.toplevel), _ => {} } }
-        let has = nc::has_focus(c);
-        if has != self.keys { self.keys = has; nc::grab_escape(self.toplevel, has); nc::grab_click(c, !has); if has { self.touched(); } cx.notify(); }
+        let mut has = nc::has_focus(c);
+        // KiCad took the keyboard on a click (`_BACKPLANE_FOCUS`) and a window manager that focuses on click (i3) gave it straight back to
+        // Backplane's window: the click was KiCad's, so is the keyboard (once, within moments of it)
+        if !has && self.keys {
+            if let Some((w, at)) = self.took.take() { if at.elapsed() < std::time::Duration::from_millis(600) { nc::focus(w); has = true; } }
+        }
+        if has != self.keys { self.keys = has; nc::grab_escape(self.toplevel, has); self.grab_click(c, !has); if has { self.touched(); } cx.notify(); }
         if let Some(h) = self.info["holder"].as_u64().filter(|h| *h > 0 && *h != self.kept) { nc::keep(h); self.kept = h; }
         for e in nc::events() {
+            // what reached Backplane from the editor (the e2e reads it: one click in KiCad, then a reserved chord, must arrive)
+            eprintln!("GPUI_LOG {}", json!({"kicad_ev": match &e { nc::Ev::Escape => "escape".to_string(), nc::Ev::Click => "click".to_string(), nc::Ev::Key(k) => format!("key {k}"), nc::Ev::Focus(w) => format!("focus {w}") }}));
             match e {
                 // the keyboard back to the client's window; a reserved chord is then pressed in gpui (after_frame, which has the window)
-                nc::Ev::Escape => { nc::focus(self.toplevel); self.keys = false; nc::grab_escape(self.toplevel, false); nc::grab_click(c, true); cx.notify(); }
-                nc::Ev::Click => { if let Some(w) = self.want() { nc::grab_click(c, false); nc::focus(w); self.keys = true; self.touched(); nc::grab_escape(self.toplevel, true); cx.notify(); } }
+                nc::Ev::Escape => { nc::focus(self.toplevel); self.keys = false; nc::grab_escape(self.toplevel, false); self.grab_click(c, true); cx.notify(); }
+                nc::Ev::Click => { if let Some(w) = self.want() { self.grab_click(c, false); nc::focus(w); self.keys = true; self.touched(); nc::grab_escape(self.toplevel, true); cx.notify(); } }
                 // Ctrl+Tab / Ctrl+Shift+Tab pressed in KiCad: the next editor tab, and KiCad keeps the keyboard
                 nc::Ev::Key(k) if k == "ctrl-tab" || k == "ctrl-shift-tab" => { let to = next_tab(self.wanted_kind(), if k == "ctrl-tab" { 1 } else { -1 }); self.show_kind(to, cx); }
-                nc::Ev::Key(k) => { eprintln!("GPUI_LOG {}", json!({"kicad_key": k})); nc::focus(self.toplevel); self.keys = false; nc::grab_escape(self.toplevel, false); nc::grab_click(c, true); self.press.push(k); cx.notify(); }
-                nc::Ev::Focus(_) => { if !self.keys { self.keys = true; self.touched(); nc::grab_escape(self.toplevel, true); nc::grab_click(c, false); cx.notify(); } }
+                nc::Ev::Key(k) => { eprintln!("GPUI_LOG {}", json!({"kicad_key": k})); nc::focus(self.toplevel); self.keys = false; nc::grab_escape(self.toplevel, false); self.grab_click(c, true); self.press.push(k); cx.notify(); }
+                nc::Ev::Focus(_) => { if let Some(w) = self.want() { self.took = Some((w, std::time::Instant::now())); } if !self.keys { self.keys = true; self.touched(); nc::grab_escape(self.toplevel, true); self.grab_click(c, false); cx.notify(); } }
             }
         }
     }
@@ -451,7 +483,7 @@ impl KicadPane {
             self.attached = true;
             return;
         };
-        nc::grab_click(c, true);
+        self.grab_click(c, true);
         self.attached = true;
         let display = std::env::var("DISPLAY").unwrap_or_default();
         let kind = frame_for(&self.open);
@@ -536,7 +568,7 @@ impl KicadPane {
         });
         let pane = self.placed.as_ref().and_then(|(at, _, _)| *at).map_or(Value::Null, |p| json!({"x": p.x, "y": p.y, "w": p.w, "h": p.h}));
         let shown_meta = shown.and_then(|w| nc::window_meta(w, self.container, self.toplevel));
-        json!({"ok": true, "project": self.project, "root": self.root, "open": self.open, "want": self.wanted_kind(), "jobs": self.jobs, "local_map": self.info["local_map"], "ever_shown": self.ever_shown.len(), "conflicts": self.conflicts,
+        json!({"ok": true, "project": self.project, "root": self.root, "open": self.open, "want": self.wanted_kind(), "say": waiting(&self.seen_info(), shown.is_some()), "dialogs": self.seen_info()["dialogs"], "jobs": self.jobs, "local_map": self.info["local_map"], "ever_shown": self.ever_shown.len(), "conflicts": self.conflicts,
             "state": self.info["state"], "reason": self.info["reason"], "mode": self.info["mode"], "pid": self.info["pid"],
             "holder": self.info["holder"], "sock": self.info["sock"], "pane": pane,
             "container": self.container.map_or(Value::Null, |c| { let mut v = g(c); v["xid"] = c.into(); v }),
@@ -553,16 +585,17 @@ impl Render for KicadPane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.decide(window, cx);
         let light = self.light; let c = |n: &str| crate::theme::color(light, n);
-        let say = waiting(&self.info, self.want().is_some());
+        let say = waiting(&self.seen_info(), self.want().is_some());
         let marker = self.marker.clone(); let focus = self.focus.clone();
         let keys = self.keys;
         div().id("kicad-pane").size_full().relative().bg(rgb(0x001023)).track_focus(&focus)
             .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+                this.took = None;
                 if this.keys {
                     nc::focus(this.toplevel);
                     this.keys = false;
                     nc::grab_escape(this.toplevel, false);
-                    if let Some(c) = this.container { nc::grab_click(c, true); }
+                    if let Some(c) = this.container { this.grab_click(c, true); }
                     cx.notify();
                 }
             }))
@@ -626,6 +659,9 @@ mod tests {
             "stock mode on Windows says Backplane KiCad is needed"
         );
         assert!(waiting_on(&json!({"mode": "stock", "state": "ready"}), true, false).is_none(), "stock mode on Linux embeds");
+        let asking = waiting(&json!({"state": "ready", "dialogs": ["Load Schematic", "Information"]}), false).unwrap();
+        assert!(asking.contains("Information") && !asking.contains("Starting"), "{asking}");
+        assert!(waiting(&json!({"state": "ready", "dialogs": ["Information"]}), true).is_none(), "the editor on show says nothing over it");
     }
     #[test] fn stale_hub_open_never_reverts_a_rail_switch_while_svg_plots() {
         let mut last = "board".to_string();
@@ -648,6 +684,9 @@ pub fn local(hub_addr: Option<&str>, thread: &Value) -> bool {
     match hub_addr.map(|a| a.rsplit_once(':').map_or(a, |(h, _)| h)) { Some(h) => h.is_empty() || matches!(h, "127.0.0.1" | "localhost" | "[::1]"), None => true }
 }
 
+/// The project last asked warm (kicad_warm), so each project shown in a row is asked once.
+static WARM_LAST: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+
 impl crate::Backplane {
     /// The hub's `editor.kicad.<digest>` (JSON text; "" when the editor went away): kept, and given to the pane when it is this project's.
     pub(crate) fn kicad_info(&mut self, digest: String, text: &str, cx: &mut Context<Self>) {
@@ -661,7 +700,7 @@ impl crate::Backplane {
             }
             None => (false, false, String::new()),
         };
-        eprintln!("GPUI_LOG {}", json!({"kicad_info": digest, "gone": text.is_empty(), "state": v["state"], "mode": v["mode"], "pid": v["pid"], "active": v["active"], "frames": v["frames"].as_array().map_or(0, Vec::len), "project": v["project"], "root": v["root"], "has_pane": has_pane, "matched": matched, "pane_project": pane_proj}));
+        eprintln!("GPUI_LOG {}", json!({"kicad_info": digest, "gone": text.is_empty(), "state": v["state"], "mode": v["mode"], "pid": v["pid"], "active": v["active"], "frames": v["frames"].as_array().map_or(0, Vec::len), "dialogs": v["dialogs"], "project": v["project"], "root": v["root"], "has_pane": has_pane, "matched": matched, "pane_project": pane_proj}));
     }
     /// Direct reply from an `editor.kicad.*` RPC: surface synchronous attach refusals on the pane and seed initial info if `KicadEditor` has not arrived yet.
     pub(crate) fn kicad_reply(&mut self, method: String, reply: Value, cx: &mut Context<Self>) {
@@ -691,7 +730,24 @@ impl crate::Backplane {
             }
         }
     }
+    /// A thread is shown: its project's KiCad kept warm in the hub (`editor.kicad.warm`; the hub decides whether, embed.rs `warm_decision`), so
+    /// Edit draws the editor at once instead of starting KiCad. Asked once per project shown in a row; only for a hub on this machine. Linux
+    /// for now (a fork started with no window to live in parks its frames; Windows not yet checked).
+    pub(crate) fn kicad_warm(&mut self) {
+        if !cfg!(target_os = "linux") { return }
+        let thread = &self.data["thread"];
+        if !local(self.screens.attacher.target.as_ref().map(|t| t.addr.as_str()), thread) { return }
+        let tid = crate::screens::attach::raw_id(thread["id"].as_str().unwrap_or(""));
+        if tid.is_empty() { return }
+        let pid = crate::keys::project_of(&self.data, tid);
+        let Some(root) = crate::screens::projects::find(&self.data, &pid).and_then(|p| p["root"].as_str()).map(|r| r.trim_end_matches(['/', '\\']).to_string()).filter(|r| !r.is_empty()) else { return };
+        { let mut last = WARM_LAST.lock().unwrap(); if *last == root { return } *last = root.clone(); }
+        let display = std::env::var("DISPLAY").unwrap_or_default();
+        let _ = self.tx.try_send(Command::Rpc("editor.kicad.warm".into(), Secret(json!({"project": root, "display": display, "theme": if self.light() { "light" } else { "dark" }})), "kicad"));
+    }
     pub(crate) fn kicad_rejoin(&mut self, cx: &mut Context<Self>) {
+        // a new hub (a restart ends its KiCads): the shown project is asked warm again
+        WARM_LAST.lock().unwrap().clear(); self.kicad_warm();
         if let Some(p) = self.screens.kicad.clone() { p.update(cx, |p, _| p.reattach()); }
     }
     /// Edit: the thread's design in the real KiCad, in the pane (the page stays on the rail's Board, Schematic or 3D).
@@ -740,7 +796,7 @@ pub fn strip<V: 'static>(cx: &mut Context<V>, light: bool, pane: &Entity<KicadPa
         // the symbol and footprint editors: a tab once KiCad has them, or while shown
         if matches!(*kind, "SYMBOL_EDITOR" | "FOOTPRINT_EDITOR") && !have.iter().any(|h| h == kind) && at != *kind { continue }
         let on = at == *kind; let k = kind.to_string(); let p = pane.clone();
-        row = row.child(div().id(SharedString::from(format!("kicad-tab-{kind}"))).px_2().py(px(3.)).text_size(px(12.)).cursor_pointer()
+        row = row.child(crate::ui::with_rect(div().id(SharedString::from(format!("kicad-tab-{kind}"))), { let k = kind.to_string(); move || format!("kicad-tab:{k}") }).px_2().py(px(3.)).text_size(px(12.)).cursor_pointer()
             .text_color(c(if on { "text" } else { "dim" })).when(on, |d| d.border_b_2().border_color(c("accent"))).hover(|s| s.bg(c("raise")))
             .tooltip(crate::keys::tip(&crate::i18n::trs(label), "Ctrl+Tab", light))
             .child(crate::i18n::trs(label))

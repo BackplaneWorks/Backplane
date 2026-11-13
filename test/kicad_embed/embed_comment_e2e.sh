@@ -35,11 +35,8 @@ wait_klog() { for _ in $(seq 100); do [ -n "$(klog "$1")" ] && return 0; sleep 0
 wait_mark ready || true; sleep 1; R=$(rep ready); SOCK=$(field "$R" sock); SHOWN=$(field "$R" shown)
 check "the board editor is embedded and shown" "$([ -n "$SOCK" ] && [ -n "$SHOWN" ] && echo 1 || echo 0)" "sock=$SOCK shown=$SHOWN"
 # the keyboard into KiCad (a click on its canvas, as the person gives it), then two parts selected there; after the other editors' pre-warm
-# (2 s after the first is placed), which a click before it races
-# Two clicks: the first is taken by the container's passive grab and replayed to KiCad at the pane's next tick (up to 40 ms), after XTest's
-# 60 ms click has already let go, so KiCad sees a press with no release and drops keys until the next click (reported to the lead; not this
-# suite's subject). The second lands on KiCad directly.
-sleep 4; click_win_center "$SHOWN"; sleep 0.6; click_win_center "$SHOWN"; sleep 0.8
+# (2 s after the first is placed), which a click before it races. One click: it reaches KiCad directly (embed_click_e2e.sh)
+sleep 4; click_win_center "$SHOWN"; sleep 0.8
 grep "reserved keys" "$OUT/hub.log" | tail -1 || true
 SEL=$(python3 "$IPC_PY" select-items "$SOCK" pcb "R1,C1" 0 2>>"$OUT/ipc.err" || echo '{}'); echo "$SEL" >"$OUT/select.json"
 sleep 0.5

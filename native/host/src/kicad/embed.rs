@@ -73,6 +73,11 @@ pub struct Session {
     pub caps: Vec<String>,
     pub frames: Vec<Frame>,
     pub missed_pings: u32,
+    /// KiCad's open dialogs (titles, innermost last), from ET_DIALOG_OPENED/CLOSED: a modal KiCad raised by itself (a load-time notice on a
+    /// pre-warmed frame) is said in the pane instead of a silent "Starting KiCad…"
+    pub dialogs: Vec<String>,
+    /// KiCad's resident memory, MB (Linux, sampled on the health tick; 0 unknown): the warm policy's measure of what a KiCad costs
+    pub rss_mb: u64,
     pub touched_at: u64,
     pub closing: bool,
 }
@@ -85,7 +90,7 @@ impl Session {
             container: 0, toplevel: 0, holder: 0, display: String::new(),
             sock: String::new(), events_sock: String::new(), sock_dir: String::new(),
             argv: String::new(), cli: String::new(), version: String::new(), desc: String::new(),
-            caps: vec![], frames: vec![], missed_pings: 0, touched_at: now, closing: false,
+            caps: vec![], frames: vec![], missed_pings: 0, dialogs: vec![], rss_mb: 0, touched_at: now, closing: false,
         }
     }
     pub fn spawned(mut self, pid: u32) -> Self { self.pid = pid; self }
@@ -96,6 +101,8 @@ impl Session {
     }
     pub fn ping_result(mut self, ok: bool) -> Self {
         if !matches!(self.state.as_str(), "ready" | "unresponsive") { return self }
+        // a dialog of KiCad's own is open (a load-time notice, a question): its modal loop may leave a ping unanswered; KiCad is asking, not hung
+        if !ok && !self.dialogs.is_empty() { return self }
         if ok {
             self.missed_pings = 0;
             if self.state == "unresponsive" { self.state = "ready".into(); self.reason.clear(); }
@@ -108,16 +115,23 @@ impl Session {
         }
         self
     }
+    /// A dialog opened (`open`) or closed in KiCad, by its title.
+    pub fn dialog(mut self, open: bool, title: &str) -> Self {
+        if open { self.dialogs.push(title.to_string()); }
+        else if let Some(i) = self.dialogs.iter().rposition(|d| d == title) { self.dialogs.remove(i); }
+        else { self.dialogs.pop(); }
+        self
+    }
     pub fn detached(mut self, now: u64) -> Self {
         self.container = 0; self.touched_at = now; self
     }
     pub fn failed(mut self, why: &str) -> Self {
         self.state = "failed".into(); self.reason = why.into(); self.pid = 0; self.holder = 0;
-        self.frames.clear(); self
+        self.frames.clear(); self.dialogs.clear(); self
     }
     pub fn stopped(mut self, reason: &str) -> Self {
         self.state = "stopped".into(); self.reason = reason.into(); self.pid = 0; self.holder = 0;
-        self.frames.clear(); self
+        self.frames.clear(); self.dialogs.clear(); self
     }
     pub fn exited(self, code: i32, tail: &str) -> Self {
         if self.closing { return self.stopped("") }
@@ -148,10 +162,19 @@ impl Session {
             "sock": self.sock,
             "display": self.display,
             "frames": self.frames.iter().map(Frame::to_json).collect::<Vec<_>>(),
+            "dialogs": self.dialogs,
+            "rss_mb": self.rss_mb,
             // bp.9: the client may map and unmap a frame KiCad has shown once (its tab switches need no round trip)
             "local_map": self.mode == "fork" && !self.desc.is_empty() && proto::load(&self.desc).has_field("kiapi.backplane.embed.ShowFrame", "prewarm"),
         })
     }
+}
+
+/// Whether a show of the session's `active` frame is the client's own map (bp.9+ local map, the frame realized), with nothing else asked
+/// (`plain`: no document, item or remount).
+pub fn local_switch(s: &Session, local_map: bool, plain: bool) -> bool {
+    plain && local_map && s.mode == "fork" && s.state == "ready"
+        && s.frames.iter().any(|f| f.kind == s.active && f.xid > 0 && (f.realized || f.shown))
 }
 
 /// Stable info key `editor.kicad.<12-hex-sha256>` for a canonical `.kicad_pro` path.
@@ -277,6 +300,79 @@ pub fn evict_warm(sessions: &HashMap<String, Session>, keep_pro: &str, max_warm:
         .filter(|s| s.pro != keep_pro && s.state == "ready" && s.container == 0 && s.unsaved_docs().is_empty())
         .min_by_key(|s| s.touched_at)
         .map(|s| s.pro.clone())
+}
+
+/// Keeping KiCad warm before Edit (the person's "scarily fast": Edit on a project already open in Backplane draws at once). The client asks
+/// (`editor.kicad.warm`) when it shows a thread of a project on this machine; the hub decides here.
+#[derive(Clone, Copy, Debug)]
+pub struct WarmCfg {
+    pub max: usize, pub idle_s: u64,
+    /// what a KiCad is taken to cost before one has been measured (a pcbnew parses the global footprint table at start: ~2.7 GB)
+    pub kicad_mb: u64,
+    /// memory left free for everything else once the new KiCad has started
+    pub headroom_mb: u64,
+}
+pub const WARM: WarmCfg = WarmCfg { max: MAX_WARM, idle_s: 30 * 60, kicad_mb: 3000, headroom_mb: 4096 };
+
+/// What the next KiCad will cost: the largest one measured running, else the configured guess.
+pub fn kicad_cost_mb(sessions: &HashMap<String, Session>, cfg: WarmCfg) -> u64 {
+    sessions.values().filter(|s| s.is_live()).map(|s| s.rss_mb).max().filter(|m| *m > 0).unwrap_or(cfg.kicad_mb)
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Warm {
+    /// start KiCad detached (no pane yet), first closing `evict` (a clean, idle one) when the cap is reached
+    Start { evict: Option<String> },
+    /// it is up (or starting) already: only remembered as used now
+    Have,
+    /// not now, and why (said in the reply; Edit still starts it)
+    No(&'static str),
+}
+
+/// Whether to warm `pro`. `hardware`: the project has KiCad files; `locked`: a KiCad lock file of the project's is there and no session of
+/// ours holds it (the person's own KiCad, or a crash's leftover: KiCad would ask about it in a dialog, which a pre-warm must never raise);
+/// `free_mb`: memory available (None: unknown, taken as enough); `quiet`: the runtime loads with no window of its own on screen (bp.12's
+/// ET_PROGRESS instead of KiCad's progress windows: an older one shows "Load PCB" over Backplane when a thread is merely shown).
+pub fn warm_decision(sessions: &HashMap<String, Session>, pro: &str, hardware: bool, locked: bool, free_mb: Option<u64>, quiet: bool, cfg: WarmCfg) -> Warm {
+    if !hardware { return Warm::No("not a KiCad project") }
+    if !quiet && !sessions.get(pro).is_some_and(Session::is_live) { return Warm::No("this KiCad shows its own windows while loading (needs Backplane KiCad bp.12)") }
+    if sessions.get(pro).is_some_and(Session::is_live) { return Warm::Have }
+    // a session that failed or was closed by the person is not started again behind their back; Edit does that
+    if sessions.get(pro).is_some_and(|s| s.state == "failed" || s.reason == "KiCad was closed") { return Warm::No("KiCad stopped for this project; Edit starts it") }
+    if locked { return Warm::No("the project is open in another KiCad") }
+    // memory: the new KiCad's cost and the headroom must fit (builds and other programs take theirs first); room made by an eviction is
+    // not counted on: a refused warm costs only Edit's cold start
+    if free_mb.is_some_and(|m| m < kicad_cost_mb(sessions, cfg) + cfg.headroom_mb) { return Warm::No("too little free memory") }
+    let live = sessions.values().filter(|s| s.pro != pro && s.is_live()).count();
+    if live < cfg.max { return Warm::Start { evict: None } }
+    match evict_warm(sessions, pro, cfg.max) { Some(v) => Warm::Start { evict: Some(v) }, None => Warm::No("as many KiCads as are kept warm are in use") }
+}
+
+/// The sessions to close for idleness: up, in no pane, nothing unsaved, not used for `idle_s`.
+pub fn idle_victims(sessions: &HashMap<String, Session>, now: u64, idle_s: u64) -> Vec<String> {
+    let mut v: Vec<String> = sessions.values()
+        .filter(|s| s.state == "ready" && s.container == 0 && !s.closing && s.unsaved_docs().is_empty() && now.saturating_sub(s.touched_at) >= idle_s)
+        .map(|s| s.pro.clone()).collect();
+    v.sort(); v
+}
+
+/// A KiCad lock file (`~<name>.lck`) for the project's own files in its folder.
+pub fn project_locked(files: &Files) -> bool {
+    [&files.pro, &files.pcb, &files.sch].into_iter().filter(|f| !f.is_empty()).any(|f| {
+        let p = Path::new(f);
+        match (p.parent(), p.file_name()) { (Some(d), Some(n)) => d.join(format!("~{}.lck", n.to_string_lossy())).exists(), _ => false }
+    })
+}
+
+/// A process's resident memory in MB (Linux; None elsewhere).
+fn rss_mb(pid: u32) -> Option<u64> {
+    let st = std::fs::read_to_string(format!("/proc/{pid}/status")).ok()?;
+    st.lines().find(|l| l.starts_with("VmRSS:"))?.split_whitespace().nth(1)?.parse::<u64>().ok().map(|kb| kb / 1024)
+}
+/// MemAvailable in MB (Linux; None elsewhere).
+fn free_mb() -> Option<u64> {
+    let m = std::fs::read_to_string("/proc/meminfo").ok()?;
+    m.lines().find(|l| l.starts_with("MemAvailable:"))?.split_whitespace().nth(1)?.parse::<u64>().ok().map(|kb| kb / 1024)
 }
 
 fn u64_of(v: &Value) -> u64 {
@@ -719,6 +815,11 @@ enum Msg {
     Detach {
         client: u64, pro: String, reply: oneshot::Sender<Result<Value, String>>,
     },
+    /// the client shows this project: keep its KiCad warm (detached) if the policy says so
+    Warm {
+        client: u64, pro: String, root: String, files: Files, frame: String, display: String, hardware: bool, locked: bool, env: Env,
+        reply: oneshot::Sender<Result<Value, String>>,
+    },
     Close {
         client: u64, pro: String, save: String, reply: oneshot::Sender<Result<Value, String>>,
     },
@@ -739,6 +840,9 @@ enum Msg {
     StartFailed { pro: String, gen: u64, why: String },
     FramesUpdated { pro: String, gen: u64, holder: Option<u64>, frames: Vec<Frame>, reply: Option<(u64, oneshot::Sender<Result<Value, String>>)> },
     ForkShowRequested { pro: String, gen: u64, kind: String },
+    Dialog { pro: String, gen: u64, open: bool, title: String },
+    /// the dialogs of KiCad's the client sees on screen (a modal one stops KiCad's events and pings: this is how the hub learns of it)
+    ClientDialogs { pro: String, open: Vec<String> },
     ForkSync { pro: String, gen: u64 },
     /// ForkSync for the project's current session, whichever generation it is (from outside the actor: the prewarm RPC)
     ForkSyncNow { pro: String },
@@ -857,6 +961,21 @@ impl Actor {
         });
     }
 
+    /// Close a clean session for room or idleness (refused by KiCad if anything is modified meanwhile).
+    fn retire(&mut self, victim: &str) {
+        let Some(vs) = self.sessions.get_mut(victim) else { return };
+        vs.closing = true;
+        let vs_snap = vs.clone();
+        if vs_snap.mode == "fork" && !vs_snap.sock.is_empty() {
+            let me = self.me.clone();
+            tokio::spawn(async move {
+                let _ = raw_on(&me, &vs_snap.sock, &vs_snap.desc, "kiapi.backplane.embed.Close", json!({"mode":"CM_FAIL_IF_MODIFIED"}), 10000).await;
+            });
+        } else {
+            Self::kill_pid(vs_snap.pid);
+        }
+    }
+
     fn attach(&mut self, client: u64, pro: String, root: String, files: Files, frame: String, container: u64, toplevel: u64, display: String, wait: bool, env: Env, reply: oneshot::Sender<Result<Value, String>>) {
         let now = ipc::now_s();
         if let Some(existing) = self.sessions.get_mut(&pro) {
@@ -926,20 +1045,7 @@ impl Actor {
         let sweep_locks = self.sessions.get(&pro).is_some_and(|s| s.state == "failed" || s.reason == "restarting");
 
         // Warm-session cap: retire the oldest detached clean session before starting a 4th GUI KiCad.
-        if let Some(victim) = evict_warm(&self.sessions, &pro, MAX_WARM) {
-            if let Some(vs) = self.sessions.get_mut(&victim) {
-                vs.closing = true;
-                let vs_snap = vs.clone();
-                if vs_snap.mode == "fork" && !vs_snap.sock.is_empty() {
-                    let me = self.me.clone();
-                    tokio::spawn(async move {
-                        let _ = raw_on(&me, &vs_snap.sock, &vs_snap.desc, "kiapi.backplane.embed.Close", json!({"mode":"CM_FAIL_IF_MODIFIED"}), 10000).await;
-                    });
-                } else {
-                    Self::kill_pid(vs_snap.pid);
-                }
-            }
-        }
+        if let Some(victim) = evict_warm(&self.sessions, &pro, MAX_WARM) { self.retire(&victim); }
 
         let kicad_bin = match kicad_gui_bin(&env.cli) {
             Ok(b) => b.to_string_lossy().to_string(),
@@ -1042,6 +1148,13 @@ impl Actor {
         let snap = s.clone();
         let me = self.me.clone();
         let cid = client;
+        // a frame KiCad has realized (shown once, or pre-warmed) on a runtime whose client maps frames itself: the switch is the client's
+        // (the new `active` in the info), with no round trip to KiCad; a cross-probe's selection follows over SelectItems (xprobe.rs)
+        if local_switch(&snap, snap.info_json()["local_map"] == true, doc.is_empty() && item.is_empty() && !remount) {
+            let out = snap.info_json();
+            self.publish_and_reply(&snap, Some(cid), reply, Ok(out));
+            return;
+        }
         if snap.mode == "fork" {
             tokio::spawn(async move {
                 let synced = match switch_fork_frame(&me, &snap.sock, &snap.desc, &snap.active, &doc, &item, remount, focus).await {
@@ -1189,6 +1302,25 @@ impl Actor {
             }
             Msg::Show { client, pro, frame, doc, item, remount, focus, reply } => self.show(client, pro, frame, doc, item, remount, focus, reply),
             Msg::Detach { client, pro, reply } => self.detach(client, pro, reply),
+            Msg::Warm { client, pro, root, files, frame, display, hardware, locked, env, reply } => {
+                let (desc, _) = discover_desc(&self.hub.cfg.home, &env);
+                let quiet = !desc.is_empty() && proto::load(&desc).has_own("kiapi.backplane.embed.CancelProgress");
+                match warm_decision(&self.sessions, &pro, hardware, locked, free_mb(), quiet, WARM) {
+                    Warm::Have => {
+                        if let Some(s) = self.sessions.get_mut(&pro) { s.touched_at = ipc::now_s(); }
+                        let _ = reply.send(Ok(json!({"warm": true, "started": false})));
+                    }
+                    Warm::No(why) => { eprintln!("kicad embed: not warming {pro}: {why} (runtime {} {}, api.desc {desc})", env.root, env.version); let _ = reply.send(Ok(json!({"warm": false, "why": why}))); }
+                    Warm::Start { evict } => {
+                        if let Some(v) = evict { self.retire(&v); }
+                        eprintln!("kicad embed: warming {pro}");
+                        let (tx, rx) = oneshot::channel();
+                        // detached: no container yet (the fork parks its frames); Edit attaches it to the pane
+                        self.attach(client, pro, root, files, frame, 0, 0, display, false, env, tx);
+                        tokio::spawn(async move { let r = rx.await.unwrap_or_else(|_| Err("no reply".into())); let _ = reply.send(r.map(|_| json!({"warm": true, "started": true}))); });
+                    }
+                }
+            }
             Msg::Close { client, pro, save, reply } => self.close(client, pro, save, reply),
             Msg::Restart { client, pro, env, reply } => self.restart(client, pro, env, reply),
             Msg::ClientFrames { client, pro, frames, reply } => {
@@ -1304,6 +1436,20 @@ impl Actor {
                     }
                 });
             }
+            Msg::Dialog { pro, gen, open, title } => {
+                if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("kicad embed: dialog {} {title:?} (gen {gen}, session {:?})", if open { "opened" } else { "closed" }, self.sessions.get(&pro).map(|s| (s.gen, s.state.clone()))); }
+                let Some(s) = self.sessions.get_mut(&pro).filter(|s| s.gen == gen && s.is_live()) else { return };
+                *s = s.clone().dialog(open, &title);
+                let snap = s.clone();
+                self.publish(&snap, None);
+            }
+            Msg::ClientDialogs { pro, open } => {
+                let Some(s) = self.sessions.get_mut(&pro).filter(|s| s.is_live() && s.dialogs != open) else { return };
+                s.dialogs = open;
+                if !s.dialogs.is_empty() && s.state == "unresponsive" { s.state = "ready".into(); s.reason.clear(); s.missed_pings = 0; }
+                let snap = s.clone();
+                self.publish(&snap, None);
+            }
             Msg::ForkSyncNow { pro } => {
                 if let Some(gen) = self.sessions.get(&pro).map(|s| s.gen) { let _ = self.me.send(Msg::ForkSync { pro, gen }); }
             }
@@ -1368,6 +1514,8 @@ impl Actor {
                 }
             }
             Msg::Tick => {
+                for v in idle_victims(&self.sessions, ipc::now_s(), WARM.idle_s) { eprintln!("kicad embed: idle, closing {v}"); self.retire(&v); }
+                for s in self.sessions.values_mut().filter(|s| s.is_live() && s.pid > 0) { if let Some(m) = rss_mb(s.pid) { s.rss_mb = m; } }
                 let targets: Vec<Session> = self.sessions.values()
                     .filter(|s| matches!(s.state.as_str(), "ready" | "unresponsive") && !s.sock.is_empty())
                     .cloned().collect();
@@ -1555,6 +1703,9 @@ async fn spawn_gui_session(
     me: mpsc::UnboundedSender<Msg>, home: PathBuf, pro: String, root: String, gen: u64, mode: String,
     argv: Vec<String>, sock_dir: PathBuf, req_sock: String, display: String, desc: String, active: String, spawn_container: u64, sweep_locks: bool,
 ) {
+    // where a cold start's time goes: one line per phase (hub log), for the perf e2e and the person's own log
+    let t0 = std::time::Instant::now();
+    let phase = |what: &str| eprintln!("kicad embed: start +{}ms {what}", t0.elapsed().as_millis());
     if sweep_locks {
         sweep_crashed_locks(&root, &pro);
     }
@@ -1629,6 +1780,7 @@ async fn spawn_gui_session(
         crate::agents::proc::watch_group(pid);
     }
     let _ = me.send(Msg::Spawned { pro: pro.clone(), gen, pid });
+    phase("spawned");
 
     let (stdout, stderr) = (child.stdout.take(), child.stderr.take());
     let (sock_tx, sock_rx) = oneshot::channel::<String>();
@@ -1717,6 +1869,7 @@ async fn spawn_gui_session(
         }
     };
 
+    phase("socket");
     let mut version = String::new();
     let mut hand_ok = false;
     let mut ev_since: u64 = 0;
@@ -1772,6 +1925,7 @@ async fn spawn_gui_session(
         return;
     }
 
+    phase("answering");
     if mode == "fork" {
         let gf0 = raw_on(&me, &sock, &desc, "kiapi.backplane.embed.GetFrames", json!({}), 10000).await;
         let (mut holder, mut events_sock, mut frames) = if gf0["ok"].as_bool().unwrap_or(false) {
@@ -1787,6 +1941,7 @@ async fn spawn_gui_session(
             // Because `PrepareFrame` strips decorations, `GTKUpdateDecorSize` returns early without calling `gtk_widget_show` on that
             // first frame. Waiting past the 1000 ms timer and toggling `HideFrame` + `ShowFrame` calls `gtk_widget_show` cleanly.
             if let Ok(first) = show_fork_frame(&me, &sock, &desc, &active, "", "", false).await {
+                phase("first show");
                 let win = u64_of(&first["message"]["frame"]["window"]);
                 if win > 0 {
                     tokio::time::sleep(Duration::from_millis(1150)).await;
@@ -1802,6 +1957,8 @@ async fn spawn_gui_session(
         // the chords KiCad hands to Backplane, with Ctrl+; for a comment (comment.rs)
         let rk = raw_on(&me, &sock, &desc, "kiapi.backplane.embed.SetReservedKeys", json!({"chords": super::comment::RESERVED}), 5000).await;
         eprintln!("kicad embed: reserved keys {}", if rk["ok"] == true { rk["message"]["chords"].to_string() } else { format!("refused: {}", rk["error"]) });
+        phase("ready");
+        eprintln!("kicad embed: running {version} ({})", argv.first().map(String::as_str).unwrap_or(""));
         let _ = me.send(Msg::Ready { pro, gen, sock, version, holder, events_sock, ev_since, frames, spawn_container, spawn_active: active });
     } else {
         if let Some(act) = stock_action_for(&active) {
@@ -1846,6 +2003,12 @@ fn spawn_fork_events_loop(me: mpsc::UnboundedSender<Msg>, pro: String, gen: u64,
                     if super::comment::on_event(&pro, ev) { continue }
                     if super::progress::on_event(&pro, ev) { continue }
                     if super::coedit::on_event(ev) { continue }
+                    if matches!(ty, "ET_DIALOG_OPENED" | "ET_DIALOG_CLOSED") || matches!(ty_n, 10 | 11) {
+                        let open = ty == "ET_DIALOG_OPENED" || ty_n == 10;
+                        let title = ev["detail"].as_str().unwrap_or("").to_string();
+                        if me.send(Msg::Dialog { pro: pro.clone(), gen, open, title }).is_err() { return }
+                        continue
+                    }
                     if ty == "ET_SHOW_REQUESTED" || ty_n == 9 {
                         show_req = Some(kind_of_fk_val(&ev["frame"]["kind"]).to_string());
                     } else if matches!(ty, "ET_FRAME_OPENED" | "ET_FRAME_CLOSED" | "ET_FRAME_SHOWN" | "ET_FRAME_HIDDEN"
@@ -1873,7 +2036,11 @@ pub fn start(hub: &Arc<Hub>) {
     let info_hub = hub.clone();
     tokio::spawn(async move {
         while let Some((k, v, ack)) = info_rx.recv().await {
+            let t = std::time::Instant::now();
+            if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("kicad embed: publish {k} {}", v.chars().take(400).collect::<String>()); }
             info_hub.set_info(&k, &v).await;
+            if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("kicad embed: published {k} in {} ms", t.elapsed().as_millis()); }
+            if t.elapsed() > Duration::from_millis(100) { eprintln!("kicad embed: publishing {k} took {} ms", t.elapsed().as_millis()); }
             if let Some(a) = ack { let _ = a.send(()); }
         }
     });
@@ -1904,6 +2071,8 @@ const METHODS: &[&str] = &[
     "editor.kicad.touched",
     "editor.kicad.theme",
     "editor.kicad.prewarm",
+    "editor.kicad.warm",
+    "editor.kicad.dialogs",
 ];
 
 fn ok_reply(id: &Value, payload: Value) -> Vec<Value> {
@@ -1971,6 +2140,11 @@ impl RpcHandler for EmbedRpc {
                 let o = gui_call(&gui, "kiapi.backplane.embed.SetTheme", json!({"mode": theme_mode(mode)})).await;
                 return if o["ok"].as_bool().unwrap_or(false) { ok_reply(id, json!({"applied": true, "theme": o["message"].clone()})) } else { err_reply(id, &format!("SetTheme: {}", o["error"].as_str().unwrap_or(""))) }
             }
+            if method == "editor.kicad.dialogs" {
+                let open: Vec<String> = p["open"].as_array().into_iter().flatten().filter_map(|t| t.as_str().map(String::from)).take(8).collect();
+                let _ = actor_tx.send(Msg::ClientDialogs { pro: resolved.pro, open });
+                return ok_reply(id, json!({}))
+            }
             if method == "editor.kicad.touched" { unsaved_update(&resolved.pro, |u| u.touched()); return ok_reply(id, json!({})) }
             let (tx, rx) = oneshot::channel();
             let sent = match method {
@@ -1993,6 +2167,17 @@ impl RpcHandler for EmbedRpc {
                     let focus = p["focus"].as_bool().unwrap_or(false);
                     actor_tx.send(Msg::Show {
                         client, pro: resolved.pro, frame: resolved.frame, doc, item, remount, focus, reply: tx,
+                    })
+                }
+                "editor.kicad.warm" => {
+                    // BACKPLANE_KICAD_WARM=0: never (the perf e2e measures a true cold Edit with it)
+                    if std::env::var("BACKPLANE_KICAD_WARM").is_ok_and(|v| v == "0") { return ok_reply(id, json!({"warm": false, "why": "off"})) }
+                    let hardware = super::canonical::hardware(&resolved.root);
+                    let locked = project_locked(&resolved.files);
+                    let display = p["display"].as_str().unwrap_or("").to_string();
+                    let env = ipc::runtime(hub).await;
+                    actor_tx.send(Msg::Warm {
+                        client, pro: resolved.pro, root: resolved.root, files: resolved.files, frame: resolved.frame, display, hardware, locked, env, reply: tx,
                     })
                 }
                 "editor.kicad.detach" => {
@@ -2070,6 +2255,29 @@ mod tests {
 
     use super::*;
 
+    #[test] fn a_realized_frame_is_shown_by_the_client_with_no_round_trip() {
+        let mut s = Session::new("/p/a.kicad_pro", "/p", "fork", "SCH", 1, 0).ready("/s", "", 0);
+        let f = |kind: &str, realized: bool| Frame { kind: kind.into(), doc: String::new(), title: String::new(), modified: false, shown: false, realized, xid: 7, min_w: 0, min_h: 0 };
+        s.frames = vec![f("PCB", true), f("SCH", true)];
+        assert!(!local_switch(&s, false, true), "a runtime that does not map locally");
+        assert!(local_switch(&s, true, true));
+        assert!(!local_switch(&s, true, false), "a document, item or remount goes to KiCad");
+        s.frames = vec![f("PCB", true), f("SCH", false)];
+        assert!(!local_switch(&s, true, true), "never shown: KiCad's first show (GTK)");
+    }
+
+    #[test] fn kicads_own_dialogs_are_published_until_they_close() {
+        let s = Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 1, 0).dialog(true, "Load Schematic").dialog(true, "Information");
+        assert_eq!(s.info_json()["dialogs"], json!(["Load Schematic", "Information"]), "innermost last");
+        let s = s.dialog(false, "Load Schematic");
+        assert_eq!(s.dialogs, ["Information"], "closed by title, whatever the order");
+        let s = s.dialog(false, "");
+        assert!(s.dialogs.is_empty(), "an untitled close closes the innermost");
+        assert!(Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 1, 0).dialog(true, "x").failed("gone").dialogs.is_empty(), "a dead KiCad has none");
+        let asking = Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 1, 0).ready("/s", "", 0).dialog(true, "Information");
+        assert_eq!(asking.ping_result(false).ping_result(false).ping_result(false).state, "ready", "a dialog open: missed pings are not a hang");
+    }
+
     #[test] fn pure_frame_and_mode_rules() {
         assert_eq!(canon_frame(""), "PCB");
         assert_eq!(canon_frame("0"), "PCB");
@@ -2135,6 +2343,55 @@ mod tests {
 
         let clean = s.exited(0, "");
         assert_eq!(clean.state, "stopped");
+    }
+
+    #[test] fn a_shown_project_is_kept_warm_within_the_cap_memory_and_locks() {
+        let ready = |p: &str, t: u64, cont: u64| { let mut s = Session::new(p, "/p", "fork", "PCB", 1, t).ready("/s", "", t); s.container = cont; (p.to_string(), s) };
+        let cfg = WarmCfg { max: 2, idle_s: 1800, kicad_mb: 2000, headroom_mb: 1000 };
+        let empty = HashMap::new();
+        assert_eq!(warm_decision(&empty, "/p/a.kicad_pro", true, false, Some(8000), true, cfg), Warm::Start { evict: None });
+        assert_eq!(warm_decision(&empty, "/p/a.kicad_pro", true, false, None, true, cfg), Warm::Start { evict: None }, "memory unknown: enough");
+        assert!(matches!(warm_decision(&empty, "/p/a.kicad_pro", false, false, Some(8000), true, cfg), Warm::No(_)), "not hardware");
+        assert!(matches!(warm_decision(&empty, "/p/a.kicad_pro", true, true, Some(8000), true, cfg), Warm::No(_)), "locked by another KiCad: its dialog would come up");
+        assert!(matches!(warm_decision(&empty, "/p/a.kicad_pro", true, false, Some(2900), true, cfg), Warm::No(_)), "less than a KiCad and the headroom");
+        assert!(matches!(warm_decision(&empty, "/p/a.kicad_pro", true, false, Some(8000), false, cfg), Warm::No(_)), "a runtime that shows its load windows is never warmed");
+        // a KiCad measured running sets the cost of the next: 5 GB measured, 6 GB free is not enough for another
+        let mut big = Session::new("/p/b.kicad_pro", "/p", "fork", "PCB", 1, 0).ready("/s", "", 0); big.container = 3; big.rss_mb = 5000;
+        let m: HashMap<String, Session> = [("/p/b.kicad_pro".to_string(), big)].into_iter().collect();
+        assert_eq!(kicad_cost_mb(&m, cfg), 5000);
+        assert!(matches!(warm_decision(&m, "/p/a.kicad_pro", true, false, Some(5500), true, cfg), Warm::No(_)));
+        assert_eq!(warm_decision(&m, "/p/a.kicad_pro", true, false, Some(6500), true, cfg), Warm::Start { evict: None });
+        let m: HashMap<String, Session> = [ready("/p/a.kicad_pro", 10, 0)].into_iter().collect();
+        assert_eq!(warm_decision(&m, "/p/a.kicad_pro", true, true, Some(100), true, cfg), Warm::Have, "ours already: its own lock and memory do not count");
+        // at the cap: the oldest clean one in no pane makes room; none such: refused (never a 3rd)
+        let m: HashMap<String, Session> = [ready("/p/a.kicad_pro", 10, 0), ready("/p/b.kicad_pro", 5, 0)].into_iter().collect();
+        assert_eq!(warm_decision(&m, "/p/c.kicad_pro", true, false, Some(8000), true, cfg), Warm::Start { evict: Some("/p/b.kicad_pro".into()) });
+        let m: HashMap<String, Session> = [ready("/p/a.kicad_pro", 10, 7), ready("/p/b.kicad_pro", 5, 9)].into_iter().collect();
+        assert!(matches!(warm_decision(&m, "/p/c.kicad_pro", true, false, Some(8000), true, cfg), Warm::No(_)), "both in panes");
+        // the person closed KiCad, or it failed: Edit starts it, not a pre-warm
+        let closed = Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 1, 0).exited(0, "");
+        let failed = Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 1, 0).failed("x");
+        for s in [closed, failed] { let m: HashMap<String, Session> = [("/p/a.kicad_pro".to_string(), s)].into_iter().collect(); assert!(matches!(warm_decision(&m, "/p/a.kicad_pro", true, false, Some(8000), true, cfg), Warm::No(_))); }
+        // evicted for room (closing): warm again later
+        let mut ev = Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 1, 0); ev.closing = true; let ev = ev.exited(0, "");
+        let m: HashMap<String, Session> = [("/p/a.kicad_pro".to_string(), ev)].into_iter().collect();
+        assert_eq!(warm_decision(&m, "/p/a.kicad_pro", true, false, Some(8000), true, cfg), Warm::Start { evict: None });
+    }
+
+    #[test] fn idle_kicads_in_no_pane_close_after_the_idle_time() {
+        let mk = |p: &str, t: u64, cont: u64, modified: bool| { let mut s = Session::new(p, "/p", "fork", "PCB", 1, t).ready("/s", "", t); s.container = cont;
+            if modified { s.frames.push(Frame { kind: "PCB".into(), doc: p.into(), title: String::new(), modified: true, shown: true, realized: true, xid: 1, min_w: 0, min_h: 0 }); } (p.to_string(), s) };
+        let m: HashMap<String, Session> = [mk("/p/old.kicad_pro", 0, 0, false), mk("/p/new.kicad_pro", 1500, 0, false), mk("/p/pane.kicad_pro", 0, 5, false), mk("/p/dirty.kicad_pro", 0, 0, true)].into_iter().collect();
+        assert_eq!(idle_victims(&m, 1800, 1800), ["/p/old.kicad_pro"]);
+    }
+
+    #[test] fn a_kicad_lock_file_beside_the_project_counts() {
+        let d = std::env::temp_dir().join(format!("bp-warm-lock-{}", std::process::id())); std::fs::create_dir_all(&d).unwrap();
+        let f = Files { pro: d.join("a.kicad_pro").to_string_lossy().into(), pcb: d.join("a.kicad_pcb").to_string_lossy().into(), sch: String::new(), all: vec![] };
+        assert!(!project_locked(&f));
+        std::fs::write(d.join("~a.kicad_pcb.lck"), "{}").unwrap();
+        assert!(project_locked(&f));
+        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test] fn warm_eviction_picks_oldest_detached_clean_session() {
