@@ -81,8 +81,11 @@ does; the gate box installs that archive through it. Builds from this desktop do
 
 - **Before a release**: `scripts/bare-gate.sh --commit <the release commit>`; a FAIL holds the release.
 - **After a release**: `scripts/bare-gate.sh` (the published one, as a person gets it).
-- **Nightly** from this machine: `scripts/bare-gate.sh --commit origin/main`, the log kept by the caller (a timer the person installs; agents
-  never start timers on the person's machine).
+- **Nightly** from this machine: `scripts/bare-gate-nightly.sh install <lead thread id>` (the person runs it once: a user systemd timer at
+  03:30; agents never start timers on the person's machine). Each night it runs `--commit origin/main` from a worktree of its own
+  (`.backplane/worktrees/bare-nightly`), skips when under 20 GB are free, writes `$BP_TMP/bare-nightly/<date>/` and `~/.cache/bare-nightly.last`,
+  and only on a FAIL posts the failed checks and paper cuts to that thread through this machine's hub, as a paired client does
+  (`BACKPLANE_NIGHTLY_HOME`, default `~/.backplane-gpui-fresh/home`). `status` and `uninstall` too.
 Boats cost while they run: the gate deletes its gate box and its build box on every exit (`--keep` leaves the gate box, named in the output).
 
 ## Covered so far, and next
