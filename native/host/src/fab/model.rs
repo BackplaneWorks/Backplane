@@ -185,6 +185,11 @@ impl Profile {
     }
 }
 
+/// How old a value may be (days since it was read off the fab's page) before it counts as stale: the bundled baseline's test fails
+/// past it (a new, copy or offline hub designs against the baseline until its first refresh) and the review notes a stale value it uses.
+pub const MAX_AGE_DAYS: i64 = 120;
+/// "2026-11-12" as days since 1970-01-01 (UTC).
+pub fn day(s: &str) -> i64 { let n = |a: usize, k: usize| s.get(a..a + k).and_then(|x| x.parse().ok()).unwrap_or(0); crate::google::cal::days(n(0, 4), n(5, 2), n(8, 2)) }
 /// The values that hold for one board: per key the free one and the one that costs more (either may be missing).
 #[derive(Clone, Debug, PartialEq)]
 pub struct Sel { pub key: String, pub free: Option<Limit>, pub extra: Option<Limit>, pub inherited: bool }
@@ -310,24 +315,19 @@ mod tests {
         }
         for s in &p.stackups { assert!(s.source.starts_with("https://") && s.fetched.len() == 10, "{}", s.id); let t: f64 = s.seq.iter().map(|p| p.thickness_mm).sum(); assert!((t - s.thickness_mm).abs() <= 0.2, "{} adds up to {t}", s.id) }
     }
-    /// How old a bundled value may be before this test fails: a hub refreshes its own copy daily, but a new install, a copy hub and
-    /// an offline one design against the bundled baseline until then. Read the pages again (fab_gather_live_refresh) and bring the
-    /// baseline up to date before it runs out.
-    const BASELINE_MAX_AGE_DAYS: i64 = 120;
-    fn day(s: &str) -> i64 { let n = |a: usize, k: usize| s.get(a..a + k).and_then(|x| x.parse().ok()).unwrap_or(0); crate::google::cal::days(n(0, 4), n(5, 2), n(8, 2)) }
     #[test] fn fab_model_no_baseline_value_is_older_than_its_bound() {
         let today = day(&super::super::gather::today());
         let mut old = vec![];
         for (fab, text) in super::super::store::BASELINE {
             let p = Profile::parse(text).unwrap();
             let dates = p.all().into_iter().map(|(at, l)| (format!("{at} {}", l.key), l.fetched.clone())).chain(p.stackups.iter().map(|s| (format!("stackup {}", s.id), s.fetched.clone())));
-            for (what, d) in dates { let age = today - day(&d); if age > BASELINE_MAX_AGE_DAYS { old.push(format!("{fab} {what}: read {d}, {age} days ago")) } }
+            for (what, d) in dates { let age = today - day(&d); if age > MAX_AGE_DAYS { old.push(format!("{fab} {what}: read {d}, {age} days ago")) } }
         }
-        assert!(old.is_empty(), "{} bundled values are older than {BASELINE_MAX_AGE_DAYS} days; read the fab's pages again (FAB_LIVE_HOME=<temp home> cargo test fab_gather_live_refresh -- --ignored) and update fab/baseline/:\n{}", old.len(), old.join("\n"));
+        assert!(old.is_empty(), "{} bundled values are older than {MAX_AGE_DAYS} days; read the fab's pages again (FAB_LIVE_HOME=<temp home> cargo test fab_gather_live_refresh -- --ignored) and update fab/baseline/:\n{}", old.len(), old.join("\n"));
     }
     #[test] fn fab_model_the_age_bound_sees_an_old_date() {
         assert_eq!(day("2026-11-12") - day("2026-07-15"), 120); assert_eq!(day("2027-03-12") - day("2026-11-12"), 120);
-        assert!(day("2026-11-12") - day("2026-07-14") > BASELINE_MAX_AGE_DAYS);
+        assert!(day("2026-11-12") - day("2026-07-14") > MAX_AGE_DAYS);
     }
     #[test] fn fab_model_the_tier_follows_layers_copper_and_cost() {
         let p = baseline();
