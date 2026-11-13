@@ -82,6 +82,13 @@
    "what": "a reserved chord pressed while a KiCad menu holds the keyboard closes the menu and reaches Backplane (embed-popup-keys)"
   },
   {
+   "re": "^switch_shows_the_asked_frame$",
+   "field": "ok",
+   "min": 1,
+   "strict": true,
+   "what": "every editor switch ends with the asked-for frame on show at the pane (not a frame made and left hidden)"
+  },
+  {
    "re": "^thread(_side)?_back\\d_away_ok$",
    "field": "ok",
    "min": 1,
