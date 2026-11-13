@@ -102,7 +102,7 @@ impl Peering {
             let mut g = self.flow.inner.lock().unwrap(); self.sweep(&mut g);
             if g.incoming.iter().filter(|x| x.state == In::Pending).count() >= MAX_PENDING { return text("429 Too Many Requests", "too many requests are waiting: answer them first") }
         }
-        let claim = self.reg.machine_claim(&code);
+        let claim = self.reg.machine_claim(&r.peer, &code);
         if claim["ok"] != true { let (st, why) = claim_reason(claim["error"].as_str().unwrap_or("")); return text(st, why) }
         let (id, poll) = (hex::encode(urandom(8)), hex::encode(urandom(16)));
         let shown = if name.is_empty() { machines::hostport(&url).to_string() } else { name };

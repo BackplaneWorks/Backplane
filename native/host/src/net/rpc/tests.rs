@@ -127,7 +127,7 @@ async fn signed(from: &Node, to: &Node, link: &str, body: Value) -> botnet::Resp
 }
 #[tokio::test] async fn far_a_hub_on_a_copy_takes_no_far_rpc() {
     let (a, fa) = side("ra8", true, false).await;
-    let p = PReq { method: "POST".into(), target: "/far/rpc".into(), headers: vec![], body: b"{}".to_vec(), trusted: false, own_device: false };
+    let p = PReq { method: "POST".into(), target: "/far/rpc".into(), headers: vec![], body: b"{}".to_vec(), trusted: false, own_device: false , peer: String::new()};
     let r = serve_with(true, &fa, &a.hub, &p).await;
     assert_eq!(r.status, "403 Forbidden"); assert_eq!(String::from_utf8_lossy(&r.body), "a hub on a copied log does not take /far/rpc");
     // (not left to the missing secret: the same request without the gate is refused for another reason)

@@ -48,8 +48,8 @@ pub(crate) async fn node_extra(tag: &str, trusted: bool, own_device: bool, extra
             let head = String::from_utf8_lossy(&buf[..head_end - 4]).to_string(); let mut lines = head.lines();
             let first: Vec<&str> = lines.next().unwrap_or("").split(' ').collect();
             let headers = lines.filter_map(|l| l.split_once(':').map(|(k, v)| (k.trim().to_string(), v.trim().to_string()))).collect();
-            let req = PReq { method: first[0].into(), target: first.get(1).unwrap_or(&"/").to_string(), headers, body: buf[head_end..].to_vec(), trusted, own_device };
-            let via = match &ex { Some(f) => f(h.clone(), PReq { method: req.method.clone(), target: req.target.clone(), headers: req.headers.clone(), body: req.body.clone(), trusted: req.trusted, own_device: req.own_device }).await, None => None };
+            let req = PReq { method: first[0].into(), target: first.get(1).unwrap_or(&"/").to_string(), headers, body: buf[head_end..].to_vec(), trusted, own_device, peer: String::new() };
+            let via = match &ex { Some(f) => f(h.clone(), PReq { method: req.method.clone(), target: req.target.clone(), headers: req.headers.clone(), body: req.body.clone(), trusted: req.trusted, own_device: req.own_device , peer: String::new()}).await, None => None };
             let rep = match via { Some(r) => r, None => match p.handle(&h, &req).await { Some(r) => r, None => HttpReply::text("404 Not Found", "not found") } };
             let _ = s.write_all(format!("HTTP/1.1 {}\r\nContent-Type: {}\r\nContent-Length: {}\r\nConnection: close\r\n{}\r\n", rep.status, rep.ctype, rep.body.len(), rep.extra).as_bytes()).await;
             let _ = s.write_all(&rep.body).await;
@@ -95,7 +95,7 @@ pub(crate) async fn settle() { for _ in 0..50 { tokio::time::sleep(std::time::Du
     let a = node("a8", false).await;
     let secret = botnet::fresh_secret(); assert!(botnet::peer_save(&a.home, "p1", &secret));
     let now = (a.p.now)();
-    let req = |ts: u64, sig: Option<String>, body: &str| PReq { method: "POST".into(), target: "/x".into(), trusted: false, own_device: false, body: body.as_bytes().to_vec(),
+    let req = |ts: u64, sig: Option<String>, body: &str| PReq { method: "POST".into(), target: "/x".into(), trusted: false, own_device: false, peer: String::new(), body: body.as_bytes().to_vec(),
         headers: vec![("X-Backplane-Peer".into(), "p1".into()), ("X-Backplane-Timestamp".into(), ts.to_string()), ("X-Backplane-Signature".into(), sig.unwrap_or_else(|| sign::header(&secret, ts, body)))] };
     assert_eq!(a.p.signed_in("deliver", &req(now, None, "{}")).ok().unwrap(), "p1");
     assert_eq!(a.p.signed_in("deliver", &req(now, None, "{}")).unwrap_err().body, b"already seen");

@@ -6,7 +6,7 @@ async fn until<F: Fn() -> bool>(f: F) -> bool { for _ in 0..100 { if f() { retur
 fn pending(n: &Node) -> Vec<Value> { n.p.page_data()["requests"].as_array().cloned().unwrap_or_default() }
 fn live(n: &Node) -> Vec<String> { n.p.table.with(|p| p.live().into_iter().map(|x| x.id).collect()) }
 fn own(n: &Node, id: &str) -> String { n.p.table.with(|p| p.own_how(id).to_string()) }
-fn req(body: Value) -> PReq { PReq { method: "POST".into(), target: "/bots/pair/request".into(), headers: vec![], body: body.to_string().into_bytes(), trusted: false, own_device: false } }
+fn req(body: Value) -> PReq { PReq { method: "POST".into(), target: "/bots/pair/request".into(), headers: vec![], body: body.to_string().into_bytes(), trusted: false, own_device: false , peer: String::new()} }
 fn clocked(n: &Node, host: &str, t: Arc<AtomicU64>) -> Peering {
     Peering::new(n.home.clone(), n.p.reg.clone(), n.p.table.clone(), n.p.routes.clone(), false, host, n.port).with_clock(Box::new(move || t.load(SeqCst)))
 }

@@ -23,9 +23,9 @@ fn routes() -> Vec<String> { vec!["https://m.tail.ts.net".into()] }
     let inv = r.create(&routes());
     let link = inv["link"].as_str().unwrap();
     let secret = link.split("invite=").nth(1).unwrap().split('&').next().unwrap();
-    let dev = r.enroll(secret, "Phone");
+    let dev = r.enroll("t", secret, "Phone");
     assert_eq!(dev["token"].as_str().unwrap().len(), 32);
-    assert_eq!(r.enroll(secret, "Again")["error"], "used_code", "an invitation enrolls once");
+    assert_eq!(r.enroll("t", secret, "Again")["error"], "used_code", "an invitation enrolls once");
     assert_eq!(r.resolve(dev["token"].as_str().unwrap(), 1, "/x"), dev["token"].as_str().unwrap());
 }
 #[test] fn pair_code_matches_secret_forms() {
@@ -33,26 +33,50 @@ fn routes() -> Vec<String> { vec!["https://m.tail.ts.net".into()] }
     let inv = r.create(&routes());
     let code = inv["code"].as_str().unwrap().to_lowercase();
     let spaced = format!("{}-{}", &code[..4], &code[4..]);
-    assert!(r.enroll(&spaced, "x")["token"].is_string(), "the short code is typed in any case, with a dash or a space");
+    assert!(r.enroll("t", &spaced, "x")["token"].is_string(), "the short code is typed in any case, with a dash or a space");
 }
 #[test] fn pair_unknown_and_expired_and_revoked() {
     let e = Env::new("states"); let r = e.reg();
-    assert_eq!(r.enroll("nope", "x")["error"], "wrong_code");
+    assert_eq!(r.enroll("t", "nope", "x")["error"], "wrong_code");
     let a = r.create(&routes()); let code_a = a["code"].as_str().unwrap().to_string();
     e.advance(600_001);
-    assert_eq!(r.enroll(&code_a, "x")["error"], "expired_code");
+    assert_eq!(r.enroll("t", &code_a, "x")["error"], "expired_code");
     let b = r.create(&routes()); let id_b = b["id"].as_str().unwrap().to_string(); let code_b = b["code"].as_str().unwrap().to_string();
     assert_eq!(r.uninvite(&id_b)["ok"], true);
-    assert_eq!(r.enroll(&code_b, "x")["error"], "revoked_code");
+    assert_eq!(r.enroll("t", &code_b, "x")["error"], "revoked_code");
 }
-#[test] fn pair_guessing_is_bounded_hub_wide() {
+#[test] fn pair_guessing_is_bounded_per_client() {
     let e = Env::new("rate"); let r = e.reg();
-    for _ in 0..10 { assert_eq!(r.enroll("guess", "x")["error"], "wrong_code"); }
-    assert_eq!(r.enroll("guess", "x")["error"], "rate_limited");
+    for _ in 0..10 { assert_eq!(r.enroll("t", "guess", "x")["error"], "wrong_code"); }
+    assert_eq!(r.enroll("t", "guess", "x")["error"], "rate_limited");
     let inv = r.create(&routes());
-    assert_eq!(r.enroll(inv["code"].as_str().unwrap(), "x")["error"], "rate_limited", "even the right code waits");
+    assert_eq!(r.enroll("t", inv["code"].as_str().unwrap(), "x")["error"], "rate_limited", "even the right code waits");
     e.advance(60_001);
-    assert!(r.enroll(inv["code"].as_str().unwrap(), "x")["token"].is_string());
+    assert!(r.enroll("t", inv["code"].as_str().unwrap(), "x")["token"].is_string());
+}
+#[test] fn pair_one_client_cannot_rate_limit_another() {
+    let e = Env::new("rate-each"); let r = e.reg();
+    for _ in 0..10 { assert_eq!(r.enroll("1.1.1.1", "guess", "x")["error"], "wrong_code"); }
+    assert_eq!(r.enroll("1.1.1.1", "guess", "x")["error"], "rate_limited");
+    let inv = r.create(&routes());
+    assert!(r.enroll("2.2.2.2", inv["code"].as_str().unwrap(), "x")["token"].is_string(), "another address still pairs");
+    for _ in 0..10 { assert_eq!(r.machine_claim("1.1.1.1", "guess")["error"], "wrong_code"); }
+    assert_eq!(r.machine_claim("1.1.1.1", "guess")["error"], "rate_limited");
+    assert_eq!(r.machine_claim("2.2.2.2", "guess")["error"], "wrong_code", "claims are kept per client too");
+}
+#[test] fn pair_hub_wide_cap_backstops_many_clients() {
+    let e = Env::new("rate-all"); let r = e.reg();
+    for i in 0..super::GUESS_ALL { assert_eq!(r.enroll(&format!("10.0.0.{i}"), "guess", "x")["error"], "wrong_code"); }
+    assert_eq!(r.enroll("192.168.0.1", "guess", "x")["error"], "rate_limited", "a fresh address meets the hub-wide cap");
+    e.advance(60_001);
+    assert_eq!(r.enroll("192.168.0.1", "guess", "x")["error"], "wrong_code");
+}
+#[test] fn pair_budget_map_prunes_expired_clients() {
+    let mut b = super::Budget::default();
+    for i in 0..50 { assert!(b.take(&format!("c{i}"), 1000)); }
+    assert_eq!(b.by.len(), 50);
+    assert!(b.take("late", 1000 + 60_001));
+    assert_eq!((b.by.len(), b.all.len()), (1, 1), "expired clients leave the map");
 }
 #[test] fn pair_open_invitations_are_capped() {
     let e = Env::new("cap"); let r = e.reg();
@@ -71,7 +95,7 @@ fn routes() -> Vec<String> { vec!["https://m.tail.ts.net".into()] }
 #[test] fn pair_revoked_device_stops_and_its_clients_are_named() {
     let e = Env::new("revoke"); let r = e.reg();
     let inv = r.create(&routes());
-    let dev = r.enroll(inv["code"].as_str().unwrap(), "Phone");
+    let dev = r.enroll("t", inv["code"].as_str().unwrap(), "Phone");
     let (tok, id) = (dev["token"].as_str().unwrap().to_string(), dev["id"].as_str().unwrap().to_string());
     assert_eq!(r.resolve(&tok, 7, "/ws"), tok);
     assert!(r.active(7));
@@ -84,7 +108,7 @@ fn routes() -> Vec<String> { vec!["https://m.tail.ts.net".into()] }
 #[test] fn pair_revoking_a_used_invitation_revokes_its_device() {
     let e = Env::new("uninv"); let r = e.reg();
     let inv = r.create(&routes());
-    let dev = r.enroll(inv["code"].as_str().unwrap(), "Phone"); let tok = dev["token"].as_str().unwrap().to_string();
+    let dev = r.enroll("t", inv["code"].as_str().unwrap(), "Phone"); let tok = dev["token"].as_str().unwrap().to_string();
     r.resolve(&tok, 3, "/ws");
     let out = r.uninvite(inv["id"].as_str().unwrap());
     assert_eq!(out["clients"], json!([3]));
@@ -93,7 +117,7 @@ fn routes() -> Vec<String> { vec!["https://m.tail.ts.net".into()] }
 }
 #[test] fn pair_registry_survives_a_restart_and_keeps_hashes_only() {
     let e = Env::new("persist"); let tok;
-    { let r = e.reg(); let inv = r.create(&routes()); tok = r.enroll(inv["code"].as_str().unwrap(), "Phone")["token"].as_str().unwrap().to_string(); }
+    { let r = e.reg(); let inv = r.create(&routes()); tok = r.enroll("t", inv["code"].as_str().unwrap(), "Phone")["token"].as_str().unwrap().to_string(); }
     let text = std::fs::read_to_string(e.dir.join("devices-v1.json")).unwrap();
     assert!(!text.contains(&tok), "the credential is not stored");
     assert!(text.contains(&digest(&tok)));
@@ -130,7 +154,7 @@ fn routes() -> Vec<String> { vec!["https://m.tail.ts.net".into()] }
     assert_eq!(r.machine("nope")["error"], "invalid_request");
     let m = r.machine("p0123456789abcdef"); assert_eq!(m["ok"], true);
     assert_eq!(r.machine("p0123456789abcdef")["error"], "invalid_request", "one invite per link");
-    assert_eq!(r.enroll("anything", "x")["error"], "wrong_code");
+    assert_eq!(r.enroll("t", "anything", "x")["error"], "wrong_code");
     assert_eq!(r.link("p0123456789abcdef", "desk")["ok"], true);
     assert_eq!(r.link("p0123456789abcdef", "desk")["error"], "used_code");
     assert_eq!(r.link("pffffffffffffffff", "x")["error"], "unknown_invitation");
@@ -181,7 +205,7 @@ fn routes() -> Vec<String> { vec!["https://m.tail.ts.net".into()] }
 }
 #[test] fn pair_unwritable_stamp_refuses_the_device() {
     let e = Env::new("stamp"); let r = e.reg();
-    let inv = r.create(&routes()); let tok = r.enroll(inv["code"].as_str().unwrap(), "P")["token"].as_str().unwrap().to_string();
+    let inv = r.create(&routes()); let tok = r.enroll("t", inv["code"].as_str().unwrap(), "P")["token"].as_str().unwrap().to_string();
     e.advance(61_000);
     // the folder can no longer take a new file: the stamp cannot be written
     std::fs::remove_dir_all(&e.dir).unwrap();

@@ -126,7 +126,7 @@ impl AuthRoutes {
         };
         let https = req.header("origin").starts_with("https://") || (req.header("origin").is_empty() && req.header("x-backplane-scheme") == "https");
         let j = match op {
-            "enroll" => self.reg.enroll(&secret, req.header("x-backplane-name")),
+            "enroll" => self.reg.enroll(&peer_key(req.peer), &secret, req.header("x-backplane-name")),
             "list" => self.devices(),
             "lan-on" | "lan-off" => self.lan_set(&secret, op == "lan-on"),
             "revoke" => self.reg.revoke(&secret),
@@ -322,3 +322,6 @@ mod tests {
         let _ = std::fs::remove_dir_all(dir);
     }
 }
+
+/// The client address a pairing budget is kept by (IPv4-mapped IPv6 as IPv4); empty when the socket's peer is unknown.
+pub fn peer_key(p: Option<std::net::SocketAddr>) -> String { p.map(|a| a.ip().to_canonical().to_string()).unwrap_or_default() }
