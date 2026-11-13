@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """The real-use table: one row per measure, one column per board x runtime, each value against its budget.
   real_use_table.py ROOT [--strict]    reads ROOT/<board>-<runtime>/real_use.json; writes ROOT/summary.json; prints markdown
---strict (KEMBED_REAL_STRICT=1, or "strict": true in real_use_budgets.json) exits 1 when a budgeted value misses."""
+Exits 1 on a miss of a budget marked "strict": true (marked ✗✗), or on any miss with --strict (KEMBED_REAL_STRICT=1, or top-level
+"strict": true in real_use_budgets.json)."""
 import glob, json, os, re, sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 CFG = json.load(open(os.path.join(HERE, "..", "real_use_budgets.json")))
-BUDGETS = [(b["re"], b["field"], b.get("max"), b["what"], b.get("min")) for b in CFG["budgets"]]
+BUDGETS = [(b["re"], b["field"], b.get("max"), b["what"], b.get("min"), b.get("strict") is True) for b in CFG["budgets"]]
 
 def main():
     root = sys.argv[1]; strict = "--strict" in sys.argv or os.environ.get("KEMBED_REAL_STRICT") == "1" or CFG.get("strict") is True
@@ -32,17 +33,23 @@ def main():
         if v.get("p50") is not None: s += f" p50 {v['p50']}"
         for k in ("mb", "resizes", "ok"):
             if v.get(k) is not None and v.get("ms") is None: s = f"{k} {v[k]}" + (f" hwm {v['hwm_mb']}" if v.get("hwm_mb") else "")
-        for rx, field, lim, what, low in BUDGETS:
+        marked = False
+        for rx, field, lim, what, low, hard in BUDGETS:
             if re.search(rx, name):
                 x = v.get(field)
                 bad = x is None or (isinstance(x, (int, float)) and x < 0 and low is None) or (lim is not None and x > lim) or (low is not None and x < low)
-                if bad: s += " ✗"; misses.append((run, name, field, x, lim if low is None else low, what)); break
+                if bad:
+                    if not marked: s += " ✗✗" if hard else " ✗"; marked = True
+                    misses.append((run, name, field, x, lim if low is None else low, what, hard))
         return s
     for n in names: print(f"| {n} | " + " | ".join(cell(c, n) for c in cols) + " |")
     for c in cols:
         for d in runs[c].get("dialogs", []): print(f"dialog {c}: {d['title']}")
     json.dump({"runs": runs, "misses": misses}, open(os.path.join(root, "summary.json"), "w"), indent=1)
-    print(f"budget misses: {len(misses)}")
-    return 1 if strict and misses else 0
+    hard = [m for m in misses if m[6]]
+    for m in hard: print(f"STRICT MISS {m[0]} {m[1]}: {m[2]}={m[3]} (limit {m[4]}: {m[5]})")
+    print(f"budget misses: {len(misses)} (strict: {len(hard)})")
+    # a budget marked "strict" fails the run on its own (met once, it must not regress); the rest fail only under --strict
+    return 1 if hard or (strict and misses) else 0
 
 if __name__ == "__main__": sys.exit(main())

@@ -56,11 +56,38 @@ Not yet: schematic-to-board cross-probe by a click, DRC/ERC/Gerbers, hierarchica
 
 ## Budgets
 
-`test/kicad_embed/real_use_budgets.json` (non-strict: misses print; `"strict": true` once lane B meets them). Proposed and corrected from the
+`test/kicad_embed/real_use_budgets.json`. A budget marked `"strict": true` was met on real hardware and fails `real_use_all.sh` on any miss (✗✗ in the table, `STRICT MISS` lines): since 05d847f1e, reopen (300 ms, no blank frame), no blank frame in a later tab switch or a thread switch, and the thread keeping its editor. The rest print only (first Edit, first Schematic, first 3D among them). Proposed and corrected from the
 hardware: first paint warm (reopen) <= 300 ms with no blank frame; cold <= 2.5 s; tab or thread switch <= 50 ms click to settled with no blank
 frame; pan/zoom p99 interval <= 25 ms and no frame > 50 ms (the display is 60 Hz: a perfect pan is 16.7 ms a frame, and 1 to 2 ms of sampling
 jitter puts p99 near 20, so 16 could never pass); routing and dragging no frame > 50 ms; agent commit to repaint <= 100 ms; cross-probe <= 100 ms;
 save written and clean <= 300 ms; comment posted <= 300 ms; no KiCad dialog during the journeys; the editor still there after each journey.
+
+## Numbers after lane B's 05d847f1e (2026-11-12, matrix `realuse-m4`, final bp.12 e14e66be, both boards)
+
+Pixel-based, client built at 05d847f1e. Lane B's figures (their run of this harness on Hubble_DK bp.12) beside mine.
+
+| measure | collar bp12 | hubble bp12 | lane B (hubble) | budget |
+|---|---|---|---|---|
+| first Edit, settled (wait_painted) | 109, 1 blank (74) | cold: 4876 (see note) | 215, 1 blank | 300, 0 blank (non-strict) |
+| first Schematic | 93, 0 blank | 63, 0 blank | 443, 1 blank | 50 (non-strict) |
+| first 3D | 1258, 1 blank | 11, 0 blank (unverified: see note) | 1243, 1 blank | 50 (non-strict) |
+| later tab switches (13) | 22-40, 0 blank | 24-119, 0 blank | 16-34, 0 blank | 50; 0 blank strict |
+| reopen (View, Edit) | 18-137, 0 blank | 17-60, 0 blank | 17-31, 0 blank | 300 and 0 blank, strict |
+| thread back by palette (Return to settled) | 36-80, 0 blank, editor kept 3/3 | 39-109, 0 blank, kept 3/3 | 6-28 | 50; kept and 0 blank strict |
+| thread back by sidebar/page row | 72-80, 0 blank, kept 3/3 | 72-84, 0 blank, kept 3/3 | - | 50; kept and 0 blank strict |
+| one click then Ctrl+K / Ctrl+; | 11 / 69 | no / no | - | works |
+| Ctrl+; again after Escape | no | no | - | works |
+| Ctrl+S written / clean | 97 / 165 | 103 / 261 | - | 300 |
+| pan p99 / route > 50 ms / drag > 50 ms | 23.6 / 9 / 3 | 8.6 / 5 / 0 | - | 25 / 0 / 0 |
+| editor.kicad.select settled | 320-591 | 401-465 | - | 100 |
+| BOM panel: tab / Alt+Shift+B | 110 / 106 | 188 / 76 | - | 100 |
+| KiCad RSS editors up / peak (MB) | 3872 / 4219 | 4431 / 4978 | - | - |
+
+Notes. Hubble's first Edit was cold: the harness opens Board and presses Edit 2.5 s later, and Hubble's warm start (it begins when the
+Board viewer opens) was not done by then; the hub log shows two "start ... spawned" lines for Hubble 100 ms apart. Hubble's first 3D read
+11 ms with no change on screen, which looks like the 3D view not coming up, not a fast switch. Disagreements with lane B: the palette thread
+back (36-109 ms here against 6-28), one reopen of 137 ms and later switches up to 119 ms on Hubble; first Schematic is faster here (63-93
+against 443).
 
 ## Numbers after lane B's fc6a5e500 + cd72ba7c4 (2026-11-12, origin/main 72c32ca3f, matrix `realuse-m3`)
 
@@ -79,7 +106,7 @@ before 400 ms of stillness). Earlier columns: the first matrix (5c6dd03c4; bp12 
 | first 3D, settled | 1248, 1 blank | 1312, 1 blank | (70: 3D not shown) | 1396, 2 blank | 1288-1398 | 50, 0 |
 | later tab switches (13) | 66-85, 6 blank | 68-83, 6 blank | 66-470, 0 blank | 65-82, 5 blank | 65-87, 5-6 blank | 50, 0 |
 | reopen (View, Edit), settled | 112-123, 1 blank each | 110-121, 1 blank each | 111-115 | 112-119, 1 blank each | 101-123, 1 blank | 300, 0 |
-| thread away and back | editor lost | editor lost | editor lost | editor lost | editor lost | kept |
+| thread away and back | (harness bug: see below) | | | | | kept |
 | one click, then Ctrl+K (palette) | no | 36 | no | no | - | works |
 | one click, then Ctrl+; (comment window) | 72 | 22 | no (second click: see log) | no | - | works |
 | Ctrl+; again after Escape closed it | no | no | no | no | no | works |
@@ -114,7 +141,7 @@ that found Hubble's "automatically fixed" modal (real_use_watch.sh) set only `BA
 | first switch to 3D | 1288, 1 blank | 1301, 1 blank | 1392, 1 blank | 1398, 1 blank | 50, 0 |
 | later tab switches (14 each) | 67-82 | 65-83 | 67-87 | 66-82 | 50 |
 | ... of them with a blank frame | 6 | 6 | 5 | 6 | 0 |
-| thread away and back | editor lost | editor lost | editor lost | editor lost | kept |
+| thread away and back | (harness bug: see below) | | | | kept |
 | pan 10 s: p50 / p99 / max | 16.7 / 19.8 / 21 | 16.7 / 19.3 / 20 | 7.1 / 7.1 | 8.1 / 8.1 | p99 25 |
 | wheel zoom 10 s: p50 / p99 | 11.9 / 18.5 | 9.1 / 16.6 | 10.6 / 17.1 | 10.5 / 17.1 | p99 25 |
 | pan during agent commits: p99, > 50 ms | 19.8, 0 | 19.6, 0 | 22.2, 1 | 20.6, 1 | 25, 0 |
@@ -142,9 +169,10 @@ API ping, the hub reports `unresponsive` and the pane keeps saying "Starting KiC
 
 ## Jank, ranked (2026-11-12)
 
-1. **Thread away and back loses the editor** (switch; all 4 runs). After switching to another thread and back (through the command palette), the
-   thread shows its chat with the viewer closed and no KiCad (shots `thread_back*.png`); budget: the editor kept. Cause: the client or hub
-   does not keep the thread's viewer/editor open across a thread switch (client: viewer state per thread; or hub: the thread's `viewer.open`).
+1. ~~**Thread away and back loses the editor**~~ Struck: a harness bug, not the product. With two threads seeded, the journeys' `{"select":0}`
+   picked the newest thread ("Other thread 2"), so Board and Edit opened there; "away" went to that same thread and "back" to one that never
+   had a viewer. The harness now selects threads by id (`project:p1`, `page-thread:t1`; selecting by index is banned) and asserts each step
+   from the client's `shown` metric and the X tree; measured that way (05d847f1e, bp.12) the thread comes back with its editor every time.
 2. **KiCad's modal dialogs block it, outside the pane** (open, switch; 3 of 4 runs, and the person's Hubble). `Load PCB`, `Information`, `Load
    Schematic`: top-level windows centred on the screen, not over the pane; KiCad's loop is blocked (no API pings), the hub says `unresponsive`,
    the pane says "Starting KiCad...". Cause: the fork shows load-time message boxes as free top-level dialogs; the hub reports a modal as

@@ -1,5 +1,5 @@
 {
- "_": "Budgets for test/kicad_embed/real_use_*.sh (docs/kicad-real-use.md). Each: measures (regex over PERF names), field, the most it may be, what. Non-strict: misses print; KEMBED_REAL_STRICT=1 fails on them.",
+ "_": "Budgets for test/kicad_embed/real_use_*.sh (docs/kicad-real-use.md). Each: measures (regex over PERF names), field, the most it may be, what. Non-strict: misses print; KEMBED_REAL_STRICT=1 fails on them. A budget with \"strict\": true was met on real hardware and fails the run on any miss (it must not regress); the others print.",
  "strict": false,
  "budgets": [
   {
@@ -9,34 +9,70 @@
    "what": "cold Edit to PCB painted"
   },
   {
-   "re": "^reopen\\d",
+   "re": "^reopen\\d$",
    "field": "ms",
    "max": 300,
+   "strict": true,
    "what": "View -> Edit, KiCad warm: settled"
   },
   {
-   "re": "^reopen\\d",
+   "re": "^reopen\\d$",
    "field": "blank_frames",
    "max": 0,
+   "strict": true,
    "what": "reopen: frames of background"
   },
   {
-   "re": "^tab\\d+_",
+   "re": "^tab0[02]_",
    "field": "ms",
    "max": 50,
-   "what": "tab switch click -> settled"
+   "what": "first switch to Schematic / 3D: click -> settled"
   },
   {
-   "re": "^tab\\d+_",
+   "re": "^tab0[02]_",
    "field": "blank_frames",
    "max": 0,
-   "what": "tab switch: frames of background"
+   "what": "first switch to Schematic / 3D: frames of background"
   },
   {
-   "re": "^thread_back\\d",
+   "re": "^tab(0[13-9]|1\\d)_",
+   "field": "ms",
+   "max": 50,
+   "what": "later tab switch: click -> settled"
+  },
+  {
+   "re": "^tab(0[13-9]|1\\d)_",
+   "field": "blank_frames",
+   "max": 0,
+   "strict": true,
+   "what": "later tab switch: frames of background"
+  },
+  {
+   "re": "^thread(_side)?_back\\d$",
    "field": "ms",
    "max": 50,
    "what": "thread back: pane settled"
+  },
+  {
+   "re": "^thread(_side)?_back\\d$",
+   "field": "blank_frames",
+   "max": 0,
+   "strict": true,
+   "what": "thread back: frames of background"
+  },
+  {
+   "re": "^thread(_side)?_back\\d_away_ok$",
+   "field": "ok",
+   "min": 1,
+   "strict": true,
+   "what": "away: the other thread on show, no KiCad over the pane"
+  },
+  {
+   "re": "^thread(_side)?_back\\d_kept$",
+   "field": "ok",
+   "min": 1,
+   "strict": true,
+   "what": "back: the thread's viewer and editor as left"
   },
   {
    "re": "^lost_after_",
@@ -91,12 +127,6 @@
    "field": "n",
    "max": 0,
    "what": "KiCad dialogs that block it during the journeys"
-  },
-  {
-   "re": "^thread_side_back\\d",
-   "field": "ms",
-   "max": 50,
-   "what": "thread back through the sidebar: pane settled"
   },
   {
    "re": "^first_click_reserved$",
@@ -199,6 +229,12 @@
    "field": "ok",
    "min": 1,
    "what": "one click into KiCad, then Ctrl+K reaches Backplane"
+  },
+  {
+   "re": "_precondition$",
+   "field": "ok",
+   "min": 1,
+   "what": "the journey starts where it says it does"
   }
  ]
 }

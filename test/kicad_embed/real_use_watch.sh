@@ -8,7 +8,7 @@ discover_bins; discover_kicad; init_isolated_dirs
 python3 "$SEED_PY" "$OUT" "$REPO_ROOT"
 start_xvfb_and_wm; start_hub
 cat >"$OUT/script.json" <<'J'
-[{"select":0},{"wait":2200},{"click":"rail:Board"},{"wait":2500},{"click":"ui:Edit"},{"kicad":{"wait_painted":60000,"kind":"PCB","tag":"cold"}},{"wait":3000},
+[{"wait":1500},{"click":"project:p1"},{"wait":1200},{"click":"page-thread:t1"},{"wait":1500},{"click":"rail:Board"},{"wait":2500},{"click":"ui:Edit"},{"kicad":{"wait_painted":60000,"kind":"PCB","tag":"cold"}},{"wait":3000},
  {"click":"kicad-tab:SCH"},{"kicad":{"wait_painted":60000,"kind":"SCH","tag":"sch"}},{"wait":2000},{"kicad":{"report":true,"tag":"end"}}]
 J
 HOME="$OUT/fh" BACKPLANE_GPUI_ASSETS="$ASSETS_DIR" "$CLIENT_BIN" --url "http://127.0.0.1:$HPORT" --token-file "$OUT/home/token" --script "$OUT/script.json" --exit-after 150 >"$OUT/client.log" 2>&1 &
