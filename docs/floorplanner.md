@@ -51,3 +51,13 @@ All hub data: `mgmt.plan.<digest>` (the panel and the bands) and `plan.<digest>`
 A project with a KiCad board on Backplane KiCad bp.11+ gets `<backplane_routing_plan>` (`plan::guidance`): on boards with 4 or more copper
 layers or more than 60 nets, plan before copper: the stackup from `fab_profile` (reference planes and impedance widths per layer), propose,
 ask, end the turn, respect the person's edits, route only what was approved, inside its corridor.
+
+## The person's edits in KiCad's plan view (bp.13)
+
+`test/kicad_embed/embed_plan_person_e2e.sh` drives KiCad's own plan view with real X input (XTest), as a person would: the editor
+full size, a click on the board to give KiCad the keyboard, Alt+P, Home; the corridors are found on the screen by their group's
+colour (KiCad's GL canvas is no X window of its own), then c-p is clicked and accepted (A), locked (L) and widened (W), and c-q is
+clicked and rejected (R). The hub sees each as the person's: `plan_get`'s `changes` (approved, locked, edited by the person, rejected,
+with the person's constraints), the Plan panel's data live, and the agent that asked for approval is woken with the decision. First
+run on the bp.13 test build (d5eaa3ae44): 11/11, and embed_plan_e2e 11/11. Layer approval from KiCad's context menu is not driven yet.
+Linux (Xvfb) only, as every embedded-editor e2e.
