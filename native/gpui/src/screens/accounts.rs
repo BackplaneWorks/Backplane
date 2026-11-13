@@ -120,7 +120,7 @@ pub fn menu_rows(snap: &Value, now: u64) -> Vec<MenuRow> {
     let (mut left, mut out) = left_of(holds, "", &al, now);
     if !out { if let Some(t) = twins.iter().find(|t| holds[string(t, "id")]["text"].is_string()) { (left, out) = left_of(holds, &string(t, "id"), &Value::Null, now) } }
     let (who, why) = default_who(snap, provider);
-    let (label, detail) = match who { Some(e) => (format!("{} · {e}", trs("Default account")), trs("CLI login")), None => (trs("Default account"), format!("{} · {why}", trs("CLI login"))) };
+    let (label, detail) = match who { Some(e) => (format!("{} · {e}", trs("Default account")), trs("CLI login")), /* i18n-ok: joins catalog words */ None => (trs("Default account"), format!("{} · {why}", trs("CLI login"))) };
     let on = bound.is_empty() || twins.iter().any(|t| string(t, "id") == bound);
     let mut rows = vec![MenuRow { key: None, label, detail, left, out, on, usable: true, profile: String::new(), epoch: 0 }];
     for p in profiles(snap).iter().filter(|p| p["provider"] == provider && p["sameAsDefault"] != true) {
@@ -346,7 +346,7 @@ pub fn default_line(snap: &Value, provider: &str) -> String {
     let d = &snap["default_login"][provider];
     match default_who(snap, provider) {
         (Some(e), _) => { let mut parts = vec![name.to_string(), e]; if let Some(p) = d["plan"].as_str().filter(|p| !p.is_empty()) { parts.push(p.to_string()) } parts.push(trs("CLI login")); parts.join(" · ") }
-        (None, why) => format!("{name} · {} · {why}", trs("CLI login")),
+        /* i18n-ok: joins catalog words */ (None, why) => format!("{name} · {} · {why}", trs("CLI login")),
     }
 }
 /// The added accounts folded into the CLI login's card: "Also added as Work: the same account, counted once".

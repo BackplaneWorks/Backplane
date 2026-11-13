@@ -2104,6 +2104,16 @@ gpui.acct.renew.the.sync.token	Renew the sync token	同期トークンを更新
 gpui.acct.make.a.sync.token	Make a sync token	同期トークンを作成
 gpui.acct.make.the.sync.token	Make the sync token	同期トークンを作成する
 gpui.acct.add.claude.sync	Add Claude (sync)	Claude（同期）を追加
+gpui.acct.signed.out	signed out	サインアウト中
+gpui.acct.can.t.tell.who.is	can't tell who is signed in	誰がサインインしているか分かりません
+gpui.acct.also.added.as	Also added as	次の名前でも追加済み:
+gpui.acct.the.same.account.counted.once	the same account, counted once	同じアカウントとして1つに数えます
+gpui.acct.claude.code.is.signed.in	Claude Code is signed in without a subscription (a Console or API key): it does not say whose	Claude Codeはサブスクリプションなし(ConsoleまたはAPIキー)でサインインしています: 誰のものかは分かりません
+gpui.acct.codex.is.signed.in.with	Codex is signed in with an API key: it does not say whose	CodexはAPIキーでサインインしています: 誰のものかは分かりません
+gpui.acct.codex.did.not.say.who	Codex did not say who is signed in	Codexは誰がサインインしているか答えませんでした
+gpui.acct.claude.code.did.not.say	Claude Code did not say who is signed in	Claude Codeは誰がサインインしているか答えませんでした
+gpui.acct.anthropic.api.key.is.set	ANTHROPIC_API_KEY is set: Claude Code uses that key, not a sign-in	ANTHROPIC_API_KEYが設定されています: Claude Codeはサインインではなくそのキーを使います
+gpui.acct.the.cli.is.signed.in	The CLI is signed in but did not give an email	CLIはサインインしていますがメールアドレスを返しませんでした
 gpui.send.the.message	Send the message	メッセージを送信
 gpui.new.line.in.the.message	New line in the message	メッセージ内で改行
 gpui.send.also	Send (also)	送信（別のキー）
@@ -2253,6 +2263,8 @@ gpui.open.a.thread.first.that	Open a thread first: that file is in no project he
 gpui.gerbers.open.on.their.project	Gerbers open on their project's Board; this one is in no project.	ガーバーはプロジェクトのボードで開きます。このファイルはどのプロジェクトにもありません。
 gpui.that.kicad.project.has.no	That KiCad project has no board or schematic beside it.	そのKiCadプロジェクトの隣にボードも回路図もありません。
 gpui.that.file.is.not.on	That file is not on this hub.	そのファイルはこのハブにありません。
+gpui.quit.backplane	Quit Backplane	Backplane を終了
+gpui.quit.backplane.on.a.mac	Quit Backplane, on a Mac: the hub keeps running	Backplane を終了（Mac）：ハブは動き続けます
 gpui.c.commit	Commit	コミット
 gpui.c.diff.cut	… the rest of the diff is not shown	… 差分の残りは表示されていません
 gpui.c.loading.board	Loading the board…	基板を読み込み中…
@@ -2374,6 +2386,7 @@ gpui.c.kicad.edit.in.the.real.kicad	Edit in the real KiCad, here in the pane	こ
 gpui.c.kicad.view	View	表示
 gpui.c.kicad.symbols	Symbols	シンボル
 gpui.c.kicad.footprints	Footprints	フットプリント
+gpui.c.kicad.gerbers	Gerbers	ガーバー
 gpui.c.kicad.full.size	Full size	最大化
 gpui.c.kicad.exit.full.size	Exit full size	最大化を解除
 gpui.c.kicad.the.editor.takes.the.sidebar	The editor takes the sidebar's and the thread's room	エディタがサイドバーとスレッドの領域も使います
@@ -2386,6 +2399,15 @@ gpui.c.kicad.changed	Changed on disk: {files}. You have unsaved edits.	ディス
 gpui.c.kicad.keep.yours	Keep yours	自分の編集を残す
 gpui.c.kicad.reload.lose.your.edits	Reload (lose your edits)	再読み込み（編集は失われます）
 gpui.c.kicad.a.comment.from.kicad.needs	A comment from KiCad needs an open thread.	KiCad からのコメントにはスレッドを開いておく必要があります。
+gpui.kcomment.nothing	Nothing selected: the area in view	何も選択されていません: 表示中の範囲
+gpui.kcomment.no.capture	KiCad could not say what is selected. Enter asks again · Esc cancels	KiCad から選択内容を取得できませんでした。Enter でもう一度取得 · Esc で取り消し
+gpui.kcomment.reading	Reading the selection…	選択内容を読み取り中…
+gpui.kcomment.waiting	Waiting for KiCad's selection… the comment posts when it comes	KiCad の選択内容を待っています… 届いたら投稿します
+gpui.kcomment.timeout	KiCad did not send the selection. Enter asks again · Esc cancels	KiCad から選択内容が届きませんでした。Enter でもう一度取得 · Esc で取り消し
+gpui.kcomment.hint	Enter posts to the thread · Esc cancels	Enter でスレッドに投稿 · Esc で取り消し
+gpui.kcomment.not.posted	The comment was not posted: {why}	コメントは投稿されませんでした: {why}
+gpui.keys.kcomment	Comment on what is selected in KiCad, from Backplane or from inside the editor: Enter posts, Esc cancels	KiCad で選択中のものにコメント (Backplane からもエディタ内からも): Enter で投稿、Esc で取り消し
+gpui.c.kicad.dialog	KiCad has “{title}” open	KiCad で「{title}」が開いています
 gpui.assets.missing	Assets missing in {dir}: {files}	{dir} にアセットがありません: {files}
 gpui.connecting	Connecting…	接続中…
 gpui.connected	Connected	接続済み
@@ -3160,6 +3182,10 @@ gpui.f.quote.files	Send these files for a quote?	これらのファイルを送�
 gpui.f.dictate	Dictate with this device's microphone	このデバイスのマイクで音声入力
 gpui.f.inactive	Inactive: no confirmed active work	非アクティブ: 確認できる作業はありません
 gpui.f.tool.runs.nover	{name}  runs from {path}.	{name}が{path}で動作します。
+android.mgmt.all	All	すべて
+android.mgmt.judged	agent-judged	エージェント判定
+android.mgmt.fix	Fix with agent	エージェントで直す
+android.mgmt.sent	Sent to the thread.	スレッドに送りました。
 android.mcp	MCP servers	MCP サーバー
 android.alerts.ask	Bub can alert you when a thread needs you.	スレッドがあなたを必要とするとき、Bub が通知できます。
 android.alerts.allow	Allow alerts	通知を許可
@@ -4044,6 +4070,159 @@ gpui.usage.left	{n} left	残り{n}
 gpui.usage.of	{a} of {b}	{b}中{a}
 gpui.usage.context	{n} context	コンテキスト{n}
 gpui.usage.noread	No reading yet: the first turn's result reports it.	まだ値がありません。最初のターンの結果で分かります。
+gpui.mgmt.bom.summary	{parts, plural, one {# part} other {# parts}} in {lines, plural, one {# line} other {# lines}}	部品{parts}点・{lines}行
+gpui.mgmt.bom.more	{n, plural, one {# more line not shown} other {# more lines not shown}}	ほか{n}行は表示していません
+gpui.mgmt.dock.right	Dock at the right	右に置く
+gpui.mgmt.dock.bottom	Dock at the bottom	下に置く
+gpui.mgmt.close	Close the panel	パネルを閉じる
+gpui.mgmt.bom.saved	from the saved schematic	保存された回路図から
+gpui.mgmt.bom.reading	Reading the schematic…	回路図を読んでいます…
+gpui.mgmt.bom.nomatch	No line matches the filter.	絞り込みに合う行はありません。
+gpui.mgmt.bom.nompn	no MPN	MPNなし
+gpui.mgmt.filter	Filter	絞り込み
+gpui.mgmt.bom.noparts	No parts.	部品はありません。
+gpui.mgmt.bom.dnp	DNP	実装しない
+gpui.mgmt.fab.tab	Fab	製造
+gpui.mgmt.fab.drc.current	The fab's limits are in the DRC rules	製造元の限界値はDRCルールに入っています
+gpui.mgmt.fab.drc.stale	The DRC rules have older fab limits	DRCルールの製造元の限界値が古くなっています
+gpui.mgmt.fab.drc.update	Update	更新
+gpui.mgmt.fab.drc.none	The fab's limits are not in the DRC rules	製造元の限界値はまだDRCルールに入っていません
+gpui.mgmt.fab.drc.write	Write	書き込む
+gpui.mgmt.fab.drc.noproject	No KiCad project for DRC rules	DRCルールを置くKiCadプロジェクトがありません
+gpui.mgmt.fab.tier.extra	costs-more limits	追加料金の限界値
+gpui.mgmt.fab.tier.free	base-price limits	基本料金の限界値
+gpui.mgmt.fab.reading	Reading the fab's profile…	製造元のプロファイルを読んでいます…
+gpui.mgmt.fab.thefab	The fab	製造元
+gpui.mgmt.fab.refresh	Refresh	再読み込み
+gpui.mgmt.fab.apply	Apply	適用
+gpui.mgmt.fab.changed	Changed since you last looked	前回見てから変わったところ
+gpui.mgmt.fab.seen	Seen	確認済み
+gpui.mgmt.fab.limit	Limit	項目
+gpui.mgmt.fab.free	Base price	基本料金
+gpui.mgmt.fab.extra	Costs more	追加料金
+gpui.mgmt.fab.readcol	Read	読んだ日
+gpui.mgmt.fab.derived	* worked out from the fab's page (a mil in mm, a ring from a diameter). Dimmed: the rigid board's value, where this board's page says nothing else. A date opens the page it was read from.	* 製造元のページから計算した値です（milをmmに、径からランドを）。薄い色の項目はリジッド基板の値です（この基板のページに記載がないもの）。日付を押すと読んだページが開きます。
+gpui.mgmt.fab.suggestion	{what}: board setup {project} mm, the fab {fab} mm	{what}：ボード設定 {project} mm、製造元 {fab} mm
+gpui.mgmt.fab.read	rev {rev}, read {day}	第{rev}版・{day}に読んだもの
+gpui.mgmt.fab.reviewing	Reviewing the design…	設計をレビューしています…
+gpui.mgmt.fab.noreview	No design review yet	設計レビューはまだありません
+gpui.mgmt.fab.findings	Findings	指摘
+gpui.mgmt.fab.reviewbtn	Review	レビュー
+gpui.mgmt.fab.judge	Datasheets	データシート
+gpui.mgmt.plan.reading	Reading the routing plan…	配線計画を読んでいます…
+gpui.mgmt.plan.none	No routing plan yet. An agent proposes one before routing (plan_propose); you steer and approve it here or in KiCad.	配線計画はまだありません。配線の前にエージェントが提案し（plan_propose）、ここかKiCadで調整して承認します。
+gpui.mgmt.plan.awaiting	{n, plural, one {# item awaits your approval} other {# items await your approval}}	承認待ち{n}件
+gpui.mgmt.plan.nothing	Nothing awaits your approval	承認待ちはありません
+gpui.mgmt.plan.saved	saved plan	保存された計画
+gpui.mgmt.plan.all	Approve all	すべて承認
+gpui.mgmt.plan.stop	Stop routing	配線を止める
+gpui.mgmt.plan.hide	Hide done	完了を隠す
+gpui.mgmt.plan.show	Show done	完了を表示
+gpui.mgmt.plan.done	done	完了
+gpui.mgmt.plan.layer	Approve layer	層を承認
+gpui.mgmt.plan.reject	Reject	却下
+gpui.mgmt.plan.reference	over {layer}	基準 {layer}
+gpui.mgmt.plan.nets	{n, plural, one {# net} other {# nets}}	ネット{n}本
+gpui.mgmt.plan.tab	Plan	計画
+gpui.mgmt.fab.review	Review: {must} must · {should} should · {notes} notes	レビュー：必須{must}・推奨{should}・メモ{notes}
+gpui.mgmt.fab.stackup	stackup {id}, 50 Ω outer line {w} mm	層構成 {id}、外層50 Ωの線幅 {w} mm
+gpui.mgmt.fab.proposed	Proposed:	提案：
+gpui.mgmt.fab.use	Use	使う
+gpui.keys.mgmt.bom	BOM panel beside the design: open or close	設計の横のBOMパネルを開く・閉じる
+gpui.keys.mgmt.checks	Checks panel beside the design: open or close	設計の横のチェックパネルを開く・閉じる
+gpui.keys.mgmt.life	Lifecycle panel beside the design: open or close	設計の横のライフサイクルパネルを開く・閉じる
+gpui.mgmt.checks.reading	Running the checks…	チェックしています…
+gpui.mgmt.checks.searching	Looking…	探しています…
+gpui.mgmt.checks.run	Run	実行
+gpui.mgmt.checks.running	running	実行中
+gpui.mgmt.checks.behind	after {what}	{what}の後
+gpui.mgmt.checks.stale	changed since	その後に変更あり
+gpui.mgmt.checks.liveunsaved	live, unsaved	未保存の編集を含む
+gpui.mgmt.checks.waiting	waiting: {why}	待機中: {why}
+gpui.mgmt.checks.failed	failed: {why}	失敗: {why}
+gpui.mgmt.checks.all	All	すべて
+gpui.mgmt.checks.errors	Errors	エラー
+gpui.mgmt.checks.warnings	Warnings	警告
+gpui.mgmt.checks.excluded	Excluded	除外
+gpui.mgmt.checks.fix	Fix with agent	エージェントに直してもらう
+gpui.mgmt.checks.reexport	Re-export with agent	エージェントに再出力してもらう
+gpui.mgmt.checks.more	{n, plural, one {# more} other {# more}}	ほか{n}件
+gpui.mgmt.checks.fewer	Fewer	減らす
+gpui.mgmt.checks.none	No findings.	指摘はありません。
+gpui.mgmt.checks.nomatch	Nothing matches the filter.	絞り込みに合うものはありません。
+gpui.mgmt.checks.library	Library checks (footprints and symbols against their libraries) are not in these runs, so counts can differ from KiCad's own DRC.	ライブラリのチェック（フットプリントとシンボルをライブラリと照合）はこの実行に含まれないため、KiCadのDRCと件数が異なることがあります。
+gpui.mgmt.checks.withlib	Includes the library checks.	ライブラリのチェックを含みます。
+gpui.mgmt.checks.fullrun	Run all checks	すべてチェック
+gpui.mgmt.checks.allsources	All sources	すべての種類
+gpui.mgmt.checks.judged	agent-judged	エージェントの判断
+gpui.mgmt.bom.dnp.tip	Do not place these parts	これらの部品を実装しない
+gpui.mgmt.bom.writing	Writing…	書き込み中…
+gpui.mgmt.bom.inkicad	Changed in KiCad: Ctrl+Z there takes it back; save there to keep it.	KiCadで変更しました。KiCadでCtrl+Zで元に戻せます。残すにはKiCadで保存してください。
+gpui.mgmt.bom.saved.file	Saved in the schematic.	回路図に保存しました。
+gpui.mgmt.bom.fab	Fab PN	製造先の品番
+gpui.mgmt.bom.mpn.ph	Manufacturer part number	メーカー品番
+gpui.mgmt.bom.fab.ph	The fab's part number	製造先の品番
+gpui.mgmt.bom.each	{price} each for {n}	{n}個で1個{price}
+gpui.mgmt.bom.out	Not enough in the fab's stock: {n} for {need} needed	製造先の在庫が足りません: 必要{need}に対して{n}
+gpui.mgmt.bom.low	Low in the fab's stock: {n}	製造先の在庫が少なめです: {n}
+gpui.mgmt.bom.in	In the fab's stock: {n}	製造先の在庫: {n}
+gpui.mgmt.bom.cost	≈ {cost} a board	1枚あたり約{cost}
+gpui.mgmt.bom.cost.least	at least {cost} a board	1枚あたり{cost}以上
+gpui.mgmt.bom.checking	Checking the fab's stock…	製造先の在庫を確認中…
+gpui.mgmt.bom.notknown	Not known	不明
+gpui.mgmt.bom.stock	Stock	在庫
+gpui.mgmt.bom.alts	Alternatives	代替品
+gpui.mgmt.bom.alts.looking	Looking for alternatives…	代替品を探しています…
+gpui.mgmt.bom.alts.none	No alternatives in the fab's stock.	製造先の在庫に代替品はありません。
+gpui.mgmt.bom.alts.use	Use this part: its MPN and fab part number go on the line	この部品を使う: MPNと製造先の品番を行に入れます
+gpui.mgmt.bom.class.basic	basic	基本
+gpui.mgmt.bom.class.extended	extended	拡張
+gpui.mgmt.bom.class.preferred	preferred	推奨
+gpui.mgmt.bom.notinstock	not in the fab's stock	製造先の在庫にありません
+gpui.mgmt.bom.off	the parts search is turned off	部品検索はオフです
+gpui.mgmt.life.since	since {day}, {n, plural, one {# reading} other {# readings}}	{day}から、{n}回の記録
+gpui.mgmt.life.one	History starts {day}: the graphs fill in as the fab's stock is checked again, every six hours.	記録は{day}から始まります。製造先の在庫を6時間ごとに確認するたびにグラフが伸びます。
+gpui.mgmt.life.now	Now: {cost} a board in parts; {n} of {lines} lines in stock.	現在: 部品代は1枚あたり{cost}、{lines}行のうち{n}行が在庫あり。
+gpui.mgmt.life.part.now	Now: {stock} in stock, {price} each.	現在: 在庫{stock}、1個{price}。
+gpui.mgmt.life.instock	Lines in stock (of {lines})	在庫のある行（{lines}行中）
+gpui.mgmt.life.board	Parts a board	1枚あたりの部品代
+gpui.mgmt.life.price	Unit price	単価
+gpui.mgmt.life.active	Active	量産中
+gpui.mgmt.life.nrnd	NRND	新規設計非推奨
+gpui.mgmt.life.eol	EOL	生産終了
+gpui.mgmt.life.unknown	Unknown	不明
+gpui.mgmt.life.nolines	No line has an MPN or a fab part number to follow yet.	追跡できるMPNや製造先の品番のある行はまだありません。
+gpui.mgmt.life.noread	No reading of the fab's stock yet: the BOM panel's lookups start it.	製造先の在庫の記録はまだありません。BOMパネルの検索で始まります。
+gpui.mgmt.life.reading	Reading its history…	履歴を読んでいます…
+gpui.mgmt.life.nopart	No reading of this part yet.	この部品の記録はまだありません。
+gpui.mgmt.life.tab	Lifecycle	ライフサイクル
+gpui.mgmt.bom.paused	Stock check paused	在庫確認を一時停止中
+gpui.mgmt.bom.paused.tip	The parts search asked Backplane to slow down; the lookups go on by themselves shortly.	部品検索から間隔を空けるよう求められました。しばらくすると自動で再開します。
+gpui.keys.mgmt.fab	Fab panel beside the design: open or close	設計の横の製造パネルを開く・閉じる
+gpui.mgmt.bom.putback	Put back.	元に戻しました。
+gpui.mgmt.bom.nochange	Nothing to change.	変更はありません。
+gpui.mgmt.bom.deferred	You are editing it in KiCad: the change goes in when you finish there.	KiCad で編集中です。編集を終えると変更が反映されます。
+gpui.mgmt.bom.inkicad.save	Changed in KiCad; save there to keep it.	KiCadで変更しました。残すにはKiCadで保存してください。
+gpui.mgmt.bom.undo.tip	Put the old value back	前の値に戻す
+gpui.mgmt.bom.undo	Undo	元に戻す
+gpui.mgmt.checks.on	on {host}	{host}で実行
+gpui.gerbers	Gerbers	ガーバー
+gpui.gerbers.vs	vs board	基板と比較
+gpui.gerbers.vs.tip	Mark where these Gerbers differ from the board: red on the board only, green in the Gerbers only	このガーバーが基板と異なる所に印を付けます：赤は基板だけ、緑はガーバーだけ
+gpui.gerbers.gerbview	Open in GerbView	GerbViewで開く
+gpui.gerbers.gerbview.tip	Open these Gerbers in KiCad's GerbView, here in the pane	このGerberをKiCadのGerbViewで、このペインに開く
+gpui.mgmt.bom.saved.state	Saved	保存済み
+gpui.mgmt.bom.live.tip	Live from the open KiCad: its unsaved edits are in it	開いているKiCadから直接: 保存前の変更も含みます
+gpui.mgmt.bom.saved.tip	From the saved schematic: KiCad is not open on it	保存された回路図から: KiCadでは開いていません
+gpui.mgmt.bom.price	Price	単価
+gpui.mgmt.bom.class	Class	区分
+gpui.mgmt.life.unknown.n	lifecycle unknown for {n}	{n}点はライフサイクル不明
+gpui.mgmt.life.unknown.tip	Not checked yet: {a}. The distributors state none: {b}.	まだ確認していない: {a}。代理店の記載なし: {b}。
+gpui.mgmt.bom.stock.out	out {n}	欠品 {n}
+gpui.mgmt.bom.stock.low	low {n}	少 {n}
+gpui.gerbers.boardonly	board only	基板だけ
+gpui.gerbers.gerbersonly	Gerbers only	ガーバーだけ
+gpui.mgmt.life.price.since	since {day}	{day}から
 """#
 
     /// thread.count = {n, plural, one {# thread} other {# threads}}
@@ -5158,6 +5337,12 @@ gpui.usage.noread	No reading yet: the first turn's result reports it.	まだ値�
 
     /// gpui.c.kicad.changed = Changed on disk: {files}. You have unsaved edits.
     static func gpui_c_kicad_changed(files: String) -> String { f("gpui.c.kicad.changed", ["files": files]) }
+
+    /// gpui.kcomment.not.posted = The comment was not posted: {why}
+    static func gpui_kcomment_not_posted(why: String) -> String { f("gpui.kcomment.not.posted", ["why": why]) }
+
+    /// gpui.c.kicad.dialog = KiCad has “{title}” open
+    static func gpui_c_kicad_dialog(title: String) -> String { f("gpui.c.kicad.dialog", ["title": title]) }
 
     /// gpui.assets.missing = Assets missing in {dir}: {files}
     static func gpui_assets_missing(dir: String, files: String) -> String { f("gpui.assets.missing", ["dir": dir, "files": files]) }
@@ -6613,4 +6798,94 @@ gpui.usage.noread	No reading yet: the first turn's result reports it.	まだ値�
 
     /// gpui.usage.context = {n} context
     static func gpui_usage_context(n: String) -> String { f("gpui.usage.context", ["n": n]) }
+
+    /// gpui.mgmt.bom.summary = {parts, plural, one {# part} other {# parts}} in {lines, plural, one {# line} other {# lines}}
+    static func gpui_mgmt_bom_summary(parts: Int, lines: Int) -> String { f("gpui.mgmt.bom.summary", ["parts": String(parts), "lines": String(lines)]) }
+
+    /// gpui.mgmt.bom.more = {n, plural, one {# more line not shown} other {# more lines not shown}}
+    static func gpui_mgmt_bom_more(n: Int) -> String { f("gpui.mgmt.bom.more", ["n": String(n)]) }
+
+    /// gpui.mgmt.fab.suggestion = {what}: board setup {project} mm, the fab {fab} mm
+    static func gpui_mgmt_fab_suggestion(what: String, project: String, fab: String) -> String { f("gpui.mgmt.fab.suggestion", ["what": what, "project": project, "fab": fab]) }
+
+    /// gpui.mgmt.fab.read = rev {rev}, read {day}
+    static func gpui_mgmt_fab_read(rev: String, day: String) -> String { f("gpui.mgmt.fab.read", ["rev": rev, "day": day]) }
+
+    /// gpui.mgmt.plan.awaiting = {n, plural, one {# item awaits your approval} other {# items await your approval}}
+    static func gpui_mgmt_plan_awaiting(n: Int) -> String { f("gpui.mgmt.plan.awaiting", ["n": String(n)]) }
+
+    /// gpui.mgmt.plan.reference = over {layer}
+    static func gpui_mgmt_plan_reference(layer: String) -> String { f("gpui.mgmt.plan.reference", ["layer": layer]) }
+
+    /// gpui.mgmt.plan.nets = {n, plural, one {# net} other {# nets}}
+    static func gpui_mgmt_plan_nets(n: Int) -> String { f("gpui.mgmt.plan.nets", ["n": String(n)]) }
+
+    /// gpui.mgmt.fab.review = Review: {must} must · {should} should · {notes} notes
+    static func gpui_mgmt_fab_review(must: String, should: String, notes: String) -> String { f("gpui.mgmt.fab.review", ["must": must, "should": should, "notes": notes]) }
+
+    /// gpui.mgmt.fab.stackup = stackup {id}, 50 Ω outer line {w} mm
+    static func gpui_mgmt_fab_stackup(id: String, w: String) -> String { f("gpui.mgmt.fab.stackup", ["id": id, "w": w]) }
+
+    /// gpui.mgmt.checks.behind = after {what}
+    static func gpui_mgmt_checks_behind(what: String) -> String { f("gpui.mgmt.checks.behind", ["what": what]) }
+
+    /// gpui.mgmt.checks.waiting = waiting: {why}
+    static func gpui_mgmt_checks_waiting(why: String) -> String { f("gpui.mgmt.checks.waiting", ["why": why]) }
+
+    /// gpui.mgmt.checks.failed = failed: {why}
+    static func gpui_mgmt_checks_failed(why: String) -> String { f("gpui.mgmt.checks.failed", ["why": why]) }
+
+    /// gpui.mgmt.checks.more = {n, plural, one {# more} other {# more}}
+    static func gpui_mgmt_checks_more(n: Int) -> String { f("gpui.mgmt.checks.more", ["n": String(n)]) }
+
+    /// gpui.mgmt.bom.each = {price} each for {n}
+    static func gpui_mgmt_bom_each(price: String, n: String) -> String { f("gpui.mgmt.bom.each", ["price": price, "n": n]) }
+
+    /// gpui.mgmt.bom.out = Not enough in the fab's stock: {n} for {need} needed
+    static func gpui_mgmt_bom_out(n: String, need: String) -> String { f("gpui.mgmt.bom.out", ["n": n, "need": need]) }
+
+    /// gpui.mgmt.bom.low = Low in the fab's stock: {n}
+    static func gpui_mgmt_bom_low(n: String) -> String { f("gpui.mgmt.bom.low", ["n": n]) }
+
+    /// gpui.mgmt.bom.in = In the fab's stock: {n}
+    static func gpui_mgmt_bom_in(n: String) -> String { f("gpui.mgmt.bom.in", ["n": n]) }
+
+    /// gpui.mgmt.bom.cost = ≈ {cost} a board
+    static func gpui_mgmt_bom_cost(cost: String) -> String { f("gpui.mgmt.bom.cost", ["cost": cost]) }
+
+    /// gpui.mgmt.bom.cost.least = at least {cost} a board
+    static func gpui_mgmt_bom_cost_least(cost: String) -> String { f("gpui.mgmt.bom.cost.least", ["cost": cost]) }
+
+    /// gpui.mgmt.life.since = since {day}, {n, plural, one {# reading} other {# readings}}
+    static func gpui_mgmt_life_since(day: String, n: Int) -> String { f("gpui.mgmt.life.since", ["day": day, "n": String(n)]) }
+
+    /// gpui.mgmt.life.one = History starts {day}: the graphs fill in as the fab's stock is checked again, every six hours.
+    static func gpui_mgmt_life_one(day: String) -> String { f("gpui.mgmt.life.one", ["day": day]) }
+
+    /// gpui.mgmt.life.now = Now: {cost} a board in parts; {n} of {lines} lines in stock.
+    static func gpui_mgmt_life_now(cost: String, n: String, lines: String) -> String { f("gpui.mgmt.life.now", ["cost": cost, "n": n, "lines": lines]) }
+
+    /// gpui.mgmt.life.part.now = Now: {stock} in stock, {price} each.
+    static func gpui_mgmt_life_part_now(stock: String, price: String) -> String { f("gpui.mgmt.life.part.now", ["stock": stock, "price": price]) }
+
+    /// gpui.mgmt.life.instock = Lines in stock (of {lines})
+    static func gpui_mgmt_life_instock(lines: String) -> String { f("gpui.mgmt.life.instock", ["lines": lines]) }
+
+    /// gpui.mgmt.checks.on = on {host}
+    static func gpui_mgmt_checks_on(host: String) -> String { f("gpui.mgmt.checks.on", ["host": host]) }
+
+    /// gpui.mgmt.life.unknown.n = lifecycle unknown for {n}
+    static func gpui_mgmt_life_unknown_n(n: String) -> String { f("gpui.mgmt.life.unknown.n", ["n": n]) }
+
+    /// gpui.mgmt.life.unknown.tip = Not checked yet: {a}. The distributors state none: {b}.
+    static func gpui_mgmt_life_unknown_tip(a: String, b: String) -> String { f("gpui.mgmt.life.unknown.tip", ["a": a, "b": b]) }
+
+    /// gpui.mgmt.bom.stock.out = out {n}
+    static func gpui_mgmt_bom_stock_out(n: String) -> String { f("gpui.mgmt.bom.stock.out", ["n": n]) }
+
+    /// gpui.mgmt.bom.stock.low = low {n}
+    static func gpui_mgmt_bom_stock_low(n: String) -> String { f("gpui.mgmt.bom.stock.low", ["n": n]) }
+
+    /// gpui.mgmt.life.price.since = since {day}
+    static func gpui_mgmt_life_price_since(day: String) -> String { f("gpui.mgmt.life.price.since", ["day": day]) }
 }

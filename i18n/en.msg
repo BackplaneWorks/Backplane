@@ -1766,6 +1766,16 @@ gpui.acct.renew.the.sync.token = Renew the sync token
 gpui.acct.make.a.sync.token = Make a sync token
 gpui.acct.make.the.sync.token = Make the sync token
 gpui.acct.add.claude.sync = Add Claude (sync)
+gpui.acct.signed.out = signed out
+gpui.acct.can.t.tell.who.is = can't tell who is signed in
+gpui.acct.also.added.as = Also added as
+gpui.acct.the.same.account.counted.once = the same account, counted once
+gpui.acct.claude.code.is.signed.in = Claude Code is signed in without a subscription (a Console or API key): it does not say whose
+gpui.acct.codex.is.signed.in.with = Codex is signed in with an API key: it does not say whose
+gpui.acct.codex.did.not.say.who = Codex did not say who is signed in
+gpui.acct.claude.code.did.not.say = Claude Code did not say who is signed in
+gpui.acct.anthropic.api.key.is.set = ANTHROPIC_API_KEY is set: Claude Code uses that key, not a sign-in
+gpui.acct.the.cli.is.signed.in = The CLI is signed in but did not give an email
 
 # ---- gpui-b: keys, ui, files, history ----
 gpui.send.the.message = Send the message

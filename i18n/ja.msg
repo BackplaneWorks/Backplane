@@ -1789,6 +1789,16 @@ gpui.acct.renew.the.sync.token = 同期トークンを更新
 gpui.acct.make.a.sync.token = 同期トークンを作成
 gpui.acct.make.the.sync.token = 同期トークンを作成する
 gpui.acct.add.claude.sync = Claude（同期）を追加
+gpui.acct.signed.out = サインアウト中
+gpui.acct.can.t.tell.who.is = 誰がサインインしているか分かりません
+gpui.acct.also.added.as = 次の名前でも追加済み:
+gpui.acct.the.same.account.counted.once = 同じアカウントとして1つに数えます
+gpui.acct.claude.code.is.signed.in = Claude Codeはサブスクリプションなし(ConsoleまたはAPIキー)でサインインしています: 誰のものかは分かりません
+gpui.acct.codex.is.signed.in.with = CodexはAPIキーでサインインしています: 誰のものかは分かりません
+gpui.acct.codex.did.not.say.who = Codexは誰がサインインしているか答えませんでした
+gpui.acct.claude.code.did.not.say = Claude Codeは誰がサインインしているか答えませんでした
+gpui.acct.anthropic.api.key.is.set = ANTHROPIC_API_KEYが設定されています: Claude Codeはサインインではなくそのキーを使います
+gpui.acct.the.cli.is.signed.in = CLIはサインインしていますがメールアドレスを返しませんでした
 
 # ---- gpui-b: keys, ui, files, history ----
 gpui.send.the.message = メッセージを送信
