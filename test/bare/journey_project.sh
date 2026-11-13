@@ -89,7 +89,8 @@ phase "Schematic"; if markt sch 720; then S_T=$(since); tms schematic-painted ra
   # the pane must show the schematic frame, not just be ready (rerun 3: SCH made, never shown, PCB still in the pane); KiCad's own
   # "Load Schematic" progress dialogs are counted, on which runtime
   NLOAD=$(grep -h '"kicad_info"' "$HH/win.log" | grep -o '"dialogs":\[[^]]*\]' | grep -c 'Load Schematic')
-  echo "schematic: $* after the click; Load Schematic seen in $NLOAD reports; runtime $(basename "$KDIR")" | tee "$OUT/logs/schematic.txt"
+  NRE=$(grep -c 'kicad_unshown' "$HH/win.log" 2>/dev/null)   # lane B's re-ask of a frame KiCad listed but did not show (c45798ffd)
+  echo "schematic: $* after the click; Load Schematic seen in $NLOAD reports; show re-asked $NRE times; runtime $(basename "$KDIR")" | tee "$OUT/logs/schematic.txt"
   if [ "${1:-}" = ready ] && [ "${3:-}" = SCH ]; then ok "Schematic: shown ($*)"
   else bad "Schematic clicked, but the pane shows ${3:--} ($*; $(basename "$KDIR"))"; cut_ 1 schematic "Schematic on a fresh install left the pane on ${3:--}: the schematic editor was made but not shown ($(basename "$KDIR"))"; fi
   S_D=$(python3 -c "print(round($S_T - ${E_T:-$S_T}))")

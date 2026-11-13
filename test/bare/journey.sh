@@ -179,7 +179,7 @@ for p in $RT; do [ ! -s "$MAN" ] || on_desktop $p || cut_ 3 runtime "$p is not o
 
 # --- 2. first start, as from the applications menu ---
 ENVS=(-e DISPLAY=$DISP -e GDK_BACKEND=x11 -e XDG_RUNTIME_DIR=$PH/.run -e BACKPLANE_AGENTS=/opt/standins/bin -e BACKPLANE_NO_TAILSCALE=1 -e BACKPLANE_NO_UPDATE=1
-      -e BACKPLANE_ORDER_SERVER=http://127.0.0.1:9 -e BACKPLANE_GPUI_RECTS=1 -e BACKPLANE_GPUI_LOOPTRACE=1 -e LP_NUM_THREADS=2 -e LIBGL_ALWAYS_SOFTWARE=1 -e BARE_COEDIT_OUT=$PH/coedit.json -e BARE_COEDIT_PCB=$PH/Documents/pic_programmer/pic_programmer.kicad_pcb)
+      -e BACKPLANE_ORDER_SERVER=http://127.0.0.1:9 -e BACKPLANE_GPUI_RECTS=1 -e BACKPLANE_GPUI_LOOPTRACE=1 -e BACKPLANE_KICAD_DEBUG=1 -e LP_NUM_THREADS=2 -e LIBGL_ALWAYS_SOFTWARE=1 -e BARE_COEDIT_OUT=$PH/coedit.json -e BARE_COEDIT_PCB=$PH/Documents/pic_programmer/pic_programmer.kicad_pcb)
 mkdir -p "$HH/.run"; chmod 700 "$HH/.run"
 launch() { docker exec -d -u person -w $PH -e HOME=$PH "${ENVS[@]}" "$C" sh -c "echo \$\$ > $PH/.client.pid; exec $PH/.local/bin/backplane-app $* >>$PH/win.log 2>&1"; }
 HUBH=$HH/.backplane/hub
