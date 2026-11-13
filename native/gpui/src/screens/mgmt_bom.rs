@@ -175,6 +175,8 @@ pub fn edit_note(said: Option<&(bool, String)>, last: Option<&Value>) -> Option<
     if what == "undone" { return Some(("ok", trs("Put back."), false)) }
     let undo = last.map_or("", |l| l["undo"].as_str().unwrap_or("")); let changed = last.map_or(0, |l| l["changed"].as_u64().unwrap_or(0));
     if changed == 0 { return Some(("dim", trs("Nothing to change."), false)) }
+    // co-edit: the person is editing those symbols in KiCad; KiCad applies the change when they finish there
+    if last.map_or(0, |l| l["deferred"].as_u64().unwrap_or(0)) > 0 { return Some(("dim", trs("You are editing it in KiCad: the change goes in when you finish there."), false)) }
     Some(match (what.as_str(), undo) {
         ("kicad", "kicad") => ("ok", trs("Changed in KiCad: Ctrl+Z there takes it back; save there to keep it."), true),
         ("kicad", _) => ("ok", trs("Changed in KiCad; save there to keep it."), true),
