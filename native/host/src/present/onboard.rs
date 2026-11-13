@@ -336,7 +336,7 @@ fn agents(f: &Facts, session: &Value) -> Step {
 }
 
 /// Where Backplane KiCad's releases are: the fallback when the install cannot run here.
-pub const KICAD_RELEASES: &str = "https://github.com/i2cjak/Backplane_KiCad/releases";
+pub const KICAD_RELEASES: &str = "https://github.com/BackplaneWorks/Backplane_KiCad/releases";
 pub const APK_RELEASES: &str = "https://github.com/BackplaneWorks/Backplane/releases/latest";
 pub const IOS_GUIDE: &str = "https://github.com/BackplaneWorks/Backplane/blob/main/docs/install.md#phones";
 pub const KICAD_STOCK: &str = "https://www.kicad.org/download/";

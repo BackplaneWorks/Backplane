@@ -3,7 +3,7 @@
 n=$(cat "$RIG/runs" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "$RIG/runs"
 echo "Downloading $5"; sleep 5
 echo "Checking the checksum"; sleep 2
-if [ "$n" = 1 ]; then echo "Could not download https://github.com/i2cjak/Backplane_KiCad/releases/download/backplane-kicad-v$3/$5" >&2; exit 1; fi
+if [ "$n" = 1 ]; then echo "Could not download https://github.com/BackplaneWorks/Backplane_KiCad/releases/download/backplane-kicad-v$3/$5" >&2; exit 1; fi
 echo "Unpacking"; sleep 2
 d=$1/$3; mkdir -p "$d/bin" "$d/share/backplane"
 printf '#!/bin/sh\necho %s\n' "$3" > "$d/$8"; chmod +x "$d/$8"

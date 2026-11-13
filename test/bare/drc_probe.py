@@ -7,9 +7,8 @@ where it does not. Three boards:
   rules   the demo's rules (0.508 mm): the track must be reported with actual 0 (it overlaps GND copper)
   tight   every rule at 0.1 mm (net classes, the GND zone; board minimum 0.05): the track must be reported at all (a short)
   control the control track, demo's rules: reported with actual 0 (the probe itself works)
-The check is named `drc-zone-fill-short`. On a fork runtime before 10.99.0-bp.12.1 without the capability "drc-zone-guard" a miss is
-KNOWN-RED ("DRC zone-fill triangulation, fixed in bp.12.1"), shown by name and not failing the run; from bp.12.1 on (or with the
-capability) a miss is a FAIL. With --stock-cli the `tight` and `rules` boards are exported with the fork's downgrade and stock KiCad's DRC is
+The check is named `drc-zone-fill-short`. A miss is a FAIL (the gate's runtime is bp.12.1 or later since the pin moved; it was KNOWN-RED
+on bp.10 until then). The runtime's version and whether it has "drc-zone-guard" are said with the result. With --stock-cli the `tight` and `rules` boards are exported with the fork's downgrade and stock KiCad's DRC is
 asked too; whether it catches the short is recorded (NOTE), never a failure. Exit 1 on a FAIL.
 """
 import argparse, json, os, re, shutil, subprocess, sys, uuid
@@ -113,10 +112,8 @@ def main():
     seen = f"demo rules: {c['rules']['fork'] or 'nothing'}; 0.1 mm rules: {c['tight']['fork'] or 'nothing'}"
     if caught:
         print(f"PASS {NAME}: DRC ({ver}) reports the short inside the GND fill ({seen})")
-    elif must:
-        print(f"FAIL {NAME}: DRC ({ver}) misses the short inside the GND fill, which bp.12.1 and later must catch ({seen})"); fail = 1
     else:
-        print(f"KNOWN-RED {NAME}: {WHY}; DRC ({ver}) misses it ({seen})")
+        print(f"FAIL {NAME}: DRC ({ver}{', drc-zone-guard' if must else ', no drc-zone-guard'}) misses the short inside the GND fill ({seen})"); fail = 1
     if a.stock_cli:
         for k in ("rules", "tight"):
             print(f"NOTE {NAME}: stock KiCad on the downgraded '{k}' board {'catches' if c[k].get('stock_ok') else 'misses'} it ({c[k].get('stock') or 'nothing'})")
