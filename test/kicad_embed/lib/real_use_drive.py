@@ -67,6 +67,29 @@ def kicad_report(tag):
     return rs[-1] if rs else {}
 def windows(): return json.loads(sh("python3", DRV, "list-windows") or "[]")
 
+def xfocus():
+    """X's keyboard focus: the window and its parents up to the root, each as (id, WM_NAME, WM_CLASS)."""
+    import ctypes, ctypes.util
+    x = ctypes.CDLL(ctypes.util.find_library("X11")); vp, ul = ctypes.c_void_p, ctypes.c_ulong
+    x.XOpenDisplay.restype = vp; x.XOpenDisplay.argtypes = [ctypes.c_char_p]
+    d = x.XOpenDisplay(os.environ.get("DISPLAY", ":0").encode())
+    if not d: return []
+    w = ul(); rev = ctypes.c_int(); x.XGetInputFocus.argtypes = [vp, ctypes.POINTER(ul), ctypes.POINTER(ctypes.c_int)]
+    x.XGetInputFocus(d, ctypes.byref(w), ctypes.byref(rev))
+    x.XFetchName.argtypes = [vp, ul, ctypes.POINTER(ctypes.c_char_p)]
+    x.XQueryTree.argtypes = [vp, ul, ctypes.POINTER(ul), ctypes.POINTER(ul), ctypes.POINTER(vp), ctypes.POINTER(ctypes.c_uint)]
+    class CH(ctypes.Structure): _fields_ = [("name", ctypes.c_char_p), ("cls", ctypes.c_char_p)]
+    x.XGetClassHint.argtypes = [vp, ul, ctypes.POINTER(CH)]
+    out, cur = [], w.value
+    for _ in range(12):
+        if cur in (0, 1): out.append(hex(cur)); break
+        nm = ctypes.c_char_p(); x.XFetchName(d, cur, ctypes.byref(nm)); ch = CH(); x.XGetClassHint(d, cur, ctypes.byref(ch))
+        out.append([hex(cur), (nm.value or b"").decode("utf-8", "replace")[:40], (ch.cls or b"").decode()])
+        root, par, kids, n = ul(), ul(), vp(), ctypes.c_uint()
+        if not x.XQueryTree(d, cur, ctypes.byref(root), ctypes.byref(par), ctypes.byref(kids), ctypes.byref(n)) or par.value in (0, root.value): break
+        cur = par.value
+    x.XCloseDisplay.argtypes = [vp]; x.XCloseDisplay(d)
+    return out
 def shot(name): sh("import", "-window", "root", os.path.join(OUT, "shots", f"{name}.png"), timeout=20)
 # --- dialogs: KiCad windows that are neither an editor frame nor embedded: recorded, then Return
 STOP = threading.Event(); KNOWN = set(); PAUSE = threading.Event()  # PAUSE: a journey opens KiCad's dialogs on purpose
@@ -639,13 +662,24 @@ if "plan" in JOURNEYS and SOCK:
             RESULTS[f"{tag}_toggled"] = {"ms": None, "ok": int(ch and not m)}
             if m: print(f"JANK {tag}: a menu opened ({m[0]['w']}x{m[0]['h']})", flush=True); shot(f"{tag}_menu"); rt("key", "Escape"); time.sleep(0.4)
             return ch
-        # A. the person's key straight after opening the board, before any click on the canvas
-        tab("PCB", "plan_board", 1.2)
-        ok = toggled("plan_key_no_click", press_plan_key)
-        RESULTS["plan_key_without_click_ok"] = {"ms": None, "ok": int(ok)}
-        print(f"INFO plan view by {PLAN_KEY} with no click on the canvas: {'toggled' if ok else 'nothing'} (BACKPLANE_COMMIT {bc})", flush=True)
-        shot("plan_key_no_click")
-        if STATE["on"]: toggled("plan_off_for_calibration", action_toggle)
+        # A. the person's key with no click on the canvas: (a) straight after Edit (the last click was Backplane's Edit button: what a person
+        # does), (b) after the pane's Full size (lane J's embed_plan_person_e2e), (c) after a click on the Board tab. Where X's keyboard focus
+        # is each time (the window and its parents) and whether KiCad says its frame has the keyboard (FrameInfo.focused).
+        def focus_now(tag):
+            fo = xfocus(); kf = (kframes().get("PCB") or {})
+            RESULTS[f"{tag}_focus"] = {"ms": None, "x": fo, "kicad_frame_focused": kf.get("focused")}
+            print(f"INFO focus {tag}: X focus {fo}; KiCad PCB frame focused={kf.get('focused')}", flush=True)
+        for case, prep in (("after_edit", None), ("after_full_size", "kicad:full"), ("after_board_tab", "kicad-tab:PCB")):
+            if prep:
+                click_ctl(prep); time.sleep(1.5)
+                if prep == "kicad:full": click_ctl(prep); time.sleep(1.5)  # Full size on, then off again: the pane as it was
+            focus_now(f"plan_key_{case}")
+            ok = toggled(f"plan_key_{case}", press_plan_key)
+            RESULTS[f"plan_key_{case}_ok"] = {"ms": None, "ok": int(ok)}
+            print(f"INFO plan view by {PLAN_KEY} {case.replace('_', ' ')}, no click on the canvas: {'toggled' if ok else 'nothing'} (BACKPLANE_COMMIT {bc})", flush=True)
+            shot(f"plan_key_{case}")
+            if STATE["on"]: toggled(f"plan_off_{case}", action_toggle)
+        RESULTS["plan_key_without_click_ok"] = {"ms": None, "ok": RESULTS["plan_key_after_edit_ok"]["ok"]}
         rt("click", CX, PANE["y"] + PANE["h"] - 30); time.sleep(0.3); rt("key", "Home"); time.sleep(1.0)
         to_screen = calibrate()
         RESULTS["plan_calibrated"] = {"ms": None, "ok": int(to_screen is not None)}
@@ -745,6 +779,48 @@ if "plan" in JOURNEYS and SOCK:
         time.sleep(2); shot("plan_proposed")
         if STATE["on"]: toggled("plan_view_off", action_toggle)  # plan view off again
 # 8. schematic: pan/zoom there too
+# 7c0. memory: KiCad's RSS / PSS (its process tree, smaps_rollup) after each editor a person opens: the board, the schematic, the
+# footprint editor, the symbol editor, GerbView on the board's Gerbers, 3D. Each step settles 6 s. For attributing KiCad's ~4 GB.
+def mem_detail(pid):
+    out = {"rss_mb": None, "pss_mb": None, "anon_mb": None, "file_mb": None}
+    pids = [pid]
+    try:
+        for p_ in os.listdir("/proc"):
+            if p_.isdigit():
+                try:
+                    if int(open(f"/proc/{p_}/stat").read().split(")")[1].split()[1]) == pid: pids.append(int(p_))
+                except Exception: pass
+    except Exception: pass
+    tot = {"Rss": 0, "Pss": 0, "Anonymous": 0}
+    for q in pids:
+        try:
+            for l in open(f"/proc/{q}/smaps_rollup"):
+                k = l.split(":")[0]
+                if k in tot: tot[k] += int(l.split()[1])
+        except Exception: pass
+    out.update(rss_mb=tot["Rss"] // 1024, pss_mb=tot["Pss"] // 1024, anon_mb=tot["Anonymous"] // 1024, file_mb=(tot["Rss"] - tot["Anonymous"]) // 1024, procs=len(pids))
+    return out
+if "memory" in JOURNEYS and SOCK and MEM["pid"]:
+    PAUSE.set()
+    steps = []
+    def mstep(name, settle=6.0):
+        time.sleep(settle); m = mem_detail(MEM["pid"]); steps.append([name, m]); RESULTS[f"mem_{name}"] = {"ms": None, **m}
+        print(f"PERF mem_{name} {m['rss_mb']}MB pss={m['pss_mb']} anon={m['anon_mb']} file={m['file_mb']} frames={sorted(kframes())}", flush=True)
+    mstep("board", 2.0)
+    tab("SCH", "mem_sch_tab", 1.5); mstep("schematic")
+    ipc("show-frame", SOCK, "fp"); mstep("footprint_editor")
+    ipc("show-frame", SOCK, "sym"); mstep("symbol_editor")
+    tab("PCB", "mem_back_pcb", 1.5)
+    cli = os.environ.get("KICAD_CLI") or ""; mfg = os.path.join(OUT, "mfg_mem"); os.makedirs(mfg, exist_ok=True)
+    if os.path.exists(cli) and PCB:
+        subprocess.run([cli, "pcb", "export", "gerbers", "-o", mfg + "/", PCB], capture_output=True, timeout=300)
+        subprocess.run([cli, "pcb", "export", "drill", "-o", mfg + "/", PCB], capture_output=True, timeout=300)
+    gf = sorted(f for f in glob.glob(os.path.join(mfg, "*")) if re.search(r"\.(g[a-z0-9]{1,3}|drl|gbr)$", f, re.I) and not f.endswith(".gbrjob"))
+    if gf: ipc("open-gerbers", SOCK, ",".join(gf), timeout=120); mstep("gerbview")
+    tab("PCB_3D", "mem_3d_tab", 1.5); mstep("3d", 10.0)
+    tab("PCB", "mem_back", 1.5); mstep("end", 3.0)
+    print("INFO memory steps: " + json.dumps(steps), flush=True)
+    PAUSE.clear()
 # 7d. checks (bp.13 batch 3, embed-checks): DRC and ERC in the open editors (RunChecks) as the client's Checks panel can run them: the call
 # to ET_CHECKS_DONE, a pan of the board meanwhile (does the editor stay smooth), the counts, GetMarkers, and a picture of the markers.
 def wait_event(since, etype, secs, pred=lambda e: True):

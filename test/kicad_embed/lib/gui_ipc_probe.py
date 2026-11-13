@@ -683,6 +683,13 @@ def main() -> None:
             print(json.dumps({"ok": True, "frame": _decode_frame(f[1][0]) if 1 in f else {}, "loaded": dec(2), "failed": dec(3), "errors": dec(4)}))
             return
 
+        if cmd == "show-frame":  # ShowFrame KIND [ITEM] (as the host would; no geometry: the frame's current one)
+            req = pb_field_varint(1, EMBED_KIND_MAP[args[0]]) + (pb_field_str(3, args[1]) if len(args) > 1 and args[1] else b"")
+            _, val = cli.call("kiapi.backplane.embed.ShowFrame", req)
+            f = pb_decode_fields(val)
+            print(json.dumps({"ok": True, "frame": _decode_frame(f[1][0]) if 1 in f else {}}))
+            return
+
         if cmd == "hide-frame":  # HideFrame KIND
             cli.call("kiapi.backplane.embed.HideFrame", pb_field_varint(1, EMBED_KIND_MAP[args[0]]))
             print(json.dumps({"ok": True}))
