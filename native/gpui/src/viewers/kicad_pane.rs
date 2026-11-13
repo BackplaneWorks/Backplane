@@ -476,7 +476,15 @@ impl KicadPane {
         }
         if self.container.is_some() || self.attached { return }
         let Some(top) = top else { self.info = json!({"state": "failed", "reason": crate::i18n::trs("this window cannot hold another program's (only X11 and XWayland for now)")}); self.attached = true; return };
-        self.toplevel = top; self.home = top; self.container = nc::container_for(top, &self.project);
+        self.toplevel = top; self.home = top;
+        // the project's container kept from its last View (KiCad's frames still in it, attached): the editor is mapped in this very frame where
+        // it was, with no round trip and no frame of the pane's background
+        if let Some(k) = take_kept(top, &self.project) {
+            self.container = Some(k.container); self.ever_shown = k.ever_shown; self.frames = nc::frames(k.container);
+            if let (Some(r), Some(w)) = (k.rect, self.want()) { nc::place_local(k.container, Some(r), Some(w), &self.ever_shown, &mut self.last_root); self.placed = Some((Some(r), Some(w), Vec::new())); }
+        } else {
+            self.container = nc::container_for(top, &self.project);
+        }
         let Some(c) = self.container else {
             let why = if cfg!(windows) { crate::i18n::trs("could not create container window") } else { crate::i18n::trs("no X11 connection") };
             self.info = json!({"state": "failed", "reason": why});
@@ -550,7 +558,19 @@ impl KicadPane {
     }
     /// Back to the viewer: the editor's windows leave the pane (KiCad stays warm in the hub).
     pub fn detach(&mut self) {
-        if let Some(c) = self.container.take() { nc::place(c, None, None, None, &mut self.last_root); self.rpc("editor.kicad.detach", json!({"project": self.project})); nc::grab_escape(self.toplevel, false); nc::destroy(c); }
+        let Some(c) = self.container.take() else { return };
+        nc::place(c, None, None, None, &mut self.last_root); nc::grab_escape(self.toplevel, false);
+        // kept, unmapped, with KiCad's frames in it (still attached in the hub): the next Edit of this project in this window maps it at once
+        // (a fork that maps locally; the oldest kept beyond KEEP is let go as before)
+        if self.info["mode"] == "fork" && self.info["local_map"] == true && self.info["state"] == "ready" && self.toplevel == self.home {
+            let rect = self.placed.as_ref().and_then(|(at, _, _)| *at);
+            for old in keep(Kept { toplevel: self.toplevel, project: self.project.clone(), container: c, ever_shown: self.ever_shown.clone(), rect }) {
+                self.rpc("editor.kicad.detach", json!({"project": old.project})); nc::destroy(old.container);
+            }
+            self.rpc("editor.kicad.detach", json!({"project": self.project, "keep": true}));
+            return;
+        }
+        self.rpc("editor.kicad.detach", json!({"project": self.project})); nc::destroy(c);
     }
     /// The `{"kicad":{...}}` script step's answer: the container and every frame (geometry, mapped, painted), the hub's state, who has the keys.
     pub fn report(&self) -> Value {
@@ -684,6 +704,25 @@ pub fn local(hub_addr: Option<&str>, thread: &Value) -> bool {
     match hub_addr.map(|a| a.rsplit_once(':').map_or(a, |(h, _)| h)) { Some(h) => h.is_empty() || matches!(h, "127.0.0.1" | "localhost" | "[::1]"), None => true }
 }
 
+/// A pane's container after View, kept for its next Edit (detach, decide).
+struct Kept { toplevel: u64, project: String, container: u64, ever_shown: Vec<u64>, rect: Option<nc::R> }
+static KEPT: std::sync::Mutex<Vec<Kept>> = std::sync::Mutex::new(Vec::new());
+const KEEP: usize = 3;
+/// Keep `k` (replacing one of the same window and project); answers those let go to stay within KEEP.
+fn keep(k: Kept) -> Vec<Kept> {
+    let mut m = KEPT.lock().unwrap();
+    let mut out: Vec<Kept> = Vec::new();
+    if let Some(i) = m.iter().position(|x| x.toplevel == k.toplevel && x.project == k.project) { out.push(m.remove(i)); }
+    m.push(k);
+    while m.len() > KEEP { out.push(m.remove(0)); }
+    out.retain(|o| !m.iter().any(|x| x.container == o.container));
+    out
+}
+fn take_kept(toplevel: u64, project: &str) -> Option<Kept> {
+    let mut m = KEPT.lock().unwrap();
+    m.iter().position(|x| x.toplevel == toplevel && x.project == project).map(|i| m.remove(i))
+}
+
 /// The project last asked warm (kicad_warm), so each project shown in a row is asked once.
 static WARM_LAST: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
 
@@ -734,8 +773,9 @@ impl crate::Backplane {
     /// Edit draws the editor at once instead of starting KiCad. Asked once per project shown in a row; only for a hub on this machine. Linux
     /// for now (a fork started with no window to live in parks its frames; Windows not yet checked).
     pub(crate) fn kicad_warm(&mut self) {
-        if !cfg!(target_os = "linux") { return }
         let thread = &self.data["thread"];
+        if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {}", json!({"kicad_pic": thread["id"], "viewer_open": thread["viewer"]["open"], "panel": self.data["panel"], "editing": self.screens.kicad.is_some()})); }
+        if !cfg!(target_os = "linux") { return }
         if !local(self.screens.attacher.target.as_ref().map(|t| t.addr.as_str()), thread) { return }
         let tid = crate::screens::attach::raw_id(thread["id"].as_str().unwrap_or(""));
         if tid.is_empty() { return }
@@ -800,7 +840,7 @@ pub fn strip<V: 'static>(cx: &mut Context<V>, light: bool, pane: &Entity<KicadPa
             .text_color(c(if on { "text" } else { "dim" })).when(on, |d| d.border_b_2().border_color(c("accent"))).hover(|s| s.bg(c("raise")))
             .tooltip(crate::keys::tip(&crate::i18n::trs(label), "Ctrl+Tab", light))
             .child(crate::i18n::trs(label))
-            .on_click(move |_, _, cx| { let k = k.clone(); p.update(cx, |p, cx| p.show_kind(&k, cx)); }));
+            .on_mouse_down(MouseButton::Left, move |_, _, cx| { let k = k.clone(); p.update(cx, |p, cx| p.show_kind(&k, cx)); }));
     }
     // a file changed on disk over the person's unsaved edits: said here too (KiCad asks in its own infobar), with the same two answers
     if !pane.read(cx).conflicts.is_empty() {
