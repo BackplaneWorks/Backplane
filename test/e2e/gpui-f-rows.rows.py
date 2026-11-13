@@ -42,6 +42,41 @@ if want('F15'):
     same = bool(files) and open(files[0], 'rb').read()[:8] == b'\x89PNG\r\n\x1a\n'
     log('F15-paste', chip and sent and same and told, 'a PNG on the X clipboard pasted with Ctrl+V: composer changed=%s; message posted=%s; stored as a PNG=%s (%s); the agent was told the path=%s' % (chip, sent, same, [os.path.relpath(f, OUT) for f in files][:1], told))
 
+# ---- F15 the lightbox (#1112): the pasted picture opened large; Ctrl+= zooms, a double click toggles 100%, a drag moves it, a click on it keeps it open,
+# Ctrl+0 fits it, its menu's Save image as writes the file the hub has, Esc and a click on the dimmed page close it. Sizes come from the client's probes.
+if want('F15') or want('F15L'):
+    pic = lambda: probes().get('lightbox:pic')
+    thumbs = lambda: [k for k in probes() if k.startswith('img:') and 'past' in k]
+    until(lambda: thumbs(), 15)
+    def open_lb():
+        t = probes()[thumbs()[0]]; xin('click', int(t['x'] + t['w'] / 2), int(t['y'] + t['h'] / 2)); return until(lambda: pic() is not None, 10)
+    opened = bool(thumbs()) and open_lb(); pause(1); shot('lb-open')
+    p0 = pic() or {}; fit_ok = abs(p0.get('w', 0) - 64) < 1.5 and abs(p0.get('h', 0) - 48) < 1.5
+    chord('ctrl equal'); until(lambda: abs((pic() or {}).get('w', 0) - 80) < 1.5, 5); step_ok = abs((pic() or {}).get('w', 0) - 80) < 1.5
+    chord('ctrl 0'); until(lambda: abs((pic() or {}).get('w', 0) - 64) < 1.5, 5)
+    c = pic() or {'x': 0, 'y': 0, 'w': 0, 'h': 0}; xin('dblclick', int(c['x'] + c['w'] / 2), int(c['y'] + c['h'] / 2)); until(lambda: abs((pic() or {}).get('w', 0) - 128) < 1.5, 5)
+    toggle_ok = abs((pic() or {}).get('w', 0) - 128) < 1.5
+    for _ in range(14): chord('ctrl equal'); time.sleep(0.15)
+    pause(1); big = pic() or {}; shot('lb-zoomed'); area = probes().get('lightbox:area') or {}
+    # a drag over the picture moves it (it is wider than its area now) and does not close it
+    cx_, cy_ = int(area.get('x', 0) + 300), int(area.get('y', 0) + area.get('h', 0) / 2)
+    xin('drag', cx_, cy_, cx_ + 150, cy_ + 40); pause(1); moved = pic() or {}
+    pan_ok = bool(moved) and abs(moved.get('x', 0) - big.get('x', 0)) > 20
+    c = pic() or {'x': 0, 'y': 0, 'w': 0, 'h': 0}; xin('click', cx_, cy_); pause(1); stays = pic() is not None
+    chord('ctrl 0'); pause(1)
+    # its menu: Save image as writes the original (the test hook stands in for the file dialog)
+    c = pic() or {'x': 0, 'y': 0, 'w': 0, 'h': 0}; xin('click', int(c['x'] + c['w'] / 2), int(c['y'] + c['h'] / 2), 3); pause(1); shot('lb-menu')
+    has_save = 'ctx:Save image as…' in ctrls(); click_ctl('ctx:Save image as…')
+    saved = until(lambda: os.path.exists(P('saved.png')) and os.path.getsize(P('saved.png')) > 0, 10)
+    stored = glob.glob(P('home/attachments/*/*pasted*.png'))
+    same = saved and bool(stored) and open(P('saved.png'), 'rb').read() == open(stored[0], 'rb').read()
+    xin('key', 'Escape'); esc_ok = until(lambda: pic() is None, 5)
+    reopened = open_lb(); pause(0.5)
+    a = probes().get('lightbox:area') or {'x': 0, 'y': 0}; xin('click', int(a['x'] + 20), int(a['y'] + 20)); bg_ok = until(lambda: pic() is None, 5)
+    log('F15-lightbox', opened and fit_ok and step_ok and toggle_ok and pan_ok and stays and has_save and same and esc_ok and reopened and bg_ok,
+        'the pasted 64x48 picture opened large=%s at its own size=%s (lb-open.png); Ctrl+= made it 80 px wide=%s; a double click toggled to 2x (fit is 100%% here)=%s; 14 more Ctrl+= gave %s px (lb-zoomed.png) in an area %s px wide; a drag moved it=%s (x %s -> %s); a click on it kept it open=%s; its right-click menu had Save image as=%s (lb-menu.png) and the file written equals the stored attachment=%s; Esc closed it=%s; reopened=%s and a click on the dimmed page closed it=%s'
+        % (opened, fit_ok, step_ok, toggle_ok, round(big.get('w', 0)), round(area.get('w', 0)), pan_ok, round(big.get('x', 0)), round(moved.get('x', 0)), stays, has_save, same, esc_ok, reopened, bg_ok))
+
 # ---- F06 cards in the client: the approval, question and plan cards of a thread, answered with the mouse; the agent hears each answer
 if want('F06'):
     fake = lambda: open(P('fake.log')).read() if os.path.exists(P('fake.log')) else ''

@@ -24,6 +24,8 @@ pub const LOCAL_FILE_OPEN: &str = "local:file-open";
 pub const LOCAL_FILE_REVEAL: &str = "local:file-reveal";
 pub const LOCAL_COPY: &str = "local:copy";
 pub const LOCAL_COPY_IMAGE: &str = "local:copy-image";
+/// A picture's Save image as…: the original file, at full size (images.rs `Save`).
+pub const LOCAL_SAVE_IMAGE: &str = "local:save-image";
 pub const LOCAL_URL_OPEN: &str = "local:url-open";
 /// A file link's Open: inside Backplane (the hub's `link-file`: its project's thread, the viewer tab that draws it), never the system's app.
 pub const LOCAL_LINK_FILE: &str = "local:link-file";
@@ -46,9 +48,9 @@ pub fn link_items(href: &str, file: bool) -> Vec<Item> {
         /* i18n-ok: menu labels, drawn through trs in render */ _ => vec![item("Copy link", LOCAL_COPY, href.trim(), false)],
     }
 }
-/// The menu of a picture in a message: copy it, and when it is a file on the hub's machine open it, show it in its folder, or copy its path.
+/// The menu of a picture in a message: copy it, save it, and when it is a file on the hub's machine open it, show it in its folder, or copy its path.
 pub fn image_items(path: &str) -> Vec<Item> {
-    /* i18n-ok: menu labels, drawn through trs in render */ let mut v = vec![item("Copy image", LOCAL_COPY_IMAGE, "", false)];
+    /* i18n-ok: menu labels, drawn through trs in render */ let mut v = vec![item("Copy image", LOCAL_COPY_IMAGE, "", false), item("Save image as\u{2026}", LOCAL_SAVE_IMAGE, "", false)];
     /* i18n-ok: menu labels, drawn through trs in render */ if path.starts_with('/') || path.starts_with("~/") { v.extend([item("Open", LOCAL_FILE_OPEN, path, false), item("Show in folder", LOCAL_FILE_REVEAL, path, false), item("Copy path", LOCAL_COPY, path, false)]); }
     v
 }
@@ -201,6 +203,7 @@ impl Backplane {
             Some((a, v)) if a == LOCAL_COPY => { self.ctx_close(cx); cx.write_to_clipboard(ClipboardItem::new_string(v)); return }
             Some((a, v)) if a == LOCAL_URL_OPEN => { self.ctx_close(cx); cx.open_url(&v); return }
             Some((a, v)) if a == LOCAL_LINK_FILE || a == LOCAL_KICAD_EMBED => { self.ctx_close(cx); self.link_file(&v, a == LOCAL_KICAD_EMBED, cx); return }
+            Some((a, _)) if a == LOCAL_SAVE_IMAGE => { self.ctx_close(cx); if let Some(s) = self.screens.ctx_save.take() { self.save_image(s, cx); } return }
             Some((a, _)) if a == LOCAL_COPY_IMAGE => { self.ctx_close(cx); if let Some(img) = self.screens.ctx_img.take() { cx.write_to_clipboard(ClipboardItem::new_image(&img)); } return }
             // a second menu, where the first was (Move to group: the other groups, then New group…)
             Some((a, v)) if a == LOCAL_SUB => {
@@ -304,7 +307,9 @@ mod tests {
             [("Open", LOCAL_LINK_FILE), ("Open in KiCad (embedded)", LOCAL_KICAD_EMBED), ("Show in folder", LOCAL_FILE_REVEAL), ("Copy path", LOCAL_COPY)]);
         assert_eq!(l("file:///w/a.kicad_pcb", true).len(), 4); assert_eq!(l("/w/case.step", true).len(), 3, "a model has no KiCad to edit it");
         assert_eq!(l("https://x.io", false).iter().map(|x| x.1.as_str()).collect::<Vec<_>>(), [LOCAL_URL_OPEN, LOCAL_COPY]); assert_eq!(l("javascript:x", false).len(), 1);
-        assert_eq!(image_items("/h/a.png").iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), ["Copy image", "Open", "Show in folder", "Copy path"]); assert_eq!(image_items("").len(), 1);
+        assert_eq!(image_items("/h/a.png").iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), ["Copy image", "Save image as\u{2026}", "Open", "Show in folder", "Copy path"]);
+        assert_eq!(image_items("").iter().map(|i| i.action.as_str()).collect::<Vec<_>>(), [LOCAL_COPY_IMAGE, LOCAL_SAVE_IMAGE], "a picture with no file of its own (a web picture, a relative one) still copies and saves");
+        assert_eq!(image_items("docs/a.png").len(), 2);
     }
     #[test] fn the_thread_names_menu_offers_rename_its_place_and_the_hubs_thread_menu() {
         let d = j(r#"{"thread":{"id":"http://h:1|t7","menu":[{"label":"Diff","action":"diff","value":""},{"label":"Snooze","action":"snooze","value":"","options":[{"label":"1 hour","value":"1h"}]},{"label":"Delete","action":"row-delete","value":"t7","danger":true}]},

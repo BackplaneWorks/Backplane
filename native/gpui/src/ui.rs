@@ -845,7 +845,7 @@ impl Render for Backplane {
                     .children(crate::screens::bots::forms(cx, light, &self.screens.fields, &self.data))
                     .children(crate::screens::swarm::form(cx, light, &self.screens.fields, &self.data))
                     .children(crate::screens::palette::view(cx, light, &self.data, &self.screens.palette, &self.local, &self.selected))
-                    .children(crate::screens::images::lightbox(cx, self.screens.lightbox.as_ref()))
+                    .children(crate::screens::images::lightbox(cx, self.screens.lightbox.as_ref(), window.scale_factor()))
                 )
                 .children(crate::perf::mark("viewer"))
                 .children(crate::screens::viewer::is_open(thread).then(|| self.screens.parts.el(Backplane::viewer_part, StyleRefinement::default().flex_1().min_h_0(), cx)).and_then(|page| crate::screens::viewer::pane(cx, light, thread, page)))

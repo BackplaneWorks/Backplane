@@ -408,8 +408,15 @@ fn doc_img(cx: &mut Context<Backplane>, light: bool, img: &Img, key: &str, doc: 
             let mut frame = div().id(id).w(px(bw)).max_w_full().flex_none(); frame.style().aspect_ratio = Some(bw / bh.max(1.0));
             let (shown, n, link) = (pic.clone(), name.clone(), img.link.clone());
             let src_img = doc.imgs.decoded(&url).map_or(ImageSource::Image(pic), ImageSource::Render);
+            // the same menu as a message's pictures; Open, Show in folder and Copy path only for a file named by its full path
+            let file = if src.starts_with('/') || src.starts_with("~/") { src.clone() } else { String::new() };
+            let file_name = src.rsplit('/').next().unwrap_or("").split(['?', '#']).next().unwrap_or("").to_string();
+            let open = super::images::Shown { img: shown.clone(), name: if file_name.is_empty() { n.clone() } else { file_name }, file, src: doc.target.cloned().map(|t| (t, url.clone())), shrunk: doc.imgs.shrunk(&url) };
+            let open2 = open.clone();
             frame.overflow_hidden().cursor_pointer()
-                .on_click(cx.listener(move |this, _, _, cx| { match &link { Some(l) => this.open_link(l, cx), None => this.screens.lightbox = Some((shown.clone(), n.clone())) } cx.notify(); }))
+                .on_mouse_down(MouseButton::Right, cx.listener(move |this, e: &MouseDownEvent, _, cx| { cx.stop_propagation(); let s = &open2; this.screens.ctx_img = Some(s.img.clone());
+                    this.screens.ctx_save = Some(super::images::Save { img: s.img.clone(), name: s.name.clone(), src: s.src.clone(), shrunk: s.shrunk.is_some() }); this.ctx_open(e.position, super::ctxmenu::image_items(&s.file), cx); }))
+                .on_click(cx.listener(move |this, _, window, cx| { match &link { Some(l) => this.open_link(l, cx), None => this.lightbox_open(open.clone(), window, cx) } cx.notify(); }))
                 .child(gpui::img(src_img).size_full().object_fit(ObjectFit::Contain)).into_any_element()
         }
         (None, Some(Slot::Failed)) => {
@@ -471,13 +478,15 @@ pub fn images(cx: &mut Context<Backplane>, light: bool, list: &Value, key: &str,
                 // is drawn whole instead of being cut at the column's edge.
                 let (copy, ipath) = (img.clone(), it["path"].as_str().unwrap_or("").to_string());
                 let mut frame = div().w(px(bw)).max_w_full().flex_none(); frame.style().aspect_ratio = Some(bw / bh.max(1.0));
-                frame.overflow_hidden().cursor_pointer().on_mouse_down(MouseButton::Right, cx.listener(move |this, e: &MouseDownEvent, _, cx| { cx.stop_propagation(); this.screens.ctx_img = Some(copy.clone()); this.ctx_open(e.position, super::ctxmenu::image_items(&ipath), cx); }))
-                    .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| { this.screens.lightbox = Some((shown.clone(), n.clone())); cx.notify(); }))
+                let open = super::images::Shown { img: shown, name: n, file: ipath.clone(), src: target.cloned().map(|t| (t, url.to_string())), shrunk: imgs.shrunk(url) };
+                let save = super::images::Save { img: copy.clone(), name: open.name.clone(), src: open.src.clone(), shrunk: open.shrunk.is_some() };
+                frame.overflow_hidden().cursor_pointer().on_mouse_down(MouseButton::Right, cx.listener(move |this, e: &MouseDownEvent, _, cx| { cx.stop_propagation(); this.screens.ctx_img = Some(copy.clone()); this.screens.ctx_save = Some(save.clone()); this.ctx_open(e.position, super::ctxmenu::image_items(&ipath), cx); }))
+                    .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, window, cx| { this.lightbox_open(open.clone(), window, cx); }))
                     .child(gpui::img(imgs.decoded(url).map_or(ImageSource::Image(img), ImageSource::Render)).size_full().object_fit(ObjectFit::Contain)).into_any_element() }
             Slot::Loading => div().px_2().py_1().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("dim")).child(crate::i18n::tf("gpui.timeline.loading", &[("name", name.as_str().into())])).into_any_element(),
             Slot::Failed => div().px_2().py_1().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("bad")).child(crate::i18n::tf("gpui.timeline.could.not.load", &[("name", name.as_str().into())])).into_any_element(),
         };
-        row = row.child(div().id(SharedString::from(format!("img-{key}-{i}"))).max_w_full().child(el));
+        row = row.child(crate::ui::with_rect(div().id(SharedString::from(format!("img-{key}-{i}"))), || format!("img:{name}")).max_w_full().child(el));
     }
     if items.len() > MAX_IMAGES { row = row.child(div().px_2().py_1().text_size(px(12.)).text_color(c("dim")).child(crate::i18n::tf("gpui.timeline.more.images", &[("n", (items.len() - MAX_IMAGES).into())]))); }
     Some(row.into_any_element())
