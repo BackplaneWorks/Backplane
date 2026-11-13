@@ -75,9 +75,8 @@ pub fn message(field: &str, refs: &[String], value: &str) -> String {
 
 /// Whether the panel's edits go to the GUI as the person (`coedit::client_name(&Who::Person)`, "person:backplane-<pid>"): a co-editing
 /// KiCad (bp.13 on) puts them in the person's own undo; before that the name is an actor of its own and the panel offers its own Undo.
-/// Off for now: on bp.11 a commit begun as "person:…" is not found at its EndCommit ("does not has a commit in progress"; asked of the
-/// co-edit lane), so the edit would land outside any commit.
-pub const AS_PERSON: bool = false;
+
+pub const AS_PERSON: bool = true;
 /// Who takes a GUI edit back: "kicad" when it went as the person to a runtime that puts it in their undo (bp.13 on), else "panel" (the
 /// panel offers its own undo: the old value, `was`, written back).
 pub fn undo_by(version: &str, as_person: bool) -> &'static str {
@@ -98,6 +97,13 @@ async fn gui_doc(pro: &str) -> Option<(embed::GuiRoute, Value)> {
 }
 fn ok_of(v: &Value) -> Result<&Value, String> { if v["ok"] == true { Ok(&v["message"]) } else { Err(v["error"].as_str().or(v["why"].as_str()).unwrap_or("no answer").to_string()) } }
 
+/// An EndCommit for the document the commit was begun on: its header names the document, or KiCad's API takes a header-less commit
+/// request to the board editor (its pre-11 behaviour) and the schematic's commit is never ended.
+pub fn end_msg(id: &Value, action: &str, message: &str, doc: &Value) -> Value {
+    let mut m = json!({"id": id, "action": action, "header": {"document": doc}});
+    if !message.is_empty() { m["message"] = json!(message) }
+    m
+}
 /// Get, change and commit on one API (the GUI's, or the headless one through ipc::kicad_ipc). Answers how many symbols changed and the
 /// field's value before (the first changed symbol's: a line's symbols share it).
 async fn commit<F, Fut>(call: F, doc: Value, refs: &[String], field: &str, value: &str) -> Result<(usize, String), String>
@@ -109,10 +115,12 @@ where F: Fn(&'static str, Value) -> Fut, Fut: std::future::Future<Output = Value
     if todo.is_empty() { return Ok((0, was)) }
     let begun = call("kiapi.common.commands.BeginCommit", json!({"header": {"document": doc}})).await;
     let id = ok_of(&begun)?["id"].clone();
+    // from here the commit is ended on every path: committed, or dropped when anything fails (a commit left open holds the editor's
+    // handler for that client)
     let up = call("kiapi.common.commands.UpdateItems", json!({"header": {"document": doc}, "items": todo})).await;
-    if let Err(e) = ok_of(&up) { call("kiapi.common.commands.EndCommit", json!({"id": id, "action": "CMA_DROP"})).await; return Err(format!("UpdateItems: {e}")) }
-    let end = call("kiapi.common.commands.EndCommit", json!({"id": id, "action": "CMA_COMMIT", "message": message(field, refs, value)})).await;
-    ok_of(&end).map_err(|e| format!("EndCommit: {e}"))?;
+    if let Err(e) = ok_of(&up) { call("kiapi.common.commands.EndCommit", end_msg(&id, "CMA_DROP", "", &doc)).await; return Err(format!("UpdateItems: {e}")) }
+    let end = call("kiapi.common.commands.EndCommit", end_msg(&id, "CMA_COMMIT", &message(field, refs, value), &doc)).await;
+    if let Err(e) = ok_of(&end) { call("kiapi.common.commands.EndCommit", end_msg(&id, "CMA_DROP", "", &doc)).await; return Err(format!("EndCommit: {e}")) }
     Ok((todo.len(), was))
 }
 
@@ -123,10 +131,12 @@ pub async fn edit(hub: &Arc<Hub>, pro: &str, sch: &str, p: &Value) -> Result<Val
     if let Some((gui, doc)) = gui_doc(pro).await {
         let g = gui.clone();
         // as the person, never an agent's name: from bp.13 their Ctrl+Z takes it back
-        let who = if AS_PERSON { super::coedit::client_name(&super::coedit::Who::Person) } else { String::new() };
+        // BACKPLANE_BOM_CLIENT=hub: the tests' run with the hub's own client name, to compare what KiCad's undo does with each
+        let as_person = AS_PERSON && std::env::var("BACKPLANE_BOM_CLIENT").map_or(true, |v| v != "hub");
+        let who = if as_person { super::coedit::client_name(&super::coedit::Who::Person) } else { String::new() };
         let n = commit(move |ty, msg| { let (g, who) = (g.clone(), who.clone()); async move { if who.is_empty() { embed::gui_call(&g, ty, msg).await } else { embed::gui_call_as(&g, ty, msg, &who).await } } }, doc, &refs, &field, &value).await?;
         if n.0 > 0 { embed::unsaved_update(pro, |u| u.touched()); }
-        return Ok(json!({"via": "kicad", "changed": n.0, "field": field, "value": value, "was": n.1, "refs": refs, "undo": undo_by(&gui.version, AS_PERSON)}))
+        return Ok(json!({"via": "kicad", "changed": n.0, "field": field, "value": value, "was": n.1, "refs": refs, "undo": undo_by(&gui.version, as_person)}))
     }
     // no KiCad with it open: the headless one writes and saves, under the schematic's lock
     let ag = AGENTS.get().and_then(Weak::upgrade).ok_or("the hub's agents are not running")?;
@@ -197,6 +207,26 @@ mod tests {
         let d = plan(&items, &refs(&["U1"]), "dnp", "yes"); assert_eq!(d[0]["attributes"]["do_not_populate"], true); assert_eq!(current(&d[0], "dnp"), "yes");
         let fab = plan(&items, &refs(&["R1"]), "fab", "C25804"); assert_eq!(fab[0]["user_fields"][0]["name"], "LCSC");
         assert_eq!(plan(&items, &refs(&["R1"]), "footprint", "R:R_0402")[0]["footprint_field"]["text"]["text"], "R:R_0402");
+    }
+    /// A stand-in API: records each call, answers ok, or fails the named command.
+    fn fake(fail: &'static str, log: Arc<std::sync::Mutex<Vec<(String, Value)>>>) -> impl Fn(&'static str, Value) -> std::pin::Pin<Box<dyn std::future::Future<Output = Value> + Send>> {
+        move |ty, msg| { let log = log.clone(); Box::pin(async move {
+            log.lock().unwrap().push((ty.to_string(), msg));
+            if ty.ends_with(fail) && !fail.is_empty() && log.lock().unwrap().iter().filter(|(t, _)| t.ends_with(fail)).count() == 1 { return json!({"ok": false, "error": "no"}) }
+            match ty { "kiapi.common.commands.GetItems" => json!({"ok": true, "message": {"items": [sym("R1", 1, vec![])]}}), "kiapi.common.commands.BeginCommit" => json!({"ok": true, "message": {"id": {"value": "c1"}}}), _ => json!({"ok": true, "message": {}}) }
+        }) }
+    }
+    #[tokio::test] async fn a_commit_is_always_ended_on_the_schematic() {
+        let doc = json!({"type": "DOCTYPE_SCHEMATIC", "sheet_path": {}});
+        let refs = vec!["R1".to_string()];
+        for (fail, ends) in [("", vec!["CMA_COMMIT"]), ("UpdateItems", vec!["CMA_DROP"]), ("EndCommit", vec!["CMA_COMMIT", "CMA_DROP"])] {
+            let log = Arc::new(std::sync::Mutex::new(vec![]));
+            let r = commit(fake(fail, log.clone()), doc.clone(), &refs, "mpn", "X").await;
+            assert_eq!(r.is_ok(), fail.is_empty(), "{fail}: {r:?}");
+            let got: Vec<(String, Value)> = log.lock().unwrap().iter().filter(|(t, _)| t.ends_with("EndCommit")).cloned().collect();
+            assert_eq!(got.iter().map(|(_, m)| m["action"].as_str().unwrap().to_string()).collect::<Vec<_>>(), ends, "{fail}");
+            assert!(got.iter().all(|(_, m)| m["header"]["document"] == doc && m["id"]["value"] == "c1"), "every EndCommit names the schematic: {got:?}");
+        }
     }
     #[test] fn requests_are_checked() {
         assert!(check(&json!({"field": "colour", "refs": ["R1"], "value": "x"})).is_err());

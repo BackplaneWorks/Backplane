@@ -249,6 +249,9 @@ PY
   sleep 1.5
   python3 "$IPC_PY" save-doc "$API_SOCK" sch >/dev/null 2>&1 || true
   for _ in $(seq 20); do grep -q 'E2E-UNDO' "$PROJ/ecc83-pp.kicad_sch" && break; sleep 0.5; done
+  # the panel's commits were ended: another client's commit on the schematic goes through after them (a commit left open held the handler)
+  W2=$(python3 "$IPC_PY" agent-add-wire "$API_SOCK" 10 10 20 10 2>&1 || true)
+  check "After the panel's edits another client's schematic commit succeeds ($W2)" "$(python3 -c 'import json,sys; print(int(json.loads(sys.argv[1]).get("ok") is True))' "$W2" 2>/dev/null || echo 0)"
   check "Saved in KiCad, the MPN is in the schematic file as a standard field" "$(grep -q '(property "MPN" "E2E-UNDO"' "$PROJ/ecc83-pp.kicad_sch" && echo 1 || echo 0)"
   shot "m6_saved"
   hub_rpc "[{\"method\":\"editor.kicad.close\",\"params\":{\"project\":\"$PRO\",\"save\":\"discard\"}}]" >/dev/null || true
