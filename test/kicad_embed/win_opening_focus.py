@@ -5,7 +5,8 @@ click or IPC focus request precedes the native focus and hotkey checks.
 Usage: python win_opening_focus.py CLIENT HUB ASSETS KICAD OUT [PORT]
 Set BP_OPENING_FOCUS_ONLY=click_control to run only the canvas-click control
 (after the same Ctrl+` handback), e.g. to recheck a baseline after a change to it.
-Set BP_OPENING_FOCUS_ONLY=ctrl_k to run only the Ctrl+K-from-KiCad check.
+Set BP_OPENING_FOCUS_ONLY=ctrl_k to run only the Ctrl+K-from-KiCad check, straight after
+Edit (keys proven KiCad's by plain F2), with no click first.
 Set BP_OPENING_FOCUS_ONLY=mouse_return for the route with no hotkey hand-back: a real
 click in Backplane's composer, then a real click on the editor tab or the canvas, x3 each.
 Set BP_OPENING_FOCUS_HOST_FG=1 to make Backplane's window foreground from the
@@ -114,11 +115,12 @@ def ctrl_k_check(h, cp, frame, rep, timeline):
     return h.finish()
 
 
-def ctrl_k_round(h, cp, frame, rep, timeline, n, rounds):
+def ctrl_k_round(h, cp, frame, rep, timeline, n, rounds, pre=None):
     # Ctrl+K pressed in KiCad (a host chord): Backplane's window comes forward and its
     # palette takes the keys (Linux real_use ctrl_k_after_comment_ok is the model).
-    time.sleep(0.5)
-    pre = give_kicad_keys(h, cp, frame)
+    if pre is None:
+        time.sleep(0.5)
+        pre = give_kicad_keys(h, cp, frame)
     timeline.append({"stage": "before_ctrl_k", **pre})
     top = int(rep.get("toplevel") or 0)
     wx, wy, ww, wh = window_box(top)
@@ -296,7 +298,17 @@ def run(h):
             print("DIAG repost " + json.dumps(timeline[-1]), flush=True)
         h.shot("01_before_input")
         if only_ctrl_k:
-            return ctrl_k_check(h, cp, frame, rep, timeline)
+            # The keys are KiCad's straight after Edit (the opening fix): proven by plain F2
+            # acting, with no click anywhere first. Clicking Backplane's window (the tab) would
+            # take them away, and getting them back is a separate, known gap (F4).
+            gls = [w for w in children if w["visible"] and w["class"] == "wxGLCanvas"]
+            gl = max(gls, key=lambda w: w["w"] * w["h"]) if gls else None
+            px = plain_key_acts(h, gl, "ctrlk_pre") if gl else 0
+            pre = {"tab_clicked": None, "f2_changed_px": px, **focus_snapshot(frame)}
+            pre["inside_frame"] = pre["inside_frame"] and px > 2000
+            timeline.append({"stage": "before_ctrl_k_from_edit", **pre})
+            ctrl_k_round(h, cp, frame, rep, timeline, 1, 1, pre=pre)
+            return h.finish()
         if only == "mouse_return":
             return mouse_return_check(h, cp, frame, children, timeline)
         if not only_click:
