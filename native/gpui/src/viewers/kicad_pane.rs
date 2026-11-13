@@ -222,10 +222,15 @@ impl KicadPane {
                 else if r < 0 { std::thread::sleep(std::time::Duration::from_millis(40)); }
             });
         }
-        cx.spawn(async move |weak, cx| { let _hold = hold_tx; loop {
-            let timer = cx.background_executor().timer(std::time::Duration::from_millis(40));
-            let _ = futures_util::future::select(Box::pin(timer), Box::pin(wake_rx.recv())).await;
+        // one 40 ms timer at a time, kept across wakes (a new timer per pass was a queued entry each in gpui's timer thread: a loop that never
+        // waited grew it without bound), and a wake that comes again within 2 ms of the last pass waits for the timer: the tick can never spin
+        cx.spawn(async move |weak, cx| { let _hold = hold_tx; let mut timer = Box::pin(cx.background_executor().timer(std::time::Duration::from_millis(40))); let mut last = std::time::Instant::now() - std::time::Duration::from_secs(1); loop {
+            let woke = if last.elapsed() < std::time::Duration::from_millis(2) { (&mut timer).await; false } else {
+                match futures_util::future::select(&mut timer, Box::pin(wake_rx.recv())).await { futures_util::future::Either::Left(_) => false, futures_util::future::Either::Right(_) => true }
+            };
+            if !woke { timer = Box::pin(cx.background_executor().timer(std::time::Duration::from_millis(40))); }
             if weak.update(cx, |this, cx| this.tick(cx)).is_err() { break }
+            last = std::time::Instant::now();
             let _ = drained_tx.send(());
         } }).detach();
         KicadPane { bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), last_root: (i32::MIN, 0), placed: None,
