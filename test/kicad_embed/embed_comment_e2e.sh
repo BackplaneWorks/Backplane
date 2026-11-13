@@ -22,7 +22,7 @@ start_hub
 python3 - "$OUT/script.json" <<'PY'
 import json, sys
 s = [{"select": 0}, {"wait": 2200}, {"click": "rail:Board"}, {"wait": 2500}, {"click": "ui:Edit"}, {"wait": 15000}]
-for m, w in [("ready", 25000), ("posted", 3000)]:
+for m, w in [("ready", 25000), ("posted", 20000)]:  # posted: the handoff checks run after it (bp.13 batch 4)
     s += [{"mark": m}, {"kicad": {"report": True, "tag": m}}, {"wait": w}]
 json.dump(s, open(sys.argv[1], "w"))
 PY
@@ -79,6 +79,21 @@ wait_klog post || true; wait_klog closed || true; POST=$(klog post)
 check "Enter posts the comment and the window shuts" "$([ -n "$POST" ] && [ -n "$(klog closed)" ] && echo 1 || echo 0)" "$POST"
 wait_mark posted || true; sleep 1.5; R=$(rep posted)
 check "the keyboard is back in KiCad" "$(field "$R" keys | grep -qi true && echo 1 || echo 0)" "keys=$(field "$R" keys)"
+# a runtime that hands its comment key over itself (bp.13 batch 4: "comment-key-handoff"): ';' is not reserved, so it types in KiCad's text fields;
+# on the canvas and from the "Comment to Backplane..." action (the menu item's) it opens Backplane's window
+if grep -qa "comment-key-handoff" "$(dirname "$(dirname "$BACKPLANE_KICAD_CLI")")/manifest.json" 2>/dev/null; then
+  RK=$(grep "reserved keys" "$OUT/hub.log" | tail -1)
+  check "handoff: the bare ';' is not reserved (text fields keep it)" "$(echo "$RK" | grep -q '";"' && echo 0 || echo 1)" "$RK"
+  opens() { grep -c '"kcomment":"open"' "$OUT/client.log" || true; }; semis() { grep -c '"kicad_key":";"' "$OUT/client.log" || true; }
+  O0=$(opens); S0=$(semis)
+  python3 "$XINPUT_PY" chord ctrl g; sleep 1.0; python3 "$XINPUT_PY" type "R1"; python3 "$XINPUT_PY" key semicolon; sleep 1.5; shot search
+  check "handoff: ';' typed in KiCad's search box stays there (no key to Backplane, no window)" "$([ "$(opens)" = "$O0" ] && [ "$(semis)" = "$S0" ] && echo 1 || echo 0)" "opens $O0->$(opens) keys $S0->$(semis)"
+  python3 "$XINPUT_PY" key Escape; sleep 0.5; click_win_center "$SHOWN"; sleep 0.8
+  python3 "$IPC_PY" run-action "$SOCK" common.Control.commentToBackplane >>"$OUT/ipc.err" 2>&1 || true
+  for _ in $(seq 60); do [ "$(opens)" -gt "$O0" ] && break; sleep 0.05; done
+  check "handoff: the menu item's action opens Backplane's comment window" "$([ "$(opens)" -gt "$O0" ] && echo 1 || echo 0)" "opens $O0->$(opens)"
+  python3 "$XINPUT_PY" key Escape; sleep 0.5
+fi
 # the thread: one message from the person, with the note, the names and the picture (never a second one from the capture's own ET_COMMENT)
 MSGS=$(python3 - "$OUT/home/events.jsonl" <<'PY'
 import json, sys

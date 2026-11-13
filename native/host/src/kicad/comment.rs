@@ -26,8 +26,14 @@ pub fn start(hub: &Arc<Hub>) { *HUB.lock().unwrap() = Some(Arc::downgrade(hub));
 pub const RESERVED: [&str; 10] = ["Ctrl+K", "Ctrl+J", "Ctrl+Tab", "Ctrl+Shift+Tab", "Ctrl+`", "Ctrl+;", "Alt+Shift+B", "Alt+Shift+C", "Alt+Shift+L", "Alt+Shift+F"];
 
 /// The chords to reserve on a runtime: `RESERVED`, and on bp.13 (its CommentSelection has `capture_only`, and ';' is KiCad's own "Comment to
-/// Backplane…" key there) a bare ';' too, so that key opens Backplane's window and never KiCad's dialog. Index 10 on Windows.
-pub fn reserved(semicolon_is_kicads: bool) -> Vec<&'static str> { let mut v = RESERVED.to_vec(); if semicolon_is_kicads { v.push(";") } v }
+/// Backplane…" key there) a bare ';' too, so that key opens Backplane's window and never KiCad's dialog. Index 10 on Windows. A runtime with
+/// "comment-key-handoff" (bp.13 batch 4 on) hands its comment key over itself (the same key message) and only when no text field has the
+/// keyboard, so ';' is not reserved there: it types in the properties panel, search and every field.
+pub fn reserved(semicolon_is_kicads: bool, caps: &[String]) -> Vec<&'static str> {
+    let mut v = RESERVED.to_vec();
+    if semicolon_is_kicads && !caps.iter().any(|c| c == "comment-key-handoff") { v.push(";") }
+    v
+}
 
 /// Whether `ev` is a comment (ET_COMMENT = 19).
 pub fn is_comment(ev: &Value) -> bool { ev["type"] == "ET_COMMENT" || ev["type"].as_i64() == Some(19) }
@@ -210,7 +216,8 @@ mod tests {
         assert_eq!((kind_of("SCH"), kind_of("sch"), kind_of("FK_SCH"), kind_of("PCB"), kind_of("")), ("FK_SCH", "FK_SCH", "FK_SCH", "FK_PCB", "FK_PCB"));
         assert_eq!(RESERVED[5], "Ctrl+;"); assert_eq!(RESERVED.len(), 10, "the Windows index of each stays");
         assert_eq!(RESERVED[6..], ["Alt+Shift+B", "Alt+Shift+C", "Alt+Shift+L", "Alt+Shift+F"], "the management panels' keys reach Backplane from KiCad");
-        assert_eq!(reserved(false).len(), 10); assert_eq!(reserved(true)[10], ";", "bp.13: KiCad's own ';' comes to Backplane");
+        assert_eq!(reserved(false, &[]).len(), 10); assert_eq!(reserved(true, &[])[10], ";", "bp.13: KiCad's own ';' comes to Backplane");
+        assert_eq!(reserved(true, &["api-descriptor".into(), "comment-key-handoff".into()]).len(), 10, "a runtime that hands ';' over keeps it for text fields");
     }
     #[test] fn a_comment_reads_as_the_persons_message_with_its_references_and_picture() {
         let c = json!({"frame": "FK_PCB", "note": "Move U3 closer to J1", "names": {"references": ["U3"], "nets": ["GND"], "pins": []},
