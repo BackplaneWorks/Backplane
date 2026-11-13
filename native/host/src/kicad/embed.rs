@@ -373,6 +373,9 @@ pub struct WarmCfg {
     /// memory left free for everything else once the new KiCad has started
     pub headroom_mb: u64,
 }
+/// Free memory (MemAvailable) below which the other editors are not pre-warmed after the first is on show: a pre-warmed schematic took
+/// ~1.5 GB on Hubble_DK, and the headroom for everything else is kept as for a warm KiCad (WARM.headroom_mb).
+pub const PREWARM_FREE_MB: u64 = 2048 + 4096;
 pub const WARM: WarmCfg = WarmCfg { max: MAX_WARM, idle_s: 30 * 60, kicad_mb: 5200, headroom_mb: 4096 };
 
 /// What the next KiCad will cost: the largest one measured running, else the configured guess.
@@ -2324,7 +2327,14 @@ impl RpcHandler for EmbedRpc {
                 if gui.mode != "fork" || gui.desc.is_empty() || !proto::load(&gui.desc).has_field("kiapi.backplane.embed.ShowFrame", "prewarm") { return ok_reply(id, json!({"prewarmed": []})) }
                 let (w, h) = (p["width"].as_u64().unwrap_or(0), p["height"].as_u64().unwrap_or(0));
                 let have: Vec<String> = p["have"].as_array().into_iter().flatten().filter_map(|k| k.as_str().map(|k| canon_frame(k).to_string())).collect();
-                let kinds = prewarm_kinds(p["active"].as_str().unwrap_or("PCB"), &have);
+                let mut kinds = prewarm_kinds(p["active"].as_str().unwrap_or("PCB"), &have);
+                // memory: a pre-warmed editor costs its frame and its libraries (Hubble_DK's schematic: ~1.5 GB, 3.9 -> 5.4 GB), worth it only
+                // with room to spare; below that the first switch loads it (~1 s) instead. BACKPLANE_KICAD_PREWARM_FREE_MB overrides the floor
+                let floor = std::env::var("BACKPLANE_KICAD_PREWARM_FREE_MB").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(PREWARM_FREE_MB);
+                if let Some(free) = free_mb().filter(|f| *f < floor) {
+                    if !kinds.is_empty() { eprintln!("kicad embed: {}: not pre-warming {kinds:?}: {free} MB free, under {floor} MB", resolved.pro); }
+                    kinds.clear();
+                }
                 let (me, gui2, pro) = (actor_tx.clone(), gui.clone(), resolved.pro.clone());
                 // a pre-warm is the hub's own drive: KiCad's show requests for the frames it opens are not the person's (Hubble_DK on
                 // bp.13 batch 4 posts ET_SHOW_REQUESTED for the pre-warmed schematic, and the pane flipped to it after Edit)
