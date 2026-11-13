@@ -28,6 +28,8 @@ SUITES=(
   "embed_ux_e2e.sh:ux-broken-toplevel:KEMBED_PROJ_SRC=$REPO_ROOT/test/files/fixtures/broken-toplevel"
   "embed_mgmt_e2e.sh:mgmt"
   "embed_fab_e2e.sh:fab"
+  # the person's edits in KiCad's plan view (bp.13+; skips itself on runtimes without them, and outside fork mode)
+  "embed_plan_person_e2e.sh:plan-person"
   "embed_comment_e2e.sh:comment"
   "embed_prewarm_e2e.sh:prewarm"
   "embed_click_e2e.sh:click"
