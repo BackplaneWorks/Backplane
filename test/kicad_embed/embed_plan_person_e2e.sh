@@ -7,6 +7,10 @@
 #   Q3  plan_get `changes`: c-p approved, locked, edited by the person, a constraint by the person; c-q rejected
 #   Q4  the Plan panel (mgmt.plan, the hub's data) shows c-p approved and locked, c-q rejected, without a refresh
 #   Q5  the agent that asked is woken with the person's decision
+#   Q7  (bp.13 batch 4) with B.Cu active, a click on an F.Cu corridor (c-r) selects it and makes F.Cu active, and W widens it; W with
+#       nothing selected changes nothing. Batch 3's hit test looked only at the active layer: there the first case is expected to fail,
+#       so it is told (XFAIL) without failing the suite until the build has the fix (capability rules-insert-position marks batch 4;
+#       PLAN_XLAYER=expect runs it for real on any build)
 #   Q6  layer approval is the person's: KiCad's right-click menu "Approve Layer" on B.Cu (PageDown, then the menu by keyboard) approves
 #       it; an agent's kicad_ipc RunAction pcbnew.Plan.approveLayer and ApprovePlan are refused, its plan_approve only asks (F.Cu stays
 #       unapproved); the Plan panel's Approve (plan.approve: ApprovePlan as the person) approves F.Cu with plan view on
@@ -53,7 +57,7 @@ for l in sys.stdin:
     f=((o.get("result") or {}).get("data") or {}).get("plan", f)
 print(json.dumps(f))'; }
 # the board's outline centre (147.3, 113.3); c-p left of it, c-q right, both wide enough for a click; the plane off the active layer
-PLAN='{"layers":[{"layer":"F.Cu","role":"signal","status":"proposed"},{"layer":"B.Cu","role":"plane","status":"proposed"}],"groups":[{"id":"g-k","name":"Cathodes","color":"#e8a33d","nets":["Net-(U1A-K)","Net-(U1B-K)"],"status":"proposed"}],"corridors":[{"id":"c-p","group":"g-k","layer":"F.Cu","order":1,"path":[[122,113.3],[140,113.3]],"width":12.0,"status":"proposed"},{"id":"c-q","group":"g-k","layer":"F.Cu","order":2,"path":[[155,113.3],[173,113.3]],"width":12.0,"status":"proposed"}],"planes":[{"id":"p-gnd","net":"GND","layer":"B.Cu","outline":[[[122,91],[173,91],[173,136],[122,136]]],"priority":1,"status":"proposed"}]}'
+PLAN='{"layers":[{"layer":"F.Cu","role":"signal","status":"proposed"},{"layer":"B.Cu","role":"plane","status":"proposed"}],"groups":[{"id":"g-k","name":"Cathodes","color":"#e8a33d","nets":["Net-(U1A-K)","Net-(U1B-K)"],"status":"proposed"},{"id":"g-r","name":"Spare","color":"#3de86b","nets":["Net-(U1A-G)"],"status":"proposed"}],"corridors":[{"id":"c-p","group":"g-k","layer":"F.Cu","order":1,"path":[[122,113.3],[140,113.3]],"width":12.0,"status":"proposed"},{"id":"c-q","group":"g-k","layer":"F.Cu","order":2,"path":[[155,113.3],[173,113.3]],"width":12.0,"status":"proposed"},{"id":"c-r","group":"g-r","layer":"F.Cu","order":3,"path":[[136,129],[159,129]],"width":3.0,"status":"proposed"}],"planes":[{"id":"p-gnd","net":"GND","layer":"B.Cu","outline":[[[122,91],[173,91],[173,108],[122,108]]],"priority":1,"status":"proposed"}]}'
 R1=$(ask plan_propose "{\"plan\":$PLAN,\"mode\":\"merge\"}"); echo "$R1" | cut -c1-200
 R2=$(ask plan_get '{}')
 check "the agent's plan is in KiCad, awaiting approval" "$(echo "$R2" | grep -q 'c-q' && echo "$R2" | grep -q awaiting_approval && echo 1 || echo 0)" "$(echo "$R2" | cut -c1-300)"
@@ -184,4 +188,32 @@ print(next((l.get("status", "?") for l in ls if l.get("layer") == sys.argv[1]), 
 else
   echo "SKIP layer approval: this KiCad has no pcbnew.Plan.approveLayer"
 fi
+# Q7: the plan's other layers are hit (bp.13 batch 4)
+CAPS7=$(ask kicad_ipc "{\"path\":\"$PCB\",\"type\":\"kiapi.backplane.GetCapabilities\",\"message\":{}}")
+XL=${PLAN_XLAYER:-$(echo "$CAPS7" | grep -q 'rules-insert-position' && echo expect || echo xfail)}
+plan_field() { ask plan_get '{}' | sed 's/^MCPCALL plan_get //' | python3 -c '
+import json, sys
+try: o = json.loads(sys.stdin.read()); r = json.loads(o["result"]["content"][0]["text"])
+except Exception: print("?"); sys.exit()
+p = r.get("plan", {})
+if sys.argv[1] == "rev": print(r.get("summary", {}).get("revision", "?"))
+else: print(next((c.get("width") for c in p.get("corridors", []) if c.get("id") == sys.argv[1]), "?"))' "$1"; }
+active_layer() { ask kicad_ipc "{\"path\":\"$PCB\",\"type\":\"kiapi.board.commands.GetActiveLayer\",\"message\":{\"board\":{\"type\":\"DOCTYPE_PCB\",\"board_filename\":\"ecc83-pp.kicad_pcb\",\"project\":{\"name\":\"ecc83-pp\",\"path\":\"$PROJ\"}}}}" | grep -o 'BL_[A-Za-z_]*' | head -1; }
+xcheck() { # $1 what, $2 1|0, $3 detail: a FAIL only where the build is expected to have the fix
+  if [ "$XL" = expect ] || [ "$2" = 1 ]; then check "$1" "$2" "$3"; else echo "XFAIL $1 (this build's hit test sees only the active layer; fixed in bp.13 batch 4): $3"; fi
+}
+X key Escape; sleep 0.3; X key Next; sleep 1                      # B.Cu active, nothing selected
+# c-r's middle (147.5, 129) on the screen, from c-p's (131, 113.3) and c-q's (164, 113.3); the B.Cu plane stops at y 108, so nothing of
+# the active layer is under the click
+read -r RX RY < <(python3 -c 'import sys; px,py,qx=map(float,sys.argv[1:]); s=(qx-px)/33; print(round(px+(147.5-131)*s), round(py+(129-113.3)*s))' "$PX" "$PY" "$QX")
+W0=$(plan_field c-r); REV0=$(plan_field rev); L0=$(active_layer)
+echo "INFO Q7 ($XL): c-r at ($RX,$RY), width $W0, active $L0"
+X click "$RX" "$RY"; sleep 0.8; X key w; sleep 1.5; shot q7_cross_layer
+W1=$(plan_field c-r); L1=$(active_layer)
+xcheck "with B.Cu active, a click on an F.Cu corridor and W widen it" "$(python3 -c 'import sys; a,b=sys.argv[1:]; print(int(a!="?" and b!="?" and float(b)>float(a)+1e-9))' "$W0" "$W1")" "c-r width $W0 -> $W1"
+xcheck "the click makes the corridor's layer (F.Cu) active" "$([ "$L1" = BL_F_Cu ] && echo 1 || echo 0)" "active $L0 -> $L1"
+# W with nothing selected: nothing changes
+X key Escape; sleep 0.5; REV1=$(plan_field rev); X key w; sleep 1.5; REV2=$(plan_field rev)
+check "W with nothing selected changes nothing in the plan" "$([ "$REV1" != "?" ] && [ "$REV1" = "$REV2" ] && echo 1 || echo 0)" "revision $REV1 -> $REV2"
+shot q7_nothing_selected
 finish_suite "embed_plan_person_e2e ($EMBED_MODE)"
