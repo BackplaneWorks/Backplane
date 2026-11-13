@@ -1278,9 +1278,9 @@ def run_window_suite(h: SuiteHarness) -> int:
             (f_wsch.get("painted") or 0) > 15
             and (f_w3d.get("painted") or 0) > 15
             and (f_wpcb.get("painted") or 0) > 15
-            and (r_wsch.get("wait_ms") or 9999) < 350
-            and (r_w3d.get("wait_ms") or 9999) < 350
-            and (r_wpcb.get("wait_ms") or 9999) < 350,
+            and (9999 if r_wsch.get("wait_ms") is None else r_wsch.get("wait_ms")) < 350
+            and (9999 if r_w3d.get("wait_ms") is None else r_w3d.get("wait_ms")) < 350
+            and (9999 if r_wpcb.get("wait_ms") is None else r_wpcb.get("wait_ms")) < 350,
             {
                 "warm_sch_ms": r_wsch.get("wait_ms"),
                 "warm_3d_ms": r_w3d.get("wait_ms"),
