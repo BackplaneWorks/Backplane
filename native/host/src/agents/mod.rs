@@ -119,6 +119,7 @@ impl Agents {
         let home = hub.cfg.home.to_string_lossy().into_owned(); let h2 = home.clone();
         let left = tokio::task::spawn_blocking(move || proc::reap_orphans(&h2)).await.unwrap_or(0); proc::set_owner(&home);
         if left > 0 { eprintln!("agents: ended {left} process(es) a previous hub left behind") }
+        let _ = tokio::task::spawn_blocking(crate::memscope::init).await; // agents and jobs in memory scopes of their own (memscope.rs), probed once
         crate::startup::mark("agents: orphans reaped");
         { // bots live in ~/.backplane/bots/<bot>: copy what older builds kept elsewhere (folder, session history, memory) before any turn resumes
             let moves: Vec<(String, String)> = { let w = ag.world.lock().await; w.bots.iter().filter(|(_, x)| !x.2).map(|(id, x)| (id.clone(), w.threads.get(&x.1).map(|t| t.worktree.clone()).unwrap_or_default())).collect() };
@@ -852,7 +853,7 @@ impl Actor {
         env.push(("BACKPLANE_KICAD_ACTOR".into(), crate::files::kicad::coedit::client_name(&crate::files::kicad::coedit::Who::Agent(&th))));
         let spawned = if self.person { match self.person_child() { Ok(pc) => proc::spawn_person(&pc, &prog, &args, std::path::Path::new(cwd), &env), Err(e) => Err(std::io::Error::new(std::io::ErrorKind::Other, e)) } } else { proc::spawn(&prog, &args, std::path::Path::new(cwd), self.ag.cli.dir(), &env) };
         match spawned {
-            Ok(mut p) => { self.ag.stats.procs_spawned.fetch_add(1, Relaxed); self.heard = Instant::now(); for l in start { let _ = p.input.try_send(l); }
+            Ok(mut p) => { self.ag.memory_watch(&th, p.pid); self.ag.stats.procs_spawned.fetch_add(1, Relaxed); self.heard = Instant::now(); for l in start { let _ = p.input.try_send(l); }
                 if driver.closes_stdin() { p.input = mpsc::channel(1).0 } /* the writer ends once what was queued is written, and the process reads EOF */ self.driver = Some(driver); self.live_proc = Some(Live { input: p.input, pid: p.pid, key: String::new(), person: self.person, _busy: busy }); self.lines = Some(p.lines); self.exit = Some(p.exit) }
             Err(e) => { self.fail(format!("could not start {}: {e}", made.cli), "spawn", &format!("spawn-{now}")).await; self.ag.stats.spawn_failures.fetch_add(1, Relaxed); }
         }
@@ -1157,6 +1158,7 @@ impl Actor {
         if self.person { args.extend(person::CLAUDE_STRICT.iter().map(|x| x.to_string())) } // only this hub's MCP config; the person's user-level hooks, MCP servers and rules do not load
         self.ag.set_gen(&th, &gen);
         let p = if self.person { proc::spawn_person(&self.person_child()?, &prog, &args, std::path::Path::new(cwd), &[]) } else { proc::spawn(&prog, &args, std::path::Path::new(cwd), self.ag.cli.dir(), &[acct_env.clone(), self.ag.kicad_env.lock().unwrap().clone()].concat()) }.map_err(|e| e.to_string())?;
+        self.ag.memory_watch(&th, p.pid);
         self.cmds = cmds::Cmds::new(); self.wait.clear(); self.resumed = if self.person { String::new() } else { session.clone() }; self.spawn_n += 1;
         self.ag.stats.procs_spawned.fetch_add(1, Relaxed);
         self.live_proc = Some(Live { input: p.input, pid: p.pid, key, person: self.person, _busy: busy }); self.lines = Some(p.lines); self.exit = Some(p.exit);
