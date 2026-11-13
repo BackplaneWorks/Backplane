@@ -157,9 +157,37 @@ def ctrl_k_round(h, cp, frame, rep, timeline, n, rounds, pre=None):
 
 
 
+def window_title(hwnd):
+    buf = E.ctypes.create_unicode_buffer(256)
+    E.u32.GetWindowTextW(hwnd, buf, 256)
+    return buf.value
+
+
+def kicad_toplevels():
+    """Every top-level window of a kicad.exe process (pre-warmed frames are parked as top-levels, not in the pane)."""
+    pids = set()
+    for line in __import__("subprocess").run(["tasklist", "/FI", "IMAGENAME eq kicad.exe", "/FO", "CSV", "/NH"], capture_output=True, text=True).stdout.splitlines():
+        parts = line.split('","')
+        if len(parts) > 1 and parts[1].isdigit():
+            pids.add(int(parts[1]))
+    found = []
+    @E.ctypes.WINFUNCTYPE(E.W.BOOL, E.W.HWND, E.W.LPARAM)
+    def cb(h, _):
+        pid = E.W.DWORD()
+        E.u32.GetWindowThreadProcessId(h, E.ctypes.byref(pid))
+        if pid.value in pids:
+            found.append({"hwnd": int(h), "title": window_title(h), "class": E.hwnd_class(int(h)), "visible": bool(E.u32.IsWindowVisible(h))})
+        return True
+    E.u32.EnumWindows(cb, 0)
+    return found
+
+
 def prewarm_frames(top):
-    """The editors the pane pre-warms (~2 s after the first is placed): frames titled Schematic Editor / 3D Viewer."""
-    return [w for w in E.list_child_windows(top) if w["class"] == "wxWindowNR" and any(t in (w.get("title") or "") for t in ("Schematic Editor", "3D Viewer"))]
+    """The editors the pane pre-warms (~2 s after the first is placed): frames titled Schematic Editor / 3D Viewer,
+    in the pane or parked as KiCad top-levels."""
+    want = ("Schematic Editor", "3D Viewer")
+    inside = [w for w in E.list_child_windows(top) if any(t in (w.get("title") or "") for t in want)]
+    return inside + [w for w in kicad_toplevels() if any(t in w["title"] for t in want)]
 
 
 def wait_prewarm(h, top, mode, timeout_s=40):
@@ -331,6 +359,9 @@ def mouse_return_check(h, cp, frame, children, timeline, rounds=None, kpid=0):
                     fg = foreground_never_lost(550)
                     around["shot_50ms"] = shot
                 after = focus_snapshot(frame)
+                if after["foreground"]:
+                    after["foreground_title"] = window_title(after["foreground"])
+                    after["foreground_class"] = E.hwnd_class(after["foreground"])
                 px, zoomed = plain_key_acts(h, gl, f"return_{entry}_{route}{n}", frame)
                 d = {"host_first": host_ok, "host": host, "after": after, "f2_changed_px": px, "zoom_readout_changed": zoomed, **fg, **around}
                 timeline.append({"stage": f"return_{entry}_{route}_{n}", **d})
