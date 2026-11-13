@@ -200,7 +200,13 @@ fn part_detail(app: &mut Backplane, light: bool, cx: &mut Context<Backplane>) ->
         1 => wrap.child(div().px_2().py_2().flex().flex_col().gap_1()
                 .child(div().text_color(c("dim")).child(tf("gpui.mgmt.life.one", &[("day", day(stock[0].0 as u64).into())])))
                 .child(div().text_color(c("text")).child(tf("gpui.mgmt.life.part.now", &[("stock", count(stock[0].1).into()), ("price", price.first().map(|p| money(p.1)).unwrap_or_else(|| "—".into()).into())])))).into_any_element(),
-        _ => wrap.child(chart(app, "life-part-stock", trs("Stock"), stock, count, light, cx)).child(chart(app, "life-part-price", trs("Unit price"), price, money, light, cx)).into_any_element(),
+        _ => {
+            let w = wrap.child(chart(app, "life-part-stock", trs("Stock"), stock, count, light, cx));
+            // one price reading is a number and the day it starts, not a line
+            if price.len() >= 2 { w.child(chart(app, "life-part-price", trs("Unit price"), price, money, light, cx)).into_any_element() }
+            else { w.children(price.first().map(|p| div().px_2().py_1().text_size(px(11.)).flex().gap_2().child(div().text_color(c("dim")).child(trs("Unit price"))).child(div().text_color(c("text")).child(money(p.1)))
+                .child(div().text_color(c("faint")).child(tf("gpui.mgmt.life.price.since", &[("day", day(p.0 as u64).into())]))))).into_any_element() }
+        }
     }
 }
 
