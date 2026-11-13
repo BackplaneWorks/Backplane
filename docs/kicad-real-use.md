@@ -52,6 +52,11 @@ Journeys (`KEMBED_JOURNEYS`): `open` (cold Edit by the client's script; View the
 another thread and back three times through the command palette), `edit` (pan 10 s, wheel zoom 10 s, click, drag, Delete, Ctrl+Z, a track routed
 with X), `coedit` (5 agent tracks while idle; 6 during an 8 s pan), `xprobe` (`editor.kicad.select` of 4 references with zoom), `save` (an agent
 edit, then Ctrl+S: written and clean), `sch` (Schematic pan and zoom), `comment` (the fork's CommentSelection to the message in the thread).
+`undo` (Schematic: the BOM panel sets C1 to `BP-REDO`, a click on the canvas, Ctrl+Z must give the old value back, Ctrl+Y `BP-REDO`
+again, then the panel's `BP-AGAIN` must apply; any miss exits 1). It needs `KEMBED_UNDO_POINT=x,y`, an empty spot of the schematic canvas in
+root coordinates (Collar on the GPU display: `1126,700`): a screenshot taken just before the click must show canvas background there, on a
+span of at least 300 px each way, else the journey fails without pressing a key (the pane's toolbars and the message panel are no canvas, and
+GTK3 gives the canvas no X window to measure). `KEMBED_UNDO_NO_CTRL_Y=1` leaves out the Ctrl+Y only (a diagnostic: what happens without it).
 Not yet: schematic-to-board cross-probe by a click, DRC/ERC/Gerbers, hierarchical sheet/move symbol/wire/annotate.
 
 ## Budgets

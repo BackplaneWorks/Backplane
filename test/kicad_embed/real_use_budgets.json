@@ -401,6 +401,7 @@
    "re": "^undo_(panel_edit_applies|ctrl_z_takes_it_back|ctrl_y_redoes_it|then_panel_edit_applies)$",
    "field": "ok",
    "min": 1,
+   "strict": true,
    "what": "undo across a co-edit: the panel's edit, Ctrl+Z, Ctrl+Y, the panel's next edit of the same symbol applies"
   },
   {
