@@ -614,12 +614,13 @@ if "plan" in JOURNEYS and SOCK:
         from pane_sampler import grab
         import numpy as np
         CV = (PANE["x"] + 40, PANE["y"] + 110, PANE["w"] - 80, PANE["h"] - 180)  # the canvas (not the toolbars or the status bar)
-        TB = (PANE["x"], PANE["y"] + 100, 40, PANE["h"] - 170)                     # the left toolbar
+        TB = (PANE["x"] + 4, PANE["y"] + 100, 28, PANE["h"] - 170)                 # the left toolbar's icons (the canvas starts at +34)
         def frac(a_, b_): return float((a_ != b_).mean())
         def bbox(a_, b_):
             ys, xs = np.nonzero(a_ != b_)
             return None if len(xs) < 8 else (int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max()))
-        def menus(): return [w for w in windows() if w.get("shown") and w.get("override_redirect") and w["w"] > 60 and w["h"] > 60]
+        def menus():  # a popup menu: override-redirect, smaller than the screen (the client's own full-screen surfaces are not menus)
+            return [w for w in windows() if w.get("shown") and w.get("override_redirect") and 60 < w["w"] < 1200 and 60 < w["h"] < 900]
         def action_toggle(): t = now(); ipc("run-action", SOCK, "pcbnew.Plan.togglePlanView"); return t
         bc = (KICAD_RUN.get("backplane_commit") or "")[:10]
         ALT_P_BUILDS = ("d5eaa3ae44", "3de539d24a", "77a6ff17d0")  # bp.13 batches 1-2: Alt+P; batch 3 (c53b5e0800) on: Ctrl+Shift+R
@@ -649,7 +650,15 @@ if "plan" in JOURNEYS and SOCK:
         # B. the left toolbar's button, found by its checked state: the toolbar before and after a RunAction toggle
         t_a = grab(*TB); act = toggled("plan_action_probe", action_toggle); t_b = grab(*TB)
         RESULTS["plan_toggle_by_action"] = {"ms": None, "ok": int(act)}
-        btn = bbox(t_a, t_b)
+        btn = None
+        rows = (t_a != t_b).sum(axis=1); segs = []; start = None
+        for y_, v in enumerate(list(rows) + [0]):
+            if v and start is None: start = y_
+            if not v and start is not None: segs.append((start, y_ - 1, int(rows[start:y_].sum()))); start = None
+        segs = [g for g in segs if g[1] - g[0] <= 40]
+        if segs:
+            g = max(segs, key=lambda g: g[2]); btn = (0, g[0], TB[2] - 1, g[1])
+        print(f"INFO plan toolbar: changed bands {segs[:8]}", flush=True)
         print(f"INFO plan view by RunAction: {'toggled' if act else 'nothing'}; toolbar button {btn}", flush=True)
         if btn:
             bx, by = TB[0] + (btn[0] + btn[2]) // 2, TB[1] + (btn[1] + btn[3]) // 2
@@ -732,7 +741,7 @@ if "plan" in JOURNEYS and SOCK:
         EVENTS.append({"kind": "commit", "t0": t0, "tag": "plan_propose_to_overlay", "window_ms": 2000})
         perf("plan_propose_rpc", round(t1 - t0), applied=len(res.get("applied") or []), refused=len(res.get("refused") or []))
         time.sleep(2); shot("plan_proposed")
-        toggle_plan(); time.sleep(1)  # plan view off again
+        if STATE["on"]: toggled("plan_view_off", action_toggle)  # plan view off again
 # 8. schematic: pan/zoom there too
 # 7d. checks (bp.13 batch 3, embed-checks): DRC and ERC in the open editors (RunChecks) as the client's Checks panel can run them: the call
 # to ET_CHECKS_DONE, a pan of the board meanwhile (does the editor stay smooth), the counts, GetMarkers, and a picture of the markers.
