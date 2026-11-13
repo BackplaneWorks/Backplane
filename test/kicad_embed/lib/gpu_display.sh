@@ -14,7 +14,7 @@ start_gpu_display() {
   own dbus-daemon --session --nofork --address="unix:path=$gs/sysbus" >"$gs/sysbus.log" 2>&1
   for _ in $(seq 30); do [ -S "$gs/sysbus" ] && break; sleep 0.1; done
   own env -i PATH=/usr/bin:/bin HOME="$gs/home" XDG_RUNTIME_DIR="$gs/run" XDG_CONFIG_HOME="$gs/home/.config" \
-    DBUS_SYSTEM_BUS_ADDRESS="unix:path=$gs/sysbus" \
+    DBUS_SYSTEM_BUS_ADDRESS="unix:path=$gs/sysbus" GVFS_DISABLE_FUSE=1 GIO_USE_VFS=local \
     dbus-run-session -- gnome-shell --headless --wayland --no-x11 --virtual-monitor "$geo" --wayland-display bpwl >"$gs/shell.log" 2>&1
   for _ in $(seq 150); do [ -S "$gs/run/bpwl" ] && grep -q "GNOME Shell started" "$gs/shell.log" 2>/dev/null && break; sleep 0.1; done
   [ -S "$gs/run/bpwl" ] || { echo "FAIL gpu display: headless shell did not start ($gs/shell.log)"; return 1; }

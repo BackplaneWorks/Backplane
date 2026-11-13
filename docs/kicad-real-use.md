@@ -62,6 +62,43 @@ frame; pan/zoom p99 interval <= 25 ms and no frame > 50 ms (the display is 60 Hz
 jitter puts p99 near 20, so 16 could never pass); routing and dragging no frame > 50 ms; agent commit to repaint <= 100 ms; cross-probe <= 100 ms;
 save written and clean <= 300 ms; comment posted <= 300 ms; no KiCad dialog during the journeys; the editor still there after each journey.
 
+## Numbers after lane B's fc6a5e500 + cd72ba7c4 (2026-11-12, origin/main 72c32ca3f, matrix `realuse-m3`)
+
+KiCad actually running, recorded in each `real_use.json`: bp11 = 882fdf4c (`10.99.0-bp.11`), bp12 = the final build (8e57d691,
+SOURCE_COMMIT e14e66be, at `~/.cache/kicad-test/10.99.0-bp.12`); both variables set. ms; "settled" is pixel-based (click to the last change
+before 400 ms of stillness). Earlier columns: the first matrix (5c6dd03c4; bp12 there = pre-release 441259d2).
+
+| measure | collar bp11 | collar bp12 | hubble bp11 | hubble bp12 | before (bp11 / pre-bp12) | budget |
+|---|---|---|---|---|---|---|
+| first Edit, wait_painted | 3215 (cold) | 129 (warm) | 3797 (cold) | 46 (warm) | 2855-3213 cold | 2500 cold |
+| first Edit, pixels settled | n/a (cold: placeholder) | 183, 1 blank | n/a | 91, 1 blank | - | 300, 0 blank |
+| a KiCad window visible before Edit | none | none | none | none | - | none |
+| board/schematic modified after pre-warm | pcb no, sch ? | pcb no, sch ? | pcb no, sch ? | pcb no, sch ? | - | no |
+| KiCad dialogs during the run | Load PCB, Load Schematic | none | Load PCB, Information, Load Schematic | none | Hubble bp12-pre: Information | none |
+| first Schematic, settled | 148, 1 blank | 148, 1 blank | 334 | 97, 1 blank | 230-940 | 50, 0 |
+| first 3D, settled | 1248, 1 blank | 1312, 1 blank | (70: 3D not shown) | 1396, 2 blank | 1288-1398 | 50, 0 |
+| later tab switches (13) | 66-85, 6 blank | 68-83, 6 blank | 66-470, 0 blank | 65-82, 5 blank | 65-87, 5-6 blank | 50, 0 |
+| reopen (View, Edit), settled | 112-123, 1 blank each | 110-121, 1 blank each | 111-115 | 112-119, 1 blank each | 101-123, 1 blank | 300, 0 |
+| thread away and back | editor lost | editor lost | editor lost | editor lost | editor lost | kept |
+| one click, then Ctrl+K (palette) | no | 36 | no | no | - | works |
+| one click, then Ctrl+; (comment window) | 72 | 22 | no (second click: see log) | no | - | works |
+| Ctrl+; again after Escape closed it | no | no | no | no | no | works |
+| Ctrl+S written / clean | 35 / 53 | 56 / 73 | 56 / 121 | 58 / 113 | 36-57 / 55-192 | 300 |
+| pan 10 s p99 / zoom p99 | 20.3 / 18.0 | 20.8 / 22.1 (1 > 50) | 30.2 / - | 16.0 / 16.0 | 19-20 / 17-19 | 25 |
+| route a track: > 50 ms frames | 9 | 9 | 3 (max 482) | 5 | 5-9 | 0 |
+| move a symbol / draw a wire: > 50 ms frames | 10 / 8 | 10 / 8 | 6 / 5 | 6 / 5 | (new) | 0 |
+| BOM panel open: tab / Alt+Shift+B | 184 / 69 | 191 / 56 | 105 / 67 | 99 / 84 | 176-183 / 132 | 100 |
+| editor.kicad.select, settled | 437 | 356 | 361 | 351 | 284-405 | 100 |
+| schematic click -> footprint selected | 72-75 | 73 | 76 | 77 | (new) | 100 |
+| KiCad DRC dialog open / busy (ping max) | 63 / 972 (702) | 60 / 1125 (851) | 152 / 1606 (1338) | 61 / 1635 (1366) | (new) | 300 / - |
+| pan p99 while kicad-cli DRC / ERC runs | 34.0 / 27.5 | 30.4 / 36.1 | 21.5 / 35.4 | 24.0 / 22.6 | (new) | 25 |
+| KiCad RSS: editors up / peak (MB) | 4059 / 4494 | 4466 / 4872 | 3827 / 4268 | 4573 / 5123 | 3763-3923 / 4143-4374 | - |
+
+Notes. "sch ?": the API's modified call answers nothing for the schematic (it answers for the board), so the schematic's state after pre-warm
+is not verified. The pixel "first Edit" on bp11 settles on the "Starting KiCad..." placeholder (it is still for more than 400 ms), so for a
+cold start only wait_painted counts. ERC and annotate through the API's RunAction did nothing on either runtime (the names are right), so
+those dialogs are not measured. Hubble bp11's 3D tab read 70 ms because the 3D view did not come up in the pane.
+
 ## Numbers (2026-11-12, origin/main 5c6dd03c4, RTX 5080, 1800x1050 at 60 Hz, pane 804x920)
 
 ms. Matrix run `realuse-m1`: real_use_all.sh, both boards, both runtimes. Its bp12 columns are the bp.12 pre-release build 441259d2

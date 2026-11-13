@@ -175,6 +175,30 @@
    "field": "ok",
    "min": 1,
    "what": "the KiCad running is the runtime asked for"
+  },
+  {
+   "re": "^first_edit_pixels$",
+   "field": "ms",
+   "max": 300,
+   "what": "first Edit (KiCad warm before it) click -> settled on screen"
+  },
+  {
+   "re": "^first_edit_pixels$",
+   "field": "blank_frames",
+   "max": 0,
+   "what": "first Edit: frames of background"
+  },
+  {
+   "re": "^kicad_visible_before_edit$",
+   "field": "ok",
+   "min": 1,
+   "what": "no KiCad window visible before Edit"
+  },
+  {
+   "re": "^first_click_ctrl_k_ok$",
+   "field": "ok",
+   "min": 1,
+   "what": "one click into KiCad, then Ctrl+K reaches Backplane"
   }
  ]
 }

@@ -162,10 +162,27 @@ def wait_metric(pred, secs):
     return None
 
 threading.Thread(target=dialog_watch, daemon=True).start()
+# before Edit: the pane's place sampled (where KiCad will show: 1800x1050 layout), and whether any KiCad window is visible anywhere
+PRE_RECT = {"x": 924, "y": 98, "w": 804, "h": 896}
+sampler_start(PRE_RECT, "pre_edit")
+BEFORE = []
+def before_watch():
+    while not metrics("click") or not any(m.get("id") == "ui:Edit" for m in metrics("click")):
+        for w in windows():
+            if w.get("shown") and "kicad" in w.get("wm_class", "").lower() and w["w"] > 50 and w["h"] > 50 and w["xid"] not in [b["xid"] for b in BEFORE]:
+                BEFORE.append({"xid": w["xid"], "title": w.get("title"), "at": [w["root_x"], w["root_y"], w["w"], w["h"]], "t": now()})
+                print(f"JANK a KiCad window visible before Edit: {w.get('title')!r} at {w['root_x']},{w['root_y']} {w['w']}x{w['h']}", flush=True)
+        time.sleep(0.15)
+bw = threading.Thread(target=before_watch, daemon=True); bw.start()
 cold = wait_metric(lambda m: m.get("tag") == "cold", 180)
 if not cold: print("FAIL no cold report"); sys.exit(1)
 edit_click = next((m for m in metrics("click") if m.get("id") == "ui:Edit"), {})
 perf("open_cold_painted", cold.get("wait_ms"), state=cold.get("state"))
+time.sleep(1.5); pre_path = sampler_stop()
+RESULTS["kicad_visible_before_edit"] = {"ms": None, "ok": int(not BEFORE), "windows": BEFORE}
+if edit_click.get("epoch_ms"):
+    r = analyze([{"kind": "switch", "t0": edit_click["epoch_ms"], "tag": "first_edit", "window_ms": 8000}], pre_path)
+    if r: r = r[0]; perf("first_edit_pixels", r.get("settled_ms"), first_change_ms=r.get("first_change_ms"), blank_frames=r.get("blank_frames"), mid_frames=r.get("mid_frames"))
 wait_metric(lambda m: m.get("name") == "ready_for_driver", 60)
 geo = kicad_report("geom") or cold
 for w in windows():
@@ -232,6 +249,13 @@ def comment_window(tag):
 # 0. focus: the first click into KiCad, then a reserved chord (Ctrl+;) must reach Backplane at once (the first-click bug: it took a second click)
 if "focus" in JOURNEYS:
     rt("click", CX, CY + PANE["h"] // 3); time.sleep(0.6)
+    # Ctrl+K (Backplane's command palette, a reserved key) right after the one click: the palette's place over the chat changes?
+    box = {"x": 600, "y": 0, "w": 700, "h": 420}
+    sampler_stop(); sampler_start(box, "ctrlk"); r = rt("key", "k", "ctrl"); time.sleep(1.2); kp = sampler_stop(); sampler_start(PANE, "pane")
+    a = analyze([{"kind": "commit", "t0": r["t0"], "tag": "ctrlk", "window_ms": 1000}], kp)
+    ck = a[0].get("first_change_ms") if a else None
+    perf("first_click_ctrl_k", ck if ck is not None else -1, opened=int(ck is not None)); RESULTS["first_click_ctrl_k_ok"] = {"ms": None, "ok": int(ck is not None)}
+    rt("key", "Escape"); time.sleep(0.4); rt("click", CX, CY + PANE["h"] // 3); time.sleep(0.6)
     ok1 = comment_window("first_click_ctrl_semicolon")
     RESULTS["first_click_reserved"] = {"ms": None, "ok": int(ok1)}
     if not ok1:
