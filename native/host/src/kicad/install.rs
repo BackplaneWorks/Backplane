@@ -645,12 +645,12 @@ mod tests {
         }
     }
     #[test] fn refused_when_found_running_unpublished_or_without_consent() {
-        assert_eq!(refusal("/k/bin/kicad-cli", "ok", "10.99.0-bp.10", true, false, Some(&LINUX)), Some("Backplane KiCad is already installed: /k/bin/kicad-cli".into()));
+        assert_eq!(refusal("/k/bin/kicad-cli", "ok", LINUX.version, true, false, Some(&LINUX)), Some("Backplane KiCad is already installed: /k/bin/kicad-cli".into()));
         assert_eq!(refusal("", "missing", "", true, true, Some(&LINUX)), Some("KiCad is being installed already".into()));
         assert!(refusal("", "missing", "", true, false, None).unwrap().starts_with("No Backplane KiCad is published for this computer"));
         for s in ["stock", "old", "broken"] { assert_eq!(refusal("/usr/bin/kicad-cli", s, "", true, false, Some(&LINUX)), None, "{s}: the fork is installed beside it"); }
         let no = refusal("", "missing", "", false, false, Some(&LINUX)).unwrap();
-        assert!(no.starts_with("Installing needs your consent") && no.contains("10.99.0-bp.10") && no.contains(FROM), "{no}");
+        assert!(no.starts_with("Installing needs your consent") && no.contains(LINUX.version) && no.contains(FROM), "{no}");
         assert_eq!(refusal("", "missing", "", true, false, Some(&LINUX)), None);
     }
     /// The decision setup makes for each computer and each KiCad it finds: (os, arch, status, install state) -> action.
@@ -672,16 +672,16 @@ mod tests {
         let at = |v: &'static str| Package { version: v, ..LINUX };
         assert!(older("10.99.0-bp.12", &at("10.99.0-bp.12.1")) && older("10.99.0-bp.11", &at("10.99.0-bp.12.1")) && !older("10.99.0-bp.12.1", &at("10.99.0-bp.12.1")));
         assert!(!older("10.99.0-bp.12.1", &at("10.99.0-bp.12")) && older("10.99.0-bp.12.1", &at("10.99.0-bp.13")) && !older("10.99.0-bp.12-851cbefda6", &at("10.99.0-bp.13")));
-        assert!(older("10.99.0-bp.4", &LINUX) && older("10.99.0-bp.8", &LINUX) && older("10.99.0-bp.9", &LINUX) && !older("10.99.0-bp.10", &LINUX) && !older("10.99.0-bp.11", &LINUX) && !older("10.0.7", &LINUX) && !older("", &LINUX));
+        assert!(older("10.99.0-bp.4", &LINUX) && older("10.99.0-bp.8", &LINUX) && older("10.99.0-bp.9", &LINUX) && !older(LINUX.version, &LINUX) && !older("10.99.0-bp.99", &LINUX) && !older("10.0.7", &LINUX) && !older("", &LINUX));
         assert_eq!(decide(Some(&LINUX), "ok", "10.99.0-bp.4", ""), Action::Offer);
         assert_eq!(decide(Some(&LINUX), "ok", "10.99.0-bp.4", "failed"), Action::Nothing, "a failed update leaves the working one alone");
-        assert_eq!(decide(Some(&LINUX), "ok", "10.99.0-bp.10", ""), Action::Nothing);
+        assert_eq!(decide(Some(&LINUX), "ok", LINUX.version, ""), Action::Nothing);
         // Linux to the hotfix: an installed bp.10, bp.11 or bp.12 is offered the update; bp.12.1 itself and anything newer are left alone
         let hot = Package { version: "10.99.0-bp.12.1", release: "backplane-kicad-v10.99.0-bp.12.1", ..LINUX };
         for v in ["10.99.0-bp.10", "10.99.0-bp.11", "10.99.0-bp.12"] { assert_eq!(decide(Some(&hot), "ok", v, ""), Action::Offer, "{v}"); assert_eq!(refusal("/k/bin/kicad-cli", "ok", v, true, false, Some(&hot)), None, "{v}"); }
         for v in ["10.99.0-bp.12.1", "10.99.0-bp.13"] { assert_eq!(decide(Some(&hot), "ok", v, ""), Action::Nothing, "{v}"); }
         // Windows pinned behind Linux: its bp.10 is current for it while Linux's would be offered the hotfix
-        assert_eq!(decide(Some(&WINDOWS), "ok", "10.99.0-bp.10", ""), Action::Nothing);
+        assert_eq!(decide(Some(&WINDOWS), "ok", WINDOWS.version, ""), Action::Nothing);
         assert_eq!(refusal("/k/bin/kicad-cli", "ok", "10.99.0-bp.4", true, false, Some(&LINUX)), None);
     }
 
@@ -966,7 +966,7 @@ cp \"$f\" \"$out\"
         exe(&s, &format!("#!/bin/sh\necho \"Downloading $5\"\ni=0; while [ ! -e '{}' ] && [ $i -lt 1200 ]; do sleep 0.05; i=$((i+1)); done\necho Unpacking\nmkdir -p \"$1/$3/bin\" && touch \"$1/$3/$8\"\necho \"Installed in $1/$3\"\n", go.display()));
         let parent = r.join("kicad"); let mut steps = vec![];
         let got = rt().block_on(run(Some(&s), &parent, &LINUX, &r.join("log"), |l| { if steps.is_empty() { let _ = std::fs::write(&go, ""); } steps.push(l) }, |_| {}));
-        assert_eq!(got, Ok(parent.join("10.99.0-bp.10").to_string_lossy().to_string()));
+        assert_eq!(got, Ok(parent.join(LINUX.version).to_string_lossy().to_string()));
         assert!(steps.first().unwrap().starts_with("Downloading backplane-kicad-linux") && steps.last().unwrap().starts_with("Installed in"), "{steps:?}");
     }
     #[cfg(unix)] #[test] fn a_standin_installer_that_fails_is_reported_in_its_own_words() {
