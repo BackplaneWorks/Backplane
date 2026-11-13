@@ -34,7 +34,7 @@ J
 cp "$HH/win.log" "$OUT/logs/win-1.log" 2>/dev/null; : >"$HH/win.log"; T2=$(date +%s.%N)
 launch --url http://127.0.0.1:$(hub_port) --token-file $PH/.backplane/hub/token --script $PH/panels.json
 since2() { python3 -c "import time;print(round(time.time()-$T2,1))"; }
-markt p2-ready 600 || { bad "the second session never showed KiCad again"; cp "$HH/win.log" "$OUT/logs/win-2.log"; return 0; }
+step "second session: KiCad again"; markt p2-ready 600 || { bad "the second session never showed KiCad again"; cp "$HH/win.log" "$OUT/logs/win-2.log"; return 0; }
 tm reopen-edit-painted "$(since2)"
 SOCK=$(report p2 | python3 -c 'import json,sys
 l=sys.stdin.read(); print(json.loads(l[l.index("{"):]).get("sock","") if "{" in l else "")' 2>/dev/null); HSOCK=${SOCK/#$PH/$HH}
@@ -44,9 +44,9 @@ IPC="$HERE/../kicad_embed/lib/gui_ipc_probe.py"
 
 # Ctrl+; in KiCad (the comment window), first, while no panel narrows the pane: the keyboard into KiCad by a click on its frame, a part
 # selected there (over KiCad's IPC, as embed_comment_e2e.sh does), the chord, a note, Enter -> one message in the thread
-sleep 4; eval "$(DISPLAY=$DISP xwininfo -id "$SHOWN" 2>/dev/null | awk '/Absolute upper-left X/{print "wx="$NF} /Absolute upper-left Y/{print "wy="$NF} /Width:/{print "ww="$NF} /Height:/{print "wh="$NF}')"
+step "comment window (Ctrl+;)"; sleep 4; eval "$(DISPLAY=$DISP timeout 10 xwininfo -id "$SHOWN" 2>/dev/null | awk '/Absolute upper-left X/{print "wx="$NF} /Absolute upper-left Y/{print "wy="$NF} /Width:/{print "ww="$NF} /Height:/{print "wh="$NF}')"
 if [ -n "${ww:-}" ]; then X mousemove $((wx + ww / 2)) $((wy + wh / 2)) click 1; sleep 0.8
-  python3 "$IPC" select-items "$HSOCK" pcb "JP1" 0 >"$OUT/logs/comment-select.json" 2>&1; sleep 0.5
+  timeout 30 python3 "$IPC" select-items "$HSOCK" pcb "JP1" 0 >"$OUT/logs/comment-select.json" 2>&1; sleep 0.5
   t=$(date +%s.%N); X key ctrl+semicolon
   for _ in $(seq 40); do [ -n "$(klog painted)" ] && break; sleep 0.25; done; shot 11-comment
   if [ -n "$(klog painted)" ]; then ok "Ctrl+; in KiCad opens Backplane's comment window"; tm comment-window "$(python3 -c "import time;print(round(time.time()-$t,2))")"
@@ -56,7 +56,7 @@ if [ -n "${ww:-}" ]; then X mousemove $((wx + ww / 2)) $((wy + wh / 2)) click 1;
   else bad "Ctrl+; opened no comment window (selection: $(head -c 160 "$OUT/logs/comment-select.json"))"; cut_ 2 comment "Ctrl+; in the embedded KiCad opened no comment window on a fresh install"; fi
 else bad "no KiCad frame to give the keyboard to (shown=$SHOWN)"; fi
 
-markt bom 200; sleep 1; shot 12-bom
+step "BOM (Alt+Shift+B)"; markt bom 200; sleep 1; shot 12-bom
 BOM=$(hub rpc mgmt.watch "{\"project\":\"$PRO\"}" | python3 -c 'import json,sys
 r=json.load(sys.stdin); d=((r.get("result") or {}).get("data") or {}); b=d.get("bom") or {}; s=(r.get("result") or {}).get("state") or {}
 print(json.dumps({"open": s.get("open"), "lines": len(b.get("lines") or []), "parts": b.get("parts"), "source": b.get("source")}))' 2>/dev/null)
@@ -64,7 +64,7 @@ python3 -c 'import json,sys; d=json.loads(sys.argv[1]); sys.exit(0 if d.get("ope
   && ok "Alt+Shift+B opens the BOM panel with the board's lines ($BOM)" || { bad "Alt+Shift+B: no BOM panel with lines ($BOM)"; cut_ 2 bom "Alt+Shift+B did not open a BOM with lines on a fresh install: $BOM"; }
 
 # Checks, then a click on a DRC row: its items are selected in the PCB editor (GetSelection over KiCad's own socket, mounted from the box)
-markt checks 60; sleep 2; shot 13-checks
+step "Checks and the cross-probe"; markt checks 60; sleep 2; shot 13-checks
 CHK=$(hub rpc mgmt.watch "{\"project\":\"$PRO\"}" | python3 -c 'import json,sys
 r=json.load(sys.stdin); c=(((r.get("result") or {}).get("data") or {}).get("checks") or {})
 rows=[x for g in c.get("groups",[]) for x in g.get("rows",[])[:3]]
@@ -75,10 +75,10 @@ ROW=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1]).get("row",""))'
 if [ -n "$ROW" ]; then
   read -r cx cy cid < <(ctl_xy "mgmt:checks:row:$ROW")
   if [ -n "${cx:-}" ]; then
-    python3 "$IPC" select-items "$HSOCK" pcb "" 0 >/dev/null 2>&1
-    S0=$(python3 "$IPC" selection "$HSOCK" pcb 2>&1 | tail -1)
+    timeout 30 python3 "$IPC" select-items "$HSOCK" pcb "" 0 >/dev/null 2>&1
+    S0=$(timeout 30 python3 "$IPC" selection "$HSOCK" pcb 2>&1 | tail -1)
     X mousemove "$cx" "$cy" click 1; sleep 1.5
-    S1=$(python3 "$IPC" selection "$HSOCK" pcb 2>&1 | tail -1); shot 14-crossprobe
+    S1=$(timeout 30 python3 "$IPC" selection "$HSOCK" pcb 2>&1 | tail -1); shot 14-crossprobe
     echo "selection before: $S0 after: $S1" >"$OUT/logs/crossprobe.txt"
     [ "$S1" != "$S0" ] && echo "$S1" | grep -q '"count": *[1-9]' && ok "a click on a DRC row selects its items in the PCB editor ($(echo "$S1" | cut -c1-120))" \
       || { bad "the DRC row click did not change KiCad's selection ($S0 -> $S1)"; cut_ 2 checks "a Checks row click did not cross-probe into KiCad: $(echo "$S1" | cut -c1-160)"; }
@@ -86,7 +86,7 @@ if [ -n "$ROW" ]; then
 else bad "the Checks panel has no DRC row ($CHK)"; fi
 
 # Fab, then Review: the design review writes .backplane/design-review.json in the project
-read -r fx fy _ < <(ctl_xy "mgmt:fab"); [ -n "${fx:-}" ] && X mousemove "$fx" "$fy" click 1; sleep 3; shot 15-fab
+step "Fab and Review"; read -r fx fy _ < <(ctl_xy "mgmt:fab"); [ -n "${fx:-}" ] && X mousemove "$fx" "$fy" click 1; sleep 3; shot 15-fab
 read -r rx ry _ < <(ctl_xy "mgmt:fab:review")
 if [ -n "${rx:-}" ]; then t=$(date +%s.%N); X mousemove "$rx" "$ry" click 1
   for _ in $(seq 100); do [ -s "$HH/Documents/pic_programmer/.backplane/design-review.json" ] && break; sleep 0.5; done; shot 16-review
@@ -95,13 +95,13 @@ if [ -n "${rx:-}" ]; then t=$(date +%s.%N); X mousemove "$rx" "$ry" click 1
 else bad "no Fab panel or Review button (mgmt:fab, mgmt:fab:review)"; fi
 
 # Gerbers tab (the script's own click): the mfg/ set drawn
-markt gerbers 200; sleep 1; shot 17-gerbers
+step "Gerbers tab"; markt gerbers 200; sleep 1; shot 17-gerbers
 grep '"event":"plot_painted"' "$HH/win.log" | grep -q '/mfg' && ok "the Gerbers tab drew the project's mfg/ set ($(grep '"event":"plot_painted"' "$HH/win.log" | grep '/mfg' | tail -1 | grep -o '"ms":[0-9.]*'))" \
   || { bad "the Gerbers tab drew no mfg/ set ($(grep -o '"id":"rail:Gerbers"[^}]*' "$HH/win.log" | tail -1))"; cut_ 2 gerbers "the Gerbers tab did not draw the exported mfg/ set"; }
 
 # The floorplanner's plan tools, through the stand-in agent: propose, a refused route, the person's approval, the route. They need the
 # runtime's `routing-plan` capability: a runtime without it is a paper cut (what setup installs cannot do it), not a crash or a FAIL.
-CAPS=$(python3 -c "import json;print(' '.join(json.load(open('$KDIR/manifest.json')).get('capabilities',[])))" 2>/dev/null)
+step "plan tools"; CAPS=$(python3 -c "import json;print(' '.join(json.load(open('$KDIR/manifest.json')).get('capabilities',[])))" 2>/dev/null)
 if ! printf ' %s ' "$CAPS" | grep -q ' routing-plan '; then
   cut_ 2 plan "setup installs Backplane KiCad $(basename "$KDIR"), which has no routing-plan$(printf ' %s ' "$CAPS" | grep -q ' coedit ' || echo ' and no coedit'): the floorplanner$(printf ' %s ' "$CAPS" | grep -q ' coedit ' || echo ' and per-agent undo') cannot work on a fresh install"
   printf 'SKIP\tplan tools: the runtime has no routing-plan (%s)\n' "$(basename "$KDIR")" >>"$OUT/checks.tsv"; echo "SKIP plan tools (no routing-plan in $(basename "$KDIR"))"

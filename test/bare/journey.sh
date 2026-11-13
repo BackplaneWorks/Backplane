@@ -21,7 +21,12 @@ bad() { printf 'FAIL\t%s\n' "$1" >>"$OUT/checks.tsv"; echo "FAIL $1"; fails=$((f
 cut_() { grep -qxF "$(printf "%s\t%s\t%s" "$1" "$2" "$3")" "$OUT/findings.tsv" 2>/dev/null && return 0; printf '%s\t%s\t%s\n' "$1" "$2" "$3" >>"$OUT/findings.tsv"; echo "CUT [$1] $2: $3"; }   # rank where what
 in_box() { docker exec -i "$C" "$@"; }
 as_person() { docker exec -i -u person -w $PH -e HOME=$PH "$C" "$@"; }
-shot() { DISPLAY=$DISP import -window root "$OUT/shots/$1.png" 2>/dev/null || true; }
+# every X call is bounded: a client that holds a grab (or a stuck server) cost a whole run once (46 min in rerun 3); a timeout is a FAIL
+# that says which step and what the box's processes were doing (xstuck)
+STEP=start; step() { STEP=$*; echo "STEP $(python3 -c "import time;print(round(time.time()-$T0))") $*"; }
+xstuck() { [ -f "$OUT/logs/xstuck.txt" ] && return 0; { echo "step: $STEP ($1 timed out)"; in_box ps -eo pid,stat,wchan:24,etime,args 2>&1 | cut -c1-220; } >"$OUT/logs/xstuck.txt" 2>&1
+  bad "the X server did not answer during: $STEP ($1 timed out; logs/xstuck.txt)"; }
+shot() { DISPLAY=$DISP timeout 20 import -window root "$OUT/shots/$1.png" 2>/dev/null; [ $? = 124 ] && xstuck "screenshot $1"; return 0; }
 cleanup() { docker rm -f "$C" >/dev/null 2>&1; [ -n "$IP" ] && kill "$IP" 2>/dev/null; [ -n "$XP" ] && kill "$XP" 2>/dev/null; }
 trap cleanup EXIT
 
@@ -32,7 +37,7 @@ need bun || { echo "no bun on the host for the stand-in agent" >&2; exit 3; }
 Xvfb $DISP -screen 0 1600x1000x24 -nolisten tcp >"$OUT/logs/xvfb.log" 2>&1 & XP=$!; sleep 1.5
 printf 'ipc-socket %s/i3.sock\nnew_window none\nfor_window [class=".*"] border none\ndefault_border none\n' "$OUT" >"$OUT/i3.conf"
 DISPLAY=$DISP i3 -c "$OUT/i3.conf" >"$OUT/logs/i3.log" 2>&1 & IP=$!; sleep 1
-X() { DISPLAY=$DISP xdotool "$@"; }
+X() { DISPLAY=$DISP timeout 15 xdotool "$@"; local r=$?; [ $r = 124 ] && xstuck "xdotool $1"; return $r; }
 pos() { python3 "$ROOT/test/onboarding/pos.py" "$HH/win.log" "$1" 2>/dev/null; }
 click_id() { local p; for _ in $(seq ${2:-40}); do p=$(pos "$1") && { X mousemove $p click 1; return 0; }; sleep 0.5; done; return 1; }
 
@@ -141,7 +146,7 @@ launch() { docker exec -d -u person -w $PH -e HOME=$PH "${ENVS[@]}" "$C" sh -c "
 HUBH=$HH/.backplane/hub
 hub_port() { cut -d' ' -f2 "$HUBH/hub.lock" 2>/dev/null; }
 hub_up() { local p; p=$(hub_port); [ -n "$p" ] && curl --noproxy '*' -sf -m 2 "http://127.0.0.1:$p/hello" >/dev/null; }
-hub() { bun "$HERE/hub.mjs" "$(hub_port)" "$HUBH/token" "$@"; }
+hub() { timeout 90 bun "$HERE/hub.mjs" "$(hub_port)" "$HUBH/token" "$@"; }
 info() { hub info "$1" | python3 -c "import json,sys; print(json.dumps(json.load(sys.stdin).get('$1')))"; }
 setting() { python3 - "$HUBH/events.jsonl" "$1" <<'EOF'
 import json,sys
@@ -189,13 +194,21 @@ KDIR=$(ls -d "$HUBH"/kicad/10.* 2>/dev/null | sort -V | tail -1)
 if [ -n "$KDIR" ]; then
   KV=$(basename "$KDIR"); echo "$KV" >"$OUT/kicad-version.txt"
   # what a new person receives must be the newest Backplane KiCad release (GitHub's "latest"), or we never notice it falling behind
-  LATEST=$(curl -fsSL https://api.github.com/repos/BackplaneWorks/Backplane_KiCad/releases/latest 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("tag_name","").replace("backplane-kicad-v",""))' 2>/dev/null)
-  echo "fresh install got Backplane KiCad $KV; latest release $LATEST" | tee "$OUT/kicad-runtime.txt"
-  if [ -z "$LATEST" ]; then bad "could not read the latest Backplane KiCad release from GitHub"
+  # the releases setup downloads from (install.rs FROM), as the product does
+  REPO=$(grep -o 'pub const FROM: &str = "github.com/[^"]*"' "$ROOT/native/host/src/kicad/install.rs" | sed 's|.*github.com/||; s|"$||')
+  LATEST=$(curl -fsSL "https://api.github.com/repos/${REPO:-BackplaneWorks/Backplane_KiCad}/releases/latest" 2>/dev/null | python3 -c 'import json,sys; print(json.load(sys.stdin).get("tag_name","").replace("backplane-kicad-v",""))' 2>/dev/null)
+  # a deliberate hold (test/bare/kicad-hold: "<version> <why>") turns "not the latest" into HOLD and a paper cut while the install is
+  # exactly the held version; anything else still fails. The pin's bump deletes the file.
+  HOLD=$(sed -n 1p "$HERE/kicad-hold" 2>/dev/null); HOLDV=${HOLD%% *}
+  echo "fresh install got Backplane KiCad $KV; latest release $LATEST (${REPO:-?})${HOLD:+; hold: $HOLD}" | tee "$OUT/kicad-runtime.txt"
+  if [ -z "$LATEST" ]; then bad "could not read the latest Backplane KiCad release from GitHub (${REPO:-?})"
   elif [ "$KV" = "$LATEST" ]; then ok "a fresh install gets the latest Backplane KiCad release ($KV)"
-  else bad "a fresh install gets Backplane KiCad $KV, not the latest release $LATEST"; cut_ 2 runtime "a fresh install gets Backplane KiCad $KV while the latest release is $LATEST (install.rs pins it)"; fi
+    [ -n "$HOLD" ] && bad "test/bare/kicad-hold ($HOLD) is still there while the install is the latest: delete it"
+  elif [ -n "$HOLD" ] && [ "$KV" = "$HOLDV" ]; then printf 'HOLD\t%s\n' "a fresh install gets $KV, held back from the latest $LATEST: ${HOLD#* }" >>"$OUT/checks.tsv"
+    echo "HOLD a fresh install gets $KV, held back from the latest $LATEST: ${HOLD#* }"; cut_ 2 runtime "a fresh install gets Backplane KiCad $KV while the latest release is $LATEST (held: ${HOLD#* })"
+  else bad "a fresh install gets Backplane KiCad $KV, not the latest release $LATEST${HOLD:+ (nor the held $HOLDV)}"; cut_ 2 runtime "a fresh install gets Backplane KiCad $KV while the latest release is $LATEST (install.rs pins it)"; fi
   A=$(python3 -c "import json;print(json.load(open('$KDIR/manifest.json')).get('platform',''))" 2>/dev/null)
-  SZ=$(curl -sfIL "https://github.com/i2cjak/Backplane_KiCad/releases/download/backplane-kicad-v$KV/backplane-kicad-linux-x86_64-$KV.tar.gz" | awk 'tolower($1)=="content-length:"{n=$2} END{print n+0}')
+  SZ=$(curl -sfIL "https://github.com/${REPO:-BackplaneWorks/Backplane_KiCad}/releases/download/backplane-kicad-v$KV/backplane-kicad-linux-x86_64-$KV.tar.gz" | awk 'tolower($1)=="content-length:"{n=$2} END{print n+0}')
   echo "kicad $KV ($A): download $((SZ/1048576)) MB, installed $(du -sm "$KDIR" | cut -f1) MB" | tee "$OUT/kicad-size.txt"
   t=$(date +%s.%N); fill_libs "${KDIR/#$HH/$PH}" kicad; tm desktop-libs-kicad "$(python3 -c "import time;print(round(time.time()-$t,1))")"
   in_box sh -c "${KDIR/#$HH/$PH}/bin/kicad-cli --version" >"$OUT/logs/kicad-cli-version.txt" 2>&1 && ok "the installed kicad-cli runs ($(cat "$OUT/logs/kicad-cli-version.txt"))" || bad "the installed kicad-cli does not run: $(cat "$OUT/logs/kicad-cli-version.txt")"
