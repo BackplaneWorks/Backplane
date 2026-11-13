@@ -25,9 +25,12 @@ fn snapshot(d: &Path) -> Vec<(String, u64, String, std::time::SystemTime)> {
 struct Probe(AtomicUsize);
 impl Observer for Probe { fn committed(&self, _h: &Arc<Hub>, events: &[Value], _f: u32) { self.0.fetch_add(events.iter().filter(|e| e["$"] != "SettingSet" && e["$"] != "PushOrdered").count(), SeqCst); } }
 
-struct Rig { hub: Arc<Hub>, imp: Arc<Importer>, old: PathBuf, home: PathBuf, probe: Arc<Probe>, _reg: Arc<crate::net::pairing::Registry>, _dir: crate::plat::tmp::TempDir }
+/// The import's state is process-wide (`NOW`, the guard's folding count): one rig at a time, or another test's import is read as this one's (and its end as this one's).
+static ONE: std::sync::OnceLock<Arc<tokio::sync::Mutex<()>>> = std::sync::OnceLock::new();
+struct Rig { hub: Arc<Hub>, imp: Arc<Importer>, old: PathBuf, home: PathBuf, probe: Arc<Probe>, _reg: Arc<crate::net::pairing::Registry>, _dir: crate::plat::tmp::TempDir, _one: tokio::sync::OwnedMutexGuard<()> }
 async fn rig(tag: &str) -> Rig { let dir = tmp(tag); let old = old_home(&dir); rig_on(dir, old).await }
 async fn rig_on(dir: crate::plat::tmp::TempDir, old: PathBuf) -> Rig {
+    let _one = ONE.get_or_init(Default::default).clone().lock_owned().await;
     let home = dir.join("new"); std::fs::create_dir_all(&home).unwrap();
     std::fs::write(home.join("token"), "0123456789abcdef0123456789abcdef\n").unwrap();
     let cfg = Cfg { home: home.clone(), version: "0.15.0".into(), commit: "c".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() };
@@ -37,7 +40,7 @@ async fn rig_on(dir: crate::plat::tmp::TempDir, old: PathBuf) -> Rig {
     crate::settings::accounts_hub::start_cli(&hub, None, crate::agents::proc::Cli::standin(&dir.join("agents")));
     let probe = Arc::new(Probe(AtomicUsize::new(0))); hub.register_observer(probe.clone());
     let imp = start_from(&hub, Some(old.clone()));
-    Rig { hub, imp, old, home, probe, _reg: reg, _dir: dir }
+    Rig { hub, imp, old, home, probe, _reg: reg, _dir: dir, _one }
 }
 fn log(h: &Hub) -> Vec<String> { h.store.range(0, h.store.len()).unwrap() }
 fn has(h: &Hub, pat: &str) -> usize { log(h).iter().filter(|l| l.contains(pat)).count() }
@@ -245,6 +248,7 @@ fn big_home(dir: &Path, p: u32, t: u32, l: u32) -> PathBuf {
     let dir = tmp("long"); let old = big_home(&dir, 10, 500, 30000);
     let r = rig_on(dir, old).await; r.imp.throttle_ms.store(500, std::sync::atomic::Ordering::Relaxed);
     let (h, imp) = (r.hub.clone(), r.imp.clone());
+    let mut told = r.hub.attach(7001); // every state the hub publishes, in order: a poll below can miss a step shorter than its 50 ms
     let run = tokio::spawn(async move { imp.run(&h, false).await });
     let t0 = std::time::Instant::now(); let (mut last, mut last_at, mut gaps, mut seen_running, mut slow) = (String::new(), t0, vec![], 0, vec![]);
     let (mut health_ok, mut phases, mut frozen, mut samples) = (0, std::collections::BTreeSet::new(), 0, Vec::<(u128, u128, u128, u128)>::new());
@@ -286,7 +290,9 @@ fn big_home(dir: &Path, p: u32, t: u32, l: u32) -> PathBuf {
     assert!(samples.iter().all(|s| s.0 <= 1000 + fsync as u128), "a write took over a second plus one fsync ({fsync} ms) mid-import: {slow:?} {h}");
     assert!(health_ok > 0, "/healthz said migrating with a fold held");
     assert_eq!(frozen, 0, "the views' state stopped answering during the import (the clients would freeze)");
-    assert!(phases.contains("writing") && phases.contains("reading"), "{phases:?}");
+    while let Ok(o) = told.try_recv() { if let crate::hub::Out::Value(v) = o { if let Some(t) = v["info"][INFO].as_str() { let s: Value = serde_json::from_str(t).unwrap_or(Value::Null);
+        if s["state"] == "running" { phases.insert(s["phase"].as_str().unwrap_or("").to_string()); } } } }
+    assert!(["reading", "copying", "writing", "finishing"].iter().all(|p| phases.contains(*p)), "every step is published as it begins: {phases:?}");
     assert!(crate::import014::migrating().is_none() && crate::guard::health().1.get("migrating").is_none(), "nothing migrating once done");
     let c = &res["counts"]; assert_eq!((res["state"].as_str(), c["projects"].as_u64(), c["threads"].as_u64()), (Some("done"), Some(10 + 1), Some(500 + 3)), "the large part and the small fixture's own: {res}");
     assert_eq!(r.hub.model().await.threads.len(), 500 + 3, "every thread that came is in the model");

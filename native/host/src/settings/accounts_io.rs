@@ -1856,7 +1856,9 @@ for l in sys.stdin:
         a.inner.lock().unwrap().cmds.get(&aid).unwrap().send(Cmd::Respond("WRONG#STATE123".into())).unwrap();
         let s = until(&a, |s| s["attempts"][0]["state"] == "failed").await;
         assert!(s["attempts"][0]["message"].as_str().unwrap().starts_with("Claude did not accept that authentication code"), "{s}"); assert_eq!(prof(&s, &id)["state"], "disconnected"); assert_eq!(prof(&s, &id)["epoch"], 1);
-        assert!(std::fs::read_dir(h.join("providers/accounts-v1").join(&id)).unwrap().flatten().all(|e| !e.path().is_dir()), "the candidate store is discarded");
+        // the attempt shows failed at once; its candidate store goes when its child is gone (`discard`), a moment later
+        let gone = || std::fs::read_dir(h.join("providers/accounts-v1").join(&id)).unwrap().flatten().all(|e| !e.path().is_dir());
+        soon(|| gone()).await; assert!(gone(), "the candidate store is discarded");
         let _ = std::fs::remove_dir_all(&h);
     }
     #[tokio::test(flavor = "multi_thread")] async fn a_sign_in_can_be_cancelled_and_started_again() {
