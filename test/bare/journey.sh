@@ -26,7 +26,8 @@ as_person() { docker exec -i -u person -w $PH -e HOME=$PH "$C" "$@"; }
 STEP=start; phase() { rss "end of: $STEP"; STEP=$*; printf '%s\t%s\n' "$(date +%s%3N)" "$*" >>"$OUT/phases.tsv"; echo "STEP $(python3 -c "import time;print(round(time.time()-$T0))") $*"; }
 # resident memory (KB) of the client, the hub and KiCad at each phase boundary: a client once grew to 45 GB on the person's machine
 # (OOM-killed, 2026-11-13); the box's processes from the host side, by name, summed per program
-rss() { local t; t=$(docker exec "$C" ps -eo rss=,comm= 2>/dev/null | awk '{k=$2} k~/^backplane-gpui/{g+=$1} k~/^backplane-hub/{h+=$1} k~/^kicad/{c+=$1} END{printf "%d\t%d\t%d", g, h, c}')
+# by command line: KiCad runs through its runtime's own loader (ld-linux), so its process name is not "kicad"
+rss() { local t; t=$(docker exec "$C" ps -eo rss=,args= 2>/dev/null | awk '{a=$0} a~/backplane-gpui/{g+=$1;next} a~/backplane-hub/{h+=$1;next} a~/\/kicad\/[^ ]*\/bin\/kicad|kicad\.real/{c+=$1} END{printf "%d\t%d\t%d", g, h, c}')
   [ -n "$t" ] && printf '%s\t%s\t%s\n' "$(date +%s)" "$t" "$1" >>"$OUT/rss.tsv"; return 0; }
 # What it captures, for lane B's grab probe: does a fresh X client get an answer (no: a server grab, held by the one X client that is not
 # waiting on its X socket); was the Backplane client still logging; each X client's state and stack from the host (the container gives

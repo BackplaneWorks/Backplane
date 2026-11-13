@@ -141,9 +141,12 @@ tm drc "$(python3 -c "import time;print(round(time.time()-$t,1))")"
 
 # --- 7. stock KiCad: the current release from its official packages, on the fork's exports ---
 t=$(date +%s.%N)
-if [ $PM = apt ]; then pkg_install software-properties-common gpg-agent && in_box add-apt-repository -y ppa:kicad/kicad-10.0-releases >>"$OUT/logs/box-pkg.log" 2>&1 \
+# Launchpad's API flakes (rerun 7: a broken HTTP chunk in add-apt-repository): three tries
+ppa_add() { local i; for i in 1 2 3; do in_box add-apt-repository -y ppa:kicad/kicad-10.0-releases >>"$OUT/logs/box-pkg.log" 2>&1 && return 0; sleep 10; done; return 1; }
+if [ $PM = apt ]; then pkg_install software-properties-common gpg-agent && ppa_add \
   && in_box apt-get update -qq >>"$OUT/logs/box-pkg.log" 2>&1 && pkg_install --no-install-recommends kicad kicad-symbols kicad-footprints kicad-templates; fi   # `apt install kicad` brings these as recommends (and the 3D models, left out: GBs)
-SV=$(in_box kicad-cli --version 2>/dev/null); tm stock-kicad-install "$(python3 -c "import time;print(round(time.time()-$t,1))")"
+# a version, not docker's "executable file not found" (on stdout: rerun 7 printed it as a PASS)
+SV=$(in_box kicad-cli --version 2>/dev/null | grep -E '^[0-9]+\.[0-9]' | head -1); tm stock-kicad-install "$(python3 -c "import time;print(round(time.time()-$t,1))")"
 t=$(date +%s.%N)
 if [ -n "$SV" ]; then
   echo "$SV" >"$OUT/stock-version.txt"; ok "stock KiCad $SV from the official packages"
