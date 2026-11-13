@@ -15,7 +15,8 @@
 //! Source: `kicad-cli pcb drc` / `sch erc` (JSON) on the saved files, DRC and ERC side by side when memory allows (findings::admit),
 //! at low priority, cancelled when a newer save arrives. When it runs is findings::next (saves debounced, held while the
 //! person works in KiCad or an agent's turn holds the document). Results are kept in `<home>/cache/checks/` (never beside the design),
-//! so a restart shows the last result at once, fresh or stale.
+//! so a restart shows the last result at once, fresh or stale. When this machine cannot take a run (memory) or is busy, and the setting
+//! `checks.remote` names another machine of the person's with the same KiCad build, the run goes there (`Remote`); never to a Boat.
 use super::{cad, embed, findings::{self as fd, Counts, Do, Finding, Sched}, ipc, kserve as ks, project};
 use crate::{api::{Caller, Fut, RpcHandler}, hub::{now_ms, Hub}};
 use serde_json::{json, Value};
@@ -91,6 +92,8 @@ struct Src {
     full_next: bool,
     full: bool,
     peak_full_mb: u64,
+    /// the machine the last result came from ("" this one)
+    ran_on: String,
 }
 /// Findings another part of the hub puts in this list (the design review's sources: the fab's rules, the BOM, the fab outputs, the
 /// datasheets...): their state and set, replaced whole each time (`put_findings`).
@@ -211,7 +214,7 @@ fn src_json(p: &Proj, s: &str, now: u64) -> Value {
     let running = x.sched.running_since > 0;
     let reason = if st == "deferred" { x.deferred.trim_start_matches("deferred: ").to_string() } else { x.reason.clone() };
     json!({"state": st, "reason": reason, "running": running, "fraction": if running { fd::fraction(now.saturating_sub(x.sched.running_since), x.took) } else { -1.0 },
-        "counts": x.counts.to_json(), "at": x.at, "took_ms": x.took, "rev": x.sched.ran_rev, "has_result": x.had, "peak_mb": x.peak_mb, "full": x.full, "full_next": x.full_next, "note": if x.full { "" } else { fd::LIBRARY_NOTE }})
+        "counts": x.counts.to_json(), "at": x.at, "took_ms": x.took, "rev": x.sched.ran_rev, "has_result": x.had, "peak_mb": x.peak_mb, "full": x.full, "full_next": x.full_next, "ran_on": x.ran_on, "note": if x.full { "" } else { fd::LIBRARY_NOTE }})
 }
 /// none (no result yet), running, deferred (a run waits for memory or another heavy KiCad job), fresh (the result is of the design on
 /// disk), stale (the design changed since), failed.
@@ -274,7 +277,8 @@ async fn tick(hub: &Arc<Hub>) -> u64 {
     };
     if pros.is_empty() { return 60_000 }
     let mut sleep = TICK_MS * 5;
-    let (free, heavy) = tokio::task::spawn_blocking(|| (free_mb(), heavy_job())).await.unwrap_or_default();
+    let (free, heavy, busy) = tokio::task::spawn_blocking(|| (free_mb(), heavy_job(), busy_now())).await.unwrap_or_default();
+    let remote = remote_ready(hub).await;
     for (pro, files) in pros {
         let f2 = files.clone();
         let (erc_rev, drc_rev) = tokio::task::spawn_blocking(move || disk_revs(&f2)).await.unwrap_or_default();
@@ -292,10 +296,20 @@ async fn tick(hub: &Arc<Hub>) -> u64 {
                 x.sched.agent_since = agent; x.sched.person_at = person; x.sched.free_mb = free; x.sched.heavy = heavy.clone();
                 x.sched.need_mb = if x.full_next { fd::need_full_mb(s, doc_bytes(&files, s), x.peak_full_mb) } else { fd::need_mb(s, doc_bytes(&files, s), x.peak_mb) };
                 let was = std::mem::take(&mut x.deferred);
-                match fd::next(now, &x.sched) {
+                // where a run that may go runs: here, on the person's other machine set up for checks, or not yet
+                let start = |x: &mut Src, host: Option<Remote>, acts: &mut Vec<_>| {
+                    if host.is_none() { RUNNING.lock().unwrap().push((format!("{pro}|{s}"), x.sched.need_mb)); }
+                    x.sched.demand = false; let full = std::mem::take(&mut x.full_next); x.sched.running_since = now; x.sched.running_rev = rev.clone();
+                    let c = Arc::new(tokio::sync::Notify::new()); x.cancel = Some(c.clone()); acts.push((s, rev.clone(), c, full, host));
+                };
+                match fd::next_ignoring_machine(now, &x.sched) {
+                    Do::Run => match fd::place(&fd::machine_guard(&x.sched), remote.is_some(), busy) {
+                        fd::Place::Here if !fd::admit(free, &RUNNING.lock().unwrap().iter().map(|r| r.1).collect::<Vec<_>>(), x.sched.need_mb) => sleep = sleep.min(300),
+                        fd::Place::Here => { start(x, None, &mut acts); changed = true }
+                        fd::Place::There => { start(x, remote.clone(), &mut acts); changed = true }
+                        fd::Place::Defer(why) => { x.deferred = why; sleep = sleep.min(fd::DEFER_MS) }
+                    },
                     Do::Defer(why, ms) => { x.deferred = why; sleep = sleep.min(ms) }
-                    Do::Run if !fd::admit(free, &RUNNING.lock().unwrap().iter().map(|r| r.1).collect::<Vec<_>>(), x.sched.need_mb) => sleep = sleep.min(300),
-                    Do::Run => { RUNNING.lock().unwrap().push((format!("{pro}|{s}"), x.sched.need_mb)); x.sched.demand = false; let full = std::mem::take(&mut x.full_next); x.sched.running_since = now; x.sched.running_rev = rev.clone(); let c = Arc::new(tokio::sync::Notify::new()); x.cancel = Some(c.clone()); acts.push((s, rev.clone(), c, full)); changed = true; }
                     Do::Cancel => { if let Some(c) = &x.cancel { c.notify_one() } }
                     Do::Wait(ms) => sleep = sleep.min(ms.max(100)),
                     Do::Nothing => {}
@@ -305,7 +319,7 @@ async fn tick(hub: &Arc<Hub>) -> u64 {
             }
         }
         if changed { publish(hub, &pro).await }
-        for (s, rev, c, full) in acts { let (h, p, f) = (hub.clone(), pro.clone(), files.clone()); tokio::spawn(async move { run(&h, &p, &f, s, &rev, c, full).await }); }
+        for (s, rev, c, full, host) in acts { let (h, p, f) = (hub.clone(), pro.clone(), files.clone()); tokio::spawn(async move { run(&h, &p, &f, s, &rev, c, full, host).await }); }
     }
     sleep
 }
@@ -313,14 +327,14 @@ async fn tick(hub: &Arc<Hub>) -> u64 {
 /// What one run found: its findings, or why it failed (None: cancelled).
 type Outcome = Option<Result<Vec<Finding>, String>>;
 
-async fn run(hub: &Arc<Hub>, pro: &str, f: &project::Files, s: &'static str, rev: &str, cancel: Arc<tokio::sync::Notify>, full: bool) {
+async fn run(hub: &Arc<Hub>, pro: &str, f: &project::Files, s: &'static str, rev: &str, cancel: Arc<tokio::sync::Notify>, full: bool, host: Option<Remote>) {
     let t0 = now_ms();
-    let (o, peak) = run_cli(hub, pro, f, s, &cancel, full).await;
+    let (o, peak) = match &host { Some(r) => (run_remote(hub, r, pro, f, s, &cancel, full).await, 0), None => run_cli(hub, pro, f, s, &cancel, full).await };
     let took = now_ms() - t0;
     if let Some(p) = state().lock().unwrap().get_mut(pro) {
         let x = p.src(s);
         if peak > 0 { if full { x.peak_full_mb = peak } else { x.peak_mb = peak } }
-        if matches!(o, Some(Ok(_))) { x.full = full }
+        if matches!(o, Some(Ok(_))) { x.full = full; x.ran_on = host.as_ref().map(|r| r.host.clone()).unwrap_or_default() }
     }
     finish(hub, pro, s, rev, o, took).await
 }
@@ -407,8 +421,96 @@ fn low_priority(argv: &[String]) -> tokio::process::Command {
     c
 }
 
+// Another machine ----------------------------------------------------------------------------------------------------------------
+
+/// The person's other machine checks may run on: the setting `checks.remote` (an ssh destination, "h@backplane"; empty, the default:
+/// never), and its kicad-cli, the same build as this machine's (its `--version` the same): `checks.remote.cli`, else the runtime of
+/// the same name in `~/.cache/bp-kembed-remote/kicad/` or `~/.backplane-gpui-fresh/home/kicad/` there. Only the project's design files
+/// go there (its .kicad_pro, board, rules, sheets and project library tables), into `~/.cache/backplane-checks/<digest>/`. A Boat is
+/// never used for this: design files leave the person's machines only where they say so.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Remote { pub host: String, pub cli: String }
+/// (setting, local version) -> the probe's answer, so a host is asked once
+static PROBED: Mutex<Option<((String, String, String), Option<Remote>)>> = Mutex::new(None);
+async fn remote_ready(hub: &Arc<Hub>) -> Option<Remote> {
+    let host = hub.setting("checks.remote").await.unwrap_or_default();
+    if host.is_empty() || crate::copy::on() { return None }
+    let cli_set = hub.setting("checks.remote.cli").await.unwrap_or_default();
+    let rt = ipc::runtime(hub).await;
+    if rt.cli.is_empty() { return None }
+    let key = (host.clone(), cli_set.clone(), rt.cli.clone());
+    if let Some((k, v)) = PROBED.lock().unwrap().clone() { if k == key { return v } }
+    let name = Path::new(&rt.cli).parent().and_then(Path::parent).and_then(|d| d.file_name()).map(|n| n.to_string_lossy().into_owned()).unwrap_or_default();
+    let here = crate::proc::tokio_cmd(crate::proc::Kind::Local, &rt.cli).arg("--version").output().await.ok().map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string()).unwrap_or_default();
+    let cands = if cli_set.is_empty() { format!("$HOME/.cache/bp-kembed-remote/kicad/{name}/bin/kicad-cli $HOME/.backplane-gpui-fresh/home/kicad/{name}/bin/kicad-cli") } else { cli_set.clone() };
+    let script = format!("for c in {cands}; do if [ -x \"$c\" ]; then printf '%s\\t' \"$c\"; \"$c\" --version; exit 0; fi; done; exit 1");
+    let out = ssh(&host, &script, 20).await;
+    let found = out.ok().and_then(|o| { let (c, v) = o.trim().split_once('\t')?; (v.trim() == here && !here.is_empty()).then(|| Remote { host: host.clone(), cli: c.to_string() }) });
+    if found.is_none() { eprintln!("checks: {host} has no kicad-cli of this build ({here}); checks stay on this machine"); }
+    *PROBED.lock().unwrap() = Some((key, found.clone()));
+    found
+}
+/// A shell script run on the other machine (ssh, no prompts), its output; Err on failure or after `secs`.
+async fn ssh(host: &str, script: &str, secs: u64) -> Result<String, String> {
+    let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Net, "ssh");
+    c.args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=5", host, "sh", "-c", &shell_quote(script)]).stdin(std::process::Stdio::null()).kill_on_drop(true);
+    match tokio::time::timeout(Duration::from_secs(secs), c.output()).await {
+        Ok(Ok(o)) if o.status.success() => Ok(String::from_utf8_lossy(&o.stdout).into_owned()),
+        Ok(Ok(o)) => Err(String::from_utf8_lossy(&o.stderr).trim().lines().last().unwrap_or("ssh failed").to_string()),
+        Ok(Err(e)) => Err(e.to_string()), Err(_) => Err(format!("{host} did not answer in {secs} s")),
+    }
+}
+/// A word for a remote shell: single-quoted.
+pub fn shell_quote(s: &str) -> String { format!("'{}'", s.replace('\'', "'\\''")) }
+/// The project's design files the checks read, relative to its folder: the project file, board, rules, every sheet, project library tables.
+pub fn design_files(dir: &Path, f: &project::Files) -> Vec<String> {
+    let rel = |p: &Path| p.strip_prefix(dir).ok().map(|r| r.to_string_lossy().replace('\\', "/"));
+    let mut v: Vec<String> = vec![];
+    let mut add = |p: PathBuf| if p.is_file() { if let Some(r) = rel(&p) { if !v.contains(&r) { v.push(r) } } };
+    add(PathBuf::from(&f.pro));
+    if !f.pcb.is_empty() { add(PathBuf::from(&f.pcb)); add(Path::new(&f.pcb).with_extension("kicad_dru")); }
+    let mut sch = vec![]; if !f.sch.is_empty() { sheet_files(dir, 3, &mut sch) }
+    for p in sch { add(p) }
+    add(dir.join("fp-lib-table")); add(dir.join("sym-lib-table"));
+    v
+}
+/// One check on the other machine: the design files copied there, the same command as here, its report read back.
+async fn run_remote(hub: &Arc<Hub>, r: &Remote, pro: &str, f: &project::Files, s: &str, cancel: &tokio::sync::Notify, full: bool) -> Outcome {
+    let Some(c) = cad::CHECKS.iter().find(|c| c.id == s) else { return None };
+    let dir = Path::new(&f.pro).parent().map(Path::to_path_buf).unwrap_or_default();
+    let list = { let (d, f) = (dir.clone(), f.clone()); tokio::task::spawn_blocking(move || design_files(&d, &f)).await.unwrap_or_default() };
+    let rdir = format!(".cache/backplane-checks/{}", ks::digest(pro));
+    let tmp = cache_dir(hub).join(format!("{}.files", ks::digest(pro)));
+    let _ = std::fs::create_dir_all(cache_dir(hub));
+    if let Err(e) = std::fs::write(&tmp, list.join("\n")) { return Some(Err(format!("the list of design files: {e}"))) }
+    if let Err(e) = ssh(&r.host, &format!("mkdir -p $HOME/{rdir}/proj $HOME/{rdir}/out"), 20).await { return Some(Err(format!("{} cannot be reached: {e}", r.host))) }
+    let mut rs = crate::proc::tokio_cmd(crate::proc::Kind::Net, "rsync");
+    rs.args(["-a", "--files-from"]).arg(&tmp).arg("-e").arg("ssh -o BatchMode=yes -o ConnectTimeout=5").arg(format!("{}/", dir.display())).arg(format!("{}:{rdir}/proj/", r.host)).kill_on_drop(true);
+    match tokio::select! { o = rs.output() => o, _ = cancel.notified() => return None } {
+        Ok(o) if o.status.success() => {}
+        Ok(o) => return Some(Err(format!("copying the design to {} failed: {}", r.host, String::from_utf8_lossy(&o.stderr).trim().lines().last().unwrap_or("")))),
+        Err(e) => return Some(Err(format!("rsync: {e}"))),
+    }
+    let rel = |p: &str| Path::new(p).strip_prefix(&dir).map(|x| format!("$HOME/{rdir}/proj/{}", x.to_string_lossy())).unwrap_or_default();
+    let argv = cad::fill(c.argv, &[("cli", &r.cli), ("pcb", &rel(&f.pcb)), ("sch", &rel(&f.sch)), ("out", &format!("$HOME/{rdir}/out"))]);
+    let cmd = argv.iter().map(|a| if a.contains("$HOME") { format!("\"{a}\"") } else { shell_quote(a) }).collect::<Vec<_>>().join(" ");
+    let cfg = if full { String::new() } else { format!("K=$HOME/{rdir}/../kicad-config; for v in 10.99 10.0 9.0; do mkdir -p $K/$v; [ -f $K/$v/fp-lib-table ] || printf '(fp_lib_table\\n  (version 7)\\n)\\n' > $K/$v/fp-lib-table; [ -f $K/$v/sym-lib-table ] || printf '(sym_lib_table\\n  (version 7)\\n)\\n' > $K/$v/sym-lib-table; done; export KICAD_CONFIG_HOME=$K; ") };
+    let script = format!("{cfg}mkdir -p $HOME/{rdir}/out && rm -f $HOME/{rdir}/out/{rep} && nice -n 10 {cmd} >/dev/null 2>&1; cat $HOME/{rdir}/out/{rep}", rep = c.report);
+    let text = tokio::select! { o = ssh(&r.host, &script, RUN_SECS) => o, _ = cancel.notified() => return None };
+    let text = match text { Ok(t) => t, Err(e) => return Some(Err(format!("{s} on {} failed: {e}", r.host))) };
+    match if s == "drc" { fd::drc(&text) } else { fd::erc(&text) } {
+        Some(mut fs) => { if !full { fs.retain(|x| !fd::library_rule(s, &x.rule)) } Some(Ok(fs)) }
+        None => Some(Err(format!("{s} on {} gave no report", r.host))),
+    }
+}
+
 // The machine ----------------------------------------------------------------------------------------------------------------------
 
+/// Whether this machine is busy now: its load at or past its cores (Linux; never elsewhere).
+fn busy_now() -> bool {
+    let load = std::fs::read_to_string("/proc/loadavg").ok().and_then(|t| t.split_whitespace().next()?.parse::<f64>().ok()).unwrap_or(0.0);
+    load > 0.0 && load >= std::thread::available_parallelism().map_or(1, |n| n.get()) as f64
+}
 /// Memory available now (MB; 0 when this platform cannot say: the guard then does not hold runs back).
 fn free_mb() -> u64 {
     // a test hub says how much is free (embed_checks_e2e's low-memory case)
@@ -600,6 +702,17 @@ mod tests {
         let pj = panel_json(&p, v); assert_eq!(pj["total"], 2); assert_eq!(pj["badge"]["n"], 2);
         assert!(pj["groups"].as_array().unwrap().iter().any(|g| g["source"] == "fabtest" && g["rule"] == "min_drill"));
         assert!(known_source("fabtest") && known_source("drc") && !known_source("nope"));
+    }
+    #[test] fn only_the_design_goes_to_another_machine() {
+        let d = crate::plat::tmp::dir("checkrun-files");
+        std::fs::create_dir_all(d.join("sheets")).unwrap(); std::fs::create_dir_all(d.join("backups")).unwrap(); std::fs::create_dir_all(d.join("mfg")).unwrap();
+        for f in ["a.kicad_pro", "a.kicad_pcb", "a.kicad_dru", "a.kicad_sch", "sheets/io.kicad_sch", "backups/old.kicad_sch", "fp-lib-table", "mfg/a.zip", "a.kicad_prl", "notes.md"] { std::fs::write(d.join(f), "x").unwrap() }
+        let s = |p: &str| d.join(p).to_string_lossy().to_string();
+        let files = project::Files { pro: s("a.kicad_pro"), pcb: s("a.kicad_pcb"), sch: s("a.kicad_sch"), all: vec![] };
+        let mut got = design_files(&d, &files); got.sort();
+        assert_eq!(got, ["a.kicad_dru", "a.kicad_pcb", "a.kicad_pro", "a.kicad_sch", "fp-lib-table", "sheets/io.kicad_sch"]);
+        assert_eq!(shell_quote("it's"), "'it'\\''s'");
+        let _ = std::fs::remove_dir_all(&d);
     }
     #[test] fn the_state_word() {
         let mut x = Src::default();

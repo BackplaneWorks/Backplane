@@ -4293,3 +4293,4 @@ gpui.mgmt.bom.nochange = Nothing to change.
 gpui.mgmt.bom.inkicad.save = Changed in KiCad; save there to keep it.
 gpui.mgmt.bom.undo.tip = Put the old value back
 gpui.mgmt.bom.undo = Undo
+gpui.mgmt.checks.on = on {host}
