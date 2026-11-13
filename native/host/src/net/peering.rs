@@ -10,7 +10,7 @@ use std::{path::PathBuf, sync::{Arc, Mutex}};
 /// What a handler needs of a request. `trusted`: loopback or the owner's device (never a credential by itself).
 /// `own_device`: the connection came through the TAILNET listener and its peer passed the whois verdict: the only
 /// thing owner trust (`Auth.owner.pair`/`peer`) may rest on. A loopback socket is `trusted` and never `own_device`.
-pub struct PReq { pub method: String, pub target: String, pub headers: Vec<(String, String)>, pub body: Vec<u8>, pub trusted: bool, pub own_device: bool }
+pub struct PReq { pub method: String, pub target: String, pub headers: Vec<(String, String)>, pub body: Vec<u8>, pub trusted: bool, pub own_device: bool, pub peer: String }
 impl PReq {
     pub fn route(&self) -> &str { self.target.split('?').next().unwrap_or("") }
     pub fn header(&self, n: &str) -> &str { owner::header(&self.headers, n) }

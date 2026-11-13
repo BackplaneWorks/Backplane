@@ -8,7 +8,7 @@ use std::{sync::Arc, time::Duration};
 pub struct PeerRoutes(pub Arc<Peering>);
 impl PeerRoutes {
     /// Req → PReq (the socket's `trusted` comes from the acceptor; never a credential by itself).
-    pub fn preq(r: &Req) -> PReq { PReq { method: r.method.clone(), target: r.target.clone(), headers: r.headers.clone(), body: r.body.clone(), trusted: r.trusted, own_device: super::listener::is_owner_conn(r.peer) } }
+    pub fn preq(r: &Req) -> PReq { PReq { method: r.method.clone(), target: r.target.clone(), headers: r.headers.clone(), body: r.body.clone(), trusted: r.trusted, own_device: super::listener::is_owner_conn(r.peer), peer: super::routes::peer_key(r.peer) } }
 }
 impl HttpHandler for PeerRoutes {
     fn routes(&self) -> &'static [&'static str] { &["/bots/pair", "/bots/link"] }

@@ -28,8 +28,26 @@ const ALPHA: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 /// A machine code claimed with less than this left is refused: the person needs time to approve, and the link to be made.
 pub const CLAIM_MIN_MS: u64 = 180_000;
 
+/// Per-client guess limit in a minute, and the hub-wide backstop (so a flood of addresses still cannot grind the code).
+pub const GUESS_CLIENT: usize = 10;
+pub const GUESS_ALL: usize = 200;
+/// Attempt times in the last minute, by client address and altogether. Expired entries are dropped on every call, and every
+/// live key holds a time also in `all`, so the map never outgrows `GUESS_ALL` keys.
+#[derive(Default)]
+struct Budget { by: HashMap<String, Vec<u64>>, all: Vec<u64> }
+impl Budget {
+    fn take(&mut self, client: &str, at: u64) -> bool {
+        self.all.retain(|x| *x + 60000 > at);
+        self.by.retain(|_, v| { v.retain(|x| *x + 60000 > at); !v.is_empty() });
+        if self.all.len() >= GUESS_ALL || self.by.get(client).map_or(0, Vec::len) >= GUESS_CLIENT { return false }
+        self.all.push(at);
+        self.by.entry(client.to_string()).or_default().push(at);
+        true
+    }
+}
+
 struct Inner {
-    devices: Vec<Value>, invites: Vec<Value>, attempts: Vec<u64>, claims: Vec<u64>,
+    devices: Vec<Value>, invites: Vec<Value>, attempts: Budget, claims: Budget,
     clients: HashMap<u64, String>, retired: HashSet<u64>, swept: HashSet<String>,
 }
 pub struct Registry {
@@ -63,7 +81,7 @@ impl Registry {
     /// A registry that holds nothing and persists nothing: what the routes get when the real file cannot be read. The file is not touched.
     pub fn empty(home: &Path) -> Registry {
         let file = home.join("guard").join("devices-unreadable.json");
-        Registry { home: home.into(), root: String::new(), file, now: Box::new(|| 0), random: Box::new(urandom), inner: Mutex::new(Inner { devices: vec![], invites: vec![], attempts: vec![], claims: vec![], clients: HashMap::new(), retired: HashSet::new(), swept: HashSet::new() }) }
+        Registry { home: home.into(), root: String::new(), file, now: Box::new(|| 0), random: Box::new(urandom), inner: Mutex::new(Inner { devices: vec![], invites: vec![], attempts: Budget::default(), claims: Budget::default(), clients: HashMap::new(), retired: HashSet::new(), swept: HashSet::new() }) }
     }
     pub fn with(home: &Path, root: &str, now: Box<dyn Fn() -> u64 + Send + Sync>, random: Box<dyn Fn(usize) -> Vec<u8> + Send + Sync>) -> Result<Registry, String> {
         let file = home.join("devices-v1.json");
@@ -78,7 +96,7 @@ impl Registry {
             use crate::plat::fs::PermissionsExt;
             std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).map_err(|_| "Cannot read or initialize device registry; existing pairings were preserved".to_string())?;
         }
-        Ok(Registry { home: home.into(), root: root.into(), file, now, random, inner: Mutex::new(Inner { devices, invites, attempts: vec![], claims: vec![], clients: HashMap::new(), retired: HashSet::new(), swept: HashSet::new() }) })
+        Ok(Registry { home: home.into(), root: root.into(), file, now, random, inner: Mutex::new(Inner { devices, invites, attempts: Budget::default(), claims: Budget::default(), clients: HashMap::new(), retired: HashSet::new(), swept: HashSet::new() }) })
     }
     /// The 0.14 import: another home's paired devices (its devices-v1.json `devices`). Each live, valid one whose id and token hash are not here yet is
     /// added as it was, so a phone paired with 0.14 is let in by this hub without pairing again. Ok(how many were added).
@@ -172,13 +190,11 @@ impl Registry {
     }
 
     /// POST /auth/enroll: the invitation's secret (or its short code) for a new device credential. Ten
-    /// guesses a minute hub-wide, whatever the address.
-    pub fn enroll(&self, secret: &str, name: &str) -> Value {
+    /// guesses a minute from each client address (`peer`), and a higher cap hub-wide.
+    pub fn enroll(&self, peer: &str, secret: &str, name: &str) -> Value {
         let mut g = self.inner.lock().unwrap();
         let at = (self.now)();
-        g.attempts.retain(|x| *x + 60000 > at);
-        if g.attempts.len() >= 10 { return Self::err("rate_limited") }
-        g.attempts.push(at);
+        if !g.attempts.take(peer, at) { return Self::err("rate_limited") }
         let compact: String = secret.chars().filter(|c| *c != ' ' && *c != '-').collect::<String>().to_uppercase();
         let (hs, hc) = (digest(secret), digest(&compact));
         let Some(inv) = g.invites.iter().find(|x| !is_machine(x) && (same(x["hash"].as_str().unwrap_or(""), &hs) || same(x["codeHash"].as_str().unwrap_or(""), &hc))).cloned() else { return Self::err("wrong_code") };
@@ -231,13 +247,11 @@ impl Registry {
         self.sweep(&mut g);
         json!({"ok": true, "id": entry["id"], "code": code, "expiresAt": entry["expiresAt"]})
     }
-    /// A machine asks to pair with a code: the link `peer` it stands for, once. Ten tries a minute hub-wide, right or wrong.
-    pub fn machine_claim(&self, code: &str) -> Value {
+    /// A machine asks to pair with a code: the link `peer` it stands for, once. Ten tries a minute from each client address, right or wrong, and a higher cap hub-wide.
+    pub fn machine_claim(&self, peer: &str, code: &str) -> Value {
         let mut g = self.inner.lock().unwrap();
         let at = (self.now)();
-        g.claims.retain(|x| *x + 60000 > at);
-        if g.claims.len() >= 10 { return Self::err("rate_limited") }
-        g.claims.push(at);
+        if !g.claims.take(peer, at) { return Self::err("rate_limited") }
         let compact: String = code.chars().filter(|c| *c != ' ' && *c != '-').collect::<String>().to_uppercase();
         let hc = digest(&compact);
         let Some(inv) = g.invites.iter().find(|x| is_machine(x) && same(x["codeHash"].as_str().unwrap_or(""), &hc)).cloned() else { return Self::err("wrong_code") };

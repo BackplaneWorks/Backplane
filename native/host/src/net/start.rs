@@ -143,7 +143,7 @@ mod tests {
         let routes = vec!["https://m.ts.net".to_string()];
         for (n, op) in ["revoke", "uninvite"].iter().enumerate() {
             let inv = reg.create(&routes);
-            let dev = reg.enroll(inv["code"].as_str().unwrap(), "Phone");
+            let dev = reg.enroll("t", inv["code"].as_str().unwrap(), "Phone");
             let client = 9000 + n as u64;
             let mut outbox = hub.attach(client);
             assert_eq!(reg.resolve(dev["token"].as_str().unwrap(), client, "/ws"), dev["token"].as_str().unwrap(), "the socket is known as this device's");
@@ -171,7 +171,7 @@ mod tests {
         std::fs::write(dir.join("token"), "roottoken").unwrap();
         let (reg, _) = open(&dir, "127.0.0.1", 3787).unwrap();
         assert!(reg.holds("roottoken") && !reg.holds("") && !reg.holds("nope"));
-        let tok = reg.enroll(reg.create(&["https://m.ts.net".to_string()])["code"].as_str().unwrap(), "P")["token"].as_str().unwrap().to_string();
+        let tok = reg.enroll("t", reg.create(&["https://m.ts.net".to_string()])["code"].as_str().unwrap(), "P")["token"].as_str().unwrap().to_string();
         assert!(reg.holds(&tok));
     }
     #[test] fn pair_start_refuses_a_registry_it_cannot_own_and_keeps_it() {
