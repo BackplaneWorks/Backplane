@@ -4322,3 +4322,4 @@ gpui.mgmt.bom.stock.out = out {n}
 gpui.mgmt.bom.stock.low = low {n}
 gpui.gerbers.boardonly = board only
 gpui.gerbers.gerbersonly = Gerbers only
+gpui.mgmt.life.price.since = since {day}

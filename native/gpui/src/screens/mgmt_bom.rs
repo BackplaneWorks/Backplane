@@ -78,6 +78,20 @@ pub fn cost_text(d: &Value) -> Option<String> {
     let v = format!("${cost:.2}");
     Some(if priced < looked { tf("gpui.mgmt.bom.cost.least", &[("cost", v.into())]) } else { tf("gpui.mgmt.bom.cost", &[("cost", v.into())]) })
 }
+/// A footprint's package as people say it: the case size of a chip part ("C_0402_1005Metric" → "0402"), or the package family and pin
+/// count ("QFN-48-1EP_6x6mm_P0.4mm" → "QFN-48"); None when it is not recognisable (the name is shown, shortened).
+pub fn package(fp: &str) -> Option<String> {
+    let n = short_fp(fp);
+    for part in n.split('_') { if part.len() == 4 && part.chars().all(|c| c.is_ascii_digit()) && ["0201", "0402", "0603", "0805", "1206", "1210", "1812", "2010", "2512", "01005"].contains(&part) { return Some(part.to_string()) } }
+    /* i18n-ok: package family names */ const FAMILIES: [&str; 17] = ["QFN", "DFN", "SOT", "SOIC", "SOP", "SSOP", "TSSOP", "MSOP", "QFP", "LQFP", "TQFP", "BGA", "WLCSP", "SOD", "TO", "SON", "LGA"];
+    let head = n.split('_').next().unwrap_or(n);
+    let fam: String = head.chars().take_while(|c| c.is_ascii_alphabetic()).collect();
+    if FAMILIES.contains(&fam.to_ascii_uppercase().as_str()) {
+        let mut it = head.splitn(3, '-'); let (a, b) = (it.next().unwrap_or(""), it.next().unwrap_or(""));
+        return Some(if !b.is_empty() && b.chars().all(|c| c.is_ascii_digit()) { format!("{a}-{b}") } else { a.to_string() })
+    }
+    None
+}
 /// The columns a panel `width` px wide shows, each with its width (None: the rest, the MPN). The MPN is the one that matters: it takes
 /// what is left; narrower, Class, then Price, then Footprint go, in that order.
 pub fn layout(width: f32) -> Vec<(Col, Option<f32>)> {
@@ -277,7 +291,8 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
                 Col::Qty => base.text_color(c("dim")).child(l["qty"].as_u64().unwrap_or(0).to_string()).into_any_element(),
                 Col::Refs => { let t = refs_fit(&refs, chars); let full = refs.join(", "); base.id(SharedString::from(format!("bom-refs-{id}"))).when(t != full, |d| d.tooltip(crate::keys::tip(&full, "", light))).child(t).into_any_element() }
                 Col::Value => base.child(mid_ellipsis(s(&l, "value"), chars)).into_any_element(),
-                Col::Footprint => base.text_color(c(if dnp { "faint" } else { "dim" })).child(mid_ellipsis(short_fp(s(&l, "footprint")), chars)).into_any_element(),
+                Col::Footprint => { let full = s(&l, "footprint").to_string(); let t = package(&full).unwrap_or_else(|| mid_ellipsis(short_fp(&full), chars));
+                    base.id(SharedString::from(format!("bom-fp-{id}"))).text_color(c(if dnp { "faint" } else { "dim" })).when(!full.is_empty(), |d| d.tooltip(crate::keys::tip(&full, "", light))).child(t).into_any_element() }
                 Col::Mpn => {
                     let mpn = s(&l, "mpn").to_string();
                     if !mpn.is_empty() { let t = mid_ellipsis(&mpn, chars); base.id(SharedString::from(format!("bom-mpn-{id}"))).when(t != mpn, |d| d.tooltip(crate::keys::tip(&mpn, "", light))).child(t).into_any_element() }
@@ -433,6 +448,11 @@ mod tests {
         assert_eq!(refs_fit(&r(&["C2", "C4", "C37", "C40"]), 14), "C2, C4, C37 +1"); assert_eq!(refs_fit(&r(&["C1", "C36"]), 14), "C1, C36");
         assert!(refs_fit(&r(&["C12", "C32", "C33", "C34", "C35", "C40", "C41"]), 14).chars().count() <= 14);
         assert_eq!(stock_words(&json!({"status": "low", "stock": 12})).unwrap(), "low 12"); assert_eq!(stock_words(&json!({"status": "out", "stock": 0})).unwrap(), "out 0"); assert_eq!(stock_words(&json!({"status": "in", "stock": 717000})).unwrap(), "717k");
+    }
+    #[test] fn packages_as_people_say_them() {
+        assert_eq!(package("Capacitor_SMD:C_0402_1005Metric").as_deref(), Some("0402")); assert_eq!(package("Resistor_SMD:R_0201_0603Metric").as_deref(), Some("0201"));
+        assert_eq!(package("Package_DFN_QFN:QFN-48-1EP_6x6mm_P0.4mm").as_deref(), Some("QFN-48")); assert_eq!(package("Package_TO_SOT_SMD:SOT-23-5").as_deref(), Some("SOT-23"));
+        assert_eq!(package("Connector_JST:JST_PH_S2B-PH-SM4-TB_1x02-1MP_P2.00mm_Horizontal"), None); assert_eq!(package(""), None);
     }
     #[test] fn short_names() { assert_eq!(short_fp("Resistor_SMD:R_0603"), "R_0603"); assert_eq!(short_fp("R_0603"), "R_0603"); assert_eq!(refs_text(&sample()[0]), "C1, C2"); }
 }

@@ -4345,3 +4345,4 @@ gpui.mgmt.bom.stock.out = 欠品 {n}
 gpui.mgmt.bom.stock.low = 少 {n}
 gpui.gerbers.boardonly = 基板だけ
 gpui.gerbers.gerbersonly = ガーバーだけ
+gpui.mgmt.life.price.since = {day}から

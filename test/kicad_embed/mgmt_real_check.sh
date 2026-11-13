@@ -14,6 +14,9 @@ init_isolated_dirs
 python3 "$SEED_PY" "$OUT" "$REPO_ROOT"
 PRO="$OUT/proj/$PRO_NAME.kicad_pro"
 mkdir -p "$OUT/shots"
+# PARTS_FROM=<an earlier run's home/parts>: its answers are used (fresh ones are not asked again: parts.rs seeds from the history), so a
+# reshoot needs no lookups
+if [ -n "${PARTS_FROM:-}" ] && [ -d "$PARTS_FROM" ]; then mkdir -p "$OUT/home"; cp -r "$PARTS_FROM" "$OUT/home/parts"; fi
 start_xvfb_and_wm
 start_hub
 info() { hub_rpc "[{\"method\":\"mgmt.watch\",\"params\":{\"project\":\"$PRO\"}}]" | python3 -c 'import json,sys
