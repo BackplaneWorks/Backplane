@@ -453,7 +453,12 @@ if "edit" in JOURNEYS:
     tab("PCB", "edit_board", 1.5)
     rt("click", CX, CY + PANE["h"] // 3)  # focus into KiCad (an empty spot low in the pane)
     time.sleep(0.5)
+    def gesture_state(tag):  # which frames KiCad shows and which has the keyboard, the X focus, and the pane: before each gesture
+        st = {"frames": {k: [f.get("shown"), f.get("focused")] for k, f in kframes().items()} if SOCK else {}, "x": xfocus()[:2], "pane": pane_now()}
+        RESULTS[f"{tag}_state"] = {"ms": None, **st}; print(f"INFO {tag} state: {st}", flush=True); shot(f"{tag}_before")
+    gesture_state("pan_10s")
     r = rt("pan", CX, CY, min(PANE["w"], PANE["h"]) // 5, 10, 2, 120); EVENTS.append({"kind": "input", "t0": r["t0"], "t1": r["t1"], "tag": "pan_10s"}); time.sleep(1)
+    gesture_state("zoom_10s")
     r = rt("wheel", CX, CY, 10, 60); EVENTS.append({"kind": "input", "t0": r["t0"], "t1": r["t1"], "tag": "zoom_10s"}); time.sleep(1)
     rt("key", "Home"); time.sleep(1)  # zoom to fit
     r = rt("click", CX, CY); EVENTS.append({"kind": "switch", "t0": r["t0"], "tag": "select_click", "window_ms": 1500}); time.sleep(1.5)
