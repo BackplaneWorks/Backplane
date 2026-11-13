@@ -20,7 +20,7 @@ use tokio_tungstenite::tungstenite::{protocol::WebSocketConfig, Message};
 
 pub const PROTO: &str = "data/1";
 /// What this hub does beyond the base of data/1; a hub from before an addition does not list it (the app can warn instead of sending what would be dropped).
-pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan"];
+pub const FEATURES: &[&str] = &["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt"];
 const PREVIEW: usize = 140;
 const ASK_SCAN: usize = 4000;
 
@@ -679,11 +679,19 @@ fn live_pushes(f: &Value, subs: &mut Subs) -> Vec<Value> {
         // what a thread's queue strip shows changed with no line in the log (a message on its way to another machine: net/farsend.rs): ask thread.queue again
         "queue" => for sub in subs.threads(&th) { out.push(d(sub, "queue", json!({"thread":th}))) },
         // the hub the person's home moved to (net/homemove.rs): the phone adds it by itself
-        "info" => if let Some(o) = f["info"].get("hub.offer") { out.push(json!({"t":"info","info":{"hub.offer":o}})) },
+        "info" => if let Some(m) = f["info"].as_object() {
+            // the hub offer, and what the management windows and checks draw (feature "mgmt"): the phones show the same panels
+            let keep: serde_json::Map<String, Value> = m.iter().filter(|(k, _)| phone_info(k)).map(|(k, v)| (k.clone(), v.clone())).collect();
+            if !keep.is_empty() { out.push(json!({"t":"info","info":keep})) }
+        },
         _ => {}
     }
     out
 }
+
+/// The hub info a phone gets as `{"t":"info"}` frames: the hub offer, the management panels' state and data (`mgmt.*`, docs/MANAGEMENT.md)
+/// and the design checks (`kicad.checks.*`).
+pub fn phone_info(key: &str) -> bool { key == "hub.offer" || key.starts_with("mgmt.") || key.starts_with("kicad.checks.") }
 
 async fn handle(hub: &Arc<Hub>, c: &mut Conn, subs: &mut Subs, v: &Value) -> Value {
     let (id, m, p) = (v["id"].clone(), s(v, "m"), v.get("p").cloned().unwrap_or(Value::Null));

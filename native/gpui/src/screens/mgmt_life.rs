@@ -40,6 +40,8 @@ pub fn scale(pts: &[(f64, f64)], w: f32, h: f32) -> Vec<(f32, f32)> {
         (fx * w, h - fy * h)
     }).collect()
 }
+/// How many days a series spans (readings on one day are one reading's worth for a graph).
+pub fn days_in(pts: &[(f64, f64)]) -> usize { let mut d: Vec<u64> = pts.iter().map(|p| p.0 as u64 / 86400).collect(); d.dedup(); d.len() }
 /// The y axis' top: the highest value (the floor is 0).
 pub fn top_of(pts: &[(f64, f64)]) -> f64 { pts.iter().map(|p| p.1).fold(0.0, f64::max) }
 /// The point nearest the pointer's x (px from the chart's left).
@@ -195,15 +197,15 @@ fn part_detail(app: &mut Backplane, light: bool, cx: &mut Context<Backplane>) ->
     let wrap = div().flex().flex_col().bg(c("panel")).border_b_1().border_color(c("rule")).text_size(px(12.));
     if s.is_null() { return wrap.child(div().px_2().py_2().text_color(c("faint")).child(trs("Reading its history…"))).into_any_element() }
     let (stock, price) = series(&s);
-    match stock.len() {
+    match if stock.is_empty() { 0 } else { days_in(&stock) } {
         0 => wrap.child(div().px_2().py_2().text_color(c("faint")).child(trs("No reading of this part yet."))).into_any_element(),
         1 => wrap.child(div().px_2().py_2().flex().flex_col().gap_1()
                 .child(div().text_color(c("dim")).child(tf("gpui.mgmt.life.one", &[("day", day(stock[0].0 as u64).into())])))
-                .child(div().text_color(c("text")).child(tf("gpui.mgmt.life.part.now", &[("stock", count(stock[0].1).into()), ("price", price.first().map(|p| money(p.1)).unwrap_or_else(|| "—".into()).into())])))).into_any_element(),
+                .child(div().text_color(c("text")).child(tf("gpui.mgmt.life.part.now", &[("stock", count(stock[stock.len() - 1].1).into()), ("price", price.last().map(|p| money(p.1)).unwrap_or_else(|| "—".into()).into())])))).into_any_element(),
         _ => {
             let w = wrap.child(chart(app, "life-part-stock", trs("Stock"), stock, count, light, cx));
             // one price reading is a number and the day it starts, not a line
-            if price.len() >= 2 { w.child(chart(app, "life-part-price", trs("Unit price"), price, money, light, cx)).into_any_element() }
+            if days_in(&price) >= 2 { w.child(chart(app, "life-part-price", trs("Unit price"), price, money, light, cx)).into_any_element() }
             else { w.children(price.first().map(|p| div().px_2().py_1().text_size(px(11.)).flex().gap_2().child(div().text_color(c("dim")).child(trs("Unit price"))).child(div().text_color(c("text")).child(money(p.1)))
                 .child(div().text_color(c("faint")).child(tf("gpui.mgmt.life.price.since", &[("day", day(p.0 as u64).into())]))))).into_any_element() }
         }
@@ -224,6 +226,7 @@ mod tests {
     #[test] fn a_parts_series_and_words() {
         let v = json!({"samples": [{"at": 1, "stock": 10, "price": 0.5}, {"at": 2, "lifecycle": "NRND"}, {"at": 3, "stock": 8, "price": 0.6}, {"at": 4, "stock": -1}]});
         let (st, pr) = series(&v); assert_eq!(st, vec![(1.0, 10.0), (3.0, 8.0)]); assert_eq!(pr, vec![(1.0, 0.5), (3.0, 0.6)]);
+        assert_eq!(days_in(&[(100.0, 1.0), (200.0, 1.0)]), 1); assert_eq!(days_in(&[(100.0, 1.0), (90000.0, 1.0)]), 2);
         assert_eq!(top_of(&[(1.0, 3.0), (2.0, 9.0)]), 9.0); assert_eq!(top_of(&[]), 0.0);
         assert_eq!(money(1.234), "$1.23"); assert_eq!(money(0.0029), "$0.0029"); assert_eq!(life_word("eol").1, "bad"); assert_eq!(life_word("x").1, "faint");
     }

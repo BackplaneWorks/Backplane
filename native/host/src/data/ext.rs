@@ -273,6 +273,11 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Re
         // feature "plan": the routing plan's person-side calls (plan/mod.rs): approve or reject items, a layer or all, stop routing, focus an item
         "plan.approve" | "plan.stop" | "plan.focus" => { if s(p, "pro").is_empty() && s(p, "path").is_empty() { return Some(Err(err("pro (the project's .kicad_pro)"))) }
             rpc(hub, c, m, p.clone()).await.map(|r| json!({"result": r["result"]})) }
+        // feature "mgmt": the management panels (docs/MANAGEMENT.md) and the design checks, the same calls the desktop makes; a BOM edit from the
+        // phone is the person's, as the desktop's (kicad/bomedit.rs)
+        "mgmt.watch" | "mgmt.panel" | "mgmt.bom.edit" | "mgmt.bom.alts" | "mgmt.life.part" | "kicad.checks.watch" | "kicad.checks.list" | "kicad.checks.run" | "kicad.checks.focus" | "kicad.checks.fix" => {
+            rpc(hub, c, m, p.clone()).await.map(|r| if r["result"].is_null() { let mut r = r; if let Some(o) = r.as_object_mut() { for k in ["t", "id", "ok"] { o.remove(k); } } r } else { r["result"].clone() })
+        }
         "fab.profile" => { let (th, pr) = (s(p, "thread"), s(p, "project")); if th.is_empty() && pr.is_empty() { return Some(Err(err("thread or project"))) }
             rpc(hub, c, "fab.profile", p.clone()).await.map(|r| json!({"profile":r["result"]})) }
         "locks.list" => Ok(json!({"locks":locks_now(hub).await})),
