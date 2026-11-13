@@ -4380,3 +4380,20 @@ gpui.mgmt.bom.stock.low = 少 {n}
 gpui.gerbers.boardonly = 基板だけ
 gpui.gerbers.gerbersonly = ガーバーだけ
 gpui.mgmt.life.price.since = {day}から
+
+# streamer mode (native/gpui/src/streamer.rs)
+gpui.streamer.account = アカウント {n}
+gpui.streamer.mode = 配信モード
+gpui.streamer.section = 配信
+gpui.streamer.off = 配信モード: オフにする
+gpui.streamer.on = 配信モード: メール・パス・マシン名を隠す
+gpui.streamer.tip = 配信モード: メール、パス、マシン名、コードを隠しています。クリックでオフにします。
+gpui.streamer.shared = 画面共有中
+gpui.streamer.qr = 配信モード中はコードを隠しています。
+gpui.streamer.note = 画面の録画や配信のために、メール、アカウント名、ホームフォルダー、マシン名、アドレス、コード、キーを表示されるすべての場所で隠します。スレッド内の画像は隠しません。
+gpui.streamer.share = 画面共有中はオンにする
+gpui.streamer.apps = 録画アプリの実行中はオンにする
+gpui.streamer.apps.note = 推測による判定です: OBS、SimpleScreenRecorder、Kazam、vokoscreen、Peek、Kooha、GPU Screen Recorder、wf-recorder、画面を取り込む ffmpeg(macOS と Windows では Loom、ScreenFlow、Streamlabs など)。録画中かどうかにかかわらず、実行中はオンになります。
+gpui.streamer.linux = Linux: デスクトップのポータル経由の画面共有(PipeWire の画面キャスト: GNOME、KDE、wlroots)は検出できます。X11 を直接読み取るキャプチャ(OBS の画面キャプチャ (XSHM)、ffmpeg x11grab)は検出できません。下の録画アプリの確認をオンにするか、手動でオンにしてください。
+gpui.streamer.mac = macOS は画面が録画・共有されていることをアプリに知らせません。ここで使えるのは下の録画アプリの確認だけです: OBS、Loom、ScreenFlow、CleanShot、Kap、Ecamm の実行中を検出します。
+gpui.streamer.win = Windows は画面がキャプチャされていることをアプリに知らせません。ここで使えるのは下の録画アプリの確認だけです: OBS、Streamlabs、XSplit、Bandicam、Camtasia、Loom の実行中を検出します。

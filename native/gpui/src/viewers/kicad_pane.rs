@@ -1107,7 +1107,7 @@ impl crate::Backplane {
         let (app, light) = (cx.entity().downgrade(), self.light());
         let title = std::path::Path::new(&pane.read(cx).project).file_name().map(|f| f.to_string_lossy().into_owned()).unwrap_or_default();
         let opts = WindowOptions { window_bounds: Some(WindowBounds::Windowed(Bounds::centered(None, size(px(1400.), px(900.)), cx))),
-            titlebar: Some(TitlebarOptions { title: Some(format!("{title} — KiCad · Backplane").into()), ..Default::default() }), ..Default::default() };
+            titlebar: Some(TitlebarOptions { title: Some(crate::streamer::shown(&format!("{title} — KiCad · Backplane")).into()), ..Default::default() }), ..Default::default() };
         match cx.open_window(opts, move |window, cx| {
             let app2 = app.clone();
             window.on_window_should_close(cx, move |_, cx| { if let Some(a) = app2.upgrade() { a.update(cx, |a, cx| a.kicad_popin(cx)); } true });

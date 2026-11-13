@@ -11,6 +11,8 @@ use std::collections::HashMap;
 
 #[derive(Default)]
 pub struct Accounts {
+    /// a script's `click: ui:Account`: the menu opens at the next frame (it needs the window)
+    pub script_menu: bool,
     /// The newest snapshot the hub sent (Null before the first answer).
     pub snap: Value,
     /// The thread the chip last asked about, and whether the menu under the chip is open.

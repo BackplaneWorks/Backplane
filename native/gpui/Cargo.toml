@@ -59,7 +59,7 @@ gpui = { version = "=0.2.2", default-features = false, features = ["font-kit", "
 # a debug build compiles them when the window opens (D3DCompile). The manifest (DPI awareness, common controls) needs the SDK's rc.exe.
 [target.'cfg(target_os = "windows")'.dependencies]
 gpui = { version = "=0.2.2", default-features = false, features = ["windows-manifest"] }
-windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Globalization", "Win32_System_ProcessStatus", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_UI_Controls", "Win32_UI_WindowsAndMessaging", "Win32_Security", "Win32_Security_Authorization", "Win32_Graphics_Gdi", "Win32_UI_Input_KeyboardAndMouse"] }
+windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Globalization", "Win32_System_ProcessStatus", "Win32_System_Diagnostics_ToolHelp", "Win32_System_SystemInformation", "Win32_System_Threading", "Win32_UI_Controls", "Win32_UI_WindowsAndMessaging", "Win32_Security", "Win32_Security_Authorization", "Win32_Graphics_Gdi", "Win32_UI_Input_KeyboardAndMouse"] }
 
 [patch.crates-io]
 xattr = { path = "vendor/xattr" }

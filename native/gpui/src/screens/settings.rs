@@ -397,7 +397,8 @@ pub(crate) fn row_el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<
         if let Some(slot) = fields.get(&f.name) { right = right.child(div().w(px(field_w)).max_w_full().px_2().py_1().bg(c("raise")).child(slot.input.clone())); }
     }
     // the note under the code (code, address, until when) wraps in the room planned for the controls: one line of it widened the column past the dialog
-    if !r.qr.is_empty() { right = right.child(qr(light, &r.qr)); if !r.qrnote.is_empty() { right = right.child(div().max_w(px(right_w)).text_size(px(11.)).text_color(c("dim")).child(trs(&r.qrnote))); } }
+    if !r.qr.is_empty() && crate::streamer::is_on() { right = right.child(div().w(px(qr_w(r.qr.len()))).h(px(qr_w(r.qr.len()))).flex().items_center().justify_center().p_3().border_1().border_color(c("line")).text_size(px(11.)).text_color(c("dim")).child(trs("The code is hidden in streamer mode."))); }
+    else if !r.qr.is_empty() { right = right.child(qr(light, &r.qr)); if !r.qrnote.is_empty() { right = right.child(div().max_w(px(right_w)).text_size(px(11.)).text_color(c("dim")).child(trs(&r.qrnote))); } }
     if !r.buttons.is_empty() {
         // (not a wrapping flex row: it does not grow its parent's height in gpui, and the next row would be drawn over it)
         // chips in lines packed to the room they have (row_fit), at most CHIPS_PER_LINE each
@@ -516,6 +517,10 @@ pub fn device_rows(l: &crate::local::Local) -> Vec<Row> {
         /* i18n-ok: drawn through trs by row_el, nav_title or the title */ r("Opens on", "What this device shows first.", lo::VIEWS.iter().map(|(k, lab)| b(lab, "default-view", k, l.default_view == *k)).collect()),
         /* i18n-ok: drawn through trs by row_el, nav_title or the title */ r("Notifications", "", vec![]),
         /* i18n-ok: drawn through trs by row_el, nav_title or the title */ r("Desktop notifications", "Kept for this device. Alerts for what needs you and for settled work show as desktop notifications.", vec![b("On", "notifications", "on", l.notifications), b("Off", "notifications", "off", !l.notifications)]),
+        /* i18n-ok: drawn through trs by row_el, nav_title or the title */ r("Streaming", "", vec![]),
+        /* i18n-ok: drawn through trs by row_el, nav_title or the title */ r("Streamer mode", "Hides emails, account names, home folders, machine names, addresses, codes and keys wherever they are drawn, for screen recordings and streams. Pictures in threads are not hidden.", vec![b("On", "streamer", "on", l.streamer), b("Off", "streamer", "off", !l.streamer)]),
+        /* i18n-ok: drawn through trs by row_el, nav_title or the title */ r("Turn on while the screen is shared", crate::streamer::detect::what_auto_sees(), vec![b("On", "streamer-share", "on", l.streamer_share), b("Off", "streamer-share", "off", !l.streamer_share)]),
+        /* i18n-ok: drawn through trs by row_el, nav_title or the title */ r("Turn on while a recording app runs", "A guess: OBS, SimpleScreenRecorder, Kazam, vokoscreen, Peek, Kooha, GPU Screen Recorder, wf-recorder, ffmpeg grabbing the screen (and Loom, ScreenFlow, Streamlabs ... on macOS and Windows). It turns on while one runs, recording or not.", vec![b("On", "streamer-apps", "on", l.streamer_apps), b("Off", "streamer-apps", "off", !l.streamer_apps)]),
         /* i18n-ok: drawn through trs by row_el, nav_title or the title */ r("Keyboard shortcuts", "", vec![]),
     ];
     for x in crate::keys::TABLE {

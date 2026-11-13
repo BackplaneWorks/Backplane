@@ -448,7 +448,8 @@ impl Element for TextElement {
         let (display_text, text_color) = if content.is_empty() {
             (SharedString::from(crate::i18n::trs(&input.placeholder)), rgb(0x5c6473).into())
         } else {
-            (content, style.color)
+            // streamer mode: what would identify the person is drawn as `*`, one per byte, so the caret and selection stay put
+            (crate::streamer::same_width(&content, false).map_or(content, SharedString::from), style.color)
         };
 
         let run = TextRun {

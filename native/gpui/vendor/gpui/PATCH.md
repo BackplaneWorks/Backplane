@@ -27,3 +27,8 @@ gpui 0.2.2 (Apache-2.0) vendored without `examples/` (and its `[[example]]` targ
 `windows-shaders/shaders_bytes.rs` is made on a Windows machine by `scripts/windows-shaders.sh HOST` (fxc.exe with gpui's own arguments). A Windows build host still compiles the shaders itself, as upstream does.
 
 - `src/platform/linux/x11/client.rs`: `BACKPLANE_GPUI_LOOPTRACE=1` (off unless set) logs the main loop's slow steps on stderr as `GPUI_LOOP {...}`: a foreground task, a frame or an X batch over 50 ms, and each start or stop of a window's refresh loop (mapped, visibility). The client adds a 100 ms foreground timer that logs when it wakes more than 50 ms late (`src/main.rs`). For finding what holds the main thread.
+
+- `src/elements/text.rs`: a process-wide text filter (`set_text_filter`, `TextFilter`) that every text element's layout passes its string
+  through (the client's streamer mode hides the person's identifiers). The filter answers byte ranges and their replacements; the layout
+  draws the replaced text, fits the style runs to it, and keeps a map so `index_for_position`, `position_for_index` and
+  `line_layout_for_index` still speak the original text's indices (links, selections, highlights). Off, it costs one atomic load per layout.

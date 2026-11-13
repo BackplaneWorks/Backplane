@@ -546,6 +546,7 @@ impl Render for Backplane {
         self.term_layout(window, cx);
         self.term_script(window, cx);
         if self.want_focus && self.screens.pad.is_none() { self.want_focus = false; self.input.focus_handle(cx).focus(window); }
+        if std::mem::take(&mut self.screens.acct.script_menu) { self.combo_account(window, cx); }
         if self.models_pending { self.models_pending = false; self.picker_toggle(window, cx); }
         if let Some(w) = self.screens.projects.focus.take() { let e = if w == "folder" { self.screens.projects.folder.clone() } else { self.screens.projects.search.clone() }; if let Some(e) = e { window.focus(&e.focus_handle(cx)); } }
         if let Some(n) = self.screens.focus_field.take() { if let Some(s) = self.screens.fields.get(&n) { window.focus(&s.input.focus_handle(cx)); } }
@@ -712,7 +713,8 @@ impl Render for Backplane {
         /* i18n-ok: registered controls the e2e drivers press */ ctl.push(CtlEntry { id: "rail:Commands".into(), label: "Commands".into(), ctl: Ctl::OpenPalette });
         /* i18n-ok: registered controls the e2e drivers press */ ctl.push(CtlEntry { id: "ui:Context".into(), label: "Context".into(), ctl: Ctl::ToggleContext });
         /* i18n-ok: registered controls the e2e drivers press */ ctl.push(CtlEntry { id: "ui:Jump or run a command".into(), label: "Jump or run a command".into(), ctl: Ctl::OpenPalette });
-        /* i18n-ok: registered controls the e2e drivers press */ for l in ["Account"] { ctl.push(CtlEntry { id: format!("ui:{l}"), label: l.into(), ctl: Ctl::None }); }
+        /* i18n-ok: registered controls the e2e drivers press */ ctl.push(CtlEntry { id: "ui:Account".into(), label: "Account".into(), ctl: Ctl::AccountMenu });
+        /* i18n-ok: registered controls the e2e drivers press */ ctl.push(CtlEntry { id: "ui:Accounts".into(), label: "Accounts".into(), ctl: Ctl::AccountsPage });
         /* i18n-ok: registered controls the e2e drivers press */ ctl.push(CtlEntry { id: "ui:Dictate".into(), label: "Dictate".into(), ctl: Ctl::Dictate });
         crate::screens::improvements::controls(self, &mut ctl);
         /* i18n-ok: registered controls the e2e drivers press */ for (id, label, c) in crate::screens::projects::controls(&self.data) { ctl.push(CtlEntry { id, label, ctl: c }); }
@@ -737,6 +739,11 @@ impl Render for Backplane {
                     .child(div().relative().size(px(18.)).child(art::logo(light, 18., "logo"))
                         .child(div().absolute().right(px(-2.)).bottom(px(-1.)).size(px(6.)).bg(if connected { c("ok") } else { c("bad") })))
                     .child(div().font_weight(FontWeight::BOLD).child("Backplane"))
+                    // streamer mode is on: said while it lasts, with why when auto-detect turned it on; a click turns it off
+                    /* i18n-ok: ui: ids (tips go through keys::tip, words through trs) */ .children(self.screens.streamer.why.clone().map(|why| with_rect(div().id("streamer-on"), || "ui:Streamer mode".to_string()).flex().items_center().gap(px(3.)).px_1().border_1().border_color(c("warn")).text_size(px(11.)).text_color(c("warn")).cursor_pointer()
+                        .tooltip(crate::keys::tip("Streamer mode: emails, paths, machine names and codes are hidden. Click to turn it off.", "", light))
+                        .on_click(cx.listener(|this, _, _, cx| this.streamer_toggle(cx)))
+                        .child(ic(light, "radio", 11., "warn")).child(if why.is_empty() { trs("Streamer mode") } else { format!("{} · {}", trs("Streamer mode"), trs(&why)) })))
                     .children(self.screens.elsewhere.clone().map(|(short, full)| div().id("elsewhere").flex().items_center().gap(px(3.)).px_1().border_1().border_color(c("accent")).text_size(px(11.)).text_color(c("accent"))
                         .tooltip(crate::keys::tip_raw(&tf("gpui.b.window.on.machine", &[("machine", full.into())]), "", light)).child(ic(light, "link", 11., "accent")).child(tf("gpui.b.on.machine", &[("machine", short.into())]))))
                     .child(div().text_color(c("faint")).child("/")).child(div().text_color(c("dim")).whitespace_nowrap().child(crumb))
