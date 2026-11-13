@@ -83,9 +83,17 @@ def tally(report, excluded=False):
 # Differences the two engines make on the same file (the fork's own checks give the same on the native files and on the export),
 # each reviewed, with why; an entry here never hides a difference the export causes.
 KNOWN = os.path.join(os.path.dirname(os.path.abspath(__file__)), "stock_engine_known.json")
+def pending():
+    """differences being chased: they stay FAILs, with who is on them"""
+    try:
+        return {(e.get("project", ""), e["key"]): e["pending"] for e in json.load(open(KNOWN)) if e.get("pending")}
+    except FileNotFoundError:
+        return {}
+
+
 def known():
     try:
-        return {e["key"]: e["why"] for e in json.load(open(KNOWN)) if not e.get("drop_description_suffix")}
+        return {e["key"]: e["why"] for e in json.load(open(KNOWN)) if not e.get("drop_description_suffix") and not e.get("pending")}
     except FileNotFoundError:
         return {}
 
@@ -267,7 +275,8 @@ def check(args, src):
                 diff[x]["known"] = kn[x]
             hard = {x: d for x, d in diff.items() if x not in engine}
             res.setdefault("engine_known", {}).update(engine)
-            chk(not hard, f"{k.upper()} identical, fork vs stock ({sum(a.values())} vs {sum(b.values())}{'; known engine differences: ' + ', '.join(engine) if engine else ''})", {"difference": hard})
+            pend = pending(); named = [f"{x}: {pend[(name, x)]}" for x in hard if (name, x) in pend]
+            chk(not hard, f"{k.upper()} identical, fork vs stock ({sum(a.values())} vs {sum(b.values())}{'; known engine differences: ' + ', '.join(engine) if engine else ''}{'; being chased: ' + '; '.join(named) if named else ''})", {"difference": hard})
             ea, eb = tally(fork_r[k], True), tally(stock_r[k], True)
             if ea != eb:
                 res.setdefault("excluded_differ", {})[k] = {"fork": {key(x): n for x, n in ea.items()}, "stock": {key(x): n for x, n in eb.items()}}

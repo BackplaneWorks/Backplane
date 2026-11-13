@@ -23,5 +23,10 @@
   "key": "schematic_parity|footprint_symbol_mismatch|warning",
   "drop_description_suffix": "'Exclude from simulation' settings differ",
   "why": "10.0's parity check has no exclude-from-simulation comparison; only those items are left out, every other parity item still counts (fork lane, 2026-11-12: pic_programmer 7, ecc83 4)"
+ },
+ {
+  "project": "complex_hierarchy",
+  "key": "violations|clearance|error",
+  "pending": "a DRC false positive in the fork's engine: RV301 pad 3 and its teardrop against the bottom GND fill measure 0.4695/0.4872 mm in the fork's DRC, 0.5085/0.5115 mm outside KiCad (rule 0.508); lane P is finding whether it is upstream master or ours (2026-11-13)"
  }
 ]
