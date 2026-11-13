@@ -124,15 +124,15 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
         let side = if l["free"].is_object() { &l["free"] } else { &l["extra"] };
         let (url, day, derived) = (s(side, "source").to_string(), s(side, "fetched").to_string(), s(side, "confidence") != "published");
         let mark = if l["changed"] == true { "• " } else { "" };
-        let label = format!("{mark}{}{}", s(&l, "label"), if l["inherited"] == true { format!(" ({})", trs("rigid board's")) } else { String::new() });
+        let label = format!("{mark}{}", s(&l, "label"));
         let cell = |v: &Value| v["text"].as_str().map(str::to_string).unwrap_or_else(|| "—".into());
         list = list.child(div().id(SharedString::from(format!("fab-l-{i}"))).flex_shrink_0().flex().items_center().gap_2().px_2().h(px(22.)).border_b_1().border_color(c("line"))
-            .child(w(0).text_color(c(if l["changed"] == true { "warn" } else { "text" })).child(label))
+            .child(w(0).text_color(c(if l["changed"] == true { "warn" } else if l["inherited"] == true { "dim" } else { "text" })).child(label))
             .child(w(1).child(cell(&l["free"]))).child(w(2).text_color(c("dim")).child(cell(&l["extra"])))
             .child(w(3).id(SharedString::from(format!("fab-src-{i}"))).text_color(c("faint")).cursor_pointer().hover(|x| x.text_color(c("text")))
                 .child(if derived { format!("{day}*") } else { day }).on_click(move |_, _, cx| { if url.starts_with("https://") { cx.open_url(&url) } })));
     }
-    list = list.child(div().p_2().text_size(px(11.)).text_color(c("faint")).child(trs("* worked out from the fab's page (a mil in mm, a ring from a diameter). A date opens the page it was read from.")));
+    list = list.child(div().p_2().text_size(px(11.)).text_color(c("faint")).child(trs("* worked out from the fab's page (a mil in mm, a ring from a diameter). Dimmed: the rigid board's value, where this board's page says nothing else. A date opens the page it was read from.")));
     div().size_full().flex().flex_col().child(top).child(list).into_any_element()
 }
 
