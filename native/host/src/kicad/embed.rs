@@ -2386,12 +2386,11 @@ mod tests {
     }
 
     #[test] fn a_kicad_lock_file_beside_the_project_counts() {
-        let d = std::env::temp_dir().join(format!("bp-warm-lock-{}", std::process::id())); std::fs::create_dir_all(&d).unwrap();
+        let dd = crate::plat::tmp::dir("warm-lock"); let d = dd.to_path_buf();
         let f = Files { pro: d.join("a.kicad_pro").to_string_lossy().into(), pcb: d.join("a.kicad_pcb").to_string_lossy().into(), sch: String::new(), all: vec![] };
         assert!(!project_locked(&f));
         std::fs::write(d.join("~a.kicad_pcb.lck"), "{}").unwrap();
         assert!(project_locked(&f));
-        let _ = std::fs::remove_dir_all(&d);
     }
 
     #[test] fn warm_eviction_picks_oldest_detached_clean_session() {
