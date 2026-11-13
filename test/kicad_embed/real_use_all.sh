@@ -18,5 +18,6 @@ one() {
   grep -h "^PERF\|^DIALOG\|^INFO\|^FAIL\|^DIAG\|rc=" "$ROOT/$bn-$rn.log"
 }
 real_use_matrix one
-python3 -I "$HERE/lib/real_use_table.py" "$ROOT"
+python3 -I "$HERE/lib/real_use_table.py" "$ROOT"; RC=$?
 echo "artifacts: $ROOT"
+exit "$RC"

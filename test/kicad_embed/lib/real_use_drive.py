@@ -218,6 +218,9 @@ CONT = int((geo.get("container") or {}).get("xid") or 0)
 print(f"INFO pane={PANE} sock={SOCK} kicad_pid={MEM['pid']} rss={RESULTS['rss_ready_mb']['mb']}MB gpu={(metrics('gpu') or [{}])[0].get('device')} client={os.environ.get('CLIENT_BIN')}", flush=True)
 CX, CY = PANE["x"] + PANE["w"] // 2, PANE["y"] + PANE["h"] // 2
 sampler_start(PANE, "pane")
+_sn = (metrics("shown") or [{}])[-1]
+if _sn.get("thread") != "t1" or _sn.get("open") != "board":
+    print(f"FAIL the editor is not open on t1 (Embedded KiCad E2E): shown={_sn}", flush=True); sys.exit(1)
 
 def shot(name): sh("import", "-window", "root", os.path.join(OUT, "shots", f"{name}.png"), timeout=20)
 def editor_up():  # a KiCad editor frame mapped over the pane (the X tree, not the client's word)
@@ -272,28 +275,38 @@ if "open" in JOURNEYS:
 if "switch" in JOURNEYS:
     seq = ["SCH", "PCB", "PCB_3D", "PCB", "SCH", "PCB_3D", "SCH", "PCB"] * 2
     for i, k in enumerate(seq): tab(k, f"tab{i:02d}_{k}")
-    # threads: away through the command palette (Jump or run a command) and back the same way, as a person with the keyboard does
+    # threads away and back, by the palette (type the title, Return) and by the sidebar (or the project page's row). Every step asserts where
+    # it is from the client's `shown` metric (the thread on show and its viewer) and the X tree (a KiCad frame over the pane), never an index
+    def shown_now():
+        m = metrics("shown"); return m[-1] if m else {}
+    def where(label):
+        sn = shown_now(); up = editor_up()
+        print(f"INFO {label}: thread={sn.get('thread')} viewer={sn.get('open')} kicad_over_pane={up}", flush=True)
+        return sn.get("thread"), sn.get("open"), up
     def jump(title):
         click_ctl("ui:Jump or run a command"); time.sleep(0.4)
-        sh("python3", os.path.join(os.environ["REPO_ROOT"], "test/cef/xinput.py"), "type", title); time.sleep(0.5)
+        sh("python3", XIN, "type", title); time.sleep(0.5)
         return rt("key", "Return").get("t0")
-    for i in range(3):
-        jump("Other thread 2"); time.sleep(1.5)
-        t0 = jump("Embedded KiCad E2E")
-        if t0: EVENTS.append({"kind": "switch", "t0": t0, "tag": f"thread_back{i}", "window_ms": 3000}); time.sleep(3)
-        shot(f"thread_back{i}")
-    restore("thread_switch")
-    # the same through the sidebar: the project's row lists its threads; a click on the other one, then on this one
-    def side(tid):  # the sidebar's row when it lists the thread (Active), else the project's row and its page's thread row
+    def side(tid):  # the sidebar's row when it lists the thread, else the project's row and its page's thread row
         if control(f"thread:{tid}"): return click_ctl(f"thread:{tid}")
         click_ctl("project:p1"); time.sleep(1.0)
         return click_ctl(f"page-thread:{tid}")
-    for i in range(3):
-        if not side("t2"): print("DIAG sidebar: no thread:t2 or page-thread:t2 control", flush=True); break
-        time.sleep(1.5); t0 = side("t1")
-        if t0: EVENTS.append({"kind": "switch", "t0": t0, "tag": f"thread_side_back{i}", "window_ms": 3000}); time.sleep(3)
-        shot(f"thread_side_back{i}")
-    restore("thread_sidebar")
+    def away_back(tag, go_away, go_back, n=3):
+        for i in range(n):
+            th, op, up = where(f"{tag}{i} before")
+            if th != "t1" or op != "board" or not up:
+                print(f"FAIL {tag}{i}: not on t1 with the editor before switching (thread={th} viewer={op} kicad={up})", flush=True)
+                RESULTS[f"{tag}{i}_precondition"] = {"ms": None, "ok": 0}; restore(f"{tag}_pre"); continue
+            if not go_away(): print(f"DIAG {tag}: could not switch away", flush=True); break
+            time.sleep(1.5); th2, op2, up2 = where(f"{tag}{i} away")
+            RESULTS[f"{tag}{i}_away_ok"] = {"ms": None, "ok": int(th2 == "t2" and not up2)}
+            t0 = go_back()
+            if t0: EVENTS.append({"kind": "switch", "t0": t0, "tag": f"{tag}{i}", "window_ms": 3000}); time.sleep(3)
+            th3, op3, up3 = where(f"{tag}{i} back"); shot(f"{tag}{i}")
+            RESULTS[f"{tag}{i}_kept"] = {"ms": None, "ok": int(th3 == "t1" and op3 == "board" and up3)}
+            if not up3: print(f"JANK {tag}{i}: back on t1 but the editor is not there (viewer={op3})", flush=True); restore(f"{tag}{i}")
+    away_back("thread_back", lambda: jump("Other thread 2"), lambda: jump("Embedded KiCad E2E"))
+    away_back("thread_side_back", lambda: side("t2"), lambda: side("t1"))
 shot("after_switch")
 # 3. edit: pan and zoom 10 s each, a click (select), a drag (move), Delete, Ctrl+Z, a short interactive track
 if "edit" in JOURNEYS:
