@@ -55,7 +55,7 @@ ask, end the turn, respect the person's edits, route only what was approved, ins
 ## The person's edits in KiCad's plan view (bp.13)
 
 `test/kicad_embed/embed_plan_person_e2e.sh` drives KiCad's own plan view with real X input (XTest), as a person would: the editor
-full size, a click on the board to give KiCad the keyboard, Alt+P, Home; the corridors are found on the screen by their group's
+full size, a click on the board to give KiCad the keyboard, the plan view by RunAction pcbnew.Plan.togglePlanView (the hotkey only when the action is refused: Alt+P on bp.13 build #2, Ctrl+Shift+R from batch 3), Home; the corridors are found on the screen by their group's
 colour (KiCad's GL canvas is no X window of its own), then c-p is clicked and accepted (A), locked (L) and widened (W), and c-q is
 clicked and rejected (R). The hub sees each as the person's: `plan_get`'s `changes` (approved, locked, edited by the person, rejected,
 with the person's constraints), the Plan panel's data live, and the agent that asked for approval is woken with the decision. First

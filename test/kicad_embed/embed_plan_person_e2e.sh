@@ -67,7 +67,15 @@ check "the board editor is shown full size" "$([ "${FW:-0}" -gt 700 ] && echo 1 
 X() { python3 "$XINPUT_PY" "$@"; sleep "${KEMBED_STEP_S:-0.7}"; }
 # the keyboard to KiCad: a click on the canvas (its centre is the board's, where nothing of the plan is), then Escape
 X click "$((FX + FW / 2))" "$((FY + FH / 2))"; X key Escape
-X chord alt p; sleep 1.5                 # plan view
+# plan view: KiCad's own action (RunAction pcbnew.Plan.togglePlanView, every build); the hotkey only when the action is refused
+# (bp.13 build #2: Alt+P; batch 3 on: Ctrl+Shift+R; the build is told by what it does, never by its version string)
+RA=$(ask kicad_ipc "{\"path\":\"$PCB\",\"type\":\"kiapi.common.commands.RunAction\",\"message\":{\"action\":\"pcbnew.Plan.togglePlanView\"}}")
+echo "INFO RunAction togglePlanView: $(echo "$RA" | grep -o 'RAS_[A-Z_]*' | head -1)"
+if echo "$RA" | grep -q 'RAS_OK'; then VIA=action
+elif grep -qa "Routing Plan View" "$(dirname "$KICAD_BIN")/_pcbnew.kiface" 2>/dev/null; then VIA="Ctrl+Shift+R"; X chord ctrl shift r
+else VIA="Alt+P"; X chord alt p
+fi
+echo "INFO plan view by $VIA"; sleep 1.5
 X key Home; sleep 1.5                    # zoom to fit
 shot q1_plan_view
 # c-p and c-q on the screen: the corridor colour's pixels inside the frame, split at the widest gap in x into the two biggest runs

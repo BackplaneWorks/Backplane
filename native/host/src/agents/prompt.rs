@@ -131,7 +131,7 @@ pub fn build(e: &PromptEnv) -> String {
     if !e.keys.is_empty() { s += "\n\n"; s += &e.keys }
     if !e.machines.is_empty() { s += "\n\n"; s += &e.machines }
     // a board on Backplane KiCad: plan before copper (plan/mod.rs)
-    if !e.pcb.is_empty() && crate::plan::plans(&e.kicad.status, &e.kicad.version) { s += "\n\n"; s += &crate::plan::guidance() }
+    if !e.pcb.is_empty() && crate::plan::plans(&e.kicad.status, &e.kicad.version, &crate::files::kicad::ipc::read_runtime(std::path::Path::new(&e.kicad.cli)).caps) { s += "\n\n"; s += &crate::plan::guidance() }
     if e.buy { s += "\n\n"; s += &T::ORDER_PROMPT_BUY.concat() } // every piece: the opening line alone ([0]) left a buy thread without its steps
     let l = lang_line(&e.lang); if l.is_empty() { s } else { s + "\n" + l }
 }
