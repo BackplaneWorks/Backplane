@@ -313,8 +313,9 @@ ws.onmessage = e => { const v = JSON.parse(e.data); if (v.t === "reply" && v.id 
   check "KiCad held the panel's edit while the person edits R1 ($EH)" "$(python3 -c 'import json,sys; e=json.loads(sys.argv[1]); print(int(e.get("ok") is True and (e.get("deferred") or 0)>=1))' "$EH" 2>/dev/null || echo 0)"
   M_H=$(mpn_of R1)
   check "Held: R1's MPN is not changed yet (R1: $M_H)" "$([ "$M_H" != "E2E-HELD" ] && echo 1 || echo 0)"
-  # the person closes the dialog (Cancel): the keyboard to the dialog first, else Escape goes to Backplane's window
-  # Escape, as a person would (lane B's a8bbdc74e: the keyboard stays with KiCad's dialog); its Cancel button only if that failed
+  # Escape cancels the active field editor first, then the dialog. Symbol Properties opens with Reference's grid cell being edited;
+  # a single Escape leaves that cell (the selected row stays). This also happens without a deferred edit. Keep the keyboard where
+  # KiCad put it (lane B's a8bbdc74e); its Cancel button is only cleanup after a failed assertion.
   # where the keyboard is right before Escape (lane B): the X input focus's window and name, and the dialog's own xid
   FOC=$(python3 -c '
 import ctypes, ctypes.util
@@ -322,10 +323,16 @@ x=ctypes.CDLL(ctypes.util.find_library("X11")); x.XOpenDisplay.restype=ctypes.c_
 w=ctypes.c_ulong(); r=ctypes.c_int(); x.XGetInputFocus(ctypes.c_void_p(d), ctypes.byref(w), ctypes.byref(r))
 n=ctypes.c_char_p(); x.XFetchName(ctypes.c_void_p(d), w, ctypes.byref(n)); print(hex(w.value), (n.value or b"").decode(errors="replace"))' 2>&1)
   echo "FOCUS before Escape: $FOC; dialog: $(xwininfo -name 'Symbol Properties' 2>/dev/null | grep -o 'Window id: [^ ]*' || echo none)"
-  python3 "$XINPUT_PY" key Escape; sleep 1.5
+  python3 "$XINPUT_PY" key Escape; sleep 0.3
+  ESC_CELL=$(xwininfo -root -tree 2>/dev/null | grep -c '"Symbol Properties"' || true)
+  if [ "${ESC_CELL:-0}" -gt 0 ]; then
+    shot "m6h_after_cell_escape"
+    python3 "$XINPUT_PY" key Escape
+  fi
+  sleep 1.5
   ESC_LEFT=$(xwininfo -root -tree 2>/dev/null | grep -c '"Symbol Properties"' || true)
-  check "Escape closes KiCad's dialog in the pane ($ESC_LEFT left)" "$([ "${ESC_LEFT:-0}" = 0 ] && echo 1 || echo 0)"
-  # its Cancel button, measured from the dialog's bottom-right corner (151, 22 px in; GTK at 1800x1050): a key would go to Backplane's window
+  check "Escape leaves the field editor and closes KiCad's dialog in the pane ($ESC_LEFT left)" "$([ "${ESC_LEFT:-0}" = 0 ] && echo 1 || echo 0)"
+  # Cleanup only: its Cancel button, measured from the dialog's bottom-right corner (151, 22 px in; GTK at 1800x1050).
   read -r DX DY DW DH < <(xwininfo -root -tree 2>/dev/null | { grep '"Symbol Properties"' || true; } | head -1 | sed -E 's/.* ([0-9]+)x([0-9]+)\+-?[0-9]+\+-?[0-9]+ +\+(-?[0-9]+)\+(-?[0-9]+).*/\3 \4 \1 \2/') || true
   [ -n "${DW:-}" ] && { python3 "$XINPUT_PY" click $((DX + DW - 151)) $((DY + DH - 22)) || true; }; sleep 1.5
   DLG=$(xwininfo -root -tree 2>/dev/null | grep -c '"Symbol Properties"' || true)
