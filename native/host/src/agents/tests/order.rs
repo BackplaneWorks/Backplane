@@ -152,7 +152,7 @@ fn posted(ev: &[Value], msg: &str) -> usize { ev.iter().filter(|e| is(e, "Messag
     let rec = r.hub.cfg.home.join("orders/q_fake1.json"); assert!(std::fs::read_to_string(&rec).unwrap().contains(TOKEN)); assert_eq!(crate::plat::fs::mode_bits(std::fs::metadata(&rec).unwrap().permissions().mode() & 0o777, 0o600), 0o600);
     assert!(!whole_log(&r.hub).await.contains(TOKEN), "no token in the log");
     let (_, read) = call(&r.ag, "thread_read", json!({"threadId":T1,"limit":200})).await; assert!(read.contains("order:q_fake1") && !read.contains(TOKEN), "no token in thread_read");
-    let (_, st) = call(&r.ag, "order_status", json!({})).await; assert!(st.contains("112.4") && !st.contains(TOKEN), "{st}");
+    let (_, st) = call(&r.ag, "order_status", json!({})).await; assert!(st.contains("112.4") && !st.contains(TOKEN), "{st}\nwait={:?} hits={:?}\n{:?}", r.ag.hub.setting(&format!("order.wait.{T1}")).await, f.lock().unwrap().hits, log_from(&r.hub, from).await.iter().filter(|e| e.to_string().contains("order.wait") || is(e, "MessagePosted")).collect::<Vec<_>>());
     assert!(crate::settings::order::pay_shown(text).contains(TOKEN), "the person's link is real");
     assert!(until(&r.hub, 0, 5, |_| f.lock().unwrap().hits.iter().filter(|h| h.starts_with("GET")).count() >= 4).await.len() > 0, "and it is followed");
     r.ag.shutdown();
