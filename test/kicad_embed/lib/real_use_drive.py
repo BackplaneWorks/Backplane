@@ -8,7 +8,7 @@ A KiCad dialog that appears on its own (a load warning) is recorded with its tit
 import json, os, re, subprocess, sys, threading, time
 
 OUT, CLOG = sys.argv[1], sys.argv[2]
-JOURNEYS = (sys.argv[3] if len(sys.argv) > 3 else "focus,open,switch,edit,mgmt,coedit,xprobe,comment,save,tools,editors,plan,checks,markers,panels,sch").split(",")
+JOURNEYS = (sys.argv[3] if len(sys.argv) > 3 else "focus,open,switch,edit,mgmt,coedit,xprobe,comment,save,tools,textkeys,editors,plan,checks,markers,panels,sch").split(",")
 LIB = os.path.dirname(os.path.abspath(__file__))
 IPC, DRV, RPC = os.environ["IPC_PY"], os.environ["DRIVER_PY"], os.environ["HUB_RPC_MJS"]
 RT, SAMP = os.path.join(LIB, "rt_input.py"), os.path.join(LIB, "pane_sampler.py")
@@ -591,6 +591,72 @@ def fp_positions():
         at = re.search(r'\n\t\t\(at ([-\d.]+) ([-\d.]+)', body) or re.search(r'\n\t\t\(transform\s*\(translate ([-\d.]+) ([-\d.]+)\)', body)  # 10.0 / 10.99 forms
         if at and ref: out[ref.group(1)] = (float(at.group(1)), float(at.group(2)))
     return out
+# 7a. textkeys (bp.13 batch 4: comment-key-handoff, embed-popup-keys): ';' on the canvas opens Backplane's comment window; ';' typed in a
+# KiCad text field (the search panel's box, a properties field) stays there and opens nothing; Backplane's chords (Ctrl+K, Ctrl+;) while a
+# KiCad right-click menu is open reach Backplane.
+def popups(): return [w for w in windows() if w.get("shown") and w.get("override_redirect") and 60 < w["w"] < 1200 and 60 < w["h"] < 900]
+def comment_after(keys, secs=1.5):
+    n = len(logs("kcomment", "painted")); r = rt("key", *keys); got = wait_log("kcomment", "painted", n, secs)
+    return r, got
+def palette_after(keys):
+    box = {"x": 600, "y": 0, "w": 700, "h": 420}
+    sampler_stop(); sampler_start(box, "tk_palette"); r = rt("key", *keys); time.sleep(1.2); kp = sampler_stop(); sampler_start(PANE, "pane")
+    a = analyze([{"kind": "commit", "t0": r["t0"], "tag": "tk", "window_ms": 1000}], kp)
+    return a[0].get("first_change_ms") if a else None
+if "textkeys" in JOURNEYS and SOCK:
+    from pane_sampler import grab
+    PAUSE.set()
+    EXk, EYk = CX, PANE["y"] + PANE["h"] - 40
+    tab("PCB", "tk_board", 1.2); rt("click", EXk, EYk); time.sleep(0.4); rt("key", "Escape"); time.sleep(0.3)
+    # (a) ';' on the canvas: the comment key handed to Backplane
+    r, got = comment_after(("semicolon",))
+    perf("semicolon_canvas", round(got["at_ms"] - r["t0"], 1) if got and got.get("at_ms") else -1, opened=int(bool(got)))
+    if got: time.sleep(0.4); rt("key", "Escape"); time.sleep(0.6)
+    # (b) the search panel (Ctrl+G): ';' typed in its box stays there
+    rt("click", EXk, EYk); time.sleep(0.3)
+    g0 = grab(PANE["x"], PANE["y"], PANE["w"], PANE["h"]); rt("key", "g", "ctrl"); time.sleep(1.2); shot("tk_search_open")
+    r, got = comment_after(("semicolon",)); time.sleep(0.3); shot("tk_semicolon_in_search")
+    RESULTS["semicolon_in_search_stays"] = {"ms": None, "ok": int(not got)}
+    print(f"INFO textkeys: ';' in the search box {'opened the comment window' if got else 'stayed in the box'}", flush=True)
+    if got: time.sleep(0.3); rt("key", "Escape"); time.sleep(0.5)
+    rt("key", "Escape"); time.sleep(0.4); rt("key", "g", "ctrl"); time.sleep(0.8)  # the search panel shut again
+    # (c) the properties panel: shown (KiCad's action), a footprint selected, the panel found by the pixels it changes, a click in its
+    # upper field area, ';'
+    refs = [r_ for r_ in fp_positions() if re.match(r"^[RC]\d+$", r_)] or list(fp_positions())
+    if refs:
+        rt("click", EXk, EYk); time.sleep(0.3); ipc("select-items", SOCK, "pcb", refs[0], "0"); time.sleep(0.5)
+        ga = grab(PANE["x"], PANE["y"], PANE["w"], PANE["h"]); ipc("run-action", SOCK, "common.Control.showProperties"); time.sleep(1.5)
+        gb = grab(PANE["x"], PANE["y"], PANE["w"], PANE["h"]); shot("tk_properties")
+        import numpy as np
+        ys, xs = np.nonzero(ga != gb)
+        # the panel is a column that appears at the canvas's side: the changed columns, the leftmost dense run of them
+        cols = np.bincount(xs, minlength=PANE["w"]) if len(xs) else np.zeros(PANE["w"], int)
+        dense = [x for x in range(PANE["w"]) if cols[x] > PANE["h"] * 0.5]
+        if dense and (max(dense) - min(dense)) > 100:
+            px0, px1 = min(dense), max(dense)
+            fx, fy = PANE["x"] + px0 + (px1 - px0) * 2 // 3, PANE["y"] + 150
+            rt("click", fx, fy); time.sleep(0.5); shot("tk_properties_field")
+            r, got = comment_after(("semicolon",)); time.sleep(0.3); shot("tk_semicolon_in_properties")
+            RESULTS["semicolon_in_properties_stays"] = {"ms": None, "ok": int(not got), "at": [fx, fy]}
+            print(f"INFO textkeys: properties panel x {px0}-{px1} in the pane; ';' at {fx},{fy} {'opened the comment window' if got else 'stayed in the field'}", flush=True)
+            if got: time.sleep(0.3); rt("key", "Escape"); time.sleep(0.5)
+            rt("key", "Escape"); time.sleep(0.3)
+        else:
+            print(f"DIAG textkeys: the properties panel did not appear as a column ({len(dense)} dense columns)", flush=True)
+        ipc("run-action", SOCK, "common.Control.showProperties"); time.sleep(0.8)
+    # (d) Backplane's chords with KiCad's right-click menu open
+    for keys, tag in ((("k", "ctrl"), "popup_ctrl_k"), (("semicolon", "ctrl"), "popup_ctrl_semicolon")):
+        rt("click", EXk, EYk); time.sleep(0.3); rt("click", EXk, EYk - 60, 3); time.sleep(0.8)
+        m = popups(); shot(f"tk_{tag}_menu")
+        if not m: print(f"DIAG textkeys: the right-click opened no menu ({tag})", flush=True); continue
+        if tag == "popup_ctrl_k":
+            ck = palette_after(keys); perf(tag, ck if ck is not None else -1, opened=int(ck is not None), menu_open=1)
+        else:
+            r, got = comment_after(keys); perf(tag, round(got["at_ms"] - r["t0"], 1) if got and got.get("at_ms") else -1, opened=int(bool(got)), menu_open=1)
+        RESULTS[f"{tag}_menu_after"] = {"ms": None, "ok": int(not popups())}
+        rt("key", "Escape"); time.sleep(0.4); rt("key", "Escape"); time.sleep(0.4)
+        if popups(): rt("key", "Escape"); time.sleep(0.4)
+    PAUSE.clear()
 # 7b. editors (bp.13 batch 2 on): the footprint editor opened from the board as a person does (a footprint clicked, Ctrl+E), then KiCad's
 # own footprint-editor action; GerbView in KiCad's process on the board's Gerbers (OpenGerbers: hidden as a prewarm, then shown over the
 # pane, as a host would; the PCB editor has no GerbView command of its own). What appears where, how long it takes, and what the client shows.

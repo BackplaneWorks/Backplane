@@ -377,6 +377,18 @@
    "field": "stays",
    "min": 1,
    "what": "GerbView shown over the pane stays shown"
+  },
+  {
+   "re": "^semicolon_canvas$|^popup_ctrl_(k|semicolon)$",
+   "field": "ms",
+   "max": 100,
+   "what": "';' on the canvas / Backplane's chords with a KiCad menu open -> Backplane's window"
+  },
+  {
+   "re": "^semicolon_in_(search|properties)_stays$",
+   "field": "ok",
+   "min": 1,
+   "what": "';' typed in a KiCad text field stays there (no comment window)"
   }
  ]
 }
