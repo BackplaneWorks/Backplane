@@ -19,6 +19,8 @@ discover_bins
 init_isolated_dirs
 python3 "$SEED_PY" "$OUT" "$REPO_ROOT"
 start_xvfb_and_wm
+# the stand-in's turns short (one chunk), so each call's turn has ended before the next message
+export BP_STREAM_N=1 BP_STREAM_MS=10
 start_hub
 PROJ="$OUT/proj"; PCB="$PROJ/ecc83-pp.kicad_pcb"
 # the plan API is the open KiCad's (bp.12's headless server answers AS_UNHANDLED): the board is opened in the embedded editor first
@@ -38,7 +40,8 @@ ask() {
   local text; text=$(python3 -c 'import json,sys; print(json.dumps("mcpcall:" + json.dumps({"name": sys.argv[1], "arguments": json.loads(sys.argv[2])})))' "$1" "$2")
   hub_rpc "[{\"method\":\"turn.start\",\"params\":{\"thread\":\"t1\",\"text\":$text,\"msg\":\"mplan$N\"}}]" >>"$OUT/rpc.log" 2>&1 || true
   for _ in $(seq 240); do [ "$(grep -c "^MCPCALL" "$OUT/standin.log" 2>/dev/null || echo 0)" -gt "$before" ] && break; sleep 0.25; done
-  grep "^MCPCALL $1 " "$OUT/standin.log" | tail -1
+  sleep 2 # the turn ends
+  grep "^MCPCALL $1 " "$OUT/standin.log" | tail -1 || true
 }
 PLAN='{"layers":[{"layer":"B.Cu","role":"signal","status":"proposed"}],"groups":[{"id":"g-k","name":"Cathodes","color":"#e8a33d","nets":["Net-(U1A-K)","Net-(U1B-K)"],"status":"proposed"}],"corridors":[{"id":"c-k","group":"g-k","layer":"B.Cu","order":1,"path":[[120,100],[150,100]],"width":2.0,"from":["U1"],"to":["P2"],"status":"proposed"}],"planes":[{"id":"p-gnd","net":"GND","layer":"F.Cu","outline":[[[110,85],[165,85],[165,125],[110,125]]],"priority":1,"status":"proposed"}]}'
 R1=$(ask plan_propose "{\"plan\":$PLAN,\"mode\":\"merge\"}"); echo "$R1" | cut -c1-300
