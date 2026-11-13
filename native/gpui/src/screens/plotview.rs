@@ -135,6 +135,40 @@ fn paint_probe(window: &mut Window, chunks: &[std::sync::Arc<super::plot::Chunk>
     if any { if let Ok(path) = pb.build() { window.paint_path(path, col); } }
 }
 
+/// A plan item's fill and outline alpha (0..255) by its state, in the floorplanner's language: proposed translucent, approved solid,
+/// routed fading so the copper shows, rejected faint; blocked outlined red (`true`).
+pub fn plan_alpha(state: &str) -> (u32, u32, bool) {
+    match state { "approved" | "routing" => (0x70, 0xe0, false), "edited" => (0x55, 0xff, false), "routed" | "verified" => (0x22, 0x80, false), "rejected" => (0x14, 0x40, false), "blocked" => (0x55, 0xff, true), _ => (0x38, 0xa0, false) }
+}
+/// The plan over the board: plane regions as filled outlines, corridors as bands along their path at their width (millimetres, board
+/// coordinates: the plot's micrometres), each in its group's colour, its look by state; vias as small diamonds.
+fn paint_plan(window: &mut Window, d: &serde_json::Value, v: &View, o: Point<Pixels>, w: f32, h: f32) {
+    let at = |p: &serde_json::Value| { let (x, y) = (p[0].as_f64().unwrap_or(0.) as f32 * 1000., p[1].as_f64().unwrap_or(0.) as f32 * 1000.); let q = v.to_px(x, y, w, h); point(o.x + px(q.0), o.y + px(q.1)) };
+    let colour = |c: &serde_json::Value, a: u32| -> Hsla { let n = u32::from_str_radix(c.as_str().unwrap_or("#8a8a8a").trim_start_matches('#'), 16).unwrap_or(0x8a8a8a); rgba((n << 8) | a).into() };
+    for r in d["regions"].as_array().into_iter().flatten() {
+        let pts: Vec<&serde_json::Value> = r["outline"].as_array().into_iter().flatten().collect(); if pts.len() < 3 { continue }
+        let (fa, oa, bad) = plan_alpha(r["state"].as_str().unwrap_or(""));
+        let mut f = PathBuilder::fill(); for (i, p) in pts.iter().enumerate() { if i == 0 { f.move_to(at(p)) } else { f.line_to(at(p)) } } f.close();
+        if let Ok(p) = f.build() { window.paint_path(p, colour(&r["color"], fa)) }
+        let mut s = PathBuilder::stroke(px(if bad { 2.0 } else { 1.0 })); for (i, p) in pts.iter().chain(pts.first()).enumerate() { if i == 0 { s.move_to(at(p)) } else { s.line_to(at(p)) } }
+        if let Ok(p) = s.build() { window.paint_path(p, if bad { rgb(0xe05252).into() } else { colour(&r["color"], oa) }) }
+    }
+    for b in d["bands"].as_array().into_iter().flatten() {
+        let pts: Vec<&serde_json::Value> = b["path"].as_array().into_iter().flatten().collect(); if pts.len() < 2 { continue }
+        let (fa, oa, bad) = plan_alpha(b["state"].as_str().unwrap_or(""));
+        let wpx = (b["width"].as_f64().unwrap_or(1.0) as f32 * 1000. * v.scale).max(2.0);
+        let line = |width: f32| { let mut s = PathBuilder::stroke(px(width)); for (i, p) in pts.iter().enumerate() { if i == 0 { s.move_to(at(p)) } else { s.line_to(at(p)) } } s.build().ok() };
+        // the band's edge first (a little wider), then its body over it: a band with an outline, as the editor draws it
+        if let Some(p) = line(wpx + 2.0) { window.paint_path(p, if bad { rgb(0xe05252).into() } else { colour(&b["color"], oa) }) }
+        if let Some(p) = line(wpx) { window.paint_path(p, colour(&b["color"], fa)) }
+        for via in b["vias"].as_array().into_iter().flatten() {
+            let c = at(via); let r = 4.0;
+            let mut s = PathBuilder::fill(); s.move_to(point(c.x, c.y - px(r))); s.line_to(point(c.x + px(r), c.y)); s.line_to(point(c.x, c.y + px(r))); s.line_to(point(c.x - px(r), c.y)); s.close();
+            if let Ok(p) = s.build() { window.paint_path(p, colour(&b["color"], 0xff)) }
+        }
+    }
+}
+
 /// The tapped piece, outlined in a bright line over everything.
 fn paint_lit(window: &mut Window, p: &super::plot::Pick, v: &View, o: Point<Pixels>, w: f32, h: f32) {
     let pts: Vec<(f32, f32)> = p.pts.chunks_exact(2).map(|q| v.to_px(q[0], q[1], w, h)).collect();
@@ -183,6 +217,8 @@ pub fn canvas_el(cx: &mut Context<Backplane>, slot: usize, focus: Option<FocusHa
             if let Some(t2) = t2 { sp[2] += t2.elapsed().as_secs_f32() * 1000.0; }
             if !probe.is_empty() { paint_probe(window, &chunks, &probe, &v, b.origin, w, h); }
             if let Some(p) = &lit { paint_lit(window, p, &v, b.origin, w, h); }
+            // the routing plan's bands and regions over the board, read-only (the hub's mgmt.plan data; steering is in KiCad)
+            if fkey.starts_with("0|") { let draw = this.update(cx, |app, _| app.screens.mgmt.data("plan")["draw"].clone()); if !draw.is_null() { paint_plan(window, &draw, &v, b.origin, w, h); } }
         });
         if let Some(t0) = t0 {
             let ms = t0.elapsed().as_secs_f32() * 1000.0;

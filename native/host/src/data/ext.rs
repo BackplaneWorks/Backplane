@@ -270,6 +270,9 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Re
         "order.buy" => { let th = s(p, "thread"); if th.is_empty() { return Some(Err(err("thread"))) }
             rpc(hub, c, "order.buy", json!({"thread":th})).await.map(|r| json!({"thread":r["thread"]})) }
         // feature "fabprofile": the project's fab profile (fab/mod.rs Fab.view), the same the desktop and the agents' fab_profile read; `action` get, pick or seen
+        // feature "plan": the routing plan's person-side calls (plan/mod.rs): approve or reject items, a layer or all, stop routing, focus an item
+        "plan.approve" | "plan.stop" | "plan.focus" => { if s(p, "pro").is_empty() && s(p, "path").is_empty() { return Some(Err(err("pro (the project's .kicad_pro)"))) }
+            rpc(hub, c, m, p.clone()).await.map(|r| json!({"result": r["result"]})) }
         "fab.profile" => { let (th, pr) = (s(p, "thread"), s(p, "project")); if th.is_empty() && pr.is_empty() { return Some(Err(err("thread or project"))) }
             rpc(hub, c, "fab.profile", p.clone()).await.map(|r| json!({"profile":r["result"]})) }
         "locks.list" => Ok(json!({"locks":locks_now(hub).await})),
