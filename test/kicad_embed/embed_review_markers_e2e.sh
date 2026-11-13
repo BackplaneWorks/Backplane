@@ -4,7 +4,7 @@
 #       "review" (GetMarkers include_host: type host, host.set review, the finding's id), at the track
 #   M2  nothing is written to the design: the board file is byte-identical after the markers are shown
 #   M3  a run with the track fixed clears the set
-# Copies only (seed_project.py), the board open in the embedded editor. Fork mode; skips on runtimes without SetHostMarkers.
+# Copies only (seed_project.py), the board open in the embedded editor. Fork mode; skips when the embedded editor's GetCapabilities lacks embed-host-markers.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 # shellcheck source=lib/env_xvfb.sh
@@ -13,7 +13,6 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 discover_bins
 [ -x "$REAL_HOME/.bun/bin/bun" ] && PATH="$REAL_HOME/.bun/bin:$PATH"
 discover_kicad
-grep -qa "SetHostMarkers" "$(dirname "$KICAD_BIN")/../share/backplane/api.desc" 2>/dev/null || { echo "SKIP embed_review_markers_e2e: this KiCad has no SetHostMarkers (bp.13+)"; exit 0; }
 init_isolated_dirs
 python3 "$SEED_PY" "$OUT" "$REPO_ROOT"
 PROJ="$OUT/proj"; PCB="$PROJ/ecc83-pp.kicad_pcb"; mkdir -p "$OUT/shots"
@@ -46,6 +45,11 @@ ask() {
   sleep 2
   grep "^MCPCALL $1 " "$OUT/standin.log" | tail -1 || true
 }
+# review markers only where the embedded editor says so: capability embed-host-markers in its GetCapabilities (not the version)
+CAPS=$(ask kicad_ipc "{\"path\":\"$PCB\",\"type\":\"kiapi.backplane.GetCapabilities\",\"message\":{}}")
+echo "$CAPS" | grep -q 'capabilities' || { echo "FAIL the embedded KiCad's GetCapabilities gave no capabilities: $(echo "$CAPS" | cut -c1-200)"; exit 1; }
+echo "$CAPS" | grep -q 'embed-host-markers' || { echo "SKIP embed_review_markers_e2e: the embedded KiCad has no embed-host-markers capability ($(echo "$CAPS" | cut -c1-160))"; finish_suite "embed_review_markers_e2e ($EMBED_MODE)"; exit 0; }
+echo "INFO embed-host-markers: yes; SetHostMarkers in commands: $(echo "$CAPS" | grep -q 'SetHostMarkers' && echo yes || echo no)"
 host_markers() { ask kicad_ipc "{\"path\":\"$PCB\",\"type\":\"kiapi.backplane.embed.GetMarkers\",\"message\":{\"kind\":\"FK_PCB\",\"include_host\":true}}"; }
 SHA0=$(sha256sum "$PCB" | cut -d' ' -f1)
 R1=$(ask design_review '{"scope":"save"}'); echo "$R1" | cut -c1-300
