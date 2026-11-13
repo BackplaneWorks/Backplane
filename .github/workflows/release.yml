@@ -227,8 +227,12 @@ jobs:
           for f in native/host/target/release/backplane-hub.exe native/host/target/release/bp-sh.exe native/gpui/target/release/backplane-gpui.exe native/guard/target/release/backplane.exe native/voice/target/release/backplane-voice.exe; do
             [ -f "$f" ] || { echo "::error::missing $f"; exit 1; }; cp "$f" $d/; done
           cp native/voice/vad/silero_vad.onnx $d/   # beside the voice helper, as on the other platforms (its notice: licenses/silero-vad)
-          # the embedded Chromium's runtime beside the client, as cef-dll-sys put it beside the build (viewers/cef.rs runtime_dir looks there)
-          scripts/cef-runtime-files.sh native/gpui/target/release $d windows
+          # the embedded Chromium's runtime beside the client (viewers/cef.rs runtime_dir looks there): from the cef crate's distribution in its
+          # OUT_DIR, as on Linux, else the copy cef-dll-sys put beside the build (0.15.3's dry run found libcef.dll missing beside the build)
+          R=$(dirname "$(find native/gpui/target/release/build -path '*cef-dll-sys*' -name libcef.dll | head -1)")
+          [ -f "$R/libcef.dll" ] || R=native/gpui/target/release
+          echo "CEF runtime from $R"; ls native/gpui/target/release | head -40
+          scripts/cef-runtime-files.sh "$R" $d windows
           echo "9e2449e1087496d8d4caba907f23e0bd3f78d91fa552479bb9c23ac09cbb1fd6  $d/silero_vad.onnx" | sha256sum -c - || { echo "::error::silero_vad.onnx is not the pinned file (native/voice/src/local.rs)"; exit 1; }
           (cd tools/browser && bun install --frozen-lockfile && bun build.ts "$PWD/../../$d/backplane-browser.exe")
           cp dist/backplane-step2glb.exe $d/   # the STEP mesher, native (built above)
