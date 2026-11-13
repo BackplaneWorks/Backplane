@@ -46,6 +46,8 @@ pub fn lean_keeps(k: &str) -> bool {
     if k.starts_with("rule.") || k.starts_with("board.") { return true }
     // the viewer's probe, one per board (present/viewer.rs `probe_action`: the tapped piece's info line, at most 2000 characters)
     if k.starts_with("probe:") { return true }
+    // a halt card's facts (agents/halt.rs), one per turn that ended out of memory or out of context: the thread view draws the card from it (a few KB at most)
+    if k.starts_with("halt.") { return true }
     // setup (present/onboard.rs): the step reached, the skipped and seen lists, done, and the last checks of this machine (a few KB, replaced each time)
     if k.starts_with("onboard.") || k == "freecad.path" { return true }
     k.starts_with("launch.input.") || k.starts_with("fallback.input.") || (!k.starts_with("ride.") && KEEP.iter().any(|p| k.starts_with(p)))
@@ -260,6 +262,7 @@ mod tests {
         for k in ["tz.rule.Europe/Helsinki", "tz.rule.Pacific/Auckland"] { assert!(lean_keeps(k), "{k}: the thread view reads the person's zone rule, without it every time stamp is dropped"); }
         for k in ["allowance.claude", "allowance.codex", "accounts.inventory"] { assert!(lean_keeps(k), "{k}: the composer's limits chip reads it"); }
         for k in ["rule.r1", "board.b1"] { assert!(lean_keeps(k), "{k}: Settings, Rules and task board lists it"); }
+        assert!(lean_keeps("halt.t1.oom5-1"), "the thread view draws a halt card from it");
         for k in ["voice.engine", "voice.model", "voice.device", "voice.e.kicad", "voice.l.jason"] { assert!(lean_keeps(k), "{k}: Settings, Voice shows it"); }
         for k in ["tok.t.t1", "tok.1b.t.t1", "turn.last.t1", "turn.speed.t1", "turn.models.t1", "turn.live.t1", "tok.epoch", "tok.recount"] { assert!(lean_keeps(k), "{k}"); }
         for k in ["onboard.step", "onboard.skipped", "onboard.seen", "onboard.done", "onboard.checks", "onboard.usage", "freecad.path"] { assert!(lean_keeps(k), "{k}: setup reads it, and without it every press forgets the last"); }

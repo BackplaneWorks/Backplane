@@ -126,6 +126,8 @@ pub fn finish_plan(w: &super::world::World, child: &str, ended: &str) -> Option<
     if ended == "completed" && !w.ready(child) { return None } // task_waits_for_child_work
     let (want, word) = if ended == "completed" { ("done", "finished") } else { ("failed", "failed") }; // task_failed_ends_even_busy
     let last = w.threads.get(child).map(|t| t.last_assistant.as_str()).unwrap_or("");
+    let why = w.threads.get(child).map(|t| t.why.as_str()).unwrap_or("");
+    let last = &if want == "failed" && !why.is_empty() { super::launch::with_why(why, last) } else { last.to_string() };
     let pending = !k.delivered; // terminal after next(): the state sticks or becomes the wanted terminal one
     Some(Finish { id: id.clone(), parent: k.parent.clone(), child: child.into(), want, summary: last.to_string(), deliver: if pending { Some(note(id, &k.provider, &k.model, word, last)) } else { None } })
 }

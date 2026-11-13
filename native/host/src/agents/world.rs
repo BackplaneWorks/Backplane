@@ -13,6 +13,9 @@ pub struct T {
     pub runtime: String, pub interaction: String, pub turn: String, pub archived: bool, pub deleted: bool,
     pub title: String, pub last_user: String, pub newest: String, pub carry_text_last: bool,
     pub env: String, pub branch: String, pub last_assistant: String,
+    /// the plain words of the error the newest turn ended on (a halt card's: what ran out and why), "" once a turn runs again: a failed child's
+    /// report to its parent or bot says it (Task.note, Lr.note)
+    #[serde(default)] pub why: String,
     /// when the running turn began (the turn that is running now): a restart carries on the oldest first. 0 from a checkpoint older than this field: they go by id
     #[serde(default)] pub running_at: u64,
     /// settled and not woken since: nothing the hub does by itself (a report, a wake, a restart) starts it again
@@ -32,7 +35,7 @@ pub struct Ask { pub thread: String, pub kind: String, pub tool: String, pub det
 #[derive(Default, serde::Serialize, serde::Deserialize)]
 pub struct World { /** a thread's queued hand-overs (`handoff:*`), (msg, text): the conversation a switch or a fork owes the agent, which goes with its next turn */ #[serde(default)] pub handoffs: HashMap<String, Vec<(String, String)>>, pub home: String, pub bots: HashMap<String, (String, String, bool)>, pub rooms: HashMap<String, (String, bool)>, /** the bots' exchange rooms (bots/life.rs): a `#word` never names one */ #[serde(default)] pub eph_rooms: std::collections::HashSet<String>, pub bot_of: HashMap<String, String>, pub said_to: HashMap<String, std::collections::HashSet<String>>, pub reviews: HashMap<String, Vec<(String, String, u64)>>, pub queued: HashMap<String, Vec<String>>, pub parents: HashMap<String, String>, pub td_msgs: std::collections::HashSet<String>, pub launched: HashMap<String, (String, bool)>, pub projects: HashMap<String, (String, bool)>, pub tasks: HashMap<String, Tk>, pub deadlines: std::collections::HashSet<String>, pub asks: HashMap<String, Ask>, pub sessions: std::collections::HashSet<(String, String)>, pub threads: HashMap<String, T>, pub roots: HashMap<String, String>, pub st: HashMap<String, String>, seen: usize }
 
-const KEYS: &[&str] = &["far.launched.", "text.provider", "text.model", "lock.warning.", "locks.lease.minutes", "carry.wait.", "summary.", "rule.", "watch.", "thread.parent.", "bg.", "wait.", "work.timeout.seconds", "allowance.claude", "effort.", "buy.", "kicad.ipc", "order.enabled", "agent.lang", "tz.machine", "agent.thinking", "restart.continue", "tok.epoch", "tok.recount", "tok.basis.", "turn.speed.", "turn.models.", "limit.claude.", "ride.", "agy.", "session.", "launch.n.", "uber.bot", "kicad.main.", "kicad.offer."];
+const KEYS: &[&str] = &["halt.", "memory.agent.max", "far.launched.", "text.provider", "text.model", "lock.warning.", "locks.lease.minutes", "carry.wait.", "summary.", "rule.", "watch.", "thread.parent.", "bg.", "wait.", "work.timeout.seconds", "allowance.claude", "effort.", "buy.", "kicad.ipc", "order.enabled", "agent.lang", "tz.machine", "agent.thinking", "restart.continue", "tok.epoch", "tok.recount", "tok.basis.", "turn.speed.", "turn.models.", "limit.claude.", "ride.", "agy.", "session.", "launch.n.", "uber.bot", "kicad.main.", "kicad.offer."];
 fn tracked(k: &str) -> bool { KEYS.iter().any(|p| k == *p || (p.ends_with('.') && k.starts_with(p))) || k.starts_with("usage.") || k.starts_with("tok.key.") }
 
 pub const CARRY_TEXT: &str = "Backplane restarted while you were working. Continue where you left off.";
@@ -113,7 +116,7 @@ impl World {
             "ThreadDeleted" => if let Some(x) = self.threads.get_mut(&g("id")) { x.deleted = true },
             "ThreadSettled" => if let Some(x) = self.threads.get_mut(&g("id")) { x.settled = true },
             "ThreadUnsettled" | "ThreadWoke" => if let Some(x) = self.threads.get_mut(&g("id")) { x.settled = false },
-            "TurnChanged" => if let Some(x) = self.threads.get_mut(&g("thread")) { let st = g("state"); if st == "running" && x.turn != "running" { x.running_at = v.get("at").and_then(Value::as_u64).unwrap_or(0) } x.turn = st },
+            "TurnChanged" => if let Some(x) = self.threads.get_mut(&g("thread")) { let st = g("state"); if st == "running" && x.turn != "running" { x.running_at = v.get("at").and_then(Value::as_u64).unwrap_or(0); x.why.clear() } x.turn = st },
             "MessagePosted" => if let Some(x) = self.threads.get_mut(&g("thread")) {
                 x.newest = g("msg");
                 if v.get("role").and_then(Value::as_str) == Some("user") { // Lr.said: what a thread has written to others since its newest user message
@@ -128,6 +131,7 @@ impl World {
             },
             "ActivityLogged" => if let Some(x) = self.threads.get_mut(&g("thread")) {
                 if g("tone") == "review" { self.reviews.entry(g("thread")).or_default().push((g("kind"), g("summary"), v.get("at").and_then(Value::as_u64).unwrap_or(0))) } // Idx.review: a thread's review ops, in order
+                if g("tone") == "error" && !matches!(g("kind").as_str(), "restart") { x.why = g("summary").chars().take(600).collect() }
                 x.newest = g("act"); if !matches!(g("kind").as_str(), "restart" | "account-start") { x.carry_text_last = false } },
             "UsageSet" => { let k = format!("usage.{}", g("thread")); let old = self.setting(&k).to_string(); let (u, w) = (v.get("used").and_then(Value::as_u64).unwrap_or(0), v.get("window").and_then(Value::as_u64).unwrap_or(0));
                 let keep = |new: u64, old: u64| if new == 0 { old } else { new };

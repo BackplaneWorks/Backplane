@@ -351,6 +351,14 @@ pub fn act(params: &Value, facts: &dyn Facts) -> Option<ActOut> {
             let mut outbox = Map::new(); outbox.insert(rid.to_string(), json!(request));
             Some(ActOut { session_patch: json!({"rid": rid + 1, "outbox": outbox}), cmds: vec![json!({"type": "send", "hub": hub, "text": request}), json!({"type": "scroll"})] })
         }
+        // a halt card's action (agents/halt.rs): `<act>|<do>` for the open thread, as the hub's `thread.halt`
+        "halt" => {
+            let sel = s(session, "sel"); if !safe(sel) { return None }
+            let (act, what) = s(params, "value").split_once('|')?; if act.is_empty() || what.is_empty() { return None }
+            let rid = session["rid"].as_u64().unwrap_or(0);
+            let req = json!({"id": rid, "m": "thread.halt", "p": {"thread": sel, "act": act, "do": what}});
+            Some(ActOut { session_patch: json!({"rid": rid + 1}), cmds: vec![json!({"type": "send", "hub": hub, "text": req.to_string()}), json!({"type": "scroll"})] })
+        }
         "send" | "send-alt" => {
             let sel = s(session, "sel");
             send(&SendCtx { hub, cid: s(params, "cid"), now_s: params["now"].as_u64().unwrap_or(0) / 1000, bot_thread: facts.bot_thread(sel), bot: facts.bot_of(sel), binding: facts.account_binding(sel) }, session)
@@ -392,6 +400,13 @@ mod tests {
         assert_eq!(req(&act(&p("o-remove", "m3"), &Plain).unwrap()), json!({"id": 5, "m": "outbox.remove", "p": {"of": "t1", "msg": "m3"}}));
         let o = act(&p("o-edit", "m3\u{1f}unsent words"), &Plain).unwrap();
         assert_eq!(req(&o)["m"], "outbox.remove"); assert_eq!(o.session_patch["drafts"]["t1"], "mine\n\nunsent words");
+    }
+    #[test] fn a_halt_cards_button_asks_the_hub_for_its_action() {
+        struct Plain; impl Facts for Plain { fn bot_thread(&self, _: &str) -> bool { false } fn account_params(&self, _: &str) -> bool { false } }
+        let p = |v: &str| json!({"session": {"sel": "t1", "rid": 3, "drafts": {}, "info": {}}, "action": "halt", "value": v, "hub": "h"});
+        let o = act(&p("oom5-1|resume"), &Plain).unwrap();
+        assert_eq!(serde_json::from_str::<Value>(o.cmds[0]["text"].as_str().unwrap()).unwrap(), json!({"id": 3, "m": "thread.halt", "p": {"thread": "t1", "act": "oom5-1", "do": "resume"}}));
+        assert_eq!(o.session_patch["rid"], 4); assert!(act(&p("nobar"), &Plain).is_none()); assert!(act(&p("|resume"), &Plain).is_none());
     }
     #[test] fn a_reply_is_a_counted_block_the_clients_take_apart() {
         let b = reply_block("m1", "line one\nline two");

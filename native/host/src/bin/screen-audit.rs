@@ -33,9 +33,10 @@ mod present { pub use crate::ready; }
 #[path="../agents/inputs.rs"] pub mod inputs_;
 #[path="../agents/skills.rs"] pub mod skills_;
 #[path="../agents/lockrec.rs"] pub mod lockrec_;
+#[path="../agents/halt_view.rs"] pub mod halt_;
 // (the audit draws this machine's threads only: a project on another machine has no listing here)
 mod net { pub mod farfiles { pub fn listing(_: &str, _: &str) -> Option<Result<String, String>> { None } pub fn copy(_: &str, _: &str) -> Option<Result<String, String>> { None } } }
-mod agents { pub use crate::bg_ as bg; pub use crate::inputs_ as inputs; pub use crate::skills_ as skills; pub use crate::lockrec_ as lockrec; }
+mod agents { pub use crate::bg_ as bg; pub use crate::inputs_ as inputs; pub use crate::skills_ as skills; pub use crate::lockrec_ as lockrec; pub use crate::halt_ as halt; }
 use serde_json::json;
 use std::{collections::{BTreeMap,HashSet},path::Path};
 fn main() -> anyhow::Result<()> {

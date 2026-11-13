@@ -7,7 +7,7 @@
 //! Out for Claude: images/`$skill` input, the Backplane MCP server and runtime prompt in the agent's arguments,
 //! subagents and background tasks, todo tools, the allowance stream, the legacy queue, mail provenance beyond carry,
 //! and the hub's time-driven policies (liveness, autosettle, alert/told/summary, star nudge), which belong to M4.
-pub mod account_tools; pub mod kicadsel; pub mod mcp_stdio; pub mod bundled; pub mod mailroom; pub mod devturns; pub mod bg; pub mod lockrec; pub mod locks; pub mod refs; pub mod person; pub mod work; pub mod textgen; pub mod iconpick; pub mod groupname; pub mod launch; pub mod far; pub mod review; pub mod tasks; pub mod codex; pub mod providers; pub mod cmds; pub mod design; pub mod hist; pub mod host; pub mod inputs; pub mod skills; pub mod lines; pub mod mcp; pub mod proc; pub mod prompt; pub mod prompt_text; pub mod rules; pub mod settle; pub mod tools; pub mod wake; pub mod world;
+pub mod account_tools; pub mod halt; pub mod halt_view; pub mod kicadsel; pub mod mcp_stdio; pub mod bundled; pub mod mailroom; pub mod devturns; pub mod bg; pub mod lockrec; pub mod locks; pub mod refs; pub mod person; pub mod work; pub mod textgen; pub mod iconpick; pub mod groupname; pub mod launch; pub mod far; pub mod review; pub mod tasks; pub mod codex; pub mod providers; pub mod cmds; pub mod design; pub mod hist; pub mod host; pub mod inputs; pub mod skills; pub mod lines; pub mod mcp; pub mod proc; pub mod prompt; pub mod prompt_text; pub mod rules; pub mod settle; pub mod tools; pub mod wake; pub mod world;
 #[cfg(test)] mod tests;
 #[cfg(test)] mod laws;
 
@@ -120,6 +120,7 @@ impl Agents {
         let left = tokio::task::spawn_blocking(move || proc::reap_orphans(&h2)).await.unwrap_or(0); proc::set_owner(&home);
         if left > 0 { eprintln!("agents: ended {left} process(es) a previous hub left behind") }
         let _ = tokio::task::spawn_blocking(crate::memscope::init).await; // agents and jobs in memory scopes of their own (memscope.rs), probed once
+        { let cap = ag.world.lock().await.setting("memory.agent.max").to_string(); if !cap.is_empty() { crate::memscope::set_agent_cap(&cap); eprintln!("memscope: this hub's agents are capped at {cap} (Raise limit, memory.agent.max)") } }
         crate::startup::mark("agents: orphans reaped");
         { // bots live in ~/.backplane/bots/<bot>: copy what older builds kept elsewhere (folder, session history, memory) before any turn resumes
             let moves: Vec<(String, String)> = { let w = ag.world.lock().await; w.bots.iter().filter(|(_, x)| !x.2).map(|(id, x)| (id.clone(), w.threads.get(&x.1).map(|t| t.worktree.clone()).unwrap_or_default())).collect() };
@@ -417,7 +418,7 @@ impl Agents {
 
 struct Rpc(Arc<Agents>);
 impl RpcHandler for Rpc {
-    fn methods(&self) -> &'static [&'static str] { &["turn.start", "turn.interrupt", "ask.answer", "thread.retitle", "thread.btw", "lock.release", "lock.cancel", "work.cancel", "task.stop", "text.write", "thread.hand", "thread.deliver"] }
+    fn methods(&self) -> &'static [&'static str] { &["turn.start", "turn.interrupt", "ask.answer", "thread.retitle", "thread.btw", "thread.halt", "lock.release", "lock.cancel", "work.cancel", "task.stop", "text.write", "thread.hand", "thread.deliver"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
             // the hub's own requests (`/give`, from commands/give.rs): a connection (client 1 and up) could say anything there, so it is never heard
@@ -459,6 +460,10 @@ impl RpcHandler for Rpc {
             if method == "thread.retitle" { // the thread menu's Regenerate title: the person asked, so it replaces even a title they typed
                 let ag = self.0.clone(); let th = th.to_string(); let r = ag.retitle(&th, None, true).await;
                 return vec![match r { Ok(t) => json!({"t":"reply","id":id,"ok":true,"result":{"title":t}}), Err(e) => err(id, &e) }]
+            }
+            if method == "thread.halt" { // a halt card's action (halt.rs): resume, raise, compact, fresh
+                let g = |k: &str| p.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+                return vec![match self.0.halt_act(th, &g("act"), &g("do")).await { Ok(()) => ok(id), Err(e) => err(id, &e) }]
             }
             if method == "task.stop" { // the thread's panel: Stop on one subagent or background shell
                 return vec![match self.0.stop_task(th, p.get("id").and_then(Value::as_str).unwrap_or("")).await { Ok(()) => json!({"t":"reply","id":id,"ok":true,"result":{}}), Err(e) => err(id, &e) }]
@@ -621,8 +626,14 @@ impl Actor {
 
     async fn stop(&mut self) { if let Some(p) = self.live_proc.take() { proc::terminate(p.pid, Duration::from_secs(2)) } }
 
-    async fn commit(&mut self, ev: Vec<Value>) {
+    async fn commit(&mut self, mut ev: Vec<Value>) {
         if ev.is_empty() { return }
+        // halt.rs: a turn that ends on a full context says so in plain words, with its card
+        if ev.iter().any(|e| e["$"] == "TurnChanged" && e["state"] == "failed") && ev.iter().any(|e| e["$"] == "ActivityLogged" && e["tone"] == "error") {
+            let (prov, usage) = { let w = self.ag.world().await; let p = w.threads.get(&self.th).map(|t| t.provider.clone()).unwrap_or_default();
+                let u = w.setting(&format!("usage.{}", self.th)).to_string(); let mut it = u.split('/').map(|x| x.parse::<u64>().unwrap_or(0)); (p, (it.next().unwrap_or(0), it.next().unwrap_or(0))) };
+            halt::enrich(&mut ev, if prov.is_empty() { "claude" } else { &prov }, usage, now_s());
+        }
         self.ag.stats.events.fetch_add(ev.len() as u64, Relaxed);
         if let Err(e) = self.ag.hub.commit_many(&ev).await { self.ag.stats.commit_errors.fetch_add(1, Relaxed); eprintln!("agents: {}: could not write {} events: {e:#}", self.th, ev.len()) }
     }
@@ -1319,6 +1330,7 @@ impl Actor {
         let n0 = self.spawn_n;
         if let Some(mut rx) = self.lines.take() { while let Ok(Some(b)) = tokio::time::timeout(Duration::from_millis(200), next_batch(&mut rx)).await { self.batch(b).await } }
         if self.spawn_n != n0 { return } // what it wrote was its lost session: another process runs the message now (session_lost)
+        let gone_pid = self.live_proc.as_ref().map_or(0, |l| l.pid);
         self.live_proc = None; self.ag.stats.procs_exited.fetch_add(1, Relaxed);
         if self.cx.running && e.stderr.contains(SESSION_GONE) && self.can_retry_lost() && self.session_lost().await { return } // it said so on stderr only
         if self.cx.running { // it ended on a limit or a failed login: what the turn's end would have done
@@ -1328,6 +1340,17 @@ impl Actor {
                 self.cx.running = false; self.live_close().await; self.commit(ev).await;
                 if let Some(a) = v.act { crate::settings::driver::spawn_act(self.ag.clone(), self.th.clone(), a) }
             }
+        }
+        if self.cx.running && (e.signal == Some(9) || e.code == Some(137)) { // halt.rs: killed, most often for memory: what, how big, which limit, and a card to resume
+            let pid = gone_pid;
+            let mut kill = None; if crate::memscope::on() && pid > 0 { for _ in 0..20 { kill = crate::memscope::kill_of(pid); if kill.is_some() { break } tokio::time::sleep(Duration::from_millis(100)).await } }
+            let prov = { let w = self.ag.world().await; w.threads.get(&self.th).map(|t| t.provider.clone()).unwrap_or_default() }; let prov = if prov.is_empty() { "claude".to_string() } else { prov };
+            let raise = kill.as_ref().filter(|k| k.why == crate::memscope::Why::Cap).and_then(|_| { let t = crate::memscope::total_ram().unwrap_or(0); let to = crate::memscope::raised(&crate::memscope::scope_max(), &crate::memscope::slice_max(), t)?; let b = crate::memscope::cap_bytes(&to, t)?; Some((to, b)) });
+            let tail = rules::err_scrub(e.stderr.trim()); let detail = format!("{} (signal 9){}", if kill.is_some() { "killed by the kernel's out-of-memory killer" } else { "killed" }, if tail.is_empty() { String::new() } else { format!("\n\n{}", tail.chars().rev().take(1500).collect::<Vec<_>>().into_iter().rev().collect::<String>()) });
+            let now = now_s(); let act = hub_id("oom", now, self.ag.seq());
+            let card = halt::memory_card(&prov, kill.as_ref(), raise, &detail);
+            self.commit(vec![set(halt::key(&self.th, &act), card.to_string(), now)]).await;
+            self.fail_k(halt::memory_say(&prov, kill.as_ref()), "halt", &act, true).await;
         }
         if self.cx.running {
             let code = e.code.or(e.signal.map(|s| 128 + s)).unwrap_or(1);

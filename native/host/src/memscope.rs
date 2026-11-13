@@ -16,7 +16,33 @@ pub fn slice() -> String { std::env::var("BACKPLANE_SCOPE_SLICE").ok().filter(|v
 static ON: OnceLock<bool> = OnceLock::new();
 
 /// A scope's cap and the slice's (systemd's syntax: a percentage of RAM or a size).
-pub fn scope_max() -> String { std::env::var("BACKPLANE_SCOPE_MEM_MAX").ok().filter(|v| valid_size(v)).unwrap_or_else(|| "40%".into()) }
+pub fn scope_max() -> String {
+    let o = AGENT_CAP.read().map(|g| g.clone()).unwrap_or_default(); if !o.is_empty() { return o }
+    std::env::var("BACKPLANE_SCOPE_MEM_MAX").ok().filter(|v| valid_size(v)).unwrap_or_else(|| "40%".into())
+}
+/// The person's own cap for a thread's agent and commands (the setting `memory.agent.max`, set by a memory card's Raise limit): over
+/// BACKPLANE_SCOPE_MEM_MAX and the 40% default; "" goes back to them. Takes effect for the next process started.
+static AGENT_CAP: std::sync::RwLock<String> = std::sync::RwLock::new(String::new());
+pub fn set_agent_cap(v: &str) { let v = v.trim(); if v.is_empty() || valid_size(v) { if let Ok(mut g) = AGENT_CAP.write() { *g = v.to_string() } } }
+/// The machine's RAM in bytes (Linux: /proc/meminfo; elsewhere none).
+pub fn total_ram() -> Option<u64> {
+    #[cfg(windows)] { return crate::plat::proc::total_ram() }
+    #[cfg(not(windows))] { std::fs::read_to_string("/proc/meminfo").ok()?.lines().find_map(|l| l.strip_prefix("MemTotal:")).and_then(|v| v.trim().trim_end_matches("kB").trim().parse::<u64>().ok()).map(|k| k << 10) }
+}
+/// Raise limit: the next cap after `cur` (systemd's syntax), never past the slice's (`top`), or None when it is already there. A percentage
+/// grows by 15 points, a size by half again (rounded to a whole GB, or MB under 2 GB), so two presses reach the slice's cap from the default.
+pub fn raised(cur: &str, top: &str, total: u64) -> Option<String> {
+    let (c, t) = (cap_bytes(cur, total)?, cap_bytes(top, total)?);
+    if c >= t { return None }
+    if cur.ends_with('%') && top.ends_with('%') {
+        let (cp, tp): (u64, u64) = (cur.trim_end_matches('%').parse().ok()?, top.trim_end_matches('%').parse().ok()?);
+        return Some(format!("{}%", (cp + 15).min(tp)))
+    }
+    let n = (c + c / 2).min(t);
+    Some(if n == t && !top.ends_with('%') { top.to_string() } else if n >= 2 << 30 { format!("{}G", (n + (1 << 29)) >> 30) } else { format!("{}M", n >> 20) })
+}
+/// A size for people: "38.4 GB", "400 MB".
+pub fn human(bytes: u64) -> String { crate::agents::halt_view::human(bytes) }
 pub fn slice_max() -> String { std::env::var("BACKPLANE_SLICE_MEM_MAX").ok().filter(|v| valid_size(v)).unwrap_or_else(|| "75%".into()) }
 /// "40%", "24G", "512M", "1073741824": what MemoryMax takes (never anything that could be another argument).
 pub fn valid_size(v: &str) -> bool {
@@ -117,6 +143,24 @@ pub fn raise_oom(c: &mut tokio::process::Command) {
 /// What a killed process was: its name, pid and size at the last look.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Big { pub name: String, pub pid: u32, pub mb: u64 }
+/// Why the kernel killed it: the scope's own cap (`MemoryMax`), the cap every agent shares (the slice's), or the whole machine out of memory.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Why { Cap, Shared, Machine }
+impl Why { pub fn key(self) -> &'static str { match self { Why::Cap => "cap", Why::Shared => "shared", Why::Machine => "machine" } } }
+/// A kill seen in a watched scope: the process (the largest at the last look), the scope's cap ("400 MB"; its bytes), why, and whether the
+/// watched process itself died (`whole`: the agent, not something it started).
+#[derive(Clone, Debug, PartialEq)]
+pub struct Kill { pub big: Option<Big>, pub cap: String, pub cap_bytes: u64, pub why: Why, pub whole: bool }
+impl Kill { pub fn told(&self) -> String { told(self.big.as_ref(), &self.cap) } }
+/// The kills of watched processes that died themselves, by pid, until the process's end asks (`kill_of`).
+static KILLS: std::sync::Mutex<Vec<(u32, Kill)>> = std::sync::Mutex::new(Vec::new());
+pub fn note_kill(pid: u32, k: Kill) { if let Ok(mut v) = KILLS.lock() { v.retain(|(p, _)| *p != pid); v.push((pid, k)); let n = v.len(); if n > 64 { v.drain(..n - 64); } } }
+/// The kill that ended `pid`, taken (once).
+pub fn kill_of(pid: u32) -> Option<Kill> { let mut v = KILLS.lock().ok()?; let i = v.iter().position(|(p, _)| *p == pid)?; Some(v.remove(i).1) }
+/// `oom N` from memory.events: how often the cgroup's own limit was hit (not `oom_kill`, which counts a kill of any OOM).
+pub fn ooms(events: &str) -> Option<u64> { events.lines().find_map(|l| l.strip_prefix("oom ")).and_then(|n| n.trim().parse().ok()) }
+/// Why, from the scope's and the slice's `oom` counts before and after.
+pub fn why(scope: (u64, u64), slice: (u64, u64)) -> Why { if scope.1 > scope.0 { Why::Cap } else if slice.1 > slice.0 { Why::Shared } else { Why::Machine } }
 /// The words for the thread: what was killed, the cap it hit, and that nothing else was.
 pub fn told(big: Option<&Big>, cap: &str) -> String { told_as(None, big, cap) }
 /// The same for a helper of the hub's (`helper`: "KiCad", "the browser helper"): what it was, its cap, that the hub goes on.
@@ -130,8 +174,9 @@ pub fn told_as(helper: Option<&str>, big: Option<&Big>, cap: &str) -> String {
 pub fn kills(events: &str) -> Option<u64> { events.lines().find_map(|l| l.strip_prefix("oom_kill ")).and_then(|n| n.trim().parse().ok()) }
 
 /// Watches the scope `pid` runs in: each time the kernel kills a process there for memory, `tell` gets the words (`told`). Ends with the scope.
-pub fn watch(pid: u32, tell: impl Fn(String) + Send + 'static) { watch_as(pid, None, tell) }
-fn watch_as(pid: u32, helper: Option<&'static str>, tell: impl Fn(String) + Send + 'static) {
+pub fn watch(pid: u32, tell: impl Fn(Kill) + Send + 'static) { watch_k(pid, tell) }
+fn watch_as(pid: u32, helper: Option<&'static str>, tell: impl Fn(String) + Send + 'static) { watch_k(pid, move |k| tell(told_as(helper, k.big.as_ref(), &k.cap))) }
+fn watch_k(pid: u32, tell: impl Fn(Kill) + Send + 'static) {
     if !on() || pid == 0 { return }
     // a scope this hub made (bp-<what>-<hub pid>-<n>): until systemd-run has moved itself, the process is still in its parent's cgroup, which
     // may be another hub's scope (a test hub started from an agent's job)
@@ -151,22 +196,42 @@ fn watch_as(pid: u32, helper: Option<&'static str>, tell: impl Fn(String) + Send
         // the slice's count too: a scope whose last process the kernel killed is gone before its own count can be read (a lone KiCad), and the
         // slice's (hierarchical) count went up by that kill
         let pev = dir.parent().map(|p| p.join("memory.events"));
-        let slice_kills = || pev.as_ref().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|s| kills(&s));
-        let slice0 = slice_kills();
-        let mut cap = String::new();
+        let slice_ev = || pev.as_ref().and_then(|p| std::fs::read_to_string(p).ok()).unwrap_or_default();
+        // whether the slice hit its own cap: its local count (memory.events counts every scope in it too, a scope's own cap included)
+        let plocal = dir.parent().map(|p| p.join("memory.events.local"));
+        let slice_oom = || plocal.as_ref().and_then(|p| std::fs::read_to_string(p).ok()).and_then(|s| ooms(&s)).unwrap_or(0);
+        let s0 = slice_ev(); let (slice0, slice_oom0) = (kills(&s0), slice_oom());
+        let (mut cap, mut cap_b, mut oom_seen) = (String::new(), 0u64, 0u64);
         loop {
-            let Some(k) = std::fs::read_to_string(&ev).ok().and_then(|s| kills(&s)) else {
-                if dbg { eprintln!("memscope: pid {pid}: scope gone (kills seen {seen}, slice {:?} -> {:?}, last biggest {:?})", slice0, slice_kills(), big) }
-                if seen == 0 && slice_kills().zip(slice0).map_or(false, |(now, then)| now > then) && big.is_some() { tell(told_as(helper, big.as_ref(), &cap)); }
+            let evs = std::fs::read_to_string(&ev).ok();
+            let Some(k) = evs.as_deref().and_then(kills) else {
+                let s1 = slice_ev();
+                if dbg { eprintln!("memscope: pid {pid}: scope gone (kills seen {seen}, slice {:?} -> {:?}, last biggest {:?})", slice0, kills(&s1), big) }
+                // its last process killed: the scope went with it (so did the watched process); its own counts are gone, the slice's say why
+                if seen == 0 && kills(&s1).zip(slice0).map_or(false, |(now, then)| now > then) && big.is_some() {
+                    // its own counts went with it: the slice's own cap, or near the scope's cap at the last look (sampled every 100 ms, so 80%), or the machine
+                    let w = if slice_oom() > slice_oom0 { Why::Shared } else if cap_b > 0 && big.as_ref().map_or(false, |b| (b.mb << 20) * 10 >= cap_b * 8) { Why::Cap } else { Why::Machine };
+                    tell(Kill { big: big.clone(), cap: cap.clone(), cap_bytes: cap_b, why: w, whole: true });
+                }
                 break // the scope is gone
             };
-            if k > seen { seen = k; tell(told_as(helper, big.as_ref(), &cap)); }
-            if let Some(b) = std::fs::read_to_string(dir.join("memory.max")).ok().and_then(|s| s.trim().parse::<u64>().ok()) { cap = format!("{} MB", b >> 20) } else if cap.is_empty() { cap = scope_max() }
+            if k > seen {
+                seen = k;
+                // the watched process itself, or something it started: the largest one was it, or it is gone a moment later
+                let mut whole = big.as_ref().map_or(false, |b| b.pid == pid);
+                for _ in 0..6 { if whole || !alive(pid) { whole = true; break } tokio::time::sleep(std::time::Duration::from_millis(50)).await; }
+                let o = evs.as_deref().and_then(ooms).unwrap_or(0); let so = slice_oom();
+                let w = why((oom_seen, o), (slice_oom0, so)); oom_seen = o;
+                tell(Kill { big: big.clone(), cap: cap.clone(), cap_bytes: cap_b, why: w, whole });
+            }
+            if let Some(b) = std::fs::read_to_string(dir.join("memory.max")).ok().and_then(|s| s.trim().parse::<u64>().ok()) { cap = human(b); cap_b = b } else if cap.is_empty() { cap = scope_max() }
             big = biggest(&dir).or(big);
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
         }
     });
 }
+/// Whether `pid` still runs (a zombie waiting to be reaped does not).
+fn alive(pid: u32) -> bool { std::fs::read_to_string(format!("/proc/{pid}/stat")).ok().and_then(|s| s.rsplit_once(')').map(|(_, r)| r.trim_start().chars().next() != Some('Z'))).unwrap_or(false) }
 /// The largest process in a cgroup now.
 fn biggest(dir: &std::path::Path) -> Option<Big> {
     std::fs::read_to_string(dir.join("cgroup.procs")).ok()?.lines().filter_map(|l| l.trim().parse::<u32>().ok()).filter_map(|p| {

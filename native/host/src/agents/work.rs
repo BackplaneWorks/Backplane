@@ -93,7 +93,7 @@ impl Agents {
         let mut child = match c.spawn() { Ok(c) => c, Err(e) => { self.work_end(&th, &id, "gone", &format!("could not start: {e}")).await; return } };
         let pid = child.id().unwrap_or(0); crate::plat::proc::adopt(pid, false); crate::memscope::cap_job(pid, "work"); drop(guard);
         let killed: Arc<std::sync::Mutex<Option<String>>> = Arc::default(); // a process of the job killed for memory in its scope (memscope.rs): said with its end
-        { let k = killed.clone(); crate::memscope::watch(pid, move |w| { *k.lock().unwrap() = Some(w); }); }
+        { let k = killed.clone(); crate::memscope::watch(pid, move |w| { *k.lock().unwrap() = Some(w.told()); }); }
         { let _g = self.work_lock.lock().await; let rows = self.watch_rows(&th).await;
           if let Some(l) = rows.iter().find(|l| bg::field(l, 0) == bg::clean(&id)) { if bg::doing(l) == "launching" { // only this row, only if it is still launching (a cancel meanwhile keeps "cancelling")
               let nr: Vec<String> = rows.iter().map(|x| if bg::field(x, 0) == bg::clean(&id) { row(&id, "watching", &bg::work_title(x), "run", &target(x), &ident_of(pid), deadline(x)) } else { x.clone() }).collect(); self.put_watch(&th, &nr).await } } }
@@ -130,10 +130,14 @@ impl Agents {
         self.put_watch(th, &rows).await;
         self.work_tell(th, say).await;
     }
-    /// An agent process of `th` watched in its memory scope: a process it started that the kernel kills for memory is told to the thread at once.
+    /// An agent process of `th` watched in its memory scope: a process it started that the kernel kills for memory is told to the thread at once;
+    /// the agent itself killed is kept for its end (`memscope::kill_of`), whose card says it (halt.rs), never "the agent goes on".
     pub(super) fn memory_watch(self: &Arc<Self>, th: &str, pid: u32) {
         let (me, th) = (self.clone(), th.to_string()); let rt = tokio::runtime::Handle::current();
-        crate::memscope::watch(pid, move |w| { let (me, th) = (me.clone(), th.clone()); rt.spawn(async move { me.work_tell(&th, w).await }); });
+        crate::memscope::watch(pid, move |k| {
+            if k.whole { crate::memscope::note_kill(pid, k); return }
+            let (me, th, w) = (me.clone(), th.clone(), k.told()); rt.spawn(async move { me.work_tell(&th, w).await });
+        });
     }
     /// The outcome told: a stopped thread hears it without waking; an archived or deleted one is told nothing.
     pub(super) async fn work_tell(self: &Arc<Self>, th: &str, say: String) {
