@@ -160,7 +160,9 @@ pub fn merge_record(run: &Value, a: &Value) -> Value {
     for x in review_lines(&a["issues"]) { if issues.len() >= ISSUES_KEPT { break } if !issues.contains(&x) { issues.push(x) } }
     let verdict = if run["verdict"] == "issues" || verdict(sv(a, "verdict")) == "issues" { "issues" } else { "ok" };
     let c = &run["counts"]; let own = sv(a, "summary").trim();
-    let summary = format!("{}{}{} must change, {} should, {} notes (design review)", own, if own.is_empty() { "" } else { "; " }, c["error"], c["warning"], c["info"]);
+    let mut summary = format!("{}{}{} must change, {} should, {} notes (design review)", own, if own.is_empty() { "" } else { "; " }, c["error"], c["warning"], c["info"]);
+    // a review never reads as clean on a DRC that can miss a short: the warning (or what the second opinion ran) in the verdict's words
+    let drc = crate::review::drc_note(run); if !drc.is_empty() { summary = format!("{summary}; {drc}") }
     json!({"verdict": verdict, "summary": summary, "issues": issues})
 }
 async fn record(ag: &Arc<Agents>, cwd: &str, a: &Value) -> (bool, Value) {

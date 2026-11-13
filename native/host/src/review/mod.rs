@@ -8,6 +8,7 @@
 pub mod checks;
 pub mod judged;
 pub mod markers;
+pub mod stockdrc;
 pub mod policy;
 
 use crate::fab;
@@ -18,7 +19,7 @@ use std::{path::{Path, PathBuf}, sync::Arc, time::Duration};
 
 pub const FILE: &str = ".backplane/design-review.json";
 /// The sources a deterministic run fills, in the order they are listed.
-pub const SOURCES: &[&str] = &["drc", "erc", "fab", "bom", "outputs", "assembly", "mech"];
+pub const SOURCES: &[&str] = &["drc", "erc", "stockdrc", "fab", "bom", "outputs", "assembly", "mech"];
 /// A severity in the review's words: error must change, warning should, info is a note.
 pub fn level(sev: &str) -> &'static str { match sev { "error" => "must change", "warning" => "should", "excluded" => "excluded", _ => "note" } }
 
@@ -32,6 +33,11 @@ pub fn run_json(at: u64, scope: &str, fingerprint: &str, rev: &Value, findings: 
     json!({"at": at, "scope": scope, "fingerprint": fingerprint, "rev": rev, "took_ms": took_ms, "counts": c.to_json(), "by_source": by, "skipped": skipped,
         "verdict": if c.error > 0 { "issues" } else { "ok" }, "findings": findings.iter().map(fd::to_json).collect::<Vec<_>>()})
 }
+/// What the run says about trusting DRC (the stockdrc warning or note's title), for order_review's summary and review.md: "" none.
+pub fn drc_note(run: &Value) -> String {
+    run["findings"].as_array().into_iter().flatten().find(|f| f["source"] == stockdrc::SOURCE && (f["rule"] == stockdrc::RULE_WARN || f["rule"] == stockdrc::RULE_NOTE))
+        .and_then(|f| f["title"].as_str()).unwrap_or("").to_string()
+}
 /// One line per must-change (for order_review's issues and the Buy gate), at most `n`.
 pub fn must_lines(run: &Value, n: usize) -> Vec<String> {
     run["findings"].as_array().into_iter().flatten().chain(run["judged"]["findings"].as_array().into_iter().flatten()).filter(|f| f["severity"] == "error").map(|f| { let refs: Vec<&str> = f["anchors"].as_array().into_iter().flatten().filter_map(|a| a["reference"].as_str()).take(3).collect();
@@ -41,6 +47,7 @@ pub fn must_lines(run: &Value, n: usize) -> Vec<String> {
 pub fn md(run: &Value, notes: &str) -> String {
     let fs: Vec<&Value> = run["findings"].as_array().into_iter().flatten().collect();
     let mut s = format!("# Design review\n\n{} · scope {} · {} must change, {} should, {} notes\n", run["verdict"].as_str().unwrap_or(""), run["scope"].as_str().unwrap_or(""), run["counts"]["error"], run["counts"]["warning"], run["counts"]["info"]);
+    { let n = drc_note(run); if !n.is_empty() { s.push_str(&format!("\nDRC: {n}.\n")) } }
     for (sev, head) in [("error", "Must change"), ("warning", "Should"), ("info", "Notes")] {
         let xs: Vec<&&Value> = fs.iter().filter(|f| f["severity"] == sev).collect();
         if xs.is_empty() { continue }
@@ -202,9 +209,19 @@ pub async fn run(hub: &Arc<Hub>, root: &Path, scope: &str) -> Result<Value, Stri
     let (mut fs, mut skipped): (Vec<Finding>, Vec<String>) = tokio::task::spawn_blocking(move || run_files(&home, &r, &bom_lines)).await.map_err(|_| "the review failed".to_string())?;
     let mut rev = Value::Null;
     if !pro.is_empty() {
-        if scope == "save" { skipped.push("DRC and ERC: run beside the design (the Checks panel); a full review waits for them fresh".into()) }
+        if scope == "save" {
+            skipped.push("DRC and ERC: run beside the design (the Checks panel); a full review waits for them fresh".into());
+            let pcb = crate::files::kicad::project::read(&root.to_string_lossy()).pcb;
+            let (g, gs) = stockdrc::check(hub, &pro, &pcb, None, false).await; fs.extend(g); skipped.extend(gs);
+        }
         else {
-            let (d, s, r) = drc_erc(hub, &pro, true).await; let mut d = d; d.extend(fs); fs = d; skipped.extend(s); rev = r;
+            let (d, s, r) = drc_erc(hub, &pro, true).await;
+            // the runtime's DRC is compared only when it ran fresh (a DRC skipped is said in `s`)
+            let drc_fresh = !s.iter().any(|x| x.starts_with("DRC")) && !r["drc"].is_null();
+            let own: Vec<Finding> = d.iter().filter(|f| f.source == "drc").cloned().collect();
+            let pcb = crate::files::kicad::project::read(&root.to_string_lossy()).pcb;
+            let (g, gs) = stockdrc::check(hub, &pro, &pcb, drc_fresh.then_some(&own[..]), true).await;
+            let mut d = d; d.extend(g); d.extend(fs); fs = d; skipped.extend(s); skipped.extend(gs); rev = r;
             let (o, s) = outputs_fresh(hub, root).await; fs.extend(o); skipped.extend(s);
             skipped.retain(|x| !x.starts_with("Outputs against the board: a fresh export"));
         }
@@ -231,7 +248,7 @@ pub async fn run(hub: &Arc<Hub>, root: &Path, scope: &str) -> Result<Value, Stri
 }
 /// The run's sources in the one Checks list (lane E's, kicad/checkrun.rs): each source's findings, labelled, with the run's when, scope
 /// and what that source could not check. DRC and ERC are E's own and are not set from here.
-pub const LABELS: &[(&str, &str)] = &[("fab", "Fab rules"), ("bom", "BOM"), ("outputs", "Outputs"), ("assembly", "Assembly"), ("mech", "Mechanical")];
+pub const LABELS: &[(&str, &str)] = &[(stockdrc::SOURCE, stockdrc::LABEL), ("fab", "Fab rules"), ("bom", "BOM"), ("outputs", "Outputs"), ("assembly", "Assembly"), ("mech", "Mechanical")];
 pub async fn publish_checks(hub: &Arc<Hub>, pro: &str, run: &Value) {
     use crate::files::kicad::checkrun as cr;
     let _ = cr::request(hub, "kicad.checks.watch", &json!({"project": pro})).await;
