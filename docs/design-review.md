@@ -69,3 +69,12 @@ On demand (the tool); before an order (`order_review record`); on save, scope `s
 All hub data: `review.<digest>` (the run: verdict, counts by source, what was skipped, findings), the Checks list's sources (`mgmt.checks.<digest>`
 and `kicad.checks.list`, with `judged` rows marked), and the Fab panel's `review` (`mgmt.fab.<digest>`: the last run's verdict and counts,
 `running`, `judge`: the request Datasheets sends).
+
+## In KiCad: review markers (Backplane KiCad bp.13)
+
+Where the open KiCad has `SetHostMarkers`, each review run also sends its findings (DRC and ERC excepted: KiCad draws its own) as one
+named marker set, `review`, to each editor: the board's findings to the PCB editor, the schematic's to the schematic editor, worst
+first, at most 400 each, placed on the finding's items (KIIDs) or its point. Markers are host state: nothing is written to the design,
+its DRC/ERC results or its undo; a run with no findings clears the set. A click on one (ET_MARKER_CLICKED, set `review`) opens the
+Checks panel and publishes `review.clicked.<digest>` {id, at} for the panel to show that finding. Older runtimes get nothing (no
+command, no call). Linux-tested so far; nothing platform-specific in it.

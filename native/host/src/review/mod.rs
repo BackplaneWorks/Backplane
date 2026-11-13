@@ -7,6 +7,7 @@
 //! Triggers: policy.rs. Tool: `design_review {scope}`.
 pub mod checks;
 pub mod judged;
+pub mod markers;
 pub mod policy;
 
 use crate::fab;
@@ -242,6 +243,9 @@ pub async fn publish_checks(hub: &Arc<Hub>, pro: &str, run: &Value) {
         let meta = json!({"label": label, "review": {"at": run["at"], "scope": run["scope"], "verdict": run["verdict"], "skipped": mine}});
         if let Err(e) = cr::set_findings(hub, pro, id, fs, meta).await { eprintln!("review: the Checks list did not take {id}: {e}") }
     }
+    // the findings as markers in the open KiCad (bp.13), DRC and ERC left to KiCad's own
+    let mine: Vec<Finding> = all.into_iter().filter(|f| f.source != "drc" && f.source != "erc").collect();
+    markers::send(hub, pro, &mine).await;
 }
 pub fn info_key(pro: &str) -> String { format!("review.{}", crate::files::kicad::kserve::digest(pro)) }
 /// The last run kept in the project, whatever design it was of: its summary (no findings).
