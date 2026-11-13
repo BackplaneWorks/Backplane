@@ -12,7 +12,8 @@ REAL_BOARDS=(
 REAL_RUNTIMES=(
   "bp11=$HOME/.backplane-gpui-fresh/home/kicad/10.99.0-bp.11/bin/kicad"
   "bp12=${KEMBED_BP12:-$HOME/.cache/kicad-test/10.99.0-bp.12}/bin/kicad"
-  "bp13=${KEMBED_BP13:-$HOME/.cache/kicad-test/10.99.0-bp.13}/bin/kicad"
+  # bp.13 is a symlink to builds/10.99.0-bp.13-<sha10>, switched by the fork lead: resolved once here, so a switch mid-run never mixes builds
+  "bp13=$(readlink -f "${KEMBED_BP13:-$HOME/.cache/kicad-test/10.99.0-bp.13}")/bin/kicad"
 )
 # the fork's plan demo (scripts/backplane-plan-demo.py) at the runtime's own BACKPLANE_COMMIT, read from the fork's git (never its worktree)
 KICAD_FORK=${KICAD_FORK:-$HOME/Documents/Backplane/Backplane_KiCad}
