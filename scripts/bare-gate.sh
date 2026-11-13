@@ -31,7 +31,7 @@ newbox() { # name, extra args -> id
   echo "$id" >>"$OUT/boxes"; echo "$id"   # called in $( ): the list is a file, read back by gone()
 }
 push() { tar -czf - "${@:2}" | B ssh "$1" -- 'mkdir -p ~/gate && tar -xzf - -C ~/gate'; }
-FILES=(test/bare test/kicad_embed/lib/gui_ipc_probe.py test/onboarding/pos.py test/tools/claude_standin.ts test/wire.mjs test/wire-codec.js native/host/src/wire_dict.rs native/host/src/kicad/install.rs test/files/fixtures/plot)
+FILES=(README.md test/bare test/kicad_embed/lib/gui_ipc_probe.py test/onboarding/pos.py test/tools/claude_standin.ts test/wire.mjs test/wire-codec.js native/host/src/wire_dict.rs native/host/src/kicad/install.rs test/files/fixtures/plot)
 T0=$(date +%s)
 
 ARCH_ARGS=()

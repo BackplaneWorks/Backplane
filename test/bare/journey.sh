@@ -142,22 +142,22 @@ fill_libs() { # dir round
 }
 
 # --- 1. install as the person: the documented one-liner ---
+# the first command in the README's sh block that runs install.sh (docs: curl, else wget)
+readme_line() { awk '/^```sh/{f=1;next} /^```/{f=0} f && /install\.sh/ {print; exit}' "$ROOT/README.md"; }
 t=$(date +%s.%N)
 # what the stock desktop has of the downloaders goes in (a container image has neither); what it lacks stays out
 for p in curl wget ca-certificates; do on_desktop $p && pkg_install $p; done
 if [ "$SOURCE" = release ]; then
   URL=https://github.com/BackplaneWorks/Backplane/releases/${TAG/#latest/latest/download}; [ "$TAG" = latest ] || URL=https://github.com/BackplaneWorks/Backplane/releases/download/$TAG
   URL=$URL/install.sh
-  if ! in_box sh -c 'command -v curl' >/dev/null; then
-    cut_ 1 install "curl is not on a stock $(cat "$OUT/os.txt") desktop (wget is): the documented 'curl -fsSL … | sh' says 'curl: command not found'"
-    as_person sh -c "wget -qO- '$URL' | sh -s -- --quiet" >"$OUT/logs/install-wget.log" 2>&1
-    if grep -q "is installed" "$OUT/logs/install-wget.log"; then ok "wget -qO- install.sh | sh installs with no curl"
-    else bad "wget -qO- install.sh | sh installs with no curl: $(tail -1 "$OUT/logs/install-wget.log")"; pkg_install curl; fi
-  fi
-  [ -x "$HH/.local/bin/backplane-app" ] || as_person sh -c "curl -fsSL '$URL' | sh -s -- --quiet" >"$OUT/logs/install.log" 2>&1
+  # the README's own first line, as a person pastes it (curl where there is one, else wget), on this release's installer
+  as_person sh -c "$(readme_line | sed "s|https://github.com/BackplaneWorks/Backplane/releases/latest/download/install.sh|$URL|g; s/| sh\$/| sh -s -- --quiet/")" >"$OUT/logs/install.log" 2>&1
+  [ -x "$HH/.local/bin/backplane-app" ] || cut_ 1 install "the README's install line fails on a stock $(cat "$OUT/os.txt") desktop: $(tail -1 "$OUT/logs/install.log")"
 else
   docker cp "$ARCHIVE" "$C:/tmp/bp.tar.gz"; docker cp "$INSTALLER" "$C:/tmp/install.sh"; in_box chmod 644 /tmp/bp.tar.gz /tmp/install.sh
-  in_box sh -c 'command -v curl' >/dev/null || cut_ 1 install "curl is not on a stock $(cat "$OUT/os.txt") desktop (wget is): the documented 'curl -fsSL … | sh' says 'curl: command not found'"
+  # the README's line fetches the published installer with what this desktop has (the archive itself comes from the commit's build)
+  if as_person sh -c "$(readme_line | sed 's/| sh$/| head -c 64/')" 2>"$OUT/logs/readme-line.log" | grep -q '^#!/bin/sh'; then ok "the README's install line fetches install.sh on a stock $(cat "$OUT/os.txt") desktop ($(in_box sh -c 'command -v curl >/dev/null && echo curl || echo wget'))"
+  else bad "the README's install line fetched no install.sh: $(tail -1 "$OUT/logs/readme-line.log")"; cut_ 1 install "the README's install line fails on a stock $(cat "$OUT/os.txt") desktop"; fi
   as_person env BACKPLANE_ARCHIVE=/tmp/bp.tar.gz sh /tmp/install.sh --quiet >"$OUT/logs/install.log" 2>&1
 fi
 [ -x "$HH/.local/bin/backplane-app" ] && ok "install.sh installed backplane-app" || { bad "install.sh failed: $(tail -3 "$OUT/logs/install.log" | tr '\n' ' ')"; exit 1; }
