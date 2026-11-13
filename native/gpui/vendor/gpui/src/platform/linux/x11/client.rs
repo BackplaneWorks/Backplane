@@ -304,6 +304,11 @@ impl X11ClientStatePtr {
 #[derive(Clone)]
 pub(crate) struct X11Client(Rc<RefCell<X11ClientState>>);
 
+/// BACKPLANE_GPUI_LOOPTRACE=1: the main loop's slow steps (a foreground task, a frame, an X batch over 50 ms) and each change of a window's
+/// refresh loop, on stderr as `GPUI_LOOP {...}` (Backplane's stall hunt; not upstream).
+pub(crate) fn loop_trace() -> bool { static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new(); *ON.get_or_init(|| std::env::var_os("BACKPLANE_GPUI_LOOPTRACE").is_some()) }
+pub(crate) fn loop_note(what: &str, ms: f64) { if loop_trace() { let t = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis()); eprintln!("GPUI_LOOP {{\"what\":\"{what}\",\"ms\":{ms:.1},\"at_ms\":{t}}}"); } }
+
 impl X11Client {
     pub(crate) fn new() -> anyhow::Result<Self> {
         let event_loop = EventLoop::try_new()?;
@@ -321,7 +326,10 @@ impl X11Client {
                         // events have higher priority and runnables are only worked off after the event
                         // callbacks.
                         handle.insert_idle(|_| {
+                            let t = Instant::now();
                             runnable.run();
+                            let ms = t.elapsed().as_secs_f64() * 1e3;
+                            if ms > 50. { loop_note("task", ms) }
                         });
                     }
                 }
@@ -449,7 +457,10 @@ impl X11Client {
                 {
                     let xcb_connection = xcb_connection.clone();
                     move |_readiness, _, client| {
+                        let t = Instant::now();
                         client.process_x11_events(&xcb_connection)?;
+                        let ms = t.elapsed().as_secs_f64() * 1e3;
+                        if ms > 50. { loop_note("x11", ms) }
                         Ok(calloop::PostAction::Continue)
                     }
                 },
@@ -1766,6 +1777,7 @@ impl X11ClientState {
         };
         let is_visible = window_ref.is_mapped
             && !matches!(window_ref.last_visibility, Visibility::FULLY_OBSCURED);
+        if loop_trace() { loop_note(&format!("refresh x{x_window:x} mapped={} visibility={:?} running={}", window_ref.is_mapped, window_ref.last_visibility, matches!(window_ref.refresh_state, Some(RefreshState::PeriodicRefresh { .. }))), 0.) }
         match (is_visible, window_ref.refresh_state.take()) {
             (false, refresh_state @ Some(RefreshState::Hidden { .. }))
             | (false, refresh_state @ None)
@@ -1858,10 +1870,13 @@ impl X11ClientState {
                             window.expose_event_received = false;
                             let window = window.window.clone();
                             drop(state);
+                            let t = Instant::now();
                             window.refresh(RequestFrameOptions {
                                 require_presentation: expose_event_received,
                                 force_render: false,
                             });
+                            let ms = t.elapsed().as_secs_f64() * 1e3;
+                            if ms > 50. { loop_note("frame", ms) }
                         }
                         xcb_connection
                     };
