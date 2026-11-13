@@ -22,18 +22,20 @@ MINE='(rule "mine: wide tracks"
 printf '(version 1)\n# my own rules, by hand\n%s\n' "$MINE" >"$DRU"
 printf '{"kind":"pcb","name":"ECC83","source":"ecc83-pp.kicad_pcb","qty":5,"options":{"layers":2}}\n' >"$PROJ/ecc83-pp.fab.json"
 git -C "$PROJ" add -A >/dev/null 2>&1 || true; git -C "$PROJ" commit -qm "own rules" >/dev/null 2>&1 || true
+# paint bounds (Nov 13, bp.13 batch 3, 16 cores busy): KiCad painted 0.07-0.08 s after Edit and the board was open, full size, 9.7-13.3 s
+# after the client started; the main-thread stall fixed in 82c67d16a made them 11 s and 88-133 s. So 5 s to paint and 45 s to be ready.
 start_xvfb_and_wm
 export BP_STREAM_N=1 BP_STREAM_MS=10 BP_STANDIN_MCPCALL_MAX=200000
 start_hub
 cat >"$OUT/script.json" <<'JSON'
 [{"select":0},{"wait":2000},{"click":"rail:Board"},{"wait":2500},{"click":"ui:Edit"},
- {"kicad":{"wait_painted":180000,"kind":"PCB","tag":"ready"}},{"wait":1500},
+ {"kicad":{"wait_painted":5000,"kind":"PCB","tag":"ready"}},{"wait":1500},
  {"click":"kicad:full"},{"wait":1500},{"mark":"edit_ready"},{"wait":150000}]
 JSON
 HOME="$OUT/fh" BACKPLANE_GPUI_ASSETS="$ASSETS_DIR" BACKPLANE_GPUI_RECTS=1 BACKPLANE_GPUI_HOLD=1 \
 "$CLIENT_BIN" --url "http://127.0.0.1:$HPORT" --token-file "$OUT/home/token" --script "$OUT/script.json" --exit-after 420 >"$OUT/client.log" 2>&1 &
 CP=$!; track_pid "$CP"
-wait_for_log "$OUT/client.log" '"name":"edit_ready","event":"mark"' 1200 || { echo "FAIL the board never opened in KiCad"; tail -n 20 "$OUT/client.log"; exit 1; }
+wait_for_log "$OUT/client.log" '"name":"edit_ready","event":"mark"' 180 || { echo "FAIL the board never opened in KiCad"; tail -n 20 "$OUT/client.log"; exit 1; }
 ask() {
   local N; N="$1-$(date +%s%N)"; local before; before=$(grep -c "^MCPCALL" "$OUT/standin.log" 2>/dev/null || echo 0)
   local text; text=$(python3 -c 'import json,sys; print(json.dumps("mcpcall:" + json.dumps({"name": sys.argv[1], "arguments": json.loads(sys.argv[2])})))' "$1" "$2")
