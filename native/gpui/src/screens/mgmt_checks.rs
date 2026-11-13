@@ -83,6 +83,13 @@ pub fn items(d: &Value, search: Option<&[Value]>, waiting: bool, more: &BTreeMap
     if out.is_empty() { out.push(Item::Msg(if d["drc"]["has_result"] == true || d["erc"]["has_result"] == true { "gpui.mgmt.checks.none" } else { "gpui.mgmt.checks.reading" })) }
     out
 }
+/// The panel's data with only `src`'s groups ("" all).
+pub fn by_source(d: &Value, src: &str) -> Value {
+    if src.is_empty() { return d.clone() }
+    let mut o = d.clone();
+    o["groups"] = Value::Array(d["groups"].as_array().into_iter().flatten().filter(|g| s(g, "source") == src).cloned().collect());
+    o
+}
 /// One item of the list, drawn (uniform_list asks only for the ones in view).
 fn item_el(app: &mut Backplane, i: usize, cx: &mut Context<Backplane>) -> AnyElement {
     let (it, light, srcs, sel) = ui(|u| (u.items.get(i).cloned(), u.light, u.sources.clone(), u.sel.clone()));
@@ -118,10 +125,11 @@ fn item_el(app: &mut Backplane, i: usize, cx: &mut Context<Backplane>) -> AnyEle
                 .child(div().flex_shrink_0().size(px(7.)).bg(c(tone(s(&f, "severity")))))
                 .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(s(&f, "title").to_string()))
                 .when(judged(&d, s(&f, "source")), |x| x.child(div().flex_shrink_0().px(px(3.)).text_size(px(10.)).border_1().border_color(c("warn")).text_color(c("warn")).child(tf("gpui.mgmt.checks.judged", &[]))))
-                .child(div().flex_shrink_0().max_w(relative(0.35)).overflow_hidden().whitespace_nowrap().text_ellipsis().text_color(c(if ex { "faint" } else { "dim" })).child(s(&f, "names").to_string()))
+                .child(div().flex_shrink_0().max_w(relative(0.4)).overflow_hidden().whitespace_nowrap().text_ellipsis().text_color(c(if ex { "faint" } else { "dim" })).child(s(&f, "names").to_string()))
                 .child(crate::ui::with_rect(div().id(SharedString::from(format!("checks-fix-{id}"))), { let id = id.clone(); move || format!("mgmt:checks:fix:{id}") })
-                    .flex_shrink_0().px(px(5.)).border_1().border_color(c("line")).text_size(px(11.)).text_color(c("dim")).invisible().group_hover("checks-row", |x| x.visible()).when(on, |x| x.visible())
-                    .hover(|x| x.text_color(c("text")).bg(c("bg"))).child(tf("gpui.mgmt.checks.fix", &[]))
+                    // over the row's right end, not beside it: hidden, it takes no room from the title
+                    .absolute().right(px(6.)).top(px(3.)).px(px(5.)).border_1().border_color(c("line")).bg(c("raise")).text_size(px(11.)).text_color(c("dim")).invisible().group_hover("checks-row", |x| x.visible()).when(on, |x| x.visible())
+                    .hover(|x| x.text_color(c("text")).bg(c("bg"))).child(tf(if s(&f, "fix_kind") == "reexport" { "gpui.mgmt.checks.reexport" } else { "gpui.mgmt.checks.fix" }, &[]))
                     .on_click({ let id = id.clone(); cx.listener(move |this, _, _, cx| { cx.stop_propagation(); fix(this, &id, cx) }) }))
                 .on_click({ let id = id.clone(); cx.listener(move |this, _, window, cx| { if let Some(h) = ui(|u| u.focus.clone()) { window.focus(&h); } select(this, &id, cx) }) })
                 .into_any_element()
@@ -160,15 +168,17 @@ fn log(ev: &str, v: Value) { let mut o = v; o["event"] = json!(ev); eprintln!("G
 pub fn select(app: &mut Backplane, id: &str, cx: &mut Context<Backplane>) {
     ui(|u| u.sel = Some(id.to_string()));
     log("checks_select", json!({"id": id}));
-    // a place in a file (Gerbers vs board's difference): that comparison on its layer, the difference lit and zoomed on
+    // a file's finding (Gerbers vs board): that comparison on its layer; a difference (a place) lit and zoomed on, the whole (a stale
+    // export) as it is
     let row = ui(|u| u.items.iter().find_map(|i| if let Item::Row(f) = i { (s(f, "id") == id).then(|| f.clone()) } else { None }));
-    if let Some(f) = row.filter(|f| s(f, "doc") == "file" && !s(f, "at").is_empty()) {
+    if let Some(f) = row.filter(|f| s(f, "doc") == "file") {
         let viewer = app.data["thread"]["viewer"].clone();
         if viewer["gerbersVsBoard"] != true { let _ = app.tx.try_send(Command::Action("view".into(), "gerbers\tboard".into())); }
         let layer = s(&f, "layer").to_string();
         if let Some(r) = viewer["layerList"].as_array().into_iter().flatten().find(|r| s(r, "name") == layer || s(r, "name").starts_with(&format!("{layer} ·"))) { // i18n-ok: matches the hub's row name
             if r["active"] != true { let _ = app.tx.try_send(Command::Action("view-layer-pick".into(), r["layer"].as_u64().unwrap_or(0).to_string())); }
         }
+        if s(&f, "at").is_empty() { let _ = app.tx.try_send(Command::Action("view-probe".into(), String::new())); app.ui_epoch += 1; cx.notify(); return }
         let probe = format!("difference;at={}", s(&f, "at")); // i18n-ok: a probe's text, not drawn
         let _ = app.tx.try_send(Command::Action("view-probe".into(), probe.clone()));
         // zoomed on once the page shows that probe (xprobe::zoom_pending)
@@ -301,7 +311,8 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
     let q = filter_text(cx);
     let src_now = ui(|u| u.src.clone());
     let sev = search_key(&ui(|u| u.sev.clone()), &src_now);
-    let search = searching(&sev, &q);
+    // a source alone keeps the groups (each rule a heading with its count, its first rows): only a severity or words ask the hub
+    let search = searching(&ui(|u| u.sev.clone()), &q);
     if search { ask_search(app, &sev, &q) }
     let found = ui(|u| u.found.clone()).filter(|(a, b, _)| *a == sev && *b == q.trim()).map(|x| x.2);
     let (more, open) = ui(|u| (u.more.clone(), u.open.clone()));
@@ -342,7 +353,8 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
 
     // the list: groups (a heading, its rows, "n more"), or the search's rows
     // the list: only the rows in view are built (a board's hundreds of findings scroll at the frame rate); every item is one row high
-    let its = items(d, if search { Some(found.as_deref().unwrap_or(&[])) } else { None }, search && found.is_none(), &more, &open);
+    let of_src = by_source(d, &src_now);
+    let its = items(&of_src, if search { Some(found.as_deref().unwrap_or(&[])) } else { None }, search && found.is_none(), &more, &open);
     let n = its.len();
     let scroll = ui(|u| u.scroll.get_or_insert_with(UniformListScrollHandle::new).clone());
     // a finding named by a KiCad marker click: selected and scrolled to once its row is in the list; else its group is found and opened
@@ -461,6 +473,9 @@ mod tests {
         let d = json!({"sources": {"fab": {"label": "Fab rules", "judged": false}, "datasheet": {"label": "Datasheets", "judged": true}}});
         assert_eq!(source_label(&d, "drc"), "DRC"); assert_eq!(source_label(&d, "fab"), "Fab rules"); assert_eq!(source_label(&d, "bom"), "bom");
         assert!(judged(&d, "datasheet") && !judged(&d, "fab"));
+        let d = json!({"groups": [{"source": "drc", "rule": "clearance", "n": 1, "rows": []}, {"source": "gerbers", "rule": "B.Cu", "n": 21, "rows": []}]});
+        assert_eq!(by_source(&d, "gerbers")["groups"].as_array().unwrap().iter().map(|g| s(g, "rule")).collect::<Vec<_>>(), ["B.Cu"], "a source alone: its groups, headed and counted");
+        assert_eq!(by_source(&d, "")["groups"].as_array().unwrap().len(), 2);
         assert_eq!(search_key("error", ""), "error"); assert_eq!(search_key("", "fab"), "|fab"); assert!(searching(&search_key("", "fab"), ""));
     }
     #[test] fn a_shut_group_shows_three() {

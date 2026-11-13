@@ -32,8 +32,9 @@ fn label_of(set: &Path, board: Option<&Path>) -> String {
 /// What did not read in the sets read last (by path), for their viewers' note.
 static NOTES: std::sync::Mutex<Vec<(String, Vec<String>)>> = std::sync::Mutex::new(Vec::new());
 pub fn notes_of(path: &str) -> Vec<String> { NOTES.lock().unwrap().iter().find(|(p, _)| p == path).map(|x| x.1.clone()).unwrap_or_default() }
-/// Differences found by comparisons not yet taken up by the Checks panel (kicad/checkrun.rs): (set, board, [(layer, box mm, on the board)]).
-pub type Diffs = (String, String, Vec<(String, [f32; 4], bool)>);
+/// Differences found by comparisons not yet taken up by the Checks panel (kicad/checkrun.rs): (set, board, [(layer, difference)], how
+/// long before the board's last change the set was made (ms; 0 not before)).
+pub type Diffs = (String, String, Vec<(String, compare::Place)>, u64);
 pub static DIFFS: std::sync::Mutex<Vec<Diffs>> = std::sync::Mutex::new(Vec::new());
 fn cmp_board_is(path: &str) -> bool { path.starts_with(CMP) }
 
@@ -46,7 +47,9 @@ pub fn plot(path: &str) -> super::plotgen::Read {
     { let mut n = NOTES.lock().unwrap(); n.retain(|(p, _)| p != path); n.push((path.to_string(), r.notes.clone())); if n.len() > 32 { n.remove(0); } }
     let board = board_of(sp);
     let newest = set_files(sp).iter().map(|f| modified_ms(f)).max().unwrap_or(0);
-    let (mut note, mut warn) = set_line(&label_of(sp, board.as_deref()), r.layers.len(), newest, board.as_deref().map(modified_ms).unwrap_or(0));
+    let board_ms = board.as_deref().map(modified_ms).unwrap_or(0);
+    let (mut note, mut warn) = set_line(&label_of(sp, board.as_deref()), r.layers.len(), newest, board_ms);
+    let older = if newest > 0 && board_ms > newest + 60_000 { board_ms - newest } else { 0 };
     if !r.notes.is_empty() { warn = true; note.push_str(&format!(" · {}{}", r.notes[0], if r.notes.len() > 1 { format!(" (and {} more)", r.notes.len() - 1) } else { String::new() })); }
     let (items, kind) = match cmp_board {
         None => (r.items, super::plotgen::GERBER),
@@ -57,11 +60,11 @@ pub fn plot(path: &str) -> super::plotgen::Read {
             let (marks, layers) = compare::compare(&r.items, &bi);
             eprintln!("gerber: {} compared with its board in {} ms ({} marks)", set, t0.elapsed().as_millis(), marks.len());
             // the bar: the total (each layer's count is in the layer list: names.rs COUNTS); each difference to the Checks panel (DIFFS)
-            let total: usize = layers.iter().map(|l| l.removed + l.added).sum();
+            let total: usize = layers.iter().map(|l| l.places.len()).sum();
             let differ = layers.iter().filter(|l| l.removed + l.added > 0).count();
             if total == 0 { note.push_str(&format!(" · vs board: the same on {} layers", layers.len())) } else { warn = true; note.push_str(&format!(" · vs board: {total} difference{} on {differ} layer{}", if total == 1 { "" } else { "s" }, if differ == 1 { "" } else { "s" })) }
             set_counts(&set, layers.iter().map(|l| (l.name.clone(), l.removed, l.added)).collect());
-            { let mut d = DIFFS.lock().unwrap(); d.retain(|x| x.0 != set); d.push((set.clone(), b.clone(), layers.iter().flat_map(|l| l.places.iter().map(|(bx, on_board)| (l.name.clone(), *bx, *on_board))).collect())); }
+            { let mut d = DIFFS.lock().unwrap(); d.retain(|x| x.0 != set); d.push((set.clone(), b.clone(), layers.iter().flat_map(|l| l.places.iter().map(|p| (l.name.clone(), p.clone()))).collect(), older)); }
             let mut items = r.items; items.extend(marks);
             (items, super::plotgen::GERBER | super::plotgen::DIFF)
         }
@@ -306,8 +309,8 @@ mod tests {
         let t = std::time::Instant::now();
         let (marks, layers) = compare::compare(&r.items, &bi);
         eprintln!("compared in {} ms", t.elapsed().as_millis());
-        for l in &layers { eprintln!("  {}: on the board only {}, in the Gerbers only {}", l.name, l.removed, l.added) }
-        for m in marks.iter().take(60) { eprintln!("    {}", m.info) }
+        eprintln!("{} marks", marks.len());
+        for l in &layers { eprintln!("  {}: {} differences", l.name, l.places.len()); for p in l.places.iter().take(12) { eprintln!("    {}: {} ({:.2} x {:.2} mm at {})", p.side(), p.what, p.b[2] - p.b[0], p.b[3] - p.b[1], compare::at_text(p.b)) } }
         if let Ok(at) = std::env::var("BACKPLANE_TEST_AT") {
             let (x, y) = at.split_once(',').map(|(a, b)| (a.parse::<f32>().unwrap(), b.parse::<f32>().unwrap())).unwrap();
             for i in bi.iter().filter(|i| { let c = centre(&i.prim); (c.0 - x).abs() < 1.5 && (c.1 - y).abs() < 1.5 }) { eprintln!("  board item layer {} {}: {:?}", i.layer, i.info, i.prim) }
@@ -315,7 +318,7 @@ mod tests {
             for i in r.items.iter().filter(|i| { let b = bx(&i.prim); b[0] <= x && x <= b[2] && b[1] <= y && y <= b[3] && (5..=12).contains(&i.layer) }) { let b = bx(&i.prim); eprintln!("  gerber item layer {} {} box {:?} pts {}", i.layer, i.info, b, match &i.prim { Prim::Poly { ps, .. } => ps.len(), _ => 0 }) }
             for i in bi.iter().filter(|i| { let b = bx(&i.prim); b[0] <= x && x <= b[2] && b[1] <= y && y <= b[3] && i.info.starts_with("zone") }) { eprintln!("  board zone layer {} {} box {:?} pts {}", i.layer, i.info, bx(&i.prim), match &i.prim { Prim::Poly { ps, .. } => ps.len(), _ => 0 }) }
         }
-        if std::env::var("BACKPLANE_TEST_SAME").is_ok() { assert!(layers.iter().all(|l| l.removed + l.added == 0), "a fresh export differs from its board") }
+        if std::env::var("BACKPLANE_TEST_SAME").is_ok() { assert!(layers.iter().all(|l| l.places.is_empty()), "a fresh export differs from its board") }
     }
     #[test] fn a_set_reads_into_board_items() {
         let d = crate::plat::tmp::dir("gerber-set");

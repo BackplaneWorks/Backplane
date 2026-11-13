@@ -122,15 +122,26 @@ fn paint_probe(window: &mut Window, chunks: &[std::sync::Arc<super::plot::Chunk>
     let mut by: std::collections::BTreeMap<usize, std::collections::HashSet<u32>> = Default::default();
     for (c, i) in lit { by.entry(*c).or_default().insert(*i as u32); }
     let mut pb = PathBuilder::stroke(px(2.0)); let mut any = false;
+    let mut boxes: Vec<[f32; 4]> = vec![];
+    // a comparison's mark (tints: many cells of one difference) is one box round all of it; anything else a box a piece
+    let mut marks: std::collections::BTreeMap<u32, [f32; 4]> = Default::default();
     for (ci, want) in by {
         let Some(c) = chunks.get(ci) else { continue };
         for p in c.pieces.iter().filter(|p| want.contains(&p.info)) {
-            let a = v.to_px(p.bbox[0], p.bbox[1], w, h); let b = v.to_px(p.bbox[2], p.bbox[3], w, h);
-            if b.0 < -20. || a.0 > w + 20. || b.1 < -20. || a.1 > h + 20. { continue }
-            let (x0, y0, x1, y1) = (a.0.min(b.0) - 2., a.1.min(b.1) - 2., a.0.max(b.0) + 2., a.1.max(b.1) + 2.);
-            for (k, (x, y)) in [(x0, y0), (x1, y0), (x1, y1), (x0, y1), (x0, y0)].into_iter().enumerate() { let q = point(o.x + px(x), o.y + px(y)); if k == 0 { pb.move_to(q) } else { pb.line_to(q) } }
-            any = true;
+            if c.own { let m = marks.entry(p.info).or_insert([f32::MAX, f32::MAX, f32::MIN, f32::MIN]); *m = [m[0].min(p.bbox[0]), m[1].min(p.bbox[1]), m[2].max(p.bbox[2]), m[3].max(p.bbox[3])]; } else { boxes.push(p.bbox) }
         }
+    }
+    let n = boxes.len(); boxes.extend(marks.into_values());
+    for (i, bb) in boxes.into_iter().enumerate() {
+        let a = v.to_px(bb[0], bb[1], w, h); let b = v.to_px(bb[2], bb[3], w, h);
+        if b.0.max(a.0) < -20. || a.0.min(b.0) > w + 20. || b.1.max(a.1) < -20. || a.1.min(b.1) > h + 20. { continue }
+        // a mark hugged (3 px out), never smaller than can be seen
+        let (pad, least) = if i < n { (2., 0.) } else { (3., 6.) };
+        let (cx, cy) = ((a.0 + b.0) / 2., (a.1 + b.1) / 2.);
+        let (hw, hh) = (((a.0 - b.0).abs() / 2. + pad).max(least), ((a.1 - b.1).abs() / 2. + pad).max(least));
+        let (x0, y0, x1, y1) = (cx - hw, cy - hh, cx + hw, cy + hh);
+        for (k, (x, y)) in [(x0, y0), (x1, y0), (x1, y1), (x0, y1), (x0, y0)].into_iter().enumerate() { let q = point(o.x + px(x), o.y + px(y)); if k == 0 { pb.move_to(q) } else { pb.line_to(q) } }
+        any = true;
     }
     if any { if let Ok(path) = pb.build() { window.paint_path(path, col); } }
 }
@@ -362,7 +373,8 @@ pub fn lit_box(chunks: &[std::sync::Arc<super::plot::Chunk>], lit: &[(usize, usi
     let mut b = [f32::MAX, f32::MAX, f32::MIN, f32::MIN];
     for (ci, i) in lit { let Some(c) = chunks.get(*ci) else { continue }; for p in c.pieces.iter().filter(|p| p.info as usize == *i) { b = [b[0].min(p.bbox[0]), b[1].min(p.bbox[1]), b[2].max(p.bbox[2]), b[3].max(p.bbox[3])]; } }
     if b[0] > b[2] { return None }
-    let pad = (b[2] - b[0]).max(b[3] - b[1]) * 0.6 + 2000.;
+    // the piece and its neighbourhood: at least 3 mm round it (a difference of a tenth of a mm is seen among the copper it is in)
+    let pad = (b[2] - b[0]).max(b[3] - b[1]) * 0.6 + 3000.;
     Some([b[0] - pad, b[1] - pad, b[2] + pad, b[3] + pad])
 }
 /// "Bring it into view" (0.14's probe chip): canvas `slot`'s camera on the probed part (its pieces asked of the hub by its ref; the answer comes as
@@ -429,7 +441,7 @@ mod tests {
     #[test] fn the_lit_box_is_the_lit_pieces_padded() {
         let c = super::super::plot::Chunk { pieces: vec![super::super::plot::Piece { info: 7, bbox: [0., 0., 1000., 500.], at: 0, n: 0, kind: 0 }, super::super::plot::Piece { info: 8, bbox: [9e5, 9e5, 9.1e5, 9.1e5], at: 0, n: 0, kind: 0 }], ..Default::default() };
         let b = lit_box(&[std::sync::Arc::new(c)], &[(0, 7)]).unwrap();
-        assert_eq!(b, [-2600., -2600., 3600., 3100.]);
+        assert_eq!(b, [-3600., -3600., 4600., 4100.], "3 mm round it at least, for its neighbourhood");
         assert!(lit_box(&[], &[(0, 7)]).is_none());
     }
     #[test] fn an_untouched_camera_is_fitted_again_when_the_canvas_size_changes() {

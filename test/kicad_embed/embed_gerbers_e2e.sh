@@ -4,7 +4,8 @@
 #       hub watches the set, the plot paints (chunks), the rail lights Gerbers
 #   G2  Board, then Gerbers again: painted within 300 ms of the press (the set read once)
 #   G3  a Gerber file opened from the Files tab is drawn itself
-# GERBERS_BOARD=<a copy of a project folder with mfg/> uses that project instead (measurement and screenshots on a real board).
+# GERBERS_BOARD=<a copy of a project folder with mfg/> uses that project instead (measurement and screenshots on a real board);
+# GERBERS_THEME=light|dark draws the client in that theme.
 # Copies only (seed_project.py), private Xvfb + i3. EMBED_MODE=stock|fork (no KiCad editor is opened; kicad-cli exports the fixture).
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -43,7 +44,7 @@ s = [{"select": 0}, {"wait": 2500}, {"click": "rail:Gerbers"}, {"wait": 8000}, {
 json.dump(s, open(sys.argv[1], "w"))
 PY
 HOME="$OUT/fh" BACKPLANE_GPUI_ASSETS="$ASSETS_DIR" BACKPLANE_GPUI_RECTS=1 BACKPLANE_GPUI_HOLD=1 \
-"$CLIENT_BIN" --url "http://127.0.0.1:$HPORT" --token-file "$OUT/home/token" --script "$OUT/script.json" --exit-after 180 >"$OUT/client.log" 2>&1 &
+"$CLIENT_BIN" ${GERBERS_THEME:+--theme "$GERBERS_THEME"} --url "http://127.0.0.1:$HPORT" --token-file "$OUT/home/token" --script "$OUT/script.json" --exit-after 180 >"$OUT/client.log" 2>&1 &
 CP=$!; track_pid "$CP"
 # the first event of a name after line $2 (the last when $3 is "last")
 ev() { python3 - "$OUT/client.log" "$1" "${2:-0}" "${3:-first}" <<'PY'
@@ -88,21 +89,27 @@ else
   check "The differences are findings in the Checks panel ($NG)" "$( [ "$NG" -gt 0 ] 2>/dev/null && echo 1 || echo 0)"
   wait_for_log "$OUT/client.log" '"name":"checks_open","event":"mark"' 200 || true
   read -r GX GY < <(python3 "$DRIVER_PY" list-windows --pid "$CP" | python3 -c 'import json,sys; w=sorted([x for x in json.load(sys.stdin) if x.get("shown")], key=lambda x: -x.get("w",0)*x.get("h",0)); print(w[0]["root_x"], w[0]["root_y"]) if w else print(0, 0)')
-  XY=$(python3 - "$OUT/client.log" "$GX" "$GY" <<'PY'
+  # the rows as drawn: the first is the stale export's one must-change (rule export), the next a named difference
+  rows() { python3 - "$OUT/client.log" "$GX" "$GY" "$1" <<'PY'
 import json, sys
-log, gx, gy = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]); f = None
+log, gx, gy, k = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), int(sys.argv[4]); rows = []
 for line in open(log, errors="replace"):
     if "GPUI_METRIC " not in line or '"controls"' not in line: continue
     try: v = json.loads(line.split("GPUI_METRIC ", 1)[1])
     except Exception: continue
-    for c in v.get("controls", []):
-        if isinstance(c, dict) and c.get("id", "").startswith("mgmt:checks:row:gerbers:") and c.get("rect"): f = c["rect"]; break
-if f: print(int(gx + f["x"] + min(f["w"] / 2, 60)), int(gy + f["y"] + f["h"] / 2))
+    got = [c["rect"] for c in v.get("controls", []) if isinstance(c, dict) and c.get("id", "").startswith("mgmt:checks:row:gerbers:") and c.get("rect")]
+    if got: rows = got
+if len(rows) > k: f = rows[k]; print(int(gx + f["x"] + min(f["w"] / 2, 60)), int(gy + f["y"] + f["h"] / 2))
 PY
-)
+  }
+  XY=$(rows 0); [ -n "$XY" ] && python3 "$XINPUT_PY" click $XY; sleep 3
+  shot "g5a_stale"
+  XY=$(rows 1)
   L0=$(wc -l <"$OUT/client.log"); [ -n "$XY" ] && python3 "$XINPUT_PY" click $XY; sleep 4
   shot "g5_difference"
   check "A difference row pressed: lit and zoomed on in the comparison" "$(tail -n +"$L0" "$OUT/client.log" | grep -q 'probe_sync.*difference;at=' && tail -n +"$L0" "$OUT/client.log" | grep -q '"xprobe_zoom".*difference;at=' && echo 1 || echo 0)" "row at ${XY:-none}"
+  NE=$(hub_rpc "[{\"method\":\"kicad.checks.list\",\"params\":{\"project\":\"$PRO\",\"source\":\"gerbers\",\"severity\":\"error\",\"rows\":true}}]" | grep -v '^INFO ' | head -1 | python3 -c 'import json,sys; r=(json.load(sys.stdin).get("result") or {}); print(r.get("total", -1))' 2>/dev/null || echo -1)
+  check "A stale export is one must-change ($NE error of $NG findings)" "$( [ "$NE" = 1 ] && echo 1 || echo 0)"
 fi
 wait_for_log "$OUT/client.log" '"name":"files","event":"mark"' 200 || true
 shot "g3_files"

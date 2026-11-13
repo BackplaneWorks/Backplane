@@ -4272,6 +4272,7 @@ gpui.mgmt.checks.errors = エラー
 gpui.mgmt.checks.warnings = 警告
 gpui.mgmt.checks.excluded = 除外
 gpui.mgmt.checks.fix = エージェントに直してもらう
+gpui.mgmt.checks.reexport = エージェントに再出力してもらう
 gpui.mgmt.checks.more = ほか{n}件
 gpui.mgmt.checks.fewer = 減らす
 gpui.mgmt.checks.none = 指摘はありません。

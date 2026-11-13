@@ -112,6 +112,8 @@ impl Chunk {
                 let (mut x0, mut y0, mut x1, mut y1) = (f32::MAX, f32::MAX, f32::MIN, f32::MIN);
                 for q in pts.chunks_exact(2) { x0 = x0.min(q[0]); x1 = x1.max(q[0]); y0 = y0.min(q[1]); y1 = y1.max(q[1]); }
                 let kind = if mode == 2 || pts.len() == 2 { 2 } else if mode == 0 { 0 } else { 1 };
+                // a fill's box is its outline's (a tint's `w` is its colour, not a width: padded by it, a comparison's mark boxed the whole world)
+                let r = if mode == 0 { 0. } else { r };
                 c.pieces.push(Piece { info, bbox: [x0 - r, y0 - r, x1 + r, y1 + r], at: c.pts.len() as u32, n: (pts.len() / 2) as u32, kind });
                 c.pts.extend_from_slice(&pts);
             }
@@ -348,6 +350,14 @@ mod tests {
         assert_eq!(fr.chunks[0].caps, vec![0., 0., 1000., 0., 100., 1000., 0., 1000., 500., 100.]);   // two capsules, r = w/2
         assert_eq!((fr.chunks[0].layer, fr.chunks[0].color), (3, 0xFF0000));
         assert_eq!(fr.chunks[1].tris.len(), 12); assert_eq!(fr.chunks[1].polys.len(), 1);          // a square: two triangles
+    }
+    /// A tint (a fill whose `w` is its colour code) is boxed by its outline: padded by the code, a Gerbers vs board mark's box was the
+    /// world and "zoom on the difference" showed the whole board as a speck.
+    #[test] fn a_tints_piece_is_boxed_by_its_outline() {
+        let f = frame("0|/p|", &[chunk(26, 0xe5484d, 0, 0x7fe5484d, &[(10, 10), (20, 10), (20, 30), (10, 30)])], &[None], [0, 0, 100, 100]);
+        let mut s = Store::default(); s.receive(&f).unwrap();
+        let c = &s.frame.as_ref().unwrap().chunks[0];
+        assert!(c.own); assert_eq!(c.pieces[0].bbox, [10., 10., 20., 30.]);
     }
     #[test] fn a_second_frame_may_keep_held_chunks_by_index() {
         let a = frame("0|/p|", &[chunk(1, 1, 1, 10, &[(0, 0), (5, 5)]), chunk(2, 2, 1, 10, &[(0, 0), (9, 9)])], &[None, None], [0, 0, 10, 10]);

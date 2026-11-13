@@ -4249,6 +4249,7 @@ gpui.mgmt.checks.errors = Errors
 gpui.mgmt.checks.warnings = Warnings
 gpui.mgmt.checks.excluded = Excluded
 gpui.mgmt.checks.fix = Fix with agent
+gpui.mgmt.checks.reexport = Re-export with agent
 gpui.mgmt.checks.more = {n, plural, one {# more} other {# more}}
 gpui.mgmt.checks.fewer = Fewer
 gpui.mgmt.checks.none = No findings.

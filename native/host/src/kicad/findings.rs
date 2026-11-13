@@ -222,6 +222,8 @@ pub fn filter<'a>(fs: &'a [Finding], severity: &str, q: &str) -> Vec<&'a Finding
 
 /// The names a row shows for a finding's items: pins, else parts, else nets, else KiCad's words for the first item ("SW3.1 · GND").
 pub fn names(f: &Finding) -> String {
+    // a file's finding (a Gerber set's difference) says itself in its detail: "Board only · 0.40 × 1.20 mm"
+    if f.anchors.first().map_or(false, |a| a.doc == "file") && !f.detail.is_empty() { return f.detail.clone() }
     let mut v: Vec<String> = vec![];
     for a in &f.anchors {
         // a place in a file (a Gerber set's difference): its layer and where
@@ -237,6 +239,8 @@ pub fn row_json(f: &Finding) -> Value {
     let mut v = json!({"id": f.id, "source": f.source, "severity": f.severity, "rule": f.rule, "title": f.title, "names": names(f), "doc": doc});
     // a place in a file: the file (a Gerber set), its layer and where, for the viewer to open and zoom on
     if let Some(a) = f.anchors.first().filter(|a| a.doc == "file") { v["file"] = json!(a.text); v["layer"] = json!(a.layer); if a.at { v["at"] = json!(format!("{:.2},{:.2}", a.x, a.y)) } }
+    // the fix is not this one finding's but the whole output's: re-export it (the fix button says so)
+    if f.fix.starts_with("Re-export") { v["fix_kind"] = json!("reexport") }
     v
 }
 /// The panel's groups: one per check and rule, the worst severity first, then the most findings; each with its count and its first
@@ -276,6 +280,15 @@ pub fn select_params(f: &Finding) -> Value {
 
 /// The message "Fix with agent" sends: everything the agent needs to find and fix this one finding, by name and place.
 pub fn fix_message(f: &Finding, pro: &str) -> String {
+    // a file's finding (fab output against its board): the fix is the task (re-export), the finding where and why
+    if let Some(a) = f.anchors.first().filter(|a| a.doc == "file") {
+        let mut m = format!("{} for {pro}.\n\nWhy: {}", f.fix, f.title);
+        if !f.detail.is_empty() { m.push_str(&format!(" ({})", f.detail)) }
+        m.push_str(&format!("\nOutput: {}\n", a.text));
+        if a.at { m.push_str(&format!("Where: {} at ({:.2}, {:.2}) mm\n", a.layer, a.x, a.y)) }
+        m.push_str("\nThen open the Gerbers against the board (Gerbers, vs board) and confirm no differences remain.");
+        return m
+    }
     let what = match f.source.as_str() { "drc" => "DRC", "erc" => "ERC", s => s };
     let file = std::path::Path::new(pro).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
     let mut m = format!("Fix this {what} {} in {file} ({}): {}\n\nRule: {}\nFinding: {}\n", f.severity, pro, f.title, f.rule, f.id);

@@ -35,8 +35,9 @@ pub const DIFF: u32 = 8;
 pub fn look(kind: u32, layer: u32) -> (u32, u32) {
     if kind < DIFF { return look_plain(kind, layer) }
     if (26..=28).contains(&layer) { return (match layer { 26 => 15026253, 27 => 16098596, _ => 3187820 }, 235) }
-    // a Gerber set against its board: its layers grey beneath (its differences are tints in their own colours: kicad/gerber/compare.rs)
-    if kind & 7 == GERBER { let (_, al) = look_plain(GERBER, layer); return (0x8a919c, if al == 0 { 0 } else { (al / 3).max(40) }) }
+    // a Gerber set against its board: its layers grey beneath (its differences are tints in their own colours: kicad/gerber/compare.rs),
+    // light enough to read as the copper round a difference on a dark ground and dark enough on a light one
+    if kind & 7 == GERBER { let (_, al) = look_plain(GERBER, layer); return (0x8a919c, if al == 0 { 0 } else { (al * 2 / 3).max(90) }) }
     let (c, a) = look_plain(kind & 7, layer);
     (c, a / 3)
 }
