@@ -1917,6 +1917,8 @@ gpui.open.a.thread.first.that = Open a thread first: that file is in no project 
 gpui.gerbers.open.on.their.project = Gerbers open on their project's Board; this one is in no project.
 gpui.that.kicad.project.has.no = That KiCad project has no board or schematic beside it.
 gpui.that.file.is.not.on = That file is not on this hub.
+gpui.quit.backplane = Quit Backplane
+gpui.quit.backplane.on.a.mac = Quit Backplane, on a Mac: the hub keeps running
 
 # ---- gpui-c: viewers, plots, terminal, drawing pad ----
 gpui.c.commit = Commit

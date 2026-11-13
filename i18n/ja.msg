@@ -1940,6 +1940,8 @@ gpui.open.a.thread.first.that = 先にスレッドを開いてください。そ
 gpui.gerbers.open.on.their.project = ガーバーはプロジェクトのボードで開きます。このファイルはどのプロジェクトにもありません。
 gpui.that.kicad.project.has.no = そのKiCadプロジェクトの隣にボードも回路図もありません。
 gpui.that.file.is.not.on = そのファイルはこのハブにありません。
+gpui.quit.backplane = Backplane を終了
+gpui.quit.backplane.on.a.mac = Backplane を終了（Mac）：ハブは動き続けます
 
 # ---- gpui-c: viewers, plots, terminal, drawing pad ----
 gpui.c.commit = コミット
