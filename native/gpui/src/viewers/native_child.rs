@@ -529,7 +529,11 @@ mod imp {
         // Ctrl+` (the keyboard back), and the management panels' Alt+Shift+B/C/L/F (host kicad/comment.rs RESERVED): caught here even when
         // KiCad's own hand-off (_BACKPLANE_KEY) does not see the key
         let alt_shift = u16::from(ModMask::M1) | u16::from(ModMask::SHIFT);
-        for (keysym, base) in [(0x60u32, u16::from(ModMask::CONTROL)), (0x62, alt_shift), (0x63, alt_shift), (0x6c, alt_shift), (0x66, alt_shift)] {
+        // and Backplane's own chords (Ctrl+K, Ctrl+J, Ctrl+Tab, Ctrl+Shift+Tab, Ctrl+;): a reserved key reaches Backplane even when KiCad's
+        // hand-off misses it (a runtime without the fork's popup keys, a frame KiCad has not focused)
+        let (ctrl, ctrl_shift) = (u16::from(ModMask::CONTROL), u16::from(ModMask::CONTROL) | u16::from(ModMask::SHIFT));
+        for (keysym, base) in [(0x60u32, ctrl), (0x62, alt_shift), (0x63, alt_shift), (0x6c, alt_shift), (0x66, alt_shift),
+                               (0x6b, ctrl), (0x6a, ctrl), (0xff09, ctrl), (0xff09, ctrl_shift), (0x3b, ctrl)] {
             let Some(kc) = keycode(c, keysym) else { continue };
             for extra in [0u16, u16::from(ModMask::LOCK), u16::from(ModMask::M2), u16::from(ModMask::LOCK) | u16::from(ModMask::M2)] {
                 let mods = ModMask::from(base | extra);
