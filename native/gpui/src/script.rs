@@ -75,26 +75,11 @@ pub fn load(path: &Path) -> VecDeque<Step> {
 impl Backplane {
     pub fn m(&self, event: &str, fields: Value) { metric(self.started, event, fields); }
 
-    /// Called from render: arms first_frame, usable, and the pending step's result.
-    pub fn frame_marks(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// After each painted frame (check mode): the layout, the controls, the shown thread, the probes and the links, each on change.
+    pub fn drawn_marks(&mut self) {
         let started = self.started;
-        let this = cx.entity().downgrade();
-        if !self.first_frame {
-            self.first_frame = true;
-            window.on_next_frame(move |_, _| metric(started, "first_frame", json!({})));
-            match window.gpu_specs() {
-                Some(g) => metric(started, "gpu", json!({"device": g.device_name, "driver": g.driver_name, "driver_info": g.driver_info, "software": g.is_software_emulated})),
-                None => metric(started, "gpu", json!({"device": null})),
-            }
-        }
-        // G1: the first frame presented after the injected event (its local effect: pressed row, typed text, selection)
-        if let Some((label, t0)) = self.ack_pending.take() {
-            window.on_next_frame(move |_, _| metric(started, "ack", json!({"step": label, "ack_ms": (t0.elapsed().as_secs_f64() * 1e6).round() / 1e3})));
-        }
-        // G2: a frame timestamp for every frame drawn while a record is open (frames are kept coming while it is)
-        if let Some((_, frames)) = &mut self.recording { frames.push((started.elapsed().as_secs_f64() * 1e6).round() / 1e3); window.request_animation_frame(); }
         if crate::art::rects_on() {
-            // G3: the stable regions' rectangles (probes painted last frame), on change
+            // G3: the stable regions' rectangles (as this frame painted them), on change
             let snap = crate::art::layout_snapshot();
             if snap != self.last_layout { self.last_layout = snap.clone(); metric(started, "layout", json!({"rects": serde_json::from_str::<Value>(&snap).unwrap_or(Value::Null)})); }
             // G4: the controls on screen, on change
@@ -114,11 +99,35 @@ impl Backplane {
             if ptext != self.probes_last { self.probes_last = ptext; metric(started, "probes", json!({"rects": probes.iter().map(|(k, r)| json!({"id": k, "x": r[0], "y": r[1], "w": r[2], "h": r[3]})).collect::<Vec<_>>()})); }
         }
         if crate::art::rects_on() {
-            // links in messages as painted last frame (the check harness aims at these; a code block's Copy is not one)
+            // links in messages as this frame painted them (the check harness aims at these; a code block's Copy is not one)
             let links: Vec<Value> = self.link_and_copy_rects().into_iter().filter(|(id, _, _)| id.starts_with("link:")).map(|(id, href, b)| json!({"id": id, "href": href, "rect": {"x": f32::from(b.origin.x), "y": f32::from(b.origin.y), "w": f32::from(b.size.width), "h": f32::from(b.size.height)}})).collect();
             let text = serde_json::to_string(&links).unwrap_or_default();
             if !self.links_sent || text != self.links_last { self.links_sent = true; self.links_last = text; metric(started, "links", json!({"links": links, "supported": true})); }
         }
+    }
+
+    /// Called from render: arms first_frame, usable, and the pending step's result.
+    pub fn frame_marks(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let started = self.started;
+        let this = cx.entity().downgrade();
+        if !self.first_frame {
+            self.first_frame = true;
+            // G3, G4, G4b, G4c and the links: written after each frame is painted, when the controls this render registered and their
+            // rectangles from that paint are both known (from render they were a frame behind, and an idle window then wrote nothing more:
+            // a panel opened by a click showed in the log only at the next unrelated redraw)
+            if crate::art::rects_on() { let me = this.clone(); window.on_frame_drawn(move |_, cx| me.update(cx, |v, _| v.drawn_marks()).is_ok()); }
+            window.on_next_frame(move |_, _| metric(started, "first_frame", json!({})));
+            match window.gpu_specs() {
+                Some(g) => metric(started, "gpu", json!({"device": g.device_name, "driver": g.driver_name, "driver_info": g.driver_info, "software": g.is_software_emulated})),
+                None => metric(started, "gpu", json!({"device": null})),
+            }
+        }
+        // G1: the first frame presented after the injected event (its local effect: pressed row, typed text, selection)
+        if let Some((label, t0)) = self.ack_pending.take() {
+            window.on_next_frame(move |_, _| metric(started, "ack", json!({"step": label, "ack_ms": (t0.elapsed().as_secs_f64() * 1e6).round() / 1e3})));
+        }
+        // G2: a frame timestamp for every frame drawn while a record is open (frames are kept coming while it is)
+        if let Some((_, frames)) = &mut self.recording { frames.push((started.elapsed().as_secs_f64() * 1e6).round() / 1e3); window.request_animation_frame(); }
         let draws = self.data["projects"].is_array(); // (a fresh home has none, and is as usable as one that has)
         if !self.usable && draws {
             self.usable = true;
