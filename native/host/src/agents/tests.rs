@@ -1348,7 +1348,7 @@ async fn lock_now(ag: &Arc<Agents>, name: &str) -> Value { ag.tool_lock_list().a
 #[tokio::test(flavor = "multi_thread")] async fn a_kicad_write_needs_the_documents_lock_and_names_its_holder() {
     // the board in boards/main/ (the main checkout's one copy); the threads name its worktree twin
     let seed = |w: &Path| { for b in ["", ".backplane/worktrees/lane/"] { for f in ["main.kicad_pro", "main.kicad_pcb", "main.kicad_sch"] { let p = w.join(format!("{b}boards/main/{f}")); std::fs::create_dir_all(p.parent().unwrap()).unwrap(); std::fs::write(p, "x").unwrap(); } } String::new() };
-    let (_hub, ag, _h, w) = locks_up("lkc", seed).await;
+    let (hub, ag, _h, w) = locks_up("lkc", seed).await;
     let root = w.to_str().unwrap().to_string();
     let board = format!("{root}/boards/main/main.kicad_pcb");
     let name = crate::files::kicad::canonical::doc_lock(&board);
@@ -1368,9 +1368,16 @@ async fn lock_now(ag: &Arc<Agents>, name: &str) -> Value { ag.tool_lock_list().a
     assert!(ag.doc_gate(T2, &format!("{root}/boards/main/main.kicad_sch")).await.is_ok());
     // T2 queues for the board; T1's turn ends: the board is let go and T2 is granted, with one message
     assert_eq!(ag.tool_lock_acquire(T2, &json!({"name":name})).await.1["position"], 1);
+    // T2's turn was stopped while it waited, so its grant is posted, not delivered: delivered, it would start (or steer) a turn of
+    // T2's stand-in that ends at once, and that turn's end lets the documents go again (as it should), racing the reads below
+    hub.commit(&json!({"$":"TurnChanged","thread":T2,"state":"interrupted","at":now_s()})).await.unwrap();
+    let from = len(&hub).await;
     let freed = ag.doc_locks_free(T1).await; assert_eq!(freed, vec![name.clone()]);
     let l = lock_now(&ag, &name).await; assert_eq!(l["holder"]["id"], T2, "{l}"); assert_eq!(l["ready"], true);
     assert!(ag.kicad_gate(T2, &twin, write).await.is_ok());
+    let ev = log_from(&hub, from).await;
+    assert_eq!(ev.iter().filter(|e| e["thread"] == T2 && hub_says(e, "is yours")).count(), 1, "one message");
+    assert!(!ev.iter().any(|e| e["thread"] == T2 && is(e, "TurnChanged")), "and no turn of T2's started");
     ag.shutdown();
 }
 #[tokio::test(flavor = "multi_thread")] async fn a_document_lock_held_by_a_crashed_or_idle_thread_is_cleared() {
