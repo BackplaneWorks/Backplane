@@ -1153,6 +1153,9 @@ if "undo" in JOURNEYS and SOCK:
         RESULTS["undo_focus_before_ctrl_y"] = {"ms": None, "x": fo[:3], "kicad": kf}
         shot("undo_before_ctrl_y")
         rt("click", EXs, EYs); time.sleep(0.4)  # the toolbar's Redo button shows the stack (no menu: its loop could change the next key)
+        # the display's keyboard: layout (setxkbmap -query) and what y / z / Control_L map to (the keycodes XTest sends)
+        print(f"INFO undo keyboard: {sh('setxkbmap', '-query').strip()!r}; " + "; ".join(l.strip() for l in sh('xmodmap', '-pke').splitlines()
+              if re.search(r"= (y Y|z Z|Control_L)\b", l)), flush=True)
         ry = rt("key", "y", "ctrl"); time.sleep(1.2); v3 = val(); steps_u.append(["ctrl_y", v3]); shot("undo_after_ctrl_y")  # Undo/Redo after
         print(f"INFO undo keys: ctrl_z at {rz.get('t0')}, ctrl_y at {ry.get('t0')} (epoch ms)", flush=True)
         v4 = bom("BP-AGAIN", "panel_edit_again")  # a third value: it applies only if KiCad takes the panel's second edit of the item
