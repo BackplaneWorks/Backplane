@@ -195,8 +195,11 @@ pub fn want(keys: &[String]) {
     let fresh: Vec<String> = { let b = book().lock().unwrap(); keys.iter().filter(|k| b.get(k).is_none()).cloned().collect() };
     let seeds: Vec<(String, Quote, Duration)> = match &home { Some(h) => fresh.iter().filter_map(|k| from_history(h, k, super::ipc::now_s()).map(|(q, a)| (k.clone(), q, a))).collect(), None => vec![] };
     let mut b = book().lock().unwrap(); let now = Instant::now();
+    let seeded = !seeds.is_empty();
     for (k, q, a) in seeds { b.seed(&k, q, a, now) }
     b.want(keys, now); drop(b); wake().notify_one();
+    // answers taken from the history are answers like any other: the BOM shows them (it was drawn as "checking" a moment ago)
+    if seeded { GEN.fetch_add(1, Ordering::Relaxed); }
 }
 pub fn quote(k: &str) -> Option<Quote> { book().lock().unwrap().get(k).cloned() }
 
