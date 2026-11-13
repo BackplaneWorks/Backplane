@@ -69,7 +69,7 @@ check "The Checks panel's data is the hub's, both checks fresh (chip: $(python3 
 sleep 1.5; shot "p1_panel"
 read -r DRC_ID DRC_REF ERC_ID < <(python3 - "$P" <<'PY'
 import json, re, sys
-d = json.loads(sys.argv[1]); rows = [r for g in d["groups"] for r in g["rows"]]
+d = json.loads(sys.argv[1]); rows = [r for g in d["groups"] for r in g["rows"][:3]]  # a shut group shows 3 (SHUT_ROWS)
 drc = next(r for r in rows if r["source"] == "drc" and re.search(r"\b[A-Z]{1,4}[0-9]+\b", r["names"]))
 erc = next(r for r in rows if r["source"] == "erc" and r["rule"] == "label_dangling")
 print(drc["id"], re.search(r"\b([A-Z]{1,4}[0-9]+)\b", drc["names"]).group(1), erc["id"])
