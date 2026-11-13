@@ -205,6 +205,9 @@ impl KicadPane {
         // Linux: a thread waits on the connection's socket, native_child `conn_fd`)
         let (wake_tx, wake_rx) = async_channel::bounded::<()>(1);
         let (drained_tx, drained_rx) = std::sync::mpsc::channel::<()>();
+        #[cfg(not(unix))]
+        let _ = (&wake_tx, &drained_rx);
+        #[cfg(unix)]
         if let Some(fd) = nc::conn_fd().filter(|_| std::env::var_os("BACKPLANE_KICAD_NO_XWAKE").is_none()) {
             std::thread::spawn(move || loop {
                 let mut p = libc::pollfd { fd, events: libc::POLLIN, revents: 0 };
