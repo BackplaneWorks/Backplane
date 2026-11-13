@@ -73,9 +73,11 @@ pub fn message(field: &str, refs: &[String], value: &str) -> String {
     format!("BOM: {what} of {rs} = {}", if value.is_empty() { "(none)" } else { value })
 }
 
-/// The panel's edits go to the GUI as the person (`coedit::client_name(&Who::Person)`, "person:backplane-<pid>"): a co-editing KiCad
-/// (bp.13 on) puts them in the person's own undo; before that the name is an actor of its own and the panel offers its own Undo.
-pub const AS_PERSON: bool = true;
+/// Whether the panel's edits go to the GUI as the person (`coedit::client_name(&Who::Person)`, "person:backplane-<pid>"): a co-editing
+/// KiCad (bp.13 on) puts them in the person's own undo; before that the name is an actor of its own and the panel offers its own Undo.
+/// Off for now: on bp.11 a commit begun as "person:…" is not found at its EndCommit ("does not has a commit in progress"; asked of the
+/// co-edit lane), so the edit would land outside any commit.
+pub const AS_PERSON: bool = false;
 /// Who takes a GUI edit back: "kicad" when it went as the person to a runtime that puts it in their undo (bp.13 on), else "panel" (the
 /// panel offers its own undo: the old value, `was`, written back).
 pub fn undo_by(version: &str, as_person: bool) -> &'static str {
