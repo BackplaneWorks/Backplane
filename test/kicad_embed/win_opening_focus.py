@@ -157,8 +157,17 @@ def ctrl_k_round(h, cp, frame, rep, timeline, n, rounds, pre=None):
 
 
 
-def plain_key_acts(h, gl, tag):
-    """Plain F2 (KiCad's zoom out) changes the canvas: the keys are KiCad's. F1 zooms back."""
+def zoom_field_box(frame):
+    """KiCad's status-bar zoom readout ("Z 2.20"), bottom left of the frame."""
+    r = E.W.RECT()
+    E.u32.GetWindowRect(frame, E.ctypes.byref(r))
+    return (int(r.left) + 8, int(r.bottom) - 21, 70, 19)
+
+
+def plain_key_acts(h, gl, tag, frame=0):
+    """Plain F2 (KiCad's zoom out) acts: the zoom readout changes (a zoom over sparse board redraws only a few
+    thousand canvas pixels, run F4d: Z 2.20 -> 1.50 with 2,688 px). F1 zooms back. Returns the canvas px (logged)
+    and whether the readout changed (the pass)."""
     x, y, w, hh = int(gl["root_x"]), int(gl["root_y"]), int(gl["w"]), int(gl["h"])
     a, b = h.p(f"{tag}_0.png"), h.p(f"{tag}_1.png")
     E.grab_screen(a)
@@ -166,47 +175,217 @@ def plain_key_acts(h, gl, tag):
     time.sleep(1.0)
     E.grab_screen(b)
     px = E.img_diff_box(a, b, x, y, w, hh)["changed_pixels"]
-    if px > 2000:
-        E.key_tap("F1")
-        time.sleep(0.6)
+    zoomed = None
+    if frame:
+        zoomed = E.img_diff_box(a, b, *zoom_field_box(frame))["changed_pixels"] > 15
+    # always zoom back (F1 is a no-op where F2 did nothing): the view never drifts
+    E.key_tap("F1")
+    time.sleep(0.6)
+    return px if zoomed is None else (px, zoomed)
+
+
+def composer_box(h, top):
+    """Backplane's message box, above the Attach button row (client px -> screen box)."""
+    a = h.controls().get("ui:Attach") or h.probes().get("ui:Attach")
+    r = (a.get("rect") if a and "rect" in a else a) or {}
+    if not r:
+        return None
+    ox, oy = E.client_origin(top)
+    return (int(ox + r["x"] - 320), int(oy + r["y"] - 85), 440, 60)
+
+
+def typed_in_composer(h, box, text, tag):
+    """Typing reaches the composer: its pixels change. The text is then removed."""
+    a, b = h.p(f"{tag}_0.png"), h.p(f"{tag}_1.png")
+    E.grab_screen(a)
+    for ch in text:
+        E.key_tap(ch)
+    time.sleep(0.4)
+    E.grab_screen(b)
+    px = E.img_diff_box(a, b, *box)["changed_pixels"]
+    for _ in text:
+        E.key_tap("BackSpace")
     return px
 
 
-def mouse_return_check(h, cp, frame, children, timeline, rounds=3):
-    """Backplane foreground and focused by a real click in its composer (no hotkey), then a
-    real click on (a) the editor tab, (b) the canvas: does KiCad get the keys (F2 acts)?"""
+def key_latency_ms(h, box, ch, tag, limit_s=3.0):
+    """One key typed into the composer: ms until its pixels change (None if never within limit_s)."""
+    import PIL.ImageGrab as G
+    from PIL import ImageChops
+    x, y, w, hh = box
+    before = G.grab(bbox=(x, y, x + w, y + hh), all_screens=True).convert("RGB")
+    t0 = time.monotonic()
+    E.key_tap(ch)
+    while time.monotonic() - t0 < limit_s:
+        now = G.grab(bbox=(x, y, x + w, y + hh), all_screens=True).convert("RGB")
+        if ImageChops.difference(before, now).getbbox():
+            ms = round((time.monotonic() - t0) * 1000)
+            E.key_tap("BackSpace")
+            return ms
+        time.sleep(0.01)
+    return None
+
+
+def foreground_never_lost(ms=600, step=0.01):
+    """Sample the foreground window every ~10 ms for `ms`: any 0 is the F3 drop."""
+    end = time.monotonic() + ms / 1000
+    zeros, n = 0, 0
+    while time.monotonic() < end:
+        n += 1
+        if not int(E.u32.GetForegroundWindow() or 0):
+            zeros += 1
+        time.sleep(step)
+    return {"samples": n, "no_foreground_samples": zeros}
+
+
+def keys_back_to_backplane(h, cp, frame, top, entry, cbox):
+    """The entry route: Backplane gets foreground and keys, by a composer click or Ctrl+` from KiCad."""
+    if entry == "composer":
+        E.screen_click(cbox[0] + 120, cbox[1] + 30, 1)
+    else:
+        E.key_chord("ctrl", "grave")
+    start = time.monotonic()
+    host = focus_snapshot(frame)
+    while time.monotonic() - start < 2 and not (host["foreground"] == top and host["focus_pid"] == cp.pid):
+        time.sleep(0.02)
+        host = focus_snapshot(frame)
+    return host["foreground"] == top and host["focus_pid"] == cp.pid, host
+
+
+def mouse_return_check(h, cp, frame, children, timeline, rounds=None, kpid=0):
+    """F3+F4: from Backplane holding the keys (by a composer click, or by Ctrl+` from KiCad), a real click on
+    (a) the editor tab, (b) the canvas gives KiCad the keys (plain F2 acts), Backplane never without a foreground
+    window across the click. Then the hover checks (pointer over the pane never moves the keys; a frozen KiCad
+    under the pointer never stalls Backplane's typing)."""
+    rounds = rounds or max(1, int(os.environ.get("BP_RETURN_ROUNDS", "5") or 5))
     gls = [w for w in children if w["visible"] and w["class"] == "wxGLCanvas"]
     gl = max(gls, key=lambda w: w["w"] * w["h"]) if gls else None
     top = E.find_main_window(cp.pid)
-    for n in range(1, rounds + 1):
-        for route in ("tab", "canvas"):
-            attach = h.controls().get("ui:Attach") or h.probes().get("ui:Attach")
-            r = (attach.get("rect") if attach and "rect" in attach else attach) or {}
-            ox, oy = E.client_origin(top)
-            on_show = bool(frame and E.u32.IsWindowVisible(frame))
-            if not (gl and r and on_show):
-                h.check(f"Mouse return {route} {n}/{rounds}: KiCad gets the keys (F2 acts)", False, {"target_missing": {"canvas": bool(gl), "composer": bool(r), "editor_on_show": on_show}})
-                continue
-            # The composer sits above the Attach button row (screens: message box, then its buttons).
-            E.screen_click(int(ox + r["x"] - 150), int(oy + r["y"] - 55), 1)
-            start = time.monotonic()
-            host = focus_snapshot(frame)
-            while time.monotonic() - start < 2 and not (host["foreground"] == top and host["focus_pid"] == cp.pid):
-                time.sleep(0.02)
-                host = focus_snapshot(frame)
-            host_ok = host["foreground"] == top and host["focus_pid"] == cp.pid
-            if route == "tab":
-                clicked = h.click_control(top, "kicad-tab:PCB")
-                around = {"clicked": clicked}
-            else:
-                around = traced_click(gl["root_x"] + 20, gl["root_y"] + gl["h"] - 30)
-            time.sleep(0.6)
-            after = focus_snapshot(frame)
-            px = plain_key_acts(h, gl, f"mouse_{route}{n}")
-            d = {"host_first": host_ok, "host": host, "after": after, "f2_changed_px": px, **around}
-            timeline.append({"stage": f"mouse_return_{route}_{n}", **d})
-            print(f"DIAG mouse_return_{route}_{n} " + json.dumps(d)[:600], flush=True)
-            h.check(f"Mouse return {route} {n}/{rounds}: KiCad gets the keys (F2 acts)", host_ok and px > 2000, d)
+    cbox = composer_box(h, top)
+    # The pane pre-warms the other editors ~2 s after the first is placed; one of those frames took the foreground
+    # during the first return of run F4c. Let it settle first (that is its own finding, not the return under test).
+    time.sleep(float(os.environ.get("BP_RETURN_SETTLE_S", "5")))
+    for entry in ("composer", "hotkey"):
+        for n in range(1, rounds + 1):
+            for route in [r for r in ("tab", "canvas") if r in os.environ.get("BP_RETURN_ROUTES", "tab,canvas").split(",")]:
+                name = f"Return {route} from {entry} {n}/{rounds}: KiCad gets the keys (F2 acts), foreground never lost"
+                on_show = bool(frame and E.u32.IsWindowVisible(frame))
+                if not (gl and cbox and on_show):
+                    h.check(name, False, {"target_missing": {"canvas": bool(gl), "composer": bool(cbox), "editor_on_show": on_show}})
+                    continue
+                if entry == "hotkey":
+                    # Ctrl+` is pressed in KiCad, so KiCad must have the keys first (the previous round's return)
+                    kicad_first = focus_snapshot(frame)
+                    if not kicad_first["inside_frame"]:
+                        # the previous return failed: Edit's own path (the tab while KiCad is in front) puts the keys back
+                        give_kicad_keys(h, cp, frame)
+                        kicad_first = focus_snapshot(frame)
+                    if not kicad_first["inside_frame"]:
+                        # Edit's own path: close the viewer, Edit again (the opening fix gives KiCad the keys)
+                        E.key_chord("ctrl", "grave")
+                        time.sleep(0.3)
+                        E.key_tap("Escape")
+                        time.sleep(0.8)
+                        h.click_control(top, "ui:Edit")
+                        wait_focus_in(frame, 6, "wxGLCanvas")
+                        kicad_first = focus_snapshot(frame)
+                    if not kicad_first["inside_frame"]:
+                        h.check(name, False, {"precondition": "KiCad did not have the keys for Ctrl+`", **kicad_first})
+                        continue
+                host_ok, host = keys_back_to_backplane(h, cp, frame, top, entry, cbox)
+                if route == "tab":
+                    clicked = h.click_control(top, "kicad-tab:PCB")
+                    around = {"clicked": clicked}
+                    fg = foreground_never_lost()
+                else:
+                    around = traced_click(gl["root_x"] + 20, gl["root_y"] + gl["h"] - 30)
+                    shot = h.p(f"return_{entry}_{route}{n}_50ms.png")
+                    E.grab_screen(shot)  # the title bar ~50 ms after the click: inactive = a visible flicker
+                    fg = foreground_never_lost(550)
+                    around["shot_50ms"] = shot
+                after = focus_snapshot(frame)
+                px, zoomed = plain_key_acts(h, gl, f"return_{entry}_{route}{n}", frame)
+                d = {"host_first": host_ok, "host": host, "after": after, "f2_changed_px": px, "zoom_readout_changed": zoomed, **fg, **around}
+                timeline.append({"stage": f"return_{entry}_{route}_{n}", **d})
+                print(f"DIAG return_{entry}_{route}_{n} " + json.dumps(d)[:700], flush=True)
+                # a real F2 zoom redraws the whole canvas (~212,000 px here); a hover highlight is a few thousand
+                h.check(name, host_ok and zoomed and fg["no_foreground_samples"] == 0, d)
+    # Hover never moves the keys: composer focused, the pointer across the pane and back, no click; typing stays in the composer.
+    if gl and cbox:
+        keys_back_to_backplane(h, cp, frame, top, "composer", cbox)
+        for k in range(8):
+            E.screen_move(gl["root_x"] + 40 + k * 50, gl["root_y"] + 60 + k * 40)
+            time.sleep(0.08)
+        E.screen_move(cbox[0] + 200, cbox[1] - 120)
+        time.sleep(0.3)
+        snap = focus_snapshot(frame)
+        px = typed_in_composer(h, cbox, "hv", "hover_typing")
+        h.check("Pointer across the pane and back moves no keys: Win32 focus and typing stay in Backplane's composer",
+                snap["focus_pid"] == cp.pid and not snap["inside_frame"] and px > 20, {"focus": snap, "typed_px": px})
+        # Frozen KiCad under the pointer, the queues attached by hover only: Backplane's own typing must not stall,
+        # and Ctrl+` / a click elsewhere leaves the pane within 1.5 s.
+        if kpid:
+            # The first seconds of a freeze, before IsHungAppWindow says so (~5 s): freeze with the pointer off the pane,
+            # then within 1 s move it over the pane and type; then the hover-first order below.
+            keys_back_to_backplane(h, cp, frame, top, "composer", cbox)
+            E.screen_move(cbox[0] + 200, cbox[1] - 120)
+            time.sleep(0.3)
+            suspended = E.suspend_pid(kpid, True)
+            try:
+                t_freeze = time.monotonic()
+                E.screen_move(gl["root_x"] + gl["w"] // 2, gl["root_y"] + gl["h"] // 2)
+                time.sleep(0.2)
+                lat = [key_latency_ms(h, cbox, c, f"early{i}") for i, c in enumerate("abcd")]
+                since = round((time.monotonic() - t_freeze) * 1000)
+                t0 = time.monotonic()
+                E.screen_click(cbox[0] + 120, cbox[1] + 30, 1)
+                while time.monotonic() - t0 < 1.5 and focus_snapshot(frame)["focus_pid"] != cp.pid:
+                    time.sleep(0.02)
+                click_ms = round((time.monotonic() - t0) * 1000)
+                E.screen_move(gl["root_x"] + gl["w"] // 2, gl["root_y"] + gl["h"] // 2)
+                t0 = time.monotonic()
+                E.key_chord("ctrl", "grave")
+                while time.monotonic() - t0 < 1.5 and focus_snapshot(frame)["focus_pid"] != cp.pid:
+                    time.sleep(0.02)
+                grave_ms = round((time.monotonic() - t0) * 1000)
+                d = {"suspended": suspended, "key_latency_ms": lat, "typed_by_ms_after_freeze": since, "click_elsewhere_ms": click_ms, "ctrl_grave_ms": grave_ms}
+                print("DIAG frozen_early " + json.dumps(d), flush=True)
+                h.check("Freeze, then pointer over the pane within 1 s: each key reaches the composer within 300 ms, click elsewhere and Ctrl+` within 1.5 s",
+                        suspended and all(v is not None and v < 300 for v in lat) and click_ms < 1500 and grave_ms < 1500, d)
+            finally:
+                if suspended:
+                    E.suspend_pid(kpid, False)
+            time.sleep(1.0)
+            keys_back_to_backplane(h, cp, frame, top, "composer", cbox)
+            E.screen_move(gl["root_x"] + gl["w"] // 2, gl["root_y"] + gl["h"] // 2)
+            time.sleep(0.4)
+            suspended = E.suspend_pid(kpid, True)
+            try:
+                # the composer keeps the keys; the pointer stays over the frozen KiCad while typing
+                lat2 = [key_latency_ms(h, cbox, c, f"hoverfirst{i}") for i, c in enumerate("wxyz")]
+                print("DIAG frozen_hover_first " + json.dumps({"key_latency_ms": lat2}), flush=True)
+                fz = [key_latency_ms(h, cbox, c, f"frozen{i}") for i, c in enumerate("fz")]
+                px = 1000 if all(v is not None for v in fz) else 0
+                typing_ms = max(v for v in fz if v is not None) if any(v is not None for v in fz) else 99999
+                snap = focus_snapshot(frame)
+                h.check("Frozen KiCad under the pointer: each key reaches the composer within 300 ms",
+                        suspended and px > 0 and typing_ms < 300 and snap["focus_pid"] == cp.pid, {"suspended": suspended, "key_latency_ms": fz, **snap})
+                # a click elsewhere in Backplane (the composer), then Ctrl+`: both answered within 1.5 s
+                t0 = time.monotonic()
+                E.screen_click(cbox[0] + 120, cbox[1] + 30, 1)
+                while time.monotonic() - t0 < 1.5 and focus_snapshot(frame)["focus_pid"] != cp.pid:
+                    time.sleep(0.02)
+                click_ms = round((time.monotonic() - t0) * 1000)
+                t0 = time.monotonic()
+                E.key_chord("ctrl", "grave")
+                while time.monotonic() - t0 < 1.5 and focus_snapshot(frame)["focus_pid"] != cp.pid:
+                    time.sleep(0.02)
+                ms = round((time.monotonic() - t0) * 1000)
+                h.check("Frozen KiCad under the pointer: a click elsewhere and Ctrl+` answered within 1.5 s, the hub answers",
+                        suspended and ms < 1500 and click_ms < 1500 and h.hub_hello(), {"ctrl_grave_ms": ms, "click_elsewhere_ms": click_ms})
+            finally:
+                if suspended:
+                    E.suspend_pid(kpid, False)
     return h.finish()
 
 
@@ -303,14 +482,14 @@ def run(h):
             # take them away, and getting them back is a separate, known gap (F4).
             gls = [w for w in children if w["visible"] and w["class"] == "wxGLCanvas"]
             gl = max(gls, key=lambda w: w["w"] * w["h"]) if gls else None
-            px = plain_key_acts(h, gl, "ctrlk_pre") if gl else 0
-            pre = {"tab_clicked": None, "f2_changed_px": px, **focus_snapshot(frame)}
-            pre["inside_frame"] = pre["inside_frame"] and px > 2000
+            px, zoomed = plain_key_acts(h, gl, "ctrlk_pre", frame) if gl else (0, False)
+            pre = {"tab_clicked": None, "f2_changed_px": px, "zoom_readout_changed": zoomed, **focus_snapshot(frame)}
+            pre["inside_frame"] = pre["inside_frame"] and bool(zoomed)
             timeline.append({"stage": "before_ctrl_k_from_edit", **pre})
             ctrl_k_round(h, cp, frame, rep, timeline, 1, 1, pre=pre)
             return h.finish()
         if only == "mouse_return":
-            return mouse_return_check(h, cp, frame, children, timeline)
+            return mouse_return_check(h, cp, frame, children, timeline, kpid=pid)
         if not only_click:
             # Keys must be on KiCad's drawing panel (EDA_DRAW_PANEL_GAL, which binds key events to
             # the tool dispatcher) or its wxGLCanvas child: focus in the frame's toolbar Edit box
