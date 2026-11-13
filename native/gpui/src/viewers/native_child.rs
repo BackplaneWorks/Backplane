@@ -79,6 +79,7 @@ pub fn reserved_chord_index(idx: usize) -> Option<&'static str> {
         3 => Some("ctrl-shift-tab"), // i18n-ok: gpui keystroke
         4 => Some("ctrl-`"), // i18n-ok: gpui keystroke
         5 => Some("ctrl-;"), // i18n-ok: gpui keystroke (a comment: host kicad/comment.rs RESERVED)
+        6 => Some(";"), // i18n-ok: gpui keystroke (bp.13: KiCad's own comment key, host kicad/comment.rs `reserved`)
         _ => None,
     }
 }
@@ -1404,7 +1405,7 @@ mod tests {
         assert_eq!(chord(0xffbe, 4), None, "F1: not a reserved key");
         assert_eq!(reserved_chord_index(0), Some("ctrl-k"));
         assert_eq!(reserved_chord_index(3), Some("ctrl-shift-tab"));
-        assert_eq!(reserved_chord_index(4), Some("ctrl-`")); assert_eq!(reserved_chord_index(5), Some("ctrl-;")); assert_eq!(chord(0x3b, 4).as_deref(), Some("ctrl-;"));
+        assert_eq!(reserved_chord_index(4), Some("ctrl-`")); assert_eq!(reserved_chord_index(5), Some("ctrl-;")); assert_eq!(reserved_chord_index(6), Some(";")); assert_eq!(chord(0x3b, 0).as_deref(), Some(";")); assert_eq!(chord(0x3b, 4).as_deref(), Some("ctrl-;"));
         assert_eq!(reserved_chord_index(9), None);
     }
     #[test] fn overlays_cut_holes_and_nothing_else() {
