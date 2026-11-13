@@ -96,7 +96,7 @@ pub fn of(ts: &[Tri3]) -> Option<Solid> {
 /// Plot.of.solid: the plot of a model: no chunks, Box.empty, thickness 0 (None: Line.solid prints nothing and no mesh goes out)
 pub fn plot(so: Option<Solid>) -> Plot {
     let e = Rect { x0: 2147483647, y0: 2147483647, x1: 2147483648, y1: 2147483648 };
-    Plot { cs: vec![], b: e, thick: 0, solid: so, edge: e }
+    Plot { cs: vec![], b: e, thick: 0, solid: so, edge: e, note: String::new(), warn: false }
 }
 
 #[cfg(test)]

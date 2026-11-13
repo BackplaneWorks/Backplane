@@ -57,3 +57,17 @@ pub fn default_set(root: &Path) -> Option<PathBuf> {
     best.map(|b| b.1)
 }
 
+
+/// The board a set was made from: the .kicad_pcb beside the first .kicad_pro in the set's folder or the four above it.
+pub fn board_of(set: &Path) -> Option<std::path::PathBuf> {
+    for d in set.ancestors().take(5) {
+        let Ok(rd) = std::fs::read_dir(d) else { continue };
+        for e in rd.flatten() { let p = e.path(); if p.extension().map_or(false, |x| x == "kicad_pro") { let b = p.with_extension("kicad_pcb"); if b.is_file() { return Some(b) } } }
+    }
+    None
+}
+/// The path of a set compared with its board (kicad/plotread.rs reads it here): "gerbercmp\n<set>\n<board>".
+pub const CMP: &str = "gerbercmp\n";
+pub fn cmp_path(set: &str, board: &str) -> String { format!("{CMP}{set}\n{board}") }
+/// The set a viewer's file names: itself, or the set of a comparison.
+pub fn set_of(file: &str) -> &str { file.strip_prefix(CMP).map_or(file, |r| r.split_once('\n').map_or(r, |x| x.0)) }

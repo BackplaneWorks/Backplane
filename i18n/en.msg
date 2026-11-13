@@ -4310,3 +4310,5 @@ gpui.mgmt.bom.undo.tip = Put the old value back
 gpui.mgmt.bom.undo = Undo
 gpui.mgmt.checks.on = on {host}
 gpui.gerbers = Gerbers
+gpui.gerbers.vs = vs board
+gpui.gerbers.vs.tip = Mark where these Gerbers differ from the board: red on the board only, green in the Gerbers only

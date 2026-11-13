@@ -4,6 +4,7 @@
 //! Gerber's Y up turned to the board's Y down so a set lies over its board. An object's X2 attributes (net, part, pin, aperture function)
 //! are its info card, as a board item's are. A file that does not read fully is kept as far as it read; what did not read is said,
 //! file and line (`notes`).
+pub mod compare;
 pub mod excellon;
 pub mod names;
 pub mod rs274x;
@@ -13,17 +14,54 @@ use std::{path::Path, sync::Arc};
 
 pub use names::*;
 
+fn modified_ms(p: &Path) -> u64 { std::fs::metadata(p).and_then(|m| m.modified()).ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).map_or(0, |d| d.as_millis() as u64) }
+/// A span of time as a person says it: "40 s", "12 min", "3 h", "2 d".
+pub fn span(ms: u64) -> String { let s = ms / 1000; if s < 90 { format!("{s} s") } else if s < 5400 { format!("{} min", s / 60) } else if s < 172800 { format!("{} h", s / 3600) } else { format!("{} d", s / 86400) } }
+/// The bar's line for a set: where it is, how many files, and how old against its board (stale, a warning, when the board was saved
+/// more than a minute after the newest file of the set).
+pub fn set_line(label: &str, files: usize, newest_ms: u64, board_ms: u64) -> (String, bool) {
+    let n = format!("{label} · {files} file{}", if files == 1 { "" } else { "s" });
+    if board_ms == 0 || newest_ms == 0 { return (n, false) }
+    if board_ms > newest_ms + 60_000 { (format!("{n} · made {} before the board's last change", span(board_ms - newest_ms)), true) } else { (format!("{n} · made after the board's last change"), false) }
+}
+fn label_of(set: &Path, board: Option<&Path>) -> String {
+    let root = board.and_then(Path::parent);
+    root.and_then(|r| set.strip_prefix(r).ok()).map(|r| r.to_string_lossy().replace('\\', "/")).filter(|r| !r.is_empty()).unwrap_or_else(|| set.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default())
+}
+
 /// What did not read in the sets read last (by path), for their viewers' note.
 static NOTES: std::sync::Mutex<Vec<(String, Vec<String>)>> = std::sync::Mutex::new(Vec::new());
 pub fn notes_of(path: &str) -> Vec<String> { NOTES.lock().unwrap().iter().find(|(p, _)| p == path).map(|x| x.1.clone()).unwrap_or_default() }
-/// A set as a plot, as the board viewer draws one (kicad/plotread.rs `read` sends a Gerber path here).
+/// A set as a plot, as the board viewer draws one (kicad/plotread.rs `read` sends a Gerber path here), with its note: the set, its age
+/// against the board, what did not read; compared with the board (a CMP path), the differences marked and counted.
 pub fn plot(path: &str) -> super::plotgen::Read {
-    let r = read_set(Path::new(path));
+    let (set, cmp_board) = match path.strip_prefix(CMP) { Some(r) => { let (a, b) = r.split_once('\n').unwrap_or((r, "")); (a.to_string(), Some(b.to_string())) } None => (path.to_string(), None) };
+    let sp = Path::new(&set);
+    let r = read_set(sp);
     { let mut n = NOTES.lock().unwrap(); n.retain(|(p, _)| p != path); n.push((path.to_string(), r.notes.clone())); if n.len() > 32 { n.remove(0); } }
-    let (mut p, t) = super::plotgen::items_plot(r.items, super::plotgen::GERBER);
+    let board = board_of(sp);
+    let newest = set_files(sp).iter().map(|f| modified_ms(f)).max().unwrap_or(0);
+    let (mut note, mut warn) = set_line(&label_of(sp, board.as_deref()), r.layers.len(), newest, board.as_deref().map(modified_ms).unwrap_or(0));
+    if !r.notes.is_empty() { warn = true; note.push_str(&format!(" · {}{}", r.notes[0], if r.notes.len() > 1 { format!(" (and {} more)", r.notes.len() - 1) } else { String::new() })); }
+    let (items, kind) = match cmp_board {
+        None => (r.items, super::plotgen::GERBER),
+        Some(b) => {
+            let bytes = std::fs::read(&b).unwrap_or_default();
+            let bi = super::sexpr::forms(&bytes).map(|fs| { let mut v = super::plotgen::board_items(&fs); v.extend(compare::board_copper_polys(&fs)); v }).unwrap_or_default();
+            let t0 = std::time::Instant::now();
+            let (marks, layers) = compare::compare(&r.items, &bi);
+            eprintln!("gerber: {} compared with its board in {} ms ({} marks)", set, t0.elapsed().as_millis(), marks.len());
+            let diff: Vec<String> = layers.iter().filter(|l| l.removed + l.added > 0).map(|l| format!("{} {}", l.name, [(l.removed, "on the board only"), (l.added, "in the Gerbers only")].iter().filter(|x| x.0 > 0).map(|x| format!("{} {}", x.0, x.1)).collect::<Vec<_>>().join(", "))).collect();
+            if diff.is_empty() { note.push_str(&format!(" · vs board: the same on {} layers", layers.len())) } else { warn = true; note.push_str(&format!(" · vs board: {}", diff.join("; "))) }
+            let mut items = r.items; items.extend(marks);
+            (items, super::plotgen::GERBER | super::plotgen::DIFF)
+        }
+    };
+    let (mut p, t) = super::plotgen::items_plot(items, kind);
     p.thick = 0;
     // a set (or a file) with no outline is fitted to what it draws
     if (p.edge.x0 as i32) > (p.edge.x1 as i32) { p.edge = p.b }
+    p.note = note; p.warn = warn;
     super::plotgen::Read::Plot(Box::new(p), t)
 }
 
@@ -184,6 +222,12 @@ pub fn set_stamp(path: &Path) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn the_sets_line() {
+        assert_eq!(set_line("mfg/b/gerber", 37, 1_000_000, 1_000_000 + 2 * 3_600_000), ("mfg/b/gerber · 37 files · made 2 h before the board's last change".into(), true));
+        assert_eq!(set_line("mfg/b/gerber", 1, 1_000_000, 1_030_000), ("mfg/b/gerber · 1 file · made after the board's last change".into(), false));
+        assert_eq!(set_line("x.gtl", 1, 5, 0), ("x.gtl · 1 file".into(), false));
+        assert_eq!((span(40_000), span(720_000), span(3 * 86_400_000)), ("40 s".into(), "12 min".into(), "3 d".into()));
+    }
     #[test] fn layers_by_function_name_and_extension() {
         assert_eq!(layer_of_function("Copper,L1,Top"), "F.Cu"); assert_eq!(layer_of_function("Copper,L8,Bot"), "B.Cu");
         assert_eq!(layer_of_function("Copper,L3,Inr"), "In2.Cu"); assert_eq!(layer_of_function("Copper,L9,Inr"), "*.Cu");
@@ -242,6 +286,25 @@ mod tests {
         assert!(matched > 0);
         assert!(far.is_empty(), "{:?}", &far[..far.len().min(5)]);
         assert!(missing.len() * 20 <= matched, "pads on the board but not in the Gerber: {:?}", &missing[..missing.len().min(8)]);
+    }
+    /// The comparison on a real set (BACKPLANE_TEST_GERBERS, BACKPLANE_TEST_BOARD): what each layer came to, and how long it took.
+    #[test] fn a_real_set_compared_with_its_board() {
+        let (Ok(dir), Ok(pcb)) = (std::env::var("BACKPLANE_TEST_GERBERS"), std::env::var("BACKPLANE_TEST_BOARD")) else { eprintln!("skipped"); return };
+        let r = read_set(Path::new(&dir));
+        let b = std::fs::read(&pcb).unwrap(); let fs = super::super::sexpr::forms(&b).unwrap(); let mut bi = super::super::plotgen::board_items(&fs); bi.extend(compare::board_copper_polys(&fs));
+        let t = std::time::Instant::now();
+        let (marks, layers) = compare::compare(&r.items, &bi);
+        eprintln!("compared in {} ms", t.elapsed().as_millis());
+        for l in &layers { eprintln!("  {}: on the board only {}, in the Gerbers only {}", l.name, l.removed, l.added) }
+        for m in marks.iter().take(60) { eprintln!("    {}", m.info) }
+        if let Ok(at) = std::env::var("BACKPLANE_TEST_AT") {
+            let (x, y) = at.split_once(',').map(|(a, b)| (a.parse::<f32>().unwrap(), b.parse::<f32>().unwrap())).unwrap();
+            for i in bi.iter().filter(|i| { let c = centre(&i.prim); (c.0 - x).abs() < 1.5 && (c.1 - y).abs() < 1.5 }) { eprintln!("  board item layer {} {}: {:?}", i.layer, i.info, i.prim) }
+            let bx = |p: &Prim| { let ps: Vec<Pt> = match p { Prim::Poly { ps, .. } | Prim::Line { ps, .. } | Prim::Tint { ps, .. } => ps.clone(), Prim::Seg { a, b, .. } => vec![*a, *b], Prim::Circ { c, .. } => vec![*c] }; ps.iter().fold([f32::MAX, f32::MAX, f32::MIN, f32::MIN], |a, q| [a[0].min(q.x), a[1].min(q.y), a[2].max(q.x), a[3].max(q.y)]) };
+            for i in r.items.iter().filter(|i| { let b = bx(&i.prim); b[0] <= x && x <= b[2] && b[1] <= y && y <= b[3] && (5..=12).contains(&i.layer) }) { let b = bx(&i.prim); eprintln!("  gerber item layer {} {} box {:?} pts {}", i.layer, i.info, b, match &i.prim { Prim::Poly { ps, .. } => ps.len(), _ => 0 }) }
+            for i in bi.iter().filter(|i| { let b = bx(&i.prim); b[0] <= x && x <= b[2] && b[1] <= y && y <= b[3] && i.info.starts_with("zone") }) { eprintln!("  board zone layer {} {} box {:?} pts {}", i.layer, i.info, bx(&i.prim), match &i.prim { Prim::Poly { ps, .. } => ps.len(), _ => 0 }) }
+        }
+        if std::env::var("BACKPLANE_TEST_SAME").is_ok() { assert!(layers.iter().all(|l| l.removed + l.added == 0), "a fresh export differs from its board") }
     }
     #[test] fn a_set_reads_into_board_items() {
         let d = crate::plat::tmp::dir("gerber-set");

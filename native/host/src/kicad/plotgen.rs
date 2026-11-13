@@ -180,7 +180,7 @@ fn plot_of(ps: Vec<Option<Piece>>, kind: u32, edge: Bx) -> (Plot, String) {
     let mut infos = String::new();
     let mut cs = Vec::with_capacity(done.len());
     for (c, t) in done { infos.push_str(&format!("{} {} ", c.sig, t.chars().count())); infos.push_str(&t); infos.push('\n'); cs.push(c) }
-    (Plot { cs, b: bx.rect(), thick: 1600, solid: None, edge: edge.rect() }, infos)
+    (Plot { cs, b: bx.rect(), thick: 1600, solid: None, edge: edge.rect(), note: String::new(), warn: false }, infos)
 }
 /// a piece per item with its layer's opacity; the edge box beside; infos shared within the thread (a board has few distinct ones)
 struct Shown { kind: u32, edge_layer: u32 }

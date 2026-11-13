@@ -181,7 +181,9 @@ fn pane_actions(cx: &mut Context<Backplane>, light: bool, thread: &Value, target
             .tooltip(crate::keys::tip(&hover, "", light)).child(crate::art::icon("link", 11., col)).child(div().overflow_hidden().text_ellipsis().child(t)));
     }
     // Edit / View: the real KiCad in this pane (on the hub's own machine), or back to Backplane's viewer
-    if has_design(viewer) && !diff_on && crate::viewers::kicad_pane::local(target.map(|t| t.addr.as_str()), thread) {
+    // a Gerber set is no board to edit: no Edit, no Open in KiCad (the embedded GerbView comes with bp.13)
+    let gerbers = viewer["gerbers"] == true;
+    if has_design(viewer) && !gerbers && !diff_on && crate::viewers::kicad_pane::local(target.map(|t| t.addr.as_str()), thread) {
         let c2 = c(if editing { "accent" } else { "line" });
         /* i18n-ok: ctl labels and ui: ids are what drivers press */ let edit_div = crate::ui::with_rect(div().id("kicad-edit"), move || if editing { "ui:View".to_string() } else { "ui:Edit".to_string() });
         row = row.child(tall(edit_div.px_2().border_1().border_color(c2).bg(c("raise")).cursor_pointer().hover(|s| s.bg(c("panel"))).text_size(px(12.))
@@ -189,7 +191,7 @@ fn pane_actions(cx: &mut Context<Backplane>, light: bool, thread: &Value, target
             .child(if editing { trs("View") } else { trs("Edit") })
             .on_click(cx.listener(move |this, _, _, cx| { if editing { this.kicad_view(cx); } else { this.kicad_edit(cx); } }))).into_any_element());
     }
-    if has_design(viewer) && !editing { row = row.child(btn(cx, light, "kicad-open".into(), kicad_open_label(target.map(|t| t.addr.as_str()), thread["mark"]["name"].as_str()), false, kicad_open(viewer))); }
+    if has_design(viewer) && !gerbers && !editing { row = row.child(btn(cx, light, "kicad-open".into(), kicad_open_label(target.map(|t| t.addr.as_str()), thread["mark"]["name"].as_str()), false, kicad_open(viewer))); }
     row.child(div().id("viewer-close").size(px(super::head::BTN_H)).flex().items_center().justify_center().border_1().border_color(c("line")).bg(c("raise")).cursor_pointer().hover(|s| s.bg(c("panel"))).tooltip(crate::keys::tip(&trs("Close the viewer"), "", light))
         .child(crate::art::icon("x", 14., c("dim"))).on_click(cx.listener(|this, _, _, cx| { this.screens.rail_pending = Some(String::new()); this.screens.rail_at = Some(std::time::Instant::now()); let _ = this.tx.try_send(close()); cx.notify(); })))
         .into_any_element()
@@ -334,6 +336,14 @@ fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, 
         let boards = if slot == 0 { crate::viewers::boards::picker(cx, light, viewer, &pv.boards) } else { None };
         let lay = crate::viewers::layers::strip_el(cx, light, &strip, &pv.layers_key);
         tools.splice(0..0, boards.into_iter().chain([lay, fit.into_any_element()]));
+        // a Gerber set: "vs board" (its copper, drills and outline against the board's: kicad/gerber/compare.rs), then where it is and how old (the plot's note)
+        if viewer["gerbers"] == true {
+            let on = viewer["gerbersVsBoard"] == true;
+            tools.push(tall(crate::ui::with_rect(div().id("gerbers-vs-board"), || "ui:vs board".into()).px_2().text_size(px(12.))).cursor_pointer().border_1().border_color(c(if on { "accent" } else { "line" })).bg(c("raise")).hover(|s| s.bg(c("panel"))) // i18n-ok: a harness id
+                .tooltip(crate::keys::tip(&trs("Mark where these Gerbers differ from the board: red on the board only, green in the Gerbers only"), "", light))
+                .child(trs("vs board")).on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("view".into(), if on { "gerbers".into() } else { "gerbers\tboard".into() })); cx.notify(); })).into_any_element());
+            if !frame.note.is_empty() { tools.push(div().id("gerbers-note").min_w_0().flex_shrink().overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(px(11.)).text_color(c(if frame.warn { "warn" } else { "dim" })).child(frame.note.clone()).into_any_element()); }
+        }
     }
     match actions {
         Some(a) => col = col.child(bar(light).children(tools).child(div().flex_1()).child(a)),
@@ -342,7 +352,7 @@ fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, 
     }
     col = col.children(note).children(sheets_list);
     let mut area = div().relative().flex().flex_col().flex_1().min_h_0().child(super::plotview::canvas_el(cx, slot, pv.focus.clone(), light, frame, view, crate::viewers::layers::masks(viewer)));
-    if layers { if let Some(p) = crate::viewers::layers::panel_el(cx, light, &strip, pv.layers_open, pv.layers_cap.unwrap_or(280.), &pv.layers_scroll) { area = area.child(p); } }
+    if layers { if let Some(p) = crate::viewers::layers::panel_el(cx, light, &strip, pv.layers_open, pv.layers_cap.unwrap_or(0.), &pv.layers_scroll) { area = area.child(p); } }
     // the card of the piece last tapped (Insp.card): what it is, then key = value rows; a tap on nothing, or Close, puts it away
     // a probed part placed on another sheet of the design: where it is, and a press to open that sheet (0.14's probe-away)
     if open == "schematic" {

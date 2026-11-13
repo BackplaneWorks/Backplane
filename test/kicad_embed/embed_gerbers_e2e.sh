@@ -38,12 +38,12 @@ start_hub
 python3 - "$OUT/script.json" "$SET_FILE" <<'PY'
 import json, sys
 s = [{"select": 0}, {"wait": 2500}, {"click": "rail:Gerbers"}, {"wait": 8000}, {"mark": "gerbers"}, {"wait": 3000},
-     {"click": "rail:Board"}, {"wait": 4000}, {"mark": "board"}, {"wait": 2000}, {"click": "rail:Gerbers"}, {"wait": 4000}, {"mark": "gerbers2"}, {"wait": 2000}, {"layers": True}, {"wait": 2500}, {"mark": "layers"}, {"wait": 2500}, {"layers": False}, {"wait": 1000},
+     {"click": "rail:Board"}, {"wait": 4000}, {"mark": "board"}, {"wait": 2000}, {"click": "rail:Gerbers"}, {"wait": 4000}, {"mark": "gerbers2"}, {"wait": 2000}, {"layers": True}, {"wait": 2500}, {"mark": "layers"}, {"wait": 2500}, {"layers": False}, {"wait": 1000}, {"action": ["view", "gerbers\tboard"]}, {"wait": 15000}, {"mark": "vs"}, {"wait": 2500}, {"action": ["view", "gerbers"]}, {"wait": 2000},
      {"click": "rail:Files"}, {"wait": 2500}, *[x for part in sys.argv[2].split("/") for x in ({"files": "filter:" + part}, {"wait": 1200}, {"files": "open:0"}, {"wait": 1500})], {"wait": 2500}, {"mark": "files"}, {"wait": 60000}]
 json.dump(s, open(sys.argv[1], "w"))
 PY
 HOME="$OUT/fh" BACKPLANE_GPUI_ASSETS="$ASSETS_DIR" BACKPLANE_GPUI_RECTS=1 BACKPLANE_GPUI_HOLD=1 \
-"$CLIENT_BIN" --url "http://127.0.0.1:$HPORT" --token-file "$OUT/home/token" --script "$OUT/script.json" --exit-after 120 >"$OUT/client.log" 2>&1 &
+"$CLIENT_BIN" --url "http://127.0.0.1:$HPORT" --token-file "$OUT/home/token" --script "$OUT/script.json" --exit-after 180 >"$OUT/client.log" 2>&1 &
 CP=$!; track_pid "$CP"
 # the first event of a name after line $2 (the last when $3 is "last")
 ev() { python3 - "$OUT/client.log" "$1" "${2:-0}" "${3:-first}" <<'PY'
@@ -74,6 +74,12 @@ check "Gerbers again after Board: the set painted within 300 ms of the press ($P
 shot "g2_gerbers_again"
 wait_for_log "$OUT/client.log" '"name":"layers","event":"mark"' 200 || true
 shot "g2b_layers"
+wait_for_log "$OUT/client.log" '"name":"vs","event":"mark"' 200 || true
+shot "g4_vs_board"
+check "vs board: the set compared with its board was drawn (its key names the comparison)" "$(grep -q 'gerbercmp' "$OUT/client.log" && echo 1 || echo 0)"
+if [ -z "${GERBERS_BOARD:-}" ]; then
+  check "A set exported now is the same as its board: no marks ($(grep 'compared with its board' "$OUT/hub.log" | tail -1))" "$(grep -q 'compared with its board in [0-9]* ms (0 marks)' "$OUT/hub.log" && echo 1 || echo 0)"
+fi
 wait_for_log "$OUT/client.log" '"name":"files","event":"mark"' 200 || true
 shot "g3_files"
 check "A Gerber opened from the Files tab is drawn itself (its key names the file)" "$(grep -q "\"key\":\"0|$PROJ|$PROJ/$SET_FILE\"" "$OUT/client.log" && echo 1 || echo 0)"

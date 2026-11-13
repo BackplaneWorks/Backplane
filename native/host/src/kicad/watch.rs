@@ -29,6 +29,8 @@ pub fn stamp(path: &str) -> Stamp {
     use crate::plat::fs::MetadataExt;
     // a Gerber set's folder: its files' stamps (an export rewrites them in place)
     if std::path::Path::new(path).is_dir() { return Stamp { rev: super::gerber::set_stamp(std::path::Path::new(path)), ok: true } }
+    // a set compared with its board: both
+    if let Some(r) = path.strip_prefix(super::gerber::CMP) { let (a, b) = r.split_once('\n').unwrap_or((r, "")); return Stamp { rev: format!("{}{}", super::gerber::set_stamp(std::path::Path::new(a)), stamp(b).rev), ok: true } }
     // FS.revision: "dev:ino:size:mtime s:ns:ctime s:ns" (a same-size save within a second still changes it)
     match std::fs::metadata(path) { Ok(m) => Stamp { rev: format!("{}:{}:{}:{}:{}:{}:{}", m.dev(), m.ino(), m.len(), m.mtime(), m.mtime_nsec(), m.ctime(), m.ctime_nsec()), ok: true }, Err(_) => Stamp::default() }
 }

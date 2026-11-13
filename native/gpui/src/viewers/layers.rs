@@ -68,7 +68,9 @@ pub fn strip_el(cx: &mut Context<Backplane>, light: bool, s: &Strip, key: &str) 
 pub fn panel_el(cx: &mut Context<Backplane>, light: bool, s: &Strip, open: bool, cap: f32, scroll: &ScrollHandle) -> Option<AnyElement> {
     let c = |n: &str| theme::color(light, n);
     if !open || s.rows.is_empty() { return None; }
-    let mut panel = div().id("layers-panel").absolute().top(px(4.)).left(px(12.)).max_h(px(cap)).overflow_y_scroll().track_scroll(scroll).flex().flex_col().gap_1().p_2().border_1().border_color(c("line")).bg(c("panel")).occlude();
+    // a cap of 0: as tall as the pane lets it be before it scrolls
+    let mh: Length = if cap > 0. { px(cap).into() } else { relative(0.96).into() };
+    let mut panel = div().id("layers-panel").absolute().top(px(4.)).left(px(12.)).max_h(mh).overflow_y_scroll().track_scroll(scroll).flex().flex_col().gap_1().p_2().border_1().border_color(c("line")).bg(c("panel")).occlude();
     if s.modes {
         let present = s.present;
         /* i18n-ok: drawn through trs */ panel = panel.child(div().flex().gap_1().children(["All", "Dim", "Only"].iter().enumerate().map(|(i, label)| {

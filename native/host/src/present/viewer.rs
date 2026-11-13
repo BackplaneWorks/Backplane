@@ -137,6 +137,8 @@ pub fn view_action(st: &State, hub: &str, session: &Value, kind: &str) -> Option
     let (kind, part) = kind.split_once('\t').unwrap_or((kind, ""));
     // Gerbers: the Board page drawing the project's fab output (its newest set under mfg/: kicad/gerber), the page marked as theirs
     let gerbers = kind == "gerbers";
+    // "gerbers\tboard": the set on show compared with its board (kicad/gerber/compare.rs); "gerbers\t" (or none) the set alone
+    let gerbers_vs_board = gerbers && part == "board";
     let kind = if gerbers { "board" } else { kind };
     if !(shows(kind) || kind.is_empty() || kind == "review") { return None }
     let sel = s(session, "sel");
@@ -157,7 +159,13 @@ pub fn view_action(st: &State, hub: &str, session: &Value, kind: &str) -> Option
     let kept_part = s(d, &format!("@mech.part:{sel}")).to_string();
     let part = if kind == "mech" && part.is_empty() { kept_part.as_str() } else { part };
     // (a board picked in the Boards menu stays the one shown on Board, Schematic, 3D and Split: its file is the source)
-    let picked = if gerbers { crate::files::kicad::gerber::default_set(std::path::Path::new(&root))?.to_string_lossy().into_owned() }
+    let picked = if gerbers {
+        use crate::files::kicad::gerber as g;
+        // the set on show (a set or a file opened from Files), else the project's newest
+        let shown = s(d, &format!("@view.file:{sel}"));
+        let set = if s(d, &format!("@view.gerbers:{sel}")) == "1" && !shown.is_empty() { g::set_of(shown).to_string() } else { g::default_set(std::path::Path::new(&root))?.to_string_lossy().into_owned() };
+        if gerbers_vs_board { g::cmp_path(&set, &g::board_of(std::path::Path::new(&set))?.to_string_lossy()) } else { set }
+    }
         else if matches!(kind, "board" | "schematic" | "3d" | "split") { board_file(kind, &root, &chosen_board(d, sel)) } else { String::new() };
     let (want, wkind, wpath, board) = if kind == "mech" { let part = rel_in(&root, part); let ps = parts_of(&root, sel, &part); let (w, a) = mech_want(&root, &ps, &part); let k = if w.is_empty() { "" } else { "3d" }; (w, k.to_string(), a, String::new()) }
         else { let base = key(kind, &root); let want = if base.is_empty() { base } else { format!("{base}{picked}") };
@@ -400,7 +408,11 @@ fn page(template: &Value, kind: &str, root: &str, drafts: &Value, sel: &str) -> 
     let Some(o) = v.as_object_mut() else { return v };
     o.insert("open".into(), json!(kind)); o.insert("key".into(), json!(k));
     // the Board page drawing a Gerber set (kicad/gerber): the rail lights Gerbers, the layer list is the set's
-    if kind == "board" && !sel.is_empty() && s(drafts, &format!("@view.gerbers:{sel}")) == "1" { o.insert("gerbers".into(), json!(true)); }
+    if kind == "board" && !sel.is_empty() && s(drafts, &format!("@view.gerbers:{sel}")) == "1" {
+        o.insert("gerbers".into(), json!(true));
+        // compared with its board, or not (the bar's toggle)
+        o.insert("gerbersVsBoard".into(), json!(file.starts_with(crate::files::kicad::gerber::CMP)));
+    }
     // View.layers: a 3D view draws the board's layers on its faces
     o.insert("layers".into(), json!(if kind == "3d" { if file.is_empty() { key("board", root) } else { String::new() } } else { k }));
     // View.masks / View.lmode / View.lhead: what the person hid, the focus, and what the canvas draws from them
@@ -1106,6 +1118,16 @@ mod tests {
         assert!(v["choices"].as_array().unwrap().iter().any(|c| c["value"] == "gerbers" && c["on"] == true), "the Gerbers tab is the one on");
         let names: Vec<&str> = v["layerList"].as_array().unwrap().iter().map(|r| r["name"].as_str().unwrap()).collect();
         assert!(names.contains(&"F.Mask") && names.contains(&"B.Paste") && names.contains(&"Drills") && !names.contains(&"Vias"), "{names:?}");
+        // compared with its board: the set and the board side by side in the watched path, marked so
+        std::fs::write(d.join("b.kicad_pro"), "{}").unwrap(); std::fs::write(d.join("b.kicad_pcb"), "(kicad_pcb)").unwrap();
+        let o2 = view_action(&st, "h", &s2, "gerbers\tboard").unwrap();
+        let f = o2.patch["drafts"][format!("@view.file:{th}")].as_str().unwrap().to_string();
+        assert_eq!(f, format!("gerbercmp\n{set}\n{root}/b.kicad_pcb"));
+        let mut s3 = s2.clone(); crate::session::patch::merge(&mut s3, &o2.patch);
+        assert_eq!(viewer_json(&st, &json!({}), &s3).unwrap()["gerbersVsBoard"], true);
+        // and back to the set alone
+        let o3 = view_action(&st, "h", &s3, "gerbers").unwrap();
+        assert_eq!(o3.patch["drafts"][format!("@view.file:{th}")], set.as_str());
         // the Board page again: its own board, not marked
         let o = view_action(&st, "h", &s2, "board").unwrap();
         assert_eq!(o.patch["drafts"][format!("@view.gerbers:{th}")], "");
