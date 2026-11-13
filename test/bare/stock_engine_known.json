@@ -44,5 +44,9 @@
    }
   ],
   "why": "upstream DRC false positive, post-10.0: RV301 pad 3 and its teardrop against the bottom GND fill measure 0.5085 / 0.5115 mm outside KiCad (rule 0.508); upstream master at the fork's merge base gives the same errors (lane P, 2026-11-13). REMOVE this entry when upstream fixes it."
+ },
+ {
+  "key": "exclusions|unresolved_sheet",
+  "why": "an exclusion whose sheet is not in the loaded hierarchy gets no marker and is not reported by the fork (upstream master 36ef2e1453, 'Preserve ERC exclusions for unavailable sheet instances'); it is written back on save, so nothing is lost. 10.0 lists it (excluded, items []). From the fork's batch 5 its ERC JSON lists them as 10.0 does, with unresolved_sheet_path: equal again then (Collar main and mic_flex: 4 each, 2026-11-13)"
  }
 ]

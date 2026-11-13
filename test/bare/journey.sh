@@ -161,7 +161,8 @@ if grep -q "Run: backplane-app" "$OUT/logs/install.log" && ! as_person bash -lc 
 elif grep -q "Run: $PH/.local/bin/backplane-app" "$OUT/logs/install.log"; then ok "the installer gives the full path to run while ~/.local/bin is not on PATH"; fi
 BUILD=$HH/.local/share/backplane/builds/$(cat "$HH/.local/share/backplane/CURRENT")
 echo "build: $(basename "$BUILD") commit $(cat "$BUILD/COMMIT" 2>/dev/null)"
-t=$(date +%s.%N); fill_libs "$PH/.local/share/backplane/builds" backplane; tm desktop-libs-backplane "$(python3 -c "import time;print(round(time.time()-$t,1))")"
+# harness time, not a person's: the packages a stock desktop already has (its manifest), installed into the bare image
+t=$(date +%s.%N); fill_libs "$PH/.local/share/backplane/builds" backplane; tm harness-desktop-libs-backplane "$(python3 -c "import time;print(round(time.time()-$t,1))")"
 # what a desktop has without a library linking it: a Vulkan driver, GL, fonts, a session bus, xdg-open
 RT="python3 libvulkan1 mesa-vulkan-drivers libgl1-mesa-dri libegl1 libglx-mesa0 fontconfig fonts-dejavu-core xdg-utils dbus-user-session"
 for p in $RT; do [ ! -s "$MAN" ] || on_desktop $p || cut_ 3 runtime "$p is not on the stock desktop"; done; pkg_install $RT
@@ -238,7 +239,7 @@ if [ -n "$KDIR" ]; then
   A=$(python3 -c "import json;print(json.load(open('$KDIR/manifest.json')).get('platform',''))" 2>/dev/null)
   SZ=$(curl -sfIL "https://github.com/${REPO:-BackplaneWorks/Backplane_KiCad}/releases/download/backplane-kicad-v$KV/backplane-kicad-linux-x86_64-$KV.tar.gz" | awk 'tolower($1)=="content-length:"{n=$2} END{print n+0}')
   echo "kicad $KV ($A): download $((SZ/1048576)) MB, installed $(du -sm "$KDIR" | cut -f1) MB" | tee "$OUT/kicad-size.txt"
-  t=$(date +%s.%N); fill_libs "${KDIR/#$HH/$PH}" kicad; tm desktop-libs-kicad "$(python3 -c "import time;print(round(time.time()-$t,1))")"
+  t=$(date +%s.%N); fill_libs "${KDIR/#$HH/$PH}" kicad; tm harness-desktop-libs-kicad "$(python3 -c "import time;print(round(time.time()-$t,1))")"
   in_box sh -c "${KDIR/#$HH/$PH}/bin/kicad-cli --version" >"$OUT/logs/kicad-cli-version.txt" 2>&1 && ok "the installed kicad-cli runs ($(cat "$OUT/logs/kicad-cli-version.txt"))" || bad "the installed kicad-cli does not run: $(cat "$OUT/logs/kicad-cli-version.txt")"
 fi
 for _ in $(seq 30); do [ "$(step)" = project ] && break; s0=$(step); X key Return; for _ in $(seq 20); do [ "$(step)" != "$s0" ] && break; sleep 0.25; done; done

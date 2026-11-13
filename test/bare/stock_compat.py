@@ -73,6 +73,22 @@ def drops():
         return []
 
 
+def fork_version(cli):
+    """The fork runtime's version from its manifest (beside bin/), "" when it has none."""
+    try: return json.load(open(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(cli))), "manifest.json"))).get("version", "")
+    except Exception: return ""
+
+
+def bp_parts(v):
+    """The bp. number's parts (10.99.0-bp.12.1 -> [12, 1]; the last bp. part of a describe name), [] for none: as kserve.rs KH.bp."""
+    for part in reversed(v.split("-")):
+        if part.startswith("bp."):
+            n = [int(x) if x.isdigit() else 0 for x in part[3:].split(".")]
+            while len(n) > 1 and n[-1] == 0: n.pop()
+            return n
+    return []
+
+
 def tally(report, excluded=False, project=""):
     """(kind, type, severity) -> count from a kicad-cli ERC or DRC JSON report. Exclusions the person made (kept in the .kicad_pro)
     are counted apart: 10.0 lists a stale one (whose items are gone) under --severity-all, the fork drops it."""
@@ -210,7 +226,17 @@ def check(args, src):
     rc, out = run(args.fork_cli, ["project", "downgrade", "--target", args.target, "-o", k10, "--report-json", rep, pro], fenv, flog)
     forced = False
     if rc != 0:
-        chk(False, f"fork exports to KiCad {args.target} without --force", {"message": out[-3000:], "report": rep})
+        # a refusal that names what it would lose is the fork doing its job; before bp.12.1 it also refused what 10.0 evaluates the same
+        # (intersectsArea rules, fixed in the fork at 13502c4cf1): a NOTE naming the features there, a FAIL from bp.12.1 on
+        lost = []
+        try: lost = [f"{e.get('feature')} ({e.get('category')})" for e in json.load(open(rep)).get("entries", []) if e.get("category") != "keep"]
+        except Exception: pass
+        fv = fork_version(args.fork_cli)
+        if lost and not json.load(open(rep)).get("blocked") and bp_parts(fv) < [12, 1]:
+            print(f"NOTE {name}: the fork ({fv}) exports to KiCad {args.target} only with --force: {'; '.join(lost)} (from bp.12.1 a rule 10.0 evaluates the same is kept)")
+            res.setdefault("notes", []).append({"downgrade_refused": lost, "fork": fv})
+        else:
+            chk(False, f"fork exports to KiCad {args.target} without --force", {"message": out[-3000:], "report": rep})
         shutil.rmtree(k10, ignore_errors=True)
         rc, out = run(args.fork_cli, ["project", "downgrade", "--target", args.target, "--force", "-o", k10, "--report-json", rep, pro], fenv, flog)
         forced = True
@@ -294,7 +320,8 @@ def check(args, src):
             ea, eb = tally(fork_r[k], True, name), tally(stock_r[k], True, name)
             if ea != eb:
                 res.setdefault("excluded_differ", {})[k] = {"fork": {key(x): n for x, n in ea.items()}, "stock": {key(x): n for x, n in eb.items()}}
-                print(f"NOTE {name}: {k.upper()} exclusions listed differently (fork {sum(ea.values())}, stock {sum(eb.values())}; stale ones in the .kicad_pro)")
+                why = next((e["why"] for e in json.load(open(KNOWN)) if e.get("key") == "exclusions|unresolved_sheet"), "")
+                print(f"NOTE {name}: {k.upper()} exclusions listed differently (fork {sum(ea.values())}, stock {sum(eb.values())}; stale ones in the .kicad_pro){'; known: ' + why if why else ''}")
     with open(os.path.join(root, "result.json"), "w") as f:
         json.dump(res, f, indent=1)
     return res
