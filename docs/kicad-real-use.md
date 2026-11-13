@@ -247,3 +247,60 @@ No strict miss. A run on the 03:3x client builds (f8f74b981, b64ecc48f) is void:
 | plan: key after a click x10 / toolbar x10 | 10/10, 15-38 ms / 10/10, 86-130 ms | 10/10, 27-38 ms / 10/10, 80-153 ms | 100 |
 | plan vertex drag p99 | 37 / 35 ms, 1-2 > 50 | (missed the handle) | 16.7 |
 | KiCad RSS, editors up | 4.17 GB | 4.23 GB | ~1.7 |
+
+### Rerun on main's client (bd6c80dfa: 82c67d16a, 406d6b594 in; e3883aadc and the focus fix not yet), 2026-11-13 07:2x
+
+Same runtime (c53b5e0800), both boards, every journey, 10 GB scope; xprobe timed from the request (lane D's sent_at), GerbView shown
+through the hub. Hubble's run overlapped about ten other lanes' builds: its pan (p99 1173 ms) and cross-probe (1.8 s) are that load,
+not a regression (Collar and the earlier Hubble run: 19 ms / 78 ms).
+
+| measure | Collar | Hubble_DK | budget |
+|---|---|---|---|
+| first Edit cold (painted / pixels) | 141 ms / 142 ms, 1 blank | 64 ms / 126 ms, 1 blank | 2500 / 0 blank |
+| reopen (warm) | 95 / 21 / 18 ms, 0 blank | 144 / 21 / 33 ms, 0 blank | 300 |
+| first Schematic / first 3D | 1052 ms / 1240 ms, 1 blank | 109 ms / 1180 ms | first-time, non-strict |
+| later tab switch | 21-27 ms, 0 blank | 16-43 ms, 0 blank | 50 |
+| thread back: palette / sidebar | 30 / 69-77 ms | 30 / 83-90 ms | 50 |
+| cross-probe: hub rpc / to pixels | 37 / 78 ms | (load) | 100 |
+| Ctrl+K / Ctrl+; after the first click | 9 / 9 ms | 47 / 26 ms | 100 |
+| comment window / posted | 19 / 54 ms | 25 / 35 ms | 100 / 300 |
+| Ctrl+E -> footprint editor (in the pane) | 910 ms | 947 ms | 1000 |
+| GerbView through the hub: shown, stays | 1383 ms, stays | 1657 ms, stays | stays |
+| in-editor DRC / ERC | 222 / 37 ms | 635 / 136 ms | 30 s |
+| pan during in-editor DRC | 64 frames > 50 ms | 54 frames > 50 ms | 0 |
+| host markers on screen | 20 ms | 27 ms | 100 |
+| plan view by View menu | 78-87 ms | 89-91 ms | 100 |
+| plan view by toolbar / key after a canvas click | 93 / 148 ms (first) | 167 / 36 ms (first) | 100 |
+| plan view key straight after Edit | nothing | nothing | toggles |
+| KiCad RSS, editors up | 4.75 GB | 4.37 GB | ~1.7 |
+
+#### Misses, ranked (what a person sees, owner, repro)
+
+1. **A KiCad hotkey right after Edit does nothing** (Ctrl+Shift+R, E, Ctrl+F...): X keeps the keyboard on Backplane's window,
+   KiCad's frame is not focused, after Edit, after Full size and after the Board tab alike; one click on the canvas and it works.
+   Owner: client, lane B (fixed in climb-b, not yet landed). Repro: open a board, Edit, press Ctrl+Shift+R. (Lane J's e2e passed
+   only because its stand-in host sends ShowFrame{focus:true}.)
+2. **KiCad uses 3.9-4.7 GB**, one process (the embedded GUI): 3.65 GB anonymous at the first sample after Edit, before any other
+   editor; schematic, footprint and symbol editors, GerbView and 3D add 0.8 GB together. Owner: fork (library caches on open; the
+   lazy loading is not in this build). Repro: the memory journey (KEMBED_JOURNEYS=memory).
+3. **Panning stutters while DRC runs in the editor** (54-64 frames over 50 ms in 6 s, p50 33-48 ms). Owner: fork (RunChecks on
+   the UI thread). Repro: RunChecks FK_PCB, pan meanwhile.
+4. **W / Shift+W / A / R on a selected corridor change nothing** (GetPlan before and after). Owner: fork (floorplanner).
+   Repro: plan view, click a corridor, W.
+5. **GerbView shown freezes KiCad ~4.7 s** (one UI loop: 1,452 toolbar size events, BACKPLANE_KICAD_FRAMETRACE). Owner: fork.
+   Shown through the hub it now stays on screen; shown by OpenGerbers alone the client unmaps it (the hub does not know it).
+6. **The schematic editor answers no RunAction**: every eeschema.* action (Inspect > ERC included) does nothing over the API, from
+   this drive or an agent's kicad_ipc; erc_gui_dialog_open -1 on every bp.13 run. Owner: fork (fix a376ea22f0, after batch 4).
+   Parameterised actions over RunAction (showFootprintEditor, show3DViewer) raise the wrong editor until 4cae1323f9.
+7. **Plan vertex drags drop about one frame in twenty** (p99 35-37 ms, 1-2 > 50 ms in 5 s); on Hubble the layer panels leave B.Cu
+   active so the corridor is not editable there. Owner: fork. Repro: the plan journey on the plan copies.
+8. **First Schematic on Collar 1.05 s, first 3D 1.2 s (1 blank frame on Collar)**: the first open of an editor not prewarmed.
+   Owner: hub prewarm (lane B). It matters: it is the one blank frame and the one second-long wait a person still meets, once per
+   session.
+9. **Ctrl+E shows the footprint editor in 0.9 s**; with lane B's frame plumbing (e3883aadc) it no longer floats first.
+   Owner: lane B (landed after this run's client).
+10. **Thread back from the sidebar 69-90 ms** (budget 50; the palette's 30 ms): a step a person barely feels. Owner: client, lane B.
+    Low.
+
+Harness, not KiCad: the review-marker click lands on KiCad's own DRC arrow beside the ring (Hubble: an event without the host
+marker; Collar: none); the side-panel journey did not reach Full size in this run (fixed after it).
