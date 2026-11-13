@@ -1374,7 +1374,7 @@ if MEM["samples"]:
     RESULTS["rss_end_mb"] = {"ms": None, "mb": MEM["samples"][-1][1]}
     print(f"PERF memory ready={RESULTS['rss_ready_mb']['mb']}MB peak={RESULTS['rss_peak_mb']['mb']}MB hwm={RESULTS['rss_peak_mb']['hwm_mb']}MB end={RESULTS['rss_end_mb']['mb']}MB", flush=True)
 RESULTS["switch_shows_the_asked_frame"] = {"ms": None, "ok": int(not SHOW_MISSES), "misses": SHOW_MISSES}
-summary = {"results": RESULTS, "client": os.environ.get("CLIENT_BIN"), "kicad": os.environ.get("KICAD_BIN"), "kicad_running": KICAD_RUN, "dialogs": DIALOGS, "pane": PANE, "gpu": (metrics("gpu") or [{}])[0], "cold_edit_click_epoch": edit_click.get("epoch_ms")}
+summary = {"results": RESULTS, "client": os.environ.get("CLIENT_BIN"), "client_id": os.environ.get("CLIENT_ID"), "hub": os.environ.get("HUB_BIN"), "hub_id": os.environ.get("HUB_ID"), "kicad": os.environ.get("KICAD_BIN"), "kicad_running": KICAD_RUN, "dialogs": DIALOGS, "pane": PANE, "gpu": (metrics("gpu") or [{}])[0], "cold_edit_click_epoch": edit_click.get("epoch_ms")}
 json.dump(summary, open(os.path.join(OUT, "real_use.json"), "w"), indent=1)
 print("JSON " + json.dumps(summary), flush=True)
 if "undo" in JOURNEYS:

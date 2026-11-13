@@ -9,7 +9,16 @@ set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 . "$HERE/lib/env_xvfb.sh"
 [ "$EMBED_MODE" = "fork" ] || { echo "real_use_journeys: fork only"; exit 0; }
+# A pinned client needs a pinned hub: discover_bins would otherwise take the worktree's own target/fast hub (an older build: Nov 13's
+# gal2/gal3 ran client 46cd43ec0 with a 015eb3206 hub whose immediate in-KiCad check switched the pane to the board)
+[ -z "${CLIENT_BIN:-}" ] || [ -n "${HUB_BIN:-}" ] || { echo "FAIL real_use_journeys: CLIENT_BIN is pinned but HUB_BIN is not; pin both"; exit 2; }
 discover_bins; discover_kicad; init_isolated_dirs
+bin_id() {  # path, sha256, mtime and the build folder's COMMIT file, when it has one
+  local c; c=$(cat "$(dirname "$1")/COMMIT" 2>/dev/null | head -1 || true)
+  echo "path=$1 sha256=$(sha256sum <"$1" | cut -c1-16) mtime=$(date -r "$1" +%FT%T) commit=${c:-unknown}"
+}
+echo "INFO hub $(bin_id "$HUB_BIN")"; echo "INFO client $(bin_id "$CLIENT_BIN")"
+export HUB_ID="$(bin_id "$HUB_BIN")" CLIENT_ID="$(bin_id "$CLIENT_BIN")"
 KEMBED_THREADS=2 python3 "$SEED_PY" "$OUT" "$REPO_ROOT"
 start_xvfb_and_wm; start_hub
 cat >"$OUT/script.json" <<'J'
