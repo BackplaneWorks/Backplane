@@ -20,9 +20,12 @@ if '--version' in a:
 if len(a) > 2 and a[1] == 'auth' and a[2] == 'status':
     print(json.dumps({"loggedIn": True, "email": "standin@example.com", "authMethod": "claude.ai"})); sys.exit(0)
 # where to write and which board: the hub gives an agent a filtered environment, so the gate leaves them in a file beside this program too
-conf = {}
-try: conf = json.load(open(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'coedit.conf')))
-except Exception: pass
+def read_conf():
+    try:
+        with open(os.path.join(os.path.dirname(os.path.realpath(__file__)), 'coedit.conf')) as f:
+            return json.load(f)
+    except (OSError, ValueError): return {}
+conf = read_conf()
 out, pcb = os.environ.get('BARE_COEDIT_OUT') or conf.get('out', ''), os.environ.get('BARE_COEDIT_PCB') or conf.get('pcb', '')
 open((out or '/tmp/bare-standin') + '.argv', 'a').write(json.dumps({'argv': a, 'url': url, 'pcb': pcb}) + '\n')
 if '--output-format' in a and a[a.index('--output-format') + 1] == 'json':   # a turn is -p too, with stream-json
@@ -49,7 +52,8 @@ ipc = lambda ty, m={}: tool('kicad_ipc', {'path': pcb, 'type': ty, 'message': m}
 msg = lambda r: r['body'].get('message', {}) if isinstance(r['body'], dict) else {}
 def turn(text, out):
     r = {}
-    plan = conf.get('plan')
+    # The full journey supplies the plan after the co-edit and comment turns, while this process stays alive.
+    plan = read_conf().get('plan')
     if url and pcb and 'plan-propose' in text:
         # the floorplanner's gate: propose, then a route the hub must refuse while nothing is approved
         out = out.replace('.json', '-plan1.json') if out else ''

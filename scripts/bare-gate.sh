@@ -68,8 +68,8 @@ fi
 pull() { B ssh "$GATE" -- 'cd ~/run 2>/dev/null && tar -czf - --exclude=home --exclude=standins --exclude=projects .' 2>/dev/null | tar -xzf - -C "$OUT" 2>/dev/null; }
 ( while sleep "${BARE_PULL_S:-60}"; do pull; done ) & PULLER=$!
 timeout "${BARE_TIMEOUT:-3600}" python3 scripts/boat-run.py "$GATE" "cd ~/gate && env $ENV bash test/bare/journey.sh ~/run" 2>&1 | tee "$OUT/journey.log"
-kill "$PULLER" 2>/dev/null; wait "$PULLER" 2>/dev/null
 RC=${PIPESTATUS[0]}
+kill "$PULLER" 2>/dev/null; wait "$PULLER" 2>/dev/null
 pull
 
 echo; echo "== timings ($IMAGE, $SRC${SHA:+ $SHA})"
