@@ -53,6 +53,14 @@ marked section, merged, never overwritten:
 - Whole-line `#` comments `# BEGIN Backplane fab profile` … `# END Backplane fab profile`, right after the file's `(version 1)` (a new
   file gets one). Regenerated in place; every byte outside the markers stays as the person wrote it (a test proves the round trip).
 - KiCad lets later rules win, so the person's own rules, after the section, keep precedence where they match.
+- Where the fab's rules sit: ahead of every rule of the person's. The fab's limits are the floor; a rule of the person's that sets the
+  same constraint decides, stricter or not, and one that allows less than the fab is a conflict (below), said and never silently won.
+- With the board open in KiCad the rules go through it (`EditCustomRules`, by rule name: a replaced rule keeps its place). A KiCad with
+  `rules-insert-position` (bp.13 batch 4) is sent `insert: RIP_FIRST`: every fab rule goes, ahead of the person's; when one is new or
+  one stands after the person's (an older runtime's write), all of them are removed and sent again in one request, in the plan's
+  order, so they move. An older KiCad appends a new name after everything else, where it would win: there a new fab rule whose
+  constraint one of the person's rules also sets is left out and named (`drc.left_out`). `current` follows the same choice (and, with
+  the capability, wants no fab rule after the person's).
 - A board setup minimum (the .kicad_pro's `board.design_settings.rules`) already as strict as the fab's gets no rule, only a comment:
   the project wins. One under it gets the rule and is listed in `drc.suggestions` for the person to approve; Backplane never rewrites
   the board setup itself.

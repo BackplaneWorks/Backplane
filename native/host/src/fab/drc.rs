@@ -75,7 +75,10 @@ pub const PREFIX: &str = "fab: ";
 #[derive(Clone, Debug, PartialEq)]
 pub struct Plan { pub section: String, pub rules: Vec<FabRule>, pub suggestions: Vec<Value>, pub conflicts: Vec<String>,
     /// the person's rules that allow less than the fab's base price but no less than it makes for more
-    pub costs_more: Vec<String> }
+    pub costs_more: Vec<String>,
+    /// the open KiCad places new rules first (bp.13 batch 4 `rules-insert-position`): every fab rule goes ahead of the person's
+    /// own, which win where they set the same constraint; else (older runtimes) a new rule KiCad would append is left out instead
+    pub insert_first: bool }
 
 /// Fab.drc.plan: the section for this profile and choice, given the project's own settings and the text of its rules file.
 pub fn plan(p: &Profile, c: &Choice, pr: &ProjectRules, existing: &str) -> Plan {
@@ -130,7 +133,7 @@ pub fn plan(p: &Profile, c: &Choice, pr: &ProjectRules, existing: &str) -> Plan 
             } }
         }
     }
-    Plan { section: s, rules, suggestions, conflicts, costs_more }
+    Plan { section: s, rules, suggestions, conflicts, costs_more, insert_first: false }
 }
 
 /// (start, end) byte offsets of the section, the END line's newline included.
@@ -220,6 +223,7 @@ pub fn present(text: &str) -> bool { section(text).is_some() || !fab_rules_in(te
 /// the rules its own way) the same rules by name, constraint and minimum.
 pub fn current(text: &str, plan: &Plan) -> bool {
     if section(text) == Some(plan.section.as_str()) { return true }
+    if plan.insert_first && fab_after_own(text) { return false }
     let mut have = fab_rules_in(text); let mut want: Vec<(String, String, f64)> = live_rules(text, plan).0.into_iter().map(|r| (r.name.clone(), r.constraint.clone(), r.min)).collect();
     let key = |x: &(String, String, f64)| format!("{}|{}", x.0, x.1);
     have.sort_by_key(key); want.sort_by_key(key);
@@ -233,7 +237,18 @@ fn crct(constraint: &str) -> Option<&'static str> {
         "edge_clearance" => "CRCT_EDGE_CLEARANCE", "text_height" => "CRCT_TEXT_HEIGHT", "text_thickness" => "CRCT_TEXT_THICKNESS", _ => return None,
     })
 }
-/// The plan's rules an open KiCad gets, and those left out: KiCad appends a rule whose name the file does not have yet after every
+/// Every rule's name in file order (comments left out).
+fn rule_names(text: &str) -> Vec<String> {
+    let clean: String = text.lines().filter(|l| !l.trim_start().starts_with('#')).collect::<Vec<_>>().join("\n");
+    clean.split("(rule ").skip(1).map(|c| c.trim_start().strip_prefix('"').and_then(|r| r.split('"').next()).unwrap_or_else(|| c.split_whitespace().next().unwrap_or("")).to_string()).collect()
+}
+/// Whether some fab rule stands after one of the person's own (where KiCad lets it win over theirs).
+fn fab_after_own(text: &str) -> bool {
+    let n = rule_names(text);
+    let first_own = n.iter().position(|x| !x.starts_with(PREFIX)); let last_fab = n.iter().rposition(|x| x.starts_with(PREFIX));
+    matches!((first_own, last_fab), (Some(o), Some(f)) if f > o)
+}
+/// The plan's rules an open KiCad gets, and those left out. With insert_first every rule goes (ahead of the person's). Else KiCad appends a rule whose name the file does not have yet after every
 /// other rule, so such a rule is left out where one of the person's own rules sets the same constraint (theirs keeps deciding).
 fn live_rules<'a>(text: &str, plan: &'a Plan) -> (Vec<&'a FabRule>, Vec<String>) {
     let had: Vec<String> = fab_rules_in(text).into_iter().map(|r| r.0).collect();
@@ -241,6 +256,7 @@ fn live_rules<'a>(text: &str, plan: &'a Plan) -> (Vec<&'a FabRule>, Vec<String>)
     let (mut keep, mut left) = (vec![], vec![]);
     for r in &plan.rules {
         if crct(&r.constraint).is_none() { continue }
+        if plan.insert_first { keep.push(r); continue }
         if !had.contains(&r.name) && own.contains(&r.constraint) { left.push(format!("{} (your own {} rule keeps deciding)", r.name, r.constraint)) } else { keep.push(r) }
     }
     (keep, left)
@@ -249,7 +265,9 @@ fn live_rules<'a>(text: &str, plan: &'a Plan) -> (Vec<&'a FabRule>, Vec<String>)
 /// longer has removed; every other rule stays as it is. KiCad replaces a rule of the same name where it stands, but appends a new
 /// one after everything else, where it would win over the person's own rules (later rules win). So a rule the file does not have yet
 /// whose constraint one of the person's rules also sets is left out (named in the answer's second part): the person's
-/// rule keeps deciding. Answers (message fields but the board, the rules left out).
+/// rule keeps deciding. With plan.insert_first (bp.13 batch 4) the fab's rules are placed first instead (RIP_FIRST): all of them
+/// go, ahead of the person's, whose rules win where they set the same constraint (a loosening one is a conflict, said). Answers
+/// (message fields but the board, the rules left out).
 pub fn edit_message(text: &str, plan: &Plan) -> (Value, Vec<String>) {
     let had: Vec<String> = fab_rules_in(text).into_iter().map(|r| r.0).collect();
     let (keep, left) = live_rules(text, plan);
@@ -261,8 +279,14 @@ pub fn edit_message(text: &str, plan: &Plan) -> (Value, Vec<String>) {
         upsert.push(j);
     }
     let names: Vec<&str> = plan.rules.iter().map(|r| r.name.as_str()).collect();
-    let mut remove: Vec<String> = had.into_iter().filter(|n| !names.contains(&n.as_str())).collect(); remove.dedup();
-    (json!({"upsert": upsert, "remove": remove}), left)
+    let new_one = upsert.iter().any(|u| !had.iter().any(|h| u["name"] == json!(h)));
+    // first: a new rule goes ahead of every other, so the fab's rules (kept in the plan's order) are all removed and sent again at
+    // once when one is new or one stands after the person's rules (a replaced rule keeps its place; remove and upsert moves it)
+    let resend = plan.insert_first && (new_one || fab_after_own(text));
+    let mut remove: Vec<String> = had.into_iter().filter(|n| resend || !names.contains(&n.as_str())).collect(); remove.dedup();
+    let mut m = json!({"upsert": upsert, "remove": remove});
+    if plan.insert_first { m["insert"] = json!("RIP_FIRST") }
+    (m, left)
 }
 
 /// What the project's rules file holds against the plan.
@@ -334,6 +358,31 @@ mod tests {
         assert!(present(&file) && current(&file, &pl), "{file}");
         assert!(!current(HAND, &pl) && !present(HAND));
         assert!(own_rules(&file).iter().all(|r| !r.0.starts_with(PREFIX)), "the fab's rules are not the person's");
+    }
+    #[test] fn fab_drc_a_kicad_that_places_rules_first_gets_every_fab_rule_ahead_of_the_persons() {
+        let p = store::baseline("jlcpcb").unwrap(); let mut pl = plan(&p, &choice("pcb", json!({"layers": 4}), "free"), &pro(), HAND); pl.insert_first = true;
+        let n = pl.rules.iter().filter(|r| crct(&r.constraint).is_some()).count();
+        // first write: nothing left out, all go first
+        let (m, left) = edit_message(HAND, &pl);
+        assert!(left.is_empty(), "{left:?}"); assert_eq!(m["insert"], "RIP_FIRST"); assert_eq!(m["upsert"].as_array().unwrap().len(), n);
+        assert!(m["upsert"].as_array().unwrap().iter().any(|r| r["name"] == "fab: clearance"), "the colliding rule goes too: the person's, after it, wins");
+        assert_eq!(m["remove"], json!([]));
+        let fmt = |r: &FabRule| format!("(rule \"{}\"\n\t# {}\n\t(constraint {} (min {}mm)))\n", r.name, r.comment, r.constraint, r.min);
+        let all: String = pl.rules.iter().filter(|r| crct(&r.constraint).is_some()).map(fmt).collect();
+        // what KiCad wrote: fab first, then the person's: current, and a second write moves nothing
+        let ahead = HAND.replacen("(version 1)\n", &format!("(version 1)\n{all}"), 1);
+        assert!(current(&ahead, &pl), "{ahead}");
+        let (m2, _) = edit_message(&ahead, &pl); assert_eq!(m2["remove"], json!([]), "replaced in place");
+        // an older runtime's write left fab rules after the person's (and one out): not current; all removed and sent again, first
+        let old: String = pl.rules.iter().filter(|r| crct(&r.constraint).is_some() && r.name != "fab: clearance").map(fmt).collect();
+        let behind = format!("{HAND}{old}");
+        assert!(!current(&behind, &pl), "fab rules after the person's are not where they belong");
+        let (m3, left3) = edit_message(&behind, &pl);
+        assert!(left3.is_empty()); assert_eq!(m3["upsert"].as_array().unwrap().len(), n);
+        assert_eq!(m3["remove"].as_array().unwrap().len(), n - 1, "each one there is moved: removed and sent again in the same request");
+        // without the capability nothing changes: the colliding rule is left out and no position is asked for
+        pl.insert_first = false; let (m4, left4) = edit_message(HAND, &pl);
+        assert!(m4.get("insert").is_none() && left4.iter().any(|l| l.starts_with("fab: clearance")));
     }
     #[test] fn fab_drc_the_project_wins_where_it_is_stricter_and_no_net_class_is_loosened() {
         let p = store::baseline("jlcpcb").unwrap(); let pl = plan(&p, &choice("pcb", json!({"layers": 4}), "free"), &pro(), HAND); let s = &pl.section;
