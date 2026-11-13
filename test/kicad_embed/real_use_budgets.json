@@ -133,6 +133,48 @@
    "field": "ok",
    "min": 1,
    "what": "Ctrl+; reaches Backplane again after the comment window closed with Escape"
+  },
+  {
+   "re": "^pan_during_(drc|erc|gerbers)_cli$",
+   "field": "ms",
+   "max": 25,
+   "what": "pan p99 while kicad-cli checks or exports"
+  },
+  {
+   "re": "^pan_during_(drc|erc|gerbers)_cli$",
+   "field": "hitch50",
+   "max": 0,
+   "what": "pan frames > 50 ms while kicad-cli runs"
+  },
+  {
+   "re": "^sch_xprobe\\d",
+   "field": "ms",
+   "max": 100,
+   "what": "a click on a symbol -> its footprint selected on the board"
+  },
+  {
+   "re": "^(drc_gui|plot_gui|erc_gui|annotate)_dialog_open$",
+   "field": "ms",
+   "max": 300,
+   "what": "KiCad's dialog open"
+  },
+  {
+   "re": "^(sch_move_symbol|sch_wire_draw)$",
+   "field": "hitch50",
+   "max": 0,
+   "what": "schematic edit frames > 50 ms"
+  },
+  {
+   "re": "^prewarm_modified$",
+   "field": "ok",
+   "min": 1,
+   "what": "no document modified by Edit and the pre-warm alone"
+  },
+  {
+   "re": "^kicad_mismatch$",
+   "field": "ok",
+   "min": 1,
+   "what": "the KiCad running is the runtime asked for"
   }
  ]
 }

@@ -7,10 +7,11 @@ REAL_BOARDS=(
   "hubble=$HOME/Documents/Nordic/Hubble_DK"
   "collar_main=$HOME/Documents/i2cjak/Collar_Wearable/boards/main"
 )
-# name=KiCad runtime's bin/kicad: the released one the person runs, the bp.12 test build
+# name=KiCad runtime's bin/kicad: the released one the person runs, the bp.12 test build (KEMBED_BP12=<dir> for another; each run passes
+# BACKPLANE_KICAD_BIN and BACKPLANE_KICAD_CLI from the same dir: the hub starts the KiCad beside the CLI, and agent shells export bp.11's CLI)
 REAL_RUNTIMES=(
   "bp11=$HOME/.backplane-gpui-fresh/home/kicad/10.99.0-bp.11/bin/kicad"
-  "bp12=$(ls -1d "$HOME"/.cache/kicad-test/10.99.0-bp.12*/bin/kicad 2>/dev/null | tail -1)"
+  "bp12=${KEMBED_BP12:-$HOME/.cache/kicad-test/10.99.0-bp.12}/bin/kicad"
 )
 
 # stage_board SRC DST: a slim read-only copy (rsync-like, python so nothing extra is needed)

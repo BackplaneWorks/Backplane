@@ -8,7 +8,7 @@ A KiCad dialog that appears on its own (a load warning) is recorded with its tit
 import json, os, re, subprocess, sys, threading, time
 
 OUT, CLOG = sys.argv[1], sys.argv[2]
-JOURNEYS = (sys.argv[3] if len(sys.argv) > 3 else "focus,open,switch,edit,mgmt,coedit,xprobe,comment,save,sch").split(",")
+JOURNEYS = (sys.argv[3] if len(sys.argv) > 3 else "focus,open,switch,edit,mgmt,coedit,xprobe,comment,save,tools,sch").split(",")
 LIB = os.path.dirname(os.path.abspath(__file__))
 IPC, DRV, RPC = os.environ["IPC_PY"], os.environ["DRIVER_PY"], os.environ["HUB_RPC_MJS"]
 RT, SAMP = os.path.join(LIB, "rt_input.py"), os.path.join(LIB, "pane_sampler.py")
@@ -68,9 +68,10 @@ def kicad_report(tag):
 def windows(): return json.loads(sh("python3", DRV, "list-windows") or "[]")
 
 # --- dialogs: KiCad windows that are neither an editor frame nor embedded: recorded, then Return
-STOP = threading.Event(); KNOWN = set()
+STOP = threading.Event(); KNOWN = set(); PAUSE = threading.Event()  # PAUSE: a journey opens KiCad's dialogs on purpose
 def dialog_watch():
     while not STOP.is_set():
+        if PAUSE.is_set(): STOP.wait(0.25); continue
         try:
             for w in windows():
                 if not w.get("shown") or w.get("override_redirect") or w["w"] < 120 or w["h"] < 60: continue
@@ -178,6 +179,23 @@ PROJ_DIR = os.path.join(OUT, "proj")
 if not PCB: PCB = (sorted(glob.glob(os.path.join(PROJ_DIR, "*.kicad_pcb"))) or [""])[0]
 KPRO = PCB[:-len(".kicad_pcb")] + ".kicad_pro" if PCB else ""
 MEM["pid"] = int(geo.get("pid") or 0); threading.Thread(target=mem_watch, daemon=True).start()
+# the KiCad actually running (never the one asked for): its executable, its runtime's SOURCE_VERSION/SOURCE_COMMIT, and its API's version
+KICAD_RUN = {"api": ipc("version", SOCK).get("full_version") if SOCK else None}
+try:
+    exe = os.readlink(f"/proc/{MEM['pid']}/exe"); rt_dir = os.path.dirname(os.path.dirname(exe)); KICAD_RUN["exe"] = exe
+    for f in ("SOURCE_VERSION", "SOURCE_COMMIT"):
+        if os.path.exists(os.path.join(rt_dir, f)): KICAD_RUN[f.lower()] = open(os.path.join(rt_dir, f)).read().strip()
+except Exception as e: KICAD_RUN["error"] = str(e)
+asked = os.environ.get("KICAD_BIN", "")
+KICAD_RUN["asked"] = asked
+if asked and KICAD_RUN.get("exe") and os.path.dirname(os.path.dirname(os.path.realpath(asked))) != os.path.dirname(os.path.dirname(KICAD_RUN["exe"])):
+    print(f"FAIL the KiCad running is not the one asked for: {KICAD_RUN}", flush=True); RESULTS["kicad_mismatch"] = {"ms": None, "ok": 0}
+print(f"INFO kicad {KICAD_RUN}", flush=True)
+# after Edit and the other editors' pre-warm, before any edit: is any document marked modified (a pre-warm that "repairs" a file)?
+if SOCK:
+    pm = {k: ipc("modified", SOCK, k).get("modified") for k in ("pcb", "sch")}
+    RESULTS["prewarm_modified"] = {"ms": None, "ok": int(not any(v is True for v in pm.values())), "pcb": pm["pcb"], "sch": pm["sch"]}
+    print(f"INFO modified after pre-warm: {pm}", flush=True)
 time.sleep(1.2); RESULTS["rss_ready_mb"] = {"ms": None, "mb": mem_now()}
 CONT = int((geo.get("container") or {}).get("xid") or 0)
 print(f"INFO pane={PANE} sock={SOCK} kicad_pid={MEM['pid']} rss={RESULTS['rss_ready_mb']['mb']}MB gpu={(metrics('gpu') or [{}])[0].get('device')} client={os.environ.get('CLIENT_BIN')}", flush=True)
@@ -339,12 +357,116 @@ if "save" in JOURNEYS and SOCK and PCB:
         if written and ipc("modified", SOCK, "pcb").get("modified") is False: clean = now(); break
         time.sleep(0.02)
     perf("save_written", round(written - t0) if written else -1); perf("save_clean", round(clean - t0) if clean else -1)
+# 7b. tools: KiCad's own DRC, Plot (Gerbers) and ERC dialogs as the person runs them (the dialog open, Return on its default button, how long
+# KiCad stays busy: its API ping answered slowly), then the same checks and exports by kicad-cli (what agents and the hub run) while the person pans
+def busy_after(t0, secs):
+    """KiCad's API ping every 100 ms for SECS: the slowest answer, and when the last slow (> 100 ms) one ended (busy time from t0)."""
+    pings, last_slow = [], None
+    while now() - t0 < secs * 1000:
+        a = now(); ok = ipc("ping", SOCK, timeout=30); b = now(); pings.append(b - a)
+        if b - a > 100: last_slow = b
+        time.sleep(0.1)
+    return (round(max(pings)) if pings else None), (round(last_slow - t0) if last_slow else 0)
+def find_win(title_part, secs):
+    t = time.time()
+    while time.time() - t < secs:
+        for w in windows():
+            if w.get("shown") and title_part.lower() in w.get("title", "").lower() and "kicad" in w.get("wm_class", "").lower(): return w
+        time.sleep(0.03)
+    return None
+def dialog_run(action, title, tag, run_secs=20, press_return=True):
+    t0 = now(); call = subprocess.Popen(["python3", IPC, "run-action", SOCK, action], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    w = find_win(title, 20)
+    if not w: perf(f"{tag}_dialog_open", -1, found=0); call.kill(); return
+    perf(f"{tag}_dialog_open", round(now() - t0), found=1); shot(f"{tag}_dialog")
+    sh("python3", XIN, "focus", w["title"]); time.sleep(0.2)
+    if not press_return:  # the Plot dialog's Return lands on its format list (a menu), not on Plot: only its opening is measured
+        sh("python3", XIN, "focus", w["title"]); rt("key", "Escape"); time.sleep(0.5)
+        try: call.wait(timeout=10)
+        except Exception: call.kill()
+        return
+    t1 = rt("key", "Return").get("t0")
+    worst, busy = busy_after(t1, run_secs)
+    perf(f"{tag}_run_busy", busy, ping_max=worst); shot(f"{tag}_done")
+    sh("python3", XIN, "focus", w["title"]); rt("key", "Escape"); time.sleep(0.5)
+    if find_win(title, 0.3): rt("key", "Escape"); time.sleep(0.5)
+    try: call.wait(timeout=10)
+    except Exception: call.kill()
+if "tools" in JOURNEYS and SOCK:
+    PAUSE.set()
+    tab("PCB", "tools_board", 1.2); rt("click", CX, CY + PANE["h"] // 3); time.sleep(0.4)
+    dialog_run("pcbnew.DRCTool.runDRC", "Design Rules Checker", "drc_gui")
+    gerb0 = set(glob.glob(os.path.join(PROJ_DIR, "**", "*.g*"), recursive=True))
+    dialog_run("common.Control.plot", "Plot", "plot_gui", press_return=False)
+    tab("SCH", "tools_sch", 1.5); rt("click", CX, PANE["y"] + PANE["h"] - 40); time.sleep(0.4)
+    dialog_run("eeschema.InspectionTool.runERC", "Electrical Rules Checker", "erc_gui")
+    tab("PCB", "tools_back", 1.2)
+    PAUSE.clear()
+    cli = os.environ.get("KICAD_CLI") or ""
+    sch = PCB[:-len(".kicad_pcb")] + ".kicad_sch"
+    jobs = [("drc_cli", [cli, "pcb", "drc", "--format", "json", "-o", os.path.join(OUT, "drc.json"), PCB]),
+            ("erc_cli", [cli, "sch", "erc", "--format", "json", "-o", os.path.join(OUT, "erc.json"), sch]),
+            ("gerbers_cli", [cli, "pcb", "export", "gerbers", "-o", os.path.join(OUT, "gerbers") + "/", PCB])]
+    for tag, cmd in jobs:
+        if not os.path.exists(cli): break
+        os.makedirs(os.path.join(OUT, "gerbers"), exist_ok=True)
+        box = {}
+        th = threading.Thread(target=lambda: box.update(r=rt("pan", CX, CY, min(PANE["w"], PANE["h"]) // 5, 5, 2, 120))); th.start(); time.sleep(0.3)
+        t0 = now(); rc = subprocess.run(cmd, capture_output=True, timeout=300).returncode; t1 = now()
+        th.join(); perf(tag, round(t1 - t0), rc=rc)
+        if box.get("r"): EVENTS.append({"kind": "input", "t0": box["r"]["t0"], "t1": box["r"]["t1"], "tag": f"pan_during_{tag}"})
+        time.sleep(0.5)
 # 8. schematic: pan/zoom there too
 if "sch" in JOURNEYS:
     tab("SCH", "sch_tab", 1.5)
     rt("click", CX, PANE["y"] + PANE["h"] - 40); time.sleep(0.3)
     r = rt("pan", CX, CY, min(PANE["w"], PANE["h"]) // 5, 6, 2, 120); EVENTS.append({"kind": "input", "t0": r["t0"], "t1": r["t1"], "tag": "sch_pan_6s"}); time.sleep(1)
     r = rt("wheel", CX, CY, 6, 60); EVENTS.append({"kind": "input", "t0": r["t0"], "t1": r["t1"], "tag": "sch_zoom_6s"}); time.sleep(1)
+    # cross-probe: a symbol brought to the pane's middle (SelectItems with zoom), the person's click on it, its footprint selected on the board
+    SREFS = []
+    sch_files = glob.glob(os.path.join(PROJ_DIR, "**", "*.kicad_sch"), recursive=True)
+    for f in sch_files:
+        SREFS += [r for r in re.findall(r'\(property "Reference" "([A-Z]+[0-9]+)"', open(f, errors="ignore").read()) if not r.startswith("PWR")]
+    SREFS = [r for r in dict.fromkeys(SREFS) if r[0] in "RCUJDLQ"][:12:3]
+    for i, ref in enumerate(SREFS[:3]):
+        ipc("select-items", SOCK, "sch", ref, 1); time.sleep(0.8); rt("key", "Escape"); time.sleep(0.3)  # in view, nothing selected
+        r = rt("click", CX, CY); t0 = r["t0"]; got = None
+        while now() - t0 < 3000:
+            sel = ipc("selection", SOCK, "pcb")
+            if ref in (sel.get("refs") or []): got = now(); break
+            time.sleep(0.03)
+        ssel = ipc("selection", SOCK, "sch")
+        perf(f"sch_xprobe{i}_{ref}", round(got - t0) if got else -1, sch_selected=int(ref in (ssel.get("refs") or [])))
+    # edits: move a symbol (M, the pointer moves, a click), a wire (W, two clicks, Escape), annotate (its dialog, Return), each undone
+    if SREFS:
+        ipc("select-items", SOCK, "sch", SREFS[0], 1); time.sleep(0.8); rt("key", "Escape"); time.sleep(0.2)
+        rt("click", CX, CY); time.sleep(0.3); rt("key", "m")
+        r = rt("pan", CX + 30, CY + 30, 40, 1.2, 0, 60); EVENTS.append({"kind": "input", "t0": r["t0"], "t1": r["t1"], "tag": "sch_move_symbol"})
+        r = rt("click", CX + 70, CY + 30); EVENTS.append({"kind": "switch", "t0": r["t0"], "tag": "sch_move_place", "window_ms": 1500}); time.sleep(1)
+        rt("key", "Escape"); rt("key", "z", "ctrl"); time.sleep(1)
+        rt("click", CX - 150, CY + 120); rt("key", "Escape"); rt("key", "w")
+        r = rt("pan", CX - 100, CY + 120, 50, 1.0, 0, 60); EVENTS.append({"kind": "input", "t0": r["t0"], "t1": r["t1"], "tag": "sch_wire_draw"})
+        r = rt("click", CX - 50, CY + 120); rt("key", "Escape"); rt("key", "Escape")
+        EVENTS.append({"kind": "switch", "t0": r["t0"], "tag": "sch_wire_end", "window_ms": 1500}); time.sleep(1)
+        rt("key", "z", "ctrl"); time.sleep(1)
+    PAUSE.set()
+    for act in ("eeschema.EditorControl.annotate", "eeschema.SchematicControl.annotate", "eeschema.InspectionTool.annotate"):
+        if find_win("Annotate", 0.1): break
+        call = subprocess.Popen(["python3", IPC, "run-action", SOCK, act], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True)
+        t0 = now(); w = find_win("Annotate", 3)
+        if w:
+            perf("annotate_dialog_open", round(now() - t0), action=act); sh("python3", XIN, "focus", w["title"]); time.sleep(0.2)
+            t1 = rt("key", "Return").get("t0"); worst, busy = busy_after(t1, 6); perf("annotate_run_busy", busy, ping_max=worst)
+            if find_win("Annotate", 0.2): sh("python3", XIN, "focus", "Annotate"); rt("key", "Escape"); time.sleep(0.4)
+            try: call.wait(timeout=5)
+            except Exception: call.kill()
+            rt("key", "z", "ctrl"); time.sleep(0.5)
+            break
+        try: call.kill()
+        except Exception: pass
+    else: print("DIAG annotate: no action opened its dialog", flush=True)
+    PAUSE.clear()
+    # a hierarchical sheet: not yet (eeschema.NavigateTool.enterSheet needs a sheet selected; SelectItems takes references only)
     tab("PCB", "sch_back_board", 1.5)
 
 # 6. comment: the fork's "Comment to Backplane" on a selection -> the message in the thread
@@ -379,6 +501,6 @@ if MEM["samples"]:
     RESULTS["rss_peak_mb"] = {"ms": None, "mb": max(x[1] for x in MEM["samples"]), "hwm_mb": max(x[2] for x in MEM["samples"])}
     RESULTS["rss_end_mb"] = {"ms": None, "mb": MEM["samples"][-1][1]}
     print(f"PERF memory ready={RESULTS['rss_ready_mb']['mb']}MB peak={RESULTS['rss_peak_mb']['mb']}MB hwm={RESULTS['rss_peak_mb']['hwm_mb']}MB end={RESULTS['rss_end_mb']['mb']}MB", flush=True)
-summary = {"results": RESULTS, "client": os.environ.get("CLIENT_BIN"), "kicad": os.environ.get("KICAD_BIN"), "dialogs": DIALOGS, "pane": PANE, "gpu": (metrics("gpu") or [{}])[0], "cold_edit_click_epoch": edit_click.get("epoch_ms")}
+summary = {"results": RESULTS, "client": os.environ.get("CLIENT_BIN"), "kicad": os.environ.get("KICAD_BIN"), "kicad_running": KICAD_RUN, "dialogs": DIALOGS, "pane": PANE, "gpu": (metrics("gpu") or [{}])[0], "cold_edit_click_epoch": edit_click.get("epoch_ms")}
 json.dump(summary, open(os.path.join(OUT, "real_use.json"), "w"), indent=1)
 print("JSON " + json.dumps(summary), flush=True)
