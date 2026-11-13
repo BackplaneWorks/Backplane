@@ -109,7 +109,7 @@ Upstream main (`origin/main`) is the one main. Local `main` only ever follows it
 1. `git fetch origin main`;
 2. `git rebase origin/main` (a conflict aborts the rebase and stops: resolve it by hand, then land again);
 3. `scripts/check-author.sh origin/main..HEAD`;
-4. the tests, `scripts/dev-build.sh --gate --no-cut` (`LAND_TEST` replaces the command); a tree that already passed (`<git-dir>/land-tested`) is not tested again;
+4. free space first: the repo's disk and the tests' scratch (`$TMPDIR`, `~/.cache`) each need `LAND_MIN_FREE_GB` (10); less fails at once with `land: FAILED: only N GB free on /, need M: clean up` rather than as a dozen unrelated "No space left on device" test failures; then the tests, `scripts/dev-build.sh --gate --no-cut` (`LAND_TEST` replaces the command); a tree that already passed (`<git-dir>/land-tested`) is not tested again;
 5. `git push origin HEAD:main`, a fast-forward, never forced. Rejected because origin moved: back to 1, at most `LAND_TRIES` (3) times;
 6. local `main` fast-forwards to what was pushed (in the checkout that has it out).
 
