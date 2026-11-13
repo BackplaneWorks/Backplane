@@ -12,7 +12,14 @@ REAL_BOARDS=(
 REAL_RUNTIMES=(
   "bp11=$HOME/.backplane-gpui-fresh/home/kicad/10.99.0-bp.11/bin/kicad"
   "bp12=${KEMBED_BP12:-$HOME/.cache/kicad-test/10.99.0-bp.12}/bin/kicad"
+  "bp13=${KEMBED_BP13:-$HOME/.cache/kicad-test/10.99.0-bp.13}/bin/kicad"
 )
+# the fork's plan demo (scripts/backplane-plan-demo.py) at the runtime's own BACKPLANE_COMMIT, read from the fork's git (never its worktree)
+KICAD_FORK=${KICAD_FORK:-$HOME/Documents/Backplane/Backplane_KiCad}
+plan_demo() {  # plan_demo RUNTIME_KICAD OUT.py: 0 when the runtime has a plan demo
+  local rd c; rd=$(dirname "$(dirname "$1")"); c=$(cat "$rd/BACKPLANE_COMMIT" 2>/dev/null || true)
+  [ -n "$c" ] && git -C "$KICAD_FORK" show "$c:scripts/backplane-plan-demo.py" >"$2" 2>/dev/null && [ -s "$2" ]
+}
 
 # stage_board SRC DST: a slim read-only copy (rsync-like, python so nothing extra is needed)
 stage_board() {

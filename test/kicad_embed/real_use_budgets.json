@@ -235,6 +235,66 @@
    "field": "ok",
    "min": 1,
    "what": "the journey starts where it says it does"
+  },
+  {
+   "re": "^plan_view_on$",
+   "field": "ms",
+   "max": 300,
+   "what": "Alt+P -> plan view drawn"
+  },
+  {
+   "re": "^plan_view_on$|^plan_toggle\\d+_",
+   "field": "blank_frames",
+   "max": 0,
+   "what": "plan view: frames of background"
+  },
+  {
+   "re": "^plan_toggle\\d+_",
+   "field": "ms",
+   "max": 100,
+   "what": "plan view toggle -> drawn"
+  },
+  {
+   "re": "^plan_drag_(corridor|plane)_vertex$",
+   "field": "ms",
+   "max": 16.7,
+   "what": "plan vertex drag p99 frame interval (the floorplanner's budget)"
+  },
+  {
+   "re": "^plan_drag_(corridor|plane)_vertex$",
+   "field": "hitch50",
+   "max": 0,
+   "what": "plan vertex drag: frames > 50 ms"
+  },
+  {
+   "re": "^plan_(widen|narrow|approve|reject|layer_corridor|layer_plane)$",
+   "field": "ms",
+   "max": 100,
+   "what": "plan edit -> drawn"
+  },
+  {
+   "re": "^plan_propose_to_overlay$",
+   "field": "ms",
+   "max": 100,
+   "what": "ProposePlan -> overlay changed on screen"
+  },
+  {
+   "re": "^plan_alt_p_is_plan_view$",
+   "field": "ok",
+   "min": 1,
+   "what": "Alt+P toggles the plan view (not KiCad's Place menu)"
+  },
+  {
+   "re": "^plan_calibrated$",
+   "field": "ok",
+   "min": 1,
+   "what": "the harness put board millimetres on screen (else no vertex drags)"
+  },
+  {
+   "re": "^plan_drag_(corridor|plane)_vertex_hit$|^plan_(widen|narrow|approve|reject)_applied$",
+   "field": "ok",
+   "min": 1,
+   "what": "the plan edit took (GetPlan before/after)"
   }
  ]
 }

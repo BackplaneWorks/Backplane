@@ -8,7 +8,7 @@ A KiCad dialog that appears on its own (a load warning) is recorded with its tit
 import json, os, re, subprocess, sys, threading, time
 
 OUT, CLOG = sys.argv[1], sys.argv[2]
-JOURNEYS = (sys.argv[3] if len(sys.argv) > 3 else "focus,open,switch,edit,mgmt,coedit,xprobe,comment,save,tools,sch").split(",")
+JOURNEYS = (sys.argv[3] if len(sys.argv) > 3 else "focus,open,switch,edit,mgmt,coedit,xprobe,comment,save,tools,plan,sch").split(",")
 LIB = os.path.dirname(os.path.abspath(__file__))
 IPC, DRV, RPC = os.environ["IPC_PY"], os.environ["DRIVER_PY"], os.environ["HUB_RPC_MJS"]
 RT, SAMP = os.path.join(LIB, "rt_input.py"), os.path.join(LIB, "pane_sampler.py")
@@ -67,6 +67,7 @@ def kicad_report(tag):
     return rs[-1] if rs else {}
 def windows(): return json.loads(sh("python3", DRV, "list-windows") or "[]")
 
+def shot(name): sh("import", "-window", "root", os.path.join(OUT, "shots", f"{name}.png"), timeout=20)
 # --- dialogs: KiCad windows that are neither an editor frame nor embedded: recorded, then Return
 STOP = threading.Event(); KNOWN = set(); PAUSE = threading.Event()  # PAUSE: a journey opens KiCad's dialogs on purpose
 def dialog_watch():
@@ -78,7 +79,7 @@ def dialog_watch():
                 if "kicad" not in w.get("wm_class", "").lower(): continue
                 t = w.get("title", "")
                 if re.search(r"(PCB Editor|Schematic Editor|3D Viewer|Footprint Editor|Symbol Editor)$", t) or w["xid"] in KNOWN: continue
-                if not w.get("transient_for") and t not in ("Load Schematic", "Load PCB", "Error", "Warning", "Confirmation", "Information"): continue
+                if not w.get("transient_for") and t not in ("Load Schematic", "Load PCB", "Error", "Warning", "Confirmation", "Information", "File Open Warning"): continue
                 KNOWN.add(w["xid"]); DIALOGS.append({"t": now(), "title": t, "w": w["w"], "h": w["h"]})
                 print(f"DIALOG {t!r} {w['w']}x{w['h']} (Return)", flush=True); shot(f"dialog{len(DIALOGS)}")
                 sh("python3", os.path.join(os.environ["REPO_ROOT"], "test/cef/xinput.py"), "focus", t); rt("key", "Return")
@@ -200,7 +201,7 @@ MEM["pid"] = int(geo.get("pid") or 0); threading.Thread(target=mem_watch, daemon
 KICAD_RUN = {"api": ipc("version", SOCK).get("full_version") if SOCK else None}
 try:
     exe = os.readlink(f"/proc/{MEM['pid']}/exe"); rt_dir = os.path.dirname(os.path.dirname(exe)); KICAD_RUN["exe"] = exe
-    for f in ("SOURCE_VERSION", "SOURCE_COMMIT"):
+    for f in ("SOURCE_VERSION", "SOURCE_COMMIT", "BACKPLANE_COMMIT"):
         if os.path.exists(os.path.join(rt_dir, f)): KICAD_RUN[f.lower()] = open(os.path.join(rt_dir, f)).read().strip()
 except Exception as e: KICAD_RUN["error"] = str(e)
 asked = os.environ.get("KICAD_BIN", "")
@@ -222,7 +223,6 @@ _sn = (metrics("shown") or [{}])[-1]
 if _sn.get("thread") != "t1" or _sn.get("open") != "board":
     print(f"FAIL the editor is not open on t1 (Embedded KiCad E2E): shown={_sn}", flush=True); sys.exit(1)
 
-def shot(name): sh("import", "-window", "root", os.path.join(OUT, "shots", f"{name}.png"), timeout=20)
 def editor_up():  # a KiCad editor frame mapped over the pane (the X tree, not the client's word)
     for w in windows():
         if w.get("shown") and "kicad" in w.get("wm_class", "").lower() and w["w"] > 200 and abs(w["root_x"] - PANE["x"]) < 40 and abs(w["root_y"] - PANE["y"]) < 60: return True
@@ -453,6 +453,120 @@ if "tools" in JOURNEYS and SOCK:
         th.join(); perf(tag, round(t1 - t0), rc=rc)
         if box.get("r"): EVENTS.append({"kind": "input", "t0": box["r"]["t0"], "t1": box["r"]["t1"], "tag": f"pan_during_{tag}"})
         time.sleep(0.5)
+# 7c. plan: the routing floorplanner (fork bp.13+, a <board>.kicad_plan beside the board): plan view on/off (Alt+P), the plan layer, a corridor
+# vertex and a plane vertex dragged 5 s each (frame times), W / Shift+W, A / R, and an agent's ProposePlan to the overlay on screen.
+# Board millimetres are put on screen by a two-point calibration: two footprints selected over the API, each found by the pixels that change.
+PLANP = os.path.join(os.path.dirname(os.path.abspath(__file__)), "plan_probe.py")
+def plan(*a, timeout=30): return jl(sh("python3", PLANP, *a, timeout=timeout))
+def changed_centroid(before, after, min_px=20):
+    import numpy as np
+    ys, xs = np.nonzero(before != after)
+    if len(xs) < min_px: return None
+    return float(xs.mean()), float(ys.mean())
+def fp_positions():
+    txt = open(PCB, errors="ignore").read(); out = {}
+    for m in re.finditer(r'\(footprint "[^"]*"(.*?)\n\t\)', txt, re.S):
+        body = m.group(1); ref = re.search(r'\(property "Reference" "([^"]+)"', body)
+        at = re.search(r'\n\t\t\(at ([-\d.]+) ([-\d.]+)', body) or re.search(r'\n\t\t\(transform\s*\(translate ([-\d.]+) ([-\d.]+)\)', body)  # 10.0 / 10.99 forms
+        if at and ref: out[ref.group(1)] = (float(at.group(1)), float(at.group(2)))
+    return out
+def calibrate():
+    from pane_sampler import grab
+    # small two-pad parts (C, R): their origin is their middle, which is where a selection's changed pixels centre
+    fps = fp_positions(); refs = [r for r in fps if re.match(r"^[CR]\d+$", r)] or [r for r in fps if re.match(r"^[A-Z]+\d+$", r)]
+    if len(refs) < 2: print(f"DIAG plan calibration: {len(refs)} footprints parsed", flush=True); return None
+    # two far-apart footprints
+    a = min(refs, key=lambda r: fps[r][0] + fps[r][1]); b = max(refs, key=lambda r: fps[r][0] + fps[r][1])
+    pts = []
+    for ref in (a, b):
+        # the canvas only (not the toolbars, the header or the status bar, which a selection changes too): measured at 1800x1050
+        CV = (PANE["x"] + 40, PANE["y"] + 110, 720, 715)
+        rt("key", "Escape"); time.sleep(0.4); g0 = grab(*CV)
+        ipc("select-items", SOCK, "pcb", ref, 0); time.sleep(0.6); g1 = grab(*CV)
+        c = changed_centroid(g0, g1)
+        if c: c = (c[0] + 40, c[1] + 110)
+        if not c: print(f"DIAG plan calibration: selecting {ref} changed no pixels", flush=True); return None
+        pts.append((fps[ref], (PANE["x"] + c[0], PANE["y"] + c[1])))
+    rt("key", "Escape"); time.sleep(0.3)
+    (b1, s1), (b2, s2) = pts
+    k = ((s2[0] - s1[0]) / (b2[0] - b1[0]) + (s2[1] - s1[1]) / (b2[1] - b1[1])) / 2 if b2[0] != b1[0] and b2[1] != b1[1] else None
+    if not k or k <= 0: print(f"DIAG plan calibration: bad scale from {pts}", flush=True); return None
+    ox, oy = s1[0] - k * b1[0], s1[1] - k * b1[1]
+    print(f"INFO plan calibration: {a}@{s1} {b}@{s2} -> {k:.3f} px/mm", flush=True)
+    return lambda x, y: (ox + k * x, oy + k * y)
+if "plan" in JOURNEYS and SOCK:
+    got = plan("get", SOCK); pj = {}
+    try: pj = json.loads(got.get("json") or "{}")
+    except Exception: pass
+    if not pj.get("corridors"):
+        print(f"DIAG plan: no plan on this board/runtime ({str(got)[:120]})", flush=True)
+    else:
+        tab("PCB", "plan_board", 1.2); rt("click", CX, PANE["y"] + PANE["h"] - 30); time.sleep(0.3); rt("key", "Home"); time.sleep(1.0)
+        to_screen = calibrate()
+        RESULTS["plan_calibrated"] = {"ms": None, "ok": int(to_screen is not None)}
+        r = rt("key", "p", "alt"); time.sleep(0.6)
+        menu = [w for w in windows() if w.get("shown") and w.get("override_redirect") and w["w"] > 100 and w["h"] > 100]
+        RESULTS["plan_alt_p_is_plan_view"] = {"ms": None, "ok": int(not menu)}
+        if menu:
+            print(f"JANK Alt+P opened a menu ({menu[0]['w']}x{menu[0]['h']} popup: KiCad's Place menu mnemonic) instead of the plan view; driving plan view by its action", flush=True)
+            shot("plan_alt_p_menu"); rt("key", "Escape"); time.sleep(0.3); rt("key", "Escape"); time.sleep(0.5)
+        def toggle_plan():
+            t0 = now(); st = ipc("run-action", SOCK, "pcbnew.Plan.togglePlanView")
+            if not st.get("ok"): print(f"DIAG togglePlanView: {st}", flush=True)
+            return t0
+        EVENTS.append({"kind": "switch", "t0": r["t0"], "tag": "plan_alt_p", "window_ms": 1500})
+        if menu: t0 = toggle_plan()  # Alt+P opened a menu: the plan view by its action (RunAction may not reach it: its status is printed)
+        else: t0 = r["t0"]
+        EVENTS.append({"kind": "switch", "t0": t0, "tag": "plan_view_on", "window_ms": 2000}); time.sleep(2); shot("plan_view")
+        for i in range(10):
+            t0 = toggle_plan() if menu else rt("key", "p", "alt")["t0"]
+            EVENTS.append({"kind": "switch", "t0": t0, "tag": f"plan_toggle{i:02d}_{'off' if i % 2 == 0 else 'on'}", "window_ms": 1200}); time.sleep(1.2)
+        cor = pj["corridors"][0]; cl = cor["layer"]
+        order = sorted({l["layer"] for l in pj.get("layers", [])}, key=lambda n: 0 if n == "F.Cu" else (99 if n == "B.Cu" else int(re.sub(r"\D", "", n) or 50)))
+        def panel_click(layer, tag):  # the plan view's mini panel for LAYER (measured at 1800x1050: x pane+708, y pane+179+120*i)
+            i = order.index(layer) if layer in order else 0
+            r = rt("click", PANE["x"] + 708, PANE["y"] + 179 + 120 * i)
+            EVENTS.append({"kind": "switch", "t0": r["t0"], "tag": tag, "window_ms": 1500}); time.sleep(1.5)
+            print(f"INFO plan layer after the {layer} panel: {plan('layer', SOCK).get('layer')}", flush=True)
+        panel_click(cl, "plan_layer_corridor"); shot("plan_layer_corridor")
+        if to_screen:
+            path = cor["path"]; mid = ((path[0][0] + path[1][0]) / 2, (path[0][1] + path[1][1]) / 2)
+            mx, my = to_screen(*mid); rt("click", mx, my); time.sleep(0.6); shot("plan_corridor_selected")
+            print(f"INFO plan corridor {cor['id']} on {cl}: clicked {mx:.0f},{my:.0f}; vertex {to_screen(*path[1])}", flush=True)
+            vx, vy = to_screen(*path[1])
+            r = rt("drag_circle", vx, vy, 25, 5, 1, 120); EVENTS.append({"kind": "input", "t0": r["t0"], "t1": r["t1"], "tag": "plan_drag_corridor_vertex"}); time.sleep(1)
+            after = json.loads(plan("get", SOCK).get("json") or "{}"); ac = next((c for c in after.get("corridors", []) if c["id"] == cor["id"]), {})
+            RESULTS["plan_drag_corridor_vertex_hit"] = {"ms": None, "ok": int(ac.get("path") != cor["path"])}
+            print(f"INFO plan corridor vertex moved by the drag: {ac.get('path') != cor['path']}", flush=True)
+            rt("click", mx, my); time.sleep(0.4)
+            for key, mods, tag in (("w", (), "plan_widen"), ("w", ("shift",), "plan_narrow"), ("a", (), "plan_approve"), ("r", (), "plan_reject")):
+                b4 = json.loads(plan("get", SOCK).get("json") or "{}")
+                r = rt("key", key, *mods); EVENTS.append({"kind": "switch", "t0": r["t0"], "tag": tag, "window_ms": 1500}); time.sleep(1.5)
+                af = json.loads(plan("get", SOCK).get("json") or "{}")
+                pick = lambda d: next(({k: c.get(k) for k in ("width", "status")} for c in d.get("corridors", []) if c["id"] == cor["id"]), {})
+                print(f"INFO plan {tag}: {pick(b4)} -> {pick(af)}", flush=True)
+                RESULTS[f"{tag}_applied"] = {"ms": None, "ok": int(pick(b4) != pick(af))}
+            shot("plan_after_keys")
+            pl = next((q for q in pj.get("planes", []) if q.get("outline") and q["outline"][0]), None)
+            if pl:
+                panel_click(pl["layer"], "plan_layer_plane")
+                ring = pl["outline"][0]; cx_ = sum(p_[0] for p_ in ring) / len(ring); cy_ = sum(p_[1] for p_ in ring) / len(ring)
+                px_, py_ = to_screen(cx_, cy_); rt("click", px_, py_); time.sleep(0.6); shot("plan_plane_selected")
+                vx, vy = to_screen(*ring[0])
+                r = rt("drag_circle", vx, vy, 25, 5, 1, 120); EVENTS.append({"kind": "input", "t0": r["t0"], "t1": r["t1"], "tag": "plan_drag_plane_vertex"}); time.sleep(1)
+                after = json.loads(plan("get", SOCK).get("json") or "{}"); ap = next((q for q in after.get("planes", []) if q["id"] == pl["id"]), {})
+                RESULTS["plan_drag_plane_vertex_hit"] = {"ms": None, "ok": int(ap.get("outline") != pl["outline"])}
+                print(f"INFO plan plane vertex moved by the drag: {ap.get('outline') != pl['outline']}", flush=True)
+        # an agent's proposal: the first corridor moved 3 mm, proposed (merge) over the API: the call to the overlay changed on screen
+        panel_click(cl, "plan_layer_back")
+        moved = dict(cor); moved["path"] = [[x + 3.0, y + 3.0] for x, y in cor["path"]]; moved["status"] = "proposed"; moved.pop("edited", None)
+        body = {k: v for k, v in pj.items() if k in ("format", "board")}; body.update({"corridors": [moved]})
+        pf = os.path.join(OUT, "propose.json"); json.dump(body, open(pf, "w"))
+        t0 = now(); res = plan("propose", SOCK, pf, "merge"); t1 = now()
+        EVENTS.append({"kind": "commit", "t0": t0, "tag": "plan_propose_to_overlay", "window_ms": 2000})
+        perf("plan_propose_rpc", round(t1 - t0), applied=len(res.get("applied") or []), refused=len(res.get("refused") or []))
+        time.sleep(2); shot("plan_proposed")
+        (toggle_plan() if menu else rt("key", "p", "alt")); time.sleep(1)  # plan view off again
 # 8. schematic: pan/zoom there too
 if "sch" in JOURNEYS:
     tab("SCH", "sch_tab", 1.5)

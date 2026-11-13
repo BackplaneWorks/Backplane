@@ -199,3 +199,27 @@ API ping, the hub reports `unresponsive` and the pane keeps saying "Starting KiC
 
 Within budget: pan and zoom (p50 16.7 ms, the display's rate; p99 17 to 22), agent commit to repaint (19 to 46 ms), Ctrl+S (36 to 57 ms written,
 55 to 192 clean), Comment to Backplane (45 to 52 ms to the thread).
+
+## The routing floorplanner (bp.13 test build d5eaa3ae44, 2026-11-12/13)
+
+`KEMBED_ONLY_PLAN=1 KEMBED_RUNTIMES=bp13 REAL_HARDWARE=1 test/kicad_embed/real_use_all.sh`: for a runtime whose `BACKPLANE_COMMIT` has the
+fork's `scripts/backplane-plan-demo.py` (read from the fork's git at that commit), each board is copied, stripped of copper and given the
+demo plan, and the `plan` journey runs: Alt+P as the person presses it (a menu that opens instead is recorded), the plan view toggled 10
+times, the plan layer by its mini panel (right of the canvas), a corridor vertex and a plane vertex dragged round for 5 s each, W / Shift+W /
+A / R on the selected corridor, and an agent's ProposePlan (merge) to the overlay on screen. Board millimetres reach the screen by a
+two-point calibration (two C/R parts selected over the API, found by the canvas pixels they change); every edit is checked by GetPlan
+before and after, so a drag that missed its handle is reported, not timed as one.
+
+| step | collar_main | hubble | budget |
+|---|---|---|---|
+| Alt+P | opens KiCad's Place menu (mnemonic) | same | plan view |
+| plan view toggle x10 | not measured: Alt+P is the menu, and RunAction(pcbnew.Plan.togglePlanView) answers nothing | same | 100 |
+| plan layer by its mini panel | 58-98 ms, 0 blank; In1.Cu/In2.Cu become active | the click leaves B.Cu active | 100 |
+| corridor vertex drag 5 s (moved: yes) | p50 16.5, p95 33.7, p99 38.2, max 153; 2 > 50 ms | missed (calibration) | p99 16, 0 > 50 |
+| plane vertex drag 5 s (moved: yes) | p50 16.2, p95 33.1, p99 37.1, max 103; 1 > 50 ms | missed | p99 16, 0 > 50 |
+| W / Shift+W / A / R on the selected corridor | no change in the plan (width 1.05, proposed, before and after) | - | changes |
+| ProposePlan call / to overlay on screen | 16-56 ms / 14-43 ms (runs 4-6); refused after the person edited the corridor (run 7) | 28-90 / 19-75 ms | 100 |
+| KiCad RSS editors up / peak | 3.9 / 4.1 GB | 3.9 / 4.1 GB | (bp.13 lazy libraries: ~1.7 GB expected) |
+
+Also on bp.13: "File Open Warning" ("Project ... is already open by 'h' at 'desktop'") on Edit in 2 of 5 Hubble runs and 1 Collar run (KiCad
+waits on it; the hub reports "waiting on dialog: File Open Warning").
