@@ -8,9 +8,9 @@ use sha2::{Digest, Sha256};
 use std::{collections::BTreeMap, fs, io::Read, path::{Path, PathBuf}};
 
 pub const FEED: &str = "https://api.github.com/repos/BackplaneWorks/Backplane/releases";
-/// The nightly builds, a repository of their own: in FEED's list a nightly would be offered to 0.15.0-0.15.3's beta hubs, whose rule calls any prerelease beta,
-/// and refused by them (its manifest says nightly), so it would hold up their betas. Only the nightly channel reads this, besides FEED.
-pub const NIGHTLY_FEED: &str = "https://api.github.com/repos/BackplaneWorks/backplane-nightly/releases";
+/// A nightly's signed files, under names of their own: 0.15.0-0.15.3 call any prerelease beta and would offer a nightly to their beta hubs, then refuse its
+/// manifest (it says nightly) every hour and never reach the next beta. Without SIGNED's names a nightly is half published to them, so never offered.
+pub const NIGHTLY_SIGNED: [&str; 3] = ["nightly-manifest.json", "nightly-manifest.json.sig", "nightly-manifest.json.keyid"];
 /// The signed files, which the release workflow uploads last: a release without all three is half published.
 pub const SIGNED: [&str; 3] = ["manifest.json", "manifest.json.sig", "manifest.json.keyid"];
 const SMALL: u64 = 1 << 20;
@@ -27,7 +27,12 @@ pub struct Listed { pub rel: Rel, pub urls: BTreeMap<String, String> }
 pub fn listing(body: &[u8]) -> Result<Vec<Listed>, String> {
     let v: Value = serde_json::from_slice(body).map_err(|_| "the release list is not JSON".to_string())?;
     Ok(v.as_array().ok_or("the release list is not a list")?.iter().map(|r| {
-        let urls: BTreeMap<String, String> = r["assets"].as_array().map(|a| a.iter().filter_map(|x| Some((x["name"].as_str()?.to_string(), x["browser_download_url"].as_str()?.to_string()))).collect()).unwrap_or_default();
+        let mut urls: BTreeMap<String, String> = r["assets"].as_array().map(|a| a.iter().filter_map(|x| Some((x["name"].as_str()?.to_string(), x["browser_download_url"].as_str()?.to_string()))).collect()).unwrap_or_default();
+        let tag = r["tag_name"].as_str().unwrap_or("");
+        // a nightly's signed files are read as SIGNED's (NIGHTLY_SIGNED)
+        if rel::tag_channel(tag) == "nightly" && NIGHTLY_SIGNED.iter().all(|n| urls.contains_key(*n)) {
+            for (s, n) in SIGNED.iter().zip(NIGHTLY_SIGNED) { let u = urls[n].clone(); urls.insert(s.to_string(), u); }
+        }
         let signed = SIGNED.iter().all(|n| urls.contains_key(*n));
         Listed { rel: Rel { tag: r["tag_name"].as_str().unwrap_or("").into(), prerelease: r["prerelease"].as_bool().unwrap_or(false), draft: r["draft"].as_bool().unwrap_or(false), signed }, urls }
     }).collect())
@@ -187,6 +192,17 @@ mod tests {
                      {"tag_name":"v0.17.0","assets":[{"name":"manifest.json","browser_download_url":"u4"}]}]"#;
         let l = listing(b).unwrap(); assert!(l[0].rel.signed); assert!(!l[1].rel.signed, "the signature is uploaded last: not there yet, half published");
         assert!(listing(b"{\"message\":\"rate limited\"}").is_err()); assert!(listing(b"<html>").is_err());
+    }
+    #[test] fn a_nightly_is_signed_under_its_own_names_which_015s_beta_hubs_do_not_count() {
+        let b = br#"[{"tag_name":"v0.15.4-nightly.20261114.1","prerelease":true,"draft":false,"assets":[{"name":"nightly-manifest.json","browser_download_url":"n1"},{"name":"nightly-manifest.json.sig","browser_download_url":"n2"},{"name":"nightly-manifest.json.keyid","browser_download_url":"n3"}]},
+                     {"tag_name":"v0.15.4-beta.1","prerelease":true,"draft":false,"assets":[{"name":"nightly-manifest.json","browser_download_url":"b1"},{"name":"nightly-manifest.json.sig","browser_download_url":"b2"},{"name":"nightly-manifest.json.keyid","browser_download_url":"b3"}]}]"#;
+        let l = listing(b).unwrap();
+        assert!(l[0].rel.signed && l[0].urls["manifest.json"] == "n1" && l[0].urls["manifest.json.sig"] == "n2" && l[0].urls["manifest.json.keyid"] == "n3", "read as SIGNED's");
+        assert!(!l[1].rel.signed, "only a nightly's tag takes the nightly names");
+        // 0.15.0-0.15.3's listing: signed only with SIGNED's names, which a published nightly does not carry
+        let v: serde_json::Value = serde_json::from_slice(b).unwrap();
+        let old_signed = v[0]["assets"].as_array().unwrap().iter().filter(|a| SIGNED.contains(&a["name"].as_str().unwrap())).count() == 3;
+        assert!(!old_signed, "an old beta hub sees the nightly half published and never offers it");
     }
     #[test] fn a_signed_newer_release_is_found_before_its_archive_is_fetched() {
         let r = Rig::new("find"); let mut f = Feed::new(); let l = f.release("v0.16.0", b"archive"); let k = keys();

@@ -2,27 +2,28 @@
 # nightly-update-gate.sh: the update check (test/update/nightly-update.sh) on a clean Boat box: a release installed as a person installs it, then updated
 # by the hub's own updater on the nightly channel to a newer signed build, keeping its project and thread. Every box it makes is deleted at the end.
 #   scripts/nightly-update-gate.sh [--from SRC] [--to SRC] [--out DIR]
-#     SRC: a tag (vX.Y.Z from BackplaneWorks/Backplane, vX.Y.Z-nightly.D.N from the nightly repo), `run:ID` (a release.yml dry run's release-dry-run
+#     SRC: a tag of BackplaneWorks/Backplane (a release, beta or nightly), `run:ID` (a release.yml dry run's release-dry-run
 #     artifact: signed with the real key), or a folder already holding one release's files.
 #     Defaults: --to the newest nightly, --from the one before it (the newest stable once that is a version with the nightly channel, 0.15.4 on).
-# Env: NIGHTLY_REPO (BackplaneWorks/backplane-nightly), NU_BOAT_TYPE (default), NU_TIMEOUT (s, 1800).
+# Env: NU_BOAT_TYPE (default), NU_TIMEOUT (s, 1800).
 {
 set -u
 REPO=$(git rev-parse --show-toplevel); cd "$REPO"
 . scripts/lib-bptmp.sh
-NREPO=${NIGHTLY_REPO:-BackplaneWorks/backplane-nightly}; MREPO=BackplaneWorks/Backplane
+MREPO=BackplaneWorks/Backplane
 FROM=; TO=; OUT=
 while [ $# -gt 0 ]; do case $1 in --from) FROM=$2; shift;; --to) TO=$2; shift;; --out) OUT=$2; shift;; *) echo "nightly-update-gate: unknown $1" >&2; exit 2;; esac; shift; done
 OUT=${OUT:-$BP_TMP/nightly-update-$(date +%Y%m%d-%H%M%S)}; mkdir -p "$OUT"
 B() { boat --no-update "$@"; }
-nightlies() { gh release list -R "$NREPO" --limit 20 --json tagName -q '.[].tagName' 2>/dev/null | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-nightly\.[0-9]+\.[0-9]+$' | sort -V -r; }
-if [ -z "$TO" ]; then TO=$(nightlies | sed -n 1p); [ -n "$TO" ] || { echo "nightly-update-gate: no nightly in $NREPO yet; give --to" >&2; exit 2; }; fi
+nightlies() { gh release list -R "$MREPO" --limit 60 --json tagName -q '.[].tagName' 2>/dev/null | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+-nightly\.[0-9]+\.[0-9]+$' | sort -V -r; }
+if [ -z "$TO" ]; then TO=$(nightlies | sed -n 1p); [ -n "$TO" ] || { echo "nightly-update-gate: no nightly in $MREPO yet; give --to" >&2; exit 2; }; fi
 if [ -z "$FROM" ]; then FROM=$(nightlies | grep -vxF "$TO" | sed -n 1p); [ -n "$FROM" ] || { echo "nightly-update-gate: no nightly before $TO; give --from" >&2; exit 2; }; fi
 fetch() { # SRC dir: one release's files for linux-x64
   local s=$1 d=$2; mkdir -p "$d"
   case $s in
     run:*) gh run download "${s#run:}" -R "$MREPO" -n release-dry-run -D "$d" >/dev/null || return 1;;
-    v*-nightly.*) gh release download "$s" -R "$NREPO" -D "$d" -p install.sh -p 'manifest.json*' -p "backplane-$s-linux-x64-native.tar.gz" || return 1;;
+    v*-nightly.*) gh release download "$s" -R "$MREPO" -D "$d" -p install.sh -p 'nightly-manifest.json*' -p "backplane-$s-linux-x64-native.tar.gz" || return 1
+      for f in manifest.json manifest.json.sig manifest.json.keyid; do mv "$d/nightly-$f" "$d/$f" || return 1; done;;   # as the test takes them (it serves them under these names again)
     v*) gh release download "$s" -R "$MREPO" -D "$d" -p install.sh -p 'manifest.json*' -p "backplane-$s-linux-x64-native.tar.gz" || return 1;;
     *) [ -d "$s" ] && cp "$s"/install.sh "$s"/manifest.json* "$s"/backplane-v*-linux-x64-native.tar.gz "$d/" || return 1;;
   esac

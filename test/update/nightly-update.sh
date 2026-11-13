@@ -5,7 +5,8 @@
 #     as `gh release download` gives them (scripts/nightly-update-gate.sh fetches them and runs this on a clean Boat). FROM older than TO; FROM may be a
 #     stable, beta or nightly; TO is signed with the real release key (nothing here signs anything).
 # Steps: FROM installed by its own install.sh into a private HOME, prefix, home and port; the home seeded first with update.channel=nightly, a project
-# (its folder holds a file) and a thread; TO served on a loopback feed shaped like GitHub's (both feeds: the main one and the nightly one); the hub's own
+# (its folder holds a file) and a thread; FROM and TO served on a loopback feed shaped like GitHub's, a nightly's signed files under the names it is published
+# with (nightly-manifest.json*, update/run.rs NIGHTLY_SIGNED); the hub's own
 # first check takes TO, the guard runs it on probation and proves it. Then: /hello names TO's version and commit, CURRENT says TO, and the seeded events are
 # still the head of events.jsonl (the new hub opened that store to start: a store it could not read would have failed its probation) and the project's
 # file is still there. Prints PASS/FAIL lines and exits non-zero on any FAIL.
@@ -17,10 +18,10 @@ commit_of() { python3 -I -c 'import json,sys;print(json.load(open(sys.argv[1]))[
 T1=$(tag "$FROM"); T2=$(tag "$TO")
 case "$(uname -s)-$(uname -m)" in Linux-x86_64) TGT=linux-x64;; Linux-aarch64) TGT=linux-arm64;; Darwin-arm64) TGT=darwin-arm64;; *) echo "nightly-update: no target for $(uname -sm)"; exit 2;; esac
 T=$(mktemp -d "${UPD_DIR:-/tmp}/.nightly-update.XXXXXX"); P=${UPD_PORT:-3996}; FP=$((P+500)); F=$T/feed; H=$T/home; PASS=0; FAILS=()
-# both feeds on loopback: the main feed lists FROM (nothing newer there), the nightly feed lists TO
+# the feed on loopback, as GitHub lists this repo's releases
 export HOME=$T/userhome BACKPLANE_PREFIX=$T/prefix BACKPLANE_BIN=$T/bin BACKPLANE_HOME=$H BACKPLANE_PORT=$P BACKPLANE_NO_DESKTOP_APP=1 BACKPLANE_NO_DESKTOP=1 \
   BACKPLANE_HUB_ARGS=--no-tailscale BACKPLANE_AGENTS=$T/agents BACKPLANE_GUARD_STABLE=10 \
-  BACKPLANE_UPDATE_FEED=http://127.0.0.1:$FP/main.json BACKPLANE_UPDATE_NIGHTLY_FEED=http://127.0.0.1:$FP/nightly.json
+  BACKPLANE_UPDATE_FEED=http://127.0.0.1:$FP/releases.json
 unset BACKPLANE_COPY BACKPLANE_NO_UPDATE BACKPLANE_BUILDS BACKPLANE_GUARD BACKPLANE_E2E_TRUST_KEY BACKPLANE_AGENT_OWNER BACKPLANE_FAULT BACKPLANE_SAFE BACKPLANE_UPDATE_CHANNEL
 mkdir -p "$HOME" "$T/agents" "$F" "$H" "$T/proj"
 G=$BACKPLANE_PREFIX/backplane
@@ -37,7 +38,8 @@ says() { local h; h=$(hello); [ "${h%% *}" = "${2#v}" ] && case "$(commit_of "$1
 on() { [ "$(st build)" = "$2" ] && [ "$(st stable)" = True ] && says "$1" "$2"; }
 listing() { # name dir... : a GitHub-shaped release list of the given releases
   local out=$1; shift
-  for d in "$@"; do t=$(tag "$d"); mkdir -p "$F/$t"; cp "$d"/manifest.json* "$d"/backplane-"$t"-$TGT-native.* "$F/$t/"; done
+  for d in "$@"; do t=$(tag "$d"); mkdir -p "$F/$t"; cp "$d"/backplane-"$t"-$TGT-native.* "$F/$t/"
+    case $t in *-nightly.*) for f in manifest.json manifest.json.sig manifest.json.keyid; do cp "$d/$f" "$F/$t/nightly-$f"; done;; *) cp "$d"/manifest.json* "$F/$t/";; esac; done
   python3 -I - "$F" "$FP" "$@" > "$F/$out" <<'PY'
 import json, os, sys
 f, port = sys.argv[1], sys.argv[2]
@@ -45,7 +47,7 @@ tags = [json.load(open(os.path.join(d, "manifest.json")))["tag"] for d in sys.ar
 print(json.dumps([{"tag_name": t, "prerelease": "-" in t, "draft": False, "assets": [{"name": n, "browser_download_url": f"http://127.0.0.1:{port}/{t}/{n}"} for n in sorted(os.listdir(os.path.join(f, t)))]} for t in tags]))
 PY
 }
-listing main.json "$FROM"; listing nightly.json "$TO"
+listing releases.json "$FROM" "$TO"
 (cd "$F" && exec python3 -I -m http.server "$FP" --bind 127.0.0.1) > "$T/feed.log" 2>&1 & FPID=$!
 
 # a person's data, set before the first start: the nightly channel, a project whose folder holds work, a thread in it

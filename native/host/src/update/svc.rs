@@ -17,10 +17,6 @@ pub fn builds() -> Option<PathBuf> { std::env::var_os(if cfg!(test) { "BACKPLANE
 fn off() -> bool { crate::copy::on() || std::env::var(if cfg!(test) { "BACKPLANE_TEST_NO_UPDATE" } else { "BACKPLANE_NO_UPDATE" }).map_or(false, |v| v == "1") }
 /// The feed. A flag or the environment may change it, never a setting: any paired client can write a setting, and this names what a hub runs next. The signature still has to match.
 pub(crate) fn feed() -> String { std::env::var("BACKPLANE_UPDATE_FEED").ok().filter(|v| !v.is_empty()).unwrap_or_else(|| run::FEED.to_string()) }
-/// The nightly channel's second feed (`run::NIGHTLY_FEED`), `BACKPLANE_UPDATE_NIGHTLY_FEED` instead when set; "-" there reads none.
-pub(crate) fn nightly_feed() -> Option<String> {
-    match std::env::var("BACKPLANE_UPDATE_NIGHTLY_FEED").ok().filter(|v| !v.is_empty()) { Some(v) if v == "-" => None, Some(v) => Some(v), None => Some(run::NIGHTLY_FEED.to_string()) }
-}
 
 /// What every client shows. `state`: package, off, idle, checking, available, downloading, waiting, installing, failed.
 #[derive(Clone, Debug, Default, PartialEq, Eq, serde::Serialize)]
@@ -115,15 +111,7 @@ impl Updates {
             fs::create_dir_all(&s2).map_err(|e| e.to_string())?;
             let target = rel::target().ok_or("no build is made for this machine")?;
             let list = s2.join("releases.json"); curl(&feed(), &list, 8 << 20)?;
-            let mut l = run::listing(&fs::read(&list).map_err(|e| e.to_string())?)?;
-            // the nightly channel also reads the nightly feed; when that one cannot be read, the releases and betas are still offered
-            if ch2 == "nightly" { if let Some(nf) = nightly_feed() {
-                let nl = s2.join("nightly.json");
-                match curl(&nf, &nl, 8 << 20).and_then(|_| run::listing(&fs::read(&nl).map_err(|e| e.to_string())?)) {
-                    Ok(n) => l.extend(n.into_iter().filter(|x| rel::tag_channel(&x.rel.tag) == "nightly")),
-                    Err(e) => eprintln!("backplane-hub: update: the nightly feed: {e}"),
-                }
-            } }
+            let l = run::listing(&fs::read(&list).map_err(|e| e.to_string())?)?;
             let bad: Vec<String> = bad_lines(&b2).into_iter().map(|x| x.0).collect();
             run::find(&run::Ask { current: &c2, channel: &ch2, target, keys: &rel::keys(), bad: &bad }, &l, &s2, &curl)
         }).await.unwrap_or_else(|e| Err(e.to_string()));

@@ -35,7 +35,7 @@ run)
   # hub's own updater on the nightly channel; a failure is one more failed check in the message below. No nightly repo or no new nightly: nothing to do.
   NU=~/.cache/nightly-update.tested
   if command -v gh >/dev/null; then
-    NEWN=$(gh release list -R "${NIGHTLY_REPO:-BackplaneWorks/backplane-nightly}" --limit 20 --json tagName -q '.[].tagName' 2>/dev/null | grep -E -- '-nightly\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+    NEWN=$(gh release list -R BackplaneWorks/Backplane --limit 60 --json tagName -q '.[].tagName' 2>/dev/null | grep -E -- '-nightly\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
     if [ -n "$NEWN" ] && [ "$NEWN" != "$(cat "$NU" 2>/dev/null)" ]; then
       (cd "$W" && scripts/nightly-update-gate.sh --to "$NEWN" --out "$D/update") >"$D/update.log" 2>&1; urc=$?
       if [ $urc = 0 ]; then echo "$NEWN" >"$NU"
