@@ -31,12 +31,6 @@ if '--output-format' in a and a[a.index('--output-format') + 1] == 'json':   # a
     sys.exit(0)
 say = lambda o: (print(json.dumps(o)), sys.stdout.flush())
 say({'type': 'system', 'subtype': 'init', 'session_id': 'bare-standin'})
-first = sys.stdin.readline()
-try:
-    m0 = json.loads(first).get('message', {}); c0 = m0.get('content', '')
-    text = c0 if isinstance(c0, str) else ' '.join(x.get('text', '') for x in c0 if isinstance(x, dict))
-except Exception:
-    text = first
 n = [0]
 def tool(name, args):
     n[0] += 1
@@ -53,53 +47,68 @@ def tool(name, args):
 C = 'kiapi.common.commands.'
 ipc = lambda ty, m={}: tool('kicad_ipc', {'path': pcb, 'type': ty, 'message': m})
 msg = lambda r: r['body'].get('message', {}) if isinstance(r['body'], dict) else {}
-r = {}
-plan = conf.get('plan')
-if url and pcb and text.startswith('plan-propose'):
-    # the floorplanner's gate: propose, then a route the hub must refuse while nothing is approved
-    out = out.replace('.json', '-plan1.json') if out else ''
-    r['propose'] = tool('plan_propose', {'plan': plan, 'mode': 'merge'})
-    r['get'] = tool('plan_get', {})
-    r['route_refused'] = tool('plan_route', {})
-    r['approve_ask'] = tool('plan_approve', {'ids': [plan['corridors'][0]['id']], 'note': 'bare gate corridor'})
-elif url and pcb and text.startswith('plan-route'):
-    out = out.replace('.json', '-plan2.json') if out else ''
-    r['get'] = tool('plan_get', {})
-    r['route'] = tool('plan_route', {'ids': [plan['corridors'][0]['id']], 'max_nets': 2})
-elif url and pcb and not text.startswith('add a track'):
-    # any other message (the comment window's note posts one to the thread): a turn that touches nothing and ends at once
-    r['note'] = 'nothing to do'
-    out = ''
-elif url and pcb:
-    r['status'] = tool('kicad_ipc_status', {'path': pcb})
-    r['open'] = ipc(C + 'OpenDocument', {'type': 'DOCTYPE_PCB', 'path': pcb})
-    # one writer at a time: the hub names the board's lock in its refusal; an agent takes it and goes on (agents/design.rs)
-    import re
-    m = re.search(r'lock_acquire (\S+)', json.dumps(r['open'].get('body')))
-    if r['open'].get('error') and m:
-        r['lock'] = tool('lock_acquire', {'name': m.group(1).rstrip(',.')})
+def turn(text, out):
+    r = {}
+    plan = conf.get('plan')
+    if url and pcb and 'plan-propose' in text:
+        # the floorplanner's gate: propose, then a route the hub must refuse while nothing is approved
+        out = out.replace('.json', '-plan1.json') if out else ''
+        r['propose'] = tool('plan_propose', {'plan': plan, 'mode': 'merge'})
+        r['get'] = tool('plan_get', {})
+        r['route_refused'] = tool('plan_route', {})
+        r['approve_ask'] = tool('plan_approve', {'ids': [plan['corridors'][0]['id']], 'note': 'bare gate corridor'})
+    elif url and pcb and 'plan-route' in text:
+        out = out.replace('.json', '-plan2.json') if out else ''
+        r['get'] = tool('plan_get', {})
+        r['route'] = tool('plan_route', {'ids': [plan['corridors'][0]['id']], 'max_nets': 2})
+    elif url and pcb and 'add a track' not in text:
+        # any other message (the comment window's note posts one to the thread): a turn that touches nothing and ends at once
+        r['note'] = 'nothing to do'
+        out = ''
+    elif url and pcb:
+        r['status'] = tool('kicad_ipc_status', {'path': pcb})
         r['open'] = ipc(C + 'OpenDocument', {'type': 'DOCTYPE_PCB', 'path': pcb})
-    doc = msg(r['open']).get('document')
-    if not doc:
-        # KiCad open in the pane already holds the board: OpenDocument is a headless call, the GUI answers GetOpenDocuments
-        r['open_docs'] = ipc(C + 'GetOpenDocuments', {'type': 'DOCTYPE_PCB'})
-        doc = (msg(r['open_docs']).get('documents') or [None])[0]
-    h = {'document': doc}
-    r['before'] = ipc(C + 'GetItems', {'header': h, 'types': ['KOT_PCB_TRACE']})
-    fps = ipc(C + 'GetItems', {'header': h, 'types': ['KOT_PCB_FOOTPRINT']})
-    items = msg(fps).get('items') or [{}]
-    p = items[0].get('position', {}); x, y = int(p.get('x_nm', 100000000)), int(p.get('y_nm', 100000000))
-    r['at'] = [x, y]
-    track = {'@type': 'type.googleapis.com/kiapi.board.types.Track', 'start': {'x_nm': x + 2000000, 'y_nm': y + 2000000},
-             'end': {'x_nm': x + 9000000, 'y_nm': y + 2000000}, 'width': {'value_nm': 300000}, 'layer': 'BL_F_Cu'}
-    r['create'] = ipc(C + 'CreateItems', {'header': h, 'items': [track]})
-    r['after'] = ipc(C + 'GetItems', {'header': h, 'types': ['KOT_PCB_TRACE']})
-    r['save'] = ipc(C + 'SaveDocument', {'document': doc})
-    r['comment'] = tool('review_comment', {'op': 'add', 'text': 'bare gate: is this track wide enough?', 'file': os.path.basename(pcb), 'kind': 'board',
-                                           'layer': 'F.Cu', 'x': (x + 5000000) / 1e6, 'y': (y + 2000000) / 1e6})
-    r['comments'] = tool('review_comments', {})
-if out and url:
-    open(out + '.tmp', 'w').write(json.dumps(r)); os.rename(out + '.tmp', out)
-say({'type': 'assistant', 'message': {'role': 'assistant', 'content': [{'type': 'text', 'text': 'Added a track beside the first part, saved, and left a comment.'}]}, 'session_id': 'bare-standin'})
-say({'type': 'result', 'subtype': 'success', 'is_error': False, 'result': 'done', 'session_id': 'bare-standin'})
-for _ in sys.stdin: pass
+        # one writer at a time: the hub names the board's lock in its refusal; an agent takes it and goes on (agents/design.rs)
+        import re
+        m = re.search(r'lock_acquire (\S+)', json.dumps(r['open'].get('body')))
+        if r['open'].get('error') and m:
+            r['lock'] = tool('lock_acquire', {'name': m.group(1).rstrip(',.')})
+            r['open'] = ipc(C + 'OpenDocument', {'type': 'DOCTYPE_PCB', 'path': pcb})
+        doc = msg(r['open']).get('document')
+        if not doc:
+            # KiCad open in the pane already holds the board: OpenDocument is a headless call, the GUI answers GetOpenDocuments
+            r['open_docs'] = ipc(C + 'GetOpenDocuments', {'type': 'DOCTYPE_PCB'})
+            doc = (msg(r['open_docs']).get('documents') or [None])[0]
+        h = {'document': doc}
+        r['before'] = ipc(C + 'GetItems', {'header': h, 'types': ['KOT_PCB_TRACE']})
+        fps = ipc(C + 'GetItems', {'header': h, 'types': ['KOT_PCB_FOOTPRINT']})
+        items = msg(fps).get('items') or [{}]
+        p = items[0].get('position', {}); x, y = int(p.get('x_nm', 100000000)), int(p.get('y_nm', 100000000))
+        r['at'] = [x, y]
+        track = {'@type': 'type.googleapis.com/kiapi.board.types.Track', 'start': {'x_nm': x + 2000000, 'y_nm': y + 2000000},
+                 'end': {'x_nm': x + 9000000, 'y_nm': y + 2000000}, 'width': {'value_nm': 300000}, 'layer': 'BL_F_Cu'}
+        r['create'] = ipc(C + 'CreateItems', {'header': h, 'items': [track]})
+        r['after'] = ipc(C + 'GetItems', {'header': h, 'types': ['KOT_PCB_TRACE']})
+        r['save'] = ipc(C + 'SaveDocument', {'document': doc})
+        r['comment'] = tool('review_comment', {'op': 'add', 'text': 'bare gate: is this track wide enough?', 'file': os.path.basename(pcb), 'kind': 'board',
+                                               'layer': 'F.Cu', 'x': (x + 5000000) / 1e6, 'y': (y + 2000000) / 1e6})
+        r['comments'] = tool('review_comments', {})
+    if out and url:
+        open(out + '.tmp', 'w').write(json.dumps(r)); os.rename(out + '.tmp', out)
+    say({'type': 'assistant', 'message': {'role': 'assistant', 'content': [{'type': 'text', 'text': 'Added a track beside the first part, saved, and left a comment.'}]}, 'session_id': 'bare-standin'})
+    say({'type': 'result', 'subtype': 'success', 'is_error': False, 'result': 'done', 'session_id': 'bare-standin'})
+
+# like the real CLI in stream mode: one process for the thread's turns, each user message on stdin is a turn ending with a result; a
+# control request is answered (the hub sends them for interrupts and tasks). Ends when the hub closes stdin.
+base_out = out
+for line in sys.stdin:
+    try: m = json.loads(line)
+    except Exception: continue
+    if m.get('type') == 'control_request':
+        say({'type': 'control_response', 'response': {'subtype': 'success', 'request_id': m.get('request_id', '')}}); continue
+    if m.get('type') != 'user': continue
+    c0 = (m.get('message') or {}).get('content', '')
+    text = c0 if isinstance(c0, str) else ' '.join(x.get('text', '') for x in c0 if isinstance(x, dict))
+    # what each turn was given, for the gate's log
+    open((base_out or '/tmp/bare-standin') + '.turns', 'a').write(json.dumps({'text': text[:300]}) + '\n')
+    turn(text, base_out)

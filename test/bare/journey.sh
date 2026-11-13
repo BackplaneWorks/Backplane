@@ -262,7 +262,7 @@ if [ -n "${KDIR:-}" ]; then . "$HERE/journey_project.sh"; else bad "no KiCad: th
 # the stock checks' own reports (not the project copies)
 for d in "$HH"/compat-saved/* "$HH"/compat-demos/*; do [ -d "$d" ] || continue; n=$OUT/logs/compat/$(basename "$(dirname "$d")")-$(basename "$d"); mkdir -p "$n"
   for x in fork stock fork-on-export result.json downgrade-report.json fork.log stock.log; do [ -e "$d/$x" ] && cp -r "$d/$x" "$n/"; done; done
-for f in "$HUBH/hub.log" "$HH/win.log" "$HH/standin.log" "$HH/coedit.json.argv" "$HUBH/kicad/.install.log"; do [ -f "$f" ] && cp "$f" "$OUT/logs/" 2>/dev/null; done
+for f in "$HUBH/hub.log" "$HH/win.log" "$HH/standin.log" "$HH/coedit.json.argv" "$HH/coedit.json.turns" "$HUBH/kicad/.install.log"; do [ -f "$f" ] && cp "$f" "$OUT/logs/" 2>/dev/null; done
 
 # --- memory: the samples, the peak of each program and KiCad role, growth from the first sample; over a bound is a FAIL
 rss "end of: $STEP"
