@@ -5,6 +5,11 @@ name: release
 on:
   push:
     tags: ['v*']
+  # a nightly (nightly.yml): built, signed and published like a tag, but to the nightly repo (vars.NIGHTLY_REPO), never this one's releases
+  workflow_call:
+    inputs:
+      tag: { type: string, required: true }
+      nightly: { type: boolean, default: false }
   workflow_dispatch:
     inputs:
       tag:
@@ -22,7 +27,9 @@ concurrency:
 env:
   CARGO_INCREMENTAL: 0
   CARGO_TERM_COLOR: always
-  TAG: ${{ github.event.inputs.tag || github.ref_name }}
+  TAG: ${{ inputs.tag || github.event.inputs.tag || github.ref_name }}
+  NIGHTLY: ${{ inputs.nightly && '1' || '' }}
+  NIGHTLY_REPO: ${{ vars.NIGHTLY_REPO || 'BackplaneWorks/backplane-nightly' }}
 permissions:
   contents: read
 jobs:
@@ -37,7 +44,9 @@ jobs:
           - { target: darwin-arm64, os: macos-latest }
           - { target: windows-x64, os: windows-latest }
     name: build ${{ matrix.target }}
-    runs-on: ${{ matrix.os }}
+    # a nightly may build on faster machines, named by repo variables (unset: GitHub's): NIGHTLY_LINUX_RUNNER (Boat CI: boat), NIGHTLY_MAC_RUNNER (the Mac mini's
+    # self-hosted runner label), NIGHTLY_WIN_RUNNER. A tag release always builds on GitHub's images above.
+    runs-on: ${{ (inputs.nightly && matrix.target == 'linux-x64' && vars.NIGHTLY_LINUX_RUNNER) || (inputs.nightly && matrix.target == 'darwin-arm64' && vars.NIGHTLY_MAC_RUNNER) || (inputs.nightly && matrix.target == 'windows-x64' && vars.NIGHTLY_WIN_RUNNER) || matrix.os }}
     defaults:
       run:
         shell: bash
@@ -97,7 +106,7 @@ jobs:
         shell: bash
         run: |
           export BACKPLANE_COMMIT=$(git rev-parse --short HEAD)   # compiled into the hub: the guard checks an update against it
-          if [ "$GITHUB_EVENT_NAME" = push ]; then
+          if [ "$GITHUB_EVENT_NAME" = push ] || [ -n "$NIGHTLY" ]; then
             if [ -z "$TM_KID" ] || [ -z "$TM_KEY" ]; then echo "::warning::no telemetry key: this release's hub sends no telemetry"
             elif [[ ! "$TM_KID" =~ ^rel-[a-z0-9-]{1,28}$ ]] || [[ ! "$TM_KEY" =~ ^[0-9a-f]{64}$ ]]; then echo "::error::BACKPLANE_TELEMETRY_KID/KEY are malformed (want rel-..., 64 lowercase hex)"; exit 1
             else export BACKPLANE_TELEMETRY_URL=https://backplaneworks.com/api/v1/events BACKPLANE_TELEMETRY_KID="$TM_KID" BACKPLANE_TELEMETRY_KEY="$TM_KEY"; echo "telemetry baked (key id only: $TM_KID)"; fi
@@ -354,7 +363,7 @@ jobs:
   publish:
     needs: [build, android]
     # a tag publishes only with every job green; a dry run (workflow_dispatch) still makes its artifact when only android failed, without the APK/AAB
-    if: always() && needs.build.result == 'success' && (needs.android.result == 'success' || github.event_name == 'workflow_dispatch')
+    if: always() && needs.build.result == 'success' && (needs.android.result == 'success' || github.event_name == 'workflow_dispatch' || inputs.nightly)
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -369,7 +378,7 @@ jobs:
       - name: manifest
         run: |
           set -e
-          v="${TAG#v}"; ch=stable; case "$v" in *-*) ch=beta;; esac
+          v="${TAG#v}"; ch=stable; case "$v" in *-nightly.*) ch=nightly;; *-*) ch=beta;; esac   # update/rel.rs tag_channel
           python3 - "$TAG" "$v" "$ch" "${{ github.sha }}" <<'PY'
           import hashlib, json, glob, os, sys
           tag, v, ch, sha = sys.argv[1:5]
@@ -384,7 +393,8 @@ jobs:
           # deploy/install.sh.in with this release's version and each archive's sha256: the script vouches for what it downloads
           set -e
           sum() { f=backplane-$TAG-$1-native.tar.gz; [ -f "$f" ] && sha256sum "$f" | cut -d' ' -f1 || true; }
-          sed -e "s|@REPO@|${{ github.repository }}|" -e "s|@VERSION@|$TAG|" -e "s|@SHA_LINUX_X64@|$(sum linux-x64)|" \
+          repo=${{ github.repository }}; [ -z "$NIGHTLY" ] || repo=$NIGHTLY_REPO   # install.sh downloads from where the release is
+          sed -e "s|@REPO@|$repo|" -e "s|@VERSION@|$TAG|" -e "s|@SHA_LINUX_X64@|$(sum linux-x64)|" \
               -e "s|@SHA_LINUX_ARM64@|$(sum linux-arm64)|" -e "s|@SHA_DARWIN_ARM64@|$(sum darwin-arm64)|" deploy/install.sh.in > install.sh
           if grep -q '@[A-Z_0-9]*@' install.sh; then echo "::error::install.sh still has a placeholder"; exit 1; fi
           sh -n install.sh
@@ -433,7 +443,7 @@ jobs:
             manifest.json.keyid
           retention-days: 7
       - name: publish (tags only, signed only; manifest and signature go last)
-        if: github.event_name == 'push' && steps.sign.outputs.signed == 'true'
+        if: github.event_name == 'push' && !inputs.nightly && steps.sign.outputs.signed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
@@ -443,6 +453,18 @@ jobs:
           # all three signed files, or the updater counts the release as half published and never offers it (update/run.rs SIGNED)
           gh release upload "$TAG" manifest.json manifest.json.sig manifest.json.keyid
           gh release edit "$TAG" --draft=false
+      - name: publish the nightly (to the nightly repo, signed only; manifest and signature go last)
+        if: inputs.nightly && steps.sign.outputs.signed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.BACKPLANE_NIGHTLY_TOKEN }}
+          GH_REPO: ${{ env.NIGHTLY_REPO }}
+        run: |
+          [ -n "$GH_TOKEN" ] || { echo "::error::no BACKPLANE_NIGHTLY_TOKEN (contents: write on $GH_REPO): the nightly is built and signed but not published"; exit 1; }
+          case "$TAG" in v*-nightly.*) ;; *) echo "::error::$TAG is not a nightly tag"; exit 1;; esac
+          notes="Nightly build of BackplaneWorks/Backplane@${{ github.sha }}. Not a release: Settings, Update channel, nightly takes these."
+          gh release create "$TAG" --prerelease --draft --title "$TAG" --notes "$notes" backplane-*.tar.gz backplane-*.zip $(ls backplane-$TAG-android.apk backplane-$TAG-android.aab 2>/dev/null) install.sh SHA256SUMS
+          gh release upload "$TAG" manifest.json manifest.json.sig manifest.json.keyid
+          gh release edit "$TAG" --draft=false
 
   # The release-candidate smoke, dry runs only, on each target's own runner (test/update/rc-smoke.sh): the archive installed as a person would, the guard
   # starting the hub and /hello naming the manifest's version and commit, the helpers answering, the installed client drawing with every asset and its
@@ -450,7 +472,7 @@ jobs:
   # darwin-arm64 also the way from 0.14 (test/update/from-014.py): 0.14.1, installed from its release, updates itself to this dry run.
   smoke:
     needs: publish
-    if: github.event_name == 'workflow_dispatch' && always() && needs.publish.result == 'success'
+    if: (github.event_name == 'workflow_dispatch' || inputs.nightly) && always() && needs.publish.result == 'success'
     strategy:
       fail-fast: false
       matrix:

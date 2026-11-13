@@ -1,5 +1,6 @@
 #!/bin/bash
-# bare-gate-nightly.sh: the bare-install gate every night from this machine (no GitHub runner), on the tip of origin/main.
+# bare-gate-nightly.sh: the bare-install gate every night from this machine (no GitHub runner), on the tip of origin/main; then, when nightly.yml has
+# published a new nightly, the update check (scripts/nightly-update-gate.sh: the nightly before it updated to it on a clean Boat).
 #   scripts/bare-gate-nightly.sh install THREAD   a user systemd timer (03:30 local) that runs `run THREAD`; the PERSON runs this (agents never
 #                                                start timers on the person's machine; docs/bare-install-gate.md)
 #   scripts/bare-gate-nightly.sh run THREAD       one run now: scripts/bare-gate.sh --commit origin/main from a worktree of its own; on a FAIL only,
@@ -30,7 +31,19 @@ run)
   git -C "$REPO" fetch -q origin && { [ -d "$W" ] || git -C "$REPO" worktree add -q --detach "$W" origin/main; } && git -C "$W" checkout -q --detach origin/main || { echo "$(date -Is) nightly: could not check out origin/main in $W" | tee ~/.cache/bare-nightly.last; exit 1; }
   SHA=$(git -C "$W" rev-parse --short origin/main)
   (cd "$W" && scripts/bare-gate.sh --commit origin/main --out "$D/run") >"$D/gate.log" 2>&1; rc=$?
-  { echo "$(date -Is) $SHA rc=$rc $D"; sed -n '/== timings/,$p' "$D/gate.log"; } >~/.cache/bare-nightly.last
+  # the update check (scripts/nightly-update-gate.sh): once for each new nightly, the one before it installed on a clean Boat and updated to it by the
+  # hub's own updater on the nightly channel; a failure is one more failed check in the message below. No nightly repo or no new nightly: nothing to do.
+  NU=~/.cache/nightly-update.tested
+  if command -v gh >/dev/null; then
+    NEWN=$(gh release list -R "${NIGHTLY_REPO:-BackplaneWorks/backplane-nightly}" --limit 20 --json tagName -q '.[].tagName' 2>/dev/null | grep -E -- '-nightly\.[0-9]+\.[0-9]+$' | sort -V | tail -1)
+    if [ -n "$NEWN" ] && [ "$NEWN" != "$(cat "$NU" 2>/dev/null)" ]; then
+      (cd "$W" && scripts/nightly-update-gate.sh --to "$NEWN" --out "$D/update") >"$D/update.log" 2>&1; urc=$?
+      if [ $urc = 0 ]; then echo "$NEWN" >"$NU"
+      elif grep -q "no nightly before" "$D/update.log"; then echo "$NEWN" >"$NU"   # the first nightly: nothing to update from yet
+      else mkdir -p "$D/run"; printf 'FAIL\tnightly update to %s: %s\n' "$NEWN" "$(grep -E '^FAIL|could not' "$D/update.log" | head -1 | cut -c1-150)" >>"$D/run/checks.tsv"; rc=1; fi
+    fi
+  fi
+  { echo "$(date -Is) $SHA rc=$rc $D"; sed -n '/== timings/,$p' "$D/gate.log"; [ -f "$D/update.log" ] && tail -2 "$D/update.log"; } >~/.cache/bare-nightly.last
   # since when each check fails: ~/.cache/bare-nightly.fails keeps "<check>\t<first failing commit>\t<date>" for the checks failing now
   F=~/.cache/bare-nightly.fails; touch "$F"
   NOW=$(grep '^FAIL' "$D/run/checks.tsv" 2>/dev/null | cut -f2- | cut -c1-200)

@@ -33,8 +33,8 @@ fn chips(values: &[&str], cur: &str, key: &str) -> Vec<Value> {
 }
 fn onoff(on: bool) -> &'static str { if on { "on" } else { "off" } }
 
-/// The channel a stored value means: 0.14's "nightly" is beta now, and the unknown is stable (`update::rel::channel`, the rule the updater itself follows).
-fn update_channel(raw: &str) -> &'static str { match raw.trim() { "beta" | "nightly" => "beta", _ => "stable" } }
+/// The channel a stored value means, by the rule the updater itself follows (`update::rel::channel`): the unknown is stable.
+fn update_channel(raw: &str) -> &'static str { crate::update::rel::channel(raw) }
 /// What to say about updates, and whether Check now is offered, from info `update.status` (`update/svc.rs`). One sentence for every client: the phones get it in `update.status`.
 pub fn update_line(status: &str) -> (String, bool) {
     let v: Value = serde_json::from_str(status).unwrap_or_default();
@@ -222,7 +222,7 @@ fn network(st: &State, info: &Value) -> Vec<Value> {
         row(&format!("Tailscale: {state}"), &note, vec![]),
         // no tailnet link: pairing still works on the local network or this computer, from Devices (where the links are made since 0.15)
         if link.is_empty() { row("Pairing link", PAIR_ELSEWHERE, vec![btn("Devices", "settings-page", "devices", false)]) } else { row("Pairing link", link, vec![]) },
-        row("Update channel", "Stable takes releases; beta also takes prereleases.", chips(&["stable", "beta"], update_channel(set(st, "update.channel", "stable")), "update.channel")),
+        row("Update channel", "Stable takes releases; beta also takes betas; nightly also takes a build of main each night.", chips(&["stable", "beta", "nightly"], update_channel(set(st, "update.channel", "stable")), "update.channel")),
         update_row(version, &i("update.status")),
     ].into_iter().chain(boat_hub_rows(i("boathub.cost"), crate::hub::now_ms() / 1000)).collect()
 }
@@ -1197,7 +1197,7 @@ mod tests {
         assert_eq!(r[1]["label"], "Tailscale: off"); assert_eq!(r[1]["note"], "Listening on 127.0.0.1:3787 only: started with --no-tailscale.");
         assert_eq!(r[2]["note"], PAIR_ELSEWHERE); assert_eq!((r[2]["buttons"][0]["action"].as_str(), r[2]["buttons"][0]["value"].as_str()), (Some("settings-page"), Some("devices")), "it opens Devices");
         let r = page_rows(&st(&[("update.channel", "nightly")]), "network", json!({"tailscale": "reachable", "tailnet": "m.t.ts.net", "pair": "backplane://x"}));
-        assert_eq!(r[1]["label"], "Tailscale: m.t.ts.net"); assert_eq!(r[2]["note"], "backplane://x"); assert_eq!(r[3]["buttons"][1]["on"], true);
+        assert_eq!(r[1]["label"], "Tailscale: m.t.ts.net"); assert_eq!(r[2]["note"], "backplane://x"); assert_eq!((r[3]["buttons"][1]["on"].as_bool(), r[3]["buttons"][2]["on"].as_bool()), (Some(false), Some(true)));
     }
     #[test] fn the_zone_says_where_it_comes_from_and_a_bad_name_is_not_sent() {
         let r = page_rows(&st(&[("tz.machine", "Europe/Helsinki")]), "timezone", json!({}));
@@ -1228,7 +1228,7 @@ mod tests {
         assert_eq!(r(r#"{"state":"failed","note":"v0.16.0 failed its health check, so this build stayed."}"#)["buttons"][0]["label"], "Check now");
         assert_eq!(r(r#"{"state":"installing","available":"v0.16.0"}"#)["buttons"], json!([]), "nothing to press while it goes"); assert_eq!(r("not json")["note"], "Updated by its package.");
     }
-    #[test] fn a_stored_nightly_lights_beta() { assert_eq!((update_channel("nightly"), update_channel("beta"), update_channel("stable"), update_channel("x")), ("beta", "beta", "stable", "stable")); }
+    #[test] fn a_stored_nightly_lights_nightly() { assert_eq!((update_channel("nightly"), update_channel("beta"), update_channel("stable"), update_channel("x")), ("nightly", "beta", "stable", "stable")); }
     #[test] fn rules_and_the_board_are_listed_and_edited_from_settings() {
         let mut st = State::new();
         for e in [json!({"$":"SettingSet","key":"rule.r1","value":r#"{"id":"r1","text":"Never push to main","tool":"Bash","enforce":true,"word":"push","on":true,"at":2}"#,"at":2}),
