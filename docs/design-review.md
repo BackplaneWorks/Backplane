@@ -78,3 +78,26 @@ first, at most 400 each, placed on the finding's items (KIIDs) or its point. Mar
 its DRC/ERC results or its undo; a run with no findings clears the set. A click on one (ET_MARKER_CLICKED, set `review`) opens the
 Checks panel and publishes `review.clicked.<digest>` {id, at} for the panel to show that finding. Older runtimes get nothing (no
 command, no call). Linux-tested so far; nothing platform-specific in it.
+
+## DRC second opinion (stock KiCad 10.0) and the zone-fill warning
+
+Backplane KiCad bp.10 to bp.12 can miss a short inside a zone fill: its DRC can leave real fill copper out of the check, so a track
+of another net inside a GND fill passes (in the CLI and the editor alike; the saved copper and Gerbers are right). bp.12.1 fixes it
+and advertises the capability `drc-zone-guard`. Source `stockdrc` ("Stock DRC (second opinion)", review/stockdrc.rs):
+
+- When the runtime lacks `drc-zone-guard` and the board has filled zones, one should-level finding says this KiCad build's DRC can
+  miss a short inside a zone fill, and to get a second opinion before ordering. `order_review record` appends the same words to its
+  summary, so the Buy flow's review never reads as clean on that DRC alone.
+- On a full or order review (never on save; under a memory guard), when a stock KiCad 10.0.x `kicad-cli` is on the machine (one
+  that is not a Backplane runtime: no manifest.json beside its bin/, not the runtime in use; `BACKPLANE_STOCK_KICAD_CLI` for tests),
+  the board's .kicad_pro, .kicad_pcb and .kicad_dru are copied to the hub's cache, exported with the runtime's
+  `project downgrade --target 10.0` (forced only when a feature must be dropped, and the dropped features named), and checked by
+  stock `pcb drc --format json`. Each violation stock reports that the runtime's DRC did not (same type and items, or the same type
+  at the same places; unconnected items, library checks and exclusions left out) is a finding: errors are must-change, warnings
+  should. After a forced export, only a short stays a must-change; anything else becomes a should naming what was dropped. When
+  stock ran and added nothing, the warning drops to a note: "Second opinion (stock KiCad 10.0.x DRC on the exported project): no
+  additional violations". Stock staying quiet is said as that, never as the board being clean. The copy is removed after the run.
+- With `drc-zone-guard` present the warning and the note go; the stock cross-check still runs when stock is installed.
+
+Measured: Hubble_DK copy, bp.13 test build against stock 10.0.7, 534 vs 564 violations, no extras (the export dropped the custom
+rule 'U1 fanout area', so a forced export). Linux-tested; the install paths for macOS and Windows are in, untested.
