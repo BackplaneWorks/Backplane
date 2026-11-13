@@ -79,6 +79,7 @@ echo; echo "== timings ($IMAGE, $SRC${SHA:+ $SHA})"
 [ -f "$OUT/kicad-size.txt" ] && echo "  $(cat "$OUT/kicad-size.txt")"
 [ -f "$OUT/kicad-runtime.txt" ] && echo "  $(cat "$OUT/kicad-runtime.txt")"
 printf '  %-28s %8s s\n' gate-wall "$(( $(date +%s) - T0 ))"
+[ -s "$OUT/memory.tsv" ] && { echo "== memory peaks (MB; rss.tsv has every phase)"; awk -F"\t" '{printf "  %-28s %8s MB\n", $1, $2}' "$OUT/memory.tsv"; }
 echo "== paper cuts, in the order a person meets them (rank 1 = blocks or misleads)"
 [ -s "$OUT/findings.tsv" ] && sort -s -t$'\t' -k1,1n "$OUT/findings.tsv" | awk -F'\t' '{printf "  [%s] %-12s %s\n", $1, $2, $3}' || echo "  none"
 echo "== checks: $(grep -c ^PASS "$OUT/checks.tsv" 2>/dev/null) pass, $(grep -c ^FAIL "$OUT/checks.tsv" 2>/dev/null) fail, $(grep -c ^HOLD "$OUT/checks.tsv" 2>/dev/null) held ($OUT)"

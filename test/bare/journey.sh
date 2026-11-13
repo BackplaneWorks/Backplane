@@ -266,7 +266,7 @@ for name, i in (("client", 1), ("hub", 2), ("kicad", 3)):
 PYR
 )
   echo "$RS" | sed 's/^/  rss: /'; cp "$OUT/rss.tsv" "$OUT/logs/" 2>/dev/null
-  while read -r k rest; do case $k in OVER) bad "memory: $rest (over ${RSS_MAX_GB:-8} GB)";; PEAK) tm "rss-peak-${rest%% *}-mb" "$(echo "$rest" | awk '{print $2}')";; esac; done <<<"$RS"
+  while read -r k rest; do case $k in OVER) bad "memory: $rest (over ${RSS_MAX_GB:-8} GB)";; PEAK) printf '%s\t%s\n' "rss-peak-${rest%% *}-mb" "$(echo "$rest" | awk '{print $2}')" >>"$OUT/memory.tsv";; esac; done <<<"$RS"
 fi
 # --- the client's main thread never held (lane C's stall, fixed at 82c67d16a): BACKPLANE_GPUI_LOOPTRACE logs every main-loop step over
 # 50 ms (a task, an X batch, a frame) and a 100 ms timer waking over 50 ms late, each with its time; the gate fails on a step over 500 ms
@@ -274,7 +274,7 @@ fi
 LOOP=$(python3 - "$HH/win.log" "$OUT/phases.tsv" "${LOOP_TASK_MS:-500}" "${LOOP_WAKE_MS:-1000}" <<'PYEOF2'
 import json,sys,bisect
 log,ph,task_b,wake_b=sys.argv[1],sys.argv[2],float(sys.argv[3]),float(sys.argv[4])
-phases=[(int(l.split('\t',1)[0]),l.split('\t',1)[1].strip()) for l in open(ph) if '\t' in l] if ph else []
+phases=[(int(l.split('\t',1)[0]),l.split('\t',1)[1].strip()) for l in open(ph) if '\t' in l] if ph and __import__('os').path.exists(ph) else []
 at=[p[0] for p in phases]
 ev=[]
 for l in open(log,errors='replace'):
