@@ -58,6 +58,8 @@ pub mod proc {
     pub fn kill(pid: u32, sig: i32) -> bool { unsafe { libc::kill(pid as i32, sig) == 0 } }
     /// Whether a process is there (kill 0).
     pub fn alive(pid: u32) -> bool { pid > 0 && unsafe { libc::kill(pid as i32, 0) } == 0 }
+    /// Whether anything is left in the process group a leader made (kill(-pid, 0)), or the leader itself.
+    pub fn group_alive(pid: u32) -> bool { pid > 0 && (unsafe { libc::kill(-(pid as i32), 0) } == 0 || alive(pid)) }
     /// Whether a process is there, including another user's (kill 0 answering EPERM).
     pub fn exists(pid: u32) -> bool { pid > 0 && (unsafe { libc::kill(pid as i32, 0) } == 0 || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)) }
     /// The signal that ended a child, if one did.

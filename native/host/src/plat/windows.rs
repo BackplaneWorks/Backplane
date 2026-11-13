@@ -175,6 +175,8 @@ pub mod proc {
         if pid == 0 { return false }
         unsafe { let h = OpenProcess(PROCESS_SYNCHRONIZE | PROCESS_QUERY_LIMITED_INFORMATION, 0, pid); if h.is_null() { return false } let r = WaitForSingleObject(h, 0) == 0x102; CloseHandle(h); r } // WAIT_TIMEOUT: still running
     }
+    /// Whether the group a leader made is still there: its leader (a Job Object has no cheap "anyone left" query here).
+    pub fn group_alive(pid: u32) -> bool { alive(pid) }
     /// There, even if another user's (access denied).
     pub fn exists(pid: u32) -> bool {
         if pid == 0 { return false }
