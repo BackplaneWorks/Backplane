@@ -27,7 +27,7 @@ open(p, "w").write(t)
 PY
 git -C "$PROJ" commit -qam "a narrow track" 2>/dev/null || true
 start_xvfb_and_wm
-export BP_STREAM_N=1 BP_STREAM_MS=10
+export BP_STREAM_N=1 BP_STREAM_MS=10 BP_STANDIN_MCPCALL_MAX=200000
 start_hub
 cat >"$OUT/script.json" <<'JSON'
 [{"select":0},{"wait":2000},{"click":"rail:Board"},{"wait":2500},{"click":"ui:Edit"},

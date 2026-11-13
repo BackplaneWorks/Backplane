@@ -211,6 +211,7 @@ start_hub() {
     BACKPLANE_NO_UPDATE=1 \
     FAKE_LOG="$OUT/standin.log" \
     BP_STANDIN_MODE=stream \
+    BP_STANDIN_MCPCALL_MAX="${BP_STANDIN_MCPCALL_MAX:-600}" \
     "$HUB_BIN" --home "$OUT/home" --port "$HPORT" --host 127.0.0.1 --no-tailscale --foreground >"$OUT/hub.log" 2>&1
   for _ in $(seq 80); do
     curl -s -m 1 -o /dev/null "http://127.0.0.1:$HPORT/hello" && return 0
