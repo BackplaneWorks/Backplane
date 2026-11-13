@@ -710,14 +710,10 @@ impl KicadPane {
                 nc::focus(w);
             } else { cx.notify(); }
         }
-        let prev_show = self.placed.as_ref().and_then(|(_, s, _)| *s);
-        let key = (at, show, over.clone());
-        if self.placed.as_ref() == Some(&key) {
-            if let (Some(at), Some(show)) = (at, show) { nc::sync_root(c, at, show, &mut self.last_root); }
-            return;
-        }
         // the first editor on show (bp.9+): the others pre-warmed at this pane's size, so their first switch is one paint with no relayout
-        // (2 s after the first editor was placed: asked at once, KiCad's pre-warm sometimes hid the editor just shown, a rare race)
+        // (2 s after the first editor was placed: asked at once, KiCad's pre-warm sometimes hid the editor just shown, a rare race). Before the
+        // unchanged-placement return: an idle pane is drawn again by tick's notify but placed the same, and the pre-warm waited for the next
+        // re-place, the first tab switch (Nov 13: nothing asked 40 s after Edit, so that switch opened the schematic cold)
         if let (true, Some(p), Some(_), Some(pid)) = (local, at, show, self.info["pid"].as_u64()) {
             let since = *self.first_placed.get_or_insert_with(std::time::Instant::now);
             if self.prewarmed != Some(pid) && since.elapsed() >= std::time::Duration::from_secs(2) {
@@ -725,6 +721,12 @@ impl KicadPane {
                 let have: Vec<&str> = self.frames.iter().map(|f| f.kind).collect();
                 self.rpc("editor.kicad.prewarm", json!({"project": self.project, "width": p.w, "height": p.h, "active": self.wanted_kind(), "have": have}));
             }
+        }
+        let prev_show = self.placed.as_ref().and_then(|(_, s, _)| *s);
+        let key = (at, show, over.clone());
+        if self.placed.as_ref() == Some(&key) {
+            if let (Some(at), Some(show)) = (at, show) { nc::sync_root(c, at, show, &mut self.last_root); }
+            return;
         }
         if local { nc::place_local(c, at, show, &self.ever_shown, &mut self.last_root); } else { nc::place(c, at, show, managed.as_deref(), &mut self.last_root); }
         if (self.keys || self.want_keys) && show != prev_show {
