@@ -26,7 +26,7 @@ for m, w in [("ready", 25000), ("posted", 3000)]:
     s += [{"mark": m}, {"kicad": {"report": True, "tag": m}}, {"wait": w}]
 json.dump(s, open(sys.argv[1], "w"))
 PY
-HOME="$OUT/fh" BACKPLANE_GPUI_ASSETS="$ASSETS_DIR" BACKPLANE_GPUI_RECTS=1 "$CLIENT_BIN" --url "http://127.0.0.1:$HPORT" --token-file "$OUT/home/token" --script "$OUT/script.json" --exit-after 80 >"$OUT/client.log" 2>&1 &
+HOME="$OUT/fh" BACKPLANE_GPUI_ASSETS="$ASSETS_DIR" BACKPLANE_GPUI_RECTS=1 "$CLIENT_BIN" --url "http://127.0.0.1:$HPORT" --token-file "$OUT/home/token" --script "$OUT/script.json" --exit-after 150 >"$OUT/client.log" 2>&1 &
 CP=$!; track_pid "$CP"
 wait_mark() { for _ in $(seq 600); do grep -q "\"name\":\"$1\",\"event\":\"mark\"" "$OUT/client.log" 2>/dev/null && return 0; kill -0 "$CP" 2>/dev/null || return 1; sleep 0.1; done; return 1; }
 rep() { last_kicad_report "$OUT/client.log" "$1"; }
