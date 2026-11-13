@@ -57,6 +57,8 @@ again, then the panel's `BP-AGAIN` must apply; any miss exits 1). It needs `KEMB
 root coordinates (Collar on the GPU display: `1126,700`): a screenshot taken just before the click must show canvas background there, on a
 span of at least 300 px each way, else the journey fails without pressing a key (the pane's toolbars and the message panel are no canvas, and
 GTK3 gives the canvas no X window to measure). `KEMBED_UNDO_NO_CTRL_Y=1` leaves out the Ctrl+Y only (a diagnostic: what happens without it).
+A run that pins `CLIENT_BIN` must pin `HUB_BIN` too (it fails otherwise: the worktree's own `target/fast` hub would be taken, whatever
+its age); each run logs both binaries (`INFO hub` / `INFO client`: path, sha256, mtime, the build folder's `COMMIT`) and `real_use.json` keeps them.
 Not yet: schematic-to-board cross-probe by a click, DRC/ERC/Gerbers, hierarchical sheet/move symbol/wire/annotate.
 
 ## Budgets
