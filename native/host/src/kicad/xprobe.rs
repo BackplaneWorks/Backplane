@@ -273,6 +273,17 @@ async fn set_probe(hub: &Arc<Hub>, files: &project::Files, n: &Names) -> String 
     text
 }
 
+/// BACKPLANE_HUB_TIMING=1: each cross-probe's steps (ms from the request) as one `HUB_TIMING` line on stderr, for the real-use measurements.
+pub struct Steps { t0: std::time::Instant, marks: Vec<(String, u128)> }
+impl Steps {
+    pub fn new() -> Self { Steps { t0: std::time::Instant::now(), marks: vec![] } }
+    pub fn mark(&mut self, what: &str) { self.marks.push((what.to_string(), self.t0.elapsed().as_millis())) }
+    pub fn print(&self, what: &str) {
+        if std::env::var("BACKPLANE_HUB_TIMING").map_or(true, |v| v.is_empty() || v == "0") { return }
+        eprintln!("HUB_TIMING {}", json!({"what": what, "steps": self.marks.iter().map(|(k, ms)| json!([k, ms])).collect::<Vec<_>>()}));
+    }
+}
+
 /// The open frames of the project's GUI KiCad: (kind, shown).
 async fn open_frames(route: &embed::GuiRoute) -> Vec<(String, bool)> {
     let o = embed::gui_call(route, "kiapi.backplane.embed.GetFrames", json!({})).await;
@@ -286,11 +297,13 @@ fn has_select_items(route: &embed::GuiRoute) -> bool {
 }
 
 /// Select `n` in the project's open KiCad: Ok({kicad, found, not_found, via}); kicad false when none is open.
-pub async fn select_in_kicad(pro: &str, n: &Names, zoom: bool, show: &str) -> Result<Value, String> {
+pub async fn select_in_kicad(pro: &str, n: &Names, zoom: bool, show: &str) -> Result<Value, String> { select_in_kicad_steps(pro, n, zoom, show, &mut Steps::new()).await }
+async fn select_in_kicad_steps(pro: &str, n: &Names, zoom: bool, show: &str, st: &mut Steps) -> Result<Value, String> {
     let Some(route) = embed::gui_route(pro) else { return Ok(json!({"kicad": false})) };
     let bp9 = has_select_items(&route);
     let open = if route.mode == "fork" { open_frames(&route).await } else { vec![] };
-    if !show.is_empty() && bp9 { embed::show_for(pro, show, "").await?; }
+    st.mark("frames");
+    if !show.is_empty() && bp9 { embed::show_for(pro, show, "").await?; st.mark("shown"); }
     if !bp9 {
         // bp.8 (and stock): ShowFrame's item cross-probes one part through KIWAY (select and centre); a net or nothing found is not selected
         let item = n.first_part();
@@ -309,6 +322,7 @@ pub async fn select_in_kicad(pro: &str, n: &Names, zoom: bool, show: &str) -> Re
         let mut tries = 0;
         loop {
             let o = embed::gui_call(&route, "kiapi.backplane.embed.SelectItems", select_msg(kind, n, zoom)).await;
+            st.mark(&format!("select {kind}"));
             if o["ok"].as_bool().unwrap_or(false) { replies.push(o["message"].clone()); sent.push(kind); break }
             let st = o["status"].as_str().unwrap_or("");
             if st == "AS_BUSY" { return Err(format!("KiCad is busy: {}", o["error"].as_str().unwrap_or("a dialog is open"))) }
@@ -345,8 +359,11 @@ pub async fn select(hub: &Arc<Hub>, p: &Value) -> Result<Value, String> {
     let show = show_frame(p["show"].as_str().unwrap_or(""));
     if n.is_empty() && show.is_empty() { return Err("nothing to select: give references (U3), nets (GND) or pins (U3.4)".into()) }
     let zoom = p["zoom"].as_bool().unwrap_or(true);
+    let mut st = Steps::new(); st.mark("checked");
     let probe = if p["from"] == "viewer" { String::new() } else { set_probe(hub, &files, &n).await };
-    let mut out = select_in_kicad(&files.pro, &n, zoom, show).await?;
+    st.mark("probe");
+    let mut out = select_in_kicad_steps(&files.pro, &n, zoom, show, &mut st).await?;
+    st.print("editor.kicad.select");
     out["project"] = json!(files.pro); out["probe"] = json!(probe);
     Ok(out)
 }
