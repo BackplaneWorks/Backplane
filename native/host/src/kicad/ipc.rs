@@ -267,7 +267,7 @@ pub fn servers() -> String { IPC.get().map(|i| i.lines.lock().unwrap().clone()).
 /// install folders wins over an older one in another.
 fn newest_in(dirs: &[PathBuf]) -> Vec<PathBuf> {
     let mut v: Vec<(String, PathBuf)> = dirs.iter().flat_map(|d| std::fs::read_dir(d).map(|r| r.flatten().filter_map(|e| e.file_name().into_string().ok().map(|n| (n, d.clone()))).collect::<Vec<_>>()).unwrap_or_default()).collect();
-    v.sort_by(|a, b| if a.0 == b.0 { std::cmp::Ordering::Equal } else if ks::version_ge(&a.0, &b.0) { std::cmp::Ordering::Less } else { std::cmp::Ordering::Greater });
+    v.sort_by(|a, b| match (ks::version_ge(&a.0, &b.0), ks::version_ge(&b.0, &a.0)) { (true, true) => std::cmp::Ordering::Equal, (true, false) => std::cmp::Ordering::Less, _ => std::cmp::Ordering::Greater });
     v.into_iter().flat_map(|(n, d)| [d.join(&n).join("bin").join("kicad-cli"), d.join(n).join("bin").join("kicad-cli.exe")]).collect()
 }
 /// Publish what this machine has for Settings > CAD: info `kicad.cli`, `kicad.version`, `kicad.status`, `kicad.source` and `freecad` (empty when absent).
@@ -498,6 +498,13 @@ impl RpcHandler for IpcRpc {
 #[cfg(test)]
 mod tests {
     /// A managed install on Windows has `bin\kicad-cli.exe`: the newest version's is found, with a space in the folder name.
+    /// An update installs beside the old runtime: a hotfix (bp.12.1) is taken over its release (bp.12) and older ones, whatever the folder order.
+    #[test] fn the_hotfix_runtime_is_taken_over_the_release_it_fixes() {
+        let d = crate::plat::tmp::dir("bp kicad hotfix").join("kicad");
+        for v in ["10.99.0-bp.12", "10.99.0-bp.10", "10.99.0-bp.12.1", "10.99.0-bp.12-851cbefda6", "10.99.0-bp.11"] { std::fs::create_dir_all(d.join(v).join("bin")).unwrap(); std::fs::write(d.join(v).join("bin/kicad-cli"), "").unwrap(); std::fs::write(d.join(v).join("bin/kicad-cli.exe"), "MZ").unwrap(); }
+        let found = newest_in(std::slice::from_ref(&d)).into_iter().find(|p| p.is_file()).unwrap();
+        assert!(found.to_string_lossy().contains("10.99.0-bp.12.1"), "{found:?}");
+    }
     #[test] fn a_managed_runtime_is_found_by_its_exe_name_in_a_folder_with_spaces() {
         let base = crate::plat::tmp::dir("bp kicad"); let d = base.join("kicad");
         for v in ["10.99.0-bp.4", "10.99.0-bp.6"] { std::fs::create_dir_all(d.join(v).join("bin")).unwrap(); std::fs::write(d.join(v).join("bin/kicad-cli.exe"), "MZ").unwrap(); }
