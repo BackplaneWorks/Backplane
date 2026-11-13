@@ -474,7 +474,8 @@ ET_NAMES = {9: "ET_SHOW_REQUESTED", 25: "ET_EDITOR_REQUESTED"}
 def kframes(): return {FK.get(f["kind"], str(f["kind"])): f for f in ipc("frames", SOCK).get("frames", [])}
 def kicad_tops():  # KiCad top-level windows a person can see (not the pane's own frame): a floating editor, a dialog
     return [w for w in windows() if w.get("shown") and "kicad" in w.get("wm_class", "").lower() and w["w"] > 100 and w["h"] > 100
-            and not (abs(w["root_x"] - PANE["x"]) < 40 and abs(w["root_y"] - PANE["y"]) < 60)]
+            and not (abs(w["root_x"] - PANE["x"]) < 40 and abs(w["root_y"] - PANE["y"]) < 60)
+            and w["root_x"] + w["w"] > 0 and w["root_y"] + w["h"] > 0]  # not a prewarmed frame laid out off-screen
 def editor_watch(tag, kind, t0, secs=20):
     """After an action at t0: when KiCad's KIND frame is shown, the events KiCad posted, any new top-level KiCad window, what the
     client last reported shown, and screenshots at 1 s and at the end."""
@@ -513,6 +514,8 @@ elif "editors" in JOURNEYS and SOCK:
     ref = refs[0] if refs else ""
     sel = ipc("select-items", SOCK, "pcb", ref, "1"); time.sleep(1.0)
     rt("click", CX, CY); time.sleep(0.5)  # the footprint, centred by the zoom, clicked: the canvas has the keyboard and the footprint is selected
+    if not ipc("selection", SOCK, "pcb").get("count"):  # the click missed the footprint's body (and cleared the selection): select it again
+        sel = ipc("select-items", SOCK, "pcb", ref, "0"); time.sleep(0.5)
     print(f"INFO editors: {ref} selected over the API ({sel.get('found')}), clicked; selection {ipc('selection', SOCK, 'pcb')}", flush=True)
     r = rt("key", "e", "ctrl")
     a = editor_watch("editor_fp_ctrl_e", "FP", r["t0"])
@@ -543,9 +546,23 @@ elif "editors" in JOURNEYS and SOCK:
                                        "shown": int(bool((g.get("frame") or {}).get("shown"))), "new_windows": [w.get("title") for w in newt], "ok": int(bool(g.get("ok")))}
         print(f"PERF gerbview_prewarm {ms}ms " + json.dumps(RESULTS["gerbview_prewarm"]), flush=True)
         shot("gerbview_prewarm")
-        t0 = now(); g2 = ipc("open-gerbers", SOCK, ",".join(files), "0", "0", str(PANE["w"]), str(PANE["h"]), timeout=120)
-        c = editor_watch("gerbview_shown", "GERBVIEW", t0, secs=10)
-        RESULTS["gerbview_shown"]["call_ms"] = round(now() - t0); RESULTS["gerbview_shown"]["loaded"] = len(g2.get("loaded", []))
+        evg = ipc("events", SOCK, "0").get("next", 0)
+        t0 = now(); g2 = ipc("open-gerbers", SOCK, ",".join(files), "0", "0", str(PANE["w"]), str(PANE["h"]), timeout=120); call_ms = round(now() - t0)
+        print(f"INFO editors: OpenGerbers shown answered in {call_ms} ms, frame shown={(g2.get('frame') or {}).get('shown')}", flush=True); shot("gerbview_call_returned")
+        # who has the pane for the next 5 s: each frame's shown flag every 100 ms, its changes, and KiCad's events
+        trace, last = [], None
+        while now() - t0 < call_ms + 5000:
+            st = tuple(sorted(k for k, f in kframes().items() if f["shown"]))
+            if st != last: trace.append([round(now() - t0), list(st)]); last = st
+            time.sleep(0.1)
+        evs = [{"seq": e["seq"], "type": e["type"], "kind": FK.get(e["frame"].get("kind")), "detail": e.get("detail", "")[:60]}
+               for e in ipc("events", SOCK, str(evg)).get("events", [])]
+        print(f"INFO editors: frames shown after OpenGerbers(show): {trace}", flush=True)
+        print(f"INFO editors: KiCad's events after OpenGerbers(show): {evs[:30]}", flush=True)
+        c = editor_watch("gerbview_shown", "GERBVIEW", t0, secs=0)
+        RESULTS["gerbview_shown"]["ms"] = next((t for t, k in trace if "GERBVIEW" in k), None)
+        RESULTS["gerbview_shown"]["stays"] = int(bool(trace) and "GERBVIEW" in trace[-1][1])
+        RESULTS["gerbview_shown"].update(call_ms=call_ms, loaded=len(g2.get("loaded", [])), trace=trace, events=evs[:30])
         ipc("hide-frame", SOCK, "gerbview"); time.sleep(0.8)
         tab("PCB", "editors_back3", 1.5); shot("editors_back3")
         RESULTS["gerbview_back_to_board"] = {"ms": None, "ok": int(editor_up() and not (kframes().get("GERBVIEW") or {}).get("shown"))}
