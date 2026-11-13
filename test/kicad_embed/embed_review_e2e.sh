@@ -21,7 +21,7 @@ start_hub
 PROJ="$OUT/proj"
 PRO=$(python3 -c 'import glob,sys; print(sorted(glob.glob(sys.argv[1] + "/*.kicad_pro"))[0])' "$PROJ")
 mkdir -p "$OUT/shots"
-WAIT=${REVIEW_WAIT_MS:-150000}
+WAIT=${REVIEW_WAIT_MS:-60000}
 cat >"$OUT/script.json" <<EOF
 [{"select":0},{"wait":2000},{"click":"rail:Board"},{"wait":6000},{"mark":"board"},{"wait":800},
  {"click":"mgmt:fab"},{"wait":2500},{"mark":"fab_open"},
@@ -33,9 +33,10 @@ HOME="$OUT/fh" BACKPLANE_GPUI_ASSETS="$ASSETS_DIR" BACKPLANE_GPUI_RECTS=1 BACKPL
 CP=$!
 track_pid "$CP"
 
-wait_for_log "$OUT/client.log" '"name":"fab_open","event":"mark"' 180 || { echo "FAIL the Fab panel never opened"; tail -n 30 "$OUT/client.log"; exit 1; }
+# (wait_for_log counts quarter seconds)
+wait_for_log "$OUT/client.log" '"name":"fab_open","event":"mark"' 720 || { echo "FAIL the Fab panel never opened"; tail -n 30 "$OUT/client.log"; exit 1; }
 sleep 0.5; shot "r0_fab_open"
-wait_for_log "$OUT/client.log" '"name":"reviewed","event":"mark"' $(( WAIT / 1000 + 120 )) || true
+wait_for_log "$OUT/client.log" '"name":"reviewed","event":"mark"' $(( (WAIT / 1000 + 120) * 4 )) || true
 sleep 0.5; shot "r1_reviewed"
 RUN="$PROJ/.backplane/design-review.json"
 check "Review wrote the run with findings by source" "$(python3 -c 'import json,sys; v=json.load(open(sys.argv[1])); print(int(v["scope"]=="full" and isinstance(v["by_source"], dict) and "fab" in v["by_source"]))' "$RUN" 2>/dev/null || echo 0)"
@@ -53,7 +54,7 @@ for line in open(sys.argv[1], errors="replace"):
 print(ok)
 PY
 )" "$(head -c 400 "$OUT/checks.out")"
-wait_for_log "$OUT/client.log" '"name":"checks_open","event":"mark"' 60 || true
+wait_for_log "$OUT/client.log" '"name":"checks_open","event":"mark"' 240 || true
 sleep 0.5; shot "r2_checks_open"
 hub_rpc "[{\"method\":\"mgmt.watch\",\"params\":{\"project\":\"$PRO\"}}]" >"$OUT/mgmt.out" 2>&1 || true
 check "Findings opened the Checks panel" "$(python3 -c 'import json,sys; print(int(any((json.loads(l).get("result") or {}).get("state",{}).get("open")=="checks" for l in open(sys.argv[1]) if l.startswith("{"))))' "$OUT/mgmt.out" 2>/dev/null || echo 0)"
