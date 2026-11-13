@@ -606,9 +606,46 @@ def main() -> None:
             f = pb_decode_fields(val); evs = []
             for raw in f.get(1, []):
                 e = pb_decode_fields(raw)
-                evs.append({"seq": int(e.get(1, [0])[0]), "type": int(e.get(2, [0])[0]),
+                ev_checks = {}
+                if 9 in e:
+                    c = pb_decode_fields(e[9][0]); ci = lambda n: int(c.get(n, [0])[0])
+                    ev_checks = {"errors": ci(2), "warnings": ci(3), "exclusions": ci(4), "unconnected": ci(5), "cancelled": bool(ci(6)),
+                                 "progress_id": ci(7), "error": c.get(9, [b""])[0].decode("utf-8", "replace")}
+                ev_marker = {}
+                if 8 in e:
+                    mr = pb_decode_fields(e[8][0]); ev_marker = {"set": mr.get(1, [b""])[0].decode(), "id": mr.get(2, [b""])[0].decode()}
+                evs.append({"seq": int(e.get(1, [0])[0]), "type": int(e.get(2, [0])[0]), "checks": ev_checks, "marker": ev_marker,
+                            "drc_marker": 10 in e,
                             "frame": _decode_frame(e[3][0]) if 3 in e else {}, "detail": e.get(4, [b""])[0].decode("utf-8", "replace")})
             print(json.dumps({"ok": True, "events": evs, "next": int(f.get(2, [0])[0])}))
+            return
+
+        if cmd == "run-checks":  # RunChecks KIND (pcb: DRC, sch: ERC): its progress_id
+            _, val = cli.call("kiapi.backplane.embed.RunChecks", pb_field_varint(1, EMBED_KIND_MAP[args[0]]))
+            print(json.dumps({"ok": True, "progress_id": int(pb_decode_fields(val).get(1, [0])[0])}))
+            return
+
+        if cmd == "get-markers":  # GetMarkers KIND [host]: counts by severity and group, and the first few
+            req = pb_field_varint(1, EMBED_KIND_MAP[args[0]]) + (pb_field_varint(2, 1) if len(args) > 1 and args[1] == "host" else b"")
+            _, val = cli.call("kiapi.backplane.embed.GetMarkers", req)
+            ms = []
+            for raw in pb_decode_fields(val).get(1, []):
+                f = pb_decode_fields(raw); g = lambda n: f.get(n, [b""])[0].decode("utf-8", "replace")
+                ms.append({"type": g(1), "severity": g(2), "group": g(13), "host": bool(f.get(8))})
+            cnt = {}
+            for m in ms:
+                k = "host" if m["host"] else f"{m['severity']}/{m['group'] or '-'}"; cnt[k] = cnt.get(k, 0) + 1
+            print(json.dumps({"ok": True, "n": len(ms), "counts": cnt}))
+            return
+
+        if cmd == "set-host-markers":  # SetHostMarkers KIND SET JSON: [{"id", "title", "severity": 0-2, "x_mm", "y_mm"}] ([] clears)
+            req = pb_field_varint(1, EMBED_KIND_MAP[args[0]]) + pb_field_str(2, args[1])
+            for m in json.loads(args[2]):
+                at = pb_field_varint(1, int(round(m["x_mm"] * 1e6))) + pb_field_varint(2, int(round(m["y_mm"] * 1e6)))
+                req += pb_field_msg(3, pb_field_str(1, m["id"]) + pb_field_str(2, m.get("title", m["id"]))
+                                    + (pb_field_varint(3, m.get("severity", 0)) if m.get("severity") else b"") + pb_field_msg(4, at))
+            _, val = cli.call("kiapi.backplane.embed.SetHostMarkers", req)
+            print(json.dumps({"ok": True, "count": int(pb_decode_fields(val).get(1, [0])[0])}))
             return
 
         if cmd == "open-gerbers":  # OpenGerbers FILES(comma) [X Y W H]: shown at that holder rect when given, else hidden (a prewarm)

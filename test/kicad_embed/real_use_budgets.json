@@ -237,22 +237,22 @@
    "what": "the journey starts where it says it does"
   },
   {
-   "re": "^plan_view_on$",
+   "re": "^plan_key_no_click$",
    "field": "ms",
    "max": 300,
-   "what": "Alt+P -> plan view drawn"
+   "what": "the plan view's key straight after opening -> plan view drawn"
   },
   {
-   "re": "^plan_view_on$|^plan_toggle\\d+_",
+   "re": "^plan_key_no_click$|^plan_(toggle|toolbar)\\d+_(on|off)$|^plan_menu\\d_(on|off)$",
    "field": "blank_frames",
    "max": 0,
    "what": "plan view: frames of background"
   },
   {
-   "re": "^plan_toggle\\d+_",
+   "re": "^plan_(toggle|toolbar)\\d+_(on|off)$|^plan_menu\\d_(on|off)$",
    "field": "ms",
    "max": 100,
-   "what": "plan view toggle -> drawn"
+   "what": "plan view toggle (key, toolbar, View menu) -> drawn"
   },
   {
    "re": "^plan_drag_(corridor|plane)_vertex$",
@@ -295,6 +295,60 @@
    "field": "ok",
    "min": 1,
    "what": "the plan view's key works without a click on the canvas first"
+  },
+  {
+   "re": "^plan_(toggle|toolbar)\\d+_.*_toggled$|^plan_menu\\d_.*_toggled$",
+   "field": "ok",
+   "min": 1,
+   "what": "the plan view toggled (key, toolbar, View menu)"
+  },
+  {
+   "re": "^plan_(toolbar|menu)_found$",
+   "field": "ok",
+   "min": 1,
+   "what": "the plan view's toolbar button and View menu item are there (checked while on)"
+  },
+  {
+   "re": "^(drc|erc)_embed$",
+   "field": "ms",
+   "max": 30000,
+   "what": "RunChecks -> ET_CHECKS_DONE"
+  },
+  {
+   "re": "^pan_during_drc_embed$",
+   "field": "hitch50",
+   "max": 0,
+   "what": "the board pans smoothly while DRC runs in the editor"
+  },
+  {
+   "re": "^markers_set_to_screen$",
+   "field": "ms",
+   "max": 100,
+   "what": "SetHostMarkers -> rings on screen"
+  },
+  {
+   "re": "^marker_click_event$",
+   "field": "ms",
+   "max": 300,
+   "what": "a click on a review marker -> ET_MARKER_CLICKED"
+  },
+  {
+   "re": "^marker_click_ok$|^markers_cleared$|^editor_fp_from_board_ok$|^editor_fp_back_to_board$|^gerbview_back_to_board$",
+   "field": "ok",
+   "min": 1,
+   "what": "the marker click, the clear, the footprint editor tab and back"
+  },
+  {
+   "re": "^editor_fp_ctrl_e$",
+   "field": "ms",
+   "max": 1000,
+   "what": "Ctrl+E on a footprint -> the footprint editor shown"
+  },
+  {
+   "re": "^gerbview_shown$",
+   "field": "stays",
+   "min": 1,
+   "what": "GerbView shown over the pane stays shown"
   }
  ]
 }

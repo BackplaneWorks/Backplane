@@ -8,7 +8,7 @@ A KiCad dialog that appears on its own (a load warning) is recorded with its tit
 import json, os, re, subprocess, sys, threading, time
 
 OUT, CLOG = sys.argv[1], sys.argv[2]
-JOURNEYS = (sys.argv[3] if len(sys.argv) > 3 else "focus,open,switch,edit,mgmt,coedit,xprobe,comment,save,tools,editors,plan,sch").split(",")
+JOURNEYS = (sys.argv[3] if len(sys.argv) > 3 else "focus,open,switch,edit,mgmt,coedit,xprobe,comment,save,tools,editors,plan,checks,markers,panels,sch").split(",")
 LIB = os.path.dirname(os.path.abspath(__file__))
 IPC, DRV, RPC = os.environ["IPC_PY"], os.environ["DRIVER_PY"], os.environ["HUB_RPC_MJS"]
 RT, SAMP = os.path.join(LIB, "rt_input.py"), os.path.join(LIB, "pane_sampler.py")
@@ -500,6 +500,8 @@ def editor_watch(tag, kind, t0, secs=20):
     for w in newtops: print(f"JANK {tag}: a KiCad window outside the pane: {w['title']!r} at {w['at']} after {w['ms']} ms", flush=True)
     return out
 CAPS = ipc("capabilities", SOCK) if SOCK else {}
+print(f"INFO kicad capabilities: {sorted(CAPS.get('capabilities', []))}", flush=True)
+RESULTS["kicad_capabilities"] = {"ms": None, "caps": sorted(CAPS.get("capabilities", [])), "build": KICAD_RUN.get("exe"), "commit": KICAD_RUN.get("backplane_commit")}
 def has_cap(cap, command):  # batch 3 on names it in capabilities; 77a6ff17d0 (batch 2) only registers the command
     return cap in CAPS.get("capabilities", []) or command in CAPS.get("commands", [])
 if "editors" in JOURNEYS and SOCK and not has_cap("embed-gerbview", "kiapi.backplane.embed.OpenGerbers"):
@@ -609,40 +611,82 @@ if "plan" in JOURNEYS and SOCK:
     if not pj.get("corridors"):
         print(f"DIAG plan: no plan on this board/runtime ({str(got)[:120]})", flush=True)
     else:
-        tab("PCB", "plan_board", 1.2); rt("click", CX, PANE["y"] + PANE["h"] - 30); time.sleep(0.3); rt("key", "Home"); time.sleep(1.0)
+        from pane_sampler import grab
+        import numpy as np
+        CV = (PANE["x"] + 40, PANE["y"] + 110, PANE["w"] - 80, PANE["h"] - 180)  # the canvas (not the toolbars or the status bar)
+        TB = (PANE["x"], PANE["y"] + 100, 40, PANE["h"] - 170)                     # the left toolbar
+        def frac(a_, b_): return float((a_ != b_).mean())
+        def bbox(a_, b_):
+            ys, xs = np.nonzero(a_ != b_)
+            return None if len(xs) < 8 else (int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max()))
+        def menus(): return [w for w in windows() if w.get("shown") and w.get("override_redirect") and w["w"] > 60 and w["h"] > 60]
+        def action_toggle(): t = now(); ipc("run-action", SOCK, "pcbnew.Plan.togglePlanView"); return t
+        bc = (KICAD_RUN.get("backplane_commit") or "")[:10]
+        ALT_P_BUILDS = ("d5eaa3ae44", "3de539d24a", "77a6ff17d0")  # bp.13 batches 1-2: Alt+P; batch 3 (c53b5e0800) on: Ctrl+Shift+R
+        PLAN_KEY = os.environ.get("KEMBED_PLAN_KEY") or ("alt+p" if bc in ALT_P_BUILDS else "ctrl+shift+r")
+        def press_plan_key():
+            mods = PLAN_KEY.split("+"); return rt("key", mods[-1], *mods[:-1])["t0"]
+        STATE = {"on": False}  # a fresh profile opens with the plan view off
+        def toggled(tag, how, settle=1.2):
+            """One toggle by HOW (a function returning t0): the canvas changed or not, the switch's frames measured, the state followed."""
+            g0 = grab(*CV); t0 = how(); time.sleep(settle); g1 = grab(*CV)
+            ch = frac(g0, g1) > 0.01; m = menus()
+            if ch: STATE["on"] = not STATE["on"]
+            EVENTS.append({"kind": "switch", "t0": t0, "tag": tag, "window_ms": int(settle * 1000)})
+            RESULTS[f"{tag}_toggled"] = {"ms": None, "ok": int(ch and not m)}
+            if m: print(f"JANK {tag}: a menu opened ({m[0]['w']}x{m[0]['h']})", flush=True); shot(f"{tag}_menu"); rt("key", "Escape"); time.sleep(0.4)
+            return ch
+        # A. the person's key straight after opening the board, before any click on the canvas
+        tab("PCB", "plan_board", 1.2)
+        ok = toggled("plan_key_no_click", press_plan_key)
+        RESULTS["plan_key_without_click_ok"] = {"ms": None, "ok": int(ok)}
+        print(f"INFO plan view by {PLAN_KEY} with no click on the canvas: {'toggled' if ok else 'nothing'} (BACKPLANE_COMMIT {bc})", flush=True)
+        shot("plan_key_no_click")
+        if STATE["on"]: toggled("plan_off_for_calibration", action_toggle)
+        rt("click", CX, PANE["y"] + PANE["h"] - 30); time.sleep(0.3); rt("key", "Home"); time.sleep(1.0)
         to_screen = calibrate()
         RESULTS["plan_calibrated"] = {"ms": None, "ok": int(to_screen is not None)}
-        # the plan view's toggle: RunAction(pcbnew.Plan.togglePlanView) where the runtime takes it; else its key after a click on the canvas
-        # (bp.13 builds d5eaa3ae44, 3de539d24a and 77a6ff17d0 (batch 2): Alt+P, the Place menu's mnemonic unless the canvas has the keyboard;
-        # batch 3 on: Ctrl+Shift+R)
-        ALT_P_BUILDS = ("d5eaa3ae44", "3de539d24a", "77a6ff17d0")
-        bc = (KICAD_RUN.get("backplane_commit") or "")[:10]
-        PLAN_KEY = os.environ.get("KEMBED_PLAN_KEY") or ("alt+p" if bc in ALT_P_BUILDS else "ctrl+shift+r")
-        def key_plan():
-            rt("click", PANE["x"] + 60, PANE["y"] + PANE["h"] - 140); time.sleep(0.2)  # the canvas gets the keyboard (an empty corner)
-            mods = PLAN_KEY.split("+"); return rt("key", mods[-1], *mods[:-1])["t0"]
-        probe_t = now(); st = ipc("run-action", SOCK, "pcbnew.Plan.togglePlanView"); USE_ACTION = bool(st.get("ok"))
-        print(f"INFO plan view toggle: {'RunAction' if USE_ACTION else 'key ' + PLAN_KEY} (BACKPLANE_COMMIT {bc})", flush=True)
-        RESULTS["plan_toggle_by_action"] = {"ms": None, "ok": int(USE_ACTION)}
-        def toggle_plan():
-            if not USE_ACTION: return key_plan()
-            t0 = now(); ipc("run-action", SOCK, "pcbnew.Plan.togglePlanView"); return t0
-        if USE_ACTION: t0 = probe_t
-        else:
-            # the person's key pressed without a click first: a menu that opens instead is recorded
-            r = rt("key", "p", "alt") if PLAN_KEY == "alt+p" else rt("key", "r", "ctrl", "shift"); time.sleep(0.6)
-            menu = [w for w in windows() if w.get("shown") and w.get("override_redirect") and w["w"] > 100 and w["h"] > 100]
-            RESULTS["plan_key_without_click_ok"] = {"ms": None, "ok": int(not menu)}
-            if menu:
-                print(f"JANK {PLAN_KEY} without a click on the canvas opened a menu ({menu[0]['w']}x{menu[0]['h']})", flush=True)
-                shot("plan_key_menu"); rt("key", "Escape"); time.sleep(0.3); rt("key", "Escape"); time.sleep(0.5)
-                t0 = key_plan()
-            else: t0 = r["t0"]
-        menu = False
-        EVENTS.append({"kind": "switch", "t0": t0, "tag": "plan_view_on", "window_ms": 2000}); time.sleep(2); shot("plan_view")
+        # B. the left toolbar's button, found by its checked state: the toolbar before and after a RunAction toggle
+        t_a = grab(*TB); act = toggled("plan_action_probe", action_toggle); t_b = grab(*TB)
+        RESULTS["plan_toggle_by_action"] = {"ms": None, "ok": int(act)}
+        btn = bbox(t_a, t_b)
+        print(f"INFO plan view by RunAction: {'toggled' if act else 'nothing'}; toolbar button {btn}", flush=True)
+        if btn:
+            bx, by = TB[0] + (btn[0] + btn[2]) // 2, TB[1] + (btn[1] + btn[3]) // 2
+            for i in range(10):
+                toggled(f"plan_toolbar{i:02d}_{'on' if not STATE['on'] else 'off'}", lambda: rt("click", bx, by)["t0"])
+        else: print("DIAG plan: the left toolbar shows no checked plan-view button", flush=True)
+        RESULTS["plan_toolbar_found"] = {"ms": None, "ok": int(bool(btn))}
+        # C. the View menu's item, found the same way: the menu open with the view off and on
+        VIEW_AT = (PANE["x"] + 97, PANE["y"] + 14)  # the menu bar's "View", measured at 1800x1050
+        def open_view():
+            rt("click", *VIEW_AT); time.sleep(0.7); m = menus(); return m[0] if m else None
+        m1 = open_view(); item = None
+        if m1:
+            g_1 = grab(m1["root_x"], m1["root_y"], m1["w"], m1["h"]); shot("plan_view_menu"); rt("key", "Escape"); time.sleep(0.4)
+            toggled("plan_menu_probe", action_toggle)
+            m2 = open_view()
+            if m2 and (m2["w"], m2["h"]) == (m1["w"], m1["h"]):
+                g_2 = grab(m2["root_x"], m2["root_y"], m2["w"], m2["h"]); bb = bbox(g_1, g_2)
+                if bb: item = (m2["root_x"] + m2["w"] // 2, m2["root_y"] + (bb[1] + bb[3]) // 2)
+            rt("key", "Escape"); time.sleep(0.4)
+        print(f"INFO plan view menu: {'open' if m1 else 'did not open'}; item at {item}", flush=True)
+        RESULTS["plan_menu_found"] = {"ms": None, "ok": int(bool(item))}
+        if item:
+            for i in range(2):
+                def by_menu():
+                    open_view(); return rt("click", *item)["t0"]
+                toggled(f"plan_menu{i}_{'on' if not STATE['on'] else 'off'}", by_menu)
+        # D. the key with the canvas holding the keyboard (a click on an empty corner first)
+        def key_after_click():
+            rt("click", PANE["x"] + 60, PANE["y"] + PANE["h"] - 140); time.sleep(0.2); return press_plan_key()
         for i in range(10):
-            t0 = toggle_plan()
-            EVENTS.append({"kind": "switch", "t0": t0, "tag": f"plan_toggle{i:02d}_{'off' if i % 2 == 0 else 'on'}", "window_ms": 1200}); time.sleep(1.2)
+            toggled(f"plan_toggle{i:02d}_{'on' if not STATE['on'] else 'off'}", key_after_click)
+        # the rest of the journey works in the plan view
+        if not STATE["on"]: toggled("plan_view_on", action_toggle, 2.0)
+        if not STATE["on"]: toggled("plan_view_on2", key_after_click, 2.0)
+        RESULTS["plan_view_reached"] = {"ms": None, "ok": int(STATE["on"])}
+        shot("plan_view")
         cor = pj["corridors"][0]; cl = cor["layer"]
         order = sorted({l["layer"] for l in pj.get("layers", [])}, key=lambda n: 0 if n == "F.Cu" else (99 if n == "B.Cu" else int(re.sub(r"\D", "", n) or 50)))
         def panel_click(layer, tag):  # the plan view's mini panel for LAYER (measured at 1800x1050: x pane+708, y pane+179+120*i)
@@ -690,6 +734,82 @@ if "plan" in JOURNEYS and SOCK:
         time.sleep(2); shot("plan_proposed")
         toggle_plan(); time.sleep(1)  # plan view off again
 # 8. schematic: pan/zoom there too
+# 7d. checks (bp.13 batch 3, embed-checks): DRC and ERC in the open editors (RunChecks) as the client's Checks panel can run them: the call
+# to ET_CHECKS_DONE, a pan of the board meanwhile (does the editor stay smooth), the counts, GetMarkers, and a picture of the markers.
+def wait_event(since, etype, secs, pred=lambda e: True):
+    t = time.time()
+    while time.time() - t < secs:
+        for e in ipc("events", SOCK, str(since)).get("events", []):
+            if e["type"] == etype and pred(e): return e
+        time.sleep(0.1)
+    return None
+if "checks" in JOURNEYS and SOCK and not has_cap("embed-checks", "kiapi.backplane.embed.RunChecks"):
+    print("DIAG checks: this runtime has no RunChecks (embed-checks): skipped", flush=True); RESULTS["checks_supported"] = {"ms": None, "ok": 0}
+elif "checks" in JOURNEYS and SOCK:
+    RESULTS["checks_supported"] = {"ms": None, "ok": 1}
+    for kind, tabk, tag in (("pcb", "PCB", "drc_embed"), ("sch", "SCH", "erc_embed")):
+        tab(tabk, f"{tag}_tab", 1.5)
+        since = ipc("events", SOCK, "0").get("next", 0)
+        box = {}
+        th = None
+        if kind == "pcb":
+            th = threading.Thread(target=lambda: box.update(r=rt("pan", CX, CY, min(PANE["w"], PANE["h"]) // 5, 6, 2, 120))); th.start(); time.sleep(0.3)
+        t0 = now(); st = ipc("run-checks", SOCK, kind); call_ms = round(now() - t0)
+        done = wait_event(since, 27, 300, lambda e: not st.get("progress_id") or e["checks"].get("progress_id") == st.get("progress_id"))
+        ms = round(now() - t0) if done else -1
+        if th: th.join()
+        if box.get("r"): EVENTS.append({"kind": "input", "t0": box["r"]["t0"], "t1": box["r"]["t1"], "tag": f"pan_during_{tag}"})
+        c = (done or {}).get("checks", {}); mk = ipc("get-markers", SOCK, kind)
+        perf(tag, ms, call_ms=call_ms, errors=c.get("errors"), warnings=c.get("warnings"), exclusions=c.get("exclusions"),
+             unconnected=c.get("unconnected"), error=json.dumps(c.get("error") or ""), markers=mk.get("n"))
+        print(f"INFO checks {tag}: GetMarkers {mk.get('counts')}", flush=True)
+        time.sleep(1.0); shot(f"{tag}_markers")
+    tab("PCB", "checks_back", 1.5)
+# 7e. markers (bp.13 batch 3, embed-host-markers): the design review's findings drawn in the board (the hub's set "review"), as rings at
+# footprints: SetHostMarkers to on screen, then a click on one (ET_MARKER_CLICKED; the hub opens its Checks panel), then cleared.
+if "markers" in JOURNEYS and SOCK and not has_cap("embed-host-markers", "kiapi.backplane.embed.SetHostMarkers"):
+    print("DIAG markers: this runtime has no SetHostMarkers (embed-host-markers): skipped", flush=True); RESULTS["markers_supported"] = {"ms": None, "ok": 0}
+elif "markers" in JOURNEYS and SOCK:
+    from pane_sampler import grab
+    RESULTS["markers_supported"] = {"ms": None, "ok": 1}
+    tab("PCB", "markers_board", 1.2); rt("click", CX, PANE["y"] + PANE["h"] - 30); time.sleep(0.3); rt("key", "Home"); time.sleep(1.0)
+    to_scr = calibrate()
+    fps = fp_positions(); refs = sorted(fps)[:: max(1, len(fps) // 8)][:8]
+    ms_ = [{"id": f"rv-{r}", "title": f"review finding at {r}", "severity": i % 3, "x_mm": fps[r][0], "y_mm": fps[r][1]} for i, r in enumerate(refs)]
+    CVm = (PANE["x"] + 40, PANE["y"] + 110, PANE["w"] - 80, PANE["h"] - 180)
+    g0 = grab(*CVm); t0 = now(); r_ = ipc("set-host-markers", SOCK, "pcb", "review", json.dumps(ms_)); call_ms = round(now() - t0)
+    seen = None
+    while now() - t0 < 3000:
+        if float((grab(*CVm) != g0).mean()) > 0.0005: seen = round(now() - t0); break
+        time.sleep(0.01)
+    perf("markers_set_to_screen", seen if seen is not None else -1, call_ms=call_ms, count=r_.get("count"), sent=len(ms_))
+    time.sleep(0.5); shot("markers_drawn")
+    gm = ipc("get-markers", SOCK, "pcb", "host"); print(f"INFO markers: GetMarkers(include_host) {gm.get('counts')}", flush=True)
+    clicked = None
+    if to_scr and ms_:
+        since = ipc("events", SOCK, "0").get("next", 0); m0 = ms_[0]
+        sx, sy = to_scr(m0["x_mm"], m0["y_mm"]); t1 = rt("click", sx, sy)["t0"]
+        e = wait_event(since, 26, 3)
+        clicked = e.get("marker") if e else None
+        perf("marker_click_event", round(now() - t1) if e else -1, marker=json.dumps(clicked), at=f"{sx:.0f},{sy:.0f}")
+        time.sleep(1.5); shot("marker_clicked")
+        RESULTS["marker_click_ok"] = {"ms": None, "ok": int(bool(clicked) and clicked.get("id") == m0["id"])}
+    t2 = now(); ipc("set-host-markers", SOCK, "pcb", "review", "[]"); time.sleep(0.8); shot("markers_cleared")
+    RESULTS["markers_cleared"] = {"ms": None, "ok": int(ipc("get-markers", SOCK, "pcb", "host").get("counts", {}).get("host", 0) == 0)}
+    rt("key", "Escape"); time.sleep(0.3)
+# 7f. side panels (bp.13 batch 3, autopanels): the board in the pane as it opens, then Full size and back: what KiCad shows at each width
+if "panels" in JOURNEYS and SOCK:
+    tab("PCB", "panels_board", 1.2); shot("panels_narrow")
+    fs = controls_like(r"(?i)full.?size|fullsize|kicad.*full")
+    print(f"INFO panels: Full size controls {[c.get('id') for c in fs]}", flush=True)
+    if fs:
+        t0 = click_ctl(fs[0]["id"]); time.sleep(2.0); shot("panels_wide")
+        if t0: EVENTS.append({"kind": "switch", "t0": t0, "tag": "panels_full_size", "window_ms": 2000})
+        t1 = click_ctl(fs[0]["id"]); time.sleep(2.0); shot("panels_back")
+        if t1: EVENTS.append({"kind": "switch", "t0": t1, "tag": "panels_back", "window_ms": 2000})
+        restore("panels")
+    else:
+        print("DIAG panels: no Full size control found", flush=True)
 if "sch" in JOURNEYS:
     tab("SCH", "sch_tab", 1.5)
     rt("click", CX, PANE["y"] + PANE["h"] - 40); time.sleep(0.3)
