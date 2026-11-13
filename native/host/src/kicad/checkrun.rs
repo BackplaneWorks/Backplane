@@ -530,9 +530,11 @@ async fn run(hub: &Arc<Hub>, pro: &str, f: &project::Files, s: &'static str, rev
 /// (no editor that checks itself, or it could not take the run now).
 async fn run_editor(hub: &Arc<Hub>, pro: &str, f: &project::Files, s: &str, cancel: &tokio::sync::Notify, full: bool) -> Option<(Outcome, bool)> {
     let route = super::edchecks::ready(hub, pro).await?;
-    // ERC in KiCad only where its schematic editor is open: without one, RunChecks{FK_SCH} answers AS_UNHANDLED (lane B, bp.13 batch 4),
-    // so kicad-cli runs it on the saved files; asked here, with no round trip
-    if s == "erc" && !embed::has_frame(pro, "SCH") { eprintln!("checks: erc with kicad-cli: KiCad has no schematic editor open"); return None }
+    // DRC and ERC in KiCad only where its schematic editor is open: without one, RunChecks{FK_SCH} answers AS_UNHANDLED (lane B, bp.13
+    // batch 4), so kicad-cli runs it on the saved files; asked here, with no round trip.
+    // DRC too: its parity test fetches the schematic's netlist, and without a schematic editor KiCad opens one inside the check, where
+    // a message box can stop it with KiCad's task gate held (lane D, batch 4: minutes of AS_BUSY)
+    if !embed::has_frame(pro, "SCH") { eprintln!("checks: {s} with kicad-cli: KiCad has no schematic editor open"); return None }
     { let e = edits(pro); let rev = with(pro, |p| if s == "drc" { p.drc.sched.running_rev.clone() } else { p.erc.sched.running_rev.clone() }).unwrap_or_default();
       eprintln!("checks: {s} in KiCad starts (rev {rev}, edits seen: board {} schematic {})", e[0], e[1]); }
     let pro2 = pro.to_string(); let s2 = s.to_string();
