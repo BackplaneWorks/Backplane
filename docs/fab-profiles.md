@@ -96,6 +96,7 @@ before the number, which number after them, a factor for a mil or a ring). More 
   missing, none different from the baseline.
 - `fab_model_no_baseline_value_is_older_than_its_bound` fails once any bundled value or stackup was read more than 120 days ago
   (a new, copy or offline hub designs against the bundled baseline until its first refresh): read the pages again and update it.
+- The review adds one note (`fab_stale`, info) naming each of the board's values read more than 120 days ago (`model::MAX_AGE_DAYS`).
 
 ## The Fab panel (`fab/panel.rs`)
 
