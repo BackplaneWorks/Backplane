@@ -157,6 +157,7 @@ pub fn bindings(l: &Local) -> Vec<KeyBinding> {
     let mut v = crate::input::bindings();
     v.extend(crate::screens::composer::bindings());
     v.extend(crate::screens::improvements::bindings());
+    v.extend(crate::screens::images::bindings());
     let k = |id: &str| l.key(id);
     v.extend([KeyBinding::new(&k("send"), crate::Send, Some("Composer")), KeyBinding::new("ctrl-enter", crate::Send, Some("Composer")),
         KeyBinding::new(&k("close"), crate::ClosePopup, None), KeyBinding::new("secondary-c", crate::CopySelection, Some(NOT_MAC_COMPOSER)),

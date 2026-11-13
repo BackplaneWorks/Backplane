@@ -1361,6 +1361,7 @@ secret.vault.locked = 保管庫がロックされています: {why}
 secret.open.tip = チャットに貼らずにエージェントへシークレットを渡す
 
 image.copy = 画像をコピー
+image.save.as = 名前を付けて画像を保存…
 image.show = ファイルを表示
 image.share = 画像を共有
 
@@ -2051,7 +2052,15 @@ gpui.c.cap.nox11 = 画面キャプチャーにはX11ディスプレイが必要�
 gpui.c.cap.nostart = ffmpegを起動できませんでした。
 gpui.c.cap.failed = ウィンドウをキャプチャーできませんでした。もう一度キャプチャーするか、画像を選んでください。
 gpui.c.cap.recfailed = 録画に失敗したか、サイズの上限を超えました。もっと短く録画してください。
-gpui.c.image.close = {name} · クリックまたはEscで閉じる
+gpui.c.image.close = Escまたは画像の外をクリックで閉じる
+gpui.c.image.size = {w} × {h} px
+gpui.c.image.fit = 全体表示
+gpui.c.image.loading.full = 元のサイズの画像を読み込み中…
+gpui.c.image.full.failed = 元のサイズの画像を読み込めませんでした。縮小版を表示しています。
+gpui.c.image.saved = {path} に保存しました
+gpui.c.image.err.nohub = 元のサイズの画像がハブにありません
+gpui.c.image.err.unsent = ハブから元のサイズの画像が届きませんでした
+gpui.c.image.save.failed = 保存できませんでした: {why}
 gpui.c.plot.toobig = このプロットは{mb} MBあり、ここに表示するには大きすぎます。
 gpui.c.plot.unread = ハブからのプロットを読み取れませんでした。ビューを開き直して再読み込みしてください。
 gpui.c.plot.badref = 形状の参照が不正です。再試行してこのビューを再読み込みしてください。

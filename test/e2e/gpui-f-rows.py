@@ -70,7 +70,7 @@ xenv = dict(env, LD_LIBRARY_PATH=XLIB) if XLIB else dict(env)
 spawn([XV, DISP, '-screen', '0', '1440x900x24', '-nolisten', 'tcp', '-xkbdir', '/usr/share/X11/xkb'], 'xvfb.log', xenv); time.sleep(2)
 open(P('i3.conf'), 'w').write('font pango:monospace 8\nnew_window none\nfor_window [class=".*"] border none\ndefault_border none\nhide_edge_borders both\nipc-socket %s/i3.sock\n' % RUN)
 denv = dict(env, DISPLAY=DISP); spawn(['i3', '-c', P('i3.conf')], 'i3.log', denv); time.sleep(1)
-cenv = dict(denv, VK_ICD_FILENAMES=(sorted(glob.glob('/usr/share/vulkan/icd.d/lvp_icd*.json')) or ['/usr/share/vulkan/icd.d/lvp_icd.json'])[0], LP_NUM_THREADS='2', BACKPLANE_GPUI_ASSETS=ASSETS, BACKPLANE_GPUI_RECTS='1')
+cenv = dict(denv, VK_ICD_FILENAMES=(sorted(glob.glob('/usr/share/vulkan/icd.d/lvp_icd*.json')) or ['/usr/share/vulkan/icd.d/lvp_icd.json'])[0], LP_NUM_THREADS='2', BACKPLANE_GPUI_ASSETS=ASSETS, BACKPLANE_GPUI_RECTS='1', BACKPLANE_SAVE_TEST_FILE=P('saved.png'))
 open(P('script.json'), 'w').write('[{"select":0},{"wait":3000000}]')
 client = spawn([CLIENT, '--url', 'http://127.0.0.1:%d' % PORT, '--token-file', P('home/token'), '--script', P('script.json'), '--exit-after', '3000'], 'client.log', cenv)
 time.sleep(6)
@@ -98,6 +98,11 @@ def ctrls():
         if m.get('event') == 'controls':
             c = {x['id']: x for x in m.get('controls', [])} if m.get('controls') else c
     return c
+def probes():
+    r = {}
+    for m in metrics():
+        if m.get('event') == 'probes': r = {x['id']: x for x in m.get('rects', [])}
+    return r
 def events():
     out = []
     for l in open(P('home/events.jsonl'), errors='replace'):

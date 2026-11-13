@@ -1338,6 +1338,7 @@ secret.vault.locked = The vault is locked: {why}
 secret.open.tip = Give an agent a secret without pasting it into the chat
 
 image.copy = Copy image
+image.save.as = Save image as…
 image.show = Show file
 image.share = Share image
 
@@ -2028,7 +2029,15 @@ gpui.c.cap.nox11 = Screen capture needs an X11 display.
 gpui.c.cap.nostart = ffmpeg did not start.
 gpui.c.cap.failed = The window could not be captured. Capture again or choose an image.
 gpui.c.cap.recfailed = Recording failed or went over the size limit. Record a shorter clip.
-gpui.c.image.close = {name} · click or Esc to close
+gpui.c.image.close = Esc or a click outside the picture to close
+gpui.c.image.size = {w} × {h} px
+gpui.c.image.fit = Fit
+gpui.c.image.loading.full = Loading the full-size picture…
+gpui.c.image.full.failed = The full-size picture did not load; this is a smaller copy.
+gpui.c.image.saved = Saved to {path}
+gpui.c.image.err.nohub = the full-size picture is not on a hub
+gpui.c.image.err.unsent = the hub did not send the full-size picture
+gpui.c.image.save.failed = Could not save: {why}
 gpui.c.plot.toobig = This plot is {mb} MB, too large to show here.
 gpui.c.plot.unread = The plot from the hub could not be read. Reopen the view to load it again.
 gpui.c.plot.badref = Invalid geometry reference. Retry to reload this view.
