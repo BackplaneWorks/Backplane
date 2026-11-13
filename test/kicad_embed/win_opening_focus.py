@@ -622,13 +622,21 @@ def run(h):
             gl = max(gls, key=lambda w: w["w"] * w["h"]) if gls else None
             top = E.find_main_window(cp.pid)
             stall = float(os.environ.get("BP_PREWARM_STALL_S", "0") or 0)
-            seen = wait_prewarm(h, top, "during", 20)
+            # KiCad suspended from before the client's pre-warm request (it asks ~2 s after the first placement), so the
+            # pre-warmed frame is built and shown only after the resume: the steal lands ~stall s after the opening hand-in,
+            # outside verify_handin's 1.5 s window
             stalled = False
-            if stall and seen.get("prewarm") == "requested":
+            t_stall = time.monotonic()
+            if stall:
                 stalled = E.suspend_pid(pid, True)
-                time.sleep(stall)
+                seen = wait_prewarm(h, top, "during", stall + 10)
+                rest = stall - (time.monotonic() - t_stall)
+                if rest > 0:
+                    time.sleep(rest)
                 if stalled:
                     E.suspend_pid(pid, False)
+            else:
+                seen = wait_prewarm(h, top, "during", 20)
             time.sleep(15)
             snap = focus_snapshot(frame)
             if snap["foreground"]:
