@@ -10,6 +10,10 @@ A profile is one fab's capabilities, `schema` 1, with a `rev` that goes up with 
 - `pages`: each page or API it is read from, `{url, fetched, etag?, sha256?}`.
 - `kinds`: per board kind (`pcb`, `flex`, `hdi`, `aluminum`, `copper_core`, `rogers`, `ptfe`, catalog.py's words) a list of values. A
   kind whose page lists only what differs `inherits` the rest from another kind (the rigid page's), and those values say `inherited`.
+  For the fab Backplane orders from, `rogers` and `ptfe` inherit every manufacturing limit from the rigid page on purpose: that page
+  lists "RF PCB: 1 oz copper, 2-layer RF PCBs with Rogers and PTFE cores" among its board types and gives them only their own sizes
+  (590 x 438 mm, 3 x 3 mm); its track, drill and ring tables cover them. Its `rf-pcb-capabilities` and
+  `high-frequency-pcb-capabilities` addresses serve the same page (checked 2026-11-13), so there is no other page to read.
 - every value: `{key, value, unit, cost, when, page, source, fetched, confidence, note, preferred?}`.
   - `cost`: `free` is what the fab makes at its base price, `extra` what it makes for more (the manufacturing review says "costs more",
     never "error", for a design between the two).
@@ -53,6 +57,14 @@ marked section, merged, never overwritten:
 - Whole-line `#` comments `# BEGIN Backplane fab profile` … `# END Backplane fab profile`, right after the file's `(version 1)` (a new
   file gets one). Regenerated in place; every byte outside the markers stays as the person wrote it (a test proves the round trip).
 - KiCad lets later rules win, so the person's own rules, after the section, keep precedence where they match.
+- Where the fab's rules sit: ahead of every rule of the person's. The fab's limits are the floor; a rule of the person's that sets the
+  same constraint decides, stricter or not, and one that allows less than the fab is a conflict (below), said and never silently won.
+- With the board open in KiCad the rules go through it (`EditCustomRules`, by rule name: a replaced rule keeps its place). A KiCad with
+  `rules-insert-position` (bp.13 batch 4) is sent `insert: RIP_FIRST`: every fab rule goes, ahead of the person's; when one is new or
+  one stands after the person's (an older runtime's write), all of them are removed and sent again in one request, in the plan's
+  order, so they move. An older KiCad appends a new name after everything else, where it would win: there a new fab rule whose
+  constraint one of the person's rules also sets is left out and named (`drc.left_out`). `current` follows the same choice (and, with
+  the capability, wants no fab rule after the person's).
 - A board setup minimum (the .kicad_pro's `board.design_settings.rules`) already as strict as the fab's gets no rule, only a comment:
   the project wins. One under it gets the rule and is listed in `drc.suggestions` for the person to approve; Backplane never rewrites
   the board setup itself.
@@ -94,6 +106,9 @@ before the number, which number after them, a factor for a mil or a ring). More 
   values are the bundled baseline's; a changed page changes the value and the revision; a missing page or row keeps the old.
   `fab_gather_live_refresh` (ignored; `FAB_LIVE_HOME=<temp home>`) runs a real one by hand: on 2026-11-12, 121 values read, none
   missing, none different from the baseline.
+- `fab_model_no_baseline_value_is_older_than_its_bound` fails once any bundled value or stackup was read more than 120 days ago
+  (a new, copy or offline hub designs against the bundled baseline until its first refresh): read the pages again and update it.
+- The review adds one note (`fab_stale`, info) naming each of the board's values read more than 120 days ago (`model::MAX_AGE_DAYS`).
 
 ## The Fab panel (`fab/panel.rs`)
 

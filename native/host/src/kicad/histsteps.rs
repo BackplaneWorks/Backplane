@@ -6,7 +6,8 @@
 //! (the live title "Live · 21 of 27 changes", the note under it) come along. `git`/`top`/`pcb`/`sch` are the project's, as before.
 use crate::{files::git as fgit, hub::Hub};
 use serde_json::{json, Value};
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::{atomic::{AtomicU64, Ordering}, Arc, Mutex, OnceLock}, time::{Duration, Instant}};
+use tokio::sync::watch;
 
 /// A thread entry as the history reads it: a message (role user/assistant) or an act (role = its tone, kind = the tool).
 #[derive(Clone, Debug, Default)]
@@ -148,12 +149,42 @@ fn moved_aside(g: &str) -> Vec<String> {
         (n.strip_prefix(&pre).is_some_and(|t| !t.is_empty() && t.bytes().all(|b| b.is_ascii_digit())) && e.path().is_dir()).then(|| e.path().to_string_lossy().into_owned()) }).collect();
     v.sort(); v.reverse(); v
 }
-/// Which of `commits` the git dir `g` has (a read: rev-list of the commits themselves, missing ones ignored).
-async fn have(g: &str, commits: &[String]) -> std::collections::HashSet<String> {
+/// One git read of a history (#1110): past this it is killed and its folder counts as having none of the commits.
+const GIT_LIMIT: Duration = Duration::from_secs(10);
+/// All of one `history.steps`' git: past this it answers with the steps found so far (a folder not yet read shows none).
+const STEPS_LIMIT: Duration = Duration::from_secs(30);
+/// Which of `commits` the git dir `g` has (a read: rev-list of the commits themselves, missing ones ignored), None when it was not read by
+/// `until` (or within GIT_LIMIT). Killed with its future: a request given up or replaced leaves no git running.
+async fn have(g: &str, commits: &[String], until: Instant) -> Option<std::collections::HashSet<String>> {
+    let left = until.saturating_duration_since(Instant::now()).min(GIT_LIMIT);
+    if left.is_zero() { return None }
     let mut args: Vec<&str> = vec!["--git-dir", g, "rev-list", "--no-walk", "--ignore-missing"]; args.extend(commits.iter().map(String::as_str));
-    let r = fgit::proc_ro("git", &args, "/", &[]).await;
-    if r.code != 0 { return Default::default() }
-    r.out.lines().map(|l| l.trim().to_string()).filter(|l| l.len() >= 7).collect()
+    let r = fgit::read_within(left, "git", &args, "/", &[]).await;
+    if r.code == 124 { return None }
+    if r.code != 0 { return Some(Default::default()) }
+    Some(r.out.lines().map(|l| l.trim().to_string()).filter(|l| l.len() >= 7).collect())
+}
+
+/// The run now going for each request key, and where its answer comes.
+struct Run { n: u64, stop: tokio::task::AbortHandle, answer: watch::Receiver<Option<Value>> }
+fn runs() -> &'static Mutex<HashMap<String, Run>> { static R: OnceLock<Mutex<HashMap<String, Run>>> = OnceLock::new(); R.get_or_init(Default::default) }
+/// `work` for `key`, replacing a run still going for the same key (#1110: a viewer asking again and again piled up git processes): the older
+/// run is stopped (its future dropped, so its git is killed) and its caller gets the newer run's answer. None only when no run answered.
+pub async fn latest<F>(key: String, work: F) -> Option<Value> where F: std::future::Future<Output = Value> + Send + 'static {
+    static N: AtomicU64 = AtomicU64::new(0);
+    let n = N.fetch_add(1, Ordering::Relaxed);
+    let (tx, mut rx) = watch::channel(None);
+    let task = tokio::spawn(async move { let v = work.await; let _ = tx.send(Some(v)); });
+    if let Some(old) = runs().lock().unwrap().insert(key.clone(), Run { n, stop: task.abort_handle(), answer: rx.clone() }) { old.stop.abort() }
+    let mut mine = n;
+    let out = loop {
+        if let Ok(v) = rx.wait_for(Option::is_some).await { break v.clone() }
+        // stopped by a newer request for the same key: wait for its answer instead (never past what it is bounded by)
+        let next = { let g = runs().lock().unwrap(); g.get(&key).filter(|r| r.n != mine).map(|r| (r.n, r.answer.clone())) };
+        match next { Some((n2, r2)) => { mine = n2; rx = r2 } None => break None }
+    };
+    { let mut g = runs().lock().unwrap(); if g.get(&key).is_some_and(|r| r.n == n) { g.remove(&key); } }
+    out
 }
 
 /// A thread's entries read off the log (the model's lock held only to copy their places).
@@ -174,10 +205,16 @@ async fn entries(hub: &Arc<Hub>, thread: &str) -> Vec<Src> {
     out
 }
 
+/// `history.steps`: one run per thread and file at a time (a repeat replaces the one still going), its git bounded in time.
 pub async fn steps(hub: &Arc<Hub>, thread: &str, kind: &str, file: &str) -> Value {
+    let (h, t, k, f) = (hub.clone(), thread.to_string(), kind.to_string(), file.to_string());
+    latest(format!("{thread}\n{kind}\n{file}"), async move { steps_now(&h, &t, &k, &f, Instant::now() + STEPS_LIMIT).await }).await
+        .unwrap_or_else(|| json!({"thread": thread, "steps": [], "live": "Live", "note": ""}))
+}
+async fn steps_now(hub: &Arc<Hub>, thread: &str, kind: &str, file: &str, until: Instant) -> Value {
     let Some(cwd) = crate::files::root_of(hub, thread).await else { return json!({"thread": thread, "steps": [], "live": "Live", "note": ""}) };
     let cwd = cwd.to_string_lossy().into_owned();
-    let out = fgit::refs(&cwd, thread).await; let mut ls = out.split('\n');
+    let out = tokio::time::timeout(GIT_LIMIT, fgit::refs(&cwd, thread)).await.unwrap_or_default(); let mut ls = out.split('\n');
     let (gd, top) = (ls.next().unwrap_or("").to_string(), ls.next().unwrap_or("").to_string());
     let f = super::project::read(&cwd);
     let k = kind_no(kind);
@@ -189,7 +226,7 @@ pub async fn steps(hub: &Arc<Hub>, thread: &str, kind: &str, file: &str) -> Valu
     let mut dirs: std::collections::BTreeMap<String, Vec<String>> = Default::default();
     for s in &steps { for d in std::iter::once(s.g.clone()).chain(moved_aside(&s.g)) { let v = dirs.entry(d).or_default(); v.push(s.c.clone()); if !s.p.is_empty() { v.push(s.p.clone()) } } }
     let mut known: HashMap<String, std::collections::HashSet<String>> = HashMap::new();
-    for (d, mut cs) in dirs { cs.sort(); cs.dedup(); let h = have(&d, &cs).await; known.insert(d, h); }
+    for (d, mut cs) in dirs { cs.sort(); cs.dedup(); if let Some(h) = have(&d, &cs, until).await { known.insert(d, h); } }
     let steps = place(steps, &mut |d, want| known.get(d).map(|h| want.iter().filter(|c| h.contains(*c)).cloned().collect()).unwrap_or_default(), &moved_aside);
     let mut v = bar_of(steps, &es, k, &file, &|t| crate::agents::rules::when(&zone, t, now));
     for (key, val) in [("thread", thread.to_string()), ("git", gd), ("top", top), ("pcb", f.pcb), ("sch", f.sch), ("kind", if k == 1 { "schematic".into() } else { "board".into() }), ("file", file)] { v[key] = json!(val); }
@@ -265,5 +302,27 @@ mod tests {
         let v = bar(&es, 0, "", &|t| format!("T{t}"));
         assert_eq!(v["steps"][0]["detail"], "Saved T6 · After reply · Moved U3."); assert_eq!(v["steps"][1]["detail"], "Saved Time unavailable · Source unavailable");
         assert_eq!(v["live"], "Live · 2 changes"); assert_eq!(live_words(1, 1), "Live · 1 change");
+    }
+    /// #1110: a repeated history.steps for the same thread and file replaces the one still going: the older is stopped (its future, and so its git,
+    /// dropped) and its caller gets the newer answer; another key is left alone.
+    #[tokio::test(flavor = "multi_thread")] async fn a_repeated_request_replaces_the_one_still_going() {
+        struct Dropped(Arc<std::sync::atomic::AtomicBool>); impl Drop for Dropped { fn drop(&mut self) { self.0.store(true, Ordering::SeqCst) } }
+        let gone = Arc::new(std::sync::atomic::AtomicBool::new(false)); let g2 = gone.clone();
+        let key = format!("t-{}\nboard\n", std::process::id());
+        let first = tokio::spawn(latest(key.clone(), async move { let _d = Dropped(g2); std::future::pending::<()>().await; json!("never") }));
+        let other = tokio::spawn(latest(format!("{key}other"), async { tokio::time::sleep(Duration::from_millis(300)).await; json!("other") }));
+        tokio::time::sleep(Duration::from_millis(100)).await; assert!(!first.is_finished());
+        let second = latest(key.clone(), async { tokio::time::sleep(Duration::from_millis(50)).await; json!("fresh") }).await;
+        assert_eq!(second, Some(json!("fresh")));
+        assert!(gone.load(Ordering::SeqCst), "the older run was stopped");
+        assert_eq!(tokio::time::timeout(Duration::from_secs(5), first).await.unwrap().unwrap(), Some(json!("fresh")), "its caller has the newer answer");
+        assert_eq!(other.await.unwrap(), Some(json!("other")), "another file's request is not touched");
+        assert!(!runs().lock().unwrap().contains_key(&key), "nothing is left behind");
+    }
+    /// #1110: a history read past its deadline is no read (its folder shows none of the steps), not a wait.
+    #[tokio::test] async fn a_history_read_past_its_deadline_is_skipped() {
+        let t0 = Instant::now();
+        assert_eq!(have("/nonexistent/history.git", &["abc1234".into()], Instant::now()).await, None);
+        assert!(t0.elapsed() < Duration::from_secs(1));
     }
 }

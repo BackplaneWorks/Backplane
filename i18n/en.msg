@@ -1917,6 +1917,8 @@ gpui.open.a.thread.first.that = Open a thread first: that file is in no project 
 gpui.gerbers.open.on.their.project = Gerbers open on their project's Board; this one is in no project.
 gpui.that.kicad.project.has.no = That KiCad project has no board or schematic beside it.
 gpui.that.file.is.not.on = That file is not on this hub.
+gpui.quit.backplane = Quit Backplane
+gpui.quit.backplane.on.a.mac = Quit Backplane, on a Mac: the hub keeps running
 
 # ---- gpui-c: viewers, plots, terminal, drawing pad ----
 gpui.c.commit = Commit
@@ -2053,8 +2055,10 @@ gpui.c.kicad.keep.yours = Keep yours
 gpui.c.kicad.reload.lose.your.edits = Reload (lose your edits)
 gpui.c.kicad.a.comment.from.kicad.needs = A comment from KiCad needs an open thread.
 gpui.kcomment.nothing = Nothing selected: the area in view
-gpui.kcomment.no.capture = KiCad could not say what is selected; the note goes alone
+gpui.kcomment.no.capture = KiCad could not say what is selected. Enter asks again · Esc cancels
 gpui.kcomment.reading = Reading the selection…
+gpui.kcomment.waiting = Waiting for KiCad's selection… the comment posts when it comes
+gpui.kcomment.timeout = KiCad did not send the selection. Enter asks again · Esc cancels
 gpui.kcomment.hint = Enter posts to the thread · Esc cancels
 gpui.kcomment.not.posted = The comment was not posted: {why}
 gpui.keys.kcomment = Comment on what is selected in KiCad, from Backplane or from inside the editor: Enter posts, Esc cancels
@@ -2841,6 +2845,10 @@ gpui.f.inactive = Inactive: no confirmed active work
 gpui.f.tool.runs.nover = {name}  runs from {path}.
 
 # ---- android: new entries go here ----
+android.mgmt.all = All
+android.mgmt.judged = agent-judged
+android.mgmt.fix = Fix with agent
+android.mgmt.sent = Sent to the thread.
 android.mcp = MCP servers
 android.alerts.ask = Bub can alert you when a thread needs you.
 android.alerts.allow = Allow alerts
@@ -4305,6 +4313,7 @@ gpui.mgmt.bom.paused.tip = The parts search asked Backplane to slow down; the lo
 gpui.keys.mgmt.fab = Fab panel beside the design: open or close
 gpui.mgmt.bom.putback = Put back.
 gpui.mgmt.bom.nochange = Nothing to change.
+gpui.mgmt.bom.deferred = You are editing it in KiCad: the change goes in when you finish there.
 gpui.mgmt.bom.inkicad.save = Changed in KiCad; save there to keep it.
 gpui.mgmt.bom.undo.tip = Put the old value back
 gpui.mgmt.bom.undo = Undo

@@ -11,6 +11,13 @@ use std::{collections::HashMap, path::{Path, PathBuf}, sync::{Arc, Mutex}, time:
 use tokio::{io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader}, process::{Child, ChildStdin}, sync::{mpsc, oneshot}};
 
 pub const GENERIC: &str = "Account operation failed. Check its current status before retrying.";
+/// Why an op was refused because something else runs on the account (#1108), instead of GENERIC.
+pub const SIGNING_IN: &str = "A sign-in is already in progress on this account. Finish or cancel it first.";
+pub const CHECKING: &str = "A verification is already running on this account. Try again in a moment.";
+pub const STARTING: &str = "A turn is starting on this account. Try again in a moment.";
+pub const TURN_RUNNING: &str = "A turn is running on this account. Try again when it ends.";
+/// The whole of a one-shot CLI call (`Accounts::cli`): its output and its exit.
+const CLI_LIMIT: Duration = Duration::from_secs(12);
 const FAILURES: &[(&str, &str)] = &[
     ("code_rejected", "Claude did not accept that authentication code. It may be incomplete, expired, already used, or from an earlier sign-in. Choose Connect / Login and copy the new code from that sign-in page."),
     ("network", "Claude could not reach its sign-in service. Check the connection and try Connect / Login again."),
@@ -313,7 +320,8 @@ impl Rpc {
         self.request("initialize", json!({"clientInfo":{"name":"backplane_accounts","version":"1"},"capabilities":{"experimentalApi":true}}), 12).await?;
         self.stdin.write_all(b"{\"method\":\"initialized\",\"params\":{}}\n").await.map_err(|_| ())
     }
-    async fn close(mut self) { let _ = self.child.start_kill(); let _ = self.child.wait().await; }
+    /// Killed, and its exit waited for a moment only: a missed exit (#1108) must not hold the op that closes it.
+    async fn close(mut self) { let _ = self.child.start_kill(); let _ = tokio::time::timeout(Duration::from_secs(3), self.child.wait()).await; }
 }
 /// The variables that point a CLI at one profile's store (`environment` sets them). The default login never inherits them: a hub started from a shell that
 /// ran under a profile (an agent's own Bash, after failover moved it) would otherwise run every default-login thread, and read its usage, under that profile.
@@ -465,7 +473,10 @@ impl Accounts {
     }
 
     /// One-shot `<provider> <args>`: stdout JSON (not for logout), 12 s, 128 KB.
-    async fn cli(&self, p: Option<&Profile>, program: &str, args: &[&str]) -> Result<(i32, Value), ()> {
+    async fn cli(&self, p: Option<&Profile>, program: &str, args: &[&str]) -> Result<(i32, Value), ()> { self.cli_within(CLI_LIMIT, p, program, args).await }
+    /// `cli` with its own time limit: the read AND the wait for the exit are under it (#1108: the wait had none, and a child exit the hub missed held the
+    /// account's job for ever). On expiry the child is killed and this is an error; the child is killed on drop too, so a cancelled caller leaves none.
+    async fn cli_within(&self, limit: Duration, p: Option<&Profile>, program: &str, args: &[&str]) -> Result<(i32, Value), ()> {
         let prog = (self.resolve)(program).map_err(|_| ())?;
         let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Agent, &prog);
         c.args(args); c.current_dir(&self.root); apply_env(&mut c, &self.environment(p)?, p.is_some());
@@ -473,9 +484,12 @@ impl Accounts {
         let mut child = spawn(&mut c).await.map_err(|_| ())?;
         let mut out = child.stdout.take().ok_or(())?;
         let mut buf = Vec::new();
-        let read = tokio::time::timeout(Duration::from_secs(12), async { let mut chunk = [0u8; 8192]; loop { let n = out.read(&mut chunk).await.map_err(|_| ())?; if n == 0 { break } buf.extend_from_slice(&chunk[..n]); if buf.len() > 131072 { return Err(()) } } Ok::<(), ()>(()) }).await;
-        if !matches!(read, Ok(Ok(()))) { let _ = child.start_kill(); return Err(()) }
-        let code = child.wait().await.map_err(|_| ())?.code().unwrap_or(-1);
+        let ran = tokio::time::timeout(limit, async {
+            let mut chunk = [0u8; 8192];
+            loop { let n = out.read(&mut chunk).await.map_err(|_| ())?; if n == 0 { break } buf.extend_from_slice(&chunk[..n]); if buf.len() > 131072 { return Err(()) } }
+            Ok::<i32, ()>(child.wait().await.map_err(|_| ())?.code().unwrap_or(-1))
+        }).await;
+        let code = match ran { Ok(Ok(code)) => code, _ => { let _ = child.start_kill(); return Err(()) } };
         let data = if args.get(1) == Some(&"logout") { json!({}) } else { serde_json::from_slice(&buf).map_err(|_| ())? };
         Ok((code, data))
     }
@@ -698,6 +712,17 @@ pub fn parse_iso(s: &str) -> Option<u64> {
     u64::try_from(days * 86400 + h * 3600 + mi * 60 + se).ok()
 }
 
+/// Why profile `id` takes no new op now (None: it may start). `check_busy`: a turn running on it is a refusal too.
+fn busy_refusal(g: &Inner, id: &str, check_busy: bool) -> Option<&'static str> {
+    match g.jobs.get(id) { Some(j) if j.starts_with("attempt:") => return Some(SIGNING_IN), Some(_) => return Some(CHECKING), None => {} }
+    if g.launching.get(id).copied().unwrap_or(0) > 0 { return Some(STARTING) }
+    if check_busy && g.busy.get(id).copied().unwrap_or(0) > 0 { return Some(TURN_RUNNING) }
+    None
+}
+/// An op in progress on a profile (`Accounts::hold`): its job is ended when this drops, however the op ends.
+struct Job<'a> { a: &'a Accounts, id: String, what: String }
+impl Drop for Job<'_> { fn drop(&mut self) { self.a.end(&self.id, &self.what) } }
+
 // ---- the snapshot and the ops ----
 
 #[derive(Debug)]
@@ -749,12 +774,15 @@ impl Accounts {
 
     /// A request on a profile: refused while another is in progress, or a launch is queued (accounts.js `jobs` / `launchQueues`). `check_busy`: also while a provider
     /// child (a turn) runs on it; refresh asks that (login checks `busy` and `launching` itself in `start`, disconnect and remove check it themselves), a status and a rename do not.
-    fn begin(&self, id: &str, what: &str, check_busy: bool) -> Result<(), ()> {
+    /// Err: why, in the words Settings shows (#1108: a refusal said only "Account operation failed").
+    fn begin(&self, id: &str, what: &str, check_busy: bool) -> Result<(), &'static str> {
         let mut g = self.inner.lock().unwrap();
-        if g.jobs.contains_key(id) || g.launching.get(id).copied().unwrap_or(0) > 0 || (check_busy && g.busy.get(id).copied().unwrap_or(0) > 0) { return Err(()) }
+        if let Some(why) = busy_refusal(&g, id, check_busy) { return Err(why) }
         g.jobs.insert(id.to_string(), what.to_string()); Ok(())
     }
     fn end(&self, id: &str, what: &str) { let mut g = self.inner.lock().unwrap(); if g.jobs.get(id).map(String::as_str) == Some(what) { g.jobs.remove(id); } }
+    /// `begin`, ended when the guard drops: an op that fails, times out or whose future is dropped never leaves the account marked in progress (#1108).
+    fn hold(&self, id: &str, what: &str, check_busy: bool) -> Result<Job<'_>, &'static str> { self.begin(id, what, check_busy)?; Ok(Job { a: self, id: id.to_string(), what: what.to_string() }) }
 
     /// One account request (accounts.js `request`): the snapshot after it; a failure is the snapshot with the generic error.
     pub async fn request(self: &Arc<Self>, r: &Value) -> Value {
@@ -788,7 +816,7 @@ impl Accounts {
                 g.profiles.push(p.clone()); if self.save(&mut g).is_err() { g.profiles.pop(); return Err(None) } p
             };
             // synctoken, or an add that asks (`start`, Settings' Add Claude (sync)): its sign-in starts at once
-            if from.is_some() || (sync && r["start"] == true) { self.start(&p, "sync").await.map_err(|_| None)?; }
+            if from.is_some() || (sync && r["start"] == true) { self.start(&p, "sync").await.map_err(|why| why.map(str::to_string))?; }
             let mut s = self.snapshot(); s["made"] = json!(p.id); return Ok(s);
         }
         let pid = r["profile"].as_str().unwrap_or("").to_string();
@@ -814,7 +842,7 @@ impl Accounts {
                 if let Some(t) = tx { let _ = t.send(Cmd::Respond(code.trim().to_string())); }
                 return Ok(self.snapshot());
             }
-            "login" => { self.start(&p, if p.kind == SYNC { "sync" } else { r["mode"].as_str().unwrap_or("device") }).await.map_err(|_| None)?; return Ok(self.snapshot()) }
+            "login" => { self.start(&p, if p.kind == SYNC { "sync" } else { r["mode"].as_str().unwrap_or("device") }).await.map_err(|why| why.map(str::to_string))?; return Ok(self.snapshot()) }
             _ => {}
         }
         // Delete is the way out of a stuck sign-in: its attempt is ended first (its child is told to stop), and a job left behind by an attempt that is gone is dropped
@@ -823,7 +851,10 @@ impl Accounts {
             for (aid, tx) in attempts { self.cancel(&aid, "cancelled", ""); if let Some(t) = tx { let _ = t.send(Cmd::Cancel); } }
             { let mut g = self.inner.lock().unwrap(); if g.jobs.get(&pid).map_or(false, |j| j.starts_with("attempt:")) { g.jobs.remove(&pid); } }
         }
-        self.begin(&pid, "status", false).map_err(|_| None)?;
+        let job = self.hold(&pid, "status", false).map_err(|why| Some(why.to_string()))?;
+        // why an op inside was refused (a turn running on the account), said instead of the generic failure
+        let refused = std::sync::atomic::AtomicBool::new(false);
+        let turn_runs = || { refused.store(true, std::sync::atomic::Ordering::Relaxed); Err(()) };
         let res: Result<(), ()> = async {
             match op {
                 "status" => {
@@ -836,12 +867,12 @@ impl Accounts {
                 }
                 "disconnect" if p.kind == SYNC => {
                     // a sync token is not a login the CLI can sign out of: it is forgotten here (on a machine that made it, its linked machines forget it too)
-                    if self.busy(&pid) { return Err(()) }
+                    if self.busy(&pid) { return turn_runs() }
                     self.update(&pid, |slot| { slot.state = "disconnected".into(); slot.catalog = vec![]; slot.allowance = None; slot.made_at = 0; slot.expires_at = 0; })?;
                     let t = self.tokens.lock().unwrap().clone(); t.del(&pid); Ok(())
                 }
                 "disconnect" => {
-                    if self.busy(&pid) { return Err(()) }
+                    if self.busy(&pid) { return turn_runs() }
                     if p.provider == "claude" { let (code, _) = self.cli(Some(&p), "claude", &["auth", "logout"]).await?; if code != 0 { return Err(()) } }
                     else { let prog = (self.resolve)("codex").map_err(|_| ())?; let mut rpc = Rpc::open(&prog, &self.environment(Some(&p))?, true).await?; let r = async { rpc.initialize().await?; rpc.request("account/logout", json!({}), 12).await.map(|_| ()) }.await; rpc.close().await; r?; }
                     // the registry is written first: a store is removed only once the file no longer names it
@@ -850,7 +881,7 @@ impl Accounts {
                 }
                 "rename" => { let l = label(r["label"].as_str().unwrap_or("")); if l.is_empty() { return Err(()) } self.update(&pid, |slot| slot.label = l) }
                 "remove" => {
-                    if self.busy(&pid) { return Err(()) }
+                    if self.busy(&pid) { return turn_runs() }
                     let base = self.root.join(&pid); private_dir(&base).map_err(|_| ())?;
                     self.mutate_save(|g| { g.profiles.retain(|x| x.id != pid); g.attempts.retain(|a| a.profile != pid); })?;
                     if p.kind == SYNC { let t = self.tokens.lock().unwrap().clone(); t.del(&pid); }
@@ -859,11 +890,12 @@ impl Accounts {
                 _ => Err(()),
             }
         }.await;
-        self.end(&pid, "status");
-        res.map(|_| self.snapshot()).map_err(|_| None)
+        drop(job);
+        res.map(|_| self.snapshot()).map_err(|_| refused.load(std::sync::atomic::Ordering::Relaxed).then(|| TURN_RUNNING.to_string()))
     }
     // ---- sign-in attempts ----
-    async fn start(self: &Arc<Self>, p: &Profile, mode: &str) -> Result<(), ()> {
+    /// Err(Some(why)) when refused because something else is running on the account, Err(None) for any other failure.
+    async fn start(self: &Arc<Self>, p: &Profile, mode: &str) -> Result<(), Option<&'static str>> {
         let aid = new_id();
         let (rx, cand) = {
             let mut g = self.inner.lock().unwrap();
@@ -871,7 +903,8 @@ impl Accounts {
             g.attempts.retain(|a| live.contains(&a.profile));
             // a dead login is signed in again even while a process of it lives: that process can do nothing with it, and the new sign-in has a store of its own
             let dead = g.profiles.iter().any(|x| x.id == p.id && x.state == "expired");
-            if g.attempts.len() >= 8 || g.jobs.contains_key(&p.id) || (!dead && g.busy.get(&p.id).copied().unwrap_or(0) > 0) || g.launching.get(&p.id).copied().unwrap_or(0) > 0 { return Err(()) }
+            if let Some(why) = busy_refusal(&g, &p.id, !dead) { return Err(Some(why)) }
+            if g.attempts.len() >= 8 { return Err(None) }
             // a sync account's store holds no credentials (its sessions only): a new token keeps it
             let store = if p.kind == SYNC { p.store.clone() } else { aid.clone() };
             let cand = Profile { store: store.clone(), ..p.clone() };
@@ -1209,9 +1242,8 @@ impl Accounts {
         for id in ids {
             self.inner.lock().unwrap().refresh_at.insert(id.clone(), now);
             let dead = self.profile(&id).map_or(false, |p| p.state == "expired");
-            if self.begin(&id, "refresh", !dead).is_err() { continue }
+            let Ok(_job) = self.hold(&id, "refresh", !dead) else { continue };
             if let Ok(p) = self.profile(&id) { if let Ok(np) = self.verify(&p, false).await { let _ = self.update(&id, |slot| *slot = merge_checked(slot, np)); } }
-            self.end(&id, "refresh");
         }
         let due = { let g = self.inner.lock().unwrap(); let at = g.refresh_at.get("default-claude").copied().unwrap_or(0); at == 0 || now.saturating_sub(at) >= 300 };
         if due && std::env::var_os("ANTHROPIC_API_KEY").is_none() {
@@ -1566,7 +1598,7 @@ for l in sys.stdin:
         let s = a.request(&json!({"op":"login","profile":id,"mode":"device"})).await; assert_eq!(s["error"], "");
         let s = until(&a, |s| s["attempts"][0]["state"] == "waiting").await; let aid = s["attempts"][0]["id"].as_str().unwrap().to_string();
         assert_eq!(s["attempts"][0]["url"], "https://claude.com/cai/oauth/authorize?code=true&client_id=x&state=STATE123"); assert_eq!(prof(&s, &id)["state"], "connecting");
-        assert_eq!(a.request(&json!({"op":"login","profile":id})).await["error"], GENERIC, "one request at a time");
+        assert_eq!(a.request(&json!({"op":"login","profile":id})).await["error"], SIGNING_IN, "one request at a time, and it says why");
         let r = a.request(&json!({"op":"respond","profile":id,"attempt":aid,"code":"justacode"})).await; assert!(r["error"].as_str().unwrap().starts_with("Paste the complete authentication code"));
         let r = a.request(&json!({"op":"respond","profile":id,"attempt":aid,"code":"CODE#OTHER"})).await; assert!(r["error"].as_str().unwrap().starts_with("That code belongs to a different sign-in attempt"));
         assert_eq!(a.request(&json!({"op":"respond","profile":id,"attempt":aid,"code":"a\nb#c"})).await["error"], GENERIC);
@@ -1585,7 +1617,7 @@ for l in sys.stdin:
         std::fs::write(stores[0].path().join("login.json"), json!({"email":"other@example.com","accountUuid":"u2","orgUuid":"o1"}).to_string()).unwrap();
         assert!(a.launch_plan(&id, "2", "claude").await.unwrap_err().contains("changed")); assert_eq!(prof(&a.snapshot(), &id)["epoch"], 3);
         // disconnect: logged out, epoch moves, the store is gone
-        a.child_started(&id); assert_eq!(a.request(&json!({"op":"disconnect","profile":id})).await["error"], GENERIC, "not while a turn runs"); a.child_ended(&id);
+        a.child_started(&id); assert_eq!(a.request(&json!({"op":"disconnect","profile":id})).await["error"], TURN_RUNNING, "not while a turn runs, and it says why"); a.child_ended(&id);
         let s = a.request(&json!({"op":"disconnect","profile":id})).await; assert_eq!((prof(&s, &id)["state"].clone(), prof(&s, &id)["epoch"].clone()), (json!("disconnected"), json!(4)));
         assert!(std::fs::read_dir(&store).unwrap().flatten().all(|e| !e.path().is_dir()), "the store is forgotten");
         std::env::remove_var("ANTHROPIC_API_KEY"); let _ = std::fs::remove_dir_all(&h);
@@ -1764,7 +1796,7 @@ for l in sys.stdin:
         let (a2, i2) = (a.clone(), id.clone()); let two = tokio::spawn(async move { a2.launch_plan(&i2, "2", "claude").await });
         soon(|| queued(&a, &id) == 2).await;
         assert_eq!(queued(&a, &id), 2, "both are queued behind the one running");
-        for op in ["status", "login", "disconnect", "remove"] { assert_eq!(a.request(&json!({"op":op,"profile":id})).await["error"], GENERIC, "{op} is refused while launches are queued"); }
+        for op in ["status", "login", "disconnect", "remove"] { assert_eq!(a.request(&json!({"op":op,"profile":id})).await["error"], STARTING, "{op} is refused while launches are queued, and says why"); }
         assert_eq!(prof(&a.snapshot(), &id)["state"], "connected", "and none of them changed it");
         drop(hold);
         assert!(one.await.unwrap().is_ok() && two.await.unwrap().is_ok(), "they run one after the other");
@@ -1819,7 +1851,7 @@ for l in sys.stdin:
         a.child_started(&id);
         assert!(a.launch_plan(&id, "2", "claude").await.is_ok(), "a second turn may start under the account");
         assert_eq!(a.request(&json!({"op":"status","profile":id})).await["error"], "", "status is not refused by a running turn");
-        assert_eq!(a.request(&json!({"op":"login","profile":id})).await["error"], GENERIC, "a sign-in is");
+        assert_eq!(a.request(&json!({"op":"login","profile":id})).await["error"], TURN_RUNNING, "a sign-in is, and it says why");
         a.child_ended(&id); let _ = std::fs::remove_dir_all(&h);
     }
     #[tokio::test(flavor = "multi_thread")] async fn a_failed_save_leaves_the_profile_as_it_was_and_says_so() {
@@ -1879,6 +1911,40 @@ for l in sys.stdin:
         let plan = a.launch_plan(&id, "2", "codex").await.unwrap(); assert!(plan.env.iter().any(|(k, _)| k == "CODEX_HOME")); assert!(plan.args.iter().any(|x| x.contains("cli_auth_credentials_store")));
         let s = a.request(&json!({"op":"disconnect","profile":id})).await; assert_eq!((prof(&s, &id)["state"].clone(), prof(&s, &id)["epoch"].clone()), (json!("disconnected"), json!(3)));
         assert_eq!(a.request(&json!({"op":"bogus","profile":id})).await["error"], GENERIC);
+        let _ = std::fs::remove_dir_all(&h);
+    }
+    /// #1108: a CLI that answered and closed its output but never exits (or whose exit the hub misses) held `cli`, and so the account's job, for ever.
+    #[tokio::test(flavor = "multi_thread")] async fn a_cli_that_answers_but_never_exits_is_killed_at_the_limit() {
+        let (h, _sd) = dirs("hang"); let (prog, pidf) = (h.join("hang.sh"), h.join("hang.pid"));
+        std::fs::write(&prog, format!("#!/bin/sh\necho $$ > '{}'\necho '{{\"loggedIn\":true}}'\nexec >&-\nexec sleep 30\n", pidf.display())).unwrap();
+        std::fs::set_permissions(&prog, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let p2 = prog.clone(); let a = Accounts::open(&h, Arc::new(move |_: &str| Ok(p2.clone())));
+        let t0 = std::time::Instant::now();
+        assert!(a.cli_within(Duration::from_millis(800), None, "claude", &["auth", "status"]).await.is_err(), "no exit within the limit is an error");
+        assert!(t0.elapsed() < Duration::from_secs(5), "ended at the limit, not when the child chose to: {:?}", t0.elapsed());
+        let pid: u32 = std::fs::read_to_string(&pidf).unwrap().trim().parse().unwrap();
+        let gone = std::time::Instant::now() + Duration::from_secs(10);
+        while crate::plat::proc::alive(pid) && std::time::Instant::now() < gone { tokio::time::sleep(Duration::from_millis(50)).await }
+        assert!(!crate::plat::proc::alive(pid), "the child was killed (and reaped)");
+        // one that exits in time still answers
+        std::fs::write(&prog, "#!/bin/sh\necho '{\"loggedIn\":true}'\n").unwrap();
+        let (code, data) = a.cli_within(Duration::from_secs(10), None, "claude", &["auth", "status"]).await.unwrap(); assert_eq!((code, data["loggedIn"].clone()), (0, json!(true)));
+        let _ = std::fs::remove_dir_all(&h);
+    }
+    /// #1108: the account's in-progress mark goes with the op, however it ends (an error, a timeout, a dropped future), and a refusal says why.
+    #[tokio::test(flavor = "multi_thread")] async fn an_ops_mark_is_released_when_it_is_dropped_and_a_refusal_says_why() {
+        let (h, sd) = dirs("job"); let a = mgr(&h, &sd); let id = add(&a, "claude", "Work").await; connect(&a, &id).await;
+        { let _j = a.hold(&id, "status", false).unwrap(); assert_eq!(a.begin(&id, "refresh", false), Err(CHECKING), "held"); }
+        assert!(a.hold(&id, "refresh", false).is_ok(), "released when the guard drops");
+        let a1 = a.clone(); let i1 = id.clone();
+        let stuck = async move { let _j = a1.hold(&i1, "status", false).unwrap(); std::future::pending::<()>().await };
+        assert!(tokio::time::timeout(Duration::from_millis(100), stuck).await.is_err());
+        assert!(a.hold(&id, "status", false).is_ok(), "an op whose future was dropped (a timeout) leaves no mark");
+        let _j = a.hold(&id, "refresh", false).unwrap(); // the 5-minute recheck is running
+        for op in ["status", "disconnect", "remove"] { assert_eq!(a.request(&json!({"op":op,"profile":id})).await["error"], CHECKING, "{op}: refused, saying a verification runs"); }
+        assert_eq!(a.request(&json!({"op":"login","profile":id})).await["error"], CHECKING);
+        drop(_j); assert_eq!(a.request(&json!({"op":"status","profile":id})).await["error"], "", "free again");
+        a.child_started(&id); assert_eq!(a.begin(&id, "refresh", true), Err(TURN_RUNNING)); a.child_ended(&id);
         let _ = std::fs::remove_dir_all(&h);
     }
 }

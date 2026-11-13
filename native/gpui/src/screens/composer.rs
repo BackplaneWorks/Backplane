@@ -8,7 +8,7 @@ use gpui::{
     actions, fill, point, prelude::*, px, relative, rgb, rgba, size, App, Bounds, ClipboardEntry, ClipboardItem, Context,
     ContentMask, CursorStyle, ElementId, ElementInputHandler, Entity, EntityInputHandler, EventEmitter, FocusHandle,
     Focusable, GlobalElementId, ImageFormat, KeyBinding, LayoutId, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
-    Pixels, Point, SharedString, Style, TextAlign, TextRun, UTF16Selection, UnderlineStyle, WrappedLine, Window,
+    Pixels, ScrollDelta, ScrollWheelEvent, Point, SharedString, Style, TextAlign, TextRun, UTF16Selection, UnderlineStyle, WrappedLine, Window,
 };
 use std::ops::Range;
 use std::path::PathBuf;
@@ -92,6 +92,10 @@ pub struct Composer {
     bounds: Option<Bounds<Pixels>>,
     line_height: Pixels,
     scroll_y: Pixels,
+    /// The text's full height as last laid out (`scroll_y` runs over 0..total - view).
+    total_h: Pixels,
+    /// What the view last followed the caret for (text, caret, box size): prepaint follows the caret again only when it changes, so a wheel scroll stays put.
+    followed: Option<(u64, gpui::Size<Pixels>)>,
     selecting: bool,
     blink: super::blink::Blink,
     pub light: bool,
@@ -113,7 +117,7 @@ impl Composer {
     /// A composer with its own key context: "Composer" sends on Enter (main.rs), "AskInput" emits Submit.
     pub fn with_context(cx: &mut Context<Self>, ctx: &'static str) -> Self {
         /* i18n-ok: the hint, drawn through trs by shown_placeholder */ Self { blink: Default::default(), light: false, masked: false, max_lines: MAX_LINES, ctx, focus: cx.focus_handle(), ed: Editor::default(), content: "".into(), popup_open: false, chips: vec![], placeholder: "Ask anything: @bot, >thread, %project, #room, &model, $skill, /btw".into(),
-            rows: vec![], bounds: None, line_height: px(20.), scroll_y: px(0.), selecting: false }
+            rows: vec![], bounds: None, line_height: px(20.), scroll_y: px(0.), total_h: px(0.), followed: None, selecting: false }
     }
     pub fn set(&mut self, text: String, cx: &mut Context<Self>) { self.ed.set(&text); self.sync(cx); }
     pub fn dictate(&mut self, range: std::ops::Range<usize>, with: &str, caret: usize, cx: &mut Context<Self>) { self.ed.dictate(range, with, caret); self.sync(cx); }
@@ -122,7 +126,7 @@ impl Composer {
     fn shown_placeholder(&self) -> SharedString { crate::i18n::trs(&self.placeholder).into() }
     /// Move the caret one character: `dir` < 0 back, else forward.
     pub fn caret(&mut self, dir: i32, cx: &mut Context<Self>) { self.edit(cx, |e| if dir < 0 { e.left(false, false) } else { e.right(false, false) }); }
-    pub fn reset(&mut self) { self.ed.set(""); self.content = "".into(); self.rows.clear(); self.scroll_y = px(0.); }
+    pub fn reset(&mut self) { self.ed.set(""); self.content = "".into(); self.rows.clear(); self.scroll_y = px(0.); self.followed = None; }
     pub fn editor(&self) -> &Editor { &self.ed }
     pub fn select_everything(&mut self, cx: &mut Context<Self>) { self.edit(cx, |e| e.select_all()); }
     fn sync(&mut self, cx: &mut Context<Self>) { self.content = self.ed.text().to_string().into(); cx.notify(); }
@@ -230,6 +234,12 @@ impl Composer {
         if self.selecting { let i = self.index_at(e.position); self.edit(cx, |ed| ed.place(i, true)); }
     }
     fn mouse_up(&mut self, _: &MouseUpEvent, _: &mut Window, _: &mut Context<Self>) { self.selecting = false; }
+    /// The wheel or trackpad scrolls the text inside the box (the caret stays); the event goes on to the thread behind when the box has nothing to scroll that way.
+    fn wheel(&mut self, e: &ScrollWheelEvent, _: &mut Window, cx: &mut Context<Self>) {
+        let Some(b) = self.bounds else { return };
+        let to = wheel_scroll(self.scroll_y, wheel_dy(&e.delta, self.line_height), self.total_h, b.size.height.max(self.line_height));
+        if to != self.scroll_y { self.scroll_y = to; cx.stop_propagation(); cx.notify(); }
+    }
 
     // ---- utf16 for the input method
     fn to16(&self, offset: usize) -> usize { let t = self.ed.text(); let mut o = offset.min(t.len()); while !t.is_char_boundary(o) { o -= 1; } t[..o].encode_utf16().count() }
@@ -273,7 +283,7 @@ impl EntityInputHandler for Composer {
 }
 
 struct Element_ { input: Entity<Composer> }
-struct Prepaint { rows: Vec<Row>, carets: Vec<gpui::PaintQuad>, sel: Vec<gpui::PaintQuad>, empty: bool, scroll: Pixels }
+struct Prepaint { rows: Vec<Row>, carets: Vec<gpui::PaintQuad>, sel: Vec<gpui::PaintQuad>, empty: bool, scroll: Pixels, total: Pixels, follow_sig: (u64, gpui::Size<Pixels>) }
 
 impl IntoElement for Element_ { type Element = Self; fn into_element(self) -> Self { self } }
 
@@ -318,14 +328,14 @@ impl gpui::Element for Element_ {
         let chips = if empty || input.masked { Chips::default() } else { let a = theme::color(light, "accent"); let mut bg: gpui::Hsla = a.into(); bg.a = 0.18; Chips { words: input.chips.clone(), fg: a.into(), bg } };
         let rows = shape_rows(window, &text, &base, marked.as_ref(), font_size, Some(bounds.size.width), lh, &chips);
         let total = rows.last().map_or(lh, |r| r.top + r.height(lh));
-        // keep the caret in view
+        // keep the caret in view, but only when the text, the caret or the box changed since the last frame: otherwise a wheel scroll would be pulled back
         let head = input.ed.head();
-        let mut scroll = input.scroll_y;
-        let caret_y = if empty { Some(px(0.)) } else { rows.iter().rev().find(|r| r.start <= head).map(|r| r.top + r.pos(head - r.start, lh).y) };
+        let follow_sig = (super::blink::sig(&input.content, head, input.ed.selection().start), bounds.size);
+        let follow = input.followed != Some(follow_sig);
+        let caret_y = if !follow { None } else if empty { Some(px(0.)) } else { rows.iter().rev().find(|r| r.start <= head).map(|r| r.top + r.pos(head - r.start, lh).y) };
         // a box squeezed under one row (a parent with a fixed height) never scrolls: that flipped the text 1-2 px every frame
         let view = bounds.size.height.max(lh);
-        if let Some(y) = caret_y { if y < scroll { scroll = y; } else if y + lh > scroll + view { scroll = y + lh - view; } }
-        scroll = scroll.min((total - view).max(px(0.))).max(px(0.));
+        let scroll = view_scroll(input.scroll_y, caret_y, lh, view, total);
         let origin = point(bounds.left(), bounds.top() - scroll);
         let (accent, mut sel, mut carets) = (theme::color(light, "accent"), Vec::new(), Vec::new());
         let range = input.ed.selection();
@@ -351,7 +361,7 @@ impl gpui::Element for Element_ {
                 }
             }
         }
-        Prepaint { rows, carets, sel, empty, scroll }
+        Prepaint { rows, carets, sel, empty, scroll, total, follow_sig }
     }
     fn paint(&mut self, _: Option<&GlobalElementId>, _: Option<&gpui::InspectorElementId>, bounds: Bounds<Pixels>, _: &mut (), pre: &mut Prepaint, window: &mut Window, cx: &mut App) {
         let focus = self.input.read(cx).focus.clone();
@@ -372,8 +382,8 @@ impl gpui::Element for Element_ {
             cx.spawn(async move |cx| { cx.background_executor().timer(w).await; let _ = input.update(cx, |i, cx| { i.blink.pending = false; cx.notify(); }); }).detach();
         }
         let rows = std::mem::take(&mut pre.rows);
-        let (scroll, empty) = (pre.scroll, pre.empty);
-        self.input.update(cx, |i, _| { i.rows = if empty { vec![] } else { rows }; i.bounds = Some(bounds); i.line_height = lh; i.scroll_y = scroll; });
+        let (scroll, empty, total, follow_sig) = (pre.scroll, pre.empty, pre.total, pre.follow_sig);
+        self.input.update(cx, |i, _| { i.rows = if empty { vec![] } else { rows }; i.bounds = Some(bounds); i.line_height = lh; i.scroll_y = scroll; i.total_h = total; i.followed = Some(follow_sig); });
     }
 }
 
@@ -390,6 +400,7 @@ impl Render for Composer {
             .on_action(cx.listener(Self::undo)).on_action(cx.listener(Self::redo)).on_action(cx.listener(Self::newline)).on_action(cx.listener(Self::go)).on_action(cx.listener(Self::go_back)).on_action(cx.listener(Self::palette))
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down)).on_mouse_up(MouseButton::Left, cx.listener(Self::mouse_up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::mouse_up)).on_mouse_move(cx.listener(Self::mouse_move))
+            .on_scroll_wheel(cx.listener(Self::wheel))
             .line_height(px(20.)).text_size(px(13.))
             .child(gpui::div().w_full().child(Element_ { input: cx.entity() }))
     }
@@ -424,6 +435,17 @@ pub fn bindings() -> Vec<KeyBinding> {
     v
 }
 
+/// A wheel or trackpad delta as pixels down the text (lines are the box's rows); GPUI's positive y scrolls toward the top.
+fn wheel_dy(delta: &ScrollDelta, lh: Pixels) -> Pixels { match delta { ScrollDelta::Pixels(p) => -p.y, ScrollDelta::Lines(l) => lh * -l.y } }
+/// The box's scroll after a wheel move of `dy`, within the text.
+fn wheel_scroll(scroll: Pixels, dy: Pixels, total: Pixels, view: Pixels) -> Pixels { (scroll + dy).min((total - view).max(px(0.))).max(px(0.)) }
+/// The scroll a frame draws at: brought to the caret's row when there is one to follow (`caret_y`), always within `[0, total - view]`.
+fn view_scroll(scroll: Pixels, caret_y: Option<Pixels>, lh: Pixels, view: Pixels, total: Pixels) -> Pixels {
+    let mut s = scroll;
+    if let Some(y) = caret_y { if y < s { s = y; } else if y + lh > s + view { s = y + lh - view; } }
+    s.min((total - view).max(px(0.))).max(px(0.))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -433,5 +455,29 @@ mod tests {
         let m = mask(s);
         assert_eq!(m.len(), s.len()); assert_eq!(m.find('\n'), s.find('\n')); assert!(m.chars().all(|c| c == '*' || c == '\n'));
         assert_eq!(mask(""), "");
+    }
+    // #1111: the wheel scrolls a box taller than its text, the caret stays put, and a frame with no change keeps the wheel's scroll
+    #[test] fn the_wheel_scrolls_the_text_within_the_box() {
+        let (lh, view, total) = (px(20.), px(240.), px(600.));
+        assert_eq!(wheel_dy(&ScrollDelta::Pixels(point(px(0.), px(-30.))), lh), px(30.));
+        assert_eq!(wheel_dy(&ScrollDelta::Lines(point(0., 2.)), lh), px(-40.));
+        assert_eq!(wheel_scroll(px(100.), px(30.), total, view), px(130.));
+        assert_eq!(wheel_scroll(px(350.), px(30.), total, view), px(360.), "no further than the text's end");
+        assert_eq!(wheel_scroll(px(10.), px(-40.), total, view), px(0.), "no higher than its start");
+        // nothing to scroll (the text fits): the scroll stays 0, so the wheel goes on to the thread behind
+        assert_eq!(wheel_scroll(px(0.), px(50.), px(100.), view), px(0.));
+        assert_eq!(wheel_scroll(px(360.), px(30.), total, view), px(360.), "at the end, scrolling on changes nothing");
+    }
+    #[test] fn a_frame_follows_the_caret_only_when_told_to() {
+        let (lh, view, total) = (px(20.), px(240.), px(600.));
+        // the caret on the last row, the wheel took the view to the top: an unchanged frame keeps it there
+        assert_eq!(view_scroll(px(0.), None, lh, view, total), px(0.));
+        // an edit or a caret move brings the caret's row back into view
+        assert_eq!(view_scroll(px(0.), Some(px(580.)), lh, view, total), px(360.));
+        assert_eq!(view_scroll(px(300.), Some(px(40.)), lh, view, total), px(40.));
+        assert_eq!(view_scroll(px(100.), Some(px(200.)), lh, view, total), px(100.), "a caret already in view moves nothing");
+        // always clamped, as before: text that shrank, a box squeezed under one row
+        assert_eq!(view_scroll(px(500.), None, lh, view, total), px(360.));
+        assert_eq!(view_scroll(px(50.), Some(px(0.)), lh, view, px(20.)), px(0.));
     }
 }

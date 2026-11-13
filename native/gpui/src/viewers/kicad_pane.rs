@@ -205,23 +205,29 @@ impl KicadPane {
         // Linux: a thread waits on the connection's socket, native_child `conn_fd`)
         let (wake_tx, wake_rx) = async_channel::bounded::<()>(1);
         let (drained_tx, drained_rx) = std::sync::mpsc::channel::<()>();
+        // the tick holds a sender: with no wake thread (Windows; Linux with no X socket or BACKPLANE_KICAD_NO_XWAKE) recv() then waits
+        // instead of failing at once, which spun the tick on the UI thread and starved every timer (e2e drivers stalled on Windows)
+        let hold_tx = wake_tx.clone();
         #[cfg(not(unix))]
-        let _ = (&wake_tx, &drained_rx);
+        drop((wake_tx, drained_rx));
         #[cfg(unix)]
         if let Some(fd) = nc::conn_fd().filter(|_| std::env::var_os("BACKPLANE_KICAD_NO_XWAKE").is_none()) {
             std::thread::spawn(move || loop {
                 let mut p = libc::pollfd { fd, events: libc::POLLIN, revents: 0 };
                 let r = unsafe { libc::poll(&mut p, 1, 1000) };
                 if wake_tx.is_closed() { break }
-                if r > 0 { while drained_rx.try_recv().is_ok() {} let _ = wake_tx.try_send(()); let _ = drained_rx.recv_timeout(std::time::Duration::from_millis(40)); }
+                // the socket is read here (nc::pump), so it is empty again after: only an event for the pane wakes the tick, and other X noise
+                // never spins it (a wake per readable socket the tick did not read kept the main thread busy for seconds: every lane's stall)
+                if r > 0 && nc::pump() { while drained_rx.try_recv().is_ok() {} let _ = wake_tx.try_send(()); let _ = drained_rx.recv_timeout(std::time::Duration::from_millis(40)); }
+                else if r < 0 { std::thread::sleep(std::time::Duration::from_millis(40)); }
             });
         }
-        cx.spawn(async move |weak, cx| loop {
+        cx.spawn(async move |weak, cx| { let _hold = hold_tx; loop {
             let timer = cx.background_executor().timer(std::time::Duration::from_millis(40));
             let _ = futures_util::future::select(Box::pin(timer), Box::pin(wake_rx.recv())).await;
             if weak.update(cx, |this, cx| this.tick(cx)).is_err() { break }
             let _ = drained_tx.send(());
-        }).detach();
+        } }).detach();
         KicadPane { bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), last_root: (i32::MIN, 0), placed: None,
             focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), poked: None, unmapped_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, at_px: None, dialogs_open: Vec::new(), took: None }
     }
@@ -482,8 +488,8 @@ impl KicadPane {
                 // Ctrl+Tab / Ctrl+Shift+Tab pressed in KiCad: the next editor tab, and KiCad keeps the keyboard
                 nc::Ev::Key(k) if k == "ctrl-tab" || k == "ctrl-shift-tab" => { let to = next_tab(self.wanted_kind(), if k == "ctrl-tab" { 1 } else { -1 }); self.show_kind(to, cx); }
                 nc::Ev::Key(k) => { eprintln!("GPUI_LOG {}", json!({"kicad_key": k, "at_ms": crate::screens::kcomment::epoch_ms() as u64})); nc::focus(self.toplevel); self.keys = false; nc::grab_escape(self.toplevel, false); self.grab_click(c, true);
-                    // the comment chord opens the window now, from this event (no keystroke round trip through the next frame)
-                    if k == "ctrl-;" { cx.emit(PaneKey(k)); } else { self.press.push(k); } cx.notify(); }
+                    // the comment chord (and bp.13's ';', KiCad's own comment key) opens the window now, from this event (no keystroke round trip through the next frame)
+                    if k == "ctrl-;" || k == ";" { cx.emit(PaneKey(k)); } else { self.press.push(k); } cx.notify(); }
                 nc::Ev::Focus(_) => { if let Some(w) = self.want() { self.took = Some((w, std::time::Instant::now())); } if !self.keys { self.keys = true; self.touched(); nc::grab_escape(self.toplevel, true); self.grab_click(c, false); cx.notify(); } }
             }
         }

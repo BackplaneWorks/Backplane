@@ -1329,7 +1329,9 @@ impl Actor {
         }
         if self.cx.running {
             let code = e.code.or(e.signal.map(|s| 128 + s)).unwrap_or(1);
-            self.fail_k(match self.driver.as_ref().and_then(|d| d.exit_why(code)) { Some(w) => rules::exit_say(&w, code, &e.stderr), None => rules::exit_why(code) }, "exit", &hub_id("x", now_s(), 0), true).await;
+            let why = match self.driver.as_ref().and_then(|d| d.exit_why(code)) { Some(w) => rules::exit_say(&w, code, &e.stderr), None => rules::exit_why(code) };
+            let why = if rules::sign_in_locked(&e.stderr) && !rules::sign_in_locked(&why) { rules::exit_say(&why, code, &e.stderr) } else { why }; // said on stderr only
+            self.fail_k(rules::sign_in_lock_say(why), "exit", &hub_id("x", now_s(), 0), true).await; // #1109: a stale refresh lock says so
         }
         self.cmds = cmds::Cmds::new(); self.wait.clear();
         let live = { let w = self.ag.world().await; w.threads.get(&self.th).map_or(false, |t| !t.archived && !t.deleted) };

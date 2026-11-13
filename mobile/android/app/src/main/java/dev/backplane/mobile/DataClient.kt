@@ -218,7 +218,7 @@ object DataClient {
             "star" -> { star = DStarOffer.of(o.optJSONObject("offer")) }
             "telemetry.notice" -> { telemetryNotice = DTelemetryNotice.of(o.optJSONObject("notice")) }
             "migrating" -> heardMigrating(o)
-            "info" -> o.optJSONObject("info")?.let { if (it.has("hub.offer")) heardOffer(it.optString("hub.offer")) }
+            "info" -> o.optJSONObject("info")?.let { if (it.has("hub.offer")) heardOffer(it.optString("hub.offer")); heardMgmt(it) }
             "shot" -> { shotBot = o.optString("bot"); shot = o.optLong("n") }
         }
     }
@@ -886,6 +886,39 @@ object DataClient {
     }
     fun putQuiet(spec: String) { quiet = spec; scope.launch { runCatching { call("push.prefs", JSONObject().put("notify.quiet", spec)) } } }
     fun putQuietUrgent(on: Boolean) { quietUrgent = on; scope.launch { runCatching { call("push.prefs", JSONObject().put("notify.quiet.urgent", if (on) "on" else "off")) } } }
+
+    // ---- management panels and checks (feature "mgmt"; docs/MANAGEMENT.md): the hub's info `mgmt.*` and `kicad.checks.*`, drawn by DataMgmt.kt
+    /** every management info the hub sent, by key (`mgmt.state.<digest>`, `mgmt.bom.<digest>`, `kicad.checks.<digest>`…) */
+    var mgmt by mutableStateOf<Map<String, JSONObject>>(emptyMap()); private set
+    /** the project the viewer shows: its digest (the keys' end) and path, from `mgmt.watch` */
+    var mgmtDigest by mutableStateOf(""); private set
+    var mgmtProject by mutableStateOf(""); private set
+    /** the parts a management row asks the board or schematic to light (a BOM line's references, a finding's parts) */
+    var lightRefs by mutableStateOf<List<String>>(emptyList())
+    /** the thread the viewer is open on ("Fix with agent" sends there) */
+    var viewerThread = ""
+    private fun heardMgmt(info: JSONObject) {
+        val keys = info.keys().asSequence().filter { it.startsWith("mgmt.") || it.startsWith("kicad.checks.") || it.startsWith("review.") }.toList()
+        if (keys.isEmpty()) return
+        val m = mgmt.toMutableMap()
+        for (k in keys) { val t = info.optString(k); if (t.isEmpty()) m.remove(k) else runCatching { JSONObject(t) }.getOrNull()?.let { m[k] = it } }
+        mgmt = m
+    }
+    fun mgmtData(id: String): JSONObject? = if (mgmtDigest.isEmpty()) null else mgmt["mgmt.$id.$mgmtDigest"]
+    /** `mgmt.watch`: the project's digest, its panels' state and what they have published (the info frames follow it). */
+    suspend fun mgmtWatch(project: String) {
+        val r = call("mgmt.watch", JSONObject().put("project", project))
+        val d = r.optString("digest"); if (d.isEmpty()) return
+        val m = mgmt.toMutableMap()
+        r.optJSONObject("state")?.let { m["mgmt.state.$d"] = it }
+        r.optJSONObject("data")?.let { data -> data.keys().forEach { k -> data.optJSONObject(k)?.let { m["mgmt.$k.$d"] = it } } }
+        mgmt = m; mgmtDigest = d; mgmtProject = r.optString("project", project)
+    }
+    suspend fun bomEdit(refs: List<String>, field: String, value: String): JSONObject =
+        call("mgmt.bom.edit", JSONObject().put("project", mgmtProject).put("refs", org.json.JSONArray(refs)).put("field", field).put("value", value))
+    suspend fun lifePart(key: String): JSONObject = call("mgmt.life.part", JSONObject().put("project", mgmtProject).put("key", key))
+    suspend fun checksFix(id: String): String = call("kicad.checks.fix", JSONObject().put("project", mgmtProject).put("id", id)).optString("text")
+    suspend fun checksFocus(id: String) { call("kicad.checks.focus", JSONObject().put("project", mgmtProject).put("id", id)) }
 
     // ---- viewers, files, browser (features viewers, files, browser; native/host/src/data/ext.rs)
     data class ProjectFiles(val root: String, val pcb: String, val sch: String)

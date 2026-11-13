@@ -109,6 +109,15 @@ pub fn err_scrub(s: &str) -> String {
     out
 }
 /// Exit.say: `<Exit.why's words, else dflt> (exit N | signal N)` and the scrubbed tail of stderr (the last 2048 bytes are kept by the caller).
+/// Claude Code's own words when its OAuth refresh lock is taken ("Failed to refresh OAuth token: another Claude Code process is refreshing it", "... is holding the refresh lock").
+pub fn sign_in_locked(text: &str) -> bool { let l = text.to_lowercase(); l.contains("another claude code process") && (l.contains("refreshing it") || l.contains("refresh lock")) }
+/// A turn that failed on that lock says what it is (#1109): a CLI stopped in the middle of its refresh leaves the lock behind, and every later start on that account fails the
+/// same way until it is gone. Backplane never touches the lock itself (its format is Claude Code's own): it says so, once, in plain words. Other text is returned as it is.
+pub fn sign_in_lock_say(text: String) -> String {
+    if !sign_in_locked(&text) || text.starts_with(SIGN_IN_LOCK) { return text }
+    format!("{SIGN_IN_LOCK}: Claude Code would not refresh this account's sign-in because another Claude Code process holds its refresh lock. If no other Claude Code is using this account, the lock was left by a process stopped in the middle of its refresh: sign in to the account again, then send a message (a restart does not clear it). Claude Code said: {}", text.trim())
+}
+pub const SIGN_IN_LOCK: &str = "Stale sign-in lock in this Claude account";
 pub fn exit_say(dflt: &str, code: i32, tail: &str) -> String {
     let why = if code == 137 { "agent was killed (signal 9, likely out of memory)" } else { "" };
     let c = if code >= 128 { format!("signal {}", code - 128) } else { format!("exit {code}") };
@@ -178,6 +187,15 @@ pub fn rules_agent(block: &str, text: &str) -> String { if block.is_empty() { te
 
 #[cfg(test)]
 mod tests {
+    #[test] fn a_refresh_lock_failure_is_called_a_stale_sign_in_lock_once() { // #1109
+        use super::*;
+        for m in ["Failed to refresh OAuth token: another Claude Code process is refreshing it", "OAuth access token could not be refreshed: another Claude Code process is holding the refresh lock"] {
+            let said = sign_in_lock_say(m.to_string()); assert!(said.starts_with(SIGN_IN_LOCK) && said.ends_with(m), "{said}");
+            assert_eq!(sign_in_lock_say(said.clone()), said, "said once, not wrapped again");
+            let exit = sign_in_lock_say(exit_say("claude exited before the turn ended", 1, m)); assert!(exit.starts_with(SIGN_IN_LOCK), "{exit}");
+        }
+        for m in ["API Error: 401", "Failed to authenticate: OAuth session expired and could not be refreshed", "another process is refreshing it"] { assert_eq!(sign_in_lock_say(m.to_string()), m) }
+    }
     #[test] fn exit_say_words_the_exit_and_scrubs_the_tail() {
         use super::*;
         assert_eq!(exit_say("grok exited before the turn ended", 1, ""), "grok exited before the turn ended (exit 1)");

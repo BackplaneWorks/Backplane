@@ -1,8 +1,10 @@
 #!/bin/bash
 # Suite: the Fab management panel (native/host/src/fab/{panel,drc,setup}.rs, native/gpui/src/screens/mgmt_fab.rs).
 #   F1  on the Board viewer the strip shows Fab; a press opens it with the fab's limits, each with its source and date (the hub's info)
-#   F2  the panel's Write puts the fab's section into the project's .kicad_dru (a copy), and the panel then says it is in sync
-#   F3  (stock|fork) a board setup suggestion's Apply raises that minimum in the project through the headless KiCad, and the suggestion goes
+#   F2  the panel's Write puts the fab's limits into the project's .kicad_dru (a copy; through a KiCad that has it loaded), and the panel
+#       then says it is in sync
+#   F3  (stock|fork) a board setup suggestion's Apply raises that minimum in the project (through a KiCad that has it loaded, saved
+#       when nothing else was unsaved; else the project file), and the suggestion goes
 # Copies only (seed_project.py), on a private Xvfb + i3; the hub never fetches the fab's pages (a test hub). EMBED_MODE=spike runs F1-F2.
 set -euo pipefail
 
@@ -104,7 +106,8 @@ check "The clearance minimum under the fab's is a suggestion" "$(has_ctl mgmt:fa
 # F2: Write
 wait_for_log "$OUT/client.log" '"name":"drc_written","event":"mark"' 60 || true
 sleep 0.5; shot "f2_drc_written"
-check "Write put the fab's section into the project's .kicad_dru" "$(grep -q '^# BEGIN Backplane fab profile' "$DRU" 2>/dev/null && grep -q '^# END Backplane fab profile' "$DRU" && echo 1 || echo 0)"
+# the section as Backplane writes the file, or (a KiCad with the project loaded, even only warmed) the fab's rules by name through it
+check "Write put the fab's limits into the project's .kicad_dru" "$({ grep -q '^# BEGIN Backplane fab profile' "$DRU" 2>/dev/null && grep -q '^# END Backplane fab profile' "$DRU"; } || grep -q '^(rule "fab: ' "$DRU" 2>/dev/null && echo 1 || echo 0)" "$(head -c 300 "$DRU" 2>/dev/null)"
 FAB=$(fab_info)
 check "After Write the panel says the DRC rules are in sync" "$(python3 -c 'import json,sys; print(int(json.loads(sys.argv[1])["drc"]["state"]=="current"))' "$FAB" 2>/dev/null || echo 0)" "$(echo "$FAB" | head -c 200)"
 
@@ -113,6 +116,8 @@ if [ "$EMBED_MODE" != "spike" ]; then
   wait_for_log "$OUT/client.log" '"name":"applied","event":"mark"' 90 || true
   sleep 0.5; shot "f3_applied"
   V=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["board"]["design_settings"]["rules"].get("min_clearance"))' "$PRO" 2>/dev/null || echo "?")
+  # what the hub answers an Apply now (the panel's press logs no reply): said when the value did not move
+  python3 -c 'import sys; sys.exit(0 if float(sys.argv[1]) >= 0.09 - 1e-9 else 1)' "$V" 2>/dev/null || echo "INFO a second Apply answers: $(hub_rpc "[{\"method\":\"fab.profile\",\"params\":{\"pro\":\"$PROJ/ecc83-pp.kicad_pro\",\"action\":\"apply\",\"key\":\"min_clearance\"}}]" 2>&1 | grep -a "^{\"m\":\"fab.profile\"" | cut -c1-700)"
   check "Apply raised the project's clearance minimum to the fab's (now $V)" "$(python3 -c 'import sys; print(int(float(sys.argv[1]) >= 0.09 - 1e-9))' "$V" 2>/dev/null || echo 0)" "$(grep -i 'fab.profile\|apply' "$OUT/client.log" | tail -n 5)"
   FAB=$(fab_info)
   check "The suggestion is gone once applied" "$(python3 -c 'import json,sys; print(int(not any(s.get("key")=="min_clearance" for s in json.loads(sys.argv[1]).get("suggestions",[]))))' "$FAB" 2>/dev/null || echo 0)"

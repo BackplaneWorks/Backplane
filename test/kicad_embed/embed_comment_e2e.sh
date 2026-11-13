@@ -56,9 +56,12 @@ x.XOpenDisplay.restype = ctypes.c_void_p; x.XStringToKeysym.restype = ctypes.c_u
 x.XKeysymToKeycode.argtypes = [ctypes.c_void_p, ctypes.c_ulong]; t.XTestFakeKeyEvent.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_int, ctypes.c_ulong]; x.XSync.argtypes = [ctypes.c_void_p, ctypes.c_int]
 d = x.XOpenDisplay(os.environ['DISPLAY'].encode()); kc = lambda n: x.XKeysymToKeycode(d, x.XStringToKeysym(n))
 ctrl, semi = kc(b'Control_L'), kc(b'semicolon')
-t.XTestFakeKeyEvent(d, ctrl, 1, 0); x.XSync(d, 0); time.sleep(0.05)
+bare = os.environ.get('KC_KEY') == 'semicolon'   # bp.13: KiCad's own ';' (no Ctrl)
+if not bare: t.XTestFakeKeyEvent(d, ctrl, 1, 0); x.XSync(d, 0); time.sleep(0.05)
 t.XTestFakeKeyEvent(d, semi, 1, 0); x.XSync(d, 0); t0 = int(time.time() * 1000)
-time.sleep(0.03); t.XTestFakeKeyEvent(d, semi, 0, 0); t.XTestFakeKeyEvent(d, ctrl, 0, 0); x.XSync(d, 0)
+time.sleep(0.03); t.XTestFakeKeyEvent(d, semi, 0, 0)
+if not bare: t.XTestFakeKeyEvent(d, ctrl, 0, 0)
+x.XSync(d, 0)
 print(t0)
 PY2
 )
@@ -67,6 +70,7 @@ OPEN_MS=$(python3 -c 'import json,sys; p=json.loads(sys.argv[1] or "{}"); print(
 check "Ctrl+; in KiCad opens Backplane's comment window" "$([ -n "$OPEN" ] && [ -n "$PAINT" ] && echo 1 || echo 0)" "open=$OPEN painted=$PAINT"
 shot opened
 wait_klog capture || true; CAP=$(klog capture); echo "x focus with the window open: $(xfocus)"
+if grep -qa "capture_only" "$DESC"; then check "bp.13: the capture is CommentSelection{capture_only} (no event, no dialog)" "$(python3 -c 'import json,sys; print(1 if json.loads(sys.argv[1] or "{}").get("capture_only") is True else 0)' "$CAP")" "$CAP"; fi
 check "the capture names the selection" "$(python3 -c 'import json,sys; c=json.loads(sys.argv[1] or "{}"); print(1 if c.get("ok") and set(c.get("references") or []) >= {"R1","C1"} else 0)' "$CAP")" "$CAP"
 SIZES=$(grep -o 'GPUI_RECT {"name":"kcomment"[^}]*}' "$OUT/client.log" | python3 -c 'import json,sys; print(" ".join(sorted({"%dx%d" % (json.loads(l[10:])["w"], json.loads(l[10:])["h"]) for l in sys.stdin})))')
 check "the card keeps its size when the capture fills it in" "$([ -n "$SIZES" ] && [ "$(echo $SIZES | wc -w)" = 1 ] && echo 1 || echo 0)" "$SIZES"
@@ -100,7 +104,7 @@ for l in open(sys.argv[1], errors="replace"):
     if not l.startswith("GPUI_LOG "): continue
     try: v = json.loads(l[9:])
     except Exception: continue
-    k = ("received" if v.get("kicad_key") == "ctrl-;" else "dispatched" if v.get("kicad_key_dispatch") == "ctrl-;" else v.get("kcomment") if v.get("kcomment") in ("open", "opened", "rendered", "painted") else None)
+    k = ("received" if v.get("kicad_key") in ("ctrl-;", ";") else "dispatched" if v.get("kicad_key_dispatch") == "ctrl-;" else v.get("kcomment") if v.get("kcomment") in ("open", "opened", "rendered", "painted") else None)
     if k and k not in hops and v.get("at_ms", 0) >= t0: hops[k] = v["at_ms"]
 prev = t0; print("hop table (ms after the ';' press reached X; 'painted' is when gpui drew, not pixels on screen):")
 for k in ("received", "dispatched", "open", "opened", "rendered", "painted"):
