@@ -123,6 +123,48 @@ kembed_cleanup() {
 }
 trap kembed_cleanup EXIT INT TERM
 
+# The client's memory, every e2e on this lib: a sampler finds the client of this run (its --token-file under $OUT) and writes
+# "<ms since it started> <RSS MB>" to $OUT/rss.txt every 500 ms. Past RSS_KILL_MB (default 6144) it kills the client at once, so a runaway
+# client fails its suite instead of taking the machine (a client grew to 45 GB in 3 min on Nov 13 and the OOM killer took the hub's
+# whole scope with it); it is killed too when it grows more than 1 GB within 5 s (that one grew about 300 MB/s). finish_suite checks the peak against RSS_MAX_MB (default 2048) and the growth from the run's first minute to its end
+# against RSS_GROWTH_MB (default 768).
+rss_watch() {
+  set +e +u +o pipefail  # runs in the background of suites with set -euo pipefail: a pgrep that finds nothing yet must not end it
+  local p= t0 r; local -a hist=()
+  for _ in $(seq 1500); do p=$(pgrep -f -- "--token-file $OUT/home/token" 2>/dev/null | head -1); [ -n "$p" ] && break; sleep 0.2; done
+  [ -n "$p" ] || return 0
+  t0=$(date +%s%3N)
+  while kill -0 "$p" 2>/dev/null; do
+    r=$(awk '/^VmRSS/{print int($2/1024)}' "/proc/$p/status" 2>/dev/null) || break
+    [ -n "$r" ] || break
+    echo "$(( $(date +%s%3N) - t0 )) $r" >> "$OUT/rss.txt"
+    if [ "$r" -gt "${RSS_KILL_MB:-6144}" ]; then echo "RSS_KILLED client $p at $r MB" >> "$OUT/rss.txt"; kill -KILL "$p" 2>/dev/null; break; fi
+    # a runaway is killed by its rate too, before its size takes the run's KiCad or the machine with it: more than 1 GB up within 5 s
+    hist+=("$r"); [ "${#hist[@]}" -gt 10 ] && hist=("${hist[@]:1}")
+    if [ "${#hist[@]}" -ge 10 ] && [ $(( r - hist[0] )) -gt 1024 ]; then echo "RSS_KILLED client $p at $r MB (+$(( r - hist[0] )) MB in 5 s)" >> "$OUT/rss.txt"; kill -KILL "$p" 2>/dev/null; break; fi
+    sleep 0.5
+  done
+}
+rss_watch </dev/null >/dev/null 2>&1 &
+track_pid $!
+rss_verdict() {
+  [ -s "$OUT/rss.txt" ] || return 0
+  python3 - "$OUT/rss.txt" "${RSS_MAX_MB:-2048}" "${RSS_GROWTH_MB:-768}" <<'PYR'
+import sys
+rows = []; killed = False
+for l in open(sys.argv[1]):
+    if l.startswith("RSS_KILLED"): killed = True; continue
+    a = l.split()
+    if len(a) == 2: rows.append((int(a[0]), int(a[1])))
+cap, grow = int(sys.argv[2]), int(sys.argv[3])
+peak = max(r for _, r in rows)
+early = [r for t, r in rows if t >= 60000][:1] or [rows[0][1]]
+end = rows[-1][1]
+print("peak=%d first_min=%d end=%d samples=%d%s" % (peak, early[0], end, len(rows), " KILLED" if killed else ""))
+print(1 if peak <= cap and not killed else 0, 1 if end - early[0] <= grow else 0)
+PYR
+}
+
 # Isolate HOME, XDG_*, and TMPDIR under $OUT (short path in $BP_TMP so unix sockets stay <108 chars).
 init_isolated_dirs() {
   rm -rf "$OUT/home" "$OUT/fh" "$OUT/proj" "$OUT/origin.git" "$OUT/bin" "$OUT/run" "$OUT/tmp" "$OUT/shots"
@@ -259,6 +301,12 @@ check_runtime() {
 finish_suite() {
   local suite_name=$1
   check_runtime
+  local rv; rv=$(rss_verdict)
+  if [ -n "$rv" ]; then
+    local info=$(echo "$rv" | head -1) ok=$(echo "$rv" | tail -1)
+    check "the client's memory stayed under ${RSS_MAX_MB:-2048} MB" "${ok%% *}" "$info"
+    check "the client's memory did not grow more than ${RSS_GROWTH_MB:-768} MB over the run" "${ok##* }" "$info"
+  fi
   echo "$suite_name: passed=$PASS_COUNT failed=$FAIL_COUNT artifacts=$OUT"
   [ "$FAIL_COUNT" -eq 0 ]
 }

@@ -23,5 +23,13 @@ RC=0
 python3 "$KEMBED_LIB/real_use_drive.py" "$OUT" "$OUT/client.log" "${KEMBED_JOURNEYS:-focus,open,switch,edit,mgmt,coedit,xprobe,comment,save,tools,editors,checks,markers,panels,sch}" || RC=$?
 shot end
 stop_pid "$CP"
+# the client's memory over the run (env_xvfb rss_watch): a runaway is a failure here, never the machine's OOM killer
+RV=$(rss_verdict || true)
+if [ -n "$RV" ]; then
+  echo "PERF client_memory $(echo "$RV" | head -1)"
+  OKS=$(echo "$RV" | tail -1)
+  [ "${OKS%% *}" = 1 ] || { echo "FAIL the client's memory stayed under ${RSS_MAX_MB:-2048} MB ($(echo "$RV" | head -1))"; RC=1; }
+  [ "${OKS##* }" = 1 ] || { echo "FAIL the client's memory did not grow more than ${RSS_GROWTH_MB:-768} MB over the run ($(echo "$RV" | head -1))"; RC=1; }
+fi
 echo "real_use_journeys: rc=$RC artifacts=$OUT"
 exit "$RC"
