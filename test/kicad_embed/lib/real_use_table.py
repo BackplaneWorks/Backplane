@@ -34,6 +34,8 @@ def main():
         for k in ("mb", "resizes", "ok"):
             if v.get(k) is not None and v.get("ms") is None: s = f"{k} {v[k]}" + (f" hwm {v['hwm_mb']}" if v.get("hwm_mb") else "")
         marked = False
+        # a step a diagnostic run left out on purpose (KEMBED_UNDO_NO_CTRL_Y=1) is no miss
+        if v.get("skipped") is True: return s + " (skipped)"
         for rx, field, lim, what, low, hard in BUDGETS:
             if re.search(rx, name):
                 x = v.get(field)
