@@ -2058,6 +2058,7 @@ gpui.kcomment.reading = Reading the selection…
 gpui.kcomment.hint = Enter posts to the thread · Esc cancels
 gpui.kcomment.not.posted = The comment was not posted: {why}
 gpui.keys.kcomment = Comment on what is selected in KiCad, from Backplane or from inside the editor: Enter posts, Esc cancels
+gpui.c.kicad.dialog = KiCad has “{title}” open
 
 # ---- gpui-d: setup, pairing, hubs, palette, picker, projects, composer, menus ----
 gpui.assets.missing = Assets missing in {dir}: {files}

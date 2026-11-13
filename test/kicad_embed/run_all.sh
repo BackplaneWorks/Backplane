@@ -28,6 +28,8 @@ SUITES=(
   "embed_mgmt_e2e.sh:mgmt"
   "embed_fab_e2e.sh:fab"
   "embed_comment_e2e.sh:comment"
+  "embed_prewarm_e2e.sh:prewarm"
+  "embed_click_e2e.sh:click"
 )
 
 FAILED=0

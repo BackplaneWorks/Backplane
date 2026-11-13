@@ -64,7 +64,9 @@ discover_kicad() {
       echo "SKIP/FAIL EMBED_MODE=fork requires Backplane KiCad >= 10.99.0-bp.8 (--embedded); pass BACKPLANE_KICAD_BIN=/path/to/kicad" >&2
       exit 2
     fi
-    KICAD_CLI=${BACKPLANE_KICAD_CLI:-$(dirname "$KICAD_BIN")/kicad-cli}
+    # the cli beside the KiCad asked for: the hub takes the GUI kicad from beside its cli, and an agent's shell exports BACKPLANE_KICAD_CLI
+    # for the runtime the person runs (a "bp.12" run was bp.11 through it)
+    if [ -x "$(dirname "$KICAD_BIN")/kicad-cli" ]; then KICAD_CLI="$(dirname "$KICAD_BIN")/kicad-cli"; else KICAD_CLI=${BACKPLANE_KICAD_CLI:-$(dirname "$KICAD_BIN")/kicad-cli}; fi
   else
     KICAD_CLI=${BACKPLANE_KICAD_CLI:-$REAL_HOME/.local/bin/kicad-cli}
     [ -x "$KICAD_CLI" ] || KICAD_CLI=$(command -v kicad-cli || true)
@@ -238,8 +240,24 @@ shot() {
   xwininfo -root -tree >"$OUT/shots/$name.tree" 2>&1 || true
 }
 
+# The KiCad the hub really ran (its "kicad embed: running <version> (<argv0>)" line) against the one asked for: a mismatch fails the run.
+check_runtime() {
+  local ran want bin
+  [ -f "$OUT/hub.log" ] || return 0
+  ran=$(grep -o "kicad embed: running .*" "$OUT/hub.log" | head -1 | sed 's/^kicad embed: running //')
+  [ -n "$ran" ] || return 0
+  want=$("${KICAD_CLI:-kicad-cli}" --version 2>/dev/null | tail -1)
+  bin=$(echo "$ran" | sed -n 's/.*(\(.*\))$/\1/p')
+  echo "RUNTIME asked ${KICAD_BIN:-?} ($want) ran $ran"
+  local v=${ran%% *} same=1
+  if [ -n "$want" ] && [ -n "$v" ] && [[ "$want" != *"$v"* ]] && [[ "$v" != *"$want"* ]]; then same=0; fi
+  if [ -n "${KICAD_BIN:-}" ] && [ -n "$bin" ] && [ "$(dirname "$(readlink -f "$bin")")" != "$(dirname "$(readlink -f "$KICAD_BIN")")" ]; then same=0; fi
+  check "the KiCad run is the one asked for" "$same" "asked $KICAD_BIN $want, ran $ran"
+}
+
 finish_suite() {
   local suite_name=$1
+  check_runtime
   echo "$suite_name: passed=$PASS_COUNT failed=$FAIL_COUNT artifacts=$OUT"
   [ "$FAIL_COUNT" -eq 0 ]
 }

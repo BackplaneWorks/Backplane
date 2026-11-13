@@ -2081,6 +2081,7 @@ gpui.kcomment.reading = 選択内容を読み取り中…
 gpui.kcomment.hint = Enter でスレッドに投稿 · Esc で取り消し
 gpui.kcomment.not.posted = コメントは投稿されませんでした: {why}
 gpui.keys.kcomment = KiCad で選択中のものにコメント (Backplane からもエディタ内からも): Enter で投稿、Esc で取り消し
+gpui.c.kicad.dialog = KiCad で「{title}」が開いています
 
 # ---- gpui-d: setup, pairing, hubs, palette, picker, projects, composer, menus ----
 gpui.assets.missing = {dir} にアセットがありません: {files}

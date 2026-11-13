@@ -266,6 +266,36 @@ mod imp {
         dialogs_over(c, pid, container as u32, toplevel as u32);
         let _ = c.flush();
     }
+    /// The program's dialogs that came up since the last call (KiCad's load-time notices, its questions), each moved once to the middle of
+    /// `over` (the pane, in root coordinates), so what KiCad asks shows where its editor is, not in the middle of the screen. Answers the
+    /// titles of the program's dialogs on screen now: a modal one stops KiCad's API (no events, no pings), so this is how Backplane knows.
+    pub fn centre_dialogs(pid: u32, over: R) -> Vec<String> {
+        static DONE: Mutex<Vec<u32>> = Mutex::new(Vec::new());
+        let mut open = Vec::new();
+        let Some(g) = conn() else { return open }; let c = g.as_ref().unwrap();
+        let Some(root) = root(c) else { return open };
+        let pid_atom = atom(c, "_NET_WM_PID"); // i18n-ok: X11 atom name
+        let kids = |w: Window| c.query_tree(w).ok().and_then(|r| r.reply().ok()).map(|t| t.children).unwrap_or_default();
+        let mut done = DONE.lock().unwrap();
+        let mut moved = false;
+        for a in kids(root) {
+            for w in std::iter::once(a).chain(kids(a)) {
+                if prop32(c, w, pid_atom, AtomEnum::CARDINAL).first() != Some(&pid) { continue }
+                if prop32(c, w, u32::from(AtomEnum::WM_TRANSIENT_FOR), AtomEnum::WINDOW).is_empty() { continue }
+                let Some(at) = c.get_window_attributes(w).ok().and_then(|r| r.reply().ok()) else { continue };
+                if at.override_redirect || at.map_state != MapState::VIEWABLE { continue }
+                open.push(title(c, w));
+                if done.contains(&w) || over.w <= 0 { continue }
+                let Some(geo) = c.get_geometry(w).ok().and_then(|r| r.reply().ok()) else { continue };
+                let (x, y) = (over.x + (over.w - geo.width as i32) / 2, over.y + (over.h - geo.height as i32) / 2);
+                let _ = c.configure_window(w, &ConfigureWindowAux::new().x(x.max(0)).y(y.max(0)));
+                done.push(w); moved = true;
+            }
+        }
+        if done.len() > 256 { done.drain(..128); }
+        if moved { let _ = c.flush(); }
+        open
+    }
 
     /// The frames in the container: its children, or (the fork) the children of KiCad's holder window, an override-redirect child of the container.
     fn frame_windows(c: &RustConnection, container: u32) -> Vec<Window> {
@@ -387,7 +417,9 @@ mod imp {
     }
 
     /// The keyboard to `w` (a frame), when it is viewable.
+    #[track_caller]
     pub fn focus(w: u64) {
+        if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {{\"kicad_focus\":{w},\"at\":\"{}\"}}", std::panic::Location::caller()); }
         let w = w as u32;
         let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
         let viewable = c.get_window_attributes(w).ok().and_then(|r| r.reply().ok()).map_or(false, |a| a.map_state == MapState::VIEWABLE);
@@ -843,6 +875,8 @@ mod imp {
 
     /// Stock cross-process top-level adoption is never used on Windows (fork only).
     pub fn adopt(_pid: u32, _container: u64, _toplevel: u64) -> Vec<u64> { vec![] }
+    /// Windows: `dialogs` already centres them over Backplane's window.
+    pub fn centre_dialogs(_pid: u32, _over: R) -> Vec<String> { vec![] }
 
     /// Own and centre floating KiCad dialogs (`WS_CAPTION`, non-child top-levels of `pid`) over Backplane's `toplevel` HWND asynchronously.
     pub fn dialogs(pid: u32, container: u64, toplevel: u64) {
@@ -1310,6 +1344,7 @@ mod imp {
     pub fn destroy(_container: u64) {}
     pub fn adopt(_pid: u32, _container: u64, _toplevel: u64) -> Vec<u64> { vec![] }
     pub fn dialogs(_pid: u32, _container: u64, _toplevel: u64) {}
+    pub fn centre_dialogs(_pid: u32, _over: super::R) -> Vec<String> { vec![] }
     pub fn frames(_container: u64) -> Vec<Frame> { vec![] }
     pub fn place(_container: u64, _r: Option<R>, _show: Option<u64>, _managed: Option<&[u64]>, _last_root: &mut (i32, i32)) {}
     pub fn place_local(_container: u64, _r: Option<R>, _show: Option<u64>, _mine: &[u64], _last_root: &mut (i32, i32)) {}
