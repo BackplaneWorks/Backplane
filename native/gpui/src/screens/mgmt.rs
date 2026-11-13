@@ -11,7 +11,7 @@ use std::{collections::HashMap, time::{Duration, Instant}};
 
 /// A panel's client side: drawn from the hub's `mgmt.<id>.<digest>` value (`data`; Null until it arrives).
 pub struct View { pub id: &'static str, pub body: fn(&mut Backplane, &Value, bool, &mut Context<Backplane>) -> AnyElement }
-pub const VIEWS: &[View] = &[View { id: "bom", body: super::mgmt_bom::body }, View { id: "fab", body: super::mgmt_fab::body }, View { id: "checks", body: super::mgmt_checks::body }, View { id: "life", body: super::mgmt_life::body }];
+pub const VIEWS: &[View] = &[View { id: "bom", body: super::mgmt_bom::body }, View { id: "fab", body: super::mgmt_fab::body }, View { id: "checks", body: super::mgmt_checks::body }, View { id: "life", body: super::mgmt_life::body }, View { id: "plan", body: super::mgmt_plan::body }];
 
 /// The `mgmt.watch` answer's tag (Command::Ask).
 pub const WATCH_TAG: u64 = 0x6d67_6d74;

@@ -59,6 +59,18 @@ for l in sys.stdin:
     f=((o.get("result") or {}).get("data") or {}).get("plan", f)
 print(json.dumps(f))'; }
 sleep 2; P=$(plan_info); shot "p1_proposed"
+check "The Plan panel draws the plan's rows" "$(python3 - "$OUT/client.log" <<'PY'
+import json, sys
+ok = 0
+for line in open(sys.argv[1], errors="replace"):
+    if "GPUI_METRIC " in line and '"controls"' in line:
+        try: o = json.loads(line.split("GPUI_METRIC ", 1)[1])
+        except Exception: continue
+        for c in o.get("controls", []):
+            if isinstance(c, dict) and c.get("id") == "mgmt:plan:row:c-k" and c.get("rect"): ok = 1
+print(ok)
+PY
+)"
 check "The Plan panel lists the plan by layer with what awaits approval" "$(python3 -c 'import json,sys; d=json.loads(sys.argv[1]); ids=[i["id"] for l in d.get("layers",[]) for i in l["items"]]; print(int(d.get("awaiting")==2 and "c-k" in ids and "p-gnd" in ids and d.get("live") is True))' "$P" 2>/dev/null || echo 0)" "$(echo "$P" | head -c 300)"
 R3=$(ask plan_route '{}'); echo "$R3" | cut -c1-300
 check "plan_route is refused by the hub while nothing is approved" "$(echo "$R3" | grep -q 'nothing in the plan is approved' && echo 1 || echo 0)" "$(echo "$R3" | cut -c1-300)"

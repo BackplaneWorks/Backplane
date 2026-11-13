@@ -126,5 +126,6 @@ mod tests {
         let l = json!({"items": [{"id": "a", "state": "routed"}, {"id": "b", "state": "proposed"}, {"id": "c", "state": "verified"}]});
         assert_eq!(shown(&l, true).iter().map(|i| s(i, "id").to_string()).collect::<Vec<_>>(), ["b"]); assert_eq!(shown(&l, false).len(), 3);
         assert_eq!(hex("#e8a33d"), 0xe8a33d);
+        assert!(super::super::mgmt::VIEWS.iter().any(|v| v.id == "plan"), "the host draws the Plan panel");
     }
 }
