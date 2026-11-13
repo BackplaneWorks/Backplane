@@ -357,6 +357,8 @@ fn kicad_row(f: &Facts, pkg: Option<&crate::files::kicad::install::Package>) -> 
         else if !s(&f.checks["kicad"], "path").is_empty() { format!("Found at {}, but it does not run: {}.", s(&f.checks["kicad"], "path"), s(&f.checks["kicad"], "why")) }
         else { String::new() };
     let rel = link("Releases", KICAD_RELEASES);
+    // a row whose one button is the thing to press: the releases page is a quiet link under it, never a second button beside it
+    let yourself = |mut r: Value| { r["sublink"] = json!({"label": "Download it yourself", "action": "open-url", "value": KICAD_RELEASES}); r };
     let r = match action {
         Action::Nothing => row("KiCad", &format!("Backplane KiCad{} at {}. Agents can edit a board in a running KiCad.", v(version), i("kicad.cli")), vec![]),
         Action::Wait if pstate == "running" => installing_row(&prog, v(s(&prog, "version")), note),
@@ -367,21 +369,22 @@ fn kicad_row(f: &Facts, pkg: Option<&crate::files::kicad::install::Package>) -> 
         Action::Auto if pkg.map_or(false, |p| set(f.st, "onboard.kicad.auto") == p.version) && !crate::files::kicad::install::running() => {
             let p = pkg.expect("checked");
             let kept = crate::files::kicad::install::partial_bytes(std::path::Path::new(&f.home), p);
-            if kept > 0 { row("KiCad", &format!("The download of Backplane KiCad {} stopped at {} MB. It continues from there.", p.version, kept >> 20), vec![btn("Continue the download", "ob-kicad-install", "", true), rel]) }
-            else { row("KiCad", &format!("Not found. Backplane KiCad {} is not downloaded yet.", p.version), vec![btn("Download Backplane KiCad", "ob-kicad-install", "", true), rel]) }
+            if kept > 0 { yourself(row("KiCad", &format!("The download of Backplane KiCad {} stopped at {} MB. It continues from there.", p.version, kept >> 20), vec![btn("Continue the download", "ob-kicad-install", "", true)])) }
+            else { yourself(row("KiCad", &format!("Not found. Backplane KiCad {} is not downloaded yet.", p.version), vec![btn("Download Backplane KiCad", "ob-kicad-install", "", true)])) }
         }
         Action::Auto => row("KiCad", &format!("Not found. Downloading Backplane KiCad{} into Backplane's own folder.", v(pkg.map_or("", |p| p.version))), vec![rel]),
-        // a stopped download: where it got to (its bar stays), one press to continue; the releases page is a quiet way to do it by hand
+        // a stopped download: where it got to (its bar stays), one press to continue; the releases page is a quiet way to do it by hand. A
+        // download that kept its file is paused, not failed: its note in the usual colour, its bar blue; only a try that kept nothing warns
         Action::Offer if pstate == "failed" => {
             let kept = pkg.map_or(0, |p| crate::files::kicad::install::partial_bytes(std::path::Path::new(&f.home), p));
-            let mut r = warn(row("KiCad", &format!("{}.", note.trim_end_matches('.')), vec![btn(if kept > 0 { "Continue the download" } else { "Try again" }, "ob-kicad-install", "", true)]));
+            let r = row("KiCad", &format!("{}.", note.trim_end_matches('.')), vec![btn(if kept > 0 { "Continue the download" } else { "Try again" }, "ob-kicad-install", "", true)]);
+            let mut r = yourself(if kept > 0 { r } else { warn(r) });
             let total = prog["total"].as_u64().unwrap_or(0);
             if kept > 0 && total > 0 { r["progress"] = json!(((kept.min(total) as f64 / total as f64) * 1000.).round() / 1000.); }
-            r["sublink"] = json!({"label": "Download it yourself", "action": "open-url", "value": KICAD_RELEASES});
             r
         }
-        Action::Offer if status == "ok" => row("KiCad", &format!("Backplane KiCad{} at {}. Backplane KiCad{} is out: it brings the KiCad editor inside Backplane's viewer.", v(version), i("kicad.cli"), v(pkg.map_or("", |p| p.version))), vec![btn("Update KiCad", "ob-kicad-install", "", true), rel]),
-        Action::Offer => row("KiCad", &format!("{} {} Backplane KiCad adds editing by agents.", found, offer_lead(status)).trim().replace("  ", " "), vec![btn("Install Backplane KiCad", "ob-kicad-install", "", true), rel]),
+        Action::Offer if status == "ok" => yourself(row("KiCad", &format!("Backplane KiCad{} at {}. Backplane KiCad{} is out: it brings the KiCad editor inside Backplane's viewer.", v(version), i("kicad.cli"), v(pkg.map_or("", |p| p.version))), vec![btn("Update KiCad", "ob-kicad-install", "", true)])),
+        Action::Offer => yourself(row("KiCad", &format!("{} {} Backplane KiCad adds editing by agents.", found, offer_lead(status)).trim().replace("  ", " "), vec![btn("Install Backplane KiCad", "ob-kicad-install", "", true)])),
         Action::NoPackage => row("KiCad", &if found.is_empty() { format!("{} No Backplane KiCad is published for this computer. Stock KiCad 9 or later works for viewing and export.", if f.checked { "Not found." } else { looking(f) }) } else { found.clone() }.trim().to_string(),
             vec![link("Download KiCad", KICAD_STOCK), rel]),
     };
@@ -839,6 +842,7 @@ mod tests {
         assert_eq!(k["note"], "The download stopped at 3 of 12 MB (the connection ended before the file was whole).");
         assert_eq!(k["progress"], json!(0.25)); assert_eq!(k["buttons"].as_array().unwrap().len(), 1); assert_eq!(k["buttons"][0]["label"], "Continue the download");
         assert_eq!((k["sublink"]["label"].as_str(), k["sublink"]["action"].as_str()), (Some("Download it yourself"), Some("open-url")));
+        assert!(k["tone"].is_null(), "a kept download reads as paused, not as an error: {k}");
     }
     /// What the KiCad row does for each computer and each KiCad found: the same decision `install::decide` is tested on, as the person sees it.
     #[test] fn the_kicad_row_installs_offers_or_explains_by_what_was_found() {
@@ -859,6 +863,8 @@ mod tests {
         assert!(!rows.to_string().contains("Locate KiCad"), "found: nothing to locate");
         let (rows, bad) = step("linux", "x86_64", "missing", Some(r#"{"state":"failed","note":"KiCad install failed: KiCad archive checksum mismatch"}"#)); assert!(acts(&rows).contains(&"ob-kicad-install".to_string()) && bad["note"].as_str().unwrap().contains("checksum mismatch") && bad["tone"] == "warn");
         let (rows, stock) = step("macos", "aarch64", "stock", None); let n = stock["note"].as_str().unwrap(); assert!(n.contains("Stock KiCad 10.0.6") && n.contains("works for viewing and export") && n.contains("adds editing"), "{n}"); assert!(acts(&rows).contains(&"ob-kicad-install".to_string()));
+        assert_eq!((stock["buttons"].as_array().unwrap().len(), stock["buttons"][0]["label"].as_str(), stock["sublink"]["label"].as_str()), (1, Some("Install Backplane KiCad"), Some("Download it yourself")), "one button, the releases page a quiet link: {stock}");
+        assert_eq!(bad["tone"], "warn", "a try that kept nothing is a failure: {bad}");
         let (rows, none) = step("linux", "aarch64", "missing", None); assert!(none["note"].as_str().unwrap().contains("No Backplane KiCad is published for this computer"));
         assert!(rows.to_string().contains("kicad.org") && rows.to_string().contains("\"obkicad\""), "stock download and the path field");
         assert!(LINUX.version.contains("bp."));
