@@ -156,11 +156,21 @@ pub async fn edit(hub: &Arc<Hub>, pro: &str, sch: &str, p: &Value) -> Result<Val
         let who = got["holder"].as_str().or(got["owner"].as_str()).unwrap_or("another writer");
         return Err(format!("the schematic is being edited by {who}; try again when it is free"))
     }
+    // kicad_ipc answers {type, message}: the calls below read the message
     let r = async {
         let path = doc_path.clone(); let h = hub.clone();
-        let call = move |ty: &'static str, msg: Value| { let (h, path) = (h.clone(), path.clone()); async move { match ipc::kicad_ipc(&h, &path, ty, msg).await { Ok(v) => json!({"ok": true, "message": v}), Err(e) => json!({"ok": false, "error": e}) } } };
+        let call = move |ty: &'static str, msg: Value| { let (h, path) = (h.clone(), path.clone()); async move { match ipc::kicad_ipc(&h, &path, ty, msg).await { Ok(v) => json!({"ok": true, "message": v["message"]}), Err(e) => json!({"ok": false, "error": e}) } } };
+        // a headless server with nothing open handles no document command, GetOpenDocuments included: it opens the schematic
         let docs = call("kiapi.common.commands.GetOpenDocuments", json!({"type": "DOCTYPE_SCHEMATIC"})).await;
-        let doc = ok_of(&docs)?["documents"].as_array().and_then(|d| d.first()).cloned().ok_or("the headless KiCad has no schematic open")?;
+        let doc = match ok_of(&docs).ok().and_then(|m| m["documents"].as_array()).and_then(|d| d.first()).cloned() {
+            Some(d) => d,
+            None => {
+                let o = call("kiapi.common.commands.OpenDocument", json!({"type": "DOCTYPE_SCHEMATIC", "path": doc_path})).await;
+                let d = ok_of(&o).map_err(|e| format!("OpenDocument: {e}"))?["document"].clone();
+                if !d.is_object() { return Err(format!("the headless KiCad opened no schematic: {o}")) }
+                d
+            }
+        };
         let n = commit(&call, doc.clone(), &refs, &field, &value).await?;
         if n.0 > 0 { ok_of(&call("kiapi.common.commands.SaveDocument", json!({"document": doc})).await).map_err(|e| format!("SaveDocument: {e}"))?; }
         Ok::<(usize, String), String>(n)
