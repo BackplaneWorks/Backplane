@@ -36,35 +36,107 @@ impl Cli {
                 if exec && cp.starts_with(&cd) { Ok(cp) } else { Err(format!("{} has no runnable {cli}", d.display())) }
             }
             None if self.copy => Err(format!("a copy of a log runs agents only as stand-ins: {cli} refused")),
-            None => search_dirs().iter().flat_map(|d| [d.join(cli), d.join(format!("{cli}.exe"))]).find(|c| c.is_file()).ok_or_else(|| format!("{cli} is not installed (looked in the hub's PATH, the login shell's and the usual install directories)")),
+            None => find_in(search_dirs(), cli, cfg!(windows)).ok_or_else(|| format!("{cli} is not installed (looked in the hub's PATH, the login shell's and the usual install directories)")),
         }
     }
+    /// The PATH a probe of an agent CLI runs with (`--version`, its model list), the one a turn gets: the merged search directories, or in test mode the
+    /// stand-in folder before the hub's own PATH. A CLI that is a launcher script (pi's `#!/bin/sh` that execs a `#!/usr/bin/env node` one) needs it to find
+    /// its interpreter; with the hub's bare PATH (a desktop launcher's or a service's) `pi --version` failed and pi was shown as not installed.
+    pub fn child_path(&self) -> Option<std::ffi::OsString> {
+        match &self.dir {
+            Some(d) => std::env::join_paths(std::iter::once(d.clone()).chain(std::env::split_paths(&std::env::var_os("PATH").unwrap_or_default()))).ok(),
+            None if self.copy => None,
+            None => std::env::join_paths(search_dirs()).ok(),
+        }
+    }
+}
+/// The first of `dirs` that has `cli` as a file (a symlink to one counts), as named there (not canonicalized: a launcher script finds its own install from `$0`).
+/// Windows: also `cli.exe` and npm's `cli.cmd`.
+pub fn find_in(dirs: &[PathBuf], cli: &str, windows: bool) -> Option<PathBuf> {
+    let names: Vec<String> = if windows { vec![cli.into(), format!("{cli}.exe"), format!("{cli}.cmd")] } else { vec![cli.into()] };
+    dirs.iter().flat_map(|d| names.iter().map(move |n| d.join(n))).find(|c| c.is_file())
 }
 
 // ---- where the provider CLIs are: a hub started from a launcher or a service has a PATH without the login shell's additions (nvm, volta, ~/.local/bin...) ----
 /// CliPath.merge: each directory once, the first of each, in order, none empty.
 pub fn merge_dirs(parts: &[Vec<PathBuf>]) -> Vec<PathBuf> { let mut out: Vec<PathBuf> = vec![]; for d in parts.iter().flatten() { if !d.as_os_str().is_empty() && !out.contains(d) { out.push(d.clone()) } } out }
 fn semver_key(s: &str) -> (u64, u64, u64) { let mut p = s.trim_start_matches('v').split('.').map(|x| x.parse::<u64>().unwrap_or(0)); (p.next().unwrap_or(0), p.next().unwrap_or(0), p.next().unwrap_or(0)) }
-/// CliPath.usual: the usual install directories that exist (nvm's node versions newest first, volta, bun, ~/.local/bin, npm's global bin, homebrew, /usr/local/bin).
-pub fn usual_dirs(home: &Path) -> Vec<PathBuf> {
+/// CliPath.usual: the usual install directories that exist, for this platform (see [`usual_dirs_for`]).
+pub fn usual_dirs(home: &Path) -> Vec<PathBuf> { usual_dirs_for(home, cfg!(windows), cfg!(target_os = "macos"), &|k| std::env::var_os(k).filter(|v| !v.is_empty())) }
+/// Each node version folder under `root` (`v24.13.1`, `24.13.1`...), newest first, joined with `tail`.
+fn node_versions(root: &Path, tail: &str) -> Vec<PathBuf> {
+    let Ok(rd) = std::fs::read_dir(root) else { return vec![] };
+    let mut vs: Vec<String> = rd.flatten().filter_map(|e| e.file_name().into_string().ok()).collect(); vs.sort_by(|a, b| semver_key(b).cmp(&semver_key(a)));
+    vs.into_iter().map(|n| root.join(n).join(tail)).collect()
+}
+/// Where agent CLIs and the node they run on are installed when no PATH says so: a hub started by a desktop launcher, a service or macOS's
+/// Finder has a PATH without the login shell's additions, and an installer that only edits `~/.zshrc` (grok's, opencode's) is not in the login
+/// shell's either when the shell reads no rc file. In order: node version managers (nvm, fnm; newest version first), JS tool folders (volta, bun,
+/// deno, pnpm, yarn, npm's global prefix), version-manager shims (asdf, mise, nodenv), each agent's own installer folder (claude, grok, opencode,
+/// pi and the node pi installs, antigravity), then the system's package folders. Windows has its own: npm's `%APPDATA%\npm`, nvm-windows'
+/// `%NVM_SYMLINK%`, Program Files' node, scoop, winget, and the same per-user agent folders under `%USERPROFILE%`. Only those that exist.
+/// `env` reads an environment variable (empty is unset).
+pub fn usual_dirs_for(home: &Path, windows: bool, mac: bool, env: &dyn Fn(&str) -> Option<std::ffi::OsString>) -> Vec<PathBuf> {
+    let h = |d: &str| home.join(d);
+    let var = |k: &str| env(k).map(PathBuf::from);
+    let agents = [".claude/local", ".local/bin", ".grok/bin", ".opencode/bin", ".pi/agent/bin", ".gemini/antigravity-cli/bin", ".omp/bin", ".muse/bin"];
     let mut v: Vec<PathBuf> = vec![];
-    if let Ok(rd) = std::fs::read_dir(home.join(".nvm/versions/node")) { let mut vs: Vec<String> = rd.flatten().filter_map(|e| e.file_name().into_string().ok()).collect(); vs.sort_by(|a, b| semver_key(b).cmp(&semver_key(a))); for n in vs { v.push(home.join(".nvm/versions/node").join(n).join("bin")) } }
-    for d in [".volta/bin", ".bun/bin", ".local/bin", ".npm-global/bin", ".cargo/bin"] { v.push(home.join(d)) }
-    for d in ["/opt/homebrew/bin", "/usr/local/bin"] { v.push(PathBuf::from(d)) }
+    if windows {
+        let appdata = var("APPDATA").unwrap_or_else(|| h("AppData/Roaming")); let local = var("LOCALAPPDATA").unwrap_or_else(|| h("AppData/Local"));
+        if let Some(s) = var("NVM_SYMLINK") { v.push(s) }
+        v.extend(node_versions(&var("NVM_HOME").unwrap_or_else(|| appdata.join("nvm")), ""));
+        v.push(appdata.join("npm"));
+        v.extend(node_versions(&var("FNM_DIR").unwrap_or_else(|| appdata.join("fnm")).join("node-versions"), "installation"));
+        for d in [local.join("Volta/bin"), h(".bun/bin"), h(".deno/bin"), local.join("pnpm"), local.join("Yarn/bin")] { v.push(d) }
+        for d in agents { v.push(h(d)) }
+        for d in [h("scoop/shims"), local.join("Microsoft/WinGet/Links"), h(".cargo/bin")] { v.push(d) }
+        for k in ["ProgramFiles", "ProgramW6432"] { if let Some(p) = var(k) { v.push(p.join("nodejs")); v.push(p.join("Volta")) } }
+        return v.into_iter().filter(|d| d.is_dir()).collect();
+    }
+    let data = var("XDG_DATA_HOME").unwrap_or_else(|| h(".local/share"));
+    v.extend(node_versions(&var("NVM_DIR").unwrap_or_else(|| h(".nvm")).join("versions/node"), "bin"));
+    let fnm = var("FNM_DIR").into_iter().chain([data.join("fnm"), h(".fnm")]).chain(mac.then(|| h("Library/Application Support/fnm")));
+    for f in fnm { v.extend(node_versions(&f.join("node-versions"), "installation/bin")) }
+    for d in [h(".volta/bin"), h(".bun/bin"), h(".deno/bin"), var("PNPM_HOME").unwrap_or_else(|| if mac { h("Library/pnpm") } else { data.join("pnpm") }), h(".yarn/bin"), h(".config/yarn/global/node_modules/.bin"), h(".npm-global/bin"), h(".npm/bin")] { v.push(d) }
+    for d in [h(".asdf/shims"), data.join("mise/shims"), h(".nodenv/shims")] { v.push(d) }
+    for d in agents { v.push(h(d)) }
+    v.push(data.join("pi-node/current/bin")); // the node pi's installer puts there without adding it to any profile
+    v.push(h(".cargo/bin"));
+    for d in ["/opt/homebrew/bin", "/home/linuxbrew/.linuxbrew/bin", "/usr/local/bin", "/opt/local/bin", "/snap/bin"] { v.push(PathBuf::from(d)) }
     v.into_iter().filter(|d| d.is_dir()).collect()
 }
-/// The login shell's PATH ($SHELL -lc, five seconds at most), as directories; empty when it cannot be read.
+/// The login shell's PATH ($SHELL, five seconds at most for each way of asking), as directories; empty when it cannot be read.
 fn login_dirs() -> Vec<PathBuf> { login_dirs_with(None) }
+const MARK: &str = "__BP_PATH__"; const MARK_END: &str = "__BP_END__";
+/// The PATH between the marks a probe shell printed, past whatever its rc files printed before or after it.
+pub fn marked_path(out: &str) -> Option<&str> { let a = out.rfind(MARK)? + MARK.len(); let b = out[a..].find(MARK_END)? + a; Some(&out[a..b]).filter(|p| !p.trim().is_empty()) }
 /// The login shell's PATH; `home`: run it with that HOME (the person's real one in side-by-side mode, where the hub's own is a fake).
+/// Asked of an interactive login shell (`-ilc`) first, as an editor reads it: zsh reads `~/.zshrc` and bash `~/.bashrc` only when interactive, and that is
+/// where installers put their folders (grok's `~/.grok/bin`, opencode's `~/.opencode/bin`, nvm). It runs in a session of its own (no terminal to take) with
+/// nothing on stdin, and its PATH is read between marks, so a greeting an rc file prints is not taken for it. A shell that cannot (an rc that fails or hangs)
+/// is asked again as a plain login shell (`-lc`).
 pub fn login_dirs_with(home: Option<&Path>) -> Vec<PathBuf> {
     if !probes_login_shell(cfg!(windows)) { return vec![] }
     let sh = std::env::var("SHELL").ok().filter(|s| !s.is_empty()).unwrap_or_else(|| "/bin/sh".into());
-    let mut c = crate::proc::std_cmd(crate::proc::Kind::Local, &sh); c.args(["-lc", "printf %s \"$PATH\""]).stdin(Stdio::null()).stderr(Stdio::null()); if let Some(h) = home { c.env("HOME", h); }
-    let Ok(mut child) = c.stdout(Stdio::piped()).spawn() else { return vec![] };
-    let end = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    loop { match child.try_wait() { Ok(Some(_)) => break, Ok(None) if std::time::Instant::now() < end => std::thread::sleep(std::time::Duration::from_millis(20)), _ => { let _ = child.kill(); let _ = child.wait(); return vec![] } } }
-    let mut out = String::new(); if let Some(mut so) = child.stdout.take() { use std::io::Read; let _ = so.read_to_string(&mut out); }
-    std::env::split_paths(out.trim()).collect()
+    shell_path_dirs(&sh, home, 5)
+}
+/// login_dirs_with, of the shell `sh`, each try given `secs`.
+pub fn shell_path_dirs(sh: &str, home: Option<&Path>, secs: u64) -> Vec<PathBuf> {
+    let script = format!("printf '\\n{MARK}%s{MARK_END}\\n' \"$PATH\"");
+    for flags in ["-ilc", "-lc"] {
+        let mut c = crate::proc::std_cmd(crate::proc::Kind::Local, sh); c.args([flags, &script]).stdin(Stdio::null()).stderr(Stdio::null()); if let Some(h) = home { c.env("HOME", h); }
+        crate::plat::proc::own_group(&mut c);
+        let Ok(mut child) = c.stdout(Stdio::piped()).spawn() else { return vec![] };
+        // read until the end mark, not to the end of output: something an rc file started in the background may hold stdout open
+        let (tx, rx) = std::sync::mpsc::channel::<Option<String>>(); let so = child.stdout.take();
+        std::thread::spawn(move || { use std::io::Read; let Some(mut so) = so else { let _ = tx.send(None); return }; let (mut out, mut b) = (String::new(), [0u8; 4096]);
+            loop { match so.read(&mut b) { Ok(0) | Err(_) => { let _ = tx.send(None); return } Ok(n) => { out.push_str(&String::from_utf8_lossy(&b[..n])); if let Some(p) = marked_path(&out) { let _ = tx.send(Some(p.to_string())); return } if out.len() > 1 << 20 { let _ = tx.send(None); return } } } } });
+        let got = rx.recv_timeout(std::time::Duration::from_secs(secs)).ok().flatten();
+        // the shell is not reaped yet, so its group is still its own: end it with whatever it left running, then reap it
+        crate::plat::proc::kill_group(child.id(), crate::plat::proc::KILL); let _ = child.kill(); let _ = child.wait();
+        if let Some(p) = got { return std::env::split_paths(p.trim()).collect() }
+    }
+    vec![]
 }
 /// Whether the login shell's PATH is asked for. Not on Windows: there is no login shell whose profile adds to PATH (the hub inherits the
 /// person's PATH from the registry), `$SHELL` there can name PowerShell (it was handed `-lc "printf %s \"$PATH\""` at every hub start on
@@ -294,6 +366,82 @@ mod tests {
         std::fs::write(d.join("grok"), "x").unwrap(); assert!(a.resolve("grok").is_err()); // not executable
         let outside = dir("res-out"); script(&outside, "muse", "exit 0"); crate::plat::fs::symlink(outside.join("muse"), d.join("muse")).unwrap();
         assert!(a.resolve("muse").is_err()); // a link out of the folder is refused
+    }
+    fn mk(d: &Path) -> PathBuf { std::fs::create_dir_all(d).unwrap(); d.to_path_buf() }
+    fn none(_: &str) -> Option<std::ffi::OsString> { None }
+    /// Each agent's installer folder is looked in without any PATH naming it: grok's and opencode's (their installers only edit ~/.zshrc), pi's own
+    /// and the node pi installs, bun's, nvm's and fnm's node bins.
+    #[test] fn agents_in_their_installers_folders_are_found_without_a_path() {
+        let h = dir("inst");
+        for d in [".grok/bin", ".opencode/bin", ".pi/agent/bin", ".bun/bin", ".nvm/versions/node/v22.0.0/bin", ".local/share/fnm/node-versions/v23.1.0/installation/bin", ".local/share/pi-node/current/bin", ".local/bin", ".gemini/antigravity-cli/bin", ".claude/local"] { mk(&h.join(d)); }
+        let u = usual_dirs_for(&h, false, false, &none);
+        for d in [".grok/bin", ".opencode/bin", ".pi/agent/bin", ".bun/bin", ".nvm/versions/node/v22.0.0/bin", ".local/share/fnm/node-versions/v23.1.0/installation/bin", ".local/share/pi-node/current/bin", ".gemini/antigravity-cli/bin", ".claude/local"] { assert!(u.contains(&h.join(d)), "{d} in {u:?}") }
+        assert!(u.iter().position(|d| d.ends_with("v22.0.0/bin")) < u.iter().position(|d| d.ends_with(".grok/bin")), "node before the agents");
+        script(&h.join(".grok/bin"), "grok", "echo grok 1.0.77"); script(&h.join(".opencode/bin"), "opencode", "echo 2.3.0"); script(&h.join(".bun/bin"), "omp", "echo omp");
+        // pi as its installer leaves it: ~/.local/bin/pi a relative symlink to ~/.pi/agent/bin/pi
+        script(&h.join(".pi/agent/bin"), "pi", "echo 1.4.0"); crate::plat::fs::symlink("../../.pi/agent/bin/pi", h.join(".local/bin/pi")).unwrap();
+        assert_eq!(find_in(&u, "grok", false), Some(h.join(".grok/bin/grok"))); assert_eq!(find_in(&u, "opencode", false), Some(h.join(".opencode/bin/opencode"))); assert_eq!(find_in(&u, "omp", false), Some(h.join(".bun/bin/omp")));
+        let pi = find_in(&u, "pi", false).unwrap(); assert!(pi == h.join(".local/bin/pi") || pi == h.join(".pi/agent/bin/pi"), "{pi:?}");
+        assert_eq!(find_in(&u, "codex", false), None);
+        // a version manager's own variables move its folder
+        let alt = dir("inst-alt"); mk(&alt.join("versions/node/v20.0.0/bin")); mk(&alt.join("pnpm"));
+        let env = |k: &str| match k { "NVM_DIR" => Some(alt.as_os_str().to_owned()), "PNPM_HOME" => Some(alt.join("pnpm").into_os_string()), _ => None };
+        let u = usual_dirs_for(&h, false, false, &env); assert_eq!(u[0], alt.join("versions/node/v20.0.0/bin")); assert!(u.contains(&alt.join("pnpm")));
+    }
+    /// macOS: an app started from the Finder or the Dock has PATH /usr/bin:/bin:/usr/sbin:/sbin; homebrew's and the Library folders are looked in.
+    #[test] fn macos_folders_are_looked_in() {
+        let h = dir("mac"); for d in ["Library/pnpm", "Library/Application Support/fnm/node-versions/v24.1.0/installation/bin", ".grok/bin"] { mk(&h.join(d)); }
+        let u = usual_dirs_for(&h, false, true, &none);
+        for d in ["Library/pnpm", "Library/Application Support/fnm/node-versions/v24.1.0/installation/bin", ".grok/bin"] { assert!(u.contains(&h.join(d)), "{d} in {u:?}") }
+        assert!(!usual_dirs_for(&h, false, false, &none).contains(&h.join("Library/pnpm")), "Library is macOS's");
+    }
+    /// Windows: npm's %APPDATA%\npm (its .cmd shims), nvm-windows' symlink, Program Files' node, scoop, winget, and the per-user agent folders.
+    #[test] fn windows_folders_and_cmd_shims_are_found() {
+        let h = dir("win"); let (roam, local, pf, nvm) = (h.join("AppData/Roaming"), h.join("AppData/Local"), h.join("PF"), h.join("nvm4w/nodejs"));
+        for d in [roam.join("npm"), local.join("Microsoft/WinGet/Links"), pf.join("nodejs"), nvm.clone(), h.join("scoop/shims"), h.join(".grok/bin"), h.join(".opencode/bin"), h.join(".pi/agent/bin"), h.join(".bun/bin"), h.join(".local/bin")] { mk(&d); }
+        let env = |k: &str| match k { "APPDATA" => Some(roam.as_os_str().to_owned()), "LOCALAPPDATA" => Some(local.as_os_str().to_owned()), "ProgramFiles" => Some(pf.as_os_str().to_owned()), "NVM_SYMLINK" => Some(nvm.as_os_str().to_owned()), _ => None };
+        let u = usual_dirs_for(&h, true, false, &env);
+        for d in [roam.join("npm"), local.join("Microsoft/WinGet/Links"), pf.join("nodejs"), nvm.clone(), h.join("scoop/shims"), h.join(".grok/bin"), h.join(".opencode/bin"), h.join(".pi/agent/bin"), h.join(".bun/bin")] { assert!(u.contains(&d), "{d:?} in {u:?}") }
+        assert!(!u.iter().any(|d| d.starts_with("/usr") || d.starts_with("/opt")), "no Unix folders: {u:?}");
+        std::fs::write(roam.join("npm/opencode.cmd"), "@echo off").unwrap(); std::fs::write(h.join(".grok/bin/grok.exe"), "MZ").unwrap(); std::fs::write(h.join(".pi/agent/bin/pi.cmd"), "@echo off").unwrap();
+        assert_eq!(find_in(&u, "opencode", true), Some(roam.join("npm/opencode.cmd"))); assert_eq!(find_in(&u, "grok", true), Some(h.join(".grok/bin/grok.exe"))); assert_eq!(find_in(&u, "pi", true), Some(h.join(".pi/agent/bin/pi.cmd")));
+        assert_eq!(find_in(&u, "opencode", false), None, "a .cmd is a program only on Windows");
+    }
+    #[test] fn the_path_is_read_between_its_marks() {
+        assert_eq!(marked_path("Welcome!\n__BP_PATH__/a:/b__BP_END__\nbye\n"), Some("/a:/b"));
+        assert_eq!(marked_path("__BP_PATH__/a"), None, "not finished yet"); assert_eq!(marked_path("__BP_PATH____BP_END__"), None); assert_eq!(marked_path("nothing"), None);
+    }
+    /// The PATH an installer adds in the interactive rc file (zsh's ~/.zshrc) is read; a shell whose interactive start hangs is asked again as a plain login shell.
+    #[cfg(unix)]
+    #[test] fn the_login_shells_path_includes_what_its_interactive_rc_adds() {
+        let h = dir("shell");
+        // a stand-in shell: interactive (-ilc) it reads "rc" (prints a greeting, adds .grok/bin, or hangs when told to), then runs the command
+        let sh = script(&h, "fakesh", "case \"$1\" in -ilc) echo hello from rc; [ -f \"$HOME/hang\" ] && sleep 30; PATH=\"$HOME/.grok/bin:$PATH\";; esac\nPATH=\"$HOME/.login/bin:$PATH\"\nexport PATH\neval \"$2\"");
+        let got = shell_path_dirs(sh.to_str().unwrap(), Some(&h), 5);
+        assert_eq!(got[..2], [h.join(".login/bin"), h.join(".grok/bin")], "{got:?}");
+        std::fs::write(h.join("hang"), "").unwrap(); let t = std::time::Instant::now();
+        let got = shell_path_dirs(sh.to_str().unwrap(), Some(&h), 1);
+        assert_eq!(got[0], h.join(".login/bin"), "{got:?}"); assert!(!got.contains(&h.join(".grok/bin"))); assert!(t.elapsed() < std::time::Duration::from_secs(5), "the hung shell was ended: {:?}", t.elapsed());
+        assert!(shell_path_dirs(h.join("no-such-shell").to_str().unwrap(), None, 1).is_empty());
+    }
+    /// A probe runs with the turn's PATH: pi's launcher (a sh script that execs a `#!/usr/bin/env node` one) answers --version only when node is on it.
+    #[cfg(unix)]
+    #[test] fn a_launcher_that_needs_node_answers_with_the_agents_path() {
+        let d = dir("pi-node"); script(&d, "fakenode-bp", "echo 1.4.0"); let real = d.join("pi-real"); std::fs::write(&real, "#!/usr/bin/env fakenode-bp\n").unwrap();
+        { use crate::plat::fs::PermissionsExt; std::fs::set_permissions(&real, std::fs::Permissions::from_mode(0o755)).unwrap(); }
+        let pi = script(&d, "pi", &format!("exec {} \"$@\"", real.display()));
+        let run = |path: Option<std::ffi::OsString>| { let mut c = crate::proc::std_cmd(crate::proc::Kind::Local, &pi); c.arg("--version").env_clear(); if let Some(p) = path { c.env("PATH", p); } else { c.env("PATH", "/usr/bin:/bin"); }
+            c.output().ok().map(|o| (o.status.code().unwrap_or(-1), String::from_utf8_lossy(&o.stdout).into_owned(), String::from_utf8_lossy(&o.stderr).into_owned())) };
+        let bare = run(None); assert_ne!(bare.as_ref().unwrap().0, 0, "without node: {bare:?}");
+        assert!(crate::settings::models_probe::version_or_why(&pi, bare).contains("--version failed: exit 127"), "found but failing is said, not taken for not installed");
+        let with = run(Cli::standin(&d).child_path()); assert_eq!(crate::settings::models_probe::version_or_why(&pi, with), "1.4.0");
+    }
+    #[test] fn a_version_is_its_first_line_or_why_there_is_none() {
+        use crate::settings::models_probe::version_or_why; let p = Path::new("/x/pi");
+        assert_eq!(version_or_why(p, Some((0, "\npi 1.4.0\nmore".into(), String::new()))), "pi 1.4.0");
+        assert_eq!(version_or_why(p, Some((0, String::new(), "1.4.0\n".into()))), "1.4.0", "on stderr");
+        assert_eq!(version_or_why(p, Some((127, String::new(), "env: 'node': No such file or directory\n".into()))), "/x/pi (--version failed: exit 127: env: 'node': No such file or directory)");
+        assert_eq!(version_or_why(p, None), "/x/pi (--version failed: it did not start or answer in time)");
     }
     #[test] fn a_copy_of_a_log_without_standins_runs_nothing() { let a = Cli { dir: None, copy: true }; assert!(a.resolve("claude").unwrap_err().contains("refused")); }
 

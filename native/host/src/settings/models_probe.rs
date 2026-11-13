@@ -161,14 +161,29 @@ pub fn cache_read(text: &str) -> Option<String> {
 /// A program's exit code and stdout, None when it could not start or ran out of time (it is killed then).
 async fn run(cmd: &Path, args: &[&str], env: &[(&str, &str)], limit: Duration) -> Option<(i32, String, String)> {
     let mut c = proc::tokio_cmd(Kind::Agent, cmd);
+    if let Some(p) = probe_path() { c.env("PATH", p); }
     c.args(args).envs(env.iter().copied()).stdin(std::process::Stdio::null()).kill_on_drop(true);
     let out = tokio::time::timeout(limit, c.output()).await.ok()?.ok()?;
     Some((out.status.code().unwrap_or(-1), String::from_utf8_lossy(&out.stdout).into_owned(), String::from_utf8_lossy(&out.stderr).into_owned()))
 }
-async fn version(cmd: &Path) -> String { run(cmd, &["--version"], &[], Duration::from_secs(10)).await.filter(|r| r.0 == 0).map_or(String::new(), |r| version_line(&r.1)) }
+/// The PATH a probe runs with: the one a turn of that agent gets (agents/proc.rs `Cli::child_path`), so a CLI whose launcher needs node finds it here as there.
+fn probe_path() -> Option<std::ffi::OsString> { crate::agents::proc::Cli::from_env().child_path() }
+/// The CLI's version line. A CLI that was found but whose `--version` fails is still installed (Settings shows why): only a CLI not found is "not installed".
+async fn version(cmd: &Path) -> String { version_or_why(cmd, run(cmd, &["--version"], &[], Duration::from_secs(10)).await) }
+/// version: the first line of a good answer, else the path and why it did not answer (the last line it wrote on stderr, its exit code).
+pub fn version_or_why(cmd: &Path, r: Option<(i32, String, String)>) -> String {
+    let why = match r {
+        Some((0, o, _)) if !version_line(&o).is_empty() => return version_line(&o),
+        Some((0, _, e)) => { let l = version_line(&e); if !l.is_empty() { return l } "it printed no version".to_string() } // some CLIs print their version on stderr
+        Some((c, _, e)) => { let l = e.lines().map(str::trim).filter(|l| !l.is_empty()).last().unwrap_or("").chars().take(160).collect::<String>(); if l.is_empty() { format!("exit {c}") } else { format!("exit {c}: {l}") } }
+        None => "it did not start or answer in time".to_string(),
+    };
+    format!("{} (--version failed: {why})", cmd.display())
+}
 /// A program fed `lines` on stdin, read until a line `done` says is the answer (or its output ends): the lines read.
 async fn ask(cmd: &Path, args: &[&str], lines: &[&str], done: fn(&str) -> bool, limit: Duration) -> String {
     let mut c = proc::tokio_cmd(Kind::Agent, cmd);
+    if let Some(p) = probe_path() { c.env("PATH", p); }
     c.args(args).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::null()).kill_on_drop(true);
     let Ok(mut child) = c.spawn() else { return String::new() };
     let (Some(mut stdin), Some(stdout)) = (child.stdin.take(), child.stdout.take()) else { return String::new() };
@@ -220,7 +235,7 @@ pub async fn detect(home: &Path) -> Found {
         let out = tokio::time::timeout(Duration::from_secs(10), c.output()).await.ok().and_then(Result::ok).map_or(String::new(), |o| String::from_utf8_lossy(&o.stdout).into_owned());
         let mut i = agy::info(&out);
         // no pinned agent: turns run the person's agy CLI (providers/agy_cli.rs), so the picker lists it and the models it offers this sign-in
-        if i.have.is_empty() { if let Some(p) = at("agy") { i.cli = version(&p).await; if i.cli.is_empty() { i.cli = "?".into() }
+        if i.have.is_empty() { if let Some(p) = at("agy") { i.cli = version(&p).await;
             i.cli_models = run(&p, &["models"], &[], Duration::from_secs(30)).await.filter(|r| r.0 == 0).map_or(vec![], |r| agy::cli_models(&r.1));
             // the driver maps a thread's model and effort to agy's variant id from this list (kept only when agy listed something)
             if !i.cli_models.is_empty() { let _ = std::fs::create_dir_all(&root); let _ = std::fs::write(agy::bases_path(&home.to_string_lossy()), agy::bases_json(&agy::fold(&i.cli_models))); } } }
