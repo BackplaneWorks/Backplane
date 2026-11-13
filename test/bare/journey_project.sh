@@ -24,7 +24,7 @@ hub rpc thread.create "{\"project\":\"$pid_\",\"title\":\"Board\"}" >"$OUT/logs/
 tid=; for _ in $(seq 40); do tid=$(ev ThreadCreated project "$pid_" | tail -1); [ -n "$tid" ] && break; sleep 0.5; done
 [ -n "$tid" ] && ok "a thread in the project ($tid)" || { bad "no thread: $(cat "$OUT/logs/thread-create.json")"; return 1; }
 for _ in 1 2 3; do X key Return; sleep 1.5; done; shot 05-done
-[ "$(setting onboard.done)" = 1 ] && ok "setup finished" || cut_ 3 setup "setup did not finish with Next/Enter from First project (step '$(step)')"
+[ "$(setting onboard.done)" = 1 ] && { ok "setup finished"; tm setup-done "$(now)"; } || cut_ 3 setup "setup did not finish with Next/Enter from First project (step '$(step)')"
 
 # --- 5. open it: Edit (the real KiCad in the pane), Schematic, back to Board; the agent co-edits meanwhile ---
 WP=$(cat "$HH/.client.pid" 2>/dev/null); [ -n "$WP" ] && in_box kill "$WP" 2>/dev/null; sleep 2

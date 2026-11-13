@@ -119,6 +119,10 @@ else
 fi
 [ -x "$HH/.local/bin/backplane-app" ] && ok "install.sh installed backplane-app" || { bad "install.sh failed: $(tail -3 "$OUT/logs/install.log" | tr '\n' ' ')"; exit 1; }
 tm install "$(python3 -c "import time;print(round(time.time()-$t,1))")"
+if [ "$SOURCE" = release ]; then
+  SZ=$(curl -sfIL "$(grep -ho 'https://[^ ]*-native.tar.gz' "$OUT/logs/install"*.log | head -1)" | awk 'tolower($1)=="content-length:"{n=$2} END{print n+0}')
+else SZ=$(stat -c %s "$ARCHIVE"); fi
+echo "backplane archive: $((SZ/1048576)) MB" | tee "$OUT/backplane-size.txt"
 if grep -q "Run: backplane-app" "$OUT/logs/install.log" && ! as_person bash -lc 'command -v backplane-app' >/dev/null 2>&1; then
   cut_ 4 install "~/.local/bin is not on PATH in a fresh shell, so 'backplane-app' as printed is 'command not found' until the next login"
 elif grep -q "Run: $PH/.local/bin/backplane-app" "$OUT/logs/install.log"; then ok "the installer gives the full path to run while ~/.local/bin is not on PATH"; fi
