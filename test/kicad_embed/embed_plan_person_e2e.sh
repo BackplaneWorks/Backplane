@@ -11,6 +11,7 @@
 #       nothing selected changes nothing. Batch 3's hit test looked only at the active layer: there the first case is expected to fail,
 #       so it is told (XFAIL) without failing the suite until the build has the fix (capability rules-insert-position marks batch 4;
 #       PLAN_XLAYER=expect runs it for real on any build)
+#   Q8  (bp.13 batch 5) Escape with nothing selected leaves plan view, and Ctrl+Shift+R starts it again; earlier builds XFAIL
 #   Q6  layer approval is the person's: KiCad's right-click menu "Approve Layer" on B.Cu (PageDown, then the menu by keyboard) approves
 #       it; an agent's kicad_ipc RunAction pcbnew.Plan.approveLayer and ApprovePlan are refused, its plan_approve only asks (F.Cu stays
 #       unapproved); the Plan panel's Approve (plan.approve: ApprovePlan as the person) approves F.Cu with plan view on
@@ -240,4 +241,30 @@ PY
 xcheck "W with nothing selected says so on KiCad's infobar" "$([ "${BAND:-0}" -gt 1500 ] && echo 1 || echo 0)" "$BAND pixels changed at the top of the canvas (q7_before_w/q7_after_w)"
 check "W with nothing selected changes nothing in the plan" "$([ "$REV1" != "?" ] && [ "$REV1" = "$REV2" ] && echo 1 || echo 0)" "revision $REV1 -> $REV2"
 shot q7_nothing_selected
+# Q8: Escape with nothing selected ends plan view's tool. From bp.13 batch 5 (b590534148) it leaves plan view too: the plan is no longer
+# drawn and the board's layers come back. Batch 4 and earlier end only the tool and leave the plan drawn: told (XFAIL), not failed.
+# Batch 5 has no capability of its own; PLAN_ESC=expect makes it count (set it once batch 5 is installed)
+plan_px() { python3 - "$OUT/shots/$1.png" "$FX" "$FY" "$FW" "$FH" <<'PY'
+import sys
+import numpy as np
+from PIL import Image
+a = np.asarray(Image.open(sys.argv[1]).convert("RGB")).astype(int); fx, fy, fw, fh = map(int, sys.argv[2:6])
+a = a[fy + 160:fy + fh - 40, fx + 40:fx + fw - 280]; r, g, b = a[..., 0], a[..., 1], a[..., 2]
+orange = (r > 120) & (r - b > 70) & (g > 60) & (g < r - 10) & (g > b + 20); green = (g > 150) & (g - r > 60) & (g - b > 30)
+print(int(orange.sum() + green.sum()))
+PY
+}
+X key Prior; sleep 0.8                                             # F.Cu active again: its corridors drawn
+shot q8_before_esc; P0=$(plan_px q8_before_esc)
+X key Escape; sleep 1.2; shot q8_after_esc; P1=$(plan_px q8_after_esc)
+ESC=${PLAN_ESC:-xfail}
+echo "INFO Q8 ($ESC): plan pixels $P0 before Escape, $P1 after"
+if [ "$ESC" = expect ] || [ "${P1:-1}" -lt $(( ${P0:-0} / 10 + 1 )) ]; then
+  check "Escape with nothing selected leaves plan view (the plan no longer drawn)" "$([ "${P0:-0}" -gt 500 ] && [ "${P1:-1}" -lt $(( P0 / 10 + 1 )) ] && echo 1 || echo 0)" "plan pixels $P0 -> $P1 (q8_before_esc, q8_after_esc)"
+  # and Ctrl+Shift+R starts it again
+  hotkey; sleep 1.2; shot q8_again; P2=$(plan_px q8_again)
+  check "Ctrl+Shift+R starts plan view again" "$([ "${P2:-0}" -gt $(( P0 / 2 )) ] && echo 1 || echo 0)" "plan pixels $P2"
+else
+  echo "XFAIL Escape with nothing selected leaves plan view (bp.13 batch 5): this build ends only the tool; the plan stays drawn ($P0 -> $P1)"
+fi
 finish_suite "embed_plan_person_e2e ($EMBED_MODE)"
