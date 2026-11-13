@@ -619,10 +619,12 @@ if "textkeys" in JOURNEYS and SOCK:
     PAUSE.set()
     EXk, EYk = CX, PANE["y"] + PANE["h"] - 40
     tab("PCB", "tk_board", 1.2); rt("click", EXk, EYk); time.sleep(0.4); rt("key", "Escape"); time.sleep(0.3)
-    # (a) ';' on the canvas: the comment key handed to Backplane
-    r, got = comment_after(("semicolon",))
-    perf("semicolon_canvas", round(got["at_ms"] - r["t0"], 1) if got and got.get("at_ms") else -1, opened=int(bool(got)))
-    if got: time.sleep(0.4); rt("key", "Escape"); time.sleep(0.6)
+    # (a) ';' after a click on the canvas (an empty corner), then after a click on the status bar under it (a person clicks either)
+    for tag, (qx, qy) in (("semicolon_canvas", (PANE["x"] + 60, PANE["y"] + PANE["h"] - 140)), ("semicolon_status_bar", (CX, PANE["y"] + PANE["h"] - 40))):
+        rt("click", qx, qy); time.sleep(0.4); rt("key", "Escape"); time.sleep(0.3)
+        r, got = comment_after(("semicolon",))
+        perf(tag, round(got["at_ms"] - r["t0"], 1) if got and got.get("at_ms") else -1, opened=int(bool(got)), at=f"{qx},{qy}")
+        if got: time.sleep(0.4); rt("key", "Escape"); time.sleep(0.6)
     # (b) the search panel (Ctrl+G): ';' typed in its box stays there
     rt("click", EXk, EYk); time.sleep(0.3)
     g0 = grab(PANE["x"], PANE["y"], PANE["w"], PANE["h"]); rt("key", "g", "ctrl"); time.sleep(1.2); shot("tk_search_open")
