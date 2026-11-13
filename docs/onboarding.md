@@ -7,11 +7,11 @@ This guide follows the setup Backplane runs the first time you open it on a comp
 ### Linux
 
 ```sh
-curl -fsSL https://github.com/BackplaneWorks/Backplane/releases/latest/download/install.sh | sh
+{ curl -fsSL https://github.com/BackplaneWorks/Backplane/releases/latest/download/install.sh 2>/dev/null || wget -qO- https://github.com/BackplaneWorks/Backplane/releases/latest/download/install.sh; } | sh
 backplane
 ```
 
-Without curl (a stock Ubuntu desktop has only wget): `wget -qO- https://github.com/BackplaneWorks/Backplane/releases/latest/download/install.sh | sh`.
+It takes curl, or wget where there is no curl (a stock Ubuntu desktop has only wget).
 
 The installer supports x64 and arm64. It puts Backplane in `~/.local/share/backplane`, links `backplane` into `~/.local/bin` and adds Backplane to your applications menu. If your shell cannot find `backplane`, add `~/.local/bin` to your `PATH`.
 
