@@ -12,6 +12,9 @@ def check_undo(results, skip=()):
         "undo_ctrl_y_redoes_it",
         "undo_then_panel_edit_applies",
     )
+    # the idle between Ctrl+Z and Ctrl+Y (KEMBED_UNDO_IDLE_S, on by default): a DRC ran in KiCad, and the schematic kept the pane
+    if "undo_idle_stays_on_schematic" in results:
+        required += ("undo_idle_ran_a_drc_in_kicad", "undo_idle_stays_on_schematic")
     failed = [name for name in required if name not in skip and results.get(name, {}).get("ok") != 1]
     for name in failed:
         print(f"FAIL {name}: expected ok=1, got {results.get(name, {}).get('ok')!r}", flush=True)
