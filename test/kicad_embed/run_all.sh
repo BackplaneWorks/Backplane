@@ -31,6 +31,7 @@ SUITES=(
   "embed_comment_e2e.sh:comment"
   "embed_prewarm_e2e.sh:prewarm"
   "embed_click_e2e.sh:click"
+  "embed_thread_e2e.sh:thread"
 )
 
 FAILED=0

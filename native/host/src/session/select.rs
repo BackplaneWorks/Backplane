@@ -1,6 +1,6 @@
 //! The `select` action: a pure function
-//! over the request's session, returning the session patch, the commands and the target the view moves to (`Target.after`). Ported: a local thread picked with no viewer open and no
-//! pending draft check. Not ported (None; the caller falls back to the helper): project homes, far threads (`~`), a thread whose viewer panel is open (`panel:<id>`: Viewer restore, Dv/Mpage
+//! over the request's session, returning the session patch, the commands and the target the view moves to (`Target.after`). Ported: a local thread picked (its viewer panel back with it) and no
+//! pending draft check. Not ported (None; the caller falls back to the helper): project homes, far threads (`~`), a Mech page to sync (dispatch: Mpage
 //! syncs), a draft marked read back from disk (`@kept:<id>`: Draft.stale), no thread named.
 use serde_json::{json, Map, Value};
 
@@ -28,9 +28,10 @@ pub fn select(f: &dyn Facts, hub: &str, session: &Value, value: &str) -> Option<
     let id = value.rsplit('|').next().unwrap_or("");
     let (old, d, info) = (s(session, "sel"), &session["drafts"], &session["info"]);
     if id.is_empty() || id.contains('~') || id.starts_with("project-home-") || id.starts_with('@') || !f.thread_exists(id) { return None }
-    // (a panel to restore is the helper's, except Diff and Review, which come back with their thread: pages.rs)
-    let own_panel = matches!(s(info, &format!("view.kind:{id}")), "diff" | "review");
-    if (s(info, &format!("panel:{id}")) == "1" && !own_panel) || !s(d, &format!("@kept:{id}")).is_empty() { return None }
+    // a panel to restore comes back with its thread (Ui.reselect below: `panel`): the viewer (Board, Schematic, 3D and the embedded editor in it),
+    // Diff and Review (pages.rs); a Mech page's sync is the helper's (dispatch's syncs_pending). With no helper running, a None here left the
+    // person on the other thread: the command palette's way back to a thread with its viewer open did nothing.
+    if !s(d, &format!("@kept:{id}")).is_empty() { return None }
     let rid = session["rid"].as_u64().unwrap_or(0);
     let mut drafts = Map::new();
     // Ui.select.k
@@ -111,9 +112,9 @@ mod tests {
     #[test] fn what_is_not_ported_is_none() {
         let f = M { running: false };
         for v in ["", "h|link~t9", "h|project-home-p1", "h|@x", "h|unknown"] { assert!(select(&f, HUB, &session(), v).is_none(), "{v}") }
-        let mut s = session(); s["info"]["panel:t1700000002-3"] = json!("1");
-        assert!(select(&f, HUB, &s, "t1700000002-3").is_none(), "a viewer panel to restore");
-        s["info"]["view.kind:t1700000002-3"] = json!("diff"); s["sel"] = json!("tother");
+        let mut s = session(); s["info"]["panel:t1700000002-3"] = json!("1"); s["sel"] = json!("tother");
+        assert_eq!(select(&f, HUB, &s, "t1700000002-3").unwrap().session_patch["panel"], json!(true), "a viewer panel comes back with its thread");
+        s["info"]["view.kind:t1700000002-3"] = json!("diff");
         assert_eq!(select(&f, HUB, &s, "t1700000002-3").unwrap().session_patch["panel"], json!(true), "Diff and Review come back with their thread");
         let mut k = session(); k["drafts"]["@kept:t1700000002-3"] = json!("x");
         assert!(select(&f, HUB, &k, "t1700000002-3").is_none(), "Draft.stale");
