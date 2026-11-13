@@ -78,11 +78,11 @@ pub fn message(field: &str, refs: &[String], value: &str) -> String {
 
 pub const AS_PERSON: bool = true;
 /// Who takes a GUI edit back: "kicad" on the runtimes where the e2e proved the person's Ctrl+Z takes the panel's commit back
-/// (test/kicad_embed/embed_mgmt_e2e.sh M6: Backplane KiCad bp.10, bp.11, bp.12; bp.13 puts `person:` edits in the person's own undo by
-/// design), else "panel". The panel offers its own Undo either way.
-pub fn undo_by(version: &str, _as_person: bool) -> &'static str {
-    let bp = version.split("-bp.").nth(1).and_then(|t| t.split(|c: char| !c.is_ascii_digit()).next()).and_then(|n| n.parse::<u32>().ok()).unwrap_or(0);
-    if bp >= 10 { "kicad" } else { "panel" }
+/// (test/kicad_embed/embed_mgmt_e2e.sh M6: Backplane KiCad bp.10 on; bp.13 puts `person:` edits in the person's own undo by design),
+/// else "panel". The panel offers its own Undo either way. By capability where there is one (`coedit`, bp.11 on), else the shared
+/// version reader (kserve.rs version_ge) for bp.10.
+pub fn undo_by(version: &str, caps: &[String]) -> &'static str {
+    if caps.iter().any(|c| c == "coedit") || super::kserve::version_ge(version, "10.99.0-bp.10") { "kicad" } else { "panel" }
 }
 
 static AGENTS: OnceLock<Weak<crate::agents::Agents>> = OnceLock::new();
@@ -143,9 +143,9 @@ pub async fn edit(hub: &Arc<Hub>, pro: &str, sch: &str, p: &Value) -> Result<Val
         let (todo, was) = prepare(&move |ty, msg| { let (g, w) = (g.clone(), w2.clone()); async move { embed::gui_call_as(&g, ty, msg, &w).await } }, &doc, &refs, &field, &value).await?;
         // one commit, ended or dropped on every path, with the document's header and this name on every call (embed::commit_as)
         if !todo.is_empty() { embed::commit_as(&gui, &who, &doc, todo.clone(), &message(&field, &refs, &value)).await?; embed::unsaved_update(pro, |u| u.touched()); }
-        return Ok(json!({"via": "kicad", "changed": todo.len(), "field": field, "value": value, "was": was, "refs": refs, "undo": undo_by(&gui.version, as_person)}))
+        return Ok(json!({"via": "kicad", "changed": todo.len(), "field": field, "value": value, "was": was, "refs": refs, "undo": undo_by(&gui.version, &gui.caps)}))
     }
-    // no KiCad with it open: the headless one writes and saves, under the schematic's lock
+    // no KiCad with it open (none, or one with only the board): the headless one writes and saves, under the schematic's lock
     let ag = AGENTS.get().and_then(Weak::upgrade).ok_or("the hub's agents are not running")?;
     let doc_path = kc::route(sch);
     let name = kc::doc_lock(&doc_path);
@@ -159,7 +159,7 @@ pub async fn edit(hub: &Arc<Hub>, pro: &str, sch: &str, p: &Value) -> Result<Val
     // kicad_ipc answers {type, message}: the calls below read the message
     let r = async {
         let path = doc_path.clone(); let h = hub.clone();
-        let call = move |ty: &'static str, msg: Value| { let (h, path) = (h.clone(), path.clone()); async move { match ipc::kicad_ipc(&h, &path, ty, msg).await { Ok(v) => json!({"ok": true, "message": v["message"]}), Err(e) => json!({"ok": false, "error": e}) } } };
+        let call = move |ty: &'static str, msg: Value| { let (h, path) = (h.clone(), path.clone()); async move { match ipc::kicad_ipc_headless(&h, &path, ty, msg).await { Ok(v) => json!({"ok": true, "message": v["message"]}), Err(e) => json!({"ok": false, "error": e}) } } };
         // a headless server with nothing open handles no document command, GetOpenDocuments included: it opens the schematic
         let docs = call("kiapi.common.commands.GetOpenDocuments", json!({"type": "DOCTYPE_SCHEMATIC"})).await;
         let doc = match ok_of(&docs).ok().and_then(|m| m["documents"].as_array()).and_then(|d| d.first()).cloned() {
@@ -253,8 +253,10 @@ mod tests {
         assert!(check(&json!({"field": "footprint", "refs": ["R1"], "value": "R_0603"})).is_err());
         assert_eq!(check(&json!({"field": "mpn", "refs": ["R1", "bad ref", "R2"], "value": " RC0603 "})).unwrap(), ("mpn".into(), vec!["R1".into(), "R2".into()], "RC0603".into()));
         assert_eq!(message("mpn", &["R1".into(), "R2".into()], "RC0603"), "BOM: MPN of R1, R2 = RC0603");
-        for v in ["10.99.0-bp.10", "10.99.0-bp.11", "10.99.0-bp.12", "10.99.0-bp.12-851cbefda6", "10.99.0-bp.13"] { assert_eq!(undo_by(v, true), "kicad", "{v}"); assert_eq!(undo_by(v, false), "kicad", "{v}"); }
-        for v in ["10.99.0-bp.9", "10.0.6", ""] { assert_eq!(undo_by(v, true), "panel", "{v}"); }
+        for v in ["10.99.0-bp.10", "10.99.0-bp.11", "10.99.0-bp.12", "10.99.0-bp.12-851cbefda6", "10.99.0-bp.13"] { assert_eq!(undo_by(v, &[]), "kicad", "{v}"); }
+        for v in ["10.99.0-bp.9", "10.0.6", ""] { assert_eq!(undo_by(v, &[]), "panel", "{v}"); }
+        // a dev build's describe string (Boat's bp.13 batch 3) is decided by its capability, whatever the version reader makes of it
+        assert_eq!(undo_by("backplane-kicad-v10.99.0-bp.7-15-g8d903542-dirty-bp.13", &["coedit".to_string()]), "kicad");
         assert_eq!(message("dnp", &["R1".into(), "R2".into(), "R3".into(), "R4".into(), "R5".into()], "yes"), "BOM: DNP of R1, R2, R3 and 2 more = yes");
     }
 }

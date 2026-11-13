@@ -184,7 +184,19 @@ print(int(n==2))' "$OUT/home/parts/history")"
 if [ "$EMBED_MODE" != "spike" ]; then
   # M6a: with no KiCad open, the panel's edit is written to the schematic file (headless KiCad, holding the schematic's lock)
   wait_for_log "$OUT/client.log" '"name":"file_edit","event":"mark"' 90 || true
-  check "With KiCad closed, an MPN typed in the panel is saved in the schematic file" "$(grep -q '(property "MPN" "E2E-FILE"' "$PROJ/ecc83-pp.kicad_sch" && echo 1 || echo 0)" "$(last_ev bom_edited)"
+  # R3's own MPN: R1 is seeded with E2E-FILE, so a match anywhere in the file proved nothing
+  R3MPN=$(python3 - "$PROJ/ecc83-pp.kicad_sch" <<'PY'
+import re, sys
+s = open(sys.argv[1], encoding="utf-8").read(); k = s.find('(property "Reference" "R3"')
+b = s.rfind('(symbol', 0, k) if k >= 0 else -1; d, e = 0, b
+while b >= 0 and e < len(s):
+    d += {"(": 1, ")": -1}.get(s[e], 0); e += 1
+    if d == 0: break
+m = re.search(r'\(property "MPN" "([^"]*)"', s[b:e]) if b >= 0 else None
+print(m.group(1) if m else "")
+PY
+)
+  check "With KiCad closed, an MPN typed in the panel is saved in the schematic file (R3: '$R3MPN')" "$([ "$R3MPN" = "E2E-FILE" ] && echo 1 || echo 0)" "$(last_ev bom_edited)"
   wait_for_log "$OUT/client.log" '"name":"edit_ready","event":"mark"' 240 || { echo "FAIL the editor never came up"; tail -n 30 "$OUT/client.log"; }
   R0=$(last_kicad_report "$OUT/client.log" "pcb_init")
   read -r KP API_SOCK < <(python3 -c 'import json,sys; r=json.loads(sys.argv[1] or "{}"); print(int(r.get("pid") or 0), r.get("sock") or "-")' "$R0")
@@ -263,6 +275,19 @@ PY
   check "After the panel's edits another client's schematic commit succeeds ($W2)" "$(python3 -c 'import json,sys; print(int(json.loads(sys.argv[1]).get("ok") is True))' "$W2" 2>/dev/null || echo 0)"
   check "Saved in KiCad, the MPN is in the schematic file as a standard field" "$(grep -q '(property "MPN" "E2E-UNDO"' "$PROJ/ecc83-pp.kicad_sch" && echo 1 || echo 0)"
   shot "m6_saved"
+  # M6p: the phone's edit (data/1, as scripts/mobile/android-mgmt.sh sends it) while the schematic is open here goes into this KiCad,
+  # the person's, like the panel's: no second headless copy, nothing in the file until KiCad saves
+  PH=$(bun -e '
+const [port, tok, pro] = process.argv.slice(1);
+const ws = new WebSocket(`ws://127.0.0.1:${port}/ws?data=1&enc=json&token=${tok}`);
+const t = setTimeout(() => { console.log(JSON.stringify({error: "no reply"})); process.exit(0) }, 30000);
+ws.onopen = () => ws.send(JSON.stringify({id: 7, m: "mgmt.bom.edit", p: {project: pro, field: "mpn", refs: ["R2"], value: "E2E-PHONE"}}));
+ws.onmessage = e => { const v = JSON.parse(e.data); if (v.t === "reply" && v.id === 7) { clearTimeout(t); console.log(JSON.stringify(v)); process.exit(0) } };
+' "$HPORT" "$(cat "$OUT/home/token")" "$PRO" 2>&1 | tail -1)
+  check "The phone's MPN edit went into the open KiCad as the person's, not a headless copy ($PH)" "$(python3 -c 'import json,sys; v=json.loads(sys.argv[1]); r=v.get("result") or v; print(int(v.get("ok") is True and r.get("via")=="kicad" and r.get("changed")==1))' "$PH" 2>/dev/null || echo 0)"
+  M_PH=""; for _ in $(seq 20); do M_PH=$(mpn_of R2); [ "$M_PH" = "E2E-PHONE" ] && break; sleep 0.5; done
+  check "KiCad holds the phone's MPN and the BOM shows it (R2: $M_PH)" "$([ "$M_PH" = "E2E-PHONE" ] && echo 1 || echo 0)"
+  check "The schematic file does not have the phone's MPN until KiCad saves" "$(grep -q 'E2E-PHONE' "$PROJ/ecc83-pp.kicad_sch" && echo 0 || echo 1)"
   hub_rpc "[{\"method\":\"editor.kicad.close\",\"params\":{\"project\":\"$PRO\",\"save\":\"discard\"}}]" >/dev/null || true
 fi
 

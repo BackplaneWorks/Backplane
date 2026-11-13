@@ -11,6 +11,7 @@ jlc_stock_history: C1003 had 400 then 90 in October; the others no recorded chan
 digikey_get_part: E2E-FILE is Active; the others it does not have.
 Every call is a line in LOG ({"tool", "args"}), so a test can count them.
 """
+import time
 import json
 import sys
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -28,6 +29,8 @@ PORT, LOG = int(sys.argv[1]), sys.argv[2]
 def call(tool, args):
     with open(LOG, "a") as f:
         f.write(json.dumps({"tool": tool, "args": args}) + "\n")
+    with open(LOG + ".t", "a") as f:   # when each call came, beside the log the checks count (which must stay as it is)
+        f.write(f"{time.time():.3f} {json.dumps({'tool': tool, 'args': args})}\n")
     if tool == "jlc_get_part":
         if args.get("lcsc"):
             p = BY_FAB.get(args["lcsc"].upper())
