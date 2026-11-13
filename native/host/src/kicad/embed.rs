@@ -481,6 +481,15 @@ pub fn parse_frame_info(v: &Value) -> Frame {
     }
 }
 
+/// What a GetOpenDocuments answer says is open. `Busy`: KiCad is running a task and answers nothing else (AS_BUSY): what it has open is
+/// unknown, never "nothing" (a caller waits or refuses; it never writes a file KiCad may hold, nor counts it clean or closed).
+#[derive(Debug, PartialEq)]
+pub enum OpenDocs { Docs(Vec<Value>), Busy(String), Unknown }
+pub fn open_docs(reply: &Value) -> OpenDocs {
+    if reply["status"] == "AS_BUSY" { return OpenDocs::Busy(reply["error"].as_str().unwrap_or("a task is running").to_string()) }
+    match reply["message"]["documents"].as_array() { Some(d) if reply["ok"] == true => OpenDocs::Docs(d.clone()), _ => OpenDocs::Unknown }
+}
+
 pub fn parse_get_frames(msg: &Value) -> (u64, String, Vec<Frame>) {
     let holder = u64_of(&msg["holder"]);
     let ev = msg["events_socket"].as_str().unwrap_or("");
@@ -1741,7 +1750,13 @@ async fn stock_modified_docs(me: &mpsc::UnboundedSender<Msg>, sock: &str, desc: 
     let mut supported = false;
     for (dt, kind) in [("DOCTYPE_PCB", "PCB"), ("DOCTYPE_SCHEMATIC", "SCH")] {
         let o = raw_on(me, sock, desc, "kiapi.common.commands.GetOpenDocuments", json!({"type": dt}), 4000).await;
-        let Some(docs) = o["message"]["documents"].as_array() else { continue };
+        let docs = match open_docs(&o) {
+            OpenDocs::Docs(d) => d,
+            // busy: whether it holds unsaved work is unknown, so it counts as unsaved (the close asks), never as clean
+            OpenDocs::Busy(why) => { names.push(format!("{kind} (KiCad is busy: {why})")); continue }
+            OpenDocs::Unknown => continue,
+        };
+        let docs = &docs;
         let frame_dirty = frames.iter().any(|f| f.kind == kind && (f.modified || f.title.trim_start().starts_with('*')));
         for d in docs {
             let m = raw_on(me, sock, desc, "kiapi.common.commands.GetDocumentModifiedState", json!({"document": d}), 4000).await;
@@ -2466,6 +2481,9 @@ mod tests {
         assert_eq!(default_frame_for_path("/p/a.kicad_pcb", ""), "PCB");
         assert_eq!(default_frame_for_path("/p/a.kicad_pcb", "PCB_3D"), "PCB_3D");
         assert_eq!(fk_of("SCH"), "FK_SCH");
+        assert_eq!(open_docs(&json!({"ok": false, "status": "AS_BUSY", "error": "a task is running"})), OpenDocs::Busy("a task is running".into()), "busy is not closed");
+        assert_eq!(open_docs(&json!({"ok": true, "message": {"documents": []}})), OpenDocs::Docs(vec![]));
+        assert_eq!(open_docs(&json!({"ok": false, "status": "AS_UNHANDLED"})), OpenDocs::Unknown);
         assert_eq!(prewarm_kinds("PCB", &["PCB".to_string()]), ["SCH"]);
         assert_eq!(prewarm_kinds("SCH", &["SCH".to_string(), "PCB".to_string()]), Vec::<&str>::new());
         assert_eq!(prewarm_kinds("PCB_3D", &[]), ["SCH", "PCB"]);

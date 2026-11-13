@@ -80,7 +80,11 @@ pub fn reserved_chord_index(idx: usize) -> Option<&'static str> {
         3 => Some("ctrl-shift-tab"), // i18n-ok: gpui keystroke
         4 => Some("ctrl-`"), // i18n-ok: gpui keystroke
         5 => Some("ctrl-;"), // i18n-ok: gpui keystroke (a comment: host kicad/comment.rs RESERVED)
-        6 => Some(";"), // i18n-ok: gpui keystroke (bp.13: KiCad's own comment key, host kicad/comment.rs `reserved`)
+        6 => Some("alt-shift-b"), // i18n-ok: gpui keystroke (the management panels: BOM, Checks, Lifecycle, Fab; host kicad/comment.rs RESERVED)
+        7 => Some("alt-shift-c"), // i18n-ok: gpui keystroke
+        8 => Some("alt-shift-l"), // i18n-ok: gpui keystroke
+        9 => Some("alt-shift-f"), // i18n-ok: gpui keystroke
+        10 => Some(";"), // i18n-ok: gpui keystroke (bp.13: KiCad's own comment key, host kicad/comment.rs `reserved`)
         _ => None,
     }
 }
@@ -521,10 +525,15 @@ mod imp {
     pub fn grab_escape(top: u64, on: bool) {
         let top = top as u32;
         let Some(g) = conn() else { return }; let c = g.as_ref().unwrap();
-        let Some(kc) = keycode(c, 0x60) else { return };
-        for extra in [0u16, u16::from(ModMask::LOCK), u16::from(ModMask::M2), u16::from(ModMask::LOCK) | u16::from(ModMask::M2)] {
-            let mods = ModMask::from(u16::from(ModMask::CONTROL) | extra);
-            let _ = if on { c.grab_key(true, top, mods, kc, GrabMode::ASYNC, GrabMode::ASYNC) } else { c.ungrab_key(kc, top, mods) };
+        // Ctrl+` (the keyboard back), and the management panels' Alt+Shift+B/C/L/F (host kicad/comment.rs RESERVED): caught here even when
+        // KiCad's own hand-off (_BACKPLANE_KEY) does not see the key
+        let alt_shift = u16::from(ModMask::M1) | u16::from(ModMask::SHIFT);
+        for (keysym, base) in [(0x60u32, u16::from(ModMask::CONTROL)), (0x62, alt_shift), (0x63, alt_shift), (0x6c, alt_shift), (0x66, alt_shift)] {
+            let Some(kc) = keycode(c, keysym) else { continue };
+            for extra in [0u16, u16::from(ModMask::LOCK), u16::from(ModMask::M2), u16::from(ModMask::LOCK) | u16::from(ModMask::M2)] {
+                let mods = ModMask::from(base | extra);
+                let _ = if on { c.grab_key(true, top, mods, kc, GrabMode::ASYNC, GrabMode::ASYNC) } else { c.ungrab_key(kc, top, mods) };
+            }
         }
         let _ = c.flush();
     }
@@ -547,7 +556,11 @@ mod imp {
         let mut out = Vec::new();
         while let Ok(Some(e)) = c.poll_for_event() {
             match e {
-                x11rb::protocol::Event::KeyPress(_) => out.push(super::Ev::Escape),
+                // a grabbed chord (grab_escape): Ctrl+` gives the keyboard back, any other is a reserved chord for the client
+                x11rb::protocol::Event::KeyPress(k) => {
+                    let sym = c.get_keyboard_mapping(k.detail, 1).ok().and_then(|r| r.reply().ok()).and_then(|m| m.keysyms.first().copied()).unwrap_or(0x60);
+                    match super::chord(sym, u16::from(k.state) as u32 & (1 | 4 | 8 | 0x40)) { Some(ch) if ch != "ctrl-`" => out.push(super::Ev::Key(ch)), _ => out.push(super::Ev::Escape) }
+                }
                 x11rb::protocol::Event::ButtonPress(b) => {
                     let _ = c.allow_events(Allow::REPLAY_POINTER, b.time);
                     out.push(super::Ev::Click);
@@ -1438,8 +1451,9 @@ mod tests {
         assert_eq!(chord(0xffbe, 4), None, "F1: not a reserved key");
         assert_eq!(reserved_chord_index(0), Some("ctrl-k"));
         assert_eq!(reserved_chord_index(3), Some("ctrl-shift-tab"));
-        assert_eq!(reserved_chord_index(4), Some("ctrl-`")); assert_eq!(reserved_chord_index(5), Some("ctrl-;")); assert_eq!(reserved_chord_index(6), Some(";")); assert_eq!(chord(0x3b, 0).as_deref(), Some(";")); assert_eq!(chord(0x3b, 4).as_deref(), Some("ctrl-;"));
-        assert_eq!(reserved_chord_index(9), None);
+        assert_eq!(reserved_chord_index(4), Some("ctrl-`")); assert_eq!(reserved_chord_index(5), Some("ctrl-;")); assert_eq!(reserved_chord_index(6), Some("alt-shift-b")); assert_eq!(reserved_chord_index(9), Some("alt-shift-f")); assert_eq!(reserved_chord_index(10), Some(";")); assert_eq!(chord(0x3b, 0).as_deref(), Some(";")); assert_eq!(chord(0x3b, 4).as_deref(), Some("ctrl-;"));
+        assert_eq!(reserved_chord_index(11), None);
+        assert_eq!(chord(0x42, 8 | 1).as_deref(), Some("alt-shift-b"), "X11: Shift+B is keysym B");
     }
     #[test] fn overlays_cut_holes_and_nothing_else() {
         let pane = R { x: 100, y: 50, w: 400, h: 300 };

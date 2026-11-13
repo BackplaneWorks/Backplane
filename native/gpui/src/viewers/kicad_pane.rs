@@ -719,7 +719,9 @@ impl Render for KicadPane {
                     cx.notify();
                 }
             }))
-            .when(keys, |d| d.border_2().border_color(c("accent")))
+            // the keyboard's outline: always 2 px, coloured only while KiCad has the keyboard, so the editor's container keeps one size
+            // (a border that came and went resized KiCad by 4 px at each hand-over: a relayout and repaint each time)
+            .border_2().border_color(if keys { c("accent") } else { Rgba { a: 0., ..c("accent") } })
             .child(canvas(move |b, window, _| { *marker.lock().unwrap() = Some(window.insert_hitbox(b, HitboxBehavior::Normal).id); }, |_, _, _, _| {}).size_full())
             .when_some(say, |d, s| d.child(div().absolute().inset_0().flex().items_center().justify_center().text_color(c("faint")).child(s)))
     }
