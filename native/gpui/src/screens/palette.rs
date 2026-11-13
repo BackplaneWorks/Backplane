@@ -8,7 +8,7 @@ use gpui::{prelude::*, *};
 use serde_json::Value;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum Do { Thread(String), /** a message found by what it says: its thread and the message */ Message(String, String), Action(String, String), Settings, Sidebar, Models, Prev, Next, Uber, Shortcuts, Hub(String) }
+pub enum Do { Thread(String), /** a message found by what it says: its thread and the message */ Message(String, String), Action(String, String), Settings, Sidebar, Models, Prev, Next, Uber, Shortcuts, /** streamer mode on or off (streamer.rs) */ Streamer, Hub(String) }
 #[derive(Clone, Debug, PartialEq)]
 pub struct Item { pub label: String, pub place: String, pub kind: &'static str, pub what: Do, /** a thread's row (its status, state and want): its dot and what it wants */ pub row: Value }
 /// The key that does what an item does, as the person reads it ("" for none).
@@ -97,6 +97,7 @@ pub fn items(data: &Value) -> Vec<Item> {
     if data["bots"].as_array().map_or(false, |b| b.iter().any(|b| b["uber"] == true)) { v.push(Item { label: trs("Uberbot chat"), place: String::new(), kind: "action", what: Do::Uber, row: Value::Null }); }
     v.push(Item { label: trs("Keyboard shortcuts"), place: String::new(), kind: "action", what: Do::Shortcuts, row: Value::Null });
     v.push(Item { label: trs("Settings"), place: String::new(), kind: "action", what: Do::Settings, row: Value::Null });
+    v.push(Item { label: if crate::streamer::is_on() { trs("Streamer mode: turn off") } else { trs("Streamer mode: hide emails, paths and machine names") }, place: String::new(), kind: "action", what: Do::Streamer, row: Value::Null });
     v.push(Item { label: trs("Fold or unfold the sidebar"), place: String::new(), kind: "action", what: Do::Sidebar, row: Value::Null });
     // always here, whatever the hub sends or fails to send: these do not go through it (hubbar.rs)
     for a in ["restart", "safe", "rollback"] { v.push(Item { label: trs(super::hubbar::label_of(a)), place: String::new(), kind: "action", what: Do::Hub(a.into()), row: Value::Null }); }
@@ -237,6 +238,7 @@ impl Backplane {
             Do::Prev | Do::Next => { let n = crate::keys::neighbour(&self.data, &self.selected, it.what == Do::Next); if let Some(id) = n { self.select_id(id, cx); } }
             Do::Uber => { let id = self.data["bots"].as_array().into_iter().flatten().find(|b| b["uber"] == true).map(|b| crate::string(b, "id")); if let Some(id) = id { self.go("bot", id, cx); } }
             Do::Shortcuts => self.keysheet_toggle(cx),
+            Do::Streamer => self.streamer_toggle(cx),
             Do::Hub(a) => self.hub_click(&a, cx),
         }
         cx.notify();

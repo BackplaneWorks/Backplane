@@ -23,6 +23,7 @@ mod part;
 mod screens;
 mod script;
 mod swatch;
+mod streamer;
 mod ui;
 mod viewers;
 mod theme;
@@ -69,6 +70,8 @@ impl Backplane {
         cx.spawn(async move |weak,cx|{cx.background_executor().timer(Duration::from_secs(10)).await;let _=weak.update(cx,|this,_|{if !this.usable {this.m("not_usable",serde_json::json!({"after_s":10,"status":this.status,"error":this.error,"projects":this.data["projects"].as_array().map_or(0,|p|p.len())}));}});}).detach();
         let input=cx.new(screens::composer::Composer::new);input.focus_handle(cx).focus(window);
         let local=local::Local::load();
+        // a device left in streamer mode masks from its first frame (the hub's identifiers follow once it answers)
+        if local.streamer {streamer::set(Some(streamer::Masker::new(&streamer::Ids::local())));}
         let target=screens::attach::Target::from(&config.hub,&config.token_file);let drafts_path=screens::place::beside_credential(&config.token_file,"gpui-drafts.json");let saved=screens::drafts::load(&drafts_path);
         eprintln!("GPUI_LOG {}",serde_json::json!({"hub_in_use":pairing::host_port(&config.hub).0}));let open_link=config.pair_link.clone().filter(|l|pairing::is_open_link(l));let pair=screens::pair::start(config.unpaired,config.pair_link.as_deref().filter(|l|!pairing::is_open_link(l)),cx);let paired=config.paired;let has_hub=!config.unpaired;
         cx.spawn(async move |weak,cx|{while let Ok(link)=OPENED.1.recv().await {if weak.update(cx,|this,cx|screens::pair::incoming(this,&link,cx)).is_err(){break;}}}).detach();
@@ -80,6 +83,8 @@ impl Backplane {
         cx.spawn(async move |weak,cx|{while let Ok(event)=events.recv().await {if weak.update(cx,|this,cx|this.receive(event,cx)).is_err(){break;}}}).detach();
         // the keys held show their hints only in the window in use (keys::hint_mode): its focus coming or going draws them again
         cx.observe_window_activation(window,|_,_,cx|cx.notify()).detach();
+        // streamer mode as this device left it (on, or watching for a capture), before anything identifying is drawn twice
+        cx.spawn(async move |weak,cx|{let _=weak.update(cx,|this,cx|this.streamer_apply(cx));}).detach();
         cx.observe(&input,|this,_,cx|{
             let text=this.input.read(cx).content.to_string();
             let changed=this.draft_changed(&text);
@@ -142,6 +147,7 @@ impl Backplane {
                 self.error.clear();
                 if id.contains('~') { self.note=crate::i18n::trs("Sent. The thread opens here as soon as that machine has it."); }
                 self.screens.projects.made=Some((id.to_string(),at)); self.adopt_new(cx); } cx.notify(); }
+            Event::Data(tag,v) if tag==streamer::TAG => self.streamer_ids(&v,cx),
             Event::Data(tag,v) if tag=="names" => { screens::xprobe::got_names(self,&v); cx.notify(); }
             Event::Data(tag,v) if tag=="xsel" => { screens::xprobe::got_select(self,&v); cx.notify(); }
             Event::Data(tag,v) if tag=="xsel-tap" => { eprintln!("GPUI_LOG {}",serde_json::json!({"event":"xprobe_tap","ok":v["ok"],"kicad":v["kicad"],"found":v["found"],"error":v["error"]})); }
@@ -151,7 +157,7 @@ impl Backplane {
             // the first message of a thread a page's Send made: refused, the text comes back (never merged) and the error shows; taken, it is done
             Event::Rpc("first-message",ok,why)=>{ let text=self.screens.projects.sending.take(); if !ok { self.screens.projects.refused=why; if let Some(t)=text { let now=self.input.read(cx).content.to_string(); if let Some(t)=screens::projects::give_back(t,&now,&mut self.screens.projects.restore) { self.input.update(cx,|i,cx|i.set(t,cx)); } } } cx.notify(); },
             Event::Term(key,pid,b,reset,state)=>self.term_frame(&key,pid,&b,reset,state,cx),
-            Event::Hello=>{let was=std::mem::replace(&mut self.had_hello,true);self.term_rejoin();if was{self.kicad_rejoin(cx);}self.screens.unsent.live=true;self.send_unsent();},
+            Event::Hello=>{self.streamer_hello(cx);let was=std::mem::replace(&mut self.had_hello,true);self.term_rejoin();if was{self.kicad_rejoin(cx);}self.screens.unsent.live=true;self.send_unsent();},
             Event::Star(v)=>self.star_offer(&v,cx),
             Event::TmNotice(v)=>self.tm_notice(&v,cx),
             Event::Rpc("mgmt",ok,why)=>{self.screens.mgmt.error=if ok{String::new()}else{why};cx.notify();},
@@ -189,6 +195,7 @@ impl Backplane {
         if !self.local.set(name,value){return;}
         if name=="sidebar-open"{self.sidebar_open=self.local.sidebar_open;}
         if name=="lang"{crate::i18n::set_choice(&self.local.lang);cx.defer(keys::install_menus);}
+        if name.starts_with("streamer"){self.local.save();self.streamer_apply(cx);}
         if name.starts_with("shortcut"){let l=self.local.clone();cx.defer(move|cx|bind_all(cx,&l));}
         self.local.save();self.ui_epoch+=1;cx.notify();
     }

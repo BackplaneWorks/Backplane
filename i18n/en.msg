@@ -4357,3 +4357,20 @@ gpui.mgmt.bom.stock.low = low {n}
 gpui.gerbers.boardonly = board only
 gpui.gerbers.gerbersonly = Gerbers only
 gpui.mgmt.life.price.since = since {day}
+
+# streamer mode (native/gpui/src/streamer.rs)
+gpui.streamer.account = account {n}
+gpui.streamer.mode = Streamer mode
+gpui.streamer.section = Streaming
+gpui.streamer.off = Streamer mode: turn off
+gpui.streamer.on = Streamer mode: hide emails, paths and machine names
+gpui.streamer.tip = Streamer mode: emails, paths, machine names and codes are hidden. Click to turn it off.
+gpui.streamer.shared = screen shared
+gpui.streamer.qr = The code is hidden in streamer mode.
+gpui.streamer.note = Hides emails, account names, home folders, machine names, addresses, codes and keys wherever they are drawn, for screen recordings and streams. Pictures in threads are not hidden.
+gpui.streamer.share = Turn on while the screen is shared
+gpui.streamer.apps = Turn on while a recording app runs
+gpui.streamer.apps.note = A guess: OBS, SimpleScreenRecorder, Kazam, vokoscreen, Peek, Kooha, GPU Screen Recorder, wf-recorder, ffmpeg grabbing the screen (and Loom, ScreenFlow, Streamlabs ... on macOS and Windows). It turns on while one runs, recording or not.
+gpui.streamer.linux = Linux: a screen shared through the desktop's portal (PipeWire screen cast: GNOME, KDE, wlroots) is seen. A capture that reads X11 directly (OBS's Screen Capture (XSHM), ffmpeg x11grab) is not: turn on the recording-app check below, or switch it on by hand.
+gpui.streamer.mac = macOS does not tell an app that the screen is being recorded or shared. Only the recording-app check below works here: it sees OBS, Loom, ScreenFlow, CleanShot, Kap and Ecamm while they run.
+gpui.streamer.win = Windows does not tell an app that the screen is being captured. Only the recording-app check below works here: it sees OBS, Streamlabs, XSplit, Bandicam, Camtasia and Loom while they run.

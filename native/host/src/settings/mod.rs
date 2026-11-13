@@ -38,6 +38,7 @@ pub mod onboard;
 pub mod tools_install;
 pub mod models;
 pub mod models_probe;
+pub mod privacy;
 pub mod proposal;
 pub mod secret;
 pub mod set;
@@ -97,6 +98,7 @@ pub fn start(hub: Arc<Hub>, agents: Option<Arc<crate::agents::Agents>>) {
     hub.register_rpc(Arc::new(fab::FabRpc));
     hub.register_rpc(Arc::new(skill_install::SkillRpc));
     hub.register_rpc(Arc::new(accounts::AccountsDefault));
+    hub.register_rpc(Arc::new(privacy::PrivacyIds));
     let _accounts = accounts_hub::start(&hub, agents.clone());
     // Accounts.created for every writer: a new or forked thread freezes its account binding (settings/binding.rs)
     let bindings = binding::Bindings::new();

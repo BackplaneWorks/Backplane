@@ -16,6 +16,73 @@ use std::{
 };
 use util::ResultExt;
 
+/// Backplane: a filter every string a text element lays out passes through (the client's streamer mode, which hides the person's
+/// identifiers). It answers the byte ranges to replace and what to draw instead (sorted, not overlapping, on character boundaries);
+/// none leaves the text alone. Indices the layout gives and takes (`index_for_position`, `position_for_index`) stay the original
+/// text's, so links, selections and highlights still line up. Editable text shapes its own lines and does not pass through here.
+pub type TextFilter = Arc<dyn Fn(&str) -> Vec<(Range<usize>, String)> + Send + Sync>;
+static TEXT_FILTER: std::sync::RwLock<Option<TextFilter>> = std::sync::RwLock::new(None);
+static TEXT_FILTER_ON: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// Set (or clear) the text filter; windows redrawn after this lay their text out through it.
+pub fn set_text_filter(filter: Option<TextFilter>) {
+    TEXT_FILTER_ON.store(filter.is_some(), std::sync::atomic::Ordering::Release);
+    if let Ok(mut g) = TEXT_FILTER.write() { *g = filter; }
+}
+/// Original and drawn byte ranges of each replaced piece, in order.
+#[doc(hidden)]
+#[derive(Debug, Clone, Default)]
+pub struct TextMap(pub Vec<(Range<usize>, Range<usize>)>);
+impl TextMap {
+    /// An original index on the drawn text (inside a replaced piece: its start).
+    pub fn to_shown(&self, ix: usize) -> usize {
+        let mut d: isize = 0;
+        for (o, s) in &self.0 {
+            if ix < o.start { break }
+            if ix < o.end { return s.start }
+            d = s.end as isize - o.end as isize;
+        }
+        (ix as isize + d).max(0) as usize
+    }
+    /// A drawn index on the original text (inside a replacement: the piece's start).
+    pub fn to_orig(&self, ix: usize) -> usize {
+        let mut d: isize = 0;
+        for (o, s) in &self.0 {
+            if ix < s.start { break }
+            if ix < s.end { return o.start }
+            d = o.end as isize - s.end as isize;
+        }
+        (ix as isize + d).max(0) as usize
+    }
+}
+/// The text as drawn, its runs fitted to it, and the map back; None when the filter is off or changes nothing.
+fn filtered(text: &SharedString, runs: Option<&[TextRun]>) -> Option<(SharedString, Option<Vec<TextRun>>, TextMap)> {
+    if !TEXT_FILTER_ON.load(std::sync::atomic::Ordering::Acquire) { return None }
+    let f = TEXT_FILTER.read().ok()?.clone()?;
+    let edits = f(text.as_ref());
+    if edits.is_empty() { return None }
+    let (mut out, mut map, mut at) = (String::with_capacity(text.len()), Vec::with_capacity(edits.len()), 0usize);
+    for (r, with) in edits {
+        if r.start < at || r.end > text.len() || !text.is_char_boundary(r.start) || !text.is_char_boundary(r.end) { continue }
+        out.push_str(&text[at..r.start]);
+        let s0 = out.len(); out.push_str(&with);
+        map.push((r.clone(), s0..out.len())); at = r.end;
+    }
+    if map.is_empty() { return None }
+    out.push_str(&text[at..]);
+    let map = TextMap(map);
+    let runs = runs.map(|runs| {
+        let (mut o, mut fitted) = (0usize, Vec::with_capacity(runs.len()));
+        for run in runs {
+            let (a, b) = (map.to_shown(o), if o + run.len >= text.len() { out.len() } else { map.to_shown(o + run.len) });
+            o += run.len;
+            if b > a { fitted.push(TextRun { len: b - a, ..run.clone() }); }
+        }
+        if fitted.is_empty() { if let Some(r) = runs.first() { fitted.push(TextRun { len: out.len(), ..r.clone() }); } }
+        fitted
+    });
+    Some((out.into(), runs, map))
+}
+
 impl Element for &'static str {
     type RequestLayoutState = TextLayout;
     type PrepaintState = ();
@@ -313,6 +380,8 @@ pub struct TextLayout(Rc<RefCell<Option<TextLayoutInner>>>);
 
 struct TextLayoutInner {
     len: usize,
+    /// Backplane: the text filter's map (None: drawn as given)
+    map: Option<Arc<TextMap>>,
     lines: SmallVec<[WrappedLine; 1]>,
     line_height: Pixels,
     wrap_width: Option<Pixels>,
@@ -334,6 +403,10 @@ impl TextLayout {
             .line_height
             .to_pixels(font_size.into(), window.rem_size());
 
+        let (text, runs, map) = match filtered(&text, runs.as_deref()) {
+            Some((t, r, m)) => (t, r, Some(Arc::new(m))),
+            None => (text, runs, None),
+        };
         let mut runs = if let Some(runs) = runs {
             runs
         } else {
@@ -404,6 +477,7 @@ impl TextLayout {
                     element_state.0.borrow_mut().replace(TextLayoutInner {
                         lines: Default::default(),
                         len: 0,
+                        map: None,
                         line_height,
                         wrap_width,
                         size: Some(Size::default()),
@@ -422,6 +496,7 @@ impl TextLayout {
                 element_state.0.borrow_mut().replace(TextLayoutInner {
                     lines,
                     len,
+                    map: map.clone(),
                     line_height,
                     wrap_width,
                     size: Some(size),
@@ -480,7 +555,13 @@ impl TextLayout {
     }
 
     /// Get the byte index into the input of the pixel position.
-    pub fn index_for_position(&self, mut position: Point<Pixels>) -> Result<usize, usize> {
+    pub fn index_for_position(&self, position: Point<Pixels>) -> Result<usize, usize> {
+        let map = self.0.borrow().as_ref().and_then(|s| s.map.clone());
+        let ix = self.shown_index_for_position(position);
+        match map { Some(m) => ix.map(|i| m.to_orig(i)).map_err(|i| m.to_orig(i)), None => ix }
+    }
+
+    fn shown_index_for_position(&self, mut position: Point<Pixels>) -> Result<usize, usize> {
         let element_state = self.0.borrow();
         let element_state = element_state
             .as_ref()
@@ -516,6 +597,7 @@ impl TextLayout {
     /// Get the pixel position for the given byte index.
     pub fn position_for_index(&self, index: usize) -> Option<Point<Pixels>> {
         let element_state = self.0.borrow();
+        let index = element_state.as_ref().and_then(|s| s.map.as_ref()).map_or(index, |m| m.to_shown(index));
         let element_state = element_state
             .as_ref()
             .expect("measurement has not been performed");
@@ -547,6 +629,7 @@ impl TextLayout {
     /// Retrieve the layout for the line containing the given byte index.
     pub fn line_layout_for_index(&self, index: usize) -> Option<Arc<WrappedLineLayout>> {
         let element_state = self.0.borrow();
+        let index = element_state.as_ref().and_then(|s| s.map.as_ref()).map_or(index, |m| m.to_shown(index));
         let element_state = element_state
             .as_ref()
             .expect("measurement has not been performed");
@@ -912,3 +995,4 @@ impl IntoElement for InteractiveText {
         self
     }
 }
+

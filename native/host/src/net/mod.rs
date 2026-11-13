@@ -67,6 +67,9 @@ pub fn farhttp_start(hub: std::sync::Arc<crate::hub::Hub>, peering: std::sync::A
             farsync::fold_held(&hub, &l, &ev).await;
         }
         { let p = peering.clone(); hub.mirrors().set_names(std::sync::Arc::new(move || farsync::shown_names(&p))); } // (the machines the sidebar shows)
+        { let p = peering.clone(); crate::settings::privacy::set_machines(Box::new(move || { // (streamer mode hides them: settings/privacy.rs)
+            let mut v = crate::settings::privacy::machine_names(&p.routes.machines_value());
+            v.extend(p.table.with(|t| t.live().into_iter().flat_map(|r| [r.name, crate::settings::privacy::host_of(&r.url)]).collect::<Vec<_>>())); v })); }
         let sync = farsync::FarSync::new(store, peering.clone());
         // the owner's side: the feed index (built from the log off the workers) answers pulls and drives the pushes
         let feed = feed::Feed::new();

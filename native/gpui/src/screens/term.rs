@@ -139,6 +139,14 @@ pub fn state_word(state: &str) -> String {
 }
 /// A terminal whose program still runs (a done command's shell still takes keys).
 pub fn live(state: &str) -> bool { state.is_empty() || state == "running" || state.starts_with("done ") }
+/// A row's runs as drawn: in streamer mode the row is masked as one text (an identifier split over two colours is still found), one `*` per
+/// hidden cell, and cut back into the runs by their cell counts, so nothing moves on the grid.
+pub fn shown_runs(runs: &[vt::VRun]) -> std::borrow::Cow<'_, [vt::VRun]> {
+    let whole: String = runs.iter().map(|r| r.text.as_str()).collect();
+    let Some(masked) = crate::streamer::same_width(&whole, true) else { return std::borrow::Cow::Borrowed(runs) };
+    let mut chars = masked.chars();
+    std::borrow::Cow::Owned(runs.iter().map(|r| vt::VRun { text: chars.by_ref().take(r.text.chars().count()).collect(), ..r.clone() }).collect())
+}
 
 impl Term {
     pub fn new(focus: FocusHandle) -> Term { Term { focus: Some(focus), ..Term::new_detached() } }
@@ -406,7 +414,7 @@ impl Backplane {
             .w(px(vcols as f32 * cw)).max_w_full().h(px(n as f32 * LINE_PX));
         for (i, line) in lines.iter().skip(top).take(n).enumerate() {
             let mut row = div().absolute().left_0().top(px(i as f32 * LINE_PX)).h(px(LINE_PX)).flex();
-            for r in &line.runs { row = row.child(div().text_color(fg(r.fg)).when(r.bg != vt::DEFAULT_BG, |d| d.bg(fg(r.bg))).when(r.bold, |d| d.font_weight(FontWeight::BOLD)).when(r.underline, |d| d.underline()).child(r.text.clone())); }
+            for r in shown_runs(&line.runs).iter() { row = row.child(div().text_color(fg(r.fg)).when(r.bg != vt::DEFAULT_BG, |d| d.bg(fg(r.bg))).when(r.bold, |d| d.font_weight(FontWeight::BOLD)).when(r.underline, |d| d.underline()).child(r.text.clone())); }
             body = body.child(row);
         }
         if running && cur.visible && cur.y >= top && cur.y < top + n {
@@ -466,7 +474,7 @@ pub fn view(cx: &mut Context<Backplane>, window: &mut Window, light: bool, l: &c
     }
     for (i, line) in lines.iter().enumerate() {
         let mut row = div().absolute().left_0().top(px(i as f32 * lh)).h(px(lh)).flex();
-        for r in &line.runs {
+        for r in shown_runs(&line.runs).iter() {
             row = row.child(div().text_color(fg(r.fg)).when(r.bg != vt::DEFAULT_BG, |d| d.bg(fg(r.bg))).when(r.bold, |d| d.font_weight(FontWeight::BOLD)).when(r.underline, |d| d.underline()).child(r.text.clone()));
         }
         body = body.child(row);

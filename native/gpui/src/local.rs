@@ -30,9 +30,12 @@ pub struct Local {
     /// Split's panes put away on this device ("sch", "pcb", "3d" words, as 0.14's split.hide) and where its two dividers sit
     /// (the schematic's share beside the board and 3D, the board's share beside the 3D; 0 is the default).
     pub split_hide: String, pub split_main: f32, pub split_side: f32,
+    /// Streamer mode (streamer.rs): on by the person's switch; and whether it turns on by itself while the screen is shared (a portal /
+    /// PipeWire screen cast, where the platform can tell) or while a known recording app runs (an opt-in guess).
+    pub streamer: bool, pub streamer_share: bool, pub streamer_apps: bool,
 }
 impl Default for Local {
-    fn default() -> Self { Local { lang: "auto".into(), theme: "hub".into(), viewer_bg: "auto".into(), viewer_bg_rgb: VIEWER_BG_SWATCHES[0].1, text_pct: 100, font: FONTS[0].0.into(), sidebar_px: 264, viewer_px: 0, sidebar_open: true, notifications: true, default_view: "last".into(), favs: vec![], shortcuts: BTreeMap::new(), split_hide: String::new(), split_main: 0., split_side: 0. } }
+    fn default() -> Self { Local { lang: "auto".into(), theme: "hub".into(), viewer_bg: "auto".into(), viewer_bg_rgb: VIEWER_BG_SWATCHES[0].1, text_pct: 100, font: FONTS[0].0.into(), sidebar_px: 264, viewer_px: 0, sidebar_open: true, notifications: true, default_view: "last".into(), favs: vec![], shortcuts: BTreeMap::new(), split_hide: String::new(), split_main: 0., split_side: 0., streamer: false, streamer_share: true, streamer_apps: false } }
 }
 
 pub fn path() -> Option<PathBuf> {
@@ -90,6 +93,9 @@ impl Local {
             "sidebar-width" => self.sidebar_px = step(self.sidebar_px, if value == "-" { -1 } else { 1 }, SIDEBAR_PX),
             "sidebar-open" => self.sidebar_open = value == "on",
             "notifications" => self.notifications = value == "on",
+            "streamer" => self.streamer = if value == "toggle" { !self.streamer } else { value == "on" },
+            "streamer-share" => self.streamer_share = value == "on",
+            "streamer-apps" => self.streamer_apps = value == "on",
             "default-view" if VIEWS.iter().any(|(k, _)| *k == value) => self.default_view = value.into(),
             "shortcut" => { // "<action>\u{1f}<key>", or just "<action>" to take the next key in the list
                 let (a, k) = value.split_once('\u{1f}').unwrap_or((value, ""));
