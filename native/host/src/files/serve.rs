@@ -23,7 +23,7 @@ pub fn range(h: &str, size: u64) -> Result<Option<(u64, u64)>, ()> {
 }
 
 fn head(status: &'static str, ctype: &str, extra: String, body: Vec<u8>) -> HttpReply {
-    HttpReply { status, ctype: ctype.into(), extra: format!("Cache-Control: private, no-cache\r\nAccept-Ranges: bytes\r\nX-Content-Type-Options: nosniff\r\n{extra}"), body }
+    HttpReply { status, ctype: ctype.into(), extra: format!("Cache-Control: private, no-cache\r\nAccept-Ranges: bytes\r\nX-Content-Type-Options: nosniff\r\nContent-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; sandbox\r\nReferrer-Policy: no-referrer\r\n{extra}"), body }
 }
 fn fail(status: &'static str, msg: &str, extra: &str) -> HttpReply { head(status, "text/plain; charset=utf-8", extra.into(), msg.as_bytes().to_vec()) }
 
@@ -74,6 +74,14 @@ mod tests {
         crate::plat::fs::symlink(&f, d.join("l.png")).unwrap(); assert_eq!(send(d.join("l.png").to_str().unwrap(), "image/png", "").status, "500 Internal Server Error"); // O_NOFOLLOW: ELOOP, as the JS hub
         assert_eq!(send(d.join("none.png").to_str().unwrap(), "image/png", "").status, "404 Not Found");
         assert_eq!(send("/etc/pass\0wd", "image/png", "").status, "400 Bad Request"); assert_eq!(send("/dev/null", "image/png", "").status, "404 Not Found");
+        let _ = std::fs::remove_dir_all(&d);
+    }
+    #[test] fn every_response_is_sandboxed_and_sends_no_referrer() {
+        let d = tmp("csp"); let f = d.join("a.svg"); std::fs::write(&f, b"<svg xmlns='http://www.w3.org/2000/svg'><script>1</script></svg>").unwrap();
+        for r in [send(f.to_str().unwrap(), "image/svg+xml", ""), send(f.to_str().unwrap(), "image/svg+xml", "bytes=0-3"), send(d.join("none.svg").to_str().unwrap(), "image/svg+xml", "")] {
+            assert!(r.extra.contains("Content-Security-Policy: default-src 'none'; style-src 'unsafe-inline'; sandbox\r\n"), "{}", r.extra);
+            assert!(r.extra.contains("Referrer-Policy: no-referrer\r\n")); assert!(r.extra.contains("X-Content-Type-Options: nosniff\r\n"));
+        }
         let _ = std::fs::remove_dir_all(&d);
     }
 }
