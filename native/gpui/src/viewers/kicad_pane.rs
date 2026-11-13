@@ -216,7 +216,10 @@ impl KicadPane {
                 let mut p = libc::pollfd { fd, events: libc::POLLIN, revents: 0 };
                 let r = unsafe { libc::poll(&mut p, 1, 1000) };
                 if wake_tx.is_closed() { break }
-                if r > 0 { while drained_rx.try_recv().is_ok() {} let _ = wake_tx.try_send(()); let _ = drained_rx.recv_timeout(std::time::Duration::from_millis(40)); }
+                // the socket is read here (nc::pump), so it is empty again after: only an event for the pane wakes the tick, and other X noise
+                // never spins it (a wake per readable socket the tick did not read kept the main thread busy for seconds: every lane's stall)
+                if r > 0 && nc::pump() { while drained_rx.try_recv().is_ok() {} let _ = wake_tx.try_send(()); let _ = drained_rx.recv_timeout(std::time::Duration::from_millis(40)); }
+                else if r < 0 { std::thread::sleep(std::time::Duration::from_millis(40)); }
             });
         }
         cx.spawn(async move |weak, cx| { let _hold = hold_tx; loop {

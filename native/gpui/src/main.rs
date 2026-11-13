@@ -341,6 +341,8 @@ fn main()->anyhow::Result<()> {
             }
         }
         cx.activate(true);
+        // BACKPLANE_GPUI_LOOPTRACE: how late a 100 ms foreground timer wakes (the main loop's stall hunt; vendor/gpui x11 client logs the rest)
+        if std::env::var_os("BACKPLANE_GPUI_LOOPTRACE").is_some() {cx.spawn(async move|cx|{loop{let t=Instant::now();cx.background_executor().timer(Duration::from_millis(100)).await;let late=t.elapsed().as_secs_f64()*1e3-100.;if late>50.{eprintln!("GPUI_LOOP {{\"what\":\"wake\",\"ms\":{late:.1},\"at_ms\":{}}}",std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0,|d|d.as_millis()));}}}).detach();}
         if let Some(secs)=exit_after {cx.spawn(async move|cx|{cx.background_executor().timer(Duration::from_secs_f64(secs)).await;let _=cx.update(|cx|cx.quit());}).detach();}
     });Ok(())
 }

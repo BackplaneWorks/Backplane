@@ -25,3 +25,5 @@ gpui 0.2.2 (Apache-2.0) vendored without `examples/` (and its `[[example]]` targ
   pinches. A pinch is its own event, not a ctrl + wheel, so lists, the terminal and pages that scroll never take it for a scroll.
 
 `windows-shaders/shaders_bytes.rs` is made on a Windows machine by `scripts/windows-shaders.sh HOST` (fxc.exe with gpui's own arguments). A Windows build host still compiles the shaders itself, as upstream does.
+
+- `src/platform/linux/x11/client.rs`: `BACKPLANE_GPUI_LOOPTRACE=1` (off unless set) logs the main loop's slow steps on stderr as `GPUI_LOOP {...}`: a foreground task, a frame or an X batch over 50 ms, and each start or stop of a window's refresh loop (mapped, visibility). The client adds a 100 ms foreground timer that logs when it wakes more than 50 ms late (`src/main.rs`). For finding what holds the main thread.
