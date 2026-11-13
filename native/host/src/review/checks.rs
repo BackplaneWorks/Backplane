@@ -156,7 +156,7 @@ pub fn bom(lines: &[Value], boards: u64) -> (Vec<Finding>, Vec<String>) {
     let refs = |l: &Value| l["refs"].as_array().map(|a| a.iter().filter_map(Value::as_str).map(str::to_string).collect::<Vec<_>>()).unwrap_or_default();
     let anchors = |l: &Value| refs(l).into_iter().map(|r| Anchor { doc: "sch".into(), text: format!("Symbol {r}"), reference: r, ..Default::default() }).collect::<Vec<_>>();
     let has_stock = lines.iter().any(|l| l["stock"].is_object() || l["lifecycle"].is_object());
-    let mut unchecked = 0usize;
+    let mut unchecked = 0usize; let mut pending: Vec<String> = vec![];
     for l in lines.iter().filter(|l| l["dnp"] != true) {
         let rs = refs(l).join(", "); let mpn = l["mpn"].as_str().unwrap_or("").trim();
         if mpn.is_empty() { v.push(finding("bom", "error", "bom_no_mpn", format!("{rs}: no manufacturer part number"), format!("{} {} has no MPN field, so it cannot be bought or assembled.", l["value"].as_str().unwrap_or(""), l["footprint"].as_str().unwrap_or("")), anchors(l), "Find the part (prefer the fab's basic or preferred parts: pcbparts jlc_search) and set the symbol's MPN field")); continue }
@@ -164,8 +164,10 @@ pub fn bom(lines: &[Value], boards: u64) -> (Vec<Finding>, Vec<String>) {
         let need = s["need"].as_u64().unwrap_or(l["qty"].as_u64().unwrap_or(1) * boards.max(1));
         match s["status"].as_str().unwrap_or("") {
             "out" => v.push(finding("bom", "error", "bom_stock", format!("{rs} ({mpn}) is out of stock: {need} needed"), format!("Checked {}.", s["checked"]), anchors(l), "Choose an alternative in stock (pcbparts jlc_find_alternatives) and update the MPN")),
-            "low" => v.push(finding("bom", "error", "bom_stock", format!("{rs} ({mpn}): {} in stock, {need} needed", s["stock"]), format!("Checked {}.", s["checked"]), anchors(l), "Choose an alternative in stock (pcbparts jlc_find_alternatives) and update the MPN")),
+            "low" => v.push(finding("bom", "info", "bom_stock_low", format!("{rs} ({mpn}): {} in stock, under five builds' worth", s["stock"]), format!("{need} needed for this order. Checked {}.", s["checked"]), anchors(l), "Order soon, or choose an alternative with more stock")),
             "in" => {}
+            "checking" => pending.push(rs.clone()),
+            "" if s.is_null() => unchecked += 1,
             _ => unchecked += 1,
         }
         let lc = &l["lifecycle"]; let words = lc["words"].as_str().unwrap_or("");
@@ -176,8 +178,9 @@ pub fn bom(lines: &[Value], boards: u64) -> (Vec<Finding>, Vec<String>) {
         }
         if l["library"]["class"] == "extended" { v.push(finding("bom", "info", "bom_extended", format!("{rs} ({mpn}) is an extended part of the fab's stock"), "The fab charges a loading fee per extended part.".into(), anchors(l), "A basic or preferred equivalent saves the fee (pcbparts jlc_find_alternatives)")) }
     }
-    if has_stock && unchecked > 0 { skipped.push(format!("BOM stock: {unchecked} lines not checked yet")) }
-    if lines.is_empty() { skipped.push("BOM: no BOM published for this project (the BOM panel's data); open the design so it is read".into()) }
+    if !pending.is_empty() { skipped.push(format!("BOM stock: lookup pending for {}", pending.iter().take(12).cloned().collect::<Vec<_>>().join("; "))) }
+    if has_stock && unchecked > 0 { skipped.push(format!("BOM stock: {unchecked} lines not checked (no lookup key or no answer)")) }
+    if lines.is_empty() { skipped.push("BOM: the schematic has no parts to check".into()) }
     else if !has_stock { skipped.push("BOM stock, lifecycle and the fab's library class: no stock data published for this BOM yet".into()) }
     (v, skipped)
 }
@@ -327,9 +330,11 @@ mod tests {
         let lines = vec![json!({"refs": ["R1", "R2"], "qty": 2, "value": "10k", "mpn": "", "dnp": false}), json!({"refs": ["R9"], "qty": 1, "mpn": "", "dnp": true}), json!({"refs": ["U1"], "qty": 1, "mpn": "NRF54", "dnp": false})];
         let (fs, sk) = bom(&lines, 5);
         assert_eq!(fs.iter().map(|f| (f.rule.as_str(), f.anchors.len())).collect::<Vec<_>>(), [("bom_no_mpn", 2)], "a DNP line needs no MPN"); assert_eq!(sk.len(), 1);
-        let lines = vec![json!({"refs": ["U1"], "qty": 2, "mpn": "X", "stock": {"status": "low", "stock": 7, "need": 10, "checked": 1}, "lifecycle": {"status": "nrnd", "words": "NRND", "source": "Mouser"}, "library": {"class": "extended"}})];
+        let lines = vec![json!({"refs": ["U1"], "qty": 2, "mpn": "X", "stock": {"status": "out", "stock": 7, "need": 10, "checked": 1}, "lifecycle": {"status": "nrnd", "words": "NRND", "source": "Mouser"}, "library": {"class": "extended"}}),
+            json!({"refs": ["U2"], "qty": 1, "mpn": "Y", "stock": {"status": "low", "stock": 30, "need": 5, "checked": 1}}), json!({"refs": ["U3"], "qty": 1, "mpn": "Z", "stock": {"status": "checking"}})];
         let (fs, sk) = bom(&lines, 5);
-        assert_eq!(fs.iter().map(|f| (f.rule.as_str(), f.severity.as_str())).collect::<Vec<_>>(), [("bom_stock", "error"), ("bom_lifecycle", "warning"), ("bom_extended", "info")]); assert!(sk.is_empty());
+        assert_eq!(fs.iter().map(|f| (f.rule.as_str(), f.severity.as_str())).collect::<Vec<_>>(), [("bom_stock", "error"), ("bom_lifecycle", "warning"), ("bom_extended", "info"), ("bom_stock_low", "info")]);
+        assert_eq!(sk, ["BOM stock: lookup pending for U3"], "a lookup still running is said per line, never guessed");
         assert_eq!(bom(&[], 5).1.len(), 1);
     }
     #[test] fn review_check_outputs_layers_drills_and_staleness() {

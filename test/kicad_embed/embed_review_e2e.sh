@@ -3,6 +3,7 @@
 #   R1  the Fab panel's Review runs a full review: .backplane/design-review.json is written with findings by source, review.md beside it
 #   R2  the review's sources are in the Checks list (kicad.checks summary: fab, bom, outputs, assembly, mech beside drc and erc)
 #   R3  Findings opens the Checks panel; screenshots of both panels
+#   R4  a save of the design (here: its fab file rewritten) runs the quick review by itself (scope "save") within seconds
 # Copies only (seed_project.py; KEMBED_PROJ_SRC=<a real project> for a real board), on a private Xvfb + i3. Fork mode (kicad-cli for DRC).
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -58,4 +59,12 @@ wait_for_log "$OUT/client.log" '"name":"checks_open","event":"mark"' 240 || true
 sleep 0.5; shot "r2_checks_open"
 hub_rpc "[{\"method\":\"mgmt.watch\",\"params\":{\"project\":\"$PRO\"}}]" >"$OUT/mgmt.out" 2>&1 || true
 check "Findings opened the Checks panel" "$(python3 -c 'import json,sys; print(int(any((json.loads(l).get("result") or {}).get("state",{}).get("open")=="checks" for l in open(sys.argv[1]) if l.startswith("{"))))' "$OUT/mgmt.out" 2>/dev/null || echo 0)"
+# R4: a save reviews by itself (the file checks, debounced)
+FAB=$(python3 -c 'import glob,sys; print((sorted(glob.glob(sys.argv[1] + "/*.fab.json")) + [""])[0])' "$PROJ")
+if [ -n "$FAB" ]; then
+  BEFORE=$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["at"])' "$RUN" 2>/dev/null || echo 0)
+  sleep 1.2; python3 -c 'import sys; p=sys.argv[1]; t=open(p).read(); open(p,"w").write(t.rstrip()+"\n\n")' "$FAB"
+  for _ in $(seq 40); do sleep 0.5; S=$(python3 -c 'import json,sys; v=json.load(open(sys.argv[1])); print(v["scope"], v["at"])' "$RUN" 2>/dev/null || true); case "$S" in "save "*) [ "${S#save }" -gt "$BEFORE" ] && break ;; esac; done
+  check "A save of the design ran the quick review by itself ($S)" "$(case "$S" in "save "*) [ "${S#save }" -gt "$BEFORE" ] && echo 1 || echo 0 ;; *) echo 0 ;; esac)"
+fi
 finish_suite "embed_review_e2e ($EMBED_MODE)"

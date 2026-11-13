@@ -146,6 +146,23 @@ pub fn stale_vs_export(cli: &str, pcb: &str, tmp: &Path, kept: &Path) -> Result<
     Ok((stale, n, other))
 }
 
+/// The project's BOM lines as lane D's BOM publishes them (`mgmt.bom.<digest>`): asked for here whether or not a panel shows it (its
+/// watch), waited for up to `secs` while its stock lookups are still being checked; without a published BOM, the lines read from the saved
+/// schematic (MPNs need no lookup). Never the parts service from here.
+pub async fn bom_lines(hub: &Arc<Hub>, pro: &str, secs: u64) -> Vec<Value> {
+    use crate::files::kicad::{bompanel, mgmt::{self, Panel}};
+    let key = mgmt::data_key("bom", pro);
+    let read = |hub: &Arc<Hub>| hub.info_now()[key.as_str()].as_str().and_then(|t| serde_json::from_str::<Value>(t).ok());
+    bompanel::BomPanel.watch(hub, pro);
+    for _ in 0..(secs * 2) {
+        if let Some(v) = read(hub) { if v["checking"].as_u64().unwrap_or(0) == 0 { break } }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    }
+    if let Some(v) = read(hub) { if let Some(ls) = v["lines"].as_array() { return ls.clone() } }
+    let (p, sch) = (pro.to_string(), bompanel::sch_of(pro));
+    tokio::task::spawn_blocking(move || bompanel::lines(&bompanel::parts_now(&p, &sch).0)).await.unwrap_or_default()
+}
+
 /// The project's E-side DRC and ERC: their findings when fresh; with `wait` the run is asked for and waited on (a few minutes at most).
 async fn drc_erc(hub: &Arc<Hub>, pro: &str, wait: bool) -> (Vec<Finding>, Vec<String>, Value) {
     use crate::files::kicad::checkrun as cr;
@@ -173,9 +190,7 @@ async fn drc_erc(hub: &Arc<Hub>, pro: &str, wait: bool) -> (Vec<Finding>, Vec<St
 pub async fn run(hub: &Arc<Hub>, root: &Path, scope: &str) -> Result<Value, String> {
     let t0 = crate::hub::now_ms();
     let pro = crate::files::kicad::project::read(&root.to_string_lossy()).pro;
-    let bom_lines: Vec<Value> = if pro.is_empty() { vec![] } else {
-        let info = hub.info_now(); info[format!("mgmt.bom.{}", crate::files::kicad::kserve::digest(&pro))].as_str().and_then(|t| serde_json::from_str::<Value>(t).ok()).and_then(|v| v["lines"].as_array().cloned()).unwrap_or_default()
-    };
+    let bom_lines: Vec<Value> = if pro.is_empty() { vec![] } else { bom_lines(hub, &pro, if scope == "save" { 0 } else { 20 }).await };
     let (home, r) = (hub.cfg.home.clone(), root.to_path_buf());
     let (mut fs, mut skipped): (Vec<Finding>, Vec<String>) = tokio::task::spawn_blocking(move || run_files(&home, &r, &bom_lines)).await.map_err(|_| "the review failed".to_string())?;
     let mut rev = Value::Null;
@@ -274,7 +289,9 @@ pub fn start(hub: &Arc<Hub>, ag: Option<&Arc<crate::agents::Agents>>) {
 #[cfg(test)]
 #[test] #[ignore] fn review_run_on_a_copy() {
     let Ok(root) = std::env::var("REVIEW_ROOT") else { return };
-    let h = crate::plat::tmp::dir("review-copy"); let (fs, sk) = run_files(&h, Path::new(&root), &[]);
+    let pro = crate::files::kicad::project::read(&root).pro; let sch = crate::files::kicad::bompanel::sch_of(&pro);
+    let lines = crate::files::kicad::bompanel::lines(&crate::files::kicad::bompanel::parts_now(&pro, &sch).0);
+    let h = crate::plat::tmp::dir("review-copy"); let (fs, sk) = run_files(&h, Path::new(&root), &lines);
     let v = run_json(0, "save", "", &Value::Null, &fs, &sk, 0);
     println!("REVIEW {} {}", v["counts"], v["by_source"]); for f in v["findings"].as_array().unwrap() { println!("  {} [{}] {} | {}", f["severity"], f["source"], f["title"], f["anchors"].as_array().map_or(0, Vec::len)) } for s in sk { println!("  skipped: {s}") }
 }
