@@ -12,7 +12,8 @@ pub struct Rect { pub x0: u32, pub y0: u32, pub x1: u32, pub y1: u32 }
 /// them (a STEP's, unthinned): a client smooths normals within a face and leaves every face's edge crisp. Empty otherwise.
 pub struct Solid { pub n: u32, pub b: [u32; 6], pub d: Vec<u8>, pub faces: Vec<u8> }
 #[derive(Clone, Debug, PartialEq)]
-pub struct Plot { pub cs: Vec<Chunk>, pub b: Rect, pub thick: u32, pub solid: Option<Solid>, pub edge: Rect }
+/// `note`: a line the page shows over the drawing (a Gerber set's: kicad/gerber), `warn` when it is a warning (amber); empty for others.
+pub struct Plot { pub cs: Vec<Chunk>, pub b: Rect, pub thick: u32, pub solid: Option<Solid>, pub edge: Rect, pub note: String, pub warn: bool }
 #[derive(Clone, Debug, PartialEq)]
 pub enum Ref { Keep(usize), Fresh(usize) } // Fresh: index into the plot's chunks
 
@@ -20,7 +21,7 @@ pub enum Ref { Keep(usize), Fresh(usize) } // Fresh: index into the plot's chunk
 /// counted in chars. A plot with a malformed tail yields what was read, as scan does.
 pub fn parse_child(out: &str) -> Plot {
     let cs: Vec<char> = out.chars().collect();
-    let (mut p, mut at) = (Plot { cs: vec![], b: Rect::default(), thick: 1600, solid: None, edge: Rect::default() }, 0usize);
+    let (mut p, mut at) = (Plot { cs: vec![], b: Rect::default(), thick: 1600, solid: None, edge: Rect::default(), note: String::new(), warn: false }, 0usize);
     while at < cs.len() {
         let tag = cs[at]; at += 1;
         let mut nums: Vec<u32> = vec![]; let mut cur: u32 = 0;
@@ -88,7 +89,8 @@ fn bytes(o: &mut Vec<u8>, d: &[u8]) { head(o, 2, d.len() as u32); o.extend(d) }
 /// Plot.msg.fam: `{1: "plot", 31: key, fam, base, box, thick, edge, cs}`.
 pub fn frame(key: &str, fam: &str, base: &str, p: &Plot, rs: &[Ref]) -> Vec<u8> {
     let mut o = Vec::with_capacity(256 + p.cs.iter().map(|c| c.d.len() + 32).sum::<usize>());
-    head(&mut o, 5, 8); uint(&mut o, 1); text(&mut o, "plot"); uint(&mut o, 31); text(&mut o, key);
+    head(&mut o, 5, 8 + (!p.note.is_empty()) as u32 * 2); uint(&mut o, 1); text(&mut o, "plot"); uint(&mut o, 31); text(&mut o, key);
+    if !p.note.is_empty() { text(&mut o, "note"); text(&mut o, &p.note); text(&mut o, "warn"); uint(&mut o, p.warn as u32); }
     text(&mut o, "fam"); text(&mut o, fam); text(&mut o, "base"); text(&mut o, base);
     text(&mut o, "box"); rect(&mut o, &p.b); text(&mut o, "thick"); uint(&mut o, p.thick); text(&mut o, "edge"); rect(&mut o, &p.edge);
     text(&mut o, "cs"); head(&mut o, 4, rs.len() as u32);
@@ -146,7 +148,7 @@ mod tests {
         for c in &p.cs { s += &line(c) } s
     }
     #[test] fn scan_reads_what_line_plot_writes() {
-        let p = Plot { cs: vec![ch(1, &[0, 200, 255, 10, 32], "R1\0pin\0"), ch(2, &[], ""), ch(3, b"abc", "日本\0")], b: Rect { x0: 0, y0: 0, x1: 40000, y1: 30000 }, thick: 1600, solid: None, edge: Rect { x0: 1, y0: 2, x1: 3, y1: 4 } };
+        let p = Plot { cs: vec![ch(1, &[0, 200, 255, 10, 32], "R1\0pin\0"), ch(2, &[], ""), ch(3, b"abc", "日本\0")], b: Rect { x0: 0, y0: 0, x1: 40000, y1: 30000 }, thick: 1600, solid: None, edge: Rect { x0: 1, y0: 2, x1: 3, y1: 4 } , note: String::new(), warn: false };
         assert_eq!(parse_child(&child(&p)), p);
         assert_eq!(parse_child("").cs.len(), 0); assert_eq!(parse_child("b1 2").cs.len(), 0);
         let cut = child(&p); let half: String = cut.chars().take(cut.chars().count() - 6).collect(); let half = half.as_str(); assert!(parse_child(half).cs.len() < 3);
@@ -172,7 +174,7 @@ mod tests {
         let mut info = o.clone(); info[1].info = "x".into(); assert!(!quiet(&delta(&info, &o), 4)); // equality includes the info table
     }
     #[test] fn frame_bytes() {
-        let p = Plot { cs: vec![ch(7, &[1, 2], "")], b: Rect { x0: 0, y0: 0, x1: 10, y1: u32::MAX - 1 }, thick: 1600, solid: None, edge: Rect::default() };
+        let p = Plot { cs: vec![ch(7, &[1, 2], "")], b: Rect { x0: 0, y0: 0, x1: 10, y1: u32::MAX - 1 }, thick: 1600, solid: None, edge: Rect::default(), note: String::new(), warn: false };
         let f = frame("0|/p|", "0|/p|", "", &p, &[Ref::Keep(3), Ref::Fresh(0)]);
         assert_eq!(&f[..9], &[0xa8, 0x01, 0x64, b'p', b'l', b'o', b't', 0x18, 0x1f]); // map(8), 1:"plot", 31:
         let s = String::from_utf8_lossy(&f).into_owned(); assert!(s.contains("fam") && s.contains("base") && s.contains("thick"));

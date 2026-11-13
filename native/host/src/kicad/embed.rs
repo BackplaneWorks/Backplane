@@ -693,6 +693,8 @@ fn resolve_project(raw_path: &str, req_frame: &str) -> Result<ResolvedProject, S
         return Err("project must be an absolute path (.kicad_pro, .kicad_pcb, .kicad_sch, or project folder)".into())
     }
     let routed = super::canonical::route(raw_path);
+    // fab output (an mfg/ Gerber set or file: kicad/gerber) is its project's
+    let routed = if super::gerber::is_set_path(Path::new(&routed)) { let pro = super::ipc::pro_of(&routed); if pro.is_empty() { routed } else { pro } } else { routed };
     let frame = default_frame_for_path(&routed, req_frame).to_string();
     let p = Path::new(&routed);
     let files = if p.is_dir() {

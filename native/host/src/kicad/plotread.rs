@@ -105,7 +105,7 @@ pub fn read(kind: u32, path: &str) -> Read {
         return Read::Plot(Box::new(p), t)
     }
     // a Gerber set (an mfg/ folder, or a Gerber or drill file) drawn on the board's layers (kicad/gerber)
-    if kind == 0 && kind_of(path) == 0 && super::gerber::is_set_path(std::path::Path::new(path)) { return super::gerber::plot(path) }
+    if kind == 0 && (path.starts_with(super::gerber::CMP) || (kind_of(path) == 0 && super::gerber::is_set_path(std::path::Path::new(path)))) { return super::gerber::plot(path) }
     let fixed = kind_of(path) != 0;
     let b = version(path);
     if b.is_empty() { return if fixed { Read::Fail(plotgen::UNREAD.into()) } else { plotgen::empty(path) } }

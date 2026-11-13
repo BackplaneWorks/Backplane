@@ -4333,3 +4333,5 @@ gpui.mgmt.bom.undo.tip = 前の値に戻す
 gpui.mgmt.bom.undo = 元に戻す
 gpui.mgmt.checks.on = {host}で実行
 gpui.gerbers = ガーバー
+gpui.gerbers.vs = 基板と比較
+gpui.gerbers.vs.tip = このガーバーが基板と異なる所に印を付けます：赤は基板だけ、緑はガーバーだけ

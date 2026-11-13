@@ -139,7 +139,8 @@ fn fan(p: &[f32], tris: &mut Vec<f32>) {
 
 /// What the viewer draws: chunks in paint order, the plot's box, or why there is nothing.
 #[derive(Clone, Debug, Default)]
-pub struct Frame { pub key: String, pub fam: String, pub bbox: [f32; 4], pub edge: [f32; 4], pub thick: f32, pub chunks: Vec<Arc<Chunk>>, pub none: String }
+/// `note`: the line the hub sends with a plot (a Gerber set's: where it is, its age against the board, what did not read, how it compares), `warn` amber.
+pub struct Frame { pub key: String, pub fam: String, pub bbox: [f32; 4], pub edge: [f32; 4], pub thick: f32, pub chunks: Vec<Arc<Chunk>>, pub none: String, pub note: String, pub warn: bool }
 
 /// The chunks this client holds per source (a delta names its `base` source; a Split watches a schematic and a board at once), the newest frame
 /// (`frame`, the one Board and Schematic draw) and each source's own (`frames`, what a Split's panes draw).
@@ -189,7 +190,8 @@ impl Store {
         let four = |k: &str| -> [f32; 4] { match o.get(k) { Some(C::Arr(a)) if a.len() >= 4 => [0, 1, 2, 3].map(|i| a[i].int().unwrap_or(0) as f32), _ => [0.; 4] } };
         if self.held.len() >= MAX_SOURCES && !self.held.contains_key(&key) { self.held.clear(); self.frames.clear(); }
         self.held.insert(key.clone(), cs.clone()); self.held_key = key.clone();
-        let f = Frame { key: key.clone(), fam, bbox: four("box"), edge: four("edge"), thick: o.get("thick").and_then(C::int).unwrap_or(1600) as f32, chunks: cs, none: String::new() };
+        let f = Frame { key: key.clone(), fam, bbox: four("box"), edge: four("edge"), thick: o.get("thick").and_then(C::int).unwrap_or(1600) as f32, chunks: cs, none: String::new(),
+            note: o.get("note").and_then(C::text).unwrap_or("").to_string(), warn: o.get("warn").and_then(C::int).unwrap_or(0) != 0 };
         self.frames.insert(key, f.clone()); self.frame = Some(f);
         Ok(())
     }
