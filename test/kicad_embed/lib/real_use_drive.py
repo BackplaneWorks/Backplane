@@ -927,6 +927,11 @@ if "plan" in JOURNEYS and SOCK:
         if not STATE["on"]: toggled("plan_view_on", action_toggle, 2.0)
         if not STATE["on"]: toggled("plan_view_on2", key_after_click, 2.0)
         RESULTS["plan_view_reached"] = {"ms": None, "ok": int(STATE["on"])}
+        if STATE["on"]:  # entering plan view refits the view (PLAN_TOOL::fitBesideOverview): the mapping measured before it is stale
+            t2 = calibrate()
+            if t2: to_screen = t2; print("INFO plan: recalibrated in plan view", flush=True)
+            else: print("DIAG plan: no calibration in plan view; the one from before it is used (clicks may miss)", flush=True)
+            RESULTS["plan_calibrated_in_plan_view"] = {"ms": None, "ok": int(bool(t2))}
         shot("plan_view")
         cor = pj["corridors"][0]; cl = cor["layer"]
         order = sorted({l["layer"] for l in pj.get("layers", [])}, key=lambda n: 0 if n == "F.Cu" else (99 if n == "B.Cu" else int(re.sub(r"\D", "", n) or 50)))
@@ -947,7 +952,9 @@ if "plan" in JOURNEYS and SOCK:
             selp = ipc("selection", SOCK, "pcb")
             RESULTS["plan_corridor_click"] = {"ms": None, "ok": int(ly1 == cl), "board_mm": [round(mid[0], 3), round(mid[1], 3)], "screen": [round(mx), round(my)],
                                               "layer_before": ly0, "layer_after": ly1, "selection": selp.get("types")}
-            print(f"INFO plan corridor click: {cor['id']} on {cl} at board {mid[0]:.3f},{mid[1]:.3f} mm (screen {mx:.0f},{my:.0f}); active layer {ly0} -> {ly1}; selection {selp.get('types')}", flush=True)
+            p0s, p1s = to_screen(*path[0]), to_screen(*path[1])
+            print(f"INFO plan corridor click: {cor['id']} on {cl} at board {mid[0]:.3f},{mid[1]:.3f} mm (screen {mx:.0f},{my:.0f}; the segment runs "
+                  f"{p0s[0]:.0f},{p0s[1]:.0f} -> {p1s[0]:.0f},{p1s[1]:.0f}); active layer {ly0} -> {ly1}; selection {selp.get('types')}", flush=True)
             sn = (metrics("shown") or [{}])[-1]
             if pane_now()["w"] < PANE["w"] - 100:
                 print(f"JANK plan: the click narrowed the pane (a management panel opened: {sn})", flush=True); RESULTS["plan_click_opened_panel"] = {"ms": None, "ok": 0}
@@ -1008,6 +1015,13 @@ def mem_detail(pid):
         except Exception: pass
     out.update(rss_mb=tot["Rss"] // 1024, pss_mb=tot["Pss"] // 1024, anon_mb=tot["Anonymous"] // 1024, file_mb=(tot["Rss"] - tot["Anonymous"]) // 1024, procs=len(pids))
     return out
+if "memopen" in JOURNEYS and SOCK and MEM["pid"]:
+    t_ready = now()
+    for at in (5, 15, 30):
+        time.sleep(max(0, (t_ready + at * 1000 - now()) / 1000))
+        m = mem_detail(MEM["pid"]); fr = sorted(k for k, f in kframes().items())
+        RESULTS[f"memopen_{at}s"] = {"ms": None, **m, "frames": fr}
+        print(f"PERF memopen_{at}s {m['rss_mb']}MB pss={m['pss_mb']} anon={m['anon_mb']} file={m['file_mb']} procs={m.get('procs')} frames={fr}", flush=True)
 if "memory" in JOURNEYS and SOCK and MEM["pid"]:
     PAUSE.set()
     steps = []
