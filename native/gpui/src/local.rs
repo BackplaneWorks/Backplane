@@ -10,7 +10,7 @@ use std::{collections::BTreeMap, path::PathBuf};
 /* i18n-ok: labels the settings page draws through tr; colour names */ pub const VIEWER_BG_SWATCHES: [(&str, u32); 8] = [("Slate", 0x8a94a6), ("Graphite", 0x5a5f66), ("Sand", 0xd9cfb8), ("Sky", 0xa9c7e8), ("Mint", 0xa8d8c0), ("Rose", 0xe2b4bd), ("Plum", 0x6b5b7b), ("Navy", 0x2f4468)];
 /* i18n-ok: labels the settings page draws through tr; font names */ pub const FONTS: [(&str, &str); 3] = [("Noto Sans Mono CJK JP", "Noto Sans Mono"), ("JetBrains Mono", "JetBrains Mono"), (".SystemUIFont", "System UI")];
 /* i18n-ok: labels the settings page draws through tr; font names */ pub const VIEWS: [(&str, &str); 2] = [("last", "Where I left off"), ("list", "The thread list")];
-pub const TEXT_PCT: (u32, u32, u32) = (80, 160, 10);   // min, max, step
+pub const TEXT_PCT: (u32, u32, u32) = (80, 160, 5);   // min, max, step (the slider's stops)
 pub const SIDEBAR_PX: (u32, u32, u32) = (180, 420, 24);
 /// The viewer pane's width: 0 is the default (VIEWER_PX_DEFAULT); a drag on its left edge sets it, a double click puts it back.
 pub const VIEWER_PX: (u32, u32) = (380, 1400);
@@ -45,6 +45,8 @@ pub fn path() -> Option<PathBuf> {
 }
 
 fn step(v: u32, dir: i32, (lo, hi, by): (u32, u32, u32)) -> u32 { (if dir < 0 { v.saturating_sub(by) } else { v + by }).clamp(lo, hi) }
+/// `v` at the nearest stop of a range (`lo` + a whole number of steps), within it.
+pub fn snap(v: u32, (lo, hi, by): (u32, u32, u32)) -> u32 { (lo + (v.clamp(lo, hi) - lo + by / 2) / by * by).min(hi) }
 fn cycle<'a>(list: &[(&'a str, &str)], now: &str) -> &'a str { let i = list.iter().position(|(k, _)| *k == now).map_or(0, |i| i + 1); list[i % list.len()].0 }
 
 impl Local {
@@ -87,7 +89,8 @@ impl Local {
                 let k = if value == "-" { 0.9 } else { 1.0 / 0.9 };
                 let c = self.viewer_bg_rgb; self.viewer_bg_rgb = [16, 8, 0].iter().fold(0u32, |a, sh| a | ((((c >> sh) & 255) as f32 * k).round().clamp(0.0, 255.0) as u32) << sh); self.viewer_bg = "custom".into();
             }
-            "text" => self.text_pct = step(self.text_pct, if value == "-" { -1 } else { 1 }, TEXT_PCT),
+            // "-"/"+" a step, or a percentage (the slider), snapped to a stop and kept in the range
+            "text" => self.text_pct = match value { "-" | "+" => step(self.text_pct, if value == "-" { -1 } else { 1 }, TEXT_PCT), v => { let Ok(n) = v.parse::<u32>() else { return false }; snap(n, TEXT_PCT) } },
             "text-reset" => self.text_pct = 100,
             "font" if FONTS.iter().any(|(k, _)| *k == value) => self.font = value.into(),
             "sidebar-width" => self.sidebar_px = step(self.sidebar_px, if value == "-" { -1 } else { 1 }, SIDEBAR_PX),
@@ -135,7 +138,7 @@ mod tests {
     #[test] fn a_change_survives_a_save_and_a_read_and_values_out_of_range_are_brought_in() {
         let p = tmp("rt");
         let mut l = Local::default(); assert!(l.set("theme", "light")); assert!(l.set("text", "+")); assert!(l.set("sidebar-width", "-")); assert!(l.set("notifications", "off")); assert!(l.set("shortcut", "sidebar\u{1f}alt-s")); l.save_to(&p);
-        let back = Local::read(&p); assert_eq!(back, l); assert_eq!((back.text_pct, back.sidebar_px, back.key("sidebar")), (110, 240, "alt-s".to_string()));
+        let back = Local::read(&p); assert_eq!(back, l); assert_eq!((back.text_pct, back.sidebar_px, back.key("sidebar")), (105, 240, "alt-s".to_string()));
         std::fs::write(&p, br#"{"text_pct":9999,"sidebar_px":1,"theme":"neon","shortcuts":{"send":"ctrl-q","nope":"enter","close":"ctrl-b"}}"#).unwrap();
         let b = Local::read(&p); assert_eq!((b.text_pct, b.sidebar_px, b.theme.as_str()), (160, 180, "hub")); assert_eq!(b.key("send"), "enter", "an unknown key is the default"); assert_eq!(b.key("close"), "ctrl-b");
     }
@@ -155,6 +158,8 @@ mod tests {
     }
     #[test] fn steps_stop_at_the_ends_and_the_theme_and_font_cycle() {
         let mut l = Local::default(); for _ in 0..20 { l.set("text", "+"); } assert_eq!(l.text_pct, 160); for _ in 0..20 { l.set("text", "-"); } assert_eq!(l.text_pct, 80);
+        for (v, want) in [("100", 100), ("123", 125), ("122", 120), ("9999", 160), ("0", 80), ("157", 155), ("158", 160)] { assert!(l.set("text", v)); assert_eq!(l.text_pct, want, "{v}"); }
+        assert!(!l.set("text", "big"), "not a number, no change"); assert_eq!(l.text_pct, 160);
         assert_eq!(next_theme("hub"), "dark"); assert_eq!(next_theme("light"), "hub"); assert_eq!(next_font(FONTS[2].0), FONTS[0].0);
         assert!(Local { theme: "light".into(), ..Default::default() }.light(false) && !Local { theme: "dark".into(), ..Default::default() }.light(true) && Local::default().light(true));
     }

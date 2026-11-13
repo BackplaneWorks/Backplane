@@ -158,11 +158,11 @@ pub fn bar(cx: &mut Context<Backplane>, light: bool, f: &Find) -> Option<AnyElem
     // previous and next as arrows in the text (the icon set has no up chevron and is generated, assets/GENERATED.md)
     let btn = |id: &'static str, glyph: &'static str, tip: &'static str| crate::ui::with_rect(div().id(id), move || format!("ui:{tip}")).cursor_pointer().w(px(22.)).h(px(22.)).flex().items_center().justify_center().text_color(c("dim")).hover(|s| s.bg(c("raise")).text_color(c("text"))).child(glyph);
     // a strip over the thread's rows (never over them: the message it marks would hide under it), the bar at its right
-    Some(div().w_full().flex_shrink_0().flex().justify_end().px_4().py_1().border_b_1().border_color(c("line")).child(div().id("find-bar").w(px(400.)).max_w_full().flex().items_center().gap_2().px_2().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(px(13.))
+    Some(div().w_full().flex_shrink_0().flex().justify_end().px_4().py_1().border_b_1().border_color(c("line")).child(div().id("find-bar").w(px(400.)).max_w_full().flex().items_center().gap_2().px_2().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(crate::scale::tpx(13.))
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
         .child(crate::art::icon("search", 13., c("dim")))
         .child(div().flex_1().min_w_0().children(f.input.clone()))
-        .child(div().flex_shrink_0().text_size(px(11.)).text_color(c(if answered && f.matches.is_empty() { "bad" } else { "faint" })).child(label))
+        .child(div().flex_shrink_0().text_size(crate::scale::tpx(11.)).text_color(c(if answered && f.matches.is_empty() { "bad" } else { "faint" })).child(label))
         /* i18n-ok: a control id */ .child(btn("find-prev", "↑", "Previous match").on_click(cx.listener(|this, _, _, cx| this.find_step(false, cx))))
         /* i18n-ok: a control id */ .child(btn("find-next", "↓", "Next match").on_click(cx.listener(|this, _, _, cx| this.find_step(true, cx))))
         /* i18n-ok: a control id */ .child(crate::ui::with_rect(div().id("find-close"), || "ui:Close find".to_string()).cursor_pointer().p_1().hover(|s| s.bg(c("raise"))).child(crate::art::icon("x", 14., c("dim"))).on_click(cx.listener(|this, _, _, cx| { this.find_close(cx); }))))

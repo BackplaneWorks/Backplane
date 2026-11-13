@@ -42,7 +42,7 @@ pub fn fonts(light: bool) -> impl IntoElement {
     let c = theme::color(light, "text");
     div().size_full().bg(theme::color(light, "bg")).text_color(c).p(px(16.)).flex().flex_col()
         .children(FONT_LINES.iter().enumerate().map(|(i, t)| {
-            let d = div().h(px(24.)).line_height(px(24.)).text_size(px(13.)).font(crate::art::mono_font()).child(t.to_string());
+            let d = div().h(crate::scale::tpx(24.)).line_height(crate::scale::tpx(24.)).text_size(crate::scale::tpx(13.)).font(crate::art::mono_font()).child(t.to_string());
             if i == 4 { d.font_weight(FontWeight::BOLD) } else { d }
         }))
 }

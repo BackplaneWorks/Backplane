@@ -56,14 +56,14 @@ pub fn side_rows(cx: &mut Context<Backplane>, light: bool, project: &Value, open
         let sel = room == open_room;
         let line = tf("gpui.swarm.row", &[("n", r["members"].as_u64().unwrap_or(0).into()), ("w", r["working"].as_u64().unwrap_or(0).into())]);
         let el = crate::ui::with_rect(div().id(SharedString::from(format!("swarm-{}", string(r, "id")))), { let n = name.clone(); move || format!("swarm:{n}") })
-            .flex().items_center().gap_2().pl(px(30.)).pr_3().h(px(38.)).border_l_2().border_color(if sel { c("accent") } else { c("panel") })
+            .flex().items_center().gap_2().pl(px(30.)).pr_3().h(crate::scale::tpx(38.)).border_l_2().border_color(if sel { c("accent") } else { c("panel") })
             .bg(if sel { c("raise") } else { c("panel") }).hover(|s| s.bg(c("raise"))).cursor_pointer()
             .on_click(cx.listener(move |this, _, _, cx| this.go(&action, room.clone(), cx)))
             .child(dot(light, &string(r, "state")))
-            .child(div().flex_1().min_w_0().flex().flex_col().line_height(px(16.))
+            .child(div().flex_1().min_w_0().flex().flex_col().line_height(crate::scale::tpx(16.))
                 .child(div().overflow_hidden().whitespace_nowrap().text_ellipsis().child(name))
-                .child(div().text_size(px(11.)).text_color(c("faint")).overflow_hidden().whitespace_nowrap().child(line)))
-            .child(div().text_size(px(11.)).text_color(c("faint")).child(string(r, "ago")));
+                .child(div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).overflow_hidden().whitespace_nowrap().child(line)))
+            .child(div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(string(r, "ago")));
         Some(el.into_any_element())
     }).collect()
 }
@@ -96,13 +96,13 @@ pub fn close_form(data: &Value) -> Option<Command> {
 fn send(this: &mut Backplane, a: &str, v: &str, cx: &mut Context<Backplane>) { flush_fields(this); let _ = this.tx.try_send(act(a, v)); cx.notify(); }
 fn button(cx: &mut Context<Backplane>, light: bool, id: String, label: String, on: bool, a: &'static str, v: String) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
-    let d = div().id(SharedString::from(id)).px_2().py_1().text_size(px(12.)).cursor_pointer().border_1().whitespace_nowrap();
+    let d = div().id(SharedString::from(id)).px_2().py_1().text_size(crate::scale::tpx(12.)).cursor_pointer().border_1().whitespace_nowrap();
     let d = if on { d.bg(c("accent")).text_color(c("on-accent")).border_color(c("accent")) } else { d.bg(c("raise")).border_color(c("line")).hover(|s| s.bg(c("panel"))) };
     d.child(label).on_click(cx.listener(move |this, _, _, cx| send(this, a, &v, cx))).into_any_element()
 }
 fn inert(light: bool, label: String) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
-    div().px_2().py_1().text_size(px(12.)).border_1().border_color(c("line")).bg(c("raise")).text_color(c("faint")).opacity(0.6).child(label).into_any_element()
+    div().px_2().py_1().text_size(crate::scale::tpx(12.)).border_1().border_color(c("line")).bg(c("raise")).text_color(c("faint")).opacity(0.6).child(label).into_any_element()
 }
 fn field_box(light: bool, fields: &HashMap<String, FieldSlot>, name: &str, min_h: f32) -> Option<AnyElement> {
     let c = |n: &str| theme::color(light, n);
@@ -133,7 +133,7 @@ fn post_el(light: bool, p: &Value, who: &HashMap<String, Who>, names: &HashMap<S
     let c = |n: &str| theme::color(light, n);
     let text = string(p, "text");
     if p["guard"] == true {
-        return div().px_3().py(px(3.)).text_size(px(11.)).text_color(c("faint")).child(text).into_any_element()
+        return div().px_3().py(px(3.)).text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(text).into_any_element()
     }
     let tags: Vec<String> = arr(p, "tags").filter_map(|t| t.as_str().map(str::to_string)).collect();
     let synth = tags.iter().any(|t| t == "synthesis");
@@ -145,14 +145,14 @@ fn post_el(light: bool, p: &Value, who: &HashMap<String, Who>, names: &HashMap<S
     let hl = mention_ranges(&text, &mentions, names).into_iter().map(|r| (r, HighlightStyle { font_weight: Some(FontWeight::BOLD), color: Some(c("text").into()), ..Default::default() })).collect::<Vec<_>>();
     let body = StyledText::new(text).with_highlights(hl);
     let mut head = div().flex().items_center().gap_2().child(div().font_weight(FontWeight::BOLD).text_color(edge).child(name));
-    for t in &tags { head = head.child(div().px_1().text_size(px(10.)).border_1().border_color(c("line")).text_color(c("dim")).child(trs(t))); }
-    head = head.child(div().text_size(px(11.)).text_color(c("faint")).child(string(p, "ago")));
+    for t in &tags { head = head.child(div().px_1().text_size(crate::scale::tpx(10.)).border_1().border_color(c("line")).text_color(c("dim")).child(trs(t))); }
+    head = head.child(div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(string(p, "ago")));
     let held = string(p, "held");
-    if !held.is_empty() { head = head.child(div().text_size(px(10.)).text_color(c("faint")).child(tf("gpui.swarm.held", &[("why", held.clone().into())]))); }
+    if !held.is_empty() { head = head.child(div().text_size(crate::scale::tpx(10.)).text_color(c("faint")).child(tf("gpui.swarm.held", &[("why", held.clone().into())]))); }
     let files: Vec<String> = arr(p, "files").filter_map(|f| f.as_str().map(str::to_string)).collect();
     let claim = claims.get(&string(p, "id"));
-    let files_el = (!files.is_empty()).then(|| div().flex().flex_wrap().gap_1().children(files.into_iter().map(|f| div().px_1().text_size(px(11.)).bg(c("raise")).border_1().border_color(c("line")).child(f)))
-        .children(claim.filter(|s| s.as_str() == "waiting").map(|_| div().px_1().text_size(px(11.)).text_color(c("waiting")).border_1().border_color(c("waiting")).child(trs("waiting")))));
+    let files_el = (!files.is_empty()).then(|| div().flex().flex_wrap().gap_1().children(files.into_iter().map(|f| div().px_1().text_size(crate::scale::tpx(11.)).bg(c("raise")).border_1().border_color(c("line")).child(f)))
+        .children(claim.filter(|s| s.as_str() == "waiting").map(|_| div().px_1().text_size(crate::scale::tpx(11.)).text_color(c("waiting")).border_1().border_color(c("waiting")).child(trs("waiting")))));
     let d = div().flex().flex_col().gap_1().pl_3().pr_3().py_2().border_l_2().border_color(edge).child(head).child(div().text_color(c("text")).child(body)).children(files_el);
     let d = if synth { d.mt_2().mb_2().border_1().border_l_4().bg(c("raise")) } else { d };
     d.when(!held.is_empty(), |d| d.opacity(0.5)).into_any_element()
@@ -168,7 +168,7 @@ pub fn page(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
     let names: HashMap<String, String> = members.iter().map(|m| (string(m, "member"), string(m, "name"))).collect();
     let claims: HashMap<String, String> = arr(sw, "claims").map(|c| (string(c, "post"), string(c, "state"))).collect();
     // the head: the name, then the controls the hub offers and Add member
-    let mut head = div().h(px(36.)).flex_shrink_0().px_3().flex().items_center().gap_2().border_b_1().border_color(c("line"))
+    let mut head = div().h(crate::scale::tpx(36.)).flex_shrink_0().px_3().flex().items_center().gap_2().border_b_1().border_color(c("line"))
         .child(div().font_weight(FontWeight::BOLD).child(bot["title"].as_str().map(str::to_string).unwrap_or_else(|| string(bot, "name"))))
         .children(super::badge::place(light, &bot["mark"], "", "room-head")).child(div().flex_1());
     for (i, a) in arr(sw, "actions").enumerate() { head = head.child(button(cx, light, format!("swarm-act-{i}"), trs(&string(a, "label")), false, "swarm-act", string(a, "value"))); }
@@ -178,7 +178,7 @@ pub fn page(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
     let state = string(room, "state"); let reason = string(room, "reason");
     let state_word = if reason.is_empty() { trs(&state) } else { tf("gpui.swarm.state.why", &[("state", trs(&state).into()), ("why", trs(&reason).into())]) };
     let goal = string(room, "goal");
-    let line = div().flex().items_center().gap_2().px_3().py_1().text_size(px(12.)).border_b_1().border_color(c("line"))
+    let line = div().flex().items_center().gap_2().px_3().py_1().text_size(crate::scale::tpx(12.)).border_b_1().border_color(c("line"))
         .child(dot(light, &state)).child(div().text_color(c("dim")).child(state_word))
         .children((!goal.is_empty()).then(|| div().min_w_0().text_color(c("text")).child(goal)));
     // the members: colour, name, live state; a click opens the thread, × removes it
@@ -187,7 +187,7 @@ pub fn page(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
         let col = hex(&string(m, "color")).unwrap_or(c("rule"));
         let gone = state == "removed";
         let tip = { let t = string(m, "title"); let pm = [string(m, "provider"), string(m, "model")].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" / "); [t, pm, trs(&state)].into_iter().filter(|s| !s.is_empty()).collect::<Vec<_>>().join(" · ") };
-        let mut chip = div().id(SharedString::from(format!("swarm-member-{i}"))).flex().items_center().gap_2().pl_2().pr_1().py_1().border_1().border_color(c("line")).border_l_4().border_color(col).bg(c("raise")).text_size(px(12.))
+        let mut chip = div().id(SharedString::from(format!("swarm-member-{i}"))).flex().items_center().gap_2().pl_2().pr_1().py_1().border_1().border_color(c("line")).border_l_4().border_color(col).bg(c("raise")).text_size(crate::scale::tpx(12.))
             .when(gone, |d| d.opacity(0.5)).tooltip(crate::keys::tip(&tip, "", light))
             .child(dot(light, &state)).child(div().text_color(col).font_weight(FontWeight::BOLD).child(string(m, "name")));
         let role = string(m, "role"); if !role.is_empty() && role != string(m, "name") { chip = chip.child(div().text_color(c("faint")).child(role)); }
@@ -206,8 +206,8 @@ pub fn page(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
         div().flex().flex_col().gap_2().px_3().py_2().border_b_1().border_color(c("line")).bg(c("panel"))
             .child(picks(cx, light, "swarm-add", add, "swarm-add-provider", "swarm-add-model", ""))
             .child(div().flex().gap_2().items_center().children(field_box(light, fields, "sarole", 0.))
-                .child(div().id("swarm-add-cancel").px_2().py_1().text_size(px(12.)).cursor_pointer().border_1().bg(c("raise")).border_color(c("line")).child(trs("Cancel")).on_click(cx.listener(|this, _, _, cx| send(this, "form-close", "@sadd", cx))))
-                .child(div().id("swarm-add-go").px_2().py_1().text_size(px(12.)).cursor_pointer().border_1().bg(c("accent")).text_color(c("on-accent")).border_color(c("accent")).child(trs("Add")).on_click(cx.listener(move |this, _, _, cx| {
+                .child(div().id("swarm-add-cancel").px_2().py_1().text_size(crate::scale::tpx(12.)).cursor_pointer().border_1().bg(c("raise")).border_color(c("line")).child(trs("Cancel")).on_click(cx.listener(|this, _, _, cx| send(this, "form-close", "@sadd", cx))))
+                .child(div().id("swarm-add-go").px_2().py_1().text_size(crate::scale::tpx(12.)).cursor_pointer().border_1().bg(c("accent")).text_color(c("on-accent")).border_color(c("accent")).child(trs("Add")).on_click(cx.listener(move |this, _, _, cx| {
                     let role = this.screens.fields.get("sarole").map(|s| s.input.read(cx).content.to_string()).unwrap_or_default();
                     send(this, "swarm-act", &add_value(&a1, &role), cx);
                 }))))
@@ -221,10 +221,10 @@ pub fn page(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
     let mut list = div().id("swarm-board").flex_1().min_h_0().overflow_y_scroll().track_scroll(&h).flex().flex_col().gap_1().py_2();
     if posts.is_empty() { list = list.child(div().px_3().text_color(c("dim")).child(trs("No posts yet."))); }
     for p in posts { list = list.child(post_el(light, p, &who, &names, &claims)); }
-    let foot = if ended { div().px_3().py_2().border_t_1().border_color(c("line")).text_size(px(12.)).text_color(c("dim")).child(trs("This swarm is over.")).into_any_element() } else {
+    let foot = if ended { div().px_3().py_2().border_t_1().border_color(c("line")).text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(trs("This swarm is over.")).into_any_element() } else {
         div().flex().gap_2().items_end().p_3().border_t_1().border_color(c("line"))
             .child(div().flex_1().px_2().py_1().border_1().border_color(c("line")).bg(c("view")).children(fields.get("rpost").map(|s| s.input.clone())))
-            .child(div().id("talk-send").px_2().py_1().text_size(px(12.)).cursor_pointer().border_1().bg(c("accent")).text_color(c("on-accent")).border_color(c("accent")).child(trs("Send")).on_click(cx.listener(|this, _, _, cx| super::bots::send_post(this, "rpost", "room-post", cx)))).into_any_element()
+            .child(div().id("talk-send").px_2().py_1().text_size(crate::scale::tpx(12.)).cursor_pointer().border_1().bg(c("accent")).text_color(c("on-accent")).border_color(c("accent")).child(trs("Send")).on_click(cx.listener(|this, _, _, cx| super::bots::send_post(this, "rpost", "room-post", cx)))).into_any_element()
     };
     div().id("room-page").absolute().inset_0().occlude().bg(c("bg")).flex().flex_col().child(head).child(line).child(chips).children(picker).child(list).child(foot).into_any_element()
 }
@@ -247,7 +247,7 @@ pub fn form(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
     let add = if ns["canAdd"] == true { button(cx, light, "srow-add".into(), trs("Add member"), false, "swarm-row-add", String::new()) } else { inert(light, trs("Add member")) };
     let go = if ns["ok"] == true { button(cx, light, "form-go".into(), trs("Start"), true, "swarm-start", String::new()) } else { inert(light, trs("Start")) };
     Some(div().id("swarm-form").absolute().inset_0().occlude().bg(c("bg")).flex().flex_col().p_4().gap_2()
-        .child(div().flex().items_baseline().gap_2().child(div().font_weight(FontWeight::BOLD).text_size(px(15.)).child(trs("New swarm"))).child(div().text_size(px(12.)).text_color(c("dim")).child(string(ns, "title"))))
+        .child(div().flex().items_baseline().gap_2().child(div().font_weight(FontWeight::BOLD).text_size(crate::scale::tpx(15.)).child(trs("New swarm"))).child(div().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(string(ns, "title"))))
         .children(field_box(light, fields, "stopic", 0.)).children(field_box(light, fields, "sgoal", 0.)).children(field_box(light, fields, "sseed", 48.))
         .child(div().id("swarm-form-rows").min_h_0().overflow_y_scroll().flex().flex_col().max_w(px(760.)).children(rows).child(div().pt_2().flex().child(add)))
         .child(div().flex().gap_2().child(button(cx, light, "form-cancel".into(), trs("Cancel"), false, "form-close", "@snew".into())).child(go))

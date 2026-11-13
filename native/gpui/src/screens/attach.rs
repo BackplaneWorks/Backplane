@@ -194,14 +194,14 @@ pub fn chips(cx: &mut Context<Backplane>, light: bool, previews: &Previews, thre
         let thumb = previews.get(&label).filter(|_| it["image"].as_bool().unwrap_or(false));
         let mark = match thumb {
             Some(img) => div().size(px(64.)).flex_shrink_0().flex().items_center().justify_center().bg(c("raise")).child(gpui::img(ImageSource::Image(img)).size(px(64.)).object_fit(ObjectFit::Contain)).into_any_element(),
-            /* i18n-ok: drawn through trs */ None => div().size(px(40.)).flex_shrink_0().flex().items_center().justify_center().bg(c("raise")).text_size(px(10.)).text_color(c("dim")).child(crate::i18n::trs(if it["image"].as_bool().unwrap_or(false) { "IMG" } else { "FILE" })).into_any_element(),
+            /* i18n-ok: drawn through trs */ None => div().size(px(40.)).flex_shrink_0().flex().items_center().justify_center().bg(c("raise")).text_size(crate::scale::tpx(10.)).text_color(c("dim")).child(crate::i18n::trs(if it["image"].as_bool().unwrap_or(false) { "IMG" } else { "FILE" })).into_any_element(),
         };
-        row = row.child(div().id(("att", i)).flex().items_center().gap_2().pr_2().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.))
+        row = row.child(div().id(("att", i)).flex().items_center().gap_2().pr_2().border_1().border_color(c("line")).bg(c("panel")).text_size(crate::scale::tpx(12.))
             .child(mark).child(div().max_w(px(180.)).overflow_hidden().whitespace_nowrap().child(label))
             .child(div().id(("att-x", i)).px_1().cursor_pointer().text_color(c("dim")).hover(|s| s.text_color(c("bad"))).child("×")
                 .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("detach".into(), path.clone())); cx.notify(); }))));
     }
-    if !uploading.is_empty() { row = row.child(div().px_2().py_1().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("dim")).child(crate::i18n::tf("gpui.attach.uploading", &[("name", uploading.as_str().into())]))); }
+    if !uploading.is_empty() { row = row.child(div().px_2().py_1().border_1().border_color(c("line")).text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(crate::i18n::tf("gpui.attach.uploading", &[("name", uploading.as_str().into())]))); }
     Some(row.into_any_element())
 }
 

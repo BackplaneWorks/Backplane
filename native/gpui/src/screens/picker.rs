@@ -235,7 +235,7 @@ pub fn logo(provider: &str) -> AnyElement {
     let provider = bare(provider);
     let (rgb_, letter) = mark(provider);
     if let Some(segs) = crate::art::mark_path(provider) { return crate::art::mark(segs, 16., rgb_).into_any_element(); }
-    div().w(px(16.)).h(px(16.)).flex_shrink_0().flex().items_center().justify_center().bg(rgb(rgb_)).text_color(rgb(0xffffff)).text_size(px(10.)).font_weight(FontWeight::BOLD).child(letter).into_any_element()
+    div().w(px(16.)).h(px(16.)).flex_shrink_0().flex().items_center().justify_center().bg(rgb(rgb_)).text_color(rgb(0xffffff)).text_size(crate::scale::tpx(10.)).font_weight(FontWeight::BOLD).child(letter).into_any_element()
 }
 
 /// The thumb of a scroll bar: (top, height) in px inside a track of `track` px, for a view `view` px tall holding `max + view` px, scrolled `y` (>= 0).

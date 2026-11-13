@@ -58,7 +58,7 @@ pub fn strip(viewer: &Value, present: &BTreeMap<u32, u32>) -> Strip {
 pub fn strip_el(cx: &mut Context<Backplane>, light: bool, s: &Strip, key: &str) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     if s.rows.is_empty() { return div().into_any_element(); }
-    let head = crate::screens::viewer::tall(div().id("layers-btn").px_2().text_size(px(12.))).cursor_pointer().border_1().border_color(c(if s.mode > 0 { "accent" } else { "line" })).bg(c("raise")).when(s.mode > 0, |d| d.text_color(c("accent"))).child(trs(&s.head))
+    let head = crate::screens::viewer::tall(div().id("layers-btn").px_2().text_size(crate::scale::tpx(12.))).cursor_pointer().border_1().border_color(c(if s.mode > 0 { "accent" } else { "line" })).bg(c("raise")).when(s.mode > 0, |d| d.text_color(c("accent"))).child(trs(&s.head))
         .tooltip(crate::keys::tip(&trs("Layers: others as they are, dimmed, hidden"), key, light))
         .on_click(cx.listener(|this, _, _, cx| { let pv = &mut this.screens.plotview; pv.layers_open = !pv.layers_open; cx.notify(); }));
     head.into_any_element()
@@ -74,14 +74,14 @@ pub fn panel_el(cx: &mut Context<Backplane>, light: bool, s: &Strip, open: bool,
     if s.modes {
         let present = s.present;
         /* i18n-ok: drawn through trs */ panel = panel.child(div().flex().gap_1().children(["All", "Dim", "Only"].iter().enumerate().map(|(i, label)| {
-            let on = s.mode == i as u32; let d = div().id(SharedString::from(format!("layer-mode-{i}"))).px_2().text_size(px(12.)).cursor_pointer().border_1();
+            let on = s.mode == i as u32; let d = div().id(SharedString::from(format!("layer-mode-{i}"))).px_2().text_size(crate::scale::tpx(12.)).cursor_pointer().border_1();
             (if on { d.bg(c("accent")).text_color(c("on-accent")).border_color(c("accent")) } else { d.border_color(c("line")).hover(|s| s.bg(c("raise"))) }).child(trs(label))
                 /* i18n-ok: an action value */ .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("view-layer-mode".into(), format!("{i} {present}"))); cx.notify(); }))
         })));
     }
     for r in &s.rows {
         let (l, on, active, name) = (r.layer, r.on, r.active, r.name.clone());
-        panel = panel.child(div().flex().items_center().gap_2().text_size(px(12.))
+        panel = panel.child(div().flex().items_center().gap_2().text_size(crate::scale::tpx(12.))
             .when(active, |d| d.bg(c("raise")))
             .child(div().id(SharedString::from(format!("layer-box-{l}"))).size(px(12.)).border_1().border_color(c("line")).cursor_pointer().bg(swatch(r.color, on))
                 .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("view-layer".into(), l.to_string())); cx.notify(); })))
@@ -89,7 +89,7 @@ pub fn panel_el(cx: &mut Context<Backplane>, light: bool, s: &Strip, open: bool,
                 .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("view-layer-pick".into(), l.to_string())); cx.notify(); }))));
     }
     if s.reset {
-        panel = panel.child(div().id("layers-reset").text_size(px(12.)).cursor_pointer().text_color(c("accent")).child(trs("Reset layers"))
+        panel = panel.child(div().id("layers-reset").text_size(crate::scale::tpx(12.)).cursor_pointer().text_color(c("accent")).child(trs("Reset layers"))
             .on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(Command::Action("view-layers-reset".into(), String::new())); cx.notify(); })));
     }
     Some(panel.into_any_element())

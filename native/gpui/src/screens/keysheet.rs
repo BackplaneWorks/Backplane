@@ -26,9 +26,9 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, open: bool, l: &Local) -> 
     let c = |n: &str| theme::color(light, n);
     let mut list = div().flex().flex_col().gap_1();
     for (place, rows) in groups(l) {
-        list = list.child(div().pt_3().pb_1().text_size(px(11.)).text_color(c("faint")).child(trs(place)));
+        list = list.child(div().pt_3().pb_1().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(trs(place)));
         for (what, key) in rows {
-            list = list.child(div().flex().justify_between().gap_4().py(px(2.)).text_size(px(13.))
+            list = list.child(div().flex().justify_between().gap_4().py(px(2.)).text_size(crate::scale::tpx(13.))
                 .child(div().flex_1().min_w_0().text_color(c("dim")).child(trs(what)))
                 .child(div().flex_shrink_0().px_2().bg(c("raise")).text_color(c("text")).child(key)));
         }
@@ -39,7 +39,7 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, open: bool, l: &Local) -> 
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
         // where it is, for the window's checks (BACKPLANE_GPUI_RECTS=1: test/onboarding/run.sh finds it)
         .child(canvas(|_, _, _| (), |b, _, w, _| crate::art::report("keysheet", b, w.scale_factor())).absolute().size_full())
-        .child(div().px_6().pt_5().pb_2().flex().flex_col().gap_1().child(div().text_size(px(18.)).font_weight(FontWeight::BOLD).child(title)).child(div().text_size(px(12.)).text_color(c("faint")).child(note)))
+        .child(div().px_6().pt_5().pb_2().flex().flex_col().gap_1().child(div().text_size(crate::scale::tpx(18.)).font_weight(FontWeight::BOLD).child(title)).child(div().text_size(crate::scale::tpx(12.)).text_color(c("faint")).child(note)))
         .child(div().id("keysheet-list").flex_1().min_h_0().overflow_y_scroll().px_6().pb_5().child(list));
     Some(div().id("keysheet-back").absolute().top_0().left_0().size_full().flex().items_center().justify_center().bg(hsla(0., 0., 0., 0.45)).occlude()
         .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| { this.keysheet_close(cx); }))

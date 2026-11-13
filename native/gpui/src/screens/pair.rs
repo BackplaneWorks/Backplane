@@ -80,10 +80,10 @@ fn pair(this: &mut Backplane, i: Invitation, cx: &mut Context<Backplane>) {
 
 fn btn(id: &'static str, label: &'static str, strong: bool, light: bool) -> Stateful<Div> {
     let c = |n: &str| theme::color(light, n);
-    let b = div().id(id).px_3().py_1().border_1().border_color(c("line")).cursor_pointer().text_size(px(13.)).child(trs(label));
+    let b = div().id(id).px_3().py_1().border_1().border_color(c("line")).cursor_pointer().text_size(crate::scale::tpx(13.)).child(trs(label));
     if strong { b.bg(c("raise")) } else { b.text_color(c("dim")) }
 }
-fn boxed(input: &Entity<TextInput>, light: bool) -> Div { div().h(px(32.)).px_2().flex().items_center().border_1().border_color(theme::color(light, "line")).child(input.clone()) }
+fn boxed(input: &Entity<TextInput>, light: bool) -> Div { div().h(crate::scale::tpx(32.)).px_2().flex().items_center().border_1().border_color(theme::color(light, "line")).child(input.clone()) }
 
 pub fn view(this: &mut Backplane, light: bool, window: &mut Window, cx: &mut Context<Backplane>) -> (AnyElement, Vec<crate::script::CtlEntry>) {
     use crate::script::{Ctl, CtlEntry};
@@ -97,22 +97,22 @@ pub fn view(this: &mut Backplane, light: bool, window: &mut Window, cx: &mut Con
     let mut col = div().w(px(460.)).flex().flex_col().gap_3();
     let mut ctls = vec![];
     if let Some(i) = ask {
-        col = col.child(div().text_size(px(18.)).child(trs("Pair with this hub?"))).child(div().text_size(px(13.)).child(i.origin.clone()))
-            .child(div().text_size(px(12.)).text_color(c("dim")).child(trs("A link opened this. Pair only with a hub you know.")))
+        col = col.child(div().text_size(crate::scale::tpx(18.)).child(trs("Pair with this hub?"))).child(div().text_size(crate::scale::tpx(13.)).child(i.origin.clone()))
+            .child(div().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(trs("A link opened this. Pair only with a hub you know.")))
             .child(div().flex().gap_2()
                 /* i18n-ok: button labels drawn through trs in btn; ctl labels are what drivers press */ .child(btn("pair-cancel", "Cancel", true, light).on_click(cx.listener(|this, _, _, cx| cancel(this, cx))))
                 /* i18n-ok: button labels drawn through trs in btn; ctl labels are what drivers press */ .child(btn("pair-yes", "Pair", false, light).on_click(cx.listener(|this, _, _, cx| confirm(this, cx)))));
         /* i18n-ok: button labels drawn through trs in btn; ctl labels are what drivers press */ ctls.push(ctl("pair:cancel", "Cancel", Ctl::PairCancel)); ctls.push(ctl("pair:yes", "Pair", Ctl::PairYes));
     } else {
-        /* i18n-ok: drawn through trs */ col = col.child(div().text_size(px(18.)).child(trs(if repair { "Re-pair this device" } else { if adding { "Add a hub" } else { "Connect to your Backplane hub" } })))
-            /* i18n-ok: drawn through trs */ .child(div().text_size(px(12.)).text_color(c("dim")).child(trs(if repair { "This device was revoked. Make a new link in Settings → Devices on the hub." } else { "On a paired machine: Settings → Devices → Add a device." })))
+        /* i18n-ok: drawn through trs */ col = col.child(div().text_size(crate::scale::tpx(18.)).child(trs(if repair { "Re-pair this device" } else { if adding { "Add a hub" } else { "Connect to your Backplane hub" } })))
+            /* i18n-ok: drawn through trs */ .child(div().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(trs(if repair { "This device was revoked. Make a new link in Settings → Devices on the hub." } else { "On a paired machine: Settings → Devices → Add a device." })))
             .child(boxed(&link, light))
-            .child(div().text_size(px(12.)).text_color(c("dim")).child(trs("Or the hub's address and short code")))
+            .child(div().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(trs("Or the hub's address and short code")))
             .child(div().flex().gap_2().child(boxed(&addr, light).flex_1()).child(boxed(&code, light).w(px(130.))))
             /* i18n-ok: button labels drawn through trs in btn; ctl labels are what drivers press */ .child(div().flex().gap_2().child(btn("pair-go", "Pair", true, light).on_click(cx.listener(|this, _, _, cx| go(this, cx))))
                 /* i18n-ok: button labels drawn through trs in btn; ctl labels are what drivers press */ .when(adding, |d| d.child(btn("pair-back", "Cancel", false, light).on_click(cx.listener(|this, _, _, cx| { this.pair = None; cx.notify(); })))));
         /* i18n-ok: button labels drawn through trs in btn; ctl labels are what drivers press */ ctls.push(ctl("pair:go", "Pair", Ctl::PairGo));
     }
-    if !status.is_empty() { col = col.child(div().text_size(px(12.)).text_color(c(if busy { "dim" } else { "text" })).child(trs(&status))); }
+    if !status.is_empty() { col = col.child(div().text_size(crate::scale::tpx(12.)).text_color(c(if busy { "dim" } else { "text" })).child(trs(&status))); }
     (div().size_full().flex().items_center().justify_center().bg(c("bg")).text_color(c("text")).child(col).into_any_element(), ctls)
 }

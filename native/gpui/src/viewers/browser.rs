@@ -198,23 +198,23 @@ impl Render for BrowserPage {
         let content = match &self.image {
             // a dead hub must not look like a live, frozen page: the status shows over the last frame
             Some(i) => div().id("browser-view").size_full().relative().bg(c("bg")).child(img(i.clone()).size_full().object_fit(ObjectFit::Contain))
-                .when(!status.is_empty(), |d| d.child(div().absolute().bottom_2().left_2().px_2().py_1().text_size(px(12.)).bg(c("panel")).border_1().border_color(c("line")).text_color(c("bad")).child(trs(&status)))).into_any_element(),
+                .when(!status.is_empty(), |d| d.child(div().absolute().bottom_2().left_2().px_2().py_1().text_size(crate::scale::tpx(12.)).bg(c("panel")).border_1().border_color(c("line")).text_color(c("bad")).child(trs(&status)))).into_any_element(),
             None => {
                 let said = open_message(&self.open_error, self.opening_since.elapsed());
                 let waiting = said.is_none() && status == "Opening the browser…";
                 let line = said.as_ref().map(|m| m.0.clone()).unwrap_or_else(|| status.clone());
-                div().id("browser-view").size_full().bg(c("bg")).flex().flex_col().items_center().justify_center().gap_3().px_6().text_size(px(13.)).text_color(c("dim"))
+                div().id("browser-view").size_full().bg(c("bg")).flex().flex_col().items_center().justify_center().gap_3().px_6().text_size(crate::scale::tpx(13.)).text_color(c("dim"))
                     .child(div().max_w(px(480.)).text_color(c(if said.is_some() { "text" } else { "dim" })).child(trs(&line)))
-                    .children(said.as_ref().map(|m| div().max_w(px(480.)).text_size(px(12.)).child(trs(&m.1))))
+                    .children(said.as_ref().map(|m| div().max_w(px(480.)).text_size(crate::scale::tpx(12.)).child(trs(&m.1))))
                     .children(said.is_some().then(|| div().id("browser-retry").px_4().py_1().cursor_pointer().border_1().border_color(c("line")).bg(c("raise")).text_color(c("text")).hover(|s| s.border_color(c("accent"))).child(trs("Retry"))
                         .on_click(cx.listener(|this, _, _, cx| this.retry(cx)))))
-                    .when(waiting, |d| d.child(div().text_size(px(11.)).text_color(c("faint")).child(trs("starting the hub's browser…"))))
+                    .when(waiting, |d| d.child(div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(trs("starting the hub's browser…"))))
                     .into_any_element()
             }
         };
         let light = self.light;
         let bar = self.bar.render(light, size, content, window, cx);
-        let banner = (!self.banner.is_empty()).then(|| div().px_3().py_1().text_size(px(12.)).bg(c("panel")).border_b_1().border_color(c("line")).text_color(c("warn")).child(trs(&self.banner)));
+        let banner = (!self.banner.is_empty()).then(|| div().px_3().py_1().text_size(crate::scale::tpx(12.)).bg(c("panel")).border_b_1().border_color(c("line")).text_color(c("warn")).child(trs(&self.banner)));
         div().id("browser-page").size_full().flex().flex_col().children(banner).child(div().flex_1().min_h_0().child(bar)).into_any_element()
     }
 }

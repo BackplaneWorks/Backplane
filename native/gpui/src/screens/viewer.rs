@@ -112,19 +112,19 @@ fn hub_open(thread: &Value) -> bool { thread["diff"].is_object() || thread["view
 /// one the sidebar's first row and the thread header draw across the window (the top bar's bottom + ROW_H). Its buttons are the header's
 /// tools' height (head::BTN_H, `tall`), centred on that band.
 pub fn bar(light: bool) -> Div {
-    div().flex_shrink_0().h(px(super::head::ROW_H)).flex().items_center().gap_2().px_3().border_b_1().border_color(theme::color(light, "rule"))
+    div().flex_shrink_0().h(crate::scale::tpx(super::head::ROW_H)).flex().items_center().gap_2().px_3().border_b_1().border_color(theme::color(light, "rule"))
 }
 /// The bar of a page whose buttons may not fit one line (Files, Diff, Review, Mech): one line on the header's band while they fit, else
 /// it wraps and grows down from there (its first line stays on the band).
 pub fn bar_wrap(light: bool) -> Div {
-    div().flex_shrink_0().min_h(px(super::head::ROW_H)).flex().flex_wrap().items_center().gap_x_2().gap_y_1().px_3().py(px(3.5)).border_b_1().border_color(theme::color(light, "rule"))
+    div().flex_shrink_0().min_h(crate::scale::tpx(super::head::ROW_H)).flex().flex_wrap().items_center().gap_x_2().gap_y_1().px_3().py(px(3.5)).border_b_1().border_color(theme::color(light, "rule"))
 }
 /// A button of a viewer bar: the header's tool height, its content centred.
-pub fn tall<E: Styled>(e: E) -> E { e.h(px(super::head::BTN_H)).flex().items_center() }
+pub fn tall<E: Styled>(e: E) -> E { e.h(crate::scale::tpx(super::head::BTN_H)).flex().items_center() }
 
 fn btn(cx: &mut Context<Backplane>, light: bool, id: String, label: String, on: bool, cmd: Command) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
-    let d = tall(div().id(SharedString::from(id)).px_2().text_size(px(12.)).cursor_pointer().border_1());
+    let d = tall(div().id(SharedString::from(id)).px_2().text_size(crate::scale::tpx(12.)).cursor_pointer().border_1());
     let d = if on { d.bg(c("accent")).text_color(c("on-accent")).border_color(c("accent")) } else { d.bg(c("raise")).border_color(c("line")).hover(|s| s.bg(c("panel"))) };
     let cmd = std::cell::RefCell::new(Some(cmd));
     d.child(label).on_click(cx.listener(move |this, _, _, cx| { if let Some(Command::Action(a, v)) = cmd.borrow().as_ref().map(|c| match c { Command::Action(a, v) => Command::Action(a.clone(), v.clone()), _ => Command::Page(String::new()) }) { let _ = this.tx.try_send(Command::Action(a, v)); } cx.notify(); })).into_any_element()
@@ -142,7 +142,7 @@ fn mech_chrome(cx: &mut Context<Backplane>, light: bool, viewer: &Value, key_emp
     row = row.child(btn(cx, light, "mech-refresh".into(), trs("Refresh"), false, Command::Action("mech-refresh".into(), String::new())));
     // the bar: the parts, the pane's controls at the end of its first line (the parts wrap under them); what the page says under the bar
     let bar = bar_wrap(light).flex_nowrap().items_start().child(div().flex_1().min_w_0().child(row)).child(actions);
-    div().flex().flex_col().child(bar).children(say.map(|s| div().px_3().py_2().text_size(px(12.)).text_color(c("dim")).child(trs(&s)))).into_any_element()
+    div().flex().flex_col().child(bar).children(say.map(|s| div().px_3().py_2().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(trs(&s)))).into_any_element()
 }
 
 /// A row's icon by what it opens as.
@@ -177,7 +177,7 @@ fn pane_actions(cx: &mut Context<Backplane>, light: bool, thread: &Value, target
     let mut row = div().flex().flex_shrink_0().items_center().gap_1().max_w_full();
     if let Some((_, o, hover)) = super::badge::place_text(&thread["mark"], "") {
         let t = super::badge::from_machine(&thread["mark"], &source(viewer, diff_on)); let col = c("dim");
-        row = row.child(div().id("viewer-from").min_w_0().max_w(px(200.)).flex().items_center().gap(px(3.)).overflow_hidden().whitespace_nowrap().text_size(px(11.)).text_color(col).opacity(o)
+        row = row.child(div().id("viewer-from").min_w_0().max_w(px(200.)).flex().items_center().gap(px(3.)).overflow_hidden().whitespace_nowrap().text_size(crate::scale::tpx(11.)).text_color(col).opacity(o)
             .tooltip(crate::keys::tip(&hover, "", light)).child(crate::art::icon("link", 11., col)).child(div().overflow_hidden().text_ellipsis().child(t)));
     }
     // Edit / View: the real KiCad in this pane (on the hub's own machine), or back to Backplane's viewer
@@ -186,13 +186,13 @@ fn pane_actions(cx: &mut Context<Backplane>, light: bool, thread: &Value, target
     if has_design(viewer) && !gerbers && !diff_on && crate::viewers::kicad_pane::local(target.map(|t| t.addr.as_str()), thread) {
         let c2 = c(if editing { "accent" } else { "line" });
         /* i18n-ok: ctl labels and ui: ids are what drivers press */ let edit_div = crate::ui::with_rect(div().id("kicad-edit"), move || if editing { "ui:View".to_string() } else { "ui:Edit".to_string() });
-        row = row.child(tall(edit_div.px_2().border_1().border_color(c2).bg(c("raise")).cursor_pointer().hover(|s| s.bg(c("panel"))).text_size(px(12.))
+        row = row.child(tall(edit_div.px_2().border_1().border_color(c2).bg(c("raise")).cursor_pointer().hover(|s| s.bg(c("panel"))).text_size(crate::scale::tpx(12.))
             .tooltip(crate::keys::tip(&if editing { trs("Back to Backplane's viewer (KiCad stays open)") } else { trs("Edit in the real KiCad, here in the pane") }, "", light))
             .child(if editing { trs("View") } else { trs("Edit") })
             .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| { if editing { this.kicad_view(cx); } else { this.kicad_edit(cx); } }))).into_any_element());
     }
     if has_design(viewer) && !gerbers && !editing { row = row.child(btn(cx, light, "kicad-open".into(), kicad_open_label(target.map(|t| t.addr.as_str()), thread["mark"]["name"].as_str()), false, kicad_open(viewer))); }
-    row.child(div().id("viewer-close").size(px(super::head::BTN_H)).flex().items_center().justify_center().border_1().border_color(c("line")).bg(c("raise")).cursor_pointer().hover(|s| s.bg(c("panel"))).tooltip(crate::keys::tip(&trs("Close the viewer"), "", light))
+    row.child(div().id("viewer-close").size(crate::scale::tpx(super::head::BTN_H)).flex().items_center().justify_center().border_1().border_color(c("line")).bg(c("raise")).cursor_pointer().hover(|s| s.bg(c("panel"))).tooltip(crate::keys::tip(&trs("Close the viewer"), "", light))
         .child(crate::art::icon("x", 14., c("dim"))).on_click(cx.listener(|this, _, _, cx| { this.screens.rail_pending = Some(String::new()); this.screens.rail_at = Some(std::time::Instant::now()); let _ = this.tx.try_send(close()); cx.notify(); })))
         .into_any_element()
 }
@@ -219,7 +219,7 @@ fn status_row(light: bool, say: &str, actions: Option<AnyElement>) -> AnyElement
 
 fn diff_page(cx: &mut Context<Backplane>, light: bool, diff: &Value, actions: AnyElement) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
-    let mut col = div().flex().flex_col().text_size(px(12.));
+    let mut col = div().flex().flex_col().text_size(crate::scale::tpx(12.));
     col = col.child(bar_wrap(light).child(div().flex_1().min_w(px(180.)).text_color(c("dim")).child(trs(&string(diff, "summary"))))
         // the button says all it does: it commits and pushes (`commit_push`), as the palette's "Commit & push" and its tooltip say
         .when(diff_changed(diff), |d| d.children([(trs("Commit & push"), "commit_push"), ("PR".to_string(), "commit_push_pr")].into_iter().map(|(l, v)| btn(cx, light, format!("git-{v}"), l, false, Command::Action("git".into(), v.into()))).collect::<Vec<_>>())
@@ -277,7 +277,7 @@ fn plot_loading(cx: &mut Context<Backplane>, light: bool, slot: usize, viewer: &
     let c = |n: &str| theme::color(light, n);
     let mut col = div().size_full().flex().flex_col();
     // (as plot_pane lays it out: one bar, Boards/Layers/Fit then the pane's controls; the history bar goes under it, histbar::under)
-    let ghost = |label: &str| tall(div().px_2().text_size(px(12.)).border_1().border_color(c("line")).text_color(c("faint")).child(trs(label)));
+    let ghost = |label: &str| tall(div().px_2().text_size(crate::scale::tpx(12.)).border_1().border_color(c("line")).text_color(c("faint")).child(trs(label)));
     let boards = if layers && slot == 0 { crate::viewers::boards::picker(cx, light, viewer, &pv.boards) } else { None };
     if let Some(a) = actions { col = col.child(bar(light).children(boards).when(layers, |d| d.child(ghost("Layers")).child(ghost("Fit"))).child(div().flex_1()).child(a)); }
     col.child(div().flex_1().min_h_0().bg(c("view")).flex().items_center().justify_center().text_color(c("faint")).child(say.to_string())).into_any_element()
@@ -305,7 +305,7 @@ fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, 
     // (the design history bar is under the canvas, screens::histbar)
     let mut tools: Vec<AnyElement> = Vec::new();
     let note = string(viewer, "note");
-    let note = (!note.is_empty()).then(|| div().px_3().py_1().text_size(px(11.)).text_color(c("dim")).child(trs(&note)));
+    let note = (!note.is_empty()).then(|| div().px_3().py_1().text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(trs(&note)));
     let mut sheets_list = None;
     // Layers: the menu lists the layers this plot has; the hub's masks decide what the canvas draws
     let mut present = std::collections::BTreeMap::new();
@@ -315,11 +315,11 @@ fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, 
     // Sheets: a schematic of several sheets lists them as a tree (indented by depth); a press shows that sheet, the root first
     if sheets.len() > 1 && open == "schematic" && layers {
         let on_key = frame.key.clone();
-        let head = tall(div().id("sheets-btn").px_2().text_size(px(12.)).cursor_pointer()).border_1().border_color(c("line")).bg(c("raise")).child(tf("gpui.c.sheets.count", &[("n", sheets.len().into())]))
+        let head = tall(div().id("sheets-btn").px_2().text_size(crate::scale::tpx(12.)).cursor_pointer()).border_1().border_color(c("line")).bg(c("raise")).child(tf("gpui.c.sheets.count", &[("n", sheets.len().into())]))
             .on_click(cx.listener(|this, _, _, cx| { let pv = this.screens.pv(0); pv.sheets_open = !pv.sheets_open; cx.notify(); }));
         tools.push(head.into_any_element());
         if pv.sheets_open {
-            let mut list = div().id("sheets-list").flex().flex_col().px_3().pb_1().text_size(px(12.));
+            let mut list = div().id("sheets-list").flex().flex_col().px_3().pb_1().text_size(crate::scale::tpx(12.));
             for (i, sh) in sheets.iter().enumerate() {
                 let file = if i == 0 { String::new() } else { sh.file.clone() };
                 let here = on_key.ends_with(&sh.file) && i != 0 || (i == 0 && on_key.ends_with('|'));
@@ -330,7 +330,7 @@ fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, 
         }
     }
     if layers {
-        let fit = tall(div().id(SharedString::from(format!("plot-fit-{slot}"))).px_2().text_size(px(12.))).cursor_pointer().border_1().border_color(c("line")).bg(c("raise")).hover(|s| s.bg(c("panel"))).child(trs("Fit"))
+        let fit = tall(div().id(SharedString::from(format!("plot-fit-{slot}"))).px_2().text_size(crate::scale::tpx(12.))).cursor_pointer().border_1().border_color(c("line")).bg(c("raise")).hover(|s| s.bg(c("panel"))).child(trs("Fit"))
             .on_click(cx.listener(move |this, _, _, cx| { let pv = this.screens.pv(slot); pv.touched = false; pv.fit_wh = (0., 0.); cx.notify(); }));
         // the Boards menu leads the row (0.14 put it first in the viewer's bar), then Layers and Fit
         let boards = if slot == 0 { crate::viewers::boards::picker(cx, light, viewer, &pv.boards) } else { None };
@@ -339,21 +339,21 @@ fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, 
         // a Gerber set: "vs board" (its copper, drills and outline against the board's: kicad/gerber/compare.rs), then where it is and how old (the plot's note)
         if viewer["gerbers"] == true {
             let on = viewer["gerbersVsBoard"] == true;
-            tools.push(tall(crate::ui::with_rect(div().id("gerbers-vs-board"), || "ui:vs board".into()).px_2().text_size(px(12.))).cursor_pointer().border_1().border_color(c(if on { "accent" } else { "line" })).bg(c("raise")).hover(|s| s.bg(c("panel"))) // i18n-ok: a harness id
+            tools.push(tall(crate::ui::with_rect(div().id("gerbers-vs-board"), || "ui:vs board".into()).px_2().text_size(crate::scale::tpx(12.))).cursor_pointer().border_1().border_color(c(if on { "accent" } else { "line" })).bg(c("raise")).hover(|s| s.bg(c("panel"))) // i18n-ok: a harness id
                 .tooltip(crate::keys::tip(&trs("Mark where these Gerbers differ from the board: red on the board only, green in the Gerbers only"), "", light))
                 .child(trs("vs board")).on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("view".into(), if on { "gerbers".into() } else { "gerbers\tboard".into() })); cx.notify(); })).into_any_element());
             // the set in KiCad's own GerbView, where this runtime has it in process (embed-gerbview): Edit on the Board page, then the set
             let files: Vec<String> = viewer["gerberFiles"].as_array().map(|a| a.iter().filter_map(|f| f.as_str().map(str::to_string)).collect()).unwrap_or_default();
             if !files.is_empty() && crate::viewers::kicad_pane::GERBVIEW.load(std::sync::atomic::Ordering::Relaxed) {
-                tools.push(tall(crate::ui::with_rect(div().id("gerbers-gerbview"), || "ui:Open in GerbView".into()).px_2().text_size(px(12.))).cursor_pointer().border_1().border_color(c("line")).bg(c("raise")).hover(|s| s.bg(c("panel"))) // i18n-ok: a harness id
+                tools.push(tall(crate::ui::with_rect(div().id("gerbers-gerbview"), || "ui:Open in GerbView".into()).px_2().text_size(crate::scale::tpx(12.))).cursor_pointer().border_1().border_color(c("line")).bg(c("raise")).hover(|s| s.bg(c("panel"))) // i18n-ok: a harness id
                     .tooltip(crate::keys::tip(&trs("Open these Gerbers in KiCad's GerbView, here in the pane"), "", light))
                     .child(trs("Open in GerbView")).on_click(cx.listener(move |this, _, _, cx| this.open_in_gerbview(files.clone(), cx))).into_any_element());
             }
             // the marks told apart without colour too: the board's solid, the Gerbers' striped
-            if on { tools.push(div().id("gerbers-legend").flex_shrink_0().flex().items_center().gap_1().text_size(px(11.)).text_color(c("dim"))
+            if on { tools.push(div().id("gerbers-legend").flex_shrink_0().flex().items_center().gap_1().text_size(crate::scale::tpx(11.)).text_color(c("dim"))
                 .child(div().size(px(9.)).bg(rgb(0xe5484d))).child(trs("board only"))
                 .child(div().ml_1().w(px(9.)).h(px(9.)).flex().flex_col().justify_between().children((0..3).map(|_| div().h(px(2.)).bg(rgb(0x30a46c))))).child(trs("Gerbers only")).into_any_element()); }
-            if !frame.note.is_empty() { tools.push(div().id("gerbers-note").min_w_0().flex_shrink().overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(px(11.)).text_color(c(if frame.warn { "warn" } else { "dim" })).child(frame.note.clone()).into_any_element()); }
+            if !frame.note.is_empty() { tools.push(div().id("gerbers-note").min_w_0().flex_shrink().overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(crate::scale::tpx(11.)).text_color(c(if frame.warn { "warn" } else { "dim" })).child(frame.note.clone()).into_any_element()); }
         }
     }
     match actions {
@@ -370,7 +370,7 @@ fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, 
         let r = viewer["probe"].as_str().and_then(super::plot::card).or_else(|| pv.card.clone()).and_then(|c| c.rows.iter().find(|x| x.0 == "ref" || x.0 == "symbol").map(|x| x.1.clone())).unwrap_or_default();
         if let Some(i) = super::plot::sheet_of(sheets, refs, &frame.key, &r) {
             let (say, file) = (if i == 0 { tf("gpui.c.probe.on.top", &[("ref", r.as_str().into())]) } else { tf("gpui.c.probe.on.sheet", &[("ref", r.as_str().into()), ("sheet", sheets[i].name.as_str().into())]) }, if i == 0 { String::new() } else { sheets[i].file.clone() });
-            area = area.child(div().id(SharedString::from(format!("probe-away-{slot}"))).absolute().top_2().left_2().flex().items_center().gap_2().px_2().py_1().text_size(px(12.)).bg(c("panel")).border_1().border_color(c("accent")).occlude()
+            area = area.child(div().id(SharedString::from(format!("probe-away-{slot}"))).absolute().top_2().left_2().flex().items_center().gap_2().px_2().py_1().text_size(crate::scale::tpx(12.)).bg(c("panel")).border_1().border_color(c("accent")).occlude()
                 .child(say)
                 .child(div().id(SharedString::from(format!("probe-away-open-{slot}"))).px_2().border_1().border_color(c("line")).bg(c("raise")).cursor_pointer().hover(|s| s.bg(c("panel"))).child(trs("Open it"))
                     .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("view-sheet".into(), file.clone())); cx.notify(); }))));
@@ -381,13 +381,13 @@ fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, 
         // compact (0.14's probe chip spirit): the part or net in the head, then the few rows that say what it is; every row in the tooltip
         let words = probe_words(&card);
         let full = std::iter::once(trs(&card.title)).chain(card.rows.iter().map(|(k, v)| format!("{}: {v}", trs(k)))).collect::<Vec<_>>().join("\n");
-        let mut box_ = div().id(SharedString::from(format!("pick-card-{slot}"))).absolute().left_2().bottom_2().max_w(px(280.)).flex().flex_col().gap(px(2.)).px_2().py_1().text_size(px(11.)).border_1().border_color(c("accent")).bg(c("panel")).occlude()
+        let mut box_ = div().id(SharedString::from(format!("pick-card-{slot}"))).absolute().left_2().bottom_2().max_w(px(280.)).flex().flex_col().gap(px(2.)).px_2().py_1().text_size(crate::scale::tpx(11.)).border_1().border_color(c("accent")).bg(c("panel")).occlude()
             .tooltip(crate::keys::tip(&full, "", light))
-            .child(div().flex().items_center().gap_2().child(div().id(SharedString::from(format!("pick-name-{slot}"))).flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(px(12.)).font_weight(FontWeight::BOLD).cursor_pointer().child(words.join(" · ")).tooltip(crate::keys::tip(&trs("Bring it into view"), "", light))
+            .child(div().flex().items_center().gap_2().child(div().id(SharedString::from(format!("pick-name-{slot}"))).flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(crate::scale::tpx(12.)).font_weight(FontWeight::BOLD).cursor_pointer().child(words.join(" · ")).tooltip(crate::keys::tip(&trs("Bring it into view"), "", light))
                     .on_click(cx.listener(move |this, _, _, cx| { super::plotview::bring_into_view(this, slot); cx.notify(); })))
                 /* i18n-ok: Esc is a key name */ .child(div().id(SharedString::from(format!("pick-close-{slot}"))).flex_none().p(px(2.)).cursor_pointer().hover(|s| s.bg(c("raise"))).tooltip(crate::keys::tip(&trs("Clear"), "Esc", light)).child(crate::art::icon("x", 12., c("dim")))
                     .on_click(cx.listener(move |this, _, _, cx| { let pv = this.screens.pv(slot); pv.card = None; pv.picked = None; pv.lit.clear(); super::plotview::keep_probe(this, None); cx.notify(); }))));
-        for (k, v) in card_rows(&card) { box_ = box_.child(div().flex().gap_2().child(div().w(px(58.)).flex_none().text_color(c("dim")).child(trs(&k))).child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(v))); }
+        for (k, v) in card_rows(&card) { box_ = box_.child(div().flex().gap_2().child(div().w(crate::scale::tpx(58.)).flex_none().text_color(c("dim")).child(trs(&k))).child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(v))); }
         area = area.child(box_);
     }
     col = col.child(area);
@@ -476,8 +476,8 @@ fn split_edge(cx: &mut Context<Backplane>, light: bool, main: bool, row: bool) -
 /// A pane's head (0.14's combo-head): its name, and × to put it away.
 fn split_head(cx: &mut Context<Backplane>, light: bool, pane: &'static str, name: &'static str, more: Option<AnyElement>) -> Div {
     let c = |n: &str| theme::color(light, n);
-    div().flex_none().h(px(26.)).flex().items_center().gap_2().pl_2().pr_1().bg(c("panel")).border_b_1().border_color(c("line"))
-        .child(div().flex_none().text_size(px(10.)).text_color(c("dim")).child(trs(name).to_uppercase())).children(more).child(div().flex_1())
+    div().flex_none().h(crate::scale::tpx(26.)).flex().items_center().gap_2().pl_2().pr_1().bg(c("panel")).border_b_1().border_color(c("line"))
+        .child(div().flex_none().text_size(crate::scale::tpx(10.)).text_color(c("dim")).child(trs(name).to_uppercase())).children(more).child(div().flex_1())
         .child(div().id(SharedString::from(format!("split-hide-{pane}"))).p(px(3.)).cursor_pointer().hover(|s| s.bg(c("raise"))).tooltip(crate::keys::tip(&tf("gpui.c.split.hide", &[("name", trs(name).into())]), "", light))
             .child(crate::art::icon("x", 13., c("dim"))).on_click(cx.listener(move |this, _, _, cx| split_set(this, |p| p.hide = split_flip(&p.hide, pane), true, cx))))
 }
@@ -487,12 +487,12 @@ fn split_sheets(cx: &mut Context<Backplane>, light: bool, sheets: &[super::plot:
     let c = |n: &str| theme::color(light, n);
     let here = |i: usize, sh: &super::plot::Sheet| if i == 0 { key.ends_with('|') || !sheets.iter().skip(1).any(|x| key.ends_with(&x.file)) } else { key.ends_with(&sh.file) };
     let cur = sheets.iter().enumerate().find(|(i, sh)| here(*i, sh)).map(|(i, sh)| if i == 0 { trs("Top sheet") } else { sh.name.clone() }).unwrap_or_else(|| trs("Top sheet"));
-    let btn = div().id("split-sheets").flex().items_center().gap_1().px_1().text_size(px(11.)).cursor_pointer().border_1().border_color(c(if open { "accent" } else { "line" })).hover(|s| s.bg(c("raise")))
+    let btn = div().id("split-sheets").flex().items_center().gap_1().px_1().text_size(crate::scale::tpx(11.)).cursor_pointer().border_1().border_color(c(if open { "accent" } else { "line" })).hover(|s| s.bg(c("raise")))
         .child(div().max_w(px(220.)).overflow_hidden().whitespace_nowrap().text_ellipsis().child(cur)).child(crate::art::icon("chevron-down", 11., c("dim")))
         .on_click(cx.listener(|this, _, _, cx| { let pv = this.screens.pv(1); pv.sheets_open = !pv.sheets_open; cx.notify(); }));
     let mut wrap = div().relative().child(btn);
     if open {
-        let mut list = div().id("split-sheets-list").mt(px(2.)).min_w(px(220.)).max_h(px(420.)).overflow_y_scroll().flex().flex_col().p_1().text_size(px(12.)).bg(c("panel")).border_1().border_color(c("line")).shadow_lg().occlude()
+        let mut list = div().id("split-sheets-list").mt(px(2.)).min_w(px(220.)).max_h(px(420.)).overflow_y_scroll().flex().flex_col().p_1().text_size(crate::scale::tpx(12.)).bg(c("panel")).border_1().border_color(c("line")).shadow_lg().occlude()
             .on_mouse_down_out(cx.listener(|this, _, _, cx| { this.screens.pv(1).sheets_open = false; cx.notify(); }));
         for (i, sh) in sheets.iter().enumerate() {
             let file = if i == 0 { String::new() } else { sh.file.clone() };
@@ -513,7 +513,7 @@ fn split_bar(cx: &mut Context<Backplane>, light: bool, hide: &str, probed: Optio
     for (pane, name) in SPLIT_PANES.iter() {
         let (pane, name, on) = (*pane, *name, split_shows(hide, pane));
         // (0.14's combo-pick: outlined in the accent while shown, dim while put away)
-        let d = div().id(SharedString::from(format!("split-pick-{pane}"))).px_2().py(px(2.)).text_size(px(12.)).cursor_pointer().border_1().hover(|s| s.bg(c("raise")));
+        let d = div().id(SharedString::from(format!("split-pick-{pane}"))).px_2().py(px(2.)).text_size(crate::scale::tpx(12.)).cursor_pointer().border_1().hover(|s| s.bg(c("raise")));
         let d = if on { d.border_color(c("accent")).text_color(c("text")) } else { d.border_color(c("line")).text_color(c("dim")) };
         picks = picks.child(d.tooltip(crate::keys::tip(&tf(if on { "gpui.c.split.hide" } else { "gpui.c.split.show" }, &[("name", trs(name).into())]), "", light)).child(trs(name))
             .on_click(cx.listener(move |this, _, _, cx| split_set(this, |p| p.hide = split_flip(&p.hide, pane), true, cx))));
@@ -521,11 +521,11 @@ fn split_bar(cx: &mut Context<Backplane>, light: bool, hide: &str, probed: Optio
     // the bar: (the Boards menu,) the pane toggles, the probe, then the pane's own controls
     // (as tall as the thread's head beside it, so their lines meet)
     // (the page's bar: on the header's line, as every viewer page's)
-    let mut row = div().id("split-bar").flex_none().h(px(super::head::ROW_H)).flex().items_center().gap_2().px_2().border_b_1().border_color(c("rule")).children(boards).child(div().flex_1()).child(picks);
+    let mut row = div().id("split-bar").flex_none().h(crate::scale::tpx(super::head::ROW_H)).flex().items_center().gap_2().px_2().border_b_1().border_color(c("rule")).children(boards).child(div().flex_1()).child(picks);
     if let Some(card) = probed {
         let words = probe_words(card);
         let full = std::iter::once(trs(&card.title)).chain(card.rows.iter().map(|(k, v)| format!("{}: {v}", trs(k)))).collect::<Vec<_>>().join("\n");
-        row = row.child(div().id("split-probe").min_w_0().max_w(px(240.)).flex_shrink().flex().items_center().gap_1().pl_2().pr(px(2.)).py_px().border_1().border_color(c("accent")).bg(c("raise")).text_size(px(12.))
+        row = row.child(div().id("split-probe").min_w_0().max_w(px(240.)).flex_shrink().flex().items_center().gap_1().pl_2().pr(px(2.)).py_px().border_1().border_color(c("accent")).bg(c("raise")).text_size(crate::scale::tpx(12.))
             .tooltip(crate::keys::tip(&full, "", light))
             .child(div().id("split-probe-name").min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().cursor_pointer().child(words.join(" · ")).tooltip(crate::keys::tip(&trs("Bring it into view"), "", light))
                 .on_click(cx.listener(|this, _, _, cx| { for i in [1, 2] { super::plotview::bring_into_view(this, i); } cx.notify(); })))
@@ -606,7 +606,7 @@ fn review_page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, review: &Val
     let bar = bar_wrap(light).flex_nowrap().items_start().child(pages).child(actions);
     let title = string(review, "title");
     let page = arr(review, "tabs").find(|t| t["on"] == true).map(|t| string(t, "page")).unwrap_or_default();
-    if !title.is_empty() { col = col.child(div().flex().items_center().gap_2().child(div().flex_1().font_weight(FontWeight::BOLD).text_size(px(15.)).child(trs(&title)))
+    if !title.is_empty() { col = col.child(div().flex().items_center().gap_2().child(div().flex_1().font_weight(FontWeight::BOLD).text_size(crate::scale::tpx(15.)).child(trs(&title)))
         .children(matches!(page.as_str(), "bom" | "checks").then(|| btn(cx, light, "rv-run".into(), trs("Refresh"), false, Command::Action("rv-run".into(), String::new()))))); }
     // the Checks page: why the gate fails, and the checklist's boxes (a press ticks one: rv-tick <index>)
     if review["checks"].is_object() {

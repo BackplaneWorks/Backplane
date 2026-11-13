@@ -401,7 +401,7 @@ impl Render for Composer {
             .on_mouse_down(MouseButton::Left, cx.listener(Self::mouse_down)).on_mouse_up(MouseButton::Left, cx.listener(Self::mouse_up))
             .on_mouse_up_out(MouseButton::Left, cx.listener(Self::mouse_up)).on_mouse_move(cx.listener(Self::mouse_move))
             .on_scroll_wheel(cx.listener(Self::wheel))
-            .line_height(px(20.)).text_size(px(13.))
+            .line_height(crate::scale::tpx(20.)).text_size(crate::scale::tpx(13.))
             .child(gpui::div().w_full().child(Element_ { input: cx.entity() }))
     }
 }

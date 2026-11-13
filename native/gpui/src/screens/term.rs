@@ -351,7 +351,7 @@ impl Backplane {
         let cw = window.text_system().advance(font, px(FONT_PX), 'm').map(|s| f32::from(s.width)).unwrap_or(FONT_PX * 0.6).max(1.);
         let v = window.viewport_size();
         let (_, _, w, h) = panel(f32::from(v.width), f32::from(v.height));
-        let (c, r) = grid_size(w - 2. * PAD, h - HEAD - 2. * PAD, cw, LINE_PX);
+        let (c, r) = grid_size(w - 2. * PAD, h - HEAD * crate::scale::s() - 2. * PAD, cw, LINE_PX);
         self.screens.term.cell = (cw, LINE_PX);
         if self.screens.term.resize(c, r) { let key = self.screens.term.key.clone(); self.term_rpc("term.resize", json!({"thread": key, "cols": c, "rows": r})); }
     }
@@ -424,7 +424,7 @@ impl Backplane {
         let btn = |tag: &str, text: String| div().id(SharedString::from(format!("{tag}-{id}"))).px_1().cursor_pointer().text_color(rgb(0x8a90a0)).hover(|s| s.text_color(rgb(vt::DEFAULT_FG))).child(text);
         let state_color = if running { c("ok") } else if state == "stopped" || state == "failed to start" || state.starts_with("exited ") && state != "exited 0" { c("bad") } else { rgb(0x8a90a0).into() };
         let (k1, k2, k3) = (key.clone(), key.clone(), key.clone());
-        let head = div().h(px(26.)).px_2().flex().items_center().gap_3().border_b_1().border_color(rgb(0x2a2f3a)).text_size(px(11.))
+        let head = div().h(crate::scale::tpx(26.)).px_2().flex().items_center().gap_3().border_b_1().border_color(rgb(0x2a2f3a)).text_size(crate::scale::tpx(11.))
             .child(div().flex_shrink_0().child(crate::ui::ic(light, "terminal", 12., "dim")))
             .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_color(rgb(vt::DEFAULT_FG)).child(label))
             .when(focused, |d| d.child(div().whitespace_nowrap().text_color(rgb(0x8a90a0)).child(trs("Shift+Esc back to the message"))))
@@ -505,7 +505,7 @@ pub fn view(cx: &mut Context<Backplane>, window: &mut Window, light: bool, l: &c
         }))
         .on_mouse_up(MouseButton::Left, cx.listener(|this, _: &MouseUpEvent, _, cx| { let t = &mut this.screens.term; t.dragging = false; if t.sel.is_some_and(|s| s.a == s.b) { t.sel = None; } cx.notify(); }))
         .on_mouse_up_out(MouseButton::Left, cx.listener(|this, _: &MouseUpEvent, _, _| this.screens.term.dragging = false))
-        .child(div().h(px(HEAD)).flex_shrink_0().px_3().flex().items_center().gap_3().border_b_1().border_color(rgb(0x2a2f3a)).text_size(px(11.))
+        .child(div().h(crate::scale::tpx(HEAD)).flex_shrink_0().px_3().flex().items_center().gap_3().border_b_1().border_color(rgb(0x2a2f3a)).text_size(crate::scale::tpx(11.))
             .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_color(rgb(vt::DEFAULT_FG)).child(label))
             .child(div().text_color(rgb(0x8a90a0)).whitespace_nowrap().child(hint))
             .child(div().id("term-close").cursor_pointer().px_1().text_color(rgb(0x8a90a0)).hover(|s| s.text_color(rgb(vt::DEFAULT_FG))).child("✕")

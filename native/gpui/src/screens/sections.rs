@@ -33,7 +33,7 @@ fn head(cx: &mut Context<Backplane>, light: bool, s: &Value, ctl: &mut Vec<CtlEn
     let gid = string(s, "group");
     let needs = id == "needs";
     let mut d = crate::ui::with_rect(div().id(SharedString::from(format!("sec-{id}"))), { let id = id.clone(); move || format!("section:{id}") })
-        .flex().items_center().gap_2().pl(px(6.)).pr_3().pt_3().pb_1().text_size(px(11.)).text_color(if needs { c("bad") } else { c("dim") })
+        .flex().items_center().gap_2().pl(px(6.)).pr_3().pt_3().pb_1().text_size(crate::scale::tpx(11.)).text_color(if needs { c("bad") } else { c("dim") })
         .children(fold.then(|| crate::ui::ic(light, if open { "chevron-down" } else { "chevron-right" }, 14., "dim")))
         .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().child(label));
     if fold {
@@ -70,7 +70,7 @@ fn project(this: &Backplane, cx: &mut Context<Backplane>, light: bool, p: &Value
     let can_fold = !fold_action.is_empty() && (folded || under > 0);
     /* i18n-ok: a ctl label */ if can_fold { ctl.push(CtlEntry { id: format!("project-fold:{pid}"), label: format!("{} {}", if folded { "Unfold" } else { "Fold" }, string(p, "title")), ctl: Ctl::Node(fold_action.clone(), key.clone()) }); }
     let twisty = crate::ui::with_rect(div().id(SharedString::from(format!("pfold-{pid}"))), { let p = pid.clone(); move || format!("project-fold:{p}") })
-        .w(px(16.)).h(px(30.)).flex_shrink_0().flex().items_center().justify_center()
+        .w(px(16.)).h(crate::scale::tpx(30.)).flex_shrink_0().flex().items_center().justify_center()
         .when(can_fold, |d| { let (a, k) = (fold_action.clone(), key.clone()); let (dim, text, line) = (c("dim"), c("text"), c("line")); let g = SharedString::from(format!("pfold-{pid}"));
             // the chevron: dim, lit with a square behind it under the pointer
             d.cursor_pointer().group(g.clone())
@@ -79,7 +79,7 @@ fn project(this: &Backplane, cx: &mut Context<Backplane>, light: bool, p: &Value
             .on_click(cx.listener(move |this, _, w, cx| { cx.stop_propagation(); w.focus(&this.screens.side_focus); this.go(&a, k.clone(), cx); })) });
     /* i18n-ok: a ctl label */ ctl.push(CtlEntry { id: format!("project-pin:{pid}"), label: if pinned { "Unpin project".into() } else { "Pin project".into() }, ctl: Ctl::Node("project-pin".into(), key.clone()) });
     crate::ui::with_rect(div().id(SharedString::from(format!("sproj-{pid}"))), { let p = pid.clone(); move || format!("project:{p}") })
-        .when(faded || p["off"] == true, |d| d.opacity(0.55)).flex().items_center().gap_2().pl(px(6.)).pr_3().h(px(30.)).text_size(px(13.))
+        .when(faded || p["off"] == true, |d| d.opacity(0.55)).flex().items_center().gap_2().pl(px(6.)).pr_3().h(crate::scale::tpx(30.)).text_size(crate::scale::tpx(13.))
         .border_l_2().border_color(if on_page { c("accent") } else { c("panel") }).when(on_page, |d| d.bg(c("raise"))).cursor_pointer().hover(|s| s.bg(c("raise")))
         .on_hover({ let p = pid.clone(); cx.listener(move |this, on: &bool, _, _| { if *on { this.screens.side_hover = Some(p.clone()) } else if this.screens.side_hover.as_deref() == Some(p.as_str()) { this.screens.side_hover = None } }) })
         .on_click(cx.listener(move |this, _, w, cx| { w.focus(&this.screens.side_focus); this.go("project-page", key2.clone(), cx); this.open_project(pid2.clone(), cx); }))
@@ -98,9 +98,9 @@ fn project(this: &Backplane, cx: &mut Context<Backplane>, light: bool, p: &Value
         .child(crate::screens::badge::mark(light, p))
         .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(string(p, "title")))
         .children((!dots.is_empty()).then(|| div().flex().gap_1().items_center().children(dots)))
-        .children((running > 0).then(|| div().text_size(px(11.)).text_color(c("accent")).child(tf("gpui.sections.running", &[("n", running.into())]))))
+        .children((running > 0).then(|| div().text_size(crate::scale::tpx(11.)).text_color(c("accent")).child(tf("gpui.sections.running", &[("n", running.into())]))))
         // what of it waits on the person (its rows are in Needs you, folded or not)
-        .children((needs_n > 0).then(|| div().px(px(5.)).h(px(16.)).flex().items_center().bg(c("bad")).text_size(px(10.)).text_color(c("bg")).child(needs_n.to_string())))
+        .children((needs_n > 0).then(|| div().px(px(5.)).h(px(16.)).flex().items_center().bg(c("bad")).text_size(crate::scale::tpx(10.)).text_color(c("bg")).child(needs_n.to_string())))
         .when(pinned, |d| d.child(crate::ui::ic(light, "pin", 12., "dim")))
         // New thread in this project (a project also on linked machines: the + asks which machine)
         /* i18n-ok: a ctl id the drivers press */ .child(crate::ui::with_rect(div().id(SharedString::from(format!("new-{pid}"))), || "ui:New thread".to_string()).cursor_pointer().tooltip(crate::keys::tip("New thread", "", light)).on_click({ let (new_on, pidn) = (p["newOn"].clone(), pid.clone()); cx.listener(move |this, e: &ClickEvent, _, cx| { cx.stop_propagation();
@@ -177,7 +177,7 @@ pub fn page_lists(cx: &mut Context<Backplane>, light: bool, data: &Value, pid: &
         if fold && s["count"].as_u64().unwrap_or(0) == 0 { continue }
         let (id, title, open, toggle) = (string(s, "id"), string(s, "title"), s["open"] == true, string(s, "toggle"));
         if fold { ctl.push(CtlEntry { id: format!("page-section:{id}"), label: title.clone(), ctl: Ctl::Node("side-section".into(), toggle.clone()) }); }
-        out.push(div().id(SharedString::from(format!("page-sec-{id}"))).pt_3().flex().items_center().gap_1().text_size(px(11.)).text_color(c("faint"))
+        out.push(div().id(SharedString::from(format!("page-sec-{id}"))).pt_3().flex().items_center().gap_1().text_size(crate::scale::tpx(11.)).text_color(c("faint"))
             .children(fold.then(|| crate::ui::ic(light, if open { "chevron-down" } else { "chevron-right" }, 14., "dim"))).child(trs(&title).to_uppercase())
             .when(fold, |d| d.cursor_pointer().on_click(cx.listener(move |this, _, _, cx| { this.go("side-section", toggle.clone(), cx); }))).into_any_element());
         for t in &rows {
@@ -185,11 +185,11 @@ pub fn page_lists(cx: &mut Context<Backplane>, light: bool, data: &Value, pid: &
             if t["off"] != true { ctl.push(CtlEntry { id: format!("page-thread:{raw}"), label: string(t, "title"), ctl: Ctl::Select(id.clone()) }); }
             let off = t["off"] == true;
             if t["kind"] == "swarm" { out.extend(crate::screens::swarm::side_rows(cx, light, &serde_json::json!({"swarms": [t]}), "", ctl)); continue }
-            out.push(crate::ui::with_rect(div().id(SharedString::from(format!("page-thread-{raw}"))), { let r = raw.clone(); move || format!("page-thread:{r}") }).flex().items_center().gap_2().px_2().h(px(30.)).border_b_1().border_color(c("line")).when(off, |d| d.opacity(0.55))
+            out.push(crate::ui::with_rect(div().id(SharedString::from(format!("page-thread-{raw}"))), { let r = raw.clone(); move || format!("page-thread:{r}") }).flex().items_center().gap_2().px_2().h(crate::scale::tpx(30.)).border_b_1().border_color(c("line")).when(off, |d| d.opacity(0.55))
                 .when(!off, |d| d.cursor_pointer().hover(|s| s.bg(c("raise"))))
                 .child(super::siderow::dot(light, t)).child(div().flex_1().overflow_hidden().whitespace_nowrap().child(string(t, "title")))
                 .children(crate::screens::badge::machine_mark(light, &t["mark"], false, &id))
-                .child(div().text_size(px(11.)).text_color(c("faint")).child(if string(t, "say").is_empty() { trs(&string(t, "ago")) } else { trs(&string(t, "say")) }))
+                .child(div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(if string(t, "say").is_empty() { trs(&string(t, "ago")) } else { trs(&string(t, "say")) }))
                 .when(!off, |d| d.on_click(cx.listener(move |this, _, window, cx| this.select(id.clone(), window, cx)))).into_any_element());
         }
     }

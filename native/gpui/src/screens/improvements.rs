@@ -715,27 +715,27 @@ fn all_controls(imp: &Imp) -> Vec<(String, String)> {
 fn button(cx: &mut Context<Backplane>, light: bool, id: &str, label: &str, enabled: bool, primary: bool, on: bool) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let key = id.to_string();
-    let d = probe(div().id(SharedString::from(format!("imp-{id}"))), id).px_3().py_1().text_size(px(12.)).border_1();
+    let d = probe(div().id(SharedString::from(format!("imp-{id}"))), id).px_3().py_1().text_size(crate::scale::tpx(12.)).border_1();
     let d = if primary { d.bg(c("accent")).text_color(c("on-accent")).border_color(c("accent")) } else if on { d.bg(c("accent")).text_color(c("on-accent")).border_color(c("accent")).font_weight(FontWeight::SEMIBOLD) } else { d.bg(c("raise")).border_color(c("line")).text_color(c("text")) };
     if enabled { d.cursor_pointer().hover(|s| s.opacity(0.85)).child(label.to_string()).on_click(cx.listener(move |this, _, _, cx| act(this, &key, cx))).into_any_element() } else { d.opacity(0.45).child(label.to_string()).into_any_element() }
 }
 fn check(cx: &mut Context<Backplane>, light: bool, id: &str, label: &str, on: bool, enabled: bool) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let key = id.to_string();
-    let d = probe(div().id(SharedString::from(format!("imp-{id}"))), id).flex().gap_2().items_start().text_size(px(12.)).child(div().flex_shrink_0().text_color(c(if on { "accent" } else { "dim" })).child(if on { "[x]" } else { "[ ]" })).child(div().flex_1().child(label.to_string()));
+    let d = probe(div().id(SharedString::from(format!("imp-{id}"))), id).flex().gap_2().items_start().text_size(crate::scale::tpx(12.)).child(div().flex_shrink_0().text_color(c(if on { "accent" } else { "dim" })).child(if on { "[x]" } else { "[ ]" })).child(div().flex_1().child(label.to_string()));
     if enabled { d.cursor_pointer().on_click(cx.listener(move |this, _, _, cx| act(this, &key, cx))).into_any_element() } else { d.opacity(0.55).into_any_element() }
 }
 fn field(light: bool, label: &str, input: &Entity<Composer>) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
-    div().flex().flex_col().flex_shrink_0().gap_1().child(div().text_size(px(12.)).text_color(c("dim")).child(label.to_string())).child(div().w_full().px_2().py_1().border_1().border_color(c("line")).bg(c("view")).child(input.clone())).into_any_element()
+    div().flex().flex_col().flex_shrink_0().gap_1().child(div().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(label.to_string())).child(div().w_full().px_2().py_1().border_1().border_color(c("line")).bg(c("view")).child(input.clone())).into_any_element()
 }
-fn para(light: bool, text: &str) -> AnyElement { div().flex_shrink_0().text_size(px(11.)).text_color(theme::color(light, "dim")).child(text.to_string()).into_any_element() }
+fn para(light: bool, text: &str) -> AnyElement { div().flex_shrink_0().text_size(crate::scale::tpx(11.)).text_color(theme::color(light, "dim")).child(text.to_string()).into_any_element() }
 
 /// The recording indicator: visible whenever a recording runs, whatever else is on screen.
 pub fn indicator(cx: &mut Context<Backplane>, light: bool, imp: &Imp) -> Option<AnyElement> {
     imp.rec.as_ref()?;
     let c = |n: &str| theme::color(light, n);
-    Some(div().absolute().top_0().left_0().right_0().h(px(32.)).bg(c("bad")).text_color(c("on-accent")).flex().items_center().gap_3().px_3().child(div().flex_1().child(imp.rec_text.clone()))
+    Some(div().absolute().top_0().left_0().right_0().h(crate::scale::tpx(32.)).bg(c("bad")).text_color(c("on-accent")).flex().items_center().gap_3().px_3().child(div().flex_1().child(imp.rec_text.clone()))
         .child(button(cx, light, "rec-stop", &trs("Stop recording"), true, false, false)).child(button(cx, light, "rec-cancel", &trs("Cancel recording"), true, false, false)).into_any_element())
 }
 
@@ -756,9 +756,9 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, imp: &Imp) -> Option<AnyEl
         col = col.child(check(cx, light, "chk-diag", &trs("Include sanitized diagnostics in the public issue"), d.inc_diag, !locked));
         col = col.child(check(cx, light, "chk-details", &trs("Include additional details I enter"), d.inc_details, !locked));
         if d.inc_details { col = col.child(field(light, &trs("Additional public details"), &ins.details)); }
-        if d.inc_diag && !imp.diag.is_empty() { col = col.child(div().flex_shrink_0().h(px(120.)).overflow_hidden().p_2().border_1().border_color(c("line")).bg(c("view")).text_size(px(11.)).child(imp.diag.clone())); }
+        if d.inc_diag && !imp.diag.is_empty() { col = col.child(div().flex_shrink_0().h(px(120.)).overflow_hidden().p_2().border_1().border_color(c("line")).bg(c("view")).text_size(crate::scale::tpx(11.)).child(imp.diag.clone())); }
         let writers: Vec<&Project> = imp.projects.iter().filter(|p| p.id != "scratch" && !p.root.is_empty()).collect();
-        col = col.child(div().flex().flex_col().gap_1().child(div().text_size(px(12.)).text_color(c("dim")).child(trs("Report agent project"))).child(div().flex().flex_wrap().gap_2().children(writers.iter().map(|p| button(cx, light, &format!("wproj:{}", p.id), &p.title, !locked, false, p.id == d.writer_project)).collect::<Vec<_>>())));
+        col = col.child(div().flex().flex_col().gap_1().child(div().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(trs("Report agent project"))).child(div().flex().flex_wrap().gap_2().children(writers.iter().map(|p| button(cx, light, &format!("wproj:{}", p.id), &p.title, !locked, false, p.id == d.writer_project)).collect::<Vec<_>>())));
         col = col.child(div().flex().flex_wrap().gap_2().child(button(cx, light, "write", &trs("Write report with agent"), !locked && !d.writer.as_ref().map_or(false, |w| w.started), false, false))
             .children(d.writer.as_ref().map(|_| button(cx, light, "load", &trs("Load agent report"), !locked, false, false))).children(d.writer.as_ref().map(|_| button(cx, light, "open-writer", &trs("Open report-writing thread"), !locked, false, false)))
             .child(button(cx, light, "template", &trs("Use report template"), !locked, false, false)));
@@ -784,20 +784,20 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, imp: &Imp) -> Option<AnyEl
         None => {
             col = col.child(div().flex().flex_col().flex_shrink_0().gap_2().child(button(cx, light, "record", &trs("Record screen"), !locked && d.thread.is_empty(), false, false))
                 .child(para(light, &trs("Video of this window only, no audio. Up to 2 minutes and 9 MiB. Private copies expire after 24 hours. A recording may show private messages, credentials or other private information; it cannot be redacted.")))
-                .children((!d.recording.is_empty()).then(|| div().flex().flex_col().gap_2().child(div().text_size(px(12.)).child(tf("gpui.imp.rec.saved", &[("secs", (d.recording_ms / 1000).into())])))
+                .children((!d.recording.is_empty()).then(|| div().flex().flex_col().gap_2().child(div().text_size(crate::scale::tpx(12.)).child(tf("gpui.imp.rec.saved", &[("secs", (d.recording_ms / 1000).into())])))
                     .child(div().flex().gap_2().child(button(cx, light, "rec-play", &trs("Play recording"), true, false, false)).child(button(cx, light, "rec-discard", &trs("Discard recording"), !locked && d.thread.is_empty(), false, false)))
                     .child(check(cx, light, "chk-rec", &if public { trs("Select this recording for the public report and agent. Play it first.") } else { trs("Attach this recording to the local agent thread. Play it first.") }, d.inc_rec, !locked && d.rec_reviewed)))));
         }
     }
-    col = col.child(div().text_size(px(12.)).text_color(c("dim")).child(if public { trs("OS family and app release are included. Images and recordings stay local until you send them to the agent or attach them yourself on GitHub. Ctrl+Enter reviews the issue.") } else if d.image.is_empty() && !(d.inc_rec && !d.recording.is_empty()) { trs("Choose an image or preview and select a recording before sending.") } else if d.project.is_empty() { trs("Choose a project before sending.") } else if is_far(&d.project) { trs("The thread runs on the other machine. Images and recordings stay on this computer. Ctrl+Enter sends this request.") } else { trs("Ctrl+Enter sends this request.") }));
+    col = col.child(div().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(if public { trs("OS family and app release are included. Images and recordings stay local until you send them to the agent or attach them yourself on GitHub. Ctrl+Enter reviews the issue.") } else if d.image.is_empty() && !(d.inc_rec && !d.recording.is_empty()) { trs("Choose an image or preview and select a recording before sending.") } else if d.project.is_empty() { trs("Choose a project before sending.") } else if is_far(&d.project) { trs("The thread runs on the other machine. Images and recordings stay on this computer. Ctrl+Enter sends this request.") } else { trs("Ctrl+Enter sends this request.") }));
     // the note and the primary button stay pinned below the scrolling body, visible however small the window
     let foot = div().flex_shrink_0().px_4().py_2().border_t_1().border_color(c("line")).flex().items_center().gap_3()
-        .child(div().id("imp-note").flex_1().min_w_0().text_size(px(12.)).child(note_text(&imp.note)))
+        .child(div().id("imp-note").flex_1().min_w_0().text_size(crate::scale::tpx(12.)).child(note_text(&imp.note)))
         .child(div().flex_shrink_0().child(button(cx, light, "primary", &trs(d.send_label(imp.busy)), !imp.busy, true, false)));
     // a floating window above the app: centred, bordered, shadowed, with the page dimmed behind it (a click on the dim leaves the panel as it is)
     Some(div().id("improvements-float").absolute().inset_0().occlude().bg(gpui::hsla(0., 0., 0., 0.35)).flex().items_center().justify_center().p_6()
       .child(div().id("improvements").occlude().w(px(760.)).max_w_full().max_h_full().h(px(760.)).overflow_hidden().bg(c("bg")).border_1().border_color(c("line")).shadow_lg().flex().flex_col()
-        /* i18n-ok: a shortcut */ .child(div().h(px(36.)).flex_shrink_0().px_3().flex().items_center().gap_3().border_b_1().border_color(c("line")).child(div().flex_1().font_weight(FontWeight::BOLD).child(trs("Improvements"))).child(div().text_color(c("faint")).text_size(px(11.)).child("Ctrl+Alt+I"))
+        /* i18n-ok: a shortcut */ .child(div().h(crate::scale::tpx(36.)).flex_shrink_0().px_3().flex().items_center().gap_3().border_b_1().border_color(c("line")).child(div().flex_1().font_weight(FontWeight::BOLD).child(trs("Improvements"))).child(div().text_color(c("faint")).text_size(crate::scale::tpx(11.)).child("Ctrl+Alt+I"))
             .child(button(cx, light, "close", &trs("Close"), true, false, false)))
         .child(div().id("improvements-body").flex_1().min_h_0().overflow_y_scroll().flex().justify_center().items_start().child(col))
         .child(foot)).into_any_element())

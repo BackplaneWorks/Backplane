@@ -303,7 +303,7 @@ fn upload(this: &mut Backplane, paths: Vec<PathBuf>, dir: &str, cx: &mut Context
 
 fn small_btn(cx: &mut Context<Backplane>, light: bool, id: &str, icon: &'static str, label: &str, d: Do) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
-    viewer::tall(div().id(SharedString::from(id.to_string()))).gap_1().px_2().text_size(px(12.)).cursor_pointer().border_1().border_color(c("line")).bg(c("raise")).hover(|s| s.bg(c("panel")))
+    viewer::tall(div().id(SharedString::from(id.to_string()))).gap_1().px_2().text_size(crate::scale::tpx(12.)).cursor_pointer().border_1().border_color(c("line")).bg(c("raise")).hover(|s| s.bg(c("panel")))
         .child(crate::art::icon(icon, 13., c("text"))).child(label.to_string()) // (the label comes in the language in force)
         .on_click(cx.listener(move |this, _, w, cx| act(this, d.clone(), Some(w), cx))).into_any_element()
 }
@@ -317,7 +317,8 @@ pub fn files_page(cx: &mut Context<Backplane>, light: bool, files: &Value, ui: &
     let trail = viewer::crumbs(files);
     let focus = ui.focus.clone();
     // bar: Up, breadcrumbs, then the actions
-    let mut crumbs = div().flex().flex_wrap().items_center().flex_1().min_w_0().text_size(px(12.));
+    // the crumbs keep room for a name before the buttons wrap to a line of their own (bar_wrap), and never run under them
+    let mut crumbs = div().flex().flex_wrap().items_center().flex_1().min_w(crate::scale::tpx(96.)).overflow_hidden().text_size(crate::scale::tpx(12.));
     for (i, cr) in trail.iter().enumerate() {
         let (a, v) = (cr.action.clone(), cr.value.clone());
         crumbs = crumbs.child(div().id(SharedString::from(format!("crumb-{i}"))).px_1().cursor_pointer().text_color(c(if i + 1 == trail.len() { "text" } else { "accent" })).hover(|s| s.bg(c("raise"))).child(cr.label.clone()) // (a folder's name)
@@ -342,24 +343,24 @@ pub fn files_page(cx: &mut Context<Backplane>, light: bool, files: &Value, ui: &
     col = col.child(bar);
     // filter + status line
     let filt = div().flex().items_center().gap_2().px_3().py_1().border_b_1().border_color(c("line")).child(crate::art::icon("search", 13., c("dim")))
-        .child(div().flex_1().min_w_0().px_2().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).children(ui.filter.clone()))
-        .child(div().text_size(px(11.)).text_color(c("dim")).child(if q.trim().is_empty() { tf("gpui.b.files.items", &[("n", rows.len().into())]) } else { tf("gpui.b.files.of", &[("shown", vis.len().into()), ("n", rows.len().into())]) }));
+        .child(div().flex_1().min_w_0().px_2().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(crate::scale::tpx(12.)).children(ui.filter.clone()))
+        .child(div().text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(if q.trim().is_empty() { tf("gpui.b.files.items", &[("n", rows.len().into())]) } else { tf("gpui.b.files.of", &[("shown", vis.len().into()), ("n", rows.len().into())]) }));
     col = col.child(filt);
     match &ui.mode {
         Mode::Rename(_) | Mode::NewFolder => {
-            col = col.child(div().flex().items_center().gap_2().px_3().py_1().border_b_1().border_color(c("line")).bg(c("raise")).text_size(px(12.))
+            col = col.child(div().flex().items_center().gap_2().px_3().py_1().border_b_1().border_color(c("line")).bg(c("raise")).text_size(crate::scale::tpx(12.))
                 .child(if ui.mode == Mode::NewFolder { trs("New folder") } else { trs("Rename to") })
                 .child(div().flex_1().min_w_0().px_2().py_1().border_1().border_color(c("accent")).bg(c("view")).children(ui.name.clone()))
                 .child(small_btn(cx, light, "fm-name-ok", "plus", &trs("OK"), Do::Key("name-ok".into())))
                 .child(small_btn(cx, light, "fm-name-cancel", "x", &trs("Cancel"), Do::Cancel)));
         }
         Mode::Delete(p) => {
-            col = col.child(div().flex().items_center().gap_2().px_3().py_1().border_b_1().border_color(c("line")).bg(c("raise")).text_size(px(12.)).child(div().flex_1().min_w_0().child(tf("gpui.b.files.delete.ask", &[("path", p.into())])))
+            col = col.child(div().flex().items_center().gap_2().px_3().py_1().border_b_1().border_color(c("line")).bg(c("raise")).text_size(crate::scale::tpx(12.)).child(div().flex_1().min_w_0().child(tf("gpui.b.files.delete.ask", &[("path", p.into())])))
                 .child(small_btn(cx, light, "fm-del-yes", "trash", &trs("Delete"), Do::ConfirmDelete)).child(small_btn(cx, light, "fm-del-no", "x", &trs("Keep"), Do::Cancel)));
         }
         Mode::Browse => {}
     }
-    if !ui.status.is_empty() { col = col.child(div().px_3().py_1().text_size(px(11.)).text_color(c("dim")).border_b_1().border_color(c("line")).child(ui.status.clone())); }
+    if !ui.status.is_empty() { col = col.child(div().px_3().py_1().text_size(crate::scale::tpx(11.)).text_color(c("dim")).border_b_1().border_color(c("line")).child(ui.status.clone())); }
     // the rows: their own scroll pane
     let mut list = div().id("files-list").flex_1().min_h_0().overflow_y_scroll().track_scroll(&ui.scroll).flex().flex_col();
     for (n, &k) in vis.iter().take(MAX_ROWS).enumerate() {
@@ -370,7 +371,7 @@ pub fn files_page(cx: &mut Context<Backplane>, light: bool, files: &Value, ui: &
         list = list.child(div().id(SharedString::from(format!("file-{n}"))).flex().items_center().gap_3().px_3().py_1().cursor_pointer().hover(|s| s.bg(c("raise"))).when(on, |d| d.bg(c("raise")).border_l_2().border_color(c("accent")))
             .child(crate::art::icon(ic, 15., c(tok)))
             .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_color(c(if has_open || r.kind == "folder" { "text" } else { "dim" })).child(r.label.clone()))
-            .child(div().text_size(px(11.)).text_color(c("dim")).child(trs(&r.detail)))
+            .child(div().text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(trs(&r.detail)))
             .on_click(cx.listener(move |this, e: &ClickEvent, w, cx| { if e.click_count() >= 2 || this.screens.files.sel == Some(a_open) { act(this, Do::Open(a_open), Some(w), cx) } else { act(this, Do::Select(a_open), Some(w), cx) } }))
             .on_mouse_down(MouseButton::Right, cx.listener(move |this, e: &MouseDownEvent, w, cx| { this.screens.files.sel = Some(a_open); this.screens.files.menu = Some((a_open, e.position)); if let Some(f) = &this.screens.files.focus { w.focus(f); } cx.notify(); })));
     }
@@ -381,7 +382,7 @@ pub fn files_page(cx: &mut Context<Backplane>, light: bool, files: &Value, ui: &
     if let Some((i, pos)) = ui.menu {
         if let Some(r) = vis.get(i).and_then(|&k| rows.get(k)) {
             let items = menu_items(r);
-            let menu = div().id("fm-menu").occlude().min_w(px(150.)).py_1().border_1().border_color(c("line")).bg(c("view")).shadow_md().text_size(px(12.))
+            let menu = div().id("fm-menu").occlude().min_w(px(150.)).py_1().border_1().border_color(c("line")).bg(c("view")).shadow_md().text_size(crate::scale::tpx(12.))
                 .on_mouse_down_out(cx.listener(|this, _, _, cx| { this.screens.files.menu = None; cx.notify(); }))
                 .children(items.into_iter().map(|(id, label)| div().id(SharedString::from(format!("fm-menu-{id}"))).px_3().py_1().cursor_pointer().hover(|s| s.bg(c("raise"))).text_color(c(if id == "delete" { "bad" } else { "text" })).child(trs(label))
                     .on_click(cx.listener(move |this, _, w, cx| { let d = match id { "open" => Do::Open(i), "download" => Do::Download(i), "rename" => Do::Rename(i), "copy" => Do::Copy(i), _ => Do::Delete(i) }; act(this, d, Some(w), cx) }))));
@@ -398,10 +399,10 @@ pub fn preview_page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, lig
     let url = viewer["file"]["url"].as_str().unwrap_or("").to_string();
     let mut bar = viewer::bar_wrap(light)
         .child(small_btn(cx, light, "fm-back", "chevron-left", &trs("Files"), Do::Back))
-        .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_size(px(12.)).child(name.clone()));
+        .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_size(crate::scale::tpx(12.)).child(name.clone()));
     if open == "pdf" && ui.pdf.pages > 0 {
         let (p, n) = (ui.pdf.page, ui.pdf.pages);
-        bar = bar.child(div().text_size(px(11.)).text_color(c("dim")).child(format!("{p} / {n}")))
+        bar = bar.child(div().text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(format!("{p} / {n}")))
             .child(div().id("pdf-prev").px_2().cursor_pointer().when(p <= 1, |d| d.opacity(0.35)).child(crate::art::icon("chevron-left", 14., c("text"))).on_click(cx.listener(move |this, _, _, cx| { if p > 1 { ask_pdf(this, p - 1); cx.notify(); } })))
             .child(div().id("pdf-next").px_2().cursor_pointer().when(p >= n, |d| d.opacity(0.35)).child(crate::art::icon("chevron-right", 14., c("text"))).on_click(cx.listener(move |this, _, _, cx| { if p < n { ask_pdf(this, p + 1); cx.notify(); } })));
     }
@@ -423,7 +424,7 @@ pub fn preview_page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, lig
             let blocks: Vec<Value> = viewer["file"]["blocks"].as_array().cloned().unwrap_or_default();
             let parsed = super::md::parse(&blocks);
             let doc = super::timeline::Doc { imgs: images, target, width: (f32::from(ui.preview_scroll.bounds().size.width) - 24.).max(240.) };
-            div().flex().flex_col().gap_3().p_3().text_size(px(14.)).children(super::timeline::doc_blocks(cx, reg, light, &parsed, "file", &doc)).into_any_element()
+            div().flex().flex_col().gap_3().p_3().text_size(crate::scale::tpx(14.)).children(super::timeline::doc_blocks(cx, reg, light, &parsed, "file", &doc)).into_any_element()
         }
         _ => match ui.texts.get(&url) {
             Some(Text::Ready(t)) => text_block(light, &name, t),
@@ -438,7 +439,7 @@ pub fn preview_page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, lig
 fn text_block(light: bool, name: &str, t: &str) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let md = name.to_lowercase().ends_with(".md") || name.to_lowercase().ends_with(".markdown");
-    div().flex().flex_col().p_3().text_size(px(12.)).children(t.lines().take(5000).map(|l| {
+    div().flex().flex_col().p_3().text_size(crate::scale::tpx(12.)).children(t.lines().take(5000).map(|l| {
         let h = md && l.starts_with('#');
         let mut d = div().font(crate::art::mono_font()).whitespace_nowrap().min_h(px(16.));
         if h { d = d.font_weight(FontWeight::BOLD).text_color(c("accent")); }

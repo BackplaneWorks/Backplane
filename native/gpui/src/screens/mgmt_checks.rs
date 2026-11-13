@@ -97,14 +97,14 @@ fn item_el(app: &mut Backplane, i: usize, cx: &mut Context<Backplane>) -> AnyEle
     let d = json!({"sources": srcs});
     let _ = app;
     match it {
-        None => div().w_full().h(px(24.)).into_any_element(),
-        Some(Item::Msg(k)) => div().w_full().h(px(24.)).px_3().flex().items_center().text_color(c("faint")).child(tf(k, &[])).into_any_element(),
+        None => div().w_full().h(crate::scale::tpx(24.)).into_any_element(),
+        Some(Item::Msg(k)) => div().w_full().h(crate::scale::tpx(24.)).px_3().flex().items_center().text_color(c("faint")).child(tf(k, &[])).into_any_element(),
         Some(Item::Head(g)) => {
             let ex = g["excluded"] == true; let n = g["n"].as_u64().unwrap_or(0);
             let src = source_label(&d, s(&g, "source")); let jd = judged(&d, s(&g, "source"));
-            div().w_full().h(px(24.)).flex().items_center().gap_2().px_2().border_b_1().border_color(c("line")).bg(c("panel")).text_size(px(11.))
+            div().w_full().h(crate::scale::tpx(24.)).flex().items_center().gap_2().px_2().border_b_1().border_color(c("line")).bg(c("panel")).text_size(crate::scale::tpx(11.))
                 .child(div().flex_shrink_0().text_color(c("faint")).child(src))
-                .when(jd, |x| x.child(div().flex_shrink_0().px(px(3.)).text_size(px(10.)).border_1().border_color(c("warn")).text_color(c("warn")).child(tf("gpui.mgmt.checks.judged", &[]))))
+                .when(jd, |x| x.child(div().flex_shrink_0().px(px(3.)).text_size(crate::scale::tpx(10.)).border_1().border_color(c("warn")).text_color(c("warn")).child(tf("gpui.mgmt.checks.judged", &[]))))
                 .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_color(c(if ex { "faint" } else { "dim" }))
                     .child(if ex { format!("{} · {}", rule_label(s(&g, "rule")), tf("gpui.mgmt.checks.excluded", &[])) } else { rule_label(s(&g, "rule")) })) // i18n-ok: a join
                 .child(div().flex_shrink_0().text_color(c(if ex { "faint" } else { tone(s(&g, "severity")) })).child(n.to_string()))
@@ -114,21 +114,21 @@ fn item_el(app: &mut Backplane, i: usize, cx: &mut Context<Backplane>) -> AnyEle
             let k = group_key(&g);
             let label = if left == 0 { tf("gpui.mgmt.checks.fewer", &[]) } else { tf("gpui.mgmt.checks.more", &[("n", left.into())]) };
             crate::ui::with_rect(div().id(SharedString::from(format!("checks-more-{k}"))), { let k = k.clone(); move || format!("mgmt:checks:more:{k}") })
-                .w_full().h(px(24.)).pl(px(14.)).flex().items_center().text_size(px(11.)).text_color(c("dim")).cursor_pointer().hover(|x| x.text_color(c("text")))
+                .w_full().h(crate::scale::tpx(24.)).pl(px(14.)).flex().items_center().text_size(crate::scale::tpx(11.)).text_color(c("dim")).cursor_pointer().hover(|x| x.text_color(c("text")))
                 .child(label).on_click(cx.listener(move |this, _, _, cx| open_group(this, &g, cx))).into_any_element()
         }
         Some(Item::Row(f)) => {
             let id = s(&f, "id").to_string(); let on = sel.as_deref() == Some(id.as_str()); let ex = s(&f, "severity") == "excluded";
             crate::ui::with_rect(div().id(SharedString::from(format!("checks-row-{id}"))), { let id = id.clone(); move || format!("mgmt:checks:row:{id}") })
-                .group("checks-row").w_full().flex().items_center().gap_2().pl(px(14.)).pr_2().h(px(24.)).border_b_1().border_color(c("line")).cursor_pointer()
+                .group("checks-row").w_full().flex().items_center().gap_2().pl(px(14.)).pr_2().h(crate::scale::tpx(24.)).border_b_1().border_color(c("line")).cursor_pointer()
                 .relative().when(on, |x| x.bg(c("raise")).child(div().absolute().left_0().top_0().bottom_0().w(px(2.)).bg(c("accent")))).hover(|x| x.bg(c("panel"))).when(ex, |x| x.text_color(c("faint")))
                 .child(div().flex_shrink_0().size(px(7.)).bg(c(tone(s(&f, "severity")))))
                 .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(s(&f, "title").to_string()))
-                .when(judged(&d, s(&f, "source")), |x| x.child(div().flex_shrink_0().px(px(3.)).text_size(px(10.)).border_1().border_color(c("warn")).text_color(c("warn")).child(tf("gpui.mgmt.checks.judged", &[]))))
+                .when(judged(&d, s(&f, "source")), |x| x.child(div().flex_shrink_0().px(px(3.)).text_size(crate::scale::tpx(10.)).border_1().border_color(c("warn")).text_color(c("warn")).child(tf("gpui.mgmt.checks.judged", &[]))))
                 .child(div().flex_shrink_0().max_w(relative(0.4)).overflow_hidden().whitespace_nowrap().text_ellipsis().text_color(c(if ex { "faint" } else { "dim" })).child(s(&f, "names").to_string()))
                 .child(crate::ui::with_rect(div().id(SharedString::from(format!("checks-fix-{id}"))), { let id = id.clone(); move || format!("mgmt:checks:fix:{id}") })
                     // over the row's right end, not beside it: hidden, it takes no room from the title
-                    .absolute().right(px(6.)).top(px(3.)).px(px(5.)).border_1().border_color(c("line")).bg(c("raise")).text_size(px(11.)).text_color(c("dim")).invisible().group_hover("checks-row", |x| x.visible()).when(on, |x| x.visible())
+                    .absolute().right(px(6.)).top(px(3.)).px(px(5.)).border_1().border_color(c("line")).bg(c("raise")).text_size(crate::scale::tpx(11.)).text_color(c("dim")).invisible().group_hover("checks-row", |x| x.visible()).when(on, |x| x.visible())
                     .hover(|x| x.text_color(c("text")).bg(c("bg"))).child(tf(if s(&f, "fix_kind") == "reexport" { "gpui.mgmt.checks.reexport" } else { "gpui.mgmt.checks.fix" }, &[]))
                     .on_click({ let id = id.clone(); cx.listener(move |this, _, _, cx| { cx.stop_propagation(); fix(this, &id, cx) }) }))
                 .on_click({ let id = id.clone(); cx.listener(move |this, _, window, cx| { if let Some(h) = ui(|u| u.focus.clone()) { window.focus(&h); } select(this, &id, cx) }) })
@@ -309,7 +309,7 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
         let h = cx.focus_handle();
         ui(|u| { u.filter = Some(f); u.focus = Some(h); });
     }
-    if d.is_null() { return div().p_3().text_size(px(12.)).text_color(c("faint")).child(tf("gpui.mgmt.checks.reading", &[])).into_any_element() }
+    if d.is_null() { return div().p_3().text_size(crate::scale::tpx(12.)).text_color(c("faint")).child(tf("gpui.mgmt.checks.reading", &[])).into_any_element() }
     sync(d);
     let q = filter_text(cx);
     let src_now = ui(|u| u.src.clone());
@@ -321,7 +321,7 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
     let (more, open) = ui(|u| (u.more.clone(), u.open.clone()));
 
     // the top row: each check's state, Run, the severity filter and the words
-    let mut top = div().flex_shrink_0().min_h(px(super::head::ROW_H)).flex().items_center().gap_2().px_2().border_b_1().border_color(c("rule")).text_size(px(11.));
+    let mut top = div().flex_shrink_0().min_h(crate::scale::tpx(super::head::ROW_H)).flex().items_center().gap_2().px_2().border_b_1().border_color(c("rule")).text_size(crate::scale::tpx(11.));
     for (name, k) in [("DRC", "drc"), ("ERC", "erc")] { // i18n-ok: the checks' names
         let (t, col) = state_text(name, &d[k]);
         if !t.is_empty() { top = top.child(div().id(SharedString::from(format!("checks-state-{k}"))).flex_shrink_0().max_w(px(260.)).overflow_hidden().whitespace_nowrap().text_ellipsis().text_color(c(col)).child(t)); }
@@ -340,7 +340,7 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
     // the sources, when there are more than DRC and ERC: one list, narrowed to one of them by a press
     let order: Vec<String> = d["order"].as_array().into_iter().flatten().filter_map(|x| x.as_str().map(str::to_string)).collect();
     let srcs = (!order.is_empty()).then(|| {
-        let mut row = div().flex_shrink_0().flex().flex_wrap().items_center().gap_1().px_2().py(px(3.)).border_b_1().border_color(c("line")).text_size(px(11.));
+        let mut row = div().flex_shrink_0().flex().flex_wrap().items_center().gap_1().px_2().py(px(3.)).border_b_1().border_color(c("line")).text_size(crate::scale::tpx(11.));
         let all: Vec<(String, String)> = std::iter::once((String::new(), tf("gpui.mgmt.checks.allsources", &[]))).chain(["drc", "erc"].iter().map(|x| (x.to_string(), source_label(d, x)))).chain(order.iter().map(|x| (x.clone(), source_label(d, x)))).collect();
         for (k, label) in all {
             let on = src_now == k; let stale = d["sources"][&k]["state"] == "stale"; let kk = k.clone();
@@ -352,7 +352,7 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
         }
         row
     });
-    top = top.child(sevs).child(div().flex_1().min_w(px(80.)).px_2().py(px(2.)).border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).children(ui(|u| u.filter.clone())));
+    top = top.child(sevs).child(div().flex_1().min_w(px(80.)).px_2().py(px(2.)).border_1().border_color(c("line")).bg(c("panel")).text_size(crate::scale::tpx(12.)).children(ui(|u| u.filter.clone())));
 
     // the list: groups (a heading, its rows, "n more"), or the search's rows
     // the list: only the rows in view are built (a board's hundreds of findings scroll at the frame rate); every item is one row high
@@ -376,11 +376,11 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
     }
     ui(|u| { u.items = its.clone(); u.light = light; u.sources = d["sources"].clone(); });
     let list = uniform_list("checks-rows", n, cx.processor(|this, range: std::ops::Range<usize>, _w, cx| range.map(|i| item_el(this, i, cx)).collect::<Vec<_>>()))
-        .track_scroll(scroll.clone()).flex_1().min_h_0().text_size(px(12.));
+        .track_scroll(scroll.clone()).flex_1().min_h_0().text_size(crate::scale::tpx(12.));
     // what these results leave out, said plainly: the background runs skip the library checks, so the counts can differ from KiCad's own DRC
     let left_out = ["drc", "erc"].iter().any(|k| !d[*k].is_null() && !s(&d[*k], "note").is_empty());
     let full_ran = ["drc", "erc"].iter().any(|k| d[*k]["full"] == true);
-    let foot = (left_out || full_ran).then(|| div().flex_shrink_0().flex().items_center().gap_2().px_2().py(px(4.)).border_t_1().border_color(c("line")).text_size(px(11.)).text_color(c("faint"))
+    let foot = (left_out || full_ran).then(|| div().flex_shrink_0().flex().items_center().gap_2().px_2().py(px(4.)).border_t_1().border_color(c("line")).text_size(crate::scale::tpx(11.)).text_color(c("faint"))
         .child(div().flex_1().min_w_0().child(if left_out { tf("gpui.mgmt.checks.library", &[]) } else { tf("gpui.mgmt.checks.withlib", &[]) }))
         .when(left_out, |x| x.child(crate::ui::with_rect(div().id("checks-full"), || "mgmt:checks:full".into()).flex_shrink_0().px_2().border_1().border_color(c("line")).text_color(c("dim")).cursor_pointer()
             .hover(|x| x.text_color(c("text")).bg(c("panel"))).child(tf("gpui.mgmt.checks.fullrun", &[])).on_click(cx.listener(|this, _, _, cx| run_full(this, cx))))));
@@ -437,7 +437,7 @@ pub fn same_project(pro: &str, p: &str) -> bool {
 /// The chip as the editor's row draws it; its press opens the Checks panel (`open_panel`).
 pub fn chip_el(text: &str, tone: &'static str, light: bool) -> Stateful<Div> {
     let c = |n: &str| theme::color(light, n);
-    crate::ui::with_rect(div().id("kicad-checks-chip"), || "kicad:checks-chip".into()).ml_2().flex_shrink_0().px(px(6.)).text_size(px(11.)).border_1().border_color(c("line")).cursor_pointer()
+    crate::ui::with_rect(div().id("kicad-checks-chip"), || "kicad:checks-chip".into()).ml_2().flex_shrink_0().px(px(6.)).text_size(crate::scale::tpx(11.)).border_1().border_color(c("line")).cursor_pointer()
         .text_color(c(if tone == "faint" { "dim" } else { tone })).hover(|x| x.bg(c("raise"))).child(text.to_string())
 }
 /// The chip pressed: the Checks panel opens (left open when it already is).

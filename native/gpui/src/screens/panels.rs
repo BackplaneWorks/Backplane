@@ -22,7 +22,7 @@ pub fn subs_is_open(p: &Panels, thread: &Value) -> bool {
 
 fn cell(light: bool, id: &'static str, label: String, detail: String, open: bool) -> Stateful<Div> {
     let c = |n: &str| theme::color(light, n);
-    div().id(id).px_3().h_full().flex().items_center().gap_2().text_size(px(11.)).cursor_pointer().hover(|s| s.bg(c("raise"))).when(open, |d| d.bg(c("raise")))
+    div().id(id).px_3().h_full().flex().items_center().gap_2().text_size(crate::scale::tpx(11.)).cursor_pointer().hover(|s| s.bg(c("raise"))).when(open, |d| d.bg(c("raise")))
         .child(div().text_color(c("faint")).child(trs(&label))).child(trs(&detail)).child(crate::art::icon(if open { "chevron-down" } else { "chevron-right" }, 12., c("faint")))
 }
 
@@ -58,9 +58,9 @@ pub fn dock(cx: &mut Context<Backplane>, light: bool, fields: &std::collections:
     let c = |n: &str| theme::color(light, n);
     let (to, su) = (todos_is_open(p, thread), subs_is_open(p, thread));
     if !to && !su { return None }
-    let mut col = div().id("panels-dock").flex_shrink_0().max_h(px(300.)).overflow_y_scroll().flex().flex_col().border_b_1().border_color(c("line")).bg(c("panel")).px_3().py_1().text_size(px(12.));
+    let mut col = div().id("panels-dock").flex_shrink_0().max_h(px(300.)).overflow_y_scroll().flex().flex_col().border_b_1().border_color(c("line")).bg(c("panel")).px_3().py_1().text_size(crate::scale::tpx(12.));
     if to {
-        col = col.child(div().text_size(px(11.)).text_color(c("faint")).child(trs(&string(&thread["todos"], "head")).to_uppercase()));
+        col = col.child(div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(trs(&string(&thread["todos"], "head")).to_uppercase()));
         let to_rows: Vec<Value> = thread["todos"]["rows"].as_array().cloned().unwrap_or_default();
         for r in to_rows.iter() {
             let st = string(r, "status");
@@ -87,7 +87,7 @@ pub fn dock(cx: &mut Context<Backplane>, light: bool, fields: &std::collections:
             .child(div().id("todo-add").px_2().cursor_pointer().text_color(c("accent")).child(trs("Add")).on_click(cx.listener(|this, _, _, cx| crate::screens::settings::send_todo(this, cx)))));
     }
     if su {
-        col = col.child(div().mt_1().text_size(px(11.)).text_color(c("faint")).child(tf("gpui.panels.subagents", &[("word", trs(&string(&thread["subs"], "word")).to_uppercase().into())])));
+        col = col.child(div().mt_1().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(tf("gpui.panels.subagents", &[("word", trs(&string(&thread["subs"], "word")).to_uppercase().into())])));
         for r in thread["subs"]["rows"].as_array().into_iter().flatten() {
             let working = string(r, "state") == "working"; let doing = string(r, "doing"); let key = string(r, "key");
             let detail = r["detail"].is_object(); let open = detail && sub_is_open(p, thread, &key);
@@ -106,7 +106,7 @@ pub fn dock(cx: &mut Context<Backplane>, light: bool, fields: &std::collections:
             let head = head.when(!string(r, "act").is_empty(), |d| { let (act, value) = (string(r, "act"), string(r, "value"));
                 d.child(div().id(SharedString::from(format!("{act}-{value}"))).flex_shrink_0().px_1().cursor_pointer().text_color(c("accent")).child(trs(&string(r, "label")))
                     .on_click(cx.listener(move |this, _, _, cx| { cx.stop_propagation(); let _ = this.tx.try_send(Command::Action(act.clone(), value.clone())); cx.notify(); }))) });
-            let line = |t: String, col_: Rgba| div().w_full().pl(px(22.)).flex().text_size(px(11.)).text_color(col_).child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(t));
+            let line = |t: String, col_: Rgba| div().w_full().pl(px(22.)).flex().text_size(crate::scale::tpx(11.)).text_color(col_).child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(t));
             let mut row = div().w_full().flex().flex_col().py(px(2.)).child(head);
             if detail {
                 // what it is (harness and type, model, steps, tokens) and what it is doing now (Claude's word for it, else its newest step)
@@ -114,7 +114,7 @@ pub fn dock(cx: &mut Context<Backplane>, light: bool, fields: &std::collections:
                 let now = if !doing.is_empty() { doing.clone() } else { string(r, "last") }; if !now.is_empty() && !open { row = row.child(line(now, c("dim"))); }
             }
             if open {
-                let d = &r["detail"]; let label = |l: &'static str, t: String| div().w_full().pl(px(22.)).flex().gap_2().text_size(px(11.)).child(div().flex_shrink_0().w(px(64.)).text_color(c("faint")).child(trs(l))).child(div().flex_1().min_w_0().text_color(c("dim")).child(t));
+                let d = &r["detail"]; let label = |l: &'static str, t: String| div().w_full().pl(px(22.)).flex().gap_2().text_size(crate::scale::tpx(11.)).child(div().flex_shrink_0().w(crate::scale::tpx(64.)).text_color(c("faint")).child(trs(l))).child(div().flex_1().min_w_0().text_color(c("dim")).child(t));
                 /* i18n-ok: drawn through trs in cell or label */ row = row.child(label("Runs", string(d, "where")));
                 /* i18n-ok: drawn through trs in cell or label */ if !doing.is_empty() { row = row.child(label("Doing", doing.clone())); }
                 /* i18n-ok: drawn through trs in cell or label */ if !string(d, "ask").is_empty() { row = row.child(label("Asked", string(d, "ask"))); }

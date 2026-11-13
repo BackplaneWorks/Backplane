@@ -39,38 +39,38 @@ impl Backplane {
         let thread = &self.data["thread"];
         let v = shown(&self.screens.panels, thread).cloned().unwrap_or(Value::Null);
         let back = crate::ui::with_rect(div().id("sub-back"), || "ui:Back".into()).flex_shrink_0().flex().items_center().gap_1().px_2().py_1().border_1().border_color(c("line")).cursor_pointer().hover(|s| s.bg(c("raise")))
-            .text_size(px(12.)).text_color(c("text")).child(art::icon("chevron-left", 13., c("dim"))).child({ let t = string(thread, "title"); if t.is_empty() { crate::i18n::trs("Back to the thread") } else { crate::i18n::tf("gpui.subview.back", &[("title", t.into())]) } })
+            .text_size(crate::scale::tpx(12.)).text_color(c("text")).child(art::icon("chevron-left", 13., c("dim"))).child({ let t = string(thread, "title"); if t.is_empty() { crate::i18n::trs("Back to the thread") } else { crate::i18n::tf("gpui.subview.back", &[("title", t.into())]) } })
             .on_click(cx.listener(|this, _, _, cx| this.sub_back(cx)));
         let state = string(&v, "state"); let live = v["live"] == true;
         let took = string(&v, "took");
         let mut head = div().w_full().flex().items_center().gap_3().child(back)
             .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_color(c("text")).child(if v.is_null() { crate::i18n::trs("Subagent") } else { string(&v, "title") }))
-            .child(div().flex_shrink_0().text_size(px(12.)).text_color(if live { c("accent") } else { c("faint") }).child(if took.is_empty() { state.clone() } else { format!("{} · {took}", crate::i18n::trs(&state)) /* i18n-ok: a join of translated parts */ }));
+            .child(div().flex_shrink_0().text_size(crate::scale::tpx(12.)).text_color(if live { c("accent") } else { c("faint") }).child(if took.is_empty() { state.clone() } else { format!("{} · {took}", crate::i18n::trs(&state)) /* i18n-ok: a join of translated parts */ }));
         if !string(&v, "act").is_empty() {
             let (act, value) = (string(&v, "act"), string(&v, "value"));
-            /* i18n-ok: a control id, and a join of translated parts */ head = head.child(crate::ui::with_rect(div().id("sub-stop"), || "ui:Stop subagent".into()).flex_shrink_0().px_2().cursor_pointer().text_size(px(12.)).text_color(c("accent")).child(string(&v, "label"))
+            /* i18n-ok: a control id, and a join of translated parts */ head = head.child(crate::ui::with_rect(div().id("sub-stop"), || "ui:Stop subagent".into()).flex_shrink_0().px_2().cursor_pointer().text_size(crate::scale::tpx(12.)).text_color(c("accent")).child(string(&v, "label"))
                 .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action(act.clone(), value.clone())); cx.notify(); })));
         }
         let mut top = div().w_full().max_w(px(930.)).px_4().pt_3().pb_2().flex().flex_col().gap_1().child(head);
-        for l in [string(&v, "meta"), string(&v, "where")].into_iter().filter(|l| !l.is_empty()) { top = top.child(div().text_size(px(11.)).text_color(c("faint")).child(l)); }
+        for l in [string(&v, "meta"), string(&v, "where")].into_iter().filter(|l| !l.is_empty()) { top = top.child(div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(l)); }
         let mut col = div().w_full().max_w(px(930.)).px_4().pb_4().flex().flex_col().gap_1();
         if v.is_null() { col = col.child(div().py_2().text_color(c("dim")).child(crate::i18n::trs("Loading…"))); }
         let more = v["more"].as_u64().unwrap_or(0);
-        if more > 0 { col = col.child(div().py_1().text_size(px(11.)).text_color(c("faint")).child(crate::i18n::tf("gpui.subview.more", &[("more", more.into())]))); }
+        if more > 0 { col = col.child(div().py_1().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(crate::i18n::tf("gpui.subview.more", &[("more", more.into())]))); }
         let es: Vec<Value> = v["entries"].as_array().cloned().unwrap_or_default();
         if !v.is_null() && es.is_empty() { col = col.child(div().py_2().text_color(c("dim")).child(crate::i18n::trs("No steps reported yet."))); }
         for e in &es {
             let id = string(e, "id"); let text = string(e, "text");
             let el: AnyElement = match e["kind"].as_str().unwrap_or("") {
                 "user" => div().w_full().py_2().child(div().px_3().py_2().bg(c("raise")).border_1().border_color(c("line")).flex().flex_col().gap_1()
-                    .child(div().text_size(px(11.)).text_color(c("faint")).child(crate::i18n::trs("Asked"))).child(div().text_color(c("text")).child(text))).into_any_element(),
+                    .child(div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(crate::i18n::trs("Asked"))).child(div().text_color(c("text")).child(text))).into_any_element(),
                 "assistant" => div().w_full().py_2().text_color(c("text")).child(text).into_any_element(),
                 "tool" => {
                     let t = &e["tool"]; let st = string(t, "state"); let res = string(t, "result");
                     let open = self.screens.panels.sub_results.contains(&id);
                     let (shown_res, cut) = result_lines(&res, open);
                     let tone = match st.as_str() { "running" => c("accent"), "failed" => c("bad"), _ => c("faint") };
-                    let mut row = div().id(SharedString::from(format!("sub-e-{id}"))).w_full().py_1().flex().flex_col().font(art::mono_font()).text_size(px(12.))
+                    let mut row = div().id(SharedString::from(format!("sub-e-{id}"))).w_full().py_1().flex().flex_col().font(art::mono_font()).text_size(crate::scale::tpx(12.))
                         .child(div().flex().gap_2().child(div().w(px(12.)).flex_shrink_0().text_color(tone).child(mark(&st))).child(div().flex_shrink_0().text_color(if st == "running" { c("accent") } else { c("faint") }).child(string(t, "name")))
                             .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_color(c("dim")).child(string(t, "summary"))));
                     if !shown_res.is_empty() {
@@ -80,7 +80,7 @@ impl Backplane {
                     row.into_any_element()
                 }
                 _ => { let tone = string(e, "tone");
-                    div().w_full().py_1().flex().gap_2().text_size(px(12.)).child(div().flex_shrink_0().text_color(c("faint")).child(string(e, "label")))
+                    div().w_full().py_1().flex().gap_2().text_size(crate::scale::tpx(12.)).child(div().flex_shrink_0().text_color(c("faint")).child(string(e, "label")))
                         .child(div().flex_1().min_w_0().text_color(if tone.contains("error") { c("bad") } else { c("dim") }).child(text)).into_any_element() }
             };
             col = col.child(el);

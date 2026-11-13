@@ -8,13 +8,13 @@ use gpui::{prelude::*, *};
 /// A keycap: faint, or lit (the accent's edge) for the one that does what is on show.
 pub fn cap(light: bool, text: &str, lit: bool) -> Div {
     let c = |n: &str| theme::color(light, n);
-    div().flex_shrink_0().px(px(3.)).border_1().border_b_2().border_color(c(if lit { "accent" } else { "line" })).bg(c("bg")).text_size(px(9.)).line_height(px(11.))
+    div().flex_shrink_0().px(px(3.)).border_1().border_b_2().border_color(c(if lit { "accent" } else { "line" })).bg(c("bg")).text_size(crate::scale::tpx(9.)).line_height(crate::scale::tpx(11.))
         .font(crate::art::mono_font()).text_color(c(if lit { "accent" } else { "faint" })).child(text.to_string())
 }
 /// A row's digit (a thread's or a project's): a box with the accent's edge, as the old sidebar drew it.
 pub fn digit(light: bool, n: usize) -> Div {
     let c = |n: &str| theme::color(light, n);
-    div().flex_shrink_0().size(px(16.)).flex().items_center().justify_center().border_1().border_color(c("accent")).bg(c("panel")).text_size(px(11.)).line_height(px(14.))
+    div().flex_shrink_0().size(crate::scale::tpx(16.)).flex().items_center().justify_center().border_1().border_color(c("accent")).bg(c("panel")).text_size(crate::scale::tpx(11.)).line_height(crate::scale::tpx(14.))
         .font(crate::art::mono_font()).text_color(c("text")).child(format!("{n}"))
 }
 /// Laid over the end of a row's words (a parent that is `relative`), so the row keeps its layout while the hint shows.
@@ -28,7 +28,7 @@ pub fn legend(cx: &mut Context<Backplane>, light: bool, l: &crate::local::Local)
     let rows = crate::keys::legend(l);
     let last = rows.len().saturating_sub(1);
     div().id("keys-legend").absolute().left_0().right_0().bottom_0().px_3().pt_2().pb(px(10.)).bg(c("panel")).border_t_1().border_color(c("line")).flex().flex_col().gap(px(4.))
-        .text_size(px(11.)).text_color(c("faint"))
+        .text_size(crate::scale::tpx(11.)).text_color(c("faint"))
         .children(rows.into_iter().enumerate().map(|(i, (keys, what))| {
             let row = div().id(("legend", i)).flex().items_center().gap(px(10.)).child(div().w(px(104.)).flex_shrink_0().flex().gap(px(3.)).children(keys.iter().map(|k| cap(light, k, false))))
                 .child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(what));

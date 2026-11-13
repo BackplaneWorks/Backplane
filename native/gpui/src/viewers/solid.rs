@@ -748,7 +748,7 @@ impl SolidPage {
     }
     /// Retry: the hub asked for this source's model again (its stages show as it is made).
     fn retry_button(&self, cx: &mut Context<Self>) -> impl IntoElement {
-        div().id("solid-retry").px_2().py_1().text_size(px(12.)).text_color(rgb(0xc8ced9)).bg(rgba(0x1d2430dd)).border_1().border_color(rgb(0x3a4456)).cursor_pointer()
+        div().id("solid-retry").px_2().py_1().text_size(crate::scale::tpx(12.)).text_color(rgb(0xc8ced9)).bg(rgba(0x1d2430dd)).border_1().border_color(rgb(0x3a4456)).cursor_pointer()
             .hover(|d| d.bg(rgba(0x2a3548ee))).child(trs("Retry"))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .on_click(cx.listener(|this, _, _, cx| { this.failed = false; this.note.clear(); let k = this.key.clone(); cx.emit(SolidEvent::Retry(k)); cx.notify(); }))
@@ -819,7 +819,7 @@ impl Render for SolidPage {
             // the first row of buttons centred on the thread's header row (32 px, ui.rs `thread-head`), so their line is the pane's line
             let mut bar = div().absolute().top(px(TOOL_TOP)).left_2().right(px(8. + self.reserve)).flex().flex_wrap().gap_1();
             for (key, view) in [("viewer.fit", "fit"), ("viewer.c.view.iso", "iso"), ("viewer.c.view.top", "top"), ("viewer.c.view.bottom", "bottom"), ("viewer.c.view.front", "front"), ("viewer.c.view.right", "right"), ("viewer.c.view.back", "back"), ("viewer.c.view.left", "left"), ("viewer.c.view.snap", "snap")] {
-                bar = bar.child(div().id(SharedString::from(format!("solid-{view}"))).px_2().h(px(TOOL_H)).flex().items_center().text_size(px(12.)).text_color(rgb(0xc8ced9)).bg(rgba(0x1d2430dd)).border_1().border_color(rgb(0x3a4456)).cursor_pointer()
+                bar = bar.child(div().id(SharedString::from(format!("solid-{view}"))).px_2().h(crate::scale::tpx(TOOL_H)).flex().items_center().text_size(crate::scale::tpx(12.)).text_color(rgb(0xc8ced9)).bg(rgba(0x1d2430dd)).border_1().border_color(rgb(0x3a4456)).cursor_pointer()
                     .hover(|d| d.bg(rgba(0x2a3548ee))).child(t(key))
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                     .on_click(cx.listener(move |this, _, _, cx| {
@@ -834,9 +834,9 @@ impl Render for SolidPage {
         });
         div().id("solid-page").size_full().overflow_hidden().relative().track_focus(&self.focus).key_context("Viewer").child(body).child(probe).children(tools)
             .on_key_down(cx.listener(|this, e: &KeyDownEvent, _, cx| if this.on_key(e, cx) { cx.stop_propagation() }))
-            .when(self.image.is_some() && !making_other && !self.note.is_empty(), |d| d.child(div().absolute().bottom_2().left_2().px_2().flex().items_center().gap_2().text_size(px(12.)).text_color(rgb(0x8a93a3)).child(note_words(&self.note))
+            .when(self.image.is_some() && !making_other && !self.note.is_empty(), |d| d.child(div().absolute().bottom_2().left_2().px_2().flex().items_center().gap_2().text_size(crate::scale::tpx(12.)).text_color(rgb(0x8a93a3)).child(note_words(&self.note))
                 .when(self.failed && !self.key.is_empty(), |d| d.child(self.retry_button(cx)))))
-            .when(self.image.is_some() && !making_other && (!stage.is_empty() || !self.parts_progress().is_empty()), |d| d.child(div().id("solid-parts").absolute().bottom_2().right_2().px_2().text_size(px(12.)).text_color(rgb(0x8a93a3)).child(if stage.is_empty() { trs(&self.parts_progress()) } else { stage.clone() })))
+            .when(self.image.is_some() && !making_other && (!stage.is_empty() || !self.parts_progress().is_empty()), |d| d.child(div().id("solid-parts").absolute().bottom_2().right_2().px_2().text_size(crate::scale::tpx(12.)).text_color(rgb(0x8a93a3)).child(if stage.is_empty() { trs(&self.parts_progress()) } else { stage.clone() })))
             .on_mouse_down(MouseButton::Left, cx.listener(|this, e: &MouseDownEvent, window, cx| {
                 window.focus(&this.focus);
                 if e.click_count >= 2 { this.drag = None; this.set_view("fit"); cx.notify(); return } // a double click fits, as 0.14's did

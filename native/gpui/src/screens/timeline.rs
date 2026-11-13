@@ -272,7 +272,7 @@ fn block_el(cx: &mut Context<Backplane>, reg: &Reg, light: bool, b: &Block, key:
         Block::Para(s) => text(reg, light, s.clone(), Kind::Body),
         Block::Heading(l, s) => {
             // a document's h1 and h2 are underlined, as GitHub draws them
-            let h = div().text_size(px(if doc.is_some() { doc_heading_size(*l) } else { heading_size(*l) })).mt_1().child(text(reg, light, s.clone(), Kind::Head));
+            let h = div().text_size(crate::scale::tpx(if doc.is_some() { doc_heading_size(*l) } else { heading_size(*l) })).mt_1().child(text(reg, light, s.clone(), Kind::Head));
             if doc.is_some() && *l <= 2 { h.pb_1().border_b_1().border_color(c("line")).into_any_element() } else { h.into_any_element() }
         }
         Block::Flow(parts, level) => flow_el(cx, reg, light, parts, *level, key, doc, Align::Left),
@@ -310,9 +310,9 @@ fn block_el(cx: &mut Context<Backplane>, reg: &Reg, light: bool, b: &Block, key:
             let copy = t.clone();
             let copy_ix = { let mut r = reg.borrow_mut(); let n = r.copy_seen; r.copy_seen += 1; n };
             div().w_full().bg(c("raise")).border_1().border_color(c("line")).flex().flex_col()
-                .child(div().flex().justify_end().px_2().pt_1().child(div().id(SharedString::from(format!("copy-{key}"))).relative().px_2().text_size(px(11.)).text_color(c("dim")).cursor_pointer().hover(|s| s.text_color(c("text")))
+                .child(div().flex().justify_end().px_2().pt_1().child(div().id(SharedString::from(format!("copy-{key}"))).relative().px_2().text_size(crate::scale::tpx(11.)).text_color(c("dim")).cursor_pointer().hover(|s| s.text_color(c("text")))
                     .child(crate::i18n::trs("Copy")).child(copy_probe(reg, copy_ix)).on_click(cx.listener(move |_, _, _, cx| { cx.write_to_clipboard(ClipboardItem::new_string(copy.clone())); }))))
-                .child(div().id(SharedString::from(format!("code-{key}"))).overflow_x_scroll().px_2().pb_2().text_size(px(12.)).whitespace_nowrap().child({ let mut s = SelText::new(reg, plain_spans(t), Kind::Code, light); s.tokens = tokens.clone(); s.into_any_element() }))
+                .child(div().id(SharedString::from(format!("code-{key}"))).overflow_x_scroll().px_2().pb_2().text_size(crate::scale::tpx(12.)).whitespace_nowrap().child({ let mut s = SelText::new(reg, plain_spans(t), Kind::Code, light); s.tokens = tokens.clone(); s.into_any_element() }))
                 .into_any_element()
         }
         Block::Table { head, rows } => {
@@ -322,7 +322,7 @@ fn block_el(cx: &mut Context<Backplane>, reg: &Reg, light: bool, b: &Block, key:
                 let spans = if bold { spans.into_iter().map(|mut s| { s.style.bold = true; s }).collect() } else { spans };
                 div().flex_1().min_w(px(60.)).px_2().py_1().child(text(reg, light, spans, Kind::Body)).into_any_element()
             }).collect::<Vec<_>>());
-            let mut t = div().id(SharedString::from(format!("tbl-{key}"))).overflow_x_scroll().border_1().border_color(c("line")).flex().flex_col().text_size(px(12.5));
+            let mut t = div().id(SharedString::from(format!("tbl-{key}"))).overflow_x_scroll().border_1().border_color(c("line")).flex().flex_col().text_size(crate::scale::tpx(12.5));
             if !head.is_empty() { t = t.child(row(head, true).bg(c("raise"))); }
             for r in rows.iter().take(500) { t = t.child(row(r, false)); }
             if rows.len() > 500 { t = t.child(div().px_2().py_1().text_color(c("dim")).child(crate::i18n::tf("gpui.timeline.more.rows", &[("n", (rows.len() - 500).into())]))); }
@@ -421,13 +421,13 @@ fn doc_img(cx: &mut Context<Backplane>, light: bool, img: &Img, key: &str, doc: 
         }
         (None, Some(Slot::Failed)) => {
             // GitHub shows the words of a picture that cannot be drawn
-            div().px_1().text_size(px(12.)).text_color(c("dim")).border_1().border_color(c("line")).child(name).into_any_element()
+            div().px_1().text_size(crate::scale::tpx(12.)).text_color(c("dim")).border_1().border_color(c("line")).child(name).into_any_element()
         }
         (None, slot) => {
-            let (bw, bh) = size.unwrap_or((if img.alt.is_empty() { 120. } else { (img.alt.chars().count() as f32 * 7. + 16.).min(doc.width) }, 22.));
+            let sc = crate::scale::s(); let (bw, bh) = size.unwrap_or((if img.alt.is_empty() { 120. * sc } else { (img.alt.chars().count() as f32 * 7. * sc + 16.).min(doc.width) }, 22. * sc));
             let asked = slot.is_some();
             let (imgs, target, u) = (doc.imgs.clone(), doc.target.cloned(), url.clone());
-            let mut b = div().id(id).relative().w(px(bw)).max_w_full().flex_none().border_1().border_color(c("line")).overflow_hidden().text_size(px(11.)).text_color(c("faint")).px_1().child(name);
+            let mut b = div().id(id).relative().w(px(bw)).max_w_full().flex_none().border_1().border_color(c("line")).overflow_hidden().text_size(crate::scale::tpx(11.)).text_color(c("faint")).px_1().child(name);
             b.style().aspect_ratio = Some(bw / bh.max(1.0));
             b.when(!asked, |b| b.child(canvas(move |bounds, window, _| {
                 // near the screen (a screen's height above or below): ask for it, and draw again so the window keeps polling until it arrives
@@ -442,7 +442,7 @@ fn doc_img(cx: &mut Context<Backplane>, light: bool, img: &Img, key: &str, doc: 
 fn flow_el(cx: &mut Context<Backplane>, reg: &Reg, light: bool, parts: &[Inline], level: u8, key: &str, doc: Option<&Doc>, align: Align) -> AnyElement {
     let mut row = div().w_full().flex().flex_wrap().items_end().gap_1();
     row = match align { Align::Center => row.justify_center(), Align::Right => row.justify_end(), Align::Left => row };
-    if level > 0 { row = row.text_size(px(if doc.is_some() { doc_heading_size(level) } else { heading_size(level) })).mt_1(); }
+    if level > 0 { row = row.text_size(crate::scale::tpx(if doc.is_some() { doc_heading_size(level) } else { heading_size(level) })).mt_1(); }
     for (i, p) in parts.iter().enumerate() {
         row = match p {
             Inline::Text(s) => row.child(div().max_w_full().child(text(reg, light, s.clone(), if level > 0 { Kind::Head } else { Kind::Body }))),
@@ -483,12 +483,12 @@ pub fn images(cx: &mut Context<Backplane>, light: bool, list: &Value, key: &str,
                 frame.overflow_hidden().cursor_pointer().on_mouse_down(MouseButton::Right, cx.listener(move |this, e: &MouseDownEvent, _, cx| { cx.stop_propagation(); this.screens.ctx_img = Some(copy.clone()); this.screens.ctx_save = Some(save.clone()); this.ctx_open(e.position, super::ctxmenu::image_items(&ipath), cx); }))
                     .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, window, cx| { this.lightbox_open(open.clone(), window, cx); }))
                     .child(gpui::img(imgs.decoded(url).map_or(ImageSource::Image(img), ImageSource::Render)).size_full().object_fit(ObjectFit::Contain)).into_any_element() }
-            Slot::Loading => div().px_2().py_1().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("dim")).child(crate::i18n::tf("gpui.timeline.loading", &[("name", name.as_str().into())])).into_any_element(),
-            Slot::Failed => div().px_2().py_1().border_1().border_color(c("line")).text_size(px(12.)).text_color(c("bad")).child(crate::i18n::tf("gpui.timeline.could.not.load", &[("name", name.as_str().into())])).into_any_element(),
+            Slot::Loading => div().px_2().py_1().border_1().border_color(c("line")).text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(crate::i18n::tf("gpui.timeline.loading", &[("name", name.as_str().into())])).into_any_element(),
+            Slot::Failed => div().px_2().py_1().border_1().border_color(c("line")).text_size(crate::scale::tpx(12.)).text_color(c("bad")).child(crate::i18n::tf("gpui.timeline.could.not.load", &[("name", name.as_str().into())])).into_any_element(),
         };
         row = row.child(crate::ui::with_rect(div().id(SharedString::from(format!("img-{key}-{i}"))), || format!("img:{name}")).max_w_full().child(el));
     }
-    if items.len() > MAX_IMAGES { row = row.child(div().px_2().py_1().text_size(px(12.)).text_color(c("dim")).child(crate::i18n::tf("gpui.timeline.more.images", &[("n", (items.len() - MAX_IMAGES).into())]))); }
+    if items.len() > MAX_IMAGES { row = row.child(div().px_2().py_1().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(crate::i18n::tf("gpui.timeline.more.images", &[("n", (items.len() - MAX_IMAGES).into())]))); }
     Some(row.into_any_element())
 }
 
@@ -506,7 +506,7 @@ pub fn attachments(cx: &mut Context<Backplane>, light: bool, list: &Value, key: 
     let (pics, files) = split_attachments(list);
     let mut out = Vec::new();
     if let Some(p) = images(cx, light, &Value::Array(pics), key, target, imgs) { out.push(p); }
-    if !files.is_empty() { out.push(div().flex().flex_wrap().gap_1().children(files.into_iter().map(|f| div().px_2().py_1().border_1().border_color(c("line")).text_size(px(11.)).text_color(c("dim")).child(f))).into_any_element()); }
+    if !files.is_empty() { out.push(div().flex().flex_wrap().gap_1().children(files.into_iter().map(|f| div().px_2().py_1().border_1().border_color(c("line")).text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(f))).into_any_element()); }
     out
 }
 

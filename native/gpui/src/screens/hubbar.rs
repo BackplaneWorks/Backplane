@@ -122,12 +122,12 @@ pub fn strip(cx: &mut Context<Backplane>, s: &State, light: bool) -> Option<AnyE
     for a in acts {
         let sure = asked.as_deref() == Some(a.id.as_str());
         let (id, label) = (a.id.clone(), if sure { crate::i18n::tf("gpui.hubbar.click.again", &[("label", crate::i18n::trs(&a.label).into())]) } else { crate::i18n::trs(&a.label) });
-        row = row.child(div().id(SharedString::from(format!("hub-{id}"))).px_2().h(px(16.)).flex().items_center().cursor_pointer().text_size(px(11.)).font_weight(FontWeight::BOLD)
+        row = row.child(div().id(SharedString::from(format!("hub-{id}"))).px_2().h(px(16.)).flex().items_center().cursor_pointer().text_size(crate::scale::tpx(11.)).font_weight(FontWeight::BOLD)
             .bg(if sure { c("bad") } else { c("raise") }).text_color(if sure { c("on-accent") } else { c("text") }).child(label)
             .on_click(cx.listener(move |this, _, _, cx| { this.hub_click(&id, cx); })));
     }
-    Some(div().h(px(22.)).flex_shrink_0().flex().items_center().justify_between().px_3().bg(c("raise")).border_b_1().border_color(hue)
-        .child(div().text_size(px(11.)).text_color(c("text")).overflow_hidden().child(crate::i18n::trs(&text))).child(row).into_any_element())
+    Some(div().h(crate::scale::tpx(22.)).flex_shrink_0().flex().items_center().justify_between().px_3().bg(c("raise")).border_b_1().border_color(hue)
+        .child(div().text_size(crate::scale::tpx(11.)).text_color(c("text")).overflow_hidden().child(crate::i18n::trs(&text))).child(row).into_any_element())
 }
 
 /// The socket came up: the hub answers, so a strip that said it did not goes at once (the next ask decides anything else).

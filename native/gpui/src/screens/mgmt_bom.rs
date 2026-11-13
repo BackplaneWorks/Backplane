@@ -103,8 +103,8 @@ pub fn layout(width: f32) -> Vec<(Col, Option<f32>)> {
     if width >= 700. { v.push((Col::Class, Some(64.))) }
     v
 }
-/// How many characters fit in `px` at the panel's 12 px monospace (7.2 px a character).
-pub fn chars_in(px: f32) -> usize { (px / 7.2).floor().max(4.0) as usize }
+/// How many characters fit in `px` at the panel's 12 px monospace (7.2 px a character at 100%; wider at a larger text size, scale.rs).
+pub fn chars_in(px: f32) -> usize { (px / (7.2 * crate::scale::s())).floor().max(4.0) as usize }
 /// A long part number shortened in its middle ("GRM033R6…E47D"), both ends kept: they tell parts apart.
 pub fn mid_ellipsis(s: &str, max: usize) -> String {
     let cs: Vec<char> = s.chars().collect();
@@ -244,7 +244,7 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
         cx.observe(&f, |_, _, cx| cx.notify()).detach();
         app.screens.mgmt.bom.filter = Some(f);
     }
-    if d.is_null() { return div().p_3().text_size(px(12.)).text_color(c("faint")).child(trs("Reading the schematic…")).into_any_element() }
+    if d.is_null() { return div().p_3().text_size(crate::scale::tpx(12.)).text_color(c("faint")).child(trs("Reading the schematic…")).into_any_element() }
     let all: Vec<Value> = d["lines"].as_array().cloned().unwrap_or_default();
     let q = filter_text(app, cx);
     let (col, desc) = (app.screens.mgmt.bom.sort, app.screens.mgmt.bom.desc);
@@ -253,39 +253,41 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
     let sel = app.screens.mgmt.bom.sel.clone();
     // the panel's top row, on the same band as the page's bar: what it holds, where from, and the filter
     let summary = tf("gpui.mgmt.bom.summary", &[("parts", d["parts"].as_u64().unwrap_or(0).into()), ("lines", (all.len() as u64).into())]);
-    let top = div().flex_shrink_0().min_h(px(super::head::ROW_H)).flex().items_center().gap_2().px_2().border_b_1().border_color(c("rule")).text_size(px(11.))
+    let top = div().flex_shrink_0().min_h(crate::scale::tpx(super::head::ROW_H)).flex().items_center().gap_2().px_2().border_b_1().border_color(c("rule")).text_size(crate::scale::tpx(11.))
         .child(div().flex_shrink_0().text_color(c("dim")).child(summary))
         // where the lines come from, as a state: live from the open KiCad (its unsaved edits too), or the saved file
-        .child({ let live = d["source"] == "kicad"; div().id("bom-source").flex_shrink_0().flex().items_center().gap_1().px(px(5.)).h(px(18.)).border_1().border_color(c(if live { "accent" } else { "line" }))
-            .text_size(px(10.)).text_color(c(if live { "accent" } else { "dim" })).tooltip(crate::keys::tip(&source_text(d), "", light))
+        .child({ let live = d["source"] == "kicad"; div().id("bom-source").flex_shrink_0().flex().items_center().gap_1().px(px(5.)).h(crate::scale::tpx(18.)).border_1().border_color(c(if live { "accent" } else { "line" }))
+            .text_size(crate::scale::tpx(10.)).text_color(c(if live { "accent" } else { "dim" })).tooltip(crate::keys::tip(&source_text(d), "", light))
             .child(if live { trs("Live") } else { trs("Saved") }) })
         .children(cost_text(d).map(|t| div().flex_shrink_0().text_color(c("dim")).child(t)))
         // the parts search asked to slow down: the lookups wait, quietly
         .when(d["paused"] == true, |r| r.child(div().id("bom-paused").flex_shrink_0().text_color(c("faint")).tooltip(crate::keys::tip(&trs("The parts search asked Backplane to slow down; the lookups go on by themselves shortly."), "", light)).child(trs("Stock check paused"))))
-        .child(div().flex_1().min_w(px(80.)).px_2().py(px(2.)).border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).children(app.screens.mgmt.bom.filter.clone()));
+        .child(div().flex_1().min_w(px(80.)).px_2().py(px(2.)).border_1().border_color(c("line")).bg(c("panel")).text_size(crate::scale::tpx(12.)).children(app.screens.mgmt.bom.filter.clone()));
     // the columns this width shows (MPN first in priority), the same gutter between every two
     let width = app.screens.mgmt.panel_w.max(240.);
-    let cols = layout(width);
+    // (the columns are sized for 100% text: at a larger size they are wider, and the panel takes fewer of them)
+    let sc = crate::scale::s();
+    let cols: Vec<(Col, Option<f32>)> = layout(width / sc).into_iter().map(|(k, w)| (k, w.map(|w| w * sc))).collect();
     const GUTTER: f32 = 8.0;
     let fixed: f32 = cols.iter().filter_map(|c| c.1).sum::<f32>() + GUTTER * (cols.len() as f32 - 1.0) + 16.0;
     let mpn_chars = chars_in(width - fixed);
     let cell = |w: Option<f32>, right: bool| -> Div { let d = div().flex_shrink_0().overflow_hidden().whitespace_nowrap(); let d = match w { Some(x) => d.w(px(x)), None => d.flex_1().min_w_0() }; if right { d.flex().justify_end() } else { d } };
     let right = |k: Col| matches!(k, Col::Qty | Col::Stock | Col::Price);
-    let mut head = div().flex_shrink_0().flex().items_center().gap(px(GUTTER)).px_2().h(px(22.)).border_b_1().border_color(c("line")).text_size(px(11.)).text_color(c("dim"));
+    let mut head = div().flex_shrink_0().flex().items_center().gap(px(GUTTER)).px_2().h(crate::scale::tpx(22.)).border_b_1().border_color(c("line")).text_size(crate::scale::tpx(11.)).text_color(c("dim"));
     for (k, wd) in cols.iter().copied() {
         let (_, id, label) = COLS.iter().find(|x| x.0 == k).copied().unwrap();
         let mark = if col == k { if desc { " ↓" } else { " ↑" } } else { "" };
         head = head.child(cell(wd, right(k)).id(SharedString::from(format!("bom-h-{id}"))).cursor_pointer().hover(|s| s.text_color(c("text"))).child(format!("{}{mark}", trs(label)))
             .on_click(cx.listener(move |this, _, _, cx| { let (a, b) = press((this.screens.mgmt.bom.sort, this.screens.mgmt.bom.desc), k); this.screens.mgmt.bom.sort = a; this.screens.mgmt.bom.desc = b; cx.notify(); })));
     }
-    let mut list = div().id("bom-rows").flex_1().min_h_0().overflow_y_scroll().flex().flex_col().text_size(px(12.));
+    let mut list = div().id("bom-rows").flex_1().min_h_0().overflow_y_scroll().flex().flex_col().text_size(crate::scale::tpx(12.));
     if rows.is_empty() { list = list.child(div().p_3().text_color(c("faint")).child(if all.is_empty() { trs("No parts.") } else { trs("No line matches the filter.") })); }
     for l in rows {
         let id = s(&l, "id").to_string(); let dnp = l["dnp"] == true; let on = sel.as_deref() == Some(id.as_str());
         let refs: Vec<String> = l["refs"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
         let st = &l["stock"];
         let mut row = crate::ui::with_rect(div().id(SharedString::from(format!("bom-row-{id}"))), { let id = id.clone(); move || format!("mgmt:bom:row:{id}") })
-            .flex_shrink_0().flex().items_center().gap(px(GUTTER)).px_2().h(px(24.)).border_b_1().border_color(c("line")).cursor_pointer()
+            .flex_shrink_0().flex().items_center().gap(px(GUTTER)).px_2().h(crate::scale::tpx(24.)).border_b_1().border_color(c("line")).cursor_pointer()
             .when(on, |d| d.bg(c("raise"))).hover(|d| d.bg(c("panel"))).when(dnp, |d| d.text_color(c("faint")));
         for (k, wd) in cols.iter().copied() {
             let base = cell(wd, right(k));
@@ -302,7 +304,7 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
                     else if started && !dnp { base.text_color(c("warn")).child(trs("no MPN")).into_any_element() } else { base.text_color(c("faint")).child("—").into_any_element() }
                 }
                 // a DNP line is not ordered: its stock cell says DNP, in its own place
-                Col::Stock if dnp => base.child(div().px(px(3.)).text_size(px(10.)).border_1().border_color(c("line")).child(trs("DNP"))).into_any_element(),
+                Col::Stock if dnp => base.child(div().px(px(3.)).text_size(crate::scale::tpx(10.)).border_1().border_color(c("line")).child(trs("DNP"))).into_any_element(),
                 Col::Stock => match (stock_words(st), stock_view(st)) {
                     (Some(t), Some((_, tone, tip))) => base.id(SharedString::from(format!("bom-stock-{id}"))).text_color(c(tone)).tooltip(crate::keys::tip(&tip, "", light)).child(t).into_any_element(),
                     _ => base.into_any_element() },
@@ -347,28 +349,28 @@ fn line_editor(app: &mut Backplane, l: &Value, light: bool, cx: &mut Context<Bac
     }
     if fresh { app.screens.mgmt.bom.filled = id.clone(); app.screens.mgmt.bom.said = None; }
     let dnp = l["dnp"] == true;
-    let mut rows = div().flex_shrink_0().flex().flex_col().gap_1().px_2().py_2().border_t_1().border_color(c("rule")).bg(c("panel")).text_size(px(11.));
+    let mut rows = div().flex_shrink_0().flex().flex_col().gap_1().px_2().py_2().border_t_1().border_color(c("rule")).bg(c("panel")).text_size(crate::scale::tpx(11.));
     rows = rows.child(div().flex().items_center().gap_2().child(div().text_color(c("text")).child(refs_text(l))).child(div().flex_1())
-        .child(crate::ui::with_rect(div().id("bom-dnp"), || "mgmt:bom:dnp".to_string()).px_2().h(px(20.)).flex().items_center().border_1().border_color(c(if dnp { "warn" } else { "line" })).bg(c("raise")).cursor_pointer()
+        .child(crate::ui::with_rect(div().id("bom-dnp"), || "mgmt:bom:dnp".to_string()).px_2().h(crate::scale::tpx(20.)).flex().items_center().border_1().border_color(c(if dnp { "warn" } else { "line" })).bg(c("raise")).cursor_pointer()
             .text_color(c(if dnp { "warn" } else { "dim" })).hover(|d| d.bg(c("bg"))).tooltip(crate::keys::tip(&trs("Do not place these parts"), "", light)).child(trs("DNP"))
             .on_click(cx.listener(move |this, _, _, cx| edit(this, "dnp", if dnp { "no" } else { "yes" }, cx)))));
     for (i, (_, label, _)) in EDIT.iter().enumerate() {
-        rows = rows.child(div().flex().items_center().gap_2().child(div().w(px(64.)).flex_shrink_0().text_color(c("dim")).child(trs(label)))
-            .child(div().flex_1().min_w_0().px_2().py(px(2.)).border_1().border_color(c("line")).bg(c("bg")).text_size(px(12.)).child(app.screens.mgmt.bom.fields[i].clone())));
+        rows = rows.child(div().flex().items_center().gap_2().child(div().w(crate::scale::tpx(64.)).flex_shrink_0().text_color(c("dim")).child(trs(label)))
+            .child(div().flex_1().min_w_0().px_2().py(px(2.)).border_1().border_color(c("line")).bg(c("bg")).text_size(crate::scale::tpx(12.)).child(app.screens.mgmt.bom.fields[i].clone())));
     }
     let b = &app.screens.mgmt.bom;
     let note = if b.sending { Some(("dim", trs("Writing…"), false)) } else { edit_note(b.said.as_ref(), b.last.as_ref()) };
     rows = rows.children(note.map(|(tone, t, offer)| div().flex().items_center().gap_2().child(div().flex_1().min_w_0().text_color(c(tone)).child(t))
-        .when(offer, |d| d.child(crate::ui::with_rect(div().id("bom-undo"), || "mgmt:bom:undo".to_string()).flex_shrink_0().px_2().h(px(20.)).flex().items_center().border_1().border_color(c("line")).bg(c("raise")).cursor_pointer().hover(|d| d.bg(c("bg")))
+        .when(offer, |d| d.child(crate::ui::with_rect(div().id("bom-undo"), || "mgmt:bom:undo".to_string()).flex_shrink_0().px_2().h(crate::scale::tpx(20.)).flex().items_center().border_1().border_color(c("line")).bg(c("raise")).cursor_pointer().hover(|d| d.bg(c("bg")))
             .tooltip(crate::keys::tip(&trs("Put the old value back"), "", light)).child(trs("Undo")).on_click(cx.listener(|this, _, _, cx| undo(this, cx)))))));
     // the fab's stock for the line, and parts that could stand in for it
     let st = &l["stock"];
     let fab = st["fab"].as_str().filter(|f| !f.is_empty()).unwrap_or(s(l, "fab")).to_string();
     if let Some((t, tone, tip)) = stock_view(st) {
         let id = s(l, "id").to_string();
-        rows = rows.child(div().flex().items_center().gap_2().child(div().w(px(64.)).flex_shrink_0().text_color(c("dim")).child(trs("Stock")))
+        rows = rows.child(div().flex().items_center().gap_2().child(div().w(crate::scale::tpx(64.)).flex_shrink_0().text_color(c("dim")).child(trs("Stock")))
             .child(div().flex_1().min_w_0().text_color(c(tone)).overflow_hidden().text_ellipsis().whitespace_nowrap().child(tip.clone()))
-            .when(!fab.is_empty(), |d| d.child(crate::ui::with_rect(div().id("bom-alts"), || "mgmt:bom:alts".to_string()).flex_shrink_0().px_2().h(px(20.)).flex().items_center().border_1().border_color(c("line")).bg(c("raise")).cursor_pointer().hover(|d| d.bg(c("bg")))
+            .when(!fab.is_empty(), |d| d.child(crate::ui::with_rect(div().id("bom-alts"), || "mgmt:bom:alts".to_string()).flex_shrink_0().px_2().h(crate::scale::tpx(20.)).flex().items_center().border_1().border_color(c("line")).bg(c("raise")).cursor_pointer().hover(|d| d.bg(c("bg")))
                 .child(trs("Alternatives")).on_click({ let (fab, id) = (fab.clone(), id.clone()); let need = st["need"].as_u64().unwrap_or(1); cx.listener(move |this, _, _, cx| ask_alts(this, &id, &fab, need, cx)) }))));
     }
     let id = s(l, "id").to_string();
@@ -384,7 +386,7 @@ fn line_editor(app: &mut Backplane, l: &Value, light: bool, cx: &mut Context<Bac
                     .tooltip(crate::keys::tip(&trs("Use this part: its MPN and fab part number go on the line"), "", light))
                     .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().child(format!("{xm} · {}", s(x, "mfr"))))
                     .child(div().flex_shrink_0().text_color(c("dim")).child(s(x, "class").to_string()))
-                    .child(div().w(px(44.)).flex().justify_end().flex_shrink_0().text_color(c("dim")).child(abbrev(x["stock"].as_i64().unwrap_or(-1))))
+                    .child(div().w(crate::scale::tpx(44.)).flex().justify_end().flex_shrink_0().text_color(c("dim")).child(abbrev(x["stock"].as_i64().unwrap_or(-1))))
                     .on_click(cx.listener(move |this, _, _, cx| { edit(this, "mpn", &xm, cx); edit(this, "fab", &xf, cx); this.screens.mgmt.bom.alts = None; })));
             }
         }

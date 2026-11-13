@@ -20,14 +20,14 @@ pub fn card(cx: &mut Context<Backplane>, light: bool, e: &Value) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let id = string(e, "id");
     let (title, from, note, summary) = (string(e, "title"), string(e, "from"), string(e, "note"), string(e, "text"));
-    let back = div().id(SharedString::from(format!("ho-back-{id}"))).flex().items_center().gap_2().text_size(px(11.)).text_color(c("dim")).cursor_pointer().hover(|s| s.text_color(c("text")))
+    let back = div().id(SharedString::from(format!("ho-back-{id}"))).flex().items_center().gap_2().text_size(crate::scale::tpx(11.)).text_color(c("dim")).cursor_pointer().hover(|s| s.text_color(c("text")))
         .child(ic(light, "chevron-left", 12., "dim")).child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(crate::i18n::tf("gpui.handoff.from", &[("title", title.clone().into())])))
         .on_click(cx.listener(move |this, _, _, cx| { this.go("link-open", format!("backplane://thread/{from}"), cx); }));
     let mut refs = div().flex().flex_wrap().gap_2().mt_1();
     for (i, r) in e["refs"].as_array().into_iter().flatten().enumerate() {
         let (kind, label) = (string(r, "kind"), string(r, "label"));
         let mark = match kind.as_str() { "thread" => "\u{25b8}", "message" => "\u{201c}", "board" => "\u{25a6}", _ => "\u{00b7}" };
-        let mut card = div().id(SharedString::from(format!("ho-ref-{id}-{i}"))).flex().items_center().gap_2().px_2().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.))
+        let mut card = div().id(SharedString::from(format!("ho-ref-{id}-{i}"))).flex().items_center().gap_2().px_2().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(crate::scale::tpx(12.))
             .child(div().text_color(c("accent")).font_weight(FontWeight::BOLD).child(mark)).child(div().max_w(px(260.)).overflow_hidden().whitespace_nowrap().text_ellipsis().child(label));
         if let Some((act, val)) = open(r) {
             let msg = string(r, "msg"); let thread = string(r, "thread");
@@ -41,8 +41,8 @@ pub fn card(cx: &mut Context<Backplane>, light: bool, e: &Value) -> AnyElement {
     }
     div().id(SharedString::from(format!("e-{id}"))).w_full().py_2().child(
         div().w_full().max_w(px(640.)).px_3().py_2().border_1().border_color(c("line")).bg(c("raise")).flex().flex_col().gap_1().child(back)
-            .child(div().text_size(px(13.)).child(summary))
-            .children((!note.is_empty()).then(|| div().text_size(px(12.)).text_color(c("dim")).child(crate::i18n::tf("gpui.handoff.note", &[("note", note.clone().into())]))))
+            .child(div().text_size(crate::scale::tpx(13.)).child(summary))
+            .children((!note.is_empty()).then(|| div().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(crate::i18n::tf("gpui.handoff.note", &[("note", note.clone().into())]))))
             .child(refs)).into_any_element()
 }
 

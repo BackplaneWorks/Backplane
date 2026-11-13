@@ -271,7 +271,7 @@ pub fn anchored(from: Bounds<Pixels>, window_h: Pixels, n: usize) -> Point<Pixel
 /// The menu over everything, with a backdrop that closes it.
 pub fn render(cx: &mut Context<Backplane>, light: bool, m: &Menu) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
-    let mut list = div().absolute().left(m.at.x).top(m.at.y).min_w(px(190.)).flex().flex_col().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).occlude();
+    let mut list = div().absolute().left(m.at.x).top(m.at.y).min_w(px(190.)).flex().flex_col().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(crate::scale::tpx(12.)).occlude();
     for (i, it) in m.items.iter().enumerate() {
         let armed = m.armed == Some(i);
         let label = if armed { shown_armed_label(it) } else if it.action == LOCAL_SUB { format!("{} \u{203a}", crate::i18n::trs(&it.label)) } else { crate::i18n::trs(&it.label) };

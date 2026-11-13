@@ -20,7 +20,7 @@ pub fn switch(cx: &mut Context<Backplane>, light: bool, machines: &Value, ctl: &
     for ch in cs {
         ctl.push(CtlEntry { id: format!("machine:{}", ch.label), label: ch.hint.clone(), ctl: Ctl::Node("side-machine".into(), ch.value.clone()) });
         let v = ch.value.clone();
-        row = row.child(div().id(SharedString::from(format!("machine-{}", ch.label))).px_2().py(px(2.)).text_size(px(11.)).border_1().cursor_pointer()
+        row = row.child(div().id(SharedString::from(format!("machine-{}", ch.label))).px_2().py(px(2.)).text_size(crate::scale::tpx(11.)).border_1().cursor_pointer()
             .border_color(if ch.on { c("accent") } else { c("line") }).text_color(if ch.on { c("text") } else { c("dim") }).when(ch.on, |d| d.bg(c("raise")))
             .when(ch.away, |d| d.opacity(0.5)).hover(|s| s.text_color(c("text")))
             .tooltip(crate::keys::tip(&ch.hint, "", light))

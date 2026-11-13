@@ -55,27 +55,27 @@ pub fn act(app: &mut Backplane, a: &str, cx: &mut Context<Backplane>) {
 
 fn btn(cx: &mut Context<Backplane>, light: bool, id: String, label: &str, on: impl Fn(&mut Backplane, &mut Context<Backplane>) + 'static) -> AnyElement {
     let c = |n: &str| theme::color(light, n); let rect = id.clone();
-    crate::ui::with_rect(div().id(SharedString::from(id)), move || rect).flex_shrink_0().h(px(20.)).px_2().flex().items_center().text_size(px(11.)).cursor_pointer()
+    crate::ui::with_rect(div().id(SharedString::from(id)), move || rect).flex_shrink_0().h(crate::scale::tpx(20.)).px_2().flex().items_center().text_size(crate::scale::tpx(11.)).cursor_pointer()
         .bg(c("raise")).hover(|s| s.bg(c("line"))).child(trs(label)).on_click(cx.listener(move |this, _, _, cx| { on(this, cx); cx.notify(); })).into_any_element()
 }
 
 pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backplane>) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
-    if d.is_null() { return div().p_3().text_size(px(12.)).text_color(c("faint")).child(trs("Reading the routing plan…")).into_any_element() }
-    if d["empty"] == true { return div().p_3().text_size(px(12.)).text_color(c("faint")).child(trs("No routing plan yet. An agent proposes one before routing (plan_propose); you steer and approve it here or in KiCad.")).into_any_element() }
+    if d.is_null() { return div().p_3().text_size(crate::scale::tpx(12.)).text_color(c("faint")).child(trs("Reading the routing plan…")).into_any_element() }
+    if d["empty"] == true { return div().p_3().text_size(crate::scale::tpx(12.)).text_color(c("faint")).child(trs("No routing plan yet. An agent proposes one before routing (plan_propose); you steer and approve it here or in KiCad.")).into_any_element() }
     let hide = HIDE_DONE.load(Ordering::Relaxed);
     let awaiting = d["awaiting"].as_u64().unwrap_or(0);
-    let mut top = div().flex_shrink_0().min_h(px(super::head::ROW_H)).flex().items_center().gap_2().px_2().border_b_1().border_color(c("rule")).text_size(px(11.))
+    let mut top = div().flex_shrink_0().min_h(crate::scale::tpx(super::head::ROW_H)).flex().items_center().gap_2().px_2().border_b_1().border_color(c("rule")).text_size(crate::scale::tpx(11.))
         .child(div().flex_1().min_w_0().text_color(c(if awaiting > 0 { "warn" } else { "dim" })).child(if awaiting > 0 { tf("gpui.mgmt.plan.awaiting", &[("n", awaiting.into())]) } else { trs("Nothing awaits your approval") }));
     if !d["live"].as_bool().unwrap_or(false) { top = top.child(div().flex_shrink_0().text_color(c("faint")).child(trs("saved plan"))) }
     if awaiting > 0 { top = top.child(btn(cx, light, "mgmt:plan:approve-all".into(), "Approve all", |a, cx| approve(a, "", &[], true, cx))) } // i18n-ok: English the draw passes through trs
     if d["routing"] == true { top = top.child(btn(cx, light, "mgmt:plan:stop".into(), "Stop routing", |a, cx| send(a, "plan.stop", json!({}), cx))) } // i18n-ok: English the draw passes through trs
     top = top.child(btn(cx, light, "mgmt:plan:hide".into(), if hide { "Show done" } else { "Hide done" }, |_, cx| { HIDE_DONE.fetch_xor(true, Ordering::Relaxed); cx.notify(); })); // i18n-ok: English the draw passes through trs
-    let mut list = div().id("plan-rows").flex_1().min_h_0().overflow_y_scroll().flex().flex_col().text_size(px(12.));
+    let mut list = div().id("plan-rows").flex_1().min_h_0().overflow_y_scroll().flex().flex_col().text_size(crate::scale::tpx(12.));
     for l in d["layers"].as_array().cloned().unwrap_or_default() {
         let layer = s(&l, "layer").to_string(); let total = l["items"].as_array().map_or(0, Vec::len);
         let lid = layer.clone(); let lid2 = layer.clone();
-        let mut head = div().flex_shrink_0().flex().items_center().gap_2().px_2().h(px(24.)).bg(c("panel")).border_b_1().border_color(c("line")).text_size(px(11.))
+        let mut head = div().flex_shrink_0().flex().items_center().gap_2().px_2().h(crate::scale::tpx(24.)).bg(c("panel")).border_b_1().border_color(c("line")).text_size(crate::scale::tpx(11.))
             .child(div().flex_shrink_0().text_color(c("text")).child(layer.clone()))
             .child(div().flex_shrink_0().text_color(c("dim")).child(format!("{}{}/{} {}", if s(&l, "role").is_empty() { String::new() } else { format!("{} · ", s(&l, "role")) }, l["done"].as_u64().unwrap_or(0), total, trs("done"))))
             .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().text_color(c("faint")).child(s(&l, "stackup").to_string()));
@@ -99,11 +99,11 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
             let tone = match stt.as_str() { "blocked" => "bad", "edited" => "warn", "rejected" | "routed" | "verified" => "faint", _ => "text" };
             let rid = id.clone();
             let mut row = crate::ui::with_rect(div().id(SharedString::from(format!("plan-row-{id}"))), { let id = id.clone(); move || format!("mgmt:plan:row:{id}") })
-                .flex_shrink_0().flex().items_center().gap_2().pl(px(14.)).pr_2().h(px(24.)).border_b_1().border_color(c("line")).cursor_pointer().hover(|x| x.bg(c("panel")))
+                .flex_shrink_0().flex().items_center().gap_2().pl(px(14.)).pr_2().h(crate::scale::tpx(24.)).border_b_1().border_color(c("line")).cursor_pointer().hover(|x| x.bg(c("panel")))
                 .child(swatch)
                 .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().text_color(c(tone)).child(name))
-                .child(div().flex_shrink_0().text_size(px(11.)).text_color(c("dim")).child(detail))
-                .child(div().flex_shrink_0().w(px(44.)).text_size(px(11.)).text_color(c(if stt == "blocked" { "bad" } else { "dim" })).child(mark(&i)))
+                .child(div().flex_shrink_0().text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(detail))
+                .child(div().flex_shrink_0().w(crate::scale::tpx(44.)).text_size(crate::scale::tpx(11.)).text_color(c(if stt == "blocked" { "bad" } else { "dim" })).child(mark(&i)))
                 .on_click(cx.listener(move |this, _, _, cx| send(this, "plan.focus", json!({"id": rid}), cx)));
             if matches!(stt.as_str(), "proposed" | "edited") {
                 let (a, b) = (id.clone(), id.clone());

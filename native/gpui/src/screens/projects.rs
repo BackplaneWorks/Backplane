@@ -347,7 +347,7 @@ pub fn sync(this: &mut Backplane, cx: &mut Context<Backplane>) {
 /// The sidebar's search box (an empty box before the first picture).
 pub fn search_box(light: bool, p: &Projects) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
-    div().flex_1().min_w_0().px_2().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(px(12.)).children(p.search.clone()).into_any_element()
+    div().flex_1().min_w_0().px_2().py_1().border_1().border_color(c("line")).bg(c("panel")).text_size(crate::scale::tpx(12.)).children(p.search.clone()).into_any_element()
 }
 
 /// The folder picker over the main area, while the hub shows `folders`: a column with the title (Esc and × on its right), the path field, the
@@ -369,12 +369,12 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, p: &Projects, data: &Value
         let hit = cx.listener(move |this, _: &gpui::ClickEvent, _, cx| { let typed = this.screens.projects.folder.as_ref().map(|i| i.read(cx).content.to_string()); let k = typed.and_then(|t| click(&this.data, &t, i)); key(this, k, cx); });
         let row = crate::ui::with_rect(div().id(SharedString::from(format!("folder-{i}"))), move || format!("folder-{i}")).flex().flex_none().items_center().gap_2().w_full().when(faint, |d| d.opacity(0.45));
         match it.kind.as_str() {
-            "add" => top.push(row.h(px(34.)).px(px(11.)).bg(c("accent")).text_size(px(13.)).text_color(c("on-accent")).when(!faint, |d| d.cursor_pointer().hover(|s| s.opacity(0.9)))
+            "add" => top.push(row.h(crate::scale::tpx(34.)).px(px(11.)).bg(c("accent")).text_size(crate::scale::tpx(13.)).text_color(c("on-accent")).when(!faint, |d| d.cursor_pointer().hover(|s| s.opacity(0.9)))
                 .child(crate::ui::ic(light, if a == "proj-add" { "plus" } else if a == "proj-new" { "folder-plus" } else { "folder-down" }, 15., "on-accent"))
                 .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(fit(&crate::i18n::trs(&it.label), 72)))
-                .when(mark.is_none() && !faint, |d| d.child(div().flex_none().text_size(px(11.)).opacity(0.7).child("Enter" /* i18n-ok: a key's name */)))
+                .when(mark.is_none() && !faint, |d| d.child(div().flex_none().text_size(crate::scale::tpx(11.)).opacity(0.7).child("Enter" /* i18n-ok: a key's name */)))
                 .on_click(hit).into_any_element()),
-            "note" => top.push(row.h(px(34.)).px(px(10.)).border_1().border_color(c("line")).text_size(px(13.)).text_color(c("dim"))
+            "note" => top.push(row.h(crate::scale::tpx(34.)).px(px(10.)).border_1().border_color(c("line")).text_size(crate::scale::tpx(13.)).text_color(c("dim"))
                 .child(crate::ui::ic(light, "circle-check", 14., "ok"))
                 .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(fit(&crate::i18n::trs(&it.label), 76))).into_any_element()),
             kind => {
@@ -382,32 +382,32 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, p: &Projects, data: &Value
                 let on = mark == Some(i); let added = it.tag == "project";
                 let name = if up { it.label.clone() } else { it.label.trim_end_matches('/').to_string() };
                 // the marked row: a bar of the accent on its left over the raised colour; the pointer's row only the panel's colour
-                list = list.child(row.h(px(28.)).px(px(10.)).border_l_2().border_color(if on { c("accent") } else { gpui::Rgba { r: 0., g: 0., b: 0., a: 0. } })
-                    .text_size(px(13.)).text_color(c(if !live { "faint" } else if added { "dim" } else { "text" })).when(on, |d| d.bg(c("raise"))).when(live && !on && !faint, |d| d.cursor_pointer().hover(|s| s.bg(c("panel"))))
+                list = list.child(row.h(crate::scale::tpx(28.)).px(px(10.)).border_l_2().border_color(if on { c("accent") } else { gpui::Rgba { r: 0., g: 0., b: 0., a: 0. } })
+                    .text_size(crate::scale::tpx(13.)).text_color(c(if !live { "faint" } else if added { "dim" } else { "text" })).when(on, |d| d.bg(c("raise"))).when(live && !on && !faint, |d| d.cursor_pointer().hover(|s| s.bg(c("panel"))))
                     .child(crate::ui::ic(light, if up { "corner-left-up" } else if added { "circle-check" } else { "folder" }, 14., if added { "ok" } else if it.tag.is_empty() { "dim" } else { "accent" }))
                     .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(name))
-                    .when(!it.tag.is_empty(), |d| d.child(div().flex_none().text_size(px(11.)).text_color(c("faint")).child(crate::i18n::trs(if added { "added" } else { it.tag.as_str() }))))
+                    .when(!it.tag.is_empty(), |d| d.child(div().flex_none().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(crate::i18n::trs(if added { "added" } else { it.tag.as_str() }))))
                     .on_click(hit));
             }
         }
     }
     let naming = matches!(&now, Fresh::Same(n) if !n.is_empty()) || (now == Fresh::Now && !typed.ends_with('/'));
-    if dirs == 0 && f.error.is_empty() && !naming { list = list.child(div().px(px(12.)).h(px(28.)).flex().items_center().text_size(px(12.)).text_color(c("faint")).child(crate::i18n::trs("No folders"))); }
-    if f.more > 0 && now == Fresh::Now { list = list.child(div().px(px(12.)).h(px(28.)).flex().flex_none().items_center().text_size(px(12.)).text_color(c("faint")).child(crate::i18n::trs(&format!("{} more: type to filter", f.more)))); }
-    let cancel = crate::ui::with_rect(div().id("folders-cancel"), || "folders-cancel".to_string()).flex().items_center().gap_2().h(px(26.)).px_2().cursor_pointer().hover(|s| s.bg(c("raise")))
-        .child(div().text_size(px(11.)).text_color(c("faint")).child("Esc" /* i18n-ok: a key's name */)).child(crate::ui::ic(light, "x", 14., "dim"))
+    if dirs == 0 && f.error.is_empty() && !naming { list = list.child(div().px(px(12.)).h(crate::scale::tpx(28.)).flex().items_center().text_size(crate::scale::tpx(12.)).text_color(c("faint")).child(crate::i18n::trs("No folders"))); }
+    if f.more > 0 && now == Fresh::Now { list = list.child(div().px(px(12.)).h(crate::scale::tpx(28.)).flex().flex_none().items_center().text_size(crate::scale::tpx(12.)).text_color(c("faint")).child(crate::i18n::trs(&format!("{} more: type to filter", f.more)))); }
+    let cancel = crate::ui::with_rect(div().id("folders-cancel"), || "folders-cancel".to_string()).flex().items_center().gap_2().h(crate::scale::tpx(26.)).px_2().cursor_pointer().hover(|s| s.bg(c("raise")))
+        .child(div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child("Esc" /* i18n-ok: a key's name */)).child(crate::ui::ic(light, "x", 14., "dim"))
         .on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(close_cmd()); cx.notify(); }));
     let keys: Vec<_> = hints(&f, &typed, p.folder_ix).into_iter().map(|(k, w)| div().flex().gap_1().child(div().text_color(c("dim")).child(k)).child(crate::i18n::trs(w))).collect();
     Some(div().id("folders-q").absolute().inset_0().occlude().bg(c("bg")).flex().flex_col().items_center().px_6().pt(px(56.)).pb_4()
         .child(div().flex().flex_col().w_full().max_w(px(680.)).flex_1().min_h_0().gap_2()
-            .child(div().flex().flex_none().items_center().justify_between().pb_1().child(div().text_size(px(15.)).font_weight(FontWeight::SEMIBOLD).child(crate::i18n::trs("Add project"))).child(cancel))
-            .children(p.folder.clone().map(|i| div().flex().flex_none().items_center().gap_2().w_full().h(px(36.)).px(px(10.)).border_1().border_color(c(if f.error.is_empty() { "line" } else { "bad" })).bg(c("view")).text_size(px(14.))
+            .child(div().flex().flex_none().items_center().justify_between().pb_1().child(div().text_size(crate::scale::tpx(15.)).font_weight(FontWeight::SEMIBOLD).child(crate::i18n::trs("Add project"))).child(cancel))
+            .children(p.folder.clone().map(|i| div().flex().flex_none().items_center().gap_2().w_full().h(crate::scale::tpx(36.)).px(px(10.)).border_1().border_color(c(if f.error.is_empty() { "line" } else { "bad" })).bg(c("view")).text_size(crate::scale::tpx(14.))
                 .child(crate::ui::ic(light, "folder", 15., "dim")).child(div().flex_1().min_w_0().child(i))))
-            .when(!f.error.is_empty(), |d| d.child(div().flex_none().px(px(10.)).text_size(px(12.)).text_color(c("bad")).child(fit(&crate::i18n::trs(&f.error), 90))))
+            .when(!f.error.is_empty(), |d| d.child(div().flex_none().px(px(10.)).text_size(crate::scale::tpx(12.)).text_color(c("bad")).child(fit(&crate::i18n::trs(&f.error), 90))))
             .children(top)
             .child(list)
             // the keys sit right under the last row (the list takes only the height of its rows), not at the foot of the window
-            .when(!keys.is_empty(), |d| d.child(div().flex().flex_none().gap_4().h(px(22.)).px(px(12.)).items_end().text_size(px(11.)).text_color(c("faint")).children(keys))))
+            .when(!keys.is_empty(), |d| d.child(div().flex().flex_none().gap_4().h(crate::scale::tpx(22.)).px(px(12.)).items_end().text_size(crate::scale::tpx(11.)).text_color(c("faint")).children(keys))))
         .into_any_element())
 }
 
@@ -439,12 +439,12 @@ pub fn viewer_buttons(snap: &Value) -> Vec<(&'static str, &'static str, &'static
 pub fn size_text(b: u64) -> String { if b >= 1 << 20 { format!("{:.1} MB", b as f64 / (1u64 << 20) as f64) } else { format!("{} KB", (b + 1023) >> 10) } }
 fn section(light: bool, label: String, right: Option<AnyElement>) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
-    div().flex().items_center().justify_between().pt_5().pb_1().border_b_1().border_color(c("line")).child(div().text_size(px(11.)).text_color(c("faint")).child(label)).children(right).into_any_element()
+    div().flex().items_center().justify_between().pt_5().pb_1().border_b_1().border_color(c("line")).child(div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(label)).children(right).into_any_element()
 }
 fn action_button(cx: &mut Context<Backplane>, light: bool, id: &'static str, icon: &'static str, label: String, primary: bool) -> Stateful<Div> {
     let c = |n: &str| theme::color(light, n);
     let _ = cx;
-    div().id(id).flex().items_center().gap_2().px_3().h(px(30.)).border_1().border_color(c(if primary { "accent" } else { "line" })).bg(c(if primary { "accent" } else { "raise" })).text_size(px(12.)).cursor_pointer()
+    div().id(id).flex().items_center().gap_2().px_3().h(crate::scale::tpx(30.)).border_1().border_color(c(if primary { "accent" } else { "line" })).bg(c(if primary { "accent" } else { "raise" })).text_size(crate::scale::tpx(12.)).cursor_pointer()
         .hover(|s| s.bg(c(if primary { "accent" } else { "panel" })).opacity(0.9))
         .child(crate::ui::ic(light, icon, 14., if primary { "bg" } else { "text" })).child(div().text_color(c(if primary { "bg" } else { "text" })).child(label))
 }
@@ -460,8 +460,8 @@ pub fn page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, light: bool
     let root = if loaded { let r = string(&snap, "root"); if r.is_empty() { string(p, "root") } else { r } } else { string(p, "root") };
     let top = threads.first().map(|t| string(t, "id"));
     let mut out: Vec<AnyElement> = vec![
-        div().text_size(px(22.)).font_weight(FontWeight::BOLD).child(string(p, "title")).into_any_element(),
-        div().text_size(px(12.)).text_color(c("dim")).child(root.clone()).into_any_element(),
+        div().text_size(crate::scale::tpx(22.)).font_weight(FontWeight::BOLD).child(string(p, "title")).into_any_element(),
+        div().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(root.clone()).into_any_element(),
     ];
     // the actions: New thread first (the way in), Open folder, then the viewers the folder has something for (they open on the project's top thread)
     let mut bar = div().flex().flex_wrap().items_center().gap_2().pt_3().pb_1();
@@ -493,7 +493,7 @@ pub fn page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, light: bool
         for t in &threads {
             let id = string(t, "id"); let raw = id.rsplit('|').next().unwrap_or(&id).to_string();
             ctl.push(CtlEntry { id: format!("page-thread:{raw}"), label: string(t, "title"), ctl: Ctl::Select(id.clone()) });
-            out.push(crate::ui::with_rect(div().id(SharedString::from(format!("page-thread-{raw}"))), { let r = raw.clone(); move || format!("page-thread:{r}") }).flex().items_center().gap_2().px_2().h(px(30.)).border_b_1().border_color(c("line")).cursor_pointer().hover(|s| s.bg(c("raise")))
+            out.push(crate::ui::with_rect(div().id(SharedString::from(format!("page-thread-{raw}"))), { let r = raw.clone(); move || format!("page-thread:{r}") }).flex().items_center().gap_2().px_2().h(crate::scale::tpx(30.)).border_b_1().border_color(c("line")).cursor_pointer().hover(|s| s.bg(c("raise")))
                 .child(super::siderow::dot(light, t)).child(div().flex_1().overflow_hidden().whitespace_nowrap().child(string(t, "title")))
                 .on_click(cx.listener(move |this, _, window, cx| this.select(id.clone(), window, cx))).into_any_element());
         }
@@ -503,19 +503,19 @@ pub fn page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, light: bool
     if !home.readme.is_empty() {
         out.push(section(light, crate::i18n::trs("README"), None));
         reg.borrow_mut().enter(0, "home-readme");
-        out.push(div().id("home-readme").flex().flex_col().gap_3().py_2().text_size(px(14.)).children(super::timeline::doc_blocks(cx, reg, light, &home.readme, "home-readme", doc)).into_any_element());
+        out.push(div().id("home-readme").flex().flex_col().gap_3().py_2().text_size(crate::scale::tpx(14.)).children(super::timeline::doc_blocks(cx, reg, light, &home.readme, "home-readme", doc)).into_any_element());
     }
     // the goal and notes
     let intent = { let i = string(&card, "intent"); if i.is_empty() && snap["artifacts"].as_array().map_or(false, |a| a.iter().any(|x| x["kind"] == "intent")) { string(&snap, "intent") } else { i } };
     let edit = top.clone().map(|top| {
         let text = intent_draft(&intent);
         /* i18n-ok: ctl labels and ui: ids are what drivers press */ ctl.push(CtlEntry { id: "home-intent-edit".into(), label: "Edit goal & notes".into(), ctl: Ctl::Select(top.clone()) });
-        /* i18n-ok: ctl labels and ui: ids are what drivers press */ crate::ui::with_rect(div().id("home-intent-edit"), || "ui:Edit goal & notes".to_string()).px_2().py_px().border_1().border_color(c("line")).bg(c("raise")).text_size(px(11.)).cursor_pointer().hover(|s| s.bg(c("panel"))).child(crate::i18n::trs("Edit goal & notes"))
+        /* i18n-ok: ctl labels and ui: ids are what drivers press */ crate::ui::with_rect(div().id("home-intent-edit"), || "ui:Edit goal & notes".to_string()).px_2().py_px().border_1().border_color(c("line")).bg(c("raise")).text_size(crate::scale::tpx(11.)).cursor_pointer().hover(|s| s.bg(c("panel"))).child(crate::i18n::trs("Edit goal & notes"))
             .on_click(cx.listener(move |this, _, window, cx| { let raw = top.rsplit('|').next().unwrap_or("").to_string(); this.screens.projects.intent_edit = Some((raw, text.clone())); this.select(top.clone(), window, cx); })).into_any_element()
     });
     out.push(section(light, crate::i18n::trs("GOAL & NOTES"), edit));
     if intent.trim().is_empty() { out.push(div().py_2().text_color(c("dim")).child(crate::i18n::trs("No goal yet. Ask an agent to write what this project is for, or edit .backplane/intent.md.")).into_any_element()); }
-    let mut col = div().id("home-intent").flex().flex_col().gap_1().py_2().text_size(px(13.));
+    let mut col = div().id("home-intent").flex().flex_col().gap_1().py_2().text_size(crate::scale::tpx(13.));
     for (k, t) in intent_lines(&intent) {
         col = col.child(match k { "h" => div().pt_1().font_weight(FontWeight::BOLD).child(t), "li" => div().flex().gap_2().child(div().text_color(c("dim")).child("•")).child(div().flex_1().min_w_0().child(t)), _ => div().child(t) });
     }
@@ -525,14 +525,14 @@ pub fn page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, light: bool
     if !mech.is_empty() {
         let open = top.clone().map(|top| {
             let t = top.clone();
-            /* i18n-ok: a ctl id */ crate::ui::with_rect(div().id("home-mech-open"), || "ui:Open Mech".to_string()).px_2().py_px().border_1().border_color(c("line")).bg(c("raise")).text_size(px(11.)).cursor_pointer().hover(|s| s.bg(c("panel"))).child(crate::i18n::trs("Mech"))
+            /* i18n-ok: a ctl id */ crate::ui::with_rect(div().id("home-mech-open"), || "ui:Open Mech".to_string()).px_2().py_px().border_1().border_color(c("line")).bg(c("raise")).text_size(crate::scale::tpx(11.)).cursor_pointer().hover(|s| s.bg(c("panel"))).child(crate::i18n::trs("Mech"))
                 .on_click(cx.listener(move |this, _, window, cx| { let raw = t.rsplit('|').next().unwrap_or("").to_string(); this.screens.projects.view_edit = Some((raw, "mech")); this.select(t.clone(), window, cx); })).into_any_element()
         });
         out.push(section(light, crate::i18n::tf("gpui.projects.mech", &[("n", mech.len().into())]), open));
         for (i, (path, name, size)) in mech.iter().enumerate() {
             let rel = path.strip_prefix(&root).map(|r| r.trim_start_matches('/').to_string()).unwrap_or_else(|| path.clone());
             let (pth, first) = (path.clone(), i == 0 && mech.len() > 1);
-            out.push(div().id(SharedString::from(format!("home-mech-{i}"))).flex().gap_2().px_2().h(px(28.)).items_center().border_b_1().border_color(c("line")).text_size(px(12.)).cursor_pointer().hover(|s| s.bg(c("raise")))
+            out.push(div().id(SharedString::from(format!("home-mech-{i}"))).flex().gap_2().px_2().h(crate::scale::tpx(28.)).items_center().border_b_1().border_color(c("line")).text_size(crate::scale::tpx(12.)).cursor_pointer().hover(|s| s.bg(c("raise")))
                 .child(crate::ui::ic(light, if first { "layers" } else { "box" }, 14., if first { "accent" } else { "dim" }))
                 .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().child(name.clone()))
                 .children(first.then(|| div().text_color(c("accent")).child(crate::i18n::trs("Assembly"))))
@@ -546,14 +546,14 @@ pub fn page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, light: bool
     if !parts.is_empty() {
         out.push(section(light, crate::i18n::tf("gpui.projects.to.order", &[("n", parts.len().into())]), None));
         for (i, x) in parts.iter().enumerate() {
-            out.push(div().id(SharedString::from(format!("home-part-{i}"))).flex().gap_2().px_2().h(px(26.)).items_center().border_b_1().border_color(c("line")).text_size(px(12.))
+            out.push(div().id(SharedString::from(format!("home-part-{i}"))).flex().gap_2().px_2().h(crate::scale::tpx(26.)).items_center().border_b_1().border_color(c("line")).text_size(crate::scale::tpx(12.))
                 .child(div().flex_1().child(string(x, "name"))).child(div().text_color(c("dim")).child(string(x, "kind"))).child(div().text_color(c("faint")).child(string(x, "path"))).into_any_element());
         }
     }
     let bs = boards(&snap, &card, &root);
     if !bs.is_empty() {
         out.push(section(light, crate::i18n::tf("gpui.projects.boards", &[("n", bs.len().into())]), None));
-        for (i, b) in bs.iter().enumerate() { out.push(div().id(SharedString::from(format!("home-board-{i}"))).px_2().h(px(26.)).flex().items_center().border_b_1().border_color(c("line")).text_size(px(12.)).child(b.clone()).into_any_element()); }
+        for (i, b) in bs.iter().enumerate() { out.push(div().id(SharedString::from(format!("home-board-{i}"))).px_2().h(crate::scale::tpx(26.)).flex().items_center().border_b_1().border_color(c("line")).text_size(crate::scale::tpx(12.)).child(b.clone()).into_any_element()); }
     }
     out
 }

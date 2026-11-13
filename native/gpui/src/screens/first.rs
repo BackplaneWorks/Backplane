@@ -89,23 +89,23 @@ impl First {
 impl Render for First {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let light = self.light; let c = |n: &str| theme::color(light, n);
-        let button = |id: &'static str, label: &str, primary: bool| { let d = div().id(id).h(px(30.)).px_4().flex().items_center().text_size(px(13.)).cursor_pointer(); report_rect((if primary { d.bg(c("accent")).text_color(c("on-accent")) } else { d.bg(c("raise")).hover(|s| s.bg(c("line"))) }).child(trs(label)), id) };
-        let field = |e: &Entity<Composer>| div().h(px(32.)).px_3().flex().items_center().bg(c("raise")).child(e.clone());
+        let button = |id: &'static str, label: &str, primary: bool| { let d = div().id(id).h(crate::scale::tpx(30.)).px_4().flex().items_center().text_size(crate::scale::tpx(13.)).cursor_pointer(); report_rect((if primary { d.bg(c("accent")).text_color(c("on-accent")) } else { d.bg(c("raise")).hover(|s| s.bg(c("line"))) }).child(trs(label)), id) };
+        let field = |e: &Entity<Composer>| div().h(crate::scale::tpx(32.)).px_3().flex().items_center().bg(c("raise")).child(e.clone());
         let mut col = div().flex().flex_col().gap_3().w(px(620.));
-        if !self.busy.is_empty() { col = col.child(div().text_size(px(14.)).child(self.busy.clone())); }
+        if !self.busy.is_empty() { col = col.child(div().text_size(crate::scale::tpx(14.)).child(self.busy.clone())); }
         else if self.other {
-            col = col.child(div().text_size(px(20.)).font_weight(FontWeight::BOLD).child(trs(OTHER))).child(div().text_size(px(13.)).text_color(c("dim")).child(trs(OTHER_NOTE)))
+            col = col.child(div().text_size(crate::scale::tpx(20.)).font_weight(FontWeight::BOLD).child(trs(OTHER))).child(div().text_size(crate::scale::tpx(13.)).text_color(c("dim")).child(trs(OTHER_NOTE)))
                 .child(field(&self.addr)).child(field(&self.code))
                 .child(div().flex().gap_2().child(button("first-connect", CONNECT, true).on_click(cx.listener(|t, _, w, cx| t.press_connect(w, cx)))).child(button("first-back", BACK, false).on_click(cx.listener(|t, _, _, cx| { t.other = false; t.error.clear(); cx.notify(); }))));
         } else {
             let typed = self.path.read(cx).content.to_string();
-            col = col.child(div().text_size(px(20.)).font_weight(FontWeight::BOLD).child(trs(TITLE))).child(div().text_size(px(13.)).text_color(c("dim")).child(trs(INTRO))).child(field(&self.path));
-            if launch::has_data(std::path::Path::new(typed.trim())) { col = col.child(div().text_size(px(12.)).text_color(c("dim")).child(trs(HAS_DATA))); }
-            /* i18n-ok: drawn through trs */ if let Some(o) = &self.old { col = col.child(div().flex().flex_col().gap_1().p_3().border_1().border_color(c("line")).child(div().text_size(px(12.)).child(o.to_string_lossy().into_owned())).child(div().text_size(px(12.)).text_color(c("dim")).child(trs(OLD_NOTE))).child(div().flex().child(button("first-guide", "Install guide", false).on_click(cx.listener(|_, _, _, cx| cx.open_url(GUIDE)))))); }
+            col = col.child(div().text_size(crate::scale::tpx(20.)).font_weight(FontWeight::BOLD).child(trs(TITLE))).child(div().text_size(crate::scale::tpx(13.)).text_color(c("dim")).child(trs(INTRO))).child(field(&self.path));
+            if launch::has_data(std::path::Path::new(typed.trim())) { col = col.child(div().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(trs(HAS_DATA))); }
+            /* i18n-ok: drawn through trs */ if let Some(o) = &self.old { col = col.child(div().flex().flex_col().gap_1().p_3().border_1().border_color(c("line")).child(div().text_size(crate::scale::tpx(12.)).child(o.to_string_lossy().into_owned())).child(div().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(trs(OLD_NOTE))).child(div().flex().child(button("first-guide", "Install guide", false).on_click(cx.listener(|_, _, _, cx| cx.open_url(GUIDE)))))); }
             col = col.child(div().flex().gap_2().child(button("first-use", USE, true).on_click(cx.listener(|t, _, w, cx| t.press_use(w, cx)))).child(button("first-pick", PICK, false).on_click(cx.listener(|t, _, _, cx| t.press_pick(cx)))).child(button("first-other", OTHER, false).on_click(cx.listener(|t, _, _, cx| { t.other = true; t.error.clear(); cx.notify(); }))));
             let _ = &self.default_home;
         }
-        if !self.error.is_empty() { col = col.child(div().text_size(px(12.)).text_color(c("bad")).child(self.error.clone())); }
+        if !self.error.is_empty() { col = col.child(div().text_size(crate::scale::tpx(12.)).text_color(c("bad")).child(self.error.clone())); }
         div().size_full().flex().items_center().justify_center().bg(c("bg")).text_color(c("text")).child(col)
     }
 }

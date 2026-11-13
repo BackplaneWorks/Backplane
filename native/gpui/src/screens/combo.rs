@@ -15,16 +15,20 @@ const FRAME: f32 = 52.;
 pub const OTHERS: f32 = 300.;
 /// The context chip's frame (padding, border, the gauge and its gap) and the part of OTHERS that is not the context chip ("ctx NN%" was counted in it).
 const TOK_FRAME: f32 = 46.;
-const FIXED: f32 = OTHERS - (TOK_FRAME + 7. * CH);
+/// At the text size in force (scale.rs): a character's width grows with it, and so does Send's word (SEND_W of OTHERS at 100%); the
+/// frames and the icon buttons do not.
+const SEND_W: f32 = 40.;
+fn ch() -> f32 { CH * crate::scale::s() }
+fn fixed() -> f32 { OTHERS - (TOK_FRAME + 7. * CH) + SEND_W * (crate::scale::s() - 1.) }
 /// The row's split between the one chip and the context chip: the context chip says tokens, cost and context (`tok`) while the chip's short form
 /// still fits beside it, else the context alone (`ctx`), so the chip never shows a word cut in half. Returns (the chip's px, the context chip's words).
 pub fn split(bar_w: f32, combo: &Value, tok: &str, ctx: &str) -> (f32, String) {
-    let words = |t: &str| TOK_FRAME + t.chars().count() as f32 * CH;
+    let words = |t: &str| TOK_FRAME + t.chars().count() as f32 * ch();
     if bar_w <= 0. { return (0., if tok.is_empty() { ctx.to_string() } else { tok.to_string() }) }
     let short = string(combo, "short");
-    let need = FRAME + short.chars().count() as f32 * CH;
-    let text = if !tok.is_empty() && (ctx.is_empty() || bar_w - FIXED - words(tok) >= need) { tok } else { ctx };
-    (bar_w - FIXED - words(text), text.to_string())
+    let need = FRAME + short.chars().count() as f32 * ch();
+    let text = if !tok.is_empty() && (ctx.is_empty() || bar_w - fixed() - words(tok) >= need) { tok } else { ctx };
+    (bar_w - fixed() - words(text), text.to_string())
 }
 
 /// Chip.words: the longest of the hub's three forms (full, mid, short) that fits `avail` px; the full one while the width is not known yet (0).
@@ -32,7 +36,7 @@ pub fn words(combo: &Value, avail: f32) -> String {
     let forms: Vec<String> = ["full", "mid", "short"].iter().map(|k| string(combo, k)).filter(|s| !s.is_empty()).collect();
     let Some(last) = forms.last().cloned() else { return String::new() };
     if avail <= 0. { return forms[0].clone() }
-    forms.into_iter().find(|f| FRAME + f.chars().count() as f32 * CH <= avail).unwrap_or(last)
+    forms.into_iter().find(|f| FRAME + f.chars().count() as f32 * ch() <= avail).unwrap_or(last)
 }
 /// The colour token of the chip's words: the hub's tone ("warn", "bad"), else plain.
 pub fn tone(combo: &Value) -> &'static str { match combo["tone"].as_str() { Some("bad") => "bad", Some("warn") => "warn", _ => "text" } }
@@ -64,7 +68,7 @@ pub fn chip(cx: &mut Context<Backplane>, light: bool, thread: &Value, avail: f32
     // where it was drawn: a press on it is the chip's own (it shuts the menu), not a press outside the menu
     let at = this_chip.clone();
     div().id("model-chip").relative().cursor_pointer().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().px_3().py_1().border_1().border_color(c("line")).bg(c("panel")).hover(|s| s.bg(c("raise")))
-        .text_size(px(12.)).font(crate::art::mono_font()).flex().items_center().gap_2()
+        .text_size(crate::scale::tpx(12.)).font(crate::art::mono_font()).flex().items_center().gap_2()
         .child(canvas(move |b, _, _| at.set(b), |_, _, _, _| {}).absolute().top_0().left_0().size_full()).child(crate::art::probe("modelchip"))
         .child(super::picker::logo(&provider)).child(div().min_w_0().overflow_hidden().text_ellipsis().text_color(c(tone(combo))).child(text))
         .when(!tipped.is_empty() && !menu_open, |d| d.tooltip(move |_, cx| cx.new(|_| Tip(tipped.clone(), light)).into()))
@@ -75,7 +79,7 @@ pub(crate) struct Tip(pub String, pub bool);
 impl Render for Tip {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
         let c = |n: &str| theme::color(self.1, n);
-        div().px_2().py_1().border_1().border_color(c("line")).bg(c("panel")).text_color(c("text")).text_size(px(12.)).flex().flex_col().children(self.0.lines().map(|l| div().whitespace_nowrap().child(l.to_string())).collect::<Vec<_>>())
+        div().px_2().py_1().border_1().border_color(c("line")).bg(c("panel")).text_color(c("text")).text_size(crate::scale::tpx(12.)).flex().flex_col().children(self.0.lines().map(|l| div().whitespace_nowrap().child(l.to_string())).collect::<Vec<_>>())
     }
 }
 

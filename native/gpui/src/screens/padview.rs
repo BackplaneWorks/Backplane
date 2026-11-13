@@ -92,7 +92,7 @@ impl Backplane {
 
 fn tool_button(cx: &mut Context<Backplane>, light: bool, id: &'static str, rect: &'static str, label: String, tool: Tool, on: bool) -> impl IntoElement {
     let c = |n: &str| theme::color(light, n);
-    with_rect(div().id(id), || rect.to_string()).h(px(26.)).px_3().flex().items_center().border_1().text_size(px(12.)).cursor_pointer()
+    with_rect(div().id(id), || rect.to_string()).h(crate::scale::tpx(26.)).px_3().flex().items_center().border_1().text_size(crate::scale::tpx(12.)).cursor_pointer()
         .border_color(if on { c("accent") } else { c("line") }).bg(if on { c("accent") } else { c("panel") }).text_color(if on { c("on-accent") } else { c("text") }).child(label)
         .on_click(cx.listener(move |this, _, window, cx| { this.pad_commit_length(window, cx); this.pad_with(cx, |p| p.pad.set_tool(tool)); }))
 }
@@ -133,11 +133,11 @@ pub fn view(cx: &mut Context<Backplane>, window: &mut Window, light: bool, l: &c
     if let Some((x, y)) = p.pad.length_at() {
         let k = pw / pad::W as f32;
         /* i18n-ok: a control label */ ctl.push(CtlEntry { id: "pad:length".into(), label: "Length".into(), ctl: Ctl::Pad });
-        paper = paper.child(with_rect(div().id("pad-length"), || "pad:length".to_string()).absolute().left(px((x * k - 70.).clamp(0., pw - 140.))).top(px((y * k - 14.).clamp(0., ph - 28.))).w(px(140.)).px_2().py_1().border_1().border_color(c("accent")).bg(c("view")).text_size(px(13.)).text_color(c("text"))
+        paper = paper.child(with_rect(div().id("pad-length"), || "pad:length".to_string()).absolute().left(px((x * k - 70.).clamp(0., pw - 140.))).top(px((y * k - 14.).clamp(0., ph - 28.))).w(px(140.)).px_2().py_1().border_1().border_color(c("accent")).bg(c("view")).text_size(crate::scale::tpx(13.)).text_color(c("text"))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()).child(p.length.clone()));
     }
     let hint = hint(tool, &keys::hint(l, "pad-undo"), &keys::hint(l, "pad-delete"));
-    let foot_button = |id: &'static str, rect: &'static str, label: String| with_rect(div().id(id), || rect.to_string()).h(px(26.)).px_3().flex().items_center().text_size(px(12.)).child(label);
+    let foot_button = |id: &'static str, rect: &'static str, label: String| with_rect(div().id(id), || rect.to_string()).h(crate::scale::tpx(26.)).px_3().flex().items_center().text_size(crate::scale::tpx(12.)).child(label);
     Some(div().id("pad-back").key_context("DrawPad").track_focus(&p.focus).absolute().inset_0().occlude().flex().items_center().justify_center().p_4().bg(hsla(0., 0., 0., 0.6))
         .on_action(cx.listener(|this, _: &Undo, _, cx| this.pad_with(cx, |p| p.pad.undo())))
         .on_action(cx.listener(|this, _: &Delete, _, cx| this.pad_with(cx, |p| p.pad.delete())))
@@ -155,7 +155,7 @@ pub fn view(cx: &mut Context<Backplane>, window: &mut Window, light: bool, l: &c
         .child(div().id("pad-box").w(px(pw + 26.)).flex_shrink_0().flex().flex_col().gap_2().p_3().bg(c("panel")).border_1().border_color(c("line")).text_color(c("text"))
             // a press anywhere on the box is not a press outside it, and ends a length being typed
             .on_mouse_down(MouseButton::Left, cx.listener(|this, _, window, cx| { this.pad_commit_length(window, cx); cx.stop_propagation(); }))
-            .child(div().flex().items_baseline().gap_3().child(div().font_weight(FontWeight::BOLD).child(trs("Draw"))).child(div().flex_1().min_w_0().text_size(px(12.)).text_color(c("dim")).child(hint)))
+            .child(div().flex().items_baseline().gap_3().child(div().font_weight(FontWeight::BOLD).child(trs("Draw"))).child(div().flex_1().min_w_0().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(hint)))
             .child(div().flex().items_center().gap_2()
                 .child(tool_button(cx, light, "pad-pen", "pad:pen", trs("Pen"), Tool::Pen, tool == Tool::Pen))
                 .child(tool_button(cx, light, "pad-box-tool", "pad:box", trs("Box"), Tool::Boxes, tool == Tool::Boxes))

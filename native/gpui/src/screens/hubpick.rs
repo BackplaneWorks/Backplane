@@ -179,7 +179,7 @@ pub fn picker(this: &Backplane, cx: &mut Context<Backplane>, light: bool, ctl: &
     /* i18n-ok: ctl labels are what drivers press */ ctl.push(CtlEntry { id: "hub:menu".into(), label: "Hub".into(), ctl: Ctl::Hub(Act::Menu) });
     let mut col = div().flex().flex_col().border_b_1().border_color(c("rule")).child(
         // the thread header's row height (less this column's rule, which the header's row counts in its own), so the two rules are one line
-        div().id("hub-picker").flex().items_center().gap_2().px_3().h(px(super::head::ROW_H - 1.)).cursor_pointer().text_size(px(12.)).hover(|s| s.bg(c("panel")))
+        div().id("hub-picker").flex().items_center().gap_2().px_3().h(crate::scale::tpx(super::head::ROW_H - 1.)).cursor_pointer().text_size(crate::scale::tpx(12.)).hover(|s| s.bg(c("panel")))
             .children(away.as_ref().map(|_| crate::art::icon("link", 12., c("accent"))))
             .child(div().flex_1().min_w_0().overflow_hidden().text_ellipsis().whitespace_nowrap().when(away.is_some(), |d| d.text_color(c("accent"))).child(crate::i18n::trs(&cur))).child(crate::art::icon(if this.hub_menu { "chevron-down" } else { "chevron-right" }, 14., c("dim")))
             .on_click(cx.listener(|this, _, _, cx| act(this, Act::Menu, cx))));
@@ -187,10 +187,10 @@ pub fn picker(this: &Backplane, cx: &mut Context<Backplane>, light: bool, ctl: &
         for e in es.iter().skip(1) {
             ctl.push(CtlEntry { id: format!("hub:use:{}", e.key), label: e.label.clone(), ctl: Ctl::Hub(Act::Use(e.key.clone())) });
             let k = e.key.clone();
-            col = col.child(div().id(SharedString::from(format!("hub-use-{}", e.key))).px_3().py_1().cursor_pointer().text_size(px(12.)).hover(|s| s.bg(c("panel"))).child(crate::i18n::trs(&e.label)).on_click(cx.listener(move |this, _, _, cx| act(this, Act::Use(k.clone()), cx))));
+            col = col.child(div().id(SharedString::from(format!("hub-use-{}", e.key))).px_3().py_1().cursor_pointer().text_size(crate::scale::tpx(12.)).hover(|s| s.bg(c("panel"))).child(crate::i18n::trs(&e.label)).on_click(cx.listener(move |this, _, _, cx| act(this, Act::Use(k.clone()), cx))));
         }
         /* i18n-ok: ctl labels are what drivers press */ ctl.push(CtlEntry { id: "hub:add".into(), label: "Add a hub".into(), ctl: Ctl::Hub(Act::Add) });
-        col = col.child(div().id("hub-add").px_3().py_1().cursor_pointer().text_size(px(12.)).text_color(c("dim")).hover(|s| s.bg(c("panel"))).child(crate::i18n::trs("Add a hub")).on_click(cx.listener(|this, _, _, cx| act(this, Act::Add, cx))));
+        col = col.child(div().id("hub-add").px_3().py_1().cursor_pointer().text_size(crate::scale::tpx(12.)).text_color(c("dim")).hover(|s| s.bg(c("panel"))).child(crate::i18n::trs("Add a hub")).on_click(cx.listener(|this, _, _, cx| act(this, Act::Add, cx))));
     }
     col
 }

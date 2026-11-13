@@ -29,6 +29,8 @@ pub struct Palette { pub focus: bool, pub open: bool, pub input: Option<Entity<C
     pub find_all: bool,
     /// what the hub found said (`thread.search`) for `hits_q`; the ask in flight is `asked` with its tag
     pub hits: Vec<Item>, pub hits_q: String, asked: (u64, String), seq: u64,
+    /// the list's scroll: it scrolls when its rows are taller than the box (a large text size), and keeps the chosen row in view
+    pub scroll: ScrollHandle,
     /// the threads whose title has every word, from the hub (the sidebar's rows are only its first page), for `hits_q`
     pub titles: Vec<Item> }
 
@@ -197,14 +199,14 @@ impl Backplane {
             cx.observe(&input, |this, input, cx| { let q = input.read(cx).content.to_string(); if q != this.screens.palette.q { this.screens.palette.q = q; this.screens.palette.ix = 0; this.palette_search(cx); } cx.notify(); }).detach();
             cx.subscribe(&input, |this, _, ev: &ComposerEvent, cx| match ev {
                 ComposerEvent::Submit | ComposerEvent::PopupPick => this.palette_run(None, cx),
-                ComposerEvent::PopupMove(d) => { let n = listed(&this.data, &this.screens.palette).len().max(1); this.screens.palette.ix = (this.screens.palette.ix as i32 + d).rem_euclid(n as i32) as usize; cx.notify(); }
+                ComposerEvent::PopupMove(d) => { let n = listed(&this.data, &this.screens.palette).len().max(1); this.screens.palette.ix = (this.screens.palette.ix as i32 + d).rem_euclid(n as i32) as usize; this.screens.palette.scroll.scroll_to_item(this.screens.palette.ix); cx.notify(); }
                 _ => {}
             }).detach();
             self.screens.palette.input = Some(input);
         }
         let input = self.screens.palette.input.clone().unwrap();
         /* i18n-ok: placeholders drawn through trs by the input, and the text through trs */ input.update(cx, |i, cx| { i.set(String::new(), cx); i.popup_open = true; i.set_placeholder("Jump to a thread, run a command or find what was said"); });
-        self.screens.palette.q.clear(); self.screens.palette.ix = 0; self.screens.palette.open = true; self.screens.palette.scope.clear(); self.screens.palette.find_all = false;
+        self.screens.palette.q.clear(); self.screens.palette.ix = 0; self.screens.palette.scroll.set_offset(point(px(0.), px(0.))); self.screens.palette.open = true; self.screens.palette.scope.clear(); self.screens.palette.find_all = false;
         // what an earlier opening found is not this one's (a thread's search must never show another thread's hits)
         self.screens.palette.hits.clear(); self.screens.palette.titles.clear(); self.screens.palette.hits_q.clear(); self.screens.palette.asked = (0, String::new());
         self.screens.palette.focus = true; cx.notify();
@@ -251,7 +253,8 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, data: &Value, p: &Palette,
     let list = listed(data, p);
     let ix = p.ix.min(list.len().saturating_sub(1));
     let current = crate::keys::project_of(data, sel);
-    let mut col = div().flex().flex_col().py_1();
+    // (its rows are its children in order, so the scroll handle's item n is row n)
+    let mut col = div().id("palette-list").flex().flex_col().py_1().flex_1().min_h_0().overflow_y_scroll().track_scroll(&p.scroll);
     /* i18n-ok: placeholders drawn through trs by the input, and the text through trs */ if list.is_empty() { col = col.child(div().px_3().py_1().text_color(c("faint")).child(crate::i18n::trs(if (!p.scope.is_empty() || p.find_all) && search_of(&p.q).is_none() { if p.find_all { "Type a word said in any thread" } else { "Type a word said in this thread" } } else { "Nothing matches" }))); }
     for (i, it) in list.iter().enumerate() {
         let want = it.row["want"].as_str().unwrap_or("").to_string();
@@ -262,15 +265,15 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, data: &Value, p: &Palette,
                     (Do::Message(..), Some(r)) => StyledText::new(it.label.clone()).with_highlights([(r, HighlightStyle { color: Some(c("text").into()), font_weight: Some(FontWeight::BOLD), ..Default::default() })]).into_any_element(),
                     _ => it.label.clone().into_any_element(),
                 }))
-            .when(!want.is_empty(), |d| d.child(div().text_size(px(11.)).text_color(c(if want == "failed" { "dim" } else { "bad" })).child(trs(&want))))
-            .child(div().text_size(px(11.)).text_color(c("dim")).child(shortcut(it, &current, l)))
-            .child(div().flex_shrink_0().max_w(px(220.)).overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(px(11.)).text_color(c("faint")).child(if it.place.is_empty() { trs(it.kind) } else { it.place.clone() }))
+            .when(!want.is_empty(), |d| d.child(div().text_size(crate::scale::tpx(11.)).text_color(c(if want == "failed" { "dim" } else { "bad" })).child(trs(&want))))
+            .child(div().text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(shortcut(it, &current, l)))
+            .child(div().flex_shrink_0().max_w(px(220.)).overflow_hidden().whitespace_nowrap().text_ellipsis().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(if it.place.is_empty() { trs(it.kind) } else { it.place.clone() }))
             .on_click(cx.listener(move |this, _, _, cx| this.palette_run(Some(i), cx))));
     }
     let input = p.input.clone().map(|s| div().px_3().py_2().border_b_1().border_color(c("line")).child(s));
-    Some(div().id("palette").absolute().inset_0().occlude().flex().justify_center().pt(px(90.)).bg(gpui::hsla(0., 0., 0., 0.4))
+    Some(div().id("palette").absolute().inset_0().occlude().flex().justify_center().pt(px(90.)).pb(px(24.)).bg(gpui::hsla(0., 0., 0., 0.4))
         .on_mouse_down(MouseButton::Left, cx.listener(|this, _, _, cx| { this.palette_close(cx); }))
-        .child(div().id("palette-box").w(px(560.)).max_w_full().h_auto().max_h(px(420.)).flex().flex_col().border_1().border_color(c("line")).bg(c("panel")).text_size(px(13.))
+        .child(div().id("palette-box").w(crate::scale::tpx(560.)).max_w_full().h_auto().max_h(crate::scale::tpx(420.)).overflow_hidden().flex().flex_col().border_1().border_color(c("line")).bg(c("panel")).text_size(crate::scale::tpx(13.))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation()).children(input).child(col)).into_any_element())
 }
 
