@@ -383,7 +383,13 @@ fn kicad_row(f: &Facts, pkg: Option<&crate::files::kicad::install::Package>) -> 
             if kept > 0 && total > 0 { r["progress"] = json!(((kept.min(total) as f64 / total as f64) * 1000.).round() / 1000.); }
             r
         }
-        Action::Offer if status == "ok" => yourself(row("KiCad", &format!("Backplane KiCad{} at {}. Backplane KiCad{} is out: it brings the KiCad editor inside Backplane's viewer.", v(version), i("kicad.cli"), v(pkg.map_or("", |p| p.version))), vec![btn("Update KiCad", "ob-kicad-install", "", true)])),
+        // the update: the installed version (its path is in Settings, CAD), what the new one adds over it, from what it lacks
+        Action::Offer if status == "ok" => {
+            let have: Vec<&str> = i("kicad.caps").split(',').filter(|c| !c.is_empty()).collect();
+            let why = crate::files::kicad::install::update_reason(&have).map_or(String::new(), |w| format!(" {w}"));
+            let r = yourself(row("KiCad", &format!("Backplane KiCad{} is installed; Backplane KiCad{} is out.{why}", v(version), v(pkg.map_or("", |p| p.version))), vec![btn("Update KiCad", "ob-kicad-install", "", true)]));
+            r
+        }
         Action::Offer => yourself(row("KiCad", &format!("{} {} Backplane KiCad adds editing by agents.", found, offer_lead(status)).trim().replace("  ", " "), vec![btn("Install Backplane KiCad", "ob-kicad-install", "", true)])),
         Action::NoPackage => row("KiCad", &if found.is_empty() { format!("{} No Backplane KiCad is published for this computer. Stock KiCad 9 or later works for viewing and export.", if f.checked { "Not found." } else { looking(f) }) } else { found.clone() }.trim().to_string(),
             vec![link("Download KiCad", KICAD_STOCK), rel]),
@@ -791,6 +797,17 @@ mod tests {
         let n = g["note"].as_str().unwrap(); assert!(n.contains("no worktree") && n.contains("not committed") && n.ends_with("To add it: sudo apt install git"), "{n}");
         assert_eq!(g["buttons"][0]["value"], "sudo apt install git");
         assert!(!rows(json!(true)).iter().any(|x| x["label"] == "Git") && !rows(Value::Null).iter().any(|x| x["label"] == "Git"));
+    }
+    /// The update row says the installed version (no path) and what the new pin adds over it, from the installed runtime's capabilities.
+    #[test] fn the_update_row_says_what_this_step_brings() {
+        use crate::files::kicad::install::{pick, LINUX};
+        let row_for = |caps: &str| { let mut i = info("linux"); i["kicad.status"] = json!("ok"); i["kicad.cli"] = json!("/h/kicad/10.99.0-bp.4/bin/kicad-cli"); i["kicad.version"] = json!("10.99.0-bp.4"); i["kicad.caps"] = json!(caps);
+            let s0 = cst(blank(), &[]); tools_with(&Facts::of(&s0, &i), &s0, &sess(json!({})), pick("linux", "x86_64")).rows.into_iter().find(|r| r["label"] == "KiCad").unwrap() };
+        let k = row_for("embed,coedit"); let n = k["note"].as_str().unwrap();
+        assert_eq!(n, format!("Backplane KiCad 10.99.0-bp.4 is installed; Backplane KiCad {} is out. It fixes a DRC fault that could miss a short inside a filled zone.", LINUX.version));
+        assert!(!n.contains("/h/kicad"), "no path in the sentence"); assert_eq!(k["buttons"][0]["label"], "Update KiCad");
+        assert!(row_for("api-server")["note"].as_str().unwrap().ends_with("filled zone, and brings the KiCad editor inside Backplane's viewer."));
+        assert!(row_for("drc-zone-guard")["note"].as_str().unwrap().ends_with("is out. It brings the KiCad editor inside Backplane's viewer."));
     }
     /// While KiCad downloads: its bytes over a bar, Locate and Skip quiet until asked for; when the one automatic start has passed and nothing
     /// runs, a press (continuing a kept download), never a "Downloading" that nothing does.

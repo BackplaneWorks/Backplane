@@ -511,7 +511,9 @@ pub fn install_row(session: &Value, info: &Value, pkg: Option<&crate::files::kic
             _ if draft(session, "@kinstall") == "ask" => row("Update Backplane KiCad?", &format!("Downloads Backplane KiCad {} (about 1 GB) from {FROM} and puts it beside {}, which stays. It brings the KiCad editor inside Backplane's viewer (Edit).", p.version, i("kicad.version")),
                 vec![btn("Update", "kicad-install", "", true), btn("Cancel", "kicad-install-cancel", "", false)]),
             "failed" => row("Update Backplane KiCad", &format!("{note}."), vec![btn("Try again", "kicad-install-ask", "", true)]),
-            _ => row("Update Backplane KiCad", &format!("Backplane KiCad {} is out; this computer has {}. It brings the KiCad editor inside Backplane's viewer (Edit).", p.version, i("kicad.version")), vec![btn("Update KiCad", "kicad-install-ask", "", true)]),
+            _ => { let have: Vec<&str> = i("kicad.caps").split(',').filter(|c| !c.is_empty()).collect();
+                let why = crate::files::kicad::install::update_reason(&have).map_or(String::new(), |w| format!(" {w}"));
+                row("Update Backplane KiCad", &format!("Backplane KiCad {} is out; this computer has {}.{why}", p.version, i("kicad.version")), vec![btn("Update KiCad", "kicad-install-ask", "", true)]) }
         });
     }
     let Some(p) = pkg else { return Some(row("Install KiCad", &format!("No Backplane KiCad is published for this computer ({}). Install KiCad from kicad.org, then set its path above.", crate::files::kicad::install::this_computer()), vec![])) };

@@ -501,6 +501,17 @@ pub fn decide(pkg: Option<&Package>, status: &str, version: &str, install_state:
         _ => Action::Offer,
     }
 }
+/// Why the update is worth taking, in one sentence, from what the installed runtime lacks (`have`: its manifest's capabilities): the
+/// DRC zone guard first (a safety fix), then the editor inside Backplane. None when it lacks neither (a newer build with nothing named).
+pub fn update_reason(have: &[&str]) -> Option<&'static str> {
+    let embed = have.iter().any(|c| *c == "embed" || *c == "embedded");
+    match (have.contains(&"drc-zone-guard"), embed) {
+        (false, false) => Some("It fixes a DRC fault that could miss a short inside a filled zone, and brings the KiCad editor inside Backplane's viewer."),
+        (false, true) => Some("It fixes a DRC fault that could miss a short inside a filled zone."),
+        (true, false) => Some("It brings the KiCad editor inside Backplane's viewer."),
+        (true, true) => None,
+    }
+}
 /// Why a request is refused, None when it may run. `found`: the KiCad `ipc::runtime` found ("" for none); `status` its status. Only a compatible
 /// Backplane KiCad refuses: a stock or old one is what the install replaces as the runtime the hub picks (the managed folder is searched first).
 pub fn refusal(found: &str, status: &str, version: &str, consent: bool, running: bool, p: Option<&Package>) -> Option<String> {
@@ -854,6 +865,15 @@ cp \"$f\" \"$out\"
         assert_eq!(exit_words("curl", Some(18)), "the connection ended before the file was whole");
         assert_eq!(exit_words("wget", Some(4)), "the network failed");
         assert_eq!(exit_words("curl", Some(99)), "curl stopped (exit 99)"); assert_eq!(exit_words("tar", None), "tar stopped (killed)");
+    }
+    /// The update's reason is what the new pin adds over the installed runtime, the safety fix first, one sentence; none when it lacks neither.
+    #[test] fn the_update_says_what_it_adds_over_the_installed_runtime() {
+        let zone = "It fixes a DRC fault that could miss a short inside a filled zone.";
+        assert_eq!(update_reason(&["embed", "coedit"]), Some(zone), "bp.10 to bp.12.1");
+        assert_eq!(update_reason(&["api-server"]), Some("It fixes a DRC fault that could miss a short inside a filled zone, and brings the KiCad editor inside Backplane's viewer."), "bp.4: both, the safety one first");
+        assert_eq!(update_reason(&["drc-zone-guard"]), Some("It brings the KiCad editor inside Backplane's viewer."));
+        assert_eq!(update_reason(&["embedded", "drc-zone-guard"]), None);
+        assert_eq!(update_reason(&[]).unwrap().matches('.').count(), 1, "one sentence");
     }
     #[test] fn progress_is_said_in_megabytes_and_time_left() {
         let mb = 1u64 << 20;

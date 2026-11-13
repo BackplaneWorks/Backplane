@@ -284,7 +284,9 @@ pub async fn publish_cad(hub: &Arc<Hub>) {
     let (status, version) = cad_status(&env, ran.as_deref());
     let source = if hub.setting("kicad.path").await.map_or(false, |s| !s.is_empty()) { "setting" } else { "path" };
     let fc = super::stepglb::freecad_cmd(&hub.cfg.home);
-    for (k, v) in [("kicad.cli", env.cli.as_str()), ("kicad.version", version.as_str()), ("kicad.status", status.as_str()), ("kicad.source", source), ("freecad", fc.as_str())] { hub.set_info(k, v).await; }
+    // the found runtime's own capabilities (its manifest), comma-separated: what an update offers over it is said from these
+    let caps = env.caps.join(",");
+    for (k, v) in [("kicad.cli", env.cli.as_str()), ("kicad.version", version.as_str()), ("kicad.status", status.as_str()), ("kicad.source", source), ("kicad.caps", caps.as_str()), ("freecad", fc.as_str())] { hub.set_info(k, v).await; }
 }
 /// What Settings > CAD says of a runtime: its status and version from the probe's `--version` (None: it did not run). A Backplane
 /// runtime's `--version` prints only KiCad's number (bp.4 prints `10.99.0`), so its manifest's version and status are taken when the
