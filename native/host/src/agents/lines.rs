@@ -356,7 +356,7 @@ impl Cx {
                 if self.running && !s(o, "error").is_empty() { // Claude.api.err
                     let text = m.get("content").and_then(Value::as_array).and_then(|a| a.iter().find(|b| s(b, "type") == "text")).map(|b| s(b, "text")).unwrap_or("");
                     let text = if text.trim().is_empty() { s(o, "error") } else { text };
-                    ev.push(json!({"$":"ActivityLogged","thread":self.thread,"act":hub_id("api", at, self.seq),"tone":"error","kind":"api","summary":text,"at":at}));
+                    ev.push(json!({"$":"ActivityLogged","thread":self.thread,"act":hub_id("api", at, self.seq),"tone":"error","kind":"api","summary":super::rules::sign_in_lock_say(text.to_string()),"at":at}));
                 }
                 fx.events = ev; fx.delta_end = true;
             }
@@ -364,7 +364,7 @@ impl Cx {
                 let mut ev = vec![];
                 if flow == Flow::Legacy && self.running {
                     if o.get("is_error").and_then(Value::as_bool).unwrap_or(false) {
-                        ev.push(json!({"$":"ActivityLogged","thread":self.thread,"act":hub_id("e", at, 0),"tone":"error","kind":"result","summary":Cx::why(o),"at":at}));
+                        ev.push(json!({"$":"ActivityLogged","thread":self.thread,"act":hub_id("e", at, 0),"tone":"error","kind":"result","summary":super::rules::sign_in_lock_say(Cx::why(o)),"at":at}));
                         ev.push(json!({"$":"TurnChanged","thread":self.thread,"state":"failed","at":at}));
                     } else { ev.push(json!({"$":"TurnChanged","thread":self.thread,"state":"completed","at":at})) }
                     self.running = false;
@@ -392,7 +392,7 @@ impl Cx {
         let mut ev = vec![];
         match verdict {
             3 => ev.push(json!({"$":"TurnChanged","thread":self.thread,"state":"completed","at":at})),
-            4 => { ev.push(json!({"$":"ActivityLogged","thread":self.thread,"act":hub_id("e", at, 0),"tone":"error","kind":"result","summary":text,"at":at})); ev.push(json!({"$":"TurnChanged","thread":self.thread,"state":"failed","at":at})) }
+            4 => { ev.push(json!({"$":"ActivityLogged","thread":self.thread,"act":hub_id("e", at, 0),"tone":"error","kind":"result","summary":super::rules::sign_in_lock_say(text.to_string()),"at":at})); ev.push(json!({"$":"TurnChanged","thread":self.thread,"state":"failed","at":at})) }
             5 => ev.push(json!({"$":"TurnChanged","thread":self.thread,"state":"interrupted","at":at})),
             _ => return ev,
         }
