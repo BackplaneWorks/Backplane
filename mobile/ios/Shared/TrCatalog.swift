@@ -1697,6 +1697,7 @@ secret.vault.file	Sealed with a key file on this machine (no keychain answered).
 secret.vault.locked	The vault is locked: {why}	保管庫がロックされています: {why}
 secret.open.tip	Give an agent a secret without pasting it into the chat	チャットに貼らずにエージェントへシークレットを渡す
 image.copy	Copy image	画像をコピー
+image.save.as	Save image as…	名前を付けて画像を保存…
 image.show	Show file	ファイルを表示
 image.share	Share image	画像を共有
 intent.title	Intent	意図
@@ -1877,6 +1878,25 @@ gpui.one.shared.list.agents.in	One shared list: agents in every thread read and 
 gpui.new.item	New item	新しい項目
 gpui.handoff.from	Handed over from {title}	{title}から引き継ぎ
 gpui.handoff.note	Note: {note}	メモ: {note}
+gpui.halt.details	Details	詳細
+hub.halt.oom	Out of memory	メモリ不足
+hub.halt.context	Context full	コンテキストがいっぱい
+hub.halt.compact.failed	Compaction failed	圧縮に失敗しました
+hub.halt.resume	Resume	再開
+hub.halt.retry.last	Retry last message	最後のメッセージを再送
+hub.halt.compact	Compact	圧縮
+hub.halt.fresh	Start fresh with summary	要約を引き継いで新しく始める
+hub.halt.process	Process	プロセス
+hub.halt.limit	Limit	上限
+hub.halt.cause	Cause	原因
+hub.halt.cause.cap	this thread's memory limit	このスレッドのメモリ上限
+hub.halt.cause.shared	the limit all agents share	すべてのエージェントで共有するメモリ上限
+hub.halt.cause.machine	the computer ran out of memory	コンピューターのメモリが足りなくなりました
+hub.halt.cause.kill	killed (signal 9)	強制終了 (シグナル 9)
+hub.halt.resumed	Resumed	再開しました
+hub.halt.raised	Limit raised; resumed	上限を上げて再開しました
+hub.halt.compacting	Compacting	圧縮中
+hub.halt.started.fresh	Started fresh with a summary	要約を引き継いで新しく始めました
 gpui.subview.back	Back to {title}	{title}に戻る
 gpui.subview.more	{more, plural, one {# earlier step not shown} other {# earlier steps not shown}}	以前の{more}ステップは表示されていません
 gpui.no.matches	No matches	一致なし
@@ -2362,7 +2382,15 @@ gpui.c.cap.nox11	Screen capture needs an X11 display.	画面キャプチャー�
 gpui.c.cap.nostart	ffmpeg did not start.	ffmpegを起動できませんでした。
 gpui.c.cap.failed	The window could not be captured. Capture again or choose an image.	ウィンドウをキャプチャーできませんでした。もう一度キャプチャーするか、画像を選んでください。
 gpui.c.cap.recfailed	Recording failed or went over the size limit. Record a shorter clip.	録画に失敗したか、サイズの上限を超えました。もっと短く録画してください。
-gpui.c.image.close	{name} · click or Esc to close	{name} · クリックまたはEscで閉じる
+gpui.c.image.close	Esc or a click outside the picture to close	Escまたは画像の外をクリックで閉じる
+gpui.c.image.size	{w} × {h} px	{w} × {h} px
+gpui.c.image.fit	Fit	全体表示
+gpui.c.image.loading.full	Loading the full-size picture…	元のサイズの画像を読み込み中…
+gpui.c.image.full.failed	The full-size picture did not load; this is a smaller copy.	元のサイズの画像を読み込めませんでした。縮小版を表示しています。
+gpui.c.image.saved	Saved to {path}	{path} に保存しました
+gpui.c.image.err.nohub	the full-size picture is not on a hub	元のサイズの画像がハブにありません
+gpui.c.image.err.unsent	the hub did not send the full-size picture	ハブから元のサイズの画像が届きませんでした
+gpui.c.image.save.failed	Could not save: {why}	保存できませんでした: {why}
 gpui.c.plot.toobig	This plot is {mb} MB, too large to show here.	このプロットは{mb} MBあり、ここに表示するには大きすぎます。
 gpui.c.plot.unread	The plot from the hub could not be read. Reopen the view to load it again.	ハブからのプロットを読み取れませんでした。ビューを開き直して再読み込みしてください。
 gpui.c.plot.badref	Invalid geometry reference. Retry to reload this view.	形状の参照が不正です。再試行してこのビューを再読み込みしてください。
@@ -2374,6 +2402,7 @@ gpui.c.pad.pen	Pen	ペン
 gpui.c.pad.box	Box	枠
 gpui.c.pad.eraser	Eraser	消しゴム
 gpui.c.kicad.kicad.could.not.start	KiCad could not start:	KiCad を起動できませんでした:
+gpui.c.kicad.try.again	Click the Board or Schematic tab to try again.	「基板」か「回路図」タブをクリックすると、もう一度起動します。
 gpui.c.kicad.kicad.is.not.responding	KiCad is not responding.	KiCad が応答していません。
 gpui.c.kicad.kicad.was.closed	KiCad was closed.	KiCad は閉じられました。
 gpui.c.kicad.starting.kicad	Starting KiCad…	KiCad を起動しています…
@@ -4121,6 +4150,7 @@ gpui.mgmt.plan.show	Show done	完了を表示
 gpui.mgmt.plan.done	done	完了
 gpui.mgmt.plan.layer	Approve layer	層を承認
 gpui.mgmt.plan.reject	Reject	却下
+gpui.mgmt.plan.keysnote	On this KiCad version, approve from this panel: in plan view KiCad's A, R and W keys aren't the plan's yet (A opens Add Footprint). Update KiCad.	このバージョンのKiCadでは、このパネルから承認してください。プランビューでのKiCadのA・R・Wキーはまだ計画のものではありません（Aはフットプリントの追加を開きます）。KiCadを更新してください。
 gpui.mgmt.plan.reference	over {layer}	基準 {layer}
 gpui.mgmt.plan.nets	{n, plural, one {# net} other {# nets}}	ネット{n}本
 gpui.mgmt.plan.tab	Plan	計画
@@ -4223,6 +4253,21 @@ gpui.mgmt.bom.stock.low	low {n}	少 {n}
 gpui.gerbers.boardonly	board only	基板だけ
 gpui.gerbers.gerbersonly	Gerbers only	ガーバーだけ
 gpui.mgmt.life.price.since	since {day}	{day}から
+gpui.streamer.account	account {n}	アカウント {n}
+gpui.streamer.mode	Streamer mode	配信モード
+gpui.streamer.section	Streaming	配信
+gpui.streamer.off	Streamer mode: turn off	配信モード: オフにする
+gpui.streamer.on	Streamer mode: hide emails, paths and machine names	配信モード: メール・パス・マシン名を隠す
+gpui.streamer.tip	Streamer mode: emails, paths, machine names and codes are hidden. Click to turn it off.	配信モード: メール、パス、マシン名、コードを隠しています。クリックでオフにします。
+gpui.streamer.shared	screen shared	画面共有中
+gpui.streamer.qr	The code is hidden in streamer mode.	配信モード中はコードを隠しています。
+gpui.streamer.note	Hides emails, account names, home folders, machine names, addresses, codes and keys wherever they are drawn, for screen recordings and streams. Pictures in threads are not hidden.	画面の録画や配信のために、メール、アカウント名、ホームフォルダー、マシン名、アドレス、コード、キーを表示されるすべての場所で隠します。スレッド内の画像は隠しません。
+gpui.streamer.share	Turn on while the screen is shared	画面共有中はオンにする
+gpui.streamer.apps	Turn on while a recording app runs	録画アプリの実行中はオンにする
+gpui.streamer.apps.note	A guess: OBS, SimpleScreenRecorder, Kazam, vokoscreen, Peek, Kooha, GPU Screen Recorder, wf-recorder, ffmpeg grabbing the screen (and Loom, ScreenFlow, Streamlabs ... on macOS and Windows). It turns on while one runs, recording or not.	推測による判定です: OBS、SimpleScreenRecorder、Kazam、vokoscreen、Peek、Kooha、GPU Screen Recorder、wf-recorder、画面を取り込む ffmpeg(macOS と Windows では Loom、ScreenFlow、Streamlabs など)。録画中かどうかにかかわらず、実行中はオンになります。
+gpui.streamer.linux	Linux: a screen shared through the desktop's portal (PipeWire screen cast: GNOME, KDE, wlroots) is seen. A capture that reads X11 directly (OBS's Screen Capture (XSHM), ffmpeg x11grab) is not: turn on the recording-app check below, or switch it on by hand.	Linux: デスクトップのポータル経由の画面共有(PipeWire の画面キャスト: GNOME、KDE、wlroots)は検出できます。X11 を直接読み取るキャプチャ(OBS の画面キャプチャ (XSHM)、ffmpeg x11grab)は検出できません。下の録画アプリの確認をオンにするか、手動でオンにしてください。
+gpui.streamer.mac	macOS does not tell an app that the screen is being recorded or shared. Only the recording-app check below works here: it sees OBS, Loom, ScreenFlow, CleanShot, Kap and Ecamm while they run.	macOS は画面が録画・共有されていることをアプリに知らせません。ここで使えるのは下の録画アプリの確認だけです: OBS、Loom、ScreenFlow、CleanShot、Kap、Ecamm の実行中を検出します。
+gpui.streamer.win	Windows does not tell an app that the screen is being captured. Only the recording-app check below works here: it sees OBS, Streamlabs, XSplit, Bandicam, Camtasia and Loom while they run.	Windows は画面がキャプチャされていることをアプリに知らせません。ここで使えるのは下の録画アプリの確認だけです: OBS、Streamlabs、XSplit、Bandicam、Camtasia、Loom の実行中を検出します。
 """#
 
     /// thread.count = {n, plural, one {# thread} other {# threads}}
@@ -5317,8 +5362,14 @@ gpui.mgmt.life.price.since	since {day}	{day}から
     /// gpui.c.boards.folder = Folder: {folder}
     static func gpui_c_boards_folder(folder: String) -> String { f("gpui.c.boards.folder", ["folder": folder]) }
 
-    /// gpui.c.image.close = {name} · click or Esc to close
-    static func gpui_c_image_close(name: String) -> String { f("gpui.c.image.close", ["name": name]) }
+    /// gpui.c.image.size = {w} × {h} px
+    static func gpui_c_image_size(w: String, h: String) -> String { f("gpui.c.image.size", ["w": w, "h": h]) }
+
+    /// gpui.c.image.saved = Saved to {path}
+    static func gpui_c_image_saved(path: String) -> String { f("gpui.c.image.saved", ["path": path]) }
+
+    /// gpui.c.image.save.failed = Could not save: {why}
+    static func gpui_c_image_save_failed(why: String) -> String { f("gpui.c.image.save.failed", ["why": why]) }
 
     /// gpui.c.plot.toobig = This plot is {mb} MB, too large to show here.
     static func gpui_c_plot_toobig(mb: String) -> String { f("gpui.c.plot.toobig", ["mb": mb]) }
@@ -6888,4 +6939,7 @@ gpui.mgmt.life.price.since	since {day}	{day}から
 
     /// gpui.mgmt.life.price.since = since {day}
     static func gpui_mgmt_life_price_since(day: String) -> String { f("gpui.mgmt.life.price.since", ["day": day]) }
+
+    /// gpui.streamer.account = account {n}
+    static func gpui_streamer_account(n: String) -> String { f("gpui.streamer.account", ["n": n]) }
 }
