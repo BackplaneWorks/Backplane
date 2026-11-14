@@ -58,6 +58,8 @@ export BP_STANDIN_MCPCALL_MAX=4000000
 # KiCad's events in the hub log (K5 reads ET_MARKER_CLICKED there)
 export BACKPLANE_KICAD_DEBUG=1
 export BACKPLANE_HUB_TIMING=1
+# no pre-warm: the hub's own pre-warm opens the schematic editor hidden with memory to spare, and K1b is the board with none
+export BACKPLANE_KICAD_PREWARM_FREE_MB=${BACKPLANE_KICAD_PREWARM_FREE_MB:-100000000}
 start_hub
 export HPORT
 
@@ -115,14 +117,16 @@ BSOCK=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1] or "{}").get("
 BCAPS=$(python3 "$IPC_PY" caps "$BSOCK" 2>>"$OUT/ipc.err" || echo '{}')
 if [ "${BACKPLANE_CHECKS_IN_KICAD:-}" != "0" ] && echo "$BCAPS" | grep -q 'embed-checks'; then
   SHOWS0=$(grep -c '"type":"ET_SHOW_REQUESTED"' "$OUT/hub.log" || true)
+  SCH0=$(grep -c '"type":"ET_FRAME_OPENED","frame":{"kind":"FK_SCH"' "$OUT/hub.log" || true)
   T1B=$(python3 -c 'import time; print(int(time.time()*1000))')
   hub_rpc "[{\"method\":\"kicad.checks.run\",\"params\":{\"project\":\"$PRO\"}}]" >>"$OUT/rpc.log" 2>&1 || true
   SB=$(wait_summary "d['at'] > $T1B and e['at'] > $T1B" 50) || true
   SHOWS1=$(grep -c '"type":"ET_SHOW_REQUESTED"' "$OUT/hub.log" || true)
   BV=$(python3 -c 'import json,sys; r=json.loads(sys.argv[1])["result"]; print(int(r["drc"]["in_editor"]), int(r["erc"]["in_editor"]))' "$SB" 2>/dev/null || echo "? ?")
-  echo "INFO K1b board only: DRC/ERC in_editor $BV; show requests during it $((SHOWS1 - SHOWS0)); hub: $(grep -o 'checks: [de]rc [^"]*\(kicad-cli\|starts\)[^"]\{0,60\}' "$OUT/hub.log" | tail -2 | tr '\n' '|')"
+  echo "INFO K1b board only: schematic editors open before it $SCH0; DRC/ERC in_editor $BV; show requests during it $((SHOWS1 - SHOWS0)); hub: $(grep -o 'checks: [de]rc [^"]*\(kicad-cli\|starts\)[^"]\{0,60\}' "$OUT/hub.log" | tail -2 | tr '\n' '|')"
   if echo "$BCAPS" | grep -q 'runaction-frame'; then
-    check "Board only, no schematic editor (batch 6): DRC ran in KiCad, ERC with kicad-cli" "$([ "$BV" = "1 0" ] && echo 1 || echo 0)" "$SB"
+    if [ "$SCH0" = 0 ]; then check "Board only, no schematic editor (batch 6): DRC ran in KiCad, ERC with kicad-cli" "$([ "$BV" = "1 0" ] && echo 1 || echo 0)" "$SB"
+    else echo "INFO K1b: a schematic editor was open already (pre-warm?), so this is not the board-only case"; fi
     check "DRC's parity asked to show nothing: no show request while it ran" "$([ "$SHOWS1" = "$SHOWS0" ] && echo 1 || echo 0)" "$((SHOWS1 - SHOWS0)) ET_SHOW_REQUESTED"
   else
     check "Board only, no schematic editor (before batch 6): both checks with kicad-cli" "$([ "$BV" = "0 0" ] && echo 1 || echo 0)" "$SB"
