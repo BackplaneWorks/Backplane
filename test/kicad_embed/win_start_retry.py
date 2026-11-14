@@ -10,10 +10,13 @@ first: a plain start (no knobs, no warm start), to read what a real start waited
 2:     both starts stall: the pane says KiCad could not start, offers Try again (kicad:retry), and Try again shows the editor.
 """
 
+import glob
 import json
 import os
 import re
+import subprocess
 import sys
+import time
 
 import win_embed_e2e as E
 
@@ -28,6 +31,47 @@ def hub_start_lines(h):
     return [l.strip() for l in text.splitlines() if START_LINE.search(l)]
 
 
+def kicad_state(h, tag):
+    """What the retry meets on Windows: every kicad.exe (pid, start time), KiCad's top-level windows with their titles
+    (a modal prompt shows here even while KiCad's IPC is silent), the project's lock files, and a screenshot."""
+    ps = ("Get-CimInstance Win32_Process -Filter \"Name='kicad.exe'\" | ForEach-Object { '{0} {1:HH:mm:ss.fff}' -f "
+          "$_.ProcessId, $_.CreationDate }")
+    procs = subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True, timeout=30).stdout.split("\n")
+    pids = {int(l.split()[0]) for l in procs if l.strip()}
+    wins = []
+
+    @E.WNDENUMPROC
+    def cb(hw, _):
+        if E.hwnd_pid(int(hw or 0)) in pids and E.u32.IsWindowVisible(hw):
+            wins.append({"pid": E.hwnd_pid(int(hw)), "class": E.hwnd_class(int(hw)), "title": E.hwnd_title(int(hw))})
+        return True
+
+    E.u32.EnumWindows(cb, 0)
+    locks = [os.path.basename(f) for f in glob.glob(h.p("proj", "*.lck")) + glob.glob(h.p("proj", "~*"))]
+    shot = h.shot(f"retry_{tag}")
+    print("DIAG retry_state " + json.dumps({"at": tag, "kicad": [l.strip() for l in procs if l.strip()], "windows": wins,
+                                            "locks": sorted(set(locks)), "shot": shot}), flush=True)
+
+
+def watch_retry(h, timeout_s=120):
+    """Once the hub says it starts KiCad once more, look 4, 8 and 12 s later (the second start's socket came at 5-8 s, and
+    then no Ping on bp-win, twice)."""
+    end = time.time() + timeout_s
+    while time.time() < end:
+        try:
+            if "starting it once more" in open(h.p("hub.log"), encoding="utf-8", errors="replace").read():
+                break
+        except OSError:
+            pass
+        time.sleep(0.25)
+    else:
+        return
+    t0 = time.time()
+    for at in (4, 8, 12):
+        time.sleep(max(0.0, t0 + at - time.time()))
+        kicad_state(h, f"{at}s")
+
+
 def run(h, mode):
     if mode != "first":
         os.environ["BACKPLANE_KICAD_TEST_STALLS"] = mode
@@ -37,7 +81,7 @@ def run(h, mode):
     h.init_dirs()
     try:
         h.start_hub(embed_mode="fork")
-        s = [{"select": 0}, {"wait": 2200}, {"click": "rail:Board"}, {"wait": 2500}, {"click": "ui:Edit", "within": 10000}]
+        s = [{"select": 0}, {"wait": 2200}, {"click": "rail:Board"}, {"wait": 4500}, {"click": "ui:Edit", "within": 10000}]  # 4.5 s: a client without `within` clicked too early (2b)
         if mode == "2":
             window_ms = int(os.environ.get("BACKPLANE_KICAD_START_WINDOW_S", "20")) * 1000
             s += [{"wait": 2 * window_ms + 10000}, {"kicad": {"report": True, "tag": "failed"}}, {"mark": "failed"}, {"wait": 2500},
@@ -46,6 +90,8 @@ def run(h, mode):
             s += [{"kicad": {"wait_painted": 90000, "kind": "PCB", "tag": "edit"}}]
         s += [{"mark": "done"}, {"wait": 1500}]
         h.start_client(s, exit_after=300)
+        if mode != "first":
+            watch_retry(h)
         if mode == "2" and h.wait_for_mark("failed", timeout_s=200):
             h.shot("failed_pane")  # the pane's words and its Try again button, for the person
         h.wait_for_mark("done", timeout_s=290)
