@@ -1275,7 +1275,16 @@ mod imp {
                 let focused = if GetGUIThreadInfo(0, &mut gti) != 0 { gti.hwndFocus } else { null_mut() };
                 let handed = handed_in().lock().map(|set| frames(container).iter().any(|f| set.contains(&f.window)
                     && (hwnd(f.window) == focused || IsChild(hwnd(f.window), focused) != 0))).unwrap_or(false);
-                if !CHILD_FOCUSED.load(Ordering::SeqCst) && !handed {
+                // nor for a frame nobody can see: a pre-warmed editor (hidden, or parked off-screen) that took the focus is the
+                // F5 guard's to hand back to the shown editor; reclaiming it to gpui's window gave Backplane KiCad's keys with
+                // nobody clicking (runs S9o, E14: native_child focus(top) right after the guard's re-post)
+                let in_unseen_frame = frames(container).iter().map(|f| hwnd(f.window)).any(|fw| {
+                    (fw == focused || IsChild(fw, focused) != 0) && {
+                        let mut rc = RECT::default();
+                        IsWindowVisible(fw) == 0 || (GetWindowRect(fw, &mut rc) != 0 && (rc.right <= -10000 || rc.bottom <= -10000))
+                    }
+                });
+                if !CHILD_FOCUSED.load(Ordering::SeqCst) && !handed && !in_unseen_frame {
                     // wxMSW calls ::SetFocus(canvasHwnd) during cold frame construction even when ShowFrame(focus=false);
                     // reclaim focus back to GPUI's top-level HWND so opening an editor never steals the keyboard before a click.
                     let top = GetAncestor(c, GA_PARENT);
