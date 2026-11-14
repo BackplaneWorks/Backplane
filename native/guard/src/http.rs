@@ -88,13 +88,27 @@ mod tests {
     #[test] fn hmac_matches_the_published_vector() { // RFC 4231 test case 2
         assert_eq!(hmac(b"Jefe", b"what do ya want for nothing?"), "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843");
     }
+    /// A server on a port nothing else holds. The port is chosen by binding port 0 and letting it go, so another process (a build, another gate) can take it before `start` binds it: `start` says
+    /// which addresses it could not bind, and the choice is made again then.
+    fn start_on_a_free_port() -> (String, Server) {
+        for _ in 0..50 {
+            let port = { let l = TcpListener::bind("127.0.0.1:0").unwrap(); l.local_addr().unwrap().port() };
+            let a = format!("127.0.0.1:{port}");
+            let s = Server::start(&[a.clone()], Arc::new(|r: &Req| (503, format!("{{\"p\":\"{}\",\"c\":\"{}\",\"b\":\"{}\"}}", r.path, r.credential(), r.body))));
+            if s.failed.is_empty() { return (a, s) }
+        }
+        panic!("no free port in 50 tries")
+    }
     #[test] fn a_server_answers_and_lets_go_of_its_port() {
-        let port = { let l = TcpListener::bind("127.0.0.1:0").unwrap(); l.local_addr().unwrap().port() };
-        let a = format!("127.0.0.1:{port}");
-        let s = Server::start(&[a.clone()], Arc::new(|r: &Req| (503, format!("{{\"p\":\"{}\",\"c\":\"{}\",\"b\":\"{}\"}}", r.path, r.credential(), r.body))));
-        let (code, body) = call(&a, "POST", "/x?y=1", "tok", "hi", Duration::from_secs(2)).unwrap();
+        let (a, s) = start_on_a_free_port();
+        // the answer comes the moment the server has the request; the deadline is only how long a machine that is stalled (a compile on every core) is given before this is called stuck
+        let (code, body) = call(&a, "POST", "/x?y=1", "tok", "hi", Duration::from_secs(60)).expect("an answer");
         assert_eq!(code, 503); assert_eq!(body, r#"{"p":"/x","c":"tok","b":"hi"}"#);
-        drop(s); assert!(TcpListener::bind(&a).is_ok(), "the port is free for the hub again");
+        drop(s);
+        // the listener is closed when its thread has ended (the drop joins them); another process may hold the same number for a moment as the source port of its own connection, so the
+        // port is asked for again until it is free, and a listener that is never given up still fails here
+        let end = std::time::Instant::now() + Duration::from_secs(10);
+        loop { match TcpListener::bind(&a) { Ok(_) => break, Err(e) => { assert!(std::time::Instant::now() < end, "the port is free for the hub again: {e}"); std::thread::sleep(Duration::from_millis(50)) } } }
     }
     #[test] fn nothing_listening_is_none_not_a_hang() { assert!(call("127.0.0.1:1", "GET", "/", "", "", Duration::from_millis(200)).is_none()); }
 }
