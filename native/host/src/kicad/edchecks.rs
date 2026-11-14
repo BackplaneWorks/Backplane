@@ -189,6 +189,7 @@ pub fn report(kind: &str, markers: &[Value], d: &Detail, sheets: &HashMap<String
         let t = m["type"].as_str().unwrap_or("");
         let mut v = json!({"type": t, "severity": m["severity"].as_str().unwrap_or("warning"), "description": m["message"].as_str().unwrap_or(""), "items": items});
         if m["excluded"].as_bool().unwrap_or(false) { v["excluded"] = json!(true) }
+        if let Some(p) = m["unresolved_sheet_path"].as_str().filter(|p| !p.is_empty()) { v["unresolved_sheet_path"] = json!(p) }
         if kind == "drc" {
             let list = match m["group"].as_str().unwrap_or("") { "unconnected" => "unconnected_items", "parity" => "schematic_parity", "violation" => "violations",
                 _ => if t == "unconnected_items" { "unconnected_items" } else if parity(t) { "schematic_parity" } else { "violations" } };
@@ -494,6 +495,11 @@ mod tests {
         assert_eq!(key(&a), key(&b), "the same ids run after run");
         assert_eq!(a.iter().map(|f| f.severity.as_str()).collect::<Vec<_>>(), ["excluded", "excluded"]);
         assert_ne!(a[0].id, a[1].id);
+        assert!(a[0].detail.starts_with(fd::STALE_SHEET_NOTE) && a[0].detail.ends_with("(/gone1)"), "{}", a[0].detail);
+        // the editor's marker (lane P, batch 8: GetMarkers field 15) gives the same row, the same id and the same words
+        let m = json!({"type": "pin_not_driven", "severity": "exclusion", "excluded": true, "message": "Input pin not driven by any Output pins", "sheet_path": "/R0", "items": [], "unresolved_sheet_path": "/gone1"});
+        let ed = fd::erc(&report("erc", &[m], &Detail::default(), &HashMap::from([("/R0".to_string(), "/".to_string())])).to_string()).unwrap();
+        assert_eq!((ed[0].id.as_str(), ed[0].detail.as_str()), (a[0].id.as_str(), a[0].detail.as_str()));
         for f in &a { assert!(select_items(f, &HashMap::new()).is_none(), "no items, no place: nothing to select"); let p = fd::select_params(f); assert!(["references", "pins", "nets"].iter().all(|k| p[*k].as_array().unwrap().is_empty())) }
     }
     #[test] fn a_drc_marker_click_finds_its_row_and_a_track_finding_probes_its_exact_items() {
