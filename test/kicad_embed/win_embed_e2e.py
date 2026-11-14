@@ -300,6 +300,18 @@ def foreign_windows() -> list:
         return True
 
     u32.EnumWindows(cb, 0)
+    # EnumWindows misses windows in the shell's higher bands (Windows Update's full-screen Shell_SystemDim, bp-win
+    # 22:40: its proxy window was 0x0): sample what is under a grid of points instead, as a click there would meet it
+    seen = {w["hwnd"] for w in found}
+    sw, sh = u32.GetSystemMetrics(0), u32.GetSystemMetrics(1)
+    for gx in range(1, 6):
+        for gy in range(1, 6):
+            h = u32.WindowFromPoint(W.POINT(sw * gx // 6, sh * gy // 6))
+            root = int(u32.GetAncestor(h, 2) or 0) if h else 0
+            if root and root not in seen and hwnd_class(root) not in SHELL_CLASSES and not _ours(root):
+                seen.add(root)
+                found.append({"hwnd": root, "program": window_program(root), "class": hwnd_class(root), "title": hwnd_title(root),
+                              "rect": None, "at": [sw * gx // 6, sh * gy // 6]})
     return found
 
 
