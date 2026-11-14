@@ -442,6 +442,12 @@ pub fn project_locked(files: &Files) -> bool {
 /// start's) and the machine's load: a slow open on a busy machine says so in the hub log (Nov 13: Day_11 took 10.3 s on the person's
 /// desktop during main-build's tests, 3.4 s on a quiet test instance). Linux; None elsewhere or when unreadable.
 fn start_waits(pid: u32) -> Option<String> {
+    // Windows has no stall totals: what the process used against how long it has run (a start held by Defender shows a long age with
+    // little CPU and reading; bp-win, Carbon, Nov 13: the retry line said "waited ?")
+    #[cfg(windows)]
+    { let (cpu, read, wrote, age) = crate::plat::proc::usage(pid)?;
+      return Some(format!("{age:.1} s running, cpu {cpu:.2} s, read {:.0} MB, wrote {:.0} MB (its own)", read as f64 / 1e6, wrote as f64 / 1e6)) }
+    #[allow(unreachable_code)]
     if !cfg!(target_os = "linux") || pid == 0 { return None }
     let cg = std::fs::read_to_string(format!("/proc/{pid}/cgroup")).ok()?;
     let dir = format!("/sys/fs/cgroup{}", cg.lines().find_map(|l| l.strip_prefix("0::"))?.trim());
