@@ -688,6 +688,7 @@ impl Render for Backplane {
         // the header's tools (Buy it is tool:fab-buy) and the Order card's Buy now are controls too
         for t in crate::screens::tools::tools(thread) { ctl.push(CtlEntry { id: format!("tool:{}", t.action), label: t.label.clone(), ctl: Ctl::Node(t.action.clone(), t.value.clone()) }); }
         /* i18n-ok: registered controls the e2e drivers press */ if let Some(o) = crate::screens::order::parse(&thread["order"]).filter(crate::screens::order::payable) { ctl.push(CtlEntry { id: "ui:Buy now".into(), label: if o.label.is_empty() { "Buy now".into() } else { o.label }, ctl: Ctl::None }); }
+        /* i18n-ok: registered controls the e2e drivers press */ if crate::screens::order::parse(&thread["order"]).is_some_and(|o| o.requote) { ctl.push(CtlEntry { id: "ui:Re-quote".into(), label: "Re-quote".into(), ctl: Ctl::None }); }
         // the Mechanical page's parts are controls too (the harness presses them by index)
         /* i18n-ok: registered controls the e2e drivers press */ for (i, p) in crate::screens::viewer::mech_parts(&thread["viewer"]).into_iter().enumerate() { ctl.push(CtlEntry { id: format!("mech-part-{i}"), label: p.label, ctl: Ctl::Node("mech-part".into(), p.value) }); }
         // the viewer bar's Open in KiCad, and the Subagents panel's row buttons (Release, Cancel, Stop: `<act>-<value>`, as the rows name them)

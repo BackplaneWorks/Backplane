@@ -11,7 +11,10 @@ pub fn ask_value(choice: &str) -> &str { choice.strip_suffix(LAST_MARK).map_or(c
 // ---- what a quote says ----
 
 /// Order.payable: worked out and nothing to fix.
-pub fn payable(q: &Value) -> bool { sv(q, "status") == "ready" && q["quote"]["problems"].as_array().map_or(true, Vec::is_empty) }
+pub fn payable(q: &Value) -> bool { sv(q, "status") == "ready" && q["quote"]["problems"].as_array().map_or(true, Vec::is_empty) && !unavailable(q) }
+/// Order.unavailable: parts the order server could not price right now (its distributor lookups were out of reach). Not a fault of the board: ask again later.
+pub fn unavailable(q: &Value) -> bool { q["quote"]["unavailable"].as_array().is_some_and(|a| !a.is_empty()) }
+pub const UNAVAILABLE_LINE: &str = "Can't be priced right now — ask again later";
 /// Order.pending: the order server is still working it out.
 pub fn pending(q: &Value) -> bool { matches!(sv(q, "status"), "received" | "analysing") }
 /// Order.ddp
@@ -86,10 +89,10 @@ pub fn plain(md: &str) -> String {
 pub fn said(q: &Value) -> Value {
     let failed = sv(q, "status") == "failed";
     let why = format!("The quote could not be worked out: {}. Nothing was posted with a Buy now link; say so in a line and offer to make a new quote.", sv(q, "error").trim_end_matches('.'));
-    let note = if failed { why.as_str() } else if sv(q, "status") == "expired" { "The quote has expired (the server keeps a quote for a few days). Make a new quote if the person still wants it." } else if pending(q) { STATUS_SENT } else if payable(q) { "Backplane posted the quote with its Buy now link in this thread; do not repeat its table." }
+    let note = if failed { why.as_str() } else if unavailable(q) && sv(q, "status") == "ready" { "Backplane posted the quote with NO Buy now link because the order server could not price some parts right now (sourcing is unavailable). Nothing is wrong with the board or the parts: do NOT say they cannot be bought or ask for a change. Tell the person the parts can't be priced right now, to ask again later, and make a new quote when they do." } else if sv(q, "status") == "expired" { "The quote has expired (the server keeps a quote for a few days). Make a new quote if the person still wants it." } else if pending(q) { STATUS_SENT } else if payable(q) { "Backplane posted the quote with its Buy now link in this thread; do not repeat its table." }
         else { "Backplane posted the quote in this thread with NO Buy now link: it cannot be paid until its problems are fixed. Do not say a link is there. Tell the person each problem in plain words and what fixes it (for a destination that cannot be priced, ask for another country), then make a new quote." };
     let or = |v: &Value, d: Value| if v.is_null() { d } else { v.clone() };
-    json!({"status":sv(q, "status"),"total":q["quote"]["total"],"lead_days":q["quote"]["lead_days"],"problems":or(&q["quote"]["problems"], json!([])),"warnings":or(&q["quote"]["warnings"], json!([])),"order":q["order"],"note":note})
+    json!({"status":sv(q, "status"),"total":q["quote"]["total"],"lead_days":q["quote"]["lead_days"],"problems":or(&q["quote"]["problems"], json!([])),"unavailable":or(&q["quote"]["unavailable"], json!([])),"warnings":or(&q["quote"]["warnings"], json!([])),"order":q["order"],"note":note})
 }
 /// Order.quote.md after Order.quote.customs: the order server's text, what the price covers, and Buy now only when it can be paid. The link names the quote, never its token.
 pub fn quote_md(q: &Value) -> String {
@@ -104,7 +107,7 @@ pub fn total_of(label: &str, raw: &Value) -> String {
 /// Order.sum: what the hub keeps of a quote for the card (the setting `order.quote.<thread>`), without its link: `pay_link` finds that by the id.
 pub fn sum(q: &Value) -> String {
     let label = sv(&q["quote"], "pay_label");
-    json!({"id":sv(q, "id"),"state":state(q),"total":total_of(label, &q["quote"]["total"]),"ddp":ddp(q),"payable":payable(q),"label":if label.is_empty() { "Buy now" } else { label },"tracking":sv(&q["order"], "tracking")}).to_string()
+    json!({"id":sv(q, "id"),"state":state(q),"total":total_of(label, &q["quote"]["total"]),"ddp":ddp(q),"payable":payable(q),"unavailable":unavailable(q),"label":if label.is_empty() { "Buy now" } else { label },"tracking":sv(&q["order"], "tracking")}).to_string()
 }
 /// Order.sum.keeps: a newer quote always takes the card; a quote's own progress only while it is the card's.
 pub fn sum_keeps(fresh: bool, cur: &str, id: &str) -> bool { fresh || cur.is_empty() || serde_json::from_str::<Value>(cur).map_or(false, |v| sv(&v, "id") == id) }
@@ -113,7 +116,8 @@ pub fn sum_keeps(fresh: bool, cur: &str, id: &str) -> bool { fresh || cur.is_emp
 
 pub const STEPS: [&str; 6] = ["Details", "Files", "Quote", "Pay", "Made", "Shipped"];
 pub fn card_at(st: &str) -> usize { match st { "delivered" => 6, "shipped" => 5, "paid" | "placed" => 4, _ => 3 } }
-pub fn card_said(st: &str, pay: bool, tracking: &str) -> String {
+pub fn card_said(st: &str, pay: bool, tracking: &str, unavail: bool) -> String {
+    if unavail && matches!(st, "ready" | "quoted") { return UNAVAILABLE_LINE.into() }
     match st {
         "expired" => "This quote expired. Ask here for a new one.".into(), "failed" => "The quote could not be worked out. Ask here to try again.".into(),
         "pilot" => "Test payment: nothing was charged or ordered.".into(), "refunded" => "Refunded: the money is on its way back to you.".into(),
@@ -127,11 +131,11 @@ pub fn card(name: &str, asked: bool, files: bool, waiting: bool, running: bool, 
     let (st, pay, tracking) = (sv(&q, "state"), q["payable"].as_bool().unwrap_or(false), sv(&q, "tracking"));
     let i = if files { 1 } else if waiting { 2 } else if !sum.is_empty() { card_at(st) } else { 0 };
     let line = if asked { "Backplane needs your answer below.".to_string() } else { match i {
-        0 => if running { "Getting the order ready…".into() } else { "Reply below to go on.".into() }, 1 => "Check the files below and send them for a quote.".into(), 2 => "Getting your quote… usually 1-2 min".into(), _ => card_said(st, pay, tracking) } };
+        0 => if running { "Getting the order ready…".into() } else { "Reply below to go on.".into() }, 1 => "Check the files below and send them for a quote.".into(), 2 => "Getting your quote… usually 1-2 min".into(), _ => card_said(st, pay, tracking, q["unavailable"].as_bool().unwrap_or(false)) } };
     let buys = i == 3 && pay && matches!(st, "ready" | "quoted"); let (shown, total) = (i >= 3, sv(&q, "total"));
     json!({"name":name,"steps":STEPS.iter().enumerate().map(|(k, l)| json!({"label":l,"mark":if k < i { "done" } else if k == i { "on" } else { "" }})).collect::<Vec<_>>(),
         "line":line,"waiting":i == 2,"total":if shown { total } else { "" },"customs":if shown && !total.is_empty() { customs(q["ddp"].as_bool().unwrap_or(false)) } else { "" },
-        "pay":if buys { pay_link(sv(&q, "id")).unwrap_or_default() } else { String::new() },"label":if buys { let l = sv(&q, "label"); if l.is_empty() { "Buy now" } else { l } } else { "" }})
+        "requote":i == 3 && q["unavailable"].as_bool().unwrap_or(false) && matches!(st, "ready" | "quoted"),"pay":if buys { pay_link(sv(&q, "id")).unwrap_or_default() } else { String::new() },"label":if buys { let l = sv(&q, "label"); if l.is_empty() { "Buy now" } else { l } } else { "" }})
 }
 
 // ---- the link and the record ----
