@@ -202,6 +202,24 @@ pub mod proc {
         unsafe { let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid); if h.is_null() { return std::io::Error::last_os_error().raw_os_error() == Some(5) } CloseHandle(h); false }
     }
     pub fn signal(_: &std::process::ExitStatus) -> Option<i32> { None }
+    /// What a process has used so far: CPU seconds (kernel and user), bytes read and written, and seconds since it started (a KiCad
+    /// start's timing log: a start held by real-time scanning shows a long age with little CPU and reading).
+    pub fn usage(pid: u32) -> Option<(f64, u64, u64, f64)> {
+        use windows_sys::Win32::{Foundation::FILETIME, System::{SystemInformation::GetSystemTimeAsFileTime, Threading::{GetProcessIoCounters, IO_COUNTERS}}};
+        if pid == 0 { return None }
+        let ft = |f: FILETIME| (f.dwHighDateTime as u64) << 32 | f.dwLowDateTime as u64;
+        unsafe {
+            let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid); if h.is_null() { return None }
+            let z = FILETIME { dwLowDateTime: 0, dwHighDateTime: 0 }; let (mut c, mut e, mut k, mut u) = (z, z, z, z);
+            let ok = GetProcessTimes(h, &mut c, &mut e, &mut k, &mut u) != 0;
+            let mut io: IO_COUNTERS = std::mem::zeroed(); let io_ok = GetProcessIoCounters(h, &mut io) != 0;
+            CloseHandle(h);
+            if !ok { return None }
+            let mut now = z; GetSystemTimeAsFileTime(&mut now);
+            let cpu = (ft(k) + ft(u)) as f64 / 1e7; let age = ft(now).saturating_sub(ft(c)) as f64 / 1e7;
+            Some((cpu, if io_ok { io.ReadTransferCount } else { 0 }, if io_ok { io.WriteTransferCount } else { 0 }, age))
+        }
+    }
     /// When a process started (100 ns since 1601): with the pid it names one process.
     pub fn start_time(pid: u32) -> Option<u64> {
         unsafe {
