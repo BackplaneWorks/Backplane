@@ -35,6 +35,8 @@ pub struct PlotView {
     /// The plot as last tessellated, and what it was made from: a paint with the same camera, canvas and chunks submits these again
     /// instead of tessellating every chunk (tens of ms on a real board) for a frame that only moved something else.
     pub tess: Option<(TessKey, std::rc::Rc<Vec<(Path<Pixels>, Hsla)>>)>,
+    /// What the probe lights, tessellated the same way: for that camera and those lit pieces (a hash of `lit`).
+    pub lit_tess: Option<(TessKey, u64, std::rc::Rc<Vec<(Path<Pixels>, Hsla)>>)>,
     /// The Boards menu (viewers::boards), held on the Board/Schematic page's camera for every page that shows it.
     pub boards: crate::viewers::boards::BoardsUi,
     /// The hub's probe this canvas last lit, with the source it was lit on ("<key>\u{1}<info>"): another source or another probe lights it again.
@@ -116,29 +118,76 @@ pub fn tap_at(app: &mut Backplane, slot: usize, key: &str, off: u32, at: (f32, f
     }
 }
 
-/// The pieces a cross-probe lights (the same net or part as the tapped one, on this plot): each outlined in cyan.
-fn paint_probe(window: &mut Window, chunks: &[std::sync::Arc<super::plot::Chunk>], lit: &[(usize, usize)], v: &View, o: Point<Pixels>, w: f32, h: f32) {
+/// How far the rest of the plot dims under a probe (0.14's plot2d.js DIM: the rest at 0.28), and the fills small enough to get the light edge (25 mm²).
+pub const PROBE_DIM: f32 = 0.72;
+const EDGED: f32 = 25e6;
+/// What a probe lights, as the pieces themselves (0.14's plot2d.js): for each drawn chunk with lit pieces, a chunk of only those pieces in the
+/// chunk's own colour at full strength, its strokes and dots never thinner than `least` micrometres across, and the outlines the light edge goes
+/// round (fills under 25 mm² and dots, as x y pairs; a dot as its centre and radius). A comparison's marks (`own` chunks) are not here: they are boxed.
+pub fn lit_chunks(chunks: &[std::sync::Arc<Chunk>], order: &[(usize, f32)], lit: &[(usize, usize)], least: f32) -> (Vec<Chunk>, Vec<Vec<f32>>, Vec<[f32; 3]>) {
+    let mut by: std::collections::HashMap<usize, std::collections::HashSet<u32>> = Default::default();
+    for (c, i) in lit { by.entry(*c).or_default().insert(*i as u32); }
+    let (mut out, mut edges, mut dots) = (vec![], vec![], vec![]);
+    for &(ci, _) in order {
+        let (Some(c), Some(want)) = (chunks.get(ci), by.get(&ci)) else { continue };
+        if c.own { continue }
+        let r = c.r.max(least / 2.);
+        let mut l = Chunk { layer: c.layer, color: c.color, alpha: c.alpha, r, ..Default::default() };
+        for p in c.pieces.iter().filter(|p| want.contains(&p.info)) {
+            let pts = &c.pts[p.at as usize..p.at as usize + p.n as usize * 2];
+            match p.kind {
+                2 => { l.caps.extend([pts[0], pts[1], pts[0], pts[1], r]); dots.push([pts[0], pts[1], r]); }
+                1 => { let mut k = 2; while k + 1 < pts.len() { l.caps.extend([pts[k - 2], pts[k - 1], pts[k], pts[k + 1], r]); k += 2; } }
+                _ => { if pts.len() >= 6 { l.polys.push(pts.to_vec()); if (p.bbox[2] - p.bbox[0]) * (p.bbox[3] - p.bbox[1]) < EDGED { edges.push(pts.to_vec()); } } }
+            }
+        }
+        if !l.caps.is_empty() || !l.polys.is_empty() { out.push(l); }
+    }
+    (out, edges, dots)
+}
+/// The probe's light as paths: the lit pieces over the dimmed plot, then the light edge (`edge`) round the small fills and the dots, so a part or a
+/// net reads at any zoom.
+fn lit_paths(chunks: &[std::sync::Arc<Chunk>], order: &[(usize, f32)], lit: &[(usize, usize)], v: &View, o: Point<Pixels>, w: f32, h: f32, edge: Hsla) -> Vec<(Path<Pixels>, Hsla)> {
+    let (ls, edges, dots) = lit_chunks(chunks, order, lit, 2.5 / v.scale);
+    let mut out = Vec::new();
+    for l in &ls { paint_chunk(&mut out, l, 1.0, v, o, w, h, None); }
+    let mut pb = PathBuilder::stroke(px(1.5)); let mut any = false;
+    let seen = |x: f32, y: f32, m: f32| x >= -m && x <= w + m && y >= -m && y <= h + m;
+    for e in &edges {
+        let pts: Vec<(f32, f32)> = e.chunks_exact(2).map(|q| v.to_px(q[0], q[1], w, h)).collect();
+        if !pts.iter().any(|p| seen(p.0, p.1, 20.)) { continue }
+        for (i, q) in pts.iter().chain(pts.first()).enumerate() { let q = point(o.x + px(q.0), o.y + px(q.1)); if i == 0 { pb.move_to(q) } else { pb.line_to(q) } }
+        any = true;
+    }
+    for d in &dots {
+        let (c, r) = (v.to_px(d[0], d[1], w, h), d[2] * v.scale);
+        if !seen(c.0, c.1, r + 20.) { continue }
+        let n = ((6. + r * 2.) as usize).clamp(8, 32);
+        for k in 0..=n { let t = std::f32::consts::TAU * k as f32 / n as f32; let q = point(o.x + px(c.0 + r * t.cos()), o.y + px(c.1 + r * t.sin())); if k == 0 { pb.move_to(q) } else { pb.line_to(q) } }
+        any = true;
+    }
+    if any { if let Ok(path) = pb.build() { out.push((path, edge)); } }
+    out
+}
+/// A comparison's marks a probe lights (tints: many cells of one difference): one cyan box round all of each.
+fn paint_marks(window: &mut Window, chunks: &[std::sync::Arc<super::plot::Chunk>], lit: &[(usize, usize)], v: &View, o: Point<Pixels>, w: f32, h: f32) {
     let col: Hsla = rgb(0x4cc9f0).into();
     let mut by: std::collections::BTreeMap<usize, std::collections::HashSet<u32>> = Default::default();
     for (c, i) in lit { by.entry(*c).or_default().insert(*i as u32); }
     let mut pb = PathBuilder::stroke(px(2.0)); let mut any = false;
-    let mut boxes: Vec<[f32; 4]> = vec![];
-    // a comparison's mark (tints: many cells of one difference) is one box round all of it; anything else a box a piece
     let mut marks: std::collections::BTreeMap<u32, [f32; 4]> = Default::default();
     for (ci, want) in by {
-        let Some(c) = chunks.get(ci) else { continue };
+        let Some(c) = chunks.get(ci).filter(|c| c.own) else { continue };
         for p in c.pieces.iter().filter(|p| want.contains(&p.info)) {
-            if c.own { let m = marks.entry(p.info).or_insert([f32::MAX, f32::MAX, f32::MIN, f32::MIN]); *m = [m[0].min(p.bbox[0]), m[1].min(p.bbox[1]), m[2].max(p.bbox[2]), m[3].max(p.bbox[3])]; } else { boxes.push(p.bbox) }
+            let m = marks.entry(p.info).or_insert([f32::MAX, f32::MAX, f32::MIN, f32::MIN]); *m = [m[0].min(p.bbox[0]), m[1].min(p.bbox[1]), m[2].max(p.bbox[2]), m[3].max(p.bbox[3])];
         }
     }
-    let n = boxes.len(); boxes.extend(marks.into_values());
-    for (i, bb) in boxes.into_iter().enumerate() {
+    for bb in marks.into_values() {
         let a = v.to_px(bb[0], bb[1], w, h); let b = v.to_px(bb[2], bb[3], w, h);
         if b.0.max(a.0) < -20. || a.0.min(b.0) > w + 20. || b.1.max(a.1) < -20. || a.1.min(b.1) > h + 20. { continue }
         // a mark hugged (3 px out), never smaller than can be seen
-        let (pad, least) = if i < n { (2., 0.) } else { (3., 6.) };
         let (cx, cy) = ((a.0 + b.0) / 2., (a.1 + b.1) / 2.);
-        let (hw, hh) = (((a.0 - b.0).abs() / 2. + pad).max(least), ((a.1 - b.1).abs() / 2. + pad).max(least));
+        let (hw, hh) = (((a.0 - b.0).abs() / 2. + 3.).max(6.), ((a.1 - b.1).abs() / 2. + 3.).max(6.));
         let (x0, y0, x1, y1) = (cx - hw, cy - hh, cx + hw, cy + hh);
         for (k, (x, y)) in [(x0, y0), (x1, y0), (x1, y1), (x0, y1), (x0, y0)].into_iter().enumerate() { let q = point(o.x + px(x), o.y + px(y)); if k == 0 { pb.move_to(q) } else { pb.line_to(q) } }
         any = true;
@@ -180,7 +229,7 @@ fn paint_plan(window: &mut Window, d: &serde_json::Value, v: &View, o: Point<Pix
     }
 }
 
-/// The tapped piece, outlined in a bright line over everything.
+/// The tapped piece over everything: a stroke in a bright colour, a fill or a dot outlined in it.
 fn paint_lit(window: &mut Window, p: &super::plot::Pick, v: &View, o: Point<Pixels>, w: f32, h: f32) {
     let pts: Vec<(f32, f32)> = p.pts.chunks_exact(2).map(|q| v.to_px(q[0], q[1], w, h)).collect();
     if pts.is_empty() { return }
@@ -189,6 +238,13 @@ fn paint_lit(window: &mut Window, p: &super::plot::Pick, v: &View, o: Point<Pixe
         let r = (p.r * v.scale).max(4.0) + 3.0; let mut pb = PathBuilder::stroke(px(2.0)); let n = 24;
         for k in 0..=n { let t = std::f32::consts::TAU * k as f32 / n as f32; let q = point(o.x + px(pts[0].0 + r * t.cos()), o.y + px(pts[0].1 + r * t.sin())); if k == 0 { pb.move_to(q) } else { pb.line_to(q) } }
         if let Ok(path) = pb.build() { window.paint_path(path, col); }
+        return
+    }
+    if p.kind == 1 {
+        // a stroke (a track, a wire) is lit as itself, at its own width (never thinner than 2.5 px), round ended: no line down its middle
+        let c = Chunk { color: 0xffe066, alpha: 1.0, r: p.r.max(1.25 / v.scale), caps: p.pts.windows(4).step_by(2).flat_map(|q| [q[0], q[1], q[2], q[3], p.r.max(1.25 / v.scale)]).collect(), ..Default::default() };
+        let mut out = Vec::new(); paint_chunk(&mut out, &c, 1.0, v, o, w, h, None);
+        for (path, color) in out { window.paint_path(path, color); }
         return
     }
     let mut pb = PathBuilder::stroke(px(2.5));
@@ -206,6 +262,8 @@ pub fn canvas_el(cx: &mut Context<Backplane>, slot: usize, focus: Option<FocusHa
     let order = crate::viewers::layers::plan(&chunks.iter().map(|c| c.layer).collect::<Vec<_>>(), &masks);
     let this = cx.entity();
     let (key, off) = (frame.key.clone(), masks.off);
+    // a probe: the rest dims towards the canvas's ground, and what it lights gets an edge in the text's colour (light on the dark ground, dark on the light)
+    let (dim, edge): (Hsla, Hsla) = ({ let mut d = c("view"); d.a = PROBE_DIM; d.into() }, { let mut e = c("text"); e.a = 0.77; e.into() });
     let el = canvas(|b, _, _| b, move |_, b, window, cx| {
         let (w, h) = (f32::from(b.size.width), f32::from(b.size.height));
         this.update(cx, |app, _| { app.screens.pv(slot).bounds = Some(b); });
@@ -219,14 +277,23 @@ pub fn canvas_el(cx: &mut Context<Backplane>, slot: usize, focus: Option<FocusHa
             None => {
                 let mut out = Vec::new();
                 for &(i, factor) in &order { paint_chunk(&mut out, &chunks[i], factor, &v, b.origin, w, h, measure.then_some(&mut sp)); }
-                let p = std::rc::Rc::new(out); this.update(cx, |app, _| app.screens.pv(slot).tess = Some((key, p.clone()))); p
+                let p = std::rc::Rc::new(out); this.update(cx, |app, _| app.screens.pv(slot).tess = Some((key.clone(), p.clone()))); p
             }
         };
         window.with_content_mask(Some(ContentMask { bounds: b }), |window| {
             let t2 = measure.then(std::time::Instant::now);
             for (path, color) in paths.iter() { window.paint_path(path.clone(), *color); }
             if let Some(t2) = t2 { sp[2] += t2.elapsed().as_secs_f32() * 1000.0; }
-            if !probe.is_empty() { paint_probe(window, &chunks, &probe, &v, b.origin, w, h); }
+            if !probe.is_empty() {
+                // the probed net or part itself, over the rest dimmed (tessellated once a camera, as the plot is)
+                let stamp = { use std::hash::{Hash, Hasher}; let mut hs = std::collections::hash_map::DefaultHasher::new(); probe.hash(&mut hs); hs.finish() };
+                let lp = match this.update(cx, |app, _| app.screens.pv(slot).lit_tess.as_ref().filter(|t| t.0 == key && t.1 == stamp).map(|t| t.2.clone())) {
+                    Some(p) => p,
+                    None => { let p = std::rc::Rc::new(lit_paths(&chunks, &order, &probe, &v, b.origin, w, h, edge)); this.update(cx, |app, _| app.screens.pv(slot).lit_tess = Some((key.clone(), stamp, p.clone()))); p }
+                };
+                if !lp.is_empty() { window.paint_quad(fill(b, dim)); for (path, color) in lp.iter() { window.paint_path(path.clone(), *color); } }
+                paint_marks(window, &chunks, &probe, &v, b.origin, w, h);
+            }
             if let Some(p) = &lit { paint_lit(window, p, &v, b.origin, w, h); }
             // the routing plan's bands and regions over the board, read-only (the hub's mgmt.plan data; steering is in KiCad)
             if fkey.starts_with("0|") { let draw = this.update(cx, |app, _| app.screens.mgmt.data("plan")["draw"].clone()); if !draw.is_null() { paint_plan(window, &draw, &v, b.origin, w, h); } }
@@ -452,6 +519,29 @@ mod tests {
         let b = lit_box(&[std::sync::Arc::new(c)], &[(0, 7)]).unwrap();
         assert_eq!(b, [-3600., -3600., 4600., 4100.], "3 mm round it at least, for its neighbourhood");
         assert!(lit_box(&[], &[(0, 7)]).is_none());
+    }
+    #[test] fn a_probe_lights_the_pieces_themselves_not_their_boxes() {
+        use super::super::plot::Piece;
+        // a copper chunk: a two-segment track (info 3), another net's track (info 4), a via dot (info 3); a zone fill and a pad of info 3 on another chunk
+        let track = Chunk { layer: 0, color: 0xc83434, alpha: 1.0, r: 100., pts: vec![0., 0., 1000., 0., 1000., 1000.,  5000., 0., 6000., 0.,  2000., 2000.],
+            pieces: vec![Piece { info: 3, bbox: [-100., -100., 1100., 1100.], at: 0, n: 3, kind: 1 }, Piece { info: 4, bbox: [4900., -100., 6100., 100.], at: 6, n: 2, kind: 1 }, Piece { info: 3, bbox: [1900., 1900., 2100., 2100.], at: 10, n: 1, kind: 2 }], ..Default::default() };
+        let fills = Chunk { layer: 1, color: 0x4d7fc4, alpha: 0.6, pts: vec![0., 0., 9000., 0., 9000., 9000.,  0., 0., 300., 0., 300., 300.],
+            pieces: vec![Piece { info: 3, bbox: [0., 0., 9000., 9000.], at: 0, n: 3, kind: 0 }, Piece { info: 3, bbox: [0., 0., 300., 300.], at: 6, n: 3, kind: 0 }], ..Default::default() };
+        let mark = Chunk { layer: 40, own: true, pts: vec![0., 0., 10., 0., 10., 10.], pieces: vec![Piece { info: 3, bbox: [0., 0., 10., 10.], at: 0, n: 3, kind: 0 }], ..Default::default() };
+        let chunks = [std::sync::Arc::new(track), std::sync::Arc::new(fills), std::sync::Arc::new(mark)];
+        let lit = [(0usize, 3usize), (1, 3), (2, 3)];
+        let (ls, edges, dots) = lit_chunks(&chunks, &[(0, 0.25), (1, 1.0), (2, 1.0)], &lit, 50.);
+        assert_eq!(ls.len(), 2, "the comparison's mark is boxed, not lit here");
+        assert_eq!(ls[0].caps, vec![0., 0., 1000., 0., 100.,  1000., 0., 1000., 1000., 100.,  2000., 2000., 2000., 2000., 100.], "the net's track segments and its via; the other net's track is left out");
+        assert_eq!((ls[0].color, ls[0].alpha), (0xc83434, 1.0), "in its own colour");
+        assert_eq!(ls[1].polys.len(), 2, "its zone and its pad, as fills");
+        assert_eq!(edges, vec![vec![0., 0., 300., 0., 300., 300.]], "the edge goes round the small fill (a pad), not a zone");
+        assert_eq!(dots, vec![[2000., 2000., 100.]]);
+        // zoomed far out, a lit stroke is never thinner than asked
+        let (thin, _, d) = lit_chunks(&chunks, &[(0, 1.0)], &lit, 900.);
+        assert!(thin[0].caps.chunks_exact(5).all(|s| s[4] == 450.) && d[0][2] == 450., "{:?}", thin[0].caps);
+        // a hidden layer (not in the order) lights nothing
+        assert!(lit_chunks(&chunks, &[(1, 1.0)], &[(0, 3)], 50.).0.is_empty());
     }
     #[test] fn an_untouched_camera_is_fitted_again_when_the_canvas_size_changes() {
         assert!(refit_needed(false, (480., 600.), 520., 930.));
