@@ -2,6 +2,9 @@
 # Suite: DRC and ERC in the open editor (native/host/src/kicad/edchecks.rs; Backplane KiCad bp.13 `embed-checks`: RunChecks, GetMarkers,
 # SelectItems by id and place, ET_CHECKS_DONE).
 #   K1  before KiCad opens, the checks run with kicad-cli (the saved files): the baseline rows and counts
+#   K1b the board open in KiCad, its schematic editor never opened: on a runtime with `runaction-frame` (bp.13 batch 6: DRC's parity
+#       loads the schematic hidden), DRC runs in KiCad and ERC with kicad-cli, and the pane stays on the board (no show request);
+#       before it, both with kicad-cli
 #   K2  with the board open in the embedded editor, both checks run there (summary in_editor), with the CLI's rows: the same ids, the
 #       same counts (nothing unsaved yet); the bar follows KiCad's ET_PROGRESS while DRC runs
 #   K3  an edit in KiCad, not saved (a track added over its API, as the person's tools do): DRC runs again by itself, in the editor, on
@@ -96,16 +99,41 @@ L0D=$(list drc); L0E=$(list erc)
 echo "INFO DRC untrusted (no drc-zone-guard): $(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["result"]["drc"].get("untrusted"))' "$S0" 2>/dev/null)"
 check "Before KiCad opens: both checks ran with kicad-cli and are fresh" "$(python3 -c 'import json,sys; r=json.loads(sys.argv[1])["result"]; print(int(r["drc"]["has_result"] and not r["drc"]["in_editor"] and r["erc"]["has_result"]))' "$S0" 2>/dev/null || echo 0)" "$S0"
 
-# the board open in the embedded editor; the Schematic tab pressed once, then Board: checks go to KiCad only once its schematic editor
-# is open (kicad/checkrun.rs; the pre-warm opens it only with memory to spare)
+# the board open in the embedded editor; a minute with only the board (K1b); then the Schematic tab pressed once, then Board: ERC goes
+# to KiCad only once its schematic editor is open (kicad/checkrun.rs; the pre-warm opens it only with memory to spare)
 cat >"$OUT/script.json" <<'JSON'
 [{"select":0},{"wait":2000},{"click":"rail:Board"},{"wait":2500},{"click":"ui:Edit"},
- {"kicad":{"wait_painted":60000,"tag":"painted"}},{"wait":3000},{"click":"kicad-tab:SCH"},{"wait":6000},{"click":"kicad-tab:PCB"},{"wait":4000},{"mark":"ready"},{"kicad":{"report":true,"tag":"ready"}},{"wait":200000}]
+ {"kicad":{"wait_painted":60000,"tag":"painted"}},{"wait":3000},{"kicad":{"report":true,"tag":"board"}},{"mark":"board"},{"wait":60000},
+ {"kicad":{"report":true,"tag":"board-after"}},{"click":"kicad-tab:SCH"},{"wait":6000},{"click":"kicad-tab:PCB"},{"wait":4000},{"mark":"ready"},{"kicad":{"report":true,"tag":"ready"}},{"wait":200000}]
 JSON
 HOME="$OUT/fh" BACKPLANE_GPUI_ASSETS="$ASSETS_DIR" BACKPLANE_GPUI_RECTS=1 BACKPLANE_GPUI_HOLD=1 \
-"$CLIENT_BIN" --url "http://127.0.0.1:$HPORT" --token-file "$OUT/home/token" --script "$OUT/script.json" --exit-after 260 >"$OUT/client.log" 2>&1 &
+"$CLIENT_BIN" --url "http://127.0.0.1:$HPORT" --token-file "$OUT/home/token" --script "$OUT/script.json" --exit-after 330 >"$OUT/client.log" 2>&1 &
 CP=$!; track_pid "$CP"
-wait_for_log "$OUT/client.log" '"name":"ready","event":"mark"' 480 || { echo "FAIL the board never opened in KiCad"; tail -n 20 "$OUT/client.log"; exit 1; }
+wait_for_log "$OUT/client.log" '"name":"board","event":"mark"' 480 || { echo "FAIL the board never opened in KiCad"; tail -n 20 "$OUT/client.log"; exit 1; }
+# K1b: the board only, no schematic editor opened by anyone
+BSOCK=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1] or "{}").get("sock") or "")' "$(last_kicad_report "$OUT/client.log" board)")
+BCAPS=$(python3 "$IPC_PY" caps "$BSOCK" 2>>"$OUT/ipc.err" || echo '{}')
+if [ "${BACKPLANE_CHECKS_IN_KICAD:-}" != "0" ] && echo "$BCAPS" | grep -q 'embed-checks'; then
+  SHOWS0=$(grep -c '"type":"ET_SHOW_REQUESTED"' "$OUT/hub.log" || true)
+  T1B=$(python3 -c 'import time; print(int(time.time()*1000))')
+  hub_rpc "[{\"method\":\"kicad.checks.run\",\"params\":{\"project\":\"$PRO\"}}]" >>"$OUT/rpc.log" 2>&1 || true
+  SB=$(wait_summary "d['at'] > $T1B and e['at'] > $T1B" 50) || true
+  SHOWS1=$(grep -c '"type":"ET_SHOW_REQUESTED"' "$OUT/hub.log" || true)
+  BV=$(python3 -c 'import json,sys; r=json.loads(sys.argv[1])["result"]; print(int(r["drc"]["in_editor"]), int(r["erc"]["in_editor"]))' "$SB" 2>/dev/null || echo "? ?")
+  echo "INFO K1b board only: DRC/ERC in_editor $BV; show requests during it $((SHOWS1 - SHOWS0)); hub: $(grep -o 'checks: [de]rc [^"]*\(kicad-cli\|starts\)[^"]\{0,60\}' "$OUT/hub.log" | tail -2 | tr '\n' '|')"
+  if echo "$BCAPS" | grep -q 'runaction-frame'; then
+    check "Board only, no schematic editor (batch 6): DRC ran in KiCad, ERC with kicad-cli" "$([ "$BV" = "1 0" ] && echo 1 || echo 0)" "$SB"
+    check "DRC's parity asked to show nothing: no show request while it ran" "$([ "$SHOWS1" = "$SHOWS0" ] && echo 1 || echo 0)" "$((SHOWS1 - SHOWS0)) ET_SHOW_REQUESTED"
+  else
+    check "Board only, no schematic editor (before batch 6): both checks with kicad-cli" "$([ "$BV" = "0 0" ] && echo 1 || echo 0)" "$SB"
+  fi
+fi
+wait_for_log "$OUT/client.log" '"name":"ready","event":"mark"' 480 || { echo "FAIL KiCad never got to ready"; tail -n 20 "$OUT/client.log"; exit 1; }
+if [ -n "${T1B:-}" ] && echo "$BCAPS" | grep -q 'runaction-frame'; then
+  check "The pane stayed on the board through the board-only minute (KiCad shows the PCB editor)" "$(python3 -c '
+import json,sys; r=json.loads(sys.argv[1] or "{}"); f={x.get("xid"): x.get("kind") for x in r.get("frames", [])}
+print(int(r.get("want") == "PCB" and f.get(r.get("shown")) == "PCB"))' "$(last_kicad_report "$OUT/client.log" board-after)" 2>/dev/null || echo 0)" "$(last_kicad_report "$OUT/client.log" board-after | cut -c1-300)"
+fi
 sleep 1; SOCK=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1] or "{}").get("sock") or "")' "$(last_kicad_report "$OUT/client.log" ready)")
 ask() {
   local N; N="$1-$(date +%s%N)"; local before; before=$(grep -c "^MCPCALL" "$OUT/standin.log" 2>/dev/null || true)
