@@ -521,7 +521,12 @@ async fn run_on(hub: &Arc<Hub>, thread: Option<&str>, path: &str, ty: &str, msg:
         if o["fallback"].as_bool().unwrap_or(false) { log_fallback(hub, thread, o["why"].as_str().unwrap_or("")).await; return Err(o["error"].as_str().unwrap_or("").into()) }
         let ok = o["ok"].as_bool().unwrap_or(false);
         let servers = format!("{pro}|ready|gui ({})", gui.mode);
-        if status { return Ok(json!({"server":format!("gui ({})", gui.mode),"servers":servers,"argv":gui.argv,"version":gui.version,"capabilities":o["message"].clone(),"detail":if ok { String::new() } else { err_of(&o) }})) }
+        if status {
+            // KiCad's open dialogs and its notices (embed-notice: "Could not use OpenGL, falling back to software rendering"): the agent says them
+            let st = super::embed::session_state(&pro);
+            return Ok(json!({"server":format!("gui ({})", gui.mode),"servers":servers,"argv":gui.argv,"version":gui.version,"capabilities":o["message"].clone(),"detail":if ok { String::new() } else { err_of(&o) },
+                "dialogs":st["dialogs"].clone(),"dialogs_reported":st["dialogs_reported"].clone(),"notices":st["notices"].clone()}))
+        }
         if !ok { return Err(if short == "SaveDocument" { super::savegate::explain_save_error(&err_of(&o), super::savegate::saves_design(&msg_doc, path)) } else { err_of(&o) }) }
         let mut out = json!({"type":o["type"].as_str().unwrap_or(""),"message":o["message"].clone()});
         // an agent's save of a board KiCad changed on load (its 3D model migration): said, so the agent reports it rather than owns it
