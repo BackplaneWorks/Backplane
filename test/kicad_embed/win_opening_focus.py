@@ -1174,6 +1174,59 @@ def run(h):
             h.check("Idle pre-warm, then first tab click and first hotkey: the shown editor gets the keys (F2 by the readout), hidden schematic untouched",
                     after["inside_frame"] and bool(zoomed) and fg["no_foreground_samples"] == 0 and not any(t.lstrip().startswith("*") for t in hidden), d)
             return h.finish()
+        if only == "notice_dialogs":
+            # Lane B's checks for embed-notice / embed-dialog-events (fork ba5fe711f0, client c0b81fbf8). With
+            # BP_EXPECT_NOTICE=1 (a runtime without its software opengl32.dll on a machine with no GPU) KiCad's
+            # "Could not use OpenGL..." reaches the pane as a notice, not a box. Then a native modal in KiCad
+            # (its Open file dialog, Ctrl+O) is named in the pane's dialogs while up, and gone after Escape.
+            settled_rep = h.last_kicad_report("settled")
+            rect_ids = set()
+            for m in h.metrics():
+                for r in (m.get("rects") if isinstance(m.get("rects"), list) else []):
+                    if isinstance(r, dict) and r.get("id"):
+                        rect_ids.add(r["id"])
+            notice = settled_rep.get("notice")
+            box = E.startup_box()
+            res = {"notice": notice, "notice_rects": sorted(i for i in rect_ids if i.startswith("kicad:notice")), "box_now": box}
+            if os.environ.get("BP_EXPECT_NOTICE") == "1":
+                h.check("No GPU: KiCad's graphics fallback is a notice in the pane (\"KiCad says: ...\"), and no box is up",
+                        bool(notice) and "opengl" in str(notice).lower() and not box
+                        and bool(rect_ids & {"kicad:notice", "kicad:notice-start"}), res)
+            keys = give_kicad_keys(h, cp, frame)
+            n0 = len(open(h.p("client.log"), encoding="utf-8", errors="replace").read())
+
+            def pane_dialogs():
+                """The pane's dialog lists since the press, in order (the client's kicad_info lines)."""
+                out = []
+                for l in open(h.p("client.log"), encoding="utf-8", errors="replace").read()[n0:].splitlines():
+                    if l.startswith("GPUI_LOG ") and '"kicad_info"' in l:
+                        try:
+                            out.append(json.loads(l[9:]).get("dialogs") or [])
+                        except ValueError:
+                            pass
+                return out
+
+            E.key_chord("ctrl", "o")
+            seen_open = None
+            end = time.monotonic() + 8
+            while time.monotonic() < end and seen_open is None:
+                time.sleep(0.25)
+                seen_open = next((d for d in pane_dialogs() if d), None)
+            h.shot("notice_dialogs_open")
+            named = [w["title"] for w in kicad_toplevels() if w["visible"] and w["class"] == "#32770"]
+            E.key_tap("Escape")
+            seen_closed = False
+            end = time.monotonic() + 6
+            while time.monotonic() < end and not seen_closed:
+                time.sleep(0.25)
+                lists = pane_dialogs()
+                first = next((i for i, d in enumerate(lists) if d), None)
+                seen_closed = first is not None and any(not d for d in lists[first + 1:])
+            res.update({"keys": keys, "native_modals": named, "pane_dialogs_while_open": seen_open, "closed_after_escape": seen_closed})
+            print("DIAG notice_dialogs " + json.dumps(res)[:3000], flush=True)
+            h.check("A native modal in KiCad (Open, Ctrl+O) is named in the pane's dialogs while up, and gone after Escape",
+                    bool(named) and bool(seen_open) and bool(seen_closed), res)
+            return h.finish()
         if only == "f6":
             return f6_check(h, cp, frame, children, timeline, pid)
         if only == "mouse_return":
