@@ -594,7 +594,12 @@ def run(h):
                         timeline.append({"stage": "prewarm_requested", "ms": round((t_prewarm - started) * 1000)})
                 except OSError:
                     pass
-            if "ready_for_edit" in marks and not clicked_edit and (painted or (ready_seen and time.monotonic() - ready_seen > 40)):
+            # BP_EDIT_EARLY=1: Edit pressed as soon as it is drawn, before the viewer may know its file (Lane B's 33cd306c2 keeps such
+            # a press and opens the editor once the key arrives; the client logs "kicad_edit":"pending" with the key it saw)
+            early = os.environ.get("BP_EDIT_EARLY") == "1" and not clicked_edit and bool(h.controls().get("ui:Edit"))
+            if early:
+                timeline.append({"stage": "edit_early", "painted": painted, "ready_for_edit": "ready_for_edit" in marks})
+            if not clicked_edit and (early or ("ready_for_edit" in marks and (painted or (ready_seen and time.monotonic() - ready_seen > 40)))):
                 if ready_seen:
                     timeline.append({"stage": "edit_waited_for_plot", "ms": round((time.monotonic() - ready_seen) * 1000), "painted": painted})
                 clicked_edit = h.click_control(E.find_main_window(cp.pid), "ui:Edit")
