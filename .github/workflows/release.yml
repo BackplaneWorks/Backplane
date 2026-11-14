@@ -52,6 +52,9 @@ jobs:
     steps:
       - run: git config --global core.autocrlf false
         if: runner.os == 'Windows'
+      # a self-hosted Windows runner (bp-win, nightlies) puts System32 ahead of Git's tools: Windows' find.exe and sort.exe answered for find and sort
+      - if: runner.os == 'Windows' && runner.environment == 'self-hosted'
+        run: echo 'C:\Program Files\Git\usr\bin' >> "$GITHUB_PATH"
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
       # mold comes from a GitHub download too: two tries, then the build links without it (RUSTFLAGS set: .cargo/config's mold flag is skipped)
@@ -100,8 +103,7 @@ jobs:
             vs=$("/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe" -products '*' -latest -property installationPath | tr -d '\r')
             c="$vs\Common7\IDE\CommonExtensions\Microsoft\CMake"
             [ -f "$c\Ninja\ninja.exe" ] && [ -f "$c\CMake\bin\cmake.exe" ] || { echo "::error::no choco and no CMake/Ninja in Visual Studio ($vs)"; exit 1; }
-            # and Git's own tools ahead of Windows' (its PATH puts System32 first: find.exe and sort.exe answered for find and sort)
-            printf '%s\n' "$c\Ninja" "$c\CMake\bin" 'C:\Program Files\Git\usr\bin' >> "$GITHUB_PATH"; exit 0
+            printf '%s\n' "$c\Ninja" "$c\CMake\bin" >> "$GITHUB_PATH"; exit 0
           fi
           case "${{ runner.os }}" in macOS) brew install ninja;; Windows) choco install ninja -y --no-progress;; Linux) sudo apt-get install -y -qq ninja-build;; esac
       - name: build
