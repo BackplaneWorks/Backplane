@@ -546,7 +546,7 @@ def run(h):
             {"kicad": {"wait_painted": 45000, "kind": "PCB", "tag": "first_paint"}},
             {"wait": 2000}, {"kicad": {"report": True, "tag": "settled"}},
             {"mark": "opening_settled"},
-        ], hold=True, exit_after=120)
+        ], hold=True, exit_after=600)  # a safety net only (cleanup ends it): mouse_return x5 with a 40 s pre-warm wait outlived 120 s (MS)
         started = time.monotonic()
         previous = None
         settled = False
