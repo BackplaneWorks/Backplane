@@ -499,6 +499,7 @@ impl KicadPane {
     }
     fn want(&self) -> Option<u64> { if self.info.is_null() || (cfg!(windows) && self.info["mode"] == "stock") { return None } pick_local(self.wanted_kind(), &self.info, &self.frames, &self.ever_shown) }
     fn tick(&mut self, cx: &mut Context<Self>) {
+        nc::note_pane_keys(self.keys);
         if let Some(c) = self.container { nc::shield_tick(c, if cfg!(windows) && self.info["mode"] == "fork" { self.want() } else { None }); }
         if let Some((started, done, last_stray)) = self.prewarm_guard {
             let shown = self.wanted_kind();

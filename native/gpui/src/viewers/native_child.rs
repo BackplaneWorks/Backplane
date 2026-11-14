@@ -451,6 +451,7 @@ mod imp {
     /// An explicit hand-back to the client's window (a host chord pressed in the editor): as `focus` here.
     #[track_caller]
     pub fn hand_back(w: u64) { focus(w) }
+    pub fn note_pane_keys(_kicad: bool) {}
     /// Windows only (the F3 input shield): Linux has its button grab (grab_click).
     pub fn shield(_container: u64, _on: bool) {}
     pub fn shield_tick(_container: u64, _shown: Option<u64>) {}
@@ -735,6 +736,9 @@ mod imp {
     /// that followed the hand-back is the click's own, never stale (opening-focus run B5: a canvas click 0.5 s after Ctrl+` lost
     /// its notice to a time-only rule).
     static PANE_PRESS_AT: AtomicU64 = AtomicU64::new(0);
+    /// The pane's view of who has the keys (true: KiCad's shown editor), noted each tick, for the reclaim's decision.
+    static PANE_KEYS: AtomicBool = AtomicBool::new(false);
+    pub fn note_pane_keys(kicad: bool) { PANE_KEYS.store(kicad, Ordering::SeqCst); }
     /// The frames Backplane has handed the keys to: past their cold construction, so `has_focus`'s reclaim (for wxMSW
     /// focusing a canvas by itself while a frame is built) never undoes a hand-in Backplane asked for (the editor tab's was)
     fn handed_in() -> &'static Mutex<HashSet<u64>> { static S: OnceLock<Mutex<HashSet<u64>>> = OnceLock::new(); S.get_or_init(Default::default) }
@@ -1275,16 +1279,20 @@ mod imp {
                 let focused = if GetGUIThreadInfo(0, &mut gti) != 0 { gti.hwndFocus } else { null_mut() };
                 let handed = handed_in().lock().map(|set| frames(container).iter().any(|f| set.contains(&f.window)
                     && (hwnd(f.window) == focused || IsChild(hwnd(f.window), focused) != 0))).unwrap_or(false);
-                // nor for a frame nobody can see: a pre-warmed editor (hidden, or parked off-screen) that took the focus is the
-                // F5 guard's to hand back to the shown editor; reclaiming it to gpui's window gave Backplane KiCad's keys with
-                // nobody clicking (runs S9o, E14: native_child focus(top) right after the guard's re-post)
+                // a frame nobody can see (a pre-warmed editor, hidden or parked off-screen) that took the focus: reclaiming it to
+                // gpui's window while KiCad had the keys gave Backplane KiCad's keys with nobody clicking (runs S9o, E14:
+                // native_child focus(top) right after the F5 guard's re-post)
                 let in_unseen_frame = frames(container).iter().map(|f| hwnd(f.window)).any(|fw| {
                     (fw == focused || IsChild(fw, focused) != 0) && {
                         let mut rc = RECT::default();
                         IsWindowVisible(fw) == 0 || (GetWindowRect(fw, &mut rc) != 0 && (rc.right <= -10000 || rc.bottom <= -10000))
                     }
                 });
-                if !CHILD_FOCUSED.load(Ordering::SeqCst) && !handed && !in_unseen_frame {
+                // by who had the keys before the steal (the pane's view, noted each tick): Backplane had them -> the reclaim
+                // gives them back to Backplane, as it always did; the shown editor had them -> no reclaim, the F5 guard
+                // re-posts the hand-in to it
+                let kicad_had_them = PANE_KEYS.load(Ordering::SeqCst);
+                if !CHILD_FOCUSED.load(Ordering::SeqCst) && !handed && !(in_unseen_frame && kicad_had_them) {
                     // wxMSW calls ::SetFocus(canvasHwnd) during cold frame construction even when ShowFrame(focus=false);
                     // reclaim focus back to GPUI's top-level HWND so opening an editor never steals the keyboard before a click.
                     let top = GetAncestor(c, GA_PARENT);
@@ -1662,6 +1670,7 @@ mod imp {
     pub fn holes(_container: u64, _keep: Option<&[R]>) {}
     pub fn focus(_w: u64) {}
     pub fn hand_back(_w: u64) {}
+    pub fn note_pane_keys(_kicad: bool) {}
     pub fn shield(_container: u64, _on: bool) {}
     pub fn shield_tick(_container: u64, _shown: Option<u64>) {}
     pub fn keys_really_backplanes(_container: u64) -> bool { true }

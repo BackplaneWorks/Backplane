@@ -970,6 +970,36 @@ def run(h):
                     px > 200 and not consumed, d)
             E.key_tap("Escape")
             return h.finish()
+        if only == "composer_prewarm":
+            # The reclaim's own job, kept: Backplane has the keys (composer), a pre-warm starts (a resize re-places the pane,
+            # which starts it on a runtime without prewarm-keeps-focus); typing straight through it, every key must land in
+            # the composer, none in the hidden schematic, and focus end in the composer.
+            top = E.find_main_window(cp.pid)
+            cbox = composer_box(h, top)
+            time.sleep(3.0)
+            keys_back_to_backplane(h, cp, frame, top, "composer", cbox)
+            time.sleep(0.4)
+            def prewarm_lines():
+                try:
+                    return open(h.p("client.log"), encoding="utf-8", errors="replace").read().count("editor.kicad.prewarm")
+                except OSError:
+                    return 0
+            before_pw = prewarm_lines()
+            wx, wy, ww, wh = window_box(top)
+            E.u32.SetWindowPos(top, 0, wx, wy, ww - 40, wh, 0x0004 | 0x0010)  # SWP_NOZORDER | SWP_NOACTIVATE
+            lat = [key_latency_ms(h, cbox, c, f"cp{i}") for i, c in enumerate("prewarmk")]
+            time.sleep(1.0)
+            E.u32.SetWindowPos(top, 0, wx, wy, ww, wh, 0x0004 | 0x0010)
+            log = open(h.p("client.log"), encoding="utf-8", errors="replace").read()
+            hidden = sorted(set(w["title"] for w in kicad_toplevels() + E.list_child_windows(top) if "Schematic Editor" in (w.get("title") or "")))
+            end = focus_snapshot(frame)
+            d = {"prewarm_started": prewarm_lines() > before_pw, "key_latency_ms": lat, "stray_events": log.count("kicad_stray_foreground"),
+                 "hidden_schematic_titles": hidden, "focus_end": {k: end.get(k) for k in ("focus_class", "focus_pid", "inside_frame")}}
+            print("DIAG composer_prewarm " + json.dumps(d), flush=True)
+            h.check("Backplane had the keys, a pre-warm starts, typing through it: every key in the composer, schematic untouched, focus ends in the composer",
+                    d["prewarm_started"] and all(v is not None for v in lat) and not any(t.lstrip().startswith("*") for t in hidden)
+                    and end["focus_pid"] == cp.pid and not end["inside_frame"], d)
+            return h.finish()
         if only == "steal_key":
             # A plain key pressed inside the ~0.4 s pre-warm steal (triggered on the client's pre-warm request): does it
             # reach the hidden Schematic Editor (a dialog opens, the "*" mark), the PCB editor, or nothing?
