@@ -2095,6 +2095,7 @@ gpui.c.kicad.try.again = 再試行
 gpui.c.kicad.kicad.is.not.responding = KiCad が応答していません。
 gpui.c.kicad.kicad.was.closed = KiCad は閉じられました。
 gpui.c.kicad.starting.kicad = KiCad を起動しています…
+gpui.c.kicad.task.wait = KiCadが{what}を実行中です。終わるとエディターに切り替わります。
 gpui.c.kicad.this.window.cannot.hold.another = このウィンドウには他のプログラムのウィンドウを入れられません（今は X11 と XWayland のみ）
 gpui.c.kicad.no.x11.connection = X11 に接続できません
 gpui.c.kicad.could.not.create.container = コンテナウィンドウを作成できませんでした

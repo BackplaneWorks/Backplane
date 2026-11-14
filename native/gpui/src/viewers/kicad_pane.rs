@@ -163,6 +163,8 @@ pub fn waiting_on(info: &Value, have_frame: bool, windows: bool) -> Option<Strin
             let title = info["dialogs"].as_array().and_then(|d| d.last()).and_then(Value::as_str).unwrap_or("");
             Some(crate::i18n::tf("gpui.c.kicad.dialog", &[("title", title.to_string().into())]))
         }
+        // KiCad's check or refill holds the switch (task-gate-reads): said, so the pane does not look dead; the hub sends it when it ends
+        _ if info["task_wait"].as_str().is_some_and(|w| !w.is_empty()) => Some(crate::i18n::tf("gpui.c.kicad.task.wait", &[("what", info["task_wait"].as_str().unwrap_or("").to_string().into())])),
         _ => Some(crate::i18n::trs("Starting KiCad…")),
     }
 }
@@ -505,7 +507,9 @@ impl KicadPane {
             let shown = self.wanted_kind();
             let built = ["SCH", "PCB"].iter().filter(|k| **k != shown).all(|k| self.info["frames"].as_array().is_some_and(|a| a.iter().any(|f| f["kind"].as_str() == Some(*k)))); // i18n-ok: wire frame kind enum names
             let done = done.or_else(|| built.then(std::time::Instant::now));
-            if done.is_some_and(|d| d.elapsed() > std::time::Duration::from_secs(2)) || started.elapsed() > std::time::Duration::from_secs(60) {
+            // the cap does not run out while the pre-warm waits on KiCad's check (task_wait): the guard follows the pre-warm itself
+            let held = self.info["task_wait"].as_str().is_some_and(|w| !w.is_empty());
+            if done.is_some_and(|d| d.elapsed() > std::time::Duration::from_secs(2)) || (started.elapsed() > std::time::Duration::from_secs(60) && !held) {
                 self.prewarm_guard = None;
             } else {
                 let mut last = last_stray;
@@ -974,6 +978,8 @@ mod tests {
         assert_eq!(pick("SCH", &Value::Null, &frames), None);
     }
     #[test] fn the_pane_says_what_it_waits_for() {
+        assert!(waiting(&json!({"state": "ready", "task_wait": "DRC"}), false).unwrap().contains("DRC"), "a switch waiting on KiCad's check says so");
+        assert!(waiting(&json!({"state": "ready", "task_wait": "DRC"}), true).is_none(), "an editor on show is not covered");
         assert!(waiting(&json!({"state": "starting"}), false).is_some());
         assert!(waiting(&json!({"state": "ready"}), true).is_none());
         assert!(waiting(&json!({"state": "failed", "reason": "no kicad"}), true).unwrap().contains("no kicad"));

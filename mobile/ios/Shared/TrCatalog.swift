@@ -2406,6 +2406,7 @@ gpui.c.kicad.try.again	Try again	再試行
 gpui.c.kicad.kicad.is.not.responding	KiCad is not responding.	KiCad が応答していません。
 gpui.c.kicad.kicad.was.closed	KiCad was closed.	KiCad は閉じられました。
 gpui.c.kicad.starting.kicad	Starting KiCad…	KiCad を起動しています…
+gpui.c.kicad.task.wait	KiCad is running {what}; the editor follows when it ends.	KiCadが{what}を実行中です。終わるとエディターに切り替わります。
 gpui.c.kicad.this.window.cannot.hold.another	this window cannot hold another program's (only X11 and XWayland for now)	このウィンドウには他のプログラムのウィンドウを入れられません（今は X11 と XWayland のみ）
 gpui.c.kicad.no.x11.connection	no X11 connection	X11 に接続できません
 gpui.c.kicad.could.not.create.container	could not create container window	コンテナウィンドウを作成できませんでした
@@ -5386,6 +5387,9 @@ gpui.streamer.win	Windows does not tell an app that the screen is being captured
 
     /// gpui.c.pad.hint.eraser = Drag over what to erase · {undo} undoes
     static func gpui_c_pad_hint_eraser(undo: String) -> String { f("gpui.c.pad.hint.eraser", ["undo": undo]) }
+
+    /// gpui.c.kicad.task.wait = KiCad is running {what}; the editor follows when it ends.
+    static func gpui_c_kicad_task_wait(what: String) -> String { f("gpui.c.kicad.task.wait", ["what": what]) }
 
     /// gpui.c.kicad.changed = Changed on disk: {files}. You have unsaved edits.
     static func gpui_c_kicad_changed(files: String) -> String { f("gpui.c.kicad.changed", ["files": files]) }

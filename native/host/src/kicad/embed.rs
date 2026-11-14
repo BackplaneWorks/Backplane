@@ -17,7 +17,7 @@
 use super::{ipc::{self, Env}, kipc, kserve as ks, open, project::{self, Files}, proto};
 use crate::{api::{Caller, Fut, RpcHandler}, hub::Hub};
 use serde_json::{json, Value};
-use std::{collections::{HashMap, VecDeque}, path::{Path, PathBuf}, process::Stdio, sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex, OnceLock}, time::Duration};
+use std::{collections::{HashMap, HashSet, VecDeque}, path::{Path, PathBuf}, process::Stdio, sync::{atomic::{AtomicBool, Ordering}, Arc, Mutex, OnceLock}, time::Duration};
 use tokio::{io::{AsyncBufReadExt, AsyncRead, BufReader}, sync::{mpsc, oneshot}};
 
 pub const MAX_WARM: usize = 3;
@@ -78,6 +78,8 @@ pub struct Session {
     pub dialogs: Vec<String>,
     /// KiCad's resident memory, MB (Linux, sampled on the health tick; 0 unknown): the warm policy's measure of what a KiCad costs
     pub rss_mb: u64,
+    /// a request of the hub's drive (a show, a pre-warm) waits on KiCad's check or refill task (task-gate-reads): its description, "" for none
+    pub task_wait: String,
     /// in no pane, its frames left in the client's kept (unmapped) container: as good as detached for the warm cap and idleness
     pub parked: bool,
     pub touched_at: u64,
@@ -97,7 +99,7 @@ impl Session {
             container: 0, toplevel: 0, holder: 0, display: String::new(),
             sock: String::new(), events_sock: String::new(), sock_dir: String::new(),
             argv: String::new(), cli: String::new(), version: String::new(), desc: String::new(),
-            caps: vec![], frames: vec![], missed_pings: 0, dialogs: vec![], rss_mb: 0, parked: false, touched_at: now, closing: false, lost_parent: false, editor_req: (String::new(), String::new(), None),
+            caps: vec![], frames: vec![], missed_pings: 0, dialogs: vec![], rss_mb: 0, task_wait: String::new(), parked: false, touched_at: now, closing: false, lost_parent: false, editor_req: (String::new(), String::new(), None),
         }
     }
     pub fn spawned(mut self, pid: u32) -> Self { self.pid = pid; self }
@@ -171,6 +173,7 @@ impl Session {
             "frames": self.frames.iter().map(Frame::to_json).collect::<Vec<_>>(),
             "dialogs": self.dialogs,
             "rss_mb": self.rss_mb,
+            "task_wait": self.task_wait,
             // what the embedded editor can do beyond the basics (embed-gerbview, embed-editor-requested, ...): the client gates on these
             "embed_caps": self.caps.iter().filter(|c| c.starts_with("embed-") || c.starts_with("prewarm-")).collect::<Vec<_>>(),
             // bp.9: the client may map and unmap a frame KiCad has shown once (its tab switches need no round trip)
@@ -747,6 +750,7 @@ pub async fn gui_call_as(route: &GuiRoute, ty: &str, msg: Value, client: &str) -
     impl Drop for Use { fn drop(&mut self) { if let Some(e) = gui_use().lock().unwrap().get_mut(&self.0) { e.0 = e.0.saturating_sub(1); if self.1 { e.1 = crate::hub::now_ms() } } } }
     let named = !client.is_empty();
     let _use = (client != CHECKS_CLIENT).then(|| { let mut m = gui_use().lock().unwrap(); let e = m.entry(route.sock.clone()).or_default(); e.0 += 1; if named { e.1 = crate::hub::now_ms() } Use(route.sock.clone(), named) });
+    if TASK_GATED.iter().any(|g| ty.rsplit('.').next() == Some(*g)) && has_task_gate(&route.sock) { return raw_gated(&route.tx, &route.sock, &route.desc, ty, msg, 30000, client, None).await }
     let (t, r) = oneshot::channel();
     if route.tx.send(Msg::Raw { sock: route.sock.clone(), desc: route.desc.clone(), ty: ty.into(), msg, timeout: 30000, client: client.into(), reply: t }).is_err() {
         return json!({"ok":false,"error":"no reply","why":"no reply","fallback":true})
@@ -968,6 +972,8 @@ enum Msg {
     StartupReason { pro: String, gen: u64, reason: String },
     Ready { pro: String, gen: u64, sock: String, version: String, holder: u64, events_sock: String, ev_since: u64, frames: Vec<Frame>, spawn_container: u64, spawn_active: String, caps: Vec<String> },
     StartFailed { pro: String, gen: u64, why: String },
+    /// a gated request on `sock` waits on KiCad's task (`what`), or no longer ("")
+    TaskWait { sock: String, what: String },
     FramesUpdated { pro: String, gen: u64, holder: Option<u64>, frames: Vec<Frame>, reply: Option<(u64, oneshot::Sender<Result<Value, String>>)> },
     /// `editor`: KiCad's ET_EDITOR_REQUESTED (a library editor with the item it is for), not a plain ET_SHOW_REQUESTED
     ForkShowRequested { pro: String, gen: u64, kind: String, item: String, editor: bool, actor: String },
@@ -1353,9 +1359,12 @@ impl Actor {
             return;
         }
         if snap.mode == "fork" {
+            // numbered: a show still waiting on KiCad's task when a newer one comes gives way to it (only the latest editor is sent)
+            let seq = next_show(&snap.sock);
             tokio::spawn(async move {
-                let synced = match switch_fork_frame(&me, &snap.sock, &snap.desc, &snap.active, &doc, &item, remount, focus).await {
+                let synced = match switch_fork_frame_n(&me, &snap.sock, &snap.desc, &snap.active, &doc, &item, remount, focus, Some(seq)).await {
                     Ok(v) => v,
+                    Err(e) if e == SUPERSEDED => { let _ = reply.send(Ok(snap.info_json())); return; }
                     Err(e) => { let _ = reply.send(Err(e)); return; }
                 };
                 if let Some((holder, _, frames)) = synced {
@@ -1545,6 +1554,11 @@ impl Actor {
                     let _ = reply.send(Ok(json!({"ok":true})));
                 }
             }
+            Msg::TaskWait { sock, what } => {
+                if let Some(s) = self.sessions.values_mut().find(|s| s.sock == sock && !sock.is_empty()) {
+                    if s.task_wait != what { s.task_wait = what; let snap = s.clone(); self.publish(&snap, None); }
+                }
+            }
             Msg::Raw { sock, desc, ty, msg, timeout, client, reply } => {
                 // BACKPLANE_KICAD_DEBUG: every request the hub sends the embedded KiCad, in order, with the time, its kind and KiCad's memory
                 // then (what is loaded at open, and which request separates a 4.8 GB open from a 5.5 GB one)
@@ -1582,6 +1596,7 @@ impl Actor {
                 let Some(s) = self.sessions.get_mut(&pro).filter(|s| s.gen == gen && s.state == "starting") else { return };
                 *s = s.clone().ready(&sock, &version, ipc::now_s());
                 for c in caps { if !s.caps.contains(&c) { s.caps.push(c); } }
+                note_task_gate(&s.sock, &s.caps);
                 if self.start_retried.remove(&pro) { eprintln!("kicad embed: {pro}: started after a missed start window (the hub's retry or the person's Try again)"); }
                 s.holder = holder;
                 if !events_sock.is_empty() { s.events_sock = events_sock; }
@@ -1814,11 +1829,76 @@ impl Actor {
 }
 
 async fn raw_on(me: &mpsc::UnboundedSender<Msg>, sock: &str, desc: &str, ty: &str, msg: Value, timeout: u64) -> Value {
+    raw_gated(me, sock, desc, ty, msg, timeout, "", None).await
+}
+async fn raw_once(me: &mpsc::UnboundedSender<Msg>, sock: &str, desc: &str, ty: &str, msg: Value, timeout: u64, client: &str) -> Value {
     let (t, r) = oneshot::channel();
-    if me.send(Msg::Raw { sock: sock.into(), desc: desc.into(), ty: ty.into(), msg, timeout, client: String::new(), reply: t }).is_err() {
+    if me.send(Msg::Raw { sock: sock.into(), desc: desc.into(), ty: ty.into(), msg, timeout, client: client.into(), reply: t }).is_err() {
         return json!({"ok":false,"error":"embed actor stopped"})
     }
     r.await.unwrap_or_else(|_| json!({"ok":false,"error":"no reply"}))
+}
+
+/// The hub's own drive of the editor's frames, which KiCad with `task-gate-reads` (lane P, 56ef479828) refuses AS_BUSY while a check or a
+/// refill runs, where KiCad before it made them wait: sent again as soon as that task ends, never shown to the person as a failure.
+const TASK_GATED: &[&str] = &["ShowFrame", "HideFrame", "AttachToParent", "SetFrameGeometry", "SetTheme", "OpenGerbers", "SetReservedKeys", "SetChrome", "SetHostMarkers"];
+/// The task a refusal names, and its token when said: Some only for the task gate's own refusal ("a task is running: <what> (token <t>, ...").
+pub fn task_refusal(o: &Value) -> Option<(String, String)> {
+    if o["ok"] == true || o["status"] != "AS_BUSY" { return None }
+    let rest = o["error"].as_str()?.strip_prefix("a task is running: ")?;
+    let what = rest.split(" (token ").next().unwrap_or(rest).trim().to_string();
+    let token = rest.split(" (token ").nth(1).and_then(|t| t.split(',').next()).unwrap_or("").trim().to_string();
+    Some((what, token))
+}
+#[derive(Debug, PartialEq)]
+pub enum TaskState { Running, Unknown, Ended }
+/// What a GetTaskStatus answer says: running, unknown (no state: proto3's TS_UNKNOWN), or ended (any other state, or the request refused).
+pub fn task_state(st: &Value) -> TaskState {
+    if st["ok"] != true { return TaskState::Ended }
+    match &st["message"]["state"] {
+        Value::Null => TaskState::Unknown,
+        v if v == "TS_RUNNING" || v.as_i64() == Some(1) => TaskState::Running,
+        v if v == "TS_UNKNOWN" || v.as_i64() == Some(0) => TaskState::Unknown,
+        _ => TaskState::Ended,
+    }
+}
+/// The KiCads (their sockets) whose runtime says `task-gate-reads`: only their gated requests are retried (older runtimes make them wait).
+fn gated_socks() -> &'static Mutex<HashSet<String>> { static S: OnceLock<Mutex<HashSet<String>>> = OnceLock::new(); S.get_or_init(Default::default) }
+pub fn note_task_gate(sock: &str, caps: &[String]) { if caps.iter().any(|c| c == "task-gate-reads") { gated_socks().lock().unwrap().insert(sock.to_string()); } else { gated_socks().lock().unwrap().remove(sock); } }
+fn has_task_gate(sock: &str) -> bool { gated_socks().lock().unwrap().contains(sock) }
+/// The latest show asked per KiCad (its socket): an older one still waiting on a task gives way (only the latest editor is sent).
+fn show_seq() -> &'static Mutex<HashMap<String, u64>> { static S: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new(); S.get_or_init(Default::default) }
+fn next_show(sock: &str) -> u64 { let mut m = show_seq().lock().unwrap(); let e = m.entry(sock.to_string()).or_default(); *e += 1; *e }
+fn show_current(sock: &str, seq: u64) -> bool { show_seq().lock().unwrap().get(sock).map_or(true, |n| *n == seq) }
+/// What a gated request superseded by a newer show answers.
+pub const SUPERSEDED: &str = "superseded by a newer show";
+/// One request; a TASK_GATED one refused by KiCad's task gate is sent again when the task ends (GetTaskStatus with its token, else after a
+/// short wait), up to 10 minutes, the session saying meanwhile what it waits on (`task_wait`); `seq`: a show's number, given up for a newer.
+async fn raw_gated(me: &mpsc::UnboundedSender<Msg>, sock: &str, desc: &str, ty: &str, msg: Value, timeout: u64, client: &str, seq: Option<u64>) -> Value {
+    let gated = TASK_GATED.iter().any(|g| ty.rsplit('.').next() == Some(*g)) && has_task_gate(sock);
+    let t0 = std::time::Instant::now();
+    let mut waited = false;
+    loop {
+        let o = raw_once(me, sock, desc, ty, msg.clone(), timeout, client).await;
+        let refusal = if gated { task_refusal(&o) } else { None };
+        let Some((what, token)) = refusal.filter(|_| t0.elapsed() < Duration::from_secs(600)) else {
+            if waited { let _ = me.send(Msg::TaskWait { sock: sock.into(), what: String::new() }); eprintln!("kicad embed: {ty} sent after KiCad's task, {} ms", t0.elapsed().as_millis()); }
+            return o
+        };
+        if !waited { eprintln!("kicad embed: {ty} waits on KiCad's task: {what}"); waited = true; }
+        let _ = me.send(Msg::TaskWait { sock: sock.into(), what: what.clone() });
+        let mut unknown_once = false;
+        loop {
+            if seq.is_some_and(|n| !show_current(sock, n)) { let _ = me.send(Msg::TaskWait { sock: sock.into(), what: String::new() }); return json!({"ok": false, "error": SUPERSEDED, "superseded": true}) }
+            if token.is_empty() { tokio::time::sleep(Duration::from_millis(250)).await; break }
+            // TaskStatusResponse.state: TS_RUNNING goes on; anything else ended it. An absent state (proto3's TS_UNKNOWN) is asked once more;
+            // a refused request (the token gone: "unknown task token", AS_BAD_REQUEST) is an ended task too
+            let st = raw_once(me, sock, desc, "kiapi.common.tasks.GetTaskStatus", json!({"token": {"value": token}}), 3000, "").await;
+            match task_state(&st) { TaskState::Running => {}, TaskState::Unknown if !unknown_once => unknown_once = true, _ => break }
+            if t0.elapsed() > Duration::from_secs(600) { break }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    }
 }
 
 async fn drain_lines<R: AsyncRead + Unpin>(r: R, mut each: impl FnMut(String)) {
@@ -1833,6 +1913,10 @@ async fn drain_lines<R: AsyncRead + Unpin>(r: R, mut each: impl FnMut(String)) {
 }
 
 async fn show_fork_frame(me: &mpsc::UnboundedSender<Msg>, sock: &str, desc: &str, kind: &str, doc: &str, item: &str, focus: bool) -> Result<Value, String> {
+    show_fork_frame_n(me, sock, desc, kind, doc, item, focus, None).await
+}
+/// `seq`: the show's number (next_show): while it waits on KiCad's task a newer show takes over and this one gives way (Err(SUPERSEDED)).
+async fn show_fork_frame_n(me: &mpsc::UnboundedSender<Msg>, sock: &str, desc: &str, kind: &str, doc: &str, item: &str, focus: bool, seq: Option<u64>) -> Result<Value, String> {
     // GerbView (bp.13, in KiCad's process): its files are opened with OpenGerbers (Gerbers and drill files, or one .gbrjob for all its
     // layers; `doc` lists them a line each), which shows its frame; ShowFrame shows it again after
     if canon_frame(kind) == "GERBVIEW" && !doc.is_empty() {
@@ -1845,8 +1929,9 @@ async fn show_fork_frame(me: &mpsc::UnboundedSender<Msg>, sock: &str, desc: &str
     if !doc.is_empty() { body["document"] = json!(doc); }
     if !item.is_empty() { body["item"] = json!(item); }
     for attempt in 0..8 {
-        let o = raw_on(me, sock, desc, "kiapi.backplane.embed.ShowFrame", body.clone(), 15000).await;
+        let o = raw_gated(me, sock, desc, "kiapi.backplane.embed.ShowFrame", body.clone(), 15000, "", seq).await;
         if o["ok"].as_bool().unwrap_or(false) { return Ok(o) }
+        if o["superseded"] == true { return Err(SUPERSEDED.into()) }
         let st = o["status"].as_str().unwrap_or("");
         if st == "AS_NOT_READY" && attempt < 7 {
             tokio::time::sleep(Duration::from_millis(150)).await;
@@ -1862,6 +1947,11 @@ async fn show_fork_frame(me: &mpsc::UnboundedSender<Msg>, sock: &str, desc: &str
 async fn switch_fork_frame(
     me: &mpsc::UnboundedSender<Msg>, sock: &str, desc: &str, kind: &str, doc: &str, item: &str, remount: bool, focus: bool,
 ) -> Result<Option<(u64, String, Vec<Frame>)>, String> {
+    switch_fork_frame_n(me, sock, desc, kind, doc, item, remount, focus, None).await
+}
+async fn switch_fork_frame_n(
+    me: &mpsc::UnboundedSender<Msg>, sock: &str, desc: &str, kind: &str, doc: &str, item: &str, remount: bool, focus: bool, seq: Option<u64>,
+) -> Result<Option<(u64, String, Vec<Frame>)>, String> {
     let target_kind = canon_frame(kind);
     if remount {
         let gf0 = raw_on(me, sock, desc, "kiapi.backplane.embed.GetFrames", json!({}), 5000).await;
@@ -1872,7 +1962,7 @@ async fn switch_fork_frame(
             }
         }
     }
-    let shown_res = show_fork_frame(me, sock, desc, kind, doc, item, focus).await?;
+    let shown_res = show_fork_frame_n(me, sock, desc, kind, doc, item, focus, seq).await?;
     let resp_win = u64_of(&shown_res["message"]["frame"]["window"]);
     let resp_kind = kind_of_fk_val(&shown_res["message"]["frame"]["kind"]);
     let target_win = (resp_win > 0 && resp_kind == target_kind).then_some(resp_win);
@@ -1885,7 +1975,7 @@ async fn switch_fork_frame(
         .collect();
     if !others.is_empty() {
         for win in others {
-            let _ = raw_on(me, sock, desc, "kiapi.backplane.embed.HideFrame", json!({ "window": win }), 5000).await;
+            let _ = raw_gated(me, sock, desc, "kiapi.backplane.embed.HideFrame", json!({ "window": win }), 5000, "", seq).await;
         }
         let gf2 = raw_on(me, sock, desc, "kiapi.backplane.embed.GetFrames", json!({}), 10000).await;
         if gf2["ok"].as_bool().unwrap_or(false) {
@@ -2454,6 +2544,8 @@ impl RpcHandler for EmbedRpc {
                 return err_reply(id, &format!("{} is not in a project this hub knows", resolved.pro));
             }
             if let Some(t) = p["theme"].as_str().filter(|t| matches!(*t, "light" | "dark")) { themes().lock().unwrap().insert(norm_pro_key(&resolved.pro), t.to_string()); }
+            // the person's switch, Edit or pre-warm: an automatic check in KiCad starts after it, not in its middle (its task would refuse them)
+            if matches!(method, "editor.kicad.show" | "editor.kicad.attach" | "editor.kicad.prewarm") { super::checkrun::person_touched(&resolved.pro); }
             if method == "editor.kicad.prewarm" {
                 // the client, once the first editor is on show: the others opened hidden at the pane's size (KiCad paints a pre-warmed frame at
                 // the size given; at its 1280x800 default the first real show relaid the whole frame out)
@@ -2865,6 +2957,71 @@ mod tests {
         let t = "some avg10=0.00 avg60=0.00 avg300=0.08 total=3057047\nfull avg10=0.00 avg60=0.00 avg300=0.06 total=2641386\n";
         assert_eq!(super::stall_total_us(t), Some(3057047));
         assert_eq!(super::stall_total_us("full avg10=0.00 total=5\n"), None);
+    }
+    #[test] fn the_task_gates_refusal_is_told_from_any_other() {
+        let r = json!({"ok": false, "status": "AS_BUSY", "error": "a task is running: DRC of video (token 7f3a, for 1.2 s); kiapi.backplane.embed.ShowFrame waits until it completes (GetTaskStatus with the token); only reads are answered meanwhile"});
+        assert_eq!(task_refusal(&r), Some(("DRC of video".to_string(), "7f3a".to_string())));
+        assert_eq!(task_refusal(&json!({"ok": false, "status": "AS_BUSY", "error": "KiCad is showing the dialog 'x'"})), None, "a dialog is no task");
+        assert_eq!(task_refusal(&json!({"ok": false, "status": "AS_BAD_REQUEST", "error": "a task is running: x"})), None);
+        assert_eq!(task_refusal(&json!({"ok": true})), None);
+        assert_eq!(task_refusal(&json!({"ok": false, "status": "AS_BUSY", "error": "a task is running: refill"})), Some(("refill".to_string(), String::new())), "no token: waited out by time");
+    }
+    /// KiCad's task gate refuses a show; the hub asks the task's status until it ends, then sends the show again, which lands.
+    #[tokio::test] async fn a_show_refused_for_a_task_is_sent_again_when_it_ends() {
+        let (route, mut rx) = stand_in_route("/p/gate.kicad_pro");
+        note_task_gate(&route.sock, &["task-gate-reads".to_string()]);
+        let seen = Arc::new(Mutex::new(Vec::<String>::new())); let s2 = seen.clone();
+        tokio::spawn(async move {
+            let (mut shows, mut polls) = (0, 0);
+            while let Some((ty, msg, reply)) = rx.recv().await {
+                s2.lock().unwrap().push(ty.rsplit('.').next().unwrap_or("").to_string());
+                let o = if ty.ends_with("ShowFrame") { shows += 1; if shows == 1 { json!({"ok": false, "status": "AS_BUSY", "error": "a task is running: DRC (token tk9, for 0.4 s); kiapi.backplane.embed.ShowFrame waits until it completes"}) } else { json!({"ok": true, "message": {"frame": {"window": 7}}}) } }
+                    else if ty.ends_with("GetTaskStatus") { assert_eq!(msg["token"]["value"], "tk9"); polls += 1; json!({"ok": true, "message": {"state": if polls < 3 { "TS_RUNNING" } else { "TS_COMPLETED" }}}) }
+                    else { json!({"ok": true, "message": {}}) };
+                let _ = reply.send(o);
+            }
+        });
+        let o = gui_call(&route, "kiapi.backplane.embed.ShowFrame", json!({"kind": "FK_PCB_EDITOR"})).await;
+        assert_eq!(o["ok"], true, "{o}");
+        assert_eq!(*seen.lock().unwrap(), ["ShowFrame", "GetTaskStatus", "GetTaskStatus", "GetTaskStatus", "ShowFrame"], "polled while running, sent once it ended");
+        // a request outside the gated set is answered as it is (its caller decides)
+        let (route2, mut rx2) = stand_in_route("/p/gate2.kicad_pro");
+        tokio::spawn(async move { while let Some((_, _, reply)) = rx2.recv().await { let _ = reply.send(json!({"ok": false, "status": "AS_BUSY", "error": "a task is running: DRC (token t, for 1 s)"})); } });
+        assert_eq!(gui_call(&route2, "kiapi.board.commands.GetItems", json!({})).await["status"], "AS_BUSY");
+    }
+    /// A show waiting on the task gives way to a newer one: only the latest editor is sent when the task ends.
+    #[tokio::test] async fn a_waiting_show_gives_way_to_a_newer_one() {
+        let (route, mut rx) = stand_in_route("/p/coalesce.kicad_pro");
+        note_task_gate(&route.sock, &["task-gate-reads".to_string()]);
+        let sends = Arc::new(Mutex::new(0)); let s2 = sends.clone();
+        tokio::spawn(async move { while let Some((ty, _, reply)) = rx.recv().await {
+            if ty.ends_with("ShowFrame") { *s2.lock().unwrap() += 1; }
+            let _ = reply.send(if ty.ends_with("ShowFrame") { json!({"ok": false, "status": "AS_BUSY", "error": "a task is running: DRC (token tk, for 1 s)"}) } else { json!({"ok": true, "message": {"state": "TS_RUNNING"}}) });
+        } });
+        let seq = next_show(&route.sock);
+        let (tx, sock, desc) = (route.tx.clone(), route.sock.clone(), route.desc.clone());
+        let waiting = tokio::spawn(async move { raw_gated(&tx, &sock, &desc, "kiapi.backplane.embed.ShowFrame", json!({}), 1000, "", Some(seq)).await });
+        tokio::time::sleep(Duration::from_millis(300)).await;
+        let _newer = next_show(&route.sock);
+        let o = tokio::time::timeout(Duration::from_secs(3), waiting).await.expect("it gave way").unwrap();
+        assert_eq!(o["superseded"], true, "{o}");
+        assert_eq!(*sends.lock().unwrap(), 1, "the older show was not sent again");
+    }
+    #[test] fn only_a_runtime_with_the_gate_is_retried() {
+        note_task_gate("/t/old.sock", &["api-server".to_string()]); assert!(!has_task_gate("/t/old.sock"), "older runtimes: their requests wait, nothing retried");
+        note_task_gate("/t/new.sock", &["task-gate-reads".to_string()]); assert!(has_task_gate("/t/new.sock"));
+    }
+    #[test] fn a_task_status_is_read_as_kicad_says_it() {
+        assert_eq!(task_state(&json!({"ok": true, "message": {"state": "TS_RUNNING"}})), TaskState::Running);
+        assert_eq!(task_state(&json!({"ok": true, "message": {"state": "TS_COMPLETED"}})), TaskState::Ended);
+        assert_eq!(task_state(&json!({"ok": true, "message": {}})), TaskState::Unknown, "proto3 leaves TS_UNKNOWN out: asked once more");
+        assert_eq!(task_state(&json!({"ok": false, "status": "AS_BAD_REQUEST", "error": "unknown task token tk9"})), TaskState::Ended);
+    }
+    #[test] fn only_the_latest_show_is_sent() {
+        let sock = "/t/coalesce.sock";
+        let a = next_show(sock); assert!(show_current(sock, a));
+        let b = next_show(sock); assert!(!show_current(sock, a), "an older show waiting on the task gives way"); assert!(show_current(sock, b));
+        assert!(show_current("/t/other.sock", 99), "another KiCad's shows are its own");
     }
     #[test] fn warm_eviction_picks_oldest_detached_clean_session() {
         let mut m = HashMap::new();
