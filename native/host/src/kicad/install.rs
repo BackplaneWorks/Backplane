@@ -11,9 +11,11 @@ use std::{path::{Path, PathBuf}, process::Stdio, sync::{atomic::{AtomicBool, Ord
 
 #[derive(Debug, PartialEq)]
 pub struct Package { pub platform: &'static str, pub version: &'static str, pub release: &'static str, pub asset: &'static str, pub sha256: &'static str, pub format: &'static str, pub cli: &'static str }
-/// Linux: bp.12.2 (bp.12.1's DRC zone guard, `drc-zone-guard`, and the routing plan view's own keys, `plan-keys`). Windows: bp.10 until its fixes ship. Apple Silicon keeps bp.6
+/// Linux: bp.12.4 (bp.12.1's DRC zone guard, `drc-zone-guard`; bp.12.2's plan view keys, `plan-keys`; opening a board changes nothing in it
+/// and an unchanged file saves nothing, `no-load-migration`, bp.12.3; an open Symbol Editor no longer refuses other documents' saves,
+/// bp.12.4, no capability). Windows: bp.10 until its fixes ship. Apple Silicon keeps bp.6
 /// (no newer macOS build yet; bp.13 brings darwin-arm64, then only MAC changes). Each pin is its one line; the tests read them.
-pub const LINUX: Package = Package { platform: "linux-x86_64", version: "10.99.0-bp.12.2", release: "backplane-kicad-v10.99.0-bp.12.2", asset: "backplane-kicad-linux-x86_64-10.99.0-bp.12.2.tar.gz", sha256: "c603e5ba8c9867c7922c8eae7a62e143128a4b4d0bf50a097a9a6e2401129b43", format: "tar.gz", cli: "bin/kicad-cli" };
+pub const LINUX: Package = Package { platform: "linux-x86_64", version: "10.99.0-bp.12.4", release: "backplane-kicad-v10.99.0-bp.12.4", asset: "backplane-kicad-linux-x86_64-10.99.0-bp.12.4.tar.gz", sha256: "a94104cd524558d92a1df8016ece4a2c5b2cc436a6c14bb5bc71d72e048ee2dc", format: "tar.gz", cli: "bin/kicad-cli" };
 pub const MAC: Package = Package { platform: "darwin-arm64", version: "10.99.0-bp.6", release: "backplane-kicad-v10.99.0-bp.6", asset: "backplane-kicad-darwin-arm64-10.99.0-bp.6.tar.gz", sha256: "99584fb0ee490354098778d39e3aaed9e0f274ee39972851a9cbeabfb271462d", format: "tar.gz", cli: "bin/kicad-cli" };
 pub const WINDOWS: Package = Package { platform: "windows-x86_64", version: "10.99.0-bp.10", release: "backplane-kicad-v10.99.0-bp.10", asset: "backplane-kicad-windows-x86_64-10.99.0-bp.10.zip", sha256: "68b3796f1de3a8c0a39dd20ca96a43f3354de47facbe5de45d0bd4668c32599c", format: "zip", cli: "bin/kicad-cli.exe" };
 /// Where the releases are (said in the consent note, and the script's download base).
@@ -510,6 +512,11 @@ pub fn update_reason(have: &[&str]) -> Option<String> {
     if !embed { adds.push("brings the KiCad editor inside Backplane's viewer") }
     // the routing plan view's keys (bp.12.2): only for a runtime with the plan, which lacked them
     if have.contains(&"routing-plan") && !have.contains(&"plan-keys") { adds.push("makes A, R and W in KiCad's routing plan view act on the plan") }
+    // bp.12.3: KiCad no longer rewrites what nobody changed (the load-time 3D migration, an unchanged file's save); bp.12.4: nor does an
+    // open Symbol Editor refuse a board's save (no capability: every runtime without no-load-migration lacks that fix too)
+    let nlm = !have.contains(&"no-load-migration") && (embed || have.contains(&"drc-zone-guard"));
+    if nlm && adds.is_empty() { return Some("Opening a board no longer changes its 3D model paths or teardrops, saving an unchanged file writes nothing, and an open Symbol Editor no longer blocks saves.".into()) }
+    if nlm { adds.push("stops KiCad rewriting files nobody changed or refusing saves while its Symbol Editor is open") }
     match adds.as_slice() {
         [] => None,
         [a] => Some(format!("It {a}.")),
@@ -873,14 +880,12 @@ cp \"$f\" \"$out\"
     /// The update's reason is what the new pin adds over the installed runtime, the safety fix first, one sentence; none when it lacks neither.
     #[test] fn the_update_says_what_it_adds_over_the_installed_runtime() {
         let s = |v: Option<String>| v.unwrap_or_default();
-        assert_eq!(s(update_reason(&["embed", "coedit"])), "It fixes a DRC fault that could miss a short inside a filled zone.", "bp.10 (no plan)");
-        assert_eq!(s(update_reason(&["api-server"])), "It fixes a DRC fault that could miss a short inside a filled zone, and brings the KiCad editor inside Backplane's viewer.", "bp.4: both, the safety one first");
-        assert_eq!(s(update_reason(&["drc-zone-guard"])), "It brings the KiCad editor inside Backplane's viewer.");
-        assert_eq!(s(update_reason(&["embedded", "drc-zone-guard", "routing-plan"])), "It makes A, R and W in KiCad's routing plan view act on the plan.", "bp.12.1 to bp.12.2");
-        assert_eq!(s(update_reason(&["embed", "routing-plan"])), "It fixes a DRC fault that could miss a short inside a filled zone, and makes A, R and W in KiCad's routing plan view act on the plan.", "bp.10 to bp.12.2");
-        assert_eq!(update_reason(&["embedded", "drc-zone-guard", "routing-plan", "plan-keys"]), None);
-        assert_eq!(update_reason(&["embedded", "drc-zone-guard"]), None);
-        assert_eq!(s(update_reason(&["routing-plan"])).matches('.').count(), 1, "one sentence");
+        assert_eq!(s(update_reason(&["embedded", "drc-zone-guard", "routing-plan", "plan-keys"])), "Opening a board no longer changes its 3D model paths or teardrops, saving an unchanged file writes nothing, and an open Symbol Editor no longer blocks saves.", "bp.12.2 to bp.12.4: one sentence a person reads");
+        assert_eq!(s(update_reason(&["embedded", "drc-zone-guard", "routing-plan"])), "It makes A, R and W in KiCad's routing plan view act on the plan, and stops KiCad rewriting files nobody changed or refusing saves while its Symbol Editor is open.", "bp.12.1 to bp.12.4");
+        assert_eq!(s(update_reason(&["embed", "coedit"])), "It fixes a DRC fault that could miss a short inside a filled zone, and stops KiCad rewriting files nobody changed or refusing saves while its Symbol Editor is open.", "bp.10 (no plan)");
+        assert_eq!(s(update_reason(&["api-server"])), "It fixes a DRC fault that could miss a short inside a filled zone, and brings the KiCad editor inside Backplane's viewer.", "bp.4: the safety one first");
+        assert_eq!(update_reason(&["embedded", "drc-zone-guard", "routing-plan", "plan-keys", "no-load-migration"]), None, "bp.12.3 and bp.12.4 themselves");
+        assert_eq!(s(update_reason(&["routing-plan"])).matches(". ").count(), 0, "one sentence");
     }
     #[test] fn progress_is_said_in_megabytes_and_time_left() {
         let mb = 1u64 << 20;

@@ -53,6 +53,7 @@
 //                "write:" adds a line to README.md and writes NOTES-<tag>.md;
 //                "delegate:" calls delegate_task (a plain child);
 //                "mcpcall:{json}" makes one Backplane MCP call, {"name":..,"arguments":..}, and says its answer;
+//                "mcpseq:[{json},..]" makes several in one turn, in order (a lock taken, then the write under it);
 //                "fail:" starts, then fails the turn (an API error result)
 //   delegate     the first command calls the hub's delegate_task (its MCP
 //                URL from --mcp-config) for a child "mode:plain child
@@ -473,6 +474,25 @@ async function run(c: Cmd, firstOne: boolean) {
       } catch (e) { got = String(e); }
       log(`PERMIT ${tool} ${got.slice(0, 300)}`);
       emit({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: got.includes("allow") ? `answered: ${got.slice(0, 200)}` : "denied", is_error: !got.includes("allow") }] }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
+    }
+    // "mcpseq:[json,...]": several Backplane MCP calls in one turn, in order (a document's lock taken, then the write and save under it:
+    // the lock is released when the turn ends), each logged "MCPCALL <name> <answer>" and answered in its tool result
+    const mseq = /mcpseq:(\[.*\])/.exec(c.text);
+    if (mseq && mcpUrl) {
+      for (const call of JSON.parse(mseq[1]) as { name: string; arguments: unknown }[]) {
+        const id = `toolu_${rnd()}`;
+        emit({ type: "assistant", message: { id: `msg_${rnd()}`, type: "message", role: "assistant", model: "claude-haiku-4-5-20251001",
+          content: [{ type: "tool_use", id, name: `mcp__backplane__${call.name}`, input: call.arguments }], usage: { input_tokens: 10, output_tokens: 5 } }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
+        let got = "";
+        try {
+          const r = await fetch(mcpUrl, { method: "POST", headers: { "content-type": "application/json" },
+            body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name: call.name, arguments: call.arguments } }) });
+          got = await r.text();
+        } catch (e) { got = String(e); }
+        log(`MCPCALL ${call.name} ${got.slice(0, mcpLogMax)}`);
+        emit({ type: "user", message: { role: "user", content: [{ type: "tool_result", tool_use_id: id, content: got.slice(0, 1500) }] }, parent_tool_use_id: null, session_id: session, uuid: rnd() });
+      }
+      say("MCPSEQ done");
     }
     // "mcpcall:{json}": one Backplane MCP tool call, {"name":"preview_evaluate","arguments":{...}}, its answer in the tool result
     const mc = /mcpcall:(\{.*\})/.exec(c.text);
