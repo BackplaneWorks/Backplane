@@ -1251,7 +1251,43 @@ def run(h):
         h.cleanup()
 
 
+START_FAILURES = ("did not open its IPC socket", "did not answer Ping")
+
+
+def start_failed(out_dir):
+    """KiCad never came up in this run (the hub's start window missed): a slow first scan of new files, not a focus result."""
+    try:
+        text = open(os.path.join(out_dir, "hub.log"), encoding="utf-8", errors="replace").read()
+    except OSError:
+        return None
+    return next((m for m in START_FAILURES if m in text), None)
+
+
+def defender_events(minutes=10):
+    """Microsoft Defender's operational events of the last minutes (cloud lookups, scans), to set beside a failed start."""
+    import subprocess
+    ps = ("Get-WinEvent -LogName 'Microsoft-Windows-Windows Defender/Operational' -MaxEvents 40 -EA SilentlyContinue | "
+          f"Where-Object {{ $_.TimeCreated -gt (Get-Date).AddMinutes(-{minutes}) }} | "
+          "ForEach-Object { '{0:HH:mm:ss} {1}' -f $_.TimeCreated, $_.Id }")
+    try:
+        return subprocess.run(["powershell", "-NoProfile", "-Command", ps], capture_output=True, text=True, timeout=30).stdout.split()
+    except (OSError, subprocess.SubprocessError):
+        return []
+
+
 if __name__ == "__main__":
     if len(sys.argv) not in (6, 7):
         sys.exit(__doc__)
-    sys.exit(run(E.SuiteHarness("opening_focus", *sys.argv[1:6], int(sys.argv[6]) if len(sys.argv) == 7 else 3937)))
+    args = list(sys.argv[1:6])
+    port = int(sys.argv[6]) if len(sys.argv) == 7 else 3937
+    rc = run(E.SuiteHarness("opening_focus", *args, port))
+    why = start_failed(args[4])
+    if why:
+        # one retry, in a fresh folder; a second failed start fails the run
+        print("START-RETRY " + json.dumps({"why": why, "defender_events_last_10_min": defender_events()}), flush=True)
+        args[4] = args[4].rstrip("\\/") + "-retry"
+        rc = run(E.SuiteHarness("opening_focus", *args, port))
+        if start_failed(args[4]):
+            print("START-FAILED-TWICE " + json.dumps({"why": start_failed(args[4])}), flush=True)
+            rc = rc or 1
+    sys.exit(rc)
