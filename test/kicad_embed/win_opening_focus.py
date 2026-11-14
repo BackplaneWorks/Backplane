@@ -712,7 +712,7 @@ def run(h):
             h.check("F5: Edit, then the pre-warm with no input: the PCB canvas keeps the keys (F2 acts by the zoom readout)",
                     bool(pw) and after["inside_frame"] and bool(zoomed), d)
             return h.finish()
-        if only in ("stage2", "stage2_buttons", "pane_behaviours"):
+        if only in ("stage2", "stage2_buttons", "pane_behaviours", "stage2_sweep"):
             import subprocess
             gls = [w for w in children if w["visible"] and w["class"] == "wxGLCanvas"]
             gl = max(gls, key=lambda w: w["w"] * w["h"]) if gls else None
@@ -814,6 +814,76 @@ def run(h):
                 h.check("Stage 2 right click: KiCad's context menu opens once", res["right_click"]["menus_opened"] == 1, res["right_click"])
                 h.check("Stage 2 middle drag pans, and stops at release", res["middle_drag"]["panned_px"] > 2000, res["middle_drag"])
                 h.check("Wheel over the pane does not take the composer's keys", res["composer_after_wheel"]["key_ms"] is not None and res["composer_after_wheel"]["focus_pid"] == cp.pid, res["composer_after_wheel"])
+            elif only == "stage2_sweep":
+                # Lead, Nov 15: a press on the shield released about when the replay fires must still reach KiCad as a
+                # whole click (SB2: a 60 ms right click got up-before-down, no menu). (i) holds of 40/55/60/70/120 ms for
+                # each button, (ii) 20 right clicks held 60 ms, (iii) a first press on a non-canvas part of the frame
+                # (infobar, else the toolbar strip) and then a right click on the canvas. Every press starts with Backplane
+                # holding the keys, so it goes through the shield.
+                def hold_click(dn, up, x, y, ms):
+                    E.screen_move(x, y)
+                    E._send(E._mouse(dn))
+                    t0 = time.perf_counter()
+                    while (time.perf_counter() - t0) * 1000 < ms:
+                        pass
+                    E._send(E._mouse(up))
+                    return round((time.perf_counter() - t0) * 1000, 1)
+                def menus():
+                    return len([w for w in kicad_toplevels() if w["visible"] and w["class"] == "#32768"])
+                def right_once(x, y, ms):
+                    deselect(); backplane_keys("composer")
+                    n0 = menus()
+                    held = hold_click(8, 0x10, x, y, ms)
+                    time.sleep(1.0)
+                    n = menus() - n0
+                    E.key_tap("Escape"); time.sleep(0.4)
+                    return {"held_ms": held, "menus": n}
+                sweep = {"left": [], "right": [], "middle": []}
+                for ms in (40, 55, 60, 70, 120):
+                    deselect(); backplane_keys("composer")
+                    box = message_panel_box(frame)
+                    a, b = h.p(f"sw_l{ms}_0.png"), h.p(f"sw_l{ms}_1.png")
+                    E.grab_screen(a)
+                    held = hold_click(2, 4, cx_, cy_, ms)
+                    time.sleep(0.8)
+                    E.grab_screen(b)
+                    sweep["left"].append({"hold": ms, "held_ms": held, "selected_px": E.img_diff_box(a, b, *box)["changed_pixels"]})
+                    sweep["right"].append({"hold": ms, **right_once(cx_ + 60, cy_ + 40, ms)})
+                    deselect(); backplane_keys("composer")
+                    held = hold_click(0x20, 0x40, cx_, cy_, ms)
+                    time.sleep(0.5)
+                    a, b = h.p(f"sw_m{ms}_0.png"), h.p(f"sw_m{ms}_1.png")
+                    E.grab_screen(a)
+                    E.screen_move(cx_ + 120, cy_ + 60)
+                    time.sleep(0.6)
+                    E.grab_screen(b)
+                    moved = E.img_diff_box(a, b, gl["root_x"], gl["root_y"], gl["w"], gl["h"])["changed_pixels"]
+                    sweep["middle"].append({"hold": ms, "held_ms": held, "move_after_px": moved})
+                twenty = [right_once(cx_ + 60, cy_ + 40, 60)["menus"] for _ in range(20)]
+                # (iii) a first press off the canvas: the infobar's text if KiCad shows one, else the toolbar strip above
+                # the canvas, then the canvas
+                strip_y = gl["root_y"] + 12 if any(c.get("class") == "Static" and c.get("visible") and gl["root_y"] <= c.get("root_y", -1) <= gl["root_y"] + 40
+                                                   for c in E.list_child_windows(frame)) else gl["root_y"] - 30
+                deselect(); backplane_keys("composer")
+                first = hold_click(2, 4, gl["root_x"] + gl["w"] // 2, strip_y, 80)
+                time.sleep(0.6)
+                n0 = menus()
+                E.screen_click(cx_ + 60, cy_ + 40, 3)
+                time.sleep(1.0)
+                after_first = {"first_press_y": strip_y, "first_held_ms": first, "menus": menus() - n0}
+                E.key_tap("Escape"); time.sleep(0.4)
+                lost = sum(1 for l in open(h.p("client.log"), encoding="utf-8", errors="replace") if "kicad_capture_lost" in l)
+                res = {"sweep": sweep, "right_60ms_x20": twenty, "first_press_off_canvas": after_first, "capture_lost": lost}
+                print("DIAG stage2_sweep " + json.dumps(res)[:4000], flush=True)
+                for ms_row in sweep["left"]:
+                    h.check(f"Sweep: left click held {ms_row['hold']} ms selects the item", ms_row["selected_px"] > 200, ms_row)
+                for ms_row in sweep["right"]:
+                    h.check(f"Sweep: right click held {ms_row['hold']} ms opens one menu", ms_row["menus"] == 1, ms_row)
+                for ms_row in sweep["middle"]:
+                    h.check(f"Sweep: middle click held {ms_row['hold']} ms leaves no pan behind", ms_row["move_after_px"] < 20000, ms_row)
+                h.check("20 right clicks held 60 ms each open one menu", twenty == [1] * 20, twenty)
+                h.check("A first press off the canvas (infobar or toolbar), then a right click on the canvas opens one menu",
+                        after_first["menus"] == 1, after_first)
             elif only == "stage2":
                 rounds = max(1, int(os.environ.get("BP_STAGE2_ROUNDS", "5") or 5))
                 for entry in ("composer", "other_app"):
