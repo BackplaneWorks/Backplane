@@ -76,6 +76,10 @@ pub struct Session {
     /// KiCad's open dialogs (titles, innermost last), from ET_DIALOG_OPENED/CLOSED: a modal KiCad raised by itself (a load-time notice on a
     /// pre-warmed frame) is said in the pane instead of a silent "Starting KiCad…"
     pub dialogs: Vec<String>,
+    /// What KiCad would have put in a message box it could not show (ET_NOTICE, `embed-notice`: "Could not use OpenGL, falling back to
+    /// software rendering"), oldest first: each {id, kind, title, detail, error, frame, dismissed}. Kept for the session (an agent asking the
+    /// session's state reads them all); the person's dismissal only hides one in the pane
+    pub notices: Vec<Value>,
     /// KiCad's resident memory, MB (Linux, sampled on the health tick; 0 unknown): the warm policy's measure of what a KiCad costs
     pub rss_mb: u64,
     /// a request of the hub's drive (a show, a pre-warm) waits on KiCad's check or refill task (task-gate-reads): its description, "" for none
@@ -99,7 +103,7 @@ impl Session {
             container: 0, toplevel: 0, holder: 0, display: String::new(),
             sock: String::new(), events_sock: String::new(), sock_dir: String::new(),
             argv: String::new(), cli: String::new(), version: String::new(), desc: String::new(),
-            caps: vec![], frames: vec![], missed_pings: 0, dialogs: vec![], rss_mb: 0, task_wait: String::new(), parked: false, touched_at: now, closing: false, lost_parent: false, editor_req: (String::new(), String::new(), None),
+            caps: vec![], frames: vec![], missed_pings: 0, dialogs: vec![], notices: vec![], rss_mb: 0, task_wait: String::new(), parked: false, touched_at: now, closing: false, lost_parent: false, editor_req: (String::new(), String::new(), None),
         }
     }
     pub fn spawned(mut self, pid: u32) -> Self { self.pid = pid; self }
@@ -129,6 +133,20 @@ impl Session {
         if open { self.dialogs.push(title.to_string()); }
         else if let Some(i) = self.dialogs.iter().rposition(|d| d == title) { self.dialogs.remove(i); }
         else { self.dialogs.pop(); }
+        self
+    }
+    /// A notice from KiCad (`notice_of`): the same one again (kind, title and detail) is not added twice; at most 8 kept, the oldest go.
+    pub fn notice(mut self, n: Value) -> Self {
+        if self.notices.iter().any(|o| o["kind"] == n["kind"] && o["title"] == n["title"] && o["detail"] == n["detail"]) { return self }
+        let id = self.notices.iter().filter_map(|o| o["id"].as_u64()).max().unwrap_or(0) + 1;
+        let mut n = n; n["id"] = json!(id); n["dismissed"] = json!(false);
+        self.notices.push(n);
+        if self.notices.len() > 8 { self.notices.remove(0); }
+        self
+    }
+    /// The person dismissed notice `id` in the pane (an agent still reads it).
+    pub fn dismiss_notice(mut self, id: u64) -> Self {
+        for n in self.notices.iter_mut().filter(|n| n["id"].as_u64() == Some(id)) { n["dismissed"] = json!(true); }
         self
     }
     pub fn detached(mut self, now: u64) -> Self {
@@ -172,6 +190,7 @@ impl Session {
             "display": self.display,
             "frames": self.frames.iter().map(Frame::to_json).collect::<Vec<_>>(),
             "dialogs": self.dialogs,
+            "notices": self.notices,
             "rss_mb": self.rss_mb,
             "task_wait": self.task_wait,
             // what the embedded editor can do beyond the basics (embed-gerbview, embed-editor-requested, ...): the client gates on these
@@ -653,6 +672,12 @@ pub fn coedit_routes() -> Vec<GuiRoute> {
     routes().lock().unwrap().values().filter(|r| r.caps.iter().any(|c| c == "coedit")).cloned().collect()
 }
 
+static NOTES: OnceLock<Mutex<HashMap<String, Value>>> = OnceLock::new();
+fn session_notes() -> &'static Mutex<HashMap<String, Value>> { NOTES.get_or_init(Default::default) }
+/// What an agent asking the session's state reads beside its server: KiCad's open dialogs and its notices (`notice_of`), and whether
+/// this KiCad reports its dialogs at all (on Windows only with `embed-dialog-events`: without it an empty list says nothing). Null: no session.
+pub fn session_state(pro: &str) -> Value { session_notes().lock().unwrap().get(&norm_pro_key(pro)).cloned().unwrap_or(Value::Null) }
+
 /// Active `"ready"` GUI session route for `pro`, if any (`ipc::run` checks this before headless `kserve`).
 pub fn gui_route(pro: &str) -> Option<GuiRoute> {
     routes().lock().unwrap().get(&norm_pro_key(pro)).cloned()
@@ -714,6 +739,8 @@ fn open_frames() -> &'static Mutex<HashMap<String, Vec<String>>> { static F: Onc
 /// Whether the project's open KiCad has a frame of `kind` open (shown or not): no round trip.
 pub fn has_frame(pro: &str, kind: &str) -> bool { open_frames().lock().unwrap().get(&norm_pro_key(pro)).is_some_and(|v| v.iter().any(|k| k == kind)) }
 fn put_route(s: &Session, tx: &mpsc::UnboundedSender<Msg>) {
+    session_notes().lock().unwrap().insert(norm_pro_key(&s.pro), json!({"dialogs": s.dialogs, "notices": s.notices,
+        "dialogs_reported": !cfg!(windows) || s.caps.iter().any(|c| c == "embed-dialog-events")}));
     open_frames().lock().unwrap().insert(norm_pro_key(&s.pro), s.frames.iter().map(|f| f.kind.clone()).collect());
     unsaved_update(&s.pro, |u| u.seen(s.frames.iter().any(|f| f.modified)));
     let k = norm_pro_key(&s.pro);
@@ -980,6 +1007,10 @@ enum Msg {
     Dialog { pro: String, gen: u64, open: bool, title: String },
     /// the dialogs of KiCad's the client sees on screen (a modal one stops KiCad's events and pings: this is how the hub learns of it)
     ClientDialogs { pro: String, open: Vec<String> },
+    /// KiCad's ET_NOTICE (`notice_of`)
+    Notice { pro: String, gen: u64, notice: Value },
+    /// the person dismissed a notice in the pane
+    NoticeDismiss { pro: String, id: u64 },
     ForkSync { pro: String, gen: u64 },
     /// KiCad says it lost its parent (ET_DETACHED): the client that held the pane is gone (killed or quit; X destroyed its container)
     ForkDetached { pro: String, gen: u64 },
@@ -1730,6 +1761,21 @@ impl Actor {
                 let snap = s.clone();
                 self.publish(&snap, None);
             }
+            Msg::Notice { pro, gen, notice } => {
+                eprintln!("kicad embed: KiCad notice ({}{}): {}{}", notice["kind"].as_str().unwrap_or(""),
+                    notice["frame"].as_str().filter(|f| !f.is_empty()).map(|f| format!(", {f}")).unwrap_or_default(),
+                    notice["title"].as_str().unwrap_or(""), notice["detail"].as_str().filter(|d| !d.is_empty()).map(|d| format!(": {d}")).unwrap_or_default());
+                let Some(s) = self.sessions.get_mut(&pro).filter(|s| s.gen == gen && s.is_live()) else { return };
+                *s = s.clone().notice(notice);
+                let snap = s.clone();
+                self.publish(&snap, None);
+            }
+            Msg::NoticeDismiss { pro, id } => {
+                let Some(s) = self.sessions.get_mut(&pro) else { return };
+                *s = s.clone().dismiss_notice(id);
+                let snap = s.clone();
+                self.publish(&snap, None);
+            }
             Msg::ClientDialogs { pro, open } => {
                 let Some(s) = self.sessions.get_mut(&pro).filter(|s| s.is_live() && s.dialogs != open) else { return };
                 s.dialogs = open;
@@ -2295,7 +2341,9 @@ async fn spawn_gui_session(
                             let ty = ev["type"].as_str().unwrap_or("");
                             let ty_n = ev["type"].as_i64().unwrap_or(0);
                             let detail = ev["detail"].as_str().unwrap_or("dialog").to_string();
-                            if ty == "ET_DIALOG_OPENED" || ty_n == 10 {
+                            if let Some(n) = notice_of(ev) {
+                                let _ = me.send(Msg::Notice { pro: pro.clone(), gen, notice: n });
+                            } else if ty == "ET_DIALOG_OPENED" || ty_n == 10 {
                                 open_dialogs.push(detail);
                             } else if ty == "ET_DIALOG_CLOSED" || ty_n == 11 {
                                 if let Some(pos) = open_dialogs.iter().rposition(|d| d == &detail) {
@@ -2402,6 +2450,20 @@ async fn wait_frame_drawn(me: &mpsc::UnboundedSender<Msg>, sock: &str, desc: &st
     false
 }
 
+/// KiCad's ET_NOTICE (29, `embed-notice`): a message box embedded KiCad did not show (it would have sat over a frame the host had not
+/// shown, holding up its start), sent here instead. Its detail is JSON {kind, title, detail, error}; kind "graphics" is a drawing fallback
+/// ("Could not use OpenGL, falling back to software rendering", a driver reset). `frame`: the kind of editor it concerns, "" for none.
+pub fn notice_of(ev: &Value) -> Option<Value> {
+    if !(ev["type"] == "ET_NOTICE" || ev["type"].as_i64() == Some(29)) { return None }
+    let raw = ev["detail"].as_str().unwrap_or("");
+    let d: Value = serde_json::from_str(raw).unwrap_or_else(|_| json!({"title": raw}));
+    let txt = |k: &str| d[k].as_str().unwrap_or("").trim().to_string();
+    let (title, detail) = (txt("title"), txt("detail"));
+    if title.is_empty() && detail.is_empty() { return None }
+    let frame = if ev["frame"].is_object() { kind_of_fk_val(&ev["frame"]["kind"]).to_string() } else { String::new() };
+    Some(json!({"kind": txt("kind"), "title": title, "detail": detail, "error": d["error"].as_bool().unwrap_or(false), "frame": frame}))
+}
+
 fn spawn_fork_events_loop(me: mpsc::UnboundedSender<Msg>, pro: String, gen: u64, events_sock: String, desc: String, init_since: u64) {
     tokio::spawn(async move {
         let mut since: u64 = init_since;
@@ -2429,6 +2491,10 @@ fn spawn_fork_events_loop(me: mpsc::UnboundedSender<Msg>, pro: String, gen: u64,
                     if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("kicad embed event: {ev}"); }
                     super::checkrun::on_event(&pro, ev);
                     if super::edchecks::on_event(ev) { continue }
+                    if let Some(n) = notice_of(ev) {
+                        if me.send(Msg::Notice { pro: pro.clone(), gen, notice: n }).is_err() { return }
+                        continue
+                    }
                     if ty == "ET_SELECTION_CHANGED" || ty_n == 14 {
                         if let Some((kind, names)) = super::xprobe::selection_event(ev) { super::coedit::person_selected(&pro, &kind.to_lowercase(), names.to_json()); }
                         super::xprobe::kicad_selected(&pro, ev); continue
@@ -2519,6 +2585,7 @@ const METHODS: &[&str] = &[
     "editor.kicad.prewarm",
     "editor.kicad.warm",
     "editor.kicad.dialogs",
+    "editor.kicad.notice.dismiss",
 ];
 
 fn ok_reply(id: &Value, payload: Value) -> Vec<Value> {
@@ -2602,6 +2669,11 @@ impl RpcHandler for EmbedRpc {
                 if gui.mode != "fork" || gui.desc.is_empty() || !proto::load(&gui.desc).has_own("kiapi.backplane.embed.SetTheme") { return ok_reply(id, json!({"applied": false, "why": "this KiCad cannot switch its theme (needs Backplane KiCad bp.9)"})) }
                 let o = gui_call(&gui, "kiapi.backplane.embed.SetTheme", json!({"mode": theme_mode(mode)})).await;
                 return if o["ok"].as_bool().unwrap_or(false) { ok_reply(id, json!({"applied": true, "theme": o["message"].clone()})) } else { err_reply(id, &format!("SetTheme: {}", o["error"].as_str().unwrap_or(""))) }
+            }
+            if method == "editor.kicad.notice.dismiss" {
+                let Some(nid) = p["id"].as_u64() else { return err_reply(id, "id is the notice's id") };
+                let _ = actor_tx.send(Msg::NoticeDismiss { pro: resolved.pro, id: nid });
+                return ok_reply(id, json!({}))
             }
             if method == "editor.kicad.dialogs" {
                 let open: Vec<String> = p["open"].as_array().into_iter().flatten().filter_map(|t| t.as_str().map(String::from)).take(8).collect();
@@ -2797,6 +2869,21 @@ mod tests {
         let s = s.dialog(false, "");
         assert!(s.dialogs.is_empty(), "an untitled close closes the innermost");
         assert!(Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 1, 0).dialog(true, "x").failed("gone").dialogs.is_empty(), "a dead KiCad has none");
+    }
+    /// KiCad's ET_NOTICE (embed-notice): read from its JSON detail, kept once, dismissed only in the pane, in the session's state.
+    #[test] fn a_notice_from_kicad_is_kept_said_and_dismissed() {
+        let ev = json!({"type": 29, "frame": {"kind": "FK_PCB"}, "detail": r#"{"kind":"graphics","title":"Could not use OpenGL, falling back to software rendering","detail":"GLX 1.4 missing","error":false}"#});
+        let n = notice_of(&ev).unwrap();
+        assert_eq!(n, json!({"kind": "graphics", "title": "Could not use OpenGL, falling back to software rendering", "detail": "GLX 1.4 missing", "error": false, "frame": "PCB"}));
+        assert_eq!(notice_of(&json!({"type": "ET_NOTICE", "detail": "plain words"})).unwrap()["title"], "plain words", "a detail that is not JSON is its title");
+        assert!(notice_of(&json!({"type": 29, "detail": "{}"})).is_none() && notice_of(&json!({"type": 10, "detail": "x"})).is_none(), "empty, or a dialog");
+        let s = Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 1, 0).notice(n.clone()).notice(n.clone());
+        assert_eq!(s.notices.len(), 1, "the same notice again is kept once");
+        assert_eq!((s.notices[0]["id"].as_u64(), s.notices[0]["dismissed"].as_bool()), (Some(1), Some(false)));
+        let s = s.dismiss_notice(1);
+        assert_eq!(s.info_json()["notices"][0]["dismissed"], true, "dismissed: still there for an agent");
+        let many = (0..10).fold(Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 1, 0), |s, i| s.notice(json!({"kind": "graphics", "title": format!("n{i}"), "detail": ""})));
+        assert_eq!((many.notices.len(), many.notices[0]["title"].as_str()), (8, Some("n2")), "at most 8, the oldest go");
         let asking = Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 1, 0).ready("/s", "", 0).dialog(true, "Information");
         assert_eq!(asking.ping_result(false).ping_result(false).ping_result(false).state, "ready", "a dialog open: missed pings are not a hang");
     }

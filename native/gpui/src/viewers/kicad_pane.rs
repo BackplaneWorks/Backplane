@@ -169,6 +169,15 @@ pub fn waiting_on(info: &Value, have_frame: bool, windows: bool) -> Option<Strin
     }
 }
 
+/// KiCad's notice the person has not dismissed (the hub's `notices`, from `embed-notice`: a message box KiCad would have shown over a
+/// frame not on screen yet, "Could not use OpenGL, falling back to software rendering"): the newest, as (id, the line the pane shows).
+pub fn open_notice(info: &Value) -> Option<(u64, String)> {
+    let n = info["notices"].as_array()?.iter().rev().find(|n| n["dismissed"] != true)?;
+    let (title, detail) = (n["title"].as_str().unwrap_or(""), n["detail"].as_str().unwrap_or(""));
+    let text = if detail.is_empty() || title.is_empty() { format!("{title}{detail}") } else { format!("{title} ({detail})") }; // i18n-ok: KiCad's own (translated) title and detail joined; the line is the catalog's gpui.c.kicad.notice
+    Some((n["id"].as_u64()?, crate::i18n::tf("gpui.c.kicad.notice", &[("what", text.into())])))
+}
+
 /// The pane offers Try again under its message: KiCad's start failed (the hub has already retried a missed start window once).
 pub fn try_again(info: &Value) -> bool { info["state"] == "failed" }
 
@@ -402,6 +411,8 @@ impl KicadPane {
         if j != self.jobs { self.jobs = j; cx.notify(); }
     }
     /// The × on a job's bar.
+    /// The person dismissed KiCad's notice in the pane: hidden here (the hub keeps it for an agent that asks).
+    pub fn dismiss_notice(&mut self, id: u64) { self.rpc("editor.kicad.notice.dismiss", json!({"project": self.project, "id": id})); }
     pub fn cancel_job(&mut self, id: u64) { self.rpc("editor.kicad.cancel", json!({"project": self.project, "id": id})); }
     /// The person's answer to a file changed on disk (Keep yours / Reload), for every waiting file.
     pub fn resolve(&mut self, choice: &str, cx: &mut Context<Self>) {
@@ -854,7 +865,7 @@ impl KicadPane {
         });
         let pane = self.placed.as_ref().and_then(|(at, _, _)| *at).map_or(Value::Null, |p| json!({"x": p.x, "y": p.y, "w": p.w, "h": p.h}));
         let shown_meta = shown.and_then(|w| nc::window_meta(w, self.container, self.toplevel));
-        json!({"ok": true, "project": self.project, "root": self.root, "open": self.open, "want": self.wanted_kind(), "say": waiting(&self.seen_info(), shown.is_some()), "dialogs": self.seen_info()["dialogs"], "jobs": self.jobs, "local_map": self.info["local_map"], "ever_shown": self.ever_shown.len(), "conflicts": self.conflicts,
+        json!({"ok": true, "project": self.project, "root": self.root, "open": self.open, "want": self.wanted_kind(), "say": waiting(&self.seen_info(), shown.is_some()), "dialogs": self.seen_info()["dialogs"], "notice": open_notice(&self.info).map(|(_, t)| t), "jobs": self.jobs, "local_map": self.info["local_map"], "ever_shown": self.ever_shown.len(), "conflicts": self.conflicts,
             "state": self.info["state"], "reason": self.info["reason"], "mode": self.info["mode"], "pid": self.info["pid"],
             "holder": self.info["holder"], "sock": self.info["sock"], "pane": pane,
             "container": self.container.map_or(Value::Null, |c| { let mut v = g(c); v["xid"] = c.into(); v }),
@@ -872,6 +883,8 @@ impl Render for KicadPane {
         self.decide(window, cx);
         let light = self.light; let c = |n: &str| crate::theme::color(light, n);
         let say = waiting(&self.seen_info(), self.want().is_some());
+        // a notice during the start: said under "Starting KiCad…" (and in the strip, where it stays once the editor is up)
+        let notice = say.as_ref().and_then(|_| open_notice(&self.info)).map(|(_, t)| t);
         let failed = self.failed();
         let marker = self.marker.clone(); let focus = self.focus.clone();
         let keys = self.keys;
@@ -891,6 +904,7 @@ impl Render for KicadPane {
             .border_2().border_color(if keys { c("accent") } else { Rgba { a: 0., ..c("accent") } })
             .child(canvas(move |b, window, _| { *marker.lock().unwrap() = Some(window.insert_hitbox(b, HitboxBehavior::Normal).id); }, |_, _, _, _| {}).size_full())
             .when_some(say, |d, s| d.child(div().absolute().inset_0().flex().flex_col().gap_2().items_center().justify_center().text_color(c("faint")).child(s)
+                .when_some(notice, |d, n| d.child(crate::ui::with_rect(div().id("kicad-notice-start"), || "kicad:notice-start".to_string()).max_w(px(520.)).text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(n)))
                 .when(failed, |d| d.child(crate::ui::with_rect(div().id("kicad-retry"), || "kicad:retry".to_string()).px_3().py_1().rounded_md().cursor_pointer()
                     .bg(c("raise")).hover(|x| x.bg(c("line"))).text_color(c("text")).child(crate::i18n::trs("Try again"))
                     .on_click(cx.listener(|this, _, _, cx| { this.reattach(); cx.notify(); }))))))
@@ -899,6 +913,13 @@ impl Render for KicadPane {
 
 #[cfg(test)]
 mod tests {
+    #[test] fn kicads_notice_is_one_line_until_dismissed() {
+        use serde_json::json;
+        let i = json!({"notices": [{"id": 1, "title": "Old", "detail": "", "dismissed": true}, {"id": 2, "title": "Could not use OpenGL, falling back to software rendering", "detail": "GLX missing", "dismissed": false}]});
+        let (id, t) = super::open_notice(&i).unwrap();
+        assert_eq!(id, 2); assert!(t.contains("Could not use OpenGL, falling back to software rendering (GLX missing)"), "{t}");
+        assert!(super::open_notice(&json!({"notices": [{"id": 1, "title": "x", "dismissed": true}]})).is_none() && super::open_notice(&json!({})).is_none());
+    }
     #[test] fn a_prewarm_reply_that_builds_nothing_ends_the_guard() {
         use serde_json::json;
         assert!(super::prewarm_builds_nothing(&json!({"ok": true, "prewarming": []})), "refused for memory");
@@ -1239,6 +1260,15 @@ pub fn strip<V: 'static>(cx: &mut Context<V>, light: bool, pane: &Entity<KicadPa
                 .on_click(move |_, _, cx| pk.update(cx, |p, cx| p.resolve("keep", cx))))
             .child(div().id("kicad-reload-btn").px_2().border_1().border_color(c("line")).bg(c("raise")).cursor_pointer().text_color(c("text")).child(crate::i18n::trs("Reload (lose your edits)"))
                 .on_click(move |_, _, cx| pr.update(cx, |p, cx| p.resolve("reload", cx)))));
+    }
+    // KiCad's notice (embed-notice): one line, readable after the editor is up, dismissed with its ×; never a modal
+    if let Some((id, text)) = open_notice(&pane.read(cx).info) {
+        let p = pane.clone();
+        row = row.child(crate::ui::with_rect(div().id("kicad-notice"), || "kicad:notice".to_string()).ml_2().flex().items_center().gap_1().min_w_0().text_size(crate::scale::tpx(11.)).text_color(c("dim"))
+            .child(div().max_w(px(360.)).overflow_hidden().whitespace_nowrap().text_ellipsis().child(text.clone()))
+            .tooltip(crate::keys::tip(&text, "", light))
+            .child(crate::ui::with_rect(div().id("kicad-notice-x"), || "kicad:notice-dismiss".to_string()).px_1().cursor_pointer().child("×").tooltip(crate::keys::tip(&crate::i18n::trs("Dismiss"), "", light))
+                .on_click(move |_, _, cx| p.update(cx, |p, cx| { p.dismiss_notice(id); cx.notify(); }))));
     }
     // KiCad's long job (loading, zone fill, DRC, plot): a slim bar here instead of KiCad's own progress window (bp.12)
     let jobs = if pane.read(cx).info["state"] == "ready" { pane.read(cx).jobs.clone() } else { Vec::new() };

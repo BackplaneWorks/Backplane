@@ -2407,6 +2407,7 @@ gpui.c.kicad.kicad.is.not.responding	KiCad is not responding.	KiCad が応答し
 gpui.c.kicad.kicad.was.closed	KiCad was closed.	KiCad は閉じられました。
 gpui.c.kicad.starting.kicad	Starting KiCad…	KiCad を起動しています…
 gpui.c.kicad.task.wait	KiCad is running {what}; the editor follows when it ends.	KiCadが{what}を実行中です。終わるとエディターに切り替わります。
+gpui.c.kicad.notice	KiCad says: {what}	KiCadからの通知: {what}
 gpui.c.kicad.this.window.cannot.hold.another	this window cannot hold another program's (only X11 and XWayland for now)	このウィンドウには他のプログラムのウィンドウを入れられません（今は X11 と XWayland のみ）
 gpui.c.kicad.no.x11.connection	no X11 connection	X11 に接続できません
 gpui.c.kicad.could.not.create.container	could not create container window	コンテナウィンドウを作成できませんでした
@@ -2604,6 +2605,8 @@ gpui.timeline.more.images	+{n, plural, one {# more image} other {# more images}}
 gpui.order.named	Order · {name}	注文 · {name}
 gpui.buy.now	Buy now	今すぐ購入
 gpui.order.buy.now.price	Buy now · {price}	今すぐ購入 · {price}
+gpui.order.requote	Re-quote	再見積もり
+gpui.order.unavailable.line	Can't be priced right now — ask again later	現在は価格を算出できません — 後でもう一度お試しください
 gpui.badge.away	{name} · away	{name} · 不在
 gpui.badge.again	Pick again	選び直す
 gpui.badge.on	on {name}	{name} 上
@@ -5390,6 +5393,9 @@ gpui.streamer.win	Windows does not tell an app that the screen is being captured
 
     /// gpui.c.kicad.task.wait = KiCad is running {what}; the editor follows when it ends.
     static func gpui_c_kicad_task_wait(what: String) -> String { f("gpui.c.kicad.task.wait", ["what": what]) }
+
+    /// gpui.c.kicad.notice = KiCad says: {what}
+    static func gpui_c_kicad_notice(what: String) -> String { f("gpui.c.kicad.notice", ["what": what]) }
 
     /// gpui.c.kicad.changed = Changed on disk: {files}. You have unsaved edits.
     static func gpui_c_kicad_changed(files: String) -> String { f("gpui.c.kicad.changed", ["files": files]) }
