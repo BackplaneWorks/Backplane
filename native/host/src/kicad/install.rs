@@ -11,9 +11,9 @@ use std::{path::{Path, PathBuf}, process::Stdio, sync::{atomic::{AtomicBool, Ord
 
 #[derive(Debug, PartialEq)]
 pub struct Package { pub platform: &'static str, pub version: &'static str, pub release: &'static str, pub asset: &'static str, pub sha256: &'static str, pub format: &'static str, pub cli: &'static str }
-/// Linux: bp.12.1 (bp.12 with the DRC zone guard, `drc-zone-guard`). Windows: bp.10 until its fixes ship. Apple Silicon keeps bp.6
+/// Linux: bp.12.2 (bp.12.1's DRC zone guard, `drc-zone-guard`, and the routing plan view's own keys, `plan-keys`). Windows: bp.10 until its fixes ship. Apple Silicon keeps bp.6
 /// (no newer macOS build yet; bp.13 brings darwin-arm64, then only MAC changes). Each pin is its one line; the tests read them.
-pub const LINUX: Package = Package { platform: "linux-x86_64", version: "10.99.0-bp.12.1", release: "backplane-kicad-v10.99.0-bp.12.1", asset: "backplane-kicad-linux-x86_64-10.99.0-bp.12.1.tar.gz", sha256: "9dbaf96fc8bf0ec998080184ca88cac28a12e985e04496173f2094c68b2fac9b", format: "tar.gz", cli: "bin/kicad-cli" };
+pub const LINUX: Package = Package { platform: "linux-x86_64", version: "10.99.0-bp.12.2", release: "backplane-kicad-v10.99.0-bp.12.2", asset: "backplane-kicad-linux-x86_64-10.99.0-bp.12.2.tar.gz", sha256: "c603e5ba8c9867c7922c8eae7a62e143128a4b4d0bf50a097a9a6e2401129b43", format: "tar.gz", cli: "bin/kicad-cli" };
 pub const MAC: Package = Package { platform: "darwin-arm64", version: "10.99.0-bp.6", release: "backplane-kicad-v10.99.0-bp.6", asset: "backplane-kicad-darwin-arm64-10.99.0-bp.6.tar.gz", sha256: "99584fb0ee490354098778d39e3aaed9e0f274ee39972851a9cbeabfb271462d", format: "tar.gz", cli: "bin/kicad-cli" };
 pub const WINDOWS: Package = Package { platform: "windows-x86_64", version: "10.99.0-bp.10", release: "backplane-kicad-v10.99.0-bp.10", asset: "backplane-kicad-windows-x86_64-10.99.0-bp.10.zip", sha256: "68b3796f1de3a8c0a39dd20ca96a43f3354de47facbe5de45d0bd4668c32599c", format: "zip", cli: "bin/kicad-cli.exe" };
 /// Where the releases are (said in the consent note, and the script's download base).
@@ -503,13 +503,17 @@ pub fn decide(pkg: Option<&Package>, status: &str, version: &str, install_state:
 }
 /// Why the update is worth taking, in one sentence, from what the installed runtime lacks (`have`: its manifest's capabilities): the
 /// DRC zone guard first (a safety fix), then the editor inside Backplane. None when it lacks neither (a newer build with nothing named).
-pub fn update_reason(have: &[&str]) -> Option<&'static str> {
+pub fn update_reason(have: &[&str]) -> Option<String> {
     let embed = have.iter().any(|c| *c == "embed" || *c == "embedded");
-    match (have.contains(&"drc-zone-guard"), embed) {
-        (false, false) => Some("It fixes a DRC fault that could miss a short inside a filled zone, and brings the KiCad editor inside Backplane's viewer."),
-        (false, true) => Some("It fixes a DRC fault that could miss a short inside a filled zone."),
-        (true, false) => Some("It brings the KiCad editor inside Backplane's viewer."),
-        (true, true) => None,
+    let mut adds: Vec<&str> = vec![];
+    if !have.contains(&"drc-zone-guard") { adds.push("fixes a DRC fault that could miss a short inside a filled zone") }
+    if !embed { adds.push("brings the KiCad editor inside Backplane's viewer") }
+    // the routing plan view's keys (bp.12.2): only for a runtime with the plan, which lacked them
+    if have.contains(&"routing-plan") && !have.contains(&"plan-keys") { adds.push("makes A, R and W in KiCad's routing plan view act on the plan") }
+    match adds.as_slice() {
+        [] => None,
+        [a] => Some(format!("It {a}.")),
+        [rest @ .., last] => Some(format!("It {}, and {last}.", rest.join(", "))),
     }
 }
 /// Why a request is refused, None when it may run. `found`: the KiCad `ipc::runtime` found ("" for none); `status` its status. Only a compatible
@@ -868,12 +872,15 @@ cp \"$f\" \"$out\"
     }
     /// The update's reason is what the new pin adds over the installed runtime, the safety fix first, one sentence; none when it lacks neither.
     #[test] fn the_update_says_what_it_adds_over_the_installed_runtime() {
-        let zone = "It fixes a DRC fault that could miss a short inside a filled zone.";
-        assert_eq!(update_reason(&["embed", "coedit"]), Some(zone), "bp.10 to bp.12.1");
-        assert_eq!(update_reason(&["api-server"]), Some("It fixes a DRC fault that could miss a short inside a filled zone, and brings the KiCad editor inside Backplane's viewer."), "bp.4: both, the safety one first");
-        assert_eq!(update_reason(&["drc-zone-guard"]), Some("It brings the KiCad editor inside Backplane's viewer."));
+        let s = |v: Option<String>| v.unwrap_or_default();
+        assert_eq!(s(update_reason(&["embed", "coedit"])), "It fixes a DRC fault that could miss a short inside a filled zone.", "bp.10 (no plan)");
+        assert_eq!(s(update_reason(&["api-server"])), "It fixes a DRC fault that could miss a short inside a filled zone, and brings the KiCad editor inside Backplane's viewer.", "bp.4: both, the safety one first");
+        assert_eq!(s(update_reason(&["drc-zone-guard"])), "It brings the KiCad editor inside Backplane's viewer.");
+        assert_eq!(s(update_reason(&["embedded", "drc-zone-guard", "routing-plan"])), "It makes A, R and W in KiCad's routing plan view act on the plan.", "bp.12.1 to bp.12.2");
+        assert_eq!(s(update_reason(&["embed", "routing-plan"])), "It fixes a DRC fault that could miss a short inside a filled zone, and makes A, R and W in KiCad's routing plan view act on the plan.", "bp.10 to bp.12.2");
+        assert_eq!(update_reason(&["embedded", "drc-zone-guard", "routing-plan", "plan-keys"]), None);
         assert_eq!(update_reason(&["embedded", "drc-zone-guard"]), None);
-        assert_eq!(update_reason(&[]).unwrap().matches('.').count(), 1, "one sentence");
+        assert_eq!(s(update_reason(&["routing-plan"])).matches('.').count(), 1, "one sentence");
     }
     #[test] fn progress_is_said_in_megabytes_and_time_left() {
         let mb = 1u64 << 20;

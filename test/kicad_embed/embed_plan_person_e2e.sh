@@ -179,6 +179,10 @@ if ! grep -q '"plan-keys"' "$RT/manifest.json" 2>/dev/null; then
   # a KiCad whose plan-view keys are not the plan's: the Plan panel says to approve there (the hub's keys_note)
   KN=$(echo "$P" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("keys_note") or "")' 2>/dev/null || true)
   check "the Plan panel says to approve there (no plan-keys)" "$(echo "$KN" | grep -q "approve from this panel" && echo 1 || echo 0)" "keys_note: $KN"
+else
+  # plan-keys (bp.12.2, bp.13 batch 6): KiCad's own keys are the plan's, so the panel says nothing about them
+  KN=$(echo "$P" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("keys_note") or "")' 2>/dev/null || true)
+  check "the Plan panel has no keys note (plan-keys)" "$([ -z "$KN" ] && echo 1 || echo 0)" "keys_note: $KN"
 fi
 for _ in $(seq 60); do grep -q "The person judged" "$OUT/standin.log" 2>/dev/null && break; sleep 0.5; done
 check "the agent that asked is woken with the person's decision in KiCad" "$(grep -q "The person judged.*c-p" "$OUT/standin.log" && echo 1 || echo 0)" "$(grep -o 'The person judged[^"]*' "$OUT/standin.log" | head -2)"
