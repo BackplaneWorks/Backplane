@@ -783,7 +783,10 @@ def run(h):
         control = None
         if canvas:
             around = traced_click(canvas["root_x"] + 20, canvas["root_y"] + canvas["h"] - 30)
-            clicked, settle_ms = wait_focus_in(frame, 3, "wxGLCanvas")
+            # KiCad's drawing panel (the wxGLCanvas's parent, where the tool dispatcher's key events are bound) or the canvas
+            clicked, settle_ms = wait_focus_in(frame, 3)
+            if settle_ms is not None and clicked["focus_class"] not in ("wxGLCanvas", "wxWindowNR"):
+                settle_ms = None
             timeline.append({"stage": "after_real_canvas_click", "settle_ms": settle_ms, **clicked, **around})
             print("DIAG canvas_click " + json.dumps(timeline[-1]), flush=True)
             if settle_ms is not None:
