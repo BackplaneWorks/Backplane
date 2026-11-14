@@ -551,6 +551,7 @@ def run(h):
         previous = None
         settled = False
         clicked_edit = False
+        ready_seen = 0.0
         at_request = None
         trace_idle = os.environ.get("BP_OPENING_FOCUS_ONLY") == "idle_trace"
         t_edit, t_prewarm, last_log_poll = 0.0, 0.0, 0.0
@@ -578,7 +579,13 @@ def run(h):
                 E.suspend_pid(stall_pid, False)
                 timeline.append({"stage": "stall_ended", "s": stall_s})
                 stall_started, stall_s = None, 0
-            marks = {m.get("name") for m in h.metrics() if m.get("event") == "mark"}
+            ms_ = h.metrics()
+            marks = {m.get("name") for m in ms_ if m.get("event") == "mark"}
+            # the board view drawn first: Edit pressed before it is a press on a view still loading and does nothing (b14-base-open:
+            # bp-win's first plot after its Windows update took 15 s, painted at 18.4 s, the press went at 6.3 s; MO1 painted at 3.2 s)
+            painted = any(m.get("event") == "plot_painted" for m in ms_)
+            if "ready_for_edit" in marks and not painted and not ready_seen:
+                ready_seen = time.monotonic()
             if trace_idle and t_edit and not t_prewarm and time.monotonic() - last_log_poll > 0.2:
                 last_log_poll = time.monotonic()
                 try:
@@ -587,7 +594,9 @@ def run(h):
                         timeline.append({"stage": "prewarm_requested", "ms": round((t_prewarm - started) * 1000)})
                 except OSError:
                     pass
-            if "ready_for_edit" in marks and not clicked_edit:
+            if "ready_for_edit" in marks and not clicked_edit and (painted or (ready_seen and time.monotonic() - ready_seen > 40)):
+                if ready_seen:
+                    timeline.append({"stage": "edit_waited_for_plot", "ms": round((time.monotonic() - ready_seen) * 1000), "painted": painted})
                 clicked_edit = h.click_control(E.find_main_window(cp.pid), "ui:Edit")
                 timeline.append({"stage": "native_edit_click", "clicked": clicked_edit, **focus_snapshot()})
                 t_edit = time.monotonic()
