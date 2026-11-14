@@ -1409,6 +1409,14 @@ mod imp {
                 if let Ok(mut q) = events_q().lock() { q.push(Ev::Click); }
                 0
             }
+            // a release on the shield: the press it belongs to was replayed into KiCad, so the release should have gone there
+            // too (the shield hides on the press); logged to find where a right click's menu went (stage 2, run SB3)
+            0x0202 | 0x0205 | 0x0208 /* WM_LBUTTONUP, WM_RBUTTONUP, WM_MBUTTONUP */ => {
+                if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() {
+                    eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_shield_up": {"msg": msg, "shield_on": SHIELD_ON.load(Ordering::SeqCst)}}));
+                }
+                unsafe { DefWindowProcW(h, msg, wparam, lparam) }
+            }
             // the wheel over the pane while Backplane has the keys goes on to KiCad's canvas (screen coordinates, as sent)
             0x020A | 0x020E /* WM_MOUSEWHEEL, WM_MOUSEHWHEEL */ => {
                 let frame = shown_frame(hwnd(ACTIVE_CONTAINER.load(Ordering::SeqCst)));
@@ -1532,7 +1540,13 @@ mod imp {
         let at = |flags: u32| INPUT { r#type: INPUT_MOUSE, Anonymous: INPUT_0 { mi: MOUSEINPUT { dx: ax, dy: ay, mouseData: 0, dwFlags: flags | 0x8000 | 0x4000 | 0x0001, time: 0, dwExtraInfo: 0 } } };
         let inputs: Vec<INPUT> = if held { vec![at(down)] } else { vec![at(down), at(up)] };
         unsafe { SendInput(inputs.len() as u32, inputs.as_ptr(), std::mem::size_of::<INPUT>() as i32); }
-        if debug { eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_replay": {"path": if held { "replayed-down" } else { "replayed-click" }, "waited_ms": waited}})); }
+        if debug {
+            // where the replayed press lands: the window under its point, and whether that is inside the shown frame
+            let under = unsafe { WindowFromPoint(POINT { x: r.x, y: r.y }) };
+            let in_frame = { let mut w = under; let f = hwnd(r.frame); let mut hit = false; while !w.is_null() { if w == f { hit = true; break } w = unsafe { GetAncestor(w, GA_PARENT) }; } hit };
+            let cls = { let mut b = [0u16; 64]; let n = unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetClassNameW(under, b.as_mut_ptr(), 64) }; String::from_utf16_lossy(&b[..n.max(0) as usize]) };
+            eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_replay": {"path": if held { "replayed-down" } else { "replayed-click" }, "waited_ms": waited, "button": r.msg, "under": id_of(under), "under_class": cls, "under_in_frame": in_frame, "shield_on": SHIELD_ON.load(Ordering::SeqCst)}}));
+        }
     }
     pub fn shield_tick(container: u64, shown: Option<u64>) {
         replay_tick();
