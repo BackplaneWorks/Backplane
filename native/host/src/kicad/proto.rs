@@ -251,10 +251,13 @@ pub fn decode_response(s: &Schema, bytes: &[u8]) -> Result<Reply, String> {
     let (code, words) = r.status.map(|x| (x.status, x.error_message)).unwrap_or((0, String::new()));
     if code != 1 { return Ok(Reply::Err { status: usize::try_from(code).ok().and_then(|i| STATUS.get(i)).map(|s| s.to_string()).unwrap_or_else(|| format!("AS_{code}")), error: words, token }) }
     let (url, value) = r.message.map(|m| (m.type_url, m.value)).unwrap_or_default();
-    if url.is_empty() { return Ok(Reply::Ok { ty: String::new(), message: json!({}), token }) }
+    // an AS_OK that says something (bp.12.3 / batch 7: a SaveDocument of an unmodified document answers "not modified: nothing written")
+    // keeps its words beside the message, as `_status`
+    let said = |mut m: Value| { if !words.is_empty() { if let Some(o) = m.as_object_mut() { o.insert("_status".into(), json!(words)); } } m };
+    if url.is_empty() { return Ok(Reply::Ok { ty: String::new(), message: said(json!({})), token }) }
     let name = url.rsplit('/').next().unwrap_or("").to_string();
     let Some(t) = s.message(&name) else { return Ok(Reply::Ok { message: json!({"@type": name, "bytes": base64(&value)}), ty: name, token }) };
-    let message = decode_message(&t, &value)?;
+    let message = said(decode_message(&t, &value)?);
     Ok(Reply::Ok { ty: name, message, token })
 }
 /// `T.toObject(T.decode(bytes), TO)`.

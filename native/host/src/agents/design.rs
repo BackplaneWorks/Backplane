@@ -63,7 +63,9 @@ impl Agents {
     /// Commit the design files changed in the thread's main checkout straight to main (and push
     /// when it has an upstream), leaving any document another thread holds for that thread.
     /// `why`: "turn" (a turn's end) or "save" (a SaveDocument). Each commit is a line in the thread.
-    pub async fn design_record(self: &Arc<Self>, th: &str, why: &str) {
+    pub async fn design_record(self: &Arc<Self>, th: &str, why: &str) { self.design_record_note(th, why, "").await }
+    /// The same, `note` a line of the commit's body (a save that also upgraded the file's format says so: savegate.rs).
+    pub async fn design_record_note(self: &Arc<Self>, th: &str, why: &str, note: &str) {
         if crate::copy::on() { return }
         let root = self.main_root(th).await; if root.is_empty() || !kc::hardware(&root) { return }
         let (title, mine) = { let w = self.world().await; (w.threads.get(th).map(|t| t.title.clone()).unwrap_or_default(), w.setting(&main_key(th)) == "on") };
@@ -76,7 +78,7 @@ impl Agents {
         // the documents of the project whose lock another thread holds
         let f = kc::for_cwd(&root);
         let skip: Vec<String> = [f.pcb, f.sch].into_iter().filter(|d| !d.is_empty() && held.contains(&kc::doc_lock(d))).collect();
-        let msg = format!("design: {} ({th})", if title.is_empty() || title == "New thread" { "KiCad work".to_string() } else { title.chars().take(72).collect() });
+        let msg = format!("design: {} ({th}){}", if title.is_empty() || title == "New thread" { "KiCad work".to_string() } else { title.chars().take(72).collect() }, if note.is_empty() { String::new() } else { format!("\n\n{note}") });
         match kc::commit_design(&root, &msg, &skip).await {
             Ok(r) if r.commit.is_empty() => {}
             Ok(r) => {

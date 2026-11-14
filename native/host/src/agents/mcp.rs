@@ -221,7 +221,7 @@ impl Mcp {
                 // main's canonical copy, one holder for writes; the holder is named to any other
                 Ok(path) => match crate::files::kicad::ipc::kicad_ipc_in(&ag.hub, Some(thread), &path, sv(&a, "type"), a.get("message").cloned().unwrap_or(json!({}))).await {
                     // a saved document is committed straight to main (agents/design.rs)
-                    Ok(v) => { if sv(&a, "type").rsplit('.').next() == Some("SaveDocument") { ag.design_record(thread, "save").await } (true, v) }
+                    Ok(v) => { if sv(&a, "type").rsplit('.').next() == Some("SaveDocument") && v["not_saved"].is_null() { ag.design_record_note(thread, "save", v["format_upgrade"].as_str().unwrap_or("")).await } (true, v) }
                     Err(e) => fail(&e),
                 },
                 Err(e) => fail(&e),

@@ -64,9 +64,17 @@ pub async fn apply(hub: &Arc<Hub>, root: &Path, key: &str) -> Result<Value, Stri
         // file format, is not theirs): the press is kept at once, as without KiCad; else it joins their edits and their next save
         let u = crate::files::kicad::embed::unsaved_update(&pro, |u| u);
         let clean = !(u.modified && u.person);
+        // a board KiCad itself changed on load (its 3D model migration, runtimes without no-load-migration): the press is set, never saved
+        // on the person's behalf with KiCad's change in it; they are told and decide (Backplane commits saved design files to main)
+        let migrated = if clean && u.modified { crate::files::kicad::coedit::load_migration(&r).await } else { None };
         call("kiapi.board.commands.SetBoardDesignRules", msg).await?;
+        if let Some((fp, zones)) = migrated {
+            let why = format!("{}; saving now would write that too. The setting is set in KiCad: save the board there to keep both, or close it without saving", crate::files::kicad::coedit::load_migration_words(fp, zones));
+            return Ok(json!({"applied": key, "was_mm": was, "now_mm": mm, "in": "kicad", "saved": false, "not_saved": why, "load_migration": {"footprints": fp, "teardrop_zones": zones}, "note": format!("set in KiCad's Board Setup; not saved: {why} (it was {was} mm)")}))
+        }
+        let upgrade = if clean { crate::files::kicad::savegate::upgrade_of(&r, &pcb).await } else { None };
         let save_error = if clean { match call("kiapi.common.commands.SaveDocument", json!({"document": board})).await {
-            Ok(_) => return Ok(json!({"applied": key, "was_mm": was, "now_mm": mm, "in": "kicad", "saved": true, "note": format!("set in the board setup (it was {was} mm)")})),
+            Ok(_) => return Ok(json!({"applied": key, "was_mm": was, "now_mm": mm, "in": "kicad", "saved": true, "format_upgrade": upgrade, "note": format!("set in the board setup (it was {was} mm){}", upgrade.as_ref().map(|u| format!(". {u}")).unwrap_or_default())})),
             Err(e) => e } } else { "you have unsaved edits in KiCad".to_string() };
         return Ok(json!({"applied": key, "was_mm": was, "now_mm": mm, "in": "kicad", "saved": false, "not_saved": save_error, "note": format!("set in KiCad's Board Setup; save the board to keep it (it was {was} mm)")}))
     }

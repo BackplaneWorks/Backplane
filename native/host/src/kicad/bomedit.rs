@@ -199,18 +199,23 @@ pub async fn edit(hub: &Arc<Hub>, pro: &str, sch: &str, p: &Value) -> Result<Val
         // one commit, ended or dropped on every path, with the document's header and this name on every call (embed::commit_as)
         let mut deferred = 0;
         let mut saved = false;
+        let mut upgrade = None;
         if !todo.is_empty() {
             deferred = deferred_of(&embed::commit_as(&gui, &who, &doc, todo.clone(), &message(&field, &refs, &value)).await?);
             // a KiCad the person has not on screen (pre-warmed, or its view closed): nobody would save the change there, and it would go with
             // that KiCad; it is saved at once, as the headless path does
             // (co-editing runtimes only: there a save of the person's own unsaved edits too is by design; before, it is never done for them)
             if deferred == 0 && gui.caps.iter().any(|c| c == "coedit") && !shown_to_person(&gui).await {
+                let sch = doc["board_filename"].as_str().map(str::to_string).unwrap_or_default();
+                let sch = if sch.is_empty() { super::project::read(&std::path::Path::new(pro).parent().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default()).sch } else { sch };
+                upgrade = super::savegate::upgrade_of(&gui, &sch).await;
                 saved = embed::gui_call_as(&gui, "kiapi.common.commands.SaveDocument", json!({"document": doc}), &who).await["ok"] == true;
+                if !saved { upgrade = None; }
             }
             if !saved { embed::unsaved_update(pro, |u| u.touched()); }
         }
         // `deferred`: the person is editing those symbols in KiCad; KiCad applies the change when they finish (a notice follows): not read back yet
-        return Ok(json!({"via": if saved { "file" } else { "kicad" }, "changed": todo.len(), "deferred": deferred, "field": field, "value": value, "was": was, "refs": refs, "undo": undo_by(&gui.version, &gui.caps)}))
+        return Ok(json!({"via": if saved { "file" } else { "kicad" }, "format_upgrade": upgrade, "changed": todo.len(), "deferred": deferred, "field": field, "value": value, "was": was, "refs": refs, "undo": undo_by(&gui.version, &gui.caps)}))
     }
     // no KiCad with it open (none, or one with only the board): the headless one writes and saves, under the schematic's lock
     let ag = AGENTS.get().and_then(Weak::upgrade).ok_or("the hub's agents are not running")?;

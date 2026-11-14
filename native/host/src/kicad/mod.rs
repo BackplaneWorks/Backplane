@@ -40,6 +40,7 @@ pub mod comment;
 pub mod progress;
 pub mod findings;
 pub mod checkrun;
+pub mod savegate;
 pub mod edchecks;
 pub mod gerber;
 pub mod coedit;
