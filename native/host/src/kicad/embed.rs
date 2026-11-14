@@ -931,6 +931,8 @@ fn kicad_gui_bin(cli: &str) -> Result<PathBuf, String> {
 // Actor & process supervision -----------------------------------------------------------------------------------------------
 
 enum Msg {
+    /// The first start's KiCad is gone (start_retry): start the second, on the placeholder generation the session waited under.
+    RetryNow { pro: String, gen: u64, client: u64, env: Env, waited: String },
     Attach {
         client: u64, pro: String, root: String, files: Files, frame: String,
         container: u64, toplevel: u64, display: String, wait: bool, env: Env,
@@ -1003,6 +1005,40 @@ struct Actor {
 /// run (bp-win: Defender's cloud lookups at each "did not open its IPC socket within 30 s"); the second start finds them scanned. A crash,
 /// a missing program or an unprepared folder is not retried: it would fail the same way.
 fn start_retry(why: &str, retried: bool) -> bool { !retried && why.starts_with("KiCad did not") && why.contains(" within ") }
+/// How long the start retry waits for the first KiCad after asking it to close (kill_pid's grace: a KiCad that missed its start window
+/// gets no more), then after killing it.
+const RETRY_TERM_WAIT: Duration = Duration::from_millis(1500);
+const RETRY_KILL_WAIT: Duration = Duration::from_secs(5);
+
+/// Ends the first start's KiCad before the retry starts another on the same project: asked to close, killed if it is still there after
+/// `term_wait`, then waited for up to `kill_wait`. Says what it took, for the log; a KiCad lock file left in the project is named (the
+/// second start sweeps them, as after a crash).
+async fn gone_before_retry(pid: u32, root: &str, pro: &str, term_wait: Duration, kill_wait: Duration) -> String {
+    use crate::plat::proc;
+    let t0 = std::time::Instant::now();
+    let gone_within = |limit: Duration| async move {
+        let end = tokio::time::Instant::now() + limit;
+        while tokio::time::Instant::now() < end { if !proc::group_alive(pid) { return true } tokio::time::sleep(Duration::from_millis(50)).await; }
+        !proc::group_alive(pid)
+    };
+    let how = if pid == 0 || !proc::group_alive(pid) { "was already gone".to_string() } else {
+        if !proc::kill_group(pid, proc::TERM) { let _ = proc::kill(pid, proc::TERM); }
+        if gone_within(term_wait).await { format!("closed in {} ms", t0.elapsed().as_millis()) } else {
+            if !proc::kill_group(pid, proc::KILL) { let _ = proc::kill(pid, proc::KILL); }
+            if gone_within(kill_wait).await { format!("did not close in {} ms and was killed (gone at {} ms)", term_wait.as_millis(), t0.elapsed().as_millis()) }
+            else { format!("was still there {} ms after it was killed", t0.elapsed().as_millis()) }
+        }
+    };
+    let mut locks: Vec<String> = Vec::new();
+    for dir in [Some(Path::new(root)), Path::new(pro).parent()].into_iter().flatten() {
+        for e in std::fs::read_dir(dir).into_iter().flatten().flatten() {
+            let n = e.file_name().to_string_lossy().to_string();
+            if n.starts_with('~') && n.ends_with(".lck") && !locks.contains(&n) { locks.push(n); }
+        }
+    }
+    if locks.is_empty() { how } else { format!("{how}, leaving {} (swept)", locks.join(", ")) }
+}
+
 /// How long a start has for KiCad's socket and its first answers (a dialog of KiCad's own open meanwhile extends it); short under test.
 const START_WINDOW_S: u64 = if cfg!(test) { 3 } else { 30 };
 /// The start window in force (BACKPLANE_KICAD_START_WINDOW_S for an e2e), and whether this start is one an e2e makes stall: its socket
@@ -1492,6 +1528,13 @@ impl Actor {
             }
             Msg::Close { client, pro, save, reply } => self.close(client, pro, save, reply),
             Msg::Restart { client, pro, env, reply } => self.restart(client, pro, env, reply),
+            Msg::RetryNow { pro, gen, client, env, waited } => {
+                // the session was left (stopped or retired) while the first KiCad went: nothing to start
+                if !self.sessions.get(&pro).is_some_and(|s| s.gen == gen && s.state == "starting") { return }
+                eprintln!("kicad embed: {pro}: the first start's KiCad {waited}; starting the second");
+                let (tx, _rx) = oneshot::channel();
+                self.restart(client, pro, env, tx);
+            }
             Msg::ClientFrames { client, pro, frames, reply } => {
                 if let Some(s) = self.sessions.get_mut(&pro).filter(|s| s.mode == "stock" && s.is_live()) {
                     s.frames = frames;
@@ -1580,18 +1623,28 @@ impl Actor {
                 }
             }
             Msg::StartFailed { pro, gen, why } => {
-                let Some(s) = self.sessions.get_mut(&pro).filter(|s| s.gen == gen && s.state == "starting") else { return };
-                let pid = s.pid;
+                let Some(pid) = self.sessions.get(&pro).filter(|s| s.gen == gen && s.state == "starting").map(|s| s.pid) else { return };
                 let env = self.start_env.get(&pro).cloned();
                 if let Some(env) = env.filter(|_| start_retry(&why, self.start_retried.contains(&pro))) {
                     // once more, by itself: the pane stays on "Starting KiCad..." and the first start's waiters get the second start's answer
-                    eprintln!("kicad embed: {pro}: {why}; starting it once more (the first start waited {})", self.sessions.get(&pro).and_then(|s| start_waits(s.pid)).unwrap_or_else(|| "?".into()));
+                    eprintln!("kicad embed: {pro}: {why}; starting it once more (the first start waited {})", start_waits(pid).unwrap_or_else(|| "?".into()));
                     self.start_retried.insert(pro.clone());
                     let client = self.attach_waiters.get(&pro).and_then(|w| w.first()).map_or(0, |w| w.0);
-                    let (tx, _rx) = oneshot::channel();
-                    self.restart(client, pro, env, tx);
+                    // the second KiCad starts only once the first is gone (bp-win: spawned 8 ms after the first was asked to close, it found the
+                    // project held and never answered Ping). Meanwhile the session stays "starting" under a new generation: an attach joins its
+                    // waiters instead of starting a third, and the first KiCad's own exit or late answers (its generation) are not taken for it
+                    self.next_gen += 1;
+                    let (old_pid, wait_gen) = (pid, self.next_gen);
+                    let Some(s) = self.sessions.get_mut(&pro) else { return };
+                    s.gen = wait_gen; s.pid = 0; s.reason = "restarting".into();
+                    let (root, pro_c, me) = (s.root.clone(), pro.clone(), self.me.clone());
+                    tokio::spawn(async move {
+                        let waited = gone_before_retry(old_pid, &root, &pro_c, RETRY_TERM_WAIT, RETRY_KILL_WAIT).await;
+                        let _ = me.send(Msg::RetryNow { pro: pro_c, gen: wait_gen, client, env, waited });
+                    });
                     return;
                 }
+                let Some(s) = self.sessions.get_mut(&pro) else { return };
                 *s = s.clone().failed(&why);
                 let snap = s.clone();
                 Self::kill_pid(pid);
@@ -2742,16 +2795,19 @@ mod tests {
         let _ = hub.commit(&json!({"$":"ProjectCreated","id":"p1","title":"slow","root":proj_dir.to_string_lossy(),"at":1})).await;
         let (cli, gui, starts) = (bin_dir.join("kicad-cli"), bin_dir.join("kicad"), base.join("starts"));
         std::fs::write(&cli, "#!/bin/sh\nif [ \"$2\" = \"--describe\" ]; then echo '{\"version\":\"10.99.0-bp.8\",\"capabilities\":[\"api-server\"]}'; exit 0; fi\necho 10.99.0\n").unwrap();
-        // the stand-in KiCad counts its starts and never opens its socket (held by real-time scanning, as on bp-win)
-        std::fs::write(&gui, format!("#!/bin/sh\necho x >> '{}'\nsleep 60\n", starts.display())).unwrap();
+        // the stand-in KiCad counts its starts and never opens its socket (held by real-time scanning, as on bp-win); it ignores the ask to
+        // close (so the retry has to kill it) and notes an overlap when the one before it is still there as it starts
+        let pidf = base.join("pid");
+        std::fs::write(&gui, format!("#!/bin/sh\ntrap '' TERM\np=$(cat '{pf}' 2>/dev/null)\nif [ -n \"$p\" ] && kill -0 \"$p\" 2>/dev/null; then echo overlap >> '{st}'; fi\necho $$ > '{pf}'\necho x >> '{st}'\nwhile :; do sleep 0.2; done\n", pf = pidf.display(), st = starts.display())).unwrap();
         for f in [&cli, &gui] { std::fs::set_permissions(f, std::fs::Permissions::from_mode(0o755)).unwrap(); }
         let _ = hub.commit(&json!({"$":"SettingSet","key":"kicad.path","value":cli.to_string_lossy(),"at":2})).await;
         let (mut conn, _) = hub.connect(true);
         let t0 = std::time::Instant::now();
         let rep = hub.request(&mut conn, &json!({"id": 1, "m": "editor.kicad.attach", "p": {"project": pcb.to_string_lossy(), "container": 9001, "toplevel": 8001, "display": ":99", "frame": "PCB"}})).await;
-        let n = std::fs::read_to_string(&starts).unwrap_or_default().lines().count();
-        assert_eq!(n, 2, "started once more by itself, and only once ({rep:?})");
-        assert!(t0.elapsed() >= Duration::from_secs(2 * START_WINDOW_S), "the attach waited through both starts: {:?}", t0.elapsed());
+        let log = std::fs::read_to_string(&starts).unwrap_or_default();
+        assert_eq!(log.lines().filter(|l| *l == "x").count(), 2, "started once more by itself, and only once ({rep:?})");
+        assert!(!log.contains("overlap"), "the second KiCad started while the first was still there: {log}");
+        assert!(t0.elapsed() >= Duration::from_secs(2 * START_WINDOW_S) + RETRY_TERM_WAIT, "the attach waited through both starts and the kill: {:?}", t0.elapsed());
         assert!(rep[0].to_string().contains("did not open its IPC socket"), "then failed, with the reason: {rep:?}");
         let info: Value = serde_json::from_str(hub.info_now()[&info_key(&pcb.to_string_lossy().replace(".kicad_pcb", ".kicad_pro"))].as_str().unwrap_or("{}")).unwrap_or_default();
         assert!(info.is_null() || info["state"] == json!("failed"), "{info}");
