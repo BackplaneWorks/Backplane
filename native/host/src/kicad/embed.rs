@@ -172,7 +172,7 @@ impl Session {
             "dialogs": self.dialogs,
             "rss_mb": self.rss_mb,
             // what the embedded editor can do beyond the basics (embed-gerbview, embed-editor-requested, ...): the client gates on these
-            "embed_caps": self.caps.iter().filter(|c| c.starts_with("embed-")).collect::<Vec<_>>(),
+            "embed_caps": self.caps.iter().filter(|c| c.starts_with("embed-") || c.starts_with("prewarm-")).collect::<Vec<_>>(),
             // bp.9: the client may map and unmap a frame KiCad has shown once (its tab switches need no round trip)
             "local_map": self.mode == "fork" && !self.desc.is_empty() && proto::load(&self.desc).has_field("kiapi.backplane.embed.ShowFrame", "prewarm"),
         })
