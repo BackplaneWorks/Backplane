@@ -491,7 +491,7 @@ impl KicadPane {
     }
     fn want(&self) -> Option<u64> { if self.info.is_null() || (cfg!(windows) && self.info["mode"] == "stock") { return None } pick_local(self.wanted_kind(), &self.info, &self.frames, &self.ever_shown) }
     fn tick(&mut self, cx: &mut Context<Self>) {
-        if let Some(c) = self.container { nc::shield_tick(c, cfg!(windows) && self.info["mode"] == "fork" && self.want().is_some()); }
+        if let Some(c) = self.container { nc::shield_tick(c, if cfg!(windows) && self.info["mode"] == "fork" { self.want() } else { None }); }
         if let Some((started, done, last_stray)) = self.prewarm_guard {
             let shown = self.wanted_kind();
             let built = ["SCH", "PCB"].iter().filter(|k| **k != shown).all(|k| self.info["frames"].as_array().is_some_and(|a| a.iter().any(|f| f["kind"].as_str() == Some(*k)))); // i18n-ok: wire frame kind enum names
