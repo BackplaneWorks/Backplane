@@ -4279,6 +4279,7 @@ gpui.mgmt.plan.keysnote = On this KiCad version, approve from this panel: in pla
 gpui.mgmt.plan.reference = over {layer}
 gpui.mgmt.plan.nets = {n, plural, one {# net} other {# nets}}
 gpui.mgmt.plan.tab = Plan
+gpui.mgmt.bom.shared = Its sheet is used more than once and KiCad keeps one value for all of them: {others} has it too.
 gpui.mgmt.fab.review = Review: {must} must · {should} should · {notes} notes
 gpui.mgmt.fab.stackup = stackup {id}, 50 Ω outer line {w} mm
 gpui.mgmt.fab.proposed = Proposed:

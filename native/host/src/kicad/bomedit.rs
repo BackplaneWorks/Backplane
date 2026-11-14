@@ -161,28 +161,145 @@ pub fn end_msg(id: &Value, action: &str, message: &str, doc: &Value) -> Value {
     m
 }
 /// The symbols to update (GetItems' own, changed) and the field's value before (the first changed symbol's: a line's symbols share it).
-async fn prepare<F, Fut>(call: &F, doc: &Value, refs: &[String], field: &str, value: &str) -> Result<(Vec<Value>, String), String>
+/// The schematic's sheet instances: the root document, then each sheet's (the parent's sheet path and the sheet's id), breadth first, at
+/// most 400. A symbol in a sub-sheet is answered only for its own sheet's document: asked with the root's, a BOM edit of it found
+/// nothing (complex_hierarchy's RV201, Nov 14).
+async fn sheet_docs<F, Fut>(call: &F, root: &Value, root_file: Option<&str>) -> Vec<Value>
 where F: Fn(&'static str, Value) -> Fut, Fut: std::future::Future<Output = Value> {
-    let got = call("kiapi.common.commands.GetItems", json!({"header": {"document": doc}, "types": ["KOT_SCH_SYMBOL"]})).await;
-    let items = ok_of(&got)?["items"].as_array().cloned().unwrap_or_default();
-    let was = items.iter().find(|it| refs.iter().any(|r| r == reference(it)) && current(it, field) != value).map(|it| current(it, field)).unwrap_or_default();
-    Ok((plan(&items, refs, field, value), was))
+    // a headless KiCad's document has no sheet path: the root's is its file's uuid (a child is the root's path and the sheet's id)
+    let mut root = root.clone();
+    if root["sheet_path"]["path"].as_array().map_or(true, Vec::is_empty) {
+        // the project's top-level sheet first (KiCad keys the hierarchy by it: Hubble_DK's differs from its file's uuid), else the file's
+        let top = root_file.and_then(|f| std::fs::read_to_string(std::path::Path::new(f).with_extension("kicad_pro")).ok())
+            .and_then(|t| serde_json::from_str::<Value>(&t).ok()).and_then(|v| v["sheets"][0][0].as_str().map(str::to_string));
+        if let Some(u) = top.or_else(|| root_file.and_then(|f| std::fs::read_to_string(f).ok()).and_then(|t| root_uuid(&t))) { root["sheet_path"]["path"] = json!([{"value": u}]); }
+    }
+    let mut docs = vec![root.clone()]; let mut i = 0;
+    while i < docs.len() && docs.len() < 400 {
+        let d = docs[i].clone(); i += 1;
+        let got = call("kiapi.common.commands.GetItems", json!({"header": {"document": d}, "types": ["KOT_SCH_SHEET"]})).await;
+        let Ok(m) = ok_of(&got) else { continue };
+        let path: Vec<Value> = d["sheet_path"]["path"].as_array().cloned().unwrap_or_default();
+        for sh in m["items"].as_array().into_iter().flatten() {
+            let Some(id) = sh["id"]["value"].as_str() else { continue };
+            if path.iter().any(|p| p["value"] == id) || path.len() > 32 { continue }
+            let mut c = d.clone(); let mut p2 = path.clone(); p2.push(json!({"value": id}));
+            c["sheet_path"] = json!({"path": p2});
+            docs.push(c);
+        }
+    }
+    docs
 }
-/// Get, change and commit on one API (the GUI's, or the headless one through ipc::kicad_ipc). Answers how many symbols changed and the
-/// field's value before (the first changed symbol's: a line's symbols share it).
-async fn commit<F, Fut>(call: F, doc: Value, refs: &[String], field: &str, value: &str) -> Result<(usize, String), String>
+/// A schematic file's own uuid (its root sheet's): the first `(uuid ...)` at its top level.
+pub fn root_uuid(text: &str) -> Option<String> {
+    let i = text.find("\n\t(uuid \"")? + "\n\t(uuid \"".len(); text[i..].split('"').next().map(str::to_string)
+}
+/// What an edit does: per sheet document, the symbols to update (each symbol once: a sheet used several times has one symbol and several
+/// instances, and KiCad keeps its fields per symbol, its Reference per instance); the field's value before; the references found; the
+/// other instances' references that take the same value (`shared`).
+pub struct Plan { pub todo: Vec<(Value, Vec<Value>)>, pub was: String, pub found: Vec<String>, pub shared: Vec<String> }
+pub fn plan_sheets(sheets: &[(Value, Vec<Value>)], refs: &[String], field: &str, value: &str) -> Plan {
+    use std::collections::{BTreeSet, HashMap};
+    let id = |it: &Value| it["id"]["value"].as_str().unwrap_or("").to_string();
+    let mut refs_of: HashMap<String, BTreeSet<String>> = HashMap::new();
+    for (_, items) in sheets { for it in items { refs_of.entry(id(it)).or_default().insert(reference(it).to_string()); } }
+    let (mut todo, mut done, mut found, mut shared, mut was) = (vec![], BTreeSet::new(), BTreeSet::new(), BTreeSet::new(), String::new());
+    for (doc, items) in sheets {
+        let mut mine = vec![];
+        for it in items.iter().filter(|it| refs.iter().any(|r| r == reference(it))) {
+            found.insert(reference(it).to_string());
+            for r in refs_of.get(&id(it)).into_iter().flatten() { if !refs.contains(r) { shared.insert(r.clone()); } }
+            if current(it, field) != value && done.insert(id(it)) { if was.is_empty() { was = current(it, field); } mine.push(set_field(it.clone(), field, value)); }
+        }
+        if !mine.is_empty() { todo.push((doc.clone(), mine)); }
+    }
+    Plan { todo, was, found: found.into_iter().collect(), shared: shared.into_iter().collect() }
+}
+/// Every sheet instance's symbols, read through `call`.
+async fn read_sheets<F, Fut>(call: &F, root: &Value, root_file: Option<&str>) -> Result<Vec<(Value, Vec<Value>)>, String>
 where F: Fn(&'static str, Value) -> Fut, Fut: std::future::Future<Output = Value> {
-    let (todo, was) = prepare(&call, &doc, refs, field, value).await?;
-    if todo.is_empty() { return Ok((0, was)) }
-    let begun = call("kiapi.common.commands.BeginCommit", json!({"header": {"document": doc}})).await;
-    let id = ok_of(&begun)?["id"].clone();
-    // from here the commit is ended on every path: committed, or dropped when anything fails (a commit left open holds the editor's
-    // handler for that client)
-    let up = call("kiapi.common.commands.UpdateItems", json!({"header": {"document": doc}, "items": todo})).await;
-    if let Err(e) = ok_of(&up) { call("kiapi.common.commands.EndCommit", end_msg(&id, "CMA_DROP", "", &doc)).await; return Err(format!("UpdateItems: {e}")) }
-    let end = call("kiapi.common.commands.EndCommit", end_msg(&id, "CMA_COMMIT", &message(field, refs, value), &doc)).await;
-    if let Err(e) = ok_of(&end) { call("kiapi.common.commands.EndCommit", end_msg(&id, "CMA_DROP", "", &doc)).await; return Err(format!("EndCommit: {e}")) }
-    Ok((todo.len(), was))
+    let mut out = vec![];
+    for d in sheet_docs(call, root, root_file).await {
+        let got = call("kiapi.common.commands.GetItems", json!({"header": {"document": d}, "types": ["KOT_SCH_SYMBOL"]})).await;
+        out.push((d, ok_of(&got)?["items"].as_array().cloned().unwrap_or_default()));
+    }
+    Ok(out)
+}
+async fn prepare<F, Fut>(call: &F, root: &Value, root_file: Option<&str>, refs: &[String], field: &str, value: &str) -> Result<Plan, String>
+where F: Fn(&'static str, Value) -> Fut, Fut: std::future::Future<Output = Value> {
+    let p = plan_sheets(&read_sheets(call, root, root_file).await?, refs, field, value);
+    let missing: Vec<&String> = refs.iter().filter(|r| !p.found.contains(r)).collect();
+    if !missing.is_empty() { return Err(format!("no symbol {} in the schematic (none of its sheets has it)", missing.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", "))) }
+    Ok(p)
+}
+/// After the edit, in KiCad: every reference's field reads `value`, else which do not (the edit is never said made when it is not).
+async fn read_back<F, Fut>(call: &F, root: &Value, root_file: Option<&str>, refs: &[String], field: &str, value: &str) -> Result<(), String>
+where F: Fn(&'static str, Value) -> Fut, Fut: std::future::Future<Output = Value> {
+    let sheets = read_sheets(call, root, root_file).await?;
+    let wrong: Vec<String> = refs.iter().filter(|r| !sheets.iter().any(|(_, items)| items.iter().any(|it| reference(it) == r.as_str() && current(it, field) == value))).cloned().collect();
+    if wrong.is_empty() { Ok(()) } else { Err(format!("KiCad did not take the change for {}", wrong.join(", "))) }
+}
+/// The saved files: whether every reference's symbol carries `field` = `value` in the schematic's sheet files (the file read back, never
+/// the API's word alone). A symbol block is found by its instance's `(reference "R")`; its field by the property's name.
+pub fn file_shows(texts: &[String], reference: &str, field: &str, value: &str) -> bool {
+    let esc = value.replace('\\', "\\\\").replace('"', "\\\"");
+    texts.iter().any(|t| symbol_blocks(t).into_iter().any(|b| b.contains(&format!("(reference \"{reference}\")")) && block_has(b, field, &esc, value)))
+}
+fn block_has(b: &str, field: &str, esc: &str, value: &str) -> bool {
+    match field {
+        "dnp" => if matches!(value, "yes" | "true" | "1") { b.contains("(dnp yes)") } else { !b.contains("(dnp yes)") },
+        "value" => b.contains(&format!("(property \"Value\" \"{esc}\"")),
+        "footprint" => b.contains(&format!("(property \"Footprint\" \"{esc}\"")),
+        _ => {
+            let names: &[&str] = if field == "mpn" { &MPN } else { &["lcsc"] };
+            b.match_indices("(property \"").any(|(i, _)| { let rest = &b[i + 11..]; let Some(e) = rest.find('"') else { return false };
+                names.contains(&rest[..e].to_ascii_lowercase().as_str()) && rest[e..].starts_with(&format!("\" \"{esc}\"")) })
+        }
+    }
+}
+/// The schematic file's placed symbols: each `(symbol` block at the sheet's top level (not the library's, inside `(lib_symbols`).
+fn symbol_blocks(t: &str) -> Vec<&str> {
+    let lib = t.find("(lib_symbols").map(|i| (i, i + match_close(&t[i..]))).unwrap_or((0, 0));
+    let mut out = vec![]; let mut from = 0;
+    while let Some(k) = t[from..].find("(symbol") {
+        let i = from + k; from = i + 7;
+        if i >= lib.0 && i < lib.1 { continue }
+        // a placed symbol opens with its lib_id, or with a lib_name before it (a symbol whose library copy was renamed: ecc83's R1)
+        let head = t[i + 7..].trim_start(); if !head.starts_with("(lib_id") && !head.starts_with("(lib_name") { continue }
+        let n = match_close(&t[i..]); out.push(&t[i..i + n]); from = i + n;
+    }
+    out
+}
+/// The length of the balanced parenthesised expression at the start of `t` (strings with escapes skipped).
+fn match_close(t: &str) -> usize {
+    let (mut depth, mut instr, mut esc) = (0i32, false, false);
+    for (i, c) in t.char_indices() {
+        if instr { if esc { esc = false } else if c == '\\' { esc = true } else if c == '"' { instr = false } continue }
+        match c { '"' => instr = true, '(' => depth += 1, ')' => { depth -= 1; if depth == 0 { return i + 1 } } _ => {} }
+    }
+    t.len()
+}
+/// The schematic's sheet files (the root and every .kicad_sch beside it).
+fn sheet_texts(sch: &str) -> Vec<String> { super::savegate::files_of(sch).iter().filter_map(|f| std::fs::read_to_string(f).ok()).collect() }
+/// What the panel says when other instances take the value too.
+pub fn shared_note(refs: &[String], shared: &[String]) -> Option<String> {
+    (!shared.is_empty()).then(|| format!("{} sits in a sheet used more than once, and KiCad keeps one value per symbol there: {} has it too", refs.join(", "), shared.join(", ")))
+}
+/// Commit `todo` per sheet document on one API (the headless one through ipc::kicad_ipc).
+async fn commit<F, Fut>(call: &F, todo: &[(Value, Vec<Value>)], field: &str, refs: &[String], value: &str) -> Result<usize, String>
+where F: Fn(&'static str, Value) -> Fut, Fut: std::future::Future<Output = Value> {
+    let mut n = 0;
+    for (doc, items) in todo {
+        let begun = call("kiapi.common.commands.BeginCommit", json!({"header": {"document": doc}})).await;
+        let id = ok_of(&begun)?["id"].clone();
+        // ended on every path: committed, or dropped when anything fails (a commit left open holds the editor's handler for that client)
+        let up = call("kiapi.common.commands.UpdateItems", json!({"header": {"document": doc}, "items": items})).await;
+        if let Err(e) = ok_of(&up) { call("kiapi.common.commands.EndCommit", end_msg(&id, "CMA_DROP", "", doc)).await; return Err(format!("UpdateItems: {e}")) }
+        let end = call("kiapi.common.commands.EndCommit", end_msg(&id, "CMA_COMMIT", &message(field, refs, value), doc)).await;
+        if let Err(e) = ok_of(&end) { call("kiapi.common.commands.EndCommit", end_msg(&id, "CMA_DROP", "", doc)).await; return Err(format!("EndCommit: {e}")) }
+        n += items.len();
+    }
+    Ok(n)
 }
 
 /// `mgmt.bom.edit`: {via: "kicad"|"file", changed}.
@@ -195,13 +312,18 @@ pub async fn edit(hub: &Arc<Hub>, pro: &str, sch: &str, p: &Value) -> Result<Val
         let as_person = AS_PERSON && std::env::var("BACKPLANE_BOM_CLIENT").map_or(true, |v| v != "hub");
         let who = super::coedit::client_name(&if as_person { super::coedit::Who::Person } else { super::coedit::Who::Hub("bom") });
         let g = gui.clone(); let w2 = who.clone();
-        let (todo, was) = prepare(&move |ty, msg| { let (g, w) = (g.clone(), w2.clone()); async move { embed::gui_call_as(&g, ty, msg, &w).await } }, &doc, &refs, &field, &value).await?;
-        // one commit, ended or dropped on every path, with the document's header and this name on every call (embed::commit_as)
+        let call = move |ty: &'static str, msg: Value| { let (g, w) = (g.clone(), w2.clone()); async move { embed::gui_call_as(&g, ty, msg, &w).await } };
+        let root_file = super::project::read(&std::path::Path::new(pro).parent().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default()).sch;
+        let plan = prepare(&call, &doc, Some(&root_file), &refs, &field, &value).await?;
+        let (todo, was) = (plan.todo.iter().map(|(_, i)| i.len()).sum::<usize>(), plan.was.clone());
+        // one commit per sheet document, ended or dropped on every path, with that document's header and this name on every call
         let mut deferred = 0;
         let mut saved = false;
         let mut upgrade = None;
-        if !todo.is_empty() {
-            deferred = deferred_of(&embed::commit_as(&gui, &who, &doc, todo.clone(), &message(&field, &refs, &value)).await?);
+        if todo > 0 {
+            for (d, items) in &plan.todo { deferred += deferred_of(&embed::commit_as(&gui, &who, d, items.clone(), &message(&field, &refs, &value)).await?); }
+            // KiCad's word for it: every reference reads the value now (a deferred edit is applied when the person finishes there)
+            if deferred == 0 { read_back(&call, &doc, Some(&root_file), &refs, &field, &value).await?; }
             // a KiCad the person has not on screen (pre-warmed, or its view closed): nobody would save the change there, and it would go with
             // that KiCad; it is saved at once, as the headless path does
             // (co-editing runtimes only: there a save of the person's own unsaved edits too is by design; before, it is never done for them)
@@ -211,11 +333,15 @@ pub async fn edit(hub: &Arc<Hub>, pro: &str, sch: &str, p: &Value) -> Result<Val
                 upgrade = super::savegate::upgrade_of(&gui, &sch).await;
                 saved = embed::gui_call_as(&gui, "kiapi.common.commands.SaveDocument", json!({"document": doc}), &who).await["ok"] == true;
                 if !saved { upgrade = None; }
+                // saved only when the saved files show it
+                if saved { let (t, r, f, v) = (sheet_texts(&sch), refs.clone(), field.clone(), value.clone());
+                    let ok = tokio::task::spawn_blocking(move || r.iter().all(|x| file_shows(&t, x, &f, &v))).await.unwrap_or(false);
+                    if !ok { return Err(format!("KiCad saved the schematic, but the saved file does not show {} = {value} for {}: not kept", field, refs.join(", "))) } }
             }
             if !saved { embed::unsaved_update(pro, |u| u.touched()); }
         }
         // `deferred`: the person is editing those symbols in KiCad; KiCad applies the change when they finish (a notice follows): not read back yet
-        return Ok(json!({"via": if saved { "file" } else { "kicad" }, "format_upgrade": upgrade, "changed": todo.len(), "deferred": deferred, "field": field, "value": value, "was": was, "refs": refs, "undo": undo_by(&gui.version, &gui.caps)}))
+        return Ok(json!({"via": if saved { "file" } else { "kicad" }, "format_upgrade": upgrade, "changed": todo, "deferred": deferred, "field": field, "value": value, "was": was, "refs": refs, "shared_with": plan.shared, "shared_note": shared_note(&refs, &plan.shared), "undo": undo_by(&gui.version, &gui.caps)}))
     }
     // no KiCad with it open (none, or one with only the board): the headless one writes and saves, under the schematic's lock
     let ag = AGENTS.get().and_then(Weak::upgrade).ok_or("the hub's agents are not running")?;
@@ -243,13 +369,21 @@ pub async fn edit(hub: &Arc<Hub>, pro: &str, sch: &str, p: &Value) -> Result<Val
                 d
             }
         };
-        let n = commit(&call, doc.clone(), &refs, &field, &value).await?;
-        if n.0 > 0 { ok_of(&call("kiapi.common.commands.SaveDocument", json!({"document": doc})).await).map_err(|e| format!("SaveDocument: {e}"))?; }
-        Ok::<(usize, String), String>(n)
+        let plan = prepare(&call, &doc, Some(&doc_path), &refs, &field, &value).await?;
+        let n = commit(&call, &plan.todo, &field, &refs, &value).await?;
+        if n > 0 {
+            read_back(&call, &doc, Some(&doc_path), &refs, &field, &value).await?;
+            ok_of(&call("kiapi.common.commands.SaveDocument", json!({"document": doc})).await).map_err(|e| format!("SaveDocument: {e}"))?;
+            let (t, r, f, v) = (sheet_texts(&doc_path), refs.clone(), field.clone(), value.clone());
+            if !tokio::task::spawn_blocking(move || r.iter().all(|x| file_shows(&t, x, &f, &v))).await.unwrap_or(false) {
+                return Err(format!("the schematic was saved, but the saved file does not show {field} = {value} for {}: not kept", refs.join(", ")))
+            }
+        }
+        Ok::<(usize, String, Vec<String>), String>((n, plan.was, plan.shared))
     }.await;
     ag.lock_http("release", &json!({"name": name, "holder": holder})).await;
-    let (n, was) = r?;
-    Ok(json!({"via": "file", "changed": n, "field": field, "value": value, "was": was, "refs": refs, "undo": "panel"}))
+    let (n, was, shared) = r?;
+    Ok(json!({"via": "file", "changed": n, "field": field, "value": value, "was": was, "refs": refs, "shared_with": shared, "shared_note": shared_note(&refs, &shared), "undo": "panel"}))
 }
 
 pub struct BomEditRpc;
@@ -310,12 +444,40 @@ mod tests {
         let refs = vec!["R1".to_string()];
         for (fail, ends) in [("", vec!["CMA_COMMIT"]), ("UpdateItems", vec!["CMA_DROP"]), ("EndCommit", vec!["CMA_COMMIT", "CMA_DROP"])] {
             let log = Arc::new(std::sync::Mutex::new(vec![]));
-            let r = commit(fake(fail, log.clone()), doc.clone(), &refs, "mpn", "X").await;
+            let todo = vec![(doc.clone(), vec![sym("R1", 1, vec![])])];
+            let r = commit(&fake(fail, log.clone()), &todo, "mpn", &refs, "X").await;
             assert_eq!(r.is_ok(), fail.is_empty(), "{fail}: {r:?}");
             let got: Vec<(String, Value)> = log.lock().unwrap().iter().filter(|(t, _)| t.ends_with("EndCommit")).cloned().collect();
             assert_eq!(got.iter().map(|(_, m)| m["action"].as_str().unwrap().to_string()).collect::<Vec<_>>(), ends, "{fail}");
             assert!(got.iter().all(|(_, m)| m["header"]["document"] == doc && m["id"]["value"] == "c1"), "every EndCommit names the schematic: {got:?}");
         }
+    }
+    /// A sheet used twice: one symbol (one id), an instance per sheet with its own reference; the edit writes the symbol once, through
+    /// one sheet's document, and names the other instance as sharing it. A symbol in a sheet used once is found under that sheet.
+    #[test] fn a_symbol_in_a_sheet_used_twice_is_written_once_and_shares_its_value() {
+        let r = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let inst = |rf: &str, id: &str| { let mut s = sym(rf, 1, vec![]); s["id"] = json!({"value": id}); s };
+        let (root, a, b, c) = (json!({"sheet_path": {"path": [{"value": "root"}]}}), json!({"sheet_path": {"path": [{"value": "root"}, {"value": "A"}]}}), json!({"sheet_path": {"path": [{"value": "root"}, {"value": "B"}]}}), json!({"sheet_path": {"path": [{"value": "root"}, {"value": "C"}]}}));
+        let sheets = vec![(root.clone(), vec![inst("C103", "c103")]), (a.clone(), vec![inst("RV201", "rv")]), (b.clone(), vec![inst("RV301", "rv")]), (c.clone(), vec![inst("R7", "r7")])];
+        let p = plan_sheets(&sheets, &r(&["RV201"]), "mpn", "X");
+        assert_eq!(p.todo.len(), 1, "the shared symbol once"); assert_eq!(p.todo[0].0, a, "through the sheet of the instance edited");
+        assert_eq!(p.shared, r(&["RV301"])); assert!(shared_note(&r(&["RV201"]), &p.shared).unwrap().contains("RV301 has it too"));
+        let both = plan_sheets(&sheets, &r(&["RV201", "RV301"]), "mpn", "X"); assert_eq!(both.todo.iter().map(|t| t.1.len()).sum::<usize>(), 1); assert!(both.shared.is_empty());
+        let once = plan_sheets(&sheets, &r(&["R7"]), "mpn", "X"); assert_eq!(once.todo[0].0, c, "a sheet used once: its own document"); assert!(once.shared.is_empty());
+        let flat = plan_sheets(&sheets, &r(&["C103"]), "mpn", "X"); assert_eq!(flat.todo[0].0, root);
+        assert!(plan_sheets(&sheets, &r(&["Q9"]), "mpn", "X").found.is_empty(), "not there: nothing found (the edit refuses, naming it)");
+    }
+    /// The saved file is read back: the symbol whose instance is RV201 carries the MPN (in a shared sheet, one property for both instances).
+    #[test] fn the_saved_file_is_read_for_the_value() {
+        let t = "(kicad_sch\n\t(lib_symbols\n\t\t(symbol \"Device:R\"\n\t\t\t(property \"Reference\" \"R\")\n\t\t)\n\t)\n\t(symbol\n\t\t(lib_id \"Device:R_POT\")\n\t\t(property \"Reference\" \"RV201\")\n\t\t(property \"MPN\" \"X1\"\n\t\t\t(hide yes)\n\t\t)\n\t\t(dnp yes)\n\t\t(instances\n\t\t\t(project \"p\"\n\t\t\t\t(path \"/a\" (reference \"RV201\") (unit 1))\n\t\t\t\t(path \"/b\" (reference \"RV301\") (unit 1))\n\t\t\t)\n\t\t)\n\t)\n)".to_string();
+        let ts = vec![t];
+        assert!(file_shows(&ts, "RV201", "mpn", "X1") && file_shows(&ts, "RV301", "mpn", "X1"), "one property, both instances");
+        assert!(!file_shows(&ts, "RV201", "mpn", "X2")); assert!(!file_shows(&ts, "R9", "mpn", "X1"));
+        assert!(file_shows(&ts, "RV201", "dnp", "yes") && !file_shows(&ts, "RV201", "dnp", "no"));
+        assert!(!file_shows(&ts, "R", "mpn", "X1"), "the library's own symbol is not a placed one");
+        let named = vec![ts[0].replace("(lib_id \"Device:R_POT\")", "(lib_name \"R_1\")\n\t\t(lib_id \"Device:R_POT\")")];
+        assert!(file_shows(&named, "RV201", "mpn", "X1"), "a placed symbol with a lib_name first");
+        assert_eq!(root_uuid("(kicad_sch\n\t(version 1)\n\t(uuid \"5b96\")\n\t(symbol (uuid \"x\"))"), Some("5b96".to_string()));
     }
     #[test] fn requests_are_checked() {
         assert!(check(&json!({"field": "colour", "refs": ["R1"], "value": "x"})).is_err());

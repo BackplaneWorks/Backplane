@@ -4154,6 +4154,7 @@ gpui.mgmt.plan.keysnote	On this KiCad version, approve from this panel: in plan 
 gpui.mgmt.plan.reference	over {layer}	基準 {layer}
 gpui.mgmt.plan.nets	{n, plural, one {# net} other {# nets}}	ネット{n}本
 gpui.mgmt.plan.tab	Plan	計画
+gpui.mgmt.bom.shared	Its sheet is used more than once and KiCad keeps one value for all of them: {others} has it too.	このシートは複数回使われており、KiCadはすべてに同じ値を持たせます：{others}にも同じ値が入りました。
 gpui.mgmt.fab.review	Review: {must} must · {should} should · {notes} notes	レビュー：必須{must}・推奨{should}・メモ{notes}
 gpui.mgmt.fab.stackup	stackup {id}, 50 Ω outer line {w} mm	層構成 {id}、外層50 Ωの線幅 {w} mm
 gpui.mgmt.fab.proposed	Proposed:	提案：
@@ -6870,6 +6871,9 @@ gpui.streamer.win	Windows does not tell an app that the screen is being captured
 
     /// gpui.mgmt.plan.nets = {n, plural, one {# net} other {# nets}}
     static func gpui_mgmt_plan_nets(n: Int) -> String { f("gpui.mgmt.plan.nets", ["n": String(n)]) }
+
+    /// gpui.mgmt.bom.shared = Its sheet is used more than once and KiCad keeps one value for all of them: {others} has it too.
+    static func gpui_mgmt_bom_shared(others: String) -> String { f("gpui.mgmt.bom.shared", ["others": others]) }
 
     /// gpui.mgmt.fab.review = Review: {must} must · {should} should · {notes} notes
     static func gpui_mgmt_fab_review(must: String, should: String, notes: String) -> String { f("gpui.mgmt.fab.review", ["must": must, "should": should, "notes": notes]) }

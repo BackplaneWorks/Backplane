@@ -17,9 +17,22 @@ pub fn file_version(text: &str) -> Option<u64> {
 /// The files a save of `doc` writes: the board, or the schematic and every sheet beside it.
 pub fn files_of(doc: &str) -> Vec<String> {
     if doc.ends_with(".kicad_pcb") { return vec![doc.to_string()] }
-    let dir = Path::new(doc).parent().map(Path::to_path_buf).unwrap_or_default();
-    let mut v: Vec<String> = std::fs::read_dir(&dir).into_iter().flatten().flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x == "kicad_sch")).map(|p| p.to_string_lossy().into_owned()).collect();
-    v.sort(); if !v.iter().any(|x| x == doc) { v.insert(0, doc.to_string()) } v
+    // the root and the sheets it names (each sheet's "Sheetfile", relative to the file naming it: Hubble_DK keeps its sheets in sheets/)
+    let mut v = vec![doc.to_string()]; let mut i = 0;
+    while i < v.len() && v.len() < 400 {
+        let f = v[i].clone(); i += 1;
+        let Ok(t) = std::fs::read_to_string(&f) else { continue };
+        let dir = Path::new(&f).parent().map(Path::to_path_buf).unwrap_or_default();
+        for name in sheet_files(&t) {
+            let p = dir.join(&name).to_string_lossy().into_owned();
+            if !v.contains(&p) { v.push(p) }
+        }
+    }
+    v
+}
+/// The sheet files a schematic names (its sheets' "Sheetfile" properties).
+pub fn sheet_files(text: &str) -> Vec<String> {
+    text.match_indices("(property \"Sheetfile\" \"").filter_map(|(i, m)| { let rest = &text[i + m.len()..]; rest.find('"').map(|e| rest[..e].to_string()) }).collect()
 }
 /// The line a save says when it upgrades the files' format: (oldest version among them, the runtime's), None when all are current.
 pub fn upgrade_line(versions: &[u64], runtime: u64) -> Option<String> {
@@ -56,6 +69,7 @@ mod tests {
         assert_eq!(file_version("nothing"), None);
         assert_eq!(upgrade_line(&[20261025, 20260306], 20261025).unwrap(), "KiCad also upgraded the file format in this save (version 20260306 to 20261025): most of the diff is KiCad's rewrite, not the edit.");
         assert_eq!(upgrade_line(&[20261025], 20261025), None, "current: nothing to say");
+        assert_eq!(sheet_files("(sheet (property \"Sheetname\" \"P\") (property \"Sheetfile\" \"sheets/Power.kicad_sch\"))"), ["sheets/Power.kicad_sch"]);
         assert!(wrote_nothing(&json!({"ok": true, "message": {"_status": "not modified: nothing written"}})) && !wrote_nothing(&json!({"ok": true, "message": {}})));
     }
 }

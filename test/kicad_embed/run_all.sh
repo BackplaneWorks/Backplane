@@ -34,6 +34,8 @@ SUITES=(
   "embed_prewarm_e2e.sh:prewarm"
   "embed_click_e2e.sh:click"
   "embed_thread_e2e.sh:thread"
+  # a BOM edit lands for a symbol in a sub-sheet used twice (the fork's complex_hierarchy, copied), read back from the saved file (fork only)
+  "embed_bom_sheets_e2e.sh:bom-sheets:BOM_CASE=twice"
   # Edit pressed before the viewer knows its file is kept and acted on (fork only)
   "embed_edit_early_e2e.sh:edit-early"
   # a start that misses its window is retried once by the hub; twice, the pane offers Try again (fork only)

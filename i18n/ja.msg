@@ -4302,6 +4302,7 @@ gpui.mgmt.plan.keysnote = このバージョンのKiCadでは、このパネル�
 gpui.mgmt.plan.reference = 基準 {layer}
 gpui.mgmt.plan.nets = ネット{n}本
 gpui.mgmt.plan.tab = 計画
+gpui.mgmt.bom.shared = このシートは複数回使われており、KiCadはすべてに同じ値を持たせます：{others}にも同じ値が入りました。
 gpui.mgmt.fab.review = レビュー：必須{must}・推奨{should}・メモ{notes}
 gpui.mgmt.fab.stackup = 層構成 {id}、外層50 Ωの線幅 {w} mm
 gpui.mgmt.fab.proposed = 提案：

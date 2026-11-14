@@ -178,11 +178,15 @@ pub fn edit_note(said: Option<&(bool, String)>, last: Option<&Value>) -> Option<
     if changed == 0 { return Some(("dim", trs("Nothing to change."), false)) }
     // co-edit: the person is editing those symbols in KiCad; KiCad applies the change when they finish there
     if last.map_or(0, |l| l["deferred"].as_u64().unwrap_or(0)) > 0 { return Some(("dim", trs("You are editing it in KiCad: the change goes in when you finish there."), false)) }
-    Some(match (what.as_str(), undo) {
+    let (tone, words, undoable) = match (what.as_str(), undo) {
         ("kicad", "kicad") => ("ok", trs("Changed in KiCad: Ctrl+Z there takes it back; save there to keep it."), true),
         ("kicad", _) => ("ok", trs("Changed in KiCad; save there to keep it."), true),
         _ => ("ok", trs("Saved in the schematic."), true),
-    })
+    };
+    // a symbol in a sheet used more than once: KiCad keeps one value for all its instances, so the others took it too (said, never silent)
+    let others: Vec<&str> = last.and_then(|l| l["shared_with"].as_array()).into_iter().flatten().filter_map(Value::as_str).collect();
+    let words = if others.is_empty() { words } else { format!("{words} {}", crate::i18n::tf("gpui.mgmt.bom.shared", &[("others", others.join(", ").into())])) }; // i18n-ok: two catalog sentences joined
+    Some((tone, words, undoable))
 }
 /// The tag of `mgmt.bom.edit`'s answer (Command::Ask).
 pub const EDIT_TAG: u64 = 0x6d67_6564;
