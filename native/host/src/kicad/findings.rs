@@ -149,6 +149,8 @@ fn severity_of(v: &Value) -> String {
     if v["excluded"].as_bool().unwrap_or(false) { return "excluded".into() }
     match v["severity"].as_str().unwrap_or("warning") { "error" => "error", "exclusion" | "excluded" | "ignore" => "excluded", "info" | "action" => "info", _ => "warning" }.into()
 }
+/// The detail of a stored exclusion whose sheet is no longer in the schematic.
+pub const STALE_SHEET_NOTE: &str = "Excluded for a sheet no longer in the schematic";
 fn finding_of(source: &str, v: &Value, anchor: impl Fn(&str) -> Anchor) -> Finding {
     let anchors: Vec<Anchor> = v["items"].as_array().into_iter().flatten().map(|i| {
         let mut a = anchor(i["description"].as_str().unwrap_or(""));
@@ -157,7 +159,9 @@ fn finding_of(source: &str, v: &Value, anchor: impl Fn(&str) -> Anchor) -> Findi
         a
     }).collect();
     let rule = v["type"].as_str().unwrap_or("").to_string();
-    let detail = anchors.iter().map(|a| a.text.as_str()).collect::<Vec<_>>().join("; ");
+    let mut detail = anchors.iter().map(|a| a.text.as_str()).collect::<Vec<_>>().join("; ");
+    // an ERC exclusion stored for a sheet no longer in the schematic (bp.13 batch 8, lane P): on the root sheet, no items; it says why
+    if let Some(p) = v["unresolved_sheet_path"].as_str().filter(|p| !p.is_empty()) { detail = format!("{STALE_SHEET_NOTE} ({p})") }
     Finding { id: String::new(), source: source.into(), severity: severity_of(v), fix: fix_hint(source, &rule).into(), rule, title: v["description"].as_str().unwrap_or("").into(), detail, anchors }
 }
 /// A report's units to millimetres (KiCad's JSON says "mm" or "in"; a mils report says "mils").

@@ -5,6 +5,9 @@
 #   K1b the board open in KiCad, its schematic editor never opened: on a runtime with `runaction-frame` (bp.13 batch 6: DRC's parity
 #       loads the schematic hidden), DRC runs in KiCad and ERC with kicad-cli, and the pane stays on the board (no show request);
 #       before it, both with kicad-cli
+#   K6  CHECKS_STALE_EXCLUSION=1: one stored ERC exclusion planted for a sheet not in the hierarchy (a copy of the first, its sheet path
+#       given a sheet that does not exist): kicad-cli and the editor both report it, once, the same row (fork batch 8, lane P), noted as
+#       such; the .kicad_pro keeps its bytes. CHECKS_STALE_EXPECT=1 makes it a check (a runtime with the fix), else it is informational.
 #   K2  with the board open in the embedded editor, both checks run there (summary in_editor), with the CLI's rows: the same ids, the
 #       same counts (nothing unsaved yet); the bar follows KiCad's ET_PROGRESS while DRC runs
 #   K3  an edit in KiCad, not saved (a track added over its API, as the person's tools do): DRC runs again by itself, in the editor, on
@@ -35,7 +38,20 @@ if [ -n "${CHECKS_BOARD:-}" ]; then
   echo "{\"project\": \"$(basename "$(ls "$PROJ"/*.kicad_pro | head -1)")\"}" >"$PROJ/.backplane.json"
   git -C "$PROJ" add -A >/dev/null 2>&1; git -C "$PROJ" commit -qm "the board" >/dev/null 2>&1 || true
 fi
-PRO=$(ls "$PROJ"/*.kicad_pro | head -1); PCB="${PRO%.kicad_pro}.kicad_pcb"; mkdir -p "$OUT/shots"; export PRO OUT HUB_RPC_MJS
+if [ "${CHECKS_STALE_EXCLUSION:-}" = 1 ]; then
+  python3 - "$(ls "$PROJ"/*.kicad_pro | head -1)" <<'PY'
+import copy, json, sys
+p = sys.argv[1]; d = json.load(open(p)); e = d.setdefault("erc", {}).setdefault("erc_exclusions", [])
+if not e: sys.exit("K6: the project has no ERC exclusion to copy")
+x = copy.deepcopy(e[0]); m = x["marker"]
+path = {"path": (m.get("sheet_specific_path") or {}).get("path", []) + [{"value": "deadbeef-0000-4000-8000-000000000001"}]}
+m["main_item_sheet_path"] = path; m["sheet_specific_path"] = copy.deepcopy(path); m["items"] = [{"value": "deadbeef-0000-4000-8000-0000000000aa"}]
+x["comment"] = "stale: its sheet was removed"; e.append(x); json.dump(d, open(p, "w"), indent=2)
+print(f"INFO K6: {len(e)} ERC exclusions, the last for a sheet that is not there")
+PY
+  git -C "$PROJ" commit -qam "a stale exclusion" >/dev/null 2>&1 || true
+fi
+PRO=$(ls "$PROJ"/*.kicad_pro | head -1); PRO_SHA0=$(sha256sum "$PRO" | cut -d' ' -f1); PCB="${PRO%.kicad_pro}.kicad_pcb"; mkdir -p "$OUT/shots"; export PRO OUT HUB_RPC_MJS
 # where the test track goes: through the board's first via (a track of no net across a net's via is a short on any board), else the
 # middle of the outline
 read -r TX TY < <(python3 - "$PCB" <<'PY'
@@ -186,6 +202,14 @@ L1D=$(list drc); L1E=$(list erc)
 check "In KiCad: both checks ran in the open editor (in_editor), nothing unsaved" "$(python3 -c 'import json,sys; r=json.loads(sys.argv[1])["result"]; print(int(r["drc"]["in_editor"] and r["erc"]["in_editor"] and not r["drc"]["unsaved"]))' "$S1" 2>/dev/null || echo 0)" "$S1"
 sub() { python3 -c 'import sys; a=set(sys.argv[1].split()); b=set(sys.argv[2].split()); print(len(a-b))' "$1" "$2"; }
 check "Every CLI row is in the editor's result with the same id (DRC $(ids "$L0D" | wc -w), ERC $(ids "$L0E" | wc -w))" "$([ "$(sub "$(ids "$L0D")" "$(ids "$L1D")")" = 0 ] && [ "$(sub "$(ids "$L0E")" "$(ids "$L1E")")" = 0 ] && echo 1 || echo 0)" "missing in the editor: drc $(sub "$(ids "$L0D")" "$(ids "$L1D")"), erc $(sub "$(ids "$L0E")" "$(ids "$L1E")")"
+if [ "${CHECKS_STALE_EXCLUSION:-}" = 1 ]; then
+  stale() { python3 -c 'import json,sys; fs=json.load(open(sys.argv[1]))["result"]["findings"]; print(" ".join(f["id"] for f in fs if f["detail"].startswith("Excluded for a sheet no longer in the schematic") and f["severity"]=="excluded"))' "$1" 2>/dev/null; }
+  K6C=$(stale "$L0E"); K6E=$(stale "$L1E")
+  echo "INFO K6 stale exclusion rows: kicad-cli [$K6C] editor [$K6E]"
+  if [ "${CHECKS_STALE_EXPECT:-}" = 1 ]; then
+    check "A stored exclusion for a sheet not in the schematic: one row from kicad-cli and the same one from the editor, noted as such" "$([ -n "$K6C" ] && [ "$(echo $K6C | wc -w)" = 1 ] && [ "$K6C" = "$K6E" ] && echo 1 || echo 0)" "cli [$K6C] editor [$K6E]"
+  fi
+fi
 # rows only the editor reports: none, but on the builds known to differ (bp.13 batch 3, DIFF_BUILDS):
 # an expected difference: only the known rules (edchecks EDITOR_ONLY), each with its note, and, where CHECKS_EXPECT_EDITOR_ONLY says how many
 # ("silk_over_copper:21" for Hubble_DK), that many; so a fork fix without the capability turns this red, to be told
@@ -239,6 +263,7 @@ check "An unsaved edit in KiCad: DRC ran again in the editor on it (unsaved)" "$
 NEW=$(python3 -c 'import sys; a=set(sys.argv[1].split()); b=set(sys.argv[2].split()); print(" ".join(sorted(b-a)))' "$(ids "$L1D")" "$(ids "$L3D")")
 GONE=$(python3 -c 'import sys; a=set(sys.argv[1].split()); b=set(sys.argv[2].split()); print(" ".join(sorted(a-b)))' "$(ids "$L1D")" "$(ids "$L3D")")
 check "The earlier rows keep their ids; the new track's finding joins ($NEW)" "$([ -n "$NEW" ] && [ -z "$GONE" ] && echo 1 || echo 0)" "new: $NEW gone: $GONE"
+[ "${CHECKS_STALE_EXCLUSION:-}" = 1 ] && check "The project file keeps its bytes through the checks (the stale exclusion kept, not dropped)" "$([ "$(sha256sum "$PRO" | cut -d' ' -f1)" = "$PRO_SHA0" ] && echo 1 || echo 0)"
 check "Nothing was written to the board file" "$([ "$(sha256sum "$PCB" | cut -d' ' -f1)" = "$SHA0" ] && echo 1 || echo 0)"
 import -window root "$OUT/shots/k3_unsaved.png" 2>/dev/null || true
 
