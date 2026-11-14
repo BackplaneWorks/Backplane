@@ -330,6 +330,8 @@ pub fn tip_raw(text: &str, key: &str, light: bool) -> impl Fn(&mut Window, &mut 
 impl Backplane {
     /// A rail button pressed, or its key: the viewer's kind (or Diff) is asked for; the kind already lit shuts the viewer.
     pub(crate) fn rail_press(&mut self, a: &str, v: &str, cx: &mut Context<Self>) {
+        // a project's page on show: the viewer opens on that project (projects::page_view), not on the thread that was open before the page
+        if a == "view-kind" { if let Some((t, k)) = crate::screens::projects::page_view(&self.data, self.project_page.as_deref(), &self.selected, v) { self.page_viewer(t, k, cx); return } }
         let cmd = if a == "view-kind" { self.rail_view(v, cx) } else { Command::Action(a.into(), v.into()) };
         let _ = self.tx.try_send(cmd); cx.notify();
     }

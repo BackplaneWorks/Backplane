@@ -213,7 +213,16 @@ impl Backplane {
     fn select(&mut self,id:String,window:&mut Window,cx:&mut Context<Self>) {self.select_id(id,cx);self.input.focus_handle(cx).focus(window);}
     /// A project's name was clicked: its page (its threads, a New thread button) opens in the main area, at once, from what the sidebar holds; the folder's goal and notes,
     /// parts and boards follow when the hub answers (screens::projects::ask_home).
-    pub fn open_project(&mut self,pid:String,cx:&mut Context<Self>){screens::projects::ask_home(self,&pid);self.project_page=Some(pid);self.ui_epoch+=1;cx.notify();}
+    /// A viewer open beside it follows: it shows this project's page of the same kind, not the last thread's (projects::page_view).
+    pub fn open_project(&mut self,pid:String,cx:&mut Context<Self>){screens::projects::ask_home(self,&pid);
+        let follow=screens::viewer::is_open(&self.data["thread"]).then(||screens::viewer::active_kind(&self.data["thread"]["viewer"],None)).and_then(|k|screens::projects::page_view(&self.data,Some(&pid),&self.selected,&k));
+        self.project_page=Some(pid);self.ui_epoch+=1;cx.notify();
+        if let Some((t,k))=follow {self.page_viewer(t,k,cx);}}
+    /// The viewer of the project whose page is on show: the project's thread `id` becomes the one selected (its viewer is the project's) with the page left up,
+    /// and the page of `kind` opens once that thread is here (projects::sync).
+    pub(crate) fn page_viewer(&mut self,id:String,kind:&'static str,cx:&mut Context<Self>){
+        self.screens.projects.view_edit=Some((id.rsplit('|').next().unwrap_or("").to_string(),kind));
+        let page=self.project_page.take();self.select_id(id,cx);self.project_page=page;}
     /// An action for the hub from a click or key; one that goes somewhere (projects::leaves_page) closes the project's page first.
     pub fn go(&mut self,action:&str,value:String,cx:&mut Context<Self>){if screens::projects::leaves_page(action)&&self.project_page.take().is_some(){self.ui_epoch+=1;}let _=self.tx.try_send(Command::Action(action.into(),value));cx.notify();}
     fn select_id(&mut self,id:String,cx:&mut Context<Self>) {self.project_page=None;self.ui_epoch+=1;self.screens.panels.sub_view=None;
