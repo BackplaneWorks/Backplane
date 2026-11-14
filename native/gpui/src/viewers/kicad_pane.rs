@@ -33,6 +33,15 @@ pub fn next_tab(at: &str, step: i32) -> &'static str {
 /// Whether a button down outside the editor leaves it the keyboard: yes while that press began over the editor (a drag, or a layout that
 /// moved under the pointer mid-press), so only a press that starts elsewhere takes the keyboard back to Backplane.
 pub fn press_keeps(press_began_in_editor: bool) -> bool { press_began_in_editor }
+/// An editor.kicad.prewarm reply that builds nothing: refused (not ok), `prewarming: []`, or (a hub before 676b72333)
+/// `prewarmed: []` with no `prewarming`. `prewarming: true` (an older hub's memory refusal) cannot be told apart: kept.
+pub fn prewarm_builds_nothing(reply: &Value) -> bool {
+    if reply["ok"] != true { return true }
+    match reply.get("prewarming") {
+        Some(v) => v.as_array().is_some_and(|a| a.is_empty()),
+        None => reply["prewarmed"].as_array().is_some_and(|a| a.is_empty()),
+    }
+}
 pub fn frame_for(open: &str) -> &'static str { match open { "schematic" => "SCH", "3d" => "PCB_3D", _ => "PCB" } } // i18n-ok: wire frame kind enum names
 
 fn is_abs_path(s: &str) -> bool {
@@ -230,7 +239,7 @@ pub struct KicadPane {
     /// builds, plus 2 s, an invisible KiCad window that takes the foreground while KiCad has the keys gets the hand-in posted
     /// to the shown editor once per stray (run IB1: the self-started pre-warm took it 1,244 ms after the opening hand-in,
     /// caught only by verify_handin's 1.5 s window; a slower build would land outside it). Started at, done at.
-    prewarm_guard: Option<(std::time::Instant, Option<std::time::Instant>, u64)>,
+    pub(crate) prewarm_guard: Option<(std::time::Instant, Option<std::time::Instant>, u64)>,
     /// the keyboard was in a KiCad dialog last tick: when it closes, the keyboard goes back to the editor (a window manager hands it to
     /// Backplane's window)
     was_dialog: bool,
@@ -852,6 +861,15 @@ impl Render for KicadPane {
 
 #[cfg(test)]
 mod tests {
+    #[test] fn a_prewarm_reply_that_builds_nothing_ends_the_guard() {
+        use serde_json::json;
+        assert!(super::prewarm_builds_nothing(&json!({"ok": true, "prewarming": []})), "refused for memory");
+        assert!(super::prewarm_builds_nothing(&json!({"ok": true, "prewarming": [], "prewarmed": []})), "no route / unsupported");
+        assert!(super::prewarm_builds_nothing(&json!({"ok": true, "prewarmed": []})), "a hub before 676b72333");
+        assert!(super::prewarm_builds_nothing(&json!({"ok": false, "error": "x"})), "an error");
+        assert!(!super::prewarm_builds_nothing(&json!({"ok": true, "prewarming": ["SCH"]})));
+        assert!(!super::prewarm_builds_nothing(&json!({"ok": true, "prewarming": true})), "an older hub's memory refusal: indistinguishable, kept");
+    }
     #[test] fn warm_target_is_the_shown_board() {
         assert_eq!(warm_target("/p/Day_11/Day_11.kicad_pcb".into(), "/p".into()), "/p/Day_11/Day_11.kicad_pcb");
         assert_eq!(warm_target("/p/mech/case.step".into(), "/p".into()), "/p");
@@ -985,6 +1003,11 @@ impl crate::Backplane {
     }
     /// Direct reply from an `editor.kicad.*` RPC: surface synchronous attach refusals on the pane and seed initial info if `KicadEditor` has not arrived yet.
     pub(crate) fn kicad_reply(&mut self, method: String, reply: Value, cx: &mut Context<Self>) {
+        // the hub builds no pre-warmed frame (refused for memory, no GUI route, a runtime without it, or an error): nothing will
+        // take the foreground, so the pane's pre-warm guard stops instead of watching to its 60 s cap (lane B, 676b72333)
+        if method == "editor.kicad.prewarm" && prewarm_builds_nothing(&reply) {
+            if let Some(p) = self.screens.kicad.clone() { p.update(cx, |p, _| p.prewarm_guard = None); }
+        }
         if reply["ok"] != true {
             let why = crate::hub::rpc_error(&reply);
             if method == "editor.kicad.attach" {
