@@ -133,9 +133,11 @@ pub fn card(name: &str, asked: bool, files: bool, waiting: bool, running: bool, 
     let line = if asked { "Backplane needs your answer below.".to_string() } else { match i {
         0 => if running { "Getting the order ready…".into() } else { "Reply below to go on.".into() }, 1 => "Check the files below and send them for a quote.".into(), 2 => "Getting your quote… usually 1-2 min".into(), _ => card_said(st, pay, tracking, q["unavailable"].as_bool().unwrap_or(false)) } };
     let buys = i == 3 && pay && matches!(st, "ready" | "quoted"); let (shown, total) = (i >= 3, sv(&q, "total"));
-    json!({"name":name,"steps":STEPS.iter().enumerate().map(|(k, l)| json!({"label":l,"mark":if k < i { "done" } else if k == i { "on" } else { "" }})).collect::<Vec<_>>(),
+    let mut o = json!({"name":name,"steps":STEPS.iter().enumerate().map(|(k, l)| json!({"label":l,"mark":if k < i { "done" } else if k == i { "on" } else { "" }})).collect::<Vec<_>>(),
         "line":line,"waiting":i == 2,"total":if shown { total } else { "" },"customs":if shown && !total.is_empty() { customs(q["ddp"].as_bool().unwrap_or(false)) } else { "" },
-        "requote":i == 3 && q["unavailable"].as_bool().unwrap_or(false) && matches!(st, "ready" | "quoted"),"pay":if buys { pay_link(sv(&q, "id")).unwrap_or_default() } else { String::new() },"label":if buys { let l = sv(&q, "label"); if l.is_empty() { "Buy now" } else { l } } else { "" }})
+        "pay":if buys { pay_link(sv(&q, "id")).unwrap_or_default() } else { String::new() },"label":if buys { let l = sv(&q, "label"); if l.is_empty() { "Buy now" } else { l } } else { "" }});
+    if i == 3 && q["unavailable"].as_bool().unwrap_or(false) && matches!(st, "ready" | "quoted") { o["requote"] = json!(true) }
+    o
 }
 
 // ---- the link and the record ----
