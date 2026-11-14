@@ -2364,8 +2364,8 @@ impl RpcHandler for EmbedRpc {
             if method == "editor.kicad.prewarm" {
                 // the client, once the first editor is on show: the others opened hidden at the pane's size (KiCad paints a pre-warmed frame at
                 // the size given; at its 1280x800 default the first real show relaid the whole frame out)
-                let Some(gui) = gui_route(&resolved.pro) else { return ok_reply(id, json!({"prewarmed": []})) };
-                if gui.mode != "fork" || gui.desc.is_empty() || !proto::load(&gui.desc).has_field("kiapi.backplane.embed.ShowFrame", "prewarm") { return ok_reply(id, json!({"prewarmed": []})) }
+                let Some(gui) = gui_route(&resolved.pro) else { return ok_reply(id, json!({"prewarming": [], "prewarmed": []})) };
+                if gui.mode != "fork" || gui.desc.is_empty() || !proto::load(&gui.desc).has_field("kiapi.backplane.embed.ShowFrame", "prewarm") { return ok_reply(id, json!({"prewarming": [], "prewarmed": []})) }
                 let (w, h) = (p["width"].as_u64().unwrap_or(0), p["height"].as_u64().unwrap_or(0));
                 let have: Vec<String> = p["have"].as_array().into_iter().flatten().filter_map(|k| k.as_str().map(|k| canon_frame(k).to_string())).collect();
                 let mut kinds = prewarm_kinds(p["active"].as_str().unwrap_or("PCB"), &have);
@@ -2376,6 +2376,8 @@ impl RpcHandler for EmbedRpc {
                     if !kinds.is_empty() { eprintln!("kicad embed: {}: not pre-warming {kinds:?}: {free} MB free, under {floor} MB", resolved.pro); }
                     kinds.clear();
                 }
+                // the reply says what is built ([] when nothing is): the client's F5 guard stands down at once instead of its 60 s cap
+                let building: Vec<&'static str> = kinds.clone();
                 let (me, gui2, pro) = (actor_tx.clone(), gui.clone(), resolved.pro.clone());
                 // a pre-warm is the hub's own drive: KiCad's show requests for the frames it opens are not the person's (Hubble_DK on
                 // bp.13 batch 4 posts ET_SHOW_REQUESTED for the pre-warmed schematic, and the pane flipped to it after Edit)
@@ -2394,7 +2396,7 @@ impl RpcHandler for EmbedRpc {
                         tokio::time::sleep(Duration::from_millis(600)).await;
                     }
                 });
-                return ok_reply(id, json!({"prewarming": true}))
+                return ok_reply(id, json!({"prewarming": building}))
             }
             if method == "editor.kicad.theme" {
                 let mode = p["mode"].as_str().unwrap_or("");
