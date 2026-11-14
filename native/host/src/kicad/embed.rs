@@ -1361,16 +1361,22 @@ impl Actor {
         if snap.mode == "fork" {
             // numbered: a show still waiting on KiCad's task when a newer one comes gives way to it (only the latest editor is sent)
             let seq = next_show(&snap.sock);
+            // the reply waits in the open: a show refused by KiCad's task gate is answered at once (raw_gated), so the client's view of
+            // the session, its task_wait, is not held behind it; the switch then lands with the frames' update (Nov 14: the pane said
+            // "Starting KiCad…" for the whole DRC, the info pushes queued after the show's reply)
+            early_replies().lock().unwrap().insert((snap.sock.clone(), seq), reply);
             tokio::spawn(async move {
+                let take = || early_replies().lock().unwrap().remove(&(snap.sock.clone(), seq));
                 let synced = match switch_fork_frame_n(&me, &snap.sock, &snap.desc, &snap.active, &doc, &item, remount, focus, Some(seq)).await {
                     Ok(v) => v,
-                    Err(e) if e == SUPERSEDED => { let _ = reply.send(Ok(snap.info_json())); return; }
-                    Err(e) => { let _ = reply.send(Err(e)); return; }
+                    Err(e) if e == SUPERSEDED => { if let Some(r) = take() { let _ = r.send(Ok(snap.info_json())); } return; }
+                    Err(e) => { if let Some(r) = take() { let _ = r.send(Err(e)); } return; }
                 };
+                let reply = take().map(|r| (cid, r));
                 if let Some((holder, _, frames)) = synced {
-                    let _ = me.send(Msg::FramesUpdated { pro: snap.pro.clone(), gen: snap.gen, holder: Some(holder), frames, reply: Some((cid, reply)) });
+                    let _ = me.send(Msg::FramesUpdated { pro: snap.pro.clone(), gen: snap.gen, holder: Some(holder), frames, reply });
                 } else {
-                    let _ = me.send(Msg::FramesUpdated { pro: snap.pro.clone(), gen: snap.gen, holder: None, frames: snap.frames.clone(), reply: Some((cid, reply)) });
+                    let _ = me.send(Msg::FramesUpdated { pro: snap.pro.clone(), gen: snap.gen, holder: None, frames: snap.frames.clone(), reply });
                 }
             });
         } else {
@@ -1870,6 +1876,8 @@ fn has_task_gate(sock: &str) -> bool { gated_socks().lock().unwrap().contains(so
 fn show_seq() -> &'static Mutex<HashMap<String, u64>> { static S: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new(); S.get_or_init(Default::default) }
 fn next_show(sock: &str) -> u64 { let mut m = show_seq().lock().unwrap(); let e = m.entry(sock.to_string()).or_default(); *e += 1; *e }
 fn show_current(sock: &str, seq: u64) -> bool { show_seq().lock().unwrap().get(sock).map_or(true, |n| *n == seq) }
+/// A numbered show's reply while its request may wait on KiCad's task: taken by the first of its refusal (answered at once) or its end.
+fn early_replies() -> &'static Mutex<HashMap<(String, u64), oneshot::Sender<Result<Value, String>>>> { static R: OnceLock<Mutex<HashMap<(String, u64), oneshot::Sender<Result<Value, String>>>>> = OnceLock::new(); R.get_or_init(Default::default) }
 /// What a gated request superseded by a newer show answers.
 pub const SUPERSEDED: &str = "superseded by a newer show";
 /// One request; a TASK_GATED one refused by KiCad's task gate is sent again when the task ends (GetTaskStatus with its token, else after a
@@ -1887,6 +1895,8 @@ async fn raw_gated(me: &mpsc::UnboundedSender<Msg>, sock: &str, desc: &str, ty: 
         };
         if !waited { eprintln!("kicad embed: {ty} waits on KiCad's task: {what}"); waited = true; }
         let _ = me.send(Msg::TaskWait { sock: sock.into(), what: what.clone() });
+        // a show's caller is answered now (the switch follows when the task ends): its client sees the wait instead of a held request
+        if let Some(n) = seq { if let Some(r) = early_replies().lock().unwrap().remove(&(sock.to_string(), n)) { let _ = r.send(Ok(json!({"waiting": true, "task_wait": what}))); } }
         let mut unknown_once = false;
         loop {
             if seq.is_some_and(|n| !show_current(sock, n)) { let _ = me.send(Msg::TaskWait { sock: sock.into(), what: String::new() }); return json!({"ok": false, "error": SUPERSEDED, "superseded": true}) }
@@ -2968,7 +2978,7 @@ mod tests {
     }
     /// KiCad's task gate refuses a show; the hub asks the task's status until it ends, then sends the show again, which lands.
     #[tokio::test] async fn a_show_refused_for_a_task_is_sent_again_when_it_ends() {
-        let (route, mut rx) = stand_in_route("/p/gate.kicad_pro");
+        let (mut route, mut rx) = stand_in_route("/p/gate.kicad_pro"); route.sock = "/stand-in-gate".into(); // its own KiCad (others count /stand-in's use)
         note_task_gate(&route.sock, &["task-gate-reads".to_string()]);
         let seen = Arc::new(Mutex::new(Vec::<String>::new())); let s2 = seen.clone();
         tokio::spawn(async move {
@@ -2985,13 +2995,13 @@ mod tests {
         assert_eq!(o["ok"], true, "{o}");
         assert_eq!(*seen.lock().unwrap(), ["ShowFrame", "GetTaskStatus", "GetTaskStatus", "GetTaskStatus", "ShowFrame"], "polled while running, sent once it ended");
         // a request outside the gated set is answered as it is (its caller decides)
-        let (route2, mut rx2) = stand_in_route("/p/gate2.kicad_pro");
+        let (mut route2, mut rx2) = stand_in_route("/p/gate2.kicad_pro"); route2.sock = "/stand-in-gate2".into();
         tokio::spawn(async move { while let Some((_, _, reply)) = rx2.recv().await { let _ = reply.send(json!({"ok": false, "status": "AS_BUSY", "error": "a task is running: DRC (token t, for 1 s)"})); } });
         assert_eq!(gui_call(&route2, "kiapi.board.commands.GetItems", json!({})).await["status"], "AS_BUSY");
     }
     /// A show waiting on the task gives way to a newer one: only the latest editor is sent when the task ends.
     #[tokio::test] async fn a_waiting_show_gives_way_to_a_newer_one() {
-        let (route, mut rx) = stand_in_route("/p/coalesce.kicad_pro");
+        let (mut route, mut rx) = stand_in_route("/p/coalesce.kicad_pro"); route.sock = "/stand-in-coalesce".into();
         note_task_gate(&route.sock, &["task-gate-reads".to_string()]);
         let sends = Arc::new(Mutex::new(0)); let s2 = sends.clone();
         tokio::spawn(async move { while let Some((ty, _, reply)) = rx.recv().await {
