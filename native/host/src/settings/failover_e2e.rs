@@ -329,8 +329,12 @@ impl Rig {
     std::fs::write(std::path::Path::new(&old_home).join("dead"), "").unwrap(); // its OAuth session died; the credentials file still names the account
     r.say(T, "m2", "SECOND-REQUEST route the board").await; r.rest(T, "interrupted", 2).await;
     assert_eq!(r.mgr.state_of(&w.0), "expired");
-    let said = r.lines(T); assert!(said.iter().any(|l| l == "Work's sign-in expired and no other claude account can take over. Continuing once you sign in again."), "{said:?}");
-    let rec: Value = serde_json::from_str(&r.hub.setting(&format!("provider.resume.{T}")).await.unwrap()).unwrap(); assert_eq!(rec["signin"], w.0.as_str());
+    // the turn is at rest the moment the driver commits its wait (the record, the stop, the line, in that order): the failed turn's own error line and a stop from the turn
+    // itself can come first, so wait for the line and the record rather than reading them once the state is reached
+    let wait_line = "Work's sign-in expired and no other claude account can take over. Continuing once you sign in again.";
+    let end = Instant::now() + Duration::from_secs(PATIENCE); while !r.lines(T).iter().any(|l| l == wait_line) { assert!(Instant::now() < end, "{:?}", r.lines(T)); tokio::time::sleep(Duration::from_millis(50)).await }
+    let end = Instant::now() + Duration::from_secs(PATIENCE); let rec: Value = loop { let v = r.hub.setting(&format!("provider.resume.{T}")).await.unwrap_or_default(); if !v.is_empty() { break serde_json::from_str(&v).unwrap() } assert!(Instant::now() < end, "no resume record"); tokio::time::sleep(Duration::from_millis(50)).await };
+    assert_eq!(rec["signin"], w.0.as_str());
     // honest: the status check asks the provider, which refuses; the hold stays, and the inventory says expired
     let _ = r.mgr.request(&json!({"op":"status","profile":w.0})).await; assert_eq!(r.mgr.state_of(&w.0), "expired", "auth status names the account, the provider refuses it");
     r.tick(now()).await; assert!(!r.hub.setting(&fb::hold_key("claude", &w.0, w.1)).await.unwrap_or_default().is_empty(), "nothing newer has been learned");

@@ -114,9 +114,29 @@ async fn order(s: &S, how: &str, bot: &str) { s.hub.commit(&json!({"$":"PushOrde
     assert_eq!(s.fake.wait(1).await.len(), 1);
 }
 
+/// A quiet window that holds now whatever time of day the test runs: two hours either side of the person's wall clock (the zone `push` reads it in). A fixed
+/// "00:00-23:59" is open for the last minute of every day (23:59 in the person's zone), and a test that ran then saw nothing held.
+async fn quiet_around_now(s: &S) -> String {
+    let rule = { let w = s.bots.world().await; let z = crate::bots::clock::Zones { settings: &w.settings }; let n = z.person();
+        if n == "UTC" { crate::bots::clock::TzRule::parse(push::ZONE_DEFAULT) } else { z.rule(&n).or_else(|| crate::bots::clock::TzRule::parse(push::ZONE_DEFAULT)) } };
+    quiet_window_around(rule.map_or(now_s(), |r| r.wall(now_s())) % 86400 / 60)
+}
+/// The window for the minute of the day `m`: two hours either side, across midnight when it must.
+fn quiet_window_around(m: u64) -> String {
+    let (a, b) = ((m + 1440 - 120) % 1440, (m + 120) % 1440);
+    let spec = format!("{:02}:{:02}-{:02}:{:02}", a / 60, a % 60, b / 60, b % 60);
+    assert!(push::quiet_left(&spec, m * 60).is_some(), "{spec} holds the minute it was made in");
+    spec
+}
+/// The window these tests used to set, "00:00-23:59", lets everything through in the last minute of the day: a test running then held nothing.
+#[test] fn a_window_around_any_minute_of_the_day_holds_it_and_the_fixed_one_did_not() {
+    for m in 0..1440 { quiet_window_around(m); }
+    assert_eq!(push::quiet_left("00:00-23:59", 23 * 3600 + 59 * 60 + 30), None);
+}
+
 #[tokio::test] async fn quiet_hours_hold_until_they_end_and_a_needs_you_passes_only_if_allowed() {
     let s = setup("quiet").await;
-    set(&s.hub, push::QUIET, "00:00-23:59").await; settle().await;
+    let q = quiet_around_now(&s).await; set(&s.hub, push::QUIET, &q).await; settle().await;
     s.hub.commit(&json!({"$":"ThreadCreated","id":"tw","project":"","title":"Worker","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1})).await.unwrap();
     // about a worker thread: the person writing in the uberbot's thread below deals with what is about that thread only
     let r = s.bots.tool_call_at(&s.chat, "notify_person", &json!({"reason":"needs_you","text":"Held while quiet","thread":"tw"}), now_s()).await; assert!(r.0, "{r:?}");
@@ -366,8 +386,9 @@ async fn work(hub: &Arc<Hub>, th: &str, n: u64, end: &str, said: &str) {
     // a time the gate could not read is refused and changes nothing
     for (a, b) in [("25:00", "07:00"), ("22:00", "22:00"), ("22", "07:00"), ("", "")] { assert!(press(&s, "notify-quiet", "save", json!({"qfrom": a, "qto": b})).await.is_err(), "{a}-{b}"); }
     assert!(press(&s, "setting", "notify.quiet=x", json!({})).await.is_err() && press(&s, "setting", "push.book=on", json!({})).await.is_err(), "only the page's own switches");
-    press(&s, "notify-quiet", "save", json!({"qfrom": "00:00", "qto": "23:59"})).await.unwrap();
-    assert_eq!(s.hub.setting(push::QUIET).await.as_deref(), Some("00:00-23:59"));
+    let q = quiet_around_now(&s).await; let (from, to) = q.split_once('-').unwrap();
+    press(&s, "notify-quiet", "save", json!({"qfrom": from, "qto": to})).await.unwrap();
+    assert_eq!(s.hub.setting(push::QUIET).await.as_deref(), Some(q.as_str()));
     let r = s.bots.tool_call_at(&s.chat, "notify_person", &json!({"reason":"needs_you","text":"Held while quiet","thread":"tw"}), now_s()).await; assert!(r.0, "{r:?}");
     settle().await; assert!(s.fake.alerts().is_empty(), "quiet hours on: held");
     press(&s, "setting", "notify.quiet.urgent=on", json!({})).await.unwrap(); person(&s, 1).await;
