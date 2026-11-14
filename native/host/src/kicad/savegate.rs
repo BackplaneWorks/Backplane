@@ -56,6 +56,23 @@ pub async fn modified(route: &super::embed::GuiRoute, document: &Value) -> Optio
 }
 /// Whether KiCad says a save wrote nothing (bp.12.3 / batch 7: AS_OK, its status message "not modified: ..."); older runtimes always write.
 pub fn wrote_nothing(reply: &Value) -> bool { reply["message"]["_status"].as_str().is_some_and(|s| s.starts_with("not modified")) }
+/// A board's or schematic's save refused by the Symbol Editor (an upstream KiCad bug: its SaveDocument handler answers before checking the
+/// document is its own, so with a new, unsaved symbol open it refuses every save: fork fix 93d03b6527, bp.12.4 / batch 7): said in words the
+/// person can act on, else the error as it is.
+/// A board's or schematic's save refused because KiCad's Symbol Editor is open (upstream KiCad keeps its API handlers in pointer order and
+/// the Symbol Editor's SaveDocument refuses before checking the document is its own: an open Symbol Editor with no library symbol loaded,
+/// even an empty one, refuses everyone's saves; fork fix 93d03b6527, bp.12.4). Keyed on the document, not the runtime: a fixed runtime never
+/// answers this for a board or schematic, so there this is inert; a real Symbol Editor save keeps KiCad's own words.
+pub fn explain_save_error(err: &str, board_or_schematic: bool) -> String {
+    if board_or_schematic && err.contains("the open symbol has no library yet") {
+        return format!("KiCad's Symbol Editor took this save (a KiCad bug, fixed in the next Backplane KiCad): while it is open with no library symbol loaded, it refuses every save. Close KiCad's Symbol Editor (or load a library symbol in it), then save again. (KiCad: {err})")
+    }
+    err.to_string()
+}
+/// Whether a SaveDocument message is for a board or a schematic (its document type, else the file it names).
+pub fn saves_design(msg: &serde_json::Value, path: &str) -> bool {
+    match msg["document"]["type"].as_str() { Some(t) => t == "DOCTYPE_PCB" || t == "DOCTYPE_SCHEMATIC", None => path.ends_with(".kicad_pcb") || path.ends_with(".kicad_sch") }
+}
 /// What a skipped save says.
 pub const NOTHING_CHANGED: &str = "nothing to save: KiCad says the document is unmodified, and a save would write only KiCad's own rewrite of it (its file format, its load-time changes), so it was not saved";
 
@@ -70,6 +87,13 @@ mod tests {
         assert_eq!(upgrade_line(&[20261025, 20260306], 20261025).unwrap(), "KiCad also upgraded the file format in this save (version 20260306 to 20261025): most of the diff is KiCad's rewrite, not the edit.");
         assert_eq!(upgrade_line(&[20261025], 20261025), None, "current: nothing to say");
         assert_eq!(sheet_files("(sheet (property \"Sheetname\" \"P\") (property \"Sheetfile\" \"sheets/Power.kicad_sch\"))"), ["sheets/Power.kicad_sch"]);
+        let refused = "KiCad answered AS_BAD_REQUEST: the open symbol has no library yet; use SaveCopyOfDocument with a path to save it";
+        let said = explain_save_error(refused, true);
+        assert!(said.starts_with("KiCad's Symbol Editor took this save") && said.contains("Close KiCad's Symbol Editor (or load a library symbol in it), then save again") && said.ends_with(&format!("(KiCad: {refused})")));
+        assert_eq!(explain_save_error(refused, false), refused, "the Symbol Editor's own save: KiCad's words");
+        assert_eq!(explain_save_error("no answer", true), "no answer");
+        assert!(saves_design(&json!({"document": {"type": "DOCTYPE_PCB"}}), "") && saves_design(&json!({"document": {"type": "DOCTYPE_SCHEMATIC"}}), ""));
+        assert!(!saves_design(&json!({"document": {"type": "DOCTYPE_SYMBOL"}}), "/p/x.kicad_pcb") && saves_design(&json!({}), "/p/x.kicad_sch") && !saves_design(&json!({}), "/p/x.kicad_sym"));
         assert!(wrote_nothing(&json!({"ok": true, "message": {"_status": "not modified: nothing written"}})) && !wrote_nothing(&json!({"ok": true, "message": {}})));
     }
 }

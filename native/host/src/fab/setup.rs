@@ -75,7 +75,7 @@ pub async fn apply(hub: &Arc<Hub>, root: &Path, key: &str) -> Result<Value, Stri
         let upgrade = if clean { crate::files::kicad::savegate::upgrade_of(&r, &pcb).await } else { None };
         let save_error = if clean { match call("kiapi.common.commands.SaveDocument", json!({"document": board})).await {
             Ok(_) => return Ok(json!({"applied": key, "was_mm": was, "now_mm": mm, "in": "kicad", "saved": true, "format_upgrade": upgrade, "note": format!("set in the board setup (it was {was} mm){}", upgrade.as_ref().map(|u| format!(". {u}")).unwrap_or_default())})),
-            Err(e) => e } } else { "you have unsaved edits in KiCad".to_string() };
+            Err(e) => crate::files::kicad::savegate::explain_save_error(&e, true) } } else { "you have unsaved edits in KiCad".to_string() };
         return Ok(json!({"applied": key, "was_mm": was, "now_mm": mm, "in": "kicad", "saved": false, "not_saved": save_error, "note": format!("set in KiCad's Board Setup; save the board to keep it (it was {was} mm)")}))
     }
     // no KiCad of the person's: the headless KiCad (which has no design-rules API) is retired first so it holds no older copy, then the
