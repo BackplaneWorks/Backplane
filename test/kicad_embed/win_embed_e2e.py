@@ -337,7 +337,11 @@ def _send(*ins):
             while not _ours(target) and time.monotonic() - t0 < 0.5:
                 time.sleep(0.05)
                 what, target = _input_target(ins)
-            if not _ours(target):
+            if not target and what == "key":
+                # nothing in front: the key goes nowhere, no other program is at risk, and a lost foreground is what
+                # these suites measure, so the step's own check judges it (NS, round 2: refusing it hid that)
+                print("DIAG input_no_foreground " + json.dumps({"input": what, "cursor": cursor_pos()}), flush=True)
+            elif not _ours(target):
                 info = {"input": what, "hwnd": target, "program": window_program(target), "class": hwnd_class(target) if target else "",
                         "title": hwnd_title(target) if target else "", "cursor": cursor_pos()}
                 print("DIAG input_skipped " + json.dumps(info), flush=True)
