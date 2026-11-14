@@ -315,6 +315,39 @@ def foreign_windows() -> list:
     return found
 
 
+# Not a box: menus, tooltips, IME and shell helpers a process may own
+NOT_A_BOX = {"#32768", "tooltips_class32", "IME", "MSCTFIME UI", "SysShadow", "ComboLBox"}
+
+
+def startup_box():
+    """A box KiCad shows before its first frame (Nov 13, bp-win without a GPU: "Could not use OpenGL,
+    falling back to software rendering" sat unseen and the start timed out). Embedded frames, prewarmed
+    ones too, are WS_CHILD windows in the holder and a parked holder is hidden, so any visible top-level
+    of a kicad.exe of some size is one. Its title, class and the text of its static children, or None."""
+    out = subprocess.run(["tasklist", "/FI", "IMAGENAME eq kicad.exe", "/FO", "CSV", "/NH"], capture_output=True, text=True).stdout
+    pids = {int(p[1]) for p in (l.split('","') for l in out.splitlines()) if len(p) > 1 and p[1].isdigit()}
+    if not pids:
+        return None
+    found = []
+
+    @WNDENUMPROC
+    def cb(h, _):
+        hw = int(h or 0)
+        if hw and hwnd_pid(hw) in pids and u32.IsWindowVisible(h) and hwnd_class(hw) not in NOT_A_BOX:
+            r = W.RECT()
+            u32.GetWindowRect(h, ctypes.byref(r))
+            if r.right - r.left > 60 and r.bottom - r.top > 40:
+                found.append(hw)
+        return True
+
+    u32.EnumWindows(cb, 0)
+    if not found:
+        return None
+    box = found[0]
+    texts = [c["title"] for c in list_child_windows(box) if c.get("title") and c.get("visible")]
+    return {"hwnd": box, "pid": hwnd_pid(box), "class": hwnd_class(box), "title": hwnd_title(box), "text": texts[:8]}
+
+
 def guarded_run(body, client_exe: str, kicad_dir: str) -> int:
     """Run a suite on a shared desktop: refuse to start while a foreign window is up (it would sit in front or
     take input), turn a refused synthetic input into a failed run, and mark the run invalid when it ends with a
@@ -1186,7 +1219,17 @@ def run_window_suite(h: SuiteHarness) -> int:
         move_click_pt = (0, 0)
         win32_styles_obs = {}
 
+        box_checked = 0.0
         while cp.poll() is None and "12_view_mode" not in seen:
+            # a box up before the first frame is shown is the failure, named, not a timeout later
+            if "01_shown" not in seen and time.monotonic() - box_checked > 1.0:
+                box_checked = time.monotonic()
+                box = startup_box()
+                if box:
+                    print("DIAG startup_box " + json.dumps(box), flush=True)
+                    h.shot("startup_box")
+                    h.check(f"KiCad starts without a box before its first frame (it showed {box['title']!r}: {' | '.join(box['text'])[:200]})", False, box)
+                    break
             for m in h.metrics("client.log"):
                 if m.get("event") != "mark":
                     continue
