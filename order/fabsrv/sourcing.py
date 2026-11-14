@@ -25,8 +25,12 @@ SOURCED_MARKUP = float(config.env("FAB_SOURCED_MARKUP", "1.25"))
 SOURCED_DAYS = 15
 _lock = threading.Lock()
 _cache = {}
-_calls = []
+_calls = []  # (time, install) of each call to the distributor in the last 24 h
 TTL = 12 * 3600
+DAY_BUDGET = 950           # of the distributor's 1,000 a day
+SHARE = DAY_BUDGET // 4    # most of the day's calls one quote, or one install, may spend
+MAX_MPNS = 100             # unique part numbers a quote may have looked up at a distributor
+UNAVAILABLE = object()     # an answer for a part number: the distributor could not be asked (not "not found")
 
 
 def price_at(breaks, qty):
@@ -78,22 +82,30 @@ def money(text, currency):
 
 # ------------------------------------------------------------------ Mouser
 
-def _budget():
+def _budget(owner="", spent=None):
+    """True if a call may be made: the day's budget, this install's share and this quote's share (spent,
+    a one-item list counting the quote's calls) all have room."""
     now = time.time()
     with _lock:
-        while _calls and _calls[0] < now - 86400:
+        while _calls and _calls[0][0] < now - 86400:
             _calls.pop(0)
-        if len(_calls) >= 950:
+        if len(_calls) >= DAY_BUDGET:
             return False
-        recent = [t for t in _calls if t > now - 60]
+        if owner and sum(1 for _, o in _calls if o == owner) >= SHARE:
+            return False
+        if spent is not None and spent[0] >= SHARE:
+            return False
+        recent = [t for t, _ in _calls if t > now - 60]
         if len(recent) >= 28:
             time.sleep(max(0.0, 61 - (now - recent[0])))
-        _calls.append(time.time())
+        _calls.append((time.time(), owner))
+        if spent is not None:
+            spent[0] += 1
         return True
 
 
-def _mouser_call(mpns):
-    if not config.MOUSER_KEY or not _budget():
+def _mouser_call(mpns, owner="", spent=None):
+    if not config.MOUSER_KEY or not _budget(owner, spent):
         return None
     body = json.dumps({"SearchByPartRequest": {"mouserPartNumber": "|".join(mpns), "partSearchOptions": "Exact"}}).encode()
     req = urllib.request.Request(f"https://api.mouser.com/api/v1/search/partnumber?apiKey={config.MOUSER_KEY}", body,
@@ -121,22 +133,28 @@ def _offer(p):
             "category": p.get("Category") or ""}
 
 
-def mouser(mpns):
-    """{mpn: offer or None} for each part number: an exact match with prices, in stock first."""
+def mouser(mpns, owner=""):
+    """{mpn: offer, None or UNAVAILABLE} for each part number: an exact match with prices, in stock first;
+    None when the distributor answered and does not have it; UNAVAILABLE when it could not be asked (budget
+    spent, a cap reached, no key, an error), which says nothing about the part."""
     out, need = {}, []
     now = time.time()
+    spent = [0]
     for m in dict.fromkeys(mpns):
         hit = _cache.get(("mouser", m.lower()))
         if hit and now - hit[0] < TTL:
             out[m] = hit[1]
         else:
             need.append(m)
+    for m in need[MAX_MPNS:]:
+        out[m] = UNAVAILABLE
+    need = need[:MAX_MPNS]
     for i in range(0, len(need), 10):
         chunk = need[i:i + 10]
-        parts = _mouser_call(chunk)
+        parts = _mouser_call(chunk, owner, spent)
         if parts is None:
             for m in chunk:
-                out[m] = None
+                out[m] = UNAVAILABLE
             continue
         offers = [_offer(p) for p in parts]
         for m in chunk:
@@ -150,11 +168,11 @@ def mouser(mpns):
 
 # ------------------------------------------------------------------ the BOM
 
-def components(v, lines, boards):
+def components(v, lines, boards, install=""):
     keys = [(ln["code"] or ln["mpn"]) + ("" if ln["code"] else "\t" + (ln.get("maker") or "")) for ln in lines]
     lib = v.library(keys) if lines else {}
     total, extended, extra_days = 0.0, 0, 0
-    rows, problems, warnings, sourced, standard_only = [], [], [], [], []
+    rows, problems, warnings, sourced, standard_only, unavailable = [], [], [], [], [], []
     xray = 0  # placements a board of parts only standard assembly places (BGA, LGA...): the fab X-rays each
     elsewhere = []
     for key, ln in zip(keys, lines):
@@ -172,10 +190,15 @@ def components(v, lines, boards):
                 continue
             warnings.append(f"{ln['mpn'] or st['mpn']}: only {st['stock']} in the fab's stock; sourced instead")
         elsewhere.append((ln, usage))
-    offers = mouser([ln["mpn"] for ln, _ in elsewhere if ln["mpn"]]) if elsewhere else {}
+    offers = mouser([ln["mpn"] for ln, _ in elsewhere if ln["mpn"]], install) if elsewhere else {}
     for ln, usage in elsewhere:
         o = offers.get(ln["mpn"]) if ln["mpn"] else None
         refs = ", ".join(ln["refs"][:4]) + ("…" if len(ln["refs"]) > 4 else "")
+        if o is UNAVAILABLE:
+            unavailable.append(f"{refs} ({ln['mpn']}): sourcing is unavailable right now, so this part can't be priced yet; "
+                               "ask for the quote again later (nothing is wrong with the board)")
+            rows.append({"refs": ln["refs"][:8], "mpn": ln["mpn"], "status": "unavailable"})
+            continue
         if not o:
             problems.append(f"{refs} ({ln['mpn'] or ln['code']}) can't be bought from the fab's stock or a distributor; "
                             "choose a part that is in stock")
@@ -199,4 +222,4 @@ def components(v, lines, boards):
         warnings.append(f"{len(sourced)} part{'s' if len(sourced) != 1 else ''} bought from a distributor for this order "
                         f"(about {SOURCED_DAYS} more days)")
     return {"total": round(total, 2), "unique": len(lines), "extended": extended, "lines": rows,
-            "problems": problems, "warnings": warnings, "extra_days": extra_days, "standard_only": standard_only, "xray_parts": xray}
+            "problems": problems, "unavailable": unavailable, "warnings": warnings, "extra_days": extra_days, "standard_only": standard_only, "xray_parts": xray}

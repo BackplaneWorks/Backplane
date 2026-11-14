@@ -216,6 +216,8 @@ async def quote_buy(qid: str, request: Request, t: str = ""):
         return HTMLResponse(pages.error("Not payable", "This quote can no longer be paid. Ask for a new one in Backplane."), status_code=409)
     if q["quote"].get("problems"):
         return HTMLResponse(pages.error("Not payable", "This quote has problems to fix first. See the thread in Backplane."), status_code=409)
+    if q["quote"].get("unavailable"):
+        return HTMLResponse(pages.error("Not payable yet", "Parts for this quote can't be priced right now. Nothing is wrong with the board: ask for the quote again later."), status_code=409)
     try:
         url = await asyncio.to_thread(pay.checkout, row, q["quote"])
     except pay.Unavailable as e:

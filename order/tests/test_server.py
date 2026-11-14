@@ -398,7 +398,7 @@ class _Pinned:
 def _price_pinned(monkeypatch, pack, components, qty, assemble, region, size):
     from fabsrv import pricing, sourcing, vendor_api
     monkeypatch.setattr(vendor_api, "pack", lambda: pack)
-    monkeypatch.setattr(sourcing, "components", lambda v, lines, boards: {
+    monkeypatch.setattr(sourcing, "components", lambda v, lines, boards, install="": {
         "total": components, "unique": 14, "extended": 5, "lines": [], "problems": [], "warnings": [],
         "extra_days": 0, "standard_only": ["LGA"] if assemble else [], "xray_parts": 1 if assemble else 0})
     opts = {"layers": 2, "thickness_mm": 1.6, "color": "green", "finish": "hasl", "copper_oz": 1,
