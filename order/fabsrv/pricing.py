@@ -157,10 +157,11 @@ def _board(v, p, f, problems, warnings):
     return opts, feats, qty, pr
 
 
-def price(manifest, measured):
+def price(manifest, measured, install=""):
     v = vendor_api.pack()
     country = manifest["ship_to"]
     problems, warnings = list(measured.get("problems", [])), list(measured.get("warnings", []))
+    unavailable = []  # parts not priced for lack of a distributor answer: retry later, not a board fault
     mfg = cnc = 0.0
     lead = 0
     parcels, parts_out, part_lines = [], [], []
@@ -177,8 +178,9 @@ def price(manifest, measured):
             out = {"name": p["name"], "kind": kind, "qty": qty, "summary": summary(kind, opts, feats)}
             if p.get("assemble"):
                 n = p["assemble"]
-                comp = sourcing.components(v, f.get("bom", []), n)
+                comp = sourcing.components(v, f.get("bom", []), n, install)
                 problems += [f"{p['name']}: {x}" for x in comp["problems"]]
+                unavailable += [f"{p['name']}: {x}" for x in comp.get("unavailable", [])]
                 warnings += [f"{p['name']}: {x}" for x in comp["warnings"]]
                 sides = 2 if f.get("paste_bottom") or f.get("placed_bottom") else 1
                 asm = v.assembly({"boards": n, "sides": sides, "smt_joints": (f.get("paste_top", 0) + f.get("paste_bottom", 0)),
@@ -254,7 +256,7 @@ def price(manifest, measured):
     q = {"title": manifest.get("title") or "", "country": country, "country_name": duties.name(country),
          "region": region if stax and stax["known"] else "", "sales_tax": stax,
          "currency": config.CURRENCY, "parts": parts_out, "lines": lines, "total": total,
-         "part_lines": part_lines, "lead_days": lead, "problems": [neutral(x) for x in problems], "warnings": [neutral(x) for x in warnings],
+         "part_lines": part_lines, "lead_days": lead, "problems": [neutral(x) for x in problems], "unavailable": [neutral(x) for x in unavailable], "warnings": [neutral(x) for x in warnings],
          "shipping": {"method": neutral(ship.get("method", "")), "days": ship.get("days", ""), "ddp": ddp},
          "priced_at": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds")}
     q["markdown"] = markdown(q)
@@ -285,6 +287,9 @@ def markdown(q):
         out += ["", "Parts: " + " · ".join(parts)]
     if q["problems"]:
         out += ["", "**To fix before ordering**"] + [f"- {x}" for x in q["problems"]]
+        return "\n".join(out)
+    if q.get("unavailable"):
+        out += ["", "**Can't be priced right now**"] + [f"- {x}" for x in q["unavailable"]]
         return "\n".join(out)
     if q["warnings"]:
         out += ["", "Notes:"] + [f"- {w}" for w in q["warnings"][:6]]

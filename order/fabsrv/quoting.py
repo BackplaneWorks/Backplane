@@ -64,7 +64,7 @@ def run(qid):
         store.set_quote(qid, status="analysing")
         feats = measure(root)
         manifest = json.loads((root / "manifest.json").read_text())
-        result = pricing.price(manifest, feats)
+        result = pricing.price(manifest, feats, row["install"])
         store.set_quote(qid, status="ready", result=result)
     except Exception:
         traceback.print_exc()
