@@ -458,6 +458,23 @@ pub async fn kicad_ipc_headless(hub: &Arc<Hub>, path: &str, type_: &str, message
     if let Some(why) = copy_ipc_refused(crate::copy::on(), type_) { return Err(why) }
     run_on(hub, None, path, type_, message, false, false).await
 }
+/// Before an agent's SaveDocument through the open KiCad: Err(the answer) when nothing is to be written (KiCad says the document is
+/// unmodified; or the board's only change since it opened is KiCad's own load-time migration, which has no way back: lane P, bp.12.2,
+/// UndoAgentChange of it drops the board's teardrops); else Ok(the format-upgrade line the save will carry, if any).
+pub async fn save_gate(gui: &super::embed::GuiRoute, msg: &Value, path: &str, saves_board: bool) -> Result<Option<String>, Value> {
+    let skip = |why: String| json!({"type": "kiapi.common.commands.SaveDocumentResponse", "message": {}, "not_saved": why});
+    if super::savegate::modified(gui, &msg["document"]).await == Some(false) { return Err(skip(super::savegate::NOTHING_CHANGED.into())) }
+    if saves_board {
+        if let Some((fp, zones, 0)) = super::coedit::load_migration_full(gui).await {
+            return Err(skip(format!("{}; that is the board's only change since it opened, so it was not saved. Save your own change first (it is then saved with KiCad's, and the result says so).", super::coedit::load_migration_words(fp, zones))))
+        }
+    }
+    Ok(super::savegate::upgrade_of(gui, path).await)
+}
+/// Whether a SaveDocument is the board's: its document's type when given, else the path asked.
+pub fn board_save(msg: &Value, path: &str) -> bool {
+    match msg["document"]["type"].as_str() { Some(t) => t == "DOCTYPE_PCB", None => path.ends_with(".kicad_pcb") }
+}
 async fn run(hub: &Arc<Hub>, thread: Option<&str>, path: &str, ty: &str, msg: Value, status: bool) -> Result<Value, String> { run_on(hub, thread, path, ty, msg, status, true).await }
 async fn run_on(hub: &Arc<Hub>, thread: Option<&str>, path: &str, ty: &str, msg: Value, status: bool, gui_first: bool) -> Result<Value, String> {
     let msg = if msg.is_object() { msg } else { json!({}) }; // KIpc.msg: a missing message is {}
@@ -491,6 +508,12 @@ async fn run_on(hub: &Arc<Hub>, thread: Option<&str>, path: &str, ty: &str, msg:
             // the person paused this agent in KiCad: its writes wait for "Resume" (reads go on)
             if !is_read(ty) { held = super::coedit::wait_resumed(th).await; }
         }
+        let saves_board = short == "SaveDocument" && board_save(&msg, path);
+        // never a save of a document KiCad says is unmodified: it would write only KiCad's own rewrite (its format, its load changes)
+        let mut upgrade = None;
+        if short == "SaveDocument" && msg["document"].is_object() {
+            match save_gate(&gui, &msg, path, saves_board).await { Err(skip) => return Ok(skip), Ok(u) => upgrade = u }
+        }
         let o = super::embed::gui_call_as(&gui, ty, msg, &actor).await;
         if let Some(note) = held { log_fallback(hub, thread, &note).await; }
         if commits && o["ok"].as_bool().unwrap_or(false) { super::embed::unsaved_update(&pro, |u| u.agent_committed()); }
@@ -500,6 +523,12 @@ async fn run_on(hub: &Arc<Hub>, thread: Option<&str>, path: &str, ty: &str, msg:
         if status { return Ok(json!({"server":format!("gui ({})", gui.mode),"servers":servers,"argv":gui.argv,"version":gui.version,"capabilities":o["message"].clone(),"detail":if ok { String::new() } else { err_of(&o) }})) }
         if !ok { return Err(err_of(&o)) }
         let mut out = json!({"type":o["type"].as_str().unwrap_or(""),"message":o["message"].clone()});
+        // an agent's save of a board KiCad changed on load (its 3D model migration): said, so the agent reports it rather than owns it
+        if short == "SaveDocument" && super::savegate::wrote_nothing(&o) { out["not_saved"] = json!(super::savegate::NOTHING_CHANGED); }
+        else if let Some(u) = upgrade { out["format_upgrade"] = json!(u); }
+        if saves_board {
+            if let Some((fp, zones)) = super::coedit::load_migration(&gui).await { out["kicad_load_changes"] = json!(format!("{}. They were saved with yours: tell the person, they are not your changes.", super::coedit::load_migration_words(fp, zones))); }
+        }
         // what the person is doing in this KiCad right now, so the agent asks before working over them (docs/kicad-coedit.md)
         if thread.is_some_and(|t| !t.is_empty()) { if let Some(p) = super::coedit::person_now(&pro) { out["person"] = p; } }
         return Ok(out);
@@ -538,6 +567,23 @@ fn shown_version(manifest: &str, full: &str) -> String { if manifest.is_empty() 
 
 #[cfg(test)]
 mod tests {
+    /// An agent's save: not sent for an unmodified document, nor for a board whose only change is KiCad's load-time migration; else sent.
+    #[tokio::test] async fn an_agents_save_writes_only_real_changes() {
+        use super::super::embed::stand_in_route;
+        let serve = |state: &'static str, log: Value| { let (route, mut rx) = stand_in_route(&format!("/p/sg-{state}.kicad_pro"));
+            tokio::spawn(async move { while let Some((ty, _, reply)) = rx.recv().await {
+                let _ = reply.send(if ty.ends_with("GetDocumentModifiedState") { json!({"ok": true, "message": {"state": state}}) }
+                    else if ty.ends_with("GetChanges") { json!({"ok": true, "message": log.clone()}) }
+                    else { json!({"ok": true, "message": {}}) }); } });
+            route };
+        let doc = json!({"document": {"type": "DOCTYPE_PCB"}});
+        let mig = json!({"changes": [{"description": "Auto-migrate 3D Model References", "modified": [{"value": "a"}], "created": [], "deleted": []}]});
+        let r = serve("DMS_UNMODIFIED", json!({})); assert!(save_gate(&r, &doc, "/p/x.kicad_pcb", true).await.unwrap_err()["not_saved"].as_str().unwrap().starts_with("nothing to save"));
+        let r = serve("DMS_MODIFIED", mig.clone()); assert!(save_gate(&r, &doc, "/p/x.kicad_pcb", true).await.unwrap_err()["not_saved"].as_str().unwrap().contains("only change since it opened"));
+        let mut both = mig.clone(); both["changes"].as_array_mut().unwrap().push(json!({"description": "Move", "actor": "agent:t1"}));
+        let r = serve("DMS_MODIFIED", both); assert!(save_gate(&r, &doc, "/p/x.kicad_pcb", true).await.is_ok(), "a real change goes, KiCad's with it (said)");
+        let r = serve("DMS_MODIFIED", mig); assert!(save_gate(&r, &json!({"document": {"type": "DOCTYPE_SCHEMATIC"}}), "/p/x.kicad_sch", false).await.is_ok(), "a schematic: the board's migration is not its");
+    }
     #[test] fn runaction_guidance_follows_the_capability() {
         assert!(super::runaction_guidance(&["runaction-frame".to_string()]).contains("FT_SCHEMATIC_EDITOR"));
         assert!(super::runaction_guidance(&[]).contains("goes to the board editor while one is open"));
@@ -634,6 +680,8 @@ mod tests {
         for a in ["pcbnew.Plan.accept", "pcbnew.Plan.reject", "pcbnew.Plan.approveLayer", "pcbnew.Plan.rejectLayer"] { assert!(approval_refused("kiapi.common.commands.RunAction", &json!({"action": a})).is_some(), "{a}") }
         for a in ["pcbnew.Plan.togglePlanView", "pcbnew.Plan.toggleLock", "common.Control.zoomFitScreen"] { assert_eq!(approval_refused("kiapi.common.commands.RunAction", &json!({"action": a})), None, "{a}") }
         assert_eq!(approval_refused("kiapi.backplane.plan.GetPlan", &json!({})), None);
+        assert!(board_save(&json!({"document": {"type": "DOCTYPE_PCB"}}), "/p/x.kicad_sch") && !board_save(&json!({"document": {"type": "DOCTYPE_SCHEMATIC"}}), "/p/x.kicad_pcb"));
+        assert!(board_save(&json!({}), "/p/x.kicad_pcb") && !board_save(&json!({}), "/p/x.kicad_pro"));
         for t in ["kiapi.common.commands.SaveDocument", "kiapi.board.commands.CreateItems", "kiapi.board.commands.BeginCommit", "kiapi.board.commands.EndCommit", "kiapi.backplane.Shutdown", "", "GetItemsX.Delete"] { assert!(copy_ipc_refused(true, t).is_some(), "{t}") }
         assert_eq!(copy_ipc_refused(false, "kiapi.common.commands.SaveDocument"), None);
     }

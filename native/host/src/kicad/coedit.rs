@@ -227,11 +227,47 @@ pub fn on_notice(pro: &str, ev: &Value) -> bool {
 }
 
 /// SetAgentActivity's message.
+/// KiCad's load-time 3D model migration (upstream AutoMigrateByFilename): on every board load in the GUI it rewrites .wrl references that
+/// have a STEP twin and, on a board with teardrops, rebuilds them, marking the board modified though nobody changed it (bp.10 to bp.12.2,
+/// bp.13 batch 6; kicad-cli never does it). Its change in the co-edit log has this description; runtimes with `no-load-migration`
+/// (bp.12.3, batch 7) never make it.
+pub const LOAD_MIGRATION: &str = "Auto-migrate 3D Model References";
+/// What KiCad changed in the board on load, from the change log (GetChanges): (footprints whose 3D references it rewrote, teardrop zones it
+/// rebuilt); None when it made no such change, or the runtime does not make it.
+pub fn load_migration_of(changes: &Value) -> Option<(usize, usize)> {
+    let n = |v: &Value| v.as_array().map_or(0, Vec::len);
+    changes["changes"].as_array()?.iter().find(|c| c["description"] == LOAD_MIGRATION).map(|c| (n(&c["modified"]), n(&c["created"]).max(n(&c["deleted"]))))
+}
+/// The board's other changes in the log (anything but KiCad's load-time migration).
+pub fn other_changes(changes: &Value) -> usize { changes["changes"].as_array().map_or(0, |a| a.iter().filter(|c| c["description"] != LOAD_MIGRATION).count()) }
+/// The same, asked of the open KiCad (`route`) for its board: None on a runtime with `no-load-migration`, or one that cannot say.
+pub async fn load_migration(route: &super::embed::GuiRoute) -> Option<(usize, usize)> { load_migration_full(route).await.map(|(f, z, _)| (f, z)) }
+/// With the count of the board's other changes since load: (footprints, teardrop zones, other changes).
+pub async fn load_migration_full(route: &super::embed::GuiRoute) -> Option<(usize, usize, usize)> {
+    if route.caps.iter().any(|c| c == "no-load-migration") { return None }
+    let o = super::embed::gui_call(route, "kiapi.backplane.coedit.GetChanges", json!({"since": 0, "doc": "pcb"})).await;
+    if o["ok"] != true { return None }
+    load_migration_of(&o["message"]).map(|(f, z)| (f, z, other_changes(&o["message"])))
+}
+/// The words for it: what KiCad changed when it opened the board.
+pub fn load_migration_words(fp: usize, zones: usize) -> String {
+    let z = if zones > 0 { format!(" and rebuilt {zones} teardrop zone{}", if zones == 1 { "" } else { "s" }) } else { String::new() };
+    format!("KiCad changed the board when it opened it: it moved the 3D model references of {fp} footprint{} from .wrl to .step{z} (its automatic migration; nobody edited them)", if fp == 1 { "" } else { "s" })
+}
+
 pub fn activity(thread: &str, task: &str, state_: &str) -> Value { json!({"actor": client_name(&Who::Agent(thread)), "task": task, "state": state_}) }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn the_load_migration_is_read_from_the_change_log() {
+        let log = serde_json::json!({"changes": [{"seq": 1, "actor": "backplane-12", "description": "Auto-migrate 3D Model References", "modified": [{"value": "a"}, {"value": "b"}], "created": [{"value": "z1"}], "deleted": [{"value": "z0"}]}, {"seq": 2, "actor": "", "description": "Move"}]});
+        assert_eq!(super::load_migration_of(&log), Some((2, 1)));
+        assert_eq!(super::other_changes(&log), 1);
+        assert_eq!(super::load_migration_of(&serde_json::json!({"changes": [{"description": "Move"}]})), None);
+        assert_eq!(super::load_migration_words(11, 0), "KiCad changed the board when it opened it: it moved the 3D model references of 11 footprints from .wrl to .step (its automatic migration; nobody edited them)");
+        assert!(super::load_migration_words(68, 167).contains("rebuilt 167 teardrop zones"));
+    }
     #[test] fn notices_read_as_sentences_for_the_person_and_the_agent() {
         let d = json!({"kind": "undo_took_back", "actor": "agent:t7", "doc": "pcb",
                        "details": json!({"seq": 9, "description": "Route USB", "because": "Move U3", "by": "person"}).to_string()});
