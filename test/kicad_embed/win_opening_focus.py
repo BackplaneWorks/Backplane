@@ -277,6 +277,37 @@ def field_changed(h, box, act, tag, settle=0.8):
     return E.img_diff_box(a, b, *box)["changed_pixels"]
 
 
+def fg_exe():
+    """The foreground window's program name (lower case), "" when none or unreadable."""
+    hwnd = int(E.u32.GetForegroundWindow() or 0)
+    if not hwnd:
+        return ""
+    pid = E.W.DWORD()
+    E.u32.GetWindowThreadProcessId(hwnd, E.ctypes.byref(pid))
+    k32 = E.ctypes.windll.kernel32
+    hp = k32.OpenProcess(0x1000, False, pid.value)  # PROCESS_QUERY_LIMITED_INFORMATION
+    if not hp:
+        return ""
+    try:
+        buf = E.ctypes.create_unicode_buffer(520)
+        n = E.W.DWORD(520)
+        ok = k32.QueryFullProcessImageNameW(hp, 0, buf, E.ctypes.byref(n))
+        return os.path.basename(buf.value).lower() if ok else ""
+    finally:
+        k32.CloseHandle(hp)
+
+
+def zoom_back():
+    """F1 (KiCad's zoom in) only while Backplane or KiCad is in front: on Explorer or the desktop F1 opens
+    Windows Help, which starts Edge, and Edge then holds the foreground for every later run (bp-win, 21:24)."""
+    exe = fg_exe()
+    if exe in ("backplane-gpui.exe", "kicad.exe", "pcbnew.exe", "eeschema.exe"):
+        E.key_tap("F1")
+        time.sleep(0.6)
+    else:
+        print("DIAG f1_skipped " + json.dumps({"foreground_exe": exe}), flush=True)
+
+
 def zoom_field_box(frame):
     """KiCad's status-bar zoom readout ("Z 2.20"), bottom left of the frame."""
     r = E.W.RECT()
@@ -299,8 +330,7 @@ def plain_key_acts(h, gl, tag, frame=0):
     if frame:
         zoomed = E.img_diff_box(a, b, *zoom_field_box(frame))["changed_pixels"] > 15
     # always zoom back (F1 is a no-op where F2 did nothing): the view never drifts
-    E.key_tap("F1")
-    time.sleep(0.6)
+    zoom_back()
     return px if zoomed is None else (px, zoomed)
 
 
@@ -1159,8 +1189,7 @@ def run(h):
             zoom = E.img_diff_box(zshots[0], zshots[1], px, py, pw, ph)
             plain_key = E.img_diff_box(zshots[0], zshots[1], *zoom_field_box(frame))["changed_pixels"] > 15
             if plain_key:
-                E.key_tap("F1")
-                time.sleep(0.6)
+                zoom_back()
             print("DIAG plain_key_f2 " + json.dumps({"changed_px": zoom["changed_pixels"], "box": zoom["box"], "focus": focus_snapshot(frame)}), flush=True)
             # 2. A real KiCad shortcut (a frame accelerator), rather than trusting the client's
             # cached `keys` or a ShowFrame/RunAction API call.
