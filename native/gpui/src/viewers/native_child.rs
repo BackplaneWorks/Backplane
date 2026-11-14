@@ -61,7 +61,7 @@ pub fn cut(pane: R, over: &[R]) -> Vec<R> {
 
 /// What the editor's side sent the client (`events`).
 #[derive(Clone, Debug, PartialEq)]
-pub enum Ev { /** Ctrl+`: the keyboard back to the client */ Escape, /** a button press over the unfocused container (replayed to KiCad) */ Click, /** a reserved chord, as gpui names a keystroke */ Key(String), /** KiCad took the keyboard on a click into this frame */ Focus(u64) }
+pub enum Ev { /** Ctrl+`: the keyboard back to the client */ Escape, /** a button press over the unfocused container (replayed to KiCad) */ Click, /** Windows: a press the input shield took; the hand-in is already done there and the press replayed, so the pane only notes KiCad has the keys (a second hand-in after the replay moved KiCad's focus off the canvas mid right-click and its context menu never opened, run SB3) */ ShieldClick, /** a reserved chord, as gpui names a keystroke */ Key(String), /** KiCad took the keyboard on a click into this frame */ Focus(u64) }
 
 /// A reserved chord from `_BACKPLANE_KEY` (an X keysym and modifier mask) as gpui's keystroke text: `ctrl-k`, `ctrl-shift-tab`, `ctrl-``.
 pub fn chord(keysym: u32, mods: u32) -> Option<String> {
@@ -1406,7 +1406,7 @@ mod imp {
                     let fg = unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
                     eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_shield_click": {"button": msg, "foreground": id_of(fg), "replay_pending": true, "frame": id_of(frame)}}));
                 }
-                if let Ok(mut q) = events_q().lock() { q.push(Ev::Click); }
+                if let Ok(mut q) = events_q().lock() { q.push(Ev::ShieldClick); }
                 0
             }
             // a release on the shield: the press it belongs to was replayed into KiCad, so the release should have gone there
