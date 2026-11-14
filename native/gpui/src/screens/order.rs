@@ -23,7 +23,7 @@ pub fn parse(order: &Value) -> Option<Card> {
 pub fn payable(card: &Card) -> bool { card.pay.starts_with("https://") || card.pay.starts_with("http://") }
 
 /// What Re-quote tells the agent: the parts could not be priced for lack of a distributor answer; make a new quote.
-pub const REQUOTE_TEXT: &str = "Make a new quote: the parts could not be priced a moment ago (sourcing was unavailable); nothing needs to change on the board.";
+/* i18n-ok: a message to the agent, never drawn */ pub const REQUOTE_TEXT: &str = "Make a new quote: the parts could not be priced a moment ago (sourcing was unavailable); nothing needs to change on the board.";
 /// The request a Re-quote press sends (as the composer's Send does); `thread` is the window's key, `<hub>|<id>`.
 pub fn requote_request(thread: &str) -> Value { serde_json::json!({"thread": thread.rsplit('|').next().unwrap_or(""), "text": REQUOTE_TEXT, "mode": "steer"}) }
 pub const REQUOTE_TAG: u64 = 0xF1_0000_0000;
