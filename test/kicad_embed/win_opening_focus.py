@@ -552,6 +552,7 @@ def run(h):
         settled = False
         clicked_edit = False
         ready_seen = 0.0
+        box_checked = 0.0
         at_request = None
         trace_idle = os.environ.get("BP_OPENING_FOCUS_ONLY") == "idle_trace"
         t_edit, t_prewarm, last_log_poll = 0.0, 0.0, 0.0
@@ -605,6 +606,15 @@ def run(h):
                 clicked_edit = h.click_control(E.find_main_window(cp.pid), "ui:Edit")
                 timeline.append({"stage": "native_edit_click", "clicked": clicked_edit, **focus_snapshot()})
                 t_edit = time.monotonic()
+            # a box up before the first frame is shown (first_paint) is the failure, named, not a timeout later
+            if clicked_edit and "first_paint" not in {r for r in h.kicad_reports()} and time.monotonic() - box_checked > 1.0:
+                box_checked = time.monotonic()
+                box = E.startup_box()
+                if box:
+                    print("DIAG startup_box " + json.dumps(box), flush=True)
+                    h.shot("startup_box")
+                    h.check(f"KiCad starts without a box before its first frame (it showed {box['title']!r}: {' | '.join(box['text'])[:200]})", False, box)
+                    return h.finish()
             if "opening_settled" in marks:
                 settled = True
                 break
