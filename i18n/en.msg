@@ -4274,6 +4274,7 @@ gpui.mgmt.plan.show = Show done
 gpui.mgmt.plan.done = done
 gpui.mgmt.plan.layer = Approve layer
 gpui.mgmt.plan.reject = Reject
+gpui.mgmt.plan.keysnote = On this KiCad version, approve from this panel: in plan view KiCad's A, R and W keys aren't the plan's yet (A opens Add Footprint). Update KiCad.
 gpui.mgmt.plan.reference = over {layer}
 gpui.mgmt.plan.nets = {n, plural, one {# net} other {# nets}}
 gpui.mgmt.plan.tab = Plan

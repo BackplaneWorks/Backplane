@@ -27,6 +27,26 @@ pub fn plans(status: &str, version: &str, caps: &[String]) -> bool {
     status == "ok" && (caps.iter().any(|c| c == CAP) || (caps.is_empty() && crate::files::kicad::kserve::bp_number(version) >= 11))
 }
 pub fn needs_plan(copper_layers: usize, nets: usize) -> bool { copper_layers >= LAYERS || nets > NETS }
+/// In plan view the plan tool's keys (A, R, W, Shift+W, [, ], N, L) are its own, never KiCad's defaults: the fork's `plan-keys` (bp.12.2,
+/// bp.13 batch 6). Without it (bp.12.1: the tool registered as pcbnew.PlanTool, its actions pcbnew.Plan.*) A opens Add Footprint and R
+/// rotates; the Plan panel's Approve and Reject work (KiCad's ApprovePlan), so they stay, and the panel says where to approve.
+pub const KEYS_CAP: &str = "plan-keys";
+pub const KEYS_NOTE: &str = "On this KiCad version, approve from this panel: in plan view KiCad's A, R and W keys aren't the plan's yet (A opens Add Footprint). Update KiCad.";
+pub fn keys_note(caps: &[String]) -> Option<&'static str> {
+    let has = |c: &str| caps.iter().any(|x| x == c);
+    (has(CAP) && !has(KEYS_CAP)).then_some(KEYS_NOTE)
+}
+/// After an approval KiCad accepted: the items it named still awaiting the person (proposed or edited) mean it was not recorded.
+/// `ids` empty and `layer` empty: every item; `layer`: that layer's status and its items.
+pub fn not_recorded(plan: &Value, layer: &str, ids: &[String]) -> Vec<String> {
+    let waiting = |v: &Value| matches!(v["status"].as_str().unwrap_or("proposed"), "proposed" | "edited");
+    let items = ["corridors", "planes"].iter().flat_map(|k| plan[*k].as_array().cloned().unwrap_or_default()).collect::<Vec<_>>();
+    if !layer.is_empty() {
+        let l = plan["layers"].as_array().into_iter().flatten().find(|x| x["layer"] == layer);
+        return if l.is_some_and(|l| waiting(l)) { vec![layer.to_string()] } else { vec![] }
+    }
+    items.iter().filter(|i| ids.is_empty() || ids.iter().any(|d| i["id"] == d.as_str())).filter(|i| waiting(i)).filter_map(|i| i["id"].as_str().map(str::to_string)).collect()
+}
 /// The agents' instructions for a project with a KiCad board on Backplane KiCad (agents/prompt.rs adds it).
 pub fn guidance() -> String {
     format!("<backplane_routing_plan>Plan before copper on a board with {LAYERS} or more copper layers or more than {NETS} nets (fewer: route as asked): before routing anything, read the stackup with the backplane tool `fab_profile` (its `stackup.layers`: each copper layer's reference planes above and below with the dielectric height and Er, and the trace widths for the project's impedances) and the plan with `plan_get`; then propose with `plan_propose`: on signal layers, one corridor per bus or net group (its nets, the parts it runs between, a path and a width, vias and escapes, the routing order), each next to a solid reference plane, impedance nets at the stackup's widths; on power layers, plane regions per net with their reference; one layer at a time is fine. Ask the person to approve with `plan_approve` and end your turn: Backplane tells you when they have decided. Their edits, locks, notes and constraints win: read `changes` from `plan_get` and never undo them. Route only what they approved, with `plan_route` (one step per call, until done), inside its corridor; nothing else, and no copper outside the plan. `plan_stop` stops; `plan_verify` checks the routed groups. The plan needs the board open in KiCad.</backplane_routing_plan>")
@@ -216,11 +236,23 @@ pub async fn approve(hub: &Arc<Hub>, pcb: &str, layer: &str, ids: &[String], yes
     let msg = json!({"board": spec(pcb), "layer": layer, "ids": ids, "approve": yes});
     let pro = crate::files::kicad::project::read(&Path::new(pcb).parent().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default()).pro;
     let o = match crate::files::kicad::embed::gui_route(&pro) {
-        Some(r) => { let o = crate::files::kicad::embed::gui_call_as(&r, &format!("{NS}ApprovePlan"), msg, &crate::files::kicad::coedit::client_name(&crate::files::kicad::coedit::Who::Person)).await; if o["ok"].as_bool().unwrap_or(false) { o["message"].clone() } else { return Err(format!("KiCad: {}", o["error"].as_str().unwrap_or("no answer"))) } }
+        Some(r) => { let o = crate::files::kicad::embed::gui_call_as(&r, &format!("{NS}ApprovePlan"), msg, &crate::files::kicad::coedit::client_name(&crate::files::kicad::coedit::Who::Person)).await; if o["ok"].as_bool().unwrap_or(false) { o["message"].clone() } else { return Err(refused(o["error"].as_str().unwrap_or("no answer"))) } }
         None => call(hub, None, pcb, "ApprovePlan", msg).await?,
     };
     events::settle(hub, pcb).await;
+    // KiCad said yes: the plan must say so too (a runtime that accepts and records nothing, as bp.12.1 did, is told, never a silent success)
+    if let Ok(p) = read_plan(hub, None, pcb, false).await {
+        let left = not_recorded(&p, layer, ids);
+        if !left.is_empty() { return Err(format!("KiCad accepted the {} but the plan did not record it: {} still awaiting approval. Update KiCad.", if yes { "approval" } else { "rejection" }, left.join(", "))) }
+    }
     Ok(o)
+}
+/// KiCad's refusal of the person's ApprovePlan, said in the Plan panel: a dialog KiCad shows (AS_BUSY) is named with the way out.
+pub fn refused(err: &str) -> String {
+    match err.split('\'').nth(1).filter(|_| err.contains("showing the dialog")) {
+        Some(d) => format!("KiCad is showing the dialog '{d}': close it in KiCad, then approve again."),
+        None => format!("KiCad refused: {err}"),
+    }
 }
 pub struct Rpc;
 impl RpcHandler for Rpc {
@@ -270,6 +302,24 @@ mod tests {
         assert!(!plans("ok", "10.99.0-bp.10-851cbefda6", &[]) && !plans("ok", "10.0.6", &[]) && !plans("broken", "10.99.0-bp.13", &[]));
         assert!(!plans("ok", "10.99.0-bp.12-851cbefda6", &caps(&["embed"])), "capabilities first, even on a test build");
         assert!(!plans("stock", "10.0.7", &caps(&["routing-plan"])));
+    }
+    #[test] fn plan_keys_note_where_kicads_own_keys_are_not_the_plans() {
+        let c = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        assert_eq!(keys_note(&c(&["api-server", "routing-plan"])), Some(KEYS_NOTE), "bp.12.1");
+        assert_eq!(keys_note(&c(&["routing-plan", "plan-keys"])), None, "bp.12.2, bp.13 batch 6");
+        assert_eq!(keys_note(&c(&["api-server"])), None, "no plan: nothing to say");
+        assert_eq!(refused("KiCad is showing the dialog 'Footprint Chooser (15451 items loaded)'; only reads and item edits are served until it is closed"),
+            "KiCad is showing the dialog 'Footprint Chooser (15451 items loaded)': close it in KiCad, then approve again.");
+        assert_eq!(refused("no answer"), "KiCad refused: no answer");
+    }
+    #[test] fn plan_approval_not_recorded_is_told() {
+        let p = json!({"layers": [{"layer": "F.Cu", "status": "proposed"}, {"layer": "B.Cu", "status": "approved"}],
+            "corridors": [{"id": "c-p", "status": "proposed"}, {"id": "c-q", "status": "approved"}, {"id": "c-r", "status": "edited"}], "planes": [{"id": "p-gnd", "status": "rejected"}]});
+        assert_eq!(not_recorded(&p, "", &["c-p".into(), "c-q".into()]), ["c-p"]);
+        assert_eq!(not_recorded(&p, "", &[]), ["c-p", "c-r"], "all: every item still awaiting");
+        assert_eq!(not_recorded(&p, "F.Cu", &[]), ["F.Cu"]);
+        assert!(not_recorded(&p, "B.Cu", &[]).is_empty());
+        assert!(not_recorded(&p, "", &["p-gnd".into()]).is_empty(), "a rejection recorded");
     }
     #[test] fn plan_gate_routes_only_what_the_person_approved() {
         let p = plan();

@@ -28,7 +28,13 @@ discover_kicad
 grep -qa "planAccept\|Plan.accept" "$(dirname "$KICAD_BIN")/_pcbnew.kiface" 2>/dev/null || { echo "SKIP embed_plan_person_e2e: this KiCad has no plan view edits (bp.13+)"; exit 0; }
 # bp.12.1 has the plan view's actions but not the person's approvals in it (A/R, Approve Layer and ApprovePlan leave the plan proposed;
 # Nov 13: 13/20 on bp.12.1, 26/26 on bp.13): the suite is bp.13's, told by its embed-frame-drawn capability
-grep -qa "embed-frame-drawn" "$(dirname "$KICAD_BIN")/kicad.real" 2>/dev/null || { echo "SKIP embed_plan_person_e2e: this KiCad's plan view has no person approvals (bp.13+)"; exit 0; }
+# PLAN_PERSON_FORCE=1 runs it there anyway (a logging run on bp.12.1); PLAN_KEYS=0 decides from the Plan panel instead of KiCad's keys
+# The plan view's keys are the plan tool's only with the runtime's `plan-keys` (bp.12.2, bp.13 batch 6; bp.12.1 registered the tool as
+# pcbnew.PlanTool, so A opened Add Footprint and the right-click menu was the selection tool's). bp.13 batches before 6 have the fix
+# (d5eaa3ae44) without the word: told here by embed-frame-drawn, a test-side stand-in only (the hub keys on plan-keys alone)
+RT=$(dirname "$(dirname "$KICAD_BIN")")
+KEYS=0; { grep -q '"plan-keys"' "$RT/manifest.json" 2>/dev/null || grep -qa "embed-frame-drawn" "$RT/bin/kicad.real" 2>/dev/null; } && KEYS=1
+[ "$KEYS" = 1 ] || [ "${PLAN_PERSON_FORCE:-0}" = 1 ] || { echo "SKIP embed_plan_person_e2e: in this KiCad's plan view A, R, W are KiCad's own keys (plan-keys: bp.12.2, bp.13 batch 6); PLAN_PERSON_FORCE=1 PLAN_KEYS=0 checks the Plan panel's decisions there"; exit 0; }
 init_isolated_dirs
 python3 "$SEED_PY" "$OUT" "$REPO_ROOT"
 # paint bounds (Nov 13, bp.13 batch 3, 16 cores busy): KiCad painted 0.07-0.08 s after Edit and the board was open, full size, 9.7-13.3 s
@@ -80,6 +86,20 @@ fi
 echo "INFO editor frame $FRAME ${FW}x${FH}+${FX}+${FY}"
 check "the board editor is shown full size" "$([ "${FW:-0}" -gt 700 ] && echo 1 || echo 0)" "${FW}x${FH}"
 X() { python3 "$XINPUT_PY" "$@"; sleep "${KEMBED_STEP_S:-0.7}"; }
+# A step that types into KiCad starts only with no KiCad dialog open (the client's last word on KiCad's dialogs); with one open it fails,
+# naming the dialog, and types nothing (Nov 13, bp.12.1: the plan view's A fell through to Add Footprint, and every later key went to
+# the Footprint Chooser it opened, so seven checks failed for one cause)
+dialog_now() { python3 - "$OUT/client.log" <<'PY'
+import json, re, sys
+last = []
+for l in open(sys.argv[1], errors="ignore"):
+    if '"kicad_info"' in l and '"dialogs"' in l:
+        try: last = json.loads(l[l.index("{"):]).get("dialogs") or []
+        except Exception: pass
+print("; ".join(last))
+PY
+}
+step_ok() { local d; d=$(dialog_now); [ -z "$d" ] && return 0; check "$1: no KiCad dialog is open when it starts" 0 "KiCad shows: $d"; return 1; }
 HOTKEY="Alt+P"; grep -qa "Routing Plan View" "$(dirname "$KICAD_BIN")/_pcbnew.kiface" 2>/dev/null && HOTKEY="Ctrl+Shift+R"
 hotkey() { if [ "$HOTKEY" = "Ctrl+Shift+R" ]; then X chord ctrl shift r; else X chord alt p; fi; }
 if [ "${PLAN_VIA:-action}" = key ]; then
@@ -126,18 +146,33 @@ PY
 read -r PX PY QX QY < <(spots q1_plan_view)
 echo "INFO corridors on screen: c-p ($PX,$PY) c-q ($QX,$QY)"
 check "both corridors are drawn in KiCad's plan view" "$([ "${PX:-0}" -gt 0 ] && [ "${QX:-0}" -gt "${PX:-0}" ] && echo 1 || echo 0)" "see q1_plan_view.png"
-X click "$PX" "$PY"; X key a; X key l; X key w; sleep 1
-shot q2_cp_done
-X click "$QX" "$QY"; X key r; sleep 2
-shot q3_cq_rejected
+panel() { hub_rpc "[{\"method\":\"plan.approve\",\"params\":{\"pro\":\"$PROJ/ecc83-pp.kicad_pro\",$1}}]" 2>&1 | grep -v '^INFO' | tail -2 || true; }
+if [ "${PLAN_KEYS:-1}" = 1 ]; then
+  if step_ok "Q2 A, L, W on c-p"; then X click "$PX" "$PY"; X key a; fi
+  if step_ok "Q2 L after A"; then X key l; fi
+  if step_ok "Q2 W after L"; then X key w; fi; sleep 1
+  shot q2_cp_done
+  if step_ok "Q3 R on c-q"; then X click "$QX" "$QY"; X key r; fi; sleep 2
+  shot q3_cq_rejected
+else
+  # PLAN_KEYS=0: the person's decisions from the Plan panel only (plan.approve, KiCad's ApprovePlan as the person), no key in KiCad
+  echo "INFO panel approve c-p: $(panel '"ids":["c-p"],"approve":true' | cut -c1-300)"
+  echo "INFO panel reject c-q: $(panel '"ids":["c-q"],"approve":false' | cut -c1-300)"
+  sleep 2
+fi
 R4=$(ask plan_get '{}'); echo "$R4" | cut -c1-600
 J=$(echo "$R4" | sed 's/^MCPCALL plan_get //')
 check "plan_get: the person approved c-p in KiCad" "$(echo "$J" | python3 -c 'import sys; t=sys.stdin.read(); print(int("c-p" in t and "approved" in t))')" "$(echo "$R4" | cut -c1-300)"
-check "plan_get: the person locked c-p" "$(echo "$J" | grep -q 'c-p locked\|\\"c-p\\",\\"kind\\":\\"corridor\\",\\"change\\":\\"locked' && echo 1 || (echo "$J" | python3 -c 'import sys,re; t=sys.stdin.read(); print(int(bool(re.search(r"c-p[^}]*locked", t))))'))"
-check "plan_get: c-p edited by the person (wider)" "$(echo "$J" | python3 -c 'import sys,re; t=sys.stdin.read(); print(int(bool(re.search(r"c-p[^}]*edited by the person", t)) or bool(re.search(r"constraint[^}]*wide", t))))')"
+[ "${PLAN_KEYS:-1}" = 0 ] || check "plan_get: the person locked c-p" "$(echo "$J" | grep -q 'c-p locked\|\\"c-p\\",\\"kind\\":\\"corridor\\",\\"change\\":\\"locked' && echo 1 || (echo "$J" | python3 -c 'import sys,re; t=sys.stdin.read(); print(int(bool(re.search(r"c-p[^}]*locked", t))))'))"
+[ "${PLAN_KEYS:-1}" = 0 ] || check "plan_get: c-p edited by the person (wider)" "$(echo "$J" | python3 -c 'import sys,re; t=sys.stdin.read(); print(int(bool(re.search(r"c-p[^}]*edited by the person", t)) or bool(re.search(r"constraint[^}]*wide", t))))')"
 check "plan_get: the person rejected c-q" "$(echo "$J" | python3 -c 'import sys,re; t=sys.stdin.read(); print(int("rejected" in t and "c-q" in t))')"
 P=$(plan_info)
-check "the Plan panel shows c-p approved and locked, c-q rejected (live)" "$(python3 -c 'import json,sys; d=json.loads(sys.argv[1]); it={i["id"]:i for l in d.get("layers",[]) for i in l["items"]}; p=it.get("c-p",{}); q=it.get("c-q",{}); print(int(p.get("state")=="approved" and p.get("locked") is True and q.get("state")=="rejected"))' "$P" 2>/dev/null || echo 0)" "$(echo "$P" | head -c 400)"
+check "the Plan panel shows c-p approved and locked, c-q rejected (live)" "$(python3 -c 'import json,sys; d=json.loads(sys.argv[1]); it={i["id"]:i for l in d.get("layers",[]) for i in l["items"]}; p=it.get("c-p",{}); q=it.get("c-q",{}); print(int(p.get("state")=="approved" and (p.get("locked") is True or sys.argv[2]=="0") and q.get("state")=="rejected"))' "$P" "${PLAN_KEYS:-1}" 2>/dev/null || echo 0)" "$(echo "$P" | head -c 400)"
+if ! grep -q '"plan-keys"' "$RT/manifest.json" 2>/dev/null; then
+  # a KiCad whose plan-view keys are not the plan's: the Plan panel says to approve there (the hub's keys_note)
+  KN=$(echo "$P" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("keys_note") or "")' 2>/dev/null || true)
+  check "the Plan panel says to approve there (no plan-keys)" "$(echo "$KN" | grep -q "approve from this panel" && echo 1 || echo 0)" "keys_note: $KN"
+fi
 for _ in $(seq 60); do grep -q "The person judged" "$OUT/standin.log" 2>/dev/null && break; sleep 0.5; done
 check "the agent that asked is woken with the person's decision in KiCad" "$(grep -q "The person judged.*c-p" "$OUT/standin.log" && echo 1 || echo 0)" "$(grep -o 'The person judged[^"]*' "$OUT/standin.log" | head -2)"
 shot q4_panel
@@ -169,11 +204,13 @@ print(next((l.get("status", "?") for l in ls if l.get("layer") == sys.argv[1]), 
   X key Next; sleep 1
   S=$(( (QX - PX) / 33 )); [ "$S" -gt 0 ] || S=10
   MX=$(( PX - 22 * S )); [ "$MX" -gt $((FX + 60)) ] || MX=$((FX + 60))
+  if [ "${PLAN_KEYS:-1}" = 0 ]; then echo "INFO Q6 right-click Approve Layer not tried: without plan-keys the menu is the selection tool's"; elif step_ok "Q6 right-click Approve Layer"; then
   X click "$MX" "$PY" 3; sleep 1; shot q5_menu
   for _ in 1 2 3 4 5; do X key Down; done; sleep 0.5; shot q5_menu_approve
   X key Return; sleep 2; shot q5_layer_b
+  fi
   LB=$(layer_status B.Cu)
-  check "layer approval from KiCad's right-click menu (Approve Layer on B.Cu)" "$([ "$LB" = approved ] && echo 1 || echo 0)" "B.Cu: $LB (see q5_menu_approve.png)"
+  [ "${PLAN_KEYS:-1}" = 0 ] || check "layer approval from KiCad's right-click menu (Approve Layer on B.Cu)" "$([ "$LB" = approved ] && echo 1 || echo 0)" "B.Cu: $LB (see q5_menu_approve.png)"
   # F.Cu (PageUp) stays the person's: an agent's kicad_ipc can neither run the plan view's approve-layer nor send ApprovePlan (the hub
   # refuses both on every build; the fork refuses agent clients too from bp.13 batch 4), and plan_approve only asks
   X key Prior; sleep 1
@@ -196,7 +233,8 @@ print(next((l.get("status", "?") for l in ls if l.get("layer") == sys.argv[1]), 
   LF0=$(layer_status F.Cu)
   check "F.Cu is still not approved after the agent's attempts and its plan_approve" "$([ "$LF0" != approved ] && echo 1 || echo 0)" "F.Cu: $LF0"
   # the Plan panel's Approve (plan.approve: KiCad's ApprovePlan as the person), with plan view on
-  PA=$(hub_rpc "[{\"method\":\"plan.approve\",\"params\":{\"pro\":\"$PROJ/ecc83-pp.kicad_pro\",\"layer\":\"F.Cu\",\"approve\":true}}]" 2>&1 | tail -1)
+  step_ok "Q6 the Plan panel's Approve" || true
+  PA=$(panel '"layer":"F.Cu","approve":true')
   sleep 2; LF=$(layer_status F.Cu); shot q6_layers
   check "the Plan panel's Approve (ApprovePlan as the person) approves F.Cu in plan view" "$([ "$LF" = approved ] && echo 1 || echo 0)" "F.Cu: $LF; plan.approve: $(echo "$PA" | cut -c1-200)"
 else

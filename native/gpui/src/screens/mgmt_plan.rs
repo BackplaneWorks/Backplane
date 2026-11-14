@@ -29,10 +29,17 @@ fn send(app: &mut Backplane, m: &str, mut p: Value, cx: &mut Context<Backplane>)
     let pro = app.screens.mgmt.project.clone(); if pro.is_empty() { return }
     p["pro"] = json!(pro);
     eprintln!("GPUI_LOG {}", json!({"event": "plan_press", "method": m, "params": p}));
-    let _ = app.tx.try_send(Command::Rpc(m.into(), Secret(p), "mgmt"));
+    let _ = app.tx.try_send(Command::Rpc(m.into(), Secret(p), if m == "plan.approve" { "plan" } else { "mgmt" }));
     app.ui_epoch += 1; cx.notify();
 }
-pub fn approve(app: &mut Backplane, layer: &str, ids: &[String], yes: bool, cx: &mut Context<Backplane>) { send(app, "plan.approve", json!({"layer": layer, "ids": ids, "approve": yes}), cx) }
+pub fn approve(app: &mut Backplane, layer: &str, ids: &[String], yes: bool, cx: &mut Context<Backplane>) { *REFUSED.lock().unwrap() = None; send(app, "plan.approve", json!({"layer": layer, "ids": ids, "approve": yes}), cx) }
+/// KiCad's refusal of the last Approve or Reject (the hub's words: a dialog KiCad shows, named with the way out), until the next press.
+static REFUSED: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+/// plan.approve's answer (tag "plan"): a refusal is said in the panel; an approval shows in the plan itself.
+pub fn answered(app: &mut Backplane, ok: bool, why: &str, cx: &mut Context<Backplane>) {
+    *REFUSED.lock().unwrap() = (!ok).then(|| if why.is_empty() { "KiCad refused".to_string() } else { why.to_string() }); // i18n-ok: drawn through trs
+    app.ui_epoch += 1; cx.notify();
+}
 /// The e2e harness's controls (`mgmt:plan:<what>`).
 pub fn controls(m: &super::mgmt::Mgmt) -> Vec<(String, String, String)> {
     if m.peek()["open"] != "plan" { return vec![] }
@@ -113,7 +120,11 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
             list = list.child(row);
         }
     }
-    div().size_full().flex().flex_col().child(top).child(list).into_any_element()
+    // the hub's English, drawn in the language in force: KiCad's own keys in plan view (a runtime without plan-keys), KiCad's refusal
+    let note = |t: String, tone: &str| div().flex_shrink_0().px_2().py_1().border_b_1().border_color(c("rule")).text_size(crate::scale::tpx(11.)).text_color(c(tone)).child(trs(&t)).into_any_element();
+    let keys = d["keys_note"].as_str().map(|t| note(t.to_string(), "dim"));
+    let refused = REFUSED.lock().unwrap().clone().map(|t| note(t, "bad"));
+    div().size_full().flex().flex_col().child(top).children(refused).children(keys).child(list).into_any_element()
 }
 
 #[cfg(test)]

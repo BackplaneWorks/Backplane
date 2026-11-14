@@ -4297,6 +4297,7 @@ gpui.mgmt.plan.show = 完了を表示
 gpui.mgmt.plan.done = 完了
 gpui.mgmt.plan.layer = 層を承認
 gpui.mgmt.plan.reject = 却下
+gpui.mgmt.plan.keysnote = このバージョンのKiCadでは、このパネルから承認してください。プランビューでのKiCadのA・R・Wキーはまだ計画のものではありません（Aはフットプリントの追加を開きます）。KiCadを更新してください。
 gpui.mgmt.plan.reference = 基準 {layer}
 gpui.mgmt.plan.nets = ネット{n}本
 gpui.mgmt.plan.tab = 計画
