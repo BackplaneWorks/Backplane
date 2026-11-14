@@ -277,36 +277,11 @@ def field_changed(h, box, act, tag, settle=0.8):
     return E.img_diff_box(a, b, *box)["changed_pixels"]
 
 
-def fg_exe():
-    """The foreground window's program name (lower case), "" when none or unreadable."""
-    hwnd = int(E.u32.GetForegroundWindow() or 0)
-    if not hwnd:
-        return ""
-    pid = E.W.DWORD()
-    E.u32.GetWindowThreadProcessId(hwnd, E.ctypes.byref(pid))
-    k32 = E.ctypes.windll.kernel32
-    hp = k32.OpenProcess(0x1000, False, pid.value)  # PROCESS_QUERY_LIMITED_INFORMATION
-    if not hp:
-        return ""
-    try:
-        buf = E.ctypes.create_unicode_buffer(520)
-        n = E.W.DWORD(520)
-        ok = k32.QueryFullProcessImageNameW(hp, 0, buf, E.ctypes.byref(n))
-        return os.path.basename(buf.value).lower() if ok else ""
-    finally:
-        k32.CloseHandle(hp)
-
-
 def zoom_back():
-    """F1 (KiCad's zoom in) only while Backplane or KiCad is in front: on Explorer or the desktop F1 opens
-    Windows Help, which starts Edge, and Edge then holds the foreground for every later run (bp-win, 21:24)."""
-    exe = fg_exe()
-    if exe in ("backplane-gpui.exe", "kicad.exe", "pcbnew.exe", "eeschema.exe"):
-        E.key_tap("F1")
-        time.sleep(0.6)
-    else:
-        print("DIAG f1_skipped " + json.dumps({"foreground_exe": exe}), flush=True)
-
+    """F1 (KiCad's zoom in) undoes the F2. Like every synthetic key it goes through E._send, which refuses a
+    foreground that isn't the test's own (an F1 on Explorer opened Windows Help and Edge, bp-win 21:24:40)."""
+    E.key_tap("F1")
+    time.sleep(0.6)
 
 def zoom_field_box(frame):
     """KiCad's status-bar zoom readout ("Z 2.20"), bottom left of the frame."""
@@ -727,6 +702,7 @@ def run(h):
                 if focus_snapshot(frame)["inside_frame"]:
                     E.screen_click(gl["root_x"] + 30, gl["root_y"] + gl["h"] - 40, 1)
                     time.sleep(0.5)
+            E.INPUT_EXES.add("notepad.exe")  # this mode's own Notepad may take input; the pre-run check makes sure no other is open
             np_proc = subprocess.Popen(["notepad.exe"])
             np = 0
             for _ in range(50):
@@ -882,6 +858,7 @@ def run(h):
             gl = max(gls, key=lambda w: w["w"] * w["h"]) if gls else None
             top = E.find_main_window(cp.pid)
             cbox = composer_box(h, top)
+            E.INPUT_EXES.add("notepad.exe")  # this mode's own Notepad may take input; the pre-run check makes sure no other is open
             np_proc = subprocess.Popen(["notepad.exe"])
             np = 0
             for _ in range(50):
@@ -1309,13 +1286,13 @@ if __name__ == "__main__":
         sys.exit(__doc__)
     args = list(sys.argv[1:6])
     port = int(sys.argv[6]) if len(sys.argv) == 7 else 3937
-    rc = run(E.SuiteHarness("opening_focus", *args, port))
-    why = start_failed(args[4])
+    rc = E.guarded_run(lambda: run(E.SuiteHarness("opening_focus", *args, port)), args[0], args[3])
+    why = rc != 3 and start_failed(args[4])
     if why:
         # one retry, in a fresh folder; a second failed start fails the run
         print("START-RETRY " + json.dumps({"why": why, "defender_events_last_10_min": defender_events()}), flush=True)
         args[4] = args[4].rstrip("\\/") + "-retry"
-        rc = run(E.SuiteHarness("opening_focus", *args, port))
+        rc = E.guarded_run(lambda: run(E.SuiteHarness("opening_focus", *args, port)), args[0], args[3])
         if start_failed(args[4]):
             print("START-FAILED-TWICE " + json.dumps({"why": start_failed(args[4])}), flush=True)
             rc = rc or 1

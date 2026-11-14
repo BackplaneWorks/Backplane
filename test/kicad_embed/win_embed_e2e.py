@@ -108,6 +108,10 @@ k32.TerminateProcess.argtypes = [W.HANDLE, W.UINT]
 k32.TerminateProcess.restype = W.BOOL
 k32.GetExitCodeProcess.argtypes = [W.HANDLE, ctypes.POINTER(W.DWORD)]
 k32.GetExitCodeProcess.restype = W.BOOL
+k32.QueryFullProcessImageNameW.argtypes = [W.HANDLE, W.DWORD, W.LPWSTR, ctypes.POINTER(W.DWORD)]
+k32.QueryFullProcessImageNameW.restype = W.BOOL
+u32.WindowFromPoint.argtypes = [W.POINT]
+u32.WindowFromPoint.restype = W.HWND
 ntdll.NtSuspendProcess.argtypes = [W.HANDLE]
 ntdll.NtSuspendProcess.restype = ctypes.c_long
 ntdll.NtResumeProcess.argtypes = [W.HANDLE]
@@ -217,7 +221,127 @@ def vk_of(name: str) -> int:
     raise ValueError(f"unknown key: {name}")
 
 
+class InputRefused(RuntimeError):
+    """A synthetic key or click would have gone to a program that isn't the test's: the step fails, the run is invalid."""
+
+
+# The one choke point for synthetic input on a shared desktop. Every SendInput goes through _send: a key goes to
+# the foreground window, a mouse button or wheel to the window under the cursor, and either must belong to the
+# test's own programs. An F1 that landed on Explorer (bp-win, 21:24:40) opened Windows Help and Edge, and Edge
+# held the keys through the next batch; F2, Ctrl+F, Ctrl+K or letters into Explorer or Edge are no better.
+INPUT_DIRS: list = []      # image paths under these are ours (the test's client build, its KiCad runtime)
+INPUT_EXES: set = set()    # plus these program names, while a mode needs them (away_return's Notepad)
+
+
+def input_guard(*dirs: str):
+    INPUT_DIRS[:] = [os.path.normcase(os.path.abspath(d)).rstrip("\\") + "\\" for d in dirs if d]
+
+
+def window_program(hwnd: int) -> str:
+    """The full image path of the process owning hwnd, "" when none or unreadable."""
+    if not hwnd:
+        return ""
+    pid = W.DWORD()
+    u32.GetWindowThreadProcessId(W.HWND(hwnd), ctypes.byref(pid))
+    hp = k32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid.value)
+    if not hp:
+        return ""
+    try:
+        buf = ctypes.create_unicode_buffer(520)
+        n = W.DWORD(520)
+        return buf.value if k32.QueryFullProcessImageNameW(hp, 0, buf, ctypes.byref(n)) else ""
+    finally:
+        k32.CloseHandle(hp)
+
+
+def _ours(hwnd: int) -> bool:
+    if hwnd and hwnd_class(hwnd) == "Ghost":
+        return True  # DWM's stand-in for a hung window (a frozen KiCad): input to it waits for the real one
+    path = os.path.normcase(window_program(hwnd))
+    return bool(path) and (any(path.startswith(d) for d in INPUT_DIRS) or os.path.basename(path) in INPUT_EXES)
+
+
+def _input_target(ins) -> tuple:
+    """(what, hwnd) the input reaches: the foreground for keys, the top-level under the cursor for buttons and wheel."""
+    if any(i.type == 1 for i in ins):
+        return "key", int(u32.GetForegroundWindow() or 0)
+    if any(i.type == 0 and (i.u.mi.dwFlags & ~0x0001) for i in ins):  # anything but a pure relative move
+        pt = W.POINT()
+        u32.GetCursorPos(ctypes.byref(pt))
+        h = u32.WindowFromPoint(pt)
+        return "mouse", int(u32.GetAncestor(h, 2) or 0) if h else 0  # GA_ROOT
+    return "", 0
+
+
+# The shell's own windows: always there on an empty desktop.
+SHELL_CLASSES = {"Shell_TrayWnd", "Shell_SecondaryTrayWnd", "Progman", "WorkerW"}
+
+
+def foreign_windows() -> list:
+    """Visible, uncloaked, non-empty top-level windows of programs that aren't the test's (INPUT_DIRS) or the
+    shell's: what a synthetic input could land on, or what sits in front of the run (Edge, Help, a dialog)."""
+    dwm = ctypes.WinDLL("dwmapi")
+    found = []
+
+    @WNDENUMPROC
+    def cb(h, _):
+        hw = int(h or 0)
+        if not hw or not u32.IsWindowVisible(h) or hwnd_class(hw) in SHELL_CLASSES:
+            return True
+        cloaked = W.DWORD(0)
+        dwm.DwmGetWindowAttribute(h, 14, ctypes.byref(cloaked), ctypes.sizeof(cloaked))  # DWMWA_CLOAKED: UWP hosts, other desktops
+        r = W.RECT()
+        u32.GetWindowRect(h, ctypes.byref(r))
+        if cloaked.value or r.right - r.left <= 1 or r.bottom - r.top <= 1:
+            return True
+        if not _ours(hw):
+            found.append({"hwnd": hw, "program": window_program(hw), "class": hwnd_class(hw), "title": hwnd_title(hw),
+                          "rect": [r.left, r.top, r.right - r.left, r.bottom - r.top]})
+        return True
+
+    u32.EnumWindows(cb, 0)
+    return found
+
+
+def guarded_run(body, client_exe: str, kicad_dir: str) -> int:
+    """Run a suite on a shared desktop: refuse to start while a foreign window is up (it would sit in front or
+    take input), turn a refused synthetic input into a failed run, and mark the run invalid when it ends with a
+    foreign window that wasn't there before (as Windows Help and Edge after a stray F1)."""
+    input_guard(os.path.dirname(os.path.abspath(client_exe)), kicad_dir)
+    before = foreign_windows()
+    if before:
+        print("REFUSED-DESKTOP " + json.dumps({"foreign_windows": before}), flush=True)
+        for w in before:
+            print(f"FAIL desktop not clear: {w['program'] or '?'} {w['class']} {w['title']!r}", flush=True)
+        return 3
+    try:
+        rc = body()
+    except InputRefused as e:
+        print(f"FAIL {e}", flush=True)
+        print("RUN-INVALID " + json.dumps({"why": "input refused", "detail": str(e)}), flush=True)
+        rc = 1
+    seen = {w["hwnd"] for w in before}
+    after = [w for w in foreign_windows() if w["hwnd"] not in seen]
+    if after:
+        print("RUN-INVALID " + json.dumps({"why": "a foreign window appeared during the run", "foreign_windows": after}), flush=True)
+        rc = rc or 1
+    return rc
+
+
 def _send(*ins):
+    if INPUT_DIRS:
+        what, target = _input_target(ins)
+        if what:
+            # a switch in progress has no foreground for a moment: give it 0.5 s to settle on one of ours
+            t0 = time.monotonic()
+            while not _ours(target) and time.monotonic() - t0 < 0.5:
+                time.sleep(0.05)
+                what, target = _input_target(ins)
+            if not _ours(target):
+                info = {"input": what, "hwnd": target, "program": window_program(target), "class": hwnd_class(target) if target else "",
+                        "title": hwnd_title(target) if target else "", "cursor": cursor_pos()}
+                print("DIAG input_skipped " + json.dumps(info), flush=True)
+                raise InputRefused(f"synthetic {what} input refused: it would go to {info['program'] or 'no window'} ({info['class']} {info['title']!r})")
     arr = (INPUT * len(ins))(*ins)
     u32.SendInput(len(ins), arr, ctypes.sizeof(INPUT))
     time.sleep(0.03)
@@ -566,6 +690,7 @@ class SuiteHarness:
         self.kicad_dir = os.path.abspath(kicad_dir)
         self.kicad_bin = os.path.join(self.kicad_dir, "bin", "kicad.exe")
         self.kicad_cli = os.path.join(self.kicad_dir, "bin", "kicad-cli.exe")
+        input_guard(os.path.dirname(self.client_exe), self.kicad_dir)  # synthetic input only into the test's own programs
         self.out_dir = os.path.abspath(out_dir)
         self.port = port
         self.rows = []
@@ -2662,13 +2787,10 @@ def main():
         rc = 0
         for idx, name in enumerate(("window", "editors", "resilience", "bp9")):
             sub_out = os.path.join(out_dir, name)
-            h = SuiteHarness(name, client_exe, hub_exe, assets_dir, kicad_dir, sub_out, port + idx * 20)
-            rc |= runners[name](h)
+            rc |= guarded_run(lambda: runners[name](SuiteHarness(name, client_exe, hub_exe, assets_dir, kicad_dir, sub_out, port + idx * 20)), client_exe, kicad_dir)
         sys.exit(rc)
     elif suite in runners:
-        h = SuiteHarness(suite, client_exe, hub_exe, assets_dir, kicad_dir, out_dir, port)
-        rc = runners[suite](h)
-        sys.exit(rc)
+        sys.exit(guarded_run(lambda: runners[suite](SuiteHarness(suite, client_exe, hub_exe, assets_dir, kicad_dir, out_dir, port)), client_exe, kicad_dir))
     else:
         sys.exit(f"unknown suite: {suite}")
 
