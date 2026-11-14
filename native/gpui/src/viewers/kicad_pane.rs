@@ -99,6 +99,10 @@ pub fn warm_target(project: String, root: String) -> String {
     if kicad || root.is_empty() { project } else { root }
 }
 
+/// Whether the pre-warm may start by itself on an idle pane (2 s after the first editor is placed, with no new placement): everywhere but
+/// Windows, and there only on a runtime whose pre-warm never takes the keyboard from the shown editor (`prewarm-keeps-focus`).
+pub fn idle_prewarm(windows: bool, keeps_focus: bool) -> bool { !windows || keeps_focus }
+
 /// Path without any file extension on its final segment (dots in parent folder names are preserved).
 pub fn path_stem(s: &str) -> &str {
     let s = s.trim_end_matches(['/', '\\']);
@@ -517,7 +521,9 @@ impl KicadPane {
             if !self.open_gerbers(&f, cx) { eprintln!("GPUI_LOG {}", json!({"gerbview": "not opened", "why": if self.can_gerbview() { "refused" } else { "no embed-gerbview" }})); }
         }
         // the pre-warm's 2 s are up: a frame drawn now sends it (after_frame), even when nothing else redraws the window
-        if let (Some(t), Some(pid)) = (self.first_placed, self.info["pid"].as_u64()) { if self.prewarmed != Some(pid) && t.elapsed() >= std::time::Duration::from_secs(2) { cx.notify(); } }
+        // (not where the pre-warm waits for a placement: a redraw every tick would ask nothing and only cost frames)
+        let idle_ok = idle_prewarm(cfg!(windows), self.info["embed_caps"].as_array().map(|a| a.iter().any(|c| c == "prewarm-keeps-focus")).unwrap_or(false));
+        if let (Some(t), Some(pid), true) = (self.first_placed, self.info["pid"].as_u64(), idle_ok) { if self.prewarmed != Some(pid) && t.elapsed() >= std::time::Duration::from_secs(2) { cx.notify(); } }
         let Some(c) = self.container else { return };
         if let Some(pid) = self.info["pid"].as_u64().filter(|p| *p > 0) {
             if self.info["mode"] == "fork" {
@@ -760,7 +766,12 @@ impl KicadPane {
         // (2 s after the first editor was placed: asked at once, KiCad's pre-warm sometimes hid the editor just shown, a rare race). Before the
         // unchanged-placement return: an idle pane is drawn again by tick's notify but placed the same, and the pre-warm waited for the next
         // re-place, the first tab switch (Nov 13: nothing asked 40 s after Edit, so that switch opened the schematic cold)
-        if let (true, Some(p), Some(_), Some(pid)) = (local, at, show, self.info["pid"].as_u64()) {
+        // Windows: a runtime whose pre-warm takes the keyboard from the shown editor (no `prewarm-keeps-focus`) gave the hidden schematic the keys for
+        // 350-476 ms on every open when it ran by itself (Carbon's idle_trace, 20/20 on c7fc906203): there it waits for the next placement, as
+        // before 46343fe7e (a tab switch, a resize), where the F5 guard covers the hand-in
+        let idle_ok = idle_prewarm(cfg!(windows), self.info["embed_caps"].as_array().map(|a| a.iter().any(|c| c == "prewarm-keeps-focus")).unwrap_or(false));
+        let replace = self.placed.as_ref() != Some(&(at, show, over.clone()));
+        if let (true, Some(p), Some(_), Some(pid), true) = (local, at, show, self.info["pid"].as_u64(), idle_ok || replace) {
             let since = *self.first_placed.get_or_insert_with(std::time::Instant::now);
             if self.prewarmed != Some(pid) && since.elapsed() >= std::time::Duration::from_secs(2) {
                 self.prewarmed = Some(pid);
@@ -881,6 +892,11 @@ mod tests {
         assert!(super::prewarm_builds_nothing(&json!({"ok": false, "error": "x"})), "an error");
         assert!(!super::prewarm_builds_nothing(&json!({"ok": true, "prewarming": ["SCH"]})));
         assert!(!super::prewarm_builds_nothing(&json!({"ok": true, "prewarming": true})), "an older hub's memory refusal: indistinguishable, kept");
+    }
+    #[test] fn idle_prewarm_waits_on_windows_without_prewarm_keeps_focus() {
+        assert!(super::idle_prewarm(false, false), "Linux: the pre-warm starts by itself");
+        assert!(!super::idle_prewarm(true, false), "Windows, a pre-warm that activates its frame: the next placement");
+        assert!(super::idle_prewarm(true, true), "Windows with prewarm-keeps-focus");
     }
     #[test] fn warm_target_is_the_shown_board() {
         assert_eq!(warm_target("/p/Day_11/Day_11.kicad_pcb".into(), "/p".into()), "/p/Day_11/Day_11.kicad_pcb");
