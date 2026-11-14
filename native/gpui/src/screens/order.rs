@@ -6,7 +6,7 @@ use gpui::{prelude::*, *};
 use serde_json::Value;
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Card { pub name: String, pub steps: Vec<(String, String)>, pub line: String, pub waiting: bool, pub total: String, pub customs: String, pub pay: String, pub label: String }
+pub struct Card { pub name: String, pub steps: Vec<(String, String)>, pub line: String, pub waiting: bool, pub total: String, pub customs: String, pub pay: String, pub label: String, pub requote: bool }
 
 pub fn parse(order: &Value) -> Option<Card> {
     if !order.is_object() { return None; }
@@ -15,12 +15,18 @@ pub fn parse(order: &Value) -> Option<Card> {
         steps: order["steps"].as_array().into_iter().flatten().map(|s| (string(s, "label"), string(s, "mark"))).collect(),
         line: string(order, "line"), waiting: order["waiting"].as_bool().unwrap_or(false),
         total: string(order, "total"), customs: string(order, "customs"),
-        pay: string(order, "pay"), label: string(order, "label"),
+        pay: string(order, "pay"), label: string(order, "label"), requote: order["requote"].as_bool().unwrap_or(false),
     })
 }
 
 /// Only an http(s) link is opened: anything else the hub sent is drawn without a button.
 pub fn payable(card: &Card) -> bool { card.pay.starts_with("https://") || card.pay.starts_with("http://") }
+
+/// What Re-quote tells the agent: the parts could not be priced for lack of a distributor answer; make a new quote.
+pub const REQUOTE_TEXT: &str = "Make a new quote: the parts could not be priced a moment ago (sourcing was unavailable); nothing needs to change on the board.";
+/// The request a Re-quote press sends (as the composer's Send does); `thread` is the window's key, `<hub>|<id>`.
+pub fn requote_request(thread: &str) -> Value { serde_json::json!({"thread": thread.rsplit('|').next().unwrap_or(""), "text": REQUOTE_TEXT, "mode": "steer"}) }
+pub const REQUOTE_TAG: u64 = 0xF1_0000_0000;
 
 pub fn view(cx: &mut Context<Backplane>, light: bool, order: &Value) -> Option<AnyElement> {
     let card = parse(order)?;
@@ -46,6 +52,11 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, order: &Value) -> Option<A
             .bg(c("accent")).text_color(c("on-accent")).border_1().border_color(c("accent")).child(label)
             .on_click(cx.listener(move |_, _, _, cx| cx.open_url(&link)))));
     }
+    if card.requote {
+        /* i18n-ok: a ui: id is what drivers press */ col = col.child(div().flex().child(crate::ui::with_rect(div().id("order-requote"), || "ui:Re-quote".to_string()).px_3().py_1().text_size(crate::scale::tpx(12.)).cursor_pointer()
+            .bg(c("accent")).text_color(c("on-accent")).border_1().border_color(c("accent")).child(tf("gpui.order.requote", &[]))
+            .on_click(cx.listener(move |this, _, _, cx| { let r = requote_request(&this.selected); let _ = this.tx.try_send(crate::hub::Command::Ask("turn.start".into(), r, REQUOTE_TAG)); cx.notify(); }))));
+    }
     Some(col.into_any_element())
 }
 
@@ -53,6 +64,12 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, order: &Value) -> Option<A
 mod tests {
     use super::*;
     use core::prelude::v1::test;
+    #[test] fn requote_is_the_hubs_and_sends_a_steer_turn() {
+        let v: Value = serde_json::from_str(r#"{"name":"b","steps":[],"line":"x","waiting":false,"total":"$1","customs":"","pay":"","label":"","requote":true}"#).unwrap();
+        let c = parse(&v).unwrap(); assert!(c.requote && !payable(&c), "no Buy now beside Re-quote");
+        let r = requote_request("hub|t_9"); assert_eq!(r["thread"], "t_9"); assert_eq!(r["mode"], "steer"); assert!(r["text"].as_str().unwrap().contains("new quote"));
+        assert!(!parse(&serde_json::json!({"name":"b"})).unwrap().requote);
+    }
     #[test] fn a_thread_without_an_order_has_no_card() { assert_eq!(parse(&Value::Null), None); }
     #[test] fn the_card_is_the_hubs() {
         let v: Value = serde_json::from_str(r#"{"name":"Main board","steps":[{"label":"Details","mark":"done"},{"label":"Quote","mark":"on"},{"label":"Pay","mark":""}],
