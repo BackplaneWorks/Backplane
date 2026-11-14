@@ -281,7 +281,9 @@ pub fn sync(this: &mut Backplane, cx: &mut Context<Backplane>) {
     if let Some((th, kind)) = this.screens.projects.view_edit.clone() {
         let shown = string(&this.data["thread"], "id"); let shown = shown.rsplit('|').next().unwrap_or("").to_string();
         if shown == th && this.selected.rsplit('|').next() == Some(th.as_str()) && this.data["thread"]["loading"] != true {
-            this.screens.projects.view_edit = None; let _ = this.tx.try_send(Command::Action("view-kind".into(), kind.into()));
+            // (the hub's idempotent `view`; a page already on show stays: a second Files would shut it)
+            this.screens.projects.view_edit = None; let v = &this.data["thread"]["viewer"];
+            if !(v["open"].as_str().map_or(false, |o| !o.is_empty()) && super::viewer::active_kind(v, None) == kind) { let _ = this.tx.try_send(super::viewer::view_kind(kind)); }
         }
     }
     if this.screens.projects.search.is_none() {
@@ -417,6 +419,17 @@ pub fn page_title(data: &Value, page: Option<&str>) -> Option<String> { page.and
 /// The page is this window's own; the hub's selection may not move at all (the uberbot's chat was already selected under the page), so
 /// a click on the uberbot after a project page left the page up.
 pub fn leaves_page(action: &str) -> bool { matches!(action, "bot" | "room" | "link-open" | "link-file" | "select") }
+/// A viewer page asked for (the rail, its key) while a project's page is on show: the viewer is that project's, never the thread's that was open before the
+/// page. The thread to show it on (the project's top one, the page staying) and the kind; None when the thread selected is already one of the project's,
+/// the project has no thread, or the kind is not a project's (the Browser).
+pub fn page_view(data: &Value, page: Option<&str>, selected: &str, kind: &str) -> Option<(String, &'static str)> {
+    let k = ["board", "schematic", "3d", "gerbers", "split", "mech", "files", "review"].into_iter().find(|k| *k == kind)?;
+    let p = find(data, page?)?;
+    let ids: Vec<String> = p["threads"].as_array().into_iter().flatten().chain(p["settled"].as_array().into_iter().flatten()).map(|t| string(t, "id")).filter(|i| !i.is_empty()).collect();
+    let sel = selected.rsplit('|').next().unwrap_or("");
+    if ids.iter().any(|i| i.rsplit('|').next() == Some(sel)) { return None }
+    ids.into_iter().next().map(|i| (i, k))
+}
 /// The sidebar's project with this (raw) id.
 pub fn find<'a>(data: &'a Value, pid: &str) -> Option<&'a Value> {
     data["projects"].as_array().and_then(|ps| ps.iter().find(|p| string(p, "id").rsplit('|').next() == Some(pid))).or_else(|| super::sections::find(data, pid))
@@ -703,6 +716,17 @@ mod home_tests {
     }
 
     use super::*; use serde_json::json; use core::prelude::v1::test;
+    #[test] fn a_viewer_opened_on_a_projects_page_is_that_projects() {
+        let d = json!({"projects": [{"id": "h|p1", "threads": [{"id": "h|t1"}], "settled": [{"id": "h|t2"}]}, {"id": "h|p2", "threads": [], "settled": [{"id": "h|t3"}]}, {"id": "h|p3", "threads": []}]});
+        assert_eq!(page_view(&d, Some("p1"), "bot9", "board"), Some(("h|t1".to_string(), "board")), "another thread was open: the project's top thread");
+        assert_eq!(page_view(&d, Some("p2"), "t1", "files"), Some(("h|t3".to_string(), "files")), "a done thread is still the project's");
+        assert_eq!(page_view(&d, Some("p1"), "t2", "board"), None, "one of its own threads is open: its viewer is the project's already");
+        assert_eq!(page_view(&d, Some("p1"), "h|t1", "3d"), None);
+        assert_eq!(page_view(&d, Some("p3"), "bot9", "board"), None, "no thread to show it on");
+        assert_eq!(page_view(&d, None, "bot9", "board"), None, "no page on show: the rail is the thread's");
+        assert_eq!(page_view(&d, Some("p1"), "bot9", "browser"), None, "the Browser is not a project's page");
+        assert_eq!(page_view(&d, Some("p1"), "bot9", ""), None);
+    }
     #[test] fn edit_puts_the_goal_and_notes_in_the_composer_as_intent() {
         assert_eq!(intent_draft("# Goal\nlamp"), "/intent\n# Goal\nlamp"); assert!(intent_draft("  ").starts_with("/intent\n# Goal\n"));
     }
