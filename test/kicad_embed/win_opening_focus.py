@@ -1178,7 +1178,8 @@ def run(h):
             # Lane B's checks for embed-notice / embed-dialog-events (fork ba5fe711f0, client c0b81fbf8). With
             # BP_EXPECT_NOTICE=1 (a runtime without its software opengl32.dll on a machine with no GPU) KiCad's
             # "Could not use OpenGL..." reaches the pane as a notice, not a box. Then a native modal in KiCad
-            # (its Open file dialog, Ctrl+O) is named in the pane's dialogs while up, and gone after Escape.
+            # (its Open file dialog, Ctrl+O) is named in the pane's dialogs while up, and gone after Escape. The pane's
+            # "KiCad has ... open" wording is only for a dialog before a frame is on show (Lane B), so not looked for here.
             settled_rep = h.last_kicad_report("settled")
             rect_ids = set()
             for m in h.metrics():
@@ -1187,10 +1188,21 @@ def run(h):
                         rect_ids.add(r["id"])
             notice = settled_rep.get("notice")
             box = E.startup_box()
-            res = {"notice": notice, "notice_rects": sorted(i for i in rect_ids if i.startswith("kicad:notice")), "box_now": box}
+            hub_lines = [l.strip() for l in open(h.p("hub.log"), encoding="utf-8", errors="replace") if "kicad embed: KiCad notice" in l]
+            # the capability the hub keys dialogs_reported on (Lane B: true on Windows exactly when it is there); the
+            # embedded GUI's own GetCapabilities, as the hub reads it
+            sock = settled_rep.get("sock") or ""
+            try:
+                caps = h.ipc_cmd("caps", sock).get("capabilities") if sock else None
+            except Exception as e:  # noqa: BLE001
+                caps = f"unreadable: {e}"[:200]
+            res = {"notice": notice, "notice_rects": sorted(i for i in rect_ids if i.startswith("kicad:notice")), "box_now": box,
+                   "hub_notice_lines": hub_lines[:3], "embed_caps": [c for c in caps if c.startswith("embed")] if isinstance(caps, list) else caps}
+            h.check("The runtime reports dialogs (embed-dialog-events: the hub's dialogs_reported) and notices (embed-notice)",
+                    isinstance(caps, list) and "embed-dialog-events" in caps and "embed-notice" in caps, res)
             if os.environ.get("BP_EXPECT_NOTICE") == "1":
-                h.check("No GPU: KiCad's graphics fallback is a notice in the pane (\"KiCad says: ...\"), and no box is up",
-                        bool(notice) and "opengl" in str(notice).lower() and not box
+                h.check("No GPU: KiCad's graphics fallback is a notice in the pane (\"KiCad says: ...\", the hub's \"KiCad notice\" line), and no box is up",
+                        bool(notice) and "opengl" in str(notice).lower() and not box and bool(hub_lines)
                         and bool(rect_ids & {"kicad:notice", "kicad:notice-start"}), res)
             keys = give_kicad_keys(h, cp, frame)
             n0 = len(open(h.p("client.log"), encoding="utf-8", errors="replace").read())
