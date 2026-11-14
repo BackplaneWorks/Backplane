@@ -514,6 +514,7 @@ async fn run_on(hub: &Arc<Hub>, thread: Option<&str>, path: &str, ty: &str, msg:
         if short == "SaveDocument" && msg["document"].is_object() {
             match save_gate(&gui, &msg, path, saves_board).await { Err(skip) => return Ok(skip), Ok(u) => upgrade = u }
         }
+        let msg_doc = json!({"document": msg["document"].clone()});
         let o = super::embed::gui_call_as(&gui, ty, msg, &actor).await;
         if let Some(note) = held { log_fallback(hub, thread, &note).await; }
         if commits && o["ok"].as_bool().unwrap_or(false) { super::embed::unsaved_update(&pro, |u| u.agent_committed()); }
@@ -521,7 +522,7 @@ async fn run_on(hub: &Arc<Hub>, thread: Option<&str>, path: &str, ty: &str, msg:
         let ok = o["ok"].as_bool().unwrap_or(false);
         let servers = format!("{pro}|ready|gui ({})", gui.mode);
         if status { return Ok(json!({"server":format!("gui ({})", gui.mode),"servers":servers,"argv":gui.argv,"version":gui.version,"capabilities":o["message"].clone(),"detail":if ok { String::new() } else { err_of(&o) }})) }
-        if !ok { return Err(err_of(&o)) }
+        if !ok { return Err(if short == "SaveDocument" { super::savegate::explain_save_error(&err_of(&o), super::savegate::saves_design(&msg_doc, path)) } else { err_of(&o) }) }
         let mut out = json!({"type":o["type"].as_str().unwrap_or(""),"message":o["message"].clone()});
         // an agent's save of a board KiCad changed on load (its 3D model migration): said, so the agent reports it rather than owns it
         if short == "SaveDocument" && super::savegate::wrote_nothing(&o) { out["not_saved"] = json!(super::savegate::NOTHING_CHANGED); }
