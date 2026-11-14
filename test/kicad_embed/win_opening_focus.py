@@ -642,6 +642,87 @@ def run(h):
             h.check("F5: Edit, then the pre-warm with no input: the PCB canvas keeps the keys (F2 acts by the zoom readout)",
                     bool(pw) and after["inside_frame"] and bool(zoomed), d)
             return h.finish()
+        if only == "away_return":
+            # The "focus elsewhere leaves the state alone" rule: away to another app (Notepad) and back, three ways.
+            import subprocess
+            gls = [w for w in children if w["visible"] and w["class"] == "wxGLCanvas"]
+            gl = max(gls, key=lambda w: w["w"] * w["h"]) if gls else None
+            top = E.find_main_window(cp.pid)
+            cbox = composer_box(h, top)
+            np_proc = subprocess.Popen(["notepad.exe"])
+            np = 0
+            for _ in range(50):
+                np = E.find_main_window(np_proc.pid)
+                if np:
+                    break
+                time.sleep(0.2)
+            E.u32.SetWindowPos(np, 0, 1480, 120, 420, 500, 0x0040)
+            tx, ty, tw, th = window_box(top)
+            def snap(tag):
+                d = focus_snapshot(frame)
+                d["foreground_title"] = window_title(d["foreground"]) if d["foreground"] else ""
+                return d
+            def shield_clicks():
+                return sum(1 for l in open(h.p("client.log"), encoding="utf-8", errors="replace") if "kicad_shield_click" in l)
+            def canvas_click(at):
+                box = message_panel_box(frame)
+                a, b = h.p(f"away_{at}_0.png"), h.p(f"away_{at}_1.png")
+                before = shield_clicks()
+                E.grab_screen(a)
+                x, y = (gl["root_x"] + gl["w"] // 2, gl["root_y"] + gl["h"] // 2) if at.endswith("u1") else (gl["root_x"] + 30, gl["root_y"] + gl["h"] - 40)
+                around = traced_click(x, y)
+                fg = foreground_never_lost(500)
+                E.grab_screen(b)
+                return {"panel_px": E.img_diff_box(a, b, *box)["changed_pixels"], "consumed_by_shield": shield_clicks() - before, **fg, **around}
+            def away_and_back(how):
+                E.screen_click(1480 + 200, 120 + 250, 1)
+                time.sleep(0.6)
+                away = snap("away")
+                if how == "title":
+                    E.screen_click(tx + tw // 2, ty + 12, 1)
+                    time.sleep(0.6)
+                return away
+            res = {"notepad": np}
+            # 1. KiCad had the keys (Edit), away, back by Backplane's title bar
+            r1 = {"kicad_first": snap("k")}
+            r1["away"] = away_and_back("title")
+            r1["back"] = snap("back")
+            px, z = plain_key_acts(h, gl, "away1", frame)
+            r1["f2_acts"] = z
+            r1["canvas_click_u1"] = canvas_click("1u1")
+            res["kicad_had_keys"] = r1
+            # 2. Backplane had the keys (composer), away, back by the title bar, type in the composer, then one canvas click
+            keys_back_to_backplane(h, cp, frame, top, "composer", cbox)
+            time.sleep(0.3)
+            r2 = {"backplane_first": snap("b")}
+            r2["away"] = away_and_back("title")
+            r2["back"] = snap("back")
+            r2["composer_key_ms"] = key_latency_ms(h, cbox, "q", "away2")
+            r2["canvas_click_empty"] = canvas_click("2empty")
+            px, z = plain_key_acts(h, gl, "away2", frame)
+            r2["f2_acts_after_click"] = z
+            res["backplane_had_keys"] = r2
+            # 3. Backplane had the keys, away, back by clicking straight on the canvas
+            keys_back_to_backplane(h, cp, frame, top, "composer", cbox)
+            time.sleep(0.3)
+            r3 = {"backplane_first": snap("b3"), "away": away_and_back("none")}
+            r3["canvas_click_u1_from_other_app"] = canvas_click("3u1")
+            r3["after"] = snap("after3")
+            px, z = plain_key_acts(h, gl, "away3", frame)
+            r3["f2_acts"] = z
+            res["back_by_canvas"] = r3
+            try:
+                np_proc.kill()
+            except OSError:
+                pass
+            print("DIAG away_return " + json.dumps(res)[:6000], flush=True)
+            h.check("1. KiCad had the keys, away and back by the title bar: F2 acts, the canvas click acts (not eaten)",
+                    r1["back"]["inside_frame"] and bool(r1["f2_acts"]) and r1["canvas_click_u1"]["consumed_by_shield"] == 0 and r1["canvas_click_u1"]["panel_px"] > 200, r1)
+            h.check("2. Backplane had the keys, away and back by the title bar: composer types, one canvas click hands in (shield), F2 then acts",
+                    r2["composer_key_ms"] is not None and r2["canvas_click_empty"]["consumed_by_shield"] == 1 and bool(r2["f2_acts_after_click"]) and r2["canvas_click_empty"]["no_foreground_samples"] == 0, r2)
+            h.check("3. Back from another app by clicking the canvas: KiCad gets the keys (F2 acts), foreground never empty",
+                    bool(r3["f2_acts"]) and r3["canvas_click_u1_from_other_app"]["no_foreground_samples"] == 0, r3)
+            return h.finish()
         if only == "edit_first_click":
             # F3 shield, point 3: after Edit (KiCad has the keys), the first click on the canvas must reach KiCad, not be
             # consumed by the shield: a click on the board's centre (U1) changes the message panel to the item's details.
