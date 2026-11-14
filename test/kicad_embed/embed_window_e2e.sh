@@ -281,7 +281,22 @@ while kill -0 "$CP" 2>/dev/null; do
         01_shown)
           shot "01_shown"
           R_SHOWN=$(last_kicad_report "$OUT/client.log" "shown")
-          read -r RX RY < <(python3 -c 'import json,sys; r=json.loads(sys.argv[1]); sr=r.get("shown_root") or {}; print(int(sr.get("x",800)), int(sr.get("y",400)))' "$R_SHOWN")
+          read -r RX RY PW PH < <(python3 -c 'import json,sys; r=json.loads(sys.argv[1]); sr=r.get("shown_root") or {}; p=r.get("pane") or {}; print(int(sr.get("x",800)), int(sr.get("y",400)), int(p.get("w",600)), int(p.get("h",500)))' "$R_SHOWN")
+          # Edit gives KiCad the keys (a8bbdc74e, docs/kicad-real-use.md): with no click, a plain hotkey (F2, zoom out) over the canvas acts
+          # in the shown editor. The canvas is cropped before and after; Home zooms back to fit
+          if [ "$EMBED_MODE" = fork ]; then
+            HX=$((RX + PW * 3 / 4)); HY=$((RY + PH / 2))
+            python3 "$XINPUT_PY" move "$HX" "$HY"; sleep 0.4
+            import -window root -crop "$((PW / 2))x$((PH / 2))+$((RX + PW / 2 - PW / 4))+$((RY + PH / 4))" "$OUT/hotkey_before.png" 2>/dev/null || true
+            python3 "$XINPUT_PY" key F2; sleep 1.2
+            import -window root -crop "$((PW / 2))x$((PH / 2))+$((RX + PW / 2 - PW / 4))+$((RY + PH / 4))" "$OUT/hotkey_after.png" 2>/dev/null || true
+            python3 -c 'import sys
+from PIL import Image, ImageChops
+a, b = (Image.open(f).convert("RGB") for f in sys.argv[1:3])
+d = ImageChops.difference(a, b).convert("L").point(lambda v: 255 if v > 24 else 0)
+print(d.histogram()[255])' "$OUT/hotkey_before.png" "$OUT/hotkey_after.png" >"$OUT/hotkey_noclick.txt" 2>"$OUT/hotkey_noclick.err" || echo -1 >"$OUT/hotkey_noclick.txt"
+            python3 "$XINPUT_PY" key Home; sleep 0.8
+          fi
           python3 "$XINPUT_PY" click $((RX + 140)) $((RY + 140))
           sleep 0.35
           ;;
@@ -555,11 +570,16 @@ else:
         (f_shown.get("painted") or 0) > 20 and (c_shown.get("painted") or 0) > 20,
         {"frame_painted": f_shown.get("painted"), "container_painted": c_shown.get("painted")},
     )
+    # Edit gives KiCad the keys (a8bbdc74e, docs/kicad-real-use.md): it has them at once, and a plain hotkey acts with no click
     check(
-        "Opening embedded KiCad did not steal keyboard focus before user click",
-        r_shown.get("keys") is False,
+        "Edit gives the embedded KiCad the keyboard with no click",
+        r_shown.get("keys") is True,
         {"keys": r_shown.get("keys")},
     )
+    if mode == "fork":
+        try: changed = int(open(os.path.join(out_dir, "hotkey_noclick.txt")).read().split()[0])
+        except Exception: changed = -1
+        check("a plain hotkey (F2) with no click acts in the shown editor", changed > 500, f"{changed} canvas pixels changed")
 
     r_cf = reps.get("clicked_focus", {})
     r_fr = reps.get("focus_returned", {})

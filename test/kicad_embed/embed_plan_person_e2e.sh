@@ -26,6 +26,9 @@ discover_bins
 [ -x "$REAL_HOME/.bun/bin/bun" ] && PATH="$REAL_HOME/.bun/bin:$PATH"
 discover_kicad
 grep -qa "planAccept\|Plan.accept" "$(dirname "$KICAD_BIN")/_pcbnew.kiface" 2>/dev/null || { echo "SKIP embed_plan_person_e2e: this KiCad has no plan view edits (bp.13+)"; exit 0; }
+# bp.12.1 has the plan view's actions but not the person's approvals in it (A/R, Approve Layer and ApprovePlan leave the plan proposed;
+# Nov 13: 13/20 on bp.12.1, 26/26 on bp.13): the suite is bp.13's, told by its embed-frame-drawn capability
+grep -qa "embed-frame-drawn" "$(dirname "$KICAD_BIN")/kicad.real" 2>/dev/null || { echo "SKIP embed_plan_person_e2e: this KiCad's plan view has no person approvals (bp.13+)"; exit 0; }
 init_isolated_dirs
 python3 "$SEED_PY" "$OUT" "$REPO_ROOT"
 # paint bounds (Nov 13, bp.13 batch 3, 16 cores busy): KiCad painted 0.07-0.08 s after Edit and the board was open, full size, 9.7-13.3 s
