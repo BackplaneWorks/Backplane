@@ -703,11 +703,14 @@ impl KicadPane {
         if let Some(h) = self.info["holder"].as_u64().filter(|h| *h > 0 && *h != self.kept) { nc::keep(h); self.kept = h; }
         for e in nc::events() {
             // what reached Backplane from the editor (the e2e reads it: one click in KiCad, then a reserved chord, must arrive)
-            eprintln!("GPUI_LOG {}", json!({"kicad_ev": match &e { nc::Ev::Escape => "escape".to_string(), nc::Ev::Click => "click".to_string(), nc::Ev::Key(k) => format!("key {k}"), nc::Ev::Focus(w) => format!("focus {w}") }}));
+            eprintln!("GPUI_LOG {}", json!({"kicad_ev": match &e { nc::Ev::Escape => "escape".to_string(), nc::Ev::Click => "click".to_string(), nc::Ev::ShieldClick => "shield click".to_string(), nc::Ev::Key(k) => format!("key {k}"), nc::Ev::Focus(w) => format!("focus {w}") }}));
             match e {
                 // the keyboard back to the client's window; a reserved chord is then pressed in gpui (after_frame, which has the window)
                 nc::Ev::Escape => { self.refocus = None; nc::hand_back(self.toplevel); self.keys = false; nc::grab_escape(self.toplevel, false); self.grab_click(c, true); cx.notify(); }
                 nc::Ev::Click => { if let Some(w) = self.want() { self.grab_click(c, false); nc::focus(w); self.keys = true; self.touched(); nc::grab_escape(self.toplevel, true); cx.notify(); } }
+                // the shield did the hand-in itself and replays the press: the state only (no second focus call landing
+                // after the replayed press, which closed a right click's menu before it opened)
+                nc::Ev::ShieldClick => { if self.want().is_some() { self.grab_click(c, false); self.keys = true; self.touched(); nc::grab_escape(self.toplevel, true); cx.notify(); } }
                 // Ctrl+Tab / Ctrl+Shift+Tab pressed in KiCad: the next editor tab, and KiCad keeps the keyboard
                 nc::Ev::Key(k) if k == "ctrl-tab" || k == "ctrl-shift-tab" => { let to = next_tab(self.wanted_kind(), if k == "ctrl-tab" { 1 } else { -1 }); self.show_kind_by(to, &format!("host shortcut {k} (KiCad key hook)"), cx); } // i18n-ok: a debug log cause (BACKPLANE_KICAD_DEBUG)
                 nc::Ev::Key(k) => { eprintln!("GPUI_LOG {}", json!({"kicad_key": k, "at_ms": crate::screens::kcomment::epoch_ms() as u64})); self.refocus = None; nc::hand_back(self.toplevel); self.keys = false; nc::grab_escape(self.toplevel, false); self.grab_click(c, true);
