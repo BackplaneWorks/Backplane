@@ -508,7 +508,9 @@ pub fn install_row(session: &Value, info: &Value, pkg: Option<&crate::files::kic
         let Some(p) = pkg.filter(|p| i("kicad.status") == "ok" && crate::files::kicad::install::older(i("kicad.version"), p)) else { return None };
         return Some(match state {
             "running" => running_row(&format!("Updating to Backplane KiCad {}", p.version), &st, p.version, note),
-            _ if draft(session, "@kinstall") == "ask" => row("Update Backplane KiCad?", &format!("Downloads Backplane KiCad {} (about 1 GB) from {FROM} and puts it beside {}, which stays. It brings the KiCad editor inside Backplane's viewer (Edit).", p.version, i("kicad.version")),
+            // what the update adds over this runtime, not a fixed sentence (bp.12.1 to bp.12.2 brings the plan view's keys, not the editor)
+            _ if draft(session, "@kinstall") == "ask" => row("Update Backplane KiCad?", &format!("Downloads Backplane KiCad {} (about 1 GB) from {FROM} and puts it beside {}, which stays.{}", p.version, i("kicad.version"),
+                crate::files::kicad::install::update_reason(&i("kicad.caps").split(',').filter(|c| !c.is_empty()).collect::<Vec<_>>()).map_or(String::new(), |w| format!(" {w}"))),
                 vec![btn("Update", "kicad-install", "", true), btn("Cancel", "kicad-install-cancel", "", false)]),
             "failed" => row("Update Backplane KiCad", &format!("{note}."), vec![btn("Try again", "kicad-install-ask", "", true)]),
             _ => { let have: Vec<&str> = i("kicad.caps").split(',').filter(|c| !c.is_empty()).collect();
