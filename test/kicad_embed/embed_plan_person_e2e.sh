@@ -120,12 +120,14 @@ echo "INFO plan view by $VIA"; sleep 1.5
 X key Home; sleep 1.5                    # zoom to fit
 shot q1_plan_view
 # c-p and c-q on the screen: the corridor colour's pixels inside the frame, split at the widest gap in x into the two biggest runs
-spots() { python3 - "$OUT/shots/$1.png" "$FX" "$FY" "$FW" "$FH" <<'PY'
+spots() { python3 - "$OUT/shots/$1.png" "$FX" "$FY" "$FW" "$FH" "$KEMBED_LIB" <<'PY'
 import sys
 import numpy as np
 from PIL import Image
-f, fx, fy, fw, fh = sys.argv[1], *map(int, sys.argv[2:])
-a = np.asarray(Image.open(f).convert("RGB")).astype(int)[fy + 60:fy + fh - 40, fx + 40:fx + fw - 40]
+f, fx, fy, fw, fh = sys.argv[1], *map(int, sys.argv[2:6])
+sys.path.insert(0, sys.argv[6]); from canvas_box import canvas_box
+a = np.asarray(Image.open(f).convert("RGB")).astype(int)[fy:fy + fh, fx:fx + fw]
+cx0, cy0, cx1, cy1 = canvas_box(a); a = a[cy0 + 4:cy1 - 4, cx0 + 4:cx1 - 4]; fx, fy = fx + cx0 + 4 - 40, fy + cy0 + 4 - 60
 r, g, b = a[..., 0], a[..., 1], a[..., 2]
 m = (r > 120) & (r - b > 70) & (g > 60) & (g < r - 10) & (g > b + 20)
 ys, xs = np.nonzero(m)
@@ -135,7 +137,12 @@ runs, start = [], None
 for x, v in enumerate(list(on) + [False]):
     if v and start is None: start = x
     if not v and start is not None: runs.append((start, x)); start = None
-runs = sorted(sorted(runs, key=lambda r: -cols[r[0]:r[1]].sum())[:2])
+# runs a few pixels apart are one corridor (its pads and labels break the colour; bp.12.x draws the band translucent)
+merged = []
+for r0, r1 in runs:
+    if merged and r0 - merged[-1][1] <= 30: merged[-1] = (merged[-1][0], r1)
+    else: merged.append((r0, r1))
+runs = sorted(sorted(merged, key=lambda r: -cols[r[0]:r[1]].sum())[:2])
 if len(runs) < 2: print("0 0 0 0"); sys.exit()
 out = []
 for x0, x1 in runs:
@@ -285,21 +292,37 @@ shot q7_nothing_selected
 # Q8: Escape with nothing selected ends plan view's tool. From bp.13 batch 5 (b590534148) it leaves plan view too: the plan is no longer
 # drawn and the board's layers come back. Batch 4 and earlier end only the tool and leave the plan drawn: told (XFAIL), not failed.
 # Batch 5 has no capability of its own; PLAN_ESC=expect makes it count (set it once batch 5 is installed)
-plan_px() { python3 - "$OUT/shots/$1.png" "$FX" "$FY" "$FW" "$FH" <<'PY'
+plan_px() { python3 - "$OUT/shots/$1.png" "$FX" "$FY" "$FW" "$FH" "$KEMBED_LIB" <<'PY'
 import sys
 import numpy as np
 from PIL import Image
 a = np.asarray(Image.open(sys.argv[1]).convert("RGB")).astype(int); fx, fy, fw, fh = map(int, sys.argv[2:6])
-a = a[fy + 160:fy + fh - 40, fx + 40:fx + fw - 280]; r, g, b = a[..., 0], a[..., 1], a[..., 2]
+sys.path.insert(0, sys.argv[6]); from canvas_box import canvas_box
+a = a[fy:fy + fh, fx:fx + fw]; cx0, cy0, cx1, cy1 = canvas_box(a); a = a[cy0 + 4:cy1 - 4, cx0 + 4:cx1 - 4]; r, g, b = a[..., 0], a[..., 1], a[..., 2]
 orange = (r > 120) & (r - b > 70) & (g > 60) & (g < r - 10) & (g > b + 20); green = (g > 150) & (g - r > 60) & (g - b > 30)
 print(int(orange.sum() + green.sum()))
 PY
 }
+canvas_lum() { python3 - "$OUT/shots/$1.png" "$FX" "$FY" "$FW" "$FH" "$KEMBED_LIB" <<'PY'
+import sys
+import numpy as np
+from PIL import Image
+a = np.asarray(Image.open(sys.argv[1]).convert("RGB")).astype(int); fx, fy, fw, fh = map(int, sys.argv[2:6])
+sys.path.insert(0, sys.argv[6]); from canvas_box import canvas_box
+a = a[fy:fy + fh, fx:fx + fw]; cx0, cy0, cx1, cy1 = canvas_box(a); a = a[cy0 + 4:cy1 - 4, cx0 + 4:cx1 - 4]
+print(int(a.mean()))
+PY
+}
 X key Prior; sleep 0.8                                             # F.Cu active again: its corridors drawn
-shot q8_before_esc; P0=$(plan_px q8_before_esc)
-X key Escape; sleep 1.2; shot q8_after_esc; P1=$(plan_px q8_after_esc)
+shot q8_before_esc; P0=$(plan_px q8_before_esc); L0=$(canvas_lum q8_before_esc)
+if step_ok "Q8 Escape with nothing selected"; then X key Escape; fi; sleep 1.2; shot q8_after_esc; P1=$(plan_px q8_after_esc); L1=$(canvas_lum q8_after_esc)
+# Q8 by runtime. bp.13 (rules-insert-position): plan view hides the plan on that Escape (batch 5, b590534148; earlier batches XFAIL).
+# bp.12.x with plan-keys: the Escape ends the plan tool and plan view's dimming, the plan stays drawn, fainter: the board's colours come
+# back (the canvas brighter), the plan is drawn less, the plan tool has ended (A is KiCad's own again: it opens the Footprint Chooser,
+# closed at once), and Ctrl+Shift+R / Alt+P makes A the plan's again (it opens nothing). The lead's bar for bp.12.2 (Nov 13).
+if echo "$CAPS7" | grep -q 'rules-insert-position'; then
 ESC=${PLAN_ESC:-xfail}
-echo "INFO Q8 ($ESC): plan pixels $P0 before Escape, $P1 after"
+echo "INFO Q8 bp.13 ($ESC): plan pixels $P0 before Escape, $P1 after"
 if [ "$ESC" = expect ] || [ "${P1:-1}" -lt $(( ${P0:-0} / 10 + 1 )) ]; then
   check "Escape with nothing selected leaves plan view (the plan no longer drawn)" "$([ "${P0:-0}" -gt 500 ] && [ "${P1:-1}" -lt $(( P0 / 10 + 1 )) ] && echo 1 || echo 0)" "plan pixels $P0 -> $P1 (q8_before_esc, q8_after_esc)"
   # and Ctrl+Shift+R starts it again
@@ -307,5 +330,19 @@ if [ "$ESC" = expect ] || [ "${P1:-1}" -lt $(( ${P0:-0} / 10 + 1 )) ]; then
   check "Ctrl+Shift+R starts plan view again" "$([ "${P2:-0}" -gt $(( P0 / 2 )) ] && echo 1 || echo 0)" "plan pixels $P2"
 else
   echo "XFAIL Escape with nothing selected leaves plan view (bp.13 batch 5): this build ends only the tool; the plan stays drawn ($P0 -> $P1)"
+fi
+elif [ "${PLAN_KEYS:-1}" = 1 ]; then
+  echo "INFO Q8 bp.12.x: plan pixels $P0 -> $P1, canvas luminance $L0 -> $L1"
+  check "Escape with nothing selected brings the board's colours back (bp.12.x)" "$([ "${L1:-0}" -gt $(( ${L0:-0} * 6 / 5 )) ] && echo 1 || echo 0)" "canvas luminance $L0 -> $L1 (q8_before_esc, q8_after_esc)"
+  check "the plan stays drawn, fainter (bp.12.x)" "$([ "${P1:-0}" -gt 0 ] && [ "${P1:-0}" -lt $(( ${P0:-0} * 4 / 5 )) ] && echo 1 || echo 0)" "plan pixels $P0 -> $P1"
+  # the plan tool has ended: A is KiCad's own (Add Footprint), as the person would find it
+  X key a; DL=""; for _ in $(seq 20); do DL=$(dialog_now); [ -n "$DL" ] && break; sleep 0.25; done; shot q8_a_after_esc
+  check "the plan tool has ended: A opens KiCad's Footprint Chooser (bp.12.x)" "$(echo "$DL" | grep -qi 'footprint' && echo 1 || echo 0)" "KiCad shows: ${DL:-nothing}"
+  if [ -n "$DL" ]; then X key Escape; for _ in $(seq 20); do [ -z "$(dialog_now)" ] && break; sleep 0.25; done; fi
+  # back into plan view: A is the plan's again and opens nothing
+  if step_ok "Q8 plan view again"; then hotkey; sleep 1.2; X key a; sleep 2; DL2=$(dialog_now); shot q8_again
+    check "plan view again: A is the plan's (no KiCad dialog) (bp.12.x)" "$([ -z "$DL2" ] && echo 1 || echo 0)" "KiCad shows: $DL2"
+    if [ -n "$DL2" ]; then X key Escape; fi
+  fi
 fi
 finish_suite "embed_plan_person_e2e ($EMBED_MODE)"
