@@ -4,8 +4,11 @@ name: nightly
 # release/X.Y.Z branch (a release being cut counts). Nothing is built when main has not moved since the last nightly; the newest 14 are kept.
 # The update check on a clean Boat (scripts/nightly-update-gate.sh) runs from the person's machine after it (scripts/bare-gate-nightly.sh, 03:30).
 on:
+  # off the hour (GitHub drops scheduled runs under load, most at :00: 2026-11-14's 09:00 never started), and a second try later: it builds nothing
+  # when the first already built this main (plan: go=false), and the concurrency group keeps them from overlapping
   schedule:
-    - cron: '0 9 * * *'   # 09:00 UTC: 01:00 Pacific, done before the 03:30 check
+    - cron: '23 8 * * *'    # 08:23 UTC: 00:23 Pacific, done before the 03:30 check
+    - cron: '41 11 * * *'   # 11:41 UTC: the second try
   workflow_dispatch:
     inputs:
       force:

@@ -24,7 +24,8 @@ choose it.
 
 ## When and where it builds
 
-`nightly.yml` runs at 09:00 UTC (01:00 Pacific), or by hand from the Actions tab (`force` builds even when main has not moved).
+`nightly.yml` runs at 08:23 UTC (00:23 Pacific) and again at 11:41 UTC in case GitHub dropped the first (it skips scheduled runs under load; the
+second builds nothing when the first built this main), or by hand from the Actions tab (`force` builds even when main has not moved).
 
 `release.yml`'s build jobs take a runner per target from repo variables, for nightlies only; a tag release always builds on GitHub's images:
 
@@ -34,7 +35,9 @@ choose it.
 | `NIGHTLY_MAC_RUNNER` | a self-hosted runner label | macos-latest |
 | `NIGHTLY_WIN_RUNNER` | a self-hosted runner label | windows-latest |
 
-None is set yet. The wall time is Windows's (12 to 25 minutes on GitHub), longer than Linux (7 to 16) and macOS (13 to 18), so a faster Linux or macOS machine
+None is set. bp-win was tried as `NIGHTLY_WIN_RUNNER` (its runner `bp-win-nightly` is registered, refuses all but the nightly, and comes back after a
+restart; its Windows Update active hours are 05:00 to 23:00 UTC): it built in 34 minutes against GitHub's 75, but restarted for an update mid-build and
+then went offline (the Azure VM is stopped outside these runs), so Windows builds on GitHub until bp-win stays up. The wall time is Windows's (12 to 25 minutes on GitHub), longer than Linux (7 to 16) and macOS (13 to 18), so a faster Linux or macOS machine
 does not finish a nightly sooner while Windows builds on GitHub; bp-win (4 vCPU, 16 GB) is the size of GitHub's Windows runner. Linux moves to Boat once the
 Boat CI app is on the org and a Boat build is shown to run on Ubuntu 22.04's glibc (releases are built on 22.04 for that reason).
 
