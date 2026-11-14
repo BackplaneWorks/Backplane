@@ -363,7 +363,11 @@ impl KicadPane {
     /// The passive grab that turns a click on the unfocused editor into the keyboard for it: stock KiCad only. The fork takes the keyboard on
     /// its own click (and says so with `_BACKPLANE_FOCUS`); a grab there froze the click until the pane's next tick replayed it, after the
     /// button was up, and KiCad dropped the keys until a second click (one click must do).
-    fn grab_click(&self, c: u64, on: bool) { nc::grab_click(c, on && self.info["mode"] != "fork") }
+    fn grab_click(&self, c: u64, on: bool) {
+        nc::grab_click(c, on && self.info["mode"] != "fork");
+        // Windows, fork: the input shield over the pane while Backplane has the keys (F3)
+        nc::shield(c, on && cfg!(windows) && self.info["mode"] == "fork");
+    }
     /// KiCad's frames moved into a new container in the window `t` (and the hub told), before the window they were in goes away: a window's
     /// destruction takes its children with it, and KiCad's would be among them. Also how a pane goes back in from its own window.
     pub fn rehome(&mut self, t: u64) {
