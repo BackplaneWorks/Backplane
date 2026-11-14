@@ -112,13 +112,13 @@ impl Backplane {
             Event::Picture(r,timing)=>{
                 let t_apply=Instant::now();self.ui_epoch+=1;
                 if let Some(w)=self.wake_at.take(){self.reconnected=true;self.m("net",serde_json::json!({"event":"reconnected","ms":(w.elapsed().as_secs_f64()*1e6).round()/1e3}));}
-                let mut r=r;let prev=self.data["thread"].take();self.data=r["shown"].take();self.picture_applied(cx);self.kicad_warm();screens::histbar::picture(self);
+                let mut r=r;let prev=self.data["thread"].take();self.data=r["shown"].take();crate::viewers::kicad_pane::test_hold_key(&mut self.data);self.picture_applied(cx);self.kicad_warm();screens::histbar::picture(self);
                 self.timeline_picture(prev,&r["window"]);
                 if self.data["deleting"].is_object(){eprintln!("GPUI_LOG {{\"deleting\":{}}}",self.data["deleting"]["id"]);}let selected=string(&self.data["thread"],"id");
                 screens::accounts::thread_changed(self,&selected);if !selected.is_empty() {let selected=screens::attach::raw_id(&selected).to_string();self.picture_arrived(&selected,cx);self.selected=selected;}
                 self.thread_source="hub";
                 if let Some((label,t0))=self.confirm.take(){self.m("input",serde_json::json!({"step":label,"ok":true,"latency_ms":(t0.elapsed().as_secs_f64()*1e6).round()/1e3,"source":"hub"}));}
-                self.apply_ms=t_apply.elapsed().as_secs_f64()*1000.0;self.timing=Some(timing);self.applied_at=Some(Instant::now());self.adopt_new(cx);self.edit_due(cx);
+                self.apply_ms=t_apply.elapsed().as_secs_f64()*1000.0;self.timing=Some(timing);self.applied_at=Some(Instant::now());self.adopt_new(cx);self.edit_due(cx);self.edit_pending_due(cx);
             },
             Event::Plot(b)=>self.plot_received(b,cx),
             Event::Answer(id,reply) if id==screens::unsent::TAG=>{let why=if reply["ok"]==true {String::new()} else {hub::rpc_error(&reply)};self.screens.unsent.answered_out(reply["ok"]==true,&why);self.send_unsent();cx.notify();},
