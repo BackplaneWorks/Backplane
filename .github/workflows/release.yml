@@ -484,9 +484,11 @@ jobs:
         run: |
           case "$TAG" in v*-nightly.*) ;; *) echo "::error::$TAG is not a nightly tag"; exit 1;; esac
           # nightly-manifest.json*: 0.15.0-0.15.3 count a release signed only with manifest.json*, so their beta hubs never offer a nightly they would refuse
-          # (update/run.rs NIGHTLY_SIGNED). The tag is made here by the workflow's token, which starts no workflow: no tag-push release of a nightly.
+          # (update/run.rs NIGHTLY_SIGNED). The tag is pushed here first by the workflow's token, which starts no workflow (no tag-push release of a
+          # nightly), then the release is made on it: with immutable releases on, the releases API refused to make the tag itself (403)
           for f in manifest.json manifest.json.sig manifest.json.keyid; do cp "$f" "nightly-$f"; done
-          gh release create "$TAG" --prerelease --draft --target "${{ github.sha }}" --title "$TAG" --notes "Nightly build of ${{ github.sha }} (main). Not a release: Settings, Update channel, nightly takes these." \
+          git tag "$TAG" "${{ github.sha }}" && git push origin "refs/tags/$TAG"
+          gh release create "$TAG" --verify-tag --prerelease --draft --title "$TAG" --notes "Nightly build of ${{ github.sha }} (main). Not a release: Settings, Update channel, nightly takes these." \
             backplane-*.tar.gz backplane-*.zip $(ls backplane-$TAG-android.apk backplane-$TAG-android.aab 2>/dev/null) install.sh SHA256SUMS
           gh release upload "$TAG" nightly-manifest.json nightly-manifest.json.sig nightly-manifest.json.keyid
           gh release edit "$TAG" --draft=false
