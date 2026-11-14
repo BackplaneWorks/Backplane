@@ -24,7 +24,7 @@ discover_bins
 [ -x "$REAL_HOME/.bun/bin/bun" ] && PATH="$REAL_HOME/.bun/bin:$PATH"
 discover_kicad
 [ -n "${KICAD_CLI:-}" ] || KICAD_CLI="$(dirname "${KICAD_BIN:-/usr/bin/kicad}")/kicad-cli"
-[ -x "$KICAD_CLI" ] || { echo "SKIP embed_checks_e2e: no kicad-cli"; exit 0; }
+[ -x "$KICAD_CLI" ] || { echo "FAIL embed_checks_e2e: no kicad-cli (KICAD_CLI=${KICAD_CLI:-unset}): an environment problem, not a skip"; exit 1; }
 init_isolated_dirs
 python3 "$SEED_PY" "$OUT" "$REPO_ROOT"
 DISP=${DISP:-}

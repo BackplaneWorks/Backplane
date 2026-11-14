@@ -15,6 +15,23 @@ REPO_ROOT=$(cd "$KEMBED_LIB/../../.." && pwd)
 
 REAL_HOME="$HOME"
 EMBED_MODE=${EMBED_MODE:-spike}
+
+# bun, found here rather than trusted to the caller's PATH (a work runner's shell had none: two Linux runs died mid-suite at
+# their first hub RPC, Nov 14): PATH, then ~/.bun/bin. Its directory goes first on PATH so the suites' own `bun` calls find it.
+# Not found: any use fails the suite with the reason (never a skip, never a "command not found" halfway through).
+BUN_BIN=$(command -v bun 2>/dev/null || true)
+[ -n "$BUN_BIN" ] || { [ -x "$REAL_HOME/.bun/bin/bun" ] && BUN_BIN="$REAL_HOME/.bun/bin/bun"; }
+if [ -n "$BUN_BIN" ]; then
+  PATH="$(dirname "$BUN_BIN"):$PATH"; export PATH BUN_BIN
+  echo "ENV bun: $BUN_BIN" >&2
+else
+  echo "ENV bun: not found (PATH, $REAL_HOME/.bun/bin)" >&2
+  bun() { echo "FAIL bun is needed and was not found (looked on PATH and in $REAL_HOME/.bun/bin)" >&2; exit 1; }
+fi
+
+# The fork KiCad the hub pins (native/host/src/kicad/install.rs, LINUX's version): its managed install sits in <hub home>/kicad/<version>.
+kembed_pinned_version() { sed -n 's/^pub const LINUX: Package = Package { platform: "linux-x86_64", version: "\([^"]*\)".*/\1/p' "$REPO_ROOT/native/host/src/kicad/install.rs" | head -1; }
+kembed_is_fork() { [ -x "$1" ] && grep -qa 'kiapi.backplane.embed' "$(dirname "$1")/../share/backplane/api.desc" 2>/dev/null; }
 OUT=${OUT:-$(mktemp -d "$BP_TMP/bp-kembed.XXXXXX")}
 mkdir -p "$OUT"
 OUT=$(cd "$OUT" && pwd)
@@ -47,23 +64,31 @@ discover_kicad() {
     KICAD_CLI=${BACKPLANE_KICAD_CLI:-/usr/bin/kicad-cli}
     [ -x "$KICAD_CLI" ] || KICAD_CLI=$(command -v kicad-cli || true)
   elif [ "$EMBED_MODE" = "fork" ]; then
-    if [ -z "${KICAD_BIN:-}" ]; then
-      if [ -n "${BACKPLANE_KICAD_BIN:-}" ]; then
-        KICAD_BIN="$BACKPLANE_KICAD_BIN"
-      else
-        local cand
-        for cand in $(ls -1dr "$REAL_HOME"/.local/share/backplane/kicad/10.99.0-bp.*/bin/kicad 2>/dev/null || true); do
-          if [ -x "$cand" ] && grep -qa 'kiapi.backplane.embed' "$(dirname "$cand")/../share/backplane/api.desc" 2>/dev/null; then
-            KICAD_BIN="$cand"
-            break
-          fi
+    # in order: KICAD_BIN or BACKPLANE_KICAD_BIN (asked for), the kicad beside BACKPLANE_KICAD_CLI (what an agent's shell is
+    # given: the hub's runtime), the hub's pinned version in a hub home ($BACKPLANE_HOME, ~/.backplane*/home, ~/.local/share/backplane),
+    # then the newest fork there. Said which and why; none found is a FAIL with the places looked (a skip hid three lost runs).
+    local how="" cand pin
+    if [ -n "${KICAD_BIN:-}" ]; then how="KICAD_BIN"
+    elif [ -n "${BACKPLANE_KICAD_BIN:-}" ]; then KICAD_BIN="$BACKPLANE_KICAD_BIN"; how="BACKPLANE_KICAD_BIN"
+    elif [ -n "${BACKPLANE_KICAD_CLI:-}" ] && kembed_is_fork "$(dirname "$BACKPLANE_KICAD_CLI")/kicad"; then
+      KICAD_BIN="$(dirname "$BACKPLANE_KICAD_CLI")/kicad"; how="beside BACKPLANE_KICAD_CLI"
+    else
+      pin=$(kembed_pinned_version)
+      local homes=("${BACKPLANE_HOME:-}" "$REAL_HOME"/.backplane*/home "$REAL_HOME/.local/share/backplane")
+      for cand in "${homes[@]}"; do
+        [ -n "$cand" ] && [ -n "$pin" ] && kembed_is_fork "$cand/kicad/$pin/bin/kicad" && { KICAD_BIN="$cand/kicad/$pin/bin/kicad"; how="the hub's pinned $pin"; break; }
+      done
+      if [ -z "${KICAD_BIN:-}" ]; then
+        for cand in $(ls -1dr "${homes[@]/%//kicad/10.99.0-bp.*/bin/kicad}" 2>/dev/null || true); do
+          kembed_is_fork "$cand" && { KICAD_BIN="$cand"; how="newest fork found (pinned ${pin:-?} not installed)"; break; }
         done
       fi
     fi
     if [ -z "${KICAD_BIN:-}" ] || [ ! -x "$KICAD_BIN" ]; then
-      echo "SKIP/FAIL EMBED_MODE=fork requires Backplane KiCad >= 10.99.0-bp.8 (--embedded); pass BACKPLANE_KICAD_BIN=/path/to/kicad" >&2
-      exit 2
+      echo "FAIL EMBED_MODE=fork needs Backplane's fork KiCad (--embedded) and none was found: KICAD_BIN/BACKPLANE_KICAD_BIN unset or not executable (${KICAD_BIN:-}), nothing beside BACKPLANE_KICAD_CLI (${BACKPLANE_KICAD_CLI:-unset}), no $(kembed_pinned_version) or other 10.99.0-bp.* fork under \$BACKPLANE_HOME, ~/.backplane*/home or ~/.local/share/backplane" >&2
+      exit 1
     fi
+    echo "ENV kicad (fork): $KICAD_BIN ($how)" >&2
     # the cli beside the KiCad asked for: the hub takes the GUI kicad from beside its cli, and an agent's shell exports BACKPLANE_KICAD_CLI
     # for the runtime the person runs (a "bp.12" run was bp.11 through it)
     if [ -x "$(dirname "$KICAD_BIN")/kicad-cli" ]; then KICAD_CLI="$(dirname "$KICAD_BIN")/kicad-cli"; else KICAD_CLI=${BACKPLANE_KICAD_CLI:-$(dirname "$KICAD_BIN")/kicad-cli}; fi

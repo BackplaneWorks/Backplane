@@ -26,7 +26,7 @@ if [ -n "${GERBERS_BOARD:-}" ]; then
   rsync -a --exclude '*backups*' --exclude '~*.lck' --exclude '.git' "$GERBERS_BOARD"/ "$PROJ"/
   echo "{\"project\": \"$(basename "$(ls "$PROJ"/*.kicad_pro | head -1)")\"}" >"$PROJ/.backplane.json"
 else
-  [ -x "$KICAD_CLI" ] || { echo "SKIP embed_gerbers_e2e: no kicad-cli to export the fixture's Gerbers"; exit 0; }
+  [ -x "$KICAD_CLI" ] || { echo "FAIL embed_gerbers_e2e: no kicad-cli to export the fixture's Gerbers (KICAD_CLI=${KICAD_CLI:-unset})"; exit 1; }
   mkdir -p "$PROJ/mfg/gerbers"
   "$KICAD_CLI" pcb export gerbers -o "$PROJ/mfg/gerbers/" "$PROJ/ecc83-pp.kicad_pcb" >/dev/null 2>&1
   "$KICAD_CLI" pcb export drill --format excellon --excellon-separate-th -o "$PROJ/mfg/gerbers/" "$PROJ/ecc83-pp.kicad_pcb" >/dev/null 2>&1
