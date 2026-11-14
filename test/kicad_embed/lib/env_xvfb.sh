@@ -333,6 +333,10 @@ finish_suite() {
     check "the client's memory did not grow more than ${RSS_GROWTH_MB:-768} MB over the run" "${ok##* }" "$info"
   fi
   echo "$suite_name: passed=$PASS_COUNT failed=$FAIL_COUNT artifacts=$OUT"
+  # a passing run keeps its logs and shots, not the bulk: a runtime the test home installed (GBs each) and the project copy
+  if [ "$FAIL_COUNT" -eq 0 ] && [ "${KEMBED_KEEP:-0}" != 1 ]; then
+    rm -rf "$OUT"/home/kicad/10.* "$OUT"/home/kicad/.download* "$OUT"/home/kicad/*.tar.gz "$OUT"/home/kicad/*.zip "$OUT/proj" "$OUT/origin.git" 2>/dev/null || true
+  fi
   [ "$FAIL_COUNT" -eq 0 ]
 }
 
