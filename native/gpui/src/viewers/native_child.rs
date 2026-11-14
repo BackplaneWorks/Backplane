@@ -453,6 +453,7 @@ mod imp {
     pub fn hand_back(w: u64) { focus(w) }
     /// Windows only (the F3 input shield): Linux has its button grab (grab_click).
     pub fn shield(_container: u64, _on: bool) {}
+    pub fn focus_debug(_container: u64) -> serde_json::Value { serde_json::Value::Null }
     /// Windows only (an invisible KiCad window taking the foreground): never so here.
     pub fn invisible_kicad_foreground(_frame: u64) -> Option<(u64, String)> { None }
     /// Whether `frame` and its container are both visible now (Windows re-posts an opening focus request on that): always so here.
@@ -1392,6 +1393,20 @@ mod imp {
             SetWindowPos(s, after, tl.x, tl.y, w, hh, SWP_NOACTIVATE | 0x0040 /* SWP_SHOWWINDOW */);
         }
     }
+    /// Debug: what has_focus sees (foreground, the foreground queue's focus and its class, the hand-in flags).
+    pub fn focus_debug(container: u64) -> serde_json::Value {
+        unsafe {
+            let c = hwnd(container);
+            let mut g = GUITHREADINFO { cbSize: std::mem::size_of::<GUITHREADINFO>() as u32, ..std::mem::zeroed() };
+            let ok = GetGUIThreadInfo(0, &mut g) != 0;
+            let mut cls = [0u16; 64];
+            let k = if ok && !g.hwndFocus.is_null() { GetClassNameW(g.hwndFocus, cls.as_mut_ptr(), 64) } else { 0 };
+            serde_json::json!({"foreground": id_of(windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow()),
+                "focus": if ok { id_of(g.hwndFocus) } else { 0 }, "focus_class": String::from_utf16_lossy(&cls[..k.max(0) as usize]),
+                "in_child": in_child_focus(c), "child_focused": CHILD_FOCUSED.load(Ordering::SeqCst), "escaped": FOCUS_ESCAPED.load(Ordering::SeqCst),
+                "grace_left_ms": CLICK_GRACE_UNTIL.load(Ordering::SeqCst).saturating_sub(mono_ms())})
+        }
+    }
     pub fn shield(container: u64, on: bool) {
         let c = hwnd(container);
         if c.is_null() || unsafe { IsWindow(c) } == 0 { return }
@@ -1593,6 +1608,7 @@ mod imp {
     pub fn focus(_w: u64) {}
     pub fn hand_back(_w: u64) {}
     pub fn shield(_container: u64, _on: bool) {}
+    pub fn focus_debug(_container: u64) -> serde_json::Value { serde_json::Value::Null }
     pub fn invisible_kicad_foreground(_frame: u64) -> Option<(u64, String)> { None }
     pub fn frame_visible(_container: u64, _frame: u64) -> bool { true }
     pub fn conn_fd() -> Option<i32> { None }
