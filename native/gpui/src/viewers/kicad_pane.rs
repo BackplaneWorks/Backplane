@@ -259,6 +259,10 @@ pub struct KicadPane {
     /// to the shown editor once per stray (run IB1: the self-started pre-warm took it 1,244 ms after the opening hand-in,
     /// caught only by verify_handin's 1.5 s window; a slower build would land outside it). Started at, done at.
     pub(crate) prewarm_guard: Option<(std::time::Instant, Option<std::time::Instant>, u64)>,
+    /// One re-post per F5 window for keys drifting to Backplane's own window with no press there.
+    unexplained_reposted: bool,
+    /// Debug: the last foreground/focus seen by the tick, to log only changes.
+    focus_seen: (u64, u64),
     /// the keyboard was in a KiCad dialog last tick: when it closes, the keyboard goes back to the editor (a window manager hands it to
     /// Backplane's window)
     was_dialog: bool,
@@ -304,7 +308,7 @@ impl KicadPane {
             let _ = drained_tx.send(());
         } }).detach();
         KicadPane { busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), last_root: (i32::MIN, 0), placed: None,
-            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), poked: None, unmapped_since: None, unshown_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, at_px: None, dialogs_open: Vec::new(), took: None, press_focus: None, want_keys: true, refocus: None, verify_handin: None, prewarm_guard: None, was_dialog: false }
+            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), poked: None, unmapped_since: None, unshown_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, at_px: None, dialogs_open: Vec::new(), took: None, press_focus: None, want_keys: true, refocus: None, verify_handin: None, prewarm_guard: None, unexplained_reposted: false, focus_seen: (0, 0), was_dialog: false }
     }
     fn rpc(&self, name: &str, params: Value) { let _ = self.hub.try_send(Command::Rpc(name.to_string(), Secret(params), "kicad")); }
     /// The hub's `editor.kicad.<digest>` for this project changed.
@@ -513,7 +517,14 @@ impl KicadPane {
     fn want(&self) -> Option<u64> { if self.info.is_null() || (cfg!(windows) && self.info["mode"] == "stock") { return None } pick_local(self.wanted_kind(), &self.info, &self.frames, &self.ever_shown) }
     fn tick(&mut self, cx: &mut Context<Self>) {
         nc::note_pane_keys(self.keys);
-        if let Some(c) = self.container { nc::shield_tick(c, if cfg!(windows) && self.info["mode"] == "fork" { self.want() } else { None }); }
+        // the shield never re-raises while the F5 guard is armed (pre-warm or a hand-in being verified)
+        let f5_armed = self.prewarm_guard.is_some() || self.verify_handin.is_some();
+        if let Some(c) = self.container { nc::shield_tick(c, if cfg!(windows) && self.info["mode"] == "fork" && !(f5_armed && self.keys) { self.want() } else { None }); }
+        if let (true, Some(c)) = (std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() && cfg!(windows), self.container) {
+            let d = nc::focus_debug(c);
+            let now = (d["foreground"].as_u64().unwrap_or(0), d["focus"].as_u64().unwrap_or(0));
+            if now != self.focus_seen { self.focus_seen = now; eprintln!("GPUI_LOG {}", json!({"kicad_focus_timeline": d})); }
+        }
         if let Some((started, done, last_stray)) = self.prewarm_guard {
             let shown = self.wanted_kind();
             let built = ["SCH", "PCB"].iter().filter(|k| **k != shown).all(|k| self.info["frames"].as_array().is_some_and(|a| a.iter().any(|f| f["kind"].as_str() == Some(*k)))); // i18n-ok: wire frame kind enum names
@@ -665,6 +676,18 @@ impl KicadPane {
         // owns the foreground). The desktop or another app having it for a moment (runs S1w, S2w: SysListView32, the
         // desktop) flipped the pane to "Backplane has the keys" while KiCad still had them, and raised the shield.
         if cfg!(windows) && self.keys && !has && !nc::keys_really_backplanes(c) { has = true; }
+        // Windows: while the pane pre-warms or a hand-in is being verified (the F5 windows), KiCad's keys moving to Backplane's
+        // own window with no press in it is a pre-warmed frame's activation ending (Windows passes it on), not the person
+        // taking them (run S7w): the hand-in is posted once more instead of flipping the state and raising the shield.
+        if cfg!(windows) && self.keys && !has && (self.prewarm_guard.is_some() || self.verify_handin.is_some())
+            && nc::backplane_press_ms_ago() > 600 && !self.unexplained_reposted {
+            if let Some(w) = self.want() {
+                self.unexplained_reposted = true;
+                eprintln!("GPUI_LOG {}", json!({"kicad_unexplained_focus_loss": {"frame": w, "why": nc::focus_debug(c)}}));
+                nc::focus(w);
+                has = true;
+            }
+        }
         if std::mem::replace(&mut self.was_dialog, in_dialog) && !has {
             if let Some(w) = self.want() { nc::focus(w); has = true; }
         }
@@ -799,7 +822,7 @@ impl KicadPane {
                 self.prewarmed = Some(pid);
                 let have: Vec<&str> = self.frames.iter().map(|f| f.kind).collect();
                 self.rpc("editor.kicad.prewarm", json!({"project": self.project, "width": p.w, "height": p.h, "active": self.wanted_kind(), "have": have}));
-                if cfg!(windows) { self.prewarm_guard = Some((std::time::Instant::now(), None, 0)); }
+                if cfg!(windows) { self.prewarm_guard = Some((std::time::Instant::now(), None, 0)); self.unexplained_reposted = false; }
             }
         }
         let prev_show = self.placed.as_ref().and_then(|(_, s, _)| *s);
@@ -813,7 +836,7 @@ impl KicadPane {
             if let Some(w) = show {
                 if self.want_keys && nc::button_over(w) == Some(false) { self.press_gave_keys = true; }
                 nc::focus(w);
-                if cfg!(windows) { self.verify_handin = Some((w, std::time::Instant::now())); cx.notify(); }
+                if cfg!(windows) { self.verify_handin = Some((w, std::time::Instant::now())); self.unexplained_reposted = false; cx.notify(); }
                 if cfg!(windows) && !nc::frame_visible(c, w) { self.refocus = Some((w, std::time::Instant::now())); cx.notify(); }
                 if self.want_keys && !self.keys { self.keys = true; nc::grab_escape(self.toplevel, true); self.grab_click(c, false); self.touched(); }
                 self.want_keys = false;
@@ -823,7 +846,7 @@ impl KicadPane {
             let w = show.unwrap();
             if nc::button_over(w) == Some(false) { self.press_gave_keys = true; }
             nc::focus(w);
-            if cfg!(windows) { self.verify_handin = Some((w, std::time::Instant::now())); cx.notify(); }
+            if cfg!(windows) { self.verify_handin = Some((w, std::time::Instant::now())); self.unexplained_reposted = false; cx.notify(); }
             if cfg!(windows) && !nc::frame_visible(c, w) { self.refocus = Some((w, std::time::Instant::now())); cx.notify(); }
             if !self.keys { self.keys = true; nc::grab_escape(self.toplevel, true); self.grab_click(c, false); self.touched(); }
             self.want_keys = false;
