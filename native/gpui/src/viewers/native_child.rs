@@ -453,7 +453,7 @@ mod imp {
     pub fn hand_back(w: u64) { focus(w) }
     /// Windows only (the F3 input shield): Linux has its button grab (grab_click).
     pub fn shield(_container: u64, _on: bool) {}
-    pub fn shield_tick(_container: u64, _enabled: bool) {}
+    pub fn shield_tick(_container: u64, _shown: Option<u64>) {}
     pub fn keys_really_backplanes(_container: u64) -> bool { true }
     pub fn focus_debug(_container: u64) -> serde_json::Value { serde_json::Value::Null }
     /// Windows only (an invisible KiCad window taking the foreground): never so here.
@@ -1422,11 +1422,14 @@ mod imp {
             g.hwndFocus.is_null() || (g.hwndFocus != container && IsChild(container, g.hwndFocus) == 0)
         }
     }
-    /// KiCad really has the keys: the foreground queue's focus is inside the KiCad container (a read, no message to KiCad).
-    fn kicad_has_keys(container: HWND) -> bool {
+    /// KiCad's shown editor really has the keys: the foreground queue's focus is inside `shown` (the editor on show), not
+    /// merely inside the container, which also holds the hidden pre-warmed frames: focus in one of those (a pre-warm steal)
+    /// is not "KiCad has the keys", the same reading as the F5 guard (a read, no message to KiCad).
+    fn kicad_has_keys(shown: HWND) -> bool {
+        if shown.is_null() { return false }
         unsafe {
             let mut g = GUITHREADINFO { cbSize: std::mem::size_of::<GUITHREADINFO>() as u32, ..std::mem::zeroed() };
-            GetGUIThreadInfo(0, &mut g) != 0 && !g.hwndFocus.is_null() && (g.hwndFocus == container || IsChild(container, g.hwndFocus) != 0)
+            GetGUIThreadInfo(0, &mut g) != 0 && !g.hwndFocus.is_null() && (g.hwndFocus == shown || IsChild(shown, g.hwndFocus) != 0)
         }
     }
     /// Each pane tick (40 ms), with the pane on show in fork mode (`enabled`): the shield is down exactly while KiCad really
@@ -1434,10 +1437,10 @@ mod imp {
     /// Backplane having them, or another application in front (run AW1, case 3: back from Notepad by a click straight on
     /// the canvas left no foreground window, F3 by another route). A click on it is then always a click on Backplane's own
     /// window, which Windows activates; the pane's flag never decides it, so a wrong flag cannot eat a click.
-    pub fn shield_tick(container: u64, enabled: bool) {
+    pub fn shield_tick(container: u64, shown: Option<u64>) {
         let c = hwnd(container);
         if c.is_null() || unsafe { IsWindow(c) } == 0 { return }
-        let up = enabled && unsafe { IsWindowVisible(c) } != 0 && !kicad_has_keys(c);
+        let up = shown.is_some() && unsafe { IsWindowVisible(c) } != 0 && !kicad_has_keys(hwnd(shown.unwrap_or(0)));
         if up {
             let n = SHIELD_STABLE.fetch_add(1, Ordering::SeqCst) + 1;
             if n >= 2 && !SHIELD_ON.load(Ordering::SeqCst) { shield_set(container, true); }
@@ -1651,7 +1654,7 @@ mod imp {
     pub fn focus(_w: u64) {}
     pub fn hand_back(_w: u64) {}
     pub fn shield(_container: u64, _on: bool) {}
-    pub fn shield_tick(_container: u64, _enabled: bool) {}
+    pub fn shield_tick(_container: u64, _shown: Option<u64>) {}
     pub fn keys_really_backplanes(_container: u64) -> bool { true }
     pub fn focus_debug(_container: u64) -> serde_json::Value { serde_json::Value::Null }
     pub fn invisible_kicad_foreground(_frame: u64) -> Option<(u64, String)> { None }

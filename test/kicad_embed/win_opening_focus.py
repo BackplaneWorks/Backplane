@@ -711,17 +711,36 @@ def run(h):
             px, z = plain_key_acts(h, gl, "away3", frame)
             r3["f2_acts"] = z
             res["back_by_canvas"] = r3
+            # 4. KiCad had the keys, Alt+Tab away to Notepad and Alt+Tab back, no click: the keys should be where they were
+            give_kicad_keys(h, cp, frame)
+            time.sleep(0.4)
+            r4 = {"kicad_first": snap("k4")}
+            E.u32.SetForegroundWindow(np)  # Notepad next in the Alt+Tab order
+            time.sleep(0.3)
+            give_kicad_keys(h, cp, frame)
+            r4["kicad_again"] = snap("k4b")
+            E.key_chord("alt", "Tab")
+            time.sleep(0.8)
+            r4["away"] = snap("away4")
+            E.key_chord("alt", "Tab")
+            time.sleep(0.8)
+            r4["back"] = snap("back4")
+            px, z = plain_key_acts(h, gl, "away4", frame)
+            r4["f2_acts_no_click"] = z
+            res["alt_tab"] = r4
             try:
                 np_proc.kill()
             except OSError:
                 pass
-            print("DIAG away_return " + json.dumps(res)[:6000], flush=True)
+            print("DIAG away_return " + json.dumps(res)[:8000], flush=True)
             h.check("1. KiCad had the keys, away and back by the title bar: F2 acts, the canvas click acts (not eaten)",
                     r1["back"]["inside_frame"] and bool(r1["f2_acts"]) and r1["canvas_click_u1"]["consumed_by_shield"] == 0 and r1["canvas_click_u1"]["panel_px"] > 200, r1)
             h.check("2. Backplane had the keys, away and back by the title bar: composer types, one canvas click hands in (shield), F2 then acts",
                     r2["composer_key_ms"] is not None and r2["canvas_click_empty"]["consumed_by_shield"] == 1 and bool(r2["f2_acts_after_click"]) and r2["canvas_click_empty"]["no_foreground_samples"] == 0, r2)
             h.check("3. Back from another app by clicking the canvas: KiCad gets the keys (F2 acts), foreground never empty",
                     bool(r3["f2_acts"]) and r3["canvas_click_u1_from_other_app"]["no_foreground_samples"] == 0, r3)
+            # 4 is reported, not a blocker for stage 1 (the lead's follow-up if it fails)
+            print("DIAG alt_tab_keys_back " + json.dumps({"f2_acts_no_click": r4["f2_acts_no_click"], "away_fg": r4["away"].get("foreground_title"), "back": {k: r4["back"].get(k) for k in ("foreground_title", "focus_class", "inside_frame")}}), flush=True)
             return h.finish()
         if only == "edit_first_click":
             # F3 shield, point 3: after Edit (KiCad has the keys), the first click on the canvas must reach KiCad, not be
