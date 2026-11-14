@@ -804,10 +804,10 @@ mod tests {
         let row_for = |caps: &str| { let mut i = info("linux"); i["kicad.status"] = json!("ok"); i["kicad.cli"] = json!("/h/kicad/10.99.0-bp.4/bin/kicad-cli"); i["kicad.version"] = json!("10.99.0-bp.4"); i["kicad.caps"] = json!(caps);
             let s0 = cst(blank(), &[]); tools_with(&Facts::of(&s0, &i), &s0, &sess(json!({})), pick("linux", "x86_64")).rows.into_iter().find(|r| r["label"] == "KiCad").unwrap() };
         let k = row_for("embed,coedit"); let n = k["note"].as_str().unwrap();
-        assert_eq!(n, format!("Backplane KiCad 10.99.0-bp.4 is installed; Backplane KiCad {} is out. It fixes a DRC fault that could miss a short inside a filled zone.", LINUX.version));
+        assert_eq!(n, format!("Backplane KiCad 10.99.0-bp.4 is installed; Backplane KiCad {} is out. It fixes a DRC fault that could miss a short inside a filled zone, and stops KiCad rewriting files nobody changed or refusing saves while its Symbol Editor is open.", LINUX.version));
         assert!(!n.contains("/h/kicad"), "no path in the sentence"); assert_eq!(k["buttons"][0]["label"], "Update KiCad");
         assert!(row_for("api-server")["note"].as_str().unwrap().ends_with("filled zone, and brings the KiCad editor inside Backplane's viewer."));
-        assert!(row_for("drc-zone-guard")["note"].as_str().unwrap().ends_with("is out. It brings the KiCad editor inside Backplane's viewer."));
+        assert!(row_for("drc-zone-guard")["note"].as_str().unwrap().ends_with("is out. It brings the KiCad editor inside Backplane's viewer, and stops KiCad rewriting files nobody changed or refusing saves while its Symbol Editor is open."));
     }
     /// While KiCad downloads: its bytes over a bar, Locate and Skip quiet until asked for; when the one automatic start has passed and nothing
     /// runs, a press (continuing a kept download), never a "Downloading" that nothing does.
