@@ -91,7 +91,9 @@ pub async fn plan_now(hub: &Arc<Hub>, pcb: &str) -> (Value, bool) {
 pub async fn publish(hub: &Arc<Hub>, pro: &str) {
     let pcb = pcb_of(pro); if pcb.is_empty() { return }
     let (plan, live) = plan_now(hub, &pcb).await;
-    let d = if plan.is_null() { json!({"badge": {"n": 0, "tone": ""}, "empty": true, "live": live, "layers": []}) } else { data(&plan, &super::events::open_asks(&pcb), live) };
+    let mut d = if plan.is_null() { json!({"badge": {"n": 0, "tone": ""}, "empty": true, "live": live, "layers": []}) } else { data(&plan, &super::events::open_asks(&pcb), live) };
+    // a KiCad whose own keys in plan view are not the plan's: the panel says to approve here
+    if let Some(n) = crate::files::kicad::embed::gui_route(pro).and_then(|r| super::keys_note(&r.caps)) { d["keys_note"] = json!(n); }
     mgmt::publish(hub, "plan", pro, d).await;
 }
 
