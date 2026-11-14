@@ -122,6 +122,16 @@ fn view(day: &str, now: u64) -> View { View { reset: "0:".into(), ver: "0.15.3".
 // ---- end to end: a hub, a loopback receiver ----
 
 static SERIAL: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// `ALLOWED`, `HUMAN` and the usage counters are process-wide, and a successful `thread.create` or `turn.start` on ANY hub in the binary (hub.rs) or a board counted anywhere feeds them while
+/// sending is allowed, which these tests switch on. `SERIAL` only keeps this module's tests from each other, so a test that claims exact events runs in a process of its own, with nothing else
+/// in it to touch them: the parent starts the binary again for that one test and judges its result.
+fn alone(name: &str) -> bool {
+    if std::env::var_os("BP_TELEMETRY_TEST_ALONE").is_some() { return false }
+    let out = std::process::Command::new(std::env::current_exe().unwrap()).args(["--exact", name, "--test-threads=1", "--nocapture"]).env("BP_TELEMETRY_TEST_ALONE", "1").output().unwrap();
+    assert!(out.status.success(), "{name} on its own:\n{}\n{}", String::from_utf8_lossy(&out.stdout), String::from_utf8_lossy(&out.stderr));
+    true
+}
 /// A receiver on 127.0.0.1 that checks the signature and answers `status`; keeps each accepted body.
 struct Recv { port: u16, bodies: Arc<StdMutex<Vec<Value>>>, status: Arc<AtomicU64> }
 async fn receiver() -> Recv {
@@ -225,6 +235,7 @@ fn sent_kinds(r: &Recv) -> Vec<String> { r.bodies.lock().unwrap().iter().flat_ma
     r.status.store(202, Relaxed); job(&h, &c).await; assert!(r.bodies.lock().unwrap().is_empty());
 }
 #[tokio::test] async fn the_outbox_survives_a_restart_and_is_replayed_once() {
+    if alone("settings::telemetry_send::tests::the_outbox_survives_a_restart_and_is_replayed_once") { return }
     let _g = SERIAL.lock().await; let r = receiver().await; let h = hub("replay").await; let c = tcfg(r.port);
     set(&h, &[("onboard.done", "1"), (tc::NOTICE, "chosen")]).await;
     r.status.store(503, Relaxed); ALLOWED.store(true, Relaxed); human(); job(&h, &c).await;
@@ -238,6 +249,7 @@ fn sent_kinds(r: &Recv) -> Vec<String> { r.bodies.lock().unwrap().iter().flat_ma
     let id = read_state(&h.cfg.home).id; assert!(r.bodies.lock().unwrap()[0]["events"].as_array().unwrap().iter().all(|e| e["id"] == id.as_str()));
 }
 #[tokio::test] async fn nothing_but_the_documented_fields_and_numbers_ever_leaves() {
+    if alone("settings::telemetry_send::tests::nothing_but_the_documented_fields_and_numbers_ever_leaves") { return }
     let _g = SERIAL.lock().await; let r = receiver().await; let h = hub("content").await; let c = tcfg(r.port);
     set(&h, &[("onboard.done", "1"), (tc::NOTICE, "shown")]).await;
     job(&h, &c).await; // registered

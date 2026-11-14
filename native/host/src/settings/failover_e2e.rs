@@ -57,6 +57,22 @@ impl Rig {
     async fn turn_of(&self, th: &str) -> String { self.hub.model().await.threads.get(th).map(|t| t.turn.clone()).unwrap_or_default() }
     /// Until the thread's turn is at rest in `state` and `n` turns ran.
     async fn rest(&self, th: &str, state: &str, n: usize) { let end = Instant::now() + Duration::from_secs(PATIENCE); loop { if self.turns().len() >= n && self.turn_of(th).await == state { tokio::time::sleep(Duration::from_millis(150)).await; if self.turn_of(th).await == state { return } } assert!(Instant::now() < end, "turn {}, {} of {n} turns; {:?}\n{:#?}", self.turn_of(th).await, self.turns().len(), self.lines(th), self.turns()); tokio::time::sleep(Duration::from_millis(40)).await } }
+    /// Until a line of the thread's activity satisfies `f`. The turn's state and its lines are committed by different actors (the failed turn's own end, the driver's decision, a tool call),
+    /// so a turn at rest does not yet mean the line about it is in: every positive claim about a line waits for it, by condition, up to PATIENCE.
+    async fn said(&self, th: &str, f: impl Fn(&str) -> bool) {
+        let end = Instant::now() + Duration::from_secs(PATIENCE);
+        loop { let ls = self.lines(th); if ls.iter().any(|l| f(l)) { return } assert!(Instant::now() < end, "no such line: {ls:#?}"); tokio::time::sleep(Duration::from_millis(40)).await }
+    }
+    /// Until the thread is bound to the account `id` for the provider.
+    async fn bound(&self, th: &str, provider: &str, id: &str) {
+        let end = Instant::now() + Duration::from_secs(PATIENCE);
+        loop { let b = self.binding(th, provider).await; if b == id { return } assert!(Instant::now() < end, "bound to {b:?}, not {id:?}: {:?}", self.lines(th)); tokio::time::sleep(Duration::from_millis(40)).await }
+    }
+    /// Until the setting is empty (a record the hub ends when what it was about is over).
+    async fn cleared(&self, key: &str) {
+        let end = Instant::now() + Duration::from_secs(PATIENCE);
+        loop { let v = self.hub.setting(key).await.unwrap_or_default(); if v.is_empty() { return } assert!(Instant::now() < end, "{key} is still {v}"); tokio::time::sleep(Duration::from_millis(40)).await }
+    }
     async fn binding(&self, th: &str, provider: &str) -> String { let b: Value = serde_json::from_str(&self.hub.setting(&ac::binding_key(th, provider)).await.unwrap_or_default()).unwrap_or(Value::Null); b["id"].as_str().unwrap_or("").to_string() }
     /// An MCP tool, through the real server, as an agent of `th`.
     async fn tool(&self, th: &str, name: &str, args: Value) -> (bool, Value) {
@@ -98,7 +114,7 @@ impl Rig {
     for must in ["FIRST-REQUEST remember the pad size", "answered by w@x.com", "SECOND-REQUEST route the board", "PARTIAL-w@x.com", "Continue the interrupted work"] { assert!(got.contains(must), "the rebuilt prompt lacks {must:?}:\n{got}") }
     assert_eq!(r.binding(T, "claude").await, p.0);
     let say = format!("Switched to Personal: Work ran out (resets {})", crate::agents::rules::when(&r.zone().await, reset, now()));
-    assert!(r.lines(T).contains(&say), "{:?}", r.lines(T));
+    r.said(T, |l| l == say).await;
     let log = r.log();
     assert!(!log.iter().any(|e| e["$"] == "TurnChanged" && e["state"] == "failed"), "a turn that goes on never reads as failed");
     assert!(!log.iter().any(|e| e["$"] == "ActivityLogged" && e["tone"] == "error"), "{:?}", r.lines(T));
@@ -123,8 +139,7 @@ impl Rig {
     r.mode("default", "goaway:2"); r.say(T, "m2", "SECOND route the board").await; r.rest(T, "completed", 4).await;
     let t = r.turns(); assert_eq!(t.len(), 4, "{t:?}");
     for x in &t[2..4] { assert_eq!(x["resume"], json!(sid), "each try resumes the thread's own session"); assert!(x["text"].as_str().unwrap().contains("The connection to the provider dropped") && x["text"].as_str().unwrap().contains("SECOND route the board")) }
-    let lines = r.lines(T);
-    assert!(lines.iter().any(|l| l.starts_with("Reconnecting to Claude… (try 1 of 4")) && lines.iter().any(|l| l.starts_with("Reconnecting to Claude… (try 2 of 4")), "{lines:?}");
+    r.said(T, |l| l.starts_with("Reconnecting to Claude… (try 1 of 4")).await; r.said(T, |l| l.starts_with("Reconnecting to Claude… (try 2 of 4")).await;
     assert!(!r.log().iter().any(|e| e["thread"] == T && ((e["$"] == "ActivityLogged" && e["tone"] == "error") || (e["$"] == "TurnChanged" && e["state"] == "failed"))), "no failure is shown");
     assert_eq!(r.provider(T).await, "claude"); assert_eq!(r.hub.setting(&fb::transient_key(T)).await.unwrap_or_default(), "", "the turn that came back starts the count again");
 }
@@ -132,15 +147,20 @@ impl Rig {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn a_connection_reset_that_kills_the_process_reconnects_too() {
     let r = rig("reset", "claude").await;
     r.mode("default", "exit-reset:1"); r.say(T, "m1", "ONLY check the clearances").await; r.rest(T, "completed", 2).await;
-    let lines = r.lines(T); assert!(lines.iter().any(|l| l.starts_with("Reconnecting to Claude… (try 1 of 4")), "{lines:?}");
+    r.said(T, |l| l.starts_with("Reconnecting to Claude… (try 1 of 4")).await;
     assert!(!r.log().iter().any(|e| e["thread"] == T && e["$"] == "TurnChanged" && e["state"] == "failed"));
 }
 /// Nov 13: the CLI's own login was helmut@backplaneworks.com and the same account was added again: the menu showed two accounts, and a limit on one could "move" to the other.
 /// Here the CLI's login is w@x.com and Work is w@x.com: the hub says who the login is, marks Work as it, and a limit on the login goes to Personal, never Work.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn the_cli_login_and_the_same_account_added_again_are_one_account() {
     let r = rig("twin", "claude").await; let (w, p) = r.two("claude").await; let reset = now() + 7200;
-    std::fs::write(r.dir.join("default.login"), json!({"email":"w@x.com","subscriptionType":"max","accountUuid":"w@x.com","orgUuid":"o1"}).to_string()).unwrap();
+    // The manager reads the CLI's login on its own at start and then only every five minutes. A read of ours before the file exists would be skipped as not due if that one had run, and
+    // that one, if it began before the file, could land after ours: so wait until a reading is in (ours is due if none has run, else it is that one), write the file, then ask for a read
+    // five minutes on, which is due whatever ran.
     r.mgr.read_defaults(now()).await;
+    let end = Instant::now() + Duration::from_secs(PATIENCE); loop { let inv: Value = serde_json::from_str(&r.hub.setting("accounts.inventory").await.unwrap_or_default()).unwrap_or(Value::Null); if !inv["defaultLogin"]["claude"].is_null() { break } assert!(Instant::now() < end, "the CLI's login was never read: {inv}"); tokio::time::sleep(Duration::from_millis(40)).await }
+    std::fs::write(r.dir.join("default.login"), json!({"email":"w@x.com","subscriptionType":"max","accountUuid":"w@x.com","orgUuid":"o1"}).to_string()).unwrap();
+    r.mgr.read_defaults(now() + 300).await;
     let end = Instant::now() + Duration::from_secs(PATIENCE);
     loop { let inv: Value = serde_json::from_str(&r.hub.setting("accounts.inventory").await.unwrap_or_default()).unwrap_or(Value::Null);
         if ac::profile(&inv.to_string(), &w.0)["sameAsDefault"] == true { assert_eq!(inv["defaultLogin"]["claude"]["email"], "w@x.com"); assert!(ac::profile(&inv.to_string(), &p.0)["sameAsDefault"].is_null(), "Personal is someone else"); break }
@@ -156,7 +176,7 @@ impl Rig {
     let ts = r.turns(); assert_eq!(ts.iter().map(|t| t["who"].as_str().unwrap().to_string()).collect::<Vec<_>>(), ["w@x.com", "p@x.com"], "never Work after its own login ran out: {ts:#?}");
     assert_eq!(r.binding(T, "claude").await, p.0);
     for (id, e) in [(String::new(), 0), w.clone()] { let h: Value = serde_json::from_str(&r.hub.setting(&fb::hold_key("claude", &id, e)).await.unwrap_or_default()).unwrap_or(Value::Null); assert_eq!(h["reset"], reset, "held: {id:?}") }
-    let lines = r.lines(T); assert!(lines.iter().any(|l| l.starts_with("Switched to Personal: Default account ran out")), "{lines:?}");
+    r.said(T, |l| l.starts_with("Switched to Personal: Default account ran out")).await;
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn a_limit_the_cli_ends_by_cancelling_its_command_fails_over_from_the_default_login() {
     let r = rig("cancel", "claude").await; let (w, p) = r.two("claude").await; let reset = now() + 7200;
@@ -167,7 +187,7 @@ impl Rig {
     assert!(ts[1]["text"].as_str().unwrap().contains("CHECK-THE-CALENDAR for today"), "the request goes on with what it lost:\n{}", ts[1]["text"]);
     assert_eq!(r.binding(T, "claude").await, p.0);
     let say = format!("Switched to Personal: Default account ran out (resets {})", crate::agents::rules::when(&r.zone().await, reset, now()));
-    let lines = r.lines(T); assert_eq!(lines.iter().filter(|l| l.starts_with("Switched to")).count(), 1, "one line: {lines:?}"); assert!(lines.contains(&say), "{lines:?}");
+    r.said(T, |l| l == say).await; let lines = r.lines(T); assert_eq!(lines.iter().filter(|l| l.starts_with("Switched to")).count(), 1, "one line: {lines:?}");
     let log = r.log();
     assert!(!log.iter().any(|e| e["$"] == "TurnChanged" && e["thread"] == T && matches!(e["state"].as_str(), Some("interrupted" | "failed")) && e["failover"] != true), "the turn never reads as stopped or failed to whoever waits on it");
     let hold: Value = serde_json::from_str(&r.hub.setting(&fb::hold_key("claude", "", 0)).await.unwrap()).unwrap(); assert_eq!(hold["reset"], reset, "the reset the limit gave");
@@ -186,7 +206,7 @@ impl Rig {
     let r = rig("cancelall", "claude").await; let (_w, _p) = r.two("claude").await; let (rd, rw, rp) = (now() + 9000, now() + 7200, now() + 3600);
     r.bind(T, "claude", &(String::new(), 0)).await;
     r.mode("default", &format!("cancel:{rd}")); r.mode("w@x.com", &format!("cancel:{rw}")); r.mode("p@x.com", &format!("cancel:{rp}"));
-    r.say(T, "m1", "THE-REQUEST").await; r.rest(T, "interrupted", 3).await; tokio::time::sleep(Duration::from_millis(800)).await;
+    r.say(T, "m1", "THE-REQUEST").await; r.rest(T, "interrupted", 3).await; r.said(T, |l| l.starts_with("Every claude account is out")).await;
     assert_eq!(r.turns().len(), 3, "each login once: {:#?}", r.turns());
     let waits: Vec<String> = r.lines(T).into_iter().filter(|l| l.starts_with("Every claude account is out")).collect();
     assert_eq!(waits, vec![format!("Every claude account is out (Default account, Work, Personal). Continuing at {}, when the first one resets.", crate::agents::rules::when(&r.zone().await, rp, now()))], "{:?}", r.lines(T));
@@ -200,7 +220,7 @@ impl Rig {
     std::fs::remove_file(r.dir.join("mode.w@x.com")).unwrap();
     // the hold's reset comes: as far as the record goes it is over
     r.tick(reset + 1).await; assert_eq!(r.binding(T, "claude").await, w.0);
-    assert!(r.lines(T).iter().any(|l| l == "Back on Work: it has reset"), "{:?}", r.lines(T)); assert_eq!(r.hub.setting(&fb::preference_key(T)).await.unwrap_or_default(), "");
+    r.said(T, |l| l == "Back on Work: it has reset").await; assert_eq!(r.hub.setting(&fb::preference_key(T)).await.unwrap_or_default(), "");
     r.say(T, "m3", "THREE").await; r.rest(T, "completed", 4).await; let ts = r.turns();
     assert_eq!((ts[3]["who"].as_str().unwrap(), ts[3]["resume"].as_str().unwrap()), ("w@x.com", sid.as_str()), "its own session, in its own store: {:?}\n{:?}", r.lines(T), r.log().iter().filter(|e| e["$"] == "SettingSet" && e["key"].as_str().map_or(false, |k| k.starts_with("account."))).map(|e| format!("{}={}", e["key"], e["value"])).collect::<Vec<_>>());
     let got = ts[3]["text"].as_str().unwrap(); assert!(got.contains("answered by p@x.com") && got.contains("THREE"), "what happened meanwhile is handed over:\n{got}");
@@ -208,10 +228,10 @@ impl Rig {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn every_account_out_is_said_plainly_never_loops_and_goes_on_at_the_earliest_reset() {
     let r = rig("allout", "claude").await; let (w, p) = r.two("claude").await; let (rw, rp) = (now() + 7200, now() + 3600);
     r.mode("w@x.com", &format!("limit:{rw}")); r.mode("p@x.com", &format!("limit:{rp}"));
-    r.say(T, "m1", "THE-REQUEST").await; r.rest(T, "interrupted", 2).await; tokio::time::sleep(Duration::from_millis(600)).await;
+    r.say(T, "m1", "THE-REQUEST").await; r.rest(T, "interrupted", 2).await; r.said(T, |l| l.starts_with("Every claude account is out")).await;
     assert_eq!(r.turns().len(), 2, "each account once: {:#?}", r.turns());
     let say = format!("Every claude account is out (Work, Personal). Continuing at {}, when the first one resets.", crate::agents::rules::when(&r.zone().await, rp, now()));
-    assert!(r.lines(T).contains(&say), "{:?}", r.lines(T));
+    r.said(T, |l| l == say).await;
     let rec: Value = serde_json::from_str(&r.hub.setting(&format!("provider.resume.{T}")).await.unwrap()).unwrap(); assert_eq!(rec["reset"], rp);
     r.tick(rp - 5).await; assert_eq!(r.turns().len(), 2, "not before it");
     std::fs::remove_file(r.dir.join("mode.p@x.com")).unwrap();
@@ -219,13 +239,15 @@ impl Rig {
     assert_eq!(ts[2]["who"], "p@x.com", "the account that reset first, wherever the thread stood"); assert_eq!(r.binding(T, "claude").await, p.0); let _ = w;
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn every_account_out_with_no_reset_known_says_when_it_tries_again_and_a_turn_is_the_test() {
-    let r = rig("noreset", "claude").await; let (_w, p) = r.two("claude").await; r.mode("w@x.com", "limit-noreset"); r.mode("p@x.com", "limit-noreset");
-    let t0 = now(); r.say(T, "m1", "GO").await; r.rest(T, "interrupted", 2).await; tokio::time::sleep(Duration::from_millis(400)).await;
+    let r = rig("noreset", "claude").await; let (w, p) = r.two("claude").await; r.mode("w@x.com", "limit-noreset"); r.mode("p@x.com", "limit-noreset");
+    let t0 = now(); r.say(T, "m1", "GO").await; r.rest(T, "interrupted", 2).await; r.said(T, |l| l.starts_with("Every claude account is out")).await;
     assert_eq!(r.turns().len(), 2);
-    assert!(r.lines(T).iter().any(|l| l.starts_with("Every claude account is out (Work, Personal). Continuing at ")), "a limit that named no reset is tried again an hour after it was met: {:?}", r.lines(T));
+    r.said(T, |l| l.starts_with("Every claude account is out (Work, Personal). Continuing at ")).await;
     r.tick(t0 + 600).await; assert_eq!(r.turns().len(), 2, "not before then");
     std::fs::remove_file(r.dir.join("mode.p@x.com")).unwrap(); // Personal has allowance again
-    r.tick(t0 + fb::UNKNOWN_HOLD_S + 5).await; r.rest(T, "completed", 4).await;
+    // the hour is counted from when each hold was made, which on a machine that is slow is seconds after `t0`: tick an hour after the later of the two
+    let mut late = t0; for (id, e) in [(&w.0, w.1), (&p.0, p.1)] { let h: Value = serde_json::from_str(&r.hub.setting(&fb::hold_key("claude", id, e)).await.unwrap_or_default()).unwrap_or(Value::Null); late = late.max(h["at"].as_u64().unwrap_or(0)) }
+    r.tick(late + fb::UNKNOWN_HOLD_S + 5).await; r.rest(T, "completed", 4).await;
     let ts = r.turns(); assert_eq!((ts[2]["who"].as_str().unwrap(), ts[3]["who"].as_str().unwrap()), ("w@x.com", "p@x.com"), "both are tried again: Work, first in saved order, is still out and held again; Personal works: {ts:#?}");
     assert_eq!(r.binding(T, "claude").await, p.0);
     assert_eq!(r.hub.setting(&fb::hold_key("claude", &p.0, p.1)).await.unwrap_or_default(), "", "the completed turn ended its hold");
@@ -233,7 +255,7 @@ impl Rig {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn a_failed_login_mid_turn_moves_the_thread_and_a_later_check_clears_it() {
     let r = rig("auth", "claude").await; let (w, p) = r.two("claude").await; r.mode("w@x.com", "auth");
     r.say(T, "m1", "AUTH-REQUEST").await; r.rest(T, "completed", 2).await;
-    assert_eq!(r.binding(T, "claude").await, p.0); assert!(r.lines(T).iter().any(|l| l == "Switched to Personal: Work could not sign in"), "{:?}", r.lines(T));
+    assert_eq!(r.binding(T, "claude").await, p.0); r.said(T, |l| l == "Switched to Personal: Work could not sign in").await;
     let k = fb::hold_key("claude", &w.0, w.1); let at: u64 = serde_json::from_str::<Value>(&r.hub.setting(&k).await.unwrap()).unwrap()["at"].as_u64().unwrap();
     r.tick(now()).await; assert!(!r.hub.setting(&k).await.unwrap_or_default().is_empty(), "nothing newer has been learned");
     tokio::time::sleep(Duration::from_millis(1100)).await; let _ = r.mgr.request(&json!({"op":"status","profile":w.0})).await;
@@ -256,7 +278,7 @@ impl Rig {
     r.say(T, "m1", "CODEX-REQUEST").await; r.rest(T, "completed", 2).await; let ts = r.turns();
     assert_eq!((ts[0]["who"].as_str().unwrap(), ts[1]["who"].as_str().unwrap()), ("w@x.com", "p@x.com"), "each under its own CODEX_HOME: {ts:#?}");
     assert_eq!(r.binding(T, "codex").await, p.0); let got = ts[1]["text"].as_str().unwrap(); assert!(got.contains("CODEX-REQUEST"), "{got}");
-    assert!(r.lines(T).iter().any(|l| l.starts_with("Switched to Personal: Work ran out (resets ")), "{:?}", r.lines(T)); assert!(!r.log().iter().any(|e| e["$"] == "TurnChanged" && e["state"] == "failed"));
+    r.said(T, |l| l.starts_with("Switched to Personal: Work ran out (resets ")).await; assert!(!r.log().iter().any(|e| e["$"] == "TurnChanged" && e["state"] == "failed"));
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn the_persons_pick_hands_the_conversation_over_with_the_next_message() {
     let r = rig("pick", "claude").await; let (_, p) = r.two("claude").await;
@@ -269,7 +291,9 @@ impl Rig {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn a_delegated_child_that_fails_over_is_not_reported_as_ended() {
     let r = rig("task", "claude").await; let (_, p) = r.two("claude").await; r.mode("p@x.com", "ok"); r.mode("w@x.com", &format!("limit:{}", now() + 900));
     let (ok, v) = r.tool(T, "delegate_task", json!({"prompt":"CHILD-WORK","account":"w@x.com"})).await; assert!(ok, "{v}"); assert_eq!(v["account"], "Work");
-    let child = v["childThreadId"].as_str().unwrap().to_string(); r.rest(&child, "completed", 2).await; tokio::time::sleep(Duration::from_millis(400)).await;
+    let child = v["childThreadId"].as_str().unwrap().to_string(); r.rest(&child, "completed", 2).await;
+    // the task's own end is committed by another actor than the child's turn: wait for it
+    let end = Instant::now() + Duration::from_secs(PATIENCE); while r.log().iter().filter(|e| e["$"] == "TaskStateSet").filter_map(|e| e["state"].as_str().map(str::to_string)).last().as_deref() != Some("done") { assert!(Instant::now() < end, "the task never ended: {:?}", r.log().iter().filter(|e| e["$"] == "TaskStateSet").collect::<Vec<_>>()); tokio::time::sleep(Duration::from_millis(40)).await }
     let log = r.log(); let states: Vec<&str> = log.iter().filter(|e| e["$"] == "TaskStateSet").filter_map(|e| e["state"].as_str()).collect();
     assert!(!states.contains(&"interrupted") && !states.contains(&"failed"), "{states:?}"); assert_eq!(states.last(), Some(&"done"), "the task ends once, when the child has finished: {states:?}");
 }
@@ -282,14 +306,14 @@ impl Rig {
     let (ok, v) = r.tool(T, "thread_launch", json!({"prompt":"LAUNCHED","account":"p@x.com","title":"On personal"})).await; assert!(ok, "{v}"); assert_eq!((v["account"].as_str().unwrap(), v["provider"].as_str().unwrap()), ("Personal", "claude"));
     let th = v["threadId"].as_str().unwrap().to_string(); r.rest(&th, "completed", 1).await; assert_eq!(r.turns()[0]["who"], "p@x.com", "it ran on that login");
     let chosen: Value = serde_json::from_str(&r.hub.setting(&ac::chosen_key(&th, "claude")).await.unwrap()).unwrap(); assert_eq!((chosen["by"].as_str().unwrap(), chosen["who"].as_str().unwrap()), ("agent", "The agent of \"Fixture\""));
-    assert!(r.lines(&th).iter().any(|l| l == "The agent of \"Fixture\" started this thread on Personal"), "{:?}", r.lines(&th));
+    r.said(&th, |l| l == "The agent of \"Fixture\" started this thread on Personal").await;
     for (args, why) in [(json!({"prompt":"x","account":"nobody"}), "No account is called nobody"), (json!({"prompt":"x","account":"Work","provider":"codex"}), "No account is called Work")] { let (ok, v) = r.tool(T, "thread_launch", args).await; assert!(!ok && v["error"].as_str().unwrap().contains(why), "{v}") }
     // a new thread with none named freezes the provider's default, as one the person makes does
     r.hub.commit(&json!({"$":"SettingSet","key":"account.default.claude","value":ac::binding_show(&w.0, w.1),"at":now()})).await.unwrap();
     let (_, v) = r.tool(T, "thread_launch", json!({"prompt":"DEFAULTED"})).await; let d = v["threadId"].as_str().unwrap().to_string(); r.rest(&d, "completed", 2).await; assert_eq!(r.turns()[1]["who"], "w@x.com"); assert_eq!(r.hub.setting(&ac::chosen_key(&d, "claude")).await.unwrap_or_default(), "", "nobody chose it");
     // thread_update moves an unpinned thread, and says who
     let (ok, v) = r.tool(&th, "thread_update", json!({"threadId":d,"account":"Work"})).await; assert!(ok, "{v}"); let (ok, v) = r.tool(&th, "thread_update", json!({"threadId":d,"account":"Personal"})).await; assert!(ok, "{v}"); assert_eq!(r.binding(&d, "claude").await, p.0);
-    assert!(r.lines(&d).iter().any(|l| l.ends_with("selected Personal; conversation context is handed to this account with the next message.")), "{:?}", r.lines(&d));
+    r.said(&d, |l| l.ends_with("selected Personal; conversation context is handed to this account with the next message.")).await;
     let (ok, v) = r.tool(T, "thread_update", json!({"threadId":d,"account":"Work","title":"x"})).await; assert!(!ok && v["error"].as_str().unwrap().contains("cannot be combined"), "{v}");
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn a_bot_cannot_move_a_thread_the_person_pinned_unless_the_person_asked() {
@@ -307,7 +331,7 @@ impl Rig {
     // the person's own words, naming the account, do
     r.say(T, "m9", "move this to Personal please").await; r.rest(T, "completed", 2).await;
     let (ok, v) = r.tool(t2, "thread_update", json!({"threadId":T,"account":"Personal"})).await; assert!(ok, "{v}"); assert_eq!(v["by"], "bot"); assert_eq!(r.binding(T, "claude").await, p.0);
-    assert!(r.lines(T).iter().any(|l| l == "Bub selected Personal; conversation context is handed to this account with the next message."), "{:?}", r.lines(T));
+    r.said(T, |l| l == "Bub selected Personal; conversation context is handed to this account with the next message.").await;
     let c: Value = serde_json::from_str(&r.hub.setting(&ac::chosen_key(T, "claude")).await.unwrap()).unwrap(); assert_eq!((c["by"].as_str().unwrap(), c["who"].as_str().unwrap()), ("bot", "Bub"));
     // a failover is no override: the pin stands and is where the thread goes back to
     assert_eq!(r.pick(T, &p).await["ok"], true); r.mode("p@x.com", &format!("limit:{}", now() + 900)); r.say(T, "m10", "GO").await; r.rest(T, "completed", 4).await;
@@ -328,7 +352,7 @@ impl Rig {
     let old_home = r.turns()[0]["home"].as_str().unwrap().to_string();
     std::fs::write(std::path::Path::new(&old_home).join("dead"), "").unwrap(); // its OAuth session died; the credentials file still names the account
     r.say(T, "m2", "SECOND-REQUEST route the board").await; r.rest(T, "interrupted", 2).await;
-    assert_eq!(r.mgr.state_of(&w.0), "expired");
+    let end = Instant::now() + Duration::from_secs(PATIENCE); while r.mgr.state_of(&w.0) != "expired" { assert!(Instant::now() < end, "the account never went expired: {:?}", r.lines(T)); tokio::time::sleep(Duration::from_millis(40)).await }
     // the turn is at rest the moment the driver commits its wait (the record, the stop, the line, in that order): the failed turn's own error line and a stop from the turn
     // itself can come first, so wait for the line and the record rather than reading them once the state is reached
     let wait_line = "Work's sign-in expired and no other claude account can take over. Continuing once you sign in again.";
@@ -381,10 +405,10 @@ impl Rig {
     assert!(ts[2]["text"].as_str().unwrap().contains("signed in again"), "{}", ts[2]["text"]);
     let inv = r.hub.setting("accounts.inventory").await.unwrap(); let e = ac::profile(&inv, &w.0)["epoch"].as_u64().unwrap(); assert!(e > w.1);
     let b: Value = serde_json::from_str(&r.hub.setting(&ac::binding_key(T, "claude")).await.unwrap()).unwrap(); assert_eq!((b["id"].as_str().unwrap(), b["epoch"].as_u64().unwrap()), (w.0.as_str(), e));
-    assert!(r.lines(T).iter().any(|l| l == "Work is signed in again; continuing from the last step"), "{:?}", r.lines(T));
-    assert_eq!(r.hub.setting(&accounts_hub::alert_key("claude")).await.unwrap_or_default(), "", "the alert is dealt with");
+    r.said(T, |l| l == "Work is signed in again; continuing from the last step").await;
+    r.cleared(&accounts_hub::alert_key("claude")).await; // the alert is dealt with
     assert_eq!(alerts(&r.log()).len(), 1, "one alert in all");
-    assert_eq!(r.hub.setting(&format!("provider.resume.{T}")).await.unwrap_or_default(), "");
+    r.cleared(&format!("provider.resume.{T}")).await;
 }
 
 /// Nov 7: after a restart every Claude login was held. A named account and the CLI's own login each kept a weekly-limit hold with no reset from the day before, though both had
@@ -435,7 +459,7 @@ impl Rig {
     // Personal resets: between turns the thread goes back up to Claude, on Personal; the next message runs there with what Codex did handed over
     std::fs::remove_file(r.dir.join("mode.p@x.com")).unwrap(); r.tick(rp + 1).await;
     assert_eq!((r.provider(T).await, r.binding(T, "claude").await), ("claude".to_string(), p.0.clone()), "{:?}", r.lines(T));
-    assert!(r.lines(T).iter().any(|l| l == "Back on Claude (Personal): it has reset"), "{:?}", r.lines(T));
+    r.said(T, |l| l == "Back on Claude (Personal): it has reset").await;
     assert_eq!(r.hub.setting(&format!("fallback.intent.{T}")).await.unwrap_or_default(), "", "back where it started");
     r.say(T, "m3", "THIRD").await; r.rest(T, "completed", 5).await; let ts = r.turns();
     assert_eq!(ts[4]["who"], "p@x.com"); assert!(ts[4]["text"].as_str().unwrap().contains("answered by c@x.com"), "what Codex did goes with it:\n{}", ts[4]["text"]);
@@ -445,7 +469,7 @@ impl Rig {
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)] async fn with_every_account_of_every_provider_out_it_says_so_once_and_resumes_at_the_earliest_reset() {
     let r = rig("orderall", "claude").await; let (_w, p, _c) = r.across().await; let (rw, rp, rc) = (now() + 7200, now() + 5400, now() + 3600);
     r.mode("w@x.com", &format!("limit:{rw}")); r.mode("p@x.com", &format!("limit:{rp}")); r.mode("c@x.com", &format!("limit:{rc}"));
-    r.say(T, "m1", "THE-REQUEST").await; r.rest(T, "interrupted", 3).await; tokio::time::sleep(Duration::from_millis(800)).await;
+    r.say(T, "m1", "THE-REQUEST").await; r.rest(T, "interrupted", 3).await; r.said(T, |l| l.starts_with("Every account is out")).await;
     assert_eq!(r.turns().len(), 3, "each account once: {:#?}", r.turns());
     let waits: Vec<String> = r.lines(T).into_iter().filter(|l| l.starts_with("Every ")).collect();
     assert_eq!(waits, vec![format!("Every account is out (Codex: Spare; Claude: Work, Personal). Continuing at {}, when the first one resets.", crate::agents::rules::when(&r.zone().await, rc, now()))], "once: {:?}", r.lines(T));
@@ -466,11 +490,11 @@ impl Rig {
     let r = rig("healthy", "claude").await; let (w, p) = r.two("claude").await; let reset = now() + 3600;
     r.hub.commit(&json!({"$":"SettingSet","key":fb::hold_key("claude", &w.0, w.1),"value":json!({"scope":"claude","reason":"You've hit your weekly limit","reset":reset,"at":now()}).to_string(),"at":now()})).await.unwrap();
     r.mode("w@x.com", &format!("limit:{reset}")); // were it started there, it would fail
-    r.say(T, "m1", "LAUNCH-REQUEST").await; r.rest(T, "completed", 1).await; tokio::time::sleep(Duration::from_millis(300)).await;
+    r.say(T, "m1", "LAUNCH-REQUEST").await; r.rest(T, "completed", 1).await; r.said(T, |l| l.starts_with("Started on Personal: Work is out until ")).await;
     let ts = r.turns(); assert_eq!(ts.len(), 1, "no turn spent on Work: {ts:#?}"); assert_eq!(ts[0]["who"], "p@x.com"); assert!(ts[0]["text"].as_str().unwrap().contains("LAUNCH-REQUEST"));
     assert_eq!(r.binding(T, "claude").await, p.0);
     let say = format!("Started on Personal: Work is out until {}", crate::agents::rules::when(&r.zone().await, reset, now()));
-    assert!(r.lines(T).contains(&say), "{:?}", r.lines(T));
+    r.said(T, |l| l == say).await;
     assert!(!r.log().iter().any(|e| e["$"] == "TurnChanged" && e["thread"] == T && matches!(e["state"].as_str(), Some("failed" | "interrupted"))), "no failed or stopped turn first");
     // Work resets: between turns the thread goes back to the account it asked for
     std::fs::remove_file(r.dir.join("mode.w@x.com")).unwrap(); r.tick(reset + 1).await;
@@ -509,7 +533,7 @@ impl Rig {
     assert!(!r.log().iter().any(|e| e["$"] == "ProviderSet" && e["id"] == t2), "no provider change while a Claude account has usage left");
     // Personal runs out too: now, and only now, Codex; this request never goes back to Claude
     r.mode("p@x.com", &format!("limit:{rp}"));
-    r.say(t2, "n2", "SECOND").await; r.rest(t2, "completed", 4).await; tokio::time::sleep(Duration::from_millis(400)).await;
+    r.say(t2, "n2", "SECOND").await; r.rest(t2, "completed", 4).await; r.bound(t2, "codex", &c.0).await;
     let ts = r.turns(); assert_eq!((ts[2]["who"].as_str().unwrap(), ts[3]["who"].as_str().unwrap(), ts.len()), ("p@x.com", "c@x.com", 4), "{ts:#?}");
     assert_eq!(th(&*r.hub.model().await).0, "codex"); assert_eq!(r.binding(t2, "codex").await, c.0);
     let tried: Vec<String> = serde_json::from_str(&r.hub.setting(&driver::tried_key(t2)).await.unwrap()).unwrap();
