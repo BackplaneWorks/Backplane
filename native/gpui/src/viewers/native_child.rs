@@ -1561,7 +1561,7 @@ mod imp {
         let frame = hwnd(r.frame);
         let mut target = unsafe { WindowFromPoint(POINT { x: r.x, y: r.y }) };
         let in_frame = { let mut w = target; let mut hit = false; while !w.is_null() { if w == frame { hit = true; break } w = unsafe { GetAncestor(w, GA_PARENT) }; } hit };
-        if !in_frame { target = focus_target_in_frame(frame); }
+        if !in_frame { target = unsafe { focus_target_in_frame(frame) }; }
         let held = !r.released && unsafe { GetAsyncKeyState(vk) } as u16 & 0x8000 != 0;
         let mut pt = POINT { x: r.x, y: r.y };
         unsafe { windows_sys::Win32::Graphics::Gdi::ScreenToClient(target, &mut pt); }
