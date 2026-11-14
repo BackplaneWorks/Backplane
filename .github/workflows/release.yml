@@ -94,7 +94,14 @@ jobs:
       # the cef crate builds CEF's small C++ wrapper with CMake and Ninja (docs/browser-gpui-cef.md)
       - name: ninja
         run: |
-          command -v ninja >/dev/null && exit 0
+          command -v ninja >/dev/null && command -v cmake >/dev/null && exit 0
+          # a self-hosted Windows runner (bp-win, nightlies) has no Chocolatey: Visual Studio's own CMake and Ninja, found by vswhere
+          if [ "${{ runner.os }}" = Windows ] && ! command -v choco >/dev/null; then
+            vs=$("/c/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe" -products '*' -latest -property installationPath | tr -d '\r')
+            c="$vs\Common7\IDE\CommonExtensions\Microsoft\CMake"
+            [ -f "$c\Ninja\ninja.exe" ] && [ -f "$c\CMake\bin\cmake.exe" ] || { echo "::error::no choco and no CMake/Ninja in Visual Studio ($vs)"; exit 1; }
+            printf '%s\n' "$c\Ninja" "$c\CMake\bin" >> "$GITHUB_PATH"; exit 0
+          fi
           case "${{ runner.os }}" in macOS) brew install ninja;; Windows) choco install ninja -y --no-progress;; Linux) sudo apt-get install -y -qq ninja-build;; esac
       - name: build
         env:
@@ -329,6 +336,9 @@ jobs:
           code=$(date -u +%Y%m%d%H); [ "$code" -gt 2026110401 ] || { echo "::error::version code $code is not above 0.14.1's"; exit 1; }
           { echo "BACKPLANE_ANDROID_KEYSTORE_PATH=$RUNNER_TEMP/release.keystore"; echo "BACKPLANE_ANDROID_VERSION_NAME=${TAG#v}"; echo "BACKPLANE_ANDROID_VERSION_CODE=$code"; } >> "$GITHUB_ENV"
           echo "version ${TAG#v} ($code)"
+      # Msg.kt is generated from i18n/*.msg; main often lands a new string without it, and the build refuses a stale one: made here from the catalog it ships
+      - name: the app's strings from the catalog
+        run: python3 scripts/i18n-android.py
       - name: build (APK and AAB)
         working-directory: mobile/android
         run: '"$GRADLE" --no-daemon -q -Pbp.appId=dev.backplane.mobile -Pbp.scheme=backplane -Pbp.appName=Backplane :app:assembleRelease :app:bundleRelease'
