@@ -100,7 +100,10 @@ pub fn builtin() -> Arc<Schema> {
         };
         let set = pt::FileDescriptorSet { file: vec![
             file("kiapi_types.proto", "kiapi.common.types", &[],
-                vec![enum_of("DocumentType", &[
+                vec![enum_of("FrameType", &[
+                    ("FT_UNKNOWN", 0), ("FT_PROJECT_MANAGER", 1), ("FT_SCHEMATIC_EDITOR", 2), ("FT_PCB_EDITOR", 3), ("FT_SPICE_SIMULATOR", 4),
+                    ("FT_SYMBOL_EDITOR", 5), ("FT_FOOTPRINT_EDITOR", 6), ("FT_DRAWING_SHEET_EDITOR", 7),
+                ]), enum_of("DocumentType", &[
                     ("DOCTYPE_UNKNOWN", 0), ("DOCTYPE_SCHEMATIC", 1), ("DOCTYPE_SYMBOL", 2), ("DOCTYPE_PCB", 3),
                     ("DOCTYPE_FOOTPRINT", 4), ("DOCTYPE_DRAWING_SHEET", 5), ("DOCTYPE_PROJECT", 6),
                 ])],
@@ -132,7 +135,9 @@ pub fn builtin() -> Arc<Schema> {
                     msg_of("GetDocumentModifiedState", &[], &[("document", 1, Opt(T::Message, ".kiapi.common.types.DocumentSpecifier"))]),
                     msg_of("GetDocumentModifiedStateResponse", &[], &[("state", 1, Opt(T::Enum, ".kiapi.common.commands.DocumentModifiedState"))]),
                     msg_of("SaveDocument", &[], &[("document", 1, Opt(T::Message, ".kiapi.common.types.DocumentSpecifier"))]),
-                    msg_of("RunAction", &[], &[("action", 1, Opt(T::String, ""))]),
+                    // `frame` (bp.13 batch 6, runaction-frame): the editor the action is for; absent, eeschema.* goes to the schematic editor
+                    // and the rest to the board editor while one is open
+                    msg_of("RunAction", &[], &[("action", 1, Opt(T::String, "")), ("frame", 100, Opt(T::Enum, ".kiapi.common.types.FrameType"))]),
                     msg_of("RunActionResponse", &[], &[("status", 1, Opt(T::Enum, ".kiapi.common.commands.RunActionStatus"))]),
                 ]),
             file("kiapi_backplane.proto", "kiapi.backplane", &[],
@@ -270,6 +275,14 @@ fn from_object(t: &MessageDescriptor, d: &Value, q: usize) -> Result<Built, Stri
 fn plain_from(t: &MessageDescriptor, d: &Value, q: usize) -> Result<Built, String> {
     if !is_object(d) { return Err(format!(".{}: object expected", t.full_name())) }
     if q > LIMIT { return Err("max depth exceeded".into()) }
+    // a field the description does not know is an error, never dropped: a field newer than the description in use (RunAction's `frame`
+    // before the runtime's api.desc is loaded) would otherwise be sent without it and the request run differently (Nov 14)
+    // (an Any of a type the description does not know keeps its fields as protobufjs does: they are that type's, not unknown ones)
+    if let Some(o) = d.as_object().filter(|_| t.full_name() != ANY) {
+        if let Some(k) = o.keys().find(|k| *k != "@type" && t.get_field_by_name(k).is_none() && !t.fields().any(|f| f.json_name() == k.as_str())) {
+            return Err(format!(".{}: unknown field \"{k}\" (not in this KiCad API description; known: {})", t.full_name(), t.fields().map(|f| f.name().to_string()).collect::<Vec<_>>().join(", ")))
+        }
+    }
     let mut m = DynamicMessage::new(t.clone()); let mut bad = None; let mut oneofs = HashSet::new();
     for f in t.fields() {
         let v = d.get(f.name()).unwrap_or(&Value::Null);
@@ -568,6 +581,18 @@ mod tests {
         assert_eq!(r.header.unwrap(), ReqHeader { kicad_token: "t".into(), client_name: "c".into() });
         assert_eq!(r.message.unwrap(), Any { type_url: "type.googleapis.com/kiapi.common.commands.GetVersion".into(), value: vec![] });
         assert_eq!(encode_request(&s, "kiapi.x.Nope", &json!({}), "", "c").unwrap_err(), "unknown command kiapi.x.Nope");
+    }
+    #[test] fn runaction_frame_is_sent_and_an_unknown_field_is_an_error() {
+        let s = builtin();
+        let t = s.message("kiapi.common.commands.RunAction").unwrap();
+        // action (1) "x", frame (100) FT_SCHEMATIC_EDITOR = 2: field 100 varint is tag 0xa0 0x06
+        assert_eq!(to_hex(&encode_message(&t, &json!({"action": "x", "frame": "FT_SCHEMATIC_EDITOR"})).unwrap()), "0a0178a00602");
+        assert_eq!(to_hex(&encode_message(&t, &json!({"action": "x"})).unwrap()), "0a0178", "no frame: as before");
+        let e = encode_message(&t, &json!({"action": "x", "fram": "FT_PCB_EDITOR"})).unwrap_err();
+        assert!(e.contains("unknown field \"fram\"") && e.contains("action, frame"), "{e}");
+        // nested too, and Any's @type is not a field
+        let e = encode_request(&s, "kiapi.common.commands.GetOpenDocuments", &json!({"type": "DOCTYPE_PCB", "extra": 1}), "", "c").unwrap_err();
+        assert!(e.contains("unknown field \"extra\""), "{e}");
     }
     #[test] fn response_envelope() {
         let s = builtin();

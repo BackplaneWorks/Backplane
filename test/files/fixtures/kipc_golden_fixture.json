@@ -1,5 +1,5 @@
 [{"type":"kiapi.common.commands.Ping","in":{},"hex":"","out":{}},
-{"type":"kiapi.common.commands.GetVersion","in":{"nothing":1},"hex":"","out":{}},
+{"type":"kiapi.common.commands.GetVersion","in":{"nothing":1},"error":".kiapi.common.commands.GetVersion: unknown field \"nothing\" (not in this KiCad API description; known: )"},
 {"type":"kiapi.common.commands.Ping","in":5,"error":".kiapi.common.commands.Ping: object expected"},
 {"type":"kiapi.common.commands.Ping","in":"x","error":".kiapi.common.commands.Ping: object expected"},
 {"type":"kiapi.common.commands.Ping","in":[],"hex":"","out":{}},
