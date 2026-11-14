@@ -502,6 +502,7 @@ impl Backplane {
             /* i18n-ok: scripted e2e input and its metrics, not drawn */ Ctl::KicadAct(a) => { match a.as_str() {
                 "popin" => { let h = self.screens.kicad_window; self.kicad_popin(cx); if let Some(h) = h { let _ = h.update(cx, |_, w, _| w.remove_window()); } }
                 "full" | "popout" | "checks" => self.kicad_strip_act(a, cx),
+                "retry" => { if let Some(p) = self.screens.kicad.clone() { p.update(cx, |p, cx| { p.reattach(); cx.notify(); }); } }
                 "gerbview" => { let files: Vec<String> = self.data["thread"]["viewer"]["gerberFiles"].as_array().map(|a| a.iter().filter_map(|f| f.as_str().map(str::to_string)).collect()).unwrap_or_default(); self.open_in_gerbview(files, cx) }
                 k => { if let Some(p) = self.screens.kicad.clone() { let k = k.to_string(); p.update(cx, |p, cx| p.show_kind_by(&k, "client script (test driver)", cx)); } } } // i18n-ok: a debug log cause (BACKPLANE_KICAD_DEBUG)
                 self.ui_epoch += 1; format!("kicad {a}") } // i18n-ok: an e2e metric
