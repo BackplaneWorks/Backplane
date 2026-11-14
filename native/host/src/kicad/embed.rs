@@ -987,7 +987,18 @@ struct Actor {
     pend: HashMap<String, oneshot::Sender<Value>>,
     sessions: HashMap<String, Session>,
     attach_waiters: HashMap<String, Vec<(u64, oneshot::Sender<Result<Value, String>>)>>,
+    /// the runtime each project's latest start used, and the projects whose start was already retried once (start_retry)
+    start_env: HashMap<String, Env>,
+    start_retried: std::collections::HashSet<String>,
 }
+
+/// Whether a failed start is tried once more by itself: only a missed start window (KiCad ran but its socket or its first answer came after
+/// 30 s), once per project until a start succeeds. On Windows real-time scanning holds a new runtime's or a fresh home's files on the first
+/// run (bp-win: Defender's cloud lookups at each "did not open its IPC socket within 30 s"); the second start finds them scanned. A crash,
+/// a missing program or an unprepared folder is not retried: it would fail the same way.
+fn start_retry(why: &str, retried: bool) -> bool { !retried && why.starts_with("KiCad did not") && why.contains(" within ") }
+/// How long a start has for KiCad's socket and its first answers (a dialog of KiCad's own open meanwhile extends it); short under test.
+const START_WINDOW_S: u64 = if cfg!(test) { 3 } else { 30 };
 
 impl Actor {
     fn ensure_helper(&mut self) {
@@ -1176,6 +1187,7 @@ impl Actor {
         }
 
         let sweep_locks = self.sessions.get(&pro).is_some_and(|s| s.state == "failed" || s.reason == "restarting");
+        self.start_env.insert(pro.clone(), env.clone());
 
         // Warm-session cap: retire the oldest detached clean session before starting a 4th GUI KiCad.
         if let Some(victim) = evict_warm(&self.sessions, &pro, MAX_WARM) { self.retire(&victim); }
@@ -1512,6 +1524,7 @@ impl Actor {
                 let Some(s) = self.sessions.get_mut(&pro).filter(|s| s.gen == gen && s.state == "starting") else { return };
                 *s = s.clone().ready(&sock, &version, ipc::now_s());
                 for c in caps { if !s.caps.contains(&c) { s.caps.push(c); } }
+                self.start_retried.remove(&pro);
                 s.holder = holder;
                 if !events_sock.is_empty() { s.events_sock = events_sock; }
                 if !frames.is_empty() { s.frames = frames; }
@@ -1554,6 +1567,16 @@ impl Actor {
             Msg::StartFailed { pro, gen, why } => {
                 let Some(s) = self.sessions.get_mut(&pro).filter(|s| s.gen == gen && s.state == "starting") else { return };
                 let pid = s.pid;
+                let env = self.start_env.get(&pro).cloned();
+                if let Some(env) = env.filter(|_| start_retry(&why, self.start_retried.contains(&pro))) {
+                    // once more, by itself: the pane stays on "Starting KiCad..." and the first start's waiters get the second start's answer
+                    eprintln!("kicad embed: {pro}: {why}; starting it once more");
+                    self.start_retried.insert(pro.clone());
+                    let client = self.attach_waiters.get(&pro).and_then(|w| w.first()).map_or(0, |w| w.0);
+                    let (tx, _rx) = oneshot::channel();
+                    self.restart(client, pro, env, tx);
+                    return;
+                }
                 *s = s.clone().failed(&why);
                 let snap = s.clone();
                 Self::kill_pid(pid);
@@ -2064,12 +2087,12 @@ async fn spawn_gui_session(
     // Handshake: wait up to 30 s for the API socket, then Ping + GetVersion (retrying AS_NOT_READY while frames initialize).
     // If fork KiCad opens a startup modal dialog before `SetReadyToReply` (e.g. LocalHistory's "Recover Unsaved Changes" after a crash),
     // `<sock>.events` already reports `ET_DIALOG_OPENED`: extend `deadline` while the dialog is open so the hub never kills KiCad under the user.
-    let mut deadline = tokio::time::Instant::now() + Duration::from_secs(30);
+    let mut deadline = tokio::time::Instant::now() + Duration::from_secs(START_WINDOW_S);
     let sock = match tokio::time::timeout_at(deadline, sock_rx).await {
         Ok(Ok(s)) => s,
         _ => {
             if !done.load(Ordering::SeqCst) {
-                let _ = me.send(Msg::StartFailed { pro, gen, why: "KiCad did not open its IPC socket within 30 s".into() });
+                let _ = me.send(Msg::StartFailed { pro, gen, why: format!("KiCad did not open its IPC socket within {START_WINDOW_S} s") });
             }
             return;
         }
@@ -2126,7 +2149,7 @@ async fn spawn_gui_session(
     }
     if !hand_ok {
         if !done.load(Ordering::SeqCst) {
-            let _ = me.send(Msg::StartFailed { pro, gen, why: "KiCad did not answer Ping and GetVersion within 30 s".into() });
+            let _ = me.send(Msg::StartFailed { pro, gen, why: format!("KiCad did not answer Ping and GetVersion within {START_WINDOW_S} s") });
         }
         return;
     }
@@ -2299,7 +2322,7 @@ pub fn start(hub: &Arc<Hub>) {
     });
     let mut a = Actor {
         hub: hub.clone(), me: tx.clone(), info_tx, helper: None, hgen: 0, next_id: 0, next_gen: 0,
-        pend: HashMap::new(), sessions: HashMap::new(), attach_waiters: HashMap::new(),
+        pend: HashMap::new(), sessions: HashMap::new(), attach_waiters: HashMap::new(), start_env: HashMap::new(), start_retried: Default::default(),
     };
     tokio::spawn(async move { while let Some(m) = rx.recv().await { a.handle(m) } });
     let tick = tx.clone();
@@ -2674,6 +2697,47 @@ mod tests {
 
         let clean = s.exited(0, "");
         assert_eq!(clean.state, "stopped");
+    }
+
+    #[test] fn a_missed_start_window_is_tried_once_more_and_nothing_else_is() {
+        for why in ["KiCad did not open its IPC socket within 30 s", "KiCad did not answer Ping and GetVersion within 30 s"] {
+            assert!(start_retry(why, false), "{why}: the first miss is tried again");
+            assert!(!start_retry(why, true), "{why}: a second miss is said to the person");
+        }
+        for why in ["could not start KiCad: No such file or directory", "could not prepare /x: denied", "it did not answer Ping: refused"] {
+            assert!(!start_retry(why, false), "{why}: would fail the same way");
+        }
+    }
+
+    /// A KiCad that never opens its socket is started twice (the second start by itself, the person's attach waiting through both), then
+    /// the pane is told it failed; a start that succeeds clears the retry (covered by the stand-in test above: one start, ready).
+    #[cfg(unix)]
+    #[tokio::test] async fn a_kicad_that_misses_the_start_window_is_started_once_more_then_failed() {
+        use crate::plat::fs::PermissionsExt;
+        let base = crate::plat::tmp::short_dir("ke-r");
+        let (home_dir, proj_dir, bin_dir) = (base.join("home"), base.join("proj"), base.join("bin"));
+        for d in [&home_dir, &proj_dir, &bin_dir] { std::fs::create_dir_all(d).unwrap(); }
+        let pcb = proj_dir.join("slow.kicad_pcb");
+        std::fs::write(proj_dir.join("slow.kicad_pro"), "{}").unwrap(); std::fs::write(&pcb, "(kicad_pcb)").unwrap();
+        let cfg = crate::hub::Cfg { home: home_dir.clone(), version: "0.14.0".into(), commit: "test".into(), listen: "127.0.0.1:0".into(), os: "linux".into(), arch: "x64".into() };
+        let hub = Hub::start(cfg, Arc::new(crate::presenter::Canned { reply: json!({}) })).await.unwrap();
+        ipc::start(&hub); start(&hub);
+        let _ = hub.commit(&json!({"$":"ProjectCreated","id":"p1","title":"slow","root":proj_dir.to_string_lossy(),"at":1})).await;
+        let (cli, gui, starts) = (bin_dir.join("kicad-cli"), bin_dir.join("kicad"), base.join("starts"));
+        std::fs::write(&cli, "#!/bin/sh\nif [ \"$2\" = \"--describe\" ]; then echo '{\"version\":\"10.99.0-bp.8\",\"capabilities\":[\"api-server\"]}'; exit 0; fi\necho 10.99.0\n").unwrap();
+        // the stand-in KiCad counts its starts and never opens its socket (held by real-time scanning, as on bp-win)
+        std::fs::write(&gui, format!("#!/bin/sh\necho x >> '{}'\nsleep 60\n", starts.display())).unwrap();
+        for f in [&cli, &gui] { std::fs::set_permissions(f, std::fs::Permissions::from_mode(0o755)).unwrap(); }
+        let _ = hub.commit(&json!({"$":"SettingSet","key":"kicad.path","value":cli.to_string_lossy(),"at":2})).await;
+        let (mut conn, _) = hub.connect(true);
+        let t0 = std::time::Instant::now();
+        let rep = hub.request(&mut conn, &json!({"id": 1, "m": "editor.kicad.attach", "p": {"project": pcb.to_string_lossy(), "container": 9001, "toplevel": 8001, "display": ":99", "frame": "PCB"}})).await;
+        let n = std::fs::read_to_string(&starts).unwrap_or_default().lines().count();
+        assert_eq!(n, 2, "started once more by itself, and only once ({rep:?})");
+        assert!(t0.elapsed() >= Duration::from_secs(2 * START_WINDOW_S), "the attach waited through both starts: {:?}", t0.elapsed());
+        assert!(rep[0].to_string().contains("did not open its IPC socket"), "then failed, with the reason: {rep:?}");
+        let info: Value = serde_json::from_str(hub.info_now()[&info_key(&pcb.to_string_lossy().replace(".kicad_pcb", ".kicad_pro"))].as_str().unwrap_or("{}")).unwrap_or_default();
+        assert!(info.is_null() || info["state"] == json!("failed"), "{info}");
     }
 
     #[test] fn a_shown_project_is_kept_warm_within_the_cap_memory_and_locks() {

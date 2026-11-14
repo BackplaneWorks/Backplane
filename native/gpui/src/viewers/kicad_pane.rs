@@ -153,7 +153,8 @@ pub fn waiting_on(info: &Value, have_frame: bool, windows: bool) -> Option<Strin
         return Some(crate::i18n::trs("The embedded editor needs Backplane KiCad."));
     }
     match info["state"].as_str().unwrap_or("") {
-        "failed" => Some(format!("{} {}", crate::i18n::trs("KiCad could not start:"), info["reason"].as_str().unwrap_or(""))),
+        // the hub has already tried a missed start window once more (embed.rs start_retry); a click on an editor tab starts it again
+        "failed" => Some(format!("{} {}\n{}", crate::i18n::trs("KiCad could not start:"), info["reason"].as_str().unwrap_or(""), crate::i18n::trs("Click the Board or Schematic tab to try again."))),
         "unresponsive" => Some(crate::i18n::trs("KiCad is not responding.")),
         "stopped" => Some(crate::i18n::trs("KiCad was closed.")),
         _ if have_frame => None,
@@ -957,6 +958,7 @@ mod tests {
         assert!(waiting(&json!({"state": "starting"}), false).is_some());
         assert!(waiting(&json!({"state": "ready"}), true).is_none());
         assert!(waiting(&json!({"state": "failed", "reason": "no kicad"}), true).unwrap().contains("no kicad"));
+        assert!(waiting(&json!({"state": "failed", "reason": "no kicad"}), true).unwrap().contains("Board or Schematic tab"), "a failed start says how to try again");
         assert_eq!(
             waiting_on(&json!({"mode": "stock", "state": "ready"}), false, true).as_deref(),
             Some("The embedded editor needs Backplane KiCad."),
