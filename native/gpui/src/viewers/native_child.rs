@@ -1375,20 +1375,59 @@ mod imp {
         use windows_sys::Win32::UI::WindowsAndMessaging::{WM_PAINT, WM_ERASEBKGND};
         match msg {
             WM_LBUTTONDOWN | WM_MBUTTONDOWN | WM_RBUTTONDOWN => {
+                // Stage 2: one click both hands KiCad the keys and acts. Hidden at once (on this thread, so the replayed
+                // press below can never land on the shield again), the hand-in done here (queues attached, focus posted:
+                // no wait on KiCad), then the same button pressed again with SendInput at the same point: KiCad gets the
+                // whole click (and a drag that started here) with the queues already attached, as a click in its own
+                // window would be. The physical release that follows goes to KiCad too.
                 SHIELD_ON.store(false, Ordering::SeqCst);
-                unsafe { ShowWindowAsync(h, SW_HIDE); }
+                unsafe { windows_sys::Win32::UI::WindowsAndMessaging::ShowWindow(h, SW_HIDE); }
                 PANE_PRESS_AT.store(mono_ms(), Ordering::SeqCst);
+                let frame = shown_frame(hwnd(ACTIVE_CONTAINER.load(Ordering::SeqCst)));
+                if !frame.is_null() { focus(id_of(frame)); }
+                let flag = match msg { WM_LBUTTONDOWN => 0x0002, WM_MBUTTONDOWN => 0x0020, _ => 0x0008 }; // MOUSEEVENTF_*DOWN
+                {
+                    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{SendInput, INPUT, INPUT_0, INPUT_MOUSE, MOUSEINPUT};
+                    let input = INPUT { r#type: INPUT_MOUSE, Anonymous: INPUT_0 { mi: MOUSEINPUT { dx: 0, dy: 0, mouseData: 0, dwFlags: flag, time: 0, dwExtraInfo: 0 } } };
+                    unsafe { SendInput(1, &input, std::mem::size_of::<INPUT>() as i32); }
+                }
                 if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() {
                     let fg = unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
-                    eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_shield_click": {"button": msg, "foreground": id_of(fg)}}));
+                    eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_shield_click": {"button": msg, "foreground": id_of(fg), "forwarded": true, "frame": id_of(frame)}}));
                 }
                 if let Ok(mut q) = events_q().lock() { q.push(Ev::Click); }
+                0
+            }
+            // the wheel over the pane while Backplane has the keys goes on to KiCad's canvas (screen coordinates, as sent)
+            0x020A | 0x020E /* WM_MOUSEWHEEL, WM_MOUSEHWHEEL */ => {
+                let frame = shown_frame(hwnd(ACTIVE_CONTAINER.load(Ordering::SeqCst)));
+                if !frame.is_null() { unsafe { PostMessageW(focus_target_in_frame(frame), msg, wparam, lparam); } }
+                0
+            }
+            // hover: the pointer moving over the pane goes on to KiCad's canvas in its own coordinates, so KiCad still
+            // follows the cursor (status bar coordinates, hover highlight) while Backplane has the keys
+            0x0200 /* WM_MOUSEMOVE */ => {
+                let frame = shown_frame(hwnd(ACTIVE_CONTAINER.load(Ordering::SeqCst)));
+                if !frame.is_null() {
+                    let canvas = unsafe { focus_target_in_frame(frame) };
+                    let mut pt = POINT { x: (lparam & 0xffff) as i16 as i32, y: ((lparam >> 16) & 0xffff) as i16 as i32 };
+                    unsafe {
+                        windows_sys::Win32::Graphics::Gdi::ClientToScreen(h, &mut pt);
+                        windows_sys::Win32::Graphics::Gdi::ScreenToClient(canvas, &mut pt);
+                        PostMessageW(canvas, msg, wparam, ((pt.y as u16 as isize) << 16) | (pt.x as u16 as isize));
+                    }
+                }
                 0
             }
             WM_PAINT => { unsafe { windows_sys::Win32::Graphics::Gdi::ValidateRect(h, std::ptr::null()); } 0 }
             WM_ERASEBKGND => 1,
             _ => unsafe { DefWindowProcW(h, msg, wparam, lparam) },
         }
+    }
+    /// The editor frame on show in `container` (its visible frame), or null.
+    fn shown_frame(container: HWND) -> HWND {
+        if container.is_null() { return null_mut() }
+        frames(id_of(container)).iter().map(|f| hwnd(f.window)).find(|&k| unsafe { IsWindowVisible(k) } != 0).unwrap_or(null_mut())
     }
     /// The shield over `container` (same rect in the parent, same holes, just above it), when on.
     unsafe fn shield_follow(container: HWND) {
