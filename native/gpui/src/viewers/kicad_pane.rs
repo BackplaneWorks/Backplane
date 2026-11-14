@@ -909,6 +909,15 @@ mod tests {
         assert!(!super::idle_prewarm(true, false), "Windows, a pre-warm that activates its frame: the next placement");
         assert!(super::idle_prewarm(true, true), "Windows with prewarm-keeps-focus");
     }
+    #[test] fn an_early_edit_press_waits_for_the_viewer_then_edits() {
+        use std::time::Duration;
+        let p = |t, s| Some((t, Duration::from_secs(s)));
+        assert_eq!(super::pending_edit_now(None, "t1", true), None, "nothing kept");
+        assert_eq!(super::pending_edit_now(p("t1", 6), "t1", false), None, "still no file: keep waiting");
+        assert_eq!(super::pending_edit_now(p("t1", 8), "t1", true), Some(true), "the file came: Edit now");
+        assert_eq!(super::pending_edit_now(p("t1", 8), "t2", true), Some(false), "another thread: dropped");
+        assert_eq!(super::pending_edit_now(p("t1", 61), "t1", true), Some(false), "a minute later: dropped");
+    }
     #[test] fn warm_target_is_the_shown_board() {
         assert_eq!(warm_target("/p/Day_11/Day_11.kicad_pcb".into(), "/p".into()), "/p/Day_11/Day_11.kicad_pcb");
         assert_eq!(warm_target("/p/mech/case.step".into(), "/p".into()), "/p");
@@ -1024,6 +1033,29 @@ fn take_kept(toplevel: u64, project: &str) -> Option<Kept> {
 pub static GERBVIEW: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// The project last asked warm (kicad_warm), so each project shown in a row is asked once.
 static WARM_LAST: std::sync::Mutex<String> = std::sync::Mutex::new(String::new());
+/// The early-Edit e2e: BACKPLANE_GPUI_TEST_KEY_HOLD_MS=N keeps the viewer's file key out of the pictures for the client's first N ms (a
+/// slow first preview, as on bp-win after an update), and with it the project, so Edit has nothing to open until then. Off unless set.
+pub fn test_hold_key(data: &mut Value) {
+    if !test_holding() { return }
+    let v = &mut data["thread"]["viewer"];
+    if v.is_object() { v["key"] = json!(""); if let Some(ps) = v["panes"].as_array_mut() { for p in ps { p["key"] = json!(""); } } }
+}
+/// Within BACKPLANE_GPUI_TEST_KEY_HOLD_MS of the client's first picture: Edit finds nothing to open (the project's folder too).
+fn test_holding() -> bool {
+    static T0: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    let Some(ms) = std::env::var("BACKPLANE_GPUI_TEST_KEY_HOLD_MS").ok().and_then(|v| v.parse::<u64>().ok()) else { return false };
+    T0.get_or_init(std::time::Instant::now).elapsed() < std::time::Duration::from_millis(ms)
+}
+/// An Edit pressed before the viewer knew its file: the thread, and when (kept 60 s).
+static EDIT_PENDING: std::sync::Mutex<Option<(String, std::time::Instant)>> = std::sync::Mutex::new(None);
+/// Whether an Edit press waits on this thread's first picture (the button says Opening…).
+pub fn edit_pending(thread: &str) -> bool { EDIT_PENDING.lock().unwrap().as_ref().is_some_and(|(t, at)| t == thread && at.elapsed() < std::time::Duration::from_secs(60)) }
+/// What to do with a kept press on a picture: Edit now (the viewer has a target), keep waiting, or drop it (another thread, or stale).
+pub fn pending_edit_now(pending: Option<(&str, std::time::Duration)>, thread: &str, has_target: bool) -> Option<bool> {
+    let (t, age) = pending?;
+    if t != thread || age > std::time::Duration::from_secs(60) { return Some(false) }
+    has_target.then_some(true)
+}
 
 impl crate::Backplane {
     /// The hub's `editor.kicad.<digest>` (JSON text; "" when the editor went away): kept, and given to the pane when it is this project's.
@@ -1111,13 +1143,34 @@ impl crate::Backplane {
         if !self.kicad_edit(cx) { return }
         if let Some(p) = self.screens.kicad.clone() { p.update(cx, |p, cx| p.open_gerbers_soon(&files, cx)); }
     }
+    /// After a picture: an Edit pressed before the viewer had a file, acted on now that it has one (or dropped: another thread, 60 s).
+    pub(crate) fn edit_pending_due(&mut self, cx: &mut Context<Self>) {
+        let pending = EDIT_PENDING.lock().unwrap().clone();
+        let thread = &self.data["thread"];
+        let tid = crate::screens::attach::raw_id(thread["id"].as_str().unwrap_or("")).to_string();
+        let key = crate::screens::viewer::shown_key(&thread["viewer"]);
+        let has = edit_target(&self.data, &key, &crate::keys::project_of(&self.data, &tid)).is_some() && !test_holding();
+        match pending_edit_now(pending.as_ref().map(|(t, at)| (t.as_str(), at.elapsed())), &tid, has) {
+            Some(true) => { *EDIT_PENDING.lock().unwrap() = None; self.kicad_edit(cx); }
+            Some(false) => { *EDIT_PENDING.lock().unwrap() = None; }
+            None => {}
+        }
+    }
     pub(crate) fn kicad_edit(&mut self, cx: &mut Context<Self>) -> bool {
         let thread = &self.data["thread"];
         let viewer = &thread["viewer"];
         let key = crate::screens::viewer::shown_key(viewer);
         let tid = crate::screens::attach::raw_id(thread["id"].as_str().unwrap_or(""));
         let pid = crate::keys::project_of(&self.data, tid);
-        let Some((project, root)) = edit_target(&self.data, &key, &pid) else { return false };
+        let Some((project, root)) = edit_target(&self.data, &key, &pid).filter(|_| !test_holding()) else {
+            // the viewer has no file yet (its first picture still on the way: bp-win after an update, 8 s to the key, 15 s to the paint):
+            // the press is kept and acted on when the picture says what to edit (edit_pending_due); the button says Opening… meanwhile
+            if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() { eprintln!("GPUI_LOG {}", json!({"kicad_edit": "pending", "key": key, "project": pid})); }
+            *EDIT_PENDING.lock().unwrap() = Some((tid.to_string(), std::time::Instant::now()));
+            self.ui_epoch += 1; cx.notify();
+            return false
+        };
+        *EDIT_PENDING.lock().unwrap() = None;
         let open_now = viewer["open"].as_str().unwrap_or("");
         let open = crate::screens::viewer::pressed(open_now)
             .filter(|k| matches!(k.as_str(), "board" | "schematic" | "3d")) // i18n-ok: rail page kinds
