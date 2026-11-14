@@ -1058,7 +1058,17 @@ def run(h):
             # Did focus ever leave the shown editor, when, to what, and did it come back?
             t_end = t_edit + 8.0
             prev = None
+            # BP_IDLE_REPLACE_S: that long after Edit, the window 2 px wider (no activation, no input), a re-place: a runtime
+            # without `prewarm-keeps-focus` gets its pre-warm only on a re-place (the client's gate), so this asks for it there
+            replace_at = float(os.environ.get("BP_IDLE_REPLACE_S", "0") or 0)
+            replaced = False
             while time.monotonic() < t_end:
+                if replace_at and not replaced and time.monotonic() >= t_edit + replace_at and top:
+                    r = E.W.RECT()
+                    E.u32.GetWindowRect(top, E.ctypes.byref(r))
+                    E.u32.SetWindowPos(top, 0, 0, 0, r.right - r.left + 2, r.bottom - r.top, 0x0002 | 0x0004 | 0x0010)  # NOMOVE|NOZORDER|NOACTIVATE
+                    replaced = True
+                    timeline.append({"stage": "replaced", "ms": round((time.monotonic() - started) * 1000)})
                 if not t_prewarm and time.monotonic() - last_log_poll > 0.2:
                     last_log_poll = time.monotonic()
                     try:
