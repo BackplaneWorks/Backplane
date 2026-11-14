@@ -2072,6 +2072,7 @@ gpui.c.kicad.try.again = Try again
 gpui.c.kicad.kicad.is.not.responding = KiCad is not responding.
 gpui.c.kicad.kicad.was.closed = KiCad was closed.
 gpui.c.kicad.starting.kicad = Starting KiCad…
+gpui.c.kicad.task.wait = KiCad is running {what}; the editor follows when it ends.
 gpui.c.kicad.this.window.cannot.hold.another = this window cannot hold another program's (only X11 and XWayland for now)
 gpui.c.kicad.no.x11.connection = no X11 connection
 gpui.c.kicad.could.not.create.container = could not create container window
