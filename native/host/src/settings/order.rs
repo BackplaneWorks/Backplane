@@ -503,8 +503,8 @@ mod tests {
         assert!(!quote_md(&unav).contains("Buy now ·") && !quote_md(&unav).contains("order:q_1"), "no Buy now link");
         let n = said(&unav)["note"].as_str().unwrap().to_string(); assert!(n.contains("do NOT say they cannot be bought") && said(&unav)["problems"] == json!([]) && said(&unav)["unavailable"][0].as_str().unwrap().contains("unavailable"));
         let c = card("L", false, false, false, false, &sum(&unav)); assert_eq!(c["line"], UNAVAILABLE_LINE); assert_eq!(c["requote"], true); assert_eq!(c["pay"], "");
-        let c = card("L", false, false, false, false, &sum(&ready(false))); assert_eq!(c["requote"], false);
-        let c = card("L", false, false, false, false, &sum(&{ let mut b = ready(false); b["quote"]["problems"] = json!(["x"]); b })); assert_eq!(c["requote"], false, "a real problem is not a re-quote");
+        let c = card("L", false, false, false, false, &sum(&ready(false))); assert!(c.get("requote").is_none());
+        let c = card("L", false, false, false, false, &sum(&{ let mut b = ready(false); b["quote"]["problems"] = json!(["x"]); b })); assert!(c.get("requote").is_none(), "a real problem is not a re-quote");
         let mut bad = ready(false); bad["quote"]["problems"] = json!(["No price for Germany"]); bad["quote"]["shipping"]["ddp"] = json!(false); assert!(!payable(&bad));
         assert_eq!(quote_md(&bad), "| a | b |\n\nExcludes customs: the courier will contact you to pay any duties and taxes before delivery.", "no link for a quote that cannot be paid");
         assert!(said(&bad)["note"].as_str().unwrap().contains("NO Buy now link")); assert!(said(&json!({"status":"analysing"}))["note"].as_str().unwrap().contains("being made"), "a quote still being made is never called unpayable");
