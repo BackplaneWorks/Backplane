@@ -773,7 +773,9 @@ def run(h):
                 deselect(); backplane_keys("composer")
                 a, b = h.p("b_drag_0.png"), h.p("b_drag_1.png")
                 E.grab_screen(a)
-                held = press(2, 4, gl["root_x"] + 12, gl["root_y"] + 12, 0.3, (gl["root_x"] + gl["w"] - 12, gl["root_y"] + gl["h"] - 12))
+                # 60 px down: KiCad's infobar ("This file was created by an older version...") lies over the canvas's top
+                # edge on some opens, and a drag started at +12 pressed its text instead (s2-buttons2, under "Static")
+                held = press(2, 4, gl["root_x"] + 12, gl["root_y"] + 60, 0.3, (gl["root_x"] + gl["w"] - 12, gl["root_y"] + gl["h"] - 12))
                 time.sleep(0.6)
                 E.grab_screen(b)
                 sel = E.img_diff_box(a, b, *message_panel_box(frame))["changed_pixels"]
