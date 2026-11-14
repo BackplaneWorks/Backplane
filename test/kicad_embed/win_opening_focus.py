@@ -253,6 +253,14 @@ def f6_check(h, cp, frame, children, timeline, kpid):
     return h.finish()
 
 
+def message_panel_box(frame):
+    """KiCad's message panel, the row above the status bar ("Pads Vias Track Segments ..."), which shows the details of
+    a clicked item."""
+    r = E.W.RECT()
+    E.u32.GetWindowRect(frame, E.ctypes.byref(r))
+    return (int(r.left) + 6, int(r.bottom) - 50, max(1, int(r.right - r.left) - 40), 26)
+
+
 def zoom_field_box(frame):
     """KiCad's status-bar zoom readout ("Z 2.20"), bottom left of the frame."""
     r = E.W.RECT()
@@ -633,6 +641,27 @@ def run(h):
             print("DIAG prewarm_idle " + json.dumps(d)[:1500], flush=True)
             h.check("F5: Edit, then the pre-warm with no input: the PCB canvas keeps the keys (F2 acts by the zoom readout)",
                     bool(pw) and after["inside_frame"] and bool(zoomed), d)
+            return h.finish()
+        if only == "edit_first_click":
+            # F3 shield, point 3: after Edit (KiCad has the keys), the first click on the canvas must reach KiCad, not be
+            # consumed by the shield: a click on the board's centre (U1) changes the message panel to the item's details.
+            gls = [w for w in children if w["visible"] and w["class"] == "wxGLCanvas"]
+            gl = max(gls, key=lambda w: w["w"] * w["h"]) if gls else None
+            time.sleep(float(os.environ.get("BP_FIRST_CLICK_AFTER_S", "3")))
+            box = message_panel_box(frame)
+            a, b = h.p("first_click_0.png"), h.p("first_click_1.png")
+            E.grab_screen(a)
+            around = traced_click(gl["root_x"] + gl["w"] // 2, gl["root_y"] + gl["h"] // 2) if gl else {}
+            time.sleep(0.8)
+            E.grab_screen(b)
+            px = E.img_diff_box(a, b, *box)["changed_pixels"]
+            consumed = [l.strip()[9:] for l in open(h.p("client.log"), encoding="utf-8", errors="replace") if "kicad_shield_click" in l]
+            flips = [l.strip()[9:] for l in open(h.p("client.log"), encoding="utf-8", errors="replace") if "kicad_keys_flip" in l or '"kicad_shield"' in l]
+            d = {"message_panel_px": px, "shield_consumed": consumed, "keys_flips": flips[:8], **around}
+            print("DIAG edit_first_click " + json.dumps(d)[:2500], flush=True)
+            h.check("After Edit, the first canvas click acts in KiCad (message panel shows the clicked item), not consumed by the shield",
+                    px > 200 and not consumed, d)
+            E.key_tap("Escape")
             return h.finish()
         if only == "idle_hotkey":
             # The self-started pre-warm, slowed on purpose (BP_PREWARM_STALL_S: KiCad suspended that long from the client's

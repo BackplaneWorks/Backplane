@@ -453,6 +453,8 @@ mod imp {
     pub fn hand_back(w: u64) { focus(w) }
     /// Windows only (the F3 input shield): Linux has its button grab (grab_click).
     pub fn shield(_container: u64, _on: bool) {}
+    pub fn shield_tick(_container: u64) {}
+    pub fn keys_really_backplanes(_container: u64) -> bool { true }
     pub fn focus_debug(_container: u64) -> serde_json::Value { serde_json::Value::Null }
     /// Windows only (an invisible KiCad window taking the foreground): never so here.
     pub fn invisible_kicad_foreground(_frame: u64) -> Option<(u64, String)> { None }
@@ -1357,6 +1359,7 @@ mod imp {
         match msg {
             WM_LBUTTONDOWN | WM_MBUTTONDOWN | WM_RBUTTONDOWN => {
                 SHIELD_ON.store(false, Ordering::SeqCst);
+                SHIELD_WANT.store(false, Ordering::SeqCst);
                 unsafe { ShowWindowAsync(h, SW_HIDE); }
                 PANE_PRESS_AT.store(mono_ms(), Ordering::SeqCst);
                 if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() {
@@ -1407,7 +1410,40 @@ mod imp {
                 "grace_left_ms": CLICK_GRACE_UNTIL.load(Ordering::SeqCst).saturating_sub(mono_ms())})
         }
     }
+    /// The pane's wish (it believes Backplane has the keys); the shield goes up only when Windows agrees (`shield_tick`).
+    static SHIELD_WANT: AtomicBool = AtomicBool::new(false);
+    static SHIELD_STABLE: AtomicU64 = AtomicU64::new(0);
+    /// Windows' own answer, a read with no message to KiCad: gpui's thread owns the foreground window and the foreground
+    /// queue's focus is not inside the KiCad container.
+    pub fn keys_really_backplanes(container: u64) -> bool { keys_really_ours(hwnd(container)) }
+    fn keys_really_ours(container: HWND) -> bool {
+        unsafe {
+            let fg = windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow();
+            if fg.is_null() || GetWindowThreadProcessId(fg, null_mut()) != GetCurrentThreadId() { return false }
+            let mut g = GUITHREADINFO { cbSize: std::mem::size_of::<GUITHREADINFO>() as u32, ..std::mem::zeroed() };
+            if GetGUIThreadInfo(0, &mut g) == 0 { return false }
+            g.hwndFocus.is_null() || (g.hwndFocus != container && IsChild(container, g.hwndFocus) == 0)
+        }
+    }
+    /// Each pane tick (40 ms): the shield up only after the pane's wish and Windows' focus agree for two ticks in a row,
+    /// down at once when focus is inside KiCad. A wrong flag alone can never eat a click.
+    pub fn shield_tick(container: u64) {
+        let c = hwnd(container);
+        if c.is_null() || unsafe { IsWindow(c) } == 0 { return }
+        let real = SHIELD_WANT.load(Ordering::SeqCst) && keys_really_ours(c);
+        if real {
+            let n = SHIELD_STABLE.fetch_add(1, Ordering::SeqCst) + 1;
+            if n >= 2 && !SHIELD_ON.load(Ordering::SeqCst) { shield_set(container, true); }
+        } else {
+            SHIELD_STABLE.store(0, Ordering::SeqCst);
+            if SHIELD_ON.load(Ordering::SeqCst) { shield_set(container, false); }
+        }
+    }
     pub fn shield(container: u64, on: bool) {
+        SHIELD_WANT.store(on, Ordering::SeqCst);
+        if !on { SHIELD_STABLE.store(0, Ordering::SeqCst); shield_set(container, false); }
+    }
+    fn shield_set(container: u64, on: bool) {
         let c = hwnd(container);
         if c.is_null() || unsafe { IsWindow(c) } == 0 { return }
         let was = SHIELD_ON.swap(on, Ordering::SeqCst);
@@ -1608,6 +1644,8 @@ mod imp {
     pub fn focus(_w: u64) {}
     pub fn hand_back(_w: u64) {}
     pub fn shield(_container: u64, _on: bool) {}
+    pub fn shield_tick(_container: u64) {}
+    pub fn keys_really_backplanes(_container: u64) -> bool { true }
     pub fn focus_debug(_container: u64) -> serde_json::Value { serde_json::Value::Null }
     pub fn invisible_kicad_foreground(_frame: u64) -> Option<(u64, String)> { None }
     pub fn frame_visible(_container: u64, _frame: u64) -> bool { true }
