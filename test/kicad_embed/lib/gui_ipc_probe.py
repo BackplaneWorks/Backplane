@@ -222,7 +222,9 @@ class KiCadIpc:
         except Exception:
             pass
 
-    def call(self, type_name: str, payload: bytes = b"", retries: int = 12) -> tuple[str, bytes]:
+    def call(self, type_name: str, payload: bytes = b"", retries: int = 0) -> tuple[str, bytes]:
+        # BP_IPC_RETRIES=1: an AS_BUSY is the answer, not retried (a test of KiCad's task gate)
+        retries = retries or int(os.environ.get("BP_IPC_RETRIES", "12"))
         for attempt in range(retries):
             req_id = 0x80000000 | self.seq
             self.seq += 1

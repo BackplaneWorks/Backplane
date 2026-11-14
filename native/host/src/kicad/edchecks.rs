@@ -317,7 +317,7 @@ pub async fn run(route: &GuiRoute, kind: &str, sch: &str, cancel: &tokio::sync::
     tokio::pin!(rx);
     let t0 = std::time::Instant::now();
     waits().seen.insert(id.clone(), t0);
-    // every way out but its end cancels it in KiCad: while it runs, every other client's request is AS_BUSY
+    // every way out but its end cancels it in KiCad: while it runs, every other client's request is AS_BUSY (from bp.13 batch 7, task-gate-reads, all but an allow-list of reads)
     let stop = |why: String| { let id = id.clone(); async move {
         let _ = embed::gui_call_as(route, "kiapi.backplane.embed.CancelProgress", json!({"id": id}), embed::CHECKS_CLIENT).await;
         why

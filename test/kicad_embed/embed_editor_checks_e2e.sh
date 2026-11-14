@@ -165,10 +165,23 @@ FRACS=""
 for _ in $(seq 240); do
   s=$(watch); f=$(python3 -c 'import json,sys; d=json.loads(sys.argv[1])["result"]["drc"]; print(d["fraction"] if d["running"] else "")' "$s" 2>/dev/null || true)
   [ -n "$f" ] && FRACS="$FRACS $f"
+  # task-gate-reads (bp.13 batch 7): while DRC runs, a read is answered and a change or other read is AS_BUSY naming the task
+  if [ -n "$f" ] && [ -z "${GATE_DONE:-}" ] && echo "$CAPS" | grep -q 'task-gate-reads'; then
+    GATE_DONE=1; g0=$(date +%s%N)
+    GR=$(BP_IPC_RETRIES=1 BP_IPC_CLIENT=e2e-gate python3 "$IPC_PY" frames "$SOCK" 2>&1 | tail -1 | cut -c1-200 || true); g1=$(date +%s%N)
+    GB=$(BP_IPC_RETRIES=1 BP_IPC_CLIENT=e2e-gate python3 "$IPC_PY" items-count "$SOCK" pcb 11 2>&1 | tail -1 | cut -c1-300 || true); g2=$(date +%s%N)
+    GS=$(watch); GRUN=$(python3 -c 'import json,sys; print(int(json.loads(sys.argv[1])["result"]["drc"]["running"]))' "$GS" 2>/dev/null || echo "?")
+    echo "INFO task gate during DRC: GetFrames $(( (g1-g0)/1000000 )) ms: $GR | GetItems $(( (g2-g1)/1000000 )) ms: $GB | still running after: $GRUN"
+  fi
   python3 -c 'import json,sys; r=json.loads(sys.argv[1])["result"]; sys.exit(0 if r["drc"]["in_editor"] and r["erc"]["in_editor"] and r["drc"]["state"]=="fresh" and r["erc"]["state"]=="fresh" else 1)' "$s" 2>/dev/null && break
   sleep 0.25
 done
 S1=$(wait_summary 'd["in_editor"] and e["in_editor"]' 60) || true
+if [ -n "${GATE_DONE:-}" ]; then
+  check "During DRC in KiCad a read is answered (GetFrames)" "$(echo "$GR" | grep -q '"ok": true' && echo 1 || echo 0)" "$GR"
+  if echo "$GB" | grep -q 'AS_BUSY'; then check "During DRC in KiCad GetItems is AS_BUSY naming the task (a task is running: ...)" "$(echo "$GB" | grep -q 'a task is running: ' && echo 1 || echo 0)" "$GB"
+  else echo "INFO GetItems was answered: DRC had ended by then ($GB)"; fi
+fi
 L1D=$(list drc); L1E=$(list erc)
 check "In KiCad: both checks ran in the open editor (in_editor), nothing unsaved" "$(python3 -c 'import json,sys; r=json.loads(sys.argv[1])["result"]; print(int(r["drc"]["in_editor"] and r["erc"]["in_editor"] and not r["drc"]["unsaved"]))' "$S1" 2>/dev/null || echo 0)" "$S1"
 sub() { python3 -c 'import sys; a=set(sys.argv[1].split()); b=set(sys.argv[2].split()); print(len(a-b))' "$1" "$2"; }
