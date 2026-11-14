@@ -455,6 +455,7 @@ mod imp {
     /// Windows only (the F3 input shield): Linux has its button grab (grab_click).
     pub fn shield(_container: u64, _on: bool) {}
     pub fn shield_tick(_container: u64, _shown: Option<u64>) {}
+    pub fn backplane_press_ms_ago() -> u64 { u64::MAX }
     pub fn keys_really_backplanes(_container: u64) -> bool { true }
     pub fn focus_debug(_container: u64) -> serde_json::Value { serde_json::Value::Null }
     /// Windows only (an invisible KiCad window taking the foreground): never so here.
@@ -739,6 +740,10 @@ mod imp {
     /// The pane's view of who has the keys (true: KiCad's shown editor), noted each tick, for the reclaim's decision.
     static PANE_KEYS: AtomicBool = AtomicBool::new(false);
     pub fn note_pane_keys(kicad: bool) { PANE_KEYS.store(kicad, Ordering::SeqCst); }
+    /// When a button last went down in Backplane's own window outside the pane (`button_over`): the person taking the
+    /// keys to Backplane, as opposed to focus drifting there on its own (a pre-warmed frame's activation ending).
+    static BACKPLANE_PRESS_AT: AtomicU64 = AtomicU64::new(0);
+    pub fn backplane_press_ms_ago() -> u64 { mono_ms().saturating_sub(BACKPLANE_PRESS_AT.load(Ordering::SeqCst)) }
     /// The frames Backplane has handed the keys to: past their cold construction, so `has_focus`'s reclaim (for wxMSW
     /// focusing a canvas by itself while a frame is built) never undoes a hand-in Backplane asked for (the editor tab's was)
     fn handed_in() -> &'static Mutex<HashSet<u64>> { static S: OnceLock<Mutex<HashSet<u64>>> = OnceLock::new(); S.get_or_init(Default::default) }
@@ -1182,6 +1187,7 @@ mod imp {
     ///   the frame is visible it is lost (the pane re-posts it once shown: kicad_pane `refocus`).
     /// - When `w` is gpui's top-level window (`target_tid == cur`), detach thread input queues first so `SetFocus(h)` never sends synchronous
     ///   `WM_KILLFOCUS` into KiCad (staying instant even when KiCad is `NtSuspendProcess`-frozen and preserving KiCad's `m_lostFocus` state).
+    #[track_caller]
     pub fn focus(w: u64) { focus_with(w, false) }
     /// An explicit hand-back to gpui's window (Ctrl+` or another host chord pressed in KiCad, also while KiCad is frozen):
     /// as `focus`, and the host window is activated too. KiCad's frame can be the active foreground window, where `SetFocus`
@@ -1207,15 +1213,20 @@ mod imp {
             Some((id_of(fg), String::from_utf16_lossy(&t[..n.max(0) as usize])))
         }
     }
+    #[track_caller]
     pub fn hand_back(w: u64) { HANDED_BACK_AT.store(mono_ms().max(1), Ordering::SeqCst); focus_with(w, true) }
     /// Whether `frame` and `container` are both visible (each with every ancestor): a read of window state, no message to KiCad.
     pub fn frame_visible(container: u64, frame: u64) -> bool {
         let (c, f) = (hwnd(container), hwnd(frame));
         !c.is_null() && !f.is_null() && unsafe { IsWindowVisible(c) != 0 && IsWindowVisible(f) != 0 }
     }
+    #[track_caller]
     fn focus_with(w: u64, activate: bool) {
         let h = hwnd(w);
         if h.is_null() { return }
+        if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() {
+            eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_focus_call": {"window": w, "hand_back": activate, "at": std::panic::Location::caller().to_string()}}));
+        }
         unsafe {
             let cur = GetCurrentThreadId();
             let target_tid = GetWindowThreadProcessId(h, null_mut());
@@ -1340,6 +1351,7 @@ mod imp {
             if in_cont {
                 if l_or_m { Some(true) } else { None }
             } else if in_top {
+                BACKPLANE_PRESS_AT.store(mono_ms(), Ordering::SeqCst);
                 CHILD_FOCUSED.store(false, Ordering::SeqCst);
                 CLICK_GRACE_UNTIL.store(0, Ordering::SeqCst);
                 Some(false)
@@ -1712,6 +1724,7 @@ mod imp {
     pub fn note_pane_keys(_kicad: bool) {}
     pub fn shield(_container: u64, _on: bool) {}
     pub fn shield_tick(_container: u64, _shown: Option<u64>) {}
+    pub fn backplane_press_ms_ago() -> u64 { u64::MAX }
     pub fn keys_really_backplanes(_container: u64) -> bool { true }
     pub fn focus_debug(_container: u64) -> serde_json::Value { serde_json::Value::Null }
     pub fn invisible_kicad_foreground(_frame: u64) -> Option<(u64, String)> { None }
