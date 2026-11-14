@@ -682,6 +682,32 @@ def foreground_focus_hwnd() -> int:
     return 0
 
 
+
+def keys_stay_in(frame: int, hold_ms: int = 500, arrive_ms: int = 500) -> dict:
+    """After a hand-in: the real Win32 focus enters `frame` within arrive_ms, then stays in it for hold_ms, sampled
+    every 20 ms (Lead, Nov 15: "handed in and still KiCad's 500 ms later" is its own check, not inferred from one key
+    acting; base-win: a click handed in and the keys were Backplane's again ~100 ms later). Returns when the keys
+    arrived and every sample outside the frame (ms after arrival, focus class)."""
+    def inside():
+        f = foreground_focus_hwnd()
+        return bool(frame and f and (f == frame or u32.IsChild(frame, f))), f
+    t0 = time.monotonic()
+    arrived = None
+    while time.monotonic() - t0 < arrive_ms / 1000:
+        if inside()[0]:
+            arrived = round((time.monotonic() - t0) * 1000)
+            break
+        time.sleep(0.02)
+    outside = []
+    if arrived is not None:
+        t1 = time.monotonic()
+        while time.monotonic() - t1 < hold_ms / 1000:
+            ok, f = inside()
+            if not ok:
+                outside.append({"ms": round((time.monotonic() - t1) * 1000), "focus": f, "class": hwnd_class(f) if f else ""})
+            time.sleep(0.02)
+    return {"arrived_ms": arrived, "outside_samples": len(outside), "first_outside": outside[:4], "held": arrived is not None and not outside}
+
 def grab_screen(path: str, bbox=None):
     from PIL import ImageGrab
 
@@ -1220,6 +1246,7 @@ def run_window_suite(h: SuiteHarness) -> int:
         win32_styles_obs = {}
 
         box_checked = 0.0
+        click_hold = {"held": None, "why": "the canvas click step did not run"}
         while cp.poll() is None and "12_view_mode" not in seen:
             # a box up before the first frame is shown is the failure, named, not a timeout later
             if "01_shown" not in seen and time.monotonic() - box_checked > 1.0:
@@ -1268,7 +1295,8 @@ def run_window_suite(h: SuiteHarness) -> int:
                     cx = int(sr.get("x", 600) + int(pane.get("w", 600) * 0.35))
                     cy = int(sr.get("y", 300) + int(pane.get("h", 500) * 0.50))
                     screen_click(cx, cy, 1)
-                    time.sleep(0.35)
+                    click_hold = keys_stay_in(frm_h)
+                    print("DIAG click_keys_hold " + json.dumps(click_hold), flush=True)
 
                 elif name == "handback_focus":
                     key_chord("ctrl", "grave")
@@ -1384,6 +1412,11 @@ def run_window_suite(h: SuiteHarness) -> int:
             {"keys": r_shown.get("keys")},
         )
 
+        h.check(
+            "Canvas click: the keys reach KiCad and stay KiCad's for 500 ms after the hand-in (sampled every 20 ms)",
+            bool(click_hold.get("held")),
+            click_hold,
+        )
         r_cf = reps.get("clicked_focus", {})
         r_fr = reps.get("focus_returned", {})
         h.check(

@@ -420,16 +420,22 @@ def mouse_return_check(h, cp, frame, children, timeline, rounds=None, kpid=0):
                         h.check(name, False, {"precondition": "KiCad did not have the keys for Ctrl+`", **kicad_first})
                         continue
                 host_ok, host = keys_back_to_backplane(h, cp, frame, top, entry, cbox)
+                import threading
+                hold = {}
+                sampler = threading.Thread(target=lambda: hold.update(E.keys_stay_in(frame)))
                 if route == "tab":
                     clicked = h.click_control(top, "kicad-tab:PCB")
+                    sampler.start()
                     around = {"clicked": clicked}
                     fg = foreground_never_lost()
                 else:
                     around = traced_click(gl["root_x"] + 20, gl["root_y"] + gl["h"] - 30)
+                    sampler.start()
                     shot = h.p(f"return_{entry}_{route}{n}_50ms.png")
                     E.grab_screen(shot)  # the title bar ~50 ms after the click: inactive = a visible flicker
                     fg = foreground_never_lost(550)
                     around["shot_50ms"] = shot
+                sampler.join(2.0)
                 after = focus_snapshot(frame)
                 if after["foreground"]:
                     after["foreground_title"] = window_title(after["foreground"])
@@ -444,6 +450,8 @@ def mouse_return_check(h, cp, frame, children, timeline, rounds=None, kpid=0):
                 d["hidden_schematic_titles"] = sorted(set(hidden))
                 untouched = not any(t.lstrip().startswith("*") for t in hidden)
                 h.check(name, host_ok and zoomed and fg["no_foreground_samples"] == 0 and untouched, d)
+                h.check(f"Return {route} from {entry} {n}/{rounds}: the keys stay KiCad's for 500 ms after the hand-in (sampled)",
+                        bool(hold.get("held")), hold)
     # Hover never moves the keys: composer focused, the pointer across the pane and back, no click; typing stays in the composer.
     if gl and cbox:
         keys_back_to_backplane(h, cp, frame, top, "composer", cbox)
