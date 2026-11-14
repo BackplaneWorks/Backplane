@@ -153,8 +153,8 @@ pub fn waiting_on(info: &Value, have_frame: bool, windows: bool) -> Option<Strin
         return Some(crate::i18n::trs("The embedded editor needs Backplane KiCad."));
     }
     match info["state"].as_str().unwrap_or("") {
-        // the hub has already tried a missed start window once more (embed.rs start_retry); a click on an editor tab starts it again
-        "failed" => Some(format!("{} {}\n{}", crate::i18n::trs("KiCad could not start:"), info["reason"].as_str().unwrap_or(""), crate::i18n::trs("Click the Board or Schematic tab to try again."))),
+        // the hub has already tried a missed start window once more (embed.rs start_retry); the pane's Try again under this starts it again
+        "failed" => Some(format!("{} {}", crate::i18n::trs("KiCad could not start:"), info["reason"].as_str().unwrap_or(""))),
         "unresponsive" => Some(crate::i18n::trs("KiCad is not responding.")),
         "stopped" => Some(crate::i18n::trs("KiCad was closed.")),
         _ if have_frame => None,
@@ -166,6 +166,9 @@ pub fn waiting_on(info: &Value, have_frame: bool, windows: bool) -> Option<Strin
         _ => Some(crate::i18n::trs("Starting KiCad…")),
     }
 }
+
+/// The pane offers Try again under its message: KiCad's start failed (the hub has already retried a missed start window once).
+pub fn try_again(info: &Value) -> bool { info["state"] == "failed" }
 
 /// What the pane says when the editor is not on show, from the hub's state (None: the editor is there).
 pub fn waiting(info: &Value, have_frame: bool) -> Option<String> {
@@ -715,6 +718,8 @@ impl KicadPane {
         window.on_frame_drawn(move |window, cx| weak.update(cx, |this, cx| this.after_frame(window, cx)).is_ok());
     }
     /// Re-send `editor.kicad.attach` after a WebSocket reconnect so any info transition missed while disconnected is recovered.
+    /// KiCad's start failed: the pane offers Try again.
+    pub fn failed(&self) -> bool { try_again(&self.seen_info()) }
     pub fn reattach(&mut self) {
         let Some(c) = self.container else { return };
         let display = std::env::var("DISPLAY").unwrap_or_default();
@@ -862,6 +867,7 @@ impl Render for KicadPane {
         self.decide(window, cx);
         let light = self.light; let c = |n: &str| crate::theme::color(light, n);
         let say = waiting(&self.seen_info(), self.want().is_some());
+        let failed = self.failed();
         let marker = self.marker.clone(); let focus = self.focus.clone();
         let keys = self.keys;
         div().id("kicad-pane").size_full().relative().bg(rgb(0x001023)).track_focus(&focus)
@@ -879,7 +885,10 @@ impl Render for KicadPane {
             // (a border that came and went resized KiCad by 4 px at each hand-over: a relayout and repaint each time)
             .border_2().border_color(if keys { c("accent") } else { Rgba { a: 0., ..c("accent") } })
             .child(canvas(move |b, window, _| { *marker.lock().unwrap() = Some(window.insert_hitbox(b, HitboxBehavior::Normal).id); }, |_, _, _, _| {}).size_full())
-            .when_some(say, |d, s| d.child(div().absolute().inset_0().flex().items_center().justify_center().text_color(c("faint")).child(s)))
+            .when_some(say, |d, s| d.child(div().absolute().inset_0().flex().flex_col().gap_2().items_center().justify_center().text_color(c("faint")).child(s)
+                .when(failed, |d| d.child(crate::ui::with_rect(div().id("kicad-retry"), || "kicad:retry".to_string()).px_3().py_1().rounded_md().cursor_pointer()
+                    .bg(c("raise")).hover(|x| x.bg(c("line"))).text_color(c("text")).child(crate::i18n::trs("Try again"))
+                    .on_click(cx.listener(|this, _, _, cx| { this.reattach(); cx.notify(); }))))))
     }
 }
 
@@ -958,7 +967,8 @@ mod tests {
         assert!(waiting(&json!({"state": "starting"}), false).is_some());
         assert!(waiting(&json!({"state": "ready"}), true).is_none());
         assert!(waiting(&json!({"state": "failed", "reason": "no kicad"}), true).unwrap().contains("no kicad"));
-        assert!(waiting(&json!({"state": "failed", "reason": "no kicad"}), true).unwrap().contains("Board or Schematic tab"), "a failed start says how to try again");
+        assert!(super::try_again(&json!({"state": "failed", "reason": "no kicad"})), "a failed start offers Try again");
+        assert!(!super::try_again(&json!({"state": "starting"})) && !super::try_again(&json!({"state": "stopped"})));
         assert_eq!(
             waiting_on(&json!({"mode": "stock", "state": "ready"}), false, true).as_deref(),
             Some("The embedded editor needs Backplane KiCad."),

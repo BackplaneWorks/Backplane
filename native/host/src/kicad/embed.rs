@@ -999,6 +999,15 @@ struct Actor {
 fn start_retry(why: &str, retried: bool) -> bool { !retried && why.starts_with("KiCad did not") && why.contains(" within ") }
 /// How long a start has for KiCad's socket and its first answers (a dialog of KiCad's own open meanwhile extends it); short under test.
 const START_WINDOW_S: u64 = if cfg!(test) { 3 } else { 30 };
+/// The start window in force (BACKPLANE_KICAD_START_WINDOW_S for an e2e), and whether this start is one an e2e makes stall: its socket
+/// never seen (BACKPLANE_KICAD_TEST_STALLS=N, the first N starts of this hub; warm-before-Edit starts count, so such a run sets
+/// BACKPLANE_KICAD_WARM=0).
+fn start_window() -> (u64, bool) {
+    static STARTS: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let window = std::env::var("BACKPLANE_KICAD_START_WINDOW_S").ok().and_then(|v| v.parse().ok()).filter(|v| *v > 0).unwrap_or(START_WINDOW_S);
+    let stalls = std::env::var("BACKPLANE_KICAD_TEST_STALLS").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+    (window, STARTS.fetch_add(1, Ordering::SeqCst) < stalls)
+}
 
 impl Actor {
     fn ensure_helper(&mut self) {
@@ -1524,7 +1533,7 @@ impl Actor {
                 let Some(s) = self.sessions.get_mut(&pro).filter(|s| s.gen == gen && s.state == "starting") else { return };
                 *s = s.clone().ready(&sock, &version, ipc::now_s());
                 for c in caps { if !s.caps.contains(&c) { s.caps.push(c); } }
-                self.start_retried.remove(&pro);
+                if self.start_retried.remove(&pro) { eprintln!("kicad embed: {pro}: started after a missed start window (the hub's retry or the person's Try again)"); }
                 s.holder = holder;
                 if !events_sock.is_empty() { s.events_sock = events_sock; }
                 if !frames.is_empty() { s.frames = frames; }
@@ -1570,7 +1579,7 @@ impl Actor {
                 let env = self.start_env.get(&pro).cloned();
                 if let Some(env) = env.filter(|_| start_retry(&why, self.start_retried.contains(&pro))) {
                     // once more, by itself: the pane stays on "Starting KiCad..." and the first start's waiters get the second start's answer
-                    eprintln!("kicad embed: {pro}: {why}; starting it once more");
+                    eprintln!("kicad embed: {pro}: {why}; starting it once more (the first start waited {})", self.sessions.get(&pro).and_then(|s| start_waits(s.pid)).unwrap_or_else(|| "?".into()));
                     self.start_retried.insert(pro.clone());
                     let client = self.attach_waiters.get(&pro).and_then(|w| w.first()).map_or(0, |w| w.0);
                     let (tx, _rx) = oneshot::channel();
@@ -2087,12 +2096,14 @@ async fn spawn_gui_session(
     // Handshake: wait up to 30 s for the API socket, then Ping + GetVersion (retrying AS_NOT_READY while frames initialize).
     // If fork KiCad opens a startup modal dialog before `SetReadyToReply` (e.g. LocalHistory's "Recover Unsaved Changes" after a crash),
     // `<sock>.events` already reports `ET_DIALOG_OPENED`: extend `deadline` while the dialog is open so the hub never kills KiCad under the user.
-    let mut deadline = tokio::time::Instant::now() + Duration::from_secs(START_WINDOW_S);
+    let (window, stall) = start_window();
+    let mut deadline = tokio::time::Instant::now() + Duration::from_secs(window);
+    let sock_rx = async move { if stall { std::future::pending::<()>().await; } sock_rx.await };
     let sock = match tokio::time::timeout_at(deadline, sock_rx).await {
         Ok(Ok(s)) => s,
         _ => {
             if !done.load(Ordering::SeqCst) {
-                let _ = me.send(Msg::StartFailed { pro, gen, why: format!("KiCad did not open its IPC socket within {START_WINDOW_S} s") });
+                let _ = me.send(Msg::StartFailed { pro, gen, why: format!("KiCad did not open its IPC socket within {window} s") });
             }
             return;
         }
@@ -2149,7 +2160,7 @@ async fn spawn_gui_session(
     }
     if !hand_ok {
         if !done.load(Ordering::SeqCst) {
-            let _ = me.send(Msg::StartFailed { pro, gen, why: format!("KiCad did not answer Ping and GetVersion within {START_WINDOW_S} s") });
+            let _ = me.send(Msg::StartFailed { pro, gen, why: format!("KiCad did not answer Ping and GetVersion within {window} s") });
         }
         return;
     }

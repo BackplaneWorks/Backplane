@@ -34,6 +34,8 @@ SUITES=(
   "embed_prewarm_e2e.sh:prewarm"
   "embed_click_e2e.sh:click"
   "embed_thread_e2e.sh:thread"
+  # a start that misses its window is retried once by the hub; twice, the pane offers Try again (fork only)
+  "embed_start_retry_e2e.sh:start-retry"
 )
 
 FAILED=0

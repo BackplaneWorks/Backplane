@@ -2402,7 +2402,7 @@ gpui.c.pad.pen	Pen	ペン
 gpui.c.pad.box	Box	枠
 gpui.c.pad.eraser	Eraser	消しゴム
 gpui.c.kicad.kicad.could.not.start	KiCad could not start:	KiCad を起動できませんでした:
-gpui.c.kicad.try.again	Click the Board or Schematic tab to try again.	「基板」か「回路図」タブをクリックすると、もう一度起動します。
+gpui.c.kicad.try.again	Try again	再試行
 gpui.c.kicad.kicad.is.not.responding	KiCad is not responding.	KiCad が応答していません。
 gpui.c.kicad.kicad.was.closed	KiCad was closed.	KiCad は閉じられました。
 gpui.c.kicad.starting.kicad	Starting KiCad…	KiCad を起動しています…
