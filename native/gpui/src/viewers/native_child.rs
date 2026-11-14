@@ -1397,15 +1397,14 @@ mod imp {
                 PANE_PRESS_AT.store(mono_ms(), Ordering::SeqCst);
                 let frame = shown_frame(hwnd(ACTIVE_CONTAINER.load(Ordering::SeqCst)));
                 if !frame.is_null() { focus(id_of(frame)); }
-                let flag = match msg { WM_LBUTTONDOWN => 0x0002, WM_MBUTTONDOWN => 0x0020, _ => 0x0008 }; // MOUSEEVENTF_*DOWN
-                {
-                    use windows_sys::Win32::UI::Input::KeyboardAndMouse::{SendInput, INPUT, INPUT_0, INPUT_MOUSE, MOUSEINPUT};
-                    let input = INPUT { r#type: INPUT_MOUSE, Anonymous: INPUT_0 { mi: MOUSEINPUT { dx: 0, dy: 0, mouseData: 0, dwFlags: flag, time: 0, dwExtraInfo: 0 } } };
-                    unsafe { SendInput(1, &input, std::mem::size_of::<INPUT>() as i32); }
-                }
+                // the replay waits for KiCad's shown editor to really have the focus (replay_tick): pressed straight after the
+                // hand-in, 1 in 5 presses reached the canvas before its focus change and did nothing (runs ST2, ST3)
+                let mut pt = POINT::default();
+                unsafe { GetCursorPos(&mut pt); }
+                if let Ok(mut r) = replay_q().lock() { *r = Some(Replay { msg, x: pt.x, y: pt.y, at: mono_ms(), frame: id_of(frame) }); }
                 if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() {
                     let fg = unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
-                    eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_shield_click": {"button": msg, "foreground": id_of(fg), "forwarded": true, "frame": id_of(frame)}}));
+                    eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_shield_click": {"button": msg, "foreground": id_of(fg), "replay_pending": true, "frame": id_of(frame)}}));
                 }
                 if let Ok(mut q) = events_q().lock() { q.push(Ev::Click); }
                 0
@@ -1505,7 +1504,38 @@ mod imp {
     /// Backplane having them, or another application in front (run AW1, case 3: back from Notepad by a click straight on
     /// the canvas left no foreground window, F3 by another route). A click on it is then always a click on Backplane's own
     /// window, which Windows activates; the pane's flag never decides it, so a wrong flag cannot eat a click.
+    /// A press the shield took, to be replayed into KiCad once its shown editor has the focus (stage 2).
+    struct Replay { msg: u32, x: i32, y: i32, at: u64, frame: u64 }
+    fn replay_q() -> &'static Mutex<Option<Replay>> { static Q: OnceLock<Mutex<Option<Replay>>> = OnceLock::new(); Q.get_or_init(Default::default) }
+    const REPLAY_WAIT_MS: u64 = 250;
+    /// Each tick: the pending press goes to KiCad once its shown editor has the focus, at the point it was pressed (a drag
+    /// starts where the person pressed; the real moves follow). Still held: the down alone (the physical release ends it).
+    /// Already released: down and up together, so KiCad never keeps a down with no up. Focus not there within 250 ms: the
+    /// press is dropped (consumed, as in stage 1) rather than landing late on whatever is under the pointer.
+    fn replay_tick() {
+        let Some(r) = replay_q().lock().ok().and_then(|mut q| q.take()) else { return };
+        let waited = mono_ms().saturating_sub(r.at);
+        let debug = std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some();
+        if !kicad_has_keys(hwnd(r.frame)) {
+            if waited > REPLAY_WAIT_MS {
+                if debug { eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_replay": {"path": "dropped", "waited_ms": waited}})); }
+            } else if let Ok(mut q) = replay_q().lock() { *q = Some(r); }
+            return;
+        }
+        use windows_sys::Win32::UI::Input::KeyboardAndMouse::{SendInput, INPUT, INPUT_0, INPUT_MOUSE, MOUSEINPUT, GetAsyncKeyState};
+        let (down, up, vk) = match r.msg { WM_LBUTTONDOWN => (0x0002, 0x0004, 0x01), WM_MBUTTONDOWN => (0x0020, 0x0040, 0x04), _ => (0x0008, 0x0010, 0x02) };
+        let held = unsafe { GetAsyncKeyState(vk) } as u16 & 0x8000 != 0;
+        let (vx, vy, vw, vh) = unsafe { (GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_YVIRTUALSCREEN), GetSystemMetrics(SM_CXVIRTUALSCREEN).max(2), GetSystemMetrics(SM_CYVIRTUALSCREEN).max(2)) };
+        let abs = |v: i32, o: i32, size: i32| (((v - o) as i64 * 65535) / (size - 1) as i64) as i32;
+        let (ax, ay) = (abs(r.x, vx, vw), abs(r.y, vy, vh));
+        // MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK, at the original point
+        let at = |flags: u32| INPUT { r#type: INPUT_MOUSE, Anonymous: INPUT_0 { mi: MOUSEINPUT { dx: ax, dy: ay, mouseData: 0, dwFlags: flags | 0x8000 | 0x4000 | 0x0001, time: 0, dwExtraInfo: 0 } } };
+        let inputs: Vec<INPUT> = if held { vec![at(down)] } else { vec![at(down), at(up)] };
+        unsafe { SendInput(inputs.len() as u32, inputs.as_ptr(), std::mem::size_of::<INPUT>() as i32); }
+        if debug { eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_replay": {"path": if held { "replayed-down" } else { "replayed-click" }, "waited_ms": waited}})); }
+    }
     pub fn shield_tick(container: u64, shown: Option<u64>) {
+        replay_tick();
         let c = hwnd(container);
         if c.is_null() || unsafe { IsWindow(c) } == 0 { return }
         let up = shown.is_some() && unsafe { IsWindowVisible(c) } != 0 && !kicad_has_keys(hwnd(shown.unwrap_or(0)));
