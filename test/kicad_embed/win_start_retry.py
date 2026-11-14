@@ -5,7 +5,7 @@ embed_start_retry_e2e.sh.
 
 first: a plain start (no knobs, no warm start), to read what a real start waited for: point KICAD_DIR at a freshly staged
        runtime and the first start is the one the antivirus reads the new files in. Prints the hub's start lines.
-1:     the hub's first start stalls (BACKPLANE_KICAD_TEST_STALLS=1, an 8 s window): the hub tries once more by itself,
+1:     the hub's first start stalls (BACKPLANE_KICAD_TEST_STALLS=1, a 20 s window): the hub tries once more by itself,
        Edit shows the editor, the pane never says KiCad could not start.
 2:     both starts stall: the pane says KiCad could not start, offers Try again (kicad:retry), and Try again shows the editor.
 """
@@ -31,22 +31,24 @@ def hub_start_lines(h):
 def run(h, mode):
     if mode != "first":
         os.environ["BACKPLANE_KICAD_TEST_STALLS"] = mode
-        os.environ.setdefault("BACKPLANE_KICAD_START_WINDOW_S", "8")
+        # 20 s, not Linux's 8: on bp-win the hub's second start had its socket at 5.1 s and missed Ping within 8 (start-1)
+        os.environ.setdefault("BACKPLANE_KICAD_START_WINDOW_S", "20")
     os.environ["BACKPLANE_KICAD_WARM"] = "0"  # the Edit's start is the first one
     h.init_dirs()
     try:
         h.start_hub(embed_mode="fork")
         s = [{"select": 0}, {"wait": 2200}, {"click": "rail:Board"}, {"wait": 2500}, {"click": "ui:Edit", "within": 10000}]
         if mode == "2":
-            s += [{"wait": 23000}, {"kicad": {"report": True, "tag": "failed"}}, {"mark": "failed"}, {"wait": 2500},
+            window_ms = int(os.environ.get("BACKPLANE_KICAD_START_WINDOW_S", "20")) * 1000
+            s += [{"wait": 2 * window_ms + 10000}, {"kicad": {"report": True, "tag": "failed"}}, {"mark": "failed"}, {"wait": 2500},
                   {"click": "kicad:retry", "within": 5000}, {"kicad": {"wait_painted": 90000, "kind": "PCB", "tag": "retried"}}]
         else:
             s += [{"kicad": {"wait_painted": 90000, "kind": "PCB", "tag": "edit"}}]
         s += [{"mark": "done"}, {"wait": 1500}]
-        h.start_client(s, exit_after=180)
-        if mode == "2" and h.wait_for_mark("failed", timeout_s=120):
+        h.start_client(s, exit_after=300)
+        if mode == "2" and h.wait_for_mark("failed", timeout_s=200):
             h.shot("failed_pane")  # the pane's words and its Try again button, for the person
-        h.wait_for_mark("done", timeout_s=170)
+        h.wait_for_mark("done", timeout_s=290)
         lines = hub_start_lines(h)
         for l in lines:
             print("INFO " + l[:400], flush=True)
