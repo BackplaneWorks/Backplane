@@ -642,6 +642,9 @@ impl KicadPane {
         if !has && self.keys {
             if let Some((w, at)) = self.took.take() { if at.elapsed() < std::time::Duration::from_millis(600) { nc::focus(w); has = true; } }
         }
+        if has != self.keys && std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() {
+            eprintln!("GPUI_LOG {}", json!({"kicad_keys_flip": {"to": has, "in_dialog": in_dialog, "has_focus": nc::has_focus(c), "why": nc::focus_debug(c)}}));
+        }
         if has != self.keys { self.keys = has; nc::grab_escape(self.toplevel, has); self.grab_click(c, !has); if has { self.touched(); } cx.notify(); }
         if let Some(h) = self.info["holder"].as_u64().filter(|h| *h > 0 && *h != self.kept) { nc::keep(h); self.kept = h; }
         for e in nc::events() {
