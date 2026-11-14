@@ -451,6 +451,8 @@ mod imp {
     /// An explicit hand-back to the client's window (a host chord pressed in the editor): as `focus` here.
     #[track_caller]
     pub fn hand_back(w: u64) { focus(w) }
+    /// Windows only (the F3 input shield): Linux has its button grab (grab_click).
+    pub fn shield(_container: u64, _on: bool) {}
     /// Windows only (an invisible KiCad window taking the foreground): never so here.
     pub fn invisible_kicad_foreground(_frame: u64) -> Option<(u64, String)> { None }
     /// Whether `frame` and its container are both visible now (Windows re-posts an opening focus request on that): always so here.
@@ -1083,6 +1085,7 @@ mod imp {
                 }
             }
             ShowWindowAsync(c, if show.is_some() { SW_SHOWNA } else { SW_HIDE });
+            if show.is_some() { shield_follow(c); } else if SHIELD_ON.load(Ordering::SeqCst) { ShowWindowAsync(hwnd(SHIELD.load(Ordering::SeqCst)), SW_HIDE); }
             let mut rc = RECT::default();
             if GetWindowRect(c, &mut rc) != 0 { *last_root = (rc.left, rc.top); }
         }
@@ -1128,6 +1131,7 @@ mod imp {
                     }
                 }
             }
+            shield_follow(c);
         }
     }
 
@@ -1326,6 +1330,91 @@ mod imp {
     }
 
     pub fn grab_click(_container: u64, _on: bool) {}
+    /// F3: while Backplane has the keys, a never-painting input shield over the pane (a child of Backplane's own top-level,
+    /// on its own thread, above the KiCad container, with the container's holes). A click on the pane then lands on
+    /// Backplane's own window, so Backplane keeps the foreground by construction (a click on KiCad's window left no foreground
+    /// window, runs F1/Hc: Windows dropped activation at the press, and SetForegroundWindow from Backplane was refused,
+    /// run Hd); the shield hides itself and the pane hands KiCad the keys. It never touches KiCad's thread. Stage 1: that
+    /// first click is consumed (it gives the keys; it does not reach KiCad).
+    static SHIELD: AtomicU64 = AtomicU64::new(0);
+    static SHIELD_ON: AtomicBool = AtomicBool::new(false);
+    fn shield_class() -> &'static [u16] {
+        static CLS: OnceLock<Vec<u16>> = OnceLock::new();
+        CLS.get_or_init(|| {
+            let mut n: Vec<u16> = "BackplaneKicadShield".encode_utf16().chain(std::iter::once(0)).collect(); // i18n-ok: Win32 window class name
+            unsafe {
+                let wc = WNDCLASSEXW { cbSize: std::mem::size_of::<WNDCLASSEXW>() as u32, style: 0, lpfnWndProc: Some(shield_proc), cbClsExtra: 0,
+                    cbWndExtra: 0, hInstance: null_mut(), hIcon: null_mut(), hCursor: LoadCursorW(null_mut(), IDC_ARROW), hbrBackground: null_mut(),
+                    lpszMenuName: null_mut(), lpszClassName: n.as_mut_ptr(), hIconSm: null_mut() };
+                RegisterClassExW(&wc);
+            }
+            n
+        })
+    }
+    unsafe extern "system" fn shield_proc(h: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+        use windows_sys::Win32::UI::WindowsAndMessaging::{WM_PAINT, WM_ERASEBKGND};
+        match msg {
+            WM_LBUTTONDOWN | WM_MBUTTONDOWN | WM_RBUTTONDOWN => {
+                SHIELD_ON.store(false, Ordering::SeqCst);
+                unsafe { ShowWindowAsync(h, SW_HIDE); }
+                PANE_PRESS_AT.store(mono_ms(), Ordering::SeqCst);
+                if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() {
+                    let fg = unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
+                    eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_shield_click": {"button": msg, "foreground": id_of(fg)}}));
+                }
+                if let Ok(mut q) = events_q().lock() { q.push(Ev::Click); }
+                0
+            }
+            WM_PAINT => { unsafe { windows_sys::Win32::Graphics::Gdi::ValidateRect(h, std::ptr::null()); } 0 }
+            WM_ERASEBKGND => 1,
+            _ => unsafe { DefWindowProcW(h, msg, wparam, lparam) },
+        }
+    }
+    /// The shield over `container` (same rect in the parent, same holes, just above it), when on.
+    unsafe fn shield_follow(container: HWND) {
+        if !SHIELD_ON.load(Ordering::SeqCst) { return }
+        let s = hwnd(SHIELD.load(Ordering::SeqCst));
+        if s.is_null() || container.is_null() || unsafe { IsWindow(s) } == 0 { return }
+        let parent = unsafe { GetAncestor(container, GA_PARENT) };
+        let mut rc = RECT::default();
+        if unsafe { GetWindowRect(container, &mut rc) } == 0 { return }
+        let mut tl = POINT { x: rc.left, y: rc.top };
+        unsafe { windows_sys::Win32::Graphics::Gdi::ScreenToClient(parent, &mut tl); }
+        let (w, hh) = (rc.right - rc.left, rc.bottom - rc.top);
+        unsafe {
+            // the container's holes (gpui's overlays drawn over the pane) stay clickable through the shield too
+            let rgn = CreateRectRgn(0, 0, 0, 0);
+            let kind = windows_sys::Win32::Graphics::Gdi::GetWindowRgn(container, rgn);
+            if kind == 0 /* ERROR: no region */ { DeleteObject(rgn); SetWindowRgn(s, null_mut(), 0); } else if SetWindowRgn(s, rgn, 0) == 0 { DeleteObject(rgn); }
+            // just above the container: inserted after the window above it (or at the top)
+            let above = GetWindow(container, 3 /* GW_HWNDPREV */);
+            let after = if above.is_null() || above == s { null_mut() /* HWND_TOP */ } else { above };
+            SetWindowPos(s, after, tl.x, tl.y, w, hh, SWP_NOACTIVATE | 0x0040 /* SWP_SHOWWINDOW */);
+        }
+    }
+    pub fn shield(container: u64, on: bool) {
+        let c = hwnd(container);
+        if c.is_null() || unsafe { IsWindow(c) } == 0 { return }
+        let was = SHIELD_ON.swap(on, Ordering::SeqCst);
+        unsafe {
+            let parent = GetAncestor(c, GA_PARENT);
+            let mut s = hwnd(SHIELD.load(Ordering::SeqCst));
+            if on && (s.is_null() || IsWindow(s) == 0 || GetAncestor(s, GA_PARENT) != parent) {
+                if !s.is_null() && IsWindow(s) != 0 { windows_sys::Win32::UI::WindowsAndMessaging::DestroyWindow(s); }
+                s = CreateWindowExW(windows_sys::Win32::UI::WindowsAndMessaging::WS_EX_LAYERED | WS_EX_NOACTIVATE, shield_class().as_ptr(), null_mut(),
+                    WS_CHILD | WS_CLIPSIBLINGS, 0, 0, 1, 1, parent, null_mut(), null_mut(), null_mut());
+                if s.is_null() { SHIELD_ON.store(false, Ordering::SeqCst); return }
+                // alpha 1 of 255: nothing seen, every click still hits it
+                windows_sys::Win32::UI::WindowsAndMessaging::SetLayeredWindowAttributes(s, 0, 1, windows_sys::Win32::UI::WindowsAndMessaging::LWA_ALPHA);
+                SHIELD.store(id_of(s), Ordering::SeqCst);
+            }
+            if on { shield_follow(c); } else if !s.is_null() && was { ShowWindowAsync(s, SW_HIDE); }
+        }
+        if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() && was != on {
+            eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_shield": on}));
+        }
+    }
+
 
     fn unregister_escape() {
         let prev = HOTKEY_HWND.swap(0, Ordering::SeqCst);
@@ -1503,6 +1592,7 @@ mod imp {
     pub fn holes(_container: u64, _keep: Option<&[R]>) {}
     pub fn focus(_w: u64) {}
     pub fn hand_back(_w: u64) {}
+    pub fn shield(_container: u64, _on: bool) {}
     pub fn invisible_kicad_foreground(_frame: u64) -> Option<(u64, String)> { None }
     pub fn frame_visible(_container: u64, _frame: u64) -> bool { true }
     pub fn conn_fd() -> Option<i32> { None }
@@ -1514,6 +1604,7 @@ mod imp {
     pub fn focus_in_pid(_pid: u32) -> bool { false }
     pub fn button_over(_w: u64) -> Option<bool> { None }
     pub fn grab_click(_container: u64, _on: bool) {}
+
     pub fn grab_escape(_top: u64, _on: bool) {}
     pub fn events() -> Vec<super::Ev> { vec![] }
     pub fn poke(_w: u64, _keysym: u32, _mods: u16) {}
