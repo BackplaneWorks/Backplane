@@ -33,7 +33,11 @@ pub fn capable(caps: &Value) -> bool {
     let has = |k: &str, x: &str| caps[k].as_array().is_some_and(|a| a.iter().any(|c| c.as_str().is_some_and(|c| c == x || c.ends_with(&format!(".{x}")))));
     has("capabilities", CAP) && (caps["commands"].as_array().map_or(true, |a| a.is_empty()) || (has("commands", "RunChecks") && has("commands", "GetMarkers")))
 }
-/// The capability, asked once per editor process (its socket).
+/// Whether DRC's schematic parity is safe with no schematic editor open: the board's parity loads the schematic hidden and shows
+/// nothing (the fork's b07cc5548a), never raises a hidden board (532da6fbf3), and a task's message box answers itself instead of
+/// holding KiCad's task gate (0bbf8f988e). No capability of their own: `runaction-frame` (bp.13 batch 6) is the first that has all three.
+pub fn parity_hidden(caps: &Value) -> bool { caps["capabilities"].as_array().is_some_and(|a| a.iter().any(|c| c == "runaction-frame")) }
+/// The capability, asked once per editor process (its socket): (socket, checks itself, DRC parity safe with no schematic editor).
 static CAPS: OnceLock<Mutex<HashMap<String, (String, bool, bool)>>> = OnceLock::new();
 /// The open editor of the project when it runs checks itself.
 pub async fn ready(hub: &std::sync::Arc<crate::hub::Hub>, pro: &str) -> Option<GuiRoute> {
@@ -49,10 +53,14 @@ pub async fn ready(hub: &std::sync::Arc<crate::hub::Hub>, pro: &str) -> Option<G
     if !o["ok"].as_bool().unwrap_or(false) { return None } // no answer now: ask again next time
     let caps = o["message"].clone();
     let ok = capable(&caps);
-    eprintln!("checks: {pro}: {}", if ok { "DRC and ERC run in the open KiCad (embed-checks)" } else { "the open KiCad has no embed-checks: kicad-cli on the saved files" });
-    m.lock().unwrap().insert(pro.to_string(), (route.sock.clone(), ok, false));
+    let hidden = parity_hidden(&caps);
+    eprintln!("checks: {pro}: {}{}", if ok { "DRC and ERC run in the open KiCad (embed-checks)" } else { "the open KiCad has no embed-checks: kicad-cli on the saved files" },
+        if ok && hidden { "; DRC needs no schematic editor (its parity loads the schematic hidden)" } else { "" });
+    m.lock().unwrap().insert(pro.to_string(), (route.sock.clone(), ok, hidden));
     ok.then_some(route)
 }
+/// Whether the project's open KiCad runs DRC with its parity with no schematic editor open (asked by `ready` first).
+pub fn drc_without_sch(pro: &str) -> bool { CAPS.get_or_init(Default::default).lock().unwrap().get(pro).is_some_and(|x| x.1 && x.2) }
 /// Whether the project's open editor was found to check itself (no asking: the events loop calls it).
 pub fn known(pro: &str) -> bool { CAPS.get_or_init(Default::default).lock().unwrap().get(pro).is_some_and(|x| x.1) && embed::gui_route(pro).is_some_and(|r| CAPS.get().unwrap().lock().unwrap().get(pro).is_some_and(|x| x.0 == r.sock)) }
 /// What the panel says of an editor's result, where it may differ from kicad-cli's (the fork's answer, bp.13).
@@ -507,6 +515,11 @@ mod tests {
         assert_eq!(fs.iter().map(|f| f.detail.ends_with(EDITOR_ONLY_NOTE)).collect::<Vec<_>>(), [false, true, false]);
         assert_eq!(fs.iter().map(|f| f.id.as_str()).collect::<Vec<_>>(), ["drc:cli", "drc:new", "drc:c"]);
         let mut fs = mk(); mark_editor_only(&mut fs, &Default::default()); assert!(fs.iter().all(|f| f.detail == "Text 'U3'"));
+    }
+    #[test] fn drc_needs_no_schematic_editor_from_batch_6() {
+        assert!(parity_hidden(&json!({"capabilities": ["embed-checks", "plan-keys", "runaction-frame"]})), "bp.13 batch 6");
+        assert!(!parity_hidden(&json!({"capabilities": ["embed-checks", "embed-request-actor"]})), "batch 5: hidden load, but a task's box could still hold the gate");
+        assert!(!parity_hidden(&json!({})));
     }
     #[test] fn the_capability_is_the_editors_own() {
         assert!(capable(&json!({"capabilities": ["embed", "embed-checks"], "commands": ["kiapi.backplane.embed.RunChecks", "kiapi.backplane.embed.GetMarkers"]})));
