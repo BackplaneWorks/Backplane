@@ -61,10 +61,10 @@ async fn ask(ws: &mut Ws, id: u64, m: &str, p: Value) -> Value {
 }
 
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_hello_capabilities_and_both_encodings() {
-    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt"]));
+    assert_eq!(crate::hub::capabilities()["data"]["proto"], "data/1"); assert_eq!(crate::hub::capabilities()["data"]["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages"]));
     let (_h, port) = up("hello").await;
     let mut ws = open(port, "&enc=json").await; let v = next(&mut ws).await;
-    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert!(v["name"].is_string(), "the machine's name: {v}"); assert_eq!(v["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
+    assert_eq!((v["t"].as_str(), v["proto"].as_str()), (Some("hello"), Some("data/1"))); assert_eq!(v["hub"], format!("127.0.0.1:{port}"), "the hub as asked (the Host header)"); assert!(v["name"].is_string(), "the machine's name: {v}"); assert_eq!(v["features"], json!(["images", "actions", "search", "models", "mentions", "bots", "notify", "viewers", "files", "browser", "diff", "review", "fold", "picker", "voice", "order", "layers", "onboard", "push", "settled", "commands", "work", "star", "accounts", "machines", "history", "terms", "links", "devices", "queue", "buy", "status", "subview", "find", "notifysettings", "ring", "hubOffer", "swarm", "sections", "telemetryNotice", "mcpsettings", "fabprofile", "plan", "mgmt", "replyImages"]), "a hub from before images does not list it"); assert!(v["now"].as_u64().unwrap() > 1_600_000_000_000);
     // the default is binary CBOR with plain string keys
     let mut c = open(port, "").await; let m = tokio::time::timeout(Duration::from_secs(5), c.next()).await.unwrap().unwrap().unwrap();
     let Message::Binary(b) = m else { panic!("binary") }; assert!(b.windows(5).any(|w| w == b"proto"), "plain keys, not the hub's dictionary");
@@ -721,4 +721,28 @@ fn a_reply_reaches_a_phone_as_its_body_and_reply_to() {
     let f = super::phone_info_frame(&json!({"t":"info","info":{"mgmt.bom.d1":"{}","editor.kicad.d1":"x"}})).unwrap();
     assert_eq!(f, json!({"t":"info","info":{"mgmt.bom.d1":"{}"}}));
     assert!(super::phone_info_frame(&json!({"t":"info","info":{"terms":"[]"}})).is_none());
+}
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_reply_images_are_listed_and_read_back() {
+    use base64::Engine;
+    let (hub, port) = up("replyimg").await; let mut ws = open(port, "&enc=json").await; next(&mut ws).await;
+    let src = crate::plat::tmp::canonical("replyimg-src");
+    let mut png = vec![0x89, b'P', b'N', b'G', 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 13, b'I', b'H', b'D', b'R', 0, 0, 0, 4, 0, 0, 0, 4, 8, 6, 0, 0, 0]; png.extend([0u8; 16]);
+    std::fs::write(src.join("hs_top.png"), &png).unwrap(); let p = src.join("hs_top.png").to_string_lossy().into_owned();
+    let other = src.join("other.png"); std::fs::write(&other, &png).unwrap();
+    // a path on its own line, as the agents write them
+    hub.commit(&json!({"$":"MessagePosted","thread":"t2","msg":"r1","role":"assistant","text":format!("The heatsink is on the board now.\n{p}\nThe model is a simplified one."),"at":1700000050})).await.unwrap();
+    let en = ask(&mut ws, 1, "thread.entries", json!({"thread":"t2"})).await;
+    let r = en["result"]["entries"].as_array().unwrap().iter().find(|x| x["id"] == "r1").unwrap().clone();
+    assert_eq!(r["images"], json!([p]), "{r}");
+    let g = ask(&mut ws, 2, "message.image", json!({"entry":"r1","path":p})).await;
+    assert_eq!(g["result"]["mime"], "image/png", "{g}");
+    assert_eq!(base64::engine::general_purpose::STANDARD.decode(g["result"]["data"].as_str().unwrap()).unwrap(), png);
+    // only what the message named, only in its spelling; a user's message grants nothing
+    assert_eq!(ask(&mut ws, 3, "message.image", json!({"entry":"r1","path":other.to_string_lossy()})).await["ok"], false);
+    assert_eq!(ask(&mut ws, 4, "message.image", json!({"entry":"nope","path":p})).await["ok"], false);
+    assert_eq!(ask(&mut ws, 5, "message.image", json!({"entry":"r1","path":"/etc/passwd"})).await["ok"], false);
+    // a reply with no image has no list
+    let plain = en["result"]["entries"].as_array().unwrap().iter().find(|x| x["kind"] == "assistant" && x["id"] != "r1").cloned();
+    if let Some(x) = plain { assert!(x.get("images").is_none(), "{x}") }
 }

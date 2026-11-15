@@ -4196,6 +4196,7 @@ ios.image.saved = 写真に保存しました
 ios.image.denied = 写真へのアクセスがオフです。画像を保存するには設定で許可してください。
 ios.image.failed = 画像を保存できませんでした。
 ios.image.incoming = 画像の準備ができました。送るスレッドを開いてください。
+ios.image.loadfail = 画像を読み込めませんでした。
 native.permission.photos.add = スレッドで選んだ画像を写真ライブラリに保存します。
 # ---- end ----
 # the sidebar's sections (docs/ALWAYS-ON.md section 8): the hub's words, and the window's

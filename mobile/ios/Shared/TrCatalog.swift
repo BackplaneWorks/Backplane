@@ -450,6 +450,7 @@ ios.image.saved	Saved to Photos	写真に保存しました
 ios.image.denied	Photos access is off: allow it in Settings to save pictures.	写真へのアクセスがオフです。画像を保存するには設定で許可してください。
 ios.image.failed	Could not save the picture.	画像を保存できませんでした。
 ios.image.incoming	Picture ready: open a thread to send it.	画像の準備ができました。送るスレッドを開いてください。
+ios.image.loadfail	Could not load the picture.	画像を読み込めませんでした。
 native.permission.photos.add	Backplane saves the pictures you choose in a thread to your photo library.	スレッドで選んだ画像を写真ライブラリに保存します。
 common.cancel	Cancel	キャンセル
 common.delete	Delete	削除

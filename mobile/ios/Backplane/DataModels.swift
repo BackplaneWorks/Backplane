@@ -73,13 +73,14 @@ struct DEntry: Codable, Equatable, Identifiable {
     var term: DTermInfo?   // a chat terminal (feature `terms`, kind "term")
     var handoff: DHandoff?   // a `/give` received (kind "handoff"): its card
     var attachments: [DAttachment] = []
+    var images: [String] = []   // the images a reply names (feature replyImages): drawn where they are named, read with message.image
     var replyTo: DReplyTo?   // the person's reply to a message (data/1 `replyTo`): the chip over the bubble
     var voice: DVoiceMark?   // spoken (data/1 `voice`): the mic on the bubble, the engine and its confidence
     // phone-only, never on the wire: a message sent and not yet confirmed, or one the hub refused
     var sending = false
     var failed = false
     var localImages: [Data] = []   // the pictures of a message this phone is sending (JPEG), shown before the hub has them
-    enum CodingKeys: String, CodingKey { case id, kind, text, at, label, tone, clientId, replaces, live, agentOnly, tool, ask, term, handoff, attachments, replyTo, voice }
+    enum CodingKeys: String, CodingKey { case id, kind, text, at, label, tone, clientId, replaces, live, agentOnly, tool, ask, term, handoff, attachments, images, replyTo, voice }
     init(id: String, kind: String, text: String, at: Int, clientId: String? = nil, live: Bool = false) {
         self.id = id; self.kind = kind; self.text = text; self.at = at; self.clientId = clientId; self.live = live
     }
@@ -95,6 +96,7 @@ struct DEntry: Codable, Equatable, Identifiable {
         term = try? c.decode(DTermInfo.self, forKey: .term)
         handoff = try? c.decode(DHandoff.self, forKey: .handoff)
         attachments = (try? c.decode([DAttachment].self, forKey: .attachments)) ?? []
+        images = (try? c.decode([String].self, forKey: .images)) ?? []
         replyTo = try? c.decode(DReplyTo.self, forKey: .replyTo)
         voice = try? c.decode(DVoiceMark.self, forKey: .voice)
     }
