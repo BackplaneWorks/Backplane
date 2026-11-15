@@ -32,10 +32,11 @@ pub struct PlotView {
     /// Pieces a cross-probe lights (chunk index, piece info index), and the canvas's focus for the keys.
     pub lit: Vec<(usize, usize)>, pub focus: Option<FocusHandle>,
     pub down: Option<(f32, f32)>, pub picked: Option<super::plot::Pick>, pub card: Option<super::plot::Card>,
-    /// The plot as last tessellated, and what it was made from: a paint with the same camera, canvas and chunks submits these again
-    /// instead of tessellating every chunk (tens of ms on a real board) for a frame that only moved something else.
-    pub tess: Option<(TessKey, std::rc::Rc<Vec<(Path<Pixels>, Hsla)>>)>,
-    /// What the probe lights, tessellated the same way: for that camera and those lit pieces (a hash of `lit`).
+    /// The plot as last tessellated, and what it was made from: a paint of the same chunks at the same zoom and canvas size submits these
+    /// again, moved to where the camera is now, instead of tessellating every chunk (tens of ms on a real board) for a frame that only moved
+    /// the plot (a drag) or something else. `tess_ahead`: the plot is being tessellated around the camera off the window's thread.
+    pub tess: Option<(TessKey, std::rc::Rc<Vec<(Path<Pixels>, Hsla)>>)>, pub tess_ahead: bool,
+    /// What the probe lights, tessellated for that exact camera and those lit pieces (a hash of `lit`).
     pub lit_tess: Option<(TessKey, u64, std::rc::Rc<Vec<(Path<Pixels>, Hsla)>>)>,
     /// The Boards menu (viewers::boards), held on the Board/Schematic page's camera for every page that shows it.
     pub boards: crate::viewers::boards::BoardsUi,
@@ -43,19 +44,64 @@ pub struct PlotView {
     pub probe_at: String,
 }
 
-/// What a tessellated plot depends on: the frame's chunks (by identity), the order and fade they are drawn in, the camera and the canvas.
+/// What a tessellated plot depends on: the frame's chunks (by identity), the order and fade they are drawn in, the zoom and the canvas's
+/// size; and where it was made: the camera's centre and the canvas's corner (`at`), and how far past the canvas its paths reach (`pad`, px).
 #[derive(Clone, PartialEq, Debug)]
-pub struct TessKey { chunks: Vec<usize>, order: Vec<(usize, u32)>, view: [u32; 3], bounds: Bounds<Pixels> }
+pub struct TessKey { chunks: Vec<usize>, order: Vec<(usize, u32)>, scale: u32, size: [u32; 2], at: [f32; 4], pad: f32 }
 impl TessKey {
-    pub fn of(chunks: &[std::sync::Arc<Chunk>], order: &[(usize, f32)], v: &View, b: Bounds<Pixels>) -> TessKey {
-        TessKey { chunks: chunks.iter().map(|c| std::sync::Arc::as_ptr(c) as usize).collect(), order: order.iter().map(|&(i, f)| (i, f.to_bits())).collect(), view: [v.cx.to_bits(), v.cy.to_bits(), v.scale.to_bits()], bounds: b }
+    pub fn of(chunks: &[std::sync::Arc<Chunk>], order: &[(usize, f32)], v: &View, b: Bounds<Pixels>, pad: f32) -> TessKey {
+        TessKey { chunks: chunks.iter().map(|c| std::sync::Arc::as_ptr(c) as usize).collect(), order: order.iter().map(|&(i, f)| (i, f.to_bits())).collect(), scale: v.scale.to_bits(),
+            size: [f32::from(b.size.width).to_bits(), f32::from(b.size.height).to_bits()], at: [v.cx, v.cy, f32::from(b.origin.x), f32::from(b.origin.y)], pad }
     }
+    /// The same plot drawn the same way (chunks, order, fades, zoom, canvas size): only where the camera and the canvas are may differ.
+    pub fn same_plot(&self, o: &TessKey) -> bool { self.chunks == o.chunks && self.order == o.order && self.scale == o.scale && self.size == o.size }
+    /// How far (px) the paths made for `self` are moved to be the paint `now` asks for, or None when they cannot be: another plot, zoom or
+    /// canvas size, or the camera has gone further than they reach past the canvas.
+    pub fn moved(&self, now: &TessKey) -> Option<(f32, f32)> {
+        if !self.same_plot(now) { return None }
+        let s = f32::from_bits(self.scale);
+        let d = ((self.at[0] - now.at[0]) * s + now.at[2] - self.at[2], (self.at[1] - now.at[1]) * s + now.at[3] - self.at[3]);
+        (d.0.abs() <= self.pad && d.1.abs() <= self.pad).then_some(d)
+    }
+}
+/// How far past the canvas (px, each side) the plot is tessellated off the window's thread: a drag moves those paths until the camera has
+/// gone half of it, then the plot around the camera is made again, off the thread too.
+pub fn tess_pad(w: f32, h: f32) -> f32 { (w.max(h) * 0.5).clamp(200., 1200.) }
+/// Every chunk of the plot as paths, in the order and at the fades given, culled to the canvas and `pad` px around it.
+/// Also whether that is the whole plot (nothing lay outside): paths that then serve the camera wherever it goes at this zoom.
+fn tessellate(chunks: &[std::sync::Arc<Chunk>], order: &[(usize, f32)], v: &View, o: Point<Pixels>, w: f32, h: f32, pad: f32, mut sp: Option<&mut [f32; 3]>) -> (Vec<(Path<Pixels>, Hsla)>, bool) {
+    let mut out = Vec::new(); let mut culled = false;
+    for &(i, factor) in order { culled |= paint_chunk(&mut out, &chunks[i], factor, v, o, w, h, pad, sp.as_deref_mut()); }
+    (out, !culled)
+}
+/// The plot tessellated around where the camera is now, off the window's thread (one at a time): the paints that follow move its paths
+/// (`TessKey::moved`) instead of making them, so a drag costs the window's thread no tessellation.
+fn tess_ahead(this: &Entity<Backplane>, cx: &mut App, slot: usize, chunks: &[std::sync::Arc<Chunk>], order: &[(usize, f32)], v: View, b: Bounds<Pixels>) {
+    this.update(cx, |app, cx| {
+        let pv = app.screens.pv(slot);
+        if pv.tess_ahead { return }
+        pv.tess_ahead = true;
+        let (w, h) = (f32::from(b.size.width), f32::from(b.size.height));
+        let pad = tess_pad(w, h); let mut key = TessKey::of(chunks, order, &v, b, pad);
+        let (chunks, order) = (chunks.to_vec(), order.to_vec());
+        cx.spawn(async move |weak, cx| {
+            let (out, whole) = cx.background_executor().spawn(async move { tessellate(&chunks, &order, &v, b.origin, w, h, pad, None) }).await;
+            if whole { key.pad = f32::INFINITY; }
+            let _ = weak.update(cx, |app, cx| {
+                let pv = app.screens.pv(slot); pv.tess_ahead = false;
+                // (a plot, zoom or canvas that changed meanwhile: these paths are of the old one, and the paint on show keeps its own)
+                if pv.tess.as_ref().map_or(true, |t| t.0.same_plot(&key)) { pv.tess = Some((key, std::rc::Rc::new(out))); cx.notify(); }
+            });
+        }).detach();
+    });
 }
 
 fn color(c: &Chunk, factor: f32) -> Hsla { let mut r = rgb(c.color); r.a = c.alpha * factor; r.into() }
 
 /// A chunk's stroke width in pixels: the hub's width is in micrometres on the capsule (radius = width / 2).
-fn paint_chunk(out: &mut Vec<(Path<Pixels>, Hsla)>, c: &Chunk, factor: f32, v: &View, o: Point<Pixels>, w: f32, h: f32, mut sp: Option<&mut [f32; 3]>) {
+/// Answers whether anything of the chunk was left out for lying outside the canvas and its `pad`.
+fn paint_chunk(out: &mut Vec<(Path<Pixels>, Hsla)>, c: &Chunk, factor: f32, v: &View, o: Point<Pixels>, w: f32, h: f32, pad: f32, mut sp: Option<&mut [f32; 3]>) -> bool {
+    let mut culled = false;
     // (script mode only) ms since the last lap, added to the culling/tessellation/submission split
     let mut t = sp.as_ref().map(|_| std::time::Instant::now());
     let mut lap = |k: usize, sp: &mut Option<&mut [f32; 3]>| { if let (Some(t), Some(sp)) = (t.as_mut(), sp.as_mut()) { let n = std::time::Instant::now(); sp[k] += n.duration_since(*t).as_secs_f32() * 1000.0; *t = n; } };
@@ -72,12 +118,17 @@ fn paint_chunk(out: &mut Vec<(Path<Pixels>, Hsla)>, c: &Chunk, factor: f32, v: &
         };
         let mut pb = PathBuilder::stroke(px(width)); let mut any = false;
         let mut dots = PathBuilder::fill(); let mut any_dot = false;
-        let margin = 50. + rpx;
+        let margin = 50. + rpx + pad;
         let near = |x: f32, y: f32| x >= -margin && x <= w + margin && y >= -margin && y <= h + margin;
+        // where the last piece ended (plot units) and the pixel last drawn to: a polyline's pieces follow one another (plot.rs `path`)
+        let mut last: Option<((f32, f32), (f32, f32))> = None;
         for s in c.caps.chunks_exact(5) {
             let (a, b) = (v.to_px(s[0], s[1], w, h), v.to_px(s[2], s[3], w, h));
-            if s[0] == s[2] && s[1] == s[3] { if near(a.0, a.1) { circle(&mut dots, a.0, a.1); any_dot = true; } continue; }
-            if !near(a.0, a.1) && !near(b.0, b.1) { continue; }
+            if s[0] == s[2] && s[1] == s[3] { last = None; if near(a.0, a.1) { circle(&mut dots, a.0, a.1); any_dot = true; } else { culled = true; } continue; }
+            // (a piece of a polyline that ends within `FINE` of the pixel last drawn to adds nothing at this zoom: an arc's or a letter's many short pieces)
+            let Some(a) = step(last, (s[0], s[1]), a, b) else { last = last.map(|l| ((s[2], s[3]), l.1)); continue };
+            last = Some(((s[2], s[3]), b));
+            if !crosses(a, b, w, h, margin) { culled = true; continue; }
             pb.move_to(point(o.x + px(a.0), o.y + px(a.1)));
             pb.line_to(point(o.x + px(b.0), o.y + px(b.1)));
             any = true;
@@ -89,17 +140,49 @@ fn paint_chunk(out: &mut Vec<(Path<Pixels>, Hsla)>, c: &Chunk, factor: f32, v: &
     }
     if !c.polys.is_empty() {
         let mut pb = PathBuilder::fill(); let mut any = false;
+        let mut pts: Vec<(f32, f32)> = Vec::new();
         for poly in &c.polys {
-            let pts: Vec<(f32, f32)> = poly.chunks_exact(2).map(|p| v.to_px(p[0], p[1], w, h)).collect();
-            let (minx, maxx) = pts.iter().fold((f32::MAX, f32::MIN), |a, p| (a.0.min(p.0), a.1.max(p.0)));
-            let (miny, maxy) = pts.iter().fold((f32::MAX, f32::MIN), |a, p| (a.0.min(p.1), a.1.max(p.1)));
-            if maxx < -50. || minx > w + 50. || maxy < -50. || miny > h + 50. { continue; }
+            let (mut minx, mut maxx, mut miny, mut maxy) = (f32::MAX, f32::MIN, f32::MAX, f32::MIN);
+            for p in poly.chunks_exact(2) { let q = v.to_px(p[0], p[1], w, h); minx = minx.min(q.0); maxx = maxx.max(q.0); miny = miny.min(q.1); maxy = maxy.max(q.1); }
+            if maxx < -50. - pad || minx > w + 50. + pad || maxy < -50. - pad || miny > h + 50. + pad { culled = true; continue; }
+            outline(poly, v, w, h, &mut pts);
+            if pts.len() < 3 { continue; }
             for (i, p) in pts.iter().enumerate() { let q = point(o.x + px(p.0), o.y + px(p.1)); if i == 0 { pb.move_to(q) } else { pb.line_to(q) } }
             pb.close(); any = true;
         }
         lap(0, &mut sp);
         if any { if let Ok(path) = pb.build() { lap(1, &mut sp); out.push((path, color(c, factor))); } }
     }
+    culled
+}
+/// Whether the segment a-b may show on a canvas of w x h with `margin` px around it: not when both ends lie beyond the same side. (Each end
+/// alone was tested before: a long track across the canvas with both ends outside it was not drawn.)
+pub fn crosses(a: (f32, f32), b: (f32, f32), w: f32, h: f32, margin: f32) -> bool {
+    !(a.0.max(b.0) < -margin || a.0.min(b.0) > w + margin || a.1.max(b.1) < -margin || a.1.min(b.1) > h + margin)
+}
+/// Where a stroke's piece is drawn from, or None when it is left out. `last`: where the piece before ended (plot units) and the pixel last
+/// drawn to; `start`: this piece's start (plot units); `a`, `b`: its ends in pixels. A piece that goes on from the one before is drawn from
+/// the pixel last drawn to, and left out while its end is still within `FINE` of it; any other piece is drawn whole, however short.
+pub fn step(last: Option<((f32, f32), (f32, f32))>, start: (f32, f32), a: (f32, f32), b: (f32, f32)) -> Option<(f32, f32)> {
+    match last {
+        Some((end, drawn)) if end == start => if (b.0 - drawn.0).abs() < FINE && (b.1 - drawn.1).abs() < FINE { None } else { Some(drawn) },
+        _ => Some(a),
+    }
+}
+/// A point of an outline closer than this (px, on both axes) to the last one kept is left out: a quarter of a pixel is under what four
+/// samples a pixel can show, and a board fitted to the pane has most of its outline points (a zone's arcs around every pad) that close.
+pub const FINE: f32 = 0.25;
+/// A polygon's outline in canvas pixels, without the points that add nothing at this zoom (`FINE`), into `out` (emptied first). An outline
+/// that comes to fewer than three points is smaller than can be seen.
+pub fn outline(poly: &[f32], v: &View, w: f32, h: f32, out: &mut Vec<(f32, f32)>) {
+    out.clear();
+    for p in poly.chunks_exact(2) {
+        let q = v.to_px(p[0], p[1], w, h);
+        if let Some(l) = out.last() { if (q.0 - l.0).abs() < FINE && (q.1 - l.1).abs() < FINE { continue } }
+        out.push(q);
+    }
+    // the last point kept may sit on the first: the outline closes there anyway
+    while out.len() > 1 { let (f, l) = (out[0], out[out.len() - 1]); if (f.0 - l.0).abs() < FINE && (f.1 - l.1).abs() < FINE { out.pop(); } else { break } }
 }
 
 /// A tap at window position `at` on canvas `slot`: the piece under it is lit and its info asked of the hub (the answer is the card), or, on nothing, the card goes.
@@ -150,7 +233,7 @@ pub fn lit_chunks(chunks: &[std::sync::Arc<Chunk>], order: &[(usize, f32)], lit:
 fn lit_paths(chunks: &[std::sync::Arc<Chunk>], order: &[(usize, f32)], lit: &[(usize, usize)], v: &View, o: Point<Pixels>, w: f32, h: f32, edge: Hsla) -> Vec<(Path<Pixels>, Hsla)> {
     let (ls, edges, dots) = lit_chunks(chunks, order, lit, 2.5 / v.scale);
     let mut out = Vec::new();
-    for l in &ls { paint_chunk(&mut out, l, 1.0, v, o, w, h, None); }
+    for l in &ls { paint_chunk(&mut out, l, 1.0, v, o, w, h, 0.0, None); }
     let mut pb = PathBuilder::stroke(px(1.5)); let mut any = false;
     let seen = |x: f32, y: f32, m: f32| x >= -m && x <= w + m && y >= -m && y <= h + m;
     for e in &edges {
@@ -243,7 +326,7 @@ fn paint_lit(window: &mut Window, p: &super::plot::Pick, v: &View, o: Point<Pixe
     if p.kind == 1 {
         // a stroke (a track, a wire) is lit as itself, at its own width (never thinner than 2.5 px), round ended: no line down its middle
         let c = Chunk { color: 0xffe066, alpha: 1.0, r: p.r.max(1.25 / v.scale), caps: p.pts.windows(4).step_by(2).flat_map(|q| [q[0], q[1], q[2], q[3], p.r.max(1.25 / v.scale)]).collect(), ..Default::default() };
-        let mut out = Vec::new(); paint_chunk(&mut out, &c, 1.0, v, o, w, h, None);
+        let mut out = Vec::new(); paint_chunk(&mut out, &c, 1.0, v, o, w, h, 0.0, None);
         for (path, color) in out { window.paint_path(path, color); }
         return
     }
@@ -271,25 +354,34 @@ pub fn canvas_el(cx: &mut Context<Backplane>, slot: usize, focus: Option<FocusHa
         let measure = this.update(cx, |app, _| app.screens.pv(slot).measure);
         let t0 = measure.then(std::time::Instant::now); let mut sp = [0f32; 3];
         let (lit, probe) = this.update(cx, |app, _| { let pv = app.screens.pv(slot); (pv.picked.clone(), pv.lit.clone()) });
-        let key = TessKey::of(&chunks, &order, &v, b);
-        let paths = match this.update(cx, |app, _| app.screens.pv(slot).tess.as_ref().filter(|t| t.0 == key).map(|t| t.1.clone())) {
-            Some(p) => p,
+        // the paths kept from an earlier paint are drawn again, moved by what the camera moved since (a drag tessellates nothing here);
+        // none that fit (the first paint, a zoom, another plot or size): the canvas alone is tessellated now, as little as shows it, and
+        // the plot around it off this thread, for the paints that follow
+        let mut key = TessKey::of(&chunks, &order, &v, b, 0.0);
+        let exact = key.clone(); // this very camera: what the probe's light is kept for
+        let (paths, moved) = match this.update(cx, |app, _| app.screens.pv(slot).tess.as_ref().and_then(|t| t.0.moved(&key).map(|d| (t.1.clone(), d, t.0.pad)))) {
+            Some((p, d, pad)) => { if d.0.abs().max(d.1.abs()) > pad * 0.5 || pad == 0.0 { tess_ahead(&this, cx, slot, &chunks, &order, v, b); } (p, d) }
             None => {
-                let mut out = Vec::new();
-                for &(i, factor) in &order { paint_chunk(&mut out, &chunks[i], factor, &v, b.origin, w, h, measure.then_some(&mut sp)); }
-                let p = std::rc::Rc::new(out); this.update(cx, |app, _| app.screens.pv(slot).tess = Some((key.clone(), p.clone()))); p
+                let (out, whole) = tessellate(&chunks, &order, &v, b.origin, w, h, 0.0, measure.then_some(&mut sp));
+                // (the whole plot is on the canvas: these paths serve wherever the camera goes, and none are made ahead)
+                if whole { key.pad = f32::INFINITY; }
+                let p = std::rc::Rc::new(out);
+                this.update(cx, |app, _| app.screens.pv(slot).tess = Some((key, p.clone())));
+                if !whole { tess_ahead(&this, cx, slot, &chunks, &order, v, b); }
+                (p, (0.0, 0.0))
             }
         };
+        let moved = point(px(moved.0), px(moved.1));
         window.with_content_mask(Some(ContentMask { bounds: b }), |window| {
             let t2 = measure.then(std::time::Instant::now);
-            for (path, color) in paths.iter() { window.paint_path(path.clone(), *color); }
+            for (path, color) in paths.iter() { window.paint_path_at(path, moved, *color); }
             if let Some(t2) = t2 { sp[2] += t2.elapsed().as_secs_f32() * 1000.0; }
             if !probe.is_empty() {
                 // the probed net or part itself, over the rest dimmed (tessellated once a camera, as the plot is)
                 let stamp = { use std::hash::{Hash, Hasher}; let mut hs = std::collections::hash_map::DefaultHasher::new(); probe.hash(&mut hs); hs.finish() };
-                let lp = match this.update(cx, |app, _| app.screens.pv(slot).lit_tess.as_ref().filter(|t| t.0 == key && t.1 == stamp).map(|t| t.2.clone())) {
+                let lp = match this.update(cx, |app, _| app.screens.pv(slot).lit_tess.as_ref().filter(|t| t.0 == exact && t.1 == stamp).map(|t| t.2.clone())) {
                     Some(p) => p,
-                    None => { let p = std::rc::Rc::new(lit_paths(&chunks, &order, &probe, &v, b.origin, w, h, edge)); this.update(cx, |app, _| app.screens.pv(slot).lit_tess = Some((key.clone(), stamp, p.clone()))); p }
+                    None => { let p = std::rc::Rc::new(lit_paths(&chunks, &order, &probe, &v, b.origin, w, h, edge)); this.update(cx, |app, _| app.screens.pv(slot).lit_tess = Some((exact.clone(), stamp, p.clone()))); p }
                 };
                 if !lp.is_empty() { window.paint_quad(fill(b, dim)); for (path, color) in lp.iter() { window.paint_path(path.clone(), *color); } }
                 paint_marks(window, &chunks, &probe, &v, b.origin, w, h);
@@ -525,16 +617,81 @@ pub fn report_state(app: &mut Backplane) {
 mod tests {
     use super::*;
     use core::prelude::v1::test;
-    #[test] fn a_tessellated_plot_is_reused_only_for_the_same_chunks_order_camera_and_canvas() {
+    #[test] fn a_tessellated_plot_is_reused_only_for_the_same_chunks_order_zoom_and_canvas_size() {
         let a = std::sync::Arc::new(Chunk::default()); let b = std::sync::Arc::new(Chunk::default());
         let v = View { cx: 1., cy: 2., scale: 0.5 }; let bx = Bounds::new(point(px(10.), px(20.)), size(px(300.), px(200.)));
-        let k = TessKey::of(&[a.clone(), b.clone()], &[(0, 1.0), (1, 0.4)], &v, bx);
-        assert_eq!(k, TessKey::of(&[a.clone(), b.clone()], &[(0, 1.0), (1, 0.4)], &v, bx), "the same paint");
-        assert_ne!(k, TessKey::of(&[a.clone(), std::sync::Arc::new(Chunk::default())], &[(0, 1.0), (1, 0.4)], &v, bx), "a chunk replaced");
-        assert_ne!(k, TessKey::of(&[a.clone(), b.clone()], &[(1, 1.0), (0, 0.4)], &v, bx), "another order");
-        assert_ne!(k, TessKey::of(&[a.clone(), b.clone()], &[(0, 1.0), (1, 1.0)], &v, bx), "another fade");
-        assert_ne!(k, TessKey::of(&[a.clone(), b.clone()], &[(0, 1.0), (1, 0.4)], &View { scale: 0.6, ..v }, bx), "zoomed");
-        assert_ne!(k, TessKey::of(&[a, b], &[(0, 1.0), (1, 0.4)], &v, Bounds::new(point(px(10.), px(20.)), size(px(301.), px(200.)))), "resized");
+        let k = TessKey::of(&[a.clone(), b.clone()], &[(0, 1.0), (1, 0.4)], &v, bx, 0.0);
+        let of = |cs: &[std::sync::Arc<Chunk>], order: &[(usize, f32)], v: &View, bx: Bounds<Pixels>| k.moved(&TessKey::of(cs, order, v, bx, 0.0));
+        assert_eq!(of(&[a.clone(), b.clone()], &[(0, 1.0), (1, 0.4)], &v, bx), Some((0.0, 0.0)), "the same paint");
+        assert_eq!(of(&[a.clone(), std::sync::Arc::new(Chunk::default())], &[(0, 1.0), (1, 0.4)], &v, bx), None, "a chunk replaced");
+        assert_eq!(of(&[a.clone(), b.clone()], &[(1, 1.0), (0, 0.4)], &v, bx), None, "another order");
+        assert_eq!(of(&[a.clone(), b.clone()], &[(0, 1.0), (1, 1.0)], &v, bx), None, "another fade");
+        assert_eq!(of(&[a.clone(), b.clone()], &[(0, 1.0), (1, 0.4)], &View { scale: 0.6, ..v }, bx), None, "zoomed");
+        assert_eq!(of(&[a.clone(), b.clone()], &[(0, 1.0), (1, 0.4)], &v, Bounds::new(point(px(10.), px(20.)), size(px(301.), px(200.)))), None, "resized");
+        assert_eq!(of(&[a, b], &[(0, 1.0), (1, 0.4)], &View { cx: 3., ..v }, bx), None, "moved, and these paths reach no further than the canvas");
+    }
+    #[test] fn a_drag_moves_the_kept_paths_until_the_camera_is_past_what_they_cover() {
+        let a = std::sync::Arc::new(Chunk::default());
+        let v = View { cx: 100., cy: 200., scale: 0.5 }; let bx = Bounds::new(point(px(10.), px(20.)), size(px(800.), px(600.)));
+        assert_eq!(tess_pad(800., 600.), 400.0); assert_eq!(tess_pad(100., 80.), 200.0, "a small canvas still covers a short drag"); assert_eq!(tess_pad(5000., 900.), 1200.0);
+        let k = TessKey::of(&[a.clone()], &[(0, 1.0)], &v, bx, 400.0);
+        let at = |v: &View, bx: Bounds<Pixels>| k.moved(&TessKey::of(&[a.clone()], &[(0, 1.0)], v, bx, 0.0));
+        // the plot dragged 30 px right and 10 px down: the camera's centre goes the other way, 60 and 20 plot units at this zoom
+        let dragged = v.pan(30., 10.);
+        assert_eq!(at(&dragged, bx), Some((30.0, 10.0)), "the paths follow the pointer");
+        assert_eq!(at(&v.pan(-400., 0.), bx), Some((-400.0, 0.0)), "as far as they were made");
+        assert_eq!(at(&v.pan(-401., 0.), bx), None, "past it they are made again");
+        assert_eq!(at(&v.pan(0., 500.), bx), None);
+        // paths of the whole plot serve the camera wherever it goes
+        let mut whole = k.clone(); whole.pad = f32::INFINITY;
+        assert_eq!(whole.moved(&TessKey::of(&[a.clone()], &[(0, 1.0)], &v.pan(0., 5000.), bx, 0.0)), Some((0.0, 5000.0)));
+        // the canvas itself moved in the window (a pane beside it changed width by the same amount on both sides): the paths go with it
+        assert_eq!(at(&v, Bounds::new(point(px(25.), px(20.)), size(px(800.), px(600.)))), Some((15.0, 0.0)));
+        // and a moved plot is where a tessellation at the new camera would put it: a plot point's pixel is the same either way
+        let (w, h) = (800., 600.); let p = (140., 260.);
+        let (was, now) = (v.to_px(p.0, p.1, w, h), dragged.to_px(p.0, p.1, w, h));
+        assert!((was.0 + 30.0 - now.0).abs() < 1e-3 && (was.1 + 10.0 - now.1).abs() < 1e-3);
+    }
+    #[test] fn a_track_across_the_canvas_with_both_ends_outside_is_drawn() {
+        let (w, h, m) = (800., 600., 50.);
+        assert!(crosses((-500., 300.), (1500., 300.), w, h, m), "across, both ends out");
+        assert!(crosses((-500., -400.), (900., 900.), w, h, m), "a diagonal across");
+        assert!(crosses((10., 10.), (20., 20.), w, h, m) && crosses((-30., 10.), (-20., 20.), w, h, m), "inside, and inside the margin");
+        assert!(!crosses((-500., 300.), (-60., 300.), w, h, m) && !crosses((900., 0.), (2000., 600.), w, h, m), "both ends beyond one side");
+        assert!(!crosses((0., -300.), (800., -51.), w, h, m) && !crosses((0., 651.), (800., 900.), w, h, m));
+    }
+    #[test] fn a_polylines_pieces_too_short_to_show_are_left_out_and_the_line_stays_whole() {
+        // an arc of 40 pieces a tenth of a pixel long, then a long piece: drawn as the pieces that reach a quarter pixel, each from where the last drawn one ended
+        let pt = |k: usize| (k as f32 * 0.1, 0.0f32); let mut last = None; let mut drawn: Vec<((f32, f32), (f32, f32))> = Vec::new();
+        let mut pieces: Vec<((f32, f32), (f32, f32))> = (0..40).map(|k| (pt(k), pt(k + 1))).collect(); pieces.push((pt(40), (50.0, 30.0)));
+        for (a, b) in &pieces {
+            let from = step(last, *a, *a, *b); // (plot units are pixels here)
+            last = Some((*b, match from { Some(_) => *b, None => last.map_or(*b, |l: ((f32, f32), (f32, f32))| l.1) }));
+            if let Some(f) = from { drawn.push((f, *b)); }
+        }
+        assert!(drawn.len() >= 12 && drawn.len() <= 16, "{} pieces drawn of 41", drawn.len());
+        assert_eq!(drawn[0], (pt(0), pt(1)), "the first piece is drawn whole, however short");
+        for w in drawn.windows(2) { assert_eq!(w[0].1, w[1].0, "no gap: each piece starts where the last drawn one ended"); }
+        assert_eq!(drawn.last().unwrap().1, (50.0, 30.0)); assert!((drawn.last().unwrap().0 .0 - 4.0).abs() < FINE, "the long piece starts within a quarter pixel of the arc's end");
+        // a piece that does not go on from the one before is drawn whole
+        assert_eq!(step(Some(((9.0, 9.0), (9.0, 9.0))), (0.0, 0.0), (0.0, 0.0), (0.1, 0.0)), Some((0.0, 0.0)));
+        assert_eq!(step(None, (0.0, 0.0), (0.0, 0.0), (0.1, 0.0)), Some((0.0, 0.0)));
+    }
+    #[test] fn an_outline_loses_only_the_points_too_close_to_show() {
+        let v = View { cx: 0., cy: 0., scale: 1.0 }; let (w, h) = (0., 0.); let mut out = Vec::new();
+        // a square of 10 px with a run of points a tenth of a pixel apart along one side, and its last point on its first
+        let mut p = vec![0., 0.]; for k in 1..=100 { p.extend([k as f32 * 0.1, 0.]); } p.extend([10., 10., 0., 10., 0.05, 0.05]);
+        outline(&p, &v, w, h, &mut out);
+        assert_eq!(out.first(), Some(&(0., 0.))); assert_eq!(out.last(), Some(&(0., 10.)), "the point on the first is left out");
+        assert!(out.len() >= 34 && out.len() <= 38, "{} points: about three a pixel along the fine side", out.len());
+        for q in out.windows(2) { assert!((q[1].0 - q[0].0).abs() >= FINE || (q[1].1 - q[0].1).abs() >= FINE); }
+        assert!(out.iter().any(|q| (q.0 - 10.).abs() < FINE && q.1 == 0.) && out.contains(&(10., 10.)), "the corners stay within a quarter pixel");
+        // zoomed in ten times, every point shows
+        outline(&p, &View { scale: 10.0, ..v }, w, h, &mut out); assert_eq!(out.len(), 104);
+        // a pad a fifth of a pixel wide is smaller than can be seen
+        outline(&[0., 0., 0.2, 0., 0.2, 0.2, 0., 0.2], &v, w, h, &mut out); assert!(out.len() < 3);
+        // one of half a pixel still is
+        outline(&[0., 0., 0.5, 0., 0.5, 0.5, 0., 0.5], &v, w, h, &mut out); assert_eq!(out.len(), 4);
     }
     #[test] fn the_lit_box_is_the_lit_pieces_padded() {
         let c = super::super::plot::Chunk { pieces: vec![super::super::plot::Piece { info: 7, bbox: [0., 0., 1000., 500.], at: 0, n: 0, kind: 0 }, super::super::plot::Piece { info: 8, bbox: [9e5, 9e5, 9.1e5, 9.1e5], at: 0, n: 0, kind: 0 }], ..Default::default() };

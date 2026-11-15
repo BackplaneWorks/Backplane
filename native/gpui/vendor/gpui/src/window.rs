@@ -2897,9 +2897,30 @@ impl Window {
         path.content_mask = content_mask;
         let color: Background = color.into();
         path.color = color.opacity(opacity);
-        self.next_frame
-            .scene
-            .insert_primitive(path.scale(scale_factor));
+        self.next_frame.scene.insert_path(path.scale(scale_factor));
+    }
+
+    /// Backplane (PATCH.md): paint a path the caller keeps, moved by `offset`. `paint_path` takes its path, so a path
+    /// kept between frames had to be copied for it and was copied again to be scaled; this is one copy, and the
+    /// offset lets a kept tessellation follow a camera that only moved.
+    ///
+    /// This method should only be called as part of the paint phase of element drawing.
+    pub fn paint_path_at(
+        &mut self,
+        path: &Path<Pixels>,
+        offset: Point<Pixels>,
+        color: impl Into<Background>,
+    ) {
+        self.invalidator.debug_assert_paint();
+
+        let scale_factor = self.scale_factor();
+        let content_mask = self.content_mask();
+        let opacity = self.element_opacity();
+        let color: Background = color.into();
+        let mut scaled = path.scale_moved(offset, scale_factor);
+        scaled.content_mask = content_mask.scale(scale_factor);
+        scaled.color = color.opacity(opacity);
+        self.next_frame.scene.insert_path(scaled);
     }
 
     /// Paint an underline into the scene for the next frame at the current z-index.
