@@ -452,6 +452,7 @@ ios.image.failed	Could not save the picture.	画像を保存できませんで�
 ios.image.incoming	Picture ready: open a thread to send it.	画像の準備ができました。送るスレッドを開いてください。
 ios.image.loadfail	Could not load the picture.	画像を読み込めませんでした。
 native.permission.photos.add	Backplane saves the pictures you choose in a thread to your photo library.	スレッドで選んだ画像を写真ライブラリに保存します。
+ios.buy.ask	Start a buy thread for {project}?	{project} の購入スレッドを開始しますか？
 common.cancel	Cancel	キャンセル
 common.delete	Delete	削除
 common.save	Save	保存
@@ -4054,6 +4055,7 @@ android.swarm.none	No posts yet.	まだ投稿はありません。
 android.swarm.gone	That swarm is not on this hub.	そのスウォームはこのハブにありません。
 android.swarm.provider	Provider	プロバイダー
 android.swarm.model	Model	モデル
+android.buy.ask	Start a buy thread for {project}?	{project} の購入スレッドを開始しますか？
 sidebar.sections.needs	Needs you	対応が必要
 sidebar.sections.pinned	Pinned	ピン留め
 sidebar.sections.active	Active	進行中
@@ -6627,6 +6629,9 @@ gpui.streamer.win	Windows does not tell an app that the screen is being captured
     /// android.swarm.held = held · {why}
     static func android_swarm_held(why: String) -> String { f("android.swarm.held", ["why": why]) }
 
+    /// android.buy.ask = Start a buy thread for {project}?
+    static func android_buy_ask(project: String) -> String { f("android.buy.ask", ["project": project]) }
+
     /// ios.sections.running = {n, number} running
     static func ios_sections_running(n: Int) -> String { f("ios.sections.running", ["n": String(n)]) }
 
@@ -6854,6 +6859,9 @@ gpui.streamer.win	Windows does not tell an app that the screen is being captured
 
     /// ios.swarm.remove.ask = Remove {name} from the swarm?
     static func ios_swarm_remove_ask(name: String) -> String { f("ios.swarm.remove.ask", ["name": name]) }
+
+    /// ios.buy.ask = Start a buy thread for {project}?
+    static func ios_buy_ask(project: String) -> String { f("ios.buy.ask", ["project": project]) }
 
     /// gpui.sections.move.to = Move to {group}
     static func gpui_sections_move_to(group: String) -> String { f("gpui.sections.move.to", ["group": group]) }

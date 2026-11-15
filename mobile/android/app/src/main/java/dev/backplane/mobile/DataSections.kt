@@ -16,6 +16,9 @@ import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
+import androidx.compose.material3.AlertDialog
+import androidx.compose.ui.graphics.RectangleShape
+import androidx.compose.ui.unit.sp
 import androidx.compose.runtime.*
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.Alignment
@@ -200,16 +203,22 @@ fun ProjectPageScreen(p: DSecRow, open: (String) -> Unit, newThread: (String) ->
         DBar(p.title, back)
         // New thread in this project: its New thread screen says where it runs and has the machine picker (projects.list's row of the same key)
         DataClient.projects.firstOrNull { it.key.isNotEmpty() && it.key == p.key }?.let { pr ->
-            // Buy it beside New thread, as a thread's header has it: the hub's button for this project; a press makes the buy thread and opens it
+            // Buy it beside New thread, as a thread's header has it: the hub's button for this project. It sits at the end of the New thread row, where a
+            // thumb lands, and a buy thread starts an agent's turn at once: a press asks first, and only its answer makes the buy thread and opens it
             var buy by remember(pr.id) { mutableStateOf<DataClient.Buy?>(null) }; var buying by remember(pr.id) { mutableStateOf(false) }; var failed by remember(pr.id) { mutableStateOf("") }
+            var asking by remember(pr.id) { mutableStateOf(false) }
             val scope = rememberCoroutineScope()
             LaunchedEffect(pr.id, DataClient.conn) { if (DataClient.conn == DataClient.Conn.ONLINE) runCatching { DataClient.buyOfProject(pr.id) }.onSuccess { buy = it } }
             Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                 DMono("+ " + Msg.android_thread_new_in(pr.title), dcs.primary, 12, Modifier.weight(1f).clickable { newThread(pr.id) }.padding(horizontal = 12.dp, vertical = 10.dp).testTag("project.page.new"))
                 buy?.let { b ->
-                    DMono(Tr.t(b.label), dcs.primary, 12, Modifier.clickable(enabled = !buying) { buying = true; failed = ""
-                        scope.launch { try { val t = DataClient.buy(b.thread); if (t.isNotEmpty()) open(t) } catch (e: Exception) { failed = e.message ?: Msg.android_buy_failed } finally { buying = false } } }
-                        .padding(horizontal = 12.dp, vertical = 10.dp).testTag("project.page.buy"), bold = true)
+                    DMono(Tr.t(b.label), dcs.primary, 12, Modifier.clickable(enabled = !buying) { asking = true }.padding(horizontal = 12.dp, vertical = 10.dp).testTag("project.page.buy"), bold = true)
+                    if (asking) AlertDialog(onDismissRequest = { asking = false }, shape = RectangleShape,
+                        title = { Text(Msg.android_buy_ask(pr.title), fontFamily = BpMono, fontSize = 15.sp) },
+                        text = if (b.tip.isEmpty()) null else { { Text(Tr.t(b.tip), fontFamily = BpMono, fontSize = 13.sp) } },
+                        confirmButton = { DBtn(Msg.android_buy_it, true, modifier = Modifier.testTag("project.page.buy.confirm")) { asking = false; buying = true; failed = ""
+                            scope.launch { try { val t = DataClient.buy(b.thread); if (t.isNotEmpty()) open(t) } catch (e: Exception) { failed = e.message ?: Msg.android_buy_failed } finally { buying = false } } } },
+                        dismissButton = { DBtn(Msg.common_cancel, false, modifier = Modifier.testTag("project.page.buy.cancel")) { asking = false } })
                 }
             }
             if (failed.isNotEmpty()) DMono(failed, dcs.error, 11, Modifier.padding(horizontal = 12.dp, vertical = 4.dp), lines = 3)
