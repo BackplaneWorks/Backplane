@@ -860,8 +860,8 @@ struct DataThreadView: View {
         .fullScreenCover(isPresented: $drawing) { DataPadView { add([$0]) } }
         .photosPicker(isPresented: $photoLibrary, selection: $picked, maxSelectionCount: max(1, 4 - pending.count), matching: .images)
         .fullScreenCover(isPresented: $camera) { DCamera { d in camera = false; if let d { add([d]) } }.ignoresSafeArea() }
-        // a picture another app handed over waits here, like one chosen from Photos
-        .onChange(of: client.incomingImages, initial: true) { _, d in if !d.isEmpty { client.incomingImages = []; add(d) } }
+        // a picture another app handed over waits here, like one chosen from Photos (a modifier of its own: the body's chain is at the type checker's limit)
+        .modifier(DIncomingImages(client: client) { add($0) })
         .onChange(of: picked) { _, items in
             guard !items.isEmpty else { return }
             Task {
@@ -1053,6 +1053,15 @@ struct DataThreadView: View {
             let small = await Task.detached { raw.compactMap { DataClient.prepared($0) } }.value
             pending = Array((pending + small).prefix(4))
         }
+    }
+}
+
+/// The open thread takes the pictures another app handed over (DataClient.incomingImages) into its composer.
+struct DIncomingImages: ViewModifier {
+    let client: DataClient
+    let add: ([Data]) -> Void
+    func body(content: Content) -> some View {
+        content.onChange(of: client.incomingImages, initial: true) { _, d in if !d.isEmpty { client.incomingImages = []; add(d) } }
     }
 }
 
