@@ -13,9 +13,16 @@ struct DEntryRow: Decodable, Identifiable { var dir: Bool; var size: Int; var na
 struct DEntries: Decodable { var entries: [DEntryRow]
     enum CodingKeys: String, CodingKey { case entries }
     init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); entries = (try? c.decode([DEntryRow].self, forKey: .entries)) ?? [] } }
-struct DProjectFiles: Decodable { var root: String; var pcb: String; var sch: String
-    enum CodingKeys: String, CodingKey { case root, pcb, sch }
-    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); root = c.str(.root); pcb = c.str(.pcb); sch = c.str(.sch) } }
+/// A board of the viewer's picker (the hub's `boards`): `pcb` and `sch` are the paths its pages watch, "" for the project's own board (`isDefault`), whose pages follow the project.
+struct DBoardRow: Decodable, Equatable, Identifiable { var label: String; var value: String; var isDefault: Bool; var pcb: String; var sch: String
+    var id: String { value }
+    enum CodingKeys: String, CodingKey { case label, value, isDefault = "default", pcb, sch }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); label = c.str(.label); value = c.str(.value); isDefault = c.bool(.isDefault); pcb = c.str(.pcb); sch = c.str(.sch) } }
+struct DProjectFiles: Decodable { var root: String; var pcb: String; var sch: String; var boards: [DBoardRow]
+    enum CodingKeys: String, CodingKey { case root, pcb, sch, boards }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); root = c.str(.root); pcb = c.str(.pcb); sch = c.str(.sch); boards = (try? c.decode([DBoardRow].self, forKey: .boards)) ?? [] }
+    /// The board on show: the one picked, else the project's own, else the first listed; nil when the hub lists no picker (one board or none).
+    func board(_ picked: String) -> DBoardRow? { boards.first { $0.value == picked } ?? boards.first { $0.isDefault } ?? boards.first } }
 struct DMech: Decodable { var parts: [String]
     enum CodingKeys: String, CodingKey { case parts }
     init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); parts = (try? c.decode([String].self, forKey: .parts)) ?? [] } }
@@ -39,8 +46,8 @@ extension DataClient {
     func viewerFiles(_ thread: String) async -> DProjectFiles? { try? await call("viewer.files", ["thread": thread]) }
     /// A viewer (tab, file, thread) opens: the last one's plots go at once and late ones for it are dropped (PlotStore.begin/shown);
     /// a 3D view shows its own cached model once the hub names that model's file among the view's.
-    func watch(_ thread: String, kind: String, path: String = "") async throws {
-        var p: [String: Any] = ["thread": thread, "kind": kind]; if !path.isEmpty { p["path"] = path }
+    func watch(_ thread: String, kind: String, path: String = "", board: String = "") async throws {
+        var p: [String: Any] = ["thread": thread, "kind": kind]; if !path.isEmpty { p["path"] = path }; if !board.isEmpty { p["board"] = board }
         let slot = kind.hasPrefix("3d") ? [hubName, thread, kind, path].joined(separator: "|") : ""
         // (a stop changes nothing here: it may come after the next viewer has begun, and that one drops the last one's plots itself)
         var serial = 0
@@ -93,6 +100,8 @@ struct DataViewerView: View {
     @State private var tab: String
     @State private var target: (tab: String, path: String)?
     @State private var files: DProjectFiles?
+    // the project's boards (two or more: the hub's `boards`): a pick shows that board on Board, Schematic, 3D and Split, as the desktop's Boards menu does
+    @State private var boardPick = ""
     init(client: DataClient, thread: DThread, openFile: String = "", line: Int = 0) {
         self.client = client; self.thread = thread; self.openFile = openFile; self.line = line
         // a linked file opens where it belongs: a board or schematic in its tab, a model in Mech, anything else previewed in Files
@@ -111,13 +120,26 @@ struct DataViewerView: View {
                 }
             }.background(BackplaneDesign.panel)
             DLine()
+            let board = files?.board(boardPick)
+            if let on = board, ["Board", "Schematic", "3D", "Split"].contains(tab) {
+                // the board on show and, behind it, the project's other boards (the hub's list)
+                Menu {
+                    ForEach(files?.boards ?? []) { b in
+                        Button { boardPick = b.value; target = nil } label: { if b.value == on.value { Label(b.isDefault ? b.label + " · " + Tr.t("Default board") : b.label, systemImage: "checkmark") } else { Text(b.isDefault ? b.label + " · " + Tr.t("Default board") : b.label) } }
+                    }
+                } label: {
+                    HStack { Text(on.label).dmono(12).foregroundStyle(BackplaneDesign.text).lineLimit(1); Spacer(); Image(systemName: "chevron.down").font(.system(size: 11)).foregroundStyle(BackplaneDesign.dim) }
+                        .padding(.horizontal, 12).padding(.vertical, 9).contentShape(Rectangle())
+                }.accessibilityIdentifier("data.viewer.boards")
+                DLine()
+            }
             Group {
                 switch tab {
-                case "Board": DataPlotTab(client: client, thread: thread, kind: "board", path: target?.tab == "Board" ? target!.path : "", has: files == nil || !(files?.pcb ?? "").isEmpty || target != nil, none: "No board in this project yet")
-                case "Schematic": DataPlotTab(client: client, thread: thread, kind: "schematic", path: target?.tab == "Schematic" ? target!.path : "", has: files == nil || !(files?.sch ?? "").isEmpty || target != nil, none: "No schematic in this project yet")
+                case "Board": DataPlotTab(client: client, thread: thread, kind: "board", path: target?.tab == "Board" ? target!.path : (board?.pcb ?? ""), has: files == nil || !(files?.pcb ?? "").isEmpty || board != nil || target != nil, none: "No board in this project yet")
+                case "Schematic": DataPlotTab(client: client, thread: thread, kind: "schematic", path: target?.tab == "Schematic" ? target!.path : (board?.sch ?? ""), has: files == nil || !(files?.sch ?? "").isEmpty || board != nil || target != nil, none: "No schematic in this project yet")
                 // unknown files (no hub yet) still open the 3D view: it shows the model it showed last
-                case "3D": DataPlotTab(client: client, thread: thread, kind: "3d", path: "", has: files == nil || !(files?.pcb ?? "").isEmpty, none: "No board in this project yet")
-                case "Split": DataSplitTab(client: client, thread: thread, files: files)
+                case "3D": DataPlotTab(client: client, thread: thread, kind: "3d", path: board?.pcb ?? "", has: files == nil || !(files?.pcb ?? "").isEmpty || board != nil, none: "No board in this project yet")
+                case "Split": DataSplitTab(client: client, thread: thread, files: files, board: board)
                 case "Diff": DataDiffTab(client: client, thread: thread)
                 case "Review": DataReviewTab(client: client, thread: thread)
                 case "Mech": DataMechTab(client: client, thread: thread, open: target?.tab == "Mech" ? target!.path : nil)
@@ -594,20 +616,23 @@ struct DataSplitTab: View {
     let client: DataClient
     let thread: DThread
     let files: DProjectFiles?
+    var board: DBoardRow? = nil
     var body: some View {
         let root = files?.root ?? ""
+        // a board picked in the viewer: its file and the schematic beside it are the panes' sources, keyed by their paths ("" the project's own)
+        let bp = board?.pcb ?? "", sp = board?.sch ?? ""
         let plots = client.plots
         let _ = (plots.frame?.at, plots.mesh?.at)   // the store changes on each frame: read it so the panes follow
-        let sch = plots.cachedFrame("1|\(root)|"), brd = plots.cachedFrame("0|\(root)|"), mdl = plots.cachedMesh("2|\(root)|")
+        let sch = plots.cachedFrame("1|\(root)|\(sp)"), brd = plots.cachedFrame("0|\(root)|\(bp)"), mdl = plots.cachedMesh("2|\(root)|\(bp)")
         GeometryReader { geo in
             let panes = Group {
-                pane("Schematic", "sch", sch, nil, "schematic", (files?.sch ?? "").isEmpty ? "No schematic in this project yet" : "")
-                pane("Board", "brd", brd, nil, "board", (files?.pcb ?? "").isEmpty ? "No board in this project yet" : "")
-                pane("3D", "3d", brd, mdl, "3d", (files?.pcb ?? "").isEmpty ? "No board in this project yet" : "")
+                pane("Schematic", "sch", sch, nil, "schematic", (files?.sch ?? "").isEmpty && board == nil ? "No schematic in this project yet" : "")
+                pane("Board", "brd", brd, nil, "board", (files?.pcb ?? "").isEmpty && board == nil ? "No board in this project yet" : "")
+                pane("3D", "3d", brd, mdl, "3d", (files?.pcb ?? "").isEmpty && board == nil ? "No board in this project yet" : "")
             }
             if geo.size.width > geo.size.height { HStack(spacing: 0) { panes } } else { VStack(spacing: 0) { panes } }
         }
-        .task(id: root) { if !root.isEmpty { try? await client.watch(thread.id, kind: "split") } }
+        .task(id: root + "|" + bp) { if !root.isEmpty { try? await client.watch(thread.id, kind: "split", board: bp) } }
         .accessibilityIdentifier("data.split")
     }
     @ViewBuilder private func pane(_ label: String, _ id: String, _ frame: PlotFrame?, _ mesh: MeshFrame?, _ open: String, _ none: String) -> some View {
