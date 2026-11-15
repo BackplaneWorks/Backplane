@@ -563,6 +563,16 @@ impl RpcHandler for FakeStar {
     assert!(text.starts_with("HTTP/1.1 413"), "{text}"); assert!(text.contains("upload.cap"), "it says why: {text}");
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_the_viewer_lists_boards_for_a_picker_and_split_takes_one_of_the_folder() {
+    let (_hub, port) = up("viewboards").await;
+    let mut ws = open(port, "&enc=json").await; let _ = next(&mut ws).await;
+    // the viewer's files carry the picker's boards: none for a folder with no second board
+    let r = ask(&mut ws, 3, "viewer.files", json!({"thread":"t1"})).await;
+    if r["ok"] == true { assert_eq!(r["result"]["boards"], json!([]), "{r}"); }
+    // Split takes a picked board only from the thread's own folder
+    let r = ask(&mut ws, 4, "viewer.watch", json!({"thread":"t1","kind":"split","board":"/etc/x.kicad_pcb"})).await; assert_eq!(r["ok"], false, "{r}");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_the_queue_and_buy_it_answer_for_a_thread() {
     let (_hub, port) = up("queuebuy").await;
     let mut ws = open(port, "&enc=json").await; let hello = next(&mut ws).await;
