@@ -1288,13 +1288,16 @@ def run_window_suite(h: SuiteHarness) -> int:
         win32_styles_obs = {}
 
         box_checked = 0.0
+        box_since = None
         click_hold = {"held": None, "why": "the canvas click step did not run"}
         while cp.poll() is None and "12_view_mode" not in seen:
             # a box up before the first frame is shown is the failure, named, not a timeout later
             if "01_shown" not in seen and time.monotonic() - box_checked > 1.0:
                 box_checked = time.monotonic()
                 box = startup_box()
-                if box:
+                # failed once up 3 s: bp.10's load progress window ("Load PCB") goes by itself within ~1.3 s
+                box_since = (box_since or time.monotonic()) if box else None
+                if box and time.monotonic() - box_since >= 3.0:
                     print("DIAG startup_box " + json.dumps(box), flush=True)
                     h.shot("startup_box")
                     h.check(f"KiCad starts without a box before its first frame (it showed {box['title']!r}: {' | '.join(box['text'])[:200]})", False, box)

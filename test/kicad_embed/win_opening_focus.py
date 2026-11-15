@@ -571,6 +571,7 @@ def run(h):
         # of the run: when it came, what it says, whether it went away, and whether the editor came up (the hub's retry)
         observe = os.environ.get("BP_STARTUP_BOX_OBSERVE") == "1"
         box_obs = {}
+        box_since = None
         while cp.poll() is None and time.monotonic() - started < (100 if observe else 65):
             snap = focus_snapshot()
             if snap != previous:
@@ -622,7 +623,10 @@ def run(h):
             if clicked_edit and "first_paint" not in {r for r in h.kicad_reports()} and time.monotonic() - box_checked > 1.0:
                 box_checked = time.monotonic()
                 box = E.startup_box()
-                if box and not observe:
+                # a box that waits for someone fails the start; a progress window that goes by itself does not (bp.10's
+                # "Load PCB / Finalizing board / Elapsed time", gone in 1.1-1.3 s, 4 of 10 opens Nov 15): failed once up 3 s
+                box_since = (box_since or time.monotonic()) if box else None
+                if box and not observe and time.monotonic() - box_since >= 3.0:
                     print("DIAG startup_box " + json.dumps(box), flush=True)
                     h.shot("startup_box")
                     h.check(f"KiCad starts without a box before its first frame (it showed {box['title']!r}: {' | '.join(box['text'])[:200]})", False, box)
@@ -643,8 +647,12 @@ def run(h):
             if box_obs.get("box"):
                 h.shot("after_box")
             print("DIAG startup_box_observe " + json.dumps(box_obs), flush=True)
-            h.check("Start without a box before the first frame" + (f" (it showed {box_obs['box']['title']!r})" if box_obs.get("box") else ""),
-                    not box_obs.get("box"), box_obs)
+            # a window gone within 3 s by itself is progress (bp.10's "Load PCB"), not a box waiting for someone
+            lasted = (box_obs.get("gone_ms") or box_obs.get("run_ms", 0)) - box_obs.get("first_ms", 0) if box_obs.get("box") else 0
+            box_obs["lasted_ms"] = lasted
+            box_obs["kind"] = "none" if not box_obs.get("box") else ("progress" if box_obs.get("gone_ms") and lasted < 3000 else "prompt")
+            h.check("Start without a box waiting for someone before the first frame" + (f" (it showed {box_obs['box']['title']!r} for {lasted} ms)" if box_obs.get("box") else ""),
+                    box_obs["kind"] != "prompt", box_obs)
             h.check("The editor came up in the end", bool(box_obs.get("editor_up")), box_obs)
             return h.finish()
         if stall_started:
