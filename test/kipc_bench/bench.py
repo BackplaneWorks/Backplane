@@ -9,7 +9,7 @@ HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 import norm
 TASKS = json.load(open(HERE + "/tasks.json"))
 def env(work): return json.load(open(work + "/bench.json"))
-def turn(work, d, text, ms=1500000):
+def turn(work, d, text, ms=int(os.environ.get("KIPC_BENCH_TURN_MS", "600000"))):  # a turn that hangs is a failed run, never a stalled benchmark
     r = subprocess.run(["bun", HERE + "/turn.mjs", work, d, text], capture_output=True, text=True, env={**os.environ, "TURN_MS": str(ms)})
     try: return json.loads(r.stdout.strip().splitlines()[-1])
     except Exception: return {"state": "driver-failed", "err": (r.stdout + r.stderr)[-300:]}

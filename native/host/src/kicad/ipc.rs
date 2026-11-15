@@ -33,6 +33,14 @@ pub fn runaction_guidance(caps: &[String]) -> &'static str {
     }
 }
 
+/// How long a server that listens may say it is not ready yet before its start counts as failed.
+pub const READY_WAIT: Duration = Duration::from_secs(30);
+/// A reply that says KiCad is up but still loading (AS_NOT_READY, "KiCad is not ready to reply").
+pub fn not_ready(reply: &Value) -> bool { reply["ok"] != true && (reply["status"] == "AS_NOT_READY" || reply["error"].as_str().is_some_and(|e| e.contains("not ready to reply"))) }
+#[test] fn a_server_still_loading_is_not_a_failed_one() {
+    assert!(not_ready(&json!({"ok": false, "status": "AS_NOT_READY", "error": "KiCad is not ready to reply"})) && not_ready(&json!({"ok": false, "error": "KiCad is not ready to reply"})));
+    assert!(!not_ready(&json!({"ok": true})) && !not_ready(&json!({"ok": false, "error": "no reply"})) && !not_ready(&json!({"ok": false, "status": "AS_BAD_REQUEST", "error": "x"})));
+}
 /// What the runtime is: the kicad-cli, its root, the capabilities its manifest names, its version and API level (KEnv).
 #[derive(Clone, Debug, Default)]
 pub struct Env { pub cli: String, pub root: String, pub caps: Vec<String>, pub version: String, pub api: u64, pub status: String, pub why: String }
@@ -148,13 +156,18 @@ impl Actor {
         let me = self.me.clone();
         tokio::spawn(async move {
             let ask = |ty: &str| { let (t, r) = oneshot::channel(); let _ = me.send(Msg::Raw { sock: sock.clone(), env: env.clone(), ty: ty.into(), msg: json!({}), reply: t }); r };
-            let p = ask("kiapi.common.commands.Ping").await.unwrap_or_else(|_| failed("no reply"));
+            // KiCad listens before it has finished loading and says so ("KiCad is not ready to reply", AS_NOT_READY): that is asked again for
+            // up to READY_WAIT, never taken as a failed server (which stays failed until the person retries it)
+            let mut p = ask("kiapi.common.commands.Ping").await.unwrap_or_else(|_| failed("no reply"));
+            let until = std::time::Instant::now() + READY_WAIT;
+            while not_ready(&p) && std::time::Instant::now() < until { tokio::time::sleep(Duration::from_millis(250)).await; p = ask("kiapi.common.commands.Ping").await.unwrap_or_else(|_| failed("no reply")); }
             if !p["ok"].as_bool().unwrap_or(false) { let _ = me.send(Msg::Bad { project, why: format!("it did not answer Ping: {}", p["error"].as_str().unwrap_or("")) }); return }
             let o = ask("kiapi.common.commands.GetVersion").await.unwrap_or_else(|_| failed("no reply"));
             let full = o["message"]["version"]["full_version"].as_str().unwrap_or("").to_string();
             // status says the manifest's version (a test build's GetVersion is a describe name, "...-dirty-bp.13"); KiCad's own string is logged
             if o["ok"].as_bool().unwrap_or(false) && ks::version_ok(&full, &env.version) {
-                eprintln!("kicad ipc: {project} up, KiCad says {full} (manifest {})", env.version);
+                // (written so that a closed stderr cannot stop the handshake: eprintln! panics there, and the server would never be handed its requests)
+                { use std::io::Write; let _ = writeln!(std::io::stderr(), "kicad ipc: {project} up, KiCad says {full} (manifest {})", env.version); }
                 let _ = me.send(Msg::Up { project, version: shown_version(&env.version, &full) }); }
             else { let err = o["error"].as_str().unwrap_or(""); let _ = me.send(Msg::Bad { project, why: if err.is_empty() { format!("this KiCad is {full}, not the {} Backplane installed", env.version) } else { format!("it did not answer GetVersion: {err}") } }); }
         });

@@ -12,7 +12,7 @@ python3 test/kipc_bench/repros/fp_value_partial.py $W/r5.url $W/runs/r5         
 
 The same messages go to KiCad unchanged through any client; the hub adds nothing to them.
 
-## (5) A partial FootprintInstance update resets the value field's layer, size and visibility: `fp_value_partial.py`
+## (5) A partial FootprintInstance update resets the value field's layer, place and visibility: `fp_value_partial.py`
 
 Board: the runtime's `demos/stickhub/StickHub.kicad_pcb` (upgraded by `kicad-cli pcb upgrade`), footprint R2
 (`57f2a42b-f94b-4bd7-917e-cb76fae439df`, on B.Cu). Message, inside a commit:
@@ -24,8 +24,8 @@ Board: the runtime's `demos/stickhub/StickHub.kicad_pcb` (upgraded by `kicad-cli
 
 Answer: `ISC_OK`. Expected: the Value property keeps its layer (B.Fab), size (0.3 mm), place and visibility, with only the
 text changed (as the footprint's position, orientation and body are kept when left out). Actual, in the saved file: the
-property is on `F.SilkS`, `(hide yes)`, at a place far from the part (`(at 170.246365 -34.403436 135)`), default size.
-Sending the whole `value_field` as GetItems gave it, with only the text changed, keeps all of it (the script does both
+property is on `F.SilkS`, `(hide yes)`, at a place far from the part (`(at 170.246365 -34.403436 135)`); its size and
+justification are kept. Sending the whole `value_field` as GetItems gave it, with only the text changed, keeps all of it (the script does both
 and prints the two properties).
 
 ## (4) A new symbol's reference and value land hidden at the sheet origin: `symbol_fields.py`
@@ -55,3 +55,9 @@ third). The tool's answer, whole:
 A second call five seconds later got the same answer (the server stays "failed" for the hub's retry schedule). The hub
 logs a line only when a server comes up (`kicad ipc: <pro> up, KiCad says …`), so there is no log line for the failure:
 the project is simply missing from the "up" lines. KiCad's own stdout is not kept by the hub.
+
+The hub no longer fails on it: a server that answers Ping with not-ready is asked again for up to 30 s
+(`native/host/src/kicad/ipc.rs`, `READY_WAIT`). In the 48 runs after that change it was not seen again. For the fork, the
+question is only whether a server should listen before it can answer.
+
+Both scripts were run again on bp.12.1 on 2026-11-14 with the outputs described above.
