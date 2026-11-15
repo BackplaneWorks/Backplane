@@ -585,6 +585,9 @@ impl Render for Backplane {
         let (side_shown, thread_least) = if kfull { (false, 0.) } else { (side_shown, thread_least) };
         crate::screens::viewer::KICAD_FULL.store(kfull, std::sync::atomic::Ordering::Relaxed); crate::screens::viewer::KICAD_POPPED.store(self.screens.kicad_window.is_some(), std::sync::atomic::Ordering::Relaxed);
         crate::screens::viewer::set_least(pane_least); crate::screens::viewer::set_share(share); self.screens.side_shown = side_shown;
+        // an open panel at the design's side widens the pane at the thread's cost, down to the thread's least (screens/viewer.rs `with_panel`)
+        crate::screens::viewer::set_most(win_w - if side_shown { self.local.sidebar_px as f32 } else { crate::screens::viewer::STRIP_W } - crate::screens::viewer::RAIL_W - thread_least);
+        crate::screens::viewer::set_panel(if viewer_open { crate::screens::mgmt::side_room(thread, &self.screens.mgmt) } else { 0. });
         let mut ctl: Vec<CtlEntry> = Vec::new(); // the controls drawn this frame (the e2e harness's inventory)
         // project home replaces the thread when the hub selected it
         let home = &self.data["projectHome"];
