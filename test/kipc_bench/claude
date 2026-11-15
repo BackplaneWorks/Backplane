@@ -44,14 +44,19 @@ def setarg(k, v):
 setarg("--model", os.environ.get("KIPC_BENCH_MODEL", "claude-fable-5-2"))
 setarg("--effort", os.environ.get("KIPC_BENCH_EFFORT", "medium"))
 if "--no-session-persistence" not in a: a.append("--no-session-persistence")
+# the raw file variant (KIPC_BENCH_NOMCP): no MCP servers at all, so the agent has only the CLI's own file and shell tools
+if os.environ.get("KIPC_BENCH_NOMCP") and "--mcp-config" in a: i = a.index("--mcp-config"); del a[i:i + 2]
 # a variant under test (hub.mjs): tools kept from the agent, and replacements in the hub's system prompt ([[old, new], ...] in a JSON file),
 # so a prompt wording is measured before it is built into the hub
 if os.environ.get("KIPC_BENCH_DISALLOW") and "--disallowedTools" in a: a[a.index("--disallowedTools") + 1] += "," + os.environ["KIPC_BENCH_DISALLOW"]
 if os.environ.get("KIPC_BENCH_PROMPT") and "--append-system-prompt" in a:
     i = a.index("--append-system-prompt") + 1
-    for old, new in json.load(open(os.environ["KIPC_BENCH_PROMPT"])):
-        if old not in a[i]: sys.stderr.write("kipc bench: prompt text to replace not found: %r\n" % old[:60])
-        a[i] = a[i].replace(old, new)
+    import re
+    for r in json.load(open(os.environ["KIPC_BENCH_PROMPT"])):  # [old, new], or ["re", pattern, new] for text that holds the run's paths
+        old, new = r[-2:]
+        if len(r) == 3: a[i], k = re.subn(old, lambda m: new, a[i], flags=re.S)
+        else: k = a[i].count(old); a[i] = a[i].replace(old, new)
+        if not k: sys.stderr.write("kipc bench: prompt text to replace not found: %r\n" % old[:60])
     open(os.path.join(out, name + ".prompt.txt"), "w").write(a[i])
 env = {k: v for k, v in os.environ.items() if not (k.startswith("CLAUDE") or k in ("ANTHROPIC_API_KEY", "BACKPLANE_AGENT_OWNER"))}
 env["CLAUDE_CONFIG_DIR"] = os.environ["KIPC_BENCH_LOGIN"]

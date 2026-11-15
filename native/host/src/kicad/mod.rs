@@ -9,6 +9,7 @@ pub mod embed;
 pub mod hostlibs;
 pub mod ipc;
 pub mod kedit;
+pub mod kroute;
 pub mod kexport;
 pub mod kipc;
 pub mod kserve;

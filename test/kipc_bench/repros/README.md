@@ -61,3 +61,38 @@ The hub no longer fails on it: a server that answers Ping with not-ready is aske
 question is only whether a server should listen before it can answer.
 
 Both scripts were run again on bp.12.1 on 2026-11-14 with the outputs described above.
+
+## (6) A symbol that `extends` another, created by its library id, is a library mismatch: `symbol_extends.py`
+
+Schematic: `pic_programmer.kicad_sch` (upgraded), root sheet, bp.12.1 (run 2026-11-15). CreateItems, in a commit that is
+kept and saved:
+
+```json
+{"@type": "type.googleapis.com/kiapi.schematic.types.SchematicSymbolInstance", "position": {"x_nm": "241300000", "y_nm": "33020000"},
+ "definition": {"id": {"library_nickname": "Regulator_Linear", "entry_name": "AMS1117-3.3"}},
+ "lib_id": {"library_nickname": "Regulator_Linear", "entry_name": "AMS1117-3.3"}, "unit": {"unit": 1},
+ "reference_field": {"name": "Reference", "text": {"text": "U91"}}}
+```
+
+Answer: `ISC_OK`. `Regulator_Linear:AMS1117-3.3` extends `AP1117-15`. Expected: the sheet's `lib_symbols` copy is the
+flattened symbol, as `PlaceSymbolFromLibrary` writes it. Actual: `kicad-cli sch erc` on the saved file reports
+`lib_symbol_mismatch: Symbol U91 [AMS1117-3.3]`. A symbol that extends nothing (`Device:C`) is right. What the hub does
+now: `PlaceSymbolFromLibrary` in a commit that is dropped, then CreateItems of that item whole (its `definition` as KiCad
+gave it); that saves without the finding.
+
+## (7) A Footprint sent as a user field is answered OK and not written: same script
+
+The same CreateItems with `Device:C` and
+`"user_fields": [{"name": "Footprint", "text": {"text": "Capacitor_SMD:C_0805_2012Metric", ...}}]`: `ISC_OK`, and the saved
+symbol has `(property "Footprint" ""`. UpdateItems with the same user field does the same. Expected: the field named
+Footprint is the symbol's footprint field, or the item is refused. `footprint_field: {text: {text: "..."}}` works (what
+the hub sends now).
+
+## (8) SketchRoute, headless, on StickHub with the seven `/LED*` nets taken up (2026-11-15, bp.12.1)
+
+`kiapi.backplane.SketchRoute {board, items: [the 14 pads]}` after a net class `LED` (0.2 mm track, pattern `/LED*`) was set
+and saved in the same server: `connections: 7, routed: 6, failed: 1` (`/LED6`), 0.07 s. The tracks are 0.15 mm wide (the
+board's default), not the net class's 0.2 mm; total length 28.2 mm where 13.5 mm does it; and after a refill DRC has one
+unconnected GND item (a pour cut off). A message with no `board` answers `AS_UNHANDLED`, not a bad request. Asked for:
+a `width` (or the net class's), and a per-connection reason for a failure. The hub routes with its own grid router
+(`native/host/src/kicad/kroute.rs`) until then.

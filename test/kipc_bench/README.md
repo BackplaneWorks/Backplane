@@ -18,10 +18,18 @@ runtime's own demo boards. Never on a person's project, and only with their go (
 - `hub.mjs HUB RUNTIME PORT WORK`: a hub with a temp home, its own HOME/XDG for KiCad, and `claude` (this folder's
   wrapper) as its only agent. `KIPC_BENCH_LOGIN` is the Claude config folder to sign in with (default `~/.claude`);
   `KIPC_BENCH_DISALLOW` keeps tools from the agent; `KIPC_BENCH_PROMPT` is a JSON file of `[old, new]` replacements in the
-  hub's system prompt, so a wording is measured before it is built in.
+  hub's system prompt (or `["re", pattern, new]` for text that holds a run's paths), so a wording is measured before it
+  is built in; `KIPC_BENCH_NOMCP=1` takes every MCP server away (the raw file variant: `prompts/rawfile.json`, only the
+  CLI's file and shell tools); `KIPC_BENCH_MODEL` picks the model.
 - `claude`: starts the real CLI with the hub's own arguments (its prompt, MCP tools, plugins), the model and effort
   fixed, and copies its stream to `WORK/out/<run>.jsonl`. A turn that begins `ORACLE <script>` runs that script with the
   hub's MCP url instead (no model); `HOLD <file>` holds a turn open to call tools by hand (`mcp.py`).
+- Design tasks: `mkfix2.py CLI FIXTURES HUBBLE_DIR OUT` builds their fixtures (and `OUT/<fixture>.base.json`, what DRC and
+  ERC said before), `tasks2.json` the tasks (`KIPC_BENCH_TASKS=.../tasks2.json`), `checks.py` the rules each is held to
+  (no one reference: DRC/ERC nothing new, the netlist, the spec), `kx.py` what KiCad's CLI says (DRC, ERC, netlist, pads).
+- `tasks2.json`, `checks.py`, `kx.py`, `mkfix2.py CLI FIXTURES HUBBLE_DIR OUT`: the design tasks (a schematic group, routing, placement, a
+  footprint exchange, a real 8-layer board), their rule checks (DRC and ERC with nothing new, the netlist, the spec) and their fixtures;
+  `KIPC_BENCH_TASKS=.../tasks2.json` runs `bench.py run`, `e2e` and `table` on them (`e2e`: `edit_e2e.py`'s `DESIGN`, the fewest calls).
 - `bench.py`: `ref` (the references), `e2e` (each task as one `kicad_edit` call must equal the reference), `run`
   (real turns; a line per run in `WORK/results.jsonl`), `table`.
 

@@ -23,6 +23,10 @@ pub trait Call: Sync {
     fn call<'a>(&'a self, ty: &'a str, msg: Value) -> Fut<'a>;
     /// The saved schematic's sheet files as text, for the read-back of what was set (None: not read back, as with a stand-in).
     fn sheet_texts(&self) -> Option<Vec<String>> { None }
+    /// The saved schematic's netlist as {reference: {pin: net}} (kicad-cli's export); Null: none to be had.
+    fn nets<'a>(&'a self) -> Fut<'a> { Box::pin(async { Ok(Value::Null) }) }
+    /// KiCad's own check of the saved document (kicad-cli's DRC report of a board, ERC of a schematic, as JSON); Null: none to be had.
+    fn check<'a>(&'a self) -> Fut<'a> { Box::pin(async { Ok(Value::Null) }) }
 }
 /// KiCad's task gate (a check or refill is running: AS_BUSY "a task is running: ...") is waited out, asked again every BUSY_STEP for at most
 /// BUSY_WAIT, so a check that happens to run does not fail a whole edit. Any other refusal (an open dialog, which the answer names) is the answer.
@@ -36,6 +40,8 @@ impl Call for Patient<'_> {
         loop { match self.c.call(ty, msg.clone()).await { Err(e) if task_busy(&e) && std::time::Instant::now() < until => tokio::time::sleep(self.step).await, r => return r } }
     }) }
     fn sheet_texts(&self) -> Option<Vec<String>> { self.c.sheet_texts() }
+    fn check<'a>(&'a self) -> Fut<'a> { self.c.check() }
+    fn nets<'a>(&'a self) -> Fut<'a> { self.c.nets() }
 }
 /// Whether the ops change anything (a call of finds and raw reads alone does not).
 pub fn writes(ops: &Value) -> bool {
@@ -56,6 +62,29 @@ pub fn file_prop(texts: &[String], reference: &str, name: &str, value: &str) -> 
             let start = t[..at].rfind("\n\t(symbol").unwrap_or(0); let end = t[at..].find("\n\t(symbol").map_or(t.len(), |e| at + e);
             if t[start..end].contains(&want) { return true } }
         false })
+}
+
+/// A check report's findings as one line each: DRC violations, unconnected items and parity, or ERC violations of every sheet.
+pub fn findings(report: &Value) -> Vec<String> {
+    let line = |kind: &str, v: &Value| { let items: Vec<String> = v["items"].as_array().into_iter().flatten().map(|i| i["description"].as_str().unwrap_or("").chars().take(70).collect()).collect();
+        let at = &v["items"][0]["pos"]; let ty = if kind.is_empty() { v["type"].as_str().unwrap_or("") } else { kind };
+        format!("{ty}: {}{}", items.join(" / "), if at.is_object() { format!(" @{},{}", at["x"], at["y"]) } else { String::new() }) };
+    let mut out = vec![];
+    for v in report["violations"].as_array().into_iter().flatten() { out.push(line("", v)) }
+    for v in report["unconnected_items"].as_array().into_iter().flatten() { out.push(line("unconnected", v)) }
+    for v in report["schematic_parity"].as_array().into_iter().flatten() { out.push(line("", v)) }
+    for s in report["sheets"].as_array().into_iter().flatten() { for v in s["violations"].as_array().into_iter().flatten() { out.push(line("", v)) } }
+    out
+}
+/// What an edit changed in KiCad's check: the findings that are new (12 at most, then their count), how many went away and how many are left.
+pub fn check_delta(before: &Value, after: &Value) -> Value {
+    let (mut was, now) = (findings(before), findings(after)); let left = now.len(); let mut new = vec![];
+    for f in now { match was.iter().position(|w| *w == f) { Some(i) => { was.swap_remove(i); } None => new.push(f) } }
+    let by = if after["sheets"].is_array() { "KiCad's ERC of the saved schematic" } else { "KiCad's DRC of the saved board, schematic parity included" };
+    let mut o = json!({"by": by, "new": new.iter().take(12).collect::<Vec<_>>(), "left": left});
+    if new.len() > 12 { o["more"] = json!(new.len() - 12) }
+    if !was.is_empty() { o["gone"] = json!(was.len()) }
+    o
 }
 
 // ---- units and names -------------------------------------------------------------------------------------------------------
@@ -107,7 +136,7 @@ pub const KINDS: &str = "board: footprint, pad, track, arc, via, zone, text, sha
 fn fields_of(kind: &str, raw: &Value) -> Value {
     let mut m = Map::new();
     if kind == "footprint" { for f in raw["definition"]["items"].as_array().into_iter().flatten().filter(|i| i["@type"].as_str().is_some_and(|t| t.ends_with(".Field"))) { if !text3(f).is_empty() { m.insert(f["name"].as_str().unwrap_or("").into(), json!(text3(f))); } } }
-    else { for f in raw["user_fields"].as_array().into_iter().flatten() { if !text2(f).is_empty() { m.insert(f["name"].as_str().unwrap_or("").into(), json!(text2(f))); } } }
+    else { for f in raw["user_fields"].as_array().into_iter().flatten().chain([&raw["footprint_field"]]) { if !text2(f).is_empty() { m.insert(f["name"].as_str().unwrap_or("Footprint").into(), json!(text2(f))); } } }
     Value::Object(m)
 }
 /// The short row of one raw item: what an agent reads, and (the same keys) what `set` writes.
@@ -179,6 +208,29 @@ fn board_field(name: &str, text: &str, fp: &Value) -> Value {
 fn sch_field(name: &str, text: &str, sym: &Value) -> Value {
     json!({"name": name, "visible": false, "text": {"text": text, "position": sym["position"].clone(), "attributes": {"visible": false, "size": {"x_nm": "1270000", "y_nm": "1270000"}}}})
 }
+/// A symbol's field by its name: Footprint, Datasheet and Description are KiCad's own fields of a symbol, the rest its user fields.
+/// (A Footprint sent as a user field is not written: KiCad answers OK and the file does not have it.)
+pub fn sym_field(raw: &mut Value, name: &str, t: &str) {
+    let own = match name { "Footprint" => "footprint_field", "Datasheet" => "datasheet_field", "Description" => "description_field", _ => "" };
+    if !own.is_empty() {
+        if !raw[own].is_object() { raw[own] = json!({"name": name, "text": {"position": raw["position"].clone(), "attributes": {"visible": false, "size": {"x_nm": "1270000", "y_nm": "1270000"}}}}) }
+        raw[own]["text"]["text"] = json!(t); return
+    }
+    let new = sch_field(name, t, raw);
+    if !raw["user_fields"].is_array() { raw["user_fields"] = json!([]) }
+    let fs = raw["user_fields"].as_array_mut().unwrap();
+    match fs.iter_mut().find(|f| f["name"] == json!(name)) { Some(f) => f["text"]["text"] = json!(t), None => fs.push(new) }
+}
+/// A placed symbol's pins: (number, name, where a wire joins it, the direction away from the body), in the sheet's millimetres.
+pub fn sym_pins(raw: &Value) -> Vec<(String, String, (f64, f64), (f64, f64))> {
+    let (px, py) = (mm(&raw["position"]["x_nm"]), mm(&raw["position"]["y_nm"])); let (sn, cs) = (sso(&raw["transform"]["orientation"]) as f64).to_radians().sin_cos();
+    let unit = raw["unit"]["unit"].as_u64().unwrap_or(1); let r3 = |v: f64| (v * 1e4).round() / 1e4;
+    let turn = |x: f64, y: f64| (x * cs + y * sn, -x * sn + y * cs);
+    raw["definition"]["items"].as_array().into_iter().flatten().filter(|i| i["item"]["@type"].as_str().is_some_and(|t| t.ends_with(".SchematicPin")) && matches!(i["unit"]["unit"].as_u64(), None | Some(0)) | (i["unit"]["unit"].as_u64() == Some(unit))).map(|i| { let p = &i["item"];
+        let (x, y) = turn(mm(&p["position"]["x_nm"]), mm(&p["position"]["y_nm"]));
+        let o = match p["orientation"].as_str().unwrap_or("") { "SPO_UP" => (0.0, 1.0), "SPO_DOWN" => (0.0, -1.0), "SPO_LEFT" => (1.0, 0.0), _ => (-1.0, 0.0) }; let (ox, oy) = turn(o.0, o.1);
+        (p["number"].as_str().unwrap_or("").to_string(), p["name"].as_str().unwrap_or("").to_string(), (r3(px + x), r3(py + y)), (ox.round(), oy.round())) }).collect()
+}
 /// Apply a row's keys to the raw item (`set`). Says whether a footprint's body (its `definition`) changed, so the update may leave it out.
 pub fn apply(kind: &str, raw: &mut Value, with: &Value) -> Result<bool, String> {
     let Some(o) = with.as_object() else { return Err("with is an object of row keys".into()) };
@@ -190,7 +242,13 @@ pub fn apply(kind: &str, raw: &mut Value, with: &Value) -> Result<bool, String> 
             (_, "raw") => merge(raw, v),
             ("footprint", "ref") => raw["reference_field"]["text"]["text"]["text"] = json!(s()?),
             ("footprint", "value") => raw["value_field"]["text"]["text"]["text"] = json!(s()?),
-            ("footprint" | "via" | "symbol" | "label" | "junction" | "no_connect", "at") => raw["position"] = point(v, "at")?,
+            ("symbol", "at") => { let to = pair(v).ok_or("at is [x, y] in mm")?; let (dx, dy) = (to.0 - mm(&raw["position"]["x_nm"]), to.1 - mm(&raw["position"]["y_nm"]));
+                // its texts go with it: each field has its own place on the sheet
+                let shift = |f: &mut Value| if f["text"]["position"].is_object() { let p = &f["text"]["position"]; f["text"]["position"] = to_xy(mm(&p["x_nm"]) + dx, mm(&p["y_nm"]) + dy) };
+                for k in ["reference_field", "value_field", "footprint_field", "datasheet_field", "description_field"] { shift(&mut raw[k]) }
+                for f in raw["user_fields"].as_array_mut().into_iter().flatten() { shift(f) }
+                raw["position"] = to_xy(to.0, to.1) }
+            ("footprint" | "via" | "label" | "junction" | "no_connect", "at") => raw["position"] = point(v, "at")?,
             ("footprint", "rot") => raw["orientation"] = json!({"value_degrees": n()?}),
             ("footprint", "locked") => raw["locked"] = json!(if v.as_bool().unwrap_or(false) { "LS_LOCKED" } else { "LS_UNLOCKED" }),
             ("footprint", "fields") => { body = true;
@@ -215,12 +273,8 @@ pub fn apply(kind: &str, raw: &mut Value, with: &Value) -> Result<bool, String> 
             ("symbol", "ref") => raw["reference_field"]["text"]["text"] = json!(s()?),
             ("symbol", "value") => raw["value_field"]["text"]["text"] = json!(s()?),
             ("symbol", "rot") => raw["transform"]["orientation"] = json!(format!("SSO_{}", n()? as i64)),
-            ("symbol", "fields") => for (name, t) in v.as_object().ok_or("fields is {name: text}")? {
-                let t = t.as_str().ok_or("a field's value is text")?; let new = sch_field(name, t, raw);
-                if !raw["user_fields"].is_array() { raw["user_fields"] = json!([]) }
-                let fs = raw["user_fields"].as_array_mut().unwrap();
-                match fs.iter_mut().find(|f| f["name"] == json!(name)) { Some(f) => f["text"]["text"] = json!(t), None => fs.push(new) }
-            },
+            ("symbol", "fields") => for (name, t) in v.as_object().ok_or("fields is {name: text}")? { sym_field(raw, name, t.as_str().ok_or("a field's value is text")?) },
+            ("symbol", "footprint") => sym_field(raw, "Footprint", &s()?),
             ("label", "text") => raw["text"]["text"] = json!(s()?),
             _ => return Err(format!("{kind} has no settable `{k}` (its row's keys, or raw: {{...}} merged into KiCad's own item)")),
         }
@@ -275,10 +329,12 @@ pub fn build(item: &Value) -> Result<Vec<Value>, String> {
 pub fn placed(template: &Value, v: &Value) -> Value {
     let mut s = template.clone();
     if let Some(o) = s.as_object_mut() { o.remove("id"); o.remove("path"); }
-    s["definition"] = json!({"id": if s["lib_id"].is_object() { s["lib_id"].clone() } else { template["definition"]["id"].clone() }});
+    // KiCad's own whole definition goes back with it: a symbol that extends another (AMS1117-3.3) sent as its library id alone gets a
+    // sheet copy that ERC calls a library mismatch
     if let Some(r) = v["ref"].as_str() { s["reference_field"]["text"]["text"] = json!(r) }
     if let Some(x) = v["value"].as_str() { s["value_field"]["text"]["text"] = json!(x) }
-    if let Some(fs) = v["fields"].as_object() { let extra: Vec<Value> = fs.iter().map(|(n, t)| sch_field(n, t.as_str().unwrap_or(""), &s)).collect(); s["user_fields"] = json!(extra) }
+    for (n, t) in v["fields"].as_object().into_iter().flatten() { sym_field(&mut s, n, t.as_str().unwrap_or("")) }
+    if let Some(f) = v["footprint"].as_str() { sym_field(&mut s, "Footprint", f) }
     s
 }
 
@@ -367,8 +423,15 @@ pub fn full_type(ty: &str) -> String {
 struct Run<'a> { c: &'a dyn Call, doc: Value, board: bool, commit: Option<Value>, sheets: Option<Vec<(String, Value)>>, refill: Vec<Value>, wrote: bool, cache: std::collections::HashMap<String, Vec<(Value, Value)>>,
     /// The commit's name, the op (1-based) whose `find` ended a commit early, and each new symbol as KiCad itself places it (by its add entry's text).
     message: String, split: usize, templates: std::collections::HashMap<String, Value>,
+    /// The new symbols of this call by reference (their templates: where their pins are), the parts it added or exchanged (the answer names
+    /// their nets), whether a library has answered (then "not found" is final), and how long a library's load is waited for between asks.
+    planned: std::collections::HashMap<String, Value>, added: Vec<String>, libs: bool, lib_step: std::time::Duration,
+    /// The highest #PWR number in use (new power symbols count on from it).
+    pwr: Option<u64>,
     /// What the saved sheet files must show (reference, property, text), and how many updates KiCad deferred (the person is editing those items).
-    expect: Vec<(String, String, String)>, deferred: usize }
+    expect: Vec<(String, String, String)>, deferred: usize,
+    /// Copper moved or was added (a route, a placement, a track): every zone is refilled before the save, so no pour is left over the new copper.
+    refill_all: bool }
 /// Rows a change answers with: what the items are now, so nothing is read again to check it.
 const SHOWN: usize = 24;
 /// The row kind of one of KiCad's own items, by its type.
@@ -379,7 +442,7 @@ fn kind_of(raw: &Value) -> &'static str {
     }
 }
 
-fn verb(op: &Value) -> &str { const V: &[&str] = &["find", "move", "set", "add", "delete", "ipc", "netclass", "rule", "refill"]; op.as_object().and_then(|o| V.iter().find(|v| o.contains_key(**v))).copied().unwrap_or("") }
+fn verb(op: &Value) -> &str { const V: &[&str] = &["find", "move", "set", "add", "delete", "ipc", "netclass", "rule", "refill", "route", "place"]; op.as_object().and_then(|o| V.iter().find(|v| o.contains_key(**v))).copied().unwrap_or("") }
 /// A selector from an op's target: an object as it is; text or a list of texts are references of the document's parts.
 fn selector(target: &Value, board: bool) -> Value {
     if target.is_object() { let mut t = target.clone(); if t["kind"].is_null() { t["kind"] = json!(if board { "footprint" } else { "symbol" }) } t }
@@ -444,23 +507,133 @@ impl Run<'_> {
         let Some(id) = self.commit.take() else { return Ok(()) };
         self.c.call(&format!("{C}EndCommit"), json!({"header": self.header(&Value::Null), "id": id, "action": action, "message": message})).await.map(|_| ())
     }
-    /// Each symbol the ops add, placed once by KiCad from its library alone in a commit that is dropped: where KiCad puts the reference and
-    /// value, shown or hidden as the library has them. (Fields sent without a place land hidden at the sheet's origin.)
-    async fn templates(&mut self, ops: &[Value]) -> Result<(), String> {
-        for op in ops.iter().filter(|o| verb(o) == "add") {
-            let list = match &op["add"] { Value::Array(a) => a.clone(), o => vec![o.clone()] };
-            for it in list.iter().filter(|it| it["symbol"].is_object()) {
-                let mut bare = build(it)?.remove(0);
-                if let Some(o) = bare.as_object_mut() { for k in ["reference_field", "value_field", "user_fields"] { o.remove(k); } }
-                let sheet = self.sheet(if it["sheet"].is_null() { &op["sheet"] } else { &it["sheet"] }).await?;
-                let id = self.c.call(&format!("{C}BeginCommit"), json!({"header": self.header(&Value::Null)})).await?["id"].clone();
-                let made = self.c.call(&format!("{C}CreateItems"), json!({"header": self.header(&sheet), "items": [bare]})).await;
-                self.c.call(&format!("{C}EndCommit"), json!({"header": self.header(&Value::Null), "id": id, "action": "CMA_DROP"})).await?;
-                let made = made?; if let Some(bad) = status_bad(&made, "created_items") { return Err(format!("symbol {}: {bad}", it["symbol"]["lib"].as_str().unwrap_or(""))) }
-                self.templates.insert(it.to_string(), made["created_items"][0]["item"].clone());
+    /// One thing placed by KiCad from its library in a commit that is dropped: the item as KiCad makes it (a symbol's reference and value where
+    /// the library has them, a footprint's pads where they land). Libraries load on demand: one not there yet is asked for and waited for (10 s).
+    async fn from_library(&mut self, ty: &str, msg: Value) -> Result<Value, String> {
+        for round in 0..22 {
+            let id = self.c.call(&format!("{C}BeginCommit"), json!({"header": self.header(&Value::Null)})).await?["id"].clone();
+            let made = self.c.call(ty, msg.clone()).await;
+            self.c.call(&format!("{C}EndCommit"), json!({"header": self.header(&Value::Null), "id": id, "action": "CMA_DROP"})).await?;
+            match made { Ok(v) => { self.libs = true; return Ok(v["item"].clone()) }
+                Err(e) if e.contains("not found") && !self.libs && round < 21 => { if round == 0 { let _ = self.c.call(&format!("{C}LoadAllLibraries"), json!({})).await; } tokio::time::sleep(self.lib_step).await }
+                Err(e) => return Err(e) }
+        }
+        Err("the library did not load".into())
+    }
+    async fn symbol_template(&mut self, it: &Value, sheet: &Value) -> Result<Value, String> {
+        let v = &it["symbol"]; let lib = v["lib"].as_str().unwrap_or(""); let (nick, entry) = lib.split_once(':').ok_or("symbol.lib is Library:Symbol")?;
+        let mut msg = json!({"header": self.header(sheet), "lib_id": {"library_nickname": nick, "entry_name": entry}, "position": point(&v["at"], "at")?, "orientation": format!("SSO_{}", v["rot"].as_i64().unwrap_or(0)), "unit": {"unit": v["unit"].as_u64().unwrap_or(1)}});
+        if let Some(r) = v["ref"].as_str() { msg["reference"] = json!(r) }
+        self.from_library(&format!("{S}PlaceSymbolFromLibrary"), msg).await.map_err(|e| format!("symbol {lib}: {e}"))
+    }
+    /// A point given as a pin, "U7.3" (by number, or by the pin's name): where a wire joins that pin.
+    async fn pin(&mut self, name: &str) -> Result<(String, String, (f64, f64), (f64, f64)), String> {
+        let (r, p) = name.rsplit_once('.').ok_or(format!("`{name}` is not a point [x, y] or a pin REF.PIN"))?;
+        if !self.added.iter().any(|a| a == r) { self.added.push(r.to_string()) }
+        let mut pins: Vec<(String, String, (f64, f64), (f64, f64))> = self.planned.get(r).map(sym_pins).unwrap_or_default();
+        if pins.is_empty() { pins = self.items("symbol").await?.iter().filter(|(s, _)| text2(&s["reference_field"]) == r).flat_map(|(s, _)| sym_pins(s)).collect(); if pins.is_empty() { return Err(format!("no symbol `{r}` (for the pin `{name}`)")) } }
+        pins.iter().find(|x| x.0 == p).or_else(|| pins.iter().find(|x| x.1 == p)).cloned().ok_or(format!("{r} has no pin `{p}`: {}", pins.iter().map(|x| x.0.as_str()).collect::<Vec<_>>().join(", ")))
+    }
+    /// One `add` with every new symbol placed once by KiCad (its template), pins given as points resolved ("U7.3" in a wire, a label's `at`),
+    /// and a symbol's `pins: {pin: net}` made into what joins each pin to its net: a short wire and the net's power symbol (`power:GND`),
+    /// or a label where the power library has no such symbol.
+    async fn expand(&mut self, op: &Value, list: Vec<Value>) -> Result<Vec<Value>, String> {
+        let mut out = vec![];
+        for mut it in list {
+            let sheet = self.sheet(if it["sheet"].is_null() { &op["sheet"] } else { &it["sheet"] }).await?;
+            // pins as points
+            if it["wire"].is_array() { let mut pts: Vec<Value> = vec![]; let named = it["wire"].as_array().unwrap().iter().any(Value::is_string);
+                for w in it["wire"].as_array().unwrap().clone() { let q = match w.as_str() { Some(n) => { let p = self.pin(n).await?.2; json!([p.0, p.1]) } None => w };
+                    // between pins a wire runs square: a corner where the two ends share neither x nor y
+                    if named { if let (Some((ax, ay)), Some((bx, by))) = (pts.last().and_then(pair), pair(&q)) { if (ax - bx).abs() > 1e-6 && (ay - by).abs() > 1e-6 { pts.push(json!([bx, ay])) } } }
+                    pts.push(q) }
+                it["wire"] = json!(pts) }
+            for k in ["label", "symbol"] { if let Some(n) = it[k]["at"].as_str().map(str::to_string) { let p = self.pin(&n).await?.2; it[k]["at"] = json!([p.0, p.1]) } }
+            for k in ["junction", "no_connect"] { if let Some(n) = it[k].as_str().map(str::to_string) { let p = self.pin(&n).await?.2; it[k] = json!([p.0, p.1]) } }
+            if !it["symbol"].is_object() { out.push(it); continue }
+            let t = self.symbol_template(&it, &sheet).await?;
+            if let Some(r) = it["symbol"]["ref"].as_str() { self.planned.insert(r.to_string(), t.clone()); }
+            self.templates.insert(it.to_string(), t.clone()); let pins = it["symbol"]["pins"].clone(); out.push(it.clone());
+            for (pin, net) in pins.as_object().into_iter().flatten() {
+                let net = net.as_str().ok_or("pins is {pin: net name}")?; let all = sym_pins(&t);
+                let Some(p) = all.iter().find(|x| x.0 == *pin).or_else(|| all.iter().find(|x| x.1 == *pin)) else { return Err(format!("{} has no pin `{pin}`: {}", it["symbol"]["lib"].as_str().unwrap_or(""), all.iter().map(|x| x.0.as_str()).collect::<Vec<_>>().join(", "))) };
+                let (a, q) = (p.2, ((p.2 .0 + p.3 .0 * 2.54) * 1e4_f64, (p.2 .1 + p.3 .1 * 2.54) * 1e4_f64)); let q = (q.0.round() / 1e4, q.1.round() / 1e4);
+                let mut wire = json!({"wire": [[a.0, a.1], [q.0, q.1]]}); if !it["sheet"].is_null() { wire["sheet"] = it["sheet"].clone() } out.push(wire);
+                // the next free #PWR number
+                if self.pwr.is_none() { self.pwr = Some(self.items("symbol").await?.iter().filter_map(|(s, _)| text2(&s["reference_field"]).strip_prefix("#PWR").and_then(|n| n.parse::<u64>().ok())).max().unwrap_or(0)) }
+                let n = self.pwr.unwrap() + 1;
+                let mut sym = json!({"symbol": {"lib": format!("power:{net}"), "at": [q.0, q.1], "ref": format!("#PWR{n:03}")}}); if !it["sheet"].is_null() { sym["sheet"] = it["sheet"].clone() }
+                match self.symbol_template(&sym, &sheet).await {
+                    Ok(pt) => { self.pwr = Some(n); self.templates.insert(sym.to_string(), pt); out.push(sym) }
+                    Err(e) if e.contains("not found") => { let mut l = json!({"label": {"text": net, "at": [q.0, q.1]}}); if !it["sheet"].is_null() { l["sheet"] = it["sheet"].clone() } out.push(l) }
+                    Err(e) => return Err(e) }
             }
         }
+        Ok(out)
+    }
+    /// The box (x0, y0, x1, y1) of what a schematic `add` entry draws: a symbol by its pins, a wire by its points, a label by its text.
+    fn entry_box(&self, it: &Value) -> Option<(f64, f64, f64, f64)> {
+        let around = |pts: &[(f64, f64)], pad: f64| pts.iter().fold(None, |m: Option<(f64, f64, f64, f64)>, p| Some(match m { None => (p.0 - pad, p.1 - pad, p.0 + pad, p.1 + pad), Some(b) => (b.0.min(p.0 - pad), b.1.min(p.1 - pad), b.2.max(p.0 + pad), b.3.max(p.1 + pad)) }));
+        if it["symbol"].is_object() { let mut pts: Vec<(f64, f64)> = pair(&it["symbol"]["at"]).into_iter().collect(); if let Some(t) = self.templates.get(&it.to_string()) { pts.extend(sym_pins(t).iter().map(|p| p.2)) } return around(&pts, 2.0) }
+        if let Some(w) = it["wire"].as_array() { return around(&w.iter().filter_map(pair).collect::<Vec<_>>(), 0.3) }
+        if it["label"].is_object() { let (x, y) = pair(&it["label"]["at"])?; let l = it["label"]["text"].as_str().unwrap_or("").len() as f64 * 1.1; return Some((x - 0.5, y - 1.5, x + l, y + 0.5)) }
+        for k in ["junction", "no_connect"] { if let Some(p) = pair(&it[k]) { return around(&[p], 0.3) } }
+        None
+    }
+    /// What is on a sheet already, as boxes with a few words for each: symbols, wires, labels, junctions and sheet symbols.
+    async fn sheet_boxes(&mut self, sheet: &Value) -> Result<Vec<((f64, f64, f64, f64), String)>, String> {
+        let want = if sheet.is_null() { self.sheets().await?.first().map(|s| s.1["path"].clone()).unwrap_or(Value::Null) } else { sheet["path"].clone() };
+        let mut out = vec![]; let r2 = |v: f64| (v * 100.0).round() / 100.0;
+        for kind in ["symbol", "wire", "label", "junction", "sheet"] { for (raw, sh) in self.items(kind).await? {
+            if !want.is_null() && sh["path"] != want { continue }
+            let rw = row(kind, &raw, false); let at = pair(&rw["at"]);
+            match kind {
+                "symbol" => { let mut pts: Vec<(f64, f64)> = at.into_iter().collect(); pts.extend(sym_pins(&raw).iter().map(|p| p.2)); if pts.is_empty() { continue }
+                    let b = pts.iter().fold((f64::MAX, f64::MAX, f64::MIN, f64::MIN), |m, p| (m.0.min(p.0), m.1.min(p.1), m.2.max(p.0), m.3.max(p.1))); out.push(((b.0 - 2.0, b.1 - 2.0, b.2 + 2.0, b.3 + 2.0), format!("{}", rw["ref"].as_str().unwrap_or("a symbol")))) }
+                "wire" => if let (Some(a), Some(z)) = (pair(&rw["from"]), pair(&rw["to"])) { out.push(((a.0.min(z.0) - 0.3, a.1.min(z.1) - 0.3, a.0.max(z.0) + 0.3, a.1.max(z.1) + 0.3), format!("the wire {},{} to {},{}", r2(a.0), r2(a.1), r2(z.0), r2(z.1)))) },
+                "label" => if let Some((x, y)) = at { let t = rw["text"].as_str().unwrap_or(""); out.push(((x - 0.5, y - 1.5, x + t.len() as f64 * 1.1, y + 0.5), format!("the label {t}"))) },
+                "junction" => if let Some((x, y)) = at { out.push(((x - 0.3, y - 0.3, x + 0.3, y + 0.3), format!("the junction {},{}", r2(x), r2(y)))) },
+                _ => { let (x, y, w, h) = (mm(&raw["position"]["x_nm"]), mm(&raw["position"]["y_nm"]), mm(&raw["size"]["x_nm"]), mm(&raw["size"]["y_nm"])); out.push(((x, y, x + w, y + h), "a sheet symbol".into())) }
+            }
+        } }
+        Ok(out)
+    }
+    /// A board footprint exchanged for another library footprint: KiCad places the new one where the old stands (pad 1 on the old pad 1,
+    /// the same side and rotation), and the old part keeps its identity (reference, value, fields, its symbol) and each pad its net by number.
+    async fn swap(&mut self, old: &Value, lib: &str) -> Result<Value, String> {
+        let (nick, entry) = lib.split_once(':').ok_or("footprint is Library:Footprint")?;
+        let pad1 = |fp: &Value| { let pads: Vec<&Value> = fp["definition"]["items"].as_array().into_iter().flatten().filter(|i| i["@type"].as_str().is_some_and(|t| t.ends_with(".Pad"))).collect();
+            pads.iter().find(|p| p["number"] == "1").or(pads.first()).map(|p| (mm(&p["position"]["x_nm"]), mm(&p["position"]["y_nm"]))) };
+        let (ox, oy) = (mm(&old["position"]["x_nm"]), mm(&old["position"]["y_nm"]));
+        let hdr = self.header(&Value::Null); let msg = |x: f64, y: f64| { let mut m = json!({"header": hdr, "lib_id": {"library_nickname": nick, "entry_name": entry}, "position": to_xy(x, y), "layer": old["layer"]}); if old["orientation"]["value_degrees"].is_number() { m["orientation"] = old["orientation"].clone() } m };
+        let ty = format!("{B}PlaceFootprintFromLibrary"); let first = msg(ox, oy);
+        let mut t = self.from_library(&ty, first).await.map_err(|e| format!("footprint {lib}: {e}"))?;
+        if let (Some(a), Some(b)) = (pad1(old), pad1(&t)) { let (dx, dy) = (a.0 - b.0, a.1 - b.1); if dx.abs() > 1e-6 || dy.abs() > 1e-6 { let again = msg(ox + dx, oy + dy); t = self.from_library(&ty, again).await? } }
+        let nets: std::collections::HashMap<String, Value> = old["definition"]["items"].as_array().into_iter().flatten().filter(|i| i["@type"].as_str().is_some_and(|t| t.ends_with(".Pad"))).map(|p| (p["number"].as_str().unwrap_or("").to_string(), p["net"].clone())).collect();
+        let field = |i: &&Value| i["@type"].as_str().is_some_and(|t| t.ends_with(".Field"));
+        let mut items: Vec<Value> = t["definition"]["items"].as_array().into_iter().flatten().filter(|i| !field(i)).cloned().collect();
+        for p in items.iter_mut().filter(|i| i["@type"].as_str().is_some_and(|t| t.ends_with(".Pad"))) { if let Some(n) = nets.get(p["number"].as_str().unwrap_or("")) { p["net"] = n.clone() } }
+        items.extend(old["definition"]["items"].as_array().into_iter().flatten().filter(field).cloned());
+        let mut new = old.clone(); new["position"] = t["position"].clone(); if t["attributes"].is_object() { new["attributes"] = t["attributes"].clone() }
+        new["definition"] = t["definition"].clone(); new["definition"]["items"] = json!(items);
+        Ok(new)
+    }
+    /// KiCad shows a commit's changes only once it ends: what reads the document after a change (a find, a route, a placement) ends the commit so far.
+    async fn settle(&mut self, i: usize) -> Result<(), String> {
+        if self.commit.is_some() { let m = self.message.clone(); self.end("CMA_COMMIT", &m).await?; self.split = i + 1; self.cache.clear() }
         Ok(())
+    }
+    /// The board as shapes (kroute.rs), each net's class, and the copper layers' names top to bottom.
+    async fn model(&mut self) -> Result<(super::kroute::Board, Value), String> {
+        let en = self.c.call(&format!("{B}GetBoardEnabledLayers"), json!({"board": self.doc})).await?;
+        let enabled: Vec<String> = en["layers"].as_array().into_iter().flatten().filter_map(|l| l.as_str().map(str::to_string)).collect();
+        let mut raw: Vec<Vec<Value>> = vec![];
+        for k in ["footprint", "track", "arc", "via", "zone", "shape"] { raw.push(self.items(k).await?.into_iter().map(|(v, _)| v).collect()) }
+        let rules = self.c.call(&format!("{B}GetBoardDesignRules"), json!({"board": self.doc})).await?;
+        let nets = self.c.call(&format!("{B}GetNets"), json!({"board": self.doc})).await?;
+        let names: Vec<Value> = nets["nets"].as_array().into_iter().flatten().filter(|n| n["name"].as_str().is_some_and(|s| !s.is_empty())).map(|n| json!({"name": n["name"]})).collect();
+        let classes = self.c.call(&format!("{B}GetNetClassForNets"), json!({"net": names})).await?["classes"].clone();
+        Ok((super::kroute::Board::from_raw(&enabled, &raw[0], &raw[1], &raw[2], &raw[3], &raw[4], &raw[5], &rules["rules"]["constraints"], &classes), classes))
     }
     /// Update raw items, each on its own sheet.
     async fn update(&mut self, kind: &str, items: Vec<(Value, Value, bool)>) -> Result<Value, String> {
@@ -479,6 +652,7 @@ impl Run<'_> {
         }
         Ok(if n <= SHOWN { json!(rows) } else { json!(n) })
     }
+    async fn update_body(&mut self, kind: &str, items: Vec<(Value, Value)>) -> Result<Value, String> { self.update(kind, items.into_iter().map(|(r, s)| (r, s, true)).collect()).await }
     async fn op(&mut self, i: usize, op: &Value) -> Result<Value, String> {
         match verb(op) {
             "find" => {
@@ -486,7 +660,7 @@ impl Run<'_> {
                 if kind == "net" { let r = self.c.call(&format!("{B}GetNets"), json!({"board": self.doc})).await?;
                     let names: Vec<&str> = r["nets"].as_array().into_iter().flatten().filter_map(|n| n["name"].as_str()).filter(|n| !n.is_empty() && sel["name"].as_str().map_or(true, |p| glob(p, n))).collect(); return Ok(json!({"nets": names})) }
                 // KiCad shows a commit's changes only once it ends: a find after a change ends the commit so far, and its rows are the document as changed
-                if self.commit.is_some() { let m = self.message.clone(); self.end("CMA_COMMIT", &m).await?; self.split = i + 1 }
+                self.settle(i).await?;
                 let wf = sel["fields"].as_bool().unwrap_or(false);
                 let rows: Vec<Value> = if kind == "pad" { let fsel = json!({"kind": "footprint", "ref": sel["ref"].clone()}); let fps = if sel["ref"].is_null() { self.items("footprint").await? } else { self.pick(&fsel).await? };
                         fps.iter().flat_map(|(f, _)| pad_rows(f)).filter(|r| matches(&sel, r)).collect() }
@@ -498,7 +672,10 @@ impl Run<'_> {
             }
             v @ ("move" | "set") => {
                 let sel = selector(&op[v], self.board); let kind = sel["kind"].as_str().unwrap_or("").to_string();
-                let picked = self.pick(&sel).await?;
+                let mut picked = self.pick(&sel).await?;
+                // a symbol this call added a moment ago is in the document only once its commit has ended
+                let mine = match &sel["ref"] { Value::String(r) => self.planned.contains_key(r), Value::Array(a) => a.iter().filter_map(Value::as_str).any(|r| self.planned.contains_key(r)), _ => false };
+                if mine && self.commit.is_some() { self.settle(i).await?; picked = self.pick(&sel).await? }
                 if picked.is_empty() { return Err(format!("nothing matches {sel}")) }
                 // every reference asked for by name must be there: a typo is an error, not a smaller edit
                 if let Some(want) = sel["ref"].as_array() { for w in want.iter().filter_map(Value::as_str).filter(|w| !w.contains(['*', '?'])) { if !picked.iter().any(|(r, _)| row(&kind, r, false)["ref"] == json!(w)) { return Err(format!("no {kind} `{w}`")) } } }
@@ -506,13 +683,20 @@ impl Run<'_> {
                 if v == "move" { if let Some(to) = op.get("to") { with.insert("at".into(), to.clone()); } if op.get("by").is_none() && with.is_empty() { return Err("move takes by: [dx, dy], to: [x, y] and/or rot".into()) } }
                 else if with.is_empty() { return Err("set takes the row keys to change (value, fields, at, rot, name, clearance, ...)".into()) }
                 let mut ups = vec![];
+                let swap = if kind == "footprint" { with.remove("footprint") } else { None };
+                if let Some(lib) = &swap { let lib = lib.as_str().ok_or("footprint is Library:Footprint")?.to_string(); self.settle(i).await?; self.refill_all = true;
+                    let mut done = vec![]; for (raw, sheet) in &picked { self.added.push(text3(&raw["reference_field"]).to_string()); done.push((self.swap(raw, &lib).await?, sheet.clone())) }
+                    if with.is_empty() { let pads: Vec<Value> = done.iter().flat_map(|(f, _)| pad_rows(f)).map(|mut p| { if let Some(o) = p.as_object_mut() { o.remove("id"); o.remove("pin"); } p }).collect();
+                        let n = done.len(); self.update_body("footprint", done).await?; return Ok(json!({"swapped": n, "footprint": lib, "pads": pads})) }
+                    return Err("footprint goes in a set of its own (then set the other keys)".into()) }
                 for (mut raw, sheet) in picked {
                     let mut w = with.clone();
                     if let Some((dx, dy)) = op.get("by").map(|b| pair(b).ok_or("by is [dx, dy] in mm")).transpose()? { let at = row(&kind, &raw, false); let k = if at.get("at").is_some() { "at" } else { return Err(format!("a {kind} moves with set: from/to")) };
                         let (x, y) = pair(&at[k]).unwrap_or((0.0, 0.0)); w.insert("at".into(), json!([x + dx, y + dy])); }
                     let body = apply(&kind, &mut raw, &Value::Object(w))?;
-                    if kind == "symbol" { let r = text2(&raw["reference_field"]).to_string();
+                    if kind == "symbol" { let r = text2(&raw["reference_field"]).to_string(); self.planned.remove(&r); if (v == "move" || with.contains_key("at") || with.contains_key("rot")) && !self.added.contains(&r) { self.added.push(r.clone()) }
                         if let Some(x) = with.get("value").and_then(Value::as_str) { self.expect.push((r.clone(), "Value".into(), x.into())) }
+                        if let Some(x) = with.get("footprint").and_then(Value::as_str) { self.expect.push((r.clone(), "Footprint".into(), x.into())) }
                         for (n, t) in with.get("fields").and_then(Value::as_object).into_iter().flatten() { self.expect.push((r.clone(), n.clone(), t.as_str().unwrap_or("").into())) } }
                     ups.push((raw, sheet, body));
                 }
@@ -521,15 +705,58 @@ impl Run<'_> {
                 Ok(if self.deferred > before { json!({"updated": rows, "deferred": self.deferred - before}) } else { json!({"updated": rows}) })
             }
             "add" => {
-                let list = match &op["add"] { Value::Array(a) => a.clone(), o => vec![o.clone()] }; self.begin().await?; let mut ids = vec![]; let mut by: Vec<(Value, Vec<Value>)> = vec![];
+                let mut list = match &op["add"] { Value::Array(a) => a.clone(), o => vec![o.clone()] }; let mut note = Map::new();
+                if !self.board {
+                    // a symbol is placed by KiCad first and a pin is read from the document: both need the changes so far to have landed
+                    if list.iter().any(|it| it["symbol"].is_object() || it.to_string().contains('.')) { self.settle(i).await? }
+                    let (asked, pwr0) = (list.clone(), self.pwr); list = self.expand(op, asked.clone()).await?;
+                    if list.iter().any(|it| it["symbol"].is_object()) {
+                        // where it lands against what the sheet has: with fit: [x0, y0, x1, y1] the group moves, as one, on the 1.27 mm grid to the
+                        // nearest free room inside that area; without, what it lies over is named
+                        let sheet = self.sheet(&op["sheet"]).await?; let there = self.sheet_boxes(&sheet).await?;
+                        let boxes: Vec<(f64, f64, f64, f64)> = list.iter().filter_map(|it| self.entry_box(it)).collect();
+                        let hit = |b: &(f64, f64, f64, f64), o: &(f64, f64, f64, f64), dx: f64, dy: f64| b.0 + dx < o.2 && b.2 + dx > o.0 && b.1 + dy < o.3 && b.3 + dy > o.1;
+                        let over = |dx: f64, dy: f64| -> Vec<&str> { let mut v: Vec<&str> = there.iter().filter(|(o, _)| boxes.iter().any(|b| hit(b, o, dx, dy))).map(|(_, w)| w.as_str()).collect(); v.dedup(); v };
+                        let g = boxes.iter().fold((f64::MAX, f64::MAX, f64::MIN, f64::MIN), |m, b| (m.0.min(b.0), m.1.min(b.1), m.2.max(b.2), m.3.max(b.3)));
+                        // the area it must stay in: `fit`, else the sheet as far as it is drawn on (so it never leaves the page)
+                        let given = op["fit"].as_array().filter(|a| a.len() == 4).map(|a| a.iter().map(|v| v.as_f64().unwrap_or(0.0)).collect::<Vec<_>>());
+                        let area = given.clone().unwrap_or_else(|| { let e = there.iter().fold(g, |m, (b, _)| (m.0.min(b.0), m.1.min(b.1), m.2.max(b.2), m.3.max(b.3))); vec![e.0, e.1, e.2, e.3] });
+                        let inside = |dx: f64, dy: f64| g.0 + dx >= area[0] && g.1 + dy >= area[1] && g.2 + dx <= area[2] && g.3 + dy <= area[3];
+                        let was = over(0.0, 0.0);
+                        if op["fit"] != json!(false) && (!was.is_empty() || (given.is_some() && !inside(0.0, 0.0))) {
+                            let n = (((area[2] - area[0]).max(area[3] - area[1]) / 1.27).ceil() as i64).clamp(1, 300); let mut best: Option<(f64, f64)> = None;
+                            for ix in -n..=n { for iy in -n..=n { let (dx, dy) = (ix as f64 * 1.27, iy as f64 * 1.27); if best.map_or(false, |b| dx.abs() + dy.abs() >= b.0.abs() + b.1.abs()) || !inside(dx, dy) || !over(dx, dy).is_empty() { continue } best = Some((dx, dy)) } }
+                            match best {
+                                Some((dx, dy)) => { let r4 = |v: f64| (v * 1e4).round() / 1e4;
+                                    let mv = |v: &mut Value| if let Some((x, y)) = pair(v) { *v = json!([r4(x + dx), r4(y + dy)]) };
+                                    let mut moved = asked; for it in moved.iter_mut() { for k in ["symbol", "label"] { if it[k]["at"].is_array() { mv(&mut it[k]["at"]) } } for k in ["junction", "no_connect"] { if it[k].is_array() { mv(&mut it[k]) } }
+                                        if let Some(w) = it["wire"].as_array_mut() { for q in w.iter_mut().filter(|q| q.is_array()) { mv(q) } } }
+                                    note.insert("moved_to_free_room".into(), json!({"by": [r4(dx), r4(dy)], "it_lay_over": was.iter().take(4).collect::<Vec<_>>(), "now": "lies over nothing on the sheet"}));
+                                    self.pwr = pwr0; list = self.expand(op, moved).await?; }
+                                None if given.is_some() => return Err(format!("no free room for this group inside {area:?} (it is {:.1} x {:.1} mm): give a larger area or a smaller group", g.2 - g.0, g.3 - g.1)),
+                                None => { note.insert("lies_over".into(), json!(was.iter().take(8).collect::<Vec<_>>())); } }
+                        } else if was.is_empty() { note.insert("room".into(), json!("lies over nothing on the sheet")); } else { note.insert("lies_over".into(), json!(was.iter().take(8).collect::<Vec<_>>())); }
+                    }
+                }
+                self.begin().await?; let mut ids = vec![]; let mut by: Vec<(Value, Vec<Value>)> = vec![]; let mut quiet = 0usize;
                 for it in &list { let sheet = self.sheet(if it["sheet"].is_null() { &op["sheet"] } else { &it["sheet"] }).await?;
                     let raws = match self.templates.get(&it.to_string()) { Some(t) => vec![placed(t, &it["symbol"])], None => build(it)? }; match by.iter_mut().find(|(s, _)| *s == sheet) { Some((_, v)) => v.extend(raws), None => by.push((sheet, raws)) } }
                 for (sheet, raws) in by {
                     let r = self.c.call(&format!("{C}CreateItems"), json!({"header": self.header(&sheet), "items": raws})).await?;
                     if let Some(bad) = status_bad(&r, "created_items") { return Err(bad) }
-                    ids.extend(r["created_items"].as_array().into_iter().flatten().map(|i| { let k = kind_of(&i["item"]); if k.is_empty() { json!({"id": i["item"]["id"]["value"]}) } else { row(k, &i["item"], k == "symbol") } }));
+                    for i in r["created_items"].as_array().into_iter().flatten() { let k = kind_of(&i["item"]); if k.is_empty() { ids.push(json!({"id": i["item"]["id"]["value"]})); continue }
+                        let mut rw = row(k, &i["item"], k == "symbol");
+                        // a new part answers with where its pins are (what a wire joins); power symbols and the wires between are counted, not listed
+                        if k == "symbol" { let rf = rw["ref"].as_str().unwrap_or("").to_string(); if rf.starts_with('#') { quiet += 1; continue }
+                            let t = self.planned.get(&rf).cloned().unwrap_or(Value::Null); let ps = sym_pins(&t); if !ps.is_empty() && ps.len() <= 24 { rw["pins"] = Value::Object(ps.into_iter().map(|p| (p.0, json!([p.2 .0, p.2 .1]))).collect()) }
+                            if let Some(o) = rw.as_object_mut() { o.remove("id"); o.remove("unit"); } self.added.push(rf) }
+                        else if list.len() > 6 && matches!(k, "wire" | "junction" | "label") { quiet += 1; continue }
+                        ids.push(rw) }
                 }
-                Ok(json!({"created": ids}))
+                if self.board && list.iter().any(|it| it["track"].is_object() || it["via"].is_object()) { self.refill_all = true }
+                let mut out = json!({"created": ids}); if quiet > 0 { out["and"] = json!(format!("{quiet} wires, labels and power symbols")) }
+                for (k, v) in note { out[k.as_str()] = v }
+                Ok(out)
             }
             "delete" => {
                 let t = &op["delete"];
@@ -544,6 +771,95 @@ impl Run<'_> {
                     if let Some(bad) = r["deleted_items"].as_array().into_iter().flatten().find(|d| !matches!(d["status"].as_str().unwrap_or("IDS_OK"), "IDS_OK" | "IDS_DEFERRED")) { return Err(format!("{} {}", bad["status"].as_str().unwrap_or(""), bad["id"]["value"].as_str().unwrap_or(""))) }
                 }
                 Ok(json!({"deleted": n}))
+            }
+            "route" => {
+                use super::kroute as kr;
+                let pats: Vec<String> = match &op["route"] { Value::String(s) => vec![s.clone()], Value::Array(a) => a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect(), _ => vec![] };
+                if pats.is_empty() || !self.board { return Err("route takes a board's net names: \"/LED*\" or [\"/SDA\", \"/SCL\"]".into()) }
+                self.settle(i).await?; let (mut board, classes) = self.model().await?;
+                let mut nets: Vec<String> = classes.as_object().into_iter().flatten().map(|(n, _)| n.clone()).filter(|n| pats.iter().any(|p| glob(p, n))).collect();
+                // a part ("R3") or one of its pads ("R3.2") stands for the nets on it
+                let known = nets.clone(); for p in pats.iter().filter(|p| !known.iter().any(|n| glob(p, n))) { let (r, pad) = p.rsplit_once('.').map_or((p.as_str(), None), |(r, n)| (r, Some(n)));
+                    let of: Vec<String> = board.items.iter().filter(|i| i.kind == kr::Kind::Pad && !i.net.is_empty() && ((i.of.0 == *p) || (i.of.0 == r && pad == Some(i.of.1.as_str())))).map(|i| i.net.clone()).collect();
+                    if of.is_empty() { return Err(format!("no net or part matches `{p}`")) } for n in of { if !nets.contains(&n) { nets.push(n) } } }
+                // a part named here has its pads made clean: another net's track that now lies on one of them (a footprint was exchanged, a part
+                // moved) is taken up with its whole net and routed again
+                let mut crossing: Vec<String> = vec![];
+                for p in &pats { for pad in board.items.iter().filter(|i| i.kind == kr::Kind::Pad && i.of.0 == *p) { let need = board.net_clearance(&pad.net); let pts = pad.shape.samples(0.1);
+                    for o in board.items.iter().filter(|o| matches!(o.kind, kr::Kind::Track | kr::Kind::Via) && !o.net.is_empty() && o.net != pad.net && o.layers & pad.layers != 0) {
+                        if !crossing.contains(&o.net) && (pts.iter().any(|q| o.shape.dist(*q) < need - 1e-6) || pad.shape.dist(o.shape.anchor(pts[0])) < need - 1e-6) { crossing.push(o.net.clone()) } } } }
+                for n in &crossing { if !nets.contains(n) { nets.push(n.clone()) } }
+                // ripup: the nets' own tracks and vias go first, and they are routed afresh
+                let mut ripped = 0usize; let rip: Vec<String> = if op["ripup"].as_bool().unwrap_or(false) { nets.clone() } else { crossing.clone() };
+                if !rip.is_empty() { let nets = &rip; let mut ids = vec![];
+                    for k in ["track", "arc", "via"] { for (raw, _) in self.items(k).await? { if raw["net"]["name"].as_str().is_some_and(|n| nets.iter().any(|x| x == n)) { ids.push(raw["id"].clone()) } } }
+                    if !ids.is_empty() { ripped = ids.len(); self.begin().await?; self.refill_all = true; self.c.call(&format!("{C}DeleteItems"), json!({"header": self.header(&Value::Null), "item_ids": ids})).await?; }
+                    board.items.retain(|it| !(matches!(it.kind, kr::Kind::Track | kr::Kind::Via) && nets.contains(&it.net))) }
+                let layers = op["layers"].as_array().into_iter().flatten().map(|l| { let l = l.as_str().unwrap_or(""); board.layer(l).ok_or(format!("no copper layer `{l}`: {}", board.layers.join(", "))) }).collect::<Result<Vec<_>, _>>()?;
+                let via = op["via"]["size"].as_f64().zip(op["via"]["drill"].as_f64()); let vias = op["vias"].as_bool().unwrap_or(true);
+                let width = |n: &str| op["width"].as_f64().unwrap_or_else(|| mm(&classes[n]["board"]["track_width"]["value_nm"]));
+                // short nets first; a net that finds no way goes first in the next try (three at most), and the try with the fewest left over stays
+                let span = |n: &String| { let bb = board.items.iter().filter(|i| i.net == *n).map(|i| i.shape.bbox()).fold((f64::MAX, f64::MAX, f64::MIN, f64::MIN), |m, x| (m.0.min(x.0), m.1.min(x.1), m.2.max(x.2), m.3.max(x.3))); (bb.2 - bb.0).hypot(bb.3 - bb.1) };
+                nets.sort_by(|a, z| span(a).partial_cmp(&span(z)).unwrap_or(std::cmp::Ordering::Equal));
+                let ws: Vec<f64> = nets.iter().map(|n| width(n)).collect(); if let Some(k) = ws.iter().position(|w| *w <= 0.0) { return Err(format!("{} has no track width: give width", nets[k])) }
+                let wof: std::collections::HashMap<String, f64> = nets.iter().cloned().zip(ws).collect(); let copper = board.layers.clone();
+                type Res = Vec<(String, Result<kr::Routed, (kr::Routed, String)>)>;
+                let (res, wof) = tokio::task::spawn_blocking(move || { let mut order = nets; let mut best: Option<Res> = None;
+                    let bad = |r: &Res| r.iter().filter(|x| x.1.is_err()).count();
+                    for _ in 0..4 { let mut b = board.clone();
+                        // a net with no way on the signal layers is tried once more with the plane layers too
+                        let res: Res = order.iter().map(|n| { let snap = b.clone(); let o = kr::Opts { width: wof[n], layers: layers.clone(), vias, via, planes: false };
+                            let r = match kr::route_net(&mut b, n, &o) { Err(_) if layers.is_empty() && b.planes != 0 => { b = snap; kr::route_net(&mut b, n, &kr::Opts { planes: true, ..o }) } r => r }; (n.clone(), r) }).collect();
+                        let n = bad(&res);
+                        let mut next: Vec<String> = res.iter().filter(|x| x.1.is_err()).map(|x| x.0.clone()).collect(); next.extend(res.iter().filter(|x| x.1.is_ok()).map(|x| x.0.clone()));
+                        if best.as_ref().map_or(true, |x| n < bad(x)) { best = Some(res) }
+                        if order.len() < 2 { break }
+                        if n == 0 || next == order { break } order = next }
+                    (best.unwrap_or_default(), wof) }).await.map_err(|e| format!("the router stopped: {e}"))?;
+                let (mut items, mut routed, mut failed) = (vec![], vec![], vec![]);
+                for (net, r) in res { let (r, why) = match r { Ok(r) => (r, None), Err((r, e)) => (r, Some(e)) };
+                    for (a, z, l) in &r.tracks { items.push(json!({"@type": format!("{BT}Track"), "start": to_xy(a.0, a.1), "end": to_xy(z.0, z.1), "width": {"value_nm": nm(wof[&net])}, "layer": layer_enum(&copper[*l]), "net": {"name": net}})) }
+                    for (p, s) in &r.vias { let (a, z) = (layer_enum(&copper[s.from]), layer_enum(&copper[s.to]));
+                        // like one of the board's own vias of that kind where it has one (its filling, capping and tenting), else a plain one
+                        let mut v = if s.like.is_object() && via.is_none() { let mut v = s.like.clone(); if let Some(o) = v.as_object_mut() { o.remove("id"); o.remove("parent"); } v }
+                            else { json!({"@type": format!("{BT}Via"), "type": s.ty, "pad_stack": {"type": "PST_NORMAL", "layers": [a, z], "drill": {"start_layer": a, "end_layer": z, "diameter": to_xy(s.drill, s.drill), "shape": "DS_CIRCLE"}, "copper_layers": [{"layer": "BL_F_Cu", "shape": "PSS_CIRCLE", "size": to_xy(s.size, s.size)}]}}) };
+                        v["position"] = to_xy(p.0, p.1); v["net"] = json!({"name": net}); items.push(v) }
+                    let mut ls: Vec<&str> = r.tracks.iter().map(|t| copper[t.2].as_str()).collect(); ls.sort(); ls.dedup();
+                    let row = json!({"net": net, "width": wof[&net], "length": (r.length * 1000.0).round() / 1000.0, "vias": r.vias.len(), "layers": ls});
+                    match why { None => routed.push(row), Some(e) => failed.push(json!({"net": net, "why": e})) } }
+                if !items.is_empty() { self.begin().await?; self.refill_all = true;
+                    let r = self.c.call(&format!("{C}CreateItems"), json!({"header": self.header(&Value::Null), "items": items})).await?; if let Some(bad) = status_bad(&r, "created_items") { return Err(bad) } }
+                // nets that were already whole are counted, not listed
+                let whole = routed.iter().filter(|r| r["length"] == 0.0).count(); routed.retain(|r| r["length"] != 0.0);
+                let mut out = json!({"routed": routed}); if ripped > 0 { out["ripped_up"] = json!(ripped) } if !crossing.is_empty() { out["rerouted_off_the_pads"] = json!(crossing) } if whole > 0 { out["already_connected"] = json!(whole) } if !failed.is_empty() { out["failed"] = json!(failed) }
+                Ok(out)
+            }
+            "place" => {
+                use super::kroute as kr;
+                let pairs: Vec<(String, String)> = match &op["place"] { Value::Object(o) => o.iter().map(|(k, v)| (k.clone(), v.as_str().unwrap_or("").to_string())).collect(), Value::String(s) => vec![(s.clone(), op["near"].as_str().unwrap_or("").to_string())], _ => vec![] };
+                if pairs.is_empty() || !self.board { return Err("place takes a board's parts and the pin each goes next to: {place: {\"C5\": \"U1.26\"}, within: 2}".into()) }
+                let within = op["within"].as_f64().unwrap_or(2.0); self.settle(i).await?; let (mut board, _) = self.model().await?;
+                let fps = self.items("footprint").await?; let fp = |r: &str| fps.iter().find(|(f, _)| text3(&f["reference_field"]) == r).map(|(f, _)| f.clone()).ok_or(format!("no footprint `{r}`"));
+                let norm = |d: f64| { let x = d.rem_euclid(360.0); if x > 180.0 { x - 360.0 } else { x } };
+                let (mut ups, mut rows) = (vec![], vec![]);
+                for (r, target) in pairs {
+                    let (tref, tpad) = target.rsplit_once('.').ok_or(format!("{r}: the pin it goes next to is REF.PAD, e.g. U1.26"))?;
+                    let t = board.items.iter().find(|i| i.kind == kr::Kind::Pad && i.of.0 == tref && i.of.1 == tpad).ok_or(format!("no pad `{target}`"))?.clone();
+                    let mut raw = fp(&r)?; let at = kr::P(mm(&raw["position"]["x_nm"]), mm(&raw["position"]["y_nm"])); let rot = raw["orientation"]["value_degrees"].as_f64().unwrap_or(0.0);
+                    let trot = fp(tref)?["orientation"]["value_degrees"].as_f64().unwrap_or(0.0);
+                    let mine: Vec<&kr::Item> = board.items.iter().filter(|i| i.kind == kr::Kind::Pad && i.of.0 == r).collect();
+                    let pad = match op["pad"].as_str() { Some(p) => p.to_string(), None => mine.iter().find(|i| !t.net.is_empty() && i.net == t.net).map(|i| i.of.1.clone()).ok_or(format!("{r} has no pad on {target}'s net `{}`: say which with pad", t.net))? };
+                    if mine.iter().any(|i| i.layers & t.layers == 0) { return Err(format!("{r} is not on {target}'s side of the board: flip it first (ipc FlipItems)")) }
+                    let turns: Vec<f64> = (0..4).map(|k| norm(trot + 90.0 * k as f64 - rot)).collect();
+                    let (by, turn, d) = kr::place(&board, &r, &pad, at, t.shape.anchor(at), within, &turns)?;
+                    for it in board.items.iter_mut().filter(|i| i.kind == kr::Kind::Pad && i.of.0 == r) { it.shape = it.shape.moved(at, turn, by) }
+                    for c in board.courtyards.iter_mut().filter(|c| c.0 == r) { if let kr::Shape::Poly(v) = kr::Shape::Poly(c.2.clone()).moved(at, turn, by) { c.2 = v } }
+                    let (x, y, nr) = (((at.0 + by.0) * 1e4).round() / 1e4, ((at.1 + by.1) * 1e4).round() / 1e4, norm(rot + turn));
+                    apply("footprint", &mut raw, &json!({"at": [x, y], "rot": nr}))?;
+                    rows.push(json!({"ref": r, "at": [x, y], "rot": nr, "layer": layer_name(raw["layer"].as_str().unwrap_or("")), "pad": pad, "near": target, "distance": (d * 1000.0).round() / 1000.0})); ups.push((raw, Value::Null, false));
+                }
+                self.update("footprint", ups).await?; self.refill_all = true;
+                Ok(json!({"placed": rows}))
             }
             "netclass" => { self.wrote = true; for (ty, msg) in netclass_msgs(&op["netclass"], &self.doc["project"])? { self.c.call(&ty, msg).await?; }
                 // answered with the class as the project now has it
@@ -560,7 +876,7 @@ impl Run<'_> {
             "ipc" => { let ty = full_type(op["ipc"]["type"].as_str().ok_or("ipc is {type, message}")?); let mut msg = op["ipc"]["message"].clone(); if msg.is_null() { msg = json!({}) } fill(&mut msg, &self.doc);
                 if !super::ipc::is_read(&ty) { self.wrote = true; if matches!(ty.rsplit('.').next(), Some("CreateItems" | "UpdateItems" | "DeleteItems")) { self.begin().await? } }
                 Ok(brief(self.c.call(&ty, msg).await?)) }
-            _ => Err("an op is one of find, move, set, add, delete, netclass, rule, refill, ipc".into()),
+            _ => Err("an op is one of find, move, set, add, delete, route, place, netclass, rule, refill, ipc".into()),
         }
     }
 }
@@ -568,13 +884,16 @@ impl Run<'_> {
 /// The whole edit: `{path, ops: [...], message?, save?}` -> `{results: [...], saved}`. An op that fails drops the commit: nothing of this
 /// call's item changes stays (net classes, rules and raw `ipc` commands that already ran are named in the error).
 pub async fn run(c: &dyn Call, path: &str, a: &Value) -> Result<Value, String> {
-    let ops = match &a["ops"] { Value::Array(o) if !o.is_empty() => o.clone(), _ => return Err("ops is a list of edits: find, move, set, add, delete, netclass, rule, refill, ipc".into()) };
-    if let Some((i, _)) = ops.iter().enumerate().find(|(_, o)| verb(o).is_empty()) { return Err(format!("op {}: an op is one of find, move, set, add, delete, netclass, rule, refill, ipc", i + 1)) }
+    let ops = match &a["ops"] { Value::Array(o) if !o.is_empty() => o.clone(), _ => return Err("ops is a list of edits: find, move, set, add, delete, route, place, netclass, rule, refill, ipc".into()) };
+    if let Some((i, _)) = ops.iter().enumerate().find(|(_, o)| verb(o).is_empty()) { return Err(format!("op {}: an op is one of find, move, set, add, delete, route, place, netclass, rule, refill, ipc", i + 1)) }
     let patient = Patient { c, step: BUSY_STEP, wait: BUSY_WAIT }; let c: &dyn Call = &patient;
     let doc = Run::open(c, path).await?;
-    let mut r = Run { c, expect: vec![], deferred: 0, board: path.ends_with(".kicad_pcb"), doc, commit: None, sheets: None, refill: vec![], wrote: false, cache: Default::default(),
+    let mut r = Run { c, expect: vec![], deferred: 0, refill_all: false, planned: Default::default(), added: vec![], libs: false, pwr: None, lib_step: std::time::Duration::from_millis(if cfg!(test) { 1 } else { 500 }), board: path.ends_with(".kicad_pcb"), doc, commit: None, sheets: None, refill: vec![], wrote: false, cache: Default::default(),
         message: a["message"].as_str().unwrap_or("kicad_edit").to_string(), split: 0, templates: Default::default() };
-    r.templates(&ops).await?;
+    // KiCad's own check before the edit, so the answer can say what the edit added to it (check: false leaves it out)
+    let checking = writes(&a["ops"]) && a["save"].as_bool().unwrap_or(true) && a["check"].as_bool().unwrap_or(true);
+    let before = if checking { c.check().await.unwrap_or(Value::Null) } else { Value::Null };
+
     let mut results = vec![];
     for (i, op) in ops.iter().enumerate() {
         match r.op(i, op).await {
@@ -594,6 +913,7 @@ pub async fn run(c: &dyn Call, path: &str, a: &Value) -> Result<Value, String> {
     }
     let message = r.message.clone();
     r.end("CMA_COMMIT", &message).await?;
+    if r.refill_all { r.refill.clear(); r.c.call(&format!("{B}RefillZones"), json!({"board": r.doc, "zones": []})).await?; }
     if !r.refill.is_empty() { let zs = std::mem::take(&mut r.refill); r.c.call(&format!("{B}RefillZones"), json!({"board": r.doc, "zones": zs})).await?; }
     let mut out = json!({"results": results});
     if r.wrote && a["save"].as_bool().unwrap_or(true) {
@@ -606,6 +926,9 @@ pub async fn run(c: &dyn Call, path: &str, a: &Value) -> Result<Value, String> {
             let wrong: Vec<String> = r.expect.iter().filter(|(rf, n, v)| !file_prop(&texts, rf, n, v)).map(|(rf, n, _)| format!("{rf} {n}")).collect();
             if !wrong.is_empty() { return Err(format!("saved, but the schematic's files do not show: {}. KiCad did not take those; read them with find and set them again.", wrong.join(", "))) }
         } }
+        // the parts this call added, with the net each pin is now on (the saved schematic's own netlist)
+        if out["saved"].is_string() && !r.board && !r.added.is_empty() { if let Ok(all) = r.c.nets().await { let m: Map<String, Value> = r.added.iter().filter(|a| all[a.as_str()].is_object()).map(|a| (a.clone(), all[a.as_str()].clone())).collect(); if !m.is_empty() { out["nets"] = Value::Object(m) } } }
+        if out["saved"].is_string() && !before.is_null() { if let Ok(now) = r.c.check().await { if !now.is_null() { out["check"] = check_delta(&before, &now) } } }
     }
     Ok(out)
 }
@@ -704,7 +1027,13 @@ mod tests {
                 },
                 "BeginCommit" => json!({"id": {"value": "commit-1"}}),
                 "UpdateItems" => json!({"updated_items": msg["items"].as_array().unwrap().iter().map(|i| json!({"status": {"code": "ISC_OK"}, "item": i})).collect::<Vec<_>>()}),
-                "CreateItems" => json!({"created_items": msg["items"].as_array().unwrap().iter().enumerate().map(|(n, _)| json!({"status": {"code": "ISC_OK"}, "item": {"id": {"value": format!("new-{n}")}}})).collect::<Vec<_>>()}),
+                // (a schematic item comes back whole, as KiCad answers; a board item as its id, which is all these tests read of it)
+                "CreateItems" => json!({"created_items": msg["items"].as_array().unwrap().iter().enumerate().map(|(n, i)| { let mut it = if i["@type"].as_str().is_some_and(|t| t.contains("schematic")) { i.clone() } else { json!({}) }; it["id"] = json!({"value": format!("new-{n}")}); json!({"status": {"code": "ISC_OK"}, "item": it}) }).collect::<Vec<_>>()}),
+                // KiCad's own placement of a library symbol: a two-pin part (pin 1 above, pin 2 below); the power library has GND only
+                "PlaceSymbolFromLibrary" => { if msg["lib_id"]["library_nickname"] == "power" && msg["lib_id"]["entry_name"] != "GND" { return Err("KiCad answered AS_BAD_REQUEST: symbol not found".into()) }
+                    let pin = |n: &str, y: i64, o: &str| json!({"item": {"@type": "type.googleapis.com/kiapi.schematic.types.SchematicPin", "number": n, "name": if n == "1" { "A" } else { "K" }, "position": {"y_nm": (y * 1000000).to_string()}, "orientation": o}, "unit": {"unit": 1}});
+                    json!({"item": {"id": {"value": "probe"}, "path": {}, "position": msg["position"], "transform": {"orientation": msg["orientation"]}, "unit": {"unit": 1}, "definition": {"id": msg["lib_id"], "items": [pin("1", -4, "SPO_DOWN"), pin("2", 4, "SPO_UP")]},
+                        "reference_field": {"visible": true, "text": {"position": {"x_nm": "5"}, "text": msg["reference"]}}, "value_field": {"visible": true, "text": {"position": {"x_nm": "6"}, "text": "R"}}, "@type": "type.googleapis.com/kiapi.schematic.types.SchematicSymbolInstance"}}) }
                 "DeleteItems" => json!({"deleted_items": msg["item_ids"].as_array().unwrap().iter().map(|i| json!({"id": i, "status": "IDS_OK"})).collect::<Vec<_>>()}),
                 _ => json!({}),
             })
@@ -760,7 +1089,7 @@ mod tests {
         assert_eq!(out, json!({"results": [{"updated": [{"ref": "R1", "value": "10k", "at": [1.0, 3.0], "rot": -90.0, "layer": "B.Cu"}, {"ref": "R2", "value": "10k", "at": [3.0, 3.0], "rot": -90.0, "layer": "B.Cu"}]},
             {"updated": [{"ref": "C1", "value": "2u2", "at": [5.0, 5.0], "rot": 90.0, "layer": "B.Cu"}]}, {"created": [{"id": "new-0"}]}], "saved": "/p/b.kicad_pcb"}), "a change answers with what the items are now");
         // the document is opened once, the footprints are read once before the commit starts, and one commit holds every change
-        assert_eq!(names(&f), ["GetOpenDocuments", "OpenDocument", "GetItems", "BeginCommit", "UpdateItems", "GetItems", "UpdateItems", "CreateItems", "EndCommit", "SaveDocument"]);
+        assert_eq!(names(&f), ["GetOpenDocuments", "OpenDocument", "GetItems", "BeginCommit", "UpdateItems", "GetItems", "UpdateItems", "CreateItems", "EndCommit", "RefillZones", "SaveDocument"], "a new track stands in a pour: every zone is refilled before the save");
         let up = sent(&f, "UpdateItems");
         assert_eq!((up["items"][0]["position"].clone(), up["items"][1]["position"]["y_nm"].clone(), up["items"][0].get("definition"), up["header"]["document"]["board_filename"].clone()), (json!({"x_nm": "1000000", "y_nm": "3000000"}), json!("3000000"), None, json!("b.kicad_pcb")));
         assert_eq!(sent(&f, "EndCommit"), json!({"header": {"document": {"type": "DOCTYPE_PCB", "board_filename": "b.kicad_pcb", "project": {"name": "b", "path": "/p"}}}, "id": {"value": "commit-1"}, "action": "CMA_COMMIT", "message": "tidy"}));
@@ -800,11 +1129,52 @@ mod tests {
         let t = json!({"id": {"value": "probe"}, "path": {}, "position": {"x_nm": "1", "y_nm": "2"}, "lib_id": {"library_nickname": "Device", "entry_name": "R"}, "definition": {"items": [1, 2, 3]},
             "reference_field": {"visible": true, "text": {"position": {"x_nm": "5"}, "text": "R"}}, "value_field": {"visible": true, "text": {"position": {"x_nm": "6"}, "text": "R"}}});
         let s = placed(&t, &json!({"lib": "Device:R", "ref": "R7", "value": "1k", "fields": {"MPN": "X"}}));
-        assert_eq!((s.get("id"), s["definition"].clone(), s["reference_field"].clone(), text2(&s["value_field"]), text2(&s["user_fields"][0])), (None, json!({"id": {"library_nickname": "Device", "entry_name": "R"}}), json!({"visible": true, "text": {"position": {"x_nm": "5"}, "text": "R7"}}), "1k", "X"));
-        let f = fake(None); go(&f, json!({"ops": [{"add": [{"symbol": {"lib": "Device:R", "ref": "R7", "at": [1, 2]}}, {"wire": [[1, 2], [1, 5]]}]}]})).unwrap();
-        assert_eq!(names(&f), ["GetOpenDocuments", "OpenDocument", "BeginCommit", "CreateItems", "EndCommit", "BeginCommit", "CreateItems", "EndCommit", "SaveDocument"]);
-        let log = f.log.lock().unwrap(); assert_eq!((log[4].1["action"].clone(), log[7].1["action"].clone(), log[6].1["items"].as_array().unwrap().len()), (json!("CMA_DROP"), json!("CMA_COMMIT"), 2));
-        assert_eq!((log[3].1["items"][0].get("reference_field"), text2(&log[6].1["items"][0]["reference_field"])), (None, "R7"), "the probe is the bare library symbol; the real one carries the reference");
+        assert_eq!((s.get("id"), s["definition"].clone(), s["reference_field"].clone(), text2(&s["value_field"]), text2(&s["user_fields"][0])), (None, json!({"items": [1, 2, 3]}), json!({"visible": true, "text": {"position": {"x_nm": "5"}, "text": "R7"}}), "1k", "X"), "KiCad's whole definition goes back (a symbol that extends another is right only so)");
+        // Footprint is KiCad's own field of a symbol, never a user field (which KiCad would not write)
+        let s = placed(&t, &json!({"lib": "Device:R", "ref": "R7", "footprint": "Lib:FP", "fields": {"Datasheet": "d"}}));
+        assert_eq!((text2(&s["footprint_field"]), text2(&s["datasheet_field"]), s.get("user_fields")), ("Lib:FP", "d", None));
+        let f = fake(None); go_on(&f, "/p/b.kicad_sch", json!({"ops": [{"add": [{"symbol": {"lib": "Device:R", "ref": "R7", "at": [1, 2]}}, {"wire": [[1, 2], [1, 5]]}]}]})).unwrap();
+        assert_eq!(names(&f), ["GetOpenDocuments", "OpenDocument", "BeginCommit", "PlaceSymbolFromLibrary", "EndCommit", "GetSchematicHierarchy", "GetItems", "BeginCommit", "CreateItems", "EndCommit", "SaveDocument"], "placed by KiCad, then the sheet is read once (what the new part would lie over), then the one commit");
+        let log = f.log.lock().unwrap(); assert_eq!((log[4].1["action"].clone(), log[9].1["action"].clone(), log[8].1["items"].as_array().unwrap().len()), (json!("CMA_DROP"), json!("CMA_COMMIT"), 2));
+        assert_eq!((log[3].1["reference"].clone(), text2(&log[8].1["items"][0]["reference_field"]), log[8].1["items"][0].get("id")), (json!("R7"), "R7", None), "KiCad places it from the library in a commit that is dropped; the real one is that placement");
+    }
+    #[test] fn a_symbols_pins_join_their_nets_and_a_wire_runs_between_pins() {
+        // where the pins are: the library's place turned with the symbol (KiCad's angle, y down)
+        let sym = |rot: &str| json!({"position": {"x_nm": "10000000", "y_nm": "20000000"}, "transform": {"orientation": rot}, "unit": {"unit": 1}, "definition": {"items": [
+            {"item": {"@type": "x.SchematicPin", "number": "1", "name": "A", "position": {"y_nm": "-4000000"}, "orientation": "SPO_DOWN"}, "unit": {"unit": 1}}, {"item": {"@type": "x.SchematicPin", "number": "9", "position": {}, "orientation": "SPO_UP"}, "unit": {"unit": 2}}]}});
+        assert_eq!(sym_pins(&sym("SSO_0")), vec![("1".to_string(), "A".to_string(), (10.0, 16.0), (0.0, -1.0))], "the other unit's pin is not this symbol's");
+        assert_eq!(sym_pins(&sym("SSO_90"))[0].2, (6.0, 20.0)); assert_eq!(sym_pins(&sym("SSO_90"))[0].3, (-1.0, 0.0));
+        // pins: {pin: net}: a short wire off each pin and the net's power symbol at its end; a net the power library lacks gets a label
+        let f = fake(None); let out = go_on(&f, "/p/b.kicad_sch", json!({"ops": [{"add": [{"symbol": {"lib": "Device:D", "ref": "D7", "at": [10, 20], "footprint": "L:F", "pins": {"A": "+3V3", "2": "GND"}}}, {"wire": ["D7.1", [14, 10]]}, {"label": {"text": "X", "at": "D7.K"}}]}]})).unwrap();
+        let made = sent(&f, "CreateItems"); let items = made["items"].as_array().unwrap();
+        let kinds: Vec<&str> = items.iter().map(|i| i["@type"].as_str().unwrap().rsplit('.').next().unwrap()).collect();
+        assert_eq!(kinds, ["SchematicSymbolInstance", "SchematicLine", "LocalLabel", "SchematicLine", "SchematicSymbolInstance", "SchematicLine", "SchematicLine", "LocalLabel"]);
+        assert_eq!((text2(&items[0]["footprint_field"]), items[1]["start"].clone(), items[1]["end"].clone(), text2(&items[2]), items[2]["position"].clone()), ("L:F", to_xy(10.0, 16.0), to_xy(10.0, 13.46), "+3V3", to_xy(10.0, 13.46)), "pin A (1) is above: its wire goes up 2.54 mm to a label, the power library having no +3V3");
+        assert_eq!((items[3]["end"].clone(), items[4]["position"].clone(), text2(&items[4]["reference_field"]), lib_id(&items[4]["definition"]["id"])), (to_xy(10.0, 26.54), to_xy(10.0, 26.54), "#PWR001", "power:GND".to_string()));
+        // a wire named by a pin starts on the pin and runs square to the point; a label's place may be a pin
+        assert_eq!((items[5]["start"].clone(), items[5]["end"].clone(), items[6]["end"].clone(), items[7]["position"].clone()), (to_xy(10.0, 16.0), to_xy(14.0, 16.0), to_xy(14.0, 10.0), to_xy(10.0, 24.0)));
+        // the answer: the part with its pins' places; the rest counted
+        assert_eq!(out["results"][0]["created"][0]["pins"], json!({"1": [10.0, 16.0], "2": [10.0, 24.0]}));
+        let e = go_on(&fake(None), "/p/b.kicad_sch", json!({"ops": [{"add": [{"wire": ["Q9.1", [1, 1]]}]}]})).unwrap_err(); assert!(e.contains("no symbol `Q9`"), "{e}");
+        let e = go_on(&fake(None), "/p/b.kicad_sch", json!({"ops": [{"add": [{"symbol": {"lib": "Device:D", "ref": "D7", "at": [1, 1], "pins": {"7": "GND"}}}]}]})).unwrap_err(); assert!(e.contains("has no pin `7`: 1, 2"), "{e}");
+    }
+    #[test] fn the_answer_says_what_the_edit_added_to_kicads_check() {
+        let v = |ty: &str, a: &str| json!({"type": ty, "items": [{"description": a, "pos": {"x": 1.5, "y": 2}}]});
+        let before = json!({"violations": [v("clearance", "Track [A]"), v("clearance", "Track [A]")], "unconnected_items": [v("x", "Pad 1 [N] of R1"), v("x", "Pad 1 [M] of R2")]});
+        let after = json!({"violations": [v("clearance", "Track [A]"), v("shorting_items", "Via [B]")], "unconnected_items": [v("x", "Pad 1 [M] of R2")]});
+        assert_eq!(check_delta(&before, &after), json!({"by": "KiCad's DRC of the saved board, schematic parity included", "new": ["shorting_items: Via [B] @1.5,2"], "left": 3, "gone": 2}));
+        assert_eq!(findings(&json!({"sheets": [{"violations": [v("pin_not_connected", "Symbol U7 Pin 1")]}, {"violations": []}]})), ["pin_not_connected: Symbol U7 Pin 1 @1.5,2"]);
+        let many = json!({"violations": (0..15).map(|i| v("clearance", &format!("T{i}"))).collect::<Vec<_>>()});
+        let d = check_delta(&json!({}), &many); assert_eq!((d["new"].as_array().unwrap().len(), d["more"].clone(), d["left"].clone()), (12, json!(3), json!(15)));
+        // the driver: the check runs before the edit and after the save, and only a call that writes and saves is checked
+        struct Checked(Fake, Mutex<u32>);
+        impl Call for Checked { fn call<'a>(&'a self, ty: &'a str, msg: Value) -> Fut<'a> { self.0.call(ty, msg) }
+            fn check<'a>(&'a self) -> Fut<'a> { Box::pin(async move { let mut n = self.1.lock().unwrap(); *n += 1; Ok(if *n == 1 { json!({"violations": []}) } else { json!({"violations": [{"type": "clearance", "items": [{"description": "Track [GND]"}]}]}) }) }) } }
+        let c = Checked(fake(None), Mutex::new(0)); let rt = || tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap();
+        let out = rt().block_on(run(&c, "/p/b.kicad_pcb", &json!({"ops": [{"move": "R1", "by": [1, 0]}]}))).unwrap();
+        assert_eq!((out["check"].clone(), *c.1.lock().unwrap()), (json!({"by": "KiCad's DRC of the saved board, schematic parity included", "new": ["clearance: Track [GND]"], "left": 1}), 2));
+        let c = Checked(fake(None), Mutex::new(0)); let out = rt().block_on(run(&c, "/p/b.kicad_pcb", &json!({"ops": [{"find": "footprint"}]}))).unwrap(); assert_eq!((out.get("check"), *c.1.lock().unwrap()), (None, 0));
+        let c = Checked(fake(None), Mutex::new(0)); rt().block_on(run(&c, "/p/b.kicad_pcb", &json!({"ops": [{"move": "R1", "by": [1, 0]}], "check": false}))).unwrap(); assert_eq!(*c.1.lock().unwrap(), 0);
     }
     #[test] fn raw_commands_run_in_order_with_the_document_filled_in() {
         let f = fake(None);

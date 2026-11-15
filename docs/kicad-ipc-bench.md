@@ -29,6 +29,120 @@ tokens of prompt and tool definitions, so the number of requests is what moves i
 Of the 48 runs after, 3 were cut short by the benchmark account's usage limit and are left out (rules 1, drc_fix 2);
 the other 45 passed.
 
+## Against editing the files directly
+
+The same eight edits, the same check, made two ways on `claude-opus-5-5` (medium effort, 3 runs a task, medians, 2026-11-15,
+Backplane KiCad 10.99.0-bp.12.1). Raw file: no MCP servers, so only the CLI's own file and shell tools, KiCad not running,
+and the prompt's KiCad editing lines replaced by "edit the design files directly; kicad-cli runs DRC, ERC and upgrades"
+(`KIPC_BENCH_NOMCP=1`, `KIPC_BENCH_PROMPT=prompts/rawfile.json`). `kicad_edit`: the hub as on main at c6e665e62.
+
+| task | passes | context tokens | output tokens | tool calls | wall s | cost $ |
+|---|---|---|---|---|---|---|
+| move_rotate | 2/3 → 3/3 | 369,533 → 129,959 | 4,377 → 820 | 8 → 2 | 55 → 17 | 0.45 → 0.30 |
+| sch_fields | 3/3 → 3/3 | 197,422 → 175,408 | 2,178 → 846 | 4 → 3 | 24 → 16 | 0.34 → 0.32 |
+| netclass | 2/3 → 3/3 | 152,271 → 173,360 | 1,710 → 875 | 3 → 3 | 22 → 17 | 0.30 → 0.31 |
+| sch_place | 3/3 → 3/3 | 377,440 → 218,546 | 3,705 → 1,142 | 8 → 4 | 55 → 22 | 0.44 → 0.33 |
+| track_via | 3/3 → 3/3 | 190,989 → 129,351 | 1,766 → 644 | 4 → 2 | 25 → 15 | 0.31 → 0.29 |
+| zone | 2/3 → 3/3 | 371,014 → 129,334 | 3,384 → 698 | 8 → 2 | 46 → 15 | 0.43 → 0.29 |
+| rules | 3/3 → 3/3 | 149,312 → 173,160 | 1,237 → 872 | 3 → 3 | 19 → 16 | 0.28 → 0.31 |
+| drc_fix | 3/3 → 3/3 | 153,117 → 177,398 | 1,153 → 1,170 | 3 → 3 | 19 → 22 | 0.29 → 0.33 |
+| **all (sum of medians)** | 21/24 → 24/24 | 1,961,098 → 1,306,516 | 19,510 → 7,067 | 41 → 22 | 265 → 141 | 2.84 → 2.48 |
+
+The three raw file runs that failed each said they were done. Two are wrong edits: a net class with via sizes nobody asked
+for (netclass 1), and J9 rotated in the file so that its pads no longer match its library footprint (DRC
+`lib_footprint_mismatch`, move_rotate 1). The third is a difference, not a mistake: zone 1 refilled with `kicad-cli pcb drc
+--refill-zones --save-board`, and that fill has no clearance finding where the reference's fill (KiCad's refill over IPC)
+has one. Raw file editing wins on the small edits that are one block of text (netclass, rules, drc_fix); `kicad_edit`
+on the ones that need geometry or KiCad's own rules (rotating a part, a zone refill, placing a symbol). The raw file prompt
+is shorter and carries no MCP tool definitions, so each of its requests reads a little less: the context gap is a floor.
+
+These are Opus 5.5 numbers; the tables above are Fable 5.2, so compare within a table, not across them.
+
+## Design work (pilot, 1 run a task)
+
+Realistic edits, where many results are right, so a run is held to rules written before any run (`checks.py`), not to
+one reference: DRC and ERC with nothing new, the netlist, the spec's places and widths, and nothing else moved. Fixtures
+from `mkfix2.py` (`tasks2.json`; `KIPC_BENCH_TASKS` picks the task file): `sch_ldo` (an AMS1117 with its caps and power
+symbols laid out in a free area of pic_programmer's root sheet), `route_leds` (StickHub's seven LED nets taken up: a net
+class, the routes, a refill), `place_decap` (eight decoupling caps parked off StickHub, placed again within 2 mm of their
+U1 pins), `swap_fp` (nine pic_programmer footprints to a shorter pitch, schematic and board, re-routed), `hubble_route`
+(four debugger nets on a copy of Hubble_DK, an 8-layer board part way routed). Opus 5.5, medium effort, 2026-11-15,
+one run a task each way, so read it as a first look, not a median.
+
+| task | raw file | `kicad_edit` |
+|---|---|---|
+| sch_ldo | pass, 1,446,190 tok, 26 calls, 214 s, $1.02 | pass, 2,238,997, 37, 165 s, $1.27 |
+| route_leds | pass, 1,071,396, 20, 161 s, $0.96 | pass, 2,298,611, 27, 408 s, $1.58 |
+| place_decap | fail, 3,247,644, 42, 584 s, $2.04 | pass, 1,914,940, 25, 389 s, $1.52 |
+| swap_fp | pass, 1,553,667, 23, 247 s, $1.45 | pass, 8,019,421, 60, 640 s, $5.38 |
+| hubble_route | pass, 1,330,239, 20, 257 s, $1.47 | pass, 1,995,058, 19, 272 s, $2.04 |
+| **all** | 4/5, 8,649,136, 131, $6.94 | 5/5, 16,467,027, 168, $11.79 |
+
+What the transcripts show:
+
+- The cost is geometry, and both sides pay it the same way: Python over the board file (one `kicad_edit` route_leds run
+  installed shapely, drew the area to a PNG and looked at it) and `kicad-cli pcb drc`, 14 to 28 shell calls a task on
+  either side. `kicad_edit`'s rows have no shapes (pad sizes, track outlines, courtyards), so the agent reads the file
+  anyway and then also pays for the tool.
+- `kicad_edit` has no footprint swap: swap_fp fell back to raw `kicad_ipc` (ImportNetlist, PlaceFootprintFromLibrary,
+  UpdateItems in chunks) and read the API's proto sources: 8 M tokens.
+- Setting a symbol's Footprint field through `kicad_edit` took the agent four tries.
+- The raw place_decap failure ended its turn while a search it had started in the background ran; in a thread it would be
+  woken and go on, a benchmark turn ends there.
+- Runs share `/tmp`, and an agent's memory notes land in the login's Claude folder (one wrote a "footprint swap method"
+  note); each run's folder has its own name, so no run read another's, but run them with that in mind.
+
+## Design work, against editing the files directly
+
+Five tasks a designer would give (`test/kipc_bench/tasks2.json`), each held to rules, not to one reference, since many
+results are right (`checks.py`: KiCad's DRC or ERC with nothing new, every net connected, the spec's places and widths,
+nothing else moved): add a 3.3 V regulator with its two capacitors and power symbols to a schematic, laid out in a given
+area (`sch_ldo`); add a net class and route seven nets at its width, pours refilled (`route_leds`); place eight
+decoupling capacitors each within 2 mm of its pin (`place_decap`); change nine footprints in schematic and board, pad 1
+kept, and re-route what the shorter parts leave (`swap_fp`); route four nets on a copy of Hubble_DK, a real 8-layer HDI
+board part way through routing (`hubble_route`). `claude-opus-5-5`, medium effort, medians per task (2026-11-15,
+Backplane KiCad 10.99.0-bp.12.1). Raw file: 3 runs a task, no MCP servers, the prompt's KiCad lines replaced as above.
+`kicad_edit` before: main at c6e665e62, 2 runs. `kicad_edit` now: what landed (variant v3 below), 2 runs.
+
+| task | passes raw / before / now | context tokens | tool calls | wall s | cost $ |
+|---|---|---|---|---|---|
+| sch_ldo | 3/3 / 2/2 / 2/2 | 1,446,190 / 1,934,540 / 156,413 | 26 / 32 / 2 | 174 / 150 / 30 | 1.02 / 1.16 / 0.38 |
+| route_leds | 3/3 / 2/2 / 2/2 | 1,419,475 / 1,771,720 / 132,148 | 22 / 22 / 2 | 215 / 280 / 21 | 1.19 / 1.36 / 0.35 |
+| place_decap | 1/3 / 2/2 / 2/2 | 3,247,644 / 2,445,002 / 133,438 | 42 / 28 / 2 | 584 / 658 / 29 | 2.04 / 1.79 / 0.31 |
+| swap_fp | 3/3 / 2/2 / 2/2 | 1,700,905 / 9,261,947 / 205,586 | 26 / 70 / 4 | 247 / 803 / 39 | 1.45 / 5.96 / 0.36 |
+| hubble_route | 3/3 / 2/2 / 2/2 | 1,876,724 / 2,747,482 / 191,578 | 24 / 25 / 3 | 280 / 350 / 56 | 1.76 / 2.31 / 0.39 |
+| **all (sum of medians)** | 13/15 / 10/10 / 10/10 | 9,690,938 / 18,160,692 / 819,162 | 140 / 178 / 14 | 1,501 / 2,242 / 176 | 7.46 / 12.59 / 1.79 |
+
+Against raw file editing that is 92% fewer context tokens, a tenth of the tool calls, an eighth of the time and a
+quarter of the cost, with every run passing (raw: two of three placement runs said done with the capacitors still off
+the board). Before this, `kicad_edit` lost to raw files on this work by a factor of two: it could write a track but not
+find one, so the agent still parsed the board file, wrote a clearance search in Python (with shapely, in a venv it made),
+ran DRC by hand, and for a footprint exchange fell back to forty raw `kicad_ipc` calls. What changed is in
+[kicad-edit.md](kicad-edit.md), "The geometry is the hub's": `route`, `place`, a footprint exchange, schematic groups
+whose pins join their nets and which find their own free room, and KiCad's own check in the answer.
+
+Two runs a task is few: the per-task medians of `now` moved by up to 60 thousand tokens between variants that did not
+touch that task (one request more or less). The total is not in doubt; the order of v3 and v4 below is.
+
+### What was tried (design tasks)
+
+| variant | what | passes | context tokens | tool calls | wall s | cost $ | kept |
+|---|---|---|---|---|---|---|---|
+| raw | the agent edits the files, no KiCad tools | 13/15 | 9,690,938 | 140 | 1,501 | 7.46 | |
+| before | `kicad_edit` as on main at c6e665e62 | 10/10 | 18,160,692 | 178 | 2,242 | 12.59 | |
+| v1 | `route` (a grid router at the net class's width and clearance), `place` (next to a pin), footprint exchange, a new symbol's `pins` joined to nets, wires by pin, DRC/ERC before and after in the answer, the new parts' nets | 10/10 | 1,270,746 | 22 | 233 | 2.10 | yes |
+| v2 | v1 + `fit: [area]` moves a new schematic group to free room when asked; a part named in `route` has other nets' tracks taken off its pads and routed again | 10/10 | 1,684,902 | 29 | 296 | 2.32 | the reroute (swap_fp 370k to 328k); `fit` only on request, no: the agent did not ask, rendered the sheet to look for room and moved texts by hand (sch_ldo 435k to 866k) |
+| v3 | v2 + a new group moves to free room by itself and says so, a moved symbol takes its texts, the check runs with schematic parity and names itself | 10/10 | 819,162 | 14 | 176 | 1.79 | yes (landed) |
+| v4 | v3 + a prompt line: "this project folder has no AGENTS.md ... nothing to read or list before you start" (`prompts/noagents.json`, not built in) | 10/10 | 788,506 | 12 | 180 | 1.79 | no: 4% is inside the noise of two runs, hubble_route went up (192k to 314k), and the line would have to be true of every project |
+
+Also tried and not used: the fork's own router over IPC (`kiapi.backplane.SketchRoute`, KiCad's PNS). It runs headless
+and is fast (seven nets in 0.07 s) but routed at the board's default width, not the net class's, left one of seven
+nets unrouted and cut a pour (`test/kipc_bench/repros/README.md`, 8). The hub's own router is what `route` uses.
+
+What a run still spends: every turn's first request lists the folder and looks for an AGENTS.md (the model's habit, not
+the prompt's asking), about 43 thousand tokens; then one request per `kicad_edit` call and one to answer. A task is
+two to four requests, so the floor is near 90 thousand tokens a task until the prompt and tool definitions shrink.
+
 ## What was tried
 
 | variant | what | passes | context tokens | tool calls | cost $ |
@@ -47,4 +161,5 @@ the other 45 passed.
   for up to 30 s (`kicad/ipc.rs`, `READY_WAIT`).
 - A hub whose stderr reader had gone stopped at its next "kicad ipc: up" line and never handed the server its requests
   (the benchmark's stall); that line can no longer stop the handshake.
-- Two KiCad API defects, written up for the fork with scripts: `test/kipc_bench/repros/README.md`.
+- Two KiCad API defects, written up for the fork with scripts: `test/kipc_bench/repros/README.md`; the design tasks added three more there (a symbol that extends another, a Footprint user field, SketchRoute's width).
+- A real turn of the benchmark writes Claude's own memory files under the login's `~/.claude/projects/<run folder>/memory` (one pilot run saved a note there): the wrapper gives the CLI the person's login folder. Harmless to the results (each run's folder is its own); worth a config folder of its own next time.
