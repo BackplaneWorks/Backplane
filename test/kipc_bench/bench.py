@@ -7,7 +7,7 @@
 import concurrent.futures, json, os, shutil, statistics, subprocess, sys, time
 HERE = os.path.dirname(os.path.abspath(__file__)); sys.path.insert(0, HERE)
 import norm
-TASKS = json.load(open(HERE + "/tasks.json"))
+TASKS = json.load(open(os.environ.get("KIPC_BENCH_TASKS", HERE + "/tasks.json")))  # tasks2.json: the design tasks, checked by rules (checks.py)
 def env(work): return json.load(open(work + "/bench.json"))
 def turn(work, d, text, ms=int(os.environ.get("KIPC_BENCH_TURN_MS", "600000"))):  # a turn that hangs is a failed run, never a stalled benchmark
     r = subprocess.run(["bun", HERE + "/turn.mjs", work, d, text], capture_output=True, text=True, env={**os.environ, "TURN_MS": str(ms)})
@@ -43,7 +43,9 @@ def one(work, variant, task, n):
     r = turn(work, d, task["prompt"])
     o = {"variant": variant, "task": task["id"], "run": n, "state": r.get("state"), "wall_s": round(time.time() - t0, 1), "at": int(t0)}
     if os.path.exists(log): o.update(usage(log))
-    df = norm.diff(json.load(open(f"{work}/ref/{task['id']}.json")), norm.norm(d, env(work)["cli"]))
+    if "check" in task:
+        import checks; df = checks.check(task["check"], d, env(work)["fixtures"], env(work)["cli"])
+    else: df = norm.diff(json.load(open(f"{work}/ref/{task['id']}.json")), norm.norm(d, env(work)["cli"]))
     o["pass"] = not df and r.get("state") == "completed"; o["diff"] = df[:6]
     open(work + "/results.jsonl", "a").write(json.dumps(o) + "\n")
     print(f"{name}: {'PASS' if o['pass'] else 'FAIL'} ctx={o.get('context')} out={o.get('output')} calls={o.get('calls')} wall={o['wall_s']}s ${o.get('cost', 0):.2f} {o['diff'][:2] if df else ''}", flush=True)
@@ -63,8 +65,9 @@ def main():
     elif cmd == "e2e":  # kicad_edit against a real KiCad: each task as one call must give the reference result
         bad = 0
         for t in tasks:
-            d = fresh(work, "e2e-" + t["id"], t["fixture"]); r = turn(work, d, f"ORACLE {HERE}/edit_e2e.py", 120000)
-            df = norm.diff(json.load(open(f"{work}/ref/{t['id']}.json")), norm.norm(d, env(work)["cli"]))
+            d = fresh(work, "e2e-" + t["id"], t["fixture"]); r = turn(work, d, f"ORACLE {HERE}/edit_e2e.py", 300000)
+            if "check" in t: import checks; df = checks.check(t["check"], d, env(work)["fixtures"], env(work)["cli"])
+            else: df = norm.diff(json.load(open(f"{work}/ref/{t['id']}.json")), norm.norm(d, env(work)["cli"]))
             if "misspelt field refused" not in open(f"{work}/out/e2e-{t['id']}.oracle.log").read(): df.append("kicad_ipc took a misspelt field")
             bad += bool(df)
             print(t["id"], "same as the reference" if not df else df[:4], "|", open(f"{work}/out/e2e-{t['id']}.oracle.log").read().strip()[-400:].replace("\n", " | "), flush=True)

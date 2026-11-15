@@ -1,0 +1,6 @@
+[
+ ["re", "<backplane_kicad_board_editing>.*?</backplane_kicad_board_editing>\\n*", ""],
+ ["re", "<kicad_runtime>.*?</kicad_runtime>", "<kicad_runtime>KiCad is not running on this project and there is no KiCad editing tool: edit the design files (.kicad_pcb, .kicad_sch, .kicad_pro, .kicad_dru) directly with your file and shell tools. `kicad-cli` (on your PATH, and `$BACKPLANE_KICAD_CLI`) is KiCad 10.99 and runs DRC, ERC, exports and file upgrades; see its `--help`. The SWIG `pcbnew` Python module does not exist in this KiCad.</kicad_runtime>"],
+ ["re", " Document locks \\(.*?Your document locks are released when your turn ends\\.", ""],
+ ["re", "kicad_ipc RunAction on this KiCad.*?schematic editor\\.\\n*", ""]
+]

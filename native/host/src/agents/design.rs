@@ -128,6 +128,8 @@ impl Agents {
                 }
                 let mut out = vec![]; walk(std::path::Path::new(&kc::route(self.path)).parent()?, 0, &mut out); Some(out)
             }
+            fn nets<'b>(&'b self) -> kedit::Fut<'b> { Box::pin(async move { Ok(crate::files::kicad::checkrun::netlist_of(&self.ag.hub, &kc::route(self.path)).await.unwrap_or(Value::Null)) }) }
+            fn check<'b>(&'b self) -> kedit::Fut<'b> { Box::pin(async move { Ok(crate::files::kicad::checkrun::report_of(&self.ag.hub, &kc::route(self.path)).await.unwrap_or(Value::Null)) }) }
         }
         let path = a["path"].as_str().unwrap_or("");
         if !crate::plat::fs::is_abs(path) { return fail("path must be the absolute path of the board (.kicad_pcb) or schematic (.kicad_sch) to edit") }

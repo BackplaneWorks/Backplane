@@ -629,6 +629,43 @@ async fn run_cli(hub: &Arc<Hub>, pro: &str, f: &project::Files, s: &str, cancel:
 #[cfg(unix)] fn killed(st: &std::process::ExitStatus) -> bool { use std::os::unix::process::ExitStatusExt; st.signal() == Some(9) }
 #[cfg(not(unix))] fn killed(_: &std::process::ExitStatus) -> bool { false }
 
+/// KiCad's check of one saved document as kicad-cli reports it (JSON): DRC of a board, ERC of a schematic. For `kicad_edit`, which says
+/// what an edit added to it (kedit::check_delta). None: no kicad-cli, or no report within 90 s.
+pub async fn report_of(hub: &Arc<Hub>, path: &str) -> Option<Value> {
+    let rt = ipc::runtime(hub).await; if rt.cli.is_empty() { return None }
+    let board = path.ends_with(".kicad_pcb"); let dir = cache_dir(hub); let _ = std::fs::create_dir_all(&dir);
+    let out = dir.join(format!("edit-{}-{}.json", std::process::id(), ks::digest(&format!("{path}{:?}", std::time::Instant::now()))));
+    let target = if board { path.to_string() } else { root_sch(path) };
+    let argv: Vec<String> = [rt.cli.as_str(), if board { "pcb" } else { "sch" }, if board { "drc" } else { "erc" }, "--format", "json", "--units", "mm", "-o", &out.to_string_lossy(), &target].iter().map(|s| s.to_string()).chain(board.then(|| "--schematic-parity".to_string())).collect();
+    let mut cmd = low_priority(&argv);
+    cmd.kill_on_drop(true).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+    let done = tokio::time::timeout(Duration::from_secs(90), async { cmd.spawn().ok()?.wait().await.ok() }).await;
+    let text = std::fs::read_to_string(&out).ok(); let _ = std::fs::remove_file(&out);
+    done.ok().flatten()?; serde_json::from_str(&text?).ok()
+}
+/// The root schematic of the project `path` belongs to (a sub-sheet is checked and netlisted through its root).
+fn root_sch(path: &str) -> String { let pro = ipc::pro_of(path); let root = format!("{}.kicad_sch", pro.trim_end_matches(".kicad_pro")); if !pro.is_empty() && Path::new(&root).exists() { root } else { path.to_string() } }
+/// The saved schematic's netlist as {reference: {pin: net}}, from kicad-cli's export (for `kicad_edit`: the nets of the parts an edit added).
+pub async fn netlist_of(hub: &Arc<Hub>, path: &str) -> Option<Value> {
+    let rt = ipc::runtime(hub).await; if rt.cli.is_empty() { return None }
+    let dir = cache_dir(hub); let _ = std::fs::create_dir_all(&dir);
+    let out = dir.join(format!("edit-{}-{}.xml", std::process::id(), ks::digest(&format!("{path}{:?}", std::time::Instant::now()))));
+    let argv: Vec<String> = [rt.cli.as_str(), "sch", "export", "netlist", "--format", "kicadxml", "-o", &out.to_string_lossy(), &root_sch(path)].iter().map(|s| s.to_string()).collect();
+    let mut cmd = low_priority(&argv);
+    cmd.kill_on_drop(true).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
+    let done = tokio::time::timeout(Duration::from_secs(90), async { cmd.spawn().ok()?.wait().await.ok() }).await;
+    let text = std::fs::read_to_string(&out).ok(); let _ = std::fs::remove_file(&out);
+    done.ok().flatten()?; Some(netlist_pins(&text?))
+}
+/// {reference: {pin: net}} from KiCad's XML netlist: each `<net name="N">`'s `<node ref="R" pin="P">`.
+pub fn netlist_pins(xml: &str) -> Value {
+    let attr = |tag: &str, k: &str| -> Option<String> { let i = tag.find(&format!(" {k}=\""))? + k.len() + 3; let e = tag[i..].find('"')?; Some(tag[i..i + e].replace("&amp;", "&").replace("&lt;", "<").replace("&gt;", ">").replace("&quot;", "\"")) };
+    let mut out = serde_json::Map::new(); let mut net = String::new();
+    for tag in xml.split('<').skip(1) { let tag = tag.split('>').next().unwrap_or("");
+        if tag.starts_with("net ") { net = attr(tag, "name").unwrap_or_default() }
+        else if tag.starts_with("node ") { if let (Some(r), Some(p)) = (attr(tag, "ref"), attr(tag, "pin")) { out.entry(r).or_insert_with(|| json!({}))[p] = json!(net) } } }
+    Value::Object(out)
+}
 /// A KiCad settings folder whose global footprint and symbol tables are empty (`KICAD_CONFIG_HOME`, every platform): kicad-cli then
 /// loads only the project's own libraries (fd::library_rule). KiCad reads `<KICAD_CONFIG_HOME>/<major.minor>/`.
 fn lib_free_config(hub: &Hub, version: &str) -> PathBuf {

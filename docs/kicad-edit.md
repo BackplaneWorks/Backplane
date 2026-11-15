@@ -11,19 +11,67 @@ commit, update, end it, save, then re-read the file to check. `kicad_edit` is th
 1. takes the document's lock for the thread when nobody holds it (as `lock_acquire` would; released at the turn's end);
 2. opens the board or schematic `path` names if it is not open;
 3. runs `ops` in order, the item changes inside one commit (`message` is its name in KiCad's undo history);
-4. ends the commit, refills the zones it changed, saves (the save is committed to main like any `SaveDocument`) and
-   turns the person's viewer to the document (`show: false` leaves it).
+4. ends the commit, refills the zones (every zone when copper was added or moved, else the ones it changed), saves (the
+   save is committed to main like any `SaveDocument`) and turns the person's viewer to the document (`show: false`
+   leaves it);
+5. answers with what KiCad's own check now says that it did not say before the edit (`check`, below).
 
-A new symbol is first placed by KiCad from its library alone, in a commit that is dropped, and the real one keeps that
-placement of its reference and value (fields sent without a place land hidden at the sheet's origin).
+A new symbol is first placed by KiCad from its library (`PlaceSymbolFromLibrary`), in a commit that is dropped, and the
+real one is that item whole: its reference and value where the library has them, and KiCad's own definition, without
+which a symbol that extends another (`AMS1117-3.3`) saves as a library mismatch. `Footprint`, `Datasheet` and
+`Description` are a symbol's own fields, never user fields (KiCad answers OK to a Footprint user field and does not
+write it).
 
 An op that fails drops the commit: none of the call's item changes stay and nothing is saved. Net classes, rules and
 raw `ipc` commands that ran before it are not undone; the error names them. KiCad shows a commit's changes only once it
 ends, so a `find` after a change ends the commit so far (its rows are the document as changed); a later failure then
 keeps and saves what came before that find, and says so.
 
-The answer is `{results: [one per op], saved, shown}`. A change answers with the items as they now are (24 at most,
-else their count), so nothing is read again to check it.
+The answer is `{results: [one per op], saved, check, nets, shown}`. A change answers with the items as they now are (24
+at most, else their count), so nothing is read again to check it.
+
+## The geometry is the hub's
+
+An agent asked to route seven nets through a file wrote a clearance search in Python first; asked through the old
+`kicad_edit` it did the same and then sent the tracks. These ops do that work (`native/host/src/kicad/kroute.rs`, pure
+and tested without a KiCad; the driver in `kedit.rs` feeds it KiCad's own items):
+
+- **`route`.** The board as shapes: pads (round-rect corners exact), tracks, arcs, vias, holes, copper drawn as
+  graphics, the board's edge and keep-out areas, each with its layers and net. Each net's unconnected groups (copper that
+  touches; a pour's outline joins what stands in it) are joined by an A* search on a grid a quarter of the track or
+  finer (0.0125 to 0.025 mm), in 45 degree steps, with the clearance of the net's class and of each neighbour's, the
+  edge clearance and the hole clearance. Vias are the kinds the board already has (a through via, or the micro via of
+  each layer pair, made like one of the board's own: filled, capped, tented as they are); a micro via may stand in a pad
+  of its net. Plane layers (an inner layer with a zone and next to no tracks) are left alone unless a net has no other
+  way, and a track through another net's pour on an inner layer costs three times its length. Short nets go first; a
+  net with no way goes first in the next try (four at most). `ripup: true` takes the nets' old tracks up first. A part
+  named in place of a net stands for the nets on its pads, and another net's track lying on one of those pads is taken
+  up with its net and routed again (what a footprint exchange leaves).
+- **`place`.** A part goes next to a pin: its pad on the pin's net lands within `within` mm, at one of the four
+  rotations square to the pin's part, at the nearest place where its courtyard overlaps no other and its pads keep
+  their clearance. A courtyard that overlaps is pushed out the shortest way and centred in a slot between two parts; a
+  pad a few hundredths too near a track moves off it by what is missing.
+- **A footprint exchange** (`set: refs, footprint: "Lib:Name"` on a board). KiCad places the new footprint where the old
+  one stands (in a dropped commit), pad 1 on the old pad 1, and the old part is updated with that definition: its id,
+  reference, value, fields, symbol link and each pad's net (by number) stay.
+- **A schematic group.** `pins: {pin: net}` on a new symbol joins each pin to its net with a 2.54 mm wire and the net's
+  power symbol (the next free `#PWR` number), or a label where the power library has none. A point may be a pin
+  (`"U7.2"`): in a wire (which then runs square between its points), a label's or a symbol's `at`. A group of new symbols that would lie
+  over something the sheet has (a symbol, a wire, a label, a sheet symbol) is moved as one, on the 1.27 mm grid, to the
+  nearest free room: inside `fit: [x0, y0, x1, y1]` when given, else within what the sheet has drawn; the answer says by
+  how much and what it lay over (`fit: false` leaves it where it was asked and names what it lies over). A moved symbol
+  takes its field texts with it.
+
+What this model does not know (a custom rule, a rule area's condition) KiCad's check finds, in the same answer.
+
+## The check
+
+Before the first change and after the save the hub runs `kicad-cli pcb drc --schematic-parity` (a board) or `sch erc` (the root schematic)
+and answers `check: {by, new: [the findings this edit added, 12 at most], more, left, gone}` (`kedit::check_delta`,
+`checkrun::report_of`): each finding is its kind, its items and its place. About two seconds each on the boards tried
+(Hubble_DK, 8 layers: 2.0 s). `check: false` leaves it out; a call that changes nothing or does not save is not
+checked. After a schematic edit, `nets` is the saved netlist's net of every pin of the parts the call added, moved or
+wired by pin (`checkrun::netlist_of`), so no netlist is exported to see that a pin landed on its net.
 
 ## What it keeps
 
@@ -58,12 +106,15 @@ Parts are named by reference; lengths are millimetres, angles degrees, layers as
 |---|---|
 | `{find: {kind, ...match}}` | The rows of a kind. Board: footprint, pad, track, arc, via, zone, text, shape, net. Schematic: symbol, wire, label, junction, no_connect, sheet. `fields: true` adds a part's fields, `raw: true` gives KiCad's own items, `limit` (200). |
 | `{move: refs, by: [dx, dy]}` | Also `to: [x, y]` and `rot`. |
+| `{set: refs, footprint: "Lib:Name"}` | A board: the footprint exchanged (above), answered with the pads' new places. A schematic: the symbols' Footprint. |
 | `{set: refs or {kind, ...match}, ...row keys}` | Change what the row shows: `value`, `fields: {MPN: ...}`, `at`, `rot`, a zone's `clearance`, `min_width`, `name`, `priority`, a track's `width`, `layer`, `net`. `raw: {...}` merges into KiCad's own item. |
-| `{add: [...], sheet?}` | `{track: {from, to, width, layer, net}}`, `{via: {at, size, drill, net}}`, `{wire: [[x, y], ...]}`, `{label: {text, at, type}}`, `{junction: [x, y]}`, `{no_connect: [x, y]}`, `{symbol: {lib, ref, value, at, rot, fields}}`, or KiCad's own item with `@type`. |
+| `{add: [...], sheet?, fit?}` | `{track: {from, to, width, layer, net}}`, `{via: {at, size, drill, net, layers}}`, `{wire: [[x, y] or "REF.PIN", ...]}`, `{label: {text, at, type}}`, `{junction: [x, y]}`, `{no_connect: [x, y]}`, `{symbol: {lib, ref, value, at, rot, footprint, fields, pins}}`, or KiCad's own item with `@type`. A new symbol answers with its pins' places. |
 | `{delete: ids or {kind, ...match}}` | A selector must say more than a kind. |
 | `{netclass: {name, clearance, track_width, diff_pair_width, diff_pair_gap, via_diameter, via_drill, patterns}}` | Added or changed (merged), the patterns assigned to it. |
 | `{rule: {name, condition, constraints: [{type, min, opt, max}], layer, severity}}` | Custom rules by name (`EditCustomRules`); `{rule: {remove: name}}`. |
 | `{refill: true}` | Refill every zone. |
+| `{route: nets or parts, width, layers, vias, via: {size, drill}, ripup}` | Route what is unconnected on those nets (above). Answers per net: width, length, vias, layers; `failed` with why; `already_connected`. |
+| `{place: {ref: "U1.26", ...}, within, pad}` | Each part next to that pin (above). Answers its place, rotation, side and the pad's distance. |
 | `{ipc: {type, message}}` | Any `kicad_ipc` command in the sequence; `"$doc"` and `"$project"` stand for the document and its project. |
 
 A selector matches a row's keys: text takes `*` and `?`, a list is any-of, `near: [x, y, radius]` is a place (a track
@@ -106,6 +157,9 @@ symbol is updated on its own sheet, so one `set` reaches every sheet of a hierar
 
 ## Tests
 
-`cargo test kedit` (the rules and the driver against a stand-in KiCad). Against a real KiCad:
-`python3 test/kipc_bench/bench.py e2e WORK` runs each benchmark task as one `kicad_edit` call and compares the saved
-files with the reference item for item ([the benchmark](kicad-ipc-bench.md)).
+`cargo test kedit` (the rules and the driver against a stand-in KiCad) and `cargo test kroute` (the shapes, the router
+and the placement, pure). Against a real KiCad: `python3 test/kipc_bench/bench.py e2e WORK` runs each benchmark task as
+one `kicad_edit` call and compares the saved files with the reference item for item; with
+`KIPC_BENCH_TASKS=test/kipc_bench/tasks2.json` it runs the design tasks (route, place, a schematic group, a footprint
+exchange, a real 8-layer board) as the fewest calls and holds each to its rules: DRC or ERC with nothing new, every net
+connected, the spec met ([the benchmark](kicad-ipc-bench.md)).
