@@ -77,6 +77,9 @@ fun ViewerScreen(thread: DThread, file: String = "", line: Int = 0, back: () -> 
     // the project's boards (two or more: the hub's `boards`): a pick shows that board on Board, Schematic, 3D and Split, as the desktop's Boards menu does
     var boardPick by remember(thread.id) { mutableStateOf("") }
     val board = files?.board(boardPick)
+    // the panels under the drawing (BOM, Checks, Lifecycle, Fab) are of the board on show: the hub's `project` of its row
+    val root = files?.root.orEmpty()
+    val panelsOf = board?.let { b -> b.project.ifEmpty { b.pcb.ifEmpty { root } } } ?: root
     DisposableEffect(thread.id) { DataClient.viewerThread = thread.id; onDispose { DataClient.stopWatch(thread.id); DataClient.lightRefs = emptyList() } }
     Column(Modifier.fillMaxSize()) {
         DBar(Msg.android_viewer_title(thread.title.ifEmpty { Msg.thread_new }), back)
@@ -86,12 +89,12 @@ fun ViewerScreen(thread: DThread, file: String = "", line: Int = 0, back: () -> 
             }
         }
         DLine()
-        if (board != null && tab in setOf("Board", "Schematic", "3D", "Split")) BoardPicker(files?.boards.orEmpty(), board) { boardPick = it.value; target = null }
+        if (board != null && tab in setOf("Board", "Schematic", "3D", "Split")) BoardPicker(files?.boards.orEmpty(), board) { boardPick = it.value; target = null; DataClient.lightRefs = emptyList() }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when (tab) {
                 // the management panels (BOM, Checks, Lifecycle, Fab) beside the drawing: tabs under it, a panel over its lower part (DataMgmt.kt)
-                "Board" -> Column(Modifier.fillMaxSize()) { Box(Modifier.weight(1f)) { PlotTab(thread, "board", target?.path?.takeIf { target?.tab == "Board" } ?: board?.pcb.orEmpty(), files == null || files?.pcb.orEmpty().isNotEmpty() || board != null || target != null, Msg.android_viewer_noboard) }; MgmtHost(files?.root.orEmpty()) }
-                "Schematic" -> Column(Modifier.fillMaxSize()) { Box(Modifier.weight(1f)) { PlotTab(thread, "schematic", target?.path?.takeIf { target?.tab == "Schematic" } ?: board?.sch.orEmpty(), files == null || files?.sch.orEmpty().isNotEmpty() || board != null || target != null, Msg.android_viewer_nosch) }; MgmtHost(files?.root.orEmpty()) }
+                "Board" -> Column(Modifier.fillMaxSize()) { Box(Modifier.weight(1f)) { PlotTab(thread, "board", target?.path?.takeIf { target?.tab == "Board" } ?: board?.pcb.orEmpty(), files == null || files?.pcb.orEmpty().isNotEmpty() || board != null || target != null, Msg.android_viewer_noboard) }; MgmtHost(panelsOf, root) }
+                "Schematic" -> Column(Modifier.fillMaxSize()) { Box(Modifier.weight(1f)) { PlotTab(thread, "schematic", target?.path?.takeIf { target?.tab == "Schematic" } ?: board?.sch.orEmpty(), files == null || files?.sch.orEmpty().isNotEmpty() || board != null || target != null, Msg.android_viewer_nosch) }; MgmtHost(panelsOf, root) }
                 "3D" -> PlotTab(thread, "3d", board?.pcb.orEmpty(), files == null || files?.pcb.orEmpty().isNotEmpty() || board != null, Msg.android_viewer_noboard)
                 "Split" -> SplitTab(thread, files, board)
                 "Diff" -> DiffTab(thread)
