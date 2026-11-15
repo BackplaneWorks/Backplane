@@ -26,7 +26,7 @@ int main(int argc, char **argv) { @autoreleasepool {
     CFArrayRef a = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenAboveWindow, host); BOOL ok = NO;
     if (a) { NSArray *l = (__bridge NSArray*)a; for (NSInteger i = l.count - 1; i >= 0; i--) { NSDictionary *d = l[i]; if ([[d objectForKey:(__bridge NSString*)kCGWindowLayer] intValue] != 0) continue; ok = [[d objectForKey:(__bridge NSString*)kCGWindowNumber] longValue] == w.windowNumber; break; } CFRelease(a); }
     if (!ok) { [w orderWindow:NSWindowAbove relativeTo:host]; reorders++; }
-    if (-[t0 timeIntervalSinceNow] > secs) { printf("reorders %ld\n", reorders); fflush(stdout); [NSApp terminate:nil]; }
+    if (-[t0 timeIntervalSinceNow] > secs) { printf("reorders %ld\n", reorders); fflush(stdout); exit(0); }
   };
   const char *mode = argc > 3 ? argv[3] : "poll";
   if (!strcmp(mode, "link")) { CADisplayLink *dl = [w.screen displayLinkWithTarget:[NSBlockOperation blockOperationWithBlock:tick] selector:@selector(main)]; [dl addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes]; }
