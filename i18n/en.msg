@@ -3724,6 +3724,7 @@ android.swarm.none = No posts yet.
 android.swarm.gone = That swarm is not on this hub.
 android.swarm.provider = Provider
 android.swarm.model = Model
+android.buy.ask = Start a buy thread for {project}?
 # ---- ios: new entries go here ----
 ios.sections.running = {n, number} running
 ios.alerts.ask = Bub can alert you when a thread needs you.
@@ -4175,6 +4176,7 @@ ios.image.failed = Could not save the picture.
 ios.image.incoming = Picture ready: open a thread to send it.
 ios.image.loadfail = Could not load the picture.
 native.permission.photos.add = Backplane saves the pictures you choose in a thread to your photo library.
+ios.buy.ask = Start a buy thread for {project}?
 # ---- end ----
 # the sidebar's sections (docs/ALWAYS-ON.md section 8): the hub's words, and the window's
 sidebar.sections.needs = Needs you

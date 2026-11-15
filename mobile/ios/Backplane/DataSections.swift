@@ -132,8 +132,10 @@ struct DataProjectPageView: View {
     private var project: DProject? { client.projects.first { !$0.key.isEmpty && $0.key == route.key } }
     @State private var page: DProjectPage?
     @State private var done = false
-    // Buy it beside New thread, as a thread's header has it: the hub's button for this project; a press makes the buy thread and opens it
+    // Buy it beside New thread, as a thread's header has it: the hub's button for this project. A buy thread starts an agent's turn at once, so a
+    // press asks first (`buyAsk`), and only its answer makes the buy thread and opens it
     @State private var buy: DBuy?
+    @State private var buyAsk: DBuy?
     @State private var buying = false
     @State private var buyFailed = ""
     var body: some View {
@@ -150,7 +152,11 @@ struct DataProjectPageView: View {
         .listStyle(.plain).scrollContentBackground(.hidden).environment(\.defaultMinListRowHeight, 1)
         .navigationTitle(route.title).task { await load() }.refreshable { await load() }
         .toolbar { if let p = project { ToolbarItem(placement: .primaryAction) { Button { onNew(p.id) } label: { Image(systemName: "plus") }.accessibilityIdentifier("data.project.page.new") } } }
-        .toolbar { if let b = buy { ToolbarItem(placement: .primaryAction) { Button { startBuy(b) } label: { Image(systemName: "cart") }.disabled(buying).accessibilityLabel(Tr.t(b.label)).accessibilityIdentifier("data.project.page.buy") } } }
+        .toolbar { if let b = buy { ToolbarItem(placement: .primaryAction) { Button { buyAsk = b } label: { Image(systemName: "cart") }.disabled(buying).accessibilityLabel(Tr.t(b.label)).accessibilityIdentifier("data.project.page.buy") } } }
+        .confirmationDialog(Tr.ios_buy_ask(project: route.title), isPresented: Binding(get: { buyAsk != nil }, set: { if !$0 { buyAsk = nil } }), titleVisibility: .visible) {
+            Button(Tr.t("Buy it")) { if let b = buyAsk { startBuy(b) } }.accessibilityIdentifier("data.project.page.buy.confirm")
+            Button(Tr.t("Cancel"), role: .cancel) {}
+        }
         .task(id: "\(project?.id ?? "")|\(client.conn == .online)") { if client.conn == .online, let p = project { buy = await client.buyOfProject(p.id) } }
     }
     private func startBuy(_ b: DBuy) {
