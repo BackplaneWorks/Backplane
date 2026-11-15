@@ -1404,7 +1404,7 @@ mod imp {
                 // capture on the shield (our thread, button down over our window): a release that comes before the replay
                 // is routed here, in order, never to KiCad ahead of the replayed down (run SB2: up before down, no menu)
                 unsafe { windows_sys::Win32::UI::Input::KeyboardAndMouse::SetCapture(h); }
-                if let Ok(mut r) = replay_q().lock() { *r = Some(Replay { msg, x: pt.x, y: pt.y, at: mono_ms(), frame: id_of(frame), released: false, capture_lost: false }); }
+                if let Ok(mut r) = replay_q().lock() { *r = Some(Replay { msg, x: pt.x, y: pt.y, at: mono_ms(), frame: id_of(frame), released: false, capture_lost: false, ready_ticks: 0 }); }
                 if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() {
                     let fg = unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
                     eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_shield_click": {"button": msg, "foreground": id_of(fg), "replay_pending": true, "frame": id_of(frame)}}));
@@ -1528,15 +1528,18 @@ mod imp {
     /// the canvas left no foreground window, F3 by another route). A click on it is then always a click on Backplane's own
     /// window, which Windows activates; the pane's flag never decides it, so a wrong flag cannot eat a click.
     /// A press the shield took, to be replayed into KiCad once its shown editor has the focus (stage 2).
-    struct Replay { msg: u32, x: i32, y: i32, at: u64, frame: u64, released: bool, capture_lost: bool }
+    struct Replay { msg: u32, x: i32, y: i32, at: u64, frame: u64, released: bool, capture_lost: bool, ready_ticks: u8 }
     fn replay_q() -> &'static Mutex<Option<Replay>> { static Q: OnceLock<Mutex<Option<Replay>>> = OnceLock::new(); Q.get_or_init(Default::default) }
-    const REPLAY_WAIT_MS: u64 = 250;
+    /// bp-win, Nov 15: from the composer the editor had the focus 42-50 ms after the press (33 replays); from another
+    /// application (Notepad) Windows' activation takes longer, and two presses waited 255 and 290 ms and were dropped at
+    /// 250. With capture holding the release a longer wait costs nothing in ordering.
+    const REPLAY_WAIT_MS: u64 = 600;
     /// Each tick: the pending press goes to KiCad once its shown editor has the focus, at the point it was pressed (a drag
     /// starts where the person pressed; the real moves follow). Still held: the down alone (the physical release ends it).
     /// Already released: down and up together, so KiCad never keeps a down with no up. Focus not there within 250 ms: the
     /// press is dropped (consumed, as in stage 1) rather than landing late on whatever is under the pointer.
     fn replay_tick() {
-        let Some(r) = replay_q().lock().ok().and_then(|mut q| q.take()) else { return };
+        let Some(mut r) = replay_q().lock().ok().and_then(|mut q| q.take()) else { return };
         let waited = mono_ms().saturating_sub(r.at);
         let debug = std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some();
         let release_capture = || unsafe {
@@ -1545,7 +1548,15 @@ mod imp {
                 windows_sys::Win32::UI::Input::KeyboardAndMouse::ReleaseCapture();
             }
         };
-        if !kicad_has_keys(hwnd(r.frame)) {
+        // The real state, as the shield reads it: the system foreground is Backplane's own top-level and the foreground
+        // queue's focus is inside the shown editor, on two ticks running. kicad_has_keys alone reads KiCad's thread focus,
+        // which is stale while another application was in front: from Notepad the replay fired 0-2 ms after the press,
+        // during Windows' activation, and the click was swallowed (s2-click20 "from other_app", 4 of 20).
+        let top = unsafe { GetAncestor(hwnd(ACTIVE_CONTAINER.load(Ordering::SeqCst)), GA_ROOT) };
+        let fg = unsafe { windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
+        let ready_now = !top.is_null() && fg == top && kicad_has_keys(hwnd(r.frame));
+        r.ready_ticks = if ready_now { r.ready_ticks.saturating_add(1) } else { 0 };
+        if r.ready_ticks < 2 {
             if waited > REPLAY_WAIT_MS {
                 release_capture();
                 if debug { eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_replay": {"path": "dropped", "waited_ms": waited, "button": r.msg, "released": r.released}})); }
