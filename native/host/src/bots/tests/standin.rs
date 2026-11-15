@@ -17,8 +17,9 @@ say() { printf '{"type":"assistant","message":{"id":"m%s-%s","role":"assistant",
 while IFS= read -r line; do
   case "$line" in *'"type":"user"'*)
     n=$((n + 1)); printf 'TURN %s\n' "$line" >> @LOG@
+    own=$(printf %s "$line" | sed 's/<chat>.*<\/chat>//') # the turn's own words: not its memory view (bots/recall)
     printf '{"type":"system","subtype":"init","session_id":"%s","cwd":"/tmp","tools":["Bash"],"model":"fake","permissionMode":"default"}\n' "$sid"
-    case "$line" in
+    case "$own" in
       *'<charter>'*) tool memory_save '{"key":"run-note","kind":"note","text":"the run saw the morning routine"}'; say "planned the day" ;;
       *zqsave*) tool memory_save '{"key":"favourite-part","kind":"fact","text":"likes the 0603 footprint"}'; say "saved it" ;;
       *) say "hello" ;;

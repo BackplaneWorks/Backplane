@@ -101,7 +101,7 @@ pub struct World {
     /// what the mailroom owes after a step (Run.after, Run.fallback), in log order: taken by `Bots::after_steps`, and only for lines folded after the start
     #[serde(skip)] pub steps: Vec<StepEnd>,
     /// a thread's memory tree (bots/recall): where each written line is in the log, and its view as last kept
-    #[serde(default)] pub recall: HashMap<String, super::recall::Kept>,
+    #[serde(default)] pub recall: HashMap<String, super::recall::kept::Kept>,
     seen: usize, line: usize,
 }
 /// A line the mailroom answers once it is in the log. A step answers inside the step, on the state before it;
