@@ -40,11 +40,14 @@ int main(int argc, char **argv) { @autoreleasepool {
     int s = socket(AF_UNIX, SOCK_DGRAM, 0); struct sockaddr_un a = {0}; a.sun_family = AF_UNIX; strncpy(a.sun_path, path, sizeof a.sun_path - 1); unlink(path); a.sun_len = (unsigned char)SUN_LEN(&a);
     if (bind(s, (struct sockaddr *)&a, SUN_LEN(&a))) { perror("bind"); exit(2); }
     readSource = dispatch_source_create(DISPATCH_SOURCE_TYPE_READ, s, 0, dispatch_get_main_queue());
-    dispatch_source_set_event_handler(readSource, ^{ char b[256]; ssize_t n; while ((n = recv(s, b, sizeof b - 1, MSG_DONTWAIT)) > 0) { b[n] = 0; static int got; if (got++ < 3) { fprintf(stderr, "got %s\n", b); }
-      double x, y, ww, hh; long hid;
-      if (sscanf(b, "rect %lf %lf %lf %lf %ld", &x, &y, &ww, &hh, &hid) == 5) { host = hid; place(CGRectMake(x, y, ww, hh)); static BOOL ordered; if (!w.visible || !ordered) { ordered = YES; [w orderWindow:NSWindowAbove relativeTo:host]; } }
-      else if (!strcmp(b, "hide")) [w orderOut:nil];
-      else if (!strcmp(b, "raise")) above(); } });
+    dispatch_source_set_event_handler(readSource, ^{ char b[256]; ssize_t n; BOOL have = NO; CGRect last = CGRectZero;
+      // drain everything queued, apply only the newest rect (the host may send several a frame)
+      while ((n = recv(s, b, sizeof b - 1, MSG_DONTWAIT)) > 0) { b[n] = 0; static int got; if (got++ < 3) fprintf(stderr, "got %s\n", b);
+        double x, y, ww, hh; long hid;
+        if (sscanf(b, "rect %lf %lf %lf %lf %ld", &x, &y, &ww, &hh, &hid) == 5) { host = hid; last = CGRectMake(x, y, ww, hh); have = YES; }
+        else if (!strcmp(b, "hide")) { [w orderOut:nil]; have = NO; }
+        else if (!strcmp(b, "raise")) above(); }
+      if (have) { place(last); static BOOL ordered; if (!w.visible || !ordered) { ordered = YES; [w orderWindow:NSWindowAbove relativeTo:host]; } } });
     dispatch_resume(readSource);
   } else {
     [NSTimer scheduledTimerWithTimeInterval:1.0/120 repeats:YES block:^(NSTimer *t) {
