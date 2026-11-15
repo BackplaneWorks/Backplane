@@ -58,6 +58,18 @@ pub fn header(st: &State, thread: &str, session: &Value) -> Option<Value> {
     Some(json!({"icon": "shopping-cart", "label": label, "tip": if line.is_empty() { "Ready to order".to_string() } else { line }, "action": "fab-buy", "value": "", "on": false, "danger": false}))
 }
 
+/// The thread a project's page buys from: the project's latest thread that is not a buy thread (an archived one only when there is no other).
+pub fn page_source(st: &State, project: &str) -> Option<String> {
+    st.threads.iter().filter(|(id, t)| t.project == project && !t.deleted && !id.contains('~') && st.settings.get(&format!("buy.{id}")).map_or(true, |v| v.is_empty()))
+        .max_by(|a, b| (!a.1.archived, a.1.activity.max(a.1.created), a.0).cmp(&(!b.1.archived, b.1.activity.max(b.1.created), b.0))).map(|(id, _)| id.clone())
+}
+/// Buy it in the top row of a project's page: the header's button (`header`) for the thread the page buys from, named in `value` (the page opens that
+/// thread and presses its Buy it). `card` is that thread's own `fab.look` answer. None as the header has none: nothing to order, Ordering off, no thread.
+pub fn page_button(st: &State, thread: &str, card: &Value) -> Option<Value> {
+    let mut b = header(st, thread, &keep(card)?)?;
+    b["value"] = json!(thread); Some(b)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -86,6 +98,17 @@ mod tests {
         st.apply(&json!({"$":"TurnChanged","thread":"t1","state":"running","at":9})); assert!(header(&st, "t1", &sess).is_some(), "it does not come and go with the turn");
         st.apply(&json!({"$":"SettingSet","key":"order.enabled","value":"off","at":10})); assert!(header(&st, "t1", &sess).is_none(), "Ordering off");
         st.apply(&json!({"$":"SettingSet","key":"order.enabled","value":"on","at":11})); st.apply(&json!({"$":"SettingSet","key":"buy.t1","value":"t0","at":12})); assert!(header(&st, "t1", &sess).is_none(), "a buy thread has none of its own");
+    }
+    #[test] fn a_projects_page_has_the_headers_buy_it_for_its_latest_thread_that_is_no_buy_thread() {
+        let mut st = State::default(); project(&mut st);
+        assert_eq!(page_source(&st, "p1").as_deref(), Some("t1")); assert!(page_source(&st, "p2").is_none(), "a project with no thread buys from none");
+        st.apply(&json!({"$":"ThreadCreated","id":"t2","project":"p1","title":"y","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":5}));
+        assert_eq!(page_source(&st, "p1").as_deref(), Some("t2"), "the latest");
+        st.apply(&json!({"$":"SettingSet","key":"buy.t2","value":"t1","at":6})); assert_eq!(page_source(&st, "p1").as_deref(), Some("t1"), "never a buy thread");
+        let b = page_button(&st, "t1", &card(&["A"], "from $5", "")).unwrap();
+        assert_eq!((b["label"].as_str(), b["action"].as_str(), b["value"].as_str(), b["tip"].as_str()), (Some("Buy it · from $5"), Some("fab-buy"), Some("t1"), Some("Ready to order · A")));
+        assert!(page_button(&st, "t1", &card(&[], "", "")).is_none(), "nothing to order: no button, as in the header");
+        st.apply(&json!({"$":"SettingSet","key":"order.enabled","value":"off","at":10})); assert!(page_button(&st, "t1", &card(&["A"], "from $5", "")).is_none(), "Ordering off");
     }
     #[test] fn an_ordered_project_says_buy_again_and_how_it_stands() {
         let mut st = State::default(); project(&mut st); let mut sess = json!({"info": {}});
