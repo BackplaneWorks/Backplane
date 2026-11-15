@@ -10,9 +10,10 @@ SSH=${MAC_SSH:-$ROOT/build/gpui/mac-ssh}; [ -x "$SSH" ] || SSH=$(dirname "$(git 
 HOST=hs-mac-mini; DEST=${MAC_DEST:-bp-gpui-desktop}; FEAT=${GPUI_FEATURES-cef}
 COLD=0; CHECK=0; [ "${1:-}" = cold ] && { COLD=1; shift; }; [ "${1:-}" = check ] && { CHECK=1; shift; }
 export RSYNC_RSH="$SSH"
-$SSH $HOST "mkdir -p ~/$DEST/src/native/host/src/term ~/$DEST/src/assets/web ~/$DEST/src/scripts ~/$DEST/dist ~/$DEST/logs"
+$SSH $HOST "mkdir -p ~/$DEST/src/i18n ~/$DEST/src/native/host/src/term ~/$DEST/src/assets/web ~/$DEST/src/scripts ~/$DEST/dist ~/$DEST/logs"
 rsync -a --delete --exclude target --exclude '*.rs.bk' "$ROOT/native/gpui/" $HOST:$DEST/src/native/gpui/
 rsync -a --exclude cat-rigs "$ROOT/assets/" $HOST:$DEST/src/assets/   # the client compiles in fonts, provider marks and the web colours
+rsync -a --delete "$ROOT/i18n/" $HOST:$DEST/src/i18n/   # the client compiles in the language catalogs (i18n.rs include_str!)
 rsync -a "$ROOT/native/host/src/term/vt.rs" $HOST:$DEST/src/native/host/src/term/   # the client's terminal parser is the hub's (main.rs `mod vt`)
 rsync -a "$ROOT/scripts/cef-mac-helpers.sh" "$ROOT/scripts/cef-runtime-files.sh" $HOST:$DEST/src/scripts/
 $SSH $HOST "lockf -k /tmp/bp-mac-heavy.lockf sh -s" -- "$DEST" "$FEAT" "$COLD" "$CHECK" "$@" <<'REMOTE'

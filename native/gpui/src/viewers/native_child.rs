@@ -1921,7 +1921,12 @@ mod imp {
     }
 }
 
-#[cfg(not(any(target_os = "linux", windows)))]
+// macOS: KiCad's frames stay its own borderless windows over the pane (fork capability embed-macos)
+#[cfg(target_os = "macos")]
+#[path = "native_child_mac.rs"]
+mod imp;
+
+#[cfg(not(any(target_os = "linux", windows, target_os = "macos")))]
 mod imp {
     use super::{Frame, R};
     pub fn container(_parent: u64) -> Option<u64> { None }
