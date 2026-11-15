@@ -53,7 +53,23 @@ internal fun AccountsScreen(back: () -> Unit, open: (String) -> Unit) {
         Column(Modifier.padding(16.dp).verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             val p = page
             if (p == null) DMono(if (failure.isEmpty()) Msg.android_rescue_asking else Tr.t(failure), if (failure.isEmpty()) dfaint else dcs.error, 12)
-            else {
+            else if (p.has("people")) {
+                // the accounts by person (host settings/accounts_people.rs): one card per email, each login with a bar a limit window
+                p.optJSONArray("people").objects().forEach { e -> PersonCard(e, open) }
+                val providers = p.optJSONArray("providers").objects()
+                providers.filter { it.optString("provider") != "google" }.forEach { pv ->
+                    DBtn(Tr.t(pv.optString("add")), false, modifier = Modifier.testTag("accounts.add.${pv.optString("provider")}")) { name = ""; adding = pv }
+                }
+                providers.filter { it.optString("provider") == "google" }.forEach { pv ->
+                    DLine(); DMono(Tr.t(pv.optString("title")).uppercase(), dfaint)
+                    pv.optJSONArray("accounts").objects().forEach { a -> AccountRow(a) { open(a.optString("id")) } }
+                    DBtn(Tr.t(pv.optString("add")), false, modifier = Modifier.testTag("accounts.add.google")) { scope.launch { addAccount(pv, "", open) { failure = it } } }
+                }
+                DLine()
+                if (p.optString("error").isNotEmpty()) DMono(Tr.t(p.optString("error")), dcs.error, 11, lines = 4)
+                if (failure.isNotEmpty()) DMono(Tr.t(failure), dcs.error, 11, lines = 4)
+                DMono(Tr.t(p.optString("note")), dcs.onSurfaceVariant, 11, lines = 3)
+            } else {
                 p.optJSONArray("providers").objects().forEach { pv ->
                     DMono(Tr.t(pv.optString("title")).uppercase(), dfaint)
                     val accounts = pv.optJSONArray("accounts").objects()
@@ -95,6 +111,53 @@ private suspend fun addAccount(pv: JSONObject, label: String, open: (String) -> 
     } catch (e: Exception) { GoogleLoop.stop(); fail(e.message ?: "") }
 }
 
+/** A limit window as the hub draws it: its name and words over a bar filled to its share, in its tone (ok, warn from 75%, bad from 90% or held, dim a last reading). */
+@Composable
+internal fun UsageBar(b: JSONObject) {
+    val c = tone(b.optString("tone"))
+    val used = (b.optDouble("used", 0.0) / 100.0).coerceIn(0.0, 1.0).toFloat()
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            DMono(Tr.t(b.optString("name")), dcs.onSurfaceVariant, 11, modifier = Modifier.weight(1f))
+            DMono(Tr.t(b.optString("text")), if (b.optString("tone") == "ok") dfaint else c, 11)
+        }
+        Box(Modifier.fillMaxWidth().height(6.dp).border(BorderStroke(1.dp, dcs.outlineVariant)).background(dcs.surface)) {
+            Box(Modifier.fillMaxHeight().fillMaxWidth(used).background(c))
+        }
+    }
+}
+
+/** One person: their email, then each login (Claude, Codex, a sync token) with what it is, whether new threads use it, its state or hold and its bars; a login with an account page opens it. */
+@Composable
+private fun PersonCard(e: JSONObject, open: (String) -> Unit) {
+    Column(Modifier.fillMaxWidth().border(BorderStroke(1.dp, dcs.outlineVariant)).background(dcs.surfaceVariant).padding(10.dp).testTag("accounts.person.${e.optString("key")}"),
+        verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Text(e.optString("title"), color = dcs.onSurface, fontFamily = BpMono, fontSize = 14.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+        e.optJSONArray("logins").objects().forEachIndexed { i, l ->
+            if (i > 0) DLine()
+            val profile = l.optString("profile")
+            val what = listOf(Tr.t(l.optString("title")), l.optString("plan"), if (l.optString("kind") == "cli") Tr.t("CLI login") else "",
+                l.optString("label").takeUnless { it.equals(e.optString("title"), ignoreCase = true) } ?: "").filter { it.isNotEmpty() }.joinToString(" · ")
+            val out = l.optBoolean("out")
+            Column(Modifier.fillMaxWidth().then(if (profile.isNotEmpty()) Modifier.clickable { open(profile) }.testTag("accounts.login.$profile") else Modifier),
+                verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    DMono(what, dcs.onSurfaceVariant, 11, modifier = Modifier.weight(1f, fill = false))
+                    if (l.optBoolean("default")) DMono(Tr.t("Used for new threads"), dcs.onSurfaceVariant, 10, modifier = Modifier.background(dcs.surface).padding(horizontal = 5.dp, vertical = 1.dp))
+                    Spacer(Modifier.weight(1f))
+                    if (!out) DMono(Tr.t(l.optString("line")), tone(l.optString("tone")), 11)
+                }
+                // out: the hold on a line of its own (its end time is the point), the state word beside it
+                if (out) DMono(Tr.t(l.optString("hold")) + " · " + Tr.t(l.optString("line")), dcs.error, 11, lines = 2)
+                l.optJSONArray("bars").objects().forEach { UsageBar(it) }
+                if (l.optString("note").isNotEmpty()) DMono(Tr.t(l.optString("note")), dfaint, 11)
+                val also = l.optJSONArray("also").strings()
+                if (also.isNotEmpty()) DMono(Msg.ios_acct_also(also.joinToString(", ")), dfaint, 11, lines = 2)
+            }
+        }
+    }
+}
+
 @Composable
 private fun AccountRow(a: JSONObject, onClick: () -> Unit) {
     Row(Modifier.fillMaxWidth().border(BorderStroke(1.dp, dcs.outlineVariant)).background(dcs.surfaceVariant).clickable(onClick = onClick).padding(10.dp).testTag("accounts.row.${a.optString("id")}"),
@@ -106,7 +169,8 @@ private fun AccountRow(a: JSONObject, onClick: () -> Unit) {
                 DMono(Tr.t(a.optString("line")), tone(a.optString("tone")), 11)
             }
             if (a.optString("email").isNotEmpty()) DMono(a.optString("email"), dcs.onSurfaceVariant, 11)
-            if (a.optString("limits").isNotEmpty()) DMono(Tr.t(a.optString("limits")), dfaint, 11, lines = 2)
+            val bars = a.optJSONArray("bars").objects()
+            if (bars.isNotEmpty()) bars.forEach { UsageBar(it) } else if (a.optString("limits").isNotEmpty()) DMono(Tr.t(a.optString("limits")), dfaint, 11, lines = 2)
             if (a.optString("hold").isNotEmpty()) DMono(Tr.t(a.optString("hold")), dwarn, 11)
         }
     }

@@ -123,8 +123,9 @@ struct DataSettingsView: View {
         case "settings.accounts":
             if let p = accounts {
                 let rows = (p.own ?? []) + p.providers.flatMap { $0.accounts }
-                if let b = rows.flatMap({ $0.bars ?? [] }).max(by: { $0.used < $1.used }) { DUsageBar(bar: b, compact: true) }
-                else { Text(Tr.ios_settings_accounts_n(n: rows.count)).dmono(11).foregroundStyle(BackplaneDesign.faint) }
+                let all = p.people.map { $0.flatMap { $0.logins.flatMap { $0.bars } } } ?? rows.flatMap { $0.bars ?? [] }
+                if let b = all.max(by: { $0.used < $1.used }) { DUsageBar(bar: b, compact: true) }
+                else { Text(Tr.ios_settings_accounts_n(n: p.people?.count ?? rows.count)).dmono(11).foregroundStyle(BackplaneDesign.faint) }
             }
         case "settings.hubs":
             Text(client.hubName.isEmpty ? Tr.t(client.conn.rawValue) : "\(client.hubName) · \(Tr.t(client.conn.rawValue))").dmono(11).foregroundStyle(BackplaneDesign.faint).lineLimit(1)

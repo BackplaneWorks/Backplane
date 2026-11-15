@@ -7,7 +7,16 @@ import UIKit
 
 struct DAccountsPage: Decodable { var providers: [DAccProvider]; var error: String; var note: String
     /// the hub's own Claude sign-in, when it knows it (an older hub sends none)
-    var own: [DAccRow]? }
+    var own: [DAccRow]?
+    /// the accounts by person (host settings/accounts_people.rs): drawn instead of `own` and the Claude and Codex lists when the hub sends them
+    var people: [DPerson]? }
+/// One person: their email and each login of theirs (Claude, Codex, a sync token) with its state and a bar a limit window; `profile` "" has no account page.
+struct DPerson: Decodable, Identifiable { var key: String; var title: String; var logins: [DLogin]; var id: String { key } }
+struct DLogin: Decodable, Identifiable {
+    var provider: String; var title: String; var kind: String; var profile: String; var plan: String; var state: String; var line: String; var tone: String
+    var hold: String; var out: Bool; var `default`: Bool; var bars: [DAccBar]; var note: String; var also: [String]; var label: String
+    var id: String { provider + "/" + kind + "/" + profile }
+}
 /// A limit window as the hub draws it: `used` 0...100, `text` its words, `tone` ok | warn | bad | dim.
 struct DAccBar: Decodable, Hashable { var name: String; var used: Double; var text: String; var tone: String }
 struct DAccProvider: Decodable, Identifiable { var provider: String; var title: String; var add: String; var accounts: [DAccRow]; var id: String { provider } }
@@ -41,7 +50,21 @@ struct DataAccountsView: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                if let p = page {
+                if let p = page, let people = p.people {
+                    ForEach(people) { person($0) }
+                    // adding stays per provider; Google's accounts are not people here and keep their own list
+                    ForEach(p.providers.filter { $0.provider != "google" }) { pv in
+                        Button(Tr.t(pv.add)) { name = ""; adding = pv }.buttonStyle(DButton()).accessibilityIdentifier("accounts.add." + pv.provider)
+                    }
+                    ForEach(p.providers.filter { $0.provider == "google" }) { pv in
+                        DLine(); DHeading(text: pv.title)
+                        ForEach(pv.accounts) { a in Button { opened = DAccountRoute(id: a.id) } label: { row(a) }.buttonStyle(.plain).accessibilityIdentifier("accounts.row." + a.id) }
+                        Button(Tr.t(pv.add)) { Task { await add(pv, "") } }.buttonStyle(DButton()).accessibilityIdentifier("accounts.add." + pv.provider)
+                    }
+                    DLine()
+                    if !p.error.isEmpty { Text(Tr.t(p.error)).dmono(11).foregroundStyle(BackplaneDesign.bad) }
+                    Text(Tr.t(p.note)).dmono(11).foregroundStyle(BackplaneDesign.dim)
+                } else if let p = page {
                     if let own = p.own, !own.isEmpty {
                         ForEach(own) { a in row(a, chevron: false).accessibilityIdentifier("accounts.own") }
                         DLine()
@@ -92,6 +115,34 @@ struct DataAccountsView: View {
             opened = DAccountRoute(id: r.account.id)
         } catch { GoogleLoop.shared.stop(); failure = error.localizedDescription }
         await load()
+    }
+    /// A person's card: the email, then each login (what it is, used for new threads, its state or hold, its bars); a login with an account page opens it.
+    private func person(_ e: DPerson) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text(e.title).dmono(14, bold: true).foregroundStyle(BackplaneDesign.text).lineLimit(1).accessibilityIdentifier("accounts.person." + e.key)
+            ForEach(Array(e.logins.enumerated()), id: \.element.id) { i, l in
+                if i > 0 { DLine() }
+                if l.profile.isEmpty { login(l, e, chevron: false) }
+                else { Button { opened = DAccountRoute(id: l.profile) } label: { login(l, e, chevron: true) }.buttonStyle(.plain).accessibilityIdentifier("accounts.login." + l.profile) }
+            }
+        }.padding(10).frame(maxWidth: .infinity, alignment: .leading).dbox()
+    }
+    private func login(_ l: DLogin, _ e: DPerson, chevron: Bool) -> some View {
+        let what = [Tr.t(l.title), l.plan, l.kind == "cli" ? Tr.t("CLI login") : "", l.label.caseInsensitiveCompare(e.title) == .orderedSame ? "" : l.label].filter { !$0.isEmpty }.joined(separator: " · ")
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 6) {
+                Text(what).dmono(11).foregroundStyle(BackplaneDesign.dim).lineLimit(1)
+                if l.default { Text(Tr.t("Used for new threads")).dmono(10).foregroundStyle(BackplaneDesign.dim).lineLimit(1).fixedSize().padding(.horizontal, 5).padding(.vertical, 1).background(BackplaneDesign.raised) }
+                Spacer(minLength: 4)
+                if !l.out { Text(Tr.t(l.line)).dmono(11).foregroundStyle(dTone(l.tone)).lineLimit(1).fixedSize() }
+                if chevron { Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(BackplaneDesign.faint) }
+            }
+            // out: the hold on a line of its own (its end time is the point), the state word beside it
+            if l.out { Text("\(Tr.t(l.hold)) · \(Tr.t(l.line))").dmono(11).foregroundStyle(BackplaneDesign.bad).fixedSize(horizontal: false, vertical: true) }
+            ForEach(l.bars, id: \.self) { DUsageBar(bar: $0) }
+            if !l.note.isEmpty { Text(Tr.t(l.note)).dmono(11).foregroundStyle(BackplaneDesign.faint) }
+            if !l.also.isEmpty { Text(Tr.ios_acct_also(names: l.also.joined(separator: ", "))).dmono(11).foregroundStyle(BackplaneDesign.faint) }
+        }.contentShape(Rectangle())
     }
     private func row(_ a: DAccRow, chevron: Bool = true) -> some View {
         HStack(alignment: .top, spacing: 10) {

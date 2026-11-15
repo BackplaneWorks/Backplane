@@ -22,8 +22,12 @@ pub fn state_line(state: &str) -> (&'static str, &'static str) {
     }
 }
 /// Window.name: "5h", "7d", "7d opus", or the provider's own name.
-fn window_name(w: &Value) -> String {
+pub fn window_name(w: &Value) -> String {
+    // the provider's own name for a window ("Fable weekly"), as the desktop shows it (screens/accounts.rs `window_name`)
+    let l = s(w, "label"); if !l.is_empty() { return l.to_string() }
     match s(w, "scope") {
+        x if x.starts_with("seven_day_") => format!("7d {}", x["seven_day_".len()..].replace('_', " ")),
+        x if x.starts_with("five_hour_") => format!("5h {}", x["five_hour_".len()..].replace('_', " ")),
         "five_hour" => "5h".into(), "seven_day" => "7d".into(), "seven_day_opus" => "7d opus".into(), "seven_day_sonnet" => "7d sonnet".into(),
         _ => match w["window_minutes"].as_f64().map(|m| m as u64) { Some(300) => "5h".into(), Some(10080) => "7d".into(), Some(m) if m > 0 && m % 1440 == 0 => format!("{}d", m / 1440), Some(m) if m > 0 && m % 60 == 0 => format!("{}h", m / 60), _ => s(w, "name").to_string() },
     }
@@ -52,19 +56,27 @@ pub fn bars(allowance: &Value, held: bool, zone: &str, now: u64) -> Vec<Value> {
         let used = used_of(w)?;
         let reset = w["resets_at"].as_f64().map(|r| r as u64).filter(|r| *r > now).map(|r| format!(" · resets {}", crate::agents::rules::when(zone, r, now))).unwrap_or_default();
         let tone = if held || used >= 90.0 { "bad" } else if stale { "dim" } else if used >= 75.0 { "warn" } else { "ok" };
-        Some(json!({"name":window_name(w),"used":(used * 10.0).round() / 10.0,"text":format!("{}% used{reset}{}", used.round() as u64, if stale { " (last reading)" } else { "" }),"tone":tone}))
+        Some(json!({"name":window_name(w),"used":(used * 10.0).round() / 10.0,"resets_at":w["resets_at"].as_f64().map(|r| r as u64).filter(|r| *r > now),"text":format!("{}% used{reset}{}", used.round() as u64, if stale { " (last reading)" } else { "" }),"tone":tone}))
     }).collect()
 }
-/// The hub's own Claude sign-in (the CLI's login, holds key ""), when it is known and no added account is that same login: its usage as a row of its own, which
-/// opens nothing (it has no account page). None when the hub has neither who it is nor a reading.
-pub fn own(snap: &Value, zone: &str, now: u64) -> Option<Value> {
-    let d = &snap["default_login"]["claude"]; let al = &snap["default_allowance"];
-    let twin = snap["profiles"].as_array().map_or(false, |a| a.iter().any(|p| s(p, "provider") == "claude" && p["sameAsDefault"] == true));
-    if twin || (s(d, "state") != "known" && al["windows"].as_array().map_or(true, |w| w.is_empty())) { return None }
-    let held = snap["holds"][""]["text"].is_string();
-    let (line, tone) = if s(d, "state") == "signed-out" { ("signed out", "dim") } else { ("connected", "ok") };
-    Some(json!({"id":"","provider":"claude","label":"This hub's sign-in","email":s(d, "email"),"state":if tone == "ok" { "connected" } else { "disconnected" },"line":line,"tone":tone,
-        "limits":limit_lines(&json!({"allowance":al,"state":"connected"}), zone, now).join(" · "),"hold":s(&snap["holds"][""], "text"),"bars":bars(al, held, zone, now),"out":held,"open":false}))
+/// The hub's own sign-ins (each provider's CLI login, holds key "" for Claude's), each when it is known and no added account is that same login: its usage as a
+/// row of its own, which opens nothing (it has no account page). Claude's reading is `default_allowance`, Codex's `default_allowance_codex`.
+pub fn own(snap: &Value, zone: &str, now: u64) -> Vec<Value> {
+    PROVIDERS.iter().filter_map(|pv| {
+        let d = &snap["default_login"][*pv];
+        let al = if *pv == "claude" { &snap["default_allowance"] } else { &snap["default_allowance_codex"] };
+        let twin = snap["profiles"].as_array().map_or(false, |a| a.iter().any(|p| s(p, "provider") == *pv && p["sameAsDefault"] == true));
+        if twin || (s(d, "state") != "known" && al["windows"].as_array().map_or(true, |w| w.is_empty())) { return None }
+        // the holds of the CLI's own login are Claude's (key ""); Codex's own login is not held by the hub
+        let hold = if *pv == "claude" { s(&snap["holds"][""], "text") } else { "" };
+        let held = !hold.is_empty();
+        let (line, tone) = if s(d, "state") == "signed-out" { ("signed out", "dim") } else { ("connected", "ok") };
+        let p = json!({"allowance":al,"state":"connected"});
+        let mut limits = limit_lines(&p, zone, now);
+        if limits.is_empty() && tone == "ok" { limits.push("no usage reading yet".into()) }
+        Some(json!({"id":"","provider":pv,"label":if *pv == "claude" { "This hub's Claude sign-in" } else { "This hub's Codex sign-in" },"email":s(d, "email"),
+            "state":if tone == "ok" { "connected" } else { "disconnected" },"line":line,"tone":tone,"limits":limits.join(" · "),"hold":hold,"bars":bars(al, held, zone, now),"out":held,"open":false}))
+    }).collect()
 }
 /// One account in the list.
 pub fn row(p: &Value, holds: &Value, zone: &str, now: u64) -> Value {
@@ -80,7 +92,7 @@ pub fn page(snap: &Value, zone: &str, now: u64) -> Value {
     let profiles = snap["profiles"].as_array().cloned().unwrap_or_default();
     let providers: Vec<Value> = GROUPS.iter().map(|g| json!({"provider":g,"title":group_title(g),"add":if *g == "claude-sync" { "Add a Claude sync token".to_string() } else { format!("Add a {} account", group_title(g)) },
         "accounts":profiles.iter().filter(|p| group_of(p) == *g).map(|p| row(p, &snap["holds"], zone, now)).collect::<Vec<_>>()})).collect();
-    json!({"providers":providers,"own":own(snap, zone, now).into_iter().collect::<Vec<_>>(),"error":s(snap, "error"),"note":"Accounts sign in on the hub. Other agents use the hub machine's own sign-in."})
+    json!({"providers":providers,"own":own(snap, zone, now),"people":super::accounts_people::people(snap, zone, now),"error":s(snap, "error"),"note":"Accounts sign in on the hub. Other agents use the hub machine's own sign-in."})
 }
 /// The newest sign-in attempt of a profile.
 fn attempt<'a>(snap: &'a Value, id: &str) -> Option<&'a Value> { snap["attempts"].as_array()?.iter().filter(|a| s(a, "profile") == id).last() }
@@ -206,8 +218,22 @@ mod tests {
         s["holds"][""] = json!({"text":"out, resets 15:40"});
         let o = &page(&s, "", 0)["own"][0];
         assert_eq!((o["email"].as_str().unwrap(), o["open"].as_bool().unwrap(), o["out"].as_bool().unwrap(), o["bars"][0]["tone"].as_str().unwrap()), ("me@x.com", false, true, "bad"));
+        assert_eq!(o["label"], "This hub's Claude sign-in");
         s["profiles"][0]["sameAsDefault"] = json!(true);
         assert_eq!(page(&s, "", 0)["own"], json!([]), "an added account that is the same login carries it");
+        // Codex's own login: its reading, or words saying there is none yet
+        s["default_login"]["codex"] = json!({"state":"known","email":"c@x.com"});
+        let o = &page(&s, "", 0)["own"][0];
+        assert_eq!((o["label"].as_str().unwrap(), o["bars"].as_array().unwrap().len(), o["limits"].as_str().unwrap()), ("This hub's Codex sign-in", 0, "no usage reading yet"));
+        s["default_allowance_codex"] = json!({"state":"ok","windows":[{"name":"codex/primary","window_minutes":300.0,"used_percent":20.0},{"name":"codex/secondary","window_minutes":10080.0,"used_percent":50.0}]});
+        let b = page(&s, "", 0)["own"][0]["bars"].clone();
+        assert_eq!((b[0]["name"].as_str().unwrap(), b[1]["name"].as_str().unwrap(), b[1]["used"].as_f64().unwrap()), ("5h", "7d", 50.0));
+    }
+    #[test] fn a_window_the_provider_names_keeps_its_name() {
+        // the live hub's shapes: Claude's Fable weekly window, and one with no share yet (no bar)
+        let al = json!({"windows":[{"scope":"seven_day_fable","label":"Fable weekly","used_percent":37.0,"resets_at":5000},{"scope":"seven_day_opus","used_percent":3.0},{"scope":"seven_day_sonnet_x","used_percent":1.0},{"scope":"shared","used_percent":null,"resets_at":5000}]});
+        let b = bars(&al, false, "", 0);
+        assert_eq!(b.iter().map(|x| x["name"].as_str().unwrap()).collect::<Vec<_>>(), ["Fable weekly", "7d opus", "7d sonnet x"]);
     }
     #[test] fn a_new_account_is_named_for_the_person_when_they_give_no_name() { assert_eq!(new_label(&snap(), "claude", "  "), "Claude 3"); assert_eq!(new_label(&snap(), "codex", "Laptop"), "Laptop"); }
 }

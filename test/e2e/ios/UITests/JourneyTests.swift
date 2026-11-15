@@ -974,7 +974,7 @@ final class Journeys: XCTestCase {
         func openSettings() { let g = d.el("data.settings"); if g.waitForExistence(timeout: 15), g.isHittable { d.tap(g) } else { d.app.buttons["More"].firstMatch.tap(); let s = d.app.buttons["Settings"].firstMatch; if s.waitForExistence(timeout: 5) { s.tap() } } }
         guard d.step("Settings", timeout: 25, act: { openSettings() }, expect: { d.el("settings.appearance").waitForExistence(timeout: 8) && d.el("settings.accounts").exists }) else { return }
         sleep(2); d.shot("1-top")
-        guard d.step("Accounts & Usage", act: { d.tap(d.el("settings.accounts")) }, expect: { d.el("accounts.row.w").waitForExistence(timeout: 8) && d.el("accounts.own").exists }) else { return }
+        guard d.step("Accounts & Usage", act: { d.tap(d.el("settings.accounts")) }, expect: { d.el("accounts.person.person@example.com").waitForExistence(timeout: 8) && d.el("accounts.person.alex@example.net").exists && d.el("accounts.login.h").exists }) else { return }
         sleep(1); d.shot("2-accounts-usage")
         d.app.navigationBars.buttons.element(boundBy: 0).tap()
         let search = d.el("settings.search")

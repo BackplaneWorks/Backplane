@@ -298,7 +298,6 @@ fn card(cx: &mut Context<Backplane>, light: bool, st: &Accounts, p: &Value, i: u
     let c = |n: &str| theme::color(light, n);
     let (id, state) = (string(p, "id"), string(p, "state"));
     let (word, tok) = state_word(&st.snap, &id, &state);
-    let epoch = p["epoch"].as_u64().unwrap_or(0);
     let default = is_default(&st.snap, p);
     let mut sub = vec![identity(p)];
     let al = allowance(p); if !al.is_empty() { sub.push(al) }
@@ -308,6 +307,15 @@ fn card(cx: &mut Context<Backplane>, light: bool, st: &Accounts, p: &Value, i: u
                 .when(default, |d| d.child(div().px_2().py(px(1.)).bg(c("raise")).text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(trs("New threads")))))
             .child(div().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(sub.join("  ·  "))))
         .child(div().flex().items_center().gap_2().flex_shrink_0().child(div().size(px(8.)).bg(c(tok))).child(div().text_size(crate::scale::tpx(12.)).text_color(c(tok)).child(word)));
+    let mut card = div().flex().flex_col().p_4().mb_3().border_1().border_color(c("line")).bg(c("view")).child(head);
+    for el in controls(cx, light, st, p, i, default) { card = card.child(el); }
+    card.into_any_element()
+}
+/// A profile's buttons (check, default, move, sync token, sign out or in, delete), its sign-in panels and its last failure: under its card, or under its login in a person's entry.
+fn controls(cx: &mut Context<Backplane>, light: bool, st: &Accounts, p: &Value, i: usize, default: bool) -> Vec<AnyElement> {
+    let c = |n: &str| theme::color(light, n);
+    let (id, state) = (string(p, "id"), string(p, "state"));
+    let epoch = p["epoch"].as_u64().unwrap_or(0);
     let mut row = div().flex().items_center().gap_2().mt_3().flex_wrap();
     let armed = st.armed == id;
     let mut btn = |label: &str, key: &str, primary: bool, danger: bool, on: Box<dyn Fn(&mut Backplane, &mut Context<Backplane>)>| { row = std::mem::replace(&mut row, div()).child(button(cx, light, format!("acct-{key}-{i}"), label, primary, danger, on)); };
@@ -335,10 +343,10 @@ fn card(cx: &mut Context<Backplane>, light: bool, st: &Accounts, p: &Value, i: u
     } else {
         btn(&trs("Delete"), "delete", false, true, Box::new({ let pid = pid.clone(); move |this, _| this.screens.acct.armed = pid.clone() }));
     }
-    let mut card = div().flex().flex_col().p_4().mb_3().border_1().border_color(c("line")).bg(c("view")).child(head).child(row);
-    for a in attempts_of(&st.snap, &id) { card = card.child(attempt_panel(cx, light, st, &a, &id)); }
-    let why = failure_of(&st.snap, &id); if !why.is_empty() && attempts_of(&st.snap, &id).is_empty() { card = card.child(div().mt_2().text_size(crate::scale::tpx(12.)).text_color(c("bad")).child(trs(&why))); }
-    card.into_any_element()
+    let mut out = vec![row.into_any_element()];
+    for a in attempts_of(&st.snap, &id) { out.push(attempt_panel(cx, light, st, &a, &id)); }
+    let why = failure_of(&st.snap, &id); if !why.is_empty() && attempts_of(&st.snap, &id).is_empty() { out.push(div().mt_2().text_size(crate::scale::tpx(12.)).text_color(c("bad")).child(trs(&why)).into_any_element()); }
+    out
 }
 fn state_of(snap: &Value, id: &str) -> String { profiles(snap).iter().find(|p| p["id"] == id).map(|p| string(p, "state")).unwrap_or_default() }
 
@@ -390,6 +398,10 @@ pub fn page(cx: &mut Context<Backplane>, light: bool, st: &Accounts, avail: f32)
     out.push(div().pb_3().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(trs("Each account is a separate Claude subscription sign-in kept on this machine. A thread uses the account picked beside its model; when one runs out of allowance the thread carries on with the next account that has some left.")).into_any_element());
     if !st.notice.is_empty() { out.push(div().mb_3().p_3().bg(c("raise")).text_size(crate::scale::tpx(12.)).text_color(c("bad")).child(trs(&st.notice)).into_any_element()); }
     if !st.info.is_empty() { out.push(div().mb_3().p_3().bg(c("raise")).text_size(crate::scale::tpx(12.)).text_color(c("text")).child(st.info.clone()).into_any_element()); }
+    // the hub's accounts by person (host settings/accounts_people.rs): one entry per email, each login of it with its bars; an older hub sends none and the cards below stand
+    if let Some(people) = st.snap["people"].as_array() {
+        for (i, e) in people.iter().enumerate() { out.push(person(cx, light, st, e, i, avail < ADD_ROW_MIN)); }
+    } else {
     // the CLI's own login is always there, for each provider whose CLI said anything (Claude always): who it is, and an added account of the same identity folded in
     for provider in ["claude", "codex"] {
         if provider == "codex" && st.snap["default_login"]["codex"].is_null() { continue }
@@ -397,6 +409,7 @@ pub fn page(cx: &mut Context<Backplane>, light: bool, st: &Accounts, avail: f32)
     }
     let ps = profiles(&st.snap);
     for (i, p) in ps.iter().enumerate().filter(|(_, p)| p["sameAsDefault"] != true) { out.push(card(cx, light, st, p, i, avail < ADD_ROW_MIN)); }
+    }
     if let Some(input) = &st.label {
         let row = if avail < ADD_ROW_MIN { div().flex().flex_col().items_start().gap_2().mt_2().child(div().w_full().h(crate::scale::tpx(32.)).px_3().flex().items_center().bg(c("raise")).child(input.clone())) }
             else { div().flex().items_center().gap_2().mt_2().child(div().flex_1().min_w_0().h(crate::scale::tpx(32.)).px_3().flex().items_center().bg(c("raise")).child(input.clone())) };
@@ -405,6 +418,80 @@ pub fn page(cx: &mut Context<Backplane>, light: bool, st: &Accounts, avail: f32)
             .child(button(cx, light, "acct-add-sync".into(), &trs("Add Claude (sync)"), false, false, |this, cx| add_sync(this, cx))).into_any_element());
     }
     out.extend(super::google::section(cx, light, &st.google));
+    out
+}
+
+/// A bar's colour from the hub's tone: ok, warn (from 75%), bad (from 90%, or held), dim (a last reading).
+pub fn bar_color(tone: &str) -> &'static str { match tone { "ok" => "ok", "warn" => "warn", "bad" => "bad", _ => "faint" } }
+/// One limit window: its name and the hub's words over a bar filled to its share, in its tone.
+fn usage_bar(light: bool, b: &Value) -> AnyElement {
+    let c = |n: &str| theme::color(light, n);
+    let tone = bar_color(b["tone"].as_str().unwrap_or(""));
+    let used = (b["used"].as_f64().unwrap_or(0.0) / 100.0).clamp(0.0, 1.0) as f32;
+    div().flex().flex_col().gap(px(3.)).w_full()
+        .child(div().flex().items_center().gap_2().text_size(crate::scale::tpx(11.))
+            .child(div().flex_1().text_color(c("dim")).child(trs(&string(b, "name"))))
+            .child(div().text_color(c(if tone == "ok" { "faint" } else { tone })).child(trs(&string(b, "text")))))
+        .child(div().w_full().h(px(6.)).bg(c("raise")).border_1().border_color(c("line")).child(div().h_full().w(relative(used)).bg(c(tone))))
+        .into_any_element()
+}
+/// One person's entry: their email, then each login of it (Claude, Codex, a sync token): what it is, whether it is used for new threads, its state or hold, a bar
+/// per limit window, and the buttons of the added account behind it. All of it as the hub's `people` says (host settings/accounts_people.rs).
+fn person(cx: &mut Context<Backplane>, light: bool, st: &Accounts, e: &Value, i: usize, narrow: bool) -> AnyElement {
+    let c = |n: &str| theme::color(light, n);
+    let mut card = div().flex().flex_col().gap_3().p_4().mb_3().border_1().border_color(c("line")).bg(c("view"))
+        .child(div().text_size(crate::scale::tpx(14.)).font_weight(FontWeight::BOLD).child(string(e, "title")));
+    for (j, l) in e["logins"].as_array().into_iter().flatten().enumerate() {
+        let (pv, kind, pid) = (string(l, "provider"), string(l, "kind"), string(l, "profile"));
+        let mut what = vec![trs(&string(l, "title"))];
+        if let Some(p) = l["plan"].as_str().filter(|p| !p.is_empty()) { what.push(p.to_string()) }
+        if kind == "cli" { what.push(trs("CLI login")) }
+        let label = string(l, "label"); if !label.is_empty() && !label.eq_ignore_ascii_case(&string(e, "title")) { what.push(label) }
+        let out = l["out"] == true;
+        let (word, tok) = if out { (trs(&string(l, "hold")), "warn") } else { (trs(&string(l, "line")), bar_color(l["tone"].as_str().unwrap_or(""))) };
+        let head = if narrow { div().flex().flex_col().items_start() } else { div().flex().items_center() }.gap_3()
+            .child(div().flex().items_center().gap_2().flex_1().min_w(px(140.)).child(super::picker::logo(if pv == "codex" { "codex" } else { "claude" }))
+                .child(div().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(what.join(" · ")))
+                .when(l["default"] == true, |d| d.child(div().px_2().py(px(1.)).bg(c("raise")).text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(trs("Used for new threads")))))
+            .child(div().flex().items_center().gap_2().flex_shrink_0().child(div().size(px(8.)).bg(c(tok))).child(div().text_size(crate::scale::tpx(12.)).text_color(c(tok)).child(word)));
+        let mut col = div().flex().flex_col().gap_2().when(j > 0, |d| d.pt_3().border_t_1().border_color(c("line"))).child(head);
+        for b in l["bars"].as_array().into_iter().flatten() { col = col.child(usage_bar(light, b)); }
+        let note = string(l, "note"); if !note.is_empty() { col = col.child(div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(trs(&note))); }
+        let also: Vec<String> = l["also"].as_array().into_iter().flatten().filter_map(|a| a.as_str().map(str::to_string)).collect();
+        if !also.is_empty() { col = col.child(div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(format!("{} {}: {}", trs("Also added as"), also.join(", "), trs("the same account, counted once")))); }
+        if let Some(p) = profiles(&st.snap).into_iter().find(|p| string(p, "id") == pid && !pid.is_empty()) {
+            for el in controls(cx, light, st, &p, i * 10 + j, l["default"] == true) { col = col.child(el); }
+        } else if l["default"] != true && l["state"] == "connected" {
+            // the CLI's own login with no added account of it: only made the default here
+            let prov = pv.clone();
+            col = col.child(div().flex().child(button(cx, light, format!("acct-cli-default-{pv}"), &trs("Use for new threads"), false, false, move |this, _| {
+                /* i18n-ok: drawn through tr */ if this.tx.try_send(Command::Rpc("accounts.default".into(), Secret(json!({"provider": prov, "profile": "", "epoch": 0})), "acct-default")).is_err() { this.screens.acct.notice = "The hub is not reachable. Try again.".into(); }
+            })));
+        }
+        card = card.child(col);
+    }
+    card.into_any_element()
+}
+
+/// Settings › Usage's head: each person and each login of theirs with its state or hold and a bar per limit window, no buttons (those are on Accounts).
+pub fn usage_summary(light: bool, st: &Accounts) -> Vec<AnyElement> {
+    let c = |n: &str| theme::color(light, n);
+    let Some(people) = st.snap["people"].as_array() else { return vec![] };
+    let mut out = vec![];
+    for e in people {
+        let mut card = div().flex().flex_col().gap_2().pb_3().mb_3().border_b_1().border_color(c("line")).child(div().text_size(crate::scale::tpx(13.)).font_weight(FontWeight::BOLD).child(string(e, "title")));
+        for l in e["logins"].as_array().into_iter().flatten() {
+            let pv = string(l, "provider");
+            let mut what = vec![trs(&string(l, "title"))]; if let Some(p) = l["plan"].as_str().filter(|p| !p.is_empty()) { what.push(p.to_string()) }
+            let (word, tok) = if l["out"] == true { (trs(&string(l, "hold")), "warn") } else { (trs(&string(l, "line")), bar_color(l["tone"].as_str().unwrap_or(""))) };
+            card = card.child(div().flex().items_center().gap_2().child(super::picker::logo(if pv == "codex" { "codex" } else { "claude" }))
+                .child(div().flex_1().text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(what.join(" · ")))
+                .child(div().text_size(crate::scale::tpx(12.)).text_color(c(tok)).child(word)));
+            for b in l["bars"].as_array().into_iter().flatten() { card = card.child(usage_bar(light, b)); }
+            let note = string(l, "note"); if !note.is_empty() { card = card.child(div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(trs(&note))); }
+        }
+        out.push(card.into_any_element());
+    }
     out
 }
 
@@ -500,6 +587,9 @@ fn now_s() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_
 
 #[cfg(test)]
 mod tests {
+    #[test] fn a_bar_takes_the_hubs_tone() {
+        assert_eq!(["ok", "warn", "bad", "dim", ""].map(super::bar_color), ["ok", "warn", "bad", "faint", "faint"]);
+    }
     #[test] fn a_bulk_move_says_what_moved_and_what_waits() {
         use serde_json::json;
         assert_eq!(super::moved_text(&json!({"moved":3,"already":1,"running":[],"failed":[]})), "Moved 3 threads to this account.");
