@@ -180,6 +180,13 @@ pub fn new_board_families(fams: &[Family], had_head: bool) -> u64 {
     let removed = fams.iter().filter(|(_, before, now)| *before && !now).count() as u64;
     added.saturating_sub(removed)
 }
+/// Why git refused the design commit, for the thread's line. A machine where git was never told a name and email (many
+/// people who draw boards have never used git) gets the one thing to do first, since the line is cut at the pane's width;
+/// any other refusal stays as git said it.
+pub fn commit_refused(out: &str) -> String {
+    if crate::files::git::no_identity(out).is_some() { return "git does not know your name and email on this machine yet. Set them once (git config --global user.name \"Your Name\" and git config --global user.email you@example.com); the next turn or save commits them.".into() }
+    format!("git commit: {}", out.trim())
+}
 /// Commit the design files changed in the main checkout of `root` straight onto its branch, as
 /// one commit, then push when the branch has an upstream. `skip`: documents another thread
 /// holds the lock of (their files stay for that thread's own commit). Only the main checkout
@@ -213,7 +220,7 @@ pub async fn commit_design(root: &str, msg: &str, skip: &[String]) -> Result<Rec
     if r.code != 0 { return Err(format!("git add: {}", r.out.trim())) }
     let mut ci = vec!["commit", "--only", "-q", "--no-verify", "-m", msg, "--"]; ci.extend(files.iter().map(String::as_str));
     let r = git::run(&top, &ci).await;
-    if r.code != 0 { return Err(format!("git commit: {}", r.out.trim())) }
+    if r.code != 0 { return Err(commit_refused(&r.out)) }
     let commit = git::run_ro(&top, &["rev-parse", "--short", "HEAD"]).await.out.trim().to_string();
     let up = git::run_ro(&top, &["rev-parse", "--abbrev-ref", "-q", &format!("{branch}@{{upstream}}")]).await;
     let pushed = if up.code == 0 && !up.out.trim().is_empty() {
@@ -370,6 +377,12 @@ mod tests {
         assert!(!idle_long(n, "t1", false, 100 + IDLE_GRACE), "busy again: the clock starts over");
         assert!(!idle_long(n, "t1", true, 200));
         assert!(idle_long(n, "t1", true, 200 + IDLE_GRACE), "idle for the whole grace");
+    }
+
+    #[test] fn a_design_commit_git_refused_for_no_identity_says_what_to_set() {
+        let said = commit_refused("Author identity unknown\n\n*** Please tell me who you are.\n\nRun\n\n  git config --global user.email \"you@example.com\"\n\nfatal: unable to auto-detect email address (got 'k@h.(none)')");
+        assert!(said.starts_with("git does not know your name and email") && said.contains("git config --global user.name") && !said.contains("Author identity"), "{said}");
+        assert_eq!(commit_refused("error: pathspec 'x' did not match any file(s) known to git\n"), "git commit: error: pathspec 'x' did not match any file(s) known to git");
     }
 
     fn git(dir: &str, a: &[&str]) -> String {
