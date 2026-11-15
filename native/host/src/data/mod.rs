@@ -81,7 +81,7 @@ fn flags_of(id: &str) -> (bool, bool, u64) { crate::statehost::policies().and_th
 /// A setting of the policy state ("" when unset or the state is not up).
 fn setting_of(k: &str) -> String { crate::statehost::policies().and_then(|p| p.with_state(|st| st.settings.get(k).cloned())).flatten().unwrap_or_default() }
 /// Why `thread.create` refuses the Scratch project: its chats are kept (Conversation history) and open as they were, but no new one starts there.
-pub(crate) const SCRATCH_CLOSED: &str = "Conversation history takes no new chats. Start one in a project.";
+pub(crate) const SCRATCH_CLOSED: &str = "New chats start in a project. The chats with no project are kept as they are.";
 fn thread_json(hub: &Hub, m: &crate::model::Model, id: &str, asks: &HashMap<String, u64>) -> Option<Value> {
     let t = m.threads.get(id).filter(|t| !t.deleted)?;
     let waiting = asks.get(id).copied().unwrap_or(0);

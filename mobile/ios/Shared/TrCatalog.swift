@@ -122,7 +122,7 @@ ios.review.resolved	resolved	解決済み
 ios.review.reopen	reopen	再開
 ios.review.resolve	resolve	解決
 ios.settled.count	Settled ({n})	完了（{n}）
-ios.history.count	Conversation history ({n})	会話履歴（{n}）
+ios.history.count	Chats with no project ({n})	プロジェクトなしのチャット（{n}）
 ios.pad.colour	Colour {n}	色{n}
 ios.pad.pen	Pen	ペン
 ios.pad.box	Box	四角
@@ -167,7 +167,7 @@ ios.close.lower	close	閉じる
 ios.compare.close	Close compare	比較を閉じる
 ios.badge.colour	Colour	色
 ios.pair.code.connect	Connect with code	コードで接続
-ios.history	Conversation history	会話履歴
+ios.history	Chats with no project	プロジェクトなしのチャット
 ios.copied	Copied	コピーしました
 ios.copy.code	Copy code	コードをコピー
 ios.delete.dots	Delete…	削除…
@@ -2211,7 +2211,7 @@ gpui.b.replying.to	↩ Replying to: {line}	↩ 返信中：{line}
 gpui.b.in.reply.to	↩ In reply to: {quote}	↩ 返信先：{quote}
 gpui.b.settled.shelf	Settled ({n, number})	完了（{n, number}）
 gpui.b.settled.active	Settled {n, number}	完了 {n, number}
-gpui.b.history.count	Conversation history ({n, number})	会話履歴（{n, number}）
+gpui.b.history.count	Chats with no project {n, number}	プロジェクトなしのチャット {n, number}
 gpui.b.older	Older ({n, number})	古いプロジェクト（{n, number}）
 gpui.b.older.open	Older ({n, number}) · hide	古いプロジェクト（{n, number}）· 隠す
 gpui.start.a.conversation	Start a conversation.	会話を始めてください。
@@ -2556,7 +2556,7 @@ gpui.split	Split	分割
 gpui.palette.open	Open {kind}	{kind}を開く
 gpui.viewer	viewer	ビューア
 gpui.palette.new.thread.in	New thread in {project}	{project}に新しいスレッド
-gpui.conversation.history	Conversation history	会話の履歴
+gpui.conversation.history	Chats with no project	プロジェクトなしのチャット
 gpui.search.this.thread	Search this thread	このスレッド内を検索
 gpui.jump.to.a.thread.or	Jump to a thread or run a command	スレッドへ移動、またはコマンドを実行
 gpui.jump.to.a.thread.run	Jump to a thread, run a command or find what was said	スレッドへ移動、コマンドを実行、または発言を検索
@@ -2918,6 +2918,7 @@ voice.always.pill.listen	Listen	聞く
 voice.mark.tip	Spoken, transcribed by {stt}, {conf}% sure	音声入力（{stt} で文字起こし、確信度 {conf}%）
 voice.mark.unsure	unsure: {words}	不確かな語: {words}
 voice.mark.edited	edited	編集済み
+gpui.side.old.chats.that.belong.to	Old chats that belong to no project. New ones start in a project.	どのプロジェクトにも属さない以前のチャットです。新しいチャットはプロジェクトで始めます。
 gpui.side.group.projects	Group projects	プロジェクトをグループ化
 gpui.side.on.projects.with.nothing.going	On: projects with nothing going on lately are grouped by their git owner, or else their folder. Off: one list, and only the groups you make.	オン: 最近動きのないプロジェクトを Git のオーナー（なければフォルダ）ごとにまとめます。オフ: 1 つの一覧にし、自分で作ったグループだけを表示します。
 gpui.side.no.group	No group	グループなし
@@ -3367,7 +3368,7 @@ android.link.nohere	That link does not open here.	このリンクはここでは
 android.link.failed	That link did not open.	リンクを開けませんでした。
 android.link.offline	Not connected to the hub.	ハブに接続していません。
 android.copied	Copied	コピーしました
-android.history.title	Conversation history ({n})	会話履歴（{n}）
+android.history.title	Chats with no project ({n})	プロジェクトなしのチャット（{n}）
 android.settled.title	Settled ({n})	完了済み（{n}）
 android.dictate	Dictate	音声入力
 android.voice.spelling	The right spelling	正しい綴り
@@ -3439,7 +3440,7 @@ android.project.remove.ask	Remove “{title}” and its threads from the list?	�
 android.searching	searching…	検索中…
 android.search.none	nothing matches “{q}”	「{q}」に一致するものはありません
 android.search.project	project · {title}	プロジェクト · {title}
-android.history.head	CONVERSATION HISTORY	会話履歴
+android.history.head	CHATS WITH NO PROJECT	プロジェクトなしのチャット
 android.done	Done	完了
 android.you	you	あなた
 android.agent	agent	エージェント
@@ -3983,8 +3984,8 @@ android.hub.migrate.notcopied	{path} could not be copied: {why}.	{path}をコピ
 android.hub.migrate.signin	Sign in again to {names}. Their history came across.	{names}に再度サインインしてください。履歴は移行しました。
 android.hub.migrate.accounts	The account profiles were copied but not added yet. Import again once the hub has finished starting.	アカウントのプロファイルはコピーしましたが、まだ追加されていません。ハブの起動が完了したらもう一度インポートしてください。
 android.hub.migrate.vault	The 0.14 keys did not come: {why}. Add them again in Settings, API keys.	0.14のキーを移行できませんでした: {why}。設定のAPIキーで再度追加してください。
-android.hub.history.title	Conversation history	会話履歴
-android.hub.history.closed	Conversation history takes no new chats. Start one in a project.	会話履歴では新しいチャットを始められません。プロジェクトで始めてください。
+android.hub.history.title	Chats with no project	プロジェクトなしのチャット
+android.hub.history.closed	New chats start in a project. The chats with no project are kept as they are.	新しいチャットはプロジェクトで始めてください。プロジェクトなしのチャットはそのまま残ります。
 android.away	away	応答なし
 android.open	Open	開く
 android.search.messages	MESSAGES	メッセージ
@@ -5206,7 +5207,7 @@ gpui.streamer.win	Windows does not tell an app that the screen is being captured
     /// gpui.b.settled.active = Settled {n, number}
     static func gpui_b_settled_active(n: Int) -> String { f("gpui.b.settled.active", ["n": String(n)]) }
 
-    /// gpui.b.history.count = Conversation history ({n, number})
+    /// gpui.b.history.count = Chats with no project {n, number}
     static func gpui_b_history_count(n: Int) -> String { f("gpui.b.history.count", ["n": String(n)]) }
 
     /// gpui.b.older = Older ({n, number})
@@ -6133,7 +6134,7 @@ gpui.streamer.win	Windows does not tell an app that the screen is being captured
     /// android.fail.dns = {hub}: no such address on this network.
     static func android_fail_dns(hub: String) -> String { f("android.fail.dns", ["hub": hub]) }
 
-    /// android.history.title = Conversation history ({n})
+    /// android.history.title = Chats with no project ({n})
     static func android_history_title(n: String) -> String { f("android.history.title", ["n": n]) }
 
     /// android.settled.title = Settled ({n})
@@ -6715,7 +6716,7 @@ gpui.streamer.win	Windows does not tell an app that the screen is being captured
     /// ios.settled.count = Settled ({n})
     static func ios_settled_count(n: String) -> String { f("ios.settled.count", ["n": n]) }
 
-    /// ios.history.count = Conversation history ({n})
+    /// ios.history.count = Chats with no project ({n})
     static func ios_history_count(n: String) -> String { f("ios.history.count", ["n": n]) }
 
     /// ios.pad.colour = Colour {n}
