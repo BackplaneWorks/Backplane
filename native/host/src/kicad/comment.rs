@@ -32,6 +32,11 @@ pub const RESERVED: [&str; 10] = ["Ctrl+K", "Ctrl+J", "Ctrl+Tab", "Ctrl+Shift+Ta
 /// keyboard, so ';' is not reserved there: it types in the properties panel, search and every field.
 pub fn reserved(semicolon_is_kicads: bool, caps: &[String]) -> Vec<&'static str> {
     let mut v = RESERVED.to_vec();
+    // macOS (`embed-raw-ctrl`): wx's Ctrl is Cmd there, and Cmd+Tab / Cmd+` belong to macOS, so the tab and hand-back chords are the
+    // physical Ctrl key; the others stay Cmd chords (Backplane's cmd-k, cmd-j, cmd-;). Same indices, so the client's mapping holds.
+    if caps.iter().any(|c| c == "embed-raw-ctrl") {
+        for c in v.iter_mut() { *c = match *c { "Ctrl+Tab" => "RawCtrl+Tab", "Ctrl+Shift+Tab" => "RawCtrl+Shift+Tab", "Ctrl+`" => "RawCtrl+`", other => other }; }
+    }
     if semicolon_is_kicads && !caps.iter().any(|c| c == "comment-key-63" || c == "comment-key-handoff") { v.push(";") }
     v
 }
@@ -186,6 +191,12 @@ impl RpcHandler for CommentRpc {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn on_macos_the_tab_and_hand_back_chords_are_the_physical_ctrl_key_at_the_same_indices() {
+        let mac = reserved(false, &["embed-raw-ctrl".to_string()]);
+        assert_eq!(&mac[..6], ["Ctrl+K", "Ctrl+J", "RawCtrl+Tab", "RawCtrl+Shift+Tab", "RawCtrl+`", "Ctrl+;"]);
+        assert_eq!(mac.len(), RESERVED.len());
+        assert_eq!(reserved(false, &[]), RESERVED.to_vec(), "no embed-raw-ctrl (every runtime off macOS): unchanged");
+    }
     #[test] fn a_comment_event_is_published_with_its_note_names_and_copied_image() {
         let ev = json!({"seq": "4", "type": "ET_COMMENT", "detail": "move this", "frame": {"kind": "FK_PCB"},
             "comment": {"note": "move this", "names": {"references": ["U3"], "nets": ["GND"]}, "items": [{"kind": "FOOTPRINT", "reference": "U3", "layer": "F.Cu", "x_mm": 10.0, "y_mm": 20.0}], "bbox": {"x_min": 9.0}}});
