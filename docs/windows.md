@@ -60,3 +60,25 @@ A debug client compiles its shaders at run time from the path of gpui's sources 
 
 - KiCad on Windows: the IPC transport and socket discovery are written and unit-tested, not run against a real KiCad. KiCad 10 export and the release scripts take POSIX paths (their tests are skipped).
 - Tests skipped on Windows, each group with why: `scripts/ci-hub-windows-filter.sh`. "Debt" groups are to be ported; the others are Unix by design (Git sh's own pids and signals, symlinks and hard links, mode bits).
+
+## The embedded KiCad pane: the input shield
+
+KiCad's editor is a child window of another process inside Backplane's window. While Backplane has the keys, a
+transparent shield window (`native/gpui/src/viewers/native_child.rs`, `shield_proc`) lies over the pane, so a click
+there is Backplane's own and Windows never loses the foreground to the other process (F3).
+
+- A press on the shield hands KiCad the keys and is replayed into KiCad once its shown editor really has the focus
+  (the system foreground is Backplane's window and the focus is inside the editor, two ticks running; at most 600 ms).
+  The shield holds mouse capture until then, so a release that comes first reaches it, not KiCad, and the replay is a
+  whole click; a press still held is replayed as its down and the person's moves and release follow.
+- The press is posted, not injected: nothing feeds the system's key state, so the person's button state is theirs.
+- Wheel and hover over the pane are passed on to KiCad's canvas.
+
+Known limit: a middle-button drag that starts on the pane while Backplane has the keys pans only sometimes; the press
+hands the keys to KiCad either way, and a drag once KiCad has them pans as usual. Measured on bp-win (Nov 15), ten
+drags each: 4 of 10 pan at a 300 ms hold, 0 of 10 at 1 s. Right after the posted middle-down KiCad takes the mouse
+capture for a different window than the one the down reached, and no move goes through the shield. Two changes were
+tried and did not help, so neither shipped: forwarding every move and the release from the shield (KiCad took capture
+before the first move, every time), and injecting a real middle-down through the input queue (about the same rate,
+and left and right clicks at 120 ms holds then failed). On main before the shield did this (stage 1) such a drag never
+panned: the shield consumed every first press.
