@@ -1,0 +1,71 @@
+#!/usr/bin/env python3
+"""The benchmark's `claude` (docs/kicad-ipc-bench.md): the hub starts it as its Claude CLI, with the prompt, MCP config and plugins a real
+thread gets. The turn's first message decides what it is:
+  "HOLD <file>"      writes the hub's MCP url to <file> and holds the turn until <file>.stop exists (tools called by hand)
+  "ORACLE <script>"  runs `python3 <script> <mcp url> <cwd>` (the reference edit, no model) and ends the turn
+  anything else      the real Claude CLI (KIPC_BENCH_CLAUDE) on KIPC_BENCH_MODEL, its stream-json copied to $KIPC_BENCH_OUT/<cwd name>.jsonl
+The real CLI gets the hub's argv unchanged but for --model/--effort (fixed, so every run is the same model) and no session file."""
+import json, os, subprocess, sys, threading, time
+
+a = sys.argv[1:]
+out = os.environ.get("KIPC_BENCH_OUT", "/tmp"); name = os.path.basename(os.getcwd())
+say = lambda o: (sys.stdout.write(json.dumps(o) + "\n"), sys.stdout.flush())
+first = sys.stdin.readline()
+try:
+    c = json.loads(first)["message"]["content"]
+    text = c if isinstance(c, str) else "".join(b.get("text", "") for b in c if isinstance(b, dict))
+except Exception: text = ""
+open(os.path.join(out, name + ".argv.json"), "w").write(json.dumps(a))
+url = ""
+if "--mcp-config" in a:
+    try: url = json.loads(a[a.index("--mcp-config") + 1])["mcpServers"]["backplane"]["url"]
+    except Exception: pass
+
+def done(result):
+    say({"type": "result", "subtype": "success", "is_error": False, "result": result, "session_id": "kipc-bench"})
+    for _ in sys.stdin: pass
+
+if text.startswith("HOLD ") or text.startswith("ORACLE "):
+    say({"type": "system", "subtype": "init", "session_id": "kipc-bench"})
+    arg = text.split(" ", 1)[1].strip()
+    if text.startswith("HOLD "):
+        open(arg, "w").write(url)
+        while not os.path.exists(arg + ".stop"): time.sleep(0.2)
+        done("held")
+    else:
+        r = subprocess.run([sys.executable, arg, url, os.getcwd()], capture_output=True, text=True)
+        open(os.path.join(out, name + ".oracle.log"), "w").write(r.stdout + r.stderr)
+        done("oracle exit %d" % r.returncode)
+    sys.exit(0)
+
+def setarg(k, v):
+    if k in a: a[a.index(k) + 1] = v
+    else: a.extend([k, v])
+setarg("--model", os.environ.get("KIPC_BENCH_MODEL", "claude-fable-5-2"))
+setarg("--effort", os.environ.get("KIPC_BENCH_EFFORT", "medium"))
+if "--no-session-persistence" not in a: a.append("--no-session-persistence")
+# a variant under test (hub.mjs): tools kept from the agent, and replacements in the hub's system prompt ([[old, new], ...] in a JSON file),
+# so a prompt wording is measured before it is built into the hub
+if os.environ.get("KIPC_BENCH_DISALLOW") and "--disallowedTools" in a: a[a.index("--disallowedTools") + 1] += "," + os.environ["KIPC_BENCH_DISALLOW"]
+if os.environ.get("KIPC_BENCH_PROMPT") and "--append-system-prompt" in a:
+    i = a.index("--append-system-prompt") + 1
+    for old, new in json.load(open(os.environ["KIPC_BENCH_PROMPT"])):
+        if old not in a[i]: sys.stderr.write("kipc bench: prompt text to replace not found: %r\n" % old[:60])
+        a[i] = a[i].replace(old, new)
+    open(os.path.join(out, name + ".prompt.txt"), "w").write(a[i])
+env = {k: v for k, v in os.environ.items() if not (k.startswith("CLAUDE") or k in ("ANTHROPIC_API_KEY", "BACKPLANE_AGENT_OWNER"))}
+env["CLAUDE_CONFIG_DIR"] = os.environ["KIPC_BENCH_LOGIN"]
+p = subprocess.Popen([os.environ["KIPC_BENCH_CLAUDE"]] + a, stdin=subprocess.PIPE, stdout=subprocess.PIPE, env=env, text=True, bufsize=1)
+def feed():
+    try:
+        p.stdin.write(first); p.stdin.flush()
+        for l in sys.stdin: p.stdin.write(l); p.stdin.flush()
+    except Exception: pass
+    try: p.stdin.close()
+    except Exception: pass
+threading.Thread(target=feed, daemon=True).start()
+log = open(os.path.join(out, name + ".jsonl"), "w"); t0 = time.time()
+for l in p.stdout:
+    sys.stdout.write(l); sys.stdout.flush()
+    if '"type":"stream_event"' not in l: log.write(json.dumps({"t": round(time.time() - t0, 3)}) + "\t" + l); log.flush()
+sys.exit(p.wait())

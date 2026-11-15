@@ -7,6 +7,7 @@ pub mod canonical;
 pub mod checks;
 pub mod embed;
 pub mod ipc;
+pub mod kedit;
 pub mod kexport;
 pub mod kipc;
 pub mod kserve;

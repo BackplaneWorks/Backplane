@@ -46,6 +46,104 @@ impl Agents {
         if crate::files::kicad::ipc::coedit_live(&routed) && !structural(ty) { return Ok(routed) }
         self.doc_gate(thread, &doc).await.map(|_| routed)
     }
+    /// The gate for an agent's own tool call (`kicad_ipc`, `kicad_edit`): a write to a document nobody holds takes its lock for this
+    /// thread on the spot, as `lock_acquire` would (released when its turn ends), instead of an error that only says to call it.
+    /// A document another thread holds is refused as before: nothing blocks, nobody is queued without asking.
+    pub async fn kicad_gate_take(self: &Arc<Self>, thread: &str, path: &str, ty: &str) -> Result<String, String> {
+        match self.kicad_gate(thread, path, ty).await {
+            Err(why) if why.starts_with("writes to") => {
+                let name = kc::doc_lock(&kc::doc_of(&kc::route(path)));
+                let (ok, r) = self.tool_lock_acquire(thread, &json!({"name": name, "note": "editing"})).await;
+                if ok && r["held"] == true { self.kicad_gate(thread, path, ty).await } else { Err(why) }
+            }
+            r => r,
+        }
+    }
+    /// One command of an agent's for the project's KiCad: the approval refusals, the document's gate, the command, and a save's commit
+    /// to main. Ok is `kicad_ipc`'s answer ({type, message, ...}).
+    pub async fn kicad_call(self: &Arc<Self>, thread: &str, path: &str, ty: &str, msg: Value) -> Result<Value, String> {
+        use crate::files::kicad::ipc;
+        if let Some(why) = ipc::approval_refused(ty, &msg) { return Err(why) }
+        let routed = self.kicad_gate_take(thread, path, ty).await?;
+        let v = ipc::kicad_ipc_in(&self.hub, Some(thread), &routed, ty, msg).await?;
+        // a saved document is committed straight to main
+        if ty.rsplit('.').next() == Some("SaveDocument") && v["not_saved"].is_null() { self.design_record_note(thread, "save", v["format_upgrade"].as_str().unwrap_or("")).await }
+        Ok(v)
+    }
+    /// The MCP tool `kicad_ipc`: a short or misplaced command name is completed (`GetItems`, `kiapi.board.commands.CreateItems`), `$doc` and
+    /// `$project` in the message stand for the open document and its project, and a command that finds its document closed opens it and
+    /// runs again, so none of the three costs the agent a request.
+    pub async fn tool_kicad_ipc(self: &Arc<Self>, thread: &str, a: &Value) -> (bool, Value) {
+        use crate::files::kicad::kedit;
+        let path = a["path"].as_str().unwrap_or(""); let ty = kedit::full_type(a["type"].as_str().unwrap_or(""));
+        let mut msg = a.get("message").cloned().unwrap_or(json!({}));
+        let doc_kind = if path.ends_with(".kicad_pcb") { "DOCTYPE_PCB" } else if path.ends_with(".kicad_sch") { "DOCTYPE_SCHEMATIC" } else { "" };
+        let short = ty.rsplit('.').next().unwrap_or("").to_string();
+        if !doc_kind.is_empty() && msg.to_string().contains("\"$") {
+            match self.kicad_open(thread, path, doc_kind).await { Ok(doc) => kedit::fill(&mut msg, &doc), Err(e) => return fail(&e) }
+        }
+        match self.kicad_call(thread, path, &ty, msg.clone()).await {
+            Ok(v) => (true, v),
+            // its document is not open in this KiCad yet: open it and ask again
+            Err(e) if e.contains("no handler available for request") && !doc_kind.is_empty() && !matches!(short.as_str(), "OpenDocument" | "GetOpenDocuments") => {
+                if let Err(e2) = self.kicad_open(thread, path, doc_kind).await { return fail(&format!("{e}; opening {path} failed: {e2}")) }
+                match self.kicad_call(thread, path, &ty, msg).await { Ok(v) => (true, v), Err(e) => fail(&e) }
+            }
+            Err(e) => fail(&e),
+        }
+    }
+    /// The open document of `path`'s kind (its specifier), opened if it is not.
+    async fn kicad_open(self: &Arc<Self>, thread: &str, path: &str, kind: &str) -> Result<Value, String> {
+        if let Ok(v) = self.kicad_call(thread, path, "kiapi.common.commands.GetOpenDocuments", json!({"type": kind})).await { if let Some(d) = v["message"]["documents"].get(0) { return Ok(d.clone()) } }
+        Ok(self.kicad_call(thread, path, "kiapi.common.commands.OpenDocument", json!({"type": kind, "path": path})).await?["message"]["document"].clone())
+    }
+    /// The MCP tool `kicad_edit` (kicad/kedit.rs): a whole edit in one call, each of its commands through [`Self::kicad_call`].
+    pub async fn tool_kicad_edit(self: &Arc<Self>, thread: &str, a: &Value) -> (bool, Value) {
+        use crate::files::kicad::kedit;
+        struct Via<'a> { ag: &'a Arc<Agents>, thread: &'a str, path: &'a str, person: std::sync::Mutex<Value> }
+        impl kedit::Call for Via<'_> {
+            fn call<'b>(&'b self, ty: &'b str, msg: Value) -> kedit::Fut<'b> { Box::pin(async move {
+                let v = self.ag.kicad_call(self.thread, self.path, ty, msg).await?;
+                if !v["person"].is_null() { *self.person.lock().unwrap() = v["person"].clone() }
+                let mut m = v["message"].clone();
+                for k in ["not_saved", "format_upgrade", "kicad_load_changes"] { if v[k].is_string() { if !m.is_object() { m = json!({}) } m[k] = v[k].clone() } }
+                Ok(m)
+            }) }
+        }
+        let path = a["path"].as_str().unwrap_or("");
+        if !crate::plat::fs::is_abs(path) { return fail("path must be the absolute path of the board (.kicad_pcb) or schematic (.kicad_sch) to edit") }
+        let via = Via { ag: self, thread, path, person: std::sync::Mutex::new(Value::Null) };
+        match kedit::run(&via, path, a).await {
+            Ok(mut v) => {
+                let p = via.person.lock().unwrap().clone(); if !p.is_null() { v["person"] = p }
+                // a saved edit is shown: the person's viewer turns to the document, as `viewer_show` after the save would have it (show: false leaves it)
+                if v["saved"].as_str() == Some(path) && a["show"].as_bool().unwrap_or(true) { if self.viewer_show(thread, path, "", false).await.0 { v["shown"] = json!(true) } }
+                (true, v)
+            }
+            Err(e) => fail(&e),
+        }
+    }
+    /// Whether the thread's project has a board or schematic (its canonical design files).
+    pub async fn has_design(&self, thread: &str) -> bool {
+        let cwd = self.world().await.cwd(thread); if cwd.is_empty() { return false }
+        tokio::task::spawn_blocking(move || { let f = crate::files::kicad::project::read(&kc::design_root(&cwd)); !f.pcb.is_empty() || !f.sch.is_empty() }).await.unwrap_or(false)
+    }
+    /// The MCP tool `viewer_show`: the person's viewer shows `path` (a canonical board named by its worktree twin shows main's live copy).
+    /// `wait`: the answer carries what the viewer then shows (kind, source, part, sheet, layer, selection) as the client reports it; a client
+    /// that does not answer in 2 s leaves the last report, marked. Without it the viewer is told and nothing is waited for.
+    pub async fn viewer_show(self: &Arc<Self>, thread: &str, path: &str, kind: &str, wait: bool) -> (bool, Value) {
+        let shown = kc::route(path);
+        let cwd = self.world().await.cwd(thread); let roots = [kc::design_root(&cwd), cwd];
+        if let Some(why) = crate::present::viewer::show_refusal(kind, &shown, &roots) { return fail(&why) }
+        let before = crate::files::kicad::watch::viewer_state(thread).0;
+        self.hub.push_all(&json!({"t":"view","thread":thread,"path":shown,"kind":kind}));
+        // (the owner's windows on other machines show it too)
+        { let (hub, ann) = (self.hub.clone(), json!({"thread":thread,"path":shown.clone(),"kind":kind})); tokio::spawn(async move { hub.far_announce("viewer.show", &ann).await }); }
+        if !wait { return (true, json!({"shown":shown})) }
+        let mut now = crate::files::kicad::watch::viewer_state(thread);
+        for _ in 0..40 { if now.0 > before { break } tokio::time::sleep(std::time::Duration::from_millis(50)).await; now = crate::files::kicad::watch::viewer_state(thread); }
+        (true, json!({"shown":shown,"viewer":now.1,"settled":now.0 > before}))
+    }
     /// The same gate for a direct write of a board or schematic (`files_write`): Err names the holder.
     pub async fn doc_gate(&self, thread: &str, doc: &str) -> Result<(), String> {
         if crate::copy::on() || !kc::is_document(doc) { return Ok(()) }

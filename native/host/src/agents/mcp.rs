@@ -21,7 +21,7 @@ pub trait ToolSet: Send + Sync {
     fn call<'a>(&'a self, thread: &'a str, name: &'a str, a: &'a Value) -> crate::api::Fut<'a, (bool, Value)>;
 }
 pub const TOOLS_JSON: &str = include_str!("../../../../test/agents/fixtures/mcp-tools.json");
-pub const IMPLEMENTED: &[&str] = &["orchestrator_capabilities", "review_comment", "review_comments", "work_run", "work_watch", "work_list", "work_cancel", "work_unwatch", "lock_acquire", "lock_release", "lock_cancel", "lock_list", "account_list", "thread_launch", "machine_list", "delegate_task", "task_status", "task_cancel", "thread_list", "thread_read", "thread_send", "thread_update", "thread_wait", "thread_interrupt", "thread_settle", "viewer_show", "permission_prompt", "kicad_ipc", "kicad_ipc_status", "kicad_select", "kicad_bring_back", "terminal_open", "terminal_read", "terminal_send", "terminal_close", "preview_open", "preview_navigate", "preview_snapshot", "preview_click", "preview_type", "preview_press", "preview_scroll", "preview_evaluate", "preview_wait_for", "preview_resize", "preview_status", "secret_request", "secret_list", "secret_run", "settings_inspect", "settings_propose"];
+pub const IMPLEMENTED: &[&str] = &["orchestrator_capabilities", "review_comment", "review_comments", "work_run", "work_watch", "work_list", "work_cancel", "work_unwatch", "lock_acquire", "lock_release", "lock_cancel", "lock_list", "account_list", "thread_launch", "machine_list", "delegate_task", "task_status", "task_cancel", "thread_list", "thread_read", "thread_send", "thread_update", "thread_wait", "thread_interrupt", "thread_settle", "viewer_show", "permission_prompt", "kicad_ipc", "kicad_edit", "kicad_ipc_status", "kicad_select", "kicad_bring_back", "terminal_open", "terminal_read", "terminal_send", "terminal_close", "preview_open", "preview_navigate", "preview_snapshot", "preview_click", "preview_type", "preview_press", "preview_scroll", "preview_evaluate", "preview_wait_for", "preview_resize", "preview_status", "secret_request", "secret_list", "secret_run", "settings_inspect", "settings_propose"];
 const MAX_BODY: usize = 4 << 20;
 const MAX_CONNS: usize = 256;
 const MAX_PARKED_PER_THREAD: usize = 16;
@@ -57,6 +57,8 @@ pub fn shaped(ok: bool, body: &Value) -> Value {
     }
 }
 fn fail(msg: &str) -> (bool, Value) { (false, json!({"error":msg})) }
+/// Mark one listed tool as loaded up front (`_meta["anthropic/alwaysLoad"]`: Claude Code keeps its definition in the first request instead of behind its tool search).
+pub fn always_load(tools: &mut [Value], name: &str) { if let Some(t) = tools.iter_mut().find(|t| t["name"] == name) { t["_meta"] = json!({"anthropic/alwaysLoad": true}) } }
 
 /// Perm.*: the verdicts and the ask cards.
 pub fn perm_text(v: &Value) -> Value { json!({"content":[{"type":"text","text":v.to_string()}]}) }
@@ -153,7 +155,11 @@ impl Mcp {
         let ag = self.ag.upgrade()?;
         match sv(&o, "method") {
             "initialize" => { let pv = if sv(&p, "protocolVersion").is_empty() { "2025-06-18" } else { sv(&p, "protocolVersion") }; Some(result(&id, json!({"protocolVersion":pv,"capabilities":{"tools":{}},"serverInfo":{"name":"backplane","version":ag.hub.cfg.version}}))) }
-            "tools/list" => { let mut tools = self.tools.clone(); tools.extend(crate::settings::order::listed(&ag, thread).await); for s in ag.tool_sets() { tools.extend(s.list(thread)) } Some(result(&id, json!({"tools":tools}))) }
+            "tools/list" => { let mut tools = self.tools.clone(); tools.extend(crate::settings::order::listed(&ag, thread).await); for s in ag.tool_sets() { tools.extend(s.list(thread)) }
+                // a thread of a project with a board or schematic has `kicad_edit` from its first request (Claude defers the other tools' definitions
+                // behind a tool search, a request of its own before the first edit)
+                if ag.has_design(thread).await { always_load(&mut tools, "kicad_edit") }
+                Some(result(&id, json!({"tools":tools}))) }
             "tools/call" => self.call(&ag, thread, gen, &id, &p, sock).await,
             "ping" => Some(result(&id, json!({}))),
             // the stdio wrapper and Claude's headersHelper for the thread's own MCP servers (mcpx/run.rs): never listed as tools, answered only to this agent process
@@ -215,17 +221,9 @@ impl Mcp {
             "thread_wait" => ag.tool_wait(thread, &a).await,
             "thread_interrupt" => ag.tool_interrupt(thread, &a).await,
             "thread_settle" => ag.tool_settle(thread, &a).await,
-            "kicad_ipc" if crate::files::kicad::ipc::approval_refused(sv(&a, "type"), &a["message"]).is_some() =>
-                fail(&crate::files::kicad::ipc::approval_refused(sv(&a, "type"), &a["message"]).unwrap_or_default()),
-            "kicad_ipc" => match ag.kicad_gate(thread, sv(&a, "path"), sv(&a, "type")).await {
-                // main's canonical copy, one holder for writes; the holder is named to any other
-                Ok(path) => match crate::files::kicad::ipc::kicad_ipc_in(&ag.hub, Some(thread), &path, sv(&a, "type"), a.get("message").cloned().unwrap_or(json!({}))).await {
-                    // a saved document is committed straight to main (agents/design.rs)
-                    Ok(v) => { if sv(&a, "type").rsplit('.').next() == Some("SaveDocument") && v["not_saved"].is_null() { ag.design_record_note(thread, "save", v["format_upgrade"].as_str().unwrap_or("")).await } (true, v) }
-                    Err(e) => fail(&e),
-                },
-                Err(e) => fail(&e),
-            },
+            // main's canonical copy, one holder for writes (taken when free; the holder is named to any other); a saved document is committed straight to main (agents/design.rs)
+            "kicad_ipc" => ag.tool_kicad_ipc(thread, &a).await,
+            "kicad_edit" => ag.tool_kicad_edit(thread, &a).await,
             "kicad_bring_back" => ag.tool_bring_back(thread, &a).await,
             // the person's KiCad (and Backplane's viewers) select what the agent names (kicad/xprobe.rs), as a reference clicked in the chat does
             "kicad_select" => { let mut p = a.clone(); p["project"] = json!(crate::files::kicad::canonical::route(sv(&a, "path"))); match crate::files::kicad::xprobe::select(&ag.hub, &p).await { Ok(v) => (true, v), Err(e) => fail(&e) } }
@@ -238,21 +236,7 @@ impl Mcp {
             "secret_run" => { let cwd = ag.world().await.cwd(thread); crate::settings::secret::tool_run(thread, &cwd, &a).await }
             "order_review" | "order_ask" | "order_quote" | "order_status" => crate::settings::order::call(ag, thread, name, &a).await,
             n if crate::term::tools::NAMES.contains(&n) => crate::term::tools::call(&ag.hub, thread, n, &a).await.unwrap_or_else(|| fail("unknown tool")),
-            "viewer_show" => {
-                // the answer carries what the viewer then shows (kind, source, part, sheet, layer, selection) as the client reports it; a client that does not answer in 2 s leaves the last report, marked
-                // a canonical board named by its worktree twin shows main's live copy
-                let shown = crate::files::kicad::canonical::route(sv(&a, "path"));
-                let cwd = ag.world().await.cwd(thread); let roots = [crate::files::kicad::canonical::design_root(&cwd), cwd];
-                if let Some(why) = crate::present::viewer::show_refusal(sv(&a, "kind"), &shown, &roots) { fail(&why) } else {
-                let before = crate::files::kicad::watch::viewer_state(thread).0;
-                ag.hub.push_all(&json!({"t":"view","thread":thread,"path":shown,"kind":sv(&a, "kind")}));
-                // (the owner's windows on other machines show it too)
-                { let (hub, ann) = (ag.hub.clone(), json!({"thread":thread,"path":shown.clone(),"kind":sv(&a, "kind")})); tokio::spawn(async move { hub.far_announce("viewer.show", &ann).await }); }
-                let mut now = crate::files::kicad::watch::viewer_state(thread);
-                for _ in 0..40 { if now.0 > before { break } tokio::time::sleep(std::time::Duration::from_millis(50)).await; now = crate::files::kicad::watch::viewer_state(thread); }
-                (true, json!({"shown":shown,"viewer":now.1,"settled":now.0 > before}))
-                }
-            }
+            "viewer_show" => ag.viewer_show(thread, sv(&a, "path"), sv(&a, "kind"), true).await,
             n if ag.tool_sets().iter().any(|s| s.owns(n)) => {
                 // a board or schematic written directly holds its document's lock, as a KiCad write does
                 let gate = if n == "files_write" { match ag.files_doc(thread, sv(&a, "path")).await { Some(doc) => ag.doc_gate(thread, &doc).await.err(), None => None } } else { None };
