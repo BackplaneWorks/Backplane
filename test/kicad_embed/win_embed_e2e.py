@@ -1479,9 +1479,11 @@ def run_window_suite(h: SuiteHarness) -> int:
             f_fold.get("shown") is True
             and c_fold.get("x", 9999) < c_shown.get("x", 0)
             and f_fold.get("w", 0) > f_shown.get("w", 0)
-            and abs(f_fold.get("w", -99) - p_fold.get("w", 0)) <= 2,
+            # the report taken at the fold can come before the pane's own width is in it (3 of 10, Nov 15): the container,
+            # which is placed over the pane, stands in for it then
+            and abs(f_fold.get("w", -99) - (p_fold.get("w") or c_fold.get("w") or 0)) <= 2,
             {"before_x": c_shown.get("x"), "after_x": c_fold.get("x"), "before_w": f_shown.get("w"), "after_w": f_fold.get("w"),
-             "frame_w_folded": f_fold.get("w"), "pane_w_folded": p_fold.get("w"), "frame_shown_folded": f_fold.get("shown")},
+             "frame_w_folded": f_fold.get("w"), "pane_w_folded": p_fold.get("w"), "container_w_folded": c_fold.get("w"), "frame_shown_folded": f_fold.get("shown")},
         )
 
         r_res = reps.get("resized", {})
