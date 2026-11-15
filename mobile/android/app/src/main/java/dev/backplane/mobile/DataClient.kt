@@ -767,7 +767,14 @@ object DataClient {
         return (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Hit(it.optString("msg"), it.optString("role"), it.optString("text"), it.optLong("at").let { t -> if (t in 1 until 100_000_000_000) t * 1000 else t }) } // an older hub said seconds
     }
     // Buy it (feature buy): the desktop header's button for this thread (the hub's words), null when there is nothing to buy; a press makes the buy thread, which the app opens
-    data class Buy(val label: String, val tip: String)
+    data class Buy(val label: String, val tip: String, val thread: String = "")
+    /** Buy it on a project's page: the hub's button for the project, naming the thread it buys from (`thread.buy {project}`); null when there is nothing to buy. */
+    suspend fun buyOfProject(project: String): Buy? {
+        if (!has("buy")) return null
+        val o = call("thread.buy", JSONObject().put("project", project)).optJSONObject("buy") ?: return null
+        val th = o.optString("thread"); if (th.isEmpty()) return null
+        return Buy(o.optString("label").ifEmpty { "Buy it" }, o.optString("tip"), th)
+    }
     suspend fun buyOf(tid: String): Buy? {
         if (!has("buy")) return null
         val o = call("thread.buy", JSONObject().put("thread", tid)).optJSONObject("buy") ?: return null

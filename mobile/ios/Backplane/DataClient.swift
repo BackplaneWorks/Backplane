@@ -1011,6 +1011,8 @@ final class DataClient {
     }
     func search(_ q: String) async -> DSearch? { try? await call("search", ["q": q]) }
     func buyOf(_ thread: String) async -> DBuy? { guard has("buy") else { return nil }; return (try? await call("thread.buy", ["thread": thread], as: DBuyReply.self))?.buy }
+    /// Buy it on a project's page: the hub's button for the project, naming the thread it buys from (`thread.buy {project}`); nil when there is nothing to buy.
+    func buyOfProject(_ project: String) async -> DBuy? { guard has("buy"), let b = (try? await call("thread.buy", ["project": project], as: DBuyReply.self))?.buy, !b.thread.isEmpty else { return nil }; return b }
     func buy(_ thread: String) async throws -> String { try await call("order.buy", ["thread": thread], as: DThreadRef.self).thread }
     func find(_ thread: String, _ q: String) async -> DFind? { try? await call("find", ["thread": thread, "q": q]) }
     func searchIn(_ thread: String, _ q: String) async -> [DHit] { (try? await call("search", ["q": q, "thread": thread, "limit": 60], as: DHits.self))?.messages ?? [] }
