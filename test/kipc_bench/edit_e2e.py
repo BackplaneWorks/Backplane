@@ -15,4 +15,7 @@ OPS = {
  "drc_fix": ("StickHub.kicad_pcb", [{"find": {"kind": "track", "near": [150, 112.4, 0.1]}}, {"delete": {"kind": "track", "from": [146.2, 112.4], "to": [153.8, 112.4]}}]),
 }
 m = Mcp(sys.argv[1]); cwd = sys.argv[2]; f, ops = OPS[os.path.basename(cwd).split("-", 1)[1]]
+# kicad_ipc's short command names complete the name only: a misspelt field is still KiCad's error, never passed over
+try: m.call("kicad_ipc", {"path": cwd + "/" + f, "type": "GetItems", "message": {"header": {"document": "$doc"}, "typos": ["KOT_PCB_VIA"]}}); print("FAIL: a misspelt field passed")
+except RuntimeError as e: print("misspelt field refused:", str(e)[:90])
 r = m.call("kicad_edit", {"path": cwd + "/" + f, "ops": ops, "message": "bench"}); print(json.dumps(r)[:600]); print("calls", m.calls, "bytes", m.bytes)

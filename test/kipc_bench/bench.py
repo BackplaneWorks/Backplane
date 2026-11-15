@@ -64,7 +64,9 @@ def main():
         bad = 0
         for t in tasks:
             d = fresh(work, "e2e-" + t["id"], t["fixture"]); r = turn(work, d, f"ORACLE {HERE}/edit_e2e.py", 120000)
-            df = norm.diff(json.load(open(f"{work}/ref/{t['id']}.json")), norm.norm(d, env(work)["cli"])); bad += bool(df)
+            df = norm.diff(json.load(open(f"{work}/ref/{t['id']}.json")), norm.norm(d, env(work)["cli"]))
+            if "misspelt field refused" not in open(f"{work}/out/e2e-{t['id']}.oracle.log").read(): df.append("kicad_ipc took a misspelt field")
+            bad += bool(df)
             print(t["id"], "same as the reference" if not df else df[:4], "|", open(f"{work}/out/e2e-{t['id']}.oracle.log").read().strip()[-400:].replace("\n", " | "), flush=True)
         sys.exit(1 if bad else 0)
     elif cmd == "run":

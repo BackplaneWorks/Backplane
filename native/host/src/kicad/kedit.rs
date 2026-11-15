@@ -19,7 +19,44 @@ pub const ROWS: usize = 200;
 
 pub type Fut<'a> = Pin<Box<dyn Future<Output = Result<Value, String>> + Send + 'a>>;
 /// One raw IPC command: (fully qualified type, message) -> the response's message.
-pub trait Call: Sync { fn call<'a>(&'a self, ty: &'a str, msg: Value) -> Fut<'a>; }
+pub trait Call: Sync {
+    fn call<'a>(&'a self, ty: &'a str, msg: Value) -> Fut<'a>;
+    /// The saved schematic's sheet files as text, for the read-back of what was set (None: not read back, as with a stand-in).
+    fn sheet_texts(&self) -> Option<Vec<String>> { None }
+}
+/// KiCad's task gate (a check or refill is running: AS_BUSY "a task is running: ...") is waited out, asked again every BUSY_STEP for at most
+/// BUSY_WAIT, so a check that happens to run does not fail a whole edit. Any other refusal (an open dialog, which the answer names) is the answer.
+pub const BUSY_STEP: std::time::Duration = std::time::Duration::from_millis(250);
+pub const BUSY_WAIT: std::time::Duration = std::time::Duration::from_secs(60);
+pub fn task_busy(e: &str) -> bool { e.contains("AS_BUSY") && e.contains("a task is running") }
+struct Patient<'a> { c: &'a dyn Call, step: std::time::Duration, wait: std::time::Duration }
+impl Call for Patient<'_> {
+    fn call<'b>(&'b self, ty: &'b str, msg: Value) -> Fut<'b> { Box::pin(async move {
+        let until = std::time::Instant::now() + self.wait;
+        loop { match self.c.call(ty, msg.clone()).await { Err(e) if task_busy(&e) && std::time::Instant::now() < until => tokio::time::sleep(self.step).await, r => return r } }
+    }) }
+    fn sheet_texts(&self) -> Option<Vec<String>> { self.c.sheet_texts() }
+}
+/// Whether the ops change anything (a call of finds and raw reads alone does not).
+pub fn writes(ops: &Value) -> bool {
+    ops.as_array().into_iter().flatten().any(|o| match verb(o) { "find" | "" => false, "ipc" => !super::ipc::is_read(&full_type(o["ipc"]["type"].as_str().unwrap_or(""))), _ => true })
+}
+/// What a writing call is answered while the person works in this KiCad and the call does not say it has seen that (`person_seen`):
+/// the agent asks before working over them, as it does after a `kicad_ipc` read shows `person` (docs/kicad-coedit.md).
+pub fn person_first(person: &Value) -> String {
+    format!("The person is working in this KiCad right now: {person}. Nothing was changed. If your edit touches those items or their area, ask them first in one short question and carry on with other work; if it does not, send the same call again with person_seen: true.")
+}
+/// The placed symbol's block in a sheet file (found by its instance's `(reference "R")`) has the property with that text.
+pub fn file_prop(texts: &[String], reference: &str, name: &str, value: &str) -> bool {
+    let esc = value.replace('\\', "\\\\").replace('"', "\\\"");
+    let (want_ref, want) = (format!("(reference \"{reference}\")"), format!("(property \"{name}\" \"{esc}\""));
+    texts.iter().any(|t| { let mut from = 0;
+        while let Some(k) = t[from..].find(&want_ref) { let at = from + k; from = at + want_ref.len();
+            // the symbol block around the instance: from the last top-level "\n\t(symbol" before it to the next one after
+            let start = t[..at].rfind("\n\t(symbol").unwrap_or(0); let end = t[at..].find("\n\t(symbol").map_or(t.len(), |e| at + e);
+            if t[start..end].contains(&want) { return true } }
+        false })
+}
 
 // ---- units and names -------------------------------------------------------------------------------------------------------
 
@@ -329,7 +366,9 @@ pub fn full_type(ty: &str) -> String {
 
 struct Run<'a> { c: &'a dyn Call, doc: Value, board: bool, commit: Option<Value>, sheets: Option<Vec<(String, Value)>>, refill: Vec<Value>, wrote: bool, cache: std::collections::HashMap<String, Vec<(Value, Value)>>,
     /// The commit's name, the op (1-based) whose `find` ended a commit early, and each new symbol as KiCad itself places it (by its add entry's text).
-    message: String, split: usize, templates: std::collections::HashMap<String, Value> }
+    message: String, split: usize, templates: std::collections::HashMap<String, Value>,
+    /// What the saved sheet files must show (reference, property, text), and how many updates KiCad deferred (the person is editing those items).
+    expect: Vec<(String, String, String)>, deferred: usize }
 /// Rows a change answers with: what the items are now, so nothing is read again to check it.
 const SHOWN: usize = 24;
 /// The row kind of one of KiCad's own items, by its type.
@@ -436,6 +475,7 @@ impl Run<'_> {
         for (sheet, its) in by {
             let r = self.c.call(&format!("{C}UpdateItems"), json!({"header": self.header(&sheet), "items": its})).await?;
             if let Some(bad) = status_bad(&r, "updated_items") { return Err(bad) }
+            self.deferred += r["updated_items"].as_array().into_iter().flatten().filter(|i| i["status"]["code"] == "ISC_DEFERRED").count();
         }
         Ok(if n <= SHOWN { json!(rows) } else { json!(n) })
     }
@@ -470,9 +510,15 @@ impl Run<'_> {
                     let mut w = with.clone();
                     if let Some((dx, dy)) = op.get("by").map(|b| pair(b).ok_or("by is [dx, dy] in mm")).transpose()? { let at = row(&kind, &raw, false); let k = if at.get("at").is_some() { "at" } else { return Err(format!("a {kind} moves with set: from/to")) };
                         let (x, y) = pair(&at[k]).unwrap_or((0.0, 0.0)); w.insert("at".into(), json!([x + dx, y + dy])); }
-                    let body = apply(&kind, &mut raw, &Value::Object(w))?; ups.push((raw, sheet, body));
+                    let body = apply(&kind, &mut raw, &Value::Object(w))?;
+                    if kind == "symbol" { let r = text2(&raw["reference_field"]).to_string();
+                        if let Some(x) = with.get("value").and_then(Value::as_str) { self.expect.push((r.clone(), "Value".into(), x.into())) }
+                        for (n, t) in with.get("fields").and_then(Value::as_object).into_iter().flatten() { self.expect.push((r.clone(), n.clone(), t.as_str().unwrap_or("").into())) } }
+                    ups.push((raw, sheet, body));
                 }
-                Ok(json!({"updated": self.update(&kind, ups).await?}))
+                let before = self.deferred; let rows = self.update(&kind, ups).await?;
+                // the person is editing some of these right now: KiCad applies the change when they finish, merged with theirs (GetNotices says how it went)
+                Ok(if self.deferred > before { json!({"updated": rows, "deferred": self.deferred - before}) } else { json!({"updated": rows}) })
             }
             "add" => {
                 let list = match &op["add"] { Value::Array(a) => a.clone(), o => vec![o.clone()] }; self.begin().await?; let mut ids = vec![]; let mut by: Vec<(Value, Vec<Value>)> = vec![];
@@ -524,8 +570,9 @@ impl Run<'_> {
 pub async fn run(c: &dyn Call, path: &str, a: &Value) -> Result<Value, String> {
     let ops = match &a["ops"] { Value::Array(o) if !o.is_empty() => o.clone(), _ => return Err("ops is a list of edits: find, move, set, add, delete, netclass, rule, refill, ipc".into()) };
     if let Some((i, _)) = ops.iter().enumerate().find(|(_, o)| verb(o).is_empty()) { return Err(format!("op {}: an op is one of find, move, set, add, delete, netclass, rule, refill, ipc", i + 1)) }
+    let patient = Patient { c, step: BUSY_STEP, wait: BUSY_WAIT }; let c: &dyn Call = &patient;
     let doc = Run::open(c, path).await?;
-    let mut r = Run { c, board: path.ends_with(".kicad_pcb"), doc, commit: None, sheets: None, refill: vec![], wrote: false, cache: Default::default(),
+    let mut r = Run { c, expect: vec![], deferred: 0, board: path.ends_with(".kicad_pcb"), doc, commit: None, sheets: None, refill: vec![], wrote: false, cache: Default::default(),
         message: a["message"].as_str().unwrap_or("kicad_edit").to_string(), split: 0, templates: Default::default() };
     r.templates(&ops).await?;
     let mut results = vec![];
@@ -551,7 +598,14 @@ pub async fn run(c: &dyn Call, path: &str, a: &Value) -> Result<Value, String> {
     let mut out = json!({"results": results});
     if r.wrote && a["save"].as_bool().unwrap_or(true) {
         let s = r.c.call(&format!("{C}SaveDocument"), json!({"document": r.doc})).await?;
-        out["saved"] = if s["not_saved"].is_string() { s["not_saved"].clone() } else { json!(path) };
+        // the save gate's word (nothing to write; only KiCad's own load change) is not a save; a save says what else it wrote
+        if s["not_saved"].is_string() { out["saved"] = json!(false); out["not_saved"] = s["not_saved"].clone() } else { out["saved"] = json!(path) }
+        for k in ["format_upgrade", "kicad_load_changes"] { if s[k].is_string() { out[k] = s[k].clone() } }
+        // what was set on symbols is read back from the saved sheet files, never taken on the API's word (a sub-sheet's symbol most of all)
+        if out["saved"].is_string() && r.deferred == 0 { if let Some(texts) = r.c.sheet_texts() {
+            let wrong: Vec<String> = r.expect.iter().filter(|(rf, n, v)| !file_prop(&texts, rf, n, v)).map(|(rf, n, _)| format!("{rf} {n}")).collect();
+            if !wrong.is_empty() { return Err(format!("saved, but the schematic's files do not show: {}. KiCad did not take those; read them with find and set them again.", wrong.join(", "))) }
+        } }
     }
     Ok(out)
 }
@@ -631,17 +685,20 @@ mod tests {
     }
 
     /// A stand-in KiCad: a board with two footprints, a track and a zone; it records every command.
-    struct Fake { log: Mutex<Vec<(String, Value)>>, open: Mutex<bool>, fail: Option<&'static str> }
+    struct Fake { log: Mutex<Vec<(String, Value)>>, open: Mutex<bool>, fail: Option<&'static str>, busy: Mutex<u32>, save: Value, texts: Option<Vec<String>> }
     impl Call for Fake {
         fn call<'a>(&'a self, ty: &'a str, msg: Value) -> Fut<'a> { Box::pin(async move {
             self.log.lock().unwrap().push((ty.rsplit('.').next().unwrap_or("").to_string(), msg.clone()));
             if self.fail.is_some_and(|f| ty.ends_with(f)) { return Err("KiCad answered AS_BAD_REQUEST: no".to_string()) }
+            if ty.ends_with("UpdateItems") { let mut b = self.busy.lock().unwrap(); if *b > 0 { *b -= 1; return Err("KiCad answered AS_BUSY: a task is running: DRC (token 7)".into()) } }
+            if ty.ends_with("SaveDocument") { return Ok(self.save.clone()) }
             Ok(match ty.rsplit('.').next().unwrap_or("") {
                 "GetOpenDocuments" => if *self.open.lock().unwrap() { json!({"documents": [{"type": "DOCTYPE_PCB", "board_filename": "b.kicad_pcb", "project": {"name": "b", "path": "/p"}}]}) } else { return Err("no handler".into()) },
                 "OpenDocument" => { *self.open.lock().unwrap() = true; json!({"document": {"type": "DOCTYPE_PCB", "board_filename": "b.kicad_pcb", "project": {"name": "b", "path": "/p"}}}) }
                 "GetItems" => match msg["types"][0].as_str().unwrap_or("") {
                     "KOT_PCB_FOOTPRINT" => json!({"items": [fp("R1", "10k", 1000000, 2000000), fp("R2", "10k", 3000000, 2000000), fp("C1", "1u", 5000000, 5000000)]}),
                     "KOT_PCB_TRACE" => json!({"items": [{"id": {"value": "t1"}, "start": {"x_nm": "146200000", "y_nm": "112400000"}, "end": {"x_nm": "153800000", "y_nm": "112400000"}, "width": {"value_nm": "200000"}, "layer": "BL_F_Cu", "net": {"name": "GND"}}]}),
+                    "KOT_SCH_SYMBOL" => json!({"items": [{"id": {"value": "s1"}, "path": {"path": [{"value": "root"}, {"value": "sub"}], "path_human_readable": "/sub/"}, "position": {}, "reference_field": {"text": {"text": "R1"}}, "value_field": {"text": {"text": "10K"}}}]}),
                     "KOT_PCB_ZONE" => json!({"items": [{"id": {"value": "z1"}, "copper_settings": {"net": {"name": "+1V8"}}, "filled_polygons": [1, 2]}]}),
                     _ => json!({"items": []}),
                 },
@@ -652,11 +709,50 @@ mod tests {
                 _ => json!({}),
             })
         }) }
+        fn sheet_texts(&self) -> Option<Vec<String>> { self.texts.clone() }
     }
-    fn fake(fail: Option<&'static str>) -> Fake { Fake { log: Mutex::new(vec![]), open: Mutex::new(false), fail } }
+    fn fake(fail: Option<&'static str>) -> Fake { Fake { log: Mutex::new(vec![]), open: Mutex::new(false), fail, busy: Mutex::new(0), save: json!({}), texts: None } }
     fn names(f: &Fake) -> Vec<String> { f.log.lock().unwrap().iter().map(|(t, _)| t.clone()).collect() }
     fn sent(f: &Fake, ty: &str) -> Value { f.log.lock().unwrap().iter().find(|(t, _)| t == ty).map(|(_, m)| m.clone()).unwrap_or(Value::Null) }
-    fn go(f: &Fake, a: Value) -> Result<Value, String> { tokio::runtime::Builder::new_current_thread().build().unwrap().block_on(run(f, "/p/b.kicad_pcb", &a)) }
+    fn go(f: &Fake, a: Value) -> Result<Value, String> { go_on(f, "/p/b.kicad_pcb", a) }
+    fn go_on(f: &Fake, path: &str, a: Value) -> Result<Value, String> { tokio::runtime::Builder::new_current_thread().enable_time().build().unwrap().block_on(run(f, path, &a)) }
+
+    #[test] fn the_save_gate_and_kicads_task_gate_are_kept() {
+        // the save gate's "nothing written" is not a save; a real save says what else it wrote
+        let mut f = fake(None); f.save = json!({"not_saved": "KiCad says the document is not modified: nothing was written"});
+        let out = go(&f, json!({"ops": [{"move": "R1", "by": [1, 0]}]})).unwrap();
+        assert_eq!((out["saved"].clone(), out["not_saved"].clone()), (json!(false), json!("KiCad says the document is not modified: nothing was written")));
+        let mut f = fake(None); f.save = json!({"format_upgrade": "upgraded the file format", "kicad_load_changes": "KiCad migrated 3 models"});
+        let out = go(&f, json!({"ops": [{"move": "R1", "by": [1, 0]}]})).unwrap();
+        assert_eq!((out["saved"].clone(), out["format_upgrade"].clone(), out["kicad_load_changes"].clone()), (json!("/p/b.kicad_pcb"), json!("upgraded the file format"), json!("KiCad migrated 3 models")));
+        // a check is running: the write waits and goes again; the edit is one commit and is saved
+        let f = fake(None); *f.busy.lock().unwrap() = 2;
+        assert_eq!(go(&f, json!({"ops": [{"move": "R1", "by": [1, 0]}]})).unwrap()["saved"], "/p/b.kicad_pcb");
+        assert_eq!(names(&f), ["GetOpenDocuments", "OpenDocument", "GetItems", "BeginCommit", "UpdateItems", "UpdateItems", "UpdateItems", "EndCommit", "SaveDocument"]);
+        // an open dialog's refusal names the dialog and is the answer at once; a refused command (the plan's approval, in the gate above this) is too
+        assert!(task_busy("KiCad answered AS_BUSY: a task is running: DRC") && !task_busy("KiCad answered AS_BUSY: the dialog \"Zone Properties\" is open"));
+        // nothing here closes a document, shows a frame or selects: only these commands ever leave an edit
+        let f = fake(None); go(&f, json!({"ops": [{"find": "zone"}, {"set": {"kind": "zone", "net": "+1V8"}, "name": "Z"}, {"delete": {"kind": "track", "net": "GND"}}, {"netclass": {"name": "N", "clearance": 0.2}}, {"refill": true}]})).unwrap();
+        const SENT: &[&str] = &["GetOpenDocuments", "OpenDocument", "GetItems", "BeginCommit", "UpdateItems", "DeleteItems", "EndCommit", "SetNetClasses", "GetNetClasses", "GetNetClassAssignments", "RefillZones", "SaveDocument"];
+        assert!(names(&f).iter().all(|n| SENT.contains(&n.as_str())), "{:?}", names(&f));
+    }
+    #[test] fn what_is_set_on_a_sub_sheets_symbol_is_read_back_from_the_saved_files() {
+        let sheet = |v: &str, mpn: &str| format!("(kicad_sch\n\t(lib_symbols\n\t\t(symbol \"R\")\n\t)\n\t(symbol\n\t\t(lib_id \"Device:R\")\n\t\t(property \"Value\" \"{v}\")\n\t\t(property \"MPN\" \"{mpn}\")\n\t\t(instances (path \"/a/b\" (reference \"R1\")))\n\t)\n\t(symbol\n\t\t(lib_id \"Device:R\")\n\t\t(property \"Value\" \"1k\")\n\t\t(instances (path \"/a/b\" (reference \"R2\")))\n\t)\n)");
+        let texts = vec!["(kicad_sch)".to_string(), sheet("10k", "RC \\\"0603\\\"")];
+        assert!(file_prop(&texts, "R1", "Value", "10k") && file_prop(&texts, "R1", "MPN", "RC \"0603\"") && !file_prop(&texts, "R1", "Value", "1k") && !file_prop(&texts, "R2", "MPN", "RC \"0603\"") && !file_prop(&texts, "R9", "Value", "10k"));
+        let op = json!({"ops": [{"set": "R1", "value": "10k", "fields": {"MPN": "X1"}}]});
+        // the file has it: done, and the update went to the symbol's own sheet
+        let mut f = fake(None); f.texts = Some(vec![sheet("10k", "X1")]);
+        assert_eq!(go_on(&f, "/p/b.kicad_sch", op.clone()).unwrap()["saved"], "/p/b.kicad_sch");
+        assert_eq!(sent(&f, "UpdateItems")["header"]["document"]["sheet_path"], json!({"path": [{"value": "root"}, {"value": "sub"}]}));
+        // KiCad said OK but the saved sheet still has the old text: never reported as done
+        let mut f = fake(None); f.texts = Some(vec![sheet("10K", "X1")]);
+        let e = go_on(&f, "/p/b.kicad_sch", op).unwrap_err(); assert!(e.starts_with("saved, but the schematic's files do not show: R1 Value"), "{e}");
+    }
+    #[test] fn a_writing_call_is_told_of_the_person_first() {
+        assert!(writes(&json!([{"find": "zone"}, {"move": "R1", "by": [1, 0]}])) && writes(&json!([{"ipc": {"type": "RefillZones"}}])) && !writes(&json!([{"find": "zone"}, {"ipc": {"type": "GetNets"}}])));
+        let t = person_first(&json!({"selection": {"items": 2}})); assert!(t.contains("\"items\":2") && t.contains("Nothing was changed") && t.contains("person_seen: true"), "{t}");
+    }
 
     #[test] fn one_call_opens_reads_commits_and_saves() {
         let f = fake(None);
