@@ -2149,6 +2149,7 @@ gpui.acct.codex.did.not.say.who	Codex did not say who is signed in	Codexは誰�
 gpui.acct.claude.code.did.not.say	Claude Code did not say who is signed in	Claude Codeは誰がサインインしているか答えませんでした
 gpui.acct.anthropic.api.key.is.set	ANTHROPIC_API_KEY is set: Claude Code uses that key, not a sign-in	ANTHROPIC_API_KEYが設定されています: Claude Codeはサインインではなくそのキーを使います
 gpui.acct.the.cli.is.signed.in	The CLI is signed in but did not give an email	CLIはサインインしていますがメールアドレスを返しませんでした
+gpui.bots.name.rule	A bot's name is 1 to 24 letters, digits, - or _, with no spaces.	ボットの名前は、英字・数字・「-」・「_」で1〜24文字です（スペースは使えません）。
 gpui.send.the.message	Send the message	メッセージを送信
 gpui.new.line.in.the.message	New line in the message	メッセージ内で改行
 gpui.send.also	Send (also)	送信（別のキー）
