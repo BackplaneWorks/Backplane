@@ -251,7 +251,8 @@
    "re": "^first_edit_pixels$",
    "field": "blank_frames",
    "max": 0,
-   "what": "first Edit: frames of background"
+   "strict": true,
+   "what": "first Edit: frames of background (the viewer's picture stays under a warm KiCad's frame until it has painted: KicadPane::handoff)"
   },
   {
    "re": "^kicad_visible_before_edit$",

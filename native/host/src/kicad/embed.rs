@@ -80,6 +80,9 @@ pub struct Session {
     /// software rendering"), oldest first: each {id, kind, title, detail, error, frame, dismissed}. Kept for the session (an agent asking the
     /// session's state reads them all); the person's dismissal only hides one in the pane
     pub notices: Vec<Value>,
+    /// The frames KiCad said it has drawn since they were last shown (ET_FRAME_DRAWN, `embed-frame-drawn`), by window: the client holds the
+    /// viewer's picture under a first Edit until its frame is here (KicadPane::handoff). The last 16
+    pub drawn: Vec<u64>,
     /// KiCad's resident memory, MB (Linux, sampled on the health tick; 0 unknown): the warm policy's measure of what a KiCad costs
     pub rss_mb: u64,
     /// a request of the hub's drive (a show, a pre-warm) waits on KiCad's check or refill task (task-gate-reads): its description, "" for none
@@ -103,7 +106,7 @@ impl Session {
             container: 0, toplevel: 0, holder: 0, display: String::new(),
             sock: String::new(), events_sock: String::new(), sock_dir: String::new(),
             argv: String::new(), cli: String::new(), version: String::new(), desc: String::new(),
-            caps: vec![], frames: vec![], missed_pings: 0, dialogs: vec![], notices: vec![], rss_mb: 0, task_wait: String::new(), parked: false, touched_at: now, closing: false, lost_parent: false, editor_req: (String::new(), String::new(), None),
+            caps: vec![], frames: vec![], missed_pings: 0, dialogs: vec![], notices: vec![], drawn: vec![], rss_mb: 0, task_wait: String::new(), parked: false, touched_at: now, closing: false, lost_parent: false, editor_req: (String::new(), String::new(), None),
         }
     }
     pub fn spawned(mut self, pid: u32) -> Self { self.pid = pid; self }
@@ -191,6 +194,7 @@ impl Session {
             "frames": self.frames.iter().map(Frame::to_json).collect::<Vec<_>>(),
             "dialogs": self.dialogs,
             "notices": self.notices,
+            "drawn": self.drawn,
             "rss_mb": self.rss_mb,
             "task_wait": self.task_wait,
             // what the embedded editor can do beyond the basics (embed-gerbview, embed-editor-requested, ...): the client gates on these
@@ -1009,6 +1013,8 @@ enum Msg {
     ClientDialogs { pro: String, open: Vec<String> },
     /// KiCad's ET_NOTICE (`notice_of`)
     Notice { pro: String, gen: u64, notice: Value },
+    /// KiCad's ET_FRAME_DRAWN for this window (`embed-frame-drawn`)
+    FrameDrawn { pro: String, gen: u64, window: u64, drawn: bool },
     /// the person dismissed a notice in the pane
     NoticeDismiss { pro: String, id: u64 },
     ForkSync { pro: String, gen: u64 },
@@ -1770,6 +1776,14 @@ impl Actor {
                 let snap = s.clone();
                 self.publish(&snap, None);
             }
+            Msg::FrameDrawn { pro, gen, window, drawn } => {
+                let Some(s) = self.sessions.get_mut(&pro).filter(|s| s.gen == gen && s.is_live()) else { return };
+                // hidden: its next showing is drawn again before it counts
+                if s.drawn.contains(&window) == drawn { return }
+                if drawn { s.drawn.push(window); if s.drawn.len() > 16 { s.drawn.remove(0); } } else { s.drawn.retain(|w| *w != window); }
+                let snap = s.clone();
+                self.publish(&snap, None);
+            }
             Msg::NoticeDismiss { pro, id } => {
                 let Some(s) = self.sessions.get_mut(&pro) else { return };
                 *s = s.clone().dismiss_notice(id);
@@ -2494,6 +2508,15 @@ fn spawn_fork_events_loop(me: mpsc::UnboundedSender<Msg>, pro: String, gen: u64,
                     if let Some(n) = notice_of(ev) {
                         if me.send(Msg::Notice { pro: pro.clone(), gen, notice: n }).is_err() { return }
                         continue
+                    }
+                    if ty == "ET_FRAME_DRAWN" || ty_n == 28 {
+                        let window = u64_of(&ev["frame"]["window"]);
+                        if window != 0 && me.send(Msg::FrameDrawn { pro: pro.clone(), gen, window, drawn: true }).is_err() { return }
+                        continue
+                    }
+                    if ty == "ET_FRAME_HIDDEN" || ty_n == 4 {
+                        let window = u64_of(&ev["frame"]["window"]);
+                        if window != 0 && me.send(Msg::FrameDrawn { pro: pro.clone(), gen, window, drawn: false }).is_err() { return }
                     }
                     if ty == "ET_SELECTION_CHANGED" || ty_n == 14 {
                         if let Some((kind, names)) = super::xprobe::selection_event(ev) { super::coedit::person_selected(&pro, &kind.to_lowercase(), names.to_json()); }
