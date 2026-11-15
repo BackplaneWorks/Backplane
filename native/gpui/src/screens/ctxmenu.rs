@@ -69,9 +69,7 @@ pub fn thread_items(t: &Value, project: &str) -> Vec<Item> {
     /* i18n-ok: menu labels, tested; drawn through trs in render */ if t["depth"].is_u64() && !project.is_empty() { v.push(item("Move under\u{2026}", LOCAL_MOVE, &format!("{}|{}", raw(&qid), project), false)); }
     /* i18n-ok: menu labels, tested; drawn through trs in render */ v.push(item("Rename", "row-rename", raw(&qid), false));
     /* i18n-ok: menu labels, tested; drawn through trs in render */ v.push(item("Regenerate title", "row-retitle", raw(&qid), false));
-    // an archived row's lead (the hub's Unarchive) is already above
-    let archived = t["lead"].as_array().map_or(false, |l| l.iter().any(|x| x["action"] == "row-unarchive"));
-    /* i18n-ok: menu labels, tested; drawn through trs in render */ if !archived { v.push(item("Archive", "row-archive", &qid, false)); }
+    // no Archive: it is Settle (the hub reads an archive as a settle), already above
     /* i18n-ok: menu labels, tested; drawn through trs in render */ v.push(item("Delete", "row-delete", &qid, true));
     v
 }
@@ -327,7 +325,7 @@ mod tests {
         let t = j(r#"{"id":"http://h:1|t7","pinned":false,"canChild":true,"lead":[{"label":"Settle","action":"row-settle","value":"http://h:1|t7"}],"trail":[{"label":"Delete"},{"label":"Snooze","options":[{"label":"1 hour","value":"http://h:1|t7|1h"}]}]}"#);
         let it = thread_items(&t, "p1");
         let names: Vec<&str> = it.iter().map(|i| i.label.as_str()).collect();
-        assert_eq!(names, ["Pin", "Settle", "Snooze 1 hour", "New subthread", "Rename", "Regenerate title", "Archive", "Delete"]);
+        assert_eq!(names, ["Pin", "Settle", "Snooze 1 hour", "New subthread", "Rename", "Regenerate title", "Delete"], "no Archive: it is Settle");
         assert_eq!(it[3].value, "t7|p1"); assert_eq!(it[4].value, "t7"); assert!(it.last().unwrap().confirm && !it[0].confirm);
         let pinned = j(r#"{"id":"t1","pinned":true}"#); assert_eq!(thread_items(&pinned, "p")[0].action, "row-unpin");
     }
@@ -363,10 +361,10 @@ mod tests {
         assert_eq!(it[1].action, "new-thread");
         let it = project_items("p1"); assert_eq!(it.iter().map(|i| i.action.as_str()).collect::<Vec<_>>(), ["new-thread", "swarm-new", LOCAL_INTENT, "proj-rename", "look", "proj-remove"]); assert!(it[5].confirm && !it[3].confirm && it[3].value == "p1" && it[1].value == "p1");
     }
-    #[test] fn an_archived_row_offers_unarchive_not_archive() {
-        let t = j(r#"{"id":"h|t7","lead":[{"label":"Unarchive","action":"row-unarchive","value":"h|t7"}]}"#);
-        let it = thread_items(&t, "p1"); let acts: Vec<&str> = it.iter().map(|i| i.action.as_str()).collect();
-        assert!(acts.contains(&"row-unarchive") && !acts.contains(&"row-archive"), "{acts:?}");
+    #[test] fn no_row_offers_archive() {
+        for t in [j(r#"{"id":"h|t7","lead":[{"label":"Unarchive","action":"row-unarchive","value":"h|t7"}]}"#), j(r#"{"id":"h|t8"}"#)] {
+            let it = thread_items(&t, "p1"); assert!(it.iter().all(|i| i.action != "row-archive"), "{:?}", it.iter().map(|i| &i.action).collect::<Vec<_>>());
+        }
     }
     #[test] fn move_under_offers_every_row_but_itself_its_subtree_and_its_parent() {
         let d = j(r#"{"projects":[{"id":"h|p1","threads":[{"id":"h|a","title":"A","depth":0},{"id":"h|b","title":"B","depth":1},{"id":"h|c","title":"C","depth":2},{"id":"h|d","title":"D","depth":0}],"settled":[{"id":"h|e","title":"E","depth":0}]},{"id":"h|p2","threads":[{"id":"h|x","title":"X","depth":0}]}]}"#);
@@ -378,7 +376,7 @@ mod tests {
     }
     #[test] fn an_armed_item_reads_in_the_language_in_force() {
         let t = j(r#"{"id":"h|t7"}"#); let items = thread_items(&t, "p1");
-        let del = items.iter().find(|i| i.action == "row-delete").unwrap(); let arch = Item { confirm: true, ..items.iter().find(|i| i.action == "row-archive").unwrap().clone() };
+        let del = items.iter().find(|i| i.action == "row-delete").unwrap(); let arch = Item { confirm: true, label: "Archive".into(), action: "row-archive".into(), value: "h|t7".into() };
         assert_eq!((shown_armed_label(del), shown_armed_label(&arch)), ("Click again to delete".to_string(), "Click again to archive".to_string()));
         crate::i18n::with_lang("ja", || {
             assert_eq!(shown_armed_label(del), crate::i18n::catalog().japanese("Click again to delete").unwrap());

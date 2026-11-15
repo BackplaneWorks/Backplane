@@ -56,12 +56,16 @@ fn ok() -> Value { json!({"t":"reply","id":7,"ok":true}) }
     let (e, r) = ask(&h, "thread.rename", json!({"thread":"t1","title":"  New name  "})).await; assert_eq!(e, vec![json!({"$":"ThreadRenamed","id":"t1","title":"New name","at":0}), json!({"$":"SettingSet","key":"title.person.t1","value":"1","at":0})]); assert_eq!(r, ok());
     let (e, r) = ask(&h, "thread.rename", json!({"thread":"t1","title":"   "})).await; assert!(e.is_empty()); assert_eq!(r, ok());
 }
-// Retire.archive + Archive.changes + Watch.retire: the asks that wait on the process close (a plan stays), the bg rows clear, a snooze wakes
-#[tokio::test] async fn archive_closes_asks_clears_background_rows_and_wakes_a_snooze() {
+// Archive is Settle (state/mod.rs): an older client's Archive settles the thread and logs no archive.
+// Retire (delete): the asks that wait on the process close (a plan stays), the bg rows clear
+#[tokio::test] async fn archive_settles_and_delete_closes_asks_and_clears_background_rows() {
     let h = hub("archive").await;
     let (e, r) = ask(&h, "thread.archive", json!({"thread":"t1"})).await; assert_eq!(r, ok());
-    assert_eq!(e, vec![json!({"$":"ThreadArchived","id":"t1","archived":true,"at":0}), json!({"$":"ThreadSnoozed","id":"t1","until":0,"at":0}), json!({"$":"AskClosed","id":"a1","answer":"","at":0}),
-        json!({"$":"WorkSet","thread":"t1","kind":"bg","rows":"","at":0}), json!({"$":"WorkSet","thread":"t1","kind":"watch","rows":"","at":0}),
+    assert_eq!(e[0], json!({"$":"ThreadSettled","id":"t1","manual":true,"at":0}));
+    assert!(!e.iter().any(|x| x["$"] == "ThreadArchived"), "{e:?}");
+    let (e, _) = ask(&h, "thread.delete", json!({"thread":"t1"})).await;
+    assert_eq!(e, vec![json!({"$":"ThreadDeleted","id":"t1","at":0}), json!({"$":"AskClosed","id":"a1","answer":"","at":0}),
+        json!({"$":"WorkSet","thread":"t1","kind":"watch","rows":"","at":0}),
         json!({"$":"PendingChanged","thread":"t1","count":1,"at":0})], "Pend.fix: the plan ask stays open");
     let (e, _) = ask(&h, "thread.delete", json!({"thread":"t2"})).await;
     assert_eq!(e, vec![json!({"$":"ThreadDeleted","id":"t2","at":0}), json!({"$":"WorkSet","thread":"t2","kind":"watch","rows":"","at":0})]);
@@ -495,8 +499,8 @@ async fn plan_of(h: &Arc<Hub>, method: &str, p: Value) -> Vec<Value> {
     for _ in 0..100 { if state(&h) == "running" { break } tokio::time::sleep(std::time::Duration::from_millis(50)).await }
     assert_eq!(state(&h), "running", "the stand-in holds the turn");
     let out = h.request(&mut c, &json!({"id":2,"m":"thread.archive","p":{"thread":"ta1"}})).await; assert_eq!(out[0]["ok"], true);
-    assert_ne!(state(&h), "running", "archive ended the running turn"); assert_eq!(state(&h), "interrupted");
-    let mut f = super::fold::Fold::default(); f.sync(&h.store).unwrap(); assert!(f.threads["ta1"].archived);
+    assert_ne!(state(&h), "running", "archive (a settle) ended the running turn"); assert_eq!(state(&h), "interrupted");
+    let mut f = super::fold::Fold::default(); f.sync(&h.store).unwrap(); assert!(!f.threads["ta1"].archived && f.threads["ta1"].forced == 1, "settled, not archived");
 }
 
 // Home.start is atomic for the client: turn.start failing once leaves the thread, the retry delivers the message, a third try posts nothing
@@ -637,4 +641,14 @@ async fn ask_on(h: &Arc<Hub>, c: &mut crate::hub::Conn, m: &str, p: Value) -> (V
     h.commit(&json!({"$":"TurnChanged","thread":"t1","state":"running","at":9})).await.unwrap();
     let (_, r) = ask_on(&h, &mut c, "accounts.select", sel("", 0, ac::binding_show("w", 3))).await; assert_eq!(r["error"], "Finish or stop the current turn before selecting another account.");
     crate::settings::accounts_hub::revoke_client(c.client);
+}
+// a project keeps two pinned threads: a third pin unpins its oldest (the person, 2026-11-15)
+#[tokio::test] async fn a_third_pin_in_a_project_unpins_its_oldest() {
+    let h = hub("pins3").await;
+    h.commit(&json!({"$":"ThreadCreated","id":"t3","project":"p1","title":"Three","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":6})).await.unwrap();
+    let (e, _) = ask(&h, "thread.pin", json!({"thread":"t1"})).await; assert_eq!(e.len(), 1, "{e:?}");
+    let (e, _) = ask(&h, "thread.pin", json!({"thread":"t2"})).await; assert_eq!(e[0]["id"], "t2"); assert!(!e.iter().any(|x| x["pinned"] == false), "two fit: {e:?}");
+    let (e, _) = ask(&h, "thread.pin", json!({"thread":"t3"})).await;
+    assert_eq!(e[0], json!({"$":"ThreadPinned","id":"t3","pinned":true,"at":0})); assert_eq!(e[1], json!({"$":"ThreadPinned","id":"t1","pinned":false,"at":0}), "{e:?}");
+    let (e, _) = ask(&h, "thread.pin", json!({"thread":"t3"})).await; assert_eq!(e.len(), 1, "pinning a pinned one unpins nothing: {e:?}");
 }

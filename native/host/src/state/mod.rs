@@ -215,7 +215,9 @@ impl State {
                 let t = self.thread_mut(id); t.override_ = Override::None;
                 if !(t.unsettled_at >= t.settled_at) { t.unsettled_at = t.settled_at.max(at); }
             }
-            "ThreadArchived" => { let id = s(e, "id")?; let b = fam::json::gbool(e, "archived", false); self.thread_mut(id).archived = b; }
+            // Archive is Settle now (the person, 2026-11-15: "just have it settle, it's a thread"): an archive in the log, old or new, is read as a
+            // manual settle, so an archived thread is in its project's Done list and no thread is out of sight; an unarchive changes nothing
+            "ThreadArchived" => { let id = s(e, "id")?; if fam::json::gbool(e, "archived", false) { let at = fam::json::gnat(e, "at", 0); let t = self.thread_mut(id); t.override_ = Override::ForcedSettled; t.settled_at = t.settled_at.max(at); t.pinned = false; } }
             "ThreadPinned" => { let id = s(e, "id")?; let b = fam::json::gbool(e, "pinned", false); let at = fam::json::gnat(e, "at", 0); let t = self.thread_mut(id); if b && !t.pinned { t.pinned_at = at; } t.pinned = b; }
             "ThreadDeleted" => { let id = s(e, "id")?; self.thread_mut(id).deleted = true; }
             "WorktreeSet" => { let id = s(e, "id")?; let (b, w) = (s(e, "branch")?.to_string(), s(e, "worktree")?.to_string()); let t = self.thread_mut(id); t.worktree_mode = true; t.branch = b; t.worktree = w; }

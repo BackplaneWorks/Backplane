@@ -177,7 +177,7 @@ fun SectionProjectMenu(p: DSecRow, newSwarm: (String) -> Unit = {}, close: () ->
         when (it.id) {
             "pin" -> DataClient.sidebarAct(PIN, it.value)
             "swarm" -> newSwarm(p.id)
-            "archive" -> DataClient.sidebarAct(ARCHIVE, it.value)
+            "archive", "quiet" -> DataClient.sidebarAct(ARCHIVE, it.value) // Make quiet / Back to Active (an older hub: Archive)
             "rename", "badge", "move", "remove" -> step = it.id
             else -> {}
         }

@@ -27,6 +27,8 @@ fn err(id: &Value, m: &str) -> Value { json!({"t":"reply","id":id,"ok":false,"er
 fn s(p: &Value, k: &str, d: &str) -> String { p.get(k).and_then(Value::as_str).unwrap_or(d).to_string() }
 /// J.Json.get_nat: a number, or a string of digits, else the default.
 fn nat(p: &Value, k: &str) -> u64 { match p.get(k) { Some(Value::Number(n)) => n.as_u64().unwrap_or(0), Some(Value::String(t)) => t.parse().unwrap_or(0), _ => 0 } }
+/// pinned threads a project keeps (`thread.pin`)
+pub const PINS: usize = 2;
 fn done(events: Vec<Value>, id: &Value) -> Option<Plan> { Some(Plan { events, reply: ok(id), stop: None, wt: None, scratch: None, act: None }) }
 /// Merge.found: the events that settle a thread whose branch is merged, once (none when it is not due).
 pub fn merged(f: &Fold, th: &str, url: &str, at: u64) -> Vec<Value> {
@@ -117,24 +119,31 @@ fn plan_inner(f: &Fold, at: u64, id: &Value, method: &str, p: &Value, cx: &Ctx) 
     match method {
         // Settle: a running turn is interrupted and the agent process stopped first (as archive does, see mod.rs), the background shells' rows go with it,
         // and once it is logged everything else the thread owns stops (agents/settle.rs, mod.rs)
-        "thread.settle" => {
+        // Archive is Settle (state/mod.rs says why): an older client's Archive settles the thread
+        "thread.settle" | "thread.archive" => {
             let mut ev = vec![json!({"$":"ThreadSettled","id":th,"manual":true,"at":at})];
             if !f.setting(&format!("bg.{th}")).is_empty() { ev.push(json!({"$":"WorkSet","thread":th,"kind":"bg","rows":"","at":at})) }
             Some(Plan { events: ev, reply: ok(id), stop: Some(th.clone()), wt: None, scratch: None, act: None })
         }
         "thread.unsettle" => done(vec![json!({"$":"ThreadUnsettled","id":th,"at":at})], id),
         // a new pin goes to the bottom of the Pinned shelf: a place a drag gave it on an earlier pin is dropped
+        // a project keeps at most PINS pinned threads: a new pin past them unpins the project's oldest pin, so the sidebar's rows under a
+        // project stay a short fixed list (the person, 2026-11-15: "you should be able to pin up to two threads")
         "thread.pin" => { let mut ev = vec![json!({"$":"ThreadPinned","id":th,"pinned":true,"at":at})];
+            if let Some(t) = f.threads.get(&th).filter(|t| !t.pinned) {
+                let mut pins: Vec<(&String, u64)> = f.threads.iter().filter(|(i, x)| *i != &th && x.pinned && !x.deleted && x.project == t.project).map(|(i, x)| (i, x.pinned_at)).collect();
+                pins.sort_by(|a, b| a.1.cmp(&b.1).then(a.0.cmp(b.0)));
+                for (old, _) in pins.iter().take((pins.len() + 1).saturating_sub(PINS)) { ev.push(json!({"$":"ThreadPinned","id":old,"pinned":false,"at":at})); }
+            }
             if !f.threads.get(&th).map_or(false, |t| t.pinned) && !f.nav(&th).pinned.is_empty() { ev.push(json!({"$":"ThreadOrdered","id":th,"section":"pinned","key":"","at":at})) }
             done(ev, id) }
         "thread.unpin" => done(vec![json!({"$":"ThreadPinned","id":th,"pinned":false,"at":at})], id),
         "thread.unarchive" => done(vec![json!({"$":"ThreadArchived","id":th,"archived":false,"at":at})], id),
         // a rename: the title trimmed; a blank one changes nothing (Rename.changes)
         "thread.rename" => { let t = s(p, "title", ""); let t = t.trim(); done(if t.is_empty() || th.is_empty() { vec![] } else { vec![json!({"$":"ThreadRenamed","id":th,"title":t,"at":at}), json!({"$":"SettingSet","key":format!("title.person.{th}"),"value":"1","at":at})] }, id) } // the person's own title: no titler replaces it
-        "thread.archive" | "thread.delete" => {
-            let stop = Some(th.clone()); // Retire.archive: AgentStop every time, a running turn is interrupted first (see mod.rs)
-            let first = if method == "thread.archive" { json!({"$":"ThreadArchived","id":th,"archived":true,"at":at}) } else { json!({"$":"ThreadDeleted","id":th,"at":at}) };
-            Some(Plan { events: retire(f, &th, at, first, method == "thread.archive"), reply: ok(id), stop, wt: None, scratch: None, act: None })
+        "thread.delete" => {
+            let stop = Some(th.clone()); // Retire: AgentStop every time, a running turn is interrupted first (see mod.rs)
+            Some(Plan { events: retire(f, &th, at, json!({"$":"ThreadDeleted","id":th,"at":at}), false), reply: ok(id), stop, wt: None, scratch: None, act: None })
         }
         "thread.snooze" => {
             // "tomorrow" is a server job (the machine's zone): a copy of a log tells the client no (Copy.git.reads), anywhere else it answers {thread}

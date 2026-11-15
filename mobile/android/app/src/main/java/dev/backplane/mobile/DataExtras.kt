@@ -67,7 +67,7 @@ fun threadActions(t: DThread, rename: () -> Unit, confirmDelete: () -> Unit, sea
     search?.let { add((if (DataClient.has("find")) Msg.android_find_inthread else Msg.android_search_inthread) to it) }
     add((if (t.pinned) "Unpin" else "Pin") to { DataClient.threadAct(t.id, if (t.pinned) "unpin" else "pin"); Unit })
     add((if (t.settled) "Unsettle" else "Settle") to { DataClient.threadAct(t.id, if (t.settled) "unsettle" else "settle"); Unit })
-    add((if (t.archived) "Unarchive" else "Archive") to { DataClient.threadAct(t.id, if (t.archived) "unarchive" else "archive"); Unit })
+    // no Archive: it is Settle (the hub reads an archive as a settle)
     if (t.parent.isNotEmpty()) add("Move to top level" to { DataClient.threadAct(t.id, "detach"); Unit })
     add("Rename" to rename)
     add("Delete…" to confirmDelete)
