@@ -308,8 +308,10 @@ impl Bots {
 
     /// a room the person makes is permanent; an edit (`room` given) keeps the room's life
     async fn room(&self, id: &Value, p: &Value) -> Vec<Value> {
-        let _w = self.world().await; let now = now_s(); let rid = if gs(p, "room").is_empty() { self.id("r", now) } else { gs(p, "room").to_string() };
-        self.commit_reply(id, vec![json!({"$":"RoomSet","id":rid,"name":gsd(p, "name", "room"),"members":gs(p, "members"),"at":now})]).await
+        let w = self.world().await; let now = now_s(); let rid = if gs(p, "room").is_empty() { self.id("r", now) } else { gs(p, "room").to_string() };
+        // a rename (no `members`: a room row's Rename) keeps the room's members
+        let members = match (p.get("members"), w.room(&rid)) { (None, Some(r)) => r.members.join("\n"), _ => gs(p, "members").to_string() };
+        self.commit_reply(id, vec![json!({"$":"RoomSet","id":rid,"name":gsd(p, "name", "room"),"members":members,"at":now})]).await
     }
     /// Life.keep: the person keeps a bots' exchange room (open or closed): permanent from now on, listed and shown
     pub(crate) async fn room_keep(&self, id: &Value, room: &str) -> Vec<Value> {

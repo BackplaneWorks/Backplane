@@ -318,6 +318,9 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Re
         // Delete bot (a `bots.list` row with `delete`: a bot of this hub that is not the uberbot); the app asks first. Its chat stops (`bots.delete`)
         "bot.delete" => { let bot = s(p, "bot"); if bot.is_empty() || bot.contains('~') { return Some(Err(err("bot (one of this hub)"))) }
             rpc(hub, c, "bots.delete", json!({"bot":bot})).await.map(|_| json!({})) }
+        // Delete room (a `bots.list` room with `delete`: one of this hub's); the app asks first
+        "room.delete" => { let room = s(p, "room"); if !crate::bots::api::room_deletable(hub, room).await { return Some(Err(err("room (one of this hub)"))) }
+            rpc(hub, c, "bots.room_delete", json!({"room":room})).await.map(|_| json!({})) }
         // a bots' exchange (`ephemeral`) is never in bots.list; opened by a link it reads like any room, and `keep` says the page offers Keep this room (`room.keep`)
         "room.posts" => match crate::bots::api::room_posts(hub, s(p, "room"), limit_of(p, 40, 200)).await {
             Some(x) => { let (eph, closed) = crate::bots::api::room_life(hub, s(p, "room")).await.unwrap_or_default(); Ok(json!({"posts":x,"ephemeral":eph,"closed":closed,"keep":eph && !s(p, "room").contains('~')})) }

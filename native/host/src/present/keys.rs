@@ -406,8 +406,13 @@ pub fn keys(st: &State, id: &str, now_s: u64, why: &str, models_text: Option<&st
     let until = st.snooze_until.get(id).copied().unwrap_or(0);
     let mut m = Map::new();
     m.insert("state".into(), json!(state_word(t.turn)));
-    m.insert("tools".into(), Value::Array(tools(t.turn, t.pinned, settled(st, id), t.archived, forked)));
-    m.insert("menu".into(), Value::Array(menu(id, now_s < until)));
+    // a bot's chat (its page): Stop and Retry only, and no Snooze or Delete in its menu; Pin, Settle, Archive, Fork are a project thread's
+    let bot = st.bot_threads_has(id);
+    let mut tl = tools(t.turn, t.pinned, settled(st, id), t.archived, forked);
+    let mut mn = menu(id, now_s < until);
+    if bot { tl.retain(|x| matches!(x["action"].as_str(), Some("interrupt" | "retry"))); mn.retain(|x| !matches!(x["action"].as_str(), Some("snooze" | "row-delete"))); }
+    m.insert("tools".into(), Value::Array(tl));
+    m.insert("menu".into(), Value::Array(mn));
     m.insert("working".into(), json!(working)); m.insert("phase".into(), json!(phase));
     m.insert("permissions".into(), permissions(st.runtime.get(id).map(String::as_str).unwrap_or("")));
     let get = |k: String| st.settings.get(&k).map(String::as_str).unwrap_or("");

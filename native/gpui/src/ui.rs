@@ -333,6 +333,8 @@ impl Backplane {
         let bot_data: Vec<(String, String, String, u64, String, bool)> = self.data["bots"].as_array().into_iter().flatten().filter(|b| !b["uber"].as_bool().unwrap_or(false))
             .map(|b| (string(b, "name"), string(b, "mood"), string(b, "note"), b["look"].as_u64().unwrap_or(0), string(b, "id"), b["sel"].as_bool().unwrap_or(false))).collect();
         let bot_rigs: Vec<_> = bot_data.iter().map(|(_, mood, _, look, _, _)| self.cats.rig(*look, mood)).collect();
+        // a bot's or room's right-click menu: the hub's `menu` on its row (Delete bot; Rename, Delete room), drawn as it is
+        let row_menus: std::collections::HashMap<String, Value> = ["bots", "rooms"].iter().flat_map(|k| self.data[*k].as_array().into_iter().flatten()).filter(|b| b["menu"].as_array().map_or(false, |m| !m.is_empty())).map(|b| (string(b, "id"), b["menu"].clone())).collect();
         let started = self.started;
         let mut rows: Vec<AnyElement> = Vec::new();
         if let Some(r) = crate::screens::onboard::resume_row(cx, light, &self.data) { rows.push(r); }
@@ -464,6 +466,7 @@ impl Backplane {
                     let bid2 = bid.clone();
                     rows.push(with_rect(div().id(SharedString::from(format!("bot-{bid}"))), || format!("bot:{bname}")).flex().items_center().gap_2().px_3().py(px(3.)).cursor_pointer().when(*bsel, |d| d.bg(c("raise"))).hover(|s| s.bg(c("raise")))
                         .on_click(cx.listener(move |this, _, _, cx| this.go("bot", bid2.clone(), cx)))
+                        .when_some(row_menus.get(bid).cloned(), |d, menu| d.on_mouse_down(MouseButton::Right, cx.listener(move |this, e: &MouseDownEvent, _, cx| { let items = crate::screens::ctxmenu::section_items(&menu); if !items.is_empty() { this.ctx_open(e.position, items, cx); } })))
                         .child(art::cat(rig.clone(), mood, 28., started, if art::rects_on() { format!("cat:{bname}") } else { String::new() }))
                         .child(div().flex().flex_col().min_w_0().line_height(crate::scale::tpx(18.)).child(div().overflow_hidden().whitespace_nowrap().child(bname.clone()))
                             .child(div().flex().gap_2().items_center().child(div().text_size(crate::scale::tpx(11.)).text_color(note_color).child(trs(note))).children(marks.get(bid).and_then(|m| crate::screens::badge::machine_mark(light, m, false, bid))))).into_any_element());
@@ -475,6 +478,7 @@ impl Backplane {
                     let rid2 = rid.clone();
                     rows.push(with_rect(div().id(SharedString::from(format!("room-{rid}"))), || format!("room:{rname}")).flex().items_center().gap_2().px_3().py_1().cursor_pointer().when(sel, |d| d.bg(c("raise"))).hover(|s| s.bg(c("raise")))
                         .on_click(cx.listener(move |this, _, _, cx| this.go("room", rid2.clone(), cx)))
+                        .when_some(row_menus.get(&rid).cloned(), |d, menu| d.on_mouse_down(MouseButton::Right, cx.listener(move |this, e: &MouseDownEvent, _, cx| { let items = crate::screens::ctxmenu::section_items(&menu); if !items.is_empty() { this.ctx_open(e.position, items, cx); } })))
                         .child(div().text_color(c("faint")).child("#")).child(div().flex_1().overflow_hidden().whitespace_nowrap().child(rname.clone()))
                         .children(crate::screens::badge::machine_mark(light, &r["mark"], false, &rid))
                         .child(div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(format!("{}", r["members"]))).into_any_element());

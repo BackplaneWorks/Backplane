@@ -52,6 +52,8 @@ pub fn shows_thread(p: &Value) -> bool { matches!(text(&p["target"],"kind"),"thr
 /// A swarm's page (its add picker) and the New swarm form list the composer's models: they get the hub's models info too (present/swarmform.rs)
 pub fn shows_swarm_models(p: &Value) -> bool { (text(&p["target"],"kind")=="room" && p["roomPage"]["swarm"].is_object()) || !text(&p["session"]["drafts"],"@snew").is_empty() || text(p,"action")=="swarm-new" }
 /// The uberbot a state names, when it is one of its bots ("" for none)
+/// A room the person may rename or delete from its row: this machine's, listed in the sidebar (no bots' exchange, swarm or direct line)
+fn room_mine(st: &State, id: &str) -> bool { !id.is_empty() && !id.contains('~') && !id.starts_with("dm:") && st.rooms_nav.get(id).map_or(false,|r|!r.ephemeral && !r.swarm()) }
 fn uber_in(st: &State) -> String { let u=setting(st,"uber.bot"); if !u.is_empty() && st.bots_nav.contains_key(u) { u.to_string() } else { String::new() } }
 /// The sidebar's bots: this hub's, then each shown linked machine's (`<link>~<id>`, with its machine's `mark`). The uberbot leads: this hub's own, or with
 /// none a linked machine's (`bots::api::uber_shown`, the rule `bots.list` follows), drawn in Bub's place.
@@ -79,7 +81,7 @@ fn bot_rows(st: &State, hub: &str, now: u64, uber: &str, mark: &Value) -> Vec<Va
             else if now>t.map_or(0,|t|t.activity).saturating_add(900) { ("sleep","asleep") }else{("idle","ready")};
         json!({"id":format!("{hub}|{id}"),"name":name,"title":name,"act":if b.thread.is_empty(){"remote"}else{"bot"},
             "look":b.look,"mood":mood,"note":note,"uber":!uber.is_empty()&&**id==uber,"sel":false,"remote":false,"peer":"","cat":format!("{}:{mood}",b.look),"key":id,"link":"",
-            "nav":if b.thread.is_empty(){format!("@remote:{id}")}else{format!("{hub}|{}",b.thread)},"mark":mark})
+            "nav":if b.thread.is_empty(){format!("@remote:{id}")}else{format!("{hub}|{}",b.thread)},"mark":mark,"menu":bot_menu(id,!far && **id!=uber)})
     }).collect()
 }
 /// The sidebar's rooms (permanent ones only: a bots' exchange, `RoomNav.ephemeral`, is never listed): this hub's, then each shown linked machine's (with its `mark`); a room kept on both machines (a room shared across them) is listed once, as this hub's.
@@ -93,8 +95,19 @@ fn room_rows(st: &State, hub: &str, mark: &Value, here: &dyn Fn(&str)->bool) -> 
     let mut rooms: Vec<_>=st.rooms_nav.iter().filter(|(id,r)|!r.ephemeral && !r.swarm() && !crate::net::far::local(id).starts_with("dm:") && id.contains('~')==far && !here(id)).collect(); rooms.sort_by_key(|(id,_)|*id);
     rooms.iter().map(|(id,r)| {
         let name=if rooms.iter().filter(|(_,other)|other.name.eq_ignore_ascii_case(&r.name)).count()>1 { format!("{} · {}",r.name,crate::net::far::local(id)) }else{r.name.clone()};
-        json!({"id":format!("{hub}|{id}"),"name":name,"members":r.members,"sel":false,"nav":format!("@room:{id}"),"mark":mark})
+        json!({"id":format!("{hub}|{id}"),"name":name,"members":r.members,"sel":false,"nav":format!("@room:{id}"),"mark":mark,"menu":room_menu(id,!far)})
     }).collect()
+}
+/// A bot row's right-click menu (the clients draw it as it is): Delete bot for this machine's bots but the uberbot (`side-bot-delete`, asked
+/// twice), none otherwise. The hub has no bot rename (a bot's name is its address in rooms and mentions).
+fn bot_menu(id: &str, mine: bool) -> Value {
+    if !mine { return json!([]) }
+    json!([{"id":"delete","label":"Delete bot","action":"side-bot-delete","value":id,"confirm":true}])
+}
+/// A room row's right-click menu: this machine's rooms can be renamed and deleted (`room-rename`, `room-delete`, asked twice); a linked machine's room is that machine's.
+fn room_menu(id: &str, mine: bool) -> Value {
+    if !mine { return json!([]) }
+    json!([{"id":"rename","label":"Rename","action":"room-rename","value":id},{"id":"delete","label":"Delete room","action":"room-delete","value":id,"confirm":true}])
 }
 
 /// Pure root, shared by the oracle and the hub's bound Screen. Session/local are per view, never kept here.
@@ -483,6 +496,36 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
             if let Some(o)=session.as_object_mut() { o.remove("route"); }
             return Some(json!({"remoteReady":false,"nextTarget":{"kind":"room","id":id},"session":session,"cmds":cmds,"local":p.get("local").cloned().unwrap_or(json!({"local.native.sidebar.pages":"","local.native.sidebar.context":"","local.native.sidebar.key":"","local.native.sidebar.budget":""}))}));
         },
+        // a bot row's or room row's menu (bot_menu, room_menu): only what the hub offered there, for this machine's own
+        "side-bot-delete" => {
+            if value.is_empty() || value.contains('~') || !st.bots_nav.contains_key(value) || uber_in(st)==value { return refused("action.bot-delete-unoffered") }
+            let rid=session["rid"].as_u64().unwrap_or(0);
+            cmds.push(json!({"type":"send","hub":hub,"text":json!({"id":rid,"m":"bots.delete","p":{"bot":value}}).to_string()}));
+            session["rid"]=json!(rid+1);
+            // the bot on show goes: the window goes back to the start, as Delete bot on its page does
+            if text(&p["target"],"kind")=="bot" && text(&p["target"],"id")==value {
+                if let Some(o)=session.as_object_mut() { o.remove("route"); }
+                return Some(json!({"remoteReady":false,"nextTarget":{"kind":"recent","id":""},"session":session,"cmds":cmds,"local":p.get("local").cloned().unwrap_or(json!({"local.native.sidebar.pages":"","local.native.sidebar.context":"","local.native.sidebar.key":"","local.native.sidebar.budget":""}))}))
+            }
+        },
+        "room-delete" => {
+            if !room_mine(st,value) { return refused("action.room-delete-unoffered") }
+            let rid=session["rid"].as_u64().unwrap_or(0);
+            cmds.push(json!({"type":"send","hub":hub,"text":json!({"id":rid,"m":"bots.room_delete","p":{"room":value}}).to_string()}));
+            session["rid"]=json!(rid+1);
+            if text(&p["target"],"kind")=="room" && text(&p["target"],"id")==value {
+                if let Some(o)=session.as_object_mut() { o.remove("route"); }
+                return Some(json!({"remoteReady":false,"nextTarget":{"kind":"recent","id":""},"session":session,"cmds":cmds,"local":p.get("local").cloned().unwrap_or(json!({"local.native.sidebar.pages":"","local.native.sidebar.context":"","local.native.sidebar.key":"","local.native.sidebar.budget":""}))}))
+            }
+        },
+        // Rename (a room row's menu): the rename bar, on the room; rename-save sends bots.room with the new name (its members kept)
+        "room-rename" => {
+            if !room_mine(st,value) { return refused("action.room-rename-unoffered") }
+            let d=&mut session["drafts"];
+            for (k,v) in [("@del",""),("@rm",""),("@ren.inline",""),("@menu",""),("@look",""),("@ren",value),("@ren.kind","room")] { d[k]=json!(v); }
+            d["@f.title"]=json!(st.rooms_nav.get(value).map(|r|r.name.as_str()).unwrap_or(""));
+            cmds.push(json!({"type":"focus","id":"thread-title"}));
+        },
         // Life.keep: Keep this room on a bots' exchange's page (`roomPage.keep`) makes it permanent (`bots.room_keep`)
         "room-keep" if room_page["keep"]==json!(true) => {
             let rid=session["rid"].as_u64().unwrap_or(0);
@@ -745,9 +788,9 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
     // the machine switcher filters the merged rows: the rows that machine has a copy of, with that machine's threads only
     if !mpick.is_empty() { projects=pick_filter(projects,&mpick); }
     let ren=text(&session["drafts"],"@ren");
-    let ren_kind=match text(&session["drafts"],"@ren.kind") { "project"=>"project", "group"=>"group", "group-new"=>"group-new", _=>"thread" };
+    let ren_kind=match text(&session["drafts"],"@ren.kind") { "project"=>"project", "group"=>"group", "group-new"=>"group-new", "room"=>"room", _=>"thread" };
     // New group… (a project's menu) asks the new group's name in the same bar
-    let renaming=if ren.is_empty() || text(&session["drafts"],"@ren.inline")=="1" { Value::Null }else{json!({"id":format!("{hub}|{ren}"),"kind":ren_kind,"title":match ren_kind { "project"=>"Rename project", "group"=>"Rename group", "group-new"=>"New group", _=>"Rename thread" },"text":text(&session["drafts"],"@f.title"),"yes":if ren_kind=="group-new" { "Create" } else { "Rename" },"no":"Cancel"})};
+    let renaming=if ren.is_empty() || text(&session["drafts"],"@ren.inline")=="1" { Value::Null }else{json!({"id":format!("{hub}|{ren}"),"kind":ren_kind,"title":match ren_kind { "project"=>"Rename project", "group"=>"Rename group", "group-new"=>"New group", "room"=>"Rename room", _=>"Rename thread" },"text":text(&session["drafts"],"@f.title"),"yes":if ren_kind=="group-new" { "Create" } else { "Rename" },"no":"Cancel"})};
     let del=text(&session["drafts"],"@del");
     let deleting=if del.is_empty() { Value::Null }else{json!({"id":if del.contains('|'){del.to_string()}else{format!("{hub}|{del}")},"title":"Delete thread","body":st.threads.get(del.strip_prefix(&format!("{hub}|" )).unwrap_or(del)).map(|t|t.title.as_str()).unwrap_or(""),"yes":"Delete","no":"Cancel"})};
     let pages=json!([{"version":1,"hub":hub,"projects":projects_page,"active":null,"legacy":null}]);
@@ -1191,6 +1234,40 @@ mod state_tests {
         // the uberbot's page offers none (bots/api.rs): the action is refused, nothing is sent
         assert!(recent(&st,&page(Value::Null)).is_none());
         let mut other=page(json!({"label":"Delete bot","action":"bot-delete","value":"b1"})); other["value"]=json!("b2"); assert!(recent(&st,&other).is_none(),"only the bot on show");
+    }
+    /// A bot row's and a room row's right-click menu (bot_menu, room_menu): Delete bot, Rename and Delete room, each checked again when it comes back.
+    #[test] fn bot_and_room_rows_carry_their_menu_and_its_actions_are_checked() {
+        let mut st=State::new(); st.lean=true;
+        for e in [json!({"$":"ThreadCreated","id":"t1","project":"","title":"T","at":1}), json!({"$":"BotSet","id":"b1","name":"Scout","thread":"t1","look":1,"at":2}),
+                  json!({"$":"RoomSet","id":"r1","name":"Bring-up","members":"b1","at":3})] { event(&mut st,e); }
+        let v=recent(&st,&params()).unwrap(); let s=&v["shown"];
+        assert_eq!(s["bots"][0]["menu"][0]["action"],"side-bot-delete"); assert_eq!(s["bots"][0]["menu"][0]["confirm"],true);
+        let acts: Vec<&str>=s["rooms"][0]["menu"].as_array().unwrap().iter().map(|i|i["action"].as_str().unwrap()).collect(); assert_eq!(acts,["room-rename","room-delete"]);
+        let act=|a: &str,val: &str,target: Value| { let mut p=params(); p["action"]=json!(a); p["value"]=json!(val);
+            if target["kind"]=="bot" { p["botPage"]=json!({"kind":"bot","id":"b1","name":"Scout","tab":"chat","tabs":[],"subtabs":[],"chat":"t1"}); }
+            if target["kind"]=="room" { p["roomPage"]=json!({"kind":"room","id":"r1","name":"Bring-up","posts":[]}); }
+            p["target"]=target; recent(&st,&p) };
+        let sent=|v: &Value| v["cmds"].as_array().unwrap().iter().filter_map(|c|c["text"].as_str().map(str::to_string)).collect::<Vec<_>>();
+        let d=act("side-bot-delete","b1",json!({"kind":"recent","id":""})).unwrap(); assert!(sent(&d).iter().any(|t|t.contains("\"bots.delete\"")&&t.contains("\"b1\"")),"{d}");
+        assert!(d.get("nextTarget").is_none(),"another page stays");
+        assert_eq!(act("side-bot-delete","b1",json!({"kind":"bot","id":"b1"})).unwrap()["nextTarget"],json!({"kind":"recent","id":""}),"the bot on show goes");
+        assert!(act("side-bot-delete","b9",json!({})).is_none() && act("side-bot-delete","L~b1",json!({})).is_none());
+        let d=act("room-delete","r1",json!({"kind":"room","id":"r1"})).unwrap(); assert!(sent(&d).iter().any(|t|t.contains("\"bots.room_delete\"")&&t.contains("\"r1\"")),"{d}");
+        assert_eq!(d["nextTarget"],json!({"kind":"recent","id":""}));
+        assert!(act("room-delete","nope",json!({})).is_none() && act("room-delete","dm:x",json!({})).is_none());
+        let r=act("room-rename","r1",json!({"kind":"recent","id":""})).unwrap();
+        assert_eq!((r["session"]["drafts"]["@ren.kind"].as_str(),r["session"]["drafts"]["@f.title"].as_str()),(Some("room"),Some("Bring-up")),"{r}");
+        let mut p=params(); p["session"]["drafts"]=json!({"@ren":"r1","@ren.kind":"room","@f.title":"Bring-up"});
+        assert_eq!(recent(&st,&p).unwrap()["shown"]["renaming"]["title"],"Rename room");
+    }
+    /// A bot's chat has no Pin, Settle, Archive or Fork in its header and no Snooze or Delete in its menu (keys.rs)
+    #[test] fn a_bots_chat_has_no_thread_tools() {
+        let mut st=State::new(); st.lean=true;
+        for e in [json!({"$":"ThreadCreated","id":"t1","project":"","title":"T","at":1}), json!({"$":"BotSet","id":"b1","name":"Scout","thread":"t1","look":1,"at":2}),
+                  json!({"$":"ThreadCreated","id":"t2","project":"","title":"U","at":1})] { event(&mut st,e); }
+        let k=super::super::keys::keys(&st,"t1",10,"",None).unwrap(); assert_eq!(k["tools"],json!([]),"{k:?}");
+        assert!(k["menu"].as_array().unwrap().iter().all(|i|i["action"]!="row-delete"&&i["action"]!="snooze"));
+        let k=super::super::keys::keys(&st,"t2",10,"",None).unwrap(); assert_eq!(k["tools"].as_array().unwrap().len(),4,"a plain thread keeps them");
     }
     #[test] fn a_linked_machines_bots_rooms_and_uberbot_show_here() {
         let mut here=State::new(); here.lean=true;
