@@ -505,8 +505,12 @@ pub fn install_row(session: &Value, info: &Value, pkg: Option<&crate::files::kic
     if i("kicad.status") == "checking" { return None }
     let st: Value = serde_json::from_str(i("kicad.install")).unwrap_or_default();
     let (state, note) = (st["state"].as_str().unwrap_or(""), st["note"].as_str().unwrap_or(""));
+    // a KiCad found that is no Backplane KiCad (stock, too old, one that does not run): the install is offered beside it, as setup offers it
+    // (install::decide's Offer). It was offered nowhere after setup: a person with the system's KiCad pressed Open in KiCad, got KiCad's own
+    // windows, and Settings said only "version 10.0.7" with nothing to press
+    let beside = !i("kicad.cli").is_empty() && matches!(i("kicad.status"), "stock" | "old" | "broken");
     // a Backplane KiCad found: the row only while it is an older build of the published one (the update), or while that update runs
-    if !i("kicad.cli").is_empty() {
+    if !i("kicad.cli").is_empty() && !beside {
         let Some(p) = pkg.filter(|p| i("kicad.status") == "ok" && crate::files::kicad::install::older(i("kicad.version"), p)) else { return None };
         return Some(match state {
             "running" => running_row(&format!("Updating to Backplane KiCad {}", p.version), &st, p.version, note),
@@ -520,6 +524,8 @@ pub fn install_row(session: &Value, info: &Value, pkg: Option<&crate::files::kic
                 row("Update Backplane KiCad", &format!("Backplane KiCad {} is out; this computer has {}.{why}", p.version, i("kicad.version")), vec![btn("Update KiCad", "kicad-install-ask", "", true)]) }
         });
     }
+    // nothing is published for this computer: the KiCad it has stays, with nothing to say
+    if beside && pkg.is_none() { return None }
     let Some(p) = pkg else { return Some(row("Install KiCad", &format!("No Backplane KiCad is published for this computer ({}). Install KiCad from kicad.org, then set its path above.", crate::files::kicad::install::this_computer()), vec![])) };
     let home = i("home"); let into = if home.is_empty() { "Backplane's own folder".to_string() } else { format!("{home}/kicad") };
     Some(match state {
@@ -527,6 +533,9 @@ pub fn install_row(session: &Value, info: &Value, pkg: Option<&crate::files::kic
         _ if draft(session, "@kinstall") == "ask" => row("Install Backplane KiCad?", &format!("Downloads Backplane KiCad {} (about 1 GB) from {FROM}, checks its checksum and unpacks it into {into}. It needs no administrator password and changes nothing else on this computer.", p.version),
             vec![btn("Install", "kicad-install", "", true), btn("Cancel", "kicad-install-cancel", "", false)]),
         "failed" => row("Install KiCad", &format!("{note}."), vec![btn("Try again", "kicad-install-ask", "", true)]),
+        // why, in what the person sees with the KiCad they have: its own windows, and no agent in it
+        _ if i("kicad.status") == "stock" => row("Install Backplane KiCad", &format!("This computer's KiCad is stock KiCad{}. It can open in windows of its own, and agents cannot edit in it. Backplane KiCad {}, from {FROM}, goes beside it and opens inside Backplane.", if i("kicad.version").is_empty() { String::new() } else { format!(" {}", i("kicad.version")) }, p.version),
+            vec![btn("Install Backplane KiCad", "kicad-install-ask", "", true)]),
         _ => row("Install KiCad", &format!("Backplane KiCad {} for this computer, from {FROM}. Agents edit boards with it, and it runs the checks and exports.", p.version), vec![btn("Install KiCad", "kicad-install-ask", "", true)]),
     })
 }
@@ -543,6 +552,8 @@ fn cad(st: &State, session: &Value, info: &Value) -> Vec<Value> { cad_with(st, s
 fn cad_with(st: &State, session: &Value, info: &Value, pkg: Option<&crate::files::kicad::install::Package>) -> Vec<Value> {
     let i = |k: &str| info[k].as_str().unwrap_or("");
     let kicad = match (i("kicad.status"), i("kicad.version"), i("kicad.cli")) {
+        // a stock KiCad is named as one: "version 10.0.7" read as if nothing were amiss (the row under it says what Backplane KiCad adds)
+        ("stock", v, c) if !c.is_empty() => format!("stock KiCad{}{}", if v.is_empty() { String::new() } else { format!(" {v}") }, format!(" · {c}")),
         (_, v, c) if !c.is_empty() => format!("{}{}", if v.is_empty() { "found".to_string() } else { format!("version {v}") }, format!(" · {c}")),
         ("checking", _, _) => "checking".to_string(),
         _ => "KiCad was not found. Install it below, or set the folder of one you have.".to_string(),
@@ -737,7 +748,14 @@ pub fn act(hub: &str, session: &Value, action: &str, value: &str) -> Option<Out>
             // opening Threads fills the webhook fields from the saved settings (Settings.seed): the drafts are dropped so the saved values show
             if p == "voice" { send(session, hub, "bots.voice", json!({"op": "status"}), &mut cmds, &mut rid); } // what is downloaded, the key's mask and the microphones are read afresh
             if p == "ring" { send(session, hub, "ring.search", json!({}), &mut cmds, &mut rid); } // the list and the setup as they stand now, the search kept
-            json!({"drafts": {"@settings.page": p, "@f.whurl": Value::Null, "@f.qfrom": Value::Null, "@f.qto": Value::Null, "@quiet.err": "", "@f.whsec": Value::Null, "@hook.err": "", "@f.tzname": "", "@tz.err": "", "@f.kpath": Value::Null, "@f.fpath": Value::Null, "@kinstall": "", "@f.kname": "", "@keys.rm": "", "@key.err": ""}})
+            let mut patch = json!({"drafts": {"@settings.page": p, "@f.whurl": Value::Null, "@f.qfrom": Value::Null, "@f.qto": Value::Null, "@quiet.err": "", "@f.whsec": Value::Null, "@hook.err": "", "@f.tzname": "", "@tz.err": "", "@f.kpath": Value::Null, "@f.fpath": Value::Null, "@kinstall": "", "@f.kname": "", "@keys.rm": "", "@key.err": ""}});
+            // a page asked for while Settings is shut (the KiCad pane's Install Backplane KiCad): Settings opens on it in this one action. A
+            // flag sent just before it carries the same session, so this one's answer would overwrite its opening and leave Settings shut
+            if !p.is_empty() && !is_open(session) {
+                let (shut, c) = super::viewer::shut(hub, session); crate::session::patch::merge(&mut patch, &json!({"open": {"settings": true}})); crate::session::patch::merge(&mut patch, &shut); cmds.extend(c);
+                if let Some(r) = patch["rid"].as_u64() { rid = r; }
+            }
+            patch
         }
         "dev-star" => { send(session, hub, "star.replay", json!({}), &mut cmds, &mut rid); json!({"open": {"settings": false}}) }
         "update-check" => { send(session, hub, "update.check", json!({}), &mut cmds, &mut rid); json!({}) }
@@ -1102,6 +1120,22 @@ mod tests {
         let r = cad_rows(json!({"kicad.status": "missing"}), json!({}), None);
         assert!(r[1]["note"].as_str().unwrap().starts_with("No Backplane KiCad is published for this computer") && btns(&r[1]).is_empty());
     }
+    /// The system's own KiCad (stock): Settings says it is stock and offers Backplane KiCad beside it, through the same ask; a too-old or
+    /// broken one gets the plain offer; with nothing published for this computer there is nothing to press.
+    #[test] fn a_stock_kicad_is_named_and_backplane_kicad_offered_beside_it() {
+        use crate::files::kicad::install::LINUX;
+        let stock = json!({"kicad.cli": "/usr/bin/kicad-cli", "kicad.version": "10.0.7", "kicad.status": "stock", "home": "/h"});
+        let r = cad_rows(stock.clone(), json!({}), Some(&LINUX));
+        assert_eq!(r[0]["note"], "stock KiCad 10.0.7 · /usr/bin/kicad-cli");
+        assert_eq!(r[1]["label"], "Install Backplane KiCad"); assert_eq!(btns(&r[1]), [("Install Backplane KiCad".to_string(), "kicad-install-ask".to_string())]);
+        let n = r[1]["note"].as_str().unwrap(); assert!(n.starts_with("This computer's KiCad is stock KiCad 10.0.7. It can open in windows of its own") && n.contains(LINUX.version) && n.ends_with("opens inside Backplane."), "{n}");
+        let ask = cad_rows(stock.clone(), json!({"@kinstall": "ask"}), Some(&LINUX));
+        assert_eq!(ask[1]["label"], "Install Backplane KiCad?"); assert_eq!(btns(&ask[1])[0], ("Install".to_string(), "kicad-install".to_string())); assert!(ask[1]["note"].as_str().unwrap().contains("/h/kicad"));
+        let mut run = stock.clone(); run["kicad.install"] = json!(json!({"state": "running", "version": LINUX.version, "note": "Unpacking"}).to_string());
+        assert_eq!(cad_rows(run, json!({}), Some(&LINUX))[1]["label"], format!("Installing Backplane KiCad {}", LINUX.version));
+        for st in ["old", "broken"] { let mut o = stock.clone(); o["kicad.status"] = json!(st); let r = cad_rows(o, json!({}), Some(&LINUX)); assert_eq!(r[1]["label"], "Install KiCad", "{st}"); assert!(r[0]["note"].as_str().unwrap().starts_with("version 10.0.7")); }
+        assert_eq!(cad_rows(stock, json!({}), None)[1]["label"], "FreeCAD", "nothing published for this computer: no row");
+    }
     #[test] fn install_kicad_asks_first_then_shows_progress_failure_and_the_result() {
         use crate::files::kicad::install::LINUX;
         let ask = cad_rows(json!({"kicad.status": "missing", "home": "/h"}), json!({"@kinstall": "ask"}), Some(&LINUX));
@@ -1128,6 +1162,10 @@ mod tests {
     }
     #[test] fn install_is_sent_only_after_the_ask_and_cancel_sends_nothing() {
         let o = act("h", &json!({"rid": 4, "drafts": {}}), "kicad-install-ask", "").unwrap(); assert!(o.cmds.is_empty()); assert_eq!(o.patch["drafts"]["@kinstall"], "ask");
+        // a page asked for while Settings is shut opens Settings on it in the one action (the KiCad pane's Install Backplane KiCad); open, it only turns the page
+        let o = act("h", &json!({"rid": 4, "drafts": {}}), "settings-page", "cad").unwrap(); assert_eq!(o.patch["open"]["settings"], true); assert_eq!(o.patch["drafts"]["@settings.page"], "cad");
+        let o = act("h", &json!({"rid": 4, "open": {"settings": true}, "drafts": {}}), "settings-page", "cad").unwrap(); assert!(o.patch["open"].is_null()); assert_eq!(o.patch["drafts"]["@settings.page"], "cad");
+        let o = act("h", &json!({"rid": 4, "drafts": {}}), "settings-page", "").unwrap(); assert!(o.patch["open"].is_null(), "the list of pages opens nothing");
         let o = act("h", &json!({"rid": 4, "drafts": {"@kinstall": "ask"}}), "kicad-install-cancel", "").unwrap(); assert!(o.cmds.is_empty()); assert_eq!(o.patch["drafts"]["@kinstall"], "");
         let o = act("h", &json!({"rid": 4, "drafts": {}}), "kicad-install", "").unwrap(); assert!(o.cmds.is_empty(), "no consent without the ask");
         let o = act("h", &json!({"rid": 4, "drafts": {"@kinstall": "ask"}}), "kicad-install", "").unwrap();

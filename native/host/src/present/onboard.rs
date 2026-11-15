@@ -390,7 +390,7 @@ fn kicad_row(f: &Facts, pkg: Option<&crate::files::kicad::install::Package>) -> 
             let r = yourself(row("KiCad", &format!("Backplane KiCad{} is installed; Backplane KiCad{} is out.{why}", v(version), v(pkg.map_or("", |p| p.version))), vec![btn("Update KiCad", "ob-kicad-install", "", true)]));
             r
         }
-        Action::Offer => yourself(row("KiCad", &format!("{} {} Backplane KiCad adds editing by agents.", found, offer_lead(status)).trim().replace("  ", " "), vec![btn("Install Backplane KiCad", "ob-kicad-install", "", true)])),
+        Action::Offer => yourself(row("KiCad", &format!("{} {} {}", found, offer_lead(status), offer_adds(status)).trim().replace("  ", " "), vec![btn("Install Backplane KiCad", "ob-kicad-install", "", true)])),
         Action::NoPackage => row("KiCad", &if found.is_empty() { format!("{} No Backplane KiCad is published for this computer. Stock KiCad 9 or later works for viewing and export.", if f.checked { "Not found." } else { looking(f) }) } else { found.clone() }.trim().to_string(),
             vec![link("Download KiCad", KICAD_STOCK), rel]),
     };
@@ -423,6 +423,10 @@ fn kicad_installing(info: &Value) -> bool {
 }
 fn offer_lead(status: &str) -> &'static str {
     match status { "stock" => "It works for viewing and export.", "old" => "It is too old for editing.", _ => "It does not run." }
+}
+/// What Backplane KiCad adds over the KiCad found: over a stock one also where it opens (stock KiCad starts in windows of its own).
+fn offer_adds(status: &str) -> &'static str {
+    match status { "stock" => "Backplane KiCad adds editing by agents and opens inside Backplane.", _ => "Backplane KiCad adds editing by agents." }
 }
 fn freecad_row(f: &Facts) -> (Value, bool) {
     let t = &f.checks["freecad"];

@@ -187,6 +187,13 @@ pub fn handoff_holds(drawn_event: bool, drawn: bool, since_placed: std::time::Du
 /// The pane offers Try again under its message: KiCad's start failed (the hub has already retried a missed start window once).
 pub fn try_again(info: &Value) -> bool { info["state"] == "failed" }
 
+/// The pane offers the KiCad app under its message where the editor cannot be in the pane: its start failed (no window to hold it, no
+/// KiCad that starts), or this is stock KiCad on Windows. The app opens only on that press: the pane never falls back to it by itself.
+pub fn app_instead(info: &Value, windows: bool) -> bool { try_again(info) || (windows && info["mode"] == "stock") }
+
+/// The strip offers Backplane KiCad while the pane holds a stock KiCad (the hub's `mode`; on Windows the pane says it in its middle instead).
+pub fn stock_hint(info: &Value, windows: bool) -> bool { !windows && info["mode"] == "stock" && matches!(info["state"].as_str(), Some("starting" | "ready")) }
+
 /// What the pane says when the editor is not on show, from the hub's state (None: the editor is there).
 pub fn waiting(info: &Value, have_frame: bool) -> Option<String> {
     waiting_on(info, have_frame, cfg!(windows))
@@ -973,7 +980,7 @@ impl Render for KicadPane {
         let say = if handoff { None } else { waiting(&self.seen_info(), self.want().is_some()) };
         // a notice during the start: said under "Starting KiCad…" (and in the strip, where it stays once the editor is up)
         let notice = say.as_ref().and_then(|_| open_notice(&self.info)).map(|(_, t)| t);
-        let failed = self.failed();
+        let failed = self.failed(); let app = app_instead(&self.seen_info(), cfg!(windows));
         let marker = self.marker.clone(); let focus = self.focus.clone();
         let keys = self.keys;
         div().id("kicad-pane").size_full().relative().when(!handoff, |d| d.bg(rgb(0x001023))).track_focus(&focus)
@@ -997,7 +1004,11 @@ impl Render for KicadPane {
                 .when_some(notice, |d, n| d.child(crate::ui::with_rect(div().id("kicad-notice-start"), || "kicad:notice-start".to_string()).max_w(px(520.)).text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(n)))
                 .when(failed, |d| d.child(crate::ui::with_rect(div().id("kicad-retry"), || "kicad:retry".to_string()).px_3().py_1().rounded_md().cursor_pointer()
                     .bg(c("raise")).hover(|x| x.bg(c("line"))).text_color(c("text")).child(crate::i18n::trs("Try again"))
-                    .on_click(cx.listener(|this, _, _, cx| { this.reattach(); cx.notify(); }))))))
+                    .on_click(cx.listener(|this, _, _, cx| { this.reattach(); cx.notify(); }))))
+                // the editor cannot be here: the same design in the KiCad app instead, by the person's own press (never by itself)
+                .when(app, |d| d.child(crate::ui::with_rect(div().id("kicad-app"), || "kicad:app".to_string()).px_3().py_1().rounded_md().cursor_pointer()
+                    .bg(c("raise")).hover(|x| x.bg(c("line"))).text_color(c("text")).child(crate::i18n::trs("Open the KiCad app instead"))
+                    .on_click(cx.listener(|_, _, _, cx| cx.emit(PaneKey("kicad-app".into()))))))))
     }
 }
 
@@ -1101,6 +1112,13 @@ mod tests {
         assert!(waiting(&json!({"state": "ready"}), true).is_none());
         assert!(waiting(&json!({"state": "failed", "reason": "no kicad"}), true).unwrap().contains("no kicad"));
         assert!(super::try_again(&json!({"state": "failed", "reason": "no kicad"})), "a failed start offers Try again");
+        // a stock KiCad in the pane: the strip offers Backplane KiCad (Linux; Windows says it in the pane's middle), a fork's never
+        assert!(super::stock_hint(&json!({"mode": "stock", "state": "ready"}), false) && super::stock_hint(&json!({"mode": "stock", "state": "starting"}), false));
+        assert!(!super::stock_hint(&json!({"mode": "fork", "state": "ready"}), false) && !super::stock_hint(&json!({"mode": "stock", "state": "ready"}), true) && !super::stock_hint(&json!({"mode": "stock", "state": "stopped"}), false) && !super::stock_hint(&Value::Null, false));
+        // where the editor cannot be in the pane, the KiCad app is offered (pressed, never opened by itself); not while it starts or runs
+        assert!(super::app_instead(&json!({"state": "failed", "reason": "this window cannot hold another program's"}), false));
+        assert!(super::app_instead(&json!({"mode": "stock", "state": "ready"}), true) && !super::app_instead(&json!({"mode": "stock", "state": "ready"}), false));
+        assert!(!super::app_instead(&json!({"mode": "fork", "state": "starting"}), false) && !super::app_instead(&json!({"mode": "fork", "state": "ready"}), true));
         assert!(!super::try_again(&json!({"state": "starting"})) && !super::try_again(&json!({"state": "stopped"})));
         assert_eq!(
             waiting_on(&json!({"mode": "stock", "state": "ready"}), false, true).as_deref(),
@@ -1318,6 +1336,8 @@ impl crate::Backplane {
         cx.subscribe(&page, |_, _, _: &PaneShown, cx| cx.notify()).detach();
         cx.subscribe(&page, |this, _, e: &PaneKey, cx| {
             if e.0 == "ctrl-;" || e.0 == ";" { this.kcomment_open(None, cx); return }
+            // the pane's "Open the KiCad app instead" (the editor could not be here): back to the viewer, and the hub starts KiCad on what it shows
+            if e.0 == "kicad-app" { let open = crate::screens::viewer::kicad_open(&this.data["thread"]["viewer"]); this.kicad_view(cx); let _ = this.tx.try_send(open); return }
             // a management panel's key handed over by KiCad: the panel whose binding it is (the person's, from Settings)
             if let Some(id) = ["bom", "checks", "life", "fab"].into_iter().find(|id| this.local.key(&format!("mgmt-{id}")) == e.0) { crate::screens::mgmt::toggle(this, id, cx); }
             else { this.screens.kicad.as_ref().map(|p| p.update(cx, |p, cx| { p.press.push(e.0.clone()); cx.notify(); })); }
@@ -1376,6 +1396,13 @@ pub fn strip<V: 'static>(cx: &mut Context<V>, light: bool, pane: &Entity<KicadPa
             .tooltip(crate::keys::tip(&text, "", light))
             .child(crate::ui::with_rect(div().id("kicad-notice-x"), || "kicad:notice-dismiss".to_string()).px_1().cursor_pointer().child("×").tooltip(crate::keys::tip(&crate::i18n::trs("Dismiss"), "", light))
                 .on_click(move |_, _, cx| p.update(cx, |p, cx| { p.dismiss_notice(id); cx.notify(); }))));
+    }
+    // stock KiCad in the pane (the system's own, taken in window by window): said, with the way to Backplane KiCad (Settings, CAD asks first)
+    if !popped && stock_hint(&pane.read(cx).info, cfg!(windows)) {
+        let a = act.clone(); let tip = crate::i18n::trs("This is stock KiCad: it can open in windows of its own, and agents cannot edit in it. Backplane KiCad opens in here.");
+        row = row.child(crate::ui::with_rect(div().id("kicad-stock"), || "kicad:stock".to_string()).ml_2().px_2().py(px(3.)).flex_shrink_0().text_size(crate::scale::tpx(11.)).text_color(c("warn")).cursor_pointer().hover(|s| s.bg(c("raise")))
+            .tooltip(crate::keys::tip(&tip, "", light)).child(crate::i18n::trs("Install Backplane KiCad"))
+            .on_click(cx.listener(move |v, _, w, cx| a(v, "cad", w, cx))));
     }
     // KiCad's long job (loading, zone fill, DRC, plot): a slim bar here instead of KiCad's own progress window (bp.12)
     let jobs = if pane.read(cx).info["state"] == "ready" { pane.read(cx).jobs.clone() } else { Vec::new() };
@@ -1462,7 +1489,10 @@ impl crate::Backplane {
     }
     /// The strip's buttons in the main window.
     pub(crate) fn kicad_strip_act(&mut self, a: &str, cx: &mut Context<Self>) {
-        match a { "full" => { self.screens.kicad_full = !self.screens.kicad_full; if let Some(p) = self.screens.kicad.clone() { p.update(cx, |p, _| { p.want_keys = true; p.placed = None; }); } cx.notify(); } "popout" => self.kicad_popout(cx), "checks" => crate::screens::mgmt_checks::open_panel(self, cx), _ => {} }
+        match a { "full" => { self.screens.kicad_full = !self.screens.kicad_full; if let Some(p) = self.screens.kicad.clone() { p.update(cx, |p, _| { p.want_keys = true; p.placed = None; }); } cx.notify(); } "popout" => self.kicad_popout(cx), "checks" => crate::screens::mgmt_checks::open_panel(self, cx),
+            // the strip's Install Backplane KiCad (a stock KiCad in the pane): Settings, CAD, where the install says what it downloads and asks
+            "cad" => { crate::screens::settings::go_page(self, "cad"); cx.notify(); }
+            _ => {} }
     }
 }
 
