@@ -190,6 +190,7 @@ fn agents(st: &State, info: &Value) -> Vec<Value> {
         row("Provider and model for new threads", "Each thread keeps its own; change it from the composer.", vec![]),
         row("Provider", &if cli.is_empty() && prov != "claude" { format!("{prov} is not installed") } else { cli.to_string() }, chips(PROVIDERS, prov, "agent.provider")),
         row("Model", &format!("{}: {}", if model.is_empty() { "default" } else { model }, label), chips(&ids, model, "agent.model")),
+        row("Bots: infinite context (beta)", "Each bot turn starts fresh with the whole conversation as a tree of summaries the bot can zoom into, written by a cheaper model in the background. A long history takes hours of model calls to summarize.", chips(&["on", "off"], onoff(set(st, "recall.bots", "off") == "on"), "recall.bots")),
         row("Show thinking", "Ask agents for their thinking and show it in the thread, folded (Claude, Codex and Pi; a Claude session restarts to take it)", chips(&["on", "off"], set(st, "agent.thinking", "off"), "agent.thinking")),
     ]
 }

@@ -46,16 +46,19 @@ Start a compressed message's line with its tag (\"user: \", \"you: \"); in a mer
 Each line is at most 512 bytes (about 70 words), plain text, no markdown, no line breaks. Do not answer the messages, do not do any work and do not use tools. \
 Reply with exactly one line per task, each the task's id, a bar and the line: <id>|<line>. Nothing else.";
 
-/// The threads that run with infinite context: every live bot's own thread here unless `recall.bots` or its bot's `recall.bot.<id>`
-/// is "off", and any thread whose `recall.thread.<id>` is "on" (a long-lived thread the person chose).
+/// The flag (Settings > Agents, `recall.bots`): off by default, and while it is off nothing here runs (no thread has infinite
+/// context, the compactor writes nothing, no memory_zoom).
+pub fn enabled(w: &World) -> bool { w.setting("recall.bots", "off") == "on" }
+/// The threads that run with infinite context, with the flag on: every live bot's own thread here unless its bot's `recall.bot.<id>`
+/// is "off", and any thread whose `recall.thread.<id>` is "on" (a long-lived thread the person chose). None with the flag off.
 pub fn on_threads(w: &World) -> HashSet<String> {
-    let all = w.setting("recall.bots", "on") != "off";
-    let mut s: HashSet<String> = w.bots.values().filter(|b| all && !b.deleted && !b.thread.is_empty() && !b.id.contains('~') && w.setting(&format!("recall.bot.{}", b.id), "on") != "off").map(|b| b.thread.clone()).collect();
+    if !enabled(w) { return HashSet::new() }
+    let mut s: HashSet<String> = w.bots.values().filter(|b| !b.deleted && !b.thread.is_empty() && !b.id.contains('~') && w.setting(&format!("recall.bot.{}", b.id), "on") != "off").map(|b| b.thread.clone()).collect();
     s.extend(w.settings.iter().filter(|(k, v)| k.starts_with("recall.thread.") && v.as_str() == "on").map(|(k, _)| k["recall.thread.".len()..].to_string()));
     s
 }
-/// A bot's switch as its Settings show it.
-pub fn bot_on(w: &World, bot: &str) -> bool { w.setting("recall.bots", "on") != "off" && w.setting(&format!("recall.bot.{bot}"), "on") != "off" }
+/// A bot's switch as its Settings show it (only shown with the flag on).
+pub fn bot_on(w: &World, bot: &str) -> bool { enabled(w) && w.setting(&format!("recall.bot.{bot}"), "on") != "off" }
 
 /// A message of the conversation: its log line, its line's bytes (fits: at most NODE), who wrote it.
 #[derive(Clone, Copy, Debug, PartialEq)]
