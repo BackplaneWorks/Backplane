@@ -3747,6 +3747,7 @@ android.swarm.none = まだ投稿はありません。
 android.swarm.gone = そのスウォームはこのハブにありません。
 android.swarm.provider = プロバイダー
 android.swarm.model = モデル
+android.buy.ask = {project} の購入スレッドを開始しますか？
 # ---- ios: new entries go here ----
 ios.sections.running = {n, number}件実行中
 ios.alerts.ask = スレッドがあなたを必要とするとき、Bub が通知できます。
@@ -4198,6 +4199,7 @@ ios.image.failed = 画像を保存できませんでした。
 ios.image.incoming = 画像の準備ができました。送るスレッドを開いてください。
 ios.image.loadfail = 画像を読み込めませんでした。
 native.permission.photos.add = スレッドで選んだ画像を写真ライブラリに保存します。
+ios.buy.ask = {project} の購入スレッドを開始しますか？
 # ---- end ----
 # the sidebar's sections (docs/ALWAYS-ON.md section 8): the hub's words, and the window's
 sidebar.sections.needs = 対応が必要
