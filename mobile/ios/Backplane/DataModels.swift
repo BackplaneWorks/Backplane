@@ -274,8 +274,9 @@ struct DBot: Codable, Equatable, Identifiable {
 struct DRoom: Codable, Equatable, Hashable, Identifiable {
     var id: String; var name: String
     var mark: DMark?     // a room of a linked machine: where it is
-    enum CodingKeys: String, CodingKey { case id, name, mark }
-    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); id = c.str(.id); name = c.str(.name); mark = try? c.decode(DMark.self, forKey: .mark) }
+    var delete: Bool = false // the hub offers Delete room for it (a room of this hub)
+    enum CodingKeys: String, CodingKey { case id, name, mark, delete }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); id = c.str(.id); name = c.str(.name); mark = try? c.decode(DMark.self, forKey: .mark); delete = c.bool(.delete) }
 }
 struct DDirectory: Decodable { var bots: [DBot]; var rooms: [DRoom]
     enum CodingKeys: String, CodingKey { case bots, rooms }

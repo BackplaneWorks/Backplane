@@ -980,6 +980,8 @@ hooks.new	New webhook	新しいWebhook
 hooks.note	Signed POSTs, or ones with the hook's bearer token, start a turn; the body reaches it as data, never as instructions.	署名付きPOSTまたはBearerトークン付きPOSTでターンを開始します。本文は指示ではなくデータとして渡します。
 hooks.name	Name, e.g. GitHub pushes	名前（例：GitHubプッシュ）
 bots.delete	Delete bot	ボットを削除
+rooms.delete	Delete room	ルームを削除
+rooms.rename	Rename room	ルーム名を変更
 bots.machines	Machines	マシン
 bots.machines.note	Bots here and on linked hubs can talk. An invite links one hub to another.	リンクしたハブのボットと会話できます。招待でハブをリンクします。
 bots.invite.address	This hub's address as the other reaches it	相手から接続できるこのハブのアドレス

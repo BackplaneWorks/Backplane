@@ -125,6 +125,7 @@ struct DataThreadsView: View {
     @State private var deleting: DThread?
     @State private var projectMenu: DProject?
     @State private var botDelete: DBot?
+    @State private var roomDelete: DRoom?
     @State private var renamingProject: DProject?
     @State private var badgeProject: DProject?
     @State private var projectTitle = ""
@@ -222,6 +223,10 @@ struct DataThreadsView: View {
             Button(Tr.t("Rename")) { if let p = renamingProject { Task { await client.projectAct(p.id, "rename", title: projectTitle) } } }
             Button(Tr.t("Cancel"), role: .cancel) {}
         }
+        .confirmationDialog(Tr.native_bot_delete_ask(name: roomDelete?.name ?? ""), isPresented: Binding(get: { roomDelete != nil }, set: { if !$0 { roomDelete = nil } }), titleVisibility: .visible) {
+            Button(Tr.t("Delete room"), role: .destructive) { if let r = roomDelete { Task { await client.roomDelete(r.id) } } }
+            Button(Tr.t("Cancel"), role: .cancel) {}
+        }
         .confirmationDialog(Tr.native_bot_delete_ask(name: botDelete?.name ?? ""), isPresented: Binding(get: { botDelete != nil }, set: { if !$0 { botDelete = nil } }), titleVisibility: .visible) {
             Button(Tr.t("Delete bot"), role: .destructive) { if let b = botDelete { Task { await client.botDelete(b.id) } } }
             Button(Tr.t("Cancel"), role: .cancel) {}
@@ -311,6 +316,8 @@ struct DataThreadsView: View {
                 DHeading(text: Tr.t("Rooms")).padding(.leading, 12).padding(.top, 12).padding(.bottom, 4).dataRow()
                 ForEach(client.rooms) { r in
                     Button { path.append(r) } label: { sideRow("#", r.name, "room", r.mark) }.buttonStyle(.plain).dataRow().accessibilityIdentifier("data.room." + r.id)
+                        // Delete room (a long press on a room the hub offers it for): asked first, then `room.delete`
+                        .contextMenu { if r.delete { Button(Tr.t("Delete room"), systemImage: "trash", role: .destructive) { roomDelete = r } } }
                 }
             }
         }

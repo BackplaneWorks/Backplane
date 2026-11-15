@@ -829,7 +829,8 @@ object DataClient {
         if (now.any { it.thread == open }) return null
         return now.firstOrNull { local(it.id) == local(b.id) && local(it.thread) == local(open) }?.thread
     }
-    data class Room(val id: String, val name: String, val mark: String = "")
+    /** `delete`: the hub offers Delete room for it (a room of this hub). */
+    data class Room(val id: String, val name: String, val mark: String = "", val delete: Boolean = false)
     /** Just paired: once the hub's bots are in, its uberbot's chat opens (phones have no setup; docs/ALWAYS-ON.md, D9). */
     private var uberAfterPair = false
     var bots by mutableStateOf<List<Bot>>(emptyList()); private set
@@ -845,7 +846,7 @@ object DataClient {
             if (here != null) openBot = here
             else followed(o, openBot, bots)?.let { openBot = null; linkTarget = LinkTarget(LinkTarget.Kind.THREAD, it) }
         }
-        rooms = r.optJSONArray("rooms")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Room(it.optString("id"), it.optString("name"), it.optJSONObject("mark")?.optString("short") ?: "") } } ?: emptyList()
+        rooms = r.optJSONArray("rooms")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Room(it.optString("id"), it.optString("name"), it.optJSONObject("mark")?.optString("short") ?: "", it.optBoolean("delete")) } } ?: emptyList()
         if (uberAfterPair) bots.firstOrNull { it.uber && it.thread.isNotEmpty() }?.let { uberAfterPair = false; linkTarget = LinkTarget(LinkTarget.Kind.THREAD, it.thread) }
     }
     data class Post(val from: String, val text: String, val at: Long)
@@ -853,6 +854,8 @@ object DataClient {
     suspend fun roomPost(room: String, text: String) { call("room.post", JSONObject().put("room", room).put("text", text).put("clientId", UUID.randomUUID().toString())) }
     /** Delete bot (`bot.delete`; the row asked first): the hub stops its chat, and the list is read again. */
     suspend fun botDelete(bot: String) { call("bot.delete", JSONObject().put("bot", bot)); loadBots() }
+    /** Delete room (`room.delete`; the row asked first), and the list is read again. */
+    suspend fun roomDelete(room: String) { call("room.delete", JSONObject().put("room", room)); loadBots() }
     suspend fun botSay(bot: String, text: String) { call("bot.say", JSONObject().put("bot", bot).put("text", text).put("clientId", UUID.randomUUID().toString())) }
 
     // alerts: only what the hub's gate lets through reaches here (native/host/src/push): this phone has no push service, so it hears them on its socket while the app lives
