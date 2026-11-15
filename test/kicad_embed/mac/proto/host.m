@@ -43,6 +43,13 @@ int main(int argc, char **argv) { @autoreleasepool {
   w.title = @"lane-m host"; w.delegate = d; w.collectionBehavior = NSWindowCollectionBehaviorFullScreenPrimary;
   w.backgroundColor = NSColor.darkGrayColor; [w makeKeyAndOrderFront:nil]; [NSApp activateIgnoringOtherApps:YES];
   printf("%ld %d\n", (long)w.windowNumber, getpid()); fflush(stdout);
+  // any click in our window raises it above KiCad's without an activation (a title-bar drag, a click in the sidebar):
+  // after the click is handled, order ourselves below the follower again and tell it to raise (variants below/both/tell)
+  [NSEvent addLocalMonitorForEventsMatchingMask:NSEventMaskLeftMouseDown handler:^NSEvent *(NSEvent *ev) {
+    dispatch_async(dispatch_get_main_queue(), ^{ [d fid];
+      if (fid && ([act isEqual:@"below"] || [act isEqual:@"both"])) [w orderWindow:NSWindowBelow relativeTo:fid];
+      if ([act isEqual:@"tell"] || [act isEqual:@"both"]) say(@"raise"); });
+    return ev; }];
   NSDate *t0 = [NSDate date]; __block int done = 0; double v = 600;
   [NSTimer scheduledTimerWithTimeInterval:1.0/120 repeats:YES block:^(NSTimer *t) {
     double e = -[t0 timeIntervalSinceNow];
