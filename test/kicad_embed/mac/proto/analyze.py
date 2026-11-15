@@ -13,8 +13,14 @@ for path in sys.argv[1:]:
     if not both: print(path, 'no samples with both windows'); continue
     lag, wlag, off = [], [], 0
     def since(i, col, want):
-        for j in range(i, -1, -1):
-            if abs(both[j][col] - want) < 1: return both[i][0] - both[j][0]
+        # signed: positive when the follower shows where the host was earlier, negative when it is already where the
+        # host's reported bounds get to later (push mode: the host sends its own frame before the window server reports it).
+        # Only within 250 ms either way: the host sweeps back and forth, so a farther match is an earlier sweep.
+        best = None
+        for j in range(len(both)):
+            dt = both[i][0] - both[j][0]
+            if abs(dt) <= 250 and abs(both[j][col] - want) < 1 and (best is None or abs(dt) < abs(best)): best = dt
+        return best
     for i, r in enumerate(both):
         if abs(r[5] - (r[1] + 200)) >= 1:
             off += 1; d = since(i, 1, r[5] - 200)
@@ -24,7 +30,7 @@ for path in sys.argv[1:]:
             if d is not None: wlag.append(d)
     above = sum(r[9] for r in both)
     print(f"{path}: {len(rows)} samples over {rows[-1][0]-rows[0][0]:.0f} ms; follower off its place in {100*off/len(both):.0f}% of samples; "
-          f"move lag ms p50 {q(lag,.5):.1f} p95 {q(lag,.95):.1f} max {max(lag) if lag else float('nan'):.1f}; "
+          f"move lag ms (signed, + behind) p5 {q(lag,.05):.1f} p50 {q(lag,.5):.1f} p95 {q(lag,.95):.1f}, |lag| p95 {q([abs(x) for x in lag],.95):.1f}, unmatched {off-len(lag)}; "
           f"resize lag ms p50 {q(wlag,.5):.1f} p95 {q(wlag,.95):.1f}; directly above the host in {100*above/len(both):.1f}%")
     gaps, start = [], None
     for r in rows:

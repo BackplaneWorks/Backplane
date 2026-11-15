@@ -28,9 +28,10 @@ for v in poll:none push:none push:below push:willbelow push:tell push:both; do
 done
 # 2. a real title-bar drag with the mouse, push mode, fine steps
 start drag still both push accessory
-"$O/sampler.app/Contents/MacOS/sampler" "$HID" "$FID" 6 > "$O/samples.drag.csv" & SP=$!
+"$O/sampler.app/Contents/MacOS/sampler" "$HID" "$FID" 7 > "$O/samples.drag.csv" & SP=$!
 sleep 1.2; set -- $(tail -1 "$O/samples.drag.csv" | awk -F, '{print $2+150, $3+12}'); hx=$1; hy=$2
 cliclick dd:$hx,$hy; i=0; while [ $i -lt 100 ]; do i=$((i+1)); cliclick m:$((hx + i*3)),$((hy + i)); done; cliclick du:$((hx+300)),$((hy+100))
+sleep 0.8; cliclick c:$((hx + 300 - 100)),$((hy + 100 + 200)); echo "drag: clicked the host's own area at $(now)"
 wait $SP; finish
 # 3. the host killed: how long its follower stays on screen
 start death still both push accessory
@@ -43,12 +44,11 @@ for p in accessory regular switch; do
   start menu.$p still both push $p
   sleep 1.2; set -- $(osascript -e 'tell application "System Events" to get position of window 1 of process "host"' | tr -d ','); 
   fx=$(( $1 + 400 )); fy=$(( $2 + 250 ))
-  cliclick c:$fx,$fy; sleep 0.8
+  cliclick c:$fx,$fy; sleep 0.3; screencapture -x "$O/menu.$p.0.3s.png"; sleep 1.2; screencapture -x "$O/menu.$p.1.5s.png"
   front=$(osascript -e 'tell application "System Events" to get name of first process whose frontmost is true' 2>&1)
   menus=$(osascript -e 'tell application "System Events" to get name of every menu bar item of menu bar 1 of (first process whose frontmost is true)' 2>&1)
   dock=$(osascript -e 'tell application "System Events" to get name of every UI element of list 1 of process "Dock"' 2>&1 | tr ',' '\n' | grep -c -i follower)
   cmdtab=$(osascript -e 'tell application "System Events" to get name of every process whose background only is false' 2>&1 | tr ',' '\n' | grep -c -i follower)
-  screencapture -x "$O/menu.$p.png"
   # Cmd-click back into the host's own area (left of the pane): does the host get the keyboard back?
   cliclick c:$(( fx - 300 )),$fy; sleep 0.5
   back=$(osascript -e 'tell application "System Events" to get name of first process whose frontmost is true' 2>&1)
