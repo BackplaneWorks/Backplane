@@ -740,7 +740,7 @@ def run(h):
             h.check("F5: Edit, then the pre-warm with no input: the PCB canvas keeps the keys (F2 acts by the zoom readout)",
                     bool(pw) and after["inside_frame"] and bool(zoomed), d)
             return h.finish()
-        if only in ("stage2", "stage2_buttons", "pane_behaviours", "stage2_sweep"):
+        if only in ("stage2", "stage2_buttons", "pane_behaviours", "stage2_sweep", "stage2_middle"):
             import subprocess
             gls = [w for w in children if w["visible"] and w["class"] == "wxGLCanvas"]
             gl = max(gls, key=lambda w: w["w"] * w["h"]) if gls else None
@@ -842,6 +842,25 @@ def run(h):
                 h.check("Stage 2 right click: KiCad's context menu opens once", res["right_click"]["menus_opened"] == 1, res["right_click"])
                 h.check("Stage 2 middle drag pans, and stops at release", res["middle_drag"]["panned_px"] > 2000, res["middle_drag"])
                 h.check("Wheel over the pane does not take the composer's keys", res["composer_after_wheel"]["key_ms"] is not None and res["composer_after_wheel"]["focus_pid"] == cp.pid, res["composer_after_wheel"])
+            elif only == "stage2_middle":
+                # Lead, Nov 15: a middle drag that starts on the pane while Backplane has the keys pans, 10/10 at holds of
+                # 300 ms and of 1 s (the candidate panned 1 in 3). Judged by the canvas: a pan redraws most of it.
+                rows = []
+                for hold in (0.3, 1.0):
+                    for n in range(1, 11):
+                        deselect(); backplane_keys("composer")
+                        a, b = h.p(f"mid_{int(hold*1000)}_{n}_0.png"), h.p(f"mid_{int(hold*1000)}_{n}_1.png")
+                        E.grab_screen(a)
+                        held = press(0x20, 0x40, cx_, cy_, hold, (cx_ + 150, cy_ + 100))
+                        time.sleep(0.6)
+                        E.grab_screen(b)
+                        panned = E.img_diff_box(a, b, gl["root_x"], gl["root_y"], gl["w"], gl["h"])["changed_pixels"]
+                        rows.append({"hold_s": hold, "n": n, "held_ms": held, "panned_px": panned, "ok": panned > 20000})
+                gest = [l.strip()[9:] for l in open(h.p("client.log"), encoding="utf-8", errors="replace") if '"kicad_middle_gesture"' in l or '"kicad_middle_move"' in l]
+                print("DIAG stage2_middle " + json.dumps({"rows": rows, "gesture_lines": gest[:12]})[:4000], flush=True)
+                for hold in (0.3, 1.0):
+                    rs = [r for r in rows if r["hold_s"] == hold]
+                    h.check(f"Middle drag held {int(hold*1000)} ms from Backplane's keys pans, 10/10", all(r["ok"] for r in rs), [(r["n"], r["panned_px"]) for r in rs])
             elif only == "stage2_sweep":
                 # Lead, Nov 15: a press on the shield released about when the replay fires must still reach KiCad as a
                 # whole click (SB2: a 60 ms right click got up-before-down, no menu). (i) holds of 40/55/60/70/120 ms for
