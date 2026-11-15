@@ -11,10 +11,10 @@ for p in host follower sampler cover; do app $p; done
 waitline() { i=0; while [ ! -s "$1" ] && [ $i -lt 200 ]; do sleep 0.05; i=$((i+1)); done; head -1 "$1"; }
 now() { python3 -c 'import time; print("%.3f" % time.time())'; }
 # start <name> <scenario> <activation> <mode> <policy>: sets HID HPID FID
-start() { n=$1; S=$O/sock.$n
+start() { n=$1; S=$O/sock.$n; fmode=$4; fpol=$5
   open -n --stdout "$O/host.$n.out" --stderr "$O/host.$n.err" "$O/host.app" --args $2 "$S" $3
   set -- $(waitline "$O/host.$n.out") ; HID=$1; HPID=$2
-  open -n --stdout "$O/fol.$n.out" --stderr "$O/fol.$n.err" "$O/follower.app" --args $4 "$HID" "$HPID" "$S" $5 25
+  open -n --stdout "$O/fol.$n.out" --stderr "$O/fol.$n.err" "$O/follower.app" --args $fmode "$HID" "$HPID" "$S" $fpol 25
   FID=$(waitline "$O/fol.$n.out"); }
 finish() { pkill -f "$O/host.app" 2>/dev/null; pkill -f "$O/follower.app" 2>/dev/null; pkill -f "$O/cover.app" 2>/dev/null; sleep 0.5; }
 # 1. the scripted timeline: polling (first prototype) and push with each activation variant
