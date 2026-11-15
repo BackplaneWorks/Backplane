@@ -130,7 +130,7 @@ fun LazyListScope.sectionItems(open: (String) -> Unit, page: (DSecRow) -> Unit, 
         if (s.kind == "threads") items(s.rows, key = { "sn:${it.id}" }) { r -> val room = r.swarmRoom
             if (room != null) SectionThread(r) { openSwarm(room) } else SectionThread(if (r.want == "failed" || r.want == "stopped") r.copy(want = "", say = "") else r, open = open) }
         else for (p in s.rows) {
-            item("sp:${s.id}:${p.key}") { SectionProject(p, s.id == "quiet" || (p.off && p.key.isNotEmpty()), { page(p) }, { menu(p) }) }
+            item("sp:${s.id}:${p.key}") { SectionProject(p, s.id == "quiet" || s.id == "archived" || (p.off && p.key.isNotEmpty()), { page(p) }, { menu(p) }) }
             // its live swarms (the client's own rows, feature swarm), above its threads; their members have no rows
             if (Swarms.on() && !p.folded) items(SwarmUi.live(Swarms.all, p.id).filter { it.id !in asking }, key = { "ss:${s.id}:${it.id}" }) { x -> SwarmRow(x) { openSwarm(x.id) } }
             items(p.threads, key = { "st:${s.id}:${it.id}" }) { t -> SectionThread(t, 34, open = open) }
