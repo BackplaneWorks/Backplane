@@ -257,6 +257,12 @@ pub async fn look_project(hub: &Arc<Hub>, project: &str) -> Value {
     let home = hub.cfg.home.clone();
     let mut c = tokio::task::spawn_blocking(move || look_in(&home, root.as_deref(), "", false, "", &[])).await.unwrap_or_else(|_| card("", "", &[], 0, &Value::Null, false, &[], "", ""));
     c["project"] = json!(project);
+    // Buy it on the project's page: what the header of the thread it buys from offers (present/ready.rs `page_button`), from that thread's own card
+    let src = crate::statehost::policies().and_then(|q| q.with_state(|st| crate::present::ready::page_source(st, project))).flatten();
+    if let Some(th) = src {
+        let tc = look(hub, &th).await;
+        if let Some(b) = crate::statehost::policies().and_then(|q| q.with_state(|st| crate::present::ready::page_button(st, &th, &tc))).flatten() { c["buy"] = b; }
+    }
     c
 }
 

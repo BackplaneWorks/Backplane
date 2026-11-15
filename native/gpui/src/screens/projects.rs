@@ -22,6 +22,8 @@ pub struct Projects {
     pub intent_edit: Option<(String, String)>,
     /// The page's viewer buttons: (the thread it opened, the view kind), sent as `view-kind` once that thread is on show.
     pub view_edit: Option<(String, &'static str)>,
+    /// The page's Buy it: the thread it opened (the one the hub's button names), whose own Buy it (`fab-buy`) is pressed once that thread is on show.
+    pub buy_edit: Option<String>,
     /// Send on a project's page (0.14's home composer): (the thread on show before, the message, when), sent once the new thread the page
     /// asked for is the one on show; back in the box if none came.
     pub first_send: Option<(String, String, std::time::Instant)>,
@@ -286,6 +288,14 @@ pub fn sync(this: &mut Backplane, cx: &mut Context<Backplane>) {
             if !(v["open"].as_str().map_or(false, |o| !o.is_empty()) && super::viewer::active_kind(v, None) == kind) { let _ = this.tx.try_send(super::viewer::view_kind(kind)); }
         }
     }
+    if let Some(th) = this.screens.projects.buy_edit.clone() {
+        let shown = string(&this.data["thread"], "id"); let shown = shown.rsplit('|').next().unwrap_or("").to_string();
+        if shown == th && this.selected.rsplit('|').next() == Some(th.as_str()) && this.data["thread"]["loading"] != true {
+            // (as the header's Buy it: the hub makes the buy thread and this window goes to it)
+            this.screens.projects.buy_edit = None; this.arm_new();
+            let _ = this.tx.try_send(Command::Action("fab-buy".into(), String::new()));
+        }
+    }
     if this.screens.projects.search.is_none() {
         let input = cx.new(|cx| Composer::with_context(cx, "AskInput"));
         cx.observe(&input, |this, input, cx| {
@@ -448,6 +458,17 @@ pub fn viewer_buttons(snap: &Value) -> Vec<(&'static str, &'static str, &'static
     /* i18n-ok: viewer kinds, drawn through trs */ { if has("board") { v.push(("Board", "board", "circuit-board")); } if has("schematic") { v.push(("Schematic", "schematic", "cpu")); } if has("board") { v.push(("3D", "3d", "box")); } if has("mech") { v.push(("Mech", "mech", "layers")); } v.push(("Files", "files", "folder")); }
     v
 }
+/// The page's Buy it from the hub's card (`buy`): (label, tooltip, the thread it buys from), None when the hub offers none.
+pub fn buy_button(card: &Value) -> Option<(String, String, String)> {
+    let b = &card["buy"]; let (label, thread) = (string(b, "label"), string(b, "value"));
+    if b["action"] != "fab-buy" || label.is_empty() || thread.is_empty() { return None }
+    Some((label, string(b, "tip"), thread))
+}
+/// A thread of the page's project as the window selects it (`<hub>|<id>`): its row's id when the page lists it, else the project's hub with the id.
+fn page_thread(project: &Value, threads: &[&Value], raw: &str) -> String {
+    if let Some(id) = threads.iter().map(|t| string(t, "id")).find(|i| i.rsplit('|').next() == Some(raw)) { return id }
+    match string(project, "id").rsplit_once('|') { Some((hub, _)) => format!("{hub}|{raw}"), None => raw.to_string() }
+}
 /// A size in words: 1.2 MB, 340 KB.
 pub fn size_text(b: u64) -> String { if b >= 1 << 20 { format!("{:.1} MB", b as f64 / (1u64 << 20) as f64) } else { format!("{} KB", (b + 1023) >> 10) } }
 fn section(light: bool, label: String, right: Option<AnyElement>) -> AnyElement {
@@ -495,6 +516,20 @@ pub fn page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, light: bool
             })));
         }
     } }
+    // Buy it, as the thread's header has it: the hub's button for this project (`fab.look {project}` → `buy`, present/ready.rs `page_button`); it opens
+    // the thread the hub names and presses that thread's Buy it. Nothing to order, Ordering off or no thread: no button.
+    if let Some((label, tip, thread)) = if loaded { buy_button(&card) } else { None } {
+        let id = page_thread(p, &threads, &thread);
+        /* i18n-ok: ctl labels and ids */ ctl.push(CtlEntry { id: "page-buy".into(), label: label.clone(), ctl: Ctl::Select(id.clone()) });
+        let shown = crate::i18n::trs(&label); let (word, est) = super::head::split_buy(&shown); let (word, est) = (word.to_string(), est.to_string());
+        bar = bar.child(div().w(px(1.)).h(px(18.)).mx_1().bg(c("line")));
+        /* i18n-ok: a ctl id */ bar = bar.child(crate::ui::with_rect(div().id("page-buy"), || "page-buy".to_string()).flex().items_center().gap_2().px_3().h(crate::scale::tpx(30.)).border_1().border_color(c("accent")).bg(c("raise")).text_size(crate::scale::tpx(12.)).text_color(c("accent")).cursor_pointer()
+            .hover(|s| s.bg(c("panel")))
+            .child(crate::ui::ic(light, "shopping-cart", 14., "accent")).child(div().child(word))
+            .when(!est.is_empty(), |d| d.child(div().text_color(c("faint")).child(est)))
+            .tooltip(crate::keys::tip(&tip, "", light))
+            .on_click(cx.listener(move |this, _, window, cx| { this.screens.projects.buy_edit = Some(thread.clone()); this.select(id.clone(), window, cx); })));
+    }
     out.push(bar.into_any_element());
     // threads: the hub's lists for this project (running, needs you, recent, Done (n)), every machine's threads
     let lists = super::sections::page_lists(cx, light, data, pid, ctl);
@@ -732,6 +767,14 @@ mod home_tests {
     }
     #[test] fn the_goal_and_notes_are_drawn_a_line_each() {
         assert_eq!(intent_lines("# Goal\n\nA lamp.\n\n# Parts\n\n- LED board\n* Shade\n## Notes"), vec![("h", "Goal".into()), ("p", "A lamp.".into()), ("h", "Parts".into()), ("li", "LED board".into()), ("li", "Shade".into()), ("h", "Notes".into())]);
+    }
+    #[test] fn the_pages_buy_it_is_the_hubs_button_and_names_the_thread_as_the_window_selects_it() {
+        let card: Value = serde_json::from_str(r#"{"buy":{"icon":"shopping-cart","label":"Buy it · from $5","tip":"Ready to order · A","action":"fab-buy","value":"t2"}}"#).unwrap();
+        assert_eq!(buy_button(&card), Some(("Buy it · from $5".to_string(), "Ready to order · A".to_string(), "t2".to_string())));
+        assert_eq!(buy_button(&serde_json::json!({})), None, "the hub offers none: no button");
+        assert_eq!(buy_button(&serde_json::json!({"buy":{"label":"Buy it","action":"fab-buy","value":""}})), None, "no thread to buy from");
+        let p = serde_json::json!({"id":"http://h:1|p1"}); let rows = [serde_json::json!({"id":"http://h:1|t2"})]; let rows: Vec<&Value> = rows.iter().collect();
+        assert_eq!(page_thread(&p, &rows, "t2"), "http://h:1|t2"); assert_eq!(page_thread(&p, &rows, "t9"), "http://h:1|t9", "a thread the page does not list is this hub's");
     }
     #[test] fn the_boards_are_the_folders_board_then_the_cards_board_files() {
         let snap = json!({"artifacts": [{"kind": "board", "path": "/p/board.kicad_pcb"}, {"kind": "intent", "path": "/p/.backplane/intent.md"}]});
