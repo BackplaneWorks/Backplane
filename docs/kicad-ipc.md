@@ -7,7 +7,9 @@ its relative subfolder. An ordinary project folder is unchanged. Absolute
 `project`, `pcb` and `schematic` entries in the thread's `.backplane.json`
 override the main configuration, preserving explicit external designs.
 
-Open in KiCad (the viewer bar's button, action `kicad-open`, RPC `kicad.open {thread}`; `kicad/open.rs`) starts the
+Open in KiCad on another machine (the viewer bar's button in a window that cannot hold KiCad, and the KiCad pane's "Open the KiCad
+app instead"; action `kicad-open`, RPC `kicad.open {thread}`; `kicad/open.rs`. In a window on the hub's own machine the bar's
+Open in KiCad is the editor in the pane, docs/embedded-editors.md) starts the
 desktop KiCad beside the hub's `kicad-cli` on the thread's own design, detached: the project manager on its `.kicad_pro`,
 else the board editor on the board, else the schematic editor. It opens the files the viewer shows (a worktree thread's
 copy); 0.14's choice between main and the thread's copy (Open main, Open this thread's copy, Cancel) is not ported. How it
