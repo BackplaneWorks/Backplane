@@ -16,6 +16,8 @@ final class DataClient {
     /// a tapped link the hub resolved (DataLinks.swift): the root screen opens it; a link that opens nothing leaves a short note
     var linkTarget: DLinkTarget?
     var linkNote = ""
+    /// pictures another app handed over (Open in / Share, an image file): the open thread's composer takes them, else the next thread opened
+    var incomingImages: [Data] = []
     /// a project a link named: the list opens its group and scrolls to it
     var focusProject = ""
     #if DEBUG

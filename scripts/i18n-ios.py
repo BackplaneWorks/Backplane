@@ -11,7 +11,7 @@ import pathlib, re, sys
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 CAT = ROOT / "i18n"
 OUT = ROOT / "mobile/ios/Shared/TrCatalog.swift"
-PLIST = {"NSCameraUsageDescription": "native.permission.camera", "NSMicrophoneUsageDescription": "native.permission.microphone"}
+PLIST = {"NSCameraUsageDescription": "native.permission.camera", "NSMicrophoneUsageDescription": "native.permission.microphone", "NSPhotoLibraryAddUsageDescription": "native.permission.photos.add"}
 IOS_SECTION = "# ---- ios: new entries go here ----"
 KEYWORDS = set("""associatedtype class deinit enum extension fileprivate func import init inout internal let open operator private precedencegroup protocol public
 rethrows static struct subscript typealias var break case catch continue default defer do else fallthrough for guard if in repeat return throw switch where while

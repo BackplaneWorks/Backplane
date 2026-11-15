@@ -93,11 +93,22 @@ struct DataRoot: View {
 
     /// This app's links, its one handler: backplane://thread/<id> opens that thread, backplane://account/<id> that account's sign-in; any other (a pairing link) asks first (DataClient.opened).
     private func route(_ url: URL) {
+        if url.isFileURL { take(url); return }
         guard url.scheme == "backplane" || url.scheme == AppIdentity.scheme else { return }
         // (a thread link from outside: the hub says which thread it is, so `desktop~t9` and a link id both open the one on that machine)
         if url.host == "thread" { client.openLink(url, thread: "") }
         else if url.host == "google" { return }   // the end of a Google sign-in (GoogleLoop): not a pairing link
         else if url.host == "account" { if let id = url.pathComponents.dropFirst().first { client.pushAccount = id } } else { client.opened(url) }
+    }
+    // a picture from another app (Open in / Share, Files): a copy in the app's Inbox, or a file it may read for a moment
+    private func take(_ url: URL) {
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        guard let d = try? Data(contentsOf: url), UIImage(data: d) != nil else { return }
+        if url.path.contains("/Inbox/") { try? FileManager.default.removeItem(at: url) }
+        client.incomingImages.append(d)
+        // no thread open took it: it waits for the next one
+        Task { try? await Task.sleep(for: .milliseconds(600)); if !client.incomingImages.isEmpty { client.say("Picture ready: open a thread to send it.") } }
     }
 }
 
@@ -849,6 +860,8 @@ struct DataThreadView: View {
         .fullScreenCover(isPresented: $drawing) { DataPadView { add([$0]) } }
         .photosPicker(isPresented: $photoLibrary, selection: $picked, maxSelectionCount: max(1, 4 - pending.count), matching: .images)
         .fullScreenCover(isPresented: $camera) { DCamera { d in camera = false; if let d { add([d]) } }.ignoresSafeArea() }
+        // a picture another app handed over waits here, like one chosen from Photos
+        .onChange(of: client.incomingImages, initial: true) { _, d in if !d.isEmpty { client.incomingImages = []; add(d) } }
         .onChange(of: picked) { _, items in
             guard !items.isEmpty else { return }
             Task {
@@ -1189,9 +1202,7 @@ struct DataEntryRow: View {
                             .buttonStyle(.plain).accessibilityIdentifier("data.entry.replyto")
                     }
                     VStack(alignment: .leading, spacing: 6) {
-                        ForEach(Array(entry.localImages.enumerated()), id: \.offset) { _, d in
-                            if let u = UIImage(data: d) { Image(uiImage: u).resizable().scaledToFit().frame(maxWidth: 220, maxHeight: 220).accessibilityIdentifier("data.entry.image") }
-                        }
+                        ForEach(Array(entry.localImages.enumerated()), id: \.offset) { _, d in DataLocalImage(data: d) }
                         if entry.localImages.isEmpty { ForEach(entry.attachments) { a in DataAttachmentImage(client: client, attachment: a) } }
                         if !entry.text.isEmpty { DLinkText(text: entry.text, thread: thread).foregroundStyle(BackplaneDesign.text).lineSpacing(3) }
                     }.padding(.horizontal, 10).padding(.vertical, 8).dbox(fill: BackplaneDesign.raised)
@@ -1493,25 +1504,33 @@ struct DataAttachmentImage: View {
     let client: DataClient
     let attachment: DAttachment
     @State private var image: UIImage?
+    @State private var data: Data?
     @State private var failed = false
     @State private var full = false
     var body: some View {
         Group {
-            if let image { Image(uiImage: image).resizable().scaledToFit().frame(maxWidth: 220, maxHeight: 220).onTapGesture { full = true } }
+            if let image { Image(uiImage: image).resizable().scaledToFit().frame(maxWidth: 220, maxHeight: 220).onTapGesture { full = true }.dImageMenu(image, data: data) }
             else if failed { Label(attachment.name, systemImage: "photo").font(.footnote).foregroundStyle(.secondary) }
             else { ProgressView().frame(width: 80, height: 80) }
         }
         .task(id: attachment.id) {
-            if let d = await client.attachmentData(attachment.id), let u = UIImage(data: d) { image = u } else { failed = true }
+            if let d = await client.attachmentData(attachment.id), let u = UIImage(data: d) { image = u; data = d } else { failed = true }
         }
-        .fullScreenCover(isPresented: $full) {
-            ZStack(alignment: .topTrailing) {
-                Color.black.ignoresSafeArea()
-                if let image { Image(uiImage: image).resizable().scaledToFit() }
-                Button { full = false } label: { Image(systemName: "xmark.circle.fill").font(.title).foregroundStyle(.white) }.padding()
-            }
-        }
+        .fullScreenCover(isPresented: $full) { if let image { DImageFull(image: image, data: data) { full = false } } }
         .accessibilityIdentifier("data.entry.image")
+    }
+}
+
+// a picture this phone just sent, from its own copy until the hub has it: tap for the full size, long press to save or share
+struct DataLocalImage: View {
+    let data: Data
+    @State private var full = false
+    var body: some View {
+        if let u = UIImage(data: data) {
+            Image(uiImage: u).resizable().scaledToFit().frame(maxWidth: 220, maxHeight: 220).onTapGesture { full = true }.dImageMenu(u, data: data)
+                .fullScreenCover(isPresented: $full) { DImageFull(image: u, data: data) { full = false } }
+                .accessibilityIdentifier("data.entry.image")
+        }
     }
 }
 

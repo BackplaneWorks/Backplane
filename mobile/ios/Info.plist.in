@@ -19,6 +19,27 @@
 	<!-- dictation: the composer's mic records while the person dictates -->
 	<key>NSMicrophoneUsageDescription</key>
 	<string>@NSMicrophoneUsageDescription@</string>
+	<!-- Save to Photos: a picture in a thread, long-pressed or from its full view -->
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>@NSPhotoLibraryAddUsageDescription@</string>
+	<!-- a picture handed over by another app (Open in / Share, Files): it waits in the composer of the thread that is open -->
+	<key>CFBundleDocumentTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeName</key>
+			<string>Image</string>
+			<key>CFBundleTypeRole</key>
+			<string>Viewer</string>
+			<key>LSHandlerRank</key>
+			<string>Alternate</string>
+			<key>LSItemContentTypes</key>
+			<array>
+				<string>public.image</string>
+			</array>
+		</dict>
+	</array>
+	<key>LSSupportsOpeningDocumentsInPlace</key>
+	<false/>
 	<!-- a pairing link: backplane://pair?url=http://host:3787/%23token=... -->
 	<key>CFBundleURLTypes</key>
 	<array>

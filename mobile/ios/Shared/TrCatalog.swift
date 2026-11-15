@@ -445,6 +445,12 @@ ios.swarm.add	Add member	メンバーを追加
 ios.swarm.remove.ask	Remove {name} from the swarm?	{name}をスウォームから外しますか？
 ios.swarm.stop.ask	Stop this swarm?	このスウォームを停止しますか？
 ios.swarm.post	Post to the board	ボードに投稿
+ios.image.save	Save to Photos	写真に保存
+ios.image.saved	Saved to Photos	写真に保存しました
+ios.image.denied	Photos access is off: allow it in Settings to save pictures.	写真へのアクセスがオフです。画像を保存するには設定で許可してください。
+ios.image.failed	Could not save the picture.	画像を保存できませんでした。
+ios.image.incoming	Picture ready: open a thread to send it.	画像の準備ができました。送るスレッドを開いてください。
+native.permission.photos.add	Backplane saves the pictures you choose in a thread to your photo library.	スレッドで選んだ画像を写真ライブラリに保存します。
 common.cancel	Cancel	キャンセル
 common.delete	Delete	削除
 common.save	Save	保存
@@ -2085,6 +2091,11 @@ gpui.bots.webhook.name	Webhook name	Webhookの名前
 gpui.bots.eg	{label} (e.g. {e})	{label}（例：{e}）
 gpui.bots.no.tasks.yet.teach.this	No tasks yet. Teach this bot a browser task and it shows here.	タスクはまだありません。このボットにブラウザのタスクを教えると、ここに表示されます。
 gpui.bots.mem.range	{from}–{to} of {total}	{total}件中 {from}–{to}
+gpui.bots.recall	Infinite context	無限コンテキスト
+gpui.bots.recall.on	On	オン
+gpui.bots.recall.off	Off	オフ
+gpui.bots.recall.stats	{messages} messages · {lines} lines written · {left} to write	メッセージ {messages}件 · 要約 {lines}行 · 残り {left}
+gpui.bots.recall.note	Each turn starts fresh with the whole conversation as a tree of one-line summaries, recent messages in full and older ones merged; the bot zooms into any line, down to the original message. A cheaper model writes the summaries in the background.	各ターンは新しいセッションで始まり、会話全体を一行要約の木として受け取ります。最近のメッセージはそのまま、古いものはまとめて。ボットはどの行も元のメッセージまでズームできます。要約はより安価なモデルがバックグラウンドで書きます。
 gpui.bots.newer	Newer	新しい方
 gpui.bots.mem.older	Older ({more} more)	古い方（あと{more}件）
 gpui.bots.when.hint	When: every 15m, daily 09:30, weekdays 08:00, or a one-time time	いつ：every 15m、daily 09:30、weekdays 08:00、または一度きりの日時
@@ -2645,6 +2656,8 @@ gpui.e.about.notices.hub	The licences of the third-party software in Backplane a
 gpui.e.open.folder	Open folder	フォルダを開く
 gpui.e.agents.thinking	Show thinking	思考を表示
 gpui.e.agents.thinking.note	Ask agents for their thinking and show it in the thread, folded (Claude, Codex and Pi; a Claude session restarts to take it)	エージェントに思考を求め、スレッドに折りたたんで表示します（Claude、Codex、Pi。Claudeはセッションを再起動して反映）
+gpui.e.agents.recall	Bots: infinite context (beta)	ボット：無限コンテキスト（ベータ）
+gpui.e.agents.recall.note	Each bot turn starts fresh with the whole conversation as a tree of summaries the bot can zoom into, written by a cheaper model in the background. A long history takes hours of model calls to summarize.	ボットの各ターンは、会話全体をズームできる要約の木として受け取り、新しいセッションで始まります。要約はより安価なモデルがバックグラウンドで書きます。長い履歴の要約には何時間ものモデル呼び出しがかかります。
 gpui.e.order.comes	Comes with Ordering.	注文と一緒に有効になります。
 gpui.e.devices.local.machine	This invite names only this computer (127.0.0.1): another computer cannot reach it. Start the hub with Tailscale on, or set BACKPLANE_URL to an address the other machine can reach, then make a new invite.	この招待はこのコンピューター（127.0.0.1）しか指していないため、他のコンピューターから接続できません。Tailscaleを有効にしてハブを起動するか、相手のマシンから届くアドレスをBACKPLANE_URLに設定してから、新しい招待を作ってください。
 gpui.e.rules.standing	Every agent's turn starts with the rules that apply to it. An enforced rule with tools is also checked: those tools are refused unless your latest message says its word.	エージェントの各ターンは、当てはまるルールから始まります。ツール付きの強制ルールは検査もされ、最新のメッセージにその言葉がない限り、そのツールは拒否されます。
@@ -5156,6 +5169,9 @@ gpui.streamer.win	Windows does not tell an app that the screen is being captured
 
     /// gpui.bots.mem.range = {from}–{to} of {total}
     static func gpui_bots_mem_range(from: String, to: String, total: String) -> String { f("gpui.bots.mem.range", ["from": from, "to": to, "total": total]) }
+
+    /// gpui.bots.recall.stats = {messages} messages · {lines} lines written · {left} to write
+    static func gpui_bots_recall_stats(messages: String, lines: String, left: String) -> String { f("gpui.bots.recall.stats", ["messages": messages, "lines": lines, "left": left]) }
 
     /// gpui.bots.mem.older = Older ({more} more)
     static func gpui_bots_mem_older(more: String) -> String { f("gpui.bots.mem.older", ["more": more]) }
