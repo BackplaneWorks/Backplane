@@ -9,8 +9,12 @@
 #import <Cocoa/Cocoa.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <errno.h>
+#include <string.h>
 static int sock = -1; static struct sockaddr_un to; static NSWindow *w; static NSString *act; static long fid;
-static void say(NSString *s) { const char *c = s.UTF8String; sendto(sock, c, strlen(c), 0, (struct sockaddr *)&to, sizeof to); }
+static int sent, failed;
+static void say(NSString *s) { const char *c = s.UTF8String; to.sun_len = (unsigned char)SUN_LEN(&to);
+  if (sendto(sock, c, strlen(c), 0, (struct sockaddr *)&to, SUN_LEN(&to)) < 0) { if (failed++ < 3) fprintf(stderr, "sendto %s: %s\n", to.sun_path, strerror(errno)); } else if (sent++ < 3) fprintf(stderr, "sent %s\n", c); }
 static void pushRect(void) {
   if (w.miniaturized || (w.styleMask & NSWindowStyleMaskFullScreen) || !w.isOnActiveSpace || !w.visible) { say(@"hide"); return; }
   double H = NSScreen.screens[0].frame.size.height; NSRect f = w.frame; // pane: 200 from left, 60 from top, to 20 from right/bottom

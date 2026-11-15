@@ -17,6 +17,8 @@ static void above(void) { if (w.visible) [w orderWindow:NSWindowAbove relativeTo
 - (void)windowDidBecomeKey:(NSNotification *)n { if ([self.policy isEqual:@"switch"]) [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular]; printf("key %.3f\n", NSDate.date.timeIntervalSince1970); fflush(stdout); }
 - (void)windowDidResignKey:(NSNotification *)n { if ([self.policy isEqual:@"switch"]) [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory]; }
 @end
+@interface V : NSView @end
+@implementation V - (void)mouseDown:(NSEvent *)e { printf("click %.3f active=%d key=%d\n", NSDate.date.timeIntervalSince1970, NSApp.active, self.window.keyWindow); fflush(stdout); } - (BOOL)acceptsFirstMouse:(NSEvent *)e { return YES; } @end
 @interface KeyWin : NSWindow @end
 @implementation KeyWin - (BOOL)canBecomeKeyWindow { return YES; } - (BOOL)canBecomeMainWindow { return YES; } @end
 int main(int argc, char **argv) { @autoreleasepool {
@@ -27,7 +29,7 @@ int main(int argc, char **argv) { @autoreleasepool {
   NSApp.mainMenu = bar;
   H = NSScreen.screens[0].frame.size.height;
   w = [[KeyWin alloc] initWithContentRect:NSMakeRect(0,0,100,100) styleMask:NSWindowStyleMaskBorderless backing:NSBackingStoreBuffered defer:NO];
-  w.backgroundColor = NSColor.systemGreenColor; w.hasShadow = NO; w.delegate = d; [w orderFront:nil];
+  w.backgroundColor = NSColor.systemGreenColor; w.hasShadow = NO; w.delegate = d; w.contentView = [V new]; [w orderFront:nil];
   printf("%ld\n", (long)w.windowNumber); fflush(stdout);
   [[NSString stringWithFormat:@"%ld", (long)w.windowNumber] writeToFile:[@(path) stringByAppendingString:@".id"] atomically:YES encoding:NSUTF8StringEncoding error:nil];
   // the host's death: kqueue NOTE_EXIT on its pid, delivered on the main queue
@@ -35,10 +37,10 @@ int main(int argc, char **argv) { @autoreleasepool {
   dispatch_source_set_event_handler(ds, ^{ [w orderOut:nil]; printf("host gone %.3f\n", NSDate.date.timeIntervalSince1970); fflush(stdout); exit(0); });
   dispatch_resume(ds);
   if ([mode isEqual:@"push"]) {
-    int s = socket(AF_UNIX, SOCK_DGRAM, 0); struct sockaddr_un a = {0}; a.sun_family = AF_UNIX; strncpy(a.sun_path, path, sizeof a.sun_path - 1); unlink(path);
-    if (bind(s, (struct sockaddr *)&a, sizeof a)) { perror("bind"); exit(2); }
+    int s = socket(AF_UNIX, SOCK_DGRAM, 0); struct sockaddr_un a = {0}; a.sun_family = AF_UNIX; strncpy(a.sun_path, path, sizeof a.sun_path - 1); unlink(path); a.sun_len = (unsigned char)SUN_LEN(&a);
+    if (bind(s, (struct sockaddr *)&a, SUN_LEN(&a))) { perror("bind"); exit(2); }
     dispatch_source_t rs = dispatch_source_create(DISPATCH_SOURCE_TYPE_READ, s, 0, dispatch_get_main_queue());
-    dispatch_source_set_event_handler(rs, ^{ char b[256]; ssize_t n; while ((n = recv(s, b, sizeof b - 1, MSG_DONTWAIT)) > 0) { b[n] = 0;
+    dispatch_source_set_event_handler(rs, ^{ char b[256]; ssize_t n; while ((n = recv(s, b, sizeof b - 1, MSG_DONTWAIT)) > 0) { b[n] = 0; static int got; if (got++ < 3) { fprintf(stderr, "got %s\n", b); }
       double x, y, ww, hh; long hid;
       if (sscanf(b, "rect %lf %lf %lf %lf %ld", &x, &y, &ww, &hh, &hid) == 5) { host = hid; place(CGRectMake(x, y, ww, hh)); if (!w.visible) [w orderWindow:NSWindowAbove relativeTo:host]; }
       else if (!strcmp(b, "hide")) [w orderOut:nil];
