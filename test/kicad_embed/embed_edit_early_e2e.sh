@@ -23,6 +23,7 @@ CP=$!; track_pid "$CP"
 for _ in $(seq 1100); do grep -q '"name":"done","event":"mark"' "$OUT/client.log" 2>/dev/null && break; kill -0 "$CP" 2>/dev/null || break; sleep 0.1; done
 R=$(last_kicad_report "$OUT/client.log" edit)
 check "the press was found and kept (no file yet)" "$(grep -q '"id":"ui:Edit","found":false' "$OUT/client.log" && echo 0 || (grep -q '"kicad_edit":"pending"' "$OUT/client.log" && echo 1 || echo 0))"
+check "the button said Opening… while the press waited" "$(grep -q '"kicad_edit_label":"opening"' "$OUT/client.log" && echo 1 || echo 0)"
 check "the editor came up with no second press" "$(python3 -c 'import json,sys; r=json.loads(sys.argv[1] or "{}"); print(int(r.get("state")=="ready"))' "$R")" "$(echo "$R" | cut -c1-200)"
 check "one Edit press in the script" "$([ "$(grep -c '"ui:Edit"' "$OUT/script.json")" = 1 ] && echo 1 || echo 0)"
 wait "$CP" 2>/dev/null || true
