@@ -1193,18 +1193,26 @@ def run(h):
             print("DIAG steal_key " + json.dumps(d), flush=True)
             for _ in pops:
                 E.key_tap("Escape"); time.sleep(0.5)
-            h.check("Steal-window key recorded (diagnostic)", True, d)
+            if os.environ.get("BP_IDLE_REQUIRE_PREWARM") == "1":
+                pcb_dialog = any("Footprint Chooser" in t for _, t in pops)
+                h.check("steal_key: the pre-warm was exercised (its request seen; else: not exercised)", seen, {"prewarm_seen": seen})
+                h.check("steal_key: a plain key 0.2 s into the pre-warm acts in the shown PCB editor (its Footprint Chooser), the hidden schematic untouched",
+                        seen and (pcb_dialog or d["pcb_zoom_readout_changed_px"] > 0) and not d["schematic_modified"]
+                        and bool(d["focus_when_pressed"].get("inside_frame")), d)
+            else:
+                h.check("Steal-window key recorded (diagnostic)", True, d)
             return h.finish()
         if only == "idle_trace":
             # Edit, then no input: sample foreground/focus every 20 ms until 8 s after the Edit click, then plain F2.
             # Did focus ever leave the shown editor, when, to what, and did it come back?
             t_end = t_edit + 8.0
+            t_cap = t_edit + 20.0
             prev = None
             # BP_IDLE_REPLACE_S: that long after Edit, the window 2 px wider (no activation, no input), a re-place: a runtime
             # without `prewarm-keeps-focus` gets its pre-warm only on a re-place (the client's gate), so this asks for it there
             replace_at = float(os.environ.get("BP_IDLE_REPLACE_S", "0") or 0)
             replaced = False
-            while time.monotonic() < t_end:
+            while time.monotonic() < (min(max(t_end, t_prewarm + 3.0), t_cap) if t_prewarm else t_end) or (not t_prewarm and time.monotonic() < t_cap and os.environ.get("BP_IDLE_REQUIRE_PREWARM") == "1"):
                 if replace_at and not replaced and time.monotonic() >= t_edit + replace_at and top:
                     r = E.W.RECT()
                     E.u32.GetWindowRect(top, E.ctypes.byref(r))
@@ -1248,6 +1256,16 @@ def run(h):
                  "left_shown": bool(left), "first_left": left[0] if left else None, "came_back": back,
                  "f2_acts": bool(zoomed), "changes": changes[:40]}
             print("DIAG idle_trace " + json.dumps(d)[:5000], flush=True)
+            if os.environ.get("BP_IDLE_REQUIRE_PREWARM") == "1":
+                # the lead's bar for the veto (Nov 15): the pre-warm must really run (a runtime that does not advertise
+                # prewarm-keeps-focus never starts it), and after it no focus sample may be outside the shown editor
+                after_pw = [c for c in changes if c["ms_after_prewarm"] is not None and c["ms_after_prewarm"] >= 0 and not c["inside_shown"]]
+                d["outside_after_prewarm"] = after_pw[:6]
+                h.check("The idle pre-warm was exercised: requested within 20 s of Edit and sampled 3 s past it (else: not exercised)",
+                        d["prewarm_ms_after_edit"] is not None, {"prewarm_ms_after_edit": d["prewarm_ms_after_edit"]})
+                h.check("Edit, no input: zero focus samples outside the shown editor after the pre-warm, and F2 acts",
+                        d["prewarm_ms_after_edit"] is not None and bool(zoomed) and not after_pw, d)
+                return h.finish()
             h.check("Edit, no input for 8 s: the keys stay in the shown editor (F2 acts)", bool(zoomed) and not (left and not back), d)
             return h.finish()
         if only == "idle_hotkey":
@@ -1298,6 +1316,9 @@ def run(h):
             d = {"before_click": before, "prewarmed_seen": [(w["hwnd"], w["title"]) for w in pw], "after_click": after, **fg,
                  "zoom_readout_changed": zoomed, "hidden_schematic_titles": hidden, "guard_fired": stray}
             print("DIAG idle_prewarm_tab " + json.dumps(d)[:2000], flush=True)
+            if os.environ.get("BP_IDLE_REQUIRE_PREWARM") == "1":
+                asked = "editor.kicad.prewarm" in open(h.p("client.log"), encoding="utf-8", errors="replace").read()
+                h.check("first tab: the idle pre-warm was exercised before the click (its request seen; else: not exercised)", asked, {"prewarm_requested": asked})
             h.check("Idle pre-warm, then first tab click and first hotkey: the shown editor gets the keys (F2 by the readout), hidden schematic untouched",
                     after["inside_frame"] and bool(zoomed) and fg["no_foreground_samples"] == 0 and not any(t.lstrip().startswith("*") for t in hidden), d)
             return h.finish()
