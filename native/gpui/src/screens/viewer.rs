@@ -677,7 +677,9 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
                     .on_click(cx.listener(|this, _, _, cx| { let h = this.screens.kicad_window; this.kicad_popin(cx); if let Some(h) = h { let _ = h.update(cx, |_, w, _| w.remove_window()); } })))
                 .into_any_element()
         } else { div().flex_1().min_h_0().child(e).into_any_element() };
-        div().size_full().flex().flex_col().child(bar(light).justify_end().child(a)).when(!popped, |d| d.child(strip)).child(body).into_any_element()
+        // the Boards menu (a project with several boards) stays where the viewer's bar has it; a pick moves KiCad to that board (boards::edit_due)
+        let boards = crate::viewers::boards::picker(cx, light, viewer, &pv.boards);
+        div().size_full().flex().flex_col().child(bar(light).children(boards).child(div().flex_1()).child(a)).when(!popped, |d| d.child(strip)).child(body).into_any_element()
     }
     else if early {
         let k = open;
