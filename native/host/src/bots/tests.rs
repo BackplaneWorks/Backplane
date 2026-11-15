@@ -181,6 +181,10 @@ async fn bot(hub: &Arc<Hub>, name: &str) -> String {
     let count = |k: &str| kinds(&hub, n).iter().filter(|x| x.as_str() == k).count();
     assert_eq!((count("RoomPosted"), count("BotWoke")), (1, 2), "a repeat stores and wakes nothing");
     assert_eq!(rpc(&hub, "bots.post", json!({"room":"nope","text":"x"})).await["error"], "no such room");
+    // a rename (a room row's Rename: no `members`) keeps who is in it
+    let before = { let b = crate::bots::api::of(&hub).unwrap(); let w = b.world().await; w.room("r1").unwrap().members.clone() };
+    assert_eq!(rpc(&hub, "bots.room", json!({"room":"r1","name":"bench"})).await["ok"], true);
+    { let b = crate::bots::api::of(&hub).unwrap(); let w = b.world().await; let r = w.room("r1").unwrap(); assert_eq!((r.name.as_str(), &r.members), ("bench", &before)); assert!(!before.is_empty()); }
     assert_eq!(rpc(&hub, "bots.room_delete", json!({"room":"r1"})).await["ok"], true);
     assert_eq!(rpc(&hub, "bots.post", json!({"room":"r1","text":"x"})).await["error"], "no such room");
 }

@@ -130,6 +130,8 @@ pub fn act(req: &Req) -> Option<ActOut> {
                     "group" => { a.ren_clear(); a.rpc("setting.set", json!({"key": format!("sidebar.group.name.{id}"), "value": title.chars().take(40).collect::<String>()})) }
                     // New group…: a group of that name with this project (`id` its key) in it
                     "group-new" => { a.ren_clear(); for (k, val) in crate::present::sections::new_group_sets(&id, &title).unwrap_or_default() { a.rpc("setting.set", json!({"key": k, "value": val})) } }
+                    // a room's row menu, Rename: its name only, the hub keeps its members (bots/rpc.rs `room`)
+                    "room" => { a.ren_clear(); a.rpc("bots.room", json!({"room": id, "name": title.chars().take(60).collect::<String>()})) }
                     "artifact" => return None, // a project setting: the helper's
                     _ => { a.ren_clear(); a.rpc("thread.rename", json!({"thread": id, "title": title})) }
                 }

@@ -173,11 +173,11 @@ pub async fn directory(hub: &Arc<Hub>) -> serde_json::Value {
 /// A linked machine's rooms as listed here: a room shared across machines is kept on each under the same id, and this machine's copy is the one listed
 pub fn far_rooms(rows: Vec<Value>, here: &std::collections::HashSet<String>) -> Vec<Value> { rows.into_iter().filter(|r| !here.contains(&crate::net::far::local(r["id"].as_str().unwrap_or("")))).collect() }
 /// A bots world's live bots and rooms (oldest first) as `bots.list` rows; `uber` is the bot shown as the uberbot, `mark` the machine's marker (null for this one);
-/// `delete` says the row offers Delete bot (`bot.delete`): this machine's bots but the uberbot
+/// `delete` says the row offers Delete bot (`bot.delete`): this machine's bots but the uberbot; on a room, Delete room (`room.delete`): this machine's rooms
 pub fn rows_of(w: &super::world::World, uber: &str, mark: &Value) -> (Vec<Value>, Vec<Value>) {
     let mut bots: Vec<_> = w.bots.values().filter(|x| !x.deleted).map(|x| (x.created, x.id.clone(), json!({"id":x.id,"name":x.name,"thread":x.thread,"uber":!uber.is_empty() && x.id == uber,"mark":mark,"delete":mark.is_null() && x.id != uber}))).collect();
     bots.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
-    let mut rooms: Vec<_> = w.rooms.values().filter(|x| x.listed() && !x.swarm() && !crate::net::far::local(&x.id).starts_with("dm:")).map(|x| (x.created, x.id.clone(), json!({"id":x.id,"name":x.name,"members":x.members,"mark":mark}))).collect();
+    let mut rooms: Vec<_> = w.rooms.values().filter(|x| x.listed() && !x.swarm() && !crate::net::far::local(&x.id).starts_with("dm:")).map(|x| (x.created, x.id.clone(), json!({"id":x.id,"name":x.name,"members":x.members,"mark":mark,"delete":mark.is_null()}))).collect();
     rooms.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
     (bots.into_iter().map(|x| x.2).collect(), rooms.into_iter().map(|x| x.2).collect())
 }
@@ -209,6 +209,11 @@ pub async fn room_page(hub: &Arc<Hub>, room: &str, now: u64) -> Option<Value> {
     Some(pg)
 }
 /// a room's life (ephemeral, closed), here or in a linked machine's mirror; None for an unknown room
+/// Whether `room.delete` may delete it: a room of this machine the lists show (no bots' exchange, swarm or direct line)
+pub async fn room_deletable(hub: &Arc<Hub>, room: &str) -> bool {
+    if room.is_empty() || room.contains('~') || room.starts_with("dm:") { return false }
+    let Some(b) = of(hub) else { return false }; let w = b.world().await; w.room(room).map_or(false, |r| r.listed() && !r.swarm())
+}
 pub async fn room_life(hub: &Arc<Hub>, room: &str) -> Option<(bool, bool)> {
     if room.contains('~') { let mut life = None; on_far(hub, &crate::net::far::link(room), |_, w| life = w.room(room).map(|r| (r.ephemeral, r.closed))); return life }
     let b = of(hub)?; let w = b.world().await; w.room(room).map(|r| (r.ephemeral, r.closed))

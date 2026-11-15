@@ -1052,6 +1052,8 @@ final class DataClient {
     }
     /// Delete bot (`bot.delete`; the row asked first): the hub stops its chat, and the list is read again.
     func botDelete(_ bot: String) async { _ = try? await call("bot.delete", ["bot": bot]) as DEmpty; await loadBots() }
+    /// Delete room (`room.delete`; the row asked first), and the list is read again.
+    func roomDelete(_ room: String) async { _ = try? await call("room.delete", ["room": room]) as DEmpty; await loadBots() }
     func roomPosts(_ room: String) async -> [DPost] { ((try? await call("room.posts", ["room": room, "limit": 60]) as DPosts)?.posts) ?? [] }
     func roomPost(_ room: String, _ text: String) async throws { _ = try await call("room.post", ["room": room, "text": text, "clientId": UUID().uuidString], as: DEmpty.self) }
 
