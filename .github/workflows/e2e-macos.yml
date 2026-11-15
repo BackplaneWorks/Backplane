@@ -5,7 +5,7 @@ on:
   workflow_dispatch:
     inputs:
       jobs:
-        description: "probe (what the runner allows), hub (macOS hub rows), client (GPUI client rows), pairing (test/e2e/pairing/gpui.sh, hub and client on this runner), browser (the embedded Browser and the agent's browser tools, test/cef/agent_proof.py), all"
+        description: "probe (what the runner allows), hub (macOS hub rows), client (GPUI client rows), pairing (test/e2e/pairing/gpui.sh, hub and client on this runner), kicad-proto (test/kicad_embed/mac/proto: a borderless window in another process kept over a moving window, its lag and stacking; not in all), browser (the embedded Browser and the agent's browser tools, test/cef/agent_proof.py), all"
         default: all
       archive_run:
         description: "release dry run whose darwin-arm64 archive the client rows run from, installed with its install.sh"
@@ -44,6 +44,22 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with: { name: probe, path: out }
+
+  kicad-proto:
+    # KiCad in the pane on macOS, option (b) measured before it is built: test/kicad_embed/mac/proto/run.sh
+    if: inputs.jobs == 'kicad-proto'
+    runs-on: macos-15
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: tracking lag and stacking, timer and display link
+        run: |
+          sw_vers; system_profiler SPDisplaysDataType | grep -iE "resolution|refresh|display type" | head
+          sh test/kicad_embed/mac/proto/run.sh "$RUNNER_TEMP/proto"
+          python3 test/kicad_embed/mac/proto/analyze.py "$RUNNER_TEMP"/proto/samples.*.csv | tee "$RUNNER_TEMP/proto/summary.txt"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: { name: kicad-proto, path: "${{ runner.temp }}/proto/*.[ct][sx][vt]" }
 
   build:
     if: inputs.jobs == 'build'
