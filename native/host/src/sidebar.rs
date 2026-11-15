@@ -19,8 +19,11 @@ pub fn fuzzy_hit(title: &str, q: &str) -> bool {
 }
 /// Palette.hit: every word of the query is somewhere in the text, whatever the case. For thread titles: they are many and long, and letters in order would match most of them.
 pub fn word_hit(text: &str, q: &str) -> bool { let t = text.to_lowercase(); q.to_lowercase().split_whitespace().all(|w| t.contains(w)) }
-/// The Scratch project's id: conversations that belong to no project. Nothing starts there any more; its chats stay (Conversation history).
+/// The Scratch project's id: conversations that belong to no project. Nothing starts there any more; its chats stay (`NO_PROJECT`).
 pub const SCRATCH: &str = "scratch";
+/// What every client calls the Scratch chats and says as their place: they are chats that belong to no project (the old name, "Conversation
+/// history", said nothing of what they are or why they are apart from the projects).
+pub const NO_PROJECT: &str = "Chats with no project";
 /// How many Scratch chats the palette is told of, newest first.
 const JUMP_MAX: usize = 200;
 
@@ -376,7 +379,7 @@ impl Plan<'_> {
             if !live { if history.len() < JUMP_MAX { history.push(json!({"id": q(o, id), "title": t.title})); } }
             if !word_hit(&t.title, o.query) || !(live || open) { continue }
             let r = Row { id, t, depth: 0, expanded: false, children: self.kids_by.get(id).map_or(0, |k| k.len()) };
-            let mut j = thread_json(st, o, &self.ix, &r, 0, 0); j["project"] = json!("Conversation history"); rows.push(j);
+            let mut j = thread_json(st, o, &self.ix, &r, 0, 0); j["project"] = json!(NO_PROJECT); rows.push(j);
         }
         (rows, history)
     }

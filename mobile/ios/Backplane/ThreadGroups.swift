@@ -34,7 +34,7 @@ enum ThreadGroups {
     static func title(_ n: Int) -> String { "Settled (\(n))" }
     /// Conversation history (`history.list`): what shows under the group's row. The live chats always; the rest only while it is open. No row here starts a chat.
     static func history<T: ShelvedThread>(live: [T], rows: [T], open: Bool) -> [T] { live + (open ? rows.filter { r in !live.contains { $0.id == r.id } } : []) }
-    static func historyTitle(_ n: Int) -> String { "Conversation history (\(n))" }
+    static func historyTitle(_ n: Int) -> String { "Chats with no project (\(n))" }
 
     /// The parent a thread sits under: its `parent` when that is among `ids` and the ancestry does not loop (the desktop's Tree.display_parent); else nil, a root.
     static func parent<T: NestedThread>(_ t: T, in ids: [String: T]) -> String? {

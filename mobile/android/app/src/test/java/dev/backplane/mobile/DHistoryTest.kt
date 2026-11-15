@@ -13,5 +13,5 @@ class DHistoryTest {
         assertEquals(listOf("live"), ids(h.shown(open = false)))
         assertEquals(listOf("live", "old1", "old2"), ids(h.shown(open = true)))
     }
-    @Test fun theRowCountsEveryChat() { assertEquals("Conversation history (3)", h.title); assertEquals(emptyList<DThread>(), DHistory().shown(true)) }
+    @Test fun theRowCountsEveryChat() { assertEquals("Chats with no project (3)", h.title); assertEquals(emptyList<DThread>(), DHistory().shown(true)) }
 }

@@ -381,7 +381,7 @@ pub fn build(st: &State, rows: &[MergedProject], bub: &Value, c: &Ctx) -> Value 
       for p in rows { for t in &p.threads { if let Some(s) = t.src { if !t.machine.is_empty() && !states.iter().any(|(x, _)| std::ptr::eq(*x, s)) { states.push((s, t.machine.clone())); } } } }
       for (s, machine) in states { // (another machine's ask is believed for ACTIVE, as `far_word` has it)
       for (id, t) in s.threads.iter().filter(|(id, t)| !t.deleted && !listed.contains(id.as_str()) && wants_person(s, id) && (machine.is_empty() || (far_word("needs", false, c.now.saturating_sub(t.activity)) == "needs" && hidden_at(st, id) < t.activity.max(1)))) {
-          let place = s.bots_nav.values().find(|b| &b.thread == id).map(|b| b.name.clone()).unwrap_or_else(|| "Conversation history".into());
+          let place = s.bots_nav.values().find(|b| &b.thread == id).map(|b| b.name.clone()).unwrap_or_else(|| crate::sidebar::NO_PROJECT.into());
           if !c.query.is_empty() && !hit(&t.title, c.query) && !hit(&place, c.query) { continue }
           let mt = MergedThread { machine: machine.clone(), id: id.clone(), title: t.title.clone(), activity: t.activity, pinned: t.pinned, archived: t.archived, src: Some(s), status: String::new() };
           let w = want(&mt, "needs");

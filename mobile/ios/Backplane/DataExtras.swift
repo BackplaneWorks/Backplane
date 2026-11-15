@@ -86,7 +86,7 @@ struct DataSearchResults: View {
                 ForEach(r.threads.filter { !$0.history }) { t in Button { open(t.id) } label: { DataThreadRow(thread: t) }.buttonStyle(.plain).dataRow().accessibilityIdentifier("data.search.thread." + t.id) }
                 // the old Scratch chats the search found, under their group's name (feature history)
                 let old = r.threads.filter(\.history)
-                if !old.isEmpty { DHeading(text: Tr.t("Conversation history")).padding(.leading, 12).padding(.top, 12).padding(.bottom, 4).dataRow().accessibilityIdentifier("data.search.history") }
+                if !old.isEmpty { DHeading(text: Tr.t("Chats with no project")).padding(.leading, 12).padding(.top, 12).padding(.bottom, 4).dataRow().accessibilityIdentifier("data.search.history") }
                 ForEach(old) { t in Button { open(t.id) } label: { DataThreadRow(thread: t) }.buttonStyle(.plain).dataRow().accessibilityIdentifier("data.search.thread." + t.id) }
                 if !r.messages.isEmpty { DHeading(text: Tr.k("ios.search.messages")).padding(.leading, 12).padding(.top, 12).padding(.bottom, 4).dataRow().accessibilityIdentifier("data.search.messages") }
                 ForEach(r.messages) { h in
