@@ -102,6 +102,8 @@ async fn bot(hub: &Arc<Hub>, name: &str) -> String {
     let e = &log(&hub)[n]; assert_eq!((e["$"].as_str().unwrap(), e["thread"].as_str().unwrap(), e["look"].as_u64().unwrap(), e["persona"].as_str().unwrap(), e["name"].as_str().unwrap()), ("BotSet", "", 5, "p2", "bo"));
     assert_eq!(rpc(&hub, "bots.edit", json!({"bot":"nope"})).await["error"], "no such bot");
     let th = log(&hub).iter().find(|e| e["$"] == "ThreadCreated").unwrap()["id"].as_str().unwrap().to_string();
+    // the bot's page offers Delete bot (the clients' button), naming the bot
+    assert_eq!(crate::bots::bot_page_from(&hub, &b, "settings", 1000, 0).await.unwrap()["delete"], json!({"label":"Delete bot","action":"bot-delete","value":b}));
     assert_eq!(rpc(&hub, "bots.delete", json!({"bot":b})).await["ok"], true);
     assert_eq!(*rec.stopped.lock().unwrap(), vec![th]);
     assert_eq!(rpc(&hub, "bots.delete", json!({"bot":b})).await["error"], "no such bot");
