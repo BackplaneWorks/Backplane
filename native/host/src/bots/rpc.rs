@@ -73,7 +73,9 @@ impl Inbox for Arc<Agents> {
     }) }
 }
 
-pub struct Bots { pub hub: Arc<Hub>, world: Mutex<World>, pub(super) inbox: Arc<dyn Inbox>, pub(crate) router: std::sync::OnceLock<Arc<dyn super::mail::file::Router>>, last_id: std::sync::Mutex<(u64, u64)>, pub(crate) owner_link: std::sync::OnceLock<Arc<dyn super::mail::owner::OwnerLink>>, pub(crate) owner_busy: std::sync::atomic::AtomicBool, star: std::sync::OnceLock<Arc<StarPrompt>>, threads: std::sync::RwLock<std::collections::HashMap<String, String>>, pub(crate) mail_lists: std::sync::RwLock<std::collections::HashMap<String, Vec<&'static str>>>, pub(super) far: super::far::FarState, pub(super) swarm: super::swarm::Give }
+pub struct Bots { pub hub: Arc<Hub>, world: Mutex<World>, pub(super) inbox: Arc<dyn Inbox>, pub(crate) router: std::sync::OnceLock<Arc<dyn super::mail::file::Router>>, last_id: std::sync::Mutex<(u64, u64)>, pub(crate) owner_link: std::sync::OnceLock<Arc<dyn super::mail::owner::OwnerLink>>, pub(crate) owner_busy: std::sync::atomic::AtomicBool, star: std::sync::OnceLock<Arc<StarPrompt>>, threads: std::sync::RwLock<std::collections::HashMap<String, String>>, pub(crate) mail_lists: std::sync::RwLock<std::collections::HashMap<String, Vec<&'static str>>>, pub(super) far: super::far::FarState, pub(super) swarm: super::swarm::Give,
+    /// the threads that run with infinite context (recall::on_threads), as last folded, and the memory tree's engine (Bots::start installs it)
+    pub(crate) recall_on: std::sync::RwLock<std::collections::HashSet<String>>, pub(crate) recall: std::sync::OnceLock<Arc<super::recall::Recall>> }
 /// the state lane's star-nudge count for a human prompt (statehost::policies()?.star_prompt): the events to commit with the prompt and, on the fifth, the offer for its connection
 pub type StarPrompt = dyn Fn(&str, u64) -> (Vec<Value>, Option<Value>) + Send + Sync;
 
@@ -117,6 +119,9 @@ impl Bots {
         agents.add_tools(Arc::new(super::tools::BotToolSet(b.clone()))); // the bots' own MCP tools join Backplane's in a bot's thread
         agents.add_tools(Arc::new(super::mail::tools::MailTools(b.clone()))); // the mailroom's, listed by what the thread is
         agents.set_mailroom(Arc::new(super::mail::funnel::Room(Arc::downgrade(&b))));
+        // the memory tree (bots/recall): every bot's thread runs with infinite context unless its Settings turn it off; the compactor writes the lines in the background
+        let rc = super::recall::Recall::new(&b, Arc::new(super::recall::AgentsWriter(Arc::downgrade(&agents))));
+        agents.set_recall(Arc::new(super::recall::Seam(rc.clone()))); agents.add_tools(Arc::new(super::recall::Tools(rc.clone()))); rc.start();
         let cut = agents.cut_at_start(); b.run_recover(&cut).await; b.owner_legacy().await;
         b
     }
@@ -124,7 +129,7 @@ impl Bots {
         let store = hub.store.clone();
         let w = tokio::task::spawn_blocking(move || { let mut w = crate::ckpt::take("bots", &store, || World::load(&store)).unwrap_or_default(); if let Err(e) = w.sync(&store) { eprintln!("bots: reading the log: {e:#}") } w }).await.unwrap_or_default();
         let mut w = w; w.steps.clear(); // what the start folded was answered when it happened
-        let b = Arc::new(Bots { hub: hub.clone(), world: Mutex::new(w), inbox, router: Default::default(), last_id: Default::default(), owner_link: Default::default(), owner_busy: Default::default(), star: Default::default(), threads: Default::default(), mail_lists: Default::default(), far: Default::default(), swarm: Default::default() });
+        let b = Arc::new(Bots { hub: hub.clone(), world: Mutex::new(w), inbox, router: Default::default(), last_id: Default::default(), owner_link: Default::default(), owner_busy: Default::default(), star: Default::default(), threads: Default::default(), mail_lists: Default::default(), far: Default::default(), swarm: Default::default(), recall_on: Default::default(), recall: Default::default() });
         { let g = b.world.lock().await; b.refresh_threads(&g); }
         { let me = b.clone(); crate::ckpt::register(move |store| me.world.blocking_lock().save(store)); }
         { let me = b.clone(); tokio::spawn(async move { loop { tokio::time::sleep(std::time::Duration::from_secs(20)).await; me.owner_outbox().await } }); } // OwnerJob: the outbox is walked again
@@ -155,6 +160,7 @@ impl Bots {
         t.extend(w.mail.runs.values().filter(|r| r.live).filter_map(|r| w.run_bot(&r.thread).map(|b| (r.thread.clone(), b.id.clone())))); // a run and a back office work as their bot (Bots.route: Run.bot)
         *self.mail_lists.write().unwrap() = super::mail::tools::lists(w);
         *self.threads.write().unwrap() = t;
+        *self.recall_on.write().unwrap() = super::recall::on_threads(w);
         *self.swarm.members.write().unwrap() = w.member_rooms.iter().filter(|(_, rs)| rs.iter().any(|r| w.room(r).map_or(false, |x| x.live()))).map(|(t, _)| t.clone()).collect();
     }
     pub fn is_bot_thread(&self, th: &str) -> bool { self.threads.read().unwrap().contains_key(th) }
@@ -238,6 +244,8 @@ impl Bots {
         if !w.live(bot) { return vec![err(id, "no such bot")] }
         let b = w.bot(bot).cloned().unwrap();
         let now = now_s();
+        // Settings' infinite-context switch: the bot's own setting, nothing else changes
+        if let Some(r) = p.get("recall").and_then(Value::as_str) { let v = if r == "off" { "off" } else { "on" }; return self.commit_reply(id, vec![json!({"$":"SettingSet","key":format!("recall.bot.{bot}"),"value":v,"at":now})]).await }
         let ev = json!({"$":"BotSet","id":b.id,"name":b.name,"thread":"","look":gnat(p, "look").unwrap_or(b.look),"persona":gsd(p, "persona", &b.persona),"at":now});
         self.commit_reply(id, w.also(now, vec![ev])).await
     }

@@ -1812,6 +1812,7 @@ async fn a_dollar_skill_of_the_persons_own_reaches_the_agent_as_a_slash_command_
     assert!(text.ends_with(want), "{text}");
 }
 #[cfg(test)] mod lost;
+#[cfg(test)] mod recall;
 #[cfg(test)] mod note;
 #[cfg(test)] mod order;
 #[cfg(test)] mod checkpoint;

@@ -14,6 +14,7 @@ pub mod swarm;
 pub mod mesh;
 pub mod ledger;
 pub mod plane;
+pub mod recall;
 pub mod post;
 pub mod relocate;
 pub mod reply;

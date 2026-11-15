@@ -7,7 +7,7 @@
 //! Out for Claude: images/`$skill` input, the Backplane MCP server and runtime prompt in the agent's arguments,
 //! subagents and background tasks, todo tools, the allowance stream, the legacy queue, mail provenance beyond carry,
 //! and the hub's time-driven policies (liveness, autosettle, alert/told/summary, star nudge), which belong to M4.
-pub mod account_tools; pub mod halt; pub mod halt_view; pub mod kicadsel; pub mod mcp_stdio; pub mod bundled; pub mod mailroom; pub mod devturns; pub mod bg; pub mod lockrec; pub mod locks; pub mod refs; pub mod person; pub mod work; pub mod textgen; pub mod iconpick; pub mod groupname; pub mod launch; pub mod far; pub mod review; pub mod tasks; pub mod codex; pub mod providers; pub mod cmds; pub mod design; pub mod hist; pub mod host; pub mod inputs; pub mod skills; pub mod lines; pub mod mcp; pub mod proc; pub mod prompt; pub mod prompt_text; pub mod rules; pub mod settle; pub mod tools; pub mod wake; pub mod world;
+pub mod account_tools; pub mod halt; pub mod halt_view; pub mod kicadsel; pub mod mcp_stdio; pub mod bundled; pub mod mailroom; pub mod recall; pub mod devturns; pub mod bg; pub mod lockrec; pub mod locks; pub mod refs; pub mod person; pub mod work; pub mod textgen; pub mod iconpick; pub mod groupname; pub mod launch; pub mod far; pub mod review; pub mod tasks; pub mod codex; pub mod providers; pub mod cmds; pub mod design; pub mod hist; pub mod host; pub mod inputs; pub mod skills; pub mod lines; pub mod mcp; pub mod proc; pub mod prompt; pub mod prompt_text; pub mod rules; pub mod settle; pub mod tools; pub mod wake; pub mod world;
 #[cfg(test)] mod tests;
 #[cfg(test)] mod laws;
 
@@ -83,7 +83,7 @@ impl Drop for JobGuard { fn drop(&mut self) { self.0.stats.jobs.fetch_sub(1, Rel
 pub fn handle() -> Option<Arc<Agents>> { HANDLE.get().cloned() }
 
 pub struct Agents { pub hist_ends: StdMutex<HashMap<String, Arc<HistEnds>>>, pub guards: locks::Guards, stopped: std::sync::atomic::AtomicBool, carry_gone: std::sync::atomic::AtomicBool, carrying: std::sync::atomic::AtomicUsize, pub copy_point: StdMutex<(Vec<(String, String, bool)>, Vec<String>)>, pub works: StdMutex<HashMap<String, work::Ctl>>, pub work_lock: tokio::sync::Mutex<()>, pub tool_sets: StdMutex<Vec<Arc<dyn mcp::ToolSet>>>, pub stopped_by: StdMutex<HashMap<String, String>>, pub hub: Arc<Hub>, pub cli: Cli, pub host: host::HostInfo, world: Mutex<World>, actors: StdMutex<HashMap<String, mpsc::Sender<Cmd>>>, pub stats: Stats, n: AtomicU64,
-    pub driver_asks: StdMutex<HashMap<String, String>>, pub mcp: std::sync::OnceLock<Arc<mcp::Mcp>>, gens: StdMutex<HashMap<String, String>>, pub parked: StdMutex<HashMap<String, mcp::Parked>>, pub order_asks: StdMutex<HashMap<String, crate::settings::order::Asked>>, pub mailroom: std::sync::OnceLock<Arc<dyn mailroom::Mailroom>>, /** the account manager (set by the accounts mod): a thread bound to a named account is launched through it */ pub accounts: std::sync::OnceLock<Arc<crate::settings::accounts_io::Accounts>>, cut: StdMutex<Vec<String>>, /** the selected KiCad's env for the turn being started (kicadsel.rs), set with its prompt */ pub kicad_env: StdMutex<Vec<(String, String)>>,
+    pub driver_asks: StdMutex<HashMap<String, String>>, pub mcp: std::sync::OnceLock<Arc<mcp::Mcp>>, gens: StdMutex<HashMap<String, String>>, pub parked: StdMutex<HashMap<String, mcp::Parked>>, pub order_asks: StdMutex<HashMap<String, crate::settings::order::Asked>>, pub mailroom: std::sync::OnceLock<Arc<dyn mailroom::Mailroom>>, /** the memory tree (bots/recall): a thread with infinite context starts each turn fresh with its view */ pub recall: std::sync::OnceLock<Arc<dyn recall::Recall>>, /** the account manager (set by the accounts mod): a thread bound to a named account is launched through it */ pub accounts: std::sync::OnceLock<Arc<crate::settings::accounts_io::Accounts>>, cut: StdMutex<Vec<String>>, /** the selected KiCad's env for the turn being started (kicadsel.rs), set with its prompt */ pub kicad_env: StdMutex<Vec<(String, String)>>,
     /** locks.rs: background lock ticks done; with lock_tick_manual set (tests that drive locks_tick themselves) the timer loop only counts */ pub lock_ticks: AtomicU64, pub lock_tick_manual: std::sync::atomic::AtomicBool }
 
 pub fn now_s() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_secs()).unwrap_or(0) }
@@ -109,7 +109,7 @@ impl Agents {
     pub async fn start_host(hub: Arc<Hub>, cli: Cli, host: host::HostInfo) -> Result<Arc<Agents>> {
         let no_dir = cli.dir().is_none();
         let ag = Arc::new(Agents { lock_ticks: AtomicU64::new(0), lock_tick_manual: Default::default(), kicad_env: Default::default(), hist_ends: Default::default(), guards: Default::default(), stopped: Default::default(), carry_gone: Default::default(), carrying: Default::default(), hub: hub.clone(), cli, host, world: Mutex::new(crate::ckpt::take("agents", &hub.store, || World::load(&hub.store)).unwrap_or_default()), actors: StdMutex::new(HashMap::new()), stats: Stats::default(), n: AtomicU64::new(0),
-            mailroom: Default::default(), accounts: std::sync::OnceLock::new(), cut: StdMutex::new(vec![]), driver_asks: StdMutex::new(HashMap::new()), order_asks: StdMutex::new(HashMap::new()), stopped_by: StdMutex::new(HashMap::new()), tool_sets: StdMutex::new(vec![]), works: StdMutex::new(HashMap::new()), copy_point: StdMutex::new((vec![], vec![])), work_lock: tokio::sync::Mutex::new(()), mcp: std::sync::OnceLock::new(), gens: StdMutex::new(HashMap::new()), parked: StdMutex::new(HashMap::new()) });
+            mailroom: Default::default(), recall: Default::default(), accounts: std::sync::OnceLock::new(), cut: StdMutex::new(vec![]), driver_asks: StdMutex::new(HashMap::new()), order_asks: StdMutex::new(HashMap::new()), stopped_by: StdMutex::new(HashMap::new()), tool_sets: StdMutex::new(vec![]), works: StdMutex::new(HashMap::new()), copy_point: StdMutex::new((vec![], vec![])), work_lock: tokio::sync::Mutex::new(()), mcp: std::sync::OnceLock::new(), gens: StdMutex::new(HashMap::new()), parked: StdMutex::new(HashMap::new()) });
         ag.world.lock().await.home = hub.cfg.home.to_string_lossy().into_owned();
         // reap BEFORE the owner mark is set: marked children of this process (another test's, in a shared test binary) must not be taken for a dead hub's
         if no_dir && !crate::copy::on() { tokio::task::spawn_blocking(|| { let _ = proc::search_dirs(); }); } // the login shell's PATH is read now, off the workers, not inside the person's first send
@@ -586,6 +586,9 @@ struct Actor {
     handover: bool,
     /// A usage limit or failed login this turn's lines have shown, until the turn's end says what comes of it (settings/driver.rs `on_line`)
     limit_seen: Option<crate::settings::fallback::Limit>,
+    /// Infinite context (agents/recall.rs): the process being started is a new turn's, in a fresh session that gets the view; `steering`: the Codex-shaped run being
+    /// started is a steer of the running turn, which keeps its session
+    recall_fresh: bool, steering: bool,
 }
 
 /// The state a line's events end the turn in.
@@ -604,7 +607,7 @@ async fn recv_opt(r: &mut Option<mpsc::Receiver<String>>) -> Option<Vec<String>>
 async fn exit_opt(r: &mut Option<oneshot::Receiver<Exit>>) -> Result<Exit, oneshot::error::RecvError> { match r { Some(rx) => rx.await, None => std::future::pending().await } }
 
 impl Actor {
-    fn new(ag: Arc<Agents>, th: String) -> Actor { Actor { early: None, hist_ends: ag.ends_of(&th), hist_tx: None, person: false, pressed: false, cx: Cx::new(&th), ag, th, live_proc: None, lines: None, exit: None, live: String::new(), live_gen: 0, ahead: String::new(), last_user: String::new(), recent: VecDeque::new(), pacing: None, rid: 0, cwd: String::new(), cmds: cmds::Cmds::new(), sent: VecDeque::new(), wait: String::new(), prog: bg::Prog::default(), heard: Instant::now(), codex: false, prov: String::new(), model: String::new(), next_ride: false, driver: None, asked: HashMap::new(), steer_now: false, resumed: String::new(), spawn_in: None, spawn_n: 0, acct_tries: 0, handover: false, limit_seen: None } }
+    fn new(ag: Arc<Agents>, th: String) -> Actor { Actor { early: None, hist_ends: ag.ends_of(&th), hist_tx: None, person: false, pressed: false, cx: Cx::new(&th), ag, th, live_proc: None, lines: None, exit: None, live: String::new(), live_gen: 0, ahead: String::new(), last_user: String::new(), recent: VecDeque::new(), pacing: None, rid: 0, cwd: String::new(), cmds: cmds::Cmds::new(), sent: VecDeque::new(), wait: String::new(), prog: bg::Prog::default(), heard: Instant::now(), codex: false, prov: String::new(), model: String::new(), next_ride: false, driver: None, asked: HashMap::new(), steer_now: false, resumed: String::new(), spawn_in: None, spawn_n: 0, acct_tries: 0, handover: false, limit_seen: None, recall_fresh: false, steering: false } }
 
     async fn run(mut self, mut rx: mpsc::Receiver<Cmd>) {
         let mut tick = tokio::time::interval(Duration::from_secs(1)); tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -762,6 +765,7 @@ impl Actor {
     async fn handed(&mut self, ev: &mut Vec<Value>, now: u64) -> String {
         let th = self.th.clone(); let xs = { let w = self.ag.world().await; w.handoffs.get(&th).cloned().unwrap_or_default() };
         for (m, _) in &xs { ev.push(json!({"$":"QueueRemoved","thread":th,"msg":m,"at":now})) }
+        if self.ag.recall_on(&th) { return String::new() } // infinite context: the turn's view holds the conversation a hand-over would carry
         xs.into_iter().map(|x| x.1).collect::<Vec<_>>().join("\n\n")
     }
     /// What streamed of a reply the turn will not finish, as a message: it is part of the conversation the next account is handed.
@@ -810,7 +814,7 @@ impl Actor {
         let run = if ride.is_empty() { text.clone() } else { ev.extend(codex::ride_done(&th, &ride, "with the steer", now)); if text.trim().is_empty() { codex::ride_input(&ride) } else { format!("{}\n\n{}", codex::ride_input(&ride), text) } };
         ev.push(json!({"$":"TurnChanged","thread":th,"state":"running","at":now}));
         self.live_close().await; self.commit(ev).await; self.cwd = cwd.clone(); self.cx.running = true; self.codex = true; self.prov = t.provider.clone(); self.model = t.model.clone();
-        self.codex_run(&t, &cwd, &run).await; Ok(())
+        self.steering = true; self.codex_run(&t, &cwd, &run).await; self.steering = false; Ok(())
     }
 
     /// Hub.deliver.ride: a message for a running Codex turn is posted now and waits as the thread's ride.
@@ -850,6 +854,10 @@ impl Actor {
         let prompt = self.ag.prompt_for(&th, cwd).await;
         let (effort, think, session) = { let w = self.ag.world().await; (w.setting(&format!("effort.{th}")).to_string(), self.cx.think, w.threads.get(&th).map(|x| x.session.clone()).unwrap_or_else(|| t.session.clone())) };
         let session = if self.person { String::new() } else { session_over.unwrap_or(session) }; // a copied session is never resumed in side-by-side mode; another login's is not either (`account_route`)
+        // infinite context (agents/recall.rs): a new turn runs in a fresh session with the view ahead of its text; a steer keeps the running turn's session
+        let fresh = !self.person && !self.steering && self.ag.recall_on(&th);
+        let session = if fresh { String::new() } else { session };
+        let text = if fresh { let v = self.ag.recall_view(&th).await; if v.is_empty() { text.to_string() } else { format!("{v}\n\n{text}") } } else { text.to_string() };
         let url = self.ag.mcp.get().map(|m| m.url(&th, &gen)).unwrap_or_default();
         let (host, cwd2, text2, prov2) = (self.ag.host.clone(), cwd.to_string(), text.to_string(), t.provider.clone());
         let (body, imgs) = tokio::task::spawn_blocking(move || { let body = if text2.contains('$') { let ss = skills::scan_all(&skills::env_from(&host.user_home, &host.home, host.kistack.as_deref()), &cwd2); skills::prepare(&text2, &ss, &prov2, false) } else { text2.clone() }; (body, inputs::att_paths(&text2).into_iter().filter(|p| !inputs::mime(p).is_empty()).collect::<Vec<_>>()) }).await.unwrap_or_default();
@@ -981,14 +989,19 @@ impl Actor {
         // the thread's MCP servers are part of the key: a list changed in Settings > MCP (or by an agent) starts Claude again at its next turn, on the same session
         let key = format!("{}|mcp:{}", rules::agent_key(&t.model, &t.runtime, &t.interaction, self.cx.think), crate::mcpx::svc::fingerprint(&th, "claude").await);
         // a live process with a command still open (a turn in flight) is never replaced for a changed model/mode key: the message goes on its input (the CLI queues it) and the new key applies from the next process
-        if self.live_proc.as_ref().map_or(true, |p| p.person != self.person || (p.key != key && !self.cmds.open(""))) {
+        // infinite context (agents/recall.rs): a new turn (no command open: a message into a running turn goes on its input) starts a fresh session with the view
+        let fresh = !self.person && !self.cmds.open("") && self.ag.recall_on(&th);
+        if fresh || self.live_proc.as_ref().map_or(true, |p| p.person != self.person || (p.key != key && !self.cmds.open(""))) {
             self.stop().await; self.lines = None; self.exit = None;
+            self.recall_fresh = fresh;
             if let Err(e) = self.spawn(t, &cwd, key).await {
+                self.recall_fresh = false;
                 if self.login_refused(&e).await { return }
                 if account_err(&e) && self.account_retry(&msg, &text, &agent_text, &e).await { return }
                 self.fail(format!("could not start claude: {e}"), "spawn", &format!("spawn-{now}")).await; self.ag.stats.spawn_failures.fetch_add(1, Relaxed); return }
             self.acct_tries = 0;
-            if std::mem::take(&mut self.handover) { let ctx = crate::commands::lost_session_context(&self.ag.hub, &th, &text).await; if !ctx.is_empty() { agent_text = format!("{ctx}\n\n{agent_text}") } }
+            if fresh { self.handover = false; let v = self.ag.recall_view(&th).await; if !v.is_empty() { agent_text = format!("{v}\n\n{agent_text}") } }
+            else if std::mem::take(&mut self.handover) { let ctx = crate::commands::lost_session_context(&self.ag.hub, &th, &text).await; if !ctx.is_empty() { agent_text = format!("{ctx}\n\n{agent_text}") } }
             self.spawn_in = Some((msg.to_string(), text.to_string(), agent_text.to_string()));
         }
         let uuid = rules::hub_uuid(now, &format!("{th}/{msg}"));
@@ -1154,6 +1167,7 @@ impl Actor {
                 if let Some(s) = s { session = s; self.handover = true; }
             }
         }
+        if std::mem::take(&mut self.recall_fresh) { session = String::new(); self.handover = false; } // a new turn with infinite context: a fresh session, the view goes with its message
         let gen = format!("{now}-{}", self.ag.seq()); // Hub.gen: the process's generation, which its MCP URL names
         let prompt = self.ag.prompt_for(&th, cwd).await;
         if self.ag.stopped.load(Relaxed) || !self.ag.hub.cfg.home.exists() { return Err("agents shut down".into()) }

@@ -339,8 +339,21 @@ fn settings_page(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<Stri
         .child(div().flex().flex_col().gap_1().child(div().text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(trs("Persona"))).children(field_box_h(light, fields, &field, 96.)))
         .child(div().flex().gap_2().child(div().id("bot-save").px_2().py_1().text_size(crate::scale::tpx(12.)).cursor_pointer().border_1().bg(c("accent")).text_color(c("on-accent")).border_color(c("accent")).child(trs("Save"))
             .on_click(cx.listener(move |this, _, _, cx| save_persona(this, &id, cx)))))
+        .child(recall_row(cx, light, &bot["recall"]))
         .child(row(&trs("Created"), string(bot, "created"))).into_any_element()
 }
+/// Settings' infinite context (the hub's bots/recall): the switch, and how far the memory tree is written.
+fn recall_row(cx: &mut Context<Backplane>, light: bool, r: &Value) -> AnyElement {
+    let c = |n: &str| theme::color(light, n);
+    let on = r["on"] != false;
+    let label = if on { t("gpui.bots.recall.on") } else { t("gpui.bots.recall.off") };
+    let stats = match (r["messages"].as_u64(), r["lines"].as_u64(), r["left"].as_u64()) { (Some(m), Some(l), Some(n)) => tf("gpui.bots.recall.stats", &[("messages", m.into()), ("lines", l.into()), ("left", n.into())]), _ => String::new() };
+    div().flex().flex_col().gap_1().child(div().text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(t("gpui.bots.recall")))
+        .child(div().flex().gap_2().items_center().child(btn(cx, light, "recall-toggle".into(), label, on, recall_cmd, (if on { "off" } else { "on" }).to_string()))
+            .child(div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(stats)))
+        .child(div().max_w(px(520.)).text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(t("gpui.bots.recall.note"))).into_any_element()
+}
+fn recall_cmd(v: &str) -> Command { act("recall-toggle", v) }
 /// The persona box of one bot: its name carries the bot, so another bot's page never shows this one's text.
 pub fn persona_field(bot: &str) -> String { format!("bp.{bot}") }
 /// Settings' Save: the persona goes to the hub as `bots.edit` (the name is the bot's for good).
