@@ -56,7 +56,7 @@ fn project(this: &Backplane, cx: &mut Context<Backplane>, light: bool, p: &Value
     let key = string(p, "nav");
     let on_page = this.project_page.as_deref() == Some(pid.as_str());
     ctl.push(CtlEntry { id: format!("project:{pid}"), label: string(p, "title"), ctl: Ctl::Home(pid.clone()) });
-    let running = p["running"].as_u64().unwrap_or(0);
+    let (running, rest) = (p["running"].as_u64().unwrap_or(0), p["rest"].as_u64().unwrap_or(0));
     let dots: Vec<AnyElement> = p["dots"].as_array().into_iter().flatten().filter(|_| p["dots"].as_array().map_or(0, |d| d.len()) > 1).map(|m| {
         div().size(px(6.)).rounded_full().bg(c(if m["dim"] == true { "faint" } else if m["here"] == true { "accent" } else { "dim" })).into_any_element()
     }).collect();
@@ -98,6 +98,9 @@ fn project(this: &Backplane, cx: &mut Context<Backplane>, light: bool, p: &Value
         .child(crate::screens::badge::mark(light, p))
         .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(string(p, "title")))
         .children((!dots.is_empty()).then(|| div().flex().gap_1().items_center().children(dots)))
+        // its threads with no row here (finished ones): a faint count, so none seems lost; they are on its page
+        .children((rest > 0).then(|| crate::ui::with_rect(div().id(SharedString::from(format!("prest-{pid}"))), { let p = pid.clone(); move || format!("project-rest:{p}") }).text_size(crate::scale::tpx(11.)).text_color(c("faint"))
+            .tooltip(crate::keys::tip_raw(&tf("gpui.sections.rest", &[("n", rest.into())]), "", light)).child(rest.to_string())))
         .children((running > 0).then(|| div().text_size(crate::scale::tpx(11.)).text_color(c("accent")).child(tf("gpui.sections.running", &[("n", running.into())]))))
         // what of it waits on the person (its rows are in Needs you, folded or not)
         .children((needs_n > 0).then(|| div().px(px(5.)).h(px(16.)).flex().items_center().bg(c("bad")).text_size(crate::scale::tpx(10.)).text_color(c("bg")).child(needs_n.to_string())))

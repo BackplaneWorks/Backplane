@@ -547,3 +547,16 @@ fn menu_ids(m: &Value) -> Vec<String> { m.as_array().unwrap().iter().map(|i| i["
     let j = jump(&rows2, &ctx(&HashSet::new())); assert!(j.as_array().unwrap().iter().any(|x| x["kind"] == "swarm" && x["action"] == "room" && x["value"] == "h|r1"));
     let pg = page(&s2, &rows2, &rows2[0].key, &ctx(&HashSet::new()), false); assert_eq!(pg["sections"][0]["rows"][0]["kind"], "swarm");
 }
+
+// ---- finished threads: counted on the project's row, and the one on show listed under it -----------------------------------
+#[test] fn finished_threads_are_counted_on_their_project_and_the_open_one_is_listed() {
+    let s = one(&[tc("t2", "p1", NOW - 80), tc("t3", "p1", NOW - 70), turn("t1", "completed", NOW - 50), turn("t2", "completed", NOW - 40),
+        json!({"$":"ThreadSettled","id":"t2","manual":true,"at":NOW-30}), turn("t3", "running", NOW - 20)]);
+    let rows = merged_projects(&s, &[], &|_| false, &|_| String::new(), "desk", &[]); let open = HashSet::new();
+    let row = |sel: &'static str| { let c = Ctx { selected: sel, ..ctx(&open) }; sec(&build(&s, &rows, &Value::Null, &c), "active")["rows"][0].clone() };
+    let under = |r: &Value| -> Vec<String> { r["threads"].as_array().unwrap().iter().map(|t| t["title"].as_str().unwrap().to_string()).collect() };
+    let r = row(""); assert_eq!((under(&r), r["rest"].as_u64()), (vec!["T t3".to_string()], Some(2)), "the running one is listed, the two finished are counted");
+    let r = row("t2"); assert_eq!(r["rest"].as_u64(), Some(1), "{r}");
+    let mut u = under(&r); u.sort(); assert_eq!(u, ["T t2", "T t3"], "the settled thread on show has its row");
+    let r = row("t1"); let mut u = under(&r); u.sort(); assert_eq!((u, r["rest"].as_u64()), (vec!["T t1".to_string(), "T t3".to_string()], Some(1)), "and it leaves when another is opened");
+}
