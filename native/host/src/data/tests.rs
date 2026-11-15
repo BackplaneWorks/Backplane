@@ -577,6 +577,14 @@ impl RpcHandler for FakeStar {
     assert!(r["result"]["threads"].as_array().unwrap().iter().all(|t| t["status"].is_string()), "every thread says its dot's word: {r}");
 }
 
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_a_bot_is_deleted_only_on_its_own_hub() {
+    let (_hub, port) = up("botdel").await;
+    let mut ws = open(port, "&enc=json").await; let _ = next(&mut ws).await;
+    // Delete bot: a linked machine's bot is deleted there, and a bot is named
+    let r = ask(&mut ws, 1, "bot.delete", json!({"bot":"L~b1"})).await; assert_eq!(r["ok"], false, "{r}");
+    let r = ask(&mut ws, 2, "bot.delete", json!({})).await; assert_eq!(r["ok"], false, "{r}");
+}
+
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_the_files_approval_of_a_buy_says_send_or_not_now_as_the_desktop() {
     let (_hub, port) = up_with("quoteask", "{\"$\":\"AskOpened\",\"id\":\"q2\",\"thread\":\"t2\",\"kind\":\"approval\",\"tool\":\"order_quote\",\"detail\":\"Send 11 files from mfg/x to Backplane's quote service\",\"options\":\"\",\"at\":1700000041}\n").await;
     let mut ws = open(port, "&enc=json").await; next(&mut ws).await;

@@ -810,7 +810,8 @@ object DataClient {
         return (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Mention(it.optString("sigil"), it.optString("id"), it.optString("label"), it.optString("detail"), it.optString("word")) }
     }
     /** `mark`: the short name of the linked machine a bot or room is on ("" for this hub's own) */
-    data class Bot(val id: String, val name: String, val thread: String, val uber: Boolean, val mark: String = "", val note: String = "")
+    /** `delete`: the hub offers Delete bot for it (a bot of this hub that is not the uberbot). */
+    data class Bot(val id: String, val name: String, val thread: String, val uber: Boolean, val mark: String = "", val note: String = "", val delete: Boolean = false)
     /** The open chat `open` after a home move: the same bot's thread on its new home (`<link>~<id>` there, or the plain id back here); null when it did not move. */
     /** `known`: the bot that chat was last seen to be (a move lists it gone for a moment between the old home letting go and the new one showing it). */
     fun followed(open: String, known: Bot?, now: List<Bot>): String? {
@@ -827,7 +828,7 @@ object DataClient {
     suspend fun loadBots() {
         val r = call("bots.list")
         open?.let { o -> bots.firstOrNull { it.thread == o }?.let { b -> openBot = b } }
-        bots = r.optJSONArray("bots")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Bot(it.optString("id"), it.optString("name"), it.optString("thread"), it.optBoolean("uber"), it.optJSONObject("mark")?.optString("short") ?: "", it.optString("note")) } } ?: emptyList()
+        bots = r.optJSONArray("bots")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Bot(it.optString("id"), it.optString("name"), it.optString("thread"), it.optBoolean("uber"), it.optJSONObject("mark")?.optString("short") ?: "", it.optString("note"), it.optBoolean("delete")) } } ?: emptyList()
         // the uberbot's chat follows a home move: the same row, the same thread, now drawn from the machine that holds it
         val o = open
         if (o != null) {
@@ -841,6 +842,8 @@ object DataClient {
     data class Post(val from: String, val text: String, val at: Long)
     suspend fun roomPosts(room: String): List<Post> = call("room.posts", JSONObject().put("room", room).put("limit", 60)).optJSONArray("posts")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Post(it.optString("from"), it.optString("text"), it.optLong("at")) } } ?: emptyList()
     suspend fun roomPost(room: String, text: String) { call("room.post", JSONObject().put("room", room).put("text", text).put("clientId", UUID.randomUUID().toString())) }
+    /** Delete bot (`bot.delete`; the row asked first): the hub stops its chat, and the list is read again. */
+    suspend fun botDelete(bot: String) { call("bot.delete", JSONObject().put("bot", bot)); loadBots() }
     suspend fun botSay(bot: String, text: String) { call("bot.say", JSONObject().put("bot", bot).put("text", text).put("clientId", UUID.randomUUID().toString())) }
 
     // alerts: only what the hub's gate lets through reaches here (native/host/src/push): this phone has no push service, so it hears them on its socket while the app lives
