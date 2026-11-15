@@ -185,9 +185,17 @@ pub fn page_lists(cx: &mut Context<Backplane>, light: bool, data: &Value, pid: &
             if t["off"] != true { ctl.push(CtlEntry { id: format!("page-thread:{raw}"), label: string(t, "title"), ctl: Ctl::Select(id.clone()) }); }
             let off = t["off"] == true;
             if t["kind"] == "swarm" { out.extend(crate::screens::swarm::side_rows(cx, light, &serde_json::json!({"swarms": [t]}), "", ctl)); continue }
-            out.push(crate::ui::with_rect(div().id(SharedString::from(format!("page-thread-{raw}"))), { let r = raw.clone(); move || format!("page-thread:{r}") }).flex().items_center().gap_2().px_2().h(crate::scale::tpx(30.)).border_b_1().border_color(c("line")).when(off, |d| d.opacity(0.55))
+            // a thread of this machine (the hub's `menu`) has its pin and its menu here too: the page is where every thread of the project is,
+            // so it is where one is picked to stay in the sidebar (the pin shows on a pinned row, on hover on the others)
+            let own = !off && t["menu"].as_array().map_or(false, |m| !m.is_empty());
+            let pin_group = SharedString::from(format!("page-row-{id}"));
+            let pin = own.then(|| super::siderow::pin_button_as(cx, light, t, pin_group.clone(), "page-pin"));
+            if own { let (action, value) = super::siderow::pin_press(t); ctl.push(CtlEntry { id: format!("page-pin:{raw}"), label: action.into(), ctl: Ctl::Node(action.into(), value) }); }
+            out.push(crate::ui::with_rect(div().id(SharedString::from(format!("page-thread-{raw}"))), { let r = raw.clone(); move || format!("page-thread:{r}") }).group(pin_group).flex().items_center().gap_2().px_2().h(crate::scale::tpx(30.)).border_b_1().border_color(c("line")).when(off, |d| d.opacity(0.55))
                 .when(!off, |d| d.cursor_pointer().hover(|s| s.bg(c("raise"))))
+                .when(own, |d| d.on_mouse_down(MouseButton::Right, { let (row, pid2) = (t.clone(), pid.to_string()); cx.listener(move |this, e: &MouseDownEvent, _, cx| { let items = crate::screens::ctxmenu::thread_items(&row, &pid2); this.ctx_open(e.position, items, cx); }) }))
                 .child(super::siderow::dot(light, t)).child(div().flex_1().overflow_hidden().whitespace_nowrap().child(string(t, "title")))
+                .children(pin)
                 .children(crate::screens::badge::machine_mark(light, &t["mark"], false, &id))
                 .child(div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(if string(t, "say").is_empty() { trs(&string(t, "ago")) } else { trs(&string(t, "say")) }))
                 .when(!off, |d| d.on_click(cx.listener(move |this, _, window, cx| this.select(id.clone(), window, cx)))).into_any_element());

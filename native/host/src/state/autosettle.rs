@@ -362,6 +362,22 @@ mod tests {
         assert!(upgrade(&st, 100_000).is_empty(), "nothing at version 1");
         assert!(!changes(&st, 100_000).iter().any(|e| e["id"] == "w1" && e["$"] == "ThreadSettled"), "at version 1 the mail is no longer read: only the delivery setting counts, and it is not set here");
     }
+    /// A pinned thread is the person's fixed row under its project: the clock never settles it, however long it is quiet. Unpinned, it settles as any other.
+    #[test] fn a_pinned_thread_never_settles_by_the_clock_and_unpinned_it_does() {
+        let mut st = State::new();
+        for l in [r#"{"$":"ThreadCreated","id":"t1","project":"p","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1}"#,
+            r#"{"$":"SettingSet","key":"autosettle.version","value":"1","at":1}"#, r#"{"$":"SettingSet","key":"settle.personal.minutes","value":"60","at":1}"#,
+            r#"{"$":"MessagePosted","thread":"t1","msg":"m1","role":"user","text":"go","at":3}"#, r#"{"$":"MessagePosted","thread":"t1","msg":"a1","role":"assistant","text":"done","at":4}"#,
+            r#"{"$":"TurnChanged","thread":"t1","state":"completed","at":5}"#, r#"{"$":"SettingSet","key":"autosettle.read.t1","value":"a1","at":5}"#] { assert!(st.apply_line(l), "{l}"); }
+        let settles = |st: &State, now: u64| changes(st, now).iter().any(|e| e["$"] == "ThreadSettled" && e["id"] == "t1");
+        assert!(!settles(&st, 600), "inside its grace"); assert!(settles(&st, 100_000), "read, complete and quiet: the clock settles it");
+        st.apply_line(r#"{"$":"ThreadPinned","id":"t1","pinned":true,"at":10}"#);
+        for now in [100_000, 10_000_000, 4_000_000_000] { assert!(!settles(&st, now), "pinned: never by the clock ({now})"); }
+        st.apply_line(r#"{"$":"ThreadPinned","id":"t1","pinned":false,"at":40}"#);
+        assert!(settles(&st, 100_000), "unpinned: the clock settles it again, as it does the rest");
+        st.apply_line(r#"{"$":"ThreadPinned","id":"t1","pinned":true,"at":50}"#); st.apply_line(r#"{"$":"ThreadSettled","id":"t1","manual":true,"at":60}"#);
+        assert_eq!(shelf_of(&st.threads["t1"]), Shelf::Settled, "by hand it settles, pinned or not");
+    }
     #[test] fn a_message_reopens_a_settled_thread_unless_held_seen_or_older_than_a_manual_settle() {
         let mk = |id: &str| format!(r#"{{"$":"ThreadCreated","id":"{id}","project":"p","title":"T","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1}}"#);
         let mut st = State::new();

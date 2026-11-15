@@ -102,12 +102,14 @@ pub const FOLD_ROW: f32 = 46.;
 /// The press a row's pin makes: Unpin on a pinned row, Pin on the others (the hub's `row-pin` / `row-unpin`, the context menu's too).
 pub fn pin_press(t: &Value) -> (&'static str, String) { (if t["pinned"].as_bool().unwrap_or(false) { "row-unpin" } else { "row-pin" }, t["id"].as_str().unwrap_or("").to_string()) }
 /// A thread row's pin: drawn on a pinned row, shown on hover on the others; a press pins or unpins and does not select the row.
-pub fn pin_button(cx: &mut Context<Backplane>, light: bool, t: &Value, group: SharedString) -> AnyElement {
+pub fn pin_button(cx: &mut Context<Backplane>, light: bool, t: &Value, group: SharedString) -> AnyElement { pin_button_as(cx, light, t, group, "pin") }
+/// The same pin under another control name (`<name>:<thread>`): a project page's row and the sidebar's row of one thread are both on screen.
+pub fn pin_button_as(cx: &mut Context<Backplane>, light: bool, t: &Value, group: SharedString, name: &'static str) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     let (action, value) = pin_press(t); let pinned = action == "row-unpin";
     /* i18n-ok: the context menu's words, drawn through trs */ let tip = crate::i18n::trs(if pinned { "Unpin" } else { "Pin" });
     let raw = value.rsplit('|').next().unwrap_or("").to_string();
-    crate::ui::with_rect(div().id(SharedString::from(format!("pin-{value}"))), move || format!("pin:{raw}")).flex_shrink_0().w(px(16.)).h(px(16.)).flex().items_center().justify_center().cursor_pointer()
+    crate::ui::with_rect(div().id(SharedString::from(format!("{name}-{value}"))), move || format!("{name}:{raw}")).flex_shrink_0().w(px(16.)).h(px(16.)).flex().items_center().justify_center().cursor_pointer()
         .when(!pinned, |d| d.invisible().group_hover(group, |s| s.visible()))
         .tooltip(crate::keys::tip(&tip, "", light))
         .child(crate::art::icon("pin", 12., c(if pinned { "dim" } else { "faint" })))

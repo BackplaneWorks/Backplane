@@ -1430,8 +1430,8 @@ phase.complete	Complete	完了
 phase.stopped	Stopped	停止
 tools.tip.retry	The turn failed: send your last message again	ターンが失敗しました: 最後のメッセージをもう一度送信
 tools.tip.stop	Stop the running turn · Ctrl+.	実行中のターンを停止 · Ctrl+.
-tools.tip.unpin	Unpin: it sorts with the rest again	ピン留めを外し、通常の順序に戻す
-tools.tip.pin	Keep it at the top of the list	一覧の先頭に固定
+tools.tip.unpin	Unpin: it leaves the sidebar when it is done	ピン留めを解除: 作業が終わるとサイドバーから外れます
+tools.tip.pin	Keep it under its project in the sidebar. It never settles by itself	サイドバーのプロジェクトの下に固定します。自動では完了になりません
 tools.tip.unsettle	Bring it back to the active threads	進行中のスレッドに戻す
 tools.tip.settle	Done for now: it leaves the active threads	作業を完了し、進行中の一覧から外す
 tools.tip.wake	Wake it now	今すぐスヌーズを解除
