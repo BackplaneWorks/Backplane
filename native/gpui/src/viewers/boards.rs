@@ -11,7 +11,9 @@ pub struct Board { pub label: String, pub value: String, pub on: bool, pub defau
 
 /// The menu's state (held once, on the Board/Schematic page's camera): open or not, and its search field.
 #[derive(Default)]
-pub struct BoardsUi { pub open: bool, pub find: Option<Entity<Composer>> }
+pub struct BoardsUi { pub open: bool, pub find: Option<Entity<Composer>>,
+    /// A board picked while KiCad is in the pane, and when: KiCad moves to it once the hub shows it (`edit_due`).
+    pub edit_next: Option<(String, std::time::Instant)> }
 
 pub fn list(viewer: &Value) -> Vec<Board> {
     viewer["boards"].as_array().into_iter().flatten().map(|b| Board { label: s(b, "label"), value: s(b, "value"), on: b["on"] == true, default: b["default"] == true }).collect()
@@ -51,8 +53,27 @@ pub fn toggle(this: &mut Backplane, window: &mut Window, cx: &mut Context<Backpl
 }
 fn pick(this: &mut Backplane, value: String, cx: &mut Context<Backplane>) {
     this.screens.plotview.boards.open = false;
+    // KiCad is in the pane (Open in KiCad): it follows to the picked board once the hub shows that board (edit_due)
+    let on = list(&this.data["thread"]["viewer"]).iter().any(|b| b.on && b.value == value);
+    this.screens.plotview.boards.edit_next = (this.screens.kicad.is_some() && !on).then(|| (value.clone(), std::time::Instant::now()));
     let _ = this.tx.try_send(Command::Action("view-board".into(), value));
     cx.notify();
+}
+/// What a picture does with a board picked while KiCad was in the pane: `Some(true)` KiCad opens it now (the hub's menu says it is the one
+/// on show), `Some(false)` the pick is dropped (10 s without it, or KiCad left the pane), `None` keep waiting.
+pub fn editor_follows(picked: &str, age: std::time::Duration, editing: bool, all: &[Board]) -> Option<bool> {
+    if !editing || age > std::time::Duration::from_secs(10) { return Some(false) }
+    all.iter().any(|b| b.on && b.value == picked).then_some(true)
+}
+/// After a picture: KiCad in the pane moves to the board picked in the Boards menu (the pane of the old board is let go; its KiCad stays
+/// warm in the hub, as after View).
+pub fn edit_due(this: &mut Backplane, cx: &mut Context<Backplane>) {
+    let Some((picked, at)) = this.screens.plotview.boards.edit_next.clone() else { return };
+    match editor_follows(&picked, at.elapsed(), this.screens.kicad.is_some(), &list(&this.data["thread"]["viewer"])) {
+        Some(true) => { this.screens.plotview.boards.edit_next = None; this.kicad_view(cx); this.kicad_edit(cx); }
+        Some(false) => { this.screens.plotview.boards.edit_next = None; }
+        None => {}
+    }
 }
 /// Escape while the menu is open shuts it (main.rs's ClosePopup asks here first). True when it took the key.
 pub fn escape(this: &mut Backplane, cx: &mut Context<Backplane>) -> bool {
@@ -115,5 +136,15 @@ mod tests {
         assert_eq!(matching(&all, "cm5io")[0].value, "docs/ref/CM5IO.kicad_pcb");
         assert_eq!(matching(&all, "DOCS/").len(), 1);
         assert!(matching(&all, "nope").is_empty());
+    }
+    #[test] fn kicad_in_the_pane_follows_a_picked_board_once_the_hub_shows_it() {
+        let b = |v: &str, on: bool| Board { label: stem(v), value: v.to_string(), on, default: false };
+        let s = std::time::Duration::from_secs;
+        let before = [b("a.kicad_pcb", true), b("ref/b.kicad_pcb", false)];
+        let after = [b("a.kicad_pcb", false), b("ref/b.kicad_pcb", true)];
+        assert_eq!(editor_follows("ref/b.kicad_pcb", s(0), true, &before), None, "the hub still shows the old board: wait");
+        assert_eq!(editor_follows("ref/b.kicad_pcb", s(1), true, &after), Some(true));
+        assert_eq!(editor_follows("ref/b.kicad_pcb", s(11), true, &before), Some(false), "never shown: the pick is dropped");
+        assert_eq!(editor_follows("ref/b.kicad_pcb", s(1), false, &after), Some(false), "View was pressed meanwhile: Backplane's viewer stays");
     }
 }
