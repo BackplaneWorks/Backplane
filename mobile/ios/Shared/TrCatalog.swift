@@ -2905,6 +2905,9 @@ voice.always.pill.listen	Listen	聞く
 voice.mark.tip	Spoken, transcribed by {stt}, {conf}% sure	音声入力（{stt} で文字起こし、確信度 {conf}%）
 voice.mark.unsure	unsure: {words}	不確かな語: {words}
 voice.mark.edited	edited	編集済み
+gpui.side.group.projects	Group projects	プロジェクトをグループ化
+gpui.side.on.projects.with.nothing.going	On: projects with nothing going on lately are grouped by their git owner, or else their folder. Off: one list, and only the groups you make.	オン: 最近動きのないプロジェクトを Git のオーナー（なければフォルダ）ごとにまとめます。オフ: 1 つの一覧にし、自分で作ったグループだけを表示します。
+gpui.side.no.group	No group	グループなし
 gpui.f.group.install	Install	インストール
 gpui.f.group.agents	Agents	エージェント
 gpui.f.group.cad	CAD tools	CADツール

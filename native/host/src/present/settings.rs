@@ -64,6 +64,7 @@ fn appearance(st: &State) -> Vec<Value> {
     vec![
         row("Theme", "The window and the web page (phones unset follow their own system).", chips(&["dark", "light"], set(st, "ui.theme", ""), "ui.theme")),
         row("Thread list", "Projects groups threads by project; active lists what is going on, what needs you first.", chips(&["projects", "active"], if set(st, "sidebar.view", "") == "active" { "active" } else { "projects" }, "sidebar.view")),
+        row("Group projects", "On: projects with nothing going on lately are grouped by their git owner, or else their folder. Off: one list, and only the groups you make.", chips(&["on", "off"], onoff(crate::present::sections::groups_on(st)), crate::present::sections::GROUPS)),
     ]
 }
 
