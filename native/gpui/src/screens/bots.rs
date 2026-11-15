@@ -368,6 +368,8 @@ fn delete_button(cx: &mut Context<Backplane>, light: bool, bot: &Value) -> Optio
             .on_click(cx.listener(move |this, _, _, cx| {
                 let go = BOT_DEL.lock().map_or(false, |mut g| { let (next, go) = delete_press(g.as_ref(), &value, std::time::Instant::now()); *g = next; go });
                 if go { let _ = this.tx.try_send(act(&action, &value)); }
+                // the asking lapses by itself: drawn again then, so the button says "Delete bot" again and not a stale "Click again to delete" that a late click only re-arms
+                else { cx.spawn(async move |this, cx| { cx.background_executor().timer(DELETE_ARMED + std::time::Duration::from_millis(100)).await; let _ = this.update(cx, |_, cx| cx.notify()); }).detach(); }
                 cx.notify();
             }))).into_any_element())
 }
