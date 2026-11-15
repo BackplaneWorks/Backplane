@@ -307,18 +307,25 @@ fn menu_ids(m: &Value) -> Vec<String> { m.as_array().unwrap().iter().map(|i| i["
     assert_eq!(new_group_sets(key, "  Clients "), Some(vec![(format!("sidebar.group.of.{key}"), "custom:clients".into()), ("sidebar.group.name.custom:clients".into(), "Clients".into())]));
     assert_eq!(new_group_sets(key, "  "), None);
 }
-#[test] fn an_archived_project_is_quiet_until_unarchived() {
+#[test] fn an_archived_project_is_in_archived_until_unarchived() {
     let s = world(); let rows = merged_projects(&s, &[], &|_| false, &|_| String::new(), "desk", &[]);
     let key = rows.iter().find(|p| p.name == "Recent").unwrap().key.clone();
     let a = act(&s, &rows, "project-archive", &key, &json!({}), NOW).unwrap();
     assert_eq!(a.sets, vec![(format!("sidebar.archived.{key}"), NOW.to_string()), (format!("sidebar.pin.{key}"), String::new())]);
     let mut s2 = world(); for (k, v) in &a.sets { s2.apply(&set(k, v, NOW)); }
     let rows2 = merged_projects(&s2, &[], &|_| false, &|_| String::new(), "desk", &[]);
-    let open: HashSet<String> = ["sec:quiet".to_string()].into(); let v = build(&s2, &rows2, &Value::Null, &ctx(&open));
-    assert!(!titles(sec(&v, "active")).contains(&"Recent".to_string())); assert!(titles(sec(&v, "quiet")).contains(&"Recent".to_string()));
-    let r = sec(&v, "quiet")["rows"].as_array().unwrap().iter().find(|r| r["title"] == "Recent").unwrap().clone();
+    // folded and last, with its count; nothing of it in Active or Quiet
+    let v = build(&s2, &rows2, &Value::Null, &ctx(&HashSet::new()));
+    assert_eq!(ids(&v).last().unwrap(), "archived"); let a = sec(&v, "archived"); assert_eq!((a["title"].as_str(), a["count"].as_u64(), a["open"].as_bool(), a["rows"].as_array().unwrap().len()), (Some("Archived"), Some(1), Some(false), 0));
+    let open: HashSet<String> = ["sec:archived".to_string(), "sec:quiet".to_string()].into(); let v = build(&s2, &rows2, &Value::Null, &ctx(&open));
+    assert!(!titles(sec(&v, "active")).contains(&"Recent".to_string())); assert!(!titles(sec(&v, "quiet")).contains(&"Recent".to_string())); assert_eq!(titles(sec(&v, "archived")), ["Recent"]);
+    assert_eq!(act(&s2, &rows2, "side-section", "sec:archived", &json!({}), NOW).unwrap().open_toggle.as_deref(), Some("sec:archived"));
+    // the project the open thread is in goes too: Archive acts at once
+    let mut c = ctx(&open); c.selected = "tr"; assert_eq!(titles(sec(&build(&s2, &rows2, &Value::Null, &c), "archived")), ["Recent"]);
+    let r = sec(&v, "archived")["rows"].as_array().unwrap().iter().find(|r| r["title"] == "Recent").unwrap().clone();
     assert_eq!(r["archived"], true); assert_eq!(r["menu"].as_array().unwrap().iter().find(|i| i["id"] == "archive").unwrap()["label"], "Unarchive");
     assert_eq!(act(&s2, &rows2, "project-archive", &key, &json!({}), NOW).unwrap().sets, vec![(format!("sidebar.archived.{key}"), String::new())], "again: unarchived");
+    assert_eq!(act(&s2, &rows2, "project-pin", &key, &json!({}), NOW).unwrap().sets, vec![(format!("sidebar.pin.{key}"), NOW.to_string()), (format!("sidebar.archived.{key}"), String::new())], "pinned: back from Archived");
     assert!(act(&s, &rows, "project-archive", "nope", &json!({}), NOW).is_none());
 }
 #[test] fn the_sidebar_search_opens_folds_and_finds_hidden_threads() {
