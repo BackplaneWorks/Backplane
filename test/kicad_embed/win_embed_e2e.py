@@ -2436,6 +2436,8 @@ def run_bp9_suite(h: SuiteHarness) -> int:
             {"click": "kicad:full"},
             {"wait": 2000},
             {"kicad": {"report": True, "tag": "ux_unfull"}},
+            {"mark": "pre_pop"},
+            {"wait": 2500},  # the harness clicks Backplane natively here: script clicks never make it the foreground
             {"click": "kicad:popout"},
             {"wait": 4500},
             {"kicad": {"report": True, "tag": "ux_popped"}},
@@ -2499,6 +2501,14 @@ def run_bp9_suite(h: SuiteHarness) -> int:
             key_tap("F1"); time.sleep(0.6)
             return {"f2_changed_px": px, "acts": px > 20000}
         pop = {}
+        # Every step above is a script click inside the client, which never activates a window: until a person's click
+        # Backplane is not the foreground at all (block l, Nov 15: the desktop held it from the start, before any pop).
+        # So first a native click into Backplane, as a person would, and that it is in front.
+        if h.wait_for_mark("pre_pop", timeout_s=150.0):
+            r = W.RECT(); u32.GetWindowRect(gpui_hwnd, ctypes.byref(r))
+            screen_click(r.left + 400, r.top + 15)  # its title bar: activates it, no control under it
+            time.sleep(0.6)
+            pop["before"] = fg_held(gpui_hwnd)
         if h.wait_for_mark("shot_popped", timeout_s=150.0):
             time.sleep(0.35)
             tops = client_tops()
@@ -2573,6 +2583,8 @@ def run_bp9_suite(h: SuiteHarness) -> int:
             and shown_frame_of(bk).get("painted", 0) > 0,
             {"bk_top": bk.get("toplevel"), "bk_shown": shown_frame_of(bk)},
         )
+        h.check("Precondition: a click on Backplane's title bar makes it the foreground before the pop-out",
+                bool(pop.get("before", {}).get("held")), pop.get("before"))
         h.check("Pop out: the popped window is in front throughout (sampled 500 ms) and a plain F2 acts in its editor",
                 bool(pop.get("out", {}).get("held")) and bool(pop.get("out", {}).get("acts")), pop.get("out"))
         h.check("Pop back in: Backplane's window is in front throughout, never the desktop (sampled 500 ms), and a plain F2 acts in the editor",
