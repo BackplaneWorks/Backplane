@@ -1,6 +1,6 @@
 # Infinite context for bots
 
-Every bot's thread keeps one conversation that never ends, after UniiChat
+With its flag on, every bot's thread keeps one conversation that never ends, after UniiChat
 (github.com/VictorTaelin/uniichat, `Memory.ts`). The code is
 `native/host/src/bots/recall/` (`tree.rs` is the pure part) and the seam
 `native/host/src/agents/recall.rs`.
@@ -40,7 +40,10 @@ Every bot's thread keeps one conversation that never ends, after UniiChat
   its source, cut. A thread's whole history is the tree from the start: its
   recent long messages are written first, then the rest oldest first.
   Nothing runs on a copy of a log or in safe mode.
-- **Switches.** On for every bot. The bot's Settings tab has the switch
-  (`recall.bot.<id>` = off) and shows how far the tree is written.
-  `recall.bots` = off turns it off for all bots. `recall.thread.<id>` = on
-  gives any other long-lived thread the same.
+- **Switches.** Off by default: Settings > Agents, "Bots: infinite
+  context (beta)" (`recall.bots` = on). While it is off nothing runs: no
+  thread has it, the compactor writes nothing, memory_zoom is not listed.
+  With it on, every bot has it unless its Settings tab turns it off
+  (`recall.bot.<id>` = off; the tab also shows how far the tree is
+  written), and `recall.thread.<id>` = on gives any other long-lived
+  thread the same.

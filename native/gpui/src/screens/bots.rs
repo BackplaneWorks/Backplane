@@ -339,7 +339,7 @@ fn settings_page(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<Stri
         .child(div().flex().flex_col().gap_1().child(div().text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(trs("Persona"))).children(field_box_h(light, fields, &field, 96.)))
         .child(div().flex().gap_2().child(div().id("bot-save").px_2().py_1().text_size(crate::scale::tpx(12.)).cursor_pointer().border_1().bg(c("accent")).text_color(c("on-accent")).border_color(c("accent")).child(trs("Save"))
             .on_click(cx.listener(move |this, _, _, cx| save_persona(this, &id, cx)))))
-        .child(recall_row(cx, light, &bot["recall"]))
+        .children(bot["recall"].is_object().then(|| recall_row(cx, light, &bot["recall"]))) // only with the flag on (Settings > Agents)
         .child(row(&trs("Created"), string(bot, "created"))).into_any_element()
 }
 /// Settings' infinite context (the hub's bots/recall): the switch, and how far the memory tree is written.

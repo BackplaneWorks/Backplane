@@ -42,6 +42,8 @@ fn msg(i: usize) -> String {
 }
 fn base(n: usize) -> String {
     let mut s = format!("{}\n{}\n", json!({"$":"ThreadCreated","id":TH,"project":"","title":"Bub","env":"local","branch":"","worktree":"","provider":"claude","model":"","at":1700000000}), json!({"$":"BotSet","id":BOT,"name":"Bub","thread":TH,"look":0,"persona":"","at":1700000000}));
+    // the flag (off by default) on
+    s += &json!({"$":"SettingSet","key":"recall.bots","value":"on","at":1700000000}).to_string(); s.push('\n');
     // rows that are no message of the conversation: never in the tree
     s += &json!({"$":"ActivityLogged","thread":TH,"act":"x","tone":"info","kind":"note","summary":"not a message","at":1700000000}).to_string(); s.push('\n');
     for i in 0..n { s += &msg(i); s.push('\n') }
@@ -65,7 +67,18 @@ impl Rig {
     fn log(&self) -> Vec<Value> { self.hub.store.range(0, usize::MAX).unwrap().iter().filter_map(|l| serde_json::from_str(l).ok()).collect() }
 }
 
-#[tokio::test(flavor = "multi_thread")] async fn every_bot_thread_is_on_unless_its_settings_turn_it_off() {
+#[tokio::test(flavor = "multi_thread")] async fn with_the_flag_off_by_default_nothing_runs() {
+    let home = crate::plat::tmp::dir("recall-flag"); std::fs::write(home.join("events.jsonl"), base(20).replace("\"value\":\"on\"", "\"value\":\"x\"")).unwrap();
+    let r = rig_in(home, StandIn::default()).await;
+    assert!(!r.rc.on(TH)); assert_eq!(r.rc.round().await, 0); assert_eq!(r.w.calls.load(Relaxed), 0, "no compactor call");
+    use crate::agents::mcp::ToolSet; assert!(Tools(r.rc.clone()).list(TH).is_empty());
+    r.hub.commit_many(&[json!({"$":"SettingSet","key":"recall.thread.t9","value":"on","at":2})]).await.unwrap();
+    let _ = r.bots.world().await; assert!(!r.rc.on("t9"), "a thread's own switch needs the flag too");
+    r.hub.commit_many(&[json!({"$":"SettingSet","key":"recall.bots","value":"on","at":3})]).await.unwrap();
+    let _ = r.bots.world().await; assert!(r.rc.on(TH) && r.rc.on("t9"));
+}
+
+#[tokio::test(flavor = "multi_thread")] async fn with_the_flag_on_every_bot_thread_is_on_unless_its_settings_turn_it_off() {
     let r = rig("on", 3, StandIn::default()).await;
     assert!(r.rc.on(TH));
     r.hub.commit_many(&[json!({"$":"SettingSet","key":"recall.bot.b1","value":"off","at":1})]).await.unwrap();
@@ -192,3 +205,4 @@ impl Rig {
     let mut u = noted.clone(); u.sort(); u.dedup(); assert_eq!(u.len(), noted.len(), "nothing written before the restart is written again");
     let kept = r2.kept().await; for p in tree::roots(500) { assert!(kept.at(p).is_some()) }
 }
+
