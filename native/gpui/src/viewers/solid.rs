@@ -25,7 +25,9 @@ pub(super) const FOV: f32 = 35.0 * std::f32::consts::PI / 180.0;
 
 #[derive(Clone, Debug, PartialEq)]
 /// `groups`: each triangle's fade group, 0 the board (always shown), k the k-th part frame (it fades in); empty for a model with no parts.
-pub struct Mesh { pub tris: Vec<[f32; 9]>, pub normals: Vec<[f32; 9]>, pub colors: Vec<u32>, pub center: [f32; 3], pub radius: f32, pub groups: Vec<u32> }
+/// `refs`: a part frame's mesh only: the reference designator of each instance (the frame's `refs`; "" none), its triangles `tris.len() / refs.len()`
+/// an instance in the instances' order. What a click on the model picks (`pick`).
+pub struct Mesh { pub tris: Vec<[f32; 9]>, pub normals: Vec<[f32; 9]>, pub colors: Vec<u32>, pub center: [f32; 3], pub radius: f32, pub groups: Vec<u32>, pub refs: Vec<String> }
 
 struct Varints<'a> { b: &'a [u8], at: usize, valid: bool }
 impl<'a> Varints<'a> {
@@ -77,7 +79,7 @@ pub fn decode_mesh_faces(n: usize, bytes: &[u8], runs: &[u8]) -> Result<Mesh, St
     let center = [(lo[0] + hi[0]) / 2.0, (lo[1] + hi[1]) / 2.0, (lo[2] + hi[2]) / 2.0];
     let radius = (0..3).map(|a| (hi[a] - lo[a]) * (hi[a] - lo[a])).sum::<f32>().sqrt() / 2.0;
     let normals = raster::smooth_normals_in(&tris, &keys, face_ids(runs, n).as_deref());
-    Ok(Mesh { tris, normals, colors, center, radius: radius.max(1e-3), groups: Vec::new() })
+    Ok(Mesh { tris, normals, colors, center, radius: radius.max(1e-3), groups: Vec::new(), refs: Vec::new() })
 }
 
 /// A part frame's model placed at each of its instances, in the page's axes (mm, the wire's y turned up, as `decode_mesh`). `at` is 12
@@ -124,7 +126,7 @@ pub fn decode_part_faces(n: usize, bytes: &[u8], at: &[u8], runs: &[u8]) -> Resu
     // each instance's faces are the model's, numbered apart (a face of one instance never blends with another's)
     let faces = face_ids(runs, n).map(|f| { let top = f.last().map_or(0, |x| x + 1); (0..k as u32).flat_map(|i| f.iter().map(move |x| x + i * top)).collect::<Vec<u32>>() });
     let normals = raster::smooth_normals_in(&tris, &keys, faces.as_deref());
-    Ok(Mesh { tris, normals, colors, center, radius: radius.max(1e-3), groups: Vec::new() })
+    Ok(Mesh { tris, normals, colors, center, radius: radius.max(1e-3), groups: Vec::new(), refs: Vec::new() })
 }
 
 /// The board and the parts that have come, as one model: the board's triangles (group 0) then each part frame's (group 1, 2...). Its
@@ -134,7 +136,7 @@ pub fn append(m: &mut Mesh, l: &Mesh, g: u32) { m.tris.extend_from_slice(&l.tris
 pub fn combine(board: Option<&Mesh>, parts: &[Arc<Mesh>]) -> Option<Mesh> {
     let first = board.or(parts.first().map(|p| &**p))?;
     let n = board.map_or(0, |b| b.tris.len()) + parts.iter().map(|p| p.tris.len()).sum::<usize>();
-    let mut m = Mesh { tris: Vec::with_capacity(n), normals: Vec::with_capacity(n), colors: Vec::with_capacity(n), center: first.center, radius: first.radius, groups: Vec::with_capacity(n) };
+    let mut m = Mesh { tris: Vec::with_capacity(n), normals: Vec::with_capacity(n), colors: Vec::with_capacity(n), center: first.center, radius: first.radius, groups: Vec::with_capacity(n), refs: Vec::new() };
     if let Some(b) = board { m.tris.extend_from_slice(&b.tris); m.normals.extend_from_slice(&b.normals); m.colors.extend_from_slice(&b.colors); m.groups.resize(b.tris.len(), 0); }
     for (g, p) in parts.iter().enumerate() { m.tris.extend_from_slice(&p.tris); m.normals.extend_from_slice(&p.normals); m.colors.extend_from_slice(&p.colors); m.groups.resize(m.tris.len(), g as u32 + 1); }
     Some(m)
@@ -289,7 +291,9 @@ pub fn parse_frame(b: &[u8]) -> Option<SolidFrame> {
         /* i18n-ok: the note is drawn through note_words */ let n = match get("n") { Some(Item::Int(n)) if *n > 0 => *n as usize, _ => return Some(SolidFrame::Bad("missing triangle count".into())) };
         let done = match get("done") { Some(Item::Int(d)) if *d >= 0 => *d as u32, _ => 0 };
         let runs = match get("faces") { Some(Item::Bytes(b)) => b.as_slice(), _ => &[] };
-        return Some(match decode_part_faces(n, mesh, at, runs) { Ok(m) => SolidFrame::Part(key, m, done), Err(e) => SolidFrame::Bad(e) })
+        // each instance's reference (one an instance, or none of them: a list of another length names nothing)
+        let refs: Vec<String> = match get("refs") { Some(Item::Array(a)) if a.len() * 48 == at.len() => a.iter().map(|r| match r { Item::Text(t) => t.clone(), _ => String::new() }).collect(), _ => Vec::new() };
+        return Some(match decode_part_faces(n, mesh, at, runs) { Ok(mut m) => { m.refs = refs; SolidFrame::Part(key, m, done) } Err(e) => SolidFrame::Bad(e) })
     }
     let Some(Item::Bytes(mesh)) = get("mesh") else { return None }; // a note about the parts is not a model
     /* i18n-ok: the note is drawn through note_words */ let n = match get("n") { Some(Item::Int(n)) if *n > 0 => *n as usize, _ => return Some(SolidFrame::Bad("missing triangle count".into())) };
@@ -389,6 +393,69 @@ impl Camera {
         self.shift[0] += x * (1.0 - q); self.shift[1] += y * (1.0 - q); self.dist = d; self.place();
     }
 }
+
+// ---- picking: the part under a click ---------------------------------------------------------------------------
+impl Camera {
+    /// The ray from the eye through the pointer (nx, ny in -1..1, y up; aspect = width / height), as the pictures are projected: (eye, direction).
+    pub fn ray(&self, nx: f32, ny: f32, aspect: f32) -> ([f32; 3], [f32; 3]) {
+        let t = (FOV / 2.0).tan();
+        (self.eye(), norm(add(self.fwd, add(mul(self.right, nx * aspect * t), mul(self.up, ny * t)))))
+    }
+}
+/// Where a ray meets a triangle (either face), as its distance along the ray; None when it misses or the triangle is behind the eye.
+fn ray_tri(eye: [f32; 3], dir: [f32; 3], t: &[f32; 9]) -> Option<f32> {
+    let (a, b, c) = ([t[0], t[1], t[2]], [t[3], t[4], t[5]], [t[6], t[7], t[8]]);
+    let (e1, e2) = (sub(b, a), sub(c, a));
+    let p = cross(dir, e2); let det = dot(e1, p);
+    if det.abs() < 1e-12 { return None }
+    let inv = 1.0 / det; let s = sub(eye, a);
+    let u = dot(s, p) * inv; if !(0.0..=1.0).contains(&u) { return None }
+    let q = cross(s, e1);
+    let v = dot(dir, q) * inv; if v < 0.0 || u + v > 1.0 { return None }
+    let d = dot(e2, q) * inv;
+    (d > 1e-6).then_some(d)
+}
+/// Whether the model names its parts (a board's, whose part frames carry `refs`): only such a model is picked on.
+pub fn has_refs(model: &Layers) -> bool { model.parts.iter().any(|p| p.refs.iter().any(|r| !r.is_empty())) }
+/// What a click meets first (0.14's solid.js `pick`, by the instance itself): None nothing at all; Some("") the board or a part with no name;
+/// Some(reference) the part whose model the ray enters first.
+pub fn pick(model: &Layers, eye: [f32; 3], dir: [f32; 3]) -> Option<String> {
+    let mut best: Option<(f32, String)> = None;
+    for (m, g) in model.list() {
+        // (a layer the ray passes clear of is not walked)
+        let oc = sub(m.center, eye); let along = dot(oc, dir);
+        if dot(oc, oc) - along * along > m.radius * m.radius { continue }
+        let per = if g != Some(0) && !m.refs.is_empty() { m.tris.len() / m.refs.len() } else { 0 };
+        for (i, t) in m.tris.iter().enumerate() {
+            let Some(d) = ray_tri(eye, dir, t) else { continue };
+            if best.as_ref().is_some_and(|b| b.0 <= d) { continue }
+            best = Some((d, if per > 0 { m.refs.get(i / per).cloned().unwrap_or_default() } else { String::new() }));
+        }
+    }
+    best.map(|b| b.1)
+}
+/// A reference without a schematic unit's letter ("U1A" is unit A of U1, as the board names it; the hub's plotgen `ref_base`).
+fn ref_base(r: &str) -> &str { let t = r.trim_end_matches(|c: char| c.is_ascii_uppercase()); if t.len() < r.len() && t.ends_with(|c: char| c.is_ascii_digit()) { t } else { r } }
+/// Whether a probe's reference names this instance's part (a schematic's unit names its whole part).
+pub fn same_part(probe: &str, r: &str) -> bool { !probe.is_empty() && !r.is_empty() && (probe == r || ref_base(probe) == r) }
+/// The colour a probed part's triangles take: most of the way to the pick colour, its translucency kept.
+pub fn lit_color(c: u32) -> u32 {
+    let mix = |sh: u32| { let (a, b) = ((c >> sh) & 255, (0xffe066u32 >> sh) & 255); (a * 35 + b * 65) / 100 };
+    (c & 0xff00_0000) | mix(16) << 16 | mix(8) << 8 | mix(0)
+}
+/// The model with the probed part lit: the layers that hold an instance of it made again with that instance's triangles in `lit_color`, the others
+/// shared as they are (the GPU keeps their buffers). None when the model has no such part.
+pub fn lit_layers(model: &Layers, probe: &str) -> Option<Layers> {
+    if !model.parts.iter().any(|p| p.refs.iter().any(|r| same_part(probe, r))) { return None }
+    let parts = model.parts.iter().map(|p| {
+        if !p.refs.iter().any(|r| same_part(probe, r)) { return p.clone() }
+        let mut m = (**p).clone(); let per = m.tris.len() / m.refs.len();
+        for (k, r) in p.refs.iter().enumerate() { if same_part(probe, r) { for c in &mut m.colors[k * per..(k + 1) * per] { *c = lit_color(*c); } } }
+        Arc::new(m)
+    }).collect();
+    Some(Layers { board: model.board.clone(), parts, center: model.center, radius: model.radius })
+}
+
 
 pub fn to_image(bgra: Vec<u8>, w: usize, h: usize) -> Option<Arc<RenderImage>> {
     let buf = image::RgbaImage::from_raw(w as u32, h as u32, bgra)?; // gpui takes BGRA in this container
@@ -526,7 +593,7 @@ pub fn stage_line(text: &str, secs: u64, about_ms: u64) -> String {
 }
 /// What the page asks of the window: the model of this source made again (its Retry, after the hub could not make it).
 /// `Refine`: the person zoomed in on a STEP: its solids near `at` (the model's millimetres) within `r`, meshed finer (kicad.refine).
-pub enum SolidEvent { Retry(String), Refine(String, [f32; 3], f32) }
+pub enum SolidEvent { Retry(String), Refine(String, [f32; 3], f32), /** a click on a board's model: the reference of the part under it, "" the board or nothing */ Pick(String) }
 impl EventEmitter<SolidEvent> for SolidPage {}
 /// Whether a source's model can be refined: a STEP's (the Mech tab's parts; a board's model is made at its finest already).
 pub fn refinable(key: &str) -> bool {
@@ -554,6 +621,8 @@ pub fn retry_watch(key: &str) -> Option<serde_json::Value> {
 /// `image`: its last picture, as CPU bytes (out of the atlas; painted again when it comes back, while a new one is drawn).
 struct Kept { key: String, mesh: Arc<Layers>, cam: Camera, touched: bool, fit_aspect: f32, parts: (u32, u32), groups: usize, image: Option<Arc<RenderImage>> }
 pub struct SolidPage {
+    /** where the left button went down, until the pointer leaves it by 4 px (a click picks the part under it); the reference of the probed part (`set_probe`); the model with that part lit, for the model and reference it was made of (`drawn`) */ press: Option<Point<Pixels>>, probe: String, lit: Option<(Arc<Layers>, String, Option<Arc<Layers>>)>,
+    /** the page names the probed part beside its tools (a Split names it in its own bar: off there) */ pub names_probe: bool,
     mesh: Option<Arc<Layers>>, key: String, cam: Option<Camera>, touched: bool, fit_aspect: f32, /** what the camera was last fitted to (centre, radius) */ fitted: ([f32; 3], f32), /** the regions of this model asked to be refined (`settled`) */ refined: Vec<([f32; 3], f32)>, image: Option<Arc<RenderImage>>, /** pictures off the screen and the window frame they left it in (`collect`) */ retired: Vec<(Arc<RenderImage>, u64)>, frames: u64, drag: Option<(Drag, Point<Pixels>)>,
     /** when each part group showed (its fade runs from then), the parts' progress (done, of), whether the last picture asked for was mid-fade */
     born: Vec<std::time::Instant>, parts: (u32, u32), fading: bool,
@@ -572,11 +641,32 @@ impl SolidPage {
                 if weak.update(cx, |this, cx| this.apply(msg, cx)).is_err() { break }
             }
         }).detach();
-        SolidPage { mesh: None, key: String::new(), cam: None, touched: false, fit_aspect: 0.0, fitted: ([0.0; 3], 0.0), refined: Vec::new(), image: None, retired: Vec::new(), frames: 0, drag: None, born: Vec::new(), parts: (0, 0), fading: false, focus: cx.focus_handle(), wheel: 0, stage: None, ticking: false, draft_scale: 1.0, prev: None, restored: None, failed: false, back: raster::Backdrop::DARK, note: "No 3D model yet".into(), /* i18n-ok: the note is drawn through note_words */ reserve: 0.0, worker: Worker::spawn(tx),
+        SolidPage { press: None, probe: String::new(), lit: None, names_probe: true, mesh: None, key: String::new(), cam: None, touched: false, fit_aspect: 0.0, fitted: ([0.0; 3], 0.0), refined: Vec::new(), image: None, retired: Vec::new(), frames: 0, drag: None, born: Vec::new(), parts: (0, 0), fading: false, focus: cx.focus_handle(), wheel: 0, stage: None, ticking: false, draft_scale: 1.0, prev: None, restored: None, failed: false, back: raster::Backdrop::DARK, note: "No 3D model yet".into(), /* i18n-ok: the note is drawn through note_words */ reserve: 0.0, worker: Worker::spawn(tx),
             size: Arc::new(Mutex::new([0.0, 0.0, 1.0, 0.0, 0.0])), asked: (0, 0), latest: 0, on_screen: 0, floor: 0, counted: 0, stats: Stats::default() }
     }
     /// The background to draw on (the setting resolved by the window): a change draws the picture again at once, the camera untouched.
     pub fn set_backdrop(&mut self, back: raster::Backdrop) { if self.back != back { self.back = back; self.ask_render(false); } }
+    /// The part the hub's probe names ("" none): drawn lit on a board's model, the picture made again when it changes.
+    pub fn set_probe(&mut self, r: &str) { if self.probe != r { self.probe = r.to_string(); self.ask_render(false); } }
+    /// The model as it is drawn: the probed part lit (made once a model and reference), else the model itself.
+    fn drawn(&mut self) -> Option<Arc<Layers>> {
+        let mesh = self.mesh.clone()?;
+        if self.probe.is_empty() { self.lit = None; return Some(mesh) }
+        if !self.lit.as_ref().is_some_and(|l| Arc::ptr_eq(&l.0, &mesh) && l.1 == self.probe) { self.lit = Some((mesh.clone(), self.probe.clone(), lit_layers(&mesh, &self.probe).map(Arc::new))); }
+        Some(self.lit.as_ref().and_then(|l| l.2.clone()).unwrap_or(mesh))
+    }
+    /// A click on a board's model (a press let go where it went down): the part under it is lit and told to the window (`SolidEvent::Pick`), which
+    /// makes it the board's probe; the board itself or the background clears it. A model that names no parts (a STEP, a GLB) is not picked on.
+    fn click_at(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
+        let (Some(model), Some(cam)) = (self.mesh.clone(), self.cam) else { return };
+        if !has_refs(&model) { return }
+        let [pw, ph, _, ox, oy] = *self.size.lock().unwrap();
+        if pw <= 0.0 || ph <= 0.0 { return }
+        let (eye, dir) = cam.ray((f32::from(at.x) - ox) / pw * 2.0 - 1.0, 1.0 - (f32::from(at.y) - oy) / ph * 2.0, pw / ph);
+        let r = pick(&model, eye, dir).unwrap_or_default();
+        eprintln!("GPUI_LOG {}", serde_json::json!({"event": "solid_pick", "ref": r}));
+        self.set_probe(&r); cx.emit(SolidEvent::Pick(r)); cx.notify();
+    }
     /// The key of the model the page holds now (set when a decoded frame is applied, not when one is queued): "" before any.
     pub fn key(&self) -> &str { &self.key }
     /// The source the page is showing: the one being made when the hub is making another than the model held (the page then shows its
@@ -690,7 +780,7 @@ impl SolidPage {
     /// Request an image at the panel's device-pixel size (half size for a draft), within MAX_PIXELS.
     fn ask_render(&mut self, draft: bool) {
         let (fades, fading) = self.fades(); self.fading = fading;
-        let (Some(mesh), Some(cam)) = (&self.mesh, self.cam) else { return };
+        let (Some(mesh), Some(cam)) = (self.drawn(), self.cam) else { return };
         let [pw, ph, sf, _, _] = *self.size.lock().unwrap();
         let (mut w, mut h) = (((pw * sf) as usize).max(64), ((ph * sf) as usize).max(48));
         if w * h > MAX_PIXELS { let k = (MAX_PIXELS as f32 / (w * h) as f32).sqrt(); w = (w as f32 * k) as usize; h = (h as f32 * k) as usize; }
@@ -698,7 +788,7 @@ impl SolidPage {
         let most = (DRAFT_PIXELS as f32 * self.draft_scale) as usize;
         if draft && w * h > most { let k = (most as f32 / (w * h) as f32).sqrt(); w = ((w as f32 * k) as usize).max(32); h = ((h as f32 * k) as usize).max(24); }
         self.asked = (w, h);
-        self.latest = self.worker.submit_render(mesh.clone(), Arc::new(fades), cam, w, h, samples(w, h, draft), draft, self.back);
+        self.latest = self.worker.submit_render(mesh, Arc::new(fades), cam, w, h, samples(w, h, draft), draft, self.back);
     }
     /// The toolbar's Fit (the first fitted view again, camera untouched) and its standard views.
     pub fn set_view(&mut self, name: &str) {
@@ -800,7 +890,7 @@ impl Render for SolidPage {
             let new = [f32::from(b.size.width), f32::from(b.size.height), window.scale_factor(), f32::from(b.origin.x), f32::from(b.origin.y)];
             let mut g = size.lock().unwrap();
             if *g != new { *g = new; drop(g); window.refresh(); } // the panel changed size or scale: ask for the next frame once, which re-renders at the new size
-        }).absolute().size_full();
+        }).absolute().top_0().left_0().size_full(); // (at the page's corner: with no place of its own it sat under the picture, and the pointer was measured from the page's bottom edge)
         // a panel whose size differs from the last request re-renders at the right size
         let [pw, ph, sf, _, _] = *self.size.lock().unwrap();
         // the model was fitted before the panel's size was known: an untouched camera is fitted again to the real shape
@@ -830,6 +920,14 @@ impl Render for SolidPage {
                         cx.notify();
                     })));
             }
+            // the probed part, when this model has it: its name in the colour it is lit in, and a press to put it away
+            if self.names_probe && self.lit.as_ref().is_some_and(|l| l.1 == self.probe && l.2.is_some()) {
+                bar = bar.child(div().id("solid-probe").pl_2().pr(px(2.)).h(crate::scale::tpx(TOOL_H)).flex().items_center().gap_1().text_size(crate::scale::tpx(12.)).text_color(rgb(0xc8ced9)).bg(rgba(0x1d2430dd)).border_1().border_color(rgb(0xffe066))
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .child(self.probe.clone())
+                    .child(div().id("solid-probe-clear").p(px(2.)).cursor_pointer().hover(|d| d.bg(rgba(0x2a3548ee))).child(crate::art::icon("x", 12., rgb(0x8a93a3)))
+                        .on_click(cx.listener(|this, _, _, cx| { this.set_probe(""); cx.emit(SolidEvent::Pick(String::new())); cx.notify(); }))));
+            }
             bar
         });
         div().id("solid-page").size_full().overflow_hidden().relative().track_focus(&self.focus).key_context("Viewer").child(body).child(probe).children(tools)
@@ -839,11 +937,14 @@ impl Render for SolidPage {
             .when(self.image.is_some() && !making_other && (!stage.is_empty() || !self.parts_progress().is_empty()), |d| d.child(div().id("solid-parts").absolute().bottom_2().right_2().px_2().text_size(crate::scale::tpx(12.)).text_color(rgb(0x8a93a3)).child(if stage.is_empty() { trs(&self.parts_progress()) } else { stage.clone() })))
             .on_mouse_down(MouseButton::Left, cx.listener(|this, e: &MouseDownEvent, window, cx| {
                 window.focus(&this.focus);
-                if e.click_count >= 2 { this.drag = None; this.set_view("fit"); cx.notify(); return } // a double click fits, as 0.14's did
+                if e.click_count >= 2 { this.drag = None; this.press = None; this.set_view("fit"); cx.notify(); return } // a double click fits, as 0.14's did
+                this.press = (!e.modifiers.alt && !e.modifiers.shift && !e.modifiers.control).then_some(e.position);
                 this.drag = Some((if e.modifiers.alt { Drag::Roll } else if e.modifiers.shift || e.modifiers.control { Drag::Pan } else { Drag::Orbit }, e.position)); }))
             .on_mouse_down(MouseButton::Right, cx.listener(|this, e: &MouseDownEvent, window, _| { window.focus(&this.focus); this.drag = Some((Drag::Pan, e.position)); }))
             .on_mouse_down(MouseButton::Middle, cx.listener(|this, e: &MouseDownEvent, window, _| { window.focus(&this.focus); this.drag = Some((Drag::Pan, e.position)); }))
             .on_mouse_move(cx.listener(|this, e: &MouseMoveEvent, _, cx| {
+                // (a press that moves is a turn, not a click)
+                if let Some(p) = this.press { if f32::from(e.position.x - p.x).abs() > 4.0 || f32::from(e.position.y - p.y).abs() > 4.0 { this.press = None; } }
                 let Some((kind, last)) = this.drag else { return };
                 if e.pressed_button.is_none() { this.drag = None; this.ask_render(false); cx.notify(); return } // the button went up where we could not see it
                 let (dx, dy) = (f32::from(e.position.x - last.x), f32::from(e.position.y - last.y));
@@ -851,8 +952,8 @@ impl Render for SolidPage {
                 this.touched = true; if let Some(c) = &mut this.cam { match kind { Drag::Orbit => c.orbit(dx, dy), Drag::Pan => c.pan(dx, dy, h), Drag::Roll => c.roll(dx) } }
                 this.drag = Some((kind, e.position)); this.ask_render(true); // a draft while dragging, the full image on release. No repaint here: the picture's arrival is what repaints
             }))
-            .on_mouse_up(MouseButton::Left, cx.listener(|this, _: &MouseUpEvent, _, cx| { if this.drag.take().is_some() { this.settled(cx); cx.notify(); } }))
-            .on_mouse_up_out(MouseButton::Left, cx.listener(|this, _: &MouseUpEvent, _, cx| { if this.drag.take().is_some() { this.settled(cx); cx.notify(); } }))
+            .on_mouse_up(MouseButton::Left, cx.listener(|this, _: &MouseUpEvent, _, cx| { let click = this.press.take(); if this.drag.take().is_some() { this.settled(cx); cx.notify(); } if let Some(at) = click { this.click_at(at, cx); } }))
+            .on_mouse_up_out(MouseButton::Left, cx.listener(|this, _: &MouseUpEvent, _, cx| { this.press = None; if this.drag.take().is_some() { this.settled(cx); cx.notify(); } }))
             .on_mouse_up(MouseButton::Right, cx.listener(|this, _: &MouseUpEvent, _, cx| { if this.drag.take().is_some() { this.settled(cx); cx.notify(); } }))
             .on_mouse_up(MouseButton::Middle, cx.listener(|this, _: &MouseUpEvent, _, cx| { if this.drag.take().is_some() { this.settled(cx); cx.notify(); } }))
             .on_scroll_wheel(cx.listener(|this, e: &ScrollWheelEvent, window, cx| {
@@ -893,7 +994,7 @@ mod tests {
         assert!(!super::note_keeps_model("", "2|/b|"));
     }
     // not `use super::*`: that glob brings gpui's own `test` attribute macro into scope and #[test] then expands into itself
-    use super::{decode_mesh, parse_frame, pinch_zoom, render, wheel_zoom, Camera, Drawer, Layers, Mesh, SolidFrame, add, dot, mul, refit, sub};
+    use super::{decode_mesh, parse_frame, pinch_zoom, render, wheel_zoom, Camera, Drawer, Layers, Mesh, SolidFrame, add, dot, mul, refit, sub, has_refs, lit_color, lit_layers, pick, same_part};
     use std::sync::Arc;
     use super::super::raster::smooth_normals;
     fn put(out: &mut Vec<u8>, mut v: u32) { loop { let b = (v & 0x7f) as u8; v >>= 7; if v == 0 { out.push(b); return } out.push(b | 0x80); } }
@@ -1254,6 +1355,39 @@ mod tests {
         }
         assert!(super::decode_part(1, &encode(&tri), &[0u8; 47]).is_err(), "half an instance is refused");
         assert!(super::decode_part(1, &encode(&tri), &f32::NAN.to_le_bytes().repeat(12)).is_err());
+    }
+    #[test] fn a_click_picks_the_part_under_it_by_the_frames_references_and_the_probed_part_is_lit() {
+        // one model (a 10 mm cube) at two instances 30 mm apart, named by the frame's `refs`
+        let mut f = part_frame("2|b|", &cube(), &[ID, [1.0, 0.0, 0.0, 3000.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0]], 2);
+        f[0] = 0xa7; cbor_text(&mut f, "refs"); f.push(0x82); cbor_text(&mut f, "R1"); cbor_text(&mut f, "U2");
+        let Some(SolidFrame::Part(_, part, _)) = parse_frame(&f) else { panic!() };
+        assert_eq!(part.refs, vec!["R1".to_string(), "U2".to_string()]);
+        // (a list that is not one an instance names nothing)
+        let mut g = part_frame("2|b|", &cube(), &[ID], 1); g[0] = 0xa7; cbor_text(&mut g, "refs"); g.push(0x82); cbor_text(&mut g, "R1"); cbor_text(&mut g, "U2");
+        let Some(SolidFrame::Part(_, lone, _)) = parse_frame(&g) else { panic!() }; assert!(lone.refs.is_empty());
+        // the board: a slab under the first instance and one off to the side
+        let m = mesh(); let board = { let mut b = (*at(&m, [0.0, 0.0, -20.0])).clone(); let side = at(&m, [60.0, 0.0, -20.0]); b.tris.extend_from_slice(&side.tris); b.normals.extend_from_slice(&side.normals); b.colors.extend_from_slice(&side.colors); b.center = [35.0, -5.0, -15.0]; b.radius = 60.0; Arc::new(b) };
+        let l = Layers::of(Some(board.clone()), vec![Arc::new(part)]).unwrap();
+        assert!(has_refs(&l) && !has_refs(&Layers::of(None, vec![Arc::new(lone)]).unwrap()), "only a model that names its parts is picked on");
+        let down = [0.0, 0.0, -1.0];
+        assert_eq!(pick(&l, [5.0, -5.0, 100.0], down), Some("R1".into()), "the part, though the board is under it");
+        assert_eq!(pick(&l, [35.0, -5.0, 100.0], down), Some("U2".into()), "the second instance of the same model is its own part");
+        assert_eq!(pick(&l, [65.0, -5.0, 100.0], down), Some(String::new()), "the board itself: no part");
+        assert_eq!(pick(&l, [20.0, -5.0, 100.0], down), None, "nothing at all");
+        assert_eq!(pick(&l, [5.0, -5.0, 100.0], [0.0, 0.0, 1.0]), None, "what is behind the eye is not picked");
+        // the ray of a pointer: the middle of the panel looks along the camera, a corner off towards it
+        let cam = Camera::fit_to(l.center, l.radius, 1.5);
+        let (eye, mid) = cam.ray(0.0, 0.0, 1.5); assert_eq!(eye, cam.eye()); assert!(dot(mid, cam.fwd) > 0.9999);
+        let (_, corner) = cam.ray(1.0, 1.0, 1.5); assert!(dot(corner, cam.right) > 0.0 && dot(corner, cam.up) > 0.0 && dot(corner, cam.right) > dot(corner, cam.up), "{corner:?}");
+        // the probed part lit: its instance's triangles only, the other layers shared
+        assert!(same_part("U2", "U2") && same_part("U2A", "U2") && !same_part("U2", "U21") && !same_part("", "") && !same_part("U2", ""));
+        let lit = lit_layers(&l, "U2A").unwrap(); let (was, now) = (&l.parts[0], &lit.parts[0]); let per = was.tris.len() / 2;
+        assert!(Arc::ptr_eq(lit.board.as_ref().unwrap(), &board) && !Arc::ptr_eq(was, now));
+        assert_eq!(now.colors[..per], was.colors[..per], "R1 as it was");
+        assert!((per..2 * per).all(|i| now.colors[i] == lit_color(was.colors[i]) && now.colors[i] != was.colors[i]), "U2 lit");
+        assert_eq!((now.tris.len(), &now.refs), (was.tris.len(), &was.refs));
+        assert!(lit_layers(&l, "R9").is_none() && lit_layers(&l, "").is_none(), "a part the model has not: the model as it is");
+        assert_eq!(lit_color(0x80_102030) >> 24, 0x80, "a translucent triangle stays translucent");
     }
     #[test] fn the_worker_scene_starts_parts_again_and_combines_them_after_the_board() {
         let mut sc = super::Scene::default(); let (mut b, mut r) = (false, false);
