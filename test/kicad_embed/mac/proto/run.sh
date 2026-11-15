@@ -52,7 +52,7 @@ for p in accessory regular switch; do
   # Cmd-click back into the host's own area (left of the pane): does the host get the keyboard back?
   cliclick c:$(( fx - 300 )),$fy; sleep 0.5
   back=$(osascript -e 'tell application "System Events" to get name of first process whose frontmost is true' 2>&1)
-  echo "menu.$p: after a click in the follower the frontmost is '$front'; menu bar: $menus; follower in the Dock: $dock; in the app list (Cmd-Tab): $cmdtab; follower key: $(grep -c '^key' "$O/fol.menu.$p.out"); after a click back on the host: '$back'"
+  echo "menu.$p: after a click in the follower the frontmost is '$front'; menu bar: $menus; follower in the Dock: $dock; in the app list (Cmd-Tab): $cmdtab; follower: $(grep -h "^click" "$O/fol.menu.$p.out" | head -1); after a click back on the host: '$back'"
   finish
 done
 pgrep -lf "$O/" || echo "nothing left running"
