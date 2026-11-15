@@ -5,13 +5,19 @@ import UIKit
 // and decides every word and button here (native/host/src/settings/accounts_phone.rs); the phone opens the sign-in page in the browser and, for Claude, sends back the code
 // that page shows. No password is ever typed here. The same screens as the Android app's DataAccounts.kt.
 
-struct DAccountsPage: Decodable { var providers: [DAccProvider]; var error: String; var note: String }
+struct DAccountsPage: Decodable { var providers: [DAccProvider]; var error: String; var note: String
+    /// the hub's own Claude sign-in, when it knows it (an older hub sends none)
+    var own: [DAccRow]? }
+/// A limit window as the hub draws it: `used` 0...100, `text` its words, `tone` ok | warn | bad | dim.
+struct DAccBar: Decodable, Hashable { var name: String; var used: Double; var text: String; var tone: String }
 struct DAccProvider: Decodable, Identifiable { var provider: String; var title: String; var add: String; var accounts: [DAccRow]; var id: String { provider } }
-struct DAccRow: Decodable, Identifiable { var id: String; var provider: String; var label: String; var email: String; var state: String; var line: String; var tone: String; var limits: String; var hold: String }
+struct DAccRow: Decodable, Identifiable { var id: String; var provider: String; var label: String; var email: String; var state: String; var line: String; var tone: String; var limits: String; var hold: String
+    /// a bar a window, held (`out`), and whether it has a page (`open`); an older hub sends none of them
+    var bars: [DAccBar]?; var out: Bool?; var open: Bool? }
 struct DAccReply: Decodable { var account: DAccount }
 struct DAccount: Decodable {
     var id: String; var provider: String; var title: String; var label: String; var email: String; var plan: String; var state: String; var line: String; var tone: String
-    var message: String; var limits: [String]; var hold: String; var signin: DSignIn?; var actions: [DAccAction]; var remove: String; var loopback: Bool?
+    var message: String; var limits: [String]; var hold: String; var bars: [DAccBar]?; var signin: DSignIn?; var actions: [DAccAction]; var remove: String; var loopback: Bool?
 }
 struct DSignIn: Decodable { var attempt: String; var state: String; var url: String; var code: String; var paste: Bool; var text: String; var error: String; var busy: Bool; var done: Bool }
 struct DAccAction: Decodable, Hashable { var label: String; var action: String; var danger: Bool }
@@ -36,11 +42,16 @@ struct DataAccountsView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
                 if let p = page {
+                    if let own = p.own, !own.isEmpty {
+                        ForEach(own) { a in row(a, chevron: false).accessibilityIdentifier("accounts.own") }
+                        DLine()
+                    }
                     ForEach(p.providers) { pv in
                         DHeading(text: pv.title)
                         if pv.accounts.isEmpty { Text(Tr.t("No accounts")).dmono(12).foregroundStyle(BackplaneDesign.faint) }
                         ForEach(pv.accounts) { a in
-                            Button { opened = DAccountRoute(id: a.id) } label: { row(a) }.buttonStyle(.plain).accessibilityIdentifier("accounts.row." + a.id)
+                            if a.open == false { row(a, chevron: false).accessibilityIdentifier("accounts.row." + a.id) }
+                            else { Button { opened = DAccountRoute(id: a.id) } label: { row(a) }.buttonStyle(.plain).accessibilityIdentifier("accounts.row." + a.id) }
                         }
                         Button(Tr.t(pv.add)) {
                             // Google asks no name: the sign-in starts at once, its own listener first (GoogleLoop)
@@ -55,7 +66,7 @@ struct DataAccountsView: View {
             }.padding(16)
         }
         .background(BackplaneDesign.background)
-        .dataBar(Tr.t("Accounts"))
+        .dataBar(Tr.t("Accounts & Usage"))
         .refreshable { await load() }
         .task(id: client.conn) { await load() }
         .navigationDestination(item: $opened) { r in DataAccountView(client: client, route: r, moved: { opened = DAccountRoute(id: $0) }).id(r.id) }
@@ -82,16 +93,17 @@ struct DataAccountsView: View {
         } catch { GoogleLoop.shared.stop(); failure = error.localizedDescription }
         await load()
     }
-    private func row(_ a: DAccRow) -> some View {
+    private func row(_ a: DAccRow, chevron: Bool = true) -> some View {
         HStack(alignment: .top, spacing: 10) {
             DDot(color: dTone(a.tone), size: 8).padding(.top, 5)
             VStack(alignment: .leading, spacing: 3) {
                 HStack { Text(a.label).dmono(14, bold: true).foregroundStyle(BackplaneDesign.text).lineLimit(1); Spacer(); Text(Tr.t(a.line)).dmono(11).foregroundStyle(dTone(a.tone)) }
                 if !a.email.isEmpty { Text(a.email).dmono(11).foregroundStyle(BackplaneDesign.dim).lineLimit(1) }
-                if !a.limits.isEmpty { Text(Tr.t(a.limits)).dmono(11).foregroundStyle(BackplaneDesign.faint).lineLimit(2) }
-                if !a.hold.isEmpty { Text(Tr.t(a.hold)).dmono(11).foregroundStyle(BackplaneDesign.warn) }
+                if let bars = a.bars, !bars.isEmpty { ForEach(bars, id: \.self) { DUsageBar(bar: $0) }.padding(.top, 3) }
+                else if !a.limits.isEmpty { Text(Tr.t(a.limits)).dmono(11).foregroundStyle(BackplaneDesign.faint).lineLimit(2) }
+                if !a.hold.isEmpty { Text(Tr.t(a.hold)).dmono(11).foregroundStyle(a.out == true ? BackplaneDesign.bad : BackplaneDesign.warn) }
             }
-            Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(BackplaneDesign.faint).padding(.top, 4)
+            if chevron { Image(systemName: "chevron.right").font(.system(size: 11)).foregroundStyle(BackplaneDesign.faint).padding(.top, 4) }
         }.padding(10).frame(maxWidth: .infinity, alignment: .leading).dbox().contentShape(Rectangle())
     }
 }
@@ -133,7 +145,11 @@ struct DataAccountView: View {
                     HStack(spacing: 8) { DDot(color: dTone(a.tone), size: 8); Text(Tr.t(a.line)).dmono(13, bold: true).foregroundStyle(dTone(a.tone)) }.accessibilityIdentifier("account.state")
                     if !a.email.isEmpty { Text(a.plan.isEmpty ? a.email : "\(a.email) · \(a.plan)").dmono(12).foregroundStyle(BackplaneDesign.dim) }
                     if !a.message.isEmpty { Text(Tr.t(a.message)).dmono(12).foregroundStyle(BackplaneDesign.dim) }
-                    ForEach(a.limits, id: \.self) { Text(Tr.t($0)).dmono(12).foregroundStyle(BackplaneDesign.faint) }
+                    // the bars stand for the windows; the lines the hub sends besides them (a sync token's end) stay as words
+                    if let bars = a.bars, !bars.isEmpty {
+                        ForEach(a.limits.filter { l in !bars.contains { l.hasPrefix($0.name + "  ") } }, id: \.self) { Text(Tr.t($0)).dmono(12).foregroundStyle(BackplaneDesign.faint) }
+                        ForEach(bars, id: \.self) { DUsageBar(bar: $0) }
+                    } else { ForEach(a.limits, id: \.self) { Text(Tr.t($0)).dmono(12).foregroundStyle(BackplaneDesign.faint) } }
                     if !a.hold.isEmpty { Text(Tr.t(a.hold)).dmono(12).foregroundStyle(BackplaneDesign.warn) }
                     if let s = a.signin { DLine(); signin(s) }
                     DLine()

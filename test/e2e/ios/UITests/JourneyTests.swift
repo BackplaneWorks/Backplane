@@ -964,6 +964,30 @@ final class Journeys: XCTestCase {
     // Search and find on a hub from scripts/mobile/data-hub.sh started with SEARCH=1 (thread t4 "Find": 70 messages, "quasar" in m2, m30, m55, m68; once in t1):
     // the home search lists what was said under "Messages"; a tap opens the thread at the message (older pages read), marked; the find bar counts,
     // steps (newest first, wrapping) and closes, which clears the mark.
+    // Settings: the top level's groups, Accounts & Usage with a bar a window (the stub hub's sample accounts), a search, and a page (Appearance)
+    func test_data_settings() {
+        d = Driver("data-settings"); defer { d.finish() }
+        d.launch()
+        let sbAlert = XCUIApplication(bundleIdentifier: "com.apple.springboard").alerts.buttons["Allow"]
+        if sbAlert.waitForExistence(timeout: 5) { sbAlert.tap() }
+        // a narrow bar folds the gear into its More menu
+        func openSettings() { let g = d.el("data.settings"); if g.waitForExistence(timeout: 15), g.isHittable { d.tap(g) } else { d.app.buttons["More"].firstMatch.tap(); let s = d.app.buttons["Settings"].firstMatch; if s.waitForExistence(timeout: 5) { s.tap() } } }
+        guard d.step("Settings", timeout: 25, act: { openSettings() }, expect: { d.el("settings.appearance").waitForExistence(timeout: 8) && d.el("settings.accounts").exists }) else { return }
+        sleep(2); d.shot("1-top")
+        guard d.step("Accounts & Usage", act: { d.tap(d.el("settings.accounts")) }, expect: { d.el("accounts.row.w").waitForExistence(timeout: 8) && d.el("accounts.own").exists }) else { return }
+        sleep(1); d.shot("2-accounts-usage")
+        d.app.navigationBars.buttons.element(boundBy: 0).tap()
+        let search = d.el("settings.search")
+        d.step("search: text", act: { d.tap(search); search.typeText("text") }, expect: { d.label("Text size").exists })
+        sleep(1); d.shot("3-search")
+        d.step("a hit opens its page", act: { d.tap(d.label("Text size")) }, expect: { d.el("settings.textsize").waitForExistence(timeout: 5) && d.el("settings.lang").exists })
+        sleep(1); d.shot("4-appearance")
+        d.app.navigationBars.buttons.element(boundBy: 0).tap()
+        search.clearIfThere()
+        d.step("Notifications holds the alerts switch", act: { d.tap(d.el("settings.notifications")) }, expect: { d.el("settings.alerts").waitForExistence(timeout: 5) })
+        sleep(1); d.shot("5-notifications")
+    }
+
     func test_data_search() {
         d = Driver("data-search"); defer { d.finish() }
         d.launch()
@@ -1027,7 +1051,9 @@ final class Journeys: XCTestCase {
         sleep(2); sysAlert(); skip()
         guard d.step("the list", timeout: 30, act: {}, expect: { rows.firstMatch.exists }) else { return }
         let lang = d.el("settings.lang")
-        guard d.step("Settings", act: { d.tap(d.el("data.settings")) }, expect: { lang.waitForExistence(timeout: 8) }) else { return }
+        guard d.step("Settings", act: { d.tap(d.el("data.settings")) }, expect: { d.el("settings.appearance").waitForExistence(timeout: 8) }) else { return }
+        shot("02a-settings-top")
+        guard d.step("Settings › Appearance", act: { d.tap(d.el("settings.appearance")) }, expect: { lang.waitForExistence(timeout: 8) }) else { return }
         if auto {
             d.step("Automatic is on, and the app is Japanese", act: {}, expect: { lang.buttons["自動"].isSelected && d.label("言語").exists })
         } else {
@@ -1035,10 +1061,11 @@ final class Journeys: XCTestCase {
             d.step("Language › 日本語", act: { d.tap(lang.buttons["日本語"]) }, expect: { lang.buttons["日本語"].isSelected && d.label("言語").exists })
         }
         shot("02-settings")
-        d.app.swipeUp(); shot("03-settings-more")
-        d.app.swipeUp(); shot("04-settings-end")
-        d.step("the hub page", act: { d.app.swipeDown(); d.app.swipeDown(); d.tap(d.el("settings.hub")) }, expect: { d.app.navigationBars.count > 0 && !lang.exists })
-        shot("05-hub"); back(); back()
+        back()
+        d.step("Settings › Hubs", act: { d.tap(d.el("settings.hubs")) }, expect: { d.el("settings.hub").waitForExistence(timeout: 8) })
+        shot("03-settings-hubs")
+        d.step("the hub page", act: { d.tap(d.el("settings.hub")) }, expect: { d.app.navigationBars.count > 0 && !d.el("settings.hub").exists })
+        shot("05-hub"); back(); back(); back()
         d.step("back to the list", act: {}, expect: { rows.firstMatch.waitForExistence(timeout: 8) })
         shot("06-home")
         let search = d.el("data.search")

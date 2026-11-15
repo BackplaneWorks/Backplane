@@ -4207,6 +4207,12 @@ ios.image.incoming = 画像の準備ができました。送るスレッドを�
 ios.image.loadfail = 画像を読み込めませんでした。
 native.permission.photos.add = スレッドで選んだ画像を写真ライブラリに保存します。
 ios.buy.ask = {project} の購入スレッドを開始しますか？
+ios.settings.accounts.usage = アカウントと使用量
+ios.settings.machines.devices = マシンとデバイス
+ios.settings.alerts.on = 通知オン
+ios.settings.alerts.off = 通知オフ
+ios.settings.accounts.n = {n, plural, =0 {アカウントなし} other {#件のアカウント}}
+hub.acct.this.hubs.sign.in = このハブのサインイン
 # ---- end ----
 # the sidebar's sections (docs/ALWAYS-ON.md section 8): the hub's words, and the window's
 sidebar.sections.needs = 対応が必要
