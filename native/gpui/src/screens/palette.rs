@@ -123,7 +123,7 @@ pub fn items(data: &Value) -> Vec<Item> {
         /* i18n-ok: a kind, drawn through trs */ v.push(Item { label: name, place: String::new(), kind: "room", what: Do::Action("room".into(), id), row: Value::Null });
     }
     for t in data["conversationHistory"]["jump"].as_array().into_iter().flatten().chain(data["legacy"].as_array().into_iter().flatten()) {
-        v.push(Item { label: string(t, "title"), place: trs("Conversation history"), kind: "thread", what: Do::Thread(string(t, "id")), row: Value::Null });
+        v.push(Item { label: string(t, "title"), place: trs("Chats with no project"), kind: "thread", what: Do::Thread(string(t, "id")), row: Value::Null });
     }
     // every project and thread on every machine (the hub's `jump`, present/sections.rs): a project opens its page, a thread opens; one on a machine that is off is listed and opens nothing
     for j in data["jump"].as_array().into_iter().flatten() {
@@ -309,7 +309,7 @@ mod tests {
         let d = serde_json::json!({"conversationHistory": {"jump": [{"id": "h|s1", "title": "zebra scratch chat"}]}, "legacy": [{"id": "h|s2", "title": "live chat"}]});
         let found: Vec<_> = items(&d).into_iter().filter(|i| i.kind == "thread").collect();
         assert_eq!(found.iter().map(|i| i.label.as_str()).collect::<Vec<_>>(), ["zebra scratch chat", "live chat"]);
-        assert_eq!(found[0].what, Do::Thread("h|s1".into())); assert_eq!(found[0].place, "Conversation history");
+        assert_eq!(found[0].what, Do::Thread("h|s1".into())); assert_eq!(found[0].place, "Chats with no project");
     }
     #[test] fn threads_and_actions_are_found_by_what_is_typed_and_a_delete_is_never_offered() {
         let all = items(&data());

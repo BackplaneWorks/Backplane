@@ -36,7 +36,7 @@ check(ThreadGroups.title(7) == "Settled (7)", "title", ThreadGroups.title(7))
 let hl = [T(id: "live", project: "scratch")], hr = [T(id: "old1", project: "scratch"), T(id: "live", project: "scratch"), T(id: "old2", project: "scratch")]
 check(ids(ThreadGroups.history(live: hl, rows: hr, open: false)) == ["live"], "history shut: the live chat alone", ids(ThreadGroups.history(live: hl, rows: hr, open: false)))
 check(ids(ThreadGroups.history(live: hl, rows: hr, open: true)) == ["live", "old1", "old2"], "history open: live first, none twice", ids(ThreadGroups.history(live: hl, rows: hr, open: true)))
-check(ThreadGroups.historyTitle(3) == "Conversation history (3)", "history title", ThreadGroups.historyTitle(3))
+check(ThreadGroups.historyTitle(3) == "Chats with no project (3)", "history title", ThreadGroups.historyTitle(3))
 
 // subagents and subthreads nest under their parent, wherever it is; a lost parent or a loop makes roots (as ThreadGroupsTest.kt)
 struct N: NestedThread { var id: String; var project = "p"; var settled = false; var pinned = false; var pinOrder = 0; var archived = false; var updatedAt = 0; var settledAt = 0; var parent = "" }
