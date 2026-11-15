@@ -445,18 +445,22 @@ pub fn page(st: &State, rows: &[MergedProject], key: &str, c: &Ctx, done_open: b
         else if f.settled || (f.word == "done" && !f.show) { done.push(r) } else { recent.push(r) }
     }
     let all = Groups::of(st, rows); let gid = all.of_project(st, p);
-    let n = done.len(); recent.truncate(PAGE); done.truncate(PAGE);
+    // Done lists its newest PAGE rows; the rest are behind "Older (m)" under it (`page-older`), so a long project hides none of its threads
+    let n = done.len(); recent.truncate(PAGE); done.truncate(PAGE + JUMP);
+    let older: Vec<Value> = if done.len() > PAGE { done.split_off(PAGE) } else { vec![] };
+    let (m, older_open) = (n.saturating_sub(PAGE), c.open.contains("page-older"));
     let mut head = super::merged::row_json(p);
     head["pinned"] = json!(pinned_at(st, &p.key) > 0); head["group"] = json!(gid); head["groupName"] = json!(all.name(st, &gid)); head["menu"] = project_menu(st, p, &gid, &all);
     head["newThread"] = json!(p.here.clone().unwrap_or_default());
     // what a client's page head draws (the shape of a sidebar project row): its id here, else on the newest machine
     head["id"] = json!(qid(c.hub, &pid_of(p))); head["title"] = json!(p.name); head["root"] = json!(p.folder); head["nav"] = json!(p.key);
-    json!({"key":p.key,"project":head,"sections":[
-        {"id":"running","title":"Running","rows":running},
-        {"id":"needs","title":"Needs you","rows":needs},
-        {"id":"recent","title":"Recent","rows":recent},
-        {"id":"done","title":format!("Done ({n})"),"count":n,"fold":true,"open":done_open,"toggle":"page-done","rows":if done_open { done } else { vec![] }}],
-        "moveTo":move_targets(st, rows)})
+    let mut sections = vec![
+        json!({"id":"running","title":"Running","rows":running}),
+        json!({"id":"needs","title":"Needs you","rows":needs}),
+        json!({"id":"recent","title":"Recent","rows":recent}),
+        json!({"id":"done","title":format!("Done ({n})"),"count":n,"fold":true,"open":done_open,"toggle":"page-done","rows":if done_open { done } else { vec![] }})];
+    if m > 0 { sections.push(json!({"id":"older","title":format!("Older ({m})"),"count":if done_open { m } else { 0 },"fold":true,"open":older_open,"toggle":"page-older","rows":if done_open && older_open { older } else { vec![] }})); }
+    json!({"key":p.key,"project":head,"sections":sections,"moveTo":move_targets(st, rows)})
 }
 
 // ---- Ctrl+K ---------------------------------------------------------------------------------------------------------------
@@ -488,8 +492,8 @@ pub fn act(st: &State, rows: &[MergedProject], action: &str, value: &str, drafts
     let none = || Act { open_toggle: None, page: None, sets: vec![], clear: vec![], drafts: vec![] };
     let known = |key: &str| rows.iter().any(|p| p.key == key);
     match action {
-        // a section's fold (Groups, Quiet, Archived) and the project page's Done (n)
-        "side-section" => { if !(value.starts_with("sec:group:") || value == "sec:quiet" || value == "sec:archived" || value == "page-done") { return None } Some(Act { open_toggle: Some(value.into()), ..none() }) }
+        // a section's fold (Groups, Quiet, Archived), the project page's Done (n) and its Older (m)
+        "side-section" => { if !(value.starts_with("sec:group:") || value == "sec:quiet" || value == "sec:archived" || value == "page-done" || value == "page-older") { return None } Some(Act { open_toggle: Some(value.into()), ..none() }) }
         "project-page" => { if !value.is_empty() && !known(value) { return None } Some(Act { page: Some(value.into()), ..none() }) }
         // another machine's thread, hidden here until something new happens there (`hidden_at`); a local thread has Settle and Archive
         "thread-hide" => {
@@ -542,9 +546,9 @@ pub fn act(st: &State, rows: &[MergedProject], action: &str, value: &str, drafts
     }
 }
 
-/// The open folds of the session (`open.sec:*` and `open.page-done`).
+/// The open folds of the session (`open.sec:*`, `open.page-done` and `open.page-older`).
 pub fn opened(session: &Value) -> HashSet<String> {
-    session["open"].as_object().into_iter().flatten().filter(|(k, v)| (k.starts_with("sec:") || *k == "page-done") && v.as_bool() == Some(true)).map(|(k, _)| k.clone()).collect()
+    session["open"].as_object().into_iter().flatten().filter(|(k, v)| (k.starts_with("sec:") || *k == "page-done" || *k == "page-older") && v.as_bool() == Some(true)).map(|(k, _)| k.clone()).collect()
 }
 /// A count of each section's rows by id, for tests and the e2e (what the person would see at a glance).
 pub fn census(sections: &Value) -> HashMap<String, usize> {
