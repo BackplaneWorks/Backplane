@@ -4227,6 +4227,7 @@ sidebar.sections.new.group = 新しいグループ…
 sidebar.sections.new.group.title = 新しいグループ
 sidebar.sections.remove.ask = {project}をBackplaneから外しますか？フォルダとファイルはそのまま残ります。
 gpui.sections.running = {n, number}件実行中
+gpui.sections.rest = {n, plural, other {ここにないスレッド#件（プロジェクトページにあります）}}
 gpui.projects.mech = 機構部品（{n}）
 gpui.open.folder = フォルダを開く
 gpui.picker.none = フォルダなし

@@ -11,17 +11,19 @@ struct DSecRow: Decodable, Identifiable, Equatable {
     // a project's
     var kind: String
     var key: String; var projOff: Bool; var running: Int; var needsCount: Int; var threads: [DSecRow]; var icon: String; var css: String; var dots: [DSecDot]; var more: Int
+    /// a project's threads with no row under it (finished ones, on its page): counted on its row so none seems lost
+    var rest: Int = 0
     /// its menu (SectionMenu.swift), the hub's; an older hub sends none
     var menu: [DMenuItem]
     /// the fold the hub keeps for a project row (`sidebar.fold.<key>`): the action its chevron sends, folded now, the rows it hides or would hide
     var fold: String; var folded: Bool; var under: Int
-    enum CodingKeys: String, CodingKey { case id, title, word, say, want, ago, machine, mark, project, projectKey, off, nav, pinned, hide, kind, key, running, needsCount, threads, icon, css, dots, more, menu, fold, folded, under }
+    enum CodingKeys: String, CodingKey { case id, title, word, say, want, ago, machine, mark, project, projectKey, off, nav, pinned, hide, kind, key, running, needsCount, threads, icon, css, dots, more, rest, menu, fold, folded, under }
     init(from d: Decoder) throws {
         let c = try d.container(keyedBy: CodingKeys.self)
         id = c.str(.id); title = c.str(.title); word = c.str(.word); say = c.str(.say); want = c.str(.want); ago = c.str(.ago); machine = c.str(.machine)
         mark = try? c.decode(DMark.self, forKey: .mark); project = c.str(.project); projectKey = c.str(.projectKey); off = c.bool(.off); nav = c.str(.nav); pinned = c.bool(.pinned); hide = c.str(.hide)
         kind = c.str(.kind); key = c.str(.key); projOff = (try? c.decode(Bool.self, forKey: .off)) ?? false; running = c.int(.running); needsCount = c.int(.needsCount); threads = (try? c.decode([DSecRow].self, forKey: .threads)) ?? []
-        icon = c.str(.icon); css = c.str(.css); dots = (try? c.decode([DSecDot].self, forKey: .dots)) ?? []; more = c.int(.more)
+        icon = c.str(.icon); css = c.str(.css); dots = (try? c.decode([DSecDot].self, forKey: .dots)) ?? []; more = c.int(.more); rest = c.int(.rest)
         menu = (try? c.decode([DMenuItem].self, forKey: .menu)) ?? []
         fold = c.str(.fold); folded = c.bool(.folded); under = c.int(.under)
     }
@@ -116,6 +118,7 @@ struct DataSectionProject: View {
             Text(r.title).dmono(13).foregroundStyle(BackplaneDesign.text).lineLimit(1)
             if r.dots.count > 1 { HStack(spacing: 3) { ForEach(Array(r.dots.enumerated()), id: \.offset) { _, d in Circle().fill(d.dim ? BackplaneDesign.faint : (d.here ? BackplaneDesign.accent : BackplaneDesign.dim)).frame(width: 5, height: 5) } } }
             Spacer(minLength: 0)
+            if r.rest > 0 { Text("\(r.rest)").dmono(11).foregroundStyle(BackplaneDesign.faint).accessibilityIdentifier("data.section.rest." + r.key) }
             if r.running > 0 { Text(Tr.ios_sections_running(n: r.running)).dmono(11).foregroundStyle(BackplaneDesign.accent) }
             // what of it waits on the person (its rows are in Needs you, folded or not)
             if r.needsCount > 0 { Text("\(r.needsCount)").dmono(10).foregroundStyle(BackplaneDesign.background).padding(.horizontal, 5).background(BackplaneDesign.bad).accessibilityIdentifier("data.section.needs." + r.key) }

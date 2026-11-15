@@ -4204,6 +4204,7 @@ sidebar.sections.new.group = New group…
 sidebar.sections.new.group.title = New group
 sidebar.sections.remove.ask = Remove {project} from Backplane? Its folder and files stay.
 gpui.sections.running = {n, number} running
+gpui.sections.rest = {n, plural, one {# thread not listed here, on the project page} other {# threads not listed here, on the project page}}
 gpui.projects.mech = MECHANICAL ({n})
 gpui.open.folder = Open folder
 gpui.picker.none = No folders
