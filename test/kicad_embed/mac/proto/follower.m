@@ -1,35 +1,60 @@
-// Stand-in for KiCad's frame in option (b): an accessory app's borderless window kept over the host's pane
-// (inset from the host's content) by polling the host window's bounds (CGWindowList, no permission needed),
-// ordered directly above the host window. usage: follower <host CGWindowID> <seconds> <mode: poll|link>
+// Stand-in for KiCad's frame in option (b): a borderless window kept over the host's pane.
+// usage: follower <mode poll|push> <host CGWindowID> <host pid> <socket path> <policy accessory|regular|switch> <seconds>
+//  poll: reads the host's bounds from CGWindowList at 120 Hz and keeps itself directly above the host (the first prototype)
+//  push: only does what the host says over the socket ("rect x y w h hostid", "hide", "raise"); no polling
+// Either way it watches the host's pid (kqueue) and hides and exits the moment the host is gone: never a stale window.
+// policy: accessory (no Dock icon, no Cmd-Tab), regular, switch (accessory, regular while its window is key).
+// It has a main menu ("KiCadStandIn" with File and Edit) to see what the menu bar shows when it has the keyboard.
 #import <Cocoa/Cocoa.h>
-#import <QuartzCore/QuartzCore.h>
-static CGRect hostBounds(CGWindowID id, int *onscreen) {
-  CFArrayRef a = CGWindowListCopyWindowInfo(kCGWindowListOptionIncludingWindow, id); CGRect r = CGRectNull; *onscreen = 0;
-  if (a && CFArrayGetCount(a)) { NSDictionary *d = ((__bridge NSArray*)a)[0]; CGRectMakeWithDictionaryRepresentation((__bridge CFDictionaryRef)[d objectForKey:(__bridge NSString*)kCGWindowBounds], &r); *onscreen = [[d objectForKey:(__bridge NSString*)kCGWindowIsOnscreen] boolValue]; }
-  if (a) CFRelease(a); return r;
-}
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <sys/event.h>
+static NSWindow *w; static long host; static double H;
+static void place(CGRect p) { NSRect f = NSMakeRect(p.origin.x, H - (p.origin.y + p.size.height), p.size.width, p.size.height); if (!NSEqualRects(f, w.frame)) [w setFrame:f display:NO]; }
+static void above(void) { if (w.visible) [w orderWindow:NSWindowAbove relativeTo:host]; }
+@interface D : NSObject <NSWindowDelegate> @property NSString *policy; @end
+@implementation D
+- (void)windowDidBecomeKey:(NSNotification *)n { if ([self.policy isEqual:@"switch"]) [NSApp setActivationPolicy:NSApplicationActivationPolicyRegular]; printf("key %.3f\n", NSDate.date.timeIntervalSince1970); fflush(stdout); }
+- (void)windowDidResignKey:(NSNotification *)n { if ([self.policy isEqual:@"switch"]) [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory]; }
+@end
+@interface KeyWin : NSWindow @end
+@implementation KeyWin - (BOOL)canBecomeKeyWindow { return YES; } - (BOOL)canBecomeMainWindow { return YES; } @end
 int main(int argc, char **argv) { @autoreleasepool {
-  CGWindowID host = (CGWindowID)atol(argv[1]); double secs = atof(argv[2]);
-  [NSApplication sharedApplication]; [NSApp setActivationPolicy:NSApplicationActivationPolicyAccessory];
-  NSWindow *w = [[NSWindow alloc] initWithContentRect:NSMakeRect(0,0,100,100) styleMask:NSWindowStyleMaskBorderless backing:NSBackingStoreBuffered defer:NO];
-  w.backgroundColor = NSColor.systemGreenColor; w.hasShadow = NO; [w orderFront:nil];
+  NSString *mode = @(argv[1]); host = atol(argv[2]); pid_t hpid = atoi(argv[3]); const char *path = argv[4]; NSString *policy = @(argv[5]); double secs = atof(argv[6]);
+  [NSApplication sharedApplication]; D *d = [D new]; d.policy = policy;
+  [NSApp setActivationPolicy:[policy isEqual:@"regular"] ? NSApplicationActivationPolicyRegular : NSApplicationActivationPolicyAccessory];
+  NSMenu *bar = [NSMenu new]; for (NSString *t in @[@"KiCadStandIn", @"File", @"Edit"]) { NSMenuItem *i = [NSMenuItem new]; i.submenu = [[NSMenu alloc] initWithTitle:t]; [i.submenu addItemWithTitle:[t stringByAppendingString:@" item"] action:nil keyEquivalent:@""]; [bar addItem:i]; }
+  NSApp.mainMenu = bar;
+  H = NSScreen.screens[0].frame.size.height;
+  w = [[KeyWin alloc] initWithContentRect:NSMakeRect(0,0,100,100) styleMask:NSWindowStyleMaskBorderless backing:NSBackingStoreBuffered defer:NO];
+  w.backgroundColor = NSColor.systemGreenColor; w.hasShadow = NO; w.delegate = d; [w orderFront:nil];
   printf("%ld\n", (long)w.windowNumber); fflush(stdout);
-  double H = NSScreen.screens[0].frame.size.height; __block long reorders = 0;
-  NSDate *t0 = [NSDate date];
-  void (^tick)(void) = ^{
-    int on; CGRect b = hostBounds(host, &on); if (CGRectIsNull(b)) return;
-    // the pane: 200 px from the host's left, 60 from its top (title bar + a bar), to 20 px from the right and bottom
-    CGRect p = CGRectMake(b.origin.x + 200, b.origin.y + 60, b.size.width - 220, b.size.height - 80);
-    NSRect f = NSMakeRect(p.origin.x, H - (p.origin.y + p.size.height), p.size.width, p.size.height);
-    if (!NSEqualRects(f, w.frame)) [w setFrame:f display:NO];
-    // keep directly above the host: only reorder when something other than us sits right above it
-    CFArrayRef a = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenAboveWindow, host); BOOL ok = NO;
-    if (a) { NSArray *l = (__bridge NSArray*)a; for (NSInteger i = l.count - 1; i >= 0; i--) { NSDictionary *d = l[i]; if ([[d objectForKey:(__bridge NSString*)kCGWindowLayer] intValue] != 0) continue; ok = [[d objectForKey:(__bridge NSString*)kCGWindowNumber] longValue] == w.windowNumber; break; } CFRelease(a); }
-    if (!ok) { [w orderWindow:NSWindowAbove relativeTo:host]; reorders++; }
-    if (-[t0 timeIntervalSinceNow] > secs) { printf("reorders %ld\n", reorders); fflush(stdout); exit(0); }
-  };
-  const char *mode = argc > 3 ? argv[3] : "poll";
-  if (!strcmp(mode, "link")) { CADisplayLink *dl = [w.screen displayLinkWithTarget:[NSBlockOperation blockOperationWithBlock:tick] selector:@selector(main)]; [dl addToRunLoop:NSRunLoop.mainRunLoop forMode:NSRunLoopCommonModes]; }
-  else [NSTimer scheduledTimerWithTimeInterval:1.0/120 repeats:YES block:^(NSTimer *t){ tick(); }];
+  [[NSString stringWithFormat:@"%ld", (long)w.windowNumber] writeToFile:[@(path) stringByAppendingString:@".id"] atomically:YES encoding:NSUTF8StringEncoding error:nil];
+  // the host's death: kqueue NOTE_EXIT on its pid, delivered on the main queue
+  dispatch_source_t ds = dispatch_source_create(DISPATCH_SOURCE_TYPE_PROC, hpid, DISPATCH_PROC_EXIT, dispatch_get_main_queue());
+  dispatch_source_set_event_handler(ds, ^{ [w orderOut:nil]; printf("host gone %.3f\n", NSDate.date.timeIntervalSince1970); fflush(stdout); exit(0); });
+  dispatch_resume(ds);
+  if ([mode isEqual:@"push"]) {
+    int s = socket(AF_UNIX, SOCK_DGRAM, 0); struct sockaddr_un a = {0}; a.sun_family = AF_UNIX; strncpy(a.sun_path, path, sizeof a.sun_path - 1); unlink(path);
+    if (bind(s, (struct sockaddr *)&a, sizeof a)) { perror("bind"); exit(2); }
+    dispatch_source_t rs = dispatch_source_create(DISPATCH_SOURCE_TYPE_READ, s, 0, dispatch_get_main_queue());
+    dispatch_source_set_event_handler(rs, ^{ char b[256]; ssize_t n; while ((n = recv(s, b, sizeof b - 1, MSG_DONTWAIT)) > 0) { b[n] = 0;
+      double x, y, ww, hh; long hid;
+      if (sscanf(b, "rect %lf %lf %lf %lf %ld", &x, &y, &ww, &hh, &hid) == 5) { host = hid; place(CGRectMake(x, y, ww, hh)); if (!w.visible) [w orderWindow:NSWindowAbove relativeTo:host]; }
+      else if (!strcmp(b, "hide")) [w orderOut:nil];
+      else if (!strcmp(b, "raise")) above(); } });
+    dispatch_resume(rs);
+  } else {
+    [NSTimer scheduledTimerWithTimeInterval:1.0/120 repeats:YES block:^(NSTimer *t) {
+      CFArrayRef a = CGWindowListCopyWindowInfo(kCGWindowListOptionIncludingWindow, (CGWindowID)host); CGRect b = CGRectNull;
+      if (a && CFArrayGetCount(a)) CGRectMakeWithDictionaryRepresentation((__bridge CFDictionaryRef)[((__bridge NSArray *)a)[0] objectForKey:(__bridge NSString *)kCGWindowBounds], &b);
+      if (a) CFRelease(a);
+      if (CGRectIsNull(b)) { [w orderOut:nil]; return; }
+      place(CGRectMake(b.origin.x + 200, b.origin.y + 60, b.size.width - 220, b.size.height - 80));
+      CFArrayRef o = CGWindowListCopyWindowInfo(kCGWindowListOptionOnScreenAboveWindow, (CGWindowID)host); BOOL ok = NO;
+      if (o) { NSArray *l = (__bridge NSArray *)o; for (NSInteger i = l.count - 1; i >= 0; i--) { NSDictionary *dd = l[i]; if ([[dd objectForKey:(__bridge NSString *)kCGWindowLayer] intValue]) continue; ok = [[dd objectForKey:(__bridge NSString *)kCGWindowNumber] longValue] == w.windowNumber; break; } CFRelease(o); }
+      if (!ok) above(); }];
+  }
+  [NSTimer scheduledTimerWithTimeInterval:secs repeats:NO block:^(NSTimer *t) { exit(0); }];
   [NSApp run];
 }}
