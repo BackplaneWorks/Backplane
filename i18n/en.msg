@@ -2115,6 +2115,9 @@ gpui.kcomment.hint = Enter posts to the thread · Esc cancels
 gpui.kcomment.not.posted = The comment was not posted: {why}
 gpui.keys.kcomment = Comment on what is selected in KiCad, from Backplane or from inside the editor: Enter posts, Esc cancels
 gpui.c.kicad.dialog = KiCad has “{title}” open
+gpui.c.kicad.full.screen = Full screen
+gpui.c.kicad.exit.full.screen = Exit full screen
+gpui.c.kicad.the.editor.takes.the.whole = The editor takes the whole window; only this row stays
 
 # ---- gpui-d: setup, pairing, hubs, palette, picker, projects, composer, menus ----
 gpui.assets.missing = Assets missing in {dir}: {files}
@@ -2403,7 +2406,7 @@ gpui.e.subs.where = {harness} subagent inside this thread's agent
 gpui.e.picker.already = {path} is a project already
 gpui.e.picker.create = Create {path}
 gpui.e.picker.notdir = {path} is not a folder
-gpui.e.picker.hint = Path of a folder, e.g. ~/projects/board
+gpui.e.picker.hint = Path of a folder, e.g. ~/projects/board, or a Git repository's address to clone it
 gpui.e.fab.nogoal = No goal yet. Edit to say what this project is for.
 gpui.e.fab.unavailable.line = Estimate unavailable: {error} · {line}
 gpui.e.fab.buy.label = Buy it · {label}
@@ -2593,6 +2596,14 @@ gpui.side.old.chats.that.belong.to = Old chats that belong to no project. New on
 gpui.side.group.projects = Group projects
 gpui.side.on.projects.with.nothing.going = On: projects with nothing going on lately are grouped by their git owner, or else their folder. Off: one list, and only the groups you make.
 gpui.side.no.group = No group
+gpui.e.freecad.install = Install FreeCAD
+gpui.e.freecad.ask = Install FreeCAD?
+gpui.e.freecad.installing = Installing FreeCAD
+gpui.e.freecad.page = Download FreeCAD from freecad.org, then set its path above.
+gpui.e.freecad.ask.note = Downloads the latest FreeCAD (about 800 MB, 3 GB unpacked) from github.com/FreeCAD/FreeCAD, checks its checksum and unpacks it into {into}. It needs no administrator password and changes nothing else on this computer.
+gpui.e.freecad.offer = FreeCAD's own release for this computer. Agents make mechanical parts with it.
+gpui.e.picker.clone.hint = Clones the repository and adds it as a project
+gpui.e.picker.clone.typed = Clone {origin}
 
 # ---- gpui-f: hub setup flow and thread ----
 gpui.f.group.install = Install
