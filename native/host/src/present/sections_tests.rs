@@ -177,6 +177,16 @@ fn world() -> State {
     let open: HashSet<String> = ["sec:group:folder:/w/acme".to_string(), "sec:quiet".to_string()].into(); let v = build(&s, &rows, &bub, &ctx(&open));
     assert_eq!(titles(sec(&v, "group:folder:/w/acme")), ["Grouped"]); assert_eq!(titles(sec(&v, "quiet")), ["Quiet one"]);
 }
+#[test] fn a_long_done_list_keeps_the_rest_behind_older() {
+    let mut evs = vec![]; for i in 2..=70 { let id = format!("t{i}"); evs.push(tc(&id, "p1", NOW - 5000 + i)); evs.push(turn(&id, "completed", NOW - 4000 + i)); }
+    let s = one(&evs); let rows = merged_projects(&s, &[], &|_| false, &|_| String::new(), "desk", &[]); let key = rows[0].key.clone();
+    let lens = |v: &Value| -> Vec<(String, u64, usize)> { v["sections"].as_array().unwrap().iter().filter(|x| x["fold"] == true).map(|x| (x["title"].as_str().unwrap().to_string(), x["count"].as_u64().unwrap(), x["rows"].as_array().unwrap().len())).collect() };
+    let none = HashSet::new(); let older: HashSet<String> = ["page-older".to_string()].into();
+    assert_eq!(lens(&page(&s, &rows, &key, &ctx(&none), false)), [("Done (69)".to_string(), 69, 0), ("Older (9)".to_string(), 0, 0)], "Done folded: no Older head");
+    assert_eq!(lens(&page(&s, &rows, &key, &ctx(&none), true)), [("Done (69)".to_string(), 69, 60), ("Older (9)".to_string(), 9, 0)], "the newest 60, the rest counted");
+    assert_eq!(lens(&page(&s, &rows, &key, &ctx(&older), true)), [("Done (69)".to_string(), 69, 60), ("Older (9)".to_string(), 9, 9)], "Older opened: every thread is on the page");
+    assert!(act(&s, &rows, "side-section", "page-older", &json!({}), NOW).unwrap().open_toggle.is_some());
+}
 #[test] fn needs_you_is_gone_when_empty_and_bub_only_when_there_is_one() {
     let s = one(&[turn("t1", "completed", NOW - 50)]); let rows = merged_projects(&s, &[], &|_| false, &|_| String::new(), "desk", &[]);
     assert_eq!(ids(&build(&s, &rows, &Value::Null, &ctx(&HashSet::new()))), ["active"]);
