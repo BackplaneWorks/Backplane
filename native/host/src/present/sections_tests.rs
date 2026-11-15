@@ -482,7 +482,7 @@ fn menu_ids(m: &Value) -> Vec<String> { m.as_array().unwrap().iter().map(|i| i["
     let s = st(&[pc("p1", "P", "/n/p", 1), tc("x", "", NOW - 50), ask("q", "x", "question")]);
     let rows = merged_projects(&s, &[], &|_| false, &|_| String::new(), "desk", &[]);
     let v = build(&s, &rows, &Value::Null, &ctx(&HashSet::new()));
-    assert_eq!(titles(sec(&v, "needs")), ["T x"]); assert_eq!(sec(&v, "needs")["rows"][0]["project"], "Conversation history");
+    assert_eq!(titles(sec(&v, "needs")), ["T x"]); assert_eq!(sec(&v, "needs")["rows"][0]["project"], "Chats with no project");
 }
 
 /// The sections a real log gives, from a copy (`BP_SIDEBAR_LOG=<copy of events.jsonl> cargo test -- --ignored census_of_a_log --nocapture`): the

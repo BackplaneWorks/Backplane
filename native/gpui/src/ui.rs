@@ -431,13 +431,16 @@ impl Backplane {
         for page in self.data["sidebarPages"].as_array().into_iter().flatten().filter(|_| !sectioned) { // (the projects' pagers: the sections page nothing)
             for key in ["projects", "active", "legacy"] { if let Some(row) = pager_row(cx, format!("pg-{key}"), &page[key], light, &mut ctl) { rows.push(row); } }
         }
-        // Conversation history: the old Scratch chats. Nothing starts here; a chat that wants attention always has its row, the rest open from this row or from a search
+        // Chats with no project: the old Scratch chats, the last fold of the list and drawn as one (the head of Quiet or Archived: it is the same kind of
+        // thing, what is left once the projects are listed). Nothing starts here; a chat that wants attention always has its row, the rest open from this
+        // row or from a search. It was "Conversation history" in the accent colour, which said neither what it holds nor why it is apart
         let history = &self.data["conversationHistory"];
         if history["toggle"] == true {
             let (n, open) = (history["count"].as_u64().unwrap_or(0), history["open"] == true);
-            /* i18n-ok: a ctl label */ ctl.push(CtlEntry { id: "side-history".into(), label: "Conversation history".into(), ctl: Ctl::Node("flag".into(), "conversation-history".into()) });
-            rows.push(with_rect(div().id("side-history"), || "side-history".to_string()).flex().items_center().gap_2().px_3().py_1().text_size(crate::scale::tpx(11.)).text_color(c("accent")).cursor_pointer().hover(|s| s.bg(c("raise")))
-                .child(ic(light, if open { "chevron-down" } else { "chevron-right" }, 14., "dim")).child(tf("gpui.b.history.count", &[("n", n.into())]))
+            /* i18n-ok: a ctl label */ ctl.push(CtlEntry { id: "side-history".into(), label: "Chats with no project".into(), ctl: Ctl::Node("flag".into(), "conversation-history".into()) });
+            rows.push(with_rect(div().id("side-history"), || "side-history".to_string()).flex().items_center().gap_2().pl(px(6.)).pr_3().pt_3().pb_1().text_size(crate::scale::tpx(11.)).text_color(c("dim")).cursor_pointer().hover(|s| s.text_color(c("text")))
+                .tooltip(crate::keys::tip(&crate::i18n::trs("Old chats that belong to no project. New ones start in a project."), "", light))
+                .child(ic(light, if open { "chevron-down" } else { "chevron-right" }, 14., "dim")).child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().child(tf("gpui.b.history.count", &[("n", n.into())]).to_uppercase()))
                 .on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(Command::Action("flag".into(), "conversation-history".into())); cx.notify(); })).into_any_element());
         }
         for t in self.data["legacy"].as_array().into_iter().flatten() { rows.push(self.side_thread(cx, light, t, "", "", false, &mut ctl)); }
