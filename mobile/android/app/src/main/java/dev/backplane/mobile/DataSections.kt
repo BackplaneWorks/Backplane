@@ -86,10 +86,13 @@ fun SectionThread(r: DSecRow, indent: Int = 12, showProject: Boolean = false, op
     Box {
         Row(Modifier.fillMaxWidth().height(36.dp).alpha(if (r.off) .55f else 1f).combinedClickable(onClick = { if (!r.off) open(r.nav) }, onLongClick = if (r.hide.isNotEmpty() || acts.isNotEmpty()) ({ menu = true }) else null).padding(start = indent.dp, end = 12.dp).testTag("home.section.thread.${r.id}"), verticalAlignment = Alignment.CenterVertically) {
             DDot(toneOf(r.word), 7); Spacer(Modifier.width(8.dp))
-            DMono(r.title, dcs.onSurface, 13, Modifier.weight(1f, fill = false))
-            if (r.pinned) { Spacer(Modifier.width(6.dp)); Icon(Icons.Default.PushPin, Msg.tools_pinned, tint = dfaint, modifier = Modifier.size(11.dp).testTag("home.section.pinned.${r.id}")) }
-            if (showProject) { Spacer(Modifier.width(8.dp)); DMono(r.project, dfaint, 11) }
-            Spacer(Modifier.weight(1f))
+            // the title takes the room the right-hand words leave (a weighted spacer beside a weighted title halves the row: a long title was cut at the middle and the words stopped short of the edge)
+            Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                DMono(r.title, dcs.onSurface, 13, Modifier.weight(1f, fill = false))
+                if (r.pinned) { Spacer(Modifier.width(6.dp)); Icon(Icons.Default.PushPin, Msg.tools_pinned, tint = dfaint, modifier = Modifier.size(11.dp).testTag("home.section.pinned.${r.id}")) }
+                if (showProject) { Spacer(Modifier.width(8.dp)); DMono(r.project, dfaint, 11) }
+            }
+            Spacer(Modifier.width(8.dp))
             r.mark?.let { DMono(it.short + if (it.away) " · " + Msg.android_away else "", dfaint, 11); Spacer(Modifier.width(6.dp)) }
             if (r.want.isNotEmpty()) DMono(Tr.t(r.want), dcs.error, 11) else DMono(Tr.t(r.say.ifEmpty { r.ago }), dfaint, 11)
         }
@@ -111,9 +114,11 @@ fun SectionProject(r: DSecRow, faded: Boolean, onClick: () -> Unit, onLong: () -
         if (r.icon == "backplane") androidx.compose.foundation.Image(androidx.compose.ui.res.painterResource(if (dcs.background.luminance() > 0.5f) R.drawable.brand_light else R.drawable.brand_dark), null, Modifier.size(15.dp).testTag("home.section.logo.${r.key}"))
         else androidx.compose.material3.Icon(badgeGlyph(r.icon), null, tint = runCatching { Color(android.graphics.Color.parseColor(r.css)) }.getOrDefault(dcs.onSurfaceVariant), modifier = Modifier.size(15.dp).testTag("home.section.icon.${r.key}"))
         Spacer(Modifier.width(8.dp))
-        DMono(r.title, dcs.onSurface, 13, Modifier.weight(1f, fill = false))
-        if (r.dots.size > 1) { Spacer(Modifier.width(6.dp)); r.dots.forEach { (here, dim) -> DDot(if (dim) dfaint else if (here) dok else dcs.onSurfaceVariant, 5); Spacer(Modifier.width(3.dp)) } }
-        Spacer(Modifier.weight(1f))
+        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+            DMono(r.title, dcs.onSurface, 13, Modifier.weight(1f, fill = false))
+            if (r.dots.size > 1) { Spacer(Modifier.width(6.dp)); r.dots.forEach { (here, dim) -> DDot(if (dim) dfaint else if (here) dok else dcs.onSurfaceVariant, 5); Spacer(Modifier.width(3.dp)) } }
+        }
+        Spacer(Modifier.width(8.dp))
         if (r.running > 0) DMono(Msg.ios_sections_running(r.running), dok, 11)
         // what of it waits on the person (its rows are in Needs you, folded or not)
         if (r.needsCount > 0) { Spacer(Modifier.width(6.dp)); Box(Modifier.background(dcs.error).padding(horizontal = 5.dp).testTag("home.section.needs.${r.key}")) { DMono("${r.needsCount}", dcs.onError, 10) } }
