@@ -58,9 +58,10 @@ jobs:
           brew list --versions cliclick || brew install cliclick
           sh test/kicad_embed/mac/proto/run.sh "$RUNNER_TEMP/proto"
           python3 test/kicad_embed/mac/proto/analyze.py "$RUNNER_TEMP"/proto/samples.*.csv | tee "$RUNNER_TEMP/proto/summary.txt"
+          head -5 "$RUNNER_TEMP"/proto/*.err || true
       - uses: actions/upload-artifact@v4
         if: always()
-        with: { name: kicad-proto, path: "${{ runner.temp }}/proto/*.[ctop][sxun][vtgt]" }
+        with: { name: kicad-proto, path: "${{ runner.temp }}/proto/*.[ctope][sxunr][vtgr]" }
 
   build:
     if: inputs.jobs == 'build'
