@@ -281,6 +281,8 @@ impl Backplane {
                 crate::viewers::solid::SolidEvent::Retry(key) => if let Some(p) = crate::viewers::solid::retry_watch(key) { let _ = this.tx.try_send(Command::Rpc("kicad.watch".into(), super::settings::Secret(p), "watch")); },
                 // zoomed in on a STEP: its solids there meshed finer by the hub, the model replaced when they are
                 crate::viewers::solid::SolidEvent::Refine(key, at, r) => { let _ = this.tx.try_send(Command::Rpc("kicad.refine".into(), super::settings::Secret(serde_json::json!({"key": key, "at": at, "r": r})), "refine")); }
+                // a part clicked on the board's model: the board's probe, lit on the schematic and the board as a tap there is
+                crate::viewers::solid::SolidEvent::Pick(r) => super::plotview::probe_part(this, r),
             }).detach();
             self.screens.solid = Some(page);
         }
