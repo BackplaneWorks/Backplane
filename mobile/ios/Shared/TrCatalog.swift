@@ -2419,6 +2419,8 @@ gpui.c.pad.box	Box	枠
 gpui.c.pad.eraser	Eraser	消しゴム
 gpui.c.kicad.kicad.could.not.start	KiCad could not start:	KiCad を起動できませんでした:
 gpui.c.kicad.try.again	Try again	再試行
+gpui.c.kicad.open.the.app.instead	Open the KiCad app instead	代わりに KiCad アプリで開く
+gpui.c.kicad.stock.tip	This is stock KiCad: it can open in windows of its own, and agents cannot edit in it. Backplane KiCad opens in here.	これは標準の KiCad です。独自のウィンドウで開くことがあり、エージェントは編集できません。Backplane KiCad はこの中で開きます。
 gpui.c.kicad.kicad.is.not.responding	KiCad is not responding.	KiCad が応答していません。
 gpui.c.kicad.kicad.was.closed	KiCad was closed.	KiCad は閉じられました。
 gpui.c.kicad.starting.kicad	Starting KiCad…	KiCad を起動しています…
@@ -2693,6 +2695,8 @@ gpui.e.kicad.offer	Backplane KiCad {version} for this computer, from {from}. Age
 gpui.e.kicad.own	Backplane's own folder	Backplane専用のフォルダ
 gpui.e.kicad.notfound	KiCad was not found. Install it below, or set the folder of one you have.	KiCadが見つかりません。下でインストールするか、お持ちのKiCadのフォルダを設定してください。
 gpui.e.kicad.found.version	version {version} · {path}	バージョン{version} · {path}
+gpui.e.kicad.found.stock	stock KiCad {version} · {path}	標準の KiCad {version} · {path}
+gpui.e.kicad.offer.stock	This computer's KiCad is stock KiCad {version}. It can open in windows of its own, and agents cannot edit in it. Backplane KiCad {pin}, from {from}, goes beside it and opens inside Backplane.	このコンピューターのKiCadは標準のKiCad {version}です。独自のウィンドウで開くことがあり、エージェントは編集できません。Backplane KiCad {pin}（{from} から）をその隣に入れると、Backplane の中で開きます。
 gpui.e.kicad.found	found · {path}	検出 · {path}
 gpui.e.kicad.just	version {version} · {path}. Installed by Backplane just now.	バージョン{version} · {path}。Backplaneが今インストールしました。
 gpui.e.kicad.passed	version {version} · {path}. Nothing runs at {set}, so this one is used.	バージョン{version} · {path}。{set}では何も動かないため、こちらを使います。
@@ -5618,6 +5622,12 @@ gpui.streamer.win	Windows does not tell an app that the screen is being captured
 
     /// gpui.e.kicad.found.version = version {version} · {path}
     static func gpui_e_kicad_found_version(version: String, path: String) -> String { f("gpui.e.kicad.found.version", ["version": version, "path": path]) }
+
+    /// gpui.e.kicad.found.stock = stock KiCad {version} · {path}
+    static func gpui_e_kicad_found_stock(version: String, path: String) -> String { f("gpui.e.kicad.found.stock", ["version": version, "path": path]) }
+
+    /// gpui.e.kicad.offer.stock = This computer's KiCad is stock KiCad {version}. It can open in windows of its own, and agents cannot edit in it. Backplane KiCad {pin}, from {from}, goes beside it and opens inside Backplane.
+    static func gpui_e_kicad_offer_stock(version: String, pin: String, from: String) -> String { f("gpui.e.kicad.offer.stock", ["version": version, "pin": pin, "from": from]) }
 
     /// gpui.e.kicad.found = found · {path}
     static func gpui_e_kicad_found(path: String) -> String { f("gpui.e.kicad.found", ["path": path]) }
