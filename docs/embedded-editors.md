@@ -8,7 +8,7 @@ Status: built for Linux (X11 and XWayland), KiCad 10.0 and Backplane KiCad 10.99
 
 ## What the person sees
 
-- The viewer bar gets **Edit** beside Open in KiCad. On Board, Schematic or 3D it opens the project's KiCad in the pane, showing that editor. On Mech it opens FreeCAD on the part.
+- The viewer bar's **Open in KiCad** (one button; it was **Edit** beside a second button that started a separate KiCad app, and people pressed that one expecting this) opens the project's KiCad in the pane on Board, Schematic or 3D, showing that editor. A window that cannot hold KiCad (the hub on another machine, another machine's thread) has **Open in KiCad on <machine>** instead, which starts KiCad there. Where the editor cannot start in the pane, the pane says why and offers **Open the KiCad app instead**; it never opens the app by itself. On Mech it opens FreeCAD on the part.
 - While a pane is editing, its rail items (Board, Schematic, 3D) switch frames inside the same KiCad. A small strip at the pane's top lists the open frames: PCB, Schematic, and Symbol editor, Footprint editor and 3D once they are open. It also has **View** (back to the GPUI viewer), **Full screen** and the key-owner mark.
 - A 2 px accent ring on the pane means the editor has the keyboard. With no ring, Backplane has it.
 - Closing the pane, the thread or the project while something is unsaved asks once, in Backplane: Save all, Discard, or Cancel.
@@ -186,8 +186,8 @@ Backplane's bare keys (the rail's B S 3 V M F D R W, `/`) only bind where no vie
   - they're fast;
   - they work on a remote hub and on phones;
   - they show diffs, layer focus and review marks, which KiCad does not.
-- **Edit** puts the editor in the pane, and **View** goes back. The pane remembers the last choice per thread (`viewer.mode.<thread>`).
-- Open in KiCad (a separate desktop KiCad) stays for macOS until it embeds, and for anyone who sets Settings → Editors → "Separate windows".
+- **Open in KiCad** puts the editor in the pane, and **View** goes back. The pane remembers the last choice per thread (`viewer.mode.<thread>`).
+- A separate desktop KiCad stays for macOS until it embeds and for windows that cannot hold it (the pane's "Open the KiCad app instead", a remote hub's "Open in KiCad on <machine>"). The editor in a window of its own is the strip's Pop out.
 
 ## Settings
 `editor.embed` = `embed` | `separate`, `editor.chrome.*`, `editor.keys.reserved`, `editor.idle`, `editor.max`, `editor.freecad.mode` = `view` | `workbench`.

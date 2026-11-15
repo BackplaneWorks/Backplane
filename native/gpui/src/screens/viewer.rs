@@ -44,7 +44,8 @@ pub fn pressed(now_open: &str) -> Option<String> {
 }
 /// Whether the hub's page `open` is what a press on `kind` asked for (a Files press may land on a file it opened).
 fn opened_as(open: &str, kind: &str) -> bool { open == kind || (kind == "files" && matches!(open, "image" | "pdf" | "text")) }
-/// Open in KiCad: the hub starts KiCad on the thread's design (kicad/open.rs), offered while the viewer has a board or schematic.
+/// Open in KiCad on another machine: the hub starts KiCad on the thread's design (kicad/open.rs), on its own screen; offered while the viewer has
+/// a board or schematic and this window cannot hold KiCad itself (pane_actions: where it can, Open in KiCad is the editor in the pane).
 /// Open in KiCad names what the viewer draws (its key, `<kind>|<root>|<file>`; a split's first pane), so the hub opens exactly that.
 pub fn kicad_open(viewer: &Value) -> Command { Command::Action("kicad-open".into(), shown_key(viewer)) }
 pub fn shown_key(viewer: &Value) -> String {
@@ -60,6 +61,15 @@ pub fn kicad_open_label(hub_addr: Option<&str>, thread_machine: Option<&str>) ->
         Some(h) if !h.is_empty() && !matches!(h, "127.0.0.1" | "localhost" | "[::1]") => tf("gpui.c.kicad.open.on", &[("machine", h.split('.').next().unwrap_or(h).into())]),
         _ => trs("Open in KiCad"),
     }
+}
+/// What the pane's bar offers for KiCad: the editor in this pane (Open in KiCad, then View), KiCad on the hub's own machine, or nothing.
+#[derive(Debug, PartialEq, Clone, Copy)]
+pub enum KicadOffer { Pane, There, None }
+/// One button, never two: a window that can hold KiCad (`holds`: kicad_pane::local) opens it in the pane and has no button for a separate
+/// KiCad app (not over a diff, which is no document to edit); one that cannot starts KiCad where the hub is, unless the pane is editing.
+pub fn kicad_offer(design: bool, gerbers: bool, diff_on: bool, editing: bool, holds: bool) -> KicadOffer {
+    if !design || gerbers { return KicadOffer::None }
+    match holds { true if !diff_on => KicadOffer::Pane, false if !editing => KicadOffer::There, _ => KicadOffer::None }
 }
 pub fn has_design(viewer: &Value) -> bool { tabs(viewer).iter().any(|t| matches!(t.value.as_str(), "board" | "schematic")) }
 
@@ -182,18 +192,22 @@ fn pane_actions(cx: &mut Context<Backplane>, light: bool, thread: &Value, target
         row = row.child(div().id("viewer-from").min_w_0().max_w(px(200.)).flex().items_center().gap(px(3.)).overflow_hidden().whitespace_nowrap().text_size(crate::scale::tpx(11.)).text_color(col).opacity(o)
             .tooltip(crate::keys::tip(&hover, "", light)).child(crate::art::icon("link", 11., col)).child(div().overflow_hidden().text_ellipsis().child(t)));
     }
-    // Edit / View: the real KiCad in this pane (on the hub's own machine), or back to Backplane's viewer
-    // a Gerber set is no board to edit: no Edit, no Open in KiCad (the embedded GerbView comes with bp.13)
+    // Open in KiCad / View: the real KiCad in this pane (on the hub's own machine), or back to Backplane's viewer. A window that can hold
+    // KiCad has this one button: the person pressed "Open in KiCad" for KiCad inside Backplane and got a separate KiCad app from the
+    // button beside it (the editor's own window is its Pop out). The control keeps its id (ui:Edit), which the drivers press.
+    // a Gerber set is no board to edit: no Open in KiCad (the embedded GerbView comes with bp.13)
     let gerbers = viewer["gerbers"] == true;
-    if has_design(viewer) && !gerbers && !diff_on && crate::viewers::kicad_pane::local(target.map(|t| t.addr.as_str()), thread) {
+    let offer = kicad_offer(has_design(viewer), gerbers, diff_on, editing, crate::viewers::kicad_pane::local(target.map(|t| t.addr.as_str()), thread));
+    if offer == KicadOffer::Pane {
         let c2 = c(if editing { "accent" } else { "line" });
         /* i18n-ok: ctl labels and ui: ids are what drivers press */ let edit_div = crate::ui::with_rect(div().id("kicad-edit"), move || if editing { "ui:View".to_string() } else { "ui:Edit".to_string() });
         row = row.child(tall(edit_div.px_2().border_1().border_color(c2).bg(c("raise")).cursor_pointer().hover(|s| s.bg(c("panel"))).text_size(crate::scale::tpx(12.))
             .tooltip(crate::keys::tip(&if editing { trs("Back to Backplane's viewer (KiCad stays open)") } else { trs("Edit in the real KiCad, here in the pane") }, "", light))
-            .child({ let (l, k) = if editing { (trs("View"), "view") } else if crate::viewers::kicad_pane::edit_pending(crate::screens::attach::raw_id(thread["id"].as_str().unwrap_or(""))) { (trs("Opening…"), "opening") } else { (trs("Edit"), "edit") }; crate::viewers::kicad_pane::log_edit_label(k); l })
+            .child({ let (l, k) = if editing { (trs("View"), "view") } else if crate::viewers::kicad_pane::edit_pending(crate::screens::attach::raw_id(thread["id"].as_str().unwrap_or(""))) { (trs("Opening…"), "opening") } else { (trs("Open in KiCad"), "edit") }; crate::viewers::kicad_pane::log_edit_label(k); l })
             .on_mouse_down(MouseButton::Left, cx.listener(move |this, _, _, cx| { if editing { this.kicad_view(cx); } else { this.kicad_edit(cx); } }))).into_any_element());
     }
-    if has_design(viewer) && !gerbers && !editing { row = row.child(btn(cx, light, "kicad-open".into(), kicad_open_label(target.map(|t| t.addr.as_str()), thread["mark"]["name"].as_str()), false, kicad_open(viewer))); }
+    // a window that cannot hold it (the hub on another machine, another machine's thread): KiCad opens there, and the button says on whose screen
+    if offer == KicadOffer::There { row = row.child(btn(cx, light, "kicad-open".into(), kicad_open_label(target.map(|t| t.addr.as_str()), thread["mark"]["name"].as_str()), false, kicad_open(viewer))); }
     row.child(div().id("viewer-close").size(crate::scale::tpx(super::head::BTN_H)).flex().items_center().justify_center().border_1().border_color(c("line")).bg(c("raise")).cursor_pointer().hover(|s| s.bg(c("panel"))).tooltip(crate::keys::tip(&trs("Close the viewer"), "", light))
         .child(crate::art::icon("x", 14., c("dim"))).on_click(cx.listener(|this, _, _, cx| { this.screens.rail_pending = Some(String::new()); this.screens.rail_at = Some(std::time::Instant::now()); let _ = this.tx.try_send(close()); cx.notify(); })))
         .into_any_element()
@@ -964,6 +978,16 @@ mod tests {
     #[test] fn open_in_kicad_names_the_machine_when_the_hub_is_another() {
         assert_eq!(kicad_open_label(Some("127.0.0.1:3797"), None), "Open in KiCad"); assert_eq!(kicad_open_label(None, None), "Open in KiCad"); assert_eq!(kicad_open_label(Some("127.0.0.1:3797"), Some("desktop")), "Open in KiCad on desktop"); assert_eq!(kicad_open_label(None, Some("")), "Open in KiCad");
         assert_eq!(kicad_open_label(Some("desktop.tail9e0cf2.ts.net:8451"), None), "Open in KiCad on desktop");
+    }
+    #[test] fn open_in_kicad_is_one_button_the_pane_where_the_window_can_hold_kicad() {
+        use super::{kicad_offer as o, KicadOffer::*};
+        // this computer's hub: Open in KiCad is the editor in the pane (and View while it is), never a separate KiCad app beside it
+        assert_eq!(o(true, false, false, false, true), Pane); assert_eq!(o(true, false, false, true, true), Pane);
+        assert_eq!(o(true, false, true, false, true), None, "a diff is no document to edit");
+        // a hub on another machine, or another machine's thread: KiCad opens there
+        assert_eq!(o(true, false, false, false, false), There); assert_eq!(o(true, false, true, false, false), There); assert_eq!(o(true, false, false, true, false), None);
+        // nothing KiCad on show, or a Gerber set
+        for holds in [true, false] { assert_eq!(o(false, false, false, false, holds), None); assert_eq!(o(true, true, false, false, holds), None); }
     }
     #[test] fn open_in_kicad_is_offered_with_a_board_or_a_schematic() {
         assert!(has_design(&serde_json::json!({"choices":[{"label":"Board","value":"board"},{"label":"Files","value":"files"}]})));
