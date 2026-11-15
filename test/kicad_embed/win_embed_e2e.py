@@ -2498,10 +2498,23 @@ def run_bp9_suite(h: SuiteHarness) -> int:
             r = W.RECT(); u32.GetWindowRect(win, ctypes.byref(r))
             box = (r.left + 40, r.top + 120, max(1, r.right - r.left - 80), max(1, r.bottom - r.top - 200))
             a, b = h.p(f"{tag}_f2_0.png"), h.p(f"{tag}_f2_1.png")
+            bars = []
+            @WNDENUMPROC
+            def bar_cb(hw, _):
+                if hwnd_class(int(hw or 0)) == "msctls_statusbar32" and u32.IsWindowVisible(hw):
+                    q = W.RECT(); u32.GetWindowRect(hw, ctypes.byref(q))
+                    if q.right - q.left > 200:
+                        bars.append((q.left, q.top, q.right - q.left, q.bottom - q.top))
+                return True
+            u32.EnumChildWindows(win, bar_cb, 0)
             grab_screen(a); key_tap("F2"); time.sleep(1.0); grab_screen(b)
             px = img_diff_box(a, b, *box)["changed_pixels"]
+            # the editor's status bar: F2 zooms out, so its "Z" readout changes even when the view shows little of the
+            # board (pop4, Nov 15: Z 3.50 -> 2.20 over an empty corner, 2849 pixels in the canvas, counted as not acting)
+            bar_px = img_diff_box(a, b, *bars[0])["changed_pixels"] if bars else 0
             key_tap("F1"); time.sleep(0.6)
-            return {"f2_changed_px": px, "acts": px > 20000}
+            return {"f2_changed_px": px, "status_bar_changed_px": bar_px, "status_bar_found": bool(bars),
+                    "acts": px > 20000 or bar_px > 30}
         pop = {}
         # Every step above is a script click inside the client, which never activates a window: until a person's click
         # Backplane is not the foreground at all (block l, Nov 15: the desktop held it from the start, before any pop).
