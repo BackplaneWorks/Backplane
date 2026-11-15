@@ -69,6 +69,8 @@ u32.GetAncestor.argtypes = [W.HWND, W.UINT]
 u32.GetAncestor.restype = W.HWND
 u32.GetWindow.argtypes = [W.HWND, W.UINT]
 u32.GetWindow.restype = W.HWND
+u32.GetAsyncKeyState.argtypes = [ctypes.c_int]
+u32.GetAsyncKeyState.restype = ctypes.c_short
 u32.GetWindowLongPtrW.argtypes = [W.HWND, ctypes.c_int]
 u32.GetWindowLongPtrW.restype = ctypes.c_ssize_t
 u32.GetWindowThreadProcessId.argtypes = [W.HWND, ctypes.POINTER(W.DWORD)]
@@ -372,6 +374,17 @@ def guarded_run(body, client_exe: str, kicad_dir: str) -> int:
         print(f"FAIL {e}", flush=True)
         print("RUN-INVALID " + json.dumps({"why": "input refused", "detail": str(e)}), flush=True)
         rc = 1
+    # nothing may be left held down on the machine (s2-away, Nov 15: Alt stayed down after a refused key): released
+    # here, and the run flagged, naming it
+    held = {name: vk for name, vk in (("shift", 0x10), ("ctrl", 0x11), ("alt", 0x12), ("lwin", 0x5B), ("rwin", 0x5C),
+                                      ("left_button", 0x01), ("right_button", 0x02), ("middle_button", 0x04))
+            if u32.GetAsyncKeyState(vk) & 0x8000}
+    if held:
+        ups = {0x01: 0x0004, 0x02: 0x0010, 0x04: 0x0040}
+        for name, vk in held.items():
+            _send(_mouse(ups[vk]) if vk in ups else _kbd(vk, 0, 2))
+        print("RUN-INVALID " + json.dumps({"why": "the run left keys or buttons held down (released now)", "held": sorted(held)}), flush=True)
+        rc = rc or 1
     seen = {w["hwnd"] for w in before}
     after = [w for w in foreign_windows() if w["hwnd"] not in seen]
     if after:
@@ -383,7 +396,8 @@ def guarded_run(body, client_exe: str, kicad_dir: str) -> int:
 def _send(*ins):
     # key-ups alone act on nothing and must always go out: a refused key in the middle of a chord must never leave a
     # modifier held down on the machine (s2-away, Nov 15: Alt stayed down after the Tab was refused)
-    keys_up_only = all(i.type == 1 and (i.u.ki.dwFlags & 2) for i in ins)
+    keys_up_only = all((i.type == 1 and (i.u.ki.dwFlags & 2)) or (i.type == 0 and i.u.mi.dwFlags and not (i.u.mi.dwFlags & ~0x0054))
+                       for i in ins)  # key-ups, or mouse button-ups (0x04/0x10/0x40) alone
     if INPUT_DIRS and not keys_up_only:
         what, target = _input_target(ins)
         if what:
@@ -1450,7 +1464,8 @@ def run_window_suite(h: SuiteHarness) -> int:
             and c_fold.get("x", 9999) < c_shown.get("x", 0)
             and f_fold.get("w", 0) > f_shown.get("w", 0)
             and abs(f_fold.get("w", -99) - p_fold.get("w", 0)) <= 2,
-            {"before_x": c_shown.get("x"), "after_x": c_fold.get("x"), "before_w": f_shown.get("w"), "after_w": f_fold.get("w")},
+            {"before_x": c_shown.get("x"), "after_x": c_fold.get("x"), "before_w": f_shown.get("w"), "after_w": f_fold.get("w"),
+             "frame_w_folded": f_fold.get("w"), "pane_w_folded": p_fold.get("w"), "frame_shown_folded": f_fold.get("shown")},
         )
 
         r_res = reps.get("resized", {})
