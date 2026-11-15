@@ -193,6 +193,11 @@ pub fn person_touched(pro: &str) {
     TOUCHED.get_or_init(Default::default).lock().unwrap().insert(pro.to_string(), now);
     PERSON.get_or_init(Default::default).lock().unwrap().insert(pro.to_string(), now);
 }
+/// Input KiCad saw on its canvas at `at` (ms; a run it held for it): automatic runs wait EDIT_QUIET_MS after it, as after a press.
+fn canvas_touched(pro: &str, at: u64) {
+    let mut t = TOUCHED.get_or_init(Default::default).lock().unwrap();
+    let e = t.entry(pro.to_string()).or_insert(0); *e = (*e).max(at);
+}
 static TOUCHED: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new();
 /// The last edit seen in the open editor, per project (ms): automatic in-editor runs wait EDIT_QUIET_MS after it.
 static EDIT_AT: OnceLock<Mutex<HashMap<String, u64>>> = OnceLock::new();
@@ -459,8 +464,8 @@ async fn tick(hub: &Arc<Hub>) -> u64 {
                 // where a run that may go runs: here, on the person's other machine set up for checks, or not yet
                 let start = |x: &mut Src, host: Option<Remote>, acts: &mut Vec<_>| {
                     if host.is_none() { RUNNING.lock().unwrap().push((format!("{pro}|{s}"), x.sched.need_mb)); }
-                    x.sched.demand = false; let full = std::mem::take(&mut x.full_next); x.sched.running_since = now; x.sched.running_rev = rev.clone();
-                    let c = Arc::new(tokio::sync::Notify::new()); x.cancel = Some(c.clone()); acts.push((s, rev.clone(), c, full, host));
+                    let demand = std::mem::take(&mut x.sched.demand); let full = std::mem::take(&mut x.full_next); x.sched.running_since = now; x.sched.running_rev = rev.clone();
+                    let c = Arc::new(tokio::sync::Notify::new()); x.cancel = Some(c.clone()); acts.push((s, rev.clone(), c, full, host, demand));
                 };
                 let mut next = fd::next_ignoring_machine(now, &x.sched);
                 if ed {
@@ -501,9 +506,9 @@ async fn tick(hub: &Arc<Hub>) -> u64 {
             acts.sort_by_key(|a| if a.0 == "erc" { 0 } else { 1 });
             if let Some(p) = state().lock().unwrap().get_mut(&pro) { p.src(acts[1].0).behind = acts[0].0.to_uppercase() }
             let (h, p, f) = (hub.clone(), pro.clone(), files.clone());
-            tokio::spawn(async move { for (s, rev, c, full, host) in acts { run(&h, &p, &f, s, &rev, c, full, host).await } });
+            tokio::spawn(async move { for (s, rev, c, full, host, demand) in acts { run(&h, &p, &f, s, &rev, c, full, host, demand).await } });
         } else {
-            for (s, rev, c, full, host) in acts { let (h, p, f) = (hub.clone(), pro.clone(), files.clone()); tokio::spawn(async move { run(&h, &p, &f, s, &rev, c, full, host).await }); }
+            for (s, rev, c, full, host, demand) in acts { let (h, p, f) = (hub.clone(), pro.clone(), files.clone()); tokio::spawn(async move { run(&h, &p, &f, s, &rev, c, full, host, demand).await }); }
         }
     }
     sleep
@@ -512,7 +517,8 @@ async fn tick(hub: &Arc<Hub>) -> u64 {
 /// What one run found: its findings, or why it failed (None: cancelled).
 type Outcome = Option<Result<Vec<Finding>, String>>;
 
-async fn run(hub: &Arc<Hub>, pro: &str, f: &project::Files, s: &'static str, rev: &str, cancel: Arc<tokio::sync::Notify>, full: bool, host: Option<Remote>) {
+/// `demand`: the person's Run or an agent's ask (it runs whatever the canvas is doing); otherwise automatic.
+async fn run(hub: &Arc<Hub>, pro: &str, f: &project::Files, s: &'static str, rev: &str, cancel: Arc<tokio::sync::Notify>, full: bool, host: Option<Remote>, demand: bool) {
     // its own turn now (it may have waited for the other check in the editor): its time and bar start here
     let waited = { let mut m = state().lock().unwrap(); m.get_mut(pro).map(|p| { let x = p.src(s); let w = !std::mem::take(&mut x.behind).is_empty(); if w { x.sched.running_since = now_ms() } w }).unwrap_or(false) };
     if waited { publish(hub, pro).await }
@@ -520,8 +526,8 @@ async fn run(hub: &Arc<Hub>, pro: &str, f: &project::Files, s: &'static str, rev
     let mut editor = None;
     let (o, peak) = match &host {
         Some(r) => (run_remote(hub, r, pro, f, s, &cancel, full).await, 0),
-        None => match run_editor(hub, pro, f, s, &cancel, full).await {
-            Some((o, unsaved)) => { editor = Some(unsaved); (o, 0) }
+        None => match run_editor(hub, pro, f, s, &cancel, full, demand).await {
+            Some((o, unsaved)) => { editor = unsaved; (o, 0) }
             None => run_cli(hub, pro, f, s, &cancel, full).await,
         },
     };
@@ -538,8 +544,9 @@ async fn run(hub: &Arc<Hub>, pro: &str, f: &project::Files, s: &'static str, rev
 }
 
 /// One run in the open editor (kicad/edchecks.rs): its outcome and whether it is of unsaved edits; None to run kicad-cli instead
-/// (no editor that checks itself, or it could not take the run now).
-async fn run_editor(hub: &Arc<Hub>, pro: &str, f: &project::Files, s: &str, cancel: &tokio::sync::Notify, full: bool) -> Option<(Outcome, bool)> {
+/// (no editor that checks itself, or it could not take the run now). Its unsaved flag is None for a run KiCad held for its canvas
+/// (nothing ran: no quiet after it, the revision runs again once the canvas is quiet).
+async fn run_editor(hub: &Arc<Hub>, pro: &str, f: &project::Files, s: &str, cancel: &tokio::sync::Notify, full: bool, demand: bool) -> Option<(Outcome, Option<bool>)> {
     let route = super::edchecks::ready(hub, pro).await?;
     // ERC in KiCad only where its schematic editor is open: without one, RunChecks{FK_SCH} answers AS_UNHANDLED (lane B, bp.13 batch 4),
     // so kicad-cli runs it on the saved files; asked here, with no round trip.
@@ -550,16 +557,24 @@ async fn run_editor(hub: &Arc<Hub>, pro: &str, f: &project::Files, s: &str, canc
     { let e = edits(pro); let rev = with(pro, |p| if s == "drc" { p.drc.sched.running_rev.clone() } else { p.erc.sched.running_rev.clone() }).unwrap_or_default();
       eprintln!("checks: {s} in KiCad starts (rev {rev}, edits seen: board {} schematic {})", e[0], e[1]); }
     let pro2 = pro.to_string(); let s2 = s.to_string();
-    let r = super::edchecks::run(&route, s, &f.sch, cancel, move |id| { if let Some(p) = state().lock().unwrap().get_mut(&pro2) { p.src(&s2).progress = id.to_string() } }).await;
+    // an automatic run asks KiCad for the canvas quiet itself (canvas-idle): the hub sees presses over the pane, KiCad sees the rest
+    // (a wheel zoom, keys, a tool mid-operation); the person's Run and an agent's ask go whatever the canvas is doing
+    let quiet = if !demand && super::edchecks::takes_canvas_quiet(pro) { super::edchecks::CANVAS_QUIET_MS } else { 0 };
+    let r = super::edchecks::run(&route, s, &f.sch, quiet, cancel, move |id| { if let Some(p) = state().lock().unwrap().get_mut(&pro2) { p.src(&s2).progress = id.to_string() } }).await;
     match r {
         super::edchecks::Ran::Found(mut fs, unsaved) => {
             if !full { fs.retain(|x| !fd::library_rule(s, &x.rule)) }
             let cli = with(pro, |p| if s == "drc" { p.drc.cli_ids.clone() } else { p.erc.cli_ids.clone() }).unwrap_or_default();
             super::edchecks::mark_editor_only(&mut fs, &cli);
-            Some((Some(Ok(fs)), unsaved))
+            Some((Some(Ok(fs)), Some(unsaved)))
         }
-        super::edchecks::Ran::Cancelled => Some((None, false)),
-        super::edchecks::Ran::Failed(why) => Some((Some(Err(why)), false)),
+        super::edchecks::Ran::Cancelled => Some((None, Some(false))),
+        super::edchecks::Ran::Held(ago, why) => {
+            canvas_touched(pro, now_ms().saturating_sub(ago));
+            eprintln!("checks: {s} in KiCad held for its canvas ({why}): again once it is quiet");
+            Some((None, None))
+        }
+        super::edchecks::Ran::Failed(why) => Some((Some(Err(why)), Some(false))),
         super::edchecks::Ran::Cli(why) => { eprintln!("checks: {s} with kicad-cli: {why}"); None }
     }
 }

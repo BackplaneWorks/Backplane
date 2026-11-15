@@ -33,12 +33,15 @@ pub fn capable(caps: &Value) -> bool {
     let has = |k: &str, x: &str| caps[k].as_array().is_some_and(|a| a.iter().any(|c| c.as_str().is_some_and(|c| c == x || c.ends_with(&format!(".{x}")))));
     has("capabilities", CAP) && (caps["commands"].as_array().map_or(true, |a| a.is_empty()) || (has("commands", "RunChecks") && has("commands", "GetMarkers")))
 }
+/// Whether the open KiCad takes `RunChecks.min_canvas_idle_ms` (capability `canvas-idle`).
+pub fn canvas_idle(caps: &Value) -> bool { caps["capabilities"].as_array().is_some_and(|a| a.iter().any(|c| c == "canvas-idle")) }
 /// Whether DRC's schematic parity is safe with no schematic editor open: the board's parity loads the schematic hidden and shows
 /// nothing (the fork's b07cc5548a), never raises a hidden board (532da6fbf3), and a task's message box answers itself instead of
 /// holding KiCad's task gate (0bbf8f988e). No capability of their own: `runaction-frame` (bp.13 batch 6) is the first that has all three.
 pub fn parity_hidden(caps: &Value) -> bool { caps["capabilities"].as_array().is_some_and(|a| a.iter().any(|c| c == "runaction-frame")) }
 /// The capability, asked once per editor process (its socket): (socket, checks itself, DRC parity safe with no schematic editor).
-static CAPS: OnceLock<Mutex<HashMap<String, (String, bool, bool)>>> = OnceLock::new();
+/// The fourth: RunChecks takes a canvas quiet (`canvas-idle`).
+static CAPS: OnceLock<Mutex<HashMap<String, (String, bool, bool, bool)>>> = OnceLock::new();
 /// The open editor of the project when it runs checks itself.
 pub async fn ready(hub: &std::sync::Arc<crate::hub::Hub>, pro: &str) -> Option<GuiRoute> {
     // BACKPLANE_CHECKS_IN_KICAD=0: never in the open KiCad, kicad-cli on the saved files (a test that wants KiCad free of checks)
@@ -46,7 +49,7 @@ pub async fn ready(hub: &std::sync::Arc<crate::hub::Hub>, pro: &str) -> Option<G
     let route = embed::gui_route(pro)?;
     if crate::hub::now_ms() < stuck_until(&route.sock) { return None }
     let m = CAPS.get_or_init(Default::default);
-    if let Some((sock, ok, _)) = m.lock().unwrap().get(pro).cloned() { if sock == route.sock { return ok.then_some(route) } }
+    if let Some((sock, ok, _, _)) = m.lock().unwrap().get(pro).cloned() { if sock == route.sock { return ok.then_some(route) } }
     // the embedded GUI's own answer (the headless server's manifest never has the embed capabilities)
     let _ = hub;
     let o = embed::gui_call_as(&route, "kiapi.backplane.GetCapabilities", json!({}), embed::CHECKS_CLIENT).await;
@@ -56,16 +59,18 @@ pub async fn ready(hub: &std::sync::Arc<crate::hub::Hub>, pro: &str) -> Option<G
     let hidden = parity_hidden(&caps);
     eprintln!("checks: {pro}: {}{}", if ok { "DRC and ERC run in the open KiCad (embed-checks)" } else { "the open KiCad has no embed-checks: kicad-cli on the saved files" },
         if ok && hidden { "; DRC needs no schematic editor (its parity loads the schematic hidden)" } else { "" });
-    m.lock().unwrap().insert(pro.to_string(), (route.sock.clone(), ok, hidden));
+    m.lock().unwrap().insert(pro.to_string(), (route.sock.clone(), ok, hidden, canvas_idle(&caps)));
     ok.then_some(route)
 }
+/// Whether the project's open KiCad takes a canvas quiet on RunChecks (asked by `ready` first).
+pub fn takes_canvas_quiet(pro: &str) -> bool { CAPS.get_or_init(Default::default).lock().unwrap().get(pro).is_some_and(|x| x.1 && x.3) }
 /// Whether the project's open KiCad runs DRC with its parity with no schematic editor open (asked by `ready` first).
 pub fn drc_without_sch(pro: &str) -> bool { CAPS.get_or_init(Default::default).lock().unwrap().get(pro).is_some_and(|x| x.1 && x.2) }
 /// Whether the project's open editor was found to check itself (no asking: the events loop calls it).
 pub fn known(pro: &str) -> bool { CAPS.get_or_init(Default::default).lock().unwrap().get(pro).is_some_and(|x| x.1) && embed::gui_route(pro).is_some_and(|r| CAPS.get().unwrap().lock().unwrap().get(pro).is_some_and(|x| x.0 == r.sock)) }
 /// What the panel says of an editor's result, where it may differ from kicad-cli's (the fork's answer, bp.13).
 pub const NOTE: &str = "Checked in KiCad: unsaved edits included, zones as filled, parity against the open schematic";
-#[cfg(test)] pub fn set_ready(pro: &str, sock: &str, ok: bool) { CAPS.get_or_init(Default::default).lock().unwrap().insert(pro.to_string(), (sock.to_string(), ok, false)); }
+#[cfg(test)] pub fn set_ready(pro: &str, sock: &str, ok: bool) { CAPS.get_or_init(Default::default).lock().unwrap().insert(pro.to_string(), (sock.to_string(), ok, false, false)); }
 /// The rules on which the editor and kicad-cli disagree about which items collide (bp.13 batch 3: Hubble_DK's silk-vs-mask test gives 21
 /// pairs more in the editor than the CLI's 67; the fork's parity gate follows it up).
 pub const EDITOR_ONLY: &[&str] = &["silk_over_copper"];
@@ -292,20 +297,34 @@ pub fn on_event(ev: &Value) -> bool {
 pub fn fraction(id: &str) -> Option<f64> { waits().fraction.get(id).map(|x| x.1) }
 
 /// How a run in the editor ended: its findings and whether they are of unsaved edits; cancelled; failed; or run it with kicad-cli.
-pub enum Ran { Found(Vec<Finding>, bool), Cancelled, Failed(String), Cli(String) }
+pub enum Ran { Found(Vec<Finding>, bool), Cancelled, Failed(String), Cli(String), Held(u64, String) }
+/// The canvas quiet an automatic run asks of KiCad (`RunChecks.min_canvas_idle_ms`, capability `canvas-idle`, bp.13 batch 8): the hub's own
+/// quiet after an edit or a press, so a run never takes KiCad's UI thread mid-gesture (a wheel zoom, a pan, a tool's operation).
+pub const CANVAS_QUIET_MS: u64 = 3000;
+/// A RunChecks refused for the canvas (AS_BUSY "canvas in use: the PCB editor, input 302 ms ago" or "..., tool <name> busy"): how long
+/// ago the input was (0 for a busy tool: the quiet starts now); None for any other refusal.
+pub fn canvas_in_use(why: &str) -> Option<u64> {
+    let i = why.find("canvas in use")?;
+    let t = &why[i..];
+    Some(t.find("input ").and_then(|j| t[j + 6..].split(' ').next()?.parse().ok()).filter(|_| !t.contains(" busy")).unwrap_or(0))
+}
 
 /// Run `kind` ("drc" or "erc") in the editor of `route`; `pcb`/`sch`: the project's files (the sheets' names); `on_start`: the
 /// progress id, once the editor took the run.
-pub async fn run(route: &GuiRoute, kind: &str, sch: &str, cancel: &tokio::sync::Notify, on_start: impl FnOnce(&str)) -> Ran {
+/// `quiet_ms`: the canvas quiet asked of KiCad (0: none, the person's Run or an agent's; a refusal for the canvas is `Ran::Held`).
+pub async fn run(route: &GuiRoute, kind: &str, sch: &str, quiet_ms: u64, cancel: &tokio::sync::Notify, on_start: impl FnOnce(&str)) -> Ran {
     let fk = if kind == "drc" { "FK_PCB" } else { "FK_SCH" };
     // DRC's schematic parity opens KiCad's schematic editor, which asks to be shown: not the person's switch (the pane stays where it is)
     embed::hold_shows(&route.pro, Duration::from_secs(120));
     struct Release(String);
     impl Drop for Release { fn drop(&mut self) { embed::release_shows(&self.0); } }
     let _release = Release(route.pro.clone());
-    let o = embed::gui_call_as(route, "kiapi.backplane.embed.RunChecks", json!({"kind": fk, "parity": kind == "drc"}), embed::CHECKS_CLIENT).await;
+    let mut msg = json!({"kind": fk, "parity": kind == "drc"});
+    if quiet_ms > 0 { msg["min_canvas_idle_ms"] = json!(quiet_ms) }
+    let o = embed::gui_call_as(route, "kiapi.backplane.embed.RunChecks", msg, embed::CHECKS_CLIENT).await;
     if !o["ok"].as_bool().unwrap_or(false) {
         let why = o["error"].as_str().or(o["why"].as_str()).unwrap_or("no answer").to_string();
+        if quiet_ms > 0 { if let Some(ago) = canvas_in_use(&why) { return Ran::Held(ago, why) } }
         return Ran::Cli(format!("KiCad did not run it ({why})"))
     }
     let id = pid_of(&o["message"]["progress_id"]);
@@ -522,6 +541,14 @@ mod tests {
         assert_eq!(fs.iter().map(|f| f.id.as_str()).collect::<Vec<_>>(), ["drc:cli", "drc:new", "drc:c"]);
         let mut fs = mk(); mark_editor_only(&mut fs, &Default::default()); assert!(fs.iter().all(|f| f.detail == "Text 'U3'"));
     }
+    /// The fork's refusals (batch 8 CI): input on the canvas says how long ago; a busy tool holds from now; any other is not the canvas.
+    #[test] fn a_refusal_for_the_canvas_says_how_long_ago() {
+        assert_eq!(canvas_in_use("AS_BUSY: canvas in use: the PCB editor, input 302 ms ago"), Some(302));
+        assert_eq!(canvas_in_use("canvas in use: the PCB editor, tool pcbnew.InteractiveDrawing busy"), Some(0));
+        assert_eq!(canvas_in_use("a tool is active in the PCB editor"), None);
+        assert_eq!(canvas_in_use("a task is running: DRC (token t, for 1.4 s)"), None);
+        assert!(canvas_idle(&json!({"capabilities": ["embed-checks", "canvas-idle"]})) && !canvas_idle(&json!({"capabilities": ["embed-checks"]})));
+    }
     #[test] fn drc_needs_no_schematic_editor_from_batch_6() {
         assert!(parity_hidden(&json!({"capabilities": ["embed-checks", "plan-keys", "runaction-frame"]})), "bp.13 batch 6");
         assert!(!parity_hidden(&json!({"capabilities": ["embed-checks", "embed-request-actor"]})), "batch 5: hidden load, but a task's box could still hold the gate");
@@ -545,13 +572,29 @@ mod tests {
             let _ = reply.send(if ty.ends_with("RunChecks") { json!({"ok": true, "message": {"progress_id": "901"}}) } else { json!({"ok": true, "message": {}}) });
         } });
         let t0 = std::time::Instant::now();
-        let r = tokio::time::timeout(Duration::from_secs(10), run(&route, "drc", "", &tokio::sync::Notify::new(), |_| {})).await.expect("the run ends");
+        let r = tokio::time::timeout(Duration::from_secs(10), run(&route, "drc", "", 0, &tokio::sync::Notify::new(), |_| {})).await.expect("the run ends");
         assert!(matches!(&r, Ran::Cli(w) if w.contains("no progress")), "kicad-cli takes it");
         assert!(t0.elapsed() < Duration::from_secs(5));
         assert!(seen.lock().unwrap().iter().any(|(t, m)| t.ends_with("CancelProgress") && pid_of(&m["id"]) == "901"), "cancelled in KiCad");
         assert!(waits().waiting.get("901").is_none() && waits().seen.get("901").is_none(), "nothing left waiting");
         assert!(stuck_until("/stand-in") > crate::hub::now_ms(), "KiCad is left alone a while");
         STUCK.get_or_init(Default::default).lock().unwrap().remove("/stand-in");
+    }
+    /// batch 8 (canvas-idle): an automatic run asks for the canvas quiet and a refusal for the canvas is held, not sent to kicad-cli;
+    /// the person's Run (no quiet asked) sends none.
+    #[tokio::test] async fn a_run_refused_for_the_canvas_is_held() {
+        let (route, mut rx) = embed::stand_in_route("/p/canvas.kicad_pro");
+        let seen = std::sync::Arc::new(Mutex::new(Vec::<Value>::new())); let s2 = seen.clone();
+        tokio::spawn(async move { while let Some((ty, msg, reply)) = rx.recv().await {
+            if ty.ends_with("RunChecks") { s2.lock().unwrap().push(msg); let _ = reply.send(json!({"ok": false, "error": "AS_BUSY: canvas in use: the PCB editor, input 302 ms ago"})); }
+            else { let _ = reply.send(json!({"ok": true, "message": {}})); }
+        } });
+        let r = run(&route, "drc", "", CANVAS_QUIET_MS, &tokio::sync::Notify::new(), |_| {}).await;
+        assert!(matches!(&r, Ran::Held(302, w) if w.contains("canvas in use")), "held, 302 ms after the input");
+        let r = run(&route, "drc", "", 0, &tokio::sync::Notify::new(), |_| {}).await;
+        assert!(matches!(&r, Ran::Cli(_)), "no quiet asked: not held");
+        let m = seen.lock().unwrap().clone();
+        assert_eq!((m[0]["min_canvas_idle_ms"].as_u64(), m[1]["min_canvas_idle_ms"].is_null()), (Some(CANVAS_QUIET_MS), true));
     }
     /// A stand-in editor: RunChecks answers with an id, its progress and ET_CHECKS_DONE come as events, GetMarkers and GetItemsById
     /// answer from the fixtures. The run finds what the CLI finds; a busy editor sends the run to kicad-cli; a cancel cancels it in KiCad.
@@ -595,7 +638,7 @@ mod tests {
         let cancel = tokio::sync::Notify::new();
         let mut started = String::new();
         let mut mid = None;
-        let r = { let fut = run(&route, "drc", "", &cancel, |id| started = id.to_string()); tokio::pin!(fut);
+        let r = { let fut = run(&route, "drc", "", 0, &cancel, |id| started = id.to_string()); tokio::pin!(fut);
             loop { tokio::select! { r = &mut fut => break r, _ = tokio::time::sleep(Duration::from_millis(5)) => { if mid.is_none() { mid = fraction("41") } } } } };
         let Ran::Found(fs, unsaved) = r else { panic!("the run found nothing") };
         assert_eq!(started, "41"); assert!(unsaved, "the editor's result is of its unsaved edits"); assert_eq!(mid, Some(0.5), "its progress is the bar's");
@@ -606,12 +649,12 @@ mod tests {
         assert_eq!(seen.lock().unwrap()[3].1["items"], json!([{"value": "j5"}, {"value": "sw3"}]));
         // busy: kicad-cli runs it
         busy.store(true, std::sync::atomic::Ordering::SeqCst);
-        assert!(matches!(run(&route, "drc", "", &cancel, |_| {}).await, Ran::Cli(w) if w.contains("AS_BUSY")));
+        assert!(matches!(run(&route, "drc", "", 0, &cancel, |_| {}).await, Ran::Cli(w) if w.contains("AS_BUSY")));
         busy.store(false, std::sync::atomic::Ordering::SeqCst);
         // a cancel (a newer revision) cancels it in KiCad
         let c2 = std::sync::Arc::new(tokio::sync::Notify::new()); let c3 = c2.clone();
         tokio::spawn(async move { tokio::time::sleep(Duration::from_millis(60)).await; c3.notify_one() });
-        assert!(matches!(run(&route, "erc", "", &c2, |_| {}).await, Ran::Cancelled));
+        assert!(matches!(run(&route, "erc", "", 0, &c2, |_| {}).await, Ran::Cancelled));
         assert!(seen.lock().unwrap().iter().any(|(t, m)| t.ends_with("CancelProgress") && pid_of(&m["id"]) == "42"));
         assert!(waits().waiting.get("42").is_none() && waits().fraction.get("42").is_none(), "nothing left waiting");
     }
