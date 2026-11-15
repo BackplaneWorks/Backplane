@@ -1375,10 +1375,19 @@ def run(h):
             top = E.find_main_window(cp.pid)
             cbox = composer_box(h, top)
             rows = []
+            def focus_notices():
+                return sum(1 for l in open(h.p("client.log"), encoding="utf-8", errors="replace") if '"kicad_ev":"focus' in l)
             for n in range(1, 6):
+                before = focus_notices()
                 E.screen_click(gl["root_x"] + 30, gl["root_y"] + gl["h"] - 40, 1)  # an empty spot of the board: KiCad's keys
-                time.sleep(0.25)
-                E.screen_click(cbox[0] + 120, cbox[1] + 30, 1)                  # the composer, ~250 ms later
+                # the rule only acts on KiCad's focus notice (`took`, from _BACKPLANE_FOCUS) under 600 ms old: wait for it,
+                # then the composer 100 ms later (took-race-base, Nov 15: a fixed 250 ms came before the notice, nothing armed)
+                t0 = time.monotonic()
+                while focus_notices() == before and time.monotonic() - t0 < 1.0:
+                    time.sleep(0.02)
+                armed = focus_notices() > before
+                time.sleep(0.1)
+                E.screen_click(cbox[0] + 120, cbox[1] + 30, 1)                  # the composer
                 a, b = h.p(f"took_{n}_0.png"), h.p(f"took_{n}_1.png")
                 E.grab_screen(a)
                 for ch in "123":
@@ -1387,13 +1396,16 @@ def run(h):
                 E.grab_screen(b)
                 typed = E.img_diff_box(a, b, *cbox)["changed_pixels"]
                 snap = focus_snapshot(frame)
-                rows.append({"round": n, "composer_px": typed, "focus_pid": snap["focus_pid"], "focus_class": snap["focus_class"],
-                             "ok": typed > 150 and snap["focus_pid"] == cp.pid})
+                rows.append({"round": n, "armed": armed, "notice_ms": round((time.monotonic() - t0) * 1000), "composer_px": typed,
+                             "focus_pid": snap["focus_pid"], "focus_class": snap["focus_class"], "ok": typed > 150 and snap["focus_pid"] == cp.pid})
                 E.key_chord("ctrl", "a"); E.key_tap("BackSpace"); time.sleep(0.2)
                 if not rows[-1]["ok"]:
                     E.key_tap("Escape"); time.sleep(0.3)
             print("DIAG took_race " + json.dumps(rows), flush=True)
-            h.check("Canvas click, then the composer within ~300 ms and typing: the text lands in the composer, 5/5",
+            armed_n = sum(1 for r in rows if r["armed"])
+            h.check("The race was exercised: KiCad's focus notice arrived before the composer click in at least 3 of 5 rounds",
+                    armed_n >= 3, {"armed_rounds": armed_n})
+            h.check("Canvas click, then the composer under 600 ms after KiCad's focus notice, and typing: the text lands in the composer, 5/5",
                     all(r["ok"] for r in rows), rows)
             return h.finish()
         if only == "f6":
