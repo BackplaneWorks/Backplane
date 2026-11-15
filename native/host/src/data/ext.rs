@@ -448,7 +448,8 @@ async fn viewers(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Res
                 v["boards"] = machines::board_rows(&root, &list, s(&r, "board_default")); Ok(v) }
             "viewer.refs" | "viewer.compare" | "mech.list" if machines::is_far(th) => Err(err("That is shown on its own machine only for now.")),
             // `boards`: the project's boards for the viewer's picker (two or more; the desktop's Boards menu, `boards.list`), each with the files its pages watch
-            "viewer.files" => { let root = root_of(hub, th).await?; let f = crate::files::kicad::project::read(&root);
+            // the design's folder: the main checkout for a hardware project's thread with a code worktree (which holds no board), as boards.list reads it
+            "viewer.files" => { let root = crate::files::kicad::canonical::design_root(&root_of(hub, th).await?); let f = crate::files::kicad::project::read(&root);
                 let bd = f.pcb.strip_prefix(&format!("{root}/")).unwrap_or("").to_string();
                 let list = crate::files::kicad::boards::pick(&crate::files::kicad::boards::find(std::path::Path::new(&root)), &bd);
                 Ok(json!({"root":root,"pro":f.pro,"pcb":f.pcb,"sch":f.sch,"boards":machines::board_rows(&root, &list, &bd)})) }

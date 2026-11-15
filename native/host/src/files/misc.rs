@@ -120,7 +120,9 @@ impl RpcHandler for Misc {
                 "boards.list" => { // BoardsJob: the project's boards read again, as the card finds them
                     let thread = s("thread");
                     let Some(cwd_p) = super::root_of(hub, &thread).await else { return vec![super::threadpath::refusal(id)] };
-                    let cwd = cwd_p.to_string_lossy().into_owned();
+                    // a hardware project's boards are in its main checkout: the thread's code worktree holds none of them (design files stay
+                    // on main, kicad/canonical.rs), so the list read there was empty and the picker showed only the default board
+                    let cwd = crate::files::kicad::canonical::design_root(&cwd_p.to_string_lossy());
                     let found = crate::files::kicad::boards::find(std::path::Path::new(&cwd));
                     let f = crate::files::kicad::project::read(&cwd); // Od.pcb: the folder's own board, from its root
                     let bd = f.pcb.strip_prefix(&format!("{cwd}/")).unwrap_or("").to_string();
