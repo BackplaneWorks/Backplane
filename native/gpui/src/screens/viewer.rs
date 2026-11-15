@@ -335,7 +335,8 @@ fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, 
         let fit = tall(div().id(SharedString::from(format!("plot-fit-{slot}"))).px_2().text_size(crate::scale::tpx(12.))).cursor_pointer().border_1().border_color(c("line")).bg(c("raise")).hover(|s| s.bg(c("panel"))).child(trs("Fit"))
             .on_click(cx.listener(move |this, _, _, cx| { let pv = this.screens.pv(slot); pv.touched = false; pv.fit_wh = (0., 0.); cx.notify(); }));
         // the Boards menu leads the row (0.14 put it first in the viewer's bar), then Layers and Fit
-        let boards = if slot == 0 { crate::viewers::boards::picker(cx, light, viewer, &pv.boards) } else { None };
+        // (it gives way first, down to its least, so the buttons after it keep their words in a narrow pane)
+        let boards = if slot == 0 { crate::viewers::boards::picker(cx, light, viewer, &pv.boards) } else { None }.map(|b| div().flex().flex_basis(px(96.)).flex_grow().min_w_0().max_w(px(260.)).child(b).into_any_element());
         let lay = crate::viewers::layers::strip_el(cx, light, &strip, &pv.layers_key);
         tools.splice(0..0, boards.into_iter().chain([lay, fit.into_any_element()]));
         // a Gerber set: "vs board" (its copper, drills and outline against the board's: kicad/gerber/compare.rs), then where it is and how old (the plot's note)
@@ -359,7 +360,8 @@ fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, 
         }
     }
     match actions {
-        Some(a) => col = col.child(bar(light).children(tools).child(div().flex_1()).child(a)),
+        // one line on the header's band while it fits; in a pane too narrow for it (a panel docked at the side) the pane's controls go to a line of their own, no word cut
+        Some(a) => col = col.child(bar_wrap(light).children(tools).child(div().ml_auto().flex_shrink_0().max_w_full().child(a))),
         None if !tools.is_empty() => col = col.child(div().flex().items_center().gap_2().px_3().py_1().children(tools)),
         None => {}
     }
@@ -717,16 +719,33 @@ pub fn pane(cx: &mut Context<Backplane>, light: bool, thread: &Value, page: AnyE
     let c = |n: &str| theme::color(light, n);
     let open = open.as_str();
     // a Split holds three pages at once, so it takes the room of a desktop: its pane is at least that wide, whatever this device chose for the others
-    let width = if open == "split" { (pane_width() as f32).max(960.) } else { pane_width() as f32 };
+    // a panel docked at the design's side (BOM, Checks, Fab...) takes its room from the thread first, so the design is not squeezed to a strip
+    let (base, width) = (pane_base(open), pane_px(open, PANE_PANEL.load(std::sync::atomic::Ordering::Relaxed) as f32));
     // the embedded editor's full size: the pane takes the room of the sidebar and the thread (ui.rs folds them for it)
     if KICAD_FULL.load(std::sync::atomic::Ordering::Relaxed) && matches!(open, "board" | "schematic" | "3d") {
         return Some(div().flex_1().min_w_0().h_full().relative().border_l_1().border_color(c("rule")).flex().flex_col().child(page).into_any_element())
     }
     // The pane gives way to the thread: it shrinks (down to its least) before the composer row is squeezed, so Attach and Send stay reachable
-    Some(div().w(px(width)).max_w(relative(0.62)).min_w(px(PANE_LEAST.load(std::sync::atomic::Ordering::Relaxed) as f32)).h_full().flex_shrink().relative().border_l_1().border_color(c("rule")).flex().flex_col()
+    Some(div().w(px(width)).max_w(relative(if width > base { 1. } else { 0.62 })).min_w(px(PANE_LEAST.load(std::sync::atomic::Ordering::Relaxed) as f32)).h_full().flex_shrink().relative().border_l_1().border_color(c("rule")).flex().flex_col()
         .child(resize_handle(cx)).child(page).into_any_element())
 }
 
+/// The pane's own width on a page: this device's, and for a Split at least a desktop's.
+fn pane_base(open: &str) -> f32 { if open == "split" { (pane_width() as f32).max(960.) } else { pane_width() as f32 } }
+/// The pane's width on a page with a panel `panel` wide docked at its side (0: none): `with_panel` of this frame's room.
+pub fn pane_px(open: &str, panel: f32) -> f32 { with_panel(pane_base(open), panel, PANE_MOST.load(std::sync::atomic::Ordering::Relaxed) as f32) }
+/// The pane's width with a panel `panel` wide docked at the design's side: the pane grows by what the design lacks of a fair width (PANE_FAIR)
+/// beside the panel, up to `most` (what the thread's least leaves), so the thread gives way before the design does. Never narrower than `base`.
+pub fn with_panel(base: f32, panel: f32, most: f32) -> f32 {
+    if panel <= 0. { return base }
+    (base + (PANE_FAIR + panel - base).max(0.)).min(most.max(base))
+}
+/// The most the pane may take this frame: the window less the sidebar as drawn, the rail and the thread's least (set by ui.rs before the window is drawn).
+static PANE_MOST: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+pub fn set_most(px: f32) { PANE_MOST.store(px.max(0.).round() as u32, std::sync::atomic::Ordering::Relaxed); }
+/// The width of the panel docked at the design's side this frame (screens/mgmt.rs `side_room`, set by ui.rs), 0 with none.
+static PANE_PANEL: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+pub fn set_panel(px: f32) { PANE_PANEL.store(px.max(0.).round() as u32, std::sync::atomic::Ordering::Relaxed); }
 /// The embedded editor this frame (set by ui.rs before the window is drawn, as the pane's least is): drawn at full size (only while one
 /// is open), and drawn in a window of its own (the pane then says so).
 pub static KICAD_FULL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
@@ -857,6 +876,12 @@ mod tests {
             if viewer && !force { assert!(pane > 0., "{w}: the viewer keeps some room"); }
         } } }
         assert_eq!(fit(1920., side, true, false, true), (true, THREAD_LEAST, VIEWER_LEAST, 867.), "wide: sidebar open, the viewer's share");
+        // a panel at the design's side: the pane grows until the design has a fair width beside it, the thread giving way down to its least
+        assert_eq!(with_panel(596., 0., 705.), 596., "no panel: the pane's own width");
+        assert_eq!(with_panel(596., 400., 705.), 705., "a 1400 px window: the thread gives all it can (the panel then gives the rest, mgmt::fit)");
+        assert_eq!(with_panel(700., 400., 905.), 880., "room enough: the design gets its fair 480 beside a 400 px panel");
+        assert_eq!(with_panel(900., 400., 1200.), 900., "a wide pane holds both as it is");
+        assert_eq!(with_panel(596., 400., 500.), 596., "never narrower than without the panel");
         assert_eq!(fit(1280., side, true, false, true).0, true, "a fair viewer still fits beside the open sidebar");
         assert_eq!(fit(1100., side, true, false, true), (false, THREAD_LEAST, VIEWER_LEAST, 553.), "less than a fair viewer: the sidebar folds to its strip");
         assert_eq!(fit(1100., side, true, false, false).0, true, "no viewer: nothing folds");
