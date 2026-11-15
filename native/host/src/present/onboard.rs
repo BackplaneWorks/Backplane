@@ -644,7 +644,8 @@ pub fn act(st: &State, hub: &str, session: &Value, info: &Value, c: &Client, use
             }
         }
         "ob-back" => go(steps[i.saturating_sub(1)].id, &mut ask),
-        "ob-go" => { if !steps.iter().any(|x| x.id == value) { return None } let mut p = go(value, &mut ask); p["drafts"]["@ob.open"] = json!("1"); p["drafts"]["@ob.closed"] = json!(""); p["open"] = json!({"settings": false}); p }
+        // a page with nothing to do (Welcome) is seen once it was on screen, however it is left: by the list as by Next (else Done says "Not done." of it)
+        "ob-go" => { if !steps.iter().any(|x| x.id == value) { return None } if !steps[i].task && steps[i].id != value && due(st, session) { ask.put("onboard.seen", &with(set(st, "onboard.seen"), steps[i].id)); } let mut p = go(value, &mut ask); p["drafts"]["@ob.open"] = json!("1"); p["drafts"]["@ob.closed"] = json!(""); p["open"] = json!({"settings": false}); p }
         // Finish later: closed here until the next launch, the step kept
         "ob-skip" => { ask.put("onboard.step", steps[i].id); json!({"drafts": {"@ob.closed": "1", "@ob.open": ""}}) }
         "ob-end" => { let mut p = end(&mut ask); p["drafts"]["@ob.closed"] = json!(""); p }
@@ -767,6 +768,17 @@ mod tests {
         let open = at_with(&s0, json!({"@ob.step": "agents", "@ob.more": "1"}), &i);
         for n in ["Muse Code", "OpenCode", "Pi", "Oh My Pi"] { row_of(&open, n); }
         assert_eq!(row_of(&open, "More agents")["buttons"][0]["label"], "Hide");
+    }
+    #[test] fn a_page_with_nothing_to_do_left_by_the_step_list_is_seen() {
+        let (i, s0) = (info("linux"), cst(blank(), &[]));
+        // a new hub's first screen names no step yet (the view's @ob.step is empty): Welcome is on screen all the same
+        for view in [json!({}), json!({"@ob.step": "welcome"})] {
+            let g = act(&s0, "h", &sess(view), &i, &desk(), "/h", "ob-go", "project").unwrap();
+            assert_eq!(setting_of(&g, "onboard.seen").as_deref(), Some("welcome")); assert_eq!(g.patch["drafts"]["@ob.step"], "project");
+        }
+        // from Settings on a hub whose setup ended (not on screen) nothing is marked, and a task step is never marked seen by leaving it
+        assert_eq!(setting_of(&act(&cst(blank(), &[("onboard.done", "1")]), "h", &sess(json!({})), &i, &desk(), "/h", "ob-go", "project").unwrap(), "onboard.seen"), None);
+        assert_eq!(setting_of(&act(&s0, "h", &sess(json!({"@ob.step": "agents"})), &i, &desk(), "/h", "ob-go", "project").unwrap(), "onboard.seen"), None);
     }
     #[test] fn an_agent_reads_install_connect_or_connected_as() {
         let i = info("linux");
