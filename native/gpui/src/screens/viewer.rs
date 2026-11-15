@@ -685,7 +685,8 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
         if e.read(cx).light != light { e.update(cx, |p, cx| p.set_light(light, cx)); }
         let a = acts(cx);
         let (popped, full) = (KICAD_POPPED.load(std::sync::atomic::Ordering::Relaxed), KICAD_FULL.load(std::sync::atomic::Ordering::Relaxed));
-        let strip = crate::viewers::kicad_pane::strip(cx, light, &e, false, full, |this: &mut Backplane, a, _, cx| this.kicad_strip_act(a, cx));
+        let screen = KICAD_SCREEN.load(std::sync::atomic::Ordering::Relaxed);
+        let strip = crate::viewers::kicad_pane::strip(cx, light, &e, false, full, screen, |this: &mut Backplane, a, _, cx| this.kicad_strip_act(a, cx));
         let body = if popped {
             // the editor is in its own window: the pane says so and offers it back
             div().flex_1().min_h_0().flex().flex_col().items_center().justify_center().gap_2().text_color(theme::color(light, "faint")).child(trs("KiCad is open in its own window."))
@@ -700,7 +701,7 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
         } else { div().flex_1().min_h_0().child(e).into_any_element() };
         // the Boards menu (a project with several boards) stays where the viewer's bar has it; a pick moves KiCad to that board (boards::edit_due)
         let boards = crate::viewers::boards::picker(cx, light, viewer, &pv.boards);
-        div().size_full().flex().flex_col().child(bar(light).children(boards).child(div().flex_1()).child(a)).when(!popped, |d| d.child(strip)).child(body).into_any_element()
+        div().size_full().flex().flex_col().when(!screen, |d| d.child(bar(light).children(boards).child(div().flex_1()).child(a))).when(!popped, |d| d.child(strip)).child(body).into_any_element()
     }
     else if early {
         let k = open;
@@ -744,7 +745,8 @@ pub fn pane(cx: &mut Context<Backplane>, light: bool, thread: &Value, page: AnyE
     let (base, width) = (pane_base(open), pane_px(open, PANE_PANEL.load(std::sync::atomic::Ordering::Relaxed) as f32));
     // the embedded editor's full size: the pane takes the room of the sidebar and the thread (ui.rs folds them for it)
     if KICAD_FULL.load(std::sync::atomic::Ordering::Relaxed) && matches!(open, "board" | "schematic" | "3d") {
-        return Some(div().flex_1().min_w_0().h_full().relative().border_l_1().border_color(c("rule")).flex().flex_col().child(page).into_any_element())
+        let screen = KICAD_SCREEN.load(std::sync::atomic::Ordering::Relaxed);
+        return Some(div().flex_1().min_w_0().h_full().relative().when(!screen, |d| d.border_l_1()).border_color(c("rule")).flex().flex_col().child(page).into_any_element())
     }
     // The pane gives way to the thread: it shrinks (down to its least) before the composer row is squeezed, so Attach and Send stay reachable
     Some(div().w(px(width)).max_w(relative(if width > base { 1. } else { 0.62 })).min_w(px(PANE_LEAST.load(std::sync::atomic::Ordering::Relaxed) as f32)).h_full().flex_shrink().relative().border_l_1().border_color(c("rule")).flex().flex_col()
@@ -770,6 +772,8 @@ pub fn set_panel(px: f32) { PANE_PANEL.store(px.max(0.).round() as u32, std::syn
 /// The embedded editor this frame (set by ui.rs before the window is drawn, as the pane's least is): drawn at full size (only while one
 /// is open), and drawn in a window of its own (the pane then says so).
 pub static KICAD_FULL: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The embedded editor is the whole window this frame (ui.rs): the pane draws only the editor's strip and the editor.
+pub static KICAD_SCREEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 pub static KICAD_POPPED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 /// The least the pane may shrink to on this frame (`fit`'s third answer, set by ui.rs before the window is drawn).
 static PANE_LEAST: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(crate::local::VIEWER_PX.0);
