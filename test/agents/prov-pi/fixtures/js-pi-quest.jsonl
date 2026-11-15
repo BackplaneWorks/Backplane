@@ -28,7 +28,9 @@
 {"$":"ActivityLogged","thread":"t1700000001-2","act":"k1793862342-166","tone":"info","kind":"answer","summary":"Which branch? → dev","at":1793862342}
 {"$":"SettingSet","key":"liveness.t1700000001-2","value":"{\"last\":1793862342,\"nudged\":0,\"stalled\":false,\"reported\":false,\"reason\":\"request resolved\"}","at":1793862342}
 {"$":"PendingChanged","thread":"t1700000001-2","count":0,"at":1793862342}
+{"$":"UsageSet","thread":"t1700000001-2","used":1300,"window":200000,"at":1793862342}
 {"$":"TurnChanged","thread":"t1700000001-2","state":"completed","at":1793862342}
+{"$":"TurnUsage","thread":"t1700000001-2","provider":"pi","model":"default","key":"x:bp-t1700000001-2-1793862342-160-0:130/15","input":110,"cread":20,"cwrite":3,"output":15,"reasoning":0,"cost":3100000,"known":"irwotc","basis":"x:bp-t1700000001-2-1793862342-160-0:130/20/3/15/0/3100000","at":1793862342}
 {"$":"SettingSet","key":"summary.at.t1700000001-2","value":"1793862342","at":1793862342}
 {"$":"SettingSet","key":"alert.t1700000001-2","value":"done\tturn-t1700000001-2\tm1793862342-150\t1793862342.171\t","at":1793862342}
 {"$":"SettingSet","key":"told.k1793862342-170-2","value":"{\"key\":\"turn-t1700000001-2\",\"text\":\"Fixture short\",\"channel\":\"alert\",\"bot\":\"\",\"at\":1793862342}","at":1793862342}

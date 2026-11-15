@@ -59,7 +59,7 @@ fn reply(a: &mut Acp, t: &OcpTurn, o: &Value) -> Out {
         (5, true) | (15, true) => Out { send: vec![acp::say(id == 5, &t.acp, &a.sid)], shapes: vec![] },
         (5, false) | (15, false) => fail(a, &format!("opencode refused the model {}: {}", t.model, err(o))),
         (7, true) => { let sid = sid_of(""); let mut r = opened(true, a, t, &sid); r.shapes.push(acp::event("notice", json!({"message":renewed_msg(&t.acp.session)}))); r }
-        (3, true) => Out { send: vec![], shapes: acp::finished(a) },
+        (3, true) => Out { send: vec![], shapes: acp::finished_with(a, o.get("result").unwrap_or(&Value::Null)) },
         (_, false) => fail(a, &err(o)),
         _ => Out::default(),
     }
@@ -114,7 +114,7 @@ impl Driver for OcDriver {
     fn argv(&self, _: &TurnIn) -> Vec<String> { vec!["acp".into()] }
     fn env(&self, a: &TurnIn) -> Vec<(String, String)> { vec![("OPENCODE_CONFIG_CONTENT".into(), config(&a.model, &a.runtime))] }
     fn start(&mut self, a: &TurnIn) -> Vec<String> {
-        self.turn = OcpTurn { acp: AcpTurn { cwd: a.cwd.clone(), mcp: a.mcp_url.clone(), prompt: a.prompt.clone(), text: a.text.clone(), session: a.session.clone(), ask: super::grok::asks(&a.runtime), servers: a.mcp.acp.clone() }, model: a.model.clone() };
+        self.turn = OcpTurn { acp: AcpTurn { cwd: a.cwd.clone(), mcp: a.mcp_url.clone(), prompt: a.prompt.clone(), text: a.text.clone(), session: a.session.clone(), ask: super::grok::asks(&a.runtime), servers: a.mcp.acp.clone() , model: String::new() }, model: a.model.clone() };
         vec![acp::init()]
     }
     fn on_line(&mut self, l: &Value) -> Reaction { let o = line(&mut self.a, &self.turn, l); Reaction { send: o.send, shapes: o.shapes } }
@@ -182,7 +182,7 @@ pub fn models_sh() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn turn(sid: &str, model: &str, ask: bool) -> OcpTurn { OcpTurn { acp: AcpTurn { cwd: "/tmp/p".into(), mcp: "http://127.0.0.1:1/mcp/t?token=x".into(), prompt: "RULES".into(), text: "hello".into(), session: sid.into(), ask, servers: Value::Null }, model: model.into() } }
+    fn turn(sid: &str, model: &str, ask: bool) -> OcpTurn { OcpTurn { acp: AcpTurn { cwd: "/tmp/p".into(), mcp: "http://127.0.0.1:1/mcp/t?token=x".into(), prompt: "RULES".into(), text: "hello".into(), session: sid.into(), ask, servers: Value::Null , model: String::new() }, model: model.into() } }
     fn ln(a: &mut Acp, t: &OcpTurn, l: &str) -> Out { line(a, t, &serde_json::from_str(l).unwrap()) }
     fn emits(o: &Out) -> String { o.shapes.iter().map(|v| v.to_string()).collect::<Vec<_>>().join(" | ") }
     fn sends(o: &Out) -> String { o.send.join(" | ") }

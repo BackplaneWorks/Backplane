@@ -204,11 +204,20 @@ pub fn next(w: &World) -> Next {
     // that has reset since is taken again: the order is the person's preference, not a path walked once.
     if let Some((to, account)) = w.best(false) {
         let (reset, auth) = if w.managed() { hold_of(w, &cur_id, cur_epoch) } else { (provider_hold(w, &from), false) };
-        let here = fb::provider_name(&w.provider); let from_name = if w.managed() { format!("{here} ({})", w.name(&cur_id)) } else { here };
-        let say = switched_line(&w.target_name(&to, &account), &from_name, reset, auth, &w.zone(), at);
+        let here = fb::provider_name(&w.provider); let from_name = if w.managed() { format!("{here} ({})", w.name(&cur_id)) } else { here.clone() };
+        let say = match missing_here(w) {
+            // its CLI is not on this machine: say that, never a limit it did not meet (Nov 15: "Switched to Grok: Claude ran out (resets 18:08)" on a Mac without Claude)
+            true => format!("Switched to {}: {here} is not installed on this machine", w.target_name(&to, &account)),
+            false => switched_line(&w.target_name(&to, &account), &from_name, reset, auth, &w.zone(), at),
+        };
         return Next::Chain { to, account, say };
     }
     wait_everything(w, &profiles, &from.key(), &cur_id, cur_epoch)
+}
+/// The thread's provider is held because its CLI is not installed here (`on_missing`'s hold, its reason the start's error).
+fn missing_here(w: &World) -> bool {
+    let o = serde_json::from_str::<Value>(&w.get(&fb::Limit::key(&w.provider))).unwrap_or(Value::Null);
+    fb::hold_active(&o, w.now) && fb::missing_text(o["reason"].as_str().unwrap_or(""))
 }
 /// When the hold on a provider with no accounts (or on its model) ends: 0 unknown.
 fn provider_hold(w: &World, t: &fb::Target) -> u64 {
@@ -710,7 +719,9 @@ mod tests {
         let w = ordered("antigravity", "gemini-4-carbon", &[]);
         let v = on_limit(&w, &l, true, "triage this webhook"); assert!(v.drop_turn_end && v.act.is_some(), "{:?}", keys(&v.events));
         assert_eq!(keys(&v.events), ["fallback.outage.antigravity", "fallback.pending.t1", "TurnChanged"]);
-        let held = w.with(&v.events); match next(&held) { Next::Chain { to, .. } => assert_eq!(to.provider, "claude"), n => panic!("{n:?}") }
+        let held = w.with(&v.events); match next(&held) { Next::Chain { to, say, .. } => {
+            assert_eq!(to.provider, "claude");
+            assert!(say.ends_with(": Antigravity is not installed on this machine") && !say.contains("ran out"), "the line says why, never a limit it did not meet: {say}") } n => panic!("{n:?}") }
         assert_eq!(next(&held.clone_at(1000 + fb::MISSING_HOLD_S + 1)), Next::Stay, "tried again once the hold is over");
     }
     #[test] fn transient_failures_reconnect_with_backoff_then_go_down_the_order() {

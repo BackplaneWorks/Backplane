@@ -52,7 +52,10 @@ while IFS= read -r line; do
       say '{"type":"message_end","message":{"role":"assistant","stopReason":"stop"}}'
       say '{"type":"turn_end","message":{"role":"assistant"}}'
       say '{"type":"agent_end","messages":[]}'
-      say '{"type":"agent_settled"}'
+      say '{"type":"agent_settled"}' ;;
+    # as Pi 1.4: the process stays for more commands; the hub asks for the session's totals once the run has settled
+    *'"type":"get_session_stats"'*)
+      say '{"id":"3","type":"response","command":"get_session_stats","success":true,"data":{"tokens":{"input":110,"cacheRead":20,"cacheWrite":3,"output":15,"reasoning":0,"total":148},"cost":0.0031,"contextUsage":{"tokens":1300,"contextWindow":200000}}}'
       exit 0 ;;
   esac
 done

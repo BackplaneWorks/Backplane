@@ -6,7 +6,8 @@ use serde_json::{json, Map, Value};
 
 /// AcpTurn: what a turn needs.
 #[derive(Clone, Debug, Default)]
-pub struct AcpTurn { pub cwd: String, pub mcp: String, pub prompt: String, pub text: String, pub session: String, pub ask: bool, /** the full mcpServers (mcpx gen::acp); null: Backplane's own only */ pub servers: Value }
+pub struct AcpTurn { pub cwd: String, pub mcp: String, pub prompt: String, pub text: String, pub session: String, pub ask: bool, /** the full mcpServers (mcpx gen::acp); null: Backplane's own only */ pub servers: Value,
+    /** the thread's model, set on the session before the prompt ("": the agent's own); grok's only, opencode sets its own */ pub model: String }
 impl AcpTurn { pub fn servers(&self) -> Value { if self.servers.is_array() { self.servers.clone() } else { mcp(&self.mcp) } } }
 
 /// Acp: the session id once known, the reply text so far, whether the turn ended, and the tool calls already logged ("\n<id>\n" each).
@@ -54,10 +55,31 @@ pub fn finished(a: &mut Acp) -> Vec<Value> {
     let mut v = vec![]; if !a.buf.is_empty() { v.push(event("item.completed", json!({"item":{"type":"agent_message","text":a.buf}}))) }
     v.push(event("turn.completed", json!({}))); v
 }
+/// Acp.usage: what a prompt's answer says the turn used (ACP's `usage`, or grok's under `_meta`, with the model that ran it), this turn's own
+/// (`turn: true`) in Codex's shape; None when it says nothing. Input counts what was read from the cache (grok: 23334 in, 1664 of them cached).
+pub fn usage(r: &Value) -> Option<Value> {
+    let m = r.get("_meta");
+    let u = r.get("usage").filter(|u| u.is_object()).or_else(|| m.and_then(|m| m.get("usage")).filter(|u| u.is_object()))?;
+    let g = |ks: &[&str]| ks.iter().find_map(|k| u.get(*k).and_then(Value::as_u64));
+    let out = g(&["outputTokens"])?;
+    let model = m.and_then(|m| m.get("modelId")).and_then(Value::as_str).unwrap_or("");
+    Some(json!({"input_tokens":g(&["inputTokens"]).unwrap_or(0),"cached_input_tokens":g(&["cachedReadTokens"]).unwrap_or(0),"cache_write_input_tokens":g(&["cachedWriteTokens", "cacheCreationTokens"]).unwrap_or(0),
+        "output_tokens":out,"reasoning_output_tokens":g(&["thoughtTokens", "reasoningTokens"]).unwrap_or(0),"turn":true,"model":model}))
+}
+/// Acp.finished with the prompt's answer: its usage rides on turn.completed (2026-11-15: grok and opencode threads recorded none).
+pub fn finished_with(a: &mut Acp, r: &Value) -> Vec<Value> {
+    let mut v = finished(a);
+    if let (Some(u), Some(end)) = (usage(r), v.last_mut()) { end["usage"] = u }
+    v
+}
+/// Acp.set_model: ACP's session/set_model (id 5).
+pub fn set_model(sid: &str, model: &str) -> String { rpc(5, "session/set_model", json!({"sessionId":sid,"modelId":model})) }
 /// Acp.opened: the session is open: the prompt, and the thread's session known.
 pub fn opened(a: &mut Acp, t: &AcpTurn, sid: &str) -> Out {
     a.sid = sid.into();
-    Out { send: vec![say(t.session.is_empty(), t, sid)], shapes: vec![event("thread.started", json!({"thread_id":sid}))] }
+    // grok 1.0.77 ignores `-m` (a session opens on its default, a loaded one on its own): the thread's model is set on the session, the prompt once it is taken
+    let first = if t.model.is_empty() { say(t.session.is_empty(), t, sid) } else { set_model(sid, &t.model) };
+    Out { send: vec![first], shapes: vec![event("thread.started", json!({"thread_id":sid}))] }
 }
 /// Acp.plan: an ACP plan's entries as todo items.
 pub fn plan(es: &Value) -> Value { Value::Array(es.as_array().map(|a| a.iter().map(|e| json!({"text":s(e, "content"), "status": e.get("status").and_then(Value::as_str).unwrap_or("pending")})).collect()).unwrap_or_default()) }
@@ -142,11 +164,12 @@ pub fn request(a: &mut Acp, t: &AcpTurn, o: &Value) -> Out {
 /// Acp.reply.k: the answer to one of our requests.
 fn reply(a: &mut Acp, t: &AcpTurn, o: &Value) -> Out {
     let ok = o.get("error").map_or(true, Value::is_null);
-    if !ok { return fail(a, &error(o, "grok failed")) }
+    if !ok { if nat_id(o) == 5 { return fail(a, &format!("grok could not switch this session to {}: {}", t.model, error(o, "refused"))) } return fail(a, &error(o, "grok failed")) }
     match nat_id(o) {
         1 => Out { send: vec![open(t)], shapes: vec![] },
         2 => { let sid = o.get("result").and_then(|r| r.get("sessionId")).and_then(Value::as_str).unwrap_or(&t.session).to_string(); opened(a, t, &sid) }
-        3 => Out { send: vec![], shapes: finished(a) },
+        3 => Out { send: vec![], shapes: finished_with(a, o.get("result").unwrap_or(&Value::Null)) },
+        5 => Out { send: vec![say(t.session.is_empty(), t, &a.sid.clone())], shapes: vec![] },
         _ => Out::default(),
     }
 }
@@ -159,7 +182,7 @@ pub fn line(a: &mut Acp, t: &AcpTurn, o: &Value) -> Out {
 #[cfg(test)]
 mod tests {
     use super::*;
-    fn t(sid: &str) -> AcpTurn { AcpTurn { cwd: "/tmp/p".into(), mcp: "http://127.0.0.1:1/mcp/t?token=x".into(), prompt: "RULES".into(), text: "hello".into(), session: sid.into(), ask: false, servers: Value::Null } }
+    fn t(sid: &str) -> AcpTurn { AcpTurn { cwd: "/tmp/p".into(), mcp: "http://127.0.0.1:1/mcp/t?token=x".into(), prompt: "RULES".into(), text: "hello".into(), session: sid.into(), ask: false, servers: Value::Null, model: String::new() } }
     fn ta(sid: &str) -> AcpTurn { AcpTurn { ask: true, ..t(sid) } }
     fn ln(a: &mut Acp, t: &AcpTurn, l: &str) -> Out { line(a, t, &serde_json::from_str(l).unwrap()) }
     fn outs(o: &Out) -> String { o.send.iter().cloned().chain(o.shapes.iter().map(|v| v.to_string())).collect::<Vec<_>>().join(" | ") }
@@ -349,4 +372,27 @@ mod e2e {
     #[tokio::test(flavor = "multi_thread")] async fn opencode_takes_the_threads_model_on_the_session() { let r = run("opencode", "om", "full-access", "opencode/deepseek-v4.1-flash", "", NO_ENV, &["hello"], None).await; expect("oc-model", &r, fx!("oc-model")) }
     #[tokio::test(flavor = "multi_thread")] async fn opencode_fails_a_turn_whose_model_it_refuses() { let r = run("opencode", "on", "full-access", "opencode/deepseek-v4.1-flash", "", "FAKE_NOMODEL=1", &["hello"], None).await; expect("oc-nomodel", &r, fx!("oc-nomodel")) }
     #[tokio::test(flavor = "multi_thread")] async fn opencode_asks_for_edits_when_supervised() { let r = run("opencode", "oa", "approval-required", "", "", NO_ENV, &["zqask please"], Some("accept")).await; expect("oc-ask", &r, fx!("oc-ask")) }
+    // grok 1.0.77 (2026-11-15): the prompt's answer carries the turn's usage and model under _meta; ACP's own `usage` is read the same way
+    #[test] fn a_prompts_usage_rides_on_the_turns_end() {
+        let g: Value = serde_json::from_str(r#"{"stopReason":"end_turn","_meta":{"modelId":"grok-4.7","usage":{"inputTokens":23334,"outputTokens":31,"cachedReadTokens":1664,"cacheCreationTokens":0,"reasoningTokens":30,"costUsdTicks":443580000}}}"#).unwrap();
+        assert_eq!(usage(&g).unwrap(), json!({"input_tokens":23334,"cached_input_tokens":1664,"cache_write_input_tokens":0,"output_tokens":31,"reasoning_output_tokens":30,"turn":true,"model":"grok-4.7"}));
+        let a: Value = serde_json::from_str(r#"{"stopReason":"end_turn","usage":{"inputTokens":50,"outputTokens":7,"thoughtTokens":2,"cachedReadTokens":10,"cachedWriteTokens":4,"totalTokens":57}}"#).unwrap();
+        assert_eq!(usage(&a).unwrap(), json!({"input_tokens":50,"cached_input_tokens":10,"cache_write_input_tokens":4,"output_tokens":7,"reasoning_output_tokens":2,"turn":true,"model":""}));
+        assert!(usage(&json!({"stopReason":"end_turn"})).is_none());
+        let mut st = Acp::default(); st.buf = "hi".into();
+        let v = finished_with(&mut st, &g); assert_eq!(v.len(), 2); assert_eq!(v[1]["type"], "turn.completed"); assert_eq!(v[1]["usage"]["output_tokens"], 31);
+    }
+    // grok 1.0.77 (2026-11-15): `-m grok-4.6` ran grok-4.7, on a new session as on a loaded one; session/set_model is what moves it
+    #[test] fn the_threads_model_is_set_on_the_session_before_the_prompt() {
+        let t = |sid: &str| AcpTurn { cwd: "/tmp/p".into(), text: "hello".into(), session: sid.into(), ..AcpTurn::default() }; let tt = AcpTurn { model: "grok-4.5".into(), ..t("OLD") }; let mut a = Acp::new();
+        let o = reply(&mut a, &tt, &serde_json::from_str(r#"{"jsonrpc":"2.0","id":2,"result":{"sessionId":"OLD"}}"#).unwrap());
+        assert_eq!(o.send.len(), 1); assert_eq!(serde_json::from_str::<Value>(&o.send[0]).unwrap(), json!({"jsonrpc":"2.0","id":5,"method":"session/set_model","params":{"sessionId":"OLD","modelId":"grok-4.5"}}));
+        let p = reply(&mut a, &tt, &serde_json::from_str(r#"{"jsonrpc":"2.0","id":5,"result":{"_meta":{"model":{"Ok":"grok-4.5"}}}}"#).unwrap());
+        assert!(p.send[0].contains("session/prompt") && p.send[0].contains("\"hello\"") && !p.send[0].contains("backplane_instructions"), "{:?}", p.send);
+        let mut b = Acp::new(); reply(&mut b, &tt, &serde_json::from_str(r#"{"jsonrpc":"2.0","id":2,"result":{"sessionId":"OLD"}}"#).unwrap());
+        let no = reply(&mut b, &tt, &serde_json::from_str(r#"{"jsonrpc":"2.0","id":5,"error":{"code":-32602,"message":"unknown model"}}"#).unwrap());
+        assert!(b.done && no.shapes[0]["message"].as_str().unwrap().starts_with("grok could not switch this session to grok-4.5: unknown model"));
+        // no model: the prompt at once, as before
+        let mut c = Acp::new(); let q = reply(&mut c, &t(""), &serde_json::from_str(r#"{"jsonrpc":"2.0","id":2,"result":{"sessionId":"N"}}"#).unwrap()); assert!(q.send[0].contains("session/prompt"));
+    }
 }
