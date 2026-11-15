@@ -29,7 +29,7 @@ pub fn tools(turn: Turn, pinned: bool, settled: bool, archived: bool, forked: bo
         Turn::Failed => v.push(tool("repeat", "Retry", "The turn failed: send your last message again", "retry", "", false, false)),
         _ => {}
     }
-    v.push(if pinned { tool("pin", "Pinned", "Unpin: it sorts with the rest again", "unpin", "", true, false) } else { tool("pin", "Pin", "Keep it at the top of the list", "pin", "", false, false) });
+    v.push(if pinned { tool("pin", "Pinned", "Unpin: it leaves the sidebar when it is done", "unpin", "", true, false) } else { tool("pin", "Pin", "Keep it under its project in the sidebar. It never settles by itself", "pin", "", false, false) });
     v.push(if settled { tool("circle-check", "Settled", "Bring it back to the active threads", "unsettle", "", true, false) } else { tool("circle-check", "Settle", "Done for now: it leaves the active threads", "settle", "", false, false) });
     v.push(if archived { tool("archive", "Archived", "Bring it back from the archive", "unarchive", "", true, false) } else { tool("archive", "Archive", "Put it away in the archive", "archive", "", false, false) });
     v.push(tool("git-fork", "Fork thread", "A new thread that goes on from here", "fork", "", false, false));

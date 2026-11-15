@@ -34,7 +34,7 @@ fn get<'a>(st: &'a State, k: &str) -> &'a str { st.settings.get(k).map(String::a
 fn num(st: &State, k: &str) -> u64 { get(st, k).parse().unwrap_or(0) }
 
 /// One thread's facts as the sections read them, from its live state or from the registry's row.
-struct Th<'a> { t: &'a MergedThread<'a>, word: &'static str, show: bool, needs: bool, kid: bool, settled: bool }
+pub struct Th<'a> { t: &'a MergedThread<'a>, word: &'static str, show: bool, needs: bool, kid: bool, settled: bool }
 /// An archived thread is gone from every list unless it asks the person (Needs you shows it, so the ask is never hidden).
 fn listed(f: &Th) -> bool { !f.t.archived || f.word == "needs" }
 fn word_of(s: &str) -> &'static str {
@@ -108,7 +108,24 @@ fn thread_row(hub: &str, now: u64, p: &MergedProject, f: &Th) -> Value {
         "ago":crate::sidebar::ago(now,t.activity),"activity":t.activity,"pinned":t.pinned,"machine":t.machine,"mark":mark_of(p,&t.machine),
         "project":p.name,"projectKey":p.key,"off":off,"nav":if off { String::new() } else { qid(hub,&t.id) },
         // another machine's thread can be hidden here (its menu's first item on the desktop, a long press on the phones)
-        "hide":hide_of(hub,t),"lead":if hide_of(hub,t).is_empty() { json!([]) } else { json!([{"label":"Hide","action":"thread-hide","value":hide_of(hub,t),"tone":"settle","options":[]}]) }})
+        "hide":hide_of(hub,t),"lead":if hide_of(hub,t).is_empty() { json!([]) } else { json!([{"label":"Hide","action":"thread-hide","value":hide_of(hub,t),"tone":"settle","options":[]}]) },
+        "menu":thread_menu(hub,f)})
+}
+/// A thread row's menu (right click on the desktop, long press on the phones), for a thread of this machine: Pin or Unpin (a pinned thread is a
+/// fixed row under its project, and the clock never settles it), Settle or Unsettle, Archive. `id` is the `thread.act` action a phone sends;
+/// `action` and `value` are what GPUI sends. Another machine's thread has Hide (`hide`) instead; a row from the registry has nothing.
+pub fn thread_menu(hub: &str, f: &Th) -> Value {
+    let t = f.t;
+    if !t.machine.is_empty() || t.src.is_none() || t.archived { return json!([]) }
+    let q = qid(hub, &t.id);
+    let it = |id: &str, label: &str| json!({"id":id,"label":label,"action":format!("row-{id}"),"value":q});
+    json!([if t.pinned { it("unpin", "Unpin") } else { it("pin", "Pin") }, if f.settled { it("unsettle", "Unsettle") } else { it("settle", "Settle") }, it("archive", "Archive")])
+}
+/// Where a pinned thread stands under its project: the pins first, in the order they were pinned (a thread of this machine by its pin's time,
+/// one the registry holds after them), then the rest as they came (newest first).
+fn pin_rank(f: &Th) -> (u8, u64) {
+    if !f.t.pinned { return (1, 0) }
+    (0, f.t.src.and_then(|s| s.threads.get(&f.t.id)).map_or(u64::MAX, |x| x.pinned_at))
 }
 fn hide_of(hub: &str, t: &MergedThread) -> String { if t.machine.is_empty() { String::new() } else { qid(hub, &t.id) } }
 
@@ -296,7 +313,9 @@ fn project_row(st: &State, c: &Ctx, p: &MergedProject, ths: &[Th], gid: &str, gr
     let running = ths.iter().filter(|f| matches!(f.word, "running" | "monitoring" | "limit") || (f.word == "needs" && f.t.src.map_or(false, |s| s.threads.get(&f.t.id).map_or(false, |x| x.turn == Turn::Running)))).count();
     let needs = ths.iter().filter(|f| f.needs).count();
     let q = c.query;
-    let shown: Vec<&Th> = ths.iter().filter(|f| if q.is_empty() { f.show && !f.needs && !f.kid } else { crate::sidebar::word_hit(&f.t.title, q) }).collect();
+    let mut shown: Vec<&Th> = ths.iter().filter(|f| if q.is_empty() { f.show && !f.needs && !f.kid } else { crate::sidebar::word_hit(&f.t.title, q) }).collect();
+    // a pinned thread is a fixed row of its project: first, where it was pinned, whatever runs or stops below it (and never cut by UNDER)
+    if q.is_empty() { shown.sort_by_key(|f| pin_rank(f)); }
     // folded by the person: no rows under it (a search opens it, as it opens the section folds); its counts stay on the row
     let folded = folded_at(st, &p.key) > 0 && q.is_empty();
     let under: Vec<Value> = shown.iter().take(UNDER).map(|f| thread_row(c.hub, c.now, p, f)).collect();

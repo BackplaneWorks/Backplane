@@ -61,6 +61,8 @@ pub fn thread_items(t: &Value, project: &str) -> Vec<Item> {
     let mut v = vec![];
     /* i18n-ok: menu labels, tested; drawn through trs in render */ v.push(if t["pinned"].as_bool().unwrap_or(false) { item("Unpin", "row-unpin", &qid, false) } else { item("Pin", "row-pin", &qid, false) });
     if let Some(l) = t["lead"].as_array().and_then(|l| l.first()) { v.push(item(&s(l, "label"), &s(l, "action"), &s(l, "value"), false)); }
+    // a row of the sections (the hub's `menu`): Settle or Unsettle, by hand (the clock never settles a pinned thread)
+    else if let Some(m) = t["menu"].as_array().and_then(|m| m.iter().find(|x| matches!(x["id"].as_str(), Some("settle" | "unsettle")))) { v.push(item(&s(m, "label"), &s(m, "action"), &s(m, "value"), false)); }
     /* i18n-ok: menu labels, tested; drawn through trs in render */ for o in t["trail"].as_array().into_iter().flatten().flat_map(|x| x["options"].as_array().into_iter().flatten()) { v.push(item(&format!("Snooze {}", s(o, "label").to_lowercase()), "row-snooze", &s(o, "value"), false)); }
     /* i18n-ok: menu labels, tested; drawn through trs in render */ if t["canChild"].as_bool().unwrap_or(true) { v.push(item("New subthread", "thread-child", &format!("{}|{}", raw(&qid), project), false)); }
     /* i18n-ok: menu labels, tested; drawn through trs in render */ if t["depth"].as_u64().unwrap_or(0) > 0 { v.push(item("Move to top level", "row-detach", raw(&qid), false)); }
