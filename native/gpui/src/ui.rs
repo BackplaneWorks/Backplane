@@ -99,6 +99,15 @@ fn node_el(cx: &mut Context<Backplane>, n: &Value, light: bool, depth: usize, pa
 pub(crate) fn with_rect<E: ParentElement + Styled>(e: E, id: impl FnOnce() -> String) -> E { if art::rects_on() { e.relative().child(art::probe_rect(id())) } else { e } }
 pub(crate) fn ic(light: bool, name: &'static str, size: f32, tok: &str) -> AnyElement { art::icon(name, size, theme::color(light, tok)) }
 /// A rail label: it grows with the text size until the longest ("Schematic") fills the rail's 72 px, and no further (it would wrap).
+/// An activity line that is said whole (wrapped) instead of cut at the pane's width: an error, a restart, and a warning, which
+/// is something the person has to read to the end to act on ("Design files not committed to main: …" was cut after "Author i").
+fn act_whole(tone: &str) -> bool { tone.contains("error") || tone.contains("restart") || tone.contains("warn") }
+#[cfg(test)] mod act_tests {
+    #[test] fn a_warning_line_is_said_whole_like_an_error() {
+        /* i18n-ok: tone names the hub sends, not drawn */ for t in ["error", "warn", "info restart"] { assert!(super::act_whole(t), "{t}") }
+        for t in ["info", "", "tool"] { assert!(!super::act_whole(t), "{t}") }
+    }
+}
 fn rail_label() -> Pixels { crate::scale::tpx_max(10., 12.5) }
 fn chip(light: bool, label: String) -> Div {
     let c = |name: &str| theme::color(light, name);
@@ -292,9 +301,9 @@ impl Backplane {
             // s03: the call that runs now, in an open fold of the running turn: its name in the accent with the live mark beside it
             _ if !text.is_empty() && e["now"] == true => div().id(SharedString::from(format!("e-{id}"))).flex().items_center().gap_2().py_1().font(art::mono_font()).text_size(crate::scale::tpx(12.)).text_color(c("text"))
                 .child(div().size(px(6.)).flex_shrink_0().bg(c("accent"))).child(div().text_color(c("accent")).child(string(&e, "label"))).child(div().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().child(text.lines().next().unwrap_or("").to_string())).into_any_element(),
-            // an activity: its kind faint, what it did on one line (a heredoc's first line, "…"), as 0.14's .act; an error or a restart says all of it
+            // an activity: its kind faint, what it did on one line (a heredoc's first line, "…"), as 0.14's .act; an error, a warning or a restart says all of it
             _ if !text.is_empty() => {
-                let tone = string(&e, "tone"); let whole = tone.contains("error") || tone.contains("restart");
+                let tone = string(&e, "tone"); let whole = act_whole(&tone);
                 let line = if whole { crate::i18n::trs(&text) } else { let mut l = text.lines().next().unwrap_or("").to_string(); if text.trim_end().contains('\n') { l.push_str(" …"); } l };
                 let body = div().flex_1().min_w_0().when(!whole, |d| d.overflow_hidden().whitespace_nowrap().text_ellipsis()).when(tone.contains("error") && !tone.contains("restart"), |d| d.text_color(c("bad"))).child(line);
                 div().id(SharedString::from(format!("e-{id}"))).w_full().flex().gap_2().py_1().font(art::mono_font()).text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(div().flex_shrink_0().text_color(c("faint")).child(crate::i18n::trs(&string(&e, "label")))).child(body).into_any_element()
