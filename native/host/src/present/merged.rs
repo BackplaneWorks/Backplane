@@ -270,8 +270,8 @@ mod tests {
         let mut fw2 = st(&[pc("L~p8", "Their name", "/fw/n", 2), tc("L~t8", "L~p8", 50), tc("L~t9", "L~p8", 60)]); fw2.apply(&json!({"$":"ThreadArchived","id":"L~t9","archived":true,"at":61}));
         let far2 = vec![("framework".to_string(), &fw2)];
         let v2 = merged_projects(&here, &far2, &|_| false, &|_| String::new(), "laptop", &[]);
-        assert_eq!(v2[0].threads.iter().map(|t| (t.id.as_str(), t.archived)).collect::<Vec<_>>(), [("L~t9", true), ("L~t8", false)], "archived threads are kept and marked");
-        assert_eq!(row_json(&v2[0])["threadCount"], 1);
+        assert_eq!(v2[0].threads.iter().map(|t| (t.id.as_str(), t.archived)).collect::<Vec<_>>(), [("L~t9", false), ("L~t8", false)], "an archive is a settle now: the thread is listed");
+        assert_eq!(row_json(&v2[0])["threadCount"], 2);
         assert_eq!(row_json(&v[0])["machines"][1]["state"], "on");
     }
 }

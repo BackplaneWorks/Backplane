@@ -370,7 +370,8 @@ struct DataThreadsView: View {
                         else { Button(Tr.t(g.label)) { Task { await client.sidebarAct("group-move", g.value) } } }
                     }
                 } label: { Label(Tr.t(it.label), systemImage: "folder") }
-            case "archive": Button(Tr.t(it.label), systemImage: "archivebox") { Task { await client.sidebarAct("project-archive", it.value) } }
+            // Make quiet / Back to Active (an older hub: Archive)
+            case "archive", "quiet": Button(Tr.t(it.label), systemImage: "moon") { Task { await client.sidebarAct("project-archive", it.value) } }
             case "remove": if let p = proj { Button(Tr.t(it.label), systemImage: "trash", role: .destructive) { projectMenu = p } }
             default: EmptyView()
             }
@@ -433,7 +434,6 @@ struct DataThreadsView: View {
             .swipeActions(edge: .trailing, allowsFullSwipe: false) {
                 if client.has("actions") {
                     Button(Tr.t(t.settled ? "Unsettle" : "Settle")) { Task { await client.threadAct(t.id, t.settled ? "unsettle" : "settle") } }.tint(BackplaneDesign.ok)
-                    Button(Tr.t("Archive")) { Task { await client.threadAct(t.id, "archive") } }.tint(BackplaneDesign.faint)
                 }
             }
             .onAppear { client.prefetch(t.id) }

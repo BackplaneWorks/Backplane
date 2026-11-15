@@ -4075,6 +4075,9 @@ sidebar.sections.failed	Failed	失敗
 sidebar.sections.rename	Rename group	グループ名を変更
 sidebar.sections.pin	Pin project	プロジェクトをピン留め
 sidebar.sections.unpin	Unpin project	プロジェクトのピン留めを外す
+sidebar.sections.quiet.make	Make quiet	静かにする
+sidebar.sections.quiet.back	Back to Active	進行中に戻す
+sidebar.sections.quiet.hint2	Nothing for two weeks, or made quiet	2週間動きなし、または静かにしたもの
 gpui.sections.move.to	Move to {group}	{group}へ移動
 sidebar.sections.move	Move to group	グループへ移動
 sidebar.sections.new.group	New group…	新しいグループ…
