@@ -20,6 +20,8 @@ pub struct Projects {
     pub home: Home,
     /// The page's Edit: (the thread it opened, the text for its composer), put there once that thread is on show.
     pub intent_edit: Option<(String, String)>,
+    /// A board row of the page: (the thread it opened, the board, when), shown there (`view-board`) once that thread's Board page lists it.
+    pub board_edit: Option<(String, String, std::time::Instant)>,
     /// The page's viewer buttons: (the thread it opened, the view kind), sent as `view-kind` once that thread is on show.
     pub view_edit: Option<(String, &'static str)>,
     /// Send on a project's page (0.14's home composer): (the thread on show before, the message, when), sent once the new thread the page
@@ -278,6 +280,14 @@ pub fn sync(this: &mut Backplane, cx: &mut Context<Backplane>) {
             let _ = this.tx.try_send(Command::Draft(text));
         }
     }
+    if let Some((th, rel, at)) = this.screens.projects.board_edit.clone() {
+        let shown = string(&this.data["thread"], "id"); let shown = shown.rsplit('|').next().unwrap_or("").to_string();
+        match board_step(shown == th && this.selected.rsplit('|').next() == Some(th.as_str()), &crate::viewers::boards::list(&this.data["thread"]["viewer"]), &rel, at.elapsed()) {
+            BoardStep::Wait => {}
+            BoardStep::Drop => this.screens.projects.board_edit = None,
+            BoardStep::Show => { this.screens.projects.board_edit = None; let _ = this.tx.try_send(Command::Action("view-board".into(), rel)); }
+        }
+    }
     if let Some((th, kind)) = this.screens.projects.view_edit.clone() {
         let shown = string(&this.data["thread"], "id"); let shown = shown.rsplit('|').next().unwrap_or("").to_string();
         if shown == th && this.selected.rsplit('|').next() == Some(th.as_str()) && this.data["thread"]["loading"] != true {
@@ -441,6 +451,15 @@ pub fn mech_parts(snap: &Value) -> Vec<(String, String, u64)> {
     }).collect();
     v.sort_by(|a, b| b.2.cmp(&a.2).then(a.1.cmp(&b.1))); v
 }
+/// What a page's board row does next, once its thread was opened on Board: wait for the hub's Boards menu to list the board, show it, or let go
+/// (it is the one on show already, or the menu never listed it: a project with one board has none).
+#[derive(Debug, PartialEq)]
+pub enum BoardStep { Wait, Show, Drop }
+pub fn board_step(on_show: bool, menu: &[crate::viewers::boards::Board], rel: &str, waited: std::time::Duration) -> BoardStep {
+    if waited > std::time::Duration::from_secs(10) { return BoardStep::Drop }
+    if !on_show { return BoardStep::Wait }
+    match menu.iter().find(|b| b.value == rel) { Some(b) if b.on => BoardStep::Drop, Some(_) => BoardStep::Show, None => BoardStep::Wait }
+}
 /// The viewers a project's page offers, from what the folder holds: (label, view kind, icon).
 pub fn viewer_buttons(snap: &Value) -> Vec<(&'static str, &'static str, &'static str)> {
     let has = |k: &str| snap["artifacts"].as_array().map_or(false, |a| a.iter().any(|x| x["kind"] == k));
@@ -566,7 +585,20 @@ pub fn page(cx: &mut Context<Backplane>, reg: &super::timeline::Reg, light: bool
     let bs = boards(&snap, &card, &root);
     if !bs.is_empty() {
         out.push(section(light, crate::i18n::tf("gpui.projects.boards", &[("n", bs.len().into())]), None));
-        for (i, b) in bs.iter().enumerate() { out.push(div().id(SharedString::from(format!("home-board-{i}"))).px_2().h(crate::scale::tpx(26.)).flex().items_center().border_b_1().border_color(c("line")).text_size(crate::scale::tpx(12.)).child(b.clone()).into_any_element()); }
+        // a row opens that board on the Board page of the project's top thread (the Boards menu's `view-board`, once the page lists it)
+        for (i, b) in bs.iter().enumerate() {
+            let row = div().id(SharedString::from(format!("home-board-{i}"))).px_2().h(crate::scale::tpx(26.)).flex().items_center().border_b_1().border_color(c("line")).text_size(crate::scale::tpx(12.)).child(b.clone());
+            out.push(match top.clone() {
+                Some(t) => { let rel = b.clone();
+                    ctl.push(CtlEntry { id: format!("home-board:{i}"), label: b.clone(), ctl: Ctl::Select(t.clone()) });
+                    crate::ui::with_rect(row, move || format!("home-board:{i}")).cursor_pointer().hover(|s| s.bg(c("raise"))).on_click(cx.listener(move |this, _, window, cx| {
+                        let raw = t.rsplit('|').next().unwrap_or("").to_string();
+                        this.screens.projects.view_edit = Some((raw.clone(), "board")); this.screens.projects.board_edit = Some((raw, rel.clone(), std::time::Instant::now()));
+                        this.select(t.clone(), window, cx);
+                    })).into_any_element() }
+                None => row.into_any_element(),
+            });
+        }
     }
     out
 }
@@ -690,6 +722,16 @@ mod tests {
 #[cfg(test)]
 mod home_tests {
     /// A page's Send with a linked machine picked: the command names that machine's project, the text waits; refused, the text comes back.
+    #[test] fn a_pages_board_row_shows_its_board_once_the_boards_menu_lists_it() {
+        use std::time::Duration as D;
+        let v: Value = serde_json::from_str(r#"{"boards":[{"label":"a","value":"a.kicad_pcb","on":true,"default":true},{"label":"x/b","value":"x/b.kicad_pcb","on":false}]}"#).unwrap();
+        let menu = crate::viewers::boards::list(&v);
+        assert_eq!(board_step(false, &menu, "x/b.kicad_pcb", D::from_secs(1)), BoardStep::Wait, "its thread is not on show yet");
+        assert_eq!(board_step(true, &[], "x/b.kicad_pcb", D::from_secs(1)), BoardStep::Wait, "the menu has not come yet");
+        assert_eq!(board_step(true, &menu, "x/b.kicad_pcb", D::from_secs(1)), BoardStep::Show);
+        assert_eq!(board_step(true, &menu, "a.kicad_pcb", D::from_secs(1)), BoardStep::Drop, "already the one on show");
+        assert_eq!(board_step(true, &[], "x/b.kicad_pcb", D::from_secs(11)), BoardStep::Drop, "a project with one board has no menu: the Board page is what opens");
+    }
     #[test] fn a_page_send_goes_to_the_machine_picked_and_a_refusal_gives_the_text_back() {
         let d: serde_json::Value = serde_json::from_str(r#"{"projects":[{"id":"h|pA1","runsOn":"runs on boat-hub","newOn":[{"value":"L~pB1","label":"New thread on boat-hub","kind":"machine","on":true},{"value":"pA1","label":"New thread on desktop","kind":"machine"},{"value":"github.com/o/demo","label":"A Boat (fresh clone)","kind":"boat","disabled":true}]}]}"#).unwrap();
         match page_send(&d, "pA1", "a thread sent to boat-hub", None) { Some(Ok((Command::Action(a, v), t))) => { assert_eq!((a.as_str(), v.as_str(), t.as_str()), ("new-thread", "L~pB1", "a thread sent to boat-hub")) } other => panic!("{other:?}") }

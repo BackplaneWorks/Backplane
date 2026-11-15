@@ -921,16 +921,23 @@ object DataClient {
     suspend fun checksFocus(id: String) { call("kicad.checks.focus", JSONObject().put("project", mgmtProject).put("id", id)) }
 
     // ---- viewers, files, browser (features viewers, files, browser; native/host/src/data/ext.rs)
-    data class ProjectFiles(val root: String, val pcb: String, val sch: String)
-    suspend fun viewerFiles(tid: String): ProjectFiles { val r = call("viewer.files", JSONObject().put("thread", tid)); return ProjectFiles(r.optString("root"), r.optString("pcb"), r.optString("sch")) }
+    /** A board of the viewer's picker (the hub's `boards`): `pcb` and `sch` are the paths its pages watch, "" for the project's own board (`default`), whose pages follow the project. */
+    data class BoardRow(val label: String, val value: String, val default: Boolean, val pcb: String, val sch: String)
+    data class ProjectFiles(val root: String, val pcb: String, val sch: String, val boards: List<BoardRow> = emptyList()) {
+        /** The board on show: the one picked, else the project's own, else the first listed; null when the hub lists no picker (one board or none). */
+        fun board(picked: String): BoardRow? = boards.firstOrNull { it.value == picked } ?: boards.firstOrNull { it.default } ?: boards.firstOrNull()
+    }
+    suspend fun viewerFiles(tid: String): ProjectFiles { val r = call("viewer.files", JSONObject().put("thread", tid))
+        val boards = r.optJSONArray("boards")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { BoardRow(it.optString("label"), it.optString("value"), it.optBoolean("default"), it.optString("pcb"), it.optString("sch")) } }.orEmpty()
+        return ProjectFiles(r.optString("root"), r.optString("pcb"), r.optString("sch"), boards) }
     fun stopWatch(tid: String) { scope.launch { runCatching { call("viewer.watch", JSONObject().put("thread", tid).put("kind", "")) } } }
     /** A viewer (tab, file, thread) opens: the last one's plots go at once and late ones for it are dropped (PlotStore.begin/shown);
      *  a 3D view shows its own cached model once the hub names that model's file among the view's. A stop changes nothing here. */
-    suspend fun watch(tid: String, kind: String, path: String = "") {
+    suspend fun watch(tid: String, kind: String, path: String = "", board: String = "") {
         val slot = if (kind.startsWith("3d")) listOf(hubName, tid, kind, path).joinToString("|") else ""
         val begun = if (kind.isNotEmpty()) withContext(Dispatchers.Main) { plots.begin(slot) } else null
         val kept = begun?.kept.orEmpty(); val serial = begun?.serial ?: 0
-        val r = try { call("viewer.watch", JSONObject().put("thread", tid).put("kind", kind).apply { if (path.isNotEmpty()) put("path", path); if (kept.isNotEmpty()) put("kept", kept) }) }
+        val r = try { call("viewer.watch", JSONObject().put("thread", tid).put("kind", kind).apply { if (path.isNotEmpty()) put("path", path); if (kept.isNotEmpty()) put("kept", kept); if (board.isNotEmpty()) put("board", board) }) }
             catch (e: Exception) { if (kind.isNotEmpty()) withContext(Dispatchers.Main) { plots.failed(serial) }; throw e }
         if (kind.isEmpty()) return
         val keys = r.optJSONArray("keys")?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty()

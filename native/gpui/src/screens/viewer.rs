@@ -168,7 +168,9 @@ pub fn diff_controls(diff: &Value) -> Vec<(&'static str, &'static str, &'static 
 }
 
 /// The room (px) the pane's controls take in a page's top right corner, left free by the 3D page's own floating tools.
-pub const CORNER_ROOM: f32 = 150.0;
+pub const CORNER_ROOM: f32 = 182.0;
+/// What the Boards menu's button adds to that room on 3D (its 260 px and the gap after it), so the view buttons wrap before it, never under it.
+pub const BOARDS_ROOM: f32 = 266.0;
 /// The pane's own controls, at the end of the page's toolbar row: where the page comes from (another machine's thread: "desktop: boards/x.kicad_pcb"),
 /// Open in KiCad (while there is a board or schematic) and Close. They were the tab bar's; the rail picks the page now.
 fn pane_actions(cx: &mut Context<Backplane>, light: bool, thread: &Value, target: Option<&super::attach::Target>, diff_on: bool, editing: bool) -> AnyElement {
@@ -698,7 +700,7 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
             let have = solid.map(|s| s.read(cx).shown_key().to_string()).unwrap_or_default();
             let ready = matches!(solid, Some(s) if solid_ready(&want, &have));
             // the 3D page's own tools float top left over the model: they wrap short of the corner the pane's controls take
-            if let Some(s) = solid { let room = if open == "3d" && ready { CORNER_ROOM + if crate::viewers::boards::list(viewer).len() > 1 { 240. } else { 0. } } else { 0. }; if s.read(cx).reserve != room { s.update(cx, |p, cx| { p.reserve = room; cx.notify(); }); } }
+            if let Some(s) = solid { let room = if open == "3d" && ready { CORNER_ROOM + if crate::viewers::boards::list(viewer).len() > 1 { BOARDS_ROOM } else { 0. } } else { 0. }; if s.read(cx).reserve != room { s.update(cx, |p, cx| { p.reserve = room; cx.notify(); }); } }
             let model: AnyElement = if open == "mech" && key_empty { div().into_any_element() } else { match solid { Some(s) if ready => div().flex_1().min_h_0().child(s.clone()).into_any_element(), _ => model_loading(light, &trs("Loading the model…")) } };
             if open == "mech" { let a = acts(cx); div().size_full().flex().flex_col().child(mech_chrome(cx, light, viewer, key_empty, a)).child(model).into_any_element() }
             else if ready { let a0 = acts(cx); let a = with_boards(cx, light, viewer, pv, a0); in_corner(div().size_full().flex().flex_col().child(model).into_any_element(), a) }
