@@ -14,7 +14,10 @@
 #       the unsaved board (unsaved true, "live, unsaved"); the earlier rows keep their ids, the new track's finding joins; the board file
 #       on disk is unchanged
 #   K4  a focus on a finding with board items selects those exact items in KiCad (SelectItems ids, the box round them)
-#   K5  (informational) a click on one of KiCad's own DRC markers in the canvas (XTest; the view centred on the marker by SelectItems at_nm and a box,
+#   K7  (canvas-idle, batch 8) a wheel zoom over KiCad's canvas, an unsaved edit made during it: the automatic DRC is held for the
+#       canvas (KiCad's RunChecks refusal) and runs in KiCad once the canvas has been quiet the hub's 3 s
+#   K5  (click-marker, batch 8) ClickMarker on a DRC marker: the panel shows its row, as a click on it would. Without the capability,
+#       informational: a click on one of KiCad's own DRC markers in the canvas on one of KiCad's own DRC markers in the canvas (XTest; the view centred on the marker by SelectItems at_nm and a box,
 #       the marker found by its colour near the centre) shows its row: info review.clicked.<digest> names the finding of its items
 # CHECKS_BOARD=<a project folder> runs it on a copy of that project instead of the fixture (Hubble_DK, Collar).
 # Copies only (seed_project.py). Fork mode; skips when the embedded editor's GetCapabilities lacks embed-checks.
@@ -296,13 +299,30 @@ tot = [r["selected"] for r in rows if "selected" in r]
 if tot: print(f"total: median {statistics.median(tot):.1f} ms, max {max(tot):.1f} ({len(tot)} focuses)")
 PY
 echo "INFO focus in the hub (step: own time): $(tr '\n' ';' <"$OUT/focus_timing.txt")"
+# K7: a wheel zoom holds the automatic run (canvas-idle)
+if echo "$CAPS" | grep -q 'canvas-idle'; then
+  R7=$(last_kicad_report "$OUT/client.log" ready)
+  read -r WX WY < <(python3 -c 'import json,sys; r=json.loads(sys.argv[1]); f=next((f for f in r.get("frames",[]) if f.get("xid")==r.get("shown")),{}); print(f.get("root_x",0)+f.get("w",0)//2, f.get("root_y",0)+f.get("h",0)//2+45)' "$R7")
+  H0=$(grep -c "held for its canvas" "$OUT/hub.log" || true)
+  python3 "$KEMBED_LIB/rt_input.py" wheel "$WX" "$WY" 14 30 >"$OUT/k7_wheel.json" 2>>"$OUT/ipc.err" &
+  WP=$!; sleep 1
+  ADD7=$(python3 "$IPC_PY" agent-add-track "$SOCK" "$(python3 -c "print($TX-2)")" "$(python3 -c "print($TY+3)")" "$(python3 -c "print($TX+2)")" "$(python3 -c "print($TY+3)")" 0.25 3 2>>"$OUT/ipc.err" || echo '{}')
+  wait "$WP" || true
+  TW1=$(python3 -c 'import json,sys; print(int(json.load(open(sys.argv[1]))["t1"]))' "$OUT/k7_wheel.json" 2>/dev/null || echo 0)
+  S7=$(wait_summary "d['in_editor'] and d['at'] > $TW1" 120) || true
+  H1=$(grep -c "held for its canvas" "$OUT/hub.log" || true)
+  AT7=$(python3 -c 'import json,sys; print(json.loads(sys.argv[1])["result"]["drc"]["at"])' "$S7" 2>/dev/null || echo 0)
+  echo "INFO K7: wheel $(cat "$OUT/k7_wheel.json" 2>/dev/null | cut -c1-120); edit $(echo "$ADD7" | cut -c1-80); held $((H1 - H0)) times: $(grep "held for its canvas" "$OUT/hub.log" | tail -1 | cut -c1-200); DRC ended $((AT7 - TW1)) ms after the last notch"
+  check "A wheel zoom in KiCad's canvas held the automatic DRC (canvas-idle), which ran in KiCad once the canvas was quiet" "$([ "$((H1 - H0))" -gt 0 ] && [ "$TW1" -gt 0 ] && [ "$((AT7 - TW1))" -ge 2500 ] && echo 1 || echo 0)" "held $((H1 - H0)), DRC ended $((AT7 - TW1)) ms after the wheel"
+fi
+
 # K5: KiCad's own marker clicked in the canvas. GetMarkers gives an error marker's place and items; SelectItems centres the view on it in
 # a 4 mm box; the marker is KiCad's DRC error colour (default theme rgba(215, 91, 107), blended) nearest the frame's centre.
 ask kicad_ipc "{\"path\":\"$PCB\",\"type\":\"kiapi.backplane.embed.GetMarkers\",\"message\":{\"kind\":\"FK_PCB\"}}" >"$OUT/markers.txt"
-read -r MX MY MITEMS MTYPE < <(python3 -c 'import json,re,sys
+read -r MX MY MITEMS MID MTYPE < <(python3 -c 'import json,re,sys
 t=open(sys.argv[1]).read(); i=t.find("{"); 
 try: o=json.loads(t[i:])
-except Exception: print("0 0 - -"); sys.exit()
+except Exception: print("0 0 - - -"); sys.exit()
 def find(v):
     if isinstance(v, dict):
         if "markers" in v: return v["markers"]
@@ -318,14 +338,23 @@ def find(v):
             if r is not None: return r
     return None
 ms=[m for m in (find(o) or []) if m.get("severity")=="error" and m.get("at_nm") and m.get("items") and not m.get("excluded")]
-if not ms: print("0 0 - -"); sys.exit()
+if not ms: print("0 0 - - -"); sys.exit()
 # an error marker alone (no other marker within 3 mm), so the arrows near it on the screen are its own
 allm=[m for m in (find(o) or []) if m.get("at_nm")]
 xy=lambda m: (int(m["at_nm"].get("x_nm",0)), int(m["at_nm"].get("y_nm",0)))
 alone=[m for m in ms if all(n is m or (xy(n)[0]-xy(m)[0])**2+(xy(n)[1]-xy(m)[1])**2 > 3000000**2 for n in allm)]
-m=(alone or ms)[0]; print(int(m["at_nm"].get("x_nm",0)), int(m["at_nm"].get("y_nm",0)), ",".join(sorted(x["value"] for x in m["items"])), m.get("type",""))' "$OUT/markers.txt")
-echo "INFO the marker to click: $MTYPE at ($MX,$MY) nm, items $MITEMS"
-if [ "${MX:-0}" != 0 ]; then
+m=(alone or ms)[0]; print(int(m["at_nm"].get("x_nm",0)), int(m["at_nm"].get("y_nm",0)), ",".join(sorted(x["value"] for x in m["items"])), (m.get("id") or {}).get("value") or "-", m.get("type",""))' "$OUT/markers.txt")
+echo "INFO the marker to click: $MTYPE $MID at ($MX,$MY) nm, items $MITEMS"
+want_row() { python3 -c 'import json,sys; fs=json.load(open(sys.argv[1]))["result"]["findings"]; it=set(sys.argv[2].split(","))
+print(next((f["id"] for f in fs if f["rule"]==sys.argv[3] and set(a.get("uuid") for a in f["anchors"] if a.get("uuid"))==it), ""))' "$(list drc)" "$MITEMS" "$MTYPE"; }
+if [ "${MX:-0}" != 0 ] && [ "$MID" != "-" ] && echo "$CAPS" | grep -q 'click-marker'; then
+  CKR=$(ask kicad_ipc "{\"path\":\"$PCB\",\"type\":\"kiapi.backplane.embed.ClickMarker\",\"message\":{\"kind\":\"FK_PCB\",\"marker\":{\"value\":\"$MID\"}}}")
+  CLK=""; for _ in $(seq 20); do CLK=$(hub_rpc "[]" 2>/dev/null | grep '^INFO ' | grep '"review.clicked.' | tail -1 | cut -c6- || true); [ -n "$CLK" ] && break; sleep 0.5; done
+  GOT=$(python3 -c 'import json,sys; v=json.loads(sys.argv[1] or "{}").get("value") or {}; v=json.loads(v) if isinstance(v,str) else v; print(v.get("id") or "none")' "$CLK" 2>/dev/null || echo none)
+  WANT=$(want_row)
+  echo "INFO K5 ClickMarker: $(echo "$CKR" | cut -c1-200); the hub: $(grep "marker clicked" "$OUT/hub.log" | tail -1 | cut -c1-160)"
+  check "ClickMarker on KiCad's DRC marker (click-marker): the panel shows its row ($WANT)" "$([ -n "$WANT" ] && [ "$GOT" = "$WANT" ] && echo 1 || echo 0)" "showed $GOT"
+elif [ "${MX:-0}" != 0 ]; then
   BOX=$(python3 -c 'import sys; x,y=int(sys.argv[1]),int(sys.argv[2]); print("{\"position\":{\"x_nm\":%d,\"y_nm\":%d},\"size\":{\"x_nm\":4000000,\"y_nm\":4000000}}" % (x-2000000, y-2000000))' "$MX" "$MY")
   ask kicad_ipc "{\"path\":\"$PCB\",\"type\":\"kiapi.backplane.embed.SelectItems\",\"message\":{\"kind\":\"FK_PCB\",\"at_nm\":{\"x_nm\":$MX,\"y_nm\":$MY},\"zoom_box_nm\":$BOX}}" >/dev/null
   sleep 1.5
