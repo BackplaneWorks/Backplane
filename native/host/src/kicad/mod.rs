@@ -6,6 +6,7 @@ pub mod cad;
 pub mod canonical;
 pub mod checks;
 pub mod embed;
+pub mod hostlibs;
 pub mod ipc;
 pub mod kedit;
 pub mod kexport;

@@ -540,6 +540,32 @@ pub fn install_row(session: &Value, info: &Value, pkg: Option<&crate::files::kic
     })
 }
 
+/// What a press on Install FreeCAD would do on this computer (settings/tools_install.rs `plan`): Some(true) it installs here (FreeCAD's own
+/// release on Linux and macOS, winget on Windows), Some(false) only its download page.
+fn freecad_plan(st: &State) -> Option<bool> {
+    let os = match std::env::consts::OS { "macos" => "darwin", o => o };
+    let arch = match std::env::consts::ARCH { "x86_64" => "x64", "aarch64" => "arm64", a => a };
+    let winget = serde_json::from_str::<Value>(set(st, "onboard.checks", "")).map_or(false, |c| c["winget"] == true);
+    crate::settings::tools_install::plan("freecad", os, arch, winget, false).map(|p| !matches!(p, crate::settings::tools_install::Plan::Link(_)))
+}
+/// Settings > CAD's Install FreeCAD row, only while no FreeCAD is found: what it downloads and where it goes, the consent step, how it
+/// goes (info `onboard.installs`, the same install setup's button runs) and its failure. `here`: `freecad_plan`.
+pub fn freecad_install_row(session: &Value, info: &Value, here: Option<bool>) -> Option<Value> {
+    let i = |k: &str| info[k].as_str().unwrap_or("");
+    if !i("freecad").is_empty() { return None }
+    let st: Value = serde_json::from_str(i("onboard.installs")).unwrap_or_default();
+    let (state, note) = (st["freecad"]["state"].as_str().unwrap_or(""), st["freecad"]["note"].as_str().unwrap_or(""));
+    let home = i("home"); let into = if home.is_empty() { "Backplane's own folder".to_string() } else { format!("{home}/freecad") };
+    Some(match (here?, state) {
+        (false, _) => row("Install FreeCAD", "Download FreeCAD from freecad.org, then set its path above.", vec![]),
+        (_, "running") => row("Installing FreeCAD", &format!("{}.", note.trim_end_matches('.')), vec![]),
+        (_, _) if draft(session, "@finstall") == "ask" => row("Install FreeCAD?", &format!("Downloads the latest FreeCAD (about 800 MB, 3 GB unpacked) from github.com/FreeCAD/FreeCAD, checks its checksum and unpacks it into {into}. It needs no administrator password and changes nothing else on this computer."),
+            vec![btn("Install", "freecad-install", "", true), btn("Cancel", "freecad-install-cancel", "", false)]),
+        (_, "failed") => row("Install FreeCAD", &format!("{}.", note.trim_end_matches('.')), vec![btn("Try again", "freecad-install-ask", "", true)]),
+        _ => row("Install FreeCAD", "FreeCAD's own release for this computer. Agents make mechanical parts with it.", vec![btn("Install FreeCAD", "freecad-install-ask", "", true)]),
+    })
+}
+
 /// The install row while it runs: setup's words and bar (`onboard::install_progress`).
 fn running_row(label: &str, st: &Value, version: &str, note: &str) -> Value {
     let (words, bar) = super::onboard::install_progress(st, &format!(" {version}"), note);
@@ -548,8 +574,8 @@ fn running_row(label: &str, st: &Value, version: &str, note: &str) -> Value {
     let mut r = row(label, &step, vec![]); if let Some(b) = bar { r["progress"] = json!(b); } r
 }
 /// Settings > CAD: the KiCad the hub found (what it told: `kicad.*`), Install KiCad while none is, the path field, the IPC switch, and FreeCAD.
-fn cad(st: &State, session: &Value, info: &Value) -> Vec<Value> { cad_with(st, session, info, crate::files::kicad::install::package()) }
-fn cad_with(st: &State, session: &Value, info: &Value, pkg: Option<&crate::files::kicad::install::Package>) -> Vec<Value> {
+fn cad(st: &State, session: &Value, info: &Value) -> Vec<Value> { cad_with(st, session, info, crate::files::kicad::install::package(), freecad_plan(st)) }
+fn cad_with(st: &State, session: &Value, info: &Value, pkg: Option<&crate::files::kicad::install::Package>, fc_here: Option<bool>) -> Vec<Value> {
     let i = |k: &str| info[k].as_str().unwrap_or("");
     let kicad = match (i("kicad.status"), i("kicad.version"), i("kicad.cli")) {
         // a stock KiCad is named as one: "version 10.0.7" read as if nothing were amiss (the row under it says what Backplane KiCad adds)
@@ -568,8 +594,9 @@ fn cad_with(st: &State, session: &Value, info: &Value, pkg: Option<&crate::files
     let fpath = if session["drafts"]["@f.fpath"].is_string() { draft(session, "@f.fpath") } else { set(st, "freecad.path", "") };
     let mut v = vec![row_f("KiCad", &kicad, vec![field("kpath", "Path to KiCad's command line, empty for the one on PATH", path)], vec![btn("Set", "kicad-path", "", true)])];
     v.extend(install_row(session, info, pkg));
+    v.push(row_f("FreeCAD", &free, vec![field("fpath", "Path to FreeCAD's command line (freecadcmd), empty to look for it", fpath)], vec![btn("Set", "freecad-path", "", true)]));
+    v.extend(freecad_install_row(session, info, fc_here));
     v.extend([
-        row_f("FreeCAD", &free, vec![field("fpath", "Path to FreeCAD's command line (freecadcmd), empty to look for it", fpath)], vec![btn("Set", "freecad-path", "", true)]),
         row("KiCad over its API", "Lets agents edit a board in a running KiCad. Off uses the files only.", chips(&["on", "off"], set(st, "kicad.ipc", "on"), "kicad.ipc")),
         row("Board 3D", "How a board's 3D model is made: natively, the board at once and its parts as they convert, or by kicad-cli, all at the end.", chips(&["native", "kicad-cli"], set(st, "viewer.board3d", "native"), "viewer.board3d")),
     ]);
@@ -784,6 +811,12 @@ pub fn act(hub: &str, session: &Value, action: &str, value: &str) -> Option<Out>
         "kicad-install" => {
             if draft(session, "@kinstall") != "ask" { return Some(Out { patch: json!({"drafts": {"@kinstall": "ask"}}), cmds }) }
             send(session, hub, "kicad.install", json!({"consent": true}), &mut cmds, &mut rid); json!({"drafts": {"@kinstall": ""}})
+        }
+        "freecad-install-ask" => json!({"drafts": {"@finstall": "ask"}}),
+        "freecad-install-cancel" => json!({"drafts": {"@finstall": ""}}),
+        "freecad-install" => {
+            if draft(session, "@finstall") != "ask" { return Some(Out { patch: json!({"drafts": {"@finstall": "ask"}}), cmds }) }
+            send(session, hub, "onboard.install", json!({"tool": "freecad"}), &mut cmds, &mut rid); json!({"drafts": {"@finstall": ""}})
         }
         "freecad-path" => {
             if !session["drafts"]["@f.fpath"].is_string() { return Some(Out { patch: json!({}), cmds }) }
@@ -1104,7 +1137,30 @@ mod tests {
         assert!(o.cmds[0]["text"].as_str().unwrap().contains(r#""key":"kicad.path","value":"/opt/kicad/bin""#));
     }
     fn cad_rows(info: Value, drafts: Value, pkg: Option<&crate::files::kicad::install::Package>) -> Vec<Value> {
-        let r = cad_with(&st(&[]), &json!({"drafts": drafts}), &info, pkg); r
+        let r = cad_with(&st(&[]), &json!({"drafts": drafts}), &info, pkg, None); r
+    }
+    #[test] fn install_freecad_shows_only_while_freecad_is_not_found_and_asks_first() {
+        let rows = |info: Value, drafts: Value, here: Option<bool>| cad_with(&st(&[]), &json!({"drafts": drafts}), &info, None, here);
+        let label = |r: &[Value], l: &str| r.iter().find(|x| x["label"] == l).cloned();
+        let none = json!({"kicad.cli": "/usr/bin/kicad-cli", "home": "/h"});
+        let r = rows(none.clone(), json!({}), Some(true));
+        let at = r.iter().position(|x| x["label"] == "FreeCAD").unwrap();
+        assert_eq!(r[at + 1]["label"], "Install FreeCAD", "under FreeCAD's own row"); assert_eq!(btns(&r[at + 1]), [("Install FreeCAD".to_string(), "freecad-install-ask".to_string())]);
+        let ask = label(&rows(none.clone(), json!({"@finstall": "ask"}), Some(true)), "Install FreeCAD?").unwrap();
+        assert_eq!(btns(&ask)[0], ("Install".to_string(), "freecad-install".to_string())); assert!(ask["note"].as_str().unwrap().contains("/h/freecad") && ask["note"].as_str().unwrap().contains("github.com/FreeCAD/FreeCAD"));
+        let mut run = none.clone(); run["onboard.installs"] = json!(json!({"freecad": {"state": "running", "note": "Downloading FreeCAD 1.1.4"}}).to_string());
+        assert_eq!(label(&rows(run, json!({}), Some(true)), "Installing FreeCAD").unwrap()["note"], "Downloading FreeCAD 1.1.4.");
+        let mut bad = none.clone(); bad["onboard.installs"] = json!(json!({"freecad": {"state": "failed", "note": "FreeCAD checksum mismatch"}}).to_string());
+        let f = label(&rows(bad, json!({}), Some(true)), "Install FreeCAD").unwrap(); assert_eq!(f["note"], "FreeCAD checksum mismatch."); assert_eq!(btns(&f)[0].1, "freecad-install-ask");
+        // only a download page here: said, with no button; found: no row; nothing known of this computer: no row
+        let page = label(&rows(none.clone(), json!({}), Some(false)), "Install FreeCAD").unwrap(); assert!(btns(&page).is_empty() && page["note"].as_str().unwrap().contains("freecad.org"));
+        let mut found = none.clone(); found["freecad"] = json!("/usr/bin/freecadcmd");
+        assert!(label(&rows(found, json!({}), Some(true)), "Install FreeCAD").is_none());
+        assert!(label(&rows(none, json!({}), None), "Install FreeCAD").is_none());
+        // the press: asks first, then starts the same install setup's button runs
+        let o = act("h", &json!({"rid": 3, "drafts": {}}), "freecad-install", "").unwrap(); assert_eq!(o.patch["drafts"]["@finstall"], "ask"); assert!(o.cmds.is_empty());
+        let o = act("h", &json!({"rid": 3, "drafts": {"@finstall": "ask"}}), "freecad-install", "").unwrap();
+        assert!(o.cmds[0]["text"].as_str().unwrap().contains(r#""m":"onboard.install""#) && o.cmds[0]["text"].as_str().unwrap().contains(r#""tool":"freecad""#));
     }
     fn btns(r: &Value) -> Vec<(String, String)> { r["buttons"].as_array().unwrap().iter().map(|b| (b["label"].as_str().unwrap().to_string(), b["action"].as_str().unwrap().to_string())).collect() }
     #[test] fn install_kicad_shows_only_while_kicad_is_not_found() {
@@ -1173,11 +1229,11 @@ mod tests {
     }
     #[test] fn a_kicad_path_that_holds_no_kicad_is_said_to_be_passed_over() {
         let used = json!({"kicad.cli": "/usr/bin/kicad-cli", "kicad.version": "10.0.6"});
-        let bad = cad_with(&st(&[("kicad.path", "/nonexistent/kicad-cli")]), &json!({"drafts": {}}), &used, None);
+        let bad = cad_with(&st(&[("kicad.path", "/nonexistent/kicad-cli")]), &json!({"drafts": {}}), &used, None, None);
         assert_eq!(bad[0]["note"], "version 10.0.6 · /usr/bin/kicad-cli. Nothing runs at /nonexistent/kicad-cli, so this one is used.");
-        let folder = cad_with(&st(&[("kicad.path", "/opt/kicad/")]), &json!({"drafts": {}}), &json!({"kicad.cli": "/opt/kicad/bin/kicad-cli", "kicad.version": "9.0.1"}), None);
+        let folder = cad_with(&st(&[("kicad.path", "/opt/kicad/")]), &json!({"drafts": {}}), &json!({"kicad.cli": "/opt/kicad/bin/kicad-cli", "kicad.version": "9.0.1"}), None, None);
         assert_eq!(folder[0]["note"], "version 9.0.1 · /opt/kicad/bin/kicad-cli", "a folder that holds the one used is fine");
-        assert_eq!(cad_with(&st(&[]), &json!({"drafts": {}}), &used, None)[0]["note"], "version 10.0.6 · /usr/bin/kicad-cli");
+        assert_eq!(cad_with(&st(&[]), &json!({"drafts": {}}), &used, None, None)[0]["note"], "version 10.0.6 · /usr/bin/kicad-cli");
     }
     #[test] fn cad_sets_the_freecad_path_on_a_press() {
         let r = pg_rows("cad", &[], json!({}), json!({"kicad.cli": "/usr/bin/kicad-cli"}));

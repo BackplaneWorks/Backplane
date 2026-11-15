@@ -2138,6 +2138,9 @@ gpui.kcomment.hint = Enter でスレッドに投稿 · Esc で取り消し
 gpui.kcomment.not.posted = コメントは投稿されませんでした: {why}
 gpui.keys.kcomment = KiCad で選択中のものにコメント (Backplane からもエディタ内からも): Enter で投稿、Esc で取り消し
 gpui.c.kicad.dialog = KiCad で「{title}」が開いています
+gpui.c.kicad.full.screen = 全画面
+gpui.c.kicad.exit.full.screen = 全画面を終了
+gpui.c.kicad.the.editor.takes.the.whole = エディタがウィンドウ全体を使います。この行だけが残ります
 
 # ---- gpui-d: setup, pairing, hubs, palette, picker, projects, composer, menus ----
 gpui.assets.missing = {dir} にアセットがありません: {files}
@@ -2426,7 +2429,7 @@ gpui.e.subs.where = このスレッドのエージェント内の{harness}サブ
 gpui.e.picker.already = {path}はすでにプロジェクトです
 gpui.e.picker.create = {path}を作成
 gpui.e.picker.notdir = {path}はフォルダではありません
-gpui.e.picker.hint = フォルダのパス（例：~/projects/board）
+gpui.e.picker.hint = フォルダのパス（例：~/projects/board）、またはクローンするGitリポジトリのアドレス
 gpui.e.fab.nogoal = 目標はまだありません。編集して、このプロジェクトの目的を書いてください。
 gpui.e.fab.unavailable.line = 見積もりできません：{error} · {line}
 gpui.e.fab.buy.label = 購入する · {label}
@@ -2616,6 +2619,14 @@ gpui.side.old.chats.that.belong.to = どのプロジェクトにも属さない�
 gpui.side.group.projects = プロジェクトをグループ化
 gpui.side.on.projects.with.nothing.going = オン: 最近動きのないプロジェクトを Git のオーナー（なければフォルダ）ごとにまとめます。オフ: 1 つの一覧にし、自分で作ったグループだけを表示します。
 gpui.side.no.group = グループなし
+gpui.e.freecad.install = FreeCADをインストール
+gpui.e.freecad.ask = FreeCADをインストールしますか？
+gpui.e.freecad.installing = FreeCADをインストール中
+gpui.e.freecad.page = freecad.orgからFreeCADをダウンロードし、上でそのパスを設定してください。
+gpui.e.freecad.ask.note = 最新のFreeCAD（約800 MB、展開後3 GB）をgithub.com/FreeCAD/FreeCADからダウンロードし、チェックサムを確認して{into}に展開します。管理者パスワードは不要で、このコンピュータの他の部分は変更しません。
+gpui.e.freecad.offer = このコンピュータ用のFreeCAD公式リリースです。エージェントはこれで機構部品を作ります。
+gpui.e.picker.clone.hint = リポジトリをクローンしてプロジェクトとして追加します
+gpui.e.picker.clone.typed = {origin}をクローン
 
 # ---- gpui-f: hub setup flow and thread ----
 gpui.f.group.install = インストール

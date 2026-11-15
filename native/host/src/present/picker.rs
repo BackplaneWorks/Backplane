@@ -103,6 +103,20 @@ fn shown<'a>(names: &'a [(String, String)], part: &str) -> (Vec<&'a str>, usize)
     let n = out.len() + all.count(); (out, n)
 }
 
+/// The Git repository typed where a folder's path goes (`https://github.com/o/r.git`, `git@github.com:o/r`, `github.com/o/r`), as the
+/// remote `project.clone` takes (`host/path`); None for a path or anything else.
+pub fn repo_typed(text: &str) -> Option<String> {
+    let t = text.trim();
+    // pasted after the folder already in the field (`~/`, a folder gone into): the address starts where its scheme does
+    let t = match ["https://", "http://", "ssh://", "git://", "git@"].iter().filter_map(|m| t.find(m)).min() { Some(i) if i > 0 && t[..i].ends_with('/') => &t[i..], _ => t };
+    if t.is_empty() || t.chars().any(char::is_whitespace) || t.contains("..") || t.starts_with(['~', '/', '.', '-']) { return None }
+    let url = ["http://", "https://", "ssh://", "git://"].iter().any(|s| t.starts_with(s)) || (t.contains('@') && t.contains(':') && !t.contains("://"));
+    // a bare `host.tld/owner/repo`: the first part is a host name with a dot, and there are an owner and a repository after it
+    let bare = !url && !t.contains(':') && t.split('/').next().is_some_and(|h| h.contains('.') && h.chars().all(|c| c.is_ascii_alphanumeric() || c == '.' || c == '-')) && t.trim_end_matches('/').split('/').count() >= 3;
+    let o = crate::mirror::normalize_origin(&if bare { format!("https://{t}") } else if url { t.to_string() } else { return None });
+    (o.split('/').count() >= 3 && !o.contains("..")).then_some(o)
+}
+
 /// `roots`: every project's (folder, id).
 pub fn folders(drafts: &Value, home: &str, roots: &[(&str, &str)]) -> Value {
     if drafts["@proj.open"].as_str() != Some("1") { return Value::Null }
@@ -111,6 +125,13 @@ pub fn folders(drafts: &Value, home: &str, roots: &[(&str, &str)]) -> Value {
 }
 fn folders_in(cache: &Shared, drafts: &Value, home: &str, roots: &[(&str, &str)]) -> Value {
     let text = drafts["@proj.text"].as_str().filter(|t| !t.is_empty()).unwrap_or("~/").to_string();
+    // a Git repository's address typed instead of a folder: one row, Clone, which then asks where (the same steps as Clone it here)
+    if drafts["@proj.clone"].as_str().unwrap_or("").is_empty() {
+        if let Some(origin) = repo_typed(&text) {
+            return json!({"text": text, "hint": "Clones the repository and adds it as a project", "error": "", "more": 0, "cut": false,
+                "items": [{"label": format!("Clone {origin}"), "action": "proj-clone", "value": origin, "kind": "add"}]});
+        }
+    }
     let x = expand(&text, home);
     let (dir, part) = split(&x);
     check(cache, &dir, &part);
@@ -153,7 +174,7 @@ fn folders_in(cache: &Shared, drafts: &Value, home: &str, roots: &[(&str, &str)]
         items.push(it);
     }
     let error = if Path::new(&dir).is_dir() { String::new() } else { format!("{} is not a folder", t(&dir)) };
-    let hint = if clone.is_empty() { "Path of a folder, e.g. ~/projects/board".to_string() } else { format!("Where to clone {clone}") };
+    let hint = if clone.is_empty() { "Path of a folder, e.g. ~/projects/board, or a Git repository's address to clone it".to_string() } else { format!("Where to clone {clone}") };
     // `more`: the folders that match past the rows sent (typing narrows them); `cut`: the folder holds more entries than are read, so there may be others
     json!({"text": text, "hint": hint, "error": error, "items": items, "more": more, "cut": cut})
 }
@@ -164,6 +185,13 @@ mod tests {
     fn open(t: &str) -> Value { json!({"@proj.open": "1", "@proj.text": t}) }
     fn d(tag: &str) -> crate::plat::tmp::TempDir { let p = crate::plat::tmp::dir(&format!("picker-{tag}")); std::fs::create_dir_all(p.join("alpha/inner")).unwrap(); std::fs::create_dir_all(p.join("beta")).unwrap(); std::fs::create_dir_all(p.join(".hidden")).unwrap(); p }
     #[test] fn clone_it_here_confirms_the_folder_and_refuses_one_that_holds_something_else() {
+        // a repository's address typed where the path goes: one Clone row, in every form people paste
+        for (typed, origin) in [("https://github.com/o/Board.git", "github.com/o/Board"), ("git@github.com:o/Board.git", "github.com/o/Board"), ("github.com/o/Board", "github.com/o/Board"), ("~/https://github.com/o/Board.git", "github.com/o/Board"), ("/home/me/work/git@github.com:o/Board.git", "github.com/o/Board"), ("ssh://git@gitlab.example.com/team/sub/r", "gitlab.example.com/team/sub/r")] {
+            assert_eq!(repo_typed(typed).as_deref(), Some(origin), "{typed}");
+            let f = folders_in(&Shared::default(), &json!({"@proj.open": "1", "@proj.text": typed}), "/h", &[]);
+            assert_eq!(f["items"], json!([{"label": format!("Clone {origin}"), "action": "proj-clone", "value": origin, "kind": "add"}]), "{typed}");
+        }
+        for path in ["~/projects/board", "/srv/x", "./a", "board", "notes.txt/a", "github.com/o", "https://github.com", "a b.com/o/r", "x.com/../etc/r"] { assert_eq!(repo_typed(path), None, "{path}"); }
         let home = d("clone"); let h = home.to_str().unwrap();
         let c = |t: &str| folders(&json!({"@proj.open": "1", "@proj.text": t, "@proj.clone": "github.com/o/r"}), h, &[]);
         let f = c("~/r"); assert_eq!((f["items"][0]["action"].as_str(), f["items"][0]["value"].as_str().unwrap()), (Some("proj-clone-go"), format!("github.com/o/r\u{1f}{h}/r").as_str()));
