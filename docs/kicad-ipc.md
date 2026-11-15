@@ -90,11 +90,12 @@ All in `native/host/src/kicad/`:
   `KH.min_api()`) and the setting `kicad.ipc` is not `off`.
 - Persisted data is untouched: no new events. The server lines live in the hub's runtime record only.
 
-- The pin is Backplane KiCad `10.99.0-bp.4` (API 2): `KH.min_version()` / `KH.min_api()`, and `KH.version.ge` orders
+- The IPC minimum is Backplane KiCad `10.99.0-bp.4` (API 2): `KH.min_version()` / `KH.min_api()` (`kserve.rs`). It is not the
+  install pin (below: one per platform, newer). `KH.version.ge` orders
   the `-bp.N` suffix numerically, a hotfix's parts too (bp.2 < bp.3 < bp.4 < bp.10 < bp.12 < bp.12.1 < bp.13; `10.99.0-unknown-bp.3` reads as bp.3 a test build `10.99.0-bp.12-851cbefda6` as bp.12, a describe name `backplane-kicad-v10.99.0-bp.7-15-g8d903542-dirty-bp.13` as bp.13 (the last `bp.` part; the tag prefix is dropped); no suffix is bp.0), so
   installs older than the pin are "old" and the notice offers Update. Discovery checks the pinned
   `<data>/kicad/<KiCad.version()>` first, then other managed versions newest-first. Older runtimes offer Update
-  and cannot shadow the bp.4 install.
+  and cannot shadow the pinned install.
 - The server is always started through the runtime's `bin/kicad-cli` (`KS.launcher` turns `kicad-cli.real` back into
   the launcher), which defines `KICAD10_*_DIR`. `kicad_ipc_status` shows the start command line (`argv`) and `version`.
 - Compatibility guards, in the hub (`KS.guard`): `UpdateItems` of a `FootprintInstance` without `definition` on bp.3 wipes the footprint's
@@ -117,8 +118,8 @@ runtime and candidates ahead of it; adding unrelated PATH entries after it does 
 The bp.4 runtime advertises both fix capabilities: partial footprint updates and symbol creation from a library ID
 are accepted. Symbol libraries load on demand; agents need no blanket library preload on this runtime.
 
-The installer checks the pinned bp.4 asset against both the release SHA256SUMS and the verified SHA-256
-`f60a71817d057f9dcf3faef632b2f85d06a613108dee23807c9de81aae97e0b4`.
+The installer checks the pinned asset against both the release SHA256SUMS and the SHA-256 compiled into the hub
+(`install.rs`, `Package.sha256`).
 
 KiCad can buffer its ready line until exit when stdout is a pipe. The hub discovers a fresh socket in the
 project's private socket directory, including KiCad's `api-<pid>.sock` fallback, and the hub then requires Ping
@@ -129,11 +130,22 @@ An old install therefore reports old and offers Update; the pinned directory app
 and takes precedence.
 
 The Settings installer selects a package from the hub machine's OS and
-architecture, including when the client is a phone or another computer.
-Linux x86-64 keeps the pinned bp.4 runtime; Windows x86-64 (Cygwin) and
-macOS Apple Silicon install the published bp.6 packages. There is currently
-no managed Linux ARM64 or Intel macOS package, so those hubs offer a runtime
-path instead. The install action uses the same catalog as the backend.
+architecture, including when the client is a phone or another computer. The pins are one line each in
+`native/host/src/kicad/install.rs` (`LINUX`, `WINDOWS`, `MAC`; their doc comment says which release each is on and
+why), and the tests read them. There is no managed Linux ARM64 or Intel macOS package, so those hubs offer a
+runtime path instead. The install action uses the same catalog as the backend.
+
+macOS (`darwin-arm64`): the fork's macOS job (`.github/workflows/backplane-macos.yml`, `scripts/backplane-macos.sh`)
+builds every release tag and every batch on the release line. Its package holds `KiCad.app` with every dylib moved
+inside and signed ad hoc, `bin/kicad-cli` and the GUI launchers `bin/kicad`, `bin/pcbnew`, `bin/eeschema`. It is not
+notarized, and the hub's install does not need it to be: Gatekeeper checks only files that carry the quarantine
+attribute, which browsers and other apps that opt in set on what they download. The hub downloads with `curl` and
+unpacks with `tar`, neither of which sets it (nor does the hub's process: it is not sandboxed and no bundle of ours
+sets `LSFileQuarantineEnabled`, which would quarantine everything the app writes; keep it that way), so the runtime
+runs as installed (Apple silicon requires a signature,
+and the ad-hoc one is enough). A runtime downloaded by hand from the releases page with a browser is quarantined:
+`xattr -dr com.apple.quarantine <folder>` clears it, as the release notes say. That is expected, not a bug.
+Notarization would need a Developer ID Application certificate and an Apple notarization login; neither is used.
 
 Downloads must match both the release checksum list and the compiled digest.
 The installer checks the archive format and runtime layout in a staging
