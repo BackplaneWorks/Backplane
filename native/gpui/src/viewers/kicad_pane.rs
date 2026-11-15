@@ -239,6 +239,9 @@ pub struct KicadPane {
     dialogs_open: Vec<String>,
     /// the frame KiCad gave the keyboard to on a click, and when (a click-to-focus window manager may take it back at once)
     took: Option<(u64, std::time::Instant)>,
+    /// The popped-out window closed by its X (its handle) and when: the keys are handed in once it is gone and Backplane's
+    /// window is the foreground (tick), with a 1 s bound as the fallback
+    pub await_close: Option<(u64, std::time::Instant)>,
     /// fork: a press over the editor, its keyboard given on the release (a focus change mid-press made KiCad lose the release: it took the
     /// click for a long press and opened Clarify Selection, which then held the keyboard)
     press_focus: Option<u64>,
@@ -308,7 +311,7 @@ impl KicadPane {
             let _ = drained_tx.send(());
         } }).detach();
         KicadPane { busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), last_root: (i32::MIN, 0), placed: None,
-            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), poked: None, unmapped_since: None, unshown_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, at_px: None, dialogs_open: Vec::new(), took: None, press_focus: None, want_keys: true, refocus: None, verify_handin: None, prewarm_guard: None, unexplained_reposted: false, focus_seen: (0, 0), was_dialog: false }
+            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), poked: None, unmapped_since: None, unshown_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, at_px: None, dialogs_open: Vec::new(), took: None, await_close: None, press_focus: None, want_keys: true, refocus: None, verify_handin: None, prewarm_guard: None, unexplained_reposted: false, focus_seen: (0, 0), was_dialog: false }
     }
     fn rpc(&self, name: &str, params: Value) { let _ = self.hub.try_send(Command::Rpc(name.to_string(), Secret(params), "kicad")); }
     /// The hub's `editor.kicad.<digest>` for this project changed.
@@ -399,6 +402,10 @@ impl KicadPane {
         let Some(new) = nc::container_for(t, &self.project) else { return };
         if new != old { nc::move_frames(old, new); nc::destroy(old); }
         self.toplevel = t; self.container = Some(new); self.placed = None; self.unmapped_since = None; self.last_root = (i32::MIN, 0);
+        // the editor in another window now (popped out, or back in): its keys are handed in when it is placed there
+        // (bp9 Nov 15: set at open_window, the old window's next frame used the request before the move, and the editor
+        // in the new window never got the keys)
+        self.want_keys = true;
         self.grab_click(new, !self.keys);
         self.reattach();
     }
@@ -516,6 +523,17 @@ impl KicadPane {
     }
     fn want(&self) -> Option<u64> { if self.info.is_null() || (cfg!(windows) && self.info["mode"] == "stock") { return None } pick_local(self.wanted_kind(), &self.info, &self.frames, &self.ever_shown) }
     fn tick(&mut self, cx: &mut Context<Self>) {
+        if let Some((popped, at)) = self.await_close {
+            let activated = nc::activated_after_close(self.toplevel, popped);
+            if activated || at.elapsed() >= std::time::Duration::from_millis(1000) {
+                self.await_close = None;
+                self.want_keys = true; self.placed = None;
+                if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() {
+                    eprintln!("GPUI_LOG {}", json!({"kicad_close_handin": {"path": if activated { "activated" } else { "timeout" }, "after_ms": at.elapsed().as_millis() as u64}}));
+                }
+                cx.notify();
+            }
+        }
         nc::note_pane_keys(self.keys);
         // the shield never re-raises while the F5 guard is armed (pre-warm or a hand-in being verified)
         let f5_armed = self.prewarm_guard.is_some() || self.verify_handin.is_some();
@@ -1361,9 +1379,11 @@ impl crate::Backplane {
             titlebar: Some(TitlebarOptions { title: Some(crate::streamer::shown(&format!("{title} — KiCad · Backplane")).into()), ..Default::default() }), ..Default::default() };
         match cx.open_window(opts, move |window, cx| {
             let app2 = app.clone();
-            window.on_window_should_close(cx, move |_, cx| { if let Some(a) = app2.upgrade() { a.update(cx, |a, cx| a.kicad_popin(cx)); } true });
+            window.on_window_should_close(cx, move |window, cx| { let popped = top_of(window).unwrap_or(0); if let Some(a) = app2.upgrade() { a.update(cx, |a, cx| a.kicad_popin_closing(popped, cx)); } true });
             cx.new(|_| KicadWindow { pane, app, light })
         }) {
+            // the popped-out window is the person's now: the editor in it gets the keys as on Edit (the window itself is shown
+            // active by open_window)
             Ok(h) => { self.screens.kicad_window = Some(h.into()); self.screens.kicad_full = false; }
             Err(e) => { self.note = format!("{} {e}", crate::i18n::trs("The editor's window could not open:")); }
         }
@@ -1371,8 +1391,19 @@ impl crate::Backplane {
     }
     /// Pop back in: the pane draws the editor again (its window, if still open, is closed by its own button or its title bar).
     pub(crate) fn kicad_popin(&mut self, cx: &mut Context<Self>) {
-        // KiCad back into the main window first: the editor's window is about to go, and its children with it
+        // KiCad back into the main window first (the editor's window is about to go, and its children with it); the
+        // move asks for the keys to be handed to the editor once it is placed there (rehome)
         if let Some(p) = self.screens.kicad.clone() { p.update(cx, |p, _| { let h = p.home(); if h != 0 { p.rehome(h); } }); }
+        self.screens.kicad_window = None; cx.notify();
+    }
+    /// The popped window closed by its own X: KiCad is moved back now, before the window and its children go, but the
+    /// keys only once Windows has activated Backplane's window after the close, which would otherwise take them back
+    /// (bp9 Nov 15: handed in inside should_close, F2 then did nothing)
+    pub(crate) fn kicad_popin_closing(&mut self, popped: u64, cx: &mut Context<Self>) {
+        let Some(p) = self.screens.kicad.clone() else { self.screens.kicad_window = None; cx.notify(); return };
+        // KiCad back now (its frames are children of the window about to go); the keys once that window is gone and
+        // Backplane's is the foreground (the pane's tick), not before: the activation would take them back
+        p.update(cx, |p, _| { let h = p.home(); if h != 0 { p.rehome(h); } p.want_keys = false; p.await_close = Some((popped, std::time::Instant::now())); });
         self.screens.kicad_window = None; cx.notify();
     }
     /// The strip's buttons in the main window.
