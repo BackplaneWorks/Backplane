@@ -514,6 +514,8 @@ impl Backplane {
         let editor = self.kicad_for(thread, cx);
         let el = crate::screens::viewer::page(cx, &reg, light, &self.screens.files, &self.screens.images, self.screens.attacher.target.as_ref(), thread, &self.screens.plot, &mut self.screens.plotview, &mut self.screens.split_pv, self.screens.solid.as_ref(), self.screens.browser.as_ref().map(|(_, b)| b), editor.as_ref());
         { let rows = &self.data["thread"]["entries"]; reg.borrow_mut().resolve_by(|id| rows.as_array().and_then(|r| r.iter().position(|e| e["id"].as_str() == Some(id)))); }
+        // full screen: the editor alone, without the management panels' strip under it
+        if crate::screens::viewer::KICAD_SCREEN.load(std::sync::atomic::Ordering::Relaxed) { return el }
         // the management panels' strip and the open panel beside the design (screens/mgmt.rs)
         crate::screens::mgmt::host(self, el, window, cx)
     }
@@ -601,7 +603,12 @@ impl Render for Backplane {
         if crate::screens::viewer::fit(win_w, self.local.sidebar_px as f32, self.sidebar_open, false, viewer_open).0 { self.screens.side_force = false; } // room again: "anyway" is over
         let (side_shown, thread_least, pane_least, share) = crate::screens::viewer::fit(win_w, self.local.sidebar_px as f32, self.sidebar_open, self.screens.side_force, viewer_open);
         // the embedded editor at full size: the sidebar folds and the thread gives all its room (screens/viewer.rs pane)
-        let kfull = self.screens.kicad_full && viewer_open && self.screens.kicad.is_some() && matches!(thread["viewer"]["open"].as_str(), Some("board" | "schematic" | "3d"));
+        let kedit = viewer_open && self.screens.kicad.is_some() && self.screens.kicad_window.is_none() && matches!(thread["viewer"]["open"].as_str(), Some("board" | "schematic" | "3d"));
+        // full screen: the editor and its strip are the whole window (no top bar, sidebar, thread, rail or pane bar)
+        if !kedit { self.screens.kicad_screen = false; } // the editor left the pane: the next Edit starts in the pane, not over the window
+        let kscreen = self.screens.kicad_screen && kedit;
+        let kfull = kscreen || (self.screens.kicad_full && viewer_open && self.screens.kicad.is_some() && matches!(thread["viewer"]["open"].as_str(), Some("board" | "schematic" | "3d")));
+        crate::screens::viewer::KICAD_SCREEN.store(kscreen, std::sync::atomic::Ordering::Relaxed);
         let (side_shown, thread_least) = if kfull { (false, 0.) } else { (side_shown, thread_least) };
         crate::screens::viewer::KICAD_FULL.store(kfull, std::sync::atomic::Ordering::Relaxed); crate::screens::viewer::KICAD_POPPED.store(self.screens.kicad_window.is_some(), std::sync::atomic::Ordering::Relaxed);
         crate::screens::viewer::set_least(pane_least); crate::screens::viewer::set_share(share); self.screens.side_shown = side_shown;
@@ -766,6 +773,7 @@ impl Render for Backplane {
             .when(self.screens.elsewhere.is_some(), |d| d.child(div().id("elsewhere-strip").h(px(2.)).flex_shrink_0().bg(c("accent"))))
             // top bar
             .child(div().h(crate::scale::tpx(36.)).flex_shrink_0().relative().child(art::probe("topbar")).children(crate::perf::mark("topbar")).flex().items_center().justify_between().px_3().border_b_1().border_color(c("rule")).bg(c("bg"))
+                .when(kscreen, |d| d.h(px(0.)).border_b_0().overflow_hidden())
                 .child(div().relative().min_w_0().flex().items_center().gap_2().child(crate::screens::head::measure(cx, self.screens.head.left.clone()))
                     .child(div().relative().size(px(18.)).child(art::logo(light, 18., "logo"))
                         .child(div().absolute().right(px(-2.)).bottom(px(-1.)).size(px(6.)).bg(if connected { c("ok") } else { c("bad") })))
@@ -798,11 +806,11 @@ impl Render for Backplane {
                         .when(self.screens.held == crate::keys::Held::Threads, |d| d.child(div().flex_1()).child(div().flex().gap(px(2.)).children(crate::keys::caps(&crate::keys::hint(&self.local, "palette")).iter().map(|k| crate::screens::hints::cap(light, k, false))))))
                     .child(with_rect(div().id("improvements-btn"), || "ui:Improvements".to_string()).cursor_pointer().on_click(cx.listener(|this, _, _, cx| crate::screens::improvements::toggle(this, cx))).px_2().flex().items_center().gap_2().border_1().border_color(c("line")).text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(ic(light, "message-square", 15., "dim")).child(trs("Improvements")))
                     .child(with_rect(div().id("search-btn"), || "ui:Search".to_string()).cursor_pointer().tooltip(crate::keys::tip("Filter projects and threads", "", light)).on_click(cx.listener(|this, _, _, cx| this.focus_search(cx))).child(ic(light, "search", 15., "dim"))).child(with_rect(div().id("gear"), || "ui:Settings".to_string()).cursor_pointer().on_click(cx.listener(|this, _, _, cx| { this.open_settings(cx); })).child(ic(light, "settings", 15., "dim")))))
-            .children(crate::screens::strip::view(light, &self.data))
+            .children(if kscreen { None } else { crate::screens::strip::view(light, &self.data) })
             .child(div().flex_1().min_h_0().flex()
                 // sidebar
                 // folded: the 44 px strip, its unfold chevron where the fold chevron is (screens/siderow.rs)
-                .when(!side_shown, |d| d.child(div().id("side-strip").w(px(44.)).h_full().flex_shrink_0().overflow_hidden().bg(c("bg")).border_r_1().border_color(c("rule")).flex().flex_col().children(self.side_strip(cx, light))))
+                .when(!side_shown && !kscreen, |d| d.child(div().id("side-strip").w(px(44.)).h_full().flex_shrink_0().overflow_hidden().bg(c("bg")).border_r_1().border_color(c("rule")).flex().flex_col().children(self.side_strip(cx, light))))
                 .child(div().w(px(if side_shown { self.local.sidebar_px as f32 } else { 0. })).overflow_hidden().h_full().flex_shrink_0().relative().child(art::probe("sidebar")).children(crate::perf::mark("sidebar")).bg(c("bg")).when(side_shown, |d| d.border_r_1()).border_color(c("rule")).flex().flex_col()
                     .child(crate::screens::hubpick::picker(self, cx, light, &mut ctl))
                     /* i18n-ok: ctl labels and ui: ids the drivers press */ .child(div().flex().items_center().gap_2().h(crate::scale::tpx(crate::screens::siderow::FOLD_ROW)).px_2().child(with_rect(div().id("fold-sidebar"), || "ui:Fold sidebar".to_string()).cursor_pointer().tooltip(crate::keys::tip("Fold the sidebar", &crate::keys::hint(&self.local, "sidebar"), light)).child(ic(light, "chevron-left", 16., "dim")).on_click(cx.listener(|this, _, _, cx| this.side_flip(cx)))).child(crate::screens::projects::search_box(light, &self.screens.projects)).child(with_rect(div().id("add-project"), || "ui:Add project".to_string()).cursor_pointer().on_click(cx.listener(|this, _, _, cx| { let _ = this.tx.try_send(crate::screens::projects::open_cmd()); cx.notify(); })).child(ic(light, "plus", 16., "dim"))))
@@ -888,7 +896,7 @@ impl Render for Backplane {
                 .children(crate::perf::mark("viewer"))
                 .children(crate::screens::viewer::is_open(thread).then(|| self.screens.parts.el(Backplane::viewer_part, StyleRefinement::default().flex_1().min_h_0(), cx)).and_then(|page| crate::screens::viewer::pane(cx, light, thread, page)))
                 // right rail
-                .child(div().w(px(72.)).h_full().flex_shrink_0().relative().child(art::probe("rail")).children(crate::perf::mark("rail")).border_l_1().border_color(c("rule")).flex().flex_col().py_2().children(rail)))
+                .child(div().w(px(72.)).h_full().flex_shrink_0().relative().child(art::probe("rail")).children(crate::perf::mark("rail")).border_l_1().border_color(c("rule")).flex().flex_col().py_2().when(kscreen, |d| d.w(px(0.)).border_l_0().py_0().overflow_hidden()).children(rail)))
             // the one-time telemetry notice (screens/tmnotice.rs)
             .children({ let (n, shown) = (self.screens.tm_notice.clone(), self.screens.tm_shown.clone()); crate::screens::tmnotice::strip(cx, n.as_ref(), &shown, light) })
             .children(crate::perf::mark("over"))
