@@ -231,7 +231,8 @@ fn parity(t: &str) -> bool { matches!(t, "missing_footprint" | "extra_footprint"
 
 /// A KiCad marker click (ET_MARKER_CLICKED's `drc_marker`) as the id its row has, among `rows` (the source's findings).
 pub fn row_of(kind: &str, marker: &Value, sheets: &HashMap<String, String>, rows: &[Finding]) -> Option<String> {
-    let rep = report(kind, std::slice::from_ref(marker), &Detail::new(), sheets);
+    // the marker's own words for its items: an unconnected row is keyed by its net, which only the words say (Collar, batch 8 K5)
+    let rep = report(kind, std::slice::from_ref(marker), &detail_of_markers(std::slice::from_ref(marker)), sheets);
     let f = if kind == "drc" { fd::drc(&rep.to_string()) } else { fd::erc(&rep.to_string()) }?.into_iter().next()?;
     let base = fd::base_id(&f);
     rows.iter().find(|r| r.id == base).or_else(|| rows.iter().find(|r| r.id.starts_with(&base))).map(|r| r.id.clone())
@@ -520,6 +521,19 @@ mod tests {
         let ed = fd::erc(&report("erc", &[m], &Detail::default(), &HashMap::from([("/R0".to_string(), "/".to_string())])).to_string()).unwrap();
         assert_eq!((ed[0].id.as_str(), ed[0].detail.as_str()), (a[0].id.as_str(), a[0].detail.as_str()));
         for f in &a { assert!(select_items(f, &HashMap::new()).is_none(), "no items, no place: nothing to select"); let p = fd::select_params(f); assert!(["references", "pins", "nets"].iter().all(|k| p[*k].as_array().unwrap().is_empty())) }
+    }
+    /// A click on an unconnected-items marker (Collar, batch 8, ClickMarker): its row is keyed by the net, from the items' words.
+    #[test] fn an_unconnected_marker_click_finds_its_row_by_net() {
+        let m: Value = serde_json::from_str(r#"{"type":"unconnected_items","severity":"error","message":"Missing connection between items","at_nm":{"x_nm":"87350000","y_nm":"101880000"},
+            "items":[{"value":"2b82f2e9-8257-4b9c-a00b-c542d40fb755"},{"value":"ae61e04e-806c-4e3f-9a80-cbb8eea1fa73"}],"id":{"value":"75c95e2d-de97-4a31-bc30-bad2ea3eaace"},
+            "items_detail":[{"id":{"value":"2b82f2e9-8257-4b9c-a00b-c542d40fb755"},"description":"Pad 4 [/LED_B] of D5 on F.Cu","at_nm":{"x_nm":"87350000","y_nm":"101880000"}},
+            {"id":{"value":"ae61e04e-806c-4e3f-9a80-cbb8eea1fa73"},"description":"Pad A3 [/LED_B] of U2 on F.Cu","at_nm":{"x_nm":"90120000","y_nm":"102719000"}}],"group":"unconnected"}"#).unwrap();
+        let other = json!({"type": "unconnected_items", "severity": "error", "message": "Missing connection between items", "items": [{"value": "p1"}, {"value": "p2"}], "id": {"value": "o"},
+            "items_detail": [{"id": {"value": "p1"}, "description": "Pad 1 [/SDA] of U1 on F.Cu"}, {"id": {"value": "p2"}, "description": "Pad 2 [/SDA] of R1 on F.Cu"}], "group": "unconnected"});
+        let ms = [other, m.clone()];
+        let rows = fd::drc(&report("drc", &ms, &detail_of_markers(&ms), &HashMap::new()).to_string()).unwrap();
+        let want = rows[1].id.clone();
+        assert_eq!(row_of("drc", &m, &HashMap::new(), &rows), Some(want));
     }
     #[test] fn a_drc_marker_click_finds_its_row_and_a_track_finding_probes_its_exact_items() {
         let cli = fd::drc(CLI_DRC).unwrap();
