@@ -399,6 +399,16 @@ def _send(*ins):
     keys_up_only = all((i.type == 1 and (i.u.ki.dwFlags & 2)) or (i.type == 0 and i.u.mi.dwFlags and not (i.u.mi.dwFlags & ~0x0054))
                        for i in ins)  # key-ups, or mouse button-ups (0x04/0x10/0x40) alone
     if INPUT_DIRS and not keys_up_only:
+        # function keys only ever to the test's own Backplane or KiCad: an F1 in the away mode's Notepad (allowed for
+        # its clicks and Alt+Tab) opened Notepad's help in Edge (s2-away, Nov 15 00:08). Skipped, not refused: the
+        # step that wanted the key (F2's zoom) then fails on its own check
+        fkeys = [i.u.ki.wVk for i in ins if i.type == 1 and 0x70 <= i.u.ki.wVk <= 0x7B]
+        if fkeys:
+            fg = int(u32.GetForegroundWindow() or 0)
+            prog = os.path.normcase(window_program(fg))
+            if not any(prog.startswith(d) for d in INPUT_DIRS):
+                print("DIAG input_skipped_fkey " + json.dumps({"vk": fkeys, "program": window_program(fg), "class": hwnd_class(fg) if fg else ""}), flush=True)
+                return
         what, target = _input_target(ins)
         if what:
             # a switch in progress has no foreground for a moment: give it 0.5 s to settle on one of ours
