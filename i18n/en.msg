@@ -1043,8 +1043,8 @@ phase.stopped = Stopped
 # Web/phone audit: tooltips, reasoning labels, and model progress.
 tools.tip.retry = The turn failed: send your last message again
 tools.tip.stop = Stop the running turn · Ctrl+.
-tools.tip.unpin = Unpin: it sorts with the rest again
-tools.tip.pin = Keep it at the top of the list
+tools.tip.unpin = Unpin: it leaves the sidebar when it is done
+tools.tip.pin = Keep it under its project in the sidebar. It never settles by itself
 tools.tip.unsettle = Bring it back to the active threads
 tools.tip.settle = Done for now: it leaves the active threads
 tools.tip.wake = Wake it now

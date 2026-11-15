@@ -335,6 +335,8 @@ object DataClient {
     }
     fun toggleSection(t: String) { sectionsOpen = if (t in sectionsOpen) sectionsOpen - t else sectionsOpen + t; prefs().edit().putStringSet("sections.open", sectionsOpen).apply(); scope.launch { loadSections() } }
     fun sidebarAct(action: String, value: String) { scope.launch { runCatching { call("sidebar.act", JSONObject().put("action", action).put("value", value)) }; loadSections() } }
+    /** A section row's menu item for a thread of this hub (the hub's `menu`: pin, unpin, settle, unsettle, archive): `thread.act`, then the sections as the hub has them now. */
+    fun sectionThreadAct(tid: String, action: String) { scope.launch { runCatching { call("thread.act", JSONObject().put("thread", tid).put("action", action)).optJSONObject("thread")?.let { upsert(parseThread(it)) } }; loadSections() } }
     suspend fun projectPage(key: String, done: Boolean): List<DSection>? {
         if (!has("sections")) return null
         val r = runCatching { call("sidebar.sections", JSONObject().put("open", openArr()).put("page", key).put("pageDone", done)) }.getOrNull() ?: return null
