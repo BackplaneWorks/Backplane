@@ -364,7 +364,9 @@ impl Backplane {
         if window.context_stack().iter().any(|k| ESC_OWNERS.iter().any(|o| k.contains(o))) { return false }
         let mut put = false;
         for slot in 0..3 { let pv = self.screens.pv(slot); if pv.picked.is_some() || pv.card.is_some() || !pv.lit.is_empty() { pv.picked = None; pv.card = None; pv.lit.clear(); put = true; } }
-        if put { return true }
+        // (the hub's probe goes with it, as the canvas's own Esc and the chip's x do: the 3D model's lit part too, and no page lights it again)
+        let kept = self.data["thread"]["viewer"]["probe"].as_str().map_or(false, |p| !p.is_empty());
+        if put || (kept && crate::screens::viewer::shows_solid(&self.data["thread"]) && !crate::screens::plotview::probed_part(self).is_empty()) { if kept { crate::screens::plotview::keep_probe(self, None); } return true }
         // a web page with the keyboard keeps its Esc (the old client gave the bot's page every key)
         let in_viewer = window.context_stack().iter().any(|k| k.contains("Viewer"));
         if in_viewer && crate::screens::viewer::active_kind(&self.data["thread"]["viewer"], None) == "browser" { return false }

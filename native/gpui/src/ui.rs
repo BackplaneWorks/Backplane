@@ -544,7 +544,7 @@ impl Render for Backplane {
         // and its old pictures leave the atlas once the GPU is done with them (SolidPage::collect)
         // the 3D pages' background follows the setting and the theme, live
         let back = self.local.viewer_backdrop(self.light()); back.make_current();
-        if let Some(s) = self.screens.solid.clone() { s.update(cx, |p, _| p.set_backdrop(back)); }
+        if let Some(s) = self.screens.solid.clone() { let (part, split) = (crate::screens::plotview::probed_part(self), self.data["thread"]["viewer"]["open"] == "split"); s.update(cx, |p, _| { p.set_backdrop(back); p.set_probe(&part); p.names_probe = !split; }); }
         if let Some(s) = self.screens.solid.clone() { if s.read(cx).atlas_images() > 0 { let away = !crate::screens::viewer::shows_solid(&self.data["thread"]); s.update(cx, |p, _| { if away { p.put_away() } p.collect(window) }); } }
         crate::screens::desk::tick(self, window, cx);
         self.term_layout(window, cx);
