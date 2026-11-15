@@ -1826,6 +1826,7 @@ gpui.acct.codex.did.not.say.who = Codexは誰がサインインしているか�
 gpui.acct.claude.code.did.not.say = Claude Codeは誰がサインインしているか答えませんでした
 gpui.acct.anthropic.api.key.is.set = ANTHROPIC_API_KEYが設定されています: Claude Codeはサインインではなくそのキーを使います
 gpui.acct.the.cli.is.signed.in = CLIはサインインしていますがメールアドレスを返しませんでした
+gpui.bots.name.rule = ボットの名前は、英字・数字・「-」・「_」で1〜24文字です（スペースは使えません）。
 
 # ---- gpui-b: keys, ui, files, history ----
 gpui.send.the.message = メッセージを送信

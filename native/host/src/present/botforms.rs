@@ -5,6 +5,8 @@ use crate::state::State;
 use serde_json::{json, Value};
 
 pub struct Out { pub patch: Value, pub cmds: Vec<Value> }
+/// What the new-bot form says under a name the hub would not take (Bot.name.valid, `bots::rpc::name_ok`).
+pub const NAME_RULE: &str = "A bot's name is 1 to 24 letters, digits, - or _, with no spaces.";
 const PROVIDERS: &[&str] = &["claude", "codex", "grok", "muse", "antigravity", "opencode", "pi", "omp"];
 fn s<'a>(v: &'a Value, k: &str) -> &'a str { v[k].as_str().unwrap_or("") }
 fn draft<'a>(session: &'a Value, k: &str) -> &'a str { s(&session["drafts"], k) }
@@ -24,13 +26,15 @@ pub fn act(st: &State, hub: &str, session: &Value, action: &str, value: &str) ->
     let mut cmds = vec![];
     let provider = { let p = st.settings.get("agent.provider").map(String::as_str).unwrap_or("claude"); if PROVIDERS.contains(&p) { p } else { "claude" } };
     let patch = match action {
-        "bot-new" => json!({"drafts": {"@bnew": "1", "@rnew": "", "@f.name": "", "@f.persona": "", "@bnew.provider": provider}}),
+        "bot-new" => json!({"drafts": {"@bnew": "1", "@rnew": "", "@f.name": "", "@f.persona": "", "@f.berr": "", "@bnew.provider": provider}}),
         "room-new" => json!({"drafts": {"@rnew": "1", "@bnew": "", "@f.rname": "", "@rnew.members": ""}}),
         "form-close" => match value { "@bnew" => json!({"drafts": {"@bnew": ""}}), "@rnew" => json!({"drafts": {"@rnew": ""}}), "@onew" => json!({"drafts": {"@onew": ""}}), _ => return None },
         "bfield" => {
             let (name, text) = value.split_once('\u{1f}')?;
             match name {
-                "name" | "persona" | "rname" | "rpost" | "oname" | "ocron" | "oprompt" | "todonew" => json!({"drafts": {format!("@f.{name}"): text}}),
+                // a new name takes the refusal of the last one away
+                "name" => json!({"drafts": {"@f.name": text, "@f.berr": ""}}),
+                "persona" | "rname" | "rpost" | "oname" | "ocron" | "oprompt" | "todonew" => json!({"drafts": {format!("@f.{name}"): text}}),
                 n if n.starts_with("todo.") && n.len() > 5 && n.len() < 100 => json!({"drafts": {format!("@f.{n}"): text}}),
                 "provider" if PROVIDERS.contains(&text) => json!({"drafts": {"@bnew.provider": text}}),
                 _ => return None,
@@ -45,8 +49,10 @@ pub fn act(st: &State, hub: &str, session: &Value, action: &str, value: &str) ->
         "bot-create" if on(session, "@bnew") => {
             let name = draft(session, "@f.name").trim();
             if name.is_empty() { return Some(Out { patch: json!({}), cmds }) }
+            // a name the hub would refuse (a space, a 25th letter) keeps the form and what was typed, and says the rule: the form used to close with nothing made
+            if !crate::bots::rpc::name_ok(name) { return Some(Out { patch: json!({"drafts": {"@f.berr": NAME_RULE}}), cmds }) }
             send(session, hub, "bots.create", json!({"name": name, "persona": draft(session, "@f.persona"), "provider": draft(session, "@bnew.provider")}), &mut cmds, &mut rid);
-            json!({"drafts": {"@bnew": "", "@f.name": "", "@f.persona": ""}})
+            json!({"drafts": {"@bnew": "", "@f.name": "", "@f.persona": "", "@f.berr": ""}})
         }
         "room-save" if on(session, "@rnew") => {
             let m = members(session);
@@ -104,7 +110,7 @@ pub fn routine_form(session: &Value) -> Value {
 pub fn new_bot(session: &Value) -> Option<Value> {
     if !on(session, "@bnew") { return None }
     let cur = draft(session, "@bnew.provider");
-    Some(json!({"hint": "Name", "name": draft(session, "@f.name"), "persona": draft(session, "@f.persona"),
+    Some(json!({"hint": "Name", "name": draft(session, "@f.name"), "persona": draft(session, "@f.persona"), "error": draft(session, "@f.berr"),
         "providers": PROVIDERS.iter().map(|p| json!({"label": p, "provider": p, "on": *p == cur})).collect::<Vec<_>>()}))
 }
 /// The screen's `newRoom` object: the bots of this machine to pick from.
@@ -132,6 +138,22 @@ mod tests {
         let req: Value = serde_json::from_str(o.cmds[0]["text"].as_str().unwrap()).unwrap();
         assert_eq!((req["m"].as_str(), req["p"]["name"].as_str(), req["p"]["provider"].as_str(), req["id"].as_u64()), (Some("bots.create"), Some("Rex"), Some("codex"), Some(5)));
         crate::session::patch::merge(&mut s, &o.patch); assert!(new_bot(&s).is_none() && s["rid"] == 6);
+    }
+    #[test] fn a_name_the_hub_would_refuse_keeps_the_form_and_says_the_rule() {
+        let st = State::default();
+        let mut s = sess(json!({"@bnew": "1", "@f.name": "Librarian Keeps", "@f.persona": "tidy", "@bnew.provider": "claude"}));
+        let o = act(&st, "h", &s, "bot-create", "").unwrap();
+        assert!(o.cmds.is_empty(), "nothing is asked of the hub");
+        crate::session::patch::merge(&mut s, &o.patch);
+        let nb = new_bot(&s).expect("the form stays open");
+        assert_eq!((nb["name"].as_str(), nb["persona"].as_str(), nb["error"].as_str()), (Some("Librarian Keeps"), Some("tidy"), Some(NAME_RULE)));
+        // typing a new name takes the line away; a good one is created and the form shuts
+        let o = act(&st, "h", &s, "bfield", "name\u{1f}Librarian").unwrap(); crate::session::patch::merge(&mut s, &o.patch);
+        assert_eq!(new_bot(&s).unwrap()["error"], "");
+        let o = act(&st, "h", &s, "bot-create", "").unwrap(); assert_eq!(o.cmds.len(), 1);
+        crate::session::patch::merge(&mut s, &o.patch); assert!(new_bot(&s).is_none());
+        let long = "x".repeat(25); let s2 = sess(json!({"@bnew": "1", "@f.name": long}));
+        assert!(act(&st, "h", &s2, "bot-create", "").unwrap().cmds.is_empty(), "25 letters are one too many");
     }
     #[test] fn a_room_needs_a_member_and_a_blank_name_is_room() {
         let st = State::default(); let mut s = sess(json!({"@rnew": "1"}));

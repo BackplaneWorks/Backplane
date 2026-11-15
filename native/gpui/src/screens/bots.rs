@@ -181,6 +181,8 @@ pub fn forms(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, 
         let mut els: Vec<AnyElement> = Vec::new();
         for n in ["name", "persona"] { if let Some(b) = field_box(light, fields, n) { els.push(b); } }
         let provs = providers(nb);
+        // why the hub would not take the name (the form stays open with what was typed)
+        if let Some(e) = Some(string(nb, "error")).filter(|e| !e.is_empty()) { els.push(div().id("bot-form-error").text_size(crate::scale::tpx(12.)).text_color(c("bad")).child(trs(&e)).into_any_element()); }
         if !provs.is_empty() { els.push(div().flex().flex_wrap().gap_2().children(provs.iter().enumerate().map(|(i, p)| btn(cx, light, format!("prov-{i}"), p.label.clone(), p.on, provider_cmd, p.provider.clone())).collect::<Vec<_>>()).into_any_element()); }
         /* i18n-ok: drawn through tr */ (title, body, close, go, go_label, ok) = ("New bot", els, close_bot_form, create_bot, "Create", fields.get("name").map_or(false, |s| !s.input.read(cx).content.trim().is_empty()));
     } else if nr.is_object() {
