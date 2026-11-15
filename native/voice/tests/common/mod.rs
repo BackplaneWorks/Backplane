@@ -335,7 +335,7 @@ impl Run {
                 None => vars.remove(*k),
             };
         }
-        let mut child = Command::new(EXE).args(args).env_clear().envs(vars).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+        let mut child = spawning(|| Command::new(EXE).args(args).env_clear().envs(vars).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()).unwrap();
         let log = Arc::new(Log::default());
         let mut out = child.stdout.take().unwrap();
         let l = log.clone();
@@ -502,6 +502,8 @@ impl Bins {
     pub fn script(&self, name: &str, body: &str) {
         use std::os::unix::fs::PermissionsExt;
         let p = self.dir.path().join(name);
+        // no process of this test binary is between a fork and its exec while the file is open for writing (see `spawning`)
+        let _quiet = FORKS.write().unwrap_or_else(|e| e.into_inner());
         std::fs::write(&p, format!("#!/bin/sh\n{body}\n")).unwrap();
         std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o755)).unwrap();
     }
@@ -519,6 +521,18 @@ impl Bins {
     pub fn args(&self) -> String {
         std::fs::read_to_string(self.dir.path().join("args")).unwrap_or_default()
     }
+}
+
+/// The tests run on threads of one process and write stand-in programs (the recorder scripts) that the helper later runs. A fork copies every descriptor the process has open until the child's
+/// exec, so a script being written while another test's thread forks leaves a copy of its write descriptor in that child for as long as the child takes to exec (milliseconds, and seconds on a
+/// loaded machine); the kernel then refuses to run the script ("Text file busy", ETXTBSY), the helper finds no recorder and the test sees an empty stdout. Writing a script takes the write side
+/// of this lock and starting a process takes the read side up to its exec (`spawn` returns only once the child has exec'd), so a script is never open for writing while a fork is in flight.
+pub static FORKS: std::sync::RwLock<()> = std::sync::RwLock::new(());
+
+/// Starts a process (`f` calls `spawn`) with no script being written meanwhile. Wait for the child outside it.
+pub fn spawning<T>(f: impl FnOnce() -> T) -> T {
+    let _fork = FORKS.read().unwrap_or_else(|e| e.into_inner());
+    f()
 }
 
 /// A recorder's script: writes its arguments to <bin>/args, plays, then

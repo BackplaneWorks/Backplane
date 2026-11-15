@@ -66,13 +66,19 @@ fn live_from_stdin_session_appends_commit_after_quiet_deltas_and_done() {
 #[test]
 fn the_raw_ready_line_keeps_its_field_order() {
     let m = Mock::start();
-    let o = Command::new(EXE)
-        .args(["live", "--source", "stdin"])
-        .env("OPENAI_API_KEY", "good")
-        .env("OPENAI_BASE_URL", &m.base)
-        .stdin(Stdio::null())
-        .output()
-        .unwrap();
+    let o = spawning(|| {
+        Command::new(EXE)
+            .args(["live", "--source", "stdin"])
+            .env("OPENAI_API_KEY", "good")
+            .env("OPENAI_BASE_URL", &m.base)
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+    })
+    .unwrap()
+    .wait_with_output()
+    .unwrap();
     let out = String::from_utf8(o.stdout).unwrap();
     assert_eq!(out.lines().next().unwrap(), r#"{"event":"ready","recorder":"stdin","device":"","label":""}"#);
 }
@@ -601,7 +607,7 @@ fn a_runtime_of_another_version_is_refused_with_a_plain_error() {
     let c = t.path().join("v.c");
     std::fs::write(&c, "const char *SherpaOnnxGetVersionStr() { return \"9.9.9\"; }\n").unwrap();
     for lib in [c_library(), onnx_library()] {
-        let s = Command::new("cc").arg("-shared").arg("-fPIC").arg(&c).arg("-o").arg(rt.join(lib)).status().unwrap();
+        let s = spawning(|| Command::new("cc").arg("-shared").arg("-fPIC").arg(&c).arg("-o").arg(rt.join(lib)).spawn()).unwrap().wait().unwrap();
         assert!(s.success());
     }
     std::fs::copy(std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("vad/silero_vad.onnx"), vad_path(t.path())).unwrap();
@@ -630,7 +636,7 @@ struct Raw {
 
 impl Raw {
     fn new(args: &[&str], path: &str) -> Raw {
-        let child = Command::new(EXE).args(args).env_clear().env("PATH", path).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
+        let child = spawning(|| Command::new(EXE).args(args).env_clear().env("PATH", path).stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped()).spawn()).unwrap();
         Raw { child }
     }
 
