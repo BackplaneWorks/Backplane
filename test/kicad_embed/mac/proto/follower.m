@@ -9,7 +9,7 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/event.h>
-static NSWindow *w; static long host; static double H;
+static NSWindow *w; static long host; static double H; static dispatch_source_t readSource; // held: a local would be released at its block's end (ARC) and read nothing
 static void place(CGRect p) { NSRect f = NSMakeRect(p.origin.x, H - (p.origin.y + p.size.height), p.size.width, p.size.height); if (!NSEqualRects(f, w.frame)) [w setFrame:f display:NO]; }
 static void above(void) { if (w.visible) [w orderWindow:NSWindowAbove relativeTo:host]; }
 @interface D : NSObject <NSWindowDelegate> @property NSString *policy; @end
@@ -39,13 +39,13 @@ int main(int argc, char **argv) { @autoreleasepool {
   if ([mode isEqual:@"push"]) {
     int s = socket(AF_UNIX, SOCK_DGRAM, 0); struct sockaddr_un a = {0}; a.sun_family = AF_UNIX; strncpy(a.sun_path, path, sizeof a.sun_path - 1); unlink(path); a.sun_len = (unsigned char)SUN_LEN(&a);
     if (bind(s, (struct sockaddr *)&a, SUN_LEN(&a))) { perror("bind"); exit(2); }
-    dispatch_source_t rs = dispatch_source_create(DISPATCH_SOURCE_TYPE_READ, s, 0, dispatch_get_main_queue());
-    dispatch_source_set_event_handler(rs, ^{ char b[256]; ssize_t n; while ((n = recv(s, b, sizeof b - 1, MSG_DONTWAIT)) > 0) { b[n] = 0; static int got; if (got++ < 3) { fprintf(stderr, "got %s\n", b); }
+    readSource = dispatch_source_create(DISPATCH_SOURCE_TYPE_READ, s, 0, dispatch_get_main_queue());
+    dispatch_source_set_event_handler(readSource, ^{ char b[256]; ssize_t n; while ((n = recv(s, b, sizeof b - 1, MSG_DONTWAIT)) > 0) { b[n] = 0; static int got; if (got++ < 3) { fprintf(stderr, "got %s\n", b); }
       double x, y, ww, hh; long hid;
       if (sscanf(b, "rect %lf %lf %lf %lf %ld", &x, &y, &ww, &hh, &hid) == 5) { host = hid; place(CGRectMake(x, y, ww, hh)); if (!w.visible) [w orderWindow:NSWindowAbove relativeTo:host]; }
       else if (!strcmp(b, "hide")) [w orderOut:nil];
       else if (!strcmp(b, "raise")) above(); } });
-    dispatch_resume(rs);
+    dispatch_resume(readSource);
   } else {
     [NSTimer scheduledTimerWithTimeInterval:1.0/120 repeats:YES block:^(NSTimer *t) {
       CFArrayRef a = CGWindowListCopyWindowInfo(kCGWindowListOptionIncludingWindow, (CGWindowID)host); CGRect b = CGRectNull;
