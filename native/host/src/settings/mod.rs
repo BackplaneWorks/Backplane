@@ -13,6 +13,7 @@ pub mod mentions;
 mod copy_gate;
 pub mod accounts_io;
 pub mod accounts_phone;
+pub mod accounts_people;
 pub mod accounts_sync;
 pub mod accounts_there;
 pub mod claude_usage;

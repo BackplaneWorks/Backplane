@@ -244,6 +244,8 @@ enum Cmd { Respond(String), Cancel }
 struct Inner { profiles: Vec<Profile>,
     /// a sync token a sign-in caught, by profile, while it is checked (never kept here longer, never in the registry)
     caught: HashMap<String, String>, attempts: Vec<Attempt>, jobs: HashMap<String, String>, cmds: HashMap<String, mpsc::UnboundedSender<Cmd>>, revision: u64, load_error: String, default_allowance: Option<Value>, default_identity: String,
+    /// the Codex CLI login's usage (`default_allowance_codex`), read with who it is; none until a reading
+    default_codex_allowance: Option<Value>,
     /// who each provider's CLI login is, by provider (`default_login`); none until it was asked
     default_login: HashMap<String, Value>, refresh_at: HashMap<String, u64>, busy: HashMap<String, usize>, launching: HashMap<String, usize>, launch_locks: HashMap<String, Arc<tokio::sync::Mutex<()>>>, runs_on: HashMap<String, (String, u64)>, runs_seq: u64 }
 
@@ -735,7 +737,7 @@ impl Accounts {
     pub fn snapshot(&self) -> Value {
         let g = self.inner.lock().unwrap();
         let profiles: Vec<Value> = g.profiles.iter().map(|p| { let mut o = p.public(); if g.default_login.get(&p.provider).map_or(false, |d| same_login(d, &o)) { o["sameAsDefault"] = json!(true) } o }).collect();
-        json!({"version":1,"revision":g.revision,"default_allowance":g.default_allowance,"default_login":g.default_login,"error":g.load_error,"profiles":profiles,
+        json!({"version":1,"revision":g.revision,"default_allowance":g.default_allowance,"default_allowance_codex":g.default_codex_allowance,"default_login":g.default_login,"error":g.load_error,"profiles":profiles,
             "attempts":g.attempts.iter().map(|a| json!({"id":a.id,"profile":a.profile,"state":a.state,"url":a.url,"userCode":a.user_code,"expiresAt":a.expires_at,"message":a.message})).collect::<Vec<_>>()})
     }
     fn profile(&self, id: &str) -> Result<Profile, ()> { let g = self.inner.lock().unwrap(); if !g.load_error.is_empty() { return Err(()) } g.profiles.iter().find(|p| p.id == id).cloned().ok_or(()) }
@@ -1289,9 +1291,24 @@ impl Accounts {
             let Ok(prog) = (self.resolve)("codex") else { return };
             let read = async {
                 let mut rpc = Rpc::open(&prog, &self.environment(None).unwrap_or_default(), true).await.map_err(|_| ())?;
-                let r = async { rpc.initialize().await?; rpc.request("account/read", json!({"refreshToken":false}), 12).await }.await;
+                let r = async {
+                    rpc.initialize().await?;
+                    let a = rpc.request("account/read", json!({"refreshToken":false}), 12).await?;
+                    // a ChatGPT login's limits, as an added account's are read (`verify`); an API key has none
+                    let limits = if a["account"]["type"] == "chatgpt" { rpc.request("account/rateLimits/read", json!({}), 12).await.ok() } else { None };
+                    Ok::<_, ()>((a, limits))
+                }.await;
                 rpc.close().await; r
             }.await;
+            let (read, limits) = match read { Ok((a, l)) => (Ok(a), l), Err(e) => (Err(e), None) };
+            {
+                let windows = limits.as_ref().map(Self::codex_windows).unwrap_or_default(); let n = now_s();
+                let mut g = self.inner.lock().unwrap();
+                let signed_in = read.as_ref().map_or(false, |a| a["account"]["type"] == "chatgpt");
+                if !signed_in { if g.default_codex_allowance.take().is_some() { g.revision += 1 } }
+                else if !windows.is_empty() { g.default_codex_allowance = Some(json!({"provider":"codex","state":"ok","at":n,"attempted_at":n,"auth":"chatgpt","source":"codex-app-server","windows":windows})); g.revision += 1 }
+                else if let Some(a) = g.default_codex_allowance.as_mut() { if a["state"] == "ok" { a["state"] = json!("stale"); g.revision += 1 } }
+            }
             say("codex", match read {
                 Ok(a) if a["account"]["type"] == "chatgpt" => login_of(&a["account"]["email"], &a["account"]["planType"], a["workspaceRouting"]["chatgptAccountId"].as_str(), None),
                 Ok(a) if a["account"].is_null() => json!({"state":"signed-out"}),

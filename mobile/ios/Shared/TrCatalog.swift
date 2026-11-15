@@ -459,6 +459,13 @@ ios.settings.alerts.on	Alerts on	通知オン
 ios.settings.alerts.off	Alerts off	通知オフ
 ios.settings.accounts.n	{n, plural, =0 {No accounts} one {# account} other {# accounts}}	{n, plural, =0 {アカウントなし} other {#件のアカウント}}
 hub.acct.this.hubs.sign.in	This hub's sign-in	このハブのサインイン
+hub.acct.no.usage.reading.yet	no usage reading yet	使用量はまだ読めていません
+hub.acct.this.hubs.claude.sign.in	This hub's Claude sign-in	このハブの Claude サインイン
+hub.acct.this.hubs.codex.sign.in	This hub's Codex sign-in	このハブの Codex サインイン
+hub.acct.claude.cli.login	Claude CLI login	Claude CLI ログイン
+hub.acct.codex.cli.login	Codex CLI login	Codex CLI ログイン
+hub.acct.fable.weekly	Fable weekly	Fable 週間
+ios.acct.also	Also added as {names}: the same account, counted once	{names} としても追加済み：同じアカウントとして一度だけ数えます
 common.cancel	Cancel	キャンセル
 common.delete	Delete	削除
 common.save	Save	保存
@@ -6905,6 +6912,9 @@ gpui.streamer.win	Windows does not tell an app that the screen is being captured
 
     /// ios.settings.accounts.n = {n, plural, =0 {No accounts} one {# account} other {# accounts}}
     static func ios_settings_accounts_n(n: Int) -> String { f("ios.settings.accounts.n", ["n": String(n)]) }
+
+    /// ios.acct.also = Also added as {names}: the same account, counted once
+    static func ios_acct_also(names: String) -> String { f("ios.acct.also", ["names": names]) }
 
     /// gpui.sections.move.to = Move to {group}
     static func gpui_sections_move_to(group: String) -> String { f("gpui.sections.move.to", ["group": group]) }

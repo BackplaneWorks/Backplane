@@ -4201,6 +4201,13 @@ ios.settings.alerts.on = Alerts on
 ios.settings.alerts.off = Alerts off
 ios.settings.accounts.n = {n, plural, =0 {No accounts} one {# account} other {# accounts}}
 hub.acct.this.hubs.sign.in = This hub's sign-in
+hub.acct.no.usage.reading.yet = no usage reading yet
+hub.acct.this.hubs.claude.sign.in = This hub's Claude sign-in
+hub.acct.this.hubs.codex.sign.in = This hub's Codex sign-in
+hub.acct.claude.cli.login = Claude CLI login
+hub.acct.codex.cli.login = Codex CLI login
+hub.acct.fable.weekly = Fable weekly
+ios.acct.also = Also added as {names}: the same account, counted once
 # ---- end ----
 # the sidebar's sections (docs/ALWAYS-ON.md section 8): the hub's words, and the window's
 sidebar.sections.needs = Needs you

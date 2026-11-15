@@ -260,6 +260,8 @@ impl RpcHandler for AccountsRpc {
                 snap["thread"] = json!({"id": th, "provider": provider, "binding": raw, "pinned": serde_json::from_str::<Value>(&chosen).map_or(false, |c| c["by"] == "person")});
             }
             snap["holds"] = holds(hub, &snap["profiles"], &model).await;
+            // the accounts by person, with a bar a limit window: what Settings › Accounts draws (accounts_people.rs)
+            snap["people"] = json!(super::accounts_people::people(&snap, &hub.setting("tz.machine").await.unwrap_or_default(), now_ms() / 1000));
             vec![json!({"t":"reply","id":id,"ok":snap["error"].as_str().unwrap_or("").is_empty(),"result":snap})]
         })
     }

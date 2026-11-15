@@ -290,7 +290,9 @@ fn send_field(this: &mut Backplane, f: &Field, cx: &mut Context<Backplane>) {
 
 /// Send every field's pending (coalesced) text now: called before any button action, so a fast press never overtakes the last keystrokes.
 /// A hub page of the nav, chosen (a click, or the e2e `click` on `set-nav:<page>`): what is typed goes first, then the hub is asked for the page.
-pub fn go_page(this: &mut Backplane, p: &str) { flush_fields(this); this.screens.settings_ui.device = false; this.screens.settings_ui.hubs = false; this.screens.settings_ui.accounts = false; this.screens.settings_ui.page = p.to_string(); let _ = this.tx.try_send(Command::Action("settings-page".into(), p.to_string())); }
+pub fn go_page(this: &mut Backplane, p: &str) { flush_fields(this); this.screens.settings_ui.device = false; this.screens.settings_ui.hubs = false; this.screens.settings_ui.accounts = false; this.screens.settings_ui.page = p.to_string(); let _ = this.tx.try_send(Command::Action("settings-page".into(), p.to_string()));
+    // Usage opens with each account's limit bars over the totals: the hub's accounts read again (and each signed-in account's usage, at most every 5 minutes)
+    if p == "usage" { super::accounts::list(this); super::accounts::refresh_usage(this); } }
 pub fn flush_fields(this: &mut Backplane) {
     let names: Vec<String> = this.screens.fields.iter().filter(|(_, s)| !s.vault && s.pending.is_some()).map(|(n, _)| n.clone()).collect();
     for n in names {
@@ -513,6 +515,8 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
     let dev_rows = device_rows(local);
     let hub_rows = super::hubpick::rows_on(hub_list, on_home);
     let mut els: Vec<AnyElement> = if on_hubs { hub_rows.iter().enumerate().map(|(i, r)| row_el(cx, light, fields, r, i, fit.rows)).collect() } else if on_acct { super::accounts::page(cx, light, acct, fit.rows) } else if on_device { dev_rows.iter().enumerate().map(|(i, r)| row_el(cx, light, fields, r, i, fit.rows)).collect() } else { rows.iter().skip(skip).take(MAX_ROWS).enumerate().map(|(i, r)| row_el(cx, light, fields, r, i, fit.rows)).collect() };
+    // Usage: each account's limit windows first, then the hub's lifetime totals
+    if !on_device && !on_acct && !on_hubs && ui.page == "usage" { let mut top = super::accounts::usage_summary(light, acct); top.append(&mut els); els = top; }
     if !on_device && !on_acct && !on_hubs && rows.len() > MAX_ROWS + skip { els.push(div().py_2().text_color(c("dim")).child(tf("gpui.settings.more", &[("n", (rows.len() - MAX_ROWS - skip).into())])).into_any_element()); }
     // the left nav
     let mut nav = div().id("settings-nav").flex().flex_col().gap(px(2.)).p_3().w(px(fit.nav)).flex_shrink_0().min_h_0().overflow_y_scroll().overflow_x_hidden().border_r_1().border_color(c("line"));

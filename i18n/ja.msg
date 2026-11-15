@@ -4224,6 +4224,13 @@ ios.settings.alerts.on = 通知オン
 ios.settings.alerts.off = 通知オフ
 ios.settings.accounts.n = {n, plural, =0 {アカウントなし} other {#件のアカウント}}
 hub.acct.this.hubs.sign.in = このハブのサインイン
+hub.acct.no.usage.reading.yet = 使用量はまだ読めていません
+hub.acct.this.hubs.claude.sign.in = このハブの Claude サインイン
+hub.acct.this.hubs.codex.sign.in = このハブの Codex サインイン
+hub.acct.claude.cli.login = Claude CLI ログイン
+hub.acct.codex.cli.login = Codex CLI ログイン
+hub.acct.fable.weekly = Fable 週間
+ios.acct.also = {names} としても追加済み：同じアカウントとして一度だけ数えます
 # ---- end ----
 # the sidebar's sections (docs/ALWAYS-ON.md section 8): the hub's words, and the window's
 sidebar.sections.needs = 対応が必要

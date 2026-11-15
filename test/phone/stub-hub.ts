@@ -43,6 +43,7 @@ const methods: Record<string, (p: any, ws: any) => any> = {
   // accounts (docs/PHONE-DATA.md "Accounts"): a fixed sample in the Rust hub's shape (settings/accounts_phone.rs), so a phone draws its rows and usage bars
   'accounts.page': () => {
     const bar = (name: string, used: number, text: string, tone: string) => ({name, used, text, tone});
+    const login = (provider: string, title: string, kind: string, profile: string, plan: string, bars: any[], extra: any = {}) => ({provider, title, kind, profile, plan, state: 'connected', line: 'connected', tone: 'ok', hold: '', out: false, default: false, bars, note: '', also: [], label: '', ...extra});
     const row = (id: string, provider: string, label: string, email: string, bars: any[], hold = '', extra: any = {}) => ({id, provider, label, email, state: 'connected', line: 'connected', tone: 'ok', limits: '', hold, bars, out: !!hold, open: true, ...extra});
     return {providers: [
       {provider: 'claude', title: 'Claude', add: 'Add a Claude account', accounts: [
@@ -50,6 +51,13 @@ const methods: Record<string, (p: any, ws: any) => any> = {
         row('p', 'claude', 'Personal', 'me@example.com', [bar('5h', 100, '100% used · resets 14:10', 'bad'), bar('7d', 44, '44% used', 'bad')], 'out, resets 14:10')]},
       {provider: 'claude-sync', title: 'Claude (sync)', add: 'Add a Claude sync token', accounts: []},
       {provider: 'codex', title: 'Codex', add: 'Add a Codex account', accounts: [row('c', 'codex', 'Codex 1', 'dev@example.com', [bar('5h', 12, '12% used · resets 16:05', 'ok'), bar('7d', 30, '30% used', 'ok')])]}],
+      // by person (settings/accounts_people.rs), the live hub's shape on 2026-11-15
+      people: [
+        {key: 'helmut@backplaneworks.com', title: 'helmut@backplaneworks.com', logins: [login('claude', 'Claude', 'cli', 'b', 'max', [bar('Weekly', 95, '95% used · resets Thu 09:00', 'bad'), bar('Fable weekly', 100, '100% used · resets Thu 09:00', 'bad')])]},
+        {key: 'kellyhlord@gmail.com', title: 'kellyhlord@gmail.com', logins: [
+          login('claude', 'Claude', 'account', 'k', 'max', [], {state: 'connecting', line: 'signing in', tone: 'warn', hold: 'limited until Nov 18 17:00', out: true, default: true}),
+          login('codex', 'Codex', 'cli', '', 'pro', [bar('5h', 12, '12% used · resets 16:05', 'ok'), bar('7d', 30, '30% used', 'ok')], {default: true})]},
+        {key: 'helmut.lord@amemb.com', title: 'helmut.lord@amemb.com', logins: [login('claude', 'Claude', 'account', 'h', 'max', [bar('5-hour', 0, '0% used', 'ok'), bar('Weekly', 80, '80% used · resets Mon 09:00', 'warn'), bar('Fable weekly', 37, '37% used · resets Mon 09:00', 'ok')])]}],
       own: [row('', 'claude', "This hub's sign-in", 'hub@example.com', [bar('5h', 35, '35% used · resets 15:00', 'ok'), bar('7d', 58, '58% used', 'ok')], '', {open: false})],
       error: '', note: "Accounts sign in on the hub. Other agents use the hub machine's own sign-in."};
   },
