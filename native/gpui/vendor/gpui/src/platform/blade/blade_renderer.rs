@@ -64,6 +64,7 @@ struct ShaderShadowsData {
 struct ShaderPathRasterizationData {
     globals: GlobalParams,
     b_path_vertices: gpu::BufferPiece,
+    b_path_data: gpu::BufferPiece,
 }
 
 #[derive(blade_macros::ShaderData)]
@@ -118,6 +119,16 @@ struct PathSprite {
 struct PathRasterizationVertex {
     xy_position: Point<ScaledPixels>,
     st_position: Point<f32>,
+    path_id: u32,
+    pad: u32, // (a vec2<f32> aligns the shader's struct to 8 bytes)
+}
+
+/// Backplane (PATCH.md): what every vertex of a path shares, held once a path (`PathRasterizationVertex::path_id`).
+/// In every vertex it made a vertex 104 bytes (24 now), of which 88 were the same for the whole path: a board plot of half a
+/// million vertices was 60 MB written and sent to the GPU every frame.
+#[derive(Clone, Debug)]
+#[repr(C)]
+struct PathRasterizationPath {
     color: Background,
     bounds: Bounds<ScaledPixels>,
 }
@@ -149,6 +160,7 @@ impl BladePipelines {
         shader.check_struct_size::<Quad>();
         shader.check_struct_size::<Shadow>();
         shader.check_struct_size::<PathRasterizationVertex>();
+        shader.check_struct_size::<PathRasterizationPath>();
         shader.check_struct_size::<PathSprite>();
         shader.check_struct_size::<Underline>();
         shader.check_struct_size::<MonochromeSprite>();
@@ -332,6 +344,9 @@ pub struct BladeRenderer {
     last_sync_point: Option<gpu::SyncPoint>,
     pipelines: BladePipelines,
     instance_belt: BufferBelt,
+    /// Backplane (PATCH.md): the paths' vertices as the shader takes them, kept between frames.
+    path_vertices: Vec<PathRasterizationVertex>,
+    path_data: Vec<PathRasterizationPath>,
     atlas: Arc<BladeAtlas>,
     atlas_sampler: gpu::Sampler,
     #[cfg(target_os = "macos")]
@@ -418,6 +433,8 @@ impl BladeRenderer {
             last_sync_point: None,
             pipelines,
             instance_belt,
+            path_vertices: Vec::new(),
+            path_data: Vec::new(),
             atlas,
             atlas_sampler,
             #[cfg(target_os = "macos")]
@@ -600,24 +617,44 @@ impl BladeRenderer {
             };
             let mut encoder = pass.with(&self.pipelines.path_rasterization);
 
-            let mut vertices = Vec::new();
-            for path in paths {
+            // Backplane (PATCH.md): one buffer kept between frames and sized once a batch. A new Vec grown path by
+            // path was copied again each time it doubled and came back as untouched pages every frame: on a board
+            // of a million vertices (104 bytes each here) that was most of a frame.
+            let count: usize = paths.iter().map(|path| path.vertices.len()).sum();
+            let vertices = &mut self.path_vertices;
+            vertices.clear();
+            vertices.reserve(count);
+            let data = &mut self.path_data;
+            data.clear();
+            for (path_id, path) in paths.iter().enumerate() {
+                data.push(PathRasterizationPath {
+                    color: path.color,
+                    bounds: path.clipped_bounds(),
+                });
+                let path_id = path_id as u32;
                 vertices.extend(path.vertices.iter().map(|v| PathRasterizationVertex {
                     xy_position: v.xy_position,
                     st_position: v.st_position,
-                    color: path.color,
-                    bounds: path.clipped_bounds(),
+                    path_id,
+                    pad: 0,
                 }));
             }
-            let vertex_buf = unsafe { self.instance_belt.alloc_typed(&vertices, &self.gpu) };
+            let vertex_buf = unsafe { self.instance_belt.alloc_typed(vertices, &self.gpu) };
+            let data_buf = unsafe { self.instance_belt.alloc_typed(data, &self.gpu) };
             encoder.bind(
                 0,
                 &ShaderPathRasterizationData {
                     globals,
                     b_path_vertices: vertex_buf,
+                    b_path_data: data_buf,
                 },
             );
             encoder.draw(0, vertices.len() as u32, 0, 1);
+            // (a buffer far larger than this batch needed is of a plot no longer on show: it goes back)
+            if vertices.capacity() > 4 * count.max(1 << 16) {
+                vertices.clear();
+                vertices.shrink_to(count);
+            }
         }
     }
 
