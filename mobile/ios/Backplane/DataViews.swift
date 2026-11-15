@@ -1240,7 +1240,7 @@ struct DataEntryRow: View {
             }.padding(.vertical, 4).accessibilityIdentifier("data.entry.user")
         case "assistant":
             VStack(alignment: .leading, spacing: 4) {
-                DataMarkdown(text: entry.text, thread: thread)
+                DataMarkdown(text: entry.text, thread: thread, entry: entry.id, images: entry.live ? [] : entry.images)
                 // the pictures the reply names (the hub lists them as attachments); tap for the full size
                 ForEach(entry.attachments) { a in DataAttachmentImage(client: client, attachment: a) }
                 if !entry.live { Text(dStamp(entry.at)).dmono(11).foregroundStyle(BackplaneDesign.faint) }

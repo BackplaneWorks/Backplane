@@ -4173,6 +4173,7 @@ ios.image.saved = Saved to Photos
 ios.image.denied = Photos access is off: allow it in Settings to save pictures.
 ios.image.failed = Could not save the picture.
 ios.image.incoming = Picture ready: open a thread to send it.
+ios.image.loadfail = Could not load the picture.
 native.permission.photos.add = Backplane saves the pictures you choose in a thread to your photo library.
 # ---- end ----
 # the sidebar's sections (docs/ALWAYS-ON.md section 8): the hub's words, and the window's

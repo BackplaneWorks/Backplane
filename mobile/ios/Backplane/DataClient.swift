@@ -912,6 +912,14 @@ final class DataClient {
 
     // MARK: pictures
     nonisolated(unsafe) static let attachmentCache = NSCache<NSString, NSData>()
+    /// An image a reply names (feature replyImages): the hub's snapshot of it (`message.image`), so it reads the same over the relay as on the tailnet.
+    func replyImage(entry: String, path: String) async -> Data? {
+        let key = "mi:" + entry + "\n" + path
+        if let d = Self.attachmentCache.object(forKey: key as NSString) { return d as Data }
+        guard let r: DAttachmentData = try? await call("message.image", ["entry": entry, "path": path]), let d = Data(base64Encoded: r.data) else { return nil }
+        Self.attachmentCache.setObject(d as NSData, forKey: key as NSString)
+        return d
+    }
     func attachmentData(_ id: String) async -> Data? {
         if let d = Self.attachmentCache.object(forKey: id as NSString) { return d as Data }
         guard let r: DAttachmentData = try? await call("attachment.get", ["id": id]), let d = Data(base64Encoded: r.data) else { return nil }
