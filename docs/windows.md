@@ -81,4 +81,17 @@ capture for a different window than the one the down reached, and no move goes t
 tried and did not help, so neither shipped: forwarding every move and the release from the shield (KiCad took capture
 before the first move, every time), and injecting a real middle-down through the input queue (about the same rate,
 and left and right clicks at 120 ms holds then failed). On main before the shield did this (stage 1) such a drag never
-panned: the shield consumed every first press.
+panned: the shield consumed every first press. The injected variant also made the left and right click sweep worse, so
+it is not to be tried again; a fix has to come from how KiCad takes capture after a posted press.
+
+Seen once, not reproduced: the `took` rule in `kicad_pane.rs` (an X11 workaround: a window manager that focuses on
+click hands the keyboard straight back to Backplane after a click in KiCad, so a focus notice within 600 ms pulls it
+into KiCad again) also runs on Windows. In one run (bp-win, Nov 15, stage-2 build 3afc3f375 on bp.10, the click-acts
+check, round "composer 2/10") a click into the composer handed the keys back to Backplane, the rule then focused
+KiCad's frame in the same tick, the composer's mouse-down-out handed them back again, and at the next click on the
+board KiCad still had the focus: no shield click, nothing selected. A race test that waits for KiCad's focus notice
+before the composer click (`took_race`) arms in 1 of 5 rounds at best and showed nothing on the landed build or with
+the fix, so the fix is not on main. It is on the branch `took-main` (`took_applies`: never on Windows, never after a
+button went down in Backplane's own window; unit test
+`took_never_pulls_the_keys_back_on_windows_or_after_a_click_into_backplane`); land it once a race that arms shows
+the typing going to KiCad on the landed build and to the composer with the fix.
