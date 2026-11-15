@@ -161,11 +161,14 @@ impl SelText {
             if s.style.bold || self.kind == Kind::Head { font.weight = FontWeight::BOLD; }
             if s.style.italic { font.style = FontStyle::Italic; }
             if s.style.code { font = mono.clone(); }
+            // a link into Settings (an agent's "Open Settings › CAD"): drawn as a button, a filled label with no underline
+            let button = s.style.link.as_ref().is_some_and(|l| l.href.starts_with("backplane://settings/"));
+            if button { font.weight = FontWeight::BOLD; }
             let color = if s.style.link.is_some() { c("accent") } else if self.kind == Kind::Quote || s.style.small { c("dim") } else { c("text") };
             runs.push(TextRun {
                 len: s.text.len(), font, color: color.into(),
-                background_color: (s.style.code || s.style.kbd).then(|| c("raise").into()),
-                underline: s.style.link.is_some().then(|| UnderlineStyle { color: Some(color.into()), thickness: px(1.), wavy: false }),
+                background_color: (s.style.code || s.style.kbd || button).then(|| c("raise").into()),
+                underline: (s.style.link.is_some() && !button).then(|| UnderlineStyle { color: Some(color.into()), thickness: px(1.), wavy: false }),
                 strikethrough: s.style.strike.then(|| StrikethroughStyle { color: Some(color.into()), thickness: px(1.) }),
             });
         }

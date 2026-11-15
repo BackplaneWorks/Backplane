@@ -3,7 +3,7 @@
 #[derive(Clone, Debug, PartialEq)]
 pub struct Ref { pub kind: String, pub rest: Vec<String>, pub frag: String }
 
-const KINDS: [&str; 16] = ["thread", "bot", "room", "person", "project", "routine", "task", "pr", "work", "file", "machine", "conv", "mail", "mailroom", "decision", "charter"];
+const KINDS: [&str; 17] = ["settings", "thread", "bot", "room", "person", "project", "routine", "task", "pr", "work", "file", "machine", "conv", "mail", "mailroom", "decision", "charter"];
 
 fn safe(c: char) -> bool { c.is_ascii_alphanumeric() || matches!(c, '-' | '.' | '_' | '~') }
 
@@ -133,6 +133,10 @@ mod tests {
     #[test] fn parse_forms() {
         assert_eq!(uri(&parse("backplane://thread/t1-2#m3").unwrap()), "backplane://thread/t1-2#m3");
         assert!(parse("backplane://thread").is_none()); assert!(parse("backplane://person").is_some());
+        // a Settings page (an agent's "Open Settings › CAD" when KiCad or FreeCAD is missing) is a link, written as a label too
+        assert_eq!(uri(&parse("backplane://settings/cad").unwrap()), "backplane://settings/cad"); assert!(parse("backplane://settings").is_none());
+        let n = serde_json::to_string(&crate::md::nodes_json(&crate::md::render("FreeCAD is missing.\n\n[Open Settings › CAD](backplane://settings/cad)"))).unwrap();
+        assert!(n.contains("backplane://settings/cad") && n.contains("Open Settings › CAD") && !n.contains("](backplane"), "{n}");
         assert_eq!(parse("http://host/#/thread/x").unwrap().rest, vec!["x".to_string()]);
         assert!(parse("http://host/thread/x").is_none());
     }

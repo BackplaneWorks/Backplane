@@ -353,6 +353,11 @@ fn link_file(st: &State,far: &[(String,&State)],un: &Unified,p: &Value,href: &st
         }
     }
 }
+/// The Settings page a `backplane://settings/<page>` link names, when it is one of Settings' pages.
+pub fn settings_link(href: &str) -> Option<&'static str> {
+    let page=href.trim().strip_prefix("backplane://settings/")?.split(['#','?']).next()?.trim_end_matches('/');
+    super::settings::PAGES.iter().map(|(id,_)|*id).find(|id|*id==page)
+}
 /// `recent_far` with projects shared across machines shown once (`Unified`).
 pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value) -> Option<Value> {
     if text(p,"action")=="proj-go" { match find_go(st,p) { Some(c)=>return recent_unified(st,far,un,&c), None=>{ let mut c=p.clone(); c["action"]=json!("proj-find-q"); c["value"]=json!(""); return recent_unified(st,far,un,&c) } } }
@@ -362,6 +367,8 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
     if text(p,"action")=="link-open" { if let Some(r)=crate::md::refs::parse(text(p,"value").trim()).filter(|r|r.kind=="file") {
         let Some(path)=super::filelink::file_ref(st,&r.rest) else { let mut c=p.clone(); c["action"]=json!("link-note"); c["value"]=json!("That file is not on this hub."); return recent_unified(st,far,un,&c) };
         return link_file(st,far,un,p,&path) } }
+    // `backplane://settings/<page>` (an agent's "Open Settings, CAD" when KiCad or FreeCAD is missing): Settings on that page, as its own button
+    if text(p,"action")=="link-open" { if let Some(page)=settings_link(text(p,"value")) { let mut c=p.clone(); c["action"]=json!("settings-page"); c["value"]=json!(page); return recent_unified(st,far,un,&c) } }
     // a link clicked in a message: what it opens is decided here (present/linkopen.rs); a thread on a linked machine moves the target itself
     if text(p,"action")=="link-open" {
         let c=super::linkopen::request(st,far,un.here,p);
@@ -1110,6 +1117,9 @@ mod state_tests {
         let open=|u: &str| { let mut q=params(); q["action"]=json!("link-open"); q["value"]=json!(u); recent_unified(&st,&far,&un,&q).unwrap() };
         assert_eq!(open("backplane://thread/framework~t9")["nextTarget"],json!({"kind":"thread","id":"L~t9"}));
         assert_eq!(open("bpgpui://thread/L~t8")["nextTarget"]["id"],"L~t8"); assert_eq!(open("backplane://thread/desk~t1")["nextTarget"]["id"],"t1");
+        // a Settings link opens Settings on that page; a page Settings does not have is not one
+        let cad=open("backplane://settings/cad"); assert_eq!(cad["session"]["open"]["settings"],true,"{cad}"); assert_eq!(cad["session"]["drafts"]["@settings.page"],"cad");
+        assert_eq!(settings_link("backplane://settings/cad"),Some("cad")); assert_eq!(settings_link("backplane://settings/nope"),None); assert_eq!(settings_link("https://x/settings/cad"),None);
         let none=open("backplane://thread/lab~t1"); assert!(none.get("nextTarget").is_none()); assert!(none["cmds"].as_array().unwrap().iter().any(|c|c["tone"]=="note"&&c["text"]=="That thread is on a machine this hub does not mirror (yet)."),"{none}");
         let _=std::fs::remove_dir_all(&d);
     }
