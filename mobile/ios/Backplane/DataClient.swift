@@ -1038,6 +1038,8 @@ final class DataClient {
             // the chat is re-pointed once its row is in: until then it would draw a thread with no name (Nov 11: "Thread" for two seconds)
             if threads.contains(where: { $0.id == to }) { pushThread = to } else { let g = gen; Task { try? await self.loadThreads(g); self.pushThread = to } } } }
     }
+    /// Delete bot (`bot.delete`; the row asked first): the hub stops its chat, and the list is read again.
+    func botDelete(_ bot: String) async { _ = try? await call("bot.delete", ["bot": bot]) as DEmpty; await loadBots() }
     func roomPosts(_ room: String) async -> [DPost] { ((try? await call("room.posts", ["room": room, "limit": 60]) as DPosts)?.posts) ?? [] }
     func roomPost(_ room: String, _ text: String) async throws { _ = try await call("room.post", ["room": room, "text": text, "clientId": UUID().uuidString], as: DEmpty.self) }
 

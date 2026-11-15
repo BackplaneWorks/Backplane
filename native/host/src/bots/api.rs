@@ -66,6 +66,8 @@ pub async fn page_from(hub: &Arc<Hub>, bot: &str, tab: &str, now: u64, from: usi
     let parent = nav_parent(uber, on);
     let chat = if uber { w.ub_chat() } else { me.thread.clone() };
     let mut v = json!({"kind":"bot","id":bot,"name":me.name,"title":me.name,"look":me.look,"tab":on,"navTab":parent,"tabs":tabs_json(tabs),"subtabs":tabs_json(nav_sections(uber, parent)),"edit":true,"uber":uber,"chat":chat});
+    // Delete bot: any bot of this hub but the uberbot (it is taken back first); the clients ask before they send it
+    if !uber { v["delete"] = json!({"label":"Delete bot","action":"bot-delete","value":bot}); }
     if tab_of_world(&w, bot, on, now, from, &mut v) {
         // Settings: the memory tree's state (its engine reads the world itself)
         if on == "settings" && v["recall"].is_object() { drop(w); if let Some(rc) = b.recall.get() { let (n, lines, left) = rc.stats(&me.thread).await; v["recall"]["messages"] = json!(n); v["recall"]["lines"] = json!(lines); v["recall"]["left"] = json!(left); } }
@@ -170,9 +172,10 @@ pub async fn directory(hub: &Arc<Hub>) -> serde_json::Value {
 }
 /// A linked machine's rooms as listed here: a room shared across machines is kept on each under the same id, and this machine's copy is the one listed
 pub fn far_rooms(rows: Vec<Value>, here: &std::collections::HashSet<String>) -> Vec<Value> { rows.into_iter().filter(|r| !here.contains(&crate::net::far::local(r["id"].as_str().unwrap_or("")))).collect() }
-/// A bots world's live bots and rooms (oldest first) as `bots.list` rows; `uber` is the bot shown as the uberbot, `mark` the machine's marker (null for this one)
+/// A bots world's live bots and rooms (oldest first) as `bots.list` rows; `uber` is the bot shown as the uberbot, `mark` the machine's marker (null for this one);
+/// `delete` says the row offers Delete bot (`bot.delete`): this machine's bots but the uberbot
 pub fn rows_of(w: &super::world::World, uber: &str, mark: &Value) -> (Vec<Value>, Vec<Value>) {
-    let mut bots: Vec<_> = w.bots.values().filter(|x| !x.deleted).map(|x| (x.created, x.id.clone(), json!({"id":x.id,"name":x.name,"thread":x.thread,"uber":!uber.is_empty() && x.id == uber,"mark":mark}))).collect();
+    let mut bots: Vec<_> = w.bots.values().filter(|x| !x.deleted).map(|x| (x.created, x.id.clone(), json!({"id":x.id,"name":x.name,"thread":x.thread,"uber":!uber.is_empty() && x.id == uber,"mark":mark,"delete":mark.is_null() && x.id != uber}))).collect();
     bots.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
     let mut rooms: Vec<_> = w.rooms.values().filter(|x| x.listed() && !x.swarm() && !crate::net::far::local(&x.id).starts_with("dm:")).map(|x| (x.created, x.id.clone(), json!({"id":x.id,"name":x.name,"members":x.members,"mark":mark}))).collect();
     rooms.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
@@ -254,6 +257,9 @@ mod far_tests {
         let (bots, rooms) = rows_of(&boat(), "L~bub", &mark);
         assert_eq!(bots.iter().map(|b| (b["id"].as_str().unwrap(), b["uber"] == true, b["thread"].as_str().unwrap())).collect::<Vec<_>>(), [("L~bub", true, "L~tb"), ("L~cal", false, "L~tc")]);
         assert_eq!(bots[0]["mark"]["short"], "boat-hub");
+        assert!(bots.iter().all(|b| b["delete"] == false), "a linked machine's bots are deleted there");
+        let (own, _) = rows_of(&boat(), "L~bub", &Value::Null);
+        assert_eq!(own.iter().map(|b| b["delete"] == true).collect::<Vec<_>>(), [false, true], "this machine's bots offer Delete bot, the uberbot never");
         let here: std::collections::HashSet<String> = ["r2".to_string()].into();
         let rooms = far_rooms(rooms, &here);
         assert_eq!(rooms.iter().map(|r| r["id"].as_str().unwrap()).collect::<Vec<_>>(), ["L~r9"], "the shared room is this hub's copy; a direct room is never listed");

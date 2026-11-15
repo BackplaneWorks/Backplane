@@ -228,9 +228,11 @@ fun MentionPopup(draft: String, pick: (String) -> Unit) {
 }
 
 /** A bot's or room's name row in the sidebar. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-fun SidebarRow(sigil: String, name: String, detail: String, onClick: () -> Unit) {
-    Column(Modifier.fillMaxWidth().clickable(onClick = onClick).testTag("side.$sigil$name")) {
+fun SidebarRow(sigil: String, name: String, detail: String, onLong: (() -> Unit)? = null, onClick: () -> Unit) {
+    // (a row with something more to offer, a bot's Delete bot, takes a long press, as a thread's row does)
+    Column((if (onLong != null) Modifier.fillMaxWidth().combinedClickable(onClick = onClick, onLongClick = onLong) else Modifier.fillMaxWidth().clickable(onClick = onClick)).testTag("side.$sigil$name")) {
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             DMono(sigil, dcs.primary, 13, bold = true); Spacer(Modifier.width(10.dp)); Text(name, Modifier.weight(1f), color = dcs.onSurface, fontFamily = BpMono, fontSize = 13.sp); DMono(detail, dfaint)
         }

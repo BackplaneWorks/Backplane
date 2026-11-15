@@ -295,6 +295,7 @@ internal fun ModelChip(text: String, tag: String, modifier: Modifier = Modifier,
 private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> Unit, addProject: () -> Unit, newThread: (String) -> Unit, openSwarm: (String) -> Unit, openRoom: (DataClient.Room) -> Unit) {
     var q by remember { mutableStateOf("") }
     var projMenu by remember { mutableStateOf<DProject?>(null) }
+    var botDelete by remember { mutableStateOf<DataClient.Bot?>(null) }
     // the project the long press was on stays after its sheet closes: Rename, Badge and Remove open their own box after it (the sheet alone closes)
     var projSheet by remember { mutableStateOf(false) }
     var pickNew by remember { mutableStateOf<DProject?>(null) }
@@ -429,9 +430,16 @@ private fun HomeScreen(open: (String) -> Unit, settings: () -> Unit, hub: () -> 
             }
             val bots = DataClient.bots.filter { !it.uber }
             if (bots.isNotEmpty()) { item("bots") { DMono(Msg.plane_heading_bots, dfaint, 11, Modifier.fillMaxWidth().padding(start = 12.dp, top = 12.dp, bottom = 4.dp)) }
-                items(bots, key = { "b:${it.id}" }) { b -> SidebarRow("@", b.name, onMachine(Msg.android_kind_bot, b.mark)) { if (b.thread.isNotEmpty()) open(b.thread) } } }
+                items(bots, key = { "b:${it.id}" }) { b -> SidebarRow("@", b.name, onMachine(Msg.android_kind_bot, b.mark), onLong = if (b.delete) ({ botDelete = b }) else null) { if (b.thread.isNotEmpty()) open(b.thread) } } }
             if (DataClient.rooms.isNotEmpty()) { item("rooms") { DMono(Msg.plane_heading_rooms, dfaint, 11, Modifier.fillMaxWidth().padding(start = 12.dp, top = 12.dp, bottom = 4.dp)) }
                 items(DataClient.rooms, key = { "r:${it.id}" }) { r -> SidebarRow("#", r.name, onMachine(Msg.android_kind_room, r.mark)) { openRoom(r) } } }
+        }
+        // Delete bot (a long press on a bot the hub offers it for): asked first, then `bot.delete`
+        botDelete?.let { b ->
+            val del = rememberCoroutineScope()
+            AlertDialog(onDismissRequest = { botDelete = null }, title = { Text(Msg.native_bot_delete_ask(b.name)) },
+                confirmButton = { TextButton({ botDelete = null; del.launch { runCatching { DataClient.botDelete(b.id) } } }, Modifier.testTag("bot.delete.yes")) { Text(Msg.bots_delete, color = dcs.error) } },
+                dismissButton = { TextButton({ botDelete = null }) { Text(Msg.common_cancel) } })
         }
         projMenu?.let { ProjectMenus(it, projSheet, { newSwarm = it }) { projSheet = false } }
         newSwarm?.let { pr -> NewSwarmSheet(pr.id, { newSwarm = null }) { openSwarm(it) } }

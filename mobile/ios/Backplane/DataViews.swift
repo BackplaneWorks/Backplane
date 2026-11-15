@@ -124,6 +124,7 @@ struct DataThreadsView: View {
     @State private var renaming: DThread?
     @State private var deleting: DThread?
     @State private var projectMenu: DProject?
+    @State private var botDelete: DBot?
     @State private var renamingProject: DProject?
     @State private var badgeProject: DProject?
     @State private var projectTitle = ""
@@ -219,6 +220,10 @@ struct DataThreadsView: View {
         .alert(Tr.t("Rename project"), isPresented: Binding(get: { renamingProject != nil }, set: { if !$0 { renamingProject = nil } })) {
             TextField(Tr.t("Title"), text: $projectTitle)
             Button(Tr.t("Rename")) { if let p = renamingProject { Task { await client.projectAct(p.id, "rename", title: projectTitle) } } }
+            Button(Tr.t("Cancel"), role: .cancel) {}
+        }
+        .confirmationDialog(Tr.native_bot_delete_ask(name: botDelete?.name ?? ""), isPresented: Binding(get: { botDelete != nil }, set: { if !$0 { botDelete = nil } }), titleVisibility: .visible) {
+            Button(Tr.t("Delete bot"), role: .destructive) { if let b = botDelete { Task { await client.botDelete(b.id) } } }
             Button(Tr.t("Cancel"), role: .cancel) {}
         }
         .confirmationDialog(Tr.sidebar_sections_remove_ask(project: projectMenu?.title ?? ""), isPresented: Binding(get: { projectMenu != nil }, set: { if !$0 { projectMenu = nil } }), titleVisibility: .visible) {
@@ -375,6 +380,8 @@ struct DataThreadsView: View {
     }
     private func botRow(_ b: DBot) -> some View {
         Button { path.append(b.thread) } label: { sideRow("@", b.name, !b.note.isEmpty ? b.note : b.uber ? "uberbot" : "bot", b.mark) }.buttonStyle(.plain).dataRow().accessibilityIdentifier("data.bot." + b.id)
+            // Delete bot (a long press on a bot the hub offers it for): asked first, then `bot.delete`
+            .contextMenu { if b.delete { Button(Tr.t("Delete bot"), systemImage: "trash", role: .destructive) { botDelete = b } } }
     }
     private func projectHeader(_ p: DProject) -> some View {
         HStack(spacing: 8) {
