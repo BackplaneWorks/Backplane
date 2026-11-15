@@ -79,6 +79,7 @@ struct DataSectionThread: View {
             HStack(spacing: 8) {
                 Circle().fill(r.tone).frame(width: 7, height: 7)
                 Text(r.title).dmono(13).foregroundStyle(BackplaneDesign.text).lineLimit(1)
+                if r.pinned { Image(systemName: "pin.fill").font(.system(size: 9)).foregroundStyle(BackplaneDesign.faint).accessibilityIdentifier("data.section.pinned." + r.id) }
                 if showProject { Text(r.project).dmono(11).foregroundStyle(BackplaneDesign.faint).lineLimit(1) }
                 Spacer(minLength: 0)
                 if let m = r.mark { Text(dAway(m.short, m.away)).dmono(11).foregroundStyle(BackplaneDesign.faint) }
@@ -89,9 +90,14 @@ struct DataSectionThread: View {
     }
 }
 extension View {
-    /// Another machine's thread (the hub's `hide`): a long press hides it here until something new happens there (`thread-hide`).
-    func farHide(_ r: DSecRow, _ client: DataClient) -> some View {
-        contextMenu { if !r.hide.isEmpty { Button(Tr.t("Hide"), systemImage: "eye.slash") { Task { await client.sidebarAct("thread-hide", r.hide) } } } }
+    /// A long press on a thread row. Another machine's thread (the hub's `hide`): Hide, here only, until something new happens there (`thread-hide`).
+    /// A thread of this hub (the hub's `menu`): Pin or Unpin (a pinned thread stays under its project and never settles by itself), Settle or
+    /// Unsettle, Archive. `after` runs once the hub has answered (a project page reads its lists again).
+    func farHide(_ r: DSecRow, _ client: DataClient, after: @escaping () async -> Void = {}) -> some View {
+        contextMenu {
+            if !r.hide.isEmpty { Button(Tr.t("Hide"), systemImage: "eye.slash") { Task { await client.sidebarAct("thread-hide", r.hide) } } }
+            if !r.isProject && r.swarmRoom == nil { ForEach(r.menu) { m in Button(Tr.t(m.label)) { Task { await client.sectionThreadAct(r.id, m.id); await after() } }.accessibilityIdentifier("data.section." + m.id + "." + r.id) } }
+        }
     }
 }
 /// A project row of a section: its badge and name, the machines' dots, its running count; a press opens its page.
@@ -136,7 +142,7 @@ struct DataProjectPageView: View {
             if let page {
                 ForEach(page.sections.filter { !$0.rows.isEmpty || ($0.fold && $0.count > 0) }) { s in
                     DataSectionHead(s: s) { done.toggle(); Task { await load() } }.dataRow()
-                    ForEach(s.rows) { r in DataSectionThread(r: r) { nav in if let room = r.swarmRoom { path.append(DSwarmRoute(id: room, name: r.title)) } else { path.append(nav) } }.farHide(r, client).dataRow() }
+                    ForEach(s.rows) { r in DataSectionThread(r: r) { nav in if let room = r.swarmRoom { path.append(DSwarmRoute(id: room, name: r.title)) } else { path.append(nav) } }.farHide(r, client) { await load() }.dataRow() }
                 }
                 if page.sections.allSatisfy({ $0.rows.isEmpty && $0.count == 0 }) { Text(Tr.t("No threads")).dmono(12).foregroundStyle(BackplaneDesign.faint).padding(14).dataRow() }
             } else { DLoading(text: Tr.t("Loading…")).dataRow() }

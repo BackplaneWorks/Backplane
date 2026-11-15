@@ -95,6 +95,27 @@ fn one(evs: &[Value]) -> State { let mut v = vec![pc("p1", "Proj", "/nowhere/pro
     assert!(visible(&s, "t1"));
     assert!(!visible(&one(&[json!({"$":"ThreadDeleted","id":"t1","at":NOW-40})]), "t1"));
 }
+/// A pinned thread is a fixed row of its project: first under it, in the order pinned, whatever runs below, and never cut by the row cap.
+#[test] fn a_pinned_thread_is_first_under_its_project_and_every_row_of_this_machine_has_its_menu() {
+    let pin = |id: &str, on: bool, at: u64| json!({"$":"ThreadPinned","id":id,"pinned":on,"at":at});
+    let mut evs = vec![tc("t2", "p1", NOW - 80), tc("t3", "p1", NOW - 70), turn("t1", "completed", NOW - 60), turn("t3", "completed", NOW - 55), turn("t2", "running", NOW - 10), pin("t3", true, NOW - 40), pin("t1", true, NOW - 30)];
+    let under = |s: &State| { let rows = merged_projects(s, &[], &|_| false, &|_| String::new(), "desk", &[]); let v = build(s, &rows, &Value::Null, &ctx(&HashSet::new())); sec(&v, "active")["rows"][0]["threads"].clone() };
+    let names = |u: &Value| u.as_array().unwrap().iter().map(|r| r["title"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+    let u = under(&one(&evs));
+    assert_eq!(names(&u), ["T t3", "T t1", "T t2"], "the pins first, as pinned; the running one (newest) after them");
+    let menu = |r: &Value| r["menu"].as_array().unwrap().iter().map(|m| (m["id"].as_str().unwrap().to_string(), m["action"].as_str().unwrap().to_string(), m["value"].as_str().unwrap().to_string())).collect::<Vec<_>>();
+    assert_eq!(menu(&u[0]), [("unpin".into(), "row-unpin".into(), "h|t3".into()), ("settle".into(), "row-settle".into(), "h|t3".into()), ("archive".into(), "row-archive".into(), "h|t3".into())]);
+    assert_eq!(menu(&u[2])[0].0, "pin"); assert_eq!(u[0]["menu"][0]["label"], "Unpin"); assert_eq!(u[2]["menu"][0]["label"], "Pin");
+    // ten more running threads, all newer: the pins keep their place inside the cap
+    for i in 0..10 { let id = format!("r{i}"); evs.push(tc(&id, "p1", NOW - 9)); evs.push(turn(&id, "running", NOW - 5)); }
+    let u = under(&one(&evs)); assert_eq!(u.as_array().unwrap().len(), 8); assert_eq!(names(&u)[..2], ["T t3", "T t1"]);
+    // settled by hand, a thread gives up its pin (the state's law) and leaves; unpinned and done, the other leaves too. The page's Done row offers Pin and Unsettle
+    evs.truncate(7); evs.push(json!({"$":"ThreadSettled","id":"t3","manual":true,"at":NOW-20})); evs.push(pin("t1", false, NOW - 20));
+    let s = one(&evs); assert_eq!(names(&under(&s)), ["T t2"]);
+    let rows = merged_projects(&s, &[], &|_| false, &|_| String::new(), "desk", &[]); let open = HashSet::new();
+    let pg = page(&s, &rows, &rows[0].key, &ctx(&open), true); let done = pg["sections"].as_array().unwrap().iter().find(|x| x["id"] == "done").unwrap();
+    let t3 = done["rows"].as_array().unwrap().iter().find(|r| r["title"] == "T t3").unwrap(); assert_eq!((t3["menu"][0]["id"].as_str(), t3["menu"][1]["id"].as_str()), (Some("pin"), Some("unsettle")));
+}
 #[test] fn a_registry_row_shows_by_its_word() {
     for w in ["needs", "running", "limit", "monitoring", "failed", "cut", "interrupted"] { assert!(visible_word(w, false), "{w}"); }
     for w in ["done", "idle"] { assert!(!visible_word(w, false), "{w}"); assert!(visible_word(w, true), "{w} pinned"); }

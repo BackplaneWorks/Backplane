@@ -1063,8 +1063,8 @@ phase.stopped = 停止
 # Web/phone audit: tooltips, reasoning labels, and model progress.
 tools.tip.retry = ターンが失敗しました: 最後のメッセージをもう一度送信
 tools.tip.stop = 実行中のターンを停止 · Ctrl+.
-tools.tip.unpin = ピン留めを外し、通常の順序に戻す
-tools.tip.pin = 一覧の先頭に固定
+tools.tip.unpin = ピン留めを解除: 作業が終わるとサイドバーから外れます
+tools.tip.pin = サイドバーのプロジェクトの下に固定します。自動では完了になりません
 tools.tip.unsettle = 進行中のスレッドに戻す
 tools.tip.settle = 作業を完了し、進行中の一覧から外す
 tools.tip.wake = 今すぐスヌーズを解除

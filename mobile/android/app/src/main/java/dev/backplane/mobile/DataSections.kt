@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.PushPin
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -75,21 +76,27 @@ fun SectionHead(s: DSection, onLong: (() -> Unit)?) {
         if (s.fold || s.kind == "threads") { Spacer(Modifier.width(6.dp)); DMono("${s.count}", dfaint, 11) }
     }
 }
-/** Another machine's thread (the hub's `hide`): a long press offers Hide, here only, until something new happens there (`thread-hide`). */
+/** A long press on a thread row: another machine's thread (the hub's `hide`) offers Hide, here only, until something new happens there (`thread-hide`);
+ *  a thread of this hub offers the hub's `menu`: Pin or Unpin (a pinned thread stays under its project and never settles by itself), Settle or Unsettle, Archive. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun SectionThread(r: DSecRow, indent: Int = 12, showProject: Boolean = false, open: (String) -> Unit) {
     var menu by remember { mutableStateOf(false) }
+    val acts = if (r.key.isEmpty() && r.swarmRoom == null) r.menu.filter { it.label.isNotEmpty() } else emptyList()
     Box {
-        Row(Modifier.fillMaxWidth().height(36.dp).alpha(if (r.off) .55f else 1f).combinedClickable(onClick = { if (!r.off) open(r.nav) }, onLongClick = if (r.hide.isNotEmpty()) ({ menu = true }) else null).padding(start = indent.dp, end = 12.dp).testTag("home.section.thread.${r.id}"), verticalAlignment = Alignment.CenterVertically) {
+        Row(Modifier.fillMaxWidth().height(36.dp).alpha(if (r.off) .55f else 1f).combinedClickable(onClick = { if (!r.off) open(r.nav) }, onLongClick = if (r.hide.isNotEmpty() || acts.isNotEmpty()) ({ menu = true }) else null).padding(start = indent.dp, end = 12.dp).testTag("home.section.thread.${r.id}"), verticalAlignment = Alignment.CenterVertically) {
             DDot(toneOf(r.word), 7); Spacer(Modifier.width(8.dp))
             DMono(r.title, dcs.onSurface, 13, Modifier.weight(1f, fill = false))
+            if (r.pinned) { Spacer(Modifier.width(6.dp)); Icon(Icons.Default.PushPin, Msg.tools_pinned, tint = dfaint, modifier = Modifier.size(11.dp).testTag("home.section.pinned.${r.id}")) }
             if (showProject) { Spacer(Modifier.width(8.dp)); DMono(r.project, dfaint, 11) }
             Spacer(Modifier.weight(1f))
             r.mark?.let { DMono(it.short + if (it.away) " · " + Msg.android_away else "", dfaint, 11); Spacer(Modifier.width(6.dp)) }
             if (r.want.isNotEmpty()) DMono(Tr.t(r.want), dcs.error, 11) else DMono(Tr.t(r.say.ifEmpty { r.ago }), dfaint, 11)
         }
-        DropdownMenu(menu, { menu = false }) { DropdownMenuItem(text = { Text(Msg.common_hide) }, onClick = { menu = false; DataClient.sidebarAct("thread-hide", r.hide) }, modifier = Modifier.testTag("home.section.hide.${r.id}")) }
+        DropdownMenu(menu, { menu = false }) {
+            if (r.hide.isNotEmpty()) DropdownMenuItem(text = { Text(Msg.common_hide) }, onClick = { menu = false; DataClient.sidebarAct("thread-hide", r.hide) }, modifier = Modifier.testTag("home.section.hide.${r.id}"))
+            acts.forEach { m -> DropdownMenuItem(text = { Text(Tr.t(m.label)) }, onClick = { menu = false; DataClient.sectionThreadAct(r.id, m.id) }, modifier = Modifier.testTag("home.section.${m.id}.${r.id}")) }
+        }
     }
 }
 @OptIn(ExperimentalFoundationApi::class)
