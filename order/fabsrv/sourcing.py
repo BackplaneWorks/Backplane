@@ -29,9 +29,9 @@ _calls = []  # (time, install) of each call to the distributor in the last 24 h
 TTL = 12 * 3600
 DAY_BUDGET = 950           # of the distributor's 1,000 a day
 SHARE = DAY_BUDGET // 4    # most of the day's calls one quote, or one install, may spend
-MAX_MPNS = 100             # unique uncached part numbers one pass (one quote request) looks up; not a limit on the BOM
-CAPPED = object()          # an answer for a part number: this pass's cap stopped before it; answers are cached, so asking again continues
+MAX_MPNS = 1000            # absolute safety cap on unique part numbers one quote looks up (the budget, SHARE calls, is the real limit)
 UNAVAILABLE = object()     # an answer for a part number: the distributor could not be asked (not "not found")
+TOO_MANY = object()        # an answer for a part number past MAX_MPNS: the quote has more parts than one quote prices
 
 
 def price_at(breaks, qty):
@@ -135,11 +135,10 @@ def _offer(p):
 
 
 def mouser(mpns, owner=""):
-    """{mpn: offer, None or UNAVAILABLE} for each part number: an exact match with prices, in stock first;
-    None when the distributor answered and does not have it; UNAVAILABLE when it could not be asked (budget
-    spent, no key, an error), which says nothing about the part; CAPPED when this pass's per-request cap stopped
-    before it (not looked up yet: every answer is cached, so asking again goes on with the rest and the quote
-    is priceable after enough passes, within the quote's and install's SHARE of the day's calls)."""
+    """{mpn: offer, None, UNAVAILABLE or TOO_MANY} for each part number: an exact match with prices, in stock
+    first; None when the distributor answered and does not have it; UNAVAILABLE when it could not be asked
+    (budget spent, no key, an error), which says nothing about the part; TOO_MANY for the unique part numbers
+    past MAX_MPNS, which this quote never asks about."""
     out, need = {}, []
     now = time.time()
     spent = [0]
@@ -150,7 +149,7 @@ def mouser(mpns, owner=""):
         else:
             need.append(m)
     for m in need[MAX_MPNS:]:
-        out[m] = CAPPED
+        out[m] = TOO_MANY
     need = need[:MAX_MPNS]
     for i in range(0, len(need), 10):
         chunk = need[i:i + 10]
@@ -197,10 +196,10 @@ def components(v, lines, boards, install=""):
     for ln, usage in elsewhere:
         o = offers.get(ln["mpn"]) if ln["mpn"] else None
         refs = ", ".join(ln["refs"][:4]) + ("…" if len(ln["refs"]) > 4 else "")
-        if o is CAPPED:
-            unavailable.append(f"{refs} ({ln['mpn']}): not looked up yet, because one pass looks up at most {MAX_MPNS} parts "
-                               "and this board has more; ask for the quote again and it continues (nothing is wrong with the board)")
-            rows.append({"refs": ln["refs"][:8], "mpn": ln["mpn"], "status": "unavailable", "reason": "capped"})
+        if o is TOO_MANY:
+            problems.append(f"{refs} ({ln['mpn']}): too many parts to price in one quote; split the order into smaller "
+                            "boards or choose parts the fab stocks (asking again will not change this)")
+            rows.append({"refs": ln["refs"][:8], "mpn": ln["mpn"], "status": "too_many"})
             continue
         if o is UNAVAILABLE:
             unavailable.append(f"{refs} ({ln['mpn']}): sourcing is unavailable right now, so this part can't be priced yet; "
