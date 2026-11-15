@@ -451,6 +451,8 @@ mod imp {
     /// An explicit hand-back to the client's window (a host chord pressed in the editor): as `focus` here.
     #[track_caller]
     pub fn hand_back(w: u64) { focus(w) }
+    /// X11: no activation takes the keys back after a close: hand in at once
+    pub fn activated_after_close(_main: u64, _popped: u64) -> bool { true }
     pub fn note_pane_keys(_kicad: bool) {}
     /// Windows only (the F3 input shield): Linux has its button grab (grab_click).
     pub fn shield(_container: u64, _on: bool) {}
@@ -1215,6 +1217,11 @@ mod imp {
     }
     #[track_caller]
     pub fn hand_back(w: u64) { HANDED_BACK_AT.store(mono_ms().max(1), Ordering::SeqCst); focus_with(w, true) }
+    /// After the popped-out window was closed by its X: it is gone and Windows has made Backplane's main window the
+    /// foreground (the activation that otherwise takes the keys back from a hand-in made before it)
+    pub fn activated_after_close(main: u64, popped: u64) -> bool {
+        unsafe { IsWindow(hwnd(popped)) == 0 && windows_sys::Win32::UI::WindowsAndMessaging::GetForegroundWindow() == hwnd(main) }
+    }
     /// Whether `frame` and `container` are both visible (each with every ancestor): a read of window state, no message to KiCad.
     pub fn frame_visible(container: u64, frame: u64) -> bool {
         let (c, f) = (hwnd(container), hwnd(frame));
@@ -1805,6 +1812,7 @@ mod imp {
     pub fn holes(_container: u64, _keep: Option<&[R]>) {}
     pub fn focus(_w: u64) {}
     pub fn hand_back(_w: u64) {}
+    pub fn activated_after_close(_main: u64, _popped: u64) -> bool { true }
     pub fn note_pane_keys(_kicad: bool) {}
     pub fn shield(_container: u64, _on: bool) {}
     pub fn shield_tick(_container: u64, _shown: Option<u64>) {}
