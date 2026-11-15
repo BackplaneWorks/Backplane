@@ -1212,7 +1212,24 @@ mod imp {
             if IsWindowVisible(fg) != 0 && !off { return None }
             let mut t = [0u16; 160];
             let n = InternalGetWindowText(fg, t.as_mut_ptr(), t.len() as i32);
-            Some((id_of(fg), String::from_utf16_lossy(&t[..n.max(0) as usize])))
+            let title = String::from_utf16_lossy(&t[..n.max(0) as usize]);
+            // a window owned by the shown editor's window tree (its dialogs: the Footprint Chooser a key opened, before it is
+            // on screen) is the editor's, not a stray (steal_key on 6700963e18, Nov 15: the guard took the keys back over it).
+            // A pre-warmed frame is never owned by the shown one.
+            use windows_sys::Win32::UI::WindowsAndMessaging::{GetAncestor, GetWindow, GA_ROOT, GW_OWNER};
+            let owner = GetWindow(fg, GW_OWNER);
+            let frame_root = GetAncestor(f, GA_ROOT);
+            let owner_root = if owner.is_null() { null_mut() } else { GetAncestor(owner, GA_ROOT) };
+            let owned_by_shown = !owner.is_null() && (owner == f || IsChild(f, owner) != 0 || owner_root == frame_root || owner == frame_root);
+            if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() {
+                let mut cls = [0u16; 64];
+                let cn = GetClassNameW(fg, cls.as_mut_ptr(), cls.len() as i32).max(0) as usize;
+                eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_stray_candidate": {"window": id_of(fg), "title": title, "class": String::from_utf16_lossy(&cls[..cn]),
+                    "visible": IsWindowVisible(fg) != 0, "rect": [rc.left, rc.top, rc.right, rc.bottom], "owner": id_of(owner), "owner_root": id_of(owner_root),
+                    "frame_root": id_of(frame_root), "owned_by_shown": owned_by_shown}}));
+            }
+            if owned_by_shown && std::env::var("BP_TEST_GUARD_OLD").map_or(true, |v| v != "1") { return None }
+            Some((id_of(fg), title))
         }
     }
     #[track_caller]
