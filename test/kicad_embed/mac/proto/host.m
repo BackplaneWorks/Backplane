@@ -48,6 +48,9 @@ int main(int argc, char **argv) { @autoreleasepool {
     double e = -[t0 timeIntervalSinceNow];
     if (e > 0.5 && !(done & 32)) { done |= 32; pushRect(); }
     if (e > 0.9 && !(done & 64)) { done |= 64; pushRect(); }  // again, in case the follower bound its socket late
+    // the product way: the client looks at its own window's frame each frame (in-process, cheap) and pushes on a change;
+    // windowDidMove alone lagged by about a second for programmatic moves (round 3)
+    { static NSRect last; if (!NSEqualRects(last, w.frame)) { last = w.frame; pushRect(); } }
     if (![sc isEqual:@"move"]) { if (e > 30) [NSApp terminate:nil]; return; }
     if (e > 1 && e < 5.5) { double m = e - 1, p = fmod(m * v, 600), x = 40 + (p < 300 ? p : 600 - p), g = m > 3 ? fmod((m - 3) * v/2, 150) : 0;
       [w setFrame:NSMakeRect(x, 150, 600 + g, 400 + g/2) display:YES]; }
