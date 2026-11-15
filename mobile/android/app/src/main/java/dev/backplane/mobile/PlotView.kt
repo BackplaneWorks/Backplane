@@ -659,7 +659,9 @@ class PlotRenderer : GLSurfaceView.Renderer {
 
     private fun hi() {
         if (hiCaps + hiTris == 0) return
-        layer(floatArrayOf(1f, 1f, 1f, 0.8f), bufs[4], listOf(0 until hiCaps to 1f), bufs[5], listOf(0 until hiTris to 1f))
+        // white on a dark page; on a light page white only fades the lit piece away, so there it is the accent blue
+        val light = 0.299f * bg[0] + 0.587f * bg[1] + 0.114f * bg[2] > 0.5f
+        layer(if (light) floatArrayOf(0.114f, 0.435f, 0.839f, 1f) else floatArrayOf(1f, 1f, 1f, 0.8f), bufs[4], listOf(0 until hiCaps to 1f), bufs[5], listOf(0 until hiTris to 1f))
     }
 
     private fun model(buf: Int, count: Int, alpha: Float = 1f) {
@@ -897,7 +899,15 @@ class PlotSurface(context: Context) : GLSurfaceView(context) {
         super.onSizeChanged(w, h, ow, oh)
         val b = shownMesh?.mesh?.box
         if (!fitted) { if (box.size < 4 && b != null && b.size == 6) fitSolid(b) else refit() }
+        // a board still as it was fitted stays fitted in the new room (a panel opening under it, the keyboard): what a row lights is then on show, not under the panel
+        else if (atFit(ow, oh)) refit()
         restorePose()
+    }
+    /** Whether the flat view is still the fit of a `w` by `h` view: nobody panned or zoomed it since. */
+    private fun atFit(w: Int, h: Int): Boolean {
+        if (three || box.size < 4 || w <= 0 || h <= 0) return false
+        val s = margin * min(w / max(box[2] - box[0], 1f), h / max(box[3] - box[1], 1f))
+        return abs(renderer.scale - s) <= s * 1e-3f && abs(renderer.offX - (w / 2f - (box[0] + box[2]) / 2 * s)) < 1f && abs(renderer.offY - (h / 2f - (box[1] + box[3]) / 2 * s)) < 1f
     }
 
     /** The 3D background (ViewerBg.resolve's top and bottom); a change redraws. */
