@@ -178,6 +178,12 @@ pub fn open_notice(info: &Value) -> Option<(u64, String)> {
     Some((n["id"].as_u64()?, crate::i18n::tf("gpui.c.kicad.notice", &[("what", text.into())])))
 }
 
+/// Whether a warm first Edit's hold goes on once its frame is placed: until KiCad says the frame is drawn (`embed-frame-drawn`; the 3 s
+/// cap of KicadPane::handoff ends it if that never comes), else for HANDOFF_PAINT.
+pub fn handoff_holds(drawn_event: bool, drawn: bool, since_placed: std::time::Duration) -> bool {
+    if drawn_event { !drawn } else { since_placed < HANDOFF_PAINT }
+}
+
 /// The pane offers Try again under its message: KiCad's start failed (the hub has already retried a missed start window once).
 pub fn try_again(info: &Value) -> bool { info["state"] == "failed" }
 
@@ -202,6 +208,8 @@ pub fn hub_open_step<'a>(cur_open: &str, last_hub_open: &mut String, hub_open: &
 }
 
 pub struct KicadPane {
+    /// when this pane was made (the first Edit's), its warm hand-over's end (the frame placed + HANDOFF_PAINT), and whether it is over
+    born: std::time::Instant, handoff_placed: Option<(std::time::Instant, u64)>, handoff_over: bool,
     /// the .kicad_pro the hub resolved this pane's project to (its attach reply), "" until then
     pub bound: String,
     pub project: String, pub root: String, pub project_id: String, pub open: String, last_hub_open: String, hub: tokio::sync::mpsc::Sender<Command>,
@@ -274,6 +282,16 @@ pub struct KicadPane {
 /// A chord KiCad handed back that the window acts on at once (the comment window: screens/kcomment.rs).
 pub struct PaneKey(pub String);
 impl EventEmitter<PaneKey> for KicadPane {}
+/// The pane's warm hand-over ended (`handoff`): the page draws it alone, without the viewer's picture under it.
+pub struct PaneShown;
+impl EventEmitter<PaneShown> for KicadPane {}
+/// A runtime without `embed-frame-drawn` (bp.12.x): how long the viewer's picture stays under a warm KiCad's frame once it is mapped.
+/// Measured on the GPU display (RTX 5080, Collar main, bp.12.4, Nov 14): from the frame's first pixels to the pane settled took 52.6, 54.4
+/// and 58.7 ms (KiCad paints its toolbars, then the canvas; what it has not painted shows what is under it): 150 ms is about 2.5x the most.
+/// With the capability the hold ends on KiCad's own word (ET_FRAME_DRAWN, the session's `drawn`)
+const HANDOFF_PAINT: std::time::Duration = std::time::Duration::from_millis(150);
+/// A warm hand-over that never sees its frame placed (the hub slow, the frame gone) ends after this: the pane says what it waits on
+const HANDOFF_MAX: std::time::Duration = std::time::Duration::from_secs(3);
 
 impl KicadPane {
     pub fn new(cx: &mut Context<Self>, project: String, root: String, project_id: String, open: String, hub_open: String, hub: tokio::sync::mpsc::Sender<Command>) -> Self {
@@ -310,7 +328,7 @@ impl KicadPane {
             last = std::time::Instant::now();
             let _ = drained_tx.send(());
         } }).detach();
-        KicadPane { busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), last_root: (i32::MIN, 0), placed: None,
+        KicadPane { born: std::time::Instant::now(), handoff_placed: None, handoff_over: false, busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), last_root: (i32::MIN, 0), placed: None,
             focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), poked: None, unmapped_since: None, unshown_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, at_px: None, dialogs_open: Vec::new(), took: None, await_close: None, press_focus: None, want_keys: true, refocus: None, verify_handin: None, prewarm_guard: None, unexplained_reposted: false, focus_seen: (0, 0), was_dialog: false }
     }
     fn rpc(&self, name: &str, params: Value) { let _ = self.hub.try_send(Command::Rpc(name.to_string(), Secret(params), "kicad")); }
@@ -494,6 +512,27 @@ impl KicadPane {
         cx.notify();
     }
     /// The hub's state with KiCad's dialogs as this window sees them on screen (a modal one stops KiCad's events, so the hub may not know yet).
+    /// The first Edit on a KiCad already running (pre-warmed): until its frame is mapped here and has painted, the pane draws nothing of
+    /// its own and the page keeps the viewer's picture under it (lane A, batch 8 undo runs; bp.12.4, batch 7 and 8 alike: the attach's round
+    /// trip and KiCad's first paint showed the pane's navy for ~50 ms, one blank frame on every first Edit). A cold start says Starting KiCad…
+    pub fn handoff(&self) -> bool {
+        if self.handoff_over || self.info["state"] != "ready" { return false }
+        // the hand-over e2e: BACKPLANE_GPUI_TEST_HANDOFF_MIN_MS holds it at least that long (a click and keys inside it, with KiCad mapped)
+        if std::env::var("BACKPLANE_GPUI_TEST_HANDOFF_MIN_MS").ok().and_then(|v| v.parse::<u64>().ok()).is_some_and(|ms| self.born.elapsed() < std::time::Duration::from_millis(ms)) { return true }
+        if self.born.elapsed() >= HANDOFF_MAX { return false }
+        let Some((at, w)) = self.handoff_placed else { return true };
+        let drawn_event = self.info["embed_caps"].as_array().is_some_and(|a| a.iter().any(|c| c == "embed-frame-drawn"));
+        handoff_holds(drawn_event, self.info["drawn"].as_array().is_some_and(|d| d.iter().any(|x| x.as_u64() == Some(w))), at.elapsed())
+    }
+    fn end_handoff(&mut self, cx: &mut Context<Self>) {
+        if self.handoff_over { return }
+        self.handoff_over = true;
+        if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() {
+            let drawn = self.handoff_placed.is_some_and(|(_, w)| self.info["drawn"].as_array().is_some_and(|d| d.iter().any(|x| x.as_u64() == Some(w))));
+            eprintln!("GPUI_LOG {}", json!({"kicad_handoff_end_ms": self.born.elapsed().as_millis() as u64, "placed_ms": self.handoff_placed.map(|(t, _)| t.duration_since(self.born).as_millis() as u64), "drawn_event": drawn}));
+        }
+        cx.emit(PaneShown); cx.notify();
+    }
     fn seen_info(&self) -> Value {
         let mut i = self.info.clone();
         if !self.dialogs_open.is_empty() && i["dialogs"].as_array().map_or(true, |d| d.is_empty()) { i["dialogs"] = json!(self.dialogs_open); }
@@ -523,6 +562,7 @@ impl KicadPane {
     }
     fn want(&self) -> Option<u64> { if self.info.is_null() || (cfg!(windows) && self.info["mode"] == "stock") { return None } pick_local(self.wanted_kind(), &self.info, &self.frames, &self.ever_shown) }
     fn tick(&mut self, cx: &mut Context<Self>) {
+        if !self.handoff_over && !self.handoff() { self.end_handoff(cx); }
         if let Some((popped, at)) = self.await_close {
             let activated = nc::activated_after_close(self.toplevel, popped);
             if activated || at.elapsed() >= std::time::Duration::from_millis(1000) {
@@ -759,6 +799,7 @@ impl KicadPane {
         if let Some(k) = take_kept(top, &self.project) {
             self.container = Some(k.container); self.ever_shown = k.ever_shown; self.frames = nc::frames(k.container);
             if let (Some(r), Some(w)) = (k.rect, self.want()) { nc::place_local(k.container, Some(r), Some(w), &self.ever_shown, &mut self.last_root); self.placed = Some((Some(r), Some(w), Vec::new())); }
+            self.handoff_over = true; // mapped in this very frame: nothing to hand over
         } else {
             self.container = nc::container_for(top, &self.project);
         }
@@ -853,6 +894,7 @@ impl KicadPane {
             return;
         }
         if local { nc::place_local(c, at, show, &self.ever_shown, &mut self.last_root); } else { nc::place(c, at, show, managed.as_deref(), &mut self.last_root); }
+        if let (Some(w), Some(_), false, None) = (show, at, self.handoff_over, self.handoff_placed) { self.handoff_placed = Some((std::time::Instant::now(), w)); }
         if (self.keys || self.want_keys) && show != prev_show {
             if let Some(w) = show {
                 if self.want_keys && nc::button_over(w) == Some(false) { self.press_gave_keys = true; }
@@ -913,7 +955,7 @@ impl KicadPane {
             "state": self.info["state"], "reason": self.info["reason"], "mode": self.info["mode"], "pid": self.info["pid"],
             "holder": self.info["holder"], "sock": self.info["sock"], "pane": pane,
             "container": self.container.map_or(Value::Null, |c| { let mut v = g(c); v["xid"] = c.into(); v }),
-            "toplevel": self.toplevel, "toplevel_depth": top_depth, "keys": self.keys,
+            "toplevel": self.toplevel, "toplevel_depth": top_depth, "keys": self.keys, "handoff": self.handoff(),
             "frames": frames_src.iter().map(|f| { let mut v = g(f.window); v["xid"] = f.window.into(); v["kind"] = f.kind.into(); v["title"] = f.title.clone().into(); v }).collect::<Vec<_>>(),
             "shown": shown,
             "shown_root": shown_meta.map_or(Value::Null, |(_, (rx, ry), _, _)| json!({"x": rx, "y": ry})),
@@ -926,13 +968,15 @@ impl Render for KicadPane {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.decide(window, cx);
         let light = self.light; let c = |n: &str| crate::theme::color(light, n);
-        let say = waiting(&self.seen_info(), self.want().is_some());
+        // a warm first Edit: nothing of the pane's own until KiCad's frame is up (the page draws the viewer's picture under it)
+        let handoff = self.handoff();
+        let say = if handoff { None } else { waiting(&self.seen_info(), self.want().is_some()) };
         // a notice during the start: said under "Starting KiCad…" (and in the strip, where it stays once the editor is up)
         let notice = say.as_ref().and_then(|_| open_notice(&self.info)).map(|(_, t)| t);
         let failed = self.failed();
         let marker = self.marker.clone(); let focus = self.focus.clone();
         let keys = self.keys;
-        div().id("kicad-pane").size_full().relative().bg(rgb(0x001023)).track_focus(&focus)
+        div().id("kicad-pane").size_full().relative().when(!handoff, |d| d.bg(rgb(0x001023))).track_focus(&focus)
             .on_mouse_down_out(cx.listener(|this, _, _, cx| {
                 this.took = None;
                 if this.keys {
@@ -945,7 +989,9 @@ impl Render for KicadPane {
             }))
             // the keyboard's outline: always 2 px, coloured only while KiCad has the keyboard, so the editor's container keeps one size
             // (a border that came and went resized KiCad by 4 px at each hand-over: a relayout and repaint each time)
-            .border_2().border_color(if keys { c("accent") } else { Rgba { a: 0., ..c("accent") } })
+            // in a warm hand-over the outline is the pane's navy where it would be clear (the picture under it otherwise showed in those 2 px,
+            // then turned navy at the hold's end: a change after KiCad had finished painting, GPU display bp.12.4)
+            .border_2().border_color(if keys { c("accent") } else if handoff { Rgba::from(rgb(0x001023)) } else { Rgba { a: 0., ..c("accent") } })
             .child(canvas(move |b, window, _| { *marker.lock().unwrap() = Some(window.insert_hitbox(b, HitboxBehavior::Normal).id); }, |_, _, _, _| {}).size_full())
             .when_some(say, |d, s| d.child(div().absolute().inset_0().flex().flex_col().gap_2().items_center().justify_center().text_color(c("faint")).child(s)
                 .when_some(notice, |d, n| d.child(crate::ui::with_rect(div().id("kicad-notice-start"), || "kicad:notice-start".to_string()).max_w(px(520.)).text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(n)))
@@ -957,6 +1003,12 @@ impl Render for KicadPane {
 
 #[cfg(test)]
 mod tests {
+    #[test] fn a_warm_first_edit_holds_the_picture_until_kicad_has_drawn() {
+        use std::time::Duration;
+        assert!(super::handoff_holds(true, false, Duration::from_secs(2)), "with the event: held until it comes (the 3 s cap aside)");
+        assert!(!super::handoff_holds(true, true, Duration::ZERO), "drawn: at once, no timer");
+        assert!(super::handoff_holds(false, false, Duration::from_millis(100)) && !super::handoff_holds(false, false, Duration::from_millis(150)), "bp.12.x: the measured wait");
+    }
     #[test] fn kicads_notice_is_one_line_until_dismissed() {
         use serde_json::json;
         let i = json!({"notices": [{"id": 1, "title": "Old", "detail": "", "dismissed": true}, {"id": 2, "title": "Could not use OpenGL, falling back to software rendering", "detail": "GLX missing", "dismissed": false}]});
@@ -1262,6 +1314,8 @@ impl crate::Backplane {
         }
         let (hub, infos, hub_open) = (self.tx.clone(), self.screens.kicad_infos.clone(), open_now.to_string());
         let page = cx.new(move |cx| { let mut p = KicadPane::new(cx, project, root, pid, open, hub_open, hub); if let Some(v) = infos.values().find(|v| p.matches(v)).cloned() { p.info = v; } p });
+        // the warm hand-over's end: the page drawn again without the viewer's picture under the pane
+        cx.subscribe(&page, |_, _, _: &PaneShown, cx| cx.notify()).detach();
         cx.subscribe(&page, |this, _, e: &PaneKey, cx| {
             if e.0 == "ctrl-;" || e.0 == ";" { this.kcomment_open(None, cx); return }
             // a management panel's key handed over by KiCad: the panel whose binding it is (the person's, from Settings)

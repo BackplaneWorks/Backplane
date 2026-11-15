@@ -678,6 +678,11 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
                 .child(div().id("kicad-popin").px_3().py_1().border_1().border_color(theme::color(light, "line")).bg(theme::color(light, "raise")).cursor_pointer().child(trs("Pop back in"))
                     .on_click(cx.listener(|this, _, _, cx| { let h = this.screens.kicad_window; this.kicad_popin(cx); if let Some(h) = h { let _ = h.update(cx, |_, w, _| w.remove_window()); } })))
                 .into_any_element()
+        } else if e.read(cx).handoff() && matches!(open, "board" | "schematic") {
+            // a warm first Edit: the viewer's picture under the pane until KiCad's frame is up and painted (KicadPane::handoff), never a frame of
+            // background; the picture takes no input (occluded: a click in those ms is the pane's, then KiCad's once its frame is mapped over it)
+            let under = plot_pane(cx, light, 0, open, viewer, plot.frame.as_ref(), pv, false, &plot.sheets, &plot.sheet_refs, None);
+            div().flex_1().min_h_0().relative().child(div().absolute().inset_0().child(under)).child(div().id("kicad-handoff").absolute().inset_0().occlude().child(e)).into_any_element()
         } else { div().flex_1().min_h_0().child(e).into_any_element() };
         // the Boards menu (a project with several boards) stays where the viewer's bar has it; a pick moves KiCad to that board (boards::edit_due)
         let boards = crate::viewers::boards::picker(cx, light, viewer, &pv.boards);
