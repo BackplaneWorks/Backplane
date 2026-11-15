@@ -315,9 +315,14 @@ private struct DMdImage: View {
     let alt: String, url: String
     @State private var img: UIImage?
     @State private var failed = false
+    @State private var full = false
     var body: some View {
         Group {
-            if let i = img ?? DMdPics.cache.object(forKey: url as NSString) { Image(uiImage: i).resizable().scaledToFit().frame(maxWidth: i.size.width, maxHeight: 360).dbox().accessibilityIdentifier("md.image") }
+            if let i = img ?? DMdPics.cache.object(forKey: url as NSString) {
+                // tap for the full size; a long press saves it to Photos or shares it
+                Image(uiImage: i).resizable().scaledToFit().frame(maxWidth: i.size.width, maxHeight: 360).dbox().onTapGesture { full = true }.dImageMenu(i)
+                    .fullScreenCover(isPresented: $full) { DImageFull(image: i) { full = false } }.accessibilityIdentifier("md.image")
+            }
             else if failed { Text(alt.isEmpty ? url : alt).dmono(12).foregroundStyle(BackplaneDesign.dim) }
             else { Rectangle().fill(BackplaneDesign.panel).frame(height: 96) }
         }.frame(maxWidth: .infinity, alignment: .leading)

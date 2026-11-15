@@ -4164,6 +4164,12 @@ ios.swarm.add = Add member
 ios.swarm.remove.ask = Remove {name} from the swarm?
 ios.swarm.stop.ask = Stop this swarm?
 ios.swarm.post = Post to the board
+ios.image.save = Save to Photos
+ios.image.saved = Saved to Photos
+ios.image.denied = Photos access is off: allow it in Settings to save pictures.
+ios.image.failed = Could not save the picture.
+ios.image.incoming = Picture ready: open a thread to send it.
+native.permission.photos.add = Backplane saves the pictures you choose in a thread to your photo library.
 # ---- end ----
 # the sidebar's sections (docs/ALWAYS-ON.md section 8): the hub's words, and the window's
 sidebar.sections.needs = Needs you

@@ -4187,6 +4187,12 @@ ios.swarm.add = メンバーを追加
 ios.swarm.remove.ask = {name}をスウォームから外しますか？
 ios.swarm.stop.ask = このスウォームを停止しますか？
 ios.swarm.post = ボードに投稿
+ios.image.save = 写真に保存
+ios.image.saved = 写真に保存しました
+ios.image.denied = 写真へのアクセスがオフです。画像を保存するには設定で許可してください。
+ios.image.failed = 画像を保存できませんでした。
+ios.image.incoming = 画像の準備ができました。送るスレッドを開いてください。
+native.permission.photos.add = スレッドで選んだ画像を写真ライブラリに保存します。
 # ---- end ----
 # the sidebar's sections (docs/ALWAYS-ON.md section 8): the hub's words, and the window's
 sidebar.sections.needs = 対応が必要
