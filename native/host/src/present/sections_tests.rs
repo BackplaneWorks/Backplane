@@ -134,7 +134,29 @@ fn world() -> State {
          pc("pg", "Grouped", "/w/acme/grouped", NOW - 9 * DAY), tc("tg", "pg", NOW - 8 * DAY), turn("tg", "completed", NOW - 8 * DAY),
          pc("pq", "Quiet one", "/w/other/quiet", NOW - 40 * DAY), tc("tq", "pq", NOW - 30 * DAY), turn("tq", "completed", NOW - 30 * DAY),
          pc("pf", "Failing", "/w/other/failing", NOW - 50 * DAY), tc("tf", "pf", NOW - 20 * DAY), turn("tf", "failed", NOW - 20 * DAY),
-         ask("q1", "ta", "approval")])
+         ask("q1", "ta", "approval"), set(GROUPS, "on", NOW - 90 * DAY)])
+}
+/// Groups are a setting, off by default: the projects that are neither active nor quiet stay in the one list, newest first, no group is named,
+/// and a group the person made is still a section (with a way back out of it).
+#[test] fn automatic_groups_are_off_unless_the_setting_is_on() {
+    let mut s = world(); s.apply(&set(GROUPS, "", NOW)); let rows = merged_projects(&s, &[], &|_| false, &|_| String::new(), "desk", &[]);
+    assert!(!groups_on(&s) && groups_on(&world()));
+    let v = build(&s, &rows, &Value::Null, &ctx(&HashSet::new()));
+    assert_eq!(ids(&v), ["needs", "active", "quiet"], "no group section");
+    assert_eq!(titles(sec(&v, "active")), ["Alive", "Recent", "Grouped", "Failing"], "the grouped one is in the list, by its last activity like the rest");
+    assert!(groups_due(&s, &rows).is_empty(), "nothing asks Haiku for a name");
+    let g = sec(&v, "active")["rows"].as_array().unwrap().iter().find(|r| r["title"] == "Grouped").unwrap().clone(); assert_eq!(g["group"], "");
+    let sub = |r: &Value| r["menu"].as_array().unwrap().iter().find(|i| i["id"] == "move").unwrap()["sub"].as_array().unwrap().iter().map(|i| i["label"].as_str().unwrap().to_string()).collect::<Vec<_>>();
+    assert_eq!(sub(&g), ["New group\u{2026}"]);
+    // the person makes a group: it is a section, and the project's menu has the way back out
+    let key = rows.iter().find(|p| p.name == "Grouped").unwrap().key.clone();
+    for (k, val) in new_group_sets(&key, "Clients").unwrap() { s.apply(&set(&k, &val, NOW)); }
+    let rows = merged_projects(&s, &[], &|_| false, &|_| String::new(), "desk", &[]);
+    let open: HashSet<String> = ["sec:group:custom:clients".to_string()].into(); let v = build(&s, &rows, &Value::Null, &ctx(&open));
+    assert_eq!(ids(&v), ["needs", "active", "group:custom:clients", "quiet"]); assert_eq!(titles(sec(&v, "group:custom:clients")), ["Grouped"]);
+    let g = sec(&v, "group:custom:clients")["rows"][0].clone(); assert_eq!(sub(&g), ["No group", "New group\u{2026}"]);
+    let back = g["menu"].as_array().unwrap().iter().find(|i| i["id"] == "move").unwrap()["sub"][0]["value"].as_str().unwrap().to_string();
+    assert_eq!(act(&s, &rows, "group-move", &back, &json!({}), NOW).unwrap().sets, vec![(format!("sidebar.group.of.{key}"), String::new())]);
 }
 #[test] fn the_sections_come_in_their_order_and_each_project_lands_once() {
     let s = world(); let rows = merged_projects(&s, &[], &|_| false, &|_| String::new(), "desk", &[]);
@@ -220,7 +242,7 @@ fn world() -> State {
 /// (11 Nov: the menu listed Personal four times); a move kept on any of the merged ids lands in the one group.
 fn named_world() -> State {
     let old = NOW - 8 * DAY;
-    let mut v = vec![];
+    let mut v = vec![set(GROUPS, "on", 1)];
     for (i, (id, root)) in [("p1", "/w/acme/one"), ("p2", "/w/stuff/two"), ("p3", "/home/someone/three"), ("p4", "/w/ae/four"), ("p5", "/w/ae-inc/five"), ("p6", "/w/nordic/six")].iter().enumerate() {
         v.push(pc(id, &id.to_uppercase(), root, old - 10)); v.push(tc(&format!("t{i}"), id, old)); v.push(turn(&format!("t{i}"), "completed", old));
     }

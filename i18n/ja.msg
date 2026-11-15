@@ -2605,6 +2605,9 @@ voice.always.pill.listen = 聞く
 voice.mark.tip = 音声入力（{stt} で文字起こし、確信度 {conf}%）
 voice.mark.unsure = 不確かな語: {words}
 voice.mark.edited = 編集済み
+gpui.side.group.projects = プロジェクトをグループ化
+gpui.side.on.projects.with.nothing.going = オン: 最近動きのないプロジェクトを Git のオーナー（なければフォルダ）ごとにまとめます。オフ: 1 つの一覧にし、自分で作ったグループだけを表示します。
+gpui.side.no.group = グループなし
 
 # ---- gpui-f: hub setup flow and thread ----
 gpui.f.group.install = インストール

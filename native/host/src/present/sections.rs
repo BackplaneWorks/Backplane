@@ -148,10 +148,14 @@ fn a_home(dir: &str) -> bool {
     let parts: Vec<&str> = d.split('/').collect();
     match parts.as_slice() { ["", "home" | "Users", who] => !who.is_empty(), [drive, u, who] => drive.len() == 2 && drive.ends_with(':') && u.eq_ignore_ascii_case("users") && !who.is_empty(), _ => false }
 }
-/// A project's group as kept: the person's move, else its automatic one. Groups of one name are one group (`Groups::id`).
+/// Whether projects are grouped by themselves (Settings, Appearance, "Group projects": `sidebar.groups` = on). Off unless the person turns it
+/// on: the projects that are neither active nor quiet then stay in the one list, and only a group the person made (Move to group) is a section.
+pub fn groups_on(st: &State) -> bool { get(st, GROUPS) == "on" }
+pub const GROUPS: &str = "sidebar.groups";
+/// A project's group as kept: the person's move, else its automatic one when groups are on, else none (""). Groups of one name are one group (`Groups::id`).
 fn group_raw(st: &State, p: &MergedProject) -> String {
     let moved = get(st, &format!("sidebar.group.of.{}", p.key));
-    if !moved.is_empty() { moved.to_string() } else { auto_group(&p.origin, &p.folder).0 }
+    if !moved.is_empty() { moved.to_string() } else if groups_on(st) { auto_group(&p.origin, &p.folder).0 } else { String::new() }
 }
 /// A group's name: the person's, else Haiku's, else the raw label.
 pub fn group_name(st: &State, gid: &str, raw: &str) -> String {
@@ -177,6 +181,7 @@ impl Groups {
         let mut ids: Vec<(String, String)> = vec![];
         for p in rows {
             let gid = group_raw(st, p);
+            if gid.is_empty() { continue } // (in no group: groups are off and the person moved it nowhere)
             let (auto, raw) = auto_group(&p.origin, &p.folder);
             let raw = if auto == gid { raw } else { String::new() };
             match ids.iter_mut().find(|x| x.0 == gid) { Some(x) => { if x.1.is_empty() { x.1 = raw } } None => ids.push((gid, raw)) }
@@ -208,8 +213,8 @@ impl Groups {
     }
     /// The group a kept id is in (an id no project uses is its own).
     pub fn id(&self, raw: &str) -> String { self.canon.get(raw).cloned().unwrap_or_else(|| raw.to_string()) }
-    /// A project's group.
-    pub fn of_project(&self, st: &State, p: &MergedProject) -> String { self.id(&group_raw(st, p)) }
+    /// A project's group ("" for none).
+    pub fn of_project(&self, st: &State, p: &MergedProject) -> String { let g = group_raw(st, p); if g.is_empty() { g } else { self.id(&g) } }
     pub fn name(&self, st: &State, gid: &str) -> String { self.names.get(&self.id(gid)).cloned().unwrap_or_else(|| group_name(st, gid, "")) }
     /// The ids merged into a group (its own first).
     pub fn members(&self, gid: &str) -> Vec<String> { self.members.get(&self.id(gid)).cloned().unwrap_or_else(|| vec![gid.to_string()]) }
@@ -224,6 +229,7 @@ pub fn groups_due(st: &State, rows: &[MergedProject]) -> Vec<(String, String, Ve
     let mut by: Vec<(String, String, Vec<String>)> = vec![];
     for p in rows {
         let gid = group_raw(st, p);
+        if gid.is_empty() { continue }
         if gid.starts_with("custom:") || !get(st, &format!("sidebar.group.name.{gid}")).is_empty() || !get(st, &format!("sidebar.group.pick.{gid}")).is_empty() { continue }
         let raw = auto_group(&p.origin, &p.folder).1;
         let line = if p.origin.is_empty() { format!("{} ({})", p.name, p.folder) } else { format!("{} ({})", p.name, p.origin) };
@@ -257,6 +263,8 @@ pub fn project_menu(st: &State, p: &MergedProject, gid: &str, groups: &Groups) -
         if !p.folder.is_empty() { v.push(it("open", "Open folder", "open-folder", &p.folder)); }
     }
     let mut sub: Vec<Value> = groups.list().into_iter().filter(|(g, _)| g != gid).map(|(g, n)| it("group", &n, "group-move", &format!("{key}\u{1f}{g}"))).collect();
+    // groups are off and the person put it in one: the way back out (with groups on, its own group is in the list)
+    if !gid.is_empty() && !groups_on(st) { sub.insert(0, it("group", "No group", "group-move", &format!("{key}\u{1f}"))); }
     sub.push(it("new-group", "New group\u{2026}", "group-new-start", key));
     v.push(json!({"id":"move","label":"Move to group","action":"","value":"","sub":sub}));
     v.push(it("archive", if archived { "Unarchive" } else { "Archive" }, "project-archive", key));
@@ -398,6 +406,8 @@ pub fn build(st: &State, rows: &[MergedProject], bub: &Value, c: &Ctx) -> Value 
         if archived_at(st, &p.key) > 0 && p.key != held { quiet.push(row); continue }
         if shows || p.last_activity + ACTIVE > c.now || p.key == held { active.push((p.last_activity, row)); continue }
         if p.last_activity + QUIET <= c.now { quiet.push(row); continue }
+        // in no group (groups are off, the default): it stays in the one list, below what is newer
+        if gid.is_empty() { active.push((p.last_activity, row)); continue }
         match groups.iter_mut().find(|g| g.0 == gid) { Some(g) => g.2.push(row), None => groups.push((gid.clone(), all.name(st, &gid), vec![row])) }
     }
     pinned.sort_by(|a, b| a.0.cmp(&b.0));
