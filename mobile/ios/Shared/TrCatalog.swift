@@ -2463,6 +2463,9 @@ gpui.kcomment.hint	Enter posts to the thread · Esc cancels	Enter でスレッ�
 gpui.kcomment.not.posted	The comment was not posted: {why}	コメントは投稿されませんでした: {why}
 gpui.keys.kcomment	Comment on what is selected in KiCad, from Backplane or from inside the editor: Enter posts, Esc cancels	KiCad で選択中のものにコメント (Backplane からもエディタ内からも): Enter で投稿、Esc で取り消し
 gpui.c.kicad.dialog	KiCad has “{title}” open	KiCad で「{title}」が開いています
+gpui.c.kicad.full.screen	Full screen	全画面
+gpui.c.kicad.exit.full.screen	Exit full screen	全画面を終了
+gpui.c.kicad.the.editor.takes.the.whole	The editor takes the whole window; only this row stays	エディタがウィンドウ全体を使います。この行だけが残ります
 gpui.assets.missing	Assets missing in {dir}: {files}	{dir} にアセットがありません: {files}
 gpui.connecting	Connecting…	接続中…
 gpui.connected	Connected	接続済み
@@ -2747,7 +2750,7 @@ gpui.e.subs.where	{harness} subagent inside this thread's agent	このスレッ�
 gpui.e.picker.already	{path} is a project already	{path}はすでにプロジェクトです
 gpui.e.picker.create	Create {path}	{path}を作成
 gpui.e.picker.notdir	{path} is not a folder	{path}はフォルダではありません
-gpui.e.picker.hint	Path of a folder, e.g. ~/projects/board	フォルダのパス（例：~/projects/board）
+gpui.e.picker.hint	Path of a folder, e.g. ~/projects/board, or a Git repository's address to clone it	フォルダのパス（例：~/projects/board）、またはクローンするGitリポジトリのアドレス
 gpui.e.fab.nogoal	No goal yet. Edit to say what this project is for.	目標はまだありません。編集して、このプロジェクトの目的を書いてください。
 gpui.e.fab.unavailable.line	Estimate unavailable: {error} · {line}	見積もりできません：{error} · {line}
 gpui.e.fab.buy.label	Buy it · {label}	購入する · {label}
@@ -2937,6 +2940,14 @@ gpui.side.old.chats.that.belong.to	Old chats that belong to no project. New ones
 gpui.side.group.projects	Group projects	プロジェクトをグループ化
 gpui.side.on.projects.with.nothing.going	On: projects with nothing going on lately are grouped by their git owner, or else their folder. Off: one list, and only the groups you make.	オン: 最近動きのないプロジェクトを Git のオーナー（なければフォルダ）ごとにまとめます。オフ: 1 つの一覧にし、自分で作ったグループだけを表示します。
 gpui.side.no.group	No group	グループなし
+gpui.e.freecad.install	Install FreeCAD	FreeCADをインストール
+gpui.e.freecad.ask	Install FreeCAD?	FreeCADをインストールしますか？
+gpui.e.freecad.installing	Installing FreeCAD	FreeCADをインストール中
+gpui.e.freecad.page	Download FreeCAD from freecad.org, then set its path above.	freecad.orgからFreeCADをダウンロードし、上でそのパスを設定してください。
+gpui.e.freecad.ask.note	Downloads the latest FreeCAD (about 800 MB, 3 GB unpacked) from github.com/FreeCAD/FreeCAD, checks its checksum and unpacks it into {into}. It needs no administrator password and changes nothing else on this computer.	最新のFreeCAD（約800 MB、展開後3 GB）をgithub.com/FreeCAD/FreeCADからダウンロードし、チェックサムを確認して{into}に展開します。管理者パスワードは不要で、このコンピュータの他の部分は変更しません。
+gpui.e.freecad.offer	FreeCAD's own release for this computer. Agents make mechanical parts with it.	このコンピュータ用のFreeCAD公式リリースです。エージェントはこれで機構部品を作ります。
+gpui.e.picker.clone.hint	Clones the repository and adds it as a project	リポジトリをクローンしてプロジェクトとして追加します
+gpui.e.picker.clone.typed	Clone {origin}	{origin}をクローン
 gpui.f.group.install	Install	インストール
 gpui.f.group.agents	Agents	エージェント
 gpui.f.group.cad	CAD tools	CADツール
@@ -5844,6 +5855,12 @@ gpui.streamer.win	Windows does not tell an app that the screen is being captured
 
     /// voice.mark.unsure = unsure: {words}
     static func voice_mark_unsure(words: String) -> String { f("voice.mark.unsure", ["words": words]) }
+
+    /// gpui.e.freecad.ask.note = Downloads the latest FreeCAD (about 800 MB, 3 GB unpacked) from github.com/FreeCAD/FreeCAD, checks its checksum and unpacks it into {into}. It needs no administrator password and changes nothing else on this computer.
+    static func gpui_e_freecad_ask_note(into: String) -> String { f("gpui.e.freecad.ask.note", ["into": into]) }
+
+    /// gpui.e.picker.clone.typed = Clone {origin}
+    static func gpui_e_picker_clone_typed(origin: String) -> String { f("gpui.e.picker.clone.typed", ["origin": origin]) }
 
     /// gpui.f.counter = {i, number} of {n, number}
     static func gpui_f_counter(i: Int, n: Int) -> String { f("gpui.f.counter", ["i": String(i), "n": String(n)]) }
