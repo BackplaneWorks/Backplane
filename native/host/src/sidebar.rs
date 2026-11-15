@@ -682,7 +682,7 @@ mod tests {
         let plan = plan(&s, &o); let p = plan.project("p1", &mut |_, ids| ((0..ids.len()).collect(), Value::Null)).unwrap();
         assert_eq!((p["threads"].as_array().unwrap().len(), p["settledCount"].as_u64(), p["archivedCount"].as_u64()), (1, Some(0), Some(0)));
         let o2 = Opts { query: "", ..o }; let plan = super::plan(&s, &o2); let p = plan.project("p1", &mut |_, ids| ((0..ids.len()).collect(), Value::Null)).unwrap();
-        assert_eq!((p["settledCount"].as_u64(), p["archivedCount"].as_u64()), (Some(1), Some(1)), "no search: the whole shelves");
+        assert_eq!((p["settledCount"].as_u64(), p["archivedCount"].as_u64()), (Some(2), Some(0)), "no search: the whole shelves (an archive is a settle now)");
     }
     #[test] fn the_active_view_puts_an_approval_ask_above_a_newer_question() {
         let ask = |id: &str, th: &str, kind: &str, at: u64| format!(r#"{{"$":"AskOpened","id":"{id}","thread":"{th}","kind":"{kind}","tool":"Bash","detail":"x","options":"","at":{at}}}"#);
@@ -692,11 +692,11 @@ mod tests {
         let (live, _) = p.active(&|_, _| true);
         assert_eq!(live.iter().map(|r| r["id"].as_str().unwrap()).collect::<Vec<_>>(), ["h|ap", "h|qu", "h|fa"]);
     }
-    #[test] fn an_archived_row_says_so_and_offers_to_come_back() {
+    #[test] fn an_archived_thread_is_a_settled_one() {
         let s = fold(&[PC, &tc("a", 11), &tc("b", 12), r#"{"$":"ThreadArchived","id":"a","archived":true,"at":13}"#]);
-        let mut open = HashSet::new(); open.insert("arch:p1".to_string()); let v = projects(&s, &opts(&open, 100));
-        let arch = v[0]["archived"].as_array().unwrap(); assert_eq!(arch.len(), 1);
-        assert_eq!((arch[0]["lead"][0]["action"].as_str(), arch[0]["lead"][0]["value"].as_str()), (Some("row-unarchive"), Some("h|a")));
+        let mut open = HashSet::new(); open.insert("arch:p1".to_string()); open.insert("p1".to_string()); let v = projects(&s, &opts(&open, 100));
+        assert!(v[0]["archived"].as_array().unwrap().is_empty());
+        assert_eq!(v[0]["settled"].as_array().unwrap().iter().map(|r| r["id"].as_str().unwrap()).collect::<Vec<_>>(), ["h|a"]);
         let live = &v[0]["threads"][0]; assert_eq!((live["id"].as_str(), live["lead"][0]["action"].as_str()), (Some("h|b"), Some("row-settle")));
     }
     #[test] fn a_child_thread_hangs_under_its_parent_when_the_parent_is_open() {

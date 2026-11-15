@@ -84,7 +84,7 @@ fn project(this: &Backplane, cx: &mut Context<Backplane>, light: bool, p: &Value
         .on_hover({ let p = pid.clone(); cx.listener(move |this, on: &bool, _, _| { if *on { this.screens.side_hover = Some(p.clone()) } else if this.screens.side_hover.as_deref() == Some(p.as_str()) { this.screens.side_hover = None } }) })
         .on_click(cx.listener(move |this, _, w, cx| { w.focus(&this.screens.side_focus); this.go("project-page", key2.clone(), cx); this.open_project(pid2.clone(), cx); }))
         .on_mouse_down(MouseButton::Right, cx.listener(move |this, e: &MouseDownEvent, _, cx| {
-            // the hub's menu (Pin, New swarm, Rename, Badge, Open folder, Move to group ›, Archive, Remove project); an older hub sends none
+            // the hub's menu (Pin, New swarm, Rename, Badge, Open folder, Move to group ›, Make quiet, Remove project); an older hub sends none
             let hub_menu = crate::screens::ctxmenu::section_items(&menu);
             if !hub_menu.is_empty() { this.ctx_open(e.position, hub_menu, cx); return }
             /* i18n-ok: menu labels, drawn through trs */ let mut items = vec![crate::screens::ctxmenu::Item { label: if pinned { "Unpin project".into() } else { "Pin project".into() }, action: "project-pin".into(), value: key3.clone(), confirm: false },
@@ -151,13 +151,13 @@ impl Backplane {
                     let empty = s["rows"].as_array().map_or(true, |r| r.is_empty());
                     if s["id"] == "active" && empty && s["fold"] != true { continue }
                     rows.push(head(cx, light, s, ctl));
-                    let faded = s["id"] == "quiet" || s["id"] == "archived";
+                    let faded = s["id"] == "quiet";
                     for p in s["rows"].as_array().into_iter().flatten() {
                         rows.push(project(self, cx, light, p, faded, ctl));
                         // its live swarms, above its threads (their members have no rows: the swarm stands for them)
                         rows.extend(crate::screens::swarm::side_rows(cx, light, p, &open_room, ctl));
                         let qid = string(p, "id"); let pid = qid.rsplit_once('|').map_or(qid.as_str(), |(_, r)| r).to_string();
-                        for t in p["threads"].as_array().into_iter().flatten() { rows.push(self.side_thread(cx, light, t, &pid, "", faded, ctl)); }
+                        for t in p["threads"].as_array().into_iter().flatten() { let mut t = t.clone(); t["under"] = serde_json::json!(true); rows.push(self.side_thread(cx, light, &t, &pid, "", faded, ctl)); }
                     }
                 }
             }

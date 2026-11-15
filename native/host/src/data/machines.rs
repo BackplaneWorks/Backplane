@@ -245,17 +245,18 @@ mod tests {
         let t = thread_json("L~t1", &d, "p9", &mk, "hi").unwrap();
         assert_eq!(t["project"], "p9"); assert_eq!(t["state"], "working"); assert_eq!(t["status"], "active"); assert_eq!(t["mark"]["away"], true); assert_eq!(t["mark"]["short"], "desktop");
         assert_eq!(t["preview"], "hi"); assert_eq!(t["updatedAt"], 40_000); assert_eq!(t["archived"], false);
-        assert_eq!(thread_json("L~t3", &d, "x", &mk, "").unwrap()["archived"], true); assert!(thread_json("L~none", &d, "x", &mk, "").is_none());
+        assert_eq!(thread_json("L~t3", &d, "x", &mk, "").unwrap()["archived"], false, "an archive is a settle now (state/mod.rs)"); assert!(thread_json("L~none", &d, "x", &mk, "").is_none());
     }
     #[test] fn linked_threads_list_by_recency_in_their_project_and_join_a_project_here() {
         let d = desk(); let far = vec![("desktop".to_string(), &d)];
         let mut join = HashMap::new(); join.insert("L~p1".to_string(), "p1".to_string());
         let ids = |v: Vec<(u64, String)>| v.into_iter().map(|x| x.1).collect::<Vec<_>>();
-        let mut all = thread_keys(&far, "", &join, "", false, None); all.sort(); assert_eq!(ids(all), vec!["L~t2", "L~t1"]);
-        assert_eq!(ids(thread_keys(&far, "", &join, "p1", false, None)), vec!["L~t1"], "this hub's project holds its partner's threads");
-        assert_eq!(ids(thread_keys(&far, "", &join, "L~p1", false, None)), vec!["L~t1"], "and the linked project by its own id");
+        let mut all = thread_keys(&far, "", &join, "", false, None); all.sort(); assert_eq!(ids(all), vec!["L~t3", "L~t2", "L~t1"], "an archive is a settle now: listed");
+        let sorted = |v: Vec<(u64, String)>| { let mut v = ids(v); v.sort(); v };
+        assert_eq!(sorted(thread_keys(&far, "", &join, "p1", false, None)), vec!["L~t1", "L~t3"], "this hub's project holds its partner's threads");
+        assert_eq!(sorted(thread_keys(&far, "", &join, "L~p1", false, None)), vec!["L~t1", "L~t3"], "and the linked project by its own id");
         assert_eq!(ids(thread_keys(&far, "", &join, "L~p2", false, None)), vec!["L~t2"]);
-        assert_eq!(ids(thread_keys(&far, "", &join, "", true, None)), vec!["L~t3"], "archived");
+        assert!(thread_keys(&far, "", &join, "", true, None).is_empty(), "nothing is archived: an archive is a settle now");
         assert_eq!(thread_keys(&far, "@here", &join, "", false, None).len(), 0, "this machine only: none of theirs");
         assert_eq!(project_shown("L~p1", &join), "p1"); assert_eq!(project_shown("L~p2", &join), "L~p2");
     }
@@ -269,7 +270,7 @@ mod tests {
         assert_eq!(project_rows(&far, "desktop", &HashMap::new(), &un).len(), 2, "a machine picked: its projects keep their own rows");
         let mut local = json!({"id":"p1","title":"Board","threadCount":2,"settledCount":0,"waiting":0,"updatedAt":5});
         let ps = partners(&far, "", &join); join_project(&mut local, &ps["p1"], &un);
-        assert_eq!(local["threadCount"], 3); assert_eq!(local["updatedAt"], 40_000); assert_eq!(local["also"], "also on desktop"); assert_eq!(local["marks"][0]["name"], "desktop");
+        assert_eq!(local["threadCount"], 4); assert_eq!(local["updatedAt"], 40_000); assert_eq!(local["also"], "also on desktop"); assert_eq!(local["marks"][0]["name"], "desktop");
         assert_eq!(local["newOn"][0]["value"], "p1"); assert_eq!(local["newOn"][1]["value"], "L~p1"); assert_eq!(local["newOn"][1]["label"], "New thread on desktop");
         assert!(holder(&far, "L~t1").is_some() && holder(&far, "t1").is_none());
         assert_eq!(on_link(json!({"kind":"board"}), "L~t1")["on"], "L"); assert_eq!(on_link(json!({"kind":"board"}), "t1"), json!({"kind":"board"}));
