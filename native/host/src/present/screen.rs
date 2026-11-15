@@ -557,11 +557,13 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
             cmds.push(json!({"type":"send","hub":hub,"text":json!({"id":rid,"m":"bots.task","p":q}).to_string()}));
             session["rid"]=json!(rid+1);
         },
-        "mem-forget"|"routine-toggle"|"routine-run"|"routine-delete" if bot_page.is_object() => {
+        "mem-forget"|"recall-toggle"|"routine-toggle"|"routine-run"|"routine-delete" if bot_page.is_object() => {
             let bot=text(&p["target"],"id"); let rid=session["rid"].as_u64().unwrap_or(0);
             let row=bot_page["routines"].as_array().and_then(|rs|rs.iter().find(|r|text(r,"id")==value));
             let (m,q)=match (action,row) {
                 ("mem-forget",_)=>("bots.forget",json!({"bot":bot,"key":value})),
+                // Settings' infinite context switch (bots/recall): "on" or "off"
+                ("recall-toggle",_)=>("bots.edit",json!({"bot":bot,"recall":if value=="off" {"off"} else {"on"}})),
                 ("routine-toggle",Some(r))=>("bots.routine",json!({"bot":bot,"routine":value,"name":text(r,"name"),"prompt":text(r,"prompt"),"on":r["on"]!=json!(true),"keep":true})),
                 ("routine-run",_)=>("bots.routine_run",json!({"routine":value})),
                 ("routine-delete",_)=>("bots.routine_delete",json!({"routine":value})),

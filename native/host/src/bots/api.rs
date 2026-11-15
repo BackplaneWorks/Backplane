@@ -66,7 +66,11 @@ pub async fn page_from(hub: &Arc<Hub>, bot: &str, tab: &str, now: u64, from: usi
     let parent = nav_parent(uber, on);
     let chat = if uber { w.ub_chat() } else { me.thread.clone() };
     let mut v = json!({"kind":"bot","id":bot,"name":me.name,"title":me.name,"look":me.look,"tab":on,"navTab":parent,"tabs":tabs_json(tabs),"subtabs":tabs_json(nav_sections(uber, parent)),"edit":true,"uber":uber,"chat":chat});
-    if tab_of_world(&w, bot, on, now, from, &mut v) { return Some(v) }
+    if tab_of_world(&w, bot, on, now, from, &mut v) {
+        // Settings: the memory tree's state (its engine reads the world itself)
+        if on == "settings" { drop(w); if let Some(rc) = b.recall.get() { let (n, lines, left) = rc.stats(&me.thread).await; v["recall"]["messages"] = json!(n); v["recall"]["lines"] = json!(lines); v["recall"]["left"] = json!(left); } }
+        return Some(v)
+    }
     match on {
         "hooks" => {
             let mut hs: Vec<_> = w.hooks.values().filter(|h| h.bot == bot && !h.revoked).collect(); hs.sort_by(|a, c| a.id.cmp(&c.id));
@@ -115,7 +119,7 @@ fn tab_of_world(w: &super::world::World, bot: &str, on: &str, now: u64, from: us
             v["space"] = serde_json::from_str::<Value>(spec).ok().filter(Value::is_object).unwrap_or(Value::Null);
             v["spacePage"] = json!(w.pages.get(bot).map_or(false, |p| !p.0.is_empty()));
         }
-        "settings" => { v["persona"] = json!(me.persona); v["created"] = json!(ago(now, me.created)); }
+        "settings" => { v["persona"] = json!(me.persona); v["created"] = json!(ago(now, me.created)); v["recall"] = json!({"on": super::recall::bot_on(w, bot)}); }
         _ => return false,
     }
     true

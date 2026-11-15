@@ -100,6 +100,8 @@ pub struct World {
     #[serde(default)] pub room_turns: HashMap<String, (String, String, usize)>,
     /// what the mailroom owes after a step (Run.after, Run.fallback), in log order: taken by `Bots::after_steps`, and only for lines folded after the start
     #[serde(skip)] pub steps: Vec<StepEnd>,
+    /// a thread's memory tree (bots/recall): where each written line is in the log, and its view as last kept
+    #[serde(default)] pub recall: HashMap<String, super::recall::Kept>,
     seen: usize, line: usize,
 }
 /// A line the mailroom answers once it is in the log. A step answers inside the step, on the state before it;
@@ -117,7 +119,7 @@ pub enum StepEnd {
 pub const SETTINGS: [&str; 8] = ["agent.provider", "agent.model", "mail.on", "uber.bot", "uber.uid", "person.tz", "person.tz.device", "tz.machine"];
 /// whether a setting key is held: the list above and the zone rules the hub resolved (`tz.rule.<name>`)
 /// plus the families the mailroom's routing reads (run.*, triage.*, owner.mail.*, mail.private.*, the task board, told.*, the text model)
-fn kept(k: &str) -> bool { SETTINGS.contains(&k) || ["room.", "tz.rule.", "run.", "triage.", "owner.mail.", "mail.private.", "board.", "told.", "text."].iter().any(|p| k.starts_with(p)) }
+fn kept(k: &str) -> bool { SETTINGS.contains(&k) || ["room.", "tz.rule.", "run.", "triage.", "owner.mail.", "mail.private.", "board.", "told.", "text.", "recall."].iter().any(|p| k.starts_with(p)) }
 
 fn s<'a>(e: &'a Value, k: &str) -> &'a str { e.get(k).and_then(Value::as_str).unwrap_or("") }
 fn n(e: &Value, k: &str) -> u64 { e.get(k).and_then(Value::as_u64).unwrap_or(0) }
@@ -234,11 +236,11 @@ impl World {
     pub fn apply_numbered(&mut self, line: usize, text: &str) { self.line = line; self.apply_line(text); self.seen = self.seen.max(line); self.steps.clear(); }
     pub fn apply_line(&mut self, line: &str) {
         let Some(t) = crate::session::event_type(line) else { return };
-        const READ: [&str; 46] = ["TurnUsage", "MessageFrom", "DeviceRegistered", "DeviceDropped", "DevicePrefs", "ThreadLaunched", "ActivityLogged", "RunSet", "CharterSet", "DecisionLogged", "ModesSet", "BotSet", "BotDeleted", "RoomSet", "RoomDeleted", "RoomPosted", "HookSet", "HookHit", "RoutineSet", "RoutineDeleted", "RoutineFired",
+        const READ: [&str; 48] = ["RecallNoted", "RecallView", "TurnUsage", "MessageFrom", "DeviceRegistered", "DeviceDropped", "DevicePrefs", "ThreadLaunched", "ActivityLogged", "RunSet", "CharterSet", "DecisionLogged", "ModesSet", "BotSet", "BotDeleted", "RoomSet", "RoomDeleted", "RoomPosted", "HookSet", "HookHit", "RoutineSet", "RoutineDeleted", "RoutineFired",
             "MemorySaved", "MemoryForgot", "SpaceSet", "SpacePageSet", "PeerSet", "RoutinePlan", "RoutineSlot", "RoutineDone", "SettingSet", "MessagePosted", "ThreadCreated", "TaskSet", "UberSet", "UberOp", "ConvSet", "MailPosted", "MailMarked", "MailTagged", "TurnChanged", "AskOpened", "AskClosed", "QueueTaken", "BotWoke", "ProjectCreated", "ProjectRemoved"];
         if !READ.contains(&t) { return }
         // cheap tests before a parse: most lines of a big log are messages of other threads and settings nobody here reads
-        if t == "SettingSet" && !["room.", "agent.", "mail.on", "uber.", "person.tz", "tz.", "machine.id", "run.", "triage.", "owner.mail.", "mail.private.", "board.", "told.", "text."].iter().any(|k| line.contains(k)) { return }
+        if t == "SettingSet" && !["room.", "agent.", "mail.on", "uber.", "person.tz", "tz.", "machine.id", "run.", "triage.", "owner.mail.", "mail.private.", "board.", "told.", "text.", "recall."].iter().any(|k| line.contains(k)) { return }
         if t == "TurnChanged" || t == "QueueTaken" {
             let th = line.split_once("\"thread\":\"").and_then(|(_, r)| r.split('"').next()).unwrap_or("");
             // Triage.thread.end: any thread's end is the uberbot's news once there is one (rare lines); every other turn line only matters for bots and runs
@@ -362,6 +364,8 @@ impl World {
                 let created = self.mems.get(&k).map_or(0, |m| m.created);
                 self.mems.insert(k, Mem { bot: bot.into(), key: key.into(), kind: s(e, "kind").into(), text: s(e, "text").into(), tags: s(e, "tags").into(), created: if created == 0 { at } else { created }, updated: at });
             }
+            "RecallNoted" => { let line = self.line; self.recall.entry(s(e, "thread").to_string()).or_default().noted(line, e) }
+            "RecallView" => { self.recall.entry(s(e, "thread").to_string()).or_default().viewed(e) }
             "MemoryForgot" => { self.mems.remove(&mem_at(s(e, "bot"), s(e, "key"))); }
             "SpaceSet" => { self.spaces.insert(s(e, "bot").into(), s(e, "spec").into()); }
             "SpacePageSet" => { self.pages.insert(s(e, "bot").into(), (s(e, "html").into(), at)); }
