@@ -349,7 +349,8 @@ want_row() { python3 -c 'import json,sys; fs=json.load(open(sys.argv[1]))["resul
 print(next((f["id"] for f in fs if f["rule"]==sys.argv[3] and set(a.get("uuid") for a in f["anchors"] if a.get("uuid"))==it), ""))' "$(list drc)" "$MITEMS" "$MTYPE"; }
 if [ "${MX:-0}" != 0 ] && [ "$MID" != "-" ] && echo "$CAPS" | grep -q 'click-marker'; then
   CKR=$(ask kicad_ipc "{\"path\":\"$PCB\",\"type\":\"kiapi.backplane.embed.ClickMarker\",\"message\":{\"kind\":\"FK_PCB\",\"marker\":{\"value\":\"$MID\"}}}")
-  CLK=""; for _ in $(seq 20); do CLK=$(hub_rpc "[]" 2>/dev/null | grep '^INFO ' | grep '"review.clicked.' | tail -1 | cut -c6- || true); [ -n "$CLK" ] && break; sleep 0.5; done
+  # the hub publishes the row to the clients connected then: the ask's own connection logs it in rpc.log; a later connection may not
+  CLK=""; for _ in $(seq 20); do CLK=$( { cat "$OUT/rpc.log"; hub_rpc "[]" 2>/dev/null; } | grep '^INFO ' | grep '"review.clicked.' | tail -1 | cut -c6- || true); [ -n "$CLK" ] && break; sleep 0.5; done
   GOT=$(python3 -c 'import json,sys; v=json.loads(sys.argv[1] or "{}").get("value") or {}; v=json.loads(v) if isinstance(v,str) else v; print(v.get("id") or "none")' "$CLK" 2>/dev/null || echo none)
   WANT=$(want_row)
   echo "INFO K5 ClickMarker: $(echo "$CKR" | cut -c1-200); the hub: $(grep "marker clicked" "$OUT/hub.log" | tail -1 | cut -c1-160)"
