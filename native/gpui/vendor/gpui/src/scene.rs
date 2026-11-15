@@ -114,10 +114,35 @@ impl Scene {
             .push(PaintOperation::Primitive(primitive));
     }
 
+    /// Backplane (PATCH.md): a path into the scene, kept once. `insert_primitive` keeps every primitive twice (in its
+    /// list and in `paint_operations`, for `replay`), which for a path is a second copy of all its vertices each frame;
+    /// a path's operation holds its id instead and `replay` finds it in the scene it replays from.
+    pub fn insert_path(&mut self, mut path: Path<ScaledPixels>) {
+        let clipped_bounds = path.bounds.intersect(&path.content_mask.bounds);
+        if clipped_bounds.is_empty() {
+            return;
+        }
+        let order = self
+            .layer_stack
+            .last()
+            .copied()
+            .unwrap_or_else(|| self.primitive_bounds.insert(clipped_bounds));
+        path.order = order;
+        path.id = PathId(self.paths.len());
+        self.paint_operations.push(PaintOperation::Path(path.id));
+        self.paths.push(path);
+    }
+
     pub fn replay(&mut self, range: Range<usize>, prev_scene: &Scene) {
         for operation in &prev_scene.paint_operations[range] {
             match operation {
                 PaintOperation::Primitive(primitive) => self.insert_primitive(primitive.clone()),
+                // (the scene replayed from is finished: its paths are sorted by order, so the id is looked for)
+                PaintOperation::Path(id) => {
+                    if let Some(path) = prev_scene.paths.iter().find(|path| path.id == *id) {
+                        self.insert_path(path.clone())
+                    }
+                }
                 PaintOperation::StartLayer(bounds) => self.push_layer(*bounds),
                 PaintOperation::EndLayer => self.pop_layer(),
             }
@@ -191,6 +216,8 @@ pub(crate) enum PrimitiveKind {
 
 pub(crate) enum PaintOperation {
     Primitive(Primitive),
+    /// Backplane (PATCH.md): a path, by its id in `Scene::paths`: its vertices are kept once, not here as well.
+    Path(PathId),
     StartLayer(Bounds<ScaledPixels>),
     EndLayer,
 }
@@ -718,6 +745,34 @@ impl Path<Pixels> {
                 .collect(),
             start: self.start.map(|start| start.scale(factor)),
             current: self.current.scale(factor),
+            contour_count: self.contour_count,
+            color: self.color,
+        }
+    }
+
+    /// Backplane (PATCH.md): this path moved by `offset` and then scaled, in one copy: a path kept between frames
+    /// is drawn again where a moved camera puts it (`Window::paint_path_at`).
+    pub(crate) fn scale_moved(&self, offset: Point<Pixels>, factor: f32) -> Path<ScaledPixels> {
+        Path {
+            id: self.id,
+            order: self.order,
+            bounds: Bounds {
+                origin: self.bounds.origin + offset,
+                size: self.bounds.size,
+            }
+            .scale(factor),
+            content_mask: self.content_mask.scale(factor),
+            vertices: self
+                .vertices
+                .iter()
+                .map(|vertex| PathVertex {
+                    xy_position: (vertex.xy_position + offset).scale(factor),
+                    st_position: vertex.st_position,
+                    content_mask: vertex.content_mask.scale(factor),
+                })
+                .collect(),
+            start: (self.start + offset).scale(factor),
+            current: (self.current + offset).scale(factor),
             contour_count: self.contour_count,
             color: self.color,
         }

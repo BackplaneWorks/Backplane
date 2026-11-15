@@ -32,3 +32,13 @@ gpui 0.2.2 (Apache-2.0) vendored without `examples/` (and its `[[example]]` targ
   through (the client's streamer mode hides the person's identifiers). The filter answers byte ranges and their replacements; the layout
   draws the replaced text, fits the style runs to it, and keeps a map so `index_for_position`, `position_for_index` and
   `line_layout_for_index` still speak the original text's indices (links, selections, highlights). Off, it costs one atomic load per layout.
+
+- Paths that cost less a frame (a board plot is hundreds of thousands of path vertices, drawn again every frame the window draws):
+  `Window::paint_path_at` paints a path the caller keeps, moved by an offset (`Path::scale_moved`: one copy, where `paint_path` of a kept
+  path was a clone and then a scaled copy), so a plot tessellated once follows the camera through a drag. `Scene::insert_path` keeps a path
+  once (`PaintOperation::Path(PathId)`; `insert_primitive` kept it in its list and again in `paint_operations`), and `replay` finds it by id
+  in the scene it replays from; `paint_path` uses it too. `src/platform/blade/blade_renderer.rs` + `shaders.wgsl`: a path vertex for the
+  shader is 24 bytes (position, st, its path's index) and each path's colour and bounds are sent once (`PathRasterizationPath`,
+  `b_path_data`), where every vertex carried them (104 bytes); the vertex list is one buffer kept between frames. Measured on a routed
+  8-layer board (608 000 vertices): the renderer's vertex list 42 ms -> 7 ms a frame, its upload 8 ms -> 2 ms. The Metal and DirectX
+  renderers are as upstream.
