@@ -80,12 +80,18 @@ impl Agents {
         let doc_kind = if path.ends_with(".kicad_pcb") { "DOCTYPE_PCB" } else if path.ends_with(".kicad_sch") { "DOCTYPE_SCHEMATIC" } else { "" };
         let short = ty.rsplit('.').next().unwrap_or("").to_string();
         if !doc_kind.is_empty() && msg.to_string().contains("\"$") {
-            match self.kicad_open(thread, path, doc_kind).await { Ok(doc) => kedit::fill(&mut msg, &doc), Err(e) => return fail(&e) }
+            let gui = crate::files::kicad::embed::gui_route(&crate::files::kicad::ipc::pro_of(path)).is_some();
+            let doc = match self.kicad_call(thread, path, "kiapi.common.commands.GetOpenDocuments", json!({"type": doc_kind})).await { Ok(v) => v["message"]["documents"].get(0).cloned(), Err(_) => None };
+            match doc { Some(d) => kedit::fill(&mut msg, &d),
+                None if gui => return fail(&format!("{path} is not open in the person's KiCad, which has this project")),
+                None => match self.kicad_open(thread, path, doc_kind).await { Ok(d) => kedit::fill(&mut msg, &d), Err(e) => return fail(&e) } }
         }
         match self.kicad_call(thread, path, &ty, msg.clone()).await {
             Ok(v) => (true, v),
             // its document is not open in this KiCad yet: open it and ask again
-            Err(e) if e.contains("no handler available for request") && !doc_kind.is_empty() && !matches!(short.as_str(), "OpenDocument" | "GetOpenDocuments") => {
+            // (never in the person's own KiCad: what it has open is theirs to decide, and no frame is shown or raised for an agent)
+            Err(e) if e.contains("no handler available for request") && !doc_kind.is_empty() && !matches!(short.as_str(), "OpenDocument" | "GetOpenDocuments")
+                && crate::files::kicad::embed::gui_route(&crate::files::kicad::ipc::pro_of(path)).is_none() => {
                 if let Err(e2) = self.kicad_open(thread, path, doc_kind).await { return fail(&format!("{e}; opening {path} failed: {e2}")) }
                 match self.kicad_call(thread, path, &ty, msg).await { Ok(v) => (true, v), Err(e) => fail(&e) }
             }
@@ -103,15 +109,36 @@ impl Agents {
         struct Via<'a> { ag: &'a Arc<Agents>, thread: &'a str, path: &'a str, person: std::sync::Mutex<Value> }
         impl kedit::Call for Via<'_> {
             fn call<'b>(&'b self, ty: &'b str, msg: Value) -> kedit::Fut<'b> { Box::pin(async move {
+                // the person's KiCad has the project: a document it has not opened is theirs to open (no window is opened or raised for an agent)
+                if ty.ends_with(".OpenDocument") && crate::files::kicad::embed::gui_route(&crate::files::kicad::ipc::pro_of(self.path)).is_some() {
+                    return Err(format!("{} is not open in the person's KiCad, which has this project: ask them to open it there (Backplane opens no window for an agent)", self.path))
+                }
                 let v = self.ag.kicad_call(self.thread, self.path, ty, msg).await?;
                 if !v["person"].is_null() { *self.person.lock().unwrap() = v["person"].clone() }
                 let mut m = v["message"].clone();
                 for k in ["not_saved", "format_upgrade", "kicad_load_changes"] { if v[k].is_string() { if !m.is_object() { m = json!({}) } m[k] = v[k].clone() } }
                 Ok(m)
             }) }
+            fn sheet_texts(&self) -> Option<Vec<String>> {
+                if !self.path.ends_with(".kicad_sch") { return None }
+                fn walk(d: &std::path::Path, depth: u32, out: &mut Vec<String>) {
+                    for e in std::fs::read_dir(d).into_iter().flatten().flatten() { let p = e.path();
+                        if p.is_dir() { if depth < 3 && !p.file_name().is_some_and(|n| n.to_string_lossy().starts_with('.') || n.to_string_lossy().ends_with("-backups")) { walk(&p, depth + 1, out) } }
+                        else if p.extension().is_some_and(|x| x == "kicad_sch") { if let Ok(t) = std::fs::read_to_string(&p) { out.push(t) } } }
+                }
+                let mut out = vec![]; walk(std::path::Path::new(&kc::route(self.path)).parent()?, 0, &mut out); Some(out)
+            }
         }
         let path = a["path"].as_str().unwrap_or("");
         if !crate::plat::fs::is_abs(path) { return fail("path must be the absolute path of the board (.kicad_pcb) or schematic (.kicad_sch) to edit") }
+        // what an agent may never send is refused before anything is opened or locked
+        for op in a["ops"].as_array().into_iter().flatten() {
+            if let Some(why) = crate::files::kicad::ipc::approval_refused(&kedit::full_type(op["ipc"]["type"].as_str().unwrap_or("")), &op["ipc"]["message"]) { return fail(&why) }
+        }
+        // the person is at work in this KiCad: a change waits for the agent to have seen what they are doing, as after a kicad_ipc read's `person`
+        if kedit::writes(&a["ops"]) && a["person_seen"].as_bool() != Some(true) {
+            if let Some(p) = crate::files::kicad::coedit::person_now(&crate::files::kicad::ipc::pro_of(path)) { return (false, json!({"error": kedit::person_first(&p), "person": p})) }
+        }
         let via = Via { ag: self, thread, path, person: std::sync::Mutex::new(Value::Null) };
         match kedit::run(&via, path, a).await {
             Ok(mut v) => {

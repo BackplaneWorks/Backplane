@@ -1390,6 +1390,21 @@ async fn lock_now(ag: &Arc<Agents>, name: &str) -> Value { ag.tool_lock_list().a
     let ev = log_from(&hub, from).await;
     assert_eq!(ev.iter().filter(|e| e["thread"] == T2 && hub_says(e, "is yours")).count(), 1, "one message");
     assert!(!ev.iter().any(|e| e["thread"] == T2 && is(e, "TurnChanged")), "and no turn of T2's started");
+    // an agent's own tool call (kicad_ipc, kicad_edit): a document another thread holds is refused as before, and nobody is queued behind its back
+    let why = ag.kicad_gate_take(T1, &twin, write).await.unwrap_err(); assert!(why.contains(T2) && why.contains("read only"), "{why}");
+    assert_eq!(lock_now(&ag, &name).await["waiters"].as_array().map_or(0, |w| w.len()), 0, "{}", lock_now(&ag, &name).await);
+    // a free one is taken on the spot for the writer, as lock_acquire would; a read takes nothing
+    assert_eq!(ag.doc_locks_free(T2).await.len(), 2);
+    assert_eq!(ag.kicad_gate_take(T3, &twin, "kiapi.common.commands.GetItems").await.unwrap(), board); assert!(lock_now(&ag, &name).await["holder"].is_null(), "a read takes no lock");
+    assert_eq!(ag.kicad_gate_take(T1, &twin, write).await.unwrap(), board); assert_eq!(lock_now(&ag, &name).await["holder"]["id"], T1);
+    assert!(ag.kicad_gate_take(T3, &twin, write).await.unwrap_err().contains(T1));
+    // the plan's approval stays the person's, whatever tool carries it, and is refused before any lock is taken
+    let sch = format!("{root}/boards/main/main.kicad_sch");
+    for (ty, msg) in [("kiapi.backplane.plan.ApprovePlan", json!({})), ("kiapi.common.commands.RunAction", json!({"action": "pcbnew.Plan.accept"}))] {
+        assert!(ag.kicad_call(T3, &sch, ty, msg).await.unwrap_err().contains("Approval is the person's alone"));
+    }
+    let (ok, r) = ag.tool_kicad_edit(T3, &json!({"path": sch, "ops": [{"ipc": {"type": "kiapi.backplane.plan.ApprovePlan"}}]})).await;
+    assert!(!ok, "{r}"); assert!(lock_now(&ag, &sch_lock).await["holder"].is_null(), "{}", lock_now(&ag, &sch_lock).await);
     ag.shutdown();
 }
 #[tokio::test(flavor = "multi_thread")] async fn a_document_lock_held_by_a_crashed_or_idle_thread_is_cleared() {
