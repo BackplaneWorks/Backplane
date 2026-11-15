@@ -138,12 +138,14 @@ struct DataProjectPageView: View {
     @State private var buyAsk: DBuy?
     @State private var buying = false
     @State private var buyFailed = ""
+    /// a long Done list: its newest rows, the rest behind the hub's "Older (m)" (`page-older`)
+    @State private var older = false
     var body: some View {
         List {
             if !buyFailed.isEmpty { Text(buyFailed).dmono(11).foregroundStyle(BackplaneDesign.bad).padding(.horizontal, 14).padding(.vertical, 6).dataRow() }
             if let page {
                 ForEach(page.sections.filter { !$0.rows.isEmpty || ($0.fold && $0.count > 0) }) { s in
-                    DataSectionHead(s: s) { done.toggle(); Task { await load() } }.dataRow()
+                    DataSectionHead(s: s) { if s.toggle == "page-older" { older.toggle() } else { done.toggle() }; Task { await load() } }.dataRow()
                     ForEach(s.rows) { r in DataSectionThread(r: r) { nav in if let room = r.swarmRoom { path.append(DSwarmRoute(id: room, name: r.title)) } else { path.append(nav) } }.farHide(r, client) { await load() }.dataRow() }
                 }
                 if page.sections.allSatisfy({ $0.rows.isEmpty && $0.count == 0 }) { Text(Tr.t("No threads")).dmono(12).foregroundStyle(BackplaneDesign.faint).padding(14).dataRow() }
@@ -163,5 +165,5 @@ struct DataProjectPageView: View {
         guard !buying else { return }; buying = true; buyFailed = ""
         Task { do { let t = try await client.buy(b.thread); if !t.isEmpty { client.linkTarget = DLinkTarget(kind: .thread, id: t) } } catch { buyFailed = error.localizedDescription }; buying = false }
     }
-    private func load() async { page = await client.projectPage(route.key, done: done) }
+    private func load() async { page = await client.projectPage(route.key, done: done, older: older) }
 }

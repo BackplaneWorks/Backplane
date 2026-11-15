@@ -479,8 +479,8 @@ final class DataClient {
     func sidebarAct(_ action: String, _ value: String) async { _ = try? await call("sidebar.act", ["action": action, "value": value]) as DEmpty; await loadSections() }
     /// A section row's menu item for a thread of this hub (the hub's `menu`: pin, unpin, settle, unsettle, archive): `thread.act`, then the sections as the hub has them now.
     func sectionThreadAct(_ id: String, _ action: String) async { await threadAct(id, action); await loadSections() }
-    func projectPage(_ key: String, done: Bool) async -> DProjectPage? {
-        guard has("sections"), let r: DSections = try? await call("sidebar.sections", ["open": Array(sectionsOpen), "page": key, "pageDone": done]) else { return nil }
+    func projectPage(_ key: String, done: Bool, older: Bool = false) async -> DProjectPage? {
+        guard has("sections"), let r: DSections = try? await call("sidebar.sections", ["open": Array(sectionsOpen) + (older ? ["page-older"] : []), "page": key, "pageDone": done]) else { return nil }
         return r.page
     }
     private var sectionsDue = false

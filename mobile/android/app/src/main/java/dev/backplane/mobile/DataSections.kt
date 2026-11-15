@@ -197,8 +197,10 @@ fun SectionRename(s: DSection, close: () -> Unit) { TextPrompt(Msg.sidebar_secti
 @Composable
 fun ProjectPageScreen(p: DSecRow, open: (String) -> Unit, newThread: (String) -> Unit, openSwarm: (String) -> Unit = {}, back: () -> Unit) {
     var done by remember { mutableStateOf(false) }
+    // a long Done list: its newest rows, the rest behind the hub's "Older (m)" (`page-older`)
+    var older by remember { mutableStateOf(false) }
     var lists by remember { mutableStateOf<List<DSection>?>(null) }
-    LaunchedEffect(p.key, done, DataClient.sections) { lists = DataClient.projectPage(p.key, done) }
+    LaunchedEffect(p.key, done, older, DataClient.sections) { lists = DataClient.projectPage(p.key, done, older) }
     Column(Modifier.fillMaxSize().background(dcs.surfaceVariant)) {
         DBar(p.title, back)
         // New thread in this project: its New thread screen says where it runs and has the machine picker (projects.list's row of the same key)
@@ -229,7 +231,7 @@ fun ProjectPageScreen(p: DSecRow, open: (String) -> Unit, newThread: (String) ->
             for (s in ls) {
                 if (s.rows.isEmpty() && !(s.fold && s.count > 0)) continue
                 item("pg:${s.id}") {
-                    Row(Modifier.fillMaxWidth().height(32.dp).clickable(enabled = s.fold) { done = !done }.padding(start = 10.dp, top = 6.dp).testTag("project.page.${s.id}"), verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.fillMaxWidth().height(32.dp).clickable(enabled = s.fold) { if (s.toggle == "page-older") older = !older else done = !done }.padding(start = 10.dp, top = 6.dp).testTag("project.page.${s.id}"), verticalAlignment = Alignment.CenterVertically) {
                         if (s.fold) { Icon(if (s.open) Icons.Default.ExpandMore else Icons.Default.ChevronRight, null, tint = dcs.onSurfaceVariant, modifier = Modifier.size(14.dp)); Spacer(Modifier.width(6.dp)) }
                         DMono(Tr.t(s.title).uppercase(), dcs.onSurfaceVariant, 11)
                     }

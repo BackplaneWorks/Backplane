@@ -337,9 +337,10 @@ object DataClient {
     fun sidebarAct(action: String, value: String) { scope.launch { runCatching { call("sidebar.act", JSONObject().put("action", action).put("value", value)) }; loadSections() } }
     /** A section row's menu item for a thread of this hub (the hub's `menu`: pin, unpin, settle, unsettle, archive): `thread.act`, then the sections as the hub has them now. */
     fun sectionThreadAct(tid: String, action: String) { scope.launch { runCatching { call("thread.act", JSONObject().put("thread", tid).put("action", action)).optJSONObject("thread")?.let { upsert(parseThread(it)) } }; loadSections() } }
-    suspend fun projectPage(key: String, done: Boolean): List<DSection>? {
+    suspend fun projectPage(key: String, done: Boolean, older: Boolean = false): List<DSection>? {
         if (!has("sections")) return null
-        val r = runCatching { call("sidebar.sections", JSONObject().put("open", openArr()).put("page", key).put("pageDone", done)) }.getOrNull() ?: return null
+        val open = openArr(); if (older) open.put("page-older")
+        val r = runCatching { call("sidebar.sections", JSONObject().put("open", open).put("page", key).put("pageDone", done)) }.getOrNull() ?: return null
         return DSection.list(r.optJSONObject("page")?.optJSONArray("sections"))
     }
     private var sectionsDue = false
