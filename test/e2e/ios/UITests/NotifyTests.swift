@@ -43,7 +43,10 @@ final class Notify: XCTestCase {
     func tapIn(_ e: XCUIElement) { into(e); d.tap(e); sleep(1) }
     func settings() {
         d.app.activate(); sleep(1)
-        if !d.el("settings.alerts").exists { let g = d.el("data.settings"); if g.waitForExistence(timeout: 10) { g.tap() } }
+        if !d.el("settings.alerts").exists {
+            if !d.el("settings.notifications").exists { let g = d.el("data.settings"); if g.waitForExistence(timeout: 10) { g.tap() } }
+            let n = d.el("settings.notifications"); if n.waitForExistence(timeout: 10) { n.tap() }
+        }
         _ = d.el("settings.alerts").waitForExistence(timeout: 10)
     }
     func clearType(_ e: XCUIElement, _ text: String) {

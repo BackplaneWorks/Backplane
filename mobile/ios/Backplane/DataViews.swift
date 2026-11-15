@@ -184,9 +184,9 @@ struct DataThreadsView: View {
                 } label: {
                     HStack(spacing: 8) {
                         BrandMark(size: 20, conn: client.conn == .online)
-                        Text(client.hubName.isEmpty ? "Backplane" : client.hubName).dmono(14, bold: true).foregroundStyle(BackplaneDesign.text).lineLimit(1)
+                        Text(client.hubName.isEmpty ? "Backplane" : client.hubName).dmono(14, bold: true).foregroundStyle(BackplaneDesign.text).lineLimit(1).truncationMode(.middle)
                         Image(systemName: "chevron.down").font(.system(size: 9)).foregroundStyle(BackplaneDesign.dim)
-                    }.fixedSize()
+                    }.frame(maxWidth: 230, alignment: .leading) // a long hub name is cut, never pushing the Settings gear into the bar's More menu (iOS 26 folds both there)
                 }.accessibilityIdentifier("data.hub")
             }.dflat()
             ToolbarItem(placement: .topBarTrailing) {
@@ -203,7 +203,7 @@ struct DataThreadsView: View {
             if let t = client.threads.first(where: { $0.id == r.id }) { DataViewerView(client: client, thread: t, openFile: r.file, line: r.line) }
             else { DLoading(text: Tr.t(client.conn == .online ? "Loading the thread…" : "Connecting to the hub…")) } // never a blank page while the thread list comes
         }
-        .navigationDestination(for: DPage.self) { p in if p.name == "settings" { DataSettingsView(client: client) } else if p.name == "hub" { DataHubView(client: client) } else if p.name == "accounts" { DataAccountsView(client: client) } else if p.name == "mcp" { DataMcpView(client: client) } else { DataImprovementsView(client: client) } }
+        .navigationDestination(for: DPage.self) { p in if p.name == "settings" { DataSettingsView(client: client) } else if let sub = DSettingsPage(rawValue: p.name) { DataSettingsPageView(client: client, page: sub) } else if p.name == "hub" { DataHubView(client: client) } else if p.name == "accounts" { DataAccountsView(client: client) } else if p.name == "mcp" { DataMcpView(client: client) } else { DataImprovementsView(client: client) } }
         .navigationDestination(for: DAccountRoute.self) { DataAccountView(client: client, route: $0) }
         .navigationDestination(for: DTermsRoute.self) { DataTermsView(client: client, project: $0.project) }
         .modifier(DataThreadDialogs(client: client, renaming: $renaming, deleting: $deleting))
@@ -1389,86 +1389,6 @@ struct DataImprovementsView: View {
         c.queryItems = [URLQueryItem(name: "title", value: String(title)),
                         URLQueryItem(name: "body", value: text + "\n\n---\nBackplane iOS \(v), iOS \(UIDevice.current.systemVersion)")]
         return c.url!
-    }
-}
-
-// MARK: Settings: this phone's own settings first, then the hub
-
-struct DataSettingsView: View {
-    @Bindable var client: DataClient
-    @Bindable private var settings = AppSettings.shared
-    @State private var forgetKey: String?
-
-    private func onOff(_ title: String, _ on: Binding<Bool>, id: String) -> some View {
-        VStack(alignment: .leading, spacing: 6) {
-            DHeading(text: title)
-            DChoices(options: [(label: Tr.t("on"), value: true), (label: Tr.t("off"), value: false)], value: on).accessibilityIdentifier(id)
-        }
-    }
-    var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 14) {
-                DHeading(text: Tr.k("settings.lang"))
-                DChoices(options: [(label: Tr.k("settings.lang.auto"), value: "auto"), (label: Tr.k("settings.lang.en"), value: "en"), (label: Tr.k("settings.lang.ja"), value: "ja")], value: $settings.lang).accessibilityIdentifier("settings.lang")
-                Text(Tr.k("settings.lang.note")).dmono(11).foregroundStyle(BackplaneDesign.dim)
-                DHeading(text: Tr.t("Appearance"))
-                DChoices(options: [(label: Tr.t("system"), value: "system"), (label: Tr.t("light"), value: "light"), (label: Tr.t("dark"), value: "dark")], value: $settings.appearance)
-                DataViewerBackgroundSection(settings: settings)
-                DHeading(text: Tr.t("Text size"))
-                DChoices(options: [(label: Tr.t("system"), value: "system")] + AppSettings.textSteps.map { (label: $0.tag, value: $0.tag) }, value: $settings.textSize).accessibilityIdentifier("settings.textsize")
-                onOff(Tr.t("Alerts on this phone"), $settings.alerts, id: "settings.alerts")
-                    .onChange(of: settings.alerts) { _, on in Task { if on { await client.enablePush(ask: true) }; await client.pushMute(); if client.has("notifysettings") { await client.notify.load() } } }
-                if settings.alerts { onOff(Tr.t("Alert sound"), $settings.alertSound, id: "settings.sound") }
-                onOff(Tr.t("Haptics"), $settings.haptics, id: "settings.haptics")
-                Text(Tr.t("Off: only what you let through reaches this phone. Alerts come from your uberbot.")).dmono(11).foregroundStyle(BackplaneDesign.dim)
-                // an older hub has no Notifications page: its quiet hours and urgent switch are drawn here
-                if client.has("push") && !client.has("notifysettings") { DLine(); DataQuietSection(client: client) }
-                DLine()
-                DHeading(text: Tr.t("Hubs"))
-                let keys = client.links.compactMap { Pairing.key($0) }
-                ForEach(keys.indices, id: \.self) { i in
-                    let k = keys[i]
-                    // the hub connected to now: the one in use, or the home hub while that one cannot be reached
-                    let on = k == client.usingKey
-                    HStack(spacing: 8) {
-                        if on { DDot(color: client.conn == .online ? BackplaneDesign.ok : client.conn == .connecting ? BackplaneDesign.warn : BackplaneDesign.bad, size: 8) }
-                        Text(k).dmono(13).lineLimit(1)
-                        if k == client.homeKey { Text(Tr.t("Home")).dmono(11).foregroundStyle(BackplaneDesign.dim).accessibilityIdentifier("settings.hub.home.\(k)") }
-                        Spacer()
-                        if on { Text(Tr.t(client.conn.rawValue)).dmono(11).foregroundStyle(BackplaneDesign.dim) }
-                        else if i == 0, client.onHome { Text(Tr.t("Cannot be reached")).dmono(11).foregroundStyle(BackplaneDesign.dim) }
-                        else if i > 0 { Button(Tr.t("Use")) { client.useHub(k) }.buttonStyle(DButton()).accessibilityIdentifier("settings.hub.use.\(k)") }
-                        Button(Tr.t("Forget")) { forgetKey = k }.buttonStyle(DButton(danger: true)).accessibilityIdentifier("settings.hub.forget.\(k)")
-                    }
-                }
-                if client.links.isEmpty { Text(Tr.t("Not paired")).dmono(13) }
-                if !client.failure.isEmpty, client.conn != .online { Text(Tr.t(client.failure)).dmono(11).foregroundStyle(BackplaneDesign.dim) }
-                HStack(spacing: 6) {
-                    Button(Tr.t("Reconnect")) { client.connect() }.buttonStyle(DButton())
-                    Button(Tr.t("Add a hub")) { client.pairingError = ""; client.adding = true }.buttonStyle(DButton()).accessibilityIdentifier("settings.hub.add")
-                }
-                NavigationLink(value: DPage(name: "hub")) { Text(Tr.t("Hub")) }.buttonStyle(DButton()).accessibilityIdentifier("settings.hub")
-                if client.has("accounts") { NavigationLink(value: DPage(name: "accounts")) { Text(Tr.t("Accounts")) }.buttonStyle(DButton()).accessibilityIdentifier("settings.accounts") }
-                if client.has("mcpsettings") { NavigationLink(value: DPage(name: "mcp")) { Text(Tr.t("MCP servers")) }.buttonStyle(DButton()).accessibilityIdentifier("settings.mcp") }
-                DLine()
-                DataUpdateSection(client: client)
-                DLine()
-                if client.has("voice") { DataVoiceSection(client: client); DLine() }
-                if client.has("devices") { DataDevicesSection(client: client); DLine() }
-                if client.has("machines") { DataMachinesSection(client: client); DLine() }
-                if client.has("notifysettings") { DataNotifySection(client: client); DLine() }
-                if client.has("ring") { DataRingSection(client: client); DLine() }
-                NavigationLink(value: DPage(name: "improvements")) { Text(Tr.t("Improvements")) }.buttonStyle(DButton()).accessibilityIdentifier("settings.improve")
-                DLine()
-                let i = Bundle.main.infoDictionary
-                Text(Tr.ios_version(version: i?["CFBundleShortVersionString"] as? String ?? "?", build: i?["CFBundleVersion"] as? String ?? "?")).dmono(11).foregroundStyle(BackplaneDesign.faint)
-            }.padding(16)
-        }
-        .background(BackplaneDesign.background)
-        .dataBar(Tr.t("Settings"))
-        .confirmationDialog(Tr.ios_hub_forget_ask(hub: forgetKey ?? Tr.t("this hub")), isPresented: Binding(get: { forgetKey != nil }, set: { if !$0 { forgetKey = nil } }), titleVisibility: .visible) {
-            Button(Tr.t("Forget"), role: .destructive) { if let k = forgetKey { client.forgetHub(k) }; forgetKey = nil }
-        } message: { Text(Tr.t("This phone's saved copy of its threads is removed. Pair again to come back.")) }
     }
 }
 

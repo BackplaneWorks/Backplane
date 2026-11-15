@@ -453,6 +453,12 @@ ios.image.incoming	Picture ready: open a thread to send it.	画像の準備が�
 ios.image.loadfail	Could not load the picture.	画像を読み込めませんでした。
 native.permission.photos.add	Backplane saves the pictures you choose in a thread to your photo library.	スレッドで選んだ画像を写真ライブラリに保存します。
 ios.buy.ask	Start a buy thread for {project}?	{project} の購入スレッドを開始しますか？
+ios.settings.accounts.usage	Accounts & Usage	アカウントと使用量
+ios.settings.machines.devices	Machines & devices	マシンとデバイス
+ios.settings.alerts.on	Alerts on	通知オン
+ios.settings.alerts.off	Alerts off	通知オフ
+ios.settings.accounts.n	{n, plural, =0 {No accounts} one {# account} other {# accounts}}	{n, plural, =0 {アカウントなし} other {#件のアカウント}}
+hub.acct.this.hubs.sign.in	This hub's sign-in	このハブのサインイン
 common.cancel	Cancel	キャンセル
 common.delete	Delete	削除
 common.save	Save	保存
@@ -6879,6 +6885,9 @@ gpui.streamer.win	Windows does not tell an app that the screen is being captured
 
     /// ios.buy.ask = Start a buy thread for {project}?
     static func ios_buy_ask(project: String) -> String { f("ios.buy.ask", ["project": project]) }
+
+    /// ios.settings.accounts.n = {n, plural, =0 {No accounts} one {# account} other {# accounts}}
+    static func ios_settings_accounts_n(n: Int) -> String { f("ios.settings.accounts.n", ["n": String(n)]) }
 
     /// gpui.sections.move.to = Move to {group}
     static func gpui_sections_move_to(group: String) -> String { f("gpui.sections.move.to", ["group": group]) }

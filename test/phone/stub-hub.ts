@@ -40,6 +40,19 @@ async function turn(t: Thread, text: string) {
 }
 const page = <T>(all: T[], limit: number, before?: string) => { const end = before ? Number(before) : all.length; const start = Math.max(0, end - limit); return {items: all.slice(start, end), next: start > 0 ? String(start) : null}; };
 const methods: Record<string, (p: any, ws: any) => any> = {
+  // accounts (docs/PHONE-DATA.md "Accounts"): a fixed sample in the Rust hub's shape (settings/accounts_phone.rs), so a phone draws its rows and usage bars
+  'accounts.page': () => {
+    const bar = (name: string, used: number, text: string, tone: string) => ({name, used, text, tone});
+    const row = (id: string, provider: string, label: string, email: string, bars: any[], hold = '', extra: any = {}) => ({id, provider, label, email, state: 'connected', line: 'connected', tone: 'ok', limits: '', hold, bars, out: !!hold, open: true, ...extra});
+    return {providers: [
+      {provider: 'claude', title: 'Claude', add: 'Add a Claude account', accounts: [
+        row('w', 'claude', 'Work', 'work@example.com', [bar('5h', 62, '62% used · resets 15:40', 'ok'), bar('7d', 81, '81% used · resets Tue 09:00', 'warn')]),
+        row('p', 'claude', 'Personal', 'me@example.com', [bar('5h', 100, '100% used · resets 14:10', 'bad'), bar('7d', 44, '44% used', 'bad')], 'out, resets 14:10')]},
+      {provider: 'claude-sync', title: 'Claude (sync)', add: 'Add a Claude sync token', accounts: []},
+      {provider: 'codex', title: 'Codex', add: 'Add a Codex account', accounts: [row('c', 'codex', 'Codex 1', 'dev@example.com', [bar('5h', 12, '12% used · resets 16:05', 'ok'), bar('7d', 30, '30% used', 'ok')])]}],
+      own: [row('', 'claude', "This hub's sign-in", 'hub@example.com', [bar('5h', 35, '35% used · resets 15:00', 'ok'), bar('7d', 58, '58% used', 'ok')], '', {open: false})],
+      error: '', note: "Accounts sign in on the hub. Other agents use the hub machine's own sign-in."};
+  },
   'projects.list': p => { const all = [...projects.values()].sort((a, b) => a.updatedAt - b.updatedAt); const r = page(all, p.limit ?? 50, p.before); return {projects: r.items.reverse(), next: r.next}; },
   'threads.list': p => { const all = [...threads.values()].filter(t => (!p.project || t.project === p.project) && (p.archived ? t.archived : !t.archived)).sort((a, b) => a.updatedAt - b.updatedAt); const r = page(all, p.limit ?? 50, p.before); return {threads: r.items.reverse(), next: r.next}; },
   'thread.entries': p => { const t = threads.get(p.thread); if (!t) throw 'NOT_FOUND'; const r = page(entries.get(t.id)!, p.limit ?? 40, p.before); return {thread: t, entries: r.items, next: r.next}; },
@@ -59,11 +72,11 @@ Bun.serve({port, hostname: host, fetch(req, server) {
   const url = new URL(req.url);
   if (url.pathname === '/hello') return Response.json({name: 'backplane-stub', proto: 'data/1'});
   if (!authed(req, url)) return new Response('paired authentication required', {status: 401});
-  if (url.pathname === '/client/capabilities') return Response.json({version: 1, views: {version: 1, websocketQuery: 'view=1', renderers: ['mobile'], compatibility: 'explicit-only'}, data: {proto: 'data/1', features: ['images']}});
+  if (url.pathname === '/client/capabilities') return Response.json({version: 1, views: {version: 1, websocketQuery: 'view=1', renderers: ['mobile'], compatibility: 'explicit-only'}, data: {proto: 'data/1', features: ['images', 'accounts']}});
   if (url.pathname === '/ws' && server.upgrade(req)) return;
   return new Response('not found', {status: 404});
 }, websocket: {
-  open(ws) { subs.set(ws, {lists: null, thread: null, n: 0}); ws.send(JSON.stringify({t: 'hello', proto: 'data/1', features: ['images'], hub: `${host}:${port}`, version: 'stub', epoch: String(Date.now()), now: Date.now()})); const hb = setInterval(() => { try { ws.send('{"t":"hb"}') } catch { clearInterval(hb) } }, 15000); (ws as any).hb = hb; },
+  open(ws) { subs.set(ws, {lists: null, thread: null, n: 0}); ws.send(JSON.stringify({t: 'hello', proto: 'data/1', features: ['images', 'accounts'], hub: `${host}:${port}`, version: 'stub', epoch: String(Date.now()), now: Date.now()})); const hb = setInterval(() => { try { ws.send('{"t":"hb"}') } catch { clearInterval(hb) } }, 15000); (ws as any).hb = hb; },
   close(ws) { clearInterval((ws as any).hb); subs.delete(ws); },
   message(ws, raw) { let m: any; try { m = JSON.parse(String(raw)) } catch { return } const f = methods[m.m]; if (!f) return ws.send(JSON.stringify({t: 'reply', id: m.id, ok: false, error: 'unknown method'}));
     try { ws.send(JSON.stringify({t: 'reply', id: m.id, ok: true, result: f(m.p || {}, ws)})) } catch (e) { ws.send(JSON.stringify({t: 'reply', id: m.id, ok: false, error: {code: typeof e === 'string' ? e : 'INTERNAL', message: String(e)}})) } },

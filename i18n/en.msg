@@ -4184,6 +4184,12 @@ ios.image.incoming = Picture ready: open a thread to send it.
 ios.image.loadfail = Could not load the picture.
 native.permission.photos.add = Backplane saves the pictures you choose in a thread to your photo library.
 ios.buy.ask = Start a buy thread for {project}?
+ios.settings.accounts.usage = Accounts & Usage
+ios.settings.machines.devices = Machines & devices
+ios.settings.alerts.on = Alerts on
+ios.settings.alerts.off = Alerts off
+ios.settings.accounts.n = {n, plural, =0 {No accounts} one {# account} other {# accounts}}
+hub.acct.this.hubs.sign.in = This hub's sign-in
 # ---- end ----
 # the sidebar's sections (docs/ALWAYS-ON.md section 8): the hub's words, and the window's
 sidebar.sections.needs = Needs you

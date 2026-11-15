@@ -42,6 +42,30 @@ pub fn limit_lines(p: &Value, zone: &str, now: u64) -> Vec<String> {
         Some(format!("{}  {}% used{reset}{old}", window_name(w), used.round() as u64))
     }).collect()
 }
+/// A window's share used, 0..=100: `used_percent`, else `used_permille` (as the desktop reads it, screens/accounts.rs `window_line`).
+fn used_of(w: &Value) -> Option<f64> { w["used_percent"].as_f64().or_else(|| w["used_permille"].as_f64().map(|p| p / 10.0)).filter(|u| (0.0..=100.0).contains(u)) }
+/// Allowance.bars: one bar a window, for a phone to draw: `name` ("5h"), `used` 0..=100, `text` ("42% used · resets 15:40"), `tone` (bad when held or 90% and up,
+/// warn from 75%, dim for a last reading, else ok). A held account's bars are all bad: it is out whatever a window says.
+pub fn bars(allowance: &Value, held: bool, zone: &str, now: u64) -> Vec<Value> {
+    let stale = s(allowance, "state") == "stale";
+    allowance["windows"].as_array().into_iter().flatten().filter_map(|w| {
+        let used = used_of(w)?;
+        let reset = w["resets_at"].as_f64().map(|r| r as u64).filter(|r| *r > now).map(|r| format!(" · resets {}", crate::agents::rules::when(zone, r, now))).unwrap_or_default();
+        let tone = if held || used >= 90.0 { "bad" } else if stale { "dim" } else if used >= 75.0 { "warn" } else { "ok" };
+        Some(json!({"name":window_name(w),"used":(used * 10.0).round() / 10.0,"text":format!("{}% used{reset}{}", used.round() as u64, if stale { " (last reading)" } else { "" }),"tone":tone}))
+    }).collect()
+}
+/// The hub's own Claude sign-in (the CLI's login, holds key ""), when it is known and no added account is that same login: its usage as a row of its own, which
+/// opens nothing (it has no account page). None when the hub has neither who it is nor a reading.
+pub fn own(snap: &Value, zone: &str, now: u64) -> Option<Value> {
+    let d = &snap["default_login"]["claude"]; let al = &snap["default_allowance"];
+    let twin = snap["profiles"].as_array().map_or(false, |a| a.iter().any(|p| s(p, "provider") == "claude" && p["sameAsDefault"] == true));
+    if twin || (s(d, "state") != "known" && al["windows"].as_array().map_or(true, |w| w.is_empty())) { return None }
+    let held = snap["holds"][""]["text"].is_string();
+    let (line, tone) = if s(d, "state") == "signed-out" { ("signed out", "dim") } else { ("connected", "ok") };
+    Some(json!({"id":"","provider":"claude","label":"This hub's sign-in","email":s(d, "email"),"state":if tone == "ok" { "connected" } else { "disconnected" },"line":line,"tone":tone,
+        "limits":limit_lines(&json!({"allowance":al,"state":"connected"}), zone, now).join(" · "),"hold":s(&snap["holds"][""], "text"),"bars":bars(al, held, zone, now),"out":held,"open":false}))
+}
 /// One account in the list.
 pub fn row(p: &Value, holds: &Value, zone: &str, now: u64) -> Value {
     let id = s(p, "id"); let (line, tone) = state_line(s(p, "state"));
@@ -49,14 +73,14 @@ pub fn row(p: &Value, holds: &Value, zone: &str, now: u64) -> Value {
     // the hub's own CLI login under another name: one account, said so (its usage and holds count once)
     let line = if p["sameAsDefault"] == true && s(p, "state") == "connected" { "connected, the same account as the hub's own sign-in" } else { line };
     json!({"id":id,"provider":s(p, "provider"),"label":s(p, "label"),"email":s(&p["identity"], "email"),"state":s(p, "state"),"line":line,"tone":tone,
-        "limits":limit_lines(p, zone, now).join(" · "),"hold":s(&holds[id], "text")})
+        "limits":limit_lines(p, zone, now).join(" · "),"hold":s(&holds[id], "text"),"bars":bars(&p["allowance"], holds[id]["text"].is_string(), zone, now),"out":holds[id]["text"].is_string(),"open":true})
 }
 /// Page: every provider with accounts here, in order, with its accounts as they were saved.
 pub fn page(snap: &Value, zone: &str, now: u64) -> Value {
     let profiles = snap["profiles"].as_array().cloned().unwrap_or_default();
     let providers: Vec<Value> = GROUPS.iter().map(|g| json!({"provider":g,"title":group_title(g),"add":if *g == "claude-sync" { "Add a Claude sync token".to_string() } else { format!("Add a {} account", group_title(g)) },
         "accounts":profiles.iter().filter(|p| group_of(p) == *g).map(|p| row(p, &snap["holds"], zone, now)).collect::<Vec<_>>()})).collect();
-    json!({"providers":providers,"error":s(snap, "error"),"note":"Accounts sign in on the hub. Other agents use the hub machine's own sign-in."})
+    json!({"providers":providers,"own":own(snap, zone, now).into_iter().collect::<Vec<_>>(),"error":s(snap, "error"),"note":"Accounts sign in on the hub. Other agents use the hub machine's own sign-in."})
 }
 /// The newest sign-in attempt of a profile.
 fn attempt<'a>(snap: &'a Value, id: &str) -> Option<&'a Value> { snap["attempts"].as_array()?.iter().filter(|a| s(a, "profile") == id).last() }
@@ -96,7 +120,7 @@ pub fn view(snap: &Value, id: &str, zone: &str, now: u64) -> Option<Value> {
     let mut limits = limit_lines(p, zone, now);
     if s(p, "kind") == super::accounts_io::SYNC && ends > 0 { limits.insert(0, if ends > now { format!("Sync token ends {}", crate::agents::rules::when(zone, ends, now)) } else { "Sync token ended".to_string() }) }
     Some(json!({"id":id,"provider":provider,"title":if s(p, "kind") == super::accounts_io::SYNC { "Claude (sync)" } else { title(provider) },"label":s(p, "label"),"email":s(&p["identity"], "email"),"plan":s(&p["identity"], "plan"),"state":state,"line":line,"tone":tone,
-        "message":if msg == super::accounts_io::EXPIRED_SHORT { "" } else { msg },"limits":limits,"hold":s(&snap["holds"][id], "text"),"signin":sg,"actions":actions,
+        "message":if msg == super::accounts_io::EXPIRED_SHORT { "" } else { msg },"limits":limits,"hold":s(&snap["holds"][id], "text"),"bars":bars(&p["allowance"], snap["holds"][id]["text"].is_string(), zone, now),"signin":sg,"actions":actions,
         "remove":format!("Remove {}? Threads on it stop and must choose another account.", s(p, "label"))}))
 }
 /// The label a new sync account gets when the person gives none: "Claude sync 1" for the first.
@@ -156,6 +180,34 @@ mod tests {
     #[test] fn an_expired_account_does_not_repeat_its_refusal_as_its_limits() {
         let p = json!({"state":"expired","allowance":{"state":"unavailable","windows":[],"reason":"Claude refused the request: OAuth refresh token is no longer valid"}});
         assert!(limit_lines(&p, "UTC", 1).is_empty()); assert_eq!(limit_lines(&json!({"state":"connected","allowance":p["allowance"]}), "UTC", 1).len(), 1);
+    }
+    #[test] fn each_window_is_a_bar_with_its_share_reset_and_tone() {
+        let p = page(&snap(), "", 1000);
+        let a = &p["providers"][0]["accounts"][0];
+        assert_eq!((a["out"].as_bool(), a["open"].as_bool()), (Some(true), Some(true)));
+        let b = a["bars"].as_array().unwrap();
+        assert_eq!((b.len(), b[0]["name"].as_str().unwrap(), b[0]["used"].as_f64().unwrap(), b[0]["tone"].as_str().unwrap()), (2, "5h", 42.4, "bad"), "a held account is out on every bar");
+        assert!(b[0]["text"].as_str().unwrap().starts_with("42% used · resets "), "{}", b[0]["text"]);
+        assert_eq!(b[1]["text"], "10% used");
+        let c = &p["providers"][2]["accounts"][0]["bars"][0];
+        assert_eq!((c["name"].as_str().unwrap(), c["tone"].as_str().unwrap()), ("5h", "ok"));
+        let al = json!({"state":"stale","windows":[{"scope":"five_hour","used_permille":800.0},{"scope":"seven_day","used_percent":95.0},{"scope":"x","used_percent":140.0}]});
+        let b = bars(&al, false, "", 0);
+        assert_eq!(b.len(), 2, "a share out of range is no bar");
+        assert_eq!((b[0]["used"].as_f64().unwrap(), b[0]["tone"].as_str().unwrap(), b[0]["text"].as_str().unwrap()), (80.0, "dim", "80% used (last reading)"));
+        assert_eq!(b[1]["tone"], "bad");
+        assert_eq!(bars(&json!({"windows":[{"scope":"five_hour","used_percent":80.0}]}), false, "", 0)[0]["tone"], "warn");
+    }
+    #[test] fn the_hubs_own_sign_in_shows_its_usage_unless_an_account_is_it() {
+        let mut s = snap();
+        assert_eq!(page(&s, "", 0)["own"], json!([]), "nothing known of it: no row");
+        s["default_login"] = json!({"claude":{"state":"known","email":"me@x.com"}});
+        s["default_allowance"] = json!({"windows":[{"scope":"five_hour","used_percent":30.0}]});
+        s["holds"][""] = json!({"text":"out, resets 15:40"});
+        let o = &page(&s, "", 0)["own"][0];
+        assert_eq!((o["email"].as_str().unwrap(), o["open"].as_bool().unwrap(), o["out"].as_bool().unwrap(), o["bars"][0]["tone"].as_str().unwrap()), ("me@x.com", false, true, "bad"));
+        s["profiles"][0]["sameAsDefault"] = json!(true);
+        assert_eq!(page(&s, "", 0)["own"], json!([]), "an added account that is the same login carries it");
     }
     #[test] fn a_new_account_is_named_for_the_person_when_they_give_no_name() { assert_eq!(new_label(&snap(), "claude", "  "), "Claude 3"); assert_eq!(new_label(&snap(), "codex", "Laptop"), "Laptop"); }
 }
