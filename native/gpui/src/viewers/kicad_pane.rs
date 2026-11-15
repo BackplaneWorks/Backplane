@@ -17,6 +17,9 @@ fn top_of(window: &Window) -> Option<u64> {
         R::Xcb(x) => Some(x.window.get() as u64),
         R::Xlib(x) => Some(x.window as u64),
         R::Win32(w) => Some(w.hwnd.get() as usize as u64),
+        // macOS: the window's number (CGWindowID), what KiCad orders its frames above (native_child_mac.rs)
+        #[cfg(target_os = "macos")]
+        R::AppKit(a) => nc::window_number(a.ns_view.as_ptr()),
         _ => None,
     })
 }
@@ -214,6 +217,8 @@ pub fn hub_open_step<'a>(cur_open: &str, last_hub_open: &mut String, hub_open: &
 pub struct KicadPane {
     /// when this pane was made (the first Edit's), its warm hand-over's end (the frame placed + HANDOFF_PAINT), and whether it is over
     born: std::time::Instant, handoff_placed: Option<(std::time::Instant, u64)>, handoff_over: bool,
+    /// macOS: the pane's screen rect (points) and our window's visibility last pushed to KiCad (`editor.kicad.host`)
+    host_sent: Option<(i32, i32, i32, i32, bool)>,
     /// the .kicad_pro the hub resolved this pane's project to (its attach reply), "" until then
     pub bound: String,
     pub project: String, pub root: String, pub project_id: String, pub open: String, last_hub_open: String, hub: tokio::sync::mpsc::Sender<Command>,
@@ -351,7 +356,7 @@ impl KicadPane {
             last = std::time::Instant::now();
             let _ = drained_tx.send(());
         } }).detach();
-        KicadPane { born: std::time::Instant::now(), handoff_placed: None, handoff_over: false, busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), last_root: (i32::MIN, 0), placed: None,
+        KicadPane { born: std::time::Instant::now(), handoff_placed: None, handoff_over: false, host_sent: None, busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), last_root: (i32::MIN, 0), placed: None,
             focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), lent_at: None, poked: None, unmapped_since: None, unshown_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, at_px: None, dialogs_open: Vec::new(), took: None, await_close: None, press_focus: None, want_keys: true, refocus: None, verify_handin: None, prewarm_guard: None, unexplained_reposted: false, focus_seen: (0, 0), was_dialog: false }
     }
     fn rpc(&self, name: &str, params: Value) { let _ = self.hub.try_send(Command::Rpc(name.to_string(), Secret(params), "kicad")); }
@@ -387,6 +392,13 @@ impl KicadPane {
         if info["frames"] != self.info["frames"] {
             if let Some(c) = self.container { self.frames = nc::frames(c); }
             self.placed = None; self.unmapped_since = None;
+        }
+        // macOS: the reserved chords pressed in KiCad come through the hub (its window cannot post to ours): queued as the events the
+        // other platforms read from the window system; a session's earlier chords are never replayed
+        #[cfg(target_os = "macos")]
+        for k in info["keys"].as_array().into_iter().flatten().filter_map(|k| Some((k[0].as_u64()?, k[1].as_u64()?))) {
+            if info["pid"] != self.info["pid"] || self.info["keys"].as_array().is_some_and(|old| old.iter().any(|o| o[0].as_u64() == Some(k.0))) { continue }
+            if let Some(chord) = nc::reserved_chord_index(k.1 as usize) { nc::push_key(&nc::mac_chord(chord)); }
         }
         self.info = info;
         self.note_tab(&was_tab, &cause);
@@ -863,6 +875,9 @@ impl KicadPane {
         };
         self.grab_click(c, true);
         self.attached = true;
+        // macOS: a move or resize of our window, or its activation, redraws nothing by itself; KiCad's frame must follow (after_frame)
+        #[cfg(target_os = "macos")]
+        { cx.observe_window_bounds(window, |_, _, cx| cx.notify()).detach(); cx.observe_window_activation(window, |_, _, cx| cx.notify()).detach(); }
         let display = std::env::var("DISPLAY").unwrap_or_default();
         let kind = frame_for(&self.open);
         self.pending_show = Some(kind.to_string());
@@ -898,6 +913,8 @@ impl KicadPane {
             if over.iter().any(|o| *o != p) { over.retain(|o| *o != p); }
         }
         let show = self.want();
+        #[cfg(target_os = "macos")]
+        self.mac_host(at, show);
         // bp.9 local map: the frames shown once are the client's to map and unmap, the switch with no round trip (KiCad follows the map state)
         let local = self.info["mode"] == "fork" && self.info["local_map"] == true;
         let managed: Option<Vec<u64>> = if local { None } else { (self.info["mode"] == "fork").then(|| {
@@ -973,8 +990,24 @@ impl KicadPane {
         match at { Some(p) if !over.is_empty() => nc::holes(c, Some(&nc::cut(p, &over))), _ => nc::holes(c, None) }
         self.placed = Some(key);
     }
+    /// macOS: KiCad's frame follows the pane by itself once it knows where the pane is on screen and whether our window can be seen
+    /// (native_child_mac.rs); pushed when either changes, and our window ordered back below the frame after a click or an activation.
+    #[cfg(target_os = "macos")]
+    fn mac_host(&mut self, at: Option<nc::R>, show: Option<u64>) {
+        let visible = show.is_some() && nc::host_visible(self.toplevel);
+        let rect = at.and_then(|r| nc::screen_rect(self.toplevel, r));
+        let now = rect.map(|(x, y, w, h)| (x, y, w, h, visible)).or_else(|| self.host_sent.map(|(x, y, w, h, _)| (x, y, w, h, false)));
+        let raised = visible && show.is_some_and(|f| nc::keep_below(self.toplevel, f));
+        if now.is_some() && (now != self.host_sent || raised) {
+            if let Some((x, y, w, h, v)) = now { self.rpc("editor.kicad.host", json!({"project": self.project, "x": x, "y": y, "width": w, "height": h, "visible": v, "raise": raised})); }
+            self.host_sent = now;
+        }
+    }
     /// Back to the viewer: the editor's windows leave the pane (KiCad stays warm in the hub).
     pub fn detach(&mut self) {
+        // macOS: KiCad's frame leaves the screen with the pane (its windows are its own; nothing of ours to unmap)
+        #[cfg(target_os = "macos")]
+        if let Some((x, y, w, h, true)) = self.host_sent.take() { self.rpc("editor.kicad.host", json!({"project": self.project, "x": x, "y": y, "width": w, "height": h, "visible": false, "raise": false})); }
         let Some(c) = self.container.take() else { return };
         nc::place(c, None, None, None, &mut self.last_root); nc::grab_escape(self.toplevel, false);
         // the keyboard back to Backplane's window on leaving the pane (View, another thread)

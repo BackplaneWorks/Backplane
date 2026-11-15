@@ -83,6 +83,9 @@ pub struct Session {
     /// The frames KiCad said it has drawn since they were last shown (ET_FRAME_DRAWN, `embed-frame-drawn`), by window: the client holds the
     /// viewer's picture under a first Edit until its frame is here (KicadPane::handoff). The last 16
     pub drawn: Vec<u64>,
+    /// macOS (`embed-reserved-key-event`): the reserved chords pressed in KiCad (ET_RESERVED_KEY), the last 8 as [seq, index in
+    /// SetReservedKeys or 63 for the comment key]; elsewhere they reach the client's window directly (_BACKPLANE_KEY / WM_APP)
+    pub keys: Vec<(u64, u64)>,
     /// KiCad's resident memory, MB (Linux, sampled on the health tick; 0 unknown): the warm policy's measure of what a KiCad costs
     pub rss_mb: u64,
     /// a request of the hub's drive (a show, a pre-warm) waits on KiCad's check or refill task (task-gate-reads): its description, "" for none
@@ -106,7 +109,7 @@ impl Session {
             container: 0, toplevel: 0, holder: 0, display: String::new(),
             sock: String::new(), events_sock: String::new(), sock_dir: String::new(),
             argv: String::new(), cli: String::new(), version: String::new(), desc: String::new(),
-            caps: vec![], frames: vec![], missed_pings: 0, dialogs: vec![], notices: vec![], drawn: vec![], rss_mb: 0, task_wait: String::new(), parked: false, touched_at: now, closing: false, lost_parent: false, editor_req: (String::new(), String::new(), None),
+            caps: vec![], frames: vec![], missed_pings: 0, dialogs: vec![], notices: vec![], drawn: vec![], keys: vec![], rss_mb: 0, task_wait: String::new(), parked: false, touched_at: now, closing: false, lost_parent: false, editor_req: (String::new(), String::new(), None),
         }
     }
     pub fn spawned(mut self, pid: u32) -> Self { self.pid = pid; self }
@@ -195,12 +198,14 @@ impl Session {
             "dialogs": self.dialogs,
             "notices": self.notices,
             "drawn": self.drawn,
+            "keys": self.keys,
             "rss_mb": self.rss_mb,
             "task_wait": self.task_wait,
             // what the embedded editor can do beyond the basics (embed-gerbview, embed-editor-requested, ...): the client gates on these
             "embed_caps": self.caps.iter().filter(|c| c.starts_with("embed-") || c.starts_with("prewarm-")).collect::<Vec<_>>(),
             // bp.9: the client may map and unmap a frame KiCad has shown once (its tab switches need no round trip)
-            "local_map": self.mode == "fork" && !self.desc.is_empty() && proto::load(&self.desc).has_field("kiapi.backplane.embed.ShowFrame", "prewarm"),
+            // not on macOS: KiCad's frames are its own windows there, shown and hidden through the hub (native_child_mac.rs)
+            "local_map": !cfg!(target_os = "macos") && self.mode == "fork" && !self.desc.is_empty() && proto::load(&self.desc).has_field("kiapi.backplane.embed.ShowFrame", "prewarm"),
         })
     }
 }
@@ -1056,6 +1061,8 @@ enum Msg {
     Notice { pro: String, gen: u64, notice: Value },
     /// KiCad's ET_FRAME_DRAWN for this window (`embed-frame-drawn`)
     FrameDrawn { pro: String, gen: u64, window: u64, drawn: bool },
+    /// macOS: a reserved chord pressed in KiCad (ET_RESERVED_KEY), for the client (Session.keys)
+    ReservedKey { pro: String, gen: u64, seq: u64, index: u64 },
     /// the person dismissed a notice in the pane
     NoticeDismiss { pro: String, id: u64 },
     ForkSync { pro: String, gen: u64 },
@@ -1855,6 +1862,12 @@ impl Actor {
                 let snap = s.clone();
                 self.publish(&snap, None);
             }
+            Msg::ReservedKey { pro, gen, seq, index } => {
+                let Some(s) = self.sessions.get_mut(&pro).filter(|s| s.gen == gen && s.is_live()) else { return };
+                s.keys.push((seq, index)); if s.keys.len() > 8 { s.keys.remove(0); }
+                let snap = s.clone();
+                self.publish(&snap, None);
+            }
             Msg::NoticeDismiss { pro, id } => {
                 let Some(s) = self.sessions.get_mut(&pro) else { return };
                 *s = s.clone().dismiss_notice(id);
@@ -2596,6 +2609,11 @@ fn spawn_fork_events_loop(me: mpsc::UnboundedSender<Msg>, pro: String, gen: u64,
                         if window != 0 && me.send(Msg::FrameDrawn { pro: pro.clone(), gen, window, drawn: true }).is_err() { return }
                         continue
                     }
+                    if ty == "ET_RESERVED_KEY" || ty_n == 30 {
+                        let (seq, index) = (u64_of(&ev["seq"]), u64_of(&ev["reserved_key"]["index"]));
+                        if me.send(Msg::ReservedKey { pro: pro.clone(), gen, seq, index }).is_err() { return }
+                        continue
+                    }
                     if ty == "ET_FRAME_HIDDEN" || ty_n == 4 {
                         let window = u64_of(&ev["frame"]["window"]);
                         if window != 0 && me.send(Msg::FrameDrawn { pro: pro.clone(), gen, window, drawn: false }).is_err() { return }
@@ -2692,6 +2710,7 @@ const METHODS: &[&str] = &[
     "editor.kicad.warm",
     "editor.kicad.dialogs",
     "editor.kicad.notice.dismiss",
+    "editor.kicad.host",
 ];
 
 fn ok_reply(id: &Value, payload: Value) -> Vec<Value> {
@@ -2775,6 +2794,15 @@ impl RpcHandler for EmbedRpc {
                 if gui.mode != "fork" || gui.desc.is_empty() || !proto::load(&gui.desc).has_own("kiapi.backplane.embed.SetTheme") { return ok_reply(id, json!({"applied": false, "why": "this KiCad cannot switch its theme (needs Backplane KiCad bp.9)"})) }
                 let o = gui_call(&gui, "kiapi.backplane.embed.SetTheme", json!({"mode": theme_mode(mode)})).await;
                 return if o["ok"].as_bool().unwrap_or(false) { ok_reply(id, json!({"applied": true, "theme": o["message"].clone()})) } else { err_reply(id, &format!("SetTheme: {}", o["error"].as_str().unwrap_or(""))) }
+            }
+            if method == "editor.kicad.host" {
+                // macOS: where the pane is on screen (points) and whether the client's window can be seen; KiCad places its frames there
+                let Some(gui) = gui_route(&resolved.pro) else { return ok_reply(id, json!({"applied": false, "why": "KiCad is not running"})) };
+                if gui.mode != "fork" || gui.desc.is_empty() || !proto::load(&gui.desc).has_own("kiapi.backplane.embed.SetHostGeometry") { return ok_reply(id, json!({"applied": false, "why": "this KiCad cannot follow a host window (needs embed-host-geometry)"})) }
+                let n = |k: &str| p[k].as_i64().unwrap_or(0);
+                let o = gui_call(&gui, "kiapi.backplane.embed.SetHostGeometry", json!({"x": n("x"), "y": n("y"), "width": n("width"), "height": n("height"),
+                    "visible": p["visible"].as_bool().unwrap_or(true), "raise": p["raise"].as_bool().unwrap_or(false)})).await;
+                return if o["ok"].as_bool().unwrap_or(false) { ok_reply(id, json!({"applied": true})) } else { err_reply(id, &format!("SetHostGeometry: {}", o["error"].as_str().unwrap_or(""))) }
             }
             if method == "editor.kicad.notice.dismiss" {
                 let Some(nid) = p["id"].as_u64() else { return err_reply(id, "id is the notice's id") };
