@@ -67,33 +67,53 @@ def test_one_install_cannot_spend_more_than_its_share(mouser, monkeypatch):
     assert sourcing.mouser(["C1"], "someone-else") == {"C1": None}
 
 
-def test_a_quote_looks_up_at_most_max_mpns_unique_parts(mouser):
+def test_150_unique_parts_are_all_looked_up_within_the_budget(mouser):
     mpns = [f"P{i % 150}" for i in range(2000)]  # 2,000 lines, 150 unique
     out = sourcing.mouser(mpns, "inst")
     looked = [m for c in mouser for m in c]
-    assert len(looked) == sourcing.MAX_MPNS == len(set(looked))
-    assert sum(1 for v in out.values() if v is sourcing.CAPPED) == 50
+    assert len(looked) == 150 == len(set(looked)) and len(mouser) == 15
+    assert all(v is None for v in out.values())
 
 
-def test_over_100_unique_out_of_stock_parts_become_priceable_across_retries(mouser):
-    mpns = [f"P{i}" for i in range(230)]
-    lines = [{"refs": [f"R{i}"], "qty": 1, "mpn": m, "maker": "", "code": ""} for i, m in enumerate(mpns)]
-    comp = sourcing.components(Pack(), lines, 5, "inst")
-    assert len(comp["unavailable"]) == 130 and all("not looked up yet" in u for u in comp["unavailable"])
-    assert all("unavailable right now" not in u for u in comp["unavailable"])
-    comp = sourcing.components(Pack(), lines, 5, "inst")
-    assert len(comp["unavailable"]) == 30
-    comp = sourcing.components(Pack(), lines, 5, "inst")
-    assert comp["unavailable"] == [] and len(comp["problems"]) == 230  # all answered: not found, a board fault
-    looked = [m for c in mouser for m in c]
-    assert sorted(looked) == sorted(mpns)  # each part asked once across the retries
+def test_150_unique_off_stock_parts_are_all_priced(mouser, monkeypatch):
+    def fake(req, timeout=0):
+        ms = json.loads(req.data)["SearchByPartRequest"]["mouserPartNumber"].split("|")
+        mouser.append(ms)
+        parts = [{"ManufacturerPartNumber": m, "AvailabilityInStock": "9999", "Min": "1", "Mult": "1",
+                  "PriceBreaks": [{"Quantity": 1, "Price": "$0.10", "Currency": "USD"}]} for m in ms]
+        return _Resp(json.dumps({"SearchResults": {"Parts": parts}}).encode())
+    monkeypatch.setattr(sourcing.urllib.request, "urlopen", fake)
+    lines = [{"refs": [f"R{i}"], "qty": 1, "mpn": f"P{i}", "maker": "", "code": ""} for i in range(150)]
+    comp = sourcing.components(Pack(), lines, 1, "inst")
+    assert comp["problems"] == [] and comp["unavailable"] == []
+    assert {r["status"] for r in comp["lines"]} == {"sourced"}
 
 
-def test_the_budget_still_stops_a_capped_quote_retry(mouser, monkeypatch):
-    monkeypatch.setattr(sourcing, "SHARE", 3)
-    out = sourcing.mouser([f"Q{i}" for i in range(150)], "inst")
-    assert len(mouser) == 3 and sum(1 for v in out.values() if v is UNAVAILABLE) == 70
-    assert sum(1 for v in out.values() if v is sourcing.CAPPED) == 50
+def test_budget_exhaustion_still_marks_the_rest_unavailable(mouser, monkeypatch):
+    monkeypatch.setattr(sourcing, "SHARE", 5)
+    lines = [{"refs": [f"R{i}"], "qty": 1, "mpn": f"P{i}", "maker": "", "code": ""} for i in range(150)]
+    comp = sourcing.components(Pack(), lines, 1, "inst")
+    assert len(mouser) == 5 and len(comp["unavailable"]) == 100 and len(comp["problems"]) == 50  # 50 looked up, none found
+    assert all("unavailable right now" in x for x in comp["unavailable"])
+
+
+def test_the_absolute_cap_says_too_many_parts_not_unavailable(mouser, monkeypatch):
+    monkeypatch.setattr(sourcing, "MAX_MPNS", 120)
+    lines = [{"refs": [f"R{i}"], "qty": 1, "mpn": f"P{i}", "maker": "", "code": ""} for i in range(150)]
+    comp = sourcing.components(Pack(), lines, 1, "inst")
+    assert sum(len(c) for c in mouser) == 120
+    cap = [x for x in comp["problems"] if "too many parts to price in one quote" in x]
+    assert len(cap) == 30 and comp["unavailable"] == []
+    assert all("again later" not in x and "can't be bought" not in x for x in cap)
+    assert [r["status"] for r in comp["lines"]].count("too_many") == 30
+
+
+class _Resp(io.BytesIO):
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *a):
+        return False
 
 
 class Pack:
