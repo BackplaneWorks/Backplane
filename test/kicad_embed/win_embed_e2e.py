@@ -254,9 +254,16 @@ def window_program(hwnd: int) -> str:
         k32.CloseHandle(hp)
 
 
+# The shell's Alt+Tab switcher: only up while the harness itself holds Alt (away_return's Alt+Tab), so the Tab
+# and the Alt release go to it by design (s2-away, Nov 15: refusing them left Alt held down on the machine)
+SWITCHER_CLASSES = {"MultitaskingViewFrame", "TaskSwitcherWnd", "XamlExplorerHostIslandWindow"}
+
+
 def _ours(hwnd: int) -> bool:
     if hwnd and hwnd_class(hwnd) == "Ghost":
         return True  # DWM's stand-in for a hung window (a frozen KiCad): input to it waits for the real one
+    if hwnd and hwnd_class(hwnd) in SWITCHER_CLASSES and os.path.basename(os.path.normcase(window_program(hwnd))) == "explorer.exe":
+        return True
     path = os.path.normcase(window_program(hwnd))
     return bool(path) and (any(path.startswith(d) for d in INPUT_DIRS) or os.path.basename(path) in INPUT_EXES)
 
@@ -374,7 +381,10 @@ def guarded_run(body, client_exe: str, kicad_dir: str) -> int:
 
 
 def _send(*ins):
-    if INPUT_DIRS:
+    # key-ups alone act on nothing and must always go out: a refused key in the middle of a chord must never leave a
+    # modifier held down on the machine (s2-away, Nov 15: Alt stayed down after the Tab was refused)
+    keys_up_only = all(i.type == 1 and (i.u.ki.dwFlags & 2) for i in ins)
+    if INPUT_DIRS and not keys_up_only:
         what, target = _input_target(ins)
         if what:
             # a switch in progress has no foreground for a moment: give it 0.5 s to settle on one of ours
@@ -452,13 +462,18 @@ def key_tap(name: str):
 def key_chord(*names: str):
     mods = [vk_of(m) for m in names[:-1]]
     last = vk_of(names[-1])
-    for m in mods:
-        _send(_kbd(m, 0, 1 if m in EXT_VK else 0))
-    ext = 1 if last in EXT_VK else 0
-    _send(_kbd(last, 0, ext))
-    _send(_kbd(last, 0, ext | 2))
-    for m in reversed(mods):
-        _send(_kbd(m, 0, (1 if m in EXT_VK else 0) | 2))
+    down = []
+    try:
+        for m in mods:
+            _send(_kbd(m, 0, 1 if m in EXT_VK else 0))
+            down.append(m)
+        ext = 1 if last in EXT_VK else 0
+        _send(_kbd(last, 0, ext))
+        _send(_kbd(last, 0, ext | 2))
+    finally:
+        # always released, also when a key was refused mid-chord
+        for m in reversed(down):
+            _send(_kbd(m, 0, (1 if m in EXT_VK else 0) | 2))
     time.sleep(0.06)
 
 
