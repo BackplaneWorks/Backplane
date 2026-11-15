@@ -6,6 +6,7 @@
 // policy: accessory (no Dock icon, no Cmd-Tab), regular, switch (accessory, regular while its window is key).
 // It has a main menu ("KiCadStandIn" with File and Edit) to see what the menu bar shows when it has the keyboard.
 #import <Cocoa/Cocoa.h>
+#import <QuartzCore/QuartzCore.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <sys/event.h>
