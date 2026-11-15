@@ -2575,6 +2575,9 @@ voice.always.pill.listen = Listen
 voice.mark.tip = Spoken, transcribed by {stt}, {conf}% sure
 voice.mark.unsure = unsure: {words}
 voice.mark.edited = edited
+gpui.side.group.projects = Group projects
+gpui.side.on.projects.with.nothing.going = On: projects with nothing going on lately are grouped by their git owner, or else their folder. Off: one list, and only the groups you make.
+gpui.side.no.group = No group
 
 # ---- gpui-f: hub setup flow and thread ----
 gpui.f.group.install = Install

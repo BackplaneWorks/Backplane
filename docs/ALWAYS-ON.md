@@ -162,6 +162,8 @@ Setup's sub-step shows each row as Signed in / Sign in there / Not on that machi
      machines that have it.
   5. **Groups** for the rest, auto-grouped by who the work is for (git owner, then folder: American Embedded / FazePro, Nordic, Backplane,
      i2cjak personal), named by Haiku like the project icons; the person renames groups and moves projects; collapsed by default, with counts.
+     A setting, off by default (Settings, Appearance, "Group projects", `sidebar.groups`): off, the rest stays in Active, newest first, and
+     only a group the person made (Move to group, New group…) is a section.
   6. **Quiet:** nothing for 2 weeks; auto-collapsed, never deleted, searchable.
 - **A project's page:** running, then needs you, then recent, with done threads behind "Done (n)".
 - **Ctrl+K** jumps to any project or thread on any machine (registry-backed).
