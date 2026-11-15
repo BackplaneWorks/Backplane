@@ -2,7 +2,7 @@
 // until WORK/stop exists. Temp home, temp HOME/XDG for KiCad, the wrapper `claude` as the only agent, KiStack from this checkout.
 import {mkdirSync,mkdtempSync,writeFileSync,chmodSync,copyFileSync,existsSync,rmSync} from 'node:fs';
 import {startHub,stopHub,sleep} from '../perf/lib.mjs';
-const [bin,rt,port,work]=process.argv.slice(2);const KS=process.env.KIPC_BENCH_KISTACK,CL=process.env.KIPC_BENCH_CLAUDE,LG=process.env.KIPC_BENCH_LOGIN,MD=process.env.KIPC_BENCH_MODEL,EF=process.env.KIPC_BENCH_EFFORT,UH=process.env.HOME,DIS=process.env.KIPC_BENCH_DISALLOW??'',PR=process.env.KIPC_BENCH_PROMPT??'';const here=import.meta.dir;
+const [bin,rt,port,work]=process.argv.slice(2);const KS=process.env.KIPC_BENCH_KISTACK,CL=process.env.KIPC_BENCH_CLAUDE,LG=process.env.KIPC_BENCH_LOGIN,MD=process.env.KIPC_BENCH_MODEL,EF=process.env.KIPC_BENCH_EFFORT,UH=process.env.HOME,DIS=process.env.KIPC_BENCH_DISALLOW??'',PR=process.env.KIPC_BENCH_PROMPT??'',NM=process.env.KIPC_BENCH_NOMCP??'';const here=import.meta.dir;
 for(const d of ['bin','out','runs','user/.config/kicad','user/.cache','user/.local/share','user/.local/state'])mkdirSync(`${work}/${d}`,{recursive:true});
 rmSync(`${work}/stop`,{force:true});
 const run=mkdtempSync('/tmp/kb-');
@@ -16,7 +16,7 @@ const h=await startHub({bin:wrapper,home:`${work}/home`,port:Number(port),standi
  
  extraEnv:{BACKPLANE_KICAD_CLI:`${rt}/bin/kicad-cli`,BACKPLANE_KISTACK:KS??`${here}/../../deploy/kistack`,KIPC_BENCH_OUT:`${work}/out`,
   KIPC_BENCH_CLAUDE:CL??`${UH}/.local/bin/claude`,KIPC_BENCH_LOGIN:LG??`${UH}/.claude`,
-  KIPC_BENCH_MODEL:MD??'claude-fable-5-2',KIPC_BENCH_EFFORT:EF??'medium',KIPC_BENCH_DISALLOW:DIS,KIPC_BENCH_PROMPT:PR}});
+  KIPC_BENCH_MODEL:MD??'claude-fable-5-2',KIPC_BENCH_EFFORT:EF??'medium',KIPC_BENCH_DISALLOW:DIS,KIPC_BENCH_PROMPT:PR,KIPC_BENCH_NOMCP:NM}});
 writeFileSync(`${work}/hub.json`,JSON.stringify({pid:h.pid,port:h.port,home:h.home,run,token:h.token}));
 console.log(JSON.stringify({pid:h.pid,port:h.port,home:h.home,run}));
 while(!existsSync(`${work}/stop`))await sleep(500);
