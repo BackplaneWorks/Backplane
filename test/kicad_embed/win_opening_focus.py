@@ -567,7 +567,11 @@ def run(h):
         # idle_hotkey: KiCad suspended from 0.5 s after its first paint (before the client's pre-warm request at ~2 s)
         stall_s = float(os.environ.get("BP_PREWARM_STALL_S", "0") or 0) if os.environ.get("BP_OPENING_FOCUS_ONLY") == "idle_hotkey" else 0
         stall_started, stall_pid = None, 0
-        while cp.poll() is None and time.monotonic() - started < 65:
+        # BP_STARTUP_BOX_OBSERVE=1 (the bp.10 self-lock rate, Nov 15): a box before the first frame is recorded, not the end
+        # of the run: when it came, what it says, whether it went away, and whether the editor came up (the hub's retry)
+        observe = os.environ.get("BP_STARTUP_BOX_OBSERVE") == "1"
+        box_obs = {}
+        while cp.poll() is None and time.monotonic() - started < (100 if observe else 65):
             snap = focus_snapshot()
             if snap != previous:
                 timeline.append({"ms": round((time.monotonic() - started) * 1000), **snap})
@@ -618,15 +622,31 @@ def run(h):
             if clicked_edit and "first_paint" not in {r for r in h.kicad_reports()} and time.monotonic() - box_checked > 1.0:
                 box_checked = time.monotonic()
                 box = E.startup_box()
-                if box:
+                if box and not observe:
                     print("DIAG startup_box " + json.dumps(box), flush=True)
                     h.shot("startup_box")
                     h.check(f"KiCad starts without a box before its first frame (it showed {box['title']!r}: {' | '.join(box['text'])[:200]})", False, box)
                     return h.finish()
+                if box and "first_ms" not in box_obs:
+                    box_obs.update(first_ms=round((time.monotonic() - started) * 1000), box=box)
+                    h.shot("startup_box")
+                elif box_obs and not box and "gone_ms" not in box_obs:
+                    box_obs["gone_ms"] = round((time.monotonic() - started) * 1000)
             if "opening_settled" in marks:
                 settled = True
                 break
             time.sleep(0.02 if trace_idle else 0.05)
+        if observe:
+            fp = h.kicad_reports().get("first_paint") or {}
+            box_obs.update(settled=settled, first_paint_state=fp.get("state"), first_paint_say=(fp.get("say") or "")[:160],
+                           editor_up=fp.get("state") == "ready", run_ms=round((time.monotonic() - started) * 1000))
+            if box_obs.get("box"):
+                h.shot("after_box")
+            print("DIAG startup_box_observe " + json.dumps(box_obs), flush=True)
+            h.check("Start without a box before the first frame" + (f" (it showed {box_obs['box']['title']!r})" if box_obs.get("box") else ""),
+                    not box_obs.get("box"), box_obs)
+            h.check("The editor came up in the end", bool(box_obs.get("editor_up")), box_obs)
+            return h.finish()
         if stall_started:
             rest = stall_s - (time.monotonic() - stall_started)
             if rest > 0:
@@ -1318,6 +1338,36 @@ def run(h):
             print("DIAG notice_dialogs " + json.dumps(res)[:3000], flush=True)
             h.check("A native modal in KiCad (Open, Ctrl+O) is named in the pane's dialogs while up, and gone after Escape",
                     bool(named) and bool(seen_open) and bool(seen_closed), res)
+            return h.finish()
+        if only == "took_race":
+            # Lead, Nov 15: a click in the composer within ~300 ms of a canvas click, then typing: the text must land in
+            # the composer. KiCad's focus notice from the canvas click used to pull the keyboard back (the X11 `took` rule
+            # running on Windows), and the typing went to KiCad. Digits, so a stray key in KiCad opens nothing.
+            gls = [w for w in children if w["visible"] and w["class"] == "wxGLCanvas"]
+            gl = max(gls, key=lambda w: w["w"] * w["h"]) if gls else None
+            top = E.find_main_window(cp.pid)
+            cbox = composer_box(h, top)
+            rows = []
+            for n in range(1, 6):
+                E.screen_click(gl["root_x"] + 30, gl["root_y"] + gl["h"] - 40, 1)  # an empty spot of the board: KiCad's keys
+                time.sleep(0.25)
+                E.screen_click(cbox[0] + 120, cbox[1] + 30, 1)                  # the composer, ~250 ms later
+                a, b = h.p(f"took_{n}_0.png"), h.p(f"took_{n}_1.png")
+                E.grab_screen(a)
+                for ch in "123":
+                    E.key_tap(ch)
+                time.sleep(0.5)
+                E.grab_screen(b)
+                typed = E.img_diff_box(a, b, *cbox)["changed_pixels"]
+                snap = focus_snapshot(frame)
+                rows.append({"round": n, "composer_px": typed, "focus_pid": snap["focus_pid"], "focus_class": snap["focus_class"],
+                             "ok": typed > 150 and snap["focus_pid"] == cp.pid})
+                E.key_chord("ctrl", "a"); E.key_tap("BackSpace"); time.sleep(0.2)
+                if not rows[-1]["ok"]:
+                    E.key_tap("Escape"); time.sleep(0.3)
+            print("DIAG took_race " + json.dumps(rows), flush=True)
+            h.check("Canvas click, then the composer within ~300 ms and typing: the text lands in the composer, 5/5",
+                    all(r["ok"] for r in rows), rows)
             return h.finish()
         if only == "f6":
             return f6_check(h, cp, frame, children, timeline, pid)
