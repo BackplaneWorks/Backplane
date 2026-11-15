@@ -373,6 +373,10 @@ pub fn mode_with(override_mode: Option<&str>, env: &Env, has_embed_schema: bool,
     "stock"
 }
 
+/// Whether a KiCad that is up is started again at an attach: the runtime selected now (`now`, its kicad-cli) is another than the one it
+/// runs (`runs`), and nothing in it is unsaved. A session that never said its runtime (a stand-in's) is left alone.
+pub fn runtime_moved(runs: &str, now: &str, unsaved: bool) -> bool { !runs.is_empty() && !now.is_empty() && runs != now && !unsaved }
+
 /// Command line for stock mode: `kicad --frame pcb <pcb>` when a board exists so `API_HANDLER_PCB` serves `RunAction`
 /// while `Kiway` stays project-suite (`IsSingle() == false`), else `--frame sch <sch>`, else `<pro>`.
 /// Stock KiCad 10.0: the project manager on the project (`kicad --frame pcb <board>` segfaults in 10.0.7 on a fresh config, exit 139);
@@ -1208,6 +1212,19 @@ impl Actor {
 
     fn attach(&mut self, client: u64, pro: String, root: String, files: Files, frame: String, container: u64, toplevel: u64, display: String, wait: bool, env: Env, reply: oneshot::Sender<Result<Value, String>>) {
         let now = ipc::now_s();
+        // the runtime selected now is another than the one this project's KiCad runs (Backplane KiCad installed or updated since it started,
+        // the path set in Settings): Open in KiCad gets the selected one, not the stock KiCad left running from before the install. One
+        // with unsaved work is kept as it is
+        if self.sessions.get(&pro).is_some_and(|s| s.state == "ready" && runtime_moved(&s.cli, &env.cli, s.frames.iter().any(|f| f.modified))) {
+            let mut s = self.sessions.get(&pro).cloned().expect("checked");
+            eprintln!("kicad embed: {pro}: started again on the selected runtime {} (it ran {})", env.cli, s.cli);
+            s.closing = true;
+            Self::kill_pid(s.pid);
+            self.cleanup_session_sockets(&s);
+            let stopped = s.stopped("restarting");
+            put_route(&stopped, &self.me);
+            self.sessions.insert(pro.clone(), stopped);
+        }
         if let Some(existing) = self.sessions.get_mut(&pro) {
             if existing.state == "starting" {
                 if container > 0 { existing.container = container; }
@@ -2894,6 +2911,13 @@ mod tests {
         assert!(Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 1, 0).dialog(true, "x").failed("gone").dialogs.is_empty(), "a dead KiCad has none");
     }
     /// KiCad's ET_NOTICE (embed-notice): read from its JSON detail, kept once, dismissed only in the pane, in the session's state.
+    /// Backplane KiCad installed beside the stock KiCad that is up: the next attach starts the selected one, unless work is unsaved.
+    #[test] fn a_kicad_of_another_runtime_than_the_selected_one_is_started_again_unless_unsaved() {
+        let (stock, fork) = ("/usr/bin/kicad-cli", "/h/kicad/10.99.0-bp.12.4/bin/kicad-cli");
+        assert!(runtime_moved(stock, fork, false));
+        assert!(!runtime_moved(stock, fork, true), "unsaved work keeps the KiCad that holds it");
+        assert!(!runtime_moved(fork, fork, false) && !runtime_moved("", fork, false) && !runtime_moved(stock, "", false));
+    }
     #[test] fn a_notice_from_kicad_is_kept_said_and_dismissed() {
         let ev = json!({"type": 29, "frame": {"kind": "FK_PCB"}, "detail": r#"{"kind":"graphics","title":"Could not use OpenGL, falling back to software rendering","detail":"GLX 1.4 missing","error":false}"#});
         let n = notice_of(&ev).unwrap();
