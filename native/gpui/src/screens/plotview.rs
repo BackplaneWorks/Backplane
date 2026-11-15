@@ -319,6 +319,23 @@ pub fn keep_probe(app: &mut Backplane, card: Option<&super::plot::Card>) {
     *PROBE_SENT.lock().unwrap() = Some((text.clone(), std::time::Instant::now()));
     let _ = app.tx.try_send(Command::Action("view-probe".into(), text));
 }
+/// A part clicked on the 3D model (`r` its reference; "" the board or nothing, which clears): the board's probe as the hub writes a part's
+/// (kicad/xprobe.rs `probe_text`), so the schematic and the board light it wherever they are on show, now or later, and the open KiCad selects it.
+pub fn probe_part(app: &mut Backplane, r: &str) {
+    let r = r.replace([';', '\n', '\u{1}'], ",");
+    if r.is_empty() { if app.data["thread"]["viewer"]["probe"].as_str().map_or(false, |p| !p.is_empty()) { keep_probe(app, None); } return }
+    let Some(card) = super::plot::card(&format!("footprint {r};ref={r}")) else { return }; // i18n-ok: a probe's text, not drawn
+    // (what a canvas had tapped is no longer the probe: its own mark goes, the hub's copy lights the part there)
+    for q in [0usize, 1, 2] { let pv = app.screens.pv(q); pv.picked = None; }
+    keep_probe(app, Some(&card));
+    super::xprobe::tapped(app, &card);
+}
+/// The part the probe names, for the 3D model to light ("" none): the one this window just told the hub while the hub's copy is on its way, else the hub's.
+pub fn probed_part(app: &Backplane) -> String {
+    let sent = PROBE_SENT.lock().unwrap().clone().filter(|s| s.1.elapsed() < std::time::Duration::from_secs(3)).map(|s| s.0);
+    let text = sent.unwrap_or_else(|| app.data["thread"]["viewer"]["probe"].as_str().unwrap_or("").to_string());
+    super::plot::card(&text).and_then(|c| c.rows.iter().find(|x| x.0 == "ref" || x.0 == "symbol").map(|x| x.1.clone())).unwrap_or_default()
+}
 /// The probe this window just told the hub (and when): until the hub's copy says the same (or 3 s pass), the hub's older probe is not drawn over it.
 static PROBE_SENT: std::sync::Mutex<Option<(String, std::time::Instant)>> = std::sync::Mutex::new(None);
 /// The pieces of the probed part or connection on the plot `key` on canvas `slot`: a part by its `ref` on the schematic and the board (every unit of it);
@@ -350,7 +367,12 @@ pub fn cross_probe(app: &mut Backplane, slot: usize, card: &super::plot::Card) {
     if card.src.is_empty() { card.src = if slot == 0 { app.screens.plot.frame.as_ref().map(|f| f.key.clone()) } else { panes.get(slot - 1).and_then(|p| p["key"].as_str()).map(str::to_string) }.unwrap_or_default(); }
     let (card, text) = (&card, card_text(&card));
     // (lit here at once: the hub's copy of this probe, when it comes back, finds it already lit)
-    for (s, key) in targets { app.screens.pv(s).probe_at = format!("{key}\u{1}{text}"); probe_one(app, s, &key, card); }
+    for (s, key) in targets {
+        let pv = app.screens.pv(s); pv.probe_at = format!("{key}\u{1}{text}");
+        // (a Split's other pane: what it had tapped or was told before is not the probe any more; its bar names this one)
+        if s != slot { pv.picked = None; pv.card = Some(card.clone()); }
+        probe_one(app, s, &key, card);
+    }
     keep_probe(app, Some(card));
     super::xprobe::tapped(app, card);
 }
