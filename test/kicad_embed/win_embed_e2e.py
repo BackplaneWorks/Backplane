@@ -1295,7 +1295,7 @@ def run_window_suite(h: SuiteHarness) -> int:
                     print("DIAG startup_box " + json.dumps(box), flush=True)
                     h.shot("startup_box")
                     h.check(f"KiCad starts without a box before its first frame (it showed {box['title']!r}: {' | '.join(box['text'])[:200]})", False, box)
-                    break
+                    return h.finish()  # the rest depends on a frame that never came: one failure, named, not sixteen
             for m in h.metrics("client.log"):
                 if m.get("event") != "mark":
                     continue
