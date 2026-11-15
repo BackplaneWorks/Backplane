@@ -1267,7 +1267,7 @@ mod state_tests {
                   json!({"$":"ThreadCreated","id":"t2","project":"","title":"U","at":1})] { event(&mut st,e); }
         let k=super::super::keys::keys(&st,"t1",10,"",None).unwrap(); assert_eq!(k["tools"],json!([]),"{k:?}");
         assert!(k["menu"].as_array().unwrap().iter().all(|i|i["action"]!="row-delete"&&i["action"]!="snooze"));
-        let k=super::super::keys::keys(&st,"t2",10,"",None).unwrap(); assert_eq!(k["tools"].as_array().unwrap().len(),4,"a plain thread keeps them");
+        let k=super::super::keys::keys(&st,"t2",10,"",None).unwrap(); assert_eq!(k["tools"].as_array().unwrap().len(),3,"a plain thread keeps them (Pin, Settle, Fork; Archive is Settle now)");
     }
     #[test] fn a_linked_machines_bots_rooms_and_uberbot_show_here() {
         let mut here=State::new(); here.lean=true;

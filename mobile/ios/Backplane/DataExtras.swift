@@ -14,7 +14,7 @@ struct DataThreadActions: View {
         Group {
             Button(Tr.t(thread.pinned ? "Unpin" : "Pin"), systemImage: thread.pinned ? "pin.slash" : "pin") { Task { await client.threadAct(thread.id, thread.pinned ? "unpin" : "pin") } }
             Button(Tr.t(thread.settled ? "Unsettle" : "Settle"), systemImage: "checkmark.circle") { Task { await client.threadAct(thread.id, thread.settled ? "unsettle" : "settle") } }
-            Button(Tr.t(thread.archived ? "Unarchive" : "Archive"), systemImage: "archivebox") { Task { await client.threadAct(thread.id, thread.archived ? "unarchive" : "archive") } }
+            // no Archive: it is Settle (the hub reads an archive as a settle)
             if !thread.parent.isEmpty { Button(Tr.t("Move to top level"), systemImage: "arrow.up.left") { Task { await client.threadAct(thread.id, "detach") } } }
             Button(Tr.t("Rename"), systemImage: "pencil") { renaming = thread }
             Button(Tr.t("Delete…"), systemImage: "trash", role: .destructive) { deleting = thread }

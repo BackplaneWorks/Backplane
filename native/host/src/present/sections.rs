@@ -113,14 +113,14 @@ fn thread_row(hub: &str, now: u64, p: &MergedProject, f: &Th) -> Value {
         "menu":thread_menu(hub,f)})
 }
 /// A thread row's menu (right click on the desktop, long press on the phones), for a thread of this machine: Pin or Unpin (a pinned thread is a
-/// fixed row under its project, and the clock never settles it), Settle or Unsettle, Archive. `id` is the `thread.act` action a phone sends;
+/// fixed row under its project, and the clock never settles it), Settle or Unsettle (Archive was folded into Settle). `id` is the `thread.act` action a phone sends;
 /// `action` and `value` are what GPUI sends. Another machine's thread has Hide (`hide`) instead; a row from the registry has nothing.
 pub fn thread_menu(hub: &str, f: &Th) -> Value {
     let t = f.t;
     if !t.machine.is_empty() || t.src.is_none() || t.archived { return json!([]) }
     let q = qid(hub, &t.id);
     let it = |id: &str, label: &str| json!({"id":id,"label":label,"action":format!("row-{id}"),"value":q});
-    json!([if t.pinned { it("unpin", "Unpin") } else { it("pin", "Pin") }, if f.settled { it("unsettle", "Unsettle") } else { it("settle", "Settle") }, it("archive", "Archive")])
+    json!([if t.pinned { it("unpin", "Unpin") } else { it("pin", "Pin") }, if f.settled { it("unsettle", "Unsettle") } else { it("settle", "Settle") }])
 }
 /// Where a pinned thread stands under its project: the pins first, in the order they were pinned (a thread of this machine by its pin's time,
 /// one the registry holds after them), then the rest as they came (newest first).
@@ -245,17 +245,22 @@ pub fn new_group_sets(key: &str, name: &str) -> Option<Vec<(String, String)>> {
     let gid = format!("custom:{slug}");
     Some(vec![(format!("sidebar.group.of.{key}"), gid.clone()), (format!("sidebar.group.name.{gid}"), name)])
 }
-/// An archived project (`sidebar.archived.<key>`): in the Archived section whatever its activity, until it is unarchived; a thread of it that
-/// needs the person is still in Needs you. Nothing of it is deleted or stopped.
+/// A project the person made quiet (its menu's Make quiet; the setting kept its old name, `sidebar.archived.<key>`: when): in Quiet with the
+/// projects nothing happened in for QUIET, until something new happens in it or the person brings it back (Back to Active). A thread of it
+/// that needs the person is still in Needs you. Nothing of it is deleted or stopped. (Archive and Quiet were two sections for one wish, the
+/// person said on 2026-11-15: "archive is kinda useless if we have quiet anyway. let's just make them the same".)
 fn archived_at(st: &State, key: &str) -> u64 { num(st, &format!("sidebar.archived.{key}")) }
+/// Whether a project is in Quiet: made quiet with nothing new since, or nothing for QUIET
+fn made_quiet(st: &State, p: &MergedProject) -> bool { let at = archived_at(st, &p.key); at > 0 && p.last_activity <= at }
+fn is_quiet(st: &State, p: &MergedProject, now: u64) -> bool { made_quiet(st, p) || p.last_activity + QUIET <= now }
 
 /// A project row's menu (right click on the desktop, long press on the phones), the same on every client: each item an `id` the clients know,
 /// its words, the hub action and value GPUI sends; Move to group is a submenu of the other groups and New group…; Remove asks first
 /// (`confirm`) and only takes the project off Backplane's list (`project.remove`: its folder and files stay). A project only on linked
 /// machines has no Rename, Badge, Open folder or Remove here.
-pub fn project_menu(st: &State, p: &MergedProject, gid: &str, groups: &Groups) -> Value {
+pub fn project_menu(st: &State, p: &MergedProject, gid: &str, groups: &Groups, now: u64) -> Value {
     let key = &p.key; let pid = pid_of(p);
-    let pinned = pinned_at(st, key) > 0; let archived = archived_at(st, key) > 0;
+    let pinned = pinned_at(st, key) > 0;
     let it = |id: &str, label: &str, action: &str, value: &str| json!({"id":id,"label":label,"action":action,"value":value});
     let mut v = vec![it("pin", if pinned { "Unpin project" } else { "Pin project" }, "project-pin", key), it("swarm", "New swarm", "swarm-new", &pid)];
     if let Some(here) = &p.here {
@@ -268,7 +273,8 @@ pub fn project_menu(st: &State, p: &MergedProject, gid: &str, groups: &Groups) -
     if !gid.is_empty() && !groups_on(st) { sub.insert(0, it("group", "No group", "group-move", &format!("{key}\u{1f}"))); }
     sub.push(it("new-group", "New group\u{2026}", "group-new-start", key));
     v.push(json!({"id":"move","label":"Move to group","action":"","value":"","sub":sub}));
-    v.push(it("archive", if archived { "Unarchive" } else { "Archive" }, "project-archive", key));
+    // Make quiet (Back to Active on one the person made quiet); one quiet by itself has neither
+    if made_quiet(st, p) { v.push(it("quiet", "Back to Active", "project-archive", key)) } else if !is_quiet(st, p, now) { v.push(it("quiet", "Make quiet", "project-archive", key)) }
     if let Some(here) = &p.here { let mut r = it("remove", "Remove project", "proj-remove", here); r["confirm"] = json!(true); v.push(r); }
     json!(v)
 }
@@ -326,27 +332,30 @@ fn project_row(st: &State, c: &Ctx, p: &MergedProject, ths: &[Th], gid: &str, gr
     let mut shown: Vec<&Th> = ths.iter().filter(|f| if q.is_empty() { !f.needs && ((f.show && !f.kid) || (!c.selected.is_empty() && f.t.id == c.selected)) } else { crate::sidebar::word_hit(&f.t.title, q) }).collect();
     // a pinned thread is a fixed row of its project: first, where it was pinned, whatever runs or stops below it (and never cut by UNDER)
     if q.is_empty() { shown.sort_by_key(|f| pin_rank(f)); }
-    // folded by the person: no rows under it (a search opens it, as it opens the section folds); its counts stay on the row
+    // folded by the person: no rows under it but its pins (a search opens it, as it opens the section folds); its counts stay on the row.
+    // A pinned thread is part of the project, not of what comes and goes under it: no fold hides it (the person, 2026-11-15: "pinned thread
+    // should not be collapsible at all ... stay statically there")
     let folded = folded_at(st, &p.key) > 0 && q.is_empty();
     let under: Vec<Value> = shown.iter().take(UNDER).map(|f| thread_row(c.hub, c.now, p, f)).collect();
-    let rows: Vec<Value> = if folded { vec![] } else { under.clone() };
+    let pins = shown.iter().take(UNDER).filter(|f| f.t.pinned).count();
+    let rows: Vec<Value> = if folded { under[..pins].to_vec() } else { under.clone() };
     r["id"] = json!(qid(c.hub, &pid_of(p)));
     r["title"] = json!(p.name);
     r["pinned"] = json!(pinned_at(st, &p.key) > 0);
     r["threads"] = json!(rows); r["more"] = json!(ths.len().saturating_sub(rows.len()));
     // threads of it with no row in the sidebar (settled, or past the first rows): on its page, counted on its row so none seems lost
-    r["rest"] = json!(ths.iter().filter(|f| !f.needs && !f.kid && !f.t.title.is_empty()).count().saturating_sub(if folded { 0 } else { shown.len().min(UNDER) }));
+    r["rest"] = json!(ths.iter().filter(|f| !f.needs && !f.kid && !f.t.title.is_empty()).count().saturating_sub(rows.len()));
     // its live swarms, above its threads (a swarm that needs the person is in Needs you, not repeated here)
     let sw = swarms_of(p, c);
     r["running"] = json!(running + sw.iter().filter(|x| x.1 == "running").count());
     r["needsCount"] = json!(needs + sw.iter().filter(|x| x.1 != "running").count());
     let live: Vec<Value> = sw.into_iter().filter(|x| x.1 == "running").map(|x| x.0).collect();
     // the fold: `fold` the action a chevron sends (with `nav`), `folded` its state, `under` how many rows it hides or would hide (no chevron at 0, open)
-    r["fold"] = json!("project-fold"); r["folded"] = json!(folded); r["under"] = json!(under.len() + live.len());
+    r["fold"] = json!("project-fold"); r["folded"] = json!(folded); r["under"] = json!(under.len() - pins + live.len());
     r["swarms"] = json!(if folded { vec![] } else { live });
     r["group"] = json!(gid);
-    r["archived"] = json!(archived_at(st, &p.key) > 0);
-    r["menu"] = project_menu(st, p, gid, groups);
+    r["archived"] = json!(made_quiet(st, p)); r["quiet"] = json!(is_quiet(st, p, c.now));
+    r["menu"] = project_menu(st, p, gid, groups, c.now);
     r["nav"] = json!(p.key);
     // the machines' dots: one per machine that has it, dim when away or off
     // every machine that has it is off or away: the row is drawn dimmed (lane I's `off`), and still opens its page (the registry lists its threads)
@@ -396,7 +405,6 @@ pub fn build(st: &State, rows: &[MergedProject], bub: &Value, c: &Ctx) -> Value 
     if !needs.is_empty() { out.push(json!({"id":"needs","kind":"threads","title":"Needs you","count":needs.len(),"rows":needs.into_iter().map(|x| x.2).collect::<Vec<_>>()})); }
     // the projects: pinned, active, by group, quiet
     let (mut pinned, mut active, mut quiet): (Vec<(u64, Value)>, Vec<(u64, Value)>, Vec<Value>) = (vec![], vec![], vec![]);
-    let mut archived: Vec<(u64, Value)> = vec![];
     let mut groups: Vec<(String, String, Vec<Value>)> = vec![];
     let all = Groups::of(st, rows);
     let held = rows.iter().zip(&facts_of).find(|(_, ths)| ths.iter().any(|f| f.t.id == c.selected)).map(|(p, _)| p.key.clone()).unwrap_or_default();
@@ -407,10 +415,9 @@ pub fn build(st: &State, rows: &[MergedProject], bub: &Value, c: &Ctx) -> Value 
         let pin = pinned_at(st, &p.key);
         let shows = ths.iter().any(|f| f.show && !f.kid) || row["swarms"].as_array().map_or(false, |a| !a.is_empty()) || row["needsCount"].as_u64().unwrap_or(0) > 0;
         if pin > 0 { pinned.push((pin, row)); continue }
-        // archived: out of the way in Archived at once, whatever runs in it or is open (its asks are in Needs you all the same; its section
-        // opens by itself while the open thread is listed under it, `fold_section`)
-        let arch = archived_at(st, &p.key);
-        if arch > 0 { archived.push((arch, row)); continue }
+        // made quiet: in Quiet at once, until something new happens in it (its asks are in Needs you all the same; the section opens by
+        // itself while the open thread is listed under it, `fold_section`)
+        if made_quiet(st, p) { quiet.push(row); continue }
         if shows || p.last_activity + ACTIVE > c.now || p.key == held { active.push((p.last_activity, row)); continue }
         if p.last_activity + QUIET <= c.now { quiet.push(row); continue }
         // in no group (groups are off, the default): it stays in the one list, below what is newer
@@ -423,10 +430,7 @@ pub fn build(st: &State, rows: &[MergedProject], bub: &Value, c: &Ctx) -> Value 
     out.push(json!({"id":"active","kind":"projects","title":"Active","count":active.len(),"rows":active.into_iter().map(|x| x.1).collect::<Vec<_>>()}));
     groups.sort_by(|a, b| a.1.to_lowercase().cmp(&b.1.to_lowercase()));
     for (gid, name, rs) in groups { out.push(fold_section(&format!("group:{gid}"), &name, rs, c, json!({"group":gid,"rename":true}))); }
-    if !quiet.is_empty() { out.push(fold_section("quiet", "Quiet", quiet, c, json!({"hint":"Nothing for two weeks"}))); }
-    // Archived, last: the projects the person put away (a project's menu, Archive), the newest first; each row's menu has Unarchive
-    archived.sort_by(|a, b| b.0.cmp(&a.0));
-    if !archived.is_empty() { out.push(fold_section("archived", "Archived", archived.into_iter().map(|x| x.1).collect(), c, json!({"hint":"Put away. Nothing is deleted"}))); }
+    if !quiet.is_empty() { out.push(fold_section("quiet", "Quiet", quiet, c, json!({"hint":"Nothing for two weeks, or made quiet"}))); }
     json!(out)
 }
 
@@ -453,7 +457,7 @@ pub fn page(st: &State, rows: &[MergedProject], key: &str, c: &Ctx, done_open: b
     let older: Vec<Value> = if done.len() > PAGE { done.split_off(PAGE) } else { vec![] };
     let (m, older_open) = (n.saturating_sub(PAGE), c.open.contains("page-older"));
     let mut head = super::merged::row_json(p);
-    head["pinned"] = json!(pinned_at(st, &p.key) > 0); head["group"] = json!(gid); head["groupName"] = json!(all.name(st, &gid)); head["menu"] = project_menu(st, p, &gid, &all);
+    head["pinned"] = json!(pinned_at(st, &p.key) > 0); head["group"] = json!(gid); head["groupName"] = json!(all.name(st, &gid)); head["menu"] = project_menu(st, p, &gid, &all, c.now);
     head["newThread"] = json!(p.here.clone().unwrap_or_default());
     // what a client's page head draws (the shape of a sidebar project row): its id here, else on the newest machine
     head["id"] = json!(qid(c.hub, &pid_of(p))); head["title"] = json!(p.name); head["root"] = json!(p.folder); head["nav"] = json!(p.key);
@@ -539,10 +543,10 @@ pub fn act(st: &State, rows: &[MergedProject], action: &str, value: &str, drafts
             if !known(value) { return None }
             Some(Act { drafts: vec![("@ren".into(), value.into()), ("@ren.kind".into(), "group-new".into()), ("@ren.inline".into(), String::new()), ("@ren.owner".into(), String::new()), ("@f.title".into(), String::new())], ..none() })
         }
-        // Archive: the project goes to Archived (and is unpinned) until Unarchive; nothing of it is deleted
+        // Make quiet: the project goes to Quiet (and is unpinned) until something new happens in it or Back to Active; nothing of it is deleted
         "project-archive" => {
             if !known(value) { return None }
-            if archived_at(st, value) > 0 { return Some(Act { sets: vec![(format!("sidebar.archived.{value}"), String::new())], ..none() }) }
+            if rows.iter().find(|p| p.key == value).map_or(false, |p| made_quiet(st, p)) { return Some(Act { sets: vec![(format!("sidebar.archived.{value}"), String::new())], ..none() }) }
             Some(Act { sets: vec![(format!("sidebar.archived.{value}"), now.to_string()), (format!("sidebar.pin.{value}"), String::new())], ..none() })
         }
         _ => None,

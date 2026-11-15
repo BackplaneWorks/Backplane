@@ -159,7 +159,8 @@ impl Model {
             "SessionSet" => { if let Some(th) = self.threads.get_mut(&t(&e.id)) { th.session = t(&e.session) } return }
             "WorktreeSet" => { if let Some(th) = self.threads.get_mut(&t(&e.id)) { th.branch = t(&e.branch); th.worktree = t(&e.worktree) } return }
             "ProviderSet" => { if let Some(th) = self.threads.get_mut(&t(&e.id)) { th.provider = t(&e.provider); th.model = t(&e.model) } return }
-            "ThreadArchived" => { if let Some(th) = self.threads.get_mut(&t(&e.id)) { th.archived = e.archived.unwrap_or(true) } return }
+            // an archive is read as a settle (state/mod.rs says why): the thread stays listed
+            "ThreadArchived" => return,
             "ThreadDeleted" => { if let Some(th) = self.threads.get_mut(&t(&e.id)) { th.deleted = true } return }
             _ => return,
         };

@@ -7,7 +7,7 @@ use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
 
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
-pub struct T { pub pinned: bool, pub forced: u8, pub settled_at: u64, pub unsettled_at: u64, pub session: String, pub project: String, pub title: String, pub provider: String, pub model: String, pub branch: String, pub worktree: String, pub env: String, pub turn: String,
+pub struct T { pub pinned: bool, pub pinned_at: u64, pub forced: u8, pub settled_at: u64, pub unsettled_at: u64, pub session: String, pub project: String, pub title: String, pub provider: String, pub model: String, pub branch: String, pub worktree: String, pub env: String, pub turn: String,
     pub archived: bool, pub deleted: bool, pub runtime: String, pub interaction: String }
 #[derive(Clone, Debug, Default, serde::Serialize, serde::Deserialize)]
 pub struct P { pub title: String, pub root: String, pub at: u64, pub removed: bool }
@@ -74,7 +74,8 @@ impl Fold {
             "ThreadCreated" => { self.threads.insert(g("id"), T { project: g("project"), title: g("title"), env: g("env"), branch: g("branch"), worktree: g("worktree"), provider: g("provider"), model: g("model"),
                 turn: "idle".into(), runtime: "full-access".into(), interaction: "default".into(), ..Default::default() }); }
             "ThreadRenamed" => if let Some(x) = self.threads.get_mut(&g("id")) { x.title = g("title") },
-            "ThreadArchived" => if let Some(x) = self.threads.get_mut(&g("id")) { x.archived = v.get("archived").and_then(Value::as_bool).unwrap_or(false) },
+            // an archive is read as a manual settle (state/mod.rs says why)
+            "ThreadArchived" => if let Some(x) = self.threads.get_mut(&g("id")) { if v.get("archived").and_then(Value::as_bool).unwrap_or(false) { x.forced = 1; x.settled_at = x.settled_at.max(at); x.pinned = false } },
             "ThreadDeleted" => if let Some(x) = self.threads.get_mut(&g("id")) { x.deleted = true },
             "ThreadForked" => { self.forks.insert(g("id"), g("source")); }
             "ThreadSnoozed" => self.navs.entry(g("id")).or_default().until = v.get("until").and_then(Value::as_u64).unwrap_or(0),
@@ -102,7 +103,7 @@ impl Fold {
                     let x = self.threads.get_mut(&th).unwrap(); x.provider = g("provider"); x.model = g("model"); x.session = new_se;
                 }
             }
-            "ThreadPinned" => if let Some(x) = self.threads.get_mut(&g("id")) { x.pinned = v.get("pinned").and_then(Value::as_bool).unwrap_or(false) },
+            "ThreadPinned" => if let Some(x) = self.threads.get_mut(&g("id")) { let b = v.get("pinned").and_then(Value::as_bool).unwrap_or(false); if b && !x.pinned { x.pinned_at = at } x.pinned = b },
             // Thread.settled: a manual settle forces the shelf, clears the pin; unsettled puts it back on top of the active shelf
             "ThreadSettled" => if let Some(x) = self.threads.get_mut(&g("id")) { if v.get("manual").and_then(Value::as_bool).unwrap_or(false) { x.forced = 1 } x.settled_at = at; x.pinned = false },
             "ThreadUnsettled" => if let Some(x) = self.threads.get_mut(&g("id")) { x.forced = 2; x.unsettled_at = x.settled_at.max(at) },

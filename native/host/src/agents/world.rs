@@ -112,10 +112,11 @@ impl World {
             "ThreadRenamed" => if let Some(x) = self.threads.get_mut(&g("id")) { x.title = g("title") },
             "AskOpened" => { self.asks.insert(g("id"), Ask { thread: g("thread"), kind: g("kind"), tool: g("tool"), detail: g("detail"), options: g("options") }); }
             "AskClosed" => if let Some(a) = self.asks.remove(&g("id")) { if a.kind == "approval" && g("answer") == "session" { self.sessions.insert((a.thread, a.tool)); } },
-            "ThreadArchived" => if let Some(x) = self.threads.get_mut(&g("id")) { x.archived = v.get("archived").and_then(Value::as_bool).unwrap_or(false) },
+            // an archive is read as a manual settle (state/mod.rs says why); what the thread held goes as before, until it is brought back
+            "ThreadArchived" => if let Some(x) = self.threads.get_mut(&g("id")) { x.archived = v.get("archived").and_then(Value::as_bool).unwrap_or(false); if x.archived { x.settled = true } },
             "ThreadDeleted" => if let Some(x) = self.threads.get_mut(&g("id")) { x.deleted = true },
             "ThreadSettled" => if let Some(x) = self.threads.get_mut(&g("id")) { x.settled = true },
-            "ThreadUnsettled" | "ThreadWoke" => if let Some(x) = self.threads.get_mut(&g("id")) { x.settled = false },
+            "ThreadUnsettled" | "ThreadWoke" => if let Some(x) = self.threads.get_mut(&g("id")) { x.settled = false; x.archived = false },
             "TurnChanged" => if let Some(x) = self.threads.get_mut(&g("thread")) { let st = g("state"); if st == "running" && x.turn != "running" { x.running_at = v.get("at").and_then(Value::as_u64).unwrap_or(0); x.why.clear() } x.turn = st },
             "MessagePosted" => if let Some(x) = self.threads.get_mut(&g("thread")) {
                 x.newest = g("msg");
