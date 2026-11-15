@@ -1101,6 +1101,15 @@ fn test_holding() -> bool {
 }
 /// An Edit pressed before the viewer knew its file: the thread, and when (kept 60 s).
 static EDIT_PENDING: std::sync::Mutex<Option<(String, std::time::Instant)>> = std::sync::Mutex::new(None);
+/// BACKPLANE_KICAD_DEBUG: each change of what the Edit button says ("edit", "opening", "view"), as drawn (a screenshot's timing cannot
+/// prove the "Opening…" of an early press: Carbon, bp-win key-hold runs, Nov 14).
+pub fn log_edit_label(kind: &str) {
+    static LAST: std::sync::Mutex<&'static str> = std::sync::Mutex::new("");
+    if std::env::var_os("BACKPLANE_KICAD_DEBUG").is_none() { return }
+    let k: &'static str = match kind { "opening" => "opening", "view" => "view", _ => "edit" };
+    let mut l = LAST.lock().unwrap();
+    if *l != k { *l = k; eprintln!("GPUI_LOG {}", json!({"kicad_edit_label": k})); }
+}
 /// Whether an Edit press waits on this thread's first picture (the button says Opening…).
 pub fn edit_pending(thread: &str) -> bool { EDIT_PENDING.lock().unwrap().as_ref().is_some_and(|(t, at)| t == thread && at.elapsed() < std::time::Duration::from_secs(60)) }
 /// What to do with a kept press on a picture: Edit now (the viewer has a target), keep waiting, or drop it (another thread, or stale).
