@@ -75,17 +75,19 @@ object Mgmt {
     fun objs(a: JSONArray?): List<JSONObject> = (0 until (a?.length() ?: 0)).mapNotNull { a!!.optJSONObject(it) }
 }
 
-/** The tabs under the drawing, and the open panel above them. `project`: the viewer's project path (the root is enough). */
+/** The tabs under the drawing, and the open panel above them. `project`: what the panels are of (the root is enough; a board picked in the viewer: the
+ *  hub's `project` of its row). `home`: the viewer's project, which the open panel is kept by, so it stays open over a change of board. */
 @Composable
-internal fun MgmtHost(project: String, modifier: Modifier = Modifier) {
+internal fun MgmtHost(project: String, home: String = project, modifier: Modifier = Modifier) {
     val online = DataClient.conn == DataClient.Conn.ONLINE
     LaunchedEffect(project, online) { if (project.isNotEmpty() && online && DataClient.has("mgmt")) runCatching { DataClient.mgmtWatch(project) } }
     val d = DataClient.mgmtDigest
     val state = if (d.isEmpty()) null else DataClient.mgmt["mgmt.state.$d"]
     // the panels this app draws (a panel the hub has that the phone has no view for stays on the desktop)
     val panels = Mgmt.objs(state?.optJSONArray("panels")).filter { it.optString("id") in setOf("bom", "checks", "life", "fab") }
+    // (kept above the return: while another board's panels come there are none for a moment, and the open one must not be forgotten)
+    var open by rememberSaveable(home) { mutableStateOf("") }
     if (panels.isEmpty()) return
-    var open by rememberSaveable(project) { mutableStateOf("") }
     Column(modifier.fillMaxWidth()) {
         if (open.isNotEmpty()) {
             Column(Modifier.fillMaxWidth().fillMaxHeight(.55f).background(dcs.background).testTag("mgmt.panel.$open")) {
@@ -121,7 +123,7 @@ private fun BomPanel() {
     val lines = Mgmt.objs(d.optJSONArray("lines"))
     var q by remember { mutableStateOf("") }
     var editing by remember { mutableStateOf<JSONObject?>(null) }
-    var sel by remember { mutableStateOf("") }
+    var sel by remember(DataClient.mgmtDigest) { mutableStateOf("") } // another board's BOM: no row of the last one stays picked
     Column(Modifier.fillMaxSize()) {
         // what it holds, where from, the cost a board, and the filter
         Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {

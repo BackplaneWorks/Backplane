@@ -195,12 +195,14 @@ pub fn board_files(root: &str, board_default: &str) -> Value {
 }
 /// The boards a phone's viewer offers (`viewer.files` → `boards`): the hub's own list (`boards.list`, kicad/boards.rs `pick`: paths from the root, the default
 /// first), two or more, as the desktop's Boards menu lists them. A row's `pcb` and `sch` are the files its pages watch (the schematic is the one beside the
-/// board); the project's own board (`default`) has none, so its pages follow the project. Empty for one board or none: no picker.
+/// board); the project's own board (`default`) has none, so its pages follow the project. `project` is what the panels beside that board are of (BOM,
+/// Checks, Lifecycle, Fab: the path `mgmt.watch` takes): the board's own file, so its folder's project, or the root for the project's own board; the desktop
+/// asks for the file its viewer shows the same way (screens/mgmt.rs `project_for`). Empty for one board or none: no picker.
 pub fn board_rows(root: &str, list: &[String], default: &str) -> Value {
     if list.len() < 2 || root.is_empty() { return json!([]) }
     Value::Array(list.iter().filter(|p| p.ends_with(".kicad_pcb") && !p.starts_with('/') && !p.split('/').any(|x| x == "..")).map(|p| {
         let own = !default.is_empty() && p == default; let stem = p.strip_suffix(".kicad_pcb").unwrap_or(p);
-        json!({"label":stem,"value":p,"default":own,"pcb":if own { String::new() } else { format!("{root}/{p}") },"sch":if own { String::new() } else { format!("{root}/{stem}.kicad_sch") }})
+        json!({"label":stem,"value":p,"default":own,"pcb":if own { String::new() } else { format!("{root}/{p}") },"sch":if own { String::new() } else { format!("{root}/{stem}.kicad_sch") },"project":if own { root.to_string() } else { format!("{root}/{p}") }})
     }).collect())
 }
 
@@ -213,8 +215,8 @@ mod tests {
         let l = |xs: &[&str]| xs.iter().map(|x| x.to_string()).collect::<Vec<_>>();
         assert_eq!(board_rows("/p", &l(&["a.kicad_pcb"]), "a.kicad_pcb"), json!([]), "one board: no picker");
         let r = board_rows("/p", &l(&["a.kicad_pcb", "docs/ref/B.kicad_pcb", "../x.kicad_pcb"]), "a.kicad_pcb");
-        assert_eq!(r, json!([{"label":"a","value":"a.kicad_pcb","default":true,"pcb":"","sch":""},
-            {"label":"docs/ref/B","value":"docs/ref/B.kicad_pcb","default":false,"pcb":"/p/docs/ref/B.kicad_pcb","sch":"/p/docs/ref/B.kicad_sch"}]), "the project's own follows the project; a path out of the folder is no row");
+        assert_eq!(r, json!([{"label":"a","value":"a.kicad_pcb","default":true,"pcb":"","sch":"","project":"/p"},
+            {"label":"docs/ref/B","value":"docs/ref/B.kicad_pcb","default":false,"pcb":"/p/docs/ref/B.kicad_pcb","sch":"/p/docs/ref/B.kicad_sch","project":"/p/docs/ref/B.kicad_pcb"}]), "the project's own follows the project, and so do its panels; a picked board's panels are of its own file; a path out of the folder is no row");
         assert_eq!(board_rows("/p", &l(&["x/a.kicad_pcb", "y/b.kicad_pcb"]), "")[0]["pcb"], "/p/x/a.kicad_pcb", "no board of its own: every row names its file");
     }
     use super::*;

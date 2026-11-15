@@ -909,6 +909,7 @@ object DataClient {
     /** the project the viewer shows: its digest (the keys' end) and path, from `mgmt.watch` */
     var mgmtDigest by mutableStateOf(""); private set
     var mgmtProject by mutableStateOf(""); private set
+    private var mgmtAsked = ""
     /** the parts a management row asks the board or schematic to light (a BOM line's references, a finding's parts) */
     var lightRefs by mutableStateOf<List<String>>(emptyList())
     /** the thread the viewer is open on ("Fix with agent" sends there) */
@@ -923,8 +924,10 @@ object DataClient {
     fun mgmtData(id: String): JSONObject? = if (mgmtDigest.isEmpty()) null else mgmt["mgmt.$id.$mgmtDigest"]
     /** `mgmt.watch`: the project's digest, its panels' state and what they have published (the info frames follow it). */
     suspend fun mgmtWatch(project: String) {
+        // another project (a board picked in the viewer): the last one's panels are not drawn while this one's come, or if it has none
+        if (project != mgmtAsked) { mgmtAsked = project; mgmtDigest = ""; mgmtProject = "" }
         val r = call("mgmt.watch", JSONObject().put("project", project))
-        val d = r.optString("digest"); if (d.isEmpty()) return
+        val d = r.optString("digest"); if (d.isEmpty() || project != mgmtAsked) return
         val m = mgmt.toMutableMap()
         r.optJSONObject("state")?.let { m["mgmt.state.$d"] = it }
         r.optJSONObject("data")?.let { data -> data.keys().forEach { k -> data.optJSONObject(k)?.let { m["mgmt.$k.$d"] = it } } }
@@ -938,13 +941,14 @@ object DataClient {
 
     // ---- viewers, files, browser (features viewers, files, browser; native/host/src/data/ext.rs)
     /** A board of the viewer's picker (the hub's `boards`): `pcb` and `sch` are the paths its pages watch, "" for the project's own board (`default`), whose pages follow the project. */
-    data class BoardRow(val label: String, val value: String, val default: Boolean, val pcb: String, val sch: String)
+    /** `project`: what the panels beside this board are of (`mgmt.watch`), from the hub; an older hub sends none, and the board's file (or the root) stands in. */
+    data class BoardRow(val label: String, val value: String, val default: Boolean, val pcb: String, val sch: String, val project: String = "")
     data class ProjectFiles(val root: String, val pcb: String, val sch: String, val boards: List<BoardRow> = emptyList()) {
         /** The board on show: the one picked, else the project's own, else the first listed; null when the hub lists no picker (one board or none). */
         fun board(picked: String): BoardRow? = boards.firstOrNull { it.value == picked } ?: boards.firstOrNull { it.default } ?: boards.firstOrNull()
     }
     suspend fun viewerFiles(tid: String): ProjectFiles { val r = call("viewer.files", JSONObject().put("thread", tid))
-        val boards = r.optJSONArray("boards")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { BoardRow(it.optString("label"), it.optString("value"), it.optBoolean("default"), it.optString("pcb"), it.optString("sch")) } }.orEmpty()
+        val boards = r.optJSONArray("boards")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { BoardRow(it.optString("label"), it.optString("value"), it.optBoolean("default"), it.optString("pcb"), it.optString("sch"), it.optString("project")) } }.orEmpty()
         return ProjectFiles(r.optString("root"), r.optString("pcb"), r.optString("sch"), boards) }
     fun stopWatch(tid: String) { scope.launch { runCatching { call("viewer.watch", JSONObject().put("thread", tid).put("kind", "")) } } }
     /** A viewer (tab, file, thread) opens: the last one's plots go at once and late ones for it are dropped (PlotStore.begin/shown);

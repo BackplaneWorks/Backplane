@@ -14,10 +14,11 @@ struct DEntries: Decodable { var entries: [DEntryRow]
     enum CodingKeys: String, CodingKey { case entries }
     init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); entries = (try? c.decode([DEntryRow].self, forKey: .entries)) ?? [] } }
 /// A board of the viewer's picker (the hub's `boards`): `pcb` and `sch` are the paths its pages watch, "" for the project's own board (`isDefault`), whose pages follow the project.
-struct DBoardRow: Decodable, Equatable, Identifiable { var label: String; var value: String; var isDefault: Bool; var pcb: String; var sch: String
+/// `project`: what the panels beside this board are of (the hub's `mgmt.watch` path), for the panels when this app draws them.
+struct DBoardRow: Decodable, Equatable, Identifiable { var label: String; var value: String; var isDefault: Bool; var pcb: String; var sch: String; var project: String
     var id: String { value }
-    enum CodingKeys: String, CodingKey { case label, value, isDefault = "default", pcb, sch }
-    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); label = c.str(.label); value = c.str(.value); isDefault = c.bool(.isDefault); pcb = c.str(.pcb); sch = c.str(.sch) } }
+    enum CodingKeys: String, CodingKey { case label, value, isDefault = "default", pcb, sch, project }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); label = c.str(.label); value = c.str(.value); isDefault = c.bool(.isDefault); pcb = c.str(.pcb); sch = c.str(.sch); project = c.str(.project) } }
 struct DProjectFiles: Decodable { var root: String; var pcb: String; var sch: String; var boards: [DBoardRow]
     enum CodingKeys: String, CodingKey { case root, pcb, sch, boards }
     init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); root = c.str(.root); pcb = c.str(.pcb); sch = c.str(.sch); boards = (try? c.decode([DBoardRow].self, forKey: .boards)) ?? [] }
