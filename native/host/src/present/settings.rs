@@ -686,18 +686,32 @@ fn mcp_patch(p: serde_json::Map<String, Value>) -> Value {
     json!({"drafts": d})
 }
 
+/// One page's rows (without the way back).
+fn rows_of(st: &State, session: &Value, info: &Value, p: &str) -> Vec<Value> {
+    match p { "appearance" => appearance(st), "threads" => threads(st, session), "notifications" => notifications(st, session, info), "about" => about(st, info), "setup" => super::onboard::settings_rows(st, session, info, &super::onboard::Client::of(info), &super::onboard::home_dir()), "import" => super::onboard::import_rows(info), "agents" => { let mut a = agents(st, info); a.extend(fallback(st, info)); a }, "writing" => writing(st, info), "cad" => cad(st, session, info), "keys" => keys(st, session, info), "ordering" => ordering(st), "network" => network(st, info), "devices" => devices(st, session, info), "machines" => { let mut r = crate::net::machinespage::rows(&info["machines"], &|k| draft(session, &format!("@f.{k}")).to_string());
+            r.extend(crate::net::homemove::rows(!set(st, "uber.bot", "").is_empty(), set(st, "home.at", ""), info["home.move"].as_str().unwrap_or(""), &info["machines"]["linked"]));
+            r.extend(crate::net::alwayson::rows::machines_rows(info, set(st, crate::net::alwayson::other::STAYS_ON, "") == "on"));
+            r.extend(super::signin_there::open_rows(info)); r }, "timezone" => timezone(st, session), "rules" => rules(st, session), "privacy" => privacy(st, info), "voice" => voice(st, session, info), "ring" => ring(st, session, info), "usage" => usage(st), "developer" => developer(st), "mcp" => mcp(session, info), _ => vec![] }
+}
+/// What the Settings search looks through for each page besides its title: its rows' labels as a fresh hub shows them, one a line, made once.
+/// (Setup and Import read the disk and are found by their titles.)
+fn page_words(id: &str) -> &'static str {
+    static W: OnceLock<Vec<(&'static str, String)>> = OnceLock::new();
+    let all = W.get_or_init(|| { let (st, none) = (State::default(), json!({}));
+        PAGES.iter().map(|(id, _)| (*id, if matches!(*id, "setup" | "import") { String::new() } else { rows_of(&st, &none, &none, id).iter().filter_map(|r| r["label"].as_str()).filter(|l| !l.is_empty()).collect::<Vec<_>>().join("\n") })).collect() });
+    all.iter().find(|(p, _)| *p == id).map_or("", |(_, w)| w.as_str())
+}
+
 /// The rows shown while the dialog is open: the page menu (no page chosen) or one page, its first row the way back.
 pub fn view(st: &State, session: &Value, info: &Value) -> Value {
     let p = page(session);
     let rows = if p.is_empty() {
-        PAGES.iter().map(|(id, title)| row(title, "", vec![btn(&format!("{title} ›"), "settings-page", id, false)])).collect()
+        // `words`: what the page holds, for a client's search (the desktop's nav finds "Group projects" under Appearance)
+        PAGES.iter().map(|(id, title)| { let mut r = row(title, "", vec![btn(&format!("{title} ›"), "settings-page", id, false)]); r["words"] = json!(page_words(id)); r }).collect()
     } else {
         let title = PAGES.iter().find(|(id, _)| *id == p).map_or("", |(_, t)| *t);
         let mut r = vec![row(title, "", vec![btn("‹ Settings", "settings-page", "", false)])];
-        r.extend(match p { "appearance" => appearance(st), "threads" => threads(st, session), "notifications" => notifications(st, session, info), "about" => about(st, info), "setup" => super::onboard::settings_rows(st, session, info, &super::onboard::Client::of(info), &super::onboard::home_dir()), "import" => super::onboard::import_rows(info), "agents" => { let mut a = agents(st, info); a.extend(fallback(st, info)); a }, "writing" => writing(st, info), "cad" => cad(st, session, info), "keys" => keys(st, session, info), "ordering" => ordering(st), "network" => network(st, info), "devices" => devices(st, session, info), "machines" => { let mut r = crate::net::machinespage::rows(&info["machines"], &|k| draft(session, &format!("@f.{k}")).to_string());
-            r.extend(crate::net::homemove::rows(!set(st, "uber.bot", "").is_empty(), set(st, "home.at", ""), info["home.move"].as_str().unwrap_or(""), &info["machines"]["linked"]));
-            r.extend(crate::net::alwayson::rows::machines_rows(info, set(st, crate::net::alwayson::other::STAYS_ON, "") == "on"));
-            r.extend(super::signin_there::open_rows(info)); r }, "timezone" => timezone(st, session), "rules" => rules(st, session), "privacy" => privacy(st, info), "voice" => voice(st, session, info), "ring" => ring(st, session, info), "usage" => usage(st), "developer" => developer(st), "mcp" => mcp(session, info), _ => vec![] });
+        r.extend(rows_of(st, session, info, p));
         r
     };
     json!({"rows": rows})
@@ -1191,6 +1205,13 @@ mod tests {
         assert_eq!(saved["rows"].as_array().unwrap().iter().find(|r| r["label"] == "Address").unwrap()["fields"][0]["value"], "https://old");
     }
     fn page_rows(s: &State, page: &str, info: Value) -> Vec<Value> { view(s, &json!({"drafts": {"@settings.page": page}}), &info)["rows"].as_array().unwrap().clone() }
+    #[test] fn the_menu_rows_carry_what_each_page_holds_for_the_search() {
+        let v = view(&st(&[]), &json!({}), &json!({}));
+        let words = |page: &str| v["rows"].as_array().unwrap().iter().find(|r| r["buttons"][0]["value"] == page).unwrap()["words"].as_str().unwrap().to_string();
+        assert!(words("appearance").lines().any(|l| l == "Theme") && words("appearance").lines().any(|l| l == "Thread list"), "{}", words("appearance"));
+        assert!(!words("threads").contains("Thread list") && !words("threads").is_empty());
+        assert!(v["rows"].as_array().unwrap().iter().all(|r| r["words"].is_string() && r["note"] == ""), "words are not a note: nothing more is drawn");
+    }
     #[test] fn ordering_hides_its_estimates_when_off() {
         let on = page_rows(&st(&[]), "ordering", json!({})); assert_eq!(on[3]["buttons"][0]["on"], true);
         let off = page_rows(&st(&[("order.enabled", "off")]), "ordering", json!({}));
