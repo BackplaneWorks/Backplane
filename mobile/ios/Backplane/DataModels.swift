@@ -314,8 +314,9 @@ struct DPicker: Decodable { var chip: String; var sections: [DPickerSection]
 struct DPickerReply: Decodable { var picker: DPicker }
 /// Buy it (feature buy, `thread.buy`): the desktop header's button for a thread, in the hub's words; `order.buy` answers the buy thread made.
 struct DBuy: Decodable, Equatable { var label = ""; var tip = ""
-    enum K: String, CodingKey { case label, tip }
-    init(from d: Decoder) throws { let c = try d.container(keyedBy: K.self); label = c.str(.label); tip = c.str(.tip) } }
+    var thread = "" // a project page's Buy it: the thread the hub buys from (`thread.buy {project}`)
+    enum K: String, CodingKey { case label, tip, thread }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: K.self); label = c.str(.label); tip = c.str(.tip); thread = c.str(.thread) } }
 struct DBuyReply: Decodable { var buy: DBuy?
     enum K: String, CodingKey { case buy }
     init(from d: Decoder) throws { let c = try d.container(keyedBy: K.self); buy = try? c.decode(DBuy.self, forKey: .buy) } }

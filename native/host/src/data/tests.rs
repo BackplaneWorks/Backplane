@@ -573,6 +573,8 @@ impl RpcHandler for FakeStar {
     let r = ask(&mut ws, 4, "queue.act", json!({"thread":"t1","action":"q-up","value":"m1"})).await; assert_eq!(r["ok"], false, "q-up needs a place: {r}");
     let r = ask(&mut ws, 5, "thread.buy", json!({"thread":"t1"})).await; assert_eq!(r["result"]["buy"], Value::Null, "no KiCad project, nothing to buy: {r}");
     let r = ask(&mut ws, 6, "order.buy", json!({})).await; assert_eq!(r["ok"], false, "{r}");
+    // a project's page asks by project: the same answer, here nothing to buy
+    let r = ask(&mut ws, 8, "thread.buy", json!({"project":"p1"})).await; assert_eq!((r["ok"].as_bool(), &r["result"]["buy"]), (Some(true), &Value::Null), "{r}");
     let r = ask(&mut ws, 7, "threads.list", json!({"project":"p1"})).await;
     assert!(r["result"]["threads"].as_array().unwrap().iter().all(|t| t["status"].is_string()), "every thread says its dot's word: {r}");
 }

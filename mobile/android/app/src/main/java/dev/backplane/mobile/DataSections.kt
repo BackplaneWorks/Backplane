@@ -23,6 +23,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
+import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -187,7 +188,19 @@ fun ProjectPageScreen(p: DSecRow, open: (String) -> Unit, newThread: (String) ->
         DBar(p.title, back)
         // New thread in this project: its New thread screen says where it runs and has the machine picker (projects.list's row of the same key)
         DataClient.projects.firstOrNull { it.key.isNotEmpty() && it.key == p.key }?.let { pr ->
-            DMono("+ " + Msg.android_thread_new_in(pr.title), dcs.primary, 12, Modifier.fillMaxWidth().clickable { newThread(pr.id) }.padding(horizontal = 12.dp, vertical = 10.dp).testTag("project.page.new"))
+            // Buy it beside New thread, as a thread's header has it: the hub's button for this project; a press makes the buy thread and opens it
+            var buy by remember(pr.id) { mutableStateOf<DataClient.Buy?>(null) }; var buying by remember(pr.id) { mutableStateOf(false) }; var failed by remember(pr.id) { mutableStateOf("") }
+            val scope = rememberCoroutineScope()
+            LaunchedEffect(pr.id, DataClient.conn) { if (DataClient.conn == DataClient.Conn.ONLINE) runCatching { DataClient.buyOfProject(pr.id) }.onSuccess { buy = it } }
+            Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                DMono("+ " + Msg.android_thread_new_in(pr.title), dcs.primary, 12, Modifier.weight(1f).clickable { newThread(pr.id) }.padding(horizontal = 12.dp, vertical = 10.dp).testTag("project.page.new"))
+                buy?.let { b ->
+                    DMono(Tr.t(b.label), dcs.primary, 12, Modifier.clickable(enabled = !buying) { buying = true; failed = ""
+                        scope.launch { try { val t = DataClient.buy(b.thread); if (t.isNotEmpty()) open(t) } catch (e: Exception) { failed = e.message ?: Msg.android_buy_failed } finally { buying = false } } }
+                        .padding(horizontal = 12.dp, vertical = 10.dp).testTag("project.page.buy"), bold = true)
+                }
+            }
+            if (failed.isNotEmpty()) DMono(failed, dcs.error, 11, Modifier.padding(horizontal = 12.dp, vertical = 4.dp), lines = 3)
         }
         val ls = lists
         if (ls == null) { DMono(Msg.viewer_loading, dfaint, 12, Modifier.padding(16.dp)); return@Column }

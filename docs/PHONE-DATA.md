@@ -109,6 +109,7 @@ The phones draw a thread as the desktop does; the words are the hub's.
 - `thread.buy {thread}` → `{buy}` (feature `buy`): Buy it, what the desktop's header offers for this thread (`present/ready.rs` `header`, from the hub's `fab.look`): null, or
   `{label, tip}` ("Buy it · from $5", "Ready to order · …"). `order.buy {thread}` → `{thread}`: the buy thread made, or the one another press just made; the app opens it.
   Ask `thread.buy` when the thread opens and again when its turn ends.
+  `thread.buy {project}` → `{buy}`: the same button for a project's page, with `thread`: the thread the hub buys from (the project's latest that is no buy thread), which the app sends to `order.buy`; null as above, or when the project has no thread.
 - `thread.queue {thread}` → `{rows, more}` (feature `queue`): what waits for the agent, the desktop's strip over the composer (`session/composer.rs` `queue_json`): each row
   `{msg, tag, text, buttons:[{label, action, value}]}`. What the hub keeps here is handed-over context (a fork's start, a provider switch, `/give`: it goes with the next message) and what a Stop or a restart left held (its entry is the row's `msg`: show it in the strip, not the conversation).
   `queue.act {thread, action, value}` → `{}` presses a button: `q-steer` (into the running turn now, or a turn of its own), `q-remove`, `q-up`, `q-resume`; `q-edit` takes the

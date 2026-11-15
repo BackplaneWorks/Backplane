@@ -126,8 +126,13 @@ struct DataProjectPageView: View {
     private var project: DProject? { client.projects.first { !$0.key.isEmpty && $0.key == route.key } }
     @State private var page: DProjectPage?
     @State private var done = false
+    // Buy it beside New thread, as a thread's header has it: the hub's button for this project; a press makes the buy thread and opens it
+    @State private var buy: DBuy?
+    @State private var buying = false
+    @State private var buyFailed = ""
     var body: some View {
         List {
+            if !buyFailed.isEmpty { Text(buyFailed).dmono(11).foregroundStyle(BackplaneDesign.bad).padding(.horizontal, 14).padding(.vertical, 6).dataRow() }
             if let page {
                 ForEach(page.sections.filter { !$0.rows.isEmpty || ($0.fold && $0.count > 0) }) { s in
                     DataSectionHead(s: s) { done.toggle(); Task { await load() } }.dataRow()
@@ -139,6 +144,12 @@ struct DataProjectPageView: View {
         .listStyle(.plain).scrollContentBackground(.hidden).environment(\.defaultMinListRowHeight, 1)
         .navigationTitle(route.title).task { await load() }.refreshable { await load() }
         .toolbar { if let p = project { ToolbarItem(placement: .primaryAction) { Button { onNew(p.id) } label: { Image(systemName: "plus") }.accessibilityIdentifier("data.project.page.new") } } }
+        .toolbar { if let b = buy { ToolbarItem(placement: .primaryAction) { Button { startBuy(b) } label: { Image(systemName: "cart") }.disabled(buying).accessibilityLabel(Tr.t(b.label)).accessibilityIdentifier("data.project.page.buy") } } }
+        .task(id: "\(project?.id ?? "")|\(client.conn == .online)") { if client.conn == .online, let p = project { buy = await client.buyOfProject(p.id) } }
+    }
+    private func startBuy(_ b: DBuy) {
+        guard !buying else { return }; buying = true; buyFailed = ""
+        Task { do { let t = try await client.buy(b.thread); if !t.isEmpty { client.linkTarget = DLinkTarget(kind: .thread, id: t) } } catch { buyFailed = error.localizedDescription }; buying = false }
     }
     private func load() async { page = await client.projectPage(route.key, done: done) }
 }

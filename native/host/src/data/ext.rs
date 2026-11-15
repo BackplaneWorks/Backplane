@@ -262,6 +262,12 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Re
             _ => Err(err("action: q-steer, q-remove, q-edit, q-up, q-resume, o-edit or o-remove")) } }
         // feature "buy": Buy it on the phones. `thread.buy {thread}` → `{buy}`: null, or the button the desktop's header shows (present/ready.rs `header`, from the hub's own
         // `fab.look` card) as `{label, tip}`; `order.buy {thread}` → `{thread}`: the buy thread made (or the one just made by another press), for the app to open
+        // `thread.buy {project}` → `{buy}` with `thread`: Buy it on the project's page, the same button for the thread the hub buys from (`fab.look {project}` → `buy`,
+        // present/ready.rs `page_button`); the app sends that thread to `order.buy`
+        "thread.buy" if s(p, "thread").is_empty() && !s(p, "project").is_empty() => {
+            let card = rpc(hub, c, "fab.look", json!({"project":s(p, "project")})).await.map(|r| r["result"].clone()).unwrap_or(Value::Null);
+            let b = &card["buy"];
+            Ok(json!({"buy": if b.is_object() { json!({"label":b["label"],"tip":b["tip"],"thread":b["value"]}) } else { Value::Null }})) }
         "thread.buy" => { let th = s(p, "thread"); if th.is_empty() { return Some(Err(err("thread"))) }
             let card = rpc(hub, c, "fab.look", json!({"thread":th})).await.map(|r| r["result"].clone()).unwrap_or(Value::Null);
             let sess = crate::present::ready::keep(&card).unwrap_or(json!({}));
