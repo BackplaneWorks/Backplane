@@ -74,6 +74,9 @@ fun ViewerScreen(thread: DThread, file: String = "", line: Int = 0, back: () -> 
         files = runCatching { DataClient.viewerFiles(thread.id) }.getOrNull(); if (files?.pcb?.isNotEmpty() == true && tab == "Files" && file.isEmpty()) tab = "Board"
         DataClient.openViewerTab?.takeIf { it in tabs }?.let { tab = it; DataClient.openViewerTab = null }
     }
+    // the project's boards (two or more: the hub's `boards`): a pick shows that board on Board, Schematic, 3D and Split, as the desktop's Boards menu does
+    var boardPick by remember(thread.id) { mutableStateOf("") }
+    val board = files?.board(boardPick)
     DisposableEffect(thread.id) { DataClient.viewerThread = thread.id; onDispose { DataClient.stopWatch(thread.id); DataClient.lightRefs = emptyList() } }
     Column(Modifier.fillMaxSize()) {
         DBar(Msg.android_viewer_title(thread.title.ifEmpty { Msg.thread_new }), back)
@@ -83,13 +86,14 @@ fun ViewerScreen(thread: DThread, file: String = "", line: Int = 0, back: () -> 
             }
         }
         DLine()
+        if (board != null && tab in setOf("Board", "Schematic", "3D", "Split")) BoardPicker(files?.boards.orEmpty(), board) { boardPick = it.value; target = null }
         Box(Modifier.weight(1f).fillMaxWidth()) {
             when (tab) {
                 // the management panels (BOM, Checks, Lifecycle, Fab) beside the drawing: tabs under it, a panel over its lower part (DataMgmt.kt)
-                "Board" -> Column(Modifier.fillMaxSize()) { Box(Modifier.weight(1f)) { PlotTab(thread, "board", target?.path?.takeIf { target?.tab == "Board" } ?: "", files == null || files?.pcb.orEmpty().isNotEmpty() || target != null, Msg.android_viewer_noboard) }; MgmtHost(files?.root.orEmpty()) }
-                "Schematic" -> Column(Modifier.fillMaxSize()) { Box(Modifier.weight(1f)) { PlotTab(thread, "schematic", target?.path?.takeIf { target?.tab == "Schematic" } ?: "", files == null || files?.sch.orEmpty().isNotEmpty() || target != null, Msg.android_viewer_nosch) }; MgmtHost(files?.root.orEmpty()) }
-                "3D" -> PlotTab(thread, "3d", "", files == null || files?.pcb.orEmpty().isNotEmpty(), Msg.android_viewer_noboard)
-                "Split" -> SplitTab(thread, files)
+                "Board" -> Column(Modifier.fillMaxSize()) { Box(Modifier.weight(1f)) { PlotTab(thread, "board", target?.path?.takeIf { target?.tab == "Board" } ?: board?.pcb.orEmpty(), files == null || files?.pcb.orEmpty().isNotEmpty() || board != null || target != null, Msg.android_viewer_noboard) }; MgmtHost(files?.root.orEmpty()) }
+                "Schematic" -> Column(Modifier.fillMaxSize()) { Box(Modifier.weight(1f)) { PlotTab(thread, "schematic", target?.path?.takeIf { target?.tab == "Schematic" } ?: board?.sch.orEmpty(), files == null || files?.sch.orEmpty().isNotEmpty() || board != null || target != null, Msg.android_viewer_nosch) }; MgmtHost(files?.root.orEmpty()) }
+                "3D" -> PlotTab(thread, "3d", board?.pcb.orEmpty(), files == null || files?.pcb.orEmpty().isNotEmpty() || board != null, Msg.android_viewer_noboard)
+                "Split" -> SplitTab(thread, files, board)
                 "Diff" -> DiffTab(thread)
                 "Review" -> ReviewTab(thread)
                 "Mech" -> MechTab(thread, target?.path?.takeIf { target?.tab == "Mech" })
@@ -98,6 +102,24 @@ fun ViewerScreen(thread: DThread, file: String = "", line: Int = 0, back: () -> 
             }
         }
     }
+}
+
+/** The board on show and, behind it, the project's other boards (the hub's list, two or more). */
+@Composable
+private fun BoardPicker(boards: List<DataClient.BoardRow>, on: DataClient.BoardRow, pick: (DataClient.BoardRow) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    Box(Modifier.fillMaxWidth().background(dcs.surface)) {
+        Row(Modifier.fillMaxWidth().clickable { open = true }.padding(horizontal = 12.dp, vertical = 9.dp).testTag("viewer.boards"), verticalAlignment = Alignment.CenterVertically) {
+            DMono(on.label, dcs.onSurface, 12, Modifier.weight(1f)); DMono("▾", dcs.onSurfaceVariant, 12)
+        }
+        DropdownMenu(open, { open = false }) {
+            boards.forEach { b ->
+                DropdownMenuItem({ Column { DMono(b.label, if (b.value == on.value) dcs.primary else dcs.onSurface, 12, bold = b.value == on.value); if (b.default) DMono(Msg.gpui_c_boards_default, dcs.onSurfaceVariant, 10) } },
+                    { open = false; pick(b) }, Modifier.testTag("viewer.board.${b.value}"))
+            }
+        }
+    }
+    DLine()
 }
 
 // ---- Board, Schematic and 3D: the hub's plot, drawn by the GPU view
@@ -486,13 +508,15 @@ private val splitThree = androidx.compose.runtime.snapshots.SnapshotStateMap<Str
 // ---- Split: the schematic, and the board or its 3D model (stacked in portrait, side by side in landscape). On a phone the board and 3D take
 // turns in one pane (the person, 2026-11-04/05: layout XOR 3D on phones, all three only on the desktop); Board/3D on that pane switches, per thread.
 @Composable
-private fun SplitTab(thread: DThread, files: DataClient.ProjectFiles?) {
+private fun SplitTab(thread: DThread, files: DataClient.ProjectFiles?, board: DataClient.BoardRow? = null) {
     val three = splitThree[thread.id] == true
     val root = files?.root.orEmpty()
-    LaunchedEffect(thread.id, root) { if (root.isNotEmpty()) runCatching { DataClient.watch(thread.id, "split") } }
+    // a board picked in the viewer: its file and the schematic beside it are the panes' sources, keyed by their paths ("" the project's own)
+    val bp = board?.pcb.orEmpty(); val sp = board?.sch.orEmpty()
+    LaunchedEffect(thread.id, root, bp) { if (root.isNotEmpty()) runCatching { DataClient.watch(thread.id, "split", board = bp) } }
     val plots = DataClient.plots
     val seen = plots.frame to plots.mesh   // the store changes on each frame: read it so the panes follow
-    val sch = plots.cachedFrame("1|$root|"); val brd = plots.cachedFrame("0|$root|"); val mdl = plots.cachedMesh("2|$root|")
+    val sch = plots.cachedFrame("1|$root|$sp"); val brd = plots.cachedFrame("0|$root|$bp"); val mdl = plots.cachedMesh("2|$root|$bp")
     // the parts that stream in after the board model, as the 3D tab draws them (Split showed the bare board only)
     val prt = mdl?.let { m -> plots.parts.parts?.takeIf { it.key == m.key } }
     val bg = dcs.background.toArgb() and 0xFFFFFF
@@ -502,16 +526,16 @@ private fun SplitTab(thread: DThread, files: DataClient.ProjectFiles?) {
     var lit by remember(thread.id) { mutableStateOf<Map<String, List<String>>>(emptyMap()) }
     val tap: (String, Int, Int) -> Unit = { key, at, idx -> scope.launch {
         info = runCatching { DataClient.info(key, at, idx) }.getOrDefault("").ifEmpty { Msg.android_viewer_piece("$at,$idx") }
-        lit = Probe.light(info, listOf("1|$root|", "0|$root|"))
+        lit = Probe.light(info, listOf("1|$root|$sp", "0|$root|$bp"))
     } }
     val clear = { info = ""; lit = emptyMap() }
     BoxWithConstraints(Modifier.fillMaxSize().testTag("split")) {
         val panes: @Composable (Modifier) -> Unit = { m ->
-            SplitPane("Schematic", thread.id + "|split|sch", sch, null, false, bg, if (root.isEmpty() || files?.sch.isNullOrEmpty()) Msg.android_viewer_nosch else "", m, lit = lit["1|$root|"].orEmpty(), tap = tap, untap = clear)
+            SplitPane("Schematic", thread.id + "|split|sch", sch, null, false, bg, if (root.isEmpty() || (files?.sch.isNullOrEmpty() && board == null)) Msg.android_viewer_nosch else "", m, lit = lit["1|$root|$sp"].orEmpty(), tap = tap, untap = clear)
             val pick: @Composable (Modifier) -> Unit = { a -> Row(a.padding(4.dp), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
                 ViewChip(Msg.viewer_board, !three, "split.pick.board") { splitThree[thread.id] = false }; ViewChip(Msg.viewer_solid, three, "split.pick.3d") { splitThree[thread.id] = true } } }
-            if (three) SplitPane("3D", thread.id + "|split|3d", brd, mdl, true, bg, if (files?.pcb.isNullOrEmpty()) Msg.android_viewer_noboard else "", m, pick, lit["0|$root|"].orEmpty(), tap, clear, prt)
-            else SplitPane("Board", thread.id + "|split|brd", brd, null, false, bg, if (files?.pcb.isNullOrEmpty()) Msg.android_viewer_noboard else "", m, pick, lit["0|$root|"].orEmpty(), tap, clear)
+            if (three) SplitPane("3D", thread.id + "|split|3d", brd, mdl, true, bg, if (files?.pcb.isNullOrEmpty() && board == null) Msg.android_viewer_noboard else "", m, pick, lit["0|$root|$bp"].orEmpty(), tap, clear, prt)
+            else SplitPane("Board", thread.id + "|split|brd", brd, null, false, bg, if (files?.pcb.isNullOrEmpty() && board == null) Msg.android_viewer_noboard else "", m, pick, lit["0|$root|$bp"].orEmpty(), tap, clear)
         }
         if (maxWidth > maxHeight) Row(Modifier.fillMaxSize()) { panes(Modifier.weight(1f).fillMaxHeight()) }
         else Column(Modifier.fillMaxSize()) { panes(Modifier.weight(1f).fillMaxWidth()) }

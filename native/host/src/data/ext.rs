@@ -440,9 +440,15 @@ async fn viewers(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Res
     Some(async {
         match m {
             "viewer.files" if machines::is_far(th) => { let (_, root) = machines::far_root(hub, th).ok_or_else(|| err("that thread has no folder"))?;
-                let r = result(rpc(hub, c, "boards.list", json!({"thread":th})).await?); Ok(machines::board_files(&root, s(&r, "board_default"))) }
+                let r = result(rpc(hub, c, "boards.list", json!({"thread":th})).await?); let mut v = machines::board_files(&root, s(&r, "board_default"));
+                let list: Vec<String> = r["board_list"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
+                v["boards"] = machines::board_rows(&root, &list, s(&r, "board_default")); Ok(v) }
             "viewer.refs" | "viewer.compare" | "mech.list" if machines::is_far(th) => Err(err("That is shown on its own machine only for now.")),
-            "viewer.files" => { let root = root_of(hub, th).await?; let f = crate::files::kicad::project::read(&root); Ok(json!({"root":root,"pro":f.pro,"pcb":f.pcb,"sch":f.sch})) }
+            // `boards`: the project's boards for the viewer's picker (two or more; the desktop's Boards menu, `boards.list`), each with the files its pages watch
+            "viewer.files" => { let root = root_of(hub, th).await?; let f = crate::files::kicad::project::read(&root);
+                let bd = f.pcb.strip_prefix(&format!("{root}/")).unwrap_or("").to_string();
+                let list = crate::files::kicad::boards::pick(&crate::files::kicad::boards::find(std::path::Path::new(&root)), &bd);
+                Ok(json!({"root":root,"pro":f.pro,"pcb":f.pcb,"sch":f.sch,"boards":machines::board_rows(&root, &list, &bd)})) }
             "viewer.watch" => {
                 let root = root_of(hub, th).await?; let kind = s(p, "kind"); let path = s(p, "path");
                 if path.split('/').any(|x| x == "..") || path.contains('\0') { return Err(err("that path is not in this project")) }
@@ -450,6 +456,8 @@ async fn viewers(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Res
                 let mut q = machines::on_link(json!({"kind":kind,"root":root,"path":path}), th);
                 if !s(p, "tree").is_empty() { q["tree"] = p["tree"].clone() }
                 if !s(p, "kept").is_empty() { q["kept"] = p["kept"].clone() }
+                // Split of a board picked in the viewer (`viewer.files` → `boards`, a row's `pcb`): its file and the schematic beside it are the panes' sources
+                let board = s(p, "board"); if kind == "split" && !board.is_empty() { if !board.starts_with(&format!("{root}/")) || board.split('/').any(|x| x == "..") || board.contains('\0') { return Err(err("that board is not in this project")) } q["board"] = json!(board); }
                 q["fresh"] = json!(true); // a phone holds only what `kept` names after a switch: models and parts come again (kicad/watch.rs `forget`) // the model the phone has cached (plot::mesh_id, hex): not sent again
                 let r = result(rpc(hub, c, "kicad.watch", q).await?);
                 Ok(json!({"root":root,"keys":r.get("keys").cloned().unwrap_or(json!([]))})) // the plots this view shows: a phone drops what comes late for the one it left
