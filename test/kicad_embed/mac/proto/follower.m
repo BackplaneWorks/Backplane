@@ -47,7 +47,8 @@ int main(int argc, char **argv) { @autoreleasepool {
         if (sscanf(b, "rect %lf %lf %lf %lf %ld", &x, &y, &ww, &hh, &hid) == 5) { host = hid; last = CGRectMake(x, y, ww, hh); have = YES; }
         else if (!strcmp(b, "hide")) { [w orderOut:nil]; have = NO; }
         else if (!strcmp(b, "raise")) above(); }
-      if (have) { place(last); static BOOL ordered; if (!w.visible || !ordered) { ordered = YES; [w orderWindow:NSWindowAbove relativeTo:host]; } } });
+      if (have) { place(last); [CATransaction flush]; // commit now: a dispatch handler is not a run-loop pass, so the frame change waited (resize lagged ~126 ms)
+        static BOOL ordered; if (!w.visible || !ordered) { ordered = YES; [w orderWindow:NSWindowAbove relativeTo:host]; } } });
     dispatch_resume(readSource);
   } else {
     [NSTimer scheduledTimerWithTimeInterval:1.0/120 repeats:YES block:^(NSTimer *t) {
