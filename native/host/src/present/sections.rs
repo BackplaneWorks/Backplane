@@ -322,7 +322,8 @@ fn project_row(st: &State, c: &Ctx, p: &MergedProject, ths: &[Th], gid: &str, gr
     let running = ths.iter().filter(|f| matches!(f.word, "running" | "monitoring" | "limit") || (f.word == "needs" && f.t.src.map_or(false, |s| s.threads.get(&f.t.id).map_or(false, |x| x.turn == Turn::Running)))).count();
     let needs = ths.iter().filter(|f| f.needs).count();
     let q = c.query;
-    let mut shown: Vec<&Th> = ths.iter().filter(|f| if q.is_empty() { f.show && !f.needs && !f.kid } else { crate::sidebar::word_hit(&f.t.title, q) }).collect();
+    // the thread on show is always listed under its project, settled or not: the person sees where they are (and where they left off)
+    let mut shown: Vec<&Th> = ths.iter().filter(|f| if q.is_empty() { !f.needs && ((f.show && !f.kid) || (!c.selected.is_empty() && f.t.id == c.selected)) } else { crate::sidebar::word_hit(&f.t.title, q) }).collect();
     // a pinned thread is a fixed row of its project: first, where it was pinned, whatever runs or stops below it (and never cut by UNDER)
     if q.is_empty() { shown.sort_by_key(|f| pin_rank(f)); }
     // folded by the person: no rows under it (a search opens it, as it opens the section folds); its counts stay on the row
@@ -333,6 +334,8 @@ fn project_row(st: &State, c: &Ctx, p: &MergedProject, ths: &[Th], gid: &str, gr
     r["title"] = json!(p.name);
     r["pinned"] = json!(pinned_at(st, &p.key) > 0);
     r["threads"] = json!(rows); r["more"] = json!(ths.len().saturating_sub(rows.len()));
+    // threads of it with no row in the sidebar (settled, or past the first rows): on its page, counted on its row so none seems lost
+    r["rest"] = json!(ths.iter().filter(|f| !f.needs && !f.kid && !f.t.title.is_empty()).count().saturating_sub(if folded { 0 } else { shown.len().min(UNDER) }));
     // its live swarms, above its threads (a swarm that needs the person is in Needs you, not repeated here)
     let sw = swarms_of(p, c);
     r["running"] = json!(running + sw.iter().filter(|x| x.1 == "running").count());

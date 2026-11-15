@@ -4081,6 +4081,7 @@ sidebar.sections.new.group	New group…	新しいグループ…
 sidebar.sections.new.group.title	New group	新しいグループ
 sidebar.sections.remove.ask	Remove {project} from Backplane? Its folder and files stay.	{project}をBackplaneから外しますか？フォルダとファイルはそのまま残ります。
 gpui.sections.running	{n, number} running	{n, number}件実行中
+gpui.sections.rest	{n, plural, one {# thread not listed here, on the project page} other {# threads not listed here, on the project page}}	{n, plural, other {ここにないスレッド#件（プロジェクトページにあります）}}
 gpui.projects.mech	MECHANICAL ({n})	機構部品（{n}）
 gpui.open.folder	Open folder	フォルダを開く
 gpui.picker.none	No folders	フォルダなし
@@ -6874,6 +6875,9 @@ gpui.streamer.win	Windows does not tell an app that the screen is being captured
 
     /// gpui.sections.running = {n, number} running
     static func gpui_sections_running(n: Int) -> String { f("gpui.sections.running", ["n": String(n)]) }
+
+    /// gpui.sections.rest = {n, plural, one {# thread not listed here, on the project page} other {# threads not listed here, on the project page}}
+    static func gpui_sections_rest(n: Int) -> String { f("gpui.sections.rest", ["n": String(n)]) }
 
     /// gpui.projects.mech = MECHANICAL ({n})
     static func gpui_projects_mech(n: String) -> String { f("gpui.projects.mech", ["n": n]) }

@@ -38,12 +38,14 @@ import org.json.JSONObject
 data class DSecRow(val id: String, val title: String, val word: String, val say: String, val want: String, val ago: String, val mark: DMark?, val project: String,
     val off: Boolean, val nav: String, val pinned: Boolean, val key: String, val running: Int, val threads: List<DSecRow>, val css: String, val dots: List<Pair<Boolean, Boolean>>, val kind: String = "", val hide: String = "", val icon: String = "", val menu: List<DMenuItem> = emptyList(),
     /** the fold the hub keeps for a project row (`sidebar.fold.<key>`): the action its chevron sends, folded now, the rows it hides or would hide */
-    val fold: String = "", val folded: Boolean = false, val under: Int = 0, val needsCount: Int = 0) {
+    val fold: String = "", val folded: Boolean = false, val under: Int = 0, val needsCount: Int = 0,
+    /** a project's threads with no row under it (finished ones, on its page): counted on its row so none seems lost */
+    val rest: Int = 0) {
     companion object {
         fun of(o: JSONObject): DSecRow = DSecRow(o.optString("id"), o.optString("title"), o.optString("word"), o.optString("say"), o.optString("want"), o.optString("ago"),
             parseMark(o.optJSONObject("mark")), o.optString("project"), o.optBoolean("off"), o.optString("nav"), o.optBoolean("pinned"), o.optString("key"), o.optInt("running"),
             list(o.optJSONArray("threads")), o.optString("css"), (0 until (o.optJSONArray("dots")?.length() ?: 0)).map { i -> o.getJSONArray("dots").getJSONObject(i).let { it.optBoolean("here") to it.optBoolean("dim") } }, o.optString("kind"), o.optString("hide"), o.optString("icon"), DMenuItem.list(o.optJSONArray("menu")),
-            o.optString("fold"), o.optBoolean("folded"), o.optInt("under"), o.optInt("needsCount"))
+            o.optString("fold"), o.optBoolean("folded"), o.optInt("under"), o.optInt("needsCount"), o.optInt("rest"))
         fun list(a: JSONArray?): List<DSecRow> = (0 until (a?.length() ?: 0)).map { of(a!!.getJSONObject(it)) }
     }
     /** a chevron on the row: something is under it, or it is folded (an older hub sends no fold) */
@@ -121,6 +123,7 @@ fun SectionProject(r: DSecRow, faded: Boolean, onClick: () -> Unit, onLong: () -
             DMono(r.title, dcs.onSurface, 13, Modifier.weight(1f, fill = false))
             if (r.dots.size > 1) { Spacer(Modifier.width(6.dp)); r.dots.forEach { (here, dim) -> DDot(if (dim) dfaint else if (here) dok else dcs.onSurfaceVariant, 5); Spacer(Modifier.width(3.dp)) } }
         }
+        if (r.rest > 0) { DMono("${r.rest}", dfaint, 11, Modifier.testTag("home.section.rest.${r.key}")); Spacer(Modifier.width(6.dp)) }
         Spacer(Modifier.width(8.dp))
         if (r.running > 0) DMono(Msg.ios_sections_running(r.running), dok, 11)
         // what of it waits on the person (its rows are in Needs you, folded or not)
