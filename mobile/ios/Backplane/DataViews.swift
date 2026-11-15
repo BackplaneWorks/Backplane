@@ -332,7 +332,7 @@ struct DataThreadsView: View {
                 }
             } else {
                 ForEach(s.rows) { r in
-                    Button { path.append(DProjectRoute(key: r.key, title: r.title)) } label: { DataSectionProject(r: r, faded: s.id == "quiet") { Task { await client.sidebarAct(r.fold, r.key) } } }
+                    Button { path.append(DProjectRoute(key: r.key, title: r.title)) } label: { DataSectionProject(r: r, faded: s.id == "quiet" || s.id == "archived") { Task { await client.sidebarAct(r.fold, r.key) } } }
                         .buttonStyle(.plain).dataRow().accessibilityIdentifier("data.section.project." + r.key)
                         .contextMenu { if !r.menu.isEmpty { sectionMenu(r) } else {
                             Button(Tr.t(r.pinned ? "Unpin project" : "Pin project"), systemImage: "pin") { Task { await client.sidebarAct("project-pin", r.key) } }

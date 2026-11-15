@@ -148,7 +148,7 @@ impl Backplane {
                     let empty = s["rows"].as_array().map_or(true, |r| r.is_empty());
                     if s["id"] == "active" && empty && s["fold"] != true { continue }
                     rows.push(head(cx, light, s, ctl));
-                    let faded = s["id"] == "quiet";
+                    let faded = s["id"] == "quiet" || s["id"] == "archived";
                     for p in s["rows"].as_array().into_iter().flatten() {
                         rows.push(project(self, cx, light, p, faded, ctl));
                         // its live swarms, above its threads (their members have no rows: the swarm stands for them)
