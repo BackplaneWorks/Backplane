@@ -104,7 +104,7 @@ pub(crate) fn ic(light: bool, name: &'static str, size: f32, tok: &str) -> AnyEl
 fn act_whole(tone: &str) -> bool { tone.contains("error") || tone.contains("restart") || tone.contains("warn") }
 #[cfg(test)] mod act_tests {
     #[test] fn a_warning_line_is_said_whole_like_an_error() {
-        for t in ["error", "warn", "info restart"] { assert!(super::act_whole(t), "{t}") }
+        /* i18n-ok: tone names the hub sends, not drawn */ for t in ["error", "warn", "info restart"] { assert!(super::act_whole(t), "{t}") }
         for t in ["info", "", "tool"] { assert!(!super::act_whole(t), "{t}") }
     }
 }
