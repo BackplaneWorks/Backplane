@@ -91,6 +91,24 @@ pub struct Turn { pub text: String, pub session: String, pub ask: bool }
 
 /// Pi.prompt
 pub fn prompt(text: &str) -> String { cmd("2", "prompt", vec![("message", json!(text))]) }
+/// Pi.stats: the session's running totals, asked once the run is over (Pi 1.4 and omp answer it alike).
+pub fn stats() -> String { cmd("3", "get_session_stats", vec![]) }
+/// Pi.usage: the session's running totals as Codex's (input counts what was read from the cache, which Turn.codex takes out again), its cost.
+pub fn usage(d: &Value) -> Value {
+    let tk = dl::go(d, "tokens"); let (input, cache_read) = (dl::gn(tk, "input", 0), dl::gn(tk, "cacheRead", 0));
+    obj(vec![("input_tokens", json!(input + cache_read)), ("cached_input_tokens", json!(cache_read)), ("cache_write_input_tokens", json!(dl::gn(tk, "cacheWrite", 0))),
+        ("output_tokens", json!(dl::gn(tk, "output", 0))), ("reasoning_output_tokens", json!(dl::gn(tk, "reasoning", 0))), ("cost_usd", dl::num(&raw(d, "cost", "0")))])
+}
+/// Pi.context: the context it holds now.
+pub fn context(d: &Value) -> Value {
+    let c = dl::go(d, "contextUsage"); event("context.usage", vec![("used", json!(dl::gn(c, "tokens", 0))), ("window", json!(dl::gn(c, "contextWindow", 0)))])
+}
+/// Pi.counted: the turn is over: the reply, its usage, then the end.
+pub fn counted(a: &mut Acp, d: &Value) -> Out {
+    a.done = true;
+    let mut e = vec![]; if !a.buf.is_empty() { e.push(event("item.completed", vec![("item", obj(vec![("type", json!("agent_message")), ("text", json!(a.buf))]))])) }
+    e.push(context(d)); e.push(event("turn.completed", vec![("usage", usage(d))])); Out::emit(e)
+}
 
 fn opened(a: &mut Acp, t: &Turn, d: &Value) -> Out {
     let sid = gs(d, "sessionId", &t.session).to_string(); let count = raw(d, "messageCount", "0");
@@ -105,6 +123,9 @@ fn reply(a: &mut Acp, t: &Turn, o: &Value) -> Out {
         ("1", true) => opened(a, t, dl::go(o, "data")),
         // a prompt an extension command handled starts no run: the turn is over
         ("2", true) => if gs(dl::go(o, "data"), "disposition", "") == "handled" { finished(a) } else { Out::none() },
+        ("3", true) => counted(a, dl::go(o, "data")),
+        // a Pi without the stats command still ends the turn, uncounted
+        ("3", false) => finished(a),
         (_, false) => fail(a, gs(o, "error", "pi refused the command")),
         _ => Out::none(),
     }
@@ -150,7 +171,8 @@ pub fn msg_end(m: &Value, a: &mut Acp) {
 /// Pi.settled: Pi will do nothing more: the turn ends, failed when its last assistant message did.
 fn settled(a: &mut Acp, aborted: bool) -> Out {
     let e = if aborted && a.err.is_empty() { "Pi aborted the turn".to_string() } else { a.err.clone() };
-    if e.is_empty() { finished(a) } else { fail(a, &e) }
+    // a run that ended well asks for the session's totals first (Pi.stats); the answer ends the turn with its usage (2026-11-15: Pi threads had none)
+    if e.is_empty() { Out { send: vec![stats()], ..Out::none() } } else { fail(a, &e) }
 }
 
 // ---- Dialogs ----
@@ -311,7 +333,13 @@ mod tests {
         assert_eq!(r[2].plain(), vec![json!({"type":"item.delta","text":"Hello"})]);
         assert_eq!(r[3].plain(), vec![json!({"type":"item.completed","item":{"type":"reasoning","text":"hmm"}})]);
         assert_eq!(r[4].plain(), vec![json!({"type":"item.delta","text":"\n\n"})]);
-        assert_eq!(r[7].plain(), vec![json!({"type":"item.completed","item":{"type":"agent_message","text":"Hello\n\nagain"}}), json!({"type":"turn.completed"})]);
+        assert_eq!(r[7].send, vec![r#"{"id":"3","type":"get_session_stats"}"#]); assert!(r[7].plain().is_empty() && !d.acp.done, "the run's end asks for its usage");
+        let u = feed(&mut d, &[r#"{"type":"response","id":"3","command":"get_session_stats","success":true,"data":{"tokens":{"input":100,"output":20,"cacheRead":40,"cacheWrite":5,"total":165},"cost":0.0123,"contextUsage":{"tokens":900,"contextWindow":1040000}}}"#]);
+        assert_eq!(u[0].plain(), vec![json!({"type":"item.completed","item":{"type":"agent_message","text":"Hello\n\nagain"}}), json!({"type":"context.usage","used":900,"window":1040000}),
+            json!({"type":"turn.completed","usage":{"input_tokens":140,"cached_input_tokens":40,"cache_write_input_tokens":5,"output_tokens":20,"reasoning_output_tokens":0,"cost_usd":0.0123}})]);
+        let mut d = PiDriver::new(); d.start(&ti("full-access"));
+        let r = feed(&mut d, &[r#"{"type":"agent_settled"}"#, r#"{"type":"response","id":"3","success":false,"error":"Unknown command: get_session_stats"}"#]);
+        assert_eq!(r[1].plain(), vec![json!({"type":"turn.completed"})], "a Pi without the stats command still ends the turn");
     }
     #[test] fn a_failed_assistant_message_fails_the_turn_with_the_hint() {
         let mut d = PiDriver::new(); d.start(&ti("full-access"));

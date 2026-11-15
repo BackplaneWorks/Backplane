@@ -37,6 +37,16 @@ impl Cx {
     fn codex_usage(&mut self, o: &Value, provider: &str, model: &str, at: u64, out: &mut Vec<Value>) {
         let u = o.get("usage").unwrap_or(&Value::Null);
         if u.get("output_tokens").is_none() { return }
+        // the model the provider says ran the turn, when it says (grok's `_meta.modelId`), else the thread's
+        let model = u.get("model").and_then(Value::as_str).filter(|m| !m.is_empty()).unwrap_or(model);
+        // ACP's usage is the turn's own, not the session's running totals: counted as it is, the totals' basis untouched
+        if u.get("turn").and_then(Value::as_bool) == Some(true) {
+            let (ci, cc, cw, co, ct) = (n(u, "input_tokens"), n(u, "cached_input_tokens"), n(u, "cache_write_input_tokens"), n(u, "output_tokens"), n(u, "reasoning_output_tokens"));
+            let key = format!("t:{}:{at}:{ci}/{co}", self.session); if key == self.tok_key { return }
+            out.push(json!({"$":"TurnUsage","thread":self.thread,"provider":provider,"model":if model.is_empty() { "default" } else { model },"key":key,
+                "input":ci.saturating_sub(cc),"cread":cc,"cwrite":cw,"output":co,"reasoning":ct,"cost":0,"known":format!("irwo{}", if u.get("reasoning_output_tokens").is_some() { "t" } else { "" }),"at":at}));
+            self.tok_key = key; return
+        }
         let (ci, cc, cw, co, ct) = (n(u, "input_tokens"), n(u, "cached_input_tokens"), n(u, "cache_write_input_tokens"), n(u, "output_tokens"), n(u, "reasoning_output_tokens"));
         let se = self.session.clone(); let key = format!("x:{se}:{ci}/{co}");
         if key == self.tok_key { return }

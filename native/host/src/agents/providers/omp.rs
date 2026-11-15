@@ -10,7 +10,7 @@
 //! approval and the choice made goes back (dialog.rs). Other selects (omp's `ask` questions), confirms, inputs and editors go as questions.
 //! Backplane's own tools come from an extension Backplane writes (`omp_ext.js`, loaded with `-e`). Instructions go in with `--append-system-prompt`
 //! as a private file path (one launch folder a turn, removed after the process exits), never into argv or the conversation.
-use super::dialog::{self as dl, event, gs, jshow, num, obj, or, raw};
+use super::dialog::{self as dl, event, gs, jshow, or, raw};
 use super::pi::{self, cmd, finished, notice, opt, Acp, Out};
 use super::{AskInfo, Driver, Made, Reaction, TurnIn};
 use serde_json::{json, Value};
@@ -26,7 +26,7 @@ pub const APPROVAL_TITLE: &str = "Allow tool: ";
 /// Omp.init: deltas only, then the session (two lines).
 pub fn init() -> Vec<String> { vec![cmd("0", "set_event_filter", vec![("events", Value::Null), ("messageUpdates", json!("delta"))]), pi::init()] }
 pub fn prompt(text: &str) -> String { cmd("2", "prompt", vec![("message", json!(text))]) }
-pub fn stats() -> String { cmd("3", "get_session_stats", vec![]) }
+pub use pi::stats;
 /// Omp.dir: a thread's session folder (under Backplane's home), from its id.
 pub fn dir(home: &str, thread: &str) -> String { format!("{home}/omp/sessions/{}", pi::safe(thread)) }
 /// Effort.of("omp", e): the level omp takes, else its default.
@@ -57,29 +57,13 @@ fn opened(a: &mut Acp, t: &pi::Turn, d: &Value) -> Out {
     let mut e = vec![event("thread.started", vec![("thread_id", json!(sid))])]; e.extend(lost(!t.session.is_empty(), &count));
     Out { send: vec![prompt(&t.text)], emit: e, asks: vec![] }
 }
-/// Omp.usage: the session's running totals as Codex's (input counts what was read from the cache, which Turn.codex takes out again), its cost.
-fn usage(d: &Value) -> Value {
-    let tk = dl::go(d, "tokens"); let (input, cache_read) = (dl::gn(tk, "input", 0), dl::gn(tk, "cacheRead", 0));
-    obj(vec![("input_tokens", json!(input + cache_read)), ("cached_input_tokens", json!(cache_read)), ("cache_write_input_tokens", json!(dl::gn(tk, "cacheWrite", 0))),
-        ("output_tokens", json!(dl::gn(tk, "output", 0))), ("reasoning_output_tokens", json!(dl::gn(tk, "reasoning", 0))), ("cost_usd", num(&raw(d, "cost", "0")))])
-}
-/// Omp.context: the context it holds now.
-fn context(d: &Value) -> Value {
-    let c = dl::go(d, "contextUsage"); event("context.usage", vec![("used", json!(dl::gn(c, "tokens", 0))), ("window", json!(dl::gn(c, "contextWindow", 0)))])
-}
-/// Omp.counted: the turn is over: the reply (it streamed as deltas), its usage, then the end.
-fn counted(a: &mut Acp, d: &Value) -> Out {
-    a.done = true;
-    let mut e = vec![]; if !a.buf.is_empty() { e.push(event("item.completed", vec![("item", obj(vec![("type", json!("agent_message")), ("text", json!(a.buf))]))])) }
-    e.push(context(d)); e.push(event("turn.completed", vec![("usage", usage(d))])); Out::emit(e)
-}
 fn reply(a: &mut Acp, t: &pi::Turn, o: &Value) -> Out {
     let ok = dl::gb(o, "success", false);
     match (gs(o, "id", ""), ok) {
         ("1", true) => opened(a, t, dl::go(o, "data")),
         // a prompt omp finished itself (a builtin slash command) starts no run
         ("2", true) => if dl::gb(dl::go(o, "data"), "agentInvoked", true) { Out::none() } else { finished(a) },
-        ("3", true) => counted(a, dl::go(o, "data")),
+        ("3", true) => pi::counted(a, dl::go(o, "data")),
         ("3", false) => finished(a),
         ("0", false) => Out::none(),
         (_, false) => fail(a, gs(o, "error", "omp refused the command")),

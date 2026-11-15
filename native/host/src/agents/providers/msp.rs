@@ -5,7 +5,7 @@ use serde_json::{json, Value};
 
 /// MspTurn: what a turn needs. `nonce` is the turn's gen: Muse refuses a command id it has seen, in any session.
 #[derive(Clone, Debug, Default)]
-pub struct MspTurn { pub cwd: String, pub mcp: String, pub prompt: String, pub text: String, pub session: String, pub mode: String, pub effort: String, pub nonce: String }
+pub struct MspTurn { pub cwd: String, pub mcp: String, pub prompt: String, pub text: String, pub session: String, pub mode: String, pub effort: String, pub nonce: String, pub model: String }
 
 /// AcpOut: lines to write to Muse, shapes for the log, approval requests for the person (the raw request line each).
 #[derive(Debug, Default)]
@@ -13,7 +13,7 @@ pub struct Out { pub send: Vec<String>, pub emit: Vec<Value>, pub asks: Vec<Stri
 
 /// The turn's state (Acp{sid, done}); `buf` is unused by MSP, which streams and posts whole messages.
 #[derive(Debug, Default, Clone)]
-pub struct Msp { pub sid: String, pub done: bool }
+pub struct Msp { pub sid: String, pub done: bool, pub usage: Option<Value>, pub context: Option<Value> }
 
 fn gs<'a>(v: &'a Value, k: &str) -> &'a str { v.get(k).and_then(Value::as_str).unwrap_or("") }
 fn or<'a>(a: &'a str, b: &'a str) -> &'a str { if a.is_empty() { b } else { a } }
@@ -48,11 +48,15 @@ fn say_rpc(sid: &str, t: &MspTurn, text: &str) -> String {
     if !t.effort.is_empty() { p["reasoningEffort"] = json!(t.effort) }
     rpc(4, "turn/start", p)
 }
+/// Msp.model: a resumed session keeps the model it was started on whatever `muse serve --model` says (Muse 1.4.20; 2026-11-15 a thread moved to
+/// muse-ember-1.0 still ran muse-wonder-full-1.0), so the thread's model is set on the session itself; the turn starts once Muse took it.
+fn model_rpc(sid: &str, t: &MspTurn) -> String { rpc(5, "session/setModel", json!({"commandId":uuid(&t.nonce, "4"),"sessionId":sid,"model":{"modelId":t.model}})) }
 fn mode_rpc(sid: &str, t: &MspTurn) -> String { rpc(3, "session/setApprovalMode", json!({"commandId":uuid(&t.nonce, "2"),"sessionId":sid,"mode":t.mode})) }
 /// Msp.say.k: a new session gets Backplane's instructions first; a resumed one is set to the thread's approval mode (it may have changed) first.
 fn say(t: &MspTurn, sid: &str) -> Vec<String> {
     if t.session.is_empty() { vec![say_rpc(sid, t, &format!("<backplane_instructions>\n{}\n</backplane_instructions>\n\n{}", t.prompt, t.text))] }
-    else { vec![mode_rpc(sid, t), say_rpc(sid, t, &t.text)] }
+    else if t.model.is_empty() { vec![mode_rpc(sid, t), say_rpc(sid, t, &t.text)] }
+    else { vec![mode_rpc(sid, t), model_rpc(sid, t)] }
 }
 
 // ---- Replies to our requests ----
@@ -70,6 +74,8 @@ impl Msp {
             (1, true) => Out { send: vec![note("initialized", json!({})), open(t)], ..Default::default() },
             (2, true) => { let sid = o.get("result").and_then(|r| r.get("session")).and_then(|s| s.get("sessionId")).and_then(Value::as_str).unwrap_or(&t.session).to_string();
                 self.sid = sid.clone(); Out { send: say(t, &sid), emit: vec![event("thread.started", json!({"thread_id": sid}))], ..Default::default() } }
+            (5, true) => Out { send: vec![say_rpc(&self.sid, t, &t.text)], ..Default::default() },
+            (5, false) => self.fail(&format!("Muse could not switch this session to {}: {}", t.model, error(o))),
             (1, false) | (2, false) | (4, false) => self.fail(&error(o)),
             _ => Out::default(),
         }
@@ -89,8 +95,20 @@ impl Msp {
                 "agentMessage" => { let t = gs(item, "text"); if !t.trim().is_empty() { out.emit.push(event("item.completed", json!({"item":{"type":"agent_message","text":t}}))) } }
                 "toolCall" => out.emit.push(event("tool.done", json!({"id": gs(item, "itemId")}))),
                 _ => {} },
+            // Muse 1.4: after each model call the session's running totals (`cumulative`, input counting what was read from the cache) and the model that ran it,
+            // and the context it holds; they ride on the turn's end as Codex's usage (2026-11-15: Muse threads recorded none)
+            "session/tokenUsage" => if let Some(c) = p.get("cumulative").filter(|c| c.is_object()) {
+                let g = |k: &str| c.get(k).and_then(Value::as_u64).unwrap_or(0);
+                self.usage = Some(json!({"input_tokens":g("promptTokens"),"cached_input_tokens":g("cacheReadTokens"),"cache_write_input_tokens":g("cacheWriteTokens"),"output_tokens":g("outputTokens"),"model":gs(p, "modelId")}));
+            },
+            "session/contextUsage" => if let (Some(u), Some(w)) = (p.get("usedTokens").and_then(Value::as_u64), p.get("windowTokens").and_then(Value::as_u64)) {
+                self.context = Some(event("context.usage", json!({"used":u,"window":w})));
+            },
             "turn/completed" => { self.done = true;
-                if gs(p, "terminal") == "completed" { out.emit.push(event("turn.completed", json!({}))) }
+                if gs(p, "terminal") == "completed" {
+                    if let Some(c) = self.context.take() { out.emit.push(c) }
+                    out.emit.push(match self.usage.take() { Some(u) => event("turn.completed", json!({"usage":u})), None => event("turn.completed", json!({})) })
+                }
                 else { let why = p.get("error").and_then(|e| e.get("message")).and_then(Value::as_str).map(str::to_string).or_else(|| p.get("reason").and_then(Value::as_str).map(str::to_string)).unwrap_or_else(|| format!("muse turn {}", { let x = gs(p, "terminal"); if x.is_empty() { "failed" } else { x } }));
                     out.emit.push(failed(&hint(&why))) } }
             "session/todoListChanged" => { let xs: Vec<Value> = p.get("items").and_then(Value::as_array).map(|a| a.iter().map(|x| { let s = x.get("status").and_then(Value::as_str).unwrap_or("pending"); let s = if s == "inProgress" { "in_progress" } else { s }; json!({"text":gs(x, "text"),"status":s}) }).collect()).unwrap_or_default();
@@ -163,7 +181,7 @@ pub fn mode(runtime: &str) -> &'static str { mode_k(match runtime { "approval-re
 mod tests {
     use super::*;
     fn j(s: &str) -> Value { serde_json::from_str(s).unwrap() }
-    fn turn(sid: &str) -> MspTurn { MspTurn { cwd: "/tmp/p".into(), mcp: "http://127.0.0.1:1/mcp/t?token=x".into(), prompt: "RULES".into(), text: "hello".into(), session: sid.into(), mode: "promptUnmatched".into(), effort: "".into(), nonce: "1791825557-42".into() } }
+    fn turn(sid: &str) -> MspTurn { MspTurn { cwd: "/tmp/p".into(), mcp: "http://127.0.0.1:1/mcp/t?token=x".into(), prompt: "RULES".into(), text: "hello".into(), session: sid.into(), mode: "promptUnmatched".into(), effort: "".into(), nonce: "1791825557-42".into(), model: "".into() } }
     fn turn_hi(sid: &str) -> MspTurn { MspTurn { mode: "allowAll".into(), effort: "high".into(), nonce: "1791825557-43".into(), ..turn(sid) } }
     fn m(l: &str) -> String { j(l)["method"].as_str().unwrap_or("").to_string() }
     fn p(l: &str) -> Value { j(l)["params"].clone() }
@@ -226,4 +244,28 @@ mod tests {
         let other = s.line(&t, &j(r#"{"jsonrpc":"2.0","id":9,"method":"userInput/request","params":{}}"#)); assert!(other.asks.is_empty() && other.send[0].contains("-32601"));
     }
     #[test] fn msp_modes_law() { assert_eq!(mode_k(0), "promptUnmatched"); assert_eq!(mode_k(3), "allowAll"); assert_eq!(mode("approval-required"), "promptUnmatched"); assert_eq!(mode("auto"), "onRequest"); assert_eq!(mode("full-access"), "allowAll"); }
+    // Muse 1.4.20 (2026-11-15): token and context readings come before the turn's end and are told with it, the session's running totals
+    #[test] fn a_turns_usage_is_its_sessions_totals() {
+        let mut a = Msp { sid: "S1".into(), ..Msp::default() }; let t = MspTurn::default();
+        let ln = |a: &mut Msp, l: &str| a.line(&t, &serde_json::from_str::<Value>(l).unwrap()).emit;
+        assert!(ln(&mut a, r#"{"jsonrpc":"2.0","method":"session/tokenUsage","params":{"sessionId":"S1","modelId":"muse-wonder-full-1.0","cumulative":{"cacheReadTokens":32628,"outputTokens":135,"promptTokens":59852,"totalTokens":59987},"usage":{"inputTokens":59852,"outputTokens":135}}}"#).is_empty());
+        assert!(ln(&mut a, r#"{"jsonrpc":"2.0","method":"session/tokenUsage","params":{"sessionId":"CHILD","cumulative":{"outputTokens":9999,"promptTokens":1}}}"#).is_empty());
+        assert!(ln(&mut a, r#"{"jsonrpc":"2.0","method":"session/contextUsage","params":{"sessionId":"S1","usedTokens":60126,"windowTokens":1007997}}"#).is_empty());
+        assert_eq!(ln(&mut a, r#"{"jsonrpc":"2.0","method":"turn/completed","params":{"sessionId":"S1","terminal":"completed"}}"#), vec![
+            json!({"type":"context.usage","used":60126,"window":1007997}),
+            json!({"type":"turn.completed","usage":{"input_tokens":59852,"cached_input_tokens":32628,"cache_write_input_tokens":0,"output_tokens":135,"model":"muse-wonder-full-1.0"}})]);
+    }
+    // a resumed session is moved to the thread's model before its turn (Muse 1.4.20 keeps a session's first model otherwise)
+    #[test] fn a_resumed_session_takes_the_threads_model_first() {
+        let t = MspTurn { model: "muse-spark-1.3".into(), ..turn("OLD") };
+        let (mut a, o) = opened("OLD", &t);
+        assert_eq!(o.send.len(), 2); assert_eq!(m(&o.send[0]), "session/setApprovalMode"); assert_eq!(m(&o.send[1]), "session/setModel");
+        assert_eq!(p(&o.send[1])["model"], json!({"modelId":"muse-spark-1.3"})); assert_eq!(p(&o.send[1])["sessionId"], "OLD");
+        let ok = a.line(&t, &j(r#"{"id":5,"jsonrpc":"2.0","result":{"status":"accepted"}}"#)); assert_eq!(m(&ok.send[0]), "turn/start"); assert!(ok.send[0].contains("\"text\":\"hello\""));
+        let (mut b, _) = opened("OLD", &t);
+        let no = b.line(&t, &j(r#"{"id":5,"jsonrpc":"2.0","error":{"code":-32602,"message":"unknown model"}}"#));
+        assert!(no.send.is_empty() && b.done); assert!(emits(&no).contains("Muse could not switch this session to muse-spark-1.3: unknown model"));
+        // a new session is started on it by `muse serve --model`: nothing to set
+        let (_, n) = opened("S1", &MspTurn { model: "muse-spark-1.3".into(), ..turn("") }); assert_eq!(m(&n.send[0]), "turn/start");
+    }
 }

@@ -30,7 +30,7 @@ impl Driver for MuseDriver {
     fn argv(&self, a: &TurnIn) -> Vec<String> { args(&a.runtime, &a.model) }
     fn start(&mut self, a: &TurnIn) -> Vec<String> {
         self.runtime = a.runtime.clone();
-        self.turn = msp::MspTurn { cwd: a.cwd.clone(), mcp: a.mcp_url.clone(), prompt: a.prompt.clone(), text: a.text.clone(), session: a.session.clone(), mode: msp::mode(&a.runtime).into(), effort: effort(&a.effort).into(), nonce: nonce(&a.gen) };
+        self.turn = msp::MspTurn { cwd: a.cwd.clone(), mcp: a.mcp_url.clone(), prompt: a.prompt.clone(), text: a.text.clone(), session: a.session.clone(), mode: msp::mode(&a.runtime).into(), effort: effort(&a.effort).into(), nonce: nonce(&a.gen), model: if a.model == "default" { String::new() } else { a.model.clone() } };
         self.st = msp::Msp::new();
         vec![msp::init()]
     }
@@ -254,7 +254,8 @@ mod laws {
         let r = d.on_line(&serde_json::from_str(r#"{"id":1,"result":{}}"#).unwrap());
         assert!(r.send[1].contains("\"session/resume\"") && r.send[1].contains("\"S9\""));
         let r = d.on_line(&serde_json::from_str(r#"{"id":2,"result":{"session":{"sessionId":"S9"}}}"#).unwrap());
-        assert!(r.send[0].contains("setApprovalMode") && r.send[0].contains("promptUnmatched") && r.send[1].contains("\"text\":\"do it\""));
+        assert!(r.send[0].contains("setApprovalMode") && r.send[0].contains("promptUnmatched") && r.send[1].contains("\"session/setModel\"") && r.send[1].contains("\"m1\""), "a resumed session is set to the thread's model first");
+        let r = d.on_line(&serde_json::from_str(r#"{"id":5,"result":{"status":"accepted"}}"#).unwrap()); assert!(r.send[0].contains("\"text\":\"do it\""));
         let f = driver("muse").unwrap(); let _ = f; let mut full = TurnIn { runtime: "full-access".into(), session: String::new(), ..a };
         full.model.clear(); let mut d2 = driver("muse").unwrap().driver; assert_eq!(d2.argv(&full), ["serve", "--trust-workspace", "--disable-sandbox"]); let _ = d2.start(&full);
         let r = d2.on_line(&serde_json::from_str(r#"{"id":1,"result":{}}"#).unwrap()); assert!(r.send[1].contains("\"session/start\"") && r.send[1].contains("\"workspaceRoot\":\"/work/p\"") && r.send[1].contains("allowAll"));
