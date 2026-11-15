@@ -353,8 +353,11 @@ def startup_box():
     if not found:
         return None
     box = found[0]
-    texts = [c["title"] for c in list_child_windows(box) if c.get("title") and c.get("visible")]
-    return {"hwnd": box, "pid": hwnd_pid(box), "class": hwnd_class(box), "title": hwnd_title(box), "text": texts[:8]}
+    # ASCII only: a box's text can hold characters bp-win's console code page cannot print (KiCad's "Load PCB" pads
+    # with U+2002), and printing the named failure must never be what crashes the run (s2bp10-win, Nov 15)
+    plain = lambda t: " ".join(t.encode("ascii", "replace").decode("ascii").replace("?", " ").split())
+    texts = [plain(c["title"]) for c in list_child_windows(box) if c.get("title") and c.get("visible")]
+    return {"hwnd": box, "pid": hwnd_pid(box), "class": hwnd_class(box), "title": plain(hwnd_title(box)), "text": [t for t in texts if t][:8]}
 
 
 def guarded_run(body, client_exe: str, kicad_dir: str) -> int:
