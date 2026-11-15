@@ -18,7 +18,7 @@ pub const WATCH_TAG: u64 = 0x6d67_6d74;
 /// The strip's height, the drag handle's thickness, and the room the design keeps beside an open panel.
 pub const STRIP_H: f32 = 24.0;
 pub const HANDLE: f32 = 5.0;
-pub const KEEP: f32 = 240.0;
+pub const KEEP: f32 = super::viewer::VIEWER_LEAST;
 pub const MIN: f32 = 160.0;
 
 #[derive(Default)]
@@ -51,6 +51,14 @@ pub fn project_for(thread: &Value) -> Option<String> {
 pub fn toggled(st: &Value, id: &str) -> Value { let mut s = st.clone(); s["open"] = json!(if st["open"] == id { "" } else { id }); s }
 /// Whether the hub's state has caught up with a press (the open panel, side and size it asked for).
 pub fn caught_up(hub: &Value, want: &Value) -> bool { hub["open"] == want["open"] && hub["side"] == want["side"] && hub["size"] == want["size"] }
+/// The room an open panel at the design's side asks of the pane (0: none, shut, or docked at the bottom): the pane grows by it at the thread's
+/// cost (screens/viewer.rs `with_panel`), so opening BOM, Checks or Fab does not squeeze the board to a strip.
+pub fn side_room(thread: &Value, m: &Mgmt) -> f32 {
+    if project_for(thread).is_none() { return 0. }
+    let st = m.peek();
+    if st["panels"].as_array().map_or(true, |p| p.is_empty()) || st["open"].as_str().map_or(true, str::is_empty) || st["side"] == "bottom" { return 0. }
+    m.live.unwrap_or(st["size"].as_f64().unwrap_or(400.) as f32).max(MIN)
+}
 /// The panel's drawn size: its size, kept within the room the pane leaves after the design's least.
 pub fn fit(size: f32, avail: f32) -> f32 { size.min(avail - KEEP).max(MIN.min(avail * 0.5)).round() }
 /// A drag of the edge: the new size from where it started. The panel grows as the edge moves away from the pane's right (or bottom) edge.
@@ -191,8 +199,10 @@ pub fn host(app: &mut Backplane, page: AnyElement, window: &mut Window, cx: &mut
     // the panel: its view drawn from the hub's data, or nothing yet
     let data = app.screens.mgmt.data(&open);
     let vp = window.viewport_size();
-    let avail = if bottom { f32::from(vp.height) * 0.8 } else { (super::viewer::pane_width() as f32).max(f32::from(vp.width) * 0.4) };
-    let size = fit(app.screens.mgmt.live.unwrap_or(st["size"].as_f64().unwrap_or(400.) as f32), avail);
+    let asked = app.screens.mgmt.live.unwrap_or(st["size"].as_f64().unwrap_or(400.) as f32);
+    // at the side the pane has grown for the panel (viewer::pane_px, the same sum the pane's frame is made with)
+    let avail = if bottom { f32::from(vp.height) * 0.8 } else { super::viewer::pane_px(app.data["thread"]["viewer"]["open"].as_str().unwrap_or(""), asked.max(MIN)) };
+    let size = fit(asked, avail);
     app.screens.mgmt.panel_w = if bottom { super::viewer::pane_width() as f32 } else { size };
     let body = match VIEWS.iter().find(|v| v.id == open) { Some(v) => (v.body)(app, &data, light, cx), None => div().into_any_element() };
     let handle = div().id("mgmt-edge").flex_shrink_0().bg(c("rule")).hover(|s| s.bg(c("accent")))
@@ -243,8 +253,19 @@ mod tests {
         m.pending = Some((toggled(&want, "life"), Instant::now() - Duration::from_secs(3))); assert_eq!(m.state()["open"], "bom", "a press the hub never answered gives way");
     }
     #[test] fn sizes_keep_room_for_the_design() {
-        assert_eq!(fit(400., 1000.), 400.); assert_eq!(fit(900., 1000.), 760.); assert_eq!(fit(50., 1000.), 160.); assert_eq!(fit(400., 200.), 100.);
+        assert_eq!(fit(400., 1000.), 400.); assert_eq!(fit(900., 1000.), 680.); assert_eq!(fit(50., 1000.), 160.); assert_eq!(fit(400., 200.), 100.);
         assert_eq!(dragged(800., 400., 700.), 500.); assert_eq!(dragged(800., 400., 1200.), MIN);
+    }
+    #[test] fn a_side_panel_asks_the_pane_for_its_room() {
+        let t = json!({"viewer": {"open": "board", "key": "0|/p|x.kicad_pcb", "choices": [{"label": "Board", "value": "board"}]}});
+        let st = |open: &str, side: &str| json!({"open": open, "side": side, "size": 420, "panels": [{"id": "bom", "label": "BOM"}]});
+        let mut m = Mgmt::default(); m.digest = "d".into();
+        assert_eq!(side_room(&t, &m), 0., "the hub has not answered");
+        m.info("mgmt.state.d", &st("", "right").to_string()); assert_eq!(side_room(&t, &m), 0., "shut");
+        m.info("mgmt.state.d", &st("bom", "right").to_string()); assert_eq!(side_room(&t, &m), 420.);
+        m.live = Some(500.); assert_eq!(side_room(&t, &m), 500., "its edge under a drag"); m.live = None;
+        m.info("mgmt.state.d", &st("bom", "bottom").to_string()); assert_eq!(side_room(&t, &m), 0., "at the bottom it takes no width");
+        m.info("mgmt.state.d", &st("bom", "right").to_string()); assert_eq!(side_room(&json!({"viewer": {"open": "files"}}), &m), 0., "no design on show");
     }
     #[test] fn badges() {
         assert_eq!(badge(&json!({"badge": {"n": 3, "tone": "warn"}})), Some(("3".into(), "warn"))); assert_eq!(badge(&json!({"badge": {"n": 0}})), None);

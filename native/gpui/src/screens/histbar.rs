@@ -395,7 +395,8 @@ pub fn bar_el(cx: &mut Context<Backplane>, light: bool, pv: &PlotView, key: &str
         let loading = hist.steps.is_none();
         let title = match (&step, &hist.steps) { (Some(s), _) => hub_words(&s.title), (None, Some(h)) => hub_words(&h.live), (None, None) => trs("Live") };
         let on = |app: &Backplane| app.screens.plotview.hist.steps.as_ref().map_or(0, |h| h.steps.len());
-        let row = div().flex().items_center().gap(px(4.)).min_w_0()
+        // the three words go to a line of their own in a pane too narrow for the row (a panel docked at the side), not cut
+        let row = div().flex().flex_wrap().items_center().gap(px(4.)).min_w_0()
             .child(icon_btn(cx, light, "hist-first", "skip-back", &trs("The first step"), "dim", n > 0, move |app, _| { stop(app); if on(app) > 0 { select(app, Some(0)) } }))
             .child(icon_btn(cx, light, "hist-prev", "chevron-left", &trs("The step before"), "dim", n > 0, move |app, _| { stop(app); let n = on(app); let a = app.screens.plotview.hist.at; select(app, back(a, n)) }))
             .child(icon_btn(cx, light, "hist-play", if hist.playing { "pause" } else { "play" }, &if hist.playing { trs("Pause") } else { trs("Play the steps") }, "accent", n > 0, |app, cx| play(app, cx)))
@@ -404,10 +405,10 @@ pub fn bar_el(cx: &mut Context<Backplane>, light: bool, pv: &PlotView, key: &str
             .child({ let tip = if step.is_none() { hist.steps.as_ref().map_or(String::new(), |h| h.live_tip.clone()) } else { String::new() };
                 let t = div().id("hist-title").mx(px(8.)).min_w_0().flex_shrink().child(div().overflow_hidden().text_ellipsis().whitespace_nowrap().text_color(c("text")).child(title));
                 if tip.is_empty() { t } else { t.tooltip(crate::keys::tip_raw(&hub_words(&tip), "", light)) } })
-            .child(div().flex_1())
+            .child(div().ml_auto().flex_shrink_0().flex().items_center().gap(px(4.))
             .child(btn(cx, light, "hist-diff", &trs("Highlight edits"), hist.diff && at.is_some(), n > 0, &trs("Compare a snapshot with the one before: red removed, yellow changed, green added. From Live, show the latest snapshot."), |app, _| { stop(app); highlight(app) }))
             .child(btn(cx, light, "compare-btn", &trs("Compare"), pv.menu == 1, true, &trs("Compare two versions of the file"), |app, cx| toggle_menu(app, 0, cx)))
-            .child(btn(cx, light, "step-live", &trs("Live"), at.is_none(), at.is_some(), &trs("Back to the file as it is now"), |app, _| { stop(app); select(app, None) }));
+            .child(btn(cx, light, "step-live", &trs("Live"), at.is_none(), at.is_some(), &trs("Back to the file as it is now"), |app, _| { stop(app); select(app, None) })));
         // the scrubber: a tick a step, the live file last, each where it falls in the track
         let span = n.max(1) as f32;
         let mut scrub = div().id("hist-scrub").relative().h(px(18.)).mx(px(8.)).child(div().absolute().left_0().right_0().top(px(8.)).h(px(2.)).bg(c("line")));
