@@ -548,6 +548,16 @@ pub fn recent_unified(st: &State,far: &[(String,&State)],un: &Unified,p: &Value)
             cmds.push(json!({"type":"send","hub":hub,"text":json!({"id":rid,"m":"bots.hook_revoke","p":{"hook":value}}).to_string()}));
             session["rid"]=json!(rid+1);
         },
+        // Delete bot (Settings' button, the page's `delete`: bots/api.rs offers it for this hub's bots but the uberbot; the client asked first):
+        // `bots.delete`, and the window goes back to the start, as a deleted thread's does
+        "bot-delete" if bot_page.is_object() => {
+            if value.is_empty() || text(&bot_page["delete"],"value")!=value || text(&p["target"],"id")!=value { return refused("action.bot-delete-unoffered") }
+            let rid=session["rid"].as_u64().unwrap_or(0);
+            cmds.push(json!({"type":"send","hub":hub,"text":json!({"id":rid,"m":"bots.delete","p":{"bot":value}}).to_string()}));
+            session["rid"]=json!(rid+1);
+            if let Some(o)=session.as_object_mut() { o.remove("route"); }
+            return Some(json!({"remoteReady":false,"nextTarget":{"kind":"recent","id":""},"session":session,"cmds":cmds,"local":p.get("local").cloned().unwrap_or(json!({"local.native.sidebar.pages":"","local.native.sidebar.context":"","local.native.sidebar.key":"","local.native.sidebar.budget":""}))}));
+        },
         "hook-refresh" if bot_page.is_object() => {},
         "task-run"|"task-del" if bot_page.is_object() => {
             let bot=text(&p["target"],"id"); let rid=session["rid"].as_u64().unwrap_or(0);
@@ -1169,6 +1179,19 @@ mod state_tests {
     }
     /// A linked machine's bots and rooms are listed after this hub's, each with its machine's marker; with no uberbot here, the linked machine's
     /// leads in Bub's place, and opening it, a far room or a far bot is a target like a bot here (its chat is its thread there).
+    #[test] fn delete_bot_on_its_page_deletes_the_bot_the_hub_offered_and_goes_back_to_the_start() {
+        let mut st=State::new(); st.lean=true;
+        for e in [json!({"$":"ThreadCreated","id":"t1","project":"","title":"T","at":1}), json!({"$":"BotSet","id":"b1","name":"Scout","thread":"t1","look":1,"at":2})] { event(&mut st,e); }
+        let page=|del: Value| { let mut p=params(); p["target"]=json!({"kind":"bot","id":"b1"}); p["action"]=json!("bot-delete"); p["value"]=json!("b1");
+            p["botPage"]=json!({"kind":"bot","id":"b1","name":"Scout","tab":"settings","tabs":[],"subtabs":[],"chat":"t1","delete":del}); p };
+        let v=recent(&st,&page(json!({"label":"Delete bot","action":"bot-delete","value":"b1"}))).unwrap();
+        assert_eq!(v["nextTarget"],json!({"kind":"recent","id":""}),"{v}");
+        let sent: Vec<&str>=v["cmds"].as_array().unwrap().iter().filter_map(|c|c["text"].as_str()).collect();
+        assert!(sent.iter().any(|t|t.contains("\"bots.delete\"") && t.contains("\"bot\":\"b1\"")),"{sent:?}");
+        // the uberbot's page offers none (bots/api.rs): the action is refused, nothing is sent
+        assert!(recent(&st,&page(Value::Null)).is_none());
+        let mut other=page(json!({"label":"Delete bot","action":"bot-delete","value":"b1"})); other["value"]=json!("b2"); assert!(recent(&st,&other).is_none(),"only the bot on show");
+    }
     #[test] fn a_linked_machines_bots_rooms_and_uberbot_show_here() {
         let mut here=State::new(); here.lean=true;
         for e in [json!({"$":"ThreadCreated","id":"t1","project":"","title":"T","at":1}), json!({"$":"BotSet","id":"b1","name":"Scout","thread":"t1","look":1,"at":2}),
