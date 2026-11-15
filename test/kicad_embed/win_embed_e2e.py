@@ -2437,10 +2437,17 @@ def run_bp9_suite(h: SuiteHarness) -> int:
             {"wait": 4500},
             {"kicad": {"report": True, "tag": "ux_popped"}},
             {"mark": "shot_popped"},
-            {"wait": 1500},
+            {"wait": 4000},  # the harness samples the popped window's foreground and its keys here (Lead, Nov 15)
             {"click": "kicad:popin"},
+            {"wait": 300},
+            {"mark": "back_in"},
             {"wait": 3800},
             {"kicad": {"report": True, "tag": "ux_back"}},
+            {"click": "kicad:popout"},
+            {"wait": 4500},
+            {"mark": "popped2"},
+            {"wait": 7000},  # the harness closes the popped window by its X here, then samples as after Pop back in
+            {"kicad": {"report": True, "tag": "ux_back_x"}},
             {"mark": "ux_done"},
         ]
         cp = h.start_client(script, hold=True, exit_after=360)
@@ -2458,6 +2465,53 @@ def run_bp9_suite(h: SuiteHarness) -> int:
         watcher = threading.Thread(target=_shot_watcher, daemon=True)
         watcher.start()
 
+        # Pop-out, pop-in and closing the popped window by its X: who is in front afterwards (sampled every 20 ms for
+        # 500 ms, never the desktop), and whether a plain F2 then acts in the editor that should have the keys
+        def client_tops():
+            out = []
+            @WNDENUMPROC
+            def cb(hw, _):
+                if hwnd_pid(int(hw or 0)) == cp.pid and u32.IsWindowVisible(hw) and int(hw) != gpui_hwnd:
+                    r = W.RECT(); u32.GetWindowRect(hw, ctypes.byref(r))
+                    if r.right - r.left > 300:
+                        out.append(int(hw))
+                return True
+            u32.EnumWindows(cb, 0)
+            return out
+        def fg_held(expect: int) -> dict:
+            bad = []
+            t0 = time.monotonic()
+            while time.monotonic() - t0 < 0.5:
+                fg = int(u32.GetForegroundWindow() or 0)
+                if fg != expect:
+                    bad.append({"ms": round((time.monotonic() - t0) * 1000), "fg": fg, "class": hwnd_class(fg) if fg else "", "program": os.path.basename(window_program(fg)) if fg else ""})
+                time.sleep(0.02)
+            return {"expect": expect, "outside_samples": len(bad), "first_outside": bad[:4], "held": not bad}
+        def f2_acts(win: int, tag: str) -> dict:
+            r = W.RECT(); u32.GetWindowRect(win, ctypes.byref(r))
+            box = (r.left + 40, r.top + 120, max(1, r.right - r.left - 80), max(1, r.bottom - r.top - 200))
+            a, b = h.p(f"{tag}_f2_0.png"), h.p(f"{tag}_f2_1.png")
+            grab_screen(a); key_tap("F2"); time.sleep(1.0); grab_screen(b)
+            px = img_diff_box(a, b, *box)["changed_pixels"]
+            key_tap("F1"); time.sleep(0.6)
+            return {"f2_changed_px": px, "acts": px > 20000}
+        pop = {}
+        if h.wait_for_mark("shot_popped", timeout_s=150.0):
+            time.sleep(0.35)
+            tops = client_tops()
+            pw = tops[0] if tops else 0
+            pop["out"] = {"popped_window": pw, **fg_held(pw), **(f2_acts(pw, "popout") if pw else {})}
+        if h.wait_for_mark("back_in", timeout_s=60.0):
+            pop["in"] = {**fg_held(gpui_hwnd)}
+            pop["in"].update(f2_acts(gpui_hwnd, "popin"))
+        if h.wait_for_mark("popped2", timeout_s=60.0):
+            tops = client_tops()
+            pw2 = tops[0] if tops else 0
+            if pw2:
+                u32.PostMessageW(pw2, 0x0010, 0, 0)  # WM_CLOSE: its own X, not Pop back in
+                time.sleep(0.4)
+            pop["x"] = {"popped_window": pw2, **fg_held(gpui_hwnd), **f2_acts(gpui_hwnd, "closex")}
+        print("DIAG pop_foreground " + json.dumps(pop), flush=True)
         ux_ok = h.wait_for_mark("ux_done", timeout_s=175.0)
         watcher.join(timeout=2.0)
         h.shot("02b_popped_back_in")
@@ -2516,6 +2570,12 @@ def run_bp9_suite(h: SuiteHarness) -> int:
             and shown_frame_of(bk).get("painted", 0) > 0,
             {"bk_top": bk.get("toplevel"), "bk_shown": shown_frame_of(bk)},
         )
+        h.check("Pop out: the popped window is in front throughout (sampled 500 ms) and a plain F2 acts in its editor",
+                bool(pop.get("out", {}).get("held")) and bool(pop.get("out", {}).get("acts")), pop.get("out"))
+        h.check("Pop back in: Backplane's window is in front throughout, never the desktop (sampled 500 ms), and a plain F2 acts in the editor",
+                bool(pop.get("in", {}).get("held")) and bool(pop.get("in", {}).get("acts")), pop.get("in"))
+        h.check("Closing the popped window by its X ends as Pop back in: Backplane in front throughout, F2 acts in the editor",
+                bool(pop.get("x", {}).get("held")) and bool(pop.get("x", {}).get("acts")), pop.get("x"))
 
         h.wait_for_ipc(api_sock, timeout_s=20.0)
 
