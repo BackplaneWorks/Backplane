@@ -79,6 +79,62 @@ mv "$tmp/bin" "$dest/$name"
 echo "Installed in $dest/$name"
 "#;
 
+/// FreeCAD's own release for Linux and macOS, from its GitHub releases, into `$2` (the hub's `freecad` folder, where `freecad/command` names
+/// the console program the hub then finds: kicad/stepglb.rs `freecad_cmd`). `$1`: Linux-x86_64, Linux-aarch64, macOS-arm64 or macOS-x86_64.
+/// The digest GitHub lists for the asset is checked before anything is placed. Linux: the AppImage is unpacked (`--appimage-extract`: no
+/// FUSE is needed, and the console program runs from the unpacked tree). macOS: FreeCAD.app is copied out of the disk image. No
+/// administrator password, and nothing outside that folder is changed.
+pub const FREECAD_SH: &str = r#"set -eu
+sys=$1; dest=$2
+fail() { echo "$*" >&2; exit 1; }
+if command -v curl >/dev/null 2>&1; then get() { curl --proto '=https' --tlsv1.2 -fsSL -o "$1" "$2"; }
+elif command -v wget >/dev/null 2>&1; then get() { wget -q --https-only -O "$1" "$2"; }
+else fail 'curl or wget is needed to download FreeCAD, and neither was found'; fi
+case "$sys" in Linux-*) ext=AppImage ;; macOS-*) ext=dmg ;; *) fail "No FreeCAD download for $sys" ;; esac
+mkdir -p "$dest"
+tmp=$(mktemp -d "$dest/.partial.XXXXXX"); mnt=
+cleanup() { if [ -n "$mnt" ]; then hdiutil detach "$mnt" -quiet >/dev/null 2>&1 || true; fi; rm -rf "$tmp"; }
+trap cleanup 0
+echo 'Looking up the latest FreeCAD release'
+get "$tmp/rel.json" https://api.github.com/repos/FreeCAD/FreeCAD/releases/latest || fail 'Could not read the FreeCAD release list'
+# the API answers on one line: one field per line, then the tag, the asset's name and the digest that follows it
+tr ',{}' '\n\n\n' < "$tmp/rel.json" | tr -d ' \r' > "$tmp/fields"
+tag=$(sed -n 's/^"tag_name":"\([^"]*\)".*/\1/p' "$tmp/fields" | head -n 1)
+asset=$(sed -n 's/^"name":"\(FreeCAD_[^"]*-'"$sys"'-[^"]*\.'"$ext"'\)"$/\1/p' "$tmp/fields" | head -n 1)
+[ -n "$tag" ] && [ -n "$asset" ] || fail "The latest FreeCAD release has no download for $sys"
+case "$tag$asset" in *[!A-Za-z0-9._-]*) fail 'Unexpected FreeCAD release name' ;; esac
+want=$(awk -v n="\"name\":\"$asset\"" '$0==n { f=1 } f && index($0, "\"digest\":\"sha256:") == 1 { sub(/^"digest":"sha256:/, ""); sub(/".*/, ""); print; exit }' "$tmp/fields")
+[ "${#want}" -eq 64 ] || fail "The FreeCAD release lists no checksum for $asset"
+[ ! -e "$dest/$tag" ] || fail "$dest/$tag already exists; remove it and try again"
+echo "Downloading FreeCAD $tag"
+get "$tmp/pkg" "https://github.com/FreeCAD/FreeCAD/releases/download/$tag/$asset" || fail "Could not download $asset"
+echo 'Checking the checksum'
+if command -v sha256sum >/dev/null 2>&1; then got=$(sha256sum "$tmp/pkg" | cut -d' ' -f1); else got=$(shasum -a 256 "$tmp/pkg" | cut -d' ' -f1); fi
+[ "$want" = "$got" ] || fail 'FreeCAD checksum mismatch'
+echo 'Unpacking'
+if [ "$ext" = AppImage ]; then
+  chmod +x "$tmp/pkg"
+  (cd "$tmp" && ./pkg --appimage-extract >/dev/null 2>&1) || fail 'Could not unpack the FreeCAD AppImage'
+  [ -x "$tmp/squashfs-root/usr/bin/freecadcmd" ] || fail 'The FreeCAD AppImage holds no freecadcmd'
+  mv "$tmp/squashfs-root" "$dest/$tag"
+  cmd="$dest/$tag/usr/bin/freecadcmd"
+else
+  mnt="$tmp/mnt"; mkdir "$mnt"
+  hdiutil attach "$tmp/pkg" -nobrowse -readonly -mountpoint "$mnt" -quiet || fail 'Could not open the FreeCAD disk image'
+  [ -d "$mnt/FreeCAD.app" ] || fail 'The FreeCAD disk image holds no FreeCAD.app'
+  mkdir "$tmp/out" && cp -R "$mnt/FreeCAD.app" "$tmp/out/" || fail 'Could not copy FreeCAD.app'
+  mv "$tmp/out" "$dest/$tag"
+  cmd="$dest/$tag/FreeCAD.app/Contents/Resources/bin/freecadcmd"
+  [ -x "$cmd" ] || fail 'FreeCAD.app holds no freecadcmd'
+fi
+printf '%s\n' "$cmd" > "$tmp/command" && mv "$tmp/command" "$dest/command"
+echo "Installed in $dest/$tag"
+"#;
+/// FreeCAD's release name for a system (`FREECAD_SH`'s first argument), None where it has none.
+pub fn freecad_sys(os: &str, arch: &str) -> Option<&'static str> {
+    match (os, arch) { ("linux", "x64") => Some("Linux-x86_64"), ("linux", "arm64") => Some("Linux-aarch64"), ("darwin", "arm64") => Some("macOS-arm64"), ("darwin", "x64") => Some("macOS-x86_64"), _ => None }
+}
+
 /// Codex's release asset for a system: (asset, the name it is given, kind). Hub `os` and `arch` words (linux, darwin, windows; x64, arm64).
 pub fn codex_asset(os: &str, arch: &str) -> Option<(&'static str, &'static str, &'static str)> {
     match (os, arch) {
@@ -113,7 +169,8 @@ pub fn plan(tool: &str, os: &str, arch: &str, winget: bool, node: bool) -> Optio
         // Git for Windows: the hub's shell commands and (until the fetch in Rust reaches Windows) KiCad's download run in its sh
         "git" if os == "windows" && winget => Some(Plan::Winget("Git.Git")),
         "git" if os == "windows" => Some(Plan::Link("https://git-scm.com/download/win")),
-        "freecad" => match os { "windows" if winget => Some(Plan::Winget("FreeCAD.FreeCAD")), _ => Some(Plan::Link("https://www.freecad.org/downloads.php")) },
+        // Linux and macOS: FreeCAD's own release into the hub's folder (`start` adds that folder); Windows: winget, else its page
+        "freecad" => match (os, freecad_sys(os, arch)) { ("windows", _) if winget => Some(Plan::Winget("FreeCAD.FreeCAD")), (_, Some(sys)) => Some(Plan::Sh(FREECAD_SH, vec![sys.into()])), _ => Some(Plan::Link("https://www.freecad.org/downloads.php")) },
         "claude" if unix => Some(Plan::Sh(VENDOR_SH, vec![CLAUDE_SH.into()])),
         "claude" if os == "windows" => Some(Plan::Ps(CLAUDE_PS)),
         "grok" if unix => Some(Plan::Sh(VENDOR_SH, vec![GROK_SH.into()])),
@@ -153,6 +210,8 @@ pub fn command(p: &Plan) -> Option<(String, Vec<String>)> {
 pub async fn start(hub: &Arc<Hub>, tool: &str, winget: bool, node: bool, after: impl FnOnce(Arc<Hub>) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send + 'static) -> Result<String, String> {
     if crate::copy::on() { return Err("a copy of the log installs nothing".into()) }
     let Some(p) = plan(tool, &hub.cfg.os, &hub.cfg.arch, winget, node) else { return Err(format!("{tool} has no install button; follow its guide")) };
+    // FreeCAD's own release goes into the hub's folder, where the hub then finds it (freecad/command)
+    let p = match p { Plan::Sh(s, mut a) if tool == "freecad" => { a.push(hub.cfg.home.join("freecad").to_string_lossy().into_owned()); Plan::Sh(s, a) } p => p };
     let Some((prog, args)) = command(&p) else { return Err("open its download page".into()) };
     if STATE.lock().unwrap().get(tool).map_or(false, |(s, _)| s == "running") { return Err(format!("{tool} is being installed already")) }
     let tool = tool.to_string(); let name = tool.clone();
@@ -202,7 +261,9 @@ mod tests {
             ("tailscale", "linux", "x64", false, false, |p| *p == Plan::Link("https://tailscale.com/download/linux")),
             ("freecad", "windows", "x64", true, false, |p| *p == Plan::Winget("FreeCAD.FreeCAD")),
             ("freecad", "windows", "x64", false, false, |p| matches!(p, Plan::Link(u) if u.contains("freecad.org"))),
-            ("freecad", "linux", "x64", true, false, |p| matches!(p, Plan::Link(_))),
+            ("freecad", "linux", "x64", true, false, |p| matches!(p, Plan::Sh(s, a) if *s == FREECAD_SH && a == &["Linux-x86_64"])),
+            ("freecad", "darwin", "arm64", false, false, |p| matches!(p, Plan::Sh(s, a) if *s == FREECAD_SH && a == &["macOS-arm64"])),
+            ("freecad", "freebsd", "x64", false, false, |p| matches!(p, Plan::Link(_))),
         ];
         for (tool, os, arch, winget, node, ok) in cases { let p = plan(tool, os, arch, *winget, *node).unwrap_or_else(|| panic!("{tool} {os}")); assert!(ok(&p), "{tool} {os} {arch}: {p:?}"); }
         assert_eq!(plan("pi", "linux", "x64", false, false), None, "no button for a tool with no installer we know");
