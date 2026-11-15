@@ -93,7 +93,7 @@ impl Echo {
 
 /// The settings dialog's own state (the hub keeps the page; this keeps the list the left nav shows and what is typed in its search).
 #[derive(Default)]
-pub struct SettingsUi { pub accounts: bool, pub nav: Vec<(String, String)>, pub page: String, pub q: String, pub search: Option<Entity<Composer>>, pub auto: bool, pub open_local: bool, pub device: bool, /** the Hubs page of this device */ pub hubs: bool }
+pub struct SettingsUi { pub accounts: bool, pub nav: Vec<(String, String)>, /** page -> the labels of its rows, one a line (the hub's `words`): what the search finds besides titles */ pub words: HashMap<String, String>, pub page: String, pub q: String, pub search: Option<Entity<Composer>>, pub auto: bool, pub open_local: bool, pub device: bool, /** the Hubs page of this device */ pub hubs: bool }
 /// The pages in the order and groups the nav shows them (the hub's menu order, grouped with a divider between groups). An unknown page goes last.
 const GROUPS: [&[&str]; 5] = [&["appearance", "threads", "notifications", "agents", "mcp", "writing"], &["cad", "ordering", "devices"], &["network", "voice", "keys", "timezone"], &["rules"], &["usage", "setup", "about", "privacy"]];
 pub fn group_of(page: &str) -> usize { GROUPS.iter().position(|g| g.contains(&page)).unwrap_or(GROUPS.len()) }
@@ -203,6 +203,12 @@ pub fn shown(rows: &[Row]) -> Shown {
 pub fn nav_order(items: &[(String, String)]) -> Vec<(String, String)> { let mut v = items.to_vec(); v.sort_by_key(|(p, _)| group_of(p)); v }
 /// Whether a nav title matches what is typed in the search (an empty search matches all).
 pub fn nav_matches(title: &str, q: &str) -> bool { let q = q.trim().to_lowercase(); q.is_empty() || title.to_lowercase().contains(&q) }
+/// The hub's menu rows' `words` by page (older hubs send none: the search then matches titles only).
+pub fn menu_words(rows: &Value) -> HashMap<String, String> {
+    rows.as_array().into_iter().flatten().filter_map(|r| { let b = r["buttons"].as_array()?.iter().find(|b| b["action"] == "settings-page" && b["value"].as_str().map_or(false, |v| !v.is_empty()))?; Some((b["value"].as_str()?.to_string(), r["words"].as_str()?.to_string())) }).collect()
+}
+/// Whether a page holds a setting whose name matches the search: any of its rows' labels (the hub's `words`), as written or as this language shows it.
+pub fn words_match(words: &str, q: &str) -> bool { let q = q.trim().to_lowercase(); !q.is_empty() && words.lines().any(|l| l.to_lowercase().contains(&q) || trs(l).to_lowercase().contains(&q)) }
 
 pub struct FieldSlot { pub input: Entity<Composer>, pub vault: bool, pub hub: String, echo: Echo, pending: Option<String>, timer: bool }
 
@@ -256,8 +262,9 @@ fn sync_nav(this: &mut Backplane, rows: &[Row], cx: &mut Context<Backplane>) {
     }
     if let Shown::Menu(items) = shown(rows) {
         let nav = nav_order(&items);
+        let words = menu_words(&this.data["settings"]["rows"]);
         let ui = &mut this.screens.settings_ui;
-        ui.nav = nav;
+        ui.nav = nav; ui.words = words;
         if !ui.auto { ui.auto = true; if let Some((p, _)) = ui.nav.first().cloned() { ui.page = p.clone(); let _ = this.tx.try_send(Command::Action("settings-page".into(), p)); } }
     }
 }
@@ -526,7 +533,7 @@ pub fn view(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, F
     }
     let mut last = usize::MAX;
     let title_now = rows.first().map(|r| r.label.clone()).unwrap_or_default();
-    for (n, (page, t_nav)) in ui.nav.iter().enumerate().filter(|(_, (_, t))| hub_on && nav_matches(t, &ui.q)) {
+    for (n, (page, t_nav)) in ui.nav.iter().enumerate().filter(|(_, (p, t))| hub_on && (nav_matches(t, &ui.q) || ui.words.get(p).map_or(false, |w| words_match(w, &ui.q)))) {
         let title = t_nav;
         let g = group_of(page);
         if last != usize::MAX && g != last { nav = nav.child(div().my_2().mx_2().h(px(1.)).bg(c("line"))); }
@@ -718,6 +725,13 @@ mod tests {
         assert_eq!(shown(&[back, row("Theme", "")]), Shown::Page);
         assert_eq!(shown(&[row("Theme", ""), row("Language", "")]), Shown::Other);
         assert_eq!(shown(&[]), Shown::Other);
+    }
+    #[test] fn the_search_finds_a_page_by_a_setting_it_holds() {
+        let words = "Theme\nThread list\nGroup projects";
+        assert!(words_match(words, "group") && words_match(words, " Group Projects ") && words_match(words, "thread"));
+        let m = menu_words(&serde_json::json!([{"label":"Appearance","words":words,"buttons":[{"action":"settings-page","value":"appearance"}]},{"label":"Voice","buttons":[{"action":"settings-page","value":"voice"}]}]));
+        assert_eq!(m.len(), 1); assert_eq!(m["appearance"], words);
+        assert!(!words_match(words, "voice") && !words_match(words, "") && !words_match("", "group"), "an empty search is the titles' to match");
     }
     #[test] fn every_page_has_an_icon_in_the_set_and_the_search_filters_titles_by_substring() {
         let icons: Vec<String> = ["sun", "message-square", "bell", "cpu", "square-pen", "circuit-board", "shopping-cart", "link", "globe", "mic", "code", "clock", "circle-check", "gauge", "book", "file-text", "settings", "search", "x", "plug"].iter().map(|s| s.to_string()).collect();
