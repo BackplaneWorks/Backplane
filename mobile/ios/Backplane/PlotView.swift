@@ -477,7 +477,9 @@ final class PlotRenderer: NSObject, MTKViewDelegate {
 
     private func hi(_ cb: MTLCommandBuffer, _ t: MTLTexture, _ u: inout Uniforms) {
         guard hiCount.0 + hiCount.1 > 0 else { return }
-        layer(cb, t, &u, color: SIMD4(1, 1, 1, 0.8), caps: [(hiCaps, 0..<hiCount.0, 1)], tris: [(hiTris, 0..<hiCount.1, 1)])
+        // white on a dark page; on a light page white only fades the lit piece away, so there it is the accent blue
+        let light = 0.299 * bg.x + 0.587 * bg.y + 0.114 * bg.z > 0.5
+        layer(cb, t, &u, color: light ? SIMD4(0.114, 0.435, 0.839, 1) : SIMD4(1, 1, 1, 0.8), caps: [(hiCaps, 0..<hiCount.0, 1)], tris: [(hiTris, 0..<hiCount.1, 1)])
     }
 
     func draw(in view: MTKView) {
