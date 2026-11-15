@@ -102,6 +102,14 @@ pub fn warm_target(project: String, root: String) -> String {
 /// Whether the pre-warm may start by itself on an idle pane (2 s after the first editor is placed, with no new placement): everywhere but
 /// Windows, and there only on a runtime whose pre-warm never takes the keyboard from the shown editor (`prewarm-keeps-focus`).
 pub fn idle_prewarm(windows: bool, keeps_focus: bool) -> bool { !windows || keeps_focus }
+/// Whether KiCad's focus notice (`took`) may still pull the keyboard back after it moved to Backplane's window: an X11
+/// workaround for a window manager that focuses on click (i3) handing the keyboard straight back. Never on Windows,
+/// where nothing hands it back and the move to Backplane is the person's own click (bp-win, Nov 15: a click in the
+/// composer within 600 ms of a canvas click sent the typing to KiCad); never once a button went down in Backplane's
+/// own window after the notice (a deliberate click into Backplane is never the window manager), and only within 600 ms.
+pub fn took_applies(windows: bool, since_took: std::time::Duration, pressed_out_after: bool) -> bool {
+    !windows && !pressed_out_after && since_took < std::time::Duration::from_millis(600)
+}
 
 /// Path without any file extension on its final segment (dots in parent folder names are preserved).
 pub fn path_stem(s: &str) -> &str {
@@ -239,6 +247,8 @@ pub struct KicadPane {
     dialogs_open: Vec<String>,
     /// the frame KiCad gave the keyboard to on a click, and when (a click-to-focus window manager may take it back at once)
     took: Option<(u64, std::time::Instant)>,
+    /// When a button last went down in Backplane's own window outside the pane (`on_mouse_down_out`): voids `took`
+    pressed_out: Option<std::time::Instant>,
     /// fork: a press over the editor, its keyboard given on the release (a focus change mid-press made KiCad lose the release: it took the
     /// click for a long press and opened Clarify Selection, which then held the keyboard)
     press_focus: Option<u64>,
@@ -308,7 +318,7 @@ impl KicadPane {
             let _ = drained_tx.send(());
         } }).detach();
         KicadPane { busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), last_root: (i32::MIN, 0), placed: None,
-            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), poked: None, unmapped_since: None, unshown_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, at_px: None, dialogs_open: Vec::new(), took: None, press_focus: None, want_keys: true, refocus: None, verify_handin: None, prewarm_guard: None, unexplained_reposted: false, focus_seen: (0, 0), was_dialog: false }
+            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), poked: None, unmapped_since: None, unshown_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, at_px: None, dialogs_open: Vec::new(), took: None, pressed_out: None, press_focus: None, want_keys: true, refocus: None, verify_handin: None, prewarm_guard: None, unexplained_reposted: false, focus_seen: (0, 0), was_dialog: false }
     }
     fn rpc(&self, name: &str, params: Value) { let _ = self.hub.try_send(Command::Rpc(name.to_string(), Secret(params), "kicad")); }
     /// The hub's `editor.kicad.<digest>` for this project changed.
@@ -694,7 +704,10 @@ impl KicadPane {
         // KiCad took the keyboard on a click (`_BACKPLANE_FOCUS`) and a window manager that focuses on click (i3) gave it straight back to
         // Backplane's window: the click was KiCad's, so is the keyboard (once, within moments of it)
         if !has && self.keys {
-            if let Some((w, at)) = self.took.take() { if at.elapsed() < std::time::Duration::from_millis(600) { nc::focus(w); has = true; } }
+            if let Some((w, at)) = self.took.take() {
+                let pressed_out_after = self.pressed_out.is_some_and(|p| p >= at);
+                if took_applies(cfg!(windows), at.elapsed(), pressed_out_after) { nc::focus(w); has = true; }
+            }
         }
         if has != self.keys && std::env::var_os("BACKPLANE_KICAD_DEBUG").is_some() {
             eprintln!("GPUI_LOG {}", json!({"kicad_keys_flip": {"to": has, "in_dialog": in_dialog, "has_focus": nc::has_focus(c), "why": nc::focus_debug(c)}}));
@@ -917,6 +930,7 @@ impl Render for KicadPane {
         div().id("kicad-pane").size_full().relative().bg(rgb(0x001023)).track_focus(&focus)
             .on_mouse_down_out(cx.listener(|this, _, _, cx| {
                 this.took = None;
+                this.pressed_out = Some(std::time::Instant::now());
                 if this.keys {
                     nc::focus(this.toplevel);
                     this.keys = false;
@@ -954,6 +968,13 @@ mod tests {
         assert!(super::prewarm_builds_nothing(&json!({"ok": false, "error": "x"})), "an error");
         assert!(!super::prewarm_builds_nothing(&json!({"ok": true, "prewarming": ["SCH"]})));
         assert!(!super::prewarm_builds_nothing(&json!({"ok": true, "prewarming": true})), "an older hub's memory refusal: indistinguishable, kept");
+    }
+    #[test] fn took_never_pulls_the_keys_back_on_windows_or_after_a_click_into_backplane() {
+        use std::time::Duration;
+        assert!(super::took_applies(false, Duration::from_millis(100), false), "X11, WM handed it back at once: KiCad's");
+        assert!(!super::took_applies(true, Duration::from_millis(100), false), "Windows: nothing hands it back; it was the person's click");
+        assert!(!super::took_applies(false, Duration::from_millis(100), true), "a click into Backplane after the notice is the person's");
+        assert!(!super::took_applies(false, Duration::from_millis(700), false), "too long after the notice");
     }
     #[test] fn idle_prewarm_waits_on_windows_without_prewarm_keeps_focus() {
         assert!(super::idle_prewarm(false, false), "Linux: the pre-warm starts by itself");
