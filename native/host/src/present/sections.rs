@@ -332,27 +332,30 @@ fn project_row(st: &State, c: &Ctx, p: &MergedProject, ths: &[Th], gid: &str, gr
     let mut shown: Vec<&Th> = ths.iter().filter(|f| if q.is_empty() { !f.needs && ((f.show && !f.kid) || (!c.selected.is_empty() && f.t.id == c.selected)) } else { crate::sidebar::word_hit(&f.t.title, q) }).collect();
     // a pinned thread is a fixed row of its project: first, where it was pinned, whatever runs or stops below it (and never cut by UNDER)
     if q.is_empty() { shown.sort_by_key(|f| pin_rank(f)); }
-    // folded by the person: no rows under it but its pins (a search opens it, as it opens the section folds); its counts stay on the row.
-    // A pinned thread is part of the project, not of what comes and goes under it: no fold hides it (the person, 2026-11-15: "pinned thread
-    // should not be collapsible at all ... stay statically there")
-    let folded = folded_at(st, &p.key) > 0 && q.is_empty();
-    let under: Vec<Value> = shown.iter().take(UNDER).map(|f| thread_row(c.hub, c.now, p, f)).collect();
-    let pins = shown.iter().take(UNDER).filter(|f| f.t.pinned).count();
-    let rows: Vec<Value> = if folded { under[..pins].to_vec() } else { under.clone() };
+    // At most its two pins and one other: the thread that runs (the newest live one), else the one on show, else the newest stop that
+    // still wants a look. Nothing folds: the rows under a project are few and fixed, so there is no chevron (the person, 2026-11-15: "the
+    // max number of threads viewable under a project are 2 pinned plus one active ... it should not be collapsible anyway")
+    if q.is_empty() {
+        let mut other: Vec<&Th> = shown.iter().filter(|f| !f.t.pinned).copied().collect();
+        other.sort_by_key(|f| (!crate::state::visible::live(f.word), f.t.id != c.selected, std::cmp::Reverse(f.t.activity)));
+        let pins: Vec<&Th> = shown.iter().filter(|f| f.t.pinned).take(crate::commands::plan::PINS).copied().collect();
+        shown = pins.into_iter().chain(other.into_iter().take(1)).collect();
+    }
+    let rows: Vec<Value> = shown.iter().take(UNDER).map(|f| thread_row(c.hub, c.now, p, f)).collect();
     r["id"] = json!(qid(c.hub, &pid_of(p)));
     r["title"] = json!(p.name);
     r["pinned"] = json!(pinned_at(st, &p.key) > 0);
     r["threads"] = json!(rows); r["more"] = json!(ths.len().saturating_sub(rows.len()));
-    // threads of it with no row in the sidebar (settled, or past the first rows): on its page, counted on its row so none seems lost
-    r["rest"] = json!(ths.iter().filter(|f| !f.needs && !f.kid && !f.t.title.is_empty()).count().saturating_sub(rows.len()));
+    // no count of the threads it does not list: a bare number on the row read as noise (the person, 2026-11-15); they are on its page
+    r["rest"] = json!(0);
     // its live swarms, above its threads (a swarm that needs the person is in Needs you, not repeated here)
     let sw = swarms_of(p, c);
     r["running"] = json!(running + sw.iter().filter(|x| x.1 == "running").count());
     r["needsCount"] = json!(needs + sw.iter().filter(|x| x.1 != "running").count());
     let live: Vec<Value> = sw.into_iter().filter(|x| x.1 == "running").map(|x| x.0).collect();
-    // the fold: `fold` the action a chevron sends (with `nav`), `folded` its state, `under` how many rows it hides or would hide (no chevron at 0, open)
-    r["fold"] = json!("project-fold"); r["folded"] = json!(folded); r["under"] = json!(under.len() - pins + live.len());
-    r["swarms"] = json!(if folded { vec![] } else { live });
+    // no fold (an older client draws a chevron only for a `fold` action with rows to hide: none)
+    r["fold"] = json!(""); r["folded"] = json!(false); r["under"] = json!(0);
+    r["swarms"] = json!(live);
     r["group"] = json!(gid);
     r["archived"] = json!(made_quiet(st, p)); r["quiet"] = json!(is_quiet(st, p, c.now));
     r["menu"] = project_menu(st, p, gid, groups, c.now);

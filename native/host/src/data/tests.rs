@@ -77,11 +77,13 @@ async fn ask(ws: &mut Ws, id: u64, m: &str, p: Value) -> Value {
     let r = ask(&mut ws, 1, "projects.list", json!({})).await; let ps = r["result"]["projects"].as_array().unwrap();
     assert_eq!(ps.iter().map(|p| p["id"].as_str().unwrap()).collect::<Vec<_>>(), ["p2", "p1"].iter().map(|x| *x).collect::<Vec<_>>().iter().map(|x| *x).collect::<Vec<_>>(), "recent first: p2 holds the newest thread");
     let p1 = ps.iter().find(|p| p["id"] == "p1").unwrap(); assert_eq!((p1["threadCount"].as_u64(), p1["waiting"].as_u64(), p1["root"].as_str()), (Some(2), Some(1), Some("/tmp/alpha")));
-    let r = ask(&mut ws, 2, "threads.list", json!({"limit":1})).await; let ts = &r["result"]["threads"]; assert_eq!(ts[0]["id"], "t2"); let next_c = r["result"]["next"].as_str().unwrap().to_string();
+    // (t3 was archived: an archive is a settle now, state/mod.rs, so it is listed like any settled thread, newest first)
+    let r = ask(&mut ws, 2, "threads.list", json!({"limit":1})).await; let ts = &r["result"]["threads"]; assert_eq!(ts[0]["id"], "t3"); let next_c = r["result"]["next"].as_str().unwrap().to_string();
+    let r = ask(&mut ws, 17, "threads.list", json!({"limit":1,"before":next_c})).await; assert_eq!(r["result"]["threads"][0]["id"], "t2"); let next_c = r["result"]["next"].as_str().unwrap().to_string();
     let r = ask(&mut ws, 3, "threads.list", json!({"limit":1,"before":next_c})).await; let t = &r["result"]["threads"][0]; assert_eq!(t["id"], "t1"); assert!(r["result"]["next"].is_null());
     assert_eq!((t["state"].as_str(), t["waiting"].as_u64(), t["preview"].as_str()), (Some("asking"), Some(1), Some("hi, how can I help with this long reply that goes on")), "an open ask makes the thread asking; the preview is the last thing said");
-    let r = ask(&mut ws, 4, "threads.list", json!({"archived":true})).await; assert_eq!(r["result"]["threads"].as_array().unwrap().len(), 1); assert_eq!(r["result"]["threads"][0]["id"], "t3");
-    let r = ask(&mut ws, 5, "threads.list", json!({"project":"p2"})).await; assert!(r["result"]["threads"].as_array().unwrap().is_empty(), "t3 is archived");
+    let r = ask(&mut ws, 4, "threads.list", json!({"archived":true})).await; assert!(r["result"]["threads"].as_array().unwrap().is_empty(), "nothing is archived any more");
+    let r = ask(&mut ws, 5, "threads.list", json!({"project":"p2"})).await; assert_eq!(r["result"]["threads"][0]["id"], "t3", "t3 is listed on its project, not lost");
     let r = ask(&mut ws, 6, "nope", json!({})).await; assert_eq!(r["ok"], false);
 }
 #[tokio::test(flavor = "multi_thread", worker_threads = 2)] async fn data_entries_newest_page_first_with_asks_and_the_live_reply() {

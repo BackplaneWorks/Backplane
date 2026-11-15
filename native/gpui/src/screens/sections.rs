@@ -80,7 +80,7 @@ fn project(this: &Backplane, cx: &mut Context<Backplane>, light: bool, p: &Value
     /* i18n-ok: a ctl label */ ctl.push(CtlEntry { id: format!("project-pin:{pid}"), label: if pinned { "Unpin project".into() } else { "Pin project".into() }, ctl: Ctl::Node("project-pin".into(), key.clone()) });
     crate::ui::with_rect(div().id(SharedString::from(format!("sproj-{pid}"))), { let p = pid.clone(); move || format!("project:{p}") })
         .when(faded || p["off"] == true, |d| d.opacity(0.55)).flex().items_center().gap_2().pl(px(6.)).pr_3().h(crate::scale::tpx(30.)).text_size(crate::scale::tpx(13.))
-        .border_l_2().border_color(if on_page { c("accent") } else { c("panel") }).when(on_page, |d| d.bg(c("raise"))).cursor_pointer().hover(|s| s.bg(c("raise")))
+        .border_l_2().border_color(if on_page { c("accent") } else { transparent_black().into() }).when(on_page, |d| d.bg(c("raise"))).cursor_pointer().hover(|s| s.bg(c("raise")))
         .on_hover({ let p = pid.clone(); cx.listener(move |this, on: &bool, _, _| { if *on { this.screens.side_hover = Some(p.clone()) } else if this.screens.side_hover.as_deref() == Some(p.as_str()) { this.screens.side_hover = None } }) })
         .on_click(cx.listener(move |this, _, w, cx| { w.focus(&this.screens.side_focus); this.go("project-page", key2.clone(), cx); this.open_project(pid2.clone(), cx); }))
         .on_mouse_down(MouseButton::Right, cx.listener(move |this, e: &MouseDownEvent, _, cx| {

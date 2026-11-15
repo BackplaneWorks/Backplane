@@ -174,8 +174,10 @@ impl Backplane {
                 ctl.push(CtlEntry { id: format!("thread:{raw}"), label: string(t, "title"), ctl: Ctl::Select(id.clone()) });
                 let (depth, kids, open) = (t["depth"].as_u64().unwrap_or(0).min(6) as f32, t["children"].as_u64().unwrap_or(0), t["expanded"].as_bool().unwrap_or(false));
                 // only a project's tree unfolds: an Active-view or Conversation-history row with subthreads has no rows to show under it, so no chevron
-                let tree = sub.is_empty() && !pid.is_empty();
-                let gutter = 6. + depth * 14. + 16.; // the indent and the chevron's slot
+                // a row under its project row (`under`, the sections) is one of its few fixed rows: no tree of its own either
+                let under = t["under"] == true;
+                let tree = sub.is_empty() && !pid.is_empty() && !under;
+                let gutter = if under { 44. } else { 6. + depth * 14. + 16. }; // the indent and the chevron's slot (under a project: its title lines up with the project's name, the L hangs from the project's icon)
                 // the chevron's target is the row's full height and the whole gutter left of the dot (the arrow alone, 16 x 14, was easy to miss: a near miss selected the thread)
                 let toggle = (kids > 0 && tree).then(|| {
                     let tid = id.clone();
@@ -187,22 +189,25 @@ impl Backplane {
                 let pin = crate::screens::siderow::pin_button(cx, light, t, pin_group.clone());
                 { let (action, value) = crate::screens::siderow::pin_press(t); ctl.push(CtlEntry { id: format!("pin:{raw}"), label: action.into(), ctl: Ctl::Node(action.into(), value) }); }
                 with_rect(div().id(SharedString::from(format!("thread-{id}"))), || format!("thread:{raw}")).group(pin_group).flex().items_center().gap_2().pr_3().h(crate::scale::tpx(32.)).when(faded || t["off"] == true, |d| d.opacity(0.55))
-                    .border_l_2().border_color(if selected { c("accent") } else { c("panel") })
-                    .bg(if selected { c("raise") } else { c("panel") }).hover(|s| s.bg(c("raise"))).cursor_pointer()
+                    // a row under its project: no bar and no block when open (the person, 2026-11-15); its L says where it is
+                    .border_l_2().border_color(if selected && !under { c("accent") } else { transparent_black().into() })
+                    .bg(if selected && !under { c("raise") } else { transparent_black().into() }).hover(|s| s.bg(c("raise"))).cursor_pointer()
                     .on_click(cx.listener({ let (sid, off) = (id.clone(), t["off"] == true); move |this, _, window, cx| if !off { this.select(sid.clone(), window, cx) } })) // (a thread of a machine that is off: listed from the registry, nothing to open)
                     .when(sub.is_empty(), |d| d.on_drag(DragRow { id: raw.to_string(), label: string(t, "title") }, |d, _, _, cx| { let l = d.label.clone(); cx.new(|_| Ghost(l)) })
                         .drag_over::<DragRow>({ let a = c("accent"); move |s, _, _, _| s.border_t_2().border_color(a) }))
                     .on_drop(cx.listener({ let target = raw.to_string(); move |this, d: &DragRow, _, cx| { let _ = this.tx.try_send(Command::Action("reorder".into(), format!("{}\u{1f}{}", d.id, target))); cx.notify(); } }))
                     .on_mouse_down(MouseButton::Right, { let (row, pid2) = (t.clone(), pid.to_string()); cx.listener(move |this, e: &MouseDownEvent, _, cx| { let items = crate::screens::ctxmenu::thread_items(&row, &pid2); this.ctx_open(e.position, items, cx); }) })
-                    // a row under its project row (`under`, the sections): a thin line in the indent, under the project's chevron, so the
-                    // pinned and running threads read as the project's own rows and not as a list of their own
-                    .child(toggle.map_or_else(|| div().w(px(gutter)).h_full().flex_shrink_0().when(t["under"] == true, |d| d.pl(px(13.)).child(div().w(px(1.)).h_full().bg(c("line")))).into_any_element(), |t| t.into_any_element())).child(crate::screens::siderow::dot(light, t)).child(if crate::screens::siderow::renaming(&self.data, &id, "thread") { crate::screens::siderow::field(light, &self.screens.fields, &id) } else { div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().flex().gap_2().relative().child(div().min_w_0().overflow_hidden().text_ellipsis().child(string(t, "title"))).children((!sub.is_empty()).then(|| div().flex_shrink_0().max_w(px(80.)).overflow_hidden().text_ellipsis().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(sub.to_string())))
+                    // a row under its project row: a small faint L in the indent (half a row down, then right to the dot), so it reads
+                    // as the project's own; the open one's L a shade brighter
+                    .child(toggle.map_or_else(|| div().w(px(gutter)).h_full().flex_shrink_0().relative().when(under, |d| { let l = c(if selected { "dim" } else { "line" });
+                        d.child(div().absolute().left(px(36.)).top_0().w(px(1.)).h(relative(0.5)).bg(l))
+                         .child(div().absolute().left(px(36.)).top(relative(0.5)).w(px(11.)).h(px(1.)).bg(l)) }).into_any_element(), |t| t.into_any_element())).child(crate::screens::siderow::dot(light, t)).child(if crate::screens::siderow::renaming(&self.data, &id, "thread") { crate::screens::siderow::field(light, &self.screens.fields, &id) } else { div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().flex().gap_2().relative().child(div().min_w_0().overflow_hidden().text_ellipsis().child(string(t, "title"))).children((!sub.is_empty()).then(|| div().flex_shrink_0().max_w(px(80.)).overflow_hidden().text_ellipsis().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(sub.to_string())))
                         // held Ctrl: this row's Ctrl+digit; held Alt, in the Active view: its project's Alt+digit; over the title's end, so nothing moves (screens/hints.rs)
                         .children(crate::screens::hints::digit_of(&self.screens.hold_threads, &id).or_else(|| (!sub.is_empty()).then(|| crate::screens::hints::digit_of(&self.screens.hold_projects, pid)).flatten()).map(|n| crate::screens::hints::over_end(crate::screens::hints::digit(light, n)))).into_any_element() })
                     .child(pin) // the pin: always on a pinned row, on hover on the others
                     .children(crate::screens::badge::machine_mark(light, &t["mark"], false, &id)) // (another machine's thread: its name, dim; none for this machine's)
                     .child({ let want = string(t, "want"); // a red row says what it wants where its age goes (0.14 Side.want, r01)
-                        if want.is_empty() { div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(if kids > 0 && string(t, "agents").is_empty() { format!("{kids}") } else { trs(&string(t, "ago")) }) }
+                        if want.is_empty() { div().text_size(crate::scale::tpx(11.)).text_color(c("faint")).child(if kids > 0 && !under && string(t, "agents").is_empty() { format!("{kids}") } else { trs(&string(t, "ago")) }) }
                         else { div().text_size(crate::scale::tpx(11.)).text_color(c(if want == "failed" { "dim" } else { "bad" })).child(trs(&want)) } }).into_any_element()
     }
 }
