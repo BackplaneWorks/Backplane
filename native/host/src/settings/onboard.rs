@@ -142,7 +142,7 @@ impl OnboardRpc {
     /// `onboard.install {tool}`: the press on a tool's Install button.
     async fn install(hub: &Arc<Hub>, tool: &str) -> Result<String, String> {
         let checks: Value = hub.setting("onboard.checks").await.and_then(|t| serde_json::from_str(&t).ok()).unwrap_or(Value::Null);
-        super::tools_install::start(hub, tool, checks["winget"] == true, checks["node"] == true, |h| Box::pin(async move { OnboardRpc::check(&h, &json!({})).await })).await
+        super::tools_install::start(hub, tool, checks["winget"] == true, checks["node"] == true, |h| Box::pin(async move { OnboardRpc::check(&h, &json!({})).await; crate::files::kicad::ipc::publish_cad(&h).await; h.bump_views(); })).await
     }
     /// On the Design tools step with no KiCad found and a package for this computer, the install starts by itself, once per version (a failure shows Try again
     /// and is not retried): the person reached the step, the step says what is downloaded, and the install checks the digest and stages as before.

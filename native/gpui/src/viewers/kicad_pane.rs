@@ -1359,7 +1359,7 @@ impl crate::Backplane {
 
 /// The editor's own row: a tab per editor (one click; Ctrl+Tab and Ctrl+Shift+Tab go round them), Full size, and Pop out / Pop back in.
 /// `on` (the window it is drawn in): the main window's pane, or the editor's own window.
-pub fn strip<V: 'static>(cx: &mut Context<V>, light: bool, pane: &Entity<KicadPane>, popped: bool, full: bool,
+pub fn strip<V: 'static>(cx: &mut Context<V>, light: bool, pane: &Entity<KicadPane>, popped: bool, full: bool, screen: bool,
     act: impl Fn(&mut V, &str, &mut Window, &mut Context<V>) + Clone + 'static) -> AnyElement {
     let c = |n: &str| crate::theme::color(light, n);
     let at = pane.read(cx).tab();
@@ -1430,8 +1430,10 @@ pub fn strip<V: 'static>(cx: &mut Context<V>, light: bool, pane: &Entity<KicadPa
             .tooltip(crate::keys::tip(&tip, "", light)).child(label)
             .on_click(cx.listener(move |this, _, window, cx| act(this, a, window, cx)))
     };
-    if !popped { row = row.child(mk("kicad-full", crate::i18n::trs(if full { "Exit full size" } else { "Full size" }), crate::i18n::trs("The editor takes the sidebar's and the thread's room"), "full", cx)); }
-    row = row.child(mk("kicad-pop", crate::i18n::trs(if popped { "Pop back in" } else { "Pop out" }), crate::i18n::trs(if popped { "Back into Backplane's pane, as it is" } else { "The editor in a window of its own, as it is" }), if popped { "popin" } else { "popout" }, cx));
+    if !popped && !screen { row = row.child(mk("kicad-full", crate::i18n::trs(if full { "Exit full size" } else { "Full size" }), crate::i18n::trs("The editor takes the sidebar's and the thread's room"), "full", cx)); }
+    // full screen: the editor is the whole window, with only this strip above it
+    if !popped { row = row.child(mk("kicad-screen", crate::i18n::trs(if screen { "Exit full screen" } else { "Full screen" }), crate::i18n::trs("The editor takes the whole window; only this row stays"), "screen", cx)); }
+    if !screen { row = row.child(mk("kicad-pop", crate::i18n::trs(if popped { "Pop back in" } else { "Pop out" }), crate::i18n::trs(if popped { "Back into Backplane's pane, as it is" } else { "The editor in a window of its own, as it is" }), if popped { "popin" } else { "popout" }, cx)); }
     row.into_any_element()
 }
 
@@ -1442,7 +1444,7 @@ impl Render for KicadWindow {
         // the pane's own idea of the theme (Backplane's render sets it; Backplane is never read from here, it may be the one updating)
         let light = self.pane.read(cx).light; self.light = light;
         let _ = window;
-        let strip = strip(cx, light, &self.pane, true, false, |this: &mut KicadWindow, a, window, cx| {
+        let strip = strip(cx, light, &self.pane, true, false, false, |this: &mut KicadWindow, a, window, cx| {
             if a == "popin" { if let Some(app) = this.app.upgrade() { app.update(cx, |app, cx| app.kicad_popin(cx)); } window.remove_window(); }
         });
         div().size_full().flex().flex_col().bg(crate::theme::color(light, "bg")).child(strip).child(div().flex_1().min_h_0().child(self.pane.clone()))
@@ -1465,7 +1467,7 @@ impl crate::Backplane {
         }) {
             // the popped-out window is the person's now: the editor in it gets the keys as on Edit (the window itself is shown
             // active by open_window)
-            Ok(h) => { self.screens.kicad_window = Some(h.into()); self.screens.kicad_full = false; }
+            Ok(h) => { self.screens.kicad_window = Some(h.into()); self.screens.kicad_full = false; self.screens.kicad_screen = false; }
             Err(e) => { self.note = format!("{} {e}", crate::i18n::trs("The editor's window could not open:")); }
         }
         cx.notify();
@@ -1489,9 +1491,10 @@ impl crate::Backplane {
     }
     /// The strip's buttons in the main window.
     pub(crate) fn kicad_strip_act(&mut self, a: &str, cx: &mut Context<Self>) {
-        match a { "full" => { self.screens.kicad_full = !self.screens.kicad_full; if let Some(p) = self.screens.kicad.clone() { p.update(cx, |p, _| { p.want_keys = true; p.placed = None; }); } cx.notify(); } "popout" => self.kicad_popout(cx), "checks" => crate::screens::mgmt_checks::open_panel(self, cx),
+        match a { "full" => { self.screens.kicad_full = !self.screens.kicad_full; if let Some(p) = self.screens.kicad.clone() { p.update(cx, |p, _| { p.want_keys = true; p.placed = None; }); } cx.notify(); } "popout" => self.kicad_popout(cx), "checks" => { self.screens.kicad_screen = false; crate::screens::mgmt_checks::open_panel(self, cx) }
             // the strip's Install Backplane KiCad (a stock KiCad in the pane): Settings, CAD, where the install says what it downloads and asks
-            "cad" => { crate::screens::settings::go_page(self, "cad"); cx.notify(); }
+            "screen" => { self.screens.kicad_screen = !self.screens.kicad_screen; if let Some(p) = self.screens.kicad.clone() { p.update(cx, |p, _| { p.want_keys = true; p.placed = None; }); } cx.notify(); }
+            "cad" => { self.screens.kicad_screen = false; crate::screens::settings::go_page(self, "cad"); cx.notify(); }
             _ => {} }
     }
 }
