@@ -416,7 +416,7 @@ pub struct WarmCfg {
 /// Free memory (MemAvailable) below which the other editors are not pre-warmed after the first is on show: a pre-warmed schematic took
 /// ~1.5 GB on Hubble_DK, and the headroom for everything else is kept as for a warm KiCad (WARM.headroom_mb).
 pub const PREWARM_FREE_MB: u64 = 2048 + 4096;
-pub const WARM: WarmCfg = WarmCfg { max: MAX_WARM, idle_s: 30 * 60, kicad_mb: 5200, headroom_mb: 4096 };
+pub const WARM: WarmCfg = WarmCfg { max: MAX_WARM, idle_s: 5 * 60, kicad_mb: 5200, headroom_mb: 4096 };
 
 /// What the next KiCad will cost: the largest one measured running, else the configured guess.
 pub fn kicad_cost_mb(sessions: &HashMap<String, Session>, cfg: WarmCfg) -> u64 {
@@ -452,6 +452,14 @@ pub fn warm_decision(sessions: &HashMap<String, Session>, pro: &str, hardware: b
     match evict_warm(sessions, pro, cfg.max) { Some(v) => Warm::Start { evict: Some(v) }, None => Warm::No("as many KiCads as are kept warm are in use") }
 }
 
+/// How long after the last desktop client that used KiCad went before its KiCads are closed: a reconnect (a new connection id) is not a close.
+pub const APP_GONE_S: u64 = 15;
+/// The sessions to close when the app that showed them is gone: every live one with nothing unsaved (unsaved work is kept: the app
+/// opened again takes it back into its pane).
+pub fn app_gone_victims(sessions: &HashMap<String, Session>) -> Vec<String> {
+    let mut v: Vec<String> = sessions.values().filter(|s| s.is_live() && !s.closing && s.unsaved_docs().is_empty()).map(|s| s.pro.clone()).collect();
+    v.sort(); v
+}
 /// The sessions to close for idleness: up, in no pane, nothing unsaved, not used for `idle_s`.
 pub fn idle_victims(sessions: &HashMap<String, Session>, now: u64, idle_s: u64) -> Vec<String> {
     let mut v: Vec<String> = sessions.values()
@@ -579,6 +587,28 @@ pub fn parse_get_frames(msg: &Value) -> (u64, String, Vec<Frame>) {
     (holder, events_sock, frames)
 }
 
+/// The wheel zooms at the pointer in the KiCad whose settings are in `dir` (`<config>/kicad/<version>`): `input.center_on_zoom` off in its
+/// `kicad_common.json`, set once (the mark `.bp-wheel-zoom` beside it), so what the person then chooses in KiCad's Preferences stays.
+/// KiCad's default centres the view on the pointer and warps the pointer to the middle; under XWayland, and in a pane, the warp does not
+/// happen, so each wheel step moved the view to somewhere the pointer was not. No file yet (KiCad never ran here): a small one is made,
+/// which KiCad fills in.
+pub fn wheel_zoom_once(dir: &Path) {
+    let mark = dir.join(".bp-wheel-zoom");
+    if mark.exists() || std::fs::create_dir_all(dir).is_err() { return }
+    let f = dir.join("kicad_common.json");
+    let wrote = match std::fs::read_to_string(&f) {
+        Ok(t) => match serde_json::from_str::<Value>(&t).ok().filter(Value::is_object) {
+            Some(mut c) => {
+                if !c["input"].is_object() { c["input"] = json!({}); }
+                if c["input"]["center_on_zoom"] == json!(false) { true } else { c["input"]["center_on_zoom"] = json!(false); std::fs::write(&f, serde_json::to_string_pretty(&c).unwrap_or_default()).is_ok() }
+            }
+            None => false, // not JSON we know: left as it is, and looked at again next time
+        },
+        Err(_) => std::fs::write(&f, serde_json::to_string_pretty(&json!({"meta": {"filename": "kicad_common.json", "version": 6}, "input": {"center_on_zoom": false}})).unwrap_or_default()).is_ok(),
+    };
+    if wrote { let _ = std::fs::write(&mark, ""); }
+}
+
 /// Seed an isolated `XDG_CONFIG_HOME` for stock KiCad so the IPC API server is enabled, first-run / update wizards
 /// stay silent, GAL (`canvas_type: 0`) is selected, and side AUI docks start collapsed for small embedded viewports.
 pub fn seed_stock_config(cfg_home: &Path) -> Result<(), String> {
@@ -592,6 +622,9 @@ pub fn seed_stock_config(cfg_home: &Path) -> Result<(), String> {
             "update_check_prompt": true
         },
         "environment": { "vars": null },
+        // the wheel zooms at the pointer. KiCad's default centres the view on the pointer and warps the pointer to the middle; under
+        // XWayland (and in a pane) the warp does not happen, so every wheel step moved the view somewhere the pointer was not
+        "input": { "center_on_zoom": false },
         "system": {
             "check_for_updates": false,
             "first_run_shown": true,
@@ -627,6 +660,7 @@ pub fn seed_stock_config(cfg_home: &Path) -> Result<(), String> {
             Ok(())
         };
         write("kicad_common.json", serde_json::to_string_pretty(&common).unwrap_or_default())?;
+        wheel_zoom_once(&dir);
         for (name, v) in [("pcbnew.json", 5), ("fpedit.json", 5), ("eeschema.json", 3), ("symbol_editor.json", 1), ("3d_viewer.json", 4)] {
             write(name, serde_json::to_string_pretty(&editor(name, v)).unwrap_or_default())?;
         }
@@ -1045,6 +1079,10 @@ struct Actor {
     /// the runtime each project's latest start used, and the projects whose start was already retried once (start_retry)
     start_env: HashMap<String, Env>,
     start_retried: std::collections::HashSet<String>,
+    /// the desktop clients that asked for KiCad (an attach, a show, a warm) and are still connected, and since when there has been none
+    /// after there was one: the app closed, so its KiCads close too (APP_GONE_S)
+    users: HashSet<u64>,
+    users_gone: Option<u64>,
 }
 
 /// Whether a failed start is tried once more by itself: only a missed start window (KiCad ran but its socket or its first answer came after
@@ -1196,6 +1234,8 @@ impl Actor {
     }
 
     /// Close a clean session for room or idleness (refused by KiCad if anything is modified meanwhile).
+    /// A connected client asked for KiCad (the hub's own requests carry no connection: they keep no KiCad up).
+    fn note_user(&mut self, client: u64) { if self.hub.is_attached(client) { self.users.insert(client); self.users_gone = None; } }
     fn retire(&mut self, victim: &str) {
         let Some(vs) = self.sessions.get_mut(victim) else { return };
         vs.closing = true;
@@ -1304,7 +1344,10 @@ impl Actor {
         if let Some(victim) = evict_warm(&self.sessions, &pro, MAX_WARM) { self.retire(&victim); }
 
         let kicad_bin = match kicad_gui_bin(&env.cli) {
-            Ok(b) => b.to_string_lossy().to_string(),
+            // Backplane KiCad on a computer whose glibc is at least its own: started on the computer's loader and graphics driver
+            // (hostlibs.rs: the runtime's own glibc loads no driver here, so KiCad drew in software and its 3D viewer drew nothing)
+            Ok(b) => b.parent().and_then(Path::parent).filter(|_| b.with_file_name("kicad.real").is_file())
+                .and_then(|root| super::hostlibs::gui_program(root, &self.hub.cfg.home.join("kicad-embed-cache").join("hostlibs"))).unwrap_or(b).to_string_lossy().to_string(),
             Err(why) => { let _ = reply.send(Err(why)); return; }
         };
         let (desc, has_embed_schema) = discover_desc(&self.hub.cfg.home, &env);
@@ -1315,6 +1358,12 @@ impl Actor {
             None
         };
         let mode = mode_with(override_mode.as_deref(), &env, has_embed_schema, described.as_ref());
+        // Backplane KiCad reads the person's own KiCad settings (`<config>/kicad/10.99`): its wheel zooms at the pointer (set once; a copy
+        // of the log writes nothing of the person's)
+        // (not while another KiCad of ours is up: it would write its own settings back over this when it closes)
+        if mode == "fork" && !crate::copy::on() && !self.sessions.values().any(|s| s.pro != pro && s.is_live()) {
+            if let (Some(root), Some(ver)) = (super::libtables::config_root(), super::libtables::settings_version(&env.version)) { wheel_zoom_once(&root.join(ver)); }
+        }
         let eff_display = if !display.is_empty() { display } else { std::env::var("DISPLAY").unwrap_or_default() };
 
         self.next_gen += 1;
@@ -1572,11 +1621,13 @@ impl Actor {
     fn handle(&mut self, m: Msg) {
         match m {
             Msg::Attach { client, pro, root, files, frame, container, toplevel, display, wait, env, reply } => {
+                self.note_user(client);
                 self.attach(client, pro, root, files, frame, container, toplevel, display, wait, env, reply);
             }
-            Msg::Show { client, pro, frame, doc, item, remount, focus, reply } => self.show(client, pro, frame, doc, item, remount, focus, reply),
+            Msg::Show { client, pro, frame, doc, item, remount, focus, reply } => { self.note_user(client); self.show(client, pro, frame, doc, item, remount, focus, reply) }
             Msg::Detach { client, pro, keep, reply } => self.detach(client, pro, keep, reply),
             Msg::Warm { client, pro, root, files, frame, display, hardware, locked, env, reply } => {
+                self.note_user(client);
                 let (desc, _) = discover_desc(&self.hub.cfg.home, &env);
                 let quiet = !desc.is_empty() && proto::load(&desc).has_own("kiapi.backplane.embed.CancelProgress");
                 match warm_decision(&self.sessions, &pro, hardware, locked, free_mb(), quiet, WARM) {
@@ -1887,6 +1938,17 @@ impl Actor {
                 }
             }
             Msg::Tick => {
+                // the app closed (no desktop client that used KiCad is connected any more): its KiCads close with it
+                let hub = self.hub.clone();
+                let had = !self.users.is_empty() || self.users_gone.is_some();
+                self.users.retain(|c| hub.is_attached(*c));
+                if had && self.users.is_empty() {
+                    let since = *self.users_gone.get_or_insert(ipc::now_s());
+                    if ipc::now_s().saturating_sub(since) >= APP_GONE_S {
+                        self.users_gone = None;
+                        for v in app_gone_victims(&self.sessions) { eprintln!("kicad embed: the app closed, closing {v}"); self.retire(&v); }
+                    }
+                } else { self.users_gone = None; }
                 for v in idle_victims(&self.sessions, ipc::now_s(), WARM.idle_s) { eprintln!("kicad embed: idle, closing {v}"); self.retire(&v); }
                 for s in self.sessions.values_mut().filter(|s| s.is_live() && s.pid > 0) { if let Some(m) = rss_mb(s.pid) { s.rss_mb = m; } }
                 let targets: Vec<Session> = self.sessions.values()
@@ -2599,6 +2661,7 @@ pub fn start(hub: &Arc<Hub>) {
     let mut a = Actor {
         hub: hub.clone(), me: tx.clone(), info_tx, helper: None, hgen: 0, next_id: 0, next_gen: 0,
         pend: HashMap::new(), sessions: HashMap::new(), attach_waiters: HashMap::new(), start_env: HashMap::new(), start_retried: Default::default(),
+        users: HashSet::new(), users_gone: None,
     };
     tokio::spawn(async move { while let Some(m) = rx.recv().await { a.handle(m) } });
     let tick = tx.clone();
@@ -3185,6 +3248,29 @@ mod tests {
         assert_eq!(evict_warm(&m, "/p/new.kicad_pro", 10), None);
     }
 
+    #[test] fn the_app_gone_closes_every_kicad_with_nothing_unsaved() {
+        let mk = |pro: &str, state: &str, dirty: bool| { let mut s = Session::new(pro, "/p", "fork", "PCB", 1, 0); s.state = state.into(); if dirty { s.frames.push(Frame { kind: "PCB".into(), doc: "a.kicad_pcb".into(), title: String::new(), modified: true, shown: true, realized: true, xid: 1, min_w: 0, min_h: 0 }); } s };
+        let mut m = HashMap::new();
+        for (p, st, d) in [("/p/a", "ready", false), ("/p/b", "ready", true), ("/p/c", "starting", false), ("/p/d", "stopped", false), ("/p/e", "unresponsive", false)] { m.insert(p.to_string(), mk(p, st, d)); }
+        assert_eq!(app_gone_victims(&m), vec!["/p/a", "/p/c", "/p/e"], "unsaved work and stopped ones are left");
+        assert_eq!(WARM.idle_s, 300, "a KiCad in no pane closes after five minutes");
+    }
+    #[test] fn a_seeded_config_zooms_at_the_pointer_and_an_older_one_is_set_once() {
+        let dir = crate::plat::tmp::uncreated("seedzoom");
+        let d = dir.join("kicad").join("10.99"); std::fs::create_dir_all(&d).unwrap();
+        std::fs::write(d.join("kicad_common.json"), r#"{"api":{"enable_server":true},"input":{"center_on_zoom":true,"zoom_speed":3}}"#).unwrap();
+        seed_stock_config(&dir).unwrap();
+        let read = |v: &str| serde_json::from_str::<Value>(&std::fs::read_to_string(dir.join("kicad").join(v).join("kicad_common.json")).unwrap()).unwrap();
+        assert_eq!(read("10.0")["input"]["center_on_zoom"], json!(false), "a new config");
+        assert_eq!(read("10.99")["input"], json!({"center_on_zoom": false, "zoom_speed": 3}), "an older config: set, the rest kept");
+        // KiCad never ran here (no file): a small one is made, once
+        let fresh = crate::plat::tmp::uncreated("freshzoom").join("10.99"); wheel_zoom_once(&fresh);
+        assert_eq!(serde_json::from_str::<Value>(&std::fs::read_to_string(fresh.join("kicad_common.json")).unwrap()).unwrap()["input"]["center_on_zoom"], json!(false));
+        // the person turns it back on in KiCad: kept
+        std::fs::write(d.join("kicad_common.json"), r#"{"input":{"center_on_zoom":true}}"#).unwrap();
+        seed_stock_config(&dir).unwrap();
+        assert_eq!(read("10.99")["input"]["center_on_zoom"], json!(true));
+    }
     #[test] fn stock_config_seeding_writes_expected_files() {
         let dir = crate::plat::tmp::uncreated("seed");
         seed_stock_config(&dir).unwrap();
