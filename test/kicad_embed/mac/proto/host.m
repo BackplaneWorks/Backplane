@@ -53,7 +53,7 @@ int main(int argc, char **argv) { @autoreleasepool {
     { static NSRect last; if (!NSEqualRects(last, w.frame)) { last = w.frame; pushRect(); } }
     if (![sc isEqual:@"move"]) { if (e > 30) [NSApp terminate:nil]; return; }
     if (e > 1 && e < 5.5) { double m = e - 1, p = fmod(m * v, 600), x = 40 + (p < 300 ? p : 600 - p), g = m > 3 ? fmod((m - 3) * v/2, 150) : 0;
-      [w setFrame:NSMakeRect(x, 150, 600 + g, 400 + g/2) display:YES]; }
+      [w setFrame:NSMakeRect(x, 150, 600 + g, 400 + g/2) display:YES]; pushRect(); }  // as the client would when it moves its own window
     #define AT(s, bit, code) if (e > s && !(done & bit)) { done |= bit; code; printf("%s %.3f\n", #code, e); fflush(stdout); }
     AT(7, 1, ([NSApp activateIgnoringOtherApps:YES], [w makeKeyAndOrderFront:nil]))
     AT(9, 2, [w toggleFullScreen:nil])
