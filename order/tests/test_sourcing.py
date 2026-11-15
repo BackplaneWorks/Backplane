@@ -72,7 +72,28 @@ def test_a_quote_looks_up_at_most_max_mpns_unique_parts(mouser):
     out = sourcing.mouser(mpns, "inst")
     looked = [m for c in mouser for m in c]
     assert len(looked) == sourcing.MAX_MPNS == len(set(looked))
-    assert sum(1 for v in out.values() if v is UNAVAILABLE) == 50
+    assert sum(1 for v in out.values() if v is sourcing.CAPPED) == 50
+
+
+def test_over_100_unique_out_of_stock_parts_become_priceable_across_retries(mouser):
+    mpns = [f"P{i}" for i in range(230)]
+    lines = [{"refs": [f"R{i}"], "qty": 1, "mpn": m, "maker": "", "code": ""} for i, m in enumerate(mpns)]
+    comp = sourcing.components(Pack(), lines, 5, "inst")
+    assert len(comp["unavailable"]) == 130 and all("not looked up yet" in u for u in comp["unavailable"])
+    assert all("unavailable right now" not in u for u in comp["unavailable"])
+    comp = sourcing.components(Pack(), lines, 5, "inst")
+    assert len(comp["unavailable"]) == 30
+    comp = sourcing.components(Pack(), lines, 5, "inst")
+    assert comp["unavailable"] == [] and len(comp["problems"]) == 230  # all answered: not found, a board fault
+    looked = [m for c in mouser for m in c]
+    assert sorted(looked) == sorted(mpns)  # each part asked once across the retries
+
+
+def test_the_budget_still_stops_a_capped_quote_retry(mouser, monkeypatch):
+    monkeypatch.setattr(sourcing, "SHARE", 3)
+    out = sourcing.mouser([f"Q{i}" for i in range(150)], "inst")
+    assert len(mouser) == 3 and sum(1 for v in out.values() if v is UNAVAILABLE) == 70
+    assert sum(1 for v in out.values() if v is sourcing.CAPPED) == 50
 
 
 class Pack:
