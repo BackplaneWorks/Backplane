@@ -41,7 +41,7 @@ SHA0=$(sha256sum "$PCB" | cut -d' ' -f1)
 # an unsaved change: an agent's track, committed in KiCad, not saved
 ADD=$(python3 "$IPC_PY" agent-add-track "$SOCK" 120.0 100.0 140.0 100.0 0.3 0 2>&1 | tail -1); echo "INFO unsaved change: $(echo "$ADD" | cut -c1-120)"
 sleep 45   # two autosave intervals
-AUTOSAVE=$(ls "$PROJ"/_autosave-* "$PROJ"/*autosave* 2>/dev/null | head -3 | tr '\n' ' ')
+AUTOSAVE=$(ls "$PROJ"/_autosave-* "$PROJ"/*autosave* 2>/dev/null | head -3 | tr '\n' ' ' || true)
 echo "INFO autosave files before the kill: ${AUTOSAVE:-none}"
 kill -KILL "$KPID" 2>/dev/null || true
 echo "INFO killed KiCad $KPID with SIGKILL"
@@ -56,8 +56,10 @@ SAY=$(grep -a '"kicad:open-again"' "$OUT/client.log" | grep -c '"rect":{' || tru
 check "the pane offers Open the editor again" "$([ "${SAY:-0}" -gt 0 ] && echo 1 || echo 0)" "kicad:open-again drawn $SAY times"
 check "and no Try again nor Open the KiCad app beside it" "$(grep -a 'GPUI_METRIC {"controls"' "$OUT/client.log" | tail -1 | grep -q '"kicad:retry"\|"kicad:app"' && echo 0 || echo 1)"
 check "the board file on disk is as last saved" "$([ "$(sha256sum "$PCB" | cut -d' ' -f1)" = "$SHA0" ] && echo 1 || echo 0)"
-AUTO2=$(ls "$PROJ"/_autosave-* "$PROJ"/*autosave* 2>/dev/null | head -3 | tr '\n' ' ')
+AUTO2=$(ls "$PROJ"/_autosave-* "$PROJ"/*autosave* 2>/dev/null | head -3 | tr '\n' ' ' || true)
 echo "INFO autosave files after the kill: ${AUTO2:-none}"
+echo "INFO the project folder after the kill: $(ls -A "$PROJ" | tr '\n' ' ')"
+find "$PROJ" -newer "$OUT/script.json" -type f ! -path '*/.git/*' 2>/dev/null | head -12 | sed 's/^/INFO written since the start: /' 
 [ -z "$AUTOSAVE" ] || check "KiCad's autosave is kept (not swept)" "$([ -n "$AUTO2" ] && echo 1 || echo 0)" "before: $AUTOSAVE"
 # C3: the press, and the editor painted within 30 s
 wait_for_log "$OUT/client.log" '"name":"reopened","event":"mark"' 120 || true
