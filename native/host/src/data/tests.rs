@@ -300,6 +300,11 @@ impl crate::api::RpcHandler for PushState {
     let r = ask(&mut ws, 6, "mentions.list", json!({"q":"alp","kind":"%"})).await; assert_eq!(r["result"]["items"][0]["id"], "p1");
     assert_eq!((r["result"]["items"][0]["word"].as_str(), ask(&mut ws, 61, "mentions.list", json!({"q":"sec","kind":">"})).await["result"]["items"][0]["word"].as_str()), (Some("%alpha"), Some(">second")), "the word the desktop's popup puts in the draft, which /give reads");
     let r = ask(&mut ws, 7, "bots.list", json!({})).await; assert_eq!((r["result"]["bots"].as_array().unwrap().len(), r["result"]["rooms"].as_array().unwrap().len()), (0, 0), "no bots lane on this hub: empty, not an error");
+    // feature cats: a name's cat in a colour, as the desktop draws it; no uberbot here to name
+    let r = ask(&mut ws, 71, "cat.rig", json!({"name":"Bub","color":"#6fb3f2","mood":"idle"})).await;
+    assert_eq!((r["result"]["look"].as_u64(), r["result"]["color"].as_str()), (Some(crate::bots::cat::look_of("Bub")), Some("#6fb3f2")));
+    assert!(r["result"]["parts"].as_array().unwrap().iter().any(|p| p["name"] == "body" && p["fill"] == 0x6fb3f2)); assert_eq!(r["result"]["presets"].as_array().unwrap().len(), 10);
+    assert_eq!(ask(&mut ws, 72, "bot.cat", json!({"color":"#000000"})).await["ok"], false, "no uberbot on this hub: nothing to colour");
     let r = ask(&mut ws, 8, "thread.act", json!({"thread":"t1","action":"pin"})).await; assert_eq!(r["ok"], true); assert_eq!(r["result"]["thread"]["id"], "t1");
     let r = ask(&mut ws, 9, "thread.act", json!({"thread":"t1","action":"explode"})).await; assert_eq!(r["ok"], false);
     let r = ask(&mut ws, 10, "thread.act", json!({"thread":"nope","action":"pin"})).await; assert_eq!(r["ok"], false);
