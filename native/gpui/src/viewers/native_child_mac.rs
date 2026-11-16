@@ -132,12 +132,18 @@ pub fn sync_root(_container: u64, _r: R, _show: u64, _last_root: &mut (i32, i32)
 pub fn holes(_container: u64, _keep: Option<&[R]>) {}
 /// The keyboard to `w`: our own window (activate Backplane), or a KiCad frame (activate KiCad from here: on macOS 14+ only the active
 /// app may hand activation to another; KiCad then makes its frame key and wx gives its canvas the focus back).
+/// The KiCad the pane shows (the hub's session pid): a frame not on screen yet is not in the window list, so its owner is known from here.
+pub fn note_kicad_pid(pid: u32) { if pid > 0 { KICAD_PID.store(pid as i64, std::sync::atomic::Ordering::Relaxed); } }
+
 pub fn focus(w: u64) {
-    let pid = owner(w);
-    if pid > 0 && pid != own_pid() { KICAD_PID.store(pid, std::sync::atomic::Ordering::Relaxed); }
-    eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_mac_focus": {"window": w, "owner": pid, "ours": pid == 0 || pid == own_pid(), "kicad_active_before": app_active(KICAD_PID.load(std::sync::atomic::Ordering::Relaxed))}}));
+    // ours: one of our own windows (never "whoever the window list does not know": KiCad's frame before it is on screen is not there)
+    let ours = !ns_window(w).is_null();
+    let pid = if ours { own_pid() } else { match owner(w) { 0 => KICAD_PID.load(std::sync::atomic::Ordering::Relaxed), p => p } };
+    if !ours && pid > 0 { KICAD_PID.store(pid, std::sync::atomic::Ordering::Relaxed); }
+    eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_mac_focus": {"window": w, "owner": pid, "ours": ours, "kicad_active_before": app_active(KICAD_PID.load(std::sync::atomic::Ordering::Relaxed))}}));
+    if !ours && pid <= 0 { return } // a KiCad frame whose KiCad is not known yet: nothing to activate
     unsafe {
-        if pid == 0 || pid == own_pid() {
+        if ours {
             send_activate_self(app());
             let nw = ns_window(w); if !nw.is_null() { send0(nw, c"makeKeyWindow"); }
         } else {

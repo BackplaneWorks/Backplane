@@ -386,6 +386,8 @@ impl KicadPane {
         if matches!(info["state"].as_str(), Some("failed" | "stopped")) { self.pending_show = None; }
         // macOS: a KiCad that became ready, or another one (a restart), has not had this pane's rect: pushed again on the next frame
         if info["state"] != self.info["state"] || info["pid"] != self.info["pid"] { self.host_sent = None; }
+        #[cfg(target_os = "macos")]
+        nc::note_kicad_pid(info["pid"].as_u64().unwrap_or(0) as u32);
         if let Some(act) = info["active"].as_str().filter(|a| !a.is_empty()) {
             if self.pending_show.as_deref() == Some(act) {
                 self.pending_show = None;
