@@ -25,7 +25,9 @@ if [ ! -f "$LIBR/libraries_row.py" ] || [ ! -f "$LIBR/lib/libgate_design.py" ]; 
 else
 # the row's files as the box sees them (/opt/standins is the harness's, read-only there): the test/ layout kept (hub_rpc.mjs imports ../../wire.mjs)
 LG=$OUT/standins/libgate; mkdir -p "$LG/test/kicad_embed/lib"
-cp "$LIBR/libraries_row.py" "$LG/test/kicad_embed/"; cp "$LIBR/lib/libgate_design.py" "$LIBR/lib/hub_rpc.mjs" "$LG/test/kicad_embed/lib/"; cp "$HERE/../wire.mjs" "$LG/test/"
+cp "$LIBR/libraries_row.py" "$LG/test/kicad_embed/"; cp "$LIBR/lib/libgate_design.py" "$LIBR/lib/hub_rpc.mjs" "$LG/test/kicad_embed/lib/"
+# hub_rpc.mjs -> test/wire.mjs -> test/wire-codec.js and ../native/host/src/wire_dict.rs (bare-gate.sh ships all of them)
+cp "$HERE/../wire.mjs" "$HERE/../wire-codec.js" "$LG/test/"; mkdir -p "$LG/native/host/src"; cp "$HERE/../../native/host/src/wire_dict.rs" "$LG/native/host/src/"
 cp "$(command -v bun)" "$OUT/standins/bin/bun"
 LPROJ=$PH/Documents/libgate; HLPROJ=$HH/Documents/libgate
 # the new project from the runtime's own template (its board header, so this KiCad reads its own format's layer table)
