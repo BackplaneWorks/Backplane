@@ -1804,6 +1804,7 @@ gpui.acct.claude.code.did.not.say = Claude Code did not say who is signed in
 gpui.acct.anthropic.api.key.is.set = ANTHROPIC_API_KEY is set: Claude Code uses that key, not a sign-in
 gpui.acct.the.cli.is.signed.in = The CLI is signed in but did not give an email
 gpui.bots.name.rule = A bot's name is 1 to 24 letters, digits, - or _, with no spaces.
+gpui.acct.open.the.link.and.sign = Open the link and sign in. Setup carries on by itself when you're done.
 
 # ---- gpui-b: keys, ui, files, history ----
 gpui.send.the.message = Send the message
