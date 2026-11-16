@@ -7,6 +7,8 @@
 #     --release   install the published release (default: latest), as the docs say
 #     --update-from VERSION  the update mode: the home starts with that Backplane KiCad (placed where the hub's installer puts one); the
 #                 journey's Edit must offer the build's pin in a row above the pane, install it on one press and reopen on it (journey_update.sh)
+#     --kicad-feed DIR  a staged Backplane KiCad (its asset and SHA256SUMS in DIR, before its tag): served over http on the gate host,
+#                 and the box's hub installs from it (BACKPLANE_KICAD_FEED); the commit's pin must name that asset and digest (kicad-pin.py --feed)
 #     --commit    build SHA on a build box (from the snapshot bp-build-base) into a release-shaped archive and install that (before a release)
 #     --archive   a folder with an archive and install.sh build-archive.sh made already (skips the build)
 #     --image     the clean machine's image (ubuntu:24.04; debian:12 and fedora:41 follow)
@@ -20,7 +22,7 @@ SRC=release; TAG=latest; SHA=; ADIR=; IMAGE=ubuntu:24.04; KEEP=; OUT=
 while [ $# -gt 0 ]; do case $1 in
   --release) SRC=release; TAG=${2:-latest}; shift;; --commit) SRC=commit; SHA=$2; shift;; --image) IMAGE=$2; shift;;
   --archive) SRC=archive; ADIR=$(realpath "$2"); shift;;
-  --keep) KEEP=1;; --out) OUT=$2; shift;; --update-from) UPDATE_FROM=$2; shift;; *) echo "bare-gate: unknown $1" >&2; exit 2;; esac; shift; done
+  --keep) KEEP=1;; --out) OUT=$2; shift;; --update-from) UPDATE_FROM=$2; shift;; --kicad-feed) KFEED=$(realpath "$2"); shift;; *) echo "bare-gate: unknown $1" >&2; exit 2;; esac; shift; done
 OUT=${OUT:-$BP_TMP/bare-gate-$(date +%Y%m%d-%H%M%S)}; mkdir -p "$OUT"
 B() { boat --no-update "$@"; }
 # every box this run made, and only those, are deleted at the end ($OUT/boxes)
@@ -60,10 +62,15 @@ fi
 GATE=$(newbox "bare-gate-$(date +%m%d-%H%M)") || exit 1
 echo "bare-gate: gate box $GATE ($IMAGE, $SRC${SHA:+ $SHA}${TAG:+ $TAG})"
 push "$GATE" "${FILES[@]}" || exit 1
-ENV="${UPDATE_FROM:+UPDATE_FROM=$UPDATE_FROM }IMAGE=$IMAGE SOURCE=release TAG=$TAG"
+if [ -n "${KFEED:-}" ]; then
+  [ -f "$KFEED/SHA256SUMS" ] || { echo "bare-gate: no SHA256SUMS in $KFEED" >&2; exit 2; }
+  B ssh "$GATE" -- 'mkdir -p ~/gate/feed' && for f in "$KFEED"/SHA256SUMS "$KFEED"/backplane-kicad-*; do B scp "$f" "$GATE:gate/feed/" >/dev/null || exit 1; done
+  echo "bare-gate: kicad feed $(ls "$KFEED" | tr '\n' ' ')"
+fi
+ENV="${KFEED:+KICAD_FEED=\$HOME/gate/feed }${UPDATE_FROM:+UPDATE_FROM=$UPDATE_FROM }IMAGE=$IMAGE SOURCE=release TAG=$TAG"
 if [ $SRC = commit ]; then
   B scp "$OUT/archive/backplane-$TAGC-linux-x64-native.tar.gz" "$GATE:gate/" >/dev/null && B scp "$OUT/archive/install.sh" "$GATE:gate/" >/dev/null || exit 1
-  ENV="${UPDATE_FROM:+UPDATE_FROM=$UPDATE_FROM }IMAGE=$IMAGE SOURCE=archive ARCHIVE=\$HOME/gate/backplane-$TAGC-linux-x64-native.tar.gz INSTALLER=\$HOME/gate/install.sh"
+  ENV="${KFEED:+KICAD_FEED=\$HOME/gate/feed }${UPDATE_FROM:+UPDATE_FROM=$UPDATE_FROM }IMAGE=$IMAGE SOURCE=archive ARCHIVE=\$HOME/gate/backplane-$TAGC-linux-x64-native.tar.gz INSTALLER=\$HOME/gate/install.sh"
 fi
 # the box's run folder comes here as the run goes (every minute, and once at the end): a restart of this machine costs the last minute,
 # not the run (rerun 5 lost all its logs to one)

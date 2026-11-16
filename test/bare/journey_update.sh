@@ -7,6 +7,8 @@
 #   U3 the row and its buttons are outside the pane's rect (on macOS KiCad's frame sits above Backplane's window: an overlay would hide)
 #   U4 Update installs the pin's runtime beside the old one (the old one stays)
 #   U5 the pane reopens on the new runtime by itself (no unsaved edits), and the row is gone
+#   U6 (before Update) Not now: the row goes, Edit keeps working on the old runtime, and the choice is kept for that version; the
+#      choice is then cleared (as a day later) and Backplane opened again, so the row is back for Update
 phase "update at Edit ($UPDATE_FROM)"
 WP=$(cat "$HH/.client.pid" 2>/dev/null); [ -n "$WP" ] && in_box kill "$WP" 2>/dev/null; sleep 2
 cat >"$HH/update.json" <<J
@@ -55,6 +57,23 @@ apart=int(bool(row and pane) and not any(hit(r.get(k), pane) for k in ("kicad-up
 print(shown, apart)' "$R")"
   [ "$SHOWN" = 1 ] && ok "U2 the update row shows above the pane with Update and Not now" || { bad "U2 no update row at Edit (rects: $(echo "$R" | cut -c1-200))"; cut_ 1 update "a home on $UPDATE_FROM is not offered $NEWV at Edit"; }
   [ "$APART" = 1 ] && ok "U3 the update row and its buttons are outside the pane's rect" || bad "U3 the update row overlaps the pane's rect, or the pane has none ($(echo "$R" | cut -c1-200))"
+  # U6 Not now: the row goes, KiCad stays on the old runtime and painted, the choice is kept per version (lane B: "<version>|<epoch s>")
+  LATER=$(python3 -c 'import json,sys; r=json.loads(sys.argv[1]).get("kicad-update:later"); print("%d %d" % (r["x"] + r["w"] / 2, r["y"] + r["h"] / 2) if r else "")' "$R")
+  if [ -n "$LATER" ]; then KP0=$(krun); X mousemove ${LATER% *} ${LATER#* } click 1; sleep 4; shot 32-update-later
+    LS=$HH/.config/backplane-gpui/local-settings.json
+    python3 -c 'import json,sys; sys.exit(0 if "kicad-update" not in json.loads(sys.argv[1]).get("_ids", []) else 1)' "$(urects)" && ok "U6 Not now puts the row away" || bad "U6 Not now left the row up"
+    case $(krun) in *"/kicad/$UPDATE_FROM/"*) [ "$(krun)" = "$KP0" ] && ok "U6 after Not now Edit keeps working on $UPDATE_FROM (the same KiCad)" || bad "U6 after Not now KiCad changed ($(krun | cut -c1-120))";;
+      *) bad "U6 after Not now KiCad on $UPDATE_FROM is gone ($(krun | cut -c1-160))"; cut_ 1 update "Not now stopped Edit on the old runtime";; esac
+    grep -q "\"kicad_update_later\": *\"$NEWV|" "$LS" 2>/dev/null && ok "U6 Not now is kept for $NEWV ($(grep -o '"kicad_update_later": *"[^"]*"' "$LS"))" || bad "U6 Not now was not kept ($(grep -o '"kicad_update_later": *"[^"]*"' "$LS" 2>/dev/null))"
+    # a day later, as it were: the choice cleared, Backplane opened again, the row back
+    WP=$(cat "$HH/.client.pid" 2>/dev/null); [ -n "$WP" ] && in_box kill "$WP" 2>/dev/null; sleep 2
+    python3 -c 'import json,sys; p=sys.argv[1]; d=json.load(open(p)); d["kicad_update_later"]=""; json.dump(d, open(p, "w"))' "$LS"
+    cp "$HH/win.log" "$OUT/logs/win-update-later.log" 2>/dev/null; : >"$HH/win.log"
+    launch --url http://127.0.0.1:$(hub_port) --token-file $PH/.backplane/hub/token --script $PH/update.json
+    umark old-ready 720 || bad "U6 Edit did not open again after Not now"
+    for _ in $(seq 60); do python3 -c 'import json,sys; sys.exit(0 if "kicad-update:go" in json.loads(sys.argv[1]).get("_ids", []) else 1)' "$(urects)" && break; sleep 1; done
+    R=$(urects)
+  fi
   # Update: one press
   GO=$(python3 -c 'import json,sys; r=json.loads(sys.argv[1]).get("kicad-update:go"); print("%d %d" % (r["x"] + r["w"] / 2, r["y"] + r["h"] / 2) if r else "")' "$R")
   if [ -n "$GO" ]; then t=$(date +%s); X mousemove ${GO% *} ${GO#* } click 1
