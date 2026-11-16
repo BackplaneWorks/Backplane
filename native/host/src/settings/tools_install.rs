@@ -31,8 +31,8 @@ pub const NODE: &str = "https://nodejs.org/en/download";
 /// A vendor's own installer script: downloaded to a file (so a failed download stops here) and run with bash.
 pub const VENDOR_SH: &str = r#"set -eu
 # curl, else wget: a stock Ubuntu desktop has wget and no curl
-if command -v curl >/dev/null 2>&1; then get() { curl --proto '=https' --tlsv1.2 -fsSL -o "$1" "$2"; }
-elif command -v wget >/dev/null 2>&1; then get() { wget -q --https-only -O "$1" "$2"; }
+if command -v curl >/dev/null 2>&1; then get() { curl --proto '=https' --tlsv1.2 -fsSL --connect-timeout 30 --speed-limit 1024 --speed-time 30 -o "$1" "$2"; }
+elif command -v wget >/dev/null 2>&1; then get() { wget -q --https-only --connect-timeout=30 --read-timeout=30 -O "$1" "$2"; }
 else get() { echo 'curl or wget is needed to download it, and neither was found' >&2; return 1; }; fi
 t=$(mktemp); trap 'rm -f "$t"' 0
 echo "Downloading the installer"
@@ -47,8 +47,8 @@ pub const CODEX_SH: &str = r#"set -eu
 dest=$1; asset=$2; name=$3; kind=$4
 fail() { echo "$*" >&2; exit 1; }
 command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1 || fail 'curl or wget is needed to download Codex, and neither was found'
-if command -v curl >/dev/null 2>&1; then get() { curl --proto '=https' --tlsv1.2 -fsSL -o "$1" "$2"; }
-elif command -v wget >/dev/null 2>&1; then get() { wget -q --https-only -O "$1" "$2"; }
+if command -v curl >/dev/null 2>&1; then get() { curl --proto '=https' --tlsv1.2 -fsSL --connect-timeout 30 --speed-limit 1024 --speed-time 30 -o "$1" "$2"; }
+elif command -v wget >/dev/null 2>&1; then get() { wget -q --https-only --connect-timeout=30 --read-timeout=30 -O "$1" "$2"; }
 else get() { echo 'curl or wget is needed to download it, and neither was found' >&2; return 1; }; fi
 if command -v cygpath >/dev/null 2>&1; then dest=$(cygpath -u "$dest"); fi
 case "$asset" in codex-*) ;; *) fail 'Invalid Codex asset' ;; esac
@@ -87,8 +87,8 @@ echo "Installed in $dest/$name"
 pub const FREECAD_SH: &str = r#"set -eu
 sys=$1; dest=$2
 fail() { echo "$*" >&2; exit 1; }
-if command -v curl >/dev/null 2>&1; then get() { curl --proto '=https' --tlsv1.2 -fsSL -o "$1" "$2"; }
-elif command -v wget >/dev/null 2>&1; then get() { wget -q --https-only -O "$1" "$2"; }
+if command -v curl >/dev/null 2>&1; then get() { curl --proto '=https' --tlsv1.2 -fsSL --connect-timeout 30 --speed-limit 1024 --speed-time 30 -o "$1" "$2"; }
+elif command -v wget >/dev/null 2>&1; then get() { wget -q --https-only --connect-timeout=30 --read-timeout=30 -O "$1" "$2"; }
 else fail 'curl or wget is needed to download FreeCAD, and neither was found'; fi
 case "$sys" in Linux-*) ext=AppImage ;; macOS-*) ext=dmg ;; *) fail "No FreeCAD download for $sys" ;; esac
 mkdir -p "$dest"
