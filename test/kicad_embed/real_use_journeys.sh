@@ -25,7 +25,7 @@ cat >"$OUT/script.json" <<'J'
 [{"wait":1500},{"click":"project:p1"},{"wait":1200},{"click":"page-thread:t1"},{"wait":1500},{"click":"rail:Board"},{"wait":2500},{"click":"ui:Edit"},{"kicad":{"wait_painted":90000,"kind":"PCB","tag":"cold"}},
  {"wait":3500},{"kicad":{"report":true,"tag":"geom"}},{"mark":"ready_for_driver"},{"wait":1500000}]
 J
-HOME="$OUT/fh" BACKPLANE_GPUI_RECTS=1 BACKPLANE_GPUI_ASSETS="$ASSETS_DIR" "$CLIENT_BIN" --url "http://127.0.0.1:$HPORT" --token-file "$OUT/home/token" --script "$OUT/script.json" --exit-after 1600 >"$OUT/client.log" 2>&1 &
+HOME="$OUT/fh" BACKPLANE_GPUI_RECTS=1 BACKPLANE_GPUI_FRAMETIME=8 BACKPLANE_GPUI_ASSETS="$ASSETS_DIR" "$CLIENT_BIN" --url "http://127.0.0.1:$HPORT" --token-file "$OUT/home/token" --script "$OUT/script.json" --exit-after 1600 >"$OUT/client.log" 2>&1 &
 CP=$!; track_pid "$CP"
 export IPC_PY DRIVER_PY HUB_RPC_MJS HPORT REPO_ROOT REAL_HOME
 RC=0

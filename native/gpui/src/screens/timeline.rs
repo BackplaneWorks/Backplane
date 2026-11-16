@@ -269,7 +269,7 @@ fn list_el(cx: &mut Context<Backplane>, reg: &Reg, light: bool, b: &Block, key: 
     col.into_any_element()
 }
 
-fn block_el(cx: &mut Context<Backplane>, reg: &Reg, light: bool, b: &Block, key: &str, doc: Option<&Doc>) -> AnyElement {
+pub fn block_el(cx: &mut Context<Backplane>, reg: &Reg, light: bool, b: &Block, key: &str, doc: Option<&Doc>) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     match b {
         Block::Para(s) => text(reg, light, s.clone(), Kind::Body),
@@ -601,6 +601,10 @@ impl Backplane {
     }
     /// Scroll the document on screen (the project's README, or a note in the file viewer) so the anchor `id` is at its top.
     fn jump_to_anchor(&mut self, id: &str) {
+        // a project's page: its list goes to the README block the anchor is in, drawn or not
+        if !self.screens.home_list_key.is_empty() {
+            if let Some(&i) = self.screens.home_anchors.get(id) { self.screens.home_list.scroll_to(gpui::ListOffset { item_ix: crate::screens::projects::items(0) - 1 + i, offset_in_item: px(0.) }); return }
+        }
         let Some(at) = ANCHORS.with(|a| a.borrow().get(id).copied()) else { return };
         for h in [&self.screens.home_scroll, &self.screens.files.preview_scroll] {
             let view = h.bounds();

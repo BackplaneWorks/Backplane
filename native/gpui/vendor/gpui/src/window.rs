@@ -1936,6 +1936,12 @@ impl Window {
     /// the contents of the new [`Scene`], use [`Self::present`].
     #[profiling::function]
     pub fn draw(&mut self, cx: &mut App) -> ArenaClearNeeded {
+        let t0 = std::time::Instant::now();
+        let r = self.draw_frame(cx);
+        frame_time("draw", t0);
+        r
+    }
+    fn draw_frame(&mut self, cx: &mut App) -> ArenaClearNeeded {
         self.invalidate_entities();
         cx.entities.clear_accessed();
         debug_assert!(self.rendered_entity_stack.is_empty());
@@ -2036,7 +2042,9 @@ impl Window {
 
     #[profiling::function]
     fn present(&self) {
+        let t0 = std::time::Instant::now();
         self.platform_window.draw(&self.rendered_frame.scene);
+        frame_time("present", t0);
         self.needs_present.set(false);
         profiling::finish_frame!();
     }
@@ -5157,4 +5165,15 @@ pub fn outline(
         border_color: border_color.into(),
         border_style,
     }
+}
+
+/// Backplane patch: BACKPLANE_GPUI_FRAMETIME=<ms> logs each frame's draw (build, layout, paint) and present taking at least that long
+/// (`GPUI_FRAME {"phase", "ms", "epoch_ms"}`), so an e2e can hold a page to a frame budget; unset, nothing (read once).
+fn frame_time(phase: &str, t0: std::time::Instant) {
+    static MIN: std::sync::OnceLock<Option<f64>> = std::sync::OnceLock::new();
+    let Some(min) = *MIN.get_or_init(|| std::env::var("BACKPLANE_GPUI_FRAMETIME").ok().and_then(|v| v.parse().ok())) else { return };
+    let ms = t0.elapsed().as_secs_f64() * 1000.0;
+    if ms < min { return }
+    let at = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis());
+    eprintln!("GPUI_FRAME {{\"phase\":\"{phase}\",\"ms\":{ms:.1},\"epoch_ms\":{at}}}");
 }
