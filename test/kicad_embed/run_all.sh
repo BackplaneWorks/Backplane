@@ -42,6 +42,8 @@ SUITES=(
   # a fresh profile's editors in a narrow pane (bp.13 autopanels): the canvas at least 60 % at 611, 480, 1000 px; the panels back at Full
   # size; a closed panel stays closed (fork)
   "embed_narrow_pane_e2e.sh:narrow-pane"
+  # Ctrl+Tab to a schematic opening cold stays there (KiCad's own show request for the board just after it is not followed) (fork)
+  "embed_tab_bounce_e2e.sh:tab-bounce"
   # a click on one of KiCad's DRC markers keeps the editor where it is; Escape shuts a side panel before the viewer (fork; skips without Hubble_DK)
   "embed_marker_click_e2e.sh:marker-click"
   "embed_thread_e2e.sh:thread"

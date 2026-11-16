@@ -289,6 +289,14 @@ fn host_holds() -> &'static std::sync::Mutex<HashMap<String, std::time::Instant>
     static H: std::sync::OnceLock<std::sync::Mutex<HashMap<String, std::time::Instant>>> = std::sync::OnceLock::new();
     H.get_or_init(Default::default)
 }
+/// How long after the person's own switch KiCad's unattributed show requests for another frame are not followed.
+pub const SWITCH_HOLD: Duration = Duration::from_millis(2000);
+/// The person switched the pane's frame: hold KiCad's show requests for SWITCH_HOLD, a longer hold of the hub's own (a check run) kept.
+pub fn hold_shows_after_switch(pro: &str) {
+    let until = std::time::Instant::now() + SWITCH_HOLD;
+    let mut h = host_holds().lock().unwrap();
+    if h.get(pro).map_or(true, |t| *t < until) { h.insert(pro.to_string(), until); }
+}
 /// The hub is about to drive KiCad for `pro` (a check run): KiCad's show requests are not followed until `for_` has passed, or `release`.
 pub fn hold_shows(pro: &str, for_: Duration) { host_holds().lock().unwrap().insert(pro.to_string(), std::time::Instant::now() + for_); }
 /// The hub's drive is over: follow show requests again after a short grace (KiCad's last ones are still on their way).
@@ -1673,7 +1681,14 @@ impl Actor {
                 self.note_user(client);
                 self.attach(client, pro, root, files, frame, container, toplevel, display, wait, env, reply);
             }
-            Msg::Show { client, pro, frame, doc, item, remount, focus, reply } => { self.note_user(client); self.show(client, pro, frame, doc, item, remount, focus, reply) }
+            Msg::Show { client, pro, frame, doc, item, remount, focus, reply } => {
+                self.note_user(client);
+                // the person's switch (a client's show): for SWITCH_HOLD a show request KiCad makes with no actor for another frame is KiCad's own,
+                // not followed. A schematic opening cold made KiCad ask for the board ~250 ms after Ctrl+Tab to it (ET_SHOW_REQUESTED FK_PCB,
+                // no actor: lane M's Mac mini, bp.13 batch 13), the hub showed the board, and the pane followed KiCad back to it
+                if client != 0 { hold_shows_after_switch(&pro); }
+                self.show(client, pro, frame, doc, item, remount, focus, reply)
+            }
             Msg::Detach { client, pro, keep, reply } => self.detach(client, pro, keep, reply),
             Msg::Warm { client, pro, root, files, frame, display, hardware, locked, env, reply } => {
                 self.note_user(client);
@@ -3362,6 +3377,17 @@ mod tests {
         for (p, st, d) in [("/p/a", "ready", false), ("/p/b", "ready", true), ("/p/c", "starting", false), ("/p/d", "stopped", false), ("/p/e", "unresponsive", false)] { m.insert(p.to_string(), mk(p, st, d)); }
         assert_eq!(app_gone_victims(&m), vec!["/p/a", "/p/c", "/p/e"], "unsaved work and stopped ones are left");
         assert_eq!(WARM.idle_s, 300, "a KiCad in no pane closes after five minutes");
+    }
+    #[test] fn kicads_own_show_request_just_after_the_persons_switch_is_not_followed() {
+        let pro = "/p/switch-hold.kicad_pro";
+        assert!(!shows_held(pro));
+        hold_shows_after_switch(pro);
+        assert!(shows_held(pro), "the board KiCad asks for while the schematic opens cold: held");
+        assert_eq!(show_not_followed(true, "", false, true, shows_held(pro)), Some("while the hub drives it"));
+        assert_eq!(show_not_followed(true, "person:x", false, true, shows_held(pro)), None, "the person's own (attributed) request is followed");
+        hold_shows(pro, Duration::from_secs(60)); hold_shows_after_switch(pro);
+        assert!(host_holds().lock().unwrap()[pro] > std::time::Instant::now() + Duration::from_secs(30), "a longer hold of the hub's own is kept");
+        host_holds().lock().unwrap().remove(pro);
     }
     #[test] fn a_seeded_config_zooms_at_the_pointer_and_an_older_one_is_set_once() {
         let dir = crate::plat::tmp::uncreated("seedzoom");
