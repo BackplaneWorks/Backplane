@@ -209,7 +209,7 @@ mod tests {
     #[cfg(target_os = "linux")]
     #[test] fn a_held_flock_is_seen_with_its_holder_and_a_free_one_is_stale() {
         use std::os::unix::io::AsRawFd;
-        let d = std::env::temp_dir().join(format!("bp-locks-{}", std::process::id())); std::fs::create_dir_all(&d).unwrap();
+        let d = crate::plat::tmp::dir("locks");
         let doc = d.join("a.kicad_pro"); let lck = lock_path(&doc.to_string_lossy()).unwrap();
         std::fs::write(&lck, r#"{"hostname":"desktop","username":"h","token":"t"}"#).unwrap();
         let s = inspect(&doc.to_string_lossy()).unwrap();
@@ -222,6 +222,5 @@ mod tests {
         assert!(!clear_stale(&doc.to_string_lossy(), "test"), "a held lock is never removed");
         drop(f);
         assert!(clear_stale(&doc.to_string_lossy(), "test") && !lck.exists());
-        let _ = std::fs::remove_dir_all(&d);
     }
 }
