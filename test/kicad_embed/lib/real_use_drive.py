@@ -549,8 +549,19 @@ if "switch" in JOURNEYS:
         side("t1"); time.sleep(2.5); where("after the project page")
 shot("after_switch")
 # 3. edit: pan and zoom 10 s each, a click (select), a drag (move), Delete, Ctrl+Z, a short interactive track
+STEP_PROBE = os.environ.get("KEMBED_STEP_PROBE") == "1"
+def step(tag):
+    """KEMBED_STEP_PROBE=1: after each step of the edit journey, whether the editor's strip is still drawn (its Board tab and Edit), KiCad's
+    frames, and a screenshot: finds the first step after which the editor is gone (Hubble, bp.13 batches 8 and 9)."""
+    if not STEP_PROBE: return
+    tabr, edit = control("kicad-tab:PCB"), control("ui:Edit")
+    fr = {k: [f.get("shown"), f.get("focused")] for k, f in kframes().items()} if SOCK else {}
+    pop = [[w["w"], w["h"], w.get("title", "")] for w in windows() if w.get("shown") and w["w"] > 60 and w["h"] > 40
+           and ("kicad" in w.get("wm_class", "").lower()) and not w.get("title", "").endswith(("Editor", "3D Viewer"))]
+    print(f"STEP {tag}: strip_tab={'drawn' if tabr else 'GONE'} edit={'drawn' if edit else 'gone'} frames={fr} other_kicad_windows={pop}", flush=True)
+    shot(f"step_{tag}")
 if "edit" in JOURNEYS:
-    tab("PCB", "edit_board", 1.5)
+    tab("PCB", "edit_board", 1.5); step("edit_board")
     # focus into KiCad: an empty canvas corner, then Escape (a click on overlapping items, e.g. Hubble's U17 pad over its footprint, opens
     # KiCad's "which item?" menu, which then takes the pan's drag)
     rt("click", PANE["x"] + 60, PANE["y"] + PANE["h"] - 140); time.sleep(0.4); rt("key", "Escape")
@@ -560,21 +571,30 @@ if "edit" in JOURNEYS:
               "popup": [[w["w"], w["h"]] for w in windows() if w.get("shown") and w.get("override_redirect") and 60 < w["w"] < 1200 and 40 < w["h"] < 900]}
         if st["popup"]: print(f"JANK {tag}: a KiCad popup is open before the gesture {st['popup']}", flush=True)
         RESULTS[f"{tag}_state"] = {"ms": None, **st}; print(f"INFO {tag} state: {st}", flush=True); shot(f"{tag}_before")
-    gesture_state("pan_10s")
+    step("focus_click"); gesture_state("pan_10s")
     r = rt("pan", CX, CY, min(PANE["w"], PANE["h"]) // 5, 10, 2, 120); EVENTS.append({"kind": "input", "t0": r["t0"], "t1": r["t1"], "tag": "pan_10s"}); time.sleep(1)
-    gesture_state("zoom_10s")
+    step("pan"); gesture_state("zoom_10s")
     r = rt("wheel", CX, CY, 10, 60); EVENTS.append({"kind": "input", "t0": r["t0"], "t1": r["t1"], "tag": "zoom_10s"}); time.sleep(1)
-    rt("key", "Home"); time.sleep(1)  # zoom to fit
-    r = rt("click", CX, CY); EVENTS.append({"kind": "switch", "t0": r["t0"], "tag": "select_click", "window_ms": 1500}); time.sleep(1.5)
-    r = rt("drag", CX, CY, CX + 60, CY + 40, 600); EVENTS.append({"kind": "input", "t0": r["t0"], "t1": r["t1"], "tag": "drag_move"}); time.sleep(1)
-    r = rt("key", "Delete"); EVENTS.append({"kind": "switch", "t0": r["t0"], "tag": "delete", "window_ms": 1500}); time.sleep(1.5)
-    r = rt("key", "z", "ctrl"); EVENTS.append({"kind": "switch", "t0": r["t0"], "tag": "undo", "window_ms": 1500}); time.sleep(1.5)
-    r = rt("key", "z", "ctrl"); time.sleep(1.5)
+    step("zoom"); rt("key", "Home"); time.sleep(1)  # zoom to fit
+    step("home")
+    r = rt("click", CX, CY); EVENTS.append({"kind": "switch", "t0": r["t0"], "tag": "select_click", "window_ms": 1500}); time.sleep(1.5); step("select_click")
+    # a click on a DRC marker (Hubble's board centre has one) opens Backplane's Checks panel and narrows KiCad: the next gestures at the old
+    # centre would land on the panel, and the keys after them go to Backplane (two Escapes closed the editor). Recorded, then shut.
+    pn = pane_now()
+    RESULTS["select_click_kept_the_pane"] = {"ms": None, "ok": int(pn["w"] >= PANE["w"] - 100), "pane": pn}
+    if pn["w"] < PANE["w"] - 100:
+        print(f"JANK select_click: the click opened a panel beside the editor (KiCad now {pn}); shutting it", flush=True)
+        click_ctl("mgmt:checks"); time.sleep(1.0)
+        rt("click", PANE["x"] + 60, PANE["y"] + PANE["h"] - 140); time.sleep(0.4); rt("key", "Escape"); time.sleep(0.4); step("panel_shut")
+    r = rt("drag", CX, CY, CX + 60, CY + 40, 600); EVENTS.append({"kind": "input", "t0": r["t0"], "t1": r["t1"], "tag": "drag_move"}); time.sleep(1); step("drag")
+    r = rt("key", "Delete"); EVENTS.append({"kind": "switch", "t0": r["t0"], "tag": "delete", "window_ms": 1500}); time.sleep(1.5); step("delete")
+    r = rt("key", "z", "ctrl"); EVENTS.append({"kind": "switch", "t0": r["t0"], "tag": "undo", "window_ms": 1500}); time.sleep(1.5); step("undo1")
+    r = rt("key", "z", "ctrl"); time.sleep(1.5); step("undo2")
     rt("key", "Escape"); rt("click", CX - 100, CY + 80); rt("key", "x")  # route from an empty spot
     r = rt("pan", CX - 30, CY + 80, 70, 1.5, 0, 60)  # button 0: no button, the pointer moves while routing
     if r: EVENTS.append({"kind": "input", "t0": r["t0"], "t1": r["t1"], "tag": "route_track"})
-    rt("click", CX + 40, CY + 80); rt("key", "Escape"); rt("key", "Escape"); time.sleep(1)
-    rt("key", "z", "ctrl"); time.sleep(1)
+    rt("click", CX + 40, CY + 80); rt("key", "Escape"); rt("key", "Escape"); time.sleep(1); step("route")
+    rt("key", "z", "ctrl"); time.sleep(1); step("route_undo")
 # 3b. what sampling costs: the same pan with the sampler at most every 20 ms (its own file); compare hitch counts with pan_10s
 if "edit" in JOURNEYS:
     main_path = sampler_stop(); main_events = list(EVENTS); EVENTS.clear()
@@ -588,7 +608,7 @@ else:
 # 3c. management panels beside the editor: each panel's tab clicked open and shut, and Alt+Shift+B / Alt+Shift+C with Backplane's keyboard:
 # click to settled, blank frames over the pane, and how many times KiCad's container changed size (once is right)
 if "mgmt" in JOURNEYS:
-    tab("PCB", "mgmt_board", 1.2)
+    step("before_mgmt"); tab("PCB", "mgmt_board", 1.2); step("mgmt_board")
     ids = sorted({c["id"] for c in controls_like(r"^mgmt:[a-z]+$") if c["id"] not in ("mgmt:right", "mgmt:bottom", "mgmt:left", "mgmt:close", "mgmt:shut")})
     print(f"INFO management panels: {ids}", flush=True)
     def panel(press, tag):
@@ -908,6 +928,21 @@ def changed_centroid(before, after, min_px=20):
     ys, xs = np.nonzero(before != after)
     if len(xs) < min_px: return None
     return float(xs.mean()), float(ys.mean())
+def corridor_pixel(png, x, y):
+    """The plan view's corridor colour (embed_plan_person_e2e's mask: orange-red bands) nearest to (x, y) inside the pane:
+    {x, y, dist} in root pixels, or None when the pane shows none."""
+    try:
+        import numpy as np
+        from PIL import Image
+        a = np.asarray(Image.open(png).convert("RGB")).astype(int)
+        x0, y0 = PANE["x"], PANE["y"]; a = a[y0:y0 + PANE["h"], x0:x0 + PANE["w"]]
+        r, g, b = a[..., 0], a[..., 1], a[..., 2]
+        ys, xs = np.nonzero((r > 120) & (r - b > 70) & (g > 60) & (g < r - 10) & (g > b + 20))
+        if len(xs) < 20: return None
+        d = (xs + x0 - x) ** 2 + (ys + y0 - y) ** 2; i = int(d.argmin())
+        return {"x": int(xs[i] + x0), "y": int(ys[i] + y0), "dist": round(float(d[i]) ** 0.5, 1)}
+    except Exception as e:
+        print(f"DIAG corridor_pixel: {e}", flush=True); return None
 def calibrate_markers():
     """Board millimetres on screen from two host review markers (drawn in any view, plan view included): each set alone at a known
     board point, found by the pixels it changes; then cleared."""
@@ -1085,10 +1120,20 @@ if "plan" in JOURNEYS and SOCK:
         if to_screen:
             path = cor["path"]; mid = ((path[0][0] + path[1][0]) / 2, (path[0][1] + path[1][1]) / 2)
             ly0 = plan("layer", SOCK).get("layer")
-            mx, my = to_screen(*mid); rt("click", mx, my); time.sleep(0.6); shot("plan_corridor_selected")
+            mx, my = to_screen(*mid)
+            # where the plan view draws corridors (embed_plan_person_e2e's colour test): the nearest such pixel to the computed point, and
+            # whether the point itself is on one. Tells a calibration miss (the harness) from a hit test that ignores a good click (the fork).
+            shot("plan_corridor_target"); near = corridor_pixel(os.path.join(OUT, "shots", "plan_corridor_target.png"), mx, my)
+            print(f"INFO plan corridor colour: computed point {mx:.0f},{my:.0f}; nearest corridor pixel {near}", flush=True)
+            rt("click", mx, my); time.sleep(0.6); shot("plan_corridor_selected")
             ly1 = plan("layer", SOCK).get("layer")
             selp = ipc("selection", SOCK, "pcb")
-            RESULTS["plan_corridor_click"] = {"ms": None, "ok": int(ly1 == cl), "board_mm": [round(mid[0], 3), round(mid[1], 3)], "screen": [round(mx), round(my)],
+            if ly1 != cl and near and near["dist"] > 3:  # the computed point missed the band: the drawn one, clicked again
+                rt("click", near["x"], near["y"]); time.sleep(0.6); ly2 = plan("layer", SOCK).get("layer")
+                RESULTS["plan_corridor_click_on_drawn_band"] = {"ms": None, "ok": int(ly2 == cl), "at": [near["x"], near["y"]], "layer_after": ly2}
+                print(f"INFO plan corridor click on the drawn band {near['x']},{near['y']}: active layer -> {ly2}", flush=True)
+                if ly2 == cl: mx, my = near["x"], near["y"]; ly1 = ly2
+            RESULTS["plan_corridor_click"] = {"ms": None, "ok": int(ly1 == cl), "nearest_band_px": near and near["dist"], "board_mm": [round(mid[0], 3), round(mid[1], 3)], "screen": [round(mx), round(my)],
                                               "layer_before": ly0, "layer_after": ly1, "selection": selp.get("types")}
             p0s, p1s = to_screen(*path[0]), to_screen(*path[1])
             print(f"INFO plan corridor click: {cor['id']} on {cl} at board {mid[0]:.3f},{mid[1]:.3f} mm (screen {mx:.0f},{my:.0f}; the segment runs "
