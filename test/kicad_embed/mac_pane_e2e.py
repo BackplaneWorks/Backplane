@@ -405,6 +405,11 @@ try:
             for l in subprocess.run(['ps', '-axo', 'pid=,command='], capture_output=True, text=True).stdout.splitlines():
                 if '--parent-pid' in l and '--embedded' in l and OUT in l: out.append(l.split()[0])
             return out
+        def kicad_frame():
+            order = wins(); ours = next((i for i, w in enumerate(order) if cw and w[0] == cw[0]), None)
+            if ours is None: return None
+            k = [w for w in order[:ours] if w[1] not in (client.pid, hub.pid) and 'kicad' in w[2].lower()]
+            return k[0] if k and order.index(k[0]) == ours - 1 else None
         holders = lambda: subprocess.run(['lsof', '-t', '--', LCK], capture_output=True, text=True).stdout.split()
         fow = lambda: 'File Open Warning' in hub_log()
         o = wait_for(lambda: rect_since('kicad:lock-open', 0), 60, 0.5); c = rect_since('kicad:lock-cancel', 0); time.sleep(1); shot('lock-1-asked')
