@@ -90,6 +90,9 @@ pub struct Session {
     pub rss_mb: u64,
     /// a request of the hub's drive (a show, a pre-warm) waits on KiCad's check or refill task (task-gate-reads): its description, "" for none
     pub task_wait: String,
+    /// a start's last step ("spawned", "socket", "answering", "first show") and when KiCad was started (epoch ms): a pane waiting on it
+    /// says what KiCad is doing past 10 s, never a bare "Starting KiCad…" (the release check's fresh home, Nov 16)
+    pub start_phase: String, pub start_at: u64,
     /// in no pane, its frames left in the client's kept (unmapped) container: as good as detached for the warm cap and idleness
     pub parked: bool,
     pub touched_at: u64,
@@ -106,7 +109,7 @@ impl Session {
         Session {
             pro: pro.into(), root: root.into(), mode: mode.into(), state: "starting".into(),
             reason: String::new(), pid: 0, gen, active: canon_frame(active).into(),
-            container: 0, toplevel: 0, holder: 0, display: String::new(),
+            container: 0, toplevel: 0, holder: 0, display: String::new(), start_phase: String::new(), start_at: 0,
             sock: String::new(), events_sock: String::new(), sock_dir: String::new(),
             argv: String::new(), cli: String::new(), version: String::new(), desc: String::new(),
             caps: vec![], frames: vec![], missed_pings: 0, dialogs: vec![], notices: vec![], drawn: vec![], keys: vec![], rss_mb: 0, task_wait: String::new(), parked: false, touched_at: now, closing: false, lost_parent: false, editor_req: (String::new(), String::new(), None),
@@ -201,6 +204,7 @@ impl Session {
             "keys": self.keys,
             "rss_mb": self.rss_mb,
             "task_wait": self.task_wait,
+            "start_phase": self.start_phase, "start_at": self.start_at,
             // what the embedded editor can do beyond the basics (embed-gerbview, embed-editor-requested, ...): the client gates on these
             "embed_caps": self.caps.iter().filter(|c| c.starts_with("embed-") || c.starts_with("prewarm-")).collect::<Vec<_>>(),
             // bp.9: the client may map and unmap a frame KiCad has shown once (its tab switches need no round trip)
@@ -810,7 +814,14 @@ fn publish_live_sock(pro: &str, sock: &str) {
 fn open_frames() -> &'static Mutex<HashMap<String, Vec<String>>> { static F: OnceLock<Mutex<HashMap<String, Vec<String>>>> = OnceLock::new(); F.get_or_init(Default::default) }
 /// Whether the project's open KiCad has a frame of `kind` open (shown or not): no round trip.
 pub fn has_frame(pro: &str, kind: &str) -> bool { open_frames().lock().unwrap().get(&norm_pro_key(pro)).is_some_and(|v| v.iter().any(|k| k == kind)) }
+/// Projects whose GUI KiCad is starting or closing: the hub starts no headless KiCad for them meanwhile (it would take the project's lock
+/// first, and the GUI KiCad would ask "File Open Warning: already open" outside the pane: the release check's fresh-home stall, Nov 16).
+fn gui_holding() -> &'static Mutex<std::collections::HashSet<String>> { static H: OnceLock<Mutex<std::collections::HashSet<String>>> = OnceLock::new(); H.get_or_init(Default::default) }
+/// Whether the project's GUI KiCad is starting or closing (not ready, not gone): a headless KiCad must not be started for it now.
+pub fn gui_starting(pro: &str) -> bool { gui_holding().lock().unwrap().contains(&norm_pro_key(pro)) }
 fn put_route(s: &Session, tx: &mpsc::UnboundedSender<Msg>) {
+    { let mut h = gui_holding().lock().unwrap(); let k = norm_pro_key(&s.pro);
+      if s.state == "starting" || (s.closing && s.is_live()) { h.insert(k); } else { h.remove(&k); } }
     session_notes().lock().unwrap().insert(norm_pro_key(&s.pro), json!({"dialogs": s.dialogs, "notices": s.notices,
         "dialogs_reported": !cfg!(windows) || s.caps.iter().any(|c| c == "embed-dialog-events")}));
     open_frames().lock().unwrap().insert(norm_pro_key(&s.pro), s.frames.iter().map(|f| f.kind.clone()).collect());
@@ -1077,6 +1088,7 @@ enum Msg {
     StartFailed { pro: String, gen: u64, why: String },
     /// a gated request on `sock` waits on KiCad's task (`what`), or no longer ("")
     TaskWait { sock: String, what: String },
+    StartPhase { pro: String, gen: u64, what: String },
     FramesUpdated { pro: String, gen: u64, holder: Option<u64>, frames: Vec<Frame>, reply: Option<(u64, oneshot::Sender<Result<Value, String>>)> },
     /// `editor`: KiCad's ET_EDITOR_REQUESTED (a library editor with the item it is for), not a plain ET_SHOW_REQUESTED
     ForkShowRequested { pro: String, gen: u64, kind: String, item: String, editor: bool, actor: String },
@@ -1174,6 +1186,8 @@ async fn gone_before_retry(pid: u32, root: &str, pro: &str, term_wait: Duration,
     if locks.is_empty() { how } else { format!("{how}, leaving {} (swept)", locks.join(", ")) }
 }
 
+/// How long a GUI start waits for the project's headless KiCad to finish an agent's unsaved work (it stops itself once saved).
+const HANDOVER_WAIT: std::time::Duration = std::time::Duration::from_secs(if cfg!(test) { 2 } else { 60 });
 /// How long a start has for KiCad's socket and its first answers (a dialog of KiCad's own open meanwhile extends it); short under test.
 const START_WINDOW_S: u64 = if cfg!(test) { 3 } else { 30 };
 /// The start window in force (BACKPLANE_KICAD_START_WINDOW_S for an e2e), and whether this start is one an e2e makes stall: its socket
@@ -1489,8 +1503,18 @@ impl Actor {
         let root_s = root.clone();
         let caps = env.caps.clone();
         tokio::spawn(async move {
-            // Retire any headless kserve for this project before the GUI opens its files.
-            let _ = ipc::retire(&pro).await;
+            // Retire any headless kserve for this project before the GUI opens its files: it holds the project's lock while it runs (the
+            // GUI KiCad would ask "File Open Warning" outside the pane). It refuses while it has unsaved work (an agent's commit not yet
+            // saved): asked again each second while that agent finishes on it (its requests still go there), up to HANDOVER_WAIT
+            let t = std::time::Instant::now(); let mut said = false;
+            loop {
+                let r = ipc::retire(&pro).await;
+                if r["ok"] != false { if said { eprintln!("kicad embed: {pro}: the headless KiCad stopped after {} ms; the editor starts", t.elapsed().as_millis()); } break }
+                if !said { said = true; eprintln!("kicad embed: {pro}: the headless KiCad has unsaved work ({}); waiting for it before the editor starts", r["error"].as_str().unwrap_or(""));
+                           let _ = me.send(Msg::StartPhase { pro: pro.clone(), gen, what: "handover".into() }); }
+                if t.elapsed() >= HANDOVER_WAIT { eprintln!("kicad embed: {pro}: the headless KiCad still has unsaved work after {} s; the editor starts anyway", HANDOVER_WAIT.as_secs()); break }
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            }
             spawn_gui_session(me, home, pro, root_s, gen, mode_s, argv_vec, sock_dir, req_sock, eff_display, desc, active, spawn_container, sweep_locks, caps).await;
         });
     }
@@ -1732,6 +1756,13 @@ impl Actor {
                 } else {
                     let _ = reply.send(Ok(json!({"ok":true})));
                 }
+            }
+            Msg::StartPhase { pro, gen, what } => {
+                let Some(s) = self.sessions.get_mut(&pro).filter(|s| s.gen == gen && s.state == "starting") else { return };
+                if what == "spawned" { s.start_at = ipc::now_ms() as u64; }
+                s.start_phase = what;
+                let snap = s.clone();
+                self.publish(&snap, None);
             }
             Msg::TaskWait { sock, what } => {
                 if let Some(s) = self.sessions.values_mut().find(|s| s.sock == sock && !sock.is_empty()) {
@@ -2308,7 +2339,10 @@ async fn spawn_gui_session(
 ) {
     // where a cold start's time goes: one line per phase (hub log), for the perf e2e and the person's own log
     let t0 = std::time::Instant::now();
-    let phase = |what: &str| eprintln!("kicad embed: start +{}ms {what}", t0.elapsed().as_millis());
+    let phase = { let (me, pro) = (me.clone(), pro.clone()); move |what: &str| {
+        eprintln!("kicad embed: start +{}ms {what}", t0.elapsed().as_millis());
+        let _ = me.send(Msg::StartPhase { pro: pro.clone(), gen, what: what.to_string() });
+    } };
     if sweep_locks {
         sweep_crashed_locks(&root, &pro);
     }
@@ -3020,6 +3054,17 @@ mod tests {
         // a runtime without actors: told by time only, as before
         assert_eq!(show_not_followed(false, "", false, true, true), Some("while the hub drives it"));
         assert_eq!(show_not_followed(false, "", false, true, false), None);
+    }
+    // the release check's fresh-home stall (Nov 16): a headless KiCad started while the editor's starts takes the project's lock first.
+    // While the GUI session starts (or closes, still alive) no headless KiCad may start for the project; ready or gone, it may
+    #[test] fn no_headless_kicad_while_the_editors_starts_or_closes() {
+        let (tx, _rx) = mpsc::unbounded_channel();
+        let pro = "/tmp/bp-gui-starting-test/a.kicad_pro";
+        let mut s = Session::new(pro, "/tmp/bp-gui-starting-test", "fork", "PCB", 1, 0);
+        put_route(&s, &tx); assert!(gui_starting(pro), "starting");
+        s = s.ready("/s", "", 1); put_route(&s, &tx); assert!(!gui_starting(pro), "ready: requests go to it");
+        s.closing = true; put_route(&s, &tx); assert!(gui_starting(pro), "closing, still alive: its locks are not released yet");
+        let stopped = s.stopped("closed"); put_route(&stopped, &tx); assert!(!gui_starting(pro), "gone");
     }
     #[test] fn gerbview_and_the_editors_kicad_asks_for() {
         use super::*;

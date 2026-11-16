@@ -169,8 +169,28 @@ pub fn waiting_on(info: &Value, have_frame: bool, windows: bool) -> Option<Strin
         // macOS: KiCad's start waits on a system prompt that names Backplane (the hub's mac_prompt_wait): said, so the person looks for it
         "starting" if info["reason"] == "mac-permission-prompt" => Some(crate::i18n::trs("macOS is asking for permission for Backplane: answer the prompt to let KiCad start.")),
         _ if info["task_wait"].as_str().is_some_and(|w| !w.is_empty()) => Some(crate::i18n::tf("gpui.c.kicad.task.wait", &[("what", info["task_wait"].as_str().unwrap_or("").to_string().into())])),
+        "starting" => Some(starting_words(info)),
         _ => Some(crate::i18n::trs("Starting KiCad…")),
     }
+}
+
+/// From this many seconds a start the pane is waiting on says what KiCad is doing and for how long.
+pub const STARTING_SAY: u64 = 10;
+
+/// "Starting KiCad…", and past STARTING_SAY what KiCad is doing (the hub's `start_phase`) and for how long (the pane's
+/// `starting_for_s`): the release check's fresh-home first Edit sat on "Starting KiCad…" for minutes with nothing said.
+pub fn starting_words(info: &Value) -> String {
+    let secs = info["starting_for_s"].as_u64().unwrap_or(0);
+    if secs < STARTING_SAY { return crate::i18n::trs("Starting KiCad…") }
+    let what = match info["start_phase"].as_str().unwrap_or("") {
+        "handover" => crate::i18n::tf("gpui.c.kicad.phase.handover", &[]),
+        "spawned" => crate::i18n::tf("gpui.c.kicad.phase.spawned", &[]),
+        "socket" => crate::i18n::tf("gpui.c.kicad.phase.socket", &[]),
+        "answering" => crate::i18n::tf("gpui.c.kicad.phase.answering", &[]),
+        "first show" | "ready" => crate::i18n::tf("gpui.c.kicad.phase.show", &[]),
+        _ => crate::i18n::tf("gpui.c.kicad.phase.none", &[]),
+    };
+    crate::i18n::tf("gpui.c.kicad.starting.slow", &[("what", what.into()), ("secs", secs.to_string().into())])
 }
 
 /// KiCad's own dialog up while the keyboard is elsewhere (an agent's or the API's Plot, DRC...: it never takes the person's keyboard,
@@ -227,6 +247,9 @@ pub fn hub_open_step<'a>(cur_open: &str, last_hub_open: &mut String, hub_open: &
 
 pub struct KicadPane {
     /// when this pane was made (the first Edit's), its warm hand-over's end (the frame placed + HANDOFF_PAINT), and whether it is over
+    /// since when this pane has seen KiCad starting, and the last whole second past STARTING_SAY it redrew for (the pane says
+    /// what KiCad is doing from then: never a silent "Starting KiCad…", the release check's fresh-home stall)
+    starting_since: Option<std::time::Instant>, starting_said: u64,
     born: std::time::Instant, handoff_placed: Option<(std::time::Instant, u64)>, handoff_over: bool,
     /// macOS: the pane's screen rect (points) and our window's visibility last pushed to KiCad (`editor.kicad.host`)
     pub host_sent: Option<(i32, i32, i32, i32, bool)>,
@@ -370,7 +393,7 @@ impl KicadPane {
             let _ = drained_tx.send(());
         } }).detach();
         KicadPane { born: std::time::Instant::now(), handoff_placed: None, handoff_over: false, host_sent: None, mac_full: false, busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), last_root: (i32::MIN, 0), placed: None,
-            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), lent_at: None, poked: None, unmapped_since: None, unshown_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, at_px: None, dialogs_open: Vec::new(), took: None, await_close: None, press_focus: None, want_keys: true, refocus: None, verify_handin: None, prewarm_guard: None, unexplained_reposted: false, focus_seen: (0, 0), was_dialog: false }
+            focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), lent_at: None, poked: None, unmapped_since: None, unshown_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, at_px: None, dialogs_open: Vec::new(), took: None, await_close: None, press_focus: None, want_keys: true, refocus: None, verify_handin: None, prewarm_guard: None, unexplained_reposted: false, focus_seen: (0, 0), was_dialog: false, starting_since: None, starting_said: 0 }
     }
     fn rpc(&self, name: &str, params: Value) { let _ = self.hub.try_send(Command::Rpc(name.to_string(), Secret(params), "kicad")); }
     /// The hub's `editor.kicad.<digest>` for this project changed.
@@ -417,6 +440,11 @@ impl KicadPane {
         for k in info["keys"].as_array().into_iter().flatten().filter_map(|k| Some((k[0].as_u64()?, k[1].as_u64()?))) {
             if info["pid"] != self.info["pid"] || self.info["keys"].as_array().is_some_and(|old| old.iter().any(|o| o[0].as_u64() == Some(k.0))) { continue }
             if let Some(chord) = nc::reserved_chord_index(k.1 as usize) { nc::push_key(&nc::mac_chord(chord)); }
+        }
+        match (info["state"] == "starting", self.starting_since) {
+            (true, None) => self.starting_since = Some(std::time::Instant::now()),
+            (false, Some(_)) => { self.starting_since = None; self.starting_said = 0; }
+            _ => {}
         }
         self.info = info;
         self.note_tab(&was_tab, &cause);
@@ -596,6 +624,7 @@ impl KicadPane {
     }
     fn seen_info(&self) -> Value {
         let mut i = self.info.clone();
+        if let Some(t) = self.starting_since { i["starting_for_s"] = json!(t.elapsed().as_secs()); }
         if !self.dialogs_open.is_empty() && i["dialogs"].as_array().map_or(true, |d| d.is_empty()) { i["dialogs"] = json!(self.dialogs_open); }
         i
     }
@@ -637,6 +666,11 @@ impl KicadPane {
         // Windows: Backplane in front with nothing holding the keyboard (a jump away from the editor it was lent from) gets it
         if cfg!(windows) && !self.keys && self.toplevel != 0 { nc::keep_focus(self.toplevel); }
         if !self.handoff_over && !self.handoff() { self.end_handoff(cx); }
+        // past STARTING_SAY the pane's words change each second (what KiCad is doing, for how long)
+        if let Some(t) = self.starting_since {
+            let s = t.elapsed().as_secs();
+            if s >= STARTING_SAY && s != self.starting_said { self.starting_said = s; cx.notify(); }
+        }
         if let Some((popped, at)) = self.await_close {
             let activated = nc::activated_after_close(self.toplevel, popped);
             if activated || at.elapsed() >= std::time::Duration::from_millis(1000) {
@@ -1149,6 +1183,13 @@ mod tests {
         let say = super::waiting_on(&i("starting", "mac-permission-prompt"), false, false).unwrap();
         assert!(say.contains("macOS is asking for permission for Backplane"), "{say}");
         assert_eq!(super::waiting_on(&i("starting", ""), false, false).as_deref(), Some("Starting KiCad…"));
+        // past 10 s a start says what KiCad is doing and for how long, never a silent "Starting KiCad…" (the fresh-home stall)
+        let slow = |phase: &str, secs: u64| super::waiting_on(&json!({"state": "starting", "start_phase": phase, "starting_for_s": secs}), false, false).unwrap();
+        assert_eq!(slow("socket", 9), "Starting KiCad…");
+        assert_eq!(slow("socket", 12), "Starting KiCad: KiCad is up, waiting for it to answer (12 s)");
+        assert!(slow("spawned", 10).contains("loading") && slow("answering", 40).contains("opening the project") && slow("first show", 11).contains("drawing"));
+        assert!(slow("", 30).contains("waiting for KiCad to be started"));
+        assert!(super::waiting_on(&json!({"state": "starting", "start_phase": "socket", "starting_for_s": 30, "dialogs": ["Configure Global Footprint Library Table"]}), false, false).unwrap().contains("Configure Global"), "a dialog KiCad shows is said over the phase");
         assert!(super::waiting_on(&i("failed", "KiCad waited 10 min on a macOS permission prompt that was not answered (answer it, then Try again)"), false, false).unwrap().contains("KiCad waited 10 min"));
     }
     #[test] fn a_warm_first_edit_holds_the_picture_until_kicad_has_drawn() {
