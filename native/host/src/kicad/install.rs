@@ -313,14 +313,14 @@ pub fn manifest_ok(text: &str, p: &Package) -> Result<(), String> {
     if m["platform"] != p.platform { return Err("KiCad manifest platform mismatch".into()) }
     Ok(())
 }
-fn sha256_file(f: &Path) -> Result<String, String> {
+pub(crate) fn sha256_file(f: &Path) -> Result<String, String> {
     use sha2::{Digest, Sha256};
     let mut h = Sha256::new(); let mut r = std::fs::File::open(f).map_err(|e| e.to_string())?; let mut b = vec![0u8; 1 << 20];
     loop { let n = std::io::Read::read(&mut r, &mut b).map_err(|e| e.to_string())?; if n == 0 { break } h.update(&b[..n]) }
     Ok(hex::encode(h.finalize()))
 }
 /// One program to its end (through proc.rs, in its own group, its output into the log); Err with its last line when it fails.
-async fn tool(prog: &Path, args: &[String], log: &Path, mut tick: impl FnMut()) -> Result<String, String> {
+pub(crate) async fn tool(prog: &Path, args: &[String], log: &Path, mut tick: impl FnMut()) -> Result<String, String> {
     let out = std::fs::OpenOptions::new().create(true).append(true).open(log).map_err(|e| e.to_string())?;
     let err = out.try_clone().map_err(|e| e.to_string())?;
     let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Net, prog);
@@ -374,9 +374,9 @@ impl Bytes {
 }
 /// Rate and time left from the last few seconds' samples (a moving window, so a stall shows quickly and a burst does not promise too much).
 #[derive(Default)]
-struct Meter { samples: std::collections::VecDeque<(std::time::Instant, u64)> }
+pub(crate) struct Meter { samples: std::collections::VecDeque<(std::time::Instant, u64)> }
 impl Meter {
-    fn at(&mut self, now: std::time::Instant, done: u64, total: u64) -> Bytes {
+    pub(crate) fn at(&mut self, now: std::time::Instant, done: u64, total: u64) -> Bytes {
         self.samples.push_back((now, done));
         while self.samples.len() > 2 && now.duration_since(self.samples[0].0).as_secs_f64() > 6. { self.samples.pop_front(); }
         let (t0, d0) = self.samples[0]; let dt = now.duration_since(t0).as_secs_f64();

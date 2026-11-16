@@ -541,26 +541,32 @@ pub fn install_row(session: &Value, info: &Value, pkg: Option<&crate::files::kic
     })
 }
 
-/// What a press on Install FreeCAD would do on this computer (settings/tools_install.rs `plan`): Some(true) it installs here (FreeCAD's own
-/// release on Linux and macOS, winget on Windows), Some(false) only its download page.
-fn freecad_plan(st: &State) -> Option<bool> {
+/// What a press on Install FreeCAD would do on this computer (settings/tools_install.rs `plan`): FreeCAD's own release on Linux and macOS,
+/// winget on Windows, else its pinned installer there; a download page where none of those is.
+fn freecad_plan(st: &State) -> Option<crate::settings::tools_install::Plan> {
     let os = match std::env::consts::OS { "macos" => "darwin", o => o };
     let arch = match std::env::consts::ARCH { "x86_64" => "x64", "aarch64" => "arm64", a => a };
     let winget = serde_json::from_str::<Value>(set(st, "onboard.checks", "")).map_or(false, |c| c["winget"] == true);
-    crate::settings::tools_install::plan("freecad", os, arch, winget, false).map(|p| !matches!(p, crate::settings::tools_install::Plan::Link(_)))
+    crate::settings::tools_install::plan("freecad", os, arch, winget, false)
 }
 /// Settings > CAD's Install FreeCAD row, only while no FreeCAD is found: what it downloads and where it goes, the consent step, how it
 /// goes (info `onboard.installs`, the same install setup's button runs) and its failure. `here`: `freecad_plan`.
-pub fn freecad_install_row(session: &Value, info: &Value, here: Option<bool>) -> Option<Value> {
+pub fn freecad_install_row(session: &Value, info: &Value, here: Option<crate::settings::tools_install::Plan>) -> Option<Value> {
+    use crate::settings::tools_install::Plan;
     let i = |k: &str| info[k].as_str().unwrap_or("");
     if !i("freecad").is_empty() { return None }
     let st: Value = serde_json::from_str(i("onboard.installs")).unwrap_or_default();
     let (state, note) = (st["freecad"]["state"].as_str().unwrap_or(""), st["freecad"]["note"].as_str().unwrap_or(""));
     let home = i("home"); let into = if home.is_empty() { "Backplane's own folder".to_string() } else { format!("{home}/freecad") };
-    Some(match (here?, state) {
-        (false, _) => row("Install FreeCAD", "Download FreeCAD from freecad.org, then set its path above.", vec![]),
-        (_, "running") => row("Installing FreeCAD", &format!("{}.", note.trim_end_matches('.')), vec![]),
-        (_, _) if draft(session, "@finstall") == "ask" => row("Install FreeCAD?", &format!("Downloads the latest FreeCAD (about 800 MB, 3 GB unpacked) from github.com/FreeCAD/FreeCAD, checks its checksum and unpacks it into {into}. It needs no administrator password and changes nothing else on this computer."),
+    let here = here?;
+    Some(match (&here, state) {
+        (Plan::Link(_), _) => row("Install FreeCAD", "Download FreeCAD from freecad.org, then set its path above.", vec![]),
+        (_, "running") => { let mut r = row("Installing FreeCAD", &format!("{}.", note.trim_end_matches('.')), vec![]); if let Some(b) = st["freecad"]["progress"].as_f64() { r["progress"] = json!(b); } r }
+        (_, _) if draft(session, "@finstall") == "ask" => row("Install FreeCAD?", &match &here {
+                Plan::Winget(_) => "Installs FreeCAD with winget. Windows may ask for permission once.".to_string(),
+                Plan::Direct(p) => format!("Downloads FreeCAD {}'s Windows installer (about {} MB) from github.com/FreeCAD/FreeCAD, checks it against its pinned checksum and installs it for this Windows user only, in %LOCALAPPDATA%\\Programs. It needs no administrator password.", p.version, (p.size + (1 << 19)) >> 20),
+                _ => format!("Downloads the latest FreeCAD (about 800 MB, 3 GB unpacked) from github.com/FreeCAD/FreeCAD, checks its checksum and unpacks it into {into}. It needs no administrator password and changes nothing else on this computer."),
+            },
             vec![btn("Install", "freecad-install", "", true), btn("Cancel", "freecad-install-cancel", "", false)]),
         (_, "failed") => row("Install FreeCAD", &format!("{}.", note.trim_end_matches('.')), vec![btn("Try again", "freecad-install-ask", "", true)]),
         _ => row("Install FreeCAD", "FreeCAD's own release for this computer. Agents make mechanical parts with it.", vec![btn("Install FreeCAD", "freecad-install-ask", "", true)]),
@@ -576,7 +582,7 @@ fn running_row(label: &str, st: &Value, version: &str, note: &str) -> Value {
 }
 /// Settings > CAD: the KiCad the hub found (what it told: `kicad.*`), Install KiCad while none is, the path field, the IPC switch, and FreeCAD.
 fn cad(st: &State, session: &Value, info: &Value) -> Vec<Value> { cad_with(st, session, info, crate::files::kicad::install::package(), freecad_plan(st)) }
-fn cad_with(st: &State, session: &Value, info: &Value, pkg: Option<&crate::files::kicad::install::Package>, fc_here: Option<bool>) -> Vec<Value> {
+fn cad_with(st: &State, session: &Value, info: &Value, pkg: Option<&crate::files::kicad::install::Package>, fc_here: Option<crate::settings::tools_install::Plan>) -> Vec<Value> {
     let i = |k: &str| info[k].as_str().unwrap_or("");
     let kicad = match (i("kicad.status"), i("kicad.version"), i("kicad.cli")) {
         // a stock KiCad is named as one: "version 10.0.7" read as if nothing were amiss (the row under it says what Backplane KiCad adds)
@@ -1143,7 +1149,9 @@ mod tests {
         let r = cad_with(&st(&[]), &json!({"drafts": drafts}), &info, pkg, None); r
     }
     #[test] fn install_freecad_shows_only_while_freecad_is_not_found_and_asks_first() {
-        let rows = |info: Value, drafts: Value, here: Option<bool>| cad_with(&st(&[]), &json!({"drafts": drafts}), &info, None, here);
+        use crate::settings::tools_install::{plan, FREECAD_WIN};
+        // true: FreeCAD's own release here (Linux); false: only its page
+        let rows = |info: Value, drafts: Value, here: Option<bool>| cad_with(&st(&[]), &json!({"drafts": drafts}), &info, None, here.map(|h| plan("freecad", if h { "linux" } else { "freebsd" }, "x64", false, false).unwrap()));
         let label = |r: &[Value], l: &str| r.iter().find(|x| x["label"] == l).cloned();
         let none = json!({"kicad.cli": "/usr/bin/kicad-cli", "home": "/h"});
         let r = rows(none.clone(), json!({}), Some(true));
@@ -1159,7 +1167,16 @@ mod tests {
         let page = label(&rows(none.clone(), json!({}), Some(false)), "Install FreeCAD").unwrap(); assert!(btns(&page).is_empty() && page["note"].as_str().unwrap().contains("freecad.org"));
         let mut found = none.clone(); found["freecad"] = json!("/usr/bin/freecadcmd");
         assert!(label(&rows(found, json!({}), Some(true)), "Install FreeCAD").is_none());
-        assert!(label(&rows(none, json!({}), None), "Install FreeCAD").is_none());
+        assert!(label(&rows(none.clone(), json!({}), None), "Install FreeCAD").is_none());
+        // Windows with no winget: the pinned installer, asked first, with its version and where it goes; its download shows a bar
+        let win = |drafts: Value, info: Value| cad_with(&st(&[]), &json!({"drafts": drafts}), &info, None, plan("freecad", "windows", "x64", false, false));
+        assert_eq!(btns(&label(&win(json!({}), none.clone()), "Install FreeCAD").unwrap()), [("Install FreeCAD".to_string(), "freecad-install-ask".to_string())]);
+        let ask = label(&win(json!({"@finstall": "ask"}), none.clone()), "Install FreeCAD?").unwrap(); let n = ask["note"].as_str().unwrap();
+        assert!(n.contains(FREECAD_WIN.version) && n.contains("%LOCALAPPDATA%\\Programs") && n.contains("about 495 MB") && n.contains("no administrator"), "{n}");
+        let mut run = none.clone(); run["onboard.installs"] = json!(json!({"freecad": {"state": "running", "note": "Downloading FreeCAD 1.1.4: 312 of 495 MB", "progress": 0.63}}).to_string());
+        let r = label(&win(json!({}), run), "Installing FreeCAD").unwrap(); assert_eq!(r["progress"], json!(0.63)); assert_eq!(r["note"], "Downloading FreeCAD 1.1.4: 312 of 495 MB.");
+        let wg = label(&cad_with(&st(&[]), &json!({"drafts": {"@finstall": "ask"}}), &none, None, plan("freecad", "windows", "x64", true, false)), "Install FreeCAD?").unwrap();
+        assert!(wg["note"].as_str().unwrap().contains("winget"));
         // the press: asks first, then starts the same install setup's button runs
         let o = act("h", &json!({"rid": 3, "drafts": {}}), "freecad-install", "").unwrap(); assert_eq!(o.patch["drafts"]["@finstall"], "ask"); assert!(o.cmds.is_empty());
         let o = act("h", &json!({"rid": 3, "drafts": {"@finstall": "ask"}}), "freecad-install", "").unwrap();

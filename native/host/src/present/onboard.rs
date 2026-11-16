@@ -116,9 +116,10 @@ impl<'a> Facts<'a> {
         let page = |p: &Option<Plan>| match p { Some(Plan::Link(u)) => Some(link("Download", u)), _ => None };
         let p = plan(tool, &self.os, &self.arch, self.checks["winget"] == true, self.checks["node"] == true);
         match (s(st, "state"), &p) {
-            ("running", _) => vec![row(&format!("Installing {label}"), if s(st, "note").is_empty() { "Starting." } else { s(st, "note") }, vec![])],
+            ("running", _) => { let mut r = row(&format!("Installing {label}"), if s(st, "note").is_empty() { "Starting." } else { s(st, "note") }, vec![]); if let Some(b) = st["progress"].as_f64() { r["progress"] = json!(b); } vec![r] }
             ("failed", _) => { let mut b = vec![btn("Try again", "ob-install", tool, true)]; b.extend(page(&p)); let mut r = row(&format!("{label} did not install"), &format!("{}.", s(st, "note").trim_end_matches('.')), b); r["tone"] = json!("warn"); vec![r] }
             (_, Some(Plan::Winget(_))) => vec![row(&format!("Install {label}"), "Installs with winget. Windows may ask for permission once.", vec![btn("Install", "ob-install", tool, true)])],
+            (_, Some(Plan::Direct(p))) => vec![row(&format!("Install {label}"), &format!("Downloads {} {}'s Windows installer, checks it and installs it for this Windows user. No administrator password.", p.name, p.version), vec![btn("Install", "ob-install", tool, true)])],
             (_, Some(Plan::Sh(..))) | (_, Some(Plan::Ps(_))) => vec![row(&format!("Install {label}"), &format!("Downloads and runs {}.", if tool == "codex" { "Codex's own release, checked against its published checksum" } else { "its vendor's own installer" }), vec![btn("Install", "ob-install", tool, true)])],
             (_, Some(Plan::Link(u))) => vec![row(&format!("Get {label}"), "Opens its download page.", vec![link("Download", u)])],
             (_, None) => vec![],
@@ -292,7 +293,7 @@ fn install_btns(f: &Facts, tool: &str, guide: &str) -> (String, Vec<Value>, bool
     match (s(st, "state"), &p) {
         ("running", _) => (format!("Installing. {}", if s(st, "note").is_empty() { "Starting." } else { s(st, "note") }), vec![], false),
         ("failed", _) => { let mut b = vec![btn("Try again", "ob-install", tool, true)]; b.extend(page(&p)); (format!("It did not install: {}.", s(st, "note").trim_end_matches('.')), b, true) }
-        (_, Some(Plan::Winget(_))) | (_, Some(Plan::Sh(..))) | (_, Some(Plan::Ps(_))) => (String::new(), vec![btn("Install", "ob-install", tool, true)], false),
+        (_, Some(Plan::Winget(_))) | (_, Some(Plan::Sh(..))) | (_, Some(Plan::Ps(_))) | (_, Some(Plan::Direct(_))) => (String::new(), vec![btn("Install", "ob-install", tool, true)], false),
         (_, Some(Plan::Link(u))) => (String::new(), vec![link("Download", u)], false),
         (_, None) => (String::new(), fallback(), false),
     }
@@ -436,7 +437,8 @@ fn freecad_row(f: &Facts) -> (Value, bool) {
     if !f.checked { return (row("FreeCAD", looking(f), vec![]), false) }
     let (note, b, bad) = install_btns(f, "freecad", "");
     let what = if !s(t, "path").is_empty() { format!("Found at {}, but it does not run: {}.", s(t, "path"), s(t, "why")) } else { "Not found. Agents use it to model enclosures and brackets.".to_string() };
-    let r = row("FreeCAD", &if note.is_empty() { what } else { note }, b);
+    let mut r = row("FreeCAD", &if note.is_empty() { what } else { note }, b);
+    if f.installs["freecad"]["state"] == "running" { if let Some(p) = f.installs["freecad"]["progress"].as_f64() { r["progress"] = json!(p); } }
     (if bad || !s(t, "path").is_empty() { warn(r) } else { r }, false)
 }
 /// A Locate row: the full path of a tool found nowhere Backplane looks.
@@ -910,9 +912,13 @@ mod tests {
         let p = at(&cst(c, &[]), "tools", &i, &desk()); assert_eq!(p["state"], "done"); assert_eq!(p["next"], "Next"); assert!(row_of(&p, "FreeCAD")["note"].as_str().unwrap().contains("1.0.2"));
         let mut b = blank(); b["freecad"] = json!({"path": "/x/freecadcmd", "runs": false, "why": "exit code 1"});
         let f = row_of(&at(&cst(b, &[]), "tools", &i, &desk()), "FreeCAD"); assert!(f["note"].as_str().unwrap().contains("exit code 1")); assert_eq!(f["tone"], "warn");
-        // Windows: winget buttons only when the checks found winget, the download page otherwise
+        // Windows: an Install button with winget and without it (then the hub runs FreeCAD's pinned installer); never only the download page
         let w = |winget: bool| { let mut ch = blank(); ch["winget"] = json!(winget); let mut i = info("windows"); i["arch"] = json!("x64"); at(&cst(ch, &[]), "tools", &i, &desk())["rows"].to_string() };
-        assert!(w(true).contains("\"ob-install\",\"value\":\"freecad\"")); assert!(!w(false).contains("ob-install") && w(false).contains("freecad.org"));
+        for g in [true, false] { assert!(w(g).contains("\"ob-install\",\"value\":\"freecad\""), "winget {g}"); assert!(!w(g).contains("freecad.org"), "winget {g}"); }
+        // its download shows a bar on the step
+        let mut ch = blank(); ch["winget"] = json!(false); let mut i = info("windows"); i["arch"] = json!("x64");
+        i["onboard.installs"] = json!(json!({"freecad": {"state": "running", "note": "Downloading FreeCAD 1.1.4: 100 of 495 MB", "progress": 0.2}}).to_string());
+        let f = row_of(&at(&cst(ch, &[]), "tools", &i, &desk()), "FreeCAD"); assert_eq!(f["progress"], json!(0.2)); assert!(f["note"].as_str().unwrap().contains("100 of 495 MB"), "{f}");
     }
     /// Windows with no Git: a Git for Windows row comes first (winget's one press, or the download page) and KiCad waits for it; with Git, or on
     /// Linux and macOS, no such row.

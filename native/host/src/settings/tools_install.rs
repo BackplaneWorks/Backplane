@@ -18,6 +18,77 @@ pub enum Plan {
     Ps(&'static str),
     /// Nothing to run here: the page to open.
     Link(&'static str),
+    /// A pinned Windows installer the hub downloads itself (resumable, checked against its pin) and runs silently for this user: FreeCAD on a
+    /// Windows with no winget (Windows Server, LTSC/IoT, a fresh install before App Installer updates).
+    Direct(&'static WinInstaller),
+}
+
+/// A Windows installer pinned by version, address, size and sha256, run with `args` (silent, this user only: no administrator rights).
+#[derive(Debug, PartialEq)]
+pub struct WinInstaller { pub name: &'static str, pub version: &'static str, pub asset: &'static str, pub url: &'static str, pub sha256: &'static str, pub size: u64, pub args: &'static [&'static str] }
+/// FreeCAD's Windows installer: the release winget's FreeCAD.FreeCAD gives (winget-pkgs manifests/f/FreeCAD/FreeCAD/1.1.4: the same
+/// InstallerUrl and InstallerSha256; its user scope is NSIS `/CurrentUser`). `/S /CurrentUser` installs it silently into
+/// %LOCALAPPDATA%\Programs (`install_dir`, given to it with `/D=`) (0.16.0 release check on Windows Server 2022: 133 s, 519 MB).
+/// One line per pin; the tests check it.
+pub const FREECAD_WIN: WinInstaller = WinInstaller { name: "FreeCAD", version: "1.1.4", asset: "FreeCAD_1.1.4-Windows-x86_64-py311-installer.exe", url: "https://github.com/FreeCAD/FreeCAD/releases/download/1.1.4/FreeCAD_1.1.4-Windows-x86_64-py311-installer.exe", sha256: "845f7101d33faf257a82a0cadc5f4f3804441f46ee493eb32b92fcf9c7147a24", size: 519314976, args: &["/S", "/CurrentUser"] };
+/// A pin's fields agree with each other: a version of digits and dots, the asset FreeCAD names for that version, its release's address, a
+/// lowercase sha256, a size, and silent per-user switches.
+pub fn check_pin(p: &WinInstaller) -> Result<(), String> {
+    if p.version.is_empty() || !p.version.chars().all(|c| c.is_ascii_digit() || c == '.') { return Err("Invalid installer version".into()) }
+    if !p.asset.starts_with(&format!("{}_{}-Windows-x86_64-", p.name, p.version)) || !p.asset.ends_with("-installer.exe") || p.asset.contains(['/', '\\']) { return Err("Invalid installer name".into()) }
+    if p.url != format!("https://github.com/FreeCAD/FreeCAD/releases/download/{}/{}", p.version, p.asset) { return Err("Invalid installer address".into()) }
+    if p.sha256.len() != 64 || !p.sha256.chars().all(|c| c.is_ascii_digit() || ('a'..='f').contains(&c)) { return Err("Invalid pinned digest".into()) }
+    if p.size == 0 || !p.args.contains(&"/S") || !p.args.contains(&"/CurrentUser") { return Err("Invalid installer pin".into()) }
+    Ok(())
+}
+/// A downloaded installer is the pinned one: its size, its sha256 and a Windows program's header. Err says which, in the person's words.
+pub fn verify(file: &Path, p: &WinInstaller) -> Result<(), String> {
+    let len = std::fs::metadata(file).map_err(|e| format!("Could not read the {} installer: {e}", p.name))?.len();
+    if len != p.size { return Err(format!("The {} installer is {len} bytes where {} were expected", p.name, p.size)) }
+    let got = crate::files::kicad::install::sha256_file(file)?;
+    if got != p.sha256 { return Err(format!("{} installer checksum mismatch", p.name)) }
+    let mut mz = [0u8; 2]; let _ = std::io::Read::read(&mut std::fs::File::open(file).map_err(|e| e.to_string())?, &mut mz);
+    if mz != *b"MZ" { return Err(format!("The {} installer is not a Windows program", p.name)) }
+    Ok(())
+}
+/// Where the installer puts FreeCAD: `<LOCALAPPDATA>\Programs\FreeCAD <major.minor>` (its own per-user default), said to it with `/D=` so the
+/// folder is the one this hub's environment names, and where the hub then finds `bin\freecadcmd.exe`.
+pub fn install_dir(local_app_data: &Path, p: &WinInstaller) -> PathBuf {
+    let mm: Vec<&str> = p.version.split('.').take(2).collect();
+    local_app_data.join("Programs").join(format!("{} {}", p.name, mm.join(".")))
+}
+/// The installer's command line after the program: its switches, then NSIS's `/D=<folder>`, which must come last and unquoted (spaces and all).
+pub fn installer_line(p: &WinInstaller, dest: &Path) -> String { format!("{} /D={}", p.args.join(" "), dest.display()) }
+/// The key FreeCAD's installer registers itself under (`Software\Microsoft\Windows\CurrentVersion\Uninstall\FreeCAD114` for 1.1.4).
+pub fn uninstall_key(p: &WinInstaller) -> String { format!("{}{}", p.name, p.version.replace('.', "")) }
+/// The folder an uninstaller registration names (`reg query ... /v UninstallString`'s answer: `"C:\...\FreeCAD 1.1\Uninstall-FreeCAD.exe"`).
+pub fn registered_dir(reg_out: &str) -> Option<PathBuf> {
+    let l = reg_out.lines().find(|l| l.trim_start().starts_with("UninstallString"))?;
+    let v = l.split_once("REG_SZ")?.1.trim().trim_matches('"');
+    // a Windows path, read the same on any system the tests run on
+    v.rsplit_once(['\\', '/']).map(|(d, _)| d).filter(|d| !d.is_empty()).map(PathBuf::from)
+}
+/// Where this version is registered for this user, if it is (Windows' own reg.exe; None elsewhere or when it is not).
+async fn registered(p: &WinInstaller) -> Option<PathBuf> {
+    if !cfg!(windows) { return None }
+    let reg = std::env::var_os("SystemRoot").map(|r| Path::new(&r).join("System32").join("reg.exe"))?;
+    let key = format!("HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{}", uninstall_key(p));
+    let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Local, reg); c.args(["query", &key, "/v", "UninstallString"]).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::null());
+    let o = tokio::time::timeout(std::time::Duration::from_secs(20), c.output()).await.ok()?.ok()?;
+    registered_dir(&String::from_utf8_lossy(&o.stdout))
+}
+/// An installer's failure in the person's words. FreeCAD's quits silently (NSIS exit 2) when FreeCAD is running or this version is installed already.
+pub fn installer_failed(p: &WinInstaller, code: Option<i32>) -> String {
+    match code {
+        Some(2) => format!("The {} installer stopped: close {} if it is open (agents' mechanical work uses it too), or remove an earlier {} {} in Windows' Installed apps, then Try again", p.name, p.name, p.name, p.version),
+        Some(c) => format!("The {} installer stopped (exit {c})", p.name),
+        None => format!("The {} installer was stopped", p.name),
+    }
+}
+/// Where a pinned installer is downloaded and kept until it has run: it survives a failure and a hub restart, and the next try continues it.
+/// Windows: %LOCALAPPDATA%\Backplane\downloads (the hub's home roams, and half a gigabyte does not belong there); elsewhere `<home>/downloads`.
+pub fn download_dir(windows: bool, local_app_data: Option<&std::ffi::OsStr>, home: &Path) -> PathBuf {
+    match local_app_data.filter(|d| windows && !d.is_empty()) { Some(d) => Path::new(d).join("Backplane").join("downloads"), None => home.join("downloads") }
 }
 
 pub const CLAUDE_SH: &str = "https://claude.ai/install.sh";
@@ -169,8 +240,14 @@ pub fn plan(tool: &str, os: &str, arch: &str, winget: bool, node: bool) -> Optio
         // Git for Windows: the hub's shell commands and (until the fetch in Rust reaches Windows) KiCad's download run in its sh
         "git" if os == "windows" && winget => Some(Plan::Winget("Git.Git")),
         "git" if os == "windows" => Some(Plan::Link("https://git-scm.com/download/win")),
-        // Linux and macOS: FreeCAD's own release into the hub's folder (`start` adds that folder); Windows: winget, else its page
-        "freecad" => match (os, freecad_sys(os, arch)) { ("windows", _) if winget => Some(Plan::Winget("FreeCAD.FreeCAD")), (_, Some(sys)) => Some(Plan::Sh(FREECAD_SH, vec![sys.into()])), _ => Some(Plan::Link("https://www.freecad.org/downloads.php")) },
+        // Linux and macOS: FreeCAD's own release into the hub's folder (`start` adds that folder); Windows: winget, else the same release's
+        // installer, pinned, downloaded and run by the hub (x64 only: FreeCAD publishes no other Windows build)
+        "freecad" => match (os, freecad_sys(os, arch)) {
+            ("windows", _) if winget => Some(Plan::Winget("FreeCAD.FreeCAD")),
+            ("windows", _) if arch == "x64" => Some(Plan::Direct(&FREECAD_WIN)),
+            (_, Some(sys)) => Some(Plan::Sh(FREECAD_SH, vec![sys.into()])),
+            _ => Some(Plan::Link("https://www.freecad.org/downloads.php")),
+        },
         "claude" if unix => Some(Plan::Sh(VENDOR_SH, vec![CLAUDE_SH.into()])),
         "claude" if os == "windows" => Some(Plan::Ps(CLAUDE_PS)),
         "grok" if unix => Some(Plan::Sh(VENDOR_SH, vec![GROK_SH.into()])),
@@ -186,10 +263,15 @@ pub fn plan(tool: &str, os: &str, arch: &str, winget: bool, node: bool) -> Optio
     }
 }
 
-static STATE: Mutex<BTreeMap<String, (String, String)>> = Mutex::new(BTreeMap::new());
-fn snapshot() -> String { let m = STATE.lock().unwrap(); Value::Object(m.iter().map(|(k, (s, n))| (k.clone(), json!({"state": s, "note": n}))).collect()).to_string() }
-async fn say(hub: &Arc<Hub>, tool: &str, state: &str, note: &str) {
-    STATE.lock().unwrap().insert(tool.into(), (state.into(), note.into()));
+/// Each tool's install: state, note and the share downloaded (0 to 1, a download with a known size only).
+static STATE: Mutex<BTreeMap<String, (String, String, Option<f64>)>> = Mutex::new(BTreeMap::new());
+fn snapshot() -> String {
+    let m = STATE.lock().unwrap();
+    Value::Object(m.iter().map(|(k, (s, n, b))| { let mut v = json!({"state": s, "note": n}); if let Some(b) = b { v["progress"] = json!(b); } (k.clone(), v) }).collect()).to_string()
+}
+async fn say(hub: &Arc<Hub>, tool: &str, state: &str, note: &str) { say_bar(hub, tool, state, note, None).await }
+async fn say_bar(hub: &Arc<Hub>, tool: &str, state: &str, note: &str, bar: Option<f64>) {
+    STATE.lock().unwrap().insert(tool.into(), (state.into(), note.into(), bar));
     hub.set_info("onboard.installs", &snapshot()).await; hub.bump_views();
 }
 /// The last line a program wrote ("" for none).
@@ -202,7 +284,7 @@ pub fn command(p: &Plan) -> Option<(String, Vec<String>)> {
         Plan::Winget(id) => Some(("winget".into(), v(&["install", "--id", id, "-e", "--silent", "--accept-package-agreements", "--accept-source-agreements"]))),
         Plan::Sh(script, args) => { let mut a = v(&["-c", script, "sh"]); a.extend(args.iter().cloned()); Some(("sh".into(), a)) }
         Plan::Ps(c) => Some(("powershell".into(), v(&["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", c]))),
-        Plan::Link(_) => None,
+        Plan::Link(_) | Plan::Direct(_) => None,
     }
 }
 
@@ -212,8 +294,20 @@ pub async fn start(hub: &Arc<Hub>, tool: &str, winget: bool, node: bool, after: 
     let Some(p) = plan(tool, &hub.cfg.os, &hub.cfg.arch, winget, node) else { return Err(format!("{tool} has no install button; follow its guide")) };
     // FreeCAD's own release goes into the hub's folder, where the hub then finds it (freecad/command)
     let p = match p { Plan::Sh(s, mut a) if tool == "freecad" => { a.push(hub.cfg.home.join("freecad").to_string_lossy().into_owned()); Plan::Sh(s, a) } p => p };
+    if STATE.lock().unwrap().get(tool).map_or(false, |(s, _, _)| s == "running") { return Err(format!("{tool} is being installed already")) }
+    if let Plan::Direct(pin) = p {
+        let tool = tool.to_string(); let name = tool.clone();
+        say(hub, &tool, "running", "Starting.").await;
+        let h = hub.clone();
+        let log = hub.cfg.home.join("installs"); let _ = std::fs::create_dir_all(&log); let log = log.join(format!("{tool}.log"));
+        let dir = download_dir(cfg!(windows), std::env::var_os("LOCALAPPDATA").as_deref(), &hub.cfg.home);
+        tokio::spawn(async move {
+            match direct(&h, &tool, pin, &dir, &log).await { Ok(()) => say(&h, &tool, "done", "Installed.").await, Err(why) => say(&h, &tool, "failed", &why).await }
+            after(h).await;
+        });
+        return Ok(format!("installing {name}"))
+    }
     let Some((prog, args)) = command(&p) else { return Err("open its download page".into()) };
-    if STATE.lock().unwrap().get(tool).map_or(false, |(s, _)| s == "running") { return Err(format!("{tool} is being installed already")) }
     let tool = tool.to_string(); let name = tool.clone();
     say(hub, &tool, "running", "Starting.").await;
     let h = hub.clone();
@@ -224,6 +318,82 @@ pub async fn start(hub: &Arc<Hub>, tool: &str, winget: bool, node: bool, after: 
         after(h).await;
     });
     Ok(format!("installing {name}"))
+}
+/// A pinned installer: downloaded into `dir` with the system's curl (Windows' own System32 curl.exe), continuing what an earlier try left there
+/// and retrying a cut connection as KiCad's download does, then checked (`verify`), run with its silent per-user switches, and the console
+/// program it placed written to `<home>/freecad/command` so the hub uses it at once.
+async fn direct(hub: &Arc<Hub>, tool: &str, p: &'static WinInstaller, dir: &Path, log: &Path) -> Result<(), String> {
+    use crate::files::kicad::install::{get_args, tools, Bytes, Meter, Getter};
+    check_pin(p)?;
+    let _ = std::fs::write(log, "");
+    let t = tools()?;
+    let gp = match &t.get { Getter::Curl(x) | Getter::Wget(x) => x.clone() };
+    std::fs::create_dir_all(dir).map_err(|e| format!("Could not make {}: {e}", dir.display()))?;
+    let file = dir.join(p.asset);
+    let have = |f: &Path| std::fs::metadata(f).map_or(0, |m| m.len());
+    // more than the pin is never this file: start again
+    if have(&file) > p.size { let _ = std::fs::remove_file(&file); }
+    let before = have(&file);
+    let mb = |b: u64| (b + (1 << 19)) >> 20;
+    let head = format!("Downloading {} {}", p.name, p.version);
+    if before < p.size {
+        say(hub, tool, "running", &if before > 0 { format!("{head} (continuing from {} MB)", mb(before)) } else { head.clone() }).await;
+        let mut meter = Meter::default();
+        let tick = |meter: &mut Meter| {
+            let b = meter.at(std::time::Instant::now(), have(&file), p.size);
+            STATE.lock().unwrap().insert(tool.into(), ("running".into(), format!("{head}: {}", b.words()), Some((b.share() * 1000.).round() / 1000.)));
+            let h = hub.clone(); tokio::spawn(async move { h.set_info("onboard.installs", &snapshot()).await; h.bump_views(); });
+        };
+        let mut ok = Err(String::new());
+        for _ in 0..3 {
+            ok = crate::files::kicad::install::tool(&gp, &get_args(&t.get, p.url, &file), log, || tick(&mut meter)).await;
+            if ok.is_ok() { break }
+            tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+        }
+        if let Err(why) = ok {
+            let got = have(&file);
+            let at = if got == 0 { String::new() } else { format!(" at {}", Bytes { done: got, total: p.size, rate: 0, eta: 0 }.words()) };
+            return Err(format!("The download stopped{at} ({}); Try again continues it", if why.is_empty() { "no answer".to_string() } else { why }))
+        }
+    }
+    say_bar(hub, tool, "running", "Checking the download", Some(1.)).await;
+    let f = file.clone();
+    if let Err(why) = tokio::task::spawn_blocking(move || verify(&f, p)).await.map_err(|e| e.to_string())? {
+        let _ = std::fs::remove_file(&file);
+        return Err(format!("{why} (the download was removed; Try again downloads it anew)"))
+    }
+    let lad = std::env::var_os("LOCALAPPDATA").filter(|d| !d.is_empty()).ok_or("LOCALAPPDATA is not set")?;
+    let dest = install_dir(Path::new(&lad), p);
+    // this version installed for this user already (the installer then quits at once, silently): that one is used
+    if let Some(dir) = registered(p).await.filter(|d| d.join("bin").join("freecadcmd.exe").is_file()) {
+        let cmd = dir.join("bin").join("freecadcmd.exe").to_string_lossy().into_owned();
+        let d = hub.cfg.home.join("freecad"); let _ = std::fs::create_dir_all(&d); let _ = std::fs::write(d.join("command"), &cmd);
+        say(hub, tool, "running", &format!("{} {} is installed for this user already, in {}", p.name, p.version, dir.display())).await;
+        return Ok(())
+    }
+    say(hub, tool, "running", &format!("Installing {} {} for this Windows user. This takes about two minutes", p.name, p.version)).await;
+    let out = std::fs::OpenOptions::new().append(true).create(true).open(log).map_err(|e| e.to_string())?;
+    let err = out.try_clone().map_err(|e| e.to_string())?;
+    let mut c = crate::proc::tokio_cmd(crate::proc::Kind::Local, &file);
+    // the whole line as is: NSIS reads `/D=` only unquoted, and the folder may hold spaces
+    #[cfg(windows)] c.raw_arg(installer_line(p, &dest));
+    #[cfg(not(windows))] c.args(p.args).arg(format!("/D={}", dest.display()));
+    c.stdin(Stdio::null()).stdout(Stdio::from(out)).stderr(Stdio::from(err)).kill_on_drop(false);
+    crate::plat::proc::own_group_tokio(&mut c);
+    let mut child = c.spawn().map_err(|e| format!("Could not start the {} installer: {e}", p.name))?;
+    let status = match tokio::time::timeout(std::time::Duration::from_secs(30 * 60), child.wait()).await {
+        Ok(r) => r.map_err(|e| e.to_string())?,
+        Err(_) => return Err(format!("The {} installer did not finish in 30 minutes", p.name)),
+    };
+    if !status.success() { return Err(installer_failed(p, status.code())) }
+    // the console program it placed; the hub uses it from now on
+    let cmd = dest.join("bin").join("freecadcmd.exe");
+    if !cmd.is_file() { return Err(format!("The {} installer finished, but {} is not there", p.name, cmd.display())) }
+    let cmd = cmd.to_string_lossy().into_owned();
+    let d = hub.cfg.home.join("freecad"); let _ = std::fs::create_dir_all(&d); let _ = std::fs::write(d.join("command"), &cmd);
+    let _ = std::fs::remove_file(&file);
+    say(hub, tool, "running", &format!("Installed in {}", dest.display())).await;
+    Ok(())
 }
 async fn run(hub: &Arc<Hub>, tool: &str, prog: &str, args: &[String], log: &Path) -> Result<(), String> {
     let out = std::fs::File::create(log).map_err(|e| format!("could not write {}: {e}", log.display()))?;
@@ -260,7 +430,9 @@ mod tests {
             ("tailscale", "darwin", "arm64", true, false, |p| *p == Plan::Link("https://tailscale.com/download/mac")),
             ("tailscale", "linux", "x64", false, false, |p| *p == Plan::Link("https://tailscale.com/download/linux")),
             ("freecad", "windows", "x64", true, false, |p| *p == Plan::Winget("FreeCAD.FreeCAD")),
-            ("freecad", "windows", "x64", false, false, |p| matches!(p, Plan::Link(u) if u.contains("freecad.org"))),
+            ("freecad", "windows", "x64", false, false, |p| *p == Plan::Direct(&FREECAD_WIN)),
+            ("freecad", "windows", "arm64", false, false, |p| matches!(p, Plan::Link(u) if u.contains("freecad.org"))),
+            ("freecad", "windows", "arm64", true, false, |p| *p == Plan::Winget("FreeCAD.FreeCAD")),
             ("freecad", "linux", "x64", true, false, |p| matches!(p, Plan::Sh(s, a) if *s == FREECAD_SH && a == &["Linux-x86_64"])),
             ("freecad", "darwin", "arm64", false, false, |p| matches!(p, Plan::Sh(s, a) if *s == FREECAD_SH && a == &["macOS-arm64"])),
             ("freecad", "freebsd", "x64", false, false, |p| matches!(p, Plan::Link(_))),
@@ -343,6 +515,56 @@ mod tests {
         let o = std::process::Command::new("sh").arg("-c").arg(VENDOR_SH).arg("sh").arg(CLAUDE_SH).env("PATH", format!("{}:/usr/bin:/bin", bin.display())).output().unwrap();
         assert!(!o.status.success() && String::from_utf8_lossy(&o.stderr).contains("Could not download https://claude.ai/install.sh"));
         let _ = std::fs::remove_dir_all(&r);
+    }
+    /// winget first where it answers; without it the pinned installer, never only a page (the 0.16.0 blocker on Windows Server 2022).
+    #[test] fn windows_freecad_is_winget_when_present_and_the_pinned_installer_when_not() {
+        assert_eq!(plan("freecad", "windows", "x64", true, false), Some(Plan::Winget("FreeCAD.FreeCAD")));
+        let Some(Plan::Direct(p)) = plan("freecad", "windows", "x64", false, false) else { panic!("no winget: the direct install") };
+        assert_eq!(p, &FREECAD_WIN); assert_eq!(command(&Plan::Direct(p)), None, "the hub runs it itself, not a command line");
+        assert!(p.args == ["/S", "/CurrentUser"], "silent and per-user: no administrator rights");
+    }
+    #[test] fn the_freecad_pin_is_whole_and_a_broken_pin_is_refused() {
+        check_pin(&FREECAD_WIN).unwrap();
+        assert!(FREECAD_WIN.url.ends_with(&format!("/{}/{}", FREECAD_WIN.version, FREECAD_WIN.asset)));
+        let bad = |p: WinInstaller, why: &str| assert_eq!(check_pin(&p).unwrap_err(), why);
+        let base = || WinInstaller { ..FREECAD_WIN };
+        bad(WinInstaller { version: "1.1.4;x", ..base() }, "Invalid installer version");
+        bad(WinInstaller { version: "1.1.5", ..base() }, "Invalid installer name");
+        bad(WinInstaller { url: "https://example.com/FreeCAD_1.1.4-Windows-x86_64-py311-installer.exe", ..base() }, "Invalid installer address");
+        bad(WinInstaller { url: "http://github.com/FreeCAD/FreeCAD/releases/download/1.1.4/FreeCAD_1.1.4-Windows-x86_64-py311-installer.exe", ..base() }, "Invalid installer address");
+        bad(WinInstaller { sha256: "845F7101D33FAF257A82A0CADC5F4F3804441F46EE493EB32B92FCF9C7147A24", ..base() }, "Invalid pinned digest");
+        bad(WinInstaller { sha256: "845f71", ..base() }, "Invalid pinned digest");
+        bad(WinInstaller { args: &["/S"], ..base() }, "Invalid installer pin");
+    }
+    #[test] fn a_download_is_used_only_when_its_size_digest_and_header_match_the_pin() {
+        use sha2::{Digest, Sha256};
+        let r = crate::plat::tmp::dir("tools-verify"); let f = r.join("i.exe");
+        let body = b"MZ\x90\x00 a stand-in installer".to_vec();
+        let sum: &'static str = Box::leak(hex::encode(Sha256::digest(&body)).into_boxed_str());
+        let pin = WinInstaller { sha256: sum, size: body.len() as u64, ..FREECAD_WIN };
+        std::fs::write(&f, &body).unwrap(); verify(&f, &pin).unwrap();
+        std::fs::write(&f, &body[..body.len() - 1]).unwrap(); assert!(verify(&f, &pin).unwrap_err().contains("bytes where"), "a cut download");
+        let mut other = body.clone(); other[5] ^= 1; std::fs::write(&f, &other).unwrap(); assert_eq!(verify(&f, &pin).unwrap_err(), "FreeCAD installer checksum mismatch");
+        let mut nz = body.clone(); nz[0] = b'X'; let nsum: &'static str = Box::leak(hex::encode(Sha256::digest(&nz)).into_boxed_str());
+        std::fs::write(&f, &nz).unwrap(); assert_eq!(verify(&f, &WinInstaller { sha256: nsum, ..pin }).unwrap_err(), "The FreeCAD installer is not a Windows program");
+        let _ = std::fs::remove_dir_all(&r);
+    }
+    #[test] fn the_installer_is_told_its_folder_last_and_unquoted() {
+        let d = install_dir(Path::new("C:\\Users\\A B\\AppData\\Local"), &FREECAD_WIN);
+        assert_eq!(d, Path::new("C:\\Users\\A B\\AppData\\Local").join("Programs").join("FreeCAD 1.1"));
+        let l = installer_line(&FREECAD_WIN, &d);
+        assert!(l.starts_with("/S /CurrentUser /D=") && l.ends_with("FreeCAD 1.1") && !l.contains('"'), "{l}");
+    }
+    #[test] fn an_installed_version_is_found_by_its_registration() {
+        assert_eq!(uninstall_key(&FREECAD_WIN), "FreeCAD114");
+        let out = "\r\nHKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\FreeCAD114\r\n    UninstallString    REG_SZ    \"C:\\Users\\A B\\AppData\\Local\\Programs\\FreeCAD 1.1\\Uninstall-FreeCAD.exe\"\r\n\r\n";
+        assert_eq!(registered_dir(out), Some(PathBuf::from("C:\\Users\\A B\\AppData\\Local\\Programs\\FreeCAD 1.1")));
+        assert_eq!(registered_dir("ERROR: The system was unable to find the specified registry key or value."), None);
+        assert!(installer_failed(&FREECAD_WIN, Some(2)).contains("close FreeCAD"));
+    }
+    #[test] fn the_installer_downloads_outside_the_roaming_home_on_windows() {
+        assert_eq!(download_dir(true, Some(std::ffi::OsStr::new("C:\\L")), Path::new("C:\\H")), Path::new("C:\\L").join("Backplane").join("downloads"));
+        assert_eq!(download_dir(false, Some(std::ffi::OsStr::new("/l")), Path::new("/h")), Path::new("/h/downloads"));
     }
     #[test] fn the_last_line_is_what_the_row_says() { assert_eq!(last_line("a\n\n b \n\n"), "b"); assert_eq!(last_line(""), ""); }
 }
