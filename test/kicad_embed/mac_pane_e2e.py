@@ -533,6 +533,17 @@ try:
     check(bool(wait_for(lambda: (k := kicad_frame()) and k[1] == kpid, 5)) and open(board, 'rb').read() == before_bytes, 'the unsaved change is still in the same KiCad, never written to disk')
     shot('06-reopened')
 finally:
+    def descendants(roots):
+        kids = {}
+        for l in subprocess.run(['ps', '-axo', 'pid=,ppid='], capture_output=True, text=True).stdout.splitlines():
+            try: a, b = map(int, l.split()); kids.setdefault(b, []).append(a)
+            except ValueError: pass
+        out, todo = set(), list(roots)
+        while todo:
+            for k in kids.get(todo.pop(), []):
+                if k not in out: out.add(k); todo.append(k)
+        return out
+    ours = descendants([p.pid for p in procs])
     for p in procs:
         try: p.terminate()
         except Exception: pass
@@ -540,8 +551,13 @@ finally:
     for p in procs:
         try: p.kill()
         except Exception: pass
-    left = subprocess.run(['pgrep', '-f', RT + '/'], capture_output=True, text=True).stdout.strip()
-    if left: subprocess.run(['pkill', '-f', RT + '/'])
+    # what this run started and nothing else: the descendants of its own processes (the hub's KiCad among them), taken before they were
+    # stopped (the repo's rule: never end processes by name or pattern)
+    still = [pid for pid in sorted(ours) if subprocess.run(['kill', '-0', str(pid)], capture_output=True).returncode == 0]
+    for pid in still:
+        try: os.kill(pid, 9)
+        except OSError: pass
+    left = '\n'.join(map(str, still))
     json.dump({'failures': FAILS, 'results': RES, 'left_running': left}, open(os.path.join(OUT, 'summary.json'), 'w'), indent=2)
     print(json.dumps({'failures': FAILS, 'results': RES, 'left_running': left}, indent=2))
 sys.exit(1 if FAILS else 0)
