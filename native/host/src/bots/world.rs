@@ -5,7 +5,8 @@ use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
-pub struct Bot { pub id: String, pub name: String, pub thread: String, pub look: u64, pub persona: String, pub created: u64, pub deleted: bool }
+/// `look`: the cat shown (0..72); `auto`: it is the name's (no look picked); `color`: the fur's, "#rrggbb" or "" (bots/catrig.rs `of_event`).
+pub struct Bot { pub id: String, pub name: String, pub thread: String, pub look: u64, #[serde(default)] pub auto: bool, #[serde(default)] pub color: String, pub persona: String, pub created: u64, pub deleted: bool }
 #[derive(Clone, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct Room { pub id: String, pub name: String, pub members: Vec<String>, pub created: u64, pub deleted: bool,
     /// made by a bot for one exchange (bot_send, room_create): listed to nobody, kept out of the person's screens and the bots' context (`life`)
@@ -272,9 +273,10 @@ impl World {
                 let thread = if s(e, "thread").is_empty() { th } else { s(e, "thread").to_string() };
                 self.bot_threads.insert(thread.clone());
                 self.mail.bot_named(&id, s(e, "name"));
-                self.bots.insert(id.clone(), Bot { id, name: s(e, "name").into(), thread, look: n(e, "look"), persona: s(e, "persona").into(), created: if deleted { at } else { created }, deleted: false });
+                let (look, auto, color) = super::catrig::of_event(e);
+                self.bots.insert(id.clone(), Bot { id, name: s(e, "name").into(), thread, look, auto, color, persona: s(e, "persona").into(), created: if deleted { at } else { created }, deleted: false });
             }
-            "BotDeleted" => { self.mail.bot_deleted(&id); if let Some(x) = self.bots.get_mut(&id) { x.deleted = true } else { self.bots.insert(id.clone(), Bot { id, name: String::new(), thread: String::new(), look: 0, persona: String::new(), created: 0, deleted: true }); } }
+            "BotDeleted" => { self.mail.bot_deleted(&id); if let Some(x) = self.bots.get_mut(&id) { x.deleted = true } else { self.bots.insert(id.clone(), Bot { id, name: String::new(), thread: String::new(), look: 0, auto: false, color: String::new(), persona: String::new(), created: 0, deleted: true }); } }
             "RoomSet" => {
                 let old = self.rooms.get(&id).cloned().filter(|r| !r.deleted);
                 let (created, was) = old.as_ref().map_or((at, (false, false)), |r| (r.created, (r.ephemeral, r.closed)));

@@ -119,7 +119,7 @@ pub fn after_rows(link: &str, name: &str) -> Vec<Value> { after_rows_with(link, 
 pub fn after_rows_with(link: &str, name: &str, v: &Value) -> Vec<Value> {
     if link.is_empty() { return vec![] }
     let mv = &v["move"];
-    let mut m = row("Move your uberbot there", "One press: Bub, the bots, rooms, reminders and phone alerts move, and Bub's chat shows the move. With no uberbot yet, it is made first.",
+    let mut m = row("Move your uberbot there", "One press: your uberbot, the bots, rooms, reminders and phone alerts move, and its chat shows the move. With no uberbot yet, it is made first.",
         vec![btn(&format!("Move it to {name}"), "alwayson-move", link, false)]);
     match (s(mv, "state"), s(v, "move_err")) {
         (_, e) if !e.is_empty() => { m["note"] = json!(format!("The move did not start: {e}")); m["tone"] = json!("bad"); }

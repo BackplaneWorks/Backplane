@@ -261,8 +261,10 @@ struct DBot: Codable, Equatable, Identifiable {
     var mark: DMark?     // a bot of a linked machine: where it is; nil for this hub's own
     var note: String = "" // the uberbot during a home move: "Moving to boat-hub", or that it did not move
     var delete: Bool = false // the hub offers Delete bot for it (a bot of this hub that is not the uberbot)
-    enum CodingKeys: String, CodingKey { case id, name, thread, uber, mark, note, delete }
-    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); id = c.str(.id); name = c.str(.name); thread = c.str(.thread); uber = c.bool(.uber); mark = try? c.decode(DMark.self, forKey: .mark); note = c.str(.note); delete = c.bool(.delete) }
+    var look: Int = 0     // its cat (feature cats): the look, 0..72
+    var color: String = "" // and its fur, "#rrggbb" or "" for the coat's own
+    enum CodingKeys: String, CodingKey { case id, name, thread, uber, mark, note, delete, look, color }
+    init(from d: Decoder) throws { let c = try d.container(keyedBy: CodingKeys.self); id = c.str(.id); name = c.str(.name); thread = c.str(.thread); uber = c.bool(.uber); mark = try? c.decode(DMark.self, forKey: .mark); note = c.str(.note); delete = c.bool(.delete); look = c.int(.look); color = c.str(.color) }
     /// The open chat `open` after a home move: the same bot's thread on its new home (`<link>~<id>` there, or the plain id back here); nil when it did not move.
     /// `known`: the bot that chat was last seen to be (a move lists it gone for a moment between the old home letting go and the new one showing it).
     static func followed(_ open: String, _ known: DBot?, _ now: [DBot]) -> String? {

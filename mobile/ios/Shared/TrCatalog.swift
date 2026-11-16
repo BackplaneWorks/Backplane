@@ -353,7 +353,7 @@ ios.improve.search	Search projects…	プロジェクトを検索…
 android.notify.head	NOTIFICATIONS	通知
 gpui.keysheet.note	Settings, This device changes them. Esc closes this.	設定 → このデバイスで変更できます。Escで閉じます。
 gpui.keys.help	Keyboard shortcuts: this list. ? outside a text box, F1 anywhere	キーボードショートカット：この一覧。テキスト欄の外では ?、どこでも F1
-gpui.f2.welcome.body	Backplane runs coding agents on your boards, schematics and mechanical parts. Five short steps set it up, and each one can be skipped. Finish later closes setup until the next launch.	Backplaneは基板・回路図・機構部品の上でコーディングエージェントを動かします。5つの短いステップで準備し、どれも飛ばせます。「後で続ける」で次回起動までセットアップを閉じます。
+gpui.f2.welcome.body	Backplane runs coding agents on your boards, schematics and mechanical parts. Six short steps set it up, and each one can be skipped. Finish later closes setup until the next launch.	Backplaneは基板・回路図・機構部品の上でコーディングエージェントを動かします。6つの短いステップで準備し、どれも飛ばせます。「後で続ける」で次回起動までセットアップを閉じます。
 gpui.f2.data.folder.note	{home}. Your threads, settings, bots and keys are kept here, and the hub runs your agents from it.	{home}。スレッド・設定・ボット・キーはここに保存され、ハブはここからエージェントを動かします。
 gpui.f2.choose.another	Choose another	別のフォルダを選ぶ
 gpui.f2.usage.note	On unless you turn it off. Backplane sends anonymous counts: installs, updates, daily activity, and daily totals of threads, messages, model tokens, bot traffic, boards made and boards ordered, with a random install id, the version, the system and the day. Never your conversations, projects, files, names, paths or keys. Settings, Privacy changes it.	オフにしない限りオンです。Backplaneは匿名の集計を送ります：インストール、更新、日々の利用、そしてスレッド、メッセージ、モデルのトークン、ボットの通信量、作成した基板、注文した基板の1日ごとの合計で、ランダムなインストールID、バージョン、OS、日付が付きます。会話、プロジェクト、ファイル、名前、パス、キーを送ることはありません。設定 → プライバシーで変更できます。
@@ -387,7 +387,7 @@ gpui.f2.locate.freecad	Locate FreeCAD	FreeCADの場所を指定
 gpui.f2.locate.note	If it is installed somewhere else, give the full path to {tool}.	別の場所にインストールされている場合は、{tool} のフルパスを入力してください。
 gpui.f2.path.to	Path to {tool}	{tool} のパス
 gpui.f2.alwayson	Where your uberbot lives	メインボットの置き場所
-gpui.f2.alwayson.body	Your uberbot is the assistant you talk to first. It answers you, starts and follows your threads and bots across projects and machines, and keeps your reminders and phone alerts going. Always-on keeps your uberbot, reminders, bots and phone alerts running while this computer sleeps. Hardware and code still run here.	メインボットは最初に話しかけるアシスタントです。返事をし、プロジェクトやマシンをまたいでスレッドとボットを始めて見守り、リマインダーとスマホへの通知を動かし続けます。常時稼働にすると、このコンピュータがスリープ中もメインボット・リマインダー・ボット・スマホへの通知が動き続けます。ハードウェアとコードは引き続きここで動きます。
+gpui.f2.alwayson.body	Always-on keeps your uberbot, reminders, bots and phone alerts running while this computer sleeps. Hardware and code still run here.	常時稼働にすると、このコンピュータがスリープ中もメインボット・リマインダー・ボット・スマホへの通知が動き続けます。ハードウェアとコードは引き続きここで動きます。
 gpui.f2.aon.here	Stay on this computer	このコンピュータのまま
 gpui.f2.aon.here.note	Your uberbot runs here, while this computer is on. You can move it later in Settings, Machines.	メインボットはこのコンピュータが動いている間ここで動きます。後で 設定 → マシン から移せます。
 gpui.f2.aon.boat	An always-on Boat	常時稼働のBoat
@@ -409,7 +409,7 @@ gpui.f2.show.code	Show the code	コードを表示
 gpui.f2.done.body	Press ? any time for keys.	? でいつでもキー一覧を表示できます。
 gpui.f2.open.uber	Open the uberbot	メインボットを開く
 gpui.f2.setup.phone	Setup runs on a computer, in Settings, Setup there. This phone is paired with it.	セットアップはコンピュータの 設定 → セットアップ で行います。このスマホはそのコンピュータとペアリングされています。
-gpui.f2.setup.five	Five short steps: your data folder, agents, design tools, where your uberbot lives and a first project.	5つの短いステップ：データフォルダ、エージェント、設計ツール、メインボットの置き場所、最初のプロジェクト。
+gpui.f2.setup.five	Six short steps: agents, design tools, your uberbot's name, where it lives and a first project.	6つの短いステップ：エージェント、設計ツール、メインボットの名前、置き場所、最初のプロジェクト。
 gpui.swarm.row	{n, plural, one {# member} other {# members}} · {w, number} working	メンバー{n, number}人 · 作業中{w, number}
 gpui.swarm.held	held: {why}	保留：{why}
 gpui.swarm.state.why	{state}: {why}	{state}：{why}
@@ -4100,6 +4100,11 @@ android.swarm.gone	That swarm is not on this hub.	そのスウォームはこの
 android.swarm.provider	Provider	プロバイダー
 android.swarm.model	Model	モデル
 android.buy.ask	Start a buy thread for {project}?	{project} の購入スレッドを開始しますか？
+cat.cat	Cat	猫
+cat.own	Its own	元の色
+cat.different	Different cat	別の猫
+cat.auto	The name's cat	名前の猫
+cat.color.bad	Type a colour like #6fb3f2.	#6fb3f2 のように色を入力してください。
 sidebar.sections.needs	Needs you	対応が必要
 sidebar.sections.pinned	Pinned	ピン留め
 sidebar.sections.active	Active	進行中
@@ -4353,6 +4358,30 @@ gpui.streamer.apps.note	A guess: OBS, SimpleScreenRecorder, Kazam, vokoscreen, P
 gpui.streamer.linux	Linux: a screen shared through the desktop's portal (PipeWire screen cast: GNOME, KDE, wlroots) is seen. A capture that reads X11 directly (OBS's Screen Capture (XSHM), ffmpeg x11grab) is not: turn on the recording-app check below, or switch it on by hand.	Linux: デスクトップのポータル経由の画面共有(PipeWire の画面キャスト: GNOME、KDE、wlroots)は検出できます。X11 を直接読み取るキャプチャ(OBS の画面キャプチャ (XSHM)、ffmpeg x11grab)は検出できません。下の録画アプリの確認をオンにするか、手動でオンにしてください。
 gpui.streamer.mac	macOS does not tell an app that the screen is being recorded or shared. Only the recording-app check below works here: it sees OBS, Loom, ScreenFlow, CleanShot, Kap and Ecamm while they run.	macOS は画面が録画・共有されていることをアプリに知らせません。ここで使えるのは下の録画アプリの確認だけです: OBS、Loom、ScreenFlow、CleanShot、Kap、Ecamm の実行中を検出します。
 gpui.streamer.win	Windows does not tell an app that the screen is being captured. Only the recording-app check below works here: it sees OBS, Streamlabs, XSplit, Bandicam, Camtasia and Loom while they run.	Windows は画面がキャプチャされていることをアプリに知らせません。ここで使えるのは下の録画アプリの確認だけです: OBS、Streamlabs、XSplit、Bandicam、Camtasia、Loom の実行中を検出します。
+gpui.f2.uber.title	Your uberbot	メインボット
+gpui.f2.uber.body	Your uberbot is the assistant you talk to first. It answers you, starts and follows your threads and bots across projects and machines, and keeps your reminders and phone alerts going. Give it a name: the name picks its cat, and the same name gives the same cat on every device.	メインボットは最初に話しかけるアシスタントです。返事をし、プロジェクトやマシンをまたいでスレッドとボットを始めて見守り、リマインダーとスマホへの通知を動かし続けます。名前を付けてください。名前で猫が決まり、同じ名前ならどの端末でも同じ猫になります。
+gpui.f2.uber.say	Say hello	よろしくね
+gpui.f2.uber.here	Your uberbot is here. A new name or colour is saved with Save.	メインボットはここにいます。新しい名前や色は「保存」で保存されます。
+gpui.f2.uber.err.name	Use 1 to 24 letters, digits, - or _.	1〜24文字の英数字、- または _ を使ってください。
+gpui.f2.uber.err.color	Type a colour like #6fb3f2.	#6fb3f2 のような色を入力してください。
+gpui.f2.uber.color	Colour	色
+gpui.f2.uber.own	Its own	元の色
+gpui.f2.uber.custom	Custom	カスタム
+gpui.f2.uber.hex	#rrggbb	#rrggbb
+gpui.f2.uber.use	Use	使う
+gpui.f2.uber.shuffle	Different cat	別の猫
+gpui.f2.uber.auto	The name's cat	名前の猫
+gpui.f2.uber.savename	Save name	名前を保存
+gpui.f2.uber.p.ginger	Ginger	ジンジャー
+gpui.f2.uber.p.cream	Cream	クリーム
+gpui.f2.uber.p.smoke	Smoke	スモーク
+gpui.f2.uber.p.midnight	Midnight	ミッドナイト
+gpui.f2.uber.p.cocoa	Cocoa	ココア
+gpui.f2.uber.p.sky	Sky	スカイ
+gpui.f2.uber.p.lilac	Lilac	ライラック
+gpui.f2.uber.p.rose	Rose	ローズ
+gpui.f2.uber.p.mint	Mint	ミント
+gpui.f2.uber.p.cherry	Cherry	チェリー
 """#
 
     /// thread.count = {n, plural, one {# thread} other {# threads}}

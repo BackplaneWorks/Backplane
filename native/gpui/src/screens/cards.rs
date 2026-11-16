@@ -73,6 +73,7 @@ pub fn el(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<String, Fie
     let raw = &r.raw;
     let note = |d: Div, t: &str, tone: &str| if t.is_empty() { d } else { d.child(div().text_size(crate::scale::tpx(12.)).text_color(c(tone)).child(trs(t))) };
     Some(match r.kind.as_str() {
+        "cat" => super::catpick::view(cx, light, fields, raw, avail),
         "head" => div().flex().items_start().justify_between().gap_4().pb_3().mb_1().border_b_1().border_color(c("line"))
             .child(note(div().flex().flex_col().gap_1().min_w_0().flex_1(), &r.note, "dim"))
             .child(chips_p(cx, light, &r.buttons, i, false, raw["primary"].as_u64().map(|x| x as usize))).into_any_element(),

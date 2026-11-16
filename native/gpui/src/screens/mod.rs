@@ -62,6 +62,7 @@ pub mod strip;
 pub mod term;
 pub mod settings;
 pub mod cards;
+pub mod catpick;
 pub mod accounts;
 pub mod combo;
 pub mod timeline;

@@ -145,7 +145,7 @@ impl Bots {
         let th = { let m = self.hub.model().await;
             binds.into_iter().find(|t| m.threads.contains_key(t)).or_else(|| { let mut c: Vec<_> = m.threads.iter().filter(|(_, t)| t.title == name && !t.deleted).map(|(i, _)| i.clone()).collect(); c.sort(); c.into_iter().next() }) };
         let Some(th) = th else { return false };
-        let ev = vec![json!({"$":"BotSet","id":bot,"name":b.name,"thread":th,"look":b.look,"persona":b.persona,"at":now})];
+        let ev = vec![super::catrig::with(json!({"$":"BotSet","id":bot,"name":b.name,"thread":th,"look":b.look,"persona":b.persona,"at":now}), b.look, b.auto, &b.color)];
         let ev = w.also(now, ev); drop(w);
         self.hub.commit_many(&ev).await.is_ok()
     }
@@ -185,11 +185,13 @@ impl Bots {
         if !on_offer { return vec![err(id, "that uberbot is not on offer here")] }
         if !w.uber_bot().is_empty() { return vec![err(id, "this machine has an uberbot already; make it not the uberbot first")] }
         let (name, look) = (offer["name"].as_str().unwrap_or("").to_string(), offer["look"].as_u64().unwrap_or(0));
+        // the offered cat as it was there: its look, whether it follows the name, its colour (an offer from before these keeps the look it says)
+        let (look, auto, color) = super::catrig::of_event(&json!({"name": name, "look": look, "auto": offer["auto"], "color": offer["color"]}));
         if !super::rpc::name_ok(&name) || w.named(&name).is_some() { return vec![err(id, &format!("this machine has a bot called {name} already; rename it first"))] }
         let (bot, th) = (self.hub_id("b", now), self.hub_id("t", now));
         let (provider, model) = (w.setting("agent.provider", "claude"), w.setting("agent.model", ""));
         let mut ev = vec![json!({"$":"ThreadCreated","id":th,"project":"","title":name,"env":"local","branch":"","worktree":"","provider":provider,"model":model,"at":now}),
-            json!({"$":"BotSet","id":bot,"name":name,"thread":th,"look":look,"persona":"","at":now}),
+            super::catrig::with(json!({"$":"BotSet","id":bot,"name":name,"thread":th,"look":look,"persona":"","at":now}), look, auto, &color),
             json!({"$":"UberSet","bot":bot,"uid":uid,"at":now}), json!({"$":"SettingSet","key":"uber.offer","value":"","at":now})];
         let mut ev = self.accounts_created(ev).await;
         ev.extend(w.ops_with(uid, now, &[b_bind(&w.me(), &bot, &th, &name)]));

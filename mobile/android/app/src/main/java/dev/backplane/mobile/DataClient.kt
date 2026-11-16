@@ -830,7 +830,8 @@ object DataClient {
     }
     /** `mark`: the short name of the linked machine a bot or room is on ("" for this hub's own) */
     /** `delete`: the hub offers Delete bot for it (a bot of this hub that is not the uberbot). */
-    data class Bot(val id: String, val name: String, val thread: String, val uber: Boolean, val mark: String = "", val note: String = "", val delete: Boolean = false)
+    /** `look` (0..72) and `color` ("#rrggbb", "" the coat's own): its cat (feature cats). */
+    data class Bot(val id: String, val name: String, val thread: String, val uber: Boolean, val mark: String = "", val note: String = "", val delete: Boolean = false, val look: Int = 0, val color: String = "")
     /** The open chat `open` after a home move: the same bot's thread on its new home (`<link>~<id>` there, or the plain id back here); null when it did not move. */
     /** `known`: the bot that chat was last seen to be (a move lists it gone for a moment between the old home letting go and the new one showing it). */
     fun followed(open: String, known: Bot?, now: List<Bot>): String? {
@@ -848,7 +849,7 @@ object DataClient {
     suspend fun loadBots() {
         val r = call("bots.list")
         open?.let { o -> bots.firstOrNull { it.thread == o }?.let { b -> openBot = b } }
-        bots = r.optJSONArray("bots")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Bot(it.optString("id"), it.optString("name"), it.optString("thread"), it.optBoolean("uber"), it.optJSONObject("mark")?.optString("short") ?: "", it.optString("note"), it.optBoolean("delete")) } } ?: emptyList()
+        bots = r.optJSONArray("bots")?.let { a -> (0 until a.length()).mapNotNull { a.optJSONObject(it) }.map { Bot(it.optString("id"), it.optString("name"), it.optString("thread"), it.optBoolean("uber"), it.optJSONObject("mark")?.optString("short") ?: "", it.optString("note"), it.optBoolean("delete"), it.optInt("look"), it.optString("color")) } } ?: emptyList()
         // the uberbot's chat follows a home move: the same row, the same thread, now drawn from the machine that holds it
         val o = open
         if (o != null) {

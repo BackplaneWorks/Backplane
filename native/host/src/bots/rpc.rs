@@ -91,7 +91,8 @@ fn gnat(p: &Value, k: &str) -> Option<u64> { match p.get(k)? { Value::Number(n) 
 /// Bot.name.valid: 1 to 24 letters, digits, '-' or '_'
 pub fn name_ok(n: &str) -> bool { let l = n.chars().count(); (1..=24).contains(&l) && n.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_') }
 /// Bots.seed: a stable look for a cat from its name
-pub fn seed(name: &str) -> u64 { name.to_lowercase().chars().fold(7u64, |acc, c| (acc * 31 + c as u64) % 4294967291) }
+/// The name's hash: bots/cat.rs `seed` (a cat's look is `cat::look_of`).
+pub use super::cat::seed;
 /// Mem.kind.norm
 pub fn mem_kind(k: &str) -> String { let l = k.to_lowercase(); if ["user", "pref", "fact", "howto", "note"].contains(&l.as_str()) { l } else { "fact".into() } }
 /// Mem.key.norm: trimmed, anything but a letter, digit, '.' or '_' becomes '-', lower case, at most 64
@@ -206,9 +207,11 @@ impl Bots {
         if w.named(&name).is_some() { return vec![err(id, &format!("a bot named {name} already exists"))] }
         let (provider, model) = (gsd(p, "provider", &w.setting("agent.provider", "claude")).to_string(), gsd(p, "model", &w.setting("agent.model", "")).to_string());
         let (bot, th) = (self.id("b", now), self.id("t", now));
-        let look = gnat(p, "look").unwrap_or_else(|| seed(&name));
+        // the cat: a look given is the person's pick (kept whatever the name), else the name's; `color` the fur's ("#rrggbb", "" the coat's own)
+        let (look, auto) = match gnat(p, "look") { Some(l) => (l % super::cat::LOOKS, false), None => (super::cat::look_of(&name), true) };
+        let color = gs(p, "color"); let color = super::cat::parse_color(color).map(super::cat::color_hex).unwrap_or_default();
         let evs = vec![json!({"$":"ThreadCreated","id":th,"project":"","title":name,"env":"local","branch":"","worktree":"","provider":provider,"model":model,"at":now}),
-            json!({"$":"BotSet","id":bot,"name":name,"thread":th,"look":look,"persona":gs(p, "persona"),"at":now})];
+            super::catrig::with(json!({"$":"BotSet","id":bot,"name":name,"thread":th,"look":look,"persona":gs(p, "persona"),"at":now}), look, auto, &color)];
         let evs = self.accounts_created(evs).await;
         let r = self.hub.commit_many(&evs).await;
         drop(w);
@@ -246,8 +249,21 @@ impl Bots {
         let now = now_s();
         // Settings' infinite-context switch: the bot's own setting, nothing else changes
         if let Some(r) = p.get("recall").and_then(Value::as_str) { let v = if r == "off" { "off" } else { "on" }; return self.commit_reply(id, vec![json!({"$":"SettingSet","key":format!("recall.bot.{bot}"),"value":v,"at":now})]).await }
-        let ev = json!({"$":"BotSet","id":b.id,"name":b.name,"thread":"","look":gnat(p, "look").unwrap_or(b.look),"persona":gsd(p, "persona", &b.persona),"at":now});
-        self.commit_reply(id, w.also(now, vec![ev])).await
+        // a new name (Settings, setup's Your uberbot): free and well formed; the bot's chat is titled with it too
+        let name = p.get("name").and_then(Value::as_str).map(str::trim).filter(|n| !n.is_empty() && *n != b.name).map(str::to_string);
+        if let Some(n) = &name {
+            if !name_ok(n) { return vec![err(id, "a bot's name is 1 to 24 letters, digits, - or _")] }
+            if w.named(n).map_or(false, |o| o.id != b.id) { return vec![err(id, &format!("a bot named {n} already exists"))] }
+        }
+        let new_name = name.clone().unwrap_or_else(|| b.name.clone());
+        // the cat: `look` picks one (Different cat), `auto: true` gives it back to the name, `color` sets the fur ("" the coat's own); unsaid, each stays
+        let (look, auto) = if p["auto"] == true { (super::cat::look_of(&new_name), true) } else if let Some(l) = gnat(p, "look") { (l % super::cat::LOOKS, false) }
+            else if b.auto { (super::cat::look_of(&new_name), true) } else { (b.look, false) };
+        let color = match p.get("color").and_then(Value::as_str) { Some(c) => super::cat::parse_color(c).map(super::cat::color_hex).unwrap_or_default(), None => b.color.clone() };
+        let ev = super::catrig::with(json!({"$":"BotSet","id":b.id,"name":new_name,"thread":"","look":look,"persona":gsd(p, "persona", &b.persona),"at":now}), look, auto, &color);
+        let mut evs = vec![ev];
+        if name.is_some() && !b.thread.is_empty() { evs.push(json!({"$":"ThreadRenamed","id":b.thread,"title":new_name,"at":now})) }
+        self.commit_reply(id, w.also(now, evs)).await
     }
 
     async fn delete(&self, id: &Value, p: &Value) -> Vec<Value> {

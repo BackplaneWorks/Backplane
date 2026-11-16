@@ -8,6 +8,7 @@
 # When every local build slot is taken this queues locally, and runs the tests and builds on a Boat box only after a long wait (BQ_OFFLOAD_AFTER, default 420 s) or with free memory under BQ_LOW_GB (8) (scripts/lib-boat.sh; BP_NO_BOAT=1 forces local) and copies the programs
 # back to the paths a local run writes, after a sha256 check; the stage, the smoke start (always, SKIP_SMOKE is ignored for a box's build) and the publish happen here as ever.
 # Env: GPUI_DEV_DIR (default ~/.backplane-gpui-dev), BACKPLANE_DEV_STATUS (the status file; default $DEV/BUILD), BUILD_ROOT (the checkout to build; default this one),
+#      KEEP_STAGE=1 (with --no-cut: keep the staged build in $DEV/.stage.XXXX and print its path; without it the stage is removed like every other exit's),
 #      PROFILE (cargo profile, default fast; release for fat LTO), HOST_TARGET / GPUI_TARGET / VOICE_TARGET (a CARGO_TARGET_DIR for each crate), ASSETS (an assets/ folder to ship; default the one in the build now current), JOBS (default: about 2 GB of free memory a job, a share of the cores, at most 28), BUILD_SLOTS / BUILD_LOCK_DIR / NO_SCCACHE (scripts/lib-buildslot.sh).
 set -u
 declare -A KEY   # the gate fills it; a cut built on a Boat box reads it without having gated here (an undeclared KEY made `${KEY[hub]}` an arithmetic name: "hub: unbound variable")
@@ -29,6 +30,10 @@ GATE=0; CUT=1; for a in "$@"; do case "$a" in --gate) GATE=1;; --no-cut) CUT=0;;
 SECS=$DEV/.build-secs$([ "$GATE" = 1 ] && echo -gate)
 HT=${HOST_TARGET:-$ROOT/native/host/target}; GT=${GPUI_TARGET:-$ROOT/native/gpui/target}; VT=${VOICE_TARGET:-$ROOT/native/voice/target}; UT=${GUARD_TARGET:-$HT-guard}
 mkdir -p "$DEV"
+# what a build killed outright (SIGKILL: the OOM killer, a reaper; no trap runs) left in $DEV: stages (243 MB each), build-dir copies, logs and phase files untouched for 6 h.
+# No build lives that long, and each of these is rewritten while its build runs (Nov 16: 535 stages had piled up, 130 GB).
+find "$DEV" -maxdepth 1 -mindepth 1 \( -name '.stage.????' -o -name '.bl.????' -o -name '.pull.????' -o -name '.phase.????' -o -name '.haiku.????' -o -name '.buildlog.????' -o -name '.t.????' \) -mmin +360 \
+  -exec rm -rf -- {} + 2>/dev/null
 est=$(cat "$SECS" 2>/dev/null || echo 150); start=$(date +%s); PH=$(mktemp "$DEV/.phase.XXXX"); echo "hub" > "$PH"; LOG=$(mktemp "$DEV/.buildlog.XXXX")
 status() { printf '{"phase":"%s","text":"%s","done":%s,"total":%s}\n' "$1" "$2" "${3:-0}" "${4:-0}" > "$ST.$$" && mv -f "$ST.$$" "$ST"; }
 # every 2 s: the phase, the seconds, the bar; it is also what keeps the file fresh while one crate compiles for a minute
@@ -208,6 +213,7 @@ if [ -z "${SKIP_SMOKE:-}" ] || [ -n "$BX" ]; then   # (a build made on a Boat bo
   [ -z "$SK" ] || printf '%s\n%s\n' "$SK" "$(git -C "$ROOT" rev-parse --short HEAD)" > "$DEV/.gate-ok/smoke"
   fi
 fi
-[ "$CUT" = 0 ] && { mark ""; echo "time: total $(( $(date +%s) - start ))s"; echo "built in $D"; D=; exit 0; }
+# --no-cut (land.sh's and e2e-linux.sh's gate): nothing reads the stage afterwards, so the EXIT trap removes it (it was kept, one 243 MB folder per land, and 535 piled up by Nov 16); KEEP_STAGE=1 keeps it
+[ "$CUT" = 0 ] && { mark ""; echo "time: total $(( $(date +%s) - start ))s"; if [ -n "${KEEP_STAGE:-}" ]; then echo "built in $D"; D=; fi; exit 0; }
 status ready "Build $(cat "$D/COMMIT") ready: publishing" "$est" "$est"; mark "publish"
 "$HERE/dev-cut.sh" "$D" 9>&-; rc=$?; mark ""; echo "time: total $(( $(date +%s) - start ))s"; exit $rc

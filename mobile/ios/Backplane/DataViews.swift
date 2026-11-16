@@ -378,6 +378,14 @@ struct DataThreadsView: View {
         }
     }
     /// `mark`: a bot or room of a linked machine names its machine, as its threads do
+    private func catRow(_ b: DBot) -> some View {
+        HStack(spacing: 8) {
+            DBotCat(client: client, look: b.look, color: b.color, size: b.uber ? 56 : 28)
+            Text(b.name).dmono(13).foregroundStyle(BackplaneDesign.text).lineLimit(1); Spacer()
+            if let m = b.mark { Text(dAway(m.short, m.away)).dmono(11).foregroundStyle(BackplaneDesign.faint) }
+            Text(Tr.t(!b.note.isEmpty ? b.note : b.uber ? "uberbot" : "bot")).dmono(11).foregroundStyle(BackplaneDesign.faint)
+        }.padding(.horizontal, 12).padding(.vertical, b.uber ? 4 : 2).frame(minHeight: 40).contentShape(Rectangle())
+    }
     private func sideRow(_ sigil: String, _ name: String, _ detail: String, _ mark: DMark? = nil) -> some View {
         HStack(spacing: 8) {
             Text(sigil).dmono(13, bold: true).foregroundStyle(BackplaneDesign.accent).frame(width: 16)
@@ -387,7 +395,10 @@ struct DataThreadsView: View {
         }.padding(.horizontal, 12).frame(minHeight: 40).contentShape(Rectangle())
     }
     private func botRow(_ b: DBot) -> some View {
-        Button { path.append(b.thread) } label: { sideRow("@", b.name, !b.note.isEmpty ? b.note : b.uber ? "uberbot" : "bot", b.mark) }.buttonStyle(.plain).dataRow().accessibilityIdentifier("data.bot." + b.id)
+        Button { path.append(b.thread) } label: {
+            // feature cats: the bot's cat in place of its @ (the uberbot's larger, as the desktop's sidebar has it)
+            if client.has("cats") { catRow(b) } else { sideRow("@", b.name, !b.note.isEmpty ? b.note : b.uber ? "uberbot" : "bot", b.mark) }
+        }.buttonStyle(.plain).dataRow().accessibilityIdentifier("data.bot." + b.id)
             // Delete bot (a long press on a bot the hub offers it for): asked first, then `bot.delete`
             .contextMenu { if b.delete { Button(Tr.t("Delete bot"), systemImage: "trash", role: .destructive) { botDelete = b } } }
     }
