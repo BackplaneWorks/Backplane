@@ -13,10 +13,11 @@ use std::{path::{Path, PathBuf}, process::Stdio, sync::{atomic::{AtomicBool, Ord
 pub struct Package { pub platform: &'static str, pub version: &'static str, pub release: &'static str, pub asset: &'static str, pub sha256: &'static str, pub format: &'static str, pub cli: &'static str }
 /// Linux: bp.12.4 (bp.12.1's DRC zone guard, `drc-zone-guard`; bp.12.2's plan view keys, `plan-keys`; opening a board changes nothing in it
 /// and an unchanged file saves nothing, `no-load-migration`, bp.12.3; an open Symbol Editor no longer refuses other documents' saves,
-/// bp.12.4, no capability). Windows: bp.10 until its fixes ship. Apple Silicon keeps bp.6
-/// (no newer macOS build yet; bp.13 brings darwin-arm64, then only MAC changes). Each pin is its one line; the tests read them.
+/// bp.12.4, no capability). Windows: bp.10 until its fixes ship. Apple Silicon: bp.12.5, the bp.12.4 code with the macOS build, its
+/// launchers (bin/kicad, bin/pcbnew, bin/eeschema) and manifest minOs 15.0 (`os_floor`); bp.13 brings KiCad in the pane there. Each pin is
+/// its one line; the tests read them.
 pub const LINUX: Package = Package { platform: "linux-x86_64", version: "10.99.0-bp.12.4", release: "backplane-kicad-v10.99.0-bp.12.4", asset: "backplane-kicad-linux-x86_64-10.99.0-bp.12.4.tar.gz", sha256: "a94104cd524558d92a1df8016ece4a2c5b2cc436a6c14bb5bc71d72e048ee2dc", format: "tar.gz", cli: "bin/kicad-cli" };
-pub const MAC: Package = Package { platform: "darwin-arm64", version: "10.99.0-bp.6", release: "backplane-kicad-v10.99.0-bp.6", asset: "backplane-kicad-darwin-arm64-10.99.0-bp.6.tar.gz", sha256: "99584fb0ee490354098778d39e3aaed9e0f274ee39972851a9cbeabfb271462d", format: "tar.gz", cli: "bin/kicad-cli" };
+pub const MAC: Package = Package { platform: "darwin-arm64", version: "10.99.0-bp.12.5", release: "backplane-kicad-v10.99.0-bp.12.5", asset: "backplane-kicad-darwin-arm64-10.99.0-bp.12.5.tar.gz", sha256: "4229b3cdd8dd81a84fcc66669979903bdab7ed489865664b5874e8c8a2330538", format: "tar.gz", cli: "bin/kicad-cli" };
 pub const WINDOWS: Package = Package { platform: "windows-x86_64", version: "10.99.0-bp.10", release: "backplane-kicad-v10.99.0-bp.10", asset: "backplane-kicad-windows-x86_64-10.99.0-bp.10.zip", sha256: "68b3796f1de3a8c0a39dd20ca96a43f3354de47facbe5de45d0bd4668c32599c", format: "zip", cli: "bin/kicad-cli.exe" };
 /// Where the releases are (said in the consent note, and the script's download base).
 pub const FROM: &str = "github.com/BackplaneWorks/Backplane_KiCad";
@@ -32,7 +33,7 @@ pub fn pick(os: &str, arch: &str) -> Option<&'static Package> {
 /// floor (`too_old`): a runtime that would not start is never installed.
 pub fn package() -> Option<&'static Package> { pick(std::env::consts::OS, std::env::consts::ARCH).filter(|p| too_old(p, &os_version()).is_none()) }
 /// The oldest OS version a package's programs start on, where it is above what Backplane itself runs on: the macOS runtime is built on
-/// macos-15 and its kicad and bundled dylibs say minos 15.0 (lane M, Nov 15; bp.6 was built the same way), while the client runs on 12.
+/// macos-15 and its kicad and bundled dylibs say minos 15.0 (lane M, Nov 15; bp.6 was built the same way; bp.12.5's manifest says minOs 15.0), while the client runs on 12.
 pub fn os_floor(p: &Package) -> Option<(&'static str, &'static [u32])> {
     match p.platform { "darwin-arm64" => Some(("macOS", &[15, 0])), _ => None }
 }
