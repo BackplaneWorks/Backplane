@@ -53,6 +53,8 @@ if os.environ.get("SEARCH") == "1":
     ev.append({"$":"MessagePosted","thread":"t1","msg":"m3","role":"user","text":"Is the quasar part on this board too?","at":N+2})
 open(H+"/home/events.jsonl","w").write("".join(json.dumps(e,separators=(",",":"))+"\n" for e in ev))
 PY
+  # EXTRA=<file>: more event lines after the seed (test/e2e/ios/cats.sh: an uberbot and a coloured cat)
+  [ -n "${EXTRA:-}" ] && cat "$EXTRA" >> $H/home/events.jsonl
   # STEP models: the console FreeCAD only (the hub tries FreeCAD's GUI first, which hangs headless on this machine: no `freecad` on the hub's PATH, no GUI to find)
   FC=$(command -v freecadcmd || true); mkdir -p $H/fc; [ -n "$FC" ] && printf '#!/bin/sh\nexec %s "$@"\n' "$FC" > $H/fc/freecadcmd && chmod +x $H/fc/freecadcmd && export BACKPLANE_FREECAD=$H/fc/freecadcmd && export PATH=/usr/bin:/bin
   # LIVE=1: the real browser helper (tools/browser on Bun, Playwright driving the machine's Chrome) instead of a planted frame
