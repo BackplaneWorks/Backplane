@@ -74,9 +74,16 @@ pub fn inspect(doc: &str) -> Option<Seen> {
     Some(s)
 }
 
-/// A process's command line, its arguments split by NUL (Linux /proc; elsewhere `ps`, split at spaces).
+/// A process's command line, its arguments split by NUL (Linux /proc; Windows Win32_Process.CommandLine; elsewhere `ps`, split at spaces).
 fn cmdline_of(pid: u32) -> String {
     if let Ok(b) = std::fs::read(format!("/proc/{pid}/cmdline")) { return String::from_utf8_lossy(&b).to_string() }
+    #[cfg(windows)]
+    {
+        let q = format!("(Get-CimInstance Win32_Process -Filter 'ProcessId={pid}').CommandLine");
+        return crate::proc::std_cmd(crate::proc::Kind::Local, "powershell").args(["-NoProfile", "-NonInteractive", "-Command", &q]).output().ok()
+            .map(|o| String::from_utf8_lossy(&o.stdout).trim().replace(' ', "\0")).unwrap_or_default();
+    }
+    #[allow(unreachable_code)]
     crate::proc::std_cmd(crate::proc::Kind::Local, "ps").args(["-o", "command=", "-p", &pid.to_string()]).output().ok()
         .map(|o| String::from_utf8_lossy(&o.stdout).trim().replace(' ', "\0")).unwrap_or_default()
 }
@@ -134,8 +141,40 @@ fn holder_pid(path: &Path) -> Option<u32> {
         let out = crate::proc::std_cmd(crate::proc::Kind::Local, "lsof").arg("-t").arg("--").arg(path).output().ok()?;
         return String::from_utf8_lossy(&out.stdout).lines().filter_map(|l| l.trim().parse::<u32>().ok()).find(|p| *p != me);
     }
+    // Windows: Restart Manager names every process with the file open (RmGetList; no admin). The holder keeps its .lck open for its life;
+    // our own KiCad keeps its handle too while its lock is BUSY (bp.13's FILE_LOCK), so with several the one without `--parent-pid <hub>`
+    // is the holder; when every one carries it, it is ours (lane B, Nov 16).
+    #[cfg(windows)]
+    {
+        let me = std::process::id();
+        let pids: Vec<u32> = rm_pids(path).into_iter().filter(|p| *p != me).collect();
+        if pids.len() <= 1 { return pids.first().copied() }
+        return pids.iter().copied().find(|p| parent_pid_arg(&cmdline_of(*p)) != Some(me)).or_else(|| pids.first().copied());
+    }
     #[allow(unreachable_code)]
     { let _ = path; None }
+}
+
+/// The pids with `path` open (Restart Manager: RmStartSession, RmRegisterResources, RmGetList), [] when it cannot tell.
+#[cfg(windows)]
+fn rm_pids(path: &Path) -> Vec<u32> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::System::RestartManager::{RmEndSession, RmGetList, RmRegisterResources, RmStartSession, CCH_RM_SESSION_KEY, RM_PROCESS_INFO};
+    let mut session = 0u32;
+    let mut key = [0u16; CCH_RM_SESSION_KEY as usize + 1];
+    if unsafe { RmStartSession(&mut session, 0, key.as_mut_ptr()) } != 0 { return vec![] }
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    let files = [wide.as_ptr()];
+    let mut out = vec![];
+    if unsafe { RmRegisterResources(session, 1, files.as_ptr(), 0, std::ptr::null(), 0, std::ptr::null()) } == 0 {
+        let (mut needed, mut have, mut reasons) = (0u32, 16u32, 0u32);
+        let mut infos: Vec<RM_PROCESS_INFO> = vec![unsafe { std::mem::zeroed() }; 16];
+        if unsafe { RmGetList(session, &mut needed, &mut have, infos.as_mut_ptr(), &mut reasons) } == 0 {
+            out = infos[..have as usize].iter().map(|i| i.Process.dwProcessId).collect();
+        }
+    }
+    unsafe { RmEndSession(session); }
+    out
 }
 /// /proc/locks prints the device as hex major:minor with at least two digits each; compare numerically.
 fn same_dev_ino(a: &str, b: &str) -> bool {
@@ -205,6 +244,26 @@ mod tests {
         assert!(matches!(classify(Some(&seen(Some(true), Some(55), "/rt/kicad.real\0--parent-pid\0999", "desktop")), 10, "h", "desktop"), Verdict::Foreign { .. }), "another Backplane's KiCad");
         assert!(matches!(classify(Some(&seen(Some(false), None, "", "laptop")), 10, "h", "desktop"), Verdict::Foreign { .. }), "written on another computer: open there, perhaps");
         assert_eq!(parent_pid_arg("a\0--parent-pid\042\0b"), Some(42));
+    }
+    /// Windows: a lock held the way bp.13's KiCad holds it (the .lck open, its byte at 0x40000000 locked) reads held, and Restart Manager
+    /// names the process that has it open (here this test's own: holder_pid leaves the hub's own pid out, rm_pids does not)
+    #[cfg(windows)]
+    #[test] fn a_held_byte_lock_is_seen_and_restart_manager_names_who_has_it_open() {
+        use std::os::windows::{fs::OpenOptionsExt, io::AsRawHandle};
+        use windows_sys::Win32::{Foundation::HANDLE, Storage::FileSystem::{LockFileEx, LOCKFILE_EXCLUSIVE_LOCK, LOCKFILE_FAIL_IMMEDIATELY}, System::IO::OVERLAPPED};
+        let d = crate::plat::tmp::dir("locks win");
+        let doc = d.join("a.kicad_pro"); let lck = lock_path(&doc.to_string_lossy()).unwrap();
+        std::fs::write(&lck, r#"{"hostname":"desktop","username":"h","token":"t"}"#).unwrap();
+        assert_eq!(held(&lck), Some(false), "nobody holds it");
+        let f = std::fs::OpenOptions::new().read(true).write(true).share_mode(0x1 | 0x2 | 0x4).open(&lck).unwrap();
+        let mut ov: OVERLAPPED = unsafe { std::mem::zeroed() };
+        ov.Anonymous.Anonymous.Offset = 0x4000_0000;
+        assert_ne!(unsafe { LockFileEx(f.as_raw_handle() as HANDLE, LOCKFILE_EXCLUSIVE_LOCK | LOCKFILE_FAIL_IMMEDIATELY, 0, 1, 0, &mut ov) }, 0);
+        assert_eq!(held(&lck), Some(true), "held: the byte at 0x40000000 is locked");
+        assert!(rm_pids(&lck).contains(&std::process::id()), "Restart Manager names the process that has it open");
+        assert_eq!(holder_pid(&lck), None, "the hub's own pid is never the holder it reports");
+        drop(f);
+        assert_eq!(held(&lck), Some(false), "released with its handle");
     }
     #[cfg(target_os = "linux")]
     #[test] fn a_held_flock_is_seen_with_its_holder_and_a_free_one_is_stale() {
