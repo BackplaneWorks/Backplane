@@ -485,7 +485,17 @@ pub(crate) fn order_json(st: &State, thread: &str, running: bool) -> Value {
     crate::settings::order::card(name, asked, files, waiting, running, st.settings.get(&format!("order.quote.{thread}")).map_or("", String::as_str))
 }
 /// Mob.needs.q: a buy thread's question: its choices as buttons (the earlier answer sent without its mark), a box whose text goes as `pre` and the text, and Skip.
-fn needs_json(id: &str, kind: &str, tool: &str, detail: &str, options: &str) -> Value {
+fn needs_json(id: &str, kind: &str, tool: &str, detail: &str, options: &str, off: &str) -> Value {
+    // the list of what would be ordered: every item a tick (a tap flips it: the hub draws the card again), Continue orders what is ticked, and the box
+    // adds parts of the project (its text goes with the ticked list)
+    if tool == crate::settings::order::PICK_TOOL {
+        let offs = crate::settings::order::pick_off(off);
+        let mut chips: Vec<Value> = options.split('\n').map(str::trim).filter(|l| !l.is_empty()).enumerate().map(|(i, l)| { let on = !offs.contains(&i);
+            json!({"label": format!("{} {l}", if on { "\u{2713}" } else { "\u{2717}" }), "value": format!("{id}|toggle:{i}"), "primary": false, "on": on}) }).collect();
+        chips.push(json!({"label": "Continue", "value": format!("{id}|go"), "primary": true}));
+        return json!({"id": id, "kind": kind, "needs": true, "head": "Backplane needs", "detail": detail, "blocks": [], "typed": false, "pre": format!("{id}|"), "placeholder": "More parts of the project (optional)",
+            "go": "Add and continue", "skip": Value::Null, "buttons": chips, "pick": true})
+    }
     let typed = tool == "order_ask.typed";
     let chips: Vec<Value> = options.split('\n').map(str::trim).filter(|l| !l.is_empty()).enumerate().map(|(i, l)| json!({"label": l, "value": format!("{id}|{}", crate::settings::order::ask_value(l)), "primary": i == 0 && !typed})).collect();
     json!({"id": id, "kind": kind, "needs": true, "head": "Backplane needs", "detail": detail, "blocks": [], "typed": typed, "pre": format!("{id}|"), "placeholder": if typed { "Type it here" } else { "Or type an answer" },
@@ -501,7 +511,7 @@ fn asks_json(st: &State, thread: &str, draft: &str) -> Result<Vec<Value>, &'stat
     let btn = |l: &str, v: String, primary: bool| json!({"label": l, "value": v, "primary": primary});
     let mut out = Vec::new();
     for (id, _, kind, tool, detail, options) in mine {
-        if buying && tool.starts_with("order_ask") { out.push(needs_json(id, kind, tool, detail, options)); continue }
+        if buying && tool.starts_with("order_ask") { out.push(needs_json(id, kind, tool, detail, options, st.settings.get(&crate::settings::order::pick_key(id)).map(String::as_str).unwrap_or(""))); continue }
         let head = match kind.as_str() {
             "plan" => "Proposed plan".to_string(), "input" => "The agent asks".to_string(),
             _ => match tool.as_str() {

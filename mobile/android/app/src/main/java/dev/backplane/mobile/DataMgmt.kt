@@ -134,6 +134,8 @@ private fun BomPanel() {
             if (priced > 0 && d.optInt("checking") == 0) DMono(if (priced < looked) Msg.gpui_mgmt_bom_cost_least(Mgmt.money(d.optDouble("cost"))) else Msg.gpui_mgmt_bom_cost(Mgmt.money(d.optDouble("cost"))), dcs.onSurfaceVariant, 11)
             if (d.optBoolean("paused")) DMono(Msg.gpui_mgmt_bom_paused, tone("faint"), 11)
         }
+        // where stock and prices come from (the hub's words): one catalogue; other distributors by the agent's API keys
+        d.optString("stock_note").takeIf { it.isNotEmpty() }?.let { DMono(Tr.t(it), tone("faint"), 10, Modifier.padding(start = 12.dp, end = 12.dp, bottom = 4.dp), lines = 3) }
         // a long-pressed line's editor, in the panel (not a box over it): the drawing stays in view
         val ed = editing
         if (ed != null) BomEdit(ed) { editing = null }

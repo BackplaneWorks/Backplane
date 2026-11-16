@@ -46,7 +46,8 @@ fn status_tool() -> Value { def("order_status", "Where this thread's last quote 
 fn ask_tool() -> Value {
     def("order_ask", "Ask the person one question, shown in its own card above the message box on every device: choices they can tap, or with typed a box to type the answer in (where it ships); they may always type their own answer. Answers at once: end your turn, and their answer comes as their next message, however long they take.",
         json!({"question":prop("The question, short and plain."),"options":{"type":"array","items":{"type":"string"},"description":"Two to four short choices, the likely one first; none with typed."},
-            "typed":{"type":"boolean","description":"true when the answer is typed (the country it ships to, and for the US its state): the person gets a box with Continue."},"last":prop("With typed: the earlier order's answer (its country's name, or its US state), offered as a quick choice.")}), json!(["question"]))
+            "typed":{"type":"boolean","description":"true when the answer is typed (the country it ships to, and for the US its state): the person gets a box with Continue."},"last":prop("With typed: the earlier order's answer (its country's name, or its US state), offered as a quick choice."),
+            "pick":{"type":"boolean","description":"true for the list of what would be ordered: options are every board and part (as many as there are), all ticked; the person unticks what to leave out and may type more parts of the project. Their answer says what to order, what to leave out and what they added."}}), json!(["question"]))
 }
 /// Bots.order.tools: what a thread's agent is shown: none with Ordering off, a buy thread's own only in a buy thread.
 pub fn defs(on: bool, buy: bool) -> Vec<Value> {
@@ -78,6 +79,31 @@ pub async fn call(ag: &Arc<Agents>, thread: &str, name: &str, a: &Value) -> (boo
 
 /// Order.ask.tool
 pub fn ask_tool_name(typed: bool) -> &'static str { if typed { "order_ask.typed" } else { "order_ask" } }
+/// The list of what would be ordered (order_ask with `pick`): every item ticked until the person unticks it; a tap is a toggle, Continue answers.
+pub const PICK_TOOL: &str = "order_ask.pick";
+/// What the phones say under the list (they answer it by typing).
+pub const PICK_PHONE_HINT: &str = "Answer \"all\", or say what to leave out and any parts to add.";
+/// The setting holding a pick ask's unticked items (their indexes, a line each).
+pub fn pick_key(ask: &str) -> String { format!("order.pick.{ask}") }
+/// A tap on a pick ask's item: `toggle:<index>`.
+pub fn pick_toggle(answer: &str) -> Option<usize> { answer.strip_prefix("toggle:").and_then(|n| n.trim().parse().ok()) }
+/// The unticked set after a toggle of `i`, as the setting's text.
+pub fn pick_flip(off: &str, i: usize) -> String {
+    let mut v: Vec<usize> = off.lines().filter_map(|l| l.trim().parse().ok()).collect();
+    if let Some(k) = v.iter().position(|x| *x == i) { v.remove(k); } else { v.push(i); }
+    v.sort(); v.iter().map(|x| x.to_string()).collect::<Vec<_>>().join("\n")
+}
+/// The unticked indexes.
+pub fn pick_off(off: &str) -> Vec<usize> { off.lines().filter_map(|l| l.trim().parse().ok()).collect() }
+/// The person's answer to the list, as their message: what to order, what to leave out, what they added (the typed text after Continue).
+pub fn pick_answer(items: &[&str], off: &[usize], added: &str) -> String {
+    let (on, out): (Vec<(usize, &&str)>, Vec<(usize, &&str)>) = items.iter().enumerate().partition(|(i, _)| !off.contains(i));
+    let list = |v: &[(usize, &&str)]| v.iter().map(|(_, t)| **t).collect::<Vec<_>>().join("; ");
+    let mut t = if on.is_empty() { "Order none of the listed items.".to_string() } else { format!("Order: {}.", list(&on)) };
+    if !out.is_empty() { t += &format!(" Leave out: {}.", list(&out)); }
+    let added = added.trim(); if !added.is_empty() && !added.eq_ignore_ascii_case("all") { t += &format!(" The person also wrote: {added}"); }
+    t
+}
 /// Order.ask.value: a quick choice "<it> · last time" is sent as <it>.
 /// Order.ask.choices: the ask's options, a line each, the earlier answer first and not twice.
 pub fn ask_choices(last: &str, options: &[String]) -> String {
@@ -96,6 +122,10 @@ async fn open_ask(ag: &Arc<Agents>, thread: &str, tool: &str, detail: &str, opti
 /// Od.question: it parks nothing: the answer is posted in the thread as the person's message, however long they take.
 async fn question(ag: &Arc<Agents>, thread: &str, a: &Value) -> (bool, Value) {
     let options: Vec<String> = a["options"].as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_string).collect();
+    if a["pick"].as_bool().unwrap_or(false) && !options.is_empty() {
+        let items: Vec<String> = options.iter().map(|o| o.trim().replace('\n', " ")).filter(|o| !o.is_empty()).collect();
+        open_ask(ag, thread, PICK_TOOL, sv(a, "question"), &items.join("\n"), vec![]).await; return (true, json!(ASKED))
+    }
     open_ask(ag, thread, ask_tool_name(a["typed"].as_bool().unwrap_or(false)), sv(a, "question"), &ask_choices(sv(a, "last"), &options), vec![]).await;
     (true, json!(ASKED))
 }
@@ -493,6 +523,14 @@ mod tests {
         assert_eq!(answer_text("  Germany · last time "), "Germany"); assert_eq!(answer_text(" 3 boards "), "3 boards"); assert_eq!(answer_text("  "), SKIPPED);
         assert_eq!(ask_choices("Germany", &["France".into(), " Germany ".into(), "".into()]), "Germany · last time\nFrance"); assert_eq!(ask_choices("  ", &["a".into(), " b ".into()]), "a\nb"); assert_eq!(ask_choices("", &[]), "");
         assert_eq!((ask_tool_name(true), ask_tool_name(false)), ("order_ask.typed", "order_ask"));
+        // the list of what would be ordered: a tap flips an item, Continue answers with what to order, what to leave out and what was typed
+        assert_eq!(pick_toggle("toggle:2"), Some(2)); assert_eq!(pick_toggle("go"), None);
+        let off = pick_flip(&pick_flip("", 2), 0); assert_eq!(off, "0\n2"); assert_eq!(pick_flip(&off, 2), "0");
+        let items = ["Main board, 5", "Bracket, 2", "Lid, 1"];
+        assert_eq!(pick_answer(&items, &pick_off("1"), ""), "Order: Main board, 5; Lid, 1. Leave out: Bracket, 2.");
+        assert_eq!(pick_answer(&items, &[], " also the gimbal plate "), "Order: Main board, 5; Bracket, 2; Lid, 1. The person also wrote: also the gimbal plate");
+        assert_eq!(pick_answer(&items, &[], "All"), "Order: Main board, 5; Bracket, 2; Lid, 1.", "a phone's \"all\"");
+        assert_eq!(pick_answer(&items, &[0, 1, 2], ""), "Order none of the listed items. Leave out: Main board, 5; Bracket, 2; Lid, 1.");
     }
     fn ready(pilot: bool) -> Value { json!({"id":"q_1","status":"ready","pilot":pilot,"quote":{"total":112.4,"lead_days":9,"pay_label":"Buy now · $112.40","markdown":"| a | b |","problems":[],"warnings":["w"],"shipping":{"ddp":true}}}) }
     #[test] fn a_quote_says_what_it_covers_and_its_link_never_holds_the_token() {

@@ -227,6 +227,17 @@ fun ProjectPageScreen(p: DSecRow, open: (String) -> Unit, newThread: (String) ->
                 }
             }
             if (failed.isNotEmpty()) DMono(failed, dcs.error, 11, Modifier.padding(horizontal = 12.dp, vertical = 4.dp), lines = 3)
+            // what the project is, as the desktop's project page opens: its goal (a tap shows it whole) and its boards
+            var card by remember(pr.id) { mutableStateOf<DataClient.ProjectCard?>(null) }
+            var whole by remember(pr.id) { mutableStateOf(false) }
+            LaunchedEffect(pr.id, DataClient.conn) { if (DataClient.conn == DataClient.Conn.ONLINE) runCatching { DataClient.projectCard(pr.id) }.onSuccess { card = it } }
+            card?.takeIf { it.goal.isNotEmpty() || it.boards.isNotEmpty() }?.let { c ->
+                Column(Modifier.fillMaxWidth().background(dcs.surface).clickable(enabled = c.goal.isNotEmpty()) { whole = !whole }.padding(horizontal = 12.dp, vertical = 8.dp).testTag("project.page.card")) {
+                    if (c.goal.isNotEmpty()) DMono(c.goal, dcs.onSurface, 12, lines = if (whole) 20 else 2)
+                    if (c.boards.isNotEmpty()) DMono(Msg.android_viewer_boards.uppercase() + "  " + c.boards.joinToString(" · "), dcs.onSurfaceVariant, 10, Modifier.padding(top = if (c.goal.isNotEmpty()) 4.dp else 0.dp), lines = 2)
+                }
+                DLine()
+            }
         }
         val ls = lists
         if (ls == null) { DMono(Msg.viewer_loading, dfaint, 12, Modifier.padding(16.dp)); return@Column }
