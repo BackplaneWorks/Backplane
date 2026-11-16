@@ -176,7 +176,15 @@ def gal_bounds(png, x, y, need=300):
     y0, y1 = span(col, y); x0, x1 = span(row, x)
     if y1 - y0 < need or x1 - x0 < need or not (y0 + 10 <= y <= y1 - 10 and x0 + 10 <= x <= x1 - 10): return None
     return {"x0": x0, "y0": y0, "x1": x1, "y1": y1, "bg": list(bg)}
-def shot(name): sh("import", "-window", "root", os.path.join(OUT, "shots", f"{name}.png"), timeout=20)
+if os.environ.get("KEMBED_WM", "i3") == "mutter":
+    print("DIAG real_use under mutter: screenshots via wm_ctl.py; the pane sampler and grab() read the root picture, which mutter's rootless "
+          "Xwayland does not have, so every frame-time and pixel-diff measure is unmeasured here (i3 only for now)", flush=True)
+def shot(name):
+    """The screen as a picture: the root window's (i3), or under mutter (KEMBED_WM=mutter) pieced from the windows' own pictures by
+    wm_ctl.py (its rootless Xwayland has no root picture; env_xvfb.sh's screen_shot does the same)."""
+    path = os.path.join(OUT, "shots", f"{name}.png")
+    if os.environ.get("KEMBED_WM", "i3") == "mutter": sh("python3", os.path.join(os.path.dirname(os.path.abspath(__file__)), "wm_ctl.py"), "screenshot", path, timeout=20)
+    else: sh("import", "-window", "root", path, timeout=20)
 # --- dialogs: KiCad windows that are neither an editor frame nor embedded: recorded, then Return
 STOP = threading.Event(); KNOWN = set(); PAUSE = threading.Event()  # PAUSE: a journey opens KiCad's dialogs on purpose
 MESSAGE_BOXES = ("Load Schematic", "Load PCB", "Error", "Warning", "Confirmation", "Information", "File Open Warning", "Question")
