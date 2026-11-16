@@ -3494,6 +3494,14 @@ android.code.paste	Paste the code here	ここにコードを貼り付け
 android.code.send	Send code	コードを送信
 android.viewer.split	Split	分割
 android.viewer.title	Viewer · {title}	ビューア · {title}
+android.viewer.board	Board	基板
+android.viewer.boards	Boards	基板
+android.viewer.sheet	Sheet	シート
+android.viewer.sheets	Sheets	シート
+android.viewer.sheets.n	{n, plural, one {# sheet} other {# sheets}}	{n}枚のシート
+ios.viewer.sheets.n	{n, plural, one {# sheet} other {# sheets}}	{n}枚のシート
+android.viewer.change	Change	変更
+android.viewer.find	Search	検索
 android.viewer.noboard	No board in this project yet	このプロジェクトにはまだ基板がありません
 android.viewer.nosch	No schematic in this project yet	このプロジェクトにはまだ回路図がありません
 android.viewer.piece	piece {at}	要素 {at}
@@ -6237,6 +6245,12 @@ gpui.streamer.win	Windows does not tell an app that the screen is being captured
 
     /// android.viewer.title = Viewer · {title}
     static func android_viewer_title(title: String) -> String { f("android.viewer.title", ["title": title]) }
+
+    /// android.viewer.sheets.n = {n, plural, one {# sheet} other {# sheets}}
+    static func android_viewer_sheets_n(n: Int) -> String { f("android.viewer.sheets.n", ["n": String(n)]) }
+
+    /// ios.viewer.sheets.n = {n, plural, one {# sheet} other {# sheets}}
+    static func ios_viewer_sheets_n(n: Int) -> String { f("ios.viewer.sheets.n", ["n": String(n)]) }
 
     /// android.viewer.piece = piece {at}
     static func android_viewer_piece(at: String) -> String { f("android.viewer.piece", ["at": at]) }

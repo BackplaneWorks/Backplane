@@ -78,6 +78,7 @@ fun ViewerScreen(thread: DThread, file: String = "", line: Int = 0, back: () -> 
     }
     // the project's boards (two or more: the hub's `boards`): a pick shows that board on Board, Schematic, 3D and Split, as the desktop's Boards menu does
     var boardPick by remember(thread.id) { mutableStateOf("") }
+    var sheetPick by remember(thread.id, boardPick) { mutableStateOf("") }
     val board = files?.board(boardPick)
     // the panels under the drawing (BOM, Checks, Lifecycle, Fab) are of the board on show: the hub's `project` of its row
     val root = files?.root.orEmpty()
@@ -96,7 +97,11 @@ fun ViewerScreen(thread: DThread, file: String = "", line: Int = 0, back: () -> 
             when (tab) {
                 // the management panels (BOM, Checks, Lifecycle, Fab) beside the drawing: tabs under it, a panel over its lower part (DataMgmt.kt)
                 "Board" -> Column(Modifier.fillMaxSize()) { Box(Modifier.weight(1f)) { PlotTab(thread, "board", target?.path?.takeIf { target?.tab == "Board" } ?: board?.pcb.orEmpty(), files == null || files?.pcb.orEmpty().isNotEmpty() || board != null || target != null, Msg.android_viewer_noboard) }; MgmtHost(panelsOf, root) }
-                "Schematic" -> Column(Modifier.fillMaxSize()) { Box(Modifier.weight(1f)) { PlotTab(thread, "schematic", target?.path?.takeIf { target?.tab == "Schematic" } ?: board?.sch.orEmpty(), files == null || files?.sch.orEmpty().isNotEmpty() || board != null || target != null, Msg.android_viewer_nosch) }; MgmtHost(panelsOf, root) }
+                "Schematic" -> Column(Modifier.fillMaxSize()) {
+                    // the sheet on show: the one picked, else the board's top sheet; its sheets come with it (the hub's `sheets`, read from `tree`)
+                    val schPath = target?.path?.takeIf { target?.tab == "Schematic" } ?: sheetPick.ifEmpty { board?.sch.orEmpty() }
+                    if (DataClient.sheets.size > 1) SheetPicker(DataClient.sheets, schPath) { sheetPick = if (it == DataClient.sheets.first().file) "" else it; target = null; DataClient.lightRefs = emptyList() }
+                    Box(Modifier.weight(1f)) { PlotTab(thread, "schematic", schPath, files == null || files?.sch.orEmpty().isNotEmpty() || board != null || target != null, Msg.android_viewer_nosch, tree = board?.sch.orEmpty()) }; MgmtHost(panelsOf, root) }
                 "3D" -> PlotTab(thread, "3d", board?.pcb.orEmpty(), files == null || files?.pcb.orEmpty().isNotEmpty() || board != null, Msg.android_viewer_noboard)
                 "Split" -> SplitTab(thread, files, board)
                 "Diff" -> DiffTab(thread)
@@ -109,27 +114,84 @@ fun ViewerScreen(thread: DThread, file: String = "", line: Int = 0, back: () -> 
     }
 }
 
-/** The board on show and, behind it, the project's other boards (the hub's list, two or more). */
+/** A board's name (its file's stem) and the folder it is in, from the hub's label (`Nodes/NodeGimbal/X/X`): the name always shows whole. */
+internal fun boardName(label: String): Pair<String, String> = label.substringAfterLast('/') to label.substringBeforeLast('/', "")
+
+/** The board on show, its name whole and its folder under it; a press opens every board of the project in a sheet (two lines each, the one on show ticked,
+ *  a search over them when there are many), as the desktop's Boards menu. */
 @Composable
 private fun BoardPicker(boards: List<DataClient.BoardRow>, on: DataClient.BoardRow, pick: (DataClient.BoardRow) -> Unit) {
     var open by remember { mutableStateOf(false) }
-    Box(Modifier.fillMaxWidth().background(dcs.surface)) {
-        Row(Modifier.fillMaxWidth().clickable { open = true }.padding(horizontal = 12.dp, vertical = 9.dp).testTag("viewer.boards"), verticalAlignment = Alignment.CenterVertically) {
-            DMono(on.label, dcs.onSurface, 12, Modifier.weight(1f)); DMono("▾", dcs.onSurfaceVariant, 12)
+    val (name, folder) = boardName(on.label)
+    PickerHead(Msg.android_viewer_board, name, folder, "viewer.boards") { open = true }
+    if (open) PickerSheet(Msg.android_viewer_boards, close = { open = false }, search = boards.size > 6) { q ->
+        boards.filter { q.isBlank() || it.label.contains(q.trim(), ignoreCase = true) }.forEach { b ->
+            val (n, f) = boardName(b.label)
+            PickerRow(n, listOfNotNull(f.ifEmpty { null }, if (b.default) Msg.gpui_c_boards_default else null).joinToString(" · "), b.value == on.value, 0, "viewer.board.${b.value}") { open = false; pick(b) }
         }
-        DropdownMenu(open, { open = false }) {
-            boards.forEach { b ->
-                DropdownMenuItem({ Column { DMono(b.label, if (b.value == on.value) dcs.primary else dcs.onSurface, 12, bold = b.value == on.value); if (b.default) DMono(Msg.gpui_c_boards_default, dcs.onSurfaceVariant, 10) } },
-                    { open = false; pick(b) }, Modifier.testTag("viewer.board.${b.value}"))
-            }
+    }
+}
+
+/** The schematic's sheet on show (the hub's `sheets`, top first); a press opens the hierarchy in a sheet, each indented by its depth. */
+@Composable
+private fun SheetPicker(sheets: List<DataClient.Sheet>, path: String, pick: (String) -> Unit) {
+    var open by remember { mutableStateOf(false) }
+    val on = sheets.firstOrNull { it.file == path } ?: sheets.first()
+    PickerHead(Msg.android_viewer_sheet, on.name, Msg.android_viewer_sheets_n(sheets.size), "viewer.sheets") { open = true }
+    if (open) PickerSheet(Msg.android_viewer_sheets, close = { open = false }, search = sheets.size > 10) { q ->
+        sheets.filter { q.isBlank() || it.name.contains(q.trim(), ignoreCase = true) }.forEach { sh ->
+            PickerRow(sh.name, sh.file.substringAfterLast('/'), sh.file == on.file, if (q.isBlank()) sh.depth else 0, "viewer.sheet.${sh.file.substringAfterLast('/')}") { open = false; pick(sh.file) }
         }
+    }
+}
+
+/** The bar a picker shows on the page: what it is, the choice whole, a line under it, and Change. */
+@Composable
+private fun PickerHead(what: String, name: String, sub: String, tag: String, press: () -> Unit) {
+    Row(Modifier.fillMaxWidth().background(dcs.surface).clickable(onClick = press).padding(horizontal = 12.dp, vertical = 8.dp).testTag(tag), verticalAlignment = Alignment.CenterVertically) {
+        DMono(what.uppercase(), dfaint, 10, Modifier.padding(end = 10.dp))
+        Column(Modifier.weight(1f)) {
+            DMono(name, dcs.onSurface, 13, bold = true, lines = 2)
+            if (sub.isNotEmpty()) DMono(sub, dcs.onSurfaceVariant, 10, lines = 1)
+        }
+        DMono(Msg.android_viewer_change, dcs.primary, 12, Modifier.padding(start = 10.dp), bold = true)
     }
     DLine()
 }
 
+/** A picker's list in a sheet from the bottom: its title and Done, a search field when asked, the rows. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun PickerSheet(title: String, close: () -> Unit, search: Boolean, rows: @Composable (String) -> Unit) {
+    var q by remember { mutableStateOf("") }
+    ModalBottomSheet(onDismissRequest = close, shape = androidx.compose.ui.graphics.RectangleShape, containerColor = dcs.surfaceVariant, dragHandle = null, sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)) {
+        Column(Modifier.fillMaxWidth().fillMaxHeight(.75f)) {
+            Row(Modifier.fillMaxWidth().height(48.dp).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                DMono(title.uppercase(), dfaint, 11, Modifier.weight(1f))
+                DMono(Msg.android_done, dcs.primary, 13, Modifier.clickable(onClick = close).padding(8.dp).testTag("picker.done"), bold = true)
+            }
+            if (search) DField(q, { q = it }, Msg.android_viewer_find, Modifier.padding(horizontal = 14.dp, vertical = 6.dp).testTag("picker.find"))
+            DLine()
+            Column(Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(bottom = 16.dp)) { rows(q) }
+        }
+    }
+}
+
+@Composable
+private fun PickerRow(name: String, sub: String, on: Boolean, depth: Int, tag: String, press: () -> Unit) {
+    Row(Modifier.fillMaxWidth().background(if (on) dcs.surfaceContainerHigh else Color.Transparent).clickable(onClick = press).heightIn(min = 48.dp)
+        .padding(start = (14 + 14 * depth.coerceAtMost(6)).dp, end = 14.dp, top = 6.dp, bottom = 6.dp).testTag(tag), verticalAlignment = Alignment.CenterVertically) {
+        DMono(if (on) "✓" else "", dcs.primary, 13, Modifier.width(22.dp))
+        Column(Modifier.weight(1f)) {
+            DMono(name, if (on) dcs.primary else dcs.onSurface, 13, bold = on, lines = 3)
+            if (sub.isNotEmpty()) DMono(sub, dcs.onSurfaceVariant, 11, lines = 2)
+        }
+    }
+}
+
 // ---- Board, Schematic and 3D: the hub's plot, drawn by the GPU view
 @Composable
-private fun PlotTab(thread: DThread, kind: String, path: String, has: Boolean, none: String) {
+private fun PlotTab(thread: DThread, kind: String, path: String, has: Boolean, none: String, tree: String = "") {
     val scope = rememberCoroutineScope()
     val three = kind == "3d"
     val head = if (three) "2|" else if (kind == "schematic") "1|" else "0|"
@@ -144,7 +206,7 @@ private fun PlotTab(thread: DThread, kind: String, path: String, has: Boolean, n
     LaunchedEffect(thread.id, kind, path, has, DataClient.conn == DataClient.Conn.ONLINE) {
         if (!has) return@LaunchedEffect
         error = ""; layers = null; refs = null; comparing = ""; info = ""; picked = ""; lit = emptyList()
-        runCatching { DataClient.watch(thread.id, kind, path) }.onFailure { error = it.message ?: "" }
+        runCatching { DataClient.watch(thread.id, kind, path, tree = tree) }.onFailure { error = it.message ?: "" }
     }
     val plots = DataClient.plots
     val frame = plots.frame?.takeIf { it.key.startsWith(if (three) "0|" else head) }

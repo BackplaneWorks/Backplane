@@ -215,6 +215,8 @@ object DataClient {
             "d" -> push(o)
             "voice" -> DataVoice.frame(o)
             "plot" -> scope.launch(Dispatchers.Main) { plots.receiveJSON(o) } // why a view has nothing to show (plots themselves are binary)
+            // a schematic's sheets (kicad/watch.rs `sheets`): the newest tree only (`gen` only grows)
+            "sheets" -> { val g2 = o.optString("gen").toLongOrNull() ?: 0L; scope.launch(Dispatchers.Main) { if (g2 >= sheetsGen) { sheetsGen = g2; sheets = parseSheets(o.optString("rows")) } } }
             "star" -> { star = DStarOffer.of(o.optJSONObject("offer")) }
             "telemetry.notice" -> { telemetryNotice = DTelemetryNotice.of(o.optJSONObject("notice")) }
             "migrating" -> heardMigrating(o)
@@ -953,11 +955,17 @@ object DataClient {
     fun stopWatch(tid: String) { scope.launch { runCatching { call("viewer.watch", JSONObject().put("thread", tid).put("kind", "")) } } }
     /** A viewer (tab, file, thread) opens: the last one's plots go at once and late ones for it are dropped (PlotStore.begin/shown);
      *  a 3D view shows its own cached model once the hub names that model's file among the view's. A stop changes nothing here. */
-    suspend fun watch(tid: String, kind: String, path: String = "", board: String = "") {
+    /** One sheet of the schematic on show: its depth in the hierarchy, whether it has no sheets of its own, its name and its file. */
+    data class Sheet(val depth: Int, val leaf: Boolean, val name: String, val file: String)
+    /** The rows of a `sheets` message: `depth TAB leaf TAB name TAB file` a line (the desktop's plot.rs `sheet_rows`). */
+    fun parseSheets(rows: String): List<Sheet> = rows.lines().mapNotNull { l -> val f = l.split('\t'); if (f.size < 4) null else Sheet(f[0].toIntOrNull() ?: 0, f[1] == "1", f[2], f[3]) }
+    var sheets by mutableStateOf<List<Sheet>>(emptyList())
+    private var sheetsGen = 0L
+    suspend fun watch(tid: String, kind: String, path: String = "", board: String = "", tree: String = "") {
         val slot = if (kind.startsWith("3d")) listOf(hubName, tid, kind, path).joinToString("|") else ""
         val begun = if (kind.isNotEmpty()) withContext(Dispatchers.Main) { plots.begin(slot) } else null
         val kept = begun?.kept.orEmpty(); val serial = begun?.serial ?: 0
-        val r = try { call("viewer.watch", JSONObject().put("thread", tid).put("kind", kind).apply { if (path.isNotEmpty()) put("path", path); if (kept.isNotEmpty()) put("kept", kept); if (board.isNotEmpty()) put("board", board) }) }
+        val r = try { call("viewer.watch", JSONObject().put("thread", tid).put("kind", kind).apply { if (path.isNotEmpty()) put("path", path); if (kept.isNotEmpty()) put("kept", kept); if (board.isNotEmpty()) put("board", board); if (tree.isNotEmpty()) put("tree", tree) }) }
             catch (e: Exception) { if (kind.isNotEmpty()) withContext(Dispatchers.Main) { plots.failed(serial) }; throw e }
         if (kind.isEmpty()) return
         val keys = r.optJSONArray("keys")?.let { a -> (0 until a.length()).map { a.getString(it) } }.orEmpty()
