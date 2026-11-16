@@ -13,6 +13,8 @@ x64 and arm64. It lays the release out for the guard (docs/deploy.md): the build
 
 ## macOS (Apple silicon)
 
+Backplane runs on Macs with Apple silicon (M1 or later) and macOS 12 or later; Intel Macs aren't supported, and the installer says so on one. The Backplane KiCad it installs needs macOS 15 or later; on an older macOS, Settings → CAD says why.
+
 Run the install.sh one-liner above: the same layout, with the default home in `~/Library/Application Support/Backplane/hub`. `BACKPLANE_NO_DESKTOP_APP=1` installs only the hub.
 
 **macOS builds are not notarized yet** (notarization will follow once an Apple Developer ID exists). If macOS refuses to open the downloaded app, once only: open it from Finder with right-click (or Control-click) → Open → Open; or on macOS 15+, try to open it, then System Settings → Privacy & Security → "Open Anyway"; or run `xattr -dr com.apple.quarantine /Applications/Backplane.app`. The installer checks the release checksum and signatures, and clears quarantine only on the payload it downloaded.
