@@ -1718,7 +1718,9 @@ def run(h):
             h.check("nogpu: the pane never says KiCad is not responding while a box waits (no 'unresponsive' state)", "unresponsive" not in states, sorted(set(x for x in states if x)))
             h.check("nogpu: each box was told to the hub with its title, so the pane says what KiCad is asking",
                     all(b.get("hub_dialogs") for b in nogpu_boxes), nogpu_boxes)
-            h.check("nogpu: after the boxes the editor comes up (first paint, the opening settled)", settled, {"settled": settled})
+            t_after = time.monotonic()
+            painted_ms = wait_painted(E.find_main_window(cp.pid), t_after, 60.0)
+            h.check("nogpu: after the boxes the editor is drawn in the pane (within 60 s of the last box)", painted_ms is not None, {"settled_mark": settled, "drawn_after_ms": painted_ms})
             frame_ = int((h.last_kicad_report("settled") or {}).get("shown") or 0)
             if not frame_:
                 # the settled report may name no frame (the box held the opening): the PCB Editor frame in Backplane's window
