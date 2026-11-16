@@ -997,7 +997,8 @@ impl Render for KicadPane {
         let failed = self.failed(); let app = app_instead(&self.seen_info(), cfg!(windows));
         let marker = self.marker.clone(); let focus = self.focus.clone();
         let keys = self.keys;
-        div().id("kicad-pane").size_full().relative().when(!handoff, |d| d.bg(rgb(0x001023))).track_focus(&focus)
+        // its rect as `kicad:pane` (an e2e judges KiCad's frame against the pane as it is drawn now: a panel, Full size, Full screen change it)
+        crate::ui::with_rect(div().id("kicad-pane"), || "kicad:pane".to_string()).size_full().relative().when(!handoff, |d| d.bg(rgb(0x001023))).track_focus(&focus)
             .on_mouse_down_out(cx.listener(|this, _, _, cx| {
                 this.took = None;
                 if this.keys {
@@ -1380,43 +1381,38 @@ pub fn strip<V: 'static>(cx: &mut Context<V>, light: bool, pane: &Entity<KicadPa
     // the kinds KiCad says it has (the fork names them; an X title may come later than the frame), and those the X tree shows
     let have: Vec<String> = { let p = pane.read(cx); p.frames.iter().map(|f| f.kind.to_string())
         .chain(p.info["frames"].as_array().into_iter().flatten().filter_map(|f| f["kind"].as_str().map(String::from))).collect() };
+    // a narrow pane (under 520 px: the narrowest is 380) packs the tabs and the buttons tighter, so all of them fit beside each other: at 380 px
+    // Pop out was cut at the pane's edge
+    let narrow = pane.read(cx).at_px.is_some_and(|b| f32::from(b.size.width) < 520.);
     let mut row = div().id("kicad-strip").flex().items_center().gap_1().px_2().h(crate::scale::tpx(30.)).flex_shrink_0().bg(c("panel")).border_b_1().border_color(c("rule"));
     for (kind, label) in TABS {
         // the symbol and footprint editors: a tab once KiCad has them, or while shown
         if matches!(*kind, "SYMBOL_EDITOR" | "FOOTPRINT_EDITOR" | "GERBVIEW") && !have.iter().any(|h| h == kind) && at != *kind { continue }
         let on = at == *kind; let k = kind.to_string(); let p = pane.clone();
-        row = row.child(crate::ui::with_rect(div().id(SharedString::from(format!("kicad-tab-{kind}"))), { let k = kind.to_string(); move || format!("kicad-tab:{k}") }).px_2().py(px(3.)).text_size(crate::scale::tpx(12.)).cursor_pointer()
+        row = row.child(crate::ui::with_rect(div().id(SharedString::from(format!("kicad-tab-{kind}"))), { let k = kind.to_string(); move || format!("kicad-tab:{k}") }).when(narrow, |d| d.px_1()).when(!narrow, |d| d.px_2()).py(px(3.)).text_size(crate::scale::tpx(12.)).cursor_pointer()
             .text_color(c(if on { "text" } else { "dim" })).when(on, |d| d.border_b_2().border_color(c("accent"))).hover(|s| s.bg(c("raise")))
             .tooltip(crate::keys::tip(&crate::i18n::trs(label), "Ctrl+Tab", light))
             .child(crate::i18n::trs(label))
             .on_mouse_down(MouseButton::Left, move |_, _, cx| { let k = k.clone(); p.update(cx, |p, cx| p.show_kind_by(&k, "click on the pane's tab strip", cx)); }));
     }
+    // what stands between the tabs and the buttons never pushes the buttons (a job's bar coming up pushed Pop out past the pane's edge, and the
+    // buttons jumped 66 px while it did). It is one line high and wraps what does not fit onto a second line that is clipped, so each thing is
+    // shown whole or not at all (never a half-cut chip), in this order: a file conflict (the person's two answers), KiCad's long job, the checks
+    // chip, the stock-KiCad note, and KiCad's notice, which takes what is left (80 px at least) and ends in an ellipsis
+    let mut mid = div().id("kicad-strip-mid").flex().flex_wrap().items_center().content_start().gap_1().flex_1().min_w_0().h(crate::scale::tpx(30.)).pt(px(4.)).overflow_hidden();
+    // a first item of no width: a wrapping row never moves its first item to the next line, so without it the chip, when alone, was clipped
+    // instead of wrapped away whole
+    mid = mid.child(div().w(px(0.)).h(px(18.)));
     // a file changed on disk over the person's unsaved edits: said here too (KiCad asks in its own infobar), with the same two answers
     if !pane.read(cx).conflicts.is_empty() {
         let names: Vec<String> = pane.read(cx).conflicts.iter().map(|f| std::path::Path::new(f).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()).collect();
         let (pk, pr) = (pane.clone(), pane.clone());
-        row = row.child(div().id("kicad-reload").ml_2().flex().items_center().gap_1().text_size(crate::scale::tpx(12.)).text_color(c("bad"))
+        mid = mid.child(div().id("kicad-reload").ml_2().flex().items_center().gap_1().text_size(crate::scale::tpx(12.)).text_color(c("bad"))
             .child(crate::i18n::tf("gpui.c.kicad.changed", &[("files", names.join(", ").into())]))
             .child(div().id("kicad-keep").px_2().border_1().border_color(c("line")).bg(c("raise")).cursor_pointer().text_color(c("text")).child(crate::i18n::trs("Keep yours"))
                 .on_click(move |_, _, cx| pk.update(cx, |p, cx| p.resolve("keep", cx))))
             .child(div().id("kicad-reload-btn").px_2().border_1().border_color(c("line")).bg(c("raise")).cursor_pointer().text_color(c("text")).child(crate::i18n::trs("Reload (lose your edits)"))
                 .on_click(move |_, _, cx| pr.update(cx, |p, cx| p.resolve("reload", cx)))));
-    }
-    // KiCad's notice (embed-notice): one line, readable after the editor is up, dismissed with its ×; never a modal
-    if let Some((id, text)) = open_notice(&pane.read(cx).info) {
-        let p = pane.clone();
-        row = row.child(crate::ui::with_rect(div().id("kicad-notice"), || "kicad:notice".to_string()).ml_2().flex().items_center().gap_1().min_w_0().text_size(crate::scale::tpx(11.)).text_color(c("dim"))
-            .child(div().max_w(px(360.)).overflow_hidden().whitespace_nowrap().text_ellipsis().child(text.clone()))
-            .tooltip(crate::keys::tip(&text, "", light))
-            .child(crate::ui::with_rect(div().id("kicad-notice-x"), || "kicad:notice-dismiss".to_string()).px_1().cursor_pointer().child("×").tooltip(crate::keys::tip(&crate::i18n::trs("Dismiss"), "", light))
-                .on_click(move |_, _, cx| p.update(cx, |p, cx| { p.dismiss_notice(id); cx.notify(); }))));
-    }
-    // stock KiCad in the pane (the system's own, taken in window by window): said, with the way to Backplane KiCad (Settings, CAD asks first)
-    if !popped && stock_hint(&pane.read(cx).info, cfg!(windows)) {
-        let a = act.clone(); let tip = crate::i18n::trs("This is stock KiCad: it can open in windows of its own, and agents cannot edit in it. Backplane KiCad opens in here.");
-        row = row.child(crate::ui::with_rect(div().id("kicad-stock"), || "kicad:stock".to_string()).ml_2().px_2().py(px(3.)).flex_shrink_0().text_size(crate::scale::tpx(11.)).text_color(c("warn")).cursor_pointer().hover(|s| s.bg(c("raise")))
-            .tooltip(crate::keys::tip(&tip, "", light)).child(crate::i18n::trs("Install Backplane KiCad"))
-            .on_click(cx.listener(move |v, _, w, cx| a(v, "cad", w, cx))));
     }
     // KiCad's long job (loading, zone fill, DRC, plot): a slim bar here instead of KiCad's own progress window (bp.12)
     let jobs = if pane.read(cx).info["state"] == "ready" { pane.read(cx).jobs.clone() } else { Vec::new() };
@@ -1425,7 +1421,7 @@ pub fn strip<V: 'static>(cx: &mut Context<V>, light: bool, pane: &Entity<KicadPa
         let title = j["title"].as_str().unwrap_or("").to_string(); let detail = j["detail"].as_str().unwrap_or("").to_string();
         let text = if detail.is_empty() { crate::i18n::trs(&title) } else { format!("{} · {detail}", crate::i18n::trs(&title)) };
         let w = 120.0f32; let p = pane.clone();
-        row = row.child(div().id("kicad-progress").ml_2().flex().items_center().gap_1().text_size(crate::scale::tpx(11.)).text_color(c("dim"))
+        mid = mid.child(div().id("kicad-progress").ml_2().flex().items_center().gap_1().text_size(crate::scale::tpx(11.)).text_color(c("dim"))
             .child(div().max_w(px(220.)).overflow_hidden().whitespace_nowrap().text_ellipsis().child(text))
             .child(div().w(px(w)).h(px(4.)).bg(c("line")).child(div().h_full().bg(c("accent")).w(px(if f >= 0.0 { w * f.min(1.0) as f32 } else { w * 0.3 }))))
             .when(jobs.len() > 1, |d| d.child(format!("+{}", jobs.len() - 1)))
@@ -1435,14 +1431,30 @@ pub fn strip<V: 'static>(cx: &mut Context<V>, light: bool, pane: &Entity<KicadPa
     // the design's checks ("DRC 12 · ERC 3", coloured only when not clean): a press opens the Checks panel
     if let Some((text, tone)) = crate::screens::mgmt_checks::chip_for(&pane.read(cx).project) {
         let a = act.clone();
-        row = row.child(crate::screens::mgmt_checks::chip_el(&text, tone, light).on_click(cx.listener(move |v, _, w, cx| a(v, "checks", w, cx))));
+        mid = mid.child(crate::screens::mgmt_checks::chip_el(&text, tone, light).on_click(cx.listener(move |v, _, w, cx| a(v, "checks", w, cx))));
     }
-    row = row.child(div().flex_1());
+    // stock KiCad in the pane (the system's own, taken in window by window): said, with the way to Backplane KiCad (Settings, CAD asks first)
+    if !popped && stock_hint(&pane.read(cx).info, cfg!(windows)) {
+        let a = act.clone(); let tip = crate::i18n::trs("This is stock KiCad: it can open in windows of its own, and agents cannot edit in it. Backplane KiCad opens in here.");
+        mid = mid.child(crate::ui::with_rect(div().id("kicad-stock"), || "kicad:stock".to_string()).ml_2().px_2().py(px(3.)).flex_shrink_0().text_size(crate::scale::tpx(11.)).text_color(c("warn")).cursor_pointer().hover(|s| s.bg(c("raise")))
+            .tooltip(crate::keys::tip(&tip, "", light)).child(crate::i18n::trs("Install Backplane KiCad"))
+            .on_click(cx.listener(move |v, _, w, cx| a(v, "cad", w, cx))));
+    }
+    // KiCad's notice (embed-notice): one line, readable after the editor is up, dismissed with its ×; never a modal
+    if let Some((id, text)) = open_notice(&pane.read(cx).info) {
+        let p = pane.clone();
+        mid = mid.child(crate::ui::with_rect(div().id("kicad-notice"), || "kicad:notice".to_string()).ml_2().flex().items_center().gap_1().flex_grow().flex_basis(px(80.)).min_w(px(80.)).text_size(crate::scale::tpx(11.)).text_color(c("dim"))
+            .child(div().flex_1().min_w_0().max_w(px(360.)).overflow_hidden().whitespace_nowrap().text_ellipsis().child(text.clone()))
+            .tooltip(crate::keys::tip(&text, "", light))
+            .child(crate::ui::with_rect(div().id("kicad-notice-x"), || "kicad:notice-dismiss".to_string()).px_1().cursor_pointer().child("×").tooltip(crate::keys::tip(&crate::i18n::trs("Dismiss"), "", light))
+                .on_click(move |_, _, cx| p.update(cx, |p, cx| { p.dismiss_notice(id); cx.notify(); }))));
+    }
+    row = row.child(mid);
     let mk = |id: &'static str, label: String, tip: String, a: &'static str, cx: &mut Context<V>| {
         let act = act.clone();
         // its rect under `kicad:<action>` (kicad:full, kicad:screen, kicad:popout, kicad:popin): a driver clicks the button itself, never a place
         // measured once (real_use's fixed offset for Full size landed on Full screen once it was added beside it)
-        crate::ui::with_rect(div().id(id), move || format!("kicad:{a}")).px_2().py(px(3.)).text_size(crate::scale::tpx(12.)).border_1().border_color(c("line")).bg(c("raise")).cursor_pointer().hover(|s| s.bg(c("panel")))
+        crate::ui::with_rect(div().id(id), move || format!("kicad:{a}")).when(narrow, |d| d.px_1()).when(!narrow, |d| d.px_2()).py(px(3.)).text_size(crate::scale::tpx(12.)).border_1().border_color(c("line")).bg(c("raise")).cursor_pointer().hover(|s| s.bg(c("panel")))
             .tooltip(crate::keys::tip(&tip, "", light)).child(label)
             .on_click(cx.listener(move |this, _, window, cx| act(this, a, window, cx)))
     };

@@ -11,7 +11,8 @@ python3 "$SEED_PY" "$OUT" "$REPO_ROOT"
 start_xvfb_and_wm; start_hub
 python3 - "$OUT/script.json" <<'PY'
 import json, sys
-s = [{"select": 0}, {"wait": 2200}, {"click": "rail:Board"}, {"wait": 2500}, {"click": "ui:Edit"}, {"kicad": {"wait_painted": 90000, "kind": "PCB", "tag": "up"}}, {"wait": 4000}]
+s = [{"select": 0}, {"wait": 2200}, {"click": "rail:Board"}, {"wait": 2500}, {"click": "ui:Edit"}, {"kicad": {"wait_painted": 90000, "kind": "PCB", "tag": "up"}},
+     {"kicad": {"report": True, "tag": "sock"}}, {"mark": "up"}, {"wait": 9000}]
 for tag, click in (("before", None), ("full_on", "kicad:full"), ("full_off", "kicad:full"), ("screen_on", "kicad:screen"), ("screen_off", "kicad:screen")):
     if click: s += [{"click": click}, {"wait": 2500}]
     s += [{"kicad": {"report": True, "tag": tag}}, {"mark": tag}, {"wait": 1200}]
@@ -21,6 +22,10 @@ PY
 HOME="$OUT/fh" BACKPLANE_GPUI_RECTS=1 BACKPLANE_GPUI_ASSETS="$ASSETS_DIR" "$CLIENT_BIN" --url "http://127.0.0.1:$HPORT" --token-file "$OUT/home/token" --script "$OUT/script.json" --exit-after 150 >"$OUT/client.log" 2>&1 &
 CP=$!; track_pid "$CP"
 mkdir -p "$OUT/shots"
+# KiCad's long jobs while the editor is up (its start-up work, then a zone fill asked over IPC): their bar in the strip never moves the buttons
+for _ in $(seq 1200); do grep -q '"name":"up","event":"mark"' "$OUT/client.log" 2>/dev/null && break; kill -0 "$CP" 2>/dev/null || break; sleep 0.1; done
+SOCK=$(last_kicad_report "$OUT/client.log" sock | python3 -c 'import json,sys; print(json.loads(sys.stdin.read() or "{}").get("sock") or "")')
+[ -n "$SOCK" ] && { sleep 2; python3 "$IPC_PY" run-action "$SOCK" "pcbnew.ZoneFiller.zoneFillAll" >/dev/null 2>&1 || true; }
 for tag in before full_on full_off screen_on screen_off; do
   for _ in $(seq 1200); do grep -q "\"name\":\"$tag\",\"event\":\"mark\"" "$OUT/client.log" 2>/dev/null && break; kill -0 "$CP" 2>/dev/null || break; sleep 0.1; done
   import -window root "$OUT/shots/$tag.png" 2>/dev/null || true
@@ -33,6 +38,9 @@ for tag in before full_on full_off screen_on screen_off; do
   echo "INFO $tag: pane $PX,$PY ${PW}x$PH; KiCad's frame $FX,$FY ${FW}x$FH"
   check "$tag: KiCad's frame is exactly over the pane" "$([ "$PW" -gt 100 ] && [ "$FX $FY $FW $FH" = "$PX $PY $PW $PH" ] && echo 1 || echo 0)" "pane $PX,$PY ${PW}x$PH, frame $FX,$FY ${FW}x$FH"
 done
+MOVES=$(python3 "$KEMBED_LIB/strip_moves.py" "$OUT/client.log")
+echo "INFO the strip's buttons from Edit to the first toggle: $MOVES (distinct places, snapshots)"
+check "KiCad's jobs and the checks chip never move the strip's buttons" "$([ "${MOVES%% *}" = 1 ] && echo 1 || echo 0)" "$MOVES"
 B=$(geo before | cut -d' ' -f1-4)
 check "Full size on: the pane is bigger" "$(python3 -c 'import sys; a=list(map(int,sys.argv[1].split())); b=list(map(int,sys.argv[2].split())); print(int(b[2]*b[3] > a[2]*a[3]))' "$B" "$(geo full_on | cut -d' ' -f1-4)")"
 check "Full size off: the pane is back where it was, to the pixel" "$([ "$(geo full_off | cut -d' ' -f1-4)" = "$B" ] && echo 1 || echo 0)" "before $B, after $(geo full_off | cut -d' ' -f1-4)"
