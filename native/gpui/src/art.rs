@@ -226,13 +226,25 @@ pub fn paint_cat_fx(window: &mut Window, b: Bounds<Pixels>, rig: &Rig, ms: f32, 
 pub const MONO: &str = "JetBrains Mono";
 static MONO_REGULAR: &[u8] = include_bytes!("../../../assets/fonts/jetbrains-mono/JetBrainsMono-Regular.ttf");
 static MONO_BOLD: &[u8] = include_bytes!("../../../assets/fonts/jetbrains-mono/JetBrainsMono-Bold.ttf");
-/// Registers the bundled faces; logs GPUI_LOG {"font":...,"loaded":bool} (loudly false when the family did not appear).
+// Noto Sans CJK JP (SIL OFL, assets/fonts/noto-sans-cjk-jp, subset by scripts/fetch-cjk-font.sh to JIS X 0208 and the catalog's Japanese):
+// Linux only, where a machine may have no CJK font at all (Japanese drew as boxes); macOS and Windows always have one. Its family name is
+// cosmic-text's own fallback for Han in Japanese, and a font of last resort for kana and Han in any locale; an installed CJK font still comes first.
+pub const CJK: &str = "Noto Sans CJK JP";
+#[cfg(target_os = "linux")]
+static CJK_FACES: [&[u8]; 2] = [include_bytes!("../../../assets/fonts/noto-sans-cjk-jp/NotoSansCJKjp-Regular.subset.otf"), include_bytes!("../../../assets/fonts/noto-sans-cjk-jp/NotoSansCJKjp-Bold.subset.otf")];
+#[cfg(not(target_os = "linux"))]
+static CJK_FACES: [&[u8]; 0] = [];
+/// Registers the bundled faces; logs GPUI_LOG {"font":...,"loaded":bool} for each family (loudly false when the family did not appear).
 pub fn load_fonts(cx: &mut App) {
-    let added = cx.text_system().add_fonts(vec![std::borrow::Cow::Borrowed(MONO_REGULAR), std::borrow::Cow::Borrowed(MONO_BOLD)]);
-    let loaded = added.is_ok() && cx.text_system().all_font_names().iter().any(|n| n == MONO);
-    match added { Ok(()) => eprintln!("GPUI_LOG {{\"font\":\"{MONO}\",\"loaded\":{loaded}}}"), Err(e) => eprintln!("GPUI_LOG {{\"font\":\"{MONO}\",\"loaded\":false,\"error\":{}}}", Value::String(format!("{e:#}"))) }
+    let mut sets: Vec<(&str, Vec<&'static [u8]>)> = vec![(MONO, vec![MONO_REGULAR, MONO_BOLD])];
+    if !CJK_FACES.is_empty() { sets.push((CJK, CJK_FACES.to_vec())); }
+    for (family, faces) in sets {
+        let added = cx.text_system().add_fonts(faces.into_iter().map(std::borrow::Cow::Borrowed).collect());
+        let loaded = added.is_ok() && cx.text_system().all_font_names().iter().any(|n| n == family);
+        match added { Ok(()) => eprintln!("GPUI_LOG {{\"font\":\"{family}\",\"loaded\":{loaded}}}"), Err(e) => eprintln!("GPUI_LOG {{\"font\":\"{family}\",\"loaded\":false,\"error\":{}}}", Value::String(format!("{e:#}"))) }
+    }
 }
-/// JetBrains Mono with ligatures (calt) off; CJK and anything it lacks falls back to the system font.
+/// JetBrains Mono with ligatures (calt) off; CJK and anything it lacks falls back (on Linux to the bundled Noto Sans CJK JP when nothing installed has it).
 pub fn mono_font() -> Font {
     Font { family: MONO.into(), features: FontFeatures::disable_ligatures(), fallbacks: None, weight: FontWeight::NORMAL, style: FontStyle::Normal }
 }
@@ -418,5 +430,46 @@ mod generated_assets_tests {
         let missing: Vec<_> = used.iter().filter(|n| icons.get(n.as_str()).is_none()).collect();
         assert!(missing.is_empty(), "icons the client names but assets/icons.json lacks: {missing:?}");
         let rigs = std::fs::read_dir(root.join("cat-rigs")).expect("assets/cat-rigs").count(); assert_eq!(rigs, 72 * 8, "a rig for every look and mood");
+    }
+}
+
+#[cfg(test)]
+mod cjk_font_tests {
+    /// The characters a font's cmap maps (format 4 and 12 subtables), read straight from the OpenType tables.
+    fn mapped(font: &[u8]) -> std::collections::HashSet<u32> {
+        let u16at = |o: usize| u16::from_be_bytes([font[o], font[o + 1]]) as usize;
+        let u32at = |o: usize| u32::from_be_bytes([font[o], font[o + 1], font[o + 2], font[o + 3]]) as usize;
+        let cmap = (0..u16at(4)).map(|i| 12 + 16 * i).find(|&r| &font[r..r + 4] == b"cmap").map(|r| u32at(r + 8)).expect("a cmap table");
+        let mut out = std::collections::HashSet::new();
+        for i in 0..u16at(cmap + 2) {
+            let st = cmap + u32at(cmap + 4 + 8 * i + 4);
+            match u16at(st) {
+                4 => { let n = u16at(st + 6) / 2; let (ends, starts) = (st + 14, st + 16 + 2 * n); let (deltas, ranges) = (starts + 2 * n, starts + 4 * n);
+                    for s in 0..n { for c in u16at(starts + 2 * s)..=u16at(ends + 2 * s) { if c == 0xffff { continue }
+                        let ro = u16at(ranges + 2 * s);
+                        let g = if ro == 0 { (c + u16at(deltas + 2 * s)) & 0xffff } else { let gi = u16at(ranges + 2 * s + ro + 2 * (c - u16at(starts + 2 * s))); if gi == 0 { 0 } else { (gi + u16at(deltas + 2 * s)) & 0xffff } };
+                        if g != 0 { out.insert(c as u32); } } } }
+                12 => { for g in 0..u32at(st + 12) { let o = st + 16 + 12 * g; for c in u32at(o)..=u32at(o + 4) { out.insert(c as u32); } } }
+                _ => {}
+            }
+        }
+        out
+    }
+    /// Japanese script: CJK symbols and punctuation, kana, the unified ideographs, full- and half-width forms. Arrows and other symbols in the
+    /// catalog are not in Noto Sans CJK and fall back to the other fonts as before.
+    fn is_cjk(c: char) -> bool { matches!(c as u32, 0x3000..=0x30ff | 0x3400..=0x4dbf | 0x4e00..=0x9fff | 0xf900..=0xfaff | 0xff00..=0xffef) }
+    /// The Linux client's bundled Japanese font (subset by scripts/fetch-cjk-font.sh) has every character the Japanese catalog draws, and JIS
+    /// level 1 kanji and the kana: a machine with no CJK font would show boxes for any it lacked. A failure: run scripts/fetch-cjk-font.sh again.
+    #[test] fn bundled_cjk_font_covers_the_catalog() {
+        let dir = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../assets/fonts/noto-sans-cjk-jp");
+        for face in ["NotoSansCJKjp-Regular.subset.otf", "NotoSansCJKjp-Bold.subset.otf"] {
+            let font = std::fs::read(dir.join(face)).expect(face);
+            let has = mapped(&font);
+            let missing: String = crate::i18n::JA_MSG.chars().filter(|c| is_cjk(*c) && !has.contains(&(*c as u32))).collect::<std::collections::BTreeSet<_>>().into_iter().collect();
+            assert!(missing.is_empty(), "{face} lacks the Japanese {missing:?} of i18n/ja.msg: run scripts/fetch-cjk-font.sh");
+            for c in "あいうえおアイウエオ日本語亜唖娃阿哀愛挨姶逢葵茜穐悪握渥旭葦芦鯵梓圧斡扱宛姐虻飴絢綾鮎或粟袷安庵按暗案闇鞍杏腕湾" .chars() { assert!(has.contains(&(c as u32)), "{face} lacks {c}"); }
+        }
+        assert!(std::fs::read_to_string(dir.join("OFL.txt")).unwrap().contains("SIL OPEN FONT LICENSE"), "OFL.txt holds the licence");
+        #[cfg(target_os = "linux")] assert_eq!(super::CJK_FACES.len(), 2, "the Linux client compiles both faces in");
     }
 }

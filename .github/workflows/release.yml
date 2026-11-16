@@ -226,7 +226,9 @@ jobs:
           # everything a dev cut has (scripts/dev-build.sh), or the job fails: a release must not lose a feature a dev cut showed working
           need="backplane-hub backplane-gpui backplane backplane-voice silero_vad.onnx backplane-browser backplane-step2glb COMMIT assets/icons.json assets/cat-rigs kistack/REVISION"
           need="$need licenses/README.md licenses/LICENSE licenses/bun/NOTICE.md licenses/bun/LICENSE.md licenses/playwright-core/NOTICE licenses/step2glb/NOTICE.md licenses/silero-vad/LICENSE licenses/gpui/LICENSE-APACHE licenses/rust/hub.txt licenses/rust/client.txt licenses/rust/guard.txt licenses/rust/voice.txt"
-          case "${{ matrix.target }}" in linux-*) need="$need libcef.so icudtl.dat resources.pak chrome_100_percent.pak v8_context_snapshot.bin locales/en-US.pak licenses/cef/LICENSE.txt licenses/cef/CREDITS.html";;
+          case "${{ matrix.target }}" in linux-*) need="$need libcef.so icudtl.dat resources.pak chrome_100_percent.pak v8_context_snapshot.bin locales/en-US.pak licenses/cef/LICENSE.txt licenses/cef/CREDITS.html licenses/fonts/noto-sans-cjk-jp/OFL.txt"
+            # the Japanese font compiled into the Linux client (art.rs CJK_FACES): a machine with no CJK font draws Japanese with it
+            grep -aq NotoSansCJKjp-Bold $d/backplane-gpui || { echo "::error::backplane-gpui lacks the bundled Noto Sans CJK JP"; exit 1; };;
             darwin-*) need="$need licenses/cef/LICENSE.txt licenses/cef/CREDITS.html";; esac
           for f in $need; do [ -e "$d/$f" ] || { echo "::error::$f missing from the ${{ matrix.target }} archive"; exit 1; }; done
           # macOS's engine has spaces in its names: checked one by one

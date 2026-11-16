@@ -28,5 +28,7 @@ Tests that keep it so (`native/gpui/src/i18n_scan.rs`):
   `/* i18n-ok: why */` at the start of its line. `PENDING` only shrinks: a lane removes its files when it has moved them.
 
 Rig: `BACKPLANE_GPUI_I18N_MISSES=<file>` appends each English text `tr` could not find (in Japanese) once; walk the screens and read it.
-The font is Noto Sans Mono CJK JP by default (`local::FONTS`), with the system's CJK fallback behind JetBrains Mono, so Japanese needs no bundled font on
-Linux (fontconfig), macOS (Hiragino) or Windows (Yu Gothic / Meiryo); a Linux machine with no CJK font shows tofu: the packages recommend fonts-noto-cjk.
+The font is Noto Sans Mono CJK JP by default (`local::FONTS`), with the system's CJK fallback behind JetBrains Mono: Linux (fontconfig), macOS (Hiragino),
+Windows (Yu Gothic / Meiryo). The Linux client also compiles in Noto Sans CJK JP Regular and Bold, subset to JIS X 0208 and every character of `ja.msg`
+(`assets/fonts/noto-sans-cjk-jp`, `scripts/fetch-cjk-font.sh`, `art::load_fonts`), so a Linux machine with no CJK font still draws Japanese; an installed one comes first.
+A new character in `ja.msg` outside JIS X 0208: run `scripts/fetch-cjk-font.sh` again (the `bundled_cjk_font_covers_the_catalog` test fails until then).

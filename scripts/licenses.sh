@@ -40,6 +40,7 @@ esac
 put silero-vad "$src/silero-vad/LICENSE"
 put voice-engine "$src/voice-engine/NOTICE.md" "$src/voice-engine/sherpa-onnx-LICENSE" "$src/voice-engine/onnxruntime-LICENSE" "$src/voice-engine/CC-BY-4.0.txt"
 put fonts "$root/assets/fonts/jetbrains-mono/OFL.txt" "$root/assets/fonts/SPLEEN-LICENSE"
+put fonts/noto-sans-cjk-jp "$root/assets/fonts/noto-sans-cjk-jp/OFL.txt" "$root/assets/fonts/noto-sans-cjk-jp/SOURCE.txt"   # compiled into the Linux client only; shipped everywhere, it is small
 put icons "$src/icons/lucide-LICENSE"; cp "$root/assets/providers/NOTICE.md" "$L/icons/simple-icons.md"
 put gpui "$root/native/gpui/vendor/gpui/LICENSE-APACHE" "$root/native/gpui/vendor/gpui/PATCH.md"
 

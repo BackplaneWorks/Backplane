@@ -16,6 +16,7 @@ notices for everything else in this archive, one folder per component.
 | `silero-vad/` | Silero VAD, the model dictation finds speech with | silero_vad.onnx | MIT |
 | `voice-engine/` | Dictation's local engine (sherpa-onnx, ONNX Runtime, the Parakeet models): downloaded when you turn it on, not shipped | not in the archive | Apache-2.0, MIT, CC-BY-4.0 |
 | `fonts/` | JetBrains Mono (`OFL.txt`), Spleen (`SPLEEN-LICENSE`) | assets/fonts, and compiled into backplane-gpui | OFL-1.1, BSD-2-Clause |
+| `fonts/noto-sans-cjk-jp/` | Noto Sans CJK JP, subset to JIS X 0208 and the catalog's Japanese (`OFL.txt`, `SOURCE.txt`) | assets/fonts/noto-sans-cjk-jp, compiled into the Linux backplane-gpui | OFL-1.1 |
 | `icons/` | Lucide's icons (`lucide-LICENSE`), drawn from assets/icons.json; simple-icons' provider marks (`simple-icons.md`) | assets/icons.json, assets/providers | ISC (and MIT for the Feather icons); CC0-1.0 |
 
 Settings → About in the desktop client shows where this folder is on your machine.
