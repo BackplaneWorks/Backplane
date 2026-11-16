@@ -379,3 +379,49 @@ in two. Two causes, neither in KiCad's undo:
    without actors); the fork drops the Raise when embedded (bp.13 batch 6, 532da6fbf3). The idle step above is the regression test.
 How it was found: client and hub builds logging every pane tab change with its cause and every KiCad event (diagnostic only, not landed);
 with them, 9 of 9 redo passes on the 46cd43ec0 and main hubs (no check reached KiCad in those runs) and the switch caught on 015eb3206.
+
+## bp.13 batch 9 (6a227fdd28) against batch 8 (0050212e2b), 2026-11-16
+
+Both runtimes in one sitting, the same client and hub (6cbac57ea, lane B's strip fix: no run went to Full screen), GPU display, both
+boards, every journey, then the plan copies (found through `SOURCE_COMMIT` since 5161a5247: release CI runtimes have no `BACKPLANE_COMMIT`,
+and the plan copies had been skipped without a word). One run per runtime and board: a difference under ~30 % is noise. Budget misses
+56 -> 54 (strict 2 -> 2, both `switch_shows_the_asked_frame`).
+
+| measure (Hubble / Collar) | batch 8 | batch 9 | budget |
+|---|---|---|---|
+| reopen, first | 13.7 / 26.1 ms | 8.2 / 18.7 ms | 300 |
+| pan 10 s p99 / zoom 10 s p99 | 19.7 / 19.6; 21.2 / 18.4 | 19.9 / 19.8; 18.8 / 18.7 | 25 |
+| schematic pan 6 s: max, p50 | 1468, 99 / 1268, 68 ms | 1467, 99 / 1267, 67 ms | 50 |
+| pan during in-editor DRC: max, frames > 50 ms | 108, 59 / 68, 42 | 108, 59 / 67, 36 | 50, 0 |
+| in-editor DRC / ERC tab | 14 / 71; - / 33 ms | 175 / 127; - / 127 ms | - |
+| kicad-cli DRC / ERC | 903 / 2303; 767 / 2180 ms | 891 / 2302; 537 / 1608 ms | - |
+| Ctrl+E footprint editor (Collar) | 1467 ms | 742 ms | 1000 |
+| Plot dialog open | 322 / 540 ms | 306 / 316 ms | 300 |
+| management panel open (Collar, 5 panels) | 106-207 ms | 101-114 ms | 100 |
+| thread back from the sidebar | 84-90 / 89-92 ms | 104-106 / 64-96 ms | 50 |
+| cross-probe C32 (Hubble) | 1385 ms | 1195 ms | 100 |
+| first 3D | 1096 / 1257 ms | 1157 / 1226 ms | first-time |
+| KiCad RSS peak | 5.15 / 4.45 GB | 5.33 / 4.56 GB | - |
+| plan: approve (Collar), layer to plane (Collar) | 937, 923 ms | 831, 1159 ms | 300 |
+
+Undo/redo on batch 9 (undo journey alone, Collar, 5 runs, idle step): 5/5, a DRC ran in KiCad each time, 0 show requests to ignore,
+0 unrequested tab changes. In the matrix the undo journey did not run (the ERC dialog below covered its click point).
+
+Misses, ranked:
+1. **KiCad's ERC dialog stays up** (one item, lane B on it): the tools journey closes it with Escape, the editors journey brings it back
+   and Escape no longer closes it. Behind it: `switch_shows_the_asked_frame` (sch_back_board, comment_board), `dialogs`, the comment
+   window not opening twice (comment_window1/2) and the matrix's undo journey. Both batches, both boards, main's client too.
+2. **Hubble: the editor is lost after the edit journey** (both batches; Collar not): the strip's tabs and Edit are no longer drawn, Delete
+   and Ctrl+Z change nothing, the Board tab shows no KiCad frame (mgmt_board), and the editor is reopened after the panels
+   (lost_after_mgmt). Owner: lane B (client).
+3. **The schematic pans at ~10 frames a second** (p50 67-99 ms, a 1.3-1.5 s stall), unchanged on both batches. Owner: fork.
+4. **Panning during an in-editor DRC stutters** (36-59 frames > 50 ms), unchanged: the fork's known parity-fetch silence. Owner: fork.
+5. **Plan editing applies nothing** on either board or batch: corridor click, vertex drags, widen/narrow and approve/reject all ok 0;
+   the harness calibrates only in plan view. Owner: lane A to rule out the harness first, then the fork.
+6. **In-editor DRC/ERC tab 127-175 ms on batch 9** (14-71 on batch 8). One run: to confirm before it goes to the fork.
+7. **Management panels 100-145 ms and thread back from the sidebar ~100 ms** (budgets 100 and 50). Owner: lane B.
+8. **Hubble cross-probe of C32 1.2 s, Hubble drag 348 ms frame, KiCad RSS 5.3 GB.** Owner: fork.
+9. **Reserved keys after Escape** (ok 0, both) and **Hubble's marker click** (ok 0). Owner: lane B.
+
+Better on batch 9: Collar's kicad-cli DRC/ERC 30 % faster (parity loads like the editor), Ctrl+E's footprint editor 1467 -> 742 ms,
+the Plot dialog 540 -> 316 ms, reopen 25-40 % faster.
