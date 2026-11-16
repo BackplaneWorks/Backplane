@@ -4238,6 +4238,9 @@ gpui.mgmt.plan.elsewhere	A routing plan for {board} awaits your approval	{board}
 gpui.mgmt.plan.openboard	Open board	基板を開く
 gpui.mgmt.plan.noboard	No routing plan for this board.	この基板の配線計画はありません。
 gpui.mgmt.plan.drawn	The plan's corridors and planes are drawn on the board while this panel is open. Close it to hide them.	計画の配線経路とプレーンは、このパネルを開いている間だけ基板上に表示されます。閉じると消えます。
+gpui.pick.planonce	Plan first, this turn only	このターンだけ先に計画
+gpui.pick.planonce.note	Claude proposes a plan and waits for Implement; the thread goes back to its own mode after.	Claude が計画を提案し、「実装」を待ちます。その後スレッドは元のモードに戻ります。
+hub.view.board.unlisted	That board is not in this project's list yet.	その基板はまだこのプロジェクトの一覧にありません。
 gpui.mgmt.bom.stocknote	Stock and prices come from one distributor's catalogue. To check others, add their API keys in Settings › API keys and ask your agent.	在庫と価格は一つの販売店のカタログから取得しています。他の販売店を確認するには、設定 › API キーでその API キーを追加し、エージェントに頼んでください。
 hub.order.pick.more	More parts of the project (optional)	プロジェクトの他の部品（任意）
 hub.order.pick.phone	Answer "all", or say what to leave out and any parts to add.	「all」と答えるか、外すものと追加する部品を書いてください。

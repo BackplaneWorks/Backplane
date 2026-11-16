@@ -73,7 +73,7 @@ impl Commands {
 
 impl RpcHandler for Commands {
     fn methods(&self) -> &'static [&'static str] { &["bots.give", "thread.pin", "thread.unpin", "thread.settle", "thread.unsettle", "thread.archive", "thread.unarchive", "thread.rename", "thread.delete", "thread.snooze",
-        "thread.reorder", "thread.detach", "thread.reparent", "thread.create", "thread.modes", "thread.effort", "thread.provider", "accounts.select", "accounts.move_all", "accounts.choose", "fallback.switch", "thread.fork", "thread.back", "project.remove", "project.rename",
+        "thread.reorder", "thread.detach", "thread.reparent", "thread.create", "thread.modes", "thread.planonce", "thread.effort", "thread.provider", "accounts.select", "accounts.move_all", "accounts.choose", "fallback.switch", "thread.fork", "thread.back", "project.remove", "project.rename",
         "project.reorder", "project.move", "project.add", "project.new", "project.create", "project.start", "project.home", "todos.edit", "queue.edit", "queue.remove", "queue.move", "queue.steer", "queue.resume", "order.buy", "fs.list", "fs.mkdir", "fs.find"] }
     fn call<'a>(&'a self, hub: &'a Arc<Hub>, who: &'a Caller, id: &'a Value, method: &'a str, p: &'a Value) -> Fut<'a, Vec<Value>> {
         Box::pin(async move {
