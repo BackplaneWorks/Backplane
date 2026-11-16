@@ -15,7 +15,15 @@ IPC, DRV, RPC = os.environ["IPC_PY"], os.environ["DRIVER_PY"], os.environ["HUB_R
 RT, SAMP = os.path.join(LIB, "rt_input.py"), os.path.join(LIB, "pane_sampler.py")
 HPORT = os.environ["HPORT"]
 now = lambda: round(time.time() * 1000, 1)
-EVENTS, RESULTS, DIALOGS = [], {}, []
+# Each measure's clock starts at the event that acts: a key's press, a control's press when it acts there (the editor's tabs, the
+# management panels' tabs), its release when it acts there (most of the client's controls: GPUI's on_click; the harness holds a click
+# 50 ms, which a measure from the press counted as the control's), KiCad's canvas's press. The event is printed with the measure (`from`).
+LAST_FROM = ["press"]
+class Events(list):
+    def append(self, e):
+        if e.get("kind") == "switch": e.setdefault("from", LAST_FROM[0])
+        super().append(e)
+EVENTS, RESULTS, DIALOGS = Events(), {}, []
 
 def sh(*a, timeout=60):
     try: return subprocess.run([str(x) for x in a], capture_output=True, text=True, timeout=timeout).stdout
@@ -25,7 +33,9 @@ def jl(text):
         try: return json.loads(l)
         except Exception: pass
     return {}
-def rt(*a): return jl(sh("python3", RT, *a))
+def rt(*a):
+    LAST_FROM[0] = "key" if a and a[0] == "key" else "press"
+    return jl(sh("python3", RT, *a))
 REFUSED = []
 def run_action(act, busy_retries=None):
     """RunAction ACT: "ok" only when KiCad answered RAS_OK; "busy" for AS_BUSY (KiCad's task gate: bp.13 answers every gated call so while
@@ -103,7 +113,12 @@ def click_ctl(cid):
         print(f"DIAG {cid}: no rect, clicking its measured place", flush=True) if cid not in WARNED else None; WARNED.add(cid)
         return rt("click", PANE["x"] + TAB_AT[cid.split(":", 1)[1]], PANE["y"] - 15).get("t0")
     if not r: print(f"DIAG no control {cid}", flush=True); return None
-    return rt("click", GX + r["x"] + r["w"] / 2, GY + r["y"] + r["h"] / 2).get("t0")
+    c = rt("click", GX + r["x"] + r["w"] / 2, GY + r["y"] + r["h"] / 2)
+    if acts_on_press(cid): return c.get("t0")
+    LAST_FROM[0] = "release"; return c.get("t1") or c.get("t0")
+# the controls that act as the button goes down (the rest act on its release)
+def acts_on_press(cid):
+    return cid.startswith("kicad-tab:") or (re.fullmatch(r"mgmt:[a-z]+", cid) is not None and cid not in ("mgmt:right", "mgmt:bottom", "mgmt:left", "mgmt:close", "mgmt:shut"))
 def pane_now():
     """The pane as it is now: the widest KiCad frame mapped near the pane's top (Full size widens it); else PANE."""
     best = None
@@ -766,8 +781,8 @@ if "tools" in JOURNEYS and SOCK:
     gerb0 = set(glob.glob(os.path.join(PROJ_DIR, "**", "*.g*"), recursive=True))
     dialog_run("common.Control.plot", "Plot", "plot_gui", press_return=False)
     tab("SCH", "tools_sch", 1.5); rt("click", CX, PANE["y"] + PANE["h"] - 40); time.sleep(0.4)
-    dialog_run("eeschema.InspectionTool.runERC", "Electrical Rules Checker", "erc_gui")
-    tab("PCB", "tools_back", 1.2)
+    dialog_run("eeschema.InspectionTool.runERC", "Electrical Rules Checker", "erc_gui"); step("erc_escaped")
+    tab("PCB", "tools_back", 1.2); step("tools_board_tab")
     PAUSE.clear()
     cli = os.environ.get("KICAD_CLI") or ""
     sch = PCB[:-len(".kicad_pcb")] + ".kicad_sch"
@@ -915,18 +930,18 @@ elif "editors" in JOURNEYS and SOCK:
         rt("key", "Escape"); time.sleep(0.3); sel = ipc("select-items", SOCK, "pcb", ref, "0"); time.sleep(0.5)
     print(f"INFO editors: {ref} selected over the API ({sel.get('found')}), clicked; selection {ipc('selection', SOCK, 'pcb')}", flush=True)
     r = rt("key", "e", "ctrl")
-    a = editor_watch("editor_fp_ctrl_e", "FP", r["t0"])
+    a = editor_watch("editor_fp_ctrl_e", "FP", r["t0"]); step("ctrl_e_footprint_editor")
     evs = ipc("events", SOCK, str(ev0)).get("events", [])
     got = [{"type": ET_NAMES.get(e["type"], e["type"]), "kind": FK.get(e["frame"].get("kind")), "lib_id": e["frame"].get("lib_id")}
            for e in evs if e["type"] in ET_NAMES]
     RESULTS["editor_fp_ctrl_e"]["events"] = got
     print(f"INFO editors: KiCad's events after Ctrl+E: {got}", flush=True)
     RESULTS["editor_fp_from_board_ok"] = {"ms": None, "ok": int(bool(a["shown"] and a["lib_id"] and not a["new_windows"]))}
-    tab("PCB", "editors_back1", 1.5); shot("editors_back1")
+    tab("PCB", "editors_back1", 1.5); shot("editors_back1"); step("editors_board_tab")
     RESULTS["editor_fp_back_to_board"] = {"ms": None, "ok": int(editor_up() and not (kframes().get("FP") or {}).get("shown"))}
     # KiCad's own command (the PCB editor's toolbar button "Footprint Editor")
     t0 = now(); st = run_action("common.Control.showFootprintEditor")
-    b = editor_watch("editor_fp_action", "FP", t0); RESULTS["editor_fp_action"]["action_ok"] = int(st == "ok")
+    b = editor_watch("editor_fp_action", "FP", t0); RESULTS["editor_fp_action"]["action_ok"] = int(st == "ok"); step("show_footprint_editor_action")
     tab("PCB", "editors_back2", 1.5)
     # GerbView: the board's Gerbers and drill files from kicad-cli, as Backplane's mfg/ holds them
     cli = os.environ.get("KICAD_CLI") or ""; mfg = os.path.join(OUT, "mfg"); os.makedirs(mfg, exist_ok=True)
@@ -1641,12 +1656,13 @@ if "comment" in JOURNEYS and SOCK:
 shot("end_journeys")
 STOP.set()
 path = sampler_stop()
+FROM = {e["tag"]: e.get("from", "press") for e in EVENTS if e.get("kind") == "switch"}
 res = PRE + slow + analyze(EVENTS, path)
 for r in res:
     tag = r.pop("tag"); kind = r.pop("kind")
     if kind == "input": perf(tag, r.get("p99"), **{k: v for k, v in r.items() if k != "p99"})
     elif kind == "commit": perf(tag, r.get("first_change_ms"))
-    else: perf(tag, r.get("settled_ms"), **{k: r.get(k) for k in ("first_change_ms", "mid_frames", "blank_frames", "changes")})
+    else: perf(tag, r.get("settled_ms"), **{k: r.get(k) for k in ("first_change_ms", "mid_frames", "blank_frames", "changes")}, **{"from": FROM.get(tag, "press")})
 if MEM["samples"]:
     RESULTS["rss_peak_mb"] = {"ms": None, "mb": max(x[1] for x in MEM["samples"]), "hwm_mb": max(x[2] for x in MEM["samples"])}
     RESULTS["rss_end_mb"] = {"ms": None, "mb": MEM["samples"][-1][1]}

@@ -21,7 +21,7 @@ def main():
         for k in r["results"]:
             if k not in names: names.append(k)
     cols = list(runs)
-    print("| measure | " + " | ".join(cols) + " |"); print("|---" * (len(cols) + 1) + "|")
+    print("| measure | from | " + " | ".join(cols) + " |"); print("|---" * (len(cols) + 2) + "|")
     misses = []
     def cell(run, name):
         v = runs[run]["results"].get(name)
@@ -44,7 +44,9 @@ def main():
                     if not marked: s += " ✗✗" if hard else " ✗"; marked = True
                     misses.append((run, name, field, x, lim if low is None else low, what, hard))
         return s
-    for n in names: print(f"| {n} | " + " | ".join(cell(c, n) for c in cols) + " |")
+    # the event each measure's clock starts from (real_use_drive.py LAST_FROM: a key, a control's press or its release, KiCad's canvas's press)
+    def start(n): return next((runs[c]["results"][n].get("from") for c in cols if isinstance(runs[c]["results"].get(n), dict) and runs[c]["results"][n].get("from")), "")
+    for n in names: print(f"| {n} | {start(n)} | " + " | ".join(cell(c, n) for c in cols) + " |")
     for c in cols:
         for d in runs[c].get("dialogs", []): print(f"dialog {c}: {d['title']}")
     json.dump({"runs": runs, "misses": misses}, open(os.path.join(root, "summary.json"), "w"), indent=1)
