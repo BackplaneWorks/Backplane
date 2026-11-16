@@ -208,6 +208,10 @@ pub fn grab_escape(_top: u64, _on: bool) {}
 pub fn keep(_holder: u64) {}
 /// KiCad's dialogs are its own app's windows: a new one takes the keyboard by KiCad's activation, nothing for the client to hand over.
 pub fn take_new_dialogs() -> Vec<u64> { vec![] }
+/// A press over a KiCad dialog is that dialog's app's own on macOS (its window, not ours): nothing for the pane to tell apart.
+pub fn pointer_on_other_window(_w: u64) -> bool { false }
+/// Focus is app activation on macOS (focus, yield_to): there is no window focus of ours for the pane to keep.
+pub fn keep_focus(_top: u64) -> bool { false }
 pub fn activate(_w: u64) {}
 pub fn open_dialogs(_pid: u32) -> Vec<u64> { vec![] }
 /// The reserved chords KiCad sent through the hub (kicad_pane `set_info`), for the pane's event loop.
