@@ -1185,7 +1185,7 @@ if "plan" in JOURNEYS and SOCK:
             grp = next((g for g in pj.get("groups", []) if g.get("id") == cor.get("group")), {})
             # plan view off and on again before the click: with it, Collar's corridor click, drag and W/A/R all applied (batch 9, 560074768);
             # without it, the same click at the same point selected nothing. Why is open (the plan tool's state after the layer keys?).
-            action_toggle(); time.sleep(1.0); action_toggle(); time.sleep(1.2)
+            if os.environ.get("KEMBED_PLAN_NO_TOGGLE") != "1": action_toggle(); time.sleep(1.0); action_toggle(); time.sleep(1.2)
             shot("plan_band"); band = band_spot(os.path.join(OUT, "shots", "plan_band.png"), grp.get("color", ""))
             if band:  # the corridor as drawn (its group's colour, its label pill): clicked there, like embed_plan_person_e2e
                 print(f"INFO plan corridor {cor['id']} drawn in {grp.get('color')} at {band}; the calibration put it at {mx:.0f},{my:.0f}", flush=True)
