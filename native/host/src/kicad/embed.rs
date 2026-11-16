@@ -841,12 +841,16 @@ pub fn others_busy(sock: &str, quiet_ms: u64) -> bool {
 /// requests serialize cleanly on one socket connection and share its `kicad_token`.
 pub async fn gui_call(route: &GuiRoute, ty: &str, msg: Value) -> Value { gui_call_as(route, ty, msg, "").await }
 /// The same, as `client` (an agent's actor, `agent:<thread>`): the fork's co-editing attributes, groups and undoes its changes by it.
+/// The hub's commands that never change KiCad's selection: they do not make a later selection the hub's.
+const NEVER_SELECTS: &[&str] = &["SetAgentActivity", "SetHostMarkers", "RunChecks", "HideFrame", "AttachToParent", "Shutdown", "SaveDocument", "SetVisibleLayers", "SetActiveLayer"];
 pub async fn gui_call_as(route: &GuiRoute, ty: &str, msg: Value, client: &str) -> Value {
     // every request but the checks' own is counted, so an in-editor check never starts while another client waits (kicad/checkrun.rs)
     // a named client's (an agent, the person's edit from a panel or a phone) also holds checks a moment after it ends; the hub's own
     // unnamed reads (the live BOM's poll, every second) only while in flight
     struct Use(String, bool);
     impl Drop for Use { fn drop(&mut self) { if let Some(e) = gui_use().lock().unwrap().get_mut(&self.0) { e.0 = e.0.saturating_sub(1); if self.1 { e.1 = crate::hub::now_ms() } } } }
+    // a command of ours that can change KiCad's selection (any request but a read): what KiCad then selects is not the person's
+    if !super::ipc::is_read(ty) && !NEVER_SELECTS.iter().any(|n| ty.rsplit('.').next() == Some(*n)) { super::coedit::hub_command(&route.pro) }
     let named = !client.is_empty();
     let _use = (client != CHECKS_CLIENT).then(|| { let mut m = gui_use().lock().unwrap(); let e = m.entry(route.sock.clone()).or_default(); e.0 += 1; if named { e.1 = crate::hub::now_ms() } Use(route.sock.clone(), named) });
     if TASK_GATED.iter().any(|g| ty.rsplit('.').next() == Some(*g)) && has_task_gate(&route.sock) { return raw_gated(&route.tx, &route.sock, &route.desc, ty, msg, 30000, client, None).await }
@@ -2684,7 +2688,13 @@ fn spawn_fork_events_loop(me: mpsc::UnboundedSender<Msg>, pro: String, gen: u64,
                         if window != 0 && me.send(Msg::FrameDrawn { pro: pro.clone(), gen, window, drawn: false }).is_err() { return }
                     }
                     if ty == "ET_SELECTION_CHANGED" || ty_n == 14 {
-                        if let Some((kind, names)) = super::xprobe::selection_event(ev) { super::coedit::person_selected(&pro, &kind.to_lowercase(), names.to_json()); }
+                        if let Some((kind, names)) = super::xprobe::selection_event(ev) {
+                            // BACKPLANE_TEST_SELECTION_DELAY_MS (tests): the selection reaches the person's record that late, as on a slow box
+                            let delay = std::env::var("BACKPLANE_TEST_SELECTION_DELAY_MS").ok().and_then(|v| v.parse::<u64>().ok()).unwrap_or(0);
+                            let (p2, k2, n2) = (pro.clone(), kind.to_lowercase(), names.to_json());
+                            if delay > 0 { tokio::spawn(async move { tokio::time::sleep(std::time::Duration::from_millis(delay)).await; super::coedit::person_selected(&p2, &k2, n2) }); }
+                            else { super::coedit::person_selected(&p2, &k2, n2); }
+                        }
                         super::xprobe::kicad_selected(&pro, ev); continue
                     }
                     if super::coedit::on_edited(&pro, ev) { continue }
@@ -2879,7 +2889,7 @@ impl RpcHandler for EmbedRpc {
                 let _ = actor_tx.send(Msg::ClientDialogs { pro: resolved.pro, open });
                 return ok_reply(id, json!({}))
             }
-            if method == "editor.kicad.touched" { unsaved_update(&resolved.pro, |u| u.touched()); super::checkrun::person_touched(&resolved.pro); return ok_reply(id, json!({})) }
+            if method == "editor.kicad.touched" { unsaved_update(&resolved.pro, |u| u.touched()); super::checkrun::person_touched(&resolved.pro); super::coedit::person_input(&resolved.pro); return ok_reply(id, json!({})) }
             let (tx, rx) = oneshot::channel();
             let sent = match method {
                 "editor.kicad.attach" => {
