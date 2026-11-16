@@ -37,6 +37,8 @@ fn last_of(inner: &Mutex<Inner>, key: &str) -> u64 { inner.lock().unwrap().refre
 fn now_s() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs()) }
 fn now_ms() -> u64 { std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_millis() as u64) }
 /// A name shown to the person: no control characters, at most 64, trimmed.
+/// The name an account added with none has (Settings › Accounts' Add with the box left empty) until its sign-in says who it is: then it is the email.
+pub const UNNAMED: &str = "New account";
 pub fn label(v: &str) -> String { v.chars().filter(|c| !c.is_control()).take(64).collect::<String>().trim().to_string() }
 pub fn valid_id(s: &str) -> bool { s.len() == 36 && s.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase() || b == b'-') }
 pub fn new_id() -> String {
@@ -813,6 +815,8 @@ impl Accounts {
             let sync = from.is_some() || r["kind"] == SYNC;
             let provider = if from.is_some() { "claude" } else { r["provider"].as_str().unwrap_or("") };
             let lab = match &from { Some(f) => label(&format!("{} sync", f.label)), None => label(r["label"].as_str().unwrap_or("")) };
+            // `unnamed`: no name was given; it is named after its email once signed in (`finish`)
+            let lab = if lab.is_empty() && r["unnamed"] == true && from.is_none() { UNNAMED.to_string() } else { lab };
             let identity = match &from { Some(f) => json!({"email":f.identity["email"],"plan":f.identity["plan"],"auth":"oauth_token"}), None if sync => json!({"email":label(r["email"].as_str().unwrap_or("")),"plan":"","auth":"oauth_token"}), None => json!({}) };
             let p = {
                 let mut g = self.inner.lock().unwrap();
@@ -972,7 +976,11 @@ impl Accounts {
                 let old_store = self.profile(&a.profile).map(|p| p.store).unwrap_or_default();
                 // one lock: the profile takes the new store and the attempt is done in the same step, so a cancel cannot land between and put the old state back over it
                 let saved = self.mutate_save(|g| {
-                    if let Some(slot) = g.profiles.iter_mut().find(|p| p.id == a.profile) { *slot = np.clone(); slot.store = a.store.clone(); }
+                    if let Some(slot) = g.profiles.iter_mut().find(|p| p.id == a.profile) {
+                        *slot = np.clone(); slot.store = a.store.clone();
+                        let email = label(slot.identity["email"].as_str().unwrap_or(""));
+                        if slot.label == UNNAMED && !email.is_empty() { slot.label = email }
+                    }
                     g.jobs.remove(&a.profile); g.cmds.remove(aid);
                     if let Some(att) = g.attempts.iter_mut().find(|x| x.id == aid) { att.state = "done".into(); att.url.clear(); att.user_code.clear(); }
                 });
@@ -1672,6 +1680,25 @@ for l in sys.stdin:
         for _ in 0..12 { add(&b, "codex", "c").await; } assert_eq!(b.request(&json!({"op":"add","provider":"codex","label":"one more"})).await["error"], GENERIC, "at most 12");
         std::fs::set_permissions(root.join("profiles.json"), std::fs::Permissions::from_mode(0o644)).unwrap();
         let c = mgr(&h, &sd); assert_eq!(c.snapshot()["error"], "The private account registry could not be verified."); assert_eq!(c.request(&json!({"op":"list"})).await["error"], GENERIC);
+        let _ = std::fs::remove_dir_all(&h);
+    }
+    #[tokio::test(flavor = "multi_thread")] async fn an_account_added_with_no_name_is_named_after_its_email_once_signed_in() {
+        let _l = ENV.lock().unwrap_or_else(|e| e.into_inner());
+        let (h, sd) = dirs("unnamed"); let a = mgr(&h, &sd);
+        assert_eq!(a.request(&json!({"op":"add","provider":"claude","label":""})).await["error"], GENERIC, "a blank name is still refused unless it asks to be named later");
+        let s = a.request(&json!({"op":"add","provider":"claude","label":"","unnamed":true})).await; assert_eq!(s["error"], "", "{s}");
+        let id = s["made"].as_str().unwrap().to_string(); assert_eq!(prof(&s, &id)["label"], UNNAMED);
+        assert_eq!(a.request(&json!({"op":"login","profile":id})).await["error"], "");
+        let s = until(&a, |s| s["attempts"][0]["state"] == "waiting").await; let aid = s["attempts"][0]["id"].as_str().unwrap().to_string();
+        assert_eq!(a.request(&json!({"op":"respond","profile":id,"attempt":aid,"code":"CODE#STATE123"})).await["error"], "");
+        let s = until(&a, |s| s["attempts"][0]["state"] == "done").await;
+        assert_eq!(prof(&s, &id)["label"], "a@example.com", "named after who signed in");
+        // a name the person gave is kept
+        let w = add(&a, "claude", "Work").await; a.request(&json!({"op":"login","profile":w})).await;
+        let s = until(&a, |s| s["attempts"].as_array().map_or(false, |x| x.iter().any(|t| t["profile"] == w.as_str() && t["state"] == "waiting"))).await;
+        let wa = s["attempts"].as_array().unwrap().iter().find(|t| t["profile"] == w.as_str()).unwrap()["id"].as_str().unwrap().to_string();
+        a.request(&json!({"op":"respond","profile":w,"attempt":wa,"code":"CODE#STATE123"})).await;
+        let s = until(&a, |s| prof(s, &w)["state"] == "connected").await; assert_eq!(prof(&s, &w)["label"], "Work");
         let _ = std::fs::remove_dir_all(&h);
     }
     #[tokio::test(flavor = "multi_thread")] async fn a_claude_sign_in_shows_its_link_takes_the_pasted_code_and_connects_a_verified_account() {

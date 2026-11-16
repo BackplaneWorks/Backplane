@@ -57,6 +57,8 @@ pub fn press(this: &mut Backplane, b: &settings::Btn, cx: &mut Context<Backplane
     match (b.action.as_str(), b.value.as_str()) {
         ("copy", v) => { cx.write_to_clipboard(ClipboardItem::new_string(v.to_string())); true }
         ("ob-home", _) => { crate::launch::forget(); if let Ok(me) = std::env::current_exe() { let _ = std::process::Command::new(me).args(std::env::args().skip(1)).spawn(); } cx.quit(); true }
+        // Connect: the hub signs in at once (or uses the login already there); the press still goes on, so the step shows the account's card
+        ("ob-connect", v @ ("claude" | "codex")) => { super::accounts::connect(this, v); false }
         ("ob-try", "palette") => { let _ = this.tx.try_send(settings::press(b)); this.palette_open(cx); true }
         _ => false,
     }

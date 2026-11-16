@@ -313,7 +313,8 @@ fn agent_row(f: &Facts, a: &Agent) -> Value {
     match a.id {
         "claude" | "codex" if f.signed(a.id) => {
             let who = if !s(c, "who").is_empty() { s(c, "who").to_string() } else { names.join(", ") };
-            row(a.name, &if who.is_empty() { format!("{at} Connected.") } else { format!("{at} Connected as {who}.") }, vec![btn("Add another", "ob-connect", a.id, false)])
+            // one account is all setup needs: another, named one is added in Settings › Accounts
+            row(a.name, &if who.is_empty() { format!("{at} Connected.") } else { format!("{at} Connected as {who}.") }, vec![])
         }
         "claude" | "codex" => row(a.name, &format!("{at} Not connected."), vec![btn("Connect", "ob-connect", a.id, true)]),
         // the others sign in with their own command, which Backplane cannot check
@@ -457,9 +458,11 @@ fn tools_with(f: &Facts, st: &State, session: &Value, pkg: Option<&crate::files:
     Step { id: "tools", group: "", title: "Design tools".into(), body, rows, choices: vec![], panel: String::new(), done: kd && fd, task: true, accept: false }
 }
 
+/// What the uberbot is, in one line: said where it is first named (setup's step 4, Settings › Machines).
+pub const UBERBOT: &str = "Your uberbot is the assistant you talk to first. It answers you, starts and follows your threads and bots across projects and machines, and keeps your reminders and phone alerts going.";
 /// Step 4. The frame is this file's; its rows and presses are present/onboard_alwayson.rs's.
 fn alwayson(f: &Facts, session: &Value, c: &Client) -> Step {
-    let body = "Always-on keeps your uberbot, reminders, bots and phone alerts running while this computer sleeps. Hardware and code still run here.".to_string();
+    let body = format!("{} Always-on keeps your uberbot, reminders, bots and phone alerts running while this computer sleeps. Hardware and code still run here.", UBERBOT);
     let rows = super::onboard_alwayson::rows(f, session, c);
     Step { id: "alwayson", group: "", title: "Where your uberbot lives".into(), body, rows, choices: vec![], panel: String::new(), done: super::onboard_alwayson::done(f), task: true, accept: true }
 }
@@ -793,6 +796,7 @@ mod tests {
         let p = at(&s0, "agents", &i, &desk());
         let cl = row_of(&p, "Claude Code"); assert_eq!(cl["buttons"][0]["action"], "ob-connect"); assert!(cl["note"].as_str().unwrap().contains("Not connected"));
         assert!(row_of(&p, "Codex")["note"].as_str().unwrap().contains("Connected as Work"));
+        assert_eq!(row_of(&p, "Codex")["buttons"], json!([]), "no Add another: a second, named account is Settings › Accounts' alone");
         assert!(row_of(&p, "Grok Build")["note"].as_str().unwrap().contains("grok login")); assert_eq!(row_of(&p, "Grok Build")["buttons"][0]["value"], "grok login");
         assert_eq!(p["state"], "done", "one agent signed in");
         c["agents"]["claude"]["signed"] = json!("yes"); c["agents"]["claude"]["who"] = json!("a@b.c");
@@ -920,7 +924,8 @@ mod tests {
         let (s0, i) = (cst(blank(), &[]), info("linux"));
         let p = at(&s0, "alwayson", &i, &desk());
         assert_eq!(p["title"], "Where your uberbot lives"); assert_eq!(p["next"], "Next", "the preselected choice is an answer");
-        assert!(p["body"].as_str().unwrap().contains("while this computer sleeps"));
+        assert!(p["body"].as_str().unwrap().starts_with("Your uberbot is the assistant you talk to first.") && p["body"].as_str().unwrap().contains("while this computer sleeps"));
+        assert_ne!(p["state"], "done", "not done before a choice is saved: a new install showed it ticked before it was seen");
         let labels: Vec<String> = p["rows"].as_array().unwrap().iter().map(|r| s_(r, "label")).collect();
         for l in ["Stay on this computer", "An always-on Boat", "Another machine of yours"] { assert!(labels.contains(&l.to_string()), "{l}"); }
         assert_eq!(row_of(&p, "Stay on this computer")["buttons"][0]["on"], true);

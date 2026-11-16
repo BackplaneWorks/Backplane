@@ -16,10 +16,12 @@ pub const CHOICE: &str = "alwayson.choice";
 /// The three options, in order: id, label, what it means.
 pub const OPTIONS: &[(&str, &str, &str)] = &[
     ("here", "Stay on this computer", "Your uberbot runs here, while this computer is on. You can move it later in Settings, Machines."),
-    ("boat", "An always-on Boat", "A small server on your own Boat account runs your uberbot day and night. You pay Boat for it."),
+    ("boat", "An always-on Boat", "A Boat is a small cloud server on your own Boat account. Backplane sets it up and looks after it, and it keeps your uberbot, bots, reminders and phone alerts running while this computer is off or asleep. Boat bills you, not Backplane: plans start at $20 a month, and a small Boat running all month uses about $13 of that. You can move your uberbot back here and delete the Boat in Settings, Machines."),
     ("machine", "Another machine of yours", "A home server or a desktop that stays on runs your uberbot."),
 ];
 
+/// Boat's own page: what it is and its prices (checked Nov 16 2026: plans from $20 a month of server time; small $0.018 an hour, about $13 a month).
+pub const BOAT_PAGE: &str = "https://boat.dev";
 fn chosen<'a>(f: &'a Facts) -> &'a str { f.st.settings.get(CHOICE).map(String::as_str).unwrap_or("") }
 /// The option on screen: the one pressed in this view, else the one saved, else Stay on this computer (preselected).
 fn picked<'a>(f: &'a Facts, session: &'a Value) -> &'a str {
@@ -37,7 +39,10 @@ pub fn rows(f: &Facts, session: &Value, _c: &Client) -> Vec<Value> {
     let on = picked(f, session);
     let mut v = vec![];
     for (id, label, note) in OPTIONS {
-        v.push(row(label, note, vec![btn(if *id == on { "Chosen" } else { "Choose" }, "ob-aon-pick", id, *id == on)]));
+        let mut r = row(label, note, vec![btn(if *id == on { "Chosen" } else { "Choose" }, "ob-aon-pick", id, *id == on)]);
+        // what a Boat is, from Boat itself: a quiet link under its row, never a second button beside Choose
+        if *id == "boat" { r["sublink"] = json!({"label": "Learn more about Boat", "action": "open-url", "value": BOAT_PAGE}); }
+        v.push(r);
         if *id != on { continue }
         match *id {
             "boat" => v.extend(ar::boat_rows(&ar::view_of(f.info))),
@@ -50,9 +55,9 @@ pub fn rows(f: &Facts, session: &Value, _c: &Client) -> Vec<Value> {
     v
 }
 
-/// Stay on this computer is the default (D2): with nothing saved the step is done, as with a choice made. A Boat or another machine
-/// being set up does not undo that: the uberbot stays here until it is moved.
-pub fn done(_f: &Facts) -> bool { true }
+/// Done once a choice is saved. Stay on this computer is preselected (D2) and Next saves it, so the step is one press; but a step the person
+/// has not reached is not marked done (a new install showed it ticked and counted in "1 of 5 done" before it was ever seen).
+pub fn done(f: &Facts) -> bool { !chosen(f).is_empty() }
 
 /// Next: Stay on this computer is recorded at once; a Boat once it is made (make.rs records `boat`), another machine once one is picked
 /// (other.rs records `machine`). Until then Next leaves the step not done, so setup comes back to it.
@@ -97,7 +102,8 @@ mod tests {
         assert!(r.iter().any(|x| x["label"] == "Connect your Boat account"), "{r:?}");
         let r = rows(&f, &json!({"drafts": {"@ob.aon": "machine"}}), &c);
         assert!(r.iter().any(|x| x["label"] == "Install Backplane there"));
-        assert!(done(&f), "staying here is the default: nothing saved is done");
+        assert!(!done(&f), "nothing saved: not done yet (Stay on this computer is preselected, and Next saves it)");
+        let r = rows(&f, &json!({}), &c); assert!(r.iter().any(|x| x["label"] == "An always-on Boat" && x["sublink"]["value"] == BOAT_PAGE && x["note"].as_str().unwrap().contains("Boat bills you, not Backplane")), "what a Boat is, and a link to Boat");
         let r = rows(&f, &json!({}), &c); assert_eq!((r[0]["buttons"][0]["label"].as_str(), r[0]["buttons"][0]["on"].as_bool()), (Some("Chosen"), Some(true)), "the option in effect says Chosen");
     }
 }
