@@ -174,6 +174,18 @@ impl Backplane {
         let viewer = &self.data["thread"]["viewer"];
         if super::linkroute::shows_file(viewer["open"].as_str().unwrap_or(""), &super::viewer::shown_key(viewer), &stem) { self.screens.edit_after = None; self.kicad_edit(cx); }
     }
+    /// Copy image: the picture as its file is (a picture drawn from a smaller copy is fetched again, whole, as Save image as does), as one
+    /// image entry (other programs get image/png; the composer attaches it); the clipboard is written on the window's thread once the bytes are in hand.
+    fn copy_image(&mut self, cx: &mut Context<Self>) {
+        let (save, shown) = (self.screens.ctx_save.take(), self.screens.ctx_img.take());
+        let Some(save) = save else { if let Some(img) = shown { cx.write_to_clipboard(ClipboardItem::new_image(&img)); } return };
+        cx.spawn(async move |_, cx| {
+            let fallback = save.img.clone();
+            let img = cx.background_executor().spawn(async move { super::images::original(&save) }).await
+                .unwrap_or_else(|e| { eprintln!("copy image: {e}; copying the picture as drawn"); fallback });
+            let _ = cx.update(|cx| cx.write_to_clipboard(ClipboardItem::new_image(&img)));
+        }).detach();
+    }
     pub(crate) fn file_open(&mut self, path: &str, reveal: bool) {
         let thread = raw(self.data["thread"]["id"].as_str().unwrap_or("")).to_string();
         let _ = self.tx.try_send(Command::Rpc("file.open".into(), crate::screens::settings::Secret(serde_json::json!({"path": path, "thread": thread, "how": if reveal { "reveal" } else { "open" }})), "fileopen"));
@@ -204,7 +216,7 @@ impl Backplane {
             Some((a, v)) if a == LOCAL_URL_OPEN => { self.ctx_close(cx); cx.open_url(&v); return }
             Some((a, v)) if a == LOCAL_LINK_FILE || a == LOCAL_KICAD_EMBED => { self.ctx_close(cx); self.link_file(&v, a == LOCAL_KICAD_EMBED, cx); return }
             Some((a, _)) if a == LOCAL_SAVE_IMAGE => { self.ctx_close(cx); if let Some(s) = self.screens.ctx_save.take() { self.save_image(s, cx); } return }
-            Some((a, _)) if a == LOCAL_COPY_IMAGE => { self.ctx_close(cx); if let Some(img) = self.screens.ctx_img.take() { cx.write_to_clipboard(ClipboardItem::new_image(&img)); } return }
+            Some((a, _)) if a == LOCAL_COPY_IMAGE => { self.ctx_close(cx); self.copy_image(cx); return }
             // a second menu, where the first was (Move to group: the other groups, then New group…)
             Some((a, v)) if a == LOCAL_SUB => {
                 let items = sub_items(&v);

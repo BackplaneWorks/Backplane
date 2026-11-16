@@ -8,6 +8,18 @@ mod linux;
 #[cfg(target_os = "macos")]
 mod mac;
 
+/// What a copied item is offered to other programs as on Linux, `(mime type, bytes)`, the most specific first; and the bytes served for a
+/// requested mime type (text under any of its names). Backplane patch (PATCH.md), public so the client tests it.
+#[cfg(all(any(target_os = "linux", target_os = "freebsd"), any(feature = "wayland", feature = "x11")))]
+pub fn linux_clipboard_offers(item: &ClipboardItem) -> Vec<(&'static str, Vec<u8>)> {
+    linux::clipboard_offer::offers(item)
+}
+/// See `linux_clipboard_offers`.
+#[cfg(all(any(target_os = "linux", target_os = "freebsd"), any(feature = "wayland", feature = "x11")))]
+pub fn linux_clipboard_bytes_for<'a>(offers: &'a [(&'static str, Vec<u8>)], mime: &str) -> Option<&'a [u8]> {
+    linux::clipboard_offer::bytes_for(offers, mime)
+}
+
 #[cfg(any(
     all(
         any(target_os = "linux", target_os = "freebsd"),

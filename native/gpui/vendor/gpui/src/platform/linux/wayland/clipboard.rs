@@ -30,6 +30,8 @@ pub(crate) struct Clipboard {
 
     // Internal clipboard
     contents: Option<ClipboardItem>,
+    /// What `contents` is offered as (clipboard_offer.rs), made once when it is set.
+    offers: Vec<(&'static str, Vec<u8>)>,
     primary_contents: Option<ClipboardItem>,
 
     // External clipboard
@@ -148,6 +150,7 @@ impl Clipboard {
             self_mime: format!("pid/{}", std::process::id()),
 
             contents: None,
+            offers: Vec::new(),
             primary_contents: None,
 
             cached_read: None,
@@ -157,8 +160,16 @@ impl Clipboard {
         }
     }
 
-    pub fn set(&mut self, item: ClipboardItem) {
+    /// Keeps `item` and answers the mime types to offer for it (text under each of `TEXT_MIME_TYPES`).
+    pub fn set(&mut self, item: ClipboardItem) -> Vec<String> {
+        use crate::platform::linux::clipboard_offer as offer;
+        self.offers = offer::offers(&item);
         self.contents = Some(item);
+        self.offers
+            .iter()
+            .flat_map(|(m, _)| if *m == offer::TEXT { TEXT_MIME_TYPES.to_vec() } else { vec![*m] })
+            .map(str::to_string)
+            .collect()
     }
 
     pub fn set_primary(&mut self, item: ClipboardItem) {
@@ -179,9 +190,9 @@ impl Clipboard {
         self.self_mime.clone()
     }
 
-    pub fn send(&self, _mime_type: String, fd: OwnedFd) {
-        if let Some(text) = self.contents.as_ref().and_then(|contents| contents.text()) {
-            self.send_internal(fd, text.as_bytes().to_owned());
+    pub fn send(&self, mime_type: String, fd: OwnedFd) {
+        if let Some(bytes) = crate::platform::linux::clipboard_offer::bytes_for(&self.offers, &mime_type) {
+            self.send_internal(fd, bytes.to_owned());
         }
     }
 
