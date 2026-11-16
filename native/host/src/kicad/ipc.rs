@@ -310,7 +310,9 @@ pub async fn publish_cad(hub: &Arc<Hub>) {
     let fc = super::stepglb::freecad_cmd(&hub.cfg.home);
     // the found runtime's own capabilities (its manifest), comma-separated: what an update offers over it is said from these
     let caps = env.caps.join(",");
-    for (k, v) in [("kicad.cli", env.cli.as_str()), ("kicad.version", version.as_str()), ("kicad.status", status.as_str()), ("kicad.source", source), ("kicad.caps", caps.as_str()), ("freecad", fc.as_str())] { hub.set_info(k, v).await; }
+    // the Backplane library the runtime pins (its manifest's backplaneLibrary): "2026.11.13 (314532f)", "" for none
+    let library = if env.root.is_empty() || status == "stock" { String::new() } else { library_label(&manifest_of(&env.root)) };
+    for (k, v) in [("kicad.cli", env.cli.as_str()), ("kicad.version", version.as_str()), ("kicad.status", status.as_str()), ("kicad.source", source), ("kicad.caps", caps.as_str()), ("kicad.library", library.as_str()), ("freecad", fc.as_str())] { hub.set_info(k, v).await; }
     // the libraries the selected runtime registers by default reach the person's existing tables (libtables.rs); a copy of the log changes nothing
     if !env.root.is_empty() && !crate::copy::on() {
         let (root, ver, home) = (PathBuf::from(&env.root), version.clone(), hub.cfg.home.clone());
@@ -366,11 +368,24 @@ pub fn candidates(p: &Places) -> Vec<PathBuf> {
 pub fn pick(c: Vec<PathBuf>) -> Env { match c.into_iter().find(|p| p.is_file()) { Some(p) => read_runtime(&p), None => Env { status: "missing".into(), ..Default::default() } } }
 /// The runtime to use: the one Backplane has selected, for the hub's own work and every agent's (agents/kicadsel.rs).
 pub async fn runtime(hub: &Arc<Hub>) -> Env { pick(candidates(&places(&hub.cfg.home, hub.setting("kicad.path").await))) }
+/// The Backplane library a runtime pins, as Settings says it: "2026.11.13 (314532f)", from its manifest's `backplaneLibrary` (`version`, the
+/// fork's bundle label, and `commit`, the pin; the short commit keeps the label from reading as a tag of the library's repository). ""
+/// for a runtime without one (stock KiCad, bp.12.x and older).
+pub fn library_label(manifest: &Value) -> String {
+    let l = &manifest["backplaneLibrary"];
+    let (v, c) = (l["version"].as_str().unwrap_or("").trim(), l["commit"].as_str().unwrap_or("").trim());
+    let short: String = c.chars().take(7).collect();
+    match (v.is_empty(), short.is_empty()) { (false, false) => format!("{v} ({short})"), (false, true) => v.to_string(), (true, false) => short, _ => String::new() }
+}
+/// A runtime root's manifest.json (the package's, or a bundle's Contents/Resources), Null when it has none.
+pub fn manifest_of(root: &str) -> Value {
+    let text = std::fs::read_to_string(format!("{root}/manifest.json")).or_else(|_| std::fs::read_to_string(format!("{root}/Contents/Resources/manifest.json"))).unwrap_or_default();
+    serde_json::from_str(&text).unwrap_or(Value::Null)
+}
 /// Rt.manifest + KH.status from the runtime's manifest.json (no version probe: `runs` is taken as true when a manifest is read).
 pub fn read_runtime(cli: &Path) -> Env {
     let root = cli.parent().and_then(|b| b.parent()).map(|r| r.to_string_lossy().to_string()).unwrap_or_default();
-    let text = std::fs::read_to_string(format!("{root}/manifest.json")).or_else(|_| std::fs::read_to_string(format!("{root}/Contents/Resources/manifest.json"))).unwrap_or_default();
-    let m: Value = serde_json::from_str(&text).unwrap_or(Value::Null);
+    let m = manifest_of(&root);
     let version = m["version"].as_str().unwrap_or("").to_string(); let api = m["apiVersion"].as_u64().unwrap_or(0);
     let fork = version.contains("-bp.");
     let caps: Vec<String> = m["capabilities"].as_array().map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect()).unwrap_or_default();
@@ -586,6 +601,13 @@ fn shown_version(manifest: &str, full: &str) -> String { if manifest.is_empty() 
 
 #[cfg(test)]
 mod tests {
+    #[test] fn the_backplane_library_is_said_by_its_bundle_label_and_short_commit() {
+        let m = serde_json::json!({"version": "10.99.0-bp.13", "backplaneLibrary": {"repository": "https://github.com/BackplaneWorks/Backplane_KiCad_Library.git", "version": "2026.11.13", "commit": "314532f925fef0becc5a6eaf6be3b000f41cb0d0", "sha256": "x"}});
+        assert_eq!(library_label(&m), "2026.11.13 (314532f)");
+        assert_eq!(library_label(&serde_json::json!({"version": "10.99.0-bp.12.4"})), "", "no pin before bp.13");
+        assert_eq!(library_label(&serde_json::json!({"backplaneLibrary": {"commit": "314532f925"}})), "314532f");
+    }
+
     /// An agent's save: not sent for an unmodified document, nor for a board whose only change is KiCad's load-time migration; else sent.
     #[tokio::test] async fn an_agents_save_writes_only_real_changes() {
         use super::super::embed::stand_in_route;
