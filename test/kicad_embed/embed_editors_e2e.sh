@@ -183,11 +183,11 @@ print(int(erc_ok and len(svgs) >= 1))
 
   python3 "$IPC_PY" run-action "$API_SOCK" "pcbnew.ZoneFiller.zoneUnfillAll" >/dev/null
   sleep 0.7
-  import -window root "$OUT/shots/03a_zones_unfilled.png"
+  screen_shot "$OUT/shots/03a_zones_unfilled.png"
 
   python3 "$IPC_PY" run-action "$API_SOCK" "pcbnew.ZoneFiller.zoneFillAll" >/dev/null
   sleep 0.9
-  import -window root "$OUT/shots/03b_zones_filled.png"
+  screen_shot "$OUT/shots/03b_zones_filled.png"
 
   ZONE_DIFF=$(python3 "$DRIVER_PY" img-diff "$OUT/shots/03a_zones_unfilled.png" "$OUT/shots/03b_zones_filled.png" $((GX + VX + 40)) $((GY + VY + 40)) $((VW - 80)) $((VH - 80)))
   ZONE_OK=$(python3 -c 'import json,sys; d=json.loads(sys.argv[1]); print(int(int(sys.argv[2]) >= 1 and d["changed_pixels"] > 150))' "$ZONE_DIFF" "$ZONES_0")
@@ -246,12 +246,12 @@ print(int(d.get("transient_for") == gpui and in_bounds))
   python3 "$DRIVER_PY" embed "$CONT_XID" "$V3D_XID" "$VW" "$VH" >/dev/null
   sleep 1.4
   RPT_3D=$(python3 "$DRIVER_PY" report "$GPUI_XID" "$CONT_XID" "$V3D_XID")
-  import -window root "$OUT/shots/06a_3d_before_orbit.png"
+  screen_shot "$OUT/shots/06a_3d_before_orbit.png"
 
   python3 "$DRIVER_PY" focus "$V3D_XID" >/dev/null
   python3 "$XINPUT_PY" drag $((CX - 90)) $((CY - 50)) $((CX + 90)) $((CY + 60))
   sleep 0.9
-  import -window root "$OUT/shots/06b_3d_after_orbit.png"
+  screen_shot "$OUT/shots/06b_3d_after_orbit.png"
 
   ORBIT_DIFF=$(python3 "$DRIVER_PY" img-diff "$OUT/shots/06a_3d_before_orbit.png" "$OUT/shots/06b_3d_after_orbit.png" $((GX + VX + 40)) $((GY + VY + 60)) $((VW - 80)) $((VH - 100)))
   V3D_OK=$(python3 -c '
@@ -426,11 +426,11 @@ sleep 0.45
 
 python3 "$IPC_PY" run-action "$API_SOCK" "pcbnew.ZoneFiller.zoneUnfillAll" >/dev/null
 sleep 0.7
-import -window root "$OUT/shots/03a_zones_unfilled.png"
+screen_shot "$OUT/shots/03a_zones_unfilled.png"
 
 python3 "$IPC_PY" run-action "$API_SOCK" "pcbnew.ZoneFiller.zoneFillAll" >/dev/null
 sleep 0.9
-import -window root "$OUT/shots/03b_zones_filled.png"
+screen_shot "$OUT/shots/03b_zones_filled.png"
 
 ZONE_DIFF=$(python3 "$DRIVER_PY" img-diff "$OUT/shots/03a_zones_unfilled.png" "$OUT/shots/03b_zones_filled.png" $((BX + BW / 3)) $((BY + 50)) $((BW * 2 / 3 - 50)) $((BH - 100)))
 ZONE_OK=$(python3 -c 'import json,sys; d=json.loads(sys.argv[1]); print(int(int(sys.argv[2]) >= 1 and d["changed_pixels"] > 150))' "$ZONE_DIFF" "$ZONES_0")
@@ -478,12 +478,38 @@ print(int(d.get("transient_for") == gpui and in_bounds))
 check "DRC dialog floats above GPUI with Backplane-managed WM_TRANSIENT_FOR == gpui_xid and inside screen bounds" "$DRC_OK" "$DRC_INFO"
 
 read -r DFX DFY DCX DCY < <(python3 -c 'import json,sys; g=json.loads(sys.argv[1]).get("dialog",{}); print(g.get("root_x",600)+120, g.get("root_y",300)+18, g.get("root_x",600)+g.get("w",400)-108, g.get("root_y",300)+g.get("h",300)-28)' "$DRC_INFO")
-python3 "$XINPUT_PY" click "$DFX" "$DFY"
+# what the window manager makes of the dialog (fork embed's questions: a dialog mapped for an API request has no user time, and mutter's
+# focus-stealing prevention may stack it under the focused window, so the click lands on Backplane)
+echo "INFO DRC dialog props: $(xprop -id "$DRC_XID" _NET_WM_USER_TIME _NET_WM_USER_TIME_WINDOW WM_HINTS WM_PROTOCOLS WM_TRANSIENT_FOR 2>&1 | tr '\n' ' ' | cut -c1-600)"
+UTW=$(xprop -id "$DRC_XID" _NET_WM_USER_TIME_WINDOW 2>/dev/null | grep -o '0x[0-9a-f]*' | head -1)
+[ -n "$UTW" ] && echo "INFO DRC dialog user-time window $UTW: $(xprop -id "$UTW" _NET_WM_USER_TIME 2>&1 | tr '\n' ' ')"
+python3 "$XINPUT_PY" move "$DFX" "$DFY"; sleep 0.2
+echo "INFO under the click point $DFX,$DFY: $(python3 -c 'import ctypes,ctypes.util,os
+x=ctypes.CDLL(ctypes.util.find_library("X11")); x.XOpenDisplay.restype=ctypes.c_void_p; x.XDefaultRootWindow.restype=ctypes.c_ulong; x.XDefaultRootWindow.argtypes=[ctypes.c_void_p]
+d=ctypes.c_void_p(x.XOpenDisplay(os.environ["DISPLAY"].encode())); w=x.XDefaultRootWindow(d); out=[]
+for _ in range(6):
+    r=ctypes.c_ulong(); c=ctypes.c_ulong(); i=ctypes.c_int(); m=ctypes.c_uint()
+    x.XQueryPointer(d, ctypes.c_ulong(w), ctypes.byref(r), ctypes.byref(c), ctypes.byref(i), ctypes.byref(i), ctypes.byref(i), ctypes.byref(i), ctypes.byref(m))
+    if not c.value: break
+    nm=ctypes.c_char_p(); x.XFetchName(d, c, ctypes.byref(nm)); out.append(f"{c.value:#x}:{(nm.value or b"").decode(errors="replace")[:24]}"); w=c.value
+print(" > ".join(out))')"
+echo "INFO the root's children as xwininfo lists them (XQueryTree order): $(xwininfo -root -children 2>/dev/null | grep -E '^ +0x' | awk '{print $1}' | tr '\n' ' ' | cut -c1-400)"
+click_to_focus "$DRC_XID" "$DFX" "$DFY"
 sleep 0.12
+echo "INFO DRC dialog clicked: the keyboard at $(xfocus_chain)"
 python3 "$XINPUT_PY" key Escape
 sleep 0.2
 python3 "$XINPUT_PY" click "$DCX" "$DCY"
 sleep 0.25
+DRC_LEFT=$(python3 "$DRIVER_PY" list-windows --match "Design Rules Checker" 2>/dev/null | grep -c '"shown": true' || true)
+echo "INFO DRC dialog after Escape and Close: still shown $DRC_LEFT"
+# under mutter the harness's click never reaches mutter's click-to-focus (an XTest click goes into Xwayland straight) and mutter does
+# not act on a pager's activation of a dialog mapped for an API request with a stale user time (fork: stamp it in MakeTransientFor):
+# the dialog is closed by the window manager so the steps after it see the board, and the keyboard's part is said, not checked
+if [ "${KEMBED_WM:-i3}" = mutter ] && [ "${DRC_LEFT:-0}" != 0 ]; then
+  echo "INFO (mutter) the DRC dialog kept no keyboard from the harness's click: closed by the window manager"
+  python3 "$KEMBED_LIB/wm_ctl.py" close "$DRC_XID" >/dev/null 2>&1 || true; sleep 0.5
+fi
 
 "$KICAD_CLI" pcb drc --format json -o "$OUT/drc.json" "$PROJ/ecc83-pp.kicad_pcb" >/dev/null 2>&1 || true
 CLI_DRC_OK=$(python3 -c 'import json,os,sys; print(int(os.path.isfile(sys.argv[1]) and "violations" in json.load(open(sys.argv[1]))))' "$OUT/drc.json")
@@ -494,14 +520,14 @@ click_gpui_control "$OUT/client.log" "$GPUI_XID" "rail:3D"
 V3D_XID=$(wait_for_embedded_frame "$GPUI_XID" "$CONT_XID" "$KP" "3D Viewer" 160)
 sleep 1.4
 RPT_3D=$(python3 "$DRIVER_PY" report "$GPUI_XID" "$CONT_XID" "$V3D_XID")
-import -window root "$OUT/shots/06a_3d_before_orbit.png"
+screen_shot "$OUT/shots/06a_3d_before_orbit.png"
 
 read -r X3D Y3D W3D H3D < <(python3 -c 'import json,sys; n=json.loads(sys.argv[1]).get("native",{}); print(n.get("root_x",800), n.get("root_y",200), n.get("w",600), n.get("h",600))' "$RPT_3D")
 python3 "$XINPUT_PY" click $((X3D + W3D / 2)) $((Y3D + H3D / 2))
 sleep 0.25
 python3 "$XINPUT_PY" drag $((X3D + W3D / 2 - 90)) $((Y3D + H3D / 2 - 50)) $((X3D + W3D / 2 + 90)) $((Y3D + H3D / 2 + 60))
 sleep 0.9
-import -window root "$OUT/shots/06b_3d_after_orbit.png"
+screen_shot "$OUT/shots/06b_3d_after_orbit.png"
 
 ORBIT_DIFF=$(python3 "$DRIVER_PY" img-diff "$OUT/shots/06a_3d_before_orbit.png" "$OUT/shots/06b_3d_after_orbit.png" $((X3D + 40)) $((Y3D + 60)) $((W3D - 80)) $((H3D - 100)))
 V3D_OK=$(python3 -c '
@@ -531,11 +557,18 @@ ok = dlg.get("shown") is True and (mode == "spike" or d.get("transient_for") == 
 print(int(ok))
 ' "$PLOT_INFO" "$GPUI_XID" "$EMBED_MODE")
   read -r PX PY < <(python3 -c 'import json,sys; g=json.loads(sys.argv[1]).get("dialog",{}); print(g.get("root_x",600)+g.get("w",400)//2, g.get("root_y",300)+20)' "$PLOT_INFO")
-  python3 "$XINPUT_PY" click "$PX" "$PY"
+  click_to_focus "$PLOT_XID" "$PX" "$PY"
   sleep 0.15
+  echo "INFO plot dialog clicked at $PX,$PY: the keyboard at $(xfocus_chain)"
   python3 "$XINPUT_PY" key Escape
   wait "$PLOT_CALL_PID" 2>/dev/null || true
   sleep 0.2
+  PING=$(python3 "$IPC_PY" ping "$API_SOCK" 2>&1 | tail -1 | cut -c1-120 || true)
+  echo "INFO plot dialog: transient ok $PLOT_TRANS_OK; $(echo "$PLOT_INFO" | cut -c1-400); ping after Escape: $PING; still up: $(python3 "$DRIVER_PY" list-windows --match Plot 2>/dev/null | grep -c '"shown": true')"
+  if [ "${KEMBED_WM:-i3}" = mutter ] && python3 "$DRIVER_PY" list-windows --match Plot 2>/dev/null | grep -q '"shown": true'; then
+    echo "INFO (mutter) the Plot dialog kept no keyboard from the harness's click (as the DRC dialog): closed by the window manager"
+    python3 "$KEMBED_LIB/wm_ctl.py" close "$PLOT_XID" >/dev/null 2>&1 || true; wait "$PLOT_CALL_PID" 2>/dev/null || true; sleep 0.5
+  fi
   if [ "$PLOT_TRANS_OK" -eq 1 ] && python3 "$IPC_PY" ping "$API_SOCK" >/dev/null 2>&1; then
     PLOT_DLG_OK=1
   fi
