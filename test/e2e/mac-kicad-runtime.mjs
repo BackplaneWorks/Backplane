@@ -4,15 +4,14 @@
 //   - Open in KiCad starts the editor as its own window (the launcher beside the CLI), and while it is open an agent's save through the
 //     headless server tells the agent (detached_kicad) and the person (a warning line in the thread) that this window does not show it.
 // EXPECT_VERSION (e.g. 10.99.0-bp.12.5) is checked against GetVersion. The KiCad window this test opens is closed at the end.
-import {copyFileSync,chmodSync,existsSync,mkdirSync,readFileSync,readdirSync,rmSync,statSync,writeFileSync} from 'node:fs';
+import {copyFileSync,chmodSync,existsSync,mkdirSync,readFileSync,rmSync,writeFileSync} from 'node:fs';
 import {execFileSync} from 'node:child_process';
 import {startHub,stopHub,client,makeStandins,sleep} from '../perf/lib.mjs';
 const [bin,rt,port,work]=process.argv.slice(2);const expect=process.env.EXPECT_VERSION||'';
 rmSync(work,{recursive:true,force:true});for(const d of ['bin','proj','user/Library/Preferences'])mkdirSync(`${work}/${d}`,{recursive:true});
-// the ecc83 demo from the runtime (KiCad.app's SharedSupport), else none: the test needs it
-const find=(dir,name,depth=0)=>{if(depth>7)return null;for(const e of readdirSync(dir)){const p=`${dir}/${e}`;let s;try{s=statSync(p)}catch{continue}if(s.isDirectory()){const f=find(p,name,depth+1);if(f)return f}else if(e===name)return p}return null};
-const demo=find(rt,'ecc83-pp.kicad_pcb');if(!demo){console.log('FAIL the runtime has no ecc83 demo');process.exit(1)}
-for(const e of ['kicad_pro','kicad_pcb','kicad_sch']){const p=`${work}/proj/ecc83-pp.${e}`;copyFileSync(demo.replace(/kicad_pcb$/,e),p);chmodSync(p,0o644)}
+// the ecc83 board from the repo's fixtures (the macOS package carries no demos), as the embed suites seed it
+const fx=new URL('../files/fixtures/plot/',import.meta.url).pathname;
+for(const e of ['kicad_pro','kicad_pcb','kicad_sch']){const p=`${work}/proj/ecc83-pp.${e}`;copyFileSync(`${fx}ecc83-pp.${e}`,p);chmodSync(p,0o644)}
 const pcb=`${work}/proj/ecc83-pp.kicad_pcb`;
 makeStandins(`${work}/bin`);
 writeFileSync(`${work}/bin/claude`,`#!/usr/bin/env python3
