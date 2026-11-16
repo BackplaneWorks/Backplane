@@ -1522,6 +1522,7 @@ def run(h):
         # of the run: when it came, what it says, whether it went away, and whether the editor came up (the hub's retry)
         observe = os.environ.get("BP_STARTUP_BOX_OBSERVE") == "1"
         nogpu_boxes = []
+        t_first_paint = 0.0
         box_obs = {}
         box_since = None
         while cp.poll() is None and time.monotonic() - started < (100 if observe else 65):
@@ -1606,6 +1607,8 @@ def run(h):
                     h.shot("startup_box")
                 elif box_obs and not box and "gone_ms" not in box_obs:
                     box_obs["gone_ms"] = round((time.monotonic() - started) * 1000)
+            if t_edit and not t_first_paint and "first_paint" in {r for r in h.kicad_reports()}:
+                t_first_paint = time.monotonic()
             if "opening_settled" in marks:
                 settled = True
                 break
@@ -1657,7 +1660,23 @@ def run(h):
                 editors = {}
                 for kind, word, how in (("PCB", "PCB Editor", "kicad-tab:PCB"), ("SCH", "Schematic Editor", "kicad-tab:SCH"),
                                         ("SYMBOL", "Symbol Editor", "common.Control.showSymbolEditor"), ("FOOTPRINT", "Footprint Editor", "common.Control.showFootprintEditor")):
-                    if how.startswith("kicad-tab:"):
+                    if how == "kicad-tab:SCH":
+                        # Edit -> drawn: the PCB at the opening; the schematic's first show (its kiface probes OpenGL once) and a second one
+                        def timed_show(tab, word):
+                            t0 = time.monotonic()
+                            h.click_control(top, tab)
+                            while time.monotonic() - t0 < 60:
+                                f_ = frame_titled(word)
+                                if f_ and drawn(f_, "t") > 8:
+                                    return round((time.monotonic() - t0) * 1000)
+                                time.sleep(0.1)
+                            return None
+                        editors["times_ms"] = {"pcb_edit_to_drawn": round((t_first_paint - t_edit) * 1000) if t_first_paint and t_edit else None,
+                                               "sch_first_show": timed_show("kicad-tab:SCH", "Schematic Editor")}
+                        timed_show("kicad-tab:PCB", "PCB Editor")
+                        editors["times_ms"]["sch_second_show"] = timed_show("kicad-tab:SCH", "Schematic Editor")
+                        print("DIAG nogpu_times " + json.dumps(editors["times_ms"]), flush=True)
+                    elif how.startswith("kicad-tab:"):
                         h.click_control(top, how)
                     else:
                         line = standin_ask(h, "kicad_ipc", {"path": checks_project(h), "type": "kiapi.common.commands.RunAction", "message": {"action": how}}, f"ng-{kind}")
