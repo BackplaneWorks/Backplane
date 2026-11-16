@@ -5,6 +5,7 @@
 #   L2  plan_route goes ahead in plan view and routes c-k (steps until done); plan view stays on
 #   L3  plan_verify: c-k's group has no DRC violation
 #   L4  only while the person holds a drag on a plan item does plan_route answer "Nothing was routed" with the reason; released, it goes on
+#   L6  (plan-select, bp.13 batch 12) the row selects the corridor itself: W then widens it
 #   L5  the Plan panel's row (plan.focus) finds and zooms to c-k and makes its layer active, plan view staying on (the hub puts it back:
 #       selecting copper ends KiCad's plan tool)
 # Mode and layer are read from KiCad, never from pixels; pixels only find the item to drag. Copies only (seed_project.py). Fork mode;
@@ -124,4 +125,15 @@ check "the Plan panel's row finds and zooms to c-k's nets and parts in KiCad" "$
 echo "INFO selection in plan view after the row: $(echo "$SEL" | grep -o 'kiapi.board.types.[A-Za-z]*' | sort -u | tr '\n' ' ')"
 check "it makes c-k's layer (B.Cu) active" "$([ "$LF" = BL_B_Cu ] && echo 1 || echo 0)" "active $SL -> $LF"
 check "plan view stays on" "$([ "$MF" = on ] && echo 1 || echo 0)" "plan view $MF; the hub says $(echo "$FO" | grep -o '"plan_view":"[a-z]*"')"
+# L6 (bp.13 batch 12 `plan-select`, else bp.13.1): the row selects the plan item itself (SelectPlanItems), so W acts on c-k; earlier
+# runtimes keep the copper-and-re-enter path above, told here
+if grep -q '"plan-select"' "$RT/manifest.json" 2>/dev/null; then
+  check "with plan-select the row selects the plan item (SelectPlanItems)" "$(echo "$FO" | grep -q '"via":"SelectPlanItems"' && echo 1 || echo 0)" "$(echo "$FO" | cut -c1-200)"
+  WK0=$(ask plan_get '{}' | answer | python3 -c 'import json,sys; d=json.loads(sys.stdin.read() or "{}"); p=d.get("plan",d); print(next((c.get("width") for c in p.get("corridors",[]) if c.get("id")=="c-k"),"?"))')
+  python3 "$XINPUT_PY" key w; sleep 1.5
+  WK1=$(ask plan_get '{}' | answer | python3 -c 'import json,sys; d=json.loads(sys.stdin.read() or "{}"); p=d.get("plan",d); print(next((c.get("width") for c in p.get("corridors",[]) if c.get("id")=="c-k"),"?"))')
+  check "W then acts on the row's corridor (c-k wider)" "$(python3 -c 'import sys; a,b=sys.argv[1:]; print(int(a!="?" and b!="?" and float(b)>float(a)+1e-9))' "$WK0" "$WK1")" "c-k width $WK0 -> $WK1"
+else
+  echo "INFO no plan-select in this runtime: the row selected copper and the hub put plan view back (via $(echo "$FO" | grep -o '"via":"[A-Za-z]*"'))"
+fi
 finish_suite "embed_plan_route_live_e2e ($EMBED_MODE)"
