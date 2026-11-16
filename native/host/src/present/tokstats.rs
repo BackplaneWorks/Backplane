@@ -76,6 +76,14 @@ pub struct In<'a> {
     /// when its session last began afresh, and when it was last handed the conversation and why (0: never)
     pub began: u64, pub handed: (u64, &'a str), pub now: u64, pub running: bool,
     pub bot: Option<Bot>,
+    /// the tasks this thread delegated (and theirs): their totals summed as `tv` is, and how many (present/keys.rs `task_tree`); ("", 0) for none
+    pub tasks: (String, usize),
+}
+/// Totals ("turns/in/cread/cwrite/out/reasoning/cost/costs known/tokens known", state/fam.rs `tok_add`) of several threads, added field by field.
+pub fn tv_sum(vs: &[&str]) -> String {
+    let n = vs.iter().map(|v| v.split('/').count()).max().unwrap_or(0);
+    if vs.iter().all(|v| v.is_empty()) { return String::new() }
+    (0..n).map(|i| vs.iter().map(|v| part(v, i)).sum::<u64>().to_string()).collect::<Vec<_>>().join("/")
 }
 fn totals(tv: &str) -> (u64, u64) { (part(tv, 1) + part(tv, 2) + part(tv, 3) + part(tv, 4), part(tv, 6)) }
 /// Tone.ctx: how a context reading reads as it fills ("" fine, "warn" from 60%, "bad" from 85%)
@@ -146,6 +154,13 @@ pub fn usage(x: &In) -> Value {
         tots.push(json!({"title": if x.bot.is_some() { "This chat" } else { "This thread" }, "tokens": human(tok), "cost": if part(x.tv, 7) == 0 { String::new() } else { money(cost) }, "sub": sub.join(" · "),
             "tip": format!("{} tokens: {} input, {} cache read, {} cache write, {} output{}", num(tok), num(part(x.tv, 1)), num(part(x.tv, 2)), num(part(x.tv, 3)), num(part(x.tv, 4)), if part(x.tv, 8) < part(x.tv, 0) { format!("; tokens unknown for {} turns", part(x.tv, 0) - part(x.tv, 8)) } else { String::new() }),
             "spark": spark, "sparkTip": format!("Tokens of the last {} turns", ring.len())}));
+    }
+    // the tasks it delegated, each its own thread: counted here too, so what the thread's work cost is whole (the chip shows this sum)
+    if x.tasks.1 > 0 && part(&x.tasks.0, 0) > 0 {
+        let all = tv_sum(&[x.tv, &x.tasks.0]); let (tok, cost) = totals(&all); let (ttok, tcost) = totals(&x.tasks.0);
+        tots.push(json!({"title": format!("With its {} task{}", x.tasks.1, if x.tasks.1 == 1 { "" } else { "s" }), "tokens": human(tok), "cost": if part(&all, 7) == 0 { String::new() } else { money(cost) },
+            "sub": format!("tasks: {} tok{}", human(ttok), if part(&x.tasks.0, 7) == 0 { String::new() } else { format!(" · {}", money(tcost)) }),
+            "tip": format!("{} tokens with the threads it delegated tasks to", num(tok)), "spark": [], "sparkTip": ""}));
     }
     let day_of = |v: &str| -> Option<String> { let mut it = v.splitn(3, '|'); (it.next() == Some(x.day)).then(|| it.next().unwrap_or("").to_string()) };
     let today_main = day_of(x.today).unwrap_or_default();
@@ -237,6 +252,7 @@ pub fn usage(x: &In) -> Value {
         assert_eq!(v["ctx"]["hint"], "50+ more turns at this rate", "growing 5k a turn: 177 turns of room");
         let t = &v["turns"][0]; assert_eq!(t["title"], "Last turn"); assert_eq!(t["parts"].as_array().unwrap().iter().map(|p| p["short"].as_str().unwrap()).collect::<Vec<_>>(), ["4", "95.3k", "4.9k", "7"]);
         assert_eq!(t["parts"][1]["exact"], "95,292 tokens"); assert_eq!(t["cost"], "$0.0966");
+        assert_eq!(tv_sum(&["2/10/20/30/40/0/500/2/2", "1/1/2/3/4/0/50/1/1"]), "3/11/22/33/44/0/550/3/3"); assert_eq!(tv_sum(&["", ""]), ""); assert_eq!(tv_sum(&["", "1/1/1/1/1/0/5/1/1"]), "1/1/1/1/1/0/5/1/1");
         assert_eq!(v["totals"][0]["title"], "This thread"); assert_eq!((v["totals"][0]["tokens"].as_str(), v["totals"][0]["cost"].as_str()), (Some("2.2M"), Some("$2.38")));
         assert_eq!(v["totals"][0]["spark"].as_array().unwrap().len(), 3); assert_eq!(v["totals"][1]["title"], "Today");
         assert!(v["session"].as_array().unwrap().is_empty() && v["feeds"].as_array().unwrap().is_empty() && v["lanes"].as_array().unwrap().is_empty(), "a thread has no bot parts");
