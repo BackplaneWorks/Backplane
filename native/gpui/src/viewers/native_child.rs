@@ -1134,8 +1134,36 @@ mod imp {
 
     /// Stock cross-process top-level adoption is never used on Windows (fork only).
     pub fn adopt(_pid: u32, _container: u64, _toplevel: u64) -> Vec<u64> { vec![] }
-    /// Windows: `dialogs` already centres them over Backplane's window.
-    pub fn centre_dialogs(_pid: u32, _over: R) -> Vec<String> { vec![] }
+    /// The titles of KiCad's own dialogs on screen now (`floating_dialog`: captioned, non-child, visible top-levels of `pid`, not one parked
+    /// off-screen), the one in front last. Windows has no X11 transient-for to read, and a runtime without `embed-dialog-events` posts no
+    /// ET_DIALOG_OPENED: the pane tells the hub these (`editor.kicad.dialogs`), so a modal box (no GPU: "Could not use OpenGL, falling back
+    /// to software rendering", bp.10 to bp.13 batch 14, rel016 Nov 16) is said in the strip ("KiCad is asking: ...") and KiCad, whose modal
+    /// loop leaves pings unanswered, is not called "not responding". Placement stays `dialogs`' (owned by Backplane's window, centred).
+    pub fn centre_dialogs(pid: u32, _over: R) -> Vec<String> {
+        if pid == 0 { return vec![] }
+        struct Ctx { pid: u32, out: Vec<String> }
+        unsafe extern "system" fn cb(w: HWND, l: LPARAM) -> i32 {
+            let ctx = unsafe { &mut *(l as *mut Ctx) };
+            let mut wpid = 0u32;
+            unsafe { GetWindowThreadProcessId(w, &mut wpid); }
+            if wpid != ctx.pid || unsafe { IsWindowVisible(w) } == 0 { return 1 }
+            let st = unsafe { GetWindowLongPtrW(w, GWL_STYLE) } as u32;
+            let mut cls = [0u16; 64];
+            let cn = unsafe { GetClassNameW(w, cls.as_mut_ptr(), cls.len() as i32) }.max(0) as usize;
+            if !super::floating_dialog(st, &String::from_utf16_lossy(&cls[..cn])) { return 1 }
+            let mut r = RECT::default();
+            if unsafe { GetWindowRect(w, &mut r) } != 0 && (r.left <= -10000 || r.top <= -10000) { return 1 }
+            let mut t = [0u16; 256];
+            let n = unsafe { InternalGetWindowText(w, t.as_mut_ptr(), t.len() as i32) }.max(0) as usize;
+            let title = String::from_utf16_lossy(&t[..n]);
+            if !title.trim().is_empty() { ctx.out.push(title) }
+            1
+        }
+        let mut ctx = Ctx { pid, out: vec![] };
+        unsafe { EnumWindows(Some(cb), &mut ctx as *mut Ctx as LPARAM); }
+        ctx.out.reverse(); // EnumWindows goes front to back: the one in front last, as the pane reads it
+        ctx.out
+    }
     /// Windows: the dialogs' activation is Windows' own (its foreground rules; the F5 guards), never this.
     pub fn take_new_dialogs() -> Vec<u64> { vec![] }
     pub fn activate(_w: u64) {}
