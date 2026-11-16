@@ -462,7 +462,7 @@ fn tools_with(f: &Facts, st: &State, session: &Value, pkg: Option<&crate::files:
 pub const UBERBOT: &str = "Your uberbot is the assistant you talk to first. It answers you, starts and follows your threads and bots across projects and machines, and keeps your reminders and phone alerts going.";
 /// Step 4. The frame is this file's; its rows and presses are present/onboard_alwayson.rs's.
 fn alwayson(f: &Facts, session: &Value, c: &Client) -> Step {
-    let body = format!("{} Always-on keeps your uberbot, reminders, bots and phone alerts running while this computer sleeps. Hardware and code still run here.", UBERBOT);
+    let body = "Always-on keeps your uberbot, reminders, bots and phone alerts running while this computer sleeps. Hardware and code still run here.".to_string();
     let rows = super::onboard_alwayson::rows(f, session, c);
     Step { id: "alwayson", group: "", title: "Where your uberbot lives".into(), body, rows, choices: vec![], panel: String::new(), done: super::onboard_alwayson::done(f), task: true, accept: true }
 }
@@ -927,7 +927,7 @@ mod tests {
         let (s0, i) = (cst(blank(), &[]), info("linux"));
         let p = at(&s0, "alwayson", &i, &desk());
         assert_eq!(p["title"], "Where your uberbot lives"); assert_eq!(p["next"], "Next", "the preselected choice is an answer");
-        assert!(p["body"].as_str().unwrap().starts_with("Your uberbot is the assistant you talk to first.") && p["body"].as_str().unwrap().contains("while this computer sleeps"));
+        assert!(p["body"].as_str().unwrap().starts_with("Always-on keeps") && p["body"].as_str().unwrap().contains("while this computer sleeps"), "what the uberbot is, said on Your uberbot, the step before");
         assert_ne!(p["state"], "done", "not done before a choice is saved: a new install showed it ticked before it was seen");
         let labels: Vec<String> = p["rows"].as_array().unwrap().iter().map(|r| s_(r, "label")).collect();
         for l in ["Stay on this computer", "An always-on Boat", "Another machine of yours"] { assert!(labels.contains(&l.to_string()), "{l}"); }
@@ -1151,6 +1151,7 @@ mod tests {
         let s0 = cst(blank(), &[]);
         let p = at(&s0, "uber", &info("linux"), &desk());
         assert_eq!((p["title"].as_str(), p["next"].as_str(), p["state"].as_str()), (Some("Your uberbot"), Some("Say hello"), Some("todo")));
+        assert!(p["body"].as_str().unwrap().starts_with(UBERBOT), "where the uberbot is first named, what it is");
         let r = &p["rows"][0];
         assert_eq!((r["kind"].as_str(), r["fields"][0]["name"].as_str(), r["fields"][0]["value"].as_str()), (Some("cat"), Some("obubername"), Some("Bub")), "prefilled");
         assert!(r["look"].is_null() && r["color"] == "" && r["spawn"] == "" && r["go"].is_null(), "the name's cat, its own colour, nothing arrived yet: {r}");
