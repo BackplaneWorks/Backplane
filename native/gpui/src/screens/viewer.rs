@@ -351,7 +351,7 @@ fn plot_pane(cx: &mut Context<Backplane>, light: bool, slot: usize, open: &str, 
         // the Boards menu leads the row (0.14 put it first in the viewer's bar), then Layers and Fit
         // (it gives way first, down to its least, so the buttons after it keep their words in a narrow pane)
         let boards = if slot == 0 { crate::viewers::boards::picker(cx, light, viewer, &pv.boards) } else { None }.map(|b| div().flex().flex_basis(px(96.)).flex_grow().min_w_0().max_w(px(260.)).child(b).into_any_element());
-        let lay = crate::viewers::layers::strip_el(cx, light, &strip, &pv.layers_key);
+        let lay = crate::viewers::layers::strip_el(cx, light, &strip, &pv.layers_key, pv.layers_open);
         tools.splice(0..0, boards.into_iter().chain([lay, fit.into_any_element()]));
         // a Gerber set: "vs board" (its copper, drills and outline against the board's: kicad/gerber/compare.rs), then where it is and how old (the plot's note)
         if viewer["gerbers"] == true {
@@ -507,11 +507,11 @@ fn split_sheets(cx: &mut Context<Backplane>, light: bool, sheets: &[super::plot:
     let cur = sheets.iter().enumerate().find(|(i, sh)| here(*i, sh)).map(|(i, sh)| if i == 0 { trs("Top sheet") } else { sh.name.clone() }).unwrap_or_else(|| trs("Top sheet"));
     let btn = div().id("split-sheets").flex().items_center().gap_1().px_1().text_size(crate::scale::tpx(11.)).cursor_pointer().border_1().border_color(c(if open { "accent" } else { "line" })).hover(|s| s.bg(c("raise")))
         .child(div().max_w(px(220.)).overflow_hidden().whitespace_nowrap().text_ellipsis().child(cur)).child(crate::art::icon("chevron-down", 11., c("dim")))
-        .on_click(cx.listener(|this, _, _, cx| { let pv = this.screens.pv(1); pv.sheets_open = !pv.sheets_open; cx.notify(); }));
+        .on_click(cx.listener(|this, _, _, cx| { let pv = this.screens.pv(1); if !pv.sheets_open && super::popover::just_shut("split-sheets") { return } pv.sheets_open = !pv.sheets_open; cx.notify(); }));
     let mut wrap = div().relative().child(btn);
     if open {
         let mut list = div().id("split-sheets-list").mt(px(2.)).min_w(px(220.)).max_h(px(420.)).overflow_y_scroll().flex().flex_col().p_1().text_size(crate::scale::tpx(12.)).bg(c("panel")).border_1().border_color(c("line")).shadow_lg().occlude()
-            .on_mouse_down_out(cx.listener(|this, _, _, cx| { this.screens.pv(1).sheets_open = false; cx.notify(); }));
+            .on_mouse_down_out(cx.listener(|this, _, _, cx| { this.screens.pv(1).sheets_open = false; super::popover::shut("split-sheets"); cx.notify(); }));
         for (i, sh) in sheets.iter().enumerate() {
             let file = if i == 0 { String::new() } else { sh.file.clone() };
             let on = here(i, sh);
@@ -519,7 +519,7 @@ fn split_sheets(cx: &mut Context<Backplane>, light: bool, sheets: &[super::plot:
                 .child(if i == 0 { trs("Top sheet") } else { sh.name.clone() })
                 .on_click(cx.listener(move |this, _, _, cx| { let _ = this.tx.try_send(Command::Action("view-sheet".into(), file.clone())); this.screens.pv(1).sheets_open = false; cx.notify(); })));
         }
-        wrap = wrap.child(deferred(anchored().snap_to_window_with_margin(px(8.)).child(list)).with_priority(3));
+        wrap = wrap.child(div().absolute().left_0().top(crate::scale::tpx(20.)).child(deferred(anchored().snap_to_window_with_margin(px(8.)).child(list)).with_priority(3)));
     }
     Some(wrap.into_any_element())
 }

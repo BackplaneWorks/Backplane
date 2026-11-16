@@ -283,6 +283,8 @@ fn paint_marks(window: &mut Window, chunks: &[std::sync::Arc<super::plot::Chunk>
 pub fn plan_alpha(state: &str) -> (u32, u32, bool) {
     match state { "approved" | "routing" => (0x70, 0xe0, false), "edited" => (0x55, 0xff, false), "routed" | "verified" => (0x22, 0x80, false), "rejected" => (0x14, 0x40, false), "blocked" => (0x55, 0xff, true), _ => (0x38, 0xa0, false) }
 }
+/// Whether the plan is drawn over the board: only while the Plan panel is the one open beside it (closing the panel takes it away).
+pub fn plan_shown(mgmt_state: &serde_json::Value) -> bool { mgmt_state["open"] == "plan" }
 /// The plan over the board: plane regions as filled outlines, corridors as bands along their path at their width (millimetres, board
 /// coordinates: the plot's micrometres), each in its group's colour, its look by state; vias as small diamonds.
 fn paint_plan(window: &mut Window, d: &serde_json::Value, v: &View, o: Point<Pixels>, w: f32, h: f32) {
@@ -387,8 +389,9 @@ pub fn canvas_el(cx: &mut Context<Backplane>, slot: usize, focus: Option<FocusHa
                 paint_marks(window, &chunks, &probe, &v, b.origin, w, h);
             }
             if let Some(p) = &lit { paint_lit(window, p, &v, b.origin, w, h); }
-            // the routing plan's bands and regions over the board, read-only (the hub's mgmt.plan data; steering is in KiCad)
-            if fkey.starts_with("0|") { let draw = this.update(cx, |app, _| app.screens.mgmt.data("plan")["draw"].clone()); if !draw.is_null() { paint_plan(window, &draw, &v, b.origin, w, h); } }
+            // the routing plan's bands and regions over the board, read-only (the hub's mgmt.plan data; steering is in KiCad), only while the Plan panel is
+            // open: drawn always, a proposed plan's grey corridors covered the board with nothing saying what they were or how to hide them (Nov 16)
+            if fkey.starts_with("0|") { let draw = this.update(cx, |app, _| if plan_shown(&app.screens.mgmt.peek()) { app.screens.mgmt.data("plan")["draw"].clone() } else { serde_json::Value::Null }); if !draw.is_null() { paint_plan(window, &draw, &v, b.origin, w, h); } }
         });
         if let Some(t0) = t0 {
             let ms = t0.elapsed().as_secs_f32() * 1000.0;
@@ -617,6 +620,10 @@ pub fn report_state(app: &mut Backplane) {
 mod tests {
     use super::*;
     use core::prelude::v1::test;
+    #[test] fn the_plan_is_drawn_on_the_board_only_while_its_panel_is_open() {
+        assert!(plan_shown(&serde_json::json!({"open": "plan"})));
+        for st in [serde_json::json!({"open": ""}), serde_json::json!({"open": "bom"}), serde_json::Value::Null] { assert!(!plan_shown(&st), "{st}"); }
+    }
     #[test] fn a_tessellated_plot_is_reused_only_for_the_same_chunks_order_zoom_and_canvas_size() {
         let a = std::sync::Arc::new(Chunk::default()); let b = std::sync::Arc::new(Chunk::default());
         let v = View { cx: 1., cy: 2., scale: 0.5 }; let bx = Bounds::new(point(px(10.), px(20.)), size(px(300.), px(200.)));

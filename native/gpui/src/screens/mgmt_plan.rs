@@ -167,7 +167,9 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
     let note = |t: String, tone: &str| div().flex_shrink_0().px_2().py_1().border_b_1().border_color(c("rule")).text_size(crate::scale::tpx(11.)).text_color(c(tone)).child(trs(&t)).into_any_element();
     let keys = d["keys_note"].as_str().map(|t| note(t.to_string(), "dim"));
     let refused = REFUSED.lock().unwrap().clone().map(|t| note(t, "bad"));
-    div().size_full().flex().flex_col().children(head).child(top).children(refused).children(keys).child(list).into_any_element()
+    // the overlay this panel puts on the board (plotview.rs `plan_shown`): said, so the grey corridors are never a mystery
+    let drawn = (d["draw"]["bands"].as_array().map_or(false, |a| !a.is_empty()) || d["draw"]["regions"].as_array().map_or(false, |a| !a.is_empty())).then(|| note(trs("The plan's corridors and planes are drawn on the board while this panel is open. Close it to hide them."), "faint"));
+    div().size_full().flex().flex_col().children(head).child(top).children(drawn).children(refused).children(keys).child(list).into_any_element()
 }
 
 #[cfg(test)]

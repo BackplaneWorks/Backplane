@@ -774,6 +774,13 @@ object DataClient {
     // Buy it (feature buy): the desktop header's button for this thread (the hub's words), null when there is nothing to buy; a press makes the buy thread, which the app opens
     data class Buy(val label: String, val tip: String, val thread: String = "")
     /** Buy it on a project's page: the hub's button for the project, naming the thread it buys from (`thread.buy {project}`); null when there is nothing to buy. */
+    /** The top of a project's page (feature "projectcard"): its goal and its boards by name; null from a hub without it. */
+    data class ProjectCard(val goal: String, val boards: List<String>)
+    suspend fun projectCard(project: String): ProjectCard? {
+        if (!has("projectcard")) return null
+        val o = call("project.card", JSONObject().put("project", project))
+        return ProjectCard(o.optString("goal"), o.optJSONArray("boards")?.let { a -> (0 until a.length()).map { a.optString(it) } }.orEmpty().filter { it.isNotEmpty() })
+    }
     suspend fun buyOfProject(project: String): Buy? {
         if (!has("buy")) return null
         val o = call("thread.buy", JSONObject().put("project", project)).optJSONObject("buy") ?: return null

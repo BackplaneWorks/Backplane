@@ -143,8 +143,19 @@ struct DataProjectPageView: View {
     @State private var buyFailed = ""
     /// a long Done list: its newest rows, the rest behind the hub's "Older (m)" (`page-older`)
     @State private var older = false
+    /// what the project is, as the desktop's project page opens: its goal (a tap shows it whole) and its boards
+    @State private var card: DProjectCard?
+    @State private var whole = false
     var body: some View {
         List {
+            if let c = card, !c.goal.isEmpty || !c.boards.isEmpty {
+                Button { whole.toggle() } label: {
+                    VStack(alignment: .leading, spacing: 4) {
+                        if !c.goal.isEmpty { Text(c.goal).dmono(12).foregroundStyle(BackplaneDesign.text).lineLimit(whole ? 20 : 2).multilineTextAlignment(.leading) }
+                        if !c.boards.isEmpty { Text(Tr.t("Boards").uppercased() + "  " + c.boards.joined(separator: " · ")).dmono(10).foregroundStyle(BackplaneDesign.dim).lineLimit(2) }
+                    }.frame(maxWidth: .infinity, alignment: .leading).padding(.horizontal, 14).padding(.vertical, 8).contentShape(Rectangle())
+                }.buttonStyle(.plain).background(BackplaneDesign.panel).accessibilityIdentifier("data.project.page.card").dataRow()
+            }
             if !buyFailed.isEmpty { Text(buyFailed).dmono(11).foregroundStyle(BackplaneDesign.bad).padding(.horizontal, 14).padding(.vertical, 6).dataRow() }
             if let page {
                 ForEach(page.sections.filter { !$0.rows.isEmpty || ($0.fold && $0.count > 0) }) { s in
@@ -162,7 +173,7 @@ struct DataProjectPageView: View {
             Button(Tr.t("Buy it")) { if let b = buyAsk { startBuy(b) } }.accessibilityIdentifier("data.project.page.buy.confirm")
             Button(Tr.t("Cancel"), role: .cancel) {}
         }
-        .task(id: "\(project?.id ?? "")|\(client.conn == .online)") { if client.conn == .online, let p = project { buy = await client.buyOfProject(p.id) } }
+        .task(id: "\(project?.id ?? "")|\(client.conn == .online)") { if client.conn == .online, let p = project { buy = await client.buyOfProject(p.id); card = await client.projectCard(p.id) } }
     }
     private func startBuy(_ b: DBuy) {
         guard !buying else { return }; buying = true; buyFailed = ""

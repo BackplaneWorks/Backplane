@@ -780,6 +780,28 @@ async fn recovered(extra: &str, state: &str) -> Vec<Value> {
     assert!(ev.iter().any(|e| is(e, "MessagePosted") && e["text"].as_str().unwrap_or("").starts_with(world::CARRY_BG) && e["text"].as_str().unwrap_or("").contains("Rail widths")), "{ev:?}");
     assert!(!ev.iter().any(|e| turn_is(e, "interrupted")), "nothing was running: no turn is marked cut");
 }
+/// Buy it's list of what would be ordered (order_ask with pick): a tap flips an item and closes nothing; Continue (or a typed answer) closes it once, and the
+/// person's message says what to order, what to leave out and what they wrote, the agent's turn started with it
+#[tokio::test(flavor = "multi_thread")] async fn an_order_pick_list_toggles_then_answers_with_what_to_order() {
+    let sd = dir("pick-bin"); perf_standin(&sd, 1);
+    let ask = format!("{{\"$\":\"AskOpened\",\"id\":\"qp\",\"thread\":\"{T1}\",\"kind\":\"input\",\"tool\":\"order_ask.pick\",\"detail\":\"What should this order include?\",\"options\":\"Main board · PCB · 5\\nBracket · CNC · 2\",\"at\":1700000101}}\n");
+    let (hub, ag, _h, _w) = start("pick", |w| { let l = running_log(w, &ask); l.replace("\"state\":\"running\"", "\"state\":\"completed\"") }, |_| Cli::standin(&sd)).await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    let from = len(&hub).await;
+    assert_eq!(rpc(&hub, "ask.answer", json!({"id":"qp","answer":"toggle:1"})).await["ok"], true);
+    let ev = log_from(&hub, from).await;
+    assert!(ev.iter().any(|e| is(e, "SettingSet") && e["key"] == "order.pick.qp" && e["value"] == "1"), "{ev:?}");
+    assert!(!ev.iter().any(|e| is(e, "AskClosed")), "a tap closes nothing");
+    let from = len(&hub).await;
+    assert_eq!(rpc(&hub, "ask.answer", json!({"id":"qp","answer":"go"})).await["ok"], true);
+    let ev = until(&hub, from, 20, |ev| ev.iter().any(|e| is(e, "MessagePosted") && e["role"] == "user")).await;
+    let want = "Order: Main board · PCB · 5. Leave out: Bracket · CNC · 2.";
+    assert!(ev.iter().any(|e| is(e, "AskClosed") && e["answer"] == want), "{ev:?}");
+    assert!(ev.iter().any(|e| is(e, "MessagePosted") && e["role"] == "user" && e["text"] == want), "{ev:?}");
+    let n = len(&hub).await; assert_eq!(rpc(&hub, "ask.answer", json!({"id":"qp","answer":"go"})).await["ok"], true); tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(!log_from(&hub, n).await.iter().any(|e| is(e, "MessagePosted")), "it closes once");
+    ag.shutdown();
+}
 #[tokio::test(flavor = "multi_thread")] async fn recover_leaves_idle() { let ev = recovered("", "idle").await; assert!(!ev.iter().any(|e| turn_is(e, "interrupted")) && !ev.iter().any(|e| e["kind"] == "restart")) }
 #[tokio::test(flavor = "multi_thread")] async fn recover_empty_nothing() { let sd = dir("re-bin"); perf_standin(&sd, 1); let (hub, ag, _h, _w) = start("re", |w| base_log(w, 1, ""), |_| Cli::standin(&sd)).await; let n = len(&hub).await; tokio::time::sleep(Duration::from_millis(300)).await; assert_eq!(len(&hub).await, n); ag.shutdown() }
 

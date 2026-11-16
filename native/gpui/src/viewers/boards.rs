@@ -34,6 +34,8 @@ fn find_text(ui: &BoardsUi, cx: &App) -> String { ui.find.as_ref().map(|f| f.rea
 /// Open or shut the menu; opening reads the boards again and puts the keys in the search field.
 pub fn toggle(this: &mut Backplane, window: &mut Window, cx: &mut Context<Backplane>) {
     let ui = &mut this.screens.plotview.boards;
+    // the press that ends in this click shut the menu already (a press outside it, on this button): it stays shut
+    if !ui.open && crate::screens::popover::just_shut("boards") { cx.notify(); return }
     ui.open = !ui.open;
     if !ui.open { cx.notify(); return }
     if ui.find.is_none() {
@@ -102,7 +104,7 @@ pub fn picker(cx: &mut Context<Backplane>, light: bool, viewer: &Value, ui: &Boa
         let rows = matching(&all, &q);
         let mut menu = div().id("boards-menu").mt(px(4.)).w(px(420.)).max_h(px(480.)).overflow_y_scroll().flex().flex_col().gap(px(3.)).p(px(7.))
             .bg(c("panel")).border_1().border_color(c("line")).shadow_lg().text_size(crate::scale::tpx(12.)).occlude()
-            .on_mouse_down_out(cx.listener(|this, _, _, cx| { this.screens.plotview.boards.open = false; cx.notify(); }))
+            .on_mouse_down_out(cx.listener(|this, _, _, cx| { this.screens.plotview.boards.open = false; crate::screens::popover::shut("boards"); cx.notify(); }))
             .child(div().px_1().text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(trs("Find a board")));
         if let Some(f) = ui.find.clone() { menu = menu.child(div().id("boards-find").px_2().py_1().bg(c("bg")).border_1().border_color(c("line")).child(f)); }
         let root = viewer["boardsRoot"].as_str().unwrap_or("");
@@ -117,7 +119,8 @@ pub fn picker(cx: &mut Context<Backplane>, light: bool, viewer: &Value, ui: &Boa
                 .on_click(cx.listener(move |this, _, _, cx| pick(this, v.clone(), cx))));
         }
         if rows.is_empty() { menu = menu.child(div().px_2().py_1().text_color(c("dim")).child(trs("No matching boards"))); }
-        wrap = wrap.child(deferred(anchored().snap_to_window_with_margin(px(8.)).child(menu)).with_priority(3));
+        // under the button, never over it (anchored at the button's own corner it covered the button)
+        wrap = wrap.child(div().absolute().left_0().top(crate::scale::tpx(28.)).child(deferred(anchored().snap_to_window_with_margin(px(8.)).child(menu)).with_priority(3)));
     }
     Some(wrap.into_any_element())
 }

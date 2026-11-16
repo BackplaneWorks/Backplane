@@ -257,6 +257,8 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
     let sel = app.screens.mgmt.bom.sel.clone();
     // the panel's top row, on the same band as the page's bar: what it holds, where from, and the filter
     let summary = tf("gpui.mgmt.bom.summary", &[("parts", d["parts"].as_u64().unwrap_or(0).into()), ("lines", (all.len() as u64).into())]);
+    // where stock and prices come from (the hub's words): one catalogue; other distributors by the agent's API keys
+    let stock_note: Option<AnyElement> = d["stock_note"].as_str().filter(|t| !t.is_empty()).map(|t| div().flex_shrink_0().px_2().py(px(3.)).border_b_1().border_color(c("rule")).text_size(crate::scale::tpx(10.)).text_color(c("faint")).child(trs(t)).into_any_element());
     let top = div().flex_shrink_0().min_h(crate::scale::tpx(super::head::ROW_H)).flex().items_center().gap_2().px_2().border_b_1().border_color(c("rule")).text_size(crate::scale::tpx(11.))
         .child(div().flex_shrink_0().text_color(c("dim")).child(summary))
         // where the lines come from, as a state: live from the open KiCad (its unsaved edits too), or the saved file
@@ -324,10 +326,10 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
     // docked at the bottom the panel is short and wide: the line's editor sits beside the list instead of under it
     if app.screens.mgmt.peek()["side"] == "bottom" {
         let left = div().flex_1().min_w_0().h_full().flex().flex_col().child(head).child(list);
-        return div().size_full().flex().flex_col().child(top).child(div().flex_1().min_h_0().flex().flex_row().child(left)
+        return div().size_full().flex().flex_col().child(top).children(stock_note).child(div().flex_1().min_h_0().flex().flex_row().child(left)
             .children(editor.map(|e| div().id("bom-editor").w(px(380.)).flex_shrink_0().h_full().border_l_1().border_color(c("rule")).overflow_y_scroll().child(e)))).into_any_element()
     }
-    div().size_full().flex().flex_col().child(top).child(head).child(list).children(editor).into_any_element()
+    div().size_full().flex().flex_col().child(top).children(stock_note).child(head).child(list).children(editor).into_any_element()
 }
 
 /// The selected line's editor, under the list: its fields (Enter writes one), DNP, and where the last edit went.

@@ -203,6 +203,18 @@ impl Agents {
         let (now, th) = (now_s(), a.thread.clone());
         if a.tool == crate::mcpx::tools::TOOL { return crate::mcpx::tools::answer(self, ask, &th, &a.options, answer).await } // Settings > MCP: an agent's server change, confirmed or not
         if a.tool == crate::settings::proposal::TOOL { return { let open: Vec<String> = self.world().await.asks.iter().filter(|(_, k)| k.tool == crate::settings::proposal::TOOL).map(|(i, _)| i.clone()).collect(); crate::settings::proposal::answer_ask(self, ask, &th, &a.options, answer, now, &open).await } } // settings lane: Settings.answer
+        if a.tool == crate::settings::order::PICK_TOOL { // the list of what would be ordered: a tap flips an item and the card is drawn again; anything else answers it
+            use crate::settings::order as od;
+            let ans = answer.trim();
+            let off_now = { let w = self.world().await; w.setting(&od::pick_key(ask)).to_string() };
+            if let Some(i) = od::pick_toggle(ans) { self.commit_events(vec![json!({"$":"SettingSet","key":od::pick_key(ask),"value":od::pick_flip(&off_now, i),"at":now_s()})]).await; return Ok(()) }
+            let items: Vec<&str> = a.options.split('\n').map(str::trim).filter(|l| !l.is_empty()).collect();
+            let added = if ans == "go" { "" } else { ans };
+            let text = od::pick_answer(&items, &od::pick_off(&off_now), added);
+            let pend = self.pending_ev(&th, 0, ask, now).await;
+            self.commit_events(vec![json!({"$":"AskClosed","id":ask,"answer":text,"at":now}), json!({"$":"SettingSet","key":od::pick_key(ask),"value":"","at":now}), pend]).await;
+            return self.deliver(&th, &hub_id("m", now, self.seq()), &text, None, vec![]).await
+        }
         if a.tool.starts_with("order_ask") { // Hub.answer.order: it parks nothing: the answer is the person's message, which starts (or queues) the agent's turn however long they took
             let pend = self.pending_ev(&th, 0, ask, now).await; self.commit_events(vec![json!({"$":"AskClosed","id":ask,"answer":answer,"at":now}), pend]).await;
             return self.deliver(&th, &hub_id("m", now, self.seq()), crate::settings::order::answer_text(answer), None, vec![]).await
