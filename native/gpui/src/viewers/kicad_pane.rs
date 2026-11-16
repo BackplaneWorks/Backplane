@@ -154,6 +154,11 @@ pub fn waiting_on(info: &Value, have_frame: bool, windows: bool) -> Option<Strin
     if windows && info["mode"] == "stock" {
         return Some(crate::i18n::trs("The embedded editor needs Backplane KiCad."));
     }
+    // another live KiCad holds a document this one is about to open: the person answers before it opens (Open anyway / Cancel)
+    if let Some(a) = info["lock_ask"].as_object() {
+        let g = |k: &str| a.get(k).and_then(Value::as_str).unwrap_or("").to_string();
+        return Some(crate::i18n::tf("gpui.c.kicad.lock.ask", &[("file", g("file").into()), ("holder", g("holder").into())]));
+    }
     match info["state"].as_str().unwrap_or("") {
         // the hub has already tried a missed start window once more (embed.rs start_retry); the pane's Try again under this starts it again
         "failed" => Some(format!("{} {}", crate::i18n::trs("KiCad could not start:"), info["reason"].as_str().unwrap_or(""))),
@@ -218,7 +223,9 @@ pub fn handoff_holds(drawn_event: bool, drawn: bool, since_placed: std::time::Du
 }
 
 /// The pane offers Try again under its message: KiCad's start failed (the hub has already retried a missed start window once).
-pub fn try_again(info: &Value) -> bool { info["state"] == "failed" }
+pub fn try_again(info: &Value) -> bool { info["state"] == "failed" && !lock_asked(info) }
+/// The pane asks about another KiCad's lock (Open anyway / Cancel).
+pub fn lock_asked(info: &Value) -> bool { info["lock_ask"].is_object() }
 /// KiCad closed unexpectedly after it was ready: the pane's one button opens the editor again (a new KiCad).
 pub fn open_again(info: &Value) -> bool { info["state"] == "closed_unexpectedly" }
 /// What the pane says when KiCad died after it was ready, by what is on disk (the hub's `autosaves`): saved files are as last saved;
@@ -1143,7 +1150,7 @@ impl Render for KicadPane {
         let say = if handoff { None } else { waiting(&self.seen_info(), self.want().is_some()) };
         // a notice during the start: said under "Starting KiCad…" (and in the strip, where it stays once the editor is up)
         let notice = say.as_ref().and_then(|_| open_notice(&self.info)).map(|(_, t)| t);
-        let failed = self.failed(); let app = app_instead(&self.seen_info(), cfg!(windows)); let again = open_again(&self.seen_info());
+        let failed = self.failed(); let app = app_instead(&self.seen_info(), cfg!(windows)); let again = open_again(&self.seen_info()); let asked = lock_asked(&self.info);
         // macOS: in full screen KiCad's frame cannot be over the pane; it says so and offers the editor in a window of its own
         let say = if self.mac_full && self.info["state"] == "ready" { Some(crate::i18n::trs("KiCad cannot be shown here while Backplane is full screen on macOS. Pop it out into a window of its own, or leave full screen.")) } else { say };
         let full = self.mac_full && self.info["state"] == "ready";
@@ -1172,6 +1179,13 @@ impl Render for KicadPane {
                 .when(again, |d| d.child(crate::ui::with_rect(div().id("kicad-open-again"), || "kicad:open-again".to_string()).px_3().py_1().rounded_md().cursor_pointer()
                     .bg(c("accent")).text_color(c("text")).child(crate::i18n::t("gpui.c.kicad.open.again"))
                     .on_click(cx.listener(|this, _, _, cx| { this.reattach(); cx.notify(); }))))
+                .when(asked, |d| d.child(div().flex().flex_row().gap_2()
+                    .child(crate::ui::with_rect(div().id("kicad-lock-open"), || "kicad:lock-open".to_string()).px_3().py_1().rounded_md().cursor_pointer()
+                        .bg(c("raise")).hover(|x| x.bg(c("line"))).text_color(c("text")).child(crate::i18n::trs("Open anyway"))
+                        .on_click(cx.listener(|this, _, _, cx| { this.rpc("editor.kicad.lock", json!({"project": this.project, "answer": "open"})); cx.notify(); })))
+                    .child(crate::ui::with_rect(div().id("kicad-lock-cancel"), || "kicad:lock-cancel".to_string()).px_3().py_1().rounded_md().cursor_pointer()
+                        .bg(c("raise")).hover(|x| x.bg(c("line"))).text_color(c("text")).child(crate::i18n::trs("Cancel"))
+                        .on_click(cx.listener(|this, _, _, cx| { this.rpc("editor.kicad.lock", json!({"project": this.project, "answer": "cancel"})); cx.notify(); })))))
                 .when(failed, |d| d.child(crate::ui::with_rect(div().id("kicad-retry"), || "kicad:retry".to_string()).px_3().py_1().rounded_md().cursor_pointer()
                     .bg(c("raise")).hover(|x| x.bg(c("line"))).text_color(c("text")).child(crate::i18n::trs("Try again"))
                     .on_click(cx.listener(|this, _, _, cx| { this.reattach(); cx.notify(); }))))
@@ -1192,6 +1206,11 @@ mod tests {
         let say = super::waiting_on(&i("starting", "mac-permission-prompt"), false, false).unwrap();
         assert!(say.contains("macOS is asking for permission for Backplane"), "{say}");
         assert_eq!(super::waiting_on(&i("starting", ""), false, false).as_deref(), Some("Starting KiCad…"));
+        // another live KiCad's lock: asked before KiCad opens the document, whatever the state, over the editor too
+        let ask = super::waiting_on(&json!({"state": "starting", "lock_ask": {"file": "a.kicad_pro", "holder": "kicad (pid 55) of h at desktop"}}), false, false).unwrap();
+        assert!(ask.contains("a.kicad_pro") && ask.contains("pid 55") && ask.contains("anyway"), "{ask}");
+        assert!(super::waiting_on(&json!({"state": "ready", "lock_ask": {"file": "a.kicad_sch", "holder": "x"}}), true, false).is_some());
+        assert!(!super::try_again(&json!({"state": "failed", "lock_ask": {"file": "a"}})) && super::lock_asked(&json!({"lock_ask": {"file": "a"}})));
         // past 10 s a start says what KiCad is doing and for how long, never a silent "Starting KiCad…" (the fresh-home stall)
         let slow = |phase: &str, secs: u64| super::waiting_on(&json!({"state": "starting", "start_phase": phase, "starting_for_s": secs}), false, false).unwrap();
         assert_eq!(slow("socket", 9), "Starting KiCad…");

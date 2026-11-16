@@ -93,6 +93,9 @@ pub struct Session {
     /// a start's last step ("spawned", "socket", "answering", "first show") and when KiCad was started (epoch ms): a pane waiting on it
     /// says what KiCad is doing past 10 s, never a bare "Starting KiCad…" (the release check's fresh home, Nov 16)
     pub start_phase: String, pub start_at: u64,
+    /// a document KiCad is about to open is held by another live KiCad (not ours): {file, holder} put to the person in the pane, Open
+    /// anyway or Cancel, before KiCad opens it (bp.13 would open over it without asking); Null when nothing is asked
+    pub lock_ask: Value,
     /// in no pane, its frames left in the client's kept (unmapped) container: as good as detached for the warm cap and idleness
     pub parked: bool,
     pub touched_at: u64,
@@ -109,7 +112,7 @@ impl Session {
         Session {
             pro: pro.into(), root: root.into(), mode: mode.into(), state: "starting".into(),
             reason: String::new(), pid: 0, gen, active: canon_frame(active).into(),
-            container: 0, toplevel: 0, holder: 0, display: String::new(), start_phase: String::new(), start_at: 0,
+            container: 0, toplevel: 0, holder: 0, display: String::new(), start_phase: String::new(), start_at: 0, lock_ask: Value::Null,
             sock: String::new(), events_sock: String::new(), sock_dir: String::new(),
             argv: String::new(), cli: String::new(), version: String::new(), desc: String::new(),
             caps: vec![], frames: vec![], missed_pings: 0, dialogs: vec![], notices: vec![], drawn: vec![], keys: vec![], rss_mb: 0, task_wait: String::new(), parked: false, touched_at: now, closing: false, lost_parent: false, editor_req: (String::new(), String::new(), None),
@@ -221,7 +224,7 @@ impl Session {
             "keys": self.keys,
             "rss_mb": self.rss_mb,
             "task_wait": self.task_wait,
-            "start_phase": self.start_phase, "start_at": self.start_at,
+            "start_phase": self.start_phase, "start_at": self.start_at, "lock_ask": self.lock_ask,
             // what the embedded editor can do beyond the basics (embed-gerbview, embed-editor-requested, ...): the client gates on these
             "embed_caps": self.caps.iter().filter(|c| c.starts_with("embed-") || c.starts_with("prewarm-")).collect::<Vec<_>>(),
             // bp.9: the client may map and unmap a frame KiCad has shown once (its tab switches need no round trip)
@@ -1130,6 +1133,10 @@ enum Msg {
     /// a gated request on `sock` waits on KiCad's task (`what`), or no longer ("")
     TaskWait { sock: String, what: String },
     StartPhase { pro: String, gen: u64, what: String },
+    /// a launch or a document open waits on the person: another live KiCad holds `ask.file` (locks.rs); `answer` gets true for Open anyway
+    LockAsk { pro: String, gen: u64, ask: Value, answer: oneshot::Sender<bool> },
+    /// the person's answer from the pane (editor.kicad.lock)
+    LockAnswer { pro: String, open: bool },
     FramesUpdated { pro: String, gen: u64, holder: Option<u64>, frames: Vec<Frame>, reply: Option<(u64, oneshot::Sender<Result<Value, String>>)> },
     /// `editor`: KiCad's ET_EDITOR_REQUESTED (a library editor with the item it is for), not a plain ET_SHOW_REQUESTED
     ForkShowRequested { pro: String, gen: u64, kind: String, item: String, editor: bool, actor: String },
@@ -1168,6 +1175,8 @@ struct Actor {
     /// the runtime each project's latest start used, and the projects whose start was already retried once (start_retry)
     start_env: HashMap<String, Env>,
     start_retried: std::collections::HashSet<String>,
+    /// the launch or document open waiting on the person's answer to a foreign lock, by project
+    lock_waits: HashMap<String, oneshot::Sender<bool>>,
     /// the desktop clients that asked for KiCad (an attach, a show, a warm) and are still connected, and since when there has been none
     /// after there was one: the app closed, so its KiCads close too (APP_GONE_S)
     users: HashSet<u64>,
@@ -1543,6 +1552,7 @@ impl Actor {
         let mode_s = mode.to_string();
         let root_s = root.clone();
         let caps = env.caps.clone();
+        let lock_docs = launch_docs(&files, &sess.active);
         tokio::spawn(async move {
             // Retire any headless kserve for this project before the GUI opens its files: it holds the project's lock while it runs (the
             // GUI KiCad would ask "File Open Warning" outside the pane). It refuses while it has unsaved work (an agent's commit not yet
@@ -1555,6 +1565,14 @@ impl Actor {
                            let _ = me.send(Msg::StartPhase { pro: pro.clone(), gen, what: "handover".into() }); }
                 if t.elapsed() >= HANDOVER_WAIT { eprintln!("kicad embed: {pro}: the headless KiCad still has unsaved work after {} s; the editor starts anyway", HANDOVER_WAIT.as_secs()); break }
                 tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+            }
+            // the lock of every document this KiCad opens at launch (the project, the editor shown): a stale one is cleared and logged,
+            // one held by another live KiCad is put to the person before KiCad opens it (locks.rs)
+            for doc in lock_docs {
+                if !lock_gate(&me, &pro, gen, &doc, "before KiCad starts").await {
+                    let _ = me.send(Msg::StartFailed { pro: pro.clone(), gen, why: format!("Not opened: {} is open in another KiCad, and you chose Cancel", Path::new(&doc).file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default()) });
+                    return;
+                }
             }
             spawn_gui_session(me, home, pro, root_s, gen, mode_s, argv_vec, sock_dir, req_sock, eff_display, desc, active, spawn_container, sweep_locks, caps).await;
         });
@@ -1596,6 +1614,13 @@ impl Actor {
             early_replies().lock().unwrap().insert((snap.sock.clone(), seq), reply);
             tokio::spawn(async move {
                 let take = || early_replies().lock().unwrap().remove(&(snap.sock.clone(), seq));
+                // an editor whose document KiCad has not opened yet: its lock read first (locks.rs), another live KiCad's put to the person
+                if let Some(doc) = unopened_doc(&snap) {
+                    if !lock_gate(&me, &snap.pro, snap.gen, &doc, "before KiCad opens it").await {
+                        if let Some(r) = take() { let _ = r.send(Err(format!("Not opened: {} is open in another KiCad, and you chose Cancel", Path::new(&doc).file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default()))); }
+                        return;
+                    }
+                }
                 let synced = match switch_fork_frame_n(&me, &snap.sock, &snap.desc, &snap.active, &doc, &item, remount, focus, Some(seq)).await {
                     Ok(v) => v,
                     Err(e) if e == SUPERSEDED => { if let Some(r) = take() { let _ = r.send(Ok(snap.info_json())); } return; }
@@ -1797,6 +1822,18 @@ impl Actor {
                 } else {
                     let _ = reply.send(Ok(json!({"ok":true})));
                 }
+            }
+            Msg::LockAsk { pro, gen, ask, answer } => {
+                let Some(s) = self.sessions.get_mut(&pro).filter(|s| s.gen == gen) else { let _ = answer.send(false); return };
+                eprintln!("kicad embed: {pro}: {} is held by {}: the person is asked (Open anyway or Cancel)", ask["file"].as_str().unwrap_or(""), ask["holder"].as_str().unwrap_or(""));
+                s.lock_ask = ask; let snap = s.clone();
+                self.lock_waits.insert(pro.clone(), answer);
+                self.publish(&snap, None);
+            }
+            Msg::LockAnswer { pro, open } => {
+                let Some(answer) = self.lock_waits.remove(&pro) else { return };
+                if let Some(s) = self.sessions.get_mut(&pro) { s.lock_ask = Value::Null; let snap = s.clone(); self.publish(&snap, None); }
+                let _ = answer.send(open);
             }
             Msg::StartPhase { pro, gen, what } => {
                 let Some(s) = self.sessions.get_mut(&pro).filter(|s| s.gen == gen && s.state == "starting") else { return };
@@ -2338,6 +2375,46 @@ async fn stock_modified_docs(me: &mpsc::UnboundedSender<Msg>, sock: &str, desc: 
     (specs, names, supported)
 }
 
+/// The board or schematic the shown editor (`active`) opens when KiCad has no frame of that kind yet ("" none, or one already open).
+fn unopened_doc(s: &Session) -> Option<String> {
+    let (kind, ext) = match s.active.as_str() { "PCB" | "PCB_3D" => ("PCB", "kicad_pcb"), "SCH" => ("SCH", "kicad_sch"), _ => return None };
+    if s.frames.iter().any(|f| f.kind == kind) { return None }
+    let doc = Path::new(&s.pro).with_extension(ext);
+    doc.is_file().then(|| doc.to_string_lossy().to_string())
+}
+
+/// The documents a KiCad opens at launch: the project, and the shown editor's board or schematic.
+fn launch_docs(files: &Files, active: &str) -> Vec<String> {
+    let mut v = vec![files.pro.clone()];
+    match active { "PCB" | "PCB_3D" => v.push(files.pcb.clone()), "SCH" => v.push(files.sch.clone()), _ => {} }
+    v.retain(|d| !d.is_empty()); v
+}
+
+/// Before KiCad opens `doc`: its lock read (locks.rs). Stale: removed and logged. Ours: one of this hub's KiCads (the headless one being
+/// retired: waited on a little). Foreign: the person is asked in the pane; true to go on (nothing held, or Open anyway: the lock is
+/// removed), false for Cancel.
+async fn lock_gate(me: &mpsc::UnboundedSender<Msg>, pro: &str, gen: u64, doc: &str, when: &str) -> bool {
+    let (user, host) = super::locks::me();
+    let hub = std::process::id();
+    let mut v = super::locks::classify(super::locks::inspect(doc).as_ref(), hub, &user, &host);
+    // one of ours: the headless KiCad just retired lets go as it exits (up to 5 s)
+    for _ in 0..20 { if !matches!(v, super::locks::Verdict::Ours(_)) { break } tokio::time::sleep(Duration::from_millis(250)).await; v = super::locks::classify(super::locks::inspect(doc).as_ref(), hub, &user, &host); }
+    match v {
+        super::locks::Verdict::Stale => { super::locks::clear_stale(doc, &format!("{when}: nobody holds it, its KiCad ended")); true }
+        super::locks::Verdict::Ours(pid) => { eprintln!("kicad embed: {pro}: {doc} is still held by this hub's KiCad (pid {pid}) {when}"); true }
+        super::locks::Verdict::Foreign { .. } => {
+            let holder = super::locks::holder_words(&v);
+            let file = Path::new(doc).file_name().map(|f| f.to_string_lossy().to_string()).unwrap_or_default();
+            let (tx, rx) = oneshot::channel();
+            if me.send(Msg::LockAsk { pro: pro.into(), gen, ask: json!({"file": file, "path": doc, "holder": holder}), answer: tx }).is_err() { return false }
+            let open = rx.await.unwrap_or(false);
+            if open { super::locks::override_lock(doc, &holder); } else { eprintln!("kicad embed: {pro}: the person chose Cancel over {holder}'s lock on {file}"); }
+            open
+        }
+        _ => true,
+    }
+}
+
 fn sweep_crashed_locks(root: &str, pro: &str) {
     let mut dirs = vec![];
     if !root.is_empty() { dirs.push(PathBuf::from(root)); }
@@ -2349,8 +2426,9 @@ fn sweep_crashed_locks(root: &str, pro: &str) {
         for ent in rd.flatten() {
             let name = ent.file_name();
             let s = name.to_string_lossy();
+            // only a lock nobody holds (a live KiCad's, the person's own, is never swept: locks.rs)
             if s.starts_with('~') && s.ends_with(".lck") {
-                let _ = std::fs::remove_file(ent.path());
+                super::locks::clear_stale_file(&ent.path(), "a restart's sweep");
             }
         }
     }
@@ -2831,7 +2909,7 @@ pub fn start(hub: &Arc<Hub>) {
     });
     let mut a = Actor {
         hub: hub.clone(), me: tx.clone(), info_tx, helper: None, hgen: 0, next_id: 0, next_gen: 0,
-        pend: HashMap::new(), sessions: HashMap::new(), attach_waiters: HashMap::new(), start_env: HashMap::new(), start_retried: Default::default(),
+        pend: HashMap::new(), sessions: HashMap::new(), attach_waiters: HashMap::new(), start_env: HashMap::new(), start_retried: Default::default(), lock_waits: HashMap::new(),
         users: HashSet::new(), users_gone: None,
     };
     tokio::spawn(async move { while let Some(m) = rx.recv().await { a.handle(m) } });
@@ -2861,6 +2939,7 @@ const METHODS: &[&str] = &[
     "editor.kicad.dialogs",
     "editor.kicad.notice.dismiss",
     "editor.kicad.host",
+    "editor.kicad.lock",
 ];
 
 fn ok_reply(id: &Value, payload: Value) -> Vec<Value> {
@@ -2957,6 +3036,11 @@ impl RpcHandler for EmbedRpc {
             if method == "editor.kicad.notice.dismiss" {
                 let Some(nid) = p["id"].as_u64() else { return err_reply(id, "id is the notice's id") };
                 let _ = actor_tx.send(Msg::NoticeDismiss { pro: resolved.pro, id: nid });
+                return ok_reply(id, json!({}))
+            }
+            if method == "editor.kicad.lock" {
+                let open = match p["answer"].as_str() { Some("open") => true, Some("cancel") => false, _ => return err_reply(id, "answer is \"open\" or \"cancel\"") };
+                let _ = actor_tx.send(Msg::LockAnswer { pro: resolved.pro, open });
                 return ok_reply(id, json!({}))
             }
             if method == "editor.kicad.dialogs" {
