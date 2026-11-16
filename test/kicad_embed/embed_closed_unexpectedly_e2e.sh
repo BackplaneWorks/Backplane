@@ -62,7 +62,7 @@ SAY=$(grep -a 'GPUI_METRIC {"controls"' "$OUT/client.log" | grep -c '"kicad:open
 check "the pane offers Open the editor again" "$([ "${SAY:-0}" -gt 0 ] && echo 1 || echo 0)" "kicad:open-again listed $SAY times"
 check "and no Try again nor Open the KiCad app beside it" "$(grep -a 'GPUI_METRIC {"controls"' "$OUT/client.log" | tail -1 | grep -q '"kicad:retry"\|"kicad:app"' && echo 0 || echo 1)"
 check "the board file on disk is as last saved" "$([ "$(sha256sum "$PCB" | cut -d' ' -f1)" = "$SHA0" ] && echo 1 || echo 0)"
-AUTO2=$(ls "$PROJ"/_autosave-* "$PROJ"/*autosave* 2>/dev/null | head -3 | tr '\n' ' ' || true)
+AUTO2=$(ls -d "$PROJ"/_autosave-* "$PROJ"/.history 2>/dev/null | head -3 | tr '\n' ' ' || true)
 echo "INFO autosave files after the kill: ${AUTO2:-none}"
 echo "INFO the project folder after the kill: $(ls -A "$PROJ" | tr '\n' ' ')"
 find "$PROJ" -newer "$OUT/script.json" -type f ! -path '*/.git/*' 2>/dev/null | head -12 | sed 's/^/INFO written since the start: /' 
