@@ -339,7 +339,7 @@ impl Bots {
         let (bot, th) = (self.hub_id("b", now), self.hub_id("t", now));
         let provider = { let p = gs(a, "provider"); if p.is_empty() { self.hub.model().await.threads.get(&b.thread).map(|t| t.provider.clone()).unwrap_or_default() } else { p.to_string() } };
         let evs = vec![json!({"$":"ThreadCreated","id":th,"project":"","title":name,"env":"local","branch":"","worktree":"","provider":provider,"model":gs(a, "model"),"at":now}),
-            json!({"$":"BotSet","id":bot,"name":name,"thread":th,"look":super::rpc::seed(&name),"persona":gs(a, "persona"),"at":now}),
+            super::catrig::with(json!({"$":"BotSet","id":bot,"name":name,"thread":th,"look":super::cat::look_of(&name),"persona":gs(a, "persona"),"at":now}), super::cat::look_of(&name), true, ""),
             json!({"$":"SettingSet","key":format!("bot.parent.{bot}"),"value":b.id,"at":now})];
         let evs = self.accounts_created(evs).await;
         if let Err(e) = self.t_commit(w, now, evs).await { return fail(&e) }

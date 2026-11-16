@@ -80,7 +80,7 @@ fn bot_rows(st: &State, hub: &str, now: u64, uber: &str, mark: &Value) -> Vec<Va
             } else if t.map_or(false,|t|t.turn==crate::state::Turn::Failed) { ("error","failed") }
             else if now>t.map_or(0,|t|t.activity).saturating_add(900) { ("sleep","asleep") }else{("idle","ready")};
         json!({"id":format!("{hub}|{id}"),"name":name,"title":name,"act":if b.thread.is_empty(){"remote"}else{"bot"},
-            "look":b.look,"mood":mood,"note":note,"uber":!uber.is_empty()&&**id==uber,"sel":false,"remote":false,"peer":"","cat":format!("{}:{mood}",b.look),"key":id,"link":"",
+            "look":b.look,"color":b.color,"mood":mood,"note":note,"uber":!uber.is_empty()&&**id==uber,"sel":false,"remote":false,"peer":"","cat":format!("{}:{mood}",b.look),"key":id,"link":"",
             "nav":if b.thread.is_empty(){format!("@remote:{id}")}else{format!("{hub}|{}",b.thread)},"mark":mark,"menu":bot_menu(id,!far && **id!=uber)})
     }).collect()
 }
