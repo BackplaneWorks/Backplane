@@ -299,7 +299,8 @@ shot q7_nothing_selected
 # on the active layer's corridor then selects it (W, read back from the plan); RunAction togglePlanView turns plan view off and the next
 # click selects a board item, not a corridor; then on again. The mode is read from KiCad (the plan's PLAN_VIEW_FIELD), never from
 # pixels, and a refused call is never taken as done. Batch 10 and earlier answer AS_BUSY to all three in plan view: told as XFAIL.
-# Gate: capability ${PLAN_PASSIVE_CAP:-plan-view-passive} (the fork names it in batch 11), or PLAN_PASSIVE=expect.
+# Gate: capability ${PLAN_PASSIVE_CAP:-plan-view-api} (bp.13 batch 11, 96191cbb58), or PLAN_PASSIVE=expect. The mode: GetPlan's
+# PlanResponse.in_plan_view (field 3), true in plan view.
 BOARD_SPEC="{\"type\":\"DOCTYPE_PCB\",\"board_filename\":\"ecc83-pp.kicad_pcb\",\"project\":{\"name\":\"ecc83-pp\",\"path\":\"$PROJ\"}}"
 ipc_status() { # $1 type, $2 message: OK, or the refusal (AS_BUSY ...), from the call's own answer
   local o; o=$(ask kicad_ipc "{\"path\":\"$PCB\",\"type\":\"$1\",\"message\":$2}")
@@ -317,8 +318,9 @@ v = m.get(f)
 if v is None:
     try: v = json.loads(m.get("json", "{}")).get(f)
     except Exception: v = None
-print("?" if v is None else ("on" if v else "off"))' "${PLAN_VIEW_FIELD:-in_plan_view}"; }
-PASSIVE=${PLAN_PASSIVE:-$(echo "$CAPS7" | grep -q "${PLAN_PASSIVE_CAP:-plan-view-passive}" && echo expect || echo xfail)}
+# proto3 leaves a false bool out of the answer: where the build has the field (KNOWN=1), absent is off
+print(("off" if sys.argv[2] == "1" else "?") if v is None else ("on" if v else "off"))' "${PLAN_VIEW_FIELD:-in_plan_view}" "$([ "${PASSIVE:-}" = expect ] && echo 1 || echo 0)"; }
+PASSIVE=${PLAN_PASSIVE:-$(echo "$CAPS7" | grep -q "${PLAN_PASSIVE_CAP:-plan-view-api}" && echo expect || echo xfail)}
 pcheck() { if [ "$PASSIVE" = expect ]; then check "$1" "$2" "$3"; elif [ "$2" = 1 ]; then check "$1" 1 "$3"; else echo "XFAIL $1 (plan view is busy to the API before bp.13 batch 11): $3"; fi; }
 LA=$(active_layer); M0=$(plan_mode); echo "INFO Q9 ($PASSIVE): plan view $M0, active $LA"
 S1=$(ipc_status kiapi.board.commands.SetActiveLayer "{\"board\":$BOARD_SPEC,\"layer\":\"BL_B_Cu\"}"); L1=$(active_layer)
