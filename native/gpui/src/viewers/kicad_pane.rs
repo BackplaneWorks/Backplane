@@ -928,8 +928,9 @@ impl KicadPane {
             if over.iter().any(|o| *o != p) { over.retain(|o| *o != p); }
         }
         let show = self.want();
+        // (the pane's full-screen line comes and goes with our window's full screen: drawn again when it changes)
         #[cfg(target_os = "macos")]
-        self.mac_host(at, show);
+        if self.mac_host(at, show) { cx.notify(); }
         // bp.9 local map: the frames shown once are the client's to map and unmap, the switch with no round trip (KiCad follows the map state)
         let local = self.info["mode"] == "fork" && self.info["local_map"] == true;
         let managed: Option<Vec<u64>> = if local { None } else { (self.info["mode"] == "fork").then(|| {
@@ -1013,9 +1014,10 @@ impl KicadPane {
     /// macOS: KiCad's frame follows the pane by itself once it knows where the pane is on screen and whether our window can be seen
     /// (native_child_mac.rs); pushed when either changes, and our window ordered back below the frame after a click or an activation.
     #[cfg(target_os = "macos")]
-    fn mac_host(&mut self, at: Option<nc::R>, show: Option<u64>) {
+    fn mac_host(&mut self, at: Option<nc::R>, show: Option<u64>) -> bool {
         let full = nc::host_full_screen(self.toplevel);
-        if full != self.mac_full { self.mac_full = full; }
+        let redraw = full != self.mac_full;
+        if redraw { self.mac_full = full; }
         let visible = show.is_some() && nc::host_visible(self.toplevel);
         // a frame in which the pane's hitbox was not found (our window inactive while KiCad has the keyboard draws such frames) keeps
         // the last rect: leaving the pane goes through detach, and an unseen window through host_visible (run 5: hidden for good here)
@@ -1029,6 +1031,7 @@ impl KicadPane {
             }
             self.host_sent = now;
         }
+        redraw
     }
     /// Back to the viewer: the editor's windows leave the pane (KiCad stays warm in the hub).
     pub fn detach(&mut self) {
