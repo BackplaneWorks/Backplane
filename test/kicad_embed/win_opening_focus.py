@@ -576,6 +576,48 @@ def lck_held(path):
     return (not ok) and err in (33, 997)
 
 
+def rm_holders(path):
+    """The pids with a handle open on path (Windows' Restart Manager: RmStartSession, RmRegisterResources, RmGetList), [] if none."""
+    import ctypes as C
+    from ctypes import wintypes as WT
+    rm = C.WinDLL("rstrtmgr")
+    class UNIQ(C.Structure):
+        _fields_ = [("dwProcessId", WT.DWORD), ("ProcessStartTime", WT.FILETIME)]
+    class INFO(C.Structure):
+        _fields_ = [("Process", UNIQ), ("strAppName", WT.WCHAR * 256), ("strServiceShortName", WT.WCHAR * 64), ("ApplicationType", C.c_int),
+                    ("AppStatus", WT.ULONG), ("TSSessionId", WT.DWORD), ("bRestartable", WT.BOOL)]
+    sess, key = WT.DWORD(), C.create_unicode_buffer(64)
+    if rm.RmStartSession(C.byref(sess), 0, key) != 0:
+        return []
+    try:
+        arr = (WT.LPCWSTR * 1)(path)
+        if rm.RmRegisterResources(sess, 1, arr, 0, None, 0, None) != 0:
+            return []
+        need, have, reason = WT.UINT(0), WT.UINT(16), WT.DWORD()
+        infos = (INFO * 16)()
+        r = rm.RmGetList(sess, C.byref(need), C.byref(have), infos, C.byref(reason))
+        if r != 0:
+            return []
+        return [int(infos[i].Process.dwProcessId) for i in range(have.value)]
+    finally:
+        rm.RmEndSession(sess)
+
+
+HOLDER_PY = r"""
+import ctypes as C, json, sys, time
+from ctypes import wintypes as WT
+k = C.WinDLL("kernel32", use_last_error=True); k.CreateFileW.restype = WT.HANDLE
+lck = sys.argv[1]
+open(lck, "w").write(json.dumps({"hostname": "other-pc", "username": "someone", "token": "other"}))
+h = k.CreateFileW(lck, 0xC0000000, 0x7, None, 3, 0x80, None)
+class OV(C.Structure):
+    _fields_ = [("a", C.c_void_p), ("b", C.c_void_p), ("Offset", WT.DWORD), ("OffsetHigh", WT.DWORD), ("e", WT.HANDLE)]
+ov = OV(); ov.Offset = 0x40000000
+print("held", bool(k.LockFileEx(h, 0x3, 0, 1, 0, C.byref(ov))), flush=True)
+time.sleep(3600)
+"""
+
+
 def kicad_procs():
     """kicad.exe and kicad-cli.exe processes now: [(name, pid)]."""
     import subprocess as _sp
@@ -1454,6 +1496,16 @@ def run(h):
         with open(h.p("gpui-local.json"), "w", encoding="utf-8") as f:
             json.dump({"viewer_px": int(os.environ["BP_PANE_PX"])}, f)
         os.environ["BACKPLANE_GPUI_LOCAL"] = h.p("gpui-local.json")
+    foreign_holder = None
+    if only == "foreign":
+        import subprocess as _sp
+        lck = os.path.join(os.path.dirname(checks_project(h)), "~" + os.path.basename(checks_project(h)) + ".lck")
+        with open(h.p("holder.py"), "w") as f:
+            f.write(HOLDER_PY)
+        foreign_holder = _sp.Popen([sys.executable, h.p("holder.py"), lck], stdout=open(h.p("holder.log"), "w"), creationflags=0x08000000)
+        h.track_pid(foreign_holder.pid)
+        time.sleep(2)
+        print("INFO foreign holder " + json.dumps({"pid": foreign_holder.pid, "lck": lck, "held": lck_held(lck), "rm": rm_holders(lck)}), flush=True)
     if only == "libtable":
         # the person's own global tables, from before Backplane's library: KiCad's nested table and a library of theirs, no Backplane entries
         cfg = h.p("fh", "AppData", "Roaming", "kicad", "10.99")
@@ -1723,6 +1775,53 @@ def run(h):
             ms_ = round((t_first_paint - t_edit) * 1000) if t_first_paint and t_edit else None
             h.check("first Edit on a fresh home: the editor painted within 30 s, no box", ms_ is not None and ms_ <= 30000 and not nogpu_boxes,
                     {"edit_to_first_paint_ms": ms_, "boxes": nogpu_boxes})
+        if only == "foreign":
+            # lane B's embed_foreign_lock_e2e on Windows: another live KiCad (a stand-in holding the .lck's byte lock) has the project open
+            import subprocess as _sp
+            top_ = E.find_main_window(cp.pid)
+            lck = os.path.join(os.path.dirname(checks_project(h)), "~" + os.path.basename(checks_project(h)) + ".lck")
+            def wait_ctl(cid, secs):
+                end = time.monotonic() + secs
+                while time.monotonic() < end:
+                    if cid in h.controls():
+                        return True
+                    time.sleep(0.25)
+                return False
+            kexe = lambda: [p for n, p in kicad_procs() if n == "kicad.exe"]
+            asked = wait_ctl("kicad:lock-open", 30) and wait_ctl("kicad:lock-cancel", 5)
+            h.check("foreign L1: the pane asks Open anyway or Cancel; no KiCad started, no box", asked and not kexe() and not E.startup_box(),
+                    {"asked": asked, "kicad": kexe(), "box": E.startup_box(), "controls": sorted(c for c in h.controls() if c.startswith("kicad:"))})
+            h.click_control(top_, "kicad:lock-cancel"); time.sleep(2)
+            retry = wait_ctl("kicad:retry", 10)
+            h.check("foreign L2: Cancel: no KiCad starts, Try again offered, the other KiCad keeps its lock",
+                    retry and not kexe() and lck_held(lck) is True and foreign_holder.pid in rm_holders(lck), {"retry": retry, "kicad": kexe(), "held": lck_held(lck), "rm": rm_holders(lck)})
+            h.click_control(top_, "kicad:retry")
+            asked2 = wait_ctl("kicad:lock-open", 30)
+            h.click_control(top_, "kicad:lock-open")
+            t0 = time.monotonic()
+            ms_ = wait_painted(top_, t0, 90.0)
+            time.sleep(3)
+            ours = kexe()
+            hold = rm_holders(lck)
+            h.check("foreign L3: Try again asks again; Open anyway opens the editor with no box, our KiCad has the project's lock open",
+                    asked2 and ms_ is not None and not E.startup_box() and any(p in hold for p in ours), {"asked_again": asked2, "ms": ms_, "ours": ours, "rm_holders": hold})
+            # L4: the stand-in gone and our KiCad killed (its lock left, held by nobody); a stale lock on the next open is cleared and logged
+            E.kill_pid_tree(foreign_holder.pid)
+            for p in ours:
+                _sp.run(["taskkill", "/F", "/PID", str(p)], capture_output=True)
+            E.kill_pid_tree(cp.pid)
+            time.sleep(3)
+            with open(lck, "w") as f:
+                json.dump({"hostname": os.environ.get("COMPUTERNAME", ""), "username": os.environ.get("USERNAME", ""), "token": "dead"}, f)
+            cp2 = h.start_client([{"select": 0}, {"wait": 2200}, {"click": "rail:Board"}, {"wait": 2500}, {"click": "ui:Edit"},
+                                  {"kicad": {"wait_painted": 90000, "kind": "PCB", "tag": "ready"}}, {"mark": "ready"}, {"wait": 2000}], log_name="client2.log", hold=True, exit_after=200)
+            end = time.monotonic() + 150
+            while time.monotonic() < end and not any(m.get("event") == "mark" and m.get("name") == "ready" for m in h.metrics("client2.log") if isinstance(m, dict)):
+                time.sleep(0.5)
+            stale = [l.strip()[:200] for l in log_lines(h, "hub.log") if "kicad locks: removed the stale lock" in l]
+            ready = any(m.get("event") == "mark" and m.get("name") == "ready" for m in h.metrics("client2.log") if isinstance(m, dict))
+            h.check("foreign L4: a stale lock is cleared without asking, and the hub log says so", bool(stale) and ready and not E.startup_box(), {"logged": stale[:2], "ready": ready})
+            return h.finish()
         if only == "fresh_during":
             if fd_state.get("pid") and not fd_state.get("resumed"):
                 E.suspend_pid(fd_state["pid"], False)
