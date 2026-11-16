@@ -2191,9 +2191,11 @@ def run(h):
                         {"kicad_left_after_kill": left, "ms": ms_})
                 top = top2
             h.check(f"{only}: no top-level KiCad window at any point", not watch.boxes, watch.boxes)
-            gls = [w for w in E.list_child_windows(top) if w["visible"] and w["class"] == "wxGLCanvas"]
+            frs = [w for w in E.list_child_windows(top) if w["visible"] and "PCB Editor" in (w["title"] or "") and w["w"] > 300]
+            fr_ = max(frs, key=lambda w: w["w"] * w["h"])["hwnd"] if frs else 0
+            gls = [w for w in E.list_child_windows(fr_ or top) if w["visible"] and w["class"] == "wxGLCanvas"]
             gl = max(gls, key=lambda w: w["w"] * w["h"]) if gls else None
-            px, zoomed = plain_key_acts(h, gl, only, 0) if gl else (0, False)
+            px, zoomed = plain_key_acts(h, gl, only, fr_) if (gl and fr_) else (0, False)
             h.check(f"{only}: then the editor is responsive (a plain F2 acts)", bool(zoomed), {"f2_px": px, "canvas": bool(gl)})
             return h.finish()
         if only == "panels":
