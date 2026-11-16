@@ -1850,7 +1850,9 @@ def run(h):
             if only == "lock3":
                 h.check("lock3: the pre-warm and Edit together: exactly one KiCad process for the project", n_kicad == 1, {"kicad_exe": n_kicad, "max_seen": lock_watch.max_procs if lock_watch else None})
             else:
-                time.sleep(5)
+                end_ = time.monotonic() + 90
+                while time.monotonic() < end_ and len(lock_answers) < 2:
+                    time.sleep(0.5)
                 warn = [b for b in (lock_watch.boxes if lock_watch else []) if "Open" in b["title"] or "Warning" in b["title"]]
                 h.check("lock4: an agent's edit and a BOM read during the editor's start: no File Open Warning, both answered",
                         not warn and len(lock_answers) == 2 and all(a for a in lock_answers), {"answers": [str(a)[:300] for a in lock_answers], "warn": warn})
