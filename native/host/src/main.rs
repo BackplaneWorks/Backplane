@@ -144,6 +144,10 @@ async fn run(a: Args) -> Result<()> {
         let _ = std::fs::create_dir_all(&d);
         let _ = proc::KICAD_DOCUMENTS.set(d);
     }
+    // Python's bytecode caches for FreeCAD and everything else the hub starts, never inside an installed app (proc::PYCACHE)
+    { let d = a.home.join("cache").join("pycache"); let _ = std::fs::create_dir_all(&d); let _ = proc::PYCACHE.set(d); }
+    // macOS: and in FreeCAD's Python, which reads no PYTHON* variable but the user base (proc::PYUSERBASE)
+    if cfg!(target_os = "macos") { let d = a.home.join("cache").join("pyuser"); if proc::write_userbase(&d).is_ok() { let _ = proc::PYUSERBASE.set(d); } }
     // the port first: a port that is taken must end the start before anything else happens (it used to be bound last, after every interrupted agent had been started again)
     let listen = format!("{}:{}", a.host, a.port);
     let l = TcpListener::bind(&listen).await.with_context(|| format!("bind {listen}"))?;
