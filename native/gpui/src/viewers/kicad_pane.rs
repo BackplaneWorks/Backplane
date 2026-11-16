@@ -1440,7 +1440,9 @@ pub fn strip<V: 'static>(cx: &mut Context<V>, light: bool, pane: &Entity<KicadPa
     row = row.child(div().flex_1());
     let mk = |id: &'static str, label: String, tip: String, a: &'static str, cx: &mut Context<V>| {
         let act = act.clone();
-        div().id(id).px_2().py(px(3.)).text_size(crate::scale::tpx(12.)).border_1().border_color(c("line")).bg(c("raise")).cursor_pointer().hover(|s| s.bg(c("panel")))
+        // its rect under `kicad:<action>` (kicad:full, kicad:screen, kicad:popout, kicad:popin): a driver clicks the button itself, never a place
+        // measured once (real_use's fixed offset for Full size landed on Full screen once it was added beside it)
+        crate::ui::with_rect(div().id(id), move || format!("kicad:{a}")).px_2().py(px(3.)).text_size(crate::scale::tpx(12.)).border_1().border_color(c("line")).bg(c("raise")).cursor_pointer().hover(|s| s.bg(c("panel")))
             .tooltip(crate::keys::tip(&tip, "", light)).child(label)
             .on_click(cx.listener(move |this, _, window, cx| act(this, a, window, cx)))
     };

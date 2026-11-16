@@ -58,9 +58,10 @@ WARNED = set()
 TAB_AT = {"PCB": 31, "SCH": 92, "PCB_3D": 146}
 def click_ctl(cid):
     r = control(cid)
-    if not r and cid in ("kicad:full", "kicad:popout") and PANE:
-        pn = pane_now(); off = {"kicad:full": 114, "kicad:popout": 39}[cid]  # measured at 1800x1050 from the pane's right edge
-        return rt("click", pn["x"] + pn["w"] - off, pn["y"] - 15).get("t0")
+    if not r and cid in ("kicad:full", "kicad:screen", "kicad:popout"):
+        # the strip's buttons have their rects (kicad_pane.rs strip); a client without them is not guessed at: a place measured once from the
+        # pane's edge became Full screen's when it was added beside Full size, and every later journey read the editor as gone
+        print(f"DIAG no control {cid} (a client without the strip's rects)", flush=True); return None
     if not r and cid.startswith("kicad-tab:") and PANE:
         print(f"DIAG {cid}: no rect, clicking its measured place", flush=True) if cid not in WARNED else None; WARNED.add(cid)
         return rt("click", PANE["x"] + TAB_AT[cid.split(":", 1)[1]], PANE["y"] - 15).get("t0")
@@ -337,6 +338,10 @@ def tab(kind, tag, settle=1.4, check=True):
             time.sleep(3); got = on_show()
             if got != [kind]:
                 SHOW_MISSES.append({"tag": tag, "want": kind, "shown": got}); print(f"JANK {tag}: asked for {kind}, the pane shows {got or 'no KiCad frame'} {settle + 3:.1f} s after the press", flush=True)
+                # what on_show saw: every KiCad window shown, against the pane's place
+                for w in windows():
+                    if w.get("shown") and "kicad" in w.get("wm_class", "").lower() and w["w"] > 100:
+                        print(f"DIAG {tag}: {w.get('xid')} {w.get('wm_class')!r} {w.get('title')!r} at {w.get('root_x')},{w.get('root_y')} {w['w']}x{w['h']} (pane {PANE})", flush=True)
             else: print(f"JANK {tag}: {kind} on show only after {settle + 3:.1f} s", flush=True)
 
 XIN = os.path.join(os.environ["REPO_ROOT"], "test/cef/xinput.py")
