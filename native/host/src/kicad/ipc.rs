@@ -312,7 +312,10 @@ pub async fn publish_cad(hub: &Arc<Hub>) {
     let caps = env.caps.join(",");
     // the Backplane library the runtime pins (its manifest's backplaneLibrary): "2026.11.13 (314532f)", "" for none
     let library = if env.root.is_empty() || status == "stock" { String::new() } else { library_label(&manifest_of(&env.root)) };
-    for (k, v) in [("kicad.cli", env.cli.as_str()), ("kicad.version", version.as_str()), ("kicad.status", status.as_str()), ("kicad.source", source), ("kicad.caps", caps.as_str()), ("kicad.library", library.as_str()), ("freecad", fc.as_str())] { hub.set_info(k, v).await; }
+    // the update a person is offered where they work (the pane's strip at Edit, as well as Settings): this hub's package over an older
+    // Backplane runtime, with what it brings and its size; "" when there is none (install.rs `update_offer`)
+    let update = super::install::update_offer(super::install::package(), &status, &version, &env.caps).map_or(String::new(), |v| v.to_string());
+    for (k, v) in [("kicad.cli", env.cli.as_str()), ("kicad.version", version.as_str()), ("kicad.status", status.as_str()), ("kicad.source", source), ("kicad.caps", caps.as_str()), ("kicad.library", library.as_str()), ("kicad.update", update.as_str()), ("freecad", fc.as_str())] { hub.set_info(k, v).await; }
     // the libraries the selected runtime registers by default reach the person's existing tables (libtables.rs); a copy of the log changes nothing
     if !env.root.is_empty() && !crate::copy::on() {
         let (root, ver, home) = (PathBuf::from(&env.root), version.clone(), hub.cfg.home.clone());
