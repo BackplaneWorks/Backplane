@@ -33,6 +33,8 @@ SUITES=(
   "embed_comment_e2e.sh:comment"
   "embed_prewarm_e2e.sh:prewarm"
   "embed_click_e2e.sh:click"
+  # a click on one of KiCad's DRC markers keeps the editor where it is; Escape shuts a side panel before the viewer (fork; skips without Hubble_DK)
+  "embed_marker_click_e2e.sh:marker-click"
   "embed_thread_e2e.sh:thread"
   # a BOM edit lands for a symbol in a sub-sheet used twice (the fork's complex_hierarchy, copied), read back from the saved file (fork only)
   "embed_bom_sheets_e2e.sh:bom-sheets:BOM_CASE=twice"

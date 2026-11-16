@@ -128,7 +128,7 @@ impl Backplane {
             Event::KicadReply(m,reply)=>self.kicad_reply(m,reply,cx),
             Event::KicadComment(text)=>self.kicad_comment(&text,cx),
             Event::KicadProgress(text)=>{if let Some(p)=self.screens.kicad.clone(){let v:serde_json::Value=serde_json::from_str(&text).unwrap_or_default();p.update(cx,|p,cx|p.set_progress(v,cx));}},
-            Event::Mgmt(key,text)=>{screens::mgmt_checks::seen(&key,&text);if self.screens.mgmt.info(&key,&text){self.ui_epoch+=1;cx.notify();}},
+            Event::Mgmt(key,text)=>{{let open=self.screens.mgmt.peek()["open"]=="checks";screens::mgmt_checks::seen(&key,&text,open);}if self.screens.mgmt.info(&key,&text){self.ui_epoch+=1;cx.notify();}},
             Event::KicadReload(text)=>{if let Some(p)=self.screens.kicad.clone(){let v:serde_json::Value=serde_json::from_str(&text).unwrap_or_default();p.update(cx,|p,cx|p.set_reload(v,cx));}},
             Event::Using(home)=>{eprintln!("GPUI_LOG {}",serde_json::json!({"hub":"using","text":home.clone().unwrap_or_default()}));self.screens.offers.on_home=home;cx.notify();},
             Event::Answer(id,reply) if screens::hubpick::answered(self,id,&reply,cx)=>{},

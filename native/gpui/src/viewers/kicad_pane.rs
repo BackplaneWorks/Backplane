@@ -30,9 +30,6 @@ pub fn next_tab(at: &str, step: i32) -> &'static str {
 }
 
 /// The hub's frame kind for a rail page.
-/// Whether a button down outside the editor leaves it the keyboard: yes while that press began over the editor (a drag, or a layout that
-/// moved under the pointer mid-press), so only a press that starts elsewhere takes the keyboard back to Backplane.
-pub fn press_keeps(press_began_in_editor: bool) -> bool { press_began_in_editor }
 /// An editor.kicad.prewarm reply that builds nothing: refused (not ok), `prewarming: []`, or (a hub before 676b72333)
 /// `prewarmed: []` with no `prewarming`. `prewarming: true` (an older hub's memory refusal) cannot be told apart: kept.
 pub fn prewarm_builds_nothing(reply: &Value) -> bool {
@@ -736,7 +733,7 @@ impl KicadPane {
                 // a press that began over the editor stays the editor's until it ends, however the layout moves under it: a drag in KiCad
                 // that hits one of its DRC markers opens the Checks panel, the pane shrinks under the pointer, and the keyboard went to
                 // Backplane mid-drag (lane B, Hubble: the person's next Escape closed the viewer and the editor with it)
-                (Some(false), true) if !press_keeps(self.press_in) && !self.press_gave_keys => nc::focus(self.toplevel),
+                (Some(false), true) if !self.press_in && !self.press_gave_keys => nc::focus(self.toplevel),
                 (None, false) => { self.press_in = false; self.press_gave_keys = false; if let Some(pw) = self.press_focus.take() { if pw == w { nc::focus(w); } } }
                 (None, true) => { self.press_in = false; self.press_gave_keys = false; self.press_focus = None; }
                 _ => {}
@@ -1073,11 +1070,6 @@ mod tests {
         let (proj, root) = edit_target(&serde_json::Value::Null, key, "").unwrap();
         assert_eq!(warm_target(proj, root), "/p/Day_11/Day_11.kicad_pcb");
     }
-    #[test] fn a_press_that_began_in_kicad_keeps_the_keyboard_until_it_ends() {
-        assert!(super::press_keeps(true), "a drag from the editor out over the panel: KiCad keeps the keys");
-        assert!(!super::press_keeps(false), "a press that starts on Backplane's chrome takes them back");
-    }
-
     use super::{belongs_to, edit_target, frame_for, hub_open_step, nc, path_stem, pick, project_of, root_of, waiting, waiting_on, warm_target};
     use serde_json::{json, Value};
     #[test] fn ctrl_tab_goes_round_the_editor_tabs() {
@@ -1429,9 +1421,19 @@ pub fn strip<V: 'static>(cx: &mut Context<V>, light: bool, pane: &Entity<KicadPa
                 .on_click(move |_, _, cx| p.update(cx, |p, _| p.cancel_job(id))))));
     }
     // the design's checks ("DRC 12 · ERC 3", coloured only when not clean): a press opens the Checks panel
+    // a KiCad marker clicked with the Checks panel shut: the chip says that finding for a few seconds, and its press opens the panel on it
     if let Some((text, tone)) = crate::screens::mgmt_checks::chip_for(&pane.read(cx).project) {
         let a = act.clone();
-        mid = mid.child(crate::screens::mgmt_checks::chip_el(&text, tone, light).on_click(cx.listener(move |v, _, w, cx| a(v, "checks", w, cx))));
+        let flash = crate::screens::mgmt_checks::chip_flash();
+        let chip = match &flash {
+            Some((t, ..)) => crate::screens::mgmt_checks::chip_el(if t.is_empty() { &text } else { t }, "accent", light).border_color(c("accent")).bg(c("raise"))
+                .max_w(px(260.)).overflow_hidden().whitespace_nowrap().text_ellipsis(),
+            None => crate::screens::mgmt_checks::chip_el(&text, tone, light),
+        };
+        mid = mid.child(chip.on_click(cx.listener(move |v, _, w, cx| a(v, "checks", w, cx))));
+        if let Some((_, left, true)) = flash {
+            cx.spawn(async move |v, cx| { cx.background_executor().timer(left).await; let _ = v.update(cx, |_, cx| cx.notify()); }).detach();
+        }
     }
     // stock KiCad in the pane (the system's own, taken in window by window): said, with the way to Backplane KiCad (Settings, CAD asks first)
     if !popped && stock_hint(&pane.read(cx).info, cfg!(windows)) {

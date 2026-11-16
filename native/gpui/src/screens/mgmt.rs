@@ -120,6 +120,14 @@ pub fn set(app: &mut Backplane, want: Value, patch: Value, cx: &mut Context<Back
     let _ = app.tx.try_send(Command::Rpc("mgmt.panel".into(), Secret(p), "mgmt"));
     app.ui_epoch += 1; cx.notify();
 }
+/// Escape in Backplane: a panel open beside the design shuts first (the viewer, and the editor in it, only on the next Escape: a person
+/// pressing Escape twice to leave a KiCad tool lost the whole viewer when the keyboard was on the panel). Whether it did.
+pub fn escape(app: &mut Backplane, cx: &mut Context<Backplane>) -> bool {
+    if project_for(&app.data["thread"]).is_none() { return false }
+    let st = app.screens.mgmt.state();
+    let Some(open) = st["open"].as_str().filter(|o| !o.is_empty()).map(str::to_string) else { return false };
+    toggle(app, &open, cx); true
+}
 /// A tab pressed (or its key): opens that panel, or shuts it.
 pub fn toggle(app: &mut Backplane, id: &str, cx: &mut Context<Backplane>) {
     let st = app.screens.mgmt.state();

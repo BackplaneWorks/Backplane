@@ -370,6 +370,7 @@ impl Backplane {
         // a web page with the keyboard keeps its Esc (the old client gave the bot's page every key)
         let in_viewer = window.context_stack().iter().any(|k| k.contains("Viewer"));
         if in_viewer && crate::screens::viewer::active_kind(&self.data["thread"]["viewer"], None) == "browser" { return false }
+        if crate::screens::mgmt::escape(self, cx) { return true }
         if crate::screens::viewer::is_open(&self.data["thread"]) {
             self.screens.rail_pending = Some(String::new()); self.screens.rail_at = Some(std::time::Instant::now());
             let _ = self.tx.try_send(crate::screens::viewer::close()); self.want_focus = true; return true

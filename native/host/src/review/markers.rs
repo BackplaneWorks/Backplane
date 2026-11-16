@@ -61,17 +61,17 @@ pub async fn send(_hub: &Arc<Hub>, pro: &str, fs: &[Finding]) {
     }
 }
 
-/// ET_MARKER_CLICKED on one of ours: the Checks panel opens on the project, and the finding is published as the one to show
-/// (info `review.clicked.<digest>`: {id, at}). Answers whether the event was ours.
+/// ET_MARKER_CLICKED on one of ours: the finding is published as the one to show (info `review.clicked.<digest>`: {id, title, at}); the
+/// client shows it in an open Checks panel, else on the strip's chip (the panel is not opened: it would slide the canvas under the pointer).
+/// Answers whether the event was ours.
 pub fn on_event(pro: &str, ev: &Value) -> bool {
     if !(ev["type"] == "ET_MARKER_CLICKED" || ev["type"].as_i64() == Some(26)) || ev["marker"]["set"] != SET { return false }
     let id = ev["marker"]["id"].as_str().unwrap_or("").to_string();
+    let title = ev["marker"]["title"].as_str().unwrap_or("").to_string();
     let Some(ag) = crate::agents::handle() else { return true };
     let (hub, pro) = (ag.hub.clone(), pro.to_string());
     tokio::spawn(async move {
-        use crate::api::RpcHandler;
-        let _ = crate::files::kicad::mgmt::MgmtRpc.call(&hub, &crate::api::Caller { gen: String::new(), client: 0 }, &json!(0), "mgmt.panel", &json!({"project": pro, "open": "checks"})).await;
-        let _ = hub.set_info(&format!("review.clicked.{}", crate::files::kicad::kserve::digest(&pro)), &json!({"id": id, "at": crate::hub::now_ms()}).to_string()).await;
+        let _ = hub.set_info(&format!("review.clicked.{}", crate::files::kicad::kserve::digest(&pro)), &json!({"id": id, "title": title, "at": crate::hub::now_ms()}).to_string()).await;
     });
     true
 }
