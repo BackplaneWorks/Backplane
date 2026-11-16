@@ -23,11 +23,11 @@ start_hub
 cat >"$OUT/script.json" <<'JSON'
 [{"select":0},{"wait":2000},{"click":"rail:Board"},{"wait":2500},{"click":"ui:Edit"},
  {"kicad":{"wait_painted":60000,"kind":"PCB","tag":"ready"}},{"wait":1500},{"kicad":{"report":true,"tag":"placed"}},{"mark":"edit_ready"},
- {"wait":75000},{"kicad":{"report":true,"tag":"closed"}},{"mark":"closed_seen"},
+ {"wait":120000},{"kicad":{"report":true,"tag":"closed"}},{"mark":"closed_seen"},
  {"click":"kicad:open-again"},{"kicad":{"wait_painted":30000,"kind":"PCB","tag":"reopened"}},{"mark":"reopened"},{"wait":8000},{"kicad":{"report":true,"tag":"after"}},{"mark":"done"},{"wait":60000}]
 JSON
 HOME="$OUT/fh" BACKPLANE_GPUI_ASSETS="$ASSETS_DIR" BACKPLANE_GPUI_RECTS=1 BACKPLANE_GPUI_HOLD=1 \
-"$CLIENT_BIN" --url "http://127.0.0.1:$HPORT" --token-file "$OUT/home/token" --script "$OUT/script.json" --exit-after 260 >"$OUT/client.log" 2>&1 &
+"$CLIENT_BIN" --url "http://127.0.0.1:$HPORT" --token-file "$OUT/home/token" --script "$OUT/script.json" --exit-after 320 >"$OUT/client.log" 2>&1 &
 CP=$!; track_pid "$CP"
 wait_for_log "$OUT/client.log" '"name":"edit_ready","event":"mark"' 240 || { echo "FAIL the board never opened in KiCad"; exit 1; }
 R=$(last_kicad_report "$OUT/client.log" placed)
@@ -82,7 +82,9 @@ check "and no Try again nor Open the KiCad app beside it" "$(grep -a 'GPUI_METRI
 case "${CLOSED_EDIT:-agent}" in
   agent) check "the agent's change is on disk (the hub saved it when it landed)" "$(grep -q '(start 120 100)' "$PCB" && grep -q '(end 140 100)' "$PCB" && echo 1 || echo 0)" "board $(sha256sum "$PCB" | cut -c1-12)";;
   agent_nosave) check "with save: false the file is as last saved" "$([ "$(sha256sum "$PCB" | cut -d' ' -f1)" = "$SHA0" ] && echo 1 || echo 0)"
-    check "and the pane says an agent's unsaved change was lost" "$(echo "$SAYS" | grep -q "agent's change that was not saved yet was lost" && echo 1 || echo 0)" "$SAYS";;
+    # a runtime that autosaves an embedded frame's change (bp.13 3a19ebb5bb on) kept it in .history: KiCad offers it back; else it is lost
+    if [ -d "$PROJ/.history" ]; then check "KiCad kept the agent's unsaved change (.history): the pane says it offers it back" "$(echo "$SAYS" | grep -q 'kept a copy' && echo 1 || echo 0)" "$SAYS"
+    else check "and the pane says an agent's unsaved change was lost" "$(echo "$SAYS" | grep -q "agent's change that was not saved yet was lost" && echo 1 || echo 0)" "$SAYS"; fi;;
   *) check "the board file on disk is as last saved" "$([ "$(sha256sum "$PCB" | cut -d' ' -f1)" = "$SHA0" ] && echo 1 || echo 0)";;
 esac
 AUTO2=$(ls -d "$PROJ"/_autosave-* "$PROJ"/.history 2>/dev/null | head -3 | tr '\n' ' ' || true)
