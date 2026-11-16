@@ -221,6 +221,8 @@ pub struct KicadPane {
     born: std::time::Instant, handoff_placed: Option<(std::time::Instant, u64)>, handoff_over: bool,
     /// macOS: the pane's screen rect (points) and our window's visibility last pushed to KiCad (`editor.kicad.host`)
     pub host_sent: Option<(i32, i32, i32, i32, bool)>,
+    /// macOS: our window is in full screen, where KiCad's frame cannot be: the pane offers Pop out instead (a window of its own)
+    mac_full: bool,
     /// the .kicad_pro the hub resolved this pane's project to (its attach reply), "" until then
     pub bound: String,
     pub project: String, pub root: String, pub project_id: String, pub open: String, last_hub_open: String, hub: tokio::sync::mpsc::Sender<Command>,
@@ -358,7 +360,7 @@ impl KicadPane {
             last = std::time::Instant::now();
             let _ = drained_tx.send(());
         } }).detach();
-        KicadPane { born: std::time::Instant::now(), handoff_placed: None, handoff_over: false, host_sent: None, busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), last_root: (i32::MIN, 0), placed: None,
+        KicadPane { born: std::time::Instant::now(), handoff_placed: None, handoff_over: false, host_sent: None, mac_full: false, busy_sent: None, press_in: false, press_gave_keys: false, want_gerbers: Vec::new(), bound: String::new(), project, root, project_id, open, last_hub_open: hub_open, hub, container: None, toplevel: 0, attached: false, info: Value::Null, frames: Vec::new(), marker: Arc::default(), last_root: (i32::MIN, 0), placed: None,
             focus: cx.focus_handle(), keys: false, light: false, _subs: Vec::new(), kept: 0, press: Vec::new(), lent_at: None, poked: None, unmapped_since: None, unshown_since: None, override_kind: None, pending_show: None, theme_sent: false, home: 0, conflicts: Vec::new(), jobs: Vec::new(), ever_shown: Vec::new(), prewarmed: None, first_placed: None, at_px: None, dialogs_open: Vec::new(), took: None, await_close: None, press_focus: None, want_keys: true, refocus: None, verify_handin: None, prewarm_guard: None, unexplained_reposted: false, focus_seen: (0, 0), was_dialog: false }
     }
     fn rpc(&self, name: &str, params: Value) { let _ = self.hub.try_send(Command::Rpc(name.to_string(), Secret(params), "kicad")); }
@@ -1003,6 +1005,8 @@ impl KicadPane {
     /// (native_child_mac.rs); pushed when either changes, and our window ordered back below the frame after a click or an activation.
     #[cfg(target_os = "macos")]
     fn mac_host(&mut self, at: Option<nc::R>, show: Option<u64>) {
+        let full = nc::host_full_screen(self.toplevel);
+        if full != self.mac_full { self.mac_full = full; }
         let visible = show.is_some() && nc::host_visible(self.toplevel);
         let rect = at.and_then(|r| nc::screen_rect(self.toplevel, r));
         let now = rect.map(|(x, y, w, h)| (x, y, w, h, visible)).or_else(|| self.host_sent.map(|(x, y, w, h, _)| (x, y, w, h, false)));
@@ -1075,6 +1079,9 @@ impl Render for KicadPane {
         // a notice during the start: said under "Starting KiCad…" (and in the strip, where it stays once the editor is up)
         let notice = say.as_ref().and_then(|_| open_notice(&self.info)).map(|(_, t)| t);
         let failed = self.failed(); let app = app_instead(&self.seen_info(), cfg!(windows));
+        // macOS: in full screen KiCad's frame cannot be over the pane; it says so and offers the editor in a window of its own
+        let say = if self.mac_full && self.info["state"] == "ready" { Some(crate::i18n::trs("KiCad cannot be shown here while Backplane is full screen on macOS. Pop it out into a window of its own, or leave full screen.")) } else { say };
+        let full = self.mac_full && self.info["state"] == "ready";
         let marker = self.marker.clone(); let focus = self.focus.clone();
         let keys = self.keys;
         // its rect as `kicad:pane` (an e2e judges KiCad's frame against the pane as it is drawn now: a panel, Full size, Full screen change it)
@@ -1100,6 +1107,9 @@ impl Render for KicadPane {
                 .when(failed, |d| d.child(crate::ui::with_rect(div().id("kicad-retry"), || "kicad:retry".to_string()).px_3().py_1().rounded_md().cursor_pointer()
                     .bg(c("raise")).hover(|x| x.bg(c("line"))).text_color(c("text")).child(crate::i18n::trs("Try again"))
                     .on_click(cx.listener(|this, _, _, cx| { this.reattach(); cx.notify(); }))))
+                .when(full, |d| d.child(crate::ui::with_rect(div().id("kicad-pop-full"), || "kicad:pop-full".to_string()).px_3().py_1().rounded_md().cursor_pointer()
+                    .bg(c("raise")).hover(|x| x.bg(c("line"))).text_color(c("text")).child(crate::i18n::trs("Pop out"))
+                    .on_click(cx.listener(|_, _, _, cx| cx.emit(PaneKey("kicad-popout".into()))))))
                 // the editor cannot be here: the same design in the KiCad app instead, by the person's own press (never by itself)
                 .when(app, |d| d.child(crate::ui::with_rect(div().id("kicad-app"), || "kicad:app".to_string()).px_3().py_1().rounded_md().cursor_pointer()
                     .bg(c("raise")).hover(|x| x.bg(c("line"))).text_color(c("text")).child(crate::i18n::trs("Open the KiCad app instead"))
@@ -1451,6 +1461,8 @@ impl crate::Backplane {
         cx.subscribe(&page, |this, _, e: &PaneKey, cx| {
             if e.0 == "ctrl-;" || e.0 == ";" { this.kcomment_open(None, cx); return }
             // the pane's "Open the KiCad app instead" (the editor could not be here): back to the viewer, and the hub starts KiCad on what it shows
+            // the pane's Pop out (macOS full screen: KiCad cannot be over the pane there)
+            if e.0 == "kicad-popout" { this.kicad_popout(cx); return }
             if e.0 == "kicad-app" { let open = crate::screens::viewer::kicad_open(&this.data["thread"]["viewer"]); this.kicad_view(cx); let _ = this.tx.try_send(open); return }
             // a management panel's key handed over by KiCad: the panel whose binding it is (the person's, from Settings)
             if let Some(id) = ["bom", "checks", "life", "fab"].into_iter().find(|id| this.local.key(&format!("mgmt-{id}")) == e.0) { crate::screens::mgmt::toggle(this, id, cx); }

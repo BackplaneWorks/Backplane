@@ -91,6 +91,11 @@ pub fn host_visible(top: u64) -> bool {
     }
 }
 
+/// Our window is in full screen: KiCad's frame cannot be shown over it (another app's window cannot join that Space).
+pub fn host_full_screen(top: u64) -> bool {
+    unsafe { let w = ns_window(top); if w.is_null() { return false } const FULL_SCREEN: usize = 1 << 14; send_usize(w, c"styleMask") & FULL_SCREEN != 0 }
+}
+
 /// After a click or an activation our window is above KiCad's frame `frame`: order ours just below it again (no IPC; KiCad keeps its
 /// frame directly above us otherwise). True when it re-ordered.
 pub fn keep_below(top: u64, frame: u64) -> bool {
