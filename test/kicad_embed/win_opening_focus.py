@@ -555,6 +555,27 @@ def mouse_return_check(h, cp, frame, children, timeline, rounds=None, kpid=0):
 LIBTABLE_MINE = {}
 
 
+def lck_held(path):
+    """bp.13's KiCad lock on Windows (FILE_LOCK): a 1-byte LockFileEx at 0x40000000 held for the owner's life. True: held by a live
+    process; False: free (stale or no holder); None: no lock file."""
+    import ctypes as C
+    from ctypes import wintypes as WT
+    k32 = C.WinDLL("kernel32", use_last_error=True)
+    k32.CreateFileW.restype = WT.HANDLE
+    h_ = k32.CreateFileW(path, 0x80000000, 0x7, None, 3, 0x80, None)
+    if h_ in (None, WT.HANDLE(-1).value) or h_ == -1:
+        return None
+    class OV(C.Structure):
+        _fields_ = [("Internal", C.c_void_p), ("InternalHigh", C.c_void_p), ("Offset", WT.DWORD), ("OffsetHigh", WT.DWORD), ("hEvent", WT.HANDLE)]
+    ov = OV(); ov.Offset = 0x40000000
+    ok = k32.LockFileEx(h_, 0x2 | 0x1, 0, 1, 0, C.byref(ov))
+    err = C.get_last_error()
+    if ok:
+        k32.UnlockFileEx(h_, 0, 1, 0, C.byref(ov))
+    k32.CloseHandle(h_)
+    return (not ok) and err in (33, 997)
+
+
 def kicad_procs():
     """kicad.exe and kicad-cli.exe processes now: [(name, pid)]."""
     import subprocess as _sp
@@ -1584,6 +1605,7 @@ def run(h):
         nogpu_boxes = []
         t_first_paint = 0.0
         lock_watch, lock_answers = None, []
+        fd_state = {}
         box_obs = {}
         box_since = None
         while cp.poll() is None and time.monotonic() - started < (100 if observe else 65):
@@ -1630,6 +1652,11 @@ def run(h):
             if not clicked_edit and (early or ("ready_for_edit" in marks and (painted or (ready_seen and time.monotonic() - ready_seen > 40)))):
                 if ready_seen:
                     timeline.append({"stage": "edit_waited_for_plot", "ms": round((time.monotonic() - ready_seen) * 1000), "painted": painted})
+                if only == "fresh_during":
+                    # lane B's FRESH_AGENT=during: an agent's kicad_ipc_status while the editor's KiCad starts
+                    import threading
+                    lock_watch = BoxWatch().start()
+                    threading.Thread(target=lambda: lock_answers.append(standin_ask(h, "kicad_ipc_status", {}, "fd-status")), daemon=True).start()
                 if only in ("lock3", "lock4") and not lock_watch:
                     lock_watch = BoxWatch().start()
                 if only == "lock3":
@@ -1682,6 +1709,12 @@ def run(h):
                     box_obs["gone_ms"] = round((time.monotonic() - started) * 1000)
             if t_edit and not t_first_paint and "first_paint" in {r for r in h.kicad_reports()}:
                 t_first_paint = time.monotonic()
+            if only == "fresh_during" and clicked_edit and not fd_state.get("pid"):
+                kp = [p for n, p in kicad_procs() if n == "kicad.exe"]
+                if kp:
+                    fd_state.update(pid=kp[0], at=time.monotonic(), ok=E.suspend_pid(kp[0], True))
+            if fd_state.get("pid") and not fd_state.get("resumed") and time.monotonic() - fd_state["at"] >= 12.0:
+                E.suspend_pid(fd_state["pid"], False); fd_state["resumed"] = True
             if "opening_settled" in marks:
                 settled = True
                 break
@@ -1690,6 +1723,24 @@ def run(h):
             ms_ = round((t_first_paint - t_edit) * 1000) if t_first_paint and t_edit else None
             h.check("first Edit on a fresh home: the editor painted within 30 s, no box", ms_ is not None and ms_ <= 30000 and not nogpu_boxes,
                     {"edit_to_first_paint_ms": ms_, "boxes": nogpu_boxes})
+        if only == "fresh_during":
+            if fd_state.get("pid") and not fd_state.get("resumed"):
+                E.suspend_pid(fd_state["pid"], False)
+            top_ = E.find_main_window(cp.pid)
+            ms_ = wait_painted(top_, t_edit, 30.0) if t_edit else None
+            time.sleep(2)
+            if lock_watch:
+                lock_watch.stop()
+            lck = os.path.join(os.path.dirname(checks_project(h)), "~" + os.path.basename(checks_project(h)) + ".lck")
+            n_kicad = len([p for p in kicad_procs() if p[0] == "kicad.exe"])
+            h.check("fresh_during: first Edit on a fresh home (KiCad's start held 12 s) painted within 30 s", ms_ is not None and ms_ <= 30000, {"ms": ms_, "late_launcher": fd_state})
+            h.check("fresh_during: no File Open Warning or any KiCad box", lock_watch is not None and not lock_watch.boxes, lock_watch.boxes if lock_watch else None)
+            h.check("fresh_during: one KiCad holds the project's lock (the .lck byte lock held, one kicad.exe, no headless KiCad alongside during the start)",
+                    lck_held(lck) is True and n_kicad == 1 and (lock_watch.max_procs if lock_watch else 9) <= 1,
+                    {"lck": lck, "held": lck_held(lck), "kicad_exe": n_kicad, "max_kicad_procs_at_once": lock_watch.max_procs if lock_watch else None})
+            time.sleep(3)
+            h.check("fresh_during: the agent's kicad_ipc_status during the start was answered", bool(lock_answers and lock_answers[0]), [str(a)[:400] for a in lock_answers])
+            return h.finish()
         if only in ("lock3", "lock4"):
             if lock_watch:
                 time.sleep(3); lock_watch.stop()
