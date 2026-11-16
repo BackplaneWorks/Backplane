@@ -230,6 +230,7 @@ impl Backplane {
     fn term_show(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let key = crate::screens::attach::raw_id(&self.selected).to_string();
         if key.is_empty() { self.error = trs("Open a thread first: the terminal works in its folder."); cx.notify(); return }
+        self.kicad_lend(cx);
         let t = &mut self.screens.term; t.open = true; t.key = key.clone(); t.sel = None; t.scroll = 0;
         let fresh = t.ensure(&key); let (c, r) = t.size;
         self.term_rpc("term.open", json!({"thread": key, "cols": c, "rows": r}));
@@ -242,7 +243,7 @@ impl Backplane {
         let t = &mut self.screens.term; t.open = false; t.dragging = false;
         // a chat terminal popped out goes back to its card's size
         if let Some(home) = t.card(&t.key).map(|c| c.home).filter(|h| h.0 > 0) { let key = t.key.clone(); self.term_rpc("term.resize", json!({"thread": key, "cols": home.0, "rows": home.1})); }
-        self.want_focus = true; self.ui_epoch += 1; cx.notify(); true
+        self.want_focus = true; self.ui_epoch += 1; self.kicad_return(cx); cx.notify(); true
     }
     fn term_act(&mut self, what: Toggle, window: &mut Window, cx: &mut Context<Self>) {
         match what { Toggle::Show => self.term_show(window, cx), Toggle::Focus => { self.screens.term.take_keys(window); cx.notify(); } Toggle::Hide => { self.term_hide(cx); } }
