@@ -71,7 +71,9 @@ fun ViewerScreen(thread: DThread, file: String = "", line: Int = 0, back: () -> 
     val online = DataClient.conn == DataClient.Conn.ONLINE
     LaunchedEffect(thread.id, online) {
         if (files != null) return@LaunchedEffect
-        files = runCatching { DataClient.viewerFiles(thread.id) }.getOrNull(); if (files?.pcb?.isNotEmpty() == true && tab == "Files" && file.isEmpty()) tab = "Board"
+        // a slow or dropped answer is asked again (three tries): without it the picker and the pages' files never came until the viewer was reopened
+        for (i in 0 until 3) { files = runCatching { DataClient.viewerFiles(thread.id) }.getOrNull(); if (files != null) break; kotlinx.coroutines.delay(1500L * (i + 1)) }
+        if (files?.pcb?.isNotEmpty() == true && tab == "Files" && file.isEmpty()) tab = "Board"
         DataClient.openViewerTab?.takeIf { it in tabs }?.let { tab = it; DataClient.openViewerTab = null }
     }
     // the project's boards (two or more: the hub's `boards`): a pick shows that board on Board, Schematic, 3D and Split, as the desktop's Boards menu does
