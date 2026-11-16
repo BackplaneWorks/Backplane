@@ -1573,12 +1573,33 @@ elif "checks" in JOURNEYS and SOCK:
         since = ipc("events", SOCK, "0").get("next", 0)
         box = {}
         th = None
+        # the hub's own check lines as they appear, timestamped here (hub.log has no clock): its automatic DRC starts and the times
+        # KiCad held one for its canvas ("canvas in use"), against the pan (canvas-idle, bp.13 batch 11)
+        tl, stop_tl = [], threading.Event()
+        def tail_hub():
+            hp = os.path.join(OUT, "hub.log"); at = os.path.getsize(hp) if os.path.exists(hp) else 0
+            while not stop_tl.is_set():
+                try:
+                    with open(hp, errors="ignore") as f_: f_.seek(at); new_ = f_.read(); at = f_.tell()
+                    for l_ in new_.splitlines():
+                        if l_.startswith("checks:") or "canvas in use" in l_: tl.append([round(now()), l_[:200]])
+                except Exception: pass
+                stop_tl.wait(0.05)
+        tth = threading.Thread(target=tail_hub, daemon=True); tth.start()
         if kind == "pcb":
             th = threading.Thread(target=lambda: box.update(r=rt("pan", CX, CY, min(PANE["w"], PANE["h"]) // 5, 6, 2, 120))); th.start(); time.sleep(0.3)
         t0 = now(); st = ipc("run-checks", SOCK, kind); call_ms = round(now() - t0)
         done = wait_event(since, 27, 300, lambda e: not st.get("progress_id") or e["checks"].get("progress_id") == st.get("progress_id"))
         ms = round(now() - t0) if done else -1
         if th: th.join()
+        time.sleep(1.0); stop_tl.set(); tth.join(1)
+        if kind == "pcb":
+            pr = box.get("r") or {}; p0, p1 = pr.get("t0"), pr.get("t1")
+            rel = [[(t_ - p0) if p0 else None, l_] for t_, l_ in tl]
+            RESULTS["pan_drc_timeline"] = {"ms": None, "pan_ms": round(p1 - p0) if p0 and p1 else None, "run_checks_at": round(t0 - p0) if p0 else None,
+                                           "run_checks_answer": {k: st.get(k) for k in ("ok", "progress_id", "error") if k in st}, "done_at": round(now() - p0) if p0 else None, "hub": rel}
+            print(f"INFO pan during DRC: pan {RESULTS['pan_drc_timeline']['pan_ms']} ms; the journey's RunChecks at +{RESULTS['pan_drc_timeline']['run_checks_at']} ms "
+                  f"({RESULTS['pan_drc_timeline']['run_checks_answer']}); hub lines (ms from the pan's start): {rel}", flush=True)
         if box.get("r"): EVENTS.append({"kind": "input", "t0": box["r"]["t0"], "t1": box["r"]["t1"], "tag": f"pan_during_{tag}"})
         c = (done or {}).get("checks", {}); mk = ipc("get-markers", SOCK, kind)
         perf(tag, ms, call_ms=call_ms, errors=c.get("errors"), warnings=c.get("warnings"), exclusions=c.get("exclusions"),
