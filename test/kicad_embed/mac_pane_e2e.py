@@ -177,6 +177,12 @@ if os.environ.get('MAC_MODE') == 'libs':
     with open(os.path.join(OUT, 'bin/claude'), 'w') as f:
         f.write('#!/bin/sh\nexec /usr/bin/python3 ' + os.path.join(REPO, 'test/kicad_embed/mac/standin_agent.py') + ' "$@"\n')
     os.chmod(os.path.join(OUT, 'bin/claude'), 0o755)
+if os.environ.get('MAC_MODE') == 'narrow':
+    # a fresh profile's own panels (Climb B: the seed's pcbnew.json and eeschema.json hide them; KiCad's defaults are what a person meets)
+    for root in (os.path.join(OUT, 'fh/.config/kicad'), os.path.join(OUT, 'fh/Library/Preferences/kicad')):
+        for dp, _, fs in os.walk(root):
+            for t in ('pcbnew.json', 'eeschema.json'):
+                if t in fs: os.unlink(os.path.join(dp, t))
 tmp = tempfile.mkdtemp(prefix='bpk-', dir='/tmp')   # a Unix socket path is at most 104 bytes on macOS
 port = 3893
 env = dict(os.environ, HOME=os.path.join(OUT, 'fh'), TMPDIR=tmp, BACKPLANE_KICAD_CLI=os.path.join(RT, 'bin/kicad-cli'),
