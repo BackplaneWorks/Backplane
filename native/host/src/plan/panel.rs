@@ -129,14 +129,17 @@ pub async fn focus(hub: &Arc<Hub>, pro: &str, id: &str) -> Result<Value, String>
     // plan view is put back in it (bp.13 batch 11 `plan-view-api` serves the toggle there), the zoom kept
     let in_view = |m: &Value| m["in_plan_view"] == true;
     let was = super::call(hub, None, &pcb, "GetPlan", json!({"board": crate::fab::setup::spec(&pcb), "derived": false})).await.map_or(false, |m| in_view(&m));
-    // in plan view, a KiCad with `plan-select` (bp.13 batch 12) selects the plan item itself, as a click would: its layer active, plan
-    // view kept, zoomed to it. Without it (or if it refuses), the copper and the re-entry below.
+    // a KiCad with `plan-select` (bp.13 batch 12): in plan view the row selects the plan item itself, as a click would (W/A/R act on it),
+    // its layer active, zoomed, plan view kept. Without it: the copper selected and, from plan view, the re-entry below.
     if let (true, Some(route)) = (was, crate::files::kicad::embed::gui_route(pro).filter(|r| r.caps.iter().any(|c| c == PLAN_SELECT))) {
         let o = crate::files::kicad::embed::gui_call(&route, &format!("{}SelectPlanItems", super::NS), json!({"board": crate::fab::setup::spec(&pcb), "ids": [id], "zoom": true})).await;
         if o["ok"] == true {
-            let unknown = o["message"]["unknown"].clone();
-            return Ok(json!({"kicad": true, "via": "SelectPlanItems", "plan_view": "kept", "layer": layer, "layer_active": true, "selected": [id], "unknown": if unknown.is_null() { json!([]) } else { unknown }}))
+            let m = &o["message"];
+            let active = m["active_layer"].as_str().unwrap_or(&layer).to_string();
+            return Ok(json!({"kicad": true, "via": "SelectPlanItems", "plan_view": if m["in_plan_view"] == true { "kept" } else { "left" }, "layer": active, "layer_active": true,
+                "selected": m["selected"].clone(), "missing": if m["missing"].is_null() { json!([]) } else { m["missing"].clone() }}))
         }
+        if o["status"] == "AS_BAD_REQUEST" { return Err(format!("KiCad has no plan item {id}")) }
     }
     let mut v = crate::files::kicad::xprobe::select(hub, &json!({"project": pro, "references": refs, "nets": nets, "pins": [], "show": "PCB", "zoom": true})).await?;
     if was {
@@ -155,7 +158,8 @@ pub async fn focus(hub: &Arc<Hub>, pro: &str, id: &str) -> Result<Value, String>
     }
     Ok(v)
 }
-/// The runtime capability for selecting plan items by id (kiapi.backplane.plan.SelectPlanItems; bp.13 batch 12, else bp.13.1).
+/// The runtime capability for selecting plan items by id (kiapi.backplane.plan.SelectPlanItems {board, ids, zoom} -> {selected, missing,
+/// active_layer, in_plan_view}; bp.13 batch 12, else bp.13.1).
 pub const PLAN_SELECT: &str = "plan-select";
 /// KiCad's API name of a board layer ("B.Cu" -> "BL_B_Cu", "In1.Cu" -> "BL_In1_Cu").
 pub fn board_layer(name: &str) -> String { format!("BL_{}", name.replace('.', "_")) }
