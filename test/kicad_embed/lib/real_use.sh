@@ -19,7 +19,8 @@ REAL_RUNTIMES=(
 # the fork's plan demo (scripts/backplane-plan-demo.py) at the runtime's own BACKPLANE_COMMIT, read from the fork's git (never its worktree)
 KICAD_FORK=${KICAD_FORK:-$HOME/Documents/Backplane/Backplane_KiCad}
 plan_demo() {  # plan_demo RUNTIME_KICAD OUT.py: 0 when the runtime has a plan demo
-  local rd c; rd=$(dirname "$(dirname "$1")"); c=$(cat "$rd/BACKPLANE_COMMIT" 2>/dev/null || true)
+  # a release CI runtime has SOURCE_COMMIT only (no BACKPLANE_COMMIT): bp.13 batches 8 and 9 skipped their plan copies without it
+  local rd c; rd=$(dirname "$(dirname "$1")"); c=$(cat "$rd/BACKPLANE_COMMIT" 2>/dev/null || cat "$rd/SOURCE_COMMIT" 2>/dev/null || true)
   [ -n "$c" ] && git -C "$KICAD_FORK" show "$c:scripts/backplane-plan-demo.py" >"$2" 2>/dev/null && [ -s "$2" ]
 }
 
