@@ -166,6 +166,13 @@ pub fn waiting_on(info: &Value, have_frame: bool, windows: bool) -> Option<Strin
     }
 }
 
+/// KiCad's own dialog up while the keyboard is elsewhere (an agent's or the API's Plot, DRC...: it never takes the person's keyboard,
+/// lead's rule): the strip says so, its title; None while KiCad has the keyboard (the dialog has it) or no dialog is up.
+pub fn asking(dialogs: &[String], kicad_has_keys: bool) -> Option<String> {
+    if kicad_has_keys { return None }
+    dialogs.last().filter(|t| !t.is_empty()).map(|t| crate::i18n::tf("gpui.c.kicad.asking", &[("title", t.clone().into())]))
+}
+
 /// KiCad's notice the person has not dismissed (the hub's `notices`, from `embed-notice`: a message box KiCad would have shown over a
 /// frame not on screen yet, "Could not use OpenGL, falling back to software rendering"): the newest, as (id, the line the pane shows).
 pub fn open_notice(info: &Value) -> Option<(u64, String)> {
@@ -1131,6 +1138,12 @@ mod tests {
         assert_eq!(after_close("FOOTPRINT_EDITOR", "PCB", &i(7, "ready", &["PCB"])).as_deref(), Some("PCB"), "an extra tab closed: the page's editor");
         assert_eq!(after_close("PCB_3D", "PCB", &i(7, "ready", &["SCH"])), None, "and View when that one is gone too");
     }
+    #[test] fn kicads_dialog_up_while_the_person_types_in_backplane_is_said_in_the_strip() {
+        let d = vec!["Plot".to_string()];
+        assert!(super::asking(&d, false).is_some_and(|t| t.contains("Plot")), "a dialog, the keyboard Backplane's: said");
+        assert!(super::asking(&d, true).is_none(), "the keyboard KiCad's (the dialog has it): nothing to say");
+        assert!(super::asking(&[], false).is_none(), "no dialog");
+    }
     #[test] fn ctrl_tab_goes_round_the_editor_tabs() {
         assert_eq!(super::next_tab("PCB", 1), "SCH"); assert_eq!(super::next_tab("PCB", -1), "GERBVIEW"); assert_eq!(super::next_tab("FOOTPRINT_EDITOR", 1), "GERBVIEW"); assert_eq!(super::next_tab("GERBVIEW", 1), "PCB"); assert_eq!(super::next_tab("?", 1), "SCH");
     }
@@ -1502,6 +1515,13 @@ pub fn strip<V: 'static>(cx: &mut Context<V>, light: bool, pane: &Entity<KicadPa
         mid = mid.child(crate::ui::with_rect(div().id("kicad-stock"), || "kicad:stock".to_string()).ml_2().px_2().py(px(3.)).flex_shrink_0().text_size(crate::scale::tpx(11.)).text_color(c("warn")).cursor_pointer().hover(|s| s.bg(c("raise")))
             .tooltip(crate::keys::tip(&tip, "", light)).child(crate::i18n::trs("Install Backplane KiCad"))
             .on_click(cx.listener(move |v, _, w, cx| a(v, "cad", w, cx))));
+    }
+    // KiCad asking something (its dialog up, on top) while the person types in Backplane: one line, so it is seen without taking their
+    // keyboard; a click on the dialog answers it (no press here: GNOME gives another program's window the keyboard only on the person's
+    // own click, never on ours)
+    if let Some(text) = { let p = pane.read(cx); asking(&p.dialogs_open, p.keys) } {
+        mid = mid.child(crate::ui::with_rect(div().id("kicad-asking"), || "kicad:asking".to_string()).ml_2().px_1().flex_shrink().min_w(px(80.)).max_w(px(300.)).overflow_hidden().whitespace_nowrap().text_ellipsis()
+            .text_size(crate::scale::tpx(11.)).text_color(c("warn")).child(text.clone()).tooltip(crate::keys::tip(&text, "", light)));
     }
     // KiCad's notice (embed-notice): one line, readable after the editor is up, dismissed with its ×; never a modal
     if let Some((id, text)) = open_notice(&pane.read(cx).info) {

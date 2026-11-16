@@ -464,6 +464,11 @@ PCB_XID=$(wait_for_embedded_frame "$GPUI_XID" "$CONT_XID" "$KP" "PCB Editor" 120
 sleep 0.4
 
 # 6. DRC Dialog: Backplane's own client/fork sets WM_TRANSIENT_FOR to GPUI top-level (zero driver set-transient!)
+# the person is in Backplane (a click on its sidebar), then DRC is asked for over the API, as an agent would: the dialog comes up on
+# top and never takes their keyboard (the lead's rule, 722ff3613); the strip says KiCad is asking, and a press on it gives the dialog the
+# keyboard, so Escape closes it. i3 focuses a new transient of the client whatever is asked (it has no focus-stealing prevention): there
+# the keyboard is the dialog's at once, the strip has nothing to say, and Escape closes it
+python3 "$XINPUT_PY" click 130 700; sleep 0.6
 python3 "$IPC_PY" run-action "$API_SOCK" "pcbnew.DRCTool.runDRC" >/dev/null
 DRC_XID=$(wait_for_kicad_win "$KP" "Design Rules Checker" 60)
 sleep 0.45
@@ -477,39 +482,45 @@ print(int(d.get("transient_for") == gpui and in_bounds))
 ' "$DRC_INFO" "$GPUI_XID")
 check "DRC dialog floats above GPUI with Backplane-managed WM_TRANSIENT_FOR == gpui_xid and inside screen bounds" "$DRC_OK" "$DRC_INFO"
 
-read -r DFX DFY DCX DCY < <(python3 -c 'import json,sys; g=json.loads(sys.argv[1]).get("dialog",{}); print(g.get("root_x",600)+120, g.get("root_y",300)+18, g.get("root_x",600)+g.get("w",400)-108, g.get("root_y",300)+g.get("h",300)-28)' "$DRC_INFO")
-# what the window manager makes of the dialog (fork embed's questions: a dialog mapped for an API request has no user time, and mutter's
-# focus-stealing prevention may stack it under the focused window, so the click lands on Backplane)
-echo "INFO DRC dialog props: $(xprop -id "$DRC_XID" _NET_WM_USER_TIME _NET_WM_USER_TIME_WINDOW WM_HINTS WM_PROTOCOLS WM_TRANSIENT_FOR 2>&1 | tr '\n' ' ' | cut -c1-600)"
-UTW=$(xprop -id "$DRC_XID" _NET_WM_USER_TIME_WINDOW 2>/dev/null | grep -o '0x[0-9a-f]*' | head -1)
-[ -n "$UTW" ] && echo "INFO DRC dialog user-time window $UTW: $(xprop -id "$UTW" _NET_WM_USER_TIME 2>&1 | tr '\n' ' ')"
-python3 "$XINPUT_PY" move "$DFX" "$DFY"; sleep 0.2
-echo "INFO under the click point $DFX,$DFY: $(python3 -c 'import ctypes,ctypes.util,os
+read -r DMX DMY < <(python3 -c 'import json,sys; g=json.loads(sys.argv[1]).get("dialog",{}); print(g.get("root_x",600)+g.get("w",400)//2, g.get("root_y",300)+g.get("h",300)//2)' "$DRC_INFO")
+python3 "$XINPUT_PY" move "$DMX" "$DMY"; sleep 0.2
+UNDER=$(python3 -c 'import ctypes,ctypes.util,os
 x=ctypes.CDLL(ctypes.util.find_library("X11")); x.XOpenDisplay.restype=ctypes.c_void_p; x.XDefaultRootWindow.restype=ctypes.c_ulong; x.XDefaultRootWindow.argtypes=[ctypes.c_void_p]
-d=ctypes.c_void_p(x.XOpenDisplay(os.environ["DISPLAY"].encode())); w=x.XDefaultRootWindow(d); out=[]
+d=ctypes.c_void_p(x.XOpenDisplay(os.environ["DISPLAY"].encode())); w=x.XDefaultRootWindow(d); last=0
 for _ in range(6):
     r=ctypes.c_ulong(); c=ctypes.c_ulong(); i=ctypes.c_int(); m=ctypes.c_uint()
     x.XQueryPointer(d, ctypes.c_ulong(w), ctypes.byref(r), ctypes.byref(c), ctypes.byref(i), ctypes.byref(i), ctypes.byref(i), ctypes.byref(i), ctypes.byref(m))
     if not c.value: break
-    nm=ctypes.c_char_p(); x.XFetchName(d, c, ctypes.byref(nm)); out.append(f"{c.value:#x}:{(nm.value or b"").decode(errors="replace")[:24]}"); w=c.value
-print(" > ".join(out))')"
-echo "INFO the root's children as xwininfo lists them (XQueryTree order): $(xwininfo -root -children 2>/dev/null | grep -E '^ +0x' | awk '{print $1}' | tr '\n' ' ' | cut -c1-400)"
-click_to_focus "$DRC_XID" "$DFX" "$DFY"
-sleep 0.12
-echo "INFO DRC dialog clicked: the keyboard at $(xfocus_chain)"
-python3 "$XINPUT_PY" key Escape
-sleep 0.2
-python3 "$XINPUT_PY" click "$DCX" "$DCY"
-sleep 0.25
-DRC_LEFT=$(python3 "$DRIVER_PY" list-windows --match "Design Rules Checker" 2>/dev/null | grep -c '"shown": true' || true)
-echo "INFO DRC dialog after Escape and Close: still shown $DRC_LEFT"
-# under mutter the harness's click never reaches mutter's click-to-focus (an XTest click goes into Xwayland straight) and mutter does
-# not act on a pager's activation of a dialog mapped for an API request with a stale user time (fork: stamp it in MakeTransientFor):
-# the dialog is closed by the window manager so the steps after it see the board, and the keyboard's part is said, not checked
-if [ "${KEMBED_WM:-i3}" = mutter ] && [ "${DRC_LEFT:-0}" != 0 ]; then
-  echo "INFO (mutter) the DRC dialog kept no keyboard from the harness's click: closed by the window manager"
-  python3 "$KEMBED_LIB/wm_ctl.py" close "$DRC_XID" >/dev/null 2>&1 || true; sleep 0.5
+    last=c.value; w=c.value
+print(hex(last))')
+check "a dialog asked for over the API comes up on top of Backplane (the window under its middle is the dialog)" "$([ "$UNDER" = "$(printf '0x%x' "$DRC_XID")" ] && echo 1 || echo 0)" "under its middle $UNDER, the dialog $DRC_XID"
+FOC=$(xfocus_chain)
+asking_at() { python3 - "$OUT/client.log" <<'PY'
+import json, sys
+last = None
+for l in open(sys.argv[1], errors="ignore"):
+    if "GPUI_METRIC " in l and '"rects":[' in l and "kicad:" in l:
+        try: last = json.loads(l.split("GPUI_METRIC ", 1)[1])["rects"]
+        except Exception: pass
+r = next((r for r in (last or []) if r.get("id") == "kicad:asking"), None)
+print(f'{int(r["x"] + r["w"] / 2)} {int(r["y"] + r["h"] / 2)}' if r else "")
+PY
+}
+sleep 0.6; ASK=$(asking_at)
+if [ "${KEMBED_WM:-i3}" = mutter ]; then
+  check "(mutter) the dialog does not take the keyboard from the person in Backplane" "$(echo "$FOC" | grep -q '^0x[0-9a-f]*:Backplane' && echo 1 || echo 0)" "$FOC"
+  check "(mutter) the strip says KiCad is asking" "$([ -n "$ASK" ] && echo 1 || echo 0)"
+  # the person's click on the dialog would give it the keyboard (mutter's click-to-focus), but an XTest click never reaches mutter: the
+  # dialog is closed by the window manager instead (its title bar's X), and the strip's line goes with it
+  python3 "$KEMBED_LIB/wm_ctl.py" close "$DRC_XID" >/dev/null 2>&1 || true; sleep 1.0
+  check "(mutter) the dialog closed, the strip's line goes" "$([ -z "$(asking_at)" ] && echo 1 || echo 0)"
+else
+  echo "INFO (i3) the window manager focuses the new transient: the keyboard at $FOC; the strip's line ${ASK:+shown}${ASK:-not shown} (KiCad has the keyboard)"
 fi
+[ "${KEMBED_WM:-i3}" = mutter ] || python3 "$XINPUT_PY" key Escape; sleep 0.8
+DRC_LEFT=$(python3 "$DRIVER_PY" list-windows --match "Design Rules Checker" 2>/dev/null | grep -c '"shown": true' || true)
+check "the DRC dialog is closed (i3: Escape, the keyboard the dialog's; mutter: its window's close)" "$([ "${DRC_LEFT:-1}" = 0 ] && echo 1 || echo 0)" "still shown $DRC_LEFT"
+[ "${DRC_LEFT:-0}" != 0 ] && { python3 "$KEMBED_LIB/wm_ctl.py" close "$DRC_XID" >/dev/null 2>&1 || true; sleep 0.5; }
 
 "$KICAD_CLI" pcb drc --format json -o "$OUT/drc.json" "$PROJ/ecc83-pp.kicad_pcb" >/dev/null 2>&1 || true
 CLI_DRC_OK=$(python3 -c 'import json,os,sys; print(int(os.path.isfile(sys.argv[1]) and "violations" in json.load(open(sys.argv[1]))))' "$OUT/drc.json")
@@ -557,16 +568,18 @@ ok = dlg.get("shown") is True and (mode == "spike" or d.get("transient_for") == 
 print(int(ok))
 ' "$PLOT_INFO" "$GPUI_XID" "$EMBED_MODE")
   read -r PX PY < <(python3 -c 'import json,sys; g=json.loads(sys.argv[1]).get("dialog",{}); print(g.get("root_x",600)+g.get("w",400)//2, g.get("root_y",300)+20)' "$PLOT_INFO")
-  click_to_focus "$PLOT_XID" "$PX" "$PY"
-  sleep 0.15
+  # (mutter: the dialog does not take the person's keyboard and an XTest click never reaches mutter's click-to-focus: closed by its window's
+  # close, as the DRC dialog; i3 focuses it itself and Escape closes it)
+  if [ "${KEMBED_WM:-i3}" = mutter ]; then python3 "$KEMBED_LIB/wm_ctl.py" close "$PLOT_XID" >/dev/null 2>&1 || true; else python3 "$XINPUT_PY" click "$PX" "$PY"; fi
+  sleep 0.3
   echo "INFO plot dialog clicked at $PX,$PY: the keyboard at $(xfocus_chain)"
-  python3 "$XINPUT_PY" key Escape
+  [ "${KEMBED_WM:-i3}" = mutter ] || python3 "$XINPUT_PY" key Escape
   wait "$PLOT_CALL_PID" 2>/dev/null || true
   sleep 0.2
   PING=$(python3 "$IPC_PY" ping "$API_SOCK" 2>&1 | tail -1 | cut -c1-120 || true)
   echo "INFO plot dialog: transient ok $PLOT_TRANS_OK; $(echo "$PLOT_INFO" | cut -c1-400); ping after Escape: $PING; still up: $(python3 "$DRIVER_PY" list-windows --match Plot 2>/dev/null | grep -c '"shown": true')"
   if [ "${KEMBED_WM:-i3}" = mutter ] && python3 "$DRIVER_PY" list-windows --match Plot 2>/dev/null | grep -q '"shown": true'; then
-    echo "INFO (mutter) the Plot dialog kept no keyboard from the harness's click (as the DRC dialog): closed by the window manager"
+    echo "INFO (mutter) the Plot dialog is still up after the strip's line and Escape: closed by the window manager"
     python3 "$KEMBED_LIB/wm_ctl.py" close "$PLOT_XID" >/dev/null 2>&1 || true; wait "$PLOT_CALL_PID" 2>/dev/null || true; sleep 0.5
   fi
   if [ "$PLOT_TRANS_OK" -eq 1 ] && python3 "$IPC_PY" ping "$API_SOCK" >/dev/null 2>&1; then
