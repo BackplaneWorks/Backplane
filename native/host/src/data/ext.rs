@@ -454,7 +454,8 @@ async fn viewers(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Res
                 let list = crate::files::kicad::boards::pick(&crate::files::kicad::boards::find(std::path::Path::new(&root)), &bd);
                 Ok(json!({"root":root,"pro":f.pro,"pcb":f.pcb,"sch":f.sch,"boards":machines::board_rows(&root, &list, &bd)})) }
             "viewer.watch" => {
-                let root = root_of(hub, th).await?; let kind = s(p, "kind"); let path = s(p, "path");
+                // the design's folder, as viewer.files answers it: a hardware thread working in a code worktree has no board there
+                let root = crate::files::kicad::canonical::design_root(&root_of(hub, th).await?); let kind = s(p, "kind"); let path = s(p, "path");
                 if path.split('/').any(|x| x == "..") || path.contains('\0') { return Err(err("that path is not in this project")) }
                 let path = if path.is_empty() || crate::plat::fs::is_abs(path) { path.to_string() } else { format!("{root}/{path}") };
                 let mut q = machines::on_link(json!({"kind":kind,"root":root,"path":path}), th);
@@ -476,7 +477,7 @@ async fn viewers(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Res
                 Ok(json!({"refs":crate::present::viewer::ref_rows(s(&r, "refs")).into_iter().map(|(kind, label, commit)| json!({"kind":kind,"label":label,"commit":commit})).collect::<Vec<_>>()}))
             }
             "viewer.compare" => {
-                let root = root_of(hub, th).await?; let (kind, commit, file) = (s(p, "kind"), s(p, "commit"), s(p, "path"));
+                let root = crate::files::kicad::canonical::design_root(&root_of(hub, th).await?); let (kind, commit, file) = (s(p, "kind"), s(p, "commit"), s(p, "path"));
                 if !matches!(kind, "board" | "schematic") { return Err(err("only a board or a schematic compares")) }
                 if file.split('/').any(|x| x == "..") || file.contains(['\0', '\n', '\t']) { return Err(err("that path is not in this project")) }
                 let r = result(rpc(hub, c, "history.refs", json!({"thread":th})).await?);

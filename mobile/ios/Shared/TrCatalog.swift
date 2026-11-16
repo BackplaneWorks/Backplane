@@ -2470,6 +2470,7 @@ gpui.kcomment.hint	Enter posts to the thread · Esc cancels	Enter でスレッ�
 gpui.kcomment.not.posted	The comment was not posted: {why}	コメントは投稿されませんでした: {why}
 gpui.keys.kcomment	Comment on what is selected in KiCad, from Backplane or from inside the editor: Enter posts, Esc cancels	KiCad で選択中のものにコメント (Backplane からもエディタ内からも): Enter で投稿、Esc で取り消し
 gpui.c.kicad.dialog	KiCad has “{title}” open	KiCad で「{title}」が開いています
+gpui.c.kicad.asking	KiCad is asking: {title}	KiCad からの確認: {title}
 gpui.c.kicad.full.screen	Full screen	全画面
 gpui.c.kicad.exit.full.screen	Exit full screen	全画面を終了
 gpui.c.kicad.the.editor.takes.the.whole	The editor takes the whole window; only this row stays	エディタがウィンドウ全体を使います。この行だけが残ります
@@ -5471,6 +5472,9 @@ gpui.streamer.win	Windows does not tell an app that the screen is being captured
 
     /// gpui.c.kicad.dialog = KiCad has “{title}” open
     static func gpui_c_kicad_dialog(title: String) -> String { f("gpui.c.kicad.dialog", ["title": title]) }
+
+    /// gpui.c.kicad.asking = KiCad is asking: {title}
+    static func gpui_c_kicad_asking(title: String) -> String { f("gpui.c.kicad.asking", ["title": title]) }
 
     /// gpui.assets.missing = Assets missing in {dir}: {files}
     static func gpui_assets_missing(dir: String, files: String) -> String { f("gpui.assets.missing", ["dir": dir, "files": files]) }
