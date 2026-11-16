@@ -623,7 +623,13 @@ impl KicadPane {
         let Some(c) = self.container else { return };
         nc::input_off(c, false);
         let Some(w) = self.want() else { return };
-        self.grab_click(c, false); nc::focus(w); self.keys = true; nc::grab_escape(self.toplevel, true); cx.notify();
+        self.grab_click(c, false);
+        #[cfg(not(target_os = "macos"))]
+        nc::focus(w);
+        // macOS: consent, then ShowFrame{focus}, so KiCad's canvas has the keys (activating KiCad from here focused a toolbar field)
+        #[cfg(target_os = "macos")]
+        { nc::yield_to(w); self.rpc("editor.kicad.show", json!({"project": self.project, "frame": self.wanted_kind(), "focus": true})); }
+        self.keys = true; nc::grab_escape(self.toplevel, true); cx.notify();
     }
     fn want(&self) -> Option<u64> { if self.info.is_null() || (cfg!(windows) && self.info["mode"] == "stock") { return None } pick_local(self.wanted_kind(), &self.info, &self.frames, &self.ever_shown) }
     fn tick(&mut self, cx: &mut Context<Self>) {
