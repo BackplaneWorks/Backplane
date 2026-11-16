@@ -54,6 +54,8 @@ def run_action(act, busy_retries=None):
 def in_plan_view():
     """KiCad's own answer, not pixels: until the fork's fix (t1794827460-18) a harmless gated RunAction is answered AS_BUSY only while the plan
     tool runs. True / False, or None when it cannot tell (the zoom redraw refused for another reason)."""
+    if has_cap("plan-view-api", "-"):  # bp.13 batch 11: GetPlan says it (in_plan_view), and plan view no longer answers AS_BUSY
+        return bool(plan("get", SOCK).get("in_plan_view"))
     st = run_action("common.Control.zoomRedraw", busy_retries=1)
     if REFUSED and REFUSED[-1]["action"] == "common.Control.zoomRedraw": REFUSED.pop()  # a probe, not an action of the journey
     return True if st == "busy" else (False if st == "ok" else None)
@@ -760,6 +762,10 @@ def find_win(title_part, secs):
         time.sleep(0.03)
     return None
 def dialog_run(action, title, tag, run_secs=20, press_return=True):
+    # where KiCad is when the action goes in: which frames are shown and focused, X's focus (a dialog made for a hidden frame may not show)
+    fr = {k: [f.get("shown"), f.get("focused")] for k, f in kframes().items()} if SOCK else {}
+    print(f"INFO {tag} before {action}: KiCad frames [shown, focused] {fr}; X focus {xfocus()[:2]}", flush=True)
+    RESULTS[f"{tag}_before"] = {"ms": None, "frames": fr}
     t0 = now(); call = subprocess.Popen(["python3", IPC, "run-action", SOCK, action], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     w = find_win(title, 20)
     if not w:  # no dialog: what KiCad answered (a refused or busy action is recorded, never taken as run)
@@ -767,6 +773,11 @@ def dialog_run(action, title, tag, run_secs=20, press_return=True):
         except Exception: call.kill(); o, e = "", "no answer"
         st = "ok" if jl(o).get("ok") is True else ("busy" if "AS_BUSY" in (e or "") else f"refused: {(e or '').strip().splitlines()[-1:]}")
         if st != "ok": REFUSED.append({"action": action, "answer": st, "t": now()})
+        # every KiCad window X has, mapped or not, and the full tree: is the dialog there unmapped, elsewhere, or absent
+        ws = [w for w in windows() if "kicad" in (w.get("wm_class", "") + w.get("title", "")).lower()]
+        print(f"INFO {tag}: no '{title}' window; KiCad's windows {[(w.get('title'), w.get('shown'), w['w'], w['h'], w.get('transient_for')) for w in ws]}", flush=True)
+        json.dump(ws, open(os.path.join(OUT, f"{tag}_windows.json"), "w"), indent=1)
+        sh("bash", "-c", f"xwininfo -root -tree > '{os.path.join(OUT, 'shots', tag + '_xtree.txt')}' 2>&1"); shot(f"{tag}_no_dialog")
         perf(f"{tag}_dialog_open", -1, found=0, answer=st); return
     perf(f"{tag}_dialog_open", round(now() - t0), found=1); shot(f"{tag}_dialog")
     sh("python3", XIN, "focus", w["title"]); time.sleep(0.2)
@@ -784,7 +795,12 @@ def dialog_run(action, title, tag, run_secs=20, press_return=True):
     except Exception: call.kill()
 if "tools" in JOURNEYS and SOCK:
     PAUSE.set()
-    tab("PCB", "tools_board", 1.2); rt("click", CX, CY + PANE["h"] // 3); time.sleep(0.4)
+    # focus into KiCad with a click, then Escape: on Hubble the click lands on U17's pad over its footprint and opens KiCad's "which
+    # item?" menu, which stayed open and held runDRC and Plot (no dialog in 20 s, then the Schematic tab left the board shown: 2 of 3 runs
+    # on batches 10 and 11 alike)
+    tab("PCB", "tools_board", 1.2); rt("click", CX, CY + PANE["h"] // 3); time.sleep(0.4); rt("key", "Escape"); time.sleep(0.3)
+    m_ = [w for w in windows() if w.get("shown") and w.get("override_redirect") and 60 < w["w"] < 1200 and 40 < w["h"] < 900]
+    if m_: print(f"JANK tools: a KiCad popup is still open after Escape {[[w['w'], w['h']] for w in m_]}", flush=True)
     dialog_run("pcbnew.DRCTool.runDRC", "Design Rules Checker", "drc_gui")
     gerb0 = set(glob.glob(os.path.join(PROJ_DIR, "**", "*.g*"), recursive=True))
     dialog_run("common.Control.plot", "Plot", "plot_gui", press_return=False)
