@@ -1017,8 +1017,10 @@ impl KicadPane {
         let full = nc::host_full_screen(self.toplevel);
         if full != self.mac_full { self.mac_full = full; }
         let visible = show.is_some() && nc::host_visible(self.toplevel);
-        let rect = at.and_then(|r| nc::screen_rect(self.toplevel, r));
-        let now = rect.map(|(x, y, w, h)| (x, y, w, h, visible)).or_else(|| self.host_sent.map(|(x, y, w, h, _)| (x, y, w, h, false)));
+        // a frame in which the pane's hitbox was not found (our window inactive while KiCad has the keyboard draws such frames) keeps
+        // the last rect: leaving the pane goes through detach, and an unseen window through host_visible (run 5: hidden for good here)
+        let rect = at.and_then(|r| nc::screen_rect(self.toplevel, r)).or_else(|| self.host_sent.map(|(x, y, w, h, _)| (x, y, w, h)));
+        let now = rect.map(|(x, y, w, h)| (x, y, w, h, visible));
         let raised = visible && show.is_some_and(|f| nc::keep_below(self.toplevel, f));
         if now.is_some() && (now != self.host_sent || raised) {
             if let Some((x, y, w, h, v)) = now {
