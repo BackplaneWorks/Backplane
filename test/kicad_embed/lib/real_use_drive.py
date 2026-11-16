@@ -26,6 +26,27 @@ def jl(text):
         except Exception: pass
     return {}
 def rt(*a): return jl(sh("python3", RT, *a))
+REFUSED = []
+def run_action(act, busy_retries=None):
+    """RunAction ACT: "ok" only when KiCad answered RAS_OK; "busy" for AS_BUSY (KiCad's task gate: bp.13 answers every gated call so while
+    its plan tool runs), else "refused: ...". A refused action is never counted as done: on Nov 16 a togglePlanView answered AS_BUSY was
+    taken as a flip, the journey's idea of plan view drifted, and a click on the plan overlay in board view went to the selection tool."""
+    env = dict(os.environ); env["BP_IPC_CLIENT"] = env.get("BP_IPC_CLIENT", "bp-embed-e2e")
+    if busy_retries: env["BP_IPC_RETRIES"] = str(busy_retries)
+    try: r = subprocess.run(["python3", IPC, "run-action", SOCK, act], capture_output=True, text=True, timeout=30, env=env)
+    except subprocess.TimeoutExpired: r = None
+    out = jl(r.stdout) if r else {}
+    if out.get("ok") is True: return "ok"
+    err = (r.stderr if r else "timeout") or ""
+    st = "busy" if "AS_BUSY" in err else f"refused: {out.get('status', '') or err.strip().splitlines()[-1:] }"
+    REFUSED.append({"action": act, "answer": st, "t": now()}); print(f"DIAG RunAction {act}: {st}", flush=True)
+    return st
+def in_plan_view():
+    """KiCad's own answer, not pixels: until the fork's fix (t1794827460-18) a harmless gated RunAction is answered AS_BUSY only while the plan
+    tool runs. True / False, or None when it cannot tell (the zoom redraw refused for another reason)."""
+    st = run_action("common.Control.zoomRedraw", busy_retries=1)
+    if REFUSED and REFUSED[-1]["action"] == "common.Control.zoomRedraw": REFUSED.pop()  # a probe, not an action of the journey
+    return True if st == "busy" else (False if st == "ok" else None)
 def ipc(*a, timeout=30): return jl(sh("python3", IPC, *a, timeout=timeout))
 import shutil
 BUN = shutil.which("bun") or os.path.expanduser(os.environ.get("REAL_HOME", "~") + "/.bun/bin/bun")
@@ -716,9 +737,14 @@ def find_win(title_part, secs):
         time.sleep(0.03)
     return None
 def dialog_run(action, title, tag, run_secs=20, press_return=True):
-    t0 = now(); call = subprocess.Popen(["python3", IPC, "run-action", SOCK, action], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    t0 = now(); call = subprocess.Popen(["python3", IPC, "run-action", SOCK, action], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     w = find_win(title, 20)
-    if not w: perf(f"{tag}_dialog_open", -1, found=0); call.kill(); return
+    if not w:  # no dialog: what KiCad answered (a refused or busy action is recorded, never taken as run)
+        try: o, e = call.communicate(timeout=5)
+        except Exception: call.kill(); o, e = "", "no answer"
+        st = "ok" if jl(o).get("ok") is True else ("busy" if "AS_BUSY" in (e or "") else f"refused: {(e or '').strip().splitlines()[-1:]}")
+        if st != "ok": REFUSED.append({"action": action, "answer": st, "t": now()})
+        perf(f"{tag}_dialog_open", -1, found=0, answer=st); return
     perf(f"{tag}_dialog_open", round(now() - t0), found=1); shot(f"{tag}_dialog")
     sh("python3", XIN, "focus", w["title"]); time.sleep(0.2)
     if not press_return:  # the Plot dialog's Return lands on its format list (a menu), not on Plot: only its opening is measured
@@ -804,7 +830,7 @@ if "textkeys" in JOURNEYS and SOCK:
     refs = [r_ for r_ in fp_positions() if re.match(r"^[RC]\d+$", r_)] or list(fp_positions())
     if refs:
         rt("click", EXk, EYk); time.sleep(0.3); ipc("select-items", SOCK, "pcb", refs[0], "0"); time.sleep(0.5)
-        ga = grab(PANE["x"], PANE["y"], PANE["w"], PANE["h"]); ipc("run-action", SOCK, "common.Control.showProperties"); time.sleep(1.5)
+        ga = grab(PANE["x"], PANE["y"], PANE["w"], PANE["h"]); run_action("common.Control.showProperties"); time.sleep(1.5)
         gb = grab(PANE["x"], PANE["y"], PANE["w"], PANE["h"]); shot("tk_properties")
         import numpy as np
         # the panel docks at the pane's left; its Reference value field ~ (pane+154, pane+396) at 1800x1050 (measured)
@@ -820,7 +846,7 @@ if "textkeys" in JOURNEYS and SOCK:
             rt("key", "BackSpace"); time.sleep(0.2); rt("key", "Escape"); time.sleep(0.3)  # the ';' out again, the edit dropped
         else:
             print("DIAG textkeys: the properties panel did not appear at the pane's left", flush=True)
-        ipc("run-action", SOCK, "common.Control.showProperties"); time.sleep(0.8)
+        run_action("common.Control.showProperties"); time.sleep(0.8)
     # (d) Backplane's chords with KiCad's right-click menu open
     for keys, tag in ((("k", "ctrl"), "popup_ctrl_k"), (("semicolon", "ctrl"), "popup_ctrl_semicolon")):
         rt("click", EXk, EYk); time.sleep(0.3); rt("click", EXk, EYk - 60, 3); time.sleep(0.8)
@@ -899,8 +925,8 @@ elif "editors" in JOURNEYS and SOCK:
     tab("PCB", "editors_back1", 1.5); shot("editors_back1")
     RESULTS["editor_fp_back_to_board"] = {"ms": None, "ok": int(editor_up() and not (kframes().get("FP") or {}).get("shown"))}
     # KiCad's own command (the PCB editor's toolbar button "Footprint Editor")
-    t0 = now(); st = ipc("run-action", SOCK, "common.Control.showFootprintEditor")
-    b = editor_watch("editor_fp_action", "FP", t0); RESULTS["editor_fp_action"]["action_ok"] = int(bool(st.get("ok")))
+    t0 = now(); st = run_action("common.Control.showFootprintEditor")
+    b = editor_watch("editor_fp_action", "FP", t0); RESULTS["editor_fp_action"]["action_ok"] = int(st == "ok")
     tab("PCB", "editors_back2", 1.5)
     # GerbView: the board's Gerbers and drill files from kicad-cli, as Backplane's mfg/ holds them
     cli = os.environ.get("KICAD_CLI") or ""; mfg = os.path.join(OUT, "mfg"); os.makedirs(mfg, exist_ok=True)
@@ -1052,9 +1078,14 @@ def calibrate():
     print(f"INFO plan calibration: {a}@{s1} {b}@{s2} -> {k:.3f} px/mm", flush=True)
     return lambda x, y: (ox + k * x, oy + k * y)
 if "plan" in JOURNEYS and SOCK:
-    got = plan("get", SOCK); pj = {}
-    try: pj = json.loads(got.get("json") or "{}")
-    except Exception: pass
+    pj, t_get = {}, time.time()
+    while time.time() - t_get < 20:  # the plan file is read with the board: on Hubble a first GetPlan right after Edit answered nothing (twice)
+        got = plan("get", SOCK)
+        try: pj = json.loads(got.get("json") or "{}")
+        except Exception: pj = {}
+        if pj.get("corridors"): break
+        time.sleep(1.0)
+    RESULTS["plan_loaded_s"] = {"ms": None, "s": round(time.time() - t_get, 1), "ok": int(bool(pj.get("corridors")))}
     if not pj.get("corridors"):
         print(f"DIAG plan: no plan on this board/runtime ({str(got)[:120]})", flush=True)
     else:
@@ -1068,7 +1099,7 @@ if "plan" in JOURNEYS and SOCK:
             return None if len(xs) < 8 else (int(xs.min()), int(ys.min()), int(xs.max()), int(ys.max()))
         def menus():  # a popup menu: override-redirect, smaller than the screen (the client's own full-screen surfaces are not menus)
             return [w for w in windows() if w.get("shown") and w.get("override_redirect") and 60 < w["w"] < 1200 and 60 < w["h"] < 900]
-        def action_toggle(): t = now(); ipc("run-action", SOCK, "pcbnew.Plan.togglePlanView"); return t
+        def action_toggle(): t = now(); run_action("pcbnew.Plan.togglePlanView"); return t
         bc = (KICAD_RUN.get("backplane_commit") or "")[:10]
         ALT_P_BUILDS = ("d5eaa3ae44", "3de539d24a", "77a6ff17d0")  # bp.13 batches 1-2: Alt+P; batch 3 (c53b5e0800) on: Ctrl+Shift+R
         PLAN_KEY = os.environ.get("KEMBED_PLAN_KEY") or ("alt+p" if bc in ALT_P_BUILDS else "ctrl+shift+r")
@@ -1077,9 +1108,14 @@ if "plan" in JOURNEYS and SOCK:
         STATE = {"on": False}  # a fresh profile opens with the plan view off
         def toggled(tag, how, settle=1.2):
             """One toggle by HOW (a function returning t0): the canvas changed or not, the switch's frames measured, the state followed."""
-            g0 = grab(*CV); t0 = how(); time.sleep(settle); g1 = grab(*CV)
-            ch = frac(g0, g1) > 0.01; m = menus()
-            if ch: STATE["on"] = not STATE["on"]
+            g0 = grab(*CV); was = in_plan_view(); t0 = how(); time.sleep(settle); g1 = grab(*CV); now_on = in_plan_view()
+            m = menus()
+            if was is not None and now_on is not None:  # KiCad's mode: a flip is plan view on <-> off, not a changed canvas
+                ch = was != now_on; STATE["on"] = now_on
+            else:
+                ch = frac(g0, g1) > 0.01
+                if ch: STATE["on"] = not STATE["on"]
+                print(f"DIAG {tag}: plan view mode unknown from KiCad ({was} -> {now_on}); pixels say {'changed' if ch else 'unchanged'}", flush=True)
             EVENTS.append({"kind": "switch", "t0": t0, "tag": tag, "window_ms": int(settle * 1000)})
             RESULTS[f"{tag}_toggled"] = {"ms": None, "ok": int(ch and not m)}
             if m: print(f"JANK {tag}: a menu opened ({m[0]['w']}x{m[0]['h']})", flush=True); shot(f"{tag}_menu"); rt("key", "Escape"); time.sleep(0.4)
@@ -1166,8 +1202,8 @@ if "plan" in JOURNEYS and SOCK:
         cor = pj["corridors"][0]; cl = cor["layer"]
         order = sorted({l["layer"] for l in pj.get("layers", [])}, key=lambda n: 0 if n == "F.Cu" else (99 if n == "B.Cu" else int(re.sub(r"\D", "", n) or 50)))
         def panel_click(layer, tag):
-            """LAYER made the active one with the keyboard (+ and -: KiCad's next and previous layer):
-            the plan view's mini panels were clicked at places measured at 1800x1050, where batch 9 draws none (the layer never changed)."""
+            """LAYER made the active one with the keyboard (+ and -: KiCad's next and previous layer), not by the mini panels' places
+            measured at 1800x1050 (they were clicked in board view with the plan overlay, where none are drawn: the layer never changed)."""
             before = plan("layer", SOCK).get("layer"); t0 = None; got = before
             for key in (("plus", "shift"), ("minus",)):  # Switch to Next / Previous Layer (PageUp/PageDown only reach F.Cu and B.Cu)
                 for _ in range(len(order) + 1):
@@ -1186,6 +1222,12 @@ if "plan" in JOURNEYS and SOCK:
             # plan view off and on again before the click: with it, Collar's corridor click, drag and W/A/R all applied (batch 9, 560074768);
             # without it, the same click at the same point selected nothing. Why is open (the plan tool's state after the layer keys?).
             if os.environ.get("KEMBED_PLAN_NO_TOGGLE") != "1": action_toggle(); time.sleep(1.0); action_toggle(); time.sleep(1.2)
+            # KiCad must be in plan view for the click (board view shows the plan as an overlay that looks the same, and a click there goes to
+            # the selection tool): asked of KiCad, and entered with the person's key when it is not
+            pv = in_plan_view()
+            if pv is False: press_plan_key(); time.sleep(1.5); pv = in_plan_view()
+            RESULTS["plan_view_before_corridor_click"] = {"ms": None, "ok": int(pv is True), "kicad_says": pv}
+            print(f"INFO plan view before the corridor click (KiCad): {pv}", flush=True)
             shot("plan_band"); band = band_spot(os.path.join(OUT, "shots", "plan_band.png"), grp.get("color", ""))
             if band:  # the corridor as drawn (its group's colour, its label pill): clicked there, like embed_plan_person_e2e
                 print(f"INFO plan corridor {cor['id']} drawn in {grp.get('color')} at {band}; the calibration put it at {mx:.0f},{my:.0f}", flush=True)
@@ -1594,6 +1636,7 @@ if MEM["samples"]:
     RESULTS["rss_end_mb"] = {"ms": None, "mb": MEM["samples"][-1][1]}
     print(f"PERF memory ready={RESULTS['rss_ready_mb']['mb']}MB peak={RESULTS['rss_peak_mb']['mb']}MB hwm={RESULTS['rss_peak_mb']['hwm_mb']}MB end={RESULTS['rss_end_mb']['mb']}MB", flush=True)
 RESULTS["switch_shows_the_asked_frame"] = {"ms": None, "ok": int(not SHOW_MISSES), "misses": SHOW_MISSES}
+RESULTS["actions_refused"] = {"ms": None, "count": len(REFUSED), "list": REFUSED[:40]}
 summary = {"results": RESULTS, "client": os.environ.get("CLIENT_BIN"), "client_id": os.environ.get("CLIENT_ID"), "hub": os.environ.get("HUB_BIN"), "hub_id": os.environ.get("HUB_ID"), "kicad": os.environ.get("KICAD_BIN"), "kicad_running": KICAD_RUN, "dialogs": DIALOGS, "pane": PANE, "gpu": (metrics("gpu") or [{}])[0], "cold_edit_click_epoch": edit_click.get("epoch_ms")}
 json.dump(summary, open(os.path.join(OUT, "real_use.json"), "w"), indent=1)
 print("JSON " + json.dumps(summary), flush=True)

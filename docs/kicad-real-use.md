@@ -57,9 +57,14 @@ again, then the panel's `BP-AGAIN` must apply; any miss exits 1). It needs `KEMB
 root coordinates (Collar on the GPU display: `1126,700`): a screenshot taken just before the click must show canvas background there, on a
 span of at least 300 px each way, else the journey fails without pressing a key (the pane's toolbars and the message panel are no canvas, and
 GTK3 gives the canvas no X window to measure). `KEMBED_UNDO_NO_CTRL_Y=1` leaves out the Ctrl+Y only (a diagnostic: what happens without it).
-The plan journey turns plan view off and on before its corridor click: after a layer change with + the plan tool ignores a click on that
-layer's corridor until plan view is entered again (bp.13 batch 9, 5/5; fork subthread t1794827460-18). `KEMBED_PLAN_NO_TOGGLE=1` leaves the
-toggle out, to check the fork's fix.
+The plan journey asks KiCad whether plan view is on (`in_plan_view`: until the fork's fix, a harmless RunAction is answered AS_BUSY only
+while the plan tool runs) instead of reading pixels, enters it with the person's key when it is off, and never counts a refused RunAction
+as done (`run_action`: every RunAction of real_use, `actions_refused` in the results). Withdrawn (Nov 16): "after a layer change with + the
+plan tool ignores a corridor click" was the harness's. Its toggle count (a pixel change taken as a flip) drifted by one over ~26 toggles,
+the togglePlanView it sent in plan view was answered AS_BUSY and never ran, and at the + presses and the click KiCad was in board view
+with the plan drawn as an overlay, so the click went to the selection tool; in a clean session batch 9 takes the click after +. What it
+found are two fork items (t1794827460-18): in plan view every gated API call is answered AS_BUSY, and board view's plan overlay looks
+like plan view. `KEMBED_PLAN_NO_TOGGLE=1` leaves out the old off/on toggle before the click.
 Between Ctrl+Z and Ctrl+Y it idles `KEMBED_UNDO_IDLE_S` seconds (10 by default, 0 leaves it out) after one agent track on the board: no
 key and no IPC read, so the hub's automatic DRC runs in KiCad while the person is on the schematic. It must have run
 (`undo_idle_ran_a_drc_in_kicad`, else the idle proved nothing) and the schematic must still be KiCad's focused, shown frame with the board
@@ -420,7 +425,8 @@ Misses, ranked:
 3. **The schematic pans at ~10 frames a second** (p50 67-99 ms, a 1.3-1.5 s stall), unchanged on both batches. Owner: fork.
 4. **Panning during an in-editor DRC stutters** (36-59 frames > 50 ms), unchanged: the fork's known parity-fetch silence. Owner: fork.
 5. **Plan editing applies nothing** on either board or batch: corridor click, vertex drags, widen/narrow and approve/reject all ok 0;
-   the harness calibrates only in plan view. Owner: lane A to rule out the harness first, then the fork.
+   the harness calibrates only in plan view. Owner: lane A to rule out the harness first, then the fork. Since found: the harness (plan view read
+   from pixels: it was in board view with the plan overlay, where no mini panels are drawn; a calibration off the corridor); see above.
 6. **In-editor DRC/ERC tab 127-175 ms on batch 9** (14-71 on batch 8). One run: to confirm before it goes to the fork.
 7. **Management panels 100-145 ms and thread back from the sidebar ~100 ms** (budgets 100 and 50). Owner: lane B.
 8. **Hubble cross-probe of C32 1.2 s, Hubble drag 348 ms frame, KiCad RSS 5.3 GB.** Owner: fork.
