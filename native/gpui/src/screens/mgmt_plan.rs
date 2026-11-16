@@ -43,7 +43,7 @@ pub fn answered(app: &mut Backplane, ok: bool, why: &str, cx: &mut Context<Backp
 /// The e2e harness's controls (`mgmt:plan:<what>`).
 pub fn controls(m: &super::mgmt::Mgmt) -> Vec<(String, String, String)> {
     if m.peek()["open"] != "plan" { return vec![] }
-    let d = m.data("plan"); let mut v: Vec<(String, String, String)> = vec![];
+    let d = m.data("plan"); let mut v: Vec<(String, String, String)> = vec![("mgmt:plan:on".into(), "On".into(), "plan:enable:on".into()), ("mgmt:plan:off".into(), "Off".into(), "plan:enable:off".into())]; // i18n-ok: ctl ids
     if d["awaiting"].as_u64().unwrap_or(0) > 0 { v.push(("mgmt:plan:approve-all".into(), "Approve all".into(), "plan:all".into())) } // i18n-ok: ctl ids
     for l in d["layers"].as_array().into_iter().flatten() { for i in l["items"].as_array().into_iter().flatten() {
         let id = s(i, "id"); v.push((format!("mgmt:plan:row:{id}"), id.into(), format!("plan:focus:{id}")));
@@ -54,10 +54,52 @@ pub fn controls(m: &super::mgmt::Mgmt) -> Vec<(String, String, String)> {
 }
 pub fn act(app: &mut Backplane, a: &str, cx: &mut Context<Backplane>) {
     if a == "all" { approve(app, "", &[], true, cx) }
+    else if let Some(x) = a.strip_prefix("enable:") { enable(app, x == "on", cx) }
     else if a == "stop" { send(app, "plan.stop", json!({}), cx) }
     else if let Some(id) = a.strip_prefix("approve:") { approve(app, "", &[id.to_string()], true, cx) }
     else if let Some(id) = a.strip_prefix("reject:") { approve(app, "", &[id.to_string()], false, cx) }
     else if let Some(id) = a.strip_prefix("focus:") { send(app, "plan.focus", json!({"id": id}), cx) }
+}
+
+/// The Boards menu's value for a board the hub names (absolute `pcb`, `rel` from the project's folder): the menu's own entry when it
+/// lists it, else `rel`.
+pub fn board_value(boards: &[crate::viewers::boards::Board], pcb: &str, rel: &str) -> String {
+    boards.iter().find(|b| !b.value.is_empty() && (pcb.ends_with(&format!("/{}", b.value)) || b.value == rel)).map_or(rel.to_string(), |b| b.value.clone())
+}
+/// Open in the viewer a board whose plan awaits the person, with its Plan panel open.
+fn open_board(app: &mut Backplane, pcb: &str, rel: &str, cx: &mut Context<Backplane>) {
+    let value = board_value(&crate::viewers::boards::list(&app.data["thread"]["viewer"]), pcb, rel);
+    eprintln!("GPUI_LOG {}", json!({"event": "plan_open_board", "pcb": pcb, "value": value}));
+    let pro = format!("{}.kicad_pro", pcb.strip_suffix(".kicad_pcb").unwrap_or(pcb));
+    let _ = app.tx.try_send(Command::Rpc("mgmt.panel".into(), Secret(json!({"project": pro, "open": "plan"})), "mgmt"));
+    crate::viewers::boards::pick(app, value, cx);
+}
+/// The person's switch (`plan.enable`): Plan before routing, off unless turned on.
+fn enable(app: &mut Backplane, on: bool, cx: &mut Context<Backplane>) { send(app, "plan.enable", json!({"on": on}), cx) }
+fn chip(cx: &mut Context<Backplane>, light: bool, id: &str, label: &str, on: bool, f: impl Fn(&mut Backplane, &mut Context<Backplane>) + 'static) -> AnyElement {
+    let c = |n: &str| theme::color(light, n); let rect = id.to_string();
+    crate::ui::with_rect(div().id(SharedString::from(id.to_string())), move || rect).flex_shrink_0().h(crate::scale::tpx(20.)).px_2().flex().items_center().text_size(crate::scale::tpx(11.)).cursor_pointer()
+        .when(on, |d| d.bg(c("accent")).text_color(c("on-accent"))).when(!on, |d| d.bg(c("raise")).text_color(c("dim")).hover(|s| s.bg(c("line"))))
+        .child(trs(label)).on_click(cx.listener(move |this, _, _, cx| { f(this, cx); cx.notify(); })).into_any_element()
+}
+/// The rows every state of the panel starts with: the switch with what it does, and plans waiting on the project's other boards.
+fn heading(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backplane>) -> Vec<AnyElement> {
+    let c = |n: &str| theme::color(light, n);
+    let on = d["on"] == true;
+    let mut v = vec![div().flex_shrink_0().flex().flex_col().gap_1().px_2().py_1().border_b_1().border_color(c("rule")).text_size(crate::scale::tpx(11.))
+        .child(div().flex().items_center().gap_2().child(div().flex_1().min_w_0().text_color(c("text")).child(trs("Plan before routing")))
+            .child(chip(cx, light, "mgmt:plan:on", "On", on, |a, cx| enable(a, true, cx))).child(chip(cx, light, "mgmt:plan:off", "Off", !on, |a, cx| enable(a, false, cx)))) // i18n-ok: English the draw passes through trs
+        .child(div().text_color(c("faint")).child(trs(if on { "Before routing a board with 4 or more copper layers or more than 60 nets, the agent proposes corridors and plane regions here. It routes only what you approve." } else { "Agents route as you ask. Turn it on to have them propose a routing plan first and route only what you approve here." }))) // i18n-ok: English the draw passes through trs
+        .into_any_element()];
+    let _ = app;
+    for e in d["elsewhere"].as_array().cloned().unwrap_or_default() {
+        let (pcb, rel) = (s(&e, "pcb").to_string(), s(&e, "rel").to_string());
+        v.push(div().flex_shrink_0().flex().items_center().gap_2().px_2().py_1().border_b_1().border_color(c("rule")).text_size(crate::scale::tpx(11.))
+            .child(div().flex_1().min_w_0().text_color(c("warn")).child(tf("gpui.mgmt.plan.elsewhere", &[("board", s(&e, "name").to_string().into())])))
+            .child(btn(cx, light, format!("mgmt:plan:open:{}", s(&e, "name")), "Open board", move |a, cx| open_board(a, &pcb, &rel, cx))) // i18n-ok: English the draw passes through trs
+            .into_any_element());
+    }
+    v
 }
 
 fn btn(cx: &mut Context<Backplane>, light: bool, id: String, label: &str, on: impl Fn(&mut Backplane, &mut Context<Backplane>) + 'static) -> AnyElement {
@@ -69,7 +111,8 @@ fn btn(cx: &mut Context<Backplane>, light: bool, id: String, label: &str, on: im
 pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backplane>) -> AnyElement {
     let c = |n: &str| theme::color(light, n);
     if d.is_null() { return div().p_3().text_size(crate::scale::tpx(12.)).text_color(c("faint")).child(trs("Reading the routing plan…")).into_any_element() }
-    if d["empty"] == true { return div().p_3().text_size(crate::scale::tpx(12.)).text_color(c("faint")).child(trs("No routing plan yet. An agent proposes one before routing (plan_propose); you steer and approve it here or in KiCad.")).into_any_element() }
+    let head = heading(app, d, light, cx);
+    if d["empty"] == true { return div().size_full().flex().flex_col().children(head).child(div().p_3().text_size(crate::scale::tpx(12.)).text_color(c("faint")).child(trs("No routing plan for this board."))).into_any_element() }
     let hide = HIDE_DONE.load(Ordering::Relaxed);
     let awaiting = d["awaiting"].as_u64().unwrap_or(0);
     let mut top = div().flex_shrink_0().min_h(crate::scale::tpx(super::head::ROW_H)).flex().items_center().gap_2().px_2().border_b_1().border_color(c("rule")).text_size(crate::scale::tpx(11.))
@@ -124,7 +167,7 @@ pub fn body(app: &mut Backplane, d: &Value, light: bool, cx: &mut Context<Backpl
     let note = |t: String, tone: &str| div().flex_shrink_0().px_2().py_1().border_b_1().border_color(c("rule")).text_size(crate::scale::tpx(11.)).text_color(c(tone)).child(trs(&t)).into_any_element();
     let keys = d["keys_note"].as_str().map(|t| note(t.to_string(), "dim"));
     let refused = REFUSED.lock().unwrap().clone().map(|t| note(t, "bad"));
-    div().size_full().flex().flex_col().child(top).children(refused).children(keys).child(list).into_any_element()
+    div().size_full().flex().flex_col().children(head).child(top).children(refused).children(keys).child(list).into_any_element()
 }
 
 #[cfg(test)]
@@ -138,5 +181,8 @@ mod tests {
         assert_eq!(shown(&l, true).iter().map(|i| s(i, "id").to_string()).collect::<Vec<_>>(), ["b"]); assert_eq!(shown(&l, false).len(), 3);
         assert_eq!(hex("#e8a33d"), 0xe8a33d);
         assert!(super::super::mgmt::VIEWS.iter().any(|v| v.id == "plan"), "the host draws the Plan panel");
+        let b = |v: &str| crate::viewers::boards::Board { label: String::new(), value: v.into(), on: false, default: false };
+        assert_eq!(board_value(&[b("Nodes/A/A.kicad_pcb"), b("Nodes/A_new/A_new.kicad_pcb")], "/p/Nodes/A_new/A_new.kicad_pcb", "Nodes/A_new/A_new.kicad_pcb"), "Nodes/A_new/A_new.kicad_pcb");
+        assert_eq!(board_value(&[], "/p/x/B.kicad_pcb", "x/B.kicad_pcb"), "x/B.kicad_pcb", "the menu not read yet: the hub's path from the project folder");
     }
 }
