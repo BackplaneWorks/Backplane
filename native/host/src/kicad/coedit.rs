@@ -28,22 +28,33 @@ fn state() -> &'static Mutex<State> {
 
 /// The person's activity in one project's editors.
 #[derive(Default)]
-struct Person { selection: Option<(String, Value, Instant)>, edits: std::collections::VecDeque<(Instant, Value)>, agent_wrote: Option<Instant> }
+struct Person { selection: Option<(String, Value, Instant)>, edits: std::collections::VecDeque<(Instant, Value)>,
+    /// the hub's last command to this KiCad that can change its selection (an agent's edit, a netlist import, a paste, SelectItems)
+    ours: Option<Instant>,
+    /// the person's last input in the pane (a press or key, as the client reports it: editor.kicad.touched)
+    input: Option<Instant> }
 
 /// How long the person's activity is news to an agent.
 const PERSON_RECENT: Duration = Duration::from_secs(120);
-/// How long after an agent's own edit a selection is taken for that edit's echo, not the person's.
-const AGENT_ECHO: Duration = Duration::from_secs(5);
-/// An agent's edit to this project ended now (kicad_edit): the selection KiCad reports right after is the edit's, not the person's.
-pub fn agent_wrote(pro: &str) { let mut s = state().lock().unwrap(); let p = s.person.entry(pro.to_string()).or_default(); p.agent_wrote = Some(Instant::now()); }
+/// The hub sent this KiCad a command that can change its selection (any request but a read): a selection KiCad reports after it, however
+/// late, is that command's (KiCad's selection event names no actor) unless the person gave input in the pane since.
+pub fn hub_command(pro: &str) { let mut s = state().lock().unwrap(); s.person.entry(pro.to_string()).or_default().ours = Some(Instant::now()); }
+/// An agent's edit to this project ended now (kicad_edit): the same as its commands (kept for its callers).
+pub fn agent_wrote(pro: &str) { hub_command(pro) }
+/// The person pressed or typed in the pane (the client's editor.kicad.touched): what KiCad selects after this may be theirs.
+pub fn person_input(pro: &str) { let mut s = state().lock().unwrap(); s.person.entry(pro.to_string()).or_default().input = Some(Instant::now()); }
+/// Whether a selection now is the person's: not when it follows a command of the hub's with no input of the person's since.
+fn selection_is_persons(ours: Option<Instant>, input: Option<Instant>) -> bool {
+    match (ours, input) { (None, _) => true, (Some(_), None) => false, (Some(o), Some(i)) => i > o }
+}
 
 /// The person selected something in KiCad (ET_SELECTION_CHANGED): `frame` "pcb"/"sch", `names` its ItemNames (empty: cleared).
 pub fn person_selected(pro: &str, frame: &str, names: Value) {
     let mut s = state().lock().unwrap();
     let p = s.person.entry(pro.to_string()).or_default();
-    // KiCad's selection event names no actor: a selection just after an agent's own edit is that edit's (a netlist import selects the
-    // parts it added), not the person at work, so it does not hold the agent's next call
-    if p.agent_wrote.is_some_and(|t| t.elapsed() < AGENT_ECHO) { p.selection = None; return }
+    // KiCad's selection event names no actor: a selection after a command of the hub's (a netlist import selects the parts it added),
+    // however late it arrives, is that command's unless the person gave input since; it does not hold the agent's next call
+    if !selection_is_persons(p.ours, p.input) { p.selection = None; return }
     let empty = names.as_object().map(|o| o.values().all(|v| v.as_array().map(|a| a.is_empty()).unwrap_or(true))).unwrap_or(true);
     p.selection = if empty { None } else { Some((frame.to_string(), names, Instant::now())) };
 }
@@ -307,6 +318,22 @@ mod tests {
     }
     #[test] fn announcing_is_throttled() { assert!(due("ta1")); assert!(!due("ta1")); forget("ta1"); assert!(due("ta1")); }
     #[tokio::test] async fn an_unpaused_thread_never_waits() { assert_eq!(wait_resumed("tz").await, None); }
+    #[test] fn a_late_selection_after_our_command_is_ours_unless_the_person_gave_input() {
+        let now = Instant::now(); let ago = |s: u64| now.checked_sub(Duration::from_secs(s)).unwrap_or(now);
+        // a selection KiCad reports 10 s or 60 s after the hub's command, nobody at the pane: the command's
+        assert!(!selection_is_persons(Some(ago(10)), None) && !selection_is_persons(Some(ago(60)), None));
+        // the person pressed before our command (old input): still the command's
+        assert!(!selection_is_persons(Some(ago(10)), Some(ago(60))));
+        // the person pressed after our command: theirs, however long after
+        assert!(selection_is_persons(Some(ago(60)), Some(ago(10))));
+        // no command of ours at all: the person's, as before
+        assert!(selection_is_persons(None, None) && selection_is_persons(None, Some(ago(5))));
+        let pro = "/p/late-echo.kicad_pro";
+        hub_command(pro); person_selected(pro, "pcb", json!({"references": ["C1"], "pins": [], "nets": []}));
+        assert!(person_now(pro).is_none(), "the import's selection does not hold the agent");
+        person_input(pro); person_selected(pro, "pcb", json!({"references": ["C2"], "pins": [], "nets": []}));
+        assert_eq!(person_now(pro).unwrap()["selected"]["items"]["references"][0], "C2", "after the person's press it is theirs");
+    }
     #[test] fn a_selection_right_after_an_agents_edit_is_not_the_persons() {
         let pro = "/p/echo-test.kicad_pro";
         agent_wrote(pro);

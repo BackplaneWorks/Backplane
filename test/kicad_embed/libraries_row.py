@@ -188,6 +188,9 @@ def l4(c, hub):
     r = hub.ask("kicad_edit", {"path": pcb, "ops": D.netlist_ops(net), "message": "board from the schematic"}, wait=600)
     say("INFO", "L4", f"netlist import: {json.dumps(r)[:300]}")
     check("L4", "kicad_edit updated the board from the schematic (ImportNetlist)", "error" not in r, json.dumps(r)[:300])
+    # LIB_ROW_PAUSE_AFTER_IMPORT_S (with the hub's BACKPLANE_TEST_SELECTION_DELAY_MS): the next edit after KiCad's late selection, as on a
+    # slow box, where it must still not be taken for the person's
+    time.sleep(float(os.environ.get("LIB_ROW_PAUSE_AFTER_IMPORT_S", "0") or 0))
     r = hub.ask("kicad_edit", {"path": pcb, "ops": D.board_ops(), "message": "both parts inside the outline, N1 and N2 routed"}, wait=600)
     say("INFO", "L4", f"place and route: {json.dumps(r)[:400]}")
     check("L4", "kicad_edit placed both parts and routed N1 and N2", "error" not in r, json.dumps(r)[:300])
