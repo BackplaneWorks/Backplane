@@ -44,6 +44,17 @@ names = sorted(LIB.match(l).group(1) for l in added if LIB.match(l))
 check(len(added) == 6 and all('BACKPLANE_KICAD_LIBRARY' in l for l in added), f'the hub adds exactly the 6 Backplane entries ({names})')
 check(not gone and mine.strip() in after, f'nothing of the person\'s table goes or changes, their own library included ({len(gone)} lines gone)')
 check(open(os.path.join(cfg, 'sym-lib-table')).read() == before_sym, 'sym-lib-table is left byte for byte')
+# the same judgement as Linux and Windows: lane J's libraries_row.py phase b on these tables
+REPO = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', '..'))
+tb, sb = os.path.join(OUT, 'table_before'), os.path.join(OUT, 'sym_before')
+open(tb, 'w').write(person); open(sb, 'w').write(before_sym)
+cfgp = os.path.join(OUT, 'row_b.json')
+json.dump({'out': OUT, 'config_root': os.path.join(OUT, 'fh/Library/Preferences/kicad'), 'settings_version': '10.99', 'table_before': tb, 'sym_before': sb,
+           'runtime_root': RT, 'platform': 'macos'}, open(cfgp, 'w'))
+r = subprocess.run([sys.executable, os.path.join(REPO, 'test/kicad_embed/libraries_row.py'), 'b', cfgp], capture_output=True, text=True)
+for line in (r.stdout + r.stderr).splitlines():
+    print('  ' + line, flush=True)
+    if line.startswith(('PASS ', 'FAIL ')): check(line.startswith('PASS '), 'libraries_row ' + line.split(' ', 1)[1][:300])
 log = open(os.path.join(OUT, 'hub.log'), errors='replace').read()
 print('hub said: ' + ' | '.join(l for l in log.splitlines() if 'libtables' in l or 'lib-table' in l)[:600], flush=True)
 print(json.dumps({'failures': fails}))
