@@ -554,7 +554,7 @@ fn files_page(st: &State, root: &str, sel: &str, dir: &str) -> Value {
     // a project on another machine (`<link>~<id>`): its folder is listed there and the listing comes over (net/farfiles.rs); downloads are that machine's
     let far = sel.contains('~');
     let listed = if far { match crate::net::farfiles::listing(sel, dir) { Some(r) => r, None => return json!({"trail": files_trail(dir), "rows": [], "ready": false, "error": "", "zip": "", "zipName": ""}) } }
-        else if root.is_empty() { Err("This thread has no project folder.".to_string()) } else { crate::files::dir::list(std::path::Path::new(root), dir).map_err(|e| e.to_string()) };
+        else if root.is_empty() { Err("This thread has no project folder.".to_string()) } else { crate::files::dir::list(std::path::Path::new(root), dir).map_err(|e| crate::plat::privacy_block(root).unwrap_or_else(|| e.to_string())) };
     if let (false, Ok(t)) = (far, &listed) { crate::files::watch_dir::touch(root, dir, crate::files::watch_dir::signature(t)); }
     let (mut rows, err) = match listed { Ok(t) => (rows_of(&t, sel, dir), String::new()), Err(e) => (vec![], e) };
     if far { for r in rows.iter_mut() { r["down"] = json!(""); } }

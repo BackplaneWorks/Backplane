@@ -136,6 +136,9 @@ fn folders_in(cache: &Shared, drafts: &Value, home: &str, roots: &[(&str, &str)]
     let (dir, part) = split(&x);
     check(cache, &dir, &part);
     let (all, cut) = names(cache, &dir);
+    // macOS's privacy settings refuse this folder: it is said, and nothing is offered to add or make there (a refused folder reads as empty)
+    let blocked = if all.is_empty() { crate::plat::privacy_block(&dir) } else { None };
+    if blocked.is_some() { lock(cache).dirs.remove(&dir); } // read again next time: the person may allow it in System Settings meanwhile
     let (names, total) = shown(&all, &part);
     let t = |p: &str| tilde(p, home);
     let more = total - names.len();
@@ -146,7 +149,8 @@ fn folders_in(cache: &Shared, drafts: &Value, home: &str, roots: &[(&str, &str)]
     // Clone it here (the machine picker: `@proj.clone` holds the remote): the folder is confirmed first; a folder that is there is taken only when it
     // is that repository (it is added as it is), never cloned into
     let clone = drafts["@proj.clone"].as_str().unwrap_or("");
-    if !clone.is_empty() {
+    if blocked.is_some() {
+    } else if !clone.is_empty() {
         if Path::new(whole).exists() {
             if crate::mirror::origin_of_root(whole) == clone { items.push(json!({"label": format!("Add {} (already a clone of {clone})", t(whole)), "action": "proj-add", "value": whole, "kind": "add"})) }
             else { items.push(json!({"label": format!("{} is there and holds something else: pick another folder", t(whole)), "action": "", "value": "", "kind": "note"})) }
@@ -173,7 +177,7 @@ fn folders_in(cache: &Shared, drafts: &Value, home: &str, roots: &[(&str, &str)]
         if let Some(id) = id { it["project"] = json!(id); }
         items.push(it);
     }
-    let error = if Path::new(&dir).is_dir() { String::new() } else { format!("{} is not a folder", t(&dir)) };
+    let error = if let Some(w) = blocked { w } else if Path::new(&dir).is_dir() { String::new() } else { format!("{} is not a folder", t(&dir)) };
     let hint = if clone.is_empty() { "Path of a folder, e.g. ~/projects/board, or a Git repository's address to clone it".to_string() } else { format!("Where to clone {clone}") };
     // `more`: the folders that match past the rows sent (typing narrows them); `cut`: the folder holds more entries than are read, so there may be others
     json!({"text": text, "hint": hint, "error": error, "items": items, "more": more, "cut": cut})
