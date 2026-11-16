@@ -92,11 +92,28 @@ pub async fn publish(hub: &Arc<Hub>, pro: &str) {
     let pcb = pcb_of(pro); if pcb.is_empty() { return }
     let (plan, live) = plan_now(hub, &pcb).await;
     let mut d = if plan.is_null() { json!({"badge": {"n": 0, "tone": ""}, "empty": true, "live": live, "layers": []}) } else { data(&plan, &super::events::open_asks(&pcb), live) };
+    // the person's switch, and plans an agent asked about on the project's other boards (the viewer shows one board; the plan may be another's)
+    d["on"] = json!(super::is_on(hub.setting(super::SETTING).await.as_deref().unwrap_or("")));
+    let top = project_top(pro);
+    d["elsewhere"] = json!(elsewhere(&super::events::asking_boards(), &pcb, &top));
+    if d["empty"] == true && !d["elsewhere"].as_array().map_or(true, Vec::is_empty) { d["badge"] = json!({"n": d["elsewhere"].as_array().map_or(0, Vec::len), "tone": "warn"}) }
     // a KiCad whose own keys in plan view are not the plan's: the panel says to approve here
     if let Some(n) = crate::files::kicad::embed::gui_route(pro).and_then(|r| super::keys_note(&r.caps)) { d["keys_note"] = json!(n); }
     mgmt::publish(hub, "plan", pro, d).await;
 }
 
+/// The project a .kicad_pro belongs to: the nearest folder above it holding `.git` or `.backplane.json` (a worktree path as its main checkout's).
+pub fn project_top(pro: &str) -> String {
+    let main = crate::files::kicad::canonical::main_of(pro);
+    Path::new(&main).ancestors().skip(1).find(|d| d.join(".git").exists() || d.join(".backplane.json").exists())
+        .map(|d| d.to_string_lossy().into_owned()).unwrap_or_default()
+}
+/// Of the boards with an agent's open request for approval, the others under the same folder as this one: [{pcb, name}].
+pub fn elsewhere(asking: &[String], pcb: &str, top: &str) -> Vec<Value> {
+    let top = top.trim_end_matches('/');
+    asking.iter().filter(|b| b.as_str() != pcb && !top.is_empty() && b.starts_with(&format!("{top}/")))
+        .map(|b| json!({"pcb": b, "rel": &b[top.len() + 1..], "name": Path::new(b).file_stem().map(|x| x.to_string_lossy().into_owned()).unwrap_or_default()})).collect()
+}
 /// `plan.focus {pro, id}`: the item's nets (a corridor's group, a plane's net) and the parts it runs between, selected and zoomed in KiCad.
 pub async fn focus(hub: &Arc<Hub>, pro: &str, id: &str) -> Result<Value, String> {
     let pcb = pcb_of(pro);
@@ -132,5 +149,11 @@ mod tests {
         let dr = data(&p2, &[], true)["draw"].clone();
         assert_eq!((dr["bands"].as_array().unwrap().len(), dr["bands"][0]["width"].clone(), dr["bands"][0]["state"].clone(), dr["bands"][0]["color"].clone()), (1, json!(2.4), json!("proposed"), json!("#e8a33d")), "corridors without a path are not drawn");
         assert_eq!(dr["regions"][0]["outline"].as_array().unwrap().len(), 3);
+    }
+    #[test] fn plan_panel_names_a_plan_waiting_on_another_board_of_the_project() {
+        let asking = vec!["/p/Nodes/A_new/A_new.kicad_pcb".to_string(), "/p/Nodes/A/A.kicad_pcb".to_string(), "/q/B/B.kicad_pcb".to_string()];
+        let e = elsewhere(&asking, "/p/Nodes/A/A.kicad_pcb", "/p");
+        assert_eq!(e, vec![json!({"pcb": "/p/Nodes/A_new/A_new.kicad_pcb", "rel": "Nodes/A_new/A_new.kicad_pcb", "name": "A_new"})], "this board and other projects' boards are left out");
+        assert!(elsewhere(&asking, "/p/x.kicad_pcb", "").is_empty());
     }
 }
