@@ -33,8 +33,8 @@ unsafe fn send_rect_rect(o: *mut c_void, s: &CStr, r: Rect) -> Rect { let f: uns
 unsafe fn rect_of(o: *mut c_void, s: &CStr) -> Rect { let f: unsafe extern "C" fn(*mut c_void, *mut c_void) -> Rect = std::mem::transmute(objc_msgSend as *const ()); f(o, sel(s)) }
 
 // CoreGraphics' window list (no permission needed for numbers, owners, layers and bounds)
-#[link(name = "CoreGraphics", kind = "framework")] unsafe extern "C" { fn CGWindowListCopyWindowInfo(option: u32, relative_to: u32) -> *const c_void; }
-#[link(name = "CoreFoundation", kind = "framework")] unsafe extern "C" {
+#[link(name = "CoreGraphics", kind = "framework")] unsafe extern "C" { fn CGWindowListCopyWindowInfo(option: u32, relative_to: u32) -> *const c_void; } // i18n-ok: a framework name for the linker
+#[link(name = "CoreFoundation", kind = "framework")] unsafe extern "C" { // i18n-ok: a framework name for the linker
     fn CFArrayGetCount(a: *const c_void) -> isize; fn CFArrayGetValueAtIndex(a: *const c_void, i: isize) -> *const c_void;
     fn CFDictionaryGetValue(d: *const c_void, k: *const c_void) -> *const c_void; fn CFNumberGetValue(n: *const c_void, ty: isize, out: *mut c_void) -> bool;
     fn CFRelease(o: *const c_void);
