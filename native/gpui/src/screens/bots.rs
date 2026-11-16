@@ -38,6 +38,8 @@ pub fn form_fields(data: &Value) -> Vec<Field> {
     let b = &data["bot"];
     match b["kind"].as_str() { Some("room") => out.push(f("rpost", &trs("Post to the room"), String::new())), Some("remote") => out.push(f("rtext", &trs("Message"), String::new())), _ => {} }
     // a space's inputs: the typed text stays here (a vault field sends nothing) until the input's Send, which carries it in the space action
+    // the cat control's name and custom colour boxes: typed changes redraw it (the cat follows each letter), and its presses carry the text
+    if b["kind"] == "bot" && b["tab"] == "settings" { for x in b["cat"]["fields"].as_array().into_iter().flatten() { out.push(f(&string(x, "name"), &trs(&string(x, "hint")), string(x, "value"))); } }
     if b["kind"] == "bot" && b["tab"] == "settings" { out.push(Field { name: persona_field(&string(b, "id")), hint: trs("Persona"), secret: false, value: string(b, "persona"), vault: true }); }
     if b["kind"] == "bot" && b["tab"] == "routines" && b["routine"]["open"] == true { out.push(f("oname", &trs("Name"), string(&b["routine"], "name"))); out.push(f("ocron", &trs("When"), string(&b["routine"], "cron"))); out.push(f("oprompt", &trs("What to do each time"), string(&b["routine"], "prompt"))); }
     if b["kind"] == "bot" && b["tab"] == "hooks" { out.push(Field { name: "hk.name".into(), hint: trs("Webhook name"), secret: false, value: String::new(), vault: true }); }
@@ -337,7 +339,9 @@ fn settings_page(cx: &mut Context<Backplane>, light: bool, fields: &HashMap<Stri
     let c = |n: &str| theme::color(light, n);
     let row = |k: &str, v: String| div().flex().flex_col().gap_1().child(div().text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(k.to_string())).child(div().child(v));
     let (id, field) = (string(bot, "id"), persona_field(&string(bot, "id")));
-    div().flex().flex_col().gap_3().p_3().child(row(&trs("Name"), string(bot, "name")))
+    // its name and cat: the control setup's Your uberbot draws (screens/catpick.rs, the hub's `cat`); an older hub sends none: the name as words
+    let name = if bot["cat"].is_object() { super::catpick::view(cx, light, fields, &bot["cat"], 700.) } else { row(&trs("Name"), string(bot, "name")).into_any_element() };
+    div().flex().flex_col().gap_3().p_3().child(name)
         .child(div().flex().flex_col().gap_1().child(div().text_size(crate::scale::tpx(11.)).text_color(c("dim")).child(trs("Persona"))).children(field_box_h(light, fields, &field, 96.)))
         .child(div().flex().gap_2().child(div().id("bot-save").px_2().py_1().text_size(crate::scale::tpx(12.)).cursor_pointer().border_1().bg(c("accent")).text_color(c("on-accent")).border_color(c("accent")).child(trs("Save"))
             .on_click(cx.listener(move |this, _, _, cx| save_persona(this, &id, cx)))))

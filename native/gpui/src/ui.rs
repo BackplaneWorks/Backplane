@@ -362,12 +362,15 @@ impl Backplane {
         // the uberbot (flagged by the hub) is drawn in its own spot above the projects, so it is kept apart from the BOTS list
         let uber_data: Vec<(String, String, String, u64, String, bool)> = self.data["bots"].as_array().into_iter().flatten().filter(|b| b["uber"].as_bool().unwrap_or(false))
             .map(|b| (string(b, "name"), string(b, "mood"), string(b, "note"), b["look"].as_u64().unwrap_or(0), string(b, "id"), b["sel"].as_bool().unwrap_or(false))).collect();
-        let uber_rigs: Vec<_> = uber_data.iter().map(|(_, mood, _, look, _, _)| self.cats.rig(*look, mood)).collect();
+        // each bot's fur colour ("#rrggbb", "" its coat's own), by id
+        let colors: std::collections::HashMap<String, String> = self.data["bots"].as_array().into_iter().flatten().map(|b| (string(b, "id"), string(b, "color"))).collect();
+        let fur = |id: &str| colors.get(id).cloned().unwrap_or_default();
+        let uber_rigs: Vec<_> = uber_data.iter().map(|(_, mood, _, look, id, _)| self.cats.rig(*look, mood, &fur(id))).collect();
         // a bot or room of a linked machine carries that machine's marker (the hub's `mark`, as threads elsewhere do); none for this machine's
         let marks: std::collections::HashMap<String, Value> = ["bots", "rooms"].iter().flat_map(|k| self.data[*k].as_array().into_iter().flatten()).filter(|b| b["mark"].is_object()).map(|b| (string(b, "id"), b["mark"].clone())).collect();
         let bot_data: Vec<(String, String, String, u64, String, bool)> = self.data["bots"].as_array().into_iter().flatten().filter(|b| !b["uber"].as_bool().unwrap_or(false))
             .map(|b| (string(b, "name"), string(b, "mood"), string(b, "note"), b["look"].as_u64().unwrap_or(0), string(b, "id"), b["sel"].as_bool().unwrap_or(false))).collect();
-        let bot_rigs: Vec<_> = bot_data.iter().map(|(_, mood, _, look, _, _)| self.cats.rig(*look, mood)).collect();
+        let bot_rigs: Vec<_> = bot_data.iter().map(|(_, mood, _, look, id, _)| self.cats.rig(*look, mood, &fur(id))).collect();
         // a bot's or room's right-click menu: the hub's `menu` on its row (Delete bot; Rename, Delete room), drawn as it is
         let row_menus: std::collections::HashMap<String, Value> = ["bots", "rooms"].iter().flat_map(|k| self.data[*k].as_array().into_iter().flatten()).filter(|b| b["menu"].as_array().map_or(false, |m| !m.is_empty())).map(|b| (string(b, "id"), b["menu"].clone())).collect();
         let started = self.started;

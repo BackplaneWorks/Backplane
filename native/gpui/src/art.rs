@@ -133,15 +133,33 @@ fn trace(pb: &mut PathBuilder, segs: &[Seg], rs: f32, f: impl Fn(f32, f32) -> Po
 
 // ---- cats -------------------------------------------------------------------------------------
 struct Anim { kind: u8, from: f32, to: f32, px: f32, py: f32, per: f32, delay: f32, ease: u8 }
-struct Part { segs: Vec<Seg>, fill: Option<u32>, stroke: Option<u32>, sw: f32, alpha: f32, anims: Vec<Anim> }
+/// `eye`: the y the part closes to in a blink (an eye, its pupil and shine close on the eye's own middle), None for any other part.
+struct Part { name: String, segs: Vec<Seg>, fill: Option<u32>, stroke: Option<u32>, sw: f32, alpha: f32, anims: Vec<Anim>, eye: Option<f32> }
 pub struct Rig { parts: Vec<Part>, pub moving: bool }
+/// What an animation does to a whole cat, on top of its rig's own: moved by (`dx`, `dy`), scaled by (`sx`, `sy`) about its feet (32, 62),
+/// its eyes closed by `blink` (0 open, 1 shut), drawn at `alpha`. The cat's arrival and a new look's pop are made of these (screens/catpick.rs).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Fx { pub dx: f32, pub dy: f32, pub sx: f32, pub sy: f32, pub blink: f32, pub alpha: f32 }
+impl Fx { pub const NONE: Fx = Fx { dx: 0., dy: 0., sx: 1., sy: 1., blink: 0., alpha: 1. }; }
 
 fn color(v: &Value) -> Option<u32> { v.as_u64().map(|n| n as u32) }
-fn load_rig(dir: &PathBuf, look: u32, mood: &str, moving: bool) -> Option<Rig> {
-    let text = std::fs::read_to_string(dir.join(format!("{look}-{mood}.json"))).ok()?;
-    let v: Value = serde_json::from_str(&text).ok()?;
-    let parts = v.as_array()?.iter().map(|p| Part {
-        segs: parse_d(p["d"].as_str().unwrap_or("")), fill: color(&p["fill"]), stroke: color(&p["stroke"]),
+fn read_rig(dir: &PathBuf, look: u32, mood: &str) -> Option<Value> { serde_json::from_str(&std::fs::read_to_string(dir.join(format!("{look}-{mood}.json"))).ok()?).ok() }
+/// A look's rig in a mood, its fur in `tint` (crate::cat, the hub's own file): away greys the cat, so there a part's colours are its idle ones
+/// tinted, then greyed, as the hub tints the phones' (bots/catrig.rs).
+fn load_rig(dir: &PathBuf, look: u32, mood: &str, moving: bool, tint: Option<u32>) -> Option<Rig> {
+    let v = read_rig(dir, look, mood)?;
+    let idle = if mood == "away" && tint.is_some() { read_rig(dir, look, "idle") } else { None };
+    let body = idle.as_ref().unwrap_or(&v).as_array()?.iter().find(|p| p["name"] == "body").and_then(|p| color(&p["fill"])).unwrap_or(0);
+    let colours = |p: &Value| -> (Option<u32>, Option<u32>) {
+        let name = p["name"].as_str().unwrap_or("");
+        let Some(idle) = &idle else { return crate::cat::tint(name, color(&p["fill"]), color(&p["stroke"]), body, tint) };
+        let Some(i) = idle.as_array().and_then(|a| a.iter().find(|i| i["name"] == p["name"])) else { return (color(&p["fill"]), color(&p["stroke"])) };
+        let (f, s) = crate::cat::tint(name, color(&i["fill"]), color(&i["stroke"]), body, tint);
+        (if f != color(&i["fill"]) { f.map(crate::cat::grey) } else { color(&p["fill"]) }, if s != color(&i["stroke"]) { s.map(crate::cat::grey) } else { color(&p["stroke"]) })
+    };
+    let mut parts: Vec<Part> = v.as_array()?.iter().map(|p| { let (fill, stroke) = colours(p); Part {
+        name: p["name"].as_str().unwrap_or("").to_string(), eye: None,
+        segs: parse_d(p["d"].as_str().unwrap_or("")), fill, stroke,
         sw: p["sw"].as_f64().unwrap_or(1.0) as f32, alpha: p["alpha"].as_f64().unwrap_or(255.0) as f32 / 255.0,
         anims: p["anims"].as_array().map(|a| a.iter().map(|x| Anim {
             kind: match x["k"].as_str().unwrap_or("") { "rot" => 1, "tx" => 2, "ty" => 3, "sx" => 4, "sy" => 5, _ => 6 },
@@ -149,7 +167,11 @@ fn load_rig(dir: &PathBuf, look: u32, mood: &str, moving: bool) -> Option<Rig> {
             px: x["px"].as_f64().unwrap_or(0.0) as f32, py: x["py"].as_f64().unwrap_or(0.0) as f32,
             per: (x["per"].as_f64().unwrap_or(1000.0) as f32).max(1.0), delay: x["delay"].as_f64().unwrap_or(0.0) as f32,
             ease: match x["ease"].as_str().unwrap_or("io") { "blink" => 1, "saw" => 2, _ => 0 } }).collect()).unwrap_or_default(),
-    }).collect();
+    } }).collect();
+    // a blink closes each eye on its middle: the eye's own part's, for its pupil and shine too
+    /* i18n-ok: rig part names */ let mid = |side: &str, parts: &[Part]| parts.iter().find(|p| p.name == format!("{side} eye")).map(|p| { let ys: Vec<f32> = p.segs.iter().filter_map(|s| match *s { Seg::M(_, y) | Seg::L(_, y) | Seg::C(_, _, _, _, _, y) | Seg::Q(_, _, _, y) => Some(y), _ => None }).collect(); ys.iter().sum::<f32>() / ys.len().max(1) as f32 });
+    let (l, r) = (mid("left", &parts), mid("right", &parts));
+    for p in parts.iter_mut() { p.eye = if p.name.starts_with("left eye") { l } else if p.name.starts_with("right eye") { r } else { None } }
     Some(Rig { parts, moving })
 }
 
@@ -174,11 +196,18 @@ fn pose(anims: &[Anim], ms: f32, mut x: f32, mut y: f32) -> (f32, f32) {
 }
 fn opacity(anims: &[Anim], ms: f32) -> f32 { anims.iter().filter(|a| a.kind == 6).map(|a| ease(a, ms)).product() }
 
-pub fn paint_cat(window: &mut Window, b: Bounds<Pixels>, rig: &Rig, ms: f32, size: f32, gain: f32) {
+pub fn paint_cat(window: &mut Window, b: Bounds<Pixels>, rig: &Rig, ms: f32, size: f32, gain: f32) { paint_cat_fx(window, b, rig, ms, size, gain, Fx::NONE) }
+/// A cat with an animation's `fx` on top (Fx).
+pub fn paint_cat_fx(window: &mut Window, b: Bounds<Pixels>, rig: &Rig, ms: f32, size: f32, gain: f32, fx: Fx) {
     let s = size / 64.0; let o = b.origin;
     for p in &rig.parts {
-        let al = p.alpha * opacity(&p.anims, ms) * gain;
-        let f = |x: f32, y: f32| { let (x, y) = pose(&p.anims, ms, x, y); point(o.x + px(x * s), o.y + px(y * s)) };
+        let al = p.alpha * opacity(&p.anims, ms) * gain * fx.alpha;
+        if al <= 0.003 { continue }
+        let f = |x: f32, y: f32| {
+            let (x, y) = pose(&p.anims, ms, x, y);
+            let y = match p.eye { Some(cy) if fx.blink > 0. => cy + (y - cy) * (1. - 0.9 * fx.blink.min(1.)), _ => y };
+            let (x, y) = (32. + (x - 32.) * fx.sx + fx.dx, 62. + (y - 62.) * fx.sy + fx.dy);
+            point(o.x + px(x * s), o.y + px(y * s)) };
         if let Some(c) = p.fill {
             let mut pb = PathBuilder::fill().with_style(PathStyle::Fill(FillOptions::even_odd().with_tolerance(0.02)));
             trace(&mut pb, &p.segs, 1.0, f);
@@ -276,15 +305,16 @@ pub fn icon(name: &'static str, size: f32, color: Rgba) -> AnyElement {
 }
 
 /// Rigs by (look, mood): loaded once from the generated folder, at most 64 kept.
-pub struct Cats { dir: PathBuf, cache: HashMap<(u32, String), Option<Arc<Rig>>> }
+/// Rigs by (look, mood, colour), the colour a bot's "#rrggbb" or "" (its coat's own).
+pub struct Cats { dir: PathBuf, cache: HashMap<(u32, String, Option<u32>), Option<Arc<Rig>>> }
 impl Cats {
     pub fn new() -> Self { Cats { dir: assets_dir().join("cat-rigs"), cache: HashMap::new() } }
-    pub fn rig(&mut self, seed: u64, mood: &str) -> Option<Arc<Rig>> {
-        let look = (seed % 72) as u32;
+    pub fn rig(&mut self, seed: u64, mood: &str, color: &str) -> Option<Arc<Rig>> {
+        let look = (seed % crate::cat::LOOKS) as u32; let tint = crate::cat::parse_color(color);
         if self.cache.len() > 64 { self.cache.clear(); }
         let moving = matches!(mood, "work" | "think" | "wait" | "talk");
         let dir = self.dir.clone();
-        let r = self.cache.entry((look, mood.to_string())).or_insert_with(|| load_rig(&dir, look, mood, moving).map(Arc::new)).clone();
+        let r = self.cache.entry((look, mood.to_string(), tint)).or_insert_with(|| load_rig(&dir, look, mood, moving, tint).map(Arc::new)).clone();
         /* i18n-ok: svg markup, env names and log lines */ if r.is_none() { log_once(format!("cat rig {look}-{mood} missing in {}", dir.display())); }
         r
     }
