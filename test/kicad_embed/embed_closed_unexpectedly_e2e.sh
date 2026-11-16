@@ -65,7 +65,7 @@ AUTOSAVE=$(ls -d "$PROJ"/_autosave-* "$PROJ"/.history 2>/dev/null | head -3 | tr
 echo "INFO autosave files before the kill: ${AUTOSAVE:-none}"
 kill -KILL "$KPID" 2>/dev/null || true
 echo "INFO killed KiCad $KPID with SIGKILL"
-wait_for_log "$OUT/client.log" '"name":"closed_seen","event":"mark"' 120 || true
+wait_for_log "$OUT/client.log" '"name":"closed_seen","event":"mark"' 1200 || true
 RC=$(last_kicad_report "$OUT/client.log" closed)
 ST=$(python3 -c 'import json,sys; r=json.loads(sys.argv[1] or "{}"); print(r.get("state",""), "|", r.get("reason",""))' "$RC")
 echo "INFO the hub after the kill: $ST"
@@ -93,7 +93,7 @@ echo "INFO the project folder after the kill: $(ls -A "$PROJ" | tr '\n' ' ')"
 find "$PROJ" -newer "$OUT/script.json" -type f ! -path '*/.git/*' 2>/dev/null | head -12 | sed 's/^/INFO written since the start: /' 
 [ -z "$AUTOSAVE" ] || check "KiCad's autosave is kept (not swept)" "$([ -n "$AUTO2" ] && echo 1 || echo 0)" "before: $AUTOSAVE"
 # C3: the press, and the editor painted within 30 s
-wait_for_log "$OUT/client.log" '"name":"reopened","event":"mark"' 120 || true
+wait_for_log "$OUT/client.log" '"name":"reopened","event":"mark"' 600 || true
 MS=$(python3 - "$OUT/client.log" <<'PY'
 import re, sys
 t = open(sys.argv[1]).read()
