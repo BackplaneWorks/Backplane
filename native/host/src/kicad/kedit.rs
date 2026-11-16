@@ -14,6 +14,12 @@ const B: &str = "kiapi.board.commands.";
 const S: &str = "kiapi.schematic.commands.";
 const BT: &str = "type.googleapis.com/kiapi.board.types.";
 const ST: &str = "type.googleapis.com/kiapi.schematic.types.";
+/// The fork's capability (batch 10) for its fixed item API: a symbol created by its library id is written flattened (one that extends another
+/// too) with text-only fields placed as the library has them, a user field named Footprint fills the symbol's own, and a partial
+/// FootprintInstance update keeps a field's layer, place and visibility. With it, a new symbol goes as its library id and texts (KiCad's own
+/// placement is still read once, for where its pins are), and a footprint's value or reference is updated as that one field. Without it,
+/// today's way: the whole item KiCad placed, `footprint_field`, the whole footprint without its body.
+pub const FIELD_FIXES: &str = "api-field-fixes";
 /// Rows one `find` answers with when no `limit` is given.
 pub const ROWS: usize = 200;
 /// The characters one `find` answers with at most (about six thousand tokens): a board's every pad near a point was fifty thousand, more than a
@@ -26,6 +32,8 @@ pub trait Call: Sync {
     fn call<'a>(&'a self, ty: &'a str, msg: Value) -> Fut<'a>;
     /// The saved schematic's sheet files as text, for the read-back of what was set (None: not read back, as with a stand-in).
     fn sheet_texts(&self) -> Option<Vec<String>> { None }
+    /// The KiCad runtime's capabilities (its manifest's list): what a workaround here is dropped for (`FIELD_FIXES`).
+    fn caps(&self) -> Vec<String> { vec![] }
     /// The saved schematic's netlist as {reference: {pin: net}} (kicad-cli's export); Null: none to be had.
     fn nets<'a>(&'a self) -> Fut<'a> { Box::pin(async { Ok(Value::Null) }) }
     /// KiCad's own check of the saved document (kicad-cli's DRC report of a board, ERC of a schematic, as JSON); Null: none to be had.
@@ -45,6 +53,7 @@ impl Call for Patient<'_> {
     fn sheet_texts(&self) -> Option<Vec<String>> { self.c.sheet_texts() }
     fn check<'a>(&'a self) -> Fut<'a> { self.c.check() }
     fn nets<'a>(&'a self) -> Fut<'a> { self.c.nets() }
+    fn caps(&self) -> Vec<String> { self.c.caps() }
 }
 /// Whether the ops change anything (a call of finds and raw reads alone does not).
 pub fn writes(ops: &Value) -> bool {
@@ -338,7 +347,9 @@ pub fn build(item: &Value) -> Result<Vec<Value>, String> {
             let mut s = json!({"@type": format!("{ST}SchematicSymbolInstance"), "position": point(&v["at"], "at")?, "definition": {"id": id}, "lib_id": id, "unit": {"unit": v["unit"].as_u64().unwrap_or(1)},
                 "transform": {"orientation": format!("SSO_{}", v["rot"].as_i64().unwrap_or(0))}, "reference_field": {"name": "Reference", "text": {"text": text("ref")}}});
             if v["value"].is_string() { s["value_field"] = json!({"name": "Value", "text": {"text": text("value")}}) }
-            if let Some(fs) = v["fields"].as_object() { s["user_fields"] = json!(fs.iter().map(|(n, t)| sch_field(n, t.as_str().unwrap_or(""), &s)).collect::<Vec<_>>()) }
+            let mut fs: Vec<Value> = v["fields"].as_object().into_iter().flatten().map(|(n, t)| sch_field(n, t.as_str().unwrap_or(""), &s)).collect();
+            if let Some(f) = v["footprint"].as_str() { fs.retain(|x| x["name"] != "Footprint"); fs.push(sch_field("Footprint", f, &s)) }
+            if !fs.is_empty() { s["user_fields"] = json!(fs) }
             vec![s] }
         other => return Err(format!("cannot add `{other}`: track, via, wire, label, junction, no_connect, symbol, or KiCad's own item with @type")),
     })
@@ -449,6 +460,8 @@ struct Run<'a> { c: &'a dyn Call, doc: Value, board: bool, commit: Option<Value>
     pwr: Option<u64>,
     /// The nets and references this call worked on (the check's `new` is about these), and whether something it did has no such list.
     touched: Vec<String>, touch_all: bool,
+    /// The runtime has the fork's fixed item API (`FIELD_FIXES`), and the fields the next update sends alone (a footprint's value or reference).
+    field_fixes: bool, only: Vec<&'static str>,
     /// Where a pad stood before its footprint was exchanged in this call (net, x, y): an old track's end there is cut back when the part is routed.
     vacated: Vec<(String, f64, f64)>,
     /// What the saved sheet files must show (reference, property, text), and how many updates KiCad deferred (the person is editing those items).
@@ -665,9 +678,11 @@ impl Run<'_> {
         self.begin().await?; let n = items.len(); let mut by: Vec<(Value, Vec<Value>)> = vec![];
         let fields = items.iter().any(|(_, _, body)| *body) || kind == "symbol";
         let rows: Vec<Value> = items.iter().take(SHOWN).map(|(raw, _, _)| { let mut r = row(kind, raw, fields); if let Some(o) = r.as_object_mut() { o.remove("id"); } r }).collect();
+        let only = std::mem::take(&mut self.only);
         for (raw, sheet, body) in items {
             if kind == "zone" { self.refill.push(raw["id"].clone()) }
-            let it = slim(kind, raw, body);
+            // one field of a footprint, as that field's text alone (the fixed API keeps the rest of the field and of the part)
+            let it = if !only.is_empty() { let mut p = json!({"@type": raw["@type"], "id": raw["id"]}); for k in &only { p[*k] = json!({"text": {"text": {"text": raw[*k]["text"]["text"]["text"]}}}) } p } else { slim(kind, raw, body) };
             match by.iter_mut().find(|(s, _)| *s == sheet) { Some((_, v)) => v.push(it), None => by.push((sheet, vec![it])) }
         }
         for (sheet, its) in by {
@@ -733,6 +748,8 @@ impl Run<'_> {
                         for (n, t) in with.get("fields").and_then(Value::as_object).into_iter().flatten() { self.expect.push((r.clone(), n.clone(), t.as_str().unwrap_or("").into())) } }
                     ups.push((raw, sheet, body));
                 }
+                if self.field_fixes && kind == "footprint" && v == "set" && !with.is_empty() && with.keys().all(|k| matches!(k.as_str(), "value" | "ref")) {
+                    self.only = with.keys().map(|k| if k == "value" { "value_field" } else { "reference_field" }).collect() }
                 let before = self.deferred; let rows = self.update(&kind, ups).await?;
                 // the person is editing some of these right now: KiCad applies the change when they finish, merged with theirs (GetNotices says how it went)
                 Ok(if self.deferred > before { json!({"updated": rows, "deferred": self.deferred - before}) } else { json!({"updated": rows}) })
@@ -773,7 +790,7 @@ impl Run<'_> {
                 }
                 self.begin().await?; let mut ids = vec![]; let mut by: Vec<(Value, Vec<Value>)> = vec![]; let mut quiet = 0usize;
                 for it in &list { let sheet = self.sheet(if it["sheet"].is_null() { &op["sheet"] } else { &it["sheet"] }).await?;
-                    let raws = match self.templates.get(&it.to_string()) { Some(t) => vec![placed(t, &it["symbol"])], None => build(it)? }; match by.iter_mut().find(|(s, _)| *s == sheet) { Some((_, v)) => v.extend(raws), None => by.push((sheet, raws)) } }
+                    let raws = match self.templates.get(&it.to_string()) { Some(t) if !self.field_fixes => vec![placed(t, &it["symbol"])], _ => build(it)? }; match by.iter_mut().find(|(s, _)| *s == sheet) { Some((_, v)) => v.extend(raws), None => by.push((sheet, raws)) } }
                 for (sheet, raws) in by {
                     let r = self.c.call(&format!("{C}CreateItems"), json!({"header": self.header(&sheet), "items": raws})).await?;
                     if let Some(bad) = status_bad(&r, "created_items") { return Err(bad) }
@@ -978,7 +995,7 @@ pub async fn run(c: &dyn Call, path: &str, a: &Value) -> Result<Value, String> {
     if let Some((i, _)) = ops.iter().enumerate().find(|(_, o)| verb(o).is_empty()) { return Err(format!("op {}: an op is one of find, move, set, add, delete, route, place, netclass, rule, refill, ipc", i + 1)) }
     let patient = Patient { c, step: BUSY_STEP, wait: BUSY_WAIT }; let c: &dyn Call = &patient;
     let doc = Run::open(c, path).await?;
-    let mut r = Run { c, expect: vec![], deferred: 0, refill_all: false, planned: Default::default(), added: vec![], libs: false, pwr: None, touched: vec![], touch_all: false, vacated: vec![], lib_step: std::time::Duration::from_millis(if cfg!(test) { 1 } else { 500 }), board: path.ends_with(".kicad_pcb"), doc, commit: None, sheets: None, refill: vec![], wrote: false, cache: Default::default(),
+    let mut r = Run { c, expect: vec![], deferred: 0, refill_all: false, planned: Default::default(), added: vec![], libs: false, pwr: None, touched: vec![], touch_all: false, vacated: vec![], field_fixes: c.caps().iter().any(|x| x == FIELD_FIXES), only: vec![], lib_step: std::time::Duration::from_millis(if cfg!(test) { 1 } else { 500 }), board: path.ends_with(".kicad_pcb"), doc, commit: None, sheets: None, refill: vec![], wrote: false, cache: Default::default(),
         message: a["message"].as_str().unwrap_or("kicad_edit").to_string(), split: 0, templates: Default::default() };
     // KiCad's own check before the edit, so the answer can say what the edit added to it (check: false leaves it out)
     let checking = writes(&a["ops"]) && a["save"].as_bool().unwrap_or(true) && a["check"].as_bool().unwrap_or(true);
@@ -1098,7 +1115,7 @@ mod tests {
     }
 
     /// A stand-in KiCad: a board with two footprints, a track and a zone; it records every command.
-    struct Fake { log: Mutex<Vec<(String, Value)>>, open: Mutex<bool>, fail: Option<&'static str>, busy: Mutex<u32>, save: Value, texts: Option<Vec<String>> }
+    struct Fake { log: Mutex<Vec<(String, Value)>>, open: Mutex<bool>, fail: Option<&'static str>, busy: Mutex<u32>, save: Value, texts: Option<Vec<String>>, caps: Vec<String> }
     impl Call for Fake {
         fn call<'a>(&'a self, ty: &'a str, msg: Value) -> Fut<'a> { Box::pin(async move {
             self.log.lock().unwrap().push((ty.rsplit('.').next().unwrap_or("").to_string(), msg.clone()));
@@ -1129,8 +1146,9 @@ mod tests {
             })
         }) }
         fn sheet_texts(&self) -> Option<Vec<String>> { self.texts.clone() }
+        fn caps(&self) -> Vec<String> { self.caps.clone() }
     }
-    fn fake(fail: Option<&'static str>) -> Fake { Fake { log: Mutex::new(vec![]), open: Mutex::new(false), fail, busy: Mutex::new(0), save: json!({}), texts: None } }
+    fn fake(fail: Option<&'static str>) -> Fake { Fake { log: Mutex::new(vec![]), open: Mutex::new(false), fail, busy: Mutex::new(0), save: json!({}), texts: None, caps: vec![] } }
     fn names(f: &Fake) -> Vec<String> { f.log.lock().unwrap().iter().map(|(t, _)| t.clone()).collect() }
     fn sent(f: &Fake, ty: &str) -> Value { f.log.lock().unwrap().iter().find(|(t, _)| t == ty).map(|(_, m)| m.clone()).unwrap_or(Value::Null) }
     fn go(f: &Fake, a: Value) -> Result<Value, String> { go_on(f, "/p/b.kicad_pcb", a) }
@@ -1247,6 +1265,27 @@ mod tests {
         assert_eq!(out["results"][0]["created"][0]["pins"], json!({"1": [10.0, 16.0], "2": [10.0, 24.0]}));
         let e = go_on(&fake(None), "/p/b.kicad_sch", json!({"ops": [{"add": [{"wire": ["Q9.1", [1, 1]]}]}]})).unwrap_err(); assert!(e.contains("no symbol `Q9`"), "{e}");
         let e = go_on(&fake(None), "/p/b.kicad_sch", json!({"ops": [{"add": [{"symbol": {"lib": "Device:D", "ref": "D7", "at": [1, 1], "pins": {"7": "GND"}}}]}]})).unwrap_err(); assert!(e.contains("has no pin `7`: 1, 2"), "{e}");
+    }
+    #[test] fn a_runtime_with_the_fixed_item_api_gets_the_plain_requests() {
+        let add = json!({"ops": [{"add": [{"symbol": {"lib": "Device:D", "ref": "D7", "value": "LED", "at": [10, 20], "footprint": "L:F", "fields": {"MPN": "X"}, "pins": {"2": "GND"}}}]}]});
+        // without the capability: KiCad's own placement goes back whole, the footprint in the symbol's own field
+        let f = fake(None); go_on(&f, "/p/b.kicad_sch", add.clone()).unwrap(); let it = sent(&f, "CreateItems")["items"][0].clone();
+        assert!(it["definition"]["items"].is_array() && text2(&it["footprint_field"]) == "L:F" && it["user_fields"].as_array().unwrap().len() == 1, "{it}");
+        // with it: the library id and the texts (Footprint as a field by its name); the placement is still read once, for the pins
+        let mut f = fake(None); f.caps = vec![FIELD_FIXES.to_string()]; let out = go_on(&f, "/p/b.kicad_sch", add).unwrap(); let made = sent(&f, "CreateItems"); let it = &made["items"][0];
+        assert_eq!((it["definition"].clone(), it.get("footprint_field"), text2(&it["reference_field"]), text2(&it["value_field"])), (json!({"id": {"library_nickname": "Device", "entry_name": "D"}}), None, "D7", "LED"));
+        let fields: Vec<(String, String)> = it["user_fields"].as_array().unwrap().iter().map(|x| (x["name"].as_str().unwrap().to_string(), text2(x).to_string())).collect();
+        assert_eq!(fields, [("MPN".to_string(), "X".to_string()), ("Footprint".to_string(), "L:F".to_string())]);
+        assert!(names(&f).contains(&"PlaceSymbolFromLibrary".to_string()) && out["results"][0]["created"][0]["pins"]["2"] == json!([10.0, 24.0]));
+        assert_eq!(lib_id(&made["items"][2]["definition"]["id"]), "power:GND", "the pin's power symbol too, by its library id");
+        // a footprint's value: the whole part without its body, or with the capability that one field's text
+        let f = fake(None); go(&f, json!({"ops": [{"set": "R1", "value": "1k"}]})).unwrap(); let up = sent(&f, "UpdateItems")["items"][0].clone();
+        assert!(up["position"].is_object() && up["reference_field"].is_object());
+        let mut f = fake(None); f.caps = vec![FIELD_FIXES.to_string()]; let out = go(&f, json!({"ops": [{"set": ["R1", "R2"], "value": "1k"}, {"set": "C1", "value": "2u", "rot": 90}]})).unwrap();
+        let log = f.log.lock().unwrap(); let ups: Vec<&Value> = log.iter().filter(|(t, _)| t == "UpdateItems").map(|(_, m)| m).collect();
+        assert_eq!(ups[0]["items"][0], json!({"@type": null, "id": {"value": "id-R1"}, "value_field": {"text": {"text": {"text": "1k"}}}}));
+        assert!(ups[1]["items"][0]["position"].is_object(), "a set of more than its texts goes whole");
+        assert_eq!(out["results"][0]["updated"][0]["value"], "1k");
     }
     #[test] fn the_answer_says_what_the_edit_added_to_kicads_check() {
         let v = |ty: &str, a: &str| json!({"type": ty, "items": [{"description": a, "pos": {"x": 1.5, "y": 2}}]});

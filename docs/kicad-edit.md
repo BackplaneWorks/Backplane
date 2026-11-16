@@ -79,6 +79,20 @@ and answers `check: {by, new: [the findings this edit added, 12 at most], more, 
 checked. After a schematic edit, `nets` is the saved netlist's net of every pin of the parts the call added, moved or
 wired by pin (`checkrun::netlist_of`), so no netlist is exported to see that a pin landed on its net.
 
+## By the runtime's capabilities
+
+`api-field-fixes` (the fork's batch 10: a symbol created by its library id is written flattened, text-only fields are
+placed as the library has them, a user field named Footprint fills the symbol's own, a partial footprint update keeps a
+field's layer, place and visibility). With it (`kedit::FIELD_FIXES`, read from the runtime's manifest): a new symbol is
+created as its library id and its texts, Footprint among its fields by name, and a `set` of only a footprint's value
+or reference sends that one field's text. KiCad's own placement of a new symbol is still read once in a dropped
+commit: that is where the pins are, which `pins`, wires by pin and the move to free room need before anything is
+created. Without the capability, the way described above: the whole placed item, `footprint_field`, the whole
+footprint without its body. Both ways are tested (`a_runtime_with_the_fixed_item_api_gets_the_plain_requests`).
+
+`sketch-route-width` (SketchRoute honours the net class or `track_width` and names each failure) is not used: see the
+benchmark's routing section for the measurement.
+
 ## What it keeps
 
 Every command goes through the same gate as a `kicad_ipc` call (`Agents::kicad_call`), so an edit in one call is held
