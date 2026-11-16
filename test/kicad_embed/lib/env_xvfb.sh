@@ -319,8 +319,21 @@ check_runtime() {
   echo "RUNTIME asked ${KICAD_BIN:-?} ($want) ran $ran"
   local v=${ran%% *} same=1
   if [ -n "$want" ] && [ -n "$v" ] && [[ "$want" != *"$v"* ]] && [[ "$v" != *"$want"* ]]; then same=0; fi
-  if [ -n "${KICAD_BIN:-}" ] && [ -n "$bin" ] && [ "$(dirname "$(readlink -f "$bin")")" != "$(dirname "$(readlink -f "$KICAD_BIN")")" ]; then same=0; fi
-  check "the KiCad run is the one asked for" "$same" "asked $KICAD_BIN $want, ran $ran"
+  # the runtime proved, not guessed from where the program sits (lib/kicad_runtime.py): the hub may start KiCad through a view of the
+  # runtime made for the computer's own loader (hostlibs.rs, e9371ff87), so argv[0] is the view's wrapper and /proc/<pid>/exe the loader.
+  # The program the hub logged (a view: its recorded origin, checked against its wrapper and links), and the KiCad still running from this
+  # run when there is one (its kicad.real from its command line, mapped, and the view it ran through); either naming another runtime fails
+  local proof="" pid
+  if [ -n "${KICAD_BIN:-}" ] && [ -n "$bin" ]; then
+    proof=$(python3 "$KEMBED_LIB/kicad_runtime.py" program "$bin" "$KICAD_BIN") || same=0
+    echo "RUNTIME program: $proof"
+    for pid in $(pgrep -f "kicad.real" 2>/dev/null || true); do
+      grep -qa "$OUT" "/proc/$pid/environ" 2>/dev/null || continue
+      local p2; p2=$(python3 "$KEMBED_LIB/kicad_runtime.py" pid "$pid" "$KICAD_BIN") || same=0
+      echo "RUNTIME pid $pid: $p2"; break
+    done
+  fi
+  check "the KiCad run is the one asked for" "$same" "asked $KICAD_BIN $want, ran $ran${proof:+; $proof}"
 }
 
 finish_suite() {
