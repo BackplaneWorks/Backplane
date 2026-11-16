@@ -327,8 +327,18 @@ impl Agents {
                 let will = world::carry_will(t, w.setting("restart.continue")) && !th.starts_with("run") && !th.starts_with("mailcoord-"); // Ephemeral.is: nothing carries a mail run on
                 if will && !crate::copy::on() && !crate::guard::safe() { carry.push((t.running_at, th.clone())) } // a hub on a copy of a log resumes no turn, whatever restart.continue says
             }
+            // a thread at rest that waited on background work of its agent (a shell, a subagent): the restart stopped it, and the agent, which ended its turn to
+            // hear when it ends, would wait forever (Nov 16: an hour-long measurement lost to a deploy, found only when the person asked). It goes on, told what was lost
+            for th in w.bg_waiting() {
+                let t = &w.threads[&th];
+                if w.setting(&wait_key(&th)) == "1" { continue } // in line already: the loop below keeps it
+                ev.push(json!({"$":"ActivityLogged","thread":th,"act":hub_id("r", now, self.seq()),"tone":"error","kind":"restart","summary":rules::restart_bg(&zone, now, &world::bg_live(w.setting(&format!("bg.{th}")))),"at":now}));
+                if !crate::copy::on() && !crate::guard::safe() && world::carry_may(t, w.setting("restart.continue")) && !th.starts_with("run") && !th.starts_with("mailcoord-") { carry.push((t.running_at, th.clone())) }
+            }
             // those the last restart left waiting: stopped already, nothing to mark, still owed their turn
             for (th, t) in w.threads.iter().filter(|(th, t)| t.turn != "running" && w.setting(&wait_key(th)) == "1") {
+                let bg = !world::bg_live(w.setting(&format!("bg.{th}"))).is_empty();
+                if bg { if !crate::guard::safe() && !crate::copy::on() && world::carry_may(t, w.setting("restart.continue")) { carry.push((t.running_at, th.clone())) } continue } // background work lost: still owed
                 if t.turn != "interrupted" { ev.push(set(wait_key(th), String::new(), now)); continue } // the person's own turn came and went: nothing is owed
                 if crate::guard::safe() { continue } // safe mode starts nothing, and keeps the place in line for the normal start that follows
                 if !crate::copy::on() && world::carry_may(t, w.setting("restart.continue")) && !th.starts_with("run") && !th.starts_with("mailcoord-") { carry.push((t.running_at, th.clone())) }
@@ -373,7 +383,7 @@ impl Agents {
     /// One thread's turn of the queue, judged as it is now, not as it was at the restart. The person may have written to it (their turn stands), or archived it or turned restart.continue off
     /// meanwhile (it ends as a cut turn that does not carry on does).
     async fn carry_next(self: &Arc<Self>, th: &str) {
-        let (waits, may) = { let w = self.world().await; let t = w.threads.get(th); (t.map_or(false, |t| t.turn == "interrupted"), t.map_or(false, |t| world::carry_may(t, w.setting("restart.continue")))) };
+        let (waits, may) = { let w = self.world().await; let t = w.threads.get(th); (t.map_or(false, |t| t.turn == "interrupted" || (t.turn != "running" && !world::bg_live(w.setting(&format!("bg.{th}"))).is_empty())), t.map_or(false, |t| world::carry_may(t, w.setting("restart.continue")))) };
         if waits && may { return self.carry_on(th).await }
         let _ = self.hub.commit_many(&[set(wait_key(th), String::new(), now_s())]).await;
         if waits { self.task_end(th, "interrupted").await; self.launch_tell(th, &[json!({"$":"TurnChanged","thread":th,"state":"interrupted","at":now_s()})], "").await }
@@ -386,9 +396,10 @@ impl Agents {
         if self.carry_gone.load(SeqCst) { return }
         let now = now_s(); let id = hub_id("c", now, self.seq());
         let note = json!({"$":"ActivityLogged","thread":th,"act":hub_id("r", now, self.seq()),"tone":"info","kind":"restart","summary":"Continuing after the restart","at":now});
-        let waited = self.world().await.setting(&wait_key(th)) == "1";
+        let (waited, lost) = { let w = self.world().await; (w.setting(&wait_key(th)) == "1", w.threads.get(th).filter(|t| t.turn != "running" && t.turn != "interrupted").map(|_| world::bg_live(w.setting(&format!("bg.{th}")))).unwrap_or_default()) };
         let extra = if waited { vec![note, set(wait_key(th), String::new(), now)] } else { vec![note] };
-        let text = format!("{} {}", world::CARRY_TEXT, rules::CARRY_CUT);
+        // a turn the restart cut goes on where it was; a thread at rest is told which background work it was waiting for is gone
+        let text = if lost.is_empty() { format!("{} {}", world::CARRY_TEXT, rules::CARRY_CUT) } else { world::bg_lost_text(&lost) };
         if let Err(e) = self.deliver(th, &id, &text, Some(("backplane".into(), "carry".into(), String::new())), extra).await { eprintln!("agents: carrying on {th}: {e}") }
     }
 }

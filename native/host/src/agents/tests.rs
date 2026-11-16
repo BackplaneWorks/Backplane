@@ -771,6 +771,15 @@ async fn recovered(extra: &str, state: &str) -> Vec<Value> {
 #[tokio::test(flavor = "multi_thread")] async fn recover_interrupts_running() { let ev = recovered("{\"$\":\"SettingSet\",\"key\":\"restart.continue\",\"value\":\"off\",\"at\":1700000101}\n", "run").await; let last = ev.iter().rev().find(|e| is(e, "TurnChanged")).unwrap(); assert_eq!(last["state"], "interrupted") }
 #[tokio::test(flavor = "multi_thread")] async fn recover_closes_asks() { let ask = format!("{{\"$\":\"AskOpened\",\"id\":\"q9\",\"thread\":\"{T1}\",\"kind\":\"approval\",\"tool\":\"Bash\",\"detail\":\"ls\",\"options\":\"\",\"at\":1700000101}}\n"); let ev = recovered(&ask, "run").await; assert!(ev.iter().any(|e| is(e, "AskClosed") && e["id"] == "q9")) }
 #[tokio::test(flavor = "multi_thread")] async fn recover_keeps_order_ask() { let ask = format!("{{\"$\":\"AskOpened\",\"id\":\"q8\",\"thread\":\"{T1}\",\"kind\":\"input\",\"tool\":\"order_ask.typed\",\"detail\":\"Ship to which country?\",\"options\":\"\",\"at\":1700000101}}\n"); let ev = recovered(&ask, "idle").await; assert!(!ev.iter().any(|e| is(e, "AskClosed"))) }
+/// Nov 16: a thread at rest waiting on its agent's background job (a shell the turn left running) lost it to a deploy and waited until the person asked: a restart
+/// says so on the thread and tells the agent which work is gone
+#[tokio::test(flavor = "multi_thread")] async fn recover_tells_a_thread_its_background_work_stopped() {
+    let bg = format!("{{\"$\":\"SettingSet\",\"key\":\"bg.{T1}\",\"value\":\"b1\\tmeasuring\\tc1\\tRail widths\\tshell\",\"at\":1700000101}}\n");
+    let ev = recovered(&bg, "idle").await;
+    assert!(ev.iter().any(|e| is(e, "ActivityLogged") && e["kind"] == "restart" && e["summary"].as_str().unwrap_or("").contains("background work: Rail widths")), "{ev:?}");
+    assert!(ev.iter().any(|e| is(e, "MessagePosted") && e["text"].as_str().unwrap_or("").starts_with(world::CARRY_BG) && e["text"].as_str().unwrap_or("").contains("Rail widths")), "{ev:?}");
+    assert!(!ev.iter().any(|e| turn_is(e, "interrupted")), "nothing was running: no turn is marked cut");
+}
 #[tokio::test(flavor = "multi_thread")] async fn recover_leaves_idle() { let ev = recovered("", "idle").await; assert!(!ev.iter().any(|e| turn_is(e, "interrupted")) && !ev.iter().any(|e| e["kind"] == "restart")) }
 #[tokio::test(flavor = "multi_thread")] async fn recover_empty_nothing() { let sd = dir("re-bin"); perf_standin(&sd, 1); let (hub, ag, _h, _w) = start("re", |w| base_log(w, 1, ""), |_| Cli::standin(&sd)).await; let n = len(&hub).await; tokio::time::sleep(Duration::from_millis(300)).await; assert_eq!(len(&hub).await, n); ag.shutdown() }
 
