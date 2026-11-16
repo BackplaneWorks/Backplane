@@ -21,6 +21,9 @@ on:
       kicad_run:
         description: "kicad-pane job: a Backplane_KiCad macOS CI run whose package (backplane-kicad-macos-native) has the macOS embedding"
         default: ""
+      kicad_via:
+        description: "kicad-runtime job: curl (fetch and check the tag's package by hand) or driver (Settings > CAD > Install: the hub's own install driver, which needs the hub's MAC pin on that tag)"
+        default: "curl"
       kicad_tag:
         description: "kicad-runtime job: the Backplane KiCad release whose darwin-arm64 package it tests (e.g. backplane-kicad-v10.99.0-bp.12.5)"
         default: ""
@@ -105,6 +108,7 @@ jobs:
       - uses: actions/setup-node@v4
         with: { node-version: 24 }
       - name: the release package, fetched and checked as the hub's install does
+        if: inputs.kicad_via != 'driver'
         run: |
           set -eu; T=${{ inputs.kicad_tag }}; V=${T#backplane-kicad-v}; A=backplane-kicad-darwin-arm64-$V.tar.gz
           mkdir -p "$RUNNER_TEMP/k" out; cd "$RUNNER_TEMP/k"
@@ -121,6 +125,13 @@ jobs:
         run: |
           cd native/host && cargo build --profile fast 2>&1 | tail -3
           echo "HUB=$PWD/target/fast/backplane-hub" >> "$GITHUB_ENV"
+      - name: Settings > CAD > Install, through the hub's own driver (the pin must be on the tag)
+        if: inputs.kicad_via == 'driver'
+        run: |
+          set -o pipefail; mkdir -p out
+          node test/e2e/mac-kicad-install.mjs "$HUB" "$RUNNER_TEMP/ki" 2>&1 | tee out/install.txt
+          R=$(grep '^RT=' out/install.txt | tail -1 | cut -d= -f2-); [ -n "$R" ]
+          echo "RT=$R" >> "$GITHUB_ENV"; echo "KV=$(basename "$R")" >> "$GITHUB_ENV"
       - uses: actions/setup-python@v5
         with: { python-version: '3.12' }
       - name: agent edits, Open in KiCad, the detached-KiCad warning; checks and exports
