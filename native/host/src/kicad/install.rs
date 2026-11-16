@@ -10,15 +10,20 @@ use serde_json::json;
 use std::{path::{Path, PathBuf}, process::Stdio, sync::{atomic::{AtomicBool, Ordering}, Arc}};
 
 #[derive(Debug, PartialEq)]
-pub struct Package { pub platform: &'static str, pub version: &'static str, pub release: &'static str, pub asset: &'static str, pub sha256: &'static str, pub format: &'static str, pub cli: &'static str }
+pub struct Package { pub platform: &'static str, pub version: &'static str, pub release: &'static str, pub asset: &'static str, pub sha256: &'static str, pub format: &'static str, pub cli: &'static str, pub size: u64 }
 /// Linux: bp.12.4 (bp.12.1's DRC zone guard, `drc-zone-guard`; bp.12.2's plan view keys, `plan-keys`; opening a board changes nothing in it
 /// and an unchanged file saves nothing, `no-load-migration`, bp.12.3; an open Symbol Editor no longer refuses other documents' saves,
 /// bp.12.4, no capability). Windows: bp.10 until its fixes ship. Apple Silicon: bp.12.5, the bp.12.4 code with the macOS build, its
 /// launchers (bin/kicad, bin/pcbnew, bin/eeschema) and manifest minOs 15.0 (`os_floor`); bp.13 brings KiCad in the pane there. Each pin is
 /// its one line; the tests read them.
-pub const LINUX: Package = Package { platform: "linux-x86_64", version: "10.99.0-bp.12.4", release: "backplane-kicad-v10.99.0-bp.12.4", asset: "backplane-kicad-linux-x86_64-10.99.0-bp.12.4.tar.gz", sha256: "a94104cd524558d92a1df8016ece4a2c5b2cc436a6c14bb5bc71d72e048ee2dc", format: "tar.gz", cli: "bin/kicad-cli" };
-pub const MAC: Package = Package { platform: "darwin-arm64", version: "10.99.0-bp.12.5", release: "backplane-kicad-v10.99.0-bp.12.5", asset: "backplane-kicad-darwin-arm64-10.99.0-bp.12.5.tar.gz", sha256: "4229b3cdd8dd81a84fcc66669979903bdab7ed489865664b5874e8c8a2330538", format: "tar.gz", cli: "bin/kicad-cli" };
-pub const WINDOWS: Package = Package { platform: "windows-x86_64", version: "10.99.0-bp.10", release: "backplane-kicad-v10.99.0-bp.10", asset: "backplane-kicad-windows-x86_64-10.99.0-bp.10.zip", sha256: "68b3796f1de3a8c0a39dd20ca96a43f3354de47facbe5de45d0bd4668c32599c", format: "zip", cli: "bin/kicad-cli.exe" };
+pub const LINUX: Package = Package { platform: "linux-x86_64", version: "10.99.0-bp.12.4", release: "backplane-kicad-v10.99.0-bp.12.4", asset: "backplane-kicad-linux-x86_64-10.99.0-bp.12.4.tar.gz", sha256: "a94104cd524558d92a1df8016ece4a2c5b2cc436a6c14bb5bc71d72e048ee2dc", format: "tar.gz", cli: "bin/kicad-cli", size: 1019304818 };
+pub const MAC: Package = Package { platform: "darwin-arm64", version: "10.99.0-bp.12.5", release: "backplane-kicad-v10.99.0-bp.12.5", asset: "backplane-kicad-darwin-arm64-10.99.0-bp.12.5.tar.gz", sha256: "4229b3cdd8dd81a84fcc66669979903bdab7ed489865664b5874e8c8a2330538", format: "tar.gz", cli: "bin/kicad-cli", size: 433770440 };
+pub const WINDOWS: Package = Package { platform: "windows-x86_64", version: "10.99.0-bp.10", release: "backplane-kicad-v10.99.0-bp.10", asset: "backplane-kicad-windows-x86_64-10.99.0-bp.10.zip", sha256: "68b3796f1de3a8c0a39dd20ca96a43f3354de47facbe5de45d0bd4668c32599c", format: "zip", cli: "bin/kicad-cli.exe", size: 124816974 };
+/// A package's download in words: "about 1.1 GB", "about 980 MB"; "about 1 GB" while its size is not known (a placeholder pin).
+pub fn size_words(p: &Package) -> String {
+    let mb = p.size >> 20;
+    if mb == 0 { "about 1 GB".into() } else if mb >= 1000 { format!("about {:.1} GB", p.size as f64 / (1u64 << 30) as f64) } else { format!("about {mb} MB") }
+}
 /// Where the releases are (said in the consent note, and the script's download base).
 pub const FROM: &str = "github.com/BackplaneWorks/Backplane_KiCad";
 
@@ -105,6 +110,7 @@ trap 'exit 1' 1 2 15
 stage=$(mktemp -d "$parent/.install-XXXXXX")
 pkg=$stage/$asset
 base=https://github.com/BackplaneWorks/Backplane_KiCad/releases/download/$release/
+case ${BACKPLANE_KICAD_FEED:-} in http://*|https://*) base=${BACKPLANE_KICAD_FEED%/}/;; esac
 echo "Downloading $asset"
 get "$pkg" "$base$asset" || fail "Could not download $base$asset"
 get "$stage/SUMS" "${base}SHA256SUMS" || fail "Could not download ${base}SHA256SUMS"
@@ -494,7 +500,16 @@ pub async fn fetch(t: &Tools, base: &str, parent: &Path, p: &Package, log: &Path
     Ok(dir)
 }
 /// Where the fetch downloads from (the script's base).
-pub fn base_url(p: &Package) -> String { format!("https://{FROM}/releases/download/{}/", p.release) }
+pub fn base_url(p: &Package) -> String { base_url_from(p, std::env::var("BACKPLANE_KICAD_FEED").ok().as_deref()) }
+/// `BACKPLANE_KICAD_FEED` (a rig's or a gate's, never a setting a client can send): an http(s) folder holding the pinned asset and its
+/// SHA256SUMS, used instead of the release's, so a staged runtime is installed by this same driver before its tag is published. The pin
+/// (asset name and sha256) is checked against it as against the release.
+pub fn base_url_from(p: &Package, feed: Option<&str>) -> String {
+    match feed.map(str::trim).filter(|f| f.starts_with("http://") || f.starts_with("https://")) {
+        Some(f) => format!("{}/", f.trim_end_matches('/')),
+        None => format!("https://{FROM}/releases/download/{}/", p.release),
+    }
+}
 /// Every system uses the fetch in Rust (Windows too: System32's curl.exe and the zip unpacked here, so no Git for Windows is needed); SCRIPT
 /// runs only as the stand-in path's reference and in its own tests.
 pub fn rust_fetch() -> bool { true }
@@ -538,15 +553,27 @@ pub fn decide(pkg: Option<&Package>, status: &str, version: &str, install_state:
 }
 /// Why the update is worth taking, in one sentence, from what the installed runtime lacks (`have`: its manifest's capabilities): the
 /// DRC zone guard first (a safety fix), then the editor inside Backplane. None when it lacks neither (a newer build with nothing named).
-pub fn update_reason(have: &[&str]) -> Option<String> { update_reason_on(have, cfg!(target_os = "linux")) }
+pub fn update_reason(have: &[&str]) -> Option<String> {
+    update_reason_on(have, cfg!(target_os = "linux"), package().is_some_and(|p| super::kserve::bp_number(p.version) >= 13))
+}
 /// `update_reason` for a hub on Linux or not: a Linux runtime has always carried KiCad's libraries and Backplane's (its launcher sets
 /// them up); a Windows or macOS one has them only with `global-tables-seeded` (bp.13), so an update to it brings them.
-pub fn update_reason_on(have: &[&str], linux: bool) -> Option<String> {
+/// `to13`: the update brings bp.13 or later (its libraries, the narrow-pane fit, the OpenGL fallback); before that pin they are not said.
+pub fn update_reason_on(have: &[&str], linux: bool, to13: bool) -> Option<String> {
     let embed = have.iter().any(|c| *c == "embed" || *c == "embedded");
     let mut adds: Vec<&str> = vec![];
     if !have.contains(&"drc-zone-guard") { adds.push("fixes a DRC fault that could miss a short inside a filled zone") }
     if !embed { adds.push("brings the KiCad editor inside Backplane's viewer") }
-    if !linux && !have.contains(&"global-tables-seeded") { adds.push("brings KiCad's standard symbol and footprint libraries and Backplane's own library") }
+    // bp.13 (global-tables-seeded is new in it, and every runtime that lists it also fits a narrow pane and has the OpenGL fallback fix):
+    // the libraries (Windows and macOS had none; Linux had KiCad's and two of Backplane's), the editor fitting a narrow pane, no OpenGL box
+    let bp13 = to13 && !have.contains(&"global-tables-seeded");
+    if bp13 {
+        // one sentence a person reads in the update row above the pane (the lead's words): what bp.13 brings, and nothing older, which it
+        // carries too, except the zone guard's safety fix for a runtime still without it
+        let libs = if linux { "adds Backplane's whole library" } else { "adds KiCad's standard libraries and Backplane's own" };
+        let tail = format!("{libs}, fits the editor to a narrow pane, and no longer stops at an OpenGL notice on a computer without a GPU.");
+        return Some(if have.contains(&"drc-zone-guard") { format!("It {tail}") } else { format!("It fixes a DRC fault that could miss a short inside a filled zone, {tail}") });
+    }
     // the routing plan view's keys (bp.12.2): only for a runtime with the plan, which lacked them
     if have.contains(&"routing-plan") && !have.contains(&"plan-keys") { adds.push("makes A, R and W in KiCad's routing plan view act on the plan") }
     // bp.12.3: KiCad no longer rewrites what nobody changed (the load-time 3D migration, an unchanged file's save); bp.12.4: nor does an
@@ -559,6 +586,14 @@ pub fn update_reason_on(have: &[&str], linux: bool) -> Option<String> {
         [a] => Some(format!("It {a}.")),
         [rest @ .., last] => Some(format!("It {}, and {last}.", rest.join(", "))),
     }
+}
+/// Info `kicad.update`: `{offer, from, to, reason, mb}` when `p` would update the installed Backplane runtime (`status` ok, `version` an
+/// older build of the same line); None otherwise (stock KiCad, none found, the current one). `caps`: the installed runtime's.
+pub fn update_offer(p: Option<&Package>, status: &str, version: &str, caps: &[String]) -> Option<serde_json::Value> {
+    let p = p.filter(|p| status == "ok" && older(version, p))?;
+    let have: Vec<&str> = caps.iter().map(String::as_str).collect();
+    let reason = update_reason_on(&have, cfg!(target_os = "linux"), super::kserve::bp_number(p.version) >= 13).unwrap_or_default();
+    Some(json!({"offer": true, "from": version, "to": p.version, "reason": reason, "mb": p.size >> 20, "size": size_words(p)}))
 }
 /// Why a request is refused, None when it may run. `found`: the KiCad `ipc::runtime` found ("" for none); `status` its status. Only a compatible
 /// Backplane KiCad refuses: a stock or old one is what the install replaces as the runtime the hub picks (the managed folder is searched first).
@@ -638,7 +673,8 @@ pub async fn install(hub: &Arc<Hub>, consent: bool) -> Result<String, String> {
     // a stand-in installer (tests and rigs): the same arguments, so no real KiCad is downloaded or touched
     let standin = std::env::var_os("BACKPLANE_KICAD_INSTALLER").filter(|s| !s.is_empty()).map(PathBuf::from);
     eprintln!("kicad: installing Backplane KiCad {} into {}{}", p.version, parent.display(), standin.as_ref().map_or(String::new(), |s| format!(" (stand-in {})", s.display())));
-    say(hub, "running", p.version, &format!("Starting the download from {FROM}")).await;
+    let from = base_url(p); let from = if from.contains(FROM) { FROM.to_string() } else { from };
+    say(hub, "running", p.version, &format!("Starting the download from {from}")).await;
     let started = format!("installing Backplane KiCad {} into {}", p.version, parent.display());
     let h = hub.clone();
     tokio::spawn(async move {
@@ -747,7 +783,6 @@ mod tests {
         let hot = Package { version: "10.99.0-bp.12.1", release: "backplane-kicad-v10.99.0-bp.12.1", ..LINUX };
         for v in ["10.99.0-bp.10", "10.99.0-bp.11", "10.99.0-bp.12"] { assert_eq!(decide(Some(&hot), "ok", v, ""), Action::Offer, "{v}"); assert_eq!(refusal("/k/bin/kicad-cli", "ok", v, true, false, Some(&hot)), None, "{v}"); }
         for v in ["10.99.0-bp.12.1", "10.99.0-bp.13"] { assert_eq!(decide(Some(&hot), "ok", v, ""), Action::Nothing, "{v}"); }
-        // Windows pinned behind Linux: its bp.10 is current for it while Linux's would be offered the hotfix
         assert_eq!(decide(Some(&WINDOWS), "ok", WINDOWS.version, ""), Action::Nothing);
         assert_eq!(refusal("/k/bin/kicad-cli", "ok", "10.99.0-bp.4", true, false, Some(&LINUX)), None);
     }
@@ -769,7 +804,7 @@ mod tests {
         // a HEAD (-fsSIL) answers with the file's size; a serve/FAILAT file (<bytes>) stops a download there (a partial file and exit 18, as curl does)
         exe(&bin.join("curl"), &format!("#!/bin/sh\nhead=; case \"$*\" in *-fsSIL*) head=1;; esac\nwhile [ $# -gt 1 ]; do [ \"$1\" = -o ] && out=$2; shift; done\nf={}/$(basename \"$1\")\n[ -f \"$f\" ] || exit 22\nif [ -n \"$head\" ]; then echo 'HTTP/2 302'; echo 'content-length: 0'; echo; echo 'HTTP/2 200'; echo \"Content-Length: $(wc -c <\"$f\")\"; exit 0; fi\necho x >>\"$f.calls\"\nif [ -f {0}/FAILAT ] && [ \"$(basename \"$f\")\" != SHA256SUMS ]; then head -c \"$(cat {0}/FAILAT)\" \"$f\" >\"$out\"; exit 18; fi\ncp \"$f\" \"$out\"\n", serve.display()).replace("{0}", &serve.display().to_string()));
         let leak = |s: String| -> &'static str { Box::leak(s.into_boxed_str()) };
-        (Package { platform: plat, version: v, release: leak(format!("backplane-kicad-v{v}")), asset: leak(asset), sha256: leak(sum), format: "tar.gz", cli: "bin/kicad-cli" }, bin)
+        (Package { platform: plat, version: v, release: leak(format!("backplane-kicad-v{v}")), asset: leak(asset), sha256: leak(sum), format: "tar.gz", cli: "bin/kicad-cli", size: 0 }, bin)
     }
     #[cfg(unix)] fn script(bin: &Path, parent: &Path, p: &Package) -> (bool, String) {
         let o = std::process::Command::new("sh").arg("-c").arg(SCRIPT).arg("sh").args(args(parent, p)).env("PATH", format!("{}:/usr/bin:/bin", bin.display())).output().unwrap();
@@ -885,7 +920,7 @@ cp \"$f\" \"$out\"
         zip_of(&r.join("serve").join(&asset), &ents.iter().map(|(n, b)| (n.as_str(), b.as_slice())).collect::<Vec<_>>(), &[], false);
         let sum = sha256_file(&r.join("serve").join(&asset)).unwrap(); std::fs::write(r.join("serve/SHA256SUMS"), format!("{sum}  {asset}\n")).unwrap();
         let leak = |s: String| -> &'static str { Box::leak(s.into_boxed_str()) };
-        let p = Package { platform: "windows-x86_64", version: v, release: "backplane-kicad-v0.0.1-bp.1", asset: leak(asset), sha256: leak(sum), format: "zip", cli: "bin/kicad-cli.exe" };
+        let p = Package { platform: "windows-x86_64", version: v, release: "backplane-kicad-v0.0.1-bp.1", asset: leak(asset), sha256: leak(sum), format: "zip", cli: "bin/kicad-cli.exe", size: 0 };
         // no tar anywhere: the fetch is given only the stand-in curl's folder and a tar that fails if it is ever started
         let nt = r.join("notar"); std::fs::create_dir_all(&nt).unwrap(); exe(&nt.join("tar"), "#!/bin/sh\necho tar was started >&2; exit 9\n");
         let (got, steps) = fetch_run(&r, &p, &[bin.clone(), nt]);
@@ -926,17 +961,40 @@ cp \"$f\" \"$out\"
     /// The update's reason is what the new pin adds over the installed runtime, the safety fix first, one sentence; none when it lacks neither.
     #[test] fn the_update_says_what_it_adds_over_the_installed_runtime() {
         let s = |v: Option<String>| v.unwrap_or_default();
-        assert_eq!(s(update_reason(&["embedded", "drc-zone-guard", "routing-plan", "plan-keys"])), "Opening a board no longer changes its 3D model paths or teardrops, saving an unchanged file writes nothing, and an open Symbol Editor no longer blocks saves.", "bp.12.2 to bp.12.4: one sentence a person reads");
-        assert_eq!(s(update_reason(&["embedded", "drc-zone-guard", "routing-plan"])), "It makes A, R and W in KiCad's routing plan view act on the plan, and stops KiCad rewriting files nobody changed or refusing saves while its Symbol Editor is open.", "bp.12.1 to bp.12.4");
-        assert_eq!(s(update_reason(&["embed", "coedit"])), "It fixes a DRC fault that could miss a short inside a filled zone, and stops KiCad rewriting files nobody changed or refusing saves while its Symbol Editor is open.", "bp.10 (no plan)");
-        // Windows and macOS runtimes before bp.13 carry no libraries; Linux's always did, so only off Linux is it said
-        let bp10 = ["embed", "coedit", "drc-zone-guard", "no-load-migration"];
-        assert_eq!(s(update_reason_on(&bp10, false)), "It brings KiCad's standard symbol and footprint libraries and Backplane's own library.");
-        assert_eq!(update_reason_on(&bp10, true), None, "a Linux runtime had them");
-        assert_eq!(update_reason_on(&["embed", "coedit", "drc-zone-guard", "no-load-migration", "global-tables-seeded"], false), None, "bp.13 has them");
-        assert_eq!(s(update_reason(&["api-server"])), "It fixes a DRC fault that could miss a short inside a filled zone, and brings the KiCad editor inside Backplane's viewer.", "bp.4: the safety one first");
-        assert_eq!(update_reason(&["embedded", "drc-zone-guard", "routing-plan", "plan-keys", "no-load-migration"]), None, "bp.12.3 and bp.12.4 themselves");
+        let seeded = "global-tables-seeded";
+        // before bp.13 (no global-tables-seeded): one sentence, what bp.13 brings (the lead's words for the row above the pane)
+        let win = "It adds KiCad's standard libraries and Backplane's own, fits the editor to a narrow pane, and no longer stops at an OpenGL notice on a computer without a GPU.";
+        for (have, linux, want) in [
+            (&["embedded", "drc-zone-guard", "routing-plan", "plan-keys", "no-load-migration"][..], true,
+             "It adds Backplane's whole library, fits the editor to a narrow pane, and no longer stops at an OpenGL notice on a computer without a GPU."),
+            (&["embed", "coedit", "drc-zone-guard"][..], false, win),                                   // Windows bp.10
+            (&["embedded", "drc-zone-guard", "routing-plan", "plan-keys", "no-load-migration"][..], false, win), // macOS bp.12.5
+        ] { assert_eq!(s(update_reason_on(have, linux, true)), want, "{have:?}"); }
+        // a runtime without the zone guard still hears the safety fix first
+        assert_eq!(s(update_reason_on(&["api-server"], true, true)), "It fixes a DRC fault that could miss a short inside a filled zone, adds Backplane's whole library, fits the editor to a narrow pane, and no longer stops at an OpenGL notice on a computer without a GPU.");
+        // a pin before bp.13 never says what bp.13 brings (bp.12.1 offered bp.12.4: the earlier reasons only)
+        assert_eq!(s(update_reason_on(&["embedded", "drc-zone-guard", "routing-plan"], true, false)), "It makes A, R and W in KiCad's routing plan view act on the plan, and stops KiCad rewriting files nobody changed or refusing saves while its Symbol Editor is open.");
+        // bp.13 itself, on every platform: nothing to say; the reasons between earlier pins are kept for a runtime that has bp.13's tables
+        for linux in [true, false] { assert_eq!(update_reason_on(&["embedded", "drc-zone-guard", "routing-plan", "plan-keys", "no-load-migration", seeded], linux, true), None); }
+        assert_eq!(s(update_reason_on(&["embedded", "drc-zone-guard", "routing-plan", seeded], true, true)), "It makes A, R and W in KiCad's routing plan view act on the plan, and stops KiCad rewriting files nobody changed or refusing saves while its Symbol Editor is open.");
         assert_eq!(s(update_reason(&["routing-plan"])).matches(". ").count(), 0, "one sentence");
+    }
+    #[test] fn the_update_offer_names_from_to_why_and_size_only_over_an_older_backplane_runtime() {
+        let p = Package { version: "10.99.0-bp.13", release: "backplane-kicad-v10.99.0-bp.13", size: 1_160_000_000, ..WINDOWS };
+        let caps: Vec<String> = ["embed", "coedit", "drc-zone-guard", "no-load-migration"].iter().map(|c| c.to_string()).collect();
+        let o = update_offer(Some(&p), "ok", "10.99.0-bp.10", &caps).expect("bp.10 is offered bp.13");
+        assert_eq!((o["offer"].as_bool(), o["from"].as_str(), o["to"].as_str(), o["mb"].as_u64(), o["size"].as_str()), (Some(true), Some("10.99.0-bp.10"), Some(p.version), Some(1106), Some("about 1.1 GB")));
+        assert!(o["reason"].as_str().unwrap().contains("narrow pane"), "{o}");
+        assert_eq!(update_offer(Some(&p), "ok", p.version, &caps), None, "the current one");
+        assert_eq!(update_offer(Some(&p), "stock", "10.0.7", &caps), None, "stock KiCad: Settings offers an install, not an update");
+        assert_eq!(update_offer(None, "ok", "10.99.0-bp.10", &caps), None, "no package for this computer");
+        assert_eq!(size_words(&Package { size: 0, ..LINUX }), "about 1 GB"); assert_eq!(size_words(&Package { size: 433_770_440, ..MAC }), "about 413 MB");
+    }
+    #[test] fn a_feed_replaces_the_release_folder_only_when_it_is_a_web_folder() {
+        assert_eq!(base_url_from(&LINUX, None), format!("https://{FROM}/releases/download/{}/", LINUX.release));
+        assert_eq!(base_url_from(&LINUX, Some("http://127.0.0.1:8123/bp13/")), "http://127.0.0.1:8123/bp13/");
+        assert_eq!(base_url_from(&LINUX, Some("https://h/x")), "https://h/x/");
+        for no in ["", "  ", "/tmp/x", "file:///tmp/x", "ftp://h/x"] { assert_eq!(base_url_from(&LINUX, Some(no)), base_url_from(&LINUX, None), "{no:?}"); }
     }
     #[test] fn progress_is_said_in_megabytes_and_time_left() {
         let mb = 1u64 << 20;

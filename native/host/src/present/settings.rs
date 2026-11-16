@@ -516,7 +516,7 @@ pub fn install_row(session: &Value, info: &Value, pkg: Option<&crate::files::kic
         return Some(match state {
             "running" => running_row(&format!("Updating to Backplane KiCad {}", p.version), &st, p.version, note),
             // what the update adds over this runtime, not a fixed sentence (bp.12.1 to bp.12.2 brings the plan view's keys, not the editor)
-            _ if draft(session, "@kinstall") == "ask" => row("Update Backplane KiCad?", &format!("Downloads Backplane KiCad {} (about 1 GB) from {FROM} and puts it beside {}, which stays.{}", p.version, i("kicad.version"),
+            _ if draft(session, "@kinstall") == "ask" => row("Update Backplane KiCad?", &format!("Downloads Backplane KiCad {} ({}) from {FROM} and puts it beside {}, which stays.{}", p.version, crate::files::kicad::install::size_words(p), i("kicad.version"),
                 crate::files::kicad::install::update_reason(&i("kicad.caps").split(',').filter(|c| !c.is_empty()).collect::<Vec<_>>()).map_or(String::new(), |w| format!(" {w}"))),
                 vec![btn("Update", "kicad-install", "", true), btn("Cancel", "kicad-install-cancel", "", false)]),
             "failed" => row("Update Backplane KiCad", &format!("{note}."), vec![btn("Try again", "kicad-install-ask", "", true)]),
@@ -531,7 +531,7 @@ pub fn install_row(session: &Value, info: &Value, pkg: Option<&crate::files::kic
     let home = i("home"); let into = if home.is_empty() { "Backplane's own folder".to_string() } else { format!("{home}/kicad") };
     Some(match state {
         "running" => running_row(&format!("Installing Backplane KiCad {}", p.version), &st, p.version, note),
-        _ if draft(session, "@kinstall") == "ask" => row("Install Backplane KiCad?", &format!("Downloads Backplane KiCad {} (about 1 GB) from {FROM}, checks its checksum and unpacks it into {into}. It needs no administrator password and changes nothing else on this computer.", p.version),
+        _ if draft(session, "@kinstall") == "ask" => row("Install Backplane KiCad?", &format!("Downloads Backplane KiCad {} ({}) from {FROM}, checks its checksum and unpacks it into {into}. It needs no administrator password and changes nothing else on this computer.", p.version, crate::files::kicad::install::size_words(p)),
             vec![btn("Install", "kicad-install", "", true), btn("Cancel", "kicad-install-cancel", "", false)]),
         "failed" => row("Install KiCad", &format!("{note}."), vec![btn("Try again", "kicad-install-ask", "", true)]),
         // why, in what the person sees with the KiCad they have: its own windows, and no agent in it
