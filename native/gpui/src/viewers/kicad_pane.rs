@@ -1373,12 +1373,7 @@ impl crate::Backplane {
             }
             return;
         }
-        // macOS: a host rect KiCad could not take yet (it was still starting) is pushed again on the next frame
         if method == "editor.kicad.host" { eprintln!("GPUI_LOG {}", json!({"kicad_host_reply": reply["applied"], "why": reply["why"], "error": reply["error"]})); }
-        if method == "editor.kicad.host" && reply["applied"] == false {
-            if let Some(p) = self.screens.kicad.clone() { p.update(cx, |p, cx| { p.host_sent = None; cx.notify(); }); }
-            return;
-        }
         if method == "editor.kicad.attach" && reply["state"].is_string() {
             let mut v = reply;
             if let Some(obj) = v.as_object_mut() { obj.remove("t"); obj.remove("id"); obj.remove("ok"); }
