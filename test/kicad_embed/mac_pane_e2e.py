@@ -266,6 +266,8 @@ try:
     # ---- Pop out and back in ----
     before_wins = {w[0] for w in wins() if w[1] == client.pid}
     # the window back to its first size (the strip's buttons at a narrow width may sit past its edge)
+    # and on screen (run 18: at x=-376 after full screen, so the click meant to make Backplane active fell off the screen)
+    osa(f'tell application "System Events" to set position of {win_of(client.pid)} to {{20, 30}}'); time.sleep(0.8)
     osa(f'tell application "System Events" to set size of {win_of(client.pid)} to {{1000, 700}}'); time.sleep(1.5)
     pop = rects().get('kicad:popout')
     print(f'pop-out button {pop} in window {next((w for w in wins() if w[0] == cw[0]), cw)[3]}', flush=True)
