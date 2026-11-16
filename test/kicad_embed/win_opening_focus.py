@@ -553,6 +553,58 @@ def mouse_return_check(h, cp, frame, children, timeline, rounds=None, kpid=0):
 # ---- checks: the Checks panel and KiCad's markers (embed_checks_panel_e2e.sh and the marker click of embed_editor_checks_e2e.sh) ----
 
 LIBTABLE_MINE = {}
+
+
+def kicad_procs():
+    """kicad.exe and kicad-cli.exe processes now: [(name, pid)]."""
+    import subprocess as _sp
+    out = []
+    for img in ("kicad.exe", "kicad-cli.exe"):
+        for line in _sp.run(["tasklist", "/FI", f"IMAGENAME eq {img}", "/FO", "CSV", "/NH"], capture_output=True, text=True).stdout.splitlines():
+            parts = line.split('","')
+            if len(parts) > 1 and parts[1].isdigit():
+                out.append((img, int(parts[1])))
+    return out
+
+
+class BoxWatch:
+    """Samples every 0.25 s, from start() to stop(): any top-level KiCad window (a box) and the most KiCad processes at once."""
+    def __init__(self):
+        import threading
+        self.boxes, self.max_procs, self.go = [], 0, True
+        self.t = threading.Thread(target=self.run, daemon=True)
+    def start(self):
+        self.t.start(); return self
+    def run(self):
+        while self.go:
+            b = E.startup_box()
+            if b and not any(x["hwnd"] == b["hwnd"] for x in self.boxes):
+                self.boxes.append(b)
+            self.max_procs = max(self.max_procs, len(kicad_procs()))
+            time.sleep(0.25)
+    def stop(self):
+        self.go = False; self.t.join(5); return self
+
+
+def editor_painted(top, word="PCB Editor"):
+    """The editor frame of that title visible in Backplane's window and drawn (not blank)."""
+    from PIL import Image, ImageStat
+    fr = [w for w in E.list_child_windows(top) if w["visible"] and word in (w["title"] or "") and w["w"] > 300]
+    if not fr:
+        return False
+    f = max(fr, key=lambda w: w["w"] * w["h"])
+    shot = os.path.join(os.environ.get("TEMP", "."), "bp_painted.png")
+    E.grab_screen(shot)
+    im = Image.open(shot).convert("L").crop((f["root_x"], f["root_y"] + 80, f["root_x"] + f["w"], f["root_y"] + f["h"] - 40))
+    return ImageStat.Stat(im).stddev[0] > 8
+
+
+def wait_painted(top, t0, limit=30.0, word="PCB Editor"):
+    while time.monotonic() - t0 < limit + 15:
+        if editor_painted(top, word):
+            return round((time.monotonic() - t0) * 1000)
+        time.sleep(0.25)
+    return None
 BP_LIBS = ["Backplane_Logo", "Backplane_MountingHole", "Backplane_Passives_Least", "Backplane_Passives_Most", "Backplane_Passives_Nominal", "Backplane_Shoggoth"]
 
 
@@ -1531,6 +1583,7 @@ def run(h):
         observe = os.environ.get("BP_STARTUP_BOX_OBSERVE") == "1"
         nogpu_boxes = []
         t_first_paint = 0.0
+        lock_watch, lock_answers = None, []
         box_obs = {}
         box_since = None
         while cp.poll() is None and time.monotonic() - started < (100 if observe else 65):
@@ -1577,6 +1630,18 @@ def run(h):
             if not clicked_edit and (early or ("ready_for_edit" in marks and (painted or (ready_seen and time.monotonic() - ready_seen > 40)))):
                 if ready_seen:
                     timeline.append({"stage": "edit_waited_for_plot", "ms": round((time.monotonic() - ready_seen) * 1000), "painted": painted})
+                if only in ("lock3", "lock4") and not lock_watch:
+                    lock_watch = BoxWatch().start()
+                if only == "lock3":
+                    # the pane's pre-warm and Edit together: the pre-warm sent by hand the instant Edit is pressed
+                    import threading
+                    threading.Thread(target=lambda: h.hub_rpc([{"method": "editor.kicad.prewarm", "params": {"project": checks_project(h), "width": 900, "height": 700, "active": "PCB", "have": []}}]), daemon=True).start()
+                if only == "lock4":
+                    # an agent's kicad_edit and a BOM read on the headless server while the editor's KiCad is still starting
+                    import threading
+                    pcb_ = checks_project(h)[:-len(".kicad_pro")] + ".kicad_pcb"
+                    threading.Thread(target=lambda: lock_answers.append(standin_ask(h, "kicad_edit", {"path": pcb_, "ops": [{"find": {"kind": "footprint", "limit": 3}}], "save": False}, "l4-edit")), daemon=True).start()
+                    threading.Thread(target=lambda: lock_answers.append(h.hub_rpc([{"method": "mgmt.watch", "params": {"project": checks_project(h)}, "timeout_ms": 30000}])), daemon=True).start()
                 clicked_edit = h.click_control(E.find_main_window(cp.pid), "ui:Edit")
                 timeline.append({"stage": "native_edit_click", "clicked": clicked_edit, **focus_snapshot()})
                 t_edit = time.monotonic()
@@ -1621,6 +1686,27 @@ def run(h):
                 settled = True
                 break
             time.sleep(0.02 if trace_idle else 0.05)
+        if os.environ.get("BP_FIRST_EDIT_30S") == "1":
+            ms_ = round((t_first_paint - t_edit) * 1000) if t_first_paint and t_edit else None
+            h.check("first Edit on a fresh home: the editor painted within 30 s, no box", ms_ is not None and ms_ <= 30000 and not nogpu_boxes,
+                    {"edit_to_first_paint_ms": ms_, "boxes": nogpu_boxes})
+        if only in ("lock3", "lock4"):
+            if lock_watch:
+                time.sleep(3); lock_watch.stop()
+            ms_ = round((t_first_paint - t_edit) * 1000) if t_first_paint and t_edit else None
+            h.check(f"{only}: the editor painted within 30 s of Edit", ms_ is not None and ms_ <= 30000, {"ms": ms_})
+            h.check(f"{only}: no top-level KiCad window at any point", lock_watch is not None and not lock_watch.boxes, lock_watch.boxes if lock_watch else "not watched")
+            n_kicad = len([p for p in kicad_procs() if p[0] == "kicad.exe"])
+            if only == "lock3":
+                h.check("lock3: the pre-warm and Edit together: exactly one KiCad process for the project", n_kicad == 1, {"kicad_exe": n_kicad, "max_seen": lock_watch.max_procs if lock_watch else None})
+            else:
+                time.sleep(5)
+                warn = [b for b in (lock_watch.boxes if lock_watch else []) if "Open" in b["title"] or "Warning" in b["title"]]
+                h.check("lock4: an agent's edit and a BOM read during the editor's start: no File Open Warning, both answered",
+                        not warn and len(lock_answers) == 2 and all(a for a in lock_answers), {"answers": [str(a)[:300] for a in lock_answers], "warn": warn})
+                h.check("lock4: one KiCad holds the project at a time (at most one kicad.exe and one headless kicad-cli together)",
+                        (lock_watch.max_procs if lock_watch else 9) <= 2, {"max_procs": lock_watch.max_procs if lock_watch else None})
+            return h.finish()
         if nogpu_boxes and only != "nogpu":
             print("DIAG boxes_answered " + json.dumps(nogpu_boxes), flush=True)
         if only == "nogpu":
@@ -1979,6 +2065,54 @@ def run(h):
                     time.sleep(0.5)
             h.check("checks P5: Fix with agent sent the finding to the thread's agent", got5, {"id": erc_id, "fix_clicked": fixed})
             h.shot("p5_fix")
+            return h.finish()
+        if only in ("lock1", "lock2"):
+            top = int(rep.get("toplevel") or 0) or E.find_main_window(cp.pid)
+            watch = BoxWatch().start()
+            kpid = int(rep.get("pid") or 0)
+            if only == "lock2":
+                # KiCad killed mid-edit (taskkill /F), then Edit
+                import subprocess as _sp
+                _sp.run(["taskkill", "/F", "/PID", str(kpid)], capture_output=True)
+                time.sleep(2.0)
+                ctl = h.controls()
+                which = next((c for c in ("ui:Edit", "kicad:retry", "kicad:start") if c in ctl), "ui:Edit")
+                t0 = time.monotonic()
+                clicked = h.click_control(top, which)
+                ms_ = wait_painted(top, t0)
+                watch.stop()
+                h.check("lock2: KiCad killed mid-edit, then Edit: the editor painted and responsive within 30 s", clicked and ms_ is not None and ms_ <= 30000, {"clicked": which, "ms": ms_})
+            else:
+                # Backplane (client and hub) killed mid-edit, restarted, Edit
+                E.kill_pid_tree(cp.pid)
+                for p in list(h.procs):
+                    try:
+                        if p.poll() is None:
+                            E.kill_pid_tree(p.pid)
+                    except Exception:  # noqa: BLE001
+                        pass
+                time.sleep(3.0)
+                left = kicad_procs()
+                h.start_hub(embed_mode="fork")
+                cp = h.start_client([{"select": 0}, {"wait": 2800}, {"click": "rail:Board"}, {"wait": 3000}, {"mark": "re_edit"}, {"click": "ui:Edit"}, {"wait": 60000}],
+                                    log_name="client2.log", hold=True, exit_after=240)
+                t0 = None
+                end = time.monotonic() + 90
+                while time.monotonic() < end and t0 is None:
+                    if any(m.get("event") == "mark" and m.get("name") == "re_edit" for m in h.metrics("client2.log") if isinstance(m, dict)) if hasattr(h, "metrics") else False:
+                        t0 = time.monotonic()
+                    time.sleep(0.05)
+                top2 = E.find_main_window(cp.pid)
+                ms_ = wait_painted(top2, t0 or time.monotonic())
+                watch.stop()
+                h.check("lock1: Backplane killed mid-edit (client and hub), restarted, Edit: the editor painted within 30 s", t0 is not None and ms_ is not None and ms_ <= 30000,
+                        {"kicad_left_after_kill": left, "ms": ms_})
+                top = top2
+            h.check(f"{only}: no top-level KiCad window at any point", not watch.boxes, watch.boxes)
+            gls = [w for w in E.list_child_windows(top) if w["visible"] and w["class"] == "wxGLCanvas"]
+            gl = max(gls, key=lambda w: w["w"] * w["h"]) if gls else None
+            px, zoomed = plain_key_acts(h, gl, only, 0) if gl else (0, False)
+            h.check(f"{only}: then the editor is responsive (a plain F2 acts)", bool(zoomed), {"f2_px": px, "canvas": bool(gl)})
             return h.finish()
         if only == "panels":
             # Climb B's narrow-pane rule (shared with Linux embed_narrow_pane_e2e.sh and macOS): fresh profile, the pane's width from the
