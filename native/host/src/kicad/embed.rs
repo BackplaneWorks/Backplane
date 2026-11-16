@@ -1093,6 +1093,20 @@ struct Actor {
 /// run (bp-win: Defender's cloud lookups at each "did not open its IPC socket within 30 s"); the second start finds them scanned. A crash,
 /// a missing program or an unprepared folder is not retried: it would fail the same way.
 fn start_retry(why: &str, retried: bool) -> bool { !retried && why.starts_with("KiCad did not") && why.contains(" within ") }
+/// macOS: KiCad's API answers "not ready" while its UI thread waits on a system prompt. The hub is KiCad's responsible process, so the prompt
+/// names Backplane ("would like to access files in your Documents folder", a project on the Desktop or a removable volume). After
+/// MAC_PROMPT_AFTER of that with no KiCad dialog open, the start waits for the person (the pane says so, MAC_PROMPT_REASON) up to
+/// MAC_PROMPT_BOUND, and never restarts KiCad into the same prompt: its failure says "KiCad waited", which `start_retry` does not retry.
+/// (The Mac mini gate, Nov 16: the first Edit stalled 30 s on the Documents prompt, then a second KiCad met the same prompt.)
+pub const MAC_PROMPT_REASON: &str = "mac-permission-prompt";
+const MAC_PROMPT_AFTER: Duration = Duration::from_secs(5);
+const MAC_PROMPT_BOUND: Duration = Duration::from_secs(600);
+pub fn mac_prompt_wait(macos: bool, not_ready_for: Option<Duration>, kicad_dialog_open: bool) -> bool {
+    macos && !kicad_dialog_open && not_ready_for.is_some_and(|d| d >= MAC_PROMPT_AFTER)
+}
+pub fn mac_prompt_failure(bound: Duration) -> String {
+    format!("KiCad waited {} min on a macOS permission prompt that was not answered (answer it, then Try again)", bound.as_secs() / 60)
+}
 /// How long the start retry waits for the first KiCad after asking it to close (kill_pid's grace: a KiCad that missed its start window
 /// gets no more), then after killing it.
 const RETRY_TERM_WAIT: Duration = Duration::from_millis(1500);
@@ -2415,8 +2429,11 @@ async fn spawn_gui_session(
     let mut hand_ok = false;
     let mut ev_since: u64 = 0;
     let mut open_dialogs: Vec<String> = Vec::new();
+    // macOS: since when KiCad has answered "not ready", and whether the start now waits on a system prompt (mac_prompt_wait)
+    let (mut not_ready_since, mut prompted): (Option<std::time::Instant>, bool) = (None, false);
     while tokio::time::Instant::now() < deadline && !done.load(Ordering::SeqCst) {
         let p = raw_on(&me, &sock, &desc, "kiapi.common.commands.Ping", json!({}), 3000).await;
+        if p["status"] == "AS_NOT_READY" { not_ready_since.get_or_insert_with(std::time::Instant::now); }
         if p["ok"].as_bool().unwrap_or(false) {
             let v = raw_on(&me, &sock, &desc, "kiapi.common.commands.GetVersion", json!({}), 3000).await;
             if v["ok"].as_bool().unwrap_or(false) {
@@ -2455,6 +2472,13 @@ async fn spawn_gui_session(
             if let Some(dlg) = open_dialogs.last() {
                 deadline = tokio::time::Instant::now() + Duration::from_secs(30);
                 let _ = me.send(Msg::StartupReason { pro: pro.clone(), gen, reason: format!("waiting on dialog: {dlg}") });
+            } else if mac_prompt_wait(cfg!(target_os = "macos"), not_ready_since.map(|t| t.elapsed()), false) {
+                if !prompted {
+                    prompted = true;
+                    deadline = tokio::time::Instant::now() + MAC_PROMPT_BOUND;
+                    eprintln!("kicad embed: {pro}: KiCad not ready for {} s with no dialog of its own: waiting on a macOS prompt", MAC_PROMPT_AFTER.as_secs());
+                }
+                let _ = me.send(Msg::StartupReason { pro: pro.clone(), gen, reason: MAC_PROMPT_REASON.into() });
             } else {
                 let _ = me.send(Msg::StartupReason { pro: pro.clone(), gen, reason: String::new() });
             }
@@ -2463,7 +2487,8 @@ async fn spawn_gui_session(
     }
     if !hand_ok {
         if !done.load(Ordering::SeqCst) {
-            let _ = me.send(Msg::StartFailed { pro, gen, why: format!("KiCad did not answer Ping and GetVersion within {window} s") });
+            let why = if prompted { mac_prompt_failure(MAC_PROMPT_BOUND) } else { format!("KiCad did not answer Ping and GetVersion within {window} s") };
+            let _ = me.send(Msg::StartFailed { pro, gen, why });
         }
         return;
     }
@@ -3083,6 +3108,18 @@ mod tests {
         assert_eq!(clean.state, "stopped");
     }
 
+    #[test] fn a_start_stalled_on_a_macos_prompt_waits_for_the_person_and_is_never_restarted() {
+        use std::time::Duration as D;
+        assert!(!mac_prompt_wait(true, None, false), "KiCad has not said not-ready");
+        assert!(!mac_prompt_wait(true, Some(D::from_secs(2)), false), "a normal start says not-ready for a moment");
+        assert!(mac_prompt_wait(true, Some(D::from_secs(6)), false), "not ready for 6 s with nothing of KiCad's open: a system prompt");
+        assert!(!mac_prompt_wait(true, Some(D::from_secs(60)), true), "KiCad's own dialog is said as such");
+        assert!(!mac_prompt_wait(false, Some(D::from_secs(60)), false), "macOS only");
+        let why = mac_prompt_failure(MAC_PROMPT_BOUND);
+        assert!(why.contains("10 min") && why.contains("macOS permission prompt"), "{why}");
+        assert!(!start_retry(&why, false), "never a second KiCad into the same prompt");
+        assert!(start_retry("KiCad did not answer Ping and GetVersion within 30 s", false), "a plain missed window still retries once");
+    }
     #[test] fn a_missed_start_window_is_tried_once_more_and_nothing_else_is() {
         for why in ["KiCad did not open its IPC socket within 30 s", "KiCad did not answer Ping and GetVersion within 30 s"] {
             assert!(start_retry(why, false), "{why}: the first miss is tried again");

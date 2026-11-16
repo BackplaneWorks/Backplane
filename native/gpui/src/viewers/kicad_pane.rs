@@ -161,6 +161,8 @@ pub fn waiting_on(info: &Value, have_frame: bool, windows: bool) -> Option<Strin
             Some(crate::i18n::tf("gpui.c.kicad.dialog", &[("title", title.to_string().into())]))
         }
         // KiCad's check or refill holds the switch (task-gate-reads): said, so the pane does not look dead; the hub sends it when it ends
+        // macOS: KiCad's start waits on a system prompt that names Backplane (the hub's mac_prompt_wait): said, so the person looks for it
+        "starting" if info["reason"] == "mac-permission-prompt" => Some(crate::i18n::trs("macOS is asking for permission for Backplane: answer the prompt to let KiCad start.")),
         _ if info["task_wait"].as_str().is_some_and(|w| !w.is_empty()) => Some(crate::i18n::tf("gpui.c.kicad.task.wait", &[("what", info["task_wait"].as_str().unwrap_or("").to_string().into())])),
         _ => Some(crate::i18n::trs("Starting KiCad…")),
     }
@@ -1071,6 +1073,13 @@ impl Render for KicadPane {
 
 #[cfg(test)]
 mod tests {
+    #[test] fn a_start_waiting_on_a_macos_prompt_says_so() {
+        let i = |st: &str, reason: &str| json!({"state": st, "reason": reason, "mode": "fork", "frames": [], "dialogs": []});
+        let say = super::waiting_on(&i("starting", "mac-permission-prompt"), false, false).unwrap();
+        assert!(say.contains("macOS is asking for permission for Backplane"), "{say}");
+        assert_eq!(super::waiting_on(&i("starting", ""), false, false).as_deref(), Some("Starting KiCad…"));
+        assert!(super::waiting_on(&i("failed", "KiCad waited 10 min on a macOS permission prompt that was not answered (answer it, then Try again)"), false, false).unwrap().contains("KiCad waited 10 min"));
+    }
     #[test] fn a_warm_first_edit_holds_the_picture_until_kicad_has_drawn() {
         use std::time::Duration;
         assert!(super::handoff_holds(true, false, Duration::from_secs(2)), "with the event: held until it comes (the 3 s cap aside)");
