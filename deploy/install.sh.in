@@ -103,7 +103,7 @@ if [ $os = darwin ]; then
   # a shell under Rosetta says x86_64 on Apple silicon: ask the hardware
   [ "$(sysctl -n hw.optional.arm64 2>/dev/null)" = 1 ] && arch=arm64
   [ $arch = arm64 ] || fail "Backplane needs a Mac with Apple silicon (M1 or later); this Mac has an Intel processor"
-  mv=$(sw_vers -productVersion 2>/dev/null || echo 0); [ "${mv%%.*}" -ge 12 ] 2>/dev/null || fail "Backplane needs macOS 12 or later (this Mac runs macOS $mv)"
+  mv=$(sw_vers -productVersion 2>/dev/null || echo 0); [ "${mv%%.*}" -ge 13 ] 2>/dev/null || fail "Backplane needs macOS 13 or later (this Mac runs macOS $mv)"
 fi
 case $os-$arch in
   linux-x64) sum=$SHA_LINUX_X64 ;;

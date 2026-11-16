@@ -13,7 +13,7 @@ x64 and arm64. It lays the release out for the guard (docs/deploy.md): the build
 
 ## macOS (Apple silicon)
 
-Backplane runs on Macs with Apple silicon (M1 or later) and macOS 12 or later; Intel Macs aren't supported, and the installer says so on one. The Backplane KiCad it installs needs macOS 15 or later; on an older macOS, Settings → CAD says why.
+Backplane runs on Macs with Apple silicon (M1 or later) and macOS 13 or later; Intel Macs aren't supported, and the installer says so on one. The Backplane KiCad it installs needs macOS 15 or later; on an older macOS, Settings → CAD says why.
 
 Run the install.sh one-liner above: the same layout, with the default home in `~/Library/Application Support/Backplane/hub`. `BACKPLANE_NO_DESKTOP_APP=1` installs only the hub.
 
