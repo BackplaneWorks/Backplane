@@ -18,7 +18,14 @@ usage: mac_pane_e2e.py CLIENT HUB ASSETS RUNTIME OUT
 """
 import json, os, shutil, subprocess, sys, tempfile, time
 import Quartz
-from AppKit import NSWorkspace
+from AppKit import NSWorkspace, NSRunningApplication
+
+
+def active(pid):
+    """The app is the active one (an accessory KiCad is active while it holds the keyboard, though NSWorkspace's frontmost app, the
+    menu bar's owner, stays Backplane)."""
+    a = NSRunningApplication.runningApplicationWithProcessIdentifier_(pid)
+    return bool(a and a.isActive())
 
 CLIENT, HUB, ASSETS, RT, OUT = sys.argv[1:6]
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
@@ -153,7 +160,7 @@ try:
         check(bool(got), f'{tag}: KiCad\'s frame is the pane\'s rect within 1 px ({k and k[3]} vs {p and p[0]})')
     matches('at first show')
     # ---- Edit, then typing with no click ----
-    front = wait_for(lambda: NSWorkspace.sharedWorkspace().frontmostApplication().processIdentifier() == kpid, 5)
+    front = wait_for(lambda: active(kpid), 5)
     check(bool(front), 'after Edit, with no click, KiCad is the frontmost app (it has the keyboard)')
     n0 = hub_log().count('ET_SELECTION_CHANGED')
     key(K_A, CMD); time.sleep(0.8); key(K_ESC); time.sleep(0.8)
@@ -165,11 +172,10 @@ try:
     got = wait_for(lambda: client_log().count('"kicad_key"') > k0, 5)
     check(bool(got), 'Cmd+K pressed in KiCad reaches Backplane (the client takes the reserved chord)')
     time.sleep(1); shot('02-cmd-k')
-    front = lambda: NSWorkspace.sharedWorkspace().frontmostApplication().processIdentifier()
-    check(bool(wait_for(lambda: front() == client.pid, 3)), 'with the palette open, Backplane has the keyboard')
+    check(bool(wait_for(lambda: active(client.pid), 3)), 'with the palette open, Backplane has the keyboard')
     # the palette closed: the keyboard goes back to KiCad, and a canvas key acts again
     key(K_ESC)
-    check(bool(wait_for(lambda: front() == kpid, 4)), 'the palette closed: the keyboard is back in KiCad')
+    check(bool(wait_for(lambda: active(kpid), 4)), 'the palette closed: the keyboard is back in KiCad')
     n0 = hub_log().count('ET_SELECTION_CHANGED'); key(K_A, CMD)
     check(bool(wait_for(lambda: hub_log().count('ET_SELECTION_CHANGED') > n0, 4)), 'and KiCad\'s canvas takes keys again (Cmd+A)')
     key(K_ESC); time.sleep(0.5)
@@ -177,18 +183,18 @@ try:
     d0, c0 = hub_log().count('ET_DIALOG_OPENED'), hub_log().count('ET_DIALOG_CLOSED')
     key(K_F, CMD)
     opened = wait_for(lambda: hub_log().count('ET_DIALOG_OPENED') > d0, 5)
-    check(bool(opened) and front() == kpid, 'a KiCad dialog (Find) opens with the keyboard in it')
+    check(bool(opened) and active(kpid), 'a KiCad dialog (Find) opens with the keyboard in it')
     time.sleep(0.5); shot('02c-dialog'); key(K_ESC)
     check(bool(wait_for(lambda: hub_log().count('ET_DIALOG_CLOSED') > c0, 4)), 'Escape closes the dialog')
     # a click in Backplane's own chrome (the rail, outside the pane) gives the keyboard back to Backplane
     rail = rects().get('rail:Files') or rects().get('rail:Board')
     cw = next((w for w in wins() if w[0] == cw[0]), cw)
     if rail: click(cw[3][0] + rail['x'] + rail['w'] / 2, cw[3][1] + 28 + rail['y'] + rail['h'] / 2)
-    check(bool(rail) and bool(wait_for(lambda: front() == client.pid, 4)), 'a click in Backplane\'s chrome gives it the keyboard back')
+    check(bool(rail) and bool(wait_for(lambda: active(client.pid), 4)), 'a click in Backplane\'s chrome gives it the keyboard back')
     # and the pane again: one click on KiCad's canvas gives KiCad the keyboard
     p = last_push()
     if p: click(p[0][0] + p[0][2] * 0.1, p[0][1] + p[0][3] * 0.9)
-    check(bool(wait_for(lambda: front() == kpid, 4)), 'a click on the board gives KiCad the keyboard again')
+    check(bool(wait_for(lambda: active(kpid), 4)), 'a click on the board gives KiCad the keyboard again')
     # ---- our window moved: the frame follows ----
     before = kicad_frame()
     subprocess.run(['osascript', '-e', f'tell application "System Events" to set position of (first window of (first process whose unix id is {client.pid})) to {{{cw[3][0] + 60}, {cw[3][1] + 40}}}'], capture_output=True)
