@@ -128,6 +128,8 @@ impl Backplane {
             Event::Answer(id,reply) if id==screens::unsent::TAG=>{let why=if reply["ok"]==true {String::new()} else {hub::rpc_error(&reply)};self.screens.unsent.answered_out(reply["ok"]==true,&why);self.send_unsent();cx.notify();},
             Event::HubOffer(text)=>screens::hubpick::offered(self,&text,cx),
             Event::KicadEditor(digest,text)=>self.kicad_info(digest,&text,cx),
+            Event::KicadUpdate(k,v)=>screens::kicad_update::seen(self,&k,&v,cx),
+            Event::KicadReply(m,reply) if m=="kicad.install"=>screens::kicad_update::replied(self,&reply,cx),
             Event::KicadReply(m,reply) if m=="editor.kicad.capture"||m=="kicad.comment.post"=>self.kcomment_reply(&m,reply,cx),
             Event::KicadReply(m,reply)=>self.kicad_reply(m,reply,cx),
             Event::KicadComment(text)=>self.kicad_comment(&text,cx),

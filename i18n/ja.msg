@@ -2140,6 +2140,7 @@ gpui.kcomment.hint = Enter でスレッドに投稿 · Esc で取り消し
 gpui.kcomment.not.posted = コメントは投稿されませんでした: {why}
 gpui.keys.kcomment = KiCad で選択中のものにコメント (Backplane からもエディタ内からも): Enter で投稿、Esc で取り消し
 gpui.c.kicad.dialog = KiCad で「{title}」が開いています
+gpui.kicad.update.installed = Backplane KiCad {version} をインストールしました。KiCad を開き直すと新しい版になります（未保存の変更は保存か閉じるまで残ります）
 gpui.c.kicad.asking = KiCad からの確認: {title}
 gpui.c.kicad.full.screen = 全画面
 gpui.c.kicad.exit.full.screen = 全画面を終了

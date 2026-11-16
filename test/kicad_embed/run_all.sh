@@ -44,6 +44,8 @@ SUITES=(
   "embed_narrow_pane_e2e.sh:narrow-pane"
   # Ctrl+Tab to a schematic opening cold stays there (KiCad's own show request for the board just after it is not followed) (fork)
   "embed_tab_bounce_e2e.sh:tab-bounce"
+  # the Backplane KiCad update offered at Edit: a row of its own above the pane, never over it; Not now kept per version (fork)
+  "embed_update_row_e2e.sh:update-row"
   # a click on one of KiCad's DRC markers keeps the editor where it is; Escape shuts a side panel before the viewer (fork; skips without Hubble_DK)
   "embed_marker_click_e2e.sh:marker-click"
   "embed_thread_e2e.sh:thread"

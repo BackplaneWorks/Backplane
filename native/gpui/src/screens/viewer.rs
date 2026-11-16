@@ -661,7 +661,7 @@ fn pane_page(thread: &Value) -> Option<(String, bool)> {
     press.filter(|k| !k.is_empty()).map(|k| (k, true))
 }
 /// The panel (None while nothing is open). 520 px wide, between the thread and the rail.
-pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &super::filesui::FilesUi, images: &super::images::Images, target: Option<&super::attach::Target>, thread: &Value, plot: &super::plot::Store, pv: &mut super::plotview::PlotView, split_pv: &mut [super::plotview::PlotView; 2], solid: Option<&Entity<crate::viewers::solid::SolidPage>>, browser: Option<&Entity<crate::viewers::browser::BrowserPage>>, editor: Option<&Entity<crate::viewers::kicad_pane::KicadPane>>) -> AnyElement {
+pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &super::filesui::FilesUi, images: &super::images::Images, target: Option<&super::attach::Target>, thread: &Value, plot: &super::plot::Store, pv: &mut super::plotview::PlotView, split_pv: &mut [super::plotview::PlotView; 2], solid: Option<&Entity<crate::viewers::solid::SolidPage>>, browser: Option<&Entity<crate::viewers::browser::BrowserPage>>, editor: Option<&Entity<crate::viewers::kicad_pane::KicadPane>>, update: Option<AnyElement>) -> AnyElement {
     let Some((open, early)) = pane_page(thread) else { return Empty.into_any_element() };
     let open = open.as_str();
     // a drawing page shown without the project's boards (the window reconnected, or the page was restored as it was left): read them once
@@ -701,7 +701,7 @@ pub fn page(cx: &mut Context<Backplane>, reg: &Reg, light: bool, files_ui: &supe
         } else { div().flex_1().min_h_0().child(e).into_any_element() };
         // the Boards menu (a project with several boards) stays where the viewer's bar has it; a pick moves KiCad to that board (boards::edit_due)
         let boards = crate::viewers::boards::picker(cx, light, viewer, &pv.boards);
-        div().size_full().flex().flex_col().when(!screen, |d| d.child(bar(light).children(boards).child(div().flex_1()).child(a))).when(!popped, |d| d.child(strip)).child(body).into_any_element()
+        div().size_full().flex().flex_col().when(!screen, |d| d.child(bar(light).children(boards).child(div().flex_1()).child(a))).children(update).when(!popped, |d| d.child(strip)).child(body).into_any_element()
     }
     else if early {
         let k = open;
