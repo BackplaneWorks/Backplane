@@ -169,14 +169,23 @@ impl Session {
         self.state = "stopped".into(); self.reason = reason.into(); self.pid = 0; self.holder = 0;
         self.frames.clear(); self.dialogs.clear(); self
     }
-    pub fn exited(self, code: i32, tail: &str) -> Self {
+    /// KiCad's process ended: `how` its exit ("signal 9 (SIGKILL)", "code 1"; empty: code alone), `tail` its last output lines (kept in
+    /// the hub's log only). After it was ready it closed unexpectedly (a crash, a kill): said as that, with how, never its output. Before
+    /// it was ready its start failed: the reason is an error line of its output, never start-up noise (Fontconfig, GTK, GLib, Mesa).
+    pub fn exited(self, code: i32, tail: &str) -> Self { self.exited_how(code, "", tail) }
+    pub fn exited_how(self, code: i32, how: &str, tail: &str) -> Self {
         if self.closing { return self.stopped("") }
         // KiCad quit by itself (its window closed, its own File > Exit): said, so the pane and a later request never read "stopped ()"
-        if code == 0 { return self.stopped("KiCad was closed") }
-        let detail = tail.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("").trim();
-        let why = if detail.is_empty() { format!("KiCad exited (code {code})") } else { format!("KiCad exited (code {code}): {detail}") };
+        if code == 0 && how.is_empty() { return self.stopped("KiCad was closed") }
+        let how = if how.is_empty() { format!("code {code}") } else { how.to_string() };
+        if !tail.trim().is_empty() { eprintln!("kicad embed: {} ended ({how}); its last output:\n{}", self.pro, tail.trim_end()) }
+        if matches!(self.state.as_str(), "ready" | "unresponsive") {
+            let mut s = self.failed(""); s.state = CLOSED.into(); s.reason = format!("KiCad closed unexpectedly ({how})"); return s
+        }
+        let why = match start_error(tail) { Some(l) => format!("KiCad exited before it was ready ({how}): {l}"), None => format!("KiCad exited before it was ready ({how})") };
         self.failed(&why)
     }
+    pub fn closed_unexpectedly(&self) -> bool { self.state == CLOSED }
     pub fn unsaved_docs(&self) -> Vec<String> {
         self.frames.iter().filter(|f| f.modified).map(|f| if !f.doc.is_empty() { f.doc.clone() } else { f.title.clone() }).collect()
     }
@@ -227,6 +236,30 @@ pub fn mac_refusal(macos: bool, mode: &str, desc: &str) -> Option<String> {
 pub fn local_switch(s: &Session, local_map: bool, plain: bool) -> bool {
     plain && local_map && s.mode == "fork" && s.state == "ready"
         && s.frames.iter().any(|f| f.kind == s.active && f.xid > 0 && (f.realized || f.shown))
+}
+
+/// The state of a session whose KiCad died after it was ready (a crash, a kill): the pane offers to open the editor again.
+pub const CLOSED: &str = "closed_unexpectedly";
+/// Lines of KiCad's start-up output that are noise, never a reason a start failed (the toolkits' warnings on a box without their config).
+fn noise(l: &str) -> bool {
+    let l = l.trim();
+    l.is_empty() || ["Fontconfig", "Gtk-", "GLib", "Gdk-", "dbus", "libEGL", "MESA", "Mesa", "pci id for fd", "at-spi", "AT-SPI", "libGL error", "Xlib", "(kicad", "wxWidgets Debug"]
+        .iter().any(|n| l.contains(n))
+}
+/// The line of a failed start's output that says why: the last that is not noise and reads as an error.
+pub fn start_error(tail: &str) -> Option<String> {
+    tail.lines().rev().map(str::trim).filter(|l| !noise(l))
+        .find(|l| { let s = l.to_ascii_lowercase(); ["error", "fatal", "failed", "cannot", "can't", "could not", "not found", "denied", "abort", "segmentation"].iter().any(|w| s.contains(w)) })
+        .map(|l| l.chars().take(200).collect())
+}
+/// How a process ended, for the person: a signal by its name, else its exit code.
+pub fn exit_how(status: &std::process::ExitStatus) -> (i32, String) {
+    #[cfg(unix)] { use std::os::unix::process::ExitStatusExt; if let Some(sig) = status.signal() {
+        let name = match sig { 9 => "SIGKILL", 11 => "SIGSEGV", 6 => "SIGABRT", 15 => "SIGTERM", 7 => "SIGBUS", 4 => "SIGILL", 8 => "SIGFPE", _ => "" };
+        return (128 + sig, if name.is_empty() { format!("signal {sig}") } else { format!("signal {sig}, {name}") })
+    } }
+    let c = status.code().unwrap_or(1);
+    (c, if c == 0 { String::new() } else { format!("code {c}") })
 }
 
 /// What the hub waits for after KiCad's first ShowFrame at start.
@@ -467,7 +500,7 @@ pub fn warm_decision(sessions: &HashMap<String, Session>, pro: &str, hardware: b
     if !quiet && !sessions.get(pro).is_some_and(Session::is_live) { return Warm::No("this KiCad shows its own windows while loading (needs Backplane KiCad bp.12)") }
     if sessions.get(pro).is_some_and(Session::is_live) { return Warm::Have }
     // a session that failed or was closed by the person is not started again behind their back; Edit does that
-    if sessions.get(pro).is_some_and(|s| s.state == "failed" || s.reason == "KiCad was closed") { return Warm::No("KiCad stopped for this project; Edit starts it") }
+    if sessions.get(pro).is_some_and(|s| s.state == "failed" || s.state == CLOSED || s.reason == "KiCad was closed") { return Warm::No("KiCad stopped for this project; Edit starts it") }
     if locked { return Warm::No("the project is open in another KiCad") }
     // memory: the new KiCad's cost and the headroom must fit (builds and other programs take theirs first); room made by an eviction is
     // not counted on: a refused warm costs only Edit's cold start
@@ -1109,7 +1142,7 @@ enum Msg {
     /// ForkSync for the project's current session, whichever generation it is (from outside the actor: the prewarm RPC)
     ForkSyncNow { pro: String },
     HealthResult { pro: String, gen: u64, ok: bool, modified_docs: Option<Vec<String>> },
-    ChildExited { pro: String, gen: u64, code: i32, tail: String, reply: Option<oneshot::Sender<Result<Value, String>>> },
+    ChildExited { pro: String, gen: u64, code: i32, how: String, tail: String, reply: Option<oneshot::Sender<Result<Value, String>>> },
     Tick,
 }
 
@@ -1401,7 +1434,7 @@ impl Actor {
             }
         }
 
-        let sweep_locks = self.sessions.get(&pro).is_some_and(|s| s.state == "failed" || s.reason == "restarting");
+        let sweep_locks = self.sessions.get(&pro).is_some_and(|s| s.state == "failed" || s.state == CLOSED || s.reason == "restarting");
         self.start_env.insert(pro.clone(), env.clone());
 
         // Warm-session cap: retire the oldest detached clean session before starting a 4th GUI KiCad.
@@ -1639,7 +1672,7 @@ impl Actor {
                             }
                         });
                     }
-                    let _ = me.send(Msg::ChildExited { pro: s.pro.clone(), gen: s.gen, code: 0, tail: String::new(), reply: Some(reply) });
+                    let _ = me.send(Msg::ChildExited { pro: s.pro.clone(), gen: s.gen, code: 0, how: String::new(), tail: String::new(), reply: Some(reply) });
                 } else {
                     let err = o["error"].as_str().unwrap_or("KiCad refused to close").to_string();
                     let mut unsaved = s.unsaved_docs();
@@ -1678,7 +1711,7 @@ impl Actor {
                 }
             }
             Actor::kill_pid(s.pid);
-            let _ = me.send(Msg::ChildExited { pro: s.pro.clone(), gen: s.gen, code: 0, tail: String::new(), reply: Some(reply) });
+            let _ = me.send(Msg::ChildExited { pro: s.pro.clone(), gen: s.gen, code: 0, how: String::new(), tail: String::new(), reply: Some(reply) });
         });
     }
 
@@ -2018,18 +2051,18 @@ impl Actor {
                     let _ = self.me.send(Msg::ForkSync { pro, gen });
                 }
             }
-            Msg::ChildExited { pro, gen, code, tail, reply } => {
+            Msg::ChildExited { pro, gen, code, how, tail, reply } => {
                 let Some(s) = self.sessions.get_mut(&pro).filter(|s| s.gen == gen) else {
                     if let Some(tx) = reply { let _ = tx.send(Ok(json!({"closed":true}))); }
                     return;
                 };
-                if matches!(s.state.as_str(), "stopped" | "failed") {
+                if matches!(s.state.as_str(), "stopped" | "failed" | CLOSED) {
                     if let Some(tx) = reply { let _ = tx.send(Ok(json!({"closed":true}))); }
                     return;
                 }
                 let was_starting = s.state == "starting";
                 let old = s.clone();
-                *s = s.clone().exited(code, &tail);
+                *s = s.clone().exited_how(code, &how, &tail);
                 let snap = s.clone();
                 self.cleanup_session_sockets(&old);
                 if let Some(tx) = reply {
@@ -2486,7 +2519,7 @@ async fn spawn_gui_session(
         let me = me.clone();
         let pro = pro.clone();
         tokio::spawn(async move {
-            let code = child.wait().await.map(|s| s.code().unwrap_or(128)).unwrap_or(1);
+            let (code, how) = child.wait().await.map(|s| exit_how(&s)).unwrap_or((1, "code 1".into()));
             if pid > 0 {
                 live_pids().lock().unwrap_or_else(|e| e.into_inner()).remove(&pid);
                 crate::agents::proc::unwatch_group(pid);
@@ -2495,7 +2528,7 @@ async fn spawn_gui_session(
             done.store(true, Ordering::SeqCst);
             let _ = so.await; let _ = se.await;
             let joined: Vec<String> = tail.lock().unwrap().iter().cloned().collect();
-            let _ = me.send(Msg::ChildExited { pro, gen, code, tail: joined.join("\n"), reply: None });
+            let _ = me.send(Msg::ChildExited { pro, gen, code, how, tail: joined.join("\n"), reply: None });
         });
     }
 
@@ -3226,14 +3259,25 @@ mod tests {
         let s = s.ping_result(true);
         assert_eq!(s.state, "ready", "next good ping recovers");
 
-        let crashed = s.clone().exited(1, "line1\nfatal boom\n");
-        assert_eq!(crashed.state, "failed");
-        assert!(crashed.reason.contains("fatal boom"), "{}", crashed.reason);
+        // a death after it was ready: closed unexpectedly, said by how it ended, never by its output
+        let crashed = s.clone().exited_how(137, "signal 9, SIGKILL", "Fontconfig error: Cannot load default config file: File not found\nfatal boom\n");
+        assert_eq!(crashed.state, CLOSED);
+        assert_eq!(crashed.reason, "KiCad closed unexpectedly (signal 9, SIGKILL)");
+        let crashed = s.clone().exited(139, "x");
+        assert_eq!((crashed.state.as_str(), crashed.reason.as_str()), (CLOSED, "KiCad closed unexpectedly (code 139)"));
 
         let clean = s.exited(0, "");
         assert_eq!(clean.state, "stopped");
     }
 
+    #[test] fn a_failed_start_is_said_by_an_error_line_never_by_start_up_noise() {
+        let st = Session { state: "starting".into(), ..Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 1, 0) };
+        let f = st.clone().exited_how(1, "code 1", "Fontconfig error: Cannot load default config file: File not found\n(kicad:12): Gtk-WARNING **: cannot open display\n");
+        assert_eq!((f.state.as_str(), f.reason.as_str()), ("failed", "KiCad exited before it was ready (code 1)"), "only noise: no reason quoted");
+        let f = st.clone().exited_how(1, "code 1", "Fontconfig error: Cannot load default config file\n10:00:01: Error: could not load library _pcbnew.kiface\nGLib-GIO-CRITICAL: x\n");
+        assert_eq!(f.reason, "KiCad exited before it was ready (code 1): 10:00:01: Error: could not load library _pcbnew.kiface");
+        assert_eq!(start_error("Fontconfig error: x\n"), None);
+    }
     #[test] fn a_start_stalled_on_a_macos_prompt_waits_for_the_person_and_is_never_restarted() {
         use std::time::Duration as D;
         assert!(!mac_prompt_wait(true, None, false), "KiCad has not said not-ready");

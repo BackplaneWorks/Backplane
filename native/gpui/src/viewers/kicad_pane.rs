@@ -157,6 +157,8 @@ pub fn waiting_on(info: &Value, have_frame: bool, windows: bool) -> Option<Strin
     match info["state"].as_str().unwrap_or("") {
         // the hub has already tried a missed start window once more (embed.rs start_retry); the pane's Try again under this starts it again
         "failed" => Some(format!("{} {}", crate::i18n::trs("KiCad could not start:"), info["reason"].as_str().unwrap_or(""))),
+        // KiCad died after it was ready (a crash, a kill): not a failed start; what it means for the person's work, in plain words
+        "closed_unexpectedly" => Some(crate::i18n::trs(CLOSED_WORDS)),
         "unresponsive" => Some(crate::i18n::trs("KiCad is not responding.")),
         "stopped" => Some(crate::i18n::trs("KiCad was closed.")),
         _ if have_frame => None,
@@ -217,6 +219,11 @@ pub fn handoff_holds(drawn_event: bool, drawn: bool, since_placed: std::time::Du
 
 /// The pane offers Try again under its message: KiCad's start failed (the hub has already retried a missed start window once).
 pub fn try_again(info: &Value) -> bool { info["state"] == "failed" }
+/// KiCad closed unexpectedly after it was ready: the pane's one button opens the editor again (a new KiCad).
+pub fn open_again(info: &Value) -> bool { info["state"] == "closed_unexpectedly" }
+/// What the pane says when KiCad died after it was ready. Saved files are as last saved; KiCad keeps an autosave of unsaved board and
+/// schematic changes every few minutes (_autosave-*, kept by the hub), which it offers back when the file is opened again.
+pub const CLOSED_WORDS: &str = "KiCad closed unexpectedly. Your saved files are intact. Changes made since the last save may be offered back when KiCad opens the file again, if it had autosaved them.";
 
 /// The pane offers the KiCad app under its message where the editor cannot be in the pane: its start failed (no window to hold it, no
 /// KiCad that starts), or this is stock KiCad on Windows. The app opens only on that press: the pane never falls back to it by itself.
@@ -1137,7 +1144,7 @@ impl Render for KicadPane {
         let say = if handoff { None } else { waiting(&self.seen_info(), self.want().is_some()) };
         // a notice during the start: said under "Starting KiCad…" (and in the strip, where it stays once the editor is up)
         let notice = say.as_ref().and_then(|_| open_notice(&self.info)).map(|(_, t)| t);
-        let failed = self.failed(); let app = app_instead(&self.seen_info(), cfg!(windows));
+        let failed = self.failed(); let app = app_instead(&self.seen_info(), cfg!(windows)); let again = open_again(&self.seen_info());
         // macOS: in full screen KiCad's frame cannot be over the pane; it says so and offers the editor in a window of its own
         let say = if self.mac_full && self.info["state"] == "ready" { Some(crate::i18n::trs("KiCad cannot be shown here while Backplane is full screen on macOS. Pop it out into a window of its own, or leave full screen.")) } else { say };
         let full = self.mac_full && self.info["state"] == "ready";
@@ -1163,6 +1170,9 @@ impl Render for KicadPane {
             .child(canvas(move |b, window, _| { *marker.lock().unwrap() = Some(window.insert_hitbox(b, HitboxBehavior::Normal).id); }, |_, _, _, _| {}).size_full())
             .when_some(say, |d, s| d.child(div().absolute().inset_0().flex().flex_col().gap_2().items_center().justify_center().text_color(c("faint")).child(s)
                 .when_some(notice, |d, n| d.child(crate::ui::with_rect(div().id("kicad-notice-start"), || "kicad:notice-start".to_string()).max_w(px(520.)).text_size(crate::scale::tpx(12.)).text_color(c("dim")).child(n)))
+                .when(again, |d| d.child(crate::ui::with_rect(div().id("kicad-open-again"), || "kicad:open-again".to_string()).px_3().py_1().rounded_md().cursor_pointer()
+                    .bg(c("accent")).text_color(c("text")).child(crate::i18n::trs("Open the editor again"))
+                    .on_click(cx.listener(|this, _, _, cx| { this.reattach(); cx.notify(); }))))
                 .when(failed, |d| d.child(crate::ui::with_rect(div().id("kicad-retry"), || "kicad:retry".to_string()).px_3().py_1().rounded_md().cursor_pointer()
                     .bg(c("raise")).hover(|x| x.bg(c("line"))).text_color(c("text")).child(crate::i18n::trs("Try again"))
                     .on_click(cx.listener(|this, _, _, cx| { this.reattach(); cx.notify(); }))))
@@ -1312,6 +1322,10 @@ mod tests {
         assert!(waiting(&json!({"state": "ready"}), true).is_none());
         assert!(waiting(&json!({"state": "failed", "reason": "no kicad"}), true).unwrap().contains("no kicad"));
         assert!(super::try_again(&json!({"state": "failed", "reason": "no kicad"})), "a failed start offers Try again");
+        let closed = json!({"state": "closed_unexpectedly", "reason": "KiCad closed unexpectedly (signal 9, SIGKILL)", "frames": []});
+        assert!(super::open_again(&closed) && !super::try_again(&closed) && !super::app_instead(&closed, false), "a death offers Open the editor again, alone");
+        let say = super::waiting_on(&closed, false, false).unwrap();
+        assert!(say.starts_with("KiCad closed unexpectedly.") && !say.contains("could not start") && !say.contains("Fontconfig"), "{say}");
         // a stock KiCad in the pane: the strip offers Backplane KiCad (Linux; Windows says it in the pane's middle), a fork's never
         assert!(super::stock_hint(&json!({"mode": "stock", "state": "ready"}), false) && super::stock_hint(&json!({"mode": "stock", "state": "starting"}), false));
         assert!(!super::stock_hint(&json!({"mode": "fork", "state": "ready"}), false) && !super::stock_hint(&json!({"mode": "stock", "state": "ready"}), true) && !super::stock_hint(&json!({"mode": "stock", "state": "stopped"}), false) && !super::stock_hint(&Value::Null, false));
