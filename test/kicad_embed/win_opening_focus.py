@@ -1886,6 +1886,8 @@ def run(h):
             # both choosers list libraries, and KiCad's checks find nothing about libraries.
             import re as _re
             import subprocess
+            sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "lib"))
+            import libgate_design as LG
             top = int(rep.get("toplevel") or 0) or E.find_main_window(cp.pid)
             pro = checks_project(h)
             sch, pcb = pro[:-len(".kicad_pro")] + ".kicad_sch", pro[:-len(".kicad_pro")] + ".kicad_pcb"
@@ -1919,54 +1921,63 @@ def run(h):
             ufp, usym = read(os.path.join(cfg, "fp-lib-table")), read(os.path.join(cfg, "sym-lib-table"))
             h.check("libs: the person's global tables (made at first launch) contain the standard and the Backplane libraries",
                     '(name "KiCad")' in ufp and '(name "KiCad")' in usym and all(f'(name "{n}")' in ufp for n in BP_LIBS), {"fp": ufp[-1200:], "sym": usym[-400:]})
-            # an agent's edits, as an agent makes them (kicad_edit through the stand-in's MCP)
-            sline = standin_ask(h, "kicad_edit", {"path": sch, "message": "libs gate", "ops": [{"add": [
-                {"symbol": {"lib": "Device:C", "ref": "C98", "value": "100n", "at": [30.48, 30.48], "footprint": "Capacitor_SMD:C_0603_1608Metric"}},
-                {"symbol": {"lib": "Device:C", "ref": "C99", "value": "1u", "at": [40.64, 30.48], "footprint": "Backplane_Passives_Nominal:C_0805_2012Metric"}}]}]}, "libs-sch")
-            text = read(sch)
-            h.check("libs: kicad_edit places Device:C from the standard library (C98) with the standard footprint Capacitor_SMD:C_0603_1608Metric",
-                    '(lib_id "Device:C")' in text and '"C98"' in text and '"Capacitor_SMD:C_0603_1608Metric"' in text, {"answer": sline[:600]})
-            h.check("libs: and C99 with the Backplane library's footprint Backplane_Passives_Nominal:C_0805_2012Metric",
-                    '"C99"' in text and '"Backplane_Passives_Nominal:C_0805_2012Metric"' in text, {"answer": sline[-400:]})
-            ptext0 = read(pcb)
-            refs = _re.findall(r'\(property "Reference" "(C\d+)"', ptext0)
-            ref = refs[0] if refs else "C1"
-            pline = standin_ask(h, "kicad_edit", {"path": pcb, "message": "libs gate", "ops": [{"set": ref, "footprint": "Backplane_Passives_Nominal:C_0805_2012Metric"}]}, "libs-pcb")
-            ptext = read(pcb)
-            h.check(f"libs: kicad_edit sets the Backplane footprint on the board's {ref} (KiCad loads it through the global table)",
-                    "Backplane_Passives_Nominal:C_0805_2012Metric" in ptext, {"answer": pline[:600]})
-            h.check("libs: the footprint brings its 3D model reference (${BACKPLANE_KICAD_LIBRARY}/3dmodels/Capacitor_SMD.3dshapes/C_0805_2012Metric.step)",
-                    "Capacitor_SMD.3dshapes/C_0805_2012Metric.step" in ptext, ptext[ptext.find("C_0805_2012Metric.step") - 200: ptext.find("C_0805_2012Metric.step") + 60] if "C_0805_2012Metric.step" in ptext else "absent")
             env = h.base_env()
-            step = h.p("libs_board.step")
-            ex = subprocess.run([h.kicad_cli, "pcb", "export", "step", "--force", "-o", step, pcb], capture_output=True, text=True, env=env, timeout=600)
-            out = (ex.stdout + ex.stderr)[-1500:]
-            body = read(step)
-            size = os.path.getsize(step) if os.path.isfile(step) else 0
-            missing = [l for l in out.splitlines() if "C_0805_2012Metric" in l or ("3D model" in l and ("not" in l.lower() or "could" in l.lower()))]
-            h.check("libs: a STEP export of the board includes the Backplane 3D model (export succeeds, nothing says the model is missing)",
-                    ex.returncode == 0 and size > 0 and not missing, {"rc": ex.returncode, "step_bytes": size, "model_lines": missing[:4], "out": out[-600:],
-                                                                      "step_names_model": "C_0805" in body})
-            # KiCad's own checks: nothing about libraries (the seed board has other findings of its own, counted as information)
-            def kicad_check(kind, path, outp):
-                cmd = [h.kicad_cli, kind, "erc" if kind == "sch" else "drc", "--format", "json", "-o", outp, path] + (["--schematic-parity"] if kind == "pcb" else [])
+            def cli_report(kind, path, outp, extra=()):
+                cmd = [h.kicad_cli, kind, "erc" if kind == "sch" else "drc", "--format", "json", "--severity-all", "-o", outp, *extra, path]
                 r = subprocess.run(cmd, capture_output=True, text=True, env=env, timeout=600)
                 try:
-                    j = json.load(open(outp, encoding="utf-8"))
+                    return r.returncode, json.load(open(outp, encoding="utf-8")), (r.stdout + r.stderr)[-400:]
                 except (OSError, ValueError):
-                    return r.returncode, None
-                found = []
-                for key in ("violations", "unconnected_items", "schematic_parity"):
-                    found += [v.get("type", "") for v in j.get(key, []) or []]
-                for sh in j.get("sheets", []) or []:
-                    found += [v.get("type", "") for v in sh.get("violations", []) or []]
-                return r.returncode, found
-            LIB = ("lib_symbol_issues", "lib_symbol_mismatch", "lib_footprint_issues", "lib_footprint_mismatch", "footprint_symbol_mismatch", "footprint_type_mismatch", "missing_footprint")
+                    return r.returncode, None, (r.stdout + r.stderr)[-400:]
+            # information only: KiCad's checks on the seed board as it is (it has findings of its own)
             for kind, path in (("sch", sch), ("pcb", pcb)):
-                rc, found = kicad_check(kind, path, h.p(f"libs_{kind}.json"))
-                libf = [t for t in (found or []) if t in LIB or "lib" in t]
-                print(f"INFO libs {kind} findings: " + json.dumps(sorted(set(found or []))), flush=True)
-                h.check(f"libs: KiCad's {'ERC' if kind == 'sch' else 'DRC'} on the edited design finds nothing about libraries", found is not None and not libf, {"rc": rc, "library_findings": libf})
+                rc, rpt, _ = cli_report(kind, path, h.p(f"libs_seed_{kind}.json"), ("--schematic-parity",) if kind == "pcb" else ())
+                print(f"INFO libs seed {kind}: " + json.dumps(LG.count_cli(rpt) if rpt else {"rc": rc}), flush=True)
+            # the gate's fresh design (lib/libgate_design.py: the same steps on Linux, macOS and Windows)
+            gdir = os.path.join(os.path.dirname(pro), "libgate")
+            gpro, gsch, gpcb = LG.make_project(gdir, pro, pcb, sch)
+            subprocess.run(["git", "-C", os.path.dirname(pro), "add", "libgate"], capture_output=True, text=True)
+            subprocess.run(["git", "-C", os.path.dirname(pro), "commit", "-qm", "libs gate: a new project"], capture_output=True, text=True)
+            a1 = standin_ask(h, "kicad_edit", {"path": gsch, "message": "libs gate: C1, C2 in parallel", "ops": LG.schematic_ops()}, "lg-sch")
+            st = open(gsch, encoding="utf-8", errors="replace").read()
+            h.check("libs: the agent's kicad_edit puts C1 (Device:C, Capacitor_SMD:C_0603_1608Metric) and C2 (Device:C, Backplane_Passives_Nominal:C_0805_2012Metric) in parallel on N1/N2",
+                    st.count('(lib_id "Device:C")') >= 2 and '"Capacitor_SMD:C_0603_1608Metric"' in st and '"Backplane_Passives_Nominal:C_0805_2012Metric"' in st
+                    and '"N1"' in st and '"N2"' in st, {"answer": a1[:700]})
+            net = os.path.join(gdir, "libgate.net")
+            ex = subprocess.run([h.kicad_cli, "sch", "export", "netlist", "--format", "kicadsexpr", "-o", net, gsch], capture_output=True, text=True, env=env, timeout=300)
+            a2 = standin_ask(h, "kicad_edit", {"path": gpcb, "message": "libs gate: update from the schematic", "ops": LG.netlist_ops(net.replace("\\", "/"))}, "lg-net")
+            a3 = standin_ask(h, "kicad_edit", {"path": gpcb, "message": "libs gate: place and route", "ops": LG.board_ops()}, "lg-pcb")
+            bt = open(gpcb, encoding="utf-8", errors="replace").read()
+            h.check("libs: the board is updated from the schematic (both footprints, from their libraries)",
+                    "Capacitor_SMD:C_0603_1608Metric" in bt and "Backplane_Passives_Nominal:C_0805_2012Metric" in bt, {"netlist_rc": ex.returncode, "answer": a2[:700]})
+            h.check("libs: the agent places both inside the board outline and routes N1 and N2", bt.count("(segment") >= 2 and "failed" not in a3, {"answer": a3[:900]})
+            h.check("libs: the Backplane footprint brings its 3D model (${BACKPLANE_KICAD_LIBRARY}/3dmodels/Capacitor_SMD.3dshapes/C_0805_2012Metric.step)",
+                    "Capacitor_SMD.3dshapes/C_0805_2012Metric.step" in bt, "present" if "C_0805_2012Metric.step" in bt else "absent")
+            step = h.p("libgate.step")
+            ex = subprocess.run([h.kicad_cli, "pcb", "export", "step", "--force", "-o", step, gpcb], capture_output=True, text=True, env=env, timeout=600)
+            out = ex.stdout + ex.stderr
+            size = os.path.getsize(step) if os.path.isfile(step) else 0
+            bad = [l for l in out.splitlines() if "C_0805_2012Metric" in l]
+            h.check("libs: the STEP export includes the Backplane 3D model (export succeeds, nothing says that model is missing)",
+                    ex.returncode == 0 and size > 0 and not bad, {"rc": ex.returncode, "bytes": size, "model_lines": bad[:4], "out": out[-500:]})
+            rc, rpt, o = cli_report("sch", gsch, h.p("libgate_erc.json"))
+            n = LG.count_cli(rpt) if rpt else None
+            h.check("libs: kicad-cli ERC of the fresh design: 0 errors, 0 warnings", bool(n) and n["violations"] == 0, {"rc": rc, "count": n, "out": o})
+            rc, rpt, o = cli_report("pcb", gpcb, h.p("libgate_drc.json"), ("--schematic-parity",))
+            n = LG.count_cli(rpt) if rpt else None
+            h.check("libs: kicad-cli DRC with schematic parity: 0 violations, 0 unconnected, 0 parity", bool(n) and n["violations"] == n["unconnected"] == n["parity"] == 0,
+                    {"rc": rc, "count": n, "out": o})
+            for kind, path, extra in (("FK_PCB", gpcb, {"parity": True}), ("FK_SCH", gsch, {})):
+                standin_ask(h, "kicad_ipc", {"path": path, "type": "kiapi.backplane.embed.RunChecks", "message": {"kind": kind, **extra}}, f"lg-run-{kind}")
+                time.sleep(20)
+                ans = standin_ask(h, "kicad_ipc", {"path": path, "type": "kiapi.backplane.embed.GetMarkers", "message": {"kind": kind}}, f"lg-mk-{kind}")
+                try:
+                    payload = json.loads(ans.split(" ", 2)[2]) if ans else None
+                except (ValueError, IndexError):
+                    payload = ans
+                m = LG.count_markers(payload)
+                h.check(f"libs: in the editor, KiCad's {'DRC with parity' if kind == 'FK_PCB' else 'ERC'} of the fresh design leaves no marker",
+                        m is not None and m["count"] == 0, {"markers": m, "answer": (ans or "")[:500]})
             def chooser(tab, prefix):
                 h.click_control(top, tab)
                 time.sleep(4.0)
