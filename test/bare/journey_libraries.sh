@@ -4,7 +4,20 @@
 # kicad-cli is the one the hub sees. The stand-in agent (coedit_standin.py) makes its tool calls: `mcpcall:` turns.
 #   - a new project (make_project: an empty schematic, an empty board with a 30 x 20 mm outline; the runtime's own template's header)
 #     added to the hub with a thread, and a third session with its board in the pane (L7's editor checks need the board open in KiCad);
-#   - phase a: L1-L7 and L9, each line of the row a check here (PASS, FAIL, or SKIP where it says so).
+#   - phase a: L1-L7 and L9, each line of the row a check here (PASS, FAIL, or SKIP where it says so);
+#   - phase b: L8, a person's own fp-lib-table (a custom entry, no Backplane entry) met by the hub's library-table sync (libtables.rs).
+#     The hub syncs when it selects a runtime (at start, after an install, when Settings' KiCad path changes): here the path is set to the
+#     managed runtime's own kicad-cli, the same runtime, which runs the sync without restarting the person's hub.
+# rowchecks FILE PHASE RC: each line of the row is a check of this gate (INFO lines stay in its log)
+rowchecks() { local l
+  while IFS= read -r l; do
+    case "$l" in
+      PASS\ *) ok "libraries ${l#PASS }";;
+      FAIL\ *) bad "libraries ${l#FAIL }"; cut_ 1 libraries "a clean install's libraries row: ${l#FAIL }";;
+      SKIP\ *) printf 'SKIP\tlibraries %s\n' "${l#SKIP }" >>"$OUT/checks.tsv"; echo "SKIP libraries ${l#SKIP }";;
+    esac
+  done <"$1"
+  grep -q "^libraries_row $2:" "$1" || bad "libraries row ($2): it ended without its summary (exit $3; $(tail -c 300 "$1"))"; }
 phase "libraries row"
 LIBR=$HERE/../kicad_embed
 if [ ! -f "$LIBR/libraries_row.py" ] || [ ! -f "$LIBR/lib/libgate_design.py" ]; then
@@ -60,17 +73,27 @@ PY
   t=$(date +%s); timeout 2400 docker exec -i -u person -w $PH -e HOME=$PH "$C" python3 /opt/standins/libgate/test/kicad_embed/libraries_row.py a $PH/libgate-row-a.json \
     >"$OUT/logs/libraries-row-a.txt" 2>&1; rc=$?
   tm libraries-row "$(( $(date +%s) - t ))"
-  # each line of the row is a check of this gate (INFO lines go to the log only)
-  while IFS= read -r l; do
-    case "$l" in
-      PASS\ *) ok "libraries ${l#PASS }";;
-      FAIL\ *) bad "libraries ${l#FAIL }"; cut_ 1 libraries "a clean install's libraries row: ${l#FAIL }";;
-      SKIP\ *) printf 'SKIP\tlibraries %s\n' "${l#SKIP }" >>"$OUT/checks.tsv"; echo "SKIP libraries ${l#SKIP }";;
-    esac
-  done <"$OUT/logs/libraries-row-a.txt"
-  grep -q '^libraries_row a:' "$OUT/logs/libraries-row-a.txt" || bad "libraries row: it ended without its summary (exit $rc; $(tail -c 300 "$OUT/logs/libraries-row-a.txt"))"
-  for f in "$HH/libgate-standin.log" "$HH/libgate-row-a.json"; do [ -f "$f" ] && cp "$f" "$OUT/logs/"; done
+  rowchecks "$OUT/logs/libraries-row-a.txt" a $rc
+  # phase b: the person's table, the record of what the hub added forgotten (met for the first time), the sync, then L8
+  WP=$(cat "$HH/.client.pid" 2>/dev/null); [ -n "$WP" ] && in_box kill "$WP" 2>/dev/null; sleep 2
+  KD=$HH/.config/kicad/$SV; mkdir -p "$KD"
+  printf '(fp_lib_table\n  (version 7)\n  (lib (name "KiCad")(type "Table")(uri "${KICAD10_TEMPLATE_DIR}/fp-lib-table")(options "")(descr "KiCad Default Libraries"))\n  (lib (name "My_Parts")(type "KiCad")(uri "${KIPRJMOD}/My_Parts.pretty")(options "")(descr "a person'"'"'s own"))\n)\n' >"$KD/fp-lib-table"
+  [ -f "$KD/sym-lib-table" ] || printf '(sym_lib_table\n  (version 7)\n  (lib (name "KiCad")(type "Table")(uri "${KICAD10_TEMPLATE_DIR}/sym-lib-table")(options "")(descr "KiCad Default Libraries"))\n)\n' >"$KD/sym-lib-table"
+  cp "$KD/fp-lib-table" "$HH/fp-lib-table.before"; cp "$KD/sym-lib-table" "$HH/sym-lib-table.before"
+  rm -f "$HUBH/kicad-libtables.json"
+  n0=$(grep -ac "library tables" "$HUBH/hub.log" 2>/dev/null); n0=${n0:-0}
+  hub rpc setting.set "{\"key\":\"kicad.path\",\"value\":\"$KB/bin/kicad-cli\"}" >"$OUT/logs/libgate-setting.json"
+  for _ in $(seq 60); do [ "$(grep -ac "library tables" "$HUBH/hub.log" 2>/dev/null)" -gt "$n0" ] && break; sleep 0.5; done
+  grep -a "library tables" "$HUBH/hub.log" | tail -2 >"$OUT/logs/libgate-sync.txt"
+  python3 -c 'import json,sys; c=json.load(open(sys.argv[1])); c.update(table_before=sys.argv[3], sym_before=sys.argv[4]); json.dump(c, open(sys.argv[2], "w"), indent=1)' \
+    "$HH/libgate-row-a.json" "$HH/libgate-row-b.json" "$PH/fp-lib-table.before" "$PH/sym-lib-table.before"
+  timeout 900 docker exec -i -u person -w $PH -e HOME=$PH "$C" python3 /opt/standins/libgate/test/kicad_embed/libraries_row.py b $PH/libgate-row-b.json \
+    >"$OUT/logs/libraries-row-b.txt" 2>&1; rc=$?
+  rowchecks "$OUT/logs/libraries-row-b.txt" b $rc
+  # the person's KiCad path is theirs again (empty: the runtime is found by itself)
+  hub rpc setting.set '{"key":"kicad.path","value":""}' >/dev/null 2>&1
+  for f in "$HH/libgate-standin.log" "$HH/libgate-row-a.json" "$HH/libgate-row-b.json" "$HH/fp-lib-table.before"; do [ -f "$f" ] && cp "$f" "$OUT/logs/"; done
   cp -r "$HLPROJ" "$OUT/logs/libgate-project" 2>/dev/null
-  cp "$HH/win.log" "$OUT/logs/win-3.log" 2>/dev/null; WP=$(cat "$HH/.client.pid" 2>/dev/null); [ -n "$WP" ] && in_box kill "$WP" 2>/dev/null; sleep 1
+  cp "$HH/win.log" "$OUT/logs/win-3.log" 2>/dev/null
 fi
 fi
