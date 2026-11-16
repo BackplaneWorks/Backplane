@@ -21,6 +21,10 @@ on:
       broken_run:
         description: "smoke: a dry run with a newer tag than this one whose hub dies at its start: rolled back from"
         default: ""
+      android_only:
+        description: "only the Android app: the release-signed APK and AAB as the archive-android artifact, nothing else built"
+        type: boolean
+        default: false
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
@@ -33,6 +37,8 @@ permissions:
   contents: read
 jobs:
   build:
+    # a dry run of the Android app alone skips the desktop builds (publish and smoke then skip too)
+    if: ${{ !inputs.android_only }}
     strategy:
       fail-fast: false
       matrix:
