@@ -297,6 +297,7 @@ try:
             whole = (x0, y0) == (0, 0) and (x1, y1) == (w - 1, h - 1)
             shot(f'narrow-{tag}')
             return {'frame_px': w, 'canvas_px': x1 - x0, 'share': round((x1 - x0) / w, 3), 'whole_frame': whole}
+        folded = [False]
         def set_pane(target):
             # the pane does not grow one for one with the window (the thread's column takes a share): steps by the slope seen so far
             slope, prev = 1.0, None
@@ -307,6 +308,12 @@ try:
                 if prev and b[2] != prev[0] and p[0][2] != prev[1]: slope = max(0.2, min(2.0, (p[0][2] - prev[1]) / (b[2] - prev[0])))
                 prev = (b[2], p[0][2])
                 win_size(client.pid, max(500, min(1900, round(b[2] + (target - p[0][2]) / slope))), b[3]); time.sleep(2.0)
+            p = last_push()
+            if p and p[0][2] < target - 3 and not folded[0]:
+                # wider than the window allows with the sidebar open (a 1000 pt pane on a 1920 pt display): fold it (Cmd+B in Backplane)
+                b = next((w for w in wins() if w[0] == cw[0]), cw)[3]
+                click(b[0] + 20, b[1] + b[3] - 40); time.sleep(0.6); key(K_B, CMD); time.sleep(2.0); folded[0] = True
+                return set_pane(target)
             time.sleep(3.0)  # the panels follow the width (EmbedAutoPanels)
             return last_push()[0][2] if last_push() else None
         for tab in ('PCB', 'SCH'):
