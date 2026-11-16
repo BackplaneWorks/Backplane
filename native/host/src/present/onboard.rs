@@ -473,7 +473,8 @@ fn phone_rows(session: &Value) -> Vec<Value> {
     let apps = || vec![link("Android app", APK_RELEASES), link("iPhone app", IOS_GUIDE)];
     if let Some(l) = inv["link"].as_str() {
         let mut r = row("Pair a phone", "Scan this with the Backplane app, or type the short code and this address. It works once, for ten minutes. Treat it as a password.", [vec![copy(l), btn("Make another", "device-invite", "", false)], apps()].concat());
-        r["qr"] = json!(crate::net::qr::text(l).lines().map(str::to_string).collect::<Vec<_>>());
+        // the app's own link (backplane://pair?url=...): a phone's camera opens the app, never the hub's page in a browser
+        r["qr"] = json!(crate::net::qr::text(&crate::net::qr::link(l)).lines().map(str::to_string).collect::<Vec<_>>());
         r["qrnote"] = json!(format!("Short code {}, for ten minutes", s(&inv, "code")));
         let mut v = vec![r];
         if inv["localOnly"] == true { v.push(warn(row("Only this computer", super::settings::LOCAL_DEVICE, vec![]))); }

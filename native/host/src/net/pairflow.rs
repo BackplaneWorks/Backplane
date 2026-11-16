@@ -256,7 +256,7 @@ impl Peering {
         match o["op"].as_str().unwrap_or("") {
             "device" => { let Some(rt) = super::start::routes() else { return fail("no registry".into()) }; let mut j = rt.invite(); if j["error"].is_string() { return fail(j["error"].as_str().unwrap_or("").into()) }
                 // `backplane pair` prints this QR code in the terminal (invite() leaves QR codes to the page that shows an address)
-                let link = j["link"].as_str().unwrap_or("").to_string(); if !link.is_empty() { j["qr"] = json!(super::qr::text(&link)) }
+                let link = j["link"].as_str().unwrap_or("").to_string(); if !link.is_empty() { j["qr"] = json!(super::qr::text(&super::qr::link(&link))) }
                 j["ok"] = json!(true); jreply("200 OK", &j) }
             "machine" => match self.make_code().await { Ok(mut j) => { j["ok"] = json!(true); jreply("200 OK", &j) } Err(e) => fail(e) },
             "join" => {
