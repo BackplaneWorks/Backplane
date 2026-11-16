@@ -194,7 +194,9 @@ impl Session {
     pub fn autosaves(&self) -> Vec<String> {
         let dir = Path::new(&self.pro).parent().map(Path::to_path_buf).unwrap_or_default();
         let mut v: Vec<String> = std::fs::read_dir(&dir).into_iter().flatten().flatten().filter_map(|e| e.file_name().into_string().ok()).filter(|n| n.starts_with("_autosave-")).collect();
-        v.sort(); v
+        v.sort();
+        if history_newer(&dir) { v.push(".history".into()) }
+        v
     }
     pub fn unsaved_docs(&self) -> Vec<String> {
         self.frames.iter().filter(|f| f.modified).map(|f| if !f.doc.is_empty() { f.doc.clone() } else { f.title.clone() }).collect()
@@ -249,6 +251,16 @@ pub fn local_switch(s: &Session, local_map: bool, plain: bool) -> bool {
         && s.frames.iter().any(|f| f.kind == s.active && f.xid > 0 && (f.realized || f.shown))
 }
 
+/// KiCad 10's local history (`<project>/.history`, a git repository of autosave snapshots) has a snapshot newer than the project's
+/// saved board and schematics: KiCad offers it back ("Recover Unsaved Changes") when it opens the project again.
+pub fn history_newer(dir: &Path) -> bool {
+    let mtime = |p: &Path| std::fs::metadata(p).and_then(|m| m.modified()).ok();
+    let head = dir.join(".history").join(".git");
+    let snap = ["refs/heads/master", "refs/heads/main", "logs/HEAD"].iter().filter_map(|r| mtime(&head.join(r))).max();
+    let saved = std::fs::read_dir(dir).into_iter().flatten().flatten().map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "kicad_pcb" || x == "kicad_sch")).filter_map(|p| mtime(&p)).max();
+    matches!((snap, saved), (Some(s), Some(f)) if s > f)
+}
 /// The state of a session whose KiCad died after it was ready (a crash, a kill): the pane offers to open the editor again.
 pub const CLOSED: &str = "closed_unexpectedly";
 /// Lines of KiCad's start-up output that are noise, never a reason a start failed (the toolkits' warnings on a box without their config).
@@ -3381,6 +3393,15 @@ mod tests {
         assert_eq!(clean.state, "stopped");
     }
 
+    #[test] fn a_local_history_snapshot_newer_than_the_save_counts_as_kept() {
+        let d = crate::plat::tmp::dir("hist-newer"); std::fs::write(d.join("a.kicad_pcb"), "x").unwrap();
+        assert!(!history_newer(&d), "no history");
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        let h = d.join(".history/.git/refs/heads"); std::fs::create_dir_all(&h).unwrap(); std::fs::write(h.join("master"), "c399").unwrap();
+        assert!(history_newer(&d), "a snapshot after the save");
+        std::thread::sleep(std::time::Duration::from_millis(20)); std::fs::write(d.join("a.kicad_pcb"), "y").unwrap();
+        assert!(!history_newer(&d), "saved after the snapshot");
+    }
     #[test] fn a_failed_start_is_said_by_an_error_line_never_by_start_up_noise() {
         let st = Session { state: "starting".into(), ..Session::new("/p/a.kicad_pro", "/p", "fork", "PCB", 1, 0) };
         let f = st.clone().exited_how(1, "code 1", "Fontconfig error: Cannot load default config file: File not found\n(kicad:12): Gtk-WARNING **: cannot open display\n");
