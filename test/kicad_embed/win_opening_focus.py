@@ -2078,8 +2078,30 @@ def run(h):
                 man = {}
             bl = man.get("backplaneLibrary") or {}
             srcs = read(os.path.join(root, "KICAD_LIBRARY_SOURCES.txt")) or read(os.path.join(share, "KICAD_LIBRARY_SOURCES.txt"))
-            h.check("libs: manifest backplaneLibrary matches KICAD_LIBRARY_SOURCES.txt (ref, commit, sha256)",
-                    bool(bl) and all(str(bl.get(k, "")) and str(bl.get(k)) in srcs for k in ("ref", "commit", "sha256")), {"backplaneLibrary": bl, "sources": srcs[:800]})
+            # Climb J's L9 (libraries_row.py, 750e68a90), the same on every platform: the sources file's block for the pinned repository
+            # agrees on every key both name (repository, version, commit); the pin's sha256 is 64 hex and the sha256 of the library's
+            # own SHA256SUMS (<backplane-library>/SHA256SUMS)
+            blocks, cur = [], {}
+            for line in srcs.splitlines():
+                if "=" not in line:
+                    continue
+                k, v = line.split("=", 1)
+                if k.strip() == "repository" and cur:
+                    blocks.append(cur); cur = {}
+                cur[k.strip()] = v.strip()
+            if cur:
+                blocks.append(cur)
+            src = next((b for b in blocks if b.get("repository") == bl.get("repository")), None)
+            shared = [k for k in bl if src and k in src]
+            diff = {k: (bl[k], src[k]) for k in shared if str(bl[k]) != src[k]}
+            h.check("libs: manifest backplaneLibrary matches KICAD_LIBRARY_SOURCES.txt (every key both name)", bool(src) and len(shared) >= 2 and not diff,
+                    {"pin": bl, "shared": shared, "diff": diff})
+            sha = str(bl.get("sha256") or "")
+            sums = os.path.join(bpl, "SHA256SUMS")
+            import hashlib as _hl
+            got = _hl.sha256(open(sums, "rb").read()).hexdigest() if os.path.isfile(sums) else ""
+            h.check("libs: the pin's sha256 is 64 hex digits and the sha256 of the library's own SHA256SUMS",
+                    bool(re.fullmatch(r"[0-9a-f]{64}", sha)) and got == sha, {"pin": sha, "file": sums, "got": got or "missing"})
             cfg = h.p("fh", "AppData", "Roaming", "kicad", "10.99")
             ufp, usym = read(os.path.join(cfg, "fp-lib-table")), read(os.path.join(cfg, "sym-lib-table"))
             h.check("libs: the person's global tables (made at first launch) contain the standard and the Backplane libraries",
