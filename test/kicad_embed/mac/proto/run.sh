@@ -12,16 +12,17 @@ waitline() { i=0; while [ ! -s "$1" ] && [ $i -lt 200 ]; do sleep 0.05; i=$((i+1
 now() { python3 -c 'import time; print("%.3f" % time.time())'; }
 # start <name> <scenario> <activation> <mode> <policy>: sets HID HPID FID
 start() { n=$1; S=$O/sock.$n; fmode=$4; fpol=$5
-  open -n --stdout "$O/host.$n.out" --stderr "$O/host.$n.err" "$O/host.app" --args $2 "$S" $3
+  "$O/host.app/Contents/MacOS/host" $2 "$S" $3 > "$O/host.$n.out" 2> "$O/host.$n.err" & PIDS="$PIDS $!"
   set -- $(waitline "$O/host.$n.out") ; HID=$1; HPID=$2
-  open -n --stdout "$O/fol.$n.out" --stderr "$O/fol.$n.err" "$O/follower.app" --args $fmode "$HID" "$HPID" "$S" $fpol 25
+  "$O/follower.app/Contents/MacOS/follower" $fmode "$HID" "$HPID" "$S" $fpol 25 > "$O/fol.$n.out" 2> "$O/fol.$n.err" & PIDS="$PIDS $!"
   FID=$(waitline "$O/fol.$n.out"); }
-finish() { pkill -f "$O/host.app" 2>/dev/null; pkill -f "$O/follower.app" 2>/dev/null; pkill -f "$O/cover.app" 2>/dev/null; sleep 0.5; }
+# the apps this run started, by their pids (never by name)
+PIDS=; finish() { for p in $PIDS; do kill "$p" 2>/dev/null; done; PIDS=; sleep 0.5; }
 # 1. the scripted timeline: polling (first prototype) and push with each activation variant
 for v in poll:none push:none push:below push:willbelow push:tell push:both; do
   m=${v%%:*}; a=${v#*:}; n=move.$m.$a
   start $n move $a $m accessory
-  ( sleep 5.6; open -n --stdout "$O/cov.$n" "$O/cover.app" --args 300 250 1.0 ) &
+  ( sleep 5.6; exec "$O/cover.app/Contents/MacOS/cover" 300 250 1.0 > "$O/cov.$n" ) & PIDS="$PIDS $!"
   "$O/sampler.app/Contents/MacOS/sampler" "$HID" "$FID" 16.5 "$O/cov.$n" > "$O/samples.$n.csv"
   wait; finish
   echo "$n: $(tail -n +2 "$O/host.$n.out" | awk '{print $NF}' | tr '\n' ' ')"
