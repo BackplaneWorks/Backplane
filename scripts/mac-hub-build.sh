@@ -1,5 +1,5 @@
 #!/bin/sh
-# Ship the committed tree (git archive of HEAD; the Mac has only openrsync) (native, assets, docs, test, i18n) to the Mac and build the hub and the client there. Never compiles locally.
+# Ship the committed tree (git archive of HEAD; the Mac has only openrsync) (native, assets, docs, test, i18n, deploy: the hub include_str!s from each) to the Mac and build the hub and the client there. Never compiles locally.
 # usage: scripts/mac-hub-build.sh [hub|gpui|both] [test | test:FILTER]   (default both; test:FILTER runs the matching tests only and prints their output)   -> ~/bp-e2e/dist/{backplane-hub,backplane-gpui}
 # Takes the Mac-side lock itself: lockf -k /tmp/bp-mac-heavy.lockf (the Mac has no flock; the hub has no named locks). Needs ~/.cargo or /opt/homebrew/bin cargo on the Mac.
 set -eu
@@ -8,7 +8,7 @@ WHAT=${1:-both}; TEST=${2:-}
 HOST=${MAC_HOST:-hs-mac-mini}; DEST=bp-e2e
 SSH="ssh -o BatchMode=yes"; [ -f "$ROOT/build/gpui/mac-ssh" ] && SSH="$ROOT/build/gpui/mac-ssh"
 $SSH $HOST "mkdir -p ~/$DEST/src ~/$DEST/dist ~/$DEST/logs"
-git -C "$ROOT" archive --format=tar HEAD native assets docs test i18n | $SSH $HOST "rm -rf ~/$DEST/src && mkdir -p ~/$DEST/src && tar -x -C ~/$DEST/src"
+git -C "$ROOT" archive --format=tar HEAD native assets docs test i18n deploy | $SSH $HOST "rm -rf ~/$DEST/src && mkdir -p ~/$DEST/src && tar -x -C ~/$DEST/src"
 # the Mac gets no .git: stamp the commit into the binary (BP_COMMIT overrides; /hello then reports it)
 COMMIT=${BP_COMMIT:-$(git -C "$ROOT" rev-parse --short=10 HEAD)}
 $SSH $HOST "lockf -k /tmp/bp-mac-heavy.lockf sh -s" -- "$WHAT" "${TEST:--}" "$COMMIT" <<'REMOTE'
