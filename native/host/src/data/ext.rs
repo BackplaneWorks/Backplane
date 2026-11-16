@@ -302,6 +302,18 @@ pub async fn call(hub: &Arc<Hub>, c: &mut Conn, m: &str, p: &Value) -> Option<Re
         "telemetry.notice" => rpc(hub, c, "telemetry.notice", json!({})).await.map(|r| r["result"].clone()),
         "telemetry.notice.act" => rpc(hub, c, "telemetry.notice.act", json!({"token":s(p, "token"),"action":s(p, "action")})).await.map(|_| json!({})),
         "bots.list" => Ok(crate::bots::api::directory(hub).await),
+        // feature "cats": a bot's cat drawn as the desktop draws it. `cat.rig {look?, name?, color?, mood?}` → `{look, color, parts, presets}`: the rig
+        // (Cat.swift / Cat.kt draw it) of a look (a `bots.list` row's) or of the look a name gives (a name being typed), its fur in `color`;
+        // `presets` the colours Settings offers ({name, color}). `bot.cat {bot?, name?, color?, look?, auto?}` → `{}`: renames, colours ("" the
+        // coat's own), picks a look (Different cat) or gives it back to the name (`auto: true`); `bot` left out is the uberbot (a bot of this hub)
+        "cat.rig" => { let mut a = crate::bots::catrig::answer(p);
+            a["presets"] = json!(crate::bots::cat::PRESETS.iter().map(|(n, c)| json!({"name": n, "color": crate::bots::cat::color_hex(*c)})).collect::<Vec<_>>()); Ok(a) }
+        "bot.cat" => {
+            let bot = if s(p, "bot").is_empty() { hub.setting("uber.bot").await.unwrap_or_default() } else { s(p, "bot").to_string() };
+            if bot.is_empty() || bot.contains('~') { return Some(Err(err("bot (one of this hub; none: the uberbot, and this hub has none)"))) }
+            let mut q = json!({"bot": bot});
+            for k in ["name", "color", "look", "auto"] { if let Some(v) = p.get(k).filter(|v| !v.is_null()) { q[k] = v.clone() } }
+            rpc(hub, c, "bots.edit", q).await.map(|_| json!({})) }
         // feature "swarm" (docs/SWARM.md): the hub's own swarm.* requests; a swarm is a room, its member threads carry `swarm` (the room) and a project's list shows the swarm once
         // times are unix ms here, as everywhere in data/1 (the hub's own requests answer seconds)
         "swarm.list" | "swarm.get" | "swarm.act" | "swarm.create" => rpc(hub, c, m, p.clone()).await.map(|r| { let mut v = r["result"].clone();

@@ -65,7 +65,7 @@ pub async fn page_from(hub: &Arc<Hub>, bot: &str, tab: &str, now: u64, from: usi
     let on = if tabs.contains(&nav_parent(uber, tab)) { tab } else { default_tab() };
     let parent = nav_parent(uber, on);
     let chat = if uber { w.ub_chat() } else { me.thread.clone() };
-    let mut v = json!({"kind":"bot","id":bot,"name":me.name,"title":me.name,"look":me.look,"tab":on,"navTab":parent,"tabs":tabs_json(tabs),"subtabs":tabs_json(nav_sections(uber, parent)),"edit":true,"uber":uber,"chat":chat});
+    let mut v = json!({"kind":"bot","id":bot,"name":me.name,"title":me.name,"look":me.look,"color":me.color,"auto":me.auto,"tab":on,"navTab":parent,"tabs":tabs_json(tabs),"subtabs":tabs_json(nav_sections(uber, parent)),"edit":true,"uber":uber,"chat":chat});
     // Delete bot: any bot of this hub but the uberbot (it is taken back first); the clients ask before they send it
     if !uber { v["delete"] = json!({"label":"Delete bot","action":"bot-delete","value":bot}); }
     if tab_of_world(&w, bot, on, now, from, &mut v) {
@@ -132,7 +132,7 @@ fn tab_of_world(w: &super::world::World, bot: &str, on: &str, now: u64, from: us
 pub fn far_page(w: &super::world::World, bot: &str, tab: &str, now: u64, from: usize, uber: bool, mark: &Value) -> Option<Value> {
     let me = w.bot(bot).filter(|b| !b.deleted)?;
     let on = if FAR_TABS.contains(&tab) { tab } else { default_tab() };
-    let mut v = json!({"kind":"bot","id":bot,"name":me.name,"title":me.name,"look":me.look,"tab":on,"navTab":on,"tabs":tabs_json(&FAR_TABS),"subtabs":[],"edit":false,"uber":uber,"chat":me.thread,"mark":mark});
+    let mut v = json!({"kind":"bot","id":bot,"name":me.name,"title":me.name,"look":me.look,"color":me.color,"auto":me.auto,"tab":on,"navTab":on,"tabs":tabs_json(&FAR_TABS),"subtabs":[],"edit":false,"uber":uber,"chat":me.thread,"mark":mark});
     tab_of_world(w, bot, on, now, from, &mut v);
     Some(v)
 }
@@ -175,7 +175,7 @@ pub fn far_rooms(rows: Vec<Value>, here: &std::collections::HashSet<String>) -> 
 /// A bots world's live bots and rooms (oldest first) as `bots.list` rows; `uber` is the bot shown as the uberbot, `mark` the machine's marker (null for this one);
 /// `delete` says the row offers Delete bot (`bot.delete`): this machine's bots but the uberbot; on a room, Delete room (`room.delete`): this machine's rooms
 pub fn rows_of(w: &super::world::World, uber: &str, mark: &Value) -> (Vec<Value>, Vec<Value>) {
-    let mut bots: Vec<_> = w.bots.values().filter(|x| !x.deleted).map(|x| (x.created, x.id.clone(), json!({"id":x.id,"name":x.name,"thread":x.thread,"uber":!uber.is_empty() && x.id == uber,"mark":mark,"delete":mark.is_null() && x.id != uber}))).collect();
+    let mut bots: Vec<_> = w.bots.values().filter(|x| !x.deleted).map(|x| (x.created, x.id.clone(), json!({"id":x.id,"name":x.name,"thread":x.thread,"look":x.look,"color":x.color,"uber":!uber.is_empty() && x.id == uber,"mark":mark,"delete":mark.is_null() && x.id != uber}))).collect();
     bots.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
     let mut rooms: Vec<_> = w.rooms.values().filter(|x| x.listed() && !x.swarm() && !crate::net::far::local(&x.id).starts_with("dm:")).map(|x| (x.created, x.id.clone(), json!({"id":x.id,"name":x.name,"members":x.members,"mark":mark,"delete":mark.is_null()}))).collect();
     rooms.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)));
