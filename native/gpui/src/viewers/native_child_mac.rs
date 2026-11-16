@@ -134,7 +134,8 @@ pub fn holes(_container: u64, _keep: Option<&[R]>) {}
 /// app may hand activation to another; KiCad then makes its frame key and wx gives its canvas the focus back).
 pub fn focus(w: u64) {
     let pid = owner(w);
-    eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_mac_focus": {"window": w, "owner": pid, "ours": pid == 0 || pid == own_pid(), "front_before": frontmost_pid()}}));
+    if pid > 0 && pid != own_pid() { KICAD_PID.store(pid, std::sync::atomic::Ordering::Relaxed); }
+    eprintln!("GPUI_LOG {}", serde_json::json!({"kicad_mac_focus": {"window": w, "owner": pid, "ours": pid == 0 || pid == own_pid(), "kicad_active_before": app_active(KICAD_PID.load(std::sync::atomic::Ordering::Relaxed))}}));
     unsafe {
         if pid == 0 || pid == own_pid() {
             send_activate_self(app());
@@ -172,19 +173,14 @@ pub fn conn_fd() -> Option<i32> { None }
 pub fn pump() -> bool { false }
 pub fn input_off(_container: u64, _off: bool) {}
 pub fn semicolon_held() -> Option<bool> { None }
-/// KiCad has the keyboard when the frontmost app is not us but the KiCad that owns frames over our window (our app inactive and the
-/// frontmost app's pid one of KiCad's).
-pub fn has_focus(_container: u64) -> bool { let front = frontmost_pid(); let inactive = unsafe { !send_bool(app(), c"isActive") }; inactive && front != 0 && front != own_pid() }
-fn frontmost_pid() -> i64 {
-    unsafe {
-        let ws = send0(class(c"NSWorkspace"), c"sharedWorkspace"); // i18n-ok: an Objective-C class name
-        let front = send0(ws, c"frontmostApplication"); if front.is_null() { return 0 }
-        let f: unsafe extern "C" fn(*mut c_void, *mut c_void) -> i32 = std::mem::transmute(objc_msgSend as *const ());
-        f(front, sel(c"processIdentifier")) as i64
-    }
-}
-/// The frontmost app is `pid` (an accessory app may be frontmost while it holds the keyboard).
-pub fn focus_in_pid(pid: u32) -> bool { pid != 0 && frontmost_pid() == pid as i64 }
+/// The KiCad that last got the keyboard from here (focus): its app's own active state is the truth. NSWorkspace's frontmost app is the
+/// menu bar's owner, which an accessory app never is, so it kept naming Backplane while KiCad had the keyboard (client run 7).
+static KICAD_PID: std::sync::atomic::AtomicI64 = std::sync::atomic::AtomicI64::new(0);
+fn app_active(pid: i64) -> bool { if pid <= 0 { return false } let a = running_app(pid); !a.is_null() && unsafe { send_bool(a, c"isActive") } }
+/// KiCad has the keyboard: its app is the active one.
+pub fn has_focus(_container: u64) -> bool { app_active(KICAD_PID.load(std::sync::atomic::Ordering::Relaxed)) }
+/// The app `pid` is the active one (an accessory app is active while it holds the keyboard, though it never owns the menu bar).
+pub fn focus_in_pid(pid: u32) -> bool { app_active(pid as i64) }
 pub fn button_over(_w: u64) -> Option<bool> { None }
 pub fn grab_click(_container: u64, _on: bool) {}
 pub fn grab_escape(_top: u64, _on: bool) {}

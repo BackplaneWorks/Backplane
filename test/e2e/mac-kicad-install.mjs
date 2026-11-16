@@ -4,10 +4,10 @@
 // Prints `RT=<the installed runtime folder>` last; exits non-zero when it did not install.
 import {existsSync,mkdirSync,readFileSync,readdirSync,rmSync} from 'node:fs';
 import {execFileSync} from 'node:child_process';
-import {startHub,stopHub,client,sleep} from '../perf/lib.mjs';
+import {startHub,stopHub,client,makeStandins,sleep} from '../perf/lib.mjs';
 const [bin,work]=process.argv.slice(2);process.env.NO_SCOPE='1';
-rmSync(work,{recursive:true,force:true});mkdirSync(`${work}/user`,{recursive:true});
-const h=await startHub({bin,home:`${work}/home`,port:3895,log:`${work}/hub.log`,extraEnv:{HOME:`${work}/user`,BACKPLANE_KICAD_NO_SYSTEM:'1'},unsetEnv:['BACKPLANE_KICAD_CLI']});
+rmSync(work,{recursive:true,force:true});mkdirSync(`${work}/user`,{recursive:true});makeStandins(`${work}/bin`); // the hub runs stand-in agents only
+const h=await startHub({bin,home:`${work}/home`,port:3895,standins:`${work}/bin`,log:`${work}/hub.log`,extraEnv:{HOME:`${work}/user`,BACKPLANE_KICAD_NO_SYSTEM:'1'},unsetEnv:['BACKPLANE_KICAD_CLI']});
 let bad=0;const check=(n,ok,x)=>{console.log(`${ok?'ok  ':'FAIL'} ${n}${ok?'':' '+JSON.stringify(x)?.slice(0,500)}`);if(!ok)bad++};
 const c=await client(h,{});
 const refused=await c.rpc('kicad.install',{consent:false},30000);
