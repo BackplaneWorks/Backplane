@@ -2088,6 +2088,7 @@ gpui.c.kicad.kicad.is.not.responding = KiCad is not responding.
 gpui.c.kicad.kicad.was.closed = KiCad was closed.
 gpui.c.kicad.closed.kept = KiCad closed unexpectedly. Your saved files are intact, and KiCad kept a copy of the changes you had not saved: it offers it back when the editor opens again.
 gpui.c.kicad.closed.lost = KiCad closed unexpectedly. Your saved files are intact. Changes made since the last save were not kept.
+gpui.c.kicad.closed.agent = KiCad closed unexpectedly. Your saved files are intact, but an agent's change that was not saved yet was lost.
 gpui.c.kicad.open.again = Open the editor again
 gpui.c.kicad.starting.kicad = Starting KiCad…
 gpui.c.kicad.starting.slow = Starting KiCad: {what} ({secs} s)

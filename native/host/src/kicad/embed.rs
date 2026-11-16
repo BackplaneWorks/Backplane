@@ -198,8 +198,11 @@ impl Session {
         if history_newer(&dir) { v.push(".history".into()) }
         v
     }
+    /// What is not on disk: what KiCad says is modified, and what the hub knows an agent changed and nobody has saved since.
     pub fn unsaved_docs(&self) -> Vec<String> {
-        self.frames.iter().filter(|f| f.modified).map(|f| if !f.doc.is_empty() { f.doc.clone() } else { f.title.clone() }).collect()
+        let mut v: Vec<String> = self.frames.iter().filter(|f| f.modified).map(|f| if !f.doc.is_empty() { f.doc.clone() } else { f.title.clone() }).collect();
+        for d in agent_unsaved(&self.pro) { let name = Path::new(&d).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or(d); if !v.iter().any(|x| x.ends_with(&name)) { v.push(name) } }
+        v
     }
     pub fn is_live(&self) -> bool {
         matches!(self.state.as_str(), "starting" | "ready" | "unresponsive")
@@ -220,6 +223,7 @@ impl Session {
             "display": self.display,
             "frames": self.frames.iter().map(Frame::to_json).collect::<Vec<_>>(),
             "autosaves": if self.state == CLOSED { json!(self.autosaves()) } else { json!([]) },
+            "agent_unsaved": json!(agent_unsaved(&self.pro).iter().map(|d| Path::new(d).file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()).collect::<Vec<_>>()),
             "dialogs": self.dialogs,
             "notices": self.notices,
             "drawn": self.drawn,
@@ -836,6 +840,24 @@ impl Unsaved {
     }
 }
 static UNSAVED: OnceLock<Mutex<HashMap<String, Unsaved>>> = OnceLock::new();
+
+// An agent's changes in the open editor that are not on disk, the hub's own record (KiCad does not mark a document modified for an API
+// commit, bp.13 batch 14): per project, each document an agent changed and when. A change is on disk once its file was written after it
+// (the hub's save after the commit, the agent's own SaveDocument, the person's Ctrl+S), so nothing clears it but the file.
+static AGENT_CHANGES: OnceLock<Mutex<HashMap<String, Vec<(String, std::time::SystemTime)>>>> = OnceLock::new();
+fn agent_changes() -> &'static Mutex<HashMap<String, Vec<(String, std::time::SystemTime)>>> { AGENT_CHANGES.get_or_init(Default::default) }
+/// An agent changed `doc` (a board or schematic file) in the project's open KiCad now.
+pub fn agent_changed(pro: &str, doc: &str) {
+    let mut m = agent_changes().lock().unwrap(); let v = m.entry(norm_pro_key(pro)).or_default();
+    v.retain(|(d, _)| d != doc); v.push((doc.to_string(), std::time::SystemTime::now()));
+}
+/// The documents with an agent's change that is not on disk (its file not written since).
+pub fn agent_unsaved(pro: &str) -> Vec<String> {
+    let mut m = agent_changes().lock().unwrap();
+    let Some(v) = m.get_mut(&norm_pro_key(pro)) else { return vec![] };
+    v.retain(|(d, at)| std::fs::metadata(d).and_then(|x| x.modified()).map_or(true, |w| w < *at));
+    v.iter().map(|(d, _)| d.clone()).collect()
+}
 fn unsaved() -> &'static Mutex<HashMap<String, Unsaved>> { UNSAVED.get_or_init(Default::default) }
 /// The project's state, changed by `f`; answers the new state.
 pub fn unsaved_update(pro: &str, f: impl FnOnce(Unsaved) -> Unsaved) -> Unsaved {
@@ -3393,6 +3415,17 @@ mod tests {
         assert_eq!(clean.state, "stopped");
     }
 
+    #[test] fn an_agents_change_is_unsaved_until_its_file_is_written_after_it() {
+        let d = crate::plat::tmp::dir("agent-unsaved"); let pcb = d.join("a.kicad_pcb"); std::fs::write(&pcb, "x").unwrap();
+        let pro = d.join("a.kicad_pro").to_string_lossy().into_owned(); let doc = pcb.to_string_lossy().into_owned();
+        assert!(agent_unsaved(&pro).is_empty());
+        std::thread::sleep(std::time::Duration::from_millis(20)); agent_changed(&pro, &doc);
+        assert_eq!(agent_unsaved(&pro), vec![doc.clone()], "KiCad says nothing; the hub knows");
+        let s = Session { frames: vec![], ..Session::new(&pro, &d.to_string_lossy(), "fork", "PCB", 1, 0) };
+        assert_eq!(s.unsaved_docs(), vec!["a.kicad_pcb".to_string()], "close, quit and the save gate count it");
+        std::thread::sleep(std::time::Duration::from_millis(20)); std::fs::write(&pcb, "y").unwrap();
+        assert!(agent_unsaved(&pro).is_empty(), "written after the change: on disk");
+    }
     #[test] fn a_local_history_snapshot_newer_than_the_save_counts_as_kept() {
         let d = crate::plat::tmp::dir("hist-newer"); std::fs::write(d.join("a.kicad_pcb"), "x").unwrap();
         assert!(!history_newer(&d), "no history");

@@ -74,6 +74,36 @@ impl Agents {
     /// `$project` in the message stand for the open document and its project, and a command that finds its document closed opens it and
     /// runs again, so none of the three costs the agent a request.
     pub async fn tool_kicad_ipc(self: &Arc<Self>, thread: &str, a: &Value) -> (bool, Value) {
+        use crate::files::kicad::{embed, ipc, kedit};
+        let path = a["path"].as_str().unwrap_or(""); let ty = kedit::full_type(a["type"].as_str().unwrap_or(""));
+        let short = ty.rsplit('.').next().unwrap_or("").to_string();
+        let pro = ipc::pro_of(path); let key = format!("{pro}|{thread}");
+        let (ok, mut v) = self.tool_kicad_ipc_inner(thread, a).await;
+        if !ok { return (ok, v) }
+        // an agent's change in the person's open KiCad is saved by the hub when it lands (a commit, or an item write outside one), as
+        // kicad_edit does: a crash never loses it (KiCad marks no document modified for an API commit, so it would neither autosave it nor
+        // ask to save it). `save: false` keeps it unsaved for a batch of commits: the hub then counts it as unsaved (close, quit, the
+        // closed-unexpectedly words) until a save
+        if short == "BeginCommit" { open_commits().lock().unwrap().insert(key.clone()); }
+        let in_commit = open_commits().lock().unwrap().contains(&key);
+        if short == "EndCommit" { open_commits().lock().unwrap().remove(&key); }
+        let lands = (short == "EndCommit" && !a["message"].to_string().contains("CMA_DROP")) || (ipc::ITEM_WRITES.contains(&short.as_str()) && !in_commit);
+        if lands && embed::gui_route(&pro).is_some() && v.is_object() {
+            if a["save"] == json!(false) { v["saved"] = json!(false); v["unsaved"] = json!("Not saved, as asked (save: false): the person's KiCad shows it, the file does not have it yet. Save it (SaveDocument, or a commit without save: false) before you end your turn."); return (true, v) }
+            let kind = if path.ends_with(".kicad_sch") { "DOCTYPE_SCHEMATIC" } else { "DOCTYPE_PCB" };
+            let persons = embed::unsaved_update(&pro, |u| u).person;
+            match self.kicad_open(thread, path, kind).await {
+                Ok(doc) => match self.kicad_call(thread, path, "kiapi.common.commands.SaveDocument", json!({"document": doc})).await {
+                    Ok(s) => { v["saved"] = json!(ipc::doc_file(path, &pro)); if s["not_saved"].is_string() { v["save_note"] = s["not_saved"].clone() }
+                        if persons { v["save_note"] = json!("The save also wrote the person's own unsaved edits in this document, as kicad_edit's does: tell them it is saved.") } }
+                    Err(e) => { v["saved"] = json!(false); v["unsaved"] = json!(format!("The hub could not save it: {e}. It is in the person's KiCad but not on disk: say so.")) }
+                },
+                Err(e) => { v["saved"] = json!(false); v["unsaved"] = json!(format!("The hub could not save it: {e}")) }
+            }
+        }
+        (true, v)
+    }
+    async fn tool_kicad_ipc_inner(self: &Arc<Self>, thread: &str, a: &Value) -> (bool, Value) {
         use crate::files::kicad::kedit;
         let path = a["path"].as_str().unwrap_or(""); let ty = kedit::full_type(a["type"].as_str().unwrap_or(""));
         let mut msg = a.get("message").cloned().unwrap_or(json!({}));
@@ -332,4 +362,10 @@ fn chrono_stamp() -> String {
     let z = d as i64 + 719468; let era = z.div_euclid(146097); let doe = z - era * 146097; let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
     let y = yoe + era * 400; let doy = doe - (365 * yoe + yoe / 4 - yoe / 100); let mp = (5 * doy + 2) / 153; let dd = doy - (153 * mp + 2) / 5 + 1; let m = if mp < 10 { mp + 3 } else { mp - 9 };
     format!("{:04}{:02}{:02}-{:02}{:02}{:02}", y + (m <= 2) as i64, m, dd, s / 3600, s % 3600 / 60, s % 60)
+}
+
+/// The agents' open commits in the person's KiCad ("<project>|<thread>"): an item write inside one lands with its EndCommit.
+fn open_commits() -> &'static std::sync::Mutex<std::collections::HashSet<String>> {
+    static S: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<String>>> = std::sync::OnceLock::new();
+    S.get_or_init(Default::default)
 }

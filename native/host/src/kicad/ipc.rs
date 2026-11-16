@@ -562,6 +562,8 @@ async fn run_on(hub: &Arc<Hub>, thread: Option<&str>, path: &str, ty: &str, msg:
         let o = super::embed::gui_call_as(&gui, ty, msg, &actor).await;
         if let Some(note) = held { log_fallback(hub, thread, &note).await; }
         if commits && o["ok"].as_bool().unwrap_or(false) { super::embed::unsaved_update(&pro, |u| u.agent_committed()); }
+        // the hub's own record of an agent's change not on disk (KiCad does not mark a document modified for it)
+        if o["ok"].as_bool().unwrap_or(false) && thread.is_some_and(|t| !t.is_empty()) && writes_items(short, &msg_doc, commits) { super::embed::agent_changed(&pro, &doc_file(path, &pro)) }
         if o["fallback"].as_bool().unwrap_or(false) { log_fallback(hub, thread, o["why"].as_str().unwrap_or("")).await; return Err(o["error"].as_str().unwrap_or("").into()) }
         let ok = o["ok"].as_bool().unwrap_or(false);
         let servers = format!("{pro}|ready|gui ({})", gui.mode);
@@ -627,6 +629,17 @@ async fn headless_active(pro: &str) -> bool {
 
 /// Whether an EndCommit request commits (CMA_COMMIT, the default) rather than drops.
 fn msg_commits(msg: &Value) -> bool { !msg.to_string().contains("CMA_DROP") }
+/// Commands that change items without a commit of their own (KiCad commits each by itself when no commit is open).
+pub const ITEM_WRITES: &[&str] = &["CreateItems", "UpdateItems", "DeleteItems", "MoveItems", "PlaceSymbolFromLibrary", "PlaceFootprintFromLibrary", "ImportNetlist", "SetBoardDesignRules", "FlipItems", "InteractiveMoveItems"];
+/// Whether this request leaves a change in the document: an EndCommit that commits, or an item write (inside a commit it is the
+/// EndCommit's; outside one KiCad commits it itself, and a later EndCommit is not needed).
+pub fn writes_items(short: &str, _doc: &Value, commits: bool) -> bool { (short == "EndCommit" && commits) || ITEM_WRITES.contains(&short) }
+/// The design file a request on `path` changes: the file itself, or a project's board.
+pub fn doc_file(path: &str, pro: &str) -> String {
+    if path.ends_with(".kicad_pcb") || path.ends_with(".kicad_sch") { return path.to_string() }
+    let f = super::project::read(&Path::new(pro).parent().map(|d| d.to_string_lossy().into_owned()).unwrap_or_default());
+    if !f.pcb.is_empty() { f.pcb } else { f.sch }
+}
 
 /// Client RPC `kicad.retry` (Hub.kretry): failed servers are forgotten; the next request starts them.
 pub struct IpcRpc;
