@@ -102,7 +102,7 @@ pub fn dock(cx: &mut Context<Backplane>, light: bool, fields: &std::collections:
             let mut head = crate::ui::with_rect(div().id(SharedString::from(format!("sub-{}", if key.is_empty() { string(r, "title") } else { key.clone() }))), || format!("subs:{key}")).flex().gap_2().py(px(1.)).items_center()
                 .child(div().w(px(14.)).flex_shrink_0().flex().items_center().text_color(mark_c).child(mark))
                 .child(div().flex_1().min_w_0().overflow_hidden().whitespace_nowrap().text_ellipsis().text_color(c("text")).child(string(r, "title")))
-                .child(div().flex_shrink_0().text_color(c("faint")).child(if detail { state.clone() } else if doing.is_empty() { format!("{} · {}", string(r, "kind"), state) } else { format!("{} · {}", string(r, "kind"), doing) }));
+                .child(div().flex_shrink_0().text_color(c("faint")).child(if detail { state.clone() } else if doing.is_empty() { format!("{} · {}", trs(&string(r, "kind")), state) } else { format!("{} · {}{}", trs(&string(r, "kind")), doing, { let t = string(r, "took"); if t.is_empty() { String::new() } else { format!(" · {t}") } }) }));
             if detail && !key.is_empty() {
                 // its own view: what it was asked, said and did, live while it works (subview.rs)
                 let k = key.clone();
