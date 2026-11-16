@@ -320,6 +320,43 @@ try:
         p, k = last_push(), kicad_frame()
         check(bool(got), f'{tag}: KiCad\'s frame is the pane\'s rect within 1 px ({k and k[3]} vs {p and p[0]})')
     matches('at first show')
+    # ---- MAC_MODE=bs: ⌫ in the embedded editor (fork embed's fix/mac-backspace-delete): 1 Cmd+A then ⌫ deletes (board, schematic),
+    # 2 ⌫ with nothing selected deletes what is under the pointer, 3 ⌫ while routing takes back the last segment (screenshots),
+    # 4 ⌫ in a text field edits the text (Find's field; screenshot), 5 fn+delete still deletes. KiCad's edit events judge 1, 2, 5.
+    if os.environ.get('MAC_MODE') == 'bs':
+        K_X, K_Z = 7, 6
+        KEYNAME.update({7: 'x', 6: 'z'}) if DRIVER == 'vnc' else None
+        edits = lambda: hub_log().count('ET_DOCUMENT_EDITED') + hub_log().count('ET_MODIFIED_CHANGED')
+        def board_click(fx=0.5, fy=0.5):
+            p = last_push(); click(p[0][0] + p[0][2] * fx, p[0][1] + p[0][3] * fy); time.sleep(0.6)
+        def deleted(after, tag):
+            e0 = edits(); after()
+            ok = bool(wait_for(lambda: edits() > e0, 3)); shot(f'bs-{tag}')
+            key(K_Z, CMD); time.sleep(1.2)  # undo: the next case starts from the same board
+            return ok
+        trace = lambda: open(os.path.join(OUT, 'kicad-embed-trace.log'), errors='replace').read().count('Backspace handed to wx') if os.path.isfile(os.path.join(OUT, 'kicad-embed-trace.log')) else 0
+        board_click(0.1, 0.9)
+        check(deleted(lambda: (key(K_A, CMD), time.sleep(0.6), key(K_DEL)), 'pcb-all'), 'bs 1: Cmd+A then ⌫ deletes the selection in the embedded board editor')
+        key(K_ESC); time.sleep(0.5); board_click(0.5, 0.5); key(K_ESC); time.sleep(0.6)
+        check(deleted(lambda: key(K_DEL), 'pcb-hover'), 'bs 2: ⌫ with nothing selected deletes the item under the pointer')
+        board_click(0.1, 0.9)
+        check(deleted(lambda: (key(K_A, CMD), time.sleep(0.6), key(K_FDEL)), 'pcb-fdel'), 'bs 5: fn+delete still deletes')
+        # 3: routing from a pad (the board's middle has U1's pads), two clicks, then ⌫ takes back the last segment
+        key(K_ESC); time.sleep(0.4); board_click(0.5, 0.5); key(K_ESC); time.sleep(0.4)
+        key(K_X); time.sleep(0.8); board_click(0.5, 0.35); board_click(0.65, 0.35); shot('bs-route-before'); key(K_DEL); time.sleep(1.0); shot('bs-route-after')
+        key(K_ESC); time.sleep(0.4); key(K_ESC); time.sleep(0.6)
+        print('INFO bs 3: routing before/after ⌫ in bs-route-before.png and bs-route-after.png (judged by eye)', flush=True)
+        # 4: ⌫ in a text field: Find's field takes "abc", ⌫ leaves "ab"
+        board_click(0.1, 0.9); key(K_F, CMD); time.sleep(1.5)
+        relay(op='text', text='abc'); time.sleep(0.4); key(K_DEL); time.sleep(0.6); shot('bs-text-field'); key(K_ESC); time.sleep(1.0)
+        print('INFO bs 4: Find\'s field after "abc" then ⌫ in bs-text-field.png (judged by eye: "ab")', flush=True)
+        # the schematic
+        r = rects().get('kicad-tab:SCH'); b = next((w for w in wins() if w[0] == cw[0]), cw)[3]
+        if r: click(b[0] + r['x'] + r['w'] / 2, b[1] + 28 + r['y'] + r['h'] / 2)
+        time.sleep(6); board_click(0.1, 0.9)
+        check(deleted(lambda: (key(K_A, CMD), time.sleep(0.6), key(K_DEL)), 'sch-all'), 'bs 1: Cmd+A then ⌫ deletes the selection in the embedded schematic editor')
+        RES['bs_trace_handed'] = trace(); print(f'INFO embed trace "Backspace handed to wx": {RES["bs_trace_handed"]} times', flush=True)
+        raise SystemExit(1 if FAILS else 0)
     # ---- MAC_MODE=narrow: side panels give way in a narrow pane (embed-autopanels): the canvas at least 60 % of the pane at 611, 480
     # and 1000 px, the board and the schematic; at Full size the panels are back (the frame at least 150 px wider than the canvas).
     # The canvas is found in the frame's own picture by lib/canvas_box.py (Climb B's measure); a box that is the whole frame is no measure.
