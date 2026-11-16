@@ -508,6 +508,14 @@ async fn run_on(hub: &Arc<Hub>, thread: Option<&str>, path: &str, ty: &str, msg:
     let msg = if msg.is_object() { msg } else { json!({}) }; // KIpc.msg: a missing message is {}
     let routed = super::canonical::route(path); let path = &routed; // main's copy, whichever thread named it
     let pro = pro_of(path);
+    // the GUI KiCad is starting (or closing) for this project: no headless KiCad is started for it meanwhile, it would take the project's
+    // lock first (KiCad's "File Open Warning" outside the pane, the release check's stall). One already running serves on until it is
+    // retired (an agent's commit there finishes and is saved); else this waits for the editor and goes to it, or says to retry
+    if !pro.is_empty() && super::embed::gui_starting(&pro) && !headless_active(&pro).await {
+        let until = std::time::Instant::now() + GUI_WAIT;
+        while super::embed::gui_starting(&pro) && super::embed::gui_route(&pro).is_none() && std::time::Instant::now() < until { tokio::time::sleep(Duration::from_millis(250)).await; }
+        if super::embed::gui_route(&pro).is_none() && super::embed::gui_starting(&pro) { return Err(STARTING_IN_EDITOR.into()) }
+    }
     if let Some(gui) = (gui_first && !pro.is_empty()).then(|| super::embed::gui_route(&pro)).flatten() {
         let plain = check_gui(ty, path, &pro, &msg, &gui.caps);
         if !plain.is_empty() { return Err(plain) }
@@ -598,6 +606,15 @@ async fn run_on(hub: &Arc<Hub>, thread: Option<&str>, path: &str, ty: &str, msg:
         }
     }
     Ok(out)
+}
+
+/// How long a request waits for the editor's KiCad that is starting for its project, and what it is told after.
+const GUI_WAIT: Duration = Duration::from_secs(if cfg!(test) { 1 } else { 90 });
+pub const STARTING_IN_EDITOR: &str = "KiCad is starting in the editor for this project: retry in a moment (no second KiCad is started meanwhile: it would hold the project's lock)";
+/// Whether the project's headless KiCad is running (starting or ready).
+async fn headless_active(pro: &str) -> bool {
+    let Some(i) = IPC.get() else { return false };
+    info_on(i).await.lines().any(|l| { let mut f = l.split('|'); f.next() == Some(pro) && f.next().is_some_and(ks::active) })
 }
 
 /// Whether an EndCommit request commits (CMA_COMMIT, the default) rather than drops.

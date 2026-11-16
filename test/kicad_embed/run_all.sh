@@ -46,6 +46,9 @@ SUITES=(
   "embed_tab_bounce_e2e.sh:tab-bounce"
   # the Backplane KiCad update offered at Edit: a row of its own above the pane, never over it; Not now kept per version (fork)
   "embed_update_row_e2e.sh:update-row"
+  # the first Edit on a fresh home paints within 30 s, 10 of 10, KiCad starting 12 s late with an agent's kicad_ipc while it starts: no
+  # KiCad "File Open Warning", one process holds the project's lock (the release check's Linux stall, Nov 16) (fork)
+  "embed_fresh_edit_e2e.sh:fresh-edit:FRESH_AGENT=during"
   # a click on one of KiCad's DRC markers keeps the editor where it is; Escape shuts a side panel before the viewer (fork; skips without Hubble_DK)
   "embed_marker_click_e2e.sh:marker-click"
   "embed_thread_e2e.sh:thread"
