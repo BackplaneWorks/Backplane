@@ -35,6 +35,8 @@ SUITES=(
   "embed_click_e2e.sh:click"
   # a reserved key in KiCad opens the palette; dismissed where it was opened, the keyboard is KiCad's again (fork)
   "embed_lend_e2e.sh:lend"
+  # KiCad's own Close (Ctrl+W) in the editor: the pane follows it back to View; Cancel in KiCad's save prompt keeps the editor (fork)
+  "embed_close_e2e.sh:close"
   # a click on one of KiCad's DRC markers keeps the editor where it is; Escape shuts a side panel before the viewer (fork; skips without Hubble_DK)
   "embed_marker_click_e2e.sh:marker-click"
   "embed_thread_e2e.sh:thread"

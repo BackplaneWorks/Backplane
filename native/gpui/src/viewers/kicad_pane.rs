@@ -288,6 +288,23 @@ pub struct KicadPane {
 /// A chord KiCad handed back that the window acts on at once (the comment window: screens/kcomment.rs).
 pub struct PaneKey(pub String);
 impl EventEmitter<PaneKey> for KicadPane {}
+/// KiCad closed the editor frame the pane shows (Ctrl+W / Cmd+W, File > Close, its own quit of that frame; KiCad asked about unsaved
+/// changes itself): its kind. The page leaves Edit for View, or moves to the page's own editor when it was one of the extra tabs.
+pub struct PaneFrameClosed(pub String);
+impl EventEmitter<PaneFrameClosed> for KicadPane {}
+/// The kind of the frame KiCad closed under the pane: the one it showed (`wanted`), in the old info and in the new one no longer, the
+/// same KiCad (pid) still ready. None while KiCad starts, restarts or is gone (those say so themselves).
+pub fn closed_frame(old: &Value, new: &Value, wanted: &str) -> Option<String> {
+    if old["pid"] != new["pid"] || new["state"] != "ready" || old["state"] != "ready" { return None }
+    let has = |i: &Value| i["frames"].as_array().into_iter().flatten().any(|f| f["kind"] == wanted);
+    (has(old) && !has(new)).then(|| wanted.to_string())
+}
+/// What the page does when the frame it showed closed: View (the board's or schematic's own page), or that page's editor (an extra tab
+/// closed: the symbol or footprint editor, GerbView, the 3D viewer) when it is still open.
+pub fn after_close(closed: &str, page_kind: &str, info: &Value) -> Option<String> {
+    if closed == page_kind { return None }
+    info["frames"].as_array().into_iter().flatten().any(|f| f["kind"] == page_kind).then(|| page_kind.to_string())
+}
 /// The pane's warm hand-over ended (`handoff`): the page draws it alone, without the viewer's picture under it.
 pub struct PaneShown;
 impl EventEmitter<PaneShown> for KicadPane {}
@@ -341,6 +358,9 @@ impl KicadPane {
     /// The hub's `editor.kicad.<digest>` for this project changed.
     pub fn set_info(&mut self, info: Value, cx: &mut Context<Self>) {
         if info == self.info { return }
+        // (only a frame this pane has shown: a new pane, Edit pressed again, starts from the hub's last word, which may still list the
+        // frame closed before it and not yet the one KiCad opens anew)
+        let closed = closed_frame(&self.info, &info, self.wanted_kind()).filter(|_| self.first_placed.is_some()).map(|k| { let next = after_close(&k, frame_for(&self.open), &info); (k, next) });
         let was_tab = self.tab(); let mut cause = String::from("hub info"); // i18n-ok: a debug log cause (BACKPLANE_KICAD_DEBUG)
         if info["pid"] != self.info["pid"] { self.ever_shown.clear(); }
         // shown once, or realized (bp.9: KiCad says the client may map it itself, e.g. a pre-warmed editor): the client's to map
@@ -370,6 +390,11 @@ impl KicadPane {
         }
         self.info = info;
         self.note_tab(&was_tab, &cause);
+        // the frame on show closed in KiCad: never a wait for it ("Starting KiCad…" for ever, lane M's Cmd+W)
+        if let Some((k, next)) = closed {
+            eprintln!("GPUI_LOG {}", json!({"kicad_frame_closed": k, "to": next}));
+            match next { Some(to) => { self.override_kind = None; self.show_kind_by(&to, "the frame shown closed in KiCad: the page's own editor", cx) } None => cx.emit(PaneFrameClosed(k)) } // i18n-ok: a debug log cause
+        }
         cx.notify();
     }
     pub fn matches(&self, info: &Value) -> bool {
@@ -1094,6 +1119,18 @@ mod tests {
         assert!(!loan_back(&at, &Loan { page: Some("p1".into()), ..at.clone() }, true), "a project's page over it");
         assert!(!loan_back(&at, &at.clone(), false), "the editor not on show");
     }
+    #[test] fn a_frame_kicad_closed_under_the_pane_is_noticed_and_the_page_goes_back_to_view_or_its_own_editor() {
+        use super::{after_close, closed_frame};
+        let i = |pid: u64, st: &str, kinds: &[&str]| json!({"pid": pid, "state": st, "frames": kinds.iter().map(|k| json!({"kind": k})).collect::<Vec<_>>()});
+        assert_eq!(closed_frame(&i(7, "ready", &["PCB", "SCH"]), &i(7, "ready", &["SCH"]), "PCB").as_deref(), Some("PCB"), "Ctrl+W on the board");
+        assert_eq!(closed_frame(&i(7, "ready", &["PCB", "SCH"]), &i(7, "ready", &["PCB"]), "PCB"), None, "another frame closed");
+        assert_eq!(closed_frame(&i(7, "ready", &["PCB"]), &i(8, "ready", &[]), "PCB"), None, "a new KiCad: its own wait");
+        assert_eq!(closed_frame(&i(7, "ready", &["PCB"]), &i(7, "stopped", &[]), "PCB"), None, "KiCad gone: said as such");
+        assert_eq!(closed_frame(&i(7, "starting", &[]), &i(7, "ready", &[]), "PCB"), None, "not open yet");
+        assert_eq!(after_close("PCB", "PCB", &i(7, "ready", &["SCH"])), None, "the page's own editor closed: View");
+        assert_eq!(after_close("FOOTPRINT_EDITOR", "PCB", &i(7, "ready", &["PCB"])).as_deref(), Some("PCB"), "an extra tab closed: the page's editor");
+        assert_eq!(after_close("PCB_3D", "PCB", &i(7, "ready", &["SCH"])), None, "and View when that one is gone too");
+    }
     #[test] fn ctrl_tab_goes_round_the_editor_tabs() {
         assert_eq!(super::next_tab("PCB", 1), "SCH"); assert_eq!(super::next_tab("PCB", -1), "GERBVIEW"); assert_eq!(super::next_tab("FOOTPRINT_EDITOR", 1), "GERBVIEW"); assert_eq!(super::next_tab("GERBVIEW", 1), "PCB"); assert_eq!(super::next_tab("?", 1), "SCH");
     }
@@ -1363,6 +1400,8 @@ impl crate::Backplane {
         let page = cx.new(move |cx| { let mut p = KicadPane::new(cx, project, root, pid, open, hub_open, hub); if let Some(v) = infos.values().find(|v| p.matches(v)).cloned() { p.info = v; } p });
         // the warm hand-over's end: the page drawn again without the viewer's picture under the pane
         cx.subscribe(&page, |_, _, _: &PaneShown, cx| cx.notify()).detach();
+        // the editor's frame closed in KiCad (Ctrl+W, File > Close): back to View, Edit there again (a fresh frame on the next Edit)
+        cx.subscribe(&page, |this, _, _: &PaneFrameClosed, cx| this.kicad_view(cx)).detach();
         cx.subscribe(&page, |this, _, e: &PaneKey, cx| {
             if e.0 == "ctrl-;" || e.0 == ";" { this.kcomment_open(None, cx); return }
             // the pane's "Open the KiCad app instead" (the editor could not be here): back to the viewer, and the hub starts KiCad on what it shows
