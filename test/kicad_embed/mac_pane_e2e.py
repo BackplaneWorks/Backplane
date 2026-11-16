@@ -233,6 +233,37 @@ def backing_scale():
     return round(s * 4) / 4 or 1.0
 
 
+NOTICE_IDS = ('kicad:notice', 'kicad:notice-start', 'kicad:asking', 'kicad:pop-full', 'kicad-update')
+
+
+def notices_outside(tag, since_line=0):
+    """Every notice the client drew since `since_line` of its log (the strip's "KiCad is asking", its notice line, the start notice, the
+    full-screen pop-out line, the update row) lies outside the pane's rect: on macOS KiCad's frame is over the pane, so a notice drawn
+    there is hidden. Returns {id: (inside?, rect)}; screenshots the window as it is."""
+    lines = client_log().splitlines()[since_line:]
+    k = backing_scale(); seen = {}; pane = None
+    for l in lines:
+        if 'GPUI_METRIC ' in l and '"rects"' in l:
+            try:
+                for e in json.loads(l.split('GPUI_METRIC ', 1)[1]).get('rects', []) or []:
+                    if isinstance(e, dict) and any(e.get('id', '') == n or e.get('id', '').startswith(n + ':') for n in NOTICE_IDS): seen[e['id']] = e
+            except Exception: pass
+        if '"kicad_host_push"' in l:
+            try: pane = json.loads(l.split('GPUI_LOG ', 1)[1]).get('pane_px') or pane
+            except Exception: pass
+    if pane is None:
+        for l in reversed(lines and client_log().splitlines()):
+            if '"kicad_host_push"' in l:
+                pane = json.loads(l.split('GPUI_LOG ', 1)[1]).get('pane_px'); break
+    out = {}
+    for i, e in seen.items():
+        x, y, w, h = e['x'], e['y'], e['w'], e['h']
+        inside = bool(pane) and x < pane[0] + pane[2] and pane[0] < x + w and y < pane[1] + pane[3] and pane[1] < y + h and w > 0 and h > 0
+        out[i] = (inside, [round(v / k) for v in (x, y, w, h)])
+    shot(f'notices-{tag}')
+    return out
+
+
 def rects():
     """The client's control rects (BACKPLANE_GPUI_RECTS: lists of {id, x, y, w, h} in window pixels, from the content's top-left), latest,
     in window points."""
@@ -412,10 +443,14 @@ try:
     check(bool(wait_for(lambda: hub_log().count('ET_SELECTION_CHANGED') > n0, 4)), 'and its canvas takes keys (Cmd+A, Escape)')
     # a KiCad dialog (Find, Cmd+F from the canvas) gets the keyboard, and Escape closes it
     d0, c0 = hub_log().count('ET_DIALOG_OPENED'), hub_log().count('ET_DIALOG_CLOSED')
+    mark_find = len(client_log().splitlines())
     key(K_F, CMD)
     opened = wait_for(lambda: hub_log().count('ET_DIALOG_OPENED') > d0, 5)
     check(bool(opened) and active(kpid), 'a KiCad dialog (Find) opens with the keyboard in it')
     time.sleep(0.5); shot('02c-dialog')
+    n = notices_outside('find', mark_find)
+    print(f'INFO notices while Find is up: {n}', flush=True)
+    check(not any(v[0] for v in n.values()), f'while KiCad\'s Find dialog is up, no pane notice is drawn inside the pane\'s rect, under KiCad\'s frame ({n})')
     # Escape closes it (KiCad has the keyboard; a click aimed at its Close button once hit Backplane's own close and shut the viewer)
     key(K_ESC)
     check(bool(wait_for(lambda: hub_log().count('ET_DIALOG_CLOSED') > c0, 4)), 'Escape closes it')
@@ -471,8 +506,12 @@ try:
     hidden = not any(w[0] == f[0] for w in wins())
     shot('03-full-screen')
     check(hidden, 'Backplane full screen: KiCad\'s frame leaves the screen')
+    mark_full = max(0, len(client_log().splitlines()) - 400)
     line = wait_for(lambda: rects().get('kicad:pop-full'), 5)
     check(bool(line), 'full screen: the pane says so and offers Pop out')
+    n = notices_outside('full-screen', mark_full)
+    # (in full screen KiCad's frame is off the screen: the line takes the pane's place and is seen there)
+    print(f'INFO notices in full screen: {n} (screenshot notices-full-screen.png)', flush=True)
     win_full(client.pid, False)
     back = wait_for(kicad_frame, 8, 0.25)
     check(bool(back), 'out of full screen: KiCad\'s frame is back over the pane, above Backplane')
