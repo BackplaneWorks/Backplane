@@ -123,9 +123,14 @@ else:
         else:
             # as a person leaves full screen: the pointer at the screen's top shows the title bar, then its green button
             # (Ctrl+Cmd+F needs an Exit Full Screen menu item; the client has none)
-            b = _main(pid)[3]
-            relay(op='move', x=b[0] + 300, y=1); time.sleep(1.8); relay(op='move', x=b[0] + 300, y=6); time.sleep(0.6)
-            relay(op='click', x=b[0] + 58, y=b[1] + 13); time.sleep(0.5)
+            # (the menu bar takes the top 24 pt there: the title bar it reveals has its buttons about 44 pt down, green about 60 pt in;
+            # a click at 13 pt opened the app menu at Quit)
+            for gx, gy in ((60, 44), (58, 40), (62, 48)):
+                relay(op='move', x=400, y=1); time.sleep(1.8); relay(op='move', x=gx, y=gy); time.sleep(0.8)
+                n0 = client_log().count('"kicad_mac_full_screen":false')
+                relay(op='click', x=gx, y=gy)
+                if wait_for(lambda: client_log().count('"kicad_mac_full_screen":false') > n0, 4): break
+                relay(op='chord', combo='escape'); time.sleep(0.8)  # whatever opened instead (a menu) goes
 
     def win_close(pid, bounds): relay(op='click', x=bounds[0] + 14, y=bounds[1] + 13)
 
