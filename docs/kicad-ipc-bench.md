@@ -243,6 +243,73 @@ where the library puts it. What the fixes buy is a simpler hub path on new runti
 `kicad_ipc`; the workarounds had already made `kicad_edit` right. SketchRoute still loses `route_leds` (5 of 7 nets,
 1.32 x, 2 vias) to the hub's router (7 of 7, 1.065 x).
 
+## A cheap model in Backplane against an expensive one without it (Grok 4.7, Fable 5.2)
+
+The five design tasks, the same prompts and rule checks, four cells side by side on four hubs (2026-11-16, main at
+3552c7cfd, Backplane KiCad 10.99.0-bp.12.1): `grok-4.7` (the newest model of Grok CLI 1.0.77) and `claude-fable-5-2`,
+each in Backplane (`kicad_edit` on main) and editing the files with no KiCad tools (no MCP server, the prompt's KiCad
+lines replaced: `prompts/rawfile.json`). Medium effort. **One run a cell and task**: the second round was not run (the
+first used the $40 this was given, and Grok's plan balance ran out during it), so these are single runs and the
+per-task figures carry one run's luck.
+
+Cost is each provider's list price for the tokens the CLI reports, not what was paid (both CLIs ran on a
+subscription): Claude's is the CLI's own figure; Grok's is xAI's price for `grok-4.7` under 200k prompt tokens ($2.00
+input, $0.50 cached input, $6.00 output per million; docs.x.ai/docs/models), which matches the CLI's own
+`grok usage <session>` to the cent ($1.03 on the trial run).
+
+| cell | passes | context tokens | tool calls | wall s | cost $ | cost per passed task $ |
+|---|---|---|---|---|---|---|
+| Grok 4.7 in Backplane | 5/5 | 7,535,851 | 195 | 1,747 | 5.53 | 1.11 |
+| Grok 4.7, raw files | 3/4 | 30,423,580 | 440 | 5,157 | 19.63 | 6.54 |
+| Fable 5.2 in Backplane | 5/5 | 745,830 | 15 | 227 | 3.27 | 0.65 |
+| Fable 5.2, raw files | 5/5 | 4,524,086 | 73 | 1,155 | 10.32 | 2.06 |
+
+| task | Grok 4.7 in Backplane | Grok 4.7, raw files | Fable 5.2 in Backplane | Fable 5.2, raw files |
+|---|---|---|---|---|
+| sch_ldo | pass, 1.07M, 37 calls, 438 s, $1.00 | pass, 8.86M, 123 calls, 1,299 s, $5.50 | pass, 0.14M, 2 calls, 40 s, $0.66 | pass, 0.59M, 12 calls, 226 s, $1.31 |
+| route_leds | pass, 0.95M, 28 calls, 168 s, $0.64 | pass, 8.45M, 117 calls, 1,199 s, $5.24 | pass, 0.09M, 2 calls, 26 s, $0.59 | pass, 0.75M, 14 calls, 207 s, $2.01 |
+| place_decap | pass, 2.65M, 53 calls, 465 s, $1.75 | FAIL, 6.49M, 96 calls, 1,358 s, $4.60 | pass, 0.09M, 2 calls, 36 s, $0.61 | pass, 0.65M, 11 calls, 116 s, $1.54 |
+| swap_fp | pass, 2.61M, 67 calls, 566 s, $1.86 | pass, 6.62M, 104 calls, 1,302 s, $4.29 | pass, 0.29M, 7 calls, 78 s, $0.81 | pass, 1.07M, 15 calls, 250 s, $2.44 |
+| hubble_route | pass, 0.27M, 10 calls, 109 s, $0.27 | not run: the plan's balance ran out 65 s in (HTTP 402) | pass, 0.14M, 2 calls, 46 s, $0.60 | pass, 1.46M, 21 calls, 356 s, $3.03 |
+
+(On the four tasks every cell ran: Grok in Backplane 4/4 at $1.31 a pass, Grok raw 3/4 at $6.54, Fable in Backplane 4/4
+at $0.67, Fable raw 4/4 at $1.82.)
+
+What it says, at one run a cell:
+
+- The cheap model in Backplane beat the expensive model without it: Grok with `kicad_edit` passed 5 of 5 at $1.11 a
+  passed task; Fable editing the files passed 5 of 5 at $2.06.
+- Backplane is worth more to Grok than to Fable: Grok's cost a passed task falls about six times ($6.54 to $1.11) and
+  its one failure goes away; Fable's falls about three times ($2.06 to $0.65).
+- The cheap model is not the cheap way here. Grok's token price is a fraction of Fable's, but it reads ten times the
+  tokens: in Backplane Grok cost more a task than Fable ($1.11 against $0.65) and took eight times as long. Without
+  Backplane it was the dearest cell of the four: 96 to 123 tool calls and 20 minutes a task.
+
+What the traces show (`h2h.py trace` reads Claude's logs; Grok's ACP lines were read by hand):
+
+- Grok in Backplane does the work in one or two `kicad_edit` calls, right first time (`netclass` + `route`; `place`;
+  one `add` with `pins`; `route` on Hubble: the same calls Fable makes). The rest of its 10 to 67 calls go before and
+  after. Before: its MCP tools sit behind its own `search_tool` / `use_tool`, the search returns `kicad_edit`'s whole
+  description, and it still looks for more: 15 to 51 calls a task grepping the disk and pulling strings out of the
+  hub's binary ("Extract netclass op text from hub binary"; it found this benchmark's own scratch folders and read
+  them). After: it follows the prompt's "read back the saved path, show it, verify the viewer and history" to the
+  letter (up to 24 calls on the trial run: the board file, the project file, the history repository) and reports that
+  "the show call came back with `settled: false`".
+- Grok on raw files reads and greps: 43 greps, 35 file reads and 32 shell commands to route seven nets, the board
+  file read back in pieces of 30 to 145 thousand characters. It wrote small geometry scripts (two to six a task), and
+  on placement it said it was done ("no capacitor pad touches copper of another net") with two pads short of their
+  clearance to a via and a track.
+- Fable is the same as in the tables above: two calls a task in Backplane (seven for the footprint exchange), and on
+  raw files a parser and a search of its own each time (11 to 21 calls).
+- The harness, for Grok: the hub drives it as it does a Grok thread (`grok agent stdio`, ACP, Backplane's MCP server in
+  the session), through `test/kipc_bench/grok`, which copies the lines and, for the raw cell, gives the session no MCP
+  server. Grok signs in from the person's `~/.grok`, so its own configured MCP servers are there in every cell and its
+  sessions are kept there. It searches the disk for answers, so a finished run's folder is closed to it
+  (`KIPC_BENCH_SEAL`).
+
+Open: why Grok does not trust the tool description it was handed (a shorter first answer from its tool search, or the
+ops as a schema it can check against, may save most of its calls), and a second run a cell.
+
 ## What was tried
 
 | variant | what | passes | context tokens | tool calls | cost $ |

@@ -7,7 +7,8 @@ for(const d of ['bin','out','runs','user/.config/kicad','user/.cache','user/.loc
 rmSync(`${work}/stop`,{force:true});
 const run=mkdtempSync('/tmp/kb-');
 copyFileSync(`${here}/claude`,`${work}/bin/claude`);chmodSync(`${work}/bin/claude`,0o755);
-for(const n of['codex','grok','muse']){writeFileSync(`${work}/bin/${n}`,'#!/bin/sh\nexit 1\n');chmodSync(`${work}/bin/${n}`,0o755)}
+for(const n of['codex','muse']){writeFileSync(`${work}/bin/${n}`,'#!/bin/sh\nexit 1\n');chmodSync(`${work}/bin/${n}`,0o755)}
+copyFileSync(`${here}/grok`,`${work}/bin/grok`);chmodSync(`${work}/bin/grok`,0o755); // the Grok cells: the real Grok CLI behind a wrapper, as claude's
 const u=`${work}/user`;
 const wrapper=`${work}/hub.sh`;writeFileSync(wrapper,`#!/bin/sh\nexport HOME='${u}' XDG_CONFIG_HOME='${u}/.config' XDG_CACHE_HOME='${u}/.cache' XDG_DATA_HOME='${u}/.local/share' XDG_STATE_HOME='${u}/.local/state' KICAD_CONFIG_HOME='${u}/.config/kicad' XDG_RUNTIME_DIR='${run}'\nexec '${bin}' "$@" >> '${work}/hub.log' 2>&1\n`);chmodSync(wrapper,0o755);
 for(const k of Object.keys(process.env))if(/^CLAUDE|^BACKPLANE_|^ANTHROPIC|^KIPC_BENCH/.test(k))delete process.env[k]; // this shell may be an agent's own
@@ -15,7 +16,7 @@ process.env.PATH=process.env.PATH.split(':').filter(d=>!/\/shims$/.test(d)).join
 const h=await startHub({bin:wrapper,home:`${work}/home`,port:Number(port),standins:`${work}/bin`,cap:'14G', // (its output goes to hub.log by the wrapper's own redirect, never through a pipe to this launcher: a hub whose stderr reader has gone fails at its next line)
  
  extraEnv:{BACKPLANE_KICAD_CLI:`${rt}/bin/kicad-cli`,BACKPLANE_KISTACK:KS??`${here}/../../deploy/kistack`,KIPC_BENCH_OUT:`${work}/out`,
-  KIPC_BENCH_CLAUDE:CL??`${UH}/.local/bin/claude`,KIPC_BENCH_LOGIN:LG??`${UH}/.claude`,
+  KIPC_BENCH_CLAUDE:CL??`${UH}/.local/bin/claude`,KIPC_BENCH_GROK:process.env.KIPC_BENCH_GROK_BIN??`${UH}/.grok/bin/grok`,KIPC_BENCH_REALHOME:UH,KIPC_BENCH_LOGIN:LG??`${UH}/.claude`,
   KIPC_BENCH_MODEL:MD??'claude-fable-5-2',KIPC_BENCH_EFFORT:EF??'medium',KIPC_BENCH_DISALLOW:DIS,KIPC_BENCH_PROMPT:PR,KIPC_BENCH_NOMCP:NM}});
 writeFileSync(`${work}/hub.json`,JSON.stringify({pid:h.pid,port:h.port,home:h.home,run,token:h.token}));
 console.log(JSON.stringify({pid:h.pid,port:h.port,home:h.home,run}));

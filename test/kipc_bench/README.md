@@ -21,6 +21,9 @@ runtime's own demo boards. Never on a person's project, and only with their go (
   hub's system prompt (or `["re", pattern, new]` for text that holds a run's paths), so a wording is measured before it
   is built in; `KIPC_BENCH_NOMCP=1` takes every MCP server away (the raw file variant: `prompts/rawfile.json`, only the
   CLI's file and shell tools); `KIPC_BENCH_MODEL` picks the model.
+- `grok`: the same for Grok (`KIPC_BENCH_PROVIDER=grok KIPC_BENCH_THREAD_MODEL=grok-4.7` makes the run's thread a Grok thread): the real Grok
+  CLI over ACP, its lines copied to `WORK/out/<run>.jsonl`; `bench.py` reads tokens and tool calls from them and prices them at the
+  provider's list price (`PRICE`). `KIPC_BENCH_SEAL=1` closes a finished run's folder (Grok searches the disk).
 - `claude`: starts the real CLI with the hub's own arguments (its prompt, MCP tools, plugins), the model and effort
   fixed, and copies its stream to `WORK/out/<run>.jsonl`. A turn that begins `ORACLE <script>` runs that script with the
   hub's MCP url instead (no model); `HOLD <file>` holds a turn open to call tools by hand (`mcp.py`).
