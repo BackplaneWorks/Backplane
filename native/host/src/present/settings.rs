@@ -581,7 +581,8 @@ fn cad_with(st: &State, session: &Value, info: &Value, pkg: Option<&crate::files
     let kicad = match (i("kicad.status"), i("kicad.version"), i("kicad.cli")) {
         // a stock KiCad is named as one: "version 10.0.7" read as if nothing were amiss (the row under it says what Backplane KiCad adds)
         ("stock", v, c) if !c.is_empty() => format!("stock KiCad{}{}", if v.is_empty() { String::new() } else { format!(" {v}") }, format!(" · {c}")),
-        (_, v, c) if !c.is_empty() => format!("{}{}", if v.is_empty() { "found".to_string() } else { format!("version {v}") }, format!(" · {c}")),
+        (_, v, c) if !c.is_empty() => format!("{}{}{}", if v.is_empty() { "found".to_string() } else { format!("version {v}") },
+            if i("kicad.library").is_empty() { String::new() } else { format!(" · Backplane library {}", i("kicad.library")) }, format!(" · {c}")),
         ("checking", _, _) => "checking".to_string(),
         _ => "KiCad was not found. Install it below, or set the folder of one you have.".to_string(),
     };
@@ -1217,6 +1218,8 @@ mod tests {
         let ask = cad_rows(old, json!({"@kinstall": "ask"}), Some(&LINUX)); assert_eq!(btns(&ask[1])[0], ("Update".to_string(), "kicad-install".to_string()));
         let cur = cad_rows(json!({"kicad.cli": format!("/h/kicad/{}/bin/kicad-cli", LINUX.version), "kicad.version": LINUX.version, "kicad.status": "ok"}), json!({}), Some(&LINUX));
         assert_eq!(cur[1]["label"], "FreeCAD", "no update row for the current one");
+        let lib = cad_rows(json!({"kicad.cli": "/h/kicad/10.99.0-bp.13/bin/kicad-cli", "kicad.version": "10.99.0-bp.13", "kicad.status": "ok", "kicad.library": "2026.11.13 (314532f)"}), json!({}), Some(&LINUX));
+        assert!(lib[0].to_string().contains("version 10.99.0-bp.13 · Backplane library 2026.11.13 (314532f) · /h/kicad/10.99.0-bp.13/bin/kicad-cli"), "{}", lib[0]);
     }
     #[test] fn install_is_sent_only_after_the_ask_and_cancel_sends_nothing() {
         let o = act("h", &json!({"rid": 4, "drafts": {}}), "kicad-install-ask", "").unwrap(); assert!(o.cmds.is_empty()); assert_eq!(o.patch["drafts"]["@kinstall"], "ask");

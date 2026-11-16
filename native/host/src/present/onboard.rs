@@ -361,7 +361,8 @@ fn kicad_row(f: &Facts, pkg: Option<&crate::files::kicad::install::Package>) -> 
     // a row whose one button is the thing to press: the releases page is a quiet link under it, never a second button beside it
     let yourself = |mut r: Value| { r["sublink"] = json!({"label": "Download it yourself", "action": "open-url", "value": KICAD_RELEASES}); r };
     let r = match action {
-        Action::Nothing => row("KiCad", &format!("Backplane KiCad{} at {}. Agents can edit a board in a running KiCad.", v(version), i("kicad.cli")), vec![]),
+        Action::Nothing => row("KiCad", &format!("Backplane KiCad{}{} at {}. Agents can edit a board in a running KiCad.", v(version),
+            if i("kicad.library").is_empty() { String::new() } else { format!(" with Backplane library {}", i("kicad.library")) }, i("kicad.cli")), vec![]),
         Action::Wait if pstate == "running" => installing_row(&prog, v(s(&prog, "version")), note),
         Action::Wait => row("KiCad", looking(f), vec![rel]),
         // setup starts it once by itself (settings/onboard.rs, `onboard.kicad.auto`); when that once has passed and nothing runs (a hub stopped

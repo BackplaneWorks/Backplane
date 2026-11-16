@@ -538,11 +538,15 @@ pub fn decide(pkg: Option<&Package>, status: &str, version: &str, install_state:
 }
 /// Why the update is worth taking, in one sentence, from what the installed runtime lacks (`have`: its manifest's capabilities): the
 /// DRC zone guard first (a safety fix), then the editor inside Backplane. None when it lacks neither (a newer build with nothing named).
-pub fn update_reason(have: &[&str]) -> Option<String> {
+pub fn update_reason(have: &[&str]) -> Option<String> { update_reason_on(have, cfg!(target_os = "linux")) }
+/// `update_reason` for a hub on Linux or not: a Linux runtime has always carried KiCad's libraries and Backplane's (its launcher sets
+/// them up); a Windows or macOS one has them only with `global-tables-seeded` (bp.13), so an update to it brings them.
+pub fn update_reason_on(have: &[&str], linux: bool) -> Option<String> {
     let embed = have.iter().any(|c| *c == "embed" || *c == "embedded");
     let mut adds: Vec<&str> = vec![];
     if !have.contains(&"drc-zone-guard") { adds.push("fixes a DRC fault that could miss a short inside a filled zone") }
     if !embed { adds.push("brings the KiCad editor inside Backplane's viewer") }
+    if !linux && !have.contains(&"global-tables-seeded") { adds.push("brings KiCad's standard symbol and footprint libraries and Backplane's own library") }
     // the routing plan view's keys (bp.12.2): only for a runtime with the plan, which lacked them
     if have.contains(&"routing-plan") && !have.contains(&"plan-keys") { adds.push("makes A, R and W in KiCad's routing plan view act on the plan") }
     // bp.12.3: KiCad no longer rewrites what nobody changed (the load-time 3D migration, an unchanged file's save); bp.12.4: nor does an
@@ -925,6 +929,11 @@ cp \"$f\" \"$out\"
         assert_eq!(s(update_reason(&["embedded", "drc-zone-guard", "routing-plan", "plan-keys"])), "Opening a board no longer changes its 3D model paths or teardrops, saving an unchanged file writes nothing, and an open Symbol Editor no longer blocks saves.", "bp.12.2 to bp.12.4: one sentence a person reads");
         assert_eq!(s(update_reason(&["embedded", "drc-zone-guard", "routing-plan"])), "It makes A, R and W in KiCad's routing plan view act on the plan, and stops KiCad rewriting files nobody changed or refusing saves while its Symbol Editor is open.", "bp.12.1 to bp.12.4");
         assert_eq!(s(update_reason(&["embed", "coedit"])), "It fixes a DRC fault that could miss a short inside a filled zone, and stops KiCad rewriting files nobody changed or refusing saves while its Symbol Editor is open.", "bp.10 (no plan)");
+        // Windows and macOS runtimes before bp.13 carry no libraries; Linux's always did, so only off Linux is it said
+        let bp10 = ["embed", "coedit", "drc-zone-guard", "no-load-migration"];
+        assert_eq!(s(update_reason_on(&bp10, false)), "It brings KiCad's standard symbol and footprint libraries and Backplane's own library.");
+        assert_eq!(update_reason_on(&bp10, true), None, "a Linux runtime had them");
+        assert_eq!(update_reason_on(&["embed", "coedit", "drc-zone-guard", "no-load-migration", "global-tables-seeded"], false), None, "bp.13 has them");
         assert_eq!(s(update_reason(&["api-server"])), "It fixes a DRC fault that could miss a short inside a filled zone, and brings the KiCad editor inside Backplane's viewer.", "bp.4: the safety one first");
         assert_eq!(update_reason(&["embedded", "drc-zone-guard", "routing-plan", "plan-keys", "no-load-migration"]), None, "bp.12.3 and bp.12.4 themselves");
         assert_eq!(s(update_reason(&["routing-plan"])).matches(". ").count(), 0, "one sentence");
